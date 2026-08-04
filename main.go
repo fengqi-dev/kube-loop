@@ -26,12 +26,12 @@ func main() {
 	app := desktopapp.NewApp(version, embeddedHelperFiles)
 	if err := wails.Run(&options.App{
 		Title:         "KubeLoop",
-		Width:         1080,
-		Height:        720,
-		MinWidth:      1080,
-		MinHeight:     720,
-		MaxWidth:      1080,
-		MaxHeight:     720,
+		Width:         960,
+		Height:        620,
+		MinWidth:      960,
+		MinHeight:     620,
+		MaxWidth:      960,
+		MaxHeight:     620,
 		DisableResize: true,
 		Frameless:     true,
 		SingleInstanceLock: &options.SingleInstanceLock{
