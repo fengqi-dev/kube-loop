@@ -164,7 +164,7 @@ export function WorkloadView({
             <Table>
               <TableHeader>
                 <TableRow className="hover:bg-transparent">
-                  <TableHead className="h-9 text-[11px] font-medium text-muted-foreground">
+                  <TableHead className="h-9 w-40 min-w-40 max-w-40 text-[11px] font-medium text-muted-foreground">
                     {t("network.colName")}
                   </TableHead>
                   <TableHead className="h-9 text-[11px] font-medium text-muted-foreground">
@@ -190,7 +190,11 @@ export function WorkloadView({
               <TableBody>
                 {filtered.map((item) => (
                   <TableRow key={`${item.namespace}/${item.name}`}>
-                    <TableCell className="font-medium">{item.name}</TableCell>
+                    <TableCell className="w-40 min-w-40 max-w-40 font-medium">
+                      <span className="block truncate" title={item.name}>
+                        {item.name}
+                      </span>
+                    </TableCell>
                     <TableCell className="text-primary">{item.namespace}</TableCell>
                     <TableCell className="font-mono text-[12px]">
                       <CopyableText value={item.ip} />
