@@ -20,6 +20,8 @@ export function CheckForUpdates():Promise<update.Info>;
 
 export function Connect(arg1:string,arg2:string):Promise<void>;
 
+export function ConnectMode(arg1:string,arg2:string,arg3:string):Promise<void>;
+
 export function Disconnect():Promise<void>;
 
 export function GatewayInstallManifest():Promise<string>;

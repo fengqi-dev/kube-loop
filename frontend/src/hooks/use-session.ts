@@ -7,6 +7,7 @@ import type {
   ProbeResult,
   SessionState,
   UpdateInfo,
+  ConnectionMode,
 } from "@/types";
 import { appVersion } from "@/version";
 
@@ -56,6 +57,7 @@ export function useSession() {
   });
   const [contextName, setContextName] = useState("");
   const [namespace, setNamespace] = useState("default");
+  const [connectionMode, setConnectionMode] = useState<ConnectionMode>("tun");
   const [view, setView] = useState<AppView>("overview");
   const [loading, setLoading] = useState(true);
   const [uiError, setUIError] = useState("");
@@ -134,6 +136,7 @@ export function useSession() {
             : (initial.namespaces[0] ?? "default"));
         setContextName(selected);
         setNamespace(nextNamespace);
+        setConnectionMode(initial.session.mode ?? initial.preferredMode ?? "tun");
         if (selected) {
           setNamespacesByContext({ [selected]: initial.namespaces });
         }
@@ -252,7 +255,7 @@ export function useSession() {
           await backend.disconnect();
         }
         // Namespace seeds DNS short-name search (default.svc.cluster.local…).
-        await backend.connect(contextName, "default");
+        await backend.connectMode(contextName, "default", connectionMode);
       }
     } catch (error) {
       finishConnectionAction();
@@ -286,7 +289,7 @@ export function useSession() {
       if (next !== contextName) {
         await changeContext(next);
       }
-      await backend.connect(next, "default");
+      await backend.connectMode(next, "default", connectionMode);
     } catch (error) {
       finishConnectionAction();
       setUIError((error as Error).message);
@@ -366,6 +369,7 @@ export function useSession() {
     activeContextName,
     activeNamespaces,
     namespace,
+    connectionMode,
     view,
     setView,
     loading,
@@ -378,6 +382,7 @@ export function useSession() {
     currentContext,
     kubeconfigFiles,
     setNamespace: changeNamespace,
+    setConnectionMode,
     changeContext,
     toggleConnection,
     connectContext,

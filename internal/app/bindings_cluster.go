@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	goruntime "runtime"
 	"slices"
 	"time"
 
@@ -54,13 +55,16 @@ func (a *App) Bootstrap() (BootstrapData, error) {
 	if preferredContext == "" || !contextExists(contexts, preferredContext) {
 		preferredContext = selected
 	}
+	preferredMode := a.manager.PreferredConnectionMode(preferredContext)
 	a.updateMu.RLock()
 	updateState := a.updateState
 	a.updateMu.RUnlock()
 	return BootstrapData{
 		Contexts: contexts, Namespaces: namespaces, Session: a.manager.State(),
 		Update: updateState, PreferredContext: preferredContext,
-		PreferredNamespace: preferredNamespace, KubeconfigFiles: a.provider.KubeconfigFiles(),
+		PreferredNamespace: preferredNamespace, PreferredMode: preferredMode,
+		Platform:        goruntime.GOOS,
+		KubeconfigFiles: a.provider.KubeconfigFiles(),
 	}, nil
 }
 

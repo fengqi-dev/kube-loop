@@ -6,16 +6,17 @@ import {
   CopyPlus,
   Eye,
   Loader2,
+  Network,
   RotateCcw,
   Server,
   ShieldCheck,
+  Trash2,
   type LucideIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import { backend } from "@/backend";
 import { ConnectionOrb } from "@/components/overview/connection-orb";
 import { ConnectionSteps } from "@/components/overview/connection-steps";
-import { TrafficStats } from "@/components/overview/traffic-stats";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -31,28 +32,34 @@ import { useI18n } from "@/i18n";
 import type { AppView } from "@/hooks/use-session";
 import { phaseKeys } from "@/lib/phase";
 import { cn } from "@/lib/utils";
-import type { Discovery, SessionState } from "@/types";
+import type { ConnectionMode, Discovery, HelperStatus, SessionState } from "@/types";
 
 export function OverviewView({
   contextName,
   clusterName,
   session,
+  connectionMode,
+  platform,
   loading,
   error,
   busy,
   ready,
   onToggle,
+  onConnectionModeChange,
   onManageClusters,
   onNavigate,
 }: {
   contextName: string;
   clusterName: string;
   session: SessionState;
+  connectionMode: ConnectionMode;
+  platform?: string;
   loading: boolean;
   error: string;
   busy: boolean;
   ready: boolean;
   onToggle(): void;
+  onConnectionModeChange(mode: ConnectionMode): void;
   onManageClusters(): void;
   onNavigate(view: AppView): void;
 }) {
@@ -126,9 +133,10 @@ export function OverviewView({
   const issues = session.capabilities?.issues ?? [];
   const networkIssues = session.network?.issues ?? [];
   const gatewayManifest = session.gatewayManifest ?? "";
+  const activeMode = ready ? (session.mode ?? connectionMode) : connectionMode;
 
   return (
-    <div className="mx-auto max-w-[880px] space-y-5">
+    <div className="mx-auto max-w-[880px] space-y-4">
       <Card className="gap-0 overflow-hidden border-border py-0 shadow-none">
         <div className="flex flex-wrap items-center gap-3 border-b px-5 py-3">
           <div className="min-w-0 flex-1">
@@ -153,12 +161,15 @@ export function OverviewView({
           </div>
         </div>
 
-        <CardContent className="px-5 py-5">
-          <div className="grid min-h-[16.5rem] items-stretch gap-5 sm:grid-cols-[minmax(0,1.15fr)_auto_minmax(0,0.85fr)]">
-            <DiscoverySummary
-              contextName={contextName}
-              discovery={session.discovery}
+        <CardContent className="px-5 py-4">
+          <div className="grid min-h-[14rem] items-stretch gap-4 sm:grid-cols-[minmax(0,1.15fr)_auto_minmax(0,0.85fr)]">
+            <ConnectionModePanel
+              activeMode={activeMode}
+              busy={busy}
               ready={ready}
+              socksPort={session.socksPort}
+              platform={platform}
+              onConnectionModeChange={onConnectionModeChange}
             />
 
             <div className="flex flex-col items-center justify-center self-center px-2 text-center">
@@ -289,12 +300,265 @@ export function OverviewView({
         </CardContent>
       </Card>
 
-      <TrafficStats
+      <DiscoverySummary
+        contextName={contextName}
+        discovery={session.discovery}
         ready={ready}
-        metrics={session.metrics}
       />
+
     </div>
   );
+}
+
+function ConnectionModePanel({
+  activeMode,
+  busy,
+  ready,
+  socksPort,
+  platform,
+  onConnectionModeChange,
+}: {
+  activeMode: ConnectionMode;
+  busy: boolean;
+  ready: boolean;
+  socksPort?: number;
+  platform?: string;
+  onConnectionModeChange(mode: ConnectionMode): void;
+}) {
+  const { t } = useI18n();
+  const address = `127.0.0.1:${socksPort || 7890}`;
+  const [helper, setHelper] = useState<HelperStatus | null>(null);
+  const [helperAction, setHelperAction] = useState<
+    "install" | "uninstall" | null
+  >(null);
+
+  async function refreshHelper(showError = false) {
+    try {
+      setHelper(await backend.helperStatus());
+    } catch (error) {
+      if (showError) {
+        toast.error(t("settings.helperLoadFailed"), {
+          description: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+  }
+
+  useEffect(() => {
+    if (activeMode === "tun") {
+      void refreshHelper();
+    }
+  }, [activeMode]);
+
+  async function installHelper() {
+    setHelperAction("install");
+    try {
+      await backend.installHelper();
+      await refreshHelper(true);
+      toast.success(t("settings.helperInstallOk"));
+    } catch (error) {
+      toast.error(t("settings.helperInstallFailed"), {
+        description: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setHelperAction(null);
+    }
+  }
+
+  async function uninstallHelper() {
+    setHelperAction("uninstall");
+    try {
+      await backend.uninstallHelper();
+      await refreshHelper(true);
+      toast.success(t("settings.helperUninstallOk"));
+    } catch (error) {
+      toast.error(t("settings.helperUninstallFailed"), {
+        description: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setHelperAction(null);
+    }
+  }
+
+  const helperLabel = !helper
+    ? t("overview.helperChecking")
+    : helper.running
+      ? t("settings.helperRunning")
+      : helper.installed
+        ? t("settings.helperStopped")
+        : t("settings.helperMissing");
+  const helperCurrent = Boolean(
+    helper?.running && helper.version === helper.expected,
+  );
+
+  return (
+    <SidePanel title={t("overview.connectionMode")}>
+      <div className="grid grid-cols-2 gap-1 rounded-xl bg-muted/70 p-1">
+        <ModeButton
+          active={activeMode === "socks"}
+          disabled={busy || ready}
+          icon={<Network size={15} />}
+          label={t("overview.socksProxy")}
+          onClick={() => onConnectionModeChange("socks")}
+        />
+        <ModeButton
+          active={activeMode === "tun"}
+          disabled={busy || ready}
+          icon={<Cable size={15} />}
+          label={t("overview.tunMode")}
+          onClick={() => onConnectionModeChange("tun")}
+        />
+      </div>
+
+      <div className="mt-2.5 flex min-h-0 flex-1 flex-col rounded-xl border border-primary/15 bg-primary/[0.035] p-2.5">
+        <div className="flex items-start gap-2.5">
+          <div className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+            {activeMode === "socks" ? <Network size={15} /> : <Cable size={15} />}
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[12px] font-medium">
+                {activeMode === "socks"
+                  ? t("overview.socksModeDesc")
+                  : t("overview.tunModeDesc")}
+              </span>
+              <span
+                className={cn(
+                  "rounded-full px-2 py-0.5 text-[9px] font-medium",
+                  ready
+                    ? "bg-success/10 text-success"
+                    : "bg-muted text-muted-foreground",
+                )}
+              >
+                {ready ? t("overview.modeActive") : t("overview.modeUnavailable")}
+              </span>
+            </div>
+            <p className="mt-1 text-[10px] leading-4 text-muted-foreground">
+              {activeMode === "socks"
+                ? t("overview.socksHint")
+                : t("overview.tunHint")}
+            </p>
+          </div>
+        </div>
+
+        {activeMode === "socks" ? (
+          <div className="mt-auto flex flex-wrap items-center gap-2 pt-3">
+            <code className="whitespace-nowrap rounded-md border bg-background px-2 py-1.5 text-[11px]">
+              {address}
+            </code>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-7 px-2 text-[10px]"
+              disabled={!ready || !socksPort}
+              aria-label={t("overview.socksCopy")}
+              title={t("overview.socksCopy")}
+              onClick={() => {
+                const environment = proxyEnvironmentVariables(platform, address);
+                void navigator.clipboard.writeText(environment).then(
+                  () => toast.success(t("overview.socksCopied")),
+                  () => toast.error(t("overview.socksCopyFailed")),
+                );
+              }}
+            >
+              <Copy size={12} data-icon="inline-start" />
+              {t("overview.socksCopy")}
+            </Button>
+          </div>
+        ) : (
+          <div className="mt-auto pt-3">
+            <div className="mb-2 flex items-center justify-between gap-2 text-[10px]">
+              <span className="text-muted-foreground">{t("overview.tunHelper")}</span>
+              <span className="font-medium">{helperLabel}</span>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <Button
+                type="button"
+                size="sm"
+                className="h-7 px-2 text-[10px]"
+                disabled={ready || busy || helperAction !== null || helperCurrent}
+                onClick={() => void installHelper()}
+              >
+                {helperAction === "install" ? (
+                  <Loader2 data-icon="inline-start" className="animate-spin" />
+                ) : (
+                  <ShieldCheck size={12} data-icon="inline-start" />
+                )}
+                {helperAction === "install"
+                  ? t("settings.helperInstalling")
+                  : t("settings.helperInstall")}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-7 px-2 text-[10px]"
+                disabled={
+                  ready || busy || helperAction !== null || !helper?.installed
+                }
+                onClick={() => void uninstallHelper()}
+              >
+                <Trash2 size={12} data-icon="inline-start" />
+                {helperAction === "uninstall"
+                  ? t("settings.helperUninstalling")
+                  : t("settings.helperUninstall")}
+              </Button>
+            </div>
+          </div>
+        )}
+      </div>
+    </SidePanel>
+  );
+}
+
+function ModeButton({
+  active,
+  disabled,
+  icon,
+  label,
+  onClick,
+}: {
+  active: boolean;
+  disabled: boolean;
+  icon: ReactNode;
+  label: string;
+  onClick(): void;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      aria-pressed={active}
+      className={cn(
+        "flex min-h-10 items-center justify-center gap-2 rounded-lg px-3 text-sm font-medium transition-all",
+        active
+          ? "bg-background text-foreground shadow-sm ring-1 ring-border"
+          : "text-muted-foreground hover:bg-background/60 hover:text-foreground",
+        disabled && "cursor-not-allowed opacity-75",
+      )}
+      onClick={onClick}
+    >
+      {icon}
+      <span className="truncate">{label}</span>
+    </button>
+  );
+}
+
+function proxyEnvironmentVariables(platform: string | undefined, address: string): string {
+  const proxy = `socks5h://${address}`;
+  if (platform === "windows") {
+    return [
+      `$env:HTTP_PROXY = "${proxy}"`,
+      `$env:HTTPS_PROXY = "${proxy}"`,
+      `$env:ALL_PROXY = "${proxy}"`,
+    ].join("\r\n");
+  }
+  return [
+    `export HTTP_PROXY="${proxy}"`,
+    `export HTTPS_PROXY="${proxy}"`,
+    `export ALL_PROXY="${proxy}"`,
+  ].join("\n");
 }
 
 function SidePanel({
@@ -307,8 +571,8 @@ function SidePanel({
   footer?: ReactNode;
 }) {
   return (
-    <div className="flex h-full min-w-0 flex-col rounded-lg border bg-muted/25 px-3.5 py-3">
-      <div className="mb-2 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+    <div className="flex h-full min-w-0 flex-col rounded-lg border bg-muted/25 px-3 py-2.5">
+      <div className="mb-1.5 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
         {title}
       </div>
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">{children}</div>
@@ -405,21 +669,23 @@ function DiscoverySummary({
 
   return (
     <SidePanel
-      title={t("overview.networkPanel")}
+      title={t("overview.clusterNetwork")}
       footer={
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="w-full"
-          disabled={!contextName || saving}
-          onClick={() => void save()}
-        >
-          {t("overview.networkSave")}
-        </Button>
+        <div className="flex justify-end">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="min-w-32"
+            disabled={!contextName || saving}
+            onClick={() => void save()}
+          >
+            {t("overview.networkSave")}
+          </Button>
+        </div>
       }
     >
-      <dl className="space-y-2">
+      <dl className="grid gap-x-6 gap-y-2 sm:grid-cols-2">
         <NetworkField
           label={t("overview.clusterDomain")}
           value={clusterDomains}
@@ -449,7 +715,7 @@ function DiscoverySummary({
           disabled={!contextName}
         />
       </dl>
-      <p className="mt-2 min-h-[2.5rem] text-[10px] leading-snug text-muted-foreground">
+      <p className="mt-2 text-[10px] leading-snug text-muted-foreground">
         {t("overview.networkHint")}
       </p>
     </SidePanel>
@@ -470,9 +736,9 @@ function NetworkField({
   disabled?: boolean;
 }) {
   return (
-    <div className="grid grid-cols-[5.5rem_minmax(0,1fr)] items-center gap-x-2 text-[12px]">
-      <dt className="text-muted-foreground">{label}</dt>
-      <dd>
+    <div className="grid grid-cols-[6.5rem_minmax(0,1fr)] items-center gap-x-2 text-[12px]">
+      <dt className="whitespace-nowrap text-muted-foreground">{label}</dt>
+      <dd className="min-w-0">
         <input
           className="h-7 w-full min-w-0 rounded-md border border-input bg-background px-2 font-mono text-[11px] outline-none transition-colors focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40 disabled:opacity-50"
           value={value}

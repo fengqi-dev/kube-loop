@@ -36,6 +36,17 @@ func (m *Manager) PreferredSelection() (contextName, namespace string) {
 	return ui.LastContext, ui.LastNamespace
 }
 
+func (m *Manager) PreferredConnectionMode(contextName string) ConnectionMode {
+	if m.store == nil || contextName == "" {
+		return ConnectionModeTUN
+	}
+	mode := ConnectionMode(m.store.Cluster(contextName).ConnectionMode)
+	if mode != ConnectionModeSOCKS {
+		return ConnectionModeTUN
+	}
+	return mode
+}
+
 func (m *Manager) clearPersistedSessions() error {
 	if m.store == nil {
 		return nil
@@ -141,6 +152,11 @@ func (m *Manager) PersistShutdown() {
 	}
 	connected := state.Phase == PhaseConnected
 	if contextName != "" {
+		if state.Mode != "" {
+			if err := m.store.SetConnectionMode(contextName, string(state.Mode)); err != nil {
+				m.AppendLog("ERROR", fmt.Sprintf("persist connection mode: %v", err))
+			}
+		}
 		if connected {
 			m.persistExchanges(contextName)
 			m.persistMirrors(contextName)
@@ -167,8 +183,9 @@ func (m *Manager) RestoreStartup(ctx context.Context) {
 			continue
 		}
 		if cluster.Connected && contextName == snap.UI.LastContext {
-			// Restore these after the Session core is ready so they use the
-			// sing-box traffic-in (auth_user=port-forward) path instead of the legacy API forwarder.
+			// Restore these after the selected connection mode is ready:
+			// TUN uses its traffic inbound, while SOCKS5 uses the native
+			// Kubernetes API port-forward path.
 			continue
 		}
 		for _, item := range cluster.PortForwards {
@@ -212,7 +229,11 @@ func (m *Manager) RestoreStartup(ctx context.Context) {
 		"restoring cluster connection: context=%s namespace=%s",
 		contextName, namespace,
 	))
-	if err := m.Connect(ctx, Request{Context: contextName, Namespace: namespace}); err != nil {
+	mode := ConnectionMode(cluster.ConnectionMode)
+	if mode != ConnectionModeSOCKS {
+		mode = ConnectionModeTUN
+	}
+	if err := m.Connect(ctx, Request{Context: contextName, Namespace: namespace, Mode: mode}); err != nil {
 		m.AppendLog("ERROR", fmt.Sprintf("restore connect %s: %v", contextName, err))
 	}
 }
@@ -242,37 +263,9 @@ func (m *Manager) restoreBindings(ctx context.Context, contextName string) {
 		contextName, len(cluster.PortForwards), len(cluster.Exchanges),
 		len(cluster.Mirrors), len(cluster.Previews),
 	))
-	restored := 0
-	failed := 0
-	skipped := 0
-	for _, item := range cluster.PortForwards {
-		if m.hasPortForward(contextName, item) {
-			skipped++
-			continue
-		}
-		info, err := m.portfwd.Start(ctx, portfwd.Request{
-			Context:    contextName,
-			Namespace:  item.Namespace,
-			Kind:       item.Kind,
-			Name:       item.Name,
-			Protocol:   item.Protocol,
-			RemotePort: item.RemotePort,
-			LocalPort:  item.LocalPort,
-		})
-		if err != nil {
-			failed++
-			m.AppendLog("ERROR", fmt.Sprintf(
-				"restore port-forward %s/%s/%s: %v",
-				contextName, item.Kind, item.Name, err,
-			))
-			continue
-		}
-		restored++
-		m.AppendLog("INFO", fmt.Sprintf(
-			"restored port-forward %s/%s/%s at %s",
-			contextName, item.Kind, item.Name, info.Address,
-		))
-	}
+	restored, skipped, failed := m.restorePortForwards(
+		ctx, contextName, cluster.PortForwards,
+	)
 	for _, item := range cluster.Exchanges {
 		_, err := m.intercept.StartIntercept(ctx, intercept.Mapping{
 			Namespace: item.Namespace,
@@ -331,6 +324,59 @@ func (m *Manager) restoreBindings(ctx context.Context, contextName string) {
 		"session restore complete for %s: restored=%d skipped=%d failed=%d",
 		contextName, restored, skipped, failed,
 	))
+}
+
+func (m *Manager) restoreNativePortForwards(ctx context.Context, contextName string) {
+	if m.store == nil || contextName == "" {
+		return
+	}
+	items := m.store.Cluster(contextName).PortForwards
+	if len(items) == 0 {
+		return
+	}
+	m.AppendLog("INFO", fmt.Sprintf(
+		"restoring native port-forwards for SOCKS5 mode: context=%s count=%d",
+		contextName, len(items),
+	))
+	restored, skipped, failed := m.restorePortForwards(ctx, contextName, items)
+	m.AppendLog("INFO", fmt.Sprintf(
+		"native port-forward restore complete for %s: restored=%d skipped=%d failed=%d",
+		contextName, restored, skipped, failed,
+	))
+}
+
+func (m *Manager) restorePortForwards(
+	ctx context.Context, contextName string, items []store.PortForwardSpec,
+) (restored, skipped, failed int) {
+	for _, item := range items {
+		if m.hasPortForward(contextName, item) {
+			skipped++
+			continue
+		}
+		info, err := m.portfwd.Start(ctx, portfwd.Request{
+			Context:    contextName,
+			Namespace:  item.Namespace,
+			Kind:       item.Kind,
+			Name:       item.Name,
+			Protocol:   item.Protocol,
+			RemotePort: item.RemotePort,
+			LocalPort:  item.LocalPort,
+		})
+		if err != nil {
+			failed++
+			m.AppendLog("ERROR", fmt.Sprintf(
+				"restore port-forward %s/%s/%s: %v",
+				contextName, item.Kind, item.Name, err,
+			))
+			continue
+		}
+		restored++
+		m.AppendLog("INFO", fmt.Sprintf(
+			"restored port-forward %s/%s/%s at %s",
+			contextName, item.Kind, item.Name, info.Address,
+		))
+	}
+	return restored, skipped, failed
 }
 
 func (m *Manager) hasPortForward(contextName string, want store.PortForwardSpec) bool {

@@ -18,6 +18,7 @@ function App() {
   const {
     data,
     contextName,
+    connectionMode,
     activeContextName,
     activeNamespaces,
     view,
@@ -31,6 +32,7 @@ function App() {
     currentContext,
     kubeconfigFiles,
     changeContext,
+    setConnectionMode,
     toggleConnection,
     connectContext,
     reloadContexts,
@@ -96,11 +98,14 @@ function App() {
               contextName={activeContextName}
               clusterName={currentContext?.cluster ?? ""}
               session={session}
+              connectionMode={connectionMode}
+              platform={data.platform}
               loading={loading}
               error={uiError || session.error || ""}
               busy={busy}
               ready={ready}
               onToggle={() => void toggleConnection()}
+              onConnectionModeChange={setConnectionMode}
               onManageClusters={() => setView("clusters")}
               onNavigate={setView}
             />

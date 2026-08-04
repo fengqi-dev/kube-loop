@@ -38,6 +38,8 @@ type BootstrapData struct {
 	Update             update.Info                  `json:"update"`
 	PreferredContext   string                       `json:"preferredContext,omitempty"`
 	PreferredNamespace string                       `json:"preferredNamespace,omitempty"`
+	PreferredMode      session.ConnectionMode       `json:"preferredMode,omitempty"`
+	Platform           string                       `json:"platform"`
 	KubeconfigFiles    []cluster.KubeconfigFileInfo `json:"kubeconfigFiles,omitempty"`
 }
 

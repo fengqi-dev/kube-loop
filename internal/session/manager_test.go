@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -224,15 +225,22 @@ func (f *fakeProcess) Close() error {
 	return nil
 }
 
-func testBridge(context.Context, string) (net.Listener, error) {
+func testBridge(context.Context, string, string) (net.Listener, error) {
 	return &fakeListener{}, nil
 }
 
-type fakeListener struct{}
+type fakeListener struct {
+	address string
+}
 
 func (f *fakeListener) Accept() (net.Conn, error) { return nil, net.ErrClosed }
 func (f *fakeListener) Close() error              { return nil }
-func (f *fakeListener) Addr() net.Addr            { return fakeAddress("127.0.0.1:23456") }
+func (f *fakeListener) Addr() net.Addr {
+	if f.address != "" {
+		return fakeAddress(f.address)
+	}
+	return fakeAddress("127.0.0.1:23456")
+}
 
 type fakeAddress string
 
@@ -309,6 +317,12 @@ func TestManagerPublishesConnectedStateAndCleansUp(t *testing.T) {
 	if state.ConnectedAt == nil {
 		t.Fatal("connected state does not include connection time")
 	}
+	if state.Mode != ConnectionModeTUN {
+		t.Fatalf("mode = %q, want %q", state.Mode, ConnectionModeTUN)
+	}
+	if state.SOCKSPort != 0 {
+		t.Fatalf("SOCKSPort = %d, want 0 in TUN mode", state.SOCKSPort)
+	}
 	if err := manager.Disconnect(); err != nil {
 		t.Fatal(err)
 	}
@@ -328,6 +342,106 @@ func TestManagerPublishesConnectedStateAndCleansUp(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("timed out waiting for idle state")
+	}
+}
+
+func TestManagerSOCKSModeSkipsTUNCore(t *testing.T) {
+	provider := &fakeProvider{discovery: cluster.Discovery{
+		PodCIDRs: []string{"10.244.0.0/16"}, ServiceIPs: []string{"10.96.0.1"},
+	}}
+	var listenAddresses []string
+	manager := NewManager(
+		provider,
+		WithCore(failingCore{err: errors.New("TUN core must not start")}),
+		WithBridgeFactory(func(
+			_ context.Context, _, listenAddress string,
+		) (net.Listener, error) {
+			listenAddresses = append(listenAddresses, listenAddress)
+			return &fakeListener{address: listenAddress}, nil
+		}),
+	)
+	connected := make(chan State, 1)
+	manager.Subscribe(func(state State) {
+		if state.Phase == PhaseConnected {
+			connected <- state
+		}
+	})
+
+	if err := manager.Connect(context.Background(), Request{
+		Context: "dev",
+		Mode:    ConnectionModeSOCKS,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	state := receiveState(t, connected)
+	if state.Mode != ConnectionModeSOCKS {
+		t.Fatalf("mode = %q, want %q", state.Mode, ConnectionModeSOCKS)
+	}
+	if state.SOCKSPort != DefaultSOCKSPort {
+		t.Fatalf("SOCKSPort = %d, want %d", state.SOCKSPort, DefaultSOCKSPort)
+	}
+	wantListenAddress := net.JoinHostPort("127.0.0.1", strconv.Itoa(DefaultSOCKSPort))
+	if fmt.Sprint(listenAddresses) != fmt.Sprint([]string{wantListenAddress}) {
+		t.Fatalf("listen addresses = %v, want [%s]", listenAddresses, wantListenAddress)
+	}
+	if state.Network == nil || state.Network.RoutingMode != "proxy" {
+		t.Fatalf("unexpected SOCKS network diagnostics: %#v", state.Network)
+	}
+	manager.mu.RLock()
+	runningCore := manager.runningCore
+	manager.mu.RUnlock()
+	if runningCore != nil {
+		t.Fatal("SOCKS mode started the TUN core")
+	}
+	if err := manager.Disconnect(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestManagerSOCKSModeFallsBackWhenDefaultPortIsBusy(t *testing.T) {
+	provider := &fakeProvider{discovery: cluster.Discovery{
+		PodCIDRs: []string{"10.244.0.0/16"}, ServiceIPs: []string{"10.96.0.1"},
+	}}
+	var listenAddresses []string
+	manager := NewManager(
+		provider,
+		WithCore(failingCore{err: errors.New("TUN core must not start")}),
+		WithBridgeFactory(func(
+			_ context.Context, _, listenAddress string,
+		) (net.Listener, error) {
+			listenAddresses = append(listenAddresses, listenAddress)
+			if len(listenAddresses) == 1 {
+				return nil, errors.New("address already in use")
+			}
+			return &fakeListener{}, nil
+		}),
+	)
+	connected := make(chan State, 1)
+	manager.Subscribe(func(state State) {
+		if state.Phase == PhaseConnected {
+			connected <- state
+		}
+	})
+
+	if err := manager.Connect(context.Background(), Request{
+		Context: "dev",
+		Mode:    ConnectionModeSOCKS,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	state := receiveState(t, connected)
+	if state.SOCKSPort != 23456 {
+		t.Fatalf("fallback SOCKSPort = %d, want 23456", state.SOCKSPort)
+	}
+	wantAddresses := []string{
+		net.JoinHostPort("127.0.0.1", strconv.Itoa(DefaultSOCKSPort)),
+		"127.0.0.1:0",
+	}
+	if fmt.Sprint(listenAddresses) != fmt.Sprint(wantAddresses) {
+		t.Fatalf("listen addresses = %v, want %v", listenAddresses, wantAddresses)
+	}
+	if err := manager.Disconnect(); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -401,7 +515,7 @@ func TestManagerCoreFailurePublishesPhasesAndRollsBackResources(t *testing.T) {
 	manager := NewManager(
 		provider,
 		WithCore(failingCore{err: errors.New("core failed")}),
-		WithBridgeFactory(func(context.Context, string) (net.Listener, error) {
+		WithBridgeFactory(func(context.Context, string, string) (net.Listener, error) {
 			return bridge, nil
 		}),
 	)

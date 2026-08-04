@@ -7,6 +7,8 @@ export type Phase =
   | "connected"
   | "error";
 
+export type ConnectionMode = "tun" | "socks";
+
 export interface ContextInfo {
   name: string;
   cluster: string;
@@ -128,6 +130,7 @@ export interface LogEvent {
 
 export interface SessionState {
   phase: Phase;
+  mode?: ConnectionMode;
   context: string;
   namespace: string;
   dnsNamespace?: string;
@@ -143,6 +146,7 @@ export interface SessionState {
   services?: ServiceInfo[];
   events?: LogEvent[];
   coreVersion?: string;
+  socksPort?: number;
   kubernetesVersion?: string;
   connectedAt?: string;
   metrics?: Metrics;
@@ -164,6 +168,8 @@ export interface BootstrapData {
   update: UpdateInfo;
   preferredContext?: string;
   preferredNamespace?: string;
+  preferredMode?: ConnectionMode;
+  platform?: string;
   kubeconfigFiles?: KubeconfigFileInfo[];
 }
 

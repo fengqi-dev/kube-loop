@@ -40,14 +40,15 @@ type UIState struct {
 
 // ClusterState stores restore intents for one kubeconfig context.
 type ClusterState struct {
-	Namespace     string            `json:"namespace,omitempty"`
-	Connected     bool              `json:"connected,omitzero"`
-	PortForwards  []PortForwardSpec `json:"portForwards,omitempty"`
-	Exchanges     []ExchangeSpec    `json:"exchanges,omitempty"`
-	Mirrors       []MirrorSpec      `json:"mirrors,omitempty"`
-	Previews      []PreviewSpec     `json:"previews,omitempty"`
-	HostAliases   []HostAliasSpec   `json:"hostAliases,omitempty"`
-	ManualNetwork *ManualNetwork    `json:"manualNetwork,omitempty"`
+	Namespace      string            `json:"namespace,omitempty"`
+	ConnectionMode string            `json:"connectionMode,omitempty"`
+	Connected      bool              `json:"connected,omitzero"`
+	PortForwards   []PortForwardSpec `json:"portForwards,omitempty"`
+	Exchanges      []ExchangeSpec    `json:"exchanges,omitempty"`
+	Mirrors        []MirrorSpec      `json:"mirrors,omitempty"`
+	Previews       []PreviewSpec     `json:"previews,omitempty"`
+	HostAliases    []HostAliasSpec   `json:"hostAliases,omitempty"`
+	ManualNetwork  *ManualNetwork    `json:"manualNetwork,omitempty"`
 }
 
 // HostAliasSpec maps a DNS name to an IPv4 address for the local tunnel DNS.
@@ -277,6 +278,19 @@ func (s *Store) SetConnected(contextName, namespace string, connected bool) erro
 			}
 		}
 	}
+	return s.saveLocked()
+}
+
+func (s *Store) SetConnectionMode(contextName, mode string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if contextName == "" {
+		return nil
+	}
+	if mode != "tun" && mode != "socks" {
+		return fmt.Errorf("invalid connection mode %q", mode)
+	}
+	s.ensureClusterLocked(contextName).ConnectionMode = mode
 	return s.saveLocked()
 }
 
@@ -528,13 +542,14 @@ func normalizeStorePath(path string) (string, error) {
 
 func cloneCluster(item ClusterState) ClusterState {
 	out := ClusterState{
-		Namespace:    item.Namespace,
-		Connected:    item.Connected,
-		PortForwards: clonePortForwards(item.PortForwards),
-		Exchanges:    cloneExchanges(item.Exchanges),
-		Mirrors:      cloneMirrors(item.Mirrors),
-		Previews:     clonePreviews(item.Previews),
-		HostAliases:  cloneHostAliases(item.HostAliases),
+		Namespace:      item.Namespace,
+		ConnectionMode: item.ConnectionMode,
+		Connected:      item.Connected,
+		PortForwards:   clonePortForwards(item.PortForwards),
+		Exchanges:      cloneExchanges(item.Exchanges),
+		Mirrors:        cloneMirrors(item.Mirrors),
+		Previews:       clonePreviews(item.Previews),
+		HostAliases:    cloneHostAliases(item.HostAliases),
 	}
 	if item.ManualNetwork != nil {
 		copyItem := cloneManualNetwork(*item.ManualNetwork)

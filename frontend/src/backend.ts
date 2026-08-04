@@ -1,6 +1,7 @@
 import type {
   BootstrapData,
   ClusterInventory,
+  ConnectionMode,
   ConnectivityTestResult,
   HelperStatus,
   HostAlias,
@@ -37,6 +38,11 @@ declare global {
           ListServices(contextName: string, namespace: string): Promise<ServiceInfo[]>;
           ListPods(contextName: string, namespace: string): Promise<PodInfo[]>;
           Connect(contextName: string, namespace: string): Promise<void>;
+          ConnectMode(
+            contextName: string,
+            namespace: string,
+            mode: ConnectionMode,
+          ): Promise<void>;
           Disconnect(): Promise<void>;
           TestPortForward(id: string): Promise<ConnectivityTestResult>;
           GetManualNetwork(contextName: string): Promise<ManualNetwork>;
@@ -106,6 +112,8 @@ export const backend = {
     Promise.resolve().then(() => api().ListPods(contextName, namespace)),
   connect: (contextName: string, namespace: string) =>
     Promise.resolve().then(() => api().Connect(contextName, namespace)),
+  connectMode: (contextName: string, namespace: string, mode: ConnectionMode) =>
+    Promise.resolve().then(() => api().ConnectMode(contextName, namespace, mode)),
   disconnect: () => Promise.resolve().then(() => api().Disconnect()),
   testPortForward: (id: string) =>
     Promise.resolve().then(() => api().TestPortForward(id)),

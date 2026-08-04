@@ -7,6 +7,8 @@ export namespace app {
 	    update: update.Info;
 	    preferredContext?: string;
 	    preferredNamespace?: string;
+	    preferredMode?: string;
+	    platform: string;
 	    kubeconfigFiles?: cluster.KubeconfigFileInfo[];
 	
 	    static createFrom(source: any = {}) {
@@ -21,6 +23,8 @@ export namespace app {
 	        this.update = this.convertValues(source["update"], update.Info);
 	        this.preferredContext = source["preferredContext"];
 	        this.preferredNamespace = source["preferredNamespace"];
+	        this.preferredMode = source["preferredMode"];
+	        this.platform = source["platform"];
 	        this.kubeconfigFiles = this.convertValues(source["kubeconfigFiles"], cluster.KubeconfigFileInfo);
 	    }
 	
@@ -725,6 +729,7 @@ export namespace session {
 	}
 	export class State {
 	    phase: string;
+	    mode?: string;
 	    context: string;
 	    namespace: string;
 	    dnsNamespace?: string;
@@ -740,6 +745,7 @@ export namespace session {
 	    services?: cluster.ServiceInfo[];
 	    events?: LogEvent[];
 	    coreVersion?: string;
+	    socksPort?: number;
 	    // Go type: time
 	    connectedAt?: any;
 	    metrics?: singbox.Metrics;
@@ -755,6 +761,7 @@ export namespace session {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.phase = source["phase"];
+	        this.mode = source["mode"];
 	        this.context = source["context"];
 	        this.namespace = source["namespace"];
 	        this.dnsNamespace = source["dnsNamespace"];
@@ -770,6 +777,7 @@ export namespace session {
 	        this.services = this.convertValues(source["services"], cluster.ServiceInfo);
 	        this.events = this.convertValues(source["events"], LogEvent);
 	        this.coreVersion = source["coreVersion"];
+	        this.socksPort = source["socksPort"];
 	        this.connectedAt = this.convertValues(source["connectedAt"], null);
 	        this.metrics = this.convertValues(source["metrics"], singbox.Metrics);
 	        this.inventoryRevision = source["inventoryRevision"];

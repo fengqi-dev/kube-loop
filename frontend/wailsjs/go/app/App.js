@@ -22,6 +22,10 @@ export function Connect(arg1, arg2) {
   return window['go']['app']['App']['Connect'](arg1, arg2);
 }
 
+export function ConnectMode(arg1, arg2, arg3) {
+  return window['go']['app']['App']['ConnectMode'](arg1, arg2, arg3);
+}
+
 export function Disconnect() {
   return window['go']['app']['App']['Disconnect']();
 }

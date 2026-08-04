@@ -19,6 +19,13 @@ func (a *App) Connect(contextName, namespace string) error {
 	})
 }
 
+func (a *App) ConnectMode(contextName, namespace, mode string) error {
+	_ = a.manager.RememberSelection(contextName, namespace)
+	return a.manager.Connect(a.ctx, session.Request{
+		Context: contextName, Namespace: namespace, Mode: session.ConnectionMode(mode),
+	})
+}
+
 func (a *App) Disconnect() error {
 	return a.manager.Disconnect()
 }

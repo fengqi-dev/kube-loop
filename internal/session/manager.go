@@ -33,6 +33,10 @@ const (
 
 const DefaultGatewayImage = "ghcr.io/fengqi-dev/kube-loop/gateway:latest"
 
+// DefaultSOCKSPort is the preferred local SOCKS5 port. A session falls back
+// to an OS-assigned port when this address is already occupied.
+const DefaultSOCKSPort = 7890
+
 // ResolveGatewayImage picks the Gateway image for this desktop build.
 // KUBELOOP_GATEWAY_IMAGE wins; release builds pin the matching image tag.
 func ResolveGatewayImage(appVersion string) string {
@@ -48,10 +52,19 @@ func ResolveGatewayImage(appVersion string) string {
 type Request struct {
 	Context   string
 	Namespace string
+	Mode      ConnectionMode
 }
+
+type ConnectionMode string
+
+const (
+	ConnectionModeTUN   ConnectionMode = "tun"
+	ConnectionModeSOCKS ConnectionMode = "socks"
+)
 
 type State struct {
 	Phase           Phase                 `json:"phase"`
+	Mode            ConnectionMode        `json:"mode,omitempty"`
 	Context         string                `json:"context"`
 	Namespace       string                `json:"namespace"`
 	DNSNamespace    string                `json:"dnsNamespace,omitempty"`
@@ -67,6 +80,7 @@ type State struct {
 	Services        []cluster.ServiceInfo `json:"services,omitempty"`
 	Events          []LogEvent            `json:"events,omitempty"`
 	CoreVersion     string                `json:"coreVersion,omitempty"`
+	SOCKSPort       int                   `json:"socksPort,omitempty"`
 	ConnectedAt     *time.Time            `json:"connectedAt,omitempty"`
 	Metrics         *singbox.Metrics      `json:"metrics,omitempty"`
 	// InventoryRevision increments only on Informer-driven inventory snapshots
@@ -129,7 +143,7 @@ type Core interface {
 	) (singbox.RunningCore, error)
 }
 
-type BridgeFactory func(context.Context, string) (net.Listener, error)
+type BridgeFactory func(context.Context, string, string) (net.Listener, error)
 
 type Option func(*Manager)
 
@@ -195,8 +209,10 @@ func NewManager(provider ClusterProvider, options ...Option) *Manager {
 		catalog:    provider,
 		connection: provider,
 		gateway:    provider,
-		bridgeFactory: func(ctx context.Context, gatewayAddress string) (net.Listener, error) {
-			return socksbridge.Listen(ctx, gatewayAddress)
+		bridgeFactory: func(
+			ctx context.Context, gatewayAddress, listenAddress string,
+		) (net.Listener, error) {
+			return socksbridge.Listen(ctx, gatewayAddress, listenAddress)
 		},
 		gatewayImage: ResolveGatewayImage(""),
 		intercept:    intercept.NewManager(provider),

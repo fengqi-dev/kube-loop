@@ -120,3 +120,56 @@ func TestConnectedStatePublishesAfterBindingsAreRestored(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestSOCKSConnectedStatePublishesAfterNativePortForwardsAreRestored(t *testing.T) {
+	stateStore, err := store.Open(filepath.Join(t.TempDir(), "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := stateStore.SetPortForwards("dev", []store.PortForwardSpec{{
+		Namespace:  "default",
+		Kind:       portfwd.KindService,
+		Name:       "api",
+		Protocol:   "tcp",
+		RemotePort: 80,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	provider := &fakeProvider{discovery: cluster.Discovery{
+		PodCIDRs: []string{"10.244.0.0/16"}, ServiceIPs: []string{"10.96.0.1"},
+	}}
+	manager := NewManager(
+		provider,
+		WithStore(stateStore),
+		WithCore(newFakeCore()),
+		WithBridgeFactory(testBridge),
+	)
+	restored := make(chan []portfwd.Info, 1)
+	manager.Subscribe(func(state State) {
+		if state.Phase == PhaseConnected {
+			select {
+			case restored <- manager.ListPortForwards():
+			default:
+			}
+		}
+	})
+	if err := manager.Connect(context.Background(), Request{
+		Context: "dev", Namespace: "default", Mode: ConnectionModeSOCKS,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case items := <-restored:
+		if len(items) != 1 {
+			t.Fatalf("SOCKS connected before port-forward restore: count=%d", len(items))
+		}
+		if items[0].PodName != "api-0" {
+			t.Fatalf("SOCKS port-forward did not use native pod forwarding: %#v", items[0])
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatalf("timed out waiting for SOCKS connected state; current state: %#v", manager.State())
+	}
+	if err := manager.Shutdown(); err != nil {
+		t.Fatal(err)
+	}
+}

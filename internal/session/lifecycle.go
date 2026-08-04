@@ -34,6 +34,7 @@ func (m *Manager) disconnect(clearConnected bool) error {
 	if cancel == nil {
 		m.publish(State{
 			Phase:             PhaseIdle,
+			Mode:              state.Mode,
 			Message:           "Disconnected",
 			CoreVersion:       singbox.Version,
 			KubernetesVersion: state.KubernetesVersion,

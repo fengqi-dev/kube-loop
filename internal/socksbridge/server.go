@@ -487,8 +487,8 @@ func (r *sliceReader) Read(destination []byte) (int, error) {
 	return read, nil
 }
 
-func Listen(ctx context.Context, gatewayAddress string) (*Bridge, error) {
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+func Listen(ctx context.Context, gatewayAddress, listenAddress string) (*Bridge, error) {
+	listener, err := net.Listen("tcp", listenAddress)
 	if err != nil {
 		return nil, err
 	}

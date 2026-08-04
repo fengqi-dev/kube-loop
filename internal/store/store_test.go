@@ -19,6 +19,9 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	if err := s.SetConnected("minikube", "default", true); err != nil {
 		t.Fatal(err)
 	}
+	if err := s.SetConnectionMode("minikube", "socks"); err != nil {
+		t.Fatal(err)
+	}
 	if err := s.SetPortForwards("minikube", []PortForwardSpec{{
 		Namespace: "default", Kind: "service", Name: "api", RemotePort: 80, LocalPort: 8080,
 	}}); err != nil {
@@ -40,11 +43,22 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 		t.Fatalf("ui=%#v", snap.UI)
 	}
 	cluster := reloaded.Cluster("minikube")
-	if !cluster.Connected || len(cluster.PortForwards) != 1 || len(cluster.Exchanges) != 1 {
+	if !cluster.Connected || cluster.ConnectionMode != "socks" ||
+		len(cluster.PortForwards) != 1 || len(cluster.Exchanges) != 1 {
 		t.Fatalf("cluster=%#v", cluster)
 	}
 	if _, err := os.Stat(path); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestSetConnectionModeRejectsUnknownMode(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetConnectionMode("minikube", "system-proxy"); err == nil {
+		t.Fatal("expected unknown connection mode to be rejected")
 	}
 }
 
