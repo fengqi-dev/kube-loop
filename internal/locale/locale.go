@@ -13,7 +13,7 @@ const (
 	Chinese Language = "zh-CN"
 )
 
-// Preferred returns the OS UI language for native surfaces (tray, dialogs).
+// Preferred returns the OS UI language for native dialogs.
 // It checks LANG / LC_ALL, then the platform UI language (Windows).
 func Preferred() Language {
 	if isChineseEnv() || isChineseUI() {

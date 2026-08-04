@@ -3,7 +3,6 @@ module github.com/fengqi-dev/kube-loop
 go 1.26.0
 
 require (
-	github.com/energye/systray v1.0.3
 	github.com/google/uuid v1.6.0
 	github.com/miekg/dns v1.1.72
 	github.com/modelcontextprotocol/go-sdk v1.7.0

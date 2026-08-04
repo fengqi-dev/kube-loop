@@ -24,9 +24,6 @@ var version = "dev"
 
 func main() {
 	app := desktopapp.NewApp(version, embeddedHelperFiles)
-	// Windows/Linux: tray owns a background message loop. macOS: tray is a no-op
-	// for now (see internal/tray/tray_darwin.go).
-	desktopapp.StartTray(app)
 	if err := wails.Run(&options.App{
 		Title:         "KubeLoop",
 		Width:         1080,
@@ -45,7 +42,6 @@ func main() {
 		},
 		AssetServer:      &assetserver.Options{Assets: assets},
 		OnStartup:        desktopapp.StartupHandler(app),
-		OnBeforeClose:    desktopapp.BeforeCloseHandler(app),
 		OnShutdown:       desktopapp.ShutdownHandler(app),
 		Bind:             []any{app},
 		BackgroundColour: &options.RGBA{R: 15, G: 23, B: 42, A: 1},
