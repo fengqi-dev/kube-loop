@@ -90,11 +90,11 @@ export function SessionTestPanel({
 
         <div className="min-w-0 space-y-3 rounded-lg border bg-muted/20 p-3 sm:p-4">
           <div className="flex flex-wrap items-center justify-end gap-x-4 gap-y-1 text-[10px] font-medium text-muted-foreground">
-            <span className="inline-flex items-center gap-1 text-[#0D7A4A]">
+            <span className="inline-flex items-center gap-1 text-success">
               <ArrowRight className="size-3.5" />
               {t("network.flowRequest")}
             </span>
-            <span className="inline-flex items-center gap-1 text-[#2F6FED]">
+            <span className="inline-flex items-center gap-1 text-primary">
               <ArrowLeft className="size-3.5" />
               {t("network.flowResponse")}
             </span>
@@ -285,7 +285,7 @@ function FlowNode({
         "flex min-h-14 min-w-0 items-center justify-center rounded-xl border px-2 py-2 text-center",
         "font-mono text-[11px] leading-4 shadow-xs transition-colors [overflow-wrap:anywhere]",
         nodeRoleClass(role),
-        tested && status === "running" && "ring-1 ring-[#0D7A4A]/10",
+        tested && status === "running" && "ring-1 ring-success/10",
         tested && status === "success" && "ring-1 ring-success/15",
       )}
     >
@@ -511,9 +511,9 @@ function laneTone(state: SegmentVisualState, lane: TrafficLaneTone): LaneTone {
   if (state === "neutral") {
     if (lane === "response") {
       return {
-        track: "border-[#2F6FED]/20",
-        arrow: "text-[#2F6FED]/35",
-        packet: "bg-[#2F6FED]/35",
+        track: "border-primary/20",
+        arrow: "text-primary/35",
+        packet: "bg-primary/35",
       };
     }
     if (lane === "shadow") {
@@ -524,16 +524,16 @@ function laneTone(state: SegmentVisualState, lane: TrafficLaneTone): LaneTone {
       };
     }
     return {
-      track: "border-[#0D7A4A]/20",
-      arrow: "text-[#0D7A4A]/35",
-      packet: "bg-[#0D7A4A]/35",
+      track: "border-success/20",
+      arrow: "text-success/35",
+      packet: "bg-success/35",
     };
   }
   if (lane === "response") {
     return {
-      track: "border-[#2F6FED]/55",
-      arrow: "text-[#2F6FED]",
-      packet: "bg-[#2F6FED] shadow-[0_0_6px_rgba(47,111,237,0.45)]",
+      track: "border-primary/55",
+      arrow: "text-primary",
+      packet: "bg-primary shadow-md shadow-primary/45",
     };
   }
   if (lane === "shadow") {
@@ -544,9 +544,9 @@ function laneTone(state: SegmentVisualState, lane: TrafficLaneTone): LaneTone {
     };
   }
   return {
-    track: "border-[#0D7A4A]/55",
-    arrow: "text-[#0D7A4A]",
-    packet: "bg-[#0D7A4A] shadow-[0_0_6px_rgba(13,122,74,0.5)]",
+    track: "border-success/55",
+    arrow: "text-success",
+    packet: "bg-success shadow-md shadow-success/50",
   };
 }
 
@@ -563,9 +563,9 @@ function nodeRoleClass(role: SessionTestNodeRole) {
     return "border-foreground/15 bg-muted/45";
   }
   if (role === "accent") {
-    return "border-[#0D7A4A]/35 bg-[#0D7A4A]/8";
+    return "border-success/35 bg-success/8";
   }
-  return "border-[#174D35]/20 bg-[#174D35]/5";
+  return "border-success/20 bg-success/5";
 }
 
 function flowGridColumns(nodeCount: number) {

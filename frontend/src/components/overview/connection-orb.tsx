@@ -34,18 +34,18 @@ export function ConnectionOrb({
         "active:translate-y-px active:scale-[0.98]",
         // Connected = running (click to stop)
         ready &&
-          "border-[#30A46C]/40 bg-[#30A46C] text-white shadow-[0_8px_24px_-8px_rgba(48,164,108,0.55)] hover:bg-[#2b9462]",
+          "border-success/40 bg-success text-success-foreground shadow-lg shadow-success/30 hover:bg-success/90",
         // Error
         error &&
           "border-destructive/40 bg-destructive text-white shadow-[0_8px_24px_-8px_rgba(229,72,77,0.45)] hover:bg-destructive/90",
         // Connecting / busy
         working &&
-          "border-[#F5A524]/45 bg-[#F5A524]/15 text-[#C4841D] hover:bg-[#F5A524]/20",
+          "border-chart-5/45 bg-chart-5/15 text-chart-5 hover:bg-chart-5/20",
         // Idle = start
         !ready &&
           !error &&
           !working &&
-          "border-[#326CE5]/50 bg-[#326CE5] text-white shadow-[0_8px_24px_-8px_rgba(50,108,229,0.55)] hover:bg-[#2b5fd4]",
+          "border-primary/50 bg-primary text-primary-foreground shadow-lg shadow-primary/30 hover:bg-primary/90",
       )}
     >
       {working ? (
@@ -62,7 +62,7 @@ export function ConnectionOrb({
       {ready ? (
         <span
           aria-hidden
-          className="pointer-events-none absolute inset-[-5px] rounded-full border border-[#30A46C]/35"
+          className="pointer-events-none absolute inset-[-5px] rounded-full border border-success/35"
         />
       ) : null}
     </button>
