@@ -14,6 +14,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { LogoMark } from "@/components/brand/logo-mark";
+import { TrafficStats } from "@/components/overview/traffic-stats";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -24,6 +25,7 @@ import {
 import { type AppView } from "@/hooks/use-session";
 import { useI18n, type TranslationKey } from "@/i18n";
 import { cn } from "@/lib/utils";
+import type { Metrics } from "@/types";
 
 const navigation: Array<{ id: Exclude<AppView, "settings">; icon: LucideIcon }> = [
   { id: "overview", icon: Gauge },
@@ -54,12 +56,16 @@ export function AppSidebar({
   view,
   connectionsAlert,
   updateAvailable,
+  ready,
+  metrics,
   onNavigate,
 }: {
   view: AppView;
   /** Green dot on Connections: true when unread/new sessions appeared. */
   connectionsAlert?: boolean;
   updateAvailable: boolean;
+  ready: boolean;
+  metrics?: Metrics;
   onNavigate(view: AppView): void;
 }) {
   const { t } = useI18n();
@@ -217,6 +223,7 @@ export function AppSidebar({
           collapsed ? "flex flex-col items-center px-0" : "px-1",
         )}
       >
+        {!collapsed ? <TrafficStats ready={ready} metrics={metrics} /> : null}
         <Separator className="bg-sidebar-border" />
         {navButton({
           id: "settings",

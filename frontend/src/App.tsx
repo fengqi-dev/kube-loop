@@ -78,6 +78,8 @@ function App() {
         view={view}
         connectionsAlert={connectionsAlert}
         updateAvailable={data.update.available}
+        ready={ready}
+        metrics={session.metrics}
         onNavigate={setView}
       />
 
