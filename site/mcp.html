@@ -30,8 +30,9 @@
             <p data-i18n="mcp.what.body">
               KubeLoop can expose its desktop control plane as a local
               <a href="https://modelcontextprotocol.io">MCP</a> server (Streamable
-              HTTP on 127.0.0.1). Tools cover connect/disconnect, discovery, Port
-              Forward, Exchange, Mirror, Preview, and helper install.
+              HTTP on 127.0.0.1). Seven compact tools cover cluster discovery,
+              connections, networking, traffic sessions, helper management, Pod
+              commands, and bidirectional file transfers.
             </p>
           </section>
 
@@ -77,32 +78,90 @@
               <div class="card">
                 <span class="card-icon">C</span>
                 <span class="card-body">
-                  <h3 data-i18n="mcp.tools.connect.title">Connect &amp; discover</h3>
-                  <p data-i18n="mcp.tools.connect.body">
-                    Connect or disconnect, list namespaces, Services, and Pods.
+                  <h3 data-i18n="mcp.tools.cluster.title">manage_cluster</h3>
+                  <p data-i18n="mcp.tools.cluster.body">
+                    Reload or probe contexts; list Namespaces, Services, and Pods.
+                  </p>
+                </span>
+              </div>
+              <div class="card">
+                <span class="card-icon">L</span>
+                <span class="card-body">
+                  <h3 data-i18n="mcp.tools.connection.title">manage_connection</h3>
+                  <p data-i18n="mcp.tools.connection.body">
+                    Get status, connect, disconnect, or read the sing-box config.
                   </p>
                 </span>
               </div>
               <div class="card">
                 <span class="card-icon">N</span>
                 <span class="card-body">
-                  <h3 data-i18n="mcp.tools.network.title">Network tools</h3>
+                  <h3 data-i18n="mcp.tools.network.title">manage_network</h3>
                   <p data-i18n="mcp.tools.network.body">
-                    Start and stop Port Forward, Exchange, Mirror, and Preview.
+                    Get or set manual network overrides and Host Aliases.
+                  </p>
+                </span>
+              </div>
+              <div class="card">
+                <span class="card-icon">T</span>
+                <span class="card-body">
+                  <h3 data-i18n="mcp.tools.traffic.title">manage_traffic</h3>
+                  <p data-i18n="mcp.tools.traffic.body">
+                    Start, stop, or list Exchange, Mirror, Preview, and Port Forward.
                   </p>
                 </span>
               </div>
               <div class="card">
                 <span class="card-icon">H</span>
                 <span class="card-body">
-                  <h3 data-i18n="mcp.tools.helper.title">Helper &amp; config</h3>
+                  <h3 data-i18n="mcp.tools.helper.title">manage_helper</h3>
                   <p data-i18n="mcp.tools.helper.body">
-                    Check or install the privileged helper, and read the active
-                    sing-box config.
+                    Get status, install, or uninstall the privileged Helper.
+                  </p>
+                </span>
+              </div>
+              <div class="card">
+                <span class="card-icon">E</span>
+                <span class="card-body">
+                  <h3 data-i18n="mcp.tools.exec.title">exec_pod_command</h3>
+                  <p data-i18n="mcp.tools.exec.body">
+                    Run a shell command in a Pod and return stdout, stderr, and exit code.
+                  </p>
+                </span>
+              </div>
+              <div class="card">
+                <span class="card-icon">F</span>
+                <span class="card-body">
+                  <h3 data-i18n="mcp.tools.files.title">manage_file_transfer</h3>
+                  <p data-i18n="mcp.tools.files.body">
+                    Start, list, or cancel local-to-Pod and Pod-to-local transfers.
                   </p>
                 </span>
               </div>
             </div>
+          </section>
+
+          <section class="section prose">
+            <h2 data-i18n="mcp.behavior.title">Important behavior</h2>
+            <p data-i18n="mcp.behavior.portForward">
+              Port Forward requires targetKind to be pod or service. For a Service,
+              name stays the requested Service and podName identifies the resolved
+              backend Pod.
+            </p>
+            <pre class="install-code"><code>{
+  "action": "start",
+  "type": "port_forward",
+  "targetKind": "service",
+  "targetName": "api",
+  "namespace": "default",
+  "remotePort": 8080,
+  "localPort": 0
+}</code></pre>
+            <p data-i18n="mcp.behavior.files">
+              File and directory transfers run asynchronously in upload or download
+              direction. Use manage_file_transfer with action=list for progress or
+              action=cancel with the returned task id.
+            </p>
           </section>
 
           <div class="callout">

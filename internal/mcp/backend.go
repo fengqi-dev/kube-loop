@@ -4,12 +4,37 @@ import (
 	"context"
 
 	"github.com/fengqi-dev/kube-loop/internal/cluster"
+	"github.com/fengqi-dev/kube-loop/internal/filemanager"
 	"github.com/fengqi-dev/kube-loop/internal/helper"
 	"github.com/fengqi-dev/kube-loop/internal/intercept"
 	"github.com/fengqi-dev/kube-loop/internal/portfwd"
 	"github.com/fengqi-dev/kube-loop/internal/session"
 	"github.com/fengqi-dev/kube-loop/internal/store"
 )
+
+type PodCommandRequest struct {
+	Context        string
+	Namespace      string
+	Pod            string
+	PodUID         string
+	Container      string
+	Command        string
+	TimeoutSeconds int
+}
+
+type PodCommandResult struct {
+	Context         string `json:"context"`
+	Namespace       string `json:"namespace"`
+	Pod             string `json:"pod"`
+	Container       string `json:"container"`
+	Command         string `json:"command"`
+	Stdout          string `json:"stdout"`
+	Stderr          string `json:"stderr"`
+	ExitCode        int    `json:"exitCode"`
+	Error           string `json:"error,omitempty"`
+	StdoutTruncated bool   `json:"stdoutTruncated,omitempty"`
+	StderrTruncated bool   `json:"stderrTruncated,omitempty"`
+}
 
 // Backend is the control-plane surface exposed to MCP tools.
 // Implementations typically wrap the Wails App / session.Manager.
@@ -41,4 +66,8 @@ type Backend interface {
 	InstallHelper(ctx context.Context) error
 	UninstallHelper(ctx context.Context) error
 	SingBoxConfig() ([]byte, error)
+	ExecPodCommand(ctx context.Context, request PodCommandRequest) (PodCommandResult, error)
+	StartFileTransfer(ctx context.Context, request filemanager.TransferRequest) (filemanager.TransferTask, error)
+	ListFileTransfers() []filemanager.TransferTask
+	CancelFileTransfer(id string) error
 }

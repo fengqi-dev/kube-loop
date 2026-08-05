@@ -170,7 +170,38 @@ KubeLoop 可通过 `127.0.0.1` 上的 Streamable HTTP MCP Server 暴露同一个
 3. 点击**安装 MCP Server**，或复制生成的客户端配置。
 
 MCP 默认关闭，永远不会绑定 LAN 地址，可选启用 Bearer 认证。工具覆盖连接状态、发现、
-Port Forward、Exchange、Service Mirror、Preview 和 Helper 管理。
+Port Forward、Exchange、Service Mirror、Preview、Pod 命令执行、文件传输和 Helper 管理。
+
+MCP 接口有意保持精简：相关操作通过 `action` 和 `type` 区分，而不是为
+start/stop/list 分别注册 Tool。
+
+| Tool | 操作 |
+| --- | --- |
+| `manage_cluster` | 重新加载/探测 Context；列出 Namespace、Service 和 Pod |
+| `manage_connection` | 查询状态、连接、断开或读取当前 sing-box 配置 |
+| `manage_network` | 查询/设置手工网络参数和 Host Alias |
+| `manage_traffic` | 启动/停止/列出 Exchange、Mirror、Preview 和 Port Forward |
+| `manage_helper` | 查询状态、安装或卸载特权 Helper |
+| `exec_pod_command` | 在 Pod 容器中执行 Shell 命令 |
+| `manage_file_transfer` | 启动/列出/取消本机 ↔ Pod 文件及目录传输 |
+
+Port Forward 必须明确指定目标类型，避免把 Service 名称误当成 Pod 名称：
+
+```json
+{
+  "action": "start",
+  "type": "port_forward",
+  "targetKind": "service",
+  "targetName": "api",
+  "namespace": "default",
+  "remotePort": 8080,
+  "localPort": 0
+}
+```
+
+直接转发 Pod 时使用 `targetKind: "pod"` 和 Pod 名称。Service 转发结果中的
+`name` 保留请求的 Service，`podName` 表示解析到的后端 Pod。Pod 命令执行以结构化
+结果返回 stdout、stderr 和退出码；文件传输异步执行，支持文件和目录双向上传/下载。
 
 ## 安全模型
 

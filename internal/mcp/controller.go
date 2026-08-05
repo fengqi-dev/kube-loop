@@ -6,6 +6,7 @@ import (
 	"log"
 
 	"github.com/fengqi-dev/kube-loop/internal/cluster"
+	"github.com/fengqi-dev/kube-loop/internal/filemanager"
 	"github.com/fengqi-dev/kube-loop/internal/session"
 	"github.com/fengqi-dev/kube-loop/internal/store"
 )
@@ -17,17 +18,23 @@ type Controller struct {
 	logs   *session.Manager
 }
 
-// NewController wires a Backend over provider/manager and loads store config.
+// NewController wires a Backend over provider/manager/file transfers and loads store config.
 func NewController(
 	provider *cluster.Provider,
 	manager *session.Manager,
+	files *filemanager.Manager,
 	stateStore *store.Store,
 	version string,
 ) *Controller {
 	c := &Controller{
-		server: NewServer(managerBackend{provider: provider, manager: manager}, version),
-		store:  stateStore,
-		logs:   manager,
+		server: NewServer(managerBackend{
+			provider: provider,
+			manager:  manager,
+			executor: provider,
+			files:    files,
+		}, version),
+		store: stateStore,
+		logs:  manager,
 	}
 	c.server.SetErrorHandler(func(err error) {
 		c.appendLog("ERROR", fmt.Sprintf("MCP server stopped unexpectedly: %v", err))

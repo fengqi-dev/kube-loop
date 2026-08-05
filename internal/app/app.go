@@ -75,17 +75,18 @@ func NewApp(version string, embeddedHelperFiles fs.FS) *App {
 	} else {
 		manager.AppendLog("INFO", "state store loaded")
 	}
+	fileManager := filemanager.NewManager(provider, transferStatePath)
 	return &App{
 		provider:    provider,
 		manager:     manager,
 		store:       stateStore,
-		fileManager: filemanager.NewManager(provider, transferStatePath),
+		fileManager: fileManager,
 		updater:     &update.Checker{CurrentVersion: version},
 		updateState: update.Info{
 			CurrentVersion: version,
 			URL:            "https://github.com/fengqi-dev/kube-loop/releases",
 		},
-		mcp: loopmcp.NewController(provider, manager, stateStore, version),
+		mcp: loopmcp.NewController(provider, manager, fileManager, stateStore, version),
 	}
 }
 

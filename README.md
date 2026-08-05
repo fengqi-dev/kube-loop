@@ -185,8 +185,41 @@ HTTP on `127.0.0.1`.
 3. Click **Install MCP server**, or copy the generated client configuration.
 
 MCP is off by default. It never binds to a LAN address; optional Bearer
-authentication can be enabled. Tools cover connection state, discovery, Port
-Forward, Exchange, Service Mirror, Preview, and Helper management.
+authentication can be enabled.
+
+The MCP surface is intentionally compact: related operations use `action` and
+`type` instead of separate start/stop/list tools.
+
+| Tool | Operations |
+| --- | --- |
+| `manage_cluster` | Reload/probe contexts; list Namespaces, Services, and Pods |
+| `manage_connection` | Get status, connect, disconnect, or read the active sing-box config |
+| `manage_network` | Get/set manual network overrides and Host Aliases |
+| `manage_traffic` | Start/stop/list Exchange, Mirror, Preview, and Port Forward sessions |
+| `manage_helper` | Get status, install, or uninstall the privileged Helper |
+| `exec_pod_command` | Execute a shell command in a Pod container |
+| `manage_file_transfer` | Start/list/cancel local ↔ Pod file and directory transfers |
+
+Port Forward requires an explicit target kind so a Service name is never
+mistaken for a Pod name:
+
+```json
+{
+  "action": "start",
+  "type": "port_forward",
+  "targetKind": "service",
+  "targetName": "api",
+  "namespace": "default",
+  "remotePort": 8080,
+  "localPort": 0
+}
+```
+
+Use `targetKind: "pod"` with a Pod name for direct Pod forwarding. Service
+results retain the requested Service in `name` and expose the resolved backend
+Pod in `podName`. Pod command execution returns structured stdout, stderr, and
+exit code results. File transfers are asynchronous and support files or
+directories in both upload and download directions.
 
 ## Security model
 

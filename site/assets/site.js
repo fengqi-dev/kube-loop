@@ -157,7 +157,7 @@ const dictionary = {
       "Let Cursor, Claude Code, Codex, or VS Code drive KubeLoop over a local Model Context Protocol endpoint.",
     "mcp.what.title": "What it is",
     "mcp.what.body":
-      "KubeLoop can expose its desktop control plane as a local MCP server (Streamable HTTP on 127.0.0.1). Tools cover connect/disconnect, discovery, Port Forward, Exchange, Mirror, Preview, and helper install.",
+      "KubeLoop can expose its desktop control plane as a local MCP server (Streamable HTTP on 127.0.0.1). Seven compact tools cover cluster discovery, connections, networking, traffic sessions, helper management, Pod commands, and bidirectional file transfers.",
     "mcp.setup.title": "Set up in three steps",
     "mcp.setup.s1.title": "Open the MCP tab",
     "mcp.setup.s1.body": "Start KubeLoop Desktop and open the MCP page in the sidebar.",
@@ -171,15 +171,32 @@ const dictionary = {
     "mcp.tips.body":
       "You can also Copy config for the selected client. MCP is off by default until enabled or installed; it binds only to localhost. Bearer token auth is optional and off by default.",
     "mcp.tools.title": "What agents can do",
-    "mcp.tools.connect.title": "Connect & discover",
-    "mcp.tools.connect.body":
-      "Connect or disconnect, list namespaces, Services, and Pods.",
-    "mcp.tools.network.title": "Network tools",
+    "mcp.tools.cluster.title": "manage_cluster",
+    "mcp.tools.cluster.body":
+      "Reload or probe contexts; list Namespaces, Services, and Pods.",
+    "mcp.tools.connection.title": "manage_connection",
+    "mcp.tools.connection.body":
+      "Get status, connect, disconnect, or read the sing-box config.",
+    "mcp.tools.network.title": "manage_network",
     "mcp.tools.network.body":
-      "Start and stop Port Forward, Exchange, Mirror, and Preview.",
-    "mcp.tools.helper.title": "Helper & config",
+      "Get or set manual network overrides and Host Aliases.",
+    "mcp.tools.traffic.title": "manage_traffic",
+    "mcp.tools.traffic.body":
+      "Start, stop, or list Exchange, Mirror, Preview, and Port Forward.",
+    "mcp.tools.helper.title": "manage_helper",
     "mcp.tools.helper.body":
-      "Check or install the privileged helper, and read the active sing-box config.",
+      "Get status, install, or uninstall the privileged Helper.",
+    "mcp.tools.exec.title": "exec_pod_command",
+    "mcp.tools.exec.body":
+      "Run a shell command in a Pod and return stdout, stderr, and exit code.",
+    "mcp.tools.files.title": "manage_file_transfer",
+    "mcp.tools.files.body":
+      "Start, list, or cancel local-to-Pod and Pod-to-local transfers.",
+    "mcp.behavior.title": "Important behavior",
+    "mcp.behavior.portForward":
+      "Port Forward requires targetKind to be pod or service. For a Service, name stays the requested Service and podName identifies the resolved backend Pod.",
+    "mcp.behavior.files":
+      "File and directory transfers run asynchronously in upload or download direction. Use manage_file_transfer with action=list for progress or action=cancel with the returned task id.",
 
     "workflows.title": "Workflows",
     "workflows.desc":
@@ -448,7 +465,7 @@ const dictionary = {
       "让 Cursor、Claude Code、Codex 或 VS Code 通过本机 Model Context Protocol 端点操控 KubeLoop。",
     "mcp.what.title": "是什么",
     "mcp.what.body":
-      "KubeLoop 可将桌面控制面以本机 MCP 服务暴露（127.0.0.1 上的 Streamable HTTP）。工具覆盖连接/断开、发现、Port Forward、Exchange、Mirror、Preview 与 Helper 安装。",
+      "KubeLoop 可将桌面控制面以本机 MCP 服务暴露（127.0.0.1 上的 Streamable HTTP）。7 个精简 Tool 覆盖集群发现、连接、网络、流量 Session、Helper 管理、Pod 命令执行和双向文件传输。",
     "mcp.setup.title": "三步完成",
     "mcp.setup.s1.title": "打开 MCP 页",
     "mcp.setup.s1.body": "启动 KubeLoop Desktop，在侧栏打开 MCP 页。",
@@ -461,12 +478,25 @@ const dictionary = {
     "mcp.tips.body":
       "也可对所选客户端使用「复制配置」。MCP 默认关闭（安装或手动启用后开启），仅监听本机；Bearer Token 认证可选且默认关闭。",
     "mcp.tools.title": "Agent 能做什么",
-    "mcp.tools.connect.title": "连接与发现",
-    "mcp.tools.connect.body": "连接或断开，列出 Namespace、Service 与 Pod。",
-    "mcp.tools.network.title": "网络工具",
-    "mcp.tools.network.body": "启停 Port Forward、Exchange、Mirror 与 Preview。",
-    "mcp.tools.helper.title": "Helper 与配置",
-    "mcp.tools.helper.body": "查看或安装特权 Helper，并读取当前 sing-box 配置。",
+    "mcp.tools.cluster.title": "manage_cluster",
+    "mcp.tools.cluster.body": "重新加载或探测 Context；列出 Namespace、Service 与 Pod。",
+    "mcp.tools.connection.title": "manage_connection",
+    "mcp.tools.connection.body": "查询状态、连接、断开或读取 sing-box 配置。",
+    "mcp.tools.network.title": "manage_network",
+    "mcp.tools.network.body": "查询或设置手工网络参数与 Host Alias。",
+    "mcp.tools.traffic.title": "manage_traffic",
+    "mcp.tools.traffic.body": "启动、停止或列出 Exchange、Mirror、Preview 与 Port Forward。",
+    "mcp.tools.helper.title": "manage_helper",
+    "mcp.tools.helper.body": "查询状态、安装或卸载特权 Helper。",
+    "mcp.tools.exec.title": "exec_pod_command",
+    "mcp.tools.exec.body": "在 Pod 中执行 Shell 命令，返回 stdout、stderr 和退出码。",
+    "mcp.tools.files.title": "manage_file_transfer",
+    "mcp.tools.files.body": "启动、列出或取消本机到 Pod、Pod 到本机的传输。",
+    "mcp.behavior.title": "重要行为",
+    "mcp.behavior.portForward":
+      "Port Forward 的 targetKind 必须为 pod 或 service。Service 转发的 name 保留请求的 Service，podName 表示解析到的后端 Pod。",
+    "mcp.behavior.files":
+      "文件和目录以 upload 或 download 方向异步传输。使用 manage_file_transfer 的 action=list 查询进度，或通过 action=cancel 和返回的任务 ID 取消。",
 
     "workflows.title": "使用场景",
     "workflows.desc":
