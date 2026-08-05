@@ -3,6 +3,10 @@ import type {
   ClusterInventory,
   ConnectionMode,
   ConnectivityTestResult,
+  FileEntry,
+  FileManagerTarget,
+  FileTransferRequest,
+  FileTransferTask,
   HelperStatus,
   HostAlias,
   InterceptInfo,
@@ -42,6 +46,36 @@ declare global {
           EnablePodSSH(request: PodSSHEnableRequest): Promise<PodSSHInfo>;
           DisablePodSSH(id: string): Promise<void>;
           ListPodSSH(): Promise<PodSSHInfo[]>;
+          PickLocalDirectory(): Promise<string>;
+          LocalHomeDirectory(): Promise<string>;
+          ListLocalDirectory(path: string): Promise<FileEntry[]>;
+          ListPodDirectory(target: FileManagerTarget, path: string): Promise<FileEntry[]>;
+          CreateLocalDirectory(parent: string, name: string): Promise<void>;
+          CreateLocalFile(parent: string, name: string): Promise<void>;
+          CreatePodDirectory(
+            target: FileManagerTarget,
+            parent: string,
+            name: string,
+          ): Promise<void>;
+          CreatePodFile(
+            target: FileManagerTarget,
+            parent: string,
+            name: string,
+          ): Promise<void>;
+          RenameLocalPath(path: string, newName: string): Promise<void>;
+          RenamePodPath(
+            target: FileManagerTarget,
+            path: string,
+            newName: string,
+          ): Promise<void>;
+          DeleteLocalPath(path: string): Promise<void>;
+          DeletePodPath(target: FileManagerTarget, path: string): Promise<void>;
+          StartFileTransfer(request: FileTransferRequest): Promise<FileTransferTask>;
+          ListFileTransfers(): Promise<FileTransferTask[]>;
+          PauseFileTransfer(id: string): Promise<void>;
+          ResumeFileTransfer(id: string): Promise<void>;
+          CancelFileTransfer(id: string): Promise<void>;
+          ClearFileTransferHistory(): Promise<void>;
           Connect(contextName: string, namespace: string): Promise<void>;
           ConnectMode(
             contextName: string,
@@ -120,6 +154,39 @@ export const backend = {
   disablePodSSH: (id: string) =>
     Promise.resolve().then(() => api().DisablePodSSH(id)),
   listPodSSH: () => Promise.resolve().then(() => api().ListPodSSH()),
+  pickLocalDirectory: () => Promise.resolve().then(() => api().PickLocalDirectory()),
+  localHomeDirectory: () => Promise.resolve().then(() => api().LocalHomeDirectory()),
+  listLocalDirectory: (path: string) =>
+    Promise.resolve().then(() => api().ListLocalDirectory(path)),
+  listPodDirectory: (target: FileManagerTarget, path: string) =>
+    Promise.resolve().then(() => api().ListPodDirectory(target, path)),
+  createLocalDirectory: (parent: string, name: string) =>
+    Promise.resolve().then(() => api().CreateLocalDirectory(parent, name)),
+  createLocalFile: (parent: string, name: string) =>
+    Promise.resolve().then(() => api().CreateLocalFile(parent, name)),
+  createPodDirectory: (target: FileManagerTarget, parent: string, name: string) =>
+    Promise.resolve().then(() => api().CreatePodDirectory(target, parent, name)),
+  createPodFile: (target: FileManagerTarget, parent: string, name: string) =>
+    Promise.resolve().then(() => api().CreatePodFile(target, parent, name)),
+  renameLocalPath: (path: string, newName: string) =>
+    Promise.resolve().then(() => api().RenameLocalPath(path, newName)),
+  renamePodPath: (target: FileManagerTarget, path: string, newName: string) =>
+    Promise.resolve().then(() => api().RenamePodPath(target, path, newName)),
+  deleteLocalPath: (path: string) =>
+    Promise.resolve().then(() => api().DeleteLocalPath(path)),
+  deletePodPath: (target: FileManagerTarget, path: string) =>
+    Promise.resolve().then(() => api().DeletePodPath(target, path)),
+  startFileTransfer: (request: FileTransferRequest) =>
+    Promise.resolve().then(() => api().StartFileTransfer(request)),
+  listFileTransfers: () => Promise.resolve().then(() => api().ListFileTransfers()),
+  pauseFileTransfer: (id: string) =>
+    Promise.resolve().then(() => api().PauseFileTransfer(id)),
+  resumeFileTransfer: (id: string) =>
+    Promise.resolve().then(() => api().ResumeFileTransfer(id)),
+  cancelFileTransfer: (id: string) =>
+    Promise.resolve().then(() => api().CancelFileTransfer(id)),
+  clearFileTransferHistory: () =>
+    Promise.resolve().then(() => api().ClearFileTransferHistory()),
   connect: (contextName: string, namespace: string) =>
     Promise.resolve().then(() => api().Connect(contextName, namespace)),
   connectMode: (contextName: string, namespace: string, mode: ConnectionMode) =>
@@ -188,5 +255,12 @@ export const backend = {
   onUpdate: (callback: (state: UpdateInfo) => void) => {
     if (!window.runtime) return () => undefined;
     return window.runtime.EventsOn("update:state", callback as (state: never) => void);
+  },
+  onTransfer: (callback: (task: FileTransferTask) => void) => {
+    if (!window.runtime) return () => undefined;
+    return window.runtime.EventsOn(
+      "transfer:updated",
+      callback as (state: never) => void,
+    );
   },
 };

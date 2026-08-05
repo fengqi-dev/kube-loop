@@ -5,10 +5,12 @@ import { backend } from "@/backend";
 import {
   ActionIconButton,
   portForwardIcon,
+  sftpIcon,
   sshIcon,
 } from "@/components/network/action-icons";
 import { ActiveSessions } from "@/components/network/active-sessions";
 import { PortForwardDialog } from "@/components/network/portfwd-dialog";
+import { SFTPFileManagerDialog } from "@/components/sftp/sftp-file-manager-dialog";
 import {
   ALL_NAMESPACES,
   ResourceToolbar,
@@ -50,6 +52,7 @@ export function WorkloadView({
   const [loading, setLoading] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [selected, setSelected] = useState<PodInfo | null>(null);
+  const [sftpTarget, setSFTPTarget] = useState<PodInfo | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [sshEndpoints, setSSHEndpoints] = useState<PodSSHInfo[]>([]);
   const reloadGeneration = useRef(0);
@@ -63,6 +66,7 @@ export function WorkloadView({
     );
     setQuery("");
     setSelected(null);
+    setSFTPTarget(null);
     setDialogOpen(false);
     setSSHEndpoints([]);
   }, [contextName]);
@@ -284,6 +288,22 @@ export function WorkloadView({
                             setDialogOpen(true);
                           }}
                         />
+                        <ActionIconButton
+                          label={
+                            session.capabilities?.podExec === false
+                              ? t("workload.sshDenied")
+                              : t("sftp.openManager")
+                          }
+                          icon={sftpIcon}
+                          disabled={
+                            !ready ||
+                            !item.ready ||
+                            session.capabilities?.podExec === false ||
+                            item.containers.length === 0 ||
+                            !sshByPod.has(`${item.namespace}/${item.name}`)
+                          }
+                          onClick={() => setSFTPTarget(item)}
+                        />
                         {item.containers.map((container) => {
                           const endpoint = sshByPod.get(
                             `${item.namespace}/${item.name}`,
@@ -337,6 +357,14 @@ export function WorkloadView({
         kind="pod"
         target={selected}
         onStarted={() => setRefreshKey((value) => value + 1)}
+      />
+      <SFTPFileManagerDialog
+        open={Boolean(sftpTarget)}
+        onOpenChange={(open) => {
+          if (!open) setSFTPTarget(null);
+        }}
+        contextName={contextName}
+        pod={sftpTarget}
       />
     </PageShell>
   );

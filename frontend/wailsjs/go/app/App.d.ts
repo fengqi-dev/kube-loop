@@ -3,6 +3,7 @@
 import {cluster} from '../models';
 import {app} from '../models';
 import {update} from '../models';
+import {filemanager} from '../models';
 import {podssh} from '../models';
 import {store} from '../models';
 import {mcp} from '../models';
@@ -17,11 +18,27 @@ export function AddKubeconfigPath(arg1:string):Promise<cluster.ClusterInventory>
 
 export function Bootstrap():Promise<app.BootstrapData>;
 
+export function CancelFileTransfer(arg1:string):Promise<void>;
+
 export function CheckForUpdates():Promise<update.Info>;
+
+export function ClearFileTransferHistory():Promise<void>;
 
 export function Connect(arg1:string,arg2:string):Promise<void>;
 
 export function ConnectMode(arg1:string,arg2:string,arg3:string):Promise<void>;
+
+export function CreateLocalDirectory(arg1:string,arg2:string):Promise<void>;
+
+export function CreateLocalFile(arg1:string,arg2:string):Promise<void>;
+
+export function CreatePodDirectory(arg1:filemanager.Target,arg2:string,arg3:string):Promise<void>;
+
+export function CreatePodFile(arg1:filemanager.Target,arg2:string,arg3:string):Promise<void>;
+
+export function DeleteLocalPath(arg1:string):Promise<void>;
+
+export function DeletePodPath(arg1:filemanager.Target,arg2:string):Promise<void>;
 
 export function DisablePodSSH(arg1:string):Promise<void>;
 
@@ -45,9 +62,15 @@ export function InstallHelper():Promise<void>;
 
 export function InstallMCPClient(arg1:string):Promise<mcp.InstallResult>;
 
+export function ListFileTransfers():Promise<Array<filemanager.TransferTask>>;
+
 export function ListIntercepts():Promise<Array<intercept.Info>>;
 
+export function ListLocalDirectory(arg1:string):Promise<Array<filemanager.FileEntry>>;
+
 export function ListMirrors():Promise<Array<intercept.Info>>;
+
+export function ListPodDirectory(arg1:filemanager.Target,arg2:string):Promise<Array<filemanager.FileEntry>>;
 
 export function ListPodSSH():Promise<Array<podssh.Info>>;
 
@@ -59,9 +82,15 @@ export function ListPreviews():Promise<Array<intercept.Info>>;
 
 export function ListServices(arg1:string,arg2:string):Promise<Array<cluster.ServiceInfo>>;
 
+export function LocalHomeDirectory():Promise<string>;
+
 export function Namespaces(arg1:string):Promise<Array<string>>;
 
 export function OpenUpdatePage():Promise<void>;
+
+export function PauseFileTransfer(arg1:string):Promise<void>;
+
+export function PickLocalDirectory():Promise<string>;
 
 export function ProbeContext(arg1:string):Promise<cluster.ProbeResult>;
 
@@ -73,7 +102,13 @@ export function RememberSelection(arg1:string,arg2:string):Promise<void>;
 
 export function RemoveKubeconfig(arg1:string):Promise<cluster.ClusterInventory>;
 
+export function RenameLocalPath(arg1:string,arg2:string):Promise<void>;
+
+export function RenamePodPath(arg1:filemanager.Target,arg2:string,arg3:string):Promise<void>;
+
 export function ResetSessions():Promise<void>;
+
+export function ResumeFileTransfer(arg1:string):Promise<void>;
 
 export function SessionIntentCounts():Promise<store.SessionIntentCounts>;
 
@@ -88,6 +123,8 @@ export function SetMCPPort(arg1:number):Promise<void>;
 export function SetMCPTokenEnabled(arg1:boolean):Promise<void>;
 
 export function SetManualNetwork(arg1:string,arg2:cluster.ManualNetwork):Promise<void>;
+
+export function StartFileTransfer(arg1:filemanager.TransferRequest):Promise<filemanager.TransferTask>;
 
 export function StartIntercept(arg1:intercept.Mapping):Promise<intercept.Info>;
 

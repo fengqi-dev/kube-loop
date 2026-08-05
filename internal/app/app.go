@@ -4,9 +4,11 @@ import (
 	"context"
 	"io/fs"
 	"log"
+	"path/filepath"
 	"sync"
 
 	"github.com/fengqi-dev/kube-loop/internal/cluster"
+	"github.com/fengqi-dev/kube-loop/internal/filemanager"
 	"github.com/fengqi-dev/kube-loop/internal/helper"
 	loopmcp "github.com/fengqi-dev/kube-loop/internal/mcp"
 	"github.com/fengqi-dev/kube-loop/internal/session"
@@ -21,6 +23,7 @@ type App struct {
 	provider    *cluster.Provider
 	manager     *session.Manager
 	store       *store.Store
+	fileManager *filemanager.Manager
 	updater     *update.Checker
 	mcp         *loopmcp.Controller
 	once        sync.Once
@@ -63,16 +66,21 @@ func NewApp(version string, embeddedHelperFiles fs.FS) *App {
 		options = append(options, session.WithStore(stateStore))
 	}
 	manager := session.NewManager(provider, options...)
+	transferStatePath := ""
+	if stateStore != nil {
+		transferStatePath = filepath.Join(filepath.Dir(stateStore.Path()), "transfers.json")
+	}
 	if err != nil {
 		manager.AppendLog("ERROR", "state store unavailable: "+err.Error())
 	} else {
 		manager.AppendLog("INFO", "state store loaded")
 	}
 	return &App{
-		provider: provider,
-		manager:  manager,
-		store:    stateStore,
-		updater:  &update.Checker{CurrentVersion: version},
+		provider:    provider,
+		manager:     manager,
+		store:       stateStore,
+		fileManager: filemanager.NewManager(provider, transferStatePath),
+		updater:     &update.Checker{CurrentVersion: version},
 		updateState: update.Info{
 			CurrentVersion: version,
 			URL:            "https://github.com/fengqi-dev/kube-loop/releases",
@@ -108,6 +116,9 @@ func (a *App) startup(ctx context.Context) {
 				runtime.EventsEmit(ctx, "session:metrics", metrics)
 			}
 		})
+		a.fileManager.Subscribe(func(task filemanager.TransferTask) {
+			runtime.EventsEmit(ctx, "transfer:updated", task)
+		})
 		a.manager.AppendLog("INFO", "application startup initialized")
 		go func() {
 			state := a.checkForUpdates(ctx)
@@ -121,6 +132,9 @@ func (a *App) startup(ctx context.Context) {
 }
 
 func (a *App) shutdown(context.Context) {
+	if a.fileManager != nil {
+		a.fileManager.Shutdown()
+	}
 	if a.mcp != nil {
 		_ = a.mcp.Stop()
 	}

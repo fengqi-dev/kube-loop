@@ -47,6 +47,7 @@ func podInfoFromCore(pod *corev1.Pod) (PodInfo, bool) {
 	}
 	return PodInfo{
 		Name:       pod.Name,
+		UID:        string(pod.UID),
 		Namespace:  pod.Namespace,
 		Phase:      string(pod.Status.Phase),
 		Ready:      podReady(*pod),

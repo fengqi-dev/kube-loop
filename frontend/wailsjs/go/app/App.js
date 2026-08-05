@@ -14,8 +14,16 @@ export function Bootstrap() {
   return window['go']['app']['App']['Bootstrap']();
 }
 
+export function CancelFileTransfer(arg1) {
+  return window['go']['app']['App']['CancelFileTransfer'](arg1);
+}
+
 export function CheckForUpdates() {
   return window['go']['app']['App']['CheckForUpdates']();
+}
+
+export function ClearFileTransferHistory() {
+  return window['go']['app']['App']['ClearFileTransferHistory']();
 }
 
 export function Connect(arg1, arg2) {
@@ -24,6 +32,30 @@ export function Connect(arg1, arg2) {
 
 export function ConnectMode(arg1, arg2, arg3) {
   return window['go']['app']['App']['ConnectMode'](arg1, arg2, arg3);
+}
+
+export function CreateLocalDirectory(arg1, arg2) {
+  return window['go']['app']['App']['CreateLocalDirectory'](arg1, arg2);
+}
+
+export function CreateLocalFile(arg1, arg2) {
+  return window['go']['app']['App']['CreateLocalFile'](arg1, arg2);
+}
+
+export function CreatePodDirectory(arg1, arg2, arg3) {
+  return window['go']['app']['App']['CreatePodDirectory'](arg1, arg2, arg3);
+}
+
+export function CreatePodFile(arg1, arg2, arg3) {
+  return window['go']['app']['App']['CreatePodFile'](arg1, arg2, arg3);
+}
+
+export function DeleteLocalPath(arg1) {
+  return window['go']['app']['App']['DeleteLocalPath'](arg1);
+}
+
+export function DeletePodPath(arg1, arg2) {
+  return window['go']['app']['App']['DeletePodPath'](arg1, arg2);
 }
 
 export function DisablePodSSH(arg1) {
@@ -70,12 +102,24 @@ export function InstallMCPClient(arg1) {
   return window['go']['app']['App']['InstallMCPClient'](arg1);
 }
 
+export function ListFileTransfers() {
+  return window['go']['app']['App']['ListFileTransfers']();
+}
+
 export function ListIntercepts() {
   return window['go']['app']['App']['ListIntercepts']();
 }
 
+export function ListLocalDirectory(arg1) {
+  return window['go']['app']['App']['ListLocalDirectory'](arg1);
+}
+
 export function ListMirrors() {
   return window['go']['app']['App']['ListMirrors']();
+}
+
+export function ListPodDirectory(arg1, arg2) {
+  return window['go']['app']['App']['ListPodDirectory'](arg1, arg2);
 }
 
 export function ListPodSSH() {
@@ -98,12 +142,24 @@ export function ListServices(arg1, arg2) {
   return window['go']['app']['App']['ListServices'](arg1, arg2);
 }
 
+export function LocalHomeDirectory() {
+  return window['go']['app']['App']['LocalHomeDirectory']();
+}
+
 export function Namespaces(arg1) {
   return window['go']['app']['App']['Namespaces'](arg1);
 }
 
 export function OpenUpdatePage() {
   return window['go']['app']['App']['OpenUpdatePage']();
+}
+
+export function PauseFileTransfer(arg1) {
+  return window['go']['app']['App']['PauseFileTransfer'](arg1);
+}
+
+export function PickLocalDirectory() {
+  return window['go']['app']['App']['PickLocalDirectory']();
 }
 
 export function ProbeContext(arg1) {
@@ -126,8 +182,20 @@ export function RemoveKubeconfig(arg1) {
   return window['go']['app']['App']['RemoveKubeconfig'](arg1);
 }
 
+export function RenameLocalPath(arg1, arg2) {
+  return window['go']['app']['App']['RenameLocalPath'](arg1, arg2);
+}
+
+export function RenamePodPath(arg1, arg2, arg3) {
+  return window['go']['app']['App']['RenamePodPath'](arg1, arg2, arg3);
+}
+
 export function ResetSessions() {
   return window['go']['app']['App']['ResetSessions']();
+}
+
+export function ResumeFileTransfer(arg1) {
+  return window['go']['app']['App']['ResumeFileTransfer'](arg1);
 }
 
 export function SessionIntentCounts() {
@@ -156,6 +224,10 @@ export function SetMCPTokenEnabled(arg1) {
 
 export function SetManualNetwork(arg1, arg2) {
   return window['go']['app']['App']['SetManualNetwork'](arg1, arg2);
+}
+
+export function StartFileTransfer(arg1) {
+  return window['go']['app']['App']['StartFileTransfer'](arg1);
 }
 
 export function StartIntercept(arg1) {

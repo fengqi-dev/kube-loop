@@ -3,6 +3,7 @@ import {
   Cable,
   CopyPlus,
   Eye,
+  FolderOpen,
   SquareTerminal,
   type LucideIcon,
 } from "lucide-react";
@@ -18,6 +19,7 @@ export const exchangeIcon = ArrowRightLeft;
 export const mirrorIcon = CopyPlus;
 export const previewIcon = Eye;
 export const sshIcon = SquareTerminal;
+export const sftpIcon = FolderOpen;
 
 export type NetworkAction = "portForward" | "exchange" | "mirror" | "preview";
 

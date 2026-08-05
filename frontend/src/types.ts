@@ -249,6 +249,7 @@ export interface PodPortInfo {
 
 export interface PodInfo {
   name: string;
+  uid?: string;
   namespace: string;
   phase: string;
   ready: boolean;
@@ -274,6 +275,60 @@ export interface PodSSHInfo {
   ip: string;
   port: number;
   command: string;
+}
+
+export interface FileManagerTarget {
+  context: string;
+  namespace: string;
+  pod: string;
+  podUID?: string;
+  container: string;
+}
+
+export interface FileEntry {
+  name: string;
+  path: string;
+  dir: boolean;
+  size: number;
+  mode: number;
+  modTime: string;
+}
+
+export type FileTransferDirection = "upload" | "download";
+export type FileTransferStatus =
+  | "queued"
+  | "running"
+  | "paused"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "stale";
+
+export interface FileTransferRequest {
+  direction: FileTransferDirection;
+  target: FileManagerTarget;
+  sourcePath: string;
+  destinationDir: string;
+  overwrite: boolean;
+}
+
+export interface FileTransferTask {
+  id: string;
+  direction: FileTransferDirection;
+  target: FileManagerTarget;
+  sourcePath: string;
+  destinationPath: string;
+  tempPath?: string;
+  directory?: boolean;
+  status: FileTransferStatus;
+  totalBytes: number;
+  doneBytes: number;
+  sourceModTime: string;
+  overwrite: boolean;
+  error?: string;
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string;
 }
 
 export interface PortForwardRequest {

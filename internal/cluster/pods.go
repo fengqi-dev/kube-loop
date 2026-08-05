@@ -21,6 +21,7 @@ type PodPortInfo struct {
 // PodInfo is a running Pod shown in the network and port-forward UI.
 type PodInfo struct {
 	Name       string        `json:"name"`
+	UID        string        `json:"uid,omitempty"`
 	Namespace  string        `json:"namespace"`
 	Phase      string        `json:"phase"`
 	Ready      bool          `json:"ready"`
