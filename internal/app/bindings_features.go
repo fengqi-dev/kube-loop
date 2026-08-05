@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/fengqi-dev/kube-loop/internal/intercept"
+	"github.com/fengqi-dev/kube-loop/internal/podssh"
 	"github.com/fengqi-dev/kube-loop/internal/portfwd"
 	"github.com/fengqi-dev/kube-loop/internal/session"
 	"github.com/fengqi-dev/kube-loop/internal/store"
@@ -59,6 +60,18 @@ func (a *App) TestPortForward(id string) session.ConnectivityTestResult {
 
 func (a *App) ListPortForwards() []portfwd.Info {
 	return a.manager.ListPortForwards()
+}
+
+func (a *App) EnablePodSSH(request podssh.EnableRequest) (podssh.Info, error) {
+	return a.manager.EnablePodSSH(request)
+}
+
+func (a *App) DisablePodSSH(id string) error {
+	return a.manager.DisablePodSSH(id)
+}
+
+func (a *App) ListPodSSH() []podssh.Info {
+	return a.manager.ListPodSSH()
 }
 
 func (a *App) ResetSessions() error {

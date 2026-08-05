@@ -136,6 +136,7 @@ func (m *Manager) applyInventory(snap cluster.InventorySnapshot) {
 	m.stateHub.mu.Unlock()
 
 	ctx := context.Background()
+	m.syncDefaultPodSSH(next, snap.PodItems)
 	m.reconcileBindings(ctx, snap)
 	m.publish(m.State())
 }

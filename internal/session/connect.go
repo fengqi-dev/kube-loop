@@ -326,11 +326,19 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 		return
 	}
 	if hostBridge, ok := bridge.(*socksbridge.Bridge); ok {
-		hostBridge.SetHostTCPHandler(m.intercept.HostTCP)
+		hostBridge.SetHostTCPHandler(func(host string, port uint16) (func(net.Conn), bool) {
+			if serve, claimed := m.podSSHHostTCP(host, port); claimed {
+				return serve, true
+			}
+			return m.intercept.HostTCP(host, port)
+		})
 		hostBridge.SetHostUDPHandler(m.intercept.HostUDP)
 		runtime.AddFunc("SOCKS Bridge host routes", func() {
 			hostBridge.SetHostTCPHandler(nil)
 			hostBridge.SetHostUDPHandler(nil)
+			if m.podSSH != nil {
+				m.podSSH.Reset()
+			}
 		})
 	}
 

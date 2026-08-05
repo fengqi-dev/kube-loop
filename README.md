@@ -34,10 +34,31 @@ terminal-managed port-forwards.
 | --- | --- |
 | Open an internal Service locally | Connect, then use its ClusterIP or cluster DNS name |
 | Debug a Pod directly | Connect, then use the Pod IP |
+| SSH or SFTP to a Pod without installing sshd | Enable **SSH** for the Pod in **Workload**, then connect to its Pod IP |
 | Expose a Pod or Service port locally | **Port Forward** |
 | Make an existing Service call a local app | **Exchange** |
 | Observe an existing Service without replacing its primary Pods | **Service Mirror** |
 | Expose a local app through a new ClusterIP Service | **Preview** |
+
+### Pod SSH
+
+Pod SSH is available in TUN mode and does not install or run `sshd` in the
+container. KubeLoop intercepts every ready Pod IP on port 22 by default,
+authenticates the local client with the user's standard SSH identity, and maps
+the SSH channel to the Kubernetes `pods/exec` API.
+
+- Each container has an SSH action that copies
+  `ssh <container-name>@<Pod IP>`. The login name selects the Kubernetes
+  container; it does not change the process user inside that container.
+- Existing `~/.ssh/id_ed25519`, `id_ecdsa`, or `id_rsa` identities are preferred.
+  If none is available, KubeLoop creates `~/.ssh/id_ed25519` without overwriting
+  any existing identity.
+- Interactive shells and remote commands require `/bin/sh` in the selected
+  container.
+- Modern `scp` and `sftp` clients use the built-in SFTP adapter. File transfer
+  uses `tar` streams like `kubectl cp`, so the container must provide `tar`.
+- Endpoints are runtime-only. Disconnecting KubeLoop closes active sessions and
+  removes the routes without changing the Pods.
 
 ### Exchange, Service Mirror, and Preview
 
@@ -133,6 +154,8 @@ KubeLoop supports namespace-scoped developer accounts:
 3. Pod and Service inventory is limited to authorized Namespaces.
 4. If Nodes or CoreDNS cannot be read, enter Pod CIDR, Service CIDR, cluster DNS,
    and DNS Namespace manually in Overview.
+5. Pod SSH additionally requires `create` on the `pods/exec` subresource in the
+   target Namespace.
 
 Capabilities degrade independently. Missing Service, Endpoints, or EndpointSlice
 write access disables Exchange, Service Mirror, and Preview without disabling
@@ -172,6 +195,9 @@ Forward, Exchange, Service Mirror, Preview, and Helper management.
 - The privileged Helper accepts authenticated, field-constrained IPC—not commands
   or caller-selected executable/config paths.
 - sing-box and feature inbounds bind locally and use per-session credentials.
+- Pod SSH accepts the user's standard local SSH identities (or a generated
+  mode-`0600` `~/.ssh/id_ed25519`) and delegates authorization to the active
+  kubeconfig identity through `pods/exec`.
 - Cluster routing is limited to validated Pod/Service destinations.
 - Feature mutations are transactional and recoverable.
 - Logs redact credentials, certificates, tokens, and kubeconfig content.

@@ -32,10 +32,28 @@ IDE、CLI 和 SDK 可以直接访问 Pod IP、ClusterIP Service 和 `*.cluster.l
 | --- | --- |
 | 在本地打开集群内部 Service | 连接后使用 ClusterIP 或集群 DNS 名称 |
 | 直接调试 Pod | 连接后使用 Pod IP |
+| 不安装 sshd，通过 SSH 或 SFTP 连接 Pod | 在**工作负载**中为 Pod 开启 **SSH**，然后连接其 Pod IP |
 | 把 Pod 或 Service 端口暴露到本地 | **Port Forward** |
 | 让现有 Service 调用本地应用 | **Exchange** |
 | 在不替换原始 Pod 主路径的情况下观察现有 Service | **Service Mirror** |
 | 通过新的 ClusterIP Service 暴露本地应用 | **Preview** |
+
+### Pod SSH
+
+Pod SSH 仅在 TUN 模式可用，不会在容器中安装或运行 `sshd`。KubeLoop 默认接管所有
+Ready Pod IP 的 22 端口，使用用户的标准 SSH identity 认证本地客户端，再将 SSH
+channel 映射到 Kubernetes `pods/exec` API。
+
+- 每个容器都有对应的 SSH 操作，点击后复制
+  `ssh <container-name>@<Pod IP>`。login name 用来选择 Kubernetes container，
+  不会改变容器内进程的实际用户。
+- 优先使用现有的 `~/.ssh/id_ed25519`、`id_ecdsa` 或 `id_rsa` identity；均不可用时，
+  KubeLoop 会创建 `~/.ssh/id_ed25519`，不会覆盖任何已有 identity。
+- 交互 shell 和远程命令要求所选容器提供 `/bin/sh`。
+- 新版 `scp` 与 `sftp` 使用内置 SFTP 适配器。文件传输和 `kubectl cp` 一样使用
+  `tar` stream，因此容器需要提供 `tar`。
+- SSH endpoint 只在当前运行期间存在。断开 KubeLoop 会终止活动会话并移除 route，
+  不会修改 Pod。
 
 ### Exchange、Service Mirror 与 Preview
 
@@ -126,6 +144,7 @@ KubeLoop 支持 Namespace 范围的开发者账号：
 3. Pod 和 Service inventory 限制到授权 Namespace。
 4. 无法读取 Node 或 CoreDNS 时，在 Overview 手工填写 Pod CIDR、Service CIDR、集群 DNS
    和 DNS Namespace。
+5. Pod SSH 还需要目标 Namespace 中 `pods/exec` subresource 的 `create` 权限。
 
 各能力独立降级。缺少 Service、Endpoints 或 EndpointSlice 写权限时，只禁用 Exchange、
 Service Mirror 和 Preview，不影响透明集群访问。
@@ -159,6 +178,8 @@ Port Forward、Exchange、Service Mirror、Preview 和 Helper 管理。
 - Gateway 无特权、没有 Kubernetes 凭证，也不暴露公网入口。
 - 特权 Helper 只接受经过认证、字段受限的 IPC，不接受命令或调用方选择的可执行文件/配置路径。
 - sing-box 和 feature inbound 只监听本地，并使用每 Session 凭证。
+- Pod SSH 接受用户的标准本地 SSH identity；如果没有，则生成权限为 `0600` 的
+  `~/.ssh/id_ed25519`。实际授权由当前 kubeconfig 身份通过 `pods/exec` 完成。
 - 集群路由限制到经过校验的 Pod/Service 目标。
 - 功能资源变更具备事务和恢复能力。
 - 日志脱敏凭证、证书、token 和 kubeconfig 内容。

@@ -11,6 +11,8 @@ import type {
   MCPInstallResult,
   MCPStatus,
   PodInfo,
+  PodSSHEnableRequest,
+  PodSSHInfo,
   PortForwardInfo,
   PortForwardRequest,
   PreviewInfo,
@@ -37,6 +39,9 @@ declare global {
           Namespaces(contextName: string): Promise<string[]>;
           ListServices(contextName: string, namespace: string): Promise<ServiceInfo[]>;
           ListPods(contextName: string, namespace: string): Promise<PodInfo[]>;
+          EnablePodSSH(request: PodSSHEnableRequest): Promise<PodSSHInfo>;
+          DisablePodSSH(id: string): Promise<void>;
+          ListPodSSH(): Promise<PodSSHInfo[]>;
           Connect(contextName: string, namespace: string): Promise<void>;
           ConnectMode(
             contextName: string,
@@ -110,6 +115,11 @@ export const backend = {
     Promise.resolve().then(() => api().ListServices(contextName, namespace)),
   listPods: (contextName: string, namespace: string) =>
     Promise.resolve().then(() => api().ListPods(contextName, namespace)),
+  enablePodSSH: (request: PodSSHEnableRequest) =>
+    Promise.resolve().then(() => api().EnablePodSSH(request)),
+  disablePodSSH: (id: string) =>
+    Promise.resolve().then(() => api().DisablePodSSH(id)),
+  listPodSSH: () => Promise.resolve().then(() => api().ListPodSSH()),
   connect: (contextName: string, namespace: string) =>
     Promise.resolve().then(() => api().Connect(contextName, namespace)),
   connectMode: (contextName: string, namespace: string, mode: ConnectionMode) =>

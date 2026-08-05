@@ -4,6 +4,7 @@
 //
 //	e2e/harness/   shared TUN Connect helpers and echo fixtures
 //	e2e/connect/   Connect TUN data path, manual network, disconnect
+//	e2e/podssh/    Pod-IP SSH/SCP, multi-container login selection
 //	e2e/dns/       Split DNS / search proxy / PTR / host aliases
 //	e2e/portfwd/   Port Forward (Service / Pod)
 //	e2e/exchange/  Service Exchange

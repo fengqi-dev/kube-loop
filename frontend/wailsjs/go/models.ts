@@ -58,6 +58,7 @@ export namespace cluster {
 	    inventoryCluster: boolean;
 	    serviceWrite: boolean;
 	    serviceCreate: boolean;
+	    podExec: boolean;
 	    scopeNamespaces?: string[];
 	    issues?: string[];
 	
@@ -73,6 +74,7 @@ export namespace cluster {
 	        this.inventoryCluster = source["inventoryCluster"];
 	        this.serviceWrite = source["serviceWrite"];
 	        this.serviceCreate = source["serviceCreate"];
+	        this.podExec = source["podExec"];
 	        this.scopeNamespaces = source["scopeNamespaces"];
 	        this.issues = source["issues"];
 	    }
@@ -236,6 +238,7 @@ export namespace cluster {
 	    ready: boolean;
 	    ip?: string;
 	    node?: string;
+	    containers: string[];
 	    ports: PodPortInfo[];
 	
 	    static createFrom(source: any = {}) {
@@ -250,6 +253,7 @@ export namespace cluster {
 	        this.ready = source["ready"];
 	        this.ip = source["ip"];
 	        this.node = source["node"];
+	        this.containers = source["containers"];
 	        this.ports = this.convertValues(source["ports"], PodPortInfo);
 	    }
 	
@@ -554,6 +558,55 @@ export namespace mcp {
 	        this.tokenEnabled = source["tokenEnabled"];
 	        this.token = source["token"];
 	        this.error = source["error"];
+	    }
+	}
+
+}
+
+export namespace podssh {
+
+	export class EnableRequest {
+	    context: string;
+	    namespace: string;
+	    pod: string;
+	    container?: string;
+
+	    static createFrom(source: any = {}) {
+	        return new EnableRequest(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.context = source["context"];
+	        this.namespace = source["namespace"];
+	        this.pod = source["pod"];
+	        this.container = source["container"];
+	    }
+	}
+	export class Info {
+	    id: string;
+	    context: string;
+	    namespace: string;
+	    pod: string;
+	    container: string;
+	    ip: string;
+	    port: number;
+	    command: string;
+
+	    static createFrom(source: any = {}) {
+	        return new Info(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.context = source["context"];
+	        this.namespace = source["namespace"];
+	        this.pod = source["pod"];
+	        this.container = source["container"];
+	        this.ip = source["ip"];
+	        this.port = source["port"];
+	        this.command = source["command"];
 	    }
 	}
 
@@ -972,4 +1025,3 @@ export namespace update {
 	}
 
 }
-

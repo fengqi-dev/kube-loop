@@ -20,6 +20,7 @@ type Capabilities struct {
 	InventoryCluster   bool     `json:"inventoryCluster"`
 	ServiceWrite       bool     `json:"serviceWrite"`
 	ServiceCreate      bool     `json:"serviceCreate"`
+	PodExec            bool     `json:"podExec"`
 	ScopeNamespaces    []string `json:"scopeNamespaces,omitempty"`
 	Issues             []string `json:"issues,omitempty"`
 }
@@ -103,6 +104,10 @@ func (p *Provider) ProbeCapabilities(ctx context.Context, contextName string) (C
 		Namespace: probeNS, Group: "discovery.k8s.io", Resource: "endpointslices", Verb: "delete",
 	})
 
+	caps.PodExec = canAccess(ctx, client, authorizationv1.ResourceAttributes{
+		Namespace: probeNS, Resource: "pods", Subresource: "exec", Verb: "create",
+	})
+
 	if !caps.GatewayPortForward {
 		caps.Issues = append(caps.Issues, "Missing pods/portforward permission in kubeloop-system (cannot connect)")
 	}
@@ -114,6 +119,9 @@ func (p *Provider) ProbeCapabilities(ctx context.Context, contextName string) (C
 	}
 	if !caps.ClusterNodes {
 		caps.Issues = append(caps.Issues, "Cannot list Nodes; Pod CIDR may need to be entered manually on Overview")
+	}
+	if !caps.PodExec {
+		caps.Issues = append(caps.Issues, "Missing pods/exec permission (Pod SSH is unavailable)")
 	}
 	return caps, nil
 }

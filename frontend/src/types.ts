@@ -55,6 +55,7 @@ export interface Capabilities {
   inventoryCluster: boolean;
   serviceWrite: boolean;
   serviceCreate: boolean;
+  podExec: boolean;
   scopeNamespaces?: string[];
   issues?: string[];
 }
@@ -253,7 +254,26 @@ export interface PodInfo {
   ready: boolean;
   ip?: string;
   node?: string;
+  containers: string[];
   ports: PodPortInfo[];
+}
+
+export interface PodSSHEnableRequest {
+  context: string;
+  namespace: string;
+  pod: string;
+  container?: string;
+}
+
+export interface PodSSHInfo {
+  id: string;
+  context: string;
+  namespace: string;
+  pod: string;
+  container: string;
+  ip: string;
+  port: number;
+  command: string;
 }
 
 export interface PortForwardRequest {

@@ -21,6 +21,9 @@ spec:
       containers:
         - name: echo
           image: python:3.12-alpine
+          env:
+            - name: KUBELOOP_E2E_CONTAINER
+              value: echo
           command:
             - python
             - -u
@@ -60,6 +63,19 @@ spec:
             - name: udp
               containerPort: 9090
               protocol: UDP
+        - name: sidecar
+          image: python:3.12-alpine
+          env:
+            - name: KUBELOOP_E2E_CONTAINER
+              value: sidecar
+          command:
+            - python
+            - -u
+            - -c
+            - |
+              import time
+              while True:
+                  time.sleep(3600)
 ---
 apiVersion: v1
 kind: Service

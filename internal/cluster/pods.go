@@ -20,13 +20,14 @@ type PodPortInfo struct {
 
 // PodInfo is a running Pod shown in the network and port-forward UI.
 type PodInfo struct {
-	Name      string        `json:"name"`
-	Namespace string        `json:"namespace"`
-	Phase     string        `json:"phase"`
-	Ready     bool          `json:"ready"`
-	IP        string        `json:"ip,omitempty"`
-	Node      string        `json:"node,omitempty"`
-	Ports     []PodPortInfo `json:"ports"`
+	Name       string        `json:"name"`
+	Namespace  string        `json:"namespace"`
+	Phase      string        `json:"phase"`
+	Ready      bool          `json:"ready"`
+	IP         string        `json:"ip,omitempty"`
+	Node       string        `json:"node,omitempty"`
+	Containers []string      `json:"containers"`
+	Ports      []PodPortInfo `json:"ports"`
 }
 
 func (p *Provider) ListPods(
@@ -171,4 +172,14 @@ func collectPodPorts(pod corev1.Pod) []PodPortInfo {
 		}
 	}
 	return ports
+}
+
+func collectPodContainers(pod corev1.Pod) []string {
+	containers := make([]string, 0, len(pod.Spec.Containers))
+	for _, container := range pod.Spec.Containers {
+		if container.Name != "" {
+			containers = append(containers, container.Name)
+		}
+	}
+	return containers
 }

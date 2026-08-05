@@ -26,8 +26,16 @@ export function ConnectMode(arg1, arg2, arg3) {
   return window['go']['app']['App']['ConnectMode'](arg1, arg2, arg3);
 }
 
+export function DisablePodSSH(arg1) {
+  return window['go']['app']['App']['DisablePodSSH'](arg1);
+}
+
 export function Disconnect() {
   return window['go']['app']['App']['Disconnect']();
+}
+
+export function EnablePodSSH(arg1) {
+  return window['go']['app']['App']['EnablePodSSH'](arg1);
 }
 
 export function GatewayInstallManifest() {
@@ -68,6 +76,10 @@ export function ListIntercepts() {
 
 export function ListMirrors() {
   return window['go']['app']['App']['ListMirrors']();
+}
+
+export function ListPodSSH() {
+  return window['go']['app']['App']['ListPodSSH']();
 }
 
 export function ListPods(arg1, arg2) {

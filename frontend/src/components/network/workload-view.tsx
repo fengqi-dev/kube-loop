@@ -5,6 +5,7 @@ import { backend } from "@/backend";
 import {
   ActionIconButton,
   portForwardIcon,
+  sshIcon,
 } from "@/components/network/action-icons";
 import { ActiveSessions } from "@/components/network/active-sessions";
 import { PortForwardDialog } from "@/components/network/portfwd-dialog";
@@ -25,7 +26,7 @@ import {
 } from "@/components/ui/table";
 import { useI18n } from "@/i18n";
 import { cn } from "@/lib/utils";
-import type { PodInfo, SessionState } from "@/types";
+import type { PodInfo, PodSSHInfo, SessionState } from "@/types";
 
 export function WorkloadView({
   contextName,
@@ -50,6 +51,7 @@ export function WorkloadView({
   const [dialogOpen, setDialogOpen] = useState(false);
   const [selected, setSelected] = useState<PodInfo | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [sshEndpoints, setSSHEndpoints] = useState<PodSSHInfo[]>([]);
   const reloadGeneration = useRef(0);
 
   const connected = session.phase === "connected";
@@ -62,6 +64,7 @@ export function WorkloadView({
     setQuery("");
     setSelected(null);
     setDialogOpen(false);
+    setSSHEndpoints([]);
   }, [contextName]);
 
   useEffect(() => {
@@ -115,6 +118,51 @@ export function WorkloadView({
       reloadGeneration.current += 1;
     };
   }, [connected, contextName, livePods, namespace]);
+
+  useEffect(() => {
+    let active = true;
+    if (!ready) {
+      setSSHEndpoints([]);
+      return;
+    }
+    backend
+      .listPodSSH()
+      .then((items) => {
+        if (active) setSSHEndpoints(items);
+      })
+      .catch(() => {
+        if (active) setSSHEndpoints([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [contextName, ready, session.inventoryRevision]);
+
+  const sshByPod = useMemo(() => {
+    const result = new Map<string, PodSSHInfo>();
+    for (const item of sshEndpoints) {
+      result.set(`${item.namespace}/${item.pod}`, item);
+    }
+    return result;
+  }, [sshEndpoints]);
+
+  async function copySSH(pod: PodInfo, container: string) {
+    const key = `${pod.namespace}/${pod.name}`;
+    const endpoint = sshByPod.get(key);
+    if (!endpoint) return;
+    const command = endpoint.command.replace(
+      `${endpoint.container}@${endpoint.ip}`,
+      `${container}@${endpoint.ip}`,
+    );
+    try {
+      await navigator.clipboard.writeText(command);
+      toast.success(t("workload.sshCopied"), {
+        description: command,
+      });
+    } catch {
+      toast.error(t("workload.sshCopyFailed"));
+    }
+  }
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -226,15 +274,45 @@ export function WorkloadView({
                       )}
                     </TableCell>
                     <TableCell>
-                      <ActionIconButton
-                        label={t("network.tabPortForward")}
-                        icon={portForwardIcon}
-                        disabled={!ready}
-                        onClick={() => {
-                          setSelected(item);
-                          setDialogOpen(true);
-                        }}
-                      />
+                      <div className="flex items-center gap-1">
+                        <ActionIconButton
+                          label={t("network.tabPortForward")}
+                          icon={portForwardIcon}
+                          disabled={!ready}
+                          onClick={() => {
+                            setSelected(item);
+                            setDialogOpen(true);
+                          }}
+                        />
+                        {item.containers.map((container) => {
+                          const endpoint = sshByPod.get(
+                            `${item.namespace}/${item.name}`,
+                          );
+                          const command = endpoint
+                            ? `ssh ${container}@${endpoint.ip}`
+                            : "";
+                          return (
+                            <ActionIconButton
+                              key={`ssh-${container}`}
+                              label={
+                                session.capabilities?.podExec === false
+                                  ? t("workload.sshDenied")
+                                  : `${t("workload.copySSH")} · ${container} · ${command}`
+                              }
+                              icon={sshIcon}
+                              text={item.containers.length > 1 ? container : undefined}
+                              disabled={
+                                !ready ||
+                                !item.ready ||
+                                !item.ip ||
+                                session.capabilities?.podExec === false ||
+                                !endpoint
+                              }
+                              onClick={() => void copySSH(item, container)}
+                            />
+                          );
+                        })}
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}

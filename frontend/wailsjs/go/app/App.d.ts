@@ -3,6 +3,7 @@
 import {cluster} from '../models';
 import {app} from '../models';
 import {update} from '../models';
+import {podssh} from '../models';
 import {store} from '../models';
 import {mcp} from '../models';
 import {helperapi} from '../models';
@@ -22,7 +23,11 @@ export function Connect(arg1:string,arg2:string):Promise<void>;
 
 export function ConnectMode(arg1:string,arg2:string,arg3:string):Promise<void>;
 
+export function DisablePodSSH(arg1:string):Promise<void>;
+
 export function Disconnect():Promise<void>;
+
+export function EnablePodSSH(arg1:podssh.EnableRequest):Promise<podssh.Info>;
 
 export function GatewayInstallManifest():Promise<string>;
 
@@ -43,6 +48,8 @@ export function InstallMCPClient(arg1:string):Promise<mcp.InstallResult>;
 export function ListIntercepts():Promise<Array<intercept.Info>>;
 
 export function ListMirrors():Promise<Array<intercept.Info>>;
+
+export function ListPodSSH():Promise<Array<podssh.Info>>;
 
 export function ListPods(arg1:string,arg2:string):Promise<Array<cluster.PodInfo>>;
 

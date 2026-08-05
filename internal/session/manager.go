@@ -12,6 +12,7 @@ import (
 
 	"github.com/fengqi-dev/kube-loop/internal/cluster"
 	"github.com/fengqi-dev/kube-loop/internal/intercept"
+	"github.com/fengqi-dev/kube-loop/internal/podssh"
 	"github.com/fengqi-dev/kube-loop/internal/portfwd"
 	"github.com/fengqi-dev/kube-loop/internal/singbox"
 	"github.com/fengqi-dev/kube-loop/internal/socksbridge"
@@ -159,6 +160,18 @@ func WithGatewayImage(image string) Option {
 	return func(manager *Manager) { manager.gatewayImage = image }
 }
 
+// WithPodSSHOptions customizes the embedded Pod SSH server. It is primarily
+// useful for deterministic integration tests that provide an ephemeral key.
+func WithPodSSHOptions(options ...podssh.Option) Option {
+	return func(manager *Manager) {
+		executor, ok := any(manager.connection).(podssh.Executor)
+		if !ok {
+			return
+		}
+		manager.podSSH = podssh.NewServer(executor, options...)
+	}
+}
+
 type recentConnection struct {
 	connection singbox.Connection
 	lastSeen   time.Time
@@ -185,6 +198,7 @@ type Manager struct {
 	done      chan struct{}
 	intercept *intercept.Manager
 	portfwd   *portfwd.Manager
+	podSSH    *podssh.Server
 
 	recentConnections map[string]recentConnection
 	lastTraffic       map[string]connectionTraffic
@@ -220,6 +234,9 @@ func NewManager(provider ClusterProvider, options ...Option) *Manager {
 		stateHub: newStateHub(State{
 			Phase: PhaseIdle, Message: "Disconnected", CoreVersion: singbox.Version, UpdatedAt: time.Now(),
 		}),
+	}
+	if executor, ok := any(provider).(podssh.Executor); ok {
+		manager.podSSH = podssh.NewServer(executor)
 	}
 	manager.core = newSingboxRuntime(manager.AppendLog)
 	for _, option := range options {

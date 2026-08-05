@@ -3,6 +3,7 @@ import {
   Cable,
   CopyPlus,
   Eye,
+  SquareTerminal,
   type LucideIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -16,6 +17,7 @@ export const portForwardIcon = Cable;
 export const exchangeIcon = ArrowRightLeft;
 export const mirrorIcon = CopyPlus;
 export const previewIcon = Eye;
+export const sshIcon = SquareTerminal;
 
 export type NetworkAction = "portForward" | "exchange" | "mirror" | "preview";
 
@@ -29,12 +31,14 @@ export const networkActionIcons: Record<NetworkAction, LucideIcon> = {
 export function ActionIconButton({
   label,
   icon: Icon,
+  text,
   disabled,
   onClick,
   variant = "outline",
 }: {
   label: string;
   icon: LucideIcon;
+  text?: string;
   disabled?: boolean;
   onClick(): void;
   variant?: "outline" | "ghost" | "default";
@@ -45,13 +49,14 @@ export function ActionIconButton({
         <span className="inline-flex">
           <Button
             type="button"
-            size="icon-sm"
+            size={text ? "sm" : "icon-sm"}
             variant={variant}
             disabled={disabled}
             aria-label={label}
             onClick={onClick}
           >
             <Icon size={14} strokeWidth={1.9} />
+            {text ? <span className="max-w-24 truncate">{text}</span> : null}
           </Button>
         </span>
       </TooltipTrigger>

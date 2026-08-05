@@ -46,13 +46,14 @@ func podInfoFromCore(pod *corev1.Pod) (PodInfo, bool) {
 		return PodInfo{}, false
 	}
 	return PodInfo{
-		Name:      pod.Name,
-		Namespace: pod.Namespace,
-		Phase:     string(pod.Status.Phase),
-		Ready:     podReady(*pod),
-		IP:        pod.Status.PodIP,
-		Node:      pod.Spec.NodeName,
-		Ports:     collectPodPorts(*pod),
+		Name:       pod.Name,
+		Namespace:  pod.Namespace,
+		Phase:      string(pod.Status.Phase),
+		Ready:      podReady(*pod),
+		IP:         pod.Status.PodIP,
+		Node:       pod.Spec.NodeName,
+		Containers: collectPodContainers(*pod),
+		Ports:      collectPodPorts(*pod),
 	}, true
 }
 
