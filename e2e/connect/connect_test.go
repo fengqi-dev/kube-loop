@@ -54,6 +54,21 @@ func TestTUNConnectClusterIP(t *testing.T) {
 
 	harness.WaitHostTCP(t, clusterIP, 8080, "ping", "cluster-tcp:")
 	harness.WaitHostUDP(t, clusterIP, 9090, "ping", "cluster-udp:")
+	waitSingBoxLog(t, live.Manager)
+}
+
+func waitSingBoxLog(t *testing.T, manager *session.Manager) {
+	t.Helper()
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		for _, event := range manager.State().Events {
+			if strings.HasPrefix(event.Message, "[sing-box] ") {
+				return
+			}
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+	t.Fatal("session logs do not contain a [sing-box] entry")
 }
 
 func TestSOCKS5ConnectWithoutTUN(t *testing.T) {

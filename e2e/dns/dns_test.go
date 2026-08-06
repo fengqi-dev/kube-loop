@@ -3,11 +3,15 @@
 package dns
 
 import (
+	"context"
 	"testing"
 	"time"
 
 	"github.com/miekg/dns"
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
 
 	"github.com/fengqi-dev/kube-loop/e2e/harness"
 	"github.com/fengqi-dev/kube-loop/internal/session"
@@ -28,6 +32,9 @@ func TestTUNDNSResolution(t *testing.T) {
 	}
 	clusterIP := harness.EchoServiceIP(t, ctx, client)
 	aliasDomain := "echo.kubeloop-e2e.test"
+	priorityService := "kubeloop-e2e-dns-priority"
+	echoNamespaceIP := ensureDNSService(t, ctx, client, harness.EchoNamespace, priorityService)
+	defaultNamespaceIP := ensureDNSService(t, ctx, client, "default", priorityService)
 
 	live := harness.ConnectSession(t, ctx, session.Request{
 		Context: harness.KubeContext(), Namespace: harness.EchoNamespace,
@@ -91,10 +98,13 @@ func TestTUNDNSResolution(t *testing.T) {
 	})
 
 	t.Run("set-dns-namespace", func(t *testing.T) {
+		harness.WaitDNSA(t, port, priorityService, echoNamespaceIP)
+
 		if err := live.Manager.SetDNSNamespace(harness.KubeContext(), "default"); err != nil {
 			t.Fatal(err)
 		}
-		harness.AssertDNSNoA(t, port, "echo", clusterIP)
+		harness.WaitDNSA(t, port, "echo", clusterIP)
+		harness.WaitDNSA(t, port, priorityService, defaultNamespaceIP)
 		harness.WaitDNSA(t, port, fqdn, clusterIP)
 		harness.WaitDNSA(t, port, aliasDomain, clusterIP)
 
@@ -102,7 +112,34 @@ func TestTUNDNSResolution(t *testing.T) {
 			t.Fatal(err)
 		}
 		harness.WaitDNSA(t, port, "echo", clusterIP)
+		harness.WaitDNSA(t, port, priorityService, echoNamespaceIP)
 	})
+}
+
+func ensureDNSService(
+	t *testing.T,
+	ctx context.Context,
+	client kubernetes.Interface,
+	namespace, name string,
+) string {
+	t.Helper()
+	services := client.CoreV1().Services(namespace)
+	service, err := services.Get(ctx, name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		service, err = services.Create(ctx, &corev1.Service{
+			ObjectMeta: metav1.ObjectMeta{Name: name},
+			Spec: corev1.ServiceSpec{
+				Ports: []corev1.ServicePort{{Name: "dns", Port: 80}},
+			},
+		}, metav1.CreateOptions{})
+	}
+	if err != nil {
+		t.Fatalf("ensure DNS priority Service %s/%s: %v", namespace, name, err)
+	}
+	t.Cleanup(func() {
+		_ = services.Delete(context.Background(), name, metav1.DeleteOptions{})
+	})
+	return service.Spec.ClusterIP
 }
 
 func TestTUNDNSGoneAfterDisconnect(t *testing.T) {
