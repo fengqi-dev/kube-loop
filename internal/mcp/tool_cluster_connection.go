@@ -89,7 +89,14 @@ func manageConnection(
 		if err != nil {
 			return manageConnectionOut{}, err
 		}
-		out.Config = json.RawMessage(raw)
+		var config map[string]any
+		if err := json.Unmarshal(raw, &config); err != nil {
+			return manageConnectionOut{}, fmt.Errorf("decode sing-box config: %w", err)
+		}
+		if config == nil {
+			return manageConnectionOut{}, fmt.Errorf("decode sing-box config: expected JSON object")
+		}
+		out.Config = config
 	default:
 		return manageConnectionOut{}, fmt.Errorf(
 			"action must be status, connect, disconnect, or config",

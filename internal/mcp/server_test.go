@@ -270,8 +270,9 @@ func TestManageConnectionAndFileTransfer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(config.Config), `"level":"info"`) {
-		t.Fatalf("config=%s", config.Config)
+	logConfig, ok := config.Config["log"].(map[string]any)
+	if !ok || logConfig["level"] != "info" {
+		t.Fatalf("config=%#v", config.Config)
 	}
 	if _, err := manageConnection(
 		context.Background(),

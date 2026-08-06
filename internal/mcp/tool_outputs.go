@@ -1,8 +1,6 @@
 package mcp
 
 import (
-	"encoding/json"
-
 	"github.com/fengqi-dev/kube-loop/internal/cluster"
 	"github.com/fengqi-dev/kube-loop/internal/filemanager"
 	"github.com/fengqi-dev/kube-loop/internal/helper"
@@ -45,9 +43,9 @@ type manageClusterOut struct {
 }
 
 type manageConnectionOut struct {
-	Action string          `json:"action"`
-	State  *session.State  `json:"state,omitempty"`
-	Config json.RawMessage `json:"config,omitempty"`
+	Action string         `json:"action"`
+	State  *session.State `json:"state,omitempty"`
+	Config map[string]any `json:"config,omitempty"`
 }
 
 type manageFileTransferOut struct {
