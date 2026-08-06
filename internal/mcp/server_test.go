@@ -140,7 +140,15 @@ func (f *fakeBackend) UninstallHelper(context.Context) error {
 	return nil
 }
 func (f *fakeBackend) SingBoxConfig() ([]byte, error) {
-	return []byte(`{"log":{"level":"info"}}`), nil
+	return []byte(`{
+		"log":{"level":"info"},
+		"dns":{
+			"servers":[{"type":"udp","tag":"cluster","server":"10.96.0.10"}],
+			"rules":[{"domain_suffix":["cluster.local"],"server":"cluster"}],
+			"final":"local",
+			"strategy":"prefer_ipv4"
+		}
+	}`), nil
 }
 func (f *fakeBackend) ExecPodCommand(_ context.Context, request PodCommandRequest) (PodCommandResult, error) {
 	f.commandRequest = request
@@ -273,6 +281,13 @@ func TestManageConnectionAndFileTransfer(t *testing.T) {
 	logConfig, ok := config.Config["log"].(map[string]any)
 	if !ok || logConfig["level"] != "info" {
 		t.Fatalf("config=%#v", config.Config)
+	}
+	dnsConfig, err := getSingBoxDNSConfig(backend)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dnsConfig.DNS["final"] != "local" || dnsConfig.DNS["strategy"] != "prefer_ipv4" {
+		t.Fatalf("dns config=%#v", dnsConfig.DNS)
 	}
 	if _, err := manageConnection(
 		context.Background(),
@@ -513,13 +528,14 @@ func TestServerToolsConnectAndList(t *testing.T) {
 		t.Fatal(err)
 	}
 	expectedTools := map[string]bool{
-		"manage_cluster":       false,
-		"manage_connection":    false,
-		"manage_network":       false,
-		"manage_traffic":       false,
-		"manage_helper":        false,
-		"exec_pod_command":     false,
-		"manage_file_transfer": false,
+		"manage_cluster":         false,
+		"manage_connection":      false,
+		"get_singbox_dns_config": false,
+		"manage_network":         false,
+		"manage_traffic":         false,
+		"manage_helper":          false,
+		"exec_pod_command":       false,
+		"manage_file_transfer":   false,
 	}
 	if len(tools.Tools) != len(expectedTools) {
 		t.Fatalf("expected %d tools, got %d", len(expectedTools), len(tools.Tools))
@@ -550,6 +566,24 @@ func TestServerToolsConnectAndList(t *testing.T) {
 	}
 	if backend.connected.context != "minikube" || backend.connected.namespace != "default" {
 		t.Fatalf("connected=%#v", backend.connected)
+	}
+
+	dnsRes, err := session.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name:      "get_singbox_dns_config",
+		Arguments: map[string]any{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dnsRes.IsError {
+		t.Fatalf("DNS tool error: %#v", dnsRes)
+	}
+	dnsContent, err := json.Marshal(dnsRes.StructuredContent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(dnsContent), `"strategy":"prefer_ipv4"`) {
+		t.Fatalf("DNS structured content=%s", dnsContent)
 	}
 
 	listRes, err := session.CallTool(ctx, &mcpsdk.CallToolParams{

@@ -23,6 +23,8 @@ type manageConnectionIn struct {
 	Namespace string `json:"namespace,omitempty" jsonschema:"Kubernetes namespace used when connecting"`
 }
 
+type getSingBoxDNSConfigIn struct{}
+
 type manageNetworkIn struct {
 	Action         string      `json:"action" jsonschema:"get or set"`
 	Type           string      `json:"type" jsonschema:"manual_network or host_aliases"`
@@ -108,6 +110,14 @@ func registerTools(server *mcpsdk.Server, backend Backend) {
 			"Use action=status|connect|disconnect|config.",
 	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, in manageConnectionIn) (*mcpsdk.CallToolResult, manageConnectionOut, error) {
 		out, err := manageConnection(ctx, backend, in)
+		return nil, out, err
+	})
+
+	mcpsdk.AddTool(server, &mcpsdk.Tool{
+		Name:        "get_singbox_dns_config",
+		Description: "Get the native DNS object from the active connected session's generated sing-box config.",
+	}, func(_ context.Context, _ *mcpsdk.CallToolRequest, _ getSingBoxDNSConfigIn) (*mcpsdk.CallToolResult, singBoxDNSConfigOut, error) {
+		out, err := getSingBoxDNSConfig(backend)
 		return nil, out, err
 	})
 

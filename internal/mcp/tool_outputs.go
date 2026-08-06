@@ -48,6 +48,10 @@ type manageConnectionOut struct {
 	Config map[string]any `json:"config,omitempty"`
 }
 
+type singBoxDNSConfigOut struct {
+	DNS map[string]any `json:"dns"`
+}
+
 type manageFileTransferOut struct {
 	Action string                     `json:"action"`
 	ID     string                     `json:"id,omitempty"`
