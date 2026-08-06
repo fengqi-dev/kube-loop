@@ -6,6 +6,7 @@ import {
   Download,
   ExternalLink,
   FileJson,
+  Globe2,
   Loader2,
   RefreshCw,
   Shield,
@@ -63,7 +64,8 @@ export function SettingsView({
   const [helper, setHelper] = useState<HelperStatus | null>(null);
   const [helperBusy, setHelperBusy] = useState(false);
   const [configOpen, setConfigOpen] = useState(false);
-  const [configBusy, setConfigBusy] = useState(false);
+  const [configBusy, setConfigBusy] = useState<"full" | "dns" | null>(null);
+  const [configView, setConfigView] = useState<"full" | "dns">("full");
   const [configText, setConfigText] = useState("");
 
   async function refreshHelper() {
@@ -115,17 +117,46 @@ export function SettingsView({
       toast.error(t("settings.configUnavailable"));
       return;
     }
-    setConfigBusy(true);
+    setConfigBusy("full");
     try {
       const text = await backend.getSingBoxConfig();
       setConfigText(text);
+      setConfigView("full");
       setConfigOpen(true);
     } catch (error) {
       toast.error(t("settings.configLoadFailed"), {
         description: error instanceof Error ? error.message : String(error),
       });
     } finally {
-      setConfigBusy(false);
+      setConfigBusy(null);
+    }
+  }
+
+  async function onViewDNSConfig() {
+    if (!ready) {
+      toast.error(t("settings.configUnavailable"));
+      return;
+    }
+    setConfigBusy("dns");
+    try {
+      const text = await backend.getSingBoxConfig();
+      const config = JSON.parse(text) as { dns?: unknown };
+      if (
+        typeof config.dns !== "object" ||
+        config.dns === null ||
+        Array.isArray(config.dns)
+      ) {
+        throw new Error(t("settings.dnsConfigUnavailable"));
+      }
+      setConfigText(JSON.stringify(config.dns, null, 2));
+      setConfigView("dns");
+      setConfigOpen(true);
+    } catch (error) {
+      toast.error(t("settings.dnsConfigLoadFailed"), {
+        description: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setConfigBusy(null);
     }
   }
 
@@ -245,15 +276,33 @@ export function SettingsView({
                     "h-7 px-2 text-[11px] text-muted-foreground",
                     ready && "text-foreground hover:text-foreground",
                   )}
-                  disabled={!ready || configBusy}
+                  disabled={!ready || configBusy !== null}
                   onClick={() => void onViewConfig()}
                 >
-                  {configBusy ? (
+                  {configBusy === "full" ? (
                     <Loader2 data-icon="inline-start" className="animate-spin" />
                   ) : (
                     <FileJson data-icon="inline-start" />
                   )}
                   {t("settings.viewConfig")}
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  className={cn(
+                    "h-7 px-2 text-[11px] text-muted-foreground",
+                    ready && "text-foreground hover:text-foreground",
+                  )}
+                  disabled={!ready || configBusy !== null}
+                  onClick={() => void onViewDNSConfig()}
+                >
+                  {configBusy === "dns" ? (
+                    <Loader2 data-icon="inline-start" className="animate-spin" />
+                  ) : (
+                    <Globe2 data-icon="inline-start" />
+                  )}
+                  {t("settings.viewDNSConfig")}
                 </Button>
               </div>
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -372,8 +421,20 @@ export function SettingsView({
         <DialogContent className="gap-3 sm:max-w-2xl">
           <div className="flex items-start justify-between gap-3 pr-8">
             <DialogHeader className="min-w-0 flex-1 gap-1 pr-0 text-left">
-              <DialogTitle>{t("settings.configTitle")}</DialogTitle>
-              <DialogDescription>{t("settings.configDescription")}</DialogDescription>
+              <DialogTitle>
+                {t(
+                  configView === "dns"
+                    ? "settings.dnsConfigTitle"
+                    : "settings.configTitle",
+                )}
+              </DialogTitle>
+              <DialogDescription>
+                {t(
+                  configView === "dns"
+                    ? "settings.dnsConfigDescription"
+                    : "settings.configDescription",
+                )}
+              </DialogDescription>
             </DialogHeader>
             <Button
               type="button"
