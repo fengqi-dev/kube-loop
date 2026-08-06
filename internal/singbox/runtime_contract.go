@@ -21,6 +21,10 @@ type PrivilegedUpdateDNSFunc func(
 	ctx context.Context, sessionID string, dns DNSMeta,
 ) error
 
+type PrivilegedReadLogsFunc func(
+	ctx context.Context, sessionID string, offset int64,
+) (data string, nextOffset int64, err error)
+
 // RunningCore is the session-facing contract implemented by the runtime
 // subpackage. Keeping it with the configuration model prevents orchestration
 // packages from depending on process-management details.
@@ -30,7 +34,9 @@ type RunningCore interface {
 	Err() error
 	Snapshot(ctx context.Context) (Metrics, error)
 	TrafficEndpoints() TrafficEndpoints
+	SessionID() string
 	Config() []byte
+	ReadLogs(ctx context.Context) ([]string, error)
 	UpdateDNSNamespace(ctx context.Context, namespace string) error
 	ProbeClusterDNS(ctx context.Context) error
 	DNSPort() int

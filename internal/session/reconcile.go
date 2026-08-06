@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"regexp"
+	"strings"
 	"time"
 
 	"github.com/fengqi-dev/kube-loop/internal/cluster"
@@ -12,6 +14,8 @@ import (
 )
 
 const maxActivityEvents = 200
+
+var ansiEscapePattern = regexp.MustCompile(`\x1b\[[0-9;]*[A-Za-z]`)
 
 // LogEvent is a structured activity log entry shown on the Logs page.
 type LogEvent struct {
@@ -47,6 +51,47 @@ func (m *Manager) recordLog(level, message string) {
 	m.stateHub.mu.Lock()
 	m.appendLogLocked(level, message)
 	m.stateHub.mu.Unlock()
+}
+
+func (m *Manager) collectSingBoxLogs(ctx context.Context, core interface {
+	ReadLogs(context.Context) ([]string, error)
+}) {
+	lines, err := core.ReadLogs(ctx)
+	if err != nil || len(lines) == 0 {
+		return
+	}
+	m.stateHub.mu.Lock()
+	appended := false
+	for _, raw := range lines {
+		level, message, ok := singBoxLogEvent(raw)
+		if !ok {
+			continue
+		}
+		m.appendLogLocked(level, message)
+		appended = true
+	}
+	next := m.stateHub.state
+	m.stateHub.mu.Unlock()
+	if !appended {
+		return
+	}
+	m.publish(next)
+}
+
+func singBoxLogEvent(raw string) (level, message string, ok bool) {
+	line := strings.TrimSpace(ansiEscapePattern.ReplaceAllString(raw, ""))
+	if line == "" {
+		return "", "", false
+	}
+	level = "INFO"
+	upper := strings.ToUpper(line)
+	switch {
+	case strings.Contains(upper, "ERROR"), strings.Contains(upper, "FATAL"):
+		level = "ERROR"
+	case strings.Contains(upper, "WARN"):
+		level = "WARN"
+	}
+	return level, "[sing-box] " + line, true
 }
 
 func (m *Manager) reconcileBindings(ctx context.Context, snap cluster.InventorySnapshot) {

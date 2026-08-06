@@ -3,7 +3,7 @@ package helper
 import "github.com/fengqi-dev/kube-loop/internal/singbox"
 
 const (
-	ProtocolVersion = 5
+	ProtocolVersion = 6
 
 	OpPing      = "ping"
 	OpStart     = "start"
@@ -11,6 +11,7 @@ const (
 	OpStopAll   = "stop-all"
 	OpStatus    = "status"
 	OpUpdateDNS = "update-dns"
+	OpReadLogs  = "read-logs"
 )
 
 // Request is a single JSON-line RPC request.
@@ -19,6 +20,7 @@ type Request struct {
 	Token     string               `json:"token,omitempty"`
 	Session   *singbox.SessionSpec `json:"session,omitempty"`
 	SessionID string               `json:"sessionId,omitempty"`
+	LogOffset int64                `json:"logOffset,omitempty"`
 	DNS       *singbox.DNSMeta     `json:"dns,omitempty"`
 }
 
@@ -33,6 +35,8 @@ type Response struct {
 	CoreReady      bool     `json:"coreReady,omitempty"`
 	PID            int      `json:"pid,omitempty"`
 	ActiveSessions []string `json:"activeSessions,omitempty"`
+	LogData        string   `json:"logData,omitempty"`
+	LogOffset      int64    `json:"logOffset,omitempty"`
 }
 
 // AuthFile is persisted under the system state directory.

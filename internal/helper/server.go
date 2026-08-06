@@ -149,6 +149,18 @@ func (s *Server) dispatch(request Request) Response {
 		}
 		s.Log.Printf("split DNS updated for session %s", request.SessionID)
 		return Response{OK: true, Version: Version, Protocol: ProtocolVersion}
+	case OpReadLogs:
+		if err := singbox.ValidateSessionID(request.SessionID); err != nil {
+			return Response{OK: false, Error: err.Error()}
+		}
+		data, offset, err := s.readSessionLogs(request.SessionID, request.LogOffset)
+		if err != nil {
+			return Response{OK: false, Error: err.Error()}
+		}
+		return Response{
+			OK: true, Version: Version, Protocol: ProtocolVersion,
+			LogData: data, LogOffset: offset,
+		}
 	default:
 		return Response{OK: false, Error: fmt.Sprintf("unsupported op %q", request.Op)}
 	}

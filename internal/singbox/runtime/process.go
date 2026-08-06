@@ -31,7 +31,11 @@ type Process struct {
 	config            []byte
 	spec              singbox.SessionSpec
 	updateDNS         singbox.PrivilegedUpdateDNSFunc
+	readLogs          singbox.PrivilegedReadLogsFunc
 	specMu            sync.Mutex
+	logMu             sync.Mutex
+	logOffset         int64
+	logPending        string
 }
 
 var _ singbox.RunningCore = (*Process)(nil)
@@ -46,6 +50,12 @@ func (p *Process) Err() error {
 
 func (p *Process) TrafficEndpoints() singbox.TrafficEndpoints { return p.trafficEndpoints }
 
+func (p *Process) SessionID() string {
+	p.specMu.Lock()
+	defer p.specMu.Unlock()
+	return p.spec.ID
+}
+
 func (p *Process) DNSPort() int         { return p.dnsPort }
 func (p *Process) InternalDNSPort() int { return p.internalDNSPort }
 
@@ -54,6 +64,32 @@ func (p *Process) Config() []byte {
 		return nil
 	}
 	return slices.Clone(p.config)
+}
+
+func (p *Process) ReadLogs(ctx context.Context) ([]string, error) {
+	p.logMu.Lock()
+	defer p.logMu.Unlock()
+	if p.readLogs == nil {
+		return nil, errors.New("privileged log reader is unavailable")
+	}
+	data, nextOffset, err := p.readLogs(ctx, p.SessionID(), p.logOffset)
+	if err != nil {
+		return nil, err
+	}
+	if nextOffset < p.logOffset {
+		p.logPending = ""
+	}
+	p.logOffset = nextOffset
+	data = p.logPending + data
+	parts := strings.Split(data, "\n")
+	if !strings.HasSuffix(data, "\n") {
+		p.logPending = parts[len(parts)-1]
+		parts = parts[:len(parts)-1]
+	} else {
+		p.logPending = ""
+		parts = parts[:len(parts)-1]
+	}
+	return parts, nil
 }
 
 func (p *Process) UpdateDNSNamespace(ctx context.Context, namespace string) error {

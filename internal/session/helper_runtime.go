@@ -60,6 +60,19 @@ func newSingboxRuntime(appendLog func(string, string)) *singboxruntime.Runtime {
 		}
 		return nil
 	}
+	runtime.PrivilegedReadLogs = func(
+		ctx context.Context, sessionID string, offset int64,
+	) (string, int64, error) {
+		client, err := helper.NewClient()
+		if err != nil {
+			return "", offset, err
+		}
+		response, err := client.ReadLogs(ctx, sessionID, offset)
+		if err != nil {
+			return "", offset, err
+		}
+		return response.LogData, response.LogOffset, nil
+	}
 	return runtime
 }
 

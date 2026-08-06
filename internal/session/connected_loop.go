@@ -30,9 +30,11 @@ func (m *Manager) serveConnected(
 	for {
 		select {
 		case <-ctx.Done():
+			m.flushSingBoxLogs(core)
 			return
 
 		case <-core.Done():
+			m.flushSingBoxLogs(core)
 			m.clearRecentConnections()
 			if ctx.Err() == nil {
 				err := core.Err()
@@ -62,9 +64,16 @@ func (m *Manager) serveConnected(
 			controlLost = m.intercept.ControlLost()
 
 		case <-ticker.C:
+			m.collectSingBoxLogs(ctx, core)
 			m.updateCoreMetrics(ctx, core)
 		}
 	}
+}
+
+func (m *Manager) flushSingBoxLogs(core singbox.RunningCore) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	m.collectSingBoxLogs(ctx, core)
 }
 
 func (m *Manager) serveSOCKSConnected(

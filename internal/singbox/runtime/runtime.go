@@ -22,6 +22,7 @@ type Runtime struct {
 	HTTPClient          *http.Client
 	PrivilegedStart     singbox.PrivilegedStartFunc
 	PrivilegedUpdateDNS singbox.PrivilegedUpdateDNSFunc
+	PrivilegedReadLogs  singbox.PrivilegedReadLogsFunc
 }
 
 func (r *Runtime) Start(
@@ -181,6 +182,7 @@ func (r *Runtime) startOnce(
 		config:            config,
 		spec:              spec,
 		updateDNS:         r.PrivilegedUpdateDNS,
+		readLogs:          r.PrivilegedReadLogs,
 	}
 	stop, startErr := r.PrivilegedStart(ctx, spec)
 	if startErr != nil {

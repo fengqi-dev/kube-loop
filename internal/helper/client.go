@@ -49,6 +49,10 @@ func (c *Client) UpdateDNS(ctx context.Context, sessionID string, dns singbox.DN
 	return c.roundTrip(ctx, Request{Op: OpUpdateDNS, SessionID: sessionID, DNS: &dns})
 }
 
+func (c *Client) ReadLogs(ctx context.Context, sessionID string, offset int64) (Response, error) {
+	return c.roundTrip(ctx, Request{Op: OpReadLogs, SessionID: sessionID, LogOffset: offset})
+}
+
 func (c *Client) roundTrip(ctx context.Context, request Request) (Response, error) {
 	if c.Token == "" {
 		return Response{}, fmt.Errorf("helper token is required")
