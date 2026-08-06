@@ -137,6 +137,29 @@ func (s *Server) List() []Info {
 	return items
 }
 
+// Command returns the SSH command for an active endpoint and validates the
+// requested container against the Pod's current container inventory.
+func (s *Server) Command(id, container string) (string, error) {
+	if s == nil {
+		return "", errors.New("Pod SSH is unavailable")
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, target := range s.targets {
+		if targetID(target) != id {
+			continue
+		}
+		selected, ok := targetForLogin(target, container)
+		if !ok {
+			return "", fmt.Errorf(
+				"container %q is not available for Pod SSH", container,
+			)
+		}
+		return s.info(selected).Command, nil
+	}
+	return "", fmt.Errorf("Pod SSH endpoint %q not found", id)
+}
+
 // Reconcile exposes every supplied Pod by default, follows replacement IPs,
 // and drops endpoints whose Pod/container disappeared.
 func (s *Server) Reconcile(pods []PodRef) error {

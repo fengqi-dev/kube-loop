@@ -86,6 +86,8 @@ export function LocalHomeDirectory():Promise<string>;
 
 export function Namespaces(arg1:string):Promise<Array<string>>;
 
+export function OpenPodSSHTerminal(arg1:string,arg2:string):Promise<void>;
+
 export function OpenUpdatePage():Promise<void>;
 
 export function PauseFileTransfer(arg1:string):Promise<void>;

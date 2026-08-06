@@ -12,7 +12,6 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/fengqi-dev/kube-loop/internal/helper"
 	helperinstall "github.com/fengqi-dev/kube-loop/internal/helper/install"
 	singboxdist "github.com/fengqi-dev/kube-loop/internal/singbox/distribution"
 )

@@ -127,13 +127,19 @@ func (p *Provider) Discover(ctx context.Context, contextName string, namespaces 
 	if err != nil {
 		return Discovery{}, err
 	}
+	dnsServer, clusterDomains, _ := p.discoverGatewayDNS(ctx, contextName)
+	if result.DNSServer == "" {
+		result.DNSServer = dnsServer
+	}
+	result.ClusterDomains = clusterDomains
 	return Discovery{
-		PodCIDRs:     result.PodCIDRs,
-		ServiceCIDRs: result.ServiceCIDRs,
-		ServiceIPs:   result.ServiceIPs,
-		DNSServer:    result.DNSServer,
-		Pods:         result.Pods,
-		Services:     result.Services,
-		Deployments:  result.Deployments,
+		PodCIDRs:       result.PodCIDRs,
+		ServiceCIDRs:   result.ServiceCIDRs,
+		ServiceIPs:     result.ServiceIPs,
+		DNSServer:      result.DNSServer,
+		ClusterDomains: result.ClusterDomains,
+		Pods:           result.Pods,
+		Services:       result.Services,
+		Deployments:    result.Deployments,
 	}, nil
 }

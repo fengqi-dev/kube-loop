@@ -26,6 +26,20 @@ func (s *Server) offerPending(pending *pendingStream) bool {
 func (s *Server) takePending(streamID uint64) *pendingStream {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.takePendingLocked(streamID)
+}
+
+func (s *Server) takePendingFor(token tunnel.SessionToken, streamID uint64) *pendingStream {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	pending := s.pending[streamID]
+	if pending == nil || pending.token != token {
+		return nil
+	}
+	return s.takePendingLocked(streamID)
+}
+
+func (s *Server) takePendingLocked(streamID uint64) *pendingStream {
 	pending := s.pending[streamID]
 	delete(s.pending, streamID)
 	if pending != nil && pending.timer != nil {

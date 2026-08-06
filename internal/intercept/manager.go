@@ -65,6 +65,7 @@ type Manager struct {
 	contextName    string
 	gatewayIP      string
 	gatewayAddress string
+	sessionToken   tunnel.SessionToken
 	control        *controlSession
 	nextPort       uint32
 	registry       *runtimeRegistry
@@ -108,13 +109,26 @@ func NewManager(api ClusterAPI) *Manager {
 }
 
 func (m *Manager) Start(
-	ctx context.Context, contextName, gatewayIP, gatewayAddress string,
+	ctx context.Context,
+	contextName, gatewayIP, gatewayAddress string,
+	sessionTokens ...tunnel.SessionToken,
 ) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.active {
 		return fmt.Errorf("intercept manager already started")
 	}
+	var sessionToken tunnel.SessionToken
+	if len(sessionTokens) > 0 {
+		sessionToken = sessionTokens[0]
+	} else {
+		var err error
+		sessionToken, err = tunnel.NewSessionToken()
+		if err != nil {
+			return err
+		}
+	}
+	m.control.token = sessionToken
 	if err := m.control.connect(ctx, gatewayAddress); err != nil {
 		return err
 	}
@@ -124,6 +138,7 @@ func (m *Manager) Start(
 	m.contextName = contextName
 	m.gatewayIP = gatewayIP
 	m.gatewayAddress = gatewayAddress
+	m.sessionToken = sessionToken
 	return nil
 }
 

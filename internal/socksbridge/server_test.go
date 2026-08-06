@@ -17,6 +17,8 @@ import (
 	"github.com/things-go/go-socks5/statute"
 )
 
+var testSessionToken = tunnel.SessionToken{1}
+
 func TestSOCKSUDPPacketRoundTrip(t *testing.T) {
 	want := []byte("dns payload")
 	packet, err := encodeTestDatagram("10.96.0.10", 53, want)
@@ -123,7 +125,10 @@ func TestDialGatewayTCPPreservesDomain(t *testing.T) {
 		result <- err
 	}()
 
-	server := &Server{GatewayAddress: gateway.Addr().String()}
+	server := &Server{
+		GatewayAddress: gateway.Addr().String(),
+		SessionToken:   testSessionToken,
+	}
 	connection, err := server.dial(
 		context.Background(),
 		"tcp",
@@ -189,7 +194,10 @@ func TestDialGatewayUDPAdaptsDatagrams(t *testing.T) {
 		result <- tunnel.WriteDatagram(connection, []byte("answer"))
 	}()
 
-	server := &Server{GatewayAddress: gateway.Addr().String()}
+	server := &Server{
+		GatewayAddress: gateway.Addr().String(),
+		SessionToken:   testSessionToken,
+	}
 	connection, err := server.dial(context.Background(), "udp", "10.96.0.10:53")
 	if err != nil {
 		t.Fatal(err)
@@ -229,7 +237,10 @@ func TestDialGatewayReturnsStatusError(t *testing.T) {
 		}
 	}()
 
-	server := &Server{GatewayAddress: gateway.Addr().String()}
+	server := &Server{
+		GatewayAddress: gateway.Addr().String(),
+		SessionToken:   testSessionToken,
+	}
 	_, err = server.dial(context.Background(), "tcp", "10.96.0.1:443")
 	if err == nil || !strings.Contains(err.Error(), "target denied") {
 		t.Fatalf("dial error = %v", err)

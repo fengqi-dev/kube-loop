@@ -14,7 +14,18 @@ var version = "dev"
 
 func main() {
 	listenAddress := flag.String("listen", ":1080", "gateway listen address")
+	printResolvConf := flag.Bool("print-resolv-conf", false, "print the Pod DNS configuration and exit")
 	flag.Parse()
+	if *printResolvConf {
+		content, err := os.ReadFile("/etc/resolv.conf")
+		if err != nil {
+			log.Fatal(err)
+		}
+		if _, err := os.Stdout.Write(content); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
 
 	logger := log.New(os.Stdout, "gateway: ", log.LstdFlags|log.LUTC)
 	listener, err := net.Listen("tcp", *listenAddress)

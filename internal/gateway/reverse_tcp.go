@@ -25,6 +25,7 @@ func (l *interceptListener) acceptTCP() {
 		streamID := l.server.nextStream.Add(1)
 		pending := &pendingStream{
 			id:      streamID,
+			token:   l.control.token,
 			network: tunnel.NetworkTCP,
 			ready:   make(chan net.Conn, 1),
 			tcpConn: conn,

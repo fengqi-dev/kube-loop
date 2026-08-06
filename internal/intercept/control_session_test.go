@@ -12,6 +12,7 @@ import (
 
 func TestControlSessionStateTransitions(t *testing.T) {
 	session := newControlSession(nil)
+	session.token = tunnel.SessionToken{1}
 	first := &controlClient{}
 	firstLost := make(chan struct{})
 	session.attach(first, firstLost)
@@ -55,6 +56,7 @@ func TestControlSessionStateTransitions(t *testing.T) {
 
 func TestControlSessionRejectsStaleRecovery(t *testing.T) {
 	session := newControlSession(nil)
+	session.token = tunnel.SessionToken{1}
 	session.attach(&controlClient{}, make(chan struct{}))
 	_, generation := session.beginRecovery()
 	session.stop()
@@ -87,19 +89,20 @@ func TestControlSessionReportsImmediateConnectionLoss(t *testing.T) {
 			return
 		}
 		defer conn.Close()
-		command, err := tunnel.ReadSessionHeader(conn)
+		header, err := tunnel.ReadSessionHeader(conn)
 		if err != nil {
 			serverErr <- err
 			return
 		}
-		if command != tunnel.CommandControl {
-			serverErr <- fmt.Errorf("command = %d, want control", command)
+		if header.Command != tunnel.CommandControl {
+			serverErr <- fmt.Errorf("command = %d, want control", header.Command)
 			return
 		}
 		serverErr <- tunnel.WriteStatus(conn, nil)
 	}()
 
 	session := newControlSession(nil)
+	session.token = tunnel.SessionToken{1}
 	if err := session.connect(context.Background(), listener.Addr().String()); err != nil {
 		t.Fatal(err)
 	}
@@ -129,15 +132,15 @@ func TestControlSessionRedialRetriesStaleRegistration(t *testing.T) {
 				serverErr <- err
 				return
 			}
-			command, err := tunnel.ReadSessionHeader(conn)
+			header, err := tunnel.ReadSessionHeader(conn)
 			if err != nil {
 				_ = conn.Close()
 				serverErr <- err
 				return
 			}
-			if command != tunnel.CommandControl {
+			if header.Command != tunnel.CommandControl {
 				_ = conn.Close()
-				serverErr <- fmt.Errorf("command = %d, want control", command)
+				serverErr <- fmt.Errorf("command = %d, want control", header.Command)
 				return
 			}
 			if err := tunnel.WriteStatus(conn, nil); err != nil {
@@ -180,6 +183,7 @@ func TestControlSessionRedialRetriesStaleRegistration(t *testing.T) {
 	}()
 
 	session := newControlSession(nil)
+	session.token = tunnel.SessionToken{1}
 	client, _, err := session.redial(context.Background(), listener.Addr().String(), []controlRegistration{{
 		id:         "default/api:tcp:80",
 		network:    tunnel.NetworkTCP,

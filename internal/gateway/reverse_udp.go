@@ -117,6 +117,7 @@ func (l *interceptListener) acceptUDP() {
 		associations[key] = assoc
 		pending := &pendingStream{
 			id:        streamID,
+			token:     l.control.token,
 			network:   tunnel.NetworkUDP,
 			ready:     make(chan net.Conn, 1),
 			udpPacket: l.udp,

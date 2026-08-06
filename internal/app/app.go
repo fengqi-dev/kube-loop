@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"log"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/fengqi-dev/kube-loop/internal/cluster"
@@ -60,7 +61,10 @@ func NewApp(version string, embeddedHelperFiles fs.FS) *App {
 		provider.SetExtraKubeconfigFiles(stateStore.KubeconfigFiles())
 	}
 	options := []session.Option{
-		session.WithGatewayImage(session.ResolveGatewayImage(version)),
+		session.WithGatewayImage(session.ResolveGatewayImage(
+			version,
+			developmentGatewayImage(embeddedHelperFiles),
+		)),
 	}
 	if stateStore != nil {
 		options = append(options, session.WithStore(stateStore))
@@ -88,6 +92,17 @@ func NewApp(version string, embeddedHelperFiles fs.FS) *App {
 		},
 		mcp: loopmcp.NewController(provider, manager, fileManager, stateStore, version),
 	}
+}
+
+func developmentGatewayImage(files fs.FS) string {
+	if files == nil {
+		return ""
+	}
+	raw, err := fs.ReadFile(files, "build/embedded/gateway-image")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(raw))
 }
 
 func StartupHandler(a *App) func(context.Context) {

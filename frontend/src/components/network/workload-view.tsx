@@ -150,21 +150,19 @@ export function WorkloadView({
     return result;
   }, [sshEndpoints]);
 
-  async function copySSH(pod: PodInfo, container: string) {
+  async function openSSH(pod: PodInfo, container: string) {
     const key = `${pod.namespace}/${pod.name}`;
     const endpoint = sshByPod.get(key);
     if (!endpoint) return;
-    const command = endpoint.command.replace(
-      `${endpoint.container}@${endpoint.ip}`,
-      `${container}@${endpoint.ip}`,
-    );
     try {
-      await navigator.clipboard.writeText(command);
-      toast.success(t("workload.sshCopied"), {
-        description: command,
+      await backend.openPodSSHTerminal(endpoint.id, container);
+      toast.success(t("workload.sshOpened"), {
+        description: `${container}@${endpoint.ip}`,
       });
-    } catch {
-      toast.error(t("workload.sshCopyFailed"));
+    } catch (error) {
+      toast.error(t("workload.sshOpenFailed"), {
+        description: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 
@@ -317,7 +315,7 @@ export function WorkloadView({
                               label={
                                 session.capabilities?.podExec === false
                                   ? t("workload.sshDenied")
-                                  : `${t("workload.copySSH")} · ${container} · ${command}`
+                                  : `${t("workload.openSSH")} · ${container} · ${command}`
                               }
                               icon={sshIcon}
                               text={item.containers.length > 1 ? container : undefined}
@@ -328,7 +326,7 @@ export function WorkloadView({
                                 session.capabilities?.podExec === false ||
                                 !endpoint
                               }
-                              onClick={() => void copySSH(item, container)}
+                              onClick={() => void openSSH(item, container)}
                             />
                           );
                         })}

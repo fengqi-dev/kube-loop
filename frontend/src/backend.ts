@@ -46,6 +46,7 @@ declare global {
           EnablePodSSH(request: PodSSHEnableRequest): Promise<PodSSHInfo>;
           DisablePodSSH(id: string): Promise<void>;
           ListPodSSH(): Promise<PodSSHInfo[]>;
+          OpenPodSSHTerminal(id: string, container: string): Promise<void>;
           PickLocalDirectory(): Promise<string>;
           LocalHomeDirectory(): Promise<string>;
           ListLocalDirectory(path: string): Promise<FileEntry[]>;
@@ -154,6 +155,8 @@ export const backend = {
   disablePodSSH: (id: string) =>
     Promise.resolve().then(() => api().DisablePodSSH(id)),
   listPodSSH: () => Promise.resolve().then(() => api().ListPodSSH()),
+  openPodSSHTerminal: (id: string, container: string) =>
+    Promise.resolve().then(() => api().OpenPodSSHTerminal(id, container)),
   pickLocalDirectory: () => Promise.resolve().then(() => api().PickLocalDirectory()),
   localHomeDirectory: () => Promise.resolve().then(() => api().LocalHomeDirectory()),
   listLocalDirectory: (path: string) =>

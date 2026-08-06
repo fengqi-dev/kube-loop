@@ -22,6 +22,9 @@ const (
 	Namespace = "kubeloop-system"
 	Name      = "kubeloop-gateway"
 	Port      = 1080
+
+	localDevImage       = "kube-loop-gateway:dev"
+	localDevImagePrefix = localDevImage + "-"
 )
 
 const defaultImage = "ghcr.io/fengqi-dev/kube-loop/gateway:latest"
@@ -52,7 +55,7 @@ func Ensure(ctx context.Context, client kubernetes.Interface, image string) (Inf
 	if err := ensureDeployment(ctx, client, image); err != nil {
 		return Info{}, err
 	}
-	return waitForPod(ctx, client)
+	return waitForPod(ctx, client, image)
 }
 
 // Find returns the first ready gateway Pod.
@@ -170,7 +173,9 @@ func deployment(image string) *appsv1.Deployment {
 	allowPrivilegeEscalation := false
 	readOnlyRootFilesystem := true
 	pullPolicy := corev1.PullIfNotPresent
-	if strings.HasSuffix(image, ":latest") {
+	if image == localDevImage || strings.HasPrefix(image, localDevImagePrefix) {
+		pullPolicy = corev1.PullNever
+	} else if strings.HasSuffix(image, ":latest") {
 		pullPolicy = corev1.PullAlways
 	}
 	return &appsv1.Deployment{
@@ -218,12 +223,16 @@ func deployment(image string) *appsv1.Deployment {
 	}
 }
 
-func waitForPod(ctx context.Context, client kubernetes.Interface) (Info, error) {
+func waitForPod(
+	ctx context.Context,
+	client kubernetes.Interface,
+	image string,
+) (Info, error) {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 	var lastErr error
 	for {
-		info, err := Find(ctx, client)
+		info, err := findPod(ctx, client, image)
 		if err == nil {
 			return info, nil
 		}
@@ -240,6 +249,30 @@ func waitForPod(ctx context.Context, client kubernetes.Interface) (Info, error) 
 		case <-ticker.C:
 		}
 	}
+}
+
+func findPod(
+	ctx context.Context,
+	client kubernetes.Interface,
+	image string,
+) (Info, error) {
+	list, err := client.CoreV1().Pods(Namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: "app.kubernetes.io/name=" + Name,
+	})
+	if err != nil {
+		return Info{}, fmt.Errorf("list gateway pods: %w", err)
+	}
+	for _, pod := range list.Items {
+		if pod.Status.Phase != corev1.PodRunning || pod.Status.PodIP == "" || !podReady(pod) {
+			continue
+		}
+		for _, container := range pod.Spec.Containers {
+			if container.Name == "gateway" && container.Image == image {
+				return Info{Name: pod.Name, IP: pod.Status.PodIP}, nil
+			}
+		}
+	}
+	return Info{}, fmt.Errorf("gateway pod using image %q not found", image)
 }
 
 func podReady(pod corev1.Pod) bool {

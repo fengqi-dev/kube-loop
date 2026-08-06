@@ -244,11 +244,10 @@ npm ci --prefix frontend
 wails dev
 ```
 
-`wails dev` 会自动构建并嵌入平台 Helper。使用本地 Gateway image：
-
-```bash
-KUBELOOP_GATEWAY_IMAGE=kube-loop-gateway:dev wails dev
-```
+`wails dev` 会自动构建并嵌入平台 Helper，同时构建带源码内容哈希的本地 Gateway
+镜像。Docker Desktop Kubernetes 可直接使用该镜像；当前 Minikube、kind 或 k3d
+集群会通过各自的本地镜像加载命令接收镜像。仅在需要显式覆盖开发镜像时设置
+`KUBELOOP_GATEWAY_IMAGE`。
 
 ### 测试
 

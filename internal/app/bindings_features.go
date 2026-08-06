@@ -8,6 +8,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/portfwd"
 	"github.com/fengqi-dev/kube-loop/internal/session"
 	"github.com/fengqi-dev/kube-loop/internal/store"
+	"github.com/fengqi-dev/kube-loop/internal/terminal"
 )
 
 func (a *App) StartIntercept(mapping intercept.Mapping) (intercept.Info, error) {
@@ -72,6 +73,19 @@ func (a *App) DisablePodSSH(id string) error {
 
 func (a *App) ListPodSSH() []podssh.Info {
 	return a.manager.ListPodSSH()
+}
+
+func (a *App) OpenPodSSHTerminal(id, container string) error {
+	command, err := a.manager.PodSSHCommand(id, container)
+	if err != nil {
+		return err
+	}
+	if err := terminal.Open(command); err != nil {
+		a.manager.AppendLog("ERROR", "open Pod SSH terminal: "+err.Error())
+		return err
+	}
+	a.manager.AppendLog("INFO", "opened Pod SSH terminal for "+id+" container="+container)
+	return nil
 }
 
 func (a *App) ResetSessions() error {

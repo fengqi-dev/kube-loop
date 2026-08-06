@@ -21,11 +21,12 @@ func (m *Manager) HostTCP(host string, port uint16) (func(net.Conn), bool) {
 	}
 	ctx := m.ctx
 	gatewayAddress := m.gatewayAddress
+	sessionToken := m.sessionToken
 	dialers := m.traffic
 	m.mu.Unlock()
 
 	return func(client net.Conn) {
-		m.serveHostTCP(ctx, gatewayAddress, client, route, dialers)
+		m.serveHostTCP(ctx, gatewayAddress, sessionToken, client, route, dialers)
 	}, true
 }
 
@@ -40,16 +41,18 @@ func (m *Manager) HostUDP(host string, port uint16) (func(context.Context) (net.
 		return nil, false
 	}
 	gatewayAddress := m.gatewayAddress
+	sessionToken := m.sessionToken
 	m.mu.Unlock()
 
 	return func(ctx context.Context) (net.Conn, error) {
-		return m.dialHostUDP(ctx, gatewayAddress, route)
+		return m.dialHostUDP(ctx, gatewayAddress, sessionToken, route)
 	}, true
 }
 
 func (m *Manager) serveHostTCP(
 	ctx context.Context,
 	gatewayAddress string,
+	sessionToken tunnel.SessionToken,
 	client net.Conn,
 	route hostRoute,
 	dialers TrafficDialers,
@@ -60,7 +63,8 @@ func (m *Manager) serveHostTCP(
 
 	if route.mode == ModeMirror {
 		m.serveMirrorTCP(
-			ctx, gatewayAddress, client, route.primaryAddr, host, route.local.LocalPort,
+			ctx, gatewayAddress, sessionToken, client,
+			route.primaryAddr, host, route.local.LocalPort,
 			dialers.MirrorShadow,
 		)
 		return
@@ -81,6 +85,7 @@ func (m *Manager) serveHostTCP(
 func (m *Manager) dialHostUDP(
 	ctx context.Context,
 	gatewayAddress string,
+	sessionToken tunnel.SessionToken,
 	route hostRoute,
 ) (net.Conn, error) {
 	host := cmp.Or(route.local.LocalHost, "127.0.0.1")
@@ -88,7 +93,8 @@ func (m *Manager) dialHostUDP(
 
 	if route.mode == ModeMirror {
 		return m.dialHostMirrorUDP(
-			ctx, gatewayAddress, route.primaryAddr, host, route.local.LocalPort,
+			ctx, gatewayAddress, sessionToken,
+			route.primaryAddr, host, route.local.LocalPort,
 		)
 	}
 
@@ -101,14 +107,16 @@ func (m *Manager) dialHostUDP(
 
 func (m *Manager) dialHostMirrorUDP(
 	ctx context.Context,
-	gatewayAddress, primaryAddr, localHost string,
+	gatewayAddress string,
+	sessionToken tunnel.SessionToken,
+	primaryAddr, localHost string,
 	localPort int,
 ) (net.Conn, error) {
 	if primaryAddr == "" {
 		return nil, fmt.Errorf("mirror primary address is required")
 	}
 	primary, primaryFramed, err := dialMirrorPrimary(
-		ctx, gatewayAddress, primaryAddr, tunnel.NetworkUDP,
+		ctx, gatewayAddress, sessionToken, primaryAddr, tunnel.NetworkUDP,
 	)
 	if err != nil {
 		return nil, err
@@ -125,6 +133,7 @@ func (m *Manager) dialHostMirrorUDP(
 func (m *Manager) handleReady(interceptSubID string, network byte, streamID uint64) {
 	m.mu.Lock()
 	gatewayAddress := m.gatewayAddress
+	sessionToken := m.sessionToken
 	local, primaryAddr, mode, preview, found := m.registry.findPort(interceptSubID)
 	ctx := m.ctx
 	dialers := m.traffic
@@ -137,7 +146,7 @@ func (m *Manager) handleReady(interceptSubID string, network byte, streamID uint
 		localDialer = dialers.Preview
 	}
 	go m.serveInbound(
-		ctx, gatewayAddress, streamID, network, local, mode, primaryAddr,
+		ctx, gatewayAddress, sessionToken, streamID, network, local, mode, primaryAddr,
 		localDialer, dialers.MirrorShadow,
 	)
 }
@@ -145,6 +154,7 @@ func (m *Manager) handleReady(interceptSubID string, network byte, streamID uint
 func (m *Manager) serveInbound(
 	ctx context.Context,
 	gatewayAddress string,
+	sessionToken tunnel.SessionToken,
 	streamID uint64,
 	network byte,
 	local PortMapping,
@@ -153,15 +163,15 @@ func (m *Manager) serveInbound(
 	localDialer TrafficDialer,
 	mirrorShadowDialer TrafficDialer,
 ) {
-	tunnelConn, err := acceptStream(ctx, gatewayAddress, streamID)
+	tunnelConn, err := acceptStream(ctx, gatewayAddress, sessionToken, streamID)
 	if err != nil {
 		return
 	}
 	host := cmp.Or(local.LocalHost, "127.0.0.1")
 	if mode == ModeMirror {
 		m.serveMirror(
-			ctx, gatewayAddress, tunnelConn, network, primaryAddr, host, local.LocalPort,
-			mirrorShadowDialer,
+			ctx, gatewayAddress, sessionToken, tunnelConn, network,
+			primaryAddr, host, local.LocalPort, mirrorShadowDialer,
 		)
 		return
 	}
@@ -192,6 +202,7 @@ func (m *Manager) serveInbound(
 func (m *Manager) serveMirror(
 	ctx context.Context,
 	gatewayAddress string,
+	sessionToken tunnel.SessionToken,
 	client net.Conn,
 	network byte,
 	primaryAddr, localHost string,
@@ -204,25 +215,27 @@ func (m *Manager) serveMirror(
 	}
 	if network == tunnel.NetworkUDP {
 		m.serveMirrorUDP(
-			ctx, gatewayAddress, client, primaryAddr, localHost, localPort,
+			ctx, gatewayAddress, sessionToken, client, primaryAddr, localHost, localPort,
 		)
 		return
 	}
 	m.serveMirrorTCP(
-		ctx, gatewayAddress, client, primaryAddr, localHost, localPort, shadowDialer,
+		ctx, gatewayAddress, sessionToken,
+		client, primaryAddr, localHost, localPort, shadowDialer,
 	)
 }
 
 func (m *Manager) serveMirrorTCP(
 	ctx context.Context,
 	gatewayAddress string,
+	sessionToken tunnel.SessionToken,
 	client net.Conn,
 	primaryAddr, localHost string,
 	localPort int,
 	shadowDialer TrafficDialer,
 ) {
 	primary, _, err := dialMirrorPrimary(
-		ctx, gatewayAddress, primaryAddr, tunnel.NetworkTCP,
+		ctx, gatewayAddress, sessionToken, primaryAddr, tunnel.NetworkTCP,
 	)
 	if err != nil {
 		_ = client.Close()
@@ -240,12 +253,13 @@ func (m *Manager) serveMirrorTCP(
 func (m *Manager) serveMirrorUDP(
 	ctx context.Context,
 	gatewayAddress string,
+	sessionToken tunnel.SessionToken,
 	client net.Conn,
 	primaryAddr, localHost string,
 	localPort int,
 ) {
 	primary, primaryFramed, err := dialMirrorPrimary(
-		ctx, gatewayAddress, primaryAddr, tunnel.NetworkUDP,
+		ctx, gatewayAddress, sessionToken, primaryAddr, tunnel.NetworkUDP,
 	)
 	if err != nil {
 		_ = client.Close()
@@ -268,7 +282,9 @@ func (m *Manager) serveMirrorUDP(
 // framed is true when the returned conn uses tunnel datagram framing (Gateway UDP).
 func dialMirrorPrimary(
 	ctx context.Context,
-	gatewayAddress, primaryAddr string,
+	gatewayAddress string,
+	sessionToken tunnel.SessionToken,
+	primaryAddr string,
 	network byte,
 ) (conn net.Conn, framed bool, err error) {
 	host, portStr, err := net.SplitHostPort(primaryAddr)
@@ -284,7 +300,9 @@ func dialMirrorPrimary(
 		command = tunnel.CommandUDP
 	}
 	if gatewayAddress != "" && !isLoopbackHost(host) {
-		conn, err := dialGatewayOpen(ctx, gatewayAddress, command, host, uint16(port))
+		conn, err := dialGatewayOpen(
+			ctx, gatewayAddress, sessionToken, command, host, uint16(port),
+		)
 		if err == nil {
 			return conn, network == tunnel.NetworkUDP, nil
 		}
@@ -321,7 +339,12 @@ func isLoopbackHost(host string) bool {
 }
 
 func dialGatewayOpen(
-	ctx context.Context, gatewayAddress string, command byte, host string, port uint16,
+	ctx context.Context,
+	gatewayAddress string,
+	sessionToken tunnel.SessionToken,
+	command byte,
+	host string,
+	port uint16,
 ) (net.Conn, error) {
 	var dialer net.Dialer
 	conn, err := dialer.DialContext(ctx, "tcp", gatewayAddress)
@@ -330,7 +353,7 @@ func dialGatewayOpen(
 	}
 	if err := tunnel.WriteOpen(conn, tunnel.OpenRequest{
 		Command: command, Host: host, Port: port,
-	}); err != nil {
+	}, sessionToken); err != nil {
 		_ = conn.Close()
 		return nil, err
 	}

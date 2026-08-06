@@ -243,21 +243,28 @@ func waitClusterProbe(
 	protocol, payload, prefix string,
 	timeout time.Duration,
 ) (string, error) {
-	deadline := time.Now().Add(timeout)
+	probeCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
 	var last string
 	var lastErr error
-	for time.Now().Before(deadline) {
-		got, err := ProbeFromCluster(ctx, client, host, port, protocol, payload)
+	for {
+		if err := probeCtx.Err(); err != nil {
+			return last, fmt.Errorf(
+				"probe %s %s:%d canceled: %w (last error=%v, last=%q)",
+				protocol, host, port, err, lastErr, last,
+			)
+		}
+		got, err := ProbeFromCluster(probeCtx, client, host, port, protocol, payload)
 		if err == nil && strings.HasPrefix(got, prefix) {
 			return got, nil
 		}
 		last, lastErr = got, err
-		time.Sleep(2 * time.Second)
+		select {
+		case <-probeCtx.Done():
+		case <-time.After(2 * time.Second):
+		}
 	}
-	if lastErr != nil {
-		return last, fmt.Errorf("probe %s %s:%d failed: %w (last=%q)", protocol, host, port, lastErr, last)
-	}
-	return last, fmt.Errorf("probe %s %s:%d unexpected %q want prefix %q", protocol, host, port, last, prefix)
 }
 
 func ProbeFromCluster(
@@ -267,6 +274,12 @@ func ProbeFromCluster(
 	port int,
 	protocol, payload string,
 ) (string, error) {
+	probeCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+	if err := probeCtx.Err(); err != nil {
+		return "", err
+	}
+
 	name := fmt.Sprintf("probe-%s-%d", protocol, time.Now().UnixNano())
 	script := fmt.Sprintf(`
 import socket, sys
@@ -293,23 +306,28 @@ sys.stdout.write(data.decode(errors="replace"))
 			}},
 		},
 	}
-	if _, err := client.CoreV1().Pods(EchoNamespace).Create(ctx, pod, metav1.CreateOptions{}); err != nil {
+	if _, err := client.CoreV1().Pods(EchoNamespace).Create(probeCtx, pod, metav1.CreateOptions{}); err != nil {
 		return "", err
 	}
 	defer func() {
-		_ = client.CoreV1().Pods(EchoNamespace).Delete(context.Background(), name, metav1.DeleteOptions{})
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cleanupCancel()
+		_ = client.CoreV1().Pods(EchoNamespace).Delete(cleanupCtx, name, metav1.DeleteOptions{})
 	}()
 
-	deadline := time.Now().Add(60 * time.Second)
-	for time.Now().Before(deadline) {
-		current, err := client.CoreV1().Pods(EchoNamespace).Get(ctx, name, metav1.GetOptions{})
+	for {
+		current, err := client.CoreV1().Pods(EchoNamespace).Get(probeCtx, name, metav1.GetOptions{})
 		if err != nil {
-			time.Sleep(300 * time.Millisecond)
+			select {
+			case <-probeCtx.Done():
+				return "", probeCtx.Err()
+			case <-time.After(300 * time.Millisecond):
+			}
 			continue
 		}
 		switch current.Status.Phase {
 		case corev1.PodSucceeded, corev1.PodFailed:
-			logs, err := client.CoreV1().Pods(EchoNamespace).GetLogs(name, &corev1.PodLogOptions{}).DoRaw(ctx)
+			logs, err := client.CoreV1().Pods(EchoNamespace).GetLogs(name, &corev1.PodLogOptions{}).DoRaw(probeCtx)
 			if err != nil {
 				return "", err
 			}
@@ -318,7 +336,10 @@ sys.stdout.write(data.decode(errors="replace"))
 			}
 			return string(logs), nil
 		}
-		time.Sleep(300 * time.Millisecond)
+		select {
+		case <-probeCtx.Done():
+			return "", probeCtx.Err()
+		case <-time.After(300 * time.Millisecond):
+		}
 	}
-	return "", fmt.Errorf("probe pod timed out")
 }

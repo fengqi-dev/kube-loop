@@ -25,6 +25,9 @@ func TestFindReturnsReadyGateway(t *testing.T) {
 				Type: corev1.PodReady, Status: corev1.ConditionTrue,
 			}},
 		},
+		Spec: corev1.PodSpec{Containers: []corev1.Container{{
+			Name: "gateway", Image: "example/gateway:latest",
+		}}},
 	})
 
 	info, err := Find(context.Background(), client)
@@ -33,6 +36,37 @@ func TestFindReturnsReadyGateway(t *testing.T) {
 	}
 	if info.Name != "gateway-pod" || info.IP != "10.0.0.8" {
 		t.Fatalf("unexpected gateway info: %+v", info)
+	}
+}
+
+func TestFindPodSelectsRequestedImage(t *testing.T) {
+	readyPod := func(name, image, ip string) *corev1.Pod {
+		return &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: name, Namespace: Namespace,
+				Labels: map[string]string{"app.kubernetes.io/name": Name},
+			},
+			Spec: corev1.PodSpec{Containers: []corev1.Container{{
+				Name: "gateway", Image: image,
+			}}},
+			Status: corev1.PodStatus{
+				Phase: corev1.PodRunning, PodIP: ip,
+				Conditions: []corev1.PodCondition{{
+					Type: corev1.PodReady, Status: corev1.ConditionTrue,
+				}},
+			},
+		}
+	}
+	client := fake.NewSimpleClientset(
+		readyPod("old", "example/gateway:old", "10.0.0.7"),
+		readyPod("new", "example/gateway:new", "10.0.0.8"),
+	)
+	info, err := findPod(context.Background(), client, "example/gateway:new")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Name != "new" || info.IP != "10.0.0.8" {
+		t.Fatalf("selected Gateway pod = %+v", info)
 	}
 }
 
@@ -50,6 +84,9 @@ func TestEnsureCreatesResourcesAndUsesLatestPullPolicy(t *testing.T) {
 				Type: corev1.PodReady, Status: corev1.ConditionTrue,
 			}},
 		},
+		Spec: corev1.PodSpec{Containers: []corev1.Container{{
+			Name: "gateway", Image: "example/gateway:latest",
+		}}},
 	})
 
 	if _, err := Ensure(context.Background(), client, "example/gateway:latest"); err != nil {
@@ -109,5 +146,13 @@ func TestDeploymentIsUnprivileged(t *testing.T) {
 	}
 	if container.ImagePullPolicy != corev1.PullIfNotPresent {
 		t.Fatalf("unexpected image pull policy %q", container.ImagePullPolicy)
+	}
+}
+
+func TestDeploymentUsesLocalDevelopmentImageWithoutPulling(t *testing.T) {
+	container := deployment("kube-loop-gateway:dev-deadbeef").
+		Spec.Template.Spec.Containers[0]
+	if container.ImagePullPolicy != corev1.PullNever {
+		t.Fatalf("local development image pull policy = %q", container.ImagePullPolicy)
 	}
 }

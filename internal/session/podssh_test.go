@@ -4,11 +4,13 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"os"
 	"testing"
 	"time"
 
 	"github.com/fengqi-dev/kube-loop/internal/cluster"
 	"github.com/fengqi-dev/kube-loop/internal/podssh"
+	"github.com/kballard/go-shellquote"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -54,7 +56,14 @@ func TestEnablePodSSHUsesFirstContainerAndActivePodIP(t *testing.T) {
 	if info.IP != "10.244.1.9" || info.Port != 22 || info.Container != "api" {
 		t.Fatalf("unexpected endpoint: %#v", info)
 	}
-	if info.Command != "ssh api@10.244.1.9" {
+	wantCommand := shellquote.Join(
+		"ssh",
+		"-o", "StrictHostKeyChecking=no",
+		"-o", "UserKnownHostsFile="+os.DevNull,
+		"-o", "LogLevel=ERROR",
+		"api@10.244.1.9",
+	)
+	if info.Command != wantCommand {
 		t.Fatalf("command=%q", info.Command)
 	}
 	if len(manager.ListPodSSH()) != 1 {

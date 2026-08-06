@@ -15,6 +15,7 @@ import (
 	singboxdist "github.com/fengqi-dev/kube-loop/internal/singbox/distribution"
 	"github.com/fengqi-dev/kube-loop/internal/socksbridge"
 	"github.com/fengqi-dev/kube-loop/internal/traffic"
+	"github.com/fengqi-dev/kube-loop/internal/tunnel"
 )
 
 func (m *Manager) Connect(parent context.Context, request Request) error {
@@ -228,6 +229,26 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 		return
 	}
 
+	sessionToken, err := tunnel.NewSessionToken()
+	if err != nil {
+		m.fail(ctx, state, "Could not create a secure Gateway session", err)
+		return
+	}
+	if err := m.intercept.Start(
+		ctx, request.Context, gateway.IP, forwarder.Address(), sessionToken,
+	); err != nil {
+		m.fail(ctx, state, "Could not start the Gateway control channel", err)
+		return
+	}
+	m.AppendLog("INFO", "tenant-isolated Gateway control channel ready")
+	var interceptCloseOnce sync.Once
+	closeIntercept := closerFunc(func() {
+		interceptCloseOnce.Do(func() {
+			_ = m.intercept.StopAll(context.Background())
+		})
+	})
+	runtime.Add("early Intercept guard", closeIntercept)
+
 	bridgeContext, stopBridge := context.WithCancel(ctx)
 	runtime.AddFunc("SOCKS Bridge context", stopBridge)
 	bridgeListenAddress := "127.0.0.1:0"
@@ -236,16 +257,16 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 			"127.0.0.1", strconv.Itoa(DefaultSOCKSPort),
 		)
 	}
-	bridge, err := m.bridgeFactory(
-		bridgeContext, forwarder.Address(), bridgeListenAddress,
+	bridge, err := m.startBridge(
+		bridgeContext, forwarder.Address(), bridgeListenAddress, sessionToken,
 	)
 	if err != nil && request.Mode == ConnectionModeSOCKS {
 		m.AppendLog("WARN", fmt.Sprintf(
 			"preferred SOCKS5 port %d is unavailable; selecting another port: %v",
 			DefaultSOCKSPort, err,
 		))
-		bridge, err = m.bridgeFactory(
-			bridgeContext, forwarder.Address(), "127.0.0.1:0",
+		bridge, err = m.startBridge(
+			bridgeContext, forwarder.Address(), "127.0.0.1:0", sessionToken,
 		)
 	}
 	if err != nil {
@@ -304,25 +325,10 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 		}
 		runtime.Add("inventory watcher", inventory)
 		m.recordLog("INFO", "cluster inventory watcher started")
-		<-ctx.Done()
+		m.serveSOCKSConnected(ctx, state, request.Context, bridge, runtime)
 		return
 	}
 
-	if err := m.intercept.Start(ctx, request.Context, gateway.IP, forwarder.Address()); err != nil {
-		m.fail(ctx, state, "Could not start the Service Intercept control channel", err)
-		return
-	}
-	m.AppendLog("INFO", "service intercept control channel ready")
-	var interceptCloseOnce sync.Once
-	closeIntercept := closerFunc(func() {
-		interceptCloseOnce.Do(func() {
-			_ = m.intercept.StopAll(context.Background())
-		})
-	})
-	// Keep an early guard for failures before sing-box starts. The same
-	// idempotent closer is appended again after the core so normal teardown
-	// restores Kubernetes resources before closing the data plane.
-	runtime.Add("early Intercept guard", closeIntercept)
 	if ctx.Err() != nil {
 		return
 	}
@@ -429,6 +435,17 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 	m.recordLog("INFO", "cluster inventory watcher started")
 
 	m.serveConnected(ctx, state, core, request.Context, bridge, runtime)
+}
+
+func (m *Manager) startBridge(
+	ctx context.Context,
+	gatewayAddress, listenAddress string,
+	token tunnel.SessionToken,
+) (net.Listener, error) {
+	if m.bridgeFactory != nil {
+		return m.bridgeFactory(ctx, gatewayAddress, listenAddress)
+	}
+	return socksbridge.Listen(ctx, gatewayAddress, listenAddress, token)
 }
 
 func (m *Manager) persistConnectedMode(request Request) {

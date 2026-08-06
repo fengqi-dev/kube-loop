@@ -688,11 +688,20 @@ func TestResolveGatewayImage(t *testing.T) {
 	if got := ResolveGatewayImage("dev"); got != DefaultGatewayImage {
 		t.Fatalf("dev = %q, want %q", got, DefaultGatewayImage)
 	}
+	if got := ResolveGatewayImage(
+		"dev",
+		"kube-loop-gateway:dev-deadbeef",
+	); got != "kube-loop-gateway:dev-deadbeef" {
+		t.Fatalf("wails dev = %q", got)
+	}
 	if got := ResolveGatewayImage("v0.2.0"); got != "ghcr.io/fengqi-dev/kube-loop/gateway:v0.2.0" {
 		t.Fatalf("release = %q", got)
 	}
 	t.Setenv("KUBELOOP_GATEWAY_IMAGE", "registry.example/gateway:custom")
-	if got := ResolveGatewayImage("v0.2.0"); got != "registry.example/gateway:custom" {
+	if got := ResolveGatewayImage(
+		"v0.2.0",
+		"kube-loop-gateway:dev-deadbeef",
+	); got != "registry.example/gateway:custom" {
 		t.Fatalf("env override = %q", got)
 	}
 }

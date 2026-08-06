@@ -67,6 +67,40 @@ func (m *Manager) serveConnected(
 	}
 }
 
+func (m *Manager) serveSOCKSConnected(
+	ctx context.Context,
+	state State,
+	contextName string,
+	bridge any,
+	runtime *sessionRuntime,
+) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-m.intercept.ControlLost():
+			if ctx.Err() != nil {
+				return
+			}
+			m.AppendLog("WARN", "gateway control channel closed; reconnecting")
+			if err := m.recoverGatewayControl(
+				ctx, contextName, bridge, runtime,
+			); err != nil {
+				if ctx.Err() == nil {
+					m.fail(
+						ctx,
+						state,
+						"Gateway control channel closed; reconnect required",
+						err,
+					)
+				}
+				return
+			}
+			m.AppendLog("INFO", "gateway control channel restored")
+		}
+	}
+}
+
 func (m *Manager) recoverGatewayControl(
 	ctx context.Context,
 	contextName string,

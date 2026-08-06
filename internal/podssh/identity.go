@@ -2,21 +2,27 @@ package podssh
 
 import (
 	"fmt"
+	"os"
 	"slices"
 
 	"github.com/kballard/go-shellquote"
 )
 
 func (s *Server) info(target Target) Info {
-	command := "ssh "
-	if s.clientIdentityPath != "" {
-		command += "-i " + shellquote.Join(s.clientIdentityPath) + " "
+	args := []string{
+		"ssh",
+		"-o", "StrictHostKeyChecking=no",
+		"-o", "UserKnownHostsFile=" + os.DevNull,
+		"-o", "LogLevel=ERROR",
 	}
-	command += fmt.Sprintf("%s@%s", target.Container, target.IP)
+	if s.clientIdentityPath != "" {
+		args = append(args, "-i", s.clientIdentityPath)
+	}
+	args = append(args, fmt.Sprintf("%s@%s", target.Container, target.IP))
 	return Info{
 		ID: targetID(target), Context: target.Context, Namespace: target.Namespace,
 		Pod: target.Pod, Container: target.Container, IP: target.IP, Port: DefaultPort,
-		Command: command,
+		Command: shellquote.Join(args...),
 	}
 }
 

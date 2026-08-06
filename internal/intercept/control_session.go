@@ -6,6 +6,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/fengqi-dev/kube-loop/internal/tunnel"
 )
 
 const (
@@ -20,6 +22,7 @@ type controlSession struct {
 	lost       chan struct{}
 	recovering bool
 	generation uint64
+	token      tunnel.SessionToken
 	onReady    func(interceptID string, network byte, streamID uint64)
 }
 
@@ -47,6 +50,7 @@ func (s *controlSession) open(
 	client, err := dialControl(
 		ctx,
 		address,
+		s.token,
 		s.onReady,
 		sync.OnceFunc(func() { close(lost) }),
 	)

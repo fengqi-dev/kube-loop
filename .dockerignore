@@ -1,0 +1,7 @@
+.git
+.codegraph
+frontend/node_modules
+frontend/dist
+build/embedded
+build/bin/*
+!build/bin/kube-loop-gateway

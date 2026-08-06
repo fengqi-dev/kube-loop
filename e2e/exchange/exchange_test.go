@@ -18,7 +18,7 @@ func TestMain(m *testing.M) { harness.RunMain(m) }
 
 func TestTUNServiceExchangeTCPAndUDP(t *testing.T) {
 	harness.RequireE2E(t)
-	ctx, cancel := harness.TestContext(t, 1*time.Minute)
+	ctx, cancel := harness.TestContext(t, 3*time.Minute)
 	defer cancel()
 
 	provider := harness.NewProvider(t)

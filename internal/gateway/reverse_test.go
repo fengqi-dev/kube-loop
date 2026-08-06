@@ -21,13 +21,17 @@ func TestReverseTCPRegisterAccept(t *testing.T) {
 
 	server := NewServer(log.New(io.Discard, "", 0), time.Second)
 	go func() { _ = server.Serve(gatewayListener) }()
+	sessionToken, err := tunnel.NewSessionToken()
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	control, err := net.Dial("tcp", gatewayListener.Addr().String())
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer control.Close()
-	if err := tunnel.WriteControlSession(control); err != nil {
+	if err := tunnel.WriteControlSession(control, sessionToken); err != nil {
 		t.Fatal(err)
 	}
 	if err := tunnel.ReadStatus(control); err != nil {
@@ -97,7 +101,7 @@ func TestReverseTCPRegisterAccept(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer accept.Close()
-	if err := tunnel.WriteAccept(accept, ready.StreamID); err != nil {
+	if err := tunnel.WriteAccept(accept, ready.StreamID, sessionToken); err != nil {
 		t.Fatal(err)
 	}
 	if err := tunnel.ReadStatus(accept); err != nil {
@@ -136,13 +140,17 @@ func TestReverseUDPRegisterAccept(t *testing.T) {
 
 	server := NewServer(log.New(io.Discard, "", 0), time.Second)
 	go func() { _ = server.Serve(gatewayListener) }()
+	sessionToken, err := tunnel.NewSessionToken()
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	control, err := net.Dial("tcp", gatewayListener.Addr().String())
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer control.Close()
-	if err := tunnel.WriteControlSession(control); err != nil {
+	if err := tunnel.WriteControlSession(control, sessionToken); err != nil {
 		t.Fatal(err)
 	}
 	if err := tunnel.ReadStatus(control); err != nil {
@@ -202,7 +210,7 @@ func TestReverseUDPRegisterAccept(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer accept.Close()
-	if err := tunnel.WriteAccept(accept, ready.StreamID); err != nil {
+	if err := tunnel.WriteAccept(accept, ready.StreamID, sessionToken); err != nil {
 		t.Fatal(err)
 	}
 	if err := tunnel.ReadStatus(accept); err != nil {
@@ -226,6 +234,118 @@ func TestReverseUDPRegisterAccept(t *testing.T) {
 	}
 	if got := string(buffer[:n]); got != "pong" {
 		t.Fatalf("got response %q", got)
+	}
+}
+
+func TestGatewayIsolatesTenantListenersAndPendingStreams(t *testing.T) {
+	gatewayListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer gatewayListener.Close()
+
+	server := NewServer(log.New(io.Discard, "", 0), time.Second)
+	go func() { _ = server.Serve(gatewayListener) }()
+
+	tokenA := tunnel.SessionToken{1}
+	tokenB := tunnel.SessionToken{2}
+	controlA := openTestControl(t, gatewayListener.Addr().String(), tokenA)
+	defer controlA.Close()
+	controlB := openTestControl(t, gatewayListener.Addr().String(), tokenB)
+	defer controlB.Close()
+
+	const sharedID = "default/api:tcp:80"
+	portA := freeTCPPort(t)
+	portB := freeTCPPort(t)
+	registerTestIntercept(t, controlA, sharedID, portA)
+	registerTestIntercept(t, controlB, sharedID, portB)
+
+	if err := tunnel.WriteControlMessage(controlB, tunnel.ControlMessage{
+		Type: tunnel.CtrlUnregister, InterceptID: sharedID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if reply, err := tunnel.ReadControlMessage(controlB); err != nil || reply.Type != tunnel.CtrlAck {
+		t.Fatalf("unregister tenant B: reply=%#v err=%v", reply, err)
+	}
+
+	client, err := net.Dial("tcp", fmt.Sprintf("127.0.0.1:%d", portA))
+	if err != nil {
+		t.Fatalf("tenant B unregistered tenant A listener: %v", err)
+	}
+	defer client.Close()
+	ready, err := tunnel.ReadControlMessage(controlA)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	wrongTenant, err := net.Dial("tcp", gatewayListener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tunnel.WriteAccept(wrongTenant, ready.StreamID, tokenB); err != nil {
+		t.Fatal(err)
+	}
+	if err := tunnel.ReadStatus(wrongTenant); err == nil {
+		t.Fatal("tenant B accepted tenant A stream")
+	}
+	_ = wrongTenant.Close()
+
+	owner, err := net.Dial("tcp", gatewayListener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer owner.Close()
+	if err := tunnel.WriteAccept(owner, ready.StreamID, tokenA); err != nil {
+		t.Fatal(err)
+	}
+	if err := tunnel.ReadStatus(owner); err != nil {
+		t.Fatalf("tenant A could not accept its stream: %v", err)
+	}
+}
+
+func openTestControl(
+	t *testing.T,
+	address string,
+	token tunnel.SessionToken,
+) net.Conn {
+	t.Helper()
+	conn, err := net.Dial("tcp", address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tunnel.WriteControlSession(conn, token); err != nil {
+		_ = conn.Close()
+		t.Fatal(err)
+	}
+	if err := tunnel.ReadStatus(conn); err != nil {
+		_ = conn.Close()
+		t.Fatal(err)
+	}
+	return conn
+}
+
+func registerTestIntercept(
+	t *testing.T,
+	control net.Conn,
+	id string,
+	port uint16,
+) {
+	t.Helper()
+	if err := tunnel.WriteControlMessage(control, tunnel.ControlMessage{
+		Type:        tunnel.CtrlRegister,
+		InterceptID: id,
+		Network:     tunnel.NetworkTCP,
+		ListenPort:  port,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	reply, err := tunnel.ReadControlMessage(control)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reply.Type != tunnel.CtrlAck {
+		t.Fatalf("register %s: %s", id, reply.Error)
 	}
 }
 

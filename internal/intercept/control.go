@@ -33,6 +33,7 @@ type controlClient struct {
 func dialControl(
 	ctx context.Context,
 	gatewayAddress string,
+	token tunnel.SessionToken,
 	onReady func(interceptID string, network byte, streamID uint64),
 	onClose func(),
 ) (*controlClient, error) {
@@ -41,7 +42,7 @@ func dialControl(
 	if err != nil {
 		return nil, fmt.Errorf("dial gateway control: %w", err)
 	}
-	if err := tunnel.WriteControlSession(conn); err != nil {
+	if err := tunnel.WriteControlSession(conn, token); err != nil {
 		_ = conn.Close()
 		return nil, err
 	}
@@ -136,13 +137,18 @@ func (c *controlClient) close() error {
 	return c.conn.Close()
 }
 
-func acceptStream(ctx context.Context, gatewayAddress string, streamID uint64) (net.Conn, error) {
+func acceptStream(
+	ctx context.Context,
+	gatewayAddress string,
+	token tunnel.SessionToken,
+	streamID uint64,
+) (net.Conn, error) {
 	var dialer net.Dialer
 	conn, err := dialer.DialContext(ctx, "tcp", gatewayAddress)
 	if err != nil {
 		return nil, err
 	}
-	if err := tunnel.WriteAccept(conn, streamID); err != nil {
+	if err := tunnel.WriteAccept(conn, streamID, token); err != nil {
 		_ = conn.Close()
 		return nil, err
 	}

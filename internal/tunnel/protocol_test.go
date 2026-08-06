@@ -8,10 +8,12 @@ import (
 	"testing"
 )
 
+var protocolTestToken = SessionToken{1, 2, 3, 4}
+
 func TestOpenRoundTrip(t *testing.T) {
 	var stream bytes.Buffer
 	want := OpenRequest{Command: CommandTCP, Host: "api.default.svc.cluster.local", Port: 8080}
-	if err := WriteOpen(&stream, want); err != nil {
+	if err := WriteOpen(&stream, want, protocolTestToken); err != nil {
 		t.Fatal(err)
 	}
 	got, err := ReadOpen(&stream)
@@ -73,15 +75,15 @@ func TestControlMessageRoundTrip(t *testing.T) {
 
 func TestAcceptRoundTrip(t *testing.T) {
 	var stream bytes.Buffer
-	if err := WriteAccept(&stream, 99); err != nil {
+	if err := WriteAccept(&stream, 99, protocolTestToken); err != nil {
 		t.Fatal(err)
 	}
-	command, err := ReadSessionHeader(&stream)
+	header, err := ReadSessionHeader(&stream)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if command != CommandAccept {
-		t.Fatalf("command=%d", command)
+	if header.Command != CommandAccept {
+		t.Fatalf("command=%d", header.Command)
 	}
 	streamID, err := ReadAcceptStreamID(&stream)
 	if err != nil {
@@ -94,15 +96,28 @@ func TestAcceptRoundTrip(t *testing.T) {
 
 func TestControlSessionHeader(t *testing.T) {
 	var stream bytes.Buffer
-	if err := WriteControlSession(&stream); err != nil {
+	if err := WriteControlSession(&stream, protocolTestToken); err != nil {
 		t.Fatal(err)
 	}
-	command, err := ReadSessionHeader(&stream)
+	header, err := ReadSessionHeader(&stream)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if command != CommandControl {
-		t.Fatalf("command=%d", command)
+	if header.Command != CommandControl {
+		t.Fatalf("command=%d", header.Command)
+	}
+	if header.Token != protocolTestToken {
+		t.Fatalf("token=%x", header.Token)
+	}
+}
+
+func TestSessionHeaderRejectsZeroToken(t *testing.T) {
+	wire := append(
+		[]byte{'K', 'C', 'G', 2, CommandControl},
+		make([]byte, len(SessionToken{}))...,
+	)
+	if _, err := ReadSessionHeader(bytes.NewReader(wire)); err == nil {
+		t.Fatal("zero session token was accepted")
 	}
 }
 
@@ -115,24 +130,32 @@ func TestProtocolGoldenEncoding(t *testing.T) {
 		{
 			name: "open",
 			write: func(w io.Writer) error {
-				return WriteOpen(w, OpenRequest{Command: CommandTCP, Host: "api", Port: 8080})
+				return WriteOpen(
+					w,
+					OpenRequest{Command: CommandTCP, Host: "api", Port: 8080},
+					protocolTestToken,
+				)
 			},
-			want: []byte{'K', 'C', 'G', 1, CommandTCP, 0, 3, 'a', 'p', 'i', 0x1f, 0x90},
+			want: append(
+				sessionHeaderBytes(CommandTCP),
+				0, 3, 'a', 'p', 'i', 0x1f, 0x90,
+			),
 		},
 		{
-			name:  "control-session",
-			write: WriteControlSession,
-			want:  []byte{'K', 'C', 'G', 1, CommandControl},
+			name: "control-session",
+			write: func(w io.Writer) error {
+				return WriteControlSession(w, protocolTestToken)
+			},
+			want: sessionHeaderBytes(CommandControl),
 		},
 		{
 			name: "accept",
 			write: func(w io.Writer) error {
-				return WriteAccept(w, 0x0102030405060708)
+				return WriteAccept(w, 0x0102030405060708, protocolTestToken)
 			},
-			want: []byte{
-				'K', 'C', 'G', 1, CommandAccept,
+			want: append(sessionHeaderBytes(CommandAccept),
 				1, 2, 3, 4, 5, 6, 7, 8,
-			},
+			),
 		},
 		{
 			name: "status-ok",
@@ -194,9 +217,10 @@ func TestProtocolGoldenEncoding(t *testing.T) {
 }
 
 func TestProtocolGoldenDecoding(t *testing.T) {
-	open, err := ReadOpen(bytes.NewReader([]byte{
-		'K', 'C', 'G', 1, CommandUDP, 0, 3, 'd', 'n', 's', 0, 53,
-	}))
+	open, err := ReadOpen(bytes.NewReader(append(
+		sessionHeaderBytes(CommandUDP),
+		0, 3, 'd', 'n', 's', 0, 53,
+	)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,4 +240,11 @@ func TestProtocolGoldenDecoding(t *testing.T) {
 	if control != want {
 		t.Fatalf("decoded control = %#v, want %#v", control, want)
 	}
+}
+
+func sessionHeaderBytes(command byte) []byte {
+	return append(
+		[]byte{'K', 'C', 'G', 2, command},
+		protocolTestToken[:]...,
+	)
 }

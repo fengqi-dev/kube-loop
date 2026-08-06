@@ -27,6 +27,7 @@ type HostUDPHandler func(host string, port uint16) (dial func(context.Context) (
 
 type Server struct {
 	GatewayAddress string
+	SessionToken   tunnel.SessionToken
 	DialTimeout    time.Duration
 	HostTCP        HostTCPHandler
 	HostUDP        HostUDPHandler
@@ -160,9 +161,10 @@ func (s *Server) openGateway(
 	if err != nil {
 		return nil, fmt.Errorf("connect gateway: %w", err)
 	}
-	if err := tunnel.WriteOpen(connection, tunnel.OpenRequest{
+	request := tunnel.OpenRequest{
 		Command: command, Host: host, Port: port,
-	}); err != nil {
+	}
+	if err := tunnel.WriteOpen(connection, request, s.SessionToken); err != nil {
 		connection.Close()
 		return nil, err
 	}
@@ -206,12 +208,16 @@ func relay(client io.Writer, clientReader io.Reader, target net.Conn) {
 	<-done
 }
 
-func Listen(ctx context.Context, gatewayAddress, listenAddress string) (*Bridge, error) {
+func Listen(
+	ctx context.Context,
+	gatewayAddress, listenAddress string,
+	token tunnel.SessionToken,
+) (*Bridge, error) {
 	listener, err := net.Listen("tcp", listenAddress)
 	if err != nil {
 		return nil, err
 	}
-	server := &Server{GatewayAddress: gatewayAddress}
+	server := &Server{GatewayAddress: gatewayAddress, SessionToken: token}
 	go func() {
 		<-ctx.Done()
 		listener.Close()

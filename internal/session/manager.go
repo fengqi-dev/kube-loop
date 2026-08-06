@@ -18,7 +18,6 @@ import (
 	portfwdclusteradapter "github.com/fengqi-dev/kube-loop/internal/portfwd/clusteradapter"
 	"github.com/fengqi-dev/kube-loop/internal/singbox"
 	singboxdist "github.com/fengqi-dev/kube-loop/internal/singbox/distribution"
-	"github.com/fengqi-dev/kube-loop/internal/socksbridge"
 	"github.com/fengqi-dev/kube-loop/internal/store"
 	"github.com/fengqi-dev/kube-loop/internal/traffic"
 )
@@ -43,12 +42,18 @@ const DefaultSOCKSPort = 7890
 
 // ResolveGatewayImage picks the Gateway image for this desktop build.
 // KUBELOOP_GATEWAY_IMAGE wins; release builds pin the matching image tag.
-func ResolveGatewayImage(appVersion string) string {
+// Wails development may supply a content-addressed image built by its watcher.
+func ResolveGatewayImage(appVersion string, developmentImage ...string) string {
 	if image := strings.TrimSpace(os.Getenv("KUBELOOP_GATEWAY_IMAGE")); image != "" {
 		return image
 	}
 	if appVersion != "" && appVersion != "dev" {
 		return "ghcr.io/fengqi-dev/kube-loop/gateway:" + appVersion
+	}
+	if len(developmentImage) > 0 {
+		if image := strings.TrimSpace(developmentImage[0]); image != "" {
+			return image
+		}
 	}
 	return DefaultGatewayImage
 }
@@ -222,14 +227,9 @@ const (
 
 func NewManager(provider ClusterProvider, options ...Option) *Manager {
 	manager := &Manager{
-		catalog:    provider,
-		connection: provider,
-		gateway:    provider,
-		bridgeFactory: func(
-			ctx context.Context, gatewayAddress, listenAddress string,
-		) (net.Listener, error) {
-			return socksbridge.Listen(ctx, gatewayAddress, listenAddress)
-		},
+		catalog:      provider,
+		connection:   provider,
+		gateway:      provider,
 		gatewayImage: ResolveGatewayImage(""),
 		intercept:    intercept.NewManager(clusteradapter.New(provider)),
 		portfwd:      portfwd.NewManager(portfwdclusteradapter.New(provider)),

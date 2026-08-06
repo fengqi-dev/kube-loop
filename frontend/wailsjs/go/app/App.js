@@ -150,6 +150,10 @@ export function Namespaces(arg1) {
   return window['go']['app']['App']['Namespaces'](arg1);
 }
 
+export function OpenPodSSHTerminal(arg1, arg2) {
+  return window['go']['app']['App']['OpenPodSSHTerminal'](arg1, arg2);
+}
+
 export function OpenUpdatePage() {
   return window['go']['app']['App']['OpenUpdatePage']();
 }

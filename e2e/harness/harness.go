@@ -112,6 +112,10 @@ func EnsureGateway(
 func waitGatewayControl(ctx context.Context, address string) error {
 	deadline := time.Now().Add(60 * time.Second)
 	var last error
+	sessionToken, err := tunnel.NewSessionToken()
+	if err != nil {
+		return err
+	}
 	for time.Now().Before(deadline) {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -123,7 +127,7 @@ func waitGatewayControl(ctx context.Context, address string) error {
 			time.Sleep(300 * time.Millisecond)
 			continue
 		}
-		err = tunnel.WriteControlSession(conn)
+		err = tunnel.WriteControlSession(conn, sessionToken)
 		if err == nil {
 			err = tunnel.ReadStatus(conn)
 		}

@@ -90,6 +90,13 @@ func (m *Manager) ListPodSSH() []podssh.Info {
 	return m.podSSH.List()
 }
 
+func (m *Manager) PodSSHCommand(id, container string) (string, error) {
+	if m.podSSH == nil {
+		return "", errors.New("Pod SSH is unavailable")
+	}
+	return m.podSSH.Command(id, container)
+}
+
 func (m *Manager) syncDefaultPodSSH(state State, pods []cluster.PodInfo) {
 	if m.podSSH == nil {
 		return

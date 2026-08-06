@@ -136,7 +136,15 @@ func TestServerExecOverPodIP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Command != "ssh -i "+shellquote.Join("/tmp/id_ed25519")+" api@10.244.1.7" {
+	wantCommand := shellquote.Join(
+		"ssh",
+		"-o", "StrictHostKeyChecking=no",
+		"-o", "UserKnownHostsFile="+os.DevNull,
+		"-o", "LogLevel=ERROR",
+		"-i", "/tmp/id_ed25519",
+		"api@10.244.1.7",
+	)
+	if info.Command != wantCommand {
 		t.Fatalf("command=%q", info.Command)
 	}
 	serve, claimed := server.HostTCP(target.IP, DefaultPort)
@@ -233,6 +241,38 @@ func TestTargetForLoginRejectsUnknownContainer(t *testing.T) {
 	}
 	if _, ok := targetForLogin(target, "missing"); ok {
 		t.Fatal("unknown container login was accepted")
+	}
+}
+
+func TestCommandSelectsContainerFromActiveEndpoint(t *testing.T) {
+	target := Target{
+		Context: "dev", Namespace: "default", Pod: "api", Container: "api",
+		Containers: []string{"api", "sidecar"}, IP: "10.0.0.2",
+	}
+	server := &Server{
+		targets:            map[string]Target{target.IP: target},
+		clientIdentityPath: "/tmp/key with spaces",
+	}
+	command, err := server.Command(targetID(target), "sidecar")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := shellquote.Join(
+		"ssh",
+		"-o", "StrictHostKeyChecking=no",
+		"-o", "UserKnownHostsFile="+os.DevNull,
+		"-o", "LogLevel=ERROR",
+		"-i", server.clientIdentityPath,
+		"sidecar@10.0.0.2",
+	)
+	if command != want {
+		t.Fatalf("command=%q, want %q", command, want)
+	}
+	if _, err := server.Command(targetID(target), "missing"); err == nil {
+		t.Fatal("unknown container command was accepted")
+	}
+	if _, err := server.Command("dev/default/missing", "api"); err == nil {
+		t.Fatal("unknown endpoint command was accepted")
 	}
 }
 

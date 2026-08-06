@@ -16,9 +16,14 @@ const (
 )
 
 type controlSession struct {
-	conn   net.Conn
-	server *Server
-	mu     sync.Mutex
+	conn  net.Conn
+	token tunnel.SessionToken
+	mu    sync.Mutex
+}
+
+type listenerKey struct {
+	token tunnel.SessionToken
+	id    string
 }
 
 type interceptListener struct {
@@ -34,6 +39,7 @@ type interceptListener struct {
 
 type pendingStream struct {
 	id        uint64
+	token     tunnel.SessionToken
 	network   byte
 	ready     chan net.Conn
 	tcpConn   net.Conn
@@ -51,10 +57,11 @@ type udpAssociation struct {
 	pendingID uint64
 }
 
-func (s *Server) handleControl(client net.Conn) {
-	session := &controlSession{conn: client, server: s}
+func (s *Server) handleControl(client net.Conn, token tunnel.SessionToken) {
+	session := &controlSession{conn: client, token: token}
 	s.mu.Lock()
 	s.controls[session] = struct{}{}
+	s.tenants[token]++
 	s.mu.Unlock()
 	defer func() {
 		s.removeControl(session)
@@ -76,7 +83,7 @@ func (s *Server) handleControl(client net.Conn) {
 			}
 			_ = session.reply(tunnel.ControlMessage{Type: tunnel.CtrlAck})
 		case tunnel.CtrlUnregister:
-			s.unregisterIntercept(message.InterceptID)
+			s.unregisterIntercept(session, message.InterceptID)
 			_ = session.reply(tunnel.ControlMessage{Type: tunnel.CtrlAck})
 		default:
 			_ = session.reply(tunnel.ControlMessage{
@@ -95,16 +102,32 @@ func (c *controlSession) reply(message tunnel.ControlMessage) error {
 func (s *Server) removeControl(session *controlSession) {
 	s.mu.Lock()
 	delete(s.controls, session)
+	s.tenants[session.token]--
+	lastTenantControl := s.tenants[session.token] == 0
+	if s.tenants[session.token] == 0 {
+		delete(s.tenants, session.token)
+	}
 	var toClose []*interceptListener
-	for id, listener := range s.listeners {
+	for key, listener := range s.listeners {
 		if listener.control == session {
 			toClose = append(toClose, listener)
-			delete(s.listeners, id)
+			delete(s.listeners, key)
+		}
+	}
+	var pendingToClose []*pendingStream
+	if lastTenantControl {
+		for id, pending := range s.pending {
+			if pending.token == session.token {
+				pendingToClose = append(pendingToClose, s.takePendingLocked(id))
+			}
 		}
 	}
 	s.mu.Unlock()
 	for _, listener := range toClose {
 		listener.stop()
+	}
+	for _, pending := range pendingToClose {
+		pending.close()
 	}
 }
 
@@ -113,7 +136,8 @@ func (s *Server) registerIntercept(session *controlSession, message tunnel.Contr
 		return errors.New("listen port must be >= 1024")
 	}
 	s.mu.Lock()
-	if _, exists := s.listeners[message.InterceptID]; exists {
+	key := listenerKey{token: session.token, id: message.InterceptID}
+	if _, exists := s.listeners[key]; exists {
 		s.mu.Unlock()
 		return fmt.Errorf("intercept %q already registered", message.InterceptID)
 	}
@@ -154,16 +178,26 @@ func (s *Server) registerIntercept(session *controlSession, message tunnel.Contr
 	}
 
 	s.mu.Lock()
-	s.listeners[message.InterceptID] = listener
+	if _, exists := s.listeners[key]; exists {
+		s.mu.Unlock()
+		listener.stop()
+		return fmt.Errorf("intercept %q already registered", message.InterceptID)
+	}
+	s.listeners[key] = listener
 	s.mu.Unlock()
 	s.logf("registered intercept %s on %s/%d", message.InterceptID, networkName(message.Network), message.ListenPort)
 	return nil
 }
 
-func (s *Server) unregisterIntercept(id string) {
+func (s *Server) unregisterIntercept(session *controlSession, id string) {
 	s.mu.Lock()
-	listener := s.listeners[id]
-	delete(s.listeners, id)
+	key := listenerKey{token: session.token, id: id}
+	listener := s.listeners[key]
+	if listener != nil && listener.control == session {
+		delete(s.listeners, key)
+	} else {
+		listener = nil
+	}
 	s.mu.Unlock()
 	if listener != nil {
 		listener.stop()

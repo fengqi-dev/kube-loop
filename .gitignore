@@ -1,6 +1,7 @@
 bin/
 build/bin/
 build/embedded/kubeloop-helper*
+build/embedded/gateway-image
 build/windows/installer/tmp/
 build/windows/installer/wails_tools.nsh
 build/windows/icon.ico
