@@ -3,7 +3,6 @@
 package helper
 
 import (
-	"path/filepath"
 	"runtime"
 )
 
@@ -41,9 +40,4 @@ func platformBundledSingBoxPath() string {
 	default:
 		return ""
 	}
-}
-
-// platformInstallRoot is unused on non-Windows; kept for API symmetry.
-func platformInstallRoot() string {
-	return filepath.Dir(platformBinaryInstallPath())
 }

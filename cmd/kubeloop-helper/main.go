@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/fengqi-dev/kube-loop/internal/helper"
+	helperinstall "github.com/fengqi-dev/kube-loop/internal/helper/install"
 )
 
 var version = "dev"
@@ -33,12 +34,12 @@ func main() {
 		ownerSID := fs.String("sid", "", "Windows SID allowed to access the helper socket")
 		singBox := fs.String("sing-box", "", "path to packaged sing-box binary")
 		_ = fs.Parse(os.Args[2:])
-		if err := helper.InstallFromCLI(*source, *token, *uid, *ver, *home, *ownerSID, *singBox); err != nil {
+		if err := helperinstall.InstallFromCLI(*source, *token, *uid, *ver, *home, *ownerSID, *singBox); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
 	case "uninstall":
-		if err := helper.UninstallFromCLI(); err != nil {
+		if err := helperinstall.UninstallFromCLI(); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
@@ -63,7 +64,7 @@ func main() {
 			fmt.Fprintln(os.Stderr, "--operation, --request, and --result are required")
 			os.Exit(2)
 		}
-		if err := helper.RunElevatedRequest(*operation, *request, *result); err != nil {
+		if err := helperinstall.RunElevatedRequest(*operation, *request, *result); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}

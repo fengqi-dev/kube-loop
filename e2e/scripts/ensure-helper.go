@@ -13,7 +13,8 @@ import (
 	"time"
 
 	"github.com/fengqi-dev/kube-loop/internal/helper"
-	"github.com/fengqi-dev/kube-loop/internal/singbox"
+	helperinstall "github.com/fengqi-dev/kube-loop/internal/helper/install"
+	singboxdist "github.com/fengqi-dev/kube-loop/internal/singbox/distribution"
 )
 
 func main() {
@@ -55,7 +56,7 @@ func main() {
 	singBox := filepath.Join(root, "build", "bin", "sing-box")
 	if _, err := os.Stat(singBox); err != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
-		path, ensureErr := (&singbox.Installer{}).Ensure(ctx)
+		path, ensureErr := (&singboxdist.Installer{}).Ensure(ctx)
 		cancel()
 		if ensureErr != nil {
 			fatal(ensureErr)
@@ -68,7 +69,7 @@ func main() {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	if err := helper.EnsureInstall(ctx); err != nil {
+	if err := helperinstall.EnsureInstall(ctx); err != nil {
 		fatal(err)
 	}
 	fmt.Println("helper ready")

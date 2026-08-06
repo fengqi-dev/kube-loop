@@ -7,9 +7,6 @@ import (
 	"sync"
 	"sync/atomic"
 
-	corev1 "k8s.io/api/core/v1"
-
-	"github.com/fengqi-dev/kube-loop/internal/cluster"
 	"github.com/fengqi-dev/kube-loop/internal/tunnel"
 )
 
@@ -38,22 +35,14 @@ type PreviewRequest struct {
 
 // Info is a running intercept, mirror, or preview visible to the UI.
 type Info struct {
-	ID        string                  `json:"id"`
-	Namespace string                  `json:"namespace"`
-	Service   string                  `json:"service"`
-	ClusterIP string                  `json:"clusterIP,omitempty"`
-	Preview   bool                    `json:"preview,omitempty"`
-	Mode      string                  `json:"mode,omitempty"` // exchange | mirror
-	Ports     []cluster.InterceptPort `json:"ports"`
-	Locals    []PortMapping           `json:"locals"`
-}
-
-type ClusterAPI interface {
-	GetService(context.Context, string, string, string) (*corev1.Service, error)
-	ApplyServiceIntercept(context.Context, string, *cluster.ServiceInterceptSnapshot, string) error
-	RestoreServiceIntercept(context.Context, string, cluster.ServiceInterceptSnapshot) error
-	CreatePreviewService(context.Context, string, cluster.PreviewServiceSnapshot, string) (*corev1.Service, error)
-	DeletePreviewService(context.Context, string, cluster.PreviewServiceSnapshot) error
+	ID        string          `json:"id"`
+	Namespace string          `json:"namespace"`
+	Service   string          `json:"service"`
+	ClusterIP string          `json:"clusterIP,omitempty"`
+	Preview   bool            `json:"preview,omitempty"`
+	Mode      string          `json:"mode,omitempty"` // exchange | mirror
+	Ports     []InterceptPort `json:"ports"`
+	Locals    []PortMapping   `json:"locals"`
 }
 
 type TrafficDialer interface {
@@ -100,8 +89,7 @@ func (m *Manager) SetTrafficDialers(dialers TrafficDialers) {
 
 type runtimeIntercept struct {
 	info         Info
-	snapshot     cluster.ServiceInterceptSnapshot
-	preview      *cluster.PreviewServiceSnapshot
+	lease        Lease
 	portKeys     map[string]PortMapping // subID -> local mapping
 	primaryAddrs map[string]string      // subID -> pod host:port (mirror)
 	hostKeys     []hostRouteKey
@@ -211,15 +199,9 @@ func (m *Manager) recoverControlAt(
 
 func registrationFromRuntime(runtime *runtimeIntercept, subID string) (byte, uint16, bool) {
 	ports := runtime.info.Ports
-	if len(ports) == 0 && runtime.preview != nil {
-		ports = runtime.preview.Ports
-	}
-	if len(ports) == 0 {
-		ports = runtime.snapshot.Ports
-	}
 	for _, port := range ports {
 		network := tunnel.NetworkTCP
-		if port.Protocol == corev1.ProtocolUDP {
+		if normalizeProtocol(port.Protocol) == ProtocolUDP {
 			network = tunnel.NetworkUDP
 		}
 		want := fmt.Sprintf("%s:%s:%d", runtime.info.ID, networkName(network), port.ServicePort)
@@ -286,18 +268,10 @@ func (m *Manager) Stop(ctx context.Context, id string) error {
 		return fmt.Errorf("intercept %q stop already in progress", id)
 	}
 	runtime.stopping = true
-	contextName := m.contextName
-	snapshot := runtime.snapshot
-	preview := runtime.preview
+	lease := runtime.lease
 	m.mu.Unlock()
 
-	var err error
-	if preview != nil {
-		err = m.cluster.DeletePreviewService(ctx, contextName, *preview)
-	} else {
-		err = m.cluster.RestoreServiceIntercept(ctx, contextName, snapshot)
-	}
-	if err != nil {
+	if err := lease.Release(ctx); err != nil {
 		m.mu.Lock()
 		if m.registry.get(id) == runtime {
 			runtime.stopping = false

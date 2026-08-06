@@ -6,6 +6,7 @@ import (
 
 	"github.com/fengqi-dev/kube-loop/internal/intercept"
 	"github.com/fengqi-dev/kube-loop/internal/portfwd"
+	"github.com/fengqi-dev/kube-loop/internal/session/restoreplan"
 	"github.com/fengqi-dev/kube-loop/internal/store"
 )
 
@@ -174,67 +175,48 @@ func (m *Manager) RestoreStartup(ctx context.Context) {
 		return
 	}
 	snap := m.store.Snapshot()
+	plan := restoreplan.BuildStartup(snap)
 	m.AppendLog("INFO", fmt.Sprintf(
 		"startup session restore scan: contexts=%d lastContext=%s",
-		len(snap.Clusters), snap.UI.LastContext,
+		plan.ContextCount, plan.LastContext,
 	))
-	for contextName, cluster := range snap.Clusters {
-		if cluster == nil {
-			continue
-		}
-		if cluster.Connected && contextName == snap.UI.LastContext {
-			// Restore these after the selected connection mode is ready:
-			// TUN uses its traffic inbound, while SOCKS5 uses the native
-			// Kubernetes API port-forward path.
-			continue
-		}
-		for _, item := range cluster.PortForwards {
-			info, err := m.portfwd.Start(ctx, portfwd.Request{
-				Context:    contextName,
-				Namespace:  item.Namespace,
-				Kind:       item.Kind,
-				Name:       item.Name,
-				Protocol:   item.Protocol,
-				RemotePort: item.RemotePort,
-				LocalPort:  item.LocalPort,
-			})
-			if err != nil {
-				m.AppendLog("ERROR", fmt.Sprintf(
-					"restore port-forward %s/%s/%s: %v",
-					contextName, item.Kind, item.Name, err,
-				))
-				continue
-			}
-			m.AppendLog("INFO", fmt.Sprintf(
-				"restored port-forward %s/%s/%s at %s",
-				contextName, item.Kind, item.Name, info.Address,
+	for _, restore := range plan.PortForwards {
+		item := restore.Spec
+		info, err := m.portfwd.Start(ctx, portfwd.Request{
+			Context:    restore.Context,
+			Namespace:  item.Namespace,
+			Kind:       item.Kind,
+			Name:       item.Name,
+			Protocol:   item.Protocol,
+			RemotePort: item.RemotePort,
+			LocalPort:  item.LocalPort,
+		})
+		if err != nil {
+			m.AppendLog("ERROR", fmt.Sprintf(
+				"restore port-forward %s/%s/%s: %v",
+				restore.Context, item.Kind, item.Name, err,
 			))
+			continue
 		}
+		m.AppendLog("INFO", fmt.Sprintf(
+			"restored port-forward %s/%s/%s at %s",
+			restore.Context, item.Kind, item.Name, info.Address,
+		))
 	}
 
-	contextName := snap.UI.LastContext
-	cluster := snap.Clusters[contextName]
-	if contextName == "" || cluster == nil || !cluster.Connected {
+	if plan.Reconnect == nil {
 		m.AppendLog("INFO", "startup session restore complete; no cluster reconnect requested")
 		return
 	}
-	namespace := cluster.Namespace
-	if namespace == "" {
-		namespace = snap.UI.LastNamespace
-	}
-	if namespace == "" {
-		namespace = "default"
-	}
+	reconnect := plan.Reconnect
 	m.AppendLog("INFO", fmt.Sprintf(
 		"restoring cluster connection: context=%s namespace=%s",
-		contextName, namespace,
+		reconnect.Context, reconnect.Namespace,
 	))
-	mode := ConnectionMode(cluster.ConnectionMode)
-	if mode != ConnectionModeSOCKS {
-		mode = ConnectionModeTUN
-	}
-	if err := m.Connect(ctx, Request{Context: contextName, Namespace: namespace, Mode: mode}); err != nil {
-		m.AppendLog("ERROR", fmt.Sprintf("restore connect %s: %v", contextName, err))
+	if err := m.Connect(ctx, Request{
+		Context: reconnect.Context, Namespace: reconnect.Namespace, Mode: ConnectionMode(reconnect.Mode),
+	}); err != nil {
+		m.AppendLog("ERROR", fmt.Sprintf("restore connect %s: %v", reconnect.Context, err))
 	}
 }
 

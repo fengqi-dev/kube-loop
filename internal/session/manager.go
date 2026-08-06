@@ -12,9 +12,12 @@ import (
 
 	"github.com/fengqi-dev/kube-loop/internal/cluster"
 	"github.com/fengqi-dev/kube-loop/internal/intercept"
+	"github.com/fengqi-dev/kube-loop/internal/intercept/clusteradapter"
 	"github.com/fengqi-dev/kube-loop/internal/podssh"
 	"github.com/fengqi-dev/kube-loop/internal/portfwd"
+	portfwdclusteradapter "github.com/fengqi-dev/kube-loop/internal/portfwd/clusteradapter"
 	"github.com/fengqi-dev/kube-loop/internal/singbox"
+	singboxdist "github.com/fengqi-dev/kube-loop/internal/singbox/distribution"
 	"github.com/fengqi-dev/kube-loop/internal/socksbridge"
 	"github.com/fengqi-dev/kube-loop/internal/store"
 	"github.com/fengqi-dev/kube-loop/internal/traffic"
@@ -130,8 +133,8 @@ type ClusterProvider interface {
 	ClusterCatalog
 	ClusterConnection
 	GatewayManager
-	intercept.ClusterAPI
-	PortForwardProvider
+	clusteradapter.Provider
+	portfwdclusteradapter.Provider
 }
 
 type Core interface {
@@ -218,7 +221,6 @@ const (
 )
 
 func NewManager(provider ClusterProvider, options ...Option) *Manager {
-	portForwardCluster := portForwardClusterAdapter{provider: provider, catalog: provider}
 	manager := &Manager{
 		catalog:    provider,
 		connection: provider,
@@ -229,10 +231,10 @@ func NewManager(provider ClusterProvider, options ...Option) *Manager {
 			return socksbridge.Listen(ctx, gatewayAddress, listenAddress)
 		},
 		gatewayImage: ResolveGatewayImage(""),
-		intercept:    intercept.NewManager(provider),
-		portfwd:      portfwd.NewManager(portForwardCluster),
+		intercept:    intercept.NewManager(clusteradapter.New(provider)),
+		portfwd:      portfwd.NewManager(portfwdclusteradapter.New(provider)),
 		stateHub: newStateHub(State{
-			Phase: PhaseIdle, Message: "Disconnected", CoreVersion: singbox.Version, UpdatedAt: time.Now(),
+			Phase: PhaseIdle, Message: "Disconnected", CoreVersion: singboxdist.Version, UpdatedAt: time.Now(),
 		}),
 	}
 	if executor, ok := any(provider).(podssh.Executor); ok {

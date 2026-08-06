@@ -76,6 +76,8 @@ func TestCompareVersions(t *testing.T) {
 		{left: "v1.2.0-beta.2", right: "v1.2.0-beta.1", want: 1},
 		{left: "v1.2.0", right: "v1.2.0-rc.1", want: 1},
 		{left: "v1.1.9", right: "v1.2.0", want: -1},
+		{left: "v1.2.0+build.2", right: "v1.2.0+build.1", want: 0},
+		{left: " v1.2.0 ", right: "1.2", want: 0},
 	}
 	for _, test := range tests {
 		if got := compareVersions(test.left, test.right); got != test.want {

@@ -14,6 +14,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/fengqi-dev/kube-loop/internal/cluster"
+	"github.com/fengqi-dev/kube-loop/internal/intercept"
 	"github.com/fengqi-dev/kube-loop/internal/tunnel"
 )
 
@@ -71,13 +72,13 @@ func TestContext(t *testing.T, timeout time.Duration) (context.Context, context.
 
 func InterceptListenPort(
 	t *testing.T,
-	ports []cluster.InterceptPort,
+	ports []intercept.InterceptPort,
 	servicePort int32,
 	protocol corev1.Protocol,
 ) int {
 	t.Helper()
 	for _, port := range ports {
-		if port.ServicePort == servicePort && port.Protocol == protocol {
+		if port.ServicePort == servicePort && port.Protocol == string(protocol) {
 			return int(port.ListenPort)
 		}
 	}

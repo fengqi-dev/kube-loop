@@ -8,6 +8,7 @@ import (
 	"os"
 
 	"github.com/fengqi-dev/kube-loop/internal/helper"
+	helperinstall "github.com/fengqi-dev/kube-loop/internal/helper/install"
 )
 
 var version = "dev"
@@ -27,13 +28,13 @@ func main() {
 			fmt.Fprintln(os.Stderr, "--request and --result are required together")
 			os.Exit(2)
 		}
-		if err := helper.RunElevatedRequest("uninstall", *request, *result); err != nil {
+		if err := helperinstall.RunElevatedRequest("uninstall", *request, *result); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
 		return
 	}
-	if err := helper.UninstallFromCLI(); err != nil {
+	if err := helperinstall.UninstallFromCLI(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

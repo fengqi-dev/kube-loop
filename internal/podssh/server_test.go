@@ -20,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kballard/go-shellquote"
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 )
@@ -46,7 +47,7 @@ func (f *fakeExecutor) Exec(
 		script = command[2]
 	}
 	switch {
-	case strings.Contains(script, "tar xf - -C '/tmp'"):
+	case strings.Contains(script, "tar xf - -C "+shellquote.Join("/tmp")):
 		archive := tar.NewReader(streams.Stdin)
 		header, err := archive.Next()
 		if err != nil {
@@ -75,7 +76,7 @@ func (f *fakeExecutor) Exec(
 		f.files["/tmp/"+header.Name] = content
 		f.mu.Unlock()
 		return nil
-	case strings.Contains(script, "tar cf - -C '/tmp' 'hello.txt'"):
+	case strings.Contains(script, "tar cf - -C "+shellquote.Join("/tmp", "hello.txt")):
 		f.mu.Lock()
 		content, ok := f.files["/tmp/hello.txt"]
 		f.mu.Unlock()
@@ -135,7 +136,7 @@ func TestServerExecOverPodIP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Command != "ssh -i '/tmp/id_ed25519' api@10.244.1.7" {
+	if info.Command != "ssh -i "+shellquote.Join("/tmp/id_ed25519")+" api@10.244.1.7" {
 		t.Fatalf("command=%q", info.Command)
 	}
 	serve, claimed := server.HostTCP(target.IP, DefaultPort)

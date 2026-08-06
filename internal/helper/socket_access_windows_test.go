@@ -14,7 +14,7 @@ func TestConfigureHelperSocketAccess(t *testing.T) {
 	if err := os.WriteFile(path, nil, 0o600); err != nil {
 		t.Fatalf("create socket placeholder: %v", err)
 	}
-	ownerSID, err := currentUserSID()
+	ownerSID, err := testCurrentUserSID()
 	if err != nil {
 		t.Fatalf("find current user SID: %v", err)
 	}
@@ -41,8 +41,45 @@ func TestConfigureHelperSocketAccess(t *testing.T) {
 	}
 }
 
+func TestConfigureElevatedExchangeAccess(t *testing.T) {
+	path := t.TempDir() + `\request.json`
+	if err := os.WriteFile(path, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ownerSID, err := testCurrentUserSID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ConfigureElevatedExchangeAccess(path, ownerSID); err != nil {
+		t.Fatalf("configure elevated exchange access: %v", err)
+	}
+	descriptor, err := windows.GetNamedSecurityInfo(
+		path,
+		windows.SE_FILE_OBJECT,
+		windows.DACL_SECURITY_INFORMATION,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	allowed, err := daclAllowsSID(descriptor, ownerSID)
+	if err != nil {
+		t.Fatalf("inspect elevated exchange DACL: %v", err)
+	}
+	if !allowed {
+		t.Fatalf("elevated exchange DACL %q does not allow owner SID %q", descriptor.String(), ownerSID)
+	}
+}
+
 func TestConfigureHelperSocketAccessRejectsMissingSID(t *testing.T) {
 	if err := configureHelperSocketAccess(t.TempDir()+`\missing.sock`, ""); err == nil {
 		t.Fatal("configure helper socket access accepted an empty owner SID")
 	}
+}
+
+func testCurrentUserSID() (string, error) {
+	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	if err != nil {
+		return "", err
+	}
+	return user.User.Sid.String(), nil
 }

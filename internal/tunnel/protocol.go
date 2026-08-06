@@ -47,13 +47,10 @@ func WriteOpen(w io.Writer, request OpenRequest) error {
 	if request.Port == 0 {
 		return errors.New("target port is required")
 	}
-	header := make([]byte, 9+len(request.Host))
-	copy(header[:4], magic[:])
-	header[4] = request.Command
-	binary.BigEndian.PutUint16(header[5:7], uint16(len(request.Host)))
-	copy(header[7:7+len(request.Host)], request.Host)
-	binary.BigEndian.PutUint16(header[7+len(request.Host):], request.Port)
-	return writeAll(w, header)
+	value := appendSessionHeader(make([]byte, 0, 9+len(request.Host)), request.Command)
+	value = appendUint16String(value, request.Host)
+	value = binary.BigEndian.AppendUint16(value, request.Port)
+	return writeAll(w, value)
 }
 
 func ReadOpen(r io.Reader) (OpenRequest, error) {
@@ -90,29 +87,23 @@ func ReadOpenBody(r io.Reader, command byte) (OpenRequest, error) {
 
 // ReadSessionHeader reads the shared magic + command byte used by all session types.
 func ReadSessionHeader(r io.Reader) (command byte, err error) {
-	header := make([]byte, 5)
-	if _, err := io.ReadFull(r, header); err != nil {
+	var header [5]byte
+	if _, err := io.ReadFull(r, header[:]); err != nil {
 		return 0, err
 	}
-	if string(header[:4]) != string(magic[:]) {
+	if [4]byte(header[:4]) != magic {
 		return 0, errors.New("invalid tunnel protocol magic")
 	}
 	return header[4], nil
 }
 
 func WriteControlSession(w io.Writer) error {
-	header := make([]byte, 5)
-	copy(header[:4], magic[:])
-	header[4] = CommandControl
-	return writeAll(w, header)
+	return writeAll(w, appendSessionHeader(nil, CommandControl))
 }
 
 func WriteAccept(w io.Writer, streamID uint64) error {
-	header := make([]byte, 13)
-	copy(header[:4], magic[:])
-	header[4] = CommandAccept
-	binary.BigEndian.PutUint64(header[5:13], streamID)
-	return writeAll(w, header)
+	value := appendSessionHeader(make([]byte, 0, 13), CommandAccept)
+	return writeAll(w, binary.BigEndian.AppendUint64(value, streamID))
 }
 
 func ReadAcceptStreamID(r io.Reader) (uint64, error) {
@@ -131,10 +122,8 @@ func WriteStatus(w io.Writer, err error) error {
 	if len(message) > maxErrorSize {
 		message = message[:maxErrorSize]
 	}
-	value := make([]byte, 3+len(message))
-	value[0] = StatusError
-	binary.BigEndian.PutUint16(value[1:3], uint16(len(message)))
-	copy(value[3:], message)
+	value := binary.BigEndian.AppendUint16([]byte{StatusError}, uint16(len(message)))
+	value = append(value, message...)
 	return writeAll(w, value)
 }
 
@@ -194,6 +183,16 @@ func ReadDatagram(r *bufio.Reader, buffer []byte) ([]byte, error) {
 		return nil, err
 	}
 	return buffer, nil
+}
+
+func appendSessionHeader(value []byte, command byte) []byte {
+	value = append(value, magic[:]...)
+	return append(value, command)
+}
+
+func appendUint16String(value []byte, text string) []byte {
+	value = binary.BigEndian.AppendUint16(value, uint16(len(text)))
+	return append(value, text...)
 }
 
 func writeAll(w io.Writer, value []byte) error {

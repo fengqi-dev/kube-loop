@@ -13,7 +13,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/fengqi-dev/kube-loop/internal/cluster"
 	"github.com/fengqi-dev/kube-loop/internal/gateway"
 )
 
@@ -27,7 +26,7 @@ type blockingGetCluster struct {
 func (b *blockingGetCluster) GetService(
 	ctx context.Context,
 	contextName, namespace, service string,
-) (*corev1.Service, error) {
+) (*Service, error) {
 	b.once.Do(func() {
 		close(b.started)
 		<-b.release
@@ -44,17 +43,15 @@ type blockingApplyCluster struct {
 func (b *blockingApplyCluster) ApplyServiceIntercept(
 	ctx context.Context,
 	contextName string,
-	snapshot *cluster.ServiceInterceptSnapshot,
-	interceptID string,
-) error {
-	if err := b.fakeCluster.ApplyServiceIntercept(
-		ctx, contextName, snapshot, interceptID,
-	); err != nil {
-		return err
+	request ServiceInterceptRequest,
+) (Lease, []Backend, error) {
+	lease, backends, err := b.fakeCluster.ApplyServiceIntercept(ctx, contextName, request)
+	if err != nil {
+		return nil, nil, err
 	}
 	close(b.started)
 	<-b.release
-	return nil
+	return lease, backends, nil
 }
 
 func TestConcurrentStartsReserveServiceKey(t *testing.T) {

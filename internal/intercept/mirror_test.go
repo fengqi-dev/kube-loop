@@ -4,33 +4,18 @@ import (
 	"net"
 	"testing"
 	"time"
-
-	corev1 "k8s.io/api/core/v1"
-	discoveryv1 "k8s.io/api/discovery/v1"
-
-	"github.com/fengqi-dev/kube-loop/internal/cluster"
 )
 
 func TestPrimaryAddressFromEndpointSlice(t *testing.T) {
-	name := "http"
-	protocol := corev1.ProtocolTCP
-	port := int32(8080)
-	ready := true
-	address, err := primaryAddressFromSlices(
-		[]discoveryv1.EndpointSlice{{
-			AddressType: discoveryv1.AddressTypeIPv4,
-			Ports: []discoveryv1.EndpointPort{{
-				Name: &name, Protocol: &protocol, Port: &port,
-			}},
-			Endpoints: []discoveryv1.Endpoint{{
-				Addresses: []string{"10.244.0.8"},
-				Conditions: discoveryv1.EndpointConditions{
-					Ready: &ready,
-				},
+	address, err := primaryAddress(
+		[]Backend{{
+			Address: "10.244.0.8",
+			Ports: []BackendPort{{
+				Name: "http", Protocol: ProtocolTCP, Port: 8080,
 			}},
 		}},
-		cluster.InterceptPort{
-			Name: "http", Protocol: corev1.ProtocolTCP, ServicePort: 80,
+		InterceptPort{
+			Name: "http", Protocol: ProtocolTCP, ServicePort: 80,
 		},
 	)
 	if err != nil {
@@ -43,13 +28,13 @@ func TestPrimaryAddressFromEndpointSlice(t *testing.T) {
 
 func TestPrimaryAddressMatchesPortName(t *testing.T) {
 	addr, err := primaryAddress(
-		[]corev1.EndpointSubset{{
-			Addresses: []corev1.EndpointAddress{{IP: "10.244.0.5"}},
-			Ports: []corev1.EndpointPort{{
-				Name: "http", Port: 8080, Protocol: corev1.ProtocolTCP,
+		[]Backend{{
+			Address: "10.244.0.5",
+			Ports: []BackendPort{{
+				Name: "http", Port: 8080, Protocol: ProtocolTCP,
 			}},
 		}},
-		cluster.InterceptPort{Name: "http", ServicePort: 80, Protocol: corev1.ProtocolTCP},
+		InterceptPort{Name: "http", ServicePort: 80, Protocol: ProtocolTCP},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -80,13 +65,13 @@ func TestShadowWriterDoesNotBlockWhenLocalTargetStalls(t *testing.T) {
 
 func TestPrimaryAddressMatchesUDP(t *testing.T) {
 	addr, err := primaryAddress(
-		[]corev1.EndpointSubset{{
-			Addresses: []corev1.EndpointAddress{{IP: "10.244.0.5"}},
-			Ports: []corev1.EndpointPort{{
-				Name: "dns", Port: 5353, Protocol: corev1.ProtocolUDP,
+		[]Backend{{
+			Address: "10.244.0.5",
+			Ports: []BackendPort{{
+				Name: "dns", Port: 5353, Protocol: ProtocolUDP,
 			}},
 		}},
-		cluster.InterceptPort{Name: "dns", ServicePort: 53, Protocol: corev1.ProtocolUDP},
+		InterceptPort{Name: "dns", ServicePort: 53, Protocol: ProtocolUDP},
 	)
 	if err != nil {
 		t.Fatal(err)

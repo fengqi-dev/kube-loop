@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kballard/go-shellquote"
 	"github.com/pkg/sftp"
 )
 
@@ -113,7 +114,7 @@ func (h *sftpHandler) RealPath(raw string) (string, error) {
 
 func (h *sftpHandler) Readlink(raw string) (string, error) {
 	var stdout bytes.Buffer
-	err := h.exec(context.Background(), "readlink "+shellQuote(cleanRemotePath(raw)), nil, &stdout)
+	err := h.exec(context.Background(), "readlink "+shellquote.Join(cleanRemotePath(raw)), &stdout)
 	if err != nil {
 		return "", err
 	}
@@ -125,23 +126,23 @@ func (h *sftpHandler) Filecmd(request *sftp.Request) error {
 	var command string
 	switch request.Method {
 	case "Mkdir":
-		command = "mkdir -- " + shellQuote(remotePath)
+		command = "mkdir -- " + shellquote.Join(remotePath)
 	case "Rmdir":
-		command = "rmdir -- " + shellQuote(remotePath)
+		command = "rmdir -- " + shellquote.Join(remotePath)
 	case "Remove":
-		command = "rm -f -- " + shellQuote(remotePath)
+		command = "rm -f -- " + shellquote.Join(remotePath)
 	case "Rename", "PosixRename":
-		command = "mv -- " + shellQuote(remotePath) + " " + shellQuote(cleanRemotePath(request.Target))
+		command = "mv -- " + shellquote.Join(remotePath) + " " + shellquote.Join(cleanRemotePath(request.Target))
 	case "Symlink":
-		command = "ln -s -- " + shellQuote(request.Filepath) + " " + shellQuote(cleanRemotePath(request.Target))
+		command = "ln -s -- " + shellquote.Join(request.Filepath) + " " + shellquote.Join(cleanRemotePath(request.Target))
 	case "Link":
-		command = "ln -- " + shellQuote(remotePath) + " " + shellQuote(cleanRemotePath(request.Target))
+		command = "ln -- " + shellquote.Join(remotePath) + " " + shellquote.Join(cleanRemotePath(request.Target))
 	case "Setstat":
 		return h.setstat(request.Context(), remotePath, request)
 	default:
 		return fmt.Errorf("unsupported SFTP command %q", request.Method)
 	}
-	return h.exec(request.Context(), command, nil, io.Discard)
+	return h.exec(request.Context(), command, io.Discard)
 }
 
 func (h *sftpHandler) PosixRename(request *sftp.Request) error {
@@ -167,7 +168,7 @@ func (h *sftpHandler) downloadFile(ctx context.Context, remotePath string) (*os.
 	go func() {
 		execResult <- h.executor.Exec(ctx, h.target, []string{
 			"/bin/sh", "-c",
-			"tar cf - -C " + shellQuote(parent) + " " + shellQuote(base),
+			"tar cf - -C " + shellquote.Join(parent) + " " + shellquote.Join(base),
 		}, Streams{Stdout: writer, Stderr: io.Discard})
 		_ = writer.Close()
 	}()
@@ -250,7 +251,7 @@ func (h *sftpHandler) upload(
 	}()
 	execErr := h.executor.Exec(ctx, h.target, []string{
 		"/bin/sh", "-c",
-		"tar xf - -C " + shellQuote(parent),
+		"tar xf - -C " + shellquote.Join(parent),
 	}, Streams{Stdin: reader, Stderr: io.Discard})
 	if execErr != nil {
 		_ = reader.CloseWithError(execErr)
@@ -271,7 +272,7 @@ func (h *sftpHandler) stat(ctx context.Context, remotePath string) (os.FileInfo,
 	go func() {
 		execResult <- h.executor.Exec(ctx, h.target, []string{
 			"/bin/sh", "-c",
-			"tar cf - --no-recursion -C " + shellQuote(parent) + " " + shellQuote(base),
+			"tar cf - --no-recursion -C " + shellquote.Join(parent) + " " + shellquote.Join(base),
 		}, Streams{Stdout: writer, Stderr: io.Discard})
 		_ = writer.Close()
 	}()
@@ -303,7 +304,7 @@ func (h *sftpHandler) list(ctx context.Context, remotePath string) ([]os.FileInf
 		return []os.FileInfo{item}, nil
 	}
 	var stdout bytes.Buffer
-	if err := h.exec(ctx, "ls -A1 -- "+shellQuote(remotePath), nil, &stdout); err != nil {
+	if err := h.exec(ctx, "ls -A1 -- "+shellquote.Join(remotePath), &stdout); err != nil {
 		return nil, err
 	}
 	rawNames := strings.Split(strings.TrimSuffix(stdout.String(), "\n"), "\n")
@@ -334,29 +335,28 @@ func (h *sftpHandler) setstat(
 	commands := make([]string, 0, 3)
 	if flags.Permissions {
 		commands = append(commands,
-			"chmod "+strconv.FormatUint(uint64(attrs.FileMode().Perm()), 8)+" -- "+shellQuote(remotePath),
+			"chmod "+strconv.FormatUint(uint64(attrs.FileMode().Perm()), 8)+" -- "+shellquote.Join(remotePath),
 		)
 	}
 	if flags.Size {
 		commands = append(commands,
-			"truncate -s "+strconv.FormatUint(attrs.Size, 10)+" -- "+shellQuote(remotePath),
+			"truncate -s "+strconv.FormatUint(attrs.Size, 10)+" -- "+shellquote.Join(remotePath),
 		)
 	}
 	if flags.Acmodtime {
 		commands = append(commands,
-			"touch -m -d @"+strconv.FormatUint(uint64(attrs.Mtime), 10)+" -- "+shellQuote(remotePath),
+			"touch -m -d @"+strconv.FormatUint(uint64(attrs.Mtime), 10)+" -- "+shellquote.Join(remotePath),
 		)
 	}
 	if len(commands) == 0 {
 		return nil
 	}
-	return h.exec(ctx, strings.Join(commands, " && "), nil, io.Discard)
+	return h.exec(ctx, strings.Join(commands, " && "), io.Discard)
 }
 
 func (h *sftpHandler) exec(
 	ctx context.Context,
 	script string,
-	stdin io.Reader,
 	stdout io.Writer,
 ) error {
 	var stderr bytes.Buffer
@@ -364,7 +364,7 @@ func (h *sftpHandler) exec(
 		stdout = io.Discard
 	}
 	err := h.executor.Exec(ctx, h.target, []string{"/bin/sh", "-c", script}, Streams{
-		Stdin: stdin, Stdout: stdout, Stderr: &stderr,
+		Stdout: stdout, Stderr: &stderr,
 	})
 	if err != nil && strings.TrimSpace(stderr.String()) != "" {
 		return fmt.Errorf("%w: %s", err, strings.TrimSpace(stderr.String()))
@@ -435,10 +435,6 @@ func splitRemotePath(remotePath string) (string, string) {
 		return "/", "."
 	}
 	return path.Dir(remotePath), path.Base(remotePath)
-}
-
-func shellQuote(value string) string {
-	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }
 
 func archiveNameMatches(name, base string) bool {

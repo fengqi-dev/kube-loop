@@ -317,12 +317,16 @@ jobs:
       - name: Run macOS platform E2E
         shell: bash
         run: |
-          KUBELOOP_PLATFORM_E2E=1 \
-            go test -tags=e2e ./e2e/platform -count=1 -v
           go test -tags=e2e -c \
-            -o build/bin/helper-platform-e2e.test ./internal/helper
+            -o build/bin/helper-platform-e2e.test ./e2e/platform
+          KUBELOOP_PLATFORM_E2E=1 \
+            build/bin/helper-platform-e2e.test \
+              -test.v \
+              -test.skip '^TestPlatformDNSApplyAndRestore$'
           sudo -n env KUBELOOP_PLATFORM_E2E=1 \
-            build/bin/helper-platform-e2e.test -test.v
+            build/bin/helper-platform-e2e.test \
+              -test.v \
+              -test.run '^TestPlatformDNSApplyAndRestore$'
 
       - name: Uninstall helper
         if: always()

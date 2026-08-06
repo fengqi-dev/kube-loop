@@ -6,21 +6,23 @@ import (
 	"strings"
 
 	"github.com/fengqi-dev/kube-loop/internal/helper"
+	helperinstall "github.com/fengqi-dev/kube-loop/internal/helper/install"
 	"github.com/fengqi-dev/kube-loop/internal/singbox"
+	singboxruntime "github.com/fengqi-dev/kube-loop/internal/singbox/runtime"
 )
 
-func newSingboxRuntime(appendLog func(string, string)) *singbox.Runtime {
+func newSingboxRuntime(appendLog func(string, string)) *singboxruntime.Runtime {
 	logEvent := func(level, message string) {
 		if appendLog != nil {
 			appendLog(level, message)
 		}
 	}
-	runtime := &singbox.Runtime{}
+	runtime := &singboxruntime.Runtime{}
 	runtime.PrivilegedStart = func(
 		ctx context.Context, spec singbox.SessionSpec,
 	) (func(context.Context) error, error) {
 		logEvent("INFO", "ensuring privileged helper is ready")
-		if err := helper.EnsureInstall(ctx); err != nil {
+		if err := helperinstall.EnsureInstall(ctx); err != nil {
 			return nil, fmt.Errorf("ensure privileged helper: %w", err)
 		}
 		client, err := helper.NewClient()

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/fengqi-dev/kube-loop/internal/cluster/servicebinding"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -107,7 +108,7 @@ func pickServicePod(
 	}
 
 	slices, err := client.DiscoveryV1().EndpointSlices(namespace).List(ctx, metav1.ListOptions{
-		LabelSelector: interceptServiceNameLabel + "=" + service.Name,
+		LabelSelector: servicebinding.ServiceNameLabel + "=" + service.Name,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("list endpoint slices: %w", err)

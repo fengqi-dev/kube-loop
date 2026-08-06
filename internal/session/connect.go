@@ -12,6 +12,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/cluster"
 	"github.com/fengqi-dev/kube-loop/internal/intercept"
 	"github.com/fengqi-dev/kube-loop/internal/singbox"
+	singboxdist "github.com/fengqi-dev/kube-loop/internal/singbox/distribution"
 	"github.com/fengqi-dev/kube-loop/internal/socksbridge"
 	"github.com/fengqi-dev/kube-loop/internal/traffic"
 )
@@ -70,7 +71,7 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 					Phase:             PhaseIdle,
 					Mode:              current.Mode,
 					Message:           "Disconnected",
-					CoreVersion:       singbox.Version,
+					CoreVersion:       singboxdist.Version,
 					KubernetesVersion: current.KubernetesVersion,
 					Context:           current.Context,
 					Namespace:         current.Namespace,
@@ -93,7 +94,7 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 	prev := m.State()
 	state := State{
 		Phase: PhaseChecking, Mode: request.Mode, Context: request.Context, Namespace: request.Namespace,
-		Message: "Checking Kubernetes access", CoreVersion: singbox.Version,
+		Message: "Checking Kubernetes access", CoreVersion: singboxdist.Version,
 		// Keep the last probed version so the Overview subtitle does not flash
 		// back to the cluster name while ServerVersion is re-fetched.
 		KubernetesVersion: prev.KubernetesVersion,

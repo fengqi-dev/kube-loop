@@ -3,10 +3,6 @@ package intercept
 import (
 	"fmt"
 	"strings"
-
-	corev1 "k8s.io/api/core/v1"
-
-	"github.com/fengqi-dev/kube-loop/internal/cluster"
 )
 
 type hostRouteKey struct {
@@ -35,8 +31,8 @@ func newHostRouteRegistry() *hostRouteRegistry {
 }
 
 func (r *hostRouteRegistry) install(
-	service *corev1.Service,
-	ports []cluster.InterceptPort,
+	service *Service,
+	ports []InterceptPort,
 	portKeys map[string]PortMapping,
 	primaryAddrs map[string]string,
 	mode string,
@@ -87,7 +83,7 @@ func (r *hostRouteRegistry) lookup(host string, port uint16) (hostRoute, bool) {
 	return route, ok
 }
 
-func serviceRewriteHosts(service *corev1.Service) []string {
+func serviceRewriteHosts(service *Service) []string {
 	if service == nil {
 		return nil
 	}
@@ -95,7 +91,7 @@ func serviceRewriteHosts(service *corev1.Service) []string {
 	seen := map[string]struct{}{}
 	add := func(host string) {
 		host = normalizeRouteHost(host)
-		if host == "" || host == strings.ToLower(corev1.ClusterIPNone) {
+		if host == "" || host == "none" {
 			return
 		}
 		if _, ok := seen[host]; ok {
@@ -104,7 +100,7 @@ func serviceRewriteHosts(service *corev1.Service) []string {
 		seen[host] = struct{}{}
 		hosts = append(hosts, host)
 	}
-	add(service.Spec.ClusterIP)
+	add(service.ClusterIP)
 	name := service.Name
 	namespace := service.Namespace
 	if name != "" && namespace != "" {

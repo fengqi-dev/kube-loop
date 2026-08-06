@@ -113,6 +113,7 @@ fi
 
 MAIN_LOG="${ROOT}/e2e-local.log"
 PLATFORM_LOG="${ROOT}/e2e-platform.log"
+PLATFORM_TEST="${ROOT}/build/bin/helper-platform-e2e.test"
 SINGBOX="${ROOT}/build/bin/sing-box"
 HELPER_SOURCE="${ROOT}/build/embedded/kubeloop-helper"
 GATEWAY_BINARY="${ROOT}/build/bin/kube-loop-gateway"
@@ -323,11 +324,31 @@ run_platform_tests() {
     return 0
   fi
   log "Running ${ACTUAL_OS} Helper platform E2E"
+  mkdir -p "$(dirname "${PLATFORM_TEST}")"
+  if ! go test -tags=e2e -c -o "${PLATFORM_TEST}" ./e2e/platform; then
+    PLATFORM_EXIT=1
+    return 0
+  fi
   set +e
   KUBELOOP_PLATFORM_E2E=1 \
-    go test -tags=e2e ./e2e/platform \
-      -count=1 -timeout=5m -v 2>&1 | tee "${PLATFORM_LOG}"
-  PLATFORM_EXIT="${PIPESTATUS[0]}"
+    "${PLATFORM_TEST}" \
+      -test.v \
+      -test.timeout=5m \
+      -test.skip '^TestPlatformDNSApplyAndRestore$' \
+      2>&1 | tee "${PLATFORM_LOG}"
+  local user_exit="${PIPESTATUS[0]}"
+  sudo -n env KUBELOOP_PLATFORM_E2E=1 \
+    "${PLATFORM_TEST}" \
+      -test.v \
+      -test.timeout=5m \
+      -test.run '^TestPlatformDNSApplyAndRestore$' \
+      2>&1 | tee -a "${PLATFORM_LOG}"
+  local privileged_exit="${PIPESTATUS[0]}"
+  if [[ "${user_exit}" -ne 0 ]]; then
+    PLATFORM_EXIT="${user_exit}"
+  else
+    PLATFORM_EXIT="${privileged_exit}"
+  fi
   set -e
 }
 

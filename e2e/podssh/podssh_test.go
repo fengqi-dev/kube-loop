@@ -19,6 +19,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/e2e/harness"
 	podsshserver "github.com/fengqi-dev/kube-loop/internal/podssh"
 	"github.com/fengqi-dev/kube-loop/internal/session"
+	"github.com/kballard/go-shellquote"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -49,7 +50,7 @@ func TestPodSSHSelectsContainerFromLoginName(t *testing.T) {
 	harness.RequireRoutedViaKubeLoop(t, podIP, clusterIP)
 
 	info := waitPodSSHEndpoint(t, live.Manager, podName)
-	if want := "ssh -i '" + identity.path + "' echo@" + podIP; info.Command != want {
+	if want := shellquote.Join("ssh", "-i", identity.path, "echo@"+podIP); info.Command != want {
 		t.Fatalf("copy command = %q, want %q", info.Command, want)
 	}
 

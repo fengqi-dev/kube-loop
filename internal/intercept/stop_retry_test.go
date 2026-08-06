@@ -5,8 +5,6 @@ import (
 	"errors"
 	"strings"
 	"testing"
-
-	"github.com/fengqi-dev/kube-loop/internal/cluster"
 )
 
 type blockingRestoreCluster struct {
@@ -15,14 +13,20 @@ type blockingRestoreCluster struct {
 	release chan struct{}
 }
 
-func (b *blockingRestoreCluster) RestoreServiceIntercept(
+func (b *blockingRestoreCluster) ApplyServiceIntercept(
 	ctx context.Context,
 	contextName string,
-	snapshot cluster.ServiceInterceptSnapshot,
-) error {
-	close(b.started)
-	<-b.release
-	return b.fakeCluster.RestoreServiceIntercept(ctx, contextName, snapshot)
+	request ServiceInterceptRequest,
+) (Lease, []Backend, error) {
+	lease, backends, err := b.fakeCluster.ApplyServiceIntercept(ctx, contextName, request)
+	if err != nil {
+		return nil, nil, err
+	}
+	return fakeLease{release: func(ctx context.Context) error {
+		close(b.started)
+		<-b.release
+		return lease.Release(ctx)
+	}}, backends, nil
 }
 
 func TestStopRestoreFailureKeepsInterceptForRetry(t *testing.T) {

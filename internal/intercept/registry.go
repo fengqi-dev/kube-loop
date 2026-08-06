@@ -1,6 +1,10 @@
 package intercept
 
-import "sort"
+import (
+	"cmp"
+	"maps"
+	"slices"
+)
 
 // runtimeRegistry owns the active intercept indexes. Manager.mu protects every
 // call; the registry deliberately has no second lock so lifecycle operations
@@ -76,12 +80,7 @@ func (r *runtimeRegistry) remove(id string) *runtimeIntercept {
 }
 
 func (r *runtimeRegistry) ids() []string {
-	ids := make([]string, 0, len(r.byID))
-	for id := range r.byID {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
-	return ids
+	return slices.Sorted(maps.Keys(r.byID))
 }
 
 func (r *runtimeRegistry) values() []*runtimeIntercept {
@@ -109,10 +108,7 @@ func (r *runtimeRegistry) listByMode(mode string) []Info {
 		if runtime.info.Preview {
 			continue
 		}
-		itemMode := runtime.info.Mode
-		if itemMode == "" {
-			itemMode = ModeExchange
-		}
+		itemMode := cmp.Or(runtime.info.Mode, ModeExchange)
 		if itemMode == mode {
 			items = append(items, runtime.info)
 		}
@@ -133,8 +129,8 @@ func (r *runtimeRegistry) registrations() []controlRegistration {
 			})
 		}
 	}
-	sort.Slice(registrations, func(i, j int) bool {
-		return registrations[i].id < registrations[j].id
+	slices.SortFunc(registrations, func(a, b controlRegistration) int {
+		return cmp.Compare(a.id, b.id)
 	})
 	return registrations
 }

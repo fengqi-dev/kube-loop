@@ -8,6 +8,7 @@ import (
 
 	"github.com/fengqi-dev/kube-loop/internal/cluster"
 	"github.com/fengqi-dev/kube-loop/internal/helper"
+	helperinstall "github.com/fengqi-dev/kube-loop/internal/helper/install"
 	"github.com/fengqi-dev/kube-loop/internal/session"
 	"github.com/fengqi-dev/kube-loop/internal/store"
 )
@@ -83,7 +84,7 @@ func (a *App) InstallHelper() error {
 		ctx = context.Background()
 	}
 	a.manager.AppendLog("INFO", "installing privileged helper")
-	if err := helper.EnsureInstall(ctx); err != nil {
+	if err := helperinstall.EnsureInstall(ctx); err != nil {
 		a.manager.AppendLog("ERROR", fmt.Sprintf("install privileged helper: %v", err))
 		return err
 	}
@@ -101,7 +102,7 @@ func (a *App) UninstallHelper() error {
 		ctx = context.Background()
 	}
 	a.manager.AppendLog("INFO", "uninstalling privileged helper")
-	if err := helper.Uninstall(ctx); err != nil {
+	if err := helperinstall.Uninstall(ctx); err != nil {
 		a.manager.AppendLog("ERROR", fmt.Sprintf("uninstall privileged helper: %v", err))
 		return err
 	}

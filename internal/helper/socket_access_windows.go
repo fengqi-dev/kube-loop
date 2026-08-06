@@ -21,7 +21,7 @@ func configureHelperSocketAccess(path, ownerSID string) error {
 	)
 }
 
-func configureElevatedExchangeAccess(path, ownerSID string) error {
+func ConfigureElevatedExchangeAccess(path, ownerSID string) error {
 	if _, err := windows.StringToSid(ownerSID); err != nil {
 		return fmt.Errorf("parse Windows elevated request owner SID: %w", err)
 	}

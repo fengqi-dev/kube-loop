@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"slices"
 
 	"github.com/fengqi-dev/kube-loop/internal/cluster"
 	"github.com/fengqi-dev/kube-loop/internal/podssh"
@@ -44,13 +45,7 @@ func (m *Manager) EnablePodSSH(request podssh.EnableRequest) (podssh.Info, error
 		if container == "" {
 			return podssh.Info{}, fmt.Errorf("Pod %s/%s has no regular containers", pod.Namespace, pod.Name)
 		}
-		found := false
-		for _, name := range pod.Containers {
-			if name == container {
-				found = true
-				break
-			}
-		}
+		found := slices.Contains(pod.Containers, container)
 		if !found {
 			return podssh.Info{}, fmt.Errorf(
 				"container %q not found in Pod %s/%s", container, pod.Namespace, pod.Name,

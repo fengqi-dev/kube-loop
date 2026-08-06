@@ -50,20 +50,20 @@ func (m *Manager) StartMirror(ctx context.Context, mapping intercept.Mapping) (i
 }
 
 func (m *Manager) StopIntercept(ctx context.Context, id string) error {
-	m.AppendLog("INFO", fmt.Sprintf("stopping intercept %s", id))
+	m.AppendLog("INFO", "stopping intercept "+id)
 	err := m.intercept.Stop(ctx, id)
 	if err != nil {
 		m.AppendLog("ERROR", fmt.Sprintf("stop intercept %s: %v", id, err))
 	} else if !m.isRestoring() {
 		m.persistExchanges(m.State().Context)
 		m.persistMirrors(m.State().Context)
-		m.AppendLog("INFO", fmt.Sprintf("stopped intercept %s", id))
+		m.AppendLog("INFO", "stopped intercept "+id)
 	}
 	return err
 }
 
 func (m *Manager) TestIntercept(ctx context.Context, id string) ConnectivityTestResult {
-	m.AppendLog("INFO", fmt.Sprintf("testing intercept %s", id))
+	m.AppendLog("INFO", "testing intercept "+id)
 	if err := m.intercept.TestControl(id); err != nil {
 		m.AppendLog("ERROR", fmt.Sprintf("test intercept %s control: %v", id, err))
 		return ConnectivityTestResult{
@@ -78,7 +78,7 @@ func (m *Manager) TestIntercept(ctx context.Context, id string) ConnectivityTest
 			Error:       err.Error(),
 		}
 	}
-	m.AppendLog("INFO", fmt.Sprintf("session connectivity test passed: %s", id))
+	m.AppendLog("INFO", "session connectivity test passed: "+id)
 	return ConnectivityTestResult{Passed: true}
 }
 
@@ -105,13 +105,13 @@ func (m *Manager) StartPreview(ctx context.Context, request intercept.PreviewReq
 }
 
 func (m *Manager) StopPreview(ctx context.Context, id string) error {
-	m.AppendLog("INFO", fmt.Sprintf("stopping preview %s", id))
+	m.AppendLog("INFO", "stopping preview "+id)
 	err := m.intercept.Stop(ctx, id)
 	if err != nil {
 		m.AppendLog("ERROR", fmt.Sprintf("stop preview %s: %v", id, err))
 	} else if !m.isRestoring() {
 		m.persistPreviews(m.State().Context)
-		m.AppendLog("INFO", fmt.Sprintf("stopped preview %s", id))
+		m.AppendLog("INFO", "stopped preview "+id)
 	}
 	return err
 }
@@ -147,19 +147,19 @@ func (m *Manager) StartPortForwardSession(
 }
 
 func (m *Manager) StopPortForward(id string) error {
-	m.AppendLog("INFO", fmt.Sprintf("stopping port-forward %s", id))
+	m.AppendLog("INFO", "stopping port-forward "+id)
 	err := m.portfwd.Stop(id)
 	if err != nil {
 		m.AppendLog("ERROR", fmt.Sprintf("stop port-forward %s: %v", id, err))
 	} else {
 		m.persistPortForwards()
-		m.AppendLog("INFO", fmt.Sprintf("stopped port-forward %s", id))
+		m.AppendLog("INFO", "stopped port-forward "+id)
 	}
 	return err
 }
 
 func (m *Manager) TestPortForward(ctx context.Context, id string) ConnectivityTestResult {
-	m.AppendLog("INFO", fmt.Sprintf("testing port-forward %s", id))
+	m.AppendLog("INFO", "testing port-forward "+id)
 	if err := m.portfwd.Test(ctx, id); err != nil {
 		m.AppendLog("ERROR", fmt.Sprintf("test port-forward %s: %v", id, err))
 		return ConnectivityTestResult{
@@ -167,7 +167,7 @@ func (m *Manager) TestPortForward(ctx context.Context, id string) ConnectivityTe
 			Error:       err.Error(),
 		}
 	}
-	m.AppendLog("INFO", fmt.Sprintf("port-forward connectivity test passed: %s", id))
+	m.AppendLog("INFO", "port-forward connectivity test passed: "+id)
 	return ConnectivityTestResult{Passed: true}
 }
 

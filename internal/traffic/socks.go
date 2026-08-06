@@ -2,6 +2,7 @@ package traffic
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -363,30 +364,12 @@ func decodeDatagram(packet []byte) ([]byte, error) {
 	if packet[2] != 0 {
 		return nil, errors.New("fragmented SOCKS UDP datagrams are not supported")
 	}
-	reader := bytesReader(packet[3:])
+	reader := bytes.NewReader(packet[3:])
 	if _, _, err := readAddress(reader); err != nil {
 		return nil, err
 	}
 	return packet[len(packet)-reader.Len():], nil
 }
-
-type sliceReader struct {
-	value []byte
-	index int
-}
-
-func bytesReader(value []byte) *sliceReader { return &sliceReader{value: value} }
-
-func (r *sliceReader) Read(target []byte) (int, error) {
-	if r.index >= len(r.value) {
-		return 0, io.EOF
-	}
-	n := copy(target, r.value[r.index:])
-	r.index += n
-	return n, nil
-}
-
-func (r *sliceReader) Len() int { return len(r.value) - r.index }
 
 func (c *udpConn) Close() error {
 	var first error

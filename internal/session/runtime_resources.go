@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"slices"
 	"sync"
 )
 
@@ -44,8 +45,7 @@ func (r *sessionRuntime) AddFunc(name string, close func()) {
 func (r *sessionRuntime) Close() error {
 	r.closeOnce.Do(func() {
 		var errs []error
-		for index := len(r.resources) - 1; index >= 0; index-- {
-			resource := r.resources[index]
+		for _, resource := range slices.Backward(r.resources) {
 			if err := resource.closer.Close(); err != nil {
 				if errors.Is(err, net.ErrClosed) {
 					continue

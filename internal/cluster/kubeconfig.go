@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"sync"
 	"time"
@@ -79,18 +80,18 @@ func (p *Provider) SetExtraKubeconfigFiles(paths []string) {
 func (p *Provider) ExtraKubeconfigFiles() []string {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	return append([]string(nil), p.extraFiles...)
+	return slices.Clone(p.extraFiles)
 }
 
 func (p *Provider) loadingRules() *clientcmd.ClientConfigLoadingRules {
 	rules := clientcmd.NewDefaultClientConfigLoadingRules()
 	p.mu.RLock()
-	extras := append([]string(nil), p.extraFiles...)
+	extras := slices.Clone(p.extraFiles)
 	p.mu.RUnlock()
 	if len(extras) == 0 {
 		return rules
 	}
-	precedence := append([]string{}, rules.GetLoadingPrecedence()...)
+	precedence := slices.Clone(rules.GetLoadingPrecedence())
 	precedence = append(precedence, extras...)
 	rules.Precedence = precedence
 	rules.ExplicitPath = ""
@@ -100,7 +101,7 @@ func (p *Provider) loadingRules() *clientcmd.ClientConfigLoadingRules {
 // DefaultKubeconfigPaths returns the system/default kubeconfig loading paths.
 func (p *Provider) DefaultKubeconfigPaths() []string {
 	rules := clientcmd.NewDefaultClientConfigLoadingRules()
-	return append([]string{}, rules.GetLoadingPrecedence()...)
+	return slices.Clone(rules.GetLoadingPrecedence())
 }
 
 // KubeconfigFiles lists default + user-added sources for the UI.

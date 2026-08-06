@@ -238,7 +238,7 @@ func TestDialUDPHidesSOCKSDatagramFraming(t *testing.T) {
 			serverErr <- readErr
 			return
 		}
-		packetReader := bytesReader(packet[3:n])
+		packetReader := bytes.NewReader(packet[3:n])
 		host, port, readErr := readAddress(packetReader)
 		if readErr != nil {
 			serverErr <- readErr

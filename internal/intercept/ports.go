@@ -4,9 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	corev1 "k8s.io/api/core/v1"
-
-	"github.com/fengqi-dev/kube-loop/internal/cluster"
 	"github.com/fengqi-dev/kube-loop/internal/tunnel"
 )
 
@@ -41,45 +38,45 @@ func normalizePreviewPorts(ports []PortMapping) ([]PortMapping, error) {
 
 func buildPreviewPorts(
 	locals []PortMapping, allocate func() int32,
-) ([]cluster.InterceptPort, error) {
-	ports := make([]cluster.InterceptPort, 0, len(locals))
+) []InterceptPort {
+	ports := make([]InterceptPort, 0, len(locals))
 	for _, local := range locals {
-		protocol := corev1.ProtocolTCP
+		protocol := ProtocolTCP
 		if normalizeProtocol(local.Protocol) == "UDP" {
-			protocol = corev1.ProtocolUDP
+			protocol = ProtocolUDP
 		}
-		name := fmt.Sprintf("%s-%d", strings.ToLower(string(protocol)), local.ServicePort)
-		ports = append(ports, cluster.InterceptPort{
+		name := fmt.Sprintf("%s-%d", strings.ToLower(protocol), local.ServicePort)
+		ports = append(ports, InterceptPort{
 			Name:        name,
 			Protocol:    protocol,
 			ServicePort: local.ServicePort,
 			ListenPort:  allocate(),
 		})
 	}
-	return ports, nil
+	return ports
 }
 
 func buildPortsForLocals(
-	service *corev1.Service,
+	service *Service,
 	locals []PortMapping,
 	allocate func() int32,
-) ([]cluster.InterceptPort, error) {
-	ports := make([]cluster.InterceptPort, 0, len(locals))
+) ([]InterceptPort, error) {
+	ports := make([]InterceptPort, 0, len(locals))
 	for _, local := range locals {
 		found := false
-		for _, servicePort := range service.Spec.Ports {
+		for _, servicePort := range service.Ports {
 			protocol := servicePort.Protocol
 			if protocol == "" {
-				protocol = corev1.ProtocolTCP
+				protocol = ProtocolTCP
 			}
-			if servicePort.Port != local.ServicePort || !equalProtocol(local.Protocol, string(protocol)) {
+			if servicePort.Port != local.ServicePort || !equalProtocol(local.Protocol, protocol) {
 				continue
 			}
 			name := servicePort.Name
 			if name == "" {
 				name = networkName(protocolToNetwork(protocol)) + fmt.Sprintf("-%d", servicePort.Port)
 			}
-			ports = append(ports, cluster.InterceptPort{
+			ports = append(ports, InterceptPort{
 				Name:        name,
 				Protocol:    protocol,
 				ServicePort: servicePort.Port,
@@ -101,18 +98,18 @@ func buildPortsForLocals(
 	return ports, nil
 }
 
-func protocolToNetwork(protocol corev1.Protocol) byte {
-	if protocol == corev1.ProtocolUDP {
+func protocolToNetwork(protocol string) byte {
+	if normalizeProtocol(protocol) == ProtocolUDP {
 		return tunnel.NetworkUDP
 	}
 	return tunnel.NetworkTCP
 }
 
-func (m Mapping) resolveLocals(service *corev1.Service) ([]PortMapping, error) {
+func (m Mapping) resolveLocals(service *Service) ([]PortMapping, error) {
 	if len(m.Ports) == 0 {
-		locals := make([]PortMapping, 0, len(service.Spec.Ports))
-		for _, port := range service.Spec.Ports {
-			protocol := string(port.Protocol)
+		locals := make([]PortMapping, 0, len(service.Ports))
+		for _, port := range service.Ports {
+			protocol := port.Protocol
 			if protocol == "" {
 				protocol = "TCP"
 			}
@@ -142,15 +139,15 @@ func (m Mapping) resolveLocals(service *corev1.Service) ([]PortMapping, error) {
 	return m.Ports, nil
 }
 
-func localFor(port cluster.InterceptPort, locals []PortMapping) PortMapping {
+func localFor(port InterceptPort, locals []PortMapping) PortMapping {
 	for _, local := range locals {
-		if local.ServicePort == port.ServicePort && equalProtocol(local.Protocol, string(port.Protocol)) {
+		if local.ServicePort == port.ServicePort && equalProtocol(local.Protocol, port.Protocol) {
 			return local
 		}
 	}
 	return PortMapping{
 		ServicePort: port.ServicePort,
-		Protocol:    string(port.Protocol),
+		Protocol:    port.Protocol,
 		LocalHost:   "127.0.0.1",
 		LocalPort:   int(port.ServicePort),
 	}

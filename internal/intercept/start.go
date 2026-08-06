@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"maps"
-
-	"github.com/fengqi-dev/kube-loop/internal/cluster"
 )
 
 func (m *Manager) StartIntercept(ctx context.Context, mapping Mapping) (Info, error) {
@@ -76,24 +74,25 @@ func (m *Manager) startServiceIntercept(ctx context.Context, mapping Mapping) (I
 	portKeys := transaction.portKeys
 
 	selector := map[string]string{}
-	maps.Copy(selector, service.Spec.Selector)
-	snapshot := &cluster.ServiceInterceptSnapshot{
+	maps.Copy(selector, service.Selector)
+	lease, backends, err := m.cluster.ApplyServiceIntercept(ctx, contextName, ServiceInterceptRequest{
 		Namespace: mapping.Namespace,
 		Service:   mapping.Service,
 		Selector:  selector,
 		Ports:     ports,
 		GatewayIP: gatewayIP,
-	}
-	if err := m.cluster.ApplyServiceIntercept(ctx, contextName, snapshot, interceptID); err != nil {
+		ID:        interceptID,
+	})
+	if err != nil {
 		return Info{}, err
 	}
 	transaction.compensate(func() {
-		_ = m.cluster.RestoreServiceIntercept(ctx, contextName, *snapshot)
+		_ = lease.Release(ctx)
 	})
 
 	var primaryAddrs map[string]string
 	if mode == ModeMirror {
-		primaryAddrs, err = buildPrimaryAddrs(*snapshot, ports, portKeys, interceptID)
+		primaryAddrs, err = buildPrimaryAddrs(backends, ports, portKeys, interceptID)
 		if err != nil {
 			return Info{}, err
 		}
@@ -103,7 +102,7 @@ func (m *Manager) startServiceIntercept(ctx context.Context, mapping Mapping) (I
 		ID:        interceptID,
 		Namespace: mapping.Namespace,
 		Service:   mapping.Service,
-		ClusterIP: service.Spec.ClusterIP,
+		ClusterIP: service.ClusterIP,
 		Mode:      mode,
 		Ports:     ports,
 		Locals:    locals,
@@ -117,7 +116,7 @@ func (m *Manager) startServiceIntercept(ctx context.Context, mapping Mapping) (I
 	}
 	hostKeys := m.routes.install(service, ports, portKeys, primaryAddrs, mode, false, interceptID)
 	m.registry.add(&runtimeIntercept{
-		info: info, snapshot: *snapshot, portKeys: portKeys, primaryAddrs: primaryAddrs, hostKeys: hostKeys,
+		info: info, lease: lease, portKeys: portKeys, primaryAddrs: primaryAddrs, hostKeys: hostKeys,
 	})
 	m.registry.release(key, reservation)
 	m.mu.Unlock()
@@ -158,10 +157,7 @@ func (m *Manager) StartPreview(ctx context.Context, request PreviewRequest) (Inf
 	m.mu.Unlock()
 	defer m.releaseStartReservation(key, reservation)
 
-	ports, err := buildPreviewPorts(locals, m.allocateListenPort)
-	if err != nil {
-		return Info{}, err
-	}
+	ports := buildPreviewPorts(locals, m.allocateListenPort)
 
 	previewID := fmt.Sprintf("%s/%s", request.Namespace, request.Name)
 	transaction := newStartTransaction(control)
@@ -171,25 +167,25 @@ func (m *Manager) StartPreview(ctx context.Context, request PreviewRequest) (Inf
 	}
 	portKeys := transaction.portKeys
 
-	snapshot := cluster.PreviewServiceSnapshot{
+	service, lease, err := m.cluster.CreatePreviewService(ctx, contextName, PreviewServiceRequest{
 		Namespace: request.Namespace,
 		Service:   request.Name,
 		Ports:     ports,
 		GatewayIP: gatewayIP,
-	}
-	service, err := m.cluster.CreatePreviewService(ctx, contextName, snapshot, previewID)
+		ID:        previewID,
+	})
 	if err != nil {
 		return Info{}, err
 	}
 	transaction.compensate(func() {
-		_ = m.cluster.DeletePreviewService(ctx, contextName, snapshot)
+		_ = lease.Release(ctx)
 	})
 
 	info := Info{
 		ID:        previewID,
 		Namespace: request.Namespace,
 		Service:   request.Name,
-		ClusterIP: service.Spec.ClusterIP,
+		ClusterIP: service.ClusterIP,
 		Preview:   true,
 		Ports:     ports,
 		Locals:    locals,
@@ -203,7 +199,7 @@ func (m *Manager) StartPreview(ctx context.Context, request PreviewRequest) (Inf
 	}
 	hostKeys := m.routes.install(service, ports, portKeys, nil, ModeExchange, true, previewID)
 	m.registry.add(&runtimeIntercept{
-		info: info, preview: &snapshot, portKeys: portKeys, hostKeys: hostKeys,
+		info: info, lease: lease, portKeys: portKeys, hostKeys: hostKeys,
 	})
 	m.registry.release(key, reservation)
 	m.mu.Unlock()

@@ -7,9 +7,7 @@ import (
 	"net"
 	"net/netip"
 	"runtime"
-	"sort"
 	"strconv"
-	"strings"
 
 	"github.com/fengqi-dev/kube-loop/internal/dnsname"
 )
@@ -20,6 +18,7 @@ const (
 	DirectOutbound     = "direct"
 	DefaultDNSListen   = "127.0.0.1"
 	DefaultDNSPort     = 1053
+	defaultTUNAddress  = "198.19.0.1/30"
 
 	// TrafficInbound is the single loopback SOCKS inbound for all feature adapters.
 	// Feature identity is carried as SOCKS auth_user (see TrafficUser*).
@@ -241,20 +240,19 @@ func Generate(network NetworkSpec, options Options) ([]byte, error) {
 	tunInbound := map[string]any{
 		// dns_mode is sing-box 1.14+; we pin 1.13 and use /etc/resolver
 		// (or platform split DNS) + dns-in instead of TUN DNS hijack.
-		"type":          "tun",
-		"tag":           "tun-in",
-		"address":       []string{options.TUNAddress},
-		"mtu":           9000,
-		"auto_route":    true,
-		"strict_route":  strictRouteForPlatform(runtime.GOOS),
+		"type":       "tun",
+		"tag":        "tun-in",
+		"address":    []string{options.TUNAddress},
+		"mtu":        9000,
+		"auto_route": true,
+		// Windows WFP strict_route blocks DNS on other interfaces
+		"strict_route": runtime.GOOS != "windows",
+		// Linux: auto_redirect uses nftables and avoids TUN vs Docker/Minikube
+		// bridge conflicts that otherwise break kubectl port-forward to Gateway.
+		// See https://sing-box.sagernet.org/configuration/inbound/tun/
+		"auto_redirect": runtime.GOOS == "linux",
 		"stack":         "mixed",
 		"route_address": routes,
-	}
-	// Linux: auto_redirect uses nftables and avoids TUN vs Docker/Minikube
-	// bridge conflicts that otherwise break kubectl port-forward to Gateway.
-	// See https://sing-box.sagernet.org/configuration/inbound/tun/
-	if runtime.GOOS == "linux" {
-		tunInbound["auto_redirect"] = true
 	}
 	inbounds := []map[string]any{
 		tunInbound,
@@ -326,175 +324,4 @@ func Generate(network NetworkSpec, options Options) ([]byte, error) {
 	}
 
 	return json.MarshalIndent(config, "", "  ")
-}
-
-// strictRouteForPlatform keeps strict routing on platforms where it only
-// constrains route selection. On Windows sing-box implements strict_route
-// with WFP rules that also block DNS on other interfaces. That can conflict
-// with Clash/Mihomo and other VPN clients even though kube-loop only installs
-// precise Pod/Service routes.
-func strictRouteForPlatform(goos string) bool {
-	return goos != "windows"
-}
-
-func clusterRoutes(network NetworkSpec) ([]string, error) {
-	routeSet := make(map[string]struct{})
-	for _, raw := range network.PodCIDRs {
-		prefix, err := netip.ParsePrefix(raw)
-		if err != nil {
-			return nil, fmt.Errorf("invalid pod CIDR %q: %w", raw, err)
-		}
-		routeSet[prefix.Masked().String()] = struct{}{}
-	}
-	for _, raw := range network.ServiceCIDRs {
-		prefix, err := netip.ParsePrefix(raw)
-		if err != nil {
-			return nil, fmt.Errorf("invalid service CIDR %q: %w", raw, err)
-		}
-		routeSet[prefix.Masked().String()] = struct{}{}
-	}
-	// Fall back to per-Service /32s when the cluster Service CIDR is unknown.
-	if len(network.ServiceCIDRs) == 0 {
-		for _, raw := range network.ServiceIPs {
-			ip, err := netip.ParseAddr(raw)
-			if err != nil {
-				return nil, fmt.Errorf("invalid service IP %q: %w", raw, err)
-			}
-			routeSet[netip.PrefixFrom(ip, ip.BitLen()).String()] = struct{}{}
-		}
-	}
-	if len(routeSet) == 0 {
-		return nil, errors.New("cluster discovery returned no routable addresses")
-	}
-	routes := make([]string, 0, len(routeSet))
-	for route := range routeSet {
-		routes = append(routes, route)
-	}
-	sort.Strings(routes)
-	return routes, nil
-}
-
-func validatePort(port int, label string) error {
-	if port < 1 || port > 65535 {
-		return fmt.Errorf("%s port must be between 1 and 65535", errLabel(label))
-	}
-	return nil
-}
-
-func errLabel(label string) string { return label }
-
-// ResolverDomains returns split-DNS match domains routed to the local dns-in.
-// "svc" is included so macOS /etc/resolver/svc catches short names like
-// static-web.default.svc (search domains alone query the primary resolver).
-func ResolverDomains(namespace string, clusterDomains []string, hosts []HostAlias, extra ...string) []string {
-	domains, err := dnsname.NormalizeClusterDomains(clusterDomains)
-	if err != nil || len(domains) == 0 {
-		domains = []string{dnsname.DefaultClusterDomain}
-	}
-	out := make([]string, 0, len(domains)*3+len(hosts)+len(extra)+1)
-	seen := make(map[string]struct{}, len(domains)*3+len(hosts)+len(extra)+1)
-	add := func(domain string) {
-		domain = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(domain)), ".")
-		if domain == "" {
-			return
-		}
-		if _, exists := seen[domain]; exists {
-			return
-		}
-		seen[domain] = struct{}{}
-		out = append(out, domain)
-	}
-	for _, domain := range domains {
-		add(domain)
-		add("svc." + domain)
-		if namespace != "" {
-			add(namespace + ".svc." + domain)
-		}
-	}
-	add("svc")
-	for _, item := range hosts {
-		add(item.Domain)
-	}
-	for _, domain := range extra {
-		add(domain)
-	}
-	return out
-}
-
-// NormalizeHostAliases validates and canonicalizes host aliases.
-// An empty input returns nil (clears config).
-func NormalizeHostAliases(items []HostAlias) ([]HostAlias, error) {
-	if len(items) == 0 {
-		return nil, nil
-	}
-	out := make([]HostAlias, 0, len(items))
-	seen := make(map[string]struct{}, len(items))
-	for _, item := range items {
-		domain := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(item.Domain)), ".")
-		if domain == "" {
-			return nil, errors.New("host alias domain is required")
-		}
-		if strings.ContainsAny(domain, " \t/") {
-			return nil, fmt.Errorf("invalid host alias domain %q", item.Domain)
-		}
-		if !safeDNSName(domain) {
-			return nil, fmt.Errorf("invalid host alias domain %q", item.Domain)
-		}
-		ip, err := netip.ParseAddr(strings.TrimSpace(item.IP))
-		if err != nil || !ip.Is4() {
-			return nil, fmt.Errorf("invalid host alias IPv4 %q", item.IP)
-		}
-		if _, exists := seen[domain]; exists {
-			return nil, fmt.Errorf("duplicate host alias domain %q", domain)
-		}
-		seen[domain] = struct{}{}
-		out = append(out, HostAlias{Domain: domain, IP: ip.String()})
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Domain < out[j].Domain })
-	return out, nil
-}
-
-func safeDNSName(value string) bool {
-	if value == "" || len(value) > 253 || strings.HasPrefix(value, ".") ||
-		strings.HasSuffix(value, ".") {
-		return false
-	}
-	for label := range strings.SplitSeq(value, ".") {
-		if label == "" || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
-			return false
-		}
-		for _, r := range label {
-			if (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '-' {
-				return false
-			}
-		}
-	}
-	return true
-}
-
-// SearchDomains returns Kubernetes-style DNS search suffixes for short names
-// such as mysql, mysql.default, and mysql.default.svc.
-func SearchDomains(namespace string, clusterDomains ...string) []string {
-	if namespace == "" {
-		namespace = "default"
-	}
-	domains, err := dnsname.NormalizeClusterDomains(clusterDomains)
-	if err != nil || len(domains) == 0 {
-		domains = []string{dnsname.DefaultClusterDomain}
-	}
-	out := make([]string, 0, len(domains)*3)
-	seen := make(map[string]struct{}, len(domains)*3)
-	add := func(domain string) {
-		if _, ok := seen[domain]; ok {
-			return
-		}
-		seen[domain] = struct{}{}
-		out = append(out, domain)
-	}
-	for _, domain := range domains {
-		add(namespace + ".svc." + domain)
-		add("svc." + domain)
-		add(domain)
-	}
-	return out
 }

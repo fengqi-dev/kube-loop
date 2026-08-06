@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/fengqi-dev/kube-loop/internal/singbox"
+	singboxdist "github.com/fengqi-dev/kube-loop/internal/singbox/distribution"
 )
 
 func main() {
@@ -27,7 +27,7 @@ func main() {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
-	path, err := (&singbox.Installer{}).Ensure(ctx)
+	path, err := (&singboxdist.Installer{}).Ensure(ctx)
 	if err != nil {
 		fatal(err)
 	}

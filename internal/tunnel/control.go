@@ -32,10 +32,10 @@ func WriteControlMessage(w io.Writer, message ControlMessage) error {
 	if err != nil {
 		return err
 	}
-	header := make([]byte, 3)
+	var header [3]byte
 	header[0] = message.Type
 	binary.BigEndian.PutUint16(header[1:3], uint16(len(payload)))
-	if err := writeAll(w, header); err != nil {
+	if err := writeAll(w, header[:]); err != nil {
 		return err
 	}
 	return writeAll(w, payload)
@@ -66,27 +66,23 @@ func encodeControlPayload(message ControlMessage) ([]byte, error) {
 		if err := validateInterceptID(message.InterceptID); err != nil {
 			return nil, err
 		}
-		if message.Network != NetworkTCP && message.Network != NetworkUDP {
-			return nil, fmt.Errorf("unsupported network %d", message.Network)
+		if err := validateNetwork(message.Network); err != nil {
+			return nil, err
 		}
 		if message.ListenPort == 0 {
 			return nil, errors.New("listen port is required")
 		}
-		payload := make([]byte, 2+len(message.InterceptID)+1+2)
-		binary.BigEndian.PutUint16(payload[0:2], uint16(len(message.InterceptID)))
-		copy(payload[2:], message.InterceptID)
-		offset := 2 + len(message.InterceptID)
-		payload[offset] = message.Network
-		binary.BigEndian.PutUint16(payload[offset+1:], message.ListenPort)
-		return payload, nil
+		payload := appendUint16String(
+			make([]byte, 0, 5+len(message.InterceptID)),
+			message.InterceptID,
+		)
+		payload = append(payload, message.Network)
+		return binary.BigEndian.AppendUint16(payload, message.ListenPort), nil
 	case CtrlUnregister:
 		if err := validateInterceptID(message.InterceptID); err != nil {
 			return nil, err
 		}
-		payload := make([]byte, 2+len(message.InterceptID))
-		binary.BigEndian.PutUint16(payload[0:2], uint16(len(message.InterceptID)))
-		copy(payload[2:], message.InterceptID)
-		return payload, nil
+		return appendUint16String(nil, message.InterceptID), nil
 	case CtrlInboundReady:
 		if err := validateInterceptID(message.InterceptID); err != nil {
 			return nil, err
@@ -94,15 +90,15 @@ func encodeControlPayload(message ControlMessage) ([]byte, error) {
 		if message.StreamID == 0 {
 			return nil, errors.New("stream id is required")
 		}
-		if message.Network != NetworkTCP && message.Network != NetworkUDP {
-			return nil, fmt.Errorf("unsupported network %d", message.Network)
+		if err := validateNetwork(message.Network); err != nil {
+			return nil, err
 		}
-		payload := make([]byte, 8+2+len(message.InterceptID)+1)
-		binary.BigEndian.PutUint64(payload[0:8], message.StreamID)
-		binary.BigEndian.PutUint16(payload[8:10], uint16(len(message.InterceptID)))
-		copy(payload[10:], message.InterceptID)
-		payload[10+len(message.InterceptID)] = message.Network
-		return payload, nil
+		payload := binary.BigEndian.AppendUint64(
+			make([]byte, 0, 11+len(message.InterceptID)),
+			message.StreamID,
+		)
+		payload = appendUint16String(payload, message.InterceptID)
+		return append(payload, message.Network), nil
 	case CtrlAck:
 		return nil, nil
 	case CtrlError:
@@ -132,8 +128,8 @@ func decodeControlPayload(messageType byte, payload []byte) (ControlMessage, err
 		message.InterceptID = id
 		message.Network = rest[0]
 		message.ListenPort = binary.BigEndian.Uint16(rest[1:3])
-		if message.Network != NetworkTCP && message.Network != NetworkUDP {
-			return ControlMessage{}, fmt.Errorf("unsupported network %d", message.Network)
+		if err := validateNetwork(message.Network); err != nil {
+			return ControlMessage{}, err
 		}
 		if message.ListenPort == 0 {
 			return ControlMessage{}, errors.New("listen port is required")
@@ -166,8 +162,8 @@ func decodeControlPayload(messageType byte, payload []byte) (ControlMessage, err
 		if message.StreamID == 0 {
 			return ControlMessage{}, errors.New("stream id is required")
 		}
-		if message.Network != NetworkTCP && message.Network != NetworkUDP {
-			return ControlMessage{}, fmt.Errorf("unsupported network %d", message.Network)
+		if err := validateNetwork(message.Network); err != nil {
+			return ControlMessage{}, err
 		}
 		return message, nil
 	case CtrlAck:
@@ -203,6 +199,13 @@ func readLengthPrefixed(payload []byte) (string, []byte, error) {
 func validateInterceptID(id string) error {
 	if id == "" || len(id) > maxIDSize {
 		return errors.New("intercept id length is invalid")
+	}
+	return nil
+}
+
+func validateNetwork(network byte) error {
+	if network != NetworkTCP && network != NetworkUDP {
+		return fmt.Errorf("unsupported network %d", network)
 	}
 	return nil
 }

@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"runtime"
 
-	"github.com/fengqi-dev/kube-loop/internal/singbox"
+	singboxdist "github.com/fengqi-dev/kube-loop/internal/singbox/distribution"
 )
 
 // LocateBundledSingBox finds the packaged sing-box binary next to the desktop
@@ -63,7 +63,7 @@ func configuredSingBoxPath(auth AuthFile) string {
 }
 
 func resolveSingBoxPath(auth AuthFile) (string, error) {
-	installer := &singbox.Installer{
+	installer := &singboxdist.Installer{
 		BundledPath:     configuredSingBoxPath(auth),
 		DisableOverride: true,
 		DisableDownload: true,

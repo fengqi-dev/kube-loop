@@ -5,12 +5,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/fengqi-dev/kube-loop/internal/cluster"
 	"github.com/fengqi-dev/kube-loop/internal/filemanager"
 	"github.com/fengqi-dev/kube-loop/internal/helper"
+	helperinstall "github.com/fengqi-dev/kube-loop/internal/helper/install"
 	"github.com/fengqi-dev/kube-loop/internal/intercept"
 	"github.com/fengqi-dev/kube-loop/internal/podssh"
 	"github.com/fengqi-dev/kube-loop/internal/portfwd"
@@ -190,7 +192,7 @@ func (b managerBackend) HelperStatus(ctx context.Context) helper.Status {
 
 func (b managerBackend) InstallHelper(ctx context.Context) error {
 	b.appendLog("INFO", "MCP requested privileged helper installation")
-	if err := helper.EnsureInstall(ctxOrBackground(ctx)); err != nil {
+	if err := helperinstall.EnsureInstall(ctxOrBackground(ctx)); err != nil {
 		b.appendLog("ERROR", fmt.Sprintf("MCP install privileged helper: %v", err))
 		return err
 	}
@@ -200,7 +202,7 @@ func (b managerBackend) InstallHelper(ctx context.Context) error {
 
 func (b managerBackend) UninstallHelper(ctx context.Context) error {
 	b.appendLog("INFO", "MCP requested privileged helper uninstall")
-	if err := helper.Uninstall(ctxOrBackground(ctx)); err != nil {
+	if err := helperinstall.Uninstall(ctxOrBackground(ctx)); err != nil {
 		b.appendLog("ERROR", fmt.Sprintf("MCP uninstall privileged helper: %v", err))
 		return err
 	}
@@ -252,13 +254,7 @@ func (b managerBackend) ExecPodCommand(
 	if container == "" {
 		return PodCommandResult{}, fmt.Errorf("Pod %s/%s has no regular containers", request.Namespace, request.Pod)
 	}
-	foundContainer := false
-	for _, name := range selected.Containers {
-		if name == container {
-			foundContainer = true
-			break
-		}
-	}
+	foundContainer := slices.Contains(selected.Containers, container)
 	if !foundContainer {
 		return PodCommandResult{}, fmt.Errorf(
 			"container %q not found in Pod %s/%s",
@@ -299,8 +295,10 @@ func (b managerBackend) ExecPodCommand(
 	if execErr != nil {
 		result.ExitCode = 1
 		result.Error = execErr.Error()
-		var exitErr interface{ ExitStatus() int }
-		if errors.As(execErr, &exitErr) {
+		if exitErr, ok := errors.AsType[interface {
+			error
+			ExitStatus() int
+		}](execErr); ok {
 			result.ExitCode = exitErr.ExitStatus()
 		} else if errors.Is(commandCtx.Err(), context.DeadlineExceeded) {
 			result.ExitCode = 124
@@ -353,10 +351,7 @@ func newCappedBuffer(limit int) *cappedBuffer {
 func (b *cappedBuffer) Write(value []byte) (int, error) {
 	available := b.limit - b.Len()
 	if available > 0 {
-		write := len(value)
-		if write > available {
-			write = available
-		}
+		write := min(len(value), available)
 		_, _ = b.Buffer.Write(value[:write])
 	}
 	if len(value) > available {

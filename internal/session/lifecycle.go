@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/fengqi-dev/kube-loop/internal/singbox"
+	singboxdist "github.com/fengqi-dev/kube-loop/internal/singbox/distribution"
 )
 
 func (m *Manager) Disconnect() error {
@@ -36,7 +36,7 @@ func (m *Manager) disconnect(clearConnected bool) error {
 			Phase:             PhaseIdle,
 			Mode:              state.Mode,
 			Message:           "Disconnected",
-			CoreVersion:       singbox.Version,
+			CoreVersion:       singboxdist.Version,
 			KubernetesVersion: state.KubernetesVersion,
 			Context:           state.Context,
 			Namespace:         state.Namespace,

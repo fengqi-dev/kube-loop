@@ -1,22 +1,29 @@
 package socksbridge
 
 import (
+	"bufio"
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"net"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/fengqi-dev/kube-loop/internal/tunnel"
+	"github.com/things-go/go-socks5/statute"
 )
 
 func TestSOCKSUDPPacketRoundTrip(t *testing.T) {
 	want := []byte("dns payload")
-	packet, err := encodeUDPPacket("10.96.0.10", 53, want)
+	packet, err := encodeTestDatagram("10.96.0.10", 53, want)
 	if err != nil {
 		t.Fatal(err)
 	}
-	host, port, got, err := parseUDPPacket(packet)
+	host, port, got, err := decodeTestDatagram(packet)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -26,16 +33,206 @@ func TestSOCKSUDPPacketRoundTrip(t *testing.T) {
 }
 
 func TestSOCKSUDPDomainRoundTrip(t *testing.T) {
-	packet, err := encodeUDPPacket("kube-dns.kube-system.svc.cluster.local", 53, []byte{1})
+	packet, err := encodeTestDatagram(
+		"kube-dns.kube-system.svc.cluster.local", 53, []byte{1},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	host, port, _, err := parseUDPPacket(packet)
+	host, port, _, err := decodeTestDatagram(packet)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if host != "kube-dns.kube-system.svc.cluster.local" || port != 53 {
 		t.Fatalf("got %s:%d", host, port)
+	}
+}
+
+func TestFramedConnAdaptsGatewayDatagrams(t *testing.T) {
+	local, remote := net.Pipe()
+	defer local.Close()
+	defer remote.Close()
+	connection := newFramedConn(local)
+	result := make(chan error, 1)
+	go func() {
+		if err := tunnel.WriteDatagram(remote, []byte("from-gateway")); err != nil {
+			result <- err
+			return
+		}
+		payload, err := tunnel.ReadDatagram(bufio.NewReader(remote), nil)
+		if err == nil && string(payload) != "to-gateway" {
+			err = io.ErrUnexpectedEOF
+		}
+		result <- err
+	}()
+
+	buffer := make([]byte, tunnel.MaxDatagramSize)
+	read, err := connection.Read(buffer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(buffer[:read]); got != "from-gateway" {
+		t.Fatalf("read %q", got)
+	}
+	if _, err := connection.Write([]byte("to-gateway")); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-result; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDialGatewayTCPPreservesDomain(t *testing.T) {
+	gateway, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer gateway.Close()
+	result := make(chan error, 1)
+	go func() {
+		connection, err := gateway.Accept()
+		if err != nil {
+			result <- err
+			return
+		}
+		defer connection.Close()
+		request, err := tunnel.ReadOpen(connection)
+		if err != nil {
+			result <- err
+			return
+		}
+		want := tunnel.OpenRequest{
+			Command: tunnel.CommandTCP,
+			Host:    "echo.default.svc.cluster.local",
+			Port:    8080,
+		}
+		if request != want {
+			result <- fmt.Errorf("open request = %#v, want %#v", request, want)
+			return
+		}
+		if err := tunnel.WriteStatus(connection, nil); err != nil {
+			result <- err
+			return
+		}
+		var payload [4]byte
+		if _, err := io.ReadFull(connection, payload[:]); err != nil {
+			result <- err
+			return
+		}
+		_, err = connection.Write(append([]byte("gateway:"), payload[:]...))
+		result <- err
+	}()
+
+	server := &Server{GatewayAddress: gateway.Addr().String()}
+	connection, err := server.dial(
+		context.Background(),
+		"tcp",
+		"echo.default.svc.cluster.local:8080",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connection.Close()
+	_ = connection.SetDeadline(time.Now().Add(3 * time.Second))
+	if _, err := connection.Write([]byte("ping")); err != nil {
+		t.Fatal(err)
+	}
+	response := make([]byte, len("gateway:ping"))
+	if _, err := io.ReadFull(connection, response); err != nil {
+		t.Fatal(err)
+	}
+	if string(response) != "gateway:ping" {
+		t.Fatalf("response = %q", response)
+	}
+	if err := <-result; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDialGatewayUDPAdaptsDatagrams(t *testing.T) {
+	gateway, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer gateway.Close()
+	result := make(chan error, 1)
+	go func() {
+		connection, err := gateway.Accept()
+		if err != nil {
+			result <- err
+			return
+		}
+		defer connection.Close()
+		request, err := tunnel.ReadOpen(connection)
+		if err != nil {
+			result <- err
+			return
+		}
+		want := tunnel.OpenRequest{Command: tunnel.CommandUDP, Host: "10.96.0.10", Port: 53}
+		if request != want {
+			result <- fmt.Errorf("open request = %#v, want %#v", request, want)
+			return
+		}
+		if err := tunnel.WriteStatus(connection, nil); err != nil {
+			result <- err
+			return
+		}
+		payload, err := tunnel.ReadDatagram(bufio.NewReader(connection), nil)
+		if err != nil {
+			result <- err
+			return
+		}
+		if string(payload) != "query" {
+			result <- fmt.Errorf("datagram = %q", payload)
+			return
+		}
+		result <- tunnel.WriteDatagram(connection, []byte("answer"))
+	}()
+
+	server := &Server{GatewayAddress: gateway.Addr().String()}
+	connection, err := server.dial(context.Background(), "udp", "10.96.0.10:53")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connection.Close()
+	_ = connection.SetDeadline(time.Now().Add(3 * time.Second))
+	if _, err := connection.Write([]byte("query")); err != nil {
+		t.Fatal(err)
+	}
+	response := make([]byte, 32)
+	read, err := connection.Read(response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(response[:read]) != "answer" {
+		t.Fatalf("response = %q", response[:read])
+	}
+	if err := <-result; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDialGatewayReturnsStatusError(t *testing.T) {
+	gateway, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer gateway.Close()
+	go func() {
+		connection, acceptErr := gateway.Accept()
+		if acceptErr != nil {
+			return
+		}
+		defer connection.Close()
+		if _, readErr := tunnel.ReadOpen(connection); readErr == nil {
+			_ = tunnel.WriteStatus(connection, errors.New("target denied"))
+		}
+	}()
+
+	server := &Server{GatewayAddress: gateway.Addr().String()}
+	_, err = server.dial(context.Background(), "tcp", "10.96.0.1:443")
+	if err == nil || !strings.Contains(err.Error(), "target denied") {
+		t.Fatalf("dial error = %v", err)
 	}
 }
 
@@ -69,7 +266,7 @@ func TestHostTCPHandlerBypassesGateway(t *testing.T) {
 					return
 				}
 				defer upstream.Close()
-				relay(client, upstream)
+				relay(client, client, upstream)
 			}, true
 		},
 	}
@@ -177,8 +374,10 @@ func TestHostUDPHandlerBypassesGateway(t *testing.T) {
 	if _, err := io.ReadFull(control, reply); err != nil {
 		t.Fatal(err)
 	}
-	// UDP ASSOCIATE
-	if _, err := control.Write([]byte{5, 3, 0, 1, 0, 0, 0, 0, 0, 0}); err != nil {
+	// UDP ASSOCIATE with a claimed client port that deliberately differs from
+	// the socket below. sing-box can behave this way, and a loopback-only bridge
+	// must accept the actual datagram source.
+	if _, err := control.Write([]byte{5, 3, 0, 1, 127, 0, 0, 1, 0, 9}); err != nil {
 		t.Fatal(err)
 	}
 	head := make([]byte, 4)
@@ -206,7 +405,7 @@ func TestHostUDPHandlerBypassesGateway(t *testing.T) {
 	defer client.Close()
 	_ = client.SetDeadline(time.Now().Add(3 * time.Second))
 
-	packet, err := encodeUDPPacket("10.105.153.132", 9090, []byte("ping"))
+	packet, err := encodeTestDatagram("10.105.153.132", 9090, []byte("ping"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -218,11 +417,34 @@ func TestHostUDPHandlerBypassesGateway(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _, payload, err := parseUDPPacket(buf[:n])
+	_, _, payload, err := decodeTestDatagram(buf[:n])
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got := string(payload); got != "local-udp:ping" {
 		t.Fatalf("got %q", got)
 	}
+}
+
+func encodeTestDatagram(host string, port uint16, payload []byte) ([]byte, error) {
+	packet, err := statute.NewDatagram(
+		net.JoinHostPort(host, strconv.Itoa(int(port))),
+		payload,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return packet.Bytes(), nil
+}
+
+func decodeTestDatagram(packet []byte) (string, uint16, []byte, error) {
+	value, err := statute.ParseDatagram(packet)
+	if err != nil {
+		return "", 0, nil, err
+	}
+	host := value.DstAddr.FQDN
+	if host == "" {
+		host = value.DstAddr.IP.String()
+	}
+	return host, uint16(value.DstAddr.Port), value.Data, nil
 }

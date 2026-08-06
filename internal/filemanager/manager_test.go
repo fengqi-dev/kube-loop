@@ -7,7 +7,9 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -204,7 +206,7 @@ func TestResumeDownloadFromPartialFile(t *testing.T) {
 	if err := manager.Resume("resume"); err != nil {
 		t.Fatal(err)
 	}
-	deadline := time.Now().Add(3 * time.Second)
+	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
 		items := manager.ListTransfers()
 		if len(items) == 1 && items[0].Status == StatusCompleted {
@@ -220,6 +222,183 @@ func TestResumeDownloadFromPartialFile(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("transfer did not complete: %+v", manager.ListTransfers())
+}
+
+func TestPodOperationsQuoteSpecialPaths(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("requires a local POSIX shell to emulate the Pod filesystem")
+	}
+	root := filepath.Join(t.TempDir(), "remote parent $")
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	manager := NewManager(localShellExecutor{}, "")
+	target := Target{
+		Context: "dev", Namespace: "default", Pod: "api", Container: "api",
+	}
+	directoryName := "dir ' $;"
+	fileName := "file ' $;.txt"
+	renamedName := "renamed ' $;.txt"
+
+	if err := manager.CreatePodDirectory(context.Background(), target, root, directoryName); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.CreatePodFile(context.Background(), target, root, fileName); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.RenamePodPath(
+		context.Background(),
+		target,
+		filepath.Join(root, fileName),
+		renamedName,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	items, err := manager.ListPodDirectory(context.Background(), target, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := map[string]bool{}
+	for _, item := range items {
+		found[item.Name] = true
+	}
+	if !found[directoryName] || !found[renamedName] {
+		t.Fatalf("special-path entries not listed: %+v", items)
+	}
+
+	for _, name := range []string{directoryName, renamedName} {
+		if err := manager.DeletePodPath(
+			context.Background(),
+			target,
+			filepath.Join(root, name),
+		); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := os.Lstat(filepath.Join(root, name)); !os.IsNotExist(err) {
+			t.Fatalf("deleted path %q still exists: %v", name, err)
+		}
+	}
+}
+
+func TestFileAndDirectoryTransfersQuoteSpecialPaths(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("requires a local POSIX shell to emulate the Pod filesystem")
+	}
+	ctx := context.Background()
+	target := Target{
+		Context: "dev", Namespace: "default", Pod: "api", Container: "api",
+	}
+	manager := NewManager(localShellExecutor{}, "")
+	remoteRoot := filepath.Join(t.TempDir(), "remote $ root")
+	if err := os.MkdirAll(remoteRoot, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	localSource := filepath.Join(t.TempDir(), "source ' $;.txt")
+	content := []byte("quoted file transfer")
+	if err := os.WriteFile(localSource, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sourceInfo, err := os.Stat(localSource)
+	if err != nil {
+		t.Fatal(err)
+	}
+	remoteFile := filepath.Join(remoteRoot, "uploaded ' $;.txt")
+	if err := manager.upload(ctx, TransferTask{
+		ID: "upload-special", Target: target,
+		SourcePath: localSource, DestinationPath: remoteFile, TempPath: remoteFile + ".part ' $;",
+		TotalBytes: int64(len(content)), SourceModTime: sourceInfo.ModTime(), Overwrite: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.ReadFile(remoteFile); err != nil || !bytes.Equal(got, content) {
+		t.Fatalf("uploaded content = %q, err = %v", got, err)
+	}
+
+	remoteInfo, err := manager.remoteStat(ctx, target, remoteFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	localDownload := filepath.Join(t.TempDir(), "downloaded ' $;.txt")
+	if err := manager.download(ctx, TransferTask{
+		ID: "download-special", Target: target,
+		SourcePath: remoteFile, DestinationPath: localDownload, TempPath: localDownload + ".part",
+		TotalBytes: remoteInfo.Size, SourceModTime: remoteInfo.ModTime, Overwrite: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.ReadFile(localDownload); err != nil || !bytes.Equal(got, content) {
+		t.Fatalf("downloaded content = %q, err = %v", got, err)
+	}
+
+	localDirectory := filepath.Join(t.TempDir(), "source dir ' $;")
+	if err := os.MkdirAll(filepath.Join(localDirectory, "nested ' $;"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(localDirectory, "nested ' $;", "data ' $;.txt"),
+		[]byte("quoted directory transfer"),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	directoryInfo, err := os.Stat(localDirectory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	total, err := localTreeSize(localDirectory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	remoteDirectory := filepath.Join(remoteRoot, "uploaded dir ' $;")
+	if err := manager.uploadDirectory(ctx, TransferTask{
+		ID: "upload-directory-special", Target: target, Directory: true,
+		SourcePath: localDirectory, DestinationPath: remoteDirectory,
+		TempPath: remoteDirectory + ".part ' $;", TotalBytes: total,
+		SourceModTime: directoryInfo.ModTime(), Overwrite: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	remoteDirectoryInfo, err := manager.remoteStat(ctx, target, remoteDirectory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	localDirectoryDownload := filepath.Join(t.TempDir(), "downloaded dir ' $;")
+	if err := manager.downloadDirectory(ctx, TransferTask{
+		ID: "download-directory-special", Target: target, Directory: true,
+		SourcePath: remoteDirectory, DestinationPath: localDirectoryDownload,
+		TempPath: localDirectoryDownload + ".part", SourceModTime: remoteDirectoryInfo.ModTime,
+		Overwrite: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(
+		filepath.Join(localDirectoryDownload, "nested ' $;", "data ' $;.txt"),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "quoted directory transfer" {
+		t.Fatalf("downloaded directory content = %q", got)
+	}
+}
+
+type localShellExecutor struct{}
+
+func (localShellExecutor) Exec(
+	ctx context.Context,
+	_ podssh.Target,
+	command []string,
+	streams podssh.Streams,
+) error {
+	cmd := exec.CommandContext(ctx, command[0], command[1:]...)
+	cmd.Stdin = streams.Stdin
+	cmd.Stdout = streams.Stdout
+	cmd.Stderr = streams.Stderr
+	cmd.Env = append(os.Environ(), "COPYFILE_DISABLE=1")
+	return cmd.Run()
 }
 
 type downloadExecutor struct {

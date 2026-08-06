@@ -62,7 +62,7 @@ func (s *controlSession) redial(
 	registrations []controlRegistration,
 ) (*controlClient, chan struct{}, error) {
 	var lastErr error
-	for attempt := 0; attempt < controlRedialAttempts; attempt++ {
+	for attempt := range controlRedialAttempts {
 		if attempt > 0 {
 			delay := time.Duration(attempt) * controlRedialRetryDelay
 			timer := time.NewTimer(delay)

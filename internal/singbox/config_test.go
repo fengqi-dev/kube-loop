@@ -60,8 +60,8 @@ func TestGenerateRoutesOnlyClusterTraffic(t *testing.T) {
 		if !strings.Contains(text, `"auto_redirect": true`) {
 			t.Fatalf("linux tun config must enable auto_redirect:\n%s", text)
 		}
-	} else if strings.Contains(text, `"auto_redirect"`) {
-		t.Fatalf("auto_redirect is linux-only:\n%s", text)
+	} else if !strings.Contains(text, `"auto_redirect": false`) {
+		t.Fatalf("non-linux tun config must disable auto_redirect:\n%s", text)
 	}
 
 	var parsed map[string]any
@@ -88,24 +88,6 @@ func TestGenerateRoutesOnlyClusterTraffic(t *testing.T) {
 		if value == "0.0.0.0/1" || value == "128.0.0.0/1" {
 			t.Fatalf("global route leaked into tun route_address: %v", routeAddress)
 		}
-	}
-}
-
-func TestStrictRouteForPlatform(t *testing.T) {
-	tests := []struct {
-		goos string
-		want bool
-	}{
-		{goos: "windows", want: false},
-		{goos: "linux", want: true},
-		{goos: "darwin", want: true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.goos, func(t *testing.T) {
-			if got := strictRouteForPlatform(tt.goos); got != tt.want {
-				t.Fatalf("strictRouteForPlatform(%q) = %v, want %v", tt.goos, got, tt.want)
-			}
-		})
 	}
 }
 
@@ -173,24 +155,6 @@ func TestResolverDomains(t *testing.T) {
 	if !strings.Contains(strings.Join(custom, ","), "corp.local") ||
 		!strings.Contains(strings.Join(custom, ","), "cluster.local") {
 		t.Fatalf("ResolverDomains custom domains: %v", custom)
-	}
-}
-
-func TestDNSSearchCandidates(t *testing.T) {
-	got := dnsSearchCandidates("static-web.default.svc.", SearchDomains("default"))
-	joined := strings.Join(got, ",")
-	if !strings.Contains(joined, "static-web.default.svc.cluster.local.") {
-		t.Fatalf("missing FQDN candidate: %v", got)
-	}
-	if got[0] != "static-web.default.svc.default.svc.cluster.local." {
-		t.Fatalf("Kubernetes search expansion should be first: %v", got)
-	}
-	if got[len(got)-1] != "static-web.default.svc." {
-		t.Fatalf("original name should be the final fallback: %v", got)
-	}
-	fqdn := dnsSearchCandidates("api.default.svc.cluster.local.", SearchDomains("default"))
-	if len(fqdn) != 1 || fqdn[0] != "api.default.svc.cluster.local." {
-		t.Fatalf("FQDN should not expand: %v", fqdn)
 	}
 }
 

@@ -1,12 +1,6 @@
 package intercept
 
-import (
-	"testing"
-
-	corev1 "k8s.io/api/core/v1"
-
-	"github.com/fengqi-dev/kube-loop/internal/cluster"
-)
+import "testing"
 
 func TestRuntimeRegistryIndexesAndListsDeterministically(t *testing.T) {
 	registry := newRuntimeRegistry()
@@ -51,9 +45,9 @@ func TestRuntimeRegistryFindsPortsAndBuildsSortedRegistrations(t *testing.T) {
 	registry.add(&runtimeIntercept{
 		info: Info{
 			ID: "team/api", Namespace: "team", Service: "api", Mode: ModeMirror,
-			Ports: []cluster.InterceptPort{
-				{Protocol: corev1.ProtocolUDP, ServicePort: 53, ListenPort: 20002},
-				{Protocol: corev1.ProtocolTCP, ServicePort: 80, ListenPort: 20001},
+			Ports: []InterceptPort{
+				{Protocol: ProtocolUDP, ServicePort: 53, ListenPort: 20002},
+				{Protocol: ProtocolTCP, ServicePort: 80, ListenPort: 20001},
 			},
 		},
 		portKeys: map[string]PortMapping{

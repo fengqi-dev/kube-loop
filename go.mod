@@ -4,9 +4,13 @@ go 1.26.0
 
 require (
 	github.com/google/uuid v1.6.0
+	github.com/hashicorp/go-version v1.9.0
+	github.com/kballard/go-shellquote v0.0.0-20180428030007-95032a82bc51
 	github.com/miekg/dns v1.1.72
 	github.com/modelcontextprotocol/go-sdk v1.7.0
+	github.com/pelletier/go-toml/v2 v2.4.3
 	github.com/pkg/sftp v1.13.11
+	github.com/things-go/go-socks5 v0.1.1
 	github.com/wailsapp/wails/v2 v2.13.0
 	go.yaml.in/yaml/v3 v3.0.5
 	golang.org/x/crypto v0.54.0

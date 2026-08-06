@@ -1,15 +1,17 @@
 package update
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
+
+	version "github.com/hashicorp/go-version"
 )
 
 const (
@@ -34,19 +36,13 @@ type Checker struct {
 }
 
 func (c *Checker) Check(ctx context.Context) (Info, error) {
-	current := c.CurrentVersion
-	if current == "" {
-		current = "dev"
-	}
+	current := cmp.Or(c.CurrentVersion, "dev")
 	info := Info{
 		CurrentVersion: current,
 		URL:            releasesPageURL,
 		CheckedAt:      time.Now(),
 	}
-	url := c.LatestURL
-	if url == "" {
-		url = latestReleaseURL
-	}
+	url := cmp.Or(c.LatestURL, latestReleaseURL)
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return info, fmt.Errorf("create update request: %w", err)
@@ -93,92 +89,15 @@ func (c *Checker) Check(ctx context.Context) (Info, error) {
 	return info, nil
 }
 
-type version struct {
-	numbers    [3]int
-	prerelease []string
-}
-
 func compareVersions(left, right string) int {
 	leftVersion, leftErr := parseVersion(left)
 	rightVersion, rightErr := parseVersion(right)
 	if leftErr != nil || rightErr != nil {
 		return 0
 	}
-	for index := range leftVersion.numbers {
-		if leftVersion.numbers[index] < rightVersion.numbers[index] {
-			return -1
-		}
-		if leftVersion.numbers[index] > rightVersion.numbers[index] {
-			return 1
-		}
-	}
-	switch {
-	case len(leftVersion.prerelease) == 0 && len(rightVersion.prerelease) > 0:
-		return 1
-	case len(leftVersion.prerelease) > 0 && len(rightVersion.prerelease) == 0:
-		return -1
-	}
-	for index := 0; index < len(leftVersion.prerelease) && index < len(rightVersion.prerelease); index++ {
-		comparison := compareIdentifier(leftVersion.prerelease[index], rightVersion.prerelease[index])
-		if comparison != 0 {
-			return comparison
-		}
-	}
-	switch {
-	case len(leftVersion.prerelease) < len(rightVersion.prerelease):
-		return -1
-	case len(leftVersion.prerelease) > len(rightVersion.prerelease):
-		return 1
-	default:
-		return 0
-	}
+	return leftVersion.Compare(rightVersion)
 }
 
-func parseVersion(value string) (version, error) {
-	value = strings.TrimPrefix(strings.TrimSpace(value), "v")
-	value = strings.SplitN(value, "+", 2)[0]
-	parts := strings.SplitN(value, "-", 2)
-	numbers := strings.Split(parts[0], ".")
-	if len(numbers) < 1 || len(numbers) > 3 {
-		return version{}, errors.New("invalid version")
-	}
-	var parsed version
-	for index, number := range numbers {
-		if number == "" {
-			return version{}, errors.New("invalid version")
-		}
-		item, err := strconv.Atoi(number)
-		if err != nil || item < 0 {
-			return version{}, errors.New("invalid version")
-		}
-		parsed.numbers[index] = item
-	}
-	if len(parts) == 2 {
-		if parts[1] == "" {
-			return version{}, errors.New("invalid prerelease")
-		}
-		parsed.prerelease = strings.Split(parts[1], ".")
-	}
-	return parsed, nil
-}
-
-func compareIdentifier(left, right string) int {
-	leftNumber, leftErr := strconv.Atoi(left)
-	rightNumber, rightErr := strconv.Atoi(right)
-	switch {
-	case leftErr == nil && rightErr == nil:
-		if leftNumber < rightNumber {
-			return -1
-		}
-		if leftNumber > rightNumber {
-			return 1
-		}
-		return 0
-	case leftErr == nil:
-		return -1
-	case rightErr == nil:
-		return 1
-	default:
-		return strings.Compare(left, right)
-	}
+func parseVersion(value string) (*version.Version, error) {
+	return version.NewVersion(strings.TrimSpace(value))
 }

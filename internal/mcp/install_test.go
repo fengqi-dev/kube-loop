@@ -1,11 +1,14 @@
 package mcp
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	toml "github.com/pelletier/go-toml/v2"
 )
 
 func TestInstallClientConfigWithoutToken(t *testing.T) {
@@ -136,15 +139,16 @@ func TestInstallClientConfigVSCodeAndCodex(t *testing.T) {
 		t.Fatal(err)
 	}
 	initial := `
+# keep this comment
 model = "gpt-5"
 
 [mcp_servers.other]
 command = "echo"
 
-[mcp_servers.kubeloop]
+[mcp_servers."kubeloop"]
 url = "http://old"
 
-[mcp_servers.kubeloop.http_headers]
+[mcp_servers."kubeloop".http_headers]
 Authorization = "Bearer old"
 `
 	if err := os.WriteFile(codexPath, []byte(initial), 0o600); err != nil {
@@ -158,22 +162,93 @@ Authorization = "Bearer old"
 		t.Fatal(err)
 	}
 	text := string(updated)
-	if !strings.Contains(text, `model = "gpt-5"`) || !strings.Contains(text, `[mcp_servers.other]`) {
+	if !strings.Contains(text, "# keep this comment") ||
+		!strings.Contains(text, `model = "gpt-5"`) ||
+		!strings.Contains(text, `[mcp_servers.other]`) {
 		t.Fatalf("lost unrelated config:\n%s", text)
-	}
-	if strings.Count(text, "[mcp_servers.kubeloop]") != 1 {
-		t.Fatalf("duplicate kubeloop section:\n%s", text)
-	}
-	if !strings.Contains(text, url) || !strings.Contains(text, `Authorization = "Bearer tok"`) {
-		t.Fatalf("missing kubeloop values:\n%s", text)
 	}
 	if strings.Contains(text, "http://old") || strings.Contains(text, "Bearer old") {
 		t.Fatalf("old kubeloop values remain:\n%s", text)
+	}
+	var codex map[string]any
+	if err := toml.Unmarshal(updated, &codex); err != nil {
+		t.Fatal(err)
+	}
+	codexServers := codex["mcp_servers"].(map[string]any)
+	codexEntry := codexServers["kubeloop"].(map[string]any)
+	if codexEntry["url"] != url {
+		t.Fatalf("codex url = %#v", codexEntry["url"])
+	}
+	headers := codexEntry["http_headers"].(map[string]any)
+	if headers["Authorization"] != "Bearer tok" {
+		t.Fatalf("codex headers = %#v", headers)
 	}
 }
 
 func TestInstallClientConfigRejectsUnknown(t *testing.T) {
 	if _, err := InstallClientConfig("windsurf", "http://127.0.0.1:1/mcp", "t"); err == nil {
 		t.Fatal("expected error")
+	}
+}
+
+func TestInstallCodexWithoutTokenRemovesOldHeaders(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	initial := `
+[[profiles]]
+name = "before"
+
+[mcp_servers.kubeloop]
+url = "http://old"
+
+[mcp_servers.kubeloop.http_headers]
+Authorization = "Bearer old"
+
+[[profiles]]
+name = "after"
+`
+	if err := os.WriteFile(path, []byte(initial), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := installCodexTOML(path, "http://127.0.0.1:30808/mcp", ""); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "Bearer old") ||
+		strings.Contains(string(raw), "http_headers") {
+		t.Fatalf("stale authorization headers remain:\n%s", raw)
+	}
+	if strings.Count(string(raw), "[[profiles]]") != 2 ||
+		!strings.Contains(string(raw), `name = "before"`) ||
+		!strings.Contains(string(raw), `name = "after"`) {
+		t.Fatalf("unrelated array tables were changed:\n%s", raw)
+	}
+	var decoded map[string]any
+	if err := toml.Unmarshal(raw, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	server := decoded["mcp_servers"].(map[string]any)["kubeloop"].(map[string]any)
+	if _, exists := server["http_headers"]; exists {
+		t.Fatalf("http_headers should be absent: %#v", server)
+	}
+}
+
+func TestInstallCodexInvalidTOMLLeavesFileUntouched(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	initial := []byte("[mcp_servers.kubeloop\nurl = \"http://old\"\r\n")
+	if err := os.WriteFile(path, initial, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := installCodexTOML(path, "http://127.0.0.1:30808/mcp", "token"); err == nil {
+		t.Fatal("expected invalid TOML error")
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, initial) {
+		t.Fatalf("invalid config was modified:\ngot  %q\nwant %q", got, initial)
 	}
 }

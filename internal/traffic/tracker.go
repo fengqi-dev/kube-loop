@@ -33,6 +33,10 @@ type Tracker struct {
 	conns map[string]*tracked
 }
 
+type ContextDialer interface {
+	DialContext(context.Context, string, string) (net.Conn, error)
+}
+
 type tracked struct {
 	feature     string
 	network     string
@@ -51,9 +55,7 @@ func NewTracker() *Tracker {
 
 // TrackedDialer dials through an inner dialer and records feature + byte counts.
 type TrackedDialer struct {
-	Inner interface {
-		DialContext(context.Context, string, string) (net.Conn, error)
-	}
+	Inner   ContextDialer
 	Feature string
 	Tracker *Tracker
 }
@@ -186,3 +188,8 @@ func (c *trackedConn) closeTracked() {
 		}
 	})
 }
+
+var (
+	_ ContextDialer = Dialer{}
+	_ ContextDialer = TrackedDialer{}
+)

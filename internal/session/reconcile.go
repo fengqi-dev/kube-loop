@@ -22,11 +22,13 @@ type LogEvent struct {
 
 func (m *Manager) appendLogLocked(level, message string) {
 	event := LogEvent{Time: time.Now(), Level: level, Message: message}
-	events := append(m.stateHub.state.Events, event)
-	if len(events) > maxActivityEvents {
-		events = append([]LogEvent{}, events[len(events)-maxActivityEvents:]...)
+	m.stateHub.state.Events = append(m.stateHub.state.Events, event)
+	if len(m.stateHub.state.Events) > maxActivityEvents {
+		m.stateHub.state.Events = append(
+			[]LogEvent{},
+			m.stateHub.state.Events[len(m.stateHub.state.Events)-maxActivityEvents:]...,
+		)
 	}
-	m.stateHub.state.Events = events
 	log.Printf("%s: %s", level, message)
 }
 

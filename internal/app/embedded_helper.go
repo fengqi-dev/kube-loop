@@ -5,7 +5,7 @@ import (
 	"path"
 	"strings"
 
-	"github.com/fengqi-dev/kube-loop/internal/helper"
+	helperinstall "github.com/fengqi-dev/kube-loop/internal/helper/install"
 )
 
 func registerEmbeddedHelpers(embeddedHelperFiles fs.FS) {
@@ -28,6 +28,6 @@ func registerEmbeddedHelpers(embeddedHelperFiles fs.FS) {
 		if readErr != nil || len(content) == 0 {
 			continue
 		}
-		helper.SetBundledFile(name, content)
+		helperinstall.SetBundledFile(name, content)
 	}
 }

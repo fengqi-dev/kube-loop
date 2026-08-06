@@ -1,25 +1,15 @@
 package intercept
 
-import (
-	"testing"
-
-	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
-	"github.com/fengqi-dev/kube-loop/internal/cluster"
-)
+import "testing"
 
 func TestHostRouteRegistryInstallsLooksUpAndRemovesRoutes(t *testing.T) {
 	registry := newHostRouteRegistry()
-	service := &corev1.Service{
-		ObjectMeta: metav1.ObjectMeta{Name: "API", Namespace: "Team"},
-		Spec: corev1.ServiceSpec{
-			ClusterIP: "10.96.0.8",
-		},
+	service := &Service{
+		Name: "API", Namespace: "Team", ClusterIP: "10.96.0.8",
 	}
-	ports := []cluster.InterceptPort{
-		{Protocol: corev1.ProtocolTCP, ServicePort: 80},
-		{Protocol: corev1.ProtocolUDP, ServicePort: 53},
+	ports := []InterceptPort{
+		{Protocol: ProtocolTCP, ServicePort: 80},
+		{Protocol: ProtocolUDP, ServicePort: 53},
 	}
 	portKeys := map[string]PortMapping{
 		"team/api:tcp:80": {
@@ -64,8 +54,8 @@ func TestHostRouteRegistryInstallsLooksUpAndRemovesRoutes(t *testing.T) {
 func TestHostRouteRegistrySkipsServicesWithoutRewriteHosts(t *testing.T) {
 	registry := newHostRouteRegistry()
 	keys := registry.install(
-		&corev1.Service{Spec: corev1.ServiceSpec{ClusterIP: corev1.ClusterIPNone}},
-		[]cluster.InterceptPort{{Protocol: corev1.ProtocolTCP, ServicePort: 80}},
+		&Service{ClusterIP: "None"},
+		[]InterceptPort{{Protocol: ProtocolTCP, ServicePort: 80}},
 		nil,
 		nil,
 		"",

@@ -3,11 +3,9 @@ package cluster
 import (
 	"context"
 	"fmt"
-	"net/netip"
-	"sort"
-	"strings"
+	"slices"
 
-	"go.yaml.in/yaml/v3"
+	clusterdiscovery "github.com/fengqi-dev/kube-loop/internal/cluster/discovery"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -83,7 +81,7 @@ func (p *Provider) Namespaces(ctx context.Context, contextName string) ([]string
 	for _, item := range list.Items {
 		names = append(names, item.Name)
 	}
-	sort.Strings(names)
+	slices.Sort(names)
 	return names, nil
 }
 
@@ -125,143 +123,17 @@ func (p *Provider) Discover(ctx context.Context, contextName string, namespaces 
 	if err != nil {
 		return Discovery{}, err
 	}
-
-	podCIDRs := make(map[string]struct{})
-	if nodes, nodeErr := client.CoreV1().Nodes().List(ctx, metav1.ListOptions{}); nodeErr == nil {
-		podCIDRs = collectNodePodCIDRs(nodes.Items)
-	}
-
-	var pods []corev1.Pod
-	var services []corev1.Service
-	if len(namespaces) == 0 {
-		podList, podErr := client.CoreV1().Pods("").List(ctx, metav1.ListOptions{})
-		if podErr != nil {
-			return Discovery{}, fmt.Errorf("list pods: %w", podErr)
-		}
-		pods = podList.Items
-		svcList, svcErr := client.CoreV1().Services("").List(ctx, metav1.ListOptions{})
-		if svcErr != nil {
-			return Discovery{}, fmt.Errorf("list services: %w", svcErr)
-		}
-		services = svcList.Items
-	} else {
-		for _, ns := range namespaces {
-			podList, podErr := client.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{})
-			if podErr != nil {
-				return Discovery{}, fmt.Errorf("list pods in %s: %w", ns, podErr)
-			}
-			pods = append(pods, podList.Items...)
-			svcList, svcErr := client.CoreV1().Services(ns).List(ctx, metav1.ListOptions{})
-			if svcErr != nil {
-				return Discovery{}, fmt.Errorf("list services in %s: %w", ns, svcErr)
-			}
-			services = append(services, svcList.Items...)
-		}
-		// Best-effort CoreDNS lookup outside scoped namespaces.
-		for _, dnsNS := range []string{"kube-system"} {
-			if svc, getErr := client.CoreV1().Services(dnsNS).Get(ctx, "kube-dns", metav1.GetOptions{}); getErr == nil {
-				services = append(services, *svc)
-			} else if svc, getErr := client.CoreV1().Services(dnsNS).Get(ctx, "coredns", metav1.GetOptions{}); getErr == nil {
-				services = append(services, *svc)
-			}
-		}
-	}
-
-	serviceIPs := make(map[string]struct{})
-	dnsServer := ""
-	for _, service := range services {
-		for _, raw := range service.Spec.ClusterIPs {
-			if ip, parseErr := netip.ParseAddr(raw); parseErr == nil {
-				serviceIPs[ip.String()] = struct{}{}
-				if service.Namespace == "kube-system" &&
-					(service.Name == "kube-dns" || service.Name == "coredns") {
-					dnsServer = ip.String()
-				}
-			}
-		}
-	}
-
-	deployments := 0
-	if list, depErr := client.AppsV1().Deployments("").List(ctx, metav1.ListOptions{}); depErr == nil {
-		deployments = len(list.Items)
-	}
-
-	return Discovery{
-		PodCIDRs:     sortedKeys(podCIDRs),
-		ServiceCIDRs: discoverServiceCIDRs(ctx, client),
-		ServiceIPs:   sortedKeys(serviceIPs),
-		DNSServer:    dnsServer,
-		Pods:         len(pods),
-		Services:     len(services),
-		Deployments:  deployments,
-	}, nil
-}
-
-func collectNodePodCIDRs(nodes []corev1.Node) map[string]struct{} {
-	podCIDRs := make(map[string]struct{})
-	for _, node := range nodes {
-		for _, cidr := range node.Spec.PodCIDRs {
-			if prefix, parseErr := netip.ParsePrefix(cidr); parseErr == nil {
-				podCIDRs[prefix.Masked().String()] = struct{}{}
-			}
-		}
-		if node.Spec.PodCIDR != "" {
-			if prefix, parseErr := netip.ParsePrefix(node.Spec.PodCIDR); parseErr == nil {
-				podCIDRs[prefix.Masked().String()] = struct{}{}
-			}
-		}
-	}
-	return podCIDRs
-}
-
-func discoverServiceCIDRs(ctx context.Context, client kubernetes.Interface) []string {
-	cidrs := make(map[string]struct{})
-	if list, err := client.NetworkingV1().ServiceCIDRs().List(ctx, metav1.ListOptions{}); err == nil {
-		for _, item := range list.Items {
-			for _, raw := range item.Spec.CIDRs {
-				if prefix, parseErr := netip.ParsePrefix(raw); parseErr == nil {
-					cidrs[prefix.Masked().String()] = struct{}{}
-				}
-			}
-		}
-	}
-	if len(cidrs) == 0 {
-		if subnet, err := serviceSubnetFromKubeadm(ctx, client); err == nil && subnet != "" {
-			if prefix, parseErr := netip.ParsePrefix(subnet); parseErr == nil {
-				cidrs[prefix.Masked().String()] = struct{}{}
-			}
-		}
-	}
-	return sortedKeys(cidrs)
-}
-
-func serviceSubnetFromKubeadm(ctx context.Context, client kubernetes.Interface) (string, error) {
-	configMap, err := client.CoreV1().ConfigMaps("kube-system").Get(
-		ctx, "kubeadm-config", metav1.GetOptions{},
-	)
+	result, err := clusterdiscovery.Discover(ctx, client, namespaces)
 	if err != nil {
-		return "", err
+		return Discovery{}, err
 	}
-	raw, ok := configMap.Data["ClusterConfiguration"]
-	if !ok || strings.TrimSpace(raw) == "" {
-		return "", fmt.Errorf("kubeadm-config missing ClusterConfiguration")
-	}
-	var parsed struct {
-		Networking struct {
-			ServiceSubnet string `yaml:"serviceSubnet"`
-		} `yaml:"networking"`
-	}
-	if err := yaml.Unmarshal([]byte(raw), &parsed); err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(parsed.Networking.ServiceSubnet), nil
-}
-
-func sortedKeys(values map[string]struct{}) []string {
-	items := make([]string, 0, len(values))
-	for item := range values {
-		items = append(items, item)
-	}
-	sort.Strings(items)
-	return items
+	return Discovery{
+		PodCIDRs:     result.PodCIDRs,
+		ServiceCIDRs: result.ServiceCIDRs,
+		ServiceIPs:   result.ServiceIPs,
+		DNSServer:    result.DNSServer,
+		Pods:         result.Pods,
+		Services:     result.Services,
+		Deployments:  result.Deployments,
+	}, nil
 }

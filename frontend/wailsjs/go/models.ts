@@ -176,25 +176,6 @@ export namespace cluster {
 	        this.deployments = source["deployments"];
 	    }
 	}
-	export class InterceptPort {
-	    name: string;
-	    protocol: string;
-	    servicePort: number;
-	    listenPort: number;
-
-	    static createFrom(source: any = {}) {
-	        return new InterceptPort(source);
-	    }
-
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.name = source["name"];
-	        this.protocol = source["protocol"];
-	        this.servicePort = source["servicePort"];
-	        this.listenPort = source["listenPort"];
-	    }
-	}
-
 	export class ManualNetwork {
 	    podCIDRs?: string[];
 	    serviceCIDRs?: string[];
@@ -521,7 +502,7 @@ export namespace filemanager {
 
 }
 
-export namespace helperapi {
+export namespace helper {
 
 	export class Status {
 	    installed: boolean;
@@ -554,6 +535,24 @@ export namespace helperapi {
 
 export namespace intercept {
 
+	export class InterceptPort {
+	    name: string;
+	    protocol: string;
+	    servicePort: number;
+	    listenPort: number;
+
+	    static createFrom(source: any = {}) {
+	        return new InterceptPort(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.protocol = source["protocol"];
+	        this.servicePort = source["servicePort"];
+	        this.listenPort = source["listenPort"];
+	    }
+	}
 	export class PortMapping {
 	    servicePort: number;
 	    protocol: string;
@@ -579,7 +578,7 @@ export namespace intercept {
 	    clusterIP?: string;
 	    preview?: boolean;
 	    mode?: string;
-	    ports: cluster.InterceptPort[];
+	    ports: InterceptPort[];
 	    locals: PortMapping[];
 
 	    static createFrom(source: any = {}) {
@@ -594,7 +593,7 @@ export namespace intercept {
 	        this.clusterIP = source["clusterIP"];
 	        this.preview = source["preview"];
 	        this.mode = source["mode"];
-	        this.ports = this.convertValues(source["ports"], cluster.InterceptPort);
+	        this.ports = this.convertValues(source["ports"], InterceptPort);
 	        this.locals = this.convertValues(source["locals"], PortMapping);
 	    }
 

@@ -14,7 +14,7 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/fengqi-dev/kube-loop/internal/singbox"
+	singboxdist "github.com/fengqi-dev/kube-loop/internal/singbox/distribution"
 )
 
 func main() {
@@ -37,8 +37,8 @@ func main() {
 		fatalf("create output directory: %v", err)
 	}
 
-	fmt.Printf("==> Fetching sing-box %s for %s/%s\n", singbox.Version, goos, goarch)
-	if err := singbox.BundleRelease(goos, goarch, binDir); err != nil {
+	fmt.Printf("==> Fetching sing-box %s for %s/%s\n", singboxdist.Version, goos, goarch)
+	if err := singboxdist.BundleRelease(goos, goarch, binDir); err != nil {
 		fatalf("bundle sing-box: %v", err)
 	}
 	fmt.Printf("==> Staged sing-box into %s\n", binDir)

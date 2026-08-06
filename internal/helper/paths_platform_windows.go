@@ -5,6 +5,7 @@ package helper
 import (
 	"os"
 	"path/filepath"
+	"strings"
 
 	"golang.org/x/sys/windows"
 )
@@ -43,20 +44,11 @@ func platformLegacyBinaryInstallPath() string {
 }
 
 func platformBundledSingBoxPath() string {
-	return filepath.Join(platformInstallRoot(), "sing-box.exe")
-}
-
-// platformInstallRoot is the desktop app install directory (may be on D: etc).
-// Derived from the running executable so NSIS custom InstallDir is respected:
-//
-//	{root}\KubeLoop.exe
-//	{root}\resources\kubeloop-helper.exe
-func platformInstallRoot() string {
 	executable, err := os.Executable()
 	if err != nil {
-		return windowsProgramFilesProductRoot()
+		return filepath.Join(windowsProgramFilesProductRoot(), "sing-box.exe")
 	}
-	return platformInstallRootForExecutable(executable)
+	return filepath.Join(platformInstallRootForExecutable(executable), "sing-box.exe")
 }
 
 func platformInstallRootForExecutable(executable string) string {
@@ -87,10 +79,16 @@ func windowsDisplacedHelperPaths(current string) []string {
 	}
 	out := make([]string, 0, len(candidates))
 	for _, path := range candidates {
-		if current != "" && sameInstallPath(path, current) {
+		if current != "" && strings.EqualFold(filepath.Clean(path), filepath.Clean(current)) {
 			continue
 		}
 		out = append(out, path)
 	}
 	return out
+}
+
+// WindowsDisplacedHelperPaths returns legacy helper locations that may be
+// removed after installing into the current application root.
+func WindowsDisplacedHelperPaths(current string) []string {
+	return windowsDisplacedHelperPaths(current)
 }

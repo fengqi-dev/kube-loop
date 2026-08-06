@@ -1,14 +1,15 @@
 package singbox
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"net/netip"
 	"regexp"
 	"slices"
-	"strings"
 
 	"github.com/fengqi-dev/kube-loop/internal/dnsname"
+	"k8s.io/apimachinery/pkg/util/validation"
 )
 
 const maxSessionItems = 4096
@@ -94,10 +95,10 @@ func (s SessionSpec) Validate() error {
 		tun.Addr() == tun.Masked().Addr() {
 		return errors.New("TUN address must be a host in a 198.18.0.0/15 /30 subnet")
 	}
-	if s.Namespace != "" && !safeDNSName(strings.ToLower(s.Namespace)) {
+	if s.Namespace != "" && len(validation.IsDNS1123Label(s.Namespace)) != 0 {
 		return errors.New("invalid namespace")
 	}
-	if s.DNSNamespace != "" && !safeDNSName(strings.ToLower(s.DNSNamespace)) {
+	if s.DNSNamespace != "" && len(validation.IsDNS1123Label(s.DNSNamespace)) != 0 {
 		return errors.New("invalid DNS namespace")
 	}
 	if s.ClusterDNSServer != "" {
@@ -168,13 +169,7 @@ func (s SessionSpec) DNS() (DNSMeta, error) {
 }
 
 func (s SessionSpec) dnsNamespace() string {
-	if s.DNSNamespace != "" {
-		return s.DNSNamespace
-	}
-	if s.Namespace != "" {
-		return s.Namespace
-	}
-	return "default"
+	return cmp.Or(s.DNSNamespace, s.Namespace, "default")
 }
 
 func (s SessionSpec) discovery() NetworkSpec {

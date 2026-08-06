@@ -167,21 +167,6 @@ func relayTCP(left, right net.Conn) {
 	<-done
 }
 
-func relayUDP(tunnelConn net.Conn, localHost string, localPort int) {
-	localAddr := net.JoinHostPort(localHost, fmt.Sprintf("%d", localPort))
-	udpAddr, err := net.ResolveUDPAddr("udp", localAddr)
-	if err != nil {
-		_ = tunnelConn.Close()
-		return
-	}
-	local, err := net.DialUDP("udp", nil, udpAddr)
-	if err != nil {
-		_ = tunnelConn.Close()
-		return
-	}
-	relayUDPConn(tunnelConn, local)
-}
-
 func relayUDPConn(tunnelConn, local net.Conn) {
 	defer tunnelConn.Close()
 	defer local.Close()

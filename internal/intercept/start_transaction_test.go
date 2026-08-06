@@ -5,9 +5,6 @@ import (
 	"reflect"
 	"testing"
 
-	corev1 "k8s.io/api/core/v1"
-
-	"github.com/fengqi-dev/kube-loop/internal/cluster"
 	"github.com/fengqi-dev/kube-loop/internal/tunnel"
 )
 
@@ -37,9 +34,9 @@ func (f *fakeControlRegistrar) unregister(id string) error {
 func TestStartTransactionRollsBackPartialRegistrations(t *testing.T) {
 	control := &fakeControlRegistrar{failAt: 2}
 	transaction := newStartTransaction(control)
-	ports := []cluster.InterceptPort{
-		{Protocol: corev1.ProtocolTCP, ServicePort: 80, ListenPort: 20001},
-		{Protocol: corev1.ProtocolUDP, ServicePort: 53, ListenPort: 20002},
+	ports := []InterceptPort{
+		{Protocol: ProtocolTCP, ServicePort: 80, ListenPort: 20001},
+		{Protocol: ProtocolUDP, ServicePort: 53, ListenPort: 20002},
 	}
 	locals := []PortMapping{
 		{Protocol: "tcp", ServicePort: 80, LocalPort: 8080},

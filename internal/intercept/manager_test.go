@@ -14,15 +14,14 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/fengqi-dev/kube-loop/internal/cluster"
 	"github.com/fengqi-dev/kube-loop/internal/gateway"
 )
 
 type fakeCluster struct {
 	service          *corev1.Service
-	applied          *cluster.ServiceInterceptSnapshot
+	applied          *ServiceInterceptRequest
 	restored         bool
-	preview          *cluster.PreviewServiceSnapshot
+	preview          *PreviewServiceRequest
 	deleted          bool
 	previewIP        string
 	endpointsSubsets []corev1.EndpointSubset
@@ -34,25 +33,32 @@ type fakeCluster struct {
 
 func (f *fakeCluster) GetService(
 	context.Context, string, string, string,
-) (*corev1.Service, error) {
-	return f.service.DeepCopy(), nil
+) (*Service, error) {
+	service := f.service.DeepCopy()
+	ports := make([]ServicePort, 0, len(service.Spec.Ports))
+	for _, port := range service.Spec.Ports {
+		ports = append(ports, ServicePort{
+			Name: port.Name, Protocol: normalizeProtocol(string(port.Protocol)), Port: port.Port,
+		})
+	}
+	return &Service{
+		Namespace: service.Namespace,
+		Name:      service.Name,
+		ClusterIP: service.Spec.ClusterIP,
+		Selector:  service.Spec.Selector,
+		Ports:     ports,
+	}, nil
 }
 
 func (f *fakeCluster) ApplyServiceIntercept(
-	_ context.Context, _ string, snapshot *cluster.ServiceInterceptSnapshot, _ string,
-) error {
-	if len(f.endpointsSubsets) > 0 {
-		snapshot.HasEndpoints = true
-		snapshot.EndpointsSubsets = append([]corev1.EndpointSubset(nil), f.endpointsSubsets...)
-	}
-	copySnapshot := *snapshot
-	f.applied = &copySnapshot
-	return nil
+	_ context.Context, _ string, request ServiceInterceptRequest,
+) (Lease, []Backend, error) {
+	copyRequest := request
+	f.applied = &copyRequest
+	return fakeLease{release: f.restore}, endpointSubsetModels(f.endpointsSubsets), nil
 }
 
-func (f *fakeCluster) RestoreServiceIntercept(
-	context.Context, string, cluster.ServiceInterceptSnapshot,
-) error {
+func (f *fakeCluster) restore(context.Context) error {
 	f.restoreCalls++
 	if f.restoreErr != nil {
 		return f.restoreErr
@@ -62,29 +68,51 @@ func (f *fakeCluster) RestoreServiceIntercept(
 }
 
 func (f *fakeCluster) CreatePreviewService(
-	_ context.Context, _ string, snapshot cluster.PreviewServiceSnapshot, _ string,
-) (*corev1.Service, error) {
-	copySnapshot := snapshot
-	f.preview = &copySnapshot
+	_ context.Context, _ string, request PreviewServiceRequest,
+) (*Service, Lease, error) {
+	copyRequest := request
+	f.preview = &copyRequest
 	ip := f.previewIP
 	if ip == "" {
 		ip = "10.96.9.9"
 	}
-	return &corev1.Service{
-		ObjectMeta: metav1.ObjectMeta{Name: snapshot.Service, Namespace: snapshot.Namespace},
-		Spec:       corev1.ServiceSpec{ClusterIP: ip, Ports: []corev1.ServicePort{{Port: snapshot.Ports[0].ServicePort}}},
-	}, nil
+	return &Service{
+		Name: request.Service, Namespace: request.Namespace, ClusterIP: ip,
+		Ports: []ServicePort{{Port: request.Ports[0].ServicePort}},
+	}, fakeLease{release: f.delete}, nil
 }
 
-func (f *fakeCluster) DeletePreviewService(
-	context.Context, string, cluster.PreviewServiceSnapshot,
-) error {
+func (f *fakeCluster) delete(context.Context) error {
 	f.deleteCalls++
 	if f.deleteErr != nil {
 		return f.deleteErr
 	}
 	f.deleted = true
 	return nil
+}
+
+type fakeLease struct {
+	release func(context.Context) error
+}
+
+func (l fakeLease) Release(ctx context.Context) error {
+	return l.release(ctx)
+}
+
+func endpointSubsetModels(subsets []corev1.EndpointSubset) []Backend {
+	var backends []Backend
+	for _, subset := range subsets {
+		ports := make([]BackendPort, 0, len(subset.Ports))
+		for _, port := range subset.Ports {
+			ports = append(ports, BackendPort{
+				Name: port.Name, Protocol: normalizeProtocol(string(port.Protocol)), Port: port.Port,
+			})
+		}
+		for _, address := range subset.Addresses {
+			backends = append(backends, Backend{Address: address.IP, Ports: ports})
+		}
+	}
+	return backends
 }
 
 func TestStartStopInterceptRegistersAndRestores(t *testing.T) {
@@ -551,9 +579,8 @@ func TestExchangeAndMirrorAreMutuallyExclusive(t *testing.T) {
 }
 
 func TestServiceRewriteHostsIncludesClusterIPAndDNS(t *testing.T) {
-	hosts := serviceRewriteHosts(&corev1.Service{
-		ObjectMeta: metav1.ObjectMeta{Name: "static-web", Namespace: "default"},
-		Spec:       corev1.ServiceSpec{ClusterIP: "10.105.153.132"},
+	hosts := serviceRewriteHosts(&Service{
+		Name: "static-web", Namespace: "default", ClusterIP: "10.105.153.132",
 	})
 	joined := strings.Join(hosts, ",")
 	for _, want := range []string{

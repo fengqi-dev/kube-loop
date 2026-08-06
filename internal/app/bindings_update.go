@@ -42,15 +42,16 @@ func (a *App) checkForUpdates(ctx context.Context) update.Info {
 	a.updateCheck.Lock()
 	defer a.updateCheck.Unlock()
 	state, err := a.updater.Check(ctx)
-	if err != nil {
+	switch {
+	case err != nil:
 		state.Error = err.Error()
 		a.manager.AppendLog("WARN", fmt.Sprintf("application update check failed: %v", err))
-	} else if state.Available {
+	case state.Available:
 		a.manager.AppendLog("INFO", fmt.Sprintf(
 			"application update available: current=%s latest=%s",
 			state.CurrentVersion, state.LatestVersion,
 		))
-	} else {
+	default:
 		a.manager.AppendLog("INFO", "application is up to date")
 	}
 	a.updateMu.Lock()

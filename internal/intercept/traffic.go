@@ -1,6 +1,7 @@
 package intercept
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"net"
@@ -39,11 +40,10 @@ func (m *Manager) HostUDP(host string, port uint16) (func(context.Context) (net.
 		return nil, false
 	}
 	gatewayAddress := m.gatewayAddress
-	dialers := m.traffic
 	m.mu.Unlock()
 
 	return func(ctx context.Context) (net.Conn, error) {
-		return m.dialHostUDP(ctx, gatewayAddress, route, dialers)
+		return m.dialHostUDP(ctx, gatewayAddress, route)
 	}, true
 }
 
@@ -55,10 +55,7 @@ func (m *Manager) serveHostTCP(
 	dialers TrafficDialers,
 ) {
 	defer client.Close()
-	host := route.local.LocalHost
-	if host == "" {
-		host = "127.0.0.1"
-	}
+	host := cmp.Or(route.local.LocalHost, "127.0.0.1")
 	localTarget := net.JoinHostPort(host, fmt.Sprintf("%d", route.local.LocalPort))
 
 	if route.mode == ModeMirror {
@@ -85,17 +82,13 @@ func (m *Manager) dialHostUDP(
 	ctx context.Context,
 	gatewayAddress string,
 	route hostRoute,
-	dialers TrafficDialers,
 ) (net.Conn, error) {
-	host := route.local.LocalHost
-	if host == "" {
-		host = "127.0.0.1"
-	}
+	host := cmp.Or(route.local.LocalHost, "127.0.0.1")
 	localTarget := net.JoinHostPort(host, fmt.Sprintf("%d", route.local.LocalPort))
 
 	if route.mode == ModeMirror {
 		return m.dialHostMirrorUDP(
-			ctx, gatewayAddress, route.primaryAddr, host, route.local.LocalPort, dialers,
+			ctx, gatewayAddress, route.primaryAddr, host, route.local.LocalPort,
 		)
 	}
 
@@ -110,7 +103,6 @@ func (m *Manager) dialHostMirrorUDP(
 	ctx context.Context,
 	gatewayAddress, primaryAddr, localHost string,
 	localPort int,
-	dialers TrafficDialers,
 ) (net.Conn, error) {
 	if primaryAddr == "" {
 		return nil, fmt.Errorf("mirror primary address is required")
@@ -165,10 +157,7 @@ func (m *Manager) serveInbound(
 	if err != nil {
 		return
 	}
-	host := local.LocalHost
-	if host == "" {
-		host = "127.0.0.1"
-	}
+	host := cmp.Or(local.LocalHost, "127.0.0.1")
 	if mode == ModeMirror {
 		m.serveMirror(
 			ctx, gatewayAddress, tunnelConn, network, primaryAddr, host, local.LocalPort,

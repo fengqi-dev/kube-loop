@@ -62,6 +62,8 @@ func TestSessionSpecRejectsPrivilegeBoundaryInputs(t *testing.T) {
 		{"resolver path", func(s *SessionSpec) {
 			s.Hosts = []HostAlias{{Domain: "../resolver", IP: "10.96.0.1"}}
 		}},
+		{"namespace subdomain", func(s *SessionSpec) { s.Namespace = "team.default" }},
+		{"long namespace", func(s *SessionSpec) { s.Namespace = strings.Repeat("a", 64) }},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

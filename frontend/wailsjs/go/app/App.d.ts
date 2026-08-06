@@ -7,7 +7,7 @@ import {filemanager} from '../models';
 import {podssh} from '../models';
 import {store} from '../models';
 import {mcp} from '../models';
-import {helperapi} from '../models';
+import {helper} from '../models';
 import {intercept} from '../models';
 import {portfwd} from '../models';
 import {session} from '../models';
@@ -56,7 +56,7 @@ export function GetManualNetwork(arg1:string):Promise<cluster.ManualNetwork>;
 
 export function GetSingBoxConfig():Promise<string>;
 
-export function HelperStatus():Promise<helperapi.Status>;
+export function HelperStatus():Promise<helper.Status>;
 
 export function InstallHelper():Promise<void>;
 

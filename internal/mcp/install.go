@@ -7,7 +7,12 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
+
+	"github.com/fengqi-dev/kube-loop/internal/fsatomic"
+	toml "github.com/pelletier/go-toml/v2"
+	"github.com/pelletier/go-toml/v2/unstable"
 )
 
 const clientServerName = "kubeloop"
@@ -146,7 +151,7 @@ func upsertJSONMap(path, rootKey, serverName string, server map[string]any) erro
 		return fmt.Errorf("encode %s: %w", path, err)
 	}
 	out = append(out, '\n')
-	return writeFileAtomic(path, out, 0o600)
+	return fsatomic.WriteFile(path, out, 0o755, 0o600)
 }
 
 func installCodexTOML(path, url, token string) error {
@@ -154,52 +159,93 @@ func installCodexTOML(path, url, token string) error {
 	if err != nil {
 		return err
 	}
-	content := removeTOMLTables(string(raw), "mcp_servers."+clientServerName)
-	content = strings.TrimRight(content, "\n")
-	var block string
-	if token == "" {
-		block = fmt.Sprintf(`
-[mcp_servers.%s]
-url = %q
-`, clientServerName, url)
-	} else {
-		block = fmt.Sprintf(`
-[mcp_servers.%s]
-url = %q
-
-[mcp_servers.%s.http_headers]
-Authorization = %q
-`, clientServerName, url, clientServerName, "Bearer "+token)
+	content, err := removeTOMLTable(raw, []string{"mcp_servers", clientServerName})
+	if err != nil {
+		return fmt.Errorf("decode %s: %w", path, err)
 	}
-	if content != "" {
-		content += "\n"
+	server := codexMCPServer{URL: url}
+	if token != "" {
+		server.HTTPHeaders = map[string]string{"Authorization": "Bearer " + token}
 	}
-	content += strings.TrimPrefix(block, "\n")
-	if !strings.HasSuffix(content, "\n") {
-		content += "\n"
+	block, err := toml.Marshal(codexMCPConfig{
+		MCPServers: map[string]codexMCPServer{clientServerName: server},
+	})
+	if err != nil {
+		return fmt.Errorf("encode %s: %w", path, err)
 	}
-	return writeFileAtomic(path, []byte(content), 0o600)
+	content = bytes.TrimRight(content, "\r\n")
+	if len(content) > 0 {
+		content = append(content, '\n')
+	}
+	content = append(content, block...)
+	return fsatomic.WriteFile(path, content, 0o755, 0o600)
 }
 
-func removeTOMLTables(content, prefix string) string {
-	lines := strings.Split(content, "\n")
-	out := make([]string, 0, len(lines))
-	skipping := false
-	for _, line := range lines {
-		trim := strings.TrimSpace(line)
-		if strings.HasPrefix(trim, "[") && strings.HasSuffix(trim, "]") {
-			name := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(trim, "["), "]"))
-			skipping = name == prefix || strings.HasPrefix(name, prefix+".")
+type codexMCPConfig struct {
+	MCPServers map[string]codexMCPServer `toml:"mcp_servers"`
+}
+
+type codexMCPServer struct {
+	URL         string            `toml:"url"`
+	HTTPHeaders map[string]string `toml:"http_headers,omitempty"`
+}
+
+type byteRange struct {
+	start int
+	end   int
+}
+
+func removeTOMLTable(content []byte, prefix []string) ([]byte, error) {
+	parser := unstable.Parser{}
+	parser.Reset(content)
+	var ranges []byteRange
+	start := -1
+	for parser.NextExpression() {
+		expression := parser.Expression()
+		if expression.Kind != unstable.Table && expression.Kind != unstable.ArrayTable {
+			continue
 		}
-		if !skipping {
-			out = append(out, line)
+		key, offset := tomlExpressionKey(expression)
+		lineStart := bytes.LastIndexByte(content[:offset], '\n') + 1
+		if len(key) >= len(prefix) && slices.Equal(key[:len(prefix)], prefix) {
+			if start < 0 {
+				start = lineStart
+			}
+		} else if start >= 0 {
+			ranges = append(ranges, byteRange{start: start, end: lineStart})
+			start = -1
 		}
 	}
-	// Drop trailing empty lines left by removals; keep a single trailing newline later.
-	for len(out) > 0 && strings.TrimSpace(out[len(out)-1]) == "" {
-		out = out[:len(out)-1]
+	if err := parser.Error(); err != nil {
+		return nil, err
 	}
-	return strings.Join(out, "\n")
+	if start >= 0 {
+		ranges = append(ranges, byteRange{start: start, end: len(content)})
+	}
+	if len(ranges) == 0 {
+		return bytes.Clone(content), nil
+	}
+	out := make([]byte, 0, len(content))
+	offset := 0
+	for _, item := range ranges {
+		out = append(out, content[offset:item.start]...)
+		offset = item.end
+	}
+	return append(out, content[offset:]...), nil
+}
+
+func tomlExpressionKey(expression *unstable.Node) ([]string, int) {
+	iterator := expression.Key()
+	var key []string
+	offset := 0
+	for iterator.Next() {
+		node := iterator.Node()
+		if len(key) == 0 {
+			offset = int(node.Raw.Offset)
+		}
+		key = append(key, string(node.Data))
+	}
+	return key, offset
 }
 
 func readOptionalFile(path string) ([]byte, error) {
@@ -211,19 +257,4 @@ func readOptionalFile(path string) ([]byte, error) {
 		return nil, err
 	}
 	return raw, nil
-}
-
-func writeFileAtomic(path string, data []byte, mode os.FileMode) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return fmt.Errorf("create config directory: %w", err)
-	}
-	temp := path + ".kubeloop-tmp"
-	if err := os.WriteFile(temp, data, mode); err != nil {
-		return fmt.Errorf("write config: %w", err)
-	}
-	if err := os.Rename(temp, path); err != nil {
-		_ = os.Remove(temp)
-		return fmt.Errorf("replace config: %w", err)
-	}
-	return nil
 }
