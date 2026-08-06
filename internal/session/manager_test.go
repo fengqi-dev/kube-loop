@@ -9,6 +9,7 @@ import (
 	"log"
 	"net"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -22,6 +23,7 @@ import (
 
 type fakeProvider struct {
 	discovery         cluster.Discovery
+	namespaces        []string
 	err               error
 	forwarder         *fakeForwarder
 	probeCapabilities func(context.Context, string) (cluster.Capabilities, error)
@@ -32,6 +34,9 @@ func (f *fakeProvider) ServerVersion(context.Context, string) (string, error) {
 	return "v1.29.0-fake", nil
 }
 func (f *fakeProvider) Namespaces(context.Context, string) ([]string, error) {
+	if f.namespaces != nil {
+		return f.namespaces, nil
+	}
 	return []string{"default"}, nil
 }
 func (f *fakeProvider) ListServices(
@@ -176,6 +181,7 @@ func (f *fakeForwarder) Close() error {
 type fakeCore struct {
 	process *fakeProcess
 	started chan struct{}
+	network singbox.NetworkSpec
 }
 
 func newFakeCore() *fakeCore {
@@ -183,8 +189,9 @@ func newFakeCore() *fakeCore {
 }
 
 func (f *fakeCore) Start(
-	context.Context, singbox.NetworkSpec, string, string, []singbox.HostAlias,
+	_ context.Context, network singbox.NetworkSpec, _ string, _ string, _ []singbox.HostAlias,
 ) (singbox.RunningCore, error) {
+	f.network = network
 	close(f.started)
 	return f.process, nil
 }
@@ -281,7 +288,10 @@ func TestManagerPublishesConnectedStateAndCleansUp(t *testing.T) {
 	want := cluster.Discovery{
 		PodCIDRs: []string{"10.244.0.0/16"}, ServiceIPs: []string{"10.96.0.1"},
 	}
-	provider := &fakeProvider{discovery: want}
+	provider := &fakeProvider{
+		discovery:  want,
+		namespaces: []string{"default", "payments", "platform"},
+	}
 	core := newFakeCore()
 	manager := NewManager(
 		provider, WithCore(core), WithBridgeFactory(testBridge), WithGatewayImage("gateway:test"),
@@ -322,6 +332,9 @@ func TestManagerPublishesConnectedStateAndCleansUp(t *testing.T) {
 	}
 	if state.SOCKSPort != 0 {
 		t.Fatalf("SOCKSPort = %d, want 0 in TUN mode", state.SOCKSPort)
+	}
+	if got := strings.Join(core.network.Namespaces, ","); got != "default,payments,platform" {
+		t.Fatalf("sing-box namespaces = %q", got)
 	}
 	if err := manager.Disconnect(); err != nil {
 		t.Fatal(err)

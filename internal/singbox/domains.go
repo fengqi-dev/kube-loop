@@ -84,13 +84,26 @@ func SearchDomains(namespace string, clusterDomains ...string) []string {
 	if namespace == "" {
 		namespace = "default"
 	}
+	return SearchDomainsForNamespaces([]string{namespace}, clusterDomains...)
+}
+
+// SearchDomainsForNamespaces returns Kubernetes-style DNS search suffixes for
+// every visible namespace. Namespace order is preserved and duplicates are removed.
+func SearchDomainsForNamespaces(namespaces []string, clusterDomains ...string) []string {
+	if len(namespaces) == 0 {
+		namespaces = []string{"default"}
+	}
 	domains, err := dnsname.NormalizeClusterDomains(clusterDomains)
 	if err != nil || len(domains) == 0 {
 		domains = []string{dnsname.DefaultClusterDomain}
 	}
-	out := make([]string, 0, len(domains)*3)
-	seen := make(map[string]struct{}, len(domains)*3)
+	out := make([]string, 0, len(domains)*(len(namespaces)+2))
+	seen := make(map[string]struct{}, len(domains)*(len(namespaces)+2))
 	add := func(domain string) {
+		domain = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(domain)), ".")
+		if domain == "" {
+			return
+		}
 		if _, ok := seen[domain]; ok {
 			return
 		}
@@ -98,7 +111,12 @@ func SearchDomains(namespace string, clusterDomains ...string) []string {
 		out = append(out, domain)
 	}
 	for _, domain := range domains {
-		add(namespace + ".svc." + domain)
+		for _, namespace := range namespaces {
+			namespace = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(namespace)), ".")
+			if namespace != "" {
+				add(namespace + ".svc." + domain)
+			}
+		}
 		add("svc." + domain)
 		add(domain)
 	}

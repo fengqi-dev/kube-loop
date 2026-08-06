@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -353,8 +354,17 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 	state.Message = "Installing and starting sing-box TUN"
 	m.publish(state)
 	hosts := m.hostAliasesFor(request.Context)
+	coreNetwork := networkSpec(discovery)
+	coreNetwork.Namespaces = slices.Clone(caps.ScopeNamespaces)
+	if namespaces, namespaceErr := m.catalog.Namespaces(ctx, request.Context); namespaceErr == nil {
+		coreNetwork.Namespaces = namespaces
+	} else {
+		m.AppendLog("WARN", fmt.Sprintf(
+			"could not list all namespaces for DNS search domains: %v", namespaceErr,
+		))
+	}
 	core, err := m.core.Start(
-		ctx, networkSpec(discovery), bridge.Addr().String(), dnsNamespace, hosts,
+		ctx, coreNetwork, bridge.Addr().String(), dnsNamespace, hosts,
 	)
 	if err != nil {
 		m.fail(ctx, state, "Could not start sing-box TUN", err)

@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -139,6 +140,7 @@ func (r *Runtime) startOnce(
 		TUNAddress:       tunAddress,
 		Namespace:        namespace,
 		DNSNamespace:     dnsNamespace,
+		Namespaces:       slices.Clone(network.Namespaces),
 		Hosts:            normalizedHosts,
 		TrafficPorts:     trafficPorts,
 		TrafficPassword:  trafficPassword,

@@ -1,6 +1,7 @@
 package singbox
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
@@ -20,6 +21,7 @@ func validSessionSpec() SessionSpec {
 		PublicDNSPort:    53,
 		TUNAddress:       "198.19.0.1/30",
 		Namespace:        "default",
+		Namespaces:       []string{"default", "payments"},
 		Hosts:            []HostAlias{{Domain: "api.default.svc", IP: "10.96.0.1"}},
 		TrafficPorts:     TrafficInboundPorts{Listen: 1081},
 		TrafficPassword:  strings.Repeat("p", 64),
@@ -45,6 +47,9 @@ func TestSessionSpecValidate(t *testing.T) {
 	if dns.Port != 53 || len(dns.Search) == 0 {
 		t.Fatalf("unexpected DNS metadata: %#v", dns)
 	}
+	if !slices.Contains(dns.Search, "payments.svc.cluster.local") {
+		t.Fatalf("DNS search domains do not include all namespaces: %#v", dns.Search)
+	}
 }
 
 func TestSessionSpecRejectsPrivilegeBoundaryInputs(t *testing.T) {
@@ -64,6 +69,7 @@ func TestSessionSpecRejectsPrivilegeBoundaryInputs(t *testing.T) {
 		}},
 		{"namespace subdomain", func(s *SessionSpec) { s.Namespace = "team.default" }},
 		{"long namespace", func(s *SessionSpec) { s.Namespace = strings.Repeat("a", 64) }},
+		{"invalid namespace list", func(s *SessionSpec) { s.Namespaces = []string{"team.default"} }},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

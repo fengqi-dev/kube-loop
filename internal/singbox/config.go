@@ -70,6 +70,7 @@ type NetworkSpec struct {
 	ServiceIPs     []string
 	DNSServer      string
 	ClusterDomains []string
+	Namespaces     []string
 }
 
 type Options struct {

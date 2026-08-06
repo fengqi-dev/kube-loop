@@ -35,6 +35,7 @@ type SessionSpec struct {
 	TUNAddress       string              `json:"tunAddress"`
 	Namespace        string              `json:"namespace,omitempty"`
 	DNSNamespace     string              `json:"dnsNamespace,omitempty"`
+	Namespaces       []string            `json:"namespaces,omitempty"`
 	Hosts            []HostAlias         `json:"hosts,omitempty"`
 	TrafficPorts     TrafficInboundPorts `json:"trafficPorts"`
 	TrafficPassword  string              `json:"trafficPassword"`
@@ -83,7 +84,7 @@ func (s SessionSpec) Validate() error {
 	if slices.Contains([]int{s.BridgePort, s.ControllerPort, s.DNSPort, s.PublicDNSPort}, s.TrafficPorts.Listen) {
 		return errors.New("traffic inbound port must not overlap internal ports")
 	}
-	if len(s.PodCIDRs)+len(s.ServiceCIDRs)+len(s.ServiceIPs)+len(s.Hosts) > maxSessionItems {
+	if len(s.PodCIDRs)+len(s.ServiceCIDRs)+len(s.ServiceIPs)+len(s.Namespaces)+len(s.Hosts) > maxSessionItems {
 		return errors.New("session contains too many routes or host aliases")
 	}
 	tun, err := netip.ParsePrefix(s.TUNAddress)
@@ -100,6 +101,11 @@ func (s SessionSpec) Validate() error {
 	}
 	if s.DNSNamespace != "" && len(validation.IsDNS1123Label(s.DNSNamespace)) != 0 {
 		return errors.New("invalid DNS namespace")
+	}
+	for _, namespace := range s.Namespaces {
+		if len(validation.IsDNS1123Label(namespace)) != 0 {
+			return errors.New("invalid namespace in namespace list")
+		}
 	}
 	if s.ClusterDNSServer != "" {
 		if _, err := netip.ParseAddr(s.ClusterDNSServer); err != nil {
@@ -163,13 +169,17 @@ func (s SessionSpec) DNS() (DNSMeta, error) {
 		Listen:  s.DNSHost,
 		Port:    s.PublicDNSPort,
 		Domains: ResolverDomains(ns, domains, hosts),
-		Search:  SearchDomains(ns, domains...),
+		Search:  SearchDomainsForNamespaces(s.dnsNamespaces(), domains...),
 		Ndots:   5,
 	}, nil
 }
 
 func (s SessionSpec) dnsNamespace() string {
 	return cmp.Or(s.DNSNamespace, s.Namespace, "default")
+}
+
+func (s SessionSpec) dnsNamespaces() []string {
+	return append([]string{s.dnsNamespace()}, s.Namespaces...)
 }
 
 func (s SessionSpec) discovery() NetworkSpec {
@@ -180,6 +190,7 @@ func (s SessionSpec) discovery() NetworkSpec {
 		ServiceIPs:     s.ServiceIPs,
 		DNSServer:      s.ClusterDNSServer,
 		ClusterDomains: domains,
+		Namespaces:     slices.Clone(s.Namespaces),
 	}
 }
 

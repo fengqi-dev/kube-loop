@@ -195,4 +195,15 @@ func TestSearchDomains(t *testing.T) {
 	if strings.Join(SearchDomains(""), ",") != strings.Join(SearchDomains("default"), ",") {
 		t.Fatal("empty namespace should default to default")
 	}
+
+	all := SearchDomainsForNamespaces([]string{"demo", "default", "demo"})
+	allWant := []string{
+		"demo.svc.cluster.local",
+		"default.svc.cluster.local",
+		"svc.cluster.local",
+		"cluster.local",
+	}
+	if strings.Join(all, ",") != strings.Join(allWant, ",") {
+		t.Fatalf("SearchDomainsForNamespaces = %v, want %v", all, allWant)
+	}
 }
