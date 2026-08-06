@@ -1,7 +1,6 @@
 package helper
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -85,12 +84,6 @@ func (s *Server) startSession(spec singbox.SessionSpec) error {
 		cleanupFiles()
 		fail()
 		return fmt.Errorf("write protected sing-box config: %w", err)
-	}
-	meta, _ := json.Marshal(dns)
-	if err := os.WriteFile(filepath.Join(current.workDir, "dns-meta.json"), meta, 0o600); err != nil {
-		cleanupFiles()
-		fail()
-		return fmt.Errorf("write protected DNS metadata: %w", err)
 	}
 
 	binaryPath, err := resolveSingBoxPath(s.Auth)

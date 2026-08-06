@@ -1,10 +1,7 @@
 package helper
 
 import (
-	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"time"
 
 	helperplatform "github.com/fengqi-dev/kube-loop/internal/helper/platform"
@@ -49,19 +46,6 @@ func (s *Server) updateSessionDNS(sessionID string, dns singbox.DNSMeta) error {
 		// Drop-in may still be enough for FQDN; keep going so SetDNSNamespace
 		// is not blocked by a transient missing TUN iface.
 		s.Log.Printf("link DNS update for %s: %v", sessionID, err)
-	}
-	meta, err := json.Marshal(dns)
-	if err != nil {
-		_ = helperplatform.RestoreDNS(current.workDir, dns)
-		_ = helperplatform.ApplyDNS(current.workDir, previous)
-		_ = helperplatform.ApplyLinkDNS(current.tunAddress, previous)
-		return fmt.Errorf("encode DNS metadata: %w", err)
-	}
-	if err := os.WriteFile(filepath.Join(current.workDir, "dns-meta.json"), meta, 0o600); err != nil {
-		_ = helperplatform.RestoreDNS(current.workDir, dns)
-		_ = helperplatform.ApplyDNS(current.workDir, previous)
-		_ = helperplatform.ApplyLinkDNS(current.tunAddress, previous)
-		return fmt.Errorf("write DNS metadata: %w", err)
 	}
 	current.dns = dns
 	return nil
