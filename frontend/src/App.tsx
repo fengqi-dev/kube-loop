@@ -29,6 +29,7 @@ function App() {
     updateBusy,
     session,
     busy,
+    disconnecting,
     ready,
     currentContext,
     kubeconfigFiles,
@@ -127,6 +128,7 @@ function App() {
               loading={loading}
               error={uiError || session.error || ""}
               busy={busy}
+              disconnecting={disconnecting}
               ready={ready}
               onToggle={() => void toggleConnection()}
               onConnectionModeChange={setConnectionMode}

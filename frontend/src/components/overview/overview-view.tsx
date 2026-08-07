@@ -15,7 +15,6 @@ import {
 import { toast } from "sonner";
 import { backend } from "@/backend";
 import { ConnectionOrb } from "@/components/overview/connection-orb";
-import { ConnectionSteps } from "@/components/overview/connection-steps";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -30,11 +29,20 @@ import {
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { useI18n } from "@/i18n";
+import { useI18n, type TranslationKey } from "@/i18n";
 import type { AppView } from "@/hooks/use-session";
-import { phaseKeys } from "@/lib/phase";
 import { cn } from "@/lib/utils";
 import type { ConnectionMode, Discovery, HelperStatus, SessionState } from "@/types";
+
+const overviewPhaseKeys: Record<SessionState["phase"], TranslationKey> = {
+  idle: "overview.phaseIdle",
+  checking: "overview.phaseChecking",
+  "installing-gateway": "overview.phaseInstalling",
+  "discovering-network": "overview.phaseDiscovering",
+  "starting-tunnel": "overview.phaseStarting",
+  connected: "overview.phaseConnected",
+  error: "overview.phaseError",
+};
 
 export function OverviewView({
   contextName,
@@ -45,6 +53,7 @@ export function OverviewView({
   loading,
   error,
   busy,
+  disconnecting,
   ready,
   onToggle,
   onConnectionModeChange,
@@ -59,6 +68,7 @@ export function OverviewView({
   loading: boolean;
   error: string;
   busy: boolean;
+  disconnecting: boolean;
   ready: boolean;
   onToggle(): void;
   onConnectionModeChange(mode: ConnectionMode): void;
@@ -174,10 +184,11 @@ export function OverviewView({
               onConnectionModeChange={onConnectionModeChange}
             />
 
-            <div className="flex flex-col items-center justify-center self-center px-2 text-center">
+            <div className="flex w-32 shrink-0 flex-col items-center justify-center self-center px-2 text-center">
               <ConnectionOrb
                 phase={session.phase}
                 busy={busy}
+                disconnecting={disconnecting}
                 disabled={loading || !contextName}
                 ariaLabel={
                   busy
@@ -188,8 +199,12 @@ export function OverviewView({
                 }
                 onClick={onToggle}
               />
-              <h2 className="mt-2.5 text-[14px] font-semibold tracking-tight">
-                {loading ? t("overview.loadingKubeconfig") : t(phaseKeys[session.phase])}
+              <h2 className="mt-2.5 min-h-5 w-full whitespace-nowrap text-[14px] font-semibold tracking-tight">
+                {loading
+                  ? t("overview.loadingKubeconfig")
+                  : disconnecting
+                    ? t("overview.disconnecting")
+                    : t(overviewPhaseKeys[session.phase])}
               </h2>
               <p className="mt-0.5 max-w-[9rem] truncate text-[11px] text-muted-foreground">
                 {contextName
@@ -297,8 +312,6 @@ export function OverviewView({
               </AlertDescription>
             </Alert>
           ) : null}
-
-          {busy ? <ConnectionSteps phase={session.phase} /> : null}
         </CardContent>
       </Card>
 

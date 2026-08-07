@@ -199,23 +199,196 @@
   background: color-mix(in srgb, var(--foreground) 16%, transparent);
 }
 
-@keyframes step-check-pop {
-  0% {
-    transform: scale(0.6);
-    opacity: 0;
-  }
-  60% {
-    transform: scale(1.15);
-    opacity: 1;
-  }
+@keyframes connection-breathe {
+  0%,
   100% {
-    transform: scale(1);
-    opacity: 1;
+    transform: scale(0.92);
+    opacity: 0.35;
+  }
+  50% {
+    transform: scale(1.12);
+    opacity: 0.85;
   }
 }
 
-.animate-step-check {
-  animation: step-check-pop 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+@keyframes connection-ready {
+  0%,
+  100% {
+    transform: scale(0.96);
+    opacity: 0.35;
+  }
+  50% {
+    transform: scale(1.08);
+    opacity: 0.9;
+  }
+}
+
+@keyframes connection-magic-sweep {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes connection-magic-twinkle {
+  0%,
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.1) rotate(0deg);
+  }
+  18% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1.15) rotate(28deg);
+  }
+  34% {
+    opacity: 0.3;
+    transform: translate(-50%, -50%) scale(0.35) rotate(48deg);
+  }
+  55% {
+    opacity: 0.95;
+    transform: translate(-50%, -50%) scale(0.85) rotate(82deg);
+  }
+  72% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.15) rotate(105deg);
+  }
+}
+
+@keyframes connection-magic-burst {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, 10px) scale(0.1) rotate(0deg);
+  }
+  30% {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1.25) rotate(35deg);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -18px) scale(0.25) rotate(100deg);
+  }
+}
+
+@keyframes connection-magic-collapse {
+  0% {
+    opacity: 0;
+    transform: translate(var(--collapse-x), var(--collapse-y)) scale(0.2) rotate(0deg);
+  }
+  18% {
+    opacity: 1;
+    transform: translate(var(--collapse-x), var(--collapse-y)) scale(1) rotate(25deg);
+  }
+  72% {
+    opacity: 0.85;
+    transform: translate(var(--collapse-mid-x), var(--collapse-mid-y)) scale(0.6)
+      rotate(95deg);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(0, 0) scale(0.05) rotate(150deg);
+  }
+}
+
+@keyframes connection-close-ring {
+  from {
+    stroke-dashoffset: 0;
+    opacity: 1;
+  }
+  to {
+    stroke-dashoffset: 251.33;
+    opacity: 0.15;
+  }
+}
+
+@keyframes connection-close-power {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.72);
+  }
+  35% {
+    opacity: 1;
+    transform: scale(1.08);
+  }
+}
+
+.connection-magic-star {
+  clip-path: polygon(
+    50% 0%,
+    61% 39%,
+    100% 50%,
+    61% 61%,
+    50% 100%,
+    39% 61%,
+    0% 50%,
+    39% 39%
+  );
+  background: color-mix(in srgb, var(--primary) 55%, white);
+  filter:
+    drop-shadow(0 0 3px color-mix(in srgb, var(--primary) 100%, transparent))
+    drop-shadow(0 0 7px color-mix(in srgb, var(--primary) 72%, transparent));
+}
+
+.connection-magic-star-success {
+  background: color-mix(in srgb, var(--success) 52%, white);
+  filter:
+    drop-shadow(0 0 3px color-mix(in srgb, var(--success) 100%, transparent))
+    drop-shadow(0 0 8px color-mix(in srgb, var(--success) 70%, transparent));
+}
+
+.connection-magic-collapse {
+  clip-path: polygon(
+    50% 0%,
+    61% 39%,
+    100% 50%,
+    61% 61%,
+    50% 100%,
+    39% 61%,
+    0% 50%,
+    39% 39%
+  );
+  background: color-mix(in srgb, var(--primary) 55%, white);
+  filter:
+    drop-shadow(0 0 3px var(--primary))
+    drop-shadow(0 0 7px color-mix(in srgb, var(--primary) 70%, transparent));
+  animation: connection-magic-collapse 780ms cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
+.connection-magic-comet {
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--primary) 35%, transparent) 42%,
+    color-mix(in srgb, var(--primary) 78%, white)
+  );
+  filter: blur(0.5px) drop-shadow(0 0 5px var(--primary));
+}
+
+.animate-connection-breathe {
+  animation: connection-breathe 1.8s ease-in-out infinite;
+}
+
+.animate-connection-magic-sweep {
+  animation: connection-magic-sweep 2.2s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+
+.animate-connection-magic-twinkle {
+  animation: connection-magic-twinkle 2s ease-in-out infinite;
+}
+
+.animate-connection-magic-burst {
+  animation: connection-magic-burst 900ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.animate-connection-close-ring {
+  animation: connection-close-ring 900ms cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
+.animate-connection-close-power {
+  animation: connection-close-power 900ms ease-in-out both;
+}
+
+.animate-connection-ready {
+  animation: connection-ready 2.8s ease-in-out infinite;
 }
 
 @keyframes session-flow {
