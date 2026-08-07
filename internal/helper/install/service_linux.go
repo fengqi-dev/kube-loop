@@ -37,7 +37,8 @@ WantedBy=multi-user.target
 	}
 	commands := [][]string{
 		{"systemctl", "daemon-reload"},
-		{"systemctl", "enable", "--now", unitName},
+		{"systemctl", "enable", unitName},
+		{"systemctl", "restart", unitName},
 	}
 	for _, args := range commands {
 		cmd := exec.Command(args[0], args[1:]...)

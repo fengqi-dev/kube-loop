@@ -95,7 +95,15 @@ func EnsureInstall(ctx context.Context) error {
 	return waitForHelperReady(ctx, 20*time.Second, 100*time.Millisecond, func(pingCtx context.Context) (helper.Response, error) {
 		requestCtx, cancel := context.WithTimeout(pingCtx, 2*time.Second)
 		defer cancel()
-		return client.Ping(requestCtx)
+		response, pingErr := client.Ping(requestCtx)
+		if pingErr == nil && response.Version != helper.Version {
+			return response, fmt.Errorf(
+				"helper version %q does not match expected version %q",
+				response.Version,
+				helper.Version,
+			)
+		}
+		return response, pingErr
 	})
 }
 
