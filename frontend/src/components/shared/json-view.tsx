@@ -1,5 +1,10 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 
 type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
@@ -60,11 +65,13 @@ function JsonNode({
   const closeBracket = Array.isArray(value) ? "]" : "}";
 
   return (
-    <div className="font-mono text-[11px] leading-5">
-      <button
-        type="button"
+    <Collapsible
+      open={open}
+      onOpenChange={setOpen}
+      className="font-mono text-[11px] leading-5"
+    >
+      <CollapsibleTrigger
         className="inline-flex max-w-full items-start gap-1 rounded-sm text-left hover:bg-muted/60"
-        onClick={() => setOpen((current) => !current)}
       >
         <span className="mt-0.5 shrink-0 text-muted-foreground">
           {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
@@ -79,9 +86,8 @@ function JsonNode({
             </>
           ) : null}
         </span>
-      </button>
-      {open ? (
-        <div className="ml-3 border-l border-border/70 pl-3">
+      </CollapsibleTrigger>
+      <CollapsibleContent className="ml-3 border-l border-border/70 pl-3">
           {entries.map(([key, child]) => (
             <JsonNode
               key={key}
@@ -91,9 +97,8 @@ function JsonNode({
             />
           ))}
           <div className="text-muted-foreground">{closeBracket}</div>
-        </div>
-      ) : null}
-    </div>
+      </CollapsibleContent>
+    </Collapsible>
   );
 }
 

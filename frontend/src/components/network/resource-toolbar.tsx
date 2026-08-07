@@ -1,5 +1,7 @@
-import { Loader2, RefreshCw, Search } from "lucide-react";
+import { RefreshCw, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Spinner } from "@/components/ui/spinner";
 import {
   Select,
   SelectContent,
@@ -64,7 +66,7 @@ export function ResourceToolbar({
           size={14}
           className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-muted-foreground"
         />
-        <input
+        <Input
           className="h-8 w-full rounded-lg border border-input bg-transparent pr-3 pl-8 text-sm outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50 dark:bg-input/30"
           value={query}
           disabled={disabled}
@@ -85,7 +87,7 @@ export function ResourceToolbar({
         onClick={onRefresh}
       >
         {loading ? (
-          <Loader2 data-icon="inline-start" className="animate-spin" />
+          <Spinner data-icon="inline-start" />
         ) : (
           <RefreshCw data-icon="inline-start" />
         )}

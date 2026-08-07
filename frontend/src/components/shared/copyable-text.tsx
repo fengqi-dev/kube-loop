@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
 import { useI18n } from "@/i18n";
 import { cn } from "@/lib/utils";
 
@@ -41,16 +42,18 @@ export function CopyableText({
   }
 
   return (
-    <button
+    <Button
       type="button"
+      variant="ghost"
+      size="xs"
       title={t(titleKey)}
       onClick={() => void copy()}
       className={cn(
-        "cursor-pointer rounded px-0.5 -mx-0.5 text-left transition-colors hover:bg-muted hover:text-foreground",
+        "h-auto min-w-0 cursor-pointer rounded px-0.5 -mx-0.5 text-left font-[inherit] transition-colors hover:bg-muted hover:text-foreground",
         className,
       )}
     >
       {label ?? text}
-    </button>
+    </Button>
   );
 }

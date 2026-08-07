@@ -7,7 +7,6 @@ import {
   ExternalLink,
   FileJson,
   Globe2,
-  Loader2,
   RefreshCw,
   Shield,
   ShieldCheck,
@@ -21,6 +20,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter } from "@/components/ui/card";
+import { Spinner } from "@/components/ui/spinner";
 import {
   Dialog,
   DialogContent,
@@ -280,7 +280,7 @@ export function SettingsView({
                   onClick={() => void onViewConfig()}
                 >
                   {configBusy === "full" ? (
-                    <Loader2 data-icon="inline-start" className="animate-spin" />
+                    <Spinner data-icon="inline-start" />
                   ) : (
                     <FileJson data-icon="inline-start" />
                   )}
@@ -298,7 +298,7 @@ export function SettingsView({
                   onClick={() => void onViewDNSConfig()}
                 >
                   {configBusy === "dns" ? (
-                    <Loader2 data-icon="inline-start" className="animate-spin" />
+                    <Spinner data-icon="inline-start" />
                   ) : (
                     <Globe2 data-icon="inline-start" />
                   )}
@@ -329,7 +329,7 @@ export function SettingsView({
               onClick={() => void onInstallHelper()}
             >
               {helperBusy ? (
-                <Loader2 data-icon="inline-start" className="animate-spin" />
+                <Spinner data-icon="inline-start" />
               ) : (
                 <Shield data-icon="inline-start" />
               )}

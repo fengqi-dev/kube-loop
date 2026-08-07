@@ -1,4 +1,12 @@
+import {
+  CircleCheck,
+  Info,
+  OctagonX,
+  TriangleAlert,
+} from "lucide-react";
+import type { CSSProperties } from "react";
 import { Toaster as Sonner, type ToasterProps } from "sonner";
+import { Spinner } from "@/components/ui/spinner";
 import { useTheme } from "@/hooks/use-theme";
 
 export function Toaster({ ...props }: ToasterProps) {
@@ -10,10 +18,16 @@ export function Toaster({ ...props }: ToasterProps) {
       className="toaster group"
       position="bottom-right"
       closeButton
+      icons={{
+        success: <CircleCheck className="size-4" />,
+        info: <Info className="size-4" />,
+        warning: <TriangleAlert className="size-4" />,
+        error: <OctagonX className="size-4" />,
+        loading: <Spinner className="size-4" />,
+      }}
       toastOptions={{
         classNames: {
-          toast:
-            "group toast group-[.toaster]:border-border group-[.toaster]:bg-popover group-[.toaster]:text-popover-foreground group-[.toaster]:shadow-lg",
+          toast: "group toast shadow-lg",
           description: "group-[.toast]:text-muted-foreground",
           actionButton:
             "group-[.toast]:bg-primary group-[.toast]:text-primary-foreground",
@@ -21,6 +35,14 @@ export function Toaster({ ...props }: ToasterProps) {
             "group-[.toast]:bg-muted group-[.toast]:text-muted-foreground",
         },
       }}
+      style={
+        {
+          "--normal-bg": "var(--popover)",
+          "--normal-text": "var(--popover-foreground)",
+          "--normal-border": "var(--border)",
+          "--border-radius": "var(--radius)",
+        } as CSSProperties
+      }
       {...props}
     />
   );

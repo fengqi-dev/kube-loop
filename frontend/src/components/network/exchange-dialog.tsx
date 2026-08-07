@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from "react";
-import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { backend } from "@/backend";
 import { Button } from "@/components/ui/button";
@@ -11,6 +10,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Field as ShadcnField,
+  FieldLabel,
+} from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import { Spinner } from "@/components/ui/spinner";
 import {
   Select,
   SelectContent,
@@ -132,14 +137,14 @@ export function ExchangeDialog({
             </Select>
           </Field>
           <Field label={t("intercept.localHost")}>
-            <input
+            <Input
               className={inputClassName}
               value={localHost}
               onChange={(event) => setLocalHost(event.target.value)}
             />
           </Field>
           <Field label={t("intercept.localPort")}>
-            <input
+            <Input
               className={inputClassName}
               value={localPort}
               onChange={(event) => setLocalPort(event.target.value)}
@@ -162,7 +167,7 @@ export function ExchangeDialog({
             disabled={!service || !selectedPort || busy}
             onClick={() => void onStart()}
           >
-            {busy && <Loader2 data-icon="inline-start" className="animate-spin" />}
+            {busy && <Spinner data-icon="inline-start" />}
             {t("intercept.start")}
           </Button>
         </DialogFooter>
@@ -173,9 +178,9 @@ export function ExchangeDialog({
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <label className="grid gap-1.5 text-[12px]">
-      <span className="font-medium text-muted-foreground">{label}</span>
+    <ShadcnField className="gap-1.5">
+      <FieldLabel className="text-[12px] text-muted-foreground">{label}</FieldLabel>
       {children}
-    </label>
+    </ShadcnField>
   );
 }

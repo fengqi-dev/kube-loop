@@ -1,4 +1,5 @@
-import { Check, LoaderCircle } from "lucide-react";
+import { Check } from "lucide-react";
+import { Spinner } from "@/components/ui/spinner";
 import { useI18n } from "@/i18n";
 import { cn } from "@/lib/utils";
 import type { SessionState } from "@/types";
@@ -76,7 +77,7 @@ export function ConnectionSteps({ phase }: { phase: SessionState["phase"] }) {
                       className="animate-step-check"
                     />
                   ) : active ? (
-                    <LoaderCircle size={14} strokeWidth={2.4} className="animate-spin" />
+                    <Spinner className="size-3.5" />
                   ) : (
                     <span className="text-[11px] font-semibold">{index + 1}</span>
                   )}

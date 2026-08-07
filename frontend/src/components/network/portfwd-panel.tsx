@@ -1,9 +1,15 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Cable, Copy, Loader2, Plus, Trash2 } from "lucide-react";
+import { Cable, Copy, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { backend } from "@/backend";
 import { NamespaceSelect } from "@/components/network/namespace-select";
 import { Button } from "@/components/ui/button";
+import {
+  Field as ShadcnField,
+  FieldLabel,
+} from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import { Spinner } from "@/components/ui/spinner";
 import {
   Select,
   SelectContent,
@@ -308,7 +314,7 @@ export function PortForwardPanel({
               </SelectContent>
             </Select>
           ) : (
-            <input
+            <Input
               className={inputClassName}
               value={manualRemotePort}
               disabled={!enabled}
@@ -320,7 +326,7 @@ export function PortForwardPanel({
         </Field>
 
         <Field label={t("portfwd.localPort")}>
-          <input
+          <Input
             className={inputClassName}
             value={localPort}
             disabled={!enabled}
@@ -339,7 +345,7 @@ export function PortForwardPanel({
             onClick={() => void onStart()}
           >
             {busy ? (
-              <Loader2 data-icon="inline-start" className="animate-spin" />
+              <Spinner data-icon="inline-start" />
             ) : (
               <Plus data-icon="inline-start" />
             )}
@@ -416,12 +422,12 @@ export function PortForwardPanel({
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <label className="min-w-0">
-      <span className="mb-1.5 block text-[10px] font-semibold tracking-[0.1em] text-muted-foreground uppercase">
+    <ShadcnField className="min-w-0 gap-1.5">
+      <FieldLabel className="text-[10px] font-semibold tracking-[0.1em] text-muted-foreground uppercase">
         {label}
-      </span>
+      </FieldLabel>
       {children}
-    </label>
+    </ShadcnField>
   );
 }
 

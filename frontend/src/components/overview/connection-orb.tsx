@@ -1,4 +1,5 @@
-import { CircleAlert, LoaderCircle, Power } from "lucide-react";
+import { CircleAlert, Power } from "lucide-react";
+import { Spinner } from "@/components/ui/spinner";
 import { isBusyPhase } from "@/lib/phase";
 import { cn } from "@/lib/utils";
 import type { SessionState } from "@/types";
@@ -49,7 +50,7 @@ export function ConnectionOrb({
       )}
     >
       {working ? (
-        <LoaderCircle size={30} strokeWidth={1.8} className="animate-spin" />
+        <Spinner className="size-[30px]" />
       ) : error ? (
         <CircleAlert size={30} strokeWidth={1.8} />
       ) : (

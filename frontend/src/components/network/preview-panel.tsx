@@ -1,9 +1,22 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Eye, Loader2, Plus, Trash2 } from "lucide-react";
+import { Eye, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { backend } from "@/backend";
 import { NamespaceSelect } from "@/components/network/namespace-select";
 import { Button } from "@/components/ui/button";
+import {
+  Field as ShadcnField,
+  FieldLabel,
+} from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import { Spinner } from "@/components/ui/spinner";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -160,7 +173,7 @@ export function PreviewPanel({
           onChange={onNamespaceChange}
         />
         <Field label={t("preview.serviceName")}>
-          <input
+          <Input
             className={inputClassName}
             value={serviceName}
             disabled={!ready}
@@ -170,7 +183,7 @@ export function PreviewPanel({
         </Field>
 
         <Field label={t("preview.servicePort")}>
-          <input
+          <Input
             className={inputClassName}
             value={servicePort}
             disabled={!ready}
@@ -181,19 +194,23 @@ export function PreviewPanel({
         </Field>
 
         <Field label={t("preview.protocol")}>
-          <select
-            className={inputClassName}
+          <Select
             value={protocol}
             disabled={!ready}
-            onChange={(event) => setProtocol(event.target.value)}
+            onValueChange={setProtocol}
           >
-            <option value="TCP">TCP</option>
-            <option value="UDP">UDP</option>
-          </select>
+            <SelectTrigger className="h-9 w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="TCP">TCP</SelectItem>
+              <SelectItem value="UDP">UDP</SelectItem>
+            </SelectContent>
+          </Select>
         </Field>
 
         <Field label={t("preview.localHost")}>
-          <input
+          <Input
             className={inputClassName}
             value={localHost}
             disabled={!ready}
@@ -203,7 +220,7 @@ export function PreviewPanel({
         </Field>
 
         <Field label={t("preview.localPort")}>
-          <input
+          <Input
             className={inputClassName}
             value={localPort}
             disabled={!ready}
@@ -222,7 +239,7 @@ export function PreviewPanel({
             onClick={() => void onStart()}
           >
             {busy ? (
-              <Loader2 data-icon="inline-start" className="animate-spin" />
+              <Spinner data-icon="inline-start" />
             ) : (
               <Plus data-icon="inline-start" />
             )}
@@ -296,11 +313,11 @@ export function PreviewPanel({
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <label className="min-w-0">
-      <span className="mb-1.5 block text-[10px] font-semibold tracking-[0.1em] text-muted-foreground uppercase">
+    <ShadcnField className="min-w-0 gap-1.5">
+      <FieldLabel className="text-[10px] font-semibold tracking-[0.1em] text-muted-foreground uppercase">
         {label}
-      </span>
+      </FieldLabel>
       {children}
-    </label>
+    </ShadcnField>
   );
 }

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Copy, Loader2, Minus, Plus, RefreshCw } from "lucide-react";
+import { Copy, Minus, Plus, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { backend } from "@/backend";
 import { PageShell } from "@/components/shared/page-shell";
@@ -7,6 +7,8 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Spinner } from "@/components/ui/spinner";
 import {
   Select,
   SelectContent,
@@ -249,7 +251,7 @@ Authorization = ${JSON.stringify(`Bearer ${token}`)}
               disabled={mcpBusy || !mcp}
               onClick={() => void onToggleMCP()}
             >
-              {mcpBusy ? <Loader2 data-icon="inline-start" className="animate-spin" /> : null}
+              {mcpBusy ? <Spinner data-icon="inline-start" /> : null}
               {mcp?.enabled ? t("mcp.disable") : t("mcp.enable")}
             </Button>
           </div>
@@ -280,7 +282,7 @@ Authorization = ${JSON.stringify(`Bearer ${token}`)}
                 >
                   <Minus size={14} />
                 </Button>
-                <input
+                <Input
                   className="h-9 w-[5.5rem] border-x border-input bg-transparent px-2 text-center font-mono text-[12px] outline-none focus-visible:bg-muted/40 disabled:cursor-not-allowed"
                   value={mcpPort}
                   disabled={mcpBusy || portLocked}
@@ -334,7 +336,7 @@ Authorization = ${JSON.stringify(`Bearer ${token}`)}
               disabled={mcpBusy || !mcp}
               onClick={() => void onToggleToken()}
             >
-              {mcpBusy ? <Loader2 data-icon="inline-start" className="animate-spin" /> : null}
+              {mcpBusy ? <Spinner data-icon="inline-start" /> : null}
               {mcp?.tokenEnabled ? t("mcp.tokenDisable") : t("mcp.tokenEnable")}
             </Button>
           </div>
@@ -398,7 +400,7 @@ Authorization = ${JSON.stringify(`Bearer ${token}`)}
               disabled={mcpBusy || !mcp}
               onClick={() => void onInstallMCPClient()}
             >
-              {mcpBusy ? <Loader2 data-icon="inline-start" className="animate-spin" /> : null}
+              {mcpBusy ? <Spinner data-icon="inline-start" /> : null}
               {t("mcp.install")}
             </Button>
             <Button

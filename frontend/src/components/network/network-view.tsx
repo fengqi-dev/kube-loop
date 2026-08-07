@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { Network } from "lucide-react";
 import { toast } from "sonner";
 import { backend } from "@/backend";
@@ -22,6 +22,10 @@ import { CopyableText } from "@/components/shared/copyable-text";
 import { EmptyState } from "@/components/shared/empty-state";
 import { PageShell } from "@/components/shared/page-shell";
 import {
+  ResourcePagination,
+  RESOURCE_PAGE_SIZE,
+} from "@/components/shared/resource-pagination";
+import {
   Table,
   TableBody,
   TableCell,
@@ -33,6 +37,12 @@ import { useI18n } from "@/i18n";
 import type { ServiceInfo, SessionState } from "@/types";
 
 type ServiceBinding = "exchange" | "mirror" | "preview" | "portForward" | "idle";
+
+const NetworkTrafficChart = lazy(() =>
+  import("@/components/network/network-traffic-chart").then((module) => ({
+    default: module.NetworkTrafficChart,
+  })),
+);
 
 export function NetworkView({
   contextName,
@@ -52,6 +62,7 @@ export function NetworkView({
     namespaceScoped && namespaces[0] ? namespaces[0] : ALL_NAMESPACES,
   );
   const [query, setQuery] = useState("");
+  const [page, setPage] = useState(1);
   const [services, setServices] = useState<ServiceInfo[]>([]);
   const [loading, setLoading] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -179,6 +190,19 @@ export function NetworkView({
       );
     });
   }, [namespace, query, services]);
+  const pageCount = Math.max(1, Math.ceil(filtered.length / RESOURCE_PAGE_SIZE));
+  const visibleServices = filtered.slice(
+    (page - 1) * RESOURCE_PAGE_SIZE,
+    page * RESOURCE_PAGE_SIZE,
+  );
+
+  useEffect(() => {
+    setPage(1);
+  }, [contextName, namespace, query]);
+
+  useEffect(() => {
+    setPage((current) => Math.min(current, pageCount));
+  }, [pageCount]);
 
   function bumpActive() {
     setRefreshKey((value) => value + 1);
@@ -209,6 +233,16 @@ export function NetworkView({
           />
         }
       />
+
+      {contextName ? (
+        <Suspense
+          fallback={
+            <div className="mb-4 h-[218px] animate-pulse rounded-2xl border border-border/80 bg-card/70" />
+          }
+        >
+          <NetworkTrafficChart ready={ready} metrics={session.metrics} />
+        </Suspense>
+      ) : null}
 
       {!contextName ? (
         <EmptyState
@@ -244,7 +278,7 @@ export function NetworkView({
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filtered.map((item) => (
+                {visibleServices.map((item) => (
                   <TableRow key={`${item.namespace}/${item.name}`}>
                     <TableCell className="w-40 min-w-40 max-w-40 font-medium">
                       <span className="block truncate" title={item.name}>
@@ -332,6 +366,11 @@ export function NetworkView({
               </TableBody>
             </Table>
           )}
+          <ResourcePagination
+            page={page}
+            total={filtered.length}
+            onPageChange={setPage}
+          />
         </div>
       )}
 

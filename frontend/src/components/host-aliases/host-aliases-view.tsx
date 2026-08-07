@@ -4,6 +4,15 @@ import { toast } from "sonner";
 import { backend } from "@/backend";
 import { PageShell } from "@/components/shared/page-shell";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { useI18n } from "@/i18n";
 import type { HostAlias } from "@/types";
 
@@ -147,26 +156,26 @@ export function HostAliasesView({
             {ready ? ` ${t("hosts.reconnectHint")}` : ""}
           </p>
           <div className="overflow-hidden rounded-lg border border-border">
-            <table className="w-full text-left text-[12px]">
-              <thead className="bg-muted/40 text-muted-foreground">
-                <tr>
-                  <th className="px-3 py-2 font-medium">{t("hosts.domain")}</th>
-                  <th className="px-3 py-2 font-medium">{t("hosts.ip")}</th>
-                  <th className="w-12 px-2 py-2" />
-                </tr>
-              </thead>
-              <tbody>
+            <Table className="text-left text-[12px]">
+              <TableHeader className="bg-muted/40 text-muted-foreground">
+                <TableRow className="hover:bg-transparent">
+                  <TableHead className="h-auto px-3 py-2 font-medium">{t("hosts.domain")}</TableHead>
+                  <TableHead className="h-auto px-3 py-2 font-medium">{t("hosts.ip")}</TableHead>
+                  <TableHead className="h-auto w-12 px-2 py-2" />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {rows.length === 0 ? (
-                  <tr>
-                    <td colSpan={3} className="px-3 py-8 text-center text-muted-foreground">
+                  <TableRow className="hover:bg-transparent">
+                    <TableCell colSpan={3} className="px-3 py-8 text-center text-muted-foreground">
                       {loading ? t("hosts.loading") : t("hosts.empty")}
-                    </td>
-                  </tr>
+                    </TableCell>
+                  </TableRow>
                 ) : (
                   rows.map((row) => (
-                    <tr key={row.key} className="border-t border-border">
-                      <td className="px-3 py-2">
-                        <input
+                    <TableRow key={row.key}>
+                      <TableCell className="px-3 py-2">
+                        <Input
                           className="h-8 w-full rounded-md border border-input bg-background px-2 font-mono text-[12px] outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40"
                           value={row.domain}
                           placeholder="app.example.dev"
@@ -181,9 +190,9 @@ export function HostAliasesView({
                             )
                           }
                         />
-                      </td>
-                      <td className="px-3 py-2">
-                        <input
+                      </TableCell>
+                      <TableCell className="px-3 py-2">
+                        <Input
                           className="h-8 w-full rounded-md border border-input bg-background px-2 font-mono text-[12px] outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40"
                           value={row.ip}
                           placeholder="10.96.0.50"
@@ -198,8 +207,8 @@ export function HostAliasesView({
                             )
                           }
                         />
-                      </td>
-                      <td className="px-2 py-2">
+                      </TableCell>
+                      <TableCell className="px-2 py-2">
                         <Button
                           type="button"
                           variant="ghost"
@@ -211,12 +220,12 @@ export function HostAliasesView({
                         >
                           <Trash2 size={14} />
                         </Button>
-                      </td>
-                    </tr>
+                      </TableCell>
+                    </TableRow>
                   ))
                 )}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           </div>
         </div>
       )}

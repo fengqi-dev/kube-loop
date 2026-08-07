@@ -6,7 +6,6 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
-  Loader2,
   RefreshCw,
   XCircle,
 } from "lucide-react";
@@ -18,6 +17,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { Spinner } from "@/components/ui/spinner";
 import { useI18n } from "@/i18n";
 import { cn } from "@/lib/utils";
 
@@ -230,7 +230,7 @@ export function SessionTestPanel({
           )}
         >
           {status === "running" ? (
-            <Loader2 className="mt-0.5 size-4 shrink-0 animate-spin text-primary" />
+            <Spinner className="mt-0.5 size-4 shrink-0 text-primary" />
           ) : status === "success" ? (
             <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-success" />
           ) : (

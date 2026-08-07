@@ -1,3 +1,4 @@
+import { Field, FieldLabel } from "@/components/ui/field";
 import {
   Select,
   SelectContent,
@@ -20,10 +21,10 @@ export function NamespaceSelect({
 }) {
   const { t } = useI18n();
   return (
-    <label className="block min-w-0">
-      <span className="mb-1.5 block text-[10px] font-medium text-muted-foreground">
+    <Field className="min-w-0 gap-1.5">
+      <FieldLabel className="text-[10px] font-medium text-muted-foreground">
         {t("network.namespace")}
-      </span>
+      </FieldLabel>
       <Select
         value={value || undefined}
         disabled={disabled || namespaces.length === 0}
@@ -40,6 +41,6 @@ export function NamespaceSelect({
           ))}
         </SelectContent>
       </Select>
-    </label>
+    </Field>
   );
 }

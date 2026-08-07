@@ -5,7 +5,6 @@ import {
   Copy,
   CopyPlus,
   Eye,
-  Loader2,
   Network,
   RotateCcw,
   Server,
@@ -28,6 +27,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Spinner } from "@/components/ui/spinner";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useI18n } from "@/i18n";
 import type { AppView } from "@/hooks/use-session";
 import { phaseKeys } from "@/lib/phase";
@@ -230,7 +232,7 @@ export function OverviewView({
                   onClick={() => void confirmReset()}
                 >
                   {resetting ? (
-                    <Loader2 data-icon="inline-start" className="animate-spin" />
+                    <Spinner data-icon="inline-start" />
                   ) : (
                     <RotateCcw data-icon="inline-start" />
                   )}
@@ -393,22 +395,30 @@ function ConnectionModePanel({
 
   return (
     <SidePanel title={t("overview.connectionMode")}>
-      <div className="grid grid-cols-2 gap-1 rounded-xl bg-muted/70 p-1">
-        <ModeButton
-          active={activeMode === "socks"}
-          disabled={busy || ready}
-          icon={<Network size={15} />}
-          label={t("overview.socksProxy")}
-          onClick={() => onConnectionModeChange("socks")}
-        />
-        <ModeButton
-          active={activeMode === "tun"}
-          disabled={busy || ready}
-          icon={<Cable size={15} />}
-          label={t("overview.tunMode")}
-          onClick={() => onConnectionModeChange("tun")}
-        />
-      </div>
+      <ToggleGroup
+        type="single"
+        value={activeMode}
+        disabled={busy || ready}
+        onValueChange={(value) => {
+          if (value) onConnectionModeChange(value as ConnectionMode);
+        }}
+        className="grid w-full grid-cols-2 gap-1 rounded-xl bg-muted/70 p-1"
+      >
+        <ToggleGroupItem
+          value="socks"
+          className="min-h-10 rounded-lg px-3 text-sm font-medium data-[state=on]:bg-background data-[state=on]:text-foreground data-[state=on]:shadow-sm data-[state=on]:ring-1 data-[state=on]:ring-border"
+        >
+          <Network size={15} />
+          <span className="truncate">{t("overview.socksProxy")}</span>
+        </ToggleGroupItem>
+        <ToggleGroupItem
+          value="tun"
+          className="min-h-10 rounded-lg px-3 text-sm font-medium data-[state=on]:bg-background data-[state=on]:text-foreground data-[state=on]:shadow-sm data-[state=on]:ring-1 data-[state=on]:ring-border"
+        >
+          <Cable size={15} />
+          <span className="truncate">{t("overview.tunMode")}</span>
+        </ToggleGroupItem>
+      </ToggleGroup>
 
       <div className="mt-2.5 flex min-h-0 flex-1 flex-col rounded-xl border border-primary/15 bg-primary/[0.035] p-2.5">
         <div className="flex items-start gap-2.5">
@@ -481,7 +491,7 @@ function ConnectionModePanel({
                 onClick={() => void installHelper()}
               >
                 {helperAction === "install" ? (
-                  <Loader2 data-icon="inline-start" className="animate-spin" />
+                  <Spinner data-icon="inline-start" />
                 ) : (
                   <ShieldCheck size={12} data-icon="inline-start" />
                 )}
@@ -509,39 +519,6 @@ function ConnectionModePanel({
         )}
       </div>
     </SidePanel>
-  );
-}
-
-function ModeButton({
-  active,
-  disabled,
-  icon,
-  label,
-  onClick,
-}: {
-  active: boolean;
-  disabled: boolean;
-  icon: ReactNode;
-  label: string;
-  onClick(): void;
-}) {
-  return (
-    <button
-      type="button"
-      disabled={disabled}
-      aria-pressed={active}
-      className={cn(
-        "flex min-h-10 items-center justify-center gap-2 rounded-lg px-3 text-sm font-medium transition-all",
-        active
-          ? "bg-background text-foreground shadow-sm ring-1 ring-border"
-          : "text-muted-foreground hover:bg-background/60 hover:text-foreground",
-        disabled && "cursor-not-allowed opacity-75",
-      )}
-      onClick={onClick}
-    >
-      {icon}
-      <span className="truncate">{label}</span>
-    </button>
   );
 }
 
@@ -739,7 +716,7 @@ function NetworkField({
     <div className="grid grid-cols-[6.5rem_minmax(0,1fr)] items-center gap-x-2 text-[12px]">
       <dt className="whitespace-nowrap text-muted-foreground">{label}</dt>
       <dd className="min-w-0">
-        <input
+        <Input
           className="h-7 w-full min-w-0 rounded-md border border-input bg-background px-2 font-mono text-[11px] outline-none transition-colors focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40 disabled:opacity-50"
           value={value}
           placeholder={placeholder}
@@ -838,7 +815,7 @@ function SessionMetrics({
           onClick={onReset}
         >
           {resetting ? (
-            <Loader2 data-icon="inline-start" className="animate-spin" />
+            <Spinner data-icon="inline-start" />
           ) : (
             <RotateCcw data-icon="inline-start" />
           )}
@@ -852,12 +829,13 @@ function SessionMetrics({
             <div className="mb-1.5 text-[11px] font-medium text-foreground/85">{group.title}</div>
             <div className="space-y-1.5 pl-0.5">
               {group.rows.map((row) => (
-                <button
+                <Button
                   key={`${group.title}-${row.label}`}
                   type="button"
+                  variant="ghost"
                   onClick={() => onNavigate(row.view)}
                   className={cn(
-                    "flex w-full items-center gap-2 rounded-md px-1 py-0.5 text-left",
+                    "flex h-auto w-full items-center justify-start gap-2 rounded-md px-1 py-0.5 text-left",
                     "transition-colors hover:bg-accent/60 focus-visible:outline-none",
                     "focus-visible:ring-2 focus-visible:ring-ring/50",
                   )}
@@ -869,7 +847,7 @@ function SessionMetrics({
                   <span className="ml-auto font-mono text-[13px] font-semibold tabular-nums">
                     {row.value}
                   </span>
-                </button>
+                </Button>
               ))}
             </div>
           </div>

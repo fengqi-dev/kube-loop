@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { backend } from "@/backend";
 import { Button } from "@/components/ui/button";
@@ -11,6 +10,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Field as ShadcnField,
+  FieldLabel,
+} from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import { Spinner } from "@/components/ui/spinner";
 import {
   Select,
   SelectContent,
@@ -129,7 +134,7 @@ export function PreviewCreateDialog({
             </Select>
           </Field>
           <Field label={t("preview.serviceName")}>
-            <input
+            <Input
               className={inputClassName}
               value={name}
               onChange={(event) => setName(event.target.value)}
@@ -138,7 +143,7 @@ export function PreviewCreateDialog({
           </Field>
           <div className="grid grid-cols-2 gap-3">
             <Field label={t("preview.servicePort")}>
-              <input
+              <Input
                 className={inputClassName}
                 value={servicePort}
                 onChange={(event) => setServicePort(event.target.value)}
@@ -158,14 +163,14 @@ export function PreviewCreateDialog({
             </Field>
           </div>
           <Field label={t("preview.localHost")}>
-            <input
+            <Input
               className={inputClassName}
               value={localHost}
               onChange={(event) => setLocalHost(event.target.value)}
             />
           </Field>
           <Field label={t("preview.localPort")}>
-            <input
+            <Input
               className={inputClassName}
               value={localPort}
               onChange={(event) => setLocalPort(event.target.value)}
@@ -184,7 +189,7 @@ export function PreviewCreateDialog({
             {t("actions.cancel")}
           </Button>
           <Button type="button" disabled={busy} onClick={() => void onStart()}>
-            {busy && <Loader2 data-icon="inline-start" className="animate-spin" />}
+            {busy && <Spinner data-icon="inline-start" />}
             {t("preview.start")}
           </Button>
         </DialogFooter>
@@ -195,9 +200,9 @@ export function PreviewCreateDialog({
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <label className="grid gap-1.5 text-[12px]">
-      <span className="font-medium text-muted-foreground">{label}</span>
+    <ShadcnField className="gap-1.5">
+      <FieldLabel className="text-[12px] text-muted-foreground">{label}</FieldLabel>
       {children}
-    </label>
+    </ShadcnField>
   );
 }

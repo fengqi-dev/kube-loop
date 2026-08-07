@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Activity, Copy, Loader2, Trash2 } from "lucide-react";
+import { Activity, Copy, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { backend } from "@/backend";
 import {
@@ -8,6 +8,7 @@ import {
   type SessionTestStatus,
 } from "@/components/network/session-test-panel";
 import { Button } from "@/components/ui/button";
+import { Spinner } from "@/components/ui/spinner";
 import {
   Table,
   TableBody,
@@ -388,7 +389,7 @@ export function ActiveSessions({
                       onClick={() => void testForward(item)}
                     >
                       {testingSessionID === item.id ? (
-                        <Loader2 size={14} className="animate-spin" />
+                        <Spinner />
                       ) : (
                         <Activity size={14} />
                       )}
@@ -401,7 +402,7 @@ export function ActiveSessions({
                       aria-label={`${t("portfwd.stop")}: ${item.kind}/${item.namespace}/${item.name}`}
                       onClick={() => void stopForward(item.id)}
                     >
-                      {busy ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                      {busy ? <Spinner /> : <Trash2 />}
                     </Button>
                   </div>
                 </TableCell>
@@ -431,7 +432,7 @@ export function ActiveSessions({
                       onClick={() => void testIntercept(item, "exchange")}
                     >
                       {testingSessionID === item.id ? (
-                        <Loader2 size={14} className="animate-spin" />
+                        <Spinner />
                       ) : (
                         <Activity size={14} />
                       )}
@@ -444,7 +445,7 @@ export function ActiveSessions({
                       aria-label={`${t("portfwd.stop")}: ${item.namespace}/${item.service}`}
                       onClick={() => void stopExchange(item.id)}
                     >
-                      {busy ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                      {busy ? <Spinner /> : <Trash2 />}
                     </Button>
                   </div>
                 </TableCell>
@@ -474,7 +475,7 @@ export function ActiveSessions({
                       onClick={() => void testIntercept(item, "mirror")}
                     >
                       {testingSessionID === item.id ? (
-                        <Loader2 size={14} className="animate-spin" />
+                        <Spinner />
                       ) : (
                         <Activity size={14} />
                       )}
@@ -487,7 +488,7 @@ export function ActiveSessions({
                       aria-label={`${t("portfwd.stop")}: ${item.namespace}/${item.service}`}
                       onClick={() => void stopMirror(item.id)}
                     >
-                      {busy ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                      {busy ? <Spinner /> : <Trash2 />}
                     </Button>
                   </div>
                 </TableCell>
@@ -522,7 +523,7 @@ export function ActiveSessions({
                       onClick={() => void testIntercept(item, "preview")}
                     >
                       {testingSessionID === item.id ? (
-                        <Loader2 size={14} className="animate-spin" />
+                        <Spinner />
                       ) : (
                         <Activity size={14} />
                       )}
@@ -535,7 +536,7 @@ export function ActiveSessions({
                       aria-label={`${t("portfwd.stop")}: ${item.namespace}/${item.service}`}
                       onClick={() => void stopPreview(item.id)}
                     >
-                      {busy ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                      {busy ? <Spinner /> : <Trash2 />}
                     </Button>
                   </div>
                 </TableCell>

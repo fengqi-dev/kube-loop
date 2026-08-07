@@ -19,6 +19,10 @@ import { CopyableText } from "@/components/shared/copyable-text";
 import { EmptyState } from "@/components/shared/empty-state";
 import { PageShell } from "@/components/shared/page-shell";
 import {
+  ResourcePagination,
+  RESOURCE_PAGE_SIZE,
+} from "@/components/shared/resource-pagination";
+import {
   Table,
   TableBody,
   TableCell,
@@ -48,6 +52,7 @@ export function WorkloadView({
     namespaceScoped && namespaces[0] ? namespaces[0] : ALL_NAMESPACES,
   );
   const [query, setQuery] = useState("");
+  const [page, setPage] = useState(1);
   const [pods, setPods] = useState<PodInfo[]>([]);
   const [loading, setLoading] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -181,6 +186,19 @@ export function WorkloadView({
       );
     });
   }, [namespace, pods, query]);
+  const pageCount = Math.max(1, Math.ceil(filtered.length / RESOURCE_PAGE_SIZE));
+  const visiblePods = filtered.slice(
+    (page - 1) * RESOURCE_PAGE_SIZE,
+    page * RESOURCE_PAGE_SIZE,
+  );
+
+  useEffect(() => {
+    setPage(1);
+  }, [contextName, namespace, query]);
+
+  useEffect(() => {
+    setPage((current) => Math.min(current, pageCount));
+  }, [pageCount]);
 
   return (
     <PageShell title={t("workload.title")} description={t("workload.description")}>
@@ -238,7 +256,7 @@ export function WorkloadView({
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filtered.map((item) => (
+                {visiblePods.map((item) => (
                   <TableRow key={`${item.namespace}/${item.name}`}>
                     <TableCell className="w-40 min-w-40 max-w-40 font-medium">
                       <span className="block truncate" title={item.name}>
@@ -337,6 +355,11 @@ export function WorkloadView({
               </TableBody>
             </Table>
           )}
+          <ResourcePagination
+            page={page}
+            total={filtered.length}
+            onPageChange={setPage}
+          />
         </div>
       )}
 

@@ -10,9 +10,10 @@ import { NetworkView } from "@/components/network/network-view";
 import { WorkloadView } from "@/components/network/workload-view";
 import { OverviewView } from "@/components/overview/overview-view";
 import { SettingsView } from "@/components/settings/settings-view";
+import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { useSession } from "@/hooks/use-session";
 import { cn } from "@/lib/utils";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 
 function App() {
   const {
@@ -51,7 +52,22 @@ function App() {
   const namespaceScoped = scopedNamespaces.length > 0;
 
   const [connectionsAlert, setConnectionsAlert] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(() => {
+    try {
+      return localStorage.getItem("kubeloop.sidebar.collapsed") !== "1";
+    } catch {
+      return true;
+    }
+  });
   const seenConnectionIds = useRef(new Set<string>());
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("kubeloop.sidebar.collapsed", sidebarOpen ? "0" : "1");
+    } catch {
+      // Ignore unavailable storage.
+    }
+  }, [sidebarOpen]);
 
   useEffect(() => {
     if (!ready) {
@@ -73,23 +89,29 @@ function App() {
   }, [ready, session.metrics?.connections, view]);
 
   return (
-    <div className="flex h-screen min-h-[580px] overflow-hidden bg-background text-foreground">
+    <SidebarProvider
+      open={sidebarOpen}
+      onOpenChange={setSidebarOpen}
+      className="h-screen min-h-[580px] overflow-hidden bg-background text-foreground"
+      style={{
+        "--sidebar-width": "176px",
+        "--sidebar-width-icon": "60px",
+      } as CSSProperties}
+    >
       <AppSidebar
         view={view}
         connectionsAlert={connectionsAlert}
         updateAvailable={data.update.available}
-        ready={ready}
-        metrics={session.metrics}
         onNavigate={setView}
       />
 
-      <div className="flex min-w-0 flex-1 flex-col">
+      <SidebarInset className="min-w-0 overflow-hidden">
         <AppHeader
           view={view}
           onOpenSettings={() => setView("settings")}
         />
 
-        <main
+        <div
           className={cn(
             "min-h-0 flex-1 overflow-y-auto px-6 py-5",
             view === "overview" && "scrollbar-none",
@@ -167,7 +189,7 @@ function App() {
               onOpen={() => void openUpdatePage()}
             />
           )}
-        </main>
+        </div>
 
         <StatusBar
           phase={session.phase}
@@ -175,8 +197,8 @@ function App() {
           contextName={session.context || contextName}
           message={uiError || session.error || session.message}
         />
-      </div>
-    </div>
+      </SidebarInset>
+    </SidebarProvider>
   );
 }
 

@@ -5,20 +5,21 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { ContextMenu as ContextMenuPrimitive } from "radix-ui";
 import {
   ArrowDownToLine,
+  ArrowLeft,
+  ArrowRight,
   ArrowUpFromLine,
   Ban,
   ChevronUp,
   Eye,
   EyeOff,
+  File,
   FilePlus2,
   Folder,
   FolderPlus,
   FolderOpen,
   History,
-  Loader2,
   Pause,
   Pencil,
   Play,
@@ -30,6 +31,13 @@ import { backend } from "@/backend";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -37,6 +45,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Spinner } from "@/components/ui/spinner";
 import {
   Select,
   SelectContent,
@@ -44,6 +54,20 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { useI18n } from "@/i18n";
 import { formatBytes } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -318,37 +342,38 @@ export function SFTPFileManagerDialog({
 
   return (
     <>
-    <Dialog
-      open={open}
-      onOpenChange={(nextOpen) => {
-        if (!nextOpen) setPendingOperation(null);
-        onOpenChange(nextOpen);
-      }}
-    >
-      <DialogContent
-        className="h-[calc(100vh-1.5rem)] max-h-none w-[calc(100vw-1.5rem)] max-w-[calc(100vw-1.5rem)] sm:max-w-[calc(100vw-1.5rem)] grid-rows-[auto_minmax(0,1fr)_220px] gap-3 p-4"
-        onContextMenu={(event) => event.preventDefault()}
+      <Dialog
+        open={open}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) setPendingOperation(null);
+          onOpenChange(nextOpen);
+        }}
       >
-        <DialogHeader>
-          <DialogTitle>
-            {t("sftp.managerTitle")} · {pod ? `${pod.namespace}/${pod.name}` : "—"}
-          </DialogTitle>
-          <DialogDescription className="flex items-center gap-2">
-            <span>{t("sftp.container")}</span>
-            <Select value={container} onValueChange={setContainer}>
-              <SelectTrigger className="h-7 w-52">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {(pod?.containers ?? []).map((item) => (
-                  <SelectItem key={item} value={item}>{item}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </DialogDescription>
-        </DialogHeader>
+        <DialogContent
+          overlayClassName="z-[50] bg-black/30 backdrop-blur-none"
+          className="inset-3 top-3 left-3 z-[60] h-auto max-h-none w-auto max-w-none translate-x-0 translate-y-0 grid-rows-[auto_minmax(0,1fr)_190px] gap-4 rounded-2xl border-border bg-background p-5 opacity-100 shadow-2xl sm:max-w-none"
+          onContextMenu={(event) => event.preventDefault()}
+        >
+          <DialogHeader className="border-b border-border/70 pb-3">
+            <DialogTitle className="text-base tracking-[-0.01em]">
+              {t("sftp.managerTitle")} · {pod ? `${pod.namespace}/${pod.name}` : "—"}
+            </DialogTitle>
+            <DialogDescription className="flex items-center gap-2.5 text-[13px]">
+              <span>{t("sftp.container")}</span>
+              <Select value={container} onValueChange={setContainer}>
+                <SelectTrigger className="h-8 w-56 bg-background text-[13px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {(pod?.containers ?? []).map((item) => (
+                    <SelectItem key={item} value={item}>{item}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </DialogDescription>
+          </DialogHeader>
 
-        <div className="grid min-h-0 grid-cols-[minmax(360px,1fr)_96px_minmax(360px,1fr)] gap-3 overflow-x-auto">
+        <div className="grid min-h-0 grid-cols-[minmax(360px,1fr)_44px_minmax(360px,1fr)] gap-3 overflow-x-auto">
           <FilePane
             side="local"
             title={t("sftp.localComputer")}
@@ -376,23 +401,43 @@ export function SFTPFileManagerDialog({
             onDelete={(entry) => void deleteSelected("local", entry)}
           />
 
-          <div className="flex flex-col items-stretch justify-center gap-2">
-            <Button
-              variant="outline"
-              disabled={!localSelected || !target}
-              onClick={() => void transfer("upload")}
-            >
-              <ArrowUpFromLine />
-              {t("sftp.upload")}
-            </Button>
-            <Button
-              variant="outline"
-              disabled={!remoteSelected || !target}
-              onClick={() => void transfer("download")}
-            >
-              <ArrowDownToLine />
-              {t("sftp.download")}
-            </Button>
+          <div className="flex flex-col items-center justify-center gap-2">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="rounded-full bg-background shadow-sm"
+                  disabled={!localSelected || !target}
+                  aria-label={t("sftp.upload")}
+                  onClick={() => void transfer("upload")}
+                >
+                  <ArrowRight size={16} />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="top" className="z-[90]">
+                {t("sftp.upload")}
+              </TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="rounded-full bg-background shadow-sm"
+                  disabled={!remoteSelected || !target}
+                  aria-label={t("sftp.download")}
+                  onClick={() => void transfer("download")}
+                >
+                  <ArrowLeft size={16} />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" className="z-[90]">
+                {t("sftp.download")}
+              </TooltipContent>
+            </Tooltip>
           </div>
 
           <FilePane
@@ -436,16 +481,16 @@ export function SFTPFileManagerDialog({
             )
           }
         />
-      </DialogContent>
-    </Dialog>
-    <FileOperationDialog
-      operation={pendingOperation}
-      name={operationName}
-      busy={operationBusy}
-      onNameChange={setOperationName}
-      onCancel={() => setPendingOperation(null)}
-      onConfirm={() => void confirmPendingOperation()}
-    />
+        </DialogContent>
+      </Dialog>
+      <FileOperationDialog
+        operation={pendingOperation}
+        name={operationName}
+        busy={operationBusy}
+        onNameChange={setOperationName}
+        onCancel={() => setPendingOperation(null)}
+        onConfirm={() => void confirmPendingOperation()}
+      />
     </>
   );
 }
@@ -498,7 +543,8 @@ function FileOperationDialog({
       }}
     >
       <DialogContent
-        className="sm:max-w-sm"
+        overlayClassName="z-[70] bg-black/45"
+        className="z-[80] sm:max-w-sm"
         onContextMenu={(event) => event.preventDefault()}
       >
         <DialogHeader>
@@ -513,7 +559,7 @@ function FileOperationDialog({
           }}
         >
           {requiresName ? (
-            <input
+            <Input
               autoFocus
               value={name}
               disabled={busy}
@@ -535,7 +581,7 @@ function FileOperationDialog({
               variant={operation?.kind === "delete" ? "destructive" : "default"}
               disabled={busy || (requiresName && !name.trim())}
             >
-              {busy ? <Loader2 className="animate-spin" /> : null}
+              {busy ? <Spinner /> : null}
               {t("actions.confirm")}
             </Button>
           </DialogFooter>
@@ -593,17 +639,17 @@ function FilePane({
     : entries.filter((entry) => !entry.name.startsWith("."));
   useEffect(() => setDraftPath(path), [path]);
   return (
-    <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border bg-card">
-      <div className="flex items-center gap-2 border-b px-3 py-2">
-        {side === "local" ? <FolderOpen className="size-4" /> : <Folder className="size-4" />}
-        <span className="text-xs font-semibold">{title}</span>
+    <div className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-border/90 bg-background shadow-sm">
+      <div className="flex items-center gap-2.5 border-b border-border/80 bg-muted/35 px-3.5 py-2.5">
+        {side === "local" ? <FolderOpen className="size-[18px] text-primary" /> : <Folder className="size-[18px] text-primary" />}
+        <span className="text-[13px] font-semibold tracking-[-0.01em]">{title}</span>
         {onChoose ? (
           <Button size="xs" variant="ghost" className="ml-auto" onClick={onChoose}>
             {t("sftp.choose")}
           </Button>
         ) : null}
       </div>
-      <div className="flex gap-1 border-b p-2">
+      <div className="flex gap-1.5 border-b border-border/80 bg-card px-2.5 py-2">
         <Button size="icon-sm" variant="ghost" onClick={onUp} aria-label={t("sftp.up")}>
           <ChevronUp />
         </Button>
@@ -626,10 +672,10 @@ function FilePane({
             onPathSubmit(draftPath);
           }}
         >
-          <input
+          <Input
             value={draftPath}
             onChange={(event) => setDraftPath(event.target.value)}
-            className="h-7 w-full rounded-md border bg-background px-2 font-mono text-xs outline-none focus:border-ring"
+            className="h-8 w-full rounded-lg border border-input bg-background px-2.5 font-mono text-[13px] text-foreground shadow-inner outline-none focus:border-ring focus:ring-2 focus:ring-ring/15"
             />
         </form>
         <Button
@@ -672,40 +718,65 @@ function FilePane({
         </Button>
       </div>
       <div className="min-h-0 flex-1 overflow-auto">
-        <div className="sticky top-0 grid grid-cols-[minmax(0,1fr)_90px_150px] border-b bg-muted/80 px-2 py-1.5 text-[11px] text-muted-foreground backdrop-blur">
-          <span>{t("sftp.file")}</span>
-          <span className="text-right">{t("sftp.size")}</span>
-          <span className="text-right">{t("sftp.modified")}</span>
-        </div>
-        {visibleEntries.map((entry) => (
-          <ContextMenuPrimitive.Root key={entry.path}>
-            <ContextMenuPrimitive.Trigger asChild>
-              <button
-                type="button"
-                className={cn(
-                  "grid w-full grid-cols-[minmax(0,1fr)_90px_150px] items-center border-b px-2 py-1.5 text-left text-xs hover:bg-muted/60",
-                  selected?.path === entry.path && "bg-primary/10 text-primary",
-                )}
-                onClick={() => onSelect(entry)}
-                onDoubleClick={() => onOpen(entry)}
-                onContextMenu={() => onSelect(entry)}
-              >
-                <span className="flex min-w-0 items-center gap-2">
-                  <Folder className={cn("size-3.5 shrink-0", !entry.dir && "invisible")} />
-                  <span className="truncate">{entry.name}</span>
-                </span>
-                <span className="text-right font-mono text-muted-foreground">
-                  {entry.dir ? "—" : formatBytes(entry.size)}
-                </span>
-                <span className="text-right text-muted-foreground">
-                  {new Date(entry.modTime).toLocaleString(locale)}
-                </span>
-              </button>
-            </ContextMenuPrimitive.Trigger>
-            <ContextMenuPrimitive.Portal>
-              <ContextMenuPrimitive.Content
-                className="z-[60] min-w-36 overflow-hidden rounded-lg bg-popover p-1 text-popover-foreground shadow-md ring-1 ring-foreground/10"
-              >
+        <Table className="table-fixed">
+          <TableHeader className="sticky top-0 z-10 bg-muted">
+            <TableRow className="hover:bg-muted">
+              <TableHead className="h-9 px-3 text-[12px] font-medium">{t("sftp.file")}</TableHead>
+              <TableHead className="h-9 w-[100px] px-3 text-right text-[12px] font-medium">
+                {t("sftp.size")}
+              </TableHead>
+              <TableHead className="h-9 w-[170px] px-3 text-right text-[12px] font-medium">
+                {t("sftp.modified")}
+              </TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {visibleEntries.map((entry) => (
+              <ContextMenu key={entry.path}>
+                <ContextMenuTrigger asChild>
+                  <TableRow
+                    tabIndex={0}
+                    className={cn(
+                      "cursor-default text-[13px] text-foreground",
+                      selected?.path === entry.path &&
+                        "bg-primary/12 text-primary ring-1 ring-inset ring-primary/20 hover:bg-primary/12",
+                    )}
+                    onClick={() => onSelect(entry)}
+                    onDoubleClick={() => onOpen(entry)}
+                    onContextMenu={() => onSelect(entry)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") onOpen(entry);
+                    }}
+                  >
+                    <TableCell className="px-3 py-2">
+                      <span className="flex min-w-0 items-center gap-2">
+                        {entry.dir ? (
+                          <Folder className="size-4 shrink-0 text-primary/80" />
+                        ) : (
+                          <File className="size-4 shrink-0 text-muted-foreground" />
+                        )}
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span className="truncate font-medium">{entry.name}</span>
+                          </TooltipTrigger>
+                          <TooltipContent
+                            side="top"
+                            className="z-[90] max-w-[420px] break-all"
+                          >
+                            {entry.name}
+                          </TooltipContent>
+                        </Tooltip>
+                      </span>
+                    </TableCell>
+                    <TableCell className="px-3 py-2 text-right font-mono text-[12px] text-foreground/65">
+                      {entry.dir ? "—" : formatBytes(entry.size)}
+                    </TableCell>
+                    <TableCell className="px-3 py-2 text-right text-[12px] text-foreground/65">
+                      {new Date(entry.modTime).toLocaleString(locale)}
+                    </TableCell>
+                  </TableRow>
+                </ContextMenuTrigger>
+              <ContextMenuContent className="z-[90] min-w-36">
                 <FileContextMenuItem onSelect={() => onTransfer(entry)}>
                   {side === "local" ? <ArrowUpFromLine /> : <ArrowDownToLine />}
                   {side === "local" ? t("sftp.upload") : t("sftp.download")}
@@ -714,7 +785,7 @@ function FilePane({
                   <Pencil />
                   {t("sftp.rename")}
                 </FileContextMenuItem>
-                <ContextMenuPrimitive.Separator className="-mx-1 my-1 h-px bg-border" />
+                <ContextMenuSeparator />
                 <FileContextMenuItem
                   destructive
                   onSelect={() => onDelete(entry)}
@@ -722,15 +793,18 @@ function FilePane({
                   <Trash2 />
                   {t("sftp.delete")}
                 </FileContextMenuItem>
-              </ContextMenuPrimitive.Content>
-            </ContextMenuPrimitive.Portal>
-          </ContextMenuPrimitive.Root>
-        ))}
-        {!loading && visibleEntries.length === 0 ? (
-          <div className="py-12 text-center text-xs text-muted-foreground">
-            {t("sftp.emptyDirectory")}
-          </div>
-        ) : null}
+              </ContextMenuContent>
+              </ContextMenu>
+            ))}
+            {!loading && visibleEntries.length === 0 ? (
+              <TableRow className="hover:bg-transparent">
+                <TableCell colSpan={3} className="h-28 text-center text-[13px] text-foreground/55">
+                  {t("sftp.emptyDirectory")}
+                </TableCell>
+              </TableRow>
+            ) : null}
+          </TableBody>
+        </Table>
       </div>
     </div>
   );
@@ -746,16 +820,13 @@ function FileContextMenuItem({
   onSelect(): void;
 }) {
   return (
-    <ContextMenuPrimitive.Item
-      className={cn(
-        "flex cursor-default select-none items-center gap-2 rounded-md px-2 py-1.5 text-xs outline-none focus:bg-accent focus:text-accent-foreground [&_svg]:size-3.5",
-        destructive &&
-          "text-destructive focus:bg-destructive/10 focus:text-destructive",
-      )}
+    <ContextMenuItem
+      variant={destructive ? "destructive" : "default"}
+      className="text-xs [&_svg]:size-3.5"
       onSelect={onSelect}
     >
       {children}
-    </ContextMenuPrimitive.Item>
+    </ContextMenuItem>
   );
 }
 
@@ -772,26 +843,32 @@ function TransferPanel({
 }) {
   const { t } = useI18n();
   return (
-    <div className="min-h-0 overflow-hidden rounded-lg border bg-card">
-      <div className="flex h-9 items-center gap-1 border-b px-2">
-        <Button size="sm" variant={tab === "active" ? "secondary" : "ghost"} onClick={() => onTabChange("active")}>
-          <RefreshCw />{t("sftp.activeTasks")}
-        </Button>
-        <Button size="sm" variant={tab === "history" ? "secondary" : "ghost"} onClick={() => onTabChange("history")}>
-          <History />{t("sftp.history")}
-        </Button>
+    <Tabs
+      value={tab}
+      onValueChange={(value) => onTabChange(value as TaskTab)}
+      className="min-h-0 gap-0 overflow-hidden rounded-xl border border-border/90 bg-background shadow-sm"
+    >
+      <div className="flex h-11 items-center gap-1.5 border-b border-border/80 bg-muted/35 px-2.5">
+        <TabsList className="h-8 bg-transparent p-0">
+          <TabsTrigger value="active" className="h-8 px-2.5 text-xs">
+            <RefreshCw />{t("sftp.activeTasks")}
+          </TabsTrigger>
+          <TabsTrigger value="history" className="h-8 px-2.5 text-xs">
+            <History />{t("sftp.history")}
+          </TabsTrigger>
+        </TabsList>
         {tab === "history" ? (
           <Button size="sm" variant="ghost" className="ml-auto" onClick={onClear}>
             {t("sftp.clearHistory")}
           </Button>
         ) : null}
       </div>
-      <div className="h-[174px] overflow-auto">
+      <div className="h-[144px] overflow-auto bg-card">
         {tasks.length === 0 ? (
-          <div className="py-14 text-center text-xs text-muted-foreground">{t("sftp.noTasks")}</div>
+          <div className="py-14 text-center text-[13px] text-foreground/55">{t("sftp.noTasks")}</div>
         ) : tasks.map((task) => <TransferRow key={task.id} task={task} />)}
       </div>
-    </div>
+    </Tabs>
   );
 }
 
@@ -804,7 +881,7 @@ function TransferRow({ task }: { task: FileTransferTask }) {
     : 100;
   const resumable = ["paused", "failed", "stale"].includes(task.status);
   return (
-    <div className="grid grid-cols-[22px_minmax(0,1fr)_180px_130px] items-center gap-3 border-b px-3 py-2 text-xs">
+    <div className="grid grid-cols-[22px_minmax(0,1fr)_190px_130px] items-center gap-3 border-b border-border/70 px-3 py-2.5 text-[13px]">
       {task.direction === "upload" ? <ArrowUpFromLine /> : <ArrowDownToLine />}
       <div className="min-w-0">
         <div className="flex items-center gap-2">
@@ -828,7 +905,7 @@ function TransferRow({ task }: { task: FileTransferTask }) {
         </div>
         {task.error ? <div className="mt-1 truncate text-destructive">{task.error}</div> : null}
       </div>
-      <div className="font-mono text-muted-foreground">
+      <div className="font-mono text-[12px] text-foreground/65">
         {unknownTotal
           ? formatBytes(task.doneBytes)
           : `${formatBytes(task.doneBytes)} / ${formatBytes(task.totalBytes)} · ${percent}%`}

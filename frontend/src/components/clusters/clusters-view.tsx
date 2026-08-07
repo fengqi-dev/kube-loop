@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
   FilePlus2,
-  LoaderCircle,
   Power,
   RefreshCw,
   Trash2,
@@ -14,6 +13,7 @@ import { PageShell } from "@/components/shared/page-shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Spinner } from "@/components/ui/spinner";
 import {
   Table,
   TableBody,
@@ -234,7 +234,7 @@ export function ClustersView({
             onClick={() => void handleReload()}
           >
             {refreshing ? (
-              <LoaderCircle size={14} className="animate-spin" data-icon="inline-start" />
+              <Spinner data-icon="inline-start" />
             ) : (
               <RefreshCw size={14} data-icon="inline-start" />
             )}
@@ -247,7 +247,7 @@ export function ClustersView({
             onClick={() => void handleAdd()}
           >
             {adding ? (
-              <LoaderCircle size={14} className="animate-spin" data-icon="inline-start" />
+              <Spinner data-icon="inline-start" />
             ) : (
               <FilePlus2 size={14} data-icon="inline-start" />
             )}
@@ -289,7 +289,7 @@ export function ClustersView({
                       aria-label={t("clusters.removeFile")}
                     >
                       {removing === file.path ? (
-                        <LoaderCircle size={14} className="animate-spin" />
+                        <Spinner />
                       ) : (
                         <Trash2 size={14} />
                       )}
@@ -304,7 +304,7 @@ export function ClustersView({
 
       {loading ? (
         <div className="grid min-h-[240px] place-items-center text-sm text-muted-foreground">
-          <LoaderCircle className="animate-spin" size={18} />
+          <Spinner />
         </div>
       ) : contexts.length === 0 ? (
         <EmptyState
@@ -382,7 +382,7 @@ export function ClustersView({
                           aria-label={t("clusters.probe")}
                         >
                           {probe?.probing ? (
-                            <LoaderCircle size={14} className="animate-spin" />
+                            <Spinner />
                           ) : (
                             <Wifi size={14} />
                           )}
@@ -418,7 +418,7 @@ function ProbeBadge({ probe }: { probe?: ProbeState }) {
   if (!probe || probe.probing) {
     return (
       <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
-        <LoaderCircle size={12} className="animate-spin" />
+        <Spinner />
         {t("clusters.probing")}
       </span>
     );
