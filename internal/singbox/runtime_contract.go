@@ -38,6 +38,7 @@ type RunningCore interface {
 	Config() []byte
 	ReadLogs(ctx context.Context) ([]string, error)
 	UpdateDNSNamespace(ctx context.Context, namespace string) error
+	UpdateHostAliases(ctx context.Context, hosts []HostAlias) error
 	ProbeClusterDNS(ctx context.Context) error
 	DNSPort() int
 	InternalDNSPort() int

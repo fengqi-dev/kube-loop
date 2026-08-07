@@ -124,6 +124,34 @@ func (p *Process) UpdateDNSNamespace(ctx context.Context, namespace string) erro
 	return p.updateDNS(ctx, sessionID, dns)
 }
 
+func (p *Process) UpdateHostAliases(ctx context.Context, hosts []singbox.HostAlias) error {
+	normalized, err := singbox.NormalizeHostAliases(hosts)
+	if err != nil {
+		return err
+	}
+	p.specMu.Lock()
+	nextSpec := p.spec
+	nextSpec.Hosts = normalized
+	dnsMeta, err := nextSpec.DNS()
+	sessionID := nextSpec.ID
+	proxy := p.dnsProxy
+	if err == nil {
+		p.spec = nextSpec
+		p.resolverDomains = dnsMeta.Domains
+	}
+	p.specMu.Unlock()
+	if err != nil {
+		return err
+	}
+	if proxy != nil {
+		proxy.SetHostAliases(normalized)
+	}
+	if p.updateDNS == nil {
+		return errors.New("privileged DNS update is unavailable; reconnect to apply")
+	}
+	return p.updateDNS(ctx, sessionID, dnsMeta)
+}
+
 func (p *Process) ProbeClusterDNS(ctx context.Context) error {
 	p.specMu.Lock()
 	domains := slices.Clone(p.spec.ClusterDomains)

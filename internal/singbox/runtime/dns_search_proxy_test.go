@@ -121,6 +121,63 @@ func TestDNSSearchProxyPrefersExpandedClusterName(t *testing.T) {
 	}
 }
 
+func TestDNSSearchProxyUpdatesHostAliases(t *testing.T) {
+	upstreamAddr := startTestDNSUpstream(t)
+	publicTCP, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	publicPort := publicTCP.Addr().(*net.TCPAddr).Port
+	_ = publicTCP.Close()
+
+	proxy, err := startDNSSearchProxy(
+		"127.0.0.1", publicPort, "127.0.0.1", upstreamAddr.Port,
+		singbox.SearchDomains("default"), "cluster.local",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = proxy.Close() }()
+
+	target := net.JoinHostPort("127.0.0.1", fmt.Sprintf("%d", publicPort))
+	query := func() *dns.Msg {
+		t.Helper()
+		req := new(dns.Msg)
+		req.SetQuestion("api.kubeloop.test.", dns.TypeA)
+		resp, _, queryErr := (&dns.Client{
+			Net: "udp", Timeout: 2 * time.Second,
+		}).Exchange(req, target)
+		if queryErr != nil {
+			t.Fatal(queryErr)
+		}
+		return resp
+	}
+	assertIP := func(want string) {
+		t.Helper()
+		resp := query()
+		if len(resp.Answer) != 1 {
+			t.Fatalf("answer count = %d, want 1: %#v", len(resp.Answer), resp)
+		}
+		answer, ok := resp.Answer[0].(*dns.A)
+		if !ok || answer.A.String() != want {
+			t.Fatalf("answer = %#v, want %s", resp.Answer, want)
+		}
+	}
+
+	proxy.SetHostAliases([]singbox.HostAlias{{
+		Domain: "api.kubeloop.test", IP: "192.0.2.10",
+	}})
+	assertIP("192.0.2.10")
+	proxy.SetHostAliases([]singbox.HostAlias{{
+		Domain: "api.kubeloop.test", IP: "192.0.2.11",
+	}})
+	assertIP("192.0.2.11")
+	proxy.SetHostAliases(nil)
+	if resp := query(); resp.Rcode != dns.RcodeNameError {
+		t.Fatalf("cleared alias rcode = %d, want NXDOMAIN", resp.Rcode)
+	}
+}
+
 func TestDNSSearchCandidates(t *testing.T) {
 	got := dnsSearchCandidates(
 		"static-web.default.svc.",

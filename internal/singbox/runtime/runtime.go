@@ -169,6 +169,7 @@ func (r *Runtime) startOnce(
 	if err != nil {
 		return nil, err
 	}
+	dnsProxy.SetHostAliases(normalizedHosts)
 	process := &Process{
 		done: make(chan struct{}), stopCh: make(chan struct{}),
 		controllerAddress: net.JoinHostPort("127.0.0.1", strconv.Itoa(controllerPort)),

@@ -26,6 +26,7 @@ type dnsSearchProxy struct {
 	upstream  string
 	search    []string
 	domains   []string
+	hosts     map[string]net.IP
 	clientUDP *dns.Client
 	clientTCP *dns.Client
 
@@ -51,6 +52,7 @@ func startDNSSearchProxy(
 		upstream:  net.JoinHostPort(upstreamHost, fmt.Sprintf("%d", upstreamPort)),
 		search:    slices.Clone(search),
 		domains:   domains,
+		hosts:     make(map[string]net.IP),
 		clientUDP: &dns.Client{Net: "udp", Timeout: 3 * time.Second, UDPSize: 1232},
 		clientTCP: &dns.Client{Net: "tcp", Timeout: 5 * time.Second},
 	}
@@ -89,6 +91,25 @@ func (p *dnsSearchProxy) SetClusterDomains(domains []string) {
 	p.domains = normalized
 }
 
+func (p *dnsSearchProxy) SetHostAliases(hosts []singbox.HostAlias) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.hosts == nil {
+		p.hosts = make(map[string]net.IP)
+	}
+	for name := range p.hosts {
+		// Keep a tombstone for aliases embedded in the running sing-box config,
+		// so a removed alias cannot leak through the upstream until reconnect.
+		p.hosts[name] = nil
+	}
+	for _, host := range hosts {
+		name := strings.ToLower(dns.Fqdn(host.Domain))
+		if ip := net.ParseIP(host.IP).To4(); ip != nil {
+			p.hosts[name] = slices.Clone(ip)
+		}
+	}
+}
+
 func (p *dnsSearchProxy) Close() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -118,9 +139,28 @@ func (p *dnsSearchProxy) serveDNS(w dns.ResponseWriter, req *dns.Msg) {
 	p.mu.Lock()
 	search := slices.Clone(p.search)
 	domains := slices.Clone(p.domains)
+	hostIP, managedHost := p.hosts[strings.ToLower(req.Question[0].Name)]
+	hostIP = slices.Clone(hostIP)
 	p.mu.Unlock()
 
 	original := req.Question[0].Name
+	if managedHost {
+		out := new(dns.Msg)
+		out.SetReply(req)
+		if req.Question[0].Qtype == dns.TypeA && hostIP != nil {
+			out.Answer = []dns.RR{&dns.A{
+				Hdr: dns.RR_Header{
+					Name: original, Rrtype: dns.TypeA,
+					Class: dns.ClassINET, Ttl: 1,
+				},
+				A: hostIP,
+			}}
+		} else if hostIP == nil {
+			out.Rcode = dns.RcodeNameError
+		}
+		_ = w.WriteMsg(out)
+		return
+	}
 	candidates := dnsSearchCandidates(original, search, domains...)
 	network := "udp"
 	if _, ok := w.RemoteAddr().(*net.TCPAddr); ok {

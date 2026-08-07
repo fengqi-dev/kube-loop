@@ -22,7 +22,7 @@ func TestMain(m *testing.M) { harness.RunMain(m) }
 
 func TestTUNDNSResolution(t *testing.T) {
 	harness.RequireE2E(t)
-	ctx, cancel := harness.TestContext(t, 1*time.Minute)
+	ctx, cancel := harness.TestContext(t, 2*time.Minute)
 	defer cancel()
 
 	provider := harness.NewProvider(t)
@@ -114,6 +114,74 @@ func TestTUNDNSResolution(t *testing.T) {
 		harness.WaitDNSA(t, port, "echo", clusterIP)
 		harness.WaitDNSA(t, port, priorityService, echoNamespaceIP)
 	})
+
+	updatedAliasIP := "192.0.2.10"
+	t.Run("update-host-alias-while-connected", func(t *testing.T) {
+		if err := live.Manager.SetHostAliases(harness.KubeContext(), []store.HostAliasSpec{
+			{Domain: aliasDomain, IP: updatedAliasIP},
+		}); err != nil {
+			t.Fatal(err)
+		}
+		harness.WaitDNSA(t, port, aliasDomain, updatedAliasIP)
+		harness.WaitDNSNotA(t, port, aliasDomain, clusterIP)
+	})
+
+	t.Run("host-alias-survives-reconnect", func(t *testing.T) {
+		port = reconnectDNS(t, ctx, live.Manager)
+		harness.WaitDNSA(t, port, aliasDomain, updatedAliasIP)
+	})
+
+	t.Run("clear-host-alias-while-connected", func(t *testing.T) {
+		if err := live.Manager.SetHostAliases(harness.KubeContext(), nil); err != nil {
+			t.Fatal(err)
+		}
+		harness.WaitDNSNotA(t, port, aliasDomain, updatedAliasIP)
+		if aliases := live.Manager.HostAliases(harness.KubeContext()); len(aliases) != 0 {
+			t.Fatalf("host aliases after clear = %#v", aliases)
+		}
+	})
+}
+
+func reconnectDNS(t *testing.T, ctx context.Context, manager *session.Manager) int {
+	t.Helper()
+	if err := manager.Disconnect(); err != nil {
+		t.Fatal(err)
+	}
+	harness.AssertHelperIdle(t)
+
+	connected := make(chan session.State, 1)
+	failed := make(chan session.State, 1)
+	manager.Subscribe(func(state session.State) {
+		switch state.Phase {
+		case session.PhaseConnected:
+			select {
+			case connected <- state:
+			default:
+			}
+		case session.PhaseError:
+			select {
+			case failed <- state:
+			default:
+			}
+		}
+	})
+	if err := manager.Connect(ctx, session.Request{
+		Context: harness.KubeContext(), Namespace: harness.EchoNamespace,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-connected:
+	case state := <-failed:
+		t.Fatalf("reconnected session failed: %s", state.Message)
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	port, err := manager.DNSPort()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return port
 }
 
 func ensureDNSService(

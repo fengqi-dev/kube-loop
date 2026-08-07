@@ -197,9 +197,10 @@ func (f *fakeCore) Start(
 }
 
 type fakeProcess struct {
-	once sync.Once
-	done chan struct{}
-	err  error
+	once         sync.Once
+	done         chan struct{}
+	err          error
+	updatedHosts []singbox.HostAlias
 }
 
 func (f *fakeProcess) Done() <-chan struct{} { return f.done }
@@ -228,9 +229,13 @@ func (f *fakeProcess) ReadLogs(context.Context) ([]string, error) {
 	return nil, nil
 }
 func (f *fakeProcess) UpdateDNSNamespace(context.Context, string) error { return nil }
-func (f *fakeProcess) ProbeClusterDNS(context.Context) error            { return nil }
-func (f *fakeProcess) DNSPort() int                                     { return 1053 }
-func (f *fakeProcess) InternalDNSPort() int                             { return 1054 }
+func (f *fakeProcess) UpdateHostAliases(_ context.Context, hosts []singbox.HostAlias) error {
+	f.updatedHosts = append([]singbox.HostAlias(nil), hosts...)
+	return nil
+}
+func (f *fakeProcess) ProbeClusterDNS(context.Context) error { return nil }
+func (f *fakeProcess) DNSPort() int                          { return 1053 }
+func (f *fakeProcess) InternalDNSPort() int                  { return 1054 }
 func (f *fakeProcess) Close() error {
 	f.once.Do(func() { close(f.done) })
 	return nil

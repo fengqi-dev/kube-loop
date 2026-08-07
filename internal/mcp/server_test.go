@@ -668,6 +668,34 @@ func TestServerToolsConnectAndList(t *testing.T) {
 		backend.hostAliases[0].Domain != "api.local" {
 		t.Fatalf("network result=%#v aliases=%#v", networkRes, backend.hostAliases)
 	}
+	networkRes, err = session.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name: "manage_network",
+		Arguments: map[string]any{
+			"action": "get", "type": "host_aliases", "context": "minikube",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ = json.Marshal(networkRes.StructuredContent)
+	if networkRes.IsError ||
+		!strings.Contains(string(raw), `"domain":"api.local"`) ||
+		!strings.Contains(string(raw), `"ip":"10.0.0.8"`) {
+		t.Fatalf("get host aliases result=%s", raw)
+	}
+	networkRes, err = session.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name: "manage_network",
+		Arguments: map[string]any{
+			"action": "set", "type": "host_aliases", "context": "minikube",
+			"items": []any{},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if networkRes.IsError || len(backend.hostAliases) != 0 {
+		t.Fatalf("clear host aliases result=%#v aliases=%#v", networkRes, backend.hostAliases)
+	}
 
 	helperRes, err := session.CallTool(ctx, &mcpsdk.CallToolParams{
 		Name:      "manage_helper",

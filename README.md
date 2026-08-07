@@ -145,21 +145,47 @@ Each release includes `SHA256SUMS`.
 The Helper is installed once and can be inspected or removed from Settings. It
 manages only KubeLoop's sing-box process, TUN, routes, split DNS, and recovery state.
 
-## Restricted RBAC
+## Kubernetes RBAC
 
-KubeLoop supports namespace-scoped developer accounts:
+KubeLoop uses the identity from the selected kubeconfig Context. The Gateway has
+no ServiceAccount token and does not call the Kubernetes API. Permissions below
+belong to the desktop user's kubeconfig identity.
 
-1. An administrator preinstalls the Gateway manifest shown in Overview.
-2. The user receives `get/list` and `pods/portforward` access to the Gateway Pod.
-3. Pod and Service inventory is limited to authorized Namespaces.
-4. If Nodes or CoreDNS cannot be read, enter Pod CIDR, Service CIDR, cluster DNS,
-   and DNS Namespace manually in Overview.
-5. Pod SSH additionally requires `create` on the `pods/exec` subresource in the
-   target Namespace.
+Apply the following `Role` and bind it to the kubeconfig user in each Namespace
+KubeLoop may access, including `kubeloop-system`:
 
-Capabilities degrade independently. Missing Service, Endpoints, or EndpointSlice
-write access disables Exchange, Service Mirror, and Preview without disabling
-transparent cluster access.
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: kubeloop
+  namespace: <namespace>
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods/exec", "pods/portforward"]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list", "watch", "create", "update", "delete"]
+  - apiGroups: [""]
+    resources: ["endpoints"]
+    verbs: ["get", "create", "update"]
+  - apiGroups: ["discovery.k8s.io"]
+    resources: ["endpointslices"]
+    verbs: ["get", "list", "create", "update", "delete"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch", "create", "update"]
+```
+
+Cluster-level reads such as `namespaces`, `nodes`, `servicecidrs`, and the
+`kube-system` DNS resources are only used for automatic discovery. If they are
+unavailable, configure the network values manually. Precreate
+`kubeloop-system` when the user cannot create Namespaces. MCP uses the same
+kubeconfig identity and requires no additional permissions.
 
 ## Session diagnostics
 

@@ -166,6 +166,24 @@ func (m *Manager) SetHostAliases(contextName string, items []store.HostAliasSpec
 		m.AppendLog("ERROR", fmt.Sprintf("save host aliases for %s: %v", contextName, err))
 		return err
 	}
+	m.mu.Lock()
+	core := m.runningCore
+	m.mu.Unlock()
+	state := m.State()
+	if core != nil && state.Phase == PhaseConnected && state.Context == contextName {
+		hosts := make([]singbox.HostAlias, 0, len(normalized))
+		for _, item := range normalized {
+			hosts = append(hosts, singbox.HostAlias{Domain: item.Domain, IP: item.IP})
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := core.UpdateHostAliases(ctx, hosts); err != nil {
+			m.AppendLog("ERROR", fmt.Sprintf(
+				"update active host aliases for %s: %v", contextName, err,
+			))
+			return err
+		}
+	}
 	m.AppendLog("INFO", fmt.Sprintf(
 		"host aliases saved for %s: entries=%d", contextName, len(normalized),
 	))

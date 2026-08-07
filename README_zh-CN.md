@@ -135,19 +135,44 @@ installer、portable zip、deb、rpm 和 tar.gz。每个 Release 都包含 `SHA2
 Helper 只需安装一次，可在设置中查看或卸载。它仅管理 KubeLoop 的 sing-box 进程、TUN、
 route、split DNS 和恢复状态。
 
-## 受限 RBAC
+## Kubernetes RBAC
 
-KubeLoop 支持 Namespace 范围的开发者账号：
+KubeLoop 使用所选 kubeconfig Context 中的身份。Gateway 不挂载 ServiceAccount token，
+也不会调用 Kubernetes API。以下权限均授予桌面端用户的 kubeconfig 身份。
 
-1. 管理员预装 Overview 页面提供的 Gateway manifest。
-2. 用户拥有 Gateway Pod 的 `get/list` 和 `pods/portforward` 权限。
-3. Pod 和 Service inventory 限制到授权 Namespace。
-4. 无法读取 Node 或 CoreDNS 时，在 Overview 手工填写 Pod CIDR、Service CIDR、集群 DNS
-   和 DNS Namespace。
-5. Pod SSH 还需要目标 Namespace 中 `pods/exec` subresource 的 `create` 权限。
+在 KubeLoop 需要访问的每个 Namespace（包括 `kubeloop-system`）中创建以下 `Role`，
+并绑定到 kubeconfig 用户：
 
-各能力独立降级。缺少 Service、Endpoints 或 EndpointSlice 写权限时，只禁用 Exchange、
-Service Mirror 和 Preview，不影响透明集群访问。
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: kubeloop
+  namespace: <namespace>
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods/exec", "pods/portforward"]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list", "watch", "create", "update", "delete"]
+  - apiGroups: [""]
+    resources: ["endpoints"]
+    verbs: ["get", "create", "update"]
+  - apiGroups: ["discovery.k8s.io"]
+    resources: ["endpointslices"]
+    verbs: ["get", "list", "create", "update", "delete"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch", "create", "update"]
+```
+
+`namespaces`、`nodes`、`servicecidrs` 和 `kube-system` DNS 资源等集群级读取权限仅用于
+自动发现；没有这些权限时可手工配置网络参数。若用户不能创建 Namespace，请由管理员
+预先创建 `kubeloop-system`。MCP Server 共用同一 kubeconfig 身份，不需要额外权限。
 
 ## Session 诊断
 

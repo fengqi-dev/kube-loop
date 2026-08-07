@@ -63,6 +63,33 @@ func WaitDNSNXDOMAIN(t *testing.T, port int, name string) {
 	t.Fatalf("DNS NXDOMAIN %s: %v", name, lastErr)
 }
 
+// WaitDNSNotA waits until name no longer resolves to wantIP.
+func WaitDNSNotA(t *testing.T, port int, name, wantIP string) {
+	t.Helper()
+	deadline := time.Now().Add(30 * time.Second)
+	var lastErr error
+	for time.Now().Before(deadline) {
+		msg, err := exchangeDNS(port, "udp", name, dns.TypeA)
+		if err == nil && msg != nil {
+			found := false
+			for _, rr := range msg.Answer {
+				if a, ok := rr.(*dns.A); ok && a.A.String() == wantIP {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return
+			}
+			lastErr = fmt.Errorf("still resolves to %s", wantIP)
+		} else {
+			lastErr = err
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+	t.Fatalf("DNS A %s still resolves to %s: %v", name, wantIP, lastErr)
+}
+
 func waitDNS(
 	t *testing.T,
 	port int,
