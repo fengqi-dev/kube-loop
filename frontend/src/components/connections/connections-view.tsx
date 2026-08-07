@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { Activity } from "lucide-react";
 import { EmptyState } from "@/components/shared/empty-state";
 import { PageShell } from "@/components/shared/page-shell";
@@ -18,6 +18,12 @@ import {
   formatSpeed,
 } from "@/lib/format";
 import type { Connection, Metrics } from "@/types";
+
+const NetworkTrafficChart = lazy(() =>
+  import("@/components/network/network-traffic-chart").then((module) => ({
+    default: module.NetworkTrafficChart,
+  })),
+);
 
 const stickyForMs = 30_000;
 const maxTableRows = 100;
@@ -101,12 +107,6 @@ export function ConnectionsView({
     <PageShell
       title={t("connections.title")}
       description={t("connections.description")}
-      action={
-        <div className="flex h-8 items-center gap-3 rounded-md border bg-card px-3 font-mono text-[11px] text-muted-foreground">
-          <span>↓ {formatBytes(metrics?.downloadTotal ?? 0)}</span>
-          <span>↑ {formatBytes(metrics?.uploadTotal ?? 0)}</span>
-        </div>
-      }
     >
       {!ready ? (
         <EmptyState
@@ -115,92 +115,101 @@ export function ConnectionsView({
           detail={t("connections.disconnectedDetail")}
         />
       ) : (
-        <div className="overflow-auto rounded-lg border bg-card">
-          <Table>
-            <TableHeader>
-              <TableRow className="bg-muted/50 hover:bg-muted/50">
-                {columns.map((column) => (
-                  <TableHead
-                    key={column.key}
-                    className={
-                      column.align === "right"
-                        ? "text-right text-[10px] tracking-wide uppercase"
-                        : "text-[10px] tracking-wide uppercase"
-                    }
-                  >
-                    {t(`connections.${column.key}`)}
-                  </TableHead>
-                ))}
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {connections.length === 0 ? (
-                <TableRow className="hover:bg-transparent">
-                  <TableCell
-                    colSpan={columns.length}
-                    className="h-40 text-center text-muted-foreground"
-                  >
-                    <div className="mx-auto max-w-sm space-y-1">
-                      <p className="text-sm font-medium text-foreground">
-                        {t("connections.emptyTitle")}
-                      </p>
-                      <p className="text-xs">{t("connections.emptyDetail")}</p>
-                    </div>
-                  </TableCell>
+        <>
+          <Suspense
+            fallback={
+              <div className="mb-4 h-[218px] animate-pulse rounded-2xl border border-border/80 bg-card/70" />
+            }
+          >
+            <NetworkTrafficChart ready={ready} metrics={metrics} />
+          </Suspense>
+          <div className="overflow-auto rounded-lg border bg-card">
+            <Table>
+              <TableHeader>
+                <TableRow className="bg-muted/50 hover:bg-muted/50">
+                  {columns.map((column) => (
+                    <TableHead
+                      key={column.key}
+                      className={
+                        column.align === "right"
+                          ? "text-right text-[10px] tracking-wide uppercase"
+                          : "text-[10px] tracking-wide uppercase"
+                      }
+                    >
+                      {t(`connections.${column.key}`)}
+                    </TableHead>
+                  ))}
                 </TableRow>
-              ) : (
-                connections.map((connection) => (
-                  <TableRow key={connection.id}>
-                    <TableCell className="max-w-[140px] truncate font-medium">
-                      {executableName(connection.process) ||
-                        connection.process ||
-                        "—"}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {connection.network?.toUpperCase() || "—"}
-                    </TableCell>
-                    <TableCell className="max-w-[130px] truncate text-[11px] text-muted-foreground">
-                      {connection.feature || connection.inbound || "—"}
-                    </TableCell>
-                    <TableCell className="max-w-[220px] truncate font-mono text-[11px] text-primary">
-                      {connection.destination || "—"}
-                    </TableCell>
-                    <TableCell className="font-mono text-[11px] text-muted-foreground">
-                      {connection.source || "—"}
-                    </TableCell>
-                    <TableCell className="align-middle">
-                      <StackedMetric
-                        upload={formatBytes(connection.upload ?? 0)}
-                        download={formatBytes(connection.download ?? 0)}
-                      />
-                    </TableCell>
-                    <TableCell className="align-middle">
-                      <StackedMetric
-                        upload={formatSpeed(connection.uploadSpeed ?? 0)}
-                        download={formatSpeed(connection.downloadSpeed ?? 0)}
-                      />
-                    </TableCell>
-                    <TableCell className="max-w-[120px] truncate text-[11px] text-muted-foreground">
-                      {connection.outbound || "—"}
-                    </TableCell>
-                    <TableCell className="min-w-[160px] max-w-[260px] align-top font-mono text-[11px] leading-4 text-muted-foreground">
-                      {connection.rule ? (
-                        <span className="block whitespace-pre-wrap break-all">
-                          {formatRuleLines(connection.rule)}
-                        </span>
-                      ) : (
-                        "—"
-                      )}
-                    </TableCell>
-                    <TableCell className="font-mono text-[11px] text-muted-foreground">
-                      {formatDuration(connection.startedAt, now)}
+              </TableHeader>
+              <TableBody>
+                {connections.length === 0 ? (
+                  <TableRow className="hover:bg-transparent">
+                    <TableCell
+                      colSpan={columns.length}
+                      className="h-40 text-center text-muted-foreground"
+                    >
+                      <div className="mx-auto max-w-sm space-y-1">
+                        <p className="text-sm font-medium text-foreground">
+                          {t("connections.emptyTitle")}
+                        </p>
+                        <p className="text-xs">{t("connections.emptyDetail")}</p>
+                      </div>
                     </TableCell>
                   </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </div>
+                ) : (
+                  connections.map((connection) => (
+                    <TableRow key={connection.id}>
+                      <TableCell className="max-w-[140px] truncate font-medium">
+                        {executableName(connection.process) ||
+                          connection.process ||
+                          "—"}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {connection.network?.toUpperCase() || "—"}
+                      </TableCell>
+                      <TableCell className="max-w-[130px] truncate text-[11px] text-muted-foreground">
+                        {connection.feature || connection.inbound || "—"}
+                      </TableCell>
+                      <TableCell className="max-w-[220px] truncate font-mono text-[11px] text-primary">
+                        {connection.destination || "—"}
+                      </TableCell>
+                      <TableCell className="font-mono text-[11px] text-muted-foreground">
+                        {connection.source || "—"}
+                      </TableCell>
+                      <TableCell className="align-middle">
+                        <StackedMetric
+                          upload={formatBytes(connection.upload ?? 0)}
+                          download={formatBytes(connection.download ?? 0)}
+                        />
+                      </TableCell>
+                      <TableCell className="align-middle">
+                        <StackedMetric
+                          upload={formatSpeed(connection.uploadSpeed ?? 0)}
+                          download={formatSpeed(connection.downloadSpeed ?? 0)}
+                        />
+                      </TableCell>
+                      <TableCell className="max-w-[120px] truncate text-[11px] text-muted-foreground">
+                        {connection.outbound || "—"}
+                      </TableCell>
+                      <TableCell className="min-w-[160px] max-w-[260px] align-top font-mono text-[11px] leading-4 text-muted-foreground">
+                        {connection.rule ? (
+                          <span className="block whitespace-pre-wrap break-all">
+                            {formatRuleLines(connection.rule)}
+                          </span>
+                        ) : (
+                          "—"
+                        )}
+                      </TableCell>
+                      <TableCell className="font-mono text-[11px] text-muted-foreground">
+                        {formatDuration(connection.startedAt, now)}
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </div>
+        </>
       )}
     </PageShell>
   );

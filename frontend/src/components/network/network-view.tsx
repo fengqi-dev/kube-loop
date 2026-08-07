@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Network } from "lucide-react";
 import { toast } from "sonner";
 import { backend } from "@/backend";
@@ -37,12 +37,6 @@ import { useI18n } from "@/i18n";
 import type { ServiceInfo, SessionState } from "@/types";
 
 type ServiceBinding = "exchange" | "mirror" | "preview" | "portForward" | "idle";
-
-const NetworkTrafficChart = lazy(() =>
-  import("@/components/network/network-traffic-chart").then((module) => ({
-    default: module.NetworkTrafficChart,
-  })),
-);
 
 export function NetworkView({
   contextName,
@@ -233,16 +227,6 @@ export function NetworkView({
           />
         }
       />
-
-      {contextName ? (
-        <Suspense
-          fallback={
-            <div className="mb-4 h-[218px] animate-pulse rounded-2xl border border-border/80 bg-card/70" />
-          }
-        >
-          <NetworkTrafficChart ready={ready} metrics={session.metrics} />
-        </Suspense>
-      ) : null}
 
       {!contextName ? (
         <EmptyState
