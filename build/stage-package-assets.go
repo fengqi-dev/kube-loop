@@ -10,6 +10,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -37,11 +38,30 @@ func main() {
 		fatalf("create output directory: %v", err)
 	}
 
-	fmt.Printf("==> Fetching sing-box %s for %s/%s\n", singboxdist.Version, goos, goarch)
-	if err := singboxdist.BundleRelease(goos, goarch, binDir); err != nil {
-		fatalf("bundle sing-box: %v", err)
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("KUBELOOP_SINGBOX_SOURCE")), "debug") {
+		name := "sing-box"
+		if goos == "windows" {
+			name += ".exe"
+		}
+		args := []string{
+			"run", "./build/singbox-debug.go",
+			"-target", target,
+			"-output", filepath.Join(binDir, name),
+		}
+		cmd := exec.Command("go", args...)
+		cmd.Dir = root
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			fatalf("build sing-box from source: %v", err)
+		}
+	} else {
+		fmt.Printf("==> Fetching sing-box %s for %s/%s\n", singboxdist.Version, goos, goarch)
+		if err := singboxdist.BundleRelease(goos, goarch, binDir); err != nil {
+			fatalf("bundle sing-box: %v", err)
+		}
+		fmt.Printf("==> Staged sing-box into %s\n", binDir)
 	}
-	fmt.Printf("==> Staged sing-box into %s\n", binDir)
 
 	if goos == "windows" {
 		if err := stageWindowsResources(root); err != nil {

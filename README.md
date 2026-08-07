@@ -298,6 +298,54 @@ directly; the active Minikube, kind, or k3d cluster receives the image through
 its local image loader. Set `KUBELOOP_GATEWAY_IMAGE` only to override this
 development image explicitly.
 
+### Debug sing-box source
+
+The pinned sing-box source is available as a Git submodule. Initialize it once:
+
+```bash
+git submodule update --init --recursive
+```
+
+In VS Code:
+
+1. Select `Wails: Debug KubeLoop` and press F5. Its `build` task compiles the
+   frontend, Helper, KubeLoop, and `build/bin/sing-box`. The sing-box binary is
+   built from `third_party/sing-box` with Go optimizations and inlining disabled.
+2. Connect a cluster in KubeLoop and wait for the privileged Helper to start
+   sing-box.
+3. Select `third_party: Debug Sing-box` and press F5 to start a second debug
+   session. Enter the sudo password when prompted; Delve attaches to the running
+   root-owned `sing-box` process.
+
+The Delve log confirms a working attachment with `attaching to pid` followed by
+`created breakpoint`. Attach happens after sing-box initialization, so startup
+breakpoints must be reached by reconnecting or restarting the session. Existing
+connections also do not revisit dial breakpoints; create a new connection after
+attaching.
+
+Kubernetes traffic uses the SOCKS outbound. Useful breakpoints are
+`third_party/sing-box/protocol/socks/outbound.go:70` for TCP and
+`third_party/sing-box/protocol/socks/outbound.go:96` for UDP. The generated
+configuration does not contain an HTTP outbound, so breakpoints in
+`protocol/http/outbound.go` are not expected to fire.
+
+For CLI development, the equivalent source-build mode is:
+
+```bash
+KUBELOOP_SINGBOX_SOURCE=debug wails dev
+```
+
+Outside VS Code, attach Delve manually:
+
+```bash
+sudo "$(go env GOPATH)/bin/dlv" attach "$(pgrep -n -x sing-box)"
+```
+
+Source breakpoints resolve directly under `third_party/sing-box`. On macOS,
+attaching requires initialized Xcode developer tools and Developer Tools
+permission for VS Code. Running `wails dev` without
+`KUBELOOP_SINGBOX_SOURCE=debug` continues to use the pinned release binary.
+
 ### Tests
 
 ```bash

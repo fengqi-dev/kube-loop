@@ -274,6 +274,48 @@ wails dev
 集群会通过各自的本地镜像加载命令接收镜像。仅在需要显式覆盖开发镜像时设置
 `KUBELOOP_GATEWAY_IMAGE`。
 
+### 调试 sing-box 源码
+
+项目通过 Git 子模块固定 sing-box 源码。首次使用时初始化子模块：
+
+```bash
+git submodule update --init --recursive
+```
+
+在 VS Code 中：
+
+1. 选择 `Wails: Debug KubeLoop` 并按 F5。它的 `build` 任务会构建前端、Helper、
+   KubeLoop 和 `build/bin/sing-box`。sing-box 从 `third_party/sing-box` 构建，并关闭
+   Go 编译器优化和内联。
+2. 在 KubeLoop 中连接集群，等待特权 Helper 启动 sing-box。
+3. 选择 `third_party: Debug Sing-box` 并再次按 F5，启动第二个调试 Session。终端提示时
+   输入 sudo 密码，Delve 会附加到以 root 运行的 `sing-box` 进程。
+
+Delve 日志依次出现 `attaching to pid` 和 `created breakpoint`，表示附加和断点绑定成功。
+由于附加发生在 sing-box 初始化之后，调试启动流程时需要重新连接或重启 Session。已有
+连接也不会再次经过拨号断点，应在附加完成后创建新连接。
+
+Kubernetes 流量使用 SOCKS outbound。TCP 可在
+`third_party/sing-box/protocol/socks/outbound.go:70` 设置断点，UDP 可在
+`third_party/sing-box/protocol/socks/outbound.go:96` 设置断点。生成的配置没有 HTTP
+outbound，因此 `protocol/http/outbound.go` 中的断点通常不会命中。
+
+使用命令行开发时，对应的源码构建模式为：
+
+```bash
+KUBELOOP_SINGBOX_SOURCE=debug wails dev
+```
+
+不使用 VS Code 时，可以手动附加 Delve：
+
+```bash
+sudo "$(go env GOPATH)/bin/dlv" attach "$(pgrep -n -x sing-box)"
+```
+
+源码断点位于 `third_party/sing-box`。macOS 上附加调试需要先初始化 Xcode 开发工具，并
+在“开发者工具”权限中允许 VS Code。不设置 `KUBELOOP_SINGBOX_SOURCE=debug` 时，
+`wails dev` 仍使用项目固定的发行版二进制。
+
 ### 测试
 
 ```bash

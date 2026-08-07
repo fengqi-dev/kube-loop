@@ -87,12 +87,56 @@
           "build/bin/KubeLoop.exe"
         ]
       },
-      "dependsOn": ["npm: build", "build: helper"],
+      "dependsOn": [
+        "npm: build",
+        "build: helper",
+        "sing-box: build debug binary"
+      ],
       "group": {
         "kind": "build",
         "isDefault": true
       },
       "problemMatcher": ["$go"]
+    },
+    {
+      "label": "sing-box: build debug binary",
+      "type": "process",
+      "command": "go",
+      "args": [
+        "run",
+        "./build/singbox-debug.go"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "group": "build",
+      "problemMatcher": [
+        "$go"
+      ],
+      "presentation": {
+        "clear": true,
+        "panel": "dedicated"
+      }
+    },
+    {
+      "label": "KubeLoop: wails dev with sing-box source",
+      "type": "process",
+      "command": "wails",
+      "args": [
+        "dev"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "env": {
+          "KUBELOOP_SINGBOX_SOURCE": "debug"
+        }
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "clear": true,
+        "panel": "dedicated",
+        "reveal": "always"
+      }
     }
   ]
 }

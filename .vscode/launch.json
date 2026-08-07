@@ -29,6 +29,19 @@
       "mode": "test",
       "program": "${file}",
       "args": ["-count=1"]
+    },
+    {
+      "name": "third_party: Debug Sing-box",
+      "type": "go",
+      "request": "attach",
+      "mode": "local",
+      "debugAdapter": "dlv-dap",
+      "processId": "sing-box",
+      "asRoot": true,
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}/third_party/sing-box",
+      "stopOnEntry": false,
+      "showLog": true
     }
   ]
 }
