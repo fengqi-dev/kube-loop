@@ -40,9 +40,8 @@ import {
 import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { useI18n } from "@/i18n";
+import { useI18n, type TranslationKey } from "@/i18n";
 import type { AppView } from "@/hooks/use-session";
-import { phaseKeys } from "@/lib/phase";
 import { cn } from "@/lib/utils";
 import type {
   ConnectionMode,
@@ -52,6 +51,16 @@ import type {
   NetworkDiagnostic,
   SessionState,
 } from "@/types";
+
+const overviewPhaseKeys: Record<SessionState["phase"], TranslationKey> = {
+  idle: "overview.phaseIdle",
+  checking: "overview.phaseChecking",
+  "installing-gateway": "overview.phaseInstalling",
+  "discovering-network": "overview.phaseDiscovering",
+  "starting-tunnel": "overview.phaseStarting",
+  connected: "overview.phaseConnected",
+  error: "overview.phaseError",
+};
 
 export function OverviewView({
   contextName,
@@ -218,20 +227,24 @@ export function OverviewView({
             <div className="grid items-start gap-4 grid-cols-[minmax(0,1fr)_auto]">
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
-                <span
-                  className={cn(
-                    "size-2 rounded-full",
-                    ready ? "bg-success" : busy ? "animate-pulse bg-primary" : "bg-muted-foreground/40",
-                  )}
-                />
-                <h2 className="text-lg font-semibold tracking-tight">
-                  {loading
-                    ? t("overview.loadingKubeconfig")
-                    : disconnecting
-                      ? t("overview.disconnecting")
-                      : t(phaseKeys[session.phase])}
-                </h2>
-              </div>
+                  <span
+                    className={cn(
+                      "size-2 rounded-full",
+                      ready
+                        ? "bg-success"
+                        : busy
+                          ? "animate-pulse bg-primary"
+                          : "bg-muted-foreground/40",
+                    )}
+                  />
+                  <h2 className="text-lg font-semibold tracking-tight">
+                    {loading
+                      ? t("overview.loadingKubeconfig")
+                      : disconnecting
+                        ? t("overview.disconnecting")
+                        : t(overviewPhaseKeys[session.phase])}
+                  </h2>
+                </div>
                 <p className="mt-1.5 truncate text-[12px] text-muted-foreground">
                   {contextName
                     ? t("overview.connectionMode")

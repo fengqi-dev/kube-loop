@@ -65,6 +65,7 @@ export function ConnectionOrb({
           "border-destructive/40 bg-destructive text-white shadow-[0_8px_24px_-8px_rgba(229,72,77,0.45)] hover:bg-destructive/90",
         working &&
           "border-primary/45 bg-primary/10 text-primary hover:bg-primary/15",
+        // Idle = start
         !ready &&
           !error &&
           !working &&
@@ -73,7 +74,10 @@ export function ConnectionOrb({
     >
       {disconnecting ? (
         <>
-          <span aria-hidden className="pointer-events-none absolute inset-0 motion-reduce:hidden">
+          <span
+            aria-hidden
+            className="pointer-events-none absolute inset-0 motion-reduce:hidden"
+          >
             {magicSparkles.map((sparkle, index) => (
               <span
                 key={index}
@@ -123,7 +127,10 @@ export function ConnectionOrb({
             aria-hidden
             className="pointer-events-none absolute inset-[-8px] animate-connection-breathe rounded-full bg-primary/10 blur-md motion-reduce:animate-none"
           />
-          <span aria-hidden className="pointer-events-none absolute inset-0 motion-reduce:hidden">
+          <span
+            aria-hidden
+            className="pointer-events-none absolute inset-0 motion-reduce:hidden"
+          >
             {magicSparkles.map((sparkle, index) => (
               <span
                 key={index}
@@ -206,7 +213,10 @@ export function ConnectionOrb({
       )}
       {ready ? (
         <>
-          <span aria-hidden className="pointer-events-none absolute inset-0 motion-reduce:hidden">
+          <span
+            aria-hidden
+            className="pointer-events-none absolute inset-0 motion-reduce:hidden"
+          >
             {Array.from({ length: 8 }, (_, index) => (
               <span
                 key={index}
