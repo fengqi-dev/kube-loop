@@ -22,6 +22,15 @@ export type AppView =
   | "mcp"
   | "settings";
 
+const minimumDisconnectAnimationMs = 900;
+
+async function waitForDisconnectAnimation(startedAt: number) {
+  const remaining = minimumDisconnectAnimationMs - (Date.now() - startedAt);
+  if (remaining > 0) {
+    await new Promise<void>((resolve) => window.setTimeout(resolve, remaining));
+  }
+}
+
 const emptySession: SessionState = {
   phase: "idle",
   context: "",
@@ -168,6 +177,8 @@ export function useSession() {
     session.phase === "discovering-network" ||
     session.phase === "starting-tunnel";
   const busy = sessionBusy || connectionActionBusy;
+  const disconnecting =
+    connectionActionBusy && pendingConnectionAction.current?.kind === "stop";
   const ready = session.phase === "connected";
   const discovery = session.discovery;
   const activeContextName =
@@ -261,7 +272,9 @@ export function useSession() {
     setUIError("");
     try {
       if (stopping) {
+        const startedAt = Date.now();
         await backend.disconnect();
+        await waitForDisconnectAnimation(startedAt);
         finishConnectionAction();
       } else {
         if (session.phase === "error") {
@@ -284,12 +297,16 @@ export function useSession() {
     setUIError("");
     try {
       if (sessionBusy) {
+        const startedAt = Date.now();
         await backend.disconnect();
+        await waitForDisconnectAnimation(startedAt);
         finishConnectionAction();
         return;
       }
       if (ready && session.context === next) {
+        const startedAt = Date.now();
         await backend.disconnect();
+        await waitForDisconnectAnimation(startedAt);
         finishConnectionAction();
         return;
       }
@@ -330,6 +347,13 @@ export function useSession() {
   async function addKubeconfig() {
     setUIError("");
     const inventory = await backend.addKubeconfig();
+    setData((current) => applyInventory(current, inventory));
+    return inventory;
+  }
+
+  async function addKubeconfigContent(content: string) {
+    setUIError("");
+    const inventory = await backend.addKubeconfigContent(content);
     setData((current) => applyInventory(current, inventory));
     return inventory;
   }
@@ -390,6 +414,7 @@ export function useSession() {
     updateBusy,
     session,
     busy,
+    disconnecting,
     ready,
     discovery,
     currentContext,
@@ -401,6 +426,7 @@ export function useSession() {
     connectContext,
     reloadContexts,
     addKubeconfig,
+    addKubeconfigContent,
     removeKubeconfig,
     probeContext,
     changeShareGateway,

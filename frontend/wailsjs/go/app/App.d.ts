@@ -14,6 +14,8 @@ import {session} from '../models';
 
 export function AddKubeconfig():Promise<cluster.ClusterInventory>;
 
+export function AddKubeconfigContent(arg1:string):Promise<cluster.ClusterInventory>;
+
 export function AddKubeconfigPath(arg1:string):Promise<cluster.ClusterInventory>;
 
 export function Bootstrap():Promise<app.BootstrapData>;

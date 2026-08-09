@@ -6,6 +6,10 @@ export function AddKubeconfig() {
   return window['go']['app']['App']['AddKubeconfig']();
 }
 
+export function AddKubeconfigContent(arg1) {
+  return window['go']['app']['App']['AddKubeconfigContent'](arg1);
+}
+
 export function AddKubeconfigPath(arg1) {
   return window['go']['app']['App']['AddKubeconfigPath'](arg1);
 }

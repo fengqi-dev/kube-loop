@@ -2,18 +2,25 @@ package app
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	goruntime "runtime"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/fengqi-dev/kube-loop/internal/cluster"
+	"github.com/fengqi-dev/kube-loop/internal/fsatomic"
 	"github.com/fengqi-dev/kube-loop/internal/locale"
 	"github.com/fengqi-dev/kube-loop/internal/session"
+	appstore "github.com/fengqi-dev/kube-loop/internal/store"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
+
+const maxClipboardKubeconfigBytes = 4 << 20
 
 func (a *App) Bootstrap() (BootstrapData, error) {
 	contexts, err := a.manager.Contexts()
@@ -107,6 +114,61 @@ func (a *App) AddKubeconfig() (cluster.ClusterInventory, error) {
 	return a.AddKubeconfigPath(path)
 }
 
+// AddKubeconfigContent validates kubeconfig YAML copied to the clipboard,
+// stores it with owner-only permissions, and adds it as a managed source.
+func (a *App) AddKubeconfigContent(content string) (cluster.ClusterInventory, error) {
+	raw := []byte(strings.TrimSpace(content))
+	if len(raw) == 0 {
+		return cluster.ClusterInventory{}, errors.New("clipboard does not contain kubeconfig YAML")
+	}
+	if len(raw) > maxClipboardKubeconfigBytes {
+		return cluster.ClusterInventory{}, fmt.Errorf(
+			"clipboard kubeconfig exceeds %d MiB", maxClipboardKubeconfigBytes>>20,
+		)
+	}
+	if err := cluster.ValidateKubeconfigContent(raw); err != nil {
+		return cluster.ClusterInventory{}, fmt.Errorf("validate clipboard kubeconfig: %w", err)
+	}
+	raw = append(raw, '\n')
+	sum := sha256.Sum256(raw)
+	dir, err := a.importedKubeconfigDir()
+	if err != nil {
+		return cluster.ClusterInventory{}, err
+	}
+	path := filepath.Join(dir, fmt.Sprintf("clipboard-%x.yaml", sum[:8]))
+	_, statErr := os.Stat(path)
+	existed := statErr == nil
+	if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
+		return cluster.ClusterInventory{}, fmt.Errorf("inspect clipboard kubeconfig: %w", statErr)
+	}
+	if err := fsatomic.WriteFile(path, raw, 0o700, 0o600); err != nil {
+		return cluster.ClusterInventory{}, fmt.Errorf("save clipboard kubeconfig: %w", err)
+	}
+	inventory, err := a.AddKubeconfigPath(path)
+	if err != nil {
+		if !existed {
+			_ = os.Remove(path)
+		}
+		return cluster.ClusterInventory{}, err
+	}
+	a.manager.AppendLog("INFO", "kubeconfig imported from clipboard")
+	return inventory, nil
+}
+
+func (a *App) importedKubeconfigDir() (string, error) {
+	statePath := ""
+	if a.store != nil {
+		statePath = a.store.Path()
+	} else {
+		var err error
+		statePath, err = appstore.DefaultPath()
+		if err != nil {
+			return "", err
+		}
+	}
+	return filepath.Join(filepath.Dir(statePath), "kubeconfigs"), nil
+}
+
 func (a *App) AddKubeconfigPath(path string) (cluster.ClusterInventory, error) {
 	if path == "" {
 		return cluster.ClusterInventory{}, errors.New("kubeconfig path is required")
@@ -177,6 +239,7 @@ func (a *App) RemoveKubeconfig(path string) (cluster.ClusterInventory, error) {
 		}
 		a.provider.SetExtraKubeconfigFiles(remaining)
 	}
+	a.removeImportedKubeconfig(path)
 	inventory, err := a.provider.Inventory()
 	if err != nil {
 		a.manager.AppendLog("ERROR", fmt.Sprintf("reload contexts after removing %s: %v", displayName, err))
@@ -186,6 +249,25 @@ func (a *App) RemoveKubeconfig(path string) (cluster.ClusterInventory, error) {
 		"kubeconfig file removed: %s contexts=%d", displayName, len(inventory.Contexts),
 	))
 	return inventory, nil
+}
+
+func (a *App) removeImportedKubeconfig(path string) {
+	dir, err := a.importedKubeconfigDir()
+	if err != nil {
+		return
+	}
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return
+	}
+	absDir, err := filepath.Abs(dir)
+	if err != nil || filepath.Dir(absPath) != absDir ||
+		!strings.HasPrefix(filepath.Base(absPath), "clipboard-") {
+		return
+	}
+	if err := os.Remove(absPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		a.manager.AppendLog("WARN", fmt.Sprintf("remove imported kubeconfig file: %v", err))
+	}
 }
 
 func sessionActive(phase session.Phase) bool {

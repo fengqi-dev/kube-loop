@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -195,12 +196,24 @@ func ValidateKubeconfigFile(path string) error {
 	if info.IsDir() {
 		return fmt.Errorf("kubeconfig path is a directory: %s", path)
 	}
-	cfg, err := clientcmd.LoadFromFile(path)
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read kubeconfig: %w", err)
+	}
+	if err := ValidateKubeconfigContent(raw); err != nil {
+		return err
+	}
+	return nil
+}
+
+// ValidateKubeconfigContent ensures raw kubeconfig data contains at least one context.
+func ValidateKubeconfigContent(raw []byte) error {
+	cfg, err := clientcmd.Load(raw)
 	if err != nil {
 		return fmt.Errorf("load kubeconfig: %w", err)
 	}
 	if len(cfg.Contexts) == 0 {
-		return fmt.Errorf("kubeconfig has no contexts: %s", path)
+		return errors.New("kubeconfig has no contexts")
 	}
 	return nil
 }

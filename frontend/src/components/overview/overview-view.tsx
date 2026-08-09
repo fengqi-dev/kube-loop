@@ -62,6 +62,7 @@ export function OverviewView({
   loading,
   error,
   busy,
+  disconnecting,
   ready,
   shareGateway,
   gatewayNamespace,
@@ -81,6 +82,7 @@ export function OverviewView({
   loading: boolean;
   error: string;
   busy: boolean;
+  disconnecting: boolean;
   ready: boolean;
   shareGateway: boolean;
   gatewayNamespace: string;
@@ -223,7 +225,11 @@ export function OverviewView({
                   )}
                 />
                 <h2 className="text-lg font-semibold tracking-tight">
-                  {loading ? t("overview.loadingKubeconfig") : t(phaseKeys[session.phase])}
+                  {loading
+                    ? t("overview.loadingKubeconfig")
+                    : disconnecting
+                      ? t("overview.disconnecting")
+                      : t(phaseKeys[session.phase])}
                 </h2>
               </div>
                 <p className="mt-1.5 truncate text-[12px] text-muted-foreground">
@@ -235,6 +241,7 @@ export function OverviewView({
               <ConnectionOrb
                 phase={session.phase}
                 busy={busy}
+                disconnecting={disconnecting}
                 disabled={loading || !contextName}
                 ariaLabel={
                   busy

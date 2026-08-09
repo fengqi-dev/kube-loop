@@ -29,6 +29,7 @@ function App() {
     updateBusy,
     session,
     busy,
+    disconnecting,
     ready,
     currentContext,
     kubeconfigFiles,
@@ -38,6 +39,7 @@ function App() {
     connectContext,
     reloadContexts,
     addKubeconfig,
+    addKubeconfigContent,
     removeKubeconfig,
     probeContext,
     changeShareGateway,
@@ -129,6 +131,7 @@ function App() {
               loading={loading}
               error={uiError || session.error || ""}
               busy={busy}
+              disconnecting={disconnecting}
               ready={ready}
               shareGateway={data.shareGateway}
               gatewayNamespace={data.gatewayNamespace}
@@ -154,6 +157,7 @@ function App() {
               onConnect={(value) => void connectContext(value)}
               onReload={reloadContexts}
               onAddFile={addKubeconfig}
+              onAddClipboard={addKubeconfigContent}
               onRemoveFile={removeKubeconfig}
               onProbe={probeContext}
             />

@@ -149,6 +149,29 @@ users: []
 	}
 }
 
+func TestValidateKubeconfigContent(t *testing.T) {
+	valid := []byte(`apiVersion: v1
+kind: Config
+contexts:
+- name: pasted
+  context:
+    cluster: demo
+clusters:
+- name: demo
+  cluster:
+    server: https://example.test
+`)
+	if err := ValidateKubeconfigContent(valid); err != nil {
+		t.Fatalf("ValidateKubeconfigContent: %v", err)
+	}
+	if err := ValidateKubeconfigContent([]byte("apiVersion: v1\nkind: Config\n")); err == nil {
+		t.Fatal("expected error for content without contexts")
+	}
+	if err := ValidateKubeconfigContent([]byte("not: [valid")); err == nil {
+		t.Fatal("expected error for invalid YAML")
+	}
+}
+
 func TestProbeSuccessAndTimeout(t *testing.T) {
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/version" {

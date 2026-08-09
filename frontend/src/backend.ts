@@ -38,6 +38,7 @@ declare global {
           Bootstrap(): Promise<BootstrapData>;
           ReloadContexts(): Promise<ClusterInventory>;
           AddKubeconfig(): Promise<ClusterInventory>;
+          AddKubeconfigContent(content: string): Promise<ClusterInventory>;
           RemoveKubeconfig(path: string): Promise<ClusterInventory>;
           ProbeContext(contextName: string): Promise<ProbeResult>;
           RememberSelection(contextName: string, namespace: string): Promise<void>;
@@ -143,6 +144,8 @@ export const backend = {
   bootstrap: () => Promise.resolve().then(() => api().Bootstrap()),
   reloadContexts: () => Promise.resolve().then(() => api().ReloadContexts()),
   addKubeconfig: () => Promise.resolve().then(() => api().AddKubeconfig()),
+  addKubeconfigContent: (content: string) =>
+    Promise.resolve().then(() => api().AddKubeconfigContent(content)),
   removeKubeconfig: (path: string) =>
     Promise.resolve().then(() => api().RemoveKubeconfig(path)),
   probeContext: (contextName: string) =>
