@@ -3,6 +3,7 @@ package app
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -81,7 +82,7 @@ clusters:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm() != 0o600 {
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
 		t.Fatalf("clipboard kubeconfig mode = %o", info.Mode().Perm())
 	}
 	if _, err := app.RemoveKubeconfig(imported); err != nil {
