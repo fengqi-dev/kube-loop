@@ -48,6 +48,8 @@ export function EnablePodSSH(arg1:podssh.EnableRequest):Promise<podssh.Info>;
 
 export function GatewayInstallManifest():Promise<string>;
 
+export function GetGatewayTransport(arg1:string):Promise<store.GatewayTransport>;
+
 export function GetHostAliases(arg1:string):Promise<Array<store.HostAliasSpec>>;
 
 export function GetMCPStatus():Promise<mcp.Status>;
@@ -116,6 +118,10 @@ export function SessionIntentCounts():Promise<store.SessionIntentCounts>;
 
 export function SetDNSNamespace(arg1:string,arg2:string):Promise<void>;
 
+export function SetGatewayNamespace(arg1:string):Promise<void>;
+
+export function SetGatewayTransport(arg1:string,arg2:store.GatewayTransport):Promise<void>;
+
 export function SetHostAliases(arg1:string,arg2:Array<store.HostAliasSpec>):Promise<void>;
 
 export function SetMCPEnabled(arg1:boolean):Promise<void>;
@@ -125,6 +131,8 @@ export function SetMCPPort(arg1:number):Promise<void>;
 export function SetMCPTokenEnabled(arg1:boolean):Promise<void>;
 
 export function SetManualNetwork(arg1:string,arg2:cluster.ManualNetwork):Promise<void>;
+
+export function SetShareGateway(arg1:boolean):Promise<void>;
 
 export function StartFileTransfer(arg1:filemanager.TransferRequest):Promise<filemanager.TransferTask>;
 

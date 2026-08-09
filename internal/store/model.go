@@ -6,8 +6,19 @@ const currentVersion = 1
 type State struct {
 	Version  int                      `json:"version"`
 	UI       UIState                  `json:"ui"`
+	Settings Settings                 `json:"settings,omitzero"`
 	MCP      MCPConfig                `json:"mcp,omitzero"`
 	Clusters map[string]*ClusterState `json:"clusters"`
+}
+
+// Settings persists application-wide runtime preferences.
+type Settings struct {
+	// ShareGateway is a pointer so state files written before this setting was
+	// introduced retain the compatible default (true).
+	ShareGateway *bool  `json:"shareGateway,omitempty"`
+	GatewayID    string `json:"gatewayID,omitempty"`
+	// GatewayNamespace is the exact namespace used by shared and private Gateways.
+	GatewayNamespace string `json:"gatewayNamespace,omitempty"`
 }
 
 // DefaultMCPPort is the Streamable HTTP listen port when unset.
@@ -32,6 +43,7 @@ type UIState struct {
 type ClusterState struct {
 	Namespace      string            `json:"namespace,omitempty"`
 	ConnectionMode string            `json:"connectionMode,omitempty"`
+	Gateway        GatewayTransport  `json:"gateway,omitzero"`
 	Connected      bool              `json:"connected,omitzero"`
 	PortForwards   []PortForwardSpec `json:"portForwards,omitempty"`
 	Exchanges      []ExchangeSpec    `json:"exchanges,omitempty"`
@@ -39,6 +51,22 @@ type ClusterState struct {
 	Previews       []PreviewSpec     `json:"previews,omitempty"`
 	HostAliases    []HostAliasSpec   `json:"hostAliases,omitempty"`
 	ManualNetwork  *ManualNetwork    `json:"manualNetwork,omitempty"`
+}
+
+// GatewayTransport selects how the desktop reaches the in-cluster Gateway.
+// The empty mode is intentionally equivalent to port-forward for old state files.
+type GatewayTransport struct {
+	Mode               string `json:"mode,omitempty"`
+	URL                string `json:"url,omitempty"`
+	Token              string `json:"token,omitempty"`
+	Exposure           string `json:"exposure,omitempty"`
+	GatewayNamespace   string `json:"gatewayNamespace,omitempty"`
+	GatewayName        string `json:"gatewayName,omitempty"`
+	GatewaySection     string `json:"gatewaySection,omitempty"`
+	InsecureSkipVerify bool   `json:"insecureSkipVerify,omitzero"`
+	PoolSize           int    `json:"poolSize,omitempty"`
+	MaxPhysical        int    `json:"maxPhysical,omitempty"`
+	MaxStreams         int    `json:"maxStreams,omitempty"`
 }
 
 // HostAliasSpec maps a DNS name to an IPv4 address for the local tunnel DNS.

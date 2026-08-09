@@ -3,6 +3,8 @@ package app
 import (
 	"testing"
 	"testing/fstest"
+
+	"github.com/fengqi-dev/kube-loop/internal/cluster"
 )
 
 func TestDevelopmentGatewayImage(t *testing.T) {
@@ -16,5 +18,20 @@ func TestDevelopmentGatewayImage(t *testing.T) {
 	}
 	if got := developmentGatewayImage(nil); got != "" {
 		t.Fatalf("nil filesystem Gateway image = %q", got)
+	}
+}
+
+func TestGatewayResourceUsesConfiguredNamespace(t *testing.T) {
+	namespace, name := gatewayResource(true, "abcd", "platform-networking")
+	if namespace != "platform-networking" || name != cluster.GatewayName {
+		t.Fatalf("shared resource = %s/%s", namespace, name)
+	}
+	namespace, name = gatewayResource(false, "abcd", "platform-networking")
+	if namespace != "platform-networking" || name != "kubeloop-gateway-abcd" {
+		t.Fatalf("private resource = %s/%s", namespace, name)
+	}
+	namespace, _ = gatewayResource(true, "", "")
+	if namespace != cluster.GatewayNamespace {
+		t.Fatalf("default namespace = %s", namespace)
 	}
 }

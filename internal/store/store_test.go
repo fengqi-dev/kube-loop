@@ -133,6 +133,47 @@ func TestMCPConfigRoundTrip(t *testing.T) {
 	}
 }
 
+func TestShareGatewayDefaultsTrueAndRoundTrips(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !s.ShareGateway() {
+		t.Fatal("gateway sharing should default to enabled")
+	}
+	if err := s.SetShareGateway(false); err != nil {
+		t.Fatal(err)
+	}
+	privateID := s.GatewayID()
+	if privateID == "" {
+		t.Fatal("private gateway id was not generated")
+	}
+	reloaded, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.ShareGateway() || reloaded.GatewayID() != privateID {
+		t.Fatalf("settings were not preserved: %#v", reloaded.Snapshot().Settings)
+	}
+	if err := reloaded.SetShareGateway(true); err != nil {
+		t.Fatal(err)
+	}
+	if !reloaded.ShareGateway() || reloaded.GatewayID() != privateID {
+		t.Fatal("re-enabling sharing should preserve the stable private id")
+	}
+	if err := reloaded.SetGatewayNamespace("platform-networking"); err != nil {
+		t.Fatal(err)
+	}
+	again, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.GatewayNamespace() != "platform-networking" {
+		t.Fatalf("gateway namespace = %q", again.GatewayNamespace())
+	}
+}
+
 func TestHostAliasesClear(t *testing.T) {
 	s, err := Open(filepath.Join(t.TempDir(), "state.json"))
 	if err != nil {

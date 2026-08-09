@@ -3,6 +3,7 @@ module github.com/fengqi-dev/kube-loop
 go 1.26.0
 
 require (
+	github.com/coder/websocket v1.8.15
 	github.com/google/uuid v1.6.0
 	github.com/hashicorp/go-version v1.9.0
 	github.com/kballard/go-shellquote v0.0.0-20180428030007-95032a82bc51
@@ -12,6 +13,7 @@ require (
 	github.com/pkg/sftp v1.13.11
 	github.com/things-go/go-socks5 v0.1.1
 	github.com/wailsapp/wails/v2 v2.13.0
+	github.com/xtaci/smux v1.5.57
 	go.yaml.in/yaml/v3 v3.0.5
 	golang.org/x/crypto v0.54.0
 	golang.org/x/sys v0.47.0

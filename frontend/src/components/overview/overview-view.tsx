@@ -1,13 +1,16 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState } from "react";
 import {
   ArrowRightLeft,
   Cable,
   Copy,
   CopyPlus,
   Eye,
+  EyeOff,
+  Globe2,
   Network,
   RotateCcw,
   Server,
+  Settings2,
   ShieldCheck,
   Trash2,
   type LucideIcon,
@@ -15,7 +18,6 @@ import {
 import { toast } from "sonner";
 import { backend } from "@/backend";
 import { ConnectionOrb } from "@/components/overview/connection-orb";
-import { ConnectionSteps } from "@/components/overview/connection-steps";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -28,13 +30,28 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
+import { Switch } from "@/components/ui/switch";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useI18n } from "@/i18n";
 import type { AppView } from "@/hooks/use-session";
 import { phaseKeys } from "@/lib/phase";
 import { cn } from "@/lib/utils";
-import type { ConnectionMode, Discovery, HelperStatus, SessionState } from "@/types";
+import type {
+  ConnectionMode,
+  Discovery,
+  GatewayTransport,
+  HelperStatus,
+  NetworkDiagnostic,
+  SessionState,
+} from "@/types";
 
 export function OverviewView({
   contextName,
@@ -46,8 +63,13 @@ export function OverviewView({
   error,
   busy,
   ready,
+  shareGateway,
+  gatewayNamespace,
+  gatewayNamespaces,
   onToggle,
   onConnectionModeChange,
+  onShareGatewayChange,
+  onGatewayNamespaceChange,
   onManageClusters,
   onNavigate,
 }: {
@@ -60,8 +82,13 @@ export function OverviewView({
   error: string;
   busy: boolean;
   ready: boolean;
+  shareGateway: boolean;
+  gatewayNamespace: string;
+  gatewayNamespaces: string[];
   onToggle(): void;
   onConnectionModeChange(mode: ConnectionMode): void;
+  onShareGatewayChange(shared: boolean): Promise<void>;
+  onGatewayNamespaceChange(namespace: string): Promise<void>;
   onManageClusters(): void;
   onNavigate(view: AppView): void;
 }) {
@@ -138,43 +165,73 @@ export function OverviewView({
   const activeMode = ready ? (session.mode ?? connectionMode) : connectionMode;
 
   return (
-    <div className="mx-auto max-w-[880px] space-y-4">
-      <Card className="gap-0 overflow-hidden border-border py-0 shadow-none">
-        <div className="flex flex-wrap items-center gap-3 border-b px-5 py-3">
-          <div className="min-w-0 flex-1">
-            <div className="truncate text-sm font-medium">
-              {contextName || t("overview.noContext")}
+    <div className="mx-auto h-full max-w-[1040px]">
+      <div className="grid h-full items-stretch gap-3 md:grid-cols-[1.08fr_0.92fr] md:grid-rows-[auto_auto_minmax(0,1fr)]">
+        <Card className="gap-0 overflow-hidden py-0 shadow-none">
+          <CardContent className="flex h-full min-h-[210px] flex-col p-4">
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex min-w-0 items-center gap-3">
+                <div className="grid size-10 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary">
+                  <Server size={19} />
+                </div>
+                <div className="min-w-0">
+                  <div className="truncate text-[15px] font-semibold">
+                    {contextName || t("overview.noContext")}
+                  </div>
+                  <div className="mt-0.5 truncate text-[11px] text-muted-foreground">
+                    {[
+                      clusterName && clusterName !== contextName
+                        ? clusterName
+                        : t("overview.noCluster"),
+                      session.kubernetesVersion || "",
+                    ].filter(Boolean).join(" · ")}
+                  </div>
+                </div>
+              </div>
+              <Button type="button" variant="ghost" size="sm" onClick={onManageClusters}>
+                {t("overview.manageClusters")}
+              </Button>
             </div>
-            <div className="mt-0.5 truncate text-[11px] text-muted-foreground">
-              {session.kubernetesVersion
-                ? t("overview.kubernetesVersion", { version: session.kubernetesVersion })
-                : clusterName && clusterName !== contextName
-                  ? clusterName
-                  : t("overview.noCluster")}
+
+            <div className="mt-5">
+              <GatewaySettings
+                contextName={contextName}
+                ready={ready}
+                busy={busy}
+                shareGateway={shareGateway}
+                gatewayNamespace={gatewayNamespace}
+                gatewayNamespaces={gatewayNamespaces}
+                issues={issues}
+                gatewayManifest={gatewayManifest}
+                onShareGatewayChange={onShareGatewayChange}
+                onGatewayNamespaceChange={onGatewayNamespaceChange}
+              />
             </div>
-          </div>
-          <Button type="button" variant="outline" size="sm" onClick={onManageClusters}>
-            <Server size={14} data-icon="inline-start" />
-            {t("overview.manageClusters")}
-          </Button>
-          <div className="hidden items-center gap-1.5 text-[11px] text-muted-foreground sm:flex">
-            <ShieldCheck size={13} className="text-success" />
-            {t("overview.localCredentials")}
-          </div>
-        </div>
 
-        <CardContent className="px-5 py-4">
-          <div className="grid min-h-[14rem] items-stretch gap-4 sm:grid-cols-[minmax(0,1.15fr)_auto_minmax(0,0.85fr)]">
-            <ConnectionModePanel
-              activeMode={activeMode}
-              busy={busy}
-              ready={ready}
-              socksPort={session.socksPort}
-              platform={platform}
-              onConnectionModeChange={onConnectionModeChange}
-            />
+          </CardContent>
+        </Card>
 
-            <div className="flex flex-col items-center justify-center self-center px-2 text-center">
+        <Card className="gap-0 overflow-hidden py-0 shadow-none">
+          <CardContent className="flex h-full min-h-[210px] flex-col p-4">
+            <div className="grid items-start gap-4 grid-cols-[minmax(0,1fr)_auto]">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                <span
+                  className={cn(
+                    "size-2 rounded-full",
+                    ready ? "bg-success" : busy ? "animate-pulse bg-primary" : "bg-muted-foreground/40",
+                  )}
+                />
+                <h2 className="text-lg font-semibold tracking-tight">
+                  {loading ? t("overview.loadingKubeconfig") : t(phaseKeys[session.phase])}
+                </h2>
+              </div>
+                <p className="mt-1.5 truncate text-[12px] text-muted-foreground">
+                  {contextName
+                    ? t("overview.connectionMode")
+                    : t("overview.selectClusterFirst")}
+                </p>
+              </div>
               <ConnectionOrb
                 phase={session.phase}
                 busy={busy}
@@ -188,128 +245,572 @@ export function OverviewView({
                 }
                 onClick={onToggle}
               />
-              <h2 className="mt-2.5 text-[14px] font-semibold tracking-tight">
-                {loading ? t("overview.loadingKubeconfig") : t(phaseKeys[session.phase])}
-              </h2>
-              <p className="mt-0.5 max-w-[9rem] truncate text-[11px] text-muted-foreground">
-                {contextName
-                  ? [contextName, clusterName || t("overview.noCluster")].join(" · ")
-                  : t("overview.selectClusterFirst")}
-              </p>
             </div>
 
-            <SessionMetrics
-              podPortForwards={podPortForwards}
-              networkPortForwards={networkPortForwards}
-              exchanges={exchanges}
-              mirrors={mirrors}
-              previews={previews}
-              onNavigate={onNavigate}
-              onReset={() => setResetOpen(true)}
-              resetting={resetting}
-            />
-          </div>
+            <div className="mt-auto pt-4">
+              <ConnectionModePanel
+                activeMode={activeMode}
+                busy={busy}
+                ready={ready}
+                socksPort={session.socksPort}
+                platform={platform}
+                onConnectionModeChange={onConnectionModeChange}
+              />
+            </div>
+            {error ? (
+              <Alert variant="destructive" className="mt-3 w-full text-left">
+                <AlertDescription className="truncate !whitespace-nowrap" title={error}>{error}</AlertDescription>
+              </Alert>
+            ) : null}
+          </CardContent>
+        </Card>
 
-          <Dialog open={resetOpen} onOpenChange={(open) => !resetting && setResetOpen(open)}>
-            <DialogContent showCloseButton={!resetting}>
-              <DialogHeader>
-                <DialogTitle>{t("overview.resetSessionsTitle")}</DialogTitle>
-                <DialogDescription>{t("overview.resetSessionsDesc")}</DialogDescription>
-              </DialogHeader>
-              <DialogFooter>
-                <Button
-                  type="button"
-                  variant="outline"
-                  disabled={resetting}
-                  onClick={() => setResetOpen(false)}
-                >
-                  {t("actions.cancel")}
-                </Button>
-                <Button
-                  type="button"
-                  variant="destructive"
-                  disabled={resetting}
-                  onClick={() => void confirmReset()}
-                >
-                  {resetting ? (
-                    <Spinner data-icon="inline-start" />
-                  ) : (
-                    <RotateCcw data-icon="inline-start" />
-                  )}
-                  {t("overview.resetSessionsConfirm")}
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
+        <SessionMetrics
+          podPortForwards={podPortForwards}
+          networkPortForwards={networkPortForwards}
+          exchanges={exchanges}
+          mirrors={mirrors}
+          previews={previews}
+          onNavigate={onNavigate}
+          onReset={() => setResetOpen(true)}
+          resetting={resetting}
+        />
 
-          {error ? (
-            <Alert variant="destructive" className="mt-4 w-full text-left">
-              <AlertDescription className="break-words">{error}</AlertDescription>
-            </Alert>
-          ) : null}
-          {session.dnsWarning ? (
-            <Alert className="mt-4 w-full text-left">
-              <AlertDescription className="break-words">{session.dnsWarning}</AlertDescription>
-            </Alert>
-          ) : null}
-          {networkIssues.length > 0 ? (
-            <Alert className="mt-4 w-full text-left">
-              <AlertDescription>
-                <ul className="list-disc space-y-1 pl-4 text-[12px]">
-                  {networkIssues.map((item) => (
-                    <li key={`${item.code}:${item.target}:${item.conflict}:${item.interface}`}>
-                      {item.message}
-                    </li>
-                  ))}
-                </ul>
-              </AlertDescription>
-            </Alert>
-          ) : null}
+        <DiscoverySummary
+          contextName={contextName}
+          discovery={session.discovery}
+          ready={ready}
+          dnsWarning={session.dnsWarning}
+          networkIssues={networkIssues}
+        />
+      </div>
 
-          {issues.length > 0 || gatewayManifest ? (
-            <Alert className="mt-4 w-full text-left">
-              <AlertDescription className="space-y-2">
-                {issues.length > 0 ? (
-                  <ul className="list-disc space-y-1 pl-4 text-[12px]">
-                    {issues.map((item) => (
-                      <li key={item}>{item}</li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p className="text-[12px]">{t("overview.rbacGatewayMissing")}</p>
-                )}
-                {gatewayManifest ? (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      void navigator.clipboard.writeText(gatewayManifest).then(
-                        () => toast.success(t("overview.rbacCopied")),
-                        () => toast.error(t("overview.rbacCopyFailed")),
-                      );
-                    }}
-                  >
-                    <Copy size={14} data-icon="inline-start" />
-                    {t("overview.rbacCopyYaml")}
-                  </Button>
-                ) : null}
-              </AlertDescription>
-            </Alert>
-          ) : null}
-
-          {busy ? <ConnectionSteps phase={session.phase} /> : null}
-        </CardContent>
-      </Card>
-
-      <DiscoverySummary
-        contextName={contextName}
-        discovery={session.discovery}
-        ready={ready}
-      />
+      <Dialog open={resetOpen} onOpenChange={(open) => !resetting && setResetOpen(open)}>
+        <DialogContent showCloseButton={!resetting}>
+          <DialogHeader>
+            <DialogTitle>{t("overview.resetSessionsTitle")}</DialogTitle>
+            <DialogDescription>{t("overview.resetSessionsDesc")}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={resetting}
+              onClick={() => setResetOpen(false)}
+            >
+              {t("actions.cancel")}
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={resetting}
+              onClick={() => void confirmReset()}
+            >
+              {resetting ? <Spinner data-icon="inline-start" /> : <RotateCcw data-icon="inline-start" />}
+              {t("overview.resetSessionsConfirm")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
     </div>
   );
+}
+
+function GatewaySettings({
+  contextName,
+  ready,
+  busy,
+  shareGateway,
+  gatewayNamespace,
+  gatewayNamespaces,
+  issues,
+  gatewayManifest,
+  onShareGatewayChange,
+  onGatewayNamespaceChange,
+}: {
+  contextName: string;
+  ready: boolean;
+  busy: boolean;
+  shareGateway: boolean;
+  gatewayNamespace: string;
+  gatewayNamespaces: string[];
+  issues: string[];
+  gatewayManifest: string;
+  onShareGatewayChange(shared: boolean): Promise<void>;
+  onGatewayNamespaceChange(namespace: string): Promise<void>;
+}) {
+  const { t } = useI18n();
+  const [saving, setSaving] = useState(false);
+
+  async function saveNamespace(namespace: string) {
+    setSaving(true);
+    try {
+      await onGatewayNamespaceChange(namespace);
+      toast.success(t("settings.gatewayNamespaceSaved"));
+    } catch (error) {
+      toast.error(t("settings.gatewayNamespaceFailed"), {
+        description: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function changeSharing(shared: boolean) {
+    setSaving(true);
+    try {
+      await onShareGatewayChange(shared);
+      toast.success(t("settings.shareGatewaySaved"));
+    } catch (error) {
+      toast.error(t("settings.shareGatewayFailed"), {
+        description: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const disabled = ready || busy || saving;
+  const namespaceOptions = Array.from(
+    new Set([gatewayNamespace, ...gatewayNamespaces].filter(Boolean)),
+  );
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-2 gap-3">
+        <div className="rounded-lg bg-muted/45 px-3 py-2.5">
+          <span className="text-[10px] text-muted-foreground">
+            {t("settings.gatewayNamespace")}
+          </span>
+          <Select
+            value={gatewayNamespace}
+            onValueChange={(namespace) => void saveNamespace(namespace)}
+            disabled={disabled}
+          >
+            <SelectTrigger
+              size="sm"
+              className="mt-1.5 w-full min-w-0 bg-background font-mono text-[11px]"
+              aria-label={t("settings.gatewayNamespace")}
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {namespaceOptions.map((namespace) => (
+                <SelectItem key={namespace} value={namespace}>
+                  {namespace}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="flex items-center justify-between gap-3 rounded-lg bg-muted/45 px-3 py-2.5">
+          <div className="min-w-0">
+            <div className="text-[10px] text-muted-foreground">
+              {t("settings.shareGateway")}
+            </div>
+            <div className="mt-1.5 text-[12px] font-medium">
+              {shareGateway ? t("overview.gatewayShared") : t("overview.gatewayPrivate")}
+            </div>
+          </div>
+          <Switch
+            checked={shareGateway}
+            disabled={disabled}
+            aria-label={t("settings.shareGateway")}
+            onCheckedChange={(checked) => void changeSharing(checked)}
+          />
+        </div>
+      </div>
+      <GatewayTransportSetting contextName={contextName} disabled={ready || busy || saving} />
+      {issues.length > 0 || gatewayManifest ? (
+        <Alert className="w-full text-left">
+          <AlertDescription className="space-y-2">
+            {issues.length > 0 ? (
+              <ul className="list-disc space-y-1 pl-4 text-[11px]">
+                {issues.map((item) => <li key={item}>{item}</li>)}
+              </ul>
+            ) : (
+              <p className="text-[11px]">{t("overview.rbacGatewayMissing")}</p>
+            )}
+            {gatewayManifest ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  void navigator.clipboard.writeText(gatewayManifest).then(
+                    () => toast.success(t("overview.rbacCopied")),
+                    () => toast.error(t("overview.rbacCopyFailed")),
+                  );
+                }}
+              >
+                <Copy size={14} data-icon="inline-start" />
+                {t("overview.rbacCopyYaml")}
+              </Button>
+            ) : null}
+          </AlertDescription>
+        </Alert>
+      ) : null}
+    </div>
+  );
+}
+
+function GatewayTransportSetting({
+  contextName,
+  disabled,
+}: {
+  contextName: string;
+  disabled: boolean;
+}) {
+  const { t } = useI18n();
+  const [saving, setSaving] = useState(false);
+  const [transport, setTransport] = useState<GatewayTransport>({
+    mode: "port-forward",
+  });
+  const [draft, setDraft] = useState<GatewayTransport>(defaultWebSocketTransport);
+  const [open, setOpen] = useState(false);
+  const [tokenVisible, setTokenVisible] = useState(false);
+
+  useEffect(() => {
+    if (!contextName) {
+      setTransport({ mode: "port-forward" });
+      setDraft(defaultWebSocketTransport());
+      return;
+    }
+    let active = true;
+    backend
+      .getGatewayTransport(contextName)
+      .then((config) => {
+        if (!active) return;
+        setTransport(config);
+        if (config.mode === "websocket") {
+          setDraft({
+            ...config,
+            poolSize: config.poolSize || 2,
+            maxPhysical: config.maxPhysical || 4,
+            maxStreams: config.maxStreams || 128,
+          });
+        } else {
+          setDraft(defaultWebSocketTransport());
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [contextName]);
+
+  async function changeMode(mode: string) {
+    if (mode === "websocket") {
+      openWebSocketSettings();
+      return;
+    }
+    setSaving(true);
+    try {
+      const config: GatewayTransport = { mode: "port-forward" };
+      await backend.setGatewayTransport(contextName, config);
+      setTransport(config);
+      toast.success(t("overview.gatewayTransportSaved"));
+    } catch (error) {
+      toast.error(t("overview.gatewayTransportFailed"), {
+        description: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function openWebSocketSettings() {
+    if (transport.mode === "websocket") {
+      setDraft({
+        ...transport,
+        poolSize: transport.poolSize || 2,
+        maxPhysical: transport.maxPhysical || 4,
+        maxStreams: transport.maxStreams || 128,
+      });
+    }
+    setTokenVisible(false);
+    setOpen(true);
+  }
+
+  async function saveWebSocket() {
+    setSaving(true);
+    try {
+      await backend.setGatewayTransport(contextName, draft);
+      setTransport(draft);
+      setOpen(false);
+      setTokenVisible(false);
+      toast.success(t("overview.gatewayTransportSaved"));
+    } catch (error) {
+      toast.error(t("overview.gatewayTransportFailed"), {
+        description: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <>
+      <div className="flex min-w-0 items-center justify-between gap-3 rounded-lg bg-muted/45 px-3 py-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <Globe2 size={14} className="shrink-0 text-muted-foreground" />
+          <div className="min-w-0">
+            <div className="whitespace-nowrap text-[10px] text-muted-foreground">
+              {t("overview.gatewayTransport")}
+            </div>
+            <div className="truncate text-[11px] font-medium">
+              {transport.mode === "websocket"
+                ? t("overview.gatewayWebSocket")
+                : t("overview.gatewayPortForward")}
+            </div>
+          </div>
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
+          <Select
+            value={transport.mode}
+            onValueChange={(mode) => void changeMode(mode)}
+            disabled={disabled || saving || !contextName}
+          >
+            <SelectTrigger size="sm" className="w-36 shrink-0 bg-background text-[11px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="port-forward">
+                {t("overview.gatewayPortForward")}
+              </SelectItem>
+              <SelectItem value="websocket">
+                {t("overview.gatewayWebSocket")}
+              </SelectItem>
+            </SelectContent>
+          </Select>
+          {transport.mode === "websocket" ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="icon-sm"
+              disabled={saving || !contextName}
+              aria-label={t("overview.gatewayConfigure")}
+              title={t("overview.gatewayConfigure")}
+              onClick={openWebSocketSettings}
+            >
+              <Settings2 />
+            </Button>
+          ) : null}
+        </div>
+      </div>
+
+      <Dialog
+        open={open}
+        onOpenChange={(value) => {
+          if (saving) return;
+          setOpen(value);
+          if (!value) setTokenVisible(false);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t("overview.gatewayWebSocketTitle")}</DialogTitle>
+            <DialogDescription>
+              {t("overview.gatewayWebSocketDescription")}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3">
+            <label className="grid gap-1.5 text-xs">
+              <span className="text-muted-foreground">{t("overview.gatewayURL")}</span>
+              <Input
+                value={draft.url ?? ""}
+                placeholder="ws://127.0.0.1:8080/v1/tunnel"
+                disabled={disabled}
+                onChange={(event) =>
+                  setDraft((current) => ({ ...current, url: event.target.value }))
+                }
+              />
+            </label>
+            <label className="grid gap-1.5 text-xs">
+              <span className="text-muted-foreground">
+                {t("overview.gatewayExposure")}
+              </span>
+              <Select
+                value={draft.exposure ?? "ingress"}
+                disabled={disabled}
+                onValueChange={(exposure: "ingress" | "gateway-api") =>
+                  setDraft((current) => ({ ...current, exposure }))
+                }
+              >
+                <SelectTrigger className="w-full bg-background">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ingress">{t("overview.gatewayIngress")}</SelectItem>
+                  <SelectItem value="gateway-api">
+                    {t("overview.gatewayAPI")}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </label>
+            {(draft.exposure ?? "ingress") === "gateway-api" ? (
+              <div className="grid gap-2 sm:grid-cols-2">
+                <label className="grid gap-1.5 text-xs">
+                  <span className="text-muted-foreground">
+                    {t("overview.gatewayAPINamespace")}
+                  </span>
+                  <Input
+                    value={draft.gatewayNamespace ?? ""}
+                    placeholder="default"
+                    disabled={disabled}
+                    onChange={(event) =>
+                      setDraft((current) => ({
+                        ...current,
+                        gatewayNamespace: event.target.value,
+                      }))
+                    }
+                  />
+                </label>
+                <label className="grid gap-1.5 text-xs">
+                  <span className="text-muted-foreground">
+                    {t("overview.gatewayAPIName")}
+                  </span>
+                  <Input
+                    value={draft.gatewayName ?? ""}
+                    placeholder="gateway"
+                    disabled={disabled}
+                    onChange={(event) =>
+                      setDraft((current) => ({ ...current, gatewayName: event.target.value }))
+                    }
+                  />
+                </label>
+                <label className="grid gap-1.5 text-xs sm:col-span-2">
+                  <span className="text-muted-foreground">
+                    {t("overview.gatewayAPISection")}
+                  </span>
+                  <Input
+                    value={draft.gatewaySection ?? ""}
+                    placeholder="https"
+                    disabled={disabled}
+                    onChange={(event) =>
+                      setDraft((current) => ({
+                        ...current,
+                        gatewaySection: event.target.value,
+                      }))
+                    }
+                  />
+                </label>
+                <p className="text-[11px] leading-relaxed text-muted-foreground sm:col-span-2">
+                  {t("overview.gatewayAPIHint")}
+                </p>
+              </div>
+            ) : null}
+            <div className="grid gap-1.5 text-xs">
+              <span className="text-muted-foreground">{t("overview.gatewayToken")}</span>
+              <div className="relative">
+                <Input
+                  aria-label={t("overview.gatewayToken")}
+                  type={tokenVisible ? "text" : "password"}
+                  value={draft.token ?? ""}
+                  className="pr-9 font-mono"
+                  disabled={disabled}
+                  onChange={(event) =>
+                    setDraft((current) => ({ ...current, token: event.target.value }))
+                  }
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  className="absolute right-1 top-1/2 -translate-y-1/2 text-muted-foreground"
+                  aria-label={t(
+                    tokenVisible ? "overview.gatewayTokenHide" : "overview.gatewayTokenShow",
+                  )}
+                  onClick={() => setTokenVisible((visible) => !visible)}
+                >
+                  {tokenVisible ? <EyeOff /> : <Eye />}
+                </Button>
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              {([
+                ["poolSize", "overview.gatewayPoolSize", 2, 8],
+                ["maxPhysical", "overview.gatewayMaxPhysical", 4, 16],
+                ["maxStreams", "overview.gatewayMaxStreams", 128, 1024],
+              ] as const).map(([key, label, fallback, maximum]) => (
+                <label key={key} className="grid gap-1.5 text-xs">
+                  <span className="truncate text-muted-foreground">{t(label)}</span>
+                  <Input
+                    type="number"
+                    min={1}
+                    max={maximum}
+                    value={draft[key] || fallback}
+                    disabled={disabled}
+                    onChange={(event) =>
+                      setDraft((current) => ({
+                        ...current,
+                        [key]: Number(event.target.value),
+                      }))
+                    }
+                  />
+                </label>
+              ))}
+            </div>
+            <div className="flex items-center justify-between rounded-lg border px-3 py-2.5">
+              <div className="flex items-center gap-2 text-xs">
+                <Globe2 size={14} />
+                <span>{t("overview.gatewayInsecureTLS")}</span>
+              </div>
+              <Switch
+                checked={Boolean(draft.insecureSkipVerify)}
+                disabled={disabled}
+                onCheckedChange={(checked) =>
+                  setDraft((current) => ({
+                    ...current,
+                    insecureSkipVerify: checked,
+                  }))
+                }
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={saving}
+              onClick={() => {
+                setOpen(false);
+                setTokenVisible(false);
+              }}
+            >
+              {t("actions.cancel")}
+            </Button>
+            <Button
+              type="button"
+              disabled={saving || disabled}
+              onClick={() => void saveWebSocket()}
+            >
+              {saving ? <Spinner data-icon="inline-start" /> : null}
+              {t("settings.gatewayNamespaceSave")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+function defaultWebSocketTransport(): GatewayTransport {
+  return {
+    mode: "websocket",
+    url: "ws://127.0.0.1:8080/v1/tunnel",
+    token: generateGatewayToken(),
+    exposure: "ingress",
+    poolSize: 2,
+    maxPhysical: 4,
+    maxStreams: 128,
+  };
+}
+
+function generateGatewayToken(): string {
+  const bytes = new Uint8Array(16);
+  globalThis.crypto.getRandomValues(bytes);
+  return Array.from(bytes, (value) => value.toString(16).padStart(2, "0")).join("");
 }
 
 function ConnectionModePanel({
@@ -394,7 +895,7 @@ function ConnectionModePanel({
   );
 
   return (
-    <SidePanel title={t("overview.connectionMode")}>
+    <div className="flex flex-col gap-2.5">
       <ToggleGroup
         type="single"
         value={activeMode}
@@ -402,57 +903,27 @@ function ConnectionModePanel({
         onValueChange={(value) => {
           if (value) onConnectionModeChange(value as ConnectionMode);
         }}
-        className="grid w-full grid-cols-2 gap-1 rounded-xl bg-muted/70 p-1"
+        className="grid w-full shrink-0 grid-cols-2 gap-1 rounded-lg bg-muted/70 p-1"
       >
         <ToggleGroupItem
           value="socks"
-          className="min-h-10 rounded-lg px-3 text-sm font-medium data-[state=on]:bg-background data-[state=on]:text-foreground data-[state=on]:shadow-sm data-[state=on]:ring-1 data-[state=on]:ring-border"
+          className="h-8 rounded-md px-2 text-[12px] font-medium data-[state=on]:bg-background data-[state=on]:text-foreground data-[state=on]:shadow-sm data-[state=on]:ring-1 data-[state=on]:ring-border"
         >
           <Network size={15} />
           <span className="truncate">{t("overview.socksProxy")}</span>
         </ToggleGroupItem>
         <ToggleGroupItem
           value="tun"
-          className="min-h-10 rounded-lg px-3 text-sm font-medium data-[state=on]:bg-background data-[state=on]:text-foreground data-[state=on]:shadow-sm data-[state=on]:ring-1 data-[state=on]:ring-border"
+          className="h-8 rounded-md px-2 text-[12px] font-medium data-[state=on]:bg-background data-[state=on]:text-foreground data-[state=on]:shadow-sm data-[state=on]:ring-1 data-[state=on]:ring-border"
         >
           <Cable size={15} />
           <span className="truncate">{t("overview.tunMode")}</span>
         </ToggleGroupItem>
       </ToggleGroup>
 
-      <div className="mt-2.5 flex min-h-0 flex-1 flex-col rounded-xl border border-primary/15 bg-primary/[0.035] p-2.5">
-        <div className="flex items-start gap-2.5">
-          <div className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-            {activeMode === "socks" ? <Network size={15} /> : <Cable size={15} />}
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-[12px] font-medium">
-                {activeMode === "socks"
-                  ? t("overview.socksModeDesc")
-                  : t("overview.tunModeDesc")}
-              </span>
-              <span
-                className={cn(
-                  "rounded-full px-2 py-0.5 text-[9px] font-medium",
-                  ready
-                    ? "bg-success/10 text-success"
-                    : "bg-muted text-muted-foreground",
-                )}
-              >
-                {ready ? t("overview.modeActive") : t("overview.modeUnavailable")}
-              </span>
-            </div>
-            <p className="mt-1 text-[10px] leading-4 text-muted-foreground">
-              {activeMode === "socks"
-                ? t("overview.socksHint")
-                : t("overview.tunHint")}
-            </p>
-          </div>
-        </div>
-
+      <div className="min-w-0 rounded-lg bg-muted/35 px-3 py-2">
         {activeMode === "socks" ? (
-          <div className="mt-auto flex flex-wrap items-center gap-2 pt-3">
+          <div className="flex flex-wrap items-center gap-2">
             <code className="whitespace-nowrap rounded-md border bg-background px-2 py-1.5 text-[11px]">
               {address}
             </code>
@@ -475,14 +946,16 @@ function ConnectionModePanel({
               <Copy size={12} data-icon="inline-start" />
               {t("overview.socksCopy")}
             </Button>
+            <span className="hidden truncate text-[10px] text-muted-foreground xl:inline">
+              {t("overview.socksHint")}
+            </span>
           </div>
         ) : (
-          <div className="mt-auto pt-3">
-            <div className="mb-2 flex items-center justify-between gap-2 text-[10px]">
-              <span className="text-muted-foreground">{t("overview.tunHelper")}</span>
-              <span className="font-medium">{helperLabel}</span>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="whitespace-nowrap text-[10px] text-muted-foreground">
+              {t("overview.tunHelper")}: <strong className="font-medium text-foreground">{helperLabel}</strong>
+            </span>
+            <div className="flex gap-1.5">
               <Button
                 type="button"
                 size="sm"
@@ -518,7 +991,7 @@ function ConnectionModePanel({
           </div>
         )}
       </div>
-    </SidePanel>
+    </div>
   );
 }
 
@@ -538,34 +1011,18 @@ function proxyEnvironmentVariables(platform: string | undefined, address: string
   ].join("\n");
 }
 
-function SidePanel({
-  title,
-  children,
-  footer,
-}: {
-  title: string;
-  children: ReactNode;
-  footer?: ReactNode;
-}) {
-  return (
-    <div className="flex h-full min-w-0 flex-col rounded-lg border bg-muted/25 px-3 py-2.5">
-      <div className="mb-1.5 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
-        {title}
-      </div>
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col">{children}</div>
-      {footer ? <div className="mt-2.5">{footer}</div> : null}
-    </div>
-  );
-}
-
 function DiscoverySummary({
   contextName,
   discovery,
   ready,
+  dnsWarning,
+  networkIssues,
 }: {
   contextName: string;
   discovery?: Discovery;
   ready: boolean;
+  dnsWarning?: string;
+  networkIssues: NetworkDiagnostic[];
 }) {
   const { t } = useI18n();
   const [podCIDRs, setPodCIDRs] = useState("");
@@ -644,58 +1101,90 @@ function DiscoverySummary({
     }
   }
 
+  const summaryItems = [podCIDRs, serviceCIDRs, dnsServer]
+    .map((value) => value.split(",")[0]?.trim())
+    .filter(Boolean);
+
   return (
-    <SidePanel
-      title={t("overview.clusterNetwork")}
-      footer={
-        <div className="flex justify-end">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="min-w-32"
-            disabled={!contextName || saving}
-            onClick={() => void save()}
-          >
-            {t("overview.networkSave")}
-          </Button>
+    <Card className="h-full min-h-[145px] gap-0 overflow-hidden py-0 shadow-none md:col-span-2">
+        <div className="flex items-center justify-between gap-3 px-4 pt-3 pb-2">
+          <span className="text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
+            {t("overview.clusterNetwork")}
+          </span>
+          <span className="truncate font-mono text-[10px] text-muted-foreground">
+            {summaryItems.length > 0 ? summaryItems.join(" · ") : t("overview.networkUnavailable")}
+          </span>
         </div>
-      }
-    >
-      <dl className="grid gap-x-6 gap-y-2 sm:grid-cols-2">
-        <NetworkField
-          label={t("overview.clusterDomain")}
-          value={clusterDomains}
-          placeholder="cluster.local, corp.local"
-          onChange={setClusterDomains}
-          disabled={!contextName}
-        />
-        <NetworkField
-          label={t("overview.podNetwork")}
-          value={podCIDRs}
-          placeholder="10.244.0.0/16"
-          onChange={setPodCIDRs}
-          disabled={!contextName}
-        />
-        <NetworkField
-          label={t("overview.serviceNetwork")}
-          value={serviceCIDRs}
-          placeholder="10.96.0.0/12"
-          onChange={setServiceCIDRs}
-          disabled={!contextName}
-        />
-        <NetworkField
-          label={t("overview.clusterDns")}
-          value={dnsServer}
-          placeholder="10.96.0.10"
-          onChange={setDnsServer}
-          disabled={!contextName}
-        />
-      </dl>
-      <p className="mt-2 text-[10px] leading-snug text-muted-foreground">
-        {t("overview.networkHint")}
-      </p>
-    </SidePanel>
+        {dnsWarning || networkIssues.length > 0 ? (
+          <div className="space-y-2 border-t px-4 py-3">
+            {dnsWarning ? (
+              <Alert className="w-full text-left">
+                <AlertDescription className="break-words">{dnsWarning}</AlertDescription>
+              </Alert>
+            ) : null}
+            {networkIssues.length > 0 ? (
+              <Alert className="w-full text-left">
+                <AlertDescription>
+                  <ul className="list-disc space-y-1 pl-4 text-[12px]">
+                    {networkIssues.map((item) => (
+                      <li key={`${item.code}:${item.target}:${item.conflict}:${item.interface}`}>
+                        {item.message}
+                      </li>
+                    ))}
+                  </ul>
+                </AlertDescription>
+              </Alert>
+            ) : null}
+          </div>
+        ) : null}
+        <CardContent className="flex min-h-0 flex-1 flex-col px-4 py-3">
+            <dl className="grid gap-x-4 gap-y-2 sm:grid-cols-2 md:grid-cols-4">
+              <NetworkField
+                label={t("overview.clusterDomain")}
+                value={clusterDomains}
+                placeholder="cluster.local, corp.local"
+                onChange={setClusterDomains}
+                disabled={!contextName}
+              />
+              <NetworkField
+                label={t("overview.podNetwork")}
+                value={podCIDRs}
+                placeholder="10.244.0.0/16"
+                onChange={setPodCIDRs}
+                disabled={!contextName}
+              />
+              <NetworkField
+                label={t("overview.serviceNetwork")}
+                value={serviceCIDRs}
+                placeholder="10.96.0.0/12"
+                onChange={setServiceCIDRs}
+                disabled={!contextName}
+              />
+              <NetworkField
+                label={t("overview.clusterDns")}
+                value={dnsServer}
+                placeholder="10.96.0.10"
+                onChange={setDnsServer}
+                disabled={!contextName}
+              />
+            </dl>
+            <div className="mt-auto flex flex-wrap items-end justify-between gap-3 pt-3">
+              <p className="min-w-0 flex-1 truncate text-[10px] leading-snug text-muted-foreground" title={t("overview.networkHint")}>
+                {t("overview.networkHint")}
+              </p>
+              <Button
+                type="button"
+                variant="default"
+                size="sm"
+                className="min-w-32"
+                disabled={!contextName || saving}
+                onClick={() => void save()}
+              >
+                {t("overview.networkSave")}
+              </Button>
+            </div>
+        </CardContent>
+    </Card>
   );
 }
 
@@ -713,8 +1202,8 @@ function NetworkField({
   disabled?: boolean;
 }) {
   return (
-    <div className="grid grid-cols-[6.5rem_minmax(0,1fr)] items-center gap-x-2 text-[12px]">
-      <dt className="whitespace-nowrap text-muted-foreground">{label}</dt>
+    <div className="min-w-0 space-y-1.5 text-[12px]">
+      <dt className="truncate text-[11px] text-muted-foreground">{label}</dt>
       <dd className="min-w-0">
         <Input
           className="h-7 w-full min-w-0 rounded-md border border-input bg-background px-2 font-mono text-[11px] outline-none transition-colors focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40 disabled:opacity-50"
@@ -756,61 +1245,62 @@ function SessionMetrics({
 }) {
   const { t } = useI18n();
   const resettable = podPortForwards + networkPortForwards + exchanges + mirrors;
-  const groups: {
-    title: string;
-    rows: { icon: LucideIcon; label: string; value: number; view: AppView }[];
+  const rows: {
+    group: string;
+    icon: LucideIcon;
+    label: string;
+    value: number;
+    view: AppView;
   }[] = [
     {
-      title: t("overview.podGroup"),
-      rows: [
-        {
-          icon: Cable,
-          label: t("network.tabPortForward"),
-          value: podPortForwards,
-          view: "workload",
-        },
-      ],
+      group: t("overview.podGroup"),
+      icon: Cable,
+      label: t("network.tabPortForward"),
+      value: podPortForwards,
+      view: "workload",
     },
     {
-      title: t("overview.networkGroup"),
-      rows: [
-        {
-          icon: Cable,
-          label: t("network.tabPortForward"),
-          value: networkPortForwards,
-          view: "network",
-        },
-        {
-          icon: ArrowRightLeft,
-          label: t("network.tabExchange"),
-          value: exchanges,
-          view: "network",
-        },
-        {
-          icon: CopyPlus,
-          label: t("network.tabMirror"),
-          value: mirrors,
-          view: "network",
-        },
-        {
-          icon: Eye,
-          label: t("network.tabPreview"),
-          value: previews,
-          view: "network",
-        },
-      ],
+      group: t("overview.networkGroup"),
+      icon: Cable,
+      label: t("network.tabPortForward"),
+      value: networkPortForwards,
+      view: "network",
+    },
+    {
+      group: t("overview.networkGroup"),
+      icon: ArrowRightLeft,
+      label: t("network.tabExchange"),
+      value: exchanges,
+      view: "network",
+    },
+    {
+      group: t("overview.networkGroup"),
+      icon: CopyPlus,
+      label: t("network.tabMirror"),
+      value: mirrors,
+      view: "network",
+    },
+    {
+      group: t("overview.networkGroup"),
+      icon: Eye,
+      label: t("network.tabPreview"),
+      value: previews,
+      view: "network",
     },
   ];
 
   return (
-    <SidePanel
-      title={t("overview.sessionsPanel")}
-      footer={
+    <Card className="gap-0 overflow-hidden py-0 shadow-none md:col-span-2">
+      <CardContent className="px-4 py-3">
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <div className="text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
+          {t("overview.sessionsPanel")}
+        </div>
         <Button
           type="button"
-          variant="outline"
+          variant="ghost"
           size="sm"
-          className="w-full"
+          className="h-6 px-2 text-[10px]"
           disabled={resettable === 0 || resetting}
           onClick={onReset}
         >
@@ -821,38 +1311,39 @@ function SessionMetrics({
           )}
           {t("overview.resetSessions")}
         </Button>
-      }
-    >
-      <div className="flex min-h-0 flex-1 flex-col justify-between">
-        {groups.map((group) => (
-          <div key={group.title} className="min-w-0">
-            <div className="mb-1.5 text-[11px] font-medium text-foreground/85">{group.title}</div>
-            <div className="space-y-1.5 pl-0.5">
-              {group.rows.map((row) => (
-                <Button
-                  key={`${group.title}-${row.label}`}
-                  type="button"
-                  variant="ghost"
-                  onClick={() => onNavigate(row.view)}
-                  className={cn(
-                    "flex h-auto w-full items-center justify-start gap-2 rounded-md px-1 py-0.5 text-left",
-                    "transition-colors hover:bg-accent/60 focus-visible:outline-none",
-                    "focus-visible:ring-2 focus-visible:ring-ring/50",
-                  )}
-                >
-                  <div className="grid size-6 shrink-0 place-items-center rounded-md border bg-background text-muted-foreground">
-                    <row.icon size={13} strokeWidth={1.7} />
-                  </div>
-                  <span className="text-[11px] text-muted-foreground">{row.label}</span>
-                  <span className="ml-auto font-mono text-[13px] font-semibold tabular-nums">
-                    {row.value}
-                  </span>
-                </Button>
-              ))}
+      </div>
+      <div className="grid grid-cols-2 gap-1.5 md:grid-cols-5">
+        {rows.map((row) => (
+          <Button
+            key={`${row.group}-${row.label}`}
+            type="button"
+            variant="ghost"
+            title={`${row.group} · ${row.label}`}
+            onClick={() => onNavigate(row.view)}
+            className={cn(
+              "flex h-auto min-w-0 items-center justify-start gap-2 rounded-md border bg-background/80 px-2.5 py-2 text-left",
+              "transition-colors hover:bg-accent/60 focus-visible:outline-none",
+              "focus-visible:ring-2 focus-visible:ring-ring/50",
+            )}
+          >
+            <div className="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground">
+              <row.icon size={13} strokeWidth={1.7} />
             </div>
-          </div>
+            <span className="min-w-0 flex-1 leading-tight">
+              <span className="block truncate text-[9px] text-muted-foreground">
+                {row.group}
+              </span>
+              <span className="mt-0.5 block truncate text-[10px] text-foreground">
+                {row.label}
+              </span>
+            </span>
+            <span className="ml-auto font-mono text-[13px] font-semibold tabular-nums">
+              {row.value}
+            </span>
+          </Button>
         ))}
       </div>
-    </SidePanel>
+      </CardContent>
+    </Card>
   );
 }

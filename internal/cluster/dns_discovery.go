@@ -22,7 +22,7 @@ func (p *Provider) discoverGatewayDNS(
 	}
 	var stdout bytes.Buffer
 	err = p.Exec(ctx, podssh.Target{
-		Context: contextName, Namespace: GatewayNamespace,
+		Context: contextName, Namespace: p.GatewayNamespace(),
 		Pod: gateway.Name, Container: "gateway",
 	}, []string{"/kube-loop-gateway", "--print-resolv-conf"}, podssh.Streams{Stdout: &stdout})
 	if err != nil {

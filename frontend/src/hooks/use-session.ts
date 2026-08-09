@@ -54,6 +54,9 @@ export function useSession() {
     session: emptySession,
     update: emptyUpdate,
     kubeconfigFiles: [],
+    shareGateway: true,
+    gatewayNamespace: "kubeloop-system",
+    gatewayTransport: { mode: "port-forward" },
   });
   const [contextName, setContextName] = useState("");
   const [namespace, setNamespace] = useState("default");
@@ -179,6 +182,16 @@ export function useSession() {
     [activeContextName, data.contexts],
   );
   const kubeconfigFiles: KubeconfigFileInfo[] = data.kubeconfigFiles ?? [];
+
+  async function changeShareGateway(shared: boolean) {
+    await backend.setShareGateway(shared);
+    setData((current) => ({ ...current, shareGateway: shared }));
+  }
+
+  async function changeGatewayNamespace(namespace: string) {
+    await backend.setGatewayNamespace(namespace);
+    setData((current) => ({ ...current, gatewayNamespace: namespace }));
+  }
 
   useEffect(() => {
     if (!activeContextName || namespacesByContext[activeContextName]) return;
@@ -390,6 +403,8 @@ export function useSession() {
     addKubeconfig,
     removeKubeconfig,
     probeContext,
+    changeShareGateway,
+    changeGatewayNamespace,
     checkForUpdates,
     openUpdatePage,
   };

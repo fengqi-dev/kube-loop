@@ -3,6 +3,11 @@ package store
 func cloneState(state State) State {
 	out := State{
 		Version: state.Version,
+		Settings: Settings{
+			ShareGateway:     cloneBool(state.Settings.ShareGateway),
+			GatewayID:        state.Settings.GatewayID,
+			GatewayNamespace: state.Settings.GatewayNamespace,
+		},
 		UI: UIState{
 			LastContext:     state.UI.LastContext,
 			LastNamespace:   state.UI.LastNamespace,
@@ -21,6 +26,14 @@ func cloneState(state State) State {
 	return out
 }
 
+func cloneBool(value *bool) *bool {
+	if value == nil {
+		return nil
+	}
+	copyValue := *value
+	return &copyValue
+}
+
 func cloneStrings(items []string) []string {
 	if len(items) == 0 {
 		return nil
@@ -34,6 +47,7 @@ func cloneCluster(item ClusterState) ClusterState {
 	out := ClusterState{
 		Namespace:      item.Namespace,
 		ConnectionMode: item.ConnectionMode,
+		Gateway:        item.Gateway,
 		Connected:      item.Connected,
 		PortForwards:   clonePortForwards(item.PortForwards),
 		Exchanges:      cloneExchanges(item.Exchanges),

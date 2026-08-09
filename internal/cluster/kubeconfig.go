@@ -48,13 +48,50 @@ type ProbeResult struct {
 
 // Provider loads kubeconfig contexts and talks to the Kubernetes API.
 type Provider struct {
-	mu         sync.RWMutex
-	extraFiles []string
-	userAgent  string
+	mu          sync.RWMutex
+	extraFiles  []string
+	userAgent   string
+	gatewayNS   string
+	gatewayName string
 }
 
 func NewProvider() *Provider {
-	return &Provider{userAgent: "kube-loop/dev"}
+	return &Provider{
+		userAgent: "kube-loop/dev", gatewayNS: GatewayNamespace, gatewayName: GatewayName,
+	}
+}
+
+// SetGatewayResource selects the shared or client-private Gateway resources used
+// by subsequent discovery and connection operations.
+func (p *Provider) SetGatewayResource(namespace, name string) {
+	if namespace == "" {
+		namespace = GatewayNamespace
+	}
+	if name == "" {
+		name = GatewayName
+	}
+	p.mu.Lock()
+	p.gatewayNS = namespace
+	p.gatewayName = name
+	p.mu.Unlock()
+}
+
+func (p *Provider) GatewayNamespace() string {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if p.gatewayNS == "" {
+		return GatewayNamespace
+	}
+	return p.gatewayNS
+}
+
+func (p *Provider) GatewayName() string {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if p.gatewayName == "" {
+		return GatewayName
+	}
+	return p.gatewayName
 }
 
 // SetUserAgent sets the Kubernetes client User-Agent from the app version

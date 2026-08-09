@@ -222,5 +222,37 @@ func normalizeHostAliasSpecs(items []store.HostAliasSpec) ([]store.HostAliasSpec
 }
 
 func (m *Manager) GatewayInstallManifest() string {
-	return cluster.GatewayInstallManifest(m.gatewayImage)
+	contextName, _ := m.PreferredSelection()
+	return m.GatewayInstallManifestFor(contextName)
+}
+
+func (m *Manager) GatewayInstallManifestFor(contextName string) string {
+	m.mu.RLock()
+	namespace := m.gatewayNS
+	name := m.gatewayName
+	m.mu.RUnlock()
+	transport := m.GatewayTransport(contextName)
+	if transport.Mode == GatewayTransportWebSocket {
+		return cluster.GatewayHTTPInstallManifestResource(
+			m.gatewayImage, namespace, name, cluster.HTTPGatewayConfig{
+				Token: transport.Token, Endpoint: transport.URL, Exposure: transport.Exposure,
+				GatewayNamespace: transport.GatewayNamespace, GatewayName: transport.GatewayName,
+				GatewaySection: transport.GatewaySection,
+			},
+		)
+	}
+	return cluster.GatewayInstallManifestResource(m.gatewayImage, namespace, name)
+}
+
+func (m *Manager) SetGatewayResource(namespace, name string) {
+	if namespace == "" {
+		namespace = cluster.GatewayNamespace
+	}
+	if name == "" {
+		name = cluster.GatewayName
+	}
+	m.mu.Lock()
+	m.gatewayNS = namespace
+	m.gatewayName = name
+	m.mu.Unlock()
 }

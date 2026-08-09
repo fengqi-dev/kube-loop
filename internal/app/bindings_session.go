@@ -4,13 +4,16 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/fengqi-dev/kube-loop/internal/cluster"
 	"github.com/fengqi-dev/kube-loop/internal/helper"
 	helperinstall "github.com/fengqi-dev/kube-loop/internal/helper/install"
 	"github.com/fengqi-dev/kube-loop/internal/session"
 	"github.com/fengqi-dev/kube-loop/internal/store"
+	"k8s.io/apimachinery/pkg/util/validation"
 )
 
 func (a *App) Connect(contextName, namespace string) error {
@@ -53,6 +56,59 @@ func (a *App) SetHostAliases(contextName string, items []store.HostAliasSpec) er
 
 func (a *App) GatewayInstallManifest() string {
 	return a.manager.GatewayInstallManifest()
+}
+
+// SetShareGateway selects a cluster-wide shared Gateway or a stable Gateway
+// dedicated to this desktop client. The change takes effect on the next connect.
+func (a *App) SetShareGateway(shared bool) error {
+	if a.store == nil {
+		return errors.New("state store is unavailable")
+	}
+	state := a.manager.State()
+	if state.Phase != session.PhaseIdle && state.Phase != session.PhaseError {
+		return errors.New("disconnect before changing the Gateway sharing setting")
+	}
+	if err := a.store.SetShareGateway(shared); err != nil {
+		return err
+	}
+	namespace, name := gatewayResource(
+		shared, a.store.GatewayID(), a.store.GatewayNamespace(),
+	)
+	a.provider.SetGatewayResource(namespace, name)
+	a.manager.SetGatewayResource(namespace, name)
+	return nil
+}
+
+// SetGatewayNamespace updates the exact namespace used for Gateway resources.
+func (a *App) SetGatewayNamespace(namespace string) error {
+	if a.store == nil {
+		return errors.New("state store is unavailable")
+	}
+	state := a.manager.State()
+	if state.Phase != session.PhaseIdle && state.Phase != session.PhaseError {
+		return errors.New("disconnect before changing the Gateway namespace")
+	}
+	namespace = strings.TrimSpace(namespace)
+	if problems := validation.IsDNS1123Label(namespace); len(problems) > 0 {
+		return fmt.Errorf("invalid Gateway namespace: %s", strings.Join(problems, "; "))
+	}
+	if err := a.store.SetGatewayNamespace(namespace); err != nil {
+		return err
+	}
+	resolvedNS, name := gatewayResource(
+		a.store.ShareGateway(), a.store.GatewayID(), namespace,
+	)
+	a.provider.SetGatewayResource(resolvedNS, name)
+	a.manager.SetGatewayResource(resolvedNS, name)
+	return nil
+}
+
+func (a *App) GetGatewayTransport(contextName string) store.GatewayTransport {
+	return a.manager.GatewayTransport(contextName)
+}
+
+func (a *App) SetGatewayTransport(contextName string, config store.GatewayTransport) error {
+	return a.manager.SetGatewayTransport(contextName, config)
 }
 
 // GetSingBoxConfig returns the active session's generated sing-box config JSON.

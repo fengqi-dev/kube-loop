@@ -7,6 +7,7 @@ import type {
   FileManagerTarget,
   FileTransferRequest,
   FileTransferTask,
+  GatewayTransport,
   HelperStatus,
   HostAlias,
   InterceptInfo,
@@ -91,6 +92,10 @@ declare global {
           GetHostAliases(contextName: string): Promise<HostAlias[]>;
           SetHostAliases(contextName: string, items: HostAlias[]): Promise<void>;
           GatewayInstallManifest(): Promise<string>;
+          SetShareGateway(shared: boolean): Promise<void>;
+          SetGatewayNamespace(namespace: string): Promise<void>;
+          GetGatewayTransport(contextName: string): Promise<GatewayTransport>;
+          SetGatewayTransport(contextName: string, config: GatewayTransport): Promise<void>;
           StartIntercept(mapping: InterceptMapping): Promise<InterceptInfo>;
           StartMirror(mapping: InterceptMapping): Promise<InterceptInfo>;
           StopIntercept(id: string): Promise<void>;
@@ -209,6 +214,14 @@ export const backend = {
     Promise.resolve().then(() => api().SetHostAliases(contextName, items)),
   gatewayInstallManifest: () =>
     Promise.resolve().then(() => api().GatewayInstallManifest()),
+  setShareGateway: (shared: boolean) =>
+    Promise.resolve().then(() => api().SetShareGateway(shared)),
+  setGatewayNamespace: (namespace: string) =>
+    Promise.resolve().then(() => api().SetGatewayNamespace(namespace)),
+  getGatewayTransport: (contextName: string) =>
+    Promise.resolve().then(() => api().GetGatewayTransport(contextName)),
+  setGatewayTransport: (contextName: string, config: GatewayTransport) =>
+    Promise.resolve().then(() => api().SetGatewayTransport(contextName, config)),
   startIntercept: (mapping: InterceptMapping) =>
     Promise.resolve().then(() => api().StartIntercept(mapping)),
   startMirror: (mapping: InterceptMapping) =>

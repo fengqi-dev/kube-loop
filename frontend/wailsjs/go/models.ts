@@ -10,7 +10,10 @@ export namespace app {
 	    preferredMode?: string;
 	    platform: string;
 	    kubeconfigFiles?: cluster.KubeconfigFileInfo[];
-	
+	    shareGateway: boolean;
+	    gatewayNamespace: string;
+	    gatewayTransport: store.GatewayTransport;
+
 	    static createFrom(source: any = {}) {
 	        return new BootstrapData(source);
 	    }
@@ -26,6 +29,9 @@ export namespace app {
 	        this.preferredMode = source["preferredMode"];
 	        this.platform = source["platform"];
 	        this.kubeconfigFiles = this.convertValues(source["kubeconfigFiles"], cluster.KubeconfigFileInfo);
+	        this.shareGateway = source["shareGateway"];
+	        this.gatewayNamespace = source["gatewayNamespace"];
+	        this.gatewayTransport = this.convertValues(source["gatewayTransport"], store.GatewayTransport);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -299,6 +305,7 @@ export namespace cluster {
 	export class ServiceInfo {
 	    name: string;
 	    namespace: string;
+	    type: string;
 	    clusterIP: string;
 	    ports: ServicePortInfo[];
 	
@@ -310,6 +317,7 @@ export namespace cluster {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.name = source["name"];
 	        this.namespace = source["namespace"];
+	        this.type = source["type"];
 	        this.clusterIP = source["clusterIP"];
 	        this.ports = this.convertValues(source["ports"], ServicePortInfo);
 	    }
@@ -1113,6 +1121,38 @@ export namespace singbox {
 
 export namespace store {
 	
+	export class GatewayTransport {
+	    mode?: string;
+	    url?: string;
+	    token?: string;
+	    exposure?: string;
+	    gatewayNamespace?: string;
+	    gatewayName?: string;
+	    gatewaySection?: string;
+	    insecureSkipVerify: boolean;
+	    poolSize?: number;
+	    maxPhysical?: number;
+	    maxStreams?: number;
+
+	    static createFrom(source: any = {}) {
+	        return new GatewayTransport(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.mode = source["mode"];
+	        this.url = source["url"];
+	        this.token = source["token"];
+	        this.exposure = source["exposure"];
+	        this.gatewayNamespace = source["gatewayNamespace"];
+	        this.gatewayName = source["gatewayName"];
+	        this.gatewaySection = source["gatewaySection"];
+	        this.insecureSkipVerify = source["insecureSkipVerify"];
+	        this.poolSize = source["poolSize"];
+	        this.maxPhysical = source["maxPhysical"];
+	        this.maxStreams = source["maxStreams"];
+	    }
+	}
 	export class HostAliasSpec {
 	    domain: string;
 	    ip: string;
@@ -1145,9 +1185,7 @@ export namespace store {
 	        this.mirrors = source["mirrors"];
 	    }
 	}
-
 }
-
 export namespace update {
 	
 	export class Info {
@@ -1196,4 +1234,3 @@ export namespace update {
 	}
 
 }
-

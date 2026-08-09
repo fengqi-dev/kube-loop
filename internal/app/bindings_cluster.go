@@ -56,6 +56,7 @@ func (a *App) Bootstrap() (BootstrapData, error) {
 		preferredContext = selected
 	}
 	preferredMode := a.manager.PreferredConnectionMode(preferredContext)
+	gatewayTransport := a.manager.GatewayTransport(preferredContext)
 	a.updateMu.RLock()
 	updateState := a.updateState
 	a.updateMu.RUnlock()
@@ -63,8 +64,11 @@ func (a *App) Bootstrap() (BootstrapData, error) {
 		Contexts: contexts, Namespaces: namespaces, Session: a.manager.State(),
 		Update: updateState, PreferredContext: preferredContext,
 		PreferredNamespace: preferredNamespace, PreferredMode: preferredMode,
-		Platform:        goruntime.GOOS,
-		KubeconfigFiles: a.provider.KubeconfigFiles(),
+		Platform:         goruntime.GOOS,
+		KubeconfigFiles:  a.provider.KubeconfigFiles(),
+		ShareGateway:     a.store == nil || a.store.ShareGateway(),
+		GatewayNamespace: a.provider.GatewayNamespace(),
+		GatewayTransport: gatewayTransport,
 	}, nil
 }
 

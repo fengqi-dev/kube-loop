@@ -180,6 +180,7 @@ export function NetworkView({
       return (
         item.name.toLowerCase().includes(q) ||
         item.namespace.toLowerCase().includes(q) ||
+        (item.type || "").toLowerCase().includes(q) ||
         item.clusterIP.toLowerCase().includes(q)
       );
     });
@@ -250,6 +251,9 @@ export function NetworkView({
                   <TableHead className="h-9 text-[11px] font-medium text-muted-foreground">
                     {t("network.colNamespace")}
                   </TableHead>
+                  <TableHead className="h-9 w-24 text-[11px] font-medium text-muted-foreground">
+                    {t("network.colType")}
+                  </TableHead>
                   <TableHead className="h-9 text-[11px] font-medium text-muted-foreground">
                     {t("network.colClusterIP")}
                   </TableHead>
@@ -270,12 +274,15 @@ export function NetworkView({
                       </span>
                     </TableCell>
                     <TableCell className="text-primary">{item.namespace}</TableCell>
+                    <TableCell className="whitespace-nowrap text-[11px] text-muted-foreground">
+                      {item.type || "ClusterIP"}
+                    </TableCell>
                     <TableCell className="font-mono text-[12px]">
                       <CopyableText value={item.clusterIP} />
                     </TableCell>
                     <TableCell className="font-mono text-[12px] text-muted-foreground">
                       {item.ports.length > 0 ? (
-                        <div className="flex flex-col gap-0.5">
+                        <div className="flex flex-col items-start gap-0.5">
                           {item.ports.map((port) => (
                             <CopyableText
                               key={`${port.protocol}-${port.port}-${port.name || ""}`}

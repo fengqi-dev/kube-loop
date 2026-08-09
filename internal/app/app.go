@@ -19,6 +19,8 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
+const privateGatewayNamePrefix = "kubeloop-gateway-"
+
 type App struct {
 	ctx         context.Context
 	provider    *cluster.Provider
@@ -43,6 +45,9 @@ type BootstrapData struct {
 	PreferredMode      session.ConnectionMode       `json:"preferredMode,omitempty"`
 	Platform           string                       `json:"platform"`
 	KubeconfigFiles    []cluster.KubeconfigFileInfo `json:"kubeconfigFiles,omitempty"`
+	ShareGateway       bool                         `json:"shareGateway"`
+	GatewayNamespace   string                       `json:"gatewayNamespace"`
+	GatewayTransport   store.GatewayTransport       `json:"gatewayTransport"`
 }
 
 func NewApp(version string, embeddedHelperFiles fs.FS) *App {
@@ -59,6 +64,15 @@ func NewApp(version string, embeddedHelperFiles fs.FS) *App {
 	}
 	if stateStore != nil {
 		provider.SetExtraKubeconfigFiles(stateStore.KubeconfigFiles())
+		if !stateStore.ShareGateway() && stateStore.GatewayID() == "" {
+			if settingsErr := stateStore.SetShareGateway(false); settingsErr != nil {
+				log.Printf("initialize private gateway setting: %v", settingsErr)
+			}
+		}
+		gatewayNS, gatewayName := gatewayResource(
+			stateStore.ShareGateway(), stateStore.GatewayID(), stateStore.GatewayNamespace(),
+		)
+		provider.SetGatewayResource(gatewayNS, gatewayName)
 	}
 	options := []session.Option{
 		session.WithGatewayImage(session.ResolveGatewayImage(
@@ -70,6 +84,7 @@ func NewApp(version string, embeddedHelperFiles fs.FS) *App {
 		options = append(options, session.WithStore(stateStore))
 	}
 	manager := session.NewManager(provider, options...)
+	manager.SetGatewayResource(provider.GatewayNamespace(), provider.GatewayName())
 	transferStatePath := ""
 	if stateStore != nil {
 		transferStatePath = filepath.Join(filepath.Dir(stateStore.Path()), "transfers.json")
@@ -92,6 +107,16 @@ func NewApp(version string, embeddedHelperFiles fs.FS) *App {
 		},
 		mcp: loopmcp.NewController(provider, manager, fileManager, stateStore, version),
 	}
+}
+
+func gatewayResource(shared bool, id, namespace string) (string, string) {
+	if namespace == "" {
+		namespace = cluster.GatewayNamespace
+	}
+	if shared || id == "" {
+		return namespace, cluster.GatewayName
+	}
+	return namespace, privateGatewayNamePrefix + id
 }
 
 func developmentGatewayImage(files fs.FS) string {

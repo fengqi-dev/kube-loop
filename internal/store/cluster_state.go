@@ -2,6 +2,7 @@ package store
 
 import (
 	"fmt"
+	"strings"
 )
 
 func (s *Store) SetConnected(contextName, namespace string, connected bool) error {
@@ -40,6 +41,64 @@ func (s *Store) SetConnectionMode(contextName, mode string) error {
 		return fmt.Errorf("invalid connection mode %q", mode)
 	}
 	s.ensureClusterLocked(contextName).ConnectionMode = mode
+	return s.saveLocked()
+}
+
+func (s *Store) GatewayTransport(contextName string) GatewayTransport {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	item := s.state.Clusters[contextName]
+	if item == nil {
+		return GatewayTransport{Mode: "port-forward"}
+	}
+	config := item.Gateway
+	if config.Mode == "" {
+		config.Mode = "port-forward"
+	}
+	return config
+}
+
+func (s *Store) SetGatewayTransport(contextName string, config GatewayTransport) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if contextName == "" {
+		return fmt.Errorf("context is required")
+	}
+	config.Mode = strings.TrimSpace(config.Mode)
+	config.URL = strings.TrimSpace(config.URL)
+	config.Token = strings.TrimSpace(config.Token)
+	config.Exposure = strings.TrimSpace(config.Exposure)
+	config.GatewayNamespace = strings.TrimSpace(config.GatewayNamespace)
+	config.GatewayName = strings.TrimSpace(config.GatewayName)
+	config.GatewaySection = strings.TrimSpace(config.GatewaySection)
+	if config.Mode == "" {
+		config.Mode = "port-forward"
+	}
+	if config.Mode != "port-forward" && config.Mode != "websocket" {
+		return fmt.Errorf("invalid Gateway transport %q", config.Mode)
+	}
+	if config.Mode == "websocket" && (config.URL == "" || config.Token == "") {
+		return fmt.Errorf("WebSocket Gateway URL and token are required")
+	}
+	if config.Exposure == "" {
+		config.Exposure = "ingress"
+	}
+	if config.Exposure != "ingress" && config.Exposure != "gateway-api" {
+		return fmt.Errorf("invalid Gateway exposure %q", config.Exposure)
+	}
+	if config.Mode == "websocket" && config.Exposure == "gateway-api" && config.GatewayName == "" {
+		return fmt.Errorf("Gateway API Gateway name is required")
+	}
+	if config.PoolSize < 0 || config.MaxPhysical < 0 || config.MaxStreams < 0 {
+		return fmt.Errorf("Gateway multiplexing limits cannot be negative")
+	}
+	if config.PoolSize > 8 || config.MaxPhysical > 16 || config.MaxStreams > 1024 {
+		return fmt.Errorf("Gateway multiplexing limits exceed 8 connections, 16 maximum connections, or 1024 streams")
+	}
+	if config.PoolSize > 0 && config.MaxPhysical > 0 && config.PoolSize > config.MaxPhysical {
+		return fmt.Errorf("Gateway warm connection count cannot exceed the maximum")
+	}
+	s.ensureClusterLocked(contextName).Gateway = config
 	return s.saveLocked()
 }
 
