@@ -56,6 +56,13 @@ func (s *Server) Serve(listener net.Listener) error {
 	}
 }
 
+// ServeConn handles one logical Gateway protocol connection. HTTP transports
+// use this to feed independently multiplexed streams into the same protocol
+// implementation as the raw TCP listener.
+func (s *Server) ServeConn(connection net.Conn) {
+	s.handle(connection)
+}
+
 func (s *Server) handle(client net.Conn) {
 	_ = client.SetReadDeadline(time.Now().Add(15 * time.Second))
 	header, err := tunnel.ReadSessionHeader(client)

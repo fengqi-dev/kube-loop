@@ -4,5 +4,5 @@
 FROM scratch
 COPY build/bin/kube-loop-gateway /kube-loop-gateway
 USER 65532:65532
-EXPOSE 1080
+EXPOSE 1080 8080
 ENTRYPOINT ["/kube-loop-gateway"]

@@ -6,6 +6,10 @@ export function AddKubeconfig() {
   return window['go']['app']['App']['AddKubeconfig']();
 }
 
+export function AddKubeconfigContent(arg1) {
+  return window['go']['app']['App']['AddKubeconfigContent'](arg1);
+}
+
 export function AddKubeconfigPath(arg1) {
   return window['go']['app']['App']['AddKubeconfigPath'](arg1);
 }
@@ -72,6 +76,10 @@ export function EnablePodSSH(arg1) {
 
 export function GatewayInstallManifest() {
   return window['go']['app']['App']['GatewayInstallManifest']();
+}
+
+export function GetGatewayTransport(arg1) {
+  return window['go']['app']['App']['GetGatewayTransport'](arg1);
 }
 
 export function GetHostAliases(arg1) {
@@ -210,6 +218,14 @@ export function SetDNSNamespace(arg1, arg2) {
   return window['go']['app']['App']['SetDNSNamespace'](arg1, arg2);
 }
 
+export function SetGatewayNamespace(arg1) {
+  return window['go']['app']['App']['SetGatewayNamespace'](arg1);
+}
+
+export function SetGatewayTransport(arg1, arg2) {
+  return window['go']['app']['App']['SetGatewayTransport'](arg1, arg2);
+}
+
 export function SetHostAliases(arg1, arg2) {
   return window['go']['app']['App']['SetHostAliases'](arg1, arg2);
 }
@@ -228,6 +244,10 @@ export function SetMCPTokenEnabled(arg1) {
 
 export function SetManualNetwork(arg1, arg2) {
   return window['go']['app']['App']['SetManualNetwork'](arg1, arg2);
+}
+
+export function SetShareGateway(arg1) {
+  return window['go']['app']['App']['SetShareGateway'](arg1);
 }
 
 export function StartFileTransfer(arg1) {

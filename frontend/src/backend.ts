@@ -7,6 +7,7 @@ import type {
   FileManagerTarget,
   FileTransferRequest,
   FileTransferTask,
+  GatewayTransport,
   HelperStatus,
   HostAlias,
   InterceptInfo,
@@ -37,6 +38,7 @@ declare global {
           Bootstrap(): Promise<BootstrapData>;
           ReloadContexts(): Promise<ClusterInventory>;
           AddKubeconfig(): Promise<ClusterInventory>;
+          AddKubeconfigContent(content: string): Promise<ClusterInventory>;
           RemoveKubeconfig(path: string): Promise<ClusterInventory>;
           ProbeContext(contextName: string): Promise<ProbeResult>;
           RememberSelection(contextName: string, namespace: string): Promise<void>;
@@ -91,6 +93,10 @@ declare global {
           GetHostAliases(contextName: string): Promise<HostAlias[]>;
           SetHostAliases(contextName: string, items: HostAlias[]): Promise<void>;
           GatewayInstallManifest(): Promise<string>;
+          SetShareGateway(shared: boolean): Promise<void>;
+          SetGatewayNamespace(namespace: string): Promise<void>;
+          GetGatewayTransport(contextName: string): Promise<GatewayTransport>;
+          SetGatewayTransport(contextName: string, config: GatewayTransport): Promise<void>;
           StartIntercept(mapping: InterceptMapping): Promise<InterceptInfo>;
           StartMirror(mapping: InterceptMapping): Promise<InterceptInfo>;
           StopIntercept(id: string): Promise<void>;
@@ -138,6 +144,8 @@ export const backend = {
   bootstrap: () => Promise.resolve().then(() => api().Bootstrap()),
   reloadContexts: () => Promise.resolve().then(() => api().ReloadContexts()),
   addKubeconfig: () => Promise.resolve().then(() => api().AddKubeconfig()),
+  addKubeconfigContent: (content: string) =>
+    Promise.resolve().then(() => api().AddKubeconfigContent(content)),
   removeKubeconfig: (path: string) =>
     Promise.resolve().then(() => api().RemoveKubeconfig(path)),
   probeContext: (contextName: string) =>
@@ -209,6 +217,14 @@ export const backend = {
     Promise.resolve().then(() => api().SetHostAliases(contextName, items)),
   gatewayInstallManifest: () =>
     Promise.resolve().then(() => api().GatewayInstallManifest()),
+  setShareGateway: (shared: boolean) =>
+    Promise.resolve().then(() => api().SetShareGateway(shared)),
+  setGatewayNamespace: (namespace: string) =>
+    Promise.resolve().then(() => api().SetGatewayNamespace(namespace)),
+  getGatewayTransport: (contextName: string) =>
+    Promise.resolve().then(() => api().GetGatewayTransport(contextName)),
+  setGatewayTransport: (contextName: string, config: GatewayTransport) =>
+    Promise.resolve().then(() => api().SetGatewayTransport(contextName, config)),
   startIntercept: (mapping: InterceptMapping) =>
     Promise.resolve().then(() => api().StartIntercept(mapping)),
   startMirror: (mapping: InterceptMapping) =>

@@ -39,8 +39,11 @@ function App() {
     connectContext,
     reloadContexts,
     addKubeconfig,
+    addKubeconfigContent,
     removeKubeconfig,
     probeContext,
+    changeShareGateway,
+    changeGatewayNamespace,
     checkForUpdates,
     openUpdatePage,
   } = useSession();
@@ -115,7 +118,7 @@ function App() {
         <div
           className={cn(
             "min-h-0 flex-1 overflow-y-auto px-6 py-5",
-            view === "overview" && "scrollbar-none",
+            view === "overview" && "scrollbar-none !pb-1",
           )}
         >
           {view === "overview" && (
@@ -130,8 +133,13 @@ function App() {
               busy={busy}
               disconnecting={disconnecting}
               ready={ready}
+              shareGateway={data.shareGateway}
+              gatewayNamespace={data.gatewayNamespace}
+              gatewayNamespaces={activeNamespaces}
               onToggle={() => void toggleConnection()}
               onConnectionModeChange={setConnectionMode}
+              onShareGatewayChange={changeShareGateway}
+              onGatewayNamespaceChange={changeGatewayNamespace}
               onManageClusters={() => setView("clusters")}
               onNavigate={setView}
             />
@@ -149,6 +157,7 @@ function App() {
               onConnect={(value) => void connectContext(value)}
               onReload={reloadContexts}
               onAddFile={addKubeconfig}
+              onAddClipboard={addKubeconfigContent}
               onRemoveFile={removeKubeconfig}
               onProbe={probeContext}
             />

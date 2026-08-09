@@ -276,7 +276,7 @@ export function WorkloadView({
                     <TableCell className="text-muted-foreground">{item.node || "—"}</TableCell>
                     <TableCell className="font-mono text-[12px] text-muted-foreground">
                       {item.ports.length > 0 ? (
-                        <div className="flex flex-col gap-0.5">
+                        <div className="flex flex-col items-start gap-0.5">
                           {item.ports.map((port) => (
                             <CopyableText
                               key={`${port.protocol}-${port.port}-${port.name || ""}`}

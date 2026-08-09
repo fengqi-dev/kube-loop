@@ -16,5 +16,5 @@ LABEL org.opencontainers.image.title="KubeLoop Gateway" \
       org.opencontainers.image.version="${VERSION}"
 COPY --from=build /out/kube-loop-gateway /kube-loop-gateway
 USER 65532:65532
-EXPOSE 1080
+EXPOSE 1080 8080
 ENTRYPOINT ["/kube-loop-gateway"]

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/url"
 	"slices"
 	"strconv"
 	"sync"
@@ -138,9 +139,20 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 	for _, issue := range caps.Issues {
 		m.AppendLog("INFO", issue)
 	}
-	if !caps.GatewayPortForward {
-		state.GatewayManifest = cluster.GatewayInstallManifest(m.gatewayImage)
-		m.fail(ctx, state, "Current account cannot port-forward to the Gateway", errors.New("missing pods/portforward in kubeloop-system"))
+	transport := m.GatewayTransport(request.Context)
+	if transport.Mode == GatewayTransportWebSocket {
+		resourceMode := "Ingress"
+		if parsed, parseErr := url.Parse(transport.URL); parseErr == nil && isLocalGatewayHTTPURL(parsed) {
+			resourceMode = "local port-forward (Ingress skipped)"
+		}
+		m.AppendLog("INFO", fmt.Sprintf(
+			"HTTP Gateway startup: endpoint=%s exposure=%s",
+			gatewayEndpointForLog(transport.URL), resourceMode,
+		))
+	}
+	if transport.Mode != GatewayTransportWebSocket && !caps.GatewayPortForward {
+		state.GatewayManifest = m.GatewayInstallManifestFor(request.Context)
+		m.fail(ctx, state, "Current account cannot port-forward to the Gateway", errors.New("missing Gateway pods/portforward permission"))
 		return
 	}
 
@@ -149,15 +161,29 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 	m.publish(state)
 	var gateway cluster.GatewayInfo
 	if caps.GatewayInstall {
-		gateway, err = m.gateway.EnsureGateway(ctx, request.Context, m.gatewayImage)
+		if transport.Mode == GatewayTransportWebSocket {
+			installer, ok := m.gateway.(HTTPGatewayManager)
+			if !ok {
+				err = errors.New("cluster provider cannot install an HTTP Gateway")
+			} else {
+				gateway, err = installer.EnsureHTTPGateway(
+					ctx, request.Context, m.gatewayImage, transport.Token, transport.URL,
+				)
+			}
+		} else {
+			gateway, err = m.gateway.EnsureGateway(ctx, request.Context, m.gatewayImage)
+		}
 		if err != nil {
+			if transport.Mode == GatewayTransportWebSocket {
+				state.GatewayManifest = m.GatewayInstallManifestFor(request.Context)
+			}
 			m.fail(ctx, state, "Could not install the cluster Gateway", err)
 			return
 		}
 	} else {
 		gateway, err = m.gateway.GetGateway(ctx, request.Context)
 		if err != nil {
-			state.GatewayManifest = cluster.GatewayInstallManifest(m.gatewayImage)
+			state.GatewayManifest = m.GatewayInstallManifestFor(request.Context)
 			m.fail(ctx, state, "No preinstalled Gateway found; ask an admin to install it or grant install permission", err)
 			return
 		}
@@ -165,9 +191,16 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 	if ctx.Err() != nil {
 		return
 	}
-	m.AppendLog("INFO", fmt.Sprintf(
-		"gateway ready: pod=%s ip=%s", gateway.Name, gateway.IP,
-	))
+	if transport.Mode == GatewayTransportWebSocket {
+		m.AppendLog("INFO", fmt.Sprintf(
+			"HTTP Gateway resources ready: pod=%s ip=%s endpoint=%s",
+			gateway.Name, gateway.IP, gatewayEndpointForLog(transport.URL),
+		))
+	} else {
+		m.AppendLog("INFO", fmt.Sprintf(
+			"gateway ready: pod=%s ip=%s", gateway.Name, gateway.IP,
+		))
+	}
 
 	state.Phase = PhaseDiscovering
 	state.Message = "Discovering Pods, Services, and cluster DNS"
@@ -217,14 +250,15 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 		m.AppendLog("WARN", issue.Message)
 	}
 
-	forwarder, err := m.gateway.StartPortForward(
-		ctx, request.Context, gateway.Name, cluster.GatewayPort,
-	)
+	forwarder, channelName, err := m.startGatewayForwarder(ctx, request.Context, gateway)
 	if err != nil {
+		if transport.Mode == GatewayTransportWebSocket {
+			state.GatewayManifest = m.GatewayInstallManifestFor(request.Context)
+		}
 		m.fail(ctx, state, "Could not establish a secure Gateway channel", err)
 		return
 	}
-	runtime.Add("Gateway port-forward", forwarder)
+	runtime.Add(channelName, forwarder)
 	m.AppendLog("INFO", "gateway channel established at "+forwarder.Address())
 	if ctx.Err() != nil {
 		return

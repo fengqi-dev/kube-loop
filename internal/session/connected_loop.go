@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/fengqi-dev/kube-loop/internal/cluster"
 	"github.com/fengqi-dev/kube-loop/internal/singbox"
 )
 
@@ -156,9 +155,7 @@ func (m *Manager) replaceGatewayPortForward(
 	if err != nil {
 		return fmt.Errorf("find replacement Gateway: %w", err)
 	}
-	forwarder, err := m.gateway.StartPortForward(
-		ctx, contextName, gateway.Name, cluster.GatewayPort,
-	)
+	forwarder, channelName, err := m.startGatewayForwarder(ctx, contextName, gateway)
 	if err != nil {
 		return fmt.Errorf("replace Gateway port-forward: %w", err)
 	}
@@ -174,7 +171,7 @@ func (m *Manager) replaceGatewayPortForward(
 		return errors.New("SOCKS bridge cannot replace its Gateway address")
 	}
 	updater.SetGatewayAddress(forwarder.Address())
-	runtime.Add("replacement Gateway port-forward", forwarder)
+	runtime.Add("replacement "+channelName, forwarder)
 	return nil
 }
 

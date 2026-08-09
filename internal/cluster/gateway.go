@@ -12,6 +12,7 @@ const (
 	GatewayNamespace = clustergateway.Namespace
 	GatewayName      = clustergateway.Name
 	GatewayPort      = clustergateway.Port
+	GatewayHTTPPort  = clustergateway.HTTPPort
 )
 
 // GatewayInfo identifies the running in-cluster Gateway Pod.
@@ -27,7 +28,21 @@ func (p *Provider) EnsureGateway(ctx context.Context, contextName, image string)
 	if err != nil {
 		return GatewayInfo{}, err
 	}
-	return clustergateway.Ensure(ctx, client, image)
+	return clustergateway.EnsureResource(
+		ctx, client, image, p.GatewayNamespace(), p.GatewayName(),
+	)
+}
+
+func (p *Provider) EnsureHTTPGateway(
+	ctx context.Context, contextName, image, token, endpoint string,
+) (GatewayInfo, error) {
+	client, err := p.client(contextName)
+	if err != nil {
+		return GatewayInfo{}, err
+	}
+	return clustergateway.EnsureHTTPResource(
+		ctx, client, image, p.GatewayNamespace(), p.GatewayName(), token, endpoint,
+	)
 }
 
 // GetGateway finds an already-running Gateway Pod without installing resources.
@@ -36,7 +51,7 @@ func (p *Provider) GetGateway(ctx context.Context, contextName string) (GatewayI
 	if err != nil {
 		return GatewayInfo{}, err
 	}
-	return clustergateway.Find(ctx, client)
+	return clustergateway.FindResource(ctx, client, p.GatewayNamespace(), p.GatewayName())
 }
 
 // GatewayInstallManifest returns a YAML snippet admins can apply when the user
@@ -45,11 +60,25 @@ func GatewayInstallManifest(image string) string {
 	return clustergateway.InstallManifest(image)
 }
 
+func GatewayInstallManifestNamed(image, name string) string {
+	return clustergateway.InstallManifestNamed(image, name)
+}
+
+func GatewayInstallManifestResource(image, namespace, name string) string {
+	return clustergateway.InstallManifestResource(image, namespace, name)
+}
+
+func GatewayHTTPInstallManifestResource(image, namespace, name, token, endpoint string) string {
+	return clustergateway.HTTPIngressManifestResource(image, namespace, name, token, endpoint)
+}
+
 // StartPortForward opens an API Server port-forward to a Gateway Pod.
 func (p *Provider) StartPortForward(
 	ctx context.Context, contextName, podName string, remotePort uint16,
 ) (PortForward, error) {
-	return p.StartPodPortForward(ctx, contextName, GatewayNamespace, podName, 0, remotePort)
+	return p.StartPodPortForward(
+		ctx, contextName, p.GatewayNamespace(), podName, 0, remotePort,
+	)
 }
 
 // StartPodPortForward forwards 127.0.0.1:localPort to podName:remotePort.
