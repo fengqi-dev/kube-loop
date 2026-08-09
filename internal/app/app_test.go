@@ -43,6 +43,8 @@ func TestGatewayResourceUsesConfiguredNamespace(t *testing.T) {
 
 func TestAddKubeconfigContentStoresAndRemovesManagedFile(t *testing.T) {
 	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("KUBECONFIG", filepath.Join(dir, "missing.yaml"))
 	stateStore, err := store.Open(filepath.Join(dir, "state.json"))
 	if err != nil {
 		t.Fatal(err)

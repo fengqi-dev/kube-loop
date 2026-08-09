@@ -221,7 +221,7 @@ func ValidateKubeconfigContent(raw []byte) error {
 func (p *Provider) Contexts() ([]ContextInfo, error) {
 	paths := p.loadingPaths()
 	if len(paths) == 0 {
-		return nil, fmt.Errorf("no kubeconfig files found")
+		return []ContextInfo{}, nil
 	}
 
 	byName := make(map[string]ContextInfo)
@@ -252,7 +252,7 @@ func (p *Provider) Contexts() ([]ContextInfo, error) {
 		if lastErr != nil {
 			return nil, fmt.Errorf("load kubeconfig: %w", lastErr)
 		}
-		return nil, fmt.Errorf("load kubeconfig: no readable files")
+		return []ContextInfo{}, nil
 	}
 
 	items := make([]ContextInfo, 0, len(byName))

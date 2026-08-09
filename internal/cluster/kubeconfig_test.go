@@ -172,6 +172,29 @@ clusters:
 	}
 }
 
+func TestContextsWithoutReadableFilesReturnsEmpty(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("KUBECONFIG", filepath.Join(dir, "missing.yaml"))
+
+	items, err := NewProvider().Contexts()
+	if err != nil {
+		t.Fatalf("Contexts: %v", err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("Contexts = %+v, want empty", items)
+	}
+}
+
+func TestContextsStillReportsInvalidKubeconfig(t *testing.T) {
+	dir := t.TempDir()
+	invalid := writeKubeconfig(t, dir, "invalid.yaml", "not: [valid")
+	t.Setenv("KUBECONFIG", invalid)
+
+	if _, err := NewProvider().Contexts(); err == nil {
+		t.Fatal("expected invalid kubeconfig error")
+	}
+}
+
 func TestProbeSuccessAndTimeout(t *testing.T) {
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/version" {
