@@ -13,10 +13,6 @@ export interface GatewayTransport {
   mode: "port-forward" | "websocket";
   url?: string;
   token?: string;
-  exposure?: "ingress" | "gateway-api";
-  gatewayNamespace?: string;
-  gatewayName?: string;
-  gatewaySection?: string;
   insecureSkipVerify?: boolean;
   poolSize?: number;
   maxPhysical?: number;

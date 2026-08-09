@@ -59,10 +59,6 @@ type GatewayTransport struct {
 	Mode               string `json:"mode,omitempty"`
 	URL                string `json:"url,omitempty"`
 	Token              string `json:"token,omitempty"`
-	Exposure           string `json:"exposure,omitempty"`
-	GatewayNamespace   string `json:"gatewayNamespace,omitempty"`
-	GatewayName        string `json:"gatewayName,omitempty"`
-	GatewaySection     string `json:"gatewaySection,omitempty"`
 	InsecureSkipVerify bool   `json:"insecureSkipVerify,omitzero"`
 	PoolSize           int    `json:"poolSize,omitempty"`
 	MaxPhysical        int    `json:"maxPhysical,omitempty"`

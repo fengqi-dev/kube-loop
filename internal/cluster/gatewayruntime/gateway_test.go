@@ -8,11 +8,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime"
-	dynamicfake "k8s.io/client-go/dynamic/fake"
 	"k8s.io/client-go/kubernetes/fake"
 )
 
@@ -363,69 +359,6 @@ func TestEnsureHTTPResourceCreatesHostlessIngressForIPAddress(t *testing.T) {
 	}
 }
 
-func TestEnsureHTTPResourceCreatesGatewayAPIHTTPRoute(t *testing.T) {
-	const image = "example/gateway:http"
-	client := fake.NewSimpleClientset(
-		&networkingv1.Ingress{ObjectMeta: metav1.ObjectMeta{
-			Name: Name + "-http", Namespace: Namespace, Labels: labels(Name),
-		}},
-		&corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "gateway-pod", Namespace: Namespace,
-				Labels: map[string]string{"app.kubernetes.io/name": Name},
-			},
-			Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "gateway", Image: image}}},
-			Status: corev1.PodStatus{
-				Phase: corev1.PodRunning, PodIP: "10.0.0.8",
-				Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}},
-			},
-		},
-	)
-	gateway := &unstructured.Unstructured{Object: map[string]any{
-		"apiVersion": "gateway.networking.k8s.io/v1",
-		"kind":       "Gateway",
-		"metadata":   map[string]any{"name": "shared", "namespace": "gateway-system"},
-	}}
-	dynamicClient := dynamicfake.NewSimpleDynamicClient(runtime.NewScheme())
-	if _, err := dynamicClient.Resource(gatewayGVR).Namespace("gateway-system").Create(
-		context.Background(), gateway, metav1.CreateOptions{},
-	); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := EnsureHTTPResourceWithExposure(
-		context.Background(), client, dynamicClient, image, Namespace, Name, "shared-token",
-		"wss://gateway.example.com/v1/tunnel", HTTPExposure{
-			Mode: HTTPExposureGatewayAPI, GatewayNamespace: "gateway-system",
-			GatewayName: "shared", GatewaySection: "https",
-		},
-	); err != nil {
-		t.Fatal(err)
-	}
-	route, err := dynamicClient.Resource(httpRouteGVR).Namespace(Namespace).Get(
-		context.Background(), Name+"-http", metav1.GetOptions{},
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	hostnames, found, err := unstructured.NestedStringSlice(route.Object, "spec", "hostnames")
-	if err != nil || !found || len(hostnames) != 1 || hostnames[0] != "gateway.example.com" {
-		t.Fatalf("HTTPRoute hostnames = %v, found=%t, err=%v", hostnames, found, err)
-	}
-	parentRefs, found, err := unstructured.NestedSlice(route.Object, "spec", "parentRefs")
-	if err != nil || !found || len(parentRefs) != 1 {
-		t.Fatalf("HTTPRoute parentRefs = %v, found=%t, err=%v", parentRefs, found, err)
-	}
-	parent := parentRefs[0].(map[string]any)
-	if parent["name"] != "shared" || parent["namespace"] != "gateway-system" || parent["sectionName"] != "https" {
-		t.Fatalf("HTTPRoute parentRef = %#v", parent)
-	}
-	if _, err := client.NetworkingV1().Ingresses(Namespace).Get(
-		context.Background(), Name+"-http", metav1.GetOptions{},
-	); !apierrors.IsNotFound(err) {
-		t.Fatalf("Ingress should not coexist with HTTPRoute: %v", err)
-	}
-}
-
 func TestEnsureHTTPResourceSkipsIngressForLoopback(t *testing.T) {
 	const image = "example/gateway:http"
 	client := fake.NewSimpleClientset(&corev1.Pod{
@@ -480,27 +413,5 @@ func TestHTTPIngressManifestUsesHostlessRuleForIPAddress(t *testing.T) {
 	)
 	if !strings.Contains(manifest, "kind: Ingress") || strings.Contains(manifest, "host: 192.168.66.5") {
 		t.Fatalf("IP endpoint manifest must use a hostless Ingress:\n%s", manifest)
-	}
-}
-
-func TestHTTPGatewayAPIManifestIncludesHTTPRouteReference(t *testing.T) {
-	manifest := HTTPExposureManifestResource(
-		"example/gateway:v1", Namespace, Name, "safe-token",
-		"wss://gateway.example.com/v1/tunnel", HTTPExposure{
-			Mode: HTTPExposureGatewayAPI, GatewayNamespace: "gateway-system",
-			GatewayName: "shared", GatewaySection: "https",
-		},
-	)
-	for _, expected := range []string{
-		"apiVersion: gateway.networking.k8s.io/v1", "kind: HTTPRoute",
-		"name: shared", "namespace: gateway-system", "sectionName: https",
-		"hostnames:\n    - gateway.example.com", "port: 8080",
-	} {
-		if !strings.Contains(manifest, expected) {
-			t.Fatalf("Gateway API manifest missing %q:\n%s", expected, manifest)
-		}
-	}
-	if strings.Contains(manifest, "kind: Ingress") {
-		t.Fatalf("Gateway API manifest must not include an Ingress:\n%s", manifest)
 	}
 }

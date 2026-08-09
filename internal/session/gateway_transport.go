@@ -48,15 +48,6 @@ func (m *Manager) SetGatewayTransport(contextName string, config store.GatewayTr
 		if strings.TrimSpace(config.Token) == "" {
 			return fmt.Errorf("Gateway bearer token is required")
 		}
-		if config.Exposure == "" {
-			config.Exposure = "ingress"
-		}
-		if config.Exposure != "ingress" && config.Exposure != "gateway-api" {
-			return fmt.Errorf("Gateway exposure must be ingress or gateway-api")
-		}
-		if config.Exposure == "gateway-api" && strings.TrimSpace(config.GatewayName) == "" {
-			return fmt.Errorf("Gateway API Gateway name is required")
-		}
 	}
 	return m.store.SetGatewayTransport(contextName, config)
 }

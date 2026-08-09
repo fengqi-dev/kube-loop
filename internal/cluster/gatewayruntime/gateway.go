@@ -18,10 +18,7 @@ import (
 	networkingv1 "k8s.io/api/networking/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/intstr"
-	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 )
 
@@ -38,23 +35,6 @@ const (
 
 const defaultImage = "ghcr.io/fengqi-dev/kube-loop/gateway:latest"
 
-const (
-	HTTPExposureIngress    = "ingress"
-	HTTPExposureGatewayAPI = "gateway-api"
-)
-
-var (
-	gatewayGVR   = schema.GroupVersionResource{Group: "gateway.networking.k8s.io", Version: "v1", Resource: "gateways"}
-	httpRouteGVR = schema.GroupVersionResource{Group: "gateway.networking.k8s.io", Version: "v1", Resource: "httproutes"}
-)
-
-type HTTPExposure struct {
-	Mode             string
-	GatewayNamespace string
-	GatewayName      string
-	GatewaySection   string
-}
-
 func labels(name string) map[string]string {
 	return map[string]string{
 		"app.kubernetes.io/name":       name,
@@ -64,24 +44,11 @@ func labels(name string) map[string]string {
 }
 
 // EnsureHTTPResource enables the authenticated WebSocket listener and creates
-// the stable ClusterIP Service targeted by the configured cluster exposure.
+// the stable ClusterIP Service that an Ingress should target.
 func EnsureHTTPResource(
 	ctx context.Context,
 	client kubernetes.Interface,
 	image, namespace, name, token, endpoint string,
-) (Info, error) {
-	return EnsureHTTPResourceWithExposure(
-		ctx, client, nil, image, namespace, name, token, endpoint,
-		HTTPExposure{Mode: HTTPExposureIngress},
-	)
-}
-
-func EnsureHTTPResourceWithExposure(
-	ctx context.Context,
-	client kubernetes.Interface,
-	dynamicClient dynamic.Interface,
-	image, namespace, name, token, endpoint string,
-	exposure HTTPExposure,
 ) (Info, error) {
 	if strings.TrimSpace(token) == "" {
 		return Info{}, errors.New("Gateway HTTP token is required")
@@ -101,33 +68,10 @@ func EnsureHTTPResourceWithExposure(
 	if err := ensureHTTPService(ctx, client, namespace, name); err != nil {
 		return Info{}, err
 	}
-	switch exposureMode(exposure) {
-	case HTTPExposureGatewayAPI:
-		if err := ensureHTTPRoute(ctx, dynamicClient, namespace, name, endpoint, exposure); err != nil {
-			return Info{}, err
-		}
-		if err := deleteManagedIngress(ctx, client, namespace, name); err != nil {
-			return Info{}, err
-		}
-	case HTTPExposureIngress:
-		if err := ensureHTTPIngress(ctx, client, namespace, name, endpoint); err != nil {
-			return Info{}, err
-		}
-		if err := deleteManagedHTTPRoute(ctx, dynamicClient, namespace, name); err != nil {
-			return Info{}, err
-		}
-	default:
-		return Info{}, fmt.Errorf("unsupported Gateway HTTP exposure %q", exposure.Mode)
+	if err := ensureHTTPIngress(ctx, client, namespace, name, endpoint); err != nil {
+		return Info{}, err
 	}
 	return waitForPod(ctx, client, image, namespace, name)
-}
-
-func exposureMode(exposure HTTPExposure) string {
-	mode := strings.TrimSpace(exposure.Mode)
-	if mode == "" {
-		return HTTPExposureIngress
-	}
-	return mode
 }
 
 // Info identifies a running gateway Pod.
@@ -319,14 +263,6 @@ spec:
 }
 
 func HTTPIngressManifestResource(image, namespace, name, token, endpoint string) string {
-	return HTTPExposureManifestResource(
-		image, namespace, name, token, endpoint, HTTPExposure{Mode: HTTPExposureIngress},
-	)
-}
-
-func HTTPExposureManifestResource(
-	image, namespace, name, token, endpoint string, exposure HTTPExposure,
-) string {
 	manifest := HTTPInstallManifestResource(image, namespace, name, token)
 	parsed, err := url.Parse(endpoint)
 	if err != nil || parsed.Hostname() == "" || isLoopbackHost(parsed.Hostname()) {
@@ -335,47 +271,6 @@ func HTTPExposureManifestResource(
 	path := parsed.EscapedPath()
 	if path == "" {
 		path = "/v1/tunnel"
-	}
-	if exposureMode(exposure) == HTTPExposureGatewayAPI {
-		gatewayNamespace := strings.TrimSpace(exposure.GatewayNamespace)
-		if gatewayNamespace == "" {
-			gatewayNamespace = namespace
-		}
-		parentNamespace := ""
-		if gatewayNamespace != namespace {
-			parentNamespace = "\n        namespace: " + gatewayNamespace
-		}
-		sectionName := ""
-		if strings.TrimSpace(exposure.GatewaySection) != "" {
-			sectionName = "\n        sectionName: " + strings.TrimSpace(exposure.GatewaySection)
-		}
-		hostnames := ""
-		if net.ParseIP(parsed.Hostname()) == nil {
-			hostnames = "  hostnames:\n    - " + parsed.Hostname() + "\n"
-		}
-		return fmt.Sprintf(`%s---
-apiVersion: gateway.networking.k8s.io/v1
-kind: HTTPRoute
-metadata:
-  name: %s-http
-  namespace: %s
-  labels:
-    app.kubernetes.io/name: %s
-    app.kubernetes.io/part-of: kubeloop
-    app.kubernetes.io/managed-by: kubeloop
-spec:
-  parentRefs:
-    - name: %s%s%s
-%s  rules:
-    - matches:
-        - path:
-            type: PathPrefix
-            value: %s
-      backendRefs:
-        - name: %s-http
-          port: %d
-`, manifest, name, namespace, name, strings.TrimSpace(exposure.GatewayName),
-			parentNamespace, sectionName, hostnames, path, name, HTTPPort)
 	}
 	rule := "    - http:\n"
 	if net.ParseIP(parsed.Hostname()) == nil {
@@ -603,141 +498,6 @@ func ensureHTTPIngress(
 	}
 	if err != nil {
 		return fmt.Errorf("apply Gateway HTTP Ingress: %w", err)
-	}
-	return nil
-}
-
-func ensureHTTPRoute(
-	ctx context.Context,
-	client dynamic.Interface,
-	namespace, name, endpoint string,
-	exposure HTTPExposure,
-) error {
-	if client == nil {
-		return errors.New("Gateway API client is unavailable")
-	}
-	parsed, err := url.Parse(strings.TrimSpace(endpoint))
-	if err != nil || (parsed.Scheme != "ws" && parsed.Scheme != "wss") || parsed.Hostname() == "" {
-		return errors.New("Gateway WebSocket endpoint must be an absolute ws:// or wss:// URL")
-	}
-	if isLoopbackHost(parsed.Hostname()) {
-		return nil
-	}
-	gatewayName := strings.TrimSpace(exposure.GatewayName)
-	if gatewayName == "" {
-		return errors.New("Gateway API Gateway name is required")
-	}
-	gatewayNamespace := strings.TrimSpace(exposure.GatewayNamespace)
-	if gatewayNamespace == "" {
-		gatewayNamespace = namespace
-	}
-	if _, err := client.Resource(gatewayGVR).Namespace(gatewayNamespace).Get(
-		ctx, gatewayName, metav1.GetOptions{},
-	); err != nil {
-		return fmt.Errorf("get Gateway API Gateway %s/%s: %w", gatewayNamespace, gatewayName, err)
-	}
-
-	path := parsed.Path
-	if path == "" {
-		path = "/v1/tunnel"
-	}
-	parentRef := map[string]any{"name": gatewayName}
-	if gatewayNamespace != namespace {
-		parentRef["namespace"] = gatewayNamespace
-	}
-	if section := strings.TrimSpace(exposure.GatewaySection); section != "" {
-		parentRef["sectionName"] = section
-	}
-	spec := map[string]any{
-		"parentRefs": []any{parentRef},
-		"rules": []any{map[string]any{
-			"matches": []any{map[string]any{
-				"path": map[string]any{"type": "PathPrefix", "value": path},
-			}},
-			"backendRefs": []any{map[string]any{
-				"name": name + "-http", "port": int64(HTTPPort),
-			}},
-		}},
-	}
-	if net.ParseIP(parsed.Hostname()) == nil {
-		spec["hostnames"] = []any{parsed.Hostname()}
-	}
-	expected := &unstructured.Unstructured{Object: map[string]any{
-		"apiVersion": "gateway.networking.k8s.io/v1",
-		"kind":       "HTTPRoute",
-		"metadata": map[string]any{
-			"name": name + "-http", "namespace": namespace,
-			"labels": stringMapAny(labels(name)),
-		},
-		"spec": spec,
-	}}
-	routes := client.Resource(httpRouteGVR).Namespace(namespace)
-	existing, err := routes.Get(ctx, expected.GetName(), metav1.GetOptions{})
-	switch {
-	case apierrors.IsNotFound(err):
-		_, err = routes.Create(ctx, expected, metav1.CreateOptions{})
-	case err != nil:
-		return fmt.Errorf("get Gateway HTTPRoute: %w", err)
-	default:
-		if existing.GetLabels()["app.kubernetes.io/managed-by"] != "kubeloop" {
-			return errors.New("Gateway HTTPRoute exists but is not managed by kube-loop")
-		}
-		expected.SetResourceVersion(existing.GetResourceVersion())
-		_, err = routes.Update(ctx, expected, metav1.UpdateOptions{})
-	}
-	if err != nil {
-		return fmt.Errorf("apply Gateway HTTPRoute: %w", err)
-	}
-	return nil
-}
-
-func stringMapAny(values map[string]string) map[string]any {
-	out := make(map[string]any, len(values))
-	for key, value := range values {
-		out[key] = value
-	}
-	return out
-}
-
-func deleteManagedIngress(
-	ctx context.Context, client kubernetes.Interface, namespace, name string,
-) error {
-	ingresses := client.NetworkingV1().Ingresses(namespace)
-	existing, err := ingresses.Get(ctx, name+"-http", metav1.GetOptions{})
-	if apierrors.IsNotFound(err) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("get previous Gateway HTTP Ingress: %w", err)
-	}
-	if existing.Labels["app.kubernetes.io/managed-by"] != "kubeloop" {
-		return nil
-	}
-	if err := ingresses.Delete(ctx, existing.Name, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
-		return fmt.Errorf("delete previous Gateway HTTP Ingress: %w", err)
-	}
-	return nil
-}
-
-func deleteManagedHTTPRoute(
-	ctx context.Context, client dynamic.Interface, namespace, name string,
-) error {
-	if client == nil {
-		return nil
-	}
-	routes := client.Resource(httpRouteGVR).Namespace(namespace)
-	existing, err := routes.Get(ctx, name+"-http", metav1.GetOptions{})
-	if apierrors.IsNotFound(err) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("get previous Gateway HTTPRoute: %w", err)
-	}
-	if existing.GetLabels()["app.kubernetes.io/managed-by"] != "kubeloop" {
-		return nil
-	}
-	if err := routes.Delete(ctx, existing.GetName(), metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
-		return fmt.Errorf("delete previous Gateway HTTPRoute: %w", err)
 	}
 	return nil
 }

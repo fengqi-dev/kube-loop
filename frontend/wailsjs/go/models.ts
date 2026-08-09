@@ -1125,10 +1125,6 @@ export namespace store {
 	    mode?: string;
 	    url?: string;
 	    token?: string;
-	    exposure?: string;
-	    gatewayNamespace?: string;
-	    gatewayName?: string;
-	    gatewaySection?: string;
 	    insecureSkipVerify: boolean;
 	    poolSize?: number;
 	    maxPhysical?: number;
@@ -1143,10 +1139,6 @@ export namespace store {
 	        this.mode = source["mode"];
 	        this.url = source["url"];
 	        this.token = source["token"];
-	        this.exposure = source["exposure"];
-	        this.gatewayNamespace = source["gatewayNamespace"];
-	        this.gatewayName = source["gatewayName"];
-	        this.gatewaySection = source["gatewaySection"];
 	        this.insecureSkipVerify = source["insecureSkipVerify"];
 	        this.poolSize = source["poolSize"];
 	        this.maxPhysical = source["maxPhysical"];
@@ -1185,6 +1177,7 @@ export namespace store {
 	        this.mirrors = source["mirrors"];
 	    }
 	}
+
 }
 export namespace update {
 	

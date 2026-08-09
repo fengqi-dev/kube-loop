@@ -132,7 +132,7 @@ type GatewayManager interface {
 }
 
 type HTTPGatewayManager interface {
-	EnsureHTTPGateway(context.Context, string, string, cluster.HTTPGatewayConfig) (cluster.GatewayInfo, error)
+	EnsureHTTPGateway(context.Context, string, string, string, string) (cluster.GatewayInfo, error)
 }
 
 // ClusterProvider is the composition-root contract implemented by

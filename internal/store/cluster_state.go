@@ -67,10 +67,6 @@ func (s *Store) SetGatewayTransport(contextName string, config GatewayTransport)
 	config.Mode = strings.TrimSpace(config.Mode)
 	config.URL = strings.TrimSpace(config.URL)
 	config.Token = strings.TrimSpace(config.Token)
-	config.Exposure = strings.TrimSpace(config.Exposure)
-	config.GatewayNamespace = strings.TrimSpace(config.GatewayNamespace)
-	config.GatewayName = strings.TrimSpace(config.GatewayName)
-	config.GatewaySection = strings.TrimSpace(config.GatewaySection)
 	if config.Mode == "" {
 		config.Mode = "port-forward"
 	}
@@ -79,15 +75,6 @@ func (s *Store) SetGatewayTransport(contextName string, config GatewayTransport)
 	}
 	if config.Mode == "websocket" && (config.URL == "" || config.Token == "") {
 		return fmt.Errorf("WebSocket Gateway URL and token are required")
-	}
-	if config.Exposure == "" {
-		config.Exposure = "ingress"
-	}
-	if config.Exposure != "ingress" && config.Exposure != "gateway-api" {
-		return fmt.Errorf("invalid Gateway exposure %q", config.Exposure)
-	}
-	if config.Mode == "websocket" && config.Exposure == "gateway-api" && config.GatewayName == "" {
-		return fmt.Errorf("Gateway API Gateway name is required")
 	}
 	if config.PoolSize < 0 || config.MaxPhysical < 0 || config.MaxStreams < 0 {
 		return fmt.Errorf("Gateway multiplexing limits cannot be negative")

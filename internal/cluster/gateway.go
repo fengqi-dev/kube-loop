@@ -6,7 +6,6 @@ import (
 
 	clustergateway "github.com/fengqi-dev/kube-loop/internal/cluster/gatewayruntime"
 	"github.com/fengqi-dev/kube-loop/internal/cluster/kubeportforward"
-	"k8s.io/client-go/dynamic"
 )
 
 const (
@@ -18,15 +17,6 @@ const (
 
 // GatewayInfo identifies the running in-cluster Gateway Pod.
 type GatewayInfo = clustergateway.Info
-
-type HTTPGatewayConfig struct {
-	Token            string
-	Endpoint         string
-	Exposure         string
-	GatewayNamespace string
-	GatewayName      string
-	GatewaySection   string
-}
 
 type PortForward interface {
 	Address() string
@@ -44,26 +34,14 @@ func (p *Provider) EnsureGateway(ctx context.Context, contextName, image string)
 }
 
 func (p *Provider) EnsureHTTPGateway(
-	ctx context.Context, contextName, image string, config HTTPGatewayConfig,
+	ctx context.Context, contextName, image, token, endpoint string,
 ) (GatewayInfo, error) {
 	client, err := p.client(contextName)
 	if err != nil {
 		return GatewayInfo{}, err
 	}
-	restConfig, err := p.RESTConfig(contextName)
-	if err != nil {
-		return GatewayInfo{}, err
-	}
-	dynamicClient, err := dynamic.NewForConfig(restConfig)
-	if err != nil {
-		return GatewayInfo{}, err
-	}
-	return clustergateway.EnsureHTTPResourceWithExposure(
-		ctx, client, dynamicClient, image, p.GatewayNamespace(), p.GatewayName(),
-		config.Token, config.Endpoint, clustergateway.HTTPExposure{
-			Mode: config.Exposure, GatewayNamespace: config.GatewayNamespace,
-			GatewayName: config.GatewayName, GatewaySection: config.GatewaySection,
-		},
+	return clustergateway.EnsureHTTPResource(
+		ctx, client, image, p.GatewayNamespace(), p.GatewayName(), token, endpoint,
 	)
 }
 
@@ -90,16 +68,8 @@ func GatewayInstallManifestResource(image, namespace, name string) string {
 	return clustergateway.InstallManifestResource(image, namespace, name)
 }
 
-func GatewayHTTPInstallManifestResource(
-	image, namespace, name string, config HTTPGatewayConfig,
-) string {
-	return clustergateway.HTTPExposureManifestResource(
-		image, namespace, name, config.Token, config.Endpoint,
-		clustergateway.HTTPExposure{
-			Mode: config.Exposure, GatewayNamespace: config.GatewayNamespace,
-			GatewayName: config.GatewayName, GatewaySection: config.GatewaySection,
-		},
-	)
+func GatewayHTTPInstallManifestResource(image, namespace, name, token, endpoint string) string {
+	return clustergateway.HTTPIngressManifestResource(image, namespace, name, token, endpoint)
 }
 
 // StartPortForward opens an API Server port-forward to a Gateway Pod.

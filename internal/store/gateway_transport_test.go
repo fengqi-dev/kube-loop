@@ -16,8 +16,6 @@ func TestGatewayTransportDefaultsAndRoundTrips(t *testing.T) {
 	}
 	want := GatewayTransport{
 		Mode: "websocket", URL: "wss://gateway.example.com/v1/tunnel", Token: "secret",
-		Exposure: "gateway-api", GatewayNamespace: "gateway-system",
-		GatewayName: "shared", GatewaySection: "https",
 		PoolSize: 2, MaxPhysical: 4, MaxStreams: 128,
 	}
 	if err := stateStore.SetGatewayTransport("minikube", want); err != nil {

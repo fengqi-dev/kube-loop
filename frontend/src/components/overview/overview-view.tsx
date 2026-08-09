@@ -626,80 +626,6 @@ function GatewayTransportSetting({
                 }
               />
             </label>
-            <label className="grid gap-1.5 text-xs">
-              <span className="text-muted-foreground">
-                {t("overview.gatewayExposure")}
-              </span>
-              <Select
-                value={draft.exposure ?? "ingress"}
-                disabled={disabled}
-                onValueChange={(exposure: "ingress" | "gateway-api") =>
-                  setDraft((current) => ({ ...current, exposure }))
-                }
-              >
-                <SelectTrigger className="w-full bg-background">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="ingress">{t("overview.gatewayIngress")}</SelectItem>
-                  <SelectItem value="gateway-api">
-                    {t("overview.gatewayAPI")}
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </label>
-            {(draft.exposure ?? "ingress") === "gateway-api" ? (
-              <div className="grid gap-2 sm:grid-cols-2">
-                <label className="grid gap-1.5 text-xs">
-                  <span className="text-muted-foreground">
-                    {t("overview.gatewayAPINamespace")}
-                  </span>
-                  <Input
-                    value={draft.gatewayNamespace ?? ""}
-                    placeholder="default"
-                    disabled={disabled}
-                    onChange={(event) =>
-                      setDraft((current) => ({
-                        ...current,
-                        gatewayNamespace: event.target.value,
-                      }))
-                    }
-                  />
-                </label>
-                <label className="grid gap-1.5 text-xs">
-                  <span className="text-muted-foreground">
-                    {t("overview.gatewayAPIName")}
-                  </span>
-                  <Input
-                    value={draft.gatewayName ?? ""}
-                    placeholder="gateway"
-                    disabled={disabled}
-                    onChange={(event) =>
-                      setDraft((current) => ({ ...current, gatewayName: event.target.value }))
-                    }
-                  />
-                </label>
-                <label className="grid gap-1.5 text-xs sm:col-span-2">
-                  <span className="text-muted-foreground">
-                    {t("overview.gatewayAPISection")}
-                  </span>
-                  <Input
-                    value={draft.gatewaySection ?? ""}
-                    placeholder="https"
-                    disabled={disabled}
-                    onChange={(event) =>
-                      setDraft((current) => ({
-                        ...current,
-                        gatewaySection: event.target.value,
-                      }))
-                    }
-                  />
-                </label>
-                <p className="text-[11px] leading-relaxed text-muted-foreground sm:col-span-2">
-                  {t("overview.gatewayAPIHint")}
-                </p>
-              </div>
-            ) : null}
             <div className="grid gap-1.5 text-xs">
               <span className="text-muted-foreground">{t("overview.gatewayToken")}</span>
               <div className="relative">
@@ -800,7 +726,6 @@ function defaultWebSocketTransport(): GatewayTransport {
     mode: "websocket",
     url: "ws://127.0.0.1:8080/v1/tunnel",
     token: generateGatewayToken(),
-    exposure: "ingress",
     poolSize: 2,
     maxPhysical: 4,
     maxStreams: 128,

@@ -234,11 +234,7 @@ func (m *Manager) GatewayInstallManifestFor(contextName string) string {
 	transport := m.GatewayTransport(contextName)
 	if transport.Mode == GatewayTransportWebSocket {
 		return cluster.GatewayHTTPInstallManifestResource(
-			m.gatewayImage, namespace, name, cluster.HTTPGatewayConfig{
-				Token: transport.Token, Endpoint: transport.URL, Exposure: transport.Exposure,
-				GatewayNamespace: transport.GatewayNamespace, GatewayName: transport.GatewayName,
-				GatewaySection: transport.GatewaySection,
-			},
+			m.gatewayImage, namespace, name, transport.Token, transport.URL,
 		)
 	}
 	return cluster.GatewayInstallManifestResource(m.gatewayImage, namespace, name)

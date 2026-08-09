@@ -44,9 +44,8 @@ func TestHTTPGatewayMultiplexesClusterTCPStreams(t *testing.T) {
 		installEndpoint = "ws://127.0.0.1:8080/v1/tunnel"
 	}
 	gateway, err := provider.EnsureHTTPGateway(
-		ctx, harness.KubeContext(), harness.GatewayImage(), cluster.HTTPGatewayConfig{
-			Token: testGatewayToken, Endpoint: installEndpoint, Exposure: "ingress",
-		},
+		ctx, harness.KubeContext(), harness.GatewayImage(), testGatewayToken,
+		installEndpoint,
 	)
 	if err != nil {
 		t.Fatalf("ensure HTTP gateway: %v", err)

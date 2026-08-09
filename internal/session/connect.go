@@ -141,12 +141,9 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 	}
 	transport := m.GatewayTransport(request.Context)
 	if transport.Mode == GatewayTransportWebSocket {
-		resourceMode := transport.Exposure
-		if resourceMode == "" {
-			resourceMode = "ingress"
-		}
+		resourceMode := "Ingress"
 		if parsed, parseErr := url.Parse(transport.URL); parseErr == nil && isLocalGatewayHTTPURL(parsed) {
-			resourceMode = "local port-forward (cluster exposure skipped)"
+			resourceMode = "local port-forward (Ingress skipped)"
 		}
 		m.AppendLog("INFO", fmt.Sprintf(
 			"HTTP Gateway startup: endpoint=%s exposure=%s",
@@ -169,12 +166,8 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 			if !ok {
 				err = errors.New("cluster provider cannot install an HTTP Gateway")
 			} else {
-				gateway, err = installer.EnsureHTTPGateway(ctx, request.Context, m.gatewayImage,
-					cluster.HTTPGatewayConfig{
-						Token: transport.Token, Endpoint: transport.URL, Exposure: transport.Exposure,
-						GatewayNamespace: transport.GatewayNamespace, GatewayName: transport.GatewayName,
-						GatewaySection: transport.GatewaySection,
-					},
+				gateway, err = installer.EnsureHTTPGateway(
+					ctx, request.Context, m.gatewayImage, transport.Token, transport.URL,
 				)
 			}
 		} else {
