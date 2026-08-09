@@ -9,6 +9,16 @@ export type Phase =
 
 export type ConnectionMode = "tun" | "socks";
 
+export interface GatewayTransport {
+  mode: "port-forward" | "websocket";
+  url?: string;
+  token?: string;
+  insecureSkipVerify?: boolean;
+  poolSize?: number;
+  maxPhysical?: number;
+  maxStreams?: number;
+}
+
 export interface ContextInfo {
   name: string;
   cluster: string;
@@ -172,6 +182,9 @@ export interface BootstrapData {
   preferredMode?: ConnectionMode;
   platform?: string;
   kubeconfigFiles?: KubeconfigFileInfo[];
+  shareGateway: boolean;
+  gatewayNamespace: string;
+  gatewayTransport: GatewayTransport;
 }
 
 export interface HelperStatus {
@@ -192,6 +205,7 @@ export interface ServicePortInfo {
 export interface ServiceInfo {
   name: string;
   namespace: string;
+  type: string;
   clusterIP: string;
   ports: ServicePortInfo[];
 }

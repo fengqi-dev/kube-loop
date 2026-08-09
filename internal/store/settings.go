@@ -1,9 +1,56 @@
 package store
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"slices"
 )
+
+// ShareGateway reports whether this client uses the cluster-wide shared
+// Gateway. It defaults to true for compatibility with existing state files.
+func (s *Store) ShareGateway() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.state.Settings.ShareGateway == nil || *s.state.Settings.ShareGateway
+}
+
+// SetShareGateway updates the Gateway sharing preference. A stable opaque ID
+// is allocated the first time a private Gateway is requested.
+func (s *Store) SetShareGateway(shared bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	gatewayID := s.state.Settings.GatewayID
+	if !shared && s.state.Settings.GatewayID == "" {
+		var id [5]byte
+		if _, err := rand.Read(id[:]); err != nil {
+			return fmt.Errorf("generate private gateway id: %w", err)
+		}
+		gatewayID = hex.EncodeToString(id[:])
+	}
+	s.state.Settings.ShareGateway = new(shared)
+	s.state.Settings.GatewayID = gatewayID
+	return s.saveLocked()
+}
+
+func (s *Store) GatewayID() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.state.Settings.GatewayID
+}
+
+func (s *Store) GatewayNamespace() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.state.Settings.GatewayNamespace
+}
+
+func (s *Store) SetGatewayNamespace(namespace string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.state.Settings.GatewayNamespace = namespace
+	return s.saveLocked()
+}
 
 func (s *Store) MCP() MCPConfig {
 	s.mu.Lock()

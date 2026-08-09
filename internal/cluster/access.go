@@ -41,14 +41,21 @@ func (p *Provider) ProbeCapabilities(ctx context.Context, contextName string) (C
 	}
 	caps := Capabilities{}
 
-	caps.GatewayInstall = canAccess(ctx, client, authorizationv1.ResourceAttributes{
-		Namespace: GatewayNamespace, Group: "apps", Resource: "deployments", Verb: "create",
+	_, namespaceErr := client.CoreV1().Namespaces().Get(
+		ctx, p.GatewayNamespace(), metav1.GetOptions{},
+	)
+	canPrepareGatewayNamespace := namespaceErr == nil ||
+		(apierrors.IsNotFound(namespaceErr) && canAccess(ctx, client, authorizationv1.ResourceAttributes{
+			Resource: "namespaces", Verb: "create",
+		}))
+	caps.GatewayInstall = canPrepareGatewayNamespace && canAccess(ctx, client, authorizationv1.ResourceAttributes{
+		Namespace: p.GatewayNamespace(), Group: "apps", Resource: "deployments", Verb: "create",
 	}) && canAccess(ctx, client, authorizationv1.ResourceAttributes{
-		Namespace: GatewayNamespace, Group: "apps", Resource: "deployments", Verb: "update",
+		Namespace: p.GatewayNamespace(), Group: "apps", Resource: "deployments", Verb: "update",
 	})
 
 	caps.GatewayPortForward = canAccess(ctx, client, authorizationv1.ResourceAttributes{
-		Namespace: GatewayNamespace, Resource: "pods", Subresource: "portforward", Verb: "create",
+		Namespace: p.GatewayNamespace(), Resource: "pods", Subresource: "portforward", Verb: "create",
 	})
 
 	caps.ClusterNodes = canAccess(ctx, client, authorizationv1.ResourceAttributes{
@@ -109,7 +116,9 @@ func (p *Provider) ProbeCapabilities(ctx context.Context, contextName string) (C
 	})
 
 	if !caps.GatewayPortForward {
-		caps.Issues = append(caps.Issues, "Missing pods/portforward permission in kubeloop-system (cannot connect)")
+		caps.Issues = append(caps.Issues, fmt.Sprintf(
+			"Missing pods/portforward permission in %s (cannot connect)", p.GatewayNamespace(),
+		))
 	}
 	if !caps.GatewayInstall {
 		caps.Issues = append(caps.Issues, "No Gateway install permission; will try an admin-preinstalled Gateway")

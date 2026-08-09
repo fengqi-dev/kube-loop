@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -48,13 +49,50 @@ type ProbeResult struct {
 
 // Provider loads kubeconfig contexts and talks to the Kubernetes API.
 type Provider struct {
-	mu         sync.RWMutex
-	extraFiles []string
-	userAgent  string
+	mu          sync.RWMutex
+	extraFiles  []string
+	userAgent   string
+	gatewayNS   string
+	gatewayName string
 }
 
 func NewProvider() *Provider {
-	return &Provider{userAgent: "kube-loop/dev"}
+	return &Provider{
+		userAgent: "kube-loop/dev", gatewayNS: GatewayNamespace, gatewayName: GatewayName,
+	}
+}
+
+// SetGatewayResource selects the shared or client-private Gateway resources used
+// by subsequent discovery and connection operations.
+func (p *Provider) SetGatewayResource(namespace, name string) {
+	if namespace == "" {
+		namespace = GatewayNamespace
+	}
+	if name == "" {
+		name = GatewayName
+	}
+	p.mu.Lock()
+	p.gatewayNS = namespace
+	p.gatewayName = name
+	p.mu.Unlock()
+}
+
+func (p *Provider) GatewayNamespace() string {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if p.gatewayNS == "" {
+		return GatewayNamespace
+	}
+	return p.gatewayNS
+}
+
+func (p *Provider) GatewayName() string {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if p.gatewayName == "" {
+		return GatewayName
+	}
+	return p.gatewayName
 }
 
 // SetUserAgent sets the Kubernetes client User-Agent from the app version
@@ -158,12 +196,24 @@ func ValidateKubeconfigFile(path string) error {
 	if info.IsDir() {
 		return fmt.Errorf("kubeconfig path is a directory: %s", path)
 	}
-	cfg, err := clientcmd.LoadFromFile(path)
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read kubeconfig: %w", err)
+	}
+	if err := ValidateKubeconfigContent(raw); err != nil {
+		return err
+	}
+	return nil
+}
+
+// ValidateKubeconfigContent ensures raw kubeconfig data contains at least one context.
+func ValidateKubeconfigContent(raw []byte) error {
+	cfg, err := clientcmd.Load(raw)
 	if err != nil {
 		return fmt.Errorf("load kubeconfig: %w", err)
 	}
 	if len(cfg.Contexts) == 0 {
-		return fmt.Errorf("kubeconfig has no contexts: %s", path)
+		return errors.New("kubeconfig has no contexts")
 	}
 	return nil
 }
@@ -171,7 +221,7 @@ func ValidateKubeconfigFile(path string) error {
 func (p *Provider) Contexts() ([]ContextInfo, error) {
 	paths := p.loadingPaths()
 	if len(paths) == 0 {
-		return nil, fmt.Errorf("no kubeconfig files found")
+		return []ContextInfo{}, nil
 	}
 
 	byName := make(map[string]ContextInfo)
@@ -202,7 +252,7 @@ func (p *Provider) Contexts() ([]ContextInfo, error) {
 		if lastErr != nil {
 			return nil, fmt.Errorf("load kubeconfig: %w", lastErr)
 		}
-		return nil, fmt.Errorf("load kubeconfig: no readable files")
+		return []ContextInfo{}, nil
 	}
 
 	items := make([]ContextInfo, 0, len(byName))

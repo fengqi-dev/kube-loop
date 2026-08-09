@@ -30,9 +30,14 @@ func serviceInfoFromCore(service *corev1.Service) (ServiceInfo, bool) {
 	if len(ports) == 0 {
 		return ServiceInfo{}, false
 	}
+	serviceType := string(service.Spec.Type)
+	if serviceType == "" {
+		serviceType = string(corev1.ServiceTypeClusterIP)
+	}
 	return ServiceInfo{
 		Name:      service.Name,
 		Namespace: service.Namespace,
+		Type:      serviceType,
 		ClusterIP: service.Spec.ClusterIP,
 		Ports:     ports,
 	}, true

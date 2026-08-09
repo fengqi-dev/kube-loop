@@ -131,6 +131,10 @@ type GatewayManager interface {
 	StartPortForward(context.Context, string, string, uint16) (cluster.PortForward, error)
 }
 
+type HTTPGatewayManager interface {
+	EnsureHTTPGateway(context.Context, string, string, string, string) (cluster.GatewayInfo, error)
+}
+
 // ClusterProvider is the composition-root contract implemented by
 // cluster.Provider. Manager stores each facet behind its narrow interface,
 // while feature managers receive only their own consumer-defined contracts.
@@ -198,6 +202,8 @@ type Manager struct {
 	core          Core
 	bridgeFactory BridgeFactory
 	gatewayImage  string
+	gatewayNS     string
+	gatewayName   string
 	store         *store.Store
 
 	mu        sync.RWMutex
@@ -231,6 +237,8 @@ func NewManager(provider ClusterProvider, options ...Option) *Manager {
 		connection:   provider,
 		gateway:      provider,
 		gatewayImage: ResolveGatewayImage(""),
+		gatewayNS:    cluster.GatewayNamespace,
+		gatewayName:  cluster.GatewayName,
 		intercept:    intercept.NewManager(clusteradapter.New(provider)),
 		portfwd:      portfwd.NewManager(portfwdclusteradapter.New(provider)),
 		stateHub: newStateHub(State{
