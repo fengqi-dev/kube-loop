@@ -223,6 +223,51 @@ func TestRevisionUpdateImmediatelyInvalidatesRemovedAssignment(t *testing.T) {
 	}
 }
 
+func TestApplyAcceptsRollbackOnlyWithNewerActiveETag(t *testing.T) {
+	engine, err := New(Snapshot{Version: CurrentVersion, Revision: 10, Assignments: []Assignment{{
+		ID: "reader-v10", Role: RoleAuditor, Subjects: []string{testPrincipalID},
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if engine.ETag() != 0 {
+		t.Fatalf("initial ETag = %d, want 0", engine.ETag())
+	}
+	if err := engine.Apply(Snapshot{Version: CurrentVersion, Revision: 5, Assignments: []Assignment{{
+		ID: "reader-v5", Role: RoleAuditor, Subjects: []string{testPrincipalID},
+	}}}, 2); err != nil {
+		t.Fatal(err)
+	}
+	if engine.Revision() != 5 || engine.ETag() != 2 {
+		t.Fatalf("active revision/ETag = %d/%d, want 5/2", engine.Revision(), engine.ETag())
+	}
+	engine.FailClosed()
+	if engine.Available() {
+		t.Fatal("failed-closed engine remained available")
+	}
+	if decision := engine.Authorize(context.Background(), Subject{ID: testPrincipalID}, Request{
+		Resource: ResourceAudit, Operation: OperationRead,
+	}); decision.Allowed {
+		t.Fatalf("failed-closed decision = %#v", decision)
+	}
+	if err := engine.Apply(Snapshot{Version: CurrentVersion, Revision: 5, Assignments: []Assignment{{
+		ID: "reader-v5", Role: RoleAuditor, Subjects: []string{testPrincipalID},
+	}}}, 2); err != nil {
+		t.Fatalf("restore same ETag after fail-close: %v", err)
+	}
+	for _, staleETag := range []uint64{1, 2} {
+		if err := engine.Apply(Snapshot{Version: CurrentVersion, Revision: 11, Assignments: []Assignment{}}, staleETag); err == nil {
+			t.Fatalf("stale ETag %d succeeded", staleETag)
+		}
+	}
+	if err := engine.Apply(Snapshot{Version: CurrentVersion, Revision: 11, Assignments: []Assignment{}}, 3); err != nil {
+		t.Fatal(err)
+	}
+	if engine.Revision() != 11 || engine.ETag() != 3 {
+		t.Fatalf("active revision/ETag = %d/%d, want 11/3", engine.Revision(), engine.ETag())
+	}
+}
+
 func TestDryRunCannotManufactureBreakGlassContext(t *testing.T) {
 	state := &breakGlassStateStub{state: BreakGlassState{Enabled: true, Generation: "generation-1"}}
 	engine, err := NewDenyAll(WithBreakGlass(state))

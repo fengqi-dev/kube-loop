@@ -134,6 +134,110 @@ func validateExportDomainRow(spec tableSpec, row []json.RawMessage) error {
 			}
 		}
 		return nil
+	case "admin_policy_revisions":
+		if err := schemaVersion(2); err != nil {
+			return err
+		}
+		revision, err := exportInteger(row[0])
+		if err != nil || revision < 1 {
+			return errors.New("policy revision must be positive")
+		}
+		value := AdminPolicyRevision{
+			ID: exportText(row[1]), Spec: exportJSON(row[3]), ValidationState: exportText(row[5]),
+			Validation: exportJSON(row[6]), CreatedBy: exportText(row[7]),
+			CreatedAuthenticationType: exportText(row[8]), Reason: exportText(row[9]),
+			CreatedAt: exportTime(row[10]),
+		}
+		if err := normalizeAdminPolicyRevision(&value); err != nil {
+			return err
+		}
+		if value.SpecHash != exportText(row[4]) {
+			return errors.New("policy revision hash does not match its canonical spec")
+		}
+		return nil
+	case "provider_config_revisions":
+		if err := schemaVersion(2); err != nil {
+			return err
+		}
+		revision, err := exportInteger(row[0])
+		if err != nil || revision < 1 {
+			return errors.New("provider revision must be positive")
+		}
+		value := ProviderConfigRevision{
+			ID: exportText(row[1]), ProviderID: exportText(row[3]), ProviderType: exportText(row[4]),
+			Config: exportJSON(row[5]), SecretAliases: exportJSON(row[7]), ValidationState: exportText(row[8]),
+			Validation: exportJSON(row[9]), CreatedBy: exportText(row[10]),
+			CreatedAuthenticationType: exportText(row[11]), Reason: exportText(row[12]),
+			CreatedAt: exportTime(row[13]),
+		}
+		if err := normalizeProviderConfigRevision(&value); err != nil {
+			return err
+		}
+		if value.ConfigHash != exportText(row[6]) {
+			return errors.New("provider revision hash does not match its canonical configuration")
+		}
+		return nil
+	case "admin_assignments":
+		if err := schemaVersion(1); err != nil {
+			return err
+		}
+		policyRevision, err := exportInteger(row[2])
+		if err != nil || policyRevision < 1 {
+			return errors.New("assignment policy revision must be positive")
+		}
+		return normalizeAdminAssignment(&AdminAssignment{
+			ID: exportText(row[0]), PolicyRevision: uint64(policyRevision), Role: exportText(row[3]),
+			Subjects: exportJSON(row[4]), Groups: exportJSON(row[5]), Namespaces: exportJSON(row[6]),
+			CreatedAt: exportTime(row[7]),
+		})
+	case "management_active_revisions":
+		kind, configurationID, err := normalizeConfigurationIdentity(exportText(row[0]), exportText(row[1]))
+		if err != nil || kind == "" || configurationID == "" {
+			return errors.New("active management revision identity is invalid")
+		}
+		revision, revisionErr := exportInteger(row[2])
+		etag, etagErr := exportInteger(row[3])
+		if revisionErr != nil || etagErr != nil || revision < 1 || etag < 1 {
+			return errors.New("active management revision values are invalid")
+		}
+		if _, _, err := normalizeManagementActor(exportText(row[4]), exportText(row[5])); err != nil {
+			return err
+		}
+		return nil
+	case "config_change_requests":
+		if err := schemaVersion(1); err != nil {
+			return err
+		}
+		baseRevision := int64(0)
+		var err error
+		if string(row[4]) != "null" {
+			baseRevision, err = exportInteger(row[4])
+			if err != nil || baseRevision < 1 {
+				return errors.New("configuration change base revision is invalid")
+			}
+		}
+		baseETag, err := exportInteger(row[5])
+		if err != nil || baseETag < 0 {
+			return errors.New("configuration change base ETag is invalid")
+		}
+		proposedRevision, err := exportInteger(row[6])
+		if err != nil || proposedRevision < 1 {
+			return errors.New("configuration change proposed revision is invalid")
+		}
+		status := exportText(row[7])
+		if status != ChangeStatusDraft && status != ChangeStatusValidated && status != ChangeStatusPublished &&
+			status != ChangeStatusRejected && status != ChangeStatusRolledBack {
+			return errors.New("configuration change status is invalid")
+		}
+		value := ConfigChangeRequest{
+			ID: exportText(row[0]), ConfigurationType: exportText(row[2]), ConfigurationID: exportText(row[3]),
+			BaseRevision: uint64(baseRevision), BaseETag: uint64(baseETag), ProposedRevision: uint64(proposedRevision),
+			Status: ChangeStatusDraft, IdempotencyHash: exportBinary(row[8]), RequestHash: exportText(row[9]),
+			RequestedBy: exportText(row[10]), RequestedAuthenticationType: exportText(row[11]),
+			Reason: exportText(row[12]), Validation: exportJSON(row[13]),
+			CreatedAt: exportTime(row[14]), UpdatedAt: exportTime(row[15]),
+		}
+		return normalizeConfigChangeRequest(&value)
 	case "admin_sessions", "auth_attempts", "auth_exchanges":
 		return nil
 	default:

@@ -163,3 +163,74 @@ type AdminSession struct {
 	AbsoluteExpiresAt    time.Time
 	RevokedAt            *time.Time
 }
+
+type AdminPolicyRevision struct {
+	Revision                  uint64
+	ID                        string
+	SchemaVersion             int
+	Spec                      json.RawMessage
+	SpecHash                  string
+	ValidationState           string
+	Validation                json.RawMessage
+	CreatedBy                 string
+	CreatedAuthenticationType string
+	Reason                    string
+	CreatedAt                 time.Time
+}
+
+type ProviderConfigRevision struct {
+	Revision                  uint64
+	ID                        string
+	SchemaVersion             int
+	ProviderID                string
+	ProviderType              string
+	Config                    json.RawMessage
+	ConfigHash                string
+	SecretAliases             json.RawMessage
+	ValidationState           string
+	Validation                json.RawMessage
+	CreatedBy                 string
+	CreatedAuthenticationType string
+	Reason                    string
+	CreatedAt                 time.Time
+}
+
+type AdminAssignment struct {
+	ID             string
+	SchemaVersion  int
+	PolicyRevision uint64
+	Role           string
+	Subjects       json.RawMessage
+	Groups         json.RawMessage
+	Namespaces     json.RawMessage
+	CreatedAt      time.Time
+}
+
+type ActiveManagementRevision struct {
+	ConfigurationType         string
+	ConfigurationID           string
+	Revision                  uint64
+	ETag                      uint64
+	UpdatedBy                 string
+	UpdatedAuthenticationType string
+	UpdatedAt                 time.Time
+}
+
+type ConfigChangeRequest struct {
+	ID                          string
+	SchemaVersion               int
+	ConfigurationType           string
+	ConfigurationID             string
+	BaseRevision                uint64
+	BaseETag                    uint64
+	ProposedRevision            uint64
+	Status                      string
+	IdempotencyHash             []byte
+	RequestHash                 string
+	RequestedBy                 string
+	RequestedAuthenticationType string
+	Reason                      string
+	Validation                  json.RawMessage
+	CreatedAt                   time.Time
+	UpdatedAt                   time.Time
+}

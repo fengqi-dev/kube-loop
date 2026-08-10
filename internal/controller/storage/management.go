@@ -51,8 +51,9 @@ type BackupResult struct {
 }
 
 // Export creates a deterministic, checksummed logical export from a single
-// database snapshot. It never serializes storage configuration or provider
-// configuration, so database, OIDC, and AD secrets are outside the format.
+// database snapshot. It never serializes storage connection settings or Secret
+// plaintext; Provider revisions contain only non-secret configuration and stable
+// deployment-side aliases.
 func Export(ctx context.Context, rawConfig Config, options ExportOptions) ([]byte, ExportMetadata, error) {
 	createdByVersion := strings.TrimSpace(options.CreatedByVersion)
 	if createdByVersion == "" || len(createdByVersion) > 256 {
@@ -191,6 +192,13 @@ func (store *Store) importDocument(
 	for index, spec := range exportTableSpecs {
 		if err := importTable(ctx, transaction, spec, document.Tables[index]); err != nil {
 			return ImportResult{}, err
+		}
+	}
+	for _, table := range []string{"admin_policy_revisions", "provider_config_revisions"} {
+		query := `SELECT setval(pg_get_serial_sequence('` + table + `', 'revision'),
+			COALESCE(MAX(revision), 1), COUNT(*) > 0) FROM ` + table
+		if _, err := transaction.ExecContext(ctx, query); err != nil {
+			return ImportResult{}, databaseError("advance imported management revision sequence", err)
 		}
 	}
 

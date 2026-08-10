@@ -124,6 +124,35 @@ type AdminSessionRepository interface {
 	DeleteExpired(context.Context, time.Time, int) (int64, error)
 }
 
+type AdminPolicyRevisionRepository interface {
+	Create(context.Context, AdminPolicyRevision) (AdminPolicyRevision, error)
+	Get(context.Context, uint64) (AdminPolicyRevision, error)
+}
+
+type ProviderConfigRevisionRepository interface {
+	Create(context.Context, ProviderConfigRevision) (ProviderConfigRevision, error)
+	Get(context.Context, uint64) (ProviderConfigRevision, error)
+}
+
+type AdminAssignmentRepository interface {
+	Create(context.Context, AdminAssignment) error
+	ListByPolicyRevision(context.Context, uint64) ([]AdminAssignment, error)
+}
+
+type ActiveManagementRevisionRepository interface {
+	Get(context.Context, string, string) (ActiveManagementRevision, error)
+	// CompareAndSwap changes an active pointer only when its monotonic ETag still
+	// matches. expectedETag=0 creates the first pointer; rollback never lowers ETag.
+	CompareAndSwap(context.Context, string, string, uint64, uint64, string, string, time.Time) (ActiveManagementRevision, error)
+}
+
+type ConfigChangeRequestRepository interface {
+	Create(context.Context, ConfigChangeRequest) error
+	GetByID(context.Context, string) (ConfigChangeRequest, error)
+	GetByIdempotencyHash(context.Context, string, string, string, string, []byte) (ConfigChangeRequest, error)
+	UpdateStatus(context.Context, string, string, string, json.RawMessage, time.Time) error
+}
+
 type Repositories interface {
 	Principals() PrincipalRepository
 	TokenFamilies() TokenFamilyRepository
@@ -136,6 +165,11 @@ type Repositories interface {
 	AuthTransactions() AuthTransactionRepository
 	ManagementState() ManagementStateRepository
 	AdminSessions() AdminSessionRepository
+	AdminPolicyRevisions() AdminPolicyRevisionRepository
+	ProviderConfigRevisions() ProviderConfigRevisionRepository
+	AdminAssignments() AdminAssignmentRepository
+	ActiveManagementRevisions() ActiveManagementRevisionRepository
+	ConfigChangeRequests() ConfigChangeRequestRepository
 }
 
 type TransactionManager interface {

@@ -65,6 +65,8 @@ type Engine struct {
 
 type compiledSnapshot struct {
 	revision    uint64
+	etag        uint64
+	available   bool
 	assignments []compiledAssignment
 }
 
@@ -105,6 +107,20 @@ func (engine *Engine) Revision() uint64 {
 	return engine.snapshot.Load().revision
 }
 
+func (engine *Engine) ETag() uint64 {
+	if engine == nil || engine.snapshot.Load() == nil {
+		return 0
+	}
+	return engine.snapshot.Load().etag
+}
+
+func (engine *Engine) Available() bool {
+	if engine == nil || engine.snapshot.Load() == nil {
+		return false
+	}
+	return engine.snapshot.Load().available
+}
+
 func (engine *Engine) Update(snapshot Snapshot) error {
 	if engine == nil {
 		return errors.New("management authorizer is nil")
@@ -117,8 +133,52 @@ func (engine *Engine) Update(snapshot Snapshot) error {
 	if active != nil && compiled.revision <= active.revision {
 		return fmt.Errorf("management policy revision %d must be newer than active revision %d", compiled.revision, active.revision)
 	}
+	if active != nil {
+		compiled.etag = active.etag + 1
+	} else {
+		compiled.etag = 1
+	}
 	engine.snapshot.Store(compiled)
 	return nil
+}
+
+// Apply installs the database-selected active snapshot. Unlike Update it may
+// move to an older immutable revision during rollback; the active pointer ETag
+// must always increase, preventing stale pollers from restoring newer-looking
+// but no longer active content.
+func (engine *Engine) Apply(snapshot Snapshot, etag uint64) error {
+	if engine == nil {
+		return errors.New("management authorizer is nil")
+	}
+	if etag == 0 {
+		return errors.New("management policy ETag must be positive")
+	}
+	compiled, err := compileSnapshot(snapshot)
+	if err != nil {
+		return err
+	}
+	active := engine.snapshot.Load()
+	if active != nil && (etag < active.etag || etag == active.etag && active.available) {
+		return fmt.Errorf("management policy ETag %d must be newer than active ETag %d", etag, active.etag)
+	}
+	compiled.etag = etag
+	compiled.available = true
+	engine.snapshot.Store(compiled)
+	return nil
+}
+
+// FailClosed immediately removes all database-backed grants while preserving
+// the last observed revision and ETag. A later Apply with that same ETag may
+// restore a verified snapshot after a transient storage failure.
+func (engine *Engine) FailClosed() {
+	if engine == nil {
+		return
+	}
+	active := engine.snapshot.Load()
+	if active == nil || !active.available {
+		return
+	}
+	engine.snapshot.Store(&compiledSnapshot{revision: active.revision, etag: active.etag})
 }
 
 func (engine *Engine) Authorize(ctx context.Context, subject Subject, request Request) Decision {
@@ -264,7 +324,10 @@ func compileSnapshot(snapshot Snapshot) (*compiledSnapshot, error) {
 		return nil, errors.New("management policy with assignments requires a positive revision")
 	}
 	seen := make(map[string]struct{}, len(snapshot.Assignments))
-	compiled := &compiledSnapshot{revision: snapshot.Revision, assignments: make([]compiledAssignment, 0, len(snapshot.Assignments))}
+	compiled := &compiledSnapshot{
+		revision: snapshot.Revision, available: true,
+		assignments: make([]compiledAssignment, 0, len(snapshot.Assignments)),
+	}
 	for index, assignment := range snapshot.Assignments {
 		assignment.ID = strings.TrimSpace(assignment.ID)
 		if !assignmentIDPattern.MatchString(assignment.ID) {

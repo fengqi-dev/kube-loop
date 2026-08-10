@@ -104,17 +104,22 @@ func isRetryableTransactionError(err error) bool {
 }
 
 type repositorySet struct {
-	principals        *principalRepository
-	tokenFamilies     *tokenFamilyRepository
-	refreshTokens     *refreshTokenRepository
-	sessions          *sessionRepository
-	tasks             TaskRepository
-	resourceSnapshots *resourceSnapshotRepository
-	idempotency       *idempotencyRepository
-	audit             *auditRepository
-	authTransactions  *authTransactionRepository
-	managementState   *managementStateRepository
-	adminSessions     *adminSessionRepository
+	principals                *principalRepository
+	tokenFamilies             *tokenFamilyRepository
+	refreshTokens             *refreshTokenRepository
+	sessions                  *sessionRepository
+	tasks                     TaskRepository
+	resourceSnapshots         *resourceSnapshotRepository
+	idempotency               *idempotencyRepository
+	audit                     *auditRepository
+	authTransactions          *authTransactionRepository
+	managementState           *managementStateRepository
+	adminSessions             *adminSessionRepository
+	adminPolicyRevisions      *adminPolicyRevisionRepository
+	providerConfigRevisions   *providerConfigRevisionRepository
+	adminAssignments          *adminAssignmentRepository
+	activeManagementRevisions *activeManagementRevisionRepository
+	configChangeRequests      *configChangeRequestRepository
 }
 
 func newRepositorySet(backend Backend, executor sqlExecutor, orm bun.IDB) *repositorySet {
@@ -129,12 +134,17 @@ func newRepositorySet(backend Backend, executor sqlExecutor, orm bun.IDB) *repos
 		tasks: &auditedTaskRepository{
 			delegate: &taskRepository{repositoryBase: base}, sessions: sessions, audit: audit,
 		},
-		resourceSnapshots: &resourceSnapshotRepository{repositoryBase: base},
-		idempotency:       &idempotencyRepository{repositoryBase: base},
-		audit:             audit,
-		authTransactions:  &authTransactionRepository{repositoryBase: base},
-		managementState:   &managementStateRepository{repositoryBase: base},
-		adminSessions:     &adminSessionRepository{repositoryBase: base},
+		resourceSnapshots:         &resourceSnapshotRepository{repositoryBase: base},
+		idempotency:               &idempotencyRepository{repositoryBase: base},
+		audit:                     audit,
+		authTransactions:          &authTransactionRepository{repositoryBase: base},
+		managementState:           &managementStateRepository{repositoryBase: base},
+		adminSessions:             &adminSessionRepository{repositoryBase: base},
+		adminPolicyRevisions:      &adminPolicyRevisionRepository{repositoryBase: base},
+		providerConfigRevisions:   &providerConfigRevisionRepository{repositoryBase: base},
+		adminAssignments:          &adminAssignmentRepository{repositoryBase: base},
+		activeManagementRevisions: &activeManagementRevisionRepository{repositoryBase: base},
+		configChangeRequests:      &configChangeRequestRepository{repositoryBase: base},
 	}
 }
 
@@ -186,4 +196,24 @@ func (repositories *repositorySet) ManagementState() ManagementStateRepository {
 
 func (repositories *repositorySet) AdminSessions() AdminSessionRepository {
 	return repositories.adminSessions
+}
+
+func (repositories *repositorySet) AdminPolicyRevisions() AdminPolicyRevisionRepository {
+	return repositories.adminPolicyRevisions
+}
+
+func (repositories *repositorySet) ProviderConfigRevisions() ProviderConfigRevisionRepository {
+	return repositories.providerConfigRevisions
+}
+
+func (repositories *repositorySet) AdminAssignments() AdminAssignmentRepository {
+	return repositories.adminAssignments
+}
+
+func (repositories *repositorySet) ActiveManagementRevisions() ActiveManagementRevisionRepository {
+	return repositories.activeManagementRevisions
+}
+
+func (repositories *repositorySet) ConfigChangeRequests() ConfigChangeRequestRepository {
+	return repositories.configChangeRequests
 }

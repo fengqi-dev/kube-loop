@@ -16,9 +16,11 @@ import (
 	"time"
 
 	"github.com/fengqi-dev/kube-loop/internal/controller"
+	adminauthorization "github.com/fengqi-dev/kube-loop/internal/controller/admin/authorization"
 	adminbreakglass "github.com/fengqi-dev/kube-loop/internal/controller/admin/breakglass"
 	managementconfig "github.com/fengqi-dev/kube-loop/internal/controller/admin/config"
 	adminhttpapi "github.com/fengqi-dev/kube-loop/internal/controller/admin/httpapi"
+	adminrevision "github.com/fengqi-dev/kube-loop/internal/controller/admin/revision"
 	adminsession "github.com/fengqi-dev/kube-loop/internal/controller/admin/session"
 	"github.com/fengqi-dev/kube-loop/internal/controller/authn"
 	authconfig "github.com/fengqi-dev/kube-loop/internal/controller/authn/config"
@@ -168,6 +170,26 @@ func main() {
 			logger.Error("validate Management Plane emergency credential failed", "error", err)
 			os.Exit(2)
 		}
+	}
+	managementPolicyEngine, err := adminauthorization.NewDenyAll(
+		adminauthorization.WithBootstrap(managementFile.Bootstrap.AuthorizationConfig(), stateStore.ManagementState()),
+		adminauthorization.WithBreakGlass(breakGlassStore),
+	)
+	if err != nil {
+		_ = stateStore.Close()
+		logger.Error("initialize Management Plane authorization failed", "error", err)
+		os.Exit(2)
+	}
+	managementPolicyLoader, err := adminrevision.NewPolicyLoader(stateStore, managementPolicyEngine, 0)
+	if err != nil {
+		_ = stateStore.Close()
+		logger.Error("initialize Management Plane policy loader failed", "error", err)
+		os.Exit(2)
+	}
+	if err := managementPolicyLoader.Load(signalContext); err != nil {
+		_ = stateStore.Close()
+		logger.Error("load active Management Plane policy failed", "error", err)
+		os.Exit(1)
 	}
 	authRegistry, err := authconfig.Build(signalContext, authFile)
 	if err != nil {
@@ -596,6 +618,9 @@ func main() {
 		if err := stateStore.Check(ctx); err != nil {
 			return err
 		}
+		if err := managementPolicyLoader.Check(ctx); err != nil {
+			return err
+		}
 		if managementFile.BreakGlass.Enabled {
 			if _, err := breakGlassStore.CurrentBreakGlassState(ctx); err != nil {
 				return err
@@ -712,7 +737,11 @@ func main() {
 	}
 	errCh := make(chan error, serveCount)
 	var backgroundWorkers sync.WaitGroup
-	backgroundWorkers.Add(6)
+	backgroundWorkers.Add(7)
+	go func() {
+		defer backgroundWorkers.Done()
+		managementPolicyLoader.Run(signalContext)
+	}()
 	go func() {
 		defer backgroundWorkers.Done()
 		sessionRecovery.Run(signalContext)

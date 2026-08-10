@@ -406,6 +406,46 @@ func seedManagementStore(t *testing.T, store *Store) managementSeed {
 	if retired, err := store.ManagementState().RetireBootstrap(ctx, 42, now); err != nil || !retired {
 		t.Fatalf("retire management bootstrap = %t, error = %v", retired, err)
 	}
+	policy, err := store.AdminPolicyRevisions().Create(ctx, AdminPolicyRevision{
+		ID: uuid.NewString(), Spec: json.RawMessage(`{"version":1,"assignments":[]}`),
+		ValidationState: RevisionValidationValid, Validation: json.RawMessage(`{"valid":true}`),
+		CreatedBy: principal.ID, CreatedAuthenticationType: "normal", Reason: "seed management policy", CreatedAt: now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AdminAssignments().Create(ctx, AdminAssignment{
+		ID: uuid.NewString(), PolicyRevision: policy.Revision, Role: "platform-admin",
+		Subjects: json.RawMessage(`["` + principal.ID + `"]`), Groups: json.RawMessage(`[]`),
+		Namespaces: json.RawMessage(`[]`), CreatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.ActiveManagementRevisions().CompareAndSwap(
+		ctx, ManagementConfigurationPolicy, ManagementPolicyID, policy.Revision, 0, principal.ID, "normal", now,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.ProviderConfigRevisions().Create(ctx, ProviderConfigRevision{
+		ID: uuid.NewString(), ProviderID: "corporate", ProviderType: "oidc",
+		Config:          json.RawMessage(`{"issuer":"https://id.example","clientId":"kubeloop"}`),
+		SecretAliases:   json.RawMessage(`{"client-secret":"oidc-secret"}`),
+		ValidationState: RevisionValidationValid, CreatedBy: principal.ID, CreatedAuthenticationType: "normal",
+		Reason: "seed Provider revision", CreatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	changeHash := sha256.Sum256([]byte("management-change-request"))
+	if err := store.ConfigChangeRequests().Create(ctx, ConfigChangeRequest{
+		ID: uuid.NewString(), ConfigurationType: ManagementConfigurationPolicy, ConfigurationID: ManagementPolicyID,
+		BaseRevision: policy.Revision, BaseETag: 1, ProposedRevision: policy.Revision, Status: ChangeStatusDraft,
+		IdempotencyHash: changeHash[:], RequestHash: jsonSHA256(json.RawMessage(`{"seed":true}`)),
+		RequestedBy: principal.ID, RequestedAuthenticationType: "normal",
+		Reason:    "seed change request",
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
 	adminSessionID := sha256.Sum256([]byte("management-browser-session"))
 	adminCSRF := sha256.Sum256([]byte("management-browser-csrf"))
 	if err := store.AdminSessions().Create(ctx, AdminSession{

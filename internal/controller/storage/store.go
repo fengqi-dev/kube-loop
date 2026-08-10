@@ -170,9 +170,9 @@ func (store *Store) migrate(ctx context.Context) error {
 		if store.backend == BackendPostgreSQL {
 			statements = migration.postgresql
 		}
-		for _, statement := range statements {
+		for statementIndex, statement := range statements {
 			if _, err := transaction.ExecContext(ctx, statement); err != nil {
-				return fmt.Errorf("apply storage migration %d", migration.version)
+				return fmt.Errorf("apply storage migration %d statement %d", migration.version, statementIndex+1)
 			}
 		}
 		insert := `INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)`
@@ -264,6 +264,26 @@ func (store *Store) ManagementState() ManagementStateRepository {
 
 func (store *Store) AdminSessions() AdminSessionRepository {
 	return store.repositories.AdminSessions()
+}
+
+func (store *Store) AdminPolicyRevisions() AdminPolicyRevisionRepository {
+	return store.repositories.AdminPolicyRevisions()
+}
+
+func (store *Store) ProviderConfigRevisions() ProviderConfigRevisionRepository {
+	return store.repositories.ProviderConfigRevisions()
+}
+
+func (store *Store) AdminAssignments() AdminAssignmentRepository {
+	return store.repositories.AdminAssignments()
+}
+
+func (store *Store) ActiveManagementRevisions() ActiveManagementRevisionRepository {
+	return store.repositories.ActiveManagementRevisions()
+}
+
+func (store *Store) ConfigChangeRequests() ConfigChangeRequestRepository {
+	return store.repositories.ConfigChangeRequests()
 }
 
 func (store *Store) WithinTransaction(ctx context.Context, function func(Repositories) error) error {

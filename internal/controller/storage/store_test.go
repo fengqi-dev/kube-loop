@@ -110,6 +110,14 @@ func testTaskStateMigrationPreservesLegacyTasks(t *testing.T, config Config) {
 	if _, err := store.db.ExecContext(ctx, `DROP TABLE admin_sessions`); err != nil {
 		t.Fatal(err)
 	}
+	for _, table := range []string{
+		"config_change_requests", "management_active_revisions", "admin_assignments",
+		"provider_config_revisions", "admin_policy_revisions",
+	} {
+		if _, err := store.db.ExecContext(ctx, `DROP TABLE `+table); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if _, err := store.db.ExecContext(ctx, `DELETE FROM schema_migrations WHERE version >= 6`); err != nil {
 		t.Fatal(err)
 	}

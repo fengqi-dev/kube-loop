@@ -151,6 +151,60 @@ var exportTableSpecs = []tableSpec{
 		orderBy: []string{"id"},
 	},
 	{
+		name: "admin_policy_revisions",
+		columns: []columnSpec{
+			{name: "revision", kind: columnInteger}, {name: "id"}, {name: "schema_version", kind: columnInteger},
+			{name: "spec_json", kind: columnJSON}, {name: "spec_hash"}, {name: "validation_state"},
+			{name: "validation_json", kind: columnJSON, nullable: true}, {name: "created_by"},
+			{name: "created_authentication_type"}, {name: "reason"}, {name: "created_at"},
+		},
+		orderBy: []string{"revision"},
+	},
+	{
+		name: "provider_config_revisions",
+		columns: []columnSpec{
+			{name: "revision", kind: columnInteger}, {name: "id"}, {name: "schema_version", kind: columnInteger},
+			{name: "provider_id"}, {name: "provider_type"}, {name: "config_json", kind: columnJSON},
+			{name: "config_hash"}, {name: "secret_aliases_json", kind: columnJSON}, {name: "validation_state"},
+			{name: "validation_json", kind: columnJSON, nullable: true}, {name: "created_by"},
+			{name: "created_authentication_type"}, {name: "reason"}, {name: "created_at"},
+		},
+		orderBy: []string{"revision"},
+	},
+	{
+		name: "admin_assignments",
+		columns: []columnSpec{
+			{name: "id"}, {name: "schema_version", kind: columnInteger},
+			{name: "policy_revision", kind: columnInteger}, {name: "role"},
+			{name: "subjects_json", kind: columnJSON}, {name: "groups_json", kind: columnJSON},
+			{name: "namespaces_json", kind: columnJSON}, {name: "created_at"},
+		},
+		orderBy: []string{"policy_revision", "role", "id"},
+	},
+	{
+		name: "management_active_revisions",
+		columns: []columnSpec{
+			{name: "configuration_type"}, {name: "configuration_id"},
+			{name: "revision", kind: columnInteger}, {name: "etag", kind: columnInteger},
+			{name: "updated_by"}, {name: "updated_authentication_type"}, {name: "updated_at"},
+		},
+		orderBy: []string{"configuration_type", "configuration_id"},
+	},
+	{
+		name: "config_change_requests",
+		columns: []columnSpec{
+			{name: "id"}, {name: "schema_version", kind: columnInteger}, {name: "configuration_type"},
+			{name: "configuration_id"}, {name: "base_revision", kind: columnInteger, nullable: true},
+			{name: "base_etag", kind: columnInteger}, {name: "proposed_revision", kind: columnInteger},
+			{name: "status"}, {name: "idempotency_hash", kind: columnBytes}, {name: "request_hash"},
+			{name: "requested_by"},
+			{name: "requested_authentication_type"}, {name: "reason"},
+			{name: "validation_json", kind: columnJSON, nullable: true},
+			{name: "created_at"}, {name: "updated_at"},
+		},
+		orderBy: []string{"created_at", "id"},
+	},
+	{
 		name: "admin_sessions",
 		columns: []columnSpec{
 			{name: "id_hash", kind: columnBytes}, {name: "schema_version", kind: columnInteger},
