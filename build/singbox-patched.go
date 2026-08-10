@@ -116,17 +116,32 @@ func verifyPinnedSource(sourceDir string) error {
 	if _, err := os.Stat(filepath.Join(sourceDir, "go.mod")); err != nil {
 		return errors.New("sing-box source is not initialized; run git submodule update --init --recursive")
 	}
-	command := exec.Command("git", "describe", "--tags", "--exact-match", "HEAD")
+	command := exec.Command("git", "rev-parse", "HEAD")
 	command.Dir = sourceDir
 	output, err := command.Output()
-	if err != nil || strings.TrimSpace(string(output)) != singboxdist.Version {
-		return fmt.Errorf("sing-box source must be pinned at %s", singboxdist.Version)
+	if err != nil || strings.TrimSpace(string(output)) != singboxdist.SourceRevision {
+		return fmt.Errorf("sing-box source must be pinned at revision %s", singboxdist.SourceRevision)
 	}
-	command = exec.Command("git", "rev-parse", "HEAD")
+
+	// GitHub Actions checks submodules out at the recorded commit without
+	// fetching tag objects. The immutable revision is therefore authoritative.
+	// When the expected tag is available locally, also verify that it resolves
+	// to the same commit so a moved or incorrect tag cannot pass unnoticed.
+	tagRef := "refs/tags/" + singboxdist.Version
+	command = exec.Command("git", "show-ref", "--verify", "--quiet", tagRef)
+	command.Dir = sourceDir
+	if err := command.Run(); err != nil {
+		var exitError *exec.ExitError
+		if !errors.As(err, &exitError) || exitError.ExitCode() != 1 {
+			return fmt.Errorf("inspect sing-box source tag %s: %w", singboxdist.Version, err)
+		}
+		return nil
+	}
+	command = exec.Command("git", "rev-parse", tagRef+"^{commit}")
 	command.Dir = sourceDir
 	output, err = command.Output()
 	if err != nil || strings.TrimSpace(string(output)) != singboxdist.SourceRevision {
-		return fmt.Errorf("sing-box source must be pinned at revision %s", singboxdist.SourceRevision)
+		return fmt.Errorf("sing-box tag %s must resolve to revision %s", singboxdist.Version, singboxdist.SourceRevision)
 	}
 	return nil
 }
