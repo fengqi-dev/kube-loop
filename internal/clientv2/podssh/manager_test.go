@@ -14,8 +14,8 @@ import (
 	"github.com/coder/websocket"
 	"github.com/fengqi-dev/kube-loop/internal/clientv2/profile"
 	"github.com/fengqi-dev/kube-loop/internal/clientv2/remote"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/execstream"
 	localpodssh "github.com/fengqi-dev/kube-loop/internal/podssh"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/execstream"
 	"github.com/google/uuid"
 	"golang.org/x/crypto/ssh"
 )

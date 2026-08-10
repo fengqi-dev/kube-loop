@@ -23,7 +23,7 @@ func TestNormalizeAndHashAreCanonical(t *testing.T) {
 	right := Spec{
 		Version: Version, PodCIDRs: []string{"10.2.0.0/16"}, PodIPs: []string{"10.2.1.9"},
 		ServiceCIDRs: []string{"10.96.0.0/12"},
-		ServiceIPs: []string{"10.96.0.11", "10.96.0.10"}, DNSServer: "10.96.0.11",
+		ServiceIPs:   []string{"10.96.0.11", "10.96.0.10"}, DNSServer: "10.96.0.11",
 		ClusterDomains: []string{"cluster.local", "corp.internal"},
 	}
 	leftHash, _ := Hash(left)

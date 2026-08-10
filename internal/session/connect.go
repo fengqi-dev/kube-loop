@@ -13,11 +13,11 @@ import (
 
 	"github.com/fengqi-dev/kube-loop/internal/cluster"
 	"github.com/fengqi-dev/kube-loop/internal/intercept"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
 	"github.com/fengqi-dev/kube-loop/internal/singbox"
 	singboxdist "github.com/fengqi-dev/kube-loop/internal/singbox/distribution"
 	"github.com/fengqi-dev/kube-loop/internal/socksbridge"
 	"github.com/fengqi-dev/kube-loop/internal/traffic"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
 )
 
 func (m *Manager) Connect(parent context.Context, request Request) error {

@@ -141,7 +141,7 @@ func discover(
 	return networkspec.Normalize(networkspec.Spec{
 		Version: networkspec.Version, PodCIDRs: sortedKeys(podCIDRs), PodIPs: sortedKeys(podIPs),
 		ServiceCIDRs: sortedKeys(serviceCIDRs),
-		ServiceIPs: sortedKeys(serviceIPs), DNSServer: dnsServer,
+		ServiceIPs:   sortedKeys(serviceIPs), DNSServer: dnsServer,
 		ClusterDomains: discoverClusterDomains(ctx, systemClient),
 	})
 }

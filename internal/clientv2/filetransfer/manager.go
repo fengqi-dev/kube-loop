@@ -14,8 +14,8 @@ import (
 
 	"github.com/fengqi-dev/kube-loop/internal/clientv2/profile"
 	"github.com/fengqi-dev/kube-loop/internal/clientv2/remote"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/filestream"
 	"github.com/fengqi-dev/kube-loop/internal/fsatomic"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/filestream"
 	"github.com/google/uuid"
 )
 

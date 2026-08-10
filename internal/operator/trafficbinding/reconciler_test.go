@@ -87,7 +87,7 @@ var _ = Describe("TrafficBinding Controller", func() {
 				},
 				AddressType: discoveryv1.AddressTypeIPv4,
 				Endpoints:   []discoveryv1.Endpoint{{Addresses: []string{"10.244.0.9"}}},
-				Ports:       []discoveryv1.EndpointPort{{Name: pointer("http"), Protocol: protocolPointer(corev1.ProtocolTCP), Port: int32Pointer(8080)}},
+				Ports:       []discoveryv1.EndpointPort{{Name: new("http"), Protocol: new(corev1.ProtocolTCP), Port: new(int32(8080))}},
 			}
 			Expect(k8sClient.Create(ctx, originalSlice)).To(Succeed())
 			legacy := &corev1.Endpoints{
@@ -228,8 +228,8 @@ func previewBinding(name, service string) *trafficv1alpha1.TrafficBinding {
 			Relay:   &trafficv1alpha1.RelayEndpoint{Address: "10.0.0.8"},
 			Preview: &trafficv1alpha1.PreviewExposure{ServiceName: service},
 			Ports: []trafficv1alpha1.TrafficPort{
-				{Name: "http", TargetPort: 8080, RelayPort: int32Pointer(32001), Protocol: trafficv1alpha1.TransportProtocolTCP},
-				{Name: "dns", TargetPort: 5353, RelayPort: int32Pointer(32002), Protocol: trafficv1alpha1.TransportProtocolUDP},
+				{Name: "http", TargetPort: 8080, RelayPort: new(int32(32001)), Protocol: trafficv1alpha1.TransportProtocolTCP},
+				{Name: "dns", TargetPort: 5353, RelayPort: new(int32(32002)), Protocol: trafficv1alpha1.TransportProtocolUDP},
 			},
 		},
 	}
@@ -245,7 +245,7 @@ func interceptBinding(name, service string, mode trafficv1alpha1.TrafficBindingM
 			Target: &trafficv1alpha1.TrafficTarget{Kind: trafficv1alpha1.TargetKindService, Name: service},
 			Relay:  &trafficv1alpha1.RelayEndpoint{Address: "10.0.0.8"},
 			Ports: []trafficv1alpha1.TrafficPort{{
-				Name: "http", TargetPort: 8080, RelayPort: int32Pointer(32002), Protocol: trafficv1alpha1.TransportProtocolTCP,
+				Name: "http", TargetPort: 8080, RelayPort: new(int32(32002)), Protocol: trafficv1alpha1.TransportProtocolTCP,
 			}},
 		},
 	}
@@ -298,6 +298,11 @@ func deleteBinding(name string) {
 	_, _ = reconciler.Reconcile(ctx, requestFor(name))
 }
 
-func pointer(value string) *string                           { return &value }
-func int32Pointer(value int32) *int32                        { return &value }
-func protocolPointer(value corev1.Protocol) *corev1.Protocol { return &value }
+//go:fix inline
+func pointer(value string) *string { return new(value) }
+
+//go:fix inline
+func int32Pointer(value int32) *int32 { return new(value) }
+
+//go:fix inline
+func protocolPointer(value corev1.Protocol) *corev1.Protocol { return new(value) }

@@ -10,8 +10,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/fengqi-dev/kube-loop/internal/streamcopy"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
+	"github.com/fengqi-dev/kube-loop/internal/streamcopy"
 )
 
 // errControlClosed is returned when the Gateway control channel has dropped

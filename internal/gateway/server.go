@@ -14,10 +14,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
-	"github.com/fengqi-dev/kube-loop/internal/streamcopy"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
 	"github.com/fengqi-dev/kube-loop/internal/dnsname"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
+	"github.com/fengqi-dev/kube-loop/internal/streamcopy"
 )
 
 type SessionAuthorization struct {

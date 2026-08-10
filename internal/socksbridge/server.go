@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/fengqi-dev/kube-loop/internal/streamcopy"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
+	"github.com/fengqi-dev/kube-loop/internal/streamcopy"
 	"github.com/things-go/go-socks5"
 	"github.com/things-go/go-socks5/bufferpool"
 	"github.com/things-go/go-socks5/statute"
