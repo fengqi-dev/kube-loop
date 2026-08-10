@@ -33,7 +33,8 @@ $mainPackages = @(
     "./e2e/harness",
     "./e2e/mirror",
     "./e2e/portfwd",
-    "./e2e/preview"
+    "./e2e/preview",
+    "./e2e/remotetun"
 )
 
 $mainExit = 1
@@ -218,6 +219,7 @@ to record the expected DNS failures.
     $env:KUBELOOP_E2E_CONTEXT = $Context
     $env:KUBELOOP_GATEWAY_IMAGE = $GatewayImage
     $env:KUBELOOP_SINGBOX_PATH = $singBox
+    $env:KUBELOOP_REMOTE_TUN_E2E = "1"
 
     Write-Host "==> Running TUN/Kubernetes E2E" -ForegroundColor Cyan
     & go test `

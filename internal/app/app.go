@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"log"
 	"net/http"
@@ -22,6 +23,7 @@ import (
 	clientmirror "github.com/fengqi-dev/kube-loop/internal/clientv2/mirror"
 	clientpodssh "github.com/fengqi-dev/kube-loop/internal/clientv2/podssh"
 	clientportforward "github.com/fengqi-dev/kube-loop/internal/clientv2/portforward"
+	"github.com/fengqi-dev/kube-loop/internal/clientv2/powerwatch"
 	clientpreview "github.com/fengqi-dev/kube-loop/internal/clientv2/preview"
 	clientprofile "github.com/fengqi-dev/kube-loop/internal/clientv2/profile"
 	clientremote "github.com/fengqi-dev/kube-loop/internal/clientv2/remote"
@@ -58,6 +60,7 @@ type App struct {
 	inventoryWatchMu      sync.Mutex
 	inventoryWatchProfile string
 	inventoryWatchCancel  context.CancelFunc
+	powerWatchCancel      context.CancelFunc
 }
 
 type BootstrapData struct {
@@ -293,6 +296,22 @@ func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	a.once.Do(func() {
 		a.appendLog("INFO", "V2 application startup initialized")
+		watcher, err := powerwatch.New(powerwatch.Config{OnWake: func(event powerwatch.Event) {
+			if a.dataPlanes == nil {
+				return
+			}
+			profiles := a.dataPlanes.ResumeAll()
+			a.appendLog("INFO", fmt.Sprintf(
+				"System wake detected after %s; refreshing %d Data Plane profile(s)", event.SleptFor, profiles,
+			))
+		}})
+		if err != nil {
+			a.appendLog("ERROR", "Power wake monitor unavailable: "+err.Error())
+		} else {
+			watchContext, cancel := context.WithCancel(ctx)
+			a.powerWatchCancel = cancel
+			go watcher.Run(watchContext)
+		}
 		if a.mcp != nil {
 			a.mcp.StartFromStore()
 		}
@@ -306,6 +325,9 @@ func (a *App) startup(ctx context.Context) {
 func (a *App) shutdown(context.Context) {
 	shutdownContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	if a.powerWatchCancel != nil {
+		a.powerWatchCancel()
+	}
 	a.stopServerInventoryWatch("")
 	if a.mcp != nil {
 		if err := a.mcp.Stop(); err != nil {

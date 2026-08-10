@@ -311,7 +311,7 @@ func TestRealFileTransferRevocationControllerRestartAndResume(t *testing.T) {
 		)
 		firstUpload <- fileUploadResult{task: task, result: result, err: uploadErr}
 	}()
-	waitForFileProgress(t, ctx, firstProgress)
+	waitForFileProgress(t, ctx, firstProgress, firstUpload)
 	revokedAt := time.Now()
 	if err := stateStore.TokenFamilies().Revoke(ctx, firstIdentity.familyID, revokedAt.UTC()); err != nil {
 		t.Fatal(err)
@@ -343,7 +343,7 @@ func TestRealFileTransferRevocationControllerRestartAndResume(t *testing.T) {
 		)
 		restartUpload <- fileUploadResult{task: task, result: result, err: uploadErr}
 	}()
-	waitForFileProgress(t, ctx, restartProgress)
+	waitForFileProgress(t, ctx, restartProgress, restartUpload)
 	running.Stop(t)
 	controllerStopped = true
 	restartResult := waitForFileUpload(t, ctx, restartUpload)
@@ -560,7 +560,12 @@ func sendFileProgress(channel chan<- filestream.ProgressStatus, progress filestr
 	}
 }
 
-func waitForFileProgress(t *testing.T, ctx context.Context, progress <-chan filestream.ProgressStatus) {
+func waitForFileProgress(
+	t *testing.T,
+	ctx context.Context,
+	progress <-chan filestream.ProgressStatus,
+	result <-chan fileUploadResult,
+) {
 	t.Helper()
 	for {
 		select {
@@ -568,6 +573,8 @@ func waitForFileProgress(t *testing.T, ctx context.Context, progress <-chan file
 			if value.Transferred > 0 {
 				return
 			}
+		case value := <-result:
+			t.Fatalf("real file upload ended before reporting progress: task=%#v result=%#v err=%v", value.task, value.result, value.err)
 		case <-ctx.Done():
 			t.Fatal(ctx.Err())
 		case <-time.After(30 * time.Second):

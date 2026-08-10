@@ -306,6 +306,7 @@ run_main_tests() {
   export KUBELOOP_E2E_CONTEXT="${CONTEXT}"
   export KUBELOOP_GATEWAY_IMAGE="${GATEWAY_IMAGE}"
   export KUBELOOP_SINGBOX_PATH="${SINGBOX}"
+  export KUBELOOP_REMOTE_TUN_E2E=1
 
   log "Running TUN/Kubernetes E2E"
   set +e

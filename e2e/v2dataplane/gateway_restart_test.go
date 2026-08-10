@@ -110,6 +110,10 @@ func TestGatewayPodRestartRecoversV2DataPlane(t *testing.T) {
 	}
 	installGateway(t, ctx, client, namespace, verificationKeys)
 	service := waitForGateway(t, ctx, client, namespace)
+	unauthorizedNamespace := namespace + "-denied"
+	createNamespace(t, ctx, client, unauthorizedNamespace)
+	t.Cleanup(func() { deleteNamespace(t, client, unauthorizedNamespace) })
+	unauthorizedService := installIsolatedEcho(t, ctx, client, unauthorizedNamespace, "namespace-denied")
 	slowService, err := client.CoreV1().Services(namespace).Get(ctx, "slow-consumer", metav1.GetOptions{})
 	if err != nil {
 		t.Fatalf("get slow-consumer Service: %v", err)
@@ -118,6 +122,7 @@ func TestGatewayPodRestartRecoversV2DataPlane(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get Port Forward echo Service: %v", err)
 	}
+	revocableService := installIsolatedEcho(t, ctx, client, namespace, "network-revocable")
 	echoPod := readyPodByLabel(t, ctx, client, namespace, "app.kubernetes.io/name=port-forward-echo")
 	dnsService, err := client.CoreV1().Services("kube-system").Get(ctx, "kube-dns", metav1.GetOptions{})
 	if err != nil {
@@ -125,10 +130,8 @@ func TestGatewayPodRestartRecoversV2DataPlane(t *testing.T) {
 	}
 	podCIDRs := clusterPodCIDRs(t, ctx, client)
 	// Minikube can retain an old Node.Spec.PodCIDR after its CNI allocation
-	// range advances across profile restarts. The Session also records the
-	// exact Pod IP it observed, preserving least privilege and making the
-	// runnable target authoritative even when node metadata is stale.
-	podCIDRs = append(podCIDRs, echoPod.Status.PodIP+"/32")
+	// range advances across profile restarts. CIDRs are routing hints only; the
+	// observed Pod IP is the exact Gateway authorization target.
 	nodeAddress := reachableNodeAddress(t, ctx, client)
 	publicAddress := net.JoinHostPort(nodeAddress, fmt.Sprint(service.Spec.Ports[0].NodePort))
 	waitForHTTP(t, ctx, "http://"+publicAddress+"/health/ready")
@@ -152,9 +155,10 @@ func TestGatewayPodRestartRecoversV2DataPlane(t *testing.T) {
 	})
 
 	spec, err := networkspec.Normalize(networkspec.Spec{
-		PodCIDRs: podCIDRs,
+		PodCIDRs: podCIDRs, PodIPs: []string{echoPod.Status.PodIP},
 		ServiceIPs: []string{
 			service.Spec.ClusterIP, slowService.Spec.ClusterIP, echoService.Spec.ClusterIP,
+			revocableService.Spec.ClusterIP,
 		},
 		DNSServer: dnsService.Spec.ClusterIP, ClusterDomains: []string{"cluster.local"},
 	})
@@ -219,6 +223,28 @@ func TestGatewayPodRestartRecoversV2DataPlane(t *testing.T) {
 	if err := assertEchoThroughSOCKS(ctx, status.SOCKSAddress, podTarget); err != nil {
 		t.Fatalf("initial V2 PodIP TCP/UDP request: %v", err)
 	}
+	serviceTarget := net.JoinHostPort(echoService.Spec.ClusterIP, "19090")
+	if err := assertEchoThroughSOCKS(ctx, status.SOCKSAddress, serviceTarget); err != nil {
+		t.Fatalf("initial V2 same-namespace ServiceIP TCP/UDP request: %v", err)
+	}
+	revocableTarget := net.JoinHostPort(revocableService.Spec.ClusterIP, "19090")
+	if err := wait.PollUntilContextTimeout(ctx, 250*time.Millisecond, 30*time.Second, true, func(pollCtx context.Context) (bool, error) {
+		return assertEchoThroughSOCKS(pollCtx, status.SOCKSAddress, revocableTarget) == nil, nil
+	}); err != nil {
+		t.Fatalf("initial V2 revocable ServiceIP TCP/UDP request did not become ready: %v", err)
+	}
+	assertGatewayTargetRejected(
+		t, ctx, status.SOCKSAddress,
+		net.JoinHostPort(unauthorizedService.Spec.ClusterIP, "19090"),
+		"cross-namespace ServiceIP",
+	)
+	assertGatewayTargetRejected(
+		t, ctx, status.SOCKSAddress,
+		net.JoinHostPort(
+			"namespace-denied."+unauthorizedNamespace+".svc.cluster.local", "19090",
+		),
+		"cross-namespace DNS",
+	)
 	portForwards, err := clientportforward.New(controlPlane.remote, manager)
 	if err != nil {
 		t.Fatalf("create V2 Port Forward manager: %v", err)
@@ -278,14 +304,27 @@ func TestGatewayPodRestartRecoversV2DataPlane(t *testing.T) {
 	if err := waitForDirectRequest(ctx, net.JoinHostPort(gatewayDNSName, "80"), 15*time.Second); err != nil {
 		t.Fatalf("cluster DNS request through real V2 TUN: %v", err)
 	}
-	if err := assertDirectTCPEcho(ctx, podTarget); err != nil {
-		t.Fatalf("PodIP request through real V2 TUN: %v", err)
+	if err := wait.PollUntilContextTimeout(ctx, 250*time.Millisecond, 20*time.Second, true, func(pollCtx context.Context) (bool, error) {
+		return assertDirectTCPEcho(pollCtx, podTarget) == nil, nil
+	}); err != nil {
+		t.Fatalf("PodIP request through real V2 TUN did not become ready: %v", err)
 	}
 	assertSlowConsumerIsolation(
 		t, ctx, status.SOCKSAddress,
 		net.JoinHostPort(slowService.Spec.ClusterIP, "18080"), target,
 	)
 	networkGeneration, networkTickets := source.snapshot()
+	revokedSpec, err := networkspec.Normalize(networkspec.Spec{
+		PodCIDRs: spec.PodCIDRs, PodIPs: spec.PodIPs, ServiceCIDRs: spec.ServiceCIDRs,
+		ServiceIPs: []string{service.Spec.ClusterIP, slowService.Spec.ClusterIP, echoService.Spec.ClusterIP},
+		DNSServer:  spec.DNSServer, ClusterDomains: spec.ClusterDomains,
+	})
+	if err != nil {
+		t.Fatalf("build refreshed NetworkSpec: %v", err)
+	}
+	if err := source.replaceNetworkSpec(revokedSpec); err != nil {
+		t.Fatalf("stage refreshed NetworkSpec: %v", err)
+	}
 	proxy.Switch("127.0.0.1:1")
 	waitForDataPlaneState(t, ctx, statusEvents, "reconnecting")
 	assertPortForwardAddresses(t, portForwards, serverProfile.ID, tcpForward, udpForward, podTCPForward, podUDPForward)
@@ -296,26 +335,44 @@ func TestGatewayPodRestartRecoversV2DataPlane(t *testing.T) {
 		t.Fatal("real V2 TUN was reinstalled while the Data Plane was isolated")
 	}
 	proxy.Switch(alternateProxy.Address())
+	previousNetworkSpecHash := status.NetworkSpecHash
+	var recoveryStatus clientdataplane.Status
+	var recoveryChecks [4]error
 	err = wait.PollUntilContextTimeout(ctx, 200*time.Millisecond, 30*time.Second, true, func(pollCtx context.Context) (bool, error) {
 		generation, tickets := source.snapshot()
 		if generation <= networkGeneration || tickets <= networkTickets {
 			return false, nil
 		}
-		return requestThroughSOCKS(pollCtx, status.SOCKSAddress, target) == nil &&
-			requestDirect(pollCtx, target) == nil &&
-			assertPortForwardEcho(pollCtx, tcpForward.Address, udpForward.Address) == nil &&
-			assertPortForwardEcho(pollCtx, podTCPForward.Address, podUDPForward.Address) == nil, nil
+		refreshedStatus, statusErr := manager.Status(serverProfile.ID)
+		if statusErr != nil || refreshedStatus.State != "connected" || refreshedStatus.Mode != "tun" ||
+			refreshedStatus.NetworkSpecHash == previousNetworkSpecHash {
+			return false, nil
+		}
+		status = refreshedStatus
+		recoveryStatus = refreshedStatus
+		recoveryChecks[0] = requestThroughSOCKS(pollCtx, status.SOCKSAddress, target)
+		recoveryChecks[1] = requestDirect(pollCtx, target)
+		recoveryChecks[2] = assertPortForwardEcho(pollCtx, tcpForward.Address, udpForward.Address)
+		recoveryChecks[3] = assertPortForwardEcho(pollCtx, podTCPForward.Address, podUDPForward.Address)
+		return recoveryChecks[0] == nil && recoveryChecks[1] == nil && recoveryChecks[2] == nil && recoveryChecks[3] == nil, nil
 	})
 	if err != nil {
 		generation, tickets := source.snapshot()
 		t.Fatalf(
-			"V2 Data Plane did not recover after switching network path: generation=%d tickets=%d: %v",
-			generation, tickets, err,
+			"V2 Data Plane did not recover after switching network path: generation=%d tickets=%d status=%#v checks=%v: %v",
+			generation, tickets, recoveryStatus, recoveryChecks, err,
 		)
 	}
-	if activeHelperSession(t, ctx, helperClient) != tunSessionID {
-		t.Fatal("real V2 TUN was reinstalled after network-path recovery")
+	refreshedTunSessionID := activeHelperSession(t, ctx, helperClient)
+	if refreshedTunSessionID == tunSessionID {
+		t.Fatal("real V2 TUN was not reinstalled after the NetworkSpec changed")
 	}
+	assertGatewayTargetRejected(t, ctx, status.SOCKSAddress, revocableTarget, "revoked ServiceIP")
+	assertGatewayTargetRejected(
+		t, ctx, status.SOCKSAddress,
+		net.JoinHostPort("network-revocable."+namespace+".svc.cluster.local", "19090"),
+		"revoked Service DNS",
+	)
 	secondSession := session
 	secondSession.ID = uuid.NewString()
 	secondSession.Generation = 1
@@ -387,7 +444,7 @@ func TestGatewayPodRestartRecoversV2DataPlane(t *testing.T) {
 	if generation <= initialGeneration || tickets <= initialTickets {
 		t.Fatalf("recovery did not refresh Session/Ticket: generation %d->%d tickets %d->%d", initialGeneration, generation, initialTickets, tickets)
 	}
-	if activeHelperSession(t, ctx, helperClient) != tunSessionID {
+	if activeHelperSession(t, ctx, helperClient) != refreshedTunSessionID {
 		t.Fatal("real V2 TUN was reinstalled after Gateway Pod recovery")
 	}
 	allForwards := []clientportforward.Info{tcpForward, udpForward, podTCPForward, podUDPForward}
@@ -769,6 +826,18 @@ func (source *e2eSessionSource) snapshot() (uint64, int) {
 	return source.session.Generation, source.tickets
 }
 
+func (source *e2eSessionSource) replaceNetworkSpec(spec networkspec.Spec) error {
+	hash, err := networkspec.Hash(spec)
+	if err != nil {
+		return err
+	}
+	source.mu.Lock()
+	defer source.mu.Unlock()
+	source.session.NetworkSpec = spec
+	source.session.NetworkSpecHash = hash
+	return nil
+}
+
 func kubeClient(t *testing.T) kubernetes.Interface {
 	t.Helper()
 	client, err := kubernetes.NewForConfig(kubeRESTConfig(t))
@@ -811,6 +880,17 @@ func deleteNamespace(t *testing.T, client kubernetes.Interface, namespace string
 }
 
 func installGateway(t *testing.T, ctx context.Context, client kubernetes.Interface, namespace string, verificationKeys []byte) {
+	installGatewayWithArgs(t, ctx, client, namespace, verificationKeys, nil)
+}
+
+func installGatewayWithArgs(
+	t *testing.T,
+	ctx context.Context,
+	client kubernetes.Interface,
+	namespace string,
+	verificationKeys []byte,
+	args []string,
+) {
 	t.Helper()
 	const name = "kubeloop-gateway"
 	labels := map[string]string{"app.kubernetes.io/name": name, "app.kubernetes.io/component": "data-plane"}
@@ -833,6 +913,7 @@ func installGateway(t *testing.T, ctx context.Context, client kubernetes.Interfa
 					Containers: []corev1.Container{
 						{
 							Name: name, Image: harness.GatewayImage(), ImagePullPolicy: corev1.PullIfNotPresent,
+							Args: append([]string(nil), args...),
 							Env: []corev1.EnvVar{
 								{Name: "KUBELOOP_GATEWAY_HTTP_LISTEN", Value: ":8080"},
 								{Name: "KUBELOOP_GATEWAY_HTTP_PATH", Value: testPath},
@@ -936,6 +1017,58 @@ func installGateway(t *testing.T, ctx context.Context, client kubernetes.Interfa
 	if err != nil {
 		t.Fatalf("create Port Forward echo Service: %v", err)
 	}
+}
+
+func installIsolatedEcho(
+	t *testing.T,
+	ctx context.Context,
+	client kubernetes.Interface,
+	namespace, name string,
+) *corev1.Service {
+	t.Helper()
+	labels := map[string]string{"app.kubernetes.io/name": name}
+	_, err := client.AppsV1().Deployments(namespace).Create(ctx, &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Labels: labels},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: ptr.To[int32](1), Selector: &metav1.LabelSelector{MatchLabels: labels},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{Labels: labels},
+				Spec: corev1.PodSpec{
+					AutomountServiceAccountToken: ptr.To(false),
+					Containers: []corev1.Container{{
+						Name: name, Image: "python:3.12-alpine", ImagePullPolicy: corev1.PullIfNotPresent,
+						Command: []string{"python", "-u", "-c", portForwardEchoScript},
+						ReadinessProbe: &corev1.Probe{
+							ProbeHandler:  corev1.ProbeHandler{TCPSocket: &corev1.TCPSocketAction{Port: intstr.FromString("tcp")}},
+							PeriodSeconds: 1, FailureThreshold: 30,
+						},
+						Ports: []corev1.ContainerPort{
+							{Name: "tcp", ContainerPort: 19090, Protocol: corev1.ProtocolTCP},
+							{Name: "udp", ContainerPort: 19090, Protocol: corev1.ProtocolUDP},
+						},
+					}},
+				},
+			},
+		},
+	}, metav1.CreateOptions{})
+	if err != nil {
+		t.Fatalf("create cross-namespace echo Deployment: %v", err)
+	}
+	service, err := client.CoreV1().Services(namespace).Create(ctx, &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Labels: labels},
+		Spec: corev1.ServiceSpec{
+			Selector: labels,
+			Ports: []corev1.ServicePort{
+				{Name: "tcp", Port: 19090, Protocol: corev1.ProtocolTCP, TargetPort: intstr.FromString("tcp")},
+				{Name: "udp", Port: 19090, Protocol: corev1.ProtocolUDP, TargetPort: intstr.FromString("udp")},
+			},
+		},
+	}, metav1.CreateOptions{})
+	if err != nil {
+		t.Fatalf("create cross-namespace echo Service: %v", err)
+	}
+	readyPodByLabel(t, ctx, client, namespace, "app.kubernetes.io/name="+name)
+	return service
 }
 
 func waitForGateway(t *testing.T, ctx context.Context, client kubernetes.Interface, namespace string) *corev1.Service {
@@ -1154,6 +1287,19 @@ func assertEchoThroughSOCKS(ctx context.Context, socksAddress, target string) er
 		return fmt.Errorf("unexpected PodIP UDP response %q", udpResponse[:count])
 	}
 	return nil
+}
+
+func assertGatewayTargetRejected(
+	t *testing.T,
+	ctx context.Context,
+	socksAddress, target, label string,
+) {
+	t.Helper()
+	requestContext, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if err := assertEchoThroughSOCKS(requestContext, socksAddress, target); err == nil {
+		t.Fatalf("Gateway allowed denied %s target %s", label, target)
+	}
 }
 
 func assertDirectTCPEcho(ctx context.Context, target string) error {

@@ -66,6 +66,7 @@ type HostAlias struct {
 // Session translates Kubernetes discovery into this type at the adapter boundary.
 type NetworkSpec struct {
 	PodCIDRs       []string
+	PodIPs         []string
 	ServiceCIDRs   []string
 	ServiceIPs     []string
 	DNSServer      string

@@ -132,8 +132,11 @@ operator-docker-push: ## Push the Operator container image.
 .PHONY: operator-build-installer
 operator-build-installer: operator-manifests operator-generate kustomize ## Build a consolidated Operator installation manifest.
 	mkdir -p dist
-	cd config/manager && "$(KUSTOMIZE)" edit set image controller=$(OPERATOR_IMG)
-	"$(KUSTOMIZE)" build config/default > dist/operator-install.yaml
+	@runtime_dir="$$(mktemp -d "$${TMPDIR:-/tmp}/kubeloop-operator-build.XXXXXX")"; \
+	trap 'rm -rf "$$runtime_dir"' EXIT; \
+	cp -R config "$$runtime_dir/config"; \
+	cd "$$runtime_dir/config/manager" && "$(KUSTOMIZE)" edit set image controller=$(OPERATOR_IMG); \
+	"$(KUSTOMIZE)" build "$$runtime_dir/config/default" > "$(CURDIR)/dist/operator-install.yaml"
 
 ##@ Operator deployment
 
@@ -153,8 +156,11 @@ operator-uninstall: operator-manifests kustomize ## Remove Operator CRDs from th
 
 .PHONY: operator-deploy
 operator-deploy: operator-manifests kustomize ## Deploy the Operator into the current cluster.
-	cd config/manager && "$(KUSTOMIZE)" edit set image controller=$(OPERATOR_IMG)
-	"$(KUSTOMIZE)" build config/default | "$(KUBECTL)" apply -f -
+	@runtime_dir="$$(mktemp -d "$${TMPDIR:-/tmp}/kubeloop-operator-deploy.XXXXXX")"; \
+	trap 'rm -rf "$$runtime_dir"' EXIT; \
+	cp -R config "$$runtime_dir/config"; \
+	cd "$$runtime_dir/config/manager" && "$(KUSTOMIZE)" edit set image controller=$(OPERATOR_IMG); \
+	"$(KUSTOMIZE)" build "$$runtime_dir/config/default" | "$(KUBECTL)" apply -f -
 
 .PHONY: operator-undeploy
 operator-undeploy: kustomize ## Remove the Operator deployment from the current cluster.
@@ -174,7 +180,11 @@ operator-setup-test-e2e: ## Create the isolated Minikube profile when it does no
 
 .PHONY: operator-test-e2e
 operator-test-e2e: operator-setup-test-e2e operator-manifests operator-generate operator-fmt operator-vet ## Run Operator E2E tests in Minikube.
-	MINIKUBE=$(MINIKUBE) MINIKUBE_PROFILE=$(OPERATOR_E2E_PROFILE) go test -tags=e2e ./e2e/operator/e2e -v -ginkgo.v
+	@runtime_dir="$$(mktemp -d "$${TMPDIR:-/tmp}/kubeloop-operator-e2e.XXXXXX")"; \
+	trap 'rm -rf "$$runtime_dir"' EXIT; \
+	"$(KUBECTL)" config view --raw --flatten --minify --context="$(OPERATOR_E2E_PROFILE)" > "$$runtime_dir/kubeconfig"; \
+	KUBECONFIG="$$runtime_dir/kubeconfig" MINIKUBE=$(MINIKUBE) MINIKUBE_PROFILE=$(OPERATOR_E2E_PROFILE) \
+		go test -tags=e2e ./e2e/operator/e2e -v -ginkgo.v
 
 .PHONY: operator-cleanup-test-e2e
 operator-cleanup-test-e2e: ## Delete the isolated Operator Minikube profile.
@@ -229,6 +239,34 @@ helm-test-e2e: helm-load-test-e2e-images ## Run install, upgrade, rollback, rete
 .PHONY: helm-cleanup-test-e2e
 helm-cleanup-test-e2e: ## Delete the dedicated Helm lifecycle Minikube profile.
 	@$(MINIKUBE) delete --profile $(HELM_E2E_PROFILE)
+
+##@ Quality gates
+
+.PHONY: test-local
+test-local: ## Run all non-E2E tests and vet locally.
+	go test ./... -count=1
+	go vet ./...
+
+.PHONY: capacity-baseline
+capacity-baseline: ## Verify capacity limits and record logical-stream throughput/allocation baselines.
+	go test ./internal/gateway/websocketmux -run '^TestCapacity' -count=1 -v
+	go test ./internal/gateway/websocketmux -run '^$$' -bench '^BenchmarkGatewayLogicalStreamRoundTrip$$' -benchmem -benchtime=1s -count=3
+
+.PHONY: recovery-test
+recovery-test: ## Run resource recovery, owner-safety and Task lifecycle tests with the race detector.
+	go test -race -count=1 \
+		./internal/remotetask \
+		./internal/servicebinding \
+		./internal/controller/storage \
+		./internal/controller/exchangeapi \
+		./internal/controller/mirrorapi \
+		./internal/controller/previewapi \
+		./internal/controller/portforwardapi \
+		./internal/controller/execapi \
+		./internal/controller/fileapi \
+		./internal/controller/trafficbindingclient \
+		./internal/controller/maintenance \
+		./internal/operator/trafficbinding
 
 ##@ Tool dependencies
 

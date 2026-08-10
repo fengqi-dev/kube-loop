@@ -318,6 +318,10 @@ func (runtime *Runtime) AdvanceSession(session remote.Session) error {
 func (runtime *Runtime) StartTUN(ctx context.Context) (Status, error) {
 	runtime.stateMu.Lock()
 	defer runtime.stateMu.Unlock()
+	return runtime.startTUNLocked(ctx)
+}
+
+func (runtime *Runtime) startTUNLocked(ctx context.Context) (Status, error) {
 	if runtime.tun != nil {
 		return runtime.status, nil
 	}
@@ -336,8 +340,9 @@ func (runtime *Runtime) StartTUN(ctx context.Context) (Status, error) {
 	tunCtx, tunCancel := context.WithCancel(runtime.ctx)
 	stopStartupCancel := context.AfterFunc(ctx, tunCancel)
 	core, err := runtime.tunStarter.Start(tunCtx, singbox.NetworkSpec{
-		PodCIDRs: append([]string(nil), spec.PodCIDRs...), ServiceCIDRs: append([]string(nil), spec.ServiceCIDRs...),
-		ServiceIPs: append([]string(nil), spec.ServiceIPs...), DNSServer: spec.DNSServer,
+		PodCIDRs: append([]string(nil), spec.PodCIDRs...), PodIPs: append([]string(nil), spec.PodIPs...),
+		ServiceCIDRs: append([]string(nil), spec.ServiceCIDRs...),
+		ServiceIPs:   append([]string(nil), spec.ServiceIPs...), DNSServer: spec.DNSServer,
 		ClusterDomains: append([]string(nil), spec.ClusterDomains...),
 	}, runtime.status.SOCKSAddress, runtime.session.Namespace, nil)
 	stopStartupCancel()
@@ -454,8 +459,7 @@ func (runtime *Runtime) Reconnect(
 		return err
 	}
 	runtime.stateMu.Lock()
-	if session.State != "active" || session.ID != runtime.session.ID ||
-		session.NetworkSpecHash != runtime.session.NetworkSpecHash || session.Generation < runtime.session.Generation {
+	if session.State != "active" || session.ID != runtime.session.ID || session.Generation < runtime.session.Generation {
 		runtime.stateMu.Unlock()
 		_ = transport.control.Close()
 		_ = transport.forwarder.Close()
@@ -469,6 +473,25 @@ func (runtime *Runtime) Reconnect(
 		_ = transport.forwarder.Close()
 		return errors.New("Data Plane runtime is not awaiting recovery")
 	}
+	networkChanged := session.NetworkSpecHash != runtime.session.NetworkSpecHash
+	restoreTUN := networkChanged && runtime.tun != nil
+	if restoreTUN {
+		core := runtime.tun
+		cancelTUN := runtime.tunCancel
+		runtime.tun = nil
+		runtime.tunCancel = nil
+		runtime.status.Mode = "socks"
+		if cancelTUN != nil {
+			cancelTUN()
+		}
+		if err := core.Close(); err != nil {
+			runtime.transportMu.Unlock()
+			runtime.stateMu.Unlock()
+			_ = transport.control.Close()
+			_ = transport.forwarder.Close()
+			return fmt.Errorf("stop V2 TUN for refreshed NetworkSpec: %w", err)
+		}
+	}
 	runtime.forwarder = transport.forwarder
 	runtime.control = transport.control
 	runtime.transportDone = make(chan struct{})
@@ -479,6 +502,15 @@ func (runtime *Runtime) Reconnect(
 	runtime.status.SessionGeneration = session.Generation
 	runtime.status.NetworkSpecHash = session.NetworkSpecHash
 	runtime.status.State = "connected"
+	if restoreTUN {
+		if _, err := runtime.startTUNLocked(ctx); err != nil {
+			runtime.transportMu.Unlock()
+			runtime.stateMu.Unlock()
+			_ = transport.control.Close()
+			_ = transport.forwarder.Close()
+			return fmt.Errorf("restore V2 TUN for refreshed NetworkSpec: %w", err)
+		}
+	}
 	runtime.transportMu.Unlock()
 	runtime.stateMu.Unlock()
 	go runtime.watchControl(transport.control)
@@ -577,6 +609,31 @@ func (runtime *Runtime) watchControl(control net.Conn) {
 	closeSignal(runtime.transportDone)
 	runtime.transportMu.Unlock()
 	_ = control.Close()
+	_ = closeForwarder(forwarder)
+}
+
+// interruptTransport makes a live transport eligible for the same atomic
+// replacement path used after an observed socket failure. It intentionally
+// preserves the local SOCKS listener and TUN; callers must already have
+// serialized recovery at the Manager layer.
+func (runtime *Runtime) interruptTransport(reason error) {
+	if reason == nil {
+		reason = errors.New("Data Plane transport refresh requested")
+	}
+	runtime.transportMu.Lock()
+	if runtime.ctx.Err() != nil || signalClosed(runtime.transportDone) {
+		runtime.transportMu.Unlock()
+		return
+	}
+	control := runtime.control
+	forwarder := runtime.forwarder
+	runtime.control = nil
+	runtime.forwarder = nil
+	runtime.transportErr = reason
+	runtime.bridge.SetGatewayAddress("127.0.0.1:0")
+	closeSignal(runtime.transportDone)
+	runtime.transportMu.Unlock()
+	_ = closeConnection(control)
 	_ = closeForwarder(forwarder)
 }
 

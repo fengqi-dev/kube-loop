@@ -30,9 +30,13 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/servicebinding"
 	"github.com/google/uuid"
 	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 )
 
 const previewLifecycleAccessToken = "v2-e2e-preview-lifecycle"
@@ -146,7 +150,8 @@ func TestRealPreviewLifecycleOwnershipAndStaleRecovery(t *testing.T) {
 	}
 	unchanged, err := kubeClient.CoreV1().Services(harness.EchoNamespace).Get(ctx, collisionName, metav1.GetOptions{})
 	if err != nil || unchanged.UID != collision.UID || unchanged.Labels["owner"] != "user" ||
-		unchanged.Annotations["kubeloop.dev/preview-id"] != "" {
+		unchanged.Annotations["traffic.kubeloop.io/binding-name"] != "" ||
+		unchanged.Annotations["traffic.kubeloop.io/binding-uid"] != "" {
 		t.Fatalf("collision Service was changed: %#v err=%v", unchanged, err)
 	}
 
@@ -159,7 +164,7 @@ func TestRealPreviewLifecycleOwnershipAndStaleRecovery(t *testing.T) {
 	harness.WaitClusterProbe(t, ctx, kubeClient, first.ClusterIP, 9090, "udp", "explicit", "preview-udp:")
 	stopRealPreview(t, ctx, manager, serverProfile.ID, first.ID)
 	waitForRealPreviewState(t, ctx, stateStore, first.ID, "stopped")
-	assertPreviewAbsent(t, ctx, kubeClient, stateStore, firstName, first.ID)
+	assertPreviewAbsent(t, ctx, kubeClient, bindingConfig, stateStore, firstName, first.ID)
 
 	// Abrupt desktop loss sends neither a relay Stop frame nor a DELETE request.
 	// The stream owner must still delete the exact-owner Service and EndpointSlice.
@@ -182,32 +187,22 @@ func TestRealPreviewLifecycleOwnershipAndStaleRecovery(t *testing.T) {
 	assertPreviewOwned(t, ctx, kubeClient, stateStore, crashedName, crashed.ID)
 	crashedConnection.CloseNow()
 	waitForRealPreviewState(t, ctx, stateStore, crashed.ID, "failed")
-	assertPreviewAbsent(t, ctx, kubeClient, stateStore, crashedName, crashed.ID)
+	assertPreviewAbsent(t, ctx, kubeClient, bindingConfig, stateStore, crashedName, crashed.ID)
 
-	// If a user replaces the Service after ownership was checked at creation,
-	// stop only removes the still-owned EndpointSlice and preserves that Service.
+	// If a user takes ownership of the Service after creation, stop only removes
+	// the still-owned EndpointSlice and preserves that Service. Deleting and
+	// recreating the name is intentionally not used: an active Operator correctly
+	// recreates a missing desired Service before a foreign create can win.
 	replacedName := previewName("preview-replaced")
 	replaced := startRealPreview(t, ctx, manager, serverProfile, remoteSession, replacedName, targets[:1])
 	owned, err := kubeClient.CoreV1().Services(harness.EchoNamespace).Get(ctx, replacedName, metav1.GetOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := kubeClient.CoreV1().Services(harness.EchoNamespace).Delete(
-		ctx, replacedName, metav1.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &owned.UID}},
-	); err != nil {
-		t.Fatal(err)
-	}
-	waitForPreviewServiceMissing(t, ctx, kubeClient, replacedName)
-	foreign, err := kubeClient.CoreV1().Services(harness.EchoNamespace).Create(ctx, &corev1.Service{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: replacedName, Namespace: harness.EchoNamespace,
-			Labels: map[string]string{"owner": "replacement-user"},
-		},
-		Spec: corev1.ServiceSpec{
-			Selector: map[string]string{"app": "kubeloop-e2e-echo"},
-			Ports:    []corev1.ServicePort{{Name: "http", Port: 8080, Protocol: corev1.ProtocolTCP}},
-		},
-	}, metav1.CreateOptions{})
+	owned.OwnerReferences = nil
+	owned.Annotations = nil
+	owned.Labels = map[string]string{"owner": "replacement-user"}
+	foreign, err := kubeClient.CoreV1().Services(harness.EchoNamespace).Update(ctx, owned, metav1.UpdateOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -215,10 +210,12 @@ func TestRealPreviewLifecycleOwnershipAndStaleRecovery(t *testing.T) {
 	stopRealPreview(t, ctx, manager, serverProfile.ID, replaced.ID)
 	waitForRealPreviewState(t, ctx, stateStore, replaced.ID, "stopped")
 	preserved, err := kubeClient.CoreV1().Services(harness.EchoNamespace).Get(ctx, replacedName, metav1.GetOptions{})
-	if err != nil || preserved.UID != foreign.UID || preserved.Labels["owner"] != "replacement-user" {
-		t.Fatalf("foreign replacement Service was deleted or changed: %#v err=%v", preserved, err)
+	if err != nil || preserved.UID != foreign.UID || preserved.Labels["owner"] != "replacement-user" ||
+		len(preserved.OwnerReferences) != 0 || preserved.Annotations["traffic.kubeloop.io/binding-uid"] != "" {
+		t.Fatalf("user-owned Service was deleted or changed: %#v err=%v", preserved, err)
 	}
 	assertPreviewSliceAbsent(t, ctx, kubeClient, replacedName)
+	assertTrafficBindingAbsent(t, ctx, bindingConfig, replaced.ID)
 	assertSnapshotCount(t, stateStore, replaced.ID, 0)
 
 	// A real client-go 503 outage leaves durable recovery intent. After the API
@@ -251,7 +248,7 @@ func TestRealPreviewLifecycleOwnershipAndStaleRecovery(t *testing.T) {
 		t.Fatalf("recover stale real Preview: recovered=%d err=%v", recovered, recoverErr)
 	}
 	waitForRealPreviewState(t, ctx, stateStore, stale.ID, "failed")
-	assertPreviewAbsent(t, ctx, kubeClient, stateStore, staleName, stale.ID)
+	assertPreviewAbsent(t, ctx, kubeClient, bindingConfig, stateStore, staleName, stale.ID)
 
 	// Token Family revocation ends the owner lease and deletes resources even
 	// when the desktop sends no explicit stop request.
@@ -263,7 +260,7 @@ func TestRealPreviewLifecycleOwnershipAndStaleRecovery(t *testing.T) {
 	}
 	waitForRealPreviewState(t, ctx, stateStore, revoked.ID, "stopped")
 	waitForNoLocalPreview(t, ctx, manager, serverProfile.ID)
-	assertPreviewAbsent(t, ctx, kubeClient, stateStore, revokedName, revoked.ID)
+	assertPreviewAbsent(t, ctx, kubeClient, bindingConfig, stateStore, revokedName, revoked.ID)
 }
 
 func previewLifecycleState(
@@ -413,25 +410,50 @@ func assertPreviewOwned(
 	name, taskID string,
 ) {
 	t.Helper()
+	bindingName := "kubeloop-" + taskID
 	service, err := client.CoreV1().Services(harness.EchoNamespace).Get(ctx, name, metav1.GetOptions{})
-	if err != nil || service.Annotations["kubeloop.dev/preview-id"] != taskID ||
-		service.Labels["app.kubernetes.io/name"] != "kubeloop-preview" {
+	if err != nil || service.Annotations["traffic.kubeloop.io/binding-name"] != bindingName ||
+		service.Annotations["traffic.kubeloop.io/binding-uid"] == "" ||
+		service.Annotations["traffic.kubeloop.io/mode"] != "Preview" ||
+		service.Labels["app.kubernetes.io/managed-by"] != "kubeloop-operator" ||
+		!previewOwnedByBinding(service.OwnerReferences, bindingName, service.Annotations["traffic.kubeloop.io/binding-uid"]) {
 		t.Fatalf("owned Preview Service=%#v err=%v", service, err)
 	}
-	slice, err := client.DiscoveryV1().EndpointSlices(harness.EchoNamespace).Get(
-		ctx, name+"-kubeloop", metav1.GetOptions{},
-	)
-	if err != nil || slice.Annotations["kubeloop.dev/preview-id"] != taskID ||
-		slice.Labels[servicebinding.ServiceNameLabel] != name {
-		t.Fatalf("owned Preview EndpointSlice=%#v err=%v", slice, err)
+	slices, err := previewSlices(ctx, client, name)
+	if err != nil || len(slices) != 1 ||
+		slices[0].Annotations["traffic.kubeloop.io/binding-name"] != bindingName ||
+		slices[0].Annotations["traffic.kubeloop.io/binding-uid"] != service.Annotations["traffic.kubeloop.io/binding-uid"] ||
+		!previewOwnedByBinding(slices[0].OwnerReferences, bindingName, service.Annotations["traffic.kubeloop.io/binding-uid"]) {
+		t.Fatalf("owned Preview EndpointSlices=%#v err=%v", slices, err)
 	}
 	assertSnapshotCount(t, stateStore, taskID, 1)
+}
+
+func previewOwnedByBinding(references []metav1.OwnerReference, name, uid string) bool {
+	for _, reference := range references {
+		if reference.APIVersion == "traffic.kubeloop.io/v1alpha1" && reference.Kind == "TrafficBinding" &&
+			reference.Name == name && string(reference.UID) == uid && reference.Controller != nil && *reference.Controller {
+			return true
+		}
+	}
+	return false
+}
+
+func previewSlices(ctx context.Context, client kubernetes.Interface, name string) ([]discoveryv1.EndpointSlice, error) {
+	list, err := client.DiscoveryV1().EndpointSlices(harness.EchoNamespace).List(ctx, metav1.ListOptions{
+		LabelSelector: servicebinding.ServiceNameLabel + "=" + name,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return list.Items, nil
 }
 
 func assertPreviewAbsent(
 	t *testing.T,
 	ctx context.Context,
 	client kubernetes.Interface,
+	bindingConfig *rest.Config,
 	stateStore *storage.Store,
 	name, taskID string,
 ) {
@@ -442,37 +464,41 @@ func assertPreviewAbsent(
 	defer ticker.Stop()
 	for {
 		_, serviceErr := client.CoreV1().Services(harness.EchoNamespace).Get(ctx, name, metav1.GetOptions{})
-		_, sliceErr := client.DiscoveryV1().EndpointSlices(harness.EchoNamespace).Get(ctx, name+"-kubeloop", metav1.GetOptions{})
-		if apierrors.IsNotFound(serviceErr) && apierrors.IsNotFound(sliceErr) {
+		slices, sliceErr := previewSlices(ctx, client, name)
+		if apierrors.IsNotFound(serviceErr) && sliceErr == nil && len(slices) == 0 {
 			break
 		}
 		select {
 		case <-ctx.Done():
 			t.Fatal(ctx.Err())
 		case <-deadline.C:
-			t.Fatalf("Preview resources %s were not deleted: service=%v slice=%v", name, serviceErr, sliceErr)
+			t.Fatalf("Preview resources %s were not deleted: service=%v slices=%#v error=%v", name, serviceErr, slices, sliceErr)
 		case <-ticker.C:
 		}
 	}
+	assertTrafficBindingAbsent(t, ctx, bindingConfig, taskID)
 	assertSnapshotCount(t, stateStore, taskID, 0)
 }
 
-func assertPreviewSliceAbsent(t *testing.T, ctx context.Context, client kubernetes.Interface, name string) {
+func assertTrafficBindingAbsent(t *testing.T, ctx context.Context, config *rest.Config, taskID string) {
 	t.Helper()
-	_, err := client.DiscoveryV1().EndpointSlices(harness.EchoNamespace).Get(ctx, name+"-kubeloop", metav1.GetOptions{})
-	if !apierrors.IsNotFound(err) {
-		t.Fatalf("owned Preview EndpointSlice still exists for %s: %v", name, err)
+	client, err := dynamic.NewForConfig(config)
+	if err != nil {
+		t.Fatal(err)
 	}
-}
-
-func waitForPreviewServiceMissing(t *testing.T, ctx context.Context, client kubernetes.Interface, name string) {
-	t.Helper()
+	name, err := trafficbindingclient.NameForTask(taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resource := client.Resource(schema.GroupVersionResource{
+		Group: "traffic.kubeloop.io", Version: "v1alpha1", Resource: "trafficbindings",
+	}).Namespace(harness.EchoNamespace)
 	deadline := time.NewTimer(20 * time.Second)
 	defer deadline.Stop()
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		_, err := client.CoreV1().Services(harness.EchoNamespace).Get(ctx, name, metav1.GetOptions{})
+		_, err = resource.Get(ctx, name, metav1.GetOptions{})
 		if apierrors.IsNotFound(err) {
 			return
 		}
@@ -480,9 +506,17 @@ func waitForPreviewServiceMissing(t *testing.T, ctx context.Context, client kube
 		case <-ctx.Done():
 			t.Fatal(ctx.Err())
 		case <-deadline.C:
-			t.Fatalf("Preview Service %s was not deleted: %v", name, err)
+			t.Fatalf("TrafficBinding %s was not deleted: %v", name, err)
 		case <-ticker.C:
 		}
+	}
+}
+
+func assertPreviewSliceAbsent(t *testing.T, ctx context.Context, client kubernetes.Interface, name string) {
+	t.Helper()
+	slices, err := previewSlices(ctx, client, name)
+	if err != nil || len(slices) != 0 {
+		t.Fatalf("owned Preview EndpointSlice still exists for %s: slices=%#v err=%v", name, slices, err)
 	}
 }
 
@@ -490,9 +524,13 @@ func deletePreviewFixture(ctx context.Context, client kubernetes.Interface, name
 	cleanupContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
 	_ = client.CoreV1().Services(harness.EchoNamespace).Delete(cleanupContext, name, metav1.DeleteOptions{})
-	_ = client.DiscoveryV1().EndpointSlices(harness.EchoNamespace).Delete(
-		cleanupContext, name+"-kubeloop", metav1.DeleteOptions{},
-	)
+	if slices, err := previewSlices(cleanupContext, client, name); err == nil {
+		for _, slice := range slices {
+			_ = client.DiscoveryV1().EndpointSlices(harness.EchoNamespace).Delete(
+				cleanupContext, slice.Name, metav1.DeleteOptions{},
+			)
+		}
+	}
 }
 
 func waitForRealPreviewState(

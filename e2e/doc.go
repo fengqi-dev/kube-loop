@@ -10,6 +10,7 @@
 //	e2e/exchange/  Service Exchange
 //	e2e/mirror/    Service Mirror
 //	e2e/preview/   Preview
+//	e2e/remotetun/ portable real Helper/TUN/WSS wake recovery (macOS/Windows/Linux)
 //	e2e/scripts/   Helper install / stop helpers for run.sh
 //
 // All tests use a real privileged TUN Connect via session.Manager and the

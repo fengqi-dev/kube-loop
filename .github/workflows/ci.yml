@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - v2
     paths-ignore:
       - "Casks/**"
   pull_request:
@@ -96,8 +97,14 @@ jobs:
       - name: Run unit tests
         run: go test -tags webkit2_41 ./...
 
+      - name: Record Gateway capacity baseline
+        run: make capacity-baseline
+
       - name: Run race detector
         run: go test -race ./internal/gateway/... ./internal/helper ./internal/singbox ./internal/session ./internal/socksbridge ./internal/protocol/...
+
+      - name: Run recovery race matrix
+        run: make recovery-test
 
       - name: Build Gateway binaries
         shell: bash
@@ -242,6 +249,7 @@ jobs:
           KUBELOOP_GATEWAY_IMAGE: kube-loop-gateway:dev
           KUBELOOP_SINGBOX_PATH: ${{ github.workspace }}/build/bin/sing-box
           KUBELOOP_E2E_TIMEOUT: 25m
+          KUBELOOP_REMOTE_TUN_E2E: "1"
         run: bash ./e2e/scripts/run-go-test.sh
 
       - name: Stop helper sessions
@@ -314,6 +322,12 @@ jobs:
         run: |
           go test -tags=e2e ./e2e/platform ./internal/helper -count=1 -v
 
+      - name: Run Windows remote Gateway TUN and wake E2E
+        env:
+          KUBELOOP_REMOTE_TUN_E2E: "1"
+          KUBELOOP_SINGBOX_PATH: ${{ github.workspace }}\build\bin\sing-box.exe
+        run: go test -tags=e2e ./e2e/remotetun -count=1 -v -timeout=5m
+
       - name: Uninstall helper
         if: always()
         run: >
@@ -330,11 +344,23 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v6
 
+      - name: Download frontend dist
+        uses: actions/download-artifact@v7
+        with:
+          name: frontend-dist
+          path: frontend/dist
+
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
+
+      - name: Vet macOS client
+        run: go vet ./...
+
+      - name: Run macOS client tests
+        run: go test ./... -count=1
 
       - name: Build helper and sing-box
         shell: bash
@@ -377,6 +403,12 @@ jobs:
             build/bin/helper-platform-e2e.test \
               -test.v \
               -test.run '^TestPlatformDNSApplyAndRestore$'
+
+      - name: Run macOS remote Gateway TUN and wake E2E
+        env:
+          KUBELOOP_REMOTE_TUN_E2E: "1"
+          KUBELOOP_SINGBOX_PATH: ${{ github.workspace }}/build/bin/sing-box
+        run: go test -tags=e2e ./e2e/remotetun -count=1 -v -timeout=5m
 
       - name: Uninstall helper
         if: always()

@@ -69,7 +69,7 @@ func (r *TrafficBindingReconciler) Reconcile(ctx context.Context, request ctrl.R
 		before := binding.DeepCopy()
 		controllerutil.RemoveFinalizer(binding, bindingFinalizer)
 		if err := r.Patch(ctx, binding, client.MergeFrom(before)); err != nil {
-			return ctrl.Result{}, err
+			return ctrl.Result{}, client.IgnoreNotFound(err)
 		}
 		r.event(binding, corev1.EventTypeNormal, "Restored", "TrafficBinding resources were restored")
 		return ctrl.Result{}, nil

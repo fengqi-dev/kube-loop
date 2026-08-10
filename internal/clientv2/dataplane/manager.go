@@ -35,7 +35,10 @@ const (
 	reasonSessionExpired         = "session_expired"
 	reasonSessionChanged         = "session_changed"
 	reasonNetworkUnavailable     = "network_unavailable"
+	reasonSystemResumed          = "system_resumed"
 )
+
+var errSystemResumed = errors.New("system resumed")
 
 type Manager struct {
 	sessions SessionSource
@@ -77,6 +80,7 @@ func NewManager(sessions SessionSource, config Config) (*Manager, error) {
 func (manager *Manager) Connect(ctx context.Context, serverProfile profile.Profile, session remote.Session) (Status, error) {
 	manager.mu.Lock()
 	defer manager.mu.Unlock()
+	desiredMode := "socks"
 	if current := manager.active[serverProfile.ID]; current != nil {
 		status := current.runtime.Status()
 		select {
@@ -98,6 +102,7 @@ func (manager *Manager) Connect(ctx context.Context, serverProfile profile.Profi
 				}
 				return status, nil
 			}
+			desiredMode = current.desiredMode
 			delete(manager.active, serverProfile.ID)
 			if err := current.runtime.Close(); err != nil {
 				return Status{}, err
@@ -108,8 +113,14 @@ func (manager *Manager) Connect(ctx context.Context, serverProfile profile.Profi
 	if err != nil {
 		return Status{}, err
 	}
+	if desiredMode == "tun" {
+		if _, err := runtime.StartTUN(ctx); err != nil {
+			_ = runtime.Close()
+			return Status{}, fmt.Errorf("restore V2 TUN after Session change: %w", err)
+		}
+	}
 	entry := &managedRuntime{
-		profile: serverProfile, session: session, runtime: runtime, desiredMode: "socks",
+		profile: serverProfile, session: session, runtime: runtime, desiredMode: desiredMode,
 	}
 	manager.active[serverProfile.ID] = entry
 	go manager.watch(serverProfile.ID, entry, runtime, runtime.TransportDone())
@@ -171,6 +182,23 @@ func (manager *Manager) StopTUN(profileID string) (Status, error) {
 	return status, err
 }
 
+// Status returns the current Data Plane state without changing the Runtime or
+// publishing another status event. It is suitable for UI refreshes and health
+// polling that must not retrigger lifecycle operations.
+func (manager *Manager) Status(profileID string) (Status, error) {
+	manager.mu.Lock()
+	defer manager.mu.Unlock()
+	entry := manager.active[profileID]
+	if entry == nil {
+		return Status{}, errors.New("Data Plane runtime is not connected")
+	}
+	status := entry.runtime.Status()
+	if entry.recovering {
+		status.State = "reconnecting"
+	}
+	return status, nil
+}
+
 // Dialer returns a fixed SOCKS endpoint for local feature listeners. The
 // endpoint stays stable while the underlying WebSocket transport recovers.
 func (manager *Manager) Dialer(profileID string) (traffic.Dialer, error) {
@@ -185,6 +213,50 @@ func (manager *Manager) Dialer(profileID string) (traffic.Dialer, error) {
 		return traffic.Dialer{}, errors.New("Data Plane SOCKS endpoint is unavailable")
 	}
 	return traffic.Dialer{Endpoint: traffic.Endpoint{Address: status.SOCKSAddress}}, nil
+}
+
+// Resume proactively replaces the transport after an operating-system wake.
+// Sleeping hosts can retain a TCP socket that appears open until the next
+// write, so waiting for TransportDone would leave TUN traffic black-holed.
+// The Runtime keeps its stable SOCKS listener and active TUN while the
+// authoritative Session and RelayTicket are refreshed.
+func (manager *Manager) Resume(profileID string) error {
+	manager.mu.Lock()
+	entry := manager.active[profileID]
+	if entry == nil {
+		manager.mu.Unlock()
+		return errors.New("Data Plane runtime is not connected")
+	}
+	if entry.recovering {
+		manager.mu.Unlock()
+		return nil
+	}
+	entry.recovering = true
+	runtime := entry.runtime
+	baseline := entry.session
+	manager.mu.Unlock()
+	status := runtime.Status()
+	status.State = "reconnecting"
+	manager.emit(profileID, status, errSystemResumed)
+	runtime.interruptTransport(errSystemResumed)
+	go manager.recover(profileID, entry, runtime, baseline)
+	return nil
+}
+
+// ResumeAll schedules one coalesced wake recovery for every active Profile.
+// It returns the number of connected Profiles that were present at the time
+// of the notification, including Profiles already recovering.
+func (manager *Manager) ResumeAll() int {
+	manager.mu.Lock()
+	profileIDs := make([]string, 0, len(manager.active))
+	for profileID := range manager.active {
+		profileIDs = append(profileIDs, profileID)
+	}
+	manager.mu.Unlock()
+	for _, profileID := range profileIDs {
+		_ = manager.Resume(profileID)
+	}
+	return len(profileIDs)
 }
 
 func (manager *Manager) Shutdown() error {
@@ -227,7 +299,12 @@ func (manager *Manager) watch(
 	default:
 	}
 	manager.mu.Lock()
-	if manager.active[profileID] != entry || entry.runtime != runtime || manager.ctx.Err() != nil {
+	if manager.active[profileID] != entry || entry.runtime != runtime || manager.ctx.Err() != nil ||
+		runtime.TransportDone() != transportDone {
+		manager.mu.Unlock()
+		return
+	}
+	if entry.recovering {
 		manager.mu.Unlock()
 		return
 	}
@@ -264,10 +341,7 @@ func (manager *Manager) recover(profileID string, entry *managedRuntime, failed 
 		if !valid {
 			return
 		}
-		err = failed.Reconnect(
-			manager.ctx, entry.profile, session,
-			manager.sessions.RelayTicketSource(profileID),
-		)
+		err = failed.Reconnect(manager.ctx, entry.profile, session, manager.sessions.RelayTicketSource(profileID))
 		if err != nil {
 			lastError = err
 			continue
@@ -313,7 +387,6 @@ func (manager *Manager) recover(profileID string, entry *managedRuntime, failed 
 		manager.emit(profileID, status, terminalError)
 	}
 }
-
 func (manager *Manager) emit(profileID string, status Status, err error) {
 	if manager.config.OnStatus == nil {
 		return
@@ -321,17 +394,38 @@ func (manager *Manager) emit(profileID string, status Status, err error) {
 	event := StatusEvent{ProfileID: profileID, Status: status}
 	if err != nil {
 		event.Error = err.Error()
+		if errors.Is(err, errSystemResumed) {
+			event.Reason = reasonSystemResumed
+			event.Retryable = true
+		}
 		switch status.State {
 		case "reconnecting":
-			event.Reason = reasonTransportInterrupted
-			event.Retryable = true
+			if event.Reason == "" {
+				event.Reason = reasonTransportInterrupted
+				event.Retryable = true
+			}
 		case "error":
 			event.Reason, event.Retryable = recoveryFailureAction(err)
 		}
 	}
 	select {
 	case manager.events <- event:
+		return
 	case <-manager.ctx.Done():
+		return
+	default:
+	}
+	// A UI callback is outside the Data Plane trust boundary and may stall.
+	// Preserve lifecycle progress by coalescing a full queue toward its newest
+	// status instead of blocking while a Manager mutex may be held.
+	select {
+	case <-manager.events:
+	default:
+	}
+	select {
+	case manager.events <- event:
+	case <-manager.ctx.Done():
+	default:
 	}
 }
 
@@ -384,7 +478,7 @@ func (manager *Manager) waitRecovery(attempt int) bool {
 }
 
 func validateRecoverySession(previous, current remote.Session) error {
-	if current.State != "active" || current.ID != previous.ID || current.NetworkSpecHash != previous.NetworkSpecHash {
+	if current.State != "active" || current.ID != previous.ID {
 		return errors.New("active Session identity changed during Data Plane recovery")
 	}
 	if current.Generation < previous.Generation {

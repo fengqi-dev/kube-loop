@@ -14,7 +14,7 @@
 | HTTP Gateway 多路复用 | `TestGatewayPodRestartRecoversV2DataPlane` | 同一 Gateway 上并发快/慢流、四个 Port Forward、两名 Principal；慢流不阻塞兄弟流。 |
 | Exchange TCP/UDP | `TestRealExchangeLifecycleAndStaleOwnerRecovery` | 集群 Service 流量到桌面本地目标；正常停止、客户端崩溃、撤权和 stale-owner 恢复均还原 Service。 |
 | Mirror TCP/UDP | `TestRealMirrorPreservesPrimaryPathAndRecoversStaleOwner` | 原 Pod 响应始终为主路径，桌面只收到副本；本地响应不能泄漏；覆盖停止、崩溃、撤权和恢复。 |
-| Preview TCP/UDP | `TestRealPreviewLifecycleOwnershipAndStaleRecovery` | 创建真实 Service/EndpointSlice；名称冲突与外部替换安全；停止、崩溃、撤权和恢复按 Task UUID 清理。 |
+| Preview TCP/UDP | `TestRealPreviewLifecycleOwnershipAndStaleRecovery` | 创建真实 Service/EndpointSlice；名称冲突与用户接管安全；停止、崩溃、撤权和恢复按 TrafficBinding name/UID/controller reference 清理。 |
 | Pod exec/TTY | `TestRealPodExecTTYDisconnectAndControllerRestart` | 真实 SPDY exec、stdin、TTY resize、异常 WebSocket 关闭、Controller 停止/重启及重启后再次执行。 |
 | Pod exec 撤权 | `TestRealPodExecStopsWhenTokenFamilyIsRevoked` | Token Family 撤销主动终止真实 Pod 命令并写入取消终态。 |
 | 文件上传/下载与恢复 | `TestRealFileTransferRevocationControllerRestartAndResume` | 8 MiB 真实文件、校验和、撤权、Controller 重启、Pod 端 partial resume 和完整下载校验。 |
@@ -33,7 +33,7 @@
 | Controller 崩溃/重启 | Pod exec、文件传输、Exchange/Mirror/Preview stale owner | 活跃工作终止或保留恢复意图；接替 Controller 可继续执行或补偿 Kubernetes 资源。 |
 | Token Family 撤销 | Exchange、Mirror、Preview、Pod exec、文件传输 | 无需客户端 DELETE，授权 lease 主动终止；所有资源与流被清理。 |
 | Kubernetes API 暂时不可用 | Preview lifecycle 的 client-go transport 503 gate | 真实删除请求命中 503，Task 与 snapshot 保持 `recovering`；API 恢复后接替 Reconciler 完成精确所有者清理。 |
-| 网络路径中断 | loopback Gateway proxy 切到不可达地址再切换备用路径 | TUN 不允许静默旁路；本地 listener 和 Helper session 不重装；新 generation 恢复。 |
+| 网络路径中断与权限刷新 | loopback Gateway proxy 切到不可达地址、heartbeat 刷新 NetworkSpec 后切换备用路径 | TUN 不允许静默旁路；本地 SOCKS/Port Forward 地址保持；NetworkSpec 变化时旧 Helper session 被清理并按新 allowlist 重装，随后普通 Gateway 重启不重复重装。 |
 | 多身份隔离 | 两名 Principal、跨 Session token、metrics | 跨 Session 控制令牌拒绝；指标不暴露 Principal、Device 或 Session ID。 |
 
 ## Kubernetes 资源不变量
@@ -41,17 +41,26 @@
 - Service 接管前同时快照 EndpointSlice 与 legacy Endpoints；两者同时存在时也不能择一忽略。
 - 接管时先删除 legacy Endpoints，再删除原 EndpointSlice，避免 EndpointSlice mirroring controller 重建旧 Pod 后端。
 - 恢复时分别恢复两类快照；只有恢复成功后才能删除 durable rollback snapshot。
-- Preview 只删除携带完全匹配 Task UUID owner metadata 的 Service/EndpointSlice，不能删除用户替换的资源。
+- Preview CR 名称确定性包含 Task UUID；实际 Service/EndpointSlice 只由完全匹配的 TrafficBinding name、UID 与 controller reference 控制，不能删除用户接管的资源。
 - Mirror E2E 的 Controller 运行在宿主机，生产默认仍直连 PodIP；测试注入的 primary dialer 仅把已由服务端快照授权的相同 TCP/UDP 后端映射到真实 Echo Pod NodePort，以跨越宿主机与 Minikube PodCIDR 的拓扑边界。
+
+## 身份、容量与平台证据
+
+- `internal/clientv2/auth/fullstack_oidc_test.go` 使用真实 TLS discovery、authorization redirect、PKCE、JWKS 和 RS256 ID Token，贯通桌面 loopback callback、Controller 登录、SQLite、Access/Refresh Token 轮换与撤销。
+- `internal/clientv2/auth/fullstack_ad_test.go` 使用真实 LDAPS BER 服务绑定、escaped filter 搜索、独立用户绑定、objectGUID/group/account-state 映射，贯通桌面登录、Controller、SQLite 与错误密码拒绝。
+- `make capacity-baseline` 验证全局/单用户物理 WSS、逻辑 stream 上限、容量释放，以及满载时 live/ready/metrics；三轮 32 KiB stream benchmark 记录吞吐和分配。`TestGatewayPodMultiUserCapacityRSSAndCleanup` 在单个真实 Gateway Pod 上以四名 Principal/四条物理 WSS/十六条逻辑 stream 验证限额、容量复用、集群内吞吐和 kubelet working-set 曲线；满载期间撤销 Token Family，确认 Preview Task、relay、TrafficBinding、Service、EndpointSlice 和 snapshot 在 5 秒预算内全部清理。
+- Windows/macOS workflow 运行全量本地测试和真实 Helper 安装、升级、ACL、DNS 恢复、卸载；Linux 额外运行完整 Minikube TUN。`e2e/remotetun` 已接入三平台 workflow，使用实际 Helper、sing-box TUN、WSS/smux Gateway、RelayTicket/NetworkSpec 和精确目标路由，验证休眠间隔触发 transport 刷新后 SOCKS 地址、TUN core 与 Helper Session 保持不变，且停止后无特权资源残留；macOS 本地实测通过，远端三平台 CI 是 V2-803 的最终门禁。
 
 ## 运行方式
 
 ```bash
 KUBELOOP_E2E=1 \
 KUBELOOP_E2E_CONTEXT=minikube \
+KUBELOOP_REMOTE_TUN_E2E=1 \
 KUBELOOP_GATEWAY_IMAGE=<由当前工作树构建的镜像> \
 KUBELOOP_SINGBOX_PATH=<当前 sing-box 路径> \
-go test -tags=e2e ./e2e/v2dataplane -count=1 -timeout=20m -parallel=1 -p=1 -v
+KUBELOOP_E2E_PACKAGES='./e2e/v2dataplane ./e2e/remotetun' \
+bash ./e2e/scripts/run-go-test.sh
 ```
 
-2026-08-10 的 V2-609 最终验收复跑为 8/8 通过，整包耗时 `125.367s`；加入 Data Plane core 异常退出清理后的目标用例单独复跑耗时 `12.930s`。此前同一覆盖集复跑耗时 `120.620s`。
+通用入口会在目标 context 安装当前 TrafficBinding CRD，并以隔离 kubeconfig 启动当前工作树 Operator；专用 Kubebuilder 部署/指标套件仍由 `make operator-test-e2e` 独立执行。2026-08-11 加入真实单 Pod 容量/RSS/满载撤权，以及 Helper/TUN/WSS 休眠恢复后，`e2e/v2dataplane` 完整复跑通过（`194.739s`），`e2e/remotetun` 通过（`1.647s`）。此前 File Transfer 同场景连续 10 次复跑通过；Preview 专项确认 TrafficBinding、Service、EndpointSlice 与 durable snapshot 全部释放（`30.398s`）；隔离 kubeconfig 的 Operator 部署/受保护 metrics 套件 2/2 通过（`181.297s`）；`make helm-test-e2e` 在 Minikube Kubernetes v1.35.1 完整通过 SQLite/PostgreSQL 安装、独立升级、扩缩容、回滚、Pod 恢复、审计/管理撤权、数据保留和卸载/CRD retain。

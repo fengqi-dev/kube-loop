@@ -612,18 +612,21 @@ Gateway 使用统一的 `AuthProvider` 抽象，首期支持：
   - 对 Gateway HTTP/WSS 入口执行 fuzz 和大小限制测试。
   - 2026-08-10（完成）：安全矩阵覆盖 OAuth state/nonce/PKCE/callback/交换码重放、Refresh Token 并发 replay 与整族撤销、JWT `alg=none`/HS256 confusion、AD filter 注入和账号/客户端双维度密码喷洒、统一 Authorizer 与 principal/session/namespace 所有权 IDOR、Gateway discovery/Origin/redirect 与 Provider 出站配置 SSRF 边界、文件/归档路径穿越、stream 单次 claim/续租越权以及 API/audit/readiness/storage/Task 日志脱敏。新增 64 KiB HTTP header 上限、16 KiB auth body 回归、Pod Exec WSS 连接级帧上限，并提供可持续运行的 Gateway HTTP 与 WSS exec frame fuzz target；本轮短时执行约 6 万/70 万输入无失败。完整映射见 `docs/v2-security-test-matrix.zh-CN.md`；Controller 全量 race 与全量非 E2E test/vet 通过。
 
-- [ ] **V2-801：资源恢复测试。**
+- [x] **V2-801：资源恢复测试。**
   - 在 Task 生命周期的每个步骤注入失败。
   - 验证 Exchange/Mirror/Preview 不遗留或错误恢复他人资源。
   - Gateway 重启后的回收器只处理带正确 owner identity 的过期资源。
+  - 2026-08-10（完成）：`make recovery-test` 以 race detector 覆盖统一 Task 状态机、Service/EndpointSlice/legacy Endpoints 快照、TrafficBinding finalizer、Controller stale-owner CAS、Port Forward/Exec/File/Exchange/Mirror/Preview 补偿和 maintenance 孤儿回收。故障注入覆盖 snapshot 持久化、部分 Apply、ready 前断连、显式停止、Token Family 撤销、Controller 重启、真实 Kubernetes 503、错误 owner/UID、同名用户资源接管和双 worker 竞争。通用 Minikube E2E 现在自动安装 CRD 并启动当前工作树 Operator；`e2e/v2dataplane` 8/8 复跑通过（173.842 秒），验证 Exchange/Mirror 恢复原 Service/Endpoint 表示、Preview 只清理仍由对应 TrafficBinding UID 控制的资源、Gateway Pod 重启与 NetworkSpec 权限刷新后本地 Task/端口/TUN 安全收敛。Preview 专项额外确认 TrafficBinding、Service、EndpointSlice 与 snapshot 全部释放（30.398 秒）；隔离 kubeconfig 的 Kubebuilder Operator 部署/metrics 套件 2/2 通过（181.297 秒）。
 
-- [ ] **V2-802：性能与容量测试。**
+- [x] **V2-802：性能与容量测试。**
   - 建立单 Pod 的用户数、物理 WSS、逻辑 stream、吞吐和内存基线。
   - 验证限流不会阻塞健康检查、登出和资源清理。
+  - 2026-08-11（完成）：在可重复的 Gateway 进程内容量门禁和三轮 CI benchmark 之外，新增单 Gateway Pod 的真实 Minikube 容量 E2E。测试以四名 Principal 建立四条物理 WSS 和十六条逻辑 stream，验证单用户/全局物理连接上限、每连接逻辑流上限、释放后容量复用，以及满载时 `/health/live`、`/health/ready` 和 `/metrics` 不被阻塞；并发 32 KiB 集群内往返吞吐实测 59.33 MiB/s，kubelet working-set 峰值 10.13 MiB、相对基线增长 5.42 MiB。满载期间通过真实 Controller/Operator 创建 Preview，Token Family 撤销后 130.48 ms 内停止 Task，并清空客户端 relay、TrafficBinding、Service、EndpointSlice 与 durable snapshot。独立用例 12.275 秒通过，完整 `e2e/v2dataplane` 复跑 194.739 秒通过。
 
 - [ ] **V2-803：跨平台客户端 E2E。**
   - macOS、Windows、Linux 覆盖安装、登录、TUN、DNS、退出、升级和卸载。
   - 操作系统休眠、网络切换后 Session 能恢复或安全清理。
+  - 2026-08-11（验证中）：新增可移植的休眠间隔检测器和 Data Plane `ResumeAll` 恢复路径；唤醒时主动中断陈旧 transport、刷新权威 Session/RelayTicket，并原位重连，保持 SOCKS 地址和 Helper TUN Session 不变。`e2e/remotetun` 使用实际特权 Helper、sing-box TUN、WSS/smux Gateway、RelayTicket/NetworkSpec 授权和精确目标路由，在 macOS 上验证休眠间隔前后直接访问 `100.64.0.42:443` 均成功，且停止后 Helper Session 为零（1.647 秒）；Linux Minikube 同包与完整数据面复跑通过，Windows/Linux amd64 测试二进制已交叉编译。Windows/macOS/Linux CI 均已接入该真实 TUN/唤醒门禁；待远端三平台 workflow 实际通过后关闭本项。
 
 - [ ] **V2-804：可观测性。**
   - 添加 RED 指标、active session/stream/task gauge、Kubernetes API latency 和 cleanup failure。
@@ -648,7 +651,7 @@ Gateway 使用统一的 `AuthProvider` 抽象，首期支持：
 - [x] **V2-808：Namespace 网络权限闭环。**
   - Controller Policy、Kubernetes impersonation、RelayTicket 和 Gateway 目标校验共同绑定 namespace。
   - NetworkSpec 心跳刷新；物理 WSS 不超过 RelayTicket 生命周期。
-  - 2026-08-10（完成）：ADR 0021 固化 namespace 权限单元。Controller 仅通过用户 impersonating client 发现目标 namespace 的非 host-network PodIP 与 Service ClusterIP，CIDR 只做路由；RelayTicket 强制签名绑定 namespace、Session generation 和 NetworkSpecHash。Gateway 注册 control spec 时核对 token/namespace/hash，每次 TCP/UDP open 只允许精确 IP，DNS 必须为 cluster suffix 且解析结果再次过 allowlist，CoreDNS 仅 53 端口。Session heartbeat 重新发现并原子更新 NetworkSpec/hash，发现失败不续期；WSS 使用 Ticket expiry 作为不可延长 deadline，把 IP 回收、权限变更和旧 generation 的暴露限制在两分钟内。非 E2E 单元/contract 测试覆盖缺失 hash、过期身份和跨 namespace DNS 拒绝；Minikube E2E 按约定留到统一阶段。
+  - 2026-08-10（完成）：ADR 0021 固化 namespace 权限单元。Controller 仅通过用户 impersonating client 发现目标 namespace 的非 host-network PodIP 与 Service ClusterIP，CIDR 只做路由；RelayTicket 强制签名绑定 namespace、Session generation 和 NetworkSpecHash。Gateway 注册 control spec 时核对 token/namespace/hash，每次 TCP/UDP open 只允许精确 IP，DNS 必须为 cluster suffix 且解析结果再次过 allowlist，CoreDNS 仅 53 端口。Session heartbeat 重新发现并原子更新 NetworkSpec/hash，发现失败不续期；WSS 使用 Ticket expiry 作为不可延长 deadline，把 IP 回收、权限变更和旧 generation 的暴露限制在两分钟内。单元/contract 测试覆盖缺失 hash、过期身份和跨 namespace DNS 拒绝；真实 Minikube 新建独立 denied namespace，验证其 ServiceIP/FQDN 均被 Gateway 拒绝，同 namespace 精确 ServiceIP 初始可访问、heartbeat 撤权后不可访问。NetworkSpec hash 变化时客户端保持本地 SOCKS/Port Forward 地址，替换底层 transport、清理旧 Helper TUN 并按新 PodIP/ServiceIP 重装；随后单纯 Gateway Pod 重启继续复用该 TUN。
 
 ### M9：后台管理（建议在 V2.0 Beta 后按切片交付）
 
@@ -669,7 +672,7 @@ Gateway 使用统一的 `AuthProvider` 抽象，首期支持：
   - 2026-08-10（完成）：新增 OIDC/AD Provider validate/draft/publish/rollback revision 流程。Helm 静态 Provider 与数据库 active revision 聚合为不可变 Registry；发布在事务前解析部署 allowlist 的 Secret alias、执行 OIDC discovery/AD 连通性检查并预构建完整快照，数据库 CAS 成功后以 Registry CAS 只合并变更 Provider，保留并发无关发布。Controller 启动和按 active pointer revision/ETag 指纹轮询收敛，动态 discovery、登录与 readiness 使用同一原子 Registry。chi v5 管理 API/UI 继续强制 Cookie Session、RBAC、CSRF、强 If-Match 和幂等键，响应/审计/Web Storage 不回显 alias；Helm Secret key 仅投影到 Controller 固定只读路径，不进入 ConfigMap、Data Plane 或 Operator。SQLite 生命周期、HTTP 脱敏、并发 Registry、Helm contract、全量非 E2E 与目标 race 测试通过；真实 OIDC/AD/Minikube E2E 留到 V2-908。
 - [x] **V2-907：幂等、owner-safe 运维动作。**
   - 2026-08-10（完成）：新增统一的 `internal/controller/admin/operations` 服务和 chi v5 管理端点，支持撤销单个 Device Session、按 Principal 原子撤销全部 Token Family、按 generation 强制停止 Cluster Session、按 `updatedAt` 版本停止 Preview/Exchange/Mirror/Port Forward 等 Task、触发既有五类 owner-safe recovery reconciler，以及 Relay drain/recover。所有写入继续经过 Management Session、RBAC、同步 CSRF、有界原因与 SHA-256 幂等键；状态、幂等记录和成功审计在同一数据库事务提交，明文幂等键不进入数据库或审计。Session 先持久化停止再通知运行时，失败返回待收敛；Task 使用合法 `stopping/stopped` 状态交给现有 worker 清理，不移除 finalizer、不绕过 owner/UID 防护。schema v10 持久保存 Relay desired state 与单调 control version，Controller 重启时在 Relay 注册前恢复，离线 Relay 重新注册也不会意外接流。schema v11 提供异步审计导出任务，跨副本 CAS claim、30 秒 stale claim 接管、创建者隔离读取、最多 1000 条/4 MiB NDJSON 和稳定失败码；逻辑导出/导入包含 Relay 控制意图和审计导出任务。内嵌后台按 capability 显示撤销、停止、恢复、排空及导出操作。SQLite/PostgreSQL repository conformance、事务/重放/跨 owner/运行时待收敛、HTTP CSRF/ETag/幂等与非 E2E 全量测试通过；真实 Minikube/浏览器 E2E 留到 V2-908。
-- [ ] **V2-908：管理面安全与统一 E2E。**
+- [x] **V2-908：管理面安全与统一 E2E。**
 
 管理面属于 `kubeloop-controller`，不新建项目、不进入 Data Plane，也不扩大
 Gateway Kubernetes/数据库权限。默认 SQLite、外部 PostgreSQL；Secret 仅使用

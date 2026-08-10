@@ -114,7 +114,9 @@ func (tickets *testTickets) Refresh(context.Context, string) (remote.Session, er
 }
 
 func TestManagerReusesSessionAndReplacesChangedSession(t *testing.T) {
-	spec, err := networkspec.Normalize(networkspec.Spec{PodCIDRs: []string{"10.42.0.0/16"}})
+	spec, err := networkspec.Normalize(networkspec.Spec{
+		PodCIDRs: []string{"10.42.0.0/16"}, PodIPs: []string{"10.43.7.9"},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +166,8 @@ func TestManagerReusesSessionAndReplacesChangedSession(t *testing.T) {
 	}
 	tunStarts, tunNetwork, tunBridge, tunNamespace, _ := tunStarter.snapshot()
 	if tunStatus.Mode != "tun" || tunStarts != 1 || tunBridge != firstStatus.SOCKSAddress ||
-		tunNamespace != "payments" || len(tunNetwork.PodCIDRs) != 1 {
+		tunNamespace != "payments" || len(tunNetwork.PodCIDRs) != 1 ||
+		len(tunNetwork.PodIPs) != 1 || tunNetwork.PodIPs[0] != "10.43.7.9" {
 		t.Fatalf("TUN status = %#v, starter = %#v", tunStatus, tunStarter)
 	}
 	if _, err := manager.StartTUN(context.Background(), serverProfile.ID); err != nil {
@@ -259,6 +262,9 @@ func TestManagerDisconnectClosesRuntimeAndRemovesProfile(t *testing.T) {
 	if _, err := manager.Dialer(serverProfile.ID); err == nil {
 		t.Fatal("disconnected profile still exposed a dialer")
 	}
+	if _, err := manager.Status(serverProfile.ID); err == nil {
+		t.Fatal("disconnected profile still exposed a status")
+	}
 	if err := manager.Disconnect(serverProfile.ID); err != nil {
 		t.Fatalf("repeated disconnect = %v", err)
 	}
@@ -347,6 +353,197 @@ func TestManagerRecoversControlStreamWithFreshSessionGeneration(t *testing.T) {
 	}
 	if err := manager.Shutdown(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestManagerSystemResumeRefreshesTransportWithoutReinstallingTUN(t *testing.T) {
+	spec, err := networkspec.Normalize(networkspec.Spec{ServiceIPs: []string{"10.96.0.10"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash, _ := networkspec.Hash(spec)
+	session := remote.Session{
+		ID: "ec0b67a2-e84c-4fe7-a0c5-810f210157b5", Namespace: "payments", State: "active",
+		Generation: 4, NetworkSpec: spec, NetworkSpecHash: hash,
+	}
+	controls := make(chan net.Conn, 4)
+	statusEvents := make(chan StatusEvent, 8)
+	var starts atomic.Int32
+	tunStarter := &testTUNStarter{}
+	tickets := &testTickets{session: session}
+	manager, err := NewManager(tickets, Config{
+		RecoveryAttempts: 2, RecoveryBackoff: 10 * time.Millisecond,
+		TUNStarter: tunStarter, OnStatus: func(event StatusEvent) { statusEvents <- event },
+		startForwarder: func(ctx context.Context, clientConfig websocketmux.ClientConfig) (streamForwarder, error) {
+			if _, err := clientConfig.TokenSource(ctx); err != nil {
+				return nil, err
+			}
+			listener, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				return nil, err
+			}
+			starts.Add(1)
+			go acceptTestControlWithSignal(listener, controls)
+			return &testForwarder{Listener: listener}, nil
+		},
+		listenSOCKS: func(context.Context, string, string, tunnel.SessionToken) (localBridge, error) {
+			return &testBridge{address: testAddress("127.0.0.1:48001")}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = manager.Shutdown() })
+	serverProfile := profile.Profile{ID: "service", BaseURL: "https://gateway.example.test", TunnelPath: "/tunnel"}
+	initial, err := manager.Connect(context.Background(), serverProfile, session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.StartTUN(context.Background(), serverProfile.ID); err != nil {
+		t.Fatal(err)
+	}
+	_, _, _, _, initialCore := tunStarter.snapshot()
+	firstControl := receiveControl(t, controls)
+	defer firstControl.Close()
+
+	if resumed := manager.ResumeAll(); resumed != 1 {
+		t.Fatalf("resumed Profiles = %d, want 1", resumed)
+	}
+	secondControl := receiveControl(t, controls)
+	defer secondControl.Close()
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		status, statusErr := manager.Status(serverProfile.ID)
+		if statusErr == nil && status.State == "connected" && status.Mode == "tun" &&
+			status.SOCKSAddress == initial.SOCKSAddress {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("system resume did not recover stable TUN: status=%#v err=%v", status, statusErr)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if starts.Load() != 2 {
+		t.Fatalf("wake transport starts = %d, want 2", starts.Load())
+	}
+	tunStarts, _, _, _, resumedCore := tunStarter.snapshot()
+	if tunStarts != 1 || resumedCore != initialCore {
+		t.Fatalf("wake reinstalled TUN: starts=%d corePreserved=%t", tunStarts, resumedCore == initialCore)
+	}
+	var wake StatusEvent
+	eventDeadline := time.After(time.Second)
+	for wake.Reason != reasonSystemResumed {
+		select {
+		case wake = <-statusEvents:
+		case <-eventDeadline:
+			t.Fatal("system resume status event was not published")
+		}
+	}
+	if wake.Status.State != "reconnecting" || !wake.Retryable {
+		t.Fatalf("system resume status event = %#v", wake)
+	}
+}
+
+func TestManagerReconfiguresTUNForRefreshedNetworkSpec(t *testing.T) {
+	initialSpec, err := networkspec.Normalize(networkspec.Spec{
+		PodCIDRs: []string{"10.42.0.0/16"}, ServiceIPs: []string{"10.96.0.10"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	initialHash, _ := networkspec.Hash(initialSpec)
+	refreshedSpec, err := networkspec.Normalize(networkspec.Spec{
+		PodCIDRs: []string{"10.42.0.0/16"}, PodIPs: []string{"10.42.7.9"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	refreshedHash, _ := networkspec.Hash(refreshedSpec)
+	session := remote.Session{
+		ID: "ec0b67a2-e84c-4fe7-a0c5-810f210157b5", Namespace: "payments", State: "active",
+		Generation: 4, NetworkSpec: initialSpec, NetworkSpecHash: initialHash,
+	}
+	controls := make(chan net.Conn, 4)
+	var starts atomic.Int32
+	tunStarter := &testTUNStarter{}
+	tickets := &testTickets{session: session}
+	tickets.refresh = func(current remote.Session) (remote.Session, error) {
+		current.Generation++
+		current.NetworkSpec = refreshedSpec
+		current.NetworkSpecHash = refreshedHash
+		return current, nil
+	}
+	manager, err := NewManager(tickets, Config{
+		RecoveryAttempts: 2, RecoveryBackoff: 10 * time.Millisecond,
+		TUNStarter: tunStarter,
+		startForwarder: func(ctx context.Context, clientConfig websocketmux.ClientConfig) (streamForwarder, error) {
+			if _, err := clientConfig.TokenSource(ctx); err != nil {
+				return nil, err
+			}
+			listener, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				return nil, err
+			}
+			starts.Add(1)
+			go acceptTestControlWithSignal(listener, controls)
+			return &testForwarder{Listener: listener}, nil
+		},
+		listenSOCKS: func(_ context.Context, _, _ string, _ tunnel.SessionToken) (localBridge, error) {
+			return &testBridge{address: testAddress("127.0.0.1:" + strconv.Itoa(47000+int(starts.Load())))}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = manager.Shutdown() })
+	serverProfile := profile.Profile{ID: "service", BaseURL: "https://gateway.example.test", TunnelPath: "/tunnel"}
+	firstStatus, err := manager.Connect(context.Background(), serverProfile, session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.StartTUN(context.Background(), serverProfile.ID); err != nil {
+		t.Fatal(err)
+	}
+	_, _, _, _, firstCore := tunStarter.snapshot()
+	_ = receiveControl(t, controls).Close()
+	secondControl := receiveControl(t, controls)
+	defer secondControl.Close()
+
+	deadline := time.Now().Add(time.Second)
+	var recovered Status
+	for {
+		manager.mu.Lock()
+		entry := manager.active[serverProfile.ID]
+		ready := entry != nil && !entry.recovering && entry.session.Generation == session.Generation+1 &&
+			entry.session.NetworkSpecHash == refreshedHash && entry.runtime.Status().Mode == "tun"
+		if entry != nil {
+			recovered = entry.runtime.Status()
+		}
+		manager.mu.Unlock()
+		if ready {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("Data Plane did not replace the Runtime for the refreshed NetworkSpec")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if recovered.SOCKSAddress != firstStatus.SOCKSAddress {
+		t.Fatalf("refreshed NetworkSpec changed stable SOCKS endpoint from %q to %q", firstStatus.SOCKSAddress, recovered.SOCKSAddress)
+	}
+	if starts.Load() != 2 {
+		t.Fatalf("transport starts = %d", starts.Load())
+	}
+	tunStarts, tunNetwork, tunBridge, _, recoveredCore := tunStarter.snapshot()
+	if tunStarts != 2 || recoveredCore == firstCore || tunBridge != recovered.SOCKSAddress ||
+		len(tunNetwork.PodIPs) != 1 || tunNetwork.PodIPs[0] != "10.42.7.9" || len(tunNetwork.ServiceIPs) != 0 {
+		t.Fatalf("refreshed TUN = starts %d network %#v bridge %q core-reused %t", tunStarts, tunNetwork, tunBridge, recoveredCore == firstCore)
+	}
+	select {
+	case <-firstCore.Done():
+	default:
+		t.Fatal("stale TUN remained active after the NetworkSpec refresh")
 	}
 }
 
@@ -479,6 +676,44 @@ func TestRecoveryFailureActionDistinguishesOperatorActions(t *testing.T) {
 				t.Fatalf("action = %q/%t, want %q/%t", reason, retryable, test.reason, test.retryable)
 			}
 		})
+	}
+}
+
+func TestManagerStatusCallbackCannotBlockLifecycleEvents(t *testing.T) {
+	callbackEntered := make(chan struct{})
+	releaseCallback := make(chan struct{})
+	manager, err := NewManager(&testTickets{}, Config{OnStatus: func(StatusEvent) {
+		select {
+		case <-callbackEntered:
+		default:
+			close(callbackEntered)
+		}
+		<-releaseCallback
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		close(releaseCallback)
+		_ = manager.Shutdown()
+	}()
+	manager.emit("service", Status{State: "connected"}, nil)
+	select {
+	case <-callbackEntered:
+	case <-time.After(time.Second):
+		t.Fatal("status callback was not invoked")
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for generation := uint64(1); generation <= 100; generation++ {
+			manager.emit("service", Status{State: "connected", SessionGeneration: generation}, nil)
+		}
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("blocked status callback stalled lifecycle event publication")
 	}
 }
 

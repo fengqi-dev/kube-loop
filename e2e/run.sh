@@ -168,6 +168,7 @@ run_tests() {
   KUBELOOP_E2E_CONTEXT="${CONTEXT}" \
   KUBELOOP_GATEWAY_IMAGE="${IMAGE}" \
   KUBELOOP_SINGBOX_PATH="${ROOT}/${SINGBOX_BIN}" \
+  KUBELOOP_REMOTE_TUN_E2E=1 \
   KUBELOOP_E2E_TIMEOUT=30m \
     bash "${ROOT}/e2e/scripts/run-go-test.sh" "$@"
 }

@@ -38,16 +38,16 @@ type hostRoute struct {
 }
 
 func Inspect(podCIDRs, serviceCIDRs, serviceIPs []string) Result {
-	return inspect(podCIDRs, serviceCIDRs, serviceIPs)
+	return inspect(podCIDRs, nil, serviceCIDRs, serviceIPs)
 }
 
 // InspectNetworkSpec checks only local host state. It never reads kubeconfig or
 // calls Kubernetes; the Spec is the signed remote Session snapshot.
 func InspectNetworkSpec(spec networkspec.Spec) Result {
-	return inspect(spec.PodCIDRs, spec.ServiceCIDRs, spec.ServiceIPs)
+	return inspect(spec.PodCIDRs, spec.PodIPs, spec.ServiceCIDRs, spec.ServiceIPs)
 }
 
-func inspect(podCIDRs, serviceCIDRs, serviceIPs []string) Result {
+func inspect(podCIDRs, podIPs, serviceCIDRs, serviceIPs []string) Result {
 	diagnostics := Result{
 		RoutingMode: "native",
 		StrictRoute: runtime.GOOS != "windows",
@@ -60,7 +60,7 @@ func inspect(podCIDRs, serviceCIDRs, serviceIPs []string) Result {
 			Message:  "Could not inspect existing host routes: " + err.Error(),
 		})
 	} else {
-		diagnostics.Issues = analyzeRouteConflicts(discoveryRoutes(podCIDRs, serviceCIDRs, serviceIPs), routes)
+		diagnostics.Issues = analyzeRouteConflicts(discoveryRoutes(podCIDRs, podIPs, serviceCIDRs, serviceIPs), routes)
 	}
 	if issue := inspectDNSPort(); issue != nil {
 		diagnostics.Issues = append(diagnostics.Issues, *issue)
@@ -68,8 +68,13 @@ func inspect(podCIDRs, serviceCIDRs, serviceIPs []string) Result {
 	return diagnostics
 }
 
-func discoveryRoutes(podCIDRs, serviceCIDRs, serviceIPs []string) []netip.Prefix {
+func discoveryRoutes(podCIDRs, podIPs, serviceCIDRs, serviceIPs []string) []netip.Prefix {
 	values := append([]string{}, podCIDRs...)
+	for _, ip := range podIPs {
+		if address, err := netip.ParseAddr(ip); err == nil {
+			values = append(values, netip.PrefixFrom(address, address.BitLen()).String())
+		}
+	}
 	if len(serviceCIDRs) > 0 {
 		values = append(values, serviceCIDRs...)
 	} else {
