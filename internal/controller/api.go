@@ -94,12 +94,13 @@ func (function APIHandlerFunc) ServeAPI(writer http.ResponseWriter, request *htt
 }
 
 type serverOptions struct {
-	authenticator Authenticator
-	authorizer    authorization.Authorizer
-	audit         AuditSink
-	apiHandler    APIHandler
-	readiness     ReadinessChecker
-	authHandler   http.Handler
+	authenticator     Authenticator
+	authorizer        authorization.Authorizer
+	audit             AuditSink
+	apiHandler        APIHandler
+	readiness         ReadinessChecker
+	authHandler       http.Handler
+	managementHandler http.Handler
 }
 
 type ServerOption func(*serverOptions)
@@ -136,6 +137,12 @@ func WithReadinessChecker(checker ReadinessChecker) ServerOption {
 
 func WithAuthHandler(handler http.Handler) ServerOption {
 	return func(options *serverOptions) { options.authHandler = handler }
+}
+
+// WithManagementHandler installs the browser-only Management Plane below
+// /api/v2/admin without passing it through the ordinary Gateway Bearer chain.
+func WithManagementHandler(handler http.Handler) ServerOption {
+	return func(options *serverOptions) { options.managementHandler = handler }
 }
 
 func newAPIFramework(config Config, logger *slog.Logger, options serverOptions) http.Handler {

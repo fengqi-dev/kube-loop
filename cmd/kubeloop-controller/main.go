@@ -18,6 +18,8 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/controller"
 	adminbreakglass "github.com/fengqi-dev/kube-loop/internal/controller/admin/breakglass"
 	managementconfig "github.com/fengqi-dev/kube-loop/internal/controller/admin/config"
+	adminhttpapi "github.com/fengqi-dev/kube-loop/internal/controller/admin/httpapi"
+	adminsession "github.com/fengqi-dev/kube-loop/internal/controller/admin/session"
 	"github.com/fengqi-dev/kube-loop/internal/controller/authn"
 	authconfig "github.com/fengqi-dev/kube-loop/internal/controller/authn/config"
 	"github.com/fengqi-dev/kube-loop/internal/controller/authn/httpauth"
@@ -608,6 +610,19 @@ func main() {
 		controller.WithReadinessChecker(readiness), controller.WithAuthorizer(policyEngine),
 		controller.WithAuditSink(auditSink), controller.WithAPIHandler(apiRouter),
 	}
+	managementSessions, err := adminsession.New(stateStore, breakGlassStore)
+	if err != nil {
+		_ = stateStore.Close()
+		logger.Error("initialize Management Session service failed", "error", err)
+		os.Exit(2)
+	}
+	managementHandler, err := adminhttpapi.New(adminhttpapi.Config{PublicURL: *publicURL}, managementSessions)
+	if err != nil {
+		_ = stateStore.Close()
+		logger.Error("initialize Management Plane HTTP API failed", "error", err)
+		os.Exit(2)
+	}
+	serverOptions = append(serverOptions, controller.WithManagementHandler(managementHandler))
 	if len(authRegistry.Descriptors()) > 0 {
 		signingKey, err := token.LoadSigningKey(*tokenSigningKeyFile)
 		if err != nil {

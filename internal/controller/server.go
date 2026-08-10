@@ -182,7 +182,12 @@ func NewServer(config Config, build BuildInfo, logger *slog.Logger, serverOption
 		router.Mount("/auth", options.authHandler)
 	}
 	api := newAPIFramework(normalized, logger, options)
-	router.Mount(APIPathPrefix, api)
+	router.Route(APIPathPrefix, func(apiRouter chi.Router) {
+		if options.managementHandler != nil {
+			apiRouter.Mount("/admin", http.StripPrefix(APIPathPrefix+"/admin", options.managementHandler))
+		}
+		apiRouter.Mount("/", api)
+	})
 	serverContext, cancel := context.WithCancel(context.Background())
 	active := newRequestTracker()
 	return &Server{

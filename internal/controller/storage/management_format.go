@@ -151,6 +151,18 @@ var exportTableSpecs = []tableSpec{
 		orderBy: []string{"id"},
 	},
 	{
+		name: "admin_sessions",
+		columns: []columnSpec{
+			{name: "id_hash", kind: columnBytes}, {name: "schema_version", kind: columnInteger},
+			{name: "principal_id", nullable: true}, {name: "token_family_id", nullable: true},
+			{name: "authentication_type"}, {name: "break_glass_generation"},
+			{name: "csrf_token_hash", kind: columnBytes}, {name: "created_at"}, {name: "last_seen_at"},
+			{name: "idle_expires_at"}, {name: "absolute_expires_at"}, {name: "revoked_at", nullable: true},
+		},
+		orderBy:  []string{"id_hash"},
+		omitRows: true,
+	},
+	{
 		name: "auth_attempts",
 		columns: []columnSpec{
 			{name: "id"}, {name: "schema_version", kind: columnInteger}, {name: "provider_id"},

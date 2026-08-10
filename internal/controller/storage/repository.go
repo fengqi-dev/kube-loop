@@ -114,6 +114,16 @@ type ManagementStateRepository interface {
 	RetireBootstrap(context.Context, uint64, time.Time) (bool, error)
 }
 
+type AdminSessionRepository interface {
+	Create(context.Context, AdminSession) error
+	GetByHash(context.Context, []byte) (AdminSession, error)
+	// Touch uses the observed last-seen timestamp as an optimistic guard and
+	// refuses revoked or already expired sessions.
+	Touch(context.Context, []byte, time.Time, time.Time, time.Time, time.Time) error
+	Revoke(context.Context, []byte, time.Time) error
+	DeleteExpired(context.Context, time.Time, int) (int64, error)
+}
+
 type Repositories interface {
 	Principals() PrincipalRepository
 	TokenFamilies() TokenFamilyRepository
@@ -125,6 +135,7 @@ type Repositories interface {
 	Audit() AuditRepository
 	AuthTransactions() AuthTransactionRepository
 	ManagementState() ManagementStateRepository
+	AdminSessions() AdminSessionRepository
 }
 
 type TransactionManager interface {

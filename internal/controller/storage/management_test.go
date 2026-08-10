@@ -37,7 +37,7 @@ func TestSQLiteLogicalExportIsDeterministicAndValidated(t *testing.T) {
 		t.Fatal("unchanged storage produced a non-deterministic export")
 	}
 	if metadata.SchemaVersion != currentSchemaVersion() || metadata.SourceBackend != BackendSQLite ||
-		metadata.CreatedAt != createdAt || metadata.Rows != len(exportTableSpecs)-2 || len(metadata.ChecksumSHA256) != 64 {
+		metadata.CreatedAt != createdAt || metadata.Rows != len(exportTableSpecs)-3 || len(metadata.ChecksumSHA256) != 64 {
 		t.Fatalf("export metadata = %#v", metadata)
 	}
 	validated, err := ValidateExport(first)
@@ -76,7 +76,10 @@ func TestSQLiteLogicalExportIsDeterministicAndValidated(t *testing.T) {
 			t.Fatalf("export contains configuration secret %q", secret)
 		}
 	}
-	for _, transientSecret := range []string{"client-state", `"verifier"`, "management-auth-state", "management-exchange-code"} {
+	for _, transientSecret := range []string{
+		"client-state", `"verifier"`, "management-auth-state", "management-exchange-code",
+		"management-browser-session", "management-browser-csrf",
+	} {
 		if bytes.Contains(first, []byte(transientSecret)) {
 			t.Fatalf("export contains transient authentication secret %q", transientSecret)
 		}
@@ -402,6 +405,15 @@ func seedManagementStore(t *testing.T, store *Store) managementSeed {
 	}
 	if retired, err := store.ManagementState().RetireBootstrap(ctx, 42, now); err != nil || !retired {
 		t.Fatalf("retire management bootstrap = %t, error = %v", retired, err)
+	}
+	adminSessionID := sha256.Sum256([]byte("management-browser-session"))
+	adminCSRF := sha256.Sum256([]byte("management-browser-csrf"))
+	if err := store.AdminSessions().Create(ctx, AdminSession{
+		IDHash: adminSessionID[:], PrincipalID: principal.ID, TokenFamilyID: familyID, AuthenticationType: "normal",
+		CSRFTokenHash: adminCSRF[:], CreatedAt: now, LastSeenAt: now,
+		IdleExpiresAt: now.Add(15 * time.Minute), AbsoluteExpiresAt: now.Add(8 * time.Hour),
+	}); err != nil {
+		t.Fatal(err)
 	}
 	stateHash := sha256.Sum256([]byte("management-auth-state"))
 	if err := store.AuthTransactions().CreateAttempt(ctx, AuthAttempt{

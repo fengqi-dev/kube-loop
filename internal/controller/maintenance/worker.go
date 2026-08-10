@@ -25,13 +25,14 @@ type Config struct {
 
 type Report struct {
 	Sessions         int64
+	AdminSessions    int64
 	TokenFamilies    int64
 	Idempotency      int64
 	AuthTransactions int64
 }
 
 func (report Report) Total() int64 {
-	return report.Sessions + report.TokenFamilies + report.Idempotency + report.AuthTransactions
+	return report.Sessions + report.AdminSessions + report.TokenFamilies + report.Idempotency + report.AuthTransactions
 }
 
 type Worker struct {
@@ -110,6 +111,11 @@ func (worker *Worker) RunOnce(ctx context.Context) (Report, error) {
 	if err != nil {
 		result = errors.Join(result, fmt.Errorf("clean expired authentication transactions: %w", err))
 	}
+	count, err = worker.repositories.AdminSessions().DeleteExpired(operationContext, before, worker.batchSize)
+	report.AdminSessions = count
+	if err != nil {
+		result = errors.Join(result, fmt.Errorf("clean expired Management Sessions: %w", err))
+	}
 	count, err = worker.repositories.Idempotency().DeleteExpired(operationContext, before, worker.batchSize)
 	report.Idempotency = count
 	if err != nil {
@@ -139,6 +145,7 @@ func (worker *Worker) runAndLog(ctx context.Context) {
 	if report.Total() > 0 {
 		worker.logger.InfoContext(ctx, "Controller maintenance removed expired records",
 			"sessions", report.Sessions,
+			"admin_sessions", report.AdminSessions,
 			"token_families", report.TokenFamilies,
 			"idempotency_records", report.Idempotency,
 			"auth_transactions", report.AuthTransactions,

@@ -148,3 +148,18 @@ type AuthExchange struct {
 	CreatedAt     time.Time
 	ExpiresAt     time.Time
 }
+
+type AdminSession struct {
+	IDHash               []byte
+	SchemaVersion        int
+	PrincipalID          string
+	TokenFamilyID        string
+	AuthenticationType   string
+	BreakGlassGeneration string
+	CSRFTokenHash        []byte
+	CreatedAt            time.Time
+	LastSeenAt           time.Time
+	IdleExpiresAt        time.Time
+	AbsoluteExpiresAt    time.Time
+	RevokedAt            *time.Time
+}

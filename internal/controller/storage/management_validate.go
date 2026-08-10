@@ -134,7 +134,7 @@ func validateExportDomainRow(spec tableSpec, row []json.RawMessage) error {
 			}
 		}
 		return nil
-	case "auth_attempts", "auth_exchanges":
+	case "admin_sessions", "auth_attempts", "auth_exchanges":
 		return nil
 	default:
 		return errors.New("unsupported storage export table")

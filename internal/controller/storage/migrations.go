@@ -328,6 +328,52 @@ var migrations = []migration{{
 			CHECK ((bootstrap_retired_at IS NULL) = (bootstrap_retired_revision IS NULL))
 		)`,
 	},
+}, {
+	version: 8,
+	sqlite: []string{
+		`CREATE TABLE admin_sessions (
+			id_hash BLOB PRIMARY KEY CHECK (length(id_hash) = 32),
+			schema_version INTEGER NOT NULL CHECK (schema_version >= 1),
+			principal_id TEXT REFERENCES principals(id) ON DELETE CASCADE,
+			token_family_id TEXT REFERENCES token_families(id) ON DELETE CASCADE,
+			authentication_type TEXT NOT NULL CHECK (authentication_type IN ('normal', 'bootstrap', 'break-glass')),
+			break_glass_generation TEXT NOT NULL DEFAULT '',
+			csrf_token_hash BLOB NOT NULL CHECK (length(csrf_token_hash) = 32),
+			created_at TEXT NOT NULL,
+			last_seen_at TEXT NOT NULL,
+			idle_expires_at TEXT NOT NULL,
+			absolute_expires_at TEXT NOT NULL,
+			revoked_at TEXT,
+			CHECK (
+				(authentication_type = 'break-glass' AND principal_id IS NULL AND token_family_id IS NULL AND break_glass_generation <> '') OR
+				(authentication_type IN ('normal', 'bootstrap') AND principal_id IS NOT NULL AND token_family_id IS NOT NULL AND break_glass_generation = '')
+			)
+		)`,
+		`CREATE INDEX admin_sessions_principal_idx ON admin_sessions(principal_id, absolute_expires_at)`,
+		`CREATE INDEX admin_sessions_expiry_idx ON admin_sessions(idle_expires_at, absolute_expires_at)`,
+	},
+	postgresql: []string{
+		`CREATE TABLE admin_sessions (
+			id_hash BYTEA PRIMARY KEY CHECK (octet_length(id_hash) = 32),
+			schema_version INTEGER NOT NULL CHECK (schema_version >= 1),
+			principal_id TEXT REFERENCES principals(id) ON DELETE CASCADE,
+			token_family_id TEXT REFERENCES token_families(id) ON DELETE CASCADE,
+			authentication_type TEXT NOT NULL CHECK (authentication_type IN ('normal', 'bootstrap', 'break-glass')),
+			break_glass_generation TEXT NOT NULL DEFAULT '',
+			csrf_token_hash BYTEA NOT NULL CHECK (octet_length(csrf_token_hash) = 32),
+			created_at TEXT NOT NULL,
+			last_seen_at TEXT NOT NULL,
+			idle_expires_at TEXT NOT NULL,
+			absolute_expires_at TEXT NOT NULL,
+			revoked_at TEXT,
+			CHECK (
+				(authentication_type = 'break-glass' AND principal_id IS NULL AND token_family_id IS NULL AND break_glass_generation <> '') OR
+				(authentication_type IN ('normal', 'bootstrap') AND principal_id IS NOT NULL AND token_family_id IS NOT NULL AND break_glass_generation = '')
+			)
+		)`,
+		`CREATE INDEX admin_sessions_principal_idx ON admin_sessions(principal_id, absolute_expires_at)`,
+		`CREATE INDEX admin_sessions_expiry_idx ON admin_sessions(idle_expires_at, absolute_expires_at)`,
+	},
 }}
 
 func currentSchemaVersion() int {

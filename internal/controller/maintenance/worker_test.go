@@ -1,7 +1,9 @@
 package maintenance_test
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -66,6 +68,23 @@ func TestRunOnceDeletesExpiredSessionAndCascadesTask(t *testing.T) {
 	if err := store.Tasks().Create(ctx, activeTask); err != nil {
 		t.Fatal(err)
 	}
+	generation := base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{3}, 32))
+	expiredAdminSession := storage.AdminSession{
+		IDHash: bytes.Repeat([]byte{4}, 32), AuthenticationType: "break-glass", BreakGlassGeneration: generation,
+		CSRFTokenHash: bytes.Repeat([]byte{5}, 32), CreatedAt: now.Add(-time.Hour), LastSeenAt: now.Add(-time.Hour),
+		IdleExpiresAt: now.Add(-time.Second), AbsoluteExpiresAt: now.Add(-time.Second),
+	}
+	if err := store.AdminSessions().Create(ctx, expiredAdminSession); err != nil {
+		t.Fatal(err)
+	}
+	activeAdminSession := expiredAdminSession
+	activeAdminSession.IDHash = bytes.Repeat([]byte{6}, 32)
+	activeAdminSession.CSRFTokenHash = bytes.Repeat([]byte{7}, 32)
+	activeAdminSession.IdleExpiresAt = now.Add(time.Minute)
+	activeAdminSession.AbsoluteExpiresAt = now.Add(time.Minute)
+	if err := store.AdminSessions().Create(ctx, activeAdminSession); err != nil {
+		t.Fatal(err)
+	}
 
 	worker, err := maintenance.New(store, slog.New(slog.NewTextHandler(io.Discard, nil)), maintenance.Config{
 		Now: func() time.Time { return now },
@@ -77,7 +96,7 @@ func TestRunOnceDeletesExpiredSessionAndCascadesTask(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report.Sessions != 1 || report.Total() != 1 {
+	if report.Sessions != 1 || report.AdminSessions != 1 || report.Total() != 2 {
 		t.Fatalf("maintenance report = %#v", report)
 	}
 	if _, err := store.Sessions().GetByID(ctx, expiredSession.ID); err != storage.ErrNotFound {
@@ -91,6 +110,12 @@ func TestRunOnceDeletesExpiredSessionAndCascadesTask(t *testing.T) {
 	}
 	if _, err := store.Tasks().GetByID(ctx, activeTask.ID); err != nil {
 		t.Fatalf("active Port Forward Task lookup = %v", err)
+	}
+	if _, err := store.AdminSessions().GetByHash(ctx, expiredAdminSession.IDHash); err != storage.ErrNotFound {
+		t.Fatalf("expired Management Session lookup = %v", err)
+	}
+	if _, err := store.AdminSessions().GetByHash(ctx, activeAdminSession.IDHash); err != nil {
+		t.Fatalf("active Management Session lookup = %v", err)
 	}
 }
 

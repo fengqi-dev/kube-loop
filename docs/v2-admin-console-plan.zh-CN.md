@@ -125,7 +125,7 @@ active pointer 和审计事件。使用整数 revision/ETag 做乐观并发，�
 | ID | 状态 | 任务 | 交付物 | 验收标准 |
 | --- | --- | --- | --- | --- |
 | V2-900 | 已完成 | 管理面信任边界 ADR | Management Plane ADR/威胁模型 | 明确 bootstrap、break-glass、Secret、CSRF、审计边界 |
-| V2-901 | 待实现 | 管理角色与授权 | admin authorizer + dry-run | 五类角色、namespace 委派、跨租户 IDOR 测试通过 |
+| V2-901 | 进行中 | 管理角色与授权 | admin authorizer + dry-run + Management Session | 五类角色、namespace 委派、跨租户 IDOR、break-glass 短期 Session/轮换失效/事务审计测试通过 |
 | V2-902 | 待实现 | 配置 revision Repository | migration + Bun repository | SQLite/PostgreSQL conformance、ETag、事务审计、回滚通过 |
 | V2-903 | 待实现 | 只读管理 API | status/principal/session/task/relay/audit | 有界分页、脱敏、稳定错误与审计通过 |
 | V2-904 | 待实现 | 只读管理 UI | 概览、会话、任务、Relay、审计 | 不包含 Secret/Token，权限裁剪与可访问性通过 |
