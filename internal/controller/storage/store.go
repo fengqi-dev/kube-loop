@@ -258,6 +258,10 @@ func (store *Store) AuthTransactions() AuthTransactionRepository {
 	return store.repositories.AuthTransactions()
 }
 
+func (store *Store) ManagementState() ManagementStateRepository {
+	return store.repositories.ManagementState()
+}
+
 func (store *Store) WithinTransaction(ctx context.Context, function func(Repositories) error) error {
 	if function == nil {
 		return errors.New("transaction callback is required")

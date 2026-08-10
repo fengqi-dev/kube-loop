@@ -60,9 +60,10 @@ Proxy、Secret 读取、SQL 控制台或脚本执行能力。
 
 ### 2. Bootstrap 管理员是有界且可退役的部署授权
 
-初次部署可通过 Helm 配置精确的稳定 Principal subject 和/或规范化 group：
+初次部署可通过 Helm 配置精确的 Controller Principal UUID 和/或规范化 group：
 
-- 默认列表为空；不接受 `*`、空值、email/display name 或客户端提交的 claim；
+- 默认列表为空；subject 只接受内部稳定 Principal UUID，不接受 `*`、空值、
+  email/display name 或客户端提交的 claim；新用户通常先使用受信 group bootstrap；
 - bootstrap 只授予 `platform-admin`，不修改普通 Gateway Policy；
 - 配置只来自 Controller Helm values/ConfigMap，Data Plane 不接收；
 - 每次 bootstrap 登录和管理操作都带 `bootstrap=true` 高等级审计属性。

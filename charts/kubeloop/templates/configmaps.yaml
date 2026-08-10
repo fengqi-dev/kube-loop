@@ -16,6 +16,44 @@
 {{- if or (lt (int64 .Values.dataPlane.relayRegistry.maxWebSocketFrameBytes) 8192) (gt (int64 .Values.dataPlane.relayRegistry.maxWebSocketFrameBytes) 16777216) }}
 {{- fail "dataPlane.relayRegistry.maxWebSocketFrameBytes must be between 8192 and 16777216" }}
 {{- end }}
+{{- $management := .Values.controller.management }}
+{{- $bootstrap := $management.bootstrap }}
+{{- range $index, $subject := $bootstrap.subjects }}
+{{- if not (regexMatch "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" $subject) }}
+{{- fail (printf "controller.management.bootstrap.subjects[%d] must be an exact stable Principal UUID" $index) }}
+{{- end }}
+{{- end }}
+{{- range $index, $group := $bootstrap.groups }}
+{{- if or (not $group) (eq $group "*") (eq $group "$cluster") }}
+{{- fail (printf "controller.management.bootstrap.groups[%d] must be an exact stable group" $index) }}
+{{- end }}
+{{- end }}
+{{- if and $bootstrap.recoveryEnabled (not (or $bootstrap.subjects $bootstrap.groups)) }}
+{{- fail "controller.management.bootstrap.recoveryEnabled requires a bootstrap subject or group" }}
+{{- end }}
+{{- $breakGlass := $management.breakGlass }}
+{{- $breakGlassAlias := trim (toString $breakGlass.secretAlias) }}
+{{- $breakGlassConfig := dict "enabled" false "secretAlias" "" "secretFile" "" "sessionTtl" (default "15m" $breakGlass.sessionTTL) "allowedSourceCidrs" (list) }}
+{{- if $breakGlass.enabled }}
+{{- if not (regexMatch "^[a-z][a-z0-9-]{0,62}$" $breakGlassAlias) }}
+{{- fail "controller.management.breakGlass.secretAlias must be a valid stable alias" }}
+{{- end }}
+{{- $breakGlassSecret := get (default (dict) $breakGlass.secretAliases) $breakGlassAlias }}
+{{- if not $breakGlassSecret }}
+{{- fail "controller.management.breakGlass.secretAlias must select a configured secretAliases entry" }}
+{{- end }}
+{{- $_ := required (printf "controller.management.breakGlass.secretAliases.%s.existingSecret is required" $breakGlassAlias) $breakGlassSecret.existingSecret }}
+{{- $_ := required (printf "controller.management.breakGlass.secretAliases.%s.credentialKey is required" $breakGlassAlias) $breakGlassSecret.credentialKey }}
+{{- $breakGlassConfig = dict
+      "enabled" true
+      "secretAlias" $breakGlassAlias
+      "secretFile" (printf "/var/run/secrets/kubeloop/management/break-glass/%s/credential" $breakGlassAlias)
+      "sessionTtl" (default "15m" $breakGlass.sessionTTL)
+      "allowedSourceCidrs" (default (list) $breakGlass.allowedSourceCIDRs)
+}}
+{{- else if $breakGlassAlias }}
+{{- fail "controller.management.breakGlass.secretAlias must be empty while break-glass is disabled" }}
+{{- end }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -31,6 +69,7 @@ data:
   KUBELOOP_MIN_CLIENT_VERSION: {{ .Values.controller.minClientVersion | quote }}
   KUBELOOP_AUTH_CONFIG_FILE: "/etc/kubeloop/auth/auth.json"
   KUBELOOP_POLICY_CONFIG_FILE: "/etc/kubeloop/auth/policy.json"
+  KUBELOOP_MANAGEMENT_CONFIG_FILE: "/etc/kubeloop/auth/management.json"
   KUBELOOP_KUBERNETES_CONFIG_FILE: "/etc/kubeloop/auth/kubernetes.json"
   KUBELOOP_TOKEN_SIGNING_KEY_FILE: "/var/run/secrets/kubeloop/auth/token/signing-key.pem"
   KUBELOOP_TOKEN_KEY_ID: {{ .Values.controller.auth.token.keyID | quote }}
@@ -164,6 +203,7 @@ metadata:
 data:
   auth.json: {{ dict "developmentMode" .Values.controller.auth.developmentMode "providers" $providers | toJson | quote }}
   policy.json: {{ dict "version" 1 "rules" (default (list) .Values.controller.policy.rules) | toJson | quote }}
+  management.json: {{ dict "bootstrap" (dict "subjects" (default (list) $bootstrap.subjects) "groups" (default (list) $bootstrap.groups) "recoveryEnabled" $bootstrap.recoveryEnabled) "breakGlass" $breakGlassConfig | toJson | quote }}
   kubernetes.json: {{ dict "timeout" .Values.controller.kubernetes.timeout "qps" .Values.controller.kubernetes.qps "burst" .Values.controller.kubernetes.burst "userAgent" .Values.controller.kubernetes.userAgent "impersonation" (dict "enabled" .Values.controller.kubernetes.impersonation.enabled "usernamePrefix" .Values.controller.kubernetes.impersonation.usernamePrefix "groupMappings" (default (dict) .Values.controller.kubernetes.impersonation.groupMappings)) | toJson | quote }}
 ---
 apiVersion: v1

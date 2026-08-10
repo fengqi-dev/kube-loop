@@ -23,7 +23,7 @@ module、同一存储和同一 Helm Chart。它不是新的独立项目，也不
 ## 2. 身份与权限
 
 后台复用现有 OIDC/AD 登录和 Gateway Token，不另建管理员密码库。初始
-管理员通过 Helm 配置不可变的 bootstrap subject/group；完成首次策略配置
+管理员通过 Helm 配置精确的 bootstrap Principal UUID/group；完成首次策略配置
 后由版本化管理策略接管。Break-glass 身份默认关闭，只能引用 Kubernetes
 Secret，并且每次使用必须产生高等级审计事件。
 

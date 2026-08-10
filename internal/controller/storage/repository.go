@@ -105,6 +105,15 @@ type AuthTransactionRepository interface {
 	DeleteExpired(context.Context, time.Time, int) (int64, error)
 }
 
+type ManagementStateRepository interface {
+	// BootstrapRetired fails closed at the authorization layer when storage is
+	// unavailable. A missing singleton row means bootstrap has never retired.
+	BootstrapRetired(context.Context) (bool, error)
+	// RetireBootstrap is irreversible through the application repository. It is
+	// idempotent and returns true only when this call persisted the marker.
+	RetireBootstrap(context.Context, uint64, time.Time) (bool, error)
+}
+
 type Repositories interface {
 	Principals() PrincipalRepository
 	TokenFamilies() TokenFamilyRepository
@@ -115,6 +124,7 @@ type Repositories interface {
 	Idempotency() IdempotencyRepository
 	Audit() AuditRepository
 	AuthTransactions() AuthTransactionRepository
+	ManagementState() ManagementStateRepository
 }
 
 type TransactionManager interface {

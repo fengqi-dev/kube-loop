@@ -16,6 +16,8 @@ import (
 	"time"
 
 	"github.com/fengqi-dev/kube-loop/internal/controller"
+	adminbreakglass "github.com/fengqi-dev/kube-loop/internal/controller/admin/breakglass"
+	managementconfig "github.com/fengqi-dev/kube-loop/internal/controller/admin/config"
 	"github.com/fengqi-dev/kube-loop/internal/controller/authn"
 	authconfig "github.com/fengqi-dev/kube-loop/internal/controller/authn/config"
 	"github.com/fengqi-dev/kube-loop/internal/controller/authn/httpauth"
@@ -74,6 +76,7 @@ func main() {
 	minClientVersion := flag.String("min-client-version", os.Getenv("KUBELOOP_MIN_CLIENT_VERSION"), "minimum supported client version")
 	authConfigFile := flag.String("auth-config", os.Getenv("KUBELOOP_AUTH_CONFIG_FILE"), "authentication provider JSON config file")
 	policyConfigFile := flag.String("policy-config", os.Getenv("KUBELOOP_POLICY_CONFIG_FILE"), "Gateway authorization policy JSON file")
+	managementConfigFile := flag.String("management-config", os.Getenv("KUBELOOP_MANAGEMENT_CONFIG_FILE"), "Controller Management Plane JSON config file")
 	kubernetesConfigFile := flag.String("kubernetes-config", os.Getenv("KUBELOOP_KUBERNETES_CONFIG_FILE"), "Gateway Kubernetes Provider JSON config file")
 	tokenSigningKeyFile := flag.String("token-signing-key-file", os.Getenv("KUBELOOP_TOKEN_SIGNING_KEY_FILE"), "Ed25519 PKCS#8 token signing key file")
 	tokenKeyID := flag.String("token-key-id", envOrDefault("KUBELOOP_TOKEN_KEY_ID", "primary"), "token signing key ID")
@@ -144,6 +147,25 @@ func main() {
 		_ = stateStore.Close()
 		logger.Error("load authentication configuration failed", "error", err)
 		os.Exit(2)
+	}
+	managementFile, err := managementconfig.Load(*managementConfigFile)
+	if err != nil {
+		_ = stateStore.Close()
+		logger.Error("load Management Plane configuration failed", "error", err)
+		os.Exit(2)
+	}
+	breakGlassStore, err := adminbreakglass.New(managementFile.BreakGlass)
+	if err != nil {
+		_ = stateStore.Close()
+		logger.Error("initialize Management Plane emergency authentication failed", "error", err)
+		os.Exit(2)
+	}
+	if managementFile.BreakGlass.Enabled {
+		if _, err := breakGlassStore.CurrentBreakGlassState(signalContext); err != nil {
+			_ = stateStore.Close()
+			logger.Error("validate Management Plane emergency credential failed", "error", err)
+			os.Exit(2)
+		}
 	}
 	authRegistry, err := authconfig.Build(signalContext, authFile)
 	if err != nil {
@@ -571,6 +593,11 @@ func main() {
 	readiness := controller.ReadinessCheckFunc(func(ctx context.Context) error {
 		if err := stateStore.Check(ctx); err != nil {
 			return err
+		}
+		if managementFile.BreakGlass.Enabled {
+			if _, err := breakGlassStore.CurrentBreakGlassState(ctx); err != nil {
+				return err
+			}
 		}
 		if err := authRegistry.Check(ctx); err != nil {
 			return err

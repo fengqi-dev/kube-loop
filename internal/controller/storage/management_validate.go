@@ -117,6 +117,23 @@ func validateExportDomainRow(spec tableSpec, row []json.RawMessage) error {
 			CreatedAt: exportTime(row[9]),
 		}
 		return normalizeAuditEvent(&event)
+	case "management_metadata":
+		id, err := exportInteger(row[0])
+		if err != nil || id != 1 {
+			return errors.New("management metadata ID must be 1")
+		}
+		retiredAtNull := string(row[1]) == "null"
+		revisionNull := string(row[2]) == "null"
+		if retiredAtNull != revisionNull {
+			return errors.New("management bootstrap retirement marker is incomplete")
+		}
+		if !revisionNull {
+			revision, revisionErr := exportInteger(row[2])
+			if revisionErr != nil || revision < 1 {
+				return errors.New("management bootstrap retirement revision must be positive")
+			}
+		}
+		return nil
 	case "auth_attempts", "auth_exchanges":
 		return nil
 	default:

@@ -143,6 +143,14 @@ var exportTableSpecs = []tableSpec{
 		orderBy: []string{"created_at", "id"},
 	},
 	{
+		name: "management_metadata",
+		columns: []columnSpec{
+			{name: "id", kind: columnInteger}, {name: "bootstrap_retired_at", nullable: true},
+			{name: "bootstrap_retired_revision", kind: columnInteger, nullable: true}, {name: "updated_at"},
+		},
+		orderBy: []string{"id"},
+	},
+	{
 		name: "auth_attempts",
 		columns: []columnSpec{
 			{name: "id"}, {name: "schema_version", kind: columnInteger}, {name: "provider_id"},

@@ -656,6 +656,7 @@ Gateway 使用统一的 `AuthProvider` 抽象，首期支持：
   - 2026-08-10（完成）：新增 ADR 0022 和威胁模型，冻结 Controller-only Management Plane、无管理员默认拒绝、bootstrap 正式策略发布后持久退役、Secret-backed 短期 break-glass、专用 HttpOnly 管理 Session、同步 CSRF Token、严格 CSP、Secret alias-only API 和事务审计边界。Data Plane/Operator 不接收管理路由、数据库、身份 Secret 或管理角色；V2.0 管理 API 不接受 Secret 明文、任意 Kubernetes/SQL/脚本或通用网络探测。
 
 - [ ] **V2-901：管理角色与授权。**
+  - 2026-08-10（进行中）：已新增独立 Management Plane authorizer，固定 `platform-admin`、`security-admin`、`operator`、`auditor`、`namespace-admin` 五类角色和显式 `admin.<resource>/<operation>` 矩阵；namespace 委派、dry-run、revision 原子失效及鉴权前禁止对象查询均有单元/race 测试。Helm bootstrap 只接受 Principal UUID/精确 group；schema v7 持久保存不可自动回退的退役标记，并随 SQLite 备份、逻辑导出/PostgreSQL 导入保留。Break-glass 只从 Controller Secret alias 挂载读取 32～64 随机字节 base64url 凭据，常量时间比较、CIDR 限制和 Secret generation 轮换失效已实现；管理 Session 与交换端点仍待后续切片接入。
 - [ ] **V2-902：配置 revision Repository。**
 - [ ] **V2-903：只读管理 API。**
 - [ ] **V2-904：只读管理 UI。**

@@ -351,6 +351,56 @@ Policy is mounted only into the Controller. Invalid policy prevents Controller
 startup; a runtime update is compiled completely before it atomically replaces
 the prior policy.
 
+## Management bootstrap and break-glass
+
+The Controller Management Plane has a separate deny-by-default role engine;
+ordinary Gateway Policy access never grants an `admin.*` operation. Initial
+deployment may identify exact stable OIDC/AD subjects or normalized groups:
+
+```yaml
+controller:
+  management:
+    bootstrap:
+      subjects: ["00000000-0000-4000-8000-000000000001"]
+      groups: ["platform-bootstrap"]
+      recoveryEnabled: false
+```
+
+Subjects are Controller Principal UUIDs; wildcards, `$cluster`, upstream email
+addresses, and display names are not valid bootstrap selectors. A normalized
+group is normally the practical first-install selector because a new Principal
+UUID is assigned at its first successful OIDC/AD login. After a formal
+`platform-admin` assignment revision is
+published, the persistent retirement marker prevents old values or a rollback
+from restoring bootstrap access. Disaster recovery requires an explicit Helm
+change to `recoveryEnabled: true` and a Controller restart, and still requires
+one of the configured exact identities.
+
+Break-glass is disabled by default. When enabled, the selected stable alias
+must map to an existing Secret; the credential itself never enters values,
+ConfigMaps, the database, logs, Data Plane, or Operator:
+
+```yaml
+controller:
+  management:
+    breakGlass:
+      enabled: true
+      secretAlias: emergency
+      sessionTTL: 10m
+      allowedSourceCIDRs: ["10.0.0.0/8"]
+      secretAliases:
+        emergency:
+          existingSecret: kubeloop-break-glass
+          credentialKey: credential
+```
+
+The Secret value must be an unpadded base64url encoding of 32–64 random bytes.
+Controller validates it at startup and readiness, projects it read-only under
+`/var/run/secrets/kubeloop/management`, compares credentials in constant time,
+and derives a SHA-256 generation so Secret rotation invalidates prior emergency
+sessions. Emergency sessions are non-refreshable and may never become ordinary
+Gateway Token Families or RelayTickets.
+
 ## Kubernetes access
 
 The Controller and Operator use separate in-cluster ServiceAccounts; the

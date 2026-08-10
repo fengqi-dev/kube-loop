@@ -117,6 +117,26 @@ controller:
     #   namespaces: [development]
     #   operations: [get, list, watch]
     #   resourceKinds: [namespaces, pods, services]
+  management:
+    bootstrap:
+      # Exact stable Controller Principal UUIDs or normalized groups only.
+      # Wildcards, upstream email addresses, and display names are rejected.
+      subjects: []
+      groups: []
+      # Disaster recovery must be explicitly enabled by a Helm change and
+      # Controller restart after the persistent bootstrap retirement marker is set.
+      recoveryEnabled: false
+    breakGlass:
+      # Disabled by default. The API never accepts this credential; the
+      # Controller reads the selected alias from a read-only Secret projection.
+      enabled: false
+      secretAlias: ""
+      sessionTTL: 15m
+      allowedSourceCIDRs: []
+      secretAliases: {}
+      # emergency:
+      #   existingSecret: kubeloop-break-glass
+      #   credentialKey: credential
   kubernetes:
     timeout: 15s
     qps: 20

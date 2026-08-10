@@ -308,6 +308,26 @@ var migrations = []migration{{
 		`UPDATE tasks SET state = 'running' WHERE state = 'active'`,
 		`UPDATE tasks SET state = 'starting' WHERE state = 'preparing'`,
 	},
+}, {
+	version: 7,
+	sqlite: []string{
+		`CREATE TABLE management_metadata (
+			id INTEGER PRIMARY KEY CHECK (id = 1),
+			bootstrap_retired_at TEXT,
+			bootstrap_retired_revision INTEGER CHECK (bootstrap_retired_revision IS NULL OR bootstrap_retired_revision >= 1),
+			updated_at TEXT NOT NULL,
+			CHECK ((bootstrap_retired_at IS NULL) = (bootstrap_retired_revision IS NULL))
+		)`,
+	},
+	postgresql: []string{
+		`CREATE TABLE management_metadata (
+			id BIGINT PRIMARY KEY CHECK (id = 1),
+			bootstrap_retired_at TEXT,
+			bootstrap_retired_revision BIGINT CHECK (bootstrap_retired_revision IS NULL OR bootstrap_retired_revision >= 1),
+			updated_at TEXT NOT NULL,
+			CHECK ((bootstrap_retired_at IS NULL) = (bootstrap_retired_revision IS NULL))
+		)`,
+	},
 }}
 
 func currentSchemaVersion() int {

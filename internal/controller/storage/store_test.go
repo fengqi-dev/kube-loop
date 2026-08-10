@@ -104,7 +104,10 @@ func testTaskStateMigrationPreservesLegacyTasks(t *testing.T, config Config) {
 	if _, err := store.db.ExecContext(ctx, store.repositories.principals.bind(`UPDATE tasks SET state = 'preparing' WHERE id = ?`), preparingID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.db.ExecContext(ctx, store.repositories.principals.bind(`DELETE FROM schema_migrations WHERE version = ?`), 6); err != nil {
+	if _, err := store.db.ExecContext(ctx, `DROP TABLE management_metadata`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.ExecContext(ctx, `DELETE FROM schema_migrations WHERE version >= 6`); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.Close(); err != nil {

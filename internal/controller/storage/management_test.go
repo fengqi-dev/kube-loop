@@ -169,6 +169,9 @@ func TestSQLiteConsistentBackup(t *testing.T) {
 	if err != nil || principal.ExternalID != "management-user" {
 		t.Fatalf("backed up principal = %#v, error = %v", principal, err)
 	}
+	if retired, err := backup.ManagementState().BootstrapRetired(context.Background()); err != nil || !retired {
+		t.Fatalf("backed up bootstrap retirement = %t, error = %v", retired, err)
+	}
 	if _, err := BackupSQLite(
 		context.Background(), Config{Backend: BackendSQLite, SQLitePath: source}, destination, nil,
 	); err == nil || !strings.Contains(err.Error(), "already exists") {
@@ -240,6 +243,9 @@ func TestPostgreSQLLogicalImportAndAuditIntegration(t *testing.T) {
 	}
 	if _, err := target.Tasks().GetByID(context.Background(), seed.taskID); err != nil {
 		t.Fatalf("read imported task: %v", err)
+	}
+	if retired, err := target.ManagementState().BootstrapRetired(context.Background()); err != nil || !retired {
+		t.Fatalf("imported bootstrap retirement = %t, error = %v", retired, err)
 	}
 	events, err := target.Audit().List(context.Background(), AuditFilter{Action: "storage.import", Limit: 10})
 	if err != nil || len(events) != 1 || events[0].ID != result.AuditEventID || events[0].Outcome != "success" ||
@@ -393,6 +399,9 @@ func seedManagementStore(t *testing.T, store *Store) managementSeed {
 		CreatedAt: now,
 	}); err != nil {
 		t.Fatal(err)
+	}
+	if retired, err := store.ManagementState().RetireBootstrap(ctx, 42, now); err != nil || !retired {
+		t.Fatalf("retire management bootstrap = %t, error = %v", retired, err)
 	}
 	stateHash := sha256.Sum256([]byte("management-auth-state"))
 	if err := store.AuthTransactions().CreateAttempt(ctx, AuthAttempt{
