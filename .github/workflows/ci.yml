@@ -71,6 +71,9 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Set up Operator EnvTest
+        run: make setup-envtest
+
       - name: Verify sing-box patch
         run: make singbox-patch-check
 
@@ -282,7 +285,10 @@ jobs:
         run: go vet ./...
 
       - name: Run Windows tests
-        run: go test ./... -count=1
+        shell: pwsh
+        run: |
+          $packages = go list ./... | Where-Object { $_ -notlike '*/internal/operator/trafficbinding' }
+          go test $packages -count=1
 
       - name: Build Windows binaries
         shell: pwsh
@@ -355,6 +361,9 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+
+      - name: Set up Operator EnvTest
+        run: make setup-envtest
 
       - name: Vet macOS client
         run: go vet ./...
