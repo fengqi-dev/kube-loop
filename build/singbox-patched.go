@@ -50,7 +50,7 @@ func main() {
 	if err := exportSource(sourceDir, workDir); err != nil {
 		fatalf("export sing-box source: %v", err)
 	}
-	if err := run(workDir, "git", "apply", "--whitespace=nowarn", patchPath); err != nil {
+	if err := applyPatch(workDir, patchPath); err != nil {
 		fatalf("apply sing-box patch: %v", err)
 	}
 	if checkOnly {
@@ -197,9 +197,18 @@ func exportSource(sourceDir, destination string) error {
 	}
 }
 
-func run(dir, name string, args ...string) error {
-	command := exec.Command(name, args...)
+func applyPatch(dir, path string) error {
+	patch, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	// Git may check text files out with CRLF on Windows, while git archive
+	// preserves the upstream blobs' LF line endings. Feed git apply a canonical
+	// patch stream so the same repository revision builds on every runner.
+	patch = bytes.ReplaceAll(patch, []byte("\r\n"), []byte("\n"))
+	command := exec.Command("git", "apply", "--whitespace=nowarn", "-")
 	command.Dir = dir
+	command.Stdin = bytes.NewReader(patch)
 	command.Stdout = os.Stdout
 	command.Stderr = os.Stderr
 	return command.Run()
