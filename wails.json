@@ -19,7 +19,7 @@
   "info": {
     "companyName": "KubeLoop",
     "productName": "KubeLoop",
-    "productVersion": "1.1.0",
+    "productVersion": "2.0.0",
     "copyright": "Copyright © KubeLoop",
     "comments": "Local development network for Kubernetes"
   },

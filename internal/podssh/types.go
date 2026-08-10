@@ -3,8 +3,6 @@ package podssh
 import (
 	"context"
 	"io"
-
-	"k8s.io/client-go/tools/remotecommand"
 )
 
 const DefaultPort uint16 = 22
@@ -45,7 +43,16 @@ type Streams struct {
 	Stdout            io.Writer
 	Stderr            io.Writer
 	TTY               bool
-	TerminalSizeQueue remotecommand.TerminalSizeQueue
+	TerminalSizeQueue TerminalSizeQueue
+}
+
+type TerminalSize struct {
+	Width  uint16
+	Height uint16
+}
+
+type TerminalSizeQueue interface {
+	Next() *TerminalSize
 }
 
 // Executor is implemented by the Kubernetes cluster provider.

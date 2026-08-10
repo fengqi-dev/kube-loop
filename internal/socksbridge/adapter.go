@@ -7,7 +7,7 @@ import (
 	"net"
 	"sync"
 
-	"github.com/fengqi-dev/kube-loop/internal/tunnel"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
 )
 
 // remoteResolver preserves domain names so cluster DNS resolution happens at
@@ -25,6 +25,13 @@ type bufferedConn struct {
 
 func (c *bufferedConn) Read(value []byte) (int, error) {
 	return c.reader.Read(value)
+}
+
+func (c *bufferedConn) CloseWrite() error {
+	if writer, ok := c.Conn.(interface{ CloseWrite() error }); ok {
+		return writer.CloseWrite()
+	}
+	return c.Conn.Close()
 }
 
 // framedConn adapts the Gateway's length-prefixed UDP tunnel to the datagram

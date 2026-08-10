@@ -7,7 +7,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/fengqi-dev/kube-loop/internal/tunnel"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
 )
 
 // PortMapping maps one Service port onto a local listener.

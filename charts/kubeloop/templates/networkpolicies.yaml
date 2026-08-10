@@ -1,0 +1,136 @@
+{{- if .Values.networkPolicy.enabled }}
+{{- if .Values.networkPolicy.egress.enabled }}
+{{- if not .Values.networkPolicy.egress.controller }}
+{{- fail "networkPolicy.egress.controller must contain explicit Kubernetes API, identity provider, database and required workload allow rules" }}
+{{- end }}
+{{- if not .Values.networkPolicy.egress.dataPlane }}
+{{- fail "networkPolicy.egress.dataPlane must contain explicit authorized workload CIDR or namespace allow rules" }}
+{{- end }}
+{{- if not .Values.networkPolicy.egress.operator }}
+{{- fail "networkPolicy.egress.operator must contain an explicit Kubernetes API allow rule" }}
+{{- end }}
+{{- end }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "kubeloop.dataPlaneName" . }}
+  labels:
+    {{- include "kubeloop.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "kubeloop.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: data-plane
+  policyTypes:
+    - Ingress
+    {{- if .Values.networkPolicy.egress.enabled }}
+    - Egress
+    {{- end }}
+  ingress:
+    - ports:
+        - port: 8080
+          protocol: TCP
+  {{- if .Values.networkPolicy.egress.enabled }}
+  egress:
+    {{- if .Values.networkPolicy.egress.dns.enabled }}
+    - to:
+        - namespaceSelector:
+            {{- toYaml .Values.networkPolicy.egress.dns.namespaceSelector | nindent 12 }}
+          podSelector:
+            {{- toYaml .Values.networkPolicy.egress.dns.podSelector | nindent 12 }}
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    {{- end }}
+    {{- if .Values.controller.relayRegistry.enabled }}
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "kubeloop.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: controller
+      ports:
+        - port: {{ .Values.controller.relayRegistry.listenPort }}
+          protocol: TCP
+    {{- end }}
+    {{- toYaml .Values.networkPolicy.egress.dataPlane | nindent 4 }}
+  {{- end }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "kubeloop.controllerName" . }}
+  labels:
+    {{- include "kubeloop.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "kubeloop.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: controller
+  policyTypes:
+    - Ingress
+    {{- if .Values.networkPolicy.egress.enabled }}
+    - Egress
+    {{- end }}
+  ingress:
+    - ports:
+        - port: 8080
+          protocol: TCP
+    {{- if .Values.controller.relayRegistry.enabled }}
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "kubeloop.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: data-plane
+      ports:
+        - port: {{ .Values.controller.relayRegistry.listenPort }}
+          protocol: TCP
+    {{- end }}
+  {{- if .Values.networkPolicy.egress.enabled }}
+  egress:
+    {{- if .Values.networkPolicy.egress.dns.enabled }}
+    - to:
+        - namespaceSelector:
+            {{- toYaml .Values.networkPolicy.egress.dns.namespaceSelector | nindent 12 }}
+          podSelector:
+            {{- toYaml .Values.networkPolicy.egress.dns.podSelector | nindent 12 }}
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    {{- end }}
+    {{- toYaml .Values.networkPolicy.egress.controller | nindent 4 }}
+  {{- end }}
+{{- if .Values.networkPolicy.egress.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "kubeloop.operatorName" . }}
+  labels:
+    {{- include "kubeloop.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "kubeloop.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: operator
+  policyTypes:
+    - Egress
+  egress:
+    {{- if .Values.networkPolicy.egress.dns.enabled }}
+    - to:
+        - namespaceSelector:
+            {{- toYaml .Values.networkPolicy.egress.dns.namespaceSelector | nindent 12 }}
+          podSelector:
+            {{- toYaml .Values.networkPolicy.egress.dns.podSelector | nindent 12 }}
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    {{- end }}
+    {{- toYaml .Values.networkPolicy.egress.operator | nindent 4 }}
+{{- end }}
+{{- end }}

@@ -5,7 +5,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/fengqi-dev/kube-loop/internal/tunnel"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
 )
 
 type fakeControlRegistrar struct {

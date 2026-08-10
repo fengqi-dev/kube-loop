@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/netip"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -86,7 +87,7 @@ func (s *Server) Enable(target Target) (Info, error) {
 		return Info{}, err
 	}
 	s.mu.Lock()
-	s.targets[target.IP] = target
+	s.targets[targetID(target)] = target
 	s.mu.Unlock()
 	return s.info(target), nil
 }
@@ -160,6 +161,54 @@ func (s *Server) Command(id, container string) (string, error) {
 	return "", fmt.Errorf("Pod SSH endpoint %q not found", id)
 }
 
+// EndpointInfo returns the SSH command for an enabled target through a local
+// listener. The target remains the same Pod/container; only the client-facing
+// address differs from the legacy TUN-addressed endpoint.
+func (s *Server) EndpointInfo(id, address string) (Info, error) {
+	if s == nil {
+		return Info{}, errors.New("Pod SSH is unavailable")
+	}
+	host, rawPort, err := net.SplitHostPort(strings.TrimSpace(address))
+	if err != nil || host == "" {
+		return Info{}, errors.New("Pod SSH endpoint address is invalid")
+	}
+	port, err := strconv.ParseUint(rawPort, 10, 16)
+	if err != nil || port == 0 {
+		return Info{}, errors.New("Pod SSH endpoint port is invalid")
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, target := range s.targets {
+		if targetID(target) == id {
+			return s.infoAt(target, host, uint16(port)), nil
+		}
+	}
+	return Info{}, fmt.Errorf("Pod SSH endpoint %q not found", id)
+}
+
+// ServeConnection serves one accepted local connection for an enabled target.
+func (s *Server) ServeConnection(id string, connection net.Conn) error {
+	if s == nil || connection == nil {
+		return errors.New("Pod SSH connection is required")
+	}
+	s.mu.RLock()
+	var selected *Target
+	for _, target := range s.targets {
+		if targetID(target) == id {
+			copy := target
+			selected = &copy
+			break
+		}
+	}
+	s.mu.RUnlock()
+	if selected == nil {
+		_ = connection.Close()
+		return fmt.Errorf("Pod SSH endpoint %q not found", id)
+	}
+	s.serveConnection(connection, *selected)
+	return nil
+}
+
 // Reconcile exposes every supplied Pod by default, follows replacement IPs,
 // and drops endpoints whose Pod/container disappeared.
 func (s *Server) Reconcile(pods []PodRef) error {
@@ -199,7 +248,7 @@ func (s *Server) Reconcile(pods []PodRef) error {
 			Context: pod.Context, Namespace: pod.Namespace, Pod: pod.Pod,
 			Container: container, Containers: append([]string{}, pod.Containers...), IP: pod.IP,
 		}
-		next[target.IP] = target
+		next[id] = target
 		activeIDs[id] = struct{}{}
 	}
 	s.targets = next
@@ -243,7 +292,15 @@ func (s *Server) HostTCP(host string, port uint16) (func(net.Conn), bool) {
 		return nil, false
 	}
 	s.mu.RLock()
-	target, ok := s.targets[ip.Unmap().String()]
+	var target Target
+	ok := false
+	for _, candidate := range s.targets {
+		if candidate.IP == ip.Unmap().String() {
+			target = candidate
+			ok = true
+			break
+		}
+	}
 	s.mu.RUnlock()
 	if !ok {
 		return nil, false

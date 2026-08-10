@@ -4,11 +4,16 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"strconv"
 
 	"github.com/kballard/go-shellquote"
 )
 
 func (s *Server) info(target Target) Info {
+	return s.infoAt(target, target.IP, DefaultPort)
+}
+
+func (s *Server) infoAt(target Target, host string, port uint16) Info {
 	args := []string{
 		"ssh",
 		"-o", "StrictHostKeyChecking=no",
@@ -18,10 +23,13 @@ func (s *Server) info(target Target) Info {
 	if s.clientIdentityPath != "" {
 		args = append(args, "-i", s.clientIdentityPath)
 	}
-	args = append(args, fmt.Sprintf("%s@%s", target.Container, target.IP))
+	if port != DefaultPort {
+		args = append(args, "-p", strconv.Itoa(int(port)))
+	}
+	args = append(args, fmt.Sprintf("%s@%s", target.Container, host))
 	return Info{
 		ID: targetID(target), Context: target.Context, Namespace: target.Namespace,
-		Pod: target.Pod, Container: target.Container, IP: target.IP, Port: DefaultPort,
+		Pod: target.Pod, Container: target.Container, IP: host, Port: port,
 		Command: shellquote.Join(args...),
 	}
 }

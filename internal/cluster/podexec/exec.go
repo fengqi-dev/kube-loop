@@ -14,6 +14,18 @@ import (
 
 var newRemoteExecutor = remotecommand.NewSPDYExecutor
 
+type terminalSizeQueue struct {
+	source podssh.TerminalSizeQueue
+}
+
+func (queue terminalSizeQueue) Next() *remotecommand.TerminalSize {
+	size := queue.source.Next()
+	if size == nil {
+		return nil
+	}
+	return &remotecommand.TerminalSize{Width: size.Width, Height: size.Height}
+}
+
 // Exec streams a command through the Kubernetes pods/exec subresource.
 func Exec(
 	ctx context.Context,
@@ -53,12 +65,16 @@ func Exec(
 	if err != nil {
 		return fmt.Errorf("create pod exec stream: %w", err)
 	}
+	var sizes remotecommand.TerminalSizeQueue
+	if streams.TerminalSizeQueue != nil {
+		sizes = terminalSizeQueue{source: streams.TerminalSizeQueue}
+	}
 	if err := executor.StreamWithContext(ctx, remotecommand.StreamOptions{
 		Stdin:             streams.Stdin,
 		Stdout:            streams.Stdout,
 		Stderr:            streams.Stderr,
 		Tty:               streams.TTY,
-		TerminalSizeQueue: streams.TerminalSizeQueue,
+		TerminalSizeQueue: sizes,
 	}); err != nil {
 		return fmt.Errorf("exec %s/%s: %w", target.Namespace, target.Pod, err)
 	}

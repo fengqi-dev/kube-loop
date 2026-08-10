@@ -11,7 +11,10 @@ import (
 	singboxruntime "github.com/fengqi-dev/kube-loop/internal/singbox/runtime"
 )
 
-func newSingboxRuntime(appendLog func(string, string)) *singboxruntime.Runtime {
+// NewSingboxRuntime wires the unprivileged sing-box runtime to the narrowly
+// scoped privileged helper. The V1 and V2 desktop composition roots share it;
+// neither remote client SDK nor Gateway server imports helper implementation.
+func NewSingboxRuntime(appendLog func(string, string)) *singboxruntime.Runtime {
 	logEvent := func(level, message string) {
 		if appendLog != nil {
 			appendLog(level, message)

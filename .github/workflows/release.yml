@@ -44,6 +44,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
+        with:
+          submodules: recursive
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -260,6 +262,9 @@ jobs:
     timeout-minutes: 10
 
     steps:
+      - name: Check out release source
+        uses: actions/checkout@v6
+
       - name: Download desktop artifacts
         uses: actions/download-artifact@v7
         with:
@@ -277,6 +282,9 @@ jobs:
       - name: Generate SHA-256 checksums
         shell: bash
         run: |
+          version="${GITHUB_REF_NAME#v}"
+          tar -C third_party/patches/sing-box -czf \
+            "dist/sing-box-kubeloop-${version}-patches.tar.gz" .
           cd dist
           # Prefer bare filenames (no "./" prefix) so consumers can match by asset name.
           sha256sum -- * > SHA256SUMS

@@ -2,9 +2,10 @@ package portfwd
 
 import (
 	"context"
-	"io"
 	"net"
 	"sync"
+
+	"github.com/fengqi-dev/kube-loop/internal/streamcopy"
 )
 
 type routedForwarder struct {
@@ -77,17 +78,7 @@ func (f *routedForwarder) forward(client net.Conn) {
 	}
 	defer f.untrack(target)
 	defer target.Close()
-	done := make(chan struct{}, 2)
-	copyStream := func(dst, src net.Conn) {
-		_, _ = io.Copy(dst, src)
-		if value, ok := dst.(interface{ CloseWrite() error }); ok {
-			_ = value.CloseWrite()
-		}
-		done <- struct{}{}
-	}
-	go copyStream(target, client)
-	go copyStream(client, target)
-	<-done
+	streamcopy.Bidirectional(client, target)
 }
 
 func (f *routedForwarder) track(conn net.Conn) bool {

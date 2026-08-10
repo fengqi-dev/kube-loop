@@ -1,0 +1,311 @@
+package config
+
+import (
+	"bytes"
+	"context"
+	"crypto/x509"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"strings"
+	"time"
+
+	"github.com/fengqi-dev/kube-loop/internal/controller/authn"
+	adprovider "github.com/fengqi-dev/kube-loop/internal/controller/authn/ad"
+	devprovider "github.com/fengqi-dev/kube-loop/internal/controller/authn/development"
+	oidcprovider "github.com/fengqi-dev/kube-loop/internal/controller/authn/oidc"
+)
+
+const maxConfigBytes = 1 << 20
+
+type File struct {
+	DevelopmentMode bool       `json:"developmentMode,omitempty"`
+	Providers       []Provider `json:"providers"`
+}
+
+type Provider struct {
+	ID          string             `json:"id"`
+	Type        string             `json:"type"`
+	DisplayName string             `json:"displayName,omitempty"`
+	OIDC        *OIDCConfig        `json:"oidc,omitempty"`
+	AD          *ADConfig          `json:"ad,omitempty"`
+	StaticToken *StaticTokenConfig `json:"staticToken,omitempty"`
+	Anonymous   *AnonymousConfig   `json:"anonymous,omitempty"`
+}
+
+type DevelopmentIdentityConfig struct {
+	Subject     string   `json:"subject,omitempty"`
+	DisplayName string   `json:"displayName,omitempty"`
+	Email       string   `json:"email,omitempty"`
+	Groups      []string `json:"groups,omitempty"`
+}
+
+type StaticTokenConfig struct {
+	TokenFile string `json:"tokenFile"`
+	DevelopmentIdentityConfig
+}
+
+type AnonymousConfig struct {
+	DevelopmentIdentityConfig
+}
+
+type ADConfig struct {
+	DirectoryID                 string `json:"directoryId"`
+	URL                         string `json:"url"`
+	StartTLS                    bool   `json:"startTLS,omitempty"`
+	BaseDN                      string `json:"baseDn"`
+	UserFilter                  string `json:"userFilter,omitempty"`
+	BindDN                      string `json:"bindDn,omitempty"`
+	BindPasswordFile            string `json:"bindPasswordFile,omitempty"`
+	CAFile                      string `json:"caFile,omitempty"`
+	ObjectIDAttribute           string `json:"objectIdAttribute,omitempty"`
+	DisplayNameAttribute        string `json:"displayNameAttribute,omitempty"`
+	EmailAttribute              string `json:"emailAttribute,omitempty"`
+	GroupsAttribute             string `json:"groupsAttribute,omitempty"`
+	UserAccountControlAttribute string `json:"userAccountControlAttribute,omitempty"`
+	LockoutTimeAttribute        string `json:"lockoutTimeAttribute,omitempty"`
+	AccountExpiresAttribute     string `json:"accountExpiresAttribute,omitempty"`
+	PasswordLastSetAttribute    string `json:"passwordLastSetAttribute,omitempty"`
+	GroupNameAttribute          string `json:"groupNameAttribute,omitempty"`
+	NestedGroupDepth            int    `json:"nestedGroupDepth,omitempty"`
+	MaxGroups                   int    `json:"maxGroups,omitempty"`
+	ConnectTimeout              string `json:"connectTimeout,omitempty"`
+	RequestTimeout              string `json:"requestTimeout,omitempty"`
+}
+
+type OIDCConfig struct {
+	Issuer             string                    `json:"issuer"`
+	ClientID           string                    `json:"clientId"`
+	ClientSecretFile   string                    `json:"clientSecretFile"`
+	RedirectURL        string                    `json:"redirectUrl"`
+	Scopes             []string                  `json:"scopes,omitempty"`
+	AllowedSigningAlgs []string                  `json:"allowedSigningAlgs,omitempty"`
+	RequiredClaims     []string                  `json:"requiredClaims,omitempty"`
+	Claims             oidcprovider.ClaimMapping `json:"claims"`
+	CAFile             string                    `json:"caFile,omitempty"`
+	HTTPTimeout        string                    `json:"httpTimeout,omitempty"`
+}
+
+func Load(path string) (File, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return File{}, nil
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return File{}, errors.New("open authentication config")
+	}
+	defer file.Close()
+	data, err := io.ReadAll(io.LimitReader(file, maxConfigBytes+1))
+	if err != nil {
+		return File{}, errors.New("read authentication config")
+	}
+	if len(data) > maxConfigBytes {
+		return File{}, errors.New("authentication config exceeds 1 MiB")
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	var config File
+	if err := decoder.Decode(&config); err != nil {
+		return File{}, errors.New("decode authentication config")
+	}
+	if err := ensureJSONEOF(decoder); err != nil {
+		return File{}, err
+	}
+	return config, nil
+}
+
+func Build(ctx context.Context, config File) (*authn.Registry, error) {
+	providers := make([]authn.Provider, 0, len(config.Providers))
+	for index, item := range config.Providers {
+		providerType := strings.ToLower(strings.TrimSpace(item.Type))
+		if (providerType == "static-token" || providerType == "anonymous") && !config.DevelopmentMode {
+			return nil, fmt.Errorf("auth provider %d requires explicit developmentMode", index)
+		}
+		switch providerType {
+		case "oidc":
+			if item.OIDC == nil {
+				return nil, fmt.Errorf("auth provider %d requires oidc configuration", index)
+			}
+			provider, err := buildOIDC(ctx, item)
+			if err != nil {
+				return nil, fmt.Errorf("initialize auth provider %q: %w", item.ID, err)
+			}
+			providers = append(providers, provider)
+		case "ad":
+			if item.AD == nil {
+				return nil, fmt.Errorf("auth provider %d requires ad configuration", index)
+			}
+			provider, err := buildAD(ctx, item)
+			if err != nil {
+				return nil, fmt.Errorf("initialize auth provider %q: %w", item.ID, err)
+			}
+			providers = append(providers, provider)
+		case "static-token":
+			if item.StaticToken == nil {
+				return nil, fmt.Errorf("auth provider %d requires staticToken configuration", index)
+			}
+			rawToken, err := readSmallSecretBytes(item.StaticToken.TokenFile, "development static token")
+			if err != nil {
+				return nil, fmt.Errorf("initialize auth provider %q: %w", item.ID, err)
+			}
+			provider, err := devprovider.NewStaticToken(
+				item.ID, item.DisplayName, rawToken, developmentIdentity(item.StaticToken.DevelopmentIdentityConfig),
+			)
+			if err != nil {
+				return nil, fmt.Errorf("initialize auth provider %q: %w", item.ID, err)
+			}
+			providers = append(providers, provider)
+		case "anonymous":
+			if item.Anonymous == nil {
+				return nil, fmt.Errorf("auth provider %d requires anonymous configuration", index)
+			}
+			provider, err := devprovider.NewAnonymous(
+				item.ID, item.DisplayName, developmentIdentity(item.Anonymous.DevelopmentIdentityConfig),
+			)
+			if err != nil {
+				return nil, fmt.Errorf("initialize auth provider %q: %w", item.ID, err)
+			}
+			providers = append(providers, provider)
+		default:
+			return nil, fmt.Errorf("auth provider %d has unsupported type %q", index, item.Type)
+		}
+	}
+	return authn.NewRegistry(providers...)
+}
+
+func developmentIdentity(config DevelopmentIdentityConfig) devprovider.IdentityConfig {
+	return devprovider.IdentityConfig{
+		Subject: config.Subject, DisplayName: config.DisplayName, Email: config.Email,
+		Groups: append([]string(nil), config.Groups...),
+	}
+}
+
+func buildOIDC(ctx context.Context, item Provider) (*oidcprovider.Provider, error) {
+	configuration := item.OIDC
+	var timeout time.Duration
+	var err error
+	if strings.TrimSpace(configuration.HTTPTimeout) != "" {
+		timeout, err = time.ParseDuration(configuration.HTTPTimeout)
+		if err != nil || timeout <= 0 {
+			return nil, errors.New("OIDC HTTP timeout must be a positive duration")
+		}
+	}
+	roots, err := loadRoots(configuration.CAFile, "OIDC")
+	if err != nil {
+		return nil, err
+	}
+	return oidcprovider.New(ctx, oidcprovider.Config{
+		ID: item.ID, DisplayName: item.DisplayName,
+		Issuer: configuration.Issuer, ClientID: configuration.ClientID,
+		ClientSecretFile: configuration.ClientSecretFile, RedirectURL: configuration.RedirectURL,
+		Scopes: configuration.Scopes, AllowedSigningAlgs: configuration.AllowedSigningAlgs,
+		RequiredClaims: configuration.RequiredClaims, Claims: configuration.Claims,
+		HTTPTimeout: timeout, RootCAs: roots,
+	})
+}
+
+func buildAD(ctx context.Context, item Provider) (*adprovider.Provider, error) {
+	configuration := item.AD
+	connectTimeout, err := optionalDuration(configuration.ConnectTimeout, "AD connect timeout")
+	if err != nil {
+		return nil, err
+	}
+	requestTimeout, err := optionalDuration(configuration.RequestTimeout, "AD request timeout")
+	if err != nil {
+		return nil, err
+	}
+	bindPassword := ""
+	if strings.TrimSpace(configuration.BindPasswordFile) != "" {
+		bindPassword, err = readSmallSecret(configuration.BindPasswordFile, "AD bind password")
+		if err != nil {
+			return nil, err
+		}
+	}
+	roots, err := loadRoots(configuration.CAFile, "AD")
+	if err != nil {
+		return nil, err
+	}
+	return adprovider.New(ctx, adprovider.Config{
+		ID: item.ID, DisplayName: item.DisplayName,
+		DirectoryID: configuration.DirectoryID, URL: configuration.URL,
+		StartTLS: configuration.StartTLS, BaseDN: configuration.BaseDN,
+		UserFilter: configuration.UserFilter, BindDN: configuration.BindDN,
+		BindPassword: bindPassword, ObjectIDAttribute: configuration.ObjectIDAttribute,
+		DisplayNameAttribute: configuration.DisplayNameAttribute,
+		EmailAttribute:       configuration.EmailAttribute, GroupsAttribute: configuration.GroupsAttribute,
+		UserAccountControlAttribute: configuration.UserAccountControlAttribute,
+		LockoutTimeAttribute:        configuration.LockoutTimeAttribute,
+		AccountExpiresAttribute:     configuration.AccountExpiresAttribute,
+		PasswordLastSetAttribute:    configuration.PasswordLastSetAttribute,
+		GroupNameAttribute:          configuration.GroupNameAttribute,
+		NestedGroupDepth:            configuration.NestedGroupDepth, MaxGroups: configuration.MaxGroups,
+		ConnectTimeout: connectTimeout, RequestTimeout: requestTimeout, RootCAs: roots,
+	})
+}
+
+func optionalDuration(value, name string) (time.Duration, error) {
+	if strings.TrimSpace(value) == "" {
+		return 0, nil
+	}
+	duration, err := time.ParseDuration(value)
+	if err != nil || duration <= 0 {
+		return 0, fmt.Errorf("%s must be a positive duration", name)
+	}
+	return duration, nil
+}
+
+func loadRoots(path, label string) (*x509.CertPool, error) {
+	if strings.TrimSpace(path) == "" {
+		return nil, nil
+	}
+	pem, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read %s CA file", label)
+	}
+	roots, err := x509.SystemCertPool()
+	if err != nil || roots == nil {
+		roots = x509.NewCertPool()
+	}
+	if !roots.AppendCertsFromPEM(pem) {
+		return nil, fmt.Errorf("%s CA file contains no certificates", label)
+	}
+	return roots, nil
+}
+
+func readSmallSecret(path, label string) (string, error) {
+	data, err := readSmallSecretBytes(path, label)
+	if err != nil {
+		return "", err
+	}
+	defer clear(data)
+	return string(data), nil
+}
+
+func readSmallSecretBytes(path, label string) ([]byte, error) {
+	file, err := os.Open(strings.TrimSpace(path))
+	if err != nil {
+		return nil, fmt.Errorf("read %s file", label)
+	}
+	defer file.Close()
+	data, err := io.ReadAll(io.LimitReader(file, 64<<10+1))
+	if err != nil || len(data) > 64<<10 {
+		clear(data)
+		return nil, fmt.Errorf("read %s file", label)
+	}
+	data = bytes.TrimSpace(data)
+	if len(data) == 0 {
+		return nil, fmt.Errorf("%s file is empty", label)
+	}
+	return data, nil
+}
+
+func ensureJSONEOF(decoder *json.Decoder) error {
+	var extra any
+	if err := decoder.Decode(&extra); err == io.EOF {
+		return nil
+	}
+	return errors.New("authentication config must contain exactly one JSON document")
+}

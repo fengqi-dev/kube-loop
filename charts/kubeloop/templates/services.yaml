@@ -1,0 +1,57 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "kubeloop.controllerName" . }}
+  labels:
+    {{- include "kubeloop.labels" . | nindent 4 }}
+    app.kubernetes.io/component: controller
+spec:
+  type: {{ .Values.controller.service.type }}
+  selector:
+    {{- include "kubeloop.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: controller
+  ports:
+    - name: http
+      port: {{ .Values.controller.service.port }}
+      targetPort: http
+      protocol: TCP
+      appProtocol: http
+{{- if .Values.controller.relayRegistry.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "kubeloop.controllerRegistryName" . }}
+  labels:
+    {{- include "kubeloop.labels" . | nindent 4 }}
+    app.kubernetes.io/component: controller-relay-registry
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "kubeloop.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: controller
+  ports:
+    - name: relay-mtls
+      port: {{ .Values.controller.relayRegistry.servicePort }}
+      targetPort: relay-mtls
+      protocol: TCP
+{{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "kubeloop.dataPlaneName" . }}
+  labels:
+    {{- include "kubeloop.labels" . | nindent 4 }}
+    app.kubernetes.io/component: data-plane
+spec:
+  type: {{ .Values.dataPlane.service.type }}
+  selector:
+    {{- include "kubeloop.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: data-plane
+  ports:
+    - name: http
+      port: {{ .Values.dataPlane.service.port }}
+      targetPort: http
+      protocol: TCP
+      appProtocol: kubernetes.io/ws

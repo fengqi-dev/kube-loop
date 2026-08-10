@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fengqi-dev/kube-loop/internal/tunnel"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
 )
 
 func TestControlSessionStateTransitions(t *testing.T) {

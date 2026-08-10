@@ -1,9 +1,8 @@
 import { Settings2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { WindowControls } from "@/components/layout/window-controls";
-import { navKeys } from "@/components/layout/navigation";
+import { navKeys, type AppView } from "@/components/layout/navigation";
 import { SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
-import type { AppView } from "@/hooks/use-session";
 import { useI18n, type TranslationKey } from "@/i18n";
 
 const headerKeys: Record<AppView, TranslationKey> = {

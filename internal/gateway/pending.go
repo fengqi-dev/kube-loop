@@ -5,7 +5,7 @@ import (
 	"net"
 	"time"
 
-	"github.com/fengqi-dev/kube-loop/internal/tunnel"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
 )
 
 func (s *Server) offerPending(pending *pendingStream) bool {

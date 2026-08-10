@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/fengqi-dev/kube-loop/internal/helper"
+	helperprotocol "github.com/fengqi-dev/kube-loop/internal/protocol/helper"
 )
 
 func requirePlatformE2E(t *testing.T) {
@@ -28,8 +29,8 @@ func TestHelperServiceReady(t *testing.T) {
 	if !status.Installed || !status.Running || !status.CoreReady {
 		t.Fatalf("helper is not ready: %+v", status)
 	}
-	if status.Protocol != helper.ProtocolVersion {
-		t.Fatalf("protocol=%d want %d", status.Protocol, helper.ProtocolVersion)
+	if status.Protocol != helperprotocol.Version {
+		t.Fatalf("protocol=%d want %d", status.Protocol, helperprotocol.Version)
 	}
 
 	client, err := helper.NewClient()

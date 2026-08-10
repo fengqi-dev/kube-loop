@@ -7,7 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/fengqi-dev/kube-loop/internal/tunnel"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
 )
 
 const (
@@ -16,9 +17,10 @@ const (
 )
 
 type controlSession struct {
-	conn  net.Conn
-	token tunnel.SessionToken
-	mu    sync.Mutex
+	conn            net.Conn
+	token           tunnel.SessionToken
+	networkSpecHash string
+	mu              sync.Mutex
 }
 
 type listenerKey struct {
@@ -57,9 +59,25 @@ type udpAssociation struct {
 	pendingID uint64
 }
 
-func (s *Server) handleControl(client net.Conn, token tunnel.SessionToken) {
-	session := &controlSession{conn: client, token: token}
+func (s *Server) handleControl(
+	client net.Conn,
+	token tunnel.SessionToken,
+	spec *networkspec.Spec,
+	networkSpecHash string,
+	namespace string,
+) {
+	session := &controlSession{conn: client, token: token, networkSpecHash: networkSpecHash}
 	s.mu.Lock()
+	if spec != nil {
+		if existing, ok := s.networks[token]; ok &&
+			(existing.hash != networkSpecHash || existing.namespace != namespace) {
+			s.mu.Unlock()
+			_ = tunnel.WriteStatus(client, errors.New("Session NetworkSpec changed"))
+			_ = client.Close()
+			return
+		}
+		s.networks[token] = tenantNetwork{spec: *spec, hash: networkSpecHash, namespace: namespace}
+	}
 	s.controls[session] = struct{}{}
 	s.tenants[token]++
 	s.mu.Unlock()
@@ -106,6 +124,7 @@ func (s *Server) removeControl(session *controlSession) {
 	lastTenantControl := s.tenants[session.token] == 0
 	if s.tenants[session.token] == 0 {
 		delete(s.tenants, session.token)
+		delete(s.networks, session.token)
 	}
 	var toClose []*interceptListener
 	for key, listener := range s.listeners {

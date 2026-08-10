@@ -1,0 +1,18 @@
+apiVersion: traffic.kubeloop.io/v1alpha1
+kind: TrafficBinding
+metadata:
+  name: preview-sample
+spec:
+  mode: Preview
+  sessionID: b939f2c1-899e-44cd-9865-ec688fbc38f3
+  taskID: 95ec47ae-495f-45dd-9f2b-29fa5f17f03a
+  sessionGeneration: 1
+  relay:
+    address: 10.96.0.20
+  preview:
+    serviceName: preview-sample
+  ports:
+  - name: http
+    targetPort: 8080
+    relayPort: 18080
+    protocol: TCP

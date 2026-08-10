@@ -200,19 +200,24 @@ Streamable HTTP.
 2. Select Codex, Claude Code, Cursor, or VS Code.
 3. Click **Install MCP server**, or copy the generated configuration.
 
-MCP is disabled by default, binds only to `127.0.0.1`, and supports optional
-Bearer authentication. It uses the active kubeconfig identity and requires no
-additional Kubernetes permissions.
+MCP is disabled by default, binds only to `127.0.0.1`, and enables a generated
+Bearer token by default. The token is stored in the operating-system credential
+vault; `mcp-v2.json` contains only non-secret settings.
+
+Every cluster operation uses the typed V2 Gateway SDK and the access token of
+the currently active Server Profile. MCP cannot select another saved Profile,
+cannot bypass Gateway policy or Kubernetes authorization, and does not load a
+local kubeconfig. Mutations require the exact `profileId`, `sessionId`, and
+`namespace` returned by the active Session. The V1 tools that changed local
+network overrides or installed the privileged Helper are not exposed in V2.
 
 | Tool | Operations |
 | --- | --- |
-| `manage_cluster` | Reload/probe Contexts; list Namespaces, Services, and Pods |
-| `manage_connection` | Read status/config, connect, and disconnect |
-| `manage_network` | Read or update network overrides and Host Aliases |
-| `manage_traffic` | Start, stop, and list traffic workflows |
-| `manage_helper` | Inspect, install, or uninstall the Helper |
-| `exec_pod_command` | Execute a command in a Pod container |
-| `manage_file_transfer` | Start, list, or cancel local ↔ Pod transfers |
+| `manage_cluster` | Read Kubernetes version/capabilities; list Namespaces, Services, and Pods through Gateway |
+| `manage_connection` | Read, connect, or explicitly disconnect the active Gateway Session |
+| `manage_traffic` | Start, stop, and list Exchange, Mirror, Preview, and Port Forward Tasks |
+| `exec_pod_command` | Execute an exact argv through the authenticated Gateway exec stream |
+| `manage_file_transfer` | Start, list, or explicitly cancel local ↔ Pod transfers |
 
 See the [MCP guide](https://fengqi-dev.github.io/kube-loop/mcp.html) for setup
 and request examples.
@@ -308,10 +313,32 @@ sudo "$(go env GOPATH)/bin/dlv" attach "$(pgrep -n -x sing-box)"
 
 </details>
 
+<details>
+<summary>Build the release sing-box patch set</summary>
+
+Release builds do not maintain a sing-box fork. They export the exact pinned
+upstream revision, apply the repository patch set in an isolated source tree,
+and retain only the gVisor TUN stack and Clash API build features used by
+KubeLoop.
+
+```bash
+git submodule update --init --recursive
+make singbox-patch-check
+make singbox-package
+```
+
+The binary archive, reconstructable patch archive, and SHA-256 checksums are
+written to `dist/`. See
+[`third_party/patches/sing-box/README.md`](third_party/patches/sing-box/README.md)
+for the pinned source revision, retained features, measured size reduction, and
+update procedure.
+
+</details>
+
 ### Build
 
 ```bash
-VERSION=v1.5.0
+VERSION=v2.0.0-beta.1
 VITE_APP_VERSION="$VERSION" wails build -ldflags "-X main.version=${VERSION}"
 ```
 

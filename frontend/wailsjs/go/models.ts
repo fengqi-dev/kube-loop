@@ -1,373 +1,63 @@
 export namespace app {
-	
+
+	export class AuthSession {
+	    authenticated: boolean;
+	    // Go type: time
+	    accessExpiresAt: any;
+	    // Go type: time
+	    refreshExpiresAt: any;
+
+	    static createFrom(source: any = {}) {
+	        return new AuthSession(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.authenticated = source["authenticated"];
+	        this.accessExpiresAt = this.convertValues(source["accessExpiresAt"], null);
+	        this.refreshExpiresAt = this.convertValues(source["refreshExpiresAt"], null);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class BootstrapData {
-	    contexts: cluster.ContextInfo[];
-	    namespaces: string[];
-	    session: session.State;
 	    update: update.Info;
-	    preferredContext?: string;
-	    preferredNamespace?: string;
-	    preferredMode?: string;
 	    platform: string;
-	    kubeconfigFiles?: cluster.KubeconfigFileInfo[];
-	    shareGateway: boolean;
-	    gatewayNamespace: string;
-	    gatewayTransport: store.GatewayTransport;
+	    mode: string;
+	    backendMode: string;
+	    serverProfiles: profile.State;
+	    migration: migration.Status;
 
 	    static createFrom(source: any = {}) {
 	        return new BootstrapData(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.contexts = this.convertValues(source["contexts"], cluster.ContextInfo);
-	        this.namespaces = source["namespaces"];
-	        this.session = this.convertValues(source["session"], session.State);
 	        this.update = this.convertValues(source["update"], update.Info);
-	        this.preferredContext = source["preferredContext"];
-	        this.preferredNamespace = source["preferredNamespace"];
-	        this.preferredMode = source["preferredMode"];
 	        this.platform = source["platform"];
-	        this.kubeconfigFiles = this.convertValues(source["kubeconfigFiles"], cluster.KubeconfigFileInfo);
-	        this.shareGateway = source["shareGateway"];
-	        this.gatewayNamespace = source["gatewayNamespace"];
-	        this.gatewayTransport = this.convertValues(source["gatewayTransport"], store.GatewayTransport);
-	    }
-	
-		convertValues(a: any, classs: any, asMap: boolean = false): any {
-		    if (!a) {
-		        return a;
-		    }
-		    if (a.slice && a.map) {
-		        return (a as any[]).map(elem => this.convertValues(elem, classs));
-		    } else if ("object" === typeof a) {
-		        if (asMap) {
-		            for (const key of Object.keys(a)) {
-		                a[key] = new classs(a[key]);
-		            }
-		            return a;
-		        }
-		        return new classs(a);
-		    }
-		    return a;
-		}
-	}
-
-}
-
-export namespace cluster {
-	
-	export class Capabilities {
-	    gatewayInstall: boolean;
-	    gatewayPortForward: boolean;
-	    clusterNodes: boolean;
-	    inventoryCluster: boolean;
-	    serviceWrite: boolean;
-	    serviceCreate: boolean;
-	    podExec: boolean;
-	    scopeNamespaces?: string[];
-	    issues?: string[];
-	
-	    static createFrom(source: any = {}) {
-	        return new Capabilities(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.gatewayInstall = source["gatewayInstall"];
-	        this.gatewayPortForward = source["gatewayPortForward"];
-	        this.clusterNodes = source["clusterNodes"];
-	        this.inventoryCluster = source["inventoryCluster"];
-	        this.serviceWrite = source["serviceWrite"];
-	        this.serviceCreate = source["serviceCreate"];
-	        this.podExec = source["podExec"];
-	        this.scopeNamespaces = source["scopeNamespaces"];
-	        this.issues = source["issues"];
-	    }
-	}
-	export class KubeconfigFileInfo {
-	    path: string;
-	    default: boolean;
-	
-	    static createFrom(source: any = {}) {
-	        return new KubeconfigFileInfo(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.path = source["path"];
-	        this.default = source["default"];
-	    }
-	}
-	export class ContextInfo {
-	    name: string;
-	    cluster: string;
-	    server?: string;
-	    user?: string;
-	    namespace?: string;
-	    source?: string;
-	    current: boolean;
-	
-	    static createFrom(source: any = {}) {
-	        return new ContextInfo(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.name = source["name"];
-	        this.cluster = source["cluster"];
-	        this.server = source["server"];
-	        this.user = source["user"];
-	        this.namespace = source["namespace"];
-	        this.source = source["source"];
-	        this.current = source["current"];
-	    }
-	}
-	export class ClusterInventory {
-	    contexts: ContextInfo[];
-	    files: KubeconfigFileInfo[];
-	
-	    static createFrom(source: any = {}) {
-	        return new ClusterInventory(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.contexts = this.convertValues(source["contexts"], ContextInfo);
-	        this.files = this.convertValues(source["files"], KubeconfigFileInfo);
-	    }
-	
-		convertValues(a: any, classs: any, asMap: boolean = false): any {
-		    if (!a) {
-		        return a;
-		    }
-		    if (a.slice && a.map) {
-		        return (a as any[]).map(elem => this.convertValues(elem, classs));
-		    } else if ("object" === typeof a) {
-		        if (asMap) {
-		            for (const key of Object.keys(a)) {
-		                a[key] = new classs(a[key]);
-		            }
-		            return a;
-		        }
-		        return new classs(a);
-		    }
-		    return a;
-		}
-	}
-	
-	export class Discovery {
-	    podCIDRs: string[];
-	    serviceCIDRs: string[];
-	    serviceIPs: string[];
-	    dnsServer: string;
-	    clusterDomains?: string[];
-	    pods: number;
-	    services: number;
-	    deployments: number;
-	
-	    static createFrom(source: any = {}) {
-	        return new Discovery(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.podCIDRs = source["podCIDRs"];
-	        this.serviceCIDRs = source["serviceCIDRs"];
-	        this.serviceIPs = source["serviceIPs"];
-	        this.dnsServer = source["dnsServer"];
-	        this.clusterDomains = source["clusterDomains"];
-	        this.pods = source["pods"];
-	        this.services = source["services"];
-	        this.deployments = source["deployments"];
-	    }
-	}
-	
-	export class ManualNetwork {
-	    podCIDRs?: string[];
-	    serviceCIDRs?: string[];
-	    dnsServer?: string;
-	    clusterDomains?: string[];
-	    dnsNamespace?: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new ManualNetwork(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.podCIDRs = source["podCIDRs"];
-	        this.serviceCIDRs = source["serviceCIDRs"];
-	        this.dnsServer = source["dnsServer"];
-	        this.clusterDomains = source["clusterDomains"];
-	        this.dnsNamespace = source["dnsNamespace"];
-	    }
-	}
-	export class PodPortInfo {
-	    name: string;
-	    port: number;
-	    protocol: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new PodPortInfo(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.name = source["name"];
-	        this.port = source["port"];
-	        this.protocol = source["protocol"];
-	    }
-	}
-	export class PodInfo {
-	    name: string;
-	    uid?: string;
-	    namespace: string;
-	    phase: string;
-	    ready: boolean;
-	    ip?: string;
-	    node?: string;
-	    containers: string[];
-	    ports: PodPortInfo[];
-	
-	    static createFrom(source: any = {}) {
-	        return new PodInfo(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.name = source["name"];
-	        this.uid = source["uid"];
-	        this.namespace = source["namespace"];
-	        this.phase = source["phase"];
-	        this.ready = source["ready"];
-	        this.ip = source["ip"];
-	        this.node = source["node"];
-	        this.containers = source["containers"];
-	        this.ports = this.convertValues(source["ports"], PodPortInfo);
-	    }
-	
-		convertValues(a: any, classs: any, asMap: boolean = false): any {
-		    if (!a) {
-		        return a;
-		    }
-		    if (a.slice && a.map) {
-		        return (a as any[]).map(elem => this.convertValues(elem, classs));
-		    } else if ("object" === typeof a) {
-		        if (asMap) {
-		            for (const key of Object.keys(a)) {
-		                a[key] = new classs(a[key]);
-		            }
-		            return a;
-		        }
-		        return new classs(a);
-		    }
-		    return a;
-		}
-	}
-	
-	export class ProbeResult {
-	    context: string;
-	    ok: boolean;
-	    version?: string;
-	    latencyMs?: number;
-	    error?: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new ProbeResult(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.context = source["context"];
-	        this.ok = source["ok"];
-	        this.version = source["version"];
-	        this.latencyMs = source["latencyMs"];
-	        this.error = source["error"];
-	    }
-	}
-	export class ServicePortInfo {
-	    name: string;
-	    port: number;
-	    protocol: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new ServicePortInfo(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.name = source["name"];
-	        this.port = source["port"];
-	        this.protocol = source["protocol"];
-	    }
-	}
-	export class ServiceInfo {
-	    name: string;
-	    namespace: string;
-	    type: string;
-	    clusterIP: string;
-	    ports: ServicePortInfo[];
-	
-	    static createFrom(source: any = {}) {
-	        return new ServiceInfo(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.name = source["name"];
-	        this.namespace = source["namespace"];
-	        this.type = source["type"];
-	        this.clusterIP = source["clusterIP"];
-	        this.ports = this.convertValues(source["ports"], ServicePortInfo);
-	    }
-	
-		convertValues(a: any, classs: any, asMap: boolean = false): any {
-		    if (!a) {
-		        return a;
-		    }
-		    if (a.slice && a.map) {
-		        return (a as any[]).map(elem => this.convertValues(elem, classs));
-		    } else if ("object" === typeof a) {
-		        if (asMap) {
-		            for (const key of Object.keys(a)) {
-		                a[key] = new classs(a[key]);
-		            }
-		            return a;
-		        }
-		        return new classs(a);
-		    }
-		    return a;
-		}
-	}
-
-}
-
-export namespace filemanager {
-	
-	export class FileEntry {
-	    name: string;
-	    path: string;
-	    dir: boolean;
-	    size: number;
-	    mode: number;
-	    // Go type: time
-	    modTime: any;
-	
-	    static createFrom(source: any = {}) {
-	        return new FileEntry(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.name = source["name"];
-	        this.path = source["path"];
-	        this.dir = source["dir"];
-	        this.size = source["size"];
 	        this.mode = source["mode"];
-	        this.modTime = this.convertValues(source["modTime"], null);
+	        this.backendMode = source["backendMode"];
+	        this.serverProfiles = this.convertValues(source["serverProfiles"], profile.State);
+	        this.migration = this.convertValues(source["migration"], migration.Status);
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -386,46 +76,202 @@ export namespace filemanager {
 		    return a;
 		}
 	}
-	export class Target {
-	    context: string;
-	    namespace: string;
-	    pod: string;
-	    podUID?: string;
-	    container: string;
-	
+	export class RemoteInventory {
+	    kubernetesVersion: string;
+	    gatewayVersion: string;
+	    namespaces: remote.Namespace[];
+	    namespace?: string;
+	    capabilities: string[];
+	    pods: remote.Pod[];
+	    services: remote.Service[];
+	    session?: remote.Session;
+	    network?: networkdiag.Result;
+	    dataPlane?: dataplane.Status;
+
 	    static createFrom(source: any = {}) {
-	        return new Target(source);
+	        return new RemoteInventory(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.context = source["context"];
+	        this.kubernetesVersion = source["kubernetesVersion"];
+	        this.gatewayVersion = source["gatewayVersion"];
+	        this.namespaces = this.convertValues(source["namespaces"], remote.Namespace);
 	        this.namespace = source["namespace"];
+	        this.capabilities = source["capabilities"];
+	        this.pods = this.convertValues(source["pods"], remote.Pod);
+	        this.services = this.convertValues(source["services"], remote.Service);
+	        this.session = this.convertValues(source["session"], remote.Session);
+	        this.network = this.convertValues(source["network"], networkdiag.Result);
+	        this.dataPlane = this.convertValues(source["dataPlane"], dataplane.Status);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class SaveServerProfileRequest {
+	    baseUrl: string;
+	    displayName?: string;
+	    activate: boolean;
+
+	    static createFrom(source: any = {}) {
+	        return new SaveServerProfileRequest(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.baseUrl = source["baseUrl"];
+	        this.displayName = source["displayName"];
+	        this.activate = source["activate"];
+	    }
+	}
+	export class ServerExecRequest {
+	    profileId: string;
+	    pod: string;
+	    container?: string;
+	    command: string[];
+	    tty: boolean;
+	    width?: number;
+	    height?: number;
+
+	    static createFrom(source: any = {}) {
+	        return new ServerExecRequest(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.profileId = source["profileId"];
 	        this.pod = source["pod"];
-	        this.podUID = source["podUID"];
+	        this.container = source["container"];
+	        this.command = source["command"];
+	        this.tty = source["tty"];
+	        this.width = source["width"];
+	        this.height = source["height"];
+	    }
+	}
+	export class ServerPodFileCreateRequest {
+	    profileId: string;
+	    pod: string;
+	    container?: string;
+	    path: string;
+	    kind: string;
+
+	    static createFrom(source: any = {}) {
+	        return new ServerPodFileCreateRequest(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.profileId = source["profileId"];
+	        this.pod = source["pod"];
+	        this.container = source["container"];
+	        this.path = source["path"];
+	        this.kind = source["kind"];
+	    }
+	}
+	export class ServerPodFileDeleteRequest {
+	    profileId: string;
+	    pod: string;
+	    container?: string;
+	    path: string;
+	    recursive?: boolean;
+
+	    static createFrom(source: any = {}) {
+	        return new ServerPodFileDeleteRequest(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.profileId = source["profileId"];
+	        this.pod = source["pod"];
+	        this.container = source["container"];
+	        this.path = source["path"];
+	        this.recursive = source["recursive"];
+	    }
+	}
+	export class ServerPodFileRenameRequest {
+	    profileId: string;
+	    pod: string;
+	    container?: string;
+	    path: string;
+	    destination: string;
+
+	    static createFrom(source: any = {}) {
+	        return new ServerPodFileRenameRequest(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.profileId = source["profileId"];
+	        this.pod = source["pod"];
+	        this.container = source["container"];
+	        this.path = source["path"];
+	        this.destination = source["destination"];
+	    }
+	}
+	export class ServerPodFileTarget {
+	    profileId: string;
+	    pod: string;
+	    container?: string;
+	    path: string;
+
+	    static createFrom(source: any = {}) {
+	        return new ServerPodFileTarget(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.profileId = source["profileId"];
+	        this.pod = source["pod"];
+	        this.container = source["container"];
+	        this.path = source["path"];
+	    }
+	}
+	export class ServerPodSSHRequest {
+	    profileId: string;
+	    pod: string;
+	    container?: string;
+
+	    static createFrom(source: any = {}) {
+	        return new ServerPodSSHRequest(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.profileId = source["profileId"];
+	        this.pod = source["pod"];
 	        this.container = source["container"];
 	    }
 	}
-	export class TransferRequest {
-	    direction: string;
-	    target: Target;
-	    sourcePath: string;
-	    destinationDir: string;
-	    overwrite: boolean;
-	
+	export class ServerProfileResult {
+	    profile: profile.Profile;
+	    discovery: discovery.Document;
+
 	    static createFrom(source: any = {}) {
-	        return new TransferRequest(source);
+	        return new ServerProfileResult(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.direction = source["direction"];
-	        this.target = this.convertValues(source["target"], Target);
-	        this.sourcePath = source["sourcePath"];
-	        this.destinationDir = source["destinationDir"];
-	        this.overwrite = source["overwrite"];
+	        this.profile = this.convertValues(source["profile"], profile.Profile);
+	        this.discovery = this.convertValues(source["discovery"], discovery.Document);
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -444,20 +290,263 @@ export namespace filemanager {
 		    return a;
 		}
 	}
-	export class TransferTask {
+
+}
+export namespace capability {
+
+	export class Snapshot {
+	    schemaVersion: number;
+	    principalId: string;
+	    namespace: string;
+	    gatewayVersion: string;
+	    capabilities: string[];
+
+	    static createFrom(source: any = {}) {
+	        return new Snapshot(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.schemaVersion = source["schemaVersion"];
+	        this.principalId = source["principalId"];
+	        this.namespace = source["namespace"];
+	        this.gatewayVersion = source["gatewayVersion"];
+	        this.capabilities = source["capabilities"];
+	    }
+	}
+
+}
+
+export namespace dataplane {
+
+	export class Status {
+	    state: string;
+	    mode: string;
+	    sessionId: string;
+	    sessionGeneration: number;
+	    socksAddress: string;
+	    networkSpecHash: string;
+
+	    static createFrom(source: any = {}) {
+	        return new Status(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.state = source["state"];
+	        this.mode = source["mode"];
+	        this.sessionId = source["sessionId"];
+	        this.sessionGeneration = source["sessionGeneration"];
+	        this.socksAddress = source["socksAddress"];
+	        this.networkSpecHash = source["networkSpecHash"];
+	    }
+	}
+
+}
+
+export namespace discovery {
+
+	export class AuthMethod {
 	    id: string;
+	    type: string;
+	    displayName?: string;
+	    interaction: string;
+
+	    static createFrom(source: any = {}) {
+	        return new AuthMethod(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.type = source["type"];
+	        this.displayName = source["displayName"];
+	        this.interaction = source["interaction"];
+	    }
+	}
+	export class Document {
+	    serviceId: string;
+	    publicUrl: string;
+	    tunnelPath: string;
+	    apiVersions: string[];
+	    authMethods: AuthMethod[];
+	    features: string[];
+	    serverVersion: string;
+	    serverCommit?: string;
+	    protocolMin: string;
+	    protocolMax: string;
+	    minClientVersion?: string;
+
+	    static createFrom(source: any = {}) {
+	        return new Document(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.serviceId = source["serviceId"];
+	        this.publicUrl = source["publicUrl"];
+	        this.tunnelPath = source["tunnelPath"];
+	        this.apiVersions = source["apiVersions"];
+	        this.authMethods = this.convertValues(source["authMethods"], AuthMethod);
+	        this.features = source["features"];
+	        this.serverVersion = source["serverVersion"];
+	        this.serverCommit = source["serverCommit"];
+	        this.protocolMin = source["protocolMin"];
+	        this.protocolMax = source["protocolMax"];
+	        this.minClientVersion = source["minClientVersion"];
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+
+}
+
+export namespace exchange {
+
+	export class Info {
+	    id: string;
+	    profileId: string;
+	    sessionId: string;
+	    namespace: string;
+	    service: string;
+	    clusterIp: string;
+	    state: string;
+	    targets: reverserelay.Target[];
+
+	    static createFrom(source: any = {}) {
+	        return new Info(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.profileId = source["profileId"];
+	        this.sessionId = source["sessionId"];
+	        this.namespace = source["namespace"];
+	        this.service = source["service"];
+	        this.clusterIp = source["clusterIp"];
+	        this.state = source["state"];
+	        this.targets = this.convertValues(source["targets"], reverserelay.Target);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class Request {
+	    profileId: string;
+	    service: string;
+	    targets: reverserelay.Target[];
+
+	    static createFrom(source: any = {}) {
+	        return new Request(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.profileId = source["profileId"];
+	        this.service = source["service"];
+	        this.targets = this.convertValues(source["targets"], reverserelay.Target);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+
+}
+
+export namespace filetransfer {
+
+	export class Request {
+	    profileId: string;
 	    direction: string;
-	    target: Target;
-	    sourcePath: string;
-	    destinationPath: string;
-	    tempPath?: string;
-	    directory?: boolean;
+	    kind: string;
+	    pod: string;
+	    container?: string;
+	    localPath: string;
+	    remotePath: string;
+	    overwrite?: boolean;
+
+	    static createFrom(source: any = {}) {
+	        return new Request(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.profileId = source["profileId"];
+	        this.direction = source["direction"];
+	        this.kind = source["kind"];
+	        this.pod = source["pod"];
+	        this.container = source["container"];
+	        this.localPath = source["localPath"];
+	        this.remotePath = source["remotePath"];
+	        this.overwrite = source["overwrite"];
+	    }
+	}
+	export class Task {
+	    schemaVersion: number;
+	    id: string;
+	    profileId: string;
+	    sessionId: string;
+	    namespace: string;
+	    direction: string;
+	    kind: string;
+	    pod: string;
+	    container?: string;
+	    localPath: string;
+	    remotePath: string;
+	    overwrite?: boolean;
 	    status: string;
-	    totalBytes: number;
-	    doneBytes: number;
-	    // Go type: time
-	    sourceModTime: any;
-	    overwrite: boolean;
+	    totalBytes?: number;
+	    doneBytes?: number;
+	    checksum?: string;
+	    resumeId?: string;
+	    temporaryPath?: string;
 	    error?: string;
 	    // Go type: time
 	    createdAt: any;
@@ -465,219 +554,37 @@ export namespace filemanager {
 	    updatedAt: any;
 	    // Go type: time
 	    completedAt?: any;
-	
+
 	    static createFrom(source: any = {}) {
-	        return new TransferTask(source);
+	        return new Task(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.schemaVersion = source["schemaVersion"];
 	        this.id = source["id"];
+	        this.profileId = source["profileId"];
+	        this.sessionId = source["sessionId"];
+	        this.namespace = source["namespace"];
 	        this.direction = source["direction"];
-	        this.target = this.convertValues(source["target"], Target);
-	        this.sourcePath = source["sourcePath"];
-	        this.destinationPath = source["destinationPath"];
-	        this.tempPath = source["tempPath"];
-	        this.directory = source["directory"];
+	        this.kind = source["kind"];
+	        this.pod = source["pod"];
+	        this.container = source["container"];
+	        this.localPath = source["localPath"];
+	        this.remotePath = source["remotePath"];
+	        this.overwrite = source["overwrite"];
 	        this.status = source["status"];
 	        this.totalBytes = source["totalBytes"];
 	        this.doneBytes = source["doneBytes"];
-	        this.sourceModTime = this.convertValues(source["sourceModTime"], null);
-	        this.overwrite = source["overwrite"];
+	        this.checksum = source["checksum"];
+	        this.resumeId = source["resumeId"];
+	        this.temporaryPath = source["temporaryPath"];
 	        this.error = source["error"];
 	        this.createdAt = this.convertValues(source["createdAt"], null);
 	        this.updatedAt = this.convertValues(source["updatedAt"], null);
 	        this.completedAt = this.convertValues(source["completedAt"], null);
 	    }
-	
-		convertValues(a: any, classs: any, asMap: boolean = false): any {
-		    if (!a) {
-		        return a;
-		    }
-		    if (a.slice && a.map) {
-		        return (a as any[]).map(elem => this.convertValues(elem, classs));
-		    } else if ("object" === typeof a) {
-		        if (asMap) {
-		            for (const key of Object.keys(a)) {
-		                a[key] = new classs(a[key]);
-		            }
-		            return a;
-		        }
-		        return new classs(a);
-		    }
-		    return a;
-		}
-	}
 
-}
-
-export namespace helper {
-	
-	export class Status {
-	    installed: boolean;
-	    running: boolean;
-	    coreReady: boolean;
-	    version?: string;
-	    protocol?: number;
-	    expected: string;
-	    socket: string;
-	    error?: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new Status(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.installed = source["installed"];
-	        this.running = source["running"];
-	        this.coreReady = source["coreReady"];
-	        this.version = source["version"];
-	        this.protocol = source["protocol"];
-	        this.expected = source["expected"];
-	        this.socket = source["socket"];
-	        this.error = source["error"];
-	    }
-	}
-
-}
-
-export namespace intercept {
-	
-	export class PortMapping {
-	    servicePort: number;
-	    protocol: string;
-	    localHost: string;
-	    localPort: number;
-	
-	    static createFrom(source: any = {}) {
-	        return new PortMapping(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.servicePort = source["servicePort"];
-	        this.protocol = source["protocol"];
-	        this.localHost = source["localHost"];
-	        this.localPort = source["localPort"];
-	    }
-	}
-	export class InterceptPort {
-	    name: string;
-	    protocol: string;
-	    servicePort: number;
-	    listenPort: number;
-	
-	    static createFrom(source: any = {}) {
-	        return new InterceptPort(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.name = source["name"];
-	        this.protocol = source["protocol"];
-	        this.servicePort = source["servicePort"];
-	        this.listenPort = source["listenPort"];
-	    }
-	}
-	export class Info {
-	    id: string;
-	    namespace: string;
-	    service: string;
-	    clusterIP?: string;
-	    preview?: boolean;
-	    mode?: string;
-	    ports: InterceptPort[];
-	    locals: PortMapping[];
-	
-	    static createFrom(source: any = {}) {
-	        return new Info(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.id = source["id"];
-	        this.namespace = source["namespace"];
-	        this.service = source["service"];
-	        this.clusterIP = source["clusterIP"];
-	        this.preview = source["preview"];
-	        this.mode = source["mode"];
-	        this.ports = this.convertValues(source["ports"], InterceptPort);
-	        this.locals = this.convertValues(source["locals"], PortMapping);
-	    }
-	
-		convertValues(a: any, classs: any, asMap: boolean = false): any {
-		    if (!a) {
-		        return a;
-		    }
-		    if (a.slice && a.map) {
-		        return (a as any[]).map(elem => this.convertValues(elem, classs));
-		    } else if ("object" === typeof a) {
-		        if (asMap) {
-		            for (const key of Object.keys(a)) {
-		                a[key] = new classs(a[key]);
-		            }
-		            return a;
-		        }
-		        return new classs(a);
-		    }
-		    return a;
-		}
-	}
-	
-	export class Mapping {
-	    namespace: string;
-	    service: string;
-	    ports: PortMapping[];
-	    mode?: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new Mapping(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.namespace = source["namespace"];
-	        this.service = source["service"];
-	        this.ports = this.convertValues(source["ports"], PortMapping);
-	        this.mode = source["mode"];
-	    }
-	
-		convertValues(a: any, classs: any, asMap: boolean = false): any {
-		    if (!a) {
-		        return a;
-		    }
-		    if (a.slice && a.map) {
-		        return (a as any[]).map(elem => this.convertValues(elem, classs));
-		    } else if ("object" === typeof a) {
-		        if (asMap) {
-		            for (const key of Object.keys(a)) {
-		                a[key] = new classs(a[key]);
-		            }
-		            return a;
-		        }
-		        return new classs(a);
-		    }
-		    return a;
-		}
-	}
-	
-	export class PreviewRequest {
-	    namespace: string;
-	    name: string;
-	    ports: PortMapping[];
-	
-	    static createFrom(source: any = {}) {
-	        return new PreviewRequest(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.namespace = source["namespace"];
-	        this.name = source["name"];
-	        this.ports = this.convertValues(source["ports"], PortMapping);
-	    }
-	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -700,15 +607,15 @@ export namespace intercept {
 }
 
 export namespace mcp {
-	
+
 	export class InstallResult {
 	    client: string;
 	    path: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new InstallResult(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.client = source["client"];
@@ -723,11 +630,11 @@ export namespace mcp {
 	    tokenEnabled: boolean;
 	    token?: string;
 	    error?: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new Status(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.enabled = source["enabled"];
@@ -742,149 +649,75 @@ export namespace mcp {
 
 }
 
-export namespace podssh {
-	
-	export class EnableRequest {
-	    context: string;
-	    namespace: string;
-	    pod: string;
-	    container?: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new EnableRequest(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.context = source["context"];
-	        this.namespace = source["namespace"];
-	        this.pod = source["pod"];
-	        this.container = source["container"];
-	    }
-	}
-	export class Info {
-	    id: string;
-	    context: string;
-	    namespace: string;
-	    pod: string;
-	    container: string;
-	    ip: string;
-	    port: number;
-	    command: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new Info(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.id = source["id"];
-	        this.context = source["context"];
-	        this.namespace = source["namespace"];
-	        this.pod = source["pod"];
-	        this.container = source["container"];
-	        this.ip = source["ip"];
-	        this.port = source["port"];
-	        this.command = source["command"];
-	    }
-	}
+export namespace migration {
 
-}
-
-export namespace portfwd {
-	
-	export class Info {
-	    id: string;
-	    context: string;
-	    namespace: string;
-	    kind: string;
-	    name: string;
-	    podName: string;
-	    protocol: string;
-	    remotePort: number;
-	    localPort: number;
-	    address: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new Info(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.id = source["id"];
-	        this.context = source["context"];
-	        this.namespace = source["namespace"];
-	        this.kind = source["kind"];
-	        this.name = source["name"];
-	        this.podName = source["podName"];
-	        this.protocol = source["protocol"];
-	        this.remotePort = source["remotePort"];
-	        this.localPort = source["localPort"];
-	        this.address = source["address"];
-	    }
-	}
-	export class Request {
-	    context: string;
-	    namespace: string;
-	    kind: string;
-	    name: string;
-	    protocol?: string;
-	    remotePort: number;
-	    localPort: number;
-	
-	    static createFrom(source: any = {}) {
-	        return new Request(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.context = source["context"];
-	        this.namespace = source["namespace"];
-	        this.kind = source["kind"];
-	        this.name = source["name"];
-	        this.protocol = source["protocol"];
-	        this.remotePort = source["remotePort"];
-	        this.localPort = source["localPort"];
-	    }
-	}
-
-}
-
-export namespace session {
-	
-	export class ConnectivityTestResult {
-	    passed: boolean;
-	    failedLayer?: string;
+	export class Status {
+	    legacyDetected: boolean;
+	    backupPath?: string;
+	    completedAt?: string;
 	    error?: string;
-	
+
 	    static createFrom(source: any = {}) {
-	        return new ConnectivityTestResult(source);
+	        return new Status(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.passed = source["passed"];
-	        this.failedLayer = source["failedLayer"];
+	        this.legacyDetected = source["legacyDetected"];
+	        this.backupPath = source["backupPath"];
+	        this.completedAt = source["completedAt"];
 	        this.error = source["error"];
 	    }
 	}
-	export class LogEvent {
-	    // Go type: time
-	    time: any;
-	    level: string;
-	    message: string;
-	
+
+}
+
+export namespace mirror {
+
+	export class LocalTarget {
+	    servicePort: number;
+	    protocol: string;
+	    localHost: string;
+	    localPort: number;
+
 	    static createFrom(source: any = {}) {
-	        return new LogEvent(source);
+	        return new LocalTarget(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.time = this.convertValues(source["time"], null);
-	        this.level = source["level"];
-	        this.message = source["message"];
+	        this.servicePort = source["servicePort"];
+	        this.protocol = source["protocol"];
+	        this.localHost = source["localHost"];
+	        this.localPort = source["localPort"];
 	    }
-	
+	}
+	export class Info {
+	    id: string;
+	    profileId: string;
+	    sessionId: string;
+	    namespace: string;
+	    service: string;
+	    clusterIp: string;
+	    state: string;
+	    targets: LocalTarget[];
+
+	    static createFrom(source: any = {}) {
+	        return new Info(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.profileId = source["profileId"];
+	        this.sessionId = source["sessionId"];
+	        this.namespace = source["namespace"];
+	        this.service = source["service"];
+	        this.clusterIp = source["clusterIp"];
+	        this.state = source["state"];
+	        this.targets = this.convertValues(source["targets"], LocalTarget);
+	    }
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -903,18 +736,58 @@ export namespace session {
 		    return a;
 		}
 	}
-	export class NetworkDiagnostic {
+
+	export class Request {
+	    profileId: string;
+	    service: string;
+	    targets: LocalTarget[];
+
+	    static createFrom(source: any = {}) {
+	        return new Request(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.profileId = source["profileId"];
+	        this.service = source["service"];
+	        this.targets = this.convertValues(source["targets"], LocalTarget);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+
+}
+
+export namespace networkdiag {
+
+	export class Issue {
 	    code: string;
 	    severity: string;
 	    message: string;
 	    target?: string;
 	    conflict?: string;
 	    interface?: string;
-	
+
 	    static createFrom(source: any = {}) {
-	        return new NetworkDiagnostic(source);
+	        return new Issue(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.code = source["code"];
@@ -925,98 +798,22 @@ export namespace session {
 	        this.interface = source["interface"];
 	    }
 	}
-	export class NetworkDiagnostics {
+	export class Result {
 	    routingMode: string;
 	    strictRoute: boolean;
-	    issues?: NetworkDiagnostic[];
-	
+	    issues: Issue[];
+
 	    static createFrom(source: any = {}) {
-	        return new NetworkDiagnostics(source);
+	        return new Result(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.routingMode = source["routingMode"];
 	        this.strictRoute = source["strictRoute"];
-	        this.issues = this.convertValues(source["issues"], NetworkDiagnostic);
+	        this.issues = this.convertValues(source["issues"], Issue);
 	    }
-	
-		convertValues(a: any, classs: any, asMap: boolean = false): any {
-		    if (!a) {
-		        return a;
-		    }
-		    if (a.slice && a.map) {
-		        return (a as any[]).map(elem => this.convertValues(elem, classs));
-		    } else if ("object" === typeof a) {
-		        if (asMap) {
-		            for (const key of Object.keys(a)) {
-		                a[key] = new classs(a[key]);
-		            }
-		            return a;
-		        }
-		        return new classs(a);
-		    }
-		    return a;
-		}
-	}
-	export class State {
-	    phase: string;
-	    mode?: string;
-	    context: string;
-	    namespace: string;
-	    dnsNamespace?: string;
-	    message: string;
-	    error?: string;
-	    dnsWarning?: string;
-	    network?: NetworkDiagnostics;
-	    discovery?: cluster.Discovery;
-	    capabilities?: cluster.Capabilities;
-	    scopeNamespaces?: string[];
-	    gatewayManifest?: string;
-	    pods?: cluster.PodInfo[];
-	    services?: cluster.ServiceInfo[];
-	    events?: LogEvent[];
-	    coreVersion?: string;
-	    socksPort?: number;
-	    // Go type: time
-	    connectedAt?: any;
-	    metrics?: singbox.Metrics;
-	    inventoryRevision: number;
-	    kubernetesVersion?: string;
-	    // Go type: time
-	    updatedAt: any;
-	
-	    static createFrom(source: any = {}) {
-	        return new State(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.phase = source["phase"];
-	        this.mode = source["mode"];
-	        this.context = source["context"];
-	        this.namespace = source["namespace"];
-	        this.dnsNamespace = source["dnsNamespace"];
-	        this.message = source["message"];
-	        this.error = source["error"];
-	        this.dnsWarning = source["dnsWarning"];
-	        this.network = this.convertValues(source["network"], NetworkDiagnostics);
-	        this.discovery = this.convertValues(source["discovery"], cluster.Discovery);
-	        this.capabilities = this.convertValues(source["capabilities"], cluster.Capabilities);
-	        this.scopeNamespaces = source["scopeNamespaces"];
-	        this.gatewayManifest = source["gatewayManifest"];
-	        this.pods = this.convertValues(source["pods"], cluster.PodInfo);
-	        this.services = this.convertValues(source["services"], cluster.ServiceInfo);
-	        this.events = this.convertValues(source["events"], LogEvent);
-	        this.coreVersion = source["coreVersion"];
-	        this.socksPort = source["socksPort"];
-	        this.connectedAt = this.convertValues(source["connectedAt"], null);
-	        this.metrics = this.convertValues(source["metrics"], singbox.Metrics);
-	        this.inventoryRevision = source["inventoryRevision"];
-	        this.kubernetesVersion = source["kubernetesVersion"];
-	        this.updatedAt = this.convertValues(source["updatedAt"], null);
-	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -1038,66 +835,197 @@ export namespace session {
 
 }
 
-export namespace singbox {
-	
-	export class Connection {
-	    id: string;
-	    network: string;
-	    source: string;
-	    destination: string;
-	    process: string;
-	    upload: number;
-	    download: number;
-	    uploadSpeed?: number;
-	    downloadSpeed?: number;
-	    startedAt: string;
-	    inbound: string;
-	    feature?: string;
-	    outbound: string;
-	    rule: string;
-	
+export namespace networkspec {
+
+	export class Spec {
+	    version: number;
+	    podCIDRs: string[];
+	    podIPs: string[];
+	    serviceCIDRs: string[];
+	    serviceIPs: string[];
+	    dnsServer?: string;
+	    clusterDomains: string[];
+
 	    static createFrom(source: any = {}) {
-	        return new Connection(source);
+	        return new Spec(source);
 	    }
-	
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.version = source["version"];
+	        this.podCIDRs = source["podCIDRs"];
+	        this.podIPs = source["podIPs"];
+	        this.serviceCIDRs = source["serviceCIDRs"];
+	        this.serviceIPs = source["serviceIPs"];
+	        this.dnsServer = source["dnsServer"];
+	        this.clusterDomains = source["clusterDomains"];
+	    }
+	}
+
+}
+
+export namespace podssh {
+
+	export class Info {
+	    id: string;
+	    profileId: string;
+	    sessionId: string;
+	    namespace: string;
+	    pod: string;
+	    container: string;
+	    containers: string[];
+	    podIp: string;
+	    address: string;
+	    port: number;
+	    command: string;
+	    state: string;
+
+	    static createFrom(source: any = {}) {
+	        return new Info(source);
+	    }
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
-	        this.network = source["network"];
-	        this.source = source["source"];
-	        this.destination = source["destination"];
-	        this.process = source["process"];
-	        this.upload = source["upload"];
-	        this.download = source["download"];
-	        this.uploadSpeed = source["uploadSpeed"];
-	        this.downloadSpeed = source["downloadSpeed"];
-	        this.startedAt = source["startedAt"];
-	        this.inbound = source["inbound"];
-	        this.feature = source["feature"];
-	        this.outbound = source["outbound"];
-	        this.rule = source["rule"];
+	        this.profileId = source["profileId"];
+	        this.sessionId = source["sessionId"];
+	        this.namespace = source["namespace"];
+	        this.pod = source["pod"];
+	        this.container = source["container"];
+	        this.containers = source["containers"];
+	        this.podIp = source["podIp"];
+	        this.address = source["address"];
+	        this.port = source["port"];
+	        this.command = source["command"];
+	        this.state = source["state"];
 	    }
 	}
-	export class Metrics {
-	    downloadTotal: number;
-	    uploadTotal: number;
-	    memory?: number;
-	    activeConnections: number;
-	    connections: Connection[];
-	
+
+}
+
+export namespace portforward {
+
+	export class Info {
+	    id: string;
+	    profileId: string;
+	    sessionId: string;
+	    namespace: string;
+	    kind: string;
+	    name: string;
+	    protocol: string;
+	    remotePort: number;
+	    localPort: number;
+	    address: string;
+	    dialAddress: string;
+	    state: string;
+
 	    static createFrom(source: any = {}) {
-	        return new Metrics(source);
+	        return new Info(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.downloadTotal = source["downloadTotal"];
-	        this.uploadTotal = source["uploadTotal"];
-	        this.memory = source["memory"];
-	        this.activeConnections = source["activeConnections"];
-	        this.connections = this.convertValues(source["connections"], Connection);
+	        this.id = source["id"];
+	        this.profileId = source["profileId"];
+	        this.sessionId = source["sessionId"];
+	        this.namespace = source["namespace"];
+	        this.kind = source["kind"];
+	        this.name = source["name"];
+	        this.protocol = source["protocol"];
+	        this.remotePort = source["remotePort"];
+	        this.localPort = source["localPort"];
+	        this.address = source["address"];
+	        this.dialAddress = source["dialAddress"];
+	        this.state = source["state"];
 	    }
-	
+	}
+	export class Request {
+	    profileId: string;
+	    kind: string;
+	    name: string;
+	    protocol?: string;
+	    remotePort: number;
+	    localPort: number;
+
+	    static createFrom(source: any = {}) {
+	        return new Request(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.profileId = source["profileId"];
+	        this.kind = source["kind"];
+	        this.name = source["name"];
+	        this.protocol = source["protocol"];
+	        this.remotePort = source["remotePort"];
+	        this.localPort = source["localPort"];
+	    }
+	}
+
+}
+
+export namespace preview {
+
+	export class Info {
+	    id: string;
+	    profileId: string;
+	    sessionId: string;
+	    namespace: string;
+	    name: string;
+	    clusterIp: string;
+	    state: string;
+	    targets: reverserelay.Target[];
+
+	    static createFrom(source: any = {}) {
+	        return new Info(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.profileId = source["profileId"];
+	        this.sessionId = source["sessionId"];
+	        this.namespace = source["namespace"];
+	        this.name = source["name"];
+	        this.clusterIp = source["clusterIp"];
+	        this.state = source["state"];
+	        this.targets = this.convertValues(source["targets"], reverserelay.Target);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class Request {
+	    profileId: string;
+	    name: string;
+	    targets: reverserelay.Target[];
+
+	    static createFrom(source: any = {}) {
+	        return new Request(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.profileId = source["profileId"];
+	        this.name = source["name"];
+	        this.targets = this.convertValues(source["targets"], reverserelay.Target);
+	    }
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -1119,68 +1047,459 @@ export namespace singbox {
 
 }
 
-export namespace store {
-	
-	export class GatewayTransport {
-	    mode?: string;
-	    url?: string;
-	    token?: string;
-	    insecureSkipVerify: boolean;
-	    poolSize?: number;
-	    maxPhysical?: number;
-	    maxStreams?: number;
+export namespace profile {
+
+	export class Profile {
+	    schemaVersion: number;
+	    id: string;
+	    baseUrl: string;
+	    tunnelPath: string;
+	    displayName?: string;
+	    lastPrincipalId?: string;
+	    lastUserName?: string;
+	    lastNamespace?: string;
 
 	    static createFrom(source: any = {}) {
-	        return new GatewayTransport(source);
+	        return new Profile(source);
 	    }
 
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.schemaVersion = source["schemaVersion"];
+	        this.id = source["id"];
+	        this.baseUrl = source["baseUrl"];
+	        this.tunnelPath = source["tunnelPath"];
+	        this.displayName = source["displayName"];
+	        this.lastPrincipalId = source["lastPrincipalId"];
+	        this.lastUserName = source["lastUserName"];
+	        this.lastNamespace = source["lastNamespace"];
+	    }
+	}
+	export class State {
+	    version: number;
+	    activeProfileId?: string;
+	    profiles: Profile[];
+
+	    static createFrom(source: any = {}) {
+	        return new State(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.version = source["version"];
+	        this.activeProfileId = source["activeProfileId"];
+	        this.profiles = this.convertValues(source["profiles"], Profile);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+
+}
+
+export namespace remote {
+
+	export class ExecTask {
+	    id: string;
+	    sessionId: string;
+	    namespace: string;
+	    state: string;
+	    pod: string;
+	    container?: string;
+	    tty: boolean;
+	    // Go type: time
+	    createdAt: any;
+	    // Go type: time
+	    updatedAt: any;
+	    // Go type: time
+	    expiresAt: any;
+
+	    static createFrom(source: any = {}) {
+	        return new ExecTask(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.sessionId = source["sessionId"];
+	        this.namespace = source["namespace"];
+	        this.state = source["state"];
+	        this.pod = source["pod"];
+	        this.container = source["container"];
+	        this.tty = source["tty"];
+	        this.createdAt = this.convertValues(source["createdAt"], null);
+	        this.updatedAt = this.convertValues(source["updatedAt"], null);
+	        this.expiresAt = this.convertValues(source["expiresAt"], null);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class Namespace {
+	    name: string;
+	    status?: string;
+
+	    static createFrom(source: any = {}) {
+	        return new Namespace(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.status = source["status"];
+	    }
+	}
+	export class Pod {
+	    name: string;
+	    namespace: string;
+	    phase?: string;
+	    podIp?: string;
+	    nodeName?: string;
+	    ready: boolean;
+	    containers: string[];
+
+	    static createFrom(source: any = {}) {
+	        return new Pod(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.namespace = source["namespace"];
+	        this.phase = source["phase"];
+	        this.podIp = source["podIp"];
+	        this.nodeName = source["nodeName"];
+	        this.ready = source["ready"];
+	        this.containers = source["containers"];
+	    }
+	}
+	export class PodFileEntry {
+	    name: string;
+	    path: string;
+	    kind: string;
+	    size: number;
+	    mode: string;
+	    // Go type: time
+	    modifiedAt: any;
+
+	    static createFrom(source: any = {}) {
+	        return new PodFileEntry(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.path = source["path"];
+	        this.kind = source["kind"];
+	        this.size = source["size"];
 	        this.mode = source["mode"];
-	        this.url = source["url"];
-	        this.token = source["token"];
-	        this.insecureSkipVerify = source["insecureSkipVerify"];
-	        this.poolSize = source["poolSize"];
-	        this.maxPhysical = source["maxPhysical"];
-	        this.maxStreams = source["maxStreams"];
+	        this.modifiedAt = this.convertValues(source["modifiedAt"], null);
 	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
-	export class HostAliasSpec {
-	    domain: string;
-	    ip: string;
-	
+	export class PodFileList {
+	    sessionId: string;
+	    namespace: string;
+	    pod: string;
+	    container: string;
+	    path: string;
+	    items: PodFileEntry[];
+
 	    static createFrom(source: any = {}) {
-	        return new HostAliasSpec(source);
+	        return new PodFileList(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.domain = source["domain"];
-	        this.ip = source["ip"];
+	        this.sessionId = source["sessionId"];
+	        this.namespace = source["namespace"];
+	        this.pod = source["pod"];
+	        this.container = source["container"];
+	        this.path = source["path"];
+	        this.items = this.convertValues(source["items"], PodFileEntry);
 	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
-	export class SessionIntentCounts {
-	    podPortForwards: number;
-	    networkPortForwards: number;
-	    exchanges: number;
-	    mirrors: number;
-	
+	export class PodFileResult {
+	    completed: boolean;
+	    error?: string;
+
 	    static createFrom(source: any = {}) {
-	        return new SessionIntentCounts(source);
+	        return new PodFileResult(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.podPortForwards = source["podPortForwards"];
-	        this.networkPortForwards = source["networkPortForwards"];
-	        this.exchanges = source["exchanges"];
-	        this.mirrors = source["mirrors"];
+	        this.completed = source["completed"];
+	        this.error = source["error"];
+	    }
+	}
+	export class PodFileTask {
+	    id: string;
+	    sessionId: string;
+	    namespace: string;
+	    state: string;
+	    action: string;
+	    pod: string;
+	    container: string;
+	    path: string;
+	    destination?: string;
+	    kind?: string;
+	    recursive?: boolean;
+	    result: PodFileResult;
+	    // Go type: time
+	    createdAt: any;
+	    // Go type: time
+	    updatedAt: any;
+	    // Go type: time
+	    expiresAt: any;
+
+	    static createFrom(source: any = {}) {
+	        return new PodFileTask(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.sessionId = source["sessionId"];
+	        this.namespace = source["namespace"];
+	        this.state = source["state"];
+	        this.action = source["action"];
+	        this.pod = source["pod"];
+	        this.container = source["container"];
+	        this.path = source["path"];
+	        this.destination = source["destination"];
+	        this.kind = source["kind"];
+	        this.recursive = source["recursive"];
+	        this.result = this.convertValues(source["result"], PodFileResult);
+	        this.createdAt = this.convertValues(source["createdAt"], null);
+	        this.updatedAt = this.convertValues(source["updatedAt"], null);
+	        this.expiresAt = this.convertValues(source["expiresAt"], null);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class ServicePort {
+	    name?: string;
+	    port: number;
+	    protocol: string;
+	    targetPort?: string;
+
+	    static createFrom(source: any = {}) {
+	        return new ServicePort(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.port = source["port"];
+	        this.protocol = source["protocol"];
+	        this.targetPort = source["targetPort"];
+	    }
+	}
+	export class Service {
+	    name: string;
+	    namespace: string;
+	    type: string;
+	    clusterIp?: string;
+	    externalName?: string;
+	    ports: ServicePort[];
+
+	    static createFrom(source: any = {}) {
+	        return new Service(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.namespace = source["namespace"];
+	        this.type = source["type"];
+	        this.clusterIp = source["clusterIp"];
+	        this.externalName = source["externalName"];
+	        this.ports = this.convertValues(source["ports"], ServicePort);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+
+	export class Session {
+	    id: string;
+	    namespace: string;
+	    state: string;
+	    generation: number;
+	    // Go type: time
+	    createdAt: any;
+	    // Go type: time
+	    updatedAt: any;
+	    // Go type: time
+	    lastHeartbeatAt: any;
+	    // Go type: time
+	    expiresAt: any;
+	    networkSpec: networkspec.Spec;
+	    networkSpecHash: string;
+	    capabilities?: capability.Snapshot;
+
+	    static createFrom(source: any = {}) {
+	        return new Session(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.namespace = source["namespace"];
+	        this.state = source["state"];
+	        this.generation = source["generation"];
+	        this.createdAt = this.convertValues(source["createdAt"], null);
+	        this.updatedAt = this.convertValues(source["updatedAt"], null);
+	        this.lastHeartbeatAt = this.convertValues(source["lastHeartbeatAt"], null);
+	        this.expiresAt = this.convertValues(source["expiresAt"], null);
+	        this.networkSpec = this.convertValues(source["networkSpec"], networkspec.Spec);
+	        this.networkSpecHash = source["networkSpecHash"];
+	        this.capabilities = this.convertValues(source["capabilities"], capability.Snapshot);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+
+}
+
+export namespace reverserelay {
+
+	export class Target {
+	    servicePort: number;
+	    protocol: string;
+	    localHost: string;
+	    localPort: number;
+
+	    static createFrom(source: any = {}) {
+	        return new Target(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.servicePort = source["servicePort"];
+	        this.protocol = source["protocol"];
+	        this.localHost = source["localHost"];
+	        this.localPort = source["localPort"];
 	    }
 	}
 
 }
+
 export namespace update {
-	
+
 	export class Info {
 	    currentVersion: string;
 	    latestVersion?: string;
@@ -1191,11 +1510,11 @@ export namespace update {
 	    // Go type: time
 	    checkedAt: any;
 	    error?: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new Info(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.currentVersion = source["currentVersion"];
@@ -1206,7 +1525,7 @@ export namespace update {
 	        this.checkedAt = this.convertValues(source["checkedAt"], null);
 	        this.error = source["error"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;

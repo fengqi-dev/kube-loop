@@ -1,0 +1,1681 @@
+import { backend } from "@/backend";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Spinner } from "@/components/ui/spinner";
+import { ServerFileTransfer } from "@/components/server/server-file-transfer";
+import type {
+  AuthSession,
+  DataPlaneStatusEvent,
+  RemoteInventory,
+  ServerDiscovery,
+	ServerExchangeInfo,
+	ServerMirrorInfo,
+	ServerPreviewInfo,
+  ServerExecTask,
+  ServerFileTransferTask,
+  ServerPodSSHInfo,
+  ServerPortForwardInfo,
+  ServerInventoryEvent,
+  ServerProfile,
+  ServerProfileState,
+  V1MigrationStatus,
+} from "@/types";
+import { AlertTriangle, ArrowRightLeft, Boxes, Copy, Globe2, ListTodo, LogIn, LogOut, Network, RefreshCw, Server, ShieldCheck, SquareTerminal, Trash2, UserRound } from "lucide-react";
+import { lazy, Suspense, useEffect, useMemo, useState, type ReactNode } from "react";
+
+const ServerExecTerminal = lazy(() => import("@/components/server/server-exec-terminal").then((module) => ({
+  default: module.ServerExecTerminal,
+})));
+
+export function ServerAccessView({ profiles, migration }: { profiles: ServerProfileState; migration: V1MigrationStatus }) {
+  const [profileState, setProfileState] = useState(profiles);
+  const initialProfile = useMemo(
+    () => profileState.profiles.find((item) => item.id === profileState.activeProfileId),
+    [profileState],
+  );
+  const [profile, setProfile] = useState<ServerProfile | undefined>(initialProfile);
+  const [address, setAddress] = useState(initialProfile?.baseUrl ?? "");
+  const [discovery, setDiscovery] = useState<ServerDiscovery>();
+  const [auth, setAuth] = useState<AuthSession>({ authenticated: false });
+  const [inventory, setInventory] = useState<RemoteInventory>();
+	const [workspaceView, setWorkspaceView] = useState<"environment" | "tasks">("environment");
+	const [execTask, setExecTask] = useState<ServerExecTask>();
+	const [fileTasks, setFileTasks] = useState<ServerFileTransferTask[]>([]);
+	const [forwards, setForwards] = useState<ServerPortForwardInfo[]>([]);
+	const [exchanges, setExchanges] = useState<ServerExchangeInfo[]>([]);
+	const [exchangeService, setExchangeService] = useState("");
+	const [exchangePort, setExchangePort] = useState("");
+	const [exchangeLocalHost, setExchangeLocalHost] = useState("127.0.0.1");
+	const [exchangeLocalPort, setExchangeLocalPort] = useState("");
+	const [mirrors, setMirrors] = useState<ServerMirrorInfo[]>([]);
+	const [mirrorService, setMirrorService] = useState("");
+	const [mirrorPort, setMirrorPort] = useState("");
+	const [mirrorLocalHost, setMirrorLocalHost] = useState("127.0.0.1");
+	const [mirrorLocalPort, setMirrorLocalPort] = useState("");
+	const [previews, setPreviews] = useState<ServerPreviewInfo[]>([]);
+	const [previewName, setPreviewName] = useState("");
+	const [previewProtocol, setPreviewProtocol] = useState<"tcp" | "udp">("tcp");
+	const [previewServicePort, setPreviewServicePort] = useState("");
+	const [previewLocalHost, setPreviewLocalHost] = useState("127.0.0.1");
+	const [previewLocalPort, setPreviewLocalPort] = useState("");
+	const [sshEndpoints, setSSHEndpoints] = useState<ServerPodSSHInfo[]>([]);
+	const [sshPod, setSSHPod] = useState("");
+	const [sshContainer, setSSHContainer] = useState("");
+	const [forwardKind, setForwardKind] = useState<"pod" | "service">("service");
+	const [forwardName, setForwardName] = useState("");
+	const [forwardRemotePort, setForwardRemotePort] = useState("");
+	const [forwardLocalPort, setForwardLocalPort] = useState("");
+  const [providerId, setProviderId] = useState("");
+  const [username, setUsername] = useState(initialProfile?.lastUserName ?? "");
+  const [password, setPassword] = useState("");
+  const [staticToken, setStaticToken] = useState("");
+  const [busy, setBusy] = useState<"discover" | "switch" | "login" | "refresh-login" | "logout" | "delete" | "inventory" | "tunnel" | "port-forward" | "exchange" | "mirror" | "preview" | "pod-ssh">();
+  const [error, setError] = useState("");
+  const [dataPlaneError, setDataPlaneError] = useState("");
+  const [dataPlaneReason, setDataPlaneReason] = useState<DataPlaneStatusEvent["reason"]>();
+  const [dataPlaneRetryable, setDataPlaneRetryable] = useState(false);
+
+  useEffect(() => {
+    if (!initialProfile) return;
+    let active = true;
+    setProfile(initialProfile);
+    setAddress(initialProfile.baseUrl);
+    setBusy("discover");
+    Promise.all([
+      backend.testServerAddress(initialProfile.baseUrl),
+      backend.serverAuthStatus(initialProfile.id),
+    ])
+      .then(async ([document, session]) => {
+        if (!active) return;
+        setDiscovery(document);
+        setAuth(session);
+        setProviderId(document.authMethods[0]?.id ?? "");
+        if (session.authenticated) {
+		  const [remoteInventory, remoteForwards, remoteExchanges, remoteMirrors, remotePreviews, remoteSSH] = await Promise.all([
+			backend.loadServerInventory(initialProfile.id, initialProfile.lastNamespace ?? ""),
+			backend.listServerPortForwards(initialProfile.id),
+			backend.listServerExchanges(initialProfile.id),
+			backend.listServerMirrors(initialProfile.id),
+			backend.listServerPreviews(initialProfile.id),
+			backend.listServerPodSSH(initialProfile.id),
+		  ]);
+		  if (active) {
+			setInventory(remoteInventory);
+			setForwards(remoteForwards);
+			setExchanges(remoteExchanges);
+			setMirrors(remoteMirrors);
+			setPreviews(remotePreviews);
+			setSSHEndpoints(remoteSSH);
+		  }
+        }
+      })
+      .catch((reason: unknown) => {
+        if (active) setError(messageOf(reason));
+      })
+      .finally(() => {
+        if (active) setBusy(undefined);
+      });
+    return () => {
+      active = false;
+    };
+  }, [initialProfile]);
+
+  useEffect(() => {
+    const unsubscribe = window.runtime?.EventsOn("dataplane:status", (value: unknown) => {
+      const event = value as DataPlaneStatusEvent;
+      if (!profile || event.profileId !== profile.id) return;
+      setInventory((current) => current ? { ...current, dataPlane: event.status } : current);
+      setDataPlaneError(event.status.state === "error"
+        ? event.error || "The Data Plane connection could not be restored."
+        : "");
+      setDataPlaneReason(event.status.state === "error" ? event.reason : undefined);
+      setDataPlaneRetryable(event.status.state === "error" && Boolean(event.retryable));
+    });
+    return () => unsubscribe?.();
+  }, [profile]);
+
+  useEffect(() => {
+    const unsubscribe = window.runtime?.EventsOn("server-inventory:snapshot", (value: unknown) => {
+      const event = value as ServerInventoryEvent;
+      if (!profile || event.profileId !== profile.id || !event.snapshot) return;
+      const snapshot = event.snapshot;
+      setInventory((current) => {
+        if (!current || current.namespace !== event.namespace) return current;
+        if (event.resource === "pods") {
+          return { ...current, pods: snapshot.pods ?? [] };
+        }
+        return { ...current, services: snapshot.services ?? [] };
+      });
+    });
+    return () => unsubscribe?.();
+  }, [profile]);
+
+  const selectedProvider = discovery?.authMethods.find((item) => item.id === providerId);
+  const selectedSSHPod = inventory?.pods.find((item) => item.name === sshPod);
+  const selectedExchangeService = inventory?.services.find((item) => item.name === exchangeService);
+  const selectedExchangePort = selectedExchangeService?.ports.find(
+    (item) => `${item.protocol.toLowerCase()}/${item.port}` === exchangePort,
+  );
+  const selectedMirrorService = inventory?.services.find((item) => item.name === mirrorService);
+  const selectedMirrorPort = selectedMirrorService?.ports.find(
+    (item) => `${item.protocol.toLowerCase()}/${item.port}` === mirrorPort,
+  );
+
+  async function discoverAndSave() {
+    if (busy) return;
+    setBusy("discover");
+    setError("");
+    try {
+      const normalizedAddress = withHTTPS(address);
+      const document = await backend.testServerAddress(normalizedAddress);
+      const result = await backend.saveServerProfile({
+        baseUrl: document.publicUrl,
+        displayName: document.serviceId,
+        activate: true,
+      });
+      setAddress(result.profile.baseUrl);
+      setProfile(result.profile);
+      setProfileState(await backend.serverProfiles());
+      setDiscovery(result.discovery);
+      setProviderId(result.discovery.authMethods[0]?.id ?? "");
+      const session = await backend.serverAuthStatus(result.profile.id);
+      setAuth(session);
+      setProfileState(await backend.serverProfiles());
+      setInventory(session.authenticated
+        ? await backend.loadServerInventory(result.profile.id, result.profile.lastNamespace ?? "")
+        : undefined);
+	  if (session.authenticated) {
+		const [remoteForwards, remoteExchanges, remoteMirrors, remotePreviews, remoteSSH] = await Promise.all([
+		  backend.listServerPortForwards(result.profile.id),
+		  backend.listServerExchanges(result.profile.id),
+		  backend.listServerMirrors(result.profile.id),
+		  backend.listServerPreviews(result.profile.id),
+		  backend.listServerPodSSH(result.profile.id),
+		]);
+		setForwards(remoteForwards);
+		setExchanges(remoteExchanges);
+		setMirrors(remoteMirrors);
+		setPreviews(remotePreviews);
+		setSSHEndpoints(remoteSSH);
+	  } else {
+		setForwards([]);
+		setExchanges([]);
+		setMirrors([]);
+		setPreviews([]);
+		setSSHEndpoints([]);
+	  }
+    } catch (reason) {
+      setError(messageOf(reason));
+    } finally {
+      setBusy(undefined);
+    }
+  }
+
+  async function login() {
+    if (!profile || !selectedProvider || busy) return;
+    setBusy("login");
+    setError("");
+    try {
+      const session = selectedProvider.type === "oidc"
+        ? await backend.loginServerOIDC(profile.id, selectedProvider.id)
+        : selectedProvider.type === "ad"
+          ? await backend.loginServerAD(profile.id, selectedProvider.id, username, password)
+          : selectedProvider.type === "static-token"
+            ? await backend.loginServerStaticToken(profile.id, selectedProvider.id, staticToken)
+            : await backend.loginServerAnonymous(profile.id, selectedProvider.id);
+      setAuth(session);
+      setInventory(await backend.loadServerInventory(profile.id, profile.lastNamespace ?? ""));
+	  const [remoteForwards, remoteExchanges, remoteMirrors, remotePreviews, remoteSSH] = await Promise.all([
+		backend.listServerPortForwards(profile.id),
+		backend.listServerExchanges(profile.id),
+		backend.listServerMirrors(profile.id),
+		backend.listServerPreviews(profile.id),
+		backend.listServerPodSSH(profile.id),
+	  ]);
+	  setForwards(remoteForwards);
+	  setExchanges(remoteExchanges);
+	  setMirrors(remoteMirrors);
+	  setPreviews(remotePreviews);
+	  setSSHEndpoints(remoteSSH);
+    } catch (reason) {
+      setError(messageOf(reason));
+    } finally {
+      setPassword("");
+      setStaticToken("");
+      setBusy(undefined);
+    }
+  }
+
+  async function logout() {
+    if (!profile || busy) return;
+    setBusy("logout");
+    setError("");
+    try {
+      await backend.logoutServer(profile.id);
+    } catch (reason) {
+      setError(messageOf(reason));
+    } finally {
+	  clearWorkspaceState();
+	  setSSHPod("");
+	  setSSHContainer("");
+      setBusy(undefined);
+    }
+  }
+
+  async function refreshLogin() {
+    if (!profile || busy) return;
+    setBusy("refresh-login");
+    setError("");
+    try {
+      const session = await backend.refreshServerLogin(profile.id);
+      setAuth(session);
+      setInventory(await backend.loadServerInventory(profile.id, inventory?.namespace ?? profile.lastNamespace ?? ""));
+    } catch (reason) {
+      setError(messageOf(reason));
+    } finally {
+      setBusy(undefined);
+    }
+  }
+
+  async function selectProfile(id: string) {
+    if (!id || id === profile?.id || busy) return;
+    setBusy("switch");
+    setError("");
+    try {
+      const state = await backend.selectServerProfile(id);
+      const selected = state.profiles.find((item) => item.id === state.activeProfileId);
+      setProfileState(state);
+      setProfile(selected);
+      setAddress(selected?.baseUrl ?? "");
+      setDiscovery(undefined);
+      clearWorkspaceState();
+    } catch (reason) {
+      setError(messageOf(reason));
+    } finally {
+      setBusy(undefined);
+    }
+  }
+
+  function addServer() {
+    if (busy) return;
+    setProfile(undefined);
+    setAddress("");
+    setDiscovery(undefined);
+    setProviderId("");
+    setUsername("");
+    setPassword("");
+    setStaticToken("");
+    clearWorkspaceState();
+  }
+
+  function clearWorkspaceState() {
+    setAuth({ authenticated: false });
+    setInventory(undefined);
+    setDataPlaneError("");
+    setDataPlaneReason(undefined);
+    setDataPlaneRetryable(false);
+    setForwards([]);
+    setExchanges([]);
+    setMirrors([]);
+    setPreviews([]);
+    setSSHEndpoints([]);
+    setExecTask(undefined);
+    setFileTasks([]);
+    setWorkspaceView("environment");
+  }
+
+  async function removeProfile() {
+    if (!profile || busy) return;
+    setBusy("delete");
+    setError("");
+    try {
+      const state = await backend.deleteServerProfile(profile.id);
+      const selected = state.profiles.find((item) => item.id === state.activeProfileId);
+      setProfileState(state);
+      setProfile(selected);
+      setDiscovery(undefined);
+      clearWorkspaceState();
+      setProviderId("");
+      setUsername("");
+      setPassword("");
+      setAddress(selected?.baseUrl ?? "");
+    } catch (reason) {
+      setError(messageOf(reason));
+      try {
+        const state = await backend.serverProfiles();
+        const selected = state.profiles.find((item) => item.id === state.activeProfileId);
+        setProfileState(state);
+        setProfile(selected);
+        setAddress(selected?.baseUrl ?? "");
+        setDiscovery(undefined);
+        clearWorkspaceState();
+      } catch {
+        // Preserve the original cleanup error when the local state cannot be reloaded.
+      }
+    } finally {
+      setBusy(undefined);
+    }
+  }
+
+  async function loadInventory(namespace = inventory?.namespace ?? "") {
+    if (!profile || busy) return;
+    setBusy("inventory");
+    setError("");
+    setDataPlaneError("");
+    setDataPlaneReason(undefined);
+    setDataPlaneRetryable(false);
+    try {
+	  const remoteInventory = await backend.loadServerInventory(profile.id, namespace);
+	  setInventory(remoteInventory);
+	  const [remoteForwards, remoteExchanges, remoteMirrors, remotePreviews, remoteSSH] = await Promise.all([
+		backend.listServerPortForwards(profile.id),
+		backend.listServerExchanges(profile.id),
+		backend.listServerMirrors(profile.id),
+		backend.listServerPreviews(profile.id),
+		backend.listServerPodSSH(profile.id),
+	  ]);
+	  setForwards(remoteForwards);
+	  setExchanges(remoteExchanges);
+	  setMirrors(remoteMirrors);
+	  setPreviews(remotePreviews);
+	  setSSHEndpoints(remoteSSH);
+	  setForwardName("");
+	  setForwardRemotePort("");
+	  setExchangeService("");
+	  setExchangePort("");
+	  setExchangeLocalPort("");
+	  setMirrorService("");
+	  setMirrorPort("");
+	  setMirrorLocalPort("");
+	  setPreviewName("");
+	  setPreviewServicePort("");
+	  setPreviewLocalPort("");
+	  setSSHPod("");
+	  setSSHContainer("");
+    } catch (reason) {
+      setError(messageOf(reason));
+    } finally {
+      setBusy(undefined);
+    }
+  }
+
+  async function toggleTunnel() {
+    if (!profile || !inventory?.dataPlane || inventory.dataPlane.state !== "connected" || busy) return;
+    setBusy("tunnel");
+    setError("");
+    try {
+      const dataPlane = inventory.dataPlane.mode === "tun"
+        ? await backend.stopServerTunnel(profile.id)
+        : await backend.startServerTunnel(profile.id);
+      setInventory({ ...inventory, dataPlane });
+    } catch (reason) {
+      setError(messageOf(reason));
+    } finally {
+      setBusy(undefined);
+    }
+  }
+
+	async function startPortForward() {
+		if (!profile || !inventory?.session || busy) return;
+		const remotePort = Number(forwardRemotePort);
+		const localPort = forwardLocalPort.trim() ? Number(forwardLocalPort) : 0;
+		if (!forwardName || !Number.isInteger(remotePort) || remotePort < 1 || remotePort > 65535 ||
+			!Number.isInteger(localPort) || localPort < 0 || localPort > 65535) {
+			setError("Choose a target and enter valid remote/local ports.");
+			return;
+		}
+		setBusy("port-forward");
+		setError("");
+		try {
+			const service = inventory.services.find((item) => forwardKind === "service" && item.name === forwardName);
+			const servicePort = service?.ports.find((item) => item.port === remotePort);
+			const info = await backend.startServerPortForward({
+				profileId: profile.id,
+				kind: forwardKind,
+				name: forwardName,
+				protocol: servicePort?.protocol.toLowerCase() === "udp" ? "udp" : "tcp",
+				remotePort,
+				localPort,
+			});
+			setForwards((current) => [...current, info]);
+			setForwardLocalPort("");
+		} catch (reason) {
+			setError(messageOf(reason));
+		} finally {
+			setBusy(undefined);
+		}
+	}
+
+	async function stopPortForward(taskId: string) {
+		if (!profile || busy) return;
+		setBusy("port-forward");
+		setError("");
+		try {
+			await backend.stopServerPortForward(profile.id, taskId);
+			setForwards((current) => current.filter((item) => item.id !== taskId));
+		} catch (reason) {
+			setError(messageOf(reason));
+		} finally {
+			setBusy(undefined);
+		}
+	}
+
+	async function startExchange() {
+		if (!profile || !inventory?.session || !selectedExchangeService || !selectedExchangePort || busy) return;
+		if (mirrors.some((item) => item.namespace === inventory.namespace && item.service === selectedExchangeService.name)) {
+			setError("Stop the active Mirror for this Service before starting Exchange.");
+			return;
+		}
+		const localPort = Number(exchangeLocalPort);
+		if (!exchangeLocalHost.trim() || !Number.isInteger(localPort) || localPort < 1 || localPort > 65535) {
+			setError("Enter a valid local host and port for Exchange.");
+			return;
+		}
+		setBusy("exchange");
+		setError("");
+		try {
+			const info = await backend.startServerExchange({
+				profileId: profile.id,
+				service: selectedExchangeService.name,
+				targets: [{
+					servicePort: selectedExchangePort.port,
+					protocol: selectedExchangePort.protocol.toLowerCase() === "udp" ? "udp" : "tcp",
+					localHost: exchangeLocalHost.trim(),
+					localPort,
+				}],
+			});
+			setExchanges((current) => [...current.filter((item) => item.id !== info.id), info]);
+		} catch (reason) {
+			setError(messageOf(reason));
+		} finally {
+			setBusy(undefined);
+		}
+	}
+
+	async function stopExchange(taskId: string) {
+		if (!profile || busy) return;
+		setBusy("exchange");
+		setError("");
+		try {
+			await backend.stopServerExchange(profile.id, taskId);
+			setExchanges((current) => current.filter((item) => item.id !== taskId));
+		} catch (reason) {
+			setError(messageOf(reason));
+		} finally {
+			setBusy(undefined);
+		}
+	}
+
+	async function startMirror() {
+		if (!profile || !inventory?.session || !selectedMirrorService || !selectedMirrorPort || busy) return;
+		if (exchanges.some((item) => item.namespace === inventory.namespace && item.service === selectedMirrorService.name)) {
+			setError("Stop the active Exchange for this Service before starting Mirror.");
+			return;
+		}
+		const localPort = Number(mirrorLocalPort);
+		if (!mirrorLocalHost.trim() || !Number.isInteger(localPort) || localPort < 1 || localPort > 65535) {
+			setError("Enter a valid local host and port for Mirror.");
+			return;
+		}
+		setBusy("mirror");
+		setError("");
+		try {
+			const info = await backend.startServerMirror({
+				profileId: profile.id,
+				service: selectedMirrorService.name,
+				targets: [{
+					servicePort: selectedMirrorPort.port,
+					protocol: selectedMirrorPort.protocol.toLowerCase() === "udp" ? "udp" : "tcp",
+					localHost: mirrorLocalHost.trim(),
+					localPort,
+				}],
+			});
+			setMirrors((current) => [...current.filter((item) => item.id !== info.id), info]);
+		} catch (reason) {
+			setError(messageOf(reason));
+		} finally {
+			setBusy(undefined);
+		}
+	}
+
+	async function stopMirror(taskId: string) {
+		if (!profile || busy) return;
+		setBusy("mirror");
+		setError("");
+		try {
+			await backend.stopServerMirror(profile.id, taskId);
+			setMirrors((current) => current.filter((item) => item.id !== taskId));
+		} catch (reason) {
+			setError(messageOf(reason));
+		} finally {
+			setBusy(undefined);
+		}
+	}
+
+	async function startPreview() {
+		if (!profile || !inventory?.session || busy) return;
+		const servicePort = Number(previewServicePort);
+		const localPort = Number(previewLocalPort);
+		if (!previewName.trim()) {
+			setError("Enter a Kubernetes Service name for Preview.");
+			return;
+		}
+		if (!Number.isInteger(servicePort) || servicePort < 1 || servicePort > 65535 ||
+			!previewLocalHost.trim() || !Number.isInteger(localPort) || localPort < 1 || localPort > 65535) {
+			setError("Enter valid Service and local target ports for Preview.");
+			return;
+		}
+		setBusy("preview");
+		setError("");
+		try {
+			const info = await backend.startServerPreview({
+				profileId: profile.id,
+				name: previewName.trim(),
+				targets: [{
+					servicePort,
+					protocol: previewProtocol,
+					localHost: previewLocalHost.trim(),
+					localPort,
+				}],
+			});
+			setPreviews((current) => [...current.filter((item) => item.id !== info.id), info]);
+		} catch (reason) {
+			setError(messageOf(reason));
+		} finally {
+			setBusy(undefined);
+		}
+	}
+
+	async function stopPreview(taskId: string) {
+		if (!profile || busy) return;
+		setBusy("preview");
+		setError("");
+		try {
+			await backend.stopServerPreview(profile.id, taskId);
+			setPreviews((current) => current.filter((item) => item.id !== taskId));
+		} catch (reason) {
+			setError(messageOf(reason));
+		} finally {
+			setBusy(undefined);
+		}
+	}
+
+	async function startPodSSH() {
+		if (!profile || !inventory?.session || !selectedSSHPod || busy) return;
+		setBusy("pod-ssh");
+		setError("");
+		try {
+			const info = await backend.startServerPodSSH({
+				profileId: profile.id,
+				pod: selectedSSHPod.name,
+				container: sshContainer,
+			});
+			setSSHEndpoints((current) => [...current.filter((item) => item.id !== info.id), info]);
+		} catch (reason) {
+			setError(messageOf(reason));
+		} finally {
+			setBusy(undefined);
+		}
+	}
+
+	async function stopPodSSH(endpointId: string) {
+		if (!profile || busy) return;
+		setBusy("pod-ssh");
+		setError("");
+		try {
+			await backend.stopServerPodSSH(profile.id, endpointId);
+			setSSHEndpoints((current) => current.filter((item) => item.id !== endpointId));
+		} catch (reason) {
+			setError(messageOf(reason));
+		} finally {
+			setBusy(undefined);
+		}
+	}
+
+	async function openPodSSH(endpointId: string) {
+		if (!profile || busy) return;
+		setBusy("pod-ssh");
+		setError("");
+		try {
+			await backend.openServerPodSSH(profile.id, endpointId);
+		} catch (reason) {
+			setError(messageOf(reason));
+		} finally {
+			setBusy(undefined);
+		}
+	}
+
+  return (
+    <main className="grid min-h-screen place-items-center bg-background px-6 py-10 text-foreground">
+      <div className={`w-full space-y-5 transition-[max-width] ${auth.authenticated ? "max-w-5xl" : "max-w-xl"}`}>
+        <div className="flex items-center justify-center gap-3">
+          <div className="grid size-10 place-items-center rounded-xl bg-primary text-primary-foreground">
+            <Globe2 size={21} />
+          </div>
+          <div>
+            <div className="font-heading text-lg font-semibold">KubeLoop</div>
+            <div className="text-xs text-muted-foreground">Gateway V2</div>
+          </div>
+        </div>
+
+        <Card className="shadow-lg">
+          <CardHeader>
+            <CardTitle>{auth.authenticated ? "Server environment" : profile ? "Sign in to your Gateway" : "Connect to a Gateway"}</CardTitle>
+            <CardDescription>
+              Enter the service address provided by your administrator. Kubernetes access and
+              identity configuration stay in the Gateway.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-5">
+            {migration.legacyDetected ? (
+              <div className={`flex items-start gap-3 rounded-lg border p-4 text-sm ${migration.error ? "border-destructive/40 bg-destructive/5" : "border-amber-500/40 bg-amber-500/5"}`}>
+                <AlertTriangle className={`mt-0.5 shrink-0 ${migration.error ? "text-destructive" : "text-amber-600"}`} size={18} />
+                <div className="min-w-0">
+                  <div className="font-medium">V1 upgrade detected</div>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    KubeLoop did not import or upload kubeconfig, credentials, old Gateway Pods, or Kubernetes resource intents.
+                    Enter the Gateway service address provided by your administrator to continue with V2.
+                  </p>
+                  {migration.backupPath ? <code className="mt-2 block truncate text-[11px] text-muted-foreground" title={migration.backupPath}>Backup: {migration.backupPath}</code> : null}
+                  {migration.error ? <p className="mt-2 text-xs text-destructive">Backup failed: {migration.error}</p> : null}
+                </div>
+              </div>
+            ) : null}
+
+            {profileState.profiles.length > 0 ? (
+              <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+                <div className="space-y-2">
+                  <Label htmlFor="server-profile">Server</Label>
+                  <select
+                    id="server-profile"
+                    className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
+                    value={profile?.id ?? ""}
+                    disabled={Boolean(busy)}
+                    onChange={(event) => void selectProfile(event.target.value)}
+                  >
+                    <option value="" disabled>Select a Server</option>
+                    {profileState.profiles.map((item) => (
+                      <option key={item.id} value={item.id}>{item.displayName || item.id}</option>
+                    ))}
+                  </select>
+                </div>
+                <Button type="button" variant="outline" className="self-end" disabled={Boolean(busy)} onClick={addServer}>
+                  <Server size={15} /> Add server
+                </Button>
+              </div>
+            ) : null}
+
+            <div className="space-y-2">
+              <Label htmlFor="gateway-address">Service address</Label>
+              <div className="flex gap-2">
+                <Input
+                  id="gateway-address"
+                  type="url"
+                  inputMode="url"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  placeholder="gateway.example.com"
+                  value={address}
+                  disabled={Boolean(busy)}
+                  onChange={(event) => setAddress(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") void discoverAndSave();
+                  }}
+                />
+                <Button
+                  type="button"
+                  variant={profile ? "outline" : "default"}
+                  disabled={Boolean(busy) || !address.trim()}
+                  onClick={() => void discoverAndSave()}
+                >
+                  {busy === "discover" ? <Spinner data-icon="inline-start" /> : <Server size={15} />}
+                  {profile ? "Retest" : "Connect"}
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                HTTPS is added automatically. HTTP is accepted only for loopback development.
+              </p>
+            </div>
+
+            {discovery ? (
+              <div className="rounded-lg border bg-muted/30 p-3 text-sm">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="truncate font-medium">{profile?.displayName || discovery.serviceId}</div>
+                    <div className="truncate font-mono text-xs text-muted-foreground">
+                      {discovery.publicUrl}
+                    </div>
+                  </div>
+                  <Badge variant="outline">v{discovery.serverVersion}</Badge>
+                </div>
+              </div>
+            ) : null}
+
+            {discovery && !auth.authenticated ? (
+              <div className="space-y-4 border-t pt-5">
+                {discovery.authMethods.length > 1 ? (
+                  <div className="space-y-2">
+                    <Label htmlFor="auth-provider">Sign-in method</Label>
+                    <select
+                      id="auth-provider"
+                      className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
+                      value={providerId}
+                      disabled={Boolean(busy)}
+                      onChange={(event) => setProviderId(event.target.value)}
+                    >
+                      {discovery.authMethods.map((method) => (
+                        <option key={method.id} value={method.id}>
+                          {method.displayName || method.id}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ) : null}
+
+                {selectedProvider?.type === "ad" ? (
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label htmlFor="ad-username">Account</Label>
+                      <Input
+                        id="ad-username"
+                        autoCapitalize="none"
+                        autoComplete="username"
+                        value={username}
+                        disabled={Boolean(busy)}
+                        onChange={(event) => setUsername(event.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="ad-password">Password</Label>
+                      <Input
+                        id="ad-password"
+                        type="password"
+                        autoComplete="current-password"
+                        value={password}
+                        disabled={Boolean(busy)}
+                        onChange={(event) => setPassword(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") void login();
+                        }}
+                      />
+                    </div>
+                  </div>
+                ) : null}
+
+                {selectedProvider?.type === "static-token" ? (
+                  <div className="space-y-2">
+                    <Label htmlFor="development-static-token">Development token</Label>
+                    <Input
+                      id="development-static-token"
+                      type="password"
+                      autoComplete="off"
+                      value={staticToken}
+                      disabled={Boolean(busy)}
+                      onChange={(event) => setStaticToken(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") void login();
+                      }}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      This mode is intended only for local development or controlled environments.
+                    </p>
+                  </div>
+                ) : null}
+
+                {selectedProvider?.type === "anonymous" ? (
+                  <div className="flex gap-2 rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
+                    <AlertTriangle className="mt-0.5 shrink-0" size={16} />
+                    Anonymous development access is enabled. No identity credential will be requested.
+                  </div>
+                ) : null}
+
+                {discovery.authMethods.length === 0 ? (
+                  <p className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+                    This Gateway has no login method configured.
+                  </p>
+                ) : (
+                  <Button
+                    type="button"
+                    className="w-full"
+                    disabled={
+                      Boolean(busy) ||
+                      !selectedProvider ||
+                      (selectedProvider.type === "ad" && (!username.trim() || !password)) ||
+                      (selectedProvider.type === "static-token" && !staticToken)
+                    }
+                    onClick={() => void login()}
+                  >
+                    {busy === "login" ? <Spinner data-icon="inline-start" /> : <LogIn size={15} />}
+                    {selectedProvider?.type === "oidc"
+                      ? "Continue in browser"
+                      : selectedProvider?.type === "anonymous"
+                        ? "Continue anonymously"
+                        : "Sign in"}
+                  </Button>
+                )}
+              </div>
+            ) : null}
+
+            {auth.authenticated ? (
+              <div className="flex items-start gap-3 rounded-lg border border-success/30 bg-success/5 p-4">
+                <ShieldCheck className="mt-0.5 text-success" size={20} />
+                <div>
+                  <div className="font-medium text-success">Signed in securely</div>
+                  <div className="mt-1 text-xs text-muted-foreground">
+                    Tokens are stored in the operating system credential vault. Kubernetes data is
+                    read through the Gateway; this device does not use kubeconfig.
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
+            {auth.authenticated && inventory ? (
+              <div className="space-y-4 border-t pt-5">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                  <div className="grid flex-1 gap-2 sm:max-w-xs">
+                    <Label htmlFor="remote-namespace">Namespace</Label>
+                    <select
+                      id="remote-namespace"
+                      className="h-9 rounded-md border border-input bg-transparent px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
+                      value={inventory.namespace ?? ""}
+                      disabled={Boolean(busy)}
+                      onChange={(event) => void loadInventory(event.target.value)}
+                    >
+                      {inventory.namespaces.map((namespace) => (
+                        <option key={namespace.name} value={namespace.name}>{namespace.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant="outline"><Server size={12} />{profile?.displayName || discovery?.serviceId}</Badge>
+                    <Badge variant="outline"><UserRound size={12} />{profile?.lastUserName || "Authenticated user"}</Badge>
+                    <Badge variant="outline">Kubernetes {inventory.kubernetesVersion}</Badge>
+                    {inventory.gatewayVersion ? <Badge variant="outline">Gateway {inventory.gatewayVersion}</Badge> : null}
+                    {inventory.session ? <Badge variant="outline">Session {inventory.session.state}</Badge> : null}
+                    {inventory.dataPlane ? (
+                      <Badge variant="outline">
+                        Data Plane {inventory.dataPlane.state === "connected"
+                          ? inventory.dataPlane.mode.toUpperCase()
+                          : inventory.dataPlane.state}
+                      </Badge>
+                    ) : null}
+                    <Button type="button" variant="outline" size="sm" disabled={Boolean(busy)} onClick={() => void loadInventory()}>
+                      {busy === "inventory" ? <Spinner data-icon="inline-start" /> : <RefreshCw size={14} />}
+                      Refresh
+                    </Button>
+                  </div>
+                </div>
+
+				<nav aria-label="Server workspace" className="grid grid-cols-2 rounded-lg border bg-muted/30 p-1">
+				  <Button
+					type="button"
+					variant={workspaceView === "environment" ? "default" : "ghost"}
+					className="justify-center"
+					onClick={() => setWorkspaceView("environment")}
+				  >
+					<Globe2 size={15} /> Environment
+				  </Button>
+				  <Button
+					type="button"
+					variant={workspaceView === "tasks" ? "default" : "ghost"}
+					className="justify-center"
+					onClick={() => setWorkspaceView("tasks")}
+				  >
+					<ListTodo size={15} /> Task center
+					<TaskCount value={forwards.length + exchanges.length + mirrors.length + previews.length + sshEndpoints.length + (execTask ? 1 : 0) + fileTasks.filter((task) => isActiveFileTask(task.status)).length} />
+				  </Button>
+				</nav>
+
+                {inventory.network?.issues?.some((issue) => issue.severity === "warning") ? (
+                  <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm">
+                    <div className="font-medium text-destructive">Local network conflict detected</div>
+                    <div className="mt-1 text-xs text-muted-foreground">
+                      {inventory.network.issues
+                        .filter((issue) => issue.severity === "warning")
+                        .map((issue) => issue.message)
+                        .join(" · ")}
+                    </div>
+                  </div>
+                ) : null}
+
+                {inventory.dataPlane?.state === "reconnecting" ? (
+                  <div className="flex items-start gap-3 rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-sm">
+                    <RefreshCw className="mt-0.5 animate-spin text-amber-600" size={17} />
+                    <div>
+                      <div className="font-medium">Data Plane connection interrupted</div>
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        Cluster traffic is paused while KubeLoop obtains a fresh Session generation and RelayTicket.
+                      </div>
+                    </div>
+                  </div>
+                ) : inventory.dataPlane?.state === "error" ? (
+                  <div role="alert" className="space-y-3 rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm">
+                    <div>
+                      <div className="font-medium text-destructive">{dataPlaneFailureTitle(dataPlaneReason)}</div>
+                      <div className="mt-1 break-words text-xs text-muted-foreground">
+                        {dataPlaneError || "The connection could not be restored after bounded retries."}
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {dataPlaneRetryable ? (
+                        <Button type="button" size="sm" disabled={Boolean(busy)} onClick={() => void loadInventory()}>
+                          {busy === "inventory" ? <Spinner data-icon="inline-start" /> : <RefreshCw size={14} />}
+                          {dataPlaneRetryLabel(dataPlaneReason)}
+                        </Button>
+                      ) : null}
+                      {dataPlaneReason === "authentication_required" || dataPlaneReason === "access_denied" ? (
+                        <Button type="button" variant={dataPlaneRetryable ? "outline" : "default"} size="sm" disabled={Boolean(busy)} onClick={() => void logout()}>
+                          {dataPlaneReason === "access_denied" ? "Use another account" : "Sign in again"}
+                        </Button>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : inventory.dataPlane ? (
+                  <div className="flex items-center justify-between gap-3 rounded-md border bg-muted/30 p-3 text-sm">
+                    <div>
+                      <div className="font-medium">
+                        {inventory.dataPlane.mode === "tun" ? "System TUN is connected" : "Remote cluster proxy is ready"}
+                      </div>
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        RelayTicket-bound WSS transport · local SOCKS5 endpoint
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <code className="rounded bg-background px-2 py-1 text-xs">{inventory.dataPlane.socksAddress}</code>
+                      <Button type="button" variant={inventory.dataPlane.mode === "tun" ? "outline" : "default"} size="sm" disabled={Boolean(busy)} onClick={() => void toggleTunnel()}>
+                        {busy === "tunnel" ? <Spinner data-icon="inline-start" /> : <Network size={14} />}
+                        {inventory.dataPlane.mode === "tun" ? "Stop TUN" : "Enable TUN"}
+                      </Button>
+                    </div>
+                  </div>
+                ) : null}
+
+				{workspaceView === "tasks" ? <>
+				<TaskCenter
+				  forwards={forwards}
+				  exchanges={exchanges}
+				  mirrors={mirrors}
+				  previews={previews}
+				  sshEndpoints={sshEndpoints}
+				  execTask={execTask}
+				  fileTasks={fileTasks}
+				  busy={Boolean(busy)}
+				  onStopPortForward={(id) => void stopPortForward(id)}
+				  onStopExchange={(id) => void stopExchange(id)}
+				  onStopMirror={(id) => void stopMirror(id)}
+				  onStopPreview={(id) => void stopPreview(id)}
+				  onOpenSSH={(id) => void openPodSSH(id)}
+				  onStopSSH={(id) => void stopPodSSH(id)}
+				  onStopExec={(id) => {
+					if (!profile) return;
+					void backend.stopServerExec(profile.id, id).then(() => setExecTask(undefined)).catch((reason: unknown) => setError(messageOf(reason)));
+				  }}
+				  onCancelFile={(id) => {
+					if (!profile) return;
+					void backend.cancelServerFileTransfer(profile.id, id).catch((reason: unknown) => setError(messageOf(reason)));
+				  }}
+				  onResumeFile={(id) => {
+					if (!profile) return;
+					void backend.resumeServerFileTransfer(profile.id, id)
+					  .then((task) => setFileTasks((current) => [task, ...current.filter((item) => item.id !== task.id)]))
+					  .catch((reason: unknown) => setError(messageOf(reason)));
+				  }}
+				  onClearFileHistory={() => {
+					if (!profile) return;
+					void backend.clearServerFileTransferHistory(profile.id)
+					  .then(() => setFileTasks((current) => current.filter((task) => isActiveFileTask(task.status))))
+					  .catch((reason: unknown) => setError(messageOf(reason)));
+				  }}
+				/>
+
+				{inventory.dataPlane?.state === "connected" && inventory.capabilities.includes("ports.forward") ? (
+				  <div className="space-y-3 rounded-md border bg-muted/20 p-4">
+					<div>
+					  <div className="font-medium">Port Forward</div>
+					  <div className="mt-1 text-xs text-muted-foreground">
+						The Gateway resolves the Kubernetes resource; this device opens only a loopback listener.
+					  </div>
+					</div>
+					<div className="grid gap-2 md:grid-cols-[120px_1fr_110px_110px_auto]">
+					  <select
+						className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+						value={forwardKind}
+						disabled={Boolean(busy)}
+						onChange={(event) => {
+						  setForwardKind(event.target.value as "pod" | "service");
+						  setForwardName("");
+						  setForwardRemotePort("");
+						}}
+					  >
+						<option value="service">Service</option>
+						<option value="pod">Pod</option>
+					  </select>
+					  <select
+						className="h-9 min-w-0 rounded-md border border-input bg-background px-3 text-sm"
+						value={forwardName}
+						disabled={Boolean(busy)}
+						onChange={(event) => {
+						  const name = event.target.value;
+						  setForwardName(name);
+						  const service = inventory.services.find((item) => forwardKind === "service" && item.name === name);
+						  setForwardRemotePort(service?.ports[0] ? String(service.ports[0].port) : "");
+						}}
+					  >
+						<option value="">Select target</option>
+						{(forwardKind === "service" ? inventory.services : inventory.pods).map((item) => (
+						  <option key={item.name} value={item.name}>{item.name}</option>
+						))}
+					  </select>
+					  <Input
+						type="number"
+						min={1}
+						max={65535}
+						placeholder="Remote"
+						value={forwardRemotePort}
+						disabled={Boolean(busy)}
+						onChange={(event) => setForwardRemotePort(event.target.value)}
+					  />
+					  <Input
+						type="number"
+						min={1}
+						max={65535}
+						placeholder="Local auto"
+						value={forwardLocalPort}
+						disabled={Boolean(busy)}
+						onChange={(event) => setForwardLocalPort(event.target.value)}
+					  />
+					  <Button type="button" size="sm" disabled={Boolean(busy) || !forwardName || !forwardRemotePort} onClick={() => void startPortForward()}>
+						{busy === "port-forward" ? <Spinner data-icon="inline-start" /> : <Network size={14} />}
+						Forward
+					  </Button>
+					</div>
+				  </div>
+				) : null}
+
+				{profile && inventory.session ? (
+				  <div className="space-y-3 rounded-md border bg-muted/20 p-4">
+					<div>
+					  <div className="font-medium">Preview</div>
+					  <div className="mt-1 text-xs text-muted-foreground">
+						The Gateway creates a temporary owner-bound Service and routes it through the authenticated reverse stream to this device.
+					  </div>
+					</div>
+					{inventory.capabilities.includes("services.preview") ? (
+					  <>
+						<div className="grid gap-2 md:grid-cols-[1fr_100px_110px_150px_110px_auto]">
+						  <Input
+							placeholder="Service name"
+							value={previewName}
+							disabled={Boolean(busy)}
+							onChange={(event) => setPreviewName(event.target.value)}
+						  />
+						  <select
+							className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+							value={previewProtocol}
+							disabled={Boolean(busy)}
+							onChange={(event) => setPreviewProtocol(event.target.value === "udp" ? "udp" : "tcp")}
+						  >
+							<option value="tcp">TCP</option>
+							<option value="udp">UDP</option>
+						  </select>
+						  <Input
+							type="number"
+							min={1}
+							max={65535}
+							placeholder="Service port"
+							value={previewServicePort}
+							disabled={Boolean(busy)}
+							onChange={(event) => {
+							  setPreviewServicePort(event.target.value);
+							  if (!previewLocalPort) setPreviewLocalPort(event.target.value);
+							}}
+						  />
+						  <Input
+							placeholder="Local host"
+							value={previewLocalHost}
+							disabled={Boolean(busy)}
+							onChange={(event) => setPreviewLocalHost(event.target.value)}
+						  />
+						  <Input
+							type="number"
+							min={1}
+							max={65535}
+							placeholder="Local port"
+							value={previewLocalPort}
+							disabled={Boolean(busy)}
+							onChange={(event) => setPreviewLocalPort(event.target.value)}
+						  />
+						  <Button type="button" size="sm" disabled={Boolean(busy) || !previewName || !previewServicePort || !previewLocalPort} onClick={() => void startPreview()}>
+							{busy === "preview" ? <Spinner data-icon="inline-start" /> : <Globe2 size={14} />}
+							Preview
+						  </Button>
+						</div>
+					  </>
+					) : (
+					  <p className="text-sm text-muted-foreground">Preview is not allowed by Gateway Policy or Kubernetes RBAC.</p>
+					)}
+				  </div>
+				) : null}
+
+				{profile && inventory.session ? (
+				  <div className="space-y-3 rounded-md border bg-muted/20 p-4">
+					<div>
+					  <div className="font-medium">Exchange</div>
+					  <div className="mt-1 text-xs text-muted-foreground">
+						The Gateway redirects the selected Service port through a Session-bound reverse stream to the local target retained on this device.
+					  </div>
+					</div>
+					{inventory.capabilities.includes("services.exchange") ? (
+					  <>
+						<div className="grid gap-2 md:grid-cols-[1fr_150px_150px_110px_auto]">
+						  <select
+							className="h-9 min-w-0 rounded-md border border-input bg-background px-3 text-sm"
+							value={exchangeService}
+							disabled={Boolean(busy)}
+							onChange={(event) => {
+							  const name = event.target.value;
+							  const service = inventory.services.find((item) => item.name === name);
+							  const port = service?.ports[0];
+							  setExchangeService(name);
+							  setExchangePort(port ? `${port.protocol.toLowerCase()}/${port.port}` : "");
+							  setExchangeLocalPort(port ? String(port.port) : "");
+							}}
+						  >
+							<option value="">Select Service</option>
+							{inventory.services
+							  .filter((service) => Boolean(service.clusterIp) && service.ports.length > 0)
+							  .map((service) => <option key={service.name} value={service.name}>{service.name}</option>)}
+						  </select>
+						  <select
+							className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+							value={exchangePort}
+							disabled={Boolean(busy) || !selectedExchangeService}
+							onChange={(event) => {
+							  setExchangePort(event.target.value);
+							  setExchangeLocalPort(event.target.value.split("/")[1] ?? "");
+							}}
+						  >
+							<option value="">Select port</option>
+							{selectedExchangeService?.ports.map((port) => (
+							  <option key={`${port.protocol}/${port.port}`} value={`${port.protocol.toLowerCase()}/${port.port}`}>
+								{port.port}/{port.protocol}
+							  </option>
+							))}
+						  </select>
+						  <Input
+							placeholder="Local host"
+							value={exchangeLocalHost}
+							disabled={Boolean(busy)}
+							onChange={(event) => setExchangeLocalHost(event.target.value)}
+						  />
+						  <Input
+							type="number"
+							min={1}
+							max={65535}
+							placeholder="Local port"
+							value={exchangeLocalPort}
+							disabled={Boolean(busy)}
+							onChange={(event) => setExchangeLocalPort(event.target.value)}
+						  />
+						  <Button type="button" size="sm" disabled={Boolean(busy) || !selectedExchangePort || !exchangeLocalPort} onClick={() => void startExchange()}>
+							{busy === "exchange" ? <Spinner data-icon="inline-start" /> : <ArrowRightLeft size={14} />}
+							Exchange
+						  </Button>
+						</div>
+					  </>
+					) : (
+					  <p className="text-sm text-muted-foreground">Exchange is not allowed by Gateway Policy or Kubernetes RBAC.</p>
+					)}
+				  </div>
+				) : null}
+
+				{profile && inventory.session ? (
+				  <div className="space-y-3 rounded-md border bg-muted/20 p-4">
+					<div>
+					  <div className="font-medium">Mirror</div>
+					  <div className="mt-1 text-xs text-muted-foreground">
+						The Gateway keeps the original Service response path active and sends best-effort request copies to the local target. Local responses are discarded.
+					  </div>
+					</div>
+					{inventory.capabilities.includes("services.mirror") ? (
+					  <>
+						<div className="grid gap-2 md:grid-cols-[1fr_150px_150px_110px_auto]">
+						  <select
+							className="h-9 min-w-0 rounded-md border border-input bg-background px-3 text-sm"
+							value={mirrorService}
+							disabled={Boolean(busy)}
+							onChange={(event) => {
+							  const name = event.target.value;
+							  const service = inventory.services.find((item) => item.name === name);
+							  const port = service?.ports[0];
+							  setMirrorService(name);
+							  setMirrorPort(port ? `${port.protocol.toLowerCase()}/${port.port}` : "");
+							  setMirrorLocalPort(port ? String(port.port) : "");
+							}}
+						  >
+							<option value="">Select Service</option>
+							{inventory.services
+							  .filter((service) => Boolean(service.clusterIp) && service.ports.length > 0)
+							  .map((service) => <option key={service.name} value={service.name}>{service.name}</option>)}
+						  </select>
+						  <select
+							className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+							value={mirrorPort}
+							disabled={Boolean(busy) || !selectedMirrorService}
+							onChange={(event) => {
+							  setMirrorPort(event.target.value);
+							  setMirrorLocalPort(event.target.value.split("/")[1] ?? "");
+							}}
+						  >
+							<option value="">Select port</option>
+							{selectedMirrorService?.ports.map((port) => (
+							  <option key={`${port.protocol}/${port.port}`} value={`${port.protocol.toLowerCase()}/${port.port}`}>
+								{port.port}/{port.protocol}
+							  </option>
+							))}
+						  </select>
+						  <Input
+							placeholder="Local host"
+							value={mirrorLocalHost}
+							disabled={Boolean(busy)}
+							onChange={(event) => setMirrorLocalHost(event.target.value)}
+						  />
+						  <Input
+							type="number"
+							min={1}
+							max={65535}
+							placeholder="Local port"
+							value={mirrorLocalPort}
+							disabled={Boolean(busy)}
+							onChange={(event) => setMirrorLocalPort(event.target.value)}
+						  />
+						  <Button type="button" size="sm" disabled={Boolean(busy) || !selectedMirrorPort || !mirrorLocalPort} onClick={() => void startMirror()}>
+							{busy === "mirror" ? <Spinner data-icon="inline-start" /> : <Copy size={14} />}
+							Mirror
+						  </Button>
+						</div>
+					  </>
+					) : (
+					  <p className="text-sm text-muted-foreground">Mirror is not allowed by Gateway Policy or Kubernetes RBAC.</p>
+					)}
+				  </div>
+				) : null}
+
+				{profile && inventory.session ? (
+				  <div className="space-y-3 rounded-md border bg-muted/20 p-4">
+					<div>
+					  <div className="font-medium">Pod SSH</div>
+					  <div className="mt-1 text-xs text-muted-foreground">
+						A public-key-only SSH endpoint listens on this device. Every command is executed through the authenticated Gateway Session.
+					  </div>
+					</div>
+					{inventory.capabilities.includes("pods.exec") ? (
+					  <>
+						<div className="grid gap-2 md:grid-cols-[1fr_1fr_auto]">
+						  <select
+							className="h-9 min-w-0 rounded-md border border-input bg-background px-3 text-sm"
+							value={sshPod}
+							disabled={Boolean(busy)}
+							onChange={(event) => {
+							  const podName = event.target.value;
+							  const pod = inventory.pods.find((item) => item.name === podName);
+							  setSSHPod(podName);
+							  setSSHContainer(pod?.containers[0] ?? "");
+							}}
+						  >
+							<option value="">Select a ready Pod</option>
+							{inventory.pods
+							  .filter((pod) => pod.ready && Boolean(pod.podIp) && pod.containers.length > 0)
+							  .map((pod) => <option key={pod.name} value={pod.name}>{pod.name}</option>)}
+						  </select>
+						  <select
+							className="h-9 min-w-0 rounded-md border border-input bg-background px-3 text-sm"
+							value={sshContainer}
+							disabled={Boolean(busy) || !selectedSSHPod}
+							onChange={(event) => setSSHContainer(event.target.value)}
+						  >
+							<option value="">Select container</option>
+							{selectedSSHPod?.containers.map((container) => (
+							  <option key={container} value={container}>{container}</option>
+							))}
+						  </select>
+						  <Button type="button" size="sm" disabled={Boolean(busy) || !selectedSSHPod || !sshContainer} onClick={() => void startPodSSH()}>
+							{busy === "pod-ssh" ? <Spinner data-icon="inline-start" /> : <SquareTerminal size={14} />}
+							Enable SSH
+						  </Button>
+						</div>
+					  </>
+					) : (
+					  <p className="text-sm text-muted-foreground">Pod exec is not allowed by Gateway Policy or Kubernetes RBAC.</p>
+					)}
+				  </div>
+				) : null}
+
+                {profile && inventory.session ? (
+                  <Suspense fallback={<div className="grid h-32 place-items-center rounded-md border"><Spinner /></div>}>
+                    <ServerExecTerminal
+                      key={`${profile.id}:${inventory.session.id}`}
+                      profileId={profile.id}
+                      pods={inventory.pods}
+                      allowed={inventory.capabilities.includes("pods.exec")}
+                      onError={setError}
+					  onTaskChange={setExecTask}
+                    />
+                  </Suspense>
+                ) : null}
+
+                {profile && inventory.session ? (
+                  <ServerFileTransfer
+                    key={`files:${profile.id}:${inventory.session.id}`}
+                    profileId={profile.id}
+                    pods={inventory.pods}
+                    allowed={inventory.capabilities.includes("pods.files")}
+                    manageAllowed={inventory.capabilities.includes("pods.files.manage")}
+                    onError={setError}
+					onTasksChange={setFileTasks}
+                  />
+                ) : null}
+				</> : null}
+
+				{workspaceView === "environment" ? inventory.namespaces.length === 0 ? (
+                  <p className="rounded-md border bg-muted/30 p-4 text-sm text-muted-foreground">
+                    No namespaces are available under the current Gateway Policy.
+                  </p>
+                ) : (
+                  <div className="grid gap-4 lg:grid-cols-2">
+                    <InventoryPanel
+                      title="Pods"
+                      icon={<Boxes size={16} />}
+                      allowed={inventory.capabilities.includes("pods.list")}
+                      empty="No Pods in this namespace."
+                    >
+                      {inventory.pods.map((pod) => (
+                        <div key={pod.name} className="flex items-center justify-between gap-3 border-b py-2.5 last:border-0">
+                          <div className="min-w-0">
+                            <div className="truncate text-sm font-medium">{pod.name}</div>
+                            <div className="truncate text-xs text-muted-foreground">
+                              {pod.containers.join(", ") || "No containers"}{pod.nodeName ? ` · ${pod.nodeName}` : ""}
+                            </div>
+                          </div>
+                          <Badge variant={pod.ready ? "default" : "outline"}>{pod.phase || "Unknown"}</Badge>
+                        </div>
+                      ))}
+                    </InventoryPanel>
+
+                    <InventoryPanel
+                      title="Services"
+                      icon={<Network size={16} />}
+                      allowed={inventory.capabilities.includes("services.list")}
+                      empty="No Services in this namespace."
+                    >
+                      {inventory.services.map((service) => (
+                        <div key={service.name} className="flex items-center justify-between gap-3 border-b py-2.5 last:border-0">
+                          <div className="min-w-0">
+                            <div className="truncate text-sm font-medium">{service.name}</div>
+                            <div className="truncate font-mono text-xs text-muted-foreground">
+                              {service.clusterIp || service.externalName || service.type}
+                            </div>
+                          </div>
+                          <div className="text-right text-xs text-muted-foreground">
+                            {service.ports.map((port) => `${port.port}/${port.protocol}`).join(", ") || "No ports"}
+                          </div>
+                        </div>
+                      ))}
+                    </InventoryPanel>
+                  </div>
+				) : null}
+              </div>
+            ) : null}
+
+            {error ? (
+              <p role="alert" className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+                {error}
+              </p>
+            ) : null}
+          </CardContent>
+
+          {profile ? (
+            <CardFooter className="justify-between">
+              <Button type="button" variant="ghost" size="sm" disabled={Boolean(busy)} onClick={() => void removeProfile()}>
+                {busy === "delete" ? <Spinner data-icon="inline-start" /> : <Trash2 size={14} />}
+                Remove server
+              </Button>
+              {auth.authenticated ? (
+                <div className="flex items-center gap-2">
+                  <Button type="button" variant="ghost" size="sm" disabled={Boolean(busy)} onClick={() => void refreshLogin()}>
+                    {busy === "refresh-login" ? <Spinner data-icon="inline-start" /> : <RefreshCw size={14} />}
+                    Refresh login
+                  </Button>
+                  <Button type="button" variant="outline" size="sm" disabled={Boolean(busy)} onClick={() => void logout()}>
+                    {busy === "logout" ? <Spinner data-icon="inline-start" /> : <LogOut size={14} />}
+                    Sign out / sign in again
+                  </Button>
+                </div>
+              ) : null}
+            </CardFooter>
+          ) : null}
+        </Card>
+      </div>
+    </main>
+  );
+}
+
+function TaskCount({ value }: { value: number }) {
+  return value > 0 ? (
+    <span className="ml-1 rounded-full bg-background/80 px-2 py-0.5 text-[11px] text-foreground">{value}</span>
+  ) : null;
+}
+
+function TaskCenter({
+  forwards,
+  exchanges,
+  mirrors,
+  previews,
+  sshEndpoints,
+  execTask,
+  fileTasks,
+  busy,
+  onStopPortForward,
+  onStopExchange,
+  onStopMirror,
+  onStopPreview,
+  onOpenSSH,
+  onStopSSH,
+  onStopExec,
+  onCancelFile,
+  onResumeFile,
+  onClearFileHistory,
+}: {
+  forwards: ServerPortForwardInfo[];
+  exchanges: ServerExchangeInfo[];
+  mirrors: ServerMirrorInfo[];
+  previews: ServerPreviewInfo[];
+  sshEndpoints: ServerPodSSHInfo[];
+  execTask?: ServerExecTask;
+  fileTasks: ServerFileTransferTask[];
+  busy: boolean;
+  onStopPortForward(id: string): void;
+  onStopExchange(id: string): void;
+  onStopMirror(id: string): void;
+  onStopPreview(id: string): void;
+  onOpenSSH(id: string): void;
+  onStopSSH(id: string): void;
+  onStopExec(id: string): void;
+  onCancelFile(id: string): void;
+  onResumeFile(id: string): void;
+  onClearFileHistory(): void;
+}) {
+  const rows: Array<{
+    key: string;
+    kind: string;
+    target: string;
+    detail: string;
+    state: string;
+    primary?: { label: string; run(): void };
+    stop?: () => void;
+  }> = [
+    ...forwards.map((item) => ({
+      key: `forward:${item.id}`,
+      kind: "Port Forward",
+      target: `${item.namespace} · ${item.kind}/${item.name}`,
+      detail: `${item.address} → ${item.remotePort}/${item.protocol}`,
+      state: item.state,
+      stop: () => onStopPortForward(item.id),
+    })),
+    ...exchanges.map((item) => ({
+      key: `exchange:${item.id}`,
+      kind: "Exchange",
+      target: `${item.namespace} · service/${item.service}`,
+      detail: item.targets.map((target) => `${target.servicePort}/${target.protocol} → ${target.localHost}:${target.localPort}`).join(", "),
+      state: item.state,
+      stop: () => onStopExchange(item.id),
+    })),
+    ...mirrors.map((item) => ({
+      key: `mirror:${item.id}`,
+      kind: "Mirror",
+      target: `${item.namespace} · service/${item.service}`,
+      detail: item.targets.map((target) => `${target.servicePort}/${target.protocol} ⇢ ${target.localHost}:${target.localPort}`).join(", "),
+      state: item.state,
+      stop: () => onStopMirror(item.id),
+    })),
+    ...previews.map((item) => ({
+      key: `preview:${item.id}`,
+      kind: "Preview",
+      target: `${item.namespace} · service/${item.name}`,
+      detail: item.targets.map((target) => `${target.servicePort}/${target.protocol} → ${target.localHost}:${target.localPort}`).join(", "),
+      state: item.state,
+      stop: () => onStopPreview(item.id),
+    })),
+    ...sshEndpoints.map((item) => ({
+      key: `ssh:${item.id}`,
+      kind: "Pod SSH",
+      target: `${item.namespace} · pod/${item.pod}`,
+      detail: item.command,
+      state: item.state,
+      primary: { label: "Open", run: () => onOpenSSH(item.id) },
+      stop: () => onStopSSH(item.id),
+    })),
+    ...(execTask ? [{
+      key: `exec:${execTask.id}`,
+      kind: "Pod Exec",
+      target: `${execTask.namespace} · pod/${execTask.pod}`,
+      detail: execTask.container || "default container",
+      state: execTask.state,
+      stop: () => onStopExec(execTask.id),
+    }] : []),
+    ...fileTasks.map((item) => ({
+      key: `file:${item.id}`,
+      kind: item.direction === "upload" ? "File Upload" : "File Download",
+      target: `${item.namespace} · pod/${item.pod}`,
+      detail: `${item.localPath} ↔ ${item.remotePath}`,
+      state: item.status,
+      primary: item.status === "interrupted" || item.status === "failed"
+        ? { label: "Resume", run: () => onResumeFile(item.id) }
+        : undefined,
+      stop: isActiveFileTask(item.status) ? () => onCancelFile(item.id) : undefined,
+    })),
+  ];
+
+  return (
+    <section aria-labelledby="task-center-title" className="space-y-3 rounded-md border bg-card p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div id="task-center-title" className="flex items-center gap-2 font-medium"><ListTodo size={16} />Task center</div>
+          <div className="mt-1 text-xs text-muted-foreground">Session-bound operations for this Server and Environment are tracked in one place.</div>
+        </div>
+        <div className="flex items-center gap-2">
+          {fileTasks.some((task) => !isActiveFileTask(task.status)) ? (
+            <Button type="button" variant="ghost" size="sm" disabled={busy} onClick={onClearFileHistory}>Clear file history</Button>
+          ) : null}
+          <Badge variant="outline">{rows.length} total</Badge>
+        </div>
+      </div>
+      {rows.length === 0 ? (
+        <p className="rounded-md border border-dashed py-7 text-center text-sm text-muted-foreground">No tasks in this Session.</p>
+      ) : (
+        <div className="divide-y rounded-md border bg-background px-3">
+          {rows.map((row) => (
+            <div key={row.key} className="flex flex-col gap-2 py-3 text-sm sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="font-medium">{row.kind}</span>
+                  <Badge variant="outline">{row.state}</Badge>
+                </div>
+                <div className="mt-1 truncate text-xs text-muted-foreground">{row.target} · {row.detail}</div>
+              </div>
+              <div className="flex shrink-0 gap-2">
+                {row.primary ? <Button type="button" size="sm" disabled={busy} onClick={row.primary.run}>{row.primary.label}</Button> : null}
+                {row.stop ? <Button type="button" size="sm" variant="outline" disabled={busy} onClick={row.stop}>Stop</Button> : null}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function isActiveFileTask(status: ServerFileTransferTask["status"]): boolean {
+  return status === "queued" || status === "preparing" || status === "running";
+}
+
+function InventoryPanel({
+  title,
+  icon,
+  allowed,
+  empty,
+  children,
+}: {
+  title: string;
+  icon: ReactNode;
+  allowed: boolean;
+  empty: string;
+  children: ReactNode;
+}) {
+  const hasChildren = Array.isArray(children) ? children.length > 0 : Boolean(children);
+  return (
+    <div className="min-w-0 rounded-lg border bg-card p-4">
+      <div className="mb-2 flex items-center gap-2 font-medium">{icon}{title}</div>
+      {!allowed ? (
+        <p className="py-5 text-center text-sm text-muted-foreground">Not allowed by Gateway Policy or Kubernetes RBAC.</p>
+      ) : hasChildren ? children : (
+        <p className="py-5 text-center text-sm text-muted-foreground">{empty}</p>
+      )}
+    </div>
+  );
+}
+
+function dataPlaneFailureTitle(reason: DataPlaneStatusEvent["reason"]): string {
+  switch (reason) {
+    case "authentication_required": return "Gateway sign-in expired";
+    case "access_denied": return "Gateway access was denied";
+    case "session_expired": return "Remote Session ended";
+    case "session_changed": return "Remote Session changed";
+    default: return "Data Plane recovery stopped";
+  }
+}
+
+function dataPlaneRetryLabel(reason: DataPlaneStatusEvent["reason"]): string {
+  if (reason === "session_expired") return "Start new session";
+  if (reason === "session_changed") return "Reload session";
+  return "Retry connection";
+}
+
+function withHTTPS(value: string) {
+  const trimmed = value.trim();
+  return /^[a-z][a-z\d+.-]*:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+}
+
+function messageOf(reason: unknown) {
+  return reason instanceof Error ? reason.message : String(reason);
+}

@@ -188,6 +188,43 @@ func (m *Manager) Start(ctx context.Context, request Request) (Info, error) {
 	return info, nil
 }
 
+// StartResolved starts only the loopback listener. The target must already be
+// resolved by a trusted Gateway, so this path never reads kubeconfig or calls a
+// Kubernetes API from the desktop.
+func (m *Manager) StartResolved(request Request, target string, dialer TrafficDialer) (Info, error) {
+	if dialer == nil {
+		return Info{}, fmt.Errorf("Port Forward traffic dialer is required")
+	}
+	if request.Context == "" {
+		return Info{}, fmt.Errorf("context is required")
+	}
+	if request.Namespace == "" {
+		return Info{}, fmt.Errorf("namespace is required")
+	}
+	if request.Name == "" {
+		return Info{}, fmt.Errorf("target name is required")
+	}
+	if request.RemotePort == 0 {
+		return Info{}, fmt.Errorf("remote port is required")
+	}
+	request.Kind = strings.ToLower(strings.TrimSpace(request.Kind))
+	if request.Kind != KindPod && request.Kind != KindService {
+		return Info{}, fmt.Errorf("unsupported kind %q", request.Kind)
+	}
+	request.Protocol = strings.ToLower(strings.TrimSpace(request.Protocol))
+	if request.Protocol == "" {
+		request.Protocol = "tcp"
+	}
+	if request.Protocol != "tcp" && request.Protocol != "udp" {
+		return Info{}, fmt.Errorf("unsupported protocol %q", request.Protocol)
+	}
+	host, rawPort, err := net.SplitHostPort(strings.TrimSpace(target))
+	if err != nil || host == "" || rawPort == "" {
+		return Info{}, fmt.Errorf("resolved Port Forward target is invalid")
+	}
+	return m.startRouted(request, target, dialer)
+}
+
 func (m *Manager) resolveRoutedTarget(ctx context.Context, request Request) (string, error) {
 	return m.cluster.ResolveRoutedTarget(ctx, request)
 }

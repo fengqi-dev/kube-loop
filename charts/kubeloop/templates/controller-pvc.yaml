@@ -1,0 +1,18 @@
+{{- if and (eq .Values.controller.storage.type "sqlite") .Values.controller.storage.sqlite.persistence.enabled (not .Values.controller.storage.sqlite.persistence.existingClaim) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "kubeloop.sqliteClaimName" . }}
+  labels:
+    {{- include "kubeloop.labels" . | nindent 4 }}
+    app.kubernetes.io/component: controller
+spec:
+  accessModes:
+    {{- toYaml .Values.controller.storage.sqlite.persistence.accessModes | nindent 4 }}
+  {{- with .Values.controller.storage.sqlite.persistence.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.controller.storage.sqlite.persistence.size }}
+{{- end }}

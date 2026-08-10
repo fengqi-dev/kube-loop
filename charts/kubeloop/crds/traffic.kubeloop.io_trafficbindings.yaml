@@ -1,0 +1,799 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.21.0
+  name: trafficbindings.traffic.kubeloop.io
+spec:
+  group: traffic.kubeloop.io
+  names:
+    kind: TrafficBinding
+    listKind: TrafficBindingList
+    plural: trafficbindings
+    shortNames:
+    - tb
+    singular: trafficbinding
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.mode
+      name: Mode
+      type: string
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.serviceName
+      name: Service
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: TrafficBinding is the Schema for the trafficbindings API.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: TrafficBindingSpec defines the immutable desired state of
+              TrafficBinding.
+            properties:
+              mode:
+                description: mode selects the workflow semantics.
+                enum:
+                - PortForward
+                - Preview
+                - Exchange
+                - Mirror
+                type: string
+              ports:
+                description: ports contains one PortForward port or up to 64 Preview/Exchange/Mirror
+                  mappings.
+                items:
+                  description: |-
+                    TrafficPort maps one Kubernetes target or Service port to an optional
+                    Controller relay listener.
+                  properties:
+                    name:
+                      description: name is the Service port name. The Operator derives
+                        a stable name when omitted.
+                      maxLength: 63
+                      type: string
+                    protocol:
+                      description: protocol is TCP or UDP.
+                      enum:
+                      - TCP
+                      - UDP
+                      type: string
+                    relayPort:
+                      description: relayPort is required for Preview, Exchange and
+                        Mirror and forbidden for PortForward.
+                      format: int32
+                      maximum: 65535
+                      minimum: 1
+                      type: integer
+                    targetPort:
+                      description: targetPort is the Pod/Service destination port,
+                        or the Service port created for Preview.
+                      format: int32
+                      maximum: 65535
+                      minimum: 1
+                      type: integer
+                  required:
+                  - protocol
+                  - targetPort
+                  type: object
+                maxItems: 64
+                minItems: 1
+                type: array
+                x-kubernetes-list-map-keys:
+                - protocol
+                - targetPort
+                x-kubernetes-list-type: map
+              preview:
+                description: preview is required only by Preview mode.
+                properties:
+                  serviceName:
+                    description: serviceName is the create-only ClusterIP Service
+                      name.
+                    maxLength: 63
+                    minLength: 1
+                    type: string
+                required:
+                - serviceName
+                type: object
+              relay:
+                description: |-
+                  relay is required by Preview, Exchange and Mirror. It is a trusted
+                  Controller listener, never a desktop-provided destination.
+                properties:
+                  address:
+                    description: address must be one IPv4 or IPv6 literal.
+                    maxLength: 45
+                    minLength: 2
+                    type: string
+                required:
+                - address
+                type: object
+              sessionGeneration:
+                description: |-
+                  sessionGeneration prevents an old binding from being reused by a newer
+                  incarnation of the same Session.
+                format: int64
+                minimum: 1
+                type: integer
+              sessionID:
+                description: sessionID is the owning KubeLoop Cluster Session UUID.
+                format: uuid
+                type: string
+              target:
+                description: target is required by PortForward, Exchange and Mirror.
+                properties:
+                  kind:
+                    description: kind selects the Kubernetes target type.
+                    enum:
+                    - Pod
+                    - Service
+                    type: string
+                  name:
+                    description: name is the DNS-1123 name of the target object.
+                    maxLength: 253
+                    minLength: 1
+                    type: string
+                required:
+                - kind
+                - name
+                type: object
+              taskID:
+                description: taskID is the owning KubeLoop Task UUID and is unique
+                  per binding.
+                format: uuid
+                type: string
+            required:
+            - mode
+            - ports
+            - sessionGeneration
+            - sessionID
+            - taskID
+            type: object
+            x-kubernetes-validations:
+            - message: TrafficBinding spec is immutable
+              rule: self == oldSelf
+            - message: PortForward requires one target port and forbids relay ports
+                and preview
+              rule: self.mode != 'PortForward' || (has(self.target) && !has(self.relay)
+                && !has(self.preview) && size(self.ports) == 1 && self.ports.all(p,
+                !has(p.relayPort)))
+            - message: Preview requires relay, preview and relayPort on every port
+              rule: self.mode != 'Preview' || (!has(self.target) && has(self.relay)
+                && has(self.preview) && self.ports.all(p, has(p.relayPort)))
+            - message: Exchange and Mirror require a Service target, relay and relayPort
+                on every port
+              rule: '!(self.mode in [''Exchange'', ''Mirror'']) || (has(self.target)
+                && self.target.kind == ''Service'' && has(self.relay) && !has(self.preview)
+                && self.ports.all(p, has(p.relayPort)))'
+          status:
+            description: TrafficBindingStatus defines the observed state of TrafficBinding.
+            properties:
+              conditions:
+                description: conditions use Ready and Degraded as stable condition
+                  types.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              observedGeneration:
+                description: observedGeneration is the metadata generation last reconciled.
+                format: int64
+                type: integer
+              phase:
+                description: phase is a concise lifecycle summary; conditions carry
+                  authoritative detail.
+                enum:
+                - Pending
+                - Ready
+                - Degraded
+                - Restoring
+                type: string
+              serviceClusterIP:
+                description: serviceClusterIP is populated for a ready Preview.
+                type: string
+              serviceName:
+                description: serviceName is the affected or created Service, when
+                  applicable.
+                type: string
+              snapshot:
+                description: snapshot is captured and persisted before Exchange or
+                  Mirror mutation.
+                properties:
+                  endpointSlices:
+                    items:
+                      description: |-
+                        EndpointSliceSnapshot is the exact endpoint state captured before an
+                        Exchange or Mirror takes ownership of a Service.
+                      properties:
+                        addressType:
+                          description: AddressType represents the type of address
+                            referred to by an endpoint.
+                          type: string
+                        annotations:
+                          additionalProperties:
+                            type: string
+                          type: object
+                        endpoints:
+                          items:
+                            description: Endpoint represents a single logical "backend"
+                              implementing a service.
+                            properties:
+                              addresses:
+                                description: |-
+                                  addresses of this endpoint. For EndpointSlices of addressType "IPv4" or "IPv6",
+                                  the values are IP addresses in canonical form. The syntax and semantics of
+                                  other addressType values are not defined. This must contain at least one
+                                  address but no more than 100. EndpointSlices generated by the EndpointSlice
+                                  controller will always have exactly 1 address. No semantics are defined for
+                                  additional addresses beyond the first, and kube-proxy does not look at them.
+                                items:
+                                  type: string
+                                type: array
+                                x-kubernetes-list-type: set
+                              conditions:
+                                description: conditions contains information about
+                                  the current status of the endpoint.
+                                properties:
+                                  ready:
+                                    description: |-
+                                      ready indicates that this endpoint is ready to receive traffic,
+                                      according to whatever system is managing the endpoint. A nil value
+                                      should be interpreted as "true". In general, an endpoint should be
+                                      marked ready if it is serving and not terminating, though this can
+                                      be overridden in some cases, such as when the associated Service has
+                                      set the publishNotReadyAddresses flag.
+                                    type: boolean
+                                  serving:
+                                    description: |-
+                                      serving indicates that this endpoint is able to receive traffic,
+                                      according to whatever system is managing the endpoint. For endpoints
+                                      backed by pods, the EndpointSlice controller will mark the endpoint
+                                      as serving if the pod's Ready condition is True. A nil value should be
+                                      interpreted as "true".
+                                    type: boolean
+                                  terminating:
+                                    description: |-
+                                      terminating indicates that this endpoint is terminating. A nil value
+                                      should be interpreted as "false".
+                                    type: boolean
+                                type: object
+                              deprecatedTopology:
+                                additionalProperties:
+                                  type: string
+                                description: |-
+                                  deprecatedTopology contains topology information part of the v1beta1
+                                  API. This field is deprecated, and will be removed when the v1beta1
+                                  API is removed (no sooner than kubernetes v1.24).  While this field can
+                                  hold values, it is not writable through the v1 API, and any attempts to
+                                  write to it will be silently ignored. Topology information can be found
+                                  in the zone and nodeName fields instead.
+                                type: object
+                              hints:
+                                description: |-
+                                  hints contains information associated with how an endpoint should be
+                                  consumed.
+                                properties:
+                                  forNodes:
+                                    description: |-
+                                      forNodes indicates the node(s) this endpoint should be consumed by when
+                                      using topology aware routing. May contain a maximum of 8 entries.
+                                    items:
+                                      description: ForNode provides information about
+                                        which nodes should consume this endpoint.
+                                      properties:
+                                        name:
+                                          description: name represents the name of
+                                            the node.
+                                          type: string
+                                      required:
+                                      - name
+                                      type: object
+                                    type: array
+                                    x-kubernetes-list-type: atomic
+                                  forZones:
+                                    description: |-
+                                      forZones indicates the zone(s) this endpoint should be consumed by when
+                                      using topology aware routing. May contain a maximum of 8 entries.
+                                    items:
+                                      description: ForZone provides information about
+                                        which zones should consume this endpoint.
+                                      properties:
+                                        name:
+                                          description: name represents the name of
+                                            the zone.
+                                          type: string
+                                      required:
+                                      - name
+                                      type: object
+                                    type: array
+                                    x-kubernetes-list-type: atomic
+                                type: object
+                              hostname:
+                                description: |-
+                                  hostname of this endpoint. This field may be used by consumers of
+                                  endpoints to distinguish endpoints from each other (e.g. in DNS names).
+                                  Multiple endpoints which use the same hostname should be considered
+                                  fungible (e.g. multiple A values in DNS). Must be lowercase and pass DNS
+                                  Label (RFC 1123) validation.
+                                type: string
+                              nodeName:
+                                description: |-
+                                  nodeName represents the name of the Node hosting this endpoint. This can
+                                  be used to determine endpoints local to a Node.
+                                type: string
+                              targetRef:
+                                description: |-
+                                  targetRef is a reference to a Kubernetes object that represents this
+                                  endpoint.
+                                properties:
+                                  apiVersion:
+                                    description: API version of the referent.
+                                    type: string
+                                  fieldPath:
+                                    description: |-
+                                      If referring to a piece of an object instead of an entire object, this string
+                                      should contain a valid JSON/Go field access statement, such as desiredState.manifest.containers[2].
+                                      For example, if the object reference is to a container within a pod, this would take on a value like:
+                                      "spec.containers{name}" (where "name" refers to the name of the container that triggered
+                                      the event) or if no container name is specified "spec.containers[2]" (container with
+                                      index 2 in this pod). This syntax is chosen only to have some well-defined way of
+                                      referencing a part of an object.
+                                    type: string
+                                  kind:
+                                    description: |-
+                                      Kind of the referent.
+                                      More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+                                    type: string
+                                  name:
+                                    description: |-
+                                      Name of the referent.
+                                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                                    type: string
+                                  namespace:
+                                    description: |-
+                                      Namespace of the referent.
+                                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/namespaces/
+                                    type: string
+                                  resourceVersion:
+                                    description: |-
+                                      Specific resourceVersion to which this reference is made, if any.
+                                      More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#concurrency-control-and-consistency
+                                    type: string
+                                  uid:
+                                    description: |-
+                                      UID of the referent.
+                                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#uids
+                                    type: string
+                                type: object
+                                x-kubernetes-map-type: atomic
+                              zone:
+                                description: zone is the name of the Zone this endpoint
+                                  exists in.
+                                type: string
+                            required:
+                            - addresses
+                            type: object
+                          type: array
+                        labels:
+                          additionalProperties:
+                            type: string
+                          type: object
+                        name:
+                          type: string
+                        ownerReferences:
+                          items:
+                            description: |-
+                              OwnerReference contains enough information to let you identify an owning
+                              object. An owning object must be in the same namespace as the dependent, or
+                              be cluster-scoped, so there is no namespace field.
+                            properties:
+                              apiVersion:
+                                description: API version of the referent.
+                                type: string
+                              blockOwnerDeletion:
+                                description: |-
+                                  If true, AND if the owner has the "foregroundDeletion" finalizer, then
+                                  the owner cannot be deleted from the key-value store until this
+                                  reference is removed.
+                                  See https://kubernetes.io/docs/concepts/architecture/garbage-collection/#foreground-deletion
+                                  for how the garbage collector interacts with this field and enforces the foreground deletion.
+                                  Defaults to false.
+                                  To set this field, a user needs "delete" permission of the owner,
+                                  otherwise 422 (Unprocessable Entity) will be returned.
+                                type: boolean
+                              controller:
+                                description: If true, this reference points to the
+                                  managing controller.
+                                type: boolean
+                              kind:
+                                description: |-
+                                  Kind of the referent.
+                                  More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+                                type: string
+                              name:
+                                description: |-
+                                  Name of the referent.
+                                  More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names#names
+                                type: string
+                              uid:
+                                description: |-
+                                  UID of the referent.
+                                  More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names#uids
+                                type: string
+                            required:
+                            - apiVersion
+                            - kind
+                            - name
+                            - uid
+                            type: object
+                            x-kubernetes-map-type: atomic
+                          type: array
+                        ports:
+                          items:
+                            description: EndpointPort represents a Port used by an
+                              EndpointSlice
+                            properties:
+                              appProtocol:
+                                description: |-
+                                  The application protocol for this port.
+                                  This is used as a hint for implementations to offer richer behavior for protocols that they understand.
+                                  This field follows standard Kubernetes label syntax.
+                                  Valid values are either:
+
+                                  * Un-prefixed protocol names - reserved for IANA standard service names (as per
+                                  RFC-6335 and https://www.iana.org/assignments/service-names).
+
+                                  * Kubernetes-defined prefixed names:
+                                    * 'kubernetes.io/h2c' - HTTP/2 prior knowledge over cleartext as described in https://www.rfc-editor.org/rfc/rfc9113.html#name-starting-http-2-with-prior-
+                                    * 'kubernetes.io/ws'  - WebSocket over cleartext as described in https://www.rfc-editor.org/rfc/rfc6455
+                                    * 'kubernetes.io/wss' - WebSocket over TLS as described in https://www.rfc-editor.org/rfc/rfc6455
+
+                                  * Other protocols should use implementation-defined prefixed names such as
+                                  mycompany.com/my-custom-protocol.
+                                type: string
+                              name:
+                                description: |-
+                                  name represents the name of this port. All ports in an EndpointSlice must have a unique name.
+                                  If the EndpointSlice is derived from a Kubernetes service, this corresponds to the Service.ports[].name.
+                                  Name must either be an empty string or pass DNS_LABEL validation:
+                                  * must be no more than 63 characters long.
+                                  * must consist of lower case alphanumeric characters or '-'.
+                                  * must start and end with an alphanumeric character.
+                                  Default is empty string.
+                                type: string
+                              port:
+                                description: |-
+                                  port represents the port number of the endpoint.
+                                  If the EndpointSlice is derived from a Kubernetes service, this must be set
+                                  to the service's target port. EndpointSlices used for other purposes may have
+                                  a nil port.
+                                format: int32
+                                type: integer
+                              protocol:
+                                description: |-
+                                  protocol represents the IP protocol for this port.
+                                  Must be UDP, TCP, or SCTP.
+                                  Default is TCP.
+                                type: string
+                            type: object
+                            x-kubernetes-map-type: atomic
+                          type: array
+                      required:
+                      - addressType
+                      - name
+                      type: object
+                    type: array
+                  endpointSubsets:
+                    items:
+                      description: "EndpointSubset is a group of addresses with a
+                        common set of ports. The\nexpanded set of endpoints is the
+                        Cartesian product of Addresses x Ports.\nFor example, given:\n\n\t{\n\t
+                        \ Addresses: [{\"ip\": \"10.10.1.1\"}, {\"ip\": \"10.10.2.2\"}],\n\t
+                        \ Ports:     [{\"name\": \"a\", \"port\": 8675}, {\"name\":
+                        \"b\", \"port\": 309}]\n\t}\n\nThe resulting set of endpoints
+                        can be viewed as:\n\n\ta: [ 10.10.1.1:8675, 10.10.2.2:8675
+                        ],\n\tb: [ 10.10.1.1:309, 10.10.2.2:309 ]\n\nDeprecated: This
+                        API is deprecated in v1.33+."
+                      properties:
+                        addresses:
+                          description: |-
+                            IP addresses which offer the related ports that are marked as ready. These endpoints
+                            should be considered safe for load balancers and clients to utilize.
+                          items:
+                            description: |-
+                              EndpointAddress is a tuple that describes single IP address.
+                              Deprecated: This API is deprecated in v1.33+.
+                            properties:
+                              hostname:
+                                description: The Hostname of this endpoint
+                                type: string
+                              ip:
+                                description: |-
+                                  The IP of this endpoint.
+                                  May not be loopback (127.0.0.0/8 or ::1), link-local (169.254.0.0/16 or fe80::/10),
+                                  or link-local multicast (224.0.0.0/24 or ff02::/16).
+                                type: string
+                              nodeName:
+                                description: 'Optional: Node hosting this endpoint.
+                                  This can be used to determine endpoints local to
+                                  a node.'
+                                type: string
+                              targetRef:
+                                description: Reference to object providing the endpoint.
+                                properties:
+                                  apiVersion:
+                                    description: API version of the referent.
+                                    type: string
+                                  fieldPath:
+                                    description: |-
+                                      If referring to a piece of an object instead of an entire object, this string
+                                      should contain a valid JSON/Go field access statement, such as desiredState.manifest.containers[2].
+                                      For example, if the object reference is to a container within a pod, this would take on a value like:
+                                      "spec.containers{name}" (where "name" refers to the name of the container that triggered
+                                      the event) or if no container name is specified "spec.containers[2]" (container with
+                                      index 2 in this pod). This syntax is chosen only to have some well-defined way of
+                                      referencing a part of an object.
+                                    type: string
+                                  kind:
+                                    description: |-
+                                      Kind of the referent.
+                                      More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+                                    type: string
+                                  name:
+                                    description: |-
+                                      Name of the referent.
+                                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                                    type: string
+                                  namespace:
+                                    description: |-
+                                      Namespace of the referent.
+                                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/namespaces/
+                                    type: string
+                                  resourceVersion:
+                                    description: |-
+                                      Specific resourceVersion to which this reference is made, if any.
+                                      More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#concurrency-control-and-consistency
+                                    type: string
+                                  uid:
+                                    description: |-
+                                      UID of the referent.
+                                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#uids
+                                    type: string
+                                type: object
+                                x-kubernetes-map-type: atomic
+                            required:
+                            - ip
+                            type: object
+                            x-kubernetes-map-type: atomic
+                          type: array
+                          x-kubernetes-list-type: atomic
+                        notReadyAddresses:
+                          description: |-
+                            IP addresses which offer the related ports but are not currently marked as ready
+                            because they have not yet finished starting, have recently failed a readiness check,
+                            or have recently failed a liveness check.
+                          items:
+                            description: |-
+                              EndpointAddress is a tuple that describes single IP address.
+                              Deprecated: This API is deprecated in v1.33+.
+                            properties:
+                              hostname:
+                                description: The Hostname of this endpoint
+                                type: string
+                              ip:
+                                description: |-
+                                  The IP of this endpoint.
+                                  May not be loopback (127.0.0.0/8 or ::1), link-local (169.254.0.0/16 or fe80::/10),
+                                  or link-local multicast (224.0.0.0/24 or ff02::/16).
+                                type: string
+                              nodeName:
+                                description: 'Optional: Node hosting this endpoint.
+                                  This can be used to determine endpoints local to
+                                  a node.'
+                                type: string
+                              targetRef:
+                                description: Reference to object providing the endpoint.
+                                properties:
+                                  apiVersion:
+                                    description: API version of the referent.
+                                    type: string
+                                  fieldPath:
+                                    description: |-
+                                      If referring to a piece of an object instead of an entire object, this string
+                                      should contain a valid JSON/Go field access statement, such as desiredState.manifest.containers[2].
+                                      For example, if the object reference is to a container within a pod, this would take on a value like:
+                                      "spec.containers{name}" (where "name" refers to the name of the container that triggered
+                                      the event) or if no container name is specified "spec.containers[2]" (container with
+                                      index 2 in this pod). This syntax is chosen only to have some well-defined way of
+                                      referencing a part of an object.
+                                    type: string
+                                  kind:
+                                    description: |-
+                                      Kind of the referent.
+                                      More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+                                    type: string
+                                  name:
+                                    description: |-
+                                      Name of the referent.
+                                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                                    type: string
+                                  namespace:
+                                    description: |-
+                                      Namespace of the referent.
+                                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/namespaces/
+                                    type: string
+                                  resourceVersion:
+                                    description: |-
+                                      Specific resourceVersion to which this reference is made, if any.
+                                      More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#concurrency-control-and-consistency
+                                    type: string
+                                  uid:
+                                    description: |-
+                                      UID of the referent.
+                                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#uids
+                                    type: string
+                                type: object
+                                x-kubernetes-map-type: atomic
+                            required:
+                            - ip
+                            type: object
+                            x-kubernetes-map-type: atomic
+                          type: array
+                          x-kubernetes-list-type: atomic
+                        ports:
+                          description: Port numbers available on the related IP addresses.
+                          items:
+                            description: |-
+                              EndpointPort is a tuple that describes a single port.
+                              Deprecated: This API is deprecated in v1.33+.
+                            properties:
+                              appProtocol:
+                                description: |-
+                                  The application protocol for this port.
+                                  This is used as a hint for implementations to offer richer behavior for protocols that they understand.
+                                  This field follows standard Kubernetes label syntax.
+                                  Valid values are either:
+
+                                  * Un-prefixed protocol names - reserved for IANA standard service names (as per
+                                  RFC-6335 and https://www.iana.org/assignments/service-names).
+
+                                  * Kubernetes-defined prefixed names:
+                                    * 'kubernetes.io/h2c' - HTTP/2 prior knowledge over cleartext as described in https://www.rfc-editor.org/rfc/rfc9113.html#name-starting-http-2-with-prior-
+                                    * 'kubernetes.io/ws'  - WebSocket over cleartext as described in https://www.rfc-editor.org/rfc/rfc6455
+                                    * 'kubernetes.io/wss' - WebSocket over TLS as described in https://www.rfc-editor.org/rfc/rfc6455
+
+                                  * Other protocols should use implementation-defined prefixed names such as
+                                  mycompany.com/my-custom-protocol.
+                                type: string
+                              name:
+                                description: |-
+                                  The name of this port.  This must match the 'name' field in the
+                                  corresponding ServicePort.
+                                  Must be a DNS_LABEL.
+                                  Optional only if one port is defined.
+                                type: string
+                              port:
+                                description: The port number of the endpoint.
+                                format: int32
+                                type: integer
+                              protocol:
+                                description: |-
+                                  The IP protocol for this port.
+                                  Must be UDP, TCP, or SCTP.
+                                  Default is TCP.
+                                type: string
+                            required:
+                            - port
+                            type: object
+                            x-kubernetes-map-type: atomic
+                          type: array
+                          x-kubernetes-list-type: atomic
+                      type: object
+                    type: array
+                  hadEndpointSlices:
+                    type: boolean
+                  hadEndpoints:
+                    type: boolean
+                  selector:
+                    additionalProperties:
+                      type: string
+                    type: object
+                  serviceName:
+                    type: string
+                  serviceUID:
+                    description: |-
+                      UID is a type that holds unique ID values, including UUIDs.  Because we
+                      don't ONLY use UUIDs, this is an alias to string.  Being a type captures
+                      intent and helps make sure that UIDs and names do not get conflated.
+                    type: string
+                required:
+                - serviceName
+                - serviceUID
+                type: object
+            type: object
+        required:
+        - metadata
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

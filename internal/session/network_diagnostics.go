@@ -28,7 +28,7 @@ type NetworkDiagnostics struct {
 }
 
 func inspectNetwork(discovery cluster.Discovery) *NetworkDiagnostics {
-	result := networkdiag.Inspect(discovery)
+	result := networkdiag.Inspect(discovery.PodCIDRs, discovery.ServiceCIDRs, discovery.ServiceIPs)
 	diagnostics := &NetworkDiagnostics{
 		RoutingMode: result.RoutingMode,
 		StrictRoute: result.StrictRoute,

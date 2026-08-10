@@ -248,7 +248,7 @@ func NewManager(provider ClusterProvider, options ...Option) *Manager {
 	if executor, ok := any(provider).(podssh.Executor); ok {
 		manager.podSSH = podssh.NewServer(executor)
 	}
-	manager.core = newSingboxRuntime(manager.AppendLog)
+	manager.core = NewSingboxRuntime(manager.AppendLog)
 	for _, option := range options {
 		option(manager)
 	}

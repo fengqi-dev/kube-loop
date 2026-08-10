@@ -130,6 +130,7 @@ MAIN_PACKAGES=(
   "./e2e/mirror"
   "./e2e/portfwd"
   "./e2e/preview"
+  "./e2e/v2dataplane"
 )
 
 MAIN_EXIT=1

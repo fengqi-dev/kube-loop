@@ -1,5 +1,15 @@
-import type { AppView } from "@/hooks/use-session";
 import type { TranslationKey } from "@/i18n";
+
+export type AppView =
+  | "overview"
+  | "clusters"
+  | "connections"
+  | "workload"
+  | "network"
+  | "host-aliases"
+  | "logs"
+  | "mcp"
+  | "settings";
 
 export const navKeys: Record<AppView, TranslationKey> = {
   overview: "nav.overview",

@@ -10,7 +10,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/fengqi-dev/kube-loop/internal/tunnel"
+	"github.com/fengqi-dev/kube-loop/internal/streamcopy"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
 	"github.com/things-go/go-socks5"
 	"github.com/things-go/go-socks5/bufferpool"
 	"github.com/things-go/go-socks5/statute"
@@ -54,6 +55,16 @@ func (b *Bridge) SetHostUDPHandler(handler HostUDPHandler) {
 func (b *Bridge) SetGatewayAddress(address string) {
 	b.server.gatewayMu.Lock()
 	b.server.GatewayAddress = address
+	b.server.gatewayMu.Unlock()
+}
+
+// SetGateway atomically switches the endpoint and its generation-bound
+// protocol tenant token. Existing streams keep their established connection;
+// new streams use the replacement generation.
+func (b *Bridge) SetGateway(address string, token tunnel.SessionToken) {
+	b.server.gatewayMu.Lock()
+	b.server.GatewayAddress = address
+	b.server.SessionToken = token
 	b.server.gatewayMu.Unlock()
 }
 
@@ -156,6 +167,7 @@ func (s *Server) openGateway(
 	}
 	s.gatewayMu.RLock()
 	gatewayAddress := s.GatewayAddress
+	sessionToken := s.SessionToken
 	s.gatewayMu.RUnlock()
 	connection, err := (&net.Dialer{Timeout: timeout}).DialContext(ctx, "tcp", gatewayAddress)
 	if err != nil {
@@ -164,7 +176,7 @@ func (s *Server) openGateway(
 	request := tunnel.OpenRequest{
 		Command: command, Host: host, Port: port,
 	}
-	if err := tunnel.WriteOpen(connection, request, s.SessionToken); err != nil {
+	if err := tunnel.WriteOpen(connection, request, sessionToken); err != nil {
 		connection.Close()
 		return nil, err
 	}
@@ -193,18 +205,15 @@ func relay(client io.Writer, clientReader io.Reader, target net.Conn) {
 	done := make(chan struct{}, 2)
 	go func() {
 		_, _ = io.Copy(target, clientReader)
-		if value, ok := target.(interface{ CloseWrite() error }); ok {
-			_ = value.CloseWrite()
-		}
+		streamcopy.CloseWrite(target)
 		done <- struct{}{}
 	}()
 	go func() {
 		_, _ = io.Copy(client, target)
-		if value, ok := client.(interface{ CloseWrite() error }); ok {
-			_ = value.CloseWrite()
-		}
+		streamcopy.CloseWrite(client)
 		done <- struct{}{}
 	}()
+	<-done
 	<-done
 }
 

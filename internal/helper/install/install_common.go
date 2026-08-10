@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/fengqi-dev/kube-loop/internal/helper"
+	helperprotocol "github.com/fengqi-dev/kube-loop/internal/protocol/helper"
 )
 
 func copyFile(src, dst string, mode os.FileMode) error {
@@ -152,7 +153,7 @@ func waitForInstalledHelperReady(token, version string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), installReadyTimeout)
 	defer cancel()
 	client := &helper.Client{Token: token}
-	return waitForHelperReady(ctx, installReadyTimeout, 100*time.Millisecond, func(pingCtx context.Context) (helper.Response, error) {
+	return waitForHelperReady(ctx, installReadyTimeout, 100*time.Millisecond, func(pingCtx context.Context) (helperprotocol.Response, error) {
 		requestCtx, requestCancel := context.WithTimeout(pingCtx, 2*time.Second)
 		defer requestCancel()
 		response, err := client.Ping(requestCtx)

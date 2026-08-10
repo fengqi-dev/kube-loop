@@ -1,0 +1,356 @@
+nameOverride: ""
+fullnameOverride: ""
+
+# Externally reachable origin entered by desktop clients. HTTPS is required
+# except for loopback-only development installs.
+publicURL: ""
+serviceID: ""
+
+imagePullSecrets: []
+
+controller:
+  replicas: 1
+  logLevel: info
+  image:
+    repository: ghcr.io/fengqi-dev/kube-loop/controller
+    tag: ""
+    pullPolicy: IfNotPresent
+  minClientVersion: ""
+  auth:
+    # Public discovery is derived from configured Providers. Secrets are
+    # mounted from existing Kubernetes Secrets and never written to ConfigMap.
+    # Required for static-token or anonymous Providers. Never enable this in
+    # production; anonymous mode grants every caller the configured identity.
+    developmentMode: false
+    providers: []
+    token:
+      # Required when at least one Provider is configured. The key must be an
+      # Ed25519 private key encoded as PKCS#8 PEM.
+      existingSecret: ""
+      signingKeyKey: signing-key.pem
+      keyID: primary
+      accessTTL: 5m
+      refreshTTL: 720h
+    # - id: corporate
+    #   type: oidc
+    #   displayName: Corporate SSO
+    #   oidc:
+    #     issuer: https://login.example.com
+    #     clientID: kubeloop
+    #     existingSecret: kubeloop-oidc
+    #     clientSecretKey: client-secret
+    #     caKey: "" # optional key in the same Secret for a private CA
+    #     scopes: [openid, profile, email, groups]
+    #     allowedSigningAlgs: [RS256]
+    #     requiredClaims: [sub]
+    #     claims:
+    #       displayName: name
+    #       email: email
+    #       groups: groups
+    #     httpTimeout: 10s
+    # - id: local-token
+    #   type: static-token
+    #   displayName: Development Token
+    #   staticToken:
+    #     existingSecret: kubeloop-development-auth
+    #     tokenKey: token
+    #     subject: local-developer
+    #     groups: [developers]
+    # - id: anonymous
+    #   type: anonymous
+    #   displayName: Anonymous (unsafe)
+    #   anonymous:
+    #     subject: anonymous
+    #     groups: [developers]
+  relay:
+    # Required. This Secret is mounted only into Controller and must contain
+    # an Ed25519 PKCS#8 private key used to sign short-lived RelayTickets.
+    existingSecret: ""
+    signingKeyKey: signing-key.pem
+    keyID: primary
+    ticketTTL: 1m
+    id: primary
+  relayRegistry:
+    # The internal listener is a separate ClusterIP-only HTTPS service. By
+    # default a short-lived, audience-bound projected ServiceAccount token is
+    # authenticated through Kubernetes TokenReview; it is not the general Pod
+    # API credential and automount remains disabled on Data Plane Pods.
+    enabled: true
+    authentication: tokenreview
+    listenPort: 9443
+    servicePort: 9443
+    tokenAudience: kubeloop-relay
+    trustDomain: cluster.local
+    endpointAllowedHosts: ""
+    leaseDuration: 45s
+    heartbeatAfter: 10s
+    keyGeneration: 1
+    keyValidity: 8760h
+    # Defaults to controller.relay.existingSecret when empty. It must contain
+    # the internal HTTPS server certificate/private key and issuing CA.
+    existingSecret: ""
+    serverCertificateKey: tls.crt
+    serverPrivateKeyKey: tls.key
+    caKey: ca.crt
+    # - id: legacy-ad
+    #   type: ad
+    #   displayName: Corporate Active Directory
+    #   ad:
+    #     directoryID: corp.example
+    #     url: ldaps://dc.corp.example:636
+    #     startTLS: false
+    #     baseDN: DC=corp,DC=example
+    #     userFilter: "(&(objectClass=user)(sAMAccountName={username}))"
+    #     bindDN: CN=kubeloop-reader,OU=Service Accounts,DC=corp,DC=example
+    #     existingSecret: kubeloop-ad
+    #     bindPasswordKey: bind-password
+    #     caKey: ca.crt
+    #     objectIDAttribute: objectGUID
+    #     nestedGroupDepth: 0
+    #     maxGroups: 200
+  policy:
+    # Rules are allow-only and evaluated by subject/group, namespace,
+    # operation, and resource kind. An empty list is an explicit deny-all.
+    rules: []
+    # - id: developers-read
+    #   groups: [developers]
+    #   namespaces: [development]
+    #   operations: [get, list, watch]
+    #   resourceKinds: [namespaces, pods, services]
+  kubernetes:
+    timeout: 15s
+    qps: 20
+    burst: 40
+    userAgent: ""
+    impersonation:
+      # Disabled by default. Enabling this also requires the operator to grant
+      # the Controller ServiceAccount narrowly scoped impersonate RBAC.
+      enabled: false
+      usernamePrefix: "kubeloop:"
+      groupMappings: {}
+      # engineering: [k8s:developers]
+  files:
+    # Maximum bytes accepted by one upload or download Task. Directory
+    # transfers count the sanitized tar stream bytes.
+    maxBytes: 1073741824
+    # Absolute POSIX roots that file-transfer and pod-file management APIs may
+    # address. Use narrower application paths where possible; management may
+    # list a configured root but can never mutate the root itself.
+    allowedRoots:
+      - "/"
+  rbac:
+    # cluster grants enabled workflow groups across all namespaces. namespace
+    # confines those workload permissions to the explicit namespaces below.
+    # Both modes retain narrow cluster metadata and access-review permissions.
+    create: true
+    scope: cluster
+    namespaces: []
+    permissions:
+      inventory:
+        enabled: true
+      execFile:
+        enabled: true
+      traffic:
+        enabled: true
+  apiRequestTimeout: 30s
+  sessionTTL: 2m
+  sessionMaxLifetime: 8h
+  # Expired Sessions are deleted in bounded passes. Their owned Tasks and
+  # snapshots are removed by database foreign-key cascades, including after a
+  # desktop crash that cannot send an explicit disconnect.
+  maintenanceInterval: 1m
+  maintenanceBatchSize: 100
+  maxRequestBodyBytes: 1048576
+  shutdownTimeout: 10s
+  terminationGracePeriodSeconds: 15
+  service:
+    type: ClusterIP
+    port: 80
+  serviceAccount:
+    create: true
+    name: ""
+  storage:
+    # sqlite is the safe single-replica default. postgresql permits HA once
+    # the external DSN Secret is configured.
+    type: sqlite
+    sqlite:
+      path: /var/lib/kubeloop/kubeloop.db
+      persistence:
+        enabled: true
+        existingClaim: ""
+        storageClass: ""
+        accessModes:
+          - ReadWriteOnce
+        size: 1Gi
+    postgresql:
+      existingSecret: ""
+      dsnKey: dsn
+      connectTimeout: 10s
+      queryTimeout: 5s
+      maxOpenConnections: 20
+      maxIdleConnections: 5
+      connectionMaxLifetime: 30m
+      transactionMaxRetries: 3
+      transactionRetryBackoff: 25ms
+  resources: {}
+  topologySpreadConstraints: []
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  podAnnotations: {}
+  podLabels: {}
+
+operator:
+  replicas: 1
+  image:
+    repository: ghcr.io/fengqi-dev/kube-loop/operator
+    tag: ""
+    pullPolicy: IfNotPresent
+  leaderElection: true
+  terminationGracePeriodSeconds: 10
+  serviceAccount:
+    create: true
+    name: ""
+  rbac:
+    create: true
+  resources: {}
+  topologySpreadConstraints: []
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  podAnnotations: {}
+  podLabels: {}
+
+dataPlane:
+  replicas: 1
+  logLevel: info
+  image:
+    repository: ghcr.io/fengqi-dev/kube-loop/gateway
+    tag: ""
+    pullPolicy: IfNotPresent
+  tunnelPath: /tunnel
+  drainTimeout: 30s
+  streamIdleTimeout: 30m
+  terminationGracePeriodSeconds: 35
+  service:
+    type: ClusterIP
+    port: 80
+  serviceAccount:
+    create: true
+    name: ""
+  relay:
+    # Required. The Secret is mounted only into Data Plane and contains a
+    # JSON key set with one or more Ed25519 public keys for rotation.
+    existingSecret: ""
+    verificationKeysKey: verification-keys.json
+    id: primary
+    replayEntries: 65536
+  relayRegistry:
+    # Empty values are derived from the internal Controller Service and
+    # publicURL/tunnelPath. endpoint may instead be a per-Pod routable WSS URL.
+    controllerURL: ""
+    endpoint: ""
+    serverName: ""
+    # Required only when controller.relayRegistry.authentication=mtls. Each
+    # replica needs a distinct Pod-bound workload certificate; TokenReview is
+    # the scalable default.
+    existingSecret: ""
+    clientCertificateKey: tls.crt
+    clientPrivateKeyKey: tls.key
+    tokenExpirationSeconds: 600
+    maxWebSocketSessions: 256
+    maxWebSocketSessionsPerUser: 8
+    maxStreamsPerSession: 128
+    maxWebSocketFrameBytes: 1048576
+    handshakeTimeout: 10s
+  resources: {}
+  topologySpreadConstraints: []
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  podAnnotations: {}
+  podLabels: {}
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  host: ""
+  tls:
+    enabled: true
+    secretName: ""
+
+# Gateway API v1.2+ alternative to ingress. The route uses one HTTPS Origin
+# for discovery, authentication, API and the long-lived WebSocket tunnel.
+# Enable either ingress or gatewayAPI, never both.
+gatewayAPI:
+  enabled: false
+  annotations: {}
+  host: ""
+  parentRef:
+    # For an existing Gateway, name and sectionName are required. sectionName
+    # must identify an HTTPS listener that terminates TLS for gatewayAPI.host.
+    name: ""
+    namespace: ""
+    sectionName: ""
+  gateway:
+    # Optionally create the HTTPS Gateway alongside the HTTPRoute. Otherwise
+    # the platform team owns the referenced Gateway and certificate lifecycle.
+    create: false
+    className: ""
+    annotations: {}
+    tls:
+      secretName: ""
+  timeouts:
+    # Controller requests remain bounded. A zero tunnel timeout is required
+    # for WebSocket sessions; Gateway API defines 0s as disabling the timeout.
+    controller: 30s
+    tunnel: 0s
+
+networkPolicy:
+  enabled: true
+  egress:
+    # Restricted egress needs installation-specific Kubernetes API, workload,
+    # OIDC/AD and PostgreSQL CIDRs. Enabling it without explicit component
+    # allow rules fails rendering instead of silently breaking the workloads.
+    enabled: false
+    dns:
+      enabled: true
+      namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    controller: []
+    dataPlane: []
+    operator: []
+
+monitoring:
+  serviceMonitor:
+    enabled: false
+    namespace: ""
+    labels: {}
+    interval: 30s
+    scrapeTimeout: 10s
+
+podDisruptionBudget:
+  # Rendered only for a multi-replica PostgreSQL Controller. SQLite never
+  # receives a PDB that could prevent voluntary maintenance.
+  controller:
+    enabled: true
+    minAvailable: 1
+
+podSecurityContext:
+  runAsNonRoot: true
+  fsGroup: 65532
+  fsGroupChangePolicy: OnRootMismatch
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL

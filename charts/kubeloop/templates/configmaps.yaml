@@ -1,0 +1,201 @@
+{{- $publicURL := required "publicURL is required (for example https://kubeloop.example.com)" .Values.publicURL }}
+{{- include "kubeloop.validateExternalAccess" . }}
+{{- $registryEnabled := .Values.controller.relayRegistry.enabled }}
+{{- if and $registryEnabled (not (or (eq .Values.controller.relayRegistry.authentication "tokenreview") (eq .Values.controller.relayRegistry.authentication "mtls"))) }}
+{{- fail "controller.relayRegistry.authentication must be tokenreview or mtls" }}
+{{- end }}
+{{- if not .Values.controller.files.allowedRoots }}
+{{- fail "controller.files.allowedRoots must contain at least one absolute container path" }}
+{{- end }}
+{{- if le (int64 .Values.controller.files.maxBytes) 0 }}
+{{- fail "controller.files.maxBytes must be positive" }}
+{{- end }}
+{{- if or (lt (int .Values.dataPlane.relayRegistry.maxWebSocketSessionsPerUser) 1) (gt (int .Values.dataPlane.relayRegistry.maxWebSocketSessionsPerUser) (int .Values.dataPlane.relayRegistry.maxWebSocketSessions)) }}
+{{- fail "dataPlane.relayRegistry.maxWebSocketSessionsPerUser must be between 1 and maxWebSocketSessions" }}
+{{- end }}
+{{- if or (lt (int64 .Values.dataPlane.relayRegistry.maxWebSocketFrameBytes) 8192) (gt (int64 .Values.dataPlane.relayRegistry.maxWebSocketFrameBytes) 16777216) }}
+{{- fail "dataPlane.relayRegistry.maxWebSocketFrameBytes must be between 8192 and 16777216" }}
+{{- end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "kubeloop.controllerConfigName" . }}
+  labels:
+    {{- include "kubeloop.labels" . | nindent 4 }}
+    app.kubernetes.io/component: controller
+data:
+  KUBELOOP_LISTEN: ":8080"
+  KUBELOOP_PUBLIC_URL: {{ $publicURL | quote }}
+  KUBELOOP_SERVICE_ID: {{ include "kubeloop.serviceID" . | quote }}
+  KUBELOOP_TUNNEL_PATH: {{ .Values.dataPlane.tunnelPath | quote }}
+  KUBELOOP_MIN_CLIENT_VERSION: {{ .Values.controller.minClientVersion | quote }}
+  KUBELOOP_AUTH_CONFIG_FILE: "/etc/kubeloop/auth/auth.json"
+  KUBELOOP_POLICY_CONFIG_FILE: "/etc/kubeloop/auth/policy.json"
+  KUBELOOP_KUBERNETES_CONFIG_FILE: "/etc/kubeloop/auth/kubernetes.json"
+  KUBELOOP_TOKEN_SIGNING_KEY_FILE: "/var/run/secrets/kubeloop/auth/token/signing-key.pem"
+  KUBELOOP_TOKEN_KEY_ID: {{ .Values.controller.auth.token.keyID | quote }}
+  KUBELOOP_ACCESS_TOKEN_TTL: {{ .Values.controller.auth.token.accessTTL | quote }}
+  KUBELOOP_REFRESH_TOKEN_TTL: {{ .Values.controller.auth.token.refreshTTL | quote }}
+  KUBELOOP_RELAY_TICKET_SIGNING_KEY_FILE: "/var/run/secrets/kubeloop/auth/relay/signing-key.pem"
+  KUBELOOP_RELAY_TICKET_KEY_ID: {{ .Values.controller.relay.keyID | quote }}
+  KUBELOOP_RELAY_TICKET_TTL: {{ .Values.controller.relay.ticketTTL | quote }}
+  KUBELOOP_RELAY_ID: {{ .Values.controller.relay.id | quote }}
+  {{- if $registryEnabled }}
+  KUBELOOP_RELAY_REGISTRY_LISTEN: {{ printf ":%v" .Values.controller.relayRegistry.listenPort | quote }}
+  KUBELOOP_RELAY_REGISTRY_CERT_FILE: "/var/run/secrets/kubeloop/relay-registry/tls.crt"
+  KUBELOOP_RELAY_REGISTRY_KEY_FILE: "/var/run/secrets/kubeloop/relay-registry/tls.key"
+  KUBELOOP_RELAY_REGISTRY_AUTHENTICATION: {{ .Values.controller.relayRegistry.authentication | quote }}
+  KUBELOOP_RELAY_TOKEN_AUDIENCE: {{ .Values.controller.relayRegistry.tokenAudience | quote }}
+  KUBELOOP_RELAY_TRUST_DOMAIN: {{ .Values.controller.relayRegistry.trustDomain | quote }}
+  KUBELOOP_RELAY_ENDPOINT_ALLOWED_HOSTS: {{ .Values.controller.relayRegistry.endpointAllowedHosts | quote }}
+  KUBELOOP_RELAY_LEASE_DURATION: {{ .Values.controller.relayRegistry.leaseDuration | quote }}
+  KUBELOOP_RELAY_HEARTBEAT_AFTER: {{ .Values.controller.relayRegistry.heartbeatAfter | quote }}
+  KUBELOOP_RELAY_KEY_GENERATION: {{ .Values.controller.relayRegistry.keyGeneration | quote }}
+  KUBELOOP_RELAY_KEY_VALIDITY: {{ .Values.controller.relayRegistry.keyValidity | quote }}
+  {{- if eq .Values.controller.relayRegistry.authentication "mtls" }}
+  KUBELOOP_RELAY_REGISTRY_CLIENT_CA_FILE: "/var/run/secrets/kubeloop/relay-registry/ca.crt"
+  {{- end }}
+  {{- end }}
+  KUBELOOP_CONTROLLER_REPLICAS: {{ .Values.controller.replicas | quote }}
+  KUBELOOP_FILE_MAX_BYTES: {{ .Values.controller.files.maxBytes | int64 | quote }}
+  KUBELOOP_FILE_ALLOWED_ROOTS_JSON: {{ .Values.controller.files.allowedRoots | toJson | quote }}
+---
+{{- $providers := list }}
+{{- range $index, $provider := .Values.controller.auth.providers }}
+{{- $id := required (printf "controller.auth.providers[%d].id is required" $index) $provider.id }}
+{{- if not (regexMatch "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$" $id) }}
+{{- fail (printf "controller.auth.providers[%d].id must be URL-safe" $index) }}
+{{- end }}
+{{- $type := required (printf "controller.auth.providers[%d].type is required" $index) $provider.type }}
+{{- if eq $type "oidc" }}
+{{- $oidc := required (printf "controller.auth.providers[%d].oidc is required" $index) $provider.oidc }}
+{{- $issuer := required (printf "controller.auth.providers[%d].oidc.issuer is required" $index) $oidc.issuer }}
+{{- $clientID := required (printf "controller.auth.providers[%d].oidc.clientID is required" $index) $oidc.clientID }}
+{{- $_ := required (printf "controller.auth.providers[%d].oidc.existingSecret is required" $index) $oidc.existingSecret }}
+{{- $_ := required (printf "controller.auth.providers[%d].oidc.clientSecretKey is required" $index) $oidc.clientSecretKey }}
+{{- $oidcConfig := dict
+      "issuer" $issuer
+      "clientId" $clientID
+      "clientSecretFile" (printf "/var/run/secrets/kubeloop/auth/%s/client-secret" $id)
+      "redirectUrl" (printf "%s/auth/callback/%s" (trimSuffix "/" $publicURL) $id)
+      "scopes" (default (list "openid" "profile" "email") $oidc.scopes)
+      "allowedSigningAlgs" (default (list "RS256") $oidc.allowedSigningAlgs)
+      "requiredClaims" (default (list "sub") $oidc.requiredClaims)
+      "claims" (default (dict) $oidc.claims)
+      "httpTimeout" (default "10s" $oidc.httpTimeout)
+}}
+{{- if $oidc.caKey }}
+{{- $_ := set $oidcConfig "caFile" (printf "/var/run/secrets/kubeloop/auth/%s/ca.crt" $id) }}
+{{- end }}
+{{- $providers = append $providers (dict "id" $id "type" $type "displayName" (default "" $provider.displayName) "oidc" $oidcConfig) }}
+{{- else if eq $type "ad" }}
+{{- $ad := required (printf "controller.auth.providers[%d].ad is required" $index) $provider.ad }}
+{{- $directoryID := required (printf "controller.auth.providers[%d].ad.directoryID is required" $index) $ad.directoryID }}
+{{- $url := required (printf "controller.auth.providers[%d].ad.url is required" $index) $ad.url }}
+{{- $baseDN := required (printf "controller.auth.providers[%d].ad.baseDN is required" $index) $ad.baseDN }}
+{{- if and (not (hasPrefix "ldaps://" $url)) (not (and (hasPrefix "ldap://" $url) $ad.startTLS)) }}
+{{- fail (printf "controller.auth.providers[%d].ad.url must use ldaps:// or explicitly enabled StartTLS" $index) }}
+{{- end }}
+{{- $adConfig := dict
+      "directoryId" $directoryID
+      "url" $url
+      "startTLS" (default false $ad.startTLS)
+      "baseDn" $baseDN
+      "userFilter" (default "(&(objectClass=user)(sAMAccountName={username}))" $ad.userFilter)
+      "bindDn" (default "" $ad.bindDN)
+      "objectIdAttribute" (default "objectGUID" $ad.objectIDAttribute)
+      "displayNameAttribute" (default "displayName" $ad.displayNameAttribute)
+      "emailAttribute" (default "mail" $ad.emailAttribute)
+      "groupsAttribute" (default "memberOf" $ad.groupsAttribute)
+      "groupNameAttribute" (default "cn" $ad.groupNameAttribute)
+      "nestedGroupDepth" (default 0 $ad.nestedGroupDepth)
+      "maxGroups" (default 200 $ad.maxGroups)
+      "connectTimeout" (default "5s" $ad.connectTimeout)
+      "requestTimeout" (default "5s" $ad.requestTimeout)
+}}
+{{- if $ad.bindDN }}
+{{- $_ := required (printf "controller.auth.providers[%d].ad.existingSecret is required when bindDN is configured" $index) $ad.existingSecret }}
+{{- $_ := required (printf "controller.auth.providers[%d].ad.bindPasswordKey is required when bindDN is configured" $index) $ad.bindPasswordKey }}
+{{- $_ := set $adConfig "bindPasswordFile" (printf "/var/run/secrets/kubeloop/auth/%s/bind-password" $id) }}
+{{- end }}
+{{- if $ad.caKey }}
+{{- $_ := required (printf "controller.auth.providers[%d].ad.existingSecret is required when caKey is configured" $index) $ad.existingSecret }}
+{{- $_ := set $adConfig "caFile" (printf "/var/run/secrets/kubeloop/auth/%s/ca.crt" $id) }}
+{{- end }}
+{{- $providers = append $providers (dict "id" $id "type" $type "displayName" (default "" $provider.displayName) "ad" $adConfig) }}
+{{- else if eq $type "static-token" }}
+{{- if not $.Values.controller.auth.developmentMode }}
+{{- fail (printf "controller.auth.providers[%d] static-token requires controller.auth.developmentMode=true" $index) }}
+{{- end }}
+{{- $staticToken := required (printf "controller.auth.providers[%d].staticToken is required" $index) $provider.staticToken }}
+{{- $_ := required (printf "controller.auth.providers[%d].staticToken.existingSecret is required" $index) $staticToken.existingSecret }}
+{{- $_ := required (printf "controller.auth.providers[%d].staticToken.tokenKey is required" $index) $staticToken.tokenKey }}
+{{- $staticTokenConfig := dict
+      "tokenFile" (printf "/var/run/secrets/kubeloop/auth/%s/static-token" $id)
+      "subject" (default "developer" $staticToken.subject)
+      "displayName" (default "" $staticToken.displayName)
+      "email" (default "" $staticToken.email)
+      "groups" (default (list) $staticToken.groups)
+}}
+{{- $providers = append $providers (dict "id" $id "type" $type "displayName" (default "" $provider.displayName) "staticToken" $staticTokenConfig) }}
+{{- else if eq $type "anonymous" }}
+{{- if not $.Values.controller.auth.developmentMode }}
+{{- fail (printf "controller.auth.providers[%d] anonymous requires controller.auth.developmentMode=true" $index) }}
+{{- end }}
+{{- $anonymous := required (printf "controller.auth.providers[%d].anonymous is required" $index) $provider.anonymous }}
+{{- $anonymousConfig := dict
+      "subject" (default "anonymous" $anonymous.subject)
+      "displayName" (default "" $anonymous.displayName)
+      "email" (default "" $anonymous.email)
+      "groups" (default (list) $anonymous.groups)
+}}
+{{- $providers = append $providers (dict "id" $id "type" $type "displayName" (default "" $provider.displayName) "anonymous" $anonymousConfig) }}
+{{- else }}
+{{- fail (printf "controller.auth.providers[%d].type must be oidc, ad, static-token, or anonymous" $index) }}
+{{- end }}
+{{- end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "kubeloop.controllerAuthConfigName" . }}
+  labels:
+    {{- include "kubeloop.labels" . | nindent 4 }}
+    app.kubernetes.io/component: controller
+data:
+  auth.json: {{ dict "developmentMode" .Values.controller.auth.developmentMode "providers" $providers | toJson | quote }}
+  policy.json: {{ dict "version" 1 "rules" (default (list) .Values.controller.policy.rules) | toJson | quote }}
+  kubernetes.json: {{ dict "timeout" .Values.controller.kubernetes.timeout "qps" .Values.controller.kubernetes.qps "burst" .Values.controller.kubernetes.burst "userAgent" .Values.controller.kubernetes.userAgent "impersonation" (dict "enabled" .Values.controller.kubernetes.impersonation.enabled "usernamePrefix" .Values.controller.kubernetes.impersonation.usernamePrefix "groupMappings" (default (dict) .Values.controller.kubernetes.impersonation.groupMappings)) | toJson | quote }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "kubeloop.dataPlaneConfigName" . }}
+  labels:
+    {{- include "kubeloop.labels" . | nindent 4 }}
+    app.kubernetes.io/component: data-plane
+data:
+  KUBELOOP_GATEWAY_LEGACY_LISTEN: ""
+  KUBELOOP_GATEWAY_HTTP_LISTEN: ":8080"
+  KUBELOOP_GATEWAY_HTTP_PATH: {{ .Values.dataPlane.tunnelPath | quote }}
+  KUBELOOP_GATEWAY_DRAIN_TIMEOUT: {{ .Values.dataPlane.drainTimeout | quote }}
+  KUBELOOP_GATEWAY_STREAM_IDLE_TIMEOUT: {{ .Values.dataPlane.streamIdleTimeout | quote }}
+  KUBELOOP_MIN_CLIENT_VERSION: {{ .Values.controller.minClientVersion | quote }}
+  {{- if $registryEnabled }}
+  {{- if and (not .Values.dataPlane.relayRegistry.endpoint) (not (hasPrefix "https://" $publicURL)) }}
+  {{- fail "dataPlane.relayRegistry.endpoint is required when publicURL is not HTTPS" }}
+  {{- end }}
+  KUBELOOP_RELAY_CONTROLLER_URL: {{ default (printf "https://%s.%s.svc:%v" (include "kubeloop.controllerRegistryName" .) .Release.Namespace .Values.controller.relayRegistry.servicePort) .Values.dataPlane.relayRegistry.controllerURL | quote }}
+  KUBELOOP_RELAY_ENDPOINT: {{ default (printf "wss://%s%s" (trimPrefix "https://" (trimSuffix "/" $publicURL)) .Values.dataPlane.tunnelPath) .Values.dataPlane.relayRegistry.endpoint | quote }}
+  KUBELOOP_RELAY_SERVER_CA_FILE: "/var/run/secrets/kubeloop/relay-registry/ca.crt"
+  KUBELOOP_RELAY_SERVER_NAME: {{ default (printf "%s.%s.svc" (include "kubeloop.controllerRegistryName" .) .Release.Namespace) .Values.dataPlane.relayRegistry.serverName | quote }}
+  {{- if eq .Values.controller.relayRegistry.authentication "tokenreview" }}
+  KUBELOOP_RELAY_BEARER_TOKEN_FILE: "/var/run/secrets/kubeloop/relay-identity/token"
+  {{- else }}
+  KUBELOOP_RELAY_CLIENT_CERT_FILE: "/var/run/secrets/kubeloop/relay-registry/tls.crt"
+  KUBELOOP_RELAY_CLIENT_KEY_FILE: "/var/run/secrets/kubeloop/relay-registry/tls.key"
+  {{- end }}
+  {{- else }}
+  KUBELOOP_RELAY_VERIFICATION_KEYS_FILE: "/var/run/secrets/kubeloop/relay/verification-keys.json"
+  {{- end }}
+  KUBELOOP_RELAY_TICKET_ISSUER: {{ $publicURL | quote }}
+  KUBELOOP_RELAY_ID: {{ .Values.dataPlane.relay.id | quote }}

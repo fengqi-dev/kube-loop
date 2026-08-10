@@ -26,7 +26,7 @@ type Provider interface {
 		context.Context, string, cluster.PreviewServiceSnapshot, string,
 	) (*corev1.Service, error)
 	DeletePreviewService(
-		context.Context, string, cluster.PreviewServiceSnapshot,
+		context.Context, string, cluster.PreviewServiceSnapshot, string,
 	) error
 }
 
@@ -85,7 +85,7 @@ func (a *Adapter) CreatePreviewService(
 		return nil, nil, err
 	}
 	lease := &previewLease{
-		provider: a.provider, contextName: contextName, snapshot: snapshot,
+		provider: a.provider, contextName: contextName, snapshot: snapshot, previewID: request.ID,
 	}
 	return serviceModel(service), lease, nil
 }
@@ -104,10 +104,11 @@ type previewLease struct {
 	provider    Provider
 	contextName string
 	snapshot    cluster.PreviewServiceSnapshot
+	previewID   string
 }
 
 func (l *previewLease) Release(ctx context.Context) error {
-	return l.provider.DeletePreviewService(ctx, l.contextName, l.snapshot)
+	return l.provider.DeletePreviewService(ctx, l.contextName, l.snapshot, l.previewID)
 }
 
 func serviceModel(service *corev1.Service) *intercept.Service {

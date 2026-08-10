@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fengqi-dev/kube-loop/internal/tunnel"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
 	"github.com/things-go/go-socks5/statute"
 )
 
@@ -244,6 +244,88 @@ func TestDialGatewayReturnsStatusError(t *testing.T) {
 	_, err = server.dial(context.Background(), "tcp", "10.96.0.1:443")
 	if err == nil || !strings.Contains(err.Error(), "target denied") {
 		t.Fatalf("dial error = %v", err)
+	}
+}
+
+func TestRelayPreservesTCPHalfCloseResponse(t *testing.T) {
+	clientSide, relayClient := tcpConnectionPair(t)
+	defer clientSide.Close()
+	defer relayClient.Close()
+	relayTarget, targetSide := tcpConnectionPair(t)
+	defer relayTarget.Close()
+	defer targetSide.Close()
+
+	relayDone := make(chan struct{})
+	go func() {
+		relay(relayClient, bufio.NewReader(relayClient), relayTarget)
+		close(relayDone)
+	}()
+	backendDone := make(chan error, 1)
+	go func() {
+		request, err := io.ReadAll(targetSide)
+		if err != nil {
+			backendDone <- err
+			return
+		}
+		if string(request) != "request" {
+			backendDone <- fmt.Errorf("request = %q", request)
+			return
+		}
+		_, err = io.WriteString(targetSide, "response")
+		if err == nil {
+			err = targetSide.(*net.TCPConn).CloseWrite()
+		}
+		backendDone <- err
+	}()
+
+	_ = clientSide.SetDeadline(time.Now().Add(3 * time.Second))
+	if _, err := io.WriteString(clientSide, "request"); err != nil {
+		t.Fatal(err)
+	}
+	if err := clientSide.(*net.TCPConn).CloseWrite(); err != nil {
+		t.Fatal(err)
+	}
+	response, err := io.ReadAll(clientSide)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(response) != "response" {
+		t.Fatalf("response = %q", response)
+	}
+	if err := <-backendDone; err != nil {
+		t.Fatal(err)
+	}
+	<-relayDone
+}
+
+func tcpConnectionPair(t *testing.T) (net.Conn, net.Conn) {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	accepted := make(chan net.Conn, 1)
+	acceptErr := make(chan error, 1)
+	go func() {
+		connection, err := listener.Accept()
+		if err != nil {
+			acceptErr <- err
+			return
+		}
+		accepted <- connection
+	}()
+	client, err := net.Dial("tcp", listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case server := <-accepted:
+		return client, server
+	case err := <-acceptErr:
+		client.Close()
+		t.Fatal(err)
+		return nil, nil
 	}
 }
 

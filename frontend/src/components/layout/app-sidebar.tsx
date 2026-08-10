@@ -11,7 +11,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { LogoMark } from "@/components/brand/logo-mark";
-import { navKeys } from "@/components/layout/navigation";
+import { navKeys, type AppView } from "@/components/layout/navigation";
 import {
   Sidebar,
   SidebarContent,
@@ -24,7 +24,6 @@ import {
   SidebarMenuItem,
   SidebarSeparator,
 } from "@/components/ui/sidebar";
-import { type AppView } from "@/hooks/use-session";
 import { useI18n } from "@/i18n";
 import { cn } from "@/lib/utils";
 

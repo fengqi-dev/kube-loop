@@ -2,34 +2,74 @@ package websocketmux
 
 import (
 	"context"
-	"crypto/sha256"
-	"crypto/subtle"
 	"errors"
 	"log"
 	"net"
 	"net/http"
-	"strings"
+	"slices"
+	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/coder/websocket"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/wssprotocol"
+	shared "github.com/fengqi-dev/kube-loop/internal/websocketmux"
 	"github.com/xtaci/smux"
 )
 
+type Identity struct {
+	PrincipalID       string
+	DeviceID          string
+	SessionID         string
+	SessionGeneration uint64
+	Namespace         string
+	NetworkSpecHash   string
+	ExpiresAt         time.Time
+}
+
+type Authenticator interface {
+	Authenticate(*http.Request) (Identity, error)
+}
+
+type AuthenticatorFunc func(*http.Request) (Identity, error)
+
+func (function AuthenticatorFunc) Authenticate(request *http.Request) (Identity, error) {
+	return function(request)
+}
+
 type ServerConfig struct {
-	Token                string
+	Authenticator        Authenticator
 	MaxSessions          int
 	MaxStreamsPerSession int
+	MaxSessionsPerUser   int
+	MaxFrameBytes        int64
+	StreamIdleTimeout    time.Duration
+	HandshakeTimeout     time.Duration
+	ServerVersion        string
+	MinClientVersion     string
+	SupportedVersions    []string
 	Logger               *log.Logger
-	Handle               func(net.Conn)
+	Handle               func(Identity, net.Conn)
 }
 
 type Handler struct {
-	config ServerConfig
-	limit  chan struct{}
+	config       ServerConfig
+	limit        chan struct{}
+	draining     atomic.Bool
+	generationMu sync.Mutex
+	generations  map[string]activeGeneration
+	userMu       sync.Mutex
+	userSessions map[string]int
+}
+
+type activeGeneration struct {
+	latest   uint64
+	sessions int
 }
 
 func NewHandler(config ServerConfig) (*Handler, error) {
-	if config.Token == "" {
-		return nil, errors.New("Gateway WebSocket token is required")
+	if config.Authenticator == nil {
+		return nil, errors.New("Gateway WebSocket authenticator is required")
 	}
 	if config.Handle == nil {
 		return nil, errors.New("Gateway stream handler is required")
@@ -40,21 +80,69 @@ func NewHandler(config ServerConfig) (*Handler, error) {
 	if config.MaxStreamsPerSession <= 0 {
 		config.MaxStreamsPerSession = defaultMaxStreams
 	}
-	return &Handler{config: config, limit: make(chan struct{}, config.MaxSessions)}, nil
+	if config.MaxSessionsPerUser <= 0 {
+		config.MaxSessionsPerUser = 8
+	}
+	if config.MaxSessionsPerUser > config.MaxSessions {
+		return nil, errors.New("Gateway per-user session limit exceeds the global limit")
+	}
+	if config.MaxFrameBytes == 0 {
+		config.MaxFrameBytes = 1 << 20
+	}
+	if config.MaxFrameBytes < wssprotocol.MaximumHandshakeBytes || config.MaxFrameBytes > 16<<20 {
+		return nil, errors.New("Gateway WebSocket frame limit is invalid")
+	}
+	if config.HandshakeTimeout <= 0 {
+		config.HandshakeTimeout = wssprotocol.DefaultHandshakeTimeout
+	}
+	if config.HandshakeTimeout > time.Minute {
+		return nil, errors.New("Gateway WSS handshake timeout must not exceed one minute")
+	}
+	if len(config.SupportedVersions) == 0 {
+		config.SupportedVersions = []string{wssprotocol.Version}
+	}
+	if len(config.SupportedVersions) != 1 || config.SupportedVersions[0] != wssprotocol.Version {
+		return nil, errors.New("Gateway WSS protocol versions are invalid")
+	}
+	if config.StreamIdleTimeout <= 0 {
+		config.StreamIdleTimeout = defaultStreamIdleTimeout
+	}
+	if config.StreamIdleTimeout > maxStreamIdleTimeout {
+		return nil, errors.New("Gateway stream idle timeout must not exceed 24 hours")
+	}
+	return &Handler{
+		config: config, limit: make(chan struct{}, config.MaxSessions),
+		generations: make(map[string]activeGeneration), userSessions: make(map[string]int),
+	}, nil
 }
 
 func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
+	if h.draining.Load() {
+		h.log("WebSocket request rejected: remote=%s method=%s path=%s status=%d reason=draining", request.RemoteAddr, request.Method, request.URL.Path, http.StatusServiceUnavailable)
+		writer.Header().Set("Retry-After", "5")
+		http.Error(writer, "Gateway is draining", http.StatusServiceUnavailable)
+		return
+	}
 	if request.Method != http.MethodGet {
 		h.log("WebSocket request rejected: remote=%s method=%s path=%s status=%d reason=method", request.RemoteAddr, request.Method, request.URL.Path, http.StatusMethodNotAllowed)
 		http.Error(writer, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if !h.authorized(request) {
+	identity, err := h.config.Authenticator.Authenticate(request)
+	if err != nil || identity.PrincipalID == "" || identity.DeviceID == "" || identity.SessionID == "" ||
+		identity.SessionGeneration == 0 || !identity.ExpiresAt.After(time.Now()) {
 		h.log("WebSocket request rejected: remote=%s method=%s path=%s status=%d reason=authentication", request.RemoteAddr, request.Method, request.URL.Path, http.StatusUnauthorized)
 		writer.Header().Set("WWW-Authenticate", "Bearer")
 		http.Error(writer, "unauthorized", http.StatusUnauthorized)
 		return
 	}
+	if !h.acquireGeneration(identity) {
+		h.log("WebSocket request rejected: remote=%s method=%s path=%s status=%d reason=stale_generation", request.RemoteAddr, request.Method, request.URL.Path, http.StatusUnauthorized)
+		writer.Header().Set("WWW-Authenticate", "Bearer")
+		http.Error(writer, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	defer h.releaseGeneration(identity)
 	select {
 	case h.limit <- struct{}{}:
 		defer func() { <-h.limit }()
@@ -63,6 +151,7 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		http.Error(writer, "Gateway session limit reached", http.StatusServiceUnavailable)
 		return
 	}
+	writer.Header().Set(wssprotocol.VersionHeader, wssprotocol.Version)
 	connection, err := websocket.Accept(writer, request, &websocket.AcceptOptions{
 		Subprotocols: []string{Subprotocol},
 	})
@@ -72,13 +161,80 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	}
 	defer connection.CloseNow()
 	if connection.Subprotocol() != Subprotocol {
-		h.log("WebSocket request rejected: remote=%s path=%s reason=subprotocol", request.RemoteAddr, request.URL.Path)
+		h.log(
+			"WebSocket request rejected: remote=%s path=%s reason=subprotocol requested=%q negotiated=%q",
+			request.RemoteAddr, request.URL.Path, request.Header.Get("Sec-WebSocket-Protocol"), connection.Subprotocol(),
+		)
 		_ = connection.Close(websocket.StatusPolicyViolation, "subprotocol required")
 		return
 	}
+	connection.SetReadLimit(wssprotocol.MaximumHandshakeBytes)
+	handshakeContext, cancelHandshake := context.WithTimeout(request.Context(), h.config.HandshakeTimeout)
+	message, handshakeErr := wssprotocol.Read(handshakeContext, connection)
+	if errors.Is(handshakeErr, wssprotocol.ErrLegacyProtocol) {
+		cancelHandshake()
+		h.reject(connection, wssprotocol.NewReject(
+			wssprotocol.CodeVersionMismatch, "ClientHello is required before smux", h.config.SupportedVersions...,
+		))
+		return
+	}
+	if handshakeErr != nil || message.ClientHello == nil {
+		cancelHandshake()
+		h.reject(connection, wssprotocol.NewReject(wssprotocol.CodeInvalidHandshake, "ClientHello is invalid"))
+		return
+	}
+	hello := *message.ClientHello
+	selectedVersion, versionErr := wssprotocol.Negotiate(hello.ProtocolVersions, h.config.SupportedVersions)
+	if versionErr != nil {
+		cancelHandshake()
+		h.reject(connection, wssprotocol.NewReject(
+			wssprotocol.CodeVersionMismatch, "No compatible WSS protocol version", h.config.SupportedVersions...,
+		))
+		return
+	}
+	if err := wssprotocol.CheckClientVersion(hello.ClientVersion, h.config.MinClientVersion); err != nil {
+		cancelHandshake()
+		h.reject(connection, wssprotocol.NewReject(
+			wssprotocol.CodeClientVersionUnsupported, "Client version is not supported",
+		))
+		return
+	}
+	if hello.DeviceID != identity.DeviceID {
+		cancelHandshake()
+		h.reject(connection, wssprotocol.NewReject(wssprotocol.CodeDeviceMismatch, "Device does not match RelayTicket"))
+		return
+	}
+	if !slices.Contains(hello.Capabilities, "smux.v2") || !slices.Contains(hello.Capabilities, "tunnel.open.v2") {
+		cancelHandshake()
+		h.reject(connection, wssprotocol.NewReject(wssprotocol.CodeInvalidHandshake, "Required capabilities are missing"))
+		return
+	}
+	if !h.acquireUser(identity) {
+		cancelHandshake()
+		h.reject(connection, wssprotocol.NewReject(wssprotocol.CodeUserCapacityExceeded, "Per-user connection limit reached"))
+		return
+	}
+	defer h.releaseUser(identity)
+	serverHello := wssprotocol.NewServerHello(h.config.ServerVersion, wssprotocol.Limits{
+		MaximumFrameBytes: h.config.MaxFrameBytes, MaximumStreamFrameBytes: shared.MaximumStreamFrameBytes,
+		MaximumStreamsPerConnection: h.config.MaxStreamsPerSession,
+		MaximumPhysicalConnections:  h.config.MaxSessions, MaximumConnectionsPerUser: h.config.MaxSessionsPerUser,
+		StreamIdleTimeoutMillis: h.config.StreamIdleTimeout.Milliseconds(),
+	})
+	serverHello.ProtocolVersion = selectedVersion
+	if err := wssprotocol.Write(handshakeContext, connection, serverHello); err != nil {
+		cancelHandshake()
+		_ = connection.Close(websocket.StatusInternalError, "HANDSHAKE_FAILED")
+		return
+	}
+	cancelHandshake()
+	connection.SetReadLimit(h.config.MaxFrameBytes)
 	h.log("WebSocket session opened: remote=%s path=%s active_sessions=%d subprotocol=%s", request.RemoteAddr, request.URL.Path, len(h.limit), connection.Subprotocol())
 	streamConn := websocket.NetConn(request.Context(), connection, websocket.MessageBinary)
-	connection.SetReadLimit(1024 * 1024)
+	if err := streamConn.SetDeadline(identity.ExpiresAt); err != nil {
+		h.log("WebSocket session deadline failed: remote=%s error=%v", request.RemoteAddr, err)
+		return
+	}
 	session, err := smux.Server(streamConn, smuxConfig())
 	if err != nil {
 		h.log("WebSocket multiplexer setup failed: remote=%s error=%v", request.RemoteAddr, err)
@@ -94,9 +250,15 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		}
 		select {
 		case streams <- struct{}{}:
+			if !h.generationCurrent(identity) {
+				<-streams
+				h.log("WebSocket stream rejected: remote=%s reason=stale_generation generation=%d", request.RemoteAddr, identity.SessionGeneration)
+				_ = stream.Close()
+				continue
+			}
 			go func() {
 				defer func() { <-streams }()
-				h.config.Handle(stream)
+				h.config.Handle(identity, shared.NewStreamConnWithIdleTimeout(stream, h.config.StreamIdleTimeout))
 			}()
 		default:
 			h.log("WebSocket stream rejected: remote=%s reason=stream_limit max_streams=%d", request.RemoteAddr, h.config.MaxStreamsPerSession)
@@ -105,15 +267,78 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	}
 }
 
-func (h *Handler) authorized(request *http.Request) bool {
-	value := strings.TrimSpace(request.Header.Get("Authorization"))
-	const prefix = "Bearer "
-	if !strings.HasPrefix(value, prefix) {
+func (h *Handler) acquireGeneration(identity Identity) bool {
+	h.generationMu.Lock()
+	defer h.generationMu.Unlock()
+	current := h.generations[identity.SessionID]
+	if identity.SessionGeneration < current.latest {
 		return false
 	}
-	provided := sha256.Sum256([]byte(strings.TrimSpace(strings.TrimPrefix(value, prefix))))
-	expected := sha256.Sum256([]byte(h.config.Token))
-	return subtle.ConstantTimeCompare(provided[:], expected[:]) == 1
+	if identity.SessionGeneration > current.latest {
+		current.latest = identity.SessionGeneration
+	}
+	current.sessions++
+	h.generations[identity.SessionID] = current
+	return true
+}
+
+func (h *Handler) reject(connection *websocket.Conn, rejection wssprotocol.Reject) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	_ = wssprotocol.Write(ctx, connection, rejection)
+	cancel()
+	_ = connection.Close(websocket.StatusPolicyViolation, rejection.Code)
+}
+
+func (h *Handler) acquireUser(identity Identity) bool {
+	key := identity.PrincipalID
+	h.userMu.Lock()
+	defer h.userMu.Unlock()
+	if h.userSessions[key] >= h.config.MaxSessionsPerUser {
+		return false
+	}
+	h.userSessions[key]++
+	return true
+}
+
+func (h *Handler) releaseUser(identity Identity) {
+	key := identity.PrincipalID
+	h.userMu.Lock()
+	defer h.userMu.Unlock()
+	if h.userSessions[key] <= 1 {
+		delete(h.userSessions, key)
+		return
+	}
+	h.userSessions[key]--
+}
+
+func (h *Handler) releaseGeneration(identity Identity) {
+	h.generationMu.Lock()
+	defer h.generationMu.Unlock()
+	current := h.generations[identity.SessionID]
+	current.sessions--
+	if current.sessions <= 0 {
+		delete(h.generations, identity.SessionID)
+		return
+	}
+	h.generations[identity.SessionID] = current
+}
+
+func (h *Handler) generationCurrent(identity Identity) bool {
+	h.generationMu.Lock()
+	defer h.generationMu.Unlock()
+	return identity.SessionGeneration >= h.generations[identity.SessionID].latest
+}
+
+func (h *Handler) BeginDrain() {
+	h.draining.Store(true)
+}
+
+func (h *Handler) Draining() bool {
+	return h.draining.Load()
+}
+
+func (h *Handler) ActiveSessions() int {
+	return len(h.limit)
 }
 
 func (h *Handler) log(format string, values ...any) {

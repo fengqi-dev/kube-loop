@@ -139,7 +139,7 @@ func (f *fakeProvider) CreatePreviewService(
 	return &corev1.Service{Spec: corev1.ServiceSpec{ClusterIP: "10.96.9.9"}}, nil
 }
 func (f *fakeProvider) DeletePreviewService(
-	context.Context, string, cluster.PreviewServiceSnapshot,
+	context.Context, string, cluster.PreviewServiceSnapshot, string,
 ) error {
 	return f.err
 }

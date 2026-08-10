@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/fengqi-dev/kube-loop/internal/helper"
+	helperprotocol "github.com/fengqi-dev/kube-loop/internal/protocol/helper"
 )
 
 const (
@@ -66,7 +67,7 @@ func EnsureInstall(ctx context.Context) error {
 		}
 	}
 	if status.Running && status.Version == helper.Version &&
-		status.Protocol == helper.ProtocolVersion && status.CoreReady && !needsBinaryUpdate {
+		status.Protocol == helperprotocol.Version && status.CoreReady && !needsBinaryUpdate {
 		return nil
 	}
 	if locateErr != nil {
@@ -92,7 +93,7 @@ func EnsureInstall(ctx context.Context) error {
 		return err
 	}
 	client := &helper.Client{Token: token}
-	return waitForHelperReady(ctx, 20*time.Second, 100*time.Millisecond, func(pingCtx context.Context) (helper.Response, error) {
+	return waitForHelperReady(ctx, 20*time.Second, 100*time.Millisecond, func(pingCtx context.Context) (helperprotocol.Response, error) {
 		requestCtx, cancel := context.WithTimeout(pingCtx, 2*time.Second)
 		defer cancel()
 		response, pingErr := client.Ping(requestCtx)
@@ -111,7 +112,7 @@ func waitForHelperReady(
 	ctx context.Context,
 	timeout time.Duration,
 	interval time.Duration,
-	ping func(context.Context) (helper.Response, error),
+	ping func(context.Context) (helperprotocol.Response, error),
 ) error {
 	waitCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -121,17 +122,17 @@ func waitForHelperReady(
 			return err
 		}
 		response, err := ping(waitCtx)
-		if err == nil && response.Protocol == helper.ProtocolVersion && response.CoreReady {
+		if err == nil && response.Protocol == helperprotocol.Version && response.CoreReady {
 			return nil
 		}
 		switch {
 		case err != nil:
 			lastErr = err
-		case response.Protocol != helper.ProtocolVersion:
+		case response.Protocol != helperprotocol.Version:
 			lastErr = fmt.Errorf(
 				"helper protocol %d does not match expected protocol %d",
 				response.Protocol,
-				helper.ProtocolVersion,
+				helperprotocol.Version,
 			)
 		default:
 			lastErr = fmt.Errorf("helper is running but bundled sing-box is not configured")

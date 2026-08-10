@@ -1,0 +1,74 @@
+package previewapi
+
+import (
+	"context"
+	"errors"
+	"fmt"
+
+	"github.com/fengqi-dev/kube-loop/internal/controller"
+	controllerstorage "github.com/fengqi-dev/kube-loop/internal/controller/storage"
+	"github.com/fengqi-dev/kube-loop/internal/controller/trafficbindingclient"
+	"github.com/fengqi-dev/kube-loop/internal/servicebinding"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+)
+
+type ResourceManager interface {
+	Create(context.Context, controller.Principal, servicebinding.PreviewServiceSnapshot, string) (*corev1.Service, error)
+	Delete(context.Context, servicebinding.PreviewServiceSnapshot, string) error
+}
+
+type TrafficBindingResourceManager struct {
+	repositories controllerstorage.Repositories
+	bindings     trafficbindingclient.Lifecycle
+}
+
+func NewTrafficBindingResourceManager(
+	repositories controllerstorage.Repositories,
+	bindings trafficbindingclient.Lifecycle,
+) (*TrafficBindingResourceManager, error) {
+	if repositories == nil || bindings == nil {
+		return nil, errors.New("Preview storage and TrafficBinding lifecycle are required")
+	}
+	return &TrafficBindingResourceManager{repositories: repositories, bindings: bindings}, nil
+}
+
+func (manager *TrafficBindingResourceManager) Create(
+	ctx context.Context,
+	_ controller.Principal,
+	snapshot servicebinding.PreviewServiceSnapshot,
+	previewID string,
+) (*corev1.Service, error) {
+	owner, err := trafficbindingclient.OwnerForTask(ctx, manager.repositories, previewID, TaskType, snapshot.Namespace)
+	if err != nil {
+		return nil, err
+	}
+	binding := trafficbindingclient.NewPreviewBinding(owner, snapshot)
+	active, managed, err := manager.bindings.Activate(ctx, binding)
+	if err != nil {
+		if managed {
+			return nil, errors.Join(servicebinding.ErrPreviewCleanupPending, err)
+		}
+		return nil, err
+	}
+	if active.Status.ServiceName != snapshot.Service || active.Status.ServiceClusterIP == "" {
+		return nil, errors.Join(
+			servicebinding.ErrPreviewCleanupPending,
+			fmt.Errorf("ready TrafficBinding returned invalid Preview Service status"),
+		)
+	}
+	return &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: active.Status.ServiceName, Namespace: snapshot.Namespace},
+		Spec:       corev1.ServiceSpec{ClusterIP: active.Status.ServiceClusterIP},
+	}, nil
+}
+
+func (manager *TrafficBindingResourceManager) Delete(
+	ctx context.Context,
+	snapshot servicebinding.PreviewServiceSnapshot,
+	previewID string,
+) error {
+	return manager.bindings.Delete(ctx, snapshot.Namespace, previewID)
+}
+
+var _ ResourceManager = (*TrafficBindingResourceManager)(nil)

@@ -41,7 +41,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useI18n, type TranslationKey } from "@/i18n";
-import type { AppView } from "@/hooks/use-session";
+import type { AppView } from "@/components/layout/navigation";
 import { cn } from "@/lib/utils";
 import type {
   ConnectionMode,

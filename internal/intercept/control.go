@@ -5,13 +5,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/fengqi-dev/kube-loop/internal/tunnel"
+	"github.com/fengqi-dev/kube-loop/internal/streamcopy"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
 )
 
 // errControlClosed is returned when the Gateway control channel has dropped
@@ -160,17 +160,7 @@ func acceptStream(
 }
 
 func relayTCP(left, right net.Conn) {
-	done := make(chan struct{}, 2)
-	copyStream := func(dst, src net.Conn) {
-		_, _ = io.Copy(dst, src)
-		if value, ok := dst.(interface{ CloseWrite() error }); ok {
-			_ = value.CloseWrite()
-		}
-		done <- struct{}{}
-	}
-	go copyStream(left, right)
-	go copyStream(right, left)
-	<-done
+	streamcopy.Bidirectional(left, right)
 }
 
 func relayUDPConn(tunnelConn, local net.Conn) {

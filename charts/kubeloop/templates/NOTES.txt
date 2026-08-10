@@ -1,0 +1,27 @@
+KubeLoop has been installed as three independent workloads:
+
+  Controller: {{ include "kubeloop.controllerName" . }}
+  Data Plane: {{ include "kubeloop.dataPlaneName" . }}
+  Operator: {{ include "kubeloop.operatorName" . }}
+
+Service discovery:
+  {{ required "publicURL is required" .Values.publicURL }}/.well-known/kubeloop
+
+{{- if and (not .Values.ingress.enabled) (not .Values.gatewayAPI.enabled) }}
+Chart-managed external routing is disabled. Route the same public HTTPS origin as follows:
+  /.well-known, /auth and /api -> {{ include "kubeloop.controllerName" . }}
+  {{ .Values.dataPlane.tunnelPath }} -> {{ include "kubeloop.dataPlaneName" . }}
+{{- end }}
+{{- if .Values.ingress.enabled }}
+External access uses networking.k8s.io/v1 Ingress for {{ .Values.ingress.host }}.
+{{- end }}
+{{- if .Values.gatewayAPI.enabled }}
+External access uses gateway.networking.k8s.io/v1 HTTPRoute for {{ .Values.gatewayAPI.host }}.
+Confirm the Route Accepted/ResolvedRefs conditions and HTTPS listener certificate before login.
+{{- end }}
+
+Storage mode: {{ .Values.controller.storage.type }}
+{{- if eq .Values.controller.storage.type "sqlite" }}
+SQLite mode intentionally runs one Controller replica with Recreate updates.
+Use controller.storage.type=postgresql for future Controller HA.
+{{- end }}

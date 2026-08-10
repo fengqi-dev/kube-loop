@@ -1,0 +1,7 @@
+## Append samples of your project ##
+resources:
+- traffic_v1alpha1_portforward.yaml
+- traffic_v1alpha1_preview.yaml
+- traffic_v1alpha1_exchange.yaml
+- traffic_v1alpha1_mirror.yaml
+# +kubebuilder:scaffold:manifestskustomizesamples

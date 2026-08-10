@@ -65,7 +65,7 @@ func (f *fakeProvider) CreatePreviewService(
 }
 
 func (f *fakeProvider) DeletePreviewService(
-	context.Context, string, cluster.PreviewServiceSnapshot,
+	context.Context, string, cluster.PreviewServiceSnapshot, string,
 ) error {
 	return nil
 }

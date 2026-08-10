@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/fengqi-dev/kube-loop/internal/helper"
+	helperprotocol "github.com/fengqi-dev/kube-loop/internal/protocol/helper"
 )
 
 func TestMaterializeBundledHelper(t *testing.T) {
@@ -164,10 +165,10 @@ func TestWaitForHelperReadyRetriesAtInterval(t *testing.T) {
 		context.Background(),
 		time.Second,
 		40*time.Millisecond,
-		func(context.Context) (helper.Response, error) {
+		func(context.Context) (helperprotocol.Response, error) {
 			calls++
-			return helper.Response{
-				Protocol:  helper.ProtocolVersion,
+			return helperprotocol.Response{
+				Protocol:  helperprotocol.Version,
 				CoreReady: calls >= 3,
 			}, nil
 		},
@@ -189,9 +190,9 @@ func TestWaitForHelperReadyCoreNotReadyTimesOut(t *testing.T) {
 		context.Background(),
 		180*time.Millisecond,
 		50*time.Millisecond,
-		func(context.Context) (helper.Response, error) {
+		func(context.Context) (helperprotocol.Response, error) {
 			calls++
-			return helper.Response{Protocol: helper.ProtocolVersion, CoreReady: false}, nil
+			return helperprotocol.Response{Protocol: helperprotocol.Version, CoreReady: false}, nil
 		},
 	)
 	if err == nil || !strings.Contains(err.Error(), "bundled sing-box is not configured") {
@@ -209,8 +210,8 @@ func TestWaitForHelperReadyReturnsParentCancellation(t *testing.T) {
 		ctx,
 		time.Second,
 		50*time.Millisecond,
-		func(context.Context) (helper.Response, error) {
-			return helper.Response{}, errors.New("not ready")
+		func(context.Context) (helperprotocol.Response, error) {
+			return helperprotocol.Response{}, errors.New("not ready")
 		},
 	)
 	if !errors.Is(err, context.Canceled) {

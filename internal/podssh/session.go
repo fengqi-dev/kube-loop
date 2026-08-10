@@ -10,7 +10,6 @@ import (
 
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
-	"k8s.io/client-go/tools/remotecommand"
 )
 
 type sessionState struct {
@@ -171,20 +170,20 @@ type exitStatus struct {
 }
 
 type terminalSizeQueue struct {
-	sizes chan remotecommand.TerminalSize
+	sizes chan TerminalSize
 	done  chan struct{}
 	once  sync.Once
 }
 
 func newTerminalSizeQueue() *terminalSizeQueue {
 	return &terminalSizeQueue{
-		sizes: make(chan remotecommand.TerminalSize, 1),
+		sizes: make(chan TerminalSize, 1),
 		done:  make(chan struct{}),
 	}
 }
 
 func (q *terminalSizeQueue) Push(width, height uint32) {
-	size := remotecommand.TerminalSize{Width: uint16(width), Height: uint16(height)}
+	size := TerminalSize{Width: uint16(width), Height: uint16(height)}
 	select {
 	case <-q.done:
 		return
@@ -204,7 +203,7 @@ func (q *terminalSizeQueue) Push(width, height uint32) {
 	}
 }
 
-func (q *terminalSizeQueue) Next() *remotecommand.TerminalSize {
+func (q *terminalSizeQueue) Next() *TerminalSize {
 	select {
 	case size := <-q.sizes:
 		return &size

@@ -8,6 +8,7 @@ import (
 	"net"
 	"time"
 
+	helperprotocol "github.com/fengqi-dev/kube-loop/internal/protocol/helper"
 	"github.com/fengqi-dev/kube-loop/internal/singbox"
 )
 
@@ -25,37 +26,37 @@ func NewClient() (*Client, error) {
 	return &Client{Token: token, Dial: dialHelper}, nil
 }
 
-func (c *Client) Ping(ctx context.Context) (Response, error) {
-	return c.roundTrip(ctx, Request{Op: OpPing})
+func (c *Client) Ping(ctx context.Context) (helperprotocol.Response, error) {
+	return c.roundTrip(ctx, helperprotocol.Request{Op: helperprotocol.OpPing})
 }
 
-func (c *Client) Status(ctx context.Context) (Response, error) {
-	return c.roundTrip(ctx, Request{Op: OpStatus})
+func (c *Client) Status(ctx context.Context) (helperprotocol.Response, error) {
+	return c.roundTrip(ctx, helperprotocol.Request{Op: helperprotocol.OpStatus})
 }
 
-func (c *Client) Start(ctx context.Context, session singbox.SessionSpec) (Response, error) {
-	return c.roundTrip(ctx, Request{Op: OpStart, Session: &session})
+func (c *Client) Start(ctx context.Context, session singbox.SessionSpec) (helperprotocol.Response, error) {
+	return c.roundTrip(ctx, helperprotocol.Request{Op: helperprotocol.OpStart, Session: &session})
 }
 
-func (c *Client) Stop(ctx context.Context, sessionID string) (Response, error) {
-	return c.roundTrip(ctx, Request{Op: OpStop, SessionID: sessionID})
+func (c *Client) Stop(ctx context.Context, sessionID string) (helperprotocol.Response, error) {
+	return c.roundTrip(ctx, helperprotocol.Request{Op: helperprotocol.OpStop, SessionID: sessionID})
 }
 
-func (c *Client) StopAll(ctx context.Context) (Response, error) {
-	return c.roundTrip(ctx, Request{Op: OpStopAll})
+func (c *Client) StopAll(ctx context.Context) (helperprotocol.Response, error) {
+	return c.roundTrip(ctx, helperprotocol.Request{Op: helperprotocol.OpStopAll})
 }
 
-func (c *Client) UpdateDNS(ctx context.Context, sessionID string, dns singbox.DNSMeta) (Response, error) {
-	return c.roundTrip(ctx, Request{Op: OpUpdateDNS, SessionID: sessionID, DNS: &dns})
+func (c *Client) UpdateDNS(ctx context.Context, sessionID string, dns singbox.DNSMeta) (helperprotocol.Response, error) {
+	return c.roundTrip(ctx, helperprotocol.Request{Op: helperprotocol.OpUpdateDNS, SessionID: sessionID, DNS: &dns})
 }
 
-func (c *Client) ReadLogs(ctx context.Context, sessionID string, offset int64) (Response, error) {
-	return c.roundTrip(ctx, Request{Op: OpReadLogs, SessionID: sessionID, LogOffset: offset})
+func (c *Client) ReadLogs(ctx context.Context, sessionID string, offset int64) (helperprotocol.Response, error) {
+	return c.roundTrip(ctx, helperprotocol.Request{Op: helperprotocol.OpReadLogs, SessionID: sessionID, LogOffset: offset})
 }
 
-func (c *Client) roundTrip(ctx context.Context, request Request) (Response, error) {
+func (c *Client) roundTrip(ctx context.Context, request helperprotocol.Request) (helperprotocol.Response, error) {
 	if c.Token == "" {
-		return Response{}, fmt.Errorf("helper token is required")
+		return helperprotocol.Response{}, fmt.Errorf("helper token is required")
 	}
 	request.Token = c.Token
 	dial := c.Dial
@@ -64,11 +65,11 @@ func (c *Client) roundTrip(ctx context.Context, request Request) (Response, erro
 	}
 	conn, err := dial(ctx)
 	if err != nil {
-		return Response{}, err
+		return helperprotocol.Response{}, err
 	}
 	defer conn.Close()
 	timeout := 30 * time.Second
-	if request.Op == OpStart {
+	if request.Op == helperprotocol.OpStart {
 		timeout = 3 * time.Minute
 	}
 	_ = conn.SetDeadline(time.Now().Add(timeout))
@@ -77,13 +78,13 @@ func (c *Client) roundTrip(ctx context.Context, request Request) (Response, erro
 	}
 	encoder := json.NewEncoder(conn)
 	if err := encoder.Encode(request); err != nil {
-		return Response{}, fmt.Errorf("write helper request: %w", err)
+		return helperprotocol.Response{}, fmt.Errorf("write helper request: %w", err)
 	}
 	reader := bufio.NewReader(conn)
 	decoder := json.NewDecoder(reader)
-	var response Response
+	var response helperprotocol.Response
 	if err := decoder.Decode(&response); err != nil {
-		return Response{}, fmt.Errorf("read helper response: %w", err)
+		return helperprotocol.Response{}, fmt.Errorf("read helper response: %w", err)
 	}
 	if !response.OK {
 		if response.Error == "" {
@@ -95,10 +96,10 @@ func (c *Client) roundTrip(ctx context.Context, request Request) (Response, erro
 }
 
 // Probe returns whether the helper service answers ping.
-func Probe(ctx context.Context) (Response, error) {
+func Probe(ctx context.Context) (helperprotocol.Response, error) {
 	client, err := NewClient()
 	if err != nil {
-		return Response{}, err
+		return helperprotocol.Response{}, err
 	}
 	return client.Ping(ctx)
 }

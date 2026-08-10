@@ -1,0 +1,90 @@
+{{- if .Values.gatewayAPI.enabled }}
+{{- $host := required "gatewayAPI.host is required when gatewayAPI.enabled=true" .Values.gatewayAPI.host -}}
+{{- $gatewayName := .Values.gatewayAPI.parentRef.name -}}
+{{- $sectionName := .Values.gatewayAPI.parentRef.sectionName -}}
+{{- if .Values.gatewayAPI.gateway.create -}}
+{{- $gatewayName = default (include "kubeloop.fullname" .) $gatewayName -}}
+{{- $sectionName = default "https" $sectionName -}}
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: {{ $gatewayName }}
+  labels:
+    {{- include "kubeloop.labels" . | nindent 4 }}
+  {{- with .Values.gatewayAPI.gateway.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  gatewayClassName: {{ required "gatewayAPI.gateway.className is required when gatewayAPI.gateway.create=true" .Values.gatewayAPI.gateway.className }}
+  listeners:
+    - name: {{ $sectionName }}
+      hostname: {{ $host | quote }}
+      port: 443
+      protocol: HTTPS
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - group: ""
+            kind: Secret
+            name: {{ required "gatewayAPI.gateway.tls.secretName is required when gatewayAPI.gateway.create=true" .Values.gatewayAPI.gateway.tls.secretName }}
+      allowedRoutes:
+        namespaces:
+          from: Same
+---
+{{- end }}
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ include "kubeloop.fullname" . }}
+  labels:
+    {{- include "kubeloop.labels" . | nindent 4 }}
+  {{- with .Values.gatewayAPI.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: {{ $gatewayName }}
+      {{- with .Values.gatewayAPI.parentRef.namespace }}
+      namespace: {{ . }}
+      {{- end }}
+      sectionName: {{ $sectionName }}
+  hostnames:
+    - {{ $host | quote }}
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /.well-known
+        - path:
+            type: PathPrefix
+            value: /auth
+        - path:
+            type: PathPrefix
+            value: /api
+      timeouts:
+        request: {{ .Values.gatewayAPI.timeouts.controller | quote }}
+        backendRequest: {{ .Values.gatewayAPI.timeouts.controller | quote }}
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: {{ include "kubeloop.controllerName" . }}
+          port: {{ .Values.controller.service.port }}
+          weight: 1
+    - matches:
+        - path:
+            type: Exact
+            value: {{ .Values.dataPlane.tunnelPath }}
+      timeouts:
+        request: {{ .Values.gatewayAPI.timeouts.tunnel | quote }}
+        backendRequest: {{ .Values.gatewayAPI.timeouts.tunnel | quote }}
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: {{ include "kubeloop.dataPlaneName" . }}
+          port: {{ .Values.dataPlane.service.port }}
+          weight: 1
+{{- end }}

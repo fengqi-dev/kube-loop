@@ -7,7 +7,7 @@ import (
 	"net"
 	"strconv"
 
-	"github.com/fengqi-dev/kube-loop/internal/tunnel"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
 )
 
 // HostTCP returns a serve callback when host:port is an active intercept /

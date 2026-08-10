@@ -3,7 +3,7 @@ package cluster
 import (
 	"context"
 
-	"github.com/fengqi-dev/kube-loop/internal/cluster/servicebinding"
+	"github.com/fengqi-dev/kube-loop/internal/servicebinding"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -68,12 +68,13 @@ func (p *Provider) DeletePreviewService(
 	ctx context.Context,
 	contextName string,
 	snapshot PreviewServiceSnapshot,
+	previewID string,
 ) error {
 	client, err := p.client(contextName)
 	if err != nil {
 		return err
 	}
-	return servicebinding.DeletePreviewService(ctx, client, snapshot)
+	return servicebinding.DeletePreviewService(ctx, client, snapshot, previewID)
 }
 
 // BuildInterceptPorts derives Service port mappings and allocates Gateway listen ports.

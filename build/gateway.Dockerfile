@@ -4,8 +4,7 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY cmd/kubeloop-gateway ./cmd/kubeloop-gateway
-COPY internal/gateway ./internal/gateway
-COPY internal/tunnel ./internal/tunnel
+COPY internal ./internal
 RUN CGO_ENABLED=0 go build -trimpath \
   -ldflags="-s -w -X main.version=${VERSION}" \
   -o /out/kube-loop-gateway ./cmd/kubeloop-gateway

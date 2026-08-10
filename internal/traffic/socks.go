@@ -325,6 +325,13 @@ type bufferedConn struct {
 
 func (c *bufferedConn) Read(value []byte) (int, error) { return c.reader.Read(value) }
 
+func (c *bufferedConn) CloseWrite() error {
+	if writer, ok := c.Conn.(interface{ CloseWrite() error }); ok {
+		return writer.CloseWrite()
+	}
+	return c.Conn.Close()
+}
+
 func (c *udpConn) Read(buffer []byte) (int, error) {
 	packet := make([]byte, 65535+512)
 	n, err := c.socket.Read(packet)

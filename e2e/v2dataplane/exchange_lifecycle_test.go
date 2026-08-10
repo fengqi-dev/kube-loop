@@ -1,0 +1,641 @@
+//go:build e2e
+
+package v2dataplane
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"io"
+	"log/slog"
+	"maps"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/fengqi-dev/kube-loop/e2e/harness"
+	"github.com/fengqi-dev/kube-loop/internal/clientv2/credentials"
+	clientexchange "github.com/fengqi-dev/kube-loop/internal/clientv2/exchange"
+	"github.com/fengqi-dev/kube-loop/internal/clientv2/profile"
+	"github.com/fengqi-dev/kube-loop/internal/clientv2/remote"
+	"github.com/fengqi-dev/kube-loop/internal/controller"
+	"github.com/fengqi-dev/kube-loop/internal/controller/authorization"
+	"github.com/fengqi-dev/kube-loop/internal/controller/exchangeapi"
+	controllerkubernetes "github.com/fengqi-dev/kube-loop/internal/controller/kubernetes"
+	"github.com/fengqi-dev/kube-loop/internal/controller/sessionapi"
+	"github.com/fengqi-dev/kube-loop/internal/controller/storage"
+	"github.com/fengqi-dev/kube-loop/internal/controller/trafficbindingclient"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
+	"github.com/fengqi-dev/kube-loop/internal/servicebinding"
+	"github.com/google/uuid"
+	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/kubernetes"
+)
+
+const exchangeLifecycleAccessToken = "v2-e2e-exchange-lifecycle"
+
+type failNextRestoreMutator struct {
+	delegate exchangeapi.ResourceMutator
+
+	mu       sync.Mutex
+	failNext bool
+}
+
+func (mutator *failNextRestoreMutator) Capture(
+	ctx context.Context,
+	principal controller.Principal,
+	snapshot *servicebinding.ServiceInterceptSnapshot,
+) error {
+	return mutator.delegate.Capture(ctx, principal, snapshot)
+}
+
+func (mutator *failNextRestoreMutator) Apply(
+	ctx context.Context,
+	principal controller.Principal,
+	snapshot servicebinding.ServiceInterceptSnapshot,
+	taskID string,
+) error {
+	return mutator.delegate.Apply(ctx, principal, snapshot, taskID)
+}
+
+func (mutator *failNextRestoreMutator) Restore(
+	ctx context.Context,
+	snapshot servicebinding.ServiceInterceptSnapshot,
+	taskID string,
+) error {
+	mutator.mu.Lock()
+	if mutator.failNext {
+		mutator.failNext = false
+		mutator.mu.Unlock()
+		return errors.New("simulated Controller loss before resource restoration")
+	}
+	mutator.mu.Unlock()
+	return mutator.delegate.Restore(ctx, snapshot, taskID)
+}
+
+func (mutator *failNextRestoreMutator) failOneRestore() {
+	mutator.mu.Lock()
+	defer mutator.mu.Unlock()
+	mutator.failNext = true
+}
+
+func TestRealExchangeLifecycleAndStaleOwnerRecovery(t *testing.T) {
+	harness.RequireE2E(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
+	defer cancel()
+	kubeClient := kubeClient(t)
+	if err := harness.EnsureEchoWorkload(ctx, kubeClient); err != nil {
+		t.Fatalf("ensure real Exchange fixture: %v", err)
+	}
+
+	serviceName := "exchange-" + strings.ToLower(uuid.NewString()[:8])
+	service, err := kubeClient.CoreV1().Services(harness.EchoNamespace).Create(ctx, &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: serviceName, Namespace: harness.EchoNamespace},
+		Spec: corev1.ServiceSpec{
+			Selector: map[string]string{"app": "kubeloop-e2e-echo"},
+			Ports: []corev1.ServicePort{
+				{Name: "tcp", Port: 8080, Protocol: corev1.ProtocolTCP},
+				{Name: "udp", Port: 9090, Protocol: corev1.ProtocolUDP},
+			},
+		},
+	}, metav1.CreateOptions{})
+	if err != nil {
+		t.Fatalf("create real Exchange Service: %v", err)
+	}
+	t.Cleanup(func() {
+		cleanupContext, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cleanupCancel()
+		_ = kubeClient.CoreV1().Services(harness.EchoNamespace).Delete(
+			cleanupContext, serviceName, metav1.DeleteOptions{},
+		)
+		_ = kubeClient.DiscoveryV1().EndpointSlices(harness.EchoNamespace).Delete(
+			cleanupContext, serviceName+"-kubeloop", metav1.DeleteOptions{},
+		)
+	})
+	originalSelector := maps.Clone(service.Spec.Selector)
+	harness.WaitClusterProbe(t, ctx, kubeClient, service.Spec.ClusterIP, 8080, "tcp", "baseline", "cluster-tcp:")
+	harness.WaitClusterProbe(t, ctx, kubeClient, service.Spec.ClusterIP, 9090, "udp", "baseline", "cluster-udp:")
+
+	gatewayIP := reachableHostIP(t, ctx, kubeClient)
+	stateStore, principal, activeSession, remoteSession := exchangeLifecycleState(
+		t, ctx, service.Spec.ClusterIP,
+	)
+	provider, err := controllerkubernetes.NewForRESTConfig(kubeRESTConfig(t), controllerkubernetes.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolver, err := exchangeapi.NewKubernetesServiceResolver(provider)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bindingConfig, err := provider.SystemRESTConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	bindings, err := trafficbindingclient.NewForRESTConfig(bindingConfig, trafficbindingclient.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	realMutator, err := exchangeapi.NewTrafficBindingResourceMutator(provider, stateStore, bindings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mutator := &failNextRestoreMutator{delegate: realMutator}
+	handler, err := exchangeapi.New(
+		stateStore,
+		e2eExecSessionValidator{principalID: principal.Subject, session: activeSession},
+		resolver,
+		mutator,
+		exchangeapi.Config{
+			GatewayIP: gatewayIP, OwnerID: "exchange-e2e-owner",
+			CredentialCheckInterval: 25 * time.Millisecond,
+			TaskCheckInterval:       25 * time.Millisecond,
+			UDPIdleTimeout:          time.Second,
+			RestoreTimeout:          5 * time.Second,
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := startExchangeLifecycleController(t, handler, principal)
+	defer server.Close()
+
+	serverProfile := profile.Profile{ID: "exchange-e2e", BaseURL: server.URL}
+	credentialStore := &e2eCredentialStore{
+		profileID: serverProfile.ID,
+		credential: credentials.Credential{
+			TokenType: "Bearer", AccessToken: exchangeLifecycleAccessToken,
+			AccessExpiresAt: principal.AccessExpiresAt, RefreshToken: "unused",
+			RefreshExpiresAt: principal.AccessExpiresAt, DeviceID: principal.DeviceID,
+		},
+	}
+	remoteClient, err := remote.New(credentialStore, e2eTokenRefresher{}, remote.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager, err := clientexchange.NewManager(remoteClient, clientexchange.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		shutdownContext, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer shutdownCancel()
+		_ = manager.Shutdown(shutdownContext)
+	})
+
+	tcpTarget, tcpAddress := harness.StartLocalTCPEcho(t, "desktop-tcp")
+	defer tcpTarget.Close()
+	udpTarget, udpAddress := harness.StartLocalUDPEcho(t, "desktop-udp")
+	defer udpTarget.Close()
+	targets := []clientexchange.LocalTarget{
+		{ServicePort: 8080, Protocol: "tcp", LocalHost: "127.0.0.1", LocalPort: uint16(tcpAddress.Port)},
+		{ServicePort: 9090, Protocol: "udp", LocalHost: "127.0.0.1", LocalPort: uint16(udpAddress.Port)},
+	}
+
+	// Explicit stop must close listeners, restore Kubernetes resources, and
+	// delete the durable rollback snapshot.
+	first := startRealExchange(t, ctx, manager, serverProfile, remoteSession, serviceName, targets)
+	assertServiceIntercepted(t, ctx, kubeClient, stateStore, serviceName, gatewayIP, first.ID)
+	harness.WaitClusterProbe(t, ctx, kubeClient, service.Spec.ClusterIP, 8080, "tcp", "normal", "desktop-tcp:")
+	harness.WaitClusterProbe(t, ctx, kubeClient, service.Spec.ClusterIP, 9090, "udp", "normal", "desktop-udp:")
+	stopContext, stopCancel := context.WithTimeout(ctx, 20*time.Second)
+	if err := manager.Stop(stopContext, serverProfile.ID, first.ID); err != nil {
+		stopCancel()
+		t.Fatalf("stop real Exchange: %v", err)
+	}
+	stopCancel()
+	waitForRealExchangeState(t, ctx, stateStore, first.ID, "stopped")
+	assertServiceRestored(t, ctx, kubeClient, stateStore, serviceName, first.ID, originalSelector)
+	harness.WaitClusterProbe(t, ctx, kubeClient, service.Spec.ClusterIP, 8080, "tcp", "restored", "cluster-tcp:")
+
+	// A desktop process can disappear without sending either the relay Stop
+	// frame or the DELETE request. Closing the underlying WebSocket abruptly
+	// must still release the owner lease and restore the real Service.
+	crashed, err := remoteClient.CreateExchange(ctx, serverProfile, remoteSession, remote.ExchangeSpec{
+		Service: serviceName,
+		Ports: []remote.ExchangePort{
+			{ServicePort: 8080, Protocol: "tcp"},
+			{ServicePort: 9090, Protocol: "udp"},
+		},
+	}, "exchange-client-crash:"+uuid.NewString())
+	if err != nil {
+		t.Fatalf("create Exchange for client crash: %v", err)
+	}
+	crashedConnection, err := remoteClient.OpenExchangeStream(ctx, serverProfile, remoteSession, crashed)
+	if err != nil {
+		t.Fatalf("open Exchange stream for client crash: %v", err)
+	}
+	waitForRealExchangeState(t, ctx, stateStore, crashed.ID, "running")
+	assertServiceIntercepted(t, ctx, kubeClient, stateStore, serviceName, gatewayIP, crashed.ID)
+	crashedConnection.CloseNow()
+	waitForRealExchangeState(t, ctx, stateStore, crashed.ID, "failed")
+	assertServiceRestored(t, ctx, kubeClient, stateStore, serviceName, crashed.ID, originalSelector)
+	harness.WaitClusterProbe(t, ctx, kubeClient, service.Spec.ClusterIP, 8080, "tcp", "after-client-crash", "cluster-tcp:")
+
+	// Simulate the old Controller dying after listeners are gone but before it
+	// can restore the Service. The replacement worker must claim the durable
+	// recovering Task and compensate using its system Kubernetes identity.
+	second := startRealExchange(t, ctx, manager, serverProfile, remoteSession, serviceName, targets)
+	assertServiceIntercepted(t, ctx, kubeClient, stateStore, serviceName, gatewayIP, second.ID)
+	harness.WaitClusterProbe(t, ctx, kubeClient, service.Spec.ClusterIP, 8080, "tcp", "before-crash", "desktop-tcp:")
+	mutator.failOneRestore()
+	stopContext, stopCancel = context.WithTimeout(ctx, 20*time.Second)
+	if err := manager.Stop(stopContext, serverProfile.ID, second.ID); err != nil {
+		stopCancel()
+		t.Fatalf("stop Exchange during simulated Controller loss: %v", err)
+	}
+	stopCancel()
+	waitForRealExchangeState(t, ctx, stateStore, second.ID, "recovering")
+	assertSnapshotCount(t, stateStore, second.ID, 1)
+	time.Sleep(150 * time.Millisecond)
+	reconciler, err := exchangeapi.NewReconciler(
+		stateStore, realMutator, slog.New(slog.NewTextHandler(io.Discard, nil)),
+		exchangeapi.RecoveryConfig{
+			OwnerID: "exchange-e2e-replacement", GatewayIP: gatewayIP,
+			Interval: 100 * time.Millisecond, StaleAfter: 100 * time.Millisecond,
+			RestoreTimeout: 5 * time.Second,
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recovered, recoverErr := reconciler.RunOnce(ctx); recoverErr != nil || recovered != 1 {
+		t.Fatalf("recover stale real Exchange: recovered=%d err=%v", recovered, recoverErr)
+	}
+	waitForRealExchangeState(t, ctx, stateStore, second.ID, "failed")
+	assertServiceRestored(t, ctx, kubeClient, stateStore, serviceName, second.ID, originalSelector)
+	harness.WaitClusterProbe(t, ctx, kubeClient, service.Spec.ClusterIP, 8080, "tcp", "after-recovery", "cluster-tcp:")
+
+	// Revoking the Token Family must terminate the reverse stream without a
+	// client cleanup request and still restore the original Service resources.
+	third := startRealExchange(t, ctx, manager, serverProfile, remoteSession, serviceName, targets)
+	assertServiceIntercepted(t, ctx, kubeClient, stateStore, serviceName, gatewayIP, third.ID)
+	harness.WaitClusterProbe(t, ctx, kubeClient, service.Spec.ClusterIP, 9090, "udp", "before-revoke", "desktop-udp:")
+	if err := stateStore.TokenFamilies().Revoke(ctx, principal.FamilyID, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	waitForRealExchangeState(t, ctx, stateStore, third.ID, "stopped")
+	waitForNoLocalExchange(t, ctx, manager, serverProfile.ID)
+	assertServiceRestored(t, ctx, kubeClient, stateStore, serviceName, third.ID, originalSelector)
+	harness.WaitClusterProbe(t, ctx, kubeClient, service.Spec.ClusterIP, 9090, "udp", "after-revoke", "cluster-udp:")
+}
+
+func exchangeLifecycleState(
+	t *testing.T,
+	ctx context.Context,
+	serviceIP string,
+) (*storage.Store, controller.Principal, sessionapi.ActiveSession, remote.Session) {
+	t.Helper()
+	stateStore, err := storage.Open(ctx, storage.Config{
+		Backend: storage.BackendSQLite, SQLitePath: filepath.Join(t.TempDir(), "exchange-lifecycle.db"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = stateStore.Close() })
+	now := time.Now().UTC()
+	principalID, familyID, sessionID := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	deviceID := "exchange-e2e-device"
+	if _, err := stateStore.Principals().Upsert(ctx, storage.Principal{
+		ID: principalID, Provider: "v2-e2e", ExternalID: "exchange-lifecycle",
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	expiresAt := now.Add(10 * time.Minute)
+	if err := stateStore.TokenFamilies().Create(ctx, storage.TokenFamily{
+		ID: familyID, PrincipalID: principalID, DeviceID: deviceID,
+		RefreshTokenHash: bytes.Repeat([]byte{8}, 32), CreatedAt: now, ExpiresAt: expiresAt,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	network, err := networkspec.Normalize(networkspec.Spec{ServiceIPs: []string{serviceIP}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	networkJSON, _ := networkspec.CanonicalJSON(network)
+	networkHash, _ := networkspec.Hash(network)
+	if err := stateStore.Sessions().Create(ctx, storage.Session{
+		ID: sessionID, PrincipalID: principalID, DeviceID: deviceID, ClusterID: "minikube",
+		Namespace: harness.EchoNamespace, State: "active", Generation: 1,
+		NetworkSpec: networkJSON, NetworkSpecHash: networkHash,
+		CreatedAt: now, UpdatedAt: now, LastHeartbeatAt: now, ExpiresAt: expiresAt,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	principal := controller.Principal{
+		Subject: principalID, DeviceID: deviceID, FamilyID: familyID, AccessExpiresAt: expiresAt,
+	}
+	active := sessionapi.ActiveSession{
+		ID: sessionID, Namespace: harness.EchoNamespace, Generation: 1,
+		ExpiresAt: expiresAt, NetworkSpecHash: networkHash,
+	}
+	clientSession := remote.Session{
+		ID: sessionID, Namespace: harness.EchoNamespace, State: "active", Generation: 1,
+		CreatedAt: now, UpdatedAt: now, LastHeartbeatAt: now, ExpiresAt: expiresAt,
+		NetworkSpec: network, NetworkSpecHash: networkHash,
+	}
+	return stateStore, principal, active, clientSession
+}
+
+func startExchangeLifecycleController(
+	t *testing.T,
+	handler *exchangeapi.Handler,
+	principal controller.Principal,
+) *httptest.Server {
+	t.Helper()
+	router := controller.NewAPIRouter()
+	for _, route := range []struct{ method, pattern string }{
+		{http.MethodPost, "/api/v2/sessions/{sessionID}/exchanges"},
+		{http.MethodGet, "/api/v2/sessions/{sessionID}/exchanges/{taskID}"},
+		{http.MethodDelete, "/api/v2/sessions/{sessionID}/exchanges/{taskID}"},
+		{http.MethodGet, "/api/v2/sessions/{sessionID}/exchanges/{taskID}/stream"},
+	} {
+		if err := router.Handle(route.method, route.pattern, handler); err != nil {
+			t.Fatal(err)
+		}
+	}
+	policy, err := authorization.New(authorization.Policy{Rules: []authorization.Rule{{
+		ID: "v2-e2e-exchange", Subjects: []string{principal.Subject},
+		Namespaces: []string{harness.EchoNamespace},
+		Operations: []string{"create", "get", "delete", "stream"}, ResourceKinds: []string{"exchanges"},
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server, err := controller.NewServer(
+		controller.Config{PublicURL: "http://127.0.0.1"}, controller.BuildInfo{},
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		controller.WithAuthenticator(controller.AuthenticatorFunc(func(request *http.Request) (controller.Principal, *controller.APIError) {
+			if request.Header.Get("Authorization") != "Bearer "+exchangeLifecycleAccessToken {
+				return controller.Principal{}, &controller.APIError{Code: controller.CodeUnauthenticated, Message: "invalid e2e access token"}
+			}
+			return principal, nil
+		})),
+		controller.WithAuthorizer(policy), controller.WithAPIHandler(router),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return httptest.NewServer(server.Handler())
+}
+
+func startRealExchange(
+	t *testing.T,
+	ctx context.Context,
+	manager *clientexchange.Manager,
+	serverProfile profile.Profile,
+	session remote.Session,
+	service string,
+	targets []clientexchange.LocalTarget,
+) clientexchange.Info {
+	t.Helper()
+	startContext, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	info, err := manager.Start(startContext, serverProfile, session, clientexchange.Request{
+		ProfileID: serverProfile.ID, Service: service, Targets: targets,
+	})
+	if err != nil {
+		t.Fatalf("start real Exchange: %v", err)
+	}
+	return info
+}
+
+func assertServiceIntercepted(
+	t *testing.T,
+	ctx context.Context,
+	client kubernetes.Interface,
+	stateStore *storage.Store,
+	serviceName, gatewayIP, taskID string,
+) {
+	t.Helper()
+	var lastService *corev1.Service
+	var lastSlices []discoveryv1.EndpointSlice
+	err := wait.PollUntilContextTimeout(ctx, 100*time.Millisecond, 20*time.Second, true, func(pollCtx context.Context) (bool, error) {
+		service, err := client.CoreV1().Services(harness.EchoNamespace).Get(pollCtx, serviceName, metav1.GetOptions{})
+		if err != nil {
+			return false, nil
+		}
+		lastService = service
+		if len(service.Spec.Selector) != 0 {
+			return false, nil
+		}
+		slices, err := client.DiscoveryV1().EndpointSlices(harness.EchoNamespace).List(pollCtx, metav1.ListOptions{
+			LabelSelector: servicebinding.ServiceNameLabel + "=" + serviceName,
+		})
+		if err != nil {
+			return false, nil
+		}
+		lastSlices = slices.Items
+		foundGateway := false
+		for _, slice := range slices.Items {
+			for _, endpoint := range slice.Endpoints {
+				if len(endpoint.Addresses) != 1 || endpoint.Addresses[0] != gatewayIP {
+					return false, nil
+				}
+				foundGateway = true
+			}
+		}
+		return foundGateway, nil
+	})
+	if err != nil {
+		t.Fatalf(
+			"Service intercept did not converge exclusively to Gateway %s: service=%#v slices=%#v err=%v",
+			gatewayIP, lastService, lastSlices, err,
+		)
+	}
+	assertSnapshotCount(t, stateStore, taskID, 1)
+}
+
+func assertServiceRestored(
+	t *testing.T,
+	ctx context.Context,
+	client kubernetes.Interface,
+	stateStore *storage.Store,
+	serviceName, taskID string,
+	wantSelector map[string]string,
+) {
+	t.Helper()
+	deadline := time.NewTimer(20 * time.Second)
+	defer deadline.Stop()
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		service, err := client.CoreV1().Services(harness.EchoNamespace).Get(ctx, serviceName, metav1.GetOptions{})
+		if err == nil && maps.Equal(service.Spec.Selector, wantSelector) {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		case <-deadline.C:
+			t.Fatalf("Service %s selector was not restored", serviceName)
+		case <-ticker.C:
+		}
+	}
+	assertSnapshotCount(t, stateStore, taskID, 0)
+}
+
+func assertSnapshotCount(t *testing.T, stateStore *storage.Store, taskID string, want int) {
+	t.Helper()
+	snapshots, err := stateStore.ResourceSnapshots().ListByTask(context.Background(), taskID)
+	if err != nil || len(snapshots) != want {
+		t.Fatalf("Task rollback snapshots for %s=%d want=%d err=%v", taskID, len(snapshots), want, err)
+	}
+}
+
+func waitForRealExchangeState(
+	t *testing.T,
+	ctx context.Context,
+	stateStore *storage.Store,
+	taskID, want string,
+) storage.Task {
+	t.Helper()
+	deadline := time.NewTimer(20 * time.Second)
+	defer deadline.Stop()
+	ticker := time.NewTicker(25 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		task, err := stateStore.Tasks().GetByID(ctx, taskID)
+		if err == nil && string(task.State) == want {
+			return task
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		case <-deadline.C:
+			t.Fatalf("Exchange Task %s did not reach %s: task=%#v err=%v", taskID, want, task, err)
+		case <-ticker.C:
+		}
+	}
+}
+
+func waitForNoLocalExchange(
+	t *testing.T,
+	ctx context.Context,
+	manager *clientexchange.Manager,
+	profileID string,
+) {
+	t.Helper()
+	deadline := time.NewTimer(20 * time.Second)
+	defer deadline.Stop()
+	ticker := time.NewTicker(25 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if len(manager.List(profileID)) == 0 {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		case <-deadline.C:
+			t.Fatal("local Exchange relay did not stop after Token Family revocation")
+		case <-ticker.C:
+		}
+	}
+}
+
+func reachableHostIP(t *testing.T, ctx context.Context, client kubernetes.Interface) string {
+	t.Helper()
+	if configured := strings.TrimSpace(os.Getenv("KUBELOOP_E2E_HOST_IP")); configured != "" {
+		if address := net.ParseIP(configured); address == nil || address.IsUnspecified() {
+			t.Fatalf("KUBELOOP_E2E_HOST_IP %q is not a concrete IP", configured)
+		}
+		if err := probeHostIP(ctx, client, configured); err != nil {
+			t.Fatalf("KUBELOOP_E2E_HOST_IP %s is not reachable from Minikube: %v", configured, err)
+		}
+		return configured
+	}
+	nodes, err := client.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var nodeIPs []net.IP
+	for _, node := range nodes.Items {
+		for _, address := range node.Status.Addresses {
+			if address.Type == corev1.NodeInternalIP {
+				if parsed := net.ParseIP(address.Address).To4(); parsed != nil {
+					nodeIPs = append(nodeIPs, parsed)
+				}
+			}
+		}
+	}
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var attempted []string
+	for _, networkInterface := range interfaces {
+		addresses, addressErr := networkInterface.Addrs()
+		if addressErr != nil {
+			continue
+		}
+		for _, raw := range addresses {
+			ip, _, parseErr := net.ParseCIDR(raw.String())
+			if parseErr != nil || ip.IsLoopback() || ip.To4() == nil {
+				continue
+			}
+			candidate := ip.To4()
+			if !sharesIPv4Prefix(candidate, nodeIPs) {
+				continue
+			}
+			attempted = append(attempted, candidate.String())
+			if probeErr := probeHostIP(ctx, client, candidate.String()); probeErr == nil {
+				return candidate.String()
+			}
+		}
+	}
+	t.Fatalf("no host IP reachable from Minikube; tried %v (set KUBELOOP_E2E_HOST_IP to override)", attempted)
+	return ""
+}
+
+func sharesIPv4Prefix(candidate net.IP, nodes []net.IP) bool {
+	for _, node := range nodes {
+		if len(node) == net.IPv4len && candidate[0] == node[0] && candidate[1] == node[1] && candidate[2] == node[2] {
+			return true
+		}
+	}
+	return false
+}
+
+func probeHostIP(ctx context.Context, client kubernetes.Interface, host string) error {
+	listener, err := net.Listen("tcp", net.JoinHostPort(host, "0"))
+	if err != nil {
+		return err
+	}
+	defer listener.Close()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		connection, acceptErr := listener.Accept()
+		if acceptErr != nil {
+			return
+		}
+		defer connection.Close()
+		_ = connection.SetDeadline(time.Now().Add(10 * time.Second))
+		buffer := make([]byte, 64)
+		count, readErr := connection.Read(buffer)
+		if readErr == nil {
+			_, _ = connection.Write([]byte("host-probe:" + string(buffer[:count])))
+		}
+	}()
+	port := listener.Addr().(*net.TCPAddr).Port
+	_, probeErr := harness.WaitClusterProbeOptional(
+		ctx, client, host, port, "tcp", "hello", "host-probe:", 30*time.Second,
+	)
+	_ = listener.Close()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+	}
+	return probeErr
+}

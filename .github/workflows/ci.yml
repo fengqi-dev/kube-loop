@@ -55,6 +55,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
+        with:
+          submodules: recursive
 
       - name: Download frontend dist
         uses: actions/download-artifact@v7
@@ -67,6 +69,9 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+
+      - name: Verify sing-box patch
+        run: make singbox-patch-check
 
       - name: Install Linux desktop dependencies
         run: |
@@ -92,7 +97,7 @@ jobs:
         run: go test -tags webkit2_41 ./...
 
       - name: Run race detector
-        run: go test -race ./internal/gateway ./internal/helper ./internal/singbox ./internal/session ./internal/socksbridge ./internal/tunnel
+        run: go test -race ./internal/gateway/... ./internal/helper ./internal/singbox ./internal/session ./internal/socksbridge ./internal/protocol/...
 
       - name: Build Gateway binaries
         shell: bash
@@ -123,6 +128,51 @@ jobs:
             fi
             GOOS=${pair%/*} GOARCH=${pair#*/} CGO_ENABLED=0 go build -trimpath \
               -o "${out}" ./cmd/kubeloop-helper
+          done
+
+  helm-e2e:
+    name: Helm Lifecycle E2E (Minikube)
+    needs: go
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+
+      - name: Set up Minikube
+        uses: medyagh/setup-minikube@v0.0.21
+        with:
+          start: false
+
+      - name: Start Minikube and build Helm E2E images
+        run: make helm-load-test-e2e-images MINIKUBE_DRIVER=docker
+
+      - name: Run Helm lifecycle E2E
+        id: helm-lifecycle
+        shell: bash
+        env:
+          KUBELOOP_HELM_E2E: "1"
+          KUBELOOP_HELM_E2E_CONTEXT: kubeloop-helm-e2e
+          KUBELOOP_HELM_E2E_KEEP_ON_FAILURE: "1"
+          KUBELOOP_HELM_E2E_AUDIT_SOURCE: kube-apiserver
+        run: ./e2e/helm/run.sh
+
+      - name: Collect Helm E2E diagnostics
+        if: failure() && steps.helm-lifecycle.outcome == 'failure'
+        shell: bash
+        run: |
+          kubectl get nodes,pods,deployments,replicasets,statefulsets,services,pvc --all-namespaces -o wide || true
+          kubectl get events --all-namespaces --sort-by=.lastTimestamp || true
+          kubectl logs --namespace kube-system --selector component=kube-apiserver --tail=200 || true
+          minikube logs --profile kubeloop-helm-e2e --file=/tmp/kubeloop-minikube.log || true
+          for namespace in kubeloop-helm-sqlite kubeloop-helm-postgresql; do
+            kubectl describe pods --namespace "${namespace}" || true
+            for pod in $(kubectl get pods --namespace "${namespace}" -o name 2>/dev/null); do
+              kubectl logs --namespace "${namespace}" "${pod}" --all-containers --tail=200 || true
+            done
           done
 
   e2e:

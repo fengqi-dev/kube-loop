@@ -1,216 +1,43 @@
-import { AppHeader } from "@/components/layout/app-header";
-import { AppSidebar } from "@/components/layout/app-sidebar";
-import { StatusBar } from "@/components/layout/status-bar";
-import { ClustersView } from "@/components/clusters/clusters-view";
-import { ConnectionsView } from "@/components/connections/connections-view";
-import { HostAliasesView } from "@/components/host-aliases/host-aliases-view";
-import { LogsView } from "@/components/logs/logs-view";
-import { MCPView } from "@/components/mcp/mcp-view";
-import { NetworkView } from "@/components/network/network-view";
-import { WorkloadView } from "@/components/network/workload-view";
-import { OverviewView } from "@/components/overview/overview-view";
-import { SettingsView } from "@/components/settings/settings-view";
-import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
-import { useSession } from "@/hooks/use-session";
-import { cn } from "@/lib/utils";
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { backend } from "@/backend";
+import { ServerAccessView } from "@/components/server/server-access-view";
+import { Spinner } from "@/components/ui/spinner";
+import type { BootstrapData } from "@/types";
+import { useEffect, useState } from "react";
 
 function App() {
-  const {
-    data,
-    contextName,
-    connectionMode,
-    activeContextName,
-    activeNamespaces,
-    view,
-    setView,
-    loading,
-    uiError,
-    updateBusy,
-    session,
-    busy,
-    disconnecting,
-    ready,
-    currentContext,
-    kubeconfigFiles,
-    changeContext,
-    setConnectionMode,
-    toggleConnection,
-    connectContext,
-    reloadContexts,
-    addKubeconfig,
-    addKubeconfigContent,
-    removeKubeconfig,
-    probeContext,
-    changeShareGateway,
-    changeGatewayNamespace,
-    checkForUpdates,
-    openUpdatePage,
-  } = useSession();
-
-  const scopedNamespaces = session.scopeNamespaces ?? [];
-  const inventoryNamespaces = useMemo(
-    () => (scopedNamespaces.length > 0 ? scopedNamespaces : activeNamespaces),
-    [activeNamespaces, scopedNamespaces],
-  );
-  const namespaceScoped = scopedNamespaces.length > 0;
-
-  const [connectionsAlert, setConnectionsAlert] = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(() => {
-    try {
-      return localStorage.getItem("kubeloop.sidebar.collapsed") !== "1";
-    } catch {
-      return true;
-    }
-  });
-  const seenConnectionIds = useRef(new Set<string>());
+  const [data, setData] = useState<BootstrapData>();
+  const [error, setError] = useState("");
 
   useEffect(() => {
-    try {
-      localStorage.setItem("kubeloop.sidebar.collapsed", sidebarOpen ? "0" : "1");
-    } catch {
-      // Ignore unavailable storage.
-    }
-  }, [sidebarOpen]);
+    let active = true;
+    backend
+      .bootstrap()
+      .then((result) => {
+        if (active) setData(result);
+      })
+      .catch((reason: unknown) => {
+        if (active) setError(reason instanceof Error ? reason.message : String(reason));
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
-  useEffect(() => {
-    if (!ready) {
-      seenConnectionIds.current.clear();
-      setConnectionsAlert(false);
-      return;
-    }
-    const ids = (session.metrics?.connections ?? [])
-      .map((item) => item.id)
-      .filter((id): id is string => Boolean(id));
-    if (view === "connections") {
-      for (const id of ids) seenConnectionIds.current.add(id);
-      setConnectionsAlert(false);
-      return;
-    }
-    if (ids.some((id) => !seenConnectionIds.current.has(id))) {
-      setConnectionsAlert(true);
-    }
-  }, [ready, session.metrics?.connections, view]);
-
-  return (
-    <SidebarProvider
-      open={sidebarOpen}
-      onOpenChange={setSidebarOpen}
-      className="h-screen min-h-[580px] overflow-hidden bg-background text-foreground"
-      style={{
-        "--sidebar-width": "176px",
-        "--sidebar-width-icon": "60px",
-      } as CSSProperties}
-    >
-      <AppSidebar
-        view={view}
-        connectionsAlert={connectionsAlert}
-        updateAvailable={data.update.available}
-        onNavigate={setView}
-      />
-
-      <SidebarInset className="min-w-0 overflow-hidden">
-        <AppHeader
-          view={view}
-          onOpenSettings={() => setView("settings")}
-        />
-
-        <div
-          className={cn(
-            "min-h-0 flex-1 overflow-y-auto px-6 py-5",
-            view === "overview" && "scrollbar-none !pb-1",
-          )}
-        >
-          {view === "overview" && (
-            <OverviewView
-              contextName={activeContextName}
-              clusterName={currentContext?.cluster ?? ""}
-              session={session}
-              connectionMode={connectionMode}
-              platform={data.platform}
-              loading={loading}
-              error={uiError || session.error || ""}
-              busy={busy}
-              disconnecting={disconnecting}
-              ready={ready}
-              shareGateway={data.shareGateway}
-              gatewayNamespace={data.gatewayNamespace}
-              gatewayNamespaces={activeNamespaces}
-              onToggle={() => void toggleConnection()}
-              onConnectionModeChange={setConnectionMode}
-              onShareGatewayChange={changeShareGateway}
-              onGatewayNamespaceChange={changeGatewayNamespace}
-              onManageClusters={() => setView("clusters")}
-              onNavigate={setView}
-            />
-          )}
-          {view === "clusters" && (
-            <ClustersView
-              contexts={data.contexts}
-              files={kubeconfigFiles}
-              contextName={contextName}
-              session={session}
-              busy={busy}
-              ready={ready}
-              loading={loading}
-              onSelect={(value) => void changeContext(value)}
-              onConnect={(value) => void connectContext(value)}
-              onReload={reloadContexts}
-              onAddFile={addKubeconfig}
-              onAddClipboard={addKubeconfigContent}
-              onRemoveFile={removeKubeconfig}
-              onProbe={probeContext}
-            />
-          )}
-          {view === "connections" && (
-            <ConnectionsView ready={ready} metrics={session.metrics} />
-          )}
-          {view === "workload" && (
-            <WorkloadView
-              contextName={activeContextName}
-              namespaces={inventoryNamespaces}
-              namespaceScoped={namespaceScoped}
-              ready={ready}
-              session={session}
-            />
-          )}
-          {view === "network" && (
-            <NetworkView
-              contextName={activeContextName}
-              namespaces={inventoryNamespaces}
-              namespaceScoped={namespaceScoped}
-              ready={ready}
-              session={session}
-            />
-          )}
-          {view === "host-aliases" && (
-            <HostAliasesView contextName={contextName} ready={ready} />
-          )}
-          {view === "logs" && (
-            <LogsView session={session} error={uiError || session.error || ""} />
-          )}
-          {view === "mcp" && <MCPView />}
-          {view === "settings" && (
-            <SettingsView
-              ready={ready}
-              coreVersion={session.coreVersion}
-              update={data.update}
-              checking={updateBusy}
-              onCheck={() => void checkForUpdates()}
-              onOpen={() => void openUpdatePage()}
-            />
-          )}
-        </div>
-
-        <StatusBar
-          phase={session.phase}
-          clusterName={currentContext?.cluster || session.context}
-          contextName={session.context || contextName}
-          message={uiError || session.error || session.message}
-        />
-      </SidebarInset>
-    </SidebarProvider>
-  );
+  if (error) {
+    return (
+      <div className="grid min-h-screen place-items-center bg-background px-8 text-center text-sm text-destructive">
+        {error}
+      </div>
+    );
+  }
+  if (!data) {
+    return (
+      <div className="grid min-h-screen place-items-center bg-background text-foreground">
+        <Spinner />
+      </div>
+    );
+  }
+  return <ServerAccessView profiles={data.serverProfiles} migration={data.migration} />;
 }
 
 export default App;

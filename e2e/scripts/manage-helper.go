@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/fengqi-dev/kube-loop/internal/helper"
+	helperprotocol "github.com/fengqi-dev/kube-loop/internal/protocol/helper"
 )
 
 func main() {
@@ -105,7 +106,7 @@ func install(source, installTool, singBox string, elevate bool) error {
 	for {
 		status := helper.GetStatus(ctx)
 		if status.Installed && status.Running && status.CoreReady &&
-			status.Protocol == helper.ProtocolVersion {
+			status.Protocol == helperprotocol.Version {
 			if err := verifyInstalledBinary(source, installedPath); err != nil {
 				return err
 			}

@@ -4,284 +4,212 @@ import (
 	"errors"
 	"fmt"
 	"log"
-
-	"github.com/fengqi-dev/kube-loop/internal/cluster"
-	"github.com/fengqi-dev/kube-loop/internal/filemanager"
-	"github.com/fengqi-dev/kube-loop/internal/session"
-	"github.com/fengqi-dev/kube-loop/internal/store"
 )
 
-// Controller owns the embedded MCP server and persists settings via store.
+type LogFunc func(level, message string)
+
+// Controller owns the embedded MCP listener and its V2 settings store.
 type Controller struct {
 	server *Server
-	store  *store.Store
-	logs   *session.Manager
+	store  ConfigStore
+	log    LogFunc
 }
 
-// NewController wires a Backend over provider/manager/file transfers and loads store config.
-func NewController(
-	provider *cluster.Provider,
-	manager *session.Manager,
-	files *filemanager.Manager,
-	stateStore *store.Store,
-	version string,
-) *Controller {
-	c := &Controller{
-		server: NewServer(managerBackend{
-			provider: provider,
-			manager:  manager,
-			executor: provider,
-			files:    files,
-		}, version),
-		store: stateStore,
-		logs:  manager,
+func NewController(backend Backend, configStore ConfigStore, version string, logger LogFunc) (*Controller, error) {
+	if backend == nil {
+		return nil, errors.New("MCP Gateway backend is required")
 	}
-	c.server.SetErrorHandler(func(err error) {
-		c.appendLog("ERROR", fmt.Sprintf("MCP server stopped unexpectedly: %v", err))
+	if configStore == nil {
+		return nil, errors.New("MCP settings store is required")
+	}
+	if logger == nil {
+		logger = func(level, message string) { log.Printf("[%s] %s", level, message) }
+	}
+	config, err := configStore.Load()
+	if err != nil {
+		return nil, err
+	}
+	controller := &Controller{
+		server: NewServer(backend, version), store: configStore, log: logger,
+	}
+	controller.server.Configure(config)
+	controller.server.SetErrorHandler(func(err error) {
+		controller.appendLog("ERROR", fmt.Sprintf("MCP server stopped unexpectedly: %v", err))
 	})
-	if stateStore != nil {
-		c.server.Configure(stateStore.MCP())
-	}
-	return c
+	return controller, nil
 }
 
-// StartFromStore enables the listener when persisted config says Enabled.
-func (c *Controller) StartFromStore() {
-	if c == nil || c.server == nil || c.store == nil {
+func (controller *Controller) StartFromStore() {
+	if controller == nil || controller.server == nil {
 		return
 	}
-	cfg := c.store.MCP()
-	if !cfg.Enabled {
-		c.server.Configure(cfg)
-		c.appendLog("INFO", "MCP server disabled by saved configuration")
+	config := controller.server.Config()
+	if !config.Enabled {
+		controller.appendLog("INFO", "MCP server disabled by saved configuration")
 		return
 	}
-	c.appendLog("INFO", fmt.Sprintf("starting MCP server on port %d", cfg.Port))
-	var err error
-	cfg, err = ensureToken(cfg)
+	prepared, err := ensureToken(config)
 	if err != nil {
-		c.appendLog("ERROR", fmt.Sprintf("prepare MCP authentication: %v", err))
+		controller.appendLog("ERROR", "prepare MCP authentication: "+err.Error())
 		return
 	}
-	if err := c.persist(cfg); err != nil {
-		c.appendLog("ERROR", fmt.Sprintf("persist MCP configuration: %v", err))
+	if err := controller.persist(prepared); err != nil {
+		controller.appendLog("ERROR", "persist MCP configuration: "+err.Error())
 		return
 	}
-	if err := c.server.Apply(); err != nil {
-		c.appendLog("ERROR", fmt.Sprintf("start MCP server: %v", err))
+	if err := controller.server.Apply(); err != nil {
+		controller.appendLog("ERROR", "start MCP server: "+err.Error())
 		return
 	}
-	c.appendLog("INFO", "MCP server listening at "+c.server.Status().URL)
+	controller.appendLog("INFO", "MCP server listening at "+controller.server.Status().URL)
 }
 
-// Stop shuts down the HTTP listener.
-func (c *Controller) Stop() error {
-	if c == nil || c.server == nil {
+func (controller *Controller) Stop() error {
+	if controller == nil || controller.server == nil || !controller.server.Status().Listening {
 		return nil
 	}
-	if !c.server.Status().Listening {
-		return nil
-	}
-	c.appendLog("INFO", "stopping MCP server")
-	if err := c.server.Stop(); err != nil {
-		c.appendLog("ERROR", fmt.Sprintf("stop MCP server: %v", err))
+	if err := controller.server.Stop(); err != nil {
+		controller.appendLog("ERROR", "stop MCP server: "+err.Error())
 		return err
 	}
-	c.appendLog("INFO", "MCP server stopped")
+	controller.appendLog("INFO", "MCP server stopped")
 	return nil
 }
 
-// Status returns runtime + config for the UI.
-func (c *Controller) Status() Status {
-	if c == nil || c.server == nil {
-		return Status{Port: store.DefaultMCPPort}
+func (controller *Controller) Status() Status {
+	if controller == nil || controller.server == nil {
+		return Status{Port: DefaultPort}
 	}
-	return c.server.Status()
+	return controller.server.Status()
 }
 
-// SetEnabled turns the MCP server on or off and persists the choice.
-func (c *Controller) SetEnabled(enabled bool) error {
-	if c == nil || c.server == nil {
-		return errors.New("mcp server unavailable")
+func (controller *Controller) SetEnabled(enabled bool) error {
+	if controller == nil || controller.server == nil {
+		return errors.New("MCP server unavailable")
 	}
-	cfg := c.server.Config()
-	cfg.Enabled = enabled
-	var err error
-	cfg, err = ensureToken(cfg)
+	config := controller.server.Config()
+	config.Enabled = enabled
+	prepared, err := ensureToken(config)
 	if err != nil {
-		c.appendLog("ERROR", fmt.Sprintf("prepare MCP authentication: %v", err))
 		return err
 	}
-	if err := c.persist(cfg); err != nil {
-		c.appendLog("ERROR", fmt.Sprintf("persist MCP enabled=%t: %v", enabled, err))
+	if err := controller.persist(prepared); err != nil {
 		return err
 	}
-	if err := c.server.SetEnabled(enabled); err != nil {
-		c.appendLog("ERROR", fmt.Sprintf("set MCP enabled=%t: %v", enabled, err))
+	if err := controller.server.SetEnabled(enabled); err != nil {
 		return err
 	}
-	if enabled {
-		c.appendLog("INFO", "MCP server enabled at "+c.server.Status().URL)
-	} else {
-		c.appendLog("INFO", "MCP server disabled")
-	}
+	controller.appendLog("INFO", fmt.Sprintf("MCP server enabled=%t", enabled))
 	return nil
 }
 
-// SetPort updates the listen port and persists it.
-func (c *Controller) SetPort(port int) error {
-	if c == nil || c.server == nil {
-		return errors.New("mcp server unavailable")
+func (controller *Controller) SetPort(port int) error {
+	if controller == nil || controller.server == nil {
+		return errors.New("MCP server unavailable")
 	}
-	if port <= 0 || port > 65535 {
-		err := fmt.Errorf("invalid mcp port %d", port)
-		c.appendLog("ERROR", err.Error())
-		return err
-	}
-	cfg := c.server.Config()
-	cfg.Port = port
-	if err := c.persist(cfg); err != nil {
-		c.appendLog("ERROR", fmt.Sprintf("persist MCP port %d: %v", port, err))
-		return err
-	}
-	if err := c.server.SetPort(port); err != nil {
-		c.appendLog("ERROR", fmt.Sprintf("set MCP port %d: %v", port, err))
-		return err
-	}
-	c.appendLog("INFO", fmt.Sprintf("MCP server port set to %d", port))
-	return nil
-}
-
-// SetTokenEnabled turns Bearer token auth on or off and persists the choice.
-func (c *Controller) SetTokenEnabled(enabled bool) error {
-	if c == nil || c.server == nil {
-		return errors.New("mcp server unavailable")
-	}
-	cfg := c.server.Config()
-	cfg.TokenEnabled = enabled
-	var err error
-	cfg, err = ensureToken(cfg)
+	config := controller.server.Config()
+	config.Port = port
+	normalized, err := normalizeConfig(config)
 	if err != nil {
-		c.appendLog("ERROR", fmt.Sprintf("prepare MCP authentication: %v", err))
 		return err
 	}
-	if err := c.persist(cfg); err != nil {
-		c.appendLog("ERROR", fmt.Sprintf("persist MCP token authentication: %v", err))
+	// Save before mutating the listener, but do not Configure here: Configure
+	// would make Server.SetPort believe the new port was already active.
+	if err := controller.store.Save(normalized); err != nil {
 		return err
 	}
-	if err := c.server.SetTokenEnabled(enabled); err != nil {
-		c.appendLog("ERROR", fmt.Sprintf("set MCP token authentication enabled=%t: %v", enabled, err))
-		return err
-	}
-	c.appendLog("INFO", fmt.Sprintf("MCP token authentication enabled=%t", enabled))
-	return nil
+	return controller.server.SetPort(port)
 }
 
-// RegenerateToken replaces the bearer token when token auth is enabled.
-func (c *Controller) RegenerateToken() (string, error) {
-	if c == nil || c.server == nil {
-		return "", errors.New("mcp server unavailable")
+func (controller *Controller) SetTokenEnabled(enabled bool) error {
+	if controller == nil || controller.server == nil {
+		return errors.New("MCP server unavailable")
 	}
-	cfg := c.server.Config()
-	if !cfg.TokenEnabled {
-		err := errors.New("enable MCP token auth first")
-		c.appendLog("WARN", "regenerate MCP token: "+err.Error())
-		return "", err
+	config := controller.server.Config()
+	config.TokenEnabled = enabled
+	prepared, err := ensureToken(config)
+	if err != nil {
+		return err
+	}
+	if err := controller.persist(prepared); err != nil {
+		return err
+	}
+	return controller.server.SetTokenEnabled(enabled)
+}
+
+func (controller *Controller) RegenerateToken() (string, error) {
+	if controller == nil || controller.server == nil {
+		return "", errors.New("MCP server unavailable")
+	}
+	config := controller.server.Config()
+	if !config.TokenEnabled {
+		return "", errors.New("enable MCP token authentication first")
 	}
 	token, err := GenerateToken()
 	if err != nil {
-		c.appendLog("ERROR", fmt.Sprintf("generate MCP authentication token: %v", err))
 		return "", err
 	}
-	cfg.Token = token
-	if err := c.persist(cfg); err != nil {
-		c.appendLog("ERROR", fmt.Sprintf("persist regenerated MCP token: %v", err))
+	config.Token = token
+	if err := controller.persist(config); err != nil {
 		return "", err
 	}
-	if err := c.server.SetToken(token); err != nil {
-		c.appendLog("ERROR", fmt.Sprintf("apply regenerated MCP token: %v", err))
+	if err := controller.server.SetToken(token); err != nil {
 		return "", err
 	}
-	c.appendLog("INFO", "MCP authentication token regenerated")
+	controller.appendLog("INFO", "MCP authentication token regenerated")
 	return token, nil
 }
 
-// InstallClient writes the KubeLoop MCP endpoint into a client user config
-// (claude, codex, cursor, or vscode). Enables the local MCP server if needed.
-func (c *Controller) InstallClient(client string) (InstallResult, error) {
-	if c == nil || c.server == nil {
-		return InstallResult{}, errors.New("mcp server unavailable")
+func (controller *Controller) InstallClient(client string) (InstallResult, error) {
+	if controller == nil || controller.server == nil {
+		return InstallResult{}, errors.New("MCP server unavailable")
 	}
-	status := c.server.Status()
+	status := controller.server.Status()
 	if !status.Enabled || !status.Listening {
-		if err := c.SetEnabled(true); err != nil {
+		if err := controller.SetEnabled(true); err != nil {
 			return InstallResult{}, err
 		}
-		status = c.server.Status()
+		status = controller.server.Status()
 	}
-	if status.URL == "" {
-		err := errors.New("mcp server is not ready")
-		c.appendLog("ERROR", "install MCP client configuration: "+err.Error())
-		return InstallResult{}, err
-	}
-	if status.TokenEnabled && status.Token == "" {
-		err := errors.New("mcp token is not ready")
-		c.appendLog("ERROR", "install MCP client configuration: "+err.Error())
-		return InstallResult{}, err
+	if status.URL == "" || (status.TokenEnabled && status.Token == "") {
+		return InstallResult{}, errors.New("MCP server authentication is not ready")
 	}
 	token := ""
 	if status.TokenEnabled {
 		token = status.Token
 	}
-	c.appendLog("INFO", "installing MCP client configuration for "+client)
-	result, err := InstallClientConfig(client, status.URL, token)
-	if err != nil {
-		c.appendLog("ERROR", fmt.Sprintf("install MCP client configuration for %s: %v", client, err))
-		return InstallResult{}, err
-	}
-	c.appendLog("INFO", "MCP client configuration installed for "+client)
-	return result, nil
+	return InstallClientConfig(client, status.URL, token)
 }
 
-func (c *Controller) persist(cfg store.MCPConfig) error {
-	if c.store == nil {
-		return errors.New("state store unavailable")
+func (controller *Controller) persist(config Config) error {
+	if controller.store == nil {
+		return errors.New("MCP settings store unavailable")
 	}
-	cfg = store.MCPConfig{
-		Enabled:      cfg.Enabled,
-		Port:         cfg.Port,
-		TokenEnabled: cfg.TokenEnabled,
-		Token:        cfg.Token,
-	}
-	if cfg.Port <= 0 {
-		cfg.Port = store.DefaultMCPPort
-	}
-	if err := c.store.SetMCP(cfg); err != nil {
+	normalized, err := normalizeConfig(config)
+	if err != nil {
 		return err
 	}
-	c.server.Configure(cfg)
+	if err := controller.store.Save(normalized); err != nil {
+		return err
+	}
+	controller.server.Configure(normalized)
 	return nil
 }
 
-func ensureToken(cfg store.MCPConfig) (store.MCPConfig, error) {
-	if !cfg.TokenEnabled || cfg.Token != "" {
-		return cfg, nil
+func ensureToken(config Config) (Config, error) {
+	if !config.TokenEnabled || config.Token != "" {
+		return normalizeConfig(config)
 	}
 	token, err := GenerateToken()
 	if err != nil {
-		return cfg, err
+		return Config{}, err
 	}
-	cfg.Token = token
-	if cfg.Port <= 0 {
-		cfg.Port = store.DefaultMCPPort
-	}
-	return cfg, nil
+	config.Token = token
+	return normalizeConfig(config)
 }
 
-func (c *Controller) appendLog(level, message string) {
-	if c != nil && c.logs != nil {
-		c.logs.AppendLog(level, message)
-		return
+func (controller *Controller) appendLog(level, message string) {
+	if controller != nil && controller.log != nil {
+		controller.log(level, message)
 	}
-	log.Printf("%s: %s", level, message)
 }
