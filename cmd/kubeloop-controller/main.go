@@ -47,6 +47,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/controller/ticketapi"
 	"github.com/fengqi-dev/kube-loop/internal/controller/trafficbindingclient"
 	"github.com/fengqi-dev/kube-loop/internal/logging"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/relaycontrol"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/relayticket"
 )
 
@@ -339,6 +340,21 @@ func main() {
 		_ = stateStore.Close()
 		logger.Error("initialize Relay Registry failed", "error", err)
 		os.Exit(2)
+	}
+	if relayRegistry != nil {
+		desiredStates, loadErr := stateStore.RelayDesiredStates().List(signalContext)
+		if loadErr != nil {
+			_ = stateStore.Close()
+			logger.Error("load durable Relay desired states failed", "error", loadErr)
+			os.Exit(2)
+		}
+		for _, desired := range desiredStates {
+			if restoreErr := relayRegistry.registry.RestoreDesiredState(desired.RelayID, relaycontrol.State(desired.DesiredState)); restoreErr != nil {
+				_ = stateStore.Close()
+				logger.Error("restore durable Relay desired state failed", "relay_id", desired.RelayID, "error", restoreErr)
+				os.Exit(2)
+			}
+		}
 	}
 	var relayAllocator ticketapi.RelayAllocator
 	var relayAllocationTopology map[string]string
@@ -674,7 +690,11 @@ func main() {
 		logger.Error("initialize Management Session service failed", "error", err)
 		os.Exit(2)
 	}
-	managementOperations, err := adminoperations.New(stateStore, sessionRuntime)
+	var managementRelayRuntimes []adminoperations.RelayRuntime
+	if relayRegistry != nil {
+		managementRelayRuntimes = append(managementRelayRuntimes, relayRegistry.registry)
+	}
+	managementOperations, err := adminoperations.New(stateStore, sessionRuntime, managementRelayRuntimes...)
 	if err != nil {
 		_ = stateStore.Close()
 		logger.Error("initialize Management Operations service failed", "error", err)

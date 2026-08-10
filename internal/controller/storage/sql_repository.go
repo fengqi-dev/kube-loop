@@ -112,6 +112,7 @@ type repositorySet struct {
 	resourceSnapshots         *resourceSnapshotRepository
 	idempotency               *idempotencyRepository
 	audit                     *auditRepository
+	relayDesiredStates        *relayDesiredStateRepository
 	authTransactions          *authTransactionRepository
 	managementState           *managementStateRepository
 	adminSessions             *adminSessionRepository
@@ -137,6 +138,7 @@ func newRepositorySet(backend Backend, executor sqlExecutor, orm bun.IDB) *repos
 		resourceSnapshots:         &resourceSnapshotRepository{repositoryBase: base},
 		idempotency:               &idempotencyRepository{repositoryBase: base},
 		audit:                     audit,
+		relayDesiredStates:        &relayDesiredStateRepository{repositoryBase: base},
 		authTransactions:          &authTransactionRepository{repositoryBase: base},
 		managementState:           &managementStateRepository{repositoryBase: base},
 		adminSessions:             &adminSessionRepository{repositoryBase: base},
@@ -184,6 +186,10 @@ func (repositories *repositorySet) Idempotency() IdempotencyRepository {
 
 func (repositories *repositorySet) Audit() AuditRepository {
 	return repositories.audit
+}
+
+func (repositories *repositorySet) RelayDesiredStates() RelayDesiredStateRepository {
+	return repositories.relayDesiredStates
 }
 
 func (repositories *repositorySet) AuthTransactions() AuthTransactionRepository {

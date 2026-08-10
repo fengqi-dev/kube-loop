@@ -168,6 +168,8 @@ var capabilityChecks = []adminauthorization.Request{
 	{Resource: adminauthorization.ResourceTask, Operation: adminauthorization.OperationList},
 	{Resource: adminauthorization.ResourceTask, Operation: adminauthorization.OperationStop},
 	{Resource: adminauthorization.ResourceRelay, Operation: adminauthorization.OperationList},
+	{Resource: adminauthorization.ResourceRelay, Operation: adminauthorization.OperationDrain},
+	{Resource: adminauthorization.ResourceRelay, Operation: adminauthorization.OperationRecover},
 	{Resource: adminauthorization.ResourceAudit, Operation: adminauthorization.OperationList},
 }
 
@@ -240,6 +242,14 @@ func (api *readAPI) routes(router chi.Router) {
 			protected.With(api.require(adminauthorization.Request{
 				Resource: adminauthorization.ResourceTask, Operation: adminauthorization.OperationStop,
 			})).Post("/tasks/{taskID}/stop", api.stopTask)
+			if api.operations.RelayAvailable() {
+				protected.With(api.require(adminauthorization.Request{
+					Resource: adminauthorization.ResourceRelay, Operation: adminauthorization.OperationDrain,
+				})).Post("/relays/{relayID}/drain", api.drainRelay)
+				protected.With(api.require(adminauthorization.Request{
+					Resource: adminauthorization.ResourceRelay, Operation: adminauthorization.OperationRecover,
+				})).Post("/relays/{relayID}/recover", api.recoverRelay)
+			}
 		}
 	})
 }

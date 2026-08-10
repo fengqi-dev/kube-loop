@@ -136,6 +136,60 @@ func (api *readAPI) stopTask(writer http.ResponseWriter, request *http.Request) 
 	writeJSON(writer, map[bool]int{true: http.StatusAccepted, false: http.StatusOK}[result.PendingConvergence], result)
 }
 
+func (api *readAPI) drainRelay(writer http.ResponseWriter, request *http.Request) {
+	api.changeRelayState(writer, request, true)
+}
+
+func (api *readAPI) recoverRelay(writer http.ResponseWriter, request *http.Request) {
+	api.changeRelayState(writer, request, false)
+}
+
+func (api *readAPI) changeRelayState(writer http.ResponseWriter, request *http.Request, drain bool) {
+	expectedVersion, key, ok := policyWriteHeaders(writer, request)
+	action := "admin.relay/recover"
+	if drain {
+		action = "admin.relay/drain"
+	}
+	if !ok {
+		api.audit(request, subjectFromRequest(request), action, "failure")
+		return
+	}
+	var input struct {
+		Reason string `json:"reason"`
+	}
+	if !decodePolicyJSON(writer, request, &input) || !validChangeReason(input.Reason) {
+		api.audit(request, subjectFromRequest(request), action, "failure")
+		return
+	}
+	operationRequest := adminoperations.ChangeRelayStateRequest{
+		Request: adminoperations.Request{
+			Actor: operationActor(subjectFromRequest(request)), IdempotencyKey: key,
+			Reason: input.Reason, RequestID: requestID(request),
+		},
+		RelayID: strings.TrimSpace(chi.URLParam(request, "relayID")), ExpectedVersion: expectedVersion,
+	}
+	var result adminoperations.RelayStateResult
+	var err error
+	if drain {
+		result, err = api.operations.DrainRelay(request.Context(), operationRequest)
+	} else {
+		result, err = api.operations.RecoverRelay(request.Context(), operationRequest)
+	}
+	if err != nil {
+		api.audit(request, subjectFromRequest(request), action, "failure")
+		writeOperationError(writer, request, err)
+		return
+	}
+	writer.Header().Set("ETag", strongETag(result.Version))
+	if result.PendingConvergence {
+		writer.Header().Set("Retry-After", "1")
+	}
+	if result.Replayed {
+		writer.Header().Set("Idempotent-Replayed", "true")
+	}
+	writeJSON(writer, map[bool]int{true: http.StatusAccepted, false: http.StatusOK}[result.PendingConvergence], result)
+}
+
 func operationActor(subject adminauthorization.Subject) adminoperations.Actor {
 	principalID := subject.ID
 	if subject.Authentication == adminauthorization.AuthenticationBreakGlass {
@@ -173,6 +227,8 @@ func writeOperationError(writer http.ResponseWriter, request *http.Request, err 
 		writeError(writer, http.StatusPreconditionFailed, "etag_mismatch", "management resource changed", requestID(request))
 	case errors.Is(err, adminoperations.ErrInvalidRequest):
 		writeError(writer, http.StatusBadRequest, "invalid_request", "management operation request is invalid", requestID(request))
+	case errors.Is(err, adminoperations.ErrUnavailable):
+		writeError(writer, http.StatusServiceUnavailable, "unavailable", "management operation runtime is unavailable", requestID(request))
 	case errors.Is(err, storage.ErrNotFound):
 		writeError(writer, http.StatusNotFound, "not_found", "management resource was not found", requestID(request))
 	default:

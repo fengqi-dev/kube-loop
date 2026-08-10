@@ -4,6 +4,7 @@ import (
 	"errors"
 	"maps"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -31,10 +32,11 @@ type Config struct {
 }
 
 type Registry struct {
-	mu          sync.Mutex
-	config      Config
-	relays      map[string]*relayRecord
-	assignments map[string]assignmentRecord
+	mu              sync.Mutex
+	config          Config
+	relays          map[string]*relayRecord
+	assignments     map[string]assignmentRecord
+	restoredDesired map[string]relaycontrol.State
 }
 
 type relayRecord struct {
@@ -106,7 +108,7 @@ func New(config Config) (*Registry, error) {
 	config.Revocations = cloneRevocations(config.Revocations)
 	return &Registry{
 		config: config, relays: make(map[string]*relayRecord),
-		assignments: make(map[string]assignmentRecord),
+		assignments: make(map[string]assignmentRecord), restoredDesired: make(map[string]relaycontrol.State),
 	}, nil
 }
 
@@ -147,6 +149,9 @@ func (registry *Registry) Register(
 	desired := relaycontrol.StateReady
 	if request.State == relaycontrol.StateDraining {
 		desired = relaycontrol.StateDraining
+	}
+	if restored, ok := registry.restoredDesired[relayID]; ok {
+		desired = restored
 	}
 	reservations := registry.assignmentCountLocked(relayID)
 	registry.relays[relayID] = &relayRecord{
@@ -295,6 +300,23 @@ func (registry *Registry) SetDesiredState(relayID string, state relaycontrol.Sta
 		return ErrNotFound
 	}
 	relay.desiredState = state
+	registry.restoredDesired[relayID] = state
+	return nil
+}
+
+// RestoreDesiredState installs durable control-plane intent even while a Relay
+// is offline. The next registration observes it before becoming allocatable.
+func (registry *Registry) RestoreDesiredState(relayID string, state relaycontrol.State) error {
+	if strings.TrimSpace(relayID) == "" || len(relayID) > 256 ||
+		(state != relaycontrol.StateReady && state != relaycontrol.StateDraining) {
+		return errors.New("Relay durable desired state is invalid")
+	}
+	registry.mu.Lock()
+	defer registry.mu.Unlock()
+	registry.restoredDesired[relayID] = state
+	if relay := registry.relays[relayID]; relay != nil {
+		relay.desiredState = state
+	}
 	return nil
 }
 

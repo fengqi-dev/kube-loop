@@ -155,6 +155,17 @@ type AuditFilter struct {
 	Limit       int
 }
 
+type RelayDesiredState struct {
+	RelayID                   string
+	SchemaVersion             int
+	DesiredState              string
+	Version                   uint64
+	UpdatedBy                 string
+	UpdatedAuthenticationType string
+	Reason                    string
+	UpdatedAt                 time.Time
+}
+
 type AuthAttempt struct {
 	ID                   string
 	SchemaVersion        int

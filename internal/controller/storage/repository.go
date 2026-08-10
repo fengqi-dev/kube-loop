@@ -100,6 +100,14 @@ type AuditRepository interface {
 	List(context.Context, AuditFilter) ([]AuditEvent, error)
 }
 
+type RelayDesiredStateRepository interface {
+	Get(context.Context, string) (RelayDesiredState, error)
+	List(context.Context) ([]RelayDesiredState, error)
+	// CompareAndSwap creates with expectedVersion=0 or advances an existing
+	// monotonic version. A stale expected version returns ErrConflict.
+	CompareAndSwap(context.Context, string, string, uint64, string, string, string, time.Time) (RelayDesiredState, error)
+}
+
 type AuthTransactionRepository interface {
 	// CreateAttempt stores only a hash of the upstream OIDC state. ConsumeAttempt
 	// atomically deletes and returns one unexpired attempt, preventing callback replay.
@@ -169,6 +177,7 @@ type Repositories interface {
 	ResourceSnapshots() ResourceSnapshotRepository
 	Idempotency() IdempotencyRepository
 	Audit() AuditRepository
+	RelayDesiredStates() RelayDesiredStateRepository
 	AuthTransactions() AuthTransactionRepository
 	ManagementState() ManagementStateRepository
 	AdminSessions() AdminSessionRepository

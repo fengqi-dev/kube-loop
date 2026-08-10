@@ -13,7 +13,9 @@ import (
 	"time"
 
 	adminauthorization "github.com/fengqi-dev/kube-loop/internal/controller/admin/authorization"
+	"github.com/fengqi-dev/kube-loop/internal/controller/relayregistry"
 	"github.com/fengqi-dev/kube-loop/internal/controller/storage"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/relaycontrol"
 	"github.com/fengqi-dev/kube-loop/internal/remotetask"
 	"github.com/google/uuid"
 )
@@ -21,6 +23,7 @@ import (
 var (
 	ErrInvalidRequest = errors.New("management operation request is invalid")
 	ErrConflict       = errors.New("management operation precondition failed")
+	ErrUnavailable    = errors.New("management operation runtime is unavailable")
 )
 
 const (
@@ -35,6 +38,11 @@ type Store interface {
 
 type SessionRuntime interface {
 	Disconnect(context.Context, string) error
+}
+
+type RelayRuntime interface {
+	Snapshot() []relayregistry.RelayStatus
+	RestoreDesiredState(string, relaycontrol.State) error
 }
 
 type Actor struct {
@@ -72,6 +80,12 @@ type StopTaskRequest struct {
 	ExpectedVersion uint64
 }
 
+type ChangeRelayStateRequest struct {
+	Request
+	RelayID         string
+	ExpectedVersion uint64
+}
+
 type RevocationResult struct {
 	PrincipalID     string    `json:"principalId"`
 	DeviceSessionID string    `json:"deviceSessionId,omitempty"`
@@ -97,19 +111,37 @@ type StopTaskResult struct {
 	Replayed           bool      `json:"replayed"`
 }
 
+type RelayStateResult struct {
+	RelayID            string `json:"relayId"`
+	DesiredState       string `json:"desiredState"`
+	Version            uint64 `json:"version"`
+	PendingConvergence bool   `json:"pendingConvergence"`
+	Replayed           bool   `json:"replayed"`
+}
+
 type Service struct {
 	store   Store
 	runtime SessionRuntime
+	relays  RelayRuntime
 	now     func() time.Time
 	newID   func() string
 }
 
-func New(store Store, runtime SessionRuntime) (*Service, error) {
+func New(store Store, runtime SessionRuntime, relayRuntimes ...RelayRuntime) (*Service, error) {
 	if store == nil || runtime == nil {
 		return nil, errors.New("management operation storage and Session runtime are required")
 	}
-	return &Service{store: store, runtime: runtime, now: time.Now, newID: uuid.NewString}, nil
+	var relays RelayRuntime
+	if len(relayRuntimes) > 1 {
+		return nil, errors.New("only one management Relay runtime may be configured")
+	}
+	if len(relayRuntimes) == 1 {
+		relays = relayRuntimes[0]
+	}
+	return &Service{store: store, runtime: runtime, relays: relays, now: time.Now, newID: uuid.NewString}, nil
 }
+
+func (service *Service) RelayAvailable() bool { return service != nil && service.relays != nil }
 
 func (service *Service) RevokeDeviceSession(ctx context.Context, request RevokeDeviceSessionRequest) (RevocationResult, error) {
 	common, err := normalizeRequest(request.Request, "admin.device-session.revoke")
@@ -297,6 +329,93 @@ func (service *Service) StopTask(ctx context.Context, request StopTaskRequest) (
 	})
 	if err != nil {
 		return StopTaskResult{}, mapError(err)
+	}
+	return result, nil
+}
+
+func (service *Service) DrainRelay(ctx context.Context, request ChangeRelayStateRequest) (RelayStateResult, error) {
+	return service.changeRelayState(ctx, request, relaycontrol.StateDraining, "admin.relay.drain")
+}
+
+func (service *Service) RecoverRelay(ctx context.Context, request ChangeRelayStateRequest) (RelayStateResult, error) {
+	return service.changeRelayState(ctx, request, relaycontrol.StateReady, "admin.relay.recover")
+}
+
+func (service *Service) changeRelayState(
+	ctx context.Context,
+	request ChangeRelayStateRequest,
+	desired relaycontrol.State,
+	action string,
+) (RelayStateResult, error) {
+	if service.relays == nil {
+		return RelayStateResult{}, ErrUnavailable
+	}
+	common, err := normalizeRequest(request.Request, action)
+	request.RelayID = strings.TrimSpace(request.RelayID)
+	if err != nil || request.RelayID == "" || len(request.RelayID) > 256 || strings.ContainsAny(request.RelayID, "\x00\r\n/\\") {
+		return RelayStateResult{}, ErrInvalidRequest
+	}
+	known := false
+	for _, status := range service.relays.Snapshot() {
+		if status.RelayID == request.RelayID {
+			known = true
+			break
+		}
+	}
+	if !known {
+		if _, lookupErr := service.store.RelayDesiredStates().Get(ctx, request.RelayID); lookupErr != nil {
+			return RelayStateResult{}, lookupErr
+		}
+	}
+	requestHash := requestDigest(struct {
+		RelayID         string `json:"relayId"`
+		DesiredState    string `json:"desiredState"`
+		ExpectedVersion uint64 `json:"expectedVersion"`
+		Reason          string `json:"reason"`
+	}{request.RelayID, string(desired), request.ExpectedVersion, common.reason})
+	result := RelayStateResult{}
+	err = service.store.WithinTransaction(ctx, func(repositories storage.Repositories) error {
+		replayed, lookupErr := replay(repositories, ctx, common.scope, common.keyHash, requestHash, &result)
+		if lookupErr != nil || replayed {
+			if replayed {
+				result.Replayed = true
+			}
+			return lookupErr
+		}
+		current, getErr := repositories.RelayDesiredStates().Get(ctx, request.RelayID)
+		if errors.Is(getErr, storage.ErrNotFound) {
+			if request.ExpectedVersion != 0 {
+				return storage.ErrConflict
+			}
+		} else if getErr != nil {
+			return getErr
+		} else if current.Version != request.ExpectedVersion {
+			return storage.ErrConflict
+		}
+		next, swapErr := repositories.RelayDesiredStates().CompareAndSwap(
+			ctx, request.RelayID, string(desired), request.ExpectedVersion,
+			common.actorID, common.authenticationType, common.reason, service.now().UTC(),
+		)
+		if swapErr != nil {
+			return swapErr
+		}
+		result = RelayStateResult{
+			RelayID: next.RelayID, DesiredState: next.DesiredState, Version: next.Version, PendingConvergence: true,
+		}
+		return service.persistSuccess(ctx, repositories, common, requestHash, "relay", next.RelayID, action,
+			map[string]any{"oldVersion": request.ExpectedVersion, "newVersion": next.Version, "desiredState": next.DesiredState}, result)
+	})
+	if err != nil {
+		return RelayStateResult{}, mapError(err)
+	}
+	if err := service.relays.RestoreDesiredState(request.RelayID, desired); err != nil {
+		return result, nil
+	}
+	for _, status := range service.relays.Snapshot() {
+		if status.RelayID == request.RelayID {
+			result.PendingConvergence = status.DesiredState != desired || status.State != desired
+			break
+		}
 	}
 	return result, nil
 }

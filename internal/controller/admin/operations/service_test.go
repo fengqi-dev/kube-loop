@@ -12,8 +12,10 @@ import (
 	"time"
 
 	adminauthorization "github.com/fengqi-dev/kube-loop/internal/controller/admin/authorization"
+	"github.com/fengqi-dev/kube-loop/internal/controller/relayregistry"
 	"github.com/fengqi-dev/kube-loop/internal/controller/storage"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/relaycontrol"
 	"github.com/fengqi-dev/kube-loop/internal/remotetask"
 	"github.com/google/uuid"
 )
@@ -23,6 +25,21 @@ type testRuntime struct {
 	wantSession string
 	calls       int
 	err         error
+}
+
+type testRelayRuntime struct{ statuses []relayregistry.RelayStatus }
+
+func (runtime *testRelayRuntime) Snapshot() []relayregistry.RelayStatus {
+	return append([]relayregistry.RelayStatus(nil), runtime.statuses...)
+}
+
+func (runtime *testRelayRuntime) RestoreDesiredState(relayID string, state relaycontrol.State) error {
+	for index := range runtime.statuses {
+		if runtime.statuses[index].RelayID == relayID {
+			runtime.statuses[index].DesiredState = state
+		}
+	}
+	return nil
 }
 
 func (runtime *testRuntime) Disconnect(ctx context.Context, sessionID string) error {
@@ -169,6 +186,44 @@ func TestStopTaskUsesObservedVersionAndDurableTransition(t *testing.T) {
 	request.ExpectedVersion = taskVersion(task.UpdatedAt)
 	if _, err := service.StopTask(context.Background(), request); !errors.Is(err, ErrConflict) {
 		t.Fatalf("stale Task version error = %v", err)
+	}
+}
+
+func TestRelayDrainAndRecoveryPersistAcrossRuntimeConvergence(t *testing.T) {
+	store, principal, _, now := newTestAggregate(t)
+	relays := &testRelayRuntime{statuses: []relayregistry.RelayStatus{{
+		RelayID: "relay-a", State: relaycontrol.StateReady, DesiredState: relaycontrol.StateReady, Online: true,
+	}}}
+	service, err := New(store, &testRuntime{store: store}, relays)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.now = func() time.Time { return now }
+	base := Request{
+		Actor:  Actor{PrincipalID: principal.ID, Authentication: adminauthorization.AuthenticationNormal},
+		Reason: "planned Relay maintenance", RequestID: uuid.NewString(),
+	}
+	base.IdempotencyKey = "operation-key-relay-0001"
+	drained, err := service.DrainRelay(context.Background(), ChangeRelayStateRequest{Request: base, RelayID: "relay-a"})
+	if err != nil || drained.Version != 1 || !drained.PendingConvergence {
+		t.Fatalf("DrainRelay = %#v, %v", drained, err)
+	}
+	stored, err := store.RelayDesiredStates().Get(context.Background(), "relay-a")
+	if err != nil || stored.DesiredState != "draining" || stored.Version != 1 {
+		t.Fatalf("durable Relay drain = %#v, %v", stored, err)
+	}
+	relays.statuses[0].State = relaycontrol.StateDraining
+	replayed, err := service.DrainRelay(context.Background(), ChangeRelayStateRequest{Request: base, RelayID: "relay-a"})
+	if err != nil || !replayed.Replayed || replayed.PendingConvergence {
+		t.Fatalf("converged Relay drain replay = %#v, %v", replayed, err)
+	}
+	base.IdempotencyKey = "operation-key-relay-0002"
+	base.Reason = "restore Relay capacity"
+	recovered, err := service.RecoverRelay(context.Background(), ChangeRelayStateRequest{
+		Request: base, RelayID: "relay-a", ExpectedVersion: 1,
+	})
+	if err != nil || recovered.Version != 2 || !recovered.PendingConvergence {
+		t.Fatalf("RecoverRelay = %#v, %v", recovered, err)
 	}
 }
 

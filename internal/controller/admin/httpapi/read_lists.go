@@ -102,6 +102,7 @@ type relayDocument struct {
 	LastHeartbeatAt             time.Time             `json:"lastHeartbeatAt"`
 	Reservations                uint32                `json:"reservations"`
 	Online                      bool                  `json:"online"`
+	ControlVersion              uint64                `json:"controlVersion"`
 }
 
 type relayCursorDocument struct {
@@ -277,6 +278,16 @@ func (api *readAPI) listRelays(writer http.ResponseWriter, request *http.Request
 	if api.relays != nil {
 		statuses = api.relays.Snapshot()
 	}
+	durableStates, err := api.status.RelayDesiredStates().List(request.Context())
+	if err != nil {
+		api.audit(request, subjectFromRequest(request), "admin.relay/list", "failure")
+		writeListError(writer, request, http.StatusServiceUnavailable, "unavailable", "management Relay list is unavailable")
+		return
+	}
+	versions := make(map[string]uint64, len(durableStates))
+	for _, desired := range durableStates {
+		versions[desired.RelayID] = desired.Version
+	}
 	slices.SortFunc(statuses, func(left, right relayregistry.RelayStatus) int {
 		return strings.Compare(left.RelayID, right.RelayID)
 	})
@@ -297,6 +308,7 @@ func (api *readAPI) listRelays(writer http.ResponseWriter, request *http.Request
 			AppliedRevocationGeneration: status.AppliedRevocationGeneration,
 			LeaseExpiresAt:              status.LeaseExpiresAt, LastHeartbeatAt: status.LastHeartbeatAt,
 			Reservations: status.Reservations, Online: status.Online,
+			ControlVersion: versions[status.RelayID],
 		})
 		lastID = status.RelayID
 	}

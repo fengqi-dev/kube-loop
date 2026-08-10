@@ -41,6 +41,7 @@ func testRepositoryConformance(t *testing.T, store *Store) {
 	t.Run("sessions tasks and snapshots", func(t *testing.T) { testSessionTaskSnapshotRepositories(t, store) })
 	t.Run("idempotency", func(t *testing.T) { testIdempotencyRepository(t, store) })
 	t.Run("audit", func(t *testing.T) { testAuditRepository(t, store) })
+	t.Run("Relay desired states", func(t *testing.T) { testRelayDesiredStateRepository(t, store) })
 	t.Run("management list pagination", func(t *testing.T) { testManagementListPagination(t, store) })
 	t.Run("authentication transactions", func(t *testing.T) { testAuthTransactionRepository(t, store) })
 	t.Run("management sessions", func(t *testing.T) { testAdminSessionRepositoryConformance(t, store) })
@@ -48,6 +49,34 @@ func testRepositoryConformance(t *testing.T, store *Store) {
 	t.Run("transactions", func(t *testing.T) { testTransactions(t, store) })
 	t.Run("concurrent identity and idempotency", func(t *testing.T) { testConcurrentIdentityAndIdempotency(t, store) })
 	t.Run("stable errors", func(t *testing.T) { testStableRepositoryErrors(t, store) })
+}
+
+func testRelayDesiredStateRepository(t *testing.T, store *Store) {
+	t.Helper()
+	ctx := context.Background()
+	now := time.Date(2026, 8, 10, 12, 30, 0, 0, time.UTC)
+	relayID := "relay-conformance-a"
+	created, err := store.RelayDesiredStates().CompareAndSwap(
+		ctx, relayID, "draining", 0, ManagementActorBreakGlass, "break-glass", "drain for maintenance", now,
+	)
+	if err != nil || created.Version != 1 || created.DesiredState != "draining" {
+		t.Fatalf("create Relay desired state = %#v, %v", created, err)
+	}
+	if _, err := store.RelayDesiredStates().CompareAndSwap(
+		ctx, relayID, "ready", 0, ManagementActorBreakGlass, "break-glass", "stale recovery", now,
+	); !errors.Is(err, ErrConflict) {
+		t.Fatalf("stale Relay desired state error = %v", err)
+	}
+	updated, err := store.RelayDesiredStates().CompareAndSwap(
+		ctx, relayID, "ready", 1, ManagementActorBreakGlass, "break-glass", "restore capacity", now.Add(time.Minute),
+	)
+	if err != nil || updated.Version != 2 || updated.DesiredState != "ready" {
+		t.Fatalf("update Relay desired state = %#v, %v", updated, err)
+	}
+	listed, err := store.RelayDesiredStates().List(ctx)
+	if err != nil || len(listed) != 1 || listed[0].Version != 2 {
+		t.Fatalf("list Relay desired states = %#v, %v", listed, err)
+	}
 }
 
 func testManagementListPagination(t *testing.T, store *Store) {

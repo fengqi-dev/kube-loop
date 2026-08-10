@@ -524,6 +524,32 @@ var migrations = []migration{{
 		)`,
 		`CREATE INDEX config_change_requests_status_idx ON config_change_requests(status, updated_at, id)`,
 	},
+}, {
+	version: 10,
+	sqlite: []string{
+		`CREATE TABLE relay_desired_states (
+			relay_id TEXT PRIMARY KEY,
+			schema_version INTEGER NOT NULL CHECK (schema_version >= 1),
+			desired_state TEXT NOT NULL CHECK (desired_state IN ('ready', 'draining')),
+			version INTEGER NOT NULL CHECK (version > 0),
+			updated_by TEXT NOT NULL,
+			updated_authentication_type TEXT NOT NULL CHECK (updated_authentication_type IN ('normal', 'bootstrap', 'break-glass')),
+			reason TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
+	},
+	postgresql: []string{
+		`CREATE TABLE relay_desired_states (
+			relay_id TEXT PRIMARY KEY,
+			schema_version INTEGER NOT NULL CHECK (schema_version >= 1),
+			desired_state TEXT NOT NULL CHECK (desired_state IN ('ready', 'draining')),
+			version BIGINT NOT NULL CHECK (version > 0),
+			updated_by TEXT NOT NULL,
+			updated_authentication_type TEXT NOT NULL CHECK (updated_authentication_type IN ('normal', 'bootstrap', 'break-glass')),
+			reason TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
+	},
 }}
 
 func currentSchemaVersion() int {
