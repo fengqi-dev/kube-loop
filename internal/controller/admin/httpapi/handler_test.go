@@ -3,18 +3,23 @@ package httpapi
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	adminauthorization "github.com/fengqi-dev/kube-loop/internal/controller/admin/authorization"
 	adminsession "github.com/fengqi-dev/kube-loop/internal/controller/admin/session"
+	admintoken "github.com/fengqi-dev/kube-loop/internal/controller/authn/token"
 	"github.com/fengqi-dev/kube-loop/internal/controller/storage"
+	"github.com/google/uuid"
 )
 
 func TestBreakGlassExchangeSetsHostCookieAndReturnsCSRF(t *testing.T) {
@@ -241,6 +246,102 @@ func TestAuthenticatedManagementWritesRequireSynchronousCSRFToken(t *testing.T) 
 	}
 }
 
+func TestGatewayTokenExchangeCreatesNormalAndBootstrapManagementSessions(t *testing.T) {
+	for _, bootstrap := range []bool{false, true} {
+		t.Run(map[bool]string{false: "normal", true: "bootstrap"}[bootstrap], func(t *testing.T) {
+			handler, store := newPrincipalTokenHandler(t, bootstrap)
+			request := httptest.NewRequest(http.MethodPost, "/sessions/token", bytes.NewBufferString(`{}`))
+			request.RemoteAddr = "192.0.2.30:5000"
+			request.Header.Set("Origin", "https://gateway.example")
+			request.Header.Set("Sec-Fetch-Site", "same-origin")
+			request.Header.Set("Content-Type", "application/json")
+			request.Header.Set("Authorization", "Bearer valid-access-token")
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, request)
+			if recorder.Code != http.StatusCreated || len(recorder.Result().Cookies()) != 1 {
+				t.Fatalf("exchange status=%d body=%s", recorder.Code, recorder.Body.String())
+			}
+			cookie := recorder.Result().Cookies()[0]
+			digest := sha256.Sum256([]byte(cookie.Value))
+			stored, err := store.AdminSessions().GetByHash(context.Background(), digest[:])
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantAuthentication := "normal"
+			if bootstrap {
+				wantAuthentication = "bootstrap"
+			}
+			if stored.AuthenticationType != wantAuthentication || stored.PrincipalID == "" || stored.TokenFamilyID == "" {
+				t.Fatalf("stored session=%+v", stored)
+			}
+			statusRequest := httptest.NewRequest(http.MethodGet, "/status", nil)
+			statusRequest.AddCookie(cookie)
+			status := httptest.NewRecorder()
+			handler.ServeHTTP(status, statusRequest)
+			if status.Code != http.StatusOK {
+				t.Fatalf("status after exchange=%d body=%s", status.Code, status.Body.String())
+			}
+			events, err := store.Audit().List(context.Background(), storage.AuditFilter{
+				Action: "admin.session.principal.exchange",
+			})
+			if err != nil || len(events) != 1 || events[0].Outcome != "success" {
+				t.Fatalf("exchange audit=%+v error=%v", events, err)
+			}
+		})
+	}
+}
+
+func TestGatewayTokenExchangeRejectsMalformedBearerAndCrossSite(t *testing.T) {
+	handler, store := newPrincipalTokenHandler(t, false)
+	for _, mutate := range []func(*http.Request){
+		func(request *http.Request) { request.Header.Set("Authorization", "Basic invalid") },
+		func(request *http.Request) { request.Header.Set("Origin", "https://attacker.example") },
+	} {
+		request := httptest.NewRequest(http.MethodPost, "/sessions/token", bytes.NewBufferString(`{}`))
+		request.RemoteAddr = "192.0.2.31:5000"
+		request.Header.Set("Origin", "https://gateway.example")
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("Authorization", "Bearer valid-access-token")
+		mutate(request)
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusUnauthorized {
+			t.Fatalf("rejected exchange status=%d body=%s", recorder.Code, recorder.Body.String())
+		}
+	}
+	events, err := store.Audit().List(context.Background(), storage.AuditFilter{
+		Action: "admin.session.principal.exchange",
+	})
+	if err != nil || len(events) != 2 || events[0].Outcome != "failure" || events[1].Outcome != "failure" {
+		t.Fatalf("failure audit=%+v error=%v", events, err)
+	}
+}
+
+func TestGatewayTokenExchangeRejectsNonEmptyOrNullJSONAndAudits(t *testing.T) {
+	handler, store := newPrincipalTokenHandler(t, false)
+	for _, body := range []string{`null`, `{"unexpected":true}`, `{`} {
+		request := httptest.NewRequest(http.MethodPost, "/sessions/token", bytes.NewBufferString(body))
+		request.RemoteAddr = "192.0.2.32:5000"
+		request.Header.Set("Origin", "https://gateway.example")
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("Authorization", "Bearer valid-access-token")
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusBadRequest {
+			t.Fatalf("body=%q status=%d response=%s", body, recorder.Code, recorder.Body.String())
+		}
+	}
+	events, err := store.Audit().List(context.Background(), storage.AuditFilter{Action: "admin.session.principal.exchange"})
+	if err != nil || len(events) != 3 {
+		t.Fatalf("malformed exchange audit=%+v error=%v", events, err)
+	}
+	for _, event := range events {
+		if event.Outcome != "failure" || strings.Contains(string(event.Metadata), "valid-access-token") {
+			t.Fatalf("malformed exchange event=%+v", event)
+		}
+	}
+}
+
 type testVerifier struct {
 	enabled    bool
 	generation string
@@ -311,6 +412,79 @@ func newReadTestHandler(t *testing.T, authorizeBreakGlass bool) (*Handler, *stor
 			Version: "v2-test", Commit: "test-commit", ProtocolMin: "2.0", ProtocolMax: "2.0",
 		}),
 	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return handler, store
+}
+
+type tokenAuthenticatorStub struct{ identity admintoken.AccessIdentity }
+
+func (authenticator tokenAuthenticatorStub) Authenticate(_ context.Context, value string) (admintoken.AccessIdentity, error) {
+	if value != "valid-access-token" {
+		return admintoken.AccessIdentity{}, errors.New("invalid token")
+	}
+	return authenticator.identity, nil
+}
+
+type bootstrapStateStub struct{}
+
+func (bootstrapStateStub) BootstrapRetired(context.Context) (bool, error) { return false, nil }
+
+func newPrincipalTokenHandler(t *testing.T, bootstrap bool, extraOptions ...Option) (*Handler, *storage.Store) {
+	t.Helper()
+	store, err := storage.Open(context.Background(), storage.Config{
+		Backend: storage.BackendSQLite, SQLitePath: filepath.Join(t.TempDir(), "management.db"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	now := time.Now().UTC()
+	principal, err := store.Principals().Upsert(context.Background(), storage.Principal{
+		ID: uuid.NewString(), Provider: "oidc", ExternalID: uuid.NewString(), Groups: []string{"platform"},
+		CreatedAt: now, UpdatedAt: now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	family := storage.TokenFamily{
+		ID: uuid.NewString(), PrincipalID: principal.ID, DeviceID: "browser",
+		RefreshTokenHash: bytes.Repeat([]byte{22}, 32), CreatedAt: now, ExpiresAt: now.Add(time.Hour),
+	}
+	if err := store.TokenFamilies().Create(context.Background(), family); err != nil {
+		t.Fatal(err)
+	}
+	verifier := &testVerifier{enabled: false}
+	sessions, err := adminsession.New(store, verifier)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var authorizer *adminauthorization.Engine
+	if bootstrap {
+		authorizer, err = adminauthorization.NewDenyAll(adminauthorization.WithBootstrap(
+			adminauthorization.BootstrapConfig{Groups: []string{"platform"}}, bootstrapStateStub{},
+		))
+	} else {
+		authorizer, err = adminauthorization.New(adminauthorization.Snapshot{
+			Version: adminauthorization.CurrentVersion, Revision: 1, Assignments: []adminauthorization.Assignment{{
+				ID: uuid.NewString(), Role: adminauthorization.RolePlatformAdmin, Subjects: []string{principal.ID},
+			}},
+		})
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	options := []Option{
+		WithReadAPI(authorizer, store, BuildInfo{
+			Version: "v2-test", Commit: "test", ProtocolMin: "2.0", ProtocolMax: "2.0",
+		}),
+		WithTokenExchange(tokenAuthenticatorStub{identity: admintoken.AccessIdentity{
+			Principal: principal, FamilyID: family.ID, DeviceID: family.DeviceID, AccessExpiresAt: now.Add(5 * time.Minute),
+		}}),
+	}
+	options = append(options, extraOptions...)
+	handler, err := New(Config{PublicURL: "https://gateway.example"}, sessions, options...)
 	if err != nil {
 		t.Fatal(err)
 	}

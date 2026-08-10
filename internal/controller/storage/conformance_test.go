@@ -41,12 +41,117 @@ func testRepositoryConformance(t *testing.T, store *Store) {
 	t.Run("sessions tasks and snapshots", func(t *testing.T) { testSessionTaskSnapshotRepositories(t, store) })
 	t.Run("idempotency", func(t *testing.T) { testIdempotencyRepository(t, store) })
 	t.Run("audit", func(t *testing.T) { testAuditRepository(t, store) })
+	t.Run("management list pagination", func(t *testing.T) { testManagementListPagination(t, store) })
 	t.Run("authentication transactions", func(t *testing.T) { testAuthTransactionRepository(t, store) })
 	t.Run("management sessions", func(t *testing.T) { testAdminSessionRepositoryConformance(t, store) })
 	t.Run("management revisions", func(t *testing.T) { testManagementRevisionRepositories(t, store) })
 	t.Run("transactions", func(t *testing.T) { testTransactions(t, store) })
 	t.Run("concurrent identity and idempotency", func(t *testing.T) { testConcurrentIdentityAndIdempotency(t, store) })
 	t.Run("stable errors", func(t *testing.T) { testStableRepositoryErrors(t, store) })
+}
+
+func testManagementListPagination(t *testing.T, store *Store) {
+	ctx := context.Background()
+	now := time.Date(2026, 8, 11, 9, 0, 0, 0, time.UTC)
+	provider := "pagination-" + uuid.NewString()
+	principals := make([]Principal, 0, 3)
+	for index := range 3 {
+		principal, err := store.Principals().Upsert(ctx, Principal{
+			ID: uuid.NewString(), Provider: provider, ExternalID: fmt.Sprintf("user-%d", index),
+			CreatedAt: now.Add(time.Duration(index) * time.Second), UpdatedAt: now.Add(time.Duration(index) * time.Second),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		principals = append(principals, principal)
+	}
+	firstPrincipals, err := store.Principals().List(ctx, PrincipalListFilter{Provider: provider, Limit: 2})
+	if err != nil || len(firstPrincipals) != 2 || firstPrincipals[0].ID != principals[2].ID || firstPrincipals[1].ID != principals[1].ID {
+		t.Fatalf("first principal page=%#v error=%v", firstPrincipals, err)
+	}
+	if _, err := store.Principals().Upsert(ctx, Principal{
+		ID: uuid.NewString(), Provider: provider, ExternalID: "inserted-after-page-one",
+		CreatedAt: now.Add(10 * time.Second), UpdatedAt: now.Add(10 * time.Second),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	secondPrincipals, err := store.Principals().List(ctx, PrincipalListFilter{
+		Provider: provider, Limit: 2, Cursor: pageCursor(firstPrincipals[1].CreatedAt, firstPrincipals[1].ID),
+	})
+	if err != nil || len(secondPrincipals) != 1 || secondPrincipals[0].ID != principals[0].ID {
+		t.Fatalf("second principal page=%#v error=%v", secondPrincipals, err)
+	}
+
+	sessions := make([]Session, 0, 3)
+	for index := range 3 {
+		createdAt := now.Add(time.Duration(index) * time.Minute)
+		session := Session{
+			ID: uuid.NewString(), PrincipalID: principals[0].ID, DeviceID: fmt.Sprintf("device-%d", index),
+			ClusterID: "cluster-pagination", Namespace: "pagination", State: "active",
+			CreatedAt: createdAt, ExpiresAt: createdAt.Add(time.Hour),
+		}
+		if err := store.Sessions().Create(ctx, session); err != nil {
+			t.Fatal(err)
+		}
+		sessions = append(sessions, session)
+	}
+	firstSessions, err := store.Sessions().List(ctx, SessionListFilter{Namespace: "pagination", State: "active", Limit: 2})
+	if err != nil || len(firstSessions) != 2 || firstSessions[0].ID != sessions[2].ID {
+		t.Fatalf("first session page=%#v error=%v", firstSessions, err)
+	}
+	secondSessions, err := store.Sessions().List(ctx, SessionListFilter{
+		Namespace: "pagination", Limit: 2, Cursor: pageCursor(firstSessions[1].CreatedAt, firstSessions[1].ID),
+	})
+	if err != nil || len(secondSessions) != 1 || secondSessions[0].ID != sessions[0].ID {
+		t.Fatalf("second session page=%#v error=%v", secondSessions, err)
+	}
+
+	tasks := make([]Task, 0, 3)
+	for index := range 3 {
+		createdAt := now.Add(time.Duration(index) * time.Minute)
+		task := Task{
+			ID: uuid.NewString(), PrincipalID: principals[0].ID, SessionID: sessions[index].ID,
+			Type: "pagination-task", State: remotetask.Pending, Spec: json.RawMessage(`{"safe":true}`),
+			IdempotencyKey: fmt.Sprintf("pagination-%d", index), CreatedAt: createdAt, UpdatedAt: createdAt,
+		}
+		if err := store.Tasks().Create(ctx, task); err != nil {
+			t.Fatal(err)
+		}
+		tasks = append(tasks, task)
+	}
+	firstTasks, err := store.Tasks().List(ctx, TaskListFilter{Namespace: "pagination", Type: "pagination-task", Limit: 2})
+	if err != nil || len(firstTasks) != 2 || firstTasks[0].ID != tasks[2].ID {
+		t.Fatalf("first task page=%#v error=%v", firstTasks, err)
+	}
+	secondTasks, err := store.Tasks().List(ctx, TaskListFilter{
+		Namespace: "pagination", Limit: 2, Cursor: pageCursor(firstTasks[1].CreatedAt, firstTasks[1].ID),
+	})
+	if err != nil || len(secondTasks) != 1 || secondTasks[0].ID != tasks[0].ID {
+		t.Fatalf("second task page=%#v error=%v", secondTasks, err)
+	}
+
+	action := "pagination.audit." + uuid.NewString()
+	events := make([]AuditEvent, 0, 3)
+	for index := range 3 {
+		event := AuditEvent{
+			ID: uuid.NewString(), PrincipalID: principals[0].ID, Action: action, Outcome: "success",
+			RequestID: fmt.Sprintf("pagination-request-%d", index), CreatedAt: now.Add(time.Duration(index) * time.Minute),
+		}
+		if err := store.Audit().Append(ctx, event); err != nil {
+			t.Fatal(err)
+		}
+		events = append(events, event)
+	}
+	firstEvents, err := store.Audit().List(ctx, AuditFilter{Action: action, Limit: 2})
+	if err != nil || len(firstEvents) != 2 || firstEvents[0].ID != events[2].ID {
+		t.Fatalf("first audit page=%#v error=%v", firstEvents, err)
+	}
+	secondEvents, err := store.Audit().List(ctx, AuditFilter{
+		Action: action, Limit: 2, Cursor: pageCursor(firstEvents[1].CreatedAt, firstEvents[1].ID),
+	})
+	if err != nil || len(secondEvents) != 1 || secondEvents[0].ID != events[0].ID {
+		t.Fatalf("second audit page=%#v error=%v", secondEvents, err)
+	}
 }
 
 func testConcurrentIdentityAndIdempotency(t *testing.T, store *Store) {

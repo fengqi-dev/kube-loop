@@ -95,6 +95,44 @@ func (repository *principalRepository) GetByIdentity(ctx context.Context, provid
 	return principal, nil
 }
 
+func (repository *principalRepository) List(ctx context.Context, filter PrincipalListFilter) ([]Principal, error) {
+	limit, cursor, err := normalizePage(filter.Limit, filter.Cursor)
+	if err != nil {
+		return nil, err
+	}
+	filter.Provider = strings.TrimSpace(filter.Provider)
+	if len(filter.Provider) > 128 || strings.ContainsAny(filter.Provider, "\x00\r\n") {
+		return nil, errors.New("principal provider filter is invalid")
+	}
+	query := `SELECT id, schema_version, provider, external_id, display_name, email, groups_json, created_at, updated_at
+		FROM principals WHERE 1=1`
+	arguments := make([]any, 0, 5)
+	if filter.Provider != "" {
+		query += ` AND provider = ?`
+		arguments = append(arguments, filter.Provider)
+	}
+	query, arguments = appendPageBoundary(query, arguments, "", cursor)
+	query += ` ORDER BY created_at DESC, id DESC LIMIT ?`
+	arguments = append(arguments, limit)
+	rows, err := repository.executor.QueryContext(ctx, repository.bind(query), arguments...)
+	if err != nil {
+		return nil, databaseError("list principals", err)
+	}
+	defer rows.Close()
+	principals := make([]Principal, 0)
+	for rows.Next() {
+		principal, err := scanPrincipal(rows)
+		if err != nil {
+			return nil, err
+		}
+		principals = append(principals, principal)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, databaseError("iterate principals", err)
+	}
+	return principals, nil
+}
+
 type rowScanner interface {
 	Scan(...any) error
 }

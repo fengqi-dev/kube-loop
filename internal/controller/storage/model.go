@@ -21,6 +21,35 @@ type Principal struct {
 	UpdatedAt     time.Time
 }
 
+type PageCursor struct {
+	CreatedAt time.Time
+	ID        string
+}
+
+type PrincipalListFilter struct {
+	Provider string
+	Cursor   *PageCursor
+	Limit    int
+}
+
+type SessionListFilter struct {
+	PrincipalID string
+	Namespace   string
+	State       string
+	Cursor      *PageCursor
+	Limit       int
+}
+
+type TaskListFilter struct {
+	PrincipalID string
+	SessionID   string
+	Namespace   string
+	Type        string
+	State       remotetask.State
+	Cursor      *PageCursor
+	Limit       int
+}
+
 // DeviceSession is the server-side authentication session for one stable
 // client device. Refresh-token rotation records are children of this aggregate.
 type DeviceSession struct {
@@ -122,6 +151,7 @@ type AuditFilter struct {
 	Action      string
 	After       time.Time
 	Before      time.Time
+	Cursor      *PageCursor
 	Limit       int
 }
 

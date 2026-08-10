@@ -118,6 +118,31 @@ func TestNamespaceAdminCannotCrossScopeOrUseClusterOperations(t *testing.T) {
 	}
 }
 
+func TestDelegatedNamespacesReturnsOnlyMatchingRegularScopesAndFailsClosed(t *testing.T) {
+	engine, err := New(Snapshot{Version: CurrentVersion, Revision: 8, Assignments: []Assignment{
+		{ID: "by-subject", Role: RoleNamespaceAdmin, Subjects: []string{testPrincipalID}, Namespaces: []string{"zeta", "alpha"}},
+		{ID: "by-group", Role: RoleNamespaceAdmin, Groups: []string{"team-a"}, Namespaces: []string{"beta", "alpha"}},
+		{ID: "other", Role: RoleNamespaceAdmin, Subjects: []string{testOtherPrincipalID}, Namespaces: []string{"secret"}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	subject := Subject{ID: testPrincipalID, Groups: []string{"team-a"}, Authentication: AuthenticationNormal}
+	namespaces := engine.DelegatedNamespaces(subject)
+	if len(namespaces) != 3 || namespaces[0] != "alpha" || namespaces[1] != "beta" || namespaces[2] != "zeta" {
+		t.Fatalf("delegated namespaces = %#v", namespaces)
+	}
+	subject.Authentication = AuthenticationBootstrap
+	if namespaces := engine.DelegatedNamespaces(subject); len(namespaces) != 0 {
+		t.Fatalf("bootstrap delegated namespaces = %#v", namespaces)
+	}
+	engine.FailClosed()
+	subject.Authentication = AuthenticationNormal
+	if namespaces := engine.DelegatedNamespaces(subject); len(namespaces) != 0 {
+		t.Fatalf("fail-closed delegated namespaces = %#v", namespaces)
+	}
+}
+
 func TestBootstrapFailsClosedRetiresAndRequiresExplicitRecovery(t *testing.T) {
 	bootstrap := BootstrapConfig{Subjects: []string{testPrincipalID}, Groups: []string{"platform-bootstrap"}}
 	request := Request{Resource: ResourceAssignment, Operation: OperationCreate}

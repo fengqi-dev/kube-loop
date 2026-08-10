@@ -46,6 +46,10 @@ func (repository *auditRepository) List(ctx context.Context, filter AuditFilter)
 	if limit < 1 || limit > 1000 {
 		return nil, errors.New("audit list limit must be between 1 and 1000")
 	}
+	cursor, err := normalizeCursor(filter.Cursor)
+	if err != nil {
+		return nil, err
+	}
 	query := `SELECT id, schema_version, principal_id, action, resource_type, resource_id,
 		outcome, request_id, metadata_json, created_at FROM audit_events WHERE 1=1`
 	var arguments []any
@@ -68,6 +72,7 @@ func (repository *auditRepository) List(ctx context.Context, filter AuditFilter)
 		query += ` AND created_at < ?`
 		arguments = append(arguments, formatTime(filter.Before))
 	}
+	query, arguments = appendPageBoundary(query, arguments, "", cursor)
 	query += ` ORDER BY created_at DESC, id DESC LIMIT ?`
 	arguments = append(arguments, limit)
 	rows, err := repository.executor.QueryContext(ctx, repository.bind(query), arguments...)

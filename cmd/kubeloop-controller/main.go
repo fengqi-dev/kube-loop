@@ -641,18 +641,7 @@ func main() {
 		logger.Error("initialize Management Session service failed", "error", err)
 		os.Exit(2)
 	}
-	managementHandler, err := adminhttpapi.New(
-		adminhttpapi.Config{PublicURL: *publicURL}, managementSessions,
-		adminhttpapi.WithReadAPI(managementPolicyEngine, stateStore, adminhttpapi.BuildInfo{
-			Version: version, Commit: commit, ProtocolMin: protocolMin, ProtocolMax: protocolMax,
-		}),
-	)
-	if err != nil {
-		_ = stateStore.Close()
-		logger.Error("initialize Management Plane HTTP API failed", "error", err)
-		os.Exit(2)
-	}
-	serverOptions = append(serverOptions, controller.WithManagementHandler(managementHandler))
+	var tokenService *token.Service
 	if len(authRegistry.Descriptors()) > 0 {
 		signingKey, err := token.LoadSigningKey(*tokenSigningKeyFile)
 		if err != nil {
@@ -660,7 +649,7 @@ func main() {
 			logger.Error("load token signing key failed", "error", err)
 			os.Exit(2)
 		}
-		tokenService, err := token.New(stateStore, token.Config{
+		tokenService, err = token.New(stateStore, token.Config{
 			Issuer: *publicURL, KeyID: *tokenKeyID, SigningKey: signingKey,
 			AccessTTL: *accessTokenTTL, RefreshTTL: *refreshTokenTTL,
 		})
@@ -686,6 +675,26 @@ func main() {
 			controller.WithAuthenticator(authenticateWithTokens(tokenService)),
 		)
 	}
+	managementOptions := []adminhttpapi.Option{adminhttpapi.WithReadAPI(
+		managementPolicyEngine, stateStore, adminhttpapi.BuildInfo{
+			Version: version, Commit: commit, ProtocolMin: protocolMin, ProtocolMax: protocolMax,
+		},
+	)}
+	if relayRegistry != nil {
+		managementOptions = append(managementOptions, adminhttpapi.WithRelayStatusSource(relayRegistry.registry))
+	}
+	if tokenService != nil {
+		managementOptions = append(managementOptions, adminhttpapi.WithTokenExchange(tokenService))
+	}
+	managementHandler, err := adminhttpapi.New(
+		adminhttpapi.Config{PublicURL: *publicURL}, managementSessions, managementOptions...,
+	)
+	if err != nil {
+		_ = stateStore.Close()
+		logger.Error("initialize Management Plane HTTP API failed", "error", err)
+		os.Exit(2)
+	}
+	serverOptions = append(serverOptions, controller.WithManagementHandler(managementHandler))
 	server, err := controller.NewServer(controller.Config{
 		ListenAddress:       *listenAddress,
 		PublicURL:           *publicURL,

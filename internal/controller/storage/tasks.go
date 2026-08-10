@@ -54,6 +54,76 @@ func (repository *taskRepository) GetByID(ctx context.Context, id string) (Task,
 	return task, nil
 }
 
+func (repository *taskRepository) List(ctx context.Context, filter TaskListFilter) ([]Task, error) {
+	limit, cursor, err := normalizePage(filter.Limit, filter.Cursor)
+	if err != nil {
+		return nil, err
+	}
+	filter.PrincipalID = strings.TrimSpace(filter.PrincipalID)
+	filter.SessionID = strings.TrimSpace(filter.SessionID)
+	filter.Namespace = strings.TrimSpace(filter.Namespace)
+	filter.Type = strings.TrimSpace(filter.Type)
+	if filter.PrincipalID != "" && validateUUID(filter.PrincipalID, "task principal ID") != nil {
+		return nil, errors.New("task principal filter is invalid")
+	}
+	if filter.SessionID != "" && validateUUID(filter.SessionID, "task session ID") != nil {
+		return nil, errors.New("task session filter is invalid")
+	}
+	if filter.Namespace != "" && !dns1123Label.MatchString(filter.Namespace) {
+		return nil, errors.New("task namespace filter is invalid")
+	}
+	if len(filter.Type) > 128 || strings.ContainsAny(filter.Type, "\x00\r\n") {
+		return nil, errors.New("task type filter is invalid")
+	}
+	if filter.State != "" && !filter.State.Valid() {
+		return nil, errors.New("task state filter is invalid")
+	}
+	query := `SELECT t.id, t.schema_version, t.principal_id, t.session_id, t.type, t.state, t.spec_json,
+		t.result_json, t.idempotency_key, t.created_at, t.updated_at, t.expires_at
+		FROM tasks AS t INNER JOIN sessions AS s ON s.id = t.session_id WHERE 1=1`
+	arguments := make([]any, 0, 13)
+	if filter.PrincipalID != "" {
+		query += ` AND t.principal_id = ?`
+		arguments = append(arguments, filter.PrincipalID)
+	}
+	if filter.SessionID != "" {
+		query += ` AND t.session_id = ?`
+		arguments = append(arguments, filter.SessionID)
+	}
+	if filter.Namespace != "" {
+		query += ` AND s.namespace = ?`
+		arguments = append(arguments, filter.Namespace)
+	}
+	if filter.Type != "" {
+		query += ` AND t.type = ?`
+		arguments = append(arguments, filter.Type)
+	}
+	if filter.State != "" {
+		query += ` AND t.state = ?`
+		arguments = append(arguments, filter.State)
+	}
+	query, arguments = appendPageBoundary(query, arguments, "t", cursor)
+	query += ` ORDER BY t.created_at DESC, t.id DESC LIMIT ?`
+	arguments = append(arguments, limit)
+	rows, err := repository.executor.QueryContext(ctx, repository.bind(query), arguments...)
+	if err != nil {
+		return nil, databaseError("list tasks", err)
+	}
+	defer rows.Close()
+	tasks := make([]Task, 0)
+	for rows.Next() {
+		task, err := scanTask(rows)
+		if err != nil {
+			return nil, err
+		}
+		tasks = append(tasks, task)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, databaseError("iterate tasks", err)
+	}
+	return tasks, nil
+}
+
 func (repository *taskRepository) UpdateState(
 	ctx context.Context,
 	id string,

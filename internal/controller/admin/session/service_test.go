@@ -126,6 +126,71 @@ func TestAuthenticateSubjectUsesCurrentGroupsAndTokenFamilyRevocation(t *testing
 	}
 }
 
+func TestPrincipalExchangePersistsDedicatedSessionAndAudit(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+	now := time.Date(2026, 8, 10, 11, 45, 0, 0, time.UTC)
+	principal, err := store.Principals().Upsert(ctx, storage.Principal{
+		ID: uuid.NewString(), Provider: "oidc", ExternalID: "admin-user",
+		Groups: []string{"platform"}, CreatedAt: now, UpdatedAt: now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	family := storage.TokenFamily{
+		ID: uuid.NewString(), PrincipalID: principal.ID, DeviceID: "browser",
+		RefreshTokenHash: bytes.Repeat([]byte{12}, 32), CreatedAt: now, ExpiresAt: now.Add(24 * time.Hour),
+	}
+	if err := store.TokenFamilies().Create(ctx, family); err != nil {
+		t.Fatal(err)
+	}
+	service, _ := New(store, &fakeBreakGlassVerifier{})
+	service.now = func() time.Time { return now }
+	service.random = bytes.NewReader(append(bytes.Repeat([]byte{13}, 32), bytes.Repeat([]byte{14}, 32)...))
+	issued, err := service.ExchangePrincipal(
+		ctx, principal.ID, family.ID, adminauthorization.AuthenticationNormal, "request-principal-1",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if issued.ExpiresAt != now.Add(normalSessionAbsoluteTTL) {
+		t.Fatalf("absolute expiry=%v", issued.ExpiresAt)
+	}
+	digest := sha256.Sum256([]byte(issued.SessionToken))
+	stored, err := store.AdminSessions().GetByHash(ctx, digest[:])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.PrincipalID != principal.ID || stored.TokenFamilyID != family.ID ||
+		stored.AuthenticationType != "normal" || stored.IdleExpiresAt != now.Add(normalSessionIdleTTL) {
+		t.Fatalf("stored principal session=%+v", stored)
+	}
+	if err := VerifyCSRF(stored, issued.CSRFToken); err != nil {
+		t.Fatal(err)
+	}
+	service.now = func() time.Time { return now.Add(2 * time.Minute) }
+	if _, err := service.Authenticate(ctx, issued.SessionToken); err != nil {
+		t.Fatal(err)
+	}
+	stored, err = store.AdminSessions().GetByHash(ctx, digest[:])
+	if err != nil || stored.IdleExpiresAt != now.Add(2*time.Minute+normalSessionIdleTTL) {
+		t.Fatalf("sliding idle session=%+v error=%v", stored, err)
+	}
+	events, err := store.Audit().List(ctx, storage.AuditFilter{Action: principalExchangeAudit})
+	if err != nil || len(events) != 1 || events[0].PrincipalID != principal.ID || events[0].RequestID != "request-principal-1" {
+		t.Fatalf("principal exchange audit=%+v error=%v", events, err)
+	}
+	if err := store.TokenFamilies().Revoke(ctx, family.ID, now); err != nil {
+		t.Fatal(err)
+	}
+	service.random = bytes.NewReader(append(bytes.Repeat([]byte{15}, 32), bytes.Repeat([]byte{16}, 32)...))
+	if _, err := service.ExchangePrincipal(
+		ctx, principal.ID, family.ID, adminauthorization.AuthenticationNormal, "request-principal-2",
+	); !errors.Is(err, ErrAuthenticationFailed) {
+		t.Fatalf("revoked family exchange error=%v", err)
+	}
+}
+
 func TestAuditFailureRollsBackBreakGlassSession(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)

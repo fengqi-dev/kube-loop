@@ -21,9 +21,12 @@ import (
 )
 
 const (
-	tokenEntropyBytes       = 32
-	maximumBreakGlassTTL    = 15 * time.Minute
-	breakGlassExchangeAudit = "admin.session.break-glass.exchange"
+	tokenEntropyBytes        = 32
+	maximumBreakGlassTTL     = 15 * time.Minute
+	normalSessionIdleTTL     = 15 * time.Minute
+	normalSessionAbsoluteTTL = 8 * time.Hour
+	breakGlassExchangeAudit  = "admin.session.break-glass.exchange"
+	principalExchangeAudit   = "admin.session.principal.exchange"
 )
 
 var (
@@ -144,6 +147,80 @@ func (service *Service) ExchangeBreakGlass(
 	}, nil
 }
 
+// ExchangePrincipal creates a browser-only Management Session from an already
+// verified Gateway access-token identity. The Token Family is re-read inside
+// the transaction so revocation racing the exchange fails closed.
+func (service *Service) ExchangePrincipal(
+	ctx context.Context,
+	principalID, familyID string,
+	authentication adminauthorization.AuthenticationType,
+	requestID string,
+) (Credentials, error) {
+	principalID = strings.TrimSpace(principalID)
+	familyID = strings.TrimSpace(familyID)
+	requestID = strings.TrimSpace(requestID)
+	if _, err := uuid.Parse(principalID); err != nil {
+		return Credentials{}, ErrAuthenticationFailed
+	}
+	if _, err := uuid.Parse(familyID); err != nil || requestID == "" ||
+		(authentication != adminauthorization.AuthenticationNormal && authentication != adminauthorization.AuthenticationBootstrap) {
+		return Credentials{}, ErrAuthenticationFailed
+	}
+	sessionToken, err := randomToken(service.random)
+	if err != nil {
+		return Credentials{}, ErrAuthenticationFailed
+	}
+	defer clear(sessionToken)
+	csrfToken, err := randomToken(service.random)
+	if err != nil {
+		return Credentials{}, ErrAuthenticationFailed
+	}
+	defer clear(csrfToken)
+
+	now := service.now().UTC()
+	sessionHash := sha256.Sum256(sessionToken)
+	csrfHash := sha256.Sum256(csrfToken)
+	eventID := service.newID()
+	var expiresAt time.Time
+	err = service.store.WithinTransaction(ctx, func(repositories storage.Repositories) error {
+		family, err := repositories.TokenFamilies().GetByID(ctx, familyID)
+		if err != nil || family.PrincipalID != principalID || family.RevokedAt != nil || !family.ExpiresAt.After(now) {
+			return ErrAuthenticationFailed
+		}
+		if _, err := repositories.Principals().GetByID(ctx, principalID); err != nil {
+			return ErrAuthenticationFailed
+		}
+		expiresAt = minTime(family.ExpiresAt, now.Add(normalSessionAbsoluteTTL))
+		idleExpiresAt := minTime(expiresAt, now.Add(normalSessionIdleTTL))
+		if !idleExpiresAt.After(now) {
+			return ErrAuthenticationFailed
+		}
+		if err := repositories.AdminSessions().Create(ctx, storage.AdminSession{
+			IDHash: sessionHash[:], PrincipalID: principalID, TokenFamilyID: familyID,
+			AuthenticationType: string(authentication), CSRFTokenHash: csrfHash[:],
+			CreatedAt: now, LastSeenAt: now, IdleExpiresAt: idleExpiresAt, AbsoluteExpiresAt: expiresAt,
+		}); err != nil {
+			return err
+		}
+		metadata, err := json.Marshal(map[string]any{
+			"authenticationType": authentication,
+			"expiresAt":          expiresAt.Format(time.RFC3339Nano),
+		})
+		if err != nil {
+			return err
+		}
+		return repositories.Audit().Append(ctx, storage.AuditEvent{
+			ID: eventID, PrincipalID: principalID, Action: principalExchangeAudit,
+			ResourceType: "admin-session", Outcome: "success", RequestID: requestID,
+			Metadata: metadata, CreatedAt: now,
+		})
+	})
+	if err != nil {
+		return Credentials{}, ErrAuthenticationFailed
+	}
+	return Credentials{SessionToken: string(sessionToken), CSRFToken: string(csrfToken), ExpiresAt: expiresAt}, nil
+}
+
 func (service *Service) recordFailedExchange(ctx context.Context, requestID string) {
 	metadata, err := json.Marshal(map[string]string{
 		"authenticationType": string(adminauthorization.AuthenticationBreakGlass),
@@ -182,6 +259,22 @@ func (service *Service) Authenticate(ctx context.Context, token string) (storage
 		family, err := service.store.TokenFamilies().GetByID(ctx, stored.TokenFamilyID)
 		if err != nil || family.PrincipalID != stored.PrincipalID || family.RevokedAt != nil || !family.ExpiresAt.After(now) {
 			return storage.AdminSession{}, ErrSessionInvalid
+		}
+		if now.Sub(stored.LastSeenAt) >= time.Minute {
+			nextIdleExpiry := minTime(stored.AbsoluteExpiresAt, now.Add(normalSessionIdleTTL))
+			if err := service.store.AdminSessions().Touch(
+				ctx, stored.IDHash, stored.LastSeenAt, now, now, nextIdleExpiry,
+			); err != nil {
+				fresh, lookupErr := service.store.AdminSessions().GetByHash(ctx, stored.IDHash)
+				if lookupErr != nil || fresh.RevokedAt != nil || !fresh.IdleExpiresAt.After(now) ||
+					!fresh.AbsoluteExpiresAt.After(now) || !fresh.LastSeenAt.After(stored.LastSeenAt) {
+					return storage.AdminSession{}, ErrSessionInvalid
+				}
+				stored = fresh
+			} else {
+				stored.LastSeenAt = now
+				stored.IdleExpiresAt = nextIdleExpiry
+			}
 		}
 	} else {
 		return storage.AdminSession{}, ErrSessionInvalid
@@ -253,4 +346,11 @@ func validOpaqueToken(token string) bool {
 
 func sameString(left, right string) bool {
 	return len(left) == len(right) && subtle.ConstantTimeCompare([]byte(left), []byte(right)) == 1
+}
+
+func minTime(left, right time.Time) time.Time {
+	if left.Before(right) {
+		return left
+	}
+	return right
 }

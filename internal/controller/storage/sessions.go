@@ -60,6 +60,75 @@ func (repository *sessionRepository) GetByID(ctx context.Context, id string) (Se
 	return sessionFromRow(row)
 }
 
+func (repository *sessionRepository) List(ctx context.Context, filter SessionListFilter) ([]Session, error) {
+	limit, cursor, err := normalizePage(filter.Limit, filter.Cursor)
+	if err != nil {
+		return nil, err
+	}
+	filter.PrincipalID = strings.TrimSpace(filter.PrincipalID)
+	filter.Namespace = strings.TrimSpace(filter.Namespace)
+	filter.State = strings.TrimSpace(filter.State)
+	if filter.PrincipalID != "" && validateUUID(filter.PrincipalID, "session principal ID") != nil {
+		return nil, errors.New("session principal filter is invalid")
+	}
+	if filter.Namespace != "" && !dns1123Label.MatchString(filter.Namespace) {
+		return nil, errors.New("session namespace filter is invalid")
+	}
+	if len(filter.State) > 64 || strings.ContainsAny(filter.State, "\x00\r\n") {
+		return nil, errors.New("session state filter is invalid")
+	}
+	query := `SELECT id, schema_version, principal_id, device_id, cluster_id, namespace, state, generation,
+		network_spec_json, network_spec_hash, created_at, updated_at, last_heartbeat_at, expires_at
+		FROM sessions WHERE 1=1`
+	arguments := make([]any, 0, 9)
+	if filter.PrincipalID != "" {
+		query += ` AND principal_id = ?`
+		arguments = append(arguments, filter.PrincipalID)
+	}
+	if filter.Namespace != "" {
+		query += ` AND namespace = ?`
+		arguments = append(arguments, filter.Namespace)
+	}
+	if filter.State != "" {
+		query += ` AND state = ?`
+		arguments = append(arguments, filter.State)
+	}
+	query, arguments = appendPageBoundary(query, arguments, "", cursor)
+	query += ` ORDER BY created_at DESC, id DESC LIMIT ?`
+	arguments = append(arguments, limit)
+	rows, err := repository.executor.QueryContext(ctx, repository.bind(query), arguments...)
+	if err != nil {
+		return nil, databaseError("list sessions", err)
+	}
+	defer rows.Close()
+	sessions := make([]Session, 0)
+	for rows.Next() {
+		session, err := scanSession(rows)
+		if err != nil {
+			return nil, err
+		}
+		sessions = append(sessions, session)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, databaseError("iterate sessions", err)
+	}
+	return sessions, nil
+}
+
+func scanSession(row rowScanner) (Session, error) {
+	var value sessionRow
+	var networkSpec []byte
+	if err := row.Scan(
+		&value.ID, &value.SchemaVersion, &value.PrincipalID, &value.DeviceID, &value.ClusterID,
+		&value.Namespace, &value.State, &value.Generation, &networkSpec, &value.NetworkSpecHash,
+		&value.CreatedAt, &value.UpdatedAt, &value.LastHeartbeatAt, &value.ExpiresAt,
+	); err != nil {
+		return Session{}, err
+	}
+	value.NetworkSpec = append(json.RawMessage(nil), networkSpec...)
+	return sessionFromRow(value)
+}
+
 func (repository *sessionRepository) Heartbeat(
 	ctx context.Context,
 	id string,

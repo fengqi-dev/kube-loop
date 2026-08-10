@@ -26,6 +26,8 @@ const (
 	defaultMaxBodyBytes     = int64(1024)
 	defaultGlobalAttempts   = 30
 	defaultSourceAttempts   = 5
+	defaultTokenGlobal      = 300
+	defaultTokenSource      = 30
 	defaultRateLimitWindow  = time.Minute
 	managementRequestHeader = "X-Request-ID"
 )
@@ -39,12 +41,14 @@ type Config struct {
 }
 
 type Handler struct {
-	sessions *adminsession.Service
-	readAPI  *readAPI
-	origin   string
-	maxBody  int64
-	limiter  *exchangeLimiter
-	router   http.Handler
+	sessions   *adminsession.Service
+	readAPI    *readAPI
+	tokenAuth  TokenAuthenticator
+	origin     string
+	maxBody    int64
+	limiter    *exchangeLimiter
+	tokenLimit *exchangeLimiter
+	router     http.Handler
 }
 
 func New(config Config, sessions *adminsession.Service, optionValues ...Option) (*Handler, error) {
@@ -89,14 +93,27 @@ func New(config Config, sessions *adminsession.Service, optionValues ...Option) 
 	handler := &Handler{
 		sessions: sessions, origin: parsed.Scheme + "://" + parsed.Host,
 		maxBody: maxBody, limiter: newExchangeLimiter(globalAttempts, sourceAttempts, window),
+		tokenLimit: newExchangeLimiter(defaultTokenGlobal, defaultTokenSource, window),
 	}
 	if options.readAPI != nil {
 		handler.readAPI = options.readAPI
 		handler.readAPI.handler = handler
+		handler.readAPI.relays = options.relayStatus
+	} else if options.relayStatus != nil {
+		return nil, errors.New("management Relay status source requires the read API")
+	}
+	if options.tokenAuthenticator != nil {
+		if handler.readAPI == nil {
+			return nil, errors.New("management token exchange requires the read API authorizer")
+		}
+		handler.tokenAuth = options.tokenAuthenticator
 	}
 	router := chi.NewRouter()
 	router.Use(handler.securityHeaders)
 	router.Post("/sessions/break-glass", handler.exchangeBreakGlass)
+	if handler.tokenAuth != nil {
+		router.Post("/sessions/token", handler.exchangeToken)
+	}
 	if handler.readAPI != nil {
 		router.Group(handler.readAPI.routes)
 	}

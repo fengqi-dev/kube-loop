@@ -21,6 +21,7 @@ type PrincipalRepository interface {
 	Upsert(context.Context, Principal) (Principal, error)
 	GetByID(context.Context, string) (Principal, error)
 	GetByIdentity(context.Context, string, string) (Principal, error)
+	List(context.Context, PrincipalListFilter) ([]Principal, error)
 }
 
 type TokenFamilyRepository interface {
@@ -47,6 +48,7 @@ type RefreshTokenRepository interface {
 type SessionRepository interface {
 	Create(context.Context, Session) error
 	GetByID(context.Context, string) (Session, error)
+	List(context.Context, SessionListFilter) ([]Session, error)
 	// UpdateState uses generation as an optimistic concurrency guard and returns
 	// ErrConflict when the caller observed stale state.
 	UpdateState(context.Context, string, uint64, string, time.Time) error
@@ -60,6 +62,7 @@ type TaskRepository interface {
 	// Create enforces one idempotency key per Principal.
 	Create(context.Context, Task) error
 	GetByID(context.Context, string) (Task, error)
+	List(context.Context, TaskListFilter) ([]Task, error)
 	// UpdateState only changes the expected current state, preventing competing
 	// workers from publishing two terminal outcomes.
 	UpdateState(context.Context, string, remotetask.State, remotetask.State, json.RawMessage, time.Time) error

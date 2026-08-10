@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"sync/atomic"
 
@@ -119,6 +120,43 @@ func (engine *Engine) Available() bool {
 		return false
 	}
 	return engine.snapshot.Load().available
+}
+
+// DelegatedNamespaces returns only namespace-admin scopes matching the current
+// regular identity. Callers must still authorize every concrete operation;
+// this is capability discovery, not an authorization decision.
+func (engine *Engine) DelegatedNamespaces(subject Subject) []string {
+	if engine == nil || subject.Authentication != AuthenticationNormal {
+		return nil
+	}
+	subject.ID = strings.TrimSpace(subject.ID)
+	if _, err := uuid.Parse(subject.ID); err != nil {
+		return nil
+	}
+	groups, err := compileExactValues(subject.Groups, "groups")
+	if err != nil {
+		return nil
+	}
+	subject.Groups = groups
+	snapshot := engine.snapshot.Load()
+	if snapshot == nil || !snapshot.available {
+		return nil
+	}
+	namespaces := make(map[string]struct{})
+	for _, assignment := range snapshot.assignments {
+		if assignment.role != RoleNamespaceAdmin || !assignment.matchesSubject(subject) {
+			continue
+		}
+		for namespace := range assignment.namespaces {
+			namespaces[namespace] = struct{}{}
+		}
+	}
+	result := make([]string, 0, len(namespaces))
+	for namespace := range namespaces {
+		result = append(result, namespace)
+	}
+	slices.Sort(result)
+	return result
 }
 
 func (engine *Engine) Update(snapshot Snapshot) error {
@@ -279,6 +317,17 @@ func allowedDecision(
 }
 
 func (assignment compiledAssignment) matches(subject Subject, request Request) bool {
+	if !assignment.matchesSubject(subject) {
+		return false
+	}
+	if assignment.role != RoleNamespaceAdmin {
+		return true
+	}
+	_, namespaceMatch := assignment.namespaces[request.Namespace]
+	return namespaceMatch
+}
+
+func (assignment compiledAssignment) matchesSubject(subject Subject) bool {
 	_, subjectMatch := assignment.subjects[subject.ID]
 	groupMatch := false
 	for _, group := range subject.Groups {
@@ -290,11 +339,7 @@ func (assignment compiledAssignment) matches(subject Subject, request Request) b
 	if !subjectMatch && !groupMatch {
 		return false
 	}
-	if assignment.role != RoleNamespaceAdmin {
-		return true
-	}
-	_, namespaceMatch := assignment.namespaces[request.Namespace]
-	return namespaceMatch
+	return true
 }
 
 func matchesBootstrap(config BootstrapConfig, subject Subject) bool {

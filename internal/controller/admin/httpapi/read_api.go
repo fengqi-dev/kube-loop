@@ -11,12 +11,14 @@ import (
 
 	adminauthorization "github.com/fengqi-dev/kube-loop/internal/controller/admin/authorization"
 	adminsession "github.com/fengqi-dev/kube-loop/internal/controller/admin/session"
+	"github.com/fengqi-dev/kube-loop/internal/controller/relayregistry"
 	"github.com/fengqi-dev/kube-loop/internal/controller/storage"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 )
 
 type StatusSource interface {
+	storage.Repositories
 	Check(context.Context) error
 	Backend() storage.Backend
 	SchemaVersion(context.Context) (int, error)
@@ -32,7 +34,15 @@ type BuildInfo struct {
 
 type Option func(*handlerOptions) error
 
-type handlerOptions struct{ readAPI *readAPI }
+type handlerOptions struct {
+	readAPI            *readAPI
+	tokenAuthenticator TokenAuthenticator
+	relayStatus        RelayStatusSource
+}
+
+type RelayStatusSource interface {
+	Snapshot() []relayregistry.RelayStatus
+}
 
 func WithReadAPI(authorizer *adminauthorization.Engine, status StatusSource, build BuildInfo) Option {
 	return func(options *handlerOptions) error {
@@ -54,10 +64,24 @@ func WithReadAPI(authorizer *adminauthorization.Engine, status StatusSource, bui
 	}
 }
 
+func WithRelayStatusSource(source RelayStatusSource) Option {
+	return func(options *handlerOptions) error {
+		if source == nil {
+			return errors.New("management Relay status source is required")
+		}
+		if options.relayStatus != nil {
+			return errors.New("management Relay status source is already configured")
+		}
+		options.relayStatus = source
+		return nil
+	}
+}
+
 type readAPI struct {
 	handler    *Handler
 	authorizer *adminauthorization.Engine
 	status     StatusSource
+	relays     RelayStatusSource
 	build      BuildInfo
 }
 
@@ -89,6 +113,17 @@ func (api *readAPI) routes(router chi.Router) {
 		protected.With(api.require(adminauthorization.Request{
 			Resource: adminauthorization.ResourceStatus, Operation: adminauthorization.OperationRead,
 		})).Get("/status", api.systemStatus)
+		protected.With(api.require(adminauthorization.Request{
+			Resource: adminauthorization.ResourcePrincipal, Operation: adminauthorization.OperationList,
+		})).Get("/principals", api.listPrincipals)
+		protected.Get("/sessions", api.listSessions)
+		protected.Get("/tasks", api.listTasks)
+		protected.With(api.require(adminauthorization.Request{
+			Resource: adminauthorization.ResourceAudit, Operation: adminauthorization.OperationList,
+		})).Get("/audit", api.listAudit)
+		protected.With(api.require(adminauthorization.Request{
+			Resource: adminauthorization.ResourceRelay, Operation: adminauthorization.OperationList,
+		})).Get("/relays", api.listRelays)
 	})
 }
 
@@ -155,10 +190,25 @@ func (api *readAPI) capabilities(writer http.ResponseWriter, request *http.Reque
 		}
 	}
 	sort.Strings(capabilities)
+	namespaceScopes := make([]map[string]any, 0)
+	for _, namespace := range api.authorizer.DelegatedNamespaces(subject) {
+		allowed := make([]string, 0, len(capabilityChecks))
+		for _, permission := range capabilityChecks {
+			permission.Namespace = namespace
+			if api.authorizer.Authorize(request.Context(), subject, permission).Allowed {
+				allowed = append(allowed, permission.Key())
+			}
+		}
+		sort.Strings(allowed)
+		if len(allowed) > 0 {
+			namespaceScopes = append(namespaceScopes, map[string]any{"namespace": namespace, "capabilities": allowed})
+		}
+	}
 	api.audit(request, subject, "admin.capabilities/read", "success")
 	writeJSON(writer, http.StatusOK, map[string]any{
 		"authenticationType": subject.Authentication,
 		"capabilities":       capabilities,
+		"namespaceScopes":    namespaceScopes,
 		"policyRevision":     api.authorizer.Revision(),
 		"policyEtag":         api.authorizer.ETag(),
 	})

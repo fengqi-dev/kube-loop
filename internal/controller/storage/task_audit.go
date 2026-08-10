@@ -40,6 +40,10 @@ func (repository *auditedTaskRepository) GetByID(ctx context.Context, id string)
 	return repository.delegate.GetByID(ctx, id)
 }
 
+func (repository *auditedTaskRepository) List(ctx context.Context, filter TaskListFilter) ([]Task, error) {
+	return repository.delegate.List(ctx, filter)
+}
+
 func (repository *auditedTaskRepository) ListBySession(ctx context.Context, sessionID string, limit int) ([]Task, error) {
 	return repository.delegate.ListBySession(ctx, sessionID, limit)
 }
