@@ -205,6 +205,25 @@ var exportTableSpecs = []tableSpec{
 		orderBy: []string{"created_at", "id"},
 	},
 	{
+		name: "relay_desired_states",
+		columns: []columnSpec{
+			{name: "relay_id"}, {name: "schema_version", kind: columnInteger}, {name: "desired_state"},
+			{name: "version", kind: columnInteger}, {name: "updated_by"}, {name: "updated_authentication_type"},
+			{name: "reason"}, {name: "updated_at"},
+		},
+		orderBy: []string{"relay_id"},
+	},
+	{
+		name: "audit_export_jobs",
+		columns: []columnSpec{
+			{name: "id"}, {name: "schema_version", kind: columnInteger}, {name: "state"},
+			{name: "filter_json", kind: columnJSON}, {name: "result_data"}, {name: "error_code"},
+			{name: "requested_by"}, {name: "requested_authentication_type"}, {name: "reason"},
+			{name: "created_at"}, {name: "updated_at"}, {name: "expires_at"},
+		},
+		orderBy: []string{"created_at", "id"},
+	},
+	{
 		name: "admin_sessions",
 		columns: []columnSpec{
 			{name: "id_hash", kind: columnBytes}, {name: "schema_version", kind: columnInteger},

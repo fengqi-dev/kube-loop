@@ -550,6 +550,42 @@ var migrations = []migration{{
 			updated_at TEXT NOT NULL
 		)`,
 	},
+}, {
+	version: 11,
+	sqlite: []string{
+		`CREATE TABLE audit_export_jobs (
+			id TEXT PRIMARY KEY,
+			schema_version INTEGER NOT NULL CHECK (schema_version >= 1),
+			state TEXT NOT NULL CHECK (state IN ('pending', 'running', 'succeeded', 'failed')),
+			filter_json TEXT NOT NULL,
+			result_data TEXT NOT NULL DEFAULT '',
+			error_code TEXT NOT NULL DEFAULT '',
+			requested_by TEXT NOT NULL,
+			requested_authentication_type TEXT NOT NULL CHECK (requested_authentication_type IN ('normal', 'bootstrap', 'break-glass')),
+			reason TEXT NOT NULL,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			expires_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX audit_export_jobs_pending_idx ON audit_export_jobs(state, created_at, id)`,
+	},
+	postgresql: []string{
+		`CREATE TABLE audit_export_jobs (
+			id TEXT PRIMARY KEY,
+			schema_version INTEGER NOT NULL CHECK (schema_version >= 1),
+			state TEXT NOT NULL CHECK (state IN ('pending', 'running', 'succeeded', 'failed')),
+			filter_json JSONB NOT NULL,
+			result_data TEXT NOT NULL DEFAULT '',
+			error_code TEXT NOT NULL DEFAULT '',
+			requested_by TEXT NOT NULL,
+			requested_authentication_type TEXT NOT NULL CHECK (requested_authentication_type IN ('normal', 'bootstrap', 'break-glass')),
+			reason TEXT NOT NULL,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			expires_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX audit_export_jobs_pending_idx ON audit_export_jobs(state, created_at, id)`,
+	},
 }}
 
 func currentSchemaVersion() int {

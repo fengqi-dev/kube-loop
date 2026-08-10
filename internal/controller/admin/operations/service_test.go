@@ -29,6 +29,17 @@ type testRuntime struct {
 
 type testRelayRuntime struct{ statuses []relayregistry.RelayStatus }
 
+type testRecoveryRunner struct {
+	counts map[string]int
+	err    error
+	calls  int
+}
+
+func (runner *testRecoveryRunner) RunOnce(context.Context) (map[string]int, error) {
+	runner.calls++
+	return runner.counts, runner.err
+}
+
 func (runtime *testRelayRuntime) Snapshot() []relayregistry.RelayStatus {
 	return append([]relayregistry.RelayStatus(nil), runtime.statuses...)
 }
@@ -224,6 +235,70 @@ func TestRelayDrainAndRecoveryPersistAcrossRuntimeConvergence(t *testing.T) {
 	})
 	if err != nil || recovered.Version != 2 || !recovered.PendingConvergence {
 		t.Fatalf("RecoverRelay = %#v, %v", recovered, err)
+	}
+}
+
+func TestRecoveryTriggerIsDurableIdempotentAndRerunnable(t *testing.T) {
+	store, principal, _, now := newTestAggregate(t)
+	service, _ := New(store, &testRuntime{store: store})
+	service.now = func() time.Time { return now }
+	runner := &testRecoveryRunner{counts: map[string]int{"preview": 2}}
+	if err := service.ConfigureRecovery(runner); err != nil {
+		t.Fatal(err)
+	}
+	request := TriggerRecoveryRequest{Request: Request{
+		Actor:          Actor{PrincipalID: principal.ID, Authentication: adminauthorization.AuthenticationNormal},
+		IdempotencyKey: "operation-key-recovery-01", Reason: "recover stale resources", RequestID: uuid.NewString(),
+	}}
+	result, err := service.TriggerRecovery(context.Background(), request)
+	if err != nil || result.PendingConvergence || result.RecoveredByType["preview"] != 2 || runner.calls != 1 {
+		t.Fatalf("TriggerRecovery = %#v, %v; calls=%d", result, err, runner.calls)
+	}
+	replayed, err := service.TriggerRecovery(context.Background(), request)
+	if err != nil || !replayed.Replayed || runner.calls != 2 {
+		t.Fatalf("replayed TriggerRecovery = %#v, %v; calls=%d", replayed, err, runner.calls)
+	}
+}
+
+func TestAuditExportRunsAsBoundedDurableOwnerScopedJob(t *testing.T) {
+	store, principal, _, now := newTestAggregate(t)
+	service, _ := New(store, &testRuntime{store: store})
+	service.now = func() time.Time { return now }
+	if err := store.Audit().Append(context.Background(), storage.AuditEvent{
+		ID: uuid.NewString(), PrincipalID: principal.ID, Action: "admin.test.action", ResourceType: "task",
+		ResourceID: uuid.NewString(), Outcome: "success", RequestID: uuid.NewString(),
+		Metadata: []byte(`{"safe":true}`), CreatedAt: now.Add(-time.Minute),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	actor := Actor{PrincipalID: principal.ID, Authentication: adminauthorization.AuthenticationNormal}
+	created, err := service.CreateAuditExport(context.Background(), AuditExportRequest{
+		Request: Request{
+			Actor: actor, IdempotencyKey: "operation-key-export-0001", Reason: "export incident evidence", RequestID: uuid.NewString(),
+		},
+		Action: "admin.test.action", Limit: 10,
+	})
+	if err != nil || created.State != "pending" {
+		t.Fatalf("CreateAuditExport = %#v, %v", created, err)
+	}
+	service.runAuditExports(context.Background())
+	completed, data, err := service.GetAuditExport(context.Background(), actor, created.JobID)
+	if err != nil || completed.State != "succeeded" || !strings.Contains(data, `"action":"admin.test.action"`) ||
+		!strings.HasSuffix(data, "\n") {
+		t.Fatalf("completed audit export = %#v, %q, %v", completed, data, err)
+	}
+	other := Actor{PrincipalID: uuid.NewString(), Authentication: adminauthorization.AuthenticationNormal}
+	if _, _, err := service.GetAuditExport(context.Background(), other, created.JobID); !errors.Is(err, storage.ErrNotFound) {
+		t.Fatalf("cross-owner audit export read error = %v", err)
+	}
+	replayed, err := service.CreateAuditExport(context.Background(), AuditExportRequest{
+		Request: Request{
+			Actor: actor, IdempotencyKey: "operation-key-export-0001", Reason: "export incident evidence", RequestID: uuid.NewString(),
+		},
+		Action: "admin.test.action", Limit: 10,
+	})
+	if err != nil || !replayed.Replayed || replayed.JobID != created.JobID {
+		t.Fatalf("replayed audit export = %#v, %v", replayed, err)
 	}
 }
 

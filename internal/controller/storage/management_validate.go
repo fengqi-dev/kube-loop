@@ -238,6 +238,40 @@ func validateExportDomainRow(spec tableSpec, row []json.RawMessage) error {
 			CreatedAt: exportTime(row[14]), UpdatedAt: exportTime(row[15]),
 		}
 		return normalizeConfigChangeRequest(&value)
+	case "relay_desired_states":
+		if err := schemaVersion(1); err != nil {
+			return err
+		}
+		version, err := exportInteger(row[3])
+		if err != nil || version < 1 {
+			return errors.New("Relay desired state version is invalid")
+		}
+		return normalizeRelayDesiredState(&RelayDesiredState{
+			RelayID: exportText(row[0]), SchemaVersion: ObjectSchemaVersion, DesiredState: exportText(row[2]),
+			Version: uint64(version), UpdatedBy: exportText(row[4]), UpdatedAuthenticationType: exportText(row[5]),
+			Reason: exportText(row[6]), UpdatedAt: exportTime(row[7]),
+		})
+	case "audit_export_jobs":
+		if err := schemaVersion(1); err != nil {
+			return err
+		}
+		state, result, errorCode := exportText(row[2]), exportText(row[4]), exportText(row[5])
+		if state != "pending" && state != "running" && state != "succeeded" && state != "failed" {
+			return errors.New("audit export job state is invalid")
+		}
+		if !json.Valid(row[3]) || len(result) > maximumAuditExportBytes ||
+			(state == "succeeded" && (result == "" || errorCode != "")) ||
+			(state == "failed" && (result != "" || errorCode == "")) ||
+			((state == "pending" || state == "running") && (result != "" || errorCode != "")) {
+			return errors.New("audit export job outcome is invalid")
+		}
+		if _, _, err := normalizeManagementActor(exportText(row[6]), exportText(row[7])); err != nil {
+			return err
+		}
+		if exportText(row[8]) == "" || !exportTime(row[11]).After(exportTime(row[9])) {
+			return errors.New("audit export job lifetime is invalid")
+		}
+		return nil
 	case "admin_sessions", "auth_attempts", "auth_exchanges":
 		return nil
 	default:

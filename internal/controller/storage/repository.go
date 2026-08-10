@@ -108,6 +108,14 @@ type RelayDesiredStateRepository interface {
 	CompareAndSwap(context.Context, string, string, uint64, string, string, string, time.Time) (RelayDesiredState, error)
 }
 
+type AuditExportJobRepository interface {
+	Create(context.Context, AuditExportJob) error
+	GetByID(context.Context, string) (AuditExportJob, error)
+	ListRunnable(context.Context, time.Time, int) ([]AuditExportJob, error)
+	Claim(context.Context, string, time.Time, time.Time, time.Time) error
+	Complete(context.Context, string, string, string, string, time.Time) error
+}
+
 type AuthTransactionRepository interface {
 	// CreateAttempt stores only a hash of the upstream OIDC state. ConsumeAttempt
 	// atomically deletes and returns one unexpired attempt, preventing callback replay.
@@ -178,6 +186,7 @@ type Repositories interface {
 	Idempotency() IdempotencyRepository
 	Audit() AuditRepository
 	RelayDesiredStates() RelayDesiredStateRepository
+	AuditExportJobs() AuditExportJobRepository
 	AuthTransactions() AuthTransactionRepository
 	ManagementState() ManagementStateRepository
 	AdminSessions() AdminSessionRepository

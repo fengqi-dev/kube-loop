@@ -111,6 +111,7 @@ func testTaskStateMigrationPreservesLegacyTasks(t *testing.T, config Config) {
 		t.Fatal(err)
 	}
 	for _, table := range []string{
+		"audit_export_jobs",
 		"relay_desired_states",
 		"config_change_requests", "management_active_revisions", "admin_assignments",
 		"provider_config_revisions", "admin_policy_revisions",

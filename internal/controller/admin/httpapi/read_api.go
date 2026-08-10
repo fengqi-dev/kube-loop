@@ -167,10 +167,12 @@ var capabilityChecks = []adminauthorization.Request{
 	{Resource: adminauthorization.ResourceSession, Operation: adminauthorization.OperationStop},
 	{Resource: adminauthorization.ResourceTask, Operation: adminauthorization.OperationList},
 	{Resource: adminauthorization.ResourceTask, Operation: adminauthorization.OperationStop},
+	{Resource: adminauthorization.ResourceTask, Operation: adminauthorization.OperationRecover},
 	{Resource: adminauthorization.ResourceRelay, Operation: adminauthorization.OperationList},
 	{Resource: adminauthorization.ResourceRelay, Operation: adminauthorization.OperationDrain},
 	{Resource: adminauthorization.ResourceRelay, Operation: adminauthorization.OperationRecover},
 	{Resource: adminauthorization.ResourceAudit, Operation: adminauthorization.OperationList},
+	{Resource: adminauthorization.ResourceAudit, Operation: adminauthorization.OperationExport},
 }
 
 func (api *readAPI) routes(router chi.Router) {
@@ -250,6 +252,17 @@ func (api *readAPI) routes(router chi.Router) {
 					Resource: adminauthorization.ResourceRelay, Operation: adminauthorization.OperationRecover,
 				})).Post("/relays/{relayID}/recover", api.recoverRelay)
 			}
+			if api.operations.RecoveryAvailable() {
+				protected.With(api.require(adminauthorization.Request{
+					Resource: adminauthorization.ResourceTask, Operation: adminauthorization.OperationRecover,
+				})).Post("/tasks/recovery", api.triggerRecovery)
+			}
+			protected.With(api.require(adminauthorization.Request{
+				Resource: adminauthorization.ResourceAudit, Operation: adminauthorization.OperationExport,
+			})).Post("/audit/exports", api.createAuditExport)
+			protected.With(api.require(adminauthorization.Request{
+				Resource: adminauthorization.ResourceAudit, Operation: adminauthorization.OperationExport,
+			})).Get("/audit/exports/{jobID}", api.getAuditExport)
 		}
 	})
 }

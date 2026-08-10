@@ -113,6 +113,7 @@ type repositorySet struct {
 	idempotency               *idempotencyRepository
 	audit                     *auditRepository
 	relayDesiredStates        *relayDesiredStateRepository
+	auditExportJobs           *auditExportJobRepository
 	authTransactions          *authTransactionRepository
 	managementState           *managementStateRepository
 	adminSessions             *adminSessionRepository
@@ -139,6 +140,7 @@ func newRepositorySet(backend Backend, executor sqlExecutor, orm bun.IDB) *repos
 		idempotency:               &idempotencyRepository{repositoryBase: base},
 		audit:                     audit,
 		relayDesiredStates:        &relayDesiredStateRepository{repositoryBase: base},
+		auditExportJobs:           &auditExportJobRepository{repositoryBase: base},
 		authTransactions:          &authTransactionRepository{repositoryBase: base},
 		managementState:           &managementStateRepository{repositoryBase: base},
 		adminSessions:             &adminSessionRepository{repositoryBase: base},
@@ -190,6 +192,10 @@ func (repositories *repositorySet) Audit() AuditRepository {
 
 func (repositories *repositorySet) RelayDesiredStates() RelayDesiredStateRepository {
 	return repositories.relayDesiredStates
+}
+
+func (repositories *repositorySet) AuditExportJobs() AuditExportJobRepository {
+	return repositories.auditExportJobs
 }
 
 func (repositories *repositorySet) AuthTransactions() AuthTransactionRepository {

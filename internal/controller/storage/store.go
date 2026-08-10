@@ -258,6 +258,10 @@ func (store *Store) RelayDesiredStates() RelayDesiredStateRepository {
 	return store.repositories.RelayDesiredStates()
 }
 
+func (store *Store) AuditExportJobs() AuditExportJobRepository {
+	return store.repositories.AuditExportJobs()
+}
+
 func (store *Store) AuthTransactions() AuthTransactionRepository {
 	return store.repositories.AuthTransactions()
 }

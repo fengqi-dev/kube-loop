@@ -3,6 +3,7 @@ package httpapi
 import (
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 
 	adminauthorization "github.com/fengqi-dev/kube-loop/internal/controller/admin/authorization"
@@ -188,6 +189,106 @@ func (api *readAPI) changeRelayState(writer http.ResponseWriter, request *http.R
 		writer.Header().Set("Idempotent-Replayed", "true")
 	}
 	writeJSON(writer, map[bool]int{true: http.StatusAccepted, false: http.StatusOK}[result.PendingConvergence], result)
+}
+
+func (api *readAPI) triggerRecovery(writer http.ResponseWriter, request *http.Request) {
+	key, ok := operationIdempotencyKey(writer, request)
+	if !ok {
+		api.audit(request, subjectFromRequest(request), "admin.recovery/run", "failure")
+		return
+	}
+	var input struct {
+		Reason string `json:"reason"`
+	}
+	if !decodePolicyJSON(writer, request, &input) || !validChangeReason(input.Reason) {
+		api.audit(request, subjectFromRequest(request), "admin.recovery/run", "failure")
+		return
+	}
+	result, err := api.operations.TriggerRecovery(request.Context(), adminoperations.TriggerRecoveryRequest{Request: adminoperations.Request{
+		Actor: operationActor(subjectFromRequest(request)), IdempotencyKey: key,
+		Reason: input.Reason, RequestID: requestID(request),
+	}})
+	if err != nil {
+		api.audit(request, subjectFromRequest(request), "admin.recovery/run", "failure")
+		writeOperationError(writer, request, err)
+		return
+	}
+	if result.Replayed {
+		writer.Header().Set("Idempotent-Replayed", "true")
+	}
+	if result.PendingConvergence {
+		writer.Header().Set("Retry-After", "1")
+	}
+	writeJSON(writer, map[bool]int{true: http.StatusAccepted, false: http.StatusOK}[result.PendingConvergence], result)
+}
+
+func (api *readAPI) createAuditExport(writer http.ResponseWriter, request *http.Request) {
+	key, ok := operationIdempotencyKey(writer, request)
+	if !ok {
+		api.audit(request, subjectFromRequest(request), "admin.audit/export", "failure")
+		return
+	}
+	var input struct {
+		PrincipalID string `json:"principalId"`
+		Action      string `json:"action"`
+		After       string `json:"after"`
+		Before      string `json:"before"`
+		Limit       int    `json:"limit"`
+		Reason      string `json:"reason"`
+	}
+	if !decodePolicyJSON(writer, request, &input) || !validChangeReason(input.Reason) {
+		api.audit(request, subjectFromRequest(request), "admin.audit/export", "failure")
+		return
+	}
+	after, afterErr := optionalTime(input.After)
+	before, beforeErr := optionalTime(input.Before)
+	if afterErr != nil || beforeErr != nil {
+		api.audit(request, subjectFromRequest(request), "admin.audit/export", "failure")
+		writeError(writer, http.StatusBadRequest, "invalid_request", "audit export filter is invalid", requestID(request))
+		return
+	}
+	result, err := api.operations.CreateAuditExport(request.Context(), adminoperations.AuditExportRequest{
+		Request: adminoperations.Request{
+			Actor: operationActor(subjectFromRequest(request)), IdempotencyKey: key,
+			Reason: input.Reason, RequestID: requestID(request),
+		},
+		PrincipalID: input.PrincipalID, Action: input.Action, After: after, Before: before, Limit: input.Limit,
+	})
+	if err != nil {
+		api.audit(request, subjectFromRequest(request), "admin.audit/export", "failure")
+		writeOperationError(writer, request, err)
+		return
+	}
+	writer.Header().Set("Location", "/api/v2/admin/audit/exports/"+result.JobID)
+	if result.Replayed {
+		writer.Header().Set("Idempotent-Replayed", "true")
+	}
+	writeJSON(writer, http.StatusAccepted, result)
+}
+
+func (api *readAPI) getAuditExport(writer http.ResponseWriter, request *http.Request) {
+	result, data, err := api.operations.GetAuditExport(
+		request.Context(), operationActor(subjectFromRequest(request)), strings.TrimSpace(chi.URLParam(request, "jobID")),
+	)
+	if err != nil {
+		api.audit(request, subjectFromRequest(request), "admin.audit-export/read", "failure")
+		writeOperationError(writer, request, err)
+		return
+	}
+	api.audit(request, subjectFromRequest(request), "admin.audit-export/read", "success")
+	if result.State != "succeeded" {
+		pending := result.State == "pending" || result.State == "running"
+		if pending {
+			writer.Header().Set("Retry-After", "1")
+		}
+		writeJSON(writer, map[bool]int{true: http.StatusAccepted, false: http.StatusOK}[pending], result)
+		return
+	}
+	writer.Header().Set("Content-Type", "application/x-ndjson; charset=utf-8")
+	writer.Header().Set("Content-Disposition", `attachment; filename="kubeloop-audit-`+result.JobID+`.ndjson"`)
+	writer.Header().Set("Content-Length", strconv.Itoa(len(data)))
+	writer.WriteHeader(http.StatusOK)
+	_, _ = writer.Write([]byte(data))
 }
 
 func operationActor(subject adminauthorization.Subject) adminoperations.Actor {

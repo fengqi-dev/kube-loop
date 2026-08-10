@@ -131,7 +131,7 @@ active pointer 和审计事件。使用整数 revision/ETag 做乐观并发，�
 | V2-904 | 已完成 | 只读管理 UI | 概览、会话、任务、Relay、审计 | 不包含 Secret/Token，权限裁剪与可访问性通过 |
 | V2-905 | 已完成 | 访问/网络策略管理 | draft/dry-run/publish/rollback | 发布原子、旧会话权限即时失效、错误配置可回滚 |
 | V2-906 | 已完成 | Provider 管理 | OIDC/AD validation + Secret reference | 草稿验证不影响当前 Provider，Secret 不入 DB/响应/日志 |
-| V2-907 | 待实现 | 运维动作 | revoke/drain/stop/recover/export | 全部幂等、owner-safe、失败可观测且可重试 |
+| V2-907 | 已完成 | 运维动作 | revoke/drain/stop/recover/export | 全部幂等、owner-safe、失败可观测且可重试 |
 | V2-908 | 待实现 | 管理面安全/E2E | fuzz、race、浏览器和 Minikube E2E | CSRF/CSP/IDOR/并发发布/撤销/升级回滚通过 |
 
 推荐切片顺序：先交付 V2-900～904 的只读后台；再实现 V2-905 的策略写入；

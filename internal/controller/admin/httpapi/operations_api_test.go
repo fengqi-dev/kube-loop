@@ -18,6 +18,12 @@ type noopSessionRuntime struct{}
 
 func (noopSessionRuntime) Disconnect(context.Context, string) error { return nil }
 
+type noopRecoveryRunner struct{}
+
+func (noopRecoveryRunner) RunOnce(context.Context) (map[string]int, error) {
+	return map[string]int{"preview": 0}, nil
+}
+
 func TestOperationsAPIEnforcesHeadersAndPersistsActions(t *testing.T) {
 	handler, store, _ := newPolicyTestHandler(t)
 	cookie, csrf := exchangeBreakGlassSession(t, handler)
@@ -64,6 +70,22 @@ func TestOperationsAPIEnforcesHeadersAndPersistsActions(t *testing.T) {
 		if strings.Contains(string(event.Metadata), "operation-http-") {
 			t.Fatalf("audit leaked plaintext idempotency key: %#v", event)
 		}
+	}
+
+	recovery := policyWrite(t, handler, cookie, csrf, "/tasks/recovery", "",
+		"operation-http-recover-01", map[string]string{"reason": "reconcile stale resources"})
+	if recovery.Code != http.StatusOK || !strings.Contains(recovery.Body.String(), `"preview":0`) {
+		t.Fatalf("recovery status=%d body=%s", recovery.Code, recovery.Body.String())
+	}
+	export := policyWrite(t, handler, cookie, csrf, "/audit/exports", "",
+		"operation-http-export-001", map[string]any{"action": "admin.session.stop", "limit": 10, "reason": "export incident evidence"})
+	if export.Code != http.StatusAccepted || export.Header().Get("Location") == "" {
+		t.Fatalf("audit export status=%d headers=%v body=%s", export.Code, export.Header(), export.Body.String())
+	}
+	jobPath := strings.TrimPrefix(export.Header().Get("Location"), "/api/v2/admin")
+	pending := authenticatedGET(handler, cookie, jobPath)
+	if pending.Code != http.StatusAccepted || pending.Header().Get("Retry-After") != "1" {
+		t.Fatalf("pending audit export status=%d headers=%v body=%s", pending.Code, pending.Header(), pending.Body.String())
 	}
 }
 

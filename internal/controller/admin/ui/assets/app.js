@@ -345,7 +345,90 @@ function renderToolbar(view) {
     label.append(select); actions.append(label);
   }
   const refresh = text("button", "刷新", "secondary"); refresh.type = "button"; refresh.addEventListener("click", () => { state.cursor = ""; loadList(); });
+  if (state.activeView === "tasks" && hasCapability("admin.task/recover")) {
+    const recover = text("button", "触发恢复", "secondary"); recover.type = "button";
+    recover.addEventListener("click", () => runRecovery(recover)); actions.append(recover);
+  }
+  if (state.activeView === "audit" && hasCapability("admin.audit/export")) {
+    const exportButton = text("button", "导出 NDJSON", "secondary"); exportButton.type = "button";
+    exportButton.addEventListener("click", () => startAuditExport(exportButton)); actions.append(exportButton);
+  }
   actions.append(refresh); wrapper.append(copy, actions); return wrapper;
+}
+
+function operationReason(message) {
+  const reason = window.prompt(message, "planned administrative operation")?.trim() || "";
+  if (reason.length < 8 || reason.length > 512 || /[\r\n\0]/u.test(reason)) throw new Error("原因必须为 8–512 个字符且不能换行。");
+  return reason;
+}
+
+async function operationMutation(path, reason, etag = null) {
+  const headers = {
+    "Content-Type": "application/json",
+    "X-KubeLoop-CSRF": sessionStorage.getItem(csrfStorageKey) || "",
+    "Idempotency-Key": randomValue(),
+  };
+  if (etag !== null) headers["If-Match"] = `"${etag}"`;
+  return requestJSON(`${managementBase}${path}`, { method: "POST", headers, body: JSON.stringify({ reason }) });
+}
+
+function rowOperation(item) {
+  const view = state.activeView;
+  let label = ""; let path = ""; let etag = null;
+  if (view === "principals" && hasCapability("admin.session/revoke")) {
+    label = "撤销设备"; path = `/principals/${encodeURIComponent(item.id)}/revoke`;
+  } else if (view === "sessions" && hasCapability("admin.session/stop") && item.state !== "stopped") {
+    label = "强制停止"; path = `/sessions/${encodeURIComponent(item.id)}/stop`; etag = item.generation;
+  } else if (view === "tasks" && hasCapability("admin.task/stop") && !["stopped", "failed"].includes(item.state)) {
+    label = "停止"; path = `/tasks/${encodeURIComponent(item.id)}/stop`; etag = item.version;
+  } else if (view === "relays" && item.desiredState === "draining" && hasCapability("admin.relay/recover")) {
+    label = "恢复接流"; path = `/relays/${encodeURIComponent(item.relayId)}/recover`; etag = item.controlVersion || 0;
+  } else if (view === "relays" && hasCapability("admin.relay/drain")) {
+    label = "排空"; path = `/relays/${encodeURIComponent(item.relayId)}/drain`; etag = item.controlVersion || 0;
+  }
+  if (!label) return null;
+  const button = text("button", label, "secondary"); button.type = "button";
+  button.addEventListener("click", async () => {
+    try {
+      button.disabled = true;
+      await operationMutation(path, operationReason(`请输入“${label}”原因`), etag);
+      state.cursor = ""; await loadList();
+    } catch (error) { renderError(error.message); } finally { button.disabled = false; }
+  });
+  return button;
+}
+
+async function runRecovery(button) {
+  try {
+    button.disabled = true;
+    await operationMutation("/tasks/recovery", operationReason("请输入恢复原因"));
+    state.cursor = ""; await loadList();
+  } catch (error) { renderError(error.message); } finally { button.disabled = false; }
+}
+
+async function startAuditExport(button) {
+  try {
+    button.disabled = true;
+    const created = await operationMutation("/audit/exports", operationReason("请输入审计导出原因"));
+    await downloadAuditExport(created.jobId);
+  } catch (error) { renderError(error.message); } finally { button.disabled = false; }
+}
+
+async function downloadAuditExport(jobID) {
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    const response = await fetch(`${managementBase}/audit/exports/${encodeURIComponent(jobID)}`, {
+      credentials: "same-origin", cache: "no-store", headers: { Accept: "application/x-ndjson, application/json" },
+    });
+    if (response.status === 202) { await new Promise((resolve) => setTimeout(resolve, 1000)); continue; }
+    if (!response.ok) throw new Error(`审计导出失败 (${response.status})`);
+    if ((response.headers.get("Content-Type") || "").startsWith("application/x-ndjson")) {
+      await response.body?.cancel();
+      const link = document.createElement("a"); link.href = `${managementBase}/audit/exports/${encodeURIComponent(jobID)}`;
+      link.download = `kubeloop-audit-${jobID}.ndjson`; link.click(); return;
+    }
+    const status = await response.json(); throw new Error(status.errorCode || "审计导出失败");
+  }
+  throw new Error("审计导出仍在处理中，请稍后重试。");
 }
 
 async function loadOverview() {
@@ -730,7 +813,9 @@ async function loadList() {
     else {
       const table = document.createElement("table");
       const head = document.createElement("thead"); const headRow = document.createElement("tr");
-      columns[state.activeView].forEach(([, label]) => headRow.append(text("th", label))); head.append(headRow); table.append(head);
+      columns[state.activeView].forEach(([, label]) => headRow.append(text("th", label)));
+      const showActions = items.some((item) => rowOperation(item) !== null);
+      if (showActions) headRow.append(text("th", "操作")); head.append(headRow); table.append(head);
       const body = document.createElement("tbody");
       items.forEach((item) => {
         const row = document.createElement("tr");
@@ -740,7 +825,9 @@ async function loadList() {
           if (key === "state" || key === "desiredState" || key === "outcome") cell.append(text("span", value, `pill ${String(item[key] || "").toLowerCase()}`));
           else cell.textContent = value;
           row.append(cell);
-        }); body.append(row);
+        });
+        if (showActions) { const cell = document.createElement("td"); const action = rowOperation(item); if (action) cell.append(action); row.append(cell); }
+        body.append(row);
       });
       table.append(body); tableWrap.append(table);
     }

@@ -166,6 +166,21 @@ type RelayDesiredState struct {
 	UpdatedAt                 time.Time
 }
 
+type AuditExportJob struct {
+	ID                          string
+	SchemaVersion               int
+	State                       string
+	Filter                      json.RawMessage
+	Result                      string
+	ErrorCode                   string
+	RequestedBy                 string
+	RequestedAuthenticationType string
+	Reason                      string
+	CreatedAt                   time.Time
+	UpdatedAt                   time.Time
+	ExpiresAt                   time.Time
+}
+
 type AuthAttempt struct {
 	ID                   string
 	SchemaVersion        int

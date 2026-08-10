@@ -42,6 +42,7 @@ func testRepositoryConformance(t *testing.T, store *Store) {
 	t.Run("idempotency", func(t *testing.T) { testIdempotencyRepository(t, store) })
 	t.Run("audit", func(t *testing.T) { testAuditRepository(t, store) })
 	t.Run("Relay desired states", func(t *testing.T) { testRelayDesiredStateRepository(t, store) })
+	t.Run("audit export jobs", func(t *testing.T) { testAuditExportJobRepository(t, store) })
 	t.Run("management list pagination", func(t *testing.T) { testManagementListPagination(t, store) })
 	t.Run("authentication transactions", func(t *testing.T) { testAuthTransactionRepository(t, store) })
 	t.Run("management sessions", func(t *testing.T) { testAdminSessionRepositoryConformance(t, store) })
@@ -76,6 +77,38 @@ func testRelayDesiredStateRepository(t *testing.T, store *Store) {
 	listed, err := store.RelayDesiredStates().List(ctx)
 	if err != nil || len(listed) != 1 || listed[0].Version != 2 {
 		t.Fatalf("list Relay desired states = %#v, %v", listed, err)
+	}
+}
+
+func testAuditExportJobRepository(t *testing.T, store *Store) {
+	t.Helper()
+	ctx := context.Background()
+	now := time.Date(2026, 8, 10, 13, 0, 0, 0, time.UTC)
+	job := AuditExportJob{
+		ID: uuid.NewString(), State: "pending", Filter: json.RawMessage(`{"limit":10}`),
+		RequestedBy: ManagementActorBreakGlass, RequestedAuthenticationType: "break-glass", Reason: "export conformance audit",
+		CreatedAt: now, UpdatedAt: now, ExpiresAt: now.Add(time.Hour),
+	}
+	if err := store.AuditExportJobs().Create(ctx, job); err != nil {
+		t.Fatal(err)
+	}
+	pending, err := store.AuditExportJobs().ListRunnable(ctx, now.Add(-time.Minute), 10)
+	if err != nil || len(pending) != 1 || pending[0].ID != job.ID {
+		t.Fatalf("pending audit export jobs = %#v, %v", pending, err)
+	}
+	claimedAt := now.Add(time.Minute)
+	if err := store.AuditExportJobs().Claim(ctx, job.ID, now, now.Add(-time.Minute), claimedAt); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AuditExportJobs().Claim(ctx, job.ID, now, now.Add(-time.Minute), claimedAt); !errors.Is(err, ErrConflict) {
+		t.Fatalf("duplicate audit export claim error = %v", err)
+	}
+	if err := store.AuditExportJobs().Complete(ctx, job.ID, "succeeded", "{}\n", "", claimedAt.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := store.AuditExportJobs().GetByID(ctx, job.ID)
+	if err != nil || loaded.State != "succeeded" || loaded.Result != "{}\n" {
+		t.Fatalf("completed audit export job = %#v, %v", loaded, err)
 	}
 }
 

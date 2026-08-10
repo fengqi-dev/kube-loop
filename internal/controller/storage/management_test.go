@@ -446,6 +446,18 @@ func seedManagementStore(t *testing.T, store *Store) managementSeed {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := store.RelayDesiredStates().CompareAndSwap(
+		ctx, "relay-management-seed", "draining", 0, principal.ID, "normal", "seed Relay drain", now,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AuditExportJobs().Create(ctx, AuditExportJob{
+		ID: uuid.NewString(), State: "pending", Filter: json.RawMessage(`{"limit":10}`),
+		RequestedBy: principal.ID, RequestedAuthenticationType: "normal", Reason: "seed audit export",
+		CreatedAt: now, UpdatedAt: now, ExpiresAt: now.Add(time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
 	adminSessionID := sha256.Sum256([]byte("management-browser-session"))
 	adminCSRF := sha256.Sum256([]byte("management-browser-csrf"))
 	if err := store.AdminSessions().Create(ctx, AdminSession{

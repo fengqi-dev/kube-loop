@@ -700,6 +700,27 @@ func main() {
 		logger.Error("initialize Management Operations service failed", "error", err)
 		os.Exit(2)
 	}
+	err = managementOperations.ConfigureRecovery(adminoperations.RecoveryRunnerFunc(func(ctx context.Context) (map[string]int, error) {
+		counts := make(map[string]int, 5)
+		var result error
+		for name, run := range map[string]func(context.Context) (int, error){
+			"session-runtime": sessionRecovery.RunOnce,
+			"traffic-binding": bindingRecovery.RunOnce,
+			"exchange":        exchangeRecovery.RunOnce,
+			"mirror":          mirrorRecovery.RunOnce,
+			"preview":         previewRecovery.RunOnce,
+		} {
+			count, runErr := run(ctx)
+			counts[name] = count
+			result = errors.Join(result, runErr)
+		}
+		return counts, result
+	}))
+	if err != nil {
+		_ = stateStore.Close()
+		logger.Error("initialize Management recovery runner failed", "error", err)
+		os.Exit(2)
+	}
 	var tokenService *token.Service
 	if len(authRegistry.Descriptors()) > 0 || len(managementFile.ProviderSecretAliases) > 0 {
 		signingKey, err := token.LoadSigningKey(*tokenSigningKeyFile)
@@ -815,7 +836,7 @@ func main() {
 	}
 	errCh := make(chan error, serveCount)
 	var backgroundWorkers sync.WaitGroup
-	backgroundWorkers.Add(7)
+	backgroundWorkers.Add(8)
 	go func() {
 		defer backgroundWorkers.Done()
 		managementPolicyLoader.Run(signalContext)
@@ -823,6 +844,10 @@ func main() {
 	go func() {
 		defer backgroundWorkers.Done()
 		sessionRecovery.Run(signalContext)
+	}()
+	go func() {
+		defer backgroundWorkers.Done()
+		managementOperations.Run(signalContext)
 	}()
 	go func() {
 		defer backgroundWorkers.Done()

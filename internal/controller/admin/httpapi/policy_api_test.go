@@ -194,6 +194,9 @@ func newPolicyTestHandler(t *testing.T) (*Handler, *storage.Store, *adminauthori
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := operations.ConfigureRecovery(noopRecoveryRunner{}); err != nil {
+		t.Fatal(err)
+	}
 	handler, err := New(Config{PublicURL: "https://gateway.example"}, sessions,
 		WithReadAPI(engine, store, BuildInfo{Version: "test", Commit: "test", ProtocolMin: "2.0", ProtocolMax: "2.0"}),
 		WithPolicyAPI(service, loader),

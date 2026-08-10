@@ -3,6 +3,7 @@
 package operations
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -27,8 +28,12 @@ var (
 )
 
 const (
-	idempotencyLifetime = 24 * time.Hour
-	runtimeTimeout      = 5 * time.Second
+	idempotencyLifetime   = 24 * time.Hour
+	runtimeTimeout        = 5 * time.Second
+	exportWorkerInterval  = 500 * time.Millisecond
+	maximumExportRows     = 1000
+	maximumExportBytes    = 4 << 20
+	exportClaimStaleAfter = 30 * time.Second
 )
 
 type Store interface {
@@ -43,6 +48,16 @@ type SessionRuntime interface {
 type RelayRuntime interface {
 	Snapshot() []relayregistry.RelayStatus
 	RestoreDesiredState(string, relaycontrol.State) error
+}
+
+type RecoveryRunner interface {
+	RunOnce(context.Context) (map[string]int, error)
+}
+
+type RecoveryRunnerFunc func(context.Context) (map[string]int, error)
+
+func (function RecoveryRunnerFunc) RunOnce(ctx context.Context) (map[string]int, error) {
+	return function(ctx)
 }
 
 type Actor struct {
@@ -86,6 +101,17 @@ type ChangeRelayStateRequest struct {
 	ExpectedVersion uint64
 }
 
+type TriggerRecoveryRequest struct{ Request }
+
+type AuditExportRequest struct {
+	Request
+	PrincipalID string
+	Action      string
+	After       time.Time
+	Before      time.Time
+	Limit       int
+}
+
 type RevocationResult struct {
 	PrincipalID     string    `json:"principalId"`
 	DeviceSessionID string    `json:"deviceSessionId,omitempty"`
@@ -119,12 +145,30 @@ type RelayStateResult struct {
 	Replayed           bool   `json:"replayed"`
 }
 
+type RecoveryResult struct {
+	RequestedAt        time.Time      `json:"requestedAt"`
+	RecoveredByType    map[string]int `json:"recoveredByType"`
+	PendingConvergence bool           `json:"pendingConvergence"`
+	Replayed           bool           `json:"replayed"`
+}
+
+type AuditExportResult struct {
+	JobID     string    `json:"jobId"`
+	State     string    `json:"state"`
+	ErrorCode string    `json:"errorCode,omitempty"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+	ExpiresAt time.Time `json:"expiresAt"`
+	Replayed  bool      `json:"replayed"`
+}
+
 type Service struct {
-	store   Store
-	runtime SessionRuntime
-	relays  RelayRuntime
-	now     func() time.Time
-	newID   func() string
+	store    Store
+	runtime  SessionRuntime
+	relays   RelayRuntime
+	recovery RecoveryRunner
+	now      func() time.Time
+	newID    func() string
 }
 
 func New(store Store, runtime SessionRuntime, relayRuntimes ...RelayRuntime) (*Service, error) {
@@ -142,6 +186,19 @@ func New(store Store, runtime SessionRuntime, relayRuntimes ...RelayRuntime) (*S
 }
 
 func (service *Service) RelayAvailable() bool { return service != nil && service.relays != nil }
+
+func (service *Service) ConfigureRecovery(runner RecoveryRunner) error {
+	if service == nil || runner == nil {
+		return errors.New("management recovery runner is required")
+	}
+	if service.recovery != nil {
+		return errors.New("management recovery runner is already configured")
+	}
+	service.recovery = runner
+	return nil
+}
+
+func (service *Service) RecoveryAvailable() bool { return service != nil && service.recovery != nil }
 
 func (service *Service) RevokeDeviceSession(ctx context.Context, request RevokeDeviceSessionRequest) (RevocationResult, error) {
 	common, err := normalizeRequest(request.Request, "admin.device-session.revoke")
@@ -418,6 +475,201 @@ func (service *Service) changeRelayState(
 		}
 	}
 	return result, nil
+}
+
+func (service *Service) TriggerRecovery(ctx context.Context, request TriggerRecoveryRequest) (RecoveryResult, error) {
+	if service.recovery == nil {
+		return RecoveryResult{}, ErrUnavailable
+	}
+	common, err := normalizeRequest(request.Request, "admin.recovery.run")
+	if err != nil {
+		return RecoveryResult{}, err
+	}
+	requestHash := requestDigest(struct {
+		Reason string `json:"reason"`
+	}{common.reason})
+	result := RecoveryResult{}
+	err = service.store.WithinTransaction(ctx, func(repositories storage.Repositories) error {
+		replayed, lookupErr := replay(repositories, ctx, common.scope, common.keyHash, requestHash, &result)
+		if lookupErr != nil || replayed {
+			if replayed {
+				result.Replayed = true
+			}
+			return lookupErr
+		}
+		result = RecoveryResult{
+			RequestedAt: service.now().UTC(), RecoveredByType: map[string]int{}, PendingConvergence: true,
+		}
+		return service.persistSuccess(ctx, repositories, common, requestHash, "recovery", "controller",
+			"admin.recovery.run", map[string]any{"scope": "all-stale-owned-tasks"}, result)
+	})
+	if err != nil {
+		return RecoveryResult{}, mapError(err)
+	}
+	runContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), runtimeTimeout)
+	counts, runErr := service.recovery.RunOnce(runContext)
+	cancel()
+	if counts == nil {
+		counts = map[string]int{}
+	}
+	result.RecoveredByType = counts
+	result.PendingConvergence = runErr != nil
+	return result, nil
+}
+
+func (service *Service) CreateAuditExport(ctx context.Context, request AuditExportRequest) (AuditExportResult, error) {
+	common, err := normalizeRequest(request.Request, "admin.audit.export")
+	request.PrincipalID, request.Action = strings.TrimSpace(request.PrincipalID), strings.TrimSpace(request.Action)
+	if request.Limit == 0 {
+		request.Limit = maximumExportRows
+	}
+	if err != nil || request.Limit < 1 || request.Limit > maximumExportRows ||
+		(request.PrincipalID != "" && !validUUID(request.PrincipalID)) || len(request.Action) > 256 ||
+		strings.ContainsAny(request.Action, "\x00\r\n") ||
+		(!request.After.IsZero() && !request.Before.IsZero() && !request.Before.After(request.After)) {
+		return AuditExportResult{}, ErrInvalidRequest
+	}
+	filter := storage.AuditFilter{
+		PrincipalID: request.PrincipalID, Action: request.Action,
+		After: request.After.UTC(), Before: request.Before.UTC(), Limit: request.Limit,
+	}
+	filterJSON, _ := json.Marshal(struct {
+		PrincipalID string    `json:"principalId,omitempty"`
+		Action      string    `json:"action,omitempty"`
+		After       time.Time `json:"after,omitempty"`
+		Before      time.Time `json:"before,omitempty"`
+		Limit       int       `json:"limit"`
+	}{filter.PrincipalID, filter.Action, filter.After, filter.Before, filter.Limit})
+	requestHash := requestDigest(struct {
+		Filter json.RawMessage `json:"filter"`
+		Reason string          `json:"reason"`
+	}{filterJSON, common.reason})
+	now, jobID := service.now().UTC(), service.newID()
+	result := AuditExportResult{}
+	err = service.store.WithinTransaction(ctx, func(repositories storage.Repositories) error {
+		replayed, lookupErr := replay(repositories, ctx, common.scope, common.keyHash, requestHash, &result)
+		if lookupErr != nil || replayed {
+			if replayed {
+				result.Replayed = true
+			}
+			return lookupErr
+		}
+		job := storage.AuditExportJob{
+			ID: jobID, State: "pending", Filter: filterJSON, RequestedBy: common.actorID,
+			RequestedAuthenticationType: common.authenticationType, Reason: common.reason,
+			CreatedAt: now, UpdatedAt: now, ExpiresAt: now.Add(idempotencyLifetime),
+		}
+		if createErr := repositories.AuditExportJobs().Create(ctx, job); createErr != nil {
+			return createErr
+		}
+		result = auditExportResult(job)
+		return service.persistSuccess(ctx, repositories, common, requestHash, "audit-export", job.ID,
+			"admin.audit.export", map[string]any{"limit": filter.Limit}, result)
+	})
+	if err != nil {
+		return AuditExportResult{}, mapError(err)
+	}
+	return result, nil
+}
+
+func (service *Service) GetAuditExport(ctx context.Context, actor Actor, jobID string) (AuditExportResult, string, error) {
+	common, err := normalizeRequest(Request{
+		Actor: actor, IdempotencyKey: "read-only-placeholder", Reason: "read audit export", RequestID: "read",
+	}, "admin.audit.export.read")
+	if err != nil || !validUUID(jobID) {
+		return AuditExportResult{}, "", ErrInvalidRequest
+	}
+	job, err := service.store.AuditExportJobs().GetByID(ctx, jobID)
+	if err != nil {
+		return AuditExportResult{}, "", err
+	}
+	if job.RequestedBy != common.actorID || job.RequestedAuthenticationType != common.authenticationType {
+		return AuditExportResult{}, "", storage.ErrNotFound
+	}
+	return auditExportResult(job), job.Result, nil
+}
+
+func (service *Service) Run(ctx context.Context) {
+	service.runAuditExports(ctx)
+	ticker := time.NewTicker(exportWorkerInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			service.runAuditExports(ctx)
+		}
+	}
+}
+
+func (service *Service) runAuditExports(ctx context.Context) {
+	staleBefore := service.now().UTC().Add(-exportClaimStaleAfter)
+	jobs, err := service.store.AuditExportJobs().ListRunnable(ctx, staleBefore, 10)
+	if err != nil {
+		return
+	}
+	for _, job := range jobs {
+		now := service.now().UTC()
+		if err := service.store.AuditExportJobs().Claim(ctx, job.ID, job.UpdatedAt, staleBefore, now); err != nil {
+			continue
+		}
+		data, errorCode := service.buildAuditExport(ctx, job.Filter)
+		state := "succeeded"
+		if errorCode != "" {
+			state, data = "failed", ""
+		}
+		_ = service.store.AuditExportJobs().Complete(ctx, job.ID, state, data, errorCode, service.now().UTC())
+	}
+}
+
+func (service *Service) buildAuditExport(ctx context.Context, raw json.RawMessage) (string, string) {
+	var filter struct {
+		PrincipalID string    `json:"principalId"`
+		Action      string    `json:"action"`
+		After       time.Time `json:"after"`
+		Before      time.Time `json:"before"`
+		Limit       int       `json:"limit"`
+	}
+	if json.Unmarshal(raw, &filter) != nil || filter.Limit < 1 || filter.Limit > maximumExportRows {
+		return "", "invalid_filter"
+	}
+	events, err := service.store.Audit().List(ctx, storage.AuditFilter{
+		PrincipalID: filter.PrincipalID, Action: filter.Action, After: filter.After, Before: filter.Before, Limit: filter.Limit,
+	})
+	if err != nil {
+		return "", "storage_unavailable"
+	}
+	var output bytes.Buffer
+	for _, event := range events {
+		line, marshalErr := json.Marshal(struct {
+			ID           string          `json:"id"`
+			PrincipalID  string          `json:"principalId,omitempty"`
+			Action       string          `json:"action"`
+			ResourceType string          `json:"resourceType,omitempty"`
+			ResourceID   string          `json:"resourceId,omitempty"`
+			Outcome      string          `json:"outcome"`
+			RequestID    string          `json:"requestId"`
+			Metadata     json.RawMessage `json:"metadata,omitempty"`
+			CreatedAt    time.Time       `json:"createdAt"`
+		}{event.ID, event.PrincipalID, event.Action, event.ResourceType, event.ResourceID, event.Outcome, event.RequestID, event.Metadata, event.CreatedAt})
+		if marshalErr != nil || output.Len()+len(line)+1 > maximumExportBytes {
+			return "", "export_too_large"
+		}
+		output.Write(line)
+		output.WriteByte('\n')
+	}
+	if output.Len() == 0 {
+		output.WriteByte('\n')
+	}
+	return output.String(), ""
+}
+
+func auditExportResult(job storage.AuditExportJob) AuditExportResult {
+	return AuditExportResult{
+		JobID: job.ID, State: job.State, ErrorCode: job.ErrorCode,
+		CreatedAt: job.CreatedAt, UpdatedAt: job.UpdatedAt, ExpiresAt: job.ExpiresAt,
+	}
 }
 
 type normalizedRequest struct {
