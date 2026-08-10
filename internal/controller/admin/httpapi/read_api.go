@@ -110,6 +110,7 @@ func (api *readAPI) routes(router chi.Router) {
 	router.Group(func(protected chi.Router) {
 		protected.Use(api.authenticate)
 		protected.Get("/capabilities", api.capabilities)
+		protected.Delete("/sessions/current", api.revokeCurrentSession)
 		protected.With(api.require(adminauthorization.Request{
 			Resource: adminauthorization.ResourceStatus, Operation: adminauthorization.OperationRead,
 		})).Get("/status", api.systemStatus)
@@ -125,6 +126,19 @@ func (api *readAPI) routes(router chi.Router) {
 			Resource: adminauthorization.ResourceRelay, Operation: adminauthorization.OperationList,
 		})).Get("/relays", api.listRelays)
 	})
+}
+
+func (api *readAPI) revokeCurrentSession(writer http.ResponseWriter, request *http.Request) {
+	stored, ok := request.Context().Value(sessionContextKey).(storage.AdminSession)
+	if !ok || api.handler.sessions.Revoke(request.Context(), stored, requestID(request)) != nil {
+		writeError(writer, http.StatusServiceUnavailable, "unavailable", "management session could not be revoked", requestID(request))
+		return
+	}
+	http.SetCookie(writer, &http.Cookie{
+		Name: SessionCookieName, Value: "", Path: "/", Secure: true, HttpOnly: true,
+		SameSite: http.SameSiteStrictMode, MaxAge: -1, Expires: time.Unix(1, 0).UTC(),
+	})
+	writer.WriteHeader(http.StatusNoContent)
 }
 
 func (api *readAPI) authenticate(next http.Handler) http.Handler {

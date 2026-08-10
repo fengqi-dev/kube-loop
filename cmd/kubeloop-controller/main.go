@@ -658,7 +658,9 @@ func main() {
 			logger.Error("initialize token service failed", "error", err)
 			os.Exit(2)
 		}
-		loginService, err := login.New(authRegistry, stateStore, login.Config{})
+		loginService, err := login.New(authRegistry, stateStore, login.Config{
+			AllowedCallbacks: []string{strings.TrimRight(*publicURL, "/") + "/api/v2/admin/ui/callback"},
+		})
 		if err != nil {
 			_ = stateStore.Close()
 			logger.Error("initialize login service failed", "error", err)

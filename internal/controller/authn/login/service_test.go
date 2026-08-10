@@ -148,6 +148,36 @@ func TestLoginServiceRejectsTamperingAndUnsafeCallbacks(t *testing.T) {
 	}
 }
 
+func TestLoginServiceAllowsOnlyConfiguredHTTPSBrowserCallback(t *testing.T) {
+	service, _, _ := newTestService(t)
+	request := validBeginRequest(pkceChallenge(strings.Repeat("v", 43)))
+	request.ClientCallback = "https://gateway.example.test/api/v2/admin/ui/callback"
+	if _, err := service.Begin(context.Background(), request); err != nil {
+		t.Fatalf("configured browser callback error = %v", err)
+	}
+}
+
+func TestConfiguredBrowserCallbackRejectsRemoteHTTP(t *testing.T) {
+	for _, value := range []string{
+		"http://gateway.example.test/api/v2/admin/ui/callback",
+		"https://gateway.example.test/api/v2/admin/ui/callback?next=attacker",
+		"https://user@gateway.example.test/api/v2/admin/ui/callback",
+	} {
+		if _, err := validateConfiguredCallback(value); err == nil {
+			t.Fatalf("configured callback %q was accepted", value)
+		}
+	}
+	for _, value := range []string{
+		"https://gateway.example.test/api/v2/admin/ui/callback",
+		"http://127.0.0.1:8080/api/v2/admin/ui/callback",
+		"http://localhost:8080/api/v2/admin/ui/callback",
+	} {
+		if _, err := validateConfiguredCallback(value); err != nil {
+			t.Fatalf("configured callback %q error=%v", value, err)
+		}
+	}
+}
+
 func TestLoginServiceWrongVerifierConsumesExchangeCode(t *testing.T) {
 	service, provider, _ := newTestService(t)
 	clientVerifier := strings.Repeat("v", 43)
@@ -190,7 +220,8 @@ func newTestService(t *testing.T) (*Service, *fakeOIDCProvider, *storage.Store) 
 	values := [][]byte{bytes.Repeat([]byte{1}, 32), bytes.Repeat([]byte{2}, 32), bytes.Repeat([]byte{3}, 32)}
 	var randomMu sync.Mutex
 	service, err := New(registry, store, Config{
-		Now: func() time.Time { return time.Date(2026, 8, 9, 10, 0, 0, 0, time.UTC) },
+		AllowedCallbacks: []string{"https://gateway.example.test/api/v2/admin/ui/callback"},
+		Now:              func() time.Time { return time.Date(2026, 8, 9, 10, 0, 0, 0, time.UTC) },
 		Random: func(target []byte) error {
 			randomMu.Lock()
 			defer randomMu.Unlock()

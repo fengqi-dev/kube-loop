@@ -27,6 +27,7 @@ const (
 	normalSessionAbsoluteTTL = 8 * time.Hour
 	breakGlassExchangeAudit  = "admin.session.break-glass.exchange"
 	principalExchangeAudit   = "admin.session.principal.exchange"
+	sessionRevokeAudit       = "admin.session.revoke"
 )
 
 var (
@@ -232,6 +233,38 @@ func (service *Service) recordFailedExchange(ctx context.Context, requestID stri
 		ID: service.newID(), Action: breakGlassExchangeAudit, ResourceType: "admin-session",
 		Outcome: "failure", RequestID: requestID, Metadata: metadata, CreatedAt: service.now().UTC(),
 	})
+}
+
+// Revoke atomically invalidates the current Management Session and records the
+// logout without persisting its Cookie or CSRF plaintext values.
+func (service *Service) Revoke(ctx context.Context, stored storage.AdminSession, requestID string) error {
+	requestID = strings.TrimSpace(requestID)
+	if len(stored.IDHash) != sha256.Size || requestID == "" {
+		return ErrSessionInvalid
+	}
+	now := service.now().UTC()
+	principalID := stored.PrincipalID
+	if stored.AuthenticationType == string(adminauthorization.AuthenticationBreakGlass) {
+		principalID = ""
+	}
+	metadata, err := json.Marshal(map[string]string{"authenticationType": stored.AuthenticationType})
+	if err != nil {
+		return ErrSessionInvalid
+	}
+	err = service.store.WithinTransaction(ctx, func(repositories storage.Repositories) error {
+		if err := repositories.AdminSessions().Revoke(ctx, stored.IDHash, now); err != nil {
+			return err
+		}
+		return repositories.Audit().Append(ctx, storage.AuditEvent{
+			ID: service.newID(), PrincipalID: principalID, Action: sessionRevokeAudit,
+			ResourceType: "admin-session", Outcome: "success", RequestID: requestID,
+			Metadata: metadata, CreatedAt: now,
+		})
+	})
+	if err != nil {
+		return ErrSessionInvalid
+	}
+	return nil
 }
 
 // Authenticate validates an opaque Management Session token and rejects a

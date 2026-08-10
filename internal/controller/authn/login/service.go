@@ -37,10 +37,11 @@ type Store interface {
 }
 
 type Config struct {
-	AttemptTTL  time.Duration
-	ExchangeTTL time.Duration
-	Now         func() time.Time
-	Random      func([]byte) error
+	AttemptTTL       time.Duration
+	ExchangeTTL      time.Duration
+	AllowedCallbacks []string
+	Now              func() time.Time
+	Random           func([]byte) error
 }
 
 type Service struct {
@@ -48,6 +49,7 @@ type Service struct {
 	store       Store
 	attemptTTL  time.Duration
 	exchangeTTL time.Duration
+	callbacks   map[string]struct{}
 	now         func() time.Time
 	random      func([]byte) error
 }
@@ -185,10 +187,21 @@ func New(providers *authn.Registry, store Store, config Config) (*Service, error
 			return err
 		}
 	}
+	callbacks := make(map[string]struct{}, len(config.AllowedCallbacks))
+	for _, value := range config.AllowedCallbacks {
+		callback, err := validateConfiguredCallback(value)
+		if err != nil {
+			return nil, err
+		}
+		if _, exists := callbacks[callback]; exists {
+			return nil, errors.New("login callback allowlist contains a duplicate")
+		}
+		callbacks[callback] = struct{}{}
+	}
 	return &Service{
 		providers: providers, store: store,
 		attemptTTL: config.AttemptTTL, exchangeTTL: config.ExchangeTTL,
-		now: config.Now, random: config.Random,
+		callbacks: callbacks, now: config.Now, random: config.Random,
 	}, nil
 }
 
@@ -197,7 +210,7 @@ func (service *Service) Begin(ctx context.Context, request BeginRequest) (BeginR
 	request.ClientState = strings.TrimSpace(request.ClientState)
 	request.Nonce = strings.TrimSpace(request.Nonce)
 	request.PKCEChallenge = strings.TrimSpace(request.PKCEChallenge)
-	callback, err := validateLoopbackCallback(request.ClientCallback)
+	callback, err := service.validateClientCallback(request.ClientCallback)
 	if err != nil || !boundedOpaqueValue(request.ClientState) || !boundedOpaqueValue(request.Nonce) ||
 		!validPKCEValue(request.PKCEChallenge) {
 		return BeginResult{}, ErrInvalidRequest
@@ -359,6 +372,36 @@ func validateLoopbackCallback(value string) (*url.URL, error) {
 	}
 	port, err := strconv.Atoi(parsed.Port())
 	if err != nil || port < 1 || port > 65535 || parsed.Path == "" || !strings.HasPrefix(parsed.Path, "/") {
+		return nil, ErrInvalidRequest
+	}
+	return parsed, nil
+}
+
+func validateConfiguredCallback(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	parsed, err := url.Parse(value)
+	loopback := false
+	if parsed != nil && parsed.Scheme == "http" {
+		host := parsed.Hostname()
+		address := net.ParseIP(host)
+		loopback = strings.EqualFold(host, "localhost") || address != nil && address.IsLoopback()
+	}
+	if err != nil || parsed.Host == "" || parsed.User != nil || (parsed.Scheme != "https" && !loopback) ||
+		parsed.RawQuery != "" || parsed.Fragment != "" || parsed.Path == "" || !strings.HasPrefix(parsed.Path, "/") {
+		return "", errors.New("configured login callback must use HTTPS or loopback HTTP without query or fragment")
+	}
+	return parsed.String(), nil
+}
+
+func (service *Service) validateClientCallback(value string) (*url.URL, error) {
+	if callback, err := validateLoopbackCallback(value); err == nil {
+		return callback, nil
+	}
+	parsed, err := url.Parse(strings.TrimSpace(value))
+	if err != nil || service == nil {
+		return nil, ErrInvalidRequest
+	}
+	if _, allowed := service.callbacks[parsed.String()]; !allowed {
 		return nil, ErrInvalidRequest
 	}
 	return parsed, nil

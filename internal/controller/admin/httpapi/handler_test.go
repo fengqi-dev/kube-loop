@@ -261,6 +261,12 @@ func TestGatewayTokenExchangeCreatesNormalAndBootstrapManagementSessions(t *test
 			if recorder.Code != http.StatusCreated || len(recorder.Result().Cookies()) != 1 {
 				t.Fatalf("exchange status=%d body=%s", recorder.Code, recorder.Body.String())
 			}
+			var issued struct {
+				CSRFToken string `json:"csrfToken"`
+			}
+			if err := json.Unmarshal(recorder.Body.Bytes(), &issued); err != nil || issued.CSRFToken == "" {
+				t.Fatalf("exchange response=%s error=%v", recorder.Body.String(), err)
+			}
 			cookie := recorder.Result().Cookies()[0]
 			digest := sha256.Sum256([]byte(cookie.Value))
 			stored, err := store.AdminSessions().GetByHash(context.Background(), digest[:])
@@ -287,7 +293,36 @@ func TestGatewayTokenExchangeCreatesNormalAndBootstrapManagementSessions(t *test
 			if err != nil || len(events) != 1 || events[0].Outcome != "success" {
 				t.Fatalf("exchange audit=%+v error=%v", events, err)
 			}
+			logoutRequest := httptest.NewRequest(http.MethodDelete, "/sessions/current", nil)
+			logoutRequest.AddCookie(cookie)
+			logoutRequest.Header.Set("Origin", "https://gateway.example")
+			logoutRequest.Header.Set(CSRFHeaderName, issued.CSRFToken)
+			logout := httptest.NewRecorder()
+			handler.ServeHTTP(logout, logoutRequest)
+			if logout.Code != http.StatusNoContent || len(logout.Result().Cookies()) != 1 || logout.Result().Cookies()[0].MaxAge != -1 {
+				t.Fatalf("logout status=%d headers=%v body=%s", logout.Code, logout.Header(), logout.Body.String())
+			}
+			statusAfterLogout := httptest.NewRecorder()
+			handler.ServeHTTP(statusAfterLogout, statusRequest)
+			if statusAfterLogout.Code != http.StatusUnauthorized {
+				t.Fatalf("status after logout=%d body=%s", statusAfterLogout.Code, statusAfterLogout.Body.String())
+			}
+			revocations, err := store.Audit().List(context.Background(), storage.AuditFilter{Action: "admin.session.revoke"})
+			if err != nil || len(revocations) != 1 || revocations[0].Outcome != "success" {
+				t.Fatalf("logout audit=%+v error=%v", revocations, err)
+			}
 		})
+	}
+}
+
+func TestManagementUIIsPublicButStrictlySandboxed(t *testing.T) {
+	handler, _ := newPrincipalTokenHandler(t, false)
+	request := httptest.NewRequest(http.MethodGet, "/ui", nil)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), "KubeLoop Control") ||
+		!strings.Contains(recorder.Header().Get("Content-Security-Policy"), "script-src 'self'") {
+		t.Fatalf("UI status=%d CSP=%q body=%s", recorder.Code, recorder.Header().Get("Content-Security-Policy"), recorder.Body.String())
 	}
 }
 

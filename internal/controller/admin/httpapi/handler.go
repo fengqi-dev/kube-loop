@@ -16,6 +16,7 @@ import (
 	"time"
 
 	adminsession "github.com/fengqi-dev/kube-loop/internal/controller/admin/session"
+	adminui "github.com/fengqi-dev/kube-loop/internal/controller/admin/ui"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 )
@@ -110,6 +111,7 @@ func New(config Config, sessions *adminsession.Service, optionValues ...Option) 
 	}
 	router := chi.NewRouter()
 	router.Use(handler.securityHeaders)
+	router.Mount("/ui", adminui.New())
 	router.Post("/sessions/break-glass", handler.exchangeBreakGlass)
 	if handler.tokenAuth != nil {
 		router.Post("/sessions/token", handler.exchangeToken)
