@@ -652,11 +652,22 @@ Gateway 使用统一的 `AuthProvider` 抽象，首期支持：
 
 ### M9：后台管理（建议在 V2.0 Beta 后按切片交付）
 
-- [ ] **V2-900～V2-908：Controller Management Plane。**
-  - 先完成信任边界、角色、revision Repository、只读 API/UI；再开放策略、Provider 和高风险运维写操作。
-  - 管理面属于 `kubeloop-controller`，不新建项目、不进入 Data Plane，也不扩大 Gateway Kubernetes/数据库权限。
-  - 默认 SQLite、外部 PostgreSQL；Secret 仅使用 Kubernetes/外部 Secret reference。
-  - 详细任务、数据模型、API 和发布门槛见 `docs/v2-admin-console-plan.zh-CN.md`。
+- [x] **V2-900：管理面信任边界 ADR。**
+  - 2026-08-10（完成）：新增 ADR 0022 和威胁模型，冻结 Controller-only Management Plane、无管理员默认拒绝、bootstrap 正式策略发布后持久退役、Secret-backed 短期 break-glass、专用 HttpOnly 管理 Session、同步 CSRF Token、严格 CSP、Secret alias-only API 和事务审计边界。Data Plane/Operator 不接收管理路由、数据库、身份 Secret 或管理角色；V2.0 管理 API 不接受 Secret 明文、任意 Kubernetes/SQL/脚本或通用网络探测。
+
+- [ ] **V2-901：管理角色与授权。**
+- [ ] **V2-902：配置 revision Repository。**
+- [ ] **V2-903：只读管理 API。**
+- [ ] **V2-904：只读管理 UI。**
+- [ ] **V2-905：访问/网络策略管理。**
+- [ ] **V2-906：OIDC/AD Provider 管理。**
+- [ ] **V2-907：幂等、owner-safe 运维动作。**
+- [ ] **V2-908：管理面安全与统一 E2E。**
+
+管理面属于 `kubeloop-controller`，不新建项目、不进入 Data Plane，也不扩大
+Gateway Kubernetes/数据库权限。默认 SQLite、外部 PostgreSQL；Secret 仅使用
+Kubernetes/外部 Secret alias。详细数据模型、API、依赖顺序和发布门槛见
+`docs/v2-admin-console-plan.zh-CN.md`。
 
 ## 7. 关键依赖路径
 

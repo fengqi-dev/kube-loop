@@ -1,7 +1,10 @@
 # KubeLoop V2 后台管理规划
 
-> 状态：规划中
+> 状态：实施中（V2-900 已完成）
 > 目标：提供企业管理员可审计、可回滚的 Controller 管理面；不扩大 Data Plane 权限。
+
+管理面信任边界和威胁模型已冻结在
+[`adr/0022-management-plane-trust-boundary.md`](adr/0022-management-plane-trust-boundary.md)。
 
 ## 1. 产品边界
 
@@ -52,8 +55,9 @@ Authorizer。前端隐藏按钮不能替代服务端鉴权。高风险操作要�
 
 - 查看 OIDC/AD Provider、claim/group mapping、启停状态和最近健康检查。
 - 新建/修改采用“草稿 → 连通性验证 → 发布”的版本化流程。
-- Secret 字段只提交到受限后端，最终保存到 Kubernetes Secret 或外部
-  Secret 引用；数据库仅保存 Secret reference、掩码和配置 revision。
+- 浏览器和管理 API 不提交 Secret 明文；部署操作者预先在 Kubernetes/外部
+  Secret 系统中创建并挂载 Secret，再由管理配置选择 Helm allowlist 中的稳定
+  alias。数据库仅保存 alias、非敏感用途、掩码和配置 revision。
 - Provider 发布失败不替换当前有效配置；支持回滚到上一有效 revision。
 
 ### 3.3 访问与网络策略
@@ -96,6 +100,9 @@ Authorizer。前端隐藏按钮不能替代服务端鉴权。高风险操作要�
 - `provider_config_revisions`：非 Secret Provider 配置、Secret reference、验证结果。
 - `admin_assignments`：管理角色及可选 namespace 范围。
 - `config_change_requests`：草稿、校验、发布、回滚状态和幂等键。
+- `admin_sessions`：只保存随机管理 Session ID 的哈希、Principal、认证类型、
+  Token Family、期限和撤销状态，不保存 Gateway Token 或 CSRF Token 明文。
+- 管理元数据保存 bootstrap 永久退役标记；revision 回滚不能隐式重新启用它。
 
 不使用 ORM AutoMigrate；SQLite/PostgreSQL 继续共享显式 migration 与
 Repository contract。所有写操作在一个数据库事务内同时提交 revision、
@@ -115,17 +122,17 @@ active pointer 和审计事件。使用整数 revision/ETag 做乐观并发，�
 
 ## 6. 实施 Roadmap
 
-| ID | 任务 | 交付物 | 验收标准 |
-| --- | --- | --- | --- |
-| V2-900 | 管理面信任边界 ADR | Management Plane ADR/威胁模型 | 明确 bootstrap、break-glass、Secret、CSRF、审计边界 |
-| V2-901 | 管理角色与授权 | admin authorizer + dry-run | 五类角色、namespace 委派、跨租户 IDOR 测试通过 |
-| V2-902 | 配置 revision Repository | migration + Bun repository | SQLite/PostgreSQL conformance、ETag、事务审计、回滚通过 |
-| V2-903 | 只读管理 API | status/principal/session/task/relay/audit | 有界分页、脱敏、稳定错误与审计通过 |
-| V2-904 | 只读管理 UI | 概览、会话、任务、Relay、审计 | 不包含 Secret/Token，权限裁剪与可访问性通过 |
-| V2-905 | 访问/网络策略管理 | draft/dry-run/publish/rollback | 发布原子、旧连接有界失效、错误配置可回滚 |
-| V2-906 | Provider 管理 | OIDC/AD validation + Secret reference | 草稿验证不影响当前 Provider，Secret 不入 DB/响应/日志 |
-| V2-907 | 运维动作 | revoke/drain/stop/recover/export | 全部幂等、owner-safe、失败可观测且可重试 |
-| V2-908 | 管理面安全/E2E | fuzz、race、浏览器和 Minikube E2E | CSRF/CSP/IDOR/并发发布/撤销/升级回滚通过 |
+| ID | 状态 | 任务 | 交付物 | 验收标准 |
+| --- | --- | --- | --- | --- |
+| V2-900 | 已完成 | 管理面信任边界 ADR | Management Plane ADR/威胁模型 | 明确 bootstrap、break-glass、Secret、CSRF、审计边界 |
+| V2-901 | 待实现 | 管理角色与授权 | admin authorizer + dry-run | 五类角色、namespace 委派、跨租户 IDOR 测试通过 |
+| V2-902 | 待实现 | 配置 revision Repository | migration + Bun repository | SQLite/PostgreSQL conformance、ETag、事务审计、回滚通过 |
+| V2-903 | 待实现 | 只读管理 API | status/principal/session/task/relay/audit | 有界分页、脱敏、稳定错误与审计通过 |
+| V2-904 | 待实现 | 只读管理 UI | 概览、会话、任务、Relay、审计 | 不包含 Secret/Token，权限裁剪与可访问性通过 |
+| V2-905 | 待实现 | 访问/网络策略管理 | draft/dry-run/publish/rollback | 发布原子、旧连接有界失效、错误配置可回滚 |
+| V2-906 | 待实现 | Provider 管理 | OIDC/AD validation + Secret reference | 草稿验证不影响当前 Provider，Secret 不入 DB/响应/日志 |
+| V2-907 | 待实现 | 运维动作 | revoke/drain/stop/recover/export | 全部幂等、owner-safe、失败可观测且可重试 |
+| V2-908 | 待实现 | 管理面安全/E2E | fuzz、race、浏览器和 Minikube E2E | CSRF/CSP/IDOR/并发发布/撤销/升级回滚通过 |
 
 推荐切片顺序：先交付 V2-900～904 的只读后台；再实现 V2-905 的策略写入；
 Provider 写入和高风险运维动作最后开放。V2-900～907 完成代码后，再按当前
