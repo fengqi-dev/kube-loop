@@ -43,7 +43,8 @@ func TestPolicyLoaderInstallsPublishedAggregateAndFailsClosed(t *testing.T) {
 		t.Fatal(err)
 	}
 	activation, err := service.PublishPolicy(ctx, ActivateRequest{
-		ChangeID: draft.Change.ID, ExpectedETag: 0, Reason: "publish first admin", RequestID: uuid.NewString(),
+		ChangeID: draft.Change.ID, ExpectedETag: 0, IdempotencyKey: "loader-create-key-0001",
+		Reason: "publish first admin", RequestID: uuid.NewString(),
 		Actor: Actor{Authentication: adminauthorization.AuthenticationBreakGlass},
 	})
 	if err != nil {

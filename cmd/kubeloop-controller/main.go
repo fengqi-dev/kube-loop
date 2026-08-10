@@ -191,6 +191,12 @@ func main() {
 		logger.Error("load active Management Plane policy failed", "error", err)
 		os.Exit(1)
 	}
+	managementRevisionService, err := adminrevision.New(stateStore)
+	if err != nil {
+		_ = stateStore.Close()
+		logger.Error("initialize Management Plane revision service failed", "error", err)
+		os.Exit(2)
+	}
 	authRegistry, err := authconfig.Build(signalContext, authFile)
 	if err != nil {
 		_ = stateStore.Close()
@@ -681,7 +687,7 @@ func main() {
 		managementPolicyEngine, stateStore, adminhttpapi.BuildInfo{
 			Version: version, Commit: commit, ProtocolMin: protocolMin, ProtocolMax: protocolMax,
 		},
-	)}
+	), adminhttpapi.WithPolicyAPI(managementRevisionService, managementPolicyLoader)}
 	if relayRegistry != nil {
 		managementOptions = append(managementOptions, adminhttpapi.WithRelayStatusSource(relayRegistry.registry))
 	}

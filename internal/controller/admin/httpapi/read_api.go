@@ -10,6 +10,7 @@ import (
 	"time"
 
 	adminauthorization "github.com/fengqi-dev/kube-loop/internal/controller/admin/authorization"
+	adminrevision "github.com/fengqi-dev/kube-loop/internal/controller/admin/revision"
 	adminsession "github.com/fengqi-dev/kube-loop/internal/controller/admin/session"
 	"github.com/fengqi-dev/kube-loop/internal/controller/relayregistry"
 	"github.com/fengqi-dev/kube-loop/internal/controller/storage"
@@ -38,10 +39,29 @@ type handlerOptions struct {
 	readAPI            *readAPI
 	tokenAuthenticator TokenAuthenticator
 	relayStatus        RelayStatusSource
+	policyService      *adminrevision.Service
+	policyReloader     PolicyReloader
 }
 
 type RelayStatusSource interface {
 	Snapshot() []relayregistry.RelayStatus
+}
+
+type PolicyReloader interface {
+	Load(context.Context) error
+}
+
+func WithPolicyAPI(service *adminrevision.Service, reloader PolicyReloader) Option {
+	return func(options *handlerOptions) error {
+		if service == nil || reloader == nil {
+			return errors.New("management policy API dependencies are required")
+		}
+		if options.policyService != nil || options.policyReloader != nil {
+			return errors.New("management policy API is already configured")
+		}
+		options.policyService, options.policyReloader = service, reloader
+		return nil
+	}
 }
 
 func WithReadAPI(authorizer *adminauthorization.Engine, status StatusSource, build BuildInfo) Option {
@@ -83,6 +103,8 @@ type readAPI struct {
 	status     StatusSource
 	relays     RelayStatusSource
 	build      BuildInfo
+	policy     *adminrevision.Service
+	reloader   PolicyReloader
 }
 
 type requestContextKey int
@@ -99,6 +121,10 @@ var capabilityChecks = []adminauthorization.Request{
 	{Resource: adminauthorization.ResourceProvider, Operation: adminauthorization.OperationRead},
 	{Resource: adminauthorization.ResourceAssignment, Operation: adminauthorization.OperationList},
 	{Resource: adminauthorization.ResourcePolicy, Operation: adminauthorization.OperationRead},
+	{Resource: adminauthorization.ResourcePolicy, Operation: adminauthorization.OperationCreate},
+	{Resource: adminauthorization.ResourcePolicy, Operation: adminauthorization.OperationDryRun},
+	{Resource: adminauthorization.ResourcePolicy, Operation: adminauthorization.OperationPublish},
+	{Resource: adminauthorization.ResourcePolicy, Operation: adminauthorization.OperationRollback},
 	{Resource: adminauthorization.ResourcePrincipal, Operation: adminauthorization.OperationList},
 	{Resource: adminauthorization.ResourceSession, Operation: adminauthorization.OperationList},
 	{Resource: adminauthorization.ResourceTask, Operation: adminauthorization.OperationList},
@@ -125,6 +151,23 @@ func (api *readAPI) routes(router chi.Router) {
 		protected.With(api.require(adminauthorization.Request{
 			Resource: adminauthorization.ResourceRelay, Operation: adminauthorization.OperationList,
 		})).Get("/relays", api.listRelays)
+		if api.policy != nil {
+			protected.With(api.require(adminauthorization.Request{
+				Resource: adminauthorization.ResourcePolicy, Operation: adminauthorization.OperationRead,
+			})).Get("/policy", api.currentPolicy)
+			protected.With(api.require(adminauthorization.Request{
+				Resource: adminauthorization.ResourcePolicy, Operation: adminauthorization.OperationDryRun,
+			})).Post("/policy/dry-run", api.dryRunPolicy)
+			protected.With(api.require(adminauthorization.Request{
+				Resource: adminauthorization.ResourcePolicy, Operation: adminauthorization.OperationCreate,
+			})).Post("/policy/drafts", api.createPolicyDraft)
+			protected.With(api.require(adminauthorization.Request{
+				Resource: adminauthorization.ResourcePolicy, Operation: adminauthorization.OperationPublish,
+			})).Post("/policy/changes/{changeID}/publish", api.publishPolicy)
+			protected.With(api.require(adminauthorization.Request{
+				Resource: adminauthorization.ResourcePolicy, Operation: adminauthorization.OperationRollback,
+			})).Post("/policy/rollback", api.rollbackPolicy)
+		}
 	})
 }
 

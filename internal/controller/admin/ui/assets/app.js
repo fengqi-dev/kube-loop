@@ -5,6 +5,7 @@ const authBase = "/auth";
 const csrfStorageKey = "kubeloop.admin.csrf";
 const oidcStorageKey = "kubeloop.admin.oidc";
 const deviceStorageKey = "kubeloop.admin.device";
+const policyDraftStorageKey = "kubeloop.admin.policy-draft";
 
 const app = document.getElementById("app");
 const state = {
@@ -15,10 +16,12 @@ const state = {
   cursor: "",
   selectedNamespace: "",
   loading: false,
+  policyEtag: 0,
 };
 
 const views = {
   overview: { title: "运行概览", description: "Controller、存储与管理策略状态。" },
+  policy: { title: "管理策略", description: "以 revision、dry-run 和乐观并发安全管理后台角色。", capability: "admin.policy/read" },
   principals: { title: "身份", description: "已通过 OIDC 或 AD 解析的 Principal。", capability: "admin.principal/list", path: "/principals" },
   sessions: { title: "会话", description: "Cluster Session 生命周期与网络摘要。", capability: "admin.session/list", path: "/sessions", scoped: true },
   tasks: { title: "任务", description: "Preview、Exchange、Mirror、Port Forward 等远程任务。", capability: "admin.task/list", path: "/tasks", scoped: true },
@@ -316,7 +319,9 @@ function openView(key) {
   state.cursor = "";
   document.querySelectorAll("#nav button").forEach((button) => button.classList.toggle("active", button.dataset.view === key));
   document.getElementById("page-title").textContent = views[key].title;
-  if (key === "overview") loadOverview(); else loadList();
+  if (key === "overview") loadOverview();
+  else if (key === "policy") loadPolicy();
+  else loadList();
 }
 
 function renderToolbar(view) {
@@ -370,6 +375,178 @@ async function loadOverview() {
     });
     grid.append(card);
   } catch (error) { renderError(error.message); }
+}
+
+function policyField(labelText, input) {
+  const label = text("label", labelText);
+  label.append(input);
+  return label;
+}
+
+function policyMessage(container, message, kind = "success") {
+  const existing = container.querySelector(".policy-message");
+  if (existing) existing.remove();
+  const notice = text("p", message, `policy-message ${kind}`);
+  notice.setAttribute("role", kind === "error" ? "alert" : "status");
+  container.prepend(notice);
+}
+
+function pendingPolicyDraft() {
+  try {
+    const value = JSON.parse(sessionStorage.getItem(policyDraftStorageKey) || "null");
+    if (!value || typeof value.changeId !== "string" || typeof value.key !== "string" || !Number.isSafeInteger(value.baseEtag)) return null;
+    return value;
+  } catch { return null; }
+}
+
+async function policyMutation(path, etag, key, body) {
+  const csrf = sessionStorage.getItem(csrfStorageKey) || "";
+  return requestJSON(`${managementBase}${path}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-KubeLoop-CSRF": csrf,
+      "If-Match": `"${etag}"`,
+      "Idempotency-Key": key,
+    },
+    body: JSON.stringify(body),
+  });
+}
+
+async function loadPolicy() {
+  const content = document.getElementById("content");
+  content.replaceChildren(text("div", "正在加载管理策略…", "empty"));
+  try {
+    const current = await requestJSON(`${managementBase}/policy`);
+    state.policyEtag = Number(current.etag || 0);
+    state.policyRevision = Number(current.revision || 0);
+    const revisionLabel = document.getElementById("policy-revision");
+    if (revisionLabel) revisionLabel.textContent = String(state.policyRevision);
+
+    const toolbar = document.createElement("div"); toolbar.className = "toolbar";
+    const copy = document.createElement("div"); copy.className = "toolbar-copy";
+    copy.append(text("p", views.policy.description));
+    const refresh = text("button", "刷新", "secondary"); refresh.type = "button"; refresh.addEventListener("click", loadPolicy);
+    toolbar.append(copy, refresh);
+
+    const summary = document.createElement("div"); summary.className = "grid policy-summary";
+    [["状态", current.active ? "已发布" : "Bootstrap"], ["Revision", current.revision || 0], ["ETag", current.etag || 0]].forEach(([label, value]) => {
+      const card = document.createElement("article"); card.className = "card";
+      card.append(text("div", label, "metric-label"), text("div", value, "metric")); summary.append(card);
+    });
+
+    const panel = document.createElement("section"); panel.className = "policy-panel";
+    const heading = document.createElement("div"); heading.className = "policy-heading";
+    heading.append(text("div", "候选策略", "metric-label"), text("h2", "角色与 Namespace 委派"));
+    panel.append(heading);
+    const editor = document.createElement("textarea"); editor.id = "policy-editor"; editor.spellcheck = false;
+    editor.value = JSON.stringify(current.spec || { version: 1, assignments: [] }, null, 2);
+    const canCreate = capabilityAllowed("admin.policy/create");
+    editor.readOnly = !canCreate;
+    panel.append(policyField("Policy JSON", editor));
+    panel.append(text("p", "固定角色：platform-admin、security-admin、operator、auditor、namespace-admin。只有 namespace-admin 可以声明 namespaces。", "subtle policy-help"));
+
+    const reason = document.createElement("input"); reason.id = "policy-reason"; reason.maxLength = 512;
+    reason.placeholder = "说明本次变更目的（至少 8 个字符）";
+    panel.append(policyField("变更原因", reason));
+
+    const dryRunGrid = document.createElement("div"); dryRunGrid.className = "policy-check-grid";
+    const subject = document.createElement("input"); subject.placeholder = "Principal UUID（留空则只校验策略）";
+    const groups = document.createElement("input"); groups.placeholder = "组，使用逗号分隔";
+    const resource = document.createElement("select");
+    ["policy", "provider", "session", "task", "relay", "audit", "namespace-policy"].forEach((value) => { const option = text("option", value); option.value = value; resource.append(option); });
+    const operation = document.createElement("select");
+    ["read", "list", "create", "update", "validate", "dry-run", "publish", "rollback", "revoke", "stop"].forEach((value) => { const option = text("option", value); option.value = value; operation.append(option); });
+    const namespace = document.createElement("input"); namespace.placeholder = "Namespace（可选）";
+    dryRunGrid.append(policyField("Dry-run Principal", subject), policyField("Groups", groups), policyField("Resource", resource), policyField("Operation", operation), policyField("Namespace", namespace));
+    if (capabilityAllowed("admin.policy/dry-run")) panel.append(dryRunGrid);
+
+    const actions = document.createElement("div"); actions.className = "policy-actions";
+    if (capabilityAllowed("admin.policy/dry-run")) {
+      const dryRun = text("button", "校验并 Dry-run", "secondary"); dryRun.type = "button";
+      dryRun.addEventListener("click", async () => {
+        try {
+          const spec = JSON.parse(editor.value);
+          const checks = subject.value.trim() ? [{
+            subject: { id: subject.value.trim(), groups: groups.value.split(",").map((value) => value.trim()).filter(Boolean) },
+            request: { resource: resource.value, operation: operation.value, namespace: namespace.value.trim() },
+          }] : [];
+          const result = await policyMutation("/policy/dry-run", state.policyEtag, crypto.randomUUID(), {
+            spec, checks, reason: reason.value.trim() || "validate candidate policy",
+          });
+          const decision = result.decisions?.[0];
+          const detail = decision ? `${decision.allowed ? "ALLOW" : "DENY"} · ${decision.reason}${decision.role ? ` · ${decision.role}` : ""}` : "策略结构有效";
+          policyMessage(panel, `${detail}；${result.publishable ? "包含正式 platform-admin" : "不可发布：缺少正式 platform-admin"}`,
+            result.publishable ? "success" : "warning");
+        } catch (error) { policyMessage(panel, error.message || "Policy JSON 无法解析。", "error"); }
+      });
+      actions.append(dryRun);
+    }
+    if (canCreate) {
+      const draft = text("button", "创建 Draft", "primary"); draft.type = "button";
+      draft.addEventListener("click", async () => {
+        try {
+          const spec = JSON.parse(editor.value);
+          const key = crypto.randomUUID();
+          const result = await policyMutation("/policy/drafts", state.policyEtag, key, { spec, reason: reason.value.trim() });
+          const pending = { changeId: result.changeId, revision: result.revision, baseEtag: result.baseEtag, key };
+          sessionStorage.setItem(policyDraftStorageKey, JSON.stringify(pending));
+          policyMessage(panel, `Draft revision ${result.revision} 已校验；Change ${result.changeId} 等待发布。`);
+          renderPendingPolicy(panel, actions, pending, reason);
+        } catch (error) { policyMessage(panel, error.message || "创建 Draft 失败。", "error"); }
+      });
+      actions.append(draft);
+    }
+    panel.append(actions);
+    const pending = pendingPolicyDraft();
+    if (pending && pending.baseEtag === state.policyEtag) renderPendingPolicy(panel, actions, pending, reason);
+    else if (pending) sessionStorage.removeItem(policyDraftStorageKey);
+
+    if (capabilityAllowed("admin.policy/rollback") && current.active) {
+      const rollback = document.createElement("section"); rollback.className = "policy-panel compact";
+      rollback.append(text("h2", "回滚到已验证 Revision"));
+      const target = document.createElement("input"); target.type = "number"; target.min = "1"; target.placeholder = "目标 revision";
+      const rollbackReason = document.createElement("input"); rollbackReason.maxLength = 512; rollbackReason.placeholder = "回滚原因（至少 8 个字符）";
+      const rollbackButton = text("button", "执行回滚", "secondary danger-action"); rollbackButton.type = "button";
+      rollbackButton.addEventListener("click", async () => {
+        try {
+          const result = await policyMutation("/policy/rollback", state.policyEtag, crypto.randomUUID(), {
+            targetRevision: Number(target.value), reason: rollbackReason.value.trim(),
+          });
+          sessionStorage.removeItem(policyDraftStorageKey);
+          await startApplication();
+          policyMessage(document.getElementById("content"), `已回滚到 revision ${result.revision}，新 ETag ${result.etag}。`);
+        } catch (error) { policyMessage(rollback, error.message, "error"); }
+      });
+      const rollbackFields = document.createElement("div"); rollbackFields.className = "policy-rollback";
+      rollbackFields.append(policyField("目标 Revision", target), policyField("原因", rollbackReason), rollbackButton); rollback.append(rollbackFields);
+      content.replaceChildren(toolbar, summary, panel, rollback); return;
+    }
+    content.replaceChildren(toolbar, summary, panel);
+  } catch (error) {
+    if (error.status === 401) { await renderLogin("管理会话已过期，请重新登录。"); return; }
+    renderError(error.message);
+  }
+}
+
+function renderPendingPolicy(panel, actions, pending, reasonInput) {
+  if (!capabilityAllowed("admin.policy/publish") || actions.querySelector("[data-publish]")) return;
+  const publish = text("button", `发布 Revision ${pending.revision}`, "primary"); publish.type = "button"; publish.dataset.publish = "true";
+  publish.addEventListener("click", async () => {
+    try {
+      const result = await policyMutation(`/policy/changes/${encodeURIComponent(pending.changeId)}/publish`, pending.baseEtag, pending.key, {
+        reason: reasonInput.value.trim() || "publish validated policy",
+      });
+      sessionStorage.removeItem(policyDraftStorageKey);
+      await startApplication();
+      if (capabilityAllowed("admin.policy/read")) {
+        openView("policy");
+        const currentContent = document.getElementById("content");
+        policyMessage(currentContent, `Revision ${result.revision} 已发布，ETag ${result.etag}。`);
+      }
+    } catch (error) { policyMessage(panel, error.message, "error"); }
+  });
+  actions.append(publish);
 }
 
 function displayValue(key, value) {

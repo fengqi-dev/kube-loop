@@ -4,11 +4,13 @@
 package revision
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -47,12 +49,23 @@ type PolicyDraft struct {
 	Replayed bool
 }
 
+// PolicyState is the verified aggregate behind the active management policy
+// pointer. An empty installation is represented explicitly so a bootstrap
+// administrator can create the first revision with ETag 0.
+type PolicyState struct {
+	Active   bool
+	Pointer  storage.ActiveManagementRevision
+	Revision storage.AdminPolicyRevision
+	Snapshot adminauthorization.Snapshot
+}
+
 type ActivateRequest struct {
-	ChangeID     string
-	ExpectedETag uint64
-	Reason       string
-	RequestID    string
-	Actor        Actor
+	ChangeID       string
+	ExpectedETag   uint64
+	IdempotencyKey string
+	Reason         string
+	RequestID      string
+	Actor          Actor
 }
 
 type RollbackRequest struct {
@@ -81,6 +94,38 @@ func New(store Store) (*Service, error) {
 		return nil, errors.New("management revision storage is required")
 	}
 	return &Service{store: store, now: time.Now, newID: uuid.NewString}, nil
+}
+
+func (service *Service) CurrentPolicy(ctx context.Context) (PolicyState, error) {
+	active, err := service.store.ActiveManagementRevisions().Get(
+		ctx, storage.ManagementConfigurationPolicy, storage.ManagementPolicyID,
+	)
+	if errors.Is(err, storage.ErrNotFound) {
+		return PolicyState{Snapshot: adminauthorization.Snapshot{
+			Version: adminauthorization.CurrentVersion, Assignments: []adminauthorization.Assignment{},
+		}}, nil
+	}
+	if err != nil {
+		return PolicyState{}, fmt.Errorf("%w: read active policy", ErrPolicyUnavailable)
+	}
+	revision, err := service.store.AdminPolicyRevisions().Get(ctx, active.Revision)
+	if err != nil || revision.ValidationState != storage.RevisionValidationValid ||
+		revision.SpecHash != policySpecHash(revision.Spec) {
+		return PolicyState{}, fmt.Errorf("%w: verify active policy revision", ErrPolicyUnavailable)
+	}
+	snapshot, err := decodePolicySpec(revision.Spec, revision.Revision)
+	if err != nil {
+		return PolicyState{}, err
+	}
+	assignments, err := service.store.AdminAssignments().ListByPolicyRevision(ctx, revision.Revision)
+	if err != nil {
+		return PolicyState{}, fmt.Errorf("%w: read active policy assignments", ErrPolicyUnavailable)
+	}
+	stored, err := assignmentSnapshot(assignments, revision.Revision)
+	if err != nil || !equalAssignments(snapshot.Assignments, stored.Assignments) {
+		return PolicyState{}, fmt.Errorf("%w: active policy aggregate disagrees", ErrPolicyUnavailable)
+	}
+	return PolicyState{Active: true, Pointer: active, Revision: revision, Snapshot: stored}, nil
 }
 
 func (service *Service) CreatePolicyDraft(ctx context.Context, request PolicyDraftRequest) (PolicyDraft, error) {
@@ -315,6 +360,10 @@ func (service *Service) activatePolicy(ctx context.Context, request ActivateRequ
 	if request.ChangeID == "" || request.RequestID == "" || request.Reason == "" {
 		return Activation{}, ErrInvalidRequest
 	}
+	idempotencyHash, err := hashIdempotencyKey(request.IdempotencyKey)
+	if err != nil {
+		return Activation{}, err
+	}
 	now := service.now().UTC()
 	auditID := service.newID()
 	result := Activation{}
@@ -325,6 +374,9 @@ func (service *Service) activatePolicy(ctx context.Context, request ActivateRequ
 		}
 		if change.ConfigurationType != storage.ManagementConfigurationPolicy || change.BaseETag != request.ExpectedETag {
 			return storage.ErrConflict
+		}
+		if !bytes.Equal(change.IdempotencyHash, idempotencyHash[:]) {
+			return storage.ErrIdempotencyMismatch
 		}
 		if change.Status == storage.ChangeStatusPublished {
 			active, getErr := repositories.ActiveManagementRevisions().Get(

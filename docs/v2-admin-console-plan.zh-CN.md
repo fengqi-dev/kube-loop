@@ -1,6 +1,6 @@
 # KubeLoop V2 后台管理规划
 
-> 状态：实施中（V2-900 已完成）
+> 状态：实施中（V2-900～V2-905 已完成）
 > 目标：提供企业管理员可审计、可回滚的 Controller 管理面；不扩大 Data Plane 权限。
 
 管理面信任边界和威胁模型已冻结在
@@ -129,7 +129,7 @@ active pointer 和审计事件。使用整数 revision/ETag 做乐观并发，�
 | V2-902 | 已完成 | 配置 revision Repository | migration + Bun repository | SQLite/PostgreSQL conformance、ETag、事务审计、回滚通过 |
 | V2-903 | 已完成 | 只读管理 API | status/principal/session/task/relay/audit | 有界分页、脱敏、稳定错误与审计通过 |
 | V2-904 | 已完成 | 只读管理 UI | 概览、会话、任务、Relay、审计 | 不包含 Secret/Token，权限裁剪与可访问性通过 |
-| V2-905 | 待实现 | 访问/网络策略管理 | draft/dry-run/publish/rollback | 发布原子、旧连接有界失效、错误配置可回滚 |
+| V2-905 | 已完成 | 访问/网络策略管理 | draft/dry-run/publish/rollback | 发布原子、旧会话权限即时失效、错误配置可回滚 |
 | V2-906 | 待实现 | Provider 管理 | OIDC/AD validation + Secret reference | 草稿验证不影响当前 Provider，Secret 不入 DB/响应/日志 |
 | V2-907 | 待实现 | 运维动作 | revoke/drain/stop/recover/export | 全部幂等、owner-safe、失败可观测且可重试 |
 | V2-908 | 待实现 | 管理面安全/E2E | fuzz、race、浏览器和 Minikube E2E | CSRF/CSP/IDOR/并发发布/撤销/升级回滚通过 |
@@ -137,6 +137,15 @@ active pointer 和审计事件。使用整数 revision/ETag 做乐观并发，�
 推荐切片顺序：先交付 V2-900～904 的只读后台；再实现 V2-905 的策略写入；
 Provider 写入和高风险运维动作最后开放。V2-900～907 完成代码后，再按当前
 约定统一执行 V2-908 E2E。
+
+V2-905 使用单例 `/api/v2/admin/policy` 资源管理五类管理角色及
+`namespace-admin` 委派。候选策略可在不改动 active pointer 的情况下执行
+regular-identity dry-run；draft 保存不可变 revision，publish/rollback 使用强
+整数 `If-Match` 做 CAS，并在成功事务后同步重载进程内 authorizer。所有 POST
+同时要求同步 CSRF 与 16～256 字节 `Idempotency-Key`；发布复用 draft 的幂等键，
+因此提交成功但响应中断后仍可安全重试。控制台只在当前 capability 允许时展示
+编辑、dry-run、发布和回滚入口，pending change 元数据仅保存在当前浏览器
+session，Access/Refresh Token 仍不进入 Web Storage。
 
 ## 7. 发布门槛
 

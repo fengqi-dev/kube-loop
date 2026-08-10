@@ -100,8 +100,12 @@ func New(config Config, sessions *adminsession.Service, optionValues ...Option) 
 		handler.readAPI = options.readAPI
 		handler.readAPI.handler = handler
 		handler.readAPI.relays = options.relayStatus
+		handler.readAPI.policy = options.policyService
+		handler.readAPI.reloader = options.policyReloader
 	} else if options.relayStatus != nil {
 		return nil, errors.New("management Relay status source requires the read API")
+	} else if options.policyService != nil || options.policyReloader != nil {
+		return nil, errors.New("management policy API requires the read API")
 	}
 	if options.tokenAuthenticator != nil {
 		if handler.readAPI == nil {
