@@ -94,12 +94,22 @@ jobs:
           import json
           import os
           import pathlib
+          import re
 
-          version = os.environ["GITHUB_REF_NAME"].lstrip("v")
-          parts = [p for p in version.split(".") if p]
-          while len(parts) < 3:
-              parts.append("0")
-          product_version = ".".join(parts[:3])
+          ref_name = os.environ["GITHUB_REF_NAME"]
+          match = re.fullmatch(
+              r"v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:[-+].*)?",
+              ref_name,
+          )
+          if match is None:
+              raise SystemExit(f"release tag is not a supported SemVer: {ref_name}")
+          parts = [int(value) for value in match.groups()]
+          if any(value > 65535 for value in parts):
+              raise SystemExit(f"release version exceeds Windows version limits: {ref_name}")
+          # Wails and the NSIS template append the fourth numeric component.
+          # Keep prerelease/build metadata in the application version injected
+          # below, while package metadata receives a valid X.X.X.0 version.
+          product_version = ".".join(str(value) for value in parts)
 
           path = pathlib.Path("wails.json")
           data = json.loads(path.read_text())
