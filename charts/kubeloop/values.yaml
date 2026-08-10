@@ -24,8 +24,9 @@ controller:
     developmentMode: false
     providers: []
     token:
-      # Required when at least one Provider is configured. The key must be an
-      # Ed25519 private key encoded as PKCS#8 PEM.
+      # Required when a static Provider or managed Provider Secret alias is
+      # configured. This lets the first managed Provider publish without a
+      # restart. The key is Ed25519 PKCS#8 PEM.
       existingSecret: ""
       signingKeyKey: signing-key.pem
       keyID: primary
@@ -137,6 +138,15 @@ controller:
       # emergency:
       #   existingSecret: kubeloop-break-glass
       #   credentialKey: credential
+    # Allowlisted aliases available to database-managed OIDC/AD Provider
+    # revisions. The Management API accepts only alias names; Helm projects
+    # selected keys into fixed read-only paths owned by the deployment.
+    providerSecretAliases: {}
+    # corporate:
+    #   existingSecret: kubeloop-corporate-auth
+    #   clientSecretKey: oidc-client-secret
+    #   bindPasswordKey: ad-bind-password
+    #   caKey: ca.crt
   kubernetes:
     timeout: 15s
     qps: 20

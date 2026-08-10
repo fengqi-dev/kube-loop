@@ -4,10 +4,40 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 	"time"
 )
 
 type activeManagementRevisionRepository struct{ repositoryBase }
+
+func (repository *activeManagementRevisionRepository) List(
+	ctx context.Context, kind string,
+) ([]ActiveManagementRevision, error) {
+	kind = strings.TrimSpace(kind)
+	if kind != ManagementConfigurationPolicy && kind != ManagementConfigurationProvider {
+		return nil, errors.New("management configuration type is invalid")
+	}
+	query := repository.bind(`SELECT configuration_type, configuration_id, revision, etag, updated_by,
+		updated_authentication_type, updated_at FROM management_active_revisions
+		WHERE configuration_type = ? ORDER BY configuration_id ASC`)
+	rows, err := repository.executor.QueryContext(ctx, query, kind)
+	if err != nil {
+		return nil, databaseError("list active management revisions", err)
+	}
+	defer rows.Close()
+	result := make([]ActiveManagementRevision, 0)
+	for rows.Next() {
+		active, scanErr := scanActiveManagementRevision(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		result = append(result, active)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, databaseError("iterate active management revisions", err)
+	}
+	return result, nil
+}
 
 func (repository *activeManagementRevisionRepository) Get(
 	ctx context.Context, kind, configurationID string,

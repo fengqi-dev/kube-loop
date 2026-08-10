@@ -499,6 +499,7 @@ func TestManagementBootstrapAndBreakGlassRemainControllerOnly(t *testing.T) {
 	for _, want := range []string{
 		`"subjects":[]`, `"groups":[]`, `"recoveryEnabled":false`,
 		`"enabled":false`, `"secretAlias":""`, `"sessionTtl":"15m"`,
+		`"providerSecretAliases":{}`,
 	} {
 		if !strings.Contains(defaultJSON, want) {
 			t.Fatalf("default management config missing %s: %s", want, defaultJSON)
@@ -544,6 +545,44 @@ func TestManagementBootstrapAndBreakGlassRemainControllerOnly(t *testing.T) {
 			if strings.Contains(string(componentYAML), forbidden) {
 				t.Fatalf("%s received Management Plane Secret %q", component, forbidden)
 			}
+		}
+	}
+}
+
+func TestManagedProviderSecretAliasesAreFixedControllerOnlyProjections(t *testing.T) {
+	objects := renderChart(t,
+		"--set", "publicURL=https://kubeloop.example.test",
+		"--set", "controller.auth.token.existingSecret=kubeloop-token",
+		"--set", "controller.management.providerSecretAliases.corporate.existingSecret=kubeloop-corporate",
+		"--set", "controller.management.providerSecretAliases.corporate.clientSecretKey=oidc-secret",
+		"--set", "controller.management.providerSecretAliases.corporate.caKey=ca.pem",
+	)
+	config := objectByName(t, objects, "ConfigMap", "test-kubeloop-controller-auth-config")
+	managementJSON := valueAt(t, config, "data", "management.json").(string)
+	for _, want := range []string{
+		`"providerSecretAliases":{"corporate":`,
+		`"clientSecretFile":"/var/run/secrets/kubeloop/management/providers/corporate/client-secret"`,
+		`"caFile":"/var/run/secrets/kubeloop/management/providers/corporate/ca.crt"`,
+	} {
+		if !strings.Contains(managementJSON, want) {
+			t.Fatalf("managed Provider config missing %s: %s", want, managementJSON)
+		}
+	}
+	for _, forbidden := range []string{"kubeloop-corporate", "oidc-secret", "ca.pem"} {
+		if strings.Contains(managementJSON, forbidden) {
+			t.Fatalf("Kubernetes Secret detail %q leaked into management config", forbidden)
+		}
+	}
+	controllerYAML, _ := yaml.Marshal(objectsByComponent(t, objects, "Deployment", "controller")[0])
+	for _, want := range []string{"kubeloop-corporate", "providers/corporate/client-secret", "providers/corporate/ca.crt", "kubeloop-token"} {
+		if !strings.Contains(string(controllerYAML), want) {
+			t.Fatalf("Controller managed Provider projection missing %q", want)
+		}
+	}
+	for _, component := range []string{"data-plane", "operator"} {
+		componentYAML, _ := yaml.Marshal(objectsByComponent(t, objects, "Deployment", component)[0])
+		if strings.Contains(string(componentYAML), "kubeloop-corporate") || strings.Contains(string(componentYAML), "providers/corporate") {
+			t.Fatalf("%s received managed Provider Secret", component)
 		}
 	}
 }

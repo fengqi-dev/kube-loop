@@ -41,6 +41,7 @@ type handlerOptions struct {
 	relayStatus        RelayStatusSource
 	policyService      *adminrevision.Service
 	policyReloader     PolicyReloader
+	providerService    *adminrevision.ProviderService
 }
 
 type RelayStatusSource interface {
@@ -60,6 +61,19 @@ func WithPolicyAPI(service *adminrevision.Service, reloader PolicyReloader) Opti
 			return errors.New("management policy API is already configured")
 		}
 		options.policyService, options.policyReloader = service, reloader
+		return nil
+	}
+}
+
+func WithProviderAPI(service *adminrevision.ProviderService) Option {
+	return func(options *handlerOptions) error {
+		if service == nil {
+			return errors.New("management Provider API service is required")
+		}
+		if options.providerService != nil {
+			return errors.New("management Provider API is already configured")
+		}
+		options.providerService = service
 		return nil
 	}
 }
@@ -105,6 +119,7 @@ type readAPI struct {
 	build      BuildInfo
 	policy     *adminrevision.Service
 	reloader   PolicyReloader
+	providers  *adminrevision.ProviderService
 }
 
 type requestContextKey int
@@ -119,6 +134,11 @@ var capabilityChecks = []adminauthorization.Request{
 	{Resource: adminauthorization.ResourceStatus, Operation: adminauthorization.OperationRead},
 	{Resource: adminauthorization.ResourceConfiguration, Operation: adminauthorization.OperationRead},
 	{Resource: adminauthorization.ResourceProvider, Operation: adminauthorization.OperationRead},
+	{Resource: adminauthorization.ResourceProvider, Operation: adminauthorization.OperationList},
+	{Resource: adminauthorization.ResourceProvider, Operation: adminauthorization.OperationCreate},
+	{Resource: adminauthorization.ResourceProvider, Operation: adminauthorization.OperationValidate},
+	{Resource: adminauthorization.ResourceProvider, Operation: adminauthorization.OperationPublish},
+	{Resource: adminauthorization.ResourceProvider, Operation: adminauthorization.OperationRollback},
 	{Resource: adminauthorization.ResourceAssignment, Operation: adminauthorization.OperationList},
 	{Resource: adminauthorization.ResourcePolicy, Operation: adminauthorization.OperationRead},
 	{Resource: adminauthorization.ResourcePolicy, Operation: adminauthorization.OperationCreate},
@@ -167,6 +187,26 @@ func (api *readAPI) routes(router chi.Router) {
 			protected.With(api.require(adminauthorization.Request{
 				Resource: adminauthorization.ResourcePolicy, Operation: adminauthorization.OperationRollback,
 			})).Post("/policy/rollback", api.rollbackPolicy)
+		}
+		if api.providers != nil {
+			protected.With(api.require(adminauthorization.Request{
+				Resource: adminauthorization.ResourceProvider, Operation: adminauthorization.OperationList,
+			})).Get("/providers", api.listProviders)
+			protected.With(api.require(adminauthorization.Request{
+				Resource: adminauthorization.ResourceProvider, Operation: adminauthorization.OperationRead,
+			})).Get("/providers/{providerID}", api.currentProvider)
+			protected.With(api.require(adminauthorization.Request{
+				Resource: adminauthorization.ResourceProvider, Operation: adminauthorization.OperationValidate,
+			})).Post("/providers/{providerID}/validate", api.validateProvider)
+			protected.With(api.require(adminauthorization.Request{
+				Resource: adminauthorization.ResourceProvider, Operation: adminauthorization.OperationCreate,
+			})).Post("/providers/{providerID}/drafts", api.createProviderDraft)
+			protected.With(api.require(adminauthorization.Request{
+				Resource: adminauthorization.ResourceProvider, Operation: adminauthorization.OperationPublish,
+			})).Post("/providers/{providerID}/changes/{changeID}/publish", api.publishProvider)
+			protected.With(api.require(adminauthorization.Request{
+				Resource: adminauthorization.ResourceProvider, Operation: adminauthorization.OperationRollback,
+			})).Post("/providers/{providerID}/rollback", api.rollbackProvider)
 		}
 	})
 }

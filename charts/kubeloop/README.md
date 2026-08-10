@@ -401,6 +401,41 @@ and derives a SHA-256 generation so Secret rotation invalidates prior emergency
 sessions. Emergency sessions are non-refreshable and may never become ordinary
 Gateway Token Families or RelayTickets.
 
+## Managed OIDC / AD Provider revisions
+
+The Management Plane can validate, publish, and roll back OIDC/AD Providers
+without restarting the Controller. Secret values are never accepted by the
+browser API. First allowlist the Kubernetes Secret keys that may be selected by
+a revision and configure the Gateway token signing key:
+
+```yaml
+controller:
+  auth:
+    token:
+      existingSecret: kubeloop-token-signing
+  management:
+    providerSecretAliases:
+      corporate:
+        existingSecret: kubeloop-corporate-auth
+        clientSecretKey: oidc-client-secret # optional by Provider type
+        bindPasswordKey: ad-bind-password   # optional by Provider type
+        caKey: ca.crt                       # optional
+```
+
+Helm projects only the selected keys under the fixed read-only
+`/var/run/secrets/kubeloop/management/providers/<alias>/` root. The management
+database stores only the alias and its non-sensitive use (`client-secret`,
+`bind-password`, or `ca`); API responses expose only use names and never echo
+alias values. `POST /api/v2/admin/providers/{id}/validate` performs discovery
+or directory connectivity checks without changing the live Registry. Draft,
+publish, and rollback use `/providers/{id}/drafts`,
+`/providers/{id}/changes/{changeID}/publish`, and
+`/providers/{id}/rollback`; every write requires the Management Session CSRF
+header, a strong `If-Match`, and an `Idempotency-Key`. A publish prebuilds the
+complete candidate Registry before committing its active pointer, then applies
+only the changed Provider atomically so unrelated concurrent publications are
+preserved.
+
 ## Kubernetes access
 
 The Controller and Operator use separate in-cluster ServiceAccounts; the

@@ -20,6 +20,7 @@ import (
 	adminbreakglass "github.com/fengqi-dev/kube-loop/internal/controller/admin/breakglass"
 	managementconfig "github.com/fengqi-dev/kube-loop/internal/controller/admin/config"
 	adminhttpapi "github.com/fengqi-dev/kube-loop/internal/controller/admin/httpapi"
+	adminprovider "github.com/fengqi-dev/kube-loop/internal/controller/admin/provider"
 	adminrevision "github.com/fengqi-dev/kube-loop/internal/controller/admin/revision"
 	adminsession "github.com/fengqi-dev/kube-loop/internal/controller/admin/session"
 	"github.com/fengqi-dev/kube-loop/internal/controller/authn"
@@ -202,6 +203,25 @@ func main() {
 		_ = stateStore.Close()
 		logger.Error("initialize authentication providers failed", "error", err)
 		os.Exit(1)
+	}
+	managedProviderRuntime, err := adminprovider.NewRuntime(
+		stateStore, authRegistry, authFile, managementFile.ProviderSecretAliases, *publicURL, 0,
+	)
+	if err != nil {
+		_ = stateStore.Close()
+		logger.Error("initialize managed authentication Provider runtime failed", "error", err)
+		os.Exit(2)
+	}
+	if err := managedProviderRuntime.Load(signalContext); err != nil {
+		_ = stateStore.Close()
+		logger.Error("load active managed authentication Providers failed", "error", err)
+		os.Exit(1)
+	}
+	managedProviderService, err := adminrevision.NewProviderService(stateStore, managedProviderRuntime, managedProviderRuntime)
+	if err != nil {
+		_ = stateStore.Close()
+		logger.Error("initialize managed authentication Provider service failed", "error", err)
+		os.Exit(2)
 	}
 	policy, err := authorization.Load(*policyConfigFile)
 	if err != nil {
@@ -627,6 +647,9 @@ func main() {
 		if err := managementPolicyLoader.Check(ctx); err != nil {
 			return err
 		}
+		if err := managedProviderRuntime.Check(ctx); err != nil {
+			return err
+		}
 		if managementFile.BreakGlass.Enabled {
 			if _, err := breakGlassStore.CurrentBreakGlassState(ctx); err != nil {
 				return err
@@ -640,6 +663,9 @@ func main() {
 	serverOptions := []controller.ServerOption{
 		controller.WithReadinessChecker(readiness), controller.WithAuthorizer(policyEngine),
 		controller.WithAuditSink(auditSink), controller.WithAPIHandler(apiRouter),
+		controller.WithAuthMethodSource(controller.AuthMethodSourceFunc(func() []controller.AuthMethod {
+			return discoveryAuthMethods(authRegistry)
+		})),
 	}
 	managementSessions, err := adminsession.New(stateStore, breakGlassStore)
 	if err != nil {
@@ -648,7 +674,7 @@ func main() {
 		os.Exit(2)
 	}
 	var tokenService *token.Service
-	if len(authRegistry.Descriptors()) > 0 {
+	if len(authRegistry.Descriptors()) > 0 || len(managementFile.ProviderSecretAliases) > 0 {
 		signingKey, err := token.LoadSigningKey(*tokenSigningKeyFile)
 		if err != nil {
 			_ = stateStore.Close()
@@ -687,7 +713,8 @@ func main() {
 		managementPolicyEngine, stateStore, adminhttpapi.BuildInfo{
 			Version: version, Commit: commit, ProtocolMin: protocolMin, ProtocolMax: protocolMax,
 		},
-	), adminhttpapi.WithPolicyAPI(managementRevisionService, managementPolicyLoader)}
+	), adminhttpapi.WithPolicyAPI(managementRevisionService, managementPolicyLoader),
+		adminhttpapi.WithProviderAPI(managedProviderService)}
 	if relayRegistry != nil {
 		managementOptions = append(managementOptions, adminhttpapi.WithRelayStatusSource(relayRegistry.registry))
 	}
@@ -753,6 +780,7 @@ func main() {
 	if relayListener != nil {
 		logger.Info("Relay Registry started", "listen_address", relayListener.Addr().String(), "transport", "mTLS")
 	}
+	go managedProviderRuntime.Run(signalContext)
 	serveCount := 1
 	if relayServer != nil {
 		serveCount++

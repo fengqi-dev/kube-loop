@@ -130,7 +130,7 @@ active pointer 和审计事件。使用整数 revision/ETag 做乐观并发，�
 | V2-903 | 已完成 | 只读管理 API | status/principal/session/task/relay/audit | 有界分页、脱敏、稳定错误与审计通过 |
 | V2-904 | 已完成 | 只读管理 UI | 概览、会话、任务、Relay、审计 | 不包含 Secret/Token，权限裁剪与可访问性通过 |
 | V2-905 | 已完成 | 访问/网络策略管理 | draft/dry-run/publish/rollback | 发布原子、旧会话权限即时失效、错误配置可回滚 |
-| V2-906 | 待实现 | Provider 管理 | OIDC/AD validation + Secret reference | 草稿验证不影响当前 Provider，Secret 不入 DB/响应/日志 |
+| V2-906 | 已完成 | Provider 管理 | OIDC/AD validation + Secret reference | 草稿验证不影响当前 Provider，Secret 不入 DB/响应/日志 |
 | V2-907 | 待实现 | 运维动作 | revoke/drain/stop/recover/export | 全部幂等、owner-safe、失败可观测且可重试 |
 | V2-908 | 待实现 | 管理面安全/E2E | fuzz、race、浏览器和 Minikube E2E | CSRF/CSP/IDOR/并发发布/撤销/升级回滚通过 |
 
@@ -146,6 +146,17 @@ regular-identity dry-run；draft 保存不可变 revision，publish/rollback 使
 因此提交成功但响应中断后仍可安全重试。控制台只在当前 capability 允许时展示
 编辑、dry-run、发布和回滚入口，pending change 元数据仅保存在当前浏览器
 session，Access/Refresh Token 仍不进入 Web Storage。
+
+V2-906 将 Helm 静态 Provider 作为基线，并把数据库已发布 OIDC/AD revision
+聚合为一个原子 Registry。Controller 启动及有界轮询按 active pointer 的
+revision/ETag 指纹收敛；publish/rollback 在数据库 CAS 前完成 Secret alias
+解析、OIDC discovery/AD 连接和完整候选 Registry 构建，提交成功后只以 CAS
+合并发生变化的 Provider，避免并发发布覆盖无关 Provider。chi v5 管理 API 提供
+list/current/validate/draft/publish/rollback，全部写请求继续要求 Management
+Session、同源 CSRF、强 `If-Match` 和幂等键。Helm 只把 allowlist 中的 Secret key
+投影到 Controller 固定只读路径；数据库保存 alias，API/UI/审计只返回用途名，
+pending change 也不把 alias 写入 Web Storage。Provider 发布会即时更新 discovery、
+登录和 readiness；Minikube/OIDC/AD 浏览器 E2E 按约定留到 V2-908。
 
 ## 7. 发布门槛
 

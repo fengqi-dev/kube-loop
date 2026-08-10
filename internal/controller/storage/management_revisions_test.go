@@ -126,6 +126,10 @@ func testManagementRevisionRepositories(t *testing.T, store *Store) {
 	if err != nil || providerActive.ETag != 1 {
 		t.Fatalf("provider active pointer = %#v, %v", providerActive, err)
 	}
+	providerPointers, err := store.ActiveManagementRevisions().List(ctx, ManagementConfigurationProvider)
+	if err != nil || len(providerPointers) != 1 || providerPointers[0].ConfigurationID != "corporate" {
+		t.Fatalf("provider active pointers = %#v, %v", providerPointers, err)
+	}
 
 	idempotency := sha256.Sum256([]byte("management-change-idempotency"))
 	change := ConfigChangeRequest{

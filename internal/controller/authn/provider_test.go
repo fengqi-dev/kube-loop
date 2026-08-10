@@ -88,3 +88,61 @@ func TestRegistryCheckFailsClosed(t *testing.T) {
 		t.Fatalf("check error = %v", err)
 	}
 }
+
+func TestRegistryReplaceAtomicallyUpdatesAllReaders(t *testing.T) {
+	first := fakeProvider{descriptor: Descriptor{ID: "first", Type: ProviderOIDC, Interaction: InteractionBrowser}}
+	second := fakeProvider{descriptor: Descriptor{ID: "second", Type: ProviderAD, Interaction: InteractionPassword}}
+	registry, err := NewRegistry(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	next, err := NewRegistry(second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.Replace(next); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := registry.Provider("first"); exists {
+		t.Fatal("replaced provider remained visible")
+	}
+	provider, exists := registry.Provider("second")
+	if !exists || provider.Descriptor().Type != ProviderAD || len(registry.Descriptors()) != 1 {
+		t.Fatalf("replacement snapshot provider=%#v exists=%v descriptors=%#v", provider, exists, registry.Descriptors())
+	}
+	if err := registry.Replace(nil); err == nil {
+		t.Fatal("nil replacement was accepted")
+	}
+}
+
+func TestRegistryReplaceProviderPreservesUnrelatedConcurrentUpdates(t *testing.T) {
+	first := fakeProvider{descriptor: Descriptor{ID: "first", Type: ProviderOIDC, Interaction: InteractionBrowser}}
+	second := fakeProvider{descriptor: Descriptor{ID: "second", Type: ProviderAD, Interaction: InteractionPassword}}
+	registry, err := NewRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	preparedFirst, _ := NewRegistry(first)
+	preparedSecond, _ := NewRegistry(second)
+	done := make(chan error, 2)
+	go func() { done <- registry.ReplaceProvider(preparedFirst, "first", true) }()
+	go func() { done <- registry.ReplaceProvider(preparedSecond, "second", true) }()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if len(registry.Descriptors()) != 2 {
+		t.Fatalf("descriptors = %#v", registry.Descriptors())
+	}
+	if err := registry.ReplaceProvider(preparedFirst, "first", false); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := registry.Provider("first"); ok {
+		t.Fatal("disabled Provider remains installed")
+	}
+	if _, ok := registry.Provider("second"); !ok {
+		t.Fatal("unrelated Provider was removed")
+	}
+}

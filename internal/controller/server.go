@@ -159,8 +159,15 @@ func NewServer(config Config, build BuildInfo, logger *slog.Logger, serverOption
 	}
 	router := chi.NewRouter()
 	router.Get(DiscoveryPath, func(writer http.ResponseWriter, _ *http.Request) {
-		writer.Header().Set("Cache-Control", "public, max-age=60")
-		writeJSON(writer, http.StatusOK, discovery)
+		document := discovery
+		document.AuthMethods = append([]AuthMethod(nil), discovery.AuthMethods...)
+		if options.authMethodSource != nil {
+			document.AuthMethods = append([]AuthMethod(nil), options.authMethodSource.AuthMethods()...)
+			writer.Header().Set("Cache-Control", "public, max-age=5")
+		} else {
+			writer.Header().Set("Cache-Control", "public, max-age=60")
+		}
+		writeJSON(writer, http.StatusOK, document)
 	})
 	router.Get("/health/live", func(writer http.ResponseWriter, _ *http.Request) {
 		writer.Header().Set("Cache-Control", "no-store")

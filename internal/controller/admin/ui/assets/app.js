@@ -6,6 +6,7 @@ const csrfStorageKey = "kubeloop.admin.csrf";
 const oidcStorageKey = "kubeloop.admin.oidc";
 const deviceStorageKey = "kubeloop.admin.device";
 const policyDraftStorageKey = "kubeloop.admin.policy-draft";
+const providerDraftStorageKey = "kubeloop.admin.provider-draft";
 
 const app = document.getElementById("app");
 const state = {
@@ -22,6 +23,7 @@ const state = {
 const views = {
   overview: { title: "运行概览", description: "Controller、存储与管理策略状态。" },
   policy: { title: "管理策略", description: "以 revision、dry-run 和乐观并发安全管理后台角色。", capability: "admin.policy/read" },
+  providers: { title: "身份 Provider", description: "验证并版本化发布 OIDC / AD；Secret 只使用部署 allowlist 中的 alias。", capability: "admin.provider/read" },
   principals: { title: "身份", description: "已通过 OIDC 或 AD 解析的 Principal。", capability: "admin.principal/list", path: "/principals" },
   sessions: { title: "会话", description: "Cluster Session 生命周期与网络摘要。", capability: "admin.session/list", path: "/sessions", scoped: true },
   tasks: { title: "任务", description: "Preview、Exchange、Mirror、Port Forward 等远程任务。", capability: "admin.task/list", path: "/tasks", scoped: true },
@@ -321,6 +323,7 @@ function openView(key) {
   document.getElementById("page-title").textContent = views[key].title;
   if (key === "overview") loadOverview();
   else if (key === "policy") loadPolicy();
+  else if (key === "providers") loadProviders();
   else loadList();
 }
 
@@ -547,6 +550,154 @@ function renderPendingPolicy(panel, actions, pending, reasonInput) {
     } catch (error) { policyMessage(panel, error.message, "error"); }
   });
   actions.append(publish);
+}
+
+function pendingProviderDraft() {
+  try {
+    const value = JSON.parse(sessionStorage.getItem(providerDraftStorageKey) || "null");
+    if (!value || typeof value.providerId !== "string" || typeof value.changeId !== "string" ||
+      typeof value.key !== "string" || !Number.isSafeInteger(value.baseEtag)) return null;
+    return value;
+  } catch { return null; }
+}
+
+function providerDefaults(type) {
+  if (type === "ad") {
+    return {
+      directoryId: "corp.example", url: "ldaps://dc.corp.example:636", baseDn: "DC=corp,DC=example",
+      userFilter: "(&(objectClass=user)(sAMAccountName={username}))", objectIdAttribute: "objectGUID",
+    };
+  }
+  return {
+    issuer: "", clientId: "kubeloop", scopes: ["openid", "profile", "email"],
+    allowedSigningAlgs: ["RS256"], requiredClaims: ["sub"], claims: { displayName: "name", email: "email", groups: "groups" },
+  };
+}
+
+async function loadProviders() {
+  const content = document.getElementById("content");
+  content.replaceChildren(text("div", "正在加载身份 Provider…", "empty"));
+  try {
+    const listed = await requestJSON(`${managementBase}/providers`);
+    const items = Array.isArray(listed.items) ? listed.items : [];
+    const toolbar = document.createElement("div"); toolbar.className = "toolbar";
+    const copy = document.createElement("div"); copy.className = "toolbar-copy"; copy.append(text("p", views.providers.description));
+    const refresh = text("button", "刷新", "secondary"); refresh.type = "button"; refresh.addEventListener("click", loadProviders);
+    toolbar.append(copy, refresh);
+
+    const summary = document.createElement("div"); summary.className = "grid policy-summary";
+    [["已发布", items.length], ["OIDC", items.filter((item) => item.type === "oidc").length], ["AD", items.filter((item) => item.type === "ad").length]].forEach(([label, value]) => {
+      const card = document.createElement("article"); card.className = "card";
+      card.append(text("div", label, "metric-label"), text("div", value, "metric")); summary.append(card);
+    });
+
+    const panel = document.createElement("section"); panel.className = "policy-panel";
+    const heading = document.createElement("div"); heading.className = "policy-heading";
+    heading.append(text("div", "版本化配置", "metric-label"), text("h2", "OIDC / Active Directory")); panel.append(heading);
+    const selector = document.createElement("select");
+    const createOption = text("option", "新建 Provider"); createOption.value = ""; selector.append(createOption);
+    items.forEach((item) => { const option = text("option", `${item.providerId} · ${item.type} · revision ${item.revision}`); option.value = item.providerId; selector.append(option); });
+    const providerID = document.createElement("input"); providerID.placeholder = "稳定 Provider ID"; providerID.maxLength = 128;
+    const type = document.createElement("select");
+    ["oidc", "ad"].forEach((value) => { const option = text("option", value.toUpperCase()); option.value = value; type.append(option); });
+    const config = document.createElement("textarea"); config.spellcheck = false; config.value = JSON.stringify(providerDefaults("oidc"), null, 2);
+    const aliases = document.createElement("textarea"); aliases.spellcheck = false; aliases.value = JSON.stringify({ "client-secret": "" }, null, 2);
+    const reason = document.createElement("input"); reason.maxLength = 512; reason.placeholder = "说明本次变更目的（至少 8 个字符）";
+    let etag = 0;
+    const selectProvider = (id) => {
+      const item = items.find((candidate) => candidate.providerId === id);
+      providerID.value = item?.providerId || ""; providerID.readOnly = Boolean(item);
+      type.value = item?.type || "oidc"; type.disabled = Boolean(item);
+      config.value = JSON.stringify(item?.config || providerDefaults(type.value), null, 2);
+      aliases.value = JSON.stringify(type.value === "oidc" ? { "client-secret": "" } : {}, null, 2);
+      etag = Number(item?.etag || 0);
+      policyMessage(panel, item ? `当前 revision ${item.revision}，ETag ${etag}。请重新选择 Secret alias；服务不会回显 alias 值。` : "填写非敏感配置，并选择 Helm allowlist 中的 Secret alias。", "warning");
+    };
+    selector.addEventListener("change", () => selectProvider(selector.value));
+    type.addEventListener("change", () => {
+      if (!selector.value) {
+        config.value = JSON.stringify(providerDefaults(type.value), null, 2);
+        aliases.value = JSON.stringify(type.value === "oidc" ? { "client-secret": "" } : {}, null, 2);
+      }
+    });
+    panel.append(policyField("已有 Provider", selector), policyField("Provider ID", providerID), policyField("类型", type),
+      policyField("非敏感配置 JSON", config), policyField("Secret alias JSON", aliases),
+      text("p", "仅填写 alias，例如 {\"client-secret\":\"corporate\"} 或 {\"bind-password\":\"corporate-ad\",\"ca\":\"corporate-ca\"}。不要填写 Secret 明文。", "subtle policy-help"),
+      policyField("变更原因", reason));
+    selectProvider("");
+
+    const actions = document.createElement("div"); actions.className = "policy-actions";
+    const candidate = () => ({ type: type.value, config: JSON.parse(config.value), secretAliases: JSON.parse(aliases.value), reason: reason.value.trim() });
+    if (capabilityAllowed("admin.provider/validate")) {
+      const validate = text("button", "验证连通性", "secondary"); validate.type = "button";
+      validate.addEventListener("click", async () => {
+        try {
+          const id = providerID.value.trim();
+          const result = await policyMutation(`/providers/${encodeURIComponent(id)}/validate`, etag, crypto.randomUUID(), candidate());
+          policyMessage(panel, `Provider 配置有效；${result.validation?.connectivity || "结构校验通过"}。`);
+        } catch (error) { policyMessage(panel, error.message || "Provider 验证失败。", "error"); }
+      }); actions.append(validate);
+    }
+    if (capabilityAllowed("admin.provider/create")) {
+      const draft = text("button", "创建 Draft", "primary"); draft.type = "button";
+      draft.addEventListener("click", async () => {
+        try {
+          const id = providerID.value.trim(); const key = crypto.randomUUID();
+          const result = await policyMutation(`/providers/${encodeURIComponent(id)}/drafts`, etag, key, candidate());
+          const pending = { providerId: id, changeId: result.changeId, revision: result.revision, baseEtag: result.baseEtag, key };
+          sessionStorage.setItem(providerDraftStorageKey, JSON.stringify(pending));
+          policyMessage(panel, `Draft revision ${result.revision} 已验证，等待发布。`);
+          renderPendingProvider(panel, actions, pending, reason);
+        } catch (error) { policyMessage(panel, error.message || "创建 Provider Draft 失败。", "error"); }
+      }); actions.append(draft);
+    }
+    panel.append(actions);
+    const pending = pendingProviderDraft();
+    const pendingCurrent = pending ? items.find((item) => item.providerId === pending.providerId) : null;
+    if (pending && ((pendingCurrent && Number(pendingCurrent.etag) === pending.baseEtag) || (!pendingCurrent && pending.baseEtag === 0))) {
+      renderPendingProvider(panel, actions, pending, reason);
+    } else if (pending) sessionStorage.removeItem(providerDraftStorageKey);
+
+    if (capabilityAllowed("admin.provider/rollback")) {
+      const rollback = document.createElement("section"); rollback.className = "policy-panel compact";
+      rollback.append(text("h2", "回滚 Provider Revision"));
+      const rollbackID = document.createElement("input"); rollbackID.placeholder = "Provider ID";
+      const target = document.createElement("input"); target.type = "number"; target.min = "1"; target.placeholder = "目标 revision";
+      const rollbackReason = document.createElement("input"); rollbackReason.maxLength = 512; rollbackReason.placeholder = "回滚原因（至少 8 个字符）";
+      const rollbackButton = text("button", "执行回滚", "secondary danger-action"); rollbackButton.type = "button";
+      selector.addEventListener("change", () => { rollbackID.value = selector.value; });
+      rollbackButton.addEventListener("click", async () => {
+        try {
+          const item = items.find((candidateItem) => candidateItem.providerId === rollbackID.value.trim());
+          const result = await policyMutation(`/providers/${encodeURIComponent(rollbackID.value.trim())}/rollback`, Number(item?.etag || 0), crypto.randomUUID(), {
+            targetRevision: Number(target.value), reason: rollbackReason.value.trim(),
+          });
+          sessionStorage.removeItem(providerDraftStorageKey); await loadProviders();
+          policyMessage(document.getElementById("content"), `已回滚到 revision ${result.revision}，新 ETag ${result.etag}。`);
+        } catch (error) { policyMessage(rollback, error.message, "error"); }
+      });
+      const fields = document.createElement("div"); fields.className = "policy-rollback";
+      fields.append(policyField("Provider ID", rollbackID), policyField("目标 Revision", target), policyField("原因", rollbackReason), rollbackButton); rollback.append(fields);
+      content.replaceChildren(toolbar, summary, panel, rollback); return;
+    }
+    content.replaceChildren(toolbar, summary, panel);
+  } catch (error) {
+    if (error.status === 401) { await renderLogin("管理会话已过期，请重新登录。"); return; }
+    renderError(error.message);
+  }
+}
+
+function renderPendingProvider(panel, actions, pending, reasonInput) {
+  if (!capabilityAllowed("admin.provider/publish") || actions.querySelector("[data-provider-publish]")) return;
+  const publish = text("button", `发布 Revision ${pending.revision}`, "primary"); publish.type = "button"; publish.dataset.providerPublish = "true";
+  publish.addEventListener("click", async () => {
+    try {
+      const result = await policyMutation(`/providers/${encodeURIComponent(pending.providerId)}/changes/${encodeURIComponent(pending.changeId)}/publish`,
+        pending.baseEtag, pending.key, { reason: reasonInput.value.trim() || "publish validated Provider" });
+      sessionStorage.removeItem(providerDraftStorageKey); await loadProviders();
+      policyMessage(document.getElementById("content"), `Provider revision ${result.revision} 已发布，ETag ${result.etag}。`);
+    } catch (error) { policyMessage(panel, error.message || "发布 Provider 失败。", "error"); }
+  }); actions.append(publish);
 }
 
 function displayValue(key, value) {

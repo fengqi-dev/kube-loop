@@ -34,6 +34,7 @@
 {{- $breakGlass := .Values.controller.management.breakGlass -}}
 {{- $breakGlassAlias := trim (toString $breakGlass.secretAlias) -}}
 {{- $breakGlassSecret := dict -}}
+{{- $providerSecretAliases := default (dict) .Values.controller.management.providerSecretAliases -}}
 {{- if $breakGlass.enabled -}}
 {{- if not (regexMatch "^[a-z][a-z0-9-]{0,62}$" $breakGlassAlias) -}}
 {{- fail "controller.management.breakGlass.secretAlias must be a valid stable alias" -}}
@@ -168,7 +169,7 @@ spec:
             - name: auth-secrets
               mountPath: /var/run/secrets/kubeloop/auth
               readOnly: true
-            {{- if $breakGlass.enabled }}
+            {{- if or $breakGlass.enabled $providerSecretAliases }}
             - name: management-secrets
               mountPath: /var/run/secrets/kubeloop/management
               readOnly: true
@@ -195,12 +196,14 @@ spec:
                   items:
                     - key: {{ required "controller.relay.signingKeyKey is required" .Values.controller.relay.signingKeyKey }}
                       path: relay/signing-key.pem
-              {{- if .Values.controller.auth.providers }}
+              {{- if or .Values.controller.auth.providers $providerSecretAliases }}
               - secret:
-                  name: {{ required "controller.auth.token.existingSecret is required when authentication Providers are configured" .Values.controller.auth.token.existingSecret }}
+                  name: {{ required "controller.auth.token.existingSecret is required" .Values.controller.auth.token.existingSecret }}
                   items:
                     - key: {{ required "controller.auth.token.signingKeyKey is required" .Values.controller.auth.token.signingKeyKey }}
                       path: token/signing-key.pem
+              {{- end }}
+              {{- if .Values.controller.auth.providers }}
               {{- range $index, $provider := .Values.controller.auth.providers }}
               {{- $id := required (printf "controller.auth.providers[%d].id is required" $index) $provider.id }}
               {{- $type := required (printf "controller.auth.providers[%d].type is required" $index) $provider.type }}
@@ -243,14 +246,35 @@ spec:
               {{- end }}
               {{- end }}
               {{- end }}
-        {{- if $breakGlass.enabled }}
+        {{- if or $breakGlass.enabled $providerSecretAliases }}
         - name: management-secrets
-          secret:
-            secretName: {{ required (printf "controller.management.breakGlass.secretAliases.%s.existingSecret is required" $breakGlassAlias) $breakGlassSecret.existingSecret }}
+          projected:
             defaultMode: 0400
-            items:
-              - key: {{ required (printf "controller.management.breakGlass.secretAliases.%s.credentialKey is required" $breakGlassAlias) $breakGlassSecret.credentialKey }}
-                path: {{ printf "break-glass/%s/credential" $breakGlassAlias | quote }}
+            sources:
+              {{- if $breakGlass.enabled }}
+              - secret:
+                  name: {{ required (printf "controller.management.breakGlass.secretAliases.%s.existingSecret is required" $breakGlassAlias) $breakGlassSecret.existingSecret }}
+                  items:
+                    - key: {{ required (printf "controller.management.breakGlass.secretAliases.%s.credentialKey is required" $breakGlassAlias) $breakGlassSecret.credentialKey }}
+                      path: {{ printf "break-glass/%s/credential" $breakGlassAlias | quote }}
+              {{- end }}
+              {{- range $alias, $secret := $providerSecretAliases }}
+              - secret:
+                  name: {{ required (printf "controller.management.providerSecretAliases.%s.existingSecret is required" $alias) $secret.existingSecret }}
+                  items:
+                    {{- if $secret.clientSecretKey }}
+                    - key: {{ $secret.clientSecretKey }}
+                      path: {{ printf "providers/%s/client-secret" $alias | quote }}
+                    {{- end }}
+                    {{- if $secret.bindPasswordKey }}
+                    - key: {{ $secret.bindPasswordKey }}
+                      path: {{ printf "providers/%s/bind-password" $alias | quote }}
+                    {{- end }}
+                    {{- if $secret.caKey }}
+                    - key: {{ $secret.caKey }}
+                      path: {{ printf "providers/%s/ca.crt" $alias | quote }}
+                    {{- end }}
+              {{- end }}
         {{- end }}
         {{- if .Values.controller.relayRegistry.enabled }}
         - name: relay-registry-tls

@@ -54,6 +54,27 @@
 {{- else if $breakGlassAlias }}
 {{- fail "controller.management.breakGlass.secretAlias must be empty while break-glass is disabled" }}
 {{- end }}
+{{- $providerSecretAliases := dict }}
+{{- range $alias, $secret := (default (dict) $management.providerSecretAliases) }}
+{{- if not (regexMatch "^[a-z][a-z0-9-]{0,62}$" $alias) }}
+{{- fail (printf "controller.management.providerSecretAliases.%s must use a valid stable alias" $alias) }}
+{{- end }}
+{{- $_ := required (printf "controller.management.providerSecretAliases.%s.existingSecret is required" $alias) $secret.existingSecret }}
+{{- if not (or $secret.clientSecretKey $secret.bindPasswordKey $secret.caKey) }}
+{{- fail (printf "controller.management.providerSecretAliases.%s must project at least one key" $alias) }}
+{{- end }}
+{{- $files := dict }}
+{{- if $secret.clientSecretKey }}
+{{- $_ := set $files "clientSecretFile" (printf "/var/run/secrets/kubeloop/management/providers/%s/client-secret" $alias) }}
+{{- end }}
+{{- if $secret.bindPasswordKey }}
+{{- $_ := set $files "bindPasswordFile" (printf "/var/run/secrets/kubeloop/management/providers/%s/bind-password" $alias) }}
+{{- end }}
+{{- if $secret.caKey }}
+{{- $_ := set $files "caFile" (printf "/var/run/secrets/kubeloop/management/providers/%s/ca.crt" $alias) }}
+{{- end }}
+{{- $_ := set $providerSecretAliases $alias $files }}
+{{- end }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -203,7 +224,7 @@ metadata:
 data:
   auth.json: {{ dict "developmentMode" .Values.controller.auth.developmentMode "providers" $providers | toJson | quote }}
   policy.json: {{ dict "version" 1 "rules" (default (list) .Values.controller.policy.rules) | toJson | quote }}
-  management.json: {{ dict "bootstrap" (dict "subjects" (default (list) $bootstrap.subjects) "groups" (default (list) $bootstrap.groups) "recoveryEnabled" $bootstrap.recoveryEnabled) "breakGlass" $breakGlassConfig | toJson | quote }}
+  management.json: {{ dict "bootstrap" (dict "subjects" (default (list) $bootstrap.subjects) "groups" (default (list) $bootstrap.groups) "recoveryEnabled" $bootstrap.recoveryEnabled) "breakGlass" $breakGlassConfig "providerSecretAliases" $providerSecretAliases | toJson | quote }}
   kubernetes.json: {{ dict "timeout" .Values.controller.kubernetes.timeout "qps" .Values.controller.kubernetes.qps "burst" .Values.controller.kubernetes.burst "userAgent" .Values.controller.kubernetes.userAgent "impersonation" (dict "enabled" .Values.controller.kubernetes.impersonation.enabled "usernamePrefix" .Values.controller.kubernetes.impersonation.usernamePrefix "groupMappings" (default (dict) .Values.controller.kubernetes.impersonation.groupMappings)) | toJson | quote }}
 ---
 apiVersion: v1

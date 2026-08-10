@@ -24,13 +24,46 @@ const (
 	DefaultBreakGlassSessionTTL = 15 * time.Minute
 	MinimumBreakGlassSessionTTL = time.Minute
 	breakGlassMountRoot         = "/var/run/secrets/kubeloop/management/break-glass"
+	providerSecretMountRoot     = "/var/run/secrets/kubeloop/management/providers"
+	maximumProviderAliases      = 64
 )
 
 var aliasPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,62}$`)
 
 type File struct {
-	Bootstrap  BootstrapConfig  `json:"bootstrap"`
-	BreakGlass BreakGlassConfig `json:"breakGlass"`
+	Bootstrap             BootstrapConfig       `json:"bootstrap"`
+	BreakGlass            BreakGlassConfig      `json:"breakGlass"`
+	ProviderSecretAliases ProviderSecretAliases `json:"providerSecretAliases"`
+}
+
+type ProviderSecretAliases map[string]ProviderSecretAlias
+
+type ProviderSecretAlias struct {
+	ClientSecretFile string `json:"clientSecretFile,omitempty"`
+	BindPasswordFile string `json:"bindPasswordFile,omitempty"`
+	CAFile           string `json:"caFile,omitempty"`
+}
+
+func (aliases ProviderSecretAliases) Resolve(alias, use string) (string, error) {
+	entry, ok := aliases[strings.TrimSpace(alias)]
+	if !ok {
+		return "", errors.New("managed Provider Secret alias is not allowlisted")
+	}
+	var path string
+	switch strings.TrimSpace(use) {
+	case "client-secret":
+		path = entry.ClientSecretFile
+	case "bind-password":
+		path = entry.BindPasswordFile
+	case "ca":
+		path = entry.CAFile
+	default:
+		return "", errors.New("managed Provider Secret use is invalid")
+	}
+	if path == "" {
+		return "", errors.New("managed Provider Secret use is not allowlisted")
+	}
+	return path, nil
 }
 
 type BootstrapConfig struct {
@@ -111,7 +144,45 @@ func normalize(config File) (File, error) {
 		return File{}, err
 	}
 	config.BreakGlass = breakGlass
+	providerAliases, err := normalizeProviderSecretAliases(config.ProviderSecretAliases)
+	if err != nil {
+		return File{}, err
+	}
+	config.ProviderSecretAliases = providerAliases
 	return config, nil
+}
+
+func normalizeProviderSecretAliases(aliases ProviderSecretAliases) (ProviderSecretAliases, error) {
+	if aliases == nil {
+		return ProviderSecretAliases{}, nil
+	}
+	if len(aliases) > maximumProviderAliases {
+		return nil, errors.New("management Provider Secret aliases exceed 64 entries")
+	}
+	result := make(ProviderSecretAliases, len(aliases))
+	for alias, entry := range aliases {
+		if !aliasPattern.MatchString(alias) {
+			return nil, fmt.Errorf("management Provider Secret alias %q is invalid", alias)
+		}
+		entry.ClientSecretFile = strings.TrimSpace(entry.ClientSecretFile)
+		entry.BindPasswordFile = strings.TrimSpace(entry.BindPasswordFile)
+		entry.CAFile = strings.TrimSpace(entry.CAFile)
+		if entry.ClientSecretFile == "" && entry.BindPasswordFile == "" && entry.CAFile == "" {
+			return nil, fmt.Errorf("management Provider Secret alias %q has no projected keys", alias)
+		}
+		root := filepath.Join(providerSecretMountRoot, alias)
+		for use, actual := range map[string]string{
+			"client-secret": entry.ClientSecretFile,
+			"bind-password": entry.BindPasswordFile,
+			"ca.crt":        entry.CAFile,
+		} {
+			if actual != "" && actual != filepath.Join(root, use) {
+				return nil, fmt.Errorf("management Provider Secret alias %q must use fixed mount paths", alias)
+			}
+		}
+		result[alias] = entry
+	}
+	return result, nil
 }
 
 func normalizeBreakGlass(config BreakGlassConfig) (BreakGlassConfig, error) {

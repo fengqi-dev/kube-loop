@@ -144,6 +144,7 @@ type AdminAssignmentRepository interface {
 
 type ActiveManagementRevisionRepository interface {
 	Get(context.Context, string, string) (ActiveManagementRevision, error)
+	List(context.Context, string) ([]ActiveManagementRevision, error)
 	// CompareAndSwap changes an active pointer only when its monotonic ETag still
 	// matches. expectedETag=0 creates the first pointer; rollback never lowers ETag.
 	CompareAndSwap(context.Context, string, string, uint64, uint64, string, string, time.Time) (ActiveManagementRevision, error)

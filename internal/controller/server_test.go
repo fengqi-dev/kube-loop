@@ -73,6 +73,37 @@ func TestDiscoveryContract(t *testing.T) {
 	}
 }
 
+func TestDiscoveryReadsDynamicAuthenticationMethods(t *testing.T) {
+	methods := []AuthMethod{{ID: "first", Type: "oidc", Interaction: "browser"}}
+	server, err := NewServer(
+		Config{PublicURL: "https://gateway.example.test", AuthMethods: methods}, BuildInfo{},
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		WithAuthMethodSource(AuthMethodSourceFunc(func() []AuthMethod { return append([]AuthMethod(nil), methods...) })),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	read := func() DiscoveryDocument {
+		response := httptest.NewRecorder()
+		server.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, DiscoveryPath, nil))
+		if response.Code != http.StatusOK || response.Header().Get("Cache-Control") != "public, max-age=5" {
+			t.Fatalf("dynamic discovery status=%d cache=%q", response.Code, response.Header().Get("Cache-Control"))
+		}
+		var document DiscoveryDocument
+		if err := json.Unmarshal(response.Body.Bytes(), &document); err != nil {
+			t.Fatal(err)
+		}
+		return document
+	}
+	if got := read().AuthMethods; len(got) != 1 || got[0].ID != "first" {
+		t.Fatalf("first discovery methods=%#v", got)
+	}
+	methods = []AuthMethod{{ID: "second", Type: "ad", Interaction: "password"}}
+	if got := read().AuthMethods; len(got) != 1 || got[0].ID != "second" {
+		t.Fatalf("updated discovery methods=%#v", got)
+	}
+}
+
 func TestManagementRouteIsIsolatedFromOrdinaryBearerFramework(t *testing.T) {
 	managementCalls := 0
 	management := http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {

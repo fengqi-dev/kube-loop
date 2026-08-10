@@ -101,6 +101,19 @@ type serverOptions struct {
 	readiness         ReadinessChecker
 	authHandler       http.Handler
 	managementHandler http.Handler
+	authMethodSource  AuthMethodSource
+}
+
+type AuthMethodSource interface {
+	AuthMethods() []AuthMethod
+}
+
+type AuthMethodSourceFunc func() []AuthMethod
+
+func (function AuthMethodSourceFunc) AuthMethods() []AuthMethod { return function() }
+
+func WithAuthMethodSource(source AuthMethodSource) ServerOption {
+	return func(options *serverOptions) { options.authMethodSource = source }
 }
 
 type ServerOption func(*serverOptions)
