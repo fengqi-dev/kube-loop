@@ -76,6 +76,7 @@ type taskDocument struct {
 	State       string     `json:"state"`
 	CreatedAt   time.Time  `json:"createdAt"`
 	UpdatedAt   time.Time  `json:"updatedAt"`
+	Version     uint64     `json:"version"`
 	ExpiresAt   *time.Time `json:"expiresAt,omitempty"`
 }
 
@@ -215,7 +216,8 @@ func (api *readAPI) listTasks(writer http.ResponseWriter, request *http.Request)
 	for _, task := range tasks {
 		items = append(items, taskDocument{
 			ID: task.ID, PrincipalID: task.PrincipalID, SessionID: task.SessionID,
-			Type: task.Type, State: string(task.State), CreatedAt: task.CreatedAt, UpdatedAt: task.UpdatedAt, ExpiresAt: task.ExpiresAt,
+			Type: task.Type, State: string(task.State), CreatedAt: task.CreatedAt, UpdatedAt: task.UpdatedAt,
+			Version: uint64(task.UpdatedAt.UTC().UnixNano()), ExpiresAt: task.ExpiresAt,
 		})
 	}
 	api.audit(request, subjectFromRequest(request), "admin.task/list", "success")

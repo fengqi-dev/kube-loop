@@ -64,6 +64,26 @@ func (repository *tokenFamilyRepository) Revoke(ctx context.Context, id string, 
 	return nil
 }
 
+func (repository *tokenFamilyRepository) RevokeByPrincipal(
+	ctx context.Context,
+	principalID string,
+	revokedAt time.Time,
+) (int64, error) {
+	if err := validateUUID(principalID, "principal ID"); err != nil {
+		return 0, err
+	}
+	if revokedAt.IsZero() {
+		return 0, errors.New("revocation time is required")
+	}
+	query := repository.bind(`UPDATE token_families SET revoked_at = ?
+		WHERE principal_id = ? AND revoked_at IS NULL`)
+	result, err := repository.executor.ExecContext(ctx, query, formatTime(revokedAt), principalID)
+	if err != nil {
+		return 0, mapWriteError(err)
+	}
+	return rowsAffected(result)
+}
+
 func (repository *tokenFamilyRepository) RotateHash(
 	ctx context.Context,
 	id string,

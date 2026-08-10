@@ -20,6 +20,7 @@ import (
 	adminbreakglass "github.com/fengqi-dev/kube-loop/internal/controller/admin/breakglass"
 	managementconfig "github.com/fengqi-dev/kube-loop/internal/controller/admin/config"
 	adminhttpapi "github.com/fengqi-dev/kube-loop/internal/controller/admin/httpapi"
+	adminoperations "github.com/fengqi-dev/kube-loop/internal/controller/admin/operations"
 	adminprovider "github.com/fengqi-dev/kube-loop/internal/controller/admin/provider"
 	adminrevision "github.com/fengqi-dev/kube-loop/internal/controller/admin/revision"
 	adminsession "github.com/fengqi-dev/kube-loop/internal/controller/admin/session"
@@ -673,6 +674,12 @@ func main() {
 		logger.Error("initialize Management Session service failed", "error", err)
 		os.Exit(2)
 	}
+	managementOperations, err := adminoperations.New(stateStore, sessionRuntime)
+	if err != nil {
+		_ = stateStore.Close()
+		logger.Error("initialize Management Operations service failed", "error", err)
+		os.Exit(2)
+	}
 	var tokenService *token.Service
 	if len(authRegistry.Descriptors()) > 0 || len(managementFile.ProviderSecretAliases) > 0 {
 		signingKey, err := token.LoadSigningKey(*tokenSigningKeyFile)
@@ -714,7 +721,8 @@ func main() {
 			Version: version, Commit: commit, ProtocolMin: protocolMin, ProtocolMax: protocolMax,
 		},
 	), adminhttpapi.WithPolicyAPI(managementRevisionService, managementPolicyLoader),
-		adminhttpapi.WithProviderAPI(managedProviderService)}
+		adminhttpapi.WithProviderAPI(managedProviderService),
+		adminhttpapi.WithOperationsAPI(managementOperations)}
 	if relayRegistry != nil {
 		managementOptions = append(managementOptions, adminhttpapi.WithRelayStatusSource(relayRegistry.registry))
 	}

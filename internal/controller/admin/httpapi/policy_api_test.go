@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	adminauthorization "github.com/fengqi-dev/kube-loop/internal/controller/admin/authorization"
+	adminoperations "github.com/fengqi-dev/kube-loop/internal/controller/admin/operations"
 	adminrevision "github.com/fengqi-dev/kube-loop/internal/controller/admin/revision"
 	adminsession "github.com/fengqi-dev/kube-loop/internal/controller/admin/session"
 	"github.com/fengqi-dev/kube-loop/internal/controller/storage"
@@ -189,9 +190,14 @@ func newPolicyTestHandler(t *testing.T) (*Handler, *storage.Store, *adminauthori
 	if err != nil {
 		t.Fatal(err)
 	}
+	operations, err := adminoperations.New(store, noopSessionRuntime{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	handler, err := New(Config{PublicURL: "https://gateway.example"}, sessions,
 		WithReadAPI(engine, store, BuildInfo{Version: "test", Commit: "test", ProtocolMin: "2.0", ProtocolMax: "2.0"}),
 		WithPolicyAPI(service, loader),
+		WithOperationsAPI(operations),
 	)
 	if err != nil {
 		t.Fatal(err)

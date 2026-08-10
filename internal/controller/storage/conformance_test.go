@@ -369,6 +369,22 @@ func testTokenFamilyRepository(t *testing.T, store *Store) {
 	if err != nil || loaded.RevokedAt == nil || !loaded.RevokedAt.Equal(firstRevocation) {
 		t.Fatalf("idempotent revocation = %#v, %v", loaded.RevokedAt, err)
 	}
+	batchFamily := TokenFamily{
+		ID: uuid.NewString(), PrincipalID: principal.ID, DeviceID: "batch-device",
+		RefreshTokenHash: bytes.Repeat([]byte{5}, 32), CreatedAt: now, ExpiresAt: now.Add(time.Hour),
+	}
+	if err := store.TokenFamilies().Create(ctx, batchFamily); err != nil {
+		t.Fatal(err)
+	}
+	batchRevocation := now.Add(20 * time.Minute)
+	count, err := store.TokenFamilies().RevokeByPrincipal(ctx, principal.ID, batchRevocation)
+	if err != nil || count != 1 {
+		t.Fatalf("principal token family revocation = %d, %v", count, err)
+	}
+	count, err = store.TokenFamilies().RevokeByPrincipal(ctx, principal.ID, batchRevocation.Add(time.Minute))
+	if err != nil || count != 0 {
+		t.Fatalf("replayed principal token family revocation = %d, %v", count, err)
+	}
 	expired := TokenFamily{
 		ID: uuid.NewString(), PrincipalID: principal.ID, DeviceID: "expired",
 		RefreshTokenHash: bytes.Repeat([]byte{2}, 32), CreatedAt: now.Add(-2 * time.Hour), ExpiresAt: now.Add(-time.Hour),

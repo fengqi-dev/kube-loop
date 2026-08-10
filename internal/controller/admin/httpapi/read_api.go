@@ -10,6 +10,7 @@ import (
 	"time"
 
 	adminauthorization "github.com/fengqi-dev/kube-loop/internal/controller/admin/authorization"
+	adminoperations "github.com/fengqi-dev/kube-loop/internal/controller/admin/operations"
 	adminrevision "github.com/fengqi-dev/kube-loop/internal/controller/admin/revision"
 	adminsession "github.com/fengqi-dev/kube-loop/internal/controller/admin/session"
 	"github.com/fengqi-dev/kube-loop/internal/controller/relayregistry"
@@ -42,6 +43,7 @@ type handlerOptions struct {
 	policyService      *adminrevision.Service
 	policyReloader     PolicyReloader
 	providerService    *adminrevision.ProviderService
+	operationService   *adminoperations.Service
 }
 
 type RelayStatusSource interface {
@@ -74,6 +76,19 @@ func WithProviderAPI(service *adminrevision.ProviderService) Option {
 			return errors.New("management Provider API is already configured")
 		}
 		options.providerService = service
+		return nil
+	}
+}
+
+func WithOperationsAPI(service *adminoperations.Service) Option {
+	return func(options *handlerOptions) error {
+		if service == nil {
+			return errors.New("management Operations API service is required")
+		}
+		if options.operationService != nil {
+			return errors.New("management Operations API is already configured")
+		}
+		options.operationService = service
 		return nil
 	}
 }
@@ -120,6 +135,7 @@ type readAPI struct {
 	policy     *adminrevision.Service
 	reloader   PolicyReloader
 	providers  *adminrevision.ProviderService
+	operations *adminoperations.Service
 }
 
 type requestContextKey int
@@ -147,7 +163,10 @@ var capabilityChecks = []adminauthorization.Request{
 	{Resource: adminauthorization.ResourcePolicy, Operation: adminauthorization.OperationRollback},
 	{Resource: adminauthorization.ResourcePrincipal, Operation: adminauthorization.OperationList},
 	{Resource: adminauthorization.ResourceSession, Operation: adminauthorization.OperationList},
+	{Resource: adminauthorization.ResourceSession, Operation: adminauthorization.OperationRevoke},
+	{Resource: adminauthorization.ResourceSession, Operation: adminauthorization.OperationStop},
 	{Resource: adminauthorization.ResourceTask, Operation: adminauthorization.OperationList},
+	{Resource: adminauthorization.ResourceTask, Operation: adminauthorization.OperationStop},
 	{Resource: adminauthorization.ResourceRelay, Operation: adminauthorization.OperationList},
 	{Resource: adminauthorization.ResourceAudit, Operation: adminauthorization.OperationList},
 }
@@ -207,6 +226,20 @@ func (api *readAPI) routes(router chi.Router) {
 			protected.With(api.require(adminauthorization.Request{
 				Resource: adminauthorization.ResourceProvider, Operation: adminauthorization.OperationRollback,
 			})).Post("/providers/{providerID}/rollback", api.rollbackProvider)
+		}
+		if api.operations != nil {
+			protected.With(api.require(adminauthorization.Request{
+				Resource: adminauthorization.ResourceSession, Operation: adminauthorization.OperationRevoke,
+			})).Post("/principals/{principalID}/revoke", api.revokePrincipalSessions)
+			protected.With(api.require(adminauthorization.Request{
+				Resource: adminauthorization.ResourceSession, Operation: adminauthorization.OperationRevoke,
+			})).Post("/principals/{principalID}/device-sessions/{deviceSessionID}/revoke", api.revokeDeviceSession)
+			protected.With(api.require(adminauthorization.Request{
+				Resource: adminauthorization.ResourceSession, Operation: adminauthorization.OperationStop,
+			})).Post("/sessions/{sessionID}/stop", api.stopSession)
+			protected.With(api.require(adminauthorization.Request{
+				Resource: adminauthorization.ResourceTask, Operation: adminauthorization.OperationStop,
+			})).Post("/tasks/{taskID}/stop", api.stopTask)
 		}
 	})
 }

@@ -30,6 +30,9 @@ type TokenFamilyRepository interface {
 	GetByID(context.Context, string) (TokenFamily, error)
 	// Revoke is idempotent and never clears an earlier revocation timestamp.
 	Revoke(context.Context, string, time.Time) error
+	// RevokeByPrincipal atomically revokes every active Device Session owned by
+	// one Principal and returns the number newly revoked.
+	RevokeByPrincipal(context.Context, string, time.Time) (int64, error)
 	// RotateHash changes the current hash only when it still matches the
 	// expected token, providing an optimistic guard for refresh rotation.
 	RotateHash(context.Context, string, []byte, []byte) error
