@@ -660,6 +660,7 @@ Gateway 使用统一的 `AuthProvider` 抽象，首期支持：
 - [x] **V2-902：配置 revision Repository。**
   - 2026-08-10（完成）：schema v9 新增不可变 policy/provider revision、assignment、单调 active ETag 和幂等 change request；SQLite/PostgreSQL 共用 Repository contract、逻辑导出/导入与一致性验证。策略草稿、发布和回滚把 active pointer、状态、bootstrap 永久退役及 append-only 审计放在同一事务；并发发布使用 CAS，回滚 revision 时 ETag 仍递增。Controller 启动和轮询会交叉校验 revision spec/hash 与 assignment 行，再原子更新内存 authorizer；存储或聚合异常时立即 fail closed，恢复后可安全重载。
 - [ ] **V2-903：只读管理 API。**
+  - 2026-08-10（进行中）：独立 chi v5 管理路由已新增 Cookie Session 鉴权、当前 Principal group 解析、Token Family 吊销/过期检查、同源与重复 Cookie 拒绝，以及为后续写接口共用的同步 CSRF 中间件。`GET /api/v2/admin/capabilities` 和 `/status` 按当前 policy revision 服务端授权，只返回 Controller protocol、存储 backend/schema 与能力键，并写入不含 Token/Cookie/CSRF 的有界审计。Principal/Session/Task/Relay/Audit 稳定 cursor 列表仍待后续切片。
 - [ ] **V2-904：只读管理 UI。**
 - [ ] **V2-905：访问/网络策略管理。**
 - [ ] **V2-906：OIDC/AD Provider 管理。**

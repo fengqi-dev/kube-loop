@@ -40,13 +40,14 @@ type Config struct {
 
 type Handler struct {
 	sessions *adminsession.Service
+	readAPI  *readAPI
 	origin   string
 	maxBody  int64
 	limiter  *exchangeLimiter
 	router   http.Handler
 }
 
-func New(config Config, sessions *adminsession.Service) (*Handler, error) {
+func New(config Config, sessions *adminsession.Service, optionValues ...Option) (*Handler, error) {
 	if sessions == nil {
 		return nil, errors.New("management session service is required")
 	}
@@ -77,13 +78,28 @@ func New(config Config, sessions *adminsession.Service) (*Handler, error) {
 		sourceAttempts > globalAttempts || window < time.Second || window > time.Hour {
 		return nil, errors.New("management HTTP limits are invalid")
 	}
+	var options handlerOptions
+	for _, option := range optionValues {
+		if option != nil {
+			if err := option(&options); err != nil {
+				return nil, err
+			}
+		}
+	}
 	handler := &Handler{
 		sessions: sessions, origin: parsed.Scheme + "://" + parsed.Host,
 		maxBody: maxBody, limiter: newExchangeLimiter(globalAttempts, sourceAttempts, window),
 	}
+	if options.readAPI != nil {
+		handler.readAPI = options.readAPI
+		handler.readAPI.handler = handler
+	}
 	router := chi.NewRouter()
 	router.Use(handler.securityHeaders)
 	router.Post("/sessions/break-glass", handler.exchangeBreakGlass)
+	if handler.readAPI != nil {
+		router.Group(handler.readAPI.routes)
+	}
 	handler.router = router
 	return handler, nil
 }
@@ -98,6 +114,9 @@ func (handler *Handler) securityHeaders(next http.Handler) http.Handler {
 		writer.Header().Set("Pragma", "no-cache")
 		writer.Header().Set("X-Content-Type-Options", "nosniff")
 		writer.Header().Set("Referrer-Policy", "no-referrer")
+		writer.Header().Set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'; base-uri 'none'")
+		writer.Header().Set("X-Frame-Options", "DENY")
+		writer.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
 		next.ServeHTTP(writer, request)
 	})
 }

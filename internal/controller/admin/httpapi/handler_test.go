@@ -116,6 +116,131 @@ func TestManagementPublicURLRequiresTLSOutsideLoopback(t *testing.T) {
 	}
 }
 
+func TestReadAPIRequiresCookieAndReturnsAuthorizedCapabilitiesAndStatus(t *testing.T) {
+	handler, store := newReadTestHandler(t, true)
+	unauthenticated := httptest.NewRecorder()
+	handler.ServeHTTP(unauthenticated, httptest.NewRequest(http.MethodGet, "/capabilities", nil))
+	if unauthenticated.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated status=%d body=%s", unauthenticated.Code, unauthenticated.Body.String())
+	}
+
+	exchange := performExchange(handler, `{"credential":"valid"}`)
+	if exchange.Code != http.StatusCreated || len(exchange.Result().Cookies()) != 1 {
+		t.Fatalf("exchange status=%d body=%s", exchange.Code, exchange.Body.String())
+	}
+	cookie := exchange.Result().Cookies()[0]
+	capabilityRequest := httptest.NewRequest(http.MethodGet, "/capabilities", nil)
+	capabilityRequest.AddCookie(cookie)
+	capabilityRequest.Header.Set("Sec-Fetch-Site", "same-origin")
+	capabilities := httptest.NewRecorder()
+	handler.ServeHTTP(capabilities, capabilityRequest)
+	if capabilities.Code != http.StatusOK || capabilities.Header().Get(managementRequestHeader) == "" {
+		t.Fatalf("capability status=%d headers=%v body=%s", capabilities.Code, capabilities.Header(), capabilities.Body.String())
+	}
+	var capabilityDocument struct {
+		AuthenticationType string   `json:"authenticationType"`
+		Capabilities       []string `json:"capabilities"`
+	}
+	if err := json.Unmarshal(capabilities.Body.Bytes(), &capabilityDocument); err != nil {
+		t.Fatal(err)
+	}
+	if capabilityDocument.AuthenticationType != "break-glass" || len(capabilityDocument.Capabilities) == 0 {
+		t.Fatalf("capability document=%+v", capabilityDocument)
+	}
+
+	statusRequest := httptest.NewRequest(http.MethodGet, "/status", nil)
+	statusRequest.AddCookie(cookie)
+	status := httptest.NewRecorder()
+	handler.ServeHTTP(status, statusRequest)
+	if status.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", status.Code, status.Body.String())
+	}
+	var statusDocument struct {
+		Controller struct {
+			Version string `json:"version"`
+		} `json:"controller"`
+		Storage struct {
+			Backend       string `json:"backend"`
+			SchemaVersion int    `json:"schemaVersion"`
+		} `json:"storage"`
+	}
+	if err := json.Unmarshal(status.Body.Bytes(), &statusDocument); err != nil {
+		t.Fatal(err)
+	}
+	if statusDocument.Controller.Version != "v2-test" || statusDocument.Storage.Backend != "sqlite" || statusDocument.Storage.SchemaVersion < 9 {
+		t.Fatalf("status document=%+v", statusDocument)
+	}
+	events, err := store.Audit().List(context.Background(), storage.AuditFilter{Limit: 100})
+	if err != nil || len(events) != 3 {
+		t.Fatalf("read API audit events=%d error=%v", len(events), err)
+	}
+}
+
+func TestReadAPIRejectsCrossSiteDuplicateCookieAndUnauthorizedRole(t *testing.T) {
+	handler, _ := newReadTestHandler(t, false)
+	exchange := performExchange(handler, `{"credential":"valid"}`)
+	cookie := exchange.Result().Cookies()[0]
+
+	crossSite := httptest.NewRequest(http.MethodGet, "/status", nil)
+	crossSite.AddCookie(cookie)
+	crossSite.Header.Set("Sec-Fetch-Site", "cross-site")
+	crossSiteRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(crossSiteRecorder, crossSite)
+	if crossSiteRecorder.Code != http.StatusUnauthorized {
+		t.Fatalf("cross-site status=%d", crossSiteRecorder.Code)
+	}
+
+	duplicate := httptest.NewRequest(http.MethodGet, "/status", nil)
+	duplicate.Header.Add("Cookie", SessionCookieName+"="+cookie.Value+"; "+SessionCookieName+"="+cookie.Value)
+	duplicateRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(duplicateRecorder, duplicate)
+	if duplicateRecorder.Code != http.StatusUnauthorized {
+		t.Fatalf("duplicate-cookie status=%d", duplicateRecorder.Code)
+	}
+
+	denied := httptest.NewRequest(http.MethodGet, "/status", nil)
+	denied.AddCookie(cookie)
+	deniedRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(deniedRecorder, denied)
+	if deniedRecorder.Code != http.StatusForbidden {
+		t.Fatalf("denied status=%d body=%s", deniedRecorder.Code, deniedRecorder.Body.String())
+	}
+}
+
+func TestAuthenticatedManagementWritesRequireSynchronousCSRFToken(t *testing.T) {
+	handler, _ := newReadTestHandler(t, true)
+	exchange := performExchange(handler, `{"credential":"valid"}`)
+	cookie := exchange.Result().Cookies()[0]
+	var issued struct {
+		CSRFToken string `json:"csrfToken"`
+	}
+	if err := json.Unmarshal(exchange.Body.Bytes(), &issued); err != nil {
+		t.Fatal(err)
+	}
+	protected := handler.readAPI.authenticate(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writer.WriteHeader(http.StatusNoContent)
+	}))
+
+	missing := httptest.NewRequest(http.MethodPost, "/future-write", nil)
+	missing.AddCookie(cookie)
+	missing.Header.Set("Origin", "https://gateway.example")
+	missingRecorder := httptest.NewRecorder()
+	protected.ServeHTTP(missingRecorder, missing)
+	if missingRecorder.Code != http.StatusForbidden {
+		t.Fatalf("missing CSRF status=%d", missingRecorder.Code)
+	}
+
+	valid := httptest.NewRequest(http.MethodPost, "/future-write", nil)
+	valid.AddCookie(cookie)
+	valid.Header.Set("Origin", "https://gateway.example")
+	valid.Header.Set(CSRFHeaderName, issued.CSRFToken)
+	validRecorder := httptest.NewRecorder()
+	protected.ServeHTTP(validRecorder, valid)
+	if validRecorder.Code != http.StatusNoContent {
+		t.Fatalf("valid CSRF status=%d body=%s", validRecorder.Code, validRecorder.Body.String())
+	}
+}
+
 type testVerifier struct {
 	enabled    bool
 	generation string
@@ -150,6 +275,42 @@ func newTestHandler(t *testing.T, config Config, enabled bool) (*Handler, *stora
 		t.Fatal(err)
 	}
 	handler, err := New(config, sessions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return handler, store
+}
+
+func newReadTestHandler(t *testing.T, authorizeBreakGlass bool) (*Handler, *storage.Store) {
+	t.Helper()
+	store, err := storage.Open(context.Background(), storage.Config{
+		Backend: storage.BackendSQLite, SQLitePath: filepath.Join(t.TempDir(), "management.db"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	generation := base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{4}, 32))
+	verifier := &testVerifier{enabled: true, generation: generation}
+	sessions, err := adminsession.New(store, verifier)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var authorizer *adminauthorization.Engine
+	if authorizeBreakGlass {
+		authorizer, err = adminauthorization.NewDenyAll(adminauthorization.WithBreakGlass(verifier))
+	} else {
+		authorizer, err = adminauthorization.NewDenyAll()
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler, err := New(
+		Config{PublicURL: "https://gateway.example"}, sessions,
+		WithReadAPI(authorizer, store, BuildInfo{
+			Version: "v2-test", Commit: "test-commit", ProtocolMin: "2.0", ProtocolMax: "2.0",
+		}),
+	)
 	if err != nil {
 		t.Fatal(err)
 	}

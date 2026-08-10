@@ -177,8 +177,46 @@ func (service *Service) Authenticate(ctx context.Context, token string) (storage
 		if err != nil || !state.Enabled || !sameString(stored.BreakGlassGeneration, state.Generation) {
 			return storage.AdminSession{}, ErrSessionInvalid
 		}
+	} else if stored.AuthenticationType == string(adminauthorization.AuthenticationNormal) ||
+		stored.AuthenticationType == string(adminauthorization.AuthenticationBootstrap) {
+		family, err := service.store.TokenFamilies().GetByID(ctx, stored.TokenFamilyID)
+		if err != nil || family.PrincipalID != stored.PrincipalID || family.RevokedAt != nil || !family.ExpiresAt.After(now) {
+			return storage.AdminSession{}, ErrSessionInvalid
+		}
+	} else {
+		return storage.AdminSession{}, ErrSessionInvalid
 	}
 	return stored, nil
+}
+
+// AuthenticateSubject resolves current Principal groups on every request, so
+// group removal takes effect without waiting for the browser session to expire.
+// Break-glass identity never consults or manufactures a Principal row.
+func (service *Service) AuthenticateSubject(
+	ctx context.Context,
+	token string,
+) (storage.AdminSession, adminauthorization.Subject, error) {
+	stored, err := service.Authenticate(ctx, token)
+	if err != nil {
+		return storage.AdminSession{}, adminauthorization.Subject{}, err
+	}
+	subject := adminauthorization.Subject{Authentication: adminauthorization.AuthenticationType(stored.AuthenticationType)}
+	if subject.Authentication == adminauthorization.AuthenticationBreakGlass {
+		subject.ID = storage.ManagementActorBreakGlass
+		subject.BreakGlassGeneration = stored.BreakGlassGeneration
+		return stored, subject, nil
+	}
+	if subject.Authentication != adminauthorization.AuthenticationNormal &&
+		subject.Authentication != adminauthorization.AuthenticationBootstrap {
+		return storage.AdminSession{}, adminauthorization.Subject{}, ErrSessionInvalid
+	}
+	principal, err := service.store.Principals().GetByID(ctx, stored.PrincipalID)
+	if err != nil {
+		return storage.AdminSession{}, adminauthorization.Subject{}, ErrSessionInvalid
+	}
+	subject.ID = principal.ID
+	subject.Groups = append([]string(nil), principal.Groups...)
+	return stored, subject, nil
 }
 
 func VerifyCSRF(stored storage.AdminSession, token string) error {

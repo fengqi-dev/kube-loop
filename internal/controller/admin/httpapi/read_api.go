@@ -1,0 +1,225 @@
+package httpapi
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"sort"
+	"strings"
+	"time"
+
+	adminauthorization "github.com/fengqi-dev/kube-loop/internal/controller/admin/authorization"
+	adminsession "github.com/fengqi-dev/kube-loop/internal/controller/admin/session"
+	"github.com/fengqi-dev/kube-loop/internal/controller/storage"
+	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
+)
+
+type StatusSource interface {
+	Check(context.Context) error
+	Backend() storage.Backend
+	SchemaVersion(context.Context) (int, error)
+	Audit() storage.AuditRepository
+}
+
+type BuildInfo struct {
+	Version     string
+	Commit      string
+	ProtocolMin string
+	ProtocolMax string
+}
+
+type Option func(*handlerOptions) error
+
+type handlerOptions struct{ readAPI *readAPI }
+
+func WithReadAPI(authorizer *adminauthorization.Engine, status StatusSource, build BuildInfo) Option {
+	return func(options *handlerOptions) error {
+		if authorizer == nil || status == nil {
+			return errors.New("management read API authorizer and status source are required")
+		}
+		if options.readAPI != nil {
+			return errors.New("management read API is already configured")
+		}
+		build.Version = strings.TrimSpace(build.Version)
+		build.Commit = strings.TrimSpace(build.Commit)
+		build.ProtocolMin = strings.TrimSpace(build.ProtocolMin)
+		build.ProtocolMax = strings.TrimSpace(build.ProtocolMax)
+		if build.Version == "" || build.Commit == "" || build.ProtocolMin == "" || build.ProtocolMax == "" {
+			return errors.New("management read API build information is required")
+		}
+		options.readAPI = &readAPI{authorizer: authorizer, status: status, build: build}
+		return nil
+	}
+}
+
+type readAPI struct {
+	handler    *Handler
+	authorizer *adminauthorization.Engine
+	status     StatusSource
+	build      BuildInfo
+}
+
+type requestContextKey int
+
+const (
+	subjectContextKey requestContextKey = iota
+	sessionContextKey
+	requestIDContextKey
+)
+
+var capabilityChecks = []adminauthorization.Request{
+	{Resource: adminauthorization.ResourceStatus, Operation: adminauthorization.OperationRead},
+	{Resource: adminauthorization.ResourceConfiguration, Operation: adminauthorization.OperationRead},
+	{Resource: adminauthorization.ResourceProvider, Operation: adminauthorization.OperationRead},
+	{Resource: adminauthorization.ResourceAssignment, Operation: adminauthorization.OperationList},
+	{Resource: adminauthorization.ResourcePolicy, Operation: adminauthorization.OperationRead},
+	{Resource: adminauthorization.ResourcePrincipal, Operation: adminauthorization.OperationList},
+	{Resource: adminauthorization.ResourceSession, Operation: adminauthorization.OperationList},
+	{Resource: adminauthorization.ResourceTask, Operation: adminauthorization.OperationList},
+	{Resource: adminauthorization.ResourceRelay, Operation: adminauthorization.OperationList},
+	{Resource: adminauthorization.ResourceAudit, Operation: adminauthorization.OperationList},
+}
+
+func (api *readAPI) routes(router chi.Router) {
+	router.Group(func(protected chi.Router) {
+		protected.Use(api.authenticate)
+		protected.Get("/capabilities", api.capabilities)
+		protected.With(api.require(adminauthorization.Request{
+			Resource: adminauthorization.ResourceStatus, Operation: adminauthorization.OperationRead,
+		})).Get("/status", api.systemStatus)
+	})
+}
+
+func (api *readAPI) authenticate(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		requestID := uuid.NewString()
+		writer.Header().Set(managementRequestHeader, requestID)
+		if request.Header.Get("Authorization") != "" || request.Header.Get("Sec-Fetch-Site") == "cross-site" ||
+			(request.Header.Get("Origin") != "" && request.Header.Get("Origin") != api.handler.origin) {
+			writeError(writer, http.StatusUnauthorized, "unauthenticated", "management authentication failed", requestID)
+			return
+		}
+		var token string
+		cookieCount := 0
+		for _, cookie := range request.Cookies() {
+			if cookie.Name == SessionCookieName {
+				cookieCount++
+				token = cookie.Value
+			}
+		}
+		if cookieCount != 1 {
+			writeError(writer, http.StatusUnauthorized, "unauthenticated", "management authentication failed", requestID)
+			return
+		}
+		stored, subject, err := api.handler.sessions.AuthenticateSubject(request.Context(), token)
+		if err != nil {
+			writeError(writer, http.StatusUnauthorized, "unauthenticated", "management authentication failed", requestID)
+			return
+		}
+		if request.Method != http.MethodGet && request.Method != http.MethodHead && request.Method != http.MethodOptions {
+			if err := adminsession.VerifyCSRF(stored, request.Header.Get(CSRFHeaderName)); err != nil {
+				writeError(writer, http.StatusForbidden, "csrf_failed", "management request was rejected", requestID)
+				return
+			}
+		}
+		ctx := context.WithValue(request.Context(), subjectContextKey, subject)
+		ctx = context.WithValue(ctx, sessionContextKey, stored)
+		ctx = context.WithValue(ctx, requestIDContextKey, requestID)
+		next.ServeHTTP(writer, request.WithContext(ctx))
+	})
+}
+
+func (api *readAPI) require(permission adminauthorization.Request) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+			subject, ok := request.Context().Value(subjectContextKey).(adminauthorization.Subject)
+			requestID, _ := request.Context().Value(requestIDContextKey).(string)
+			if !ok || !api.authorizer.Authorize(request.Context(), subject, permission).Allowed {
+				api.audit(request, subject, permission.Key(), "forbidden")
+				writeError(writer, http.StatusForbidden, "forbidden", "management operation is not permitted", requestID)
+				return
+			}
+			next.ServeHTTP(writer, request)
+		})
+	}
+}
+
+func (api *readAPI) capabilities(writer http.ResponseWriter, request *http.Request) {
+	subject, _ := request.Context().Value(subjectContextKey).(adminauthorization.Subject)
+	capabilities := make([]string, 0, len(capabilityChecks))
+	for _, permission := range capabilityChecks {
+		if api.authorizer.Authorize(request.Context(), subject, permission).Allowed {
+			capabilities = append(capabilities, permission.Key())
+		}
+	}
+	sort.Strings(capabilities)
+	api.audit(request, subject, "admin.capabilities/read", "success")
+	writeJSON(writer, http.StatusOK, map[string]any{
+		"authenticationType": subject.Authentication,
+		"capabilities":       capabilities,
+		"policyRevision":     api.authorizer.Revision(),
+		"policyEtag":         api.authorizer.ETag(),
+	})
+}
+
+func (api *readAPI) systemStatus(writer http.ResponseWriter, request *http.Request) {
+	if err := api.status.Check(request.Context()); err != nil {
+		api.audit(request, subjectFromRequest(request), "admin.status/read", "failure")
+		writeError(writer, http.StatusServiceUnavailable, "unavailable", "management status is unavailable", requestID(request))
+		return
+	}
+	schemaVersion, err := api.status.SchemaVersion(request.Context())
+	if err != nil {
+		api.audit(request, subjectFromRequest(request), "admin.status/read", "failure")
+		writeError(writer, http.StatusServiceUnavailable, "unavailable", "management status is unavailable", requestID(request))
+		return
+	}
+	api.audit(request, subjectFromRequest(request), "admin.status/read", "success")
+	writeJSON(writer, http.StatusOK, map[string]any{
+		"controller": map[string]string{
+			"version": api.build.Version, "commit": api.build.Commit,
+			"protocolMin": api.build.ProtocolMin, "protocolMax": api.build.ProtocolMax,
+		},
+		"storage": map[string]any{
+			"status": "ready", "backend": api.status.Backend(), "schemaVersion": schemaVersion,
+		},
+		"managementPolicy": map[string]any{
+			"status": "ready", "revision": api.authorizer.Revision(), "etag": api.authorizer.ETag(),
+		},
+	})
+}
+
+func requestID(request *http.Request) string {
+	value, _ := request.Context().Value(requestIDContextKey).(string)
+	return value
+}
+
+func subjectFromRequest(request *http.Request) adminauthorization.Subject {
+	value, _ := request.Context().Value(subjectContextKey).(adminauthorization.Subject)
+	return value
+}
+
+func (api *readAPI) audit(
+	request *http.Request,
+	subject adminauthorization.Subject,
+	action, outcome string,
+) {
+	principalID := subject.ID
+	if subject.Authentication == adminauthorization.AuthenticationBreakGlass {
+		principalID = ""
+	}
+	metadata, err := json.Marshal(map[string]any{
+		"authenticationType": subject.Authentication,
+		"policyRevision":     api.authorizer.Revision(),
+	})
+	if err != nil {
+		return
+	}
+	_ = api.status.Audit().Append(request.Context(), storage.AuditEvent{
+		ID: uuid.NewString(), PrincipalID: principalID, Action: action,
+		ResourceType: "management-api", Outcome: outcome, RequestID: requestID(request),
+		Metadata: metadata, CreatedAt: time.Now().UTC(),
+	})
+}

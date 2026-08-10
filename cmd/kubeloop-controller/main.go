@@ -641,7 +641,12 @@ func main() {
 		logger.Error("initialize Management Session service failed", "error", err)
 		os.Exit(2)
 	}
-	managementHandler, err := adminhttpapi.New(adminhttpapi.Config{PublicURL: *publicURL}, managementSessions)
+	managementHandler, err := adminhttpapi.New(
+		adminhttpapi.Config{PublicURL: *publicURL}, managementSessions,
+		adminhttpapi.WithReadAPI(managementPolicyEngine, stateStore, adminhttpapi.BuildInfo{
+			Version: version, Commit: commit, ProtocolMin: protocolMin, ProtocolMax: protocolMax,
+		}),
+	)
 	if err != nil {
 		_ = stateStore.Close()
 		logger.Error("initialize Management Plane HTTP API failed", "error", err)

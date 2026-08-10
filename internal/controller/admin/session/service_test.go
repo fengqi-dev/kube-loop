@@ -79,6 +79,53 @@ func TestBreakGlassSecretRotationInvalidatesIssuedSession(t *testing.T) {
 	}
 }
 
+func TestAuthenticateSubjectUsesCurrentGroupsAndTokenFamilyRevocation(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+	now := time.Date(2026, 8, 10, 11, 30, 0, 0, time.UTC)
+	principal, err := store.Principals().Upsert(ctx, storage.Principal{
+		ID: uuid.NewString(), Provider: "oidc", ExternalID: "management-user",
+		Groups: []string{"auditors"}, CreatedAt: now, UpdatedAt: now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	familyID := uuid.NewString()
+	if err := store.TokenFamilies().Create(ctx, storage.TokenFamily{
+		ID: familyID, PrincipalID: principal.ID, DeviceID: "management-browser",
+		RefreshTokenHash: bytes.Repeat([]byte{8}, 32), CreatedAt: now, ExpiresAt: now.Add(time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	token := opaqueToken(10)
+	tokenHash := sha256.Sum256([]byte(token))
+	if err := store.AdminSessions().Create(ctx, storage.AdminSession{
+		IDHash: tokenHash[:], PrincipalID: principal.ID, TokenFamilyID: familyID,
+		AuthenticationType: string(adminauthorization.AuthenticationNormal), CSRFTokenHash: bytes.Repeat([]byte{9}, 32),
+		CreatedAt: now, LastSeenAt: now, IdleExpiresAt: now.Add(15 * time.Minute), AbsoluteExpiresAt: now.Add(time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	service, _ := New(store, &fakeBreakGlassVerifier{})
+	service.now = func() time.Time { return now }
+	if _, err := store.Principals().Upsert(ctx, storage.Principal{
+		ID: uuid.NewString(), Provider: principal.Provider, ExternalID: principal.ExternalID,
+		Groups: []string{"security"}, CreatedAt: now, UpdatedAt: now.Add(time.Second),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_, subject, err := service.AuthenticateSubject(ctx, token)
+	if err != nil || subject.ID != principal.ID || len(subject.Groups) != 1 || subject.Groups[0] != "security" {
+		t.Fatalf("subject=%#v error=%v", subject, err)
+	}
+	if err := store.TokenFamilies().Revoke(ctx, familyID, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := service.AuthenticateSubject(ctx, token); !errors.Is(err, ErrSessionInvalid) {
+		t.Fatalf("revoked family authentication error = %v", err)
+	}
+}
+
 func TestAuditFailureRollsBackBreakGlassSession(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
