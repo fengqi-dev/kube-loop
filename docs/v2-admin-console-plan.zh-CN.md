@@ -132,7 +132,7 @@ active pointer 和审计事件。使用整数 revision/ETag 做乐观并发，�
 | V2-905 | 已完成 | 访问/网络策略管理 | draft/dry-run/publish/rollback | 发布原子、旧会话权限即时失效、错误配置可回滚 |
 | V2-906 | 已完成 | Provider 管理 | OIDC/AD validation + Secret reference | 草稿验证不影响当前 Provider，Secret 不入 DB/响应/日志 |
 | V2-907 | 已完成 | 运维动作 | revoke/drain/stop/recover/export | 全部幂等、owner-safe、失败可观测且可重试 |
-| V2-908 | 待实现 | 管理面安全/E2E | fuzz、race、浏览器和 Minikube E2E | CSRF/CSP/IDOR/并发发布/撤销/升级回滚通过 |
+| V2-908 | 已完成 | 管理面安全/E2E | fuzz、race、浏览器和 Minikube E2E | CSRF/CSP/IDOR/并发发布/撤销/升级回滚通过 |
 
 推荐切片顺序：先交付 V2-900～904 的只读后台；再实现 V2-905 的策略写入；
 Provider 写入和高风险运维动作最后开放。V2-900～907 完成代码后，再按当前
@@ -156,7 +156,19 @@ list/current/validate/draft/publish/rollback，全部写请求继续要求 Manag
 Session、同源 CSRF、强 `If-Match` 和幂等键。Helm 只把 allowlist 中的 Secret key
 投影到 Controller 固定只读路径；数据库保存 alias，API/UI/审计只返回用途名，
 pending change 也不把 alias 写入 Web Storage。Provider 发布会即时更新 discovery、
-登录和 readiness；Minikube/OIDC/AD 浏览器 E2E 按约定留到 V2-908。
+登录和 readiness。
+
+V2-908 增加管理 HTTP fuzz 入口，并对管理授权、Session、revision、operations、
+SQLite/PostgreSQL Repository 和 UI 包执行 race。真实浏览器通过
+`e2e/admin/browserfixture` 复用生产 SQLite、Management Session、authorizer、
+revision、chi v5 API 与嵌入式 UI，完成桌面/390px 窄屏、break-glass、OIDC PKCE
+callback、AD 密码登录、列表导航和策略 dry-run；同源测试 Provider 只替代外部
+IdP/目录，OIDC/AD 协议、TLS、LDAP filter 与限流继续由 Provider 安全测试覆盖。
+`e2e/admin/verify.sh` 已并入 Minikube Helm 生命周期，验证 CSP、CSRF、同一 ETag
+并发发布只有一个成功、Principal Token Family 撤销后旧 Access Token 立即 401。
+同一轮 Helm E2E 验证 SQLite/PostgreSQL 安装、组件独立升级/扩缩容、PVC/外部数据库
+持久化、回滚、Pod 故障恢复、卸载与 CRD 保留；跨租户 IDOR 继续由授权前置且不读取
+对象的单元/竞态测试覆盖。2026-08-10 最终复跑全部通过。
 
 ## 7. 发布门槛
 

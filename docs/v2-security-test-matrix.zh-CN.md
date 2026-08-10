@@ -13,6 +13,8 @@
 | 路径穿越与归档攻击 | 绝对远程根校验、清理路径、拒绝 `..`、symlink/hardlink/device、限制归档条目/大小/输出 | `internal/controller/fileapi/path_test.go`、`executor_test.go`、`handler_test.go`、`fileopsapi/operator_test.go` |
 | 请求与 WSS 资源耗尽 | HTTP header 64 KiB；API body 1 MiB 可配置；auth body 16 KiB；协议帧固定最大值；WebSocket compression 关闭 | `internal/controller/server_test.go`、`api_test.go`、`authn/httpauth/handler_test.go`、各 stream/protocol test |
 | 敏感信息泄露 | API 错误、readiness、audit、数据库错误和任务结果使用稳定脱敏消息；不记录 token、claims、命令、内容或 DSN Secret | `internal/controller/api_test.go`、`server_test.go`、`audit_test.go`、`storage/*_test.go` 与各任务测试 |
+| 管理面 CSRF/CSP 与 Token 暂存 | 同源 HttpOnly Session、同步 CSRF、严格 CSP、无第三方脚本，Access/Refresh Token 交换后清零 | `internal/controller/admin/httpapi/*_test.go`、`internal/controller/admin/ui/*_test.go`、`e2e/admin/verify.sh`、`e2e/admin/browserfixture` |
+| 管理策略竞态与高风险操作 | 强 ETag CAS、幂等键、事务审计；先持久化撤销再收敛运行时 | `internal/controller/admin/revision/*_test.go`、`internal/controller/admin/operations/*_test.go`、`e2e/admin/verify.sh` |
 
 ## Fuzz 入口
 
@@ -24,6 +26,9 @@ go test ./internal/controller \
 
 go test ./internal/protocol/execstream \
   -run '^$' -fuzz '^FuzzWebSocketExecFrameDecode$' -fuzztime=30s
+
+go test ./internal/controller/admin/httpapi \
+  -run '^$' -fuzz '^FuzzManagementEntryBoundedRedactedAndFailClosed$' -fuzztime=30s
 ```
 
 HTTP fuzz 验证任意路径、Content-Type 和 JSON 字节不会造成未恢复 panic、无界响应或 bearer/body 泄露。WSS fuzz 验证 Pod Exec 二进制帧 decoder 对任意输入保持有界，并保证所有成功解码帧可无损重新编码。生产连接另在 WebSocket 层设置 `MaximumPayload + 1` 的读上限。

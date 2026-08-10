@@ -33,7 +33,7 @@
 {{- end }}
 {{- $breakGlass := $management.breakGlass }}
 {{- $breakGlassAlias := trim (toString $breakGlass.secretAlias) }}
-{{- $breakGlassConfig := dict "enabled" false "secretAlias" "" "secretFile" "" "sessionTtl" (default "15m" $breakGlass.sessionTTL) "allowedSourceCidrs" (list) }}
+{{- $breakGlassConfig := dict "enabled" false "secretAlias" "" "secretFile" "" "sessionTtl" "" "allowedSourceCidrs" (list) }}
 {{- if $breakGlass.enabled }}
 {{- if not (regexMatch "^[a-z][a-z0-9-]{0,62}$" $breakGlassAlias) }}
 {{- fail "controller.management.breakGlass.secretAlias must be a valid stable alias" }}

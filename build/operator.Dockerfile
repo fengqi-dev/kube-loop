@@ -12,8 +12,11 @@ COPY go.mod go.sum ./
 # and so that source changes don't invalidate our downloaded layer
 RUN go mod download
 
-# Copy the Go source (relies on .dockerignore to filter)
-COPY . .
+# Copy only the Operator source tree. Keeping generated binaries and unrelated
+# application sources out of the context makes the image build reproducible in
+# Minikube as well as ordinary Docker/BuildKit environments.
+COPY cmd/kubeloop-operator ./cmd/kubeloop-operator
+COPY internal/operator ./internal/operator
 
 # Build
 # the GOARCH has no default value to allow the binary to be built according to the host where the command

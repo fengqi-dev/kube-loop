@@ -146,7 +146,7 @@ audit_event_matches() {
       'select(
         .stage == "ResponseComplete" and
         .verb == "get" and
-        .requestURI == "/version" and
+        (.requestURI == "/version" or (.requestURI | startswith("/version?"))) and
         .responseStatus.code == 200 and
         .user.username == $gateway and
         .impersonatedUser.username == $user and

@@ -498,7 +498,7 @@ func TestManagementBootstrapAndBreakGlassRemainControllerOnly(t *testing.T) {
 	defaultJSON := valueAt(t, defaultConfig, "data", "management.json").(string)
 	for _, want := range []string{
 		`"subjects":[]`, `"groups":[]`, `"recoveryEnabled":false`,
-		`"enabled":false`, `"secretAlias":""`, `"sessionTtl":"15m"`,
+		`"enabled":false`, `"secretAlias":""`, `"sessionTtl":""`,
 		`"providerSecretAliases":{}`,
 	} {
 		if !strings.Contains(defaultJSON, want) {

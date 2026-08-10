@@ -345,11 +345,11 @@ function renderToolbar(view) {
     label.append(select); actions.append(label);
   }
   const refresh = text("button", "刷新", "secondary"); refresh.type = "button"; refresh.addEventListener("click", () => { state.cursor = ""; loadList(); });
-  if (state.activeView === "tasks" && hasCapability("admin.task/recover")) {
+  if (state.activeView === "tasks" && capabilityAllowed("admin.task/recover")) {
     const recover = text("button", "触发恢复", "secondary"); recover.type = "button";
     recover.addEventListener("click", () => runRecovery(recover)); actions.append(recover);
   }
-  if (state.activeView === "audit" && hasCapability("admin.audit/export")) {
+  if (state.activeView === "audit" && capabilityAllowed("admin.audit/export")) {
     const exportButton = text("button", "导出 NDJSON", "secondary"); exportButton.type = "button";
     exportButton.addEventListener("click", () => startAuditExport(exportButton)); actions.append(exportButton);
   }
@@ -375,15 +375,15 @@ async function operationMutation(path, reason, etag = null) {
 function rowOperation(item) {
   const view = state.activeView;
   let label = ""; let path = ""; let etag = null;
-  if (view === "principals" && hasCapability("admin.session/revoke")) {
+  if (view === "principals" && capabilityAllowed("admin.session/revoke")) {
     label = "撤销设备"; path = `/principals/${encodeURIComponent(item.id)}/revoke`;
-  } else if (view === "sessions" && hasCapability("admin.session/stop") && item.state !== "stopped") {
+  } else if (view === "sessions" && capabilityAllowed("admin.session/stop") && item.state !== "stopped") {
     label = "强制停止"; path = `/sessions/${encodeURIComponent(item.id)}/stop`; etag = item.generation;
-  } else if (view === "tasks" && hasCapability("admin.task/stop") && !["stopped", "failed"].includes(item.state)) {
+  } else if (view === "tasks" && capabilityAllowed("admin.task/stop") && !["stopped", "failed"].includes(item.state)) {
     label = "停止"; path = `/tasks/${encodeURIComponent(item.id)}/stop`; etag = item.version;
-  } else if (view === "relays" && item.desiredState === "draining" && hasCapability("admin.relay/recover")) {
+  } else if (view === "relays" && item.desiredState === "draining" && capabilityAllowed("admin.relay/recover")) {
     label = "恢复接流"; path = `/relays/${encodeURIComponent(item.relayId)}/recover`; etag = item.controlVersion || 0;
-  } else if (view === "relays" && hasCapability("admin.relay/drain")) {
+  } else if (view === "relays" && capabilityAllowed("admin.relay/drain")) {
     label = "排空"; path = `/relays/${encodeURIComponent(item.relayId)}/drain`; etag = item.controlVersion || 0;
   }
   if (!label) return null;

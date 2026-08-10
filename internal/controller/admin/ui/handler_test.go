@@ -60,4 +60,7 @@ func TestBrowserAssetsDoNotPersistGatewayTokensOrLoadRemoteCode(t *testing.T) {
 		!strings.Contains(body, "sessionStorage.setItem(csrfStorageKey") {
 		t.Fatal("browser asset does not clear transient Gateway tokens or retain the synchronizer CSRF value")
 	}
+	if strings.Contains(body, "hasCapability(") {
+		t.Fatal("browser asset references the removed capability helper")
+	}
 }
