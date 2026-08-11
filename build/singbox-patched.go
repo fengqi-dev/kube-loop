@@ -1,7 +1,7 @@
 //go:build ignore
 
 // Command singbox-patched builds the pinned sing-box source after applying the
-// repository-owned minimal feature patch to an isolated temporary source tree.
+// repository-owned patch set to an isolated temporary source tree.
 package main
 
 import (
@@ -41,7 +41,10 @@ func main() {
 	if err := verifyPinnedSource(sourceDir); err != nil {
 		fatalf("%v", err)
 	}
-	patchPath := filepath.Join(root, "third_party", "patches", "sing-box", "0001-kubeloop-minimal-features.patch")
+	patchPaths, err := filepath.Glob(filepath.Join(root, "third_party", "patches", "sing-box", "*.patch"))
+	if err != nil || len(patchPaths) == 0 {
+		fatalf("find sing-box patches: %v", err)
+	}
 	workDir, err := os.MkdirTemp("", "kubeloop-sing-box-")
 	if err != nil {
 		fatalf("create temporary sing-box source tree: %v", err)
@@ -50,11 +53,13 @@ func main() {
 	if err := exportSource(sourceDir, workDir); err != nil {
 		fatalf("export sing-box source: %v", err)
 	}
-	if err := applyPatch(workDir, patchPath); err != nil {
-		fatalf("apply sing-box patch: %v", err)
+	for _, patchPath := range patchPaths {
+		if err := applyPatch(workDir, patchPath); err != nil {
+			fatalf("apply sing-box patch %s: %v", filepath.Base(patchPath), err)
+		}
 	}
 	if checkOnly {
-		fmt.Printf("==> sing-box patch applies cleanly to %s (%s)\n", singboxdist.Version, singboxdist.SourceRevision)
+		fmt.Printf("==> %d sing-box patches apply cleanly to %s (%s)\n", len(patchPaths), singboxdist.Version, singboxdist.SourceRevision)
 		return
 	}
 

@@ -1,8 +1,8 @@
 package distribution
 
 const (
-	Version        = "v1.13.16"
-	SourceRevision = "17ec3c71af8ca946dc50bf0d927c39fc77322aec"
+	Version        = "v1.13.18"
+	SourceRevision = "45ca32dcb966f07f97fc888fe8586e359dbe8405"
 	ProjectURL     = "https://github.com/SagerNet/sing-box"
 	License        = "GPL-3.0"
 )

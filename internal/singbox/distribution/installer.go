@@ -28,28 +28,28 @@ type releaseAsset struct {
 
 var releaseAssets = map[string]releaseAsset{
 	"darwin/amd64": {
-		Name:   "sing-box-1.13.16-darwin-amd64.tar.gz",
-		SHA256: "2bfad58d034e280c773e194be03649555e5a7040c48b559dd0898ad293fe793d",
+		Name:   "sing-box-1.13.18-darwin-amd64.tar.gz",
+		SHA256: "500f0decfc21f7cdb2aaa4fe193b7857a41b07c38ee3a0b15bd53e3c7af3671c",
 	},
 	"darwin/arm64": {
-		Name:   "sing-box-1.13.16-darwin-arm64.tar.gz",
-		SHA256: "32fa21fd75ad62d86a2dcb7e0be77359c35e12798cdbb6a0e30654ef487d90d6",
+		Name:   "sing-box-1.13.18-darwin-arm64.tar.gz",
+		SHA256: "9fbc05946b584423457a2778035e0cee2d9b239a4af5ae1932d9b79991149107",
 	},
 	"linux/amd64": {
-		Name:   "sing-box-1.13.16-linux-amd64.tar.gz",
-		SHA256: "e37c312859dfa84cba148f41072ff6369f08361ae91d622dc1fd3aab49611a8d",
+		Name:   "sing-box-1.13.18-linux-amd64.tar.gz",
+		SHA256: "d34d987ed6ae39ca3760269264fb502b867e5477db45518c829b07776245c495",
 	},
 	"linux/arm64": {
-		Name:   "sing-box-1.13.16-linux-arm64.tar.gz",
-		SHA256: "d587fb00bdc3c044227f35d15d154f271bc75108475091eda2542e4b82bb2949",
+		Name:   "sing-box-1.13.18-linux-arm64.tar.gz",
+		SHA256: "a894f6152cade4a2c9d062762d54dea0c1aee673ab4759e0829e19cace932719",
 	},
 	"windows/amd64": {
-		Name:   "sing-box-1.13.16-windows-amd64.zip",
-		SHA256: "6cbf90ec4ee87122ffce09b73928fb31e763bc1c75a119f79c61d24734c78807",
+		Name:   "sing-box-1.13.18-windows-amd64.zip",
+		SHA256: "65045155ffdc506334f01a4353889657ddfc024f72b394081a9abaef34dfbef3",
 	},
 	"windows/arm64": {
-		Name:   "sing-box-1.13.16-windows-arm64.zip",
-		SHA256: "8412e9751a776a1cd5138fde8a6b60784af91b0fe596cba1b6efcd05144ef511",
+		Name:   "sing-box-1.13.18-windows-arm64.zip",
+		SHA256: "7b3bed93f5e41ee6715db30f58283ec1de9a616f671e4dc1d70832242ce1c474",
 	},
 }
 
