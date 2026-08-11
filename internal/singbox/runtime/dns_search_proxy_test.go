@@ -224,20 +224,36 @@ func startTestDNSSearchProxy(
 
 func startTestDNSUpstreamWithHandler(t *testing.T, handler dns.Handler) *net.UDPAddr {
 	t.Helper()
-	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
+	var (
+		pc          net.PacketConn
+		tcpListener net.Listener
+		addr        *net.UDPAddr
+	)
+	for range 20 {
+		var err error
+		pc, err = net.ListenPacket("udp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		addr = pc.LocalAddr().(*net.UDPAddr)
+		tcpListener, err = net.Listen("tcp", addr.String())
+		if err == nil {
+			break
+		}
+		_ = pc.Close()
+		pc = nil
 	}
-	addr := pc.LocalAddr().(*net.UDPAddr)
+	if pc == nil || tcpListener == nil {
+		t.Fatal("could not reserve a shared TCP/UDP DNS upstream port")
+	}
 	udpServer := &dns.Server{PacketConn: pc, Handler: handler}
 	go func() { _ = udpServer.ActivateAndServe() }()
 	t.Cleanup(func() { _ = udpServer.Shutdown() })
 
 	tcpServer := &dns.Server{
-		Addr: addr.String(), Net: "tcp", Handler: handler,
+		Listener: tcpListener, Handler: handler,
 	}
-	go func() { _ = tcpServer.ListenAndServe() }()
+	go func() { _ = tcpServer.ActivateAndServe() }()
 	t.Cleanup(func() { _ = tcpServer.Shutdown() })
-	time.Sleep(30 * time.Millisecond)
 	return addr
 }
