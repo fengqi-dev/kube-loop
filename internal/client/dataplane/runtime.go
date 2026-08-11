@@ -121,6 +121,7 @@ func Start(
 	if ctx == nil {
 		return nil, errors.New("Data Plane context is required")
 	}
+	useDefaultListenAddress := strings.TrimSpace(config.ListenAddress) == ""
 	config = normalizedConfig(config)
 	runtimeCtx, cancel := context.WithCancel(ctx)
 	transport, err := openTransport(runtimeCtx, serverProfile, session, ticketSource, config)
@@ -129,6 +130,14 @@ func Start(
 		return nil, err
 	}
 	bridge, err := config.listenSOCKS(runtimeCtx, transport.forwarder.Address(), config.ListenAddress, transport.token)
+	if err != nil && useDefaultListenAddress && isAddressAlreadyInUse(err) {
+		host, _, splitErr := net.SplitHostPort(config.ListenAddress)
+		if splitErr == nil {
+			bridge, err = config.listenSOCKS(
+				runtimeCtx, transport.forwarder.Address(), net.JoinHostPort(host, "0"), transport.token,
+			)
+		}
+	}
 	if err != nil {
 		_ = transport.control.Close()
 		_ = transport.forwarder.Close()
@@ -150,6 +159,15 @@ func Start(
 	go runtime.watchControl(transport.control)
 	go runtime.watchContext(runtimeCtx)
 	return runtime, nil
+}
+
+func isAddressAlreadyInUse(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "address already in use") ||
+		strings.Contains(message, "only one usage of each socket address")
 }
 
 func openTransport(

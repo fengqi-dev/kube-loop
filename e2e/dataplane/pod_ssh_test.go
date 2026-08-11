@@ -6,14 +6,14 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
-	"encoding/pem"
 	"errors"
 	"fmt"
+	"io"
 	"net"
-	"os"
-	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -29,7 +29,9 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/controller/storage"
 	localpodssh "github.com/fengqi-dev/kube-loop/internal/podssh"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
+	"github.com/fengqi-dev/kube-loop/internal/socksbridge"
 	"github.com/google/uuid"
+	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -37,6 +39,50 @@ import (
 type e2ePodSSHSessionSource struct {
 	profileID string
 	session   remote.Session
+}
+
+type e2ePodSSHHostTCPRegistrar struct {
+	mu      sync.Mutex
+	handler socksbridge.HostTCPHandler
+}
+
+func (registrar *e2ePodSSHHostTCPRegistrar) SetHostTCPHandler(
+	_ string,
+	handler socksbridge.HostTCPHandler,
+) error {
+	registrar.mu.Lock()
+	defer registrar.mu.Unlock()
+	registrar.handler = handler
+	return nil
+}
+
+func (registrar *e2ePodSSHHostTCPRegistrar) dial(host string, port uint16) (net.Conn, error) {
+	registrar.mu.Lock()
+	handler := registrar.handler
+	registrar.mu.Unlock()
+	if handler == nil {
+		return nil, errors.New("Pod SSH host interception is not registered")
+	}
+	serve, ok := handler(host, port)
+	if !ok {
+		return nil, fmt.Errorf("Pod SSH host interception rejected %s:%d", host, port)
+	}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return nil, err
+	}
+	go func() {
+		defer listener.Close()
+		connection, acceptErr := listener.Accept()
+		if acceptErr == nil {
+			serve(connection)
+		}
+	}()
+	connection, err := net.Dial("tcp", listener.Addr().String())
+	if err != nil {
+		_ = listener.Close()
+	}
+	return connection, err
 }
 
 func (source e2ePodSSHSessionSource) Current(profileID string) (remote.Session, error) {
@@ -148,7 +194,6 @@ func TestRealPodSSHThroughGatewayAndLocalIdentityIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	identityPath := writePodSSHIdentity(t, privateKeyA)
 	_, privateKeyB, err := ed25519.GenerateKey(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -157,10 +202,13 @@ func TestRealPodSSHThroughGatewayAndLocalIdentityIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	hostTCP := &e2ePodSSHHostTCPRegistrar{}
 	manager, err := clientpodssh.New(
 		remoteClient,
 		e2ePodSSHSessionSource{profileID: serverProfile.ID, session: remoteSession},
-		clientpodssh.Config{ServerOptions: []localpodssh.Option{localpodssh.WithSigner(signerA)}},
+		clientpodssh.Config{
+			ServerOptions: []localpodssh.Option{localpodssh.WithSigner(signerA)}, HostTCPRegistrar: hostTCP,
+		},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -179,12 +227,12 @@ func TestRealPodSSHThroughGatewayAndLocalIdentityIsolation(t *testing.T) {
 		t.Fatalf("start local Pod SSH endpoint: %v", err)
 	}
 
-	otherUser, err := ssh.Dial("tcp", endpoint.Address, podSSHClientConfig(signerB))
+	otherUser, err := dialInterceptedPodSSH(hostTCP, endpoint.Address, podSSHClientConfig(signerB))
 	if err == nil {
 		_ = otherUser.Close()
 		t.Fatal("a different local user's SSH identity accessed the Pod SSH endpoint")
 	}
-	owner, err := ssh.Dial("tcp", endpoint.Address, podSSHClientConfig(signerA))
+	owner, err := dialInterceptedPodSSH(hostTCP, endpoint.Address, podSSHClientConfig(signerA))
 	if err != nil {
 		t.Fatalf("authenticate owner to local Pod SSH endpoint: %v", err)
 	}
@@ -194,75 +242,61 @@ func TestRealPodSSHThroughGatewayAndLocalIdentityIsolation(t *testing.T) {
 		t.Fatal(err)
 	}
 	output, err := sshSession.CombinedOutput("printf 'pod-ssh-through-gateway'")
-	_ = owner.Close()
 	if err != nil || !strings.Contains(string(output), "pod-ssh-through-gateway") {
+		_ = owner.Close()
 		t.Fatalf("real Pod SSH command: output=%q err=%v", output, err)
 	}
-
-	// OpenSSH scp uses the SFTP subsystem by default. Exercise both file and
-	// recursive directory transfers through the local SSH endpoint so proves
-	// the same bidirectional behavior as the former in-process Pod SSH path.
-	fileContents := []byte("KubeLoop Pod SSH file transfer\n")
-	localFile := filepath.Join(t.TempDir(), "upload.txt")
-	if err := os.WriteFile(localFile, fileContents, 0o600); err != nil {
-		t.Fatal(err)
+	sftpClient, err := sftp.NewClient(owner)
+	if err != nil {
+		_ = owner.Close()
+		t.Fatalf("start SFTP through intercepted Pod IP: %v", err)
 	}
+
+	// Exercise file and recursive directory transfers through the same native
+	// Pod IP interception used by SSH instead of relying on an external client.
+	fileContents := []byte("KubeLoop Pod SSH file transfer\n")
 	remoteFile := "/tmp/kubeloop-pod-ssh-" + uuid.NewString() + ".txt"
-	runEndpointSCP(t, endpoint.Address, identityPath, false, localFile, podSSHRemote(endpoint.Address, remoteFile))
-	if uploaded := runEndpointSSHCommand(t, endpoint.Address, signerA, "cat "+remoteFile); !bytes.Equal(uploaded, fileContents) {
+	writeSFTPFile(t, sftpClient, remoteFile, fileContents)
+	if uploaded := runInterceptedPodSSHCommand(t, hostTCP, endpoint.Address, signerA, "cat "+remoteFile); !bytes.Equal(uploaded, fileContents) {
 		t.Fatalf("Pod SSH uploaded file=%q", uploaded)
 	}
-	localDownload := filepath.Join(t.TempDir(), "download.txt")
-	runEndpointSCP(t, endpoint.Address, identityPath, false, podSSHRemote(endpoint.Address, remoteFile), localDownload)
-	downloaded, err := os.ReadFile(localDownload)
+	downloaded, err := readSFTPFile(sftpClient, remoteFile)
 	if err != nil || !bytes.Equal(downloaded, fileContents) {
 		t.Fatalf("Pod SSH downloaded file=%q err=%v", downloaded, err)
 	}
 
-	localDirectory := filepath.Join(t.TempDir(), "upload-tree")
-	if err := os.MkdirAll(filepath.Join(localDirectory, "nested"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Join(localDirectory, "empty"), 0o700); err != nil {
-		t.Fatal(err)
-	}
 	directoryFiles := map[string][]byte{
 		"root.txt":         []byte("root through Pod SSH\n"),
 		"nested/child.txt": []byte("nested through Pod SSH\n"),
 		"nested/empty.bin": {},
 	}
-	for relative, contents := range directoryFiles {
-		if err := os.WriteFile(filepath.Join(localDirectory, filepath.FromSlash(relative)), contents, 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
 	remoteDirectory := "/tmp/kubeloop-pod-ssh-dir-" + uuid.NewString()
-	runEndpointSCP(t, endpoint.Address, identityPath, true, localDirectory, podSSHRemote(endpoint.Address, remoteDirectory))
-	for relative, want := range directoryFiles {
-		got := runEndpointSSHCommand(t, endpoint.Address, signerA, "cat "+remoteDirectory+"/"+relative)
-		if !bytes.Equal(got, want) {
-			t.Fatalf("Pod SSH uploaded directory file %s=%q", relative, got)
-		}
+	if err := sftpClient.MkdirAll(remoteDirectory + "/nested"); err != nil {
+		t.Fatalf("create remote nested directory: %v", err)
 	}
-	if got := runEndpointSSHCommand(
-		t, endpoint.Address, signerA,
-		"if [ -d "+remoteDirectory+"/empty ]; then printf present; else printf absent; fi",
-	); string(got) != "present" {
-		t.Fatalf("Pod SSH uploaded empty directory=%q", got)
+	if err := sftpClient.MkdirAll(remoteDirectory + "/empty"); err != nil {
+		t.Fatalf("create remote empty directory: %v", err)
 	}
-	localDirectoryDownload := filepath.Join(t.TempDir(), "download-tree")
-	runEndpointSCP(t, endpoint.Address, identityPath, true, podSSHRemote(endpoint.Address, remoteDirectory), localDirectoryDownload)
+	for relative, contents := range directoryFiles {
+		writeSFTPFile(t, sftpClient, remoteDirectory+"/"+relative, contents)
+	}
 	for relative, want := range directoryFiles {
-		got, readErr := os.ReadFile(filepath.Join(localDirectoryDownload, filepath.FromSlash(relative)))
+		got, readErr := readSFTPFile(sftpClient, remoteDirectory+"/"+relative)
 		if readErr != nil || !bytes.Equal(got, want) {
 			t.Fatalf("Pod SSH downloaded directory file %s=%q err=%v", relative, got, readErr)
 		}
 	}
-	emptyInfo, err := os.Stat(filepath.Join(localDirectoryDownload, "empty"))
+	emptyInfo, err := sftpClient.Stat(remoteDirectory + "/empty")
 	if err != nil || !emptyInfo.IsDir() {
-		t.Fatalf("Pod SSH downloaded empty directory=%#v err=%v", emptyInfo, err)
+		t.Fatalf("Pod SSH remote empty directory=%#v err=%v", emptyInfo, err)
 	}
-	_ = runEndpointSSHCommand(t, endpoint.Address, signerA, "rm -rf "+remoteFile+" "+remoteDirectory)
+	_ = runInterceptedPodSSHCommand(t, hostTCP, endpoint.Address, signerA, "rm -rf "+remoteFile+" "+remoteDirectory)
+	if err := sftpClient.Close(); err != nil {
+		t.Fatalf("close intercepted Pod SFTP client: %v", err)
+	}
+	if err := owner.Close(); err != nil {
+		t.Fatalf("close intercepted Pod SSH client: %v", err)
+	}
 
 	tasks, err := stateStore.Tasks().ListBySession(ctx, sessionID, 10)
 	if err != nil || len(tasks) < 3 {
@@ -284,29 +318,70 @@ func TestRealPodSSHThroughGatewayAndLocalIdentityIsolation(t *testing.T) {
 	if err := manager.Shutdown(); err != nil {
 		t.Fatal(err)
 	}
-	rebound, err := net.Listen("tcp", endpoint.Address)
-	if err != nil {
-		t.Fatalf("Pod SSH loopback address was not released: %v", err)
+	if connection, err := dialInterceptedPodSSH(hostTCP, endpoint.Address, podSSHClientConfig(signerA)); err == nil {
+		_ = connection.Close()
+		t.Fatal("stopped Pod SSH endpoint still accepted native PodIP traffic")
 	}
-	_ = rebound.Close()
 }
 
-func writePodSSHIdentity(t *testing.T, privateKey ed25519.PrivateKey) string {
-	t.Helper()
-	block, err := ssh.MarshalPrivateKey(privateKey, "KubeLoop Pod SSH E2E")
+func dialInterceptedPodSSH(
+	registrar *e2ePodSSHHostTCPRegistrar,
+	address string,
+	config *ssh.ClientConfig,
+) (*ssh.Client, error) {
+	host, rawPort, err := net.SplitHostPort(address)
 	if err != nil {
-		t.Fatal(err)
+		return nil, err
 	}
-	filename := filepath.Join(t.TempDir(), "id_ed25519")
-	if err := os.WriteFile(filename, pem.EncodeToMemory(block), 0o600); err != nil {
-		t.Fatal(err)
+	port, err := strconv.ParseUint(rawPort, 10, 16)
+	if err != nil {
+		return nil, err
 	}
-	return filename
+	connection, err := registrar.dial(host, uint16(port))
+	if err != nil {
+		return nil, err
+	}
+	clientConnection, channels, requests, err := ssh.NewClientConn(connection, address, config)
+	if err != nil {
+		_ = connection.Close()
+		return nil, err
+	}
+	return ssh.NewClient(clientConnection, channels, requests), nil
 }
 
-func runEndpointSSHCommand(t *testing.T, address string, signer ssh.Signer, command string) []byte {
+func writeSFTPFile(t *testing.T, client *sftp.Client, path string, contents []byte) {
 	t.Helper()
-	client, err := ssh.Dial("tcp", address, podSSHClientConfig(signer))
+	file, err := client.Create(path)
+	if err != nil {
+		t.Fatalf("create remote file %s: %v", path, err)
+	}
+	if _, err := file.Write(contents); err != nil {
+		_ = file.Close()
+		t.Fatalf("write remote file %s: %v", path, err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatalf("close remote file %s: %v", path, err)
+	}
+}
+
+func readSFTPFile(client *sftp.Client, path string) ([]byte, error) {
+	file, err := client.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	return io.ReadAll(file)
+}
+
+func runInterceptedPodSSHCommand(
+	t *testing.T,
+	registrar *e2ePodSSHHostTCPRegistrar,
+	address string,
+	signer ssh.Signer,
+	command string,
+) []byte {
+	t.Helper()
+	client, err := dialInterceptedPodSSH(registrar, address, podSSHClientConfig(signer))
 	if err != nil {
 		t.Fatalf("dial Pod SSH endpoint: %v", err)
 	}
@@ -321,44 +396,6 @@ func runEndpointSSHCommand(t *testing.T, address string, signer ssh.Signer, comm
 		t.Fatalf("run Pod SSH command %q: %v (output=%q)", command, err, output)
 	}
 	return output
-}
-
-func runEndpointSCP(t *testing.T, address, identityPath string, recursive bool, source, destination string) {
-	t.Helper()
-	binary, err := exec.LookPath("scp")
-	if err != nil {
-		t.Fatalf("scp is required for Pod SSH E2E: %v", err)
-	}
-	_, port, err := net.SplitHostPort(address)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
-	defer cancel()
-	args := []string{
-		"-q", "-P", port, "-F", os.DevNull, "-i", identityPath,
-		"-o", "IdentitiesOnly=yes", "-o", "StrictHostKeyChecking=no",
-		"-o", "UserKnownHostsFile=" + os.DevNull, "-o", "ConnectTimeout=10", "-o", "LogLevel=ERROR",
-	}
-	if recursive {
-		args = append(args, "-r")
-	}
-	args = append(args, source, destination)
-	output, err := exec.CommandContext(ctx, binary, args...).CombinedOutput()
-	if err != nil {
-		t.Fatalf("scp %q -> %q: %v (output=%s)", source, destination, err, output)
-	}
-}
-
-func podSSHRemote(address, remotePath string) string {
-	host, _, err := net.SplitHostPort(address)
-	if err != nil {
-		return "echo@127.0.0.1:" + remotePath
-	}
-	if ip := net.ParseIP(host); ip != nil && ip.To4() == nil {
-		host = "[" + host + "]"
-	}
-	return fmt.Sprintf("echo@%s:%s", host, remotePath)
 }
 
 func podSSHClientConfig(signer ssh.Signer) *ssh.ClientConfig {

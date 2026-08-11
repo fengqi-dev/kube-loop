@@ -236,7 +236,17 @@ func (r *TrafficBindingReconciler) reconcileRelaySlice(
 	current := &discoveryv1.EndpointSlice{}
 	key := types.NamespacedName{Namespace: binding.Namespace, Name: desired.Name}
 	if err := r.Get(ctx, key, current); apierrors.IsNotFound(err) {
-		return r.Create(ctx, desired)
+		if createErr := r.Create(ctx, desired); createErr == nil {
+			return nil
+		} else if !apierrors.IsAlreadyExists(createErr) {
+			return createErr
+		}
+		// The EndpointSlice controller can recreate a selector-backed slice
+		// between our Get and Create after the Service selector is restored.
+		// Reload and converge that object instead of failing finalizer cleanup.
+		if getErr := r.Get(ctx, key, current); getErr != nil {
+			return getErr
+		}
 	} else if err != nil {
 		return err
 	}

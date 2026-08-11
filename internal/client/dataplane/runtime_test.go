@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -354,6 +355,65 @@ func TestStartClosesAuthorizedTransportWhenSOCKSBridgeFails(t *testing.T) {
 	if err := <-serverDone; err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestStartUsesAutomaticPortWhenDefaultSOCKSAddressIsBusy(t *testing.T) {
+	spec, err := networkspec.Normalize(networkspec.Spec{ServiceIPs: []string{"10.96.0.10"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash, _ := networkspec.Hash(spec)
+	client, gateway := net.Pipe()
+	serverDone := make(chan struct{})
+	go func() {
+		defer close(serverDone)
+		defer gateway.Close()
+		_, _ = tunnel.ReadSessionHeader(gateway)
+		_, _ = tunnel.ReadAuthorizedControlSpec(gateway)
+		_ = tunnel.WriteStatus(gateway, nil)
+		var buffer [1]byte
+		_, _ = gateway.Read(buffer[:])
+	}()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	forwarder := &testForwarder{Listener: listener}
+	bridge := &testBridge{address: testAddress("127.0.0.1:43124")}
+	var listenAddresses []string
+	runtime, err := Start(context.Background(), profile.Profile{
+		ID: "service", BaseURL: "https://gateway.example.test",
+	}, remote.Session{
+		ID: uuid.NewString(), Namespace: "development", State: "active", Generation: 1,
+		NetworkSpec: spec, NetworkSpecHash: hash,
+	}, func(context.Context) (remote.RelayTicket, error) {
+		return remote.RelayTicket{Ticket: "ticket"}, nil
+	}, Config{
+		startForwarder: func(context.Context, websocketmux.ClientConfig) (streamForwarder, error) {
+			return forwarder, nil
+		},
+		dialContext: func(context.Context, string, string) (net.Conn, error) { return client, nil },
+		listenSOCKS: func(_ context.Context, _, address string, _ tunnel.SessionToken) (localBridge, error) {
+			listenAddresses = append(listenAddresses, address)
+			if len(listenAddresses) == 1 {
+				return nil, errors.New("listen tcp 127.0.0.1:1080: bind: address already in use")
+			}
+			return bridge, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{DefaultListenAddress, "127.0.0.1:0"}; !reflect.DeepEqual(listenAddresses, want) {
+		t.Fatalf("SOCKS listen addresses = %#v, want %#v", listenAddresses, want)
+	}
+	if runtime.Status().SOCKSAddress != bridge.Addr().String() {
+		t.Fatalf("SOCKS status = %#v", runtime.Status())
+	}
+	if err := runtime.Close(); err != nil {
+		t.Fatal(err)
+	}
+	<-serverDone
 }
 
 func TestURLUsesSameOriginAndDiscoveredPath(t *testing.T) {
