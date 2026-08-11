@@ -76,7 +76,7 @@ func TestWindowsInstallRecoversMissingServiceImagePath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	singBox, err := filepath.Abs(filepath.Join("..", "..", "build", "bin", "sing-box"))
+	singBox, err := filepath.Abs(filepath.Join("..", "..", "build", "bin", "sing-box.exe"))
 	if err != nil {
 		t.Fatal(err)
 	}

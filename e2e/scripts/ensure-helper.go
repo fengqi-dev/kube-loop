@@ -52,7 +52,11 @@ func main() {
 		_ = os.Chmod(dest, 0o755)
 	}
 
-	singBox := filepath.Join(root, "build", "bin", "sing-box")
+	singBoxName := "sing-box"
+	if runtime.GOOS == "windows" {
+		singBoxName += ".exe"
+	}
+	singBox := filepath.Join(root, "build", "bin", singBoxName)
 	if _, err := os.Stat(singBox); err != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 		path, ensureErr := (&singboxdist.Installer{}).Ensure(ctx)
