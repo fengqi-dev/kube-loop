@@ -311,7 +311,7 @@ jobs:
           --operation install
           --source "${{ github.workspace }}\build\embedded\kubeloop-helper.exe"
           --install-tool "${{ github.workspace }}\build\embedded\kubeloop-helper-install.exe"
-          --sing-box "${{ github.workspace }}\build\bin\sing-box"
+          --sing-box "${{ github.workspace }}\build\bin\sing-box.exe"
 
       - name: Upgrade helper with a changed binary
         run: |
@@ -320,7 +320,7 @@ jobs:
             --operation install `
             --source "${{ github.workspace }}\build\embedded\kubeloop-helper.exe" `
             --install-tool "${{ github.workspace }}\build\embedded\kubeloop-helper-install.exe" `
-            --sing-box "${{ github.workspace }}\build\bin\sing-box"
+            --sing-box "${{ github.workspace }}\build\bin\sing-box.exe"
 
       - name: Run Windows platform E2E
         env:
