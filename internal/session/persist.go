@@ -6,27 +6,11 @@ import (
 
 	"github.com/fengqi-dev/kube-loop/internal/intercept"
 	"github.com/fengqi-dev/kube-loop/internal/portfwd"
-	"github.com/fengqi-dev/kube-loop/internal/session/restoreplan"
 	"github.com/fengqi-dev/kube-loop/internal/store"
 )
 
 func WithStore(stateStore *store.Store) Option {
 	return func(manager *Manager) { manager.store = stateStore }
-}
-
-func (m *Manager) Store() *store.Store { return m.store }
-
-func (m *Manager) RememberSelection(contextName, namespace string) error {
-	if m.store == nil {
-		return nil
-	}
-	if err := m.store.SetUI(contextName, namespace); err != nil {
-		m.AppendLog("ERROR", fmt.Sprintf(
-			"remember cluster selection %s/%s: %v", contextName, namespace, err,
-		))
-		return err
-	}
-	return nil
 }
 
 func (m *Manager) PreferredSelection() (contextName, namespace string) {
@@ -35,24 +19,6 @@ func (m *Manager) PreferredSelection() (contextName, namespace string) {
 	}
 	ui := m.store.Snapshot().UI
 	return ui.LastContext, ui.LastNamespace
-}
-
-func (m *Manager) PreferredConnectionMode(contextName string) ConnectionMode {
-	if m.store == nil || contextName == "" {
-		return ConnectionModeTUN
-	}
-	mode := ConnectionMode(m.store.Cluster(contextName).ConnectionMode)
-	if mode != ConnectionModeSOCKS {
-		return ConnectionModeTUN
-	}
-	return mode
-}
-
-func (m *Manager) clearPersistedSessions() error {
-	if m.store == nil {
-		return nil
-	}
-	return m.store.ClearSessionIntents()
 }
 
 func (m *Manager) persistPortForwards() {
@@ -166,57 +132,6 @@ func (m *Manager) PersistShutdown() {
 		if err := m.store.SetConnected(contextName, namespace, connected); err != nil {
 			m.AppendLog("ERROR", fmt.Sprintf("persist connected flag: %v", err))
 		}
-	}
-}
-
-// RestoreStartup reapplies port-forwards and optionally reconnects the last cluster.
-func (m *Manager) RestoreStartup(ctx context.Context) {
-	if m.store == nil {
-		return
-	}
-	snap := m.store.Snapshot()
-	plan := restoreplan.BuildStartup(snap)
-	m.AppendLog("INFO", fmt.Sprintf(
-		"startup session restore scan: contexts=%d lastContext=%s",
-		plan.ContextCount, plan.LastContext,
-	))
-	for _, restore := range plan.PortForwards {
-		item := restore.Spec
-		info, err := m.portfwd.Start(ctx, portfwd.Request{
-			Context:    restore.Context,
-			Namespace:  item.Namespace,
-			Kind:       item.Kind,
-			Name:       item.Name,
-			Protocol:   item.Protocol,
-			RemotePort: item.RemotePort,
-			LocalPort:  item.LocalPort,
-		})
-		if err != nil {
-			m.AppendLog("ERROR", fmt.Sprintf(
-				"restore port-forward %s/%s/%s: %v",
-				restore.Context, item.Kind, item.Name, err,
-			))
-			continue
-		}
-		m.AppendLog("INFO", fmt.Sprintf(
-			"restored port-forward %s/%s/%s at %s",
-			restore.Context, item.Kind, item.Name, info.Address,
-		))
-	}
-
-	if plan.Reconnect == nil {
-		m.AppendLog("INFO", "startup session restore complete; no cluster reconnect requested")
-		return
-	}
-	reconnect := plan.Reconnect
-	m.AppendLog("INFO", fmt.Sprintf(
-		"restoring cluster connection: context=%s namespace=%s",
-		reconnect.Context, reconnect.Namespace,
-	))
-	if err := m.Connect(ctx, Request{
-		Context: reconnect.Context, Namespace: reconnect.Namespace, Mode: ConnectionMode(reconnect.Mode),
-	}); err != nil {
-		m.AppendLog("ERROR", fmt.Sprintf("restore connect %s: %v", reconnect.Context, err))
 	}
 }
 

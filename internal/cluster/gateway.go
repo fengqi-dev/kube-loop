@@ -54,16 +54,6 @@ func (p *Provider) GetGateway(ctx context.Context, contextName string) (GatewayI
 	return clustergateway.FindResource(ctx, client, p.GatewayNamespace(), p.GatewayName())
 }
 
-// GatewayInstallManifest returns a YAML snippet admins can apply when the user
-// lacks install RBAC.
-func GatewayInstallManifest(image string) string {
-	return clustergateway.InstallManifest(image)
-}
-
-func GatewayInstallManifestNamed(image, name string) string {
-	return clustergateway.InstallManifestNamed(image, name)
-}
-
 func GatewayInstallManifestResource(image, namespace, name string) string {
 	return clustergateway.InstallManifestResource(image, namespace, name)
 }

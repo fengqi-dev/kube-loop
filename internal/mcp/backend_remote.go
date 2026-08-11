@@ -3,7 +3,6 @@ package mcp
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"slices"
 	"strings"
@@ -577,7 +576,3 @@ func (buffer *cappedBuffer) Write(value []byte) (int, error) {
 func (buffer *cappedBuffer) Bytes() []byte { return append([]byte(nil), buffer.value...) }
 
 var _ io.Writer = (*cappedBuffer)(nil)
-
-func unavailableFeature(name string) error {
-	return &ToolError{Code: ErrorUnavailable, Message: fmt.Sprintf("%s is unavailable", name)}
-}

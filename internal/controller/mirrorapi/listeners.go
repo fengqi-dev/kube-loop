@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"strconv"
 	"sync"
 
 	"github.com/fengqi-dev/kube-loop/internal/servicebinding"
@@ -93,8 +92,4 @@ func (listeners *boundListeners) Close() error {
 		}
 	})
 	return closeErr
-}
-
-func portAddress(ip string, port int32) string {
-	return net.JoinHostPort(ip, strconv.Itoa(int(port)))
 }

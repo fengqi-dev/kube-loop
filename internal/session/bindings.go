@@ -6,20 +6,7 @@ import (
 
 	"github.com/fengqi-dev/kube-loop/internal/intercept"
 	"github.com/fengqi-dev/kube-loop/internal/portfwd"
-	"github.com/fengqi-dev/kube-loop/internal/store"
 )
-
-const (
-	TestLayerGatewayControl = "gateway-control"
-	TestLayerLocalListener  = "local-listener"
-	TestLayerLocalTarget    = "local-target"
-)
-
-type ConnectivityTestResult struct {
-	Passed      bool   `json:"passed"`
-	FailedLayer string `json:"failedLayer,omitempty"`
-	Error       string `json:"error,omitempty"`
-}
 
 func (m *Manager) StartIntercept(ctx context.Context, mapping intercept.Mapping) (intercept.Info, error) {
 	m.AppendLog("INFO", fmt.Sprintf("starting exchange %s/%s", mapping.Namespace, mapping.Service))
@@ -62,26 +49,6 @@ func (m *Manager) StopIntercept(ctx context.Context, id string) error {
 	return err
 }
 
-func (m *Manager) TestIntercept(ctx context.Context, id string) ConnectivityTestResult {
-	m.AppendLog("INFO", "testing intercept "+id)
-	if err := m.intercept.TestControl(id); err != nil {
-		m.AppendLog("ERROR", fmt.Sprintf("test intercept %s control: %v", id, err))
-		return ConnectivityTestResult{
-			FailedLayer: TestLayerGatewayControl,
-			Error:       err.Error(),
-		}
-	}
-	if err := m.intercept.Test(ctx, id); err != nil {
-		m.AppendLog("ERROR", fmt.Sprintf("test intercept %s local target: %v", id, err))
-		return ConnectivityTestResult{
-			FailedLayer: TestLayerLocalTarget,
-			Error:       err.Error(),
-		}
-	}
-	m.AppendLog("INFO", "session connectivity test passed: "+id)
-	return ConnectivityTestResult{Passed: true}
-}
-
 func (m *Manager) ListIntercepts() []intercept.Info {
 	return m.intercept.List()
 }
@@ -114,10 +81,6 @@ func (m *Manager) StopPreview(ctx context.Context, id string) error {
 		m.AppendLog("INFO", "stopped preview "+id)
 	}
 	return err
-}
-
-func (m *Manager) ListPreviews() []intercept.Info {
-	return m.intercept.ListPreviews()
 }
 
 func (m *Manager) StartPortForwardSession(
@@ -158,62 +121,10 @@ func (m *Manager) StopPortForward(id string) error {
 	return err
 }
 
-func (m *Manager) TestPortForward(ctx context.Context, id string) ConnectivityTestResult {
-	m.AppendLog("INFO", "testing port-forward "+id)
-	if err := m.portfwd.Test(ctx, id); err != nil {
-		m.AppendLog("ERROR", fmt.Sprintf("test port-forward %s: %v", id, err))
-		return ConnectivityTestResult{
-			FailedLayer: TestLayerLocalListener,
-			Error:       err.Error(),
-		}
-	}
-	m.AppendLog("INFO", "port-forward connectivity test passed: "+id)
-	return ConnectivityTestResult{Passed: true}
-}
-
 func (m *Manager) ListPortForwards() []portfwd.Info {
 	return m.portfwd.List()
 }
 
 func (m *Manager) StopAllPortForwards() {
 	m.portfwd.StopAll()
-}
-
-// ResetSessions stops every port-forward, exchange, and mirror, then clears their
-// persisted intents from state.json. This still clears disk state when the
-// cluster is unavailable and live stop fails. Previews are left alone.
-func (m *Manager) ResetSessions(ctx context.Context) error {
-	m.AppendLog("INFO", fmt.Sprintf(
-		"resetting sessions: portForwards=%d exchanges=%d mirrors=%d",
-		len(m.portfwd.List()), len(m.intercept.List()), len(m.intercept.ListMirrors()),
-	))
-	for _, item := range m.portfwd.List() {
-		if err := m.StopPortForward(item.ID); err != nil {
-			m.AppendLog("WARN", fmt.Sprintf("reset stop port-forward %s: %v", item.ID, err))
-		}
-	}
-	for _, item := range m.intercept.List() {
-		if err := m.StopIntercept(ctx, item.ID); err != nil {
-			m.AppendLog("WARN", fmt.Sprintf("reset stop exchange %s: %v", item.ID, err))
-		}
-	}
-	for _, item := range m.intercept.ListMirrors() {
-		if err := m.StopIntercept(ctx, item.ID); err != nil {
-			m.AppendLog("WARN", fmt.Sprintf("reset stop mirror %s: %v", item.ID, err))
-		}
-	}
-	if err := m.clearPersistedSessions(); err != nil {
-		m.AppendLog("ERROR", fmt.Sprintf("clear persisted session intents: %v", err))
-		return err
-	}
-	m.AppendLog("INFO", "reset sessions: cleared port-forwards, exchanges, and mirrors")
-	return nil
-}
-
-// SessionIntentCounts returns persisted restore intents from state.json.
-func (m *Manager) SessionIntentCounts() store.SessionIntentCounts {
-	if m.store == nil {
-		return store.SessionIntentCounts{}
-	}
-	return m.store.SessionIntentCounts()
 }

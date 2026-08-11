@@ -5,7 +5,6 @@ package remotetask
 import (
 	"errors"
 	"fmt"
-	"strings"
 )
 
 type State string
@@ -21,14 +20,6 @@ const (
 )
 
 var orderedStates = []State{Pending, Starting, Running, Recovering, Failed, Stopping, Stopped}
-
-func ParseState(value string) (State, error) {
-	state := State(strings.TrimSpace(value))
-	if !state.Valid() {
-		return "", fmt.Errorf("invalid remote Task state %q", value)
-	}
-	return state, nil
-}
 
 func (state State) Valid() bool {
 	switch state {

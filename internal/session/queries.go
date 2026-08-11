@@ -1,32 +1,10 @@
 package session
 
 import (
-	"context"
 	"errors"
 
-	"github.com/fengqi-dev/kube-loop/internal/cluster"
 	"github.com/fengqi-dev/kube-loop/internal/singbox"
 )
-
-func (m *Manager) Contexts() ([]cluster.ContextInfo, error) {
-	return m.catalog.Contexts()
-}
-
-func (m *Manager) Namespaces(ctx context.Context, contextName string) ([]string, error) {
-	return m.catalog.Namespaces(ctx, contextName)
-}
-
-func (m *Manager) ListServices(
-	ctx context.Context, contextName, namespace string,
-) ([]cluster.ServiceInfo, error) {
-	return m.catalog.ListServices(ctx, contextName, namespace)
-}
-
-func (m *Manager) ListPods(
-	ctx context.Context, contextName, namespace string,
-) ([]cluster.PodInfo, error) {
-	return m.catalog.ListPods(ctx, contextName, namespace)
-}
 
 // SingBoxConfig returns the active session's generated sing-box config JSON.
 func (m *Manager) SingBoxConfig() ([]byte, error) {
@@ -79,22 +57,6 @@ func (m *Manager) InternalDNSPort() (int, error) {
 
 func (m *Manager) State() State {
 	return m.stateHub.snapshot()
-}
-
-// SetKubernetesVersion records the API server version for the sidebar/overview.
-func (m *Manager) SetKubernetesVersion(version string) {
-	if version == "" {
-		return
-	}
-	m.stateHub.mu.Lock()
-	if m.stateHub.state.KubernetesVersion == version {
-		m.stateHub.mu.Unlock()
-		return
-	}
-	next := m.stateHub.state
-	next.KubernetesVersion = version
-	m.stateHub.mu.Unlock()
-	m.publish(next)
 }
 
 func (m *Manager) Subscribe(listener func(State)) {

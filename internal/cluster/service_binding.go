@@ -76,11 +76,3 @@ func (p *Provider) DeletePreviewService(
 	}
 	return servicebinding.DeletePreviewService(ctx, client, snapshot, previewID)
 }
-
-// BuildInterceptPorts derives Service port mappings and allocates Gateway listen ports.
-func BuildInterceptPorts(
-	service *corev1.Service,
-	allocate func(protocol corev1.Protocol) (int32, error),
-) ([]InterceptPort, error) {
-	return servicebinding.BuildInterceptPorts(service, allocate)
-}

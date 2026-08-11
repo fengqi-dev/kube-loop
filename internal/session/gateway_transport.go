@@ -27,31 +27,6 @@ func (m *Manager) GatewayTransport(contextName string) store.GatewayTransport {
 	return m.store.GatewayTransport(contextName)
 }
 
-func (m *Manager) SetGatewayTransport(contextName string, config store.GatewayTransport) error {
-	if m.store == nil {
-		return fmt.Errorf("state store is unavailable")
-	}
-	state := m.State()
-	if state.Context == contextName && state.Phase != PhaseIdle && state.Phase != PhaseError {
-		return fmt.Errorf("disconnect before changing the Gateway transport")
-	}
-	config.Mode = strings.TrimSpace(config.Mode)
-	if config.Mode == "" {
-		config.Mode = GatewayTransportPortForward
-	}
-	if config.Mode == GatewayTransportWebSocket {
-		parsed, err := url.Parse(strings.TrimSpace(config.URL))
-		if err != nil || (parsed.Scheme != "ws" && parsed.Scheme != "wss") || parsed.Host == "" {
-			return fmt.Errorf("Gateway URL must be an absolute ws:// or wss:// URL")
-		}
-		config.URL = parsed.String()
-		if strings.TrimSpace(config.Token) == "" {
-			return fmt.Errorf("Gateway bearer token is required")
-		}
-	}
-	return m.store.SetGatewayTransport(contextName, config)
-}
-
 func (m *Manager) startGatewayForwarder(
 	ctx context.Context, contextName string, gateway cluster.GatewayInfo,
 ) (cluster.PortForward, string, error) {

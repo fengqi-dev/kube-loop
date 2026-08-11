@@ -27,10 +27,6 @@ func WithClientIdentityPath(path string) Option {
 	return func(server *Server) { server.clientIdentityPath = path }
 }
 
-func WithHostKeyPath(path string) Option {
-	return func(server *Server) { server.hostKeyPath = path }
-}
-
 // Server adapts SSH sessions addressed to Pod IPs into Kubernetes exec streams.
 type Server struct {
 	executor Executor

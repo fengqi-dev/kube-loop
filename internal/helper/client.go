@@ -94,12 +94,3 @@ func (c *Client) roundTrip(ctx context.Context, request helperprotocol.Request) 
 	}
 	return response, nil
 }
-
-// Probe returns whether the helper service answers ping.
-func Probe(ctx context.Context) (helperprotocol.Response, error) {
-	client, err := NewClient()
-	if err != nil {
-		return helperprotocol.Response{}, err
-	}
-	return client.Ping(ctx)
-}

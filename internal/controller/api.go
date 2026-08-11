@@ -549,7 +549,3 @@ func DecodeJSON(request *http.Request, destination any) *APIError {
 	}
 	return nil
 }
-
-func IsAPIPath(path string) bool {
-	return path == APIPathPrefix || strings.HasPrefix(path, APIPathPrefix+"/")
-}

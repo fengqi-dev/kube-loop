@@ -146,20 +146,6 @@ func canAccess(ctx context.Context, client kubernetes.Interface, attrs authoriza
 	return result.Status.Allowed
 }
 
-// FormatForbidden returns a readable message for API Forbidden errors.
-func FormatForbidden(err error, hint string) string {
-	if err == nil {
-		return ""
-	}
-	if apierrors.IsForbidden(err) {
-		if hint != "" {
-			return fmt.Sprintf("permission denied: %s (%v)", hint, err)
-		}
-		return fmt.Sprintf("permission denied: %v", err)
-	}
-	return err.Error()
-}
-
 // MergeManualNetwork fills empty auto-discovery fields from manual values.
 func MergeManualNetwork(auto Discovery, manual ManualNetwork) Discovery {
 	out := auto

@@ -85,12 +85,6 @@ func Ensure(ctx context.Context, client kubernetes.Interface, image string) (Inf
 	return EnsureResource(ctx, client, image, Namespace, Name)
 }
 
-// EnsureNamed creates or updates a Gateway with the supplied Kubernetes
-// resource name. Private desktop Gateways use this alongside the shared Name.
-func EnsureNamed(ctx context.Context, client kubernetes.Interface, image, name string) (Info, error) {
-	return EnsureResource(ctx, client, image, Namespace, name)
-}
-
 // EnsureResource creates or updates a Gateway in the supplied namespace.
 func EnsureResource(
 	ctx context.Context, client kubernetes.Interface, image, namespace, name string,

@@ -27,10 +27,9 @@ type Manager struct {
 	nextID   atomic.Uint64
 	slots    chan struct{}
 
-	mu          sync.Mutex
-	tasks       map[string]*TransferTask
-	cancels     map[string]context.CancelFunc
-	subscribers []func(TransferTask)
+	mu      sync.Mutex
+	tasks   map[string]*TransferTask
+	cancels map[string]context.CancelFunc
 }
 
 type podCatalog interface {
@@ -45,19 +44,6 @@ func NewManager(executor podssh.Executor, statePath string) *Manager {
 	}
 	_ = manager.load()
 	return manager
-}
-
-func (m *Manager) Subscribe(callback func(TransferTask)) {
-	if callback == nil {
-		return
-	}
-	m.mu.Lock()
-	m.subscribers = append(m.subscribers, callback)
-	m.mu.Unlock()
-}
-
-func (m *Manager) LocalHomeDirectory() (string, error) {
-	return os.UserHomeDir()
 }
 
 func (m *Manager) ListLocalDirectory(rawPath string) ([]FileEntry, error) {

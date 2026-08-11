@@ -48,8 +48,6 @@ func Open(path string) (*Store, error) {
 	return store, nil
 }
 
-func (s *Store) Path() string { return s.path }
-
 func (s *Store) Load() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -69,12 +67,6 @@ func (s *Store) Load() error {
 	}
 	s.state = state
 	return nil
-}
-
-func (s *Store) Save() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.saveLocked()
 }
 
 func (s *Store) Snapshot() State {

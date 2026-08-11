@@ -32,10 +32,8 @@ func (m *Manager) setStatus(id string, status TaskStatus, message string) {
 	task.Status = status
 	task.Error = message
 	task.UpdatedAt = time.Now()
-	copy := *task
 	_ = m.saveLocked()
 	m.mu.Unlock()
-	m.emit(copy)
 }
 
 func (m *Manager) updateProgress(id string, done int64) {
@@ -47,19 +45,8 @@ func (m *Manager) updateProgress(id string, done int64) {
 	}
 	task.DoneBytes = done
 	task.UpdatedAt = time.Now()
-	copy := *task
 	_ = m.saveLocked()
 	m.mu.Unlock()
-	m.emit(copy)
-}
-
-func (m *Manager) emit(task TransferTask) {
-	m.mu.Lock()
-	subscribers := append([]func(TransferTask){}, m.subscribers...)
-	m.mu.Unlock()
-	for _, subscriber := range subscribers {
-		subscriber(task)
-	}
 }
 
 func (m *Manager) load() error {

@@ -94,7 +94,6 @@ func (m *Manager) Start(ctx context.Context, request TransferRequest) (TransferT
 	m.tasks[id] = &task
 	_ = m.saveLocked()
 	m.mu.Unlock()
-	m.emit(task)
 	m.launch(id)
 	return task, nil
 }
@@ -110,37 +109,6 @@ func (m *Manager) ListTransfers() []TransferTask {
 		return items[i].CreatedAt.After(items[j].CreatedAt)
 	})
 	return items
-}
-
-func (m *Manager) Pause(id string) error {
-	return m.stop(id, StatusPaused)
-}
-
-func (m *Manager) Cancel(id string) error {
-	return m.stop(id, StatusCancelled)
-}
-
-func (m *Manager) stop(id string, status TaskStatus) error {
-	m.mu.Lock()
-	task := m.tasks[id]
-	if task == nil {
-		m.mu.Unlock()
-		return fmt.Errorf("transfer %q not found", id)
-	}
-	if task.Status == StatusCompleted || task.Status == StatusCancelled {
-		m.mu.Unlock()
-		return nil
-	}
-	if cancel := m.cancels[id]; cancel != nil {
-		cancel()
-	}
-	task.Status = status
-	task.UpdatedAt = time.Now()
-	copy := *task
-	_ = m.saveLocked()
-	m.mu.Unlock()
-	m.emit(copy)
-	return nil
 }
 
 func (m *Manager) Resume(id string) error {
@@ -159,25 +127,10 @@ func (m *Manager) Resume(id string) error {
 	task.Status = StatusQueued
 	task.Error = ""
 	task.UpdatedAt = time.Now()
-	copy := *task
 	_ = m.saveLocked()
 	m.mu.Unlock()
-	m.emit(copy)
 	m.launch(id)
 	return nil
-}
-
-func (m *Manager) ClearHistory() error {
-	m.mu.Lock()
-	for id, task := range m.tasks {
-		switch task.Status {
-		case StatusCompleted, StatusCancelled, StatusFailed, StatusStale:
-			delete(m.tasks, id)
-		}
-	}
-	err := m.saveLocked()
-	m.mu.Unlock()
-	return err
 }
 
 func (m *Manager) Shutdown() {
@@ -220,11 +173,9 @@ func (m *Manager) launch(id string) {
 				}
 				task.CompletedAt = &now
 				task.UpdatedAt = now
-				copy := *task
 				delete(m.cancels, id)
 				_ = m.saveLocked()
 				m.mu.Unlock()
-				m.emit(copy)
 				return
 			}
 			m.mu.Unlock()

@@ -324,12 +324,6 @@ func (s *Server) handleAccept(client net.Conn, token tunnel.SessionToken, requir
 	pending.serve(client)
 }
 
-func (s *Server) tenantActive(token tunnel.SessionToken) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.tenants[token] > 0
-}
-
 func (s *Server) authorizedNetwork(
 	token tunnel.SessionToken,
 	required *requiredAuthorization,

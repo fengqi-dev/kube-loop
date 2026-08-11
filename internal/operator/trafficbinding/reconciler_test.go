@@ -297,12 +297,3 @@ func deleteBinding(name string) {
 	reconciler := &TrafficBindingReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
 	_, _ = reconciler.Reconcile(ctx, requestFor(name))
 }
-
-//go:fix inline
-func pointer(value string) *string { return new(value) }
-
-//go:fix inline
-func int32Pointer(value int32) *int32 { return new(value) }
-
-//go:fix inline
-func protocolPointer(value corev1.Protocol) *corev1.Protocol { return new(value) }
