@@ -307,6 +307,6 @@ func NormalizeBaseURL(value string) (string, error) {
 func cloneState(state State) State {
 	return State{
 		Version: state.Version, ActiveProfileID: state.ActiveProfileID,
-		Profiles: append([]Profile(nil), state.Profiles...),
+		Profiles: append([]Profile{}, state.Profiles...),
 	}
 }

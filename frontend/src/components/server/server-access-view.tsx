@@ -38,7 +38,7 @@ const ServerExecTerminal = lazy(() => import("@/components/server/server-exec-te
 })));
 
 export function ServerAccessView({ profiles, migration }: { profiles: ServerProfileState; migration: V1MigrationStatus }) {
-  const [profileState, setProfileState] = useState(profiles);
+  const [profileState, setProfileState] = useState(() => normalizeProfileState(profiles));
   const initialProfile = useMemo(
     () => profileState.profiles.find((item) => item.id === profileState.activeProfileId),
     [profileState],
@@ -185,12 +185,12 @@ export function ServerAccessView({ profiles, migration }: { profiles: ServerProf
       });
       setAddress(result.profile.baseUrl);
       setProfile(result.profile);
-      setProfileState(await backend.serverProfiles());
+      setProfileState(normalizeProfileState(await backend.serverProfiles()));
       setDiscovery(result.discovery);
       setProviderId(result.discovery.authMethods[0]?.id ?? "");
       const session = await backend.serverAuthStatus(result.profile.id);
       setAuth(session);
-      setProfileState(await backend.serverProfiles());
+      setProfileState(normalizeProfileState(await backend.serverProfiles()));
       setInventory(session.authenticated
         ? await backend.loadServerInventory(result.profile.id, result.profile.lastNamespace ?? "")
         : undefined);
@@ -292,7 +292,7 @@ export function ServerAccessView({ profiles, migration }: { profiles: ServerProf
     setBusy("switch");
     setError("");
     try {
-      const state = await backend.selectServerProfile(id);
+      const state = normalizeProfileState(await backend.selectServerProfile(id));
       const selected = state.profiles.find((item) => item.id === state.activeProfileId);
       setProfileState(state);
       setProfile(selected);
@@ -339,7 +339,7 @@ export function ServerAccessView({ profiles, migration }: { profiles: ServerProf
     setBusy("delete");
     setError("");
     try {
-      const state = await backend.deleteServerProfile(profile.id);
+      const state = normalizeProfileState(await backend.deleteServerProfile(profile.id));
       const selected = state.profiles.find((item) => item.id === state.activeProfileId);
       setProfileState(state);
       setProfile(selected);
@@ -352,7 +352,7 @@ export function ServerAccessView({ profiles, migration }: { profiles: ServerProf
     } catch (reason) {
       setError(messageOf(reason));
       try {
-        const state = await backend.serverProfiles();
+        const state = normalizeProfileState(await backend.serverProfiles());
         const selected = state.profiles.find((item) => item.id === state.activeProfileId);
         setProfileState(state);
         setProfile(selected);
@@ -1627,6 +1627,10 @@ function TaskCenter({
 
 function isActiveFileTask(status: ServerFileTransferTask["status"]): boolean {
   return status === "queued" || status === "preparing" || status === "running";
+}
+
+function normalizeProfileState(state: ServerProfileState): ServerProfileState {
+  return { ...state, profiles: state.profiles ?? [] };
 }
 
 function InventoryPanel({

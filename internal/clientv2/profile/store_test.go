@@ -145,3 +145,21 @@ func TestServerProfileStoreReturnsDefensiveSnapshots(t *testing.T) {
 		t.Fatal("snapshot mutated persisted profile")
 	}
 }
+
+func TestServerProfileStoreSnapshotKeepsEmptyProfilesAsArray(t *testing.T) {
+	store, err := Open(filepath.Join(t.TempDir(), "servers-v2.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot := store.Snapshot()
+	if snapshot.Profiles == nil {
+		t.Fatal("empty Profile snapshot must serialize as an array, not null")
+	}
+	raw, err := json.Marshal(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"profiles":[]`) {
+		t.Fatalf("snapshot JSON = %s", raw)
+	}
+}

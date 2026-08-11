@@ -73,7 +73,7 @@ func gatewaySourceHash(root string) (string, error) {
 	for _, directory := range []string{
 		"cmd/kubeloop-gateway",
 		"internal/gateway",
-		"internal/tunnel",
+		"internal/protocol/tunnel",
 	} {
 		err := filepath.WalkDir(
 			filepath.Join(root, directory),
@@ -117,8 +117,7 @@ func currentKubeContext() string {
 }
 
 func buildImage(root, contextName, image string) error {
-	if isMinikubeContext(contextName) {
-		profile := minikubeProfile(contextName)
+	if profile, ok := minikubeProfile(contextName); ok {
 		fmt.Printf("==> Building image inside Minikube profile %s\n", profile)
 		if err := run(root, exec.Command(
 			"minikube", "-p", profile,
@@ -147,11 +146,12 @@ func buildImage(root, contextName, image string) error {
 }
 
 func loadIntoActiveLocalCluster(root, contextName, image string) error {
+	if _, ok := minikubeProfile(contextName); ok {
+		return nil
+	}
 	switch {
 	case contextName == "":
 		fmt.Println("==> kubectl context unavailable; image remains in the Docker daemon")
-		return nil
-	case isMinikubeContext(contextName):
 		return nil
 	case strings.HasPrefix(contextName, "kind-"):
 		return run(root, exec.Command(
@@ -169,15 +169,23 @@ func loadIntoActiveLocalCluster(root, contextName, image string) error {
 	}
 }
 
-func isMinikubeContext(contextName string) bool {
-	return contextName == "minikube" || strings.HasPrefix(contextName, "minikube-")
-}
-
-func minikubeProfile(contextName string) string {
-	if contextName == "minikube" {
-		return contextName
+func minikubeProfile(contextName string) (string, bool) {
+	if contextName == "" {
+		return "", false
 	}
-	return strings.TrimPrefix(contextName, "minikube-")
+	candidates := []string{contextName}
+	if trimmed := strings.TrimPrefix(contextName, "minikube-"); trimmed != contextName {
+		candidates = append(candidates, trimmed)
+	}
+	for _, profile := range candidates {
+		output, err := exec.Command(
+			"minikube", "-p", profile, "status", "--format={{.Host}}",
+		).Output()
+		if err == nil && strings.EqualFold(strings.TrimSpace(string(output)), "running") {
+			return profile, true
+		}
+	}
+	return "", false
 }
 
 func run(directory string, command *exec.Cmd) error {
