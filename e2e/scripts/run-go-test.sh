@@ -61,10 +61,10 @@ echo "==> Running TUN e2e (log: ${LOG})"
 if [[ -n "${KUBELOOP_E2E_PACKAGES:-}" ]]; then
   read -r -a E2E_PACKAGES <<<"${KUBELOOP_E2E_PACKAGES}"
 else
-  E2E_PACKAGES=()
-  while IFS= read -r package; do
-    E2E_PACKAGES+=("${package}")
-  done < <(go list -tags=e2e ./e2e/... | grep -v '/e2e/operator/e2e$')
+  # V2 clients only know the Gateway address. The older kubeconfig-driven
+  # packages remain available through KUBELOOP_E2E_PACKAGES for V1 maintenance,
+  # but are not part of the V2 acceptance gate.
+  E2E_PACKAGES=(./e2e/v2dataplane ./e2e/remotetun)
 fi
 set +e
 go test -tags=e2e "${E2E_PACKAGES[@]}" -count=1 -timeout="${TIMEOUT}" -parallel=1 -p 1 -v "$@" 2>&1 | tee "${LOG}"

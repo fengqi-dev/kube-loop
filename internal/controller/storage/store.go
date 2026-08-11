@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -68,7 +69,7 @@ func Open(ctx context.Context, rawConfig Config) (*Store, error) {
 	defer cancel()
 	if err := database.PingContext(connectContext); err != nil {
 		_ = database.Close()
-		return nil, fmt.Errorf("connect to %s storage", config.Backend)
+		return nil, fmt.Errorf("connect to %s storage: %w", config.Backend, err)
 	}
 	orm := bun.NewDB(database, pgdialect.New())
 	if config.Backend == BackendSQLite {
@@ -128,7 +129,7 @@ func prepareSQLite(config Config) (string, error) {
 	if err := file.Close(); err != nil {
 		return "", fmt.Errorf("close SQLite database: %w", err)
 	}
-	dsn := (&url.URL{Scheme: "file", Path: absolute}).String()
+	dsn := sqliteFileURL(absolute, runtime.GOOS == "windows")
 	query := url.Values{}
 	query.Add("_pragma", "busy_timeout("+strconv.FormatInt(config.BusyTimeout.Milliseconds(), 10)+")")
 	query.Add("_pragma", "foreign_keys(1)")
@@ -136,6 +137,19 @@ func prepareSQLite(config Config) (string, error) {
 	query.Add("_pragma", "synchronous(NORMAL)")
 	query.Add("_txlock", "immediate")
 	return dsn + "?" + query.Encode(), nil
+}
+
+func sqliteFileURL(absolute string, windows bool) string {
+	path := filepath.ToSlash(absolute)
+	if windows {
+		// filepath.ToSlash follows the host OS. Tests exercise this conversion on
+		// non-Windows builders too, so normalize Windows separators explicitly.
+		path = strings.ReplaceAll(absolute, `\`, "/")
+		if !strings.HasPrefix(path, "/") {
+			path = "/" + path
+		}
+	}
+	return (&url.URL{Scheme: "file", Path: path}).String()
 }
 
 func (store *Store) migrate(ctx context.Context) error {

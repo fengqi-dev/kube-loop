@@ -336,10 +336,12 @@ jobs:
 
       - name: Uninstall helper
         if: always()
-        run: >
-          go run ./e2e/scripts/manage-helper.go
-          --operation uninstall
-          --uninstall-tool "${{ github.workspace }}\build\embedded\kubeloop-helper-uninstall.exe"
+        shell: pwsh
+        run: |
+          $uninstallTool = "${{ github.workspace }}\build\embedded\kubeloop-helper-uninstall.exe"
+          if (Test-Path $uninstallTool) {
+            go run ./e2e/scripts/manage-helper.go --operation uninstall --uninstall-tool $uninstallTool
+          }
 
   macos-e2e:
     name: macOS Helper E2E

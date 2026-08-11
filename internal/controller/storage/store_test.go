@@ -51,6 +51,15 @@ func TestSQLiteOpenMigratesAndConfiguresDatabase(t *testing.T) {
 	}
 }
 
+func TestSQLiteFileURLUsesPortableAbsoluteURI(t *testing.T) {
+	if got, want := sqliteFileURL(`/var/lib/kubeloop/state.db`, false), `file:///var/lib/kubeloop/state.db`; got != want {
+		t.Fatalf("Unix SQLite URL = %q, want %q", got, want)
+	}
+	if got, want := sqliteFileURL(`D:\a\kube-loop\state.db`, true), `file:///D:/a/kube-loop/state.db`; got != want {
+		t.Fatalf("Windows SQLite URL = %q, want %q", got, want)
+	}
+}
+
 func TestSQLiteTaskStateMigrationPreservesLegacyTasks(t *testing.T) {
 	testTaskStateMigrationPreservesLegacyTasks(t, Config{
 		Backend: BackendSQLite, SQLitePath: filepath.Join(t.TempDir(), "legacy-tasks.db"),
