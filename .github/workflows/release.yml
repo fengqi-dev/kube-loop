@@ -248,7 +248,7 @@ jobs:
           images: ghcr.io/${{ github.repository }}/gateway
           tags: |
             type=ref,event=tag
-            type=raw,value=latest
+            type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
 
       - name: Build and push Gateway image
         uses: docker/build-push-action@v7
