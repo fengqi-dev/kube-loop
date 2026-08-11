@@ -98,7 +98,10 @@ func TestStartRegistersAuthorizedControlBeforeOpeningSOCKS(t *testing.T) {
 			return
 		}
 		_ = tunnel.WriteStatus(connection, nil)
-		close(controlAccepted)
+		// Hand the acknowledgement directly to listenSOCKS. Closing the channel
+		// after WriteStatus is racy: the client can read the status and reach the
+		// assertion before this goroutine is scheduled to close the channel.
+		controlAccepted <- struct{}{}
 		var buffer [1]byte
 		_, _ = connection.Read(buffer[:])
 	}()
