@@ -96,6 +96,20 @@ func (connection *testCloseConn) Close() error {
 	return connection.closeErr
 }
 
+type readSignalConn struct {
+	net.Conn
+	once sync.Once
+	read chan struct{}
+}
+
+func (connection *readSignalConn) Read(buffer []byte) (int, error) {
+	count, err := connection.Conn.Read(buffer)
+	if count > 0 {
+		connection.once.Do(func() { close(connection.read) })
+	}
+	return count, err
+}
+
 func TestStartRegistersAuthorizedControlBeforeOpeningSOCKS(t *testing.T) {
 	spec, err := networkspec.Normalize(networkspec.Spec{
 		PodCIDRs: []string{"10.42.0.0/16"}, ServiceCIDRs: []string{"10.96.0.0/12"},
@@ -110,7 +124,7 @@ func TestStartRegistersAuthorizedControlBeforeOpeningSOCKS(t *testing.T) {
 		t.Fatal(err)
 	}
 	forwarder := &testForwarder{Listener: listener}
-	controlAccepted := make(chan struct{})
+	statusRead := make(chan struct{})
 	serverDone := make(chan struct{})
 	go func() {
 		defer close(serverDone)
@@ -132,10 +146,6 @@ func TestStartRegistersAuthorizedControlBeforeOpeningSOCKS(t *testing.T) {
 			return
 		}
 		_ = tunnel.WriteStatus(connection, nil)
-		// Hand the acknowledgement directly to listenSOCKS. Closing the channel
-		// after WriteStatus is racy: the client can read the status and reach the
-		// assertion before this goroutine is scheduled to close the channel.
-		controlAccepted <- struct{}{}
 		var buffer [1]byte
 		_, _ = connection.Read(buffer[:])
 	}()
@@ -167,9 +177,16 @@ func TestStartRegistersAuthorizedControlBeforeOpeningSOCKS(t *testing.T) {
 			}
 			return forwarder, nil
 		},
+		dialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
+			connection, err := (&net.Dialer{}).DialContext(ctx, network, address)
+			if err != nil {
+				return nil, err
+			}
+			return &readSignalConn{Conn: connection, read: statusRead}, nil
+		},
 		listenSOCKS: func(_ context.Context, gatewayAddress, listenAddress string, _ tunnel.SessionToken) (localBridge, error) {
 			select {
-			case <-controlAccepted:
+			case <-statusRead:
 			default:
 				t.Fatal("SOCKS listener started before Data Plane authorization was acknowledged")
 			}

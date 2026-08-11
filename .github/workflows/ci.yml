@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - v2
     paths-ignore:
       - "Casks/**"
   pull_request:
@@ -104,7 +103,7 @@ jobs:
         run: make capacity-baseline
 
       - name: Run race detector
-        run: go test -race ./internal/gateway/... ./internal/helper ./internal/singbox ./internal/session ./internal/socksbridge ./internal/protocol/...
+        run: go test -race ./internal/gateway/... ./internal/helper ./internal/singbox ./internal/client/... ./internal/socksbridge ./internal/protocol/...
 
       - name: Run recovery race matrix
         run: make recovery-test

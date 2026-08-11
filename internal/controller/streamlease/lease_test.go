@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -46,32 +47,37 @@ func TestLeaseFollowsHeartbeatExtendedSessionExpiry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	now := time.Now().UTC()
-	initialExpiry := now.Add(100 * time.Millisecond)
+	initialNow := time.Now().UTC()
+	var clock atomic.Int64
+	clock.Store(initialNow.UnixNano())
+	now := func() time.Time { return time.Unix(0, clock.Load()).UTC() }
+	initialExpiry := initialNow.Add(time.Minute)
 	if err := stateStore.Sessions().Heartbeat(
-		context.Background(), sessionID, stored.Generation, stored.NetworkSpec, stored.NetworkSpecHash, now, initialExpiry,
+		context.Background(), sessionID, stored.Generation, stored.NetworkSpec, stored.NetworkSpecHash, initialNow, initialExpiry,
 	); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel, err := Start(context.Background(), stateStore, controller.Principal{
 		Subject: principalID, DeviceID: "device",
-	}, sessionapi.ActiveSession{ID: sessionID, ExpiresAt: initialExpiry}, Config{CheckInterval: 10 * time.Millisecond})
+	}, sessionapi.ActiveSession{ID: sessionID, ExpiresAt: initialExpiry}, Config{
+		Now: now, CheckInterval: 10 * time.Millisecond,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer cancel()
-	time.Sleep(30 * time.Millisecond)
-	heartbeatAt := time.Now().UTC()
+	heartbeatAt := initialNow.Add(time.Second)
 	if err := stateStore.Sessions().Heartbeat(
 		context.Background(), sessionID, stored.Generation+1, stored.NetworkSpec, stored.NetworkSpecHash,
 		heartbeatAt, heartbeatAt.Add(time.Hour),
 	); err != nil {
 		t.Fatal(err)
 	}
+	clock.Store(initialExpiry.Add(time.Second).UnixNano())
 	select {
 	case <-ctx.Done():
 		t.Fatalf("heartbeat-extended Session terminated its lease: %v", ctx.Err())
-	case <-time.After(120 * time.Millisecond):
+	case <-time.After(50 * time.Millisecond):
 	}
 }
 
