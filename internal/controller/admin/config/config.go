@@ -11,7 +11,7 @@ import (
 	"io"
 	"net/netip"
 	"os"
-	"path/filepath"
+	"path"
 	"regexp"
 	"strings"
 	"time"
@@ -170,13 +170,13 @@ func normalizeProviderSecretAliases(aliases ProviderSecretAliases) (ProviderSecr
 		if entry.ClientSecretFile == "" && entry.BindPasswordFile == "" && entry.CAFile == "" {
 			return nil, fmt.Errorf("management Provider Secret alias %q has no projected keys", alias)
 		}
-		root := filepath.Join(providerSecretMountRoot, alias)
+		root := path.Join(providerSecretMountRoot, alias)
 		for use, actual := range map[string]string{
 			"client-secret": entry.ClientSecretFile,
 			"bind-password": entry.BindPasswordFile,
 			"ca.crt":        entry.CAFile,
 		} {
-			if actual != "" && actual != filepath.Join(root, use) {
+			if actual != "" && actual != path.Join(root, use) {
 				return nil, fmt.Errorf("management Provider Secret alias %q must use fixed mount paths", alias)
 			}
 		}
@@ -205,7 +205,7 @@ func normalizeBreakGlass(config BreakGlassConfig) (BreakGlassConfig, error) {
 	if !aliasPattern.MatchString(config.SecretAlias) {
 		return BreakGlassConfig{}, errors.New("management break-glass requires a valid Secret alias")
 	}
-	wantSecretFile := filepath.Join(breakGlassMountRoot, config.SecretAlias, "credential")
+	wantSecretFile := path.Join(breakGlassMountRoot, config.SecretAlias, "credential")
 	if config.SecretFile != wantSecretFile {
 		return BreakGlassConfig{}, errors.New("management break-glass Secret file must use the fixed Controller mount path")
 	}

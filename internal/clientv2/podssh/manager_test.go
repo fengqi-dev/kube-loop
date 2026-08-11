@@ -69,9 +69,14 @@ func newFakeExecClient(t *testing.T) *fakeExecClient {
 			client.sizes = append(client.sizes, size)
 			client.mu.Unlock()
 			stdout, _ := execstream.Encode(execstream.Frame{Type: execstream.Stdout, Payload: []byte("remote-shell\n")})
-			_ = connection.Write(ctx, websocket.MessageBinary, stdout)
+			if err := connection.Write(ctx, websocket.MessageBinary, stdout); err != nil {
+				return
+			}
 			exit, _ := execstream.EncodeExit(execstream.ExitStatus{})
-			_ = connection.Write(ctx, websocket.MessageBinary, exit)
+			if err := connection.Write(ctx, websocket.MessageBinary, exit); err != nil {
+				return
+			}
+			_ = connection.Close(websocket.StatusNormalClosure, "exec complete")
 			return
 		}
 	}))

@@ -11,7 +11,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -509,7 +508,7 @@ func decodeExportValue(raw json.RawMessage, spec columnSpec) (any, error) {
 }
 
 func validateSQLiteBackup(ctx context.Context, path string) (int, error) {
-	location := (&url.URL{Scheme: "file", Path: path}).String() + "?mode=ro"
+	location := sqliteFileURL(path, runtime.GOOS == "windows") + "?mode=ro"
 	database, err := sql.Open("sqlite", location)
 	if err != nil {
 		return 0, errors.New("open SQLite backup for validation")
