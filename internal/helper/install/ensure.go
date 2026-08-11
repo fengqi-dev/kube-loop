@@ -18,9 +18,7 @@ import (
 )
 
 const (
-	helperServiceName   = "kubeloop-helper"
-	helperInstallName   = "kubeloop-helper-install"
-	helperUninstallName = "kubeloop-helper-uninstall"
+	helperServiceName = "kubeloop-helper"
 )
 
 var (
@@ -168,20 +166,6 @@ func Uninstall(ctx context.Context) error {
 
 func LocateBundledHelper() (string, error) {
 	return locateBundledTool(helperServiceName)
-}
-
-func LocateBundledInstallTool() (string, error) {
-	if runtime.GOOS != "windows" {
-		return LocateBundledHelper()
-	}
-	return locateBundledTool(helperInstallName)
-}
-
-func LocateBundledUninstallTool() (string, error) {
-	if runtime.GOOS != "windows" {
-		return LocateBundledHelper()
-	}
-	return locateBundledTool(helperUninstallName)
 }
 
 func locateBundledTool(baseName string) (string, error) {

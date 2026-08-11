@@ -11,7 +11,7 @@ import (
 	singboxruntime "github.com/fengqi-dev/kube-loop/internal/singbox/runtime"
 )
 
-// NewSingboxRuntime connects the V2 Data Plane to the narrowly scoped local
+// NewSingboxRuntime connects the Data Plane to the narrowly scoped local
 // privileged helper. This is local network plumbing only; it never loads a
 // kubeconfig or talks to Kubernetes.
 func NewSingboxRuntime(appendLog func(string, string)) *singboxruntime.Runtime {

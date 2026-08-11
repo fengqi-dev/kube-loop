@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -12,22 +13,21 @@ import (
 	"sync"
 	"time"
 
-	clientauth "github.com/fengqi-dev/kube-loop/internal/clientv2/auth"
-	"github.com/fengqi-dev/kube-loop/internal/clientv2/credentials"
-	clientdataplane "github.com/fengqi-dev/kube-loop/internal/clientv2/dataplane"
-	clientdiscovery "github.com/fengqi-dev/kube-loop/internal/clientv2/discovery"
-	clientexchange "github.com/fengqi-dev/kube-loop/internal/clientv2/exchange"
-	clientexec "github.com/fengqi-dev/kube-loop/internal/clientv2/exec"
-	clientfiletransfer "github.com/fengqi-dev/kube-loop/internal/clientv2/filetransfer"
-	clientmigration "github.com/fengqi-dev/kube-loop/internal/clientv2/migration"
-	clientmirror "github.com/fengqi-dev/kube-loop/internal/clientv2/mirror"
-	clientpodssh "github.com/fengqi-dev/kube-loop/internal/clientv2/podssh"
-	clientportforward "github.com/fengqi-dev/kube-loop/internal/clientv2/portforward"
-	"github.com/fengqi-dev/kube-loop/internal/clientv2/powerwatch"
-	clientpreview "github.com/fengqi-dev/kube-loop/internal/clientv2/preview"
-	clientprofile "github.com/fengqi-dev/kube-loop/internal/clientv2/profile"
-	clientremote "github.com/fengqi-dev/kube-loop/internal/clientv2/remote"
-	clientremotesession "github.com/fengqi-dev/kube-loop/internal/clientv2/remotesession"
+	clientauth "github.com/fengqi-dev/kube-loop/internal/client/auth"
+	"github.com/fengqi-dev/kube-loop/internal/client/credentials"
+	clientdataplane "github.com/fengqi-dev/kube-loop/internal/client/dataplane"
+	clientdiscovery "github.com/fengqi-dev/kube-loop/internal/client/discovery"
+	clientexchange "github.com/fengqi-dev/kube-loop/internal/client/exchange"
+	clientexec "github.com/fengqi-dev/kube-loop/internal/client/exec"
+	clientfiletransfer "github.com/fengqi-dev/kube-loop/internal/client/filetransfer"
+	clientmirror "github.com/fengqi-dev/kube-loop/internal/client/mirror"
+	clientpodssh "github.com/fengqi-dev/kube-loop/internal/client/podssh"
+	clientportforward "github.com/fengqi-dev/kube-loop/internal/client/portforward"
+	"github.com/fengqi-dev/kube-loop/internal/client/powerwatch"
+	clientpreview "github.com/fengqi-dev/kube-loop/internal/client/preview"
+	clientprofile "github.com/fengqi-dev/kube-loop/internal/client/profile"
+	clientremote "github.com/fengqi-dev/kube-loop/internal/client/remote"
+	clientremotesession "github.com/fengqi-dev/kube-loop/internal/client/remotesession"
 	"github.com/fengqi-dev/kube-loop/internal/helper"
 	"github.com/fengqi-dev/kube-loop/internal/mcp"
 	"github.com/fengqi-dev/kube-loop/internal/update"
@@ -50,7 +50,6 @@ type App struct {
 	remoteMirrors         *clientmirror.Manager
 	remotePreviews        *clientpreview.Manager
 	credentials           credentials.Store
-	migration             clientmigration.Status
 	mcp                   *mcp.Controller
 	updater               *update.Checker
 	once                  sync.Once
@@ -64,15 +63,10 @@ type App struct {
 }
 
 type BootstrapData struct {
-	Update         update.Info            `json:"update"`
-	Platform       string                 `json:"platform"`
-	Mode           string                 `json:"mode"`
-	BackendMode    string                 `json:"backendMode"`
-	ServerProfiles clientprofile.State    `json:"serverProfiles"`
-	Migration      clientmigration.Status `json:"migration"`
+	Update         update.Info         `json:"update"`
+	Platform       string              `json:"platform"`
+	ServerProfiles clientprofile.State `json:"serverProfiles"`
 }
-
-const BackendModeRemote = "remote"
 
 type appDependencies struct {
 	profilePath     string
@@ -80,8 +74,8 @@ type appDependencies struct {
 	httpClient      *http.Client
 }
 
-// NewApp is the V2 desktop composition root. It deliberately constructs no
-// kubeconfig, Kubernetes client, or V1 session manager: all cluster operations
+// NewApp is the desktop composition root. It deliberately constructs no
+// kubeconfig or Kubernetes client: all cluster operations
 // are performed remotely through the configured Gateway service.
 func NewApp(version string, embeddedHelperFiles fs.FS) *App {
 	return newApp(version, embeddedHelperFiles, appDependencies{})
@@ -91,6 +85,11 @@ func newApp(version string, embeddedHelperFiles fs.FS, dependencies appDependenc
 	registerEmbeddedHelpers(embeddedHelperFiles)
 	if version != "" {
 		helper.Version = version
+	}
+	var developmentTLSConfig *tls.Config
+	var developmentTLSErr error
+	if dependencies.httpClient == nil && helper.IsDevBuild() {
+		dependencies.httpClient, developmentTLSConfig, developmentTLSErr = developmentGatewayHTTPClient(embeddedHelperFiles)
 	}
 
 	profileStore, profileErr := clientprofile.Open(dependencies.profilePath)
@@ -102,26 +101,17 @@ func newApp(version string, embeddedHelperFiles fs.FS, dependencies appDependenc
 	}
 	transferStatePath := ""
 	if profilePath != "" {
-		transferStatePath = filepath.Join(filepath.Dir(profilePath), "transfers-v2.json")
+		transferStatePath = filepath.Join(filepath.Dir(profilePath), "transfers.json")
 	}
 
 	credentialStore := dependencies.credentialStore
 	if credentialStore == nil {
 		credentialStore = credentials.NewSystemStore()
 	}
-	migrationStatus := clientmigration.Status{}
-	var migrationErr error
-	if profilePath != "" {
-		migrationStatus, migrationErr = clientmigration.PreserveLegacyState(filepath.Dir(profilePath), nil)
-		if migrationErr != nil {
-			migrationStatus.Error = migrationErr.Error()
-		}
-	}
 	application := &App{
 		profiles:    profileStore,
 		discovery:   clientdiscovery.New(clientdiscovery.Config{ClientVersion: version, HTTPClient: dependencies.httpClient}),
 		credentials: credentialStore,
-		migration:   migrationStatus,
 		updater:     &update.Checker{CurrentVersion: version},
 		updateState: update.Info{
 			CurrentVersion: version,
@@ -129,18 +119,15 @@ func newApp(version string, embeddedHelperFiles fs.FS, dependencies appDependenc
 		},
 	}
 	if profileErr != nil {
-		application.appendLog("ERROR", "V2 Server Profile store unavailable: "+profileErr.Error())
+		application.appendLog("ERROR", "Server Profile store unavailable: "+profileErr.Error())
 	} else if profileStore.RecoveredFromBackup() {
-		application.appendLog("WARN", "V2 Server Profile store recovered from backup")
+		application.appendLog("WARN", "Server Profile store recovered from backup")
 	} else {
-		application.appendLog("INFO", "V2 Server Profile store loaded")
+		application.appendLog("INFO", "Server Profile store loaded")
 	}
-	if migrationErr != nil {
-		application.appendLog("ERROR", "V1 state backup failed: "+migrationErr.Error())
-	} else if migrationStatus.LegacyDetected {
-		application.appendLog("INFO", "V1 state preserved without importing kubeconfig, credentials, or resource intents")
+	if developmentTLSErr != nil {
+		application.appendLog("WARN", "Development Gateway CA unavailable: "+developmentTLSErr.Error())
 	}
-
 	application.auth = clientauth.New(clientauth.Config{HTTPClient: dependencies.httpClient, OpenBrowser: func(target string) error {
 		if application.ctx == nil {
 			return errors.New("application is not ready")
@@ -152,7 +139,7 @@ func newApp(version string, embeddedHelperFiles fs.FS, dependencies appDependenc
 		application.credentials, application.auth, clientremote.Config{HTTPClient: dependencies.httpClient},
 	)
 	if remoteErr != nil {
-		application.appendLog("ERROR", "V2 Remote Cluster Backend unavailable: "+remoteErr.Error())
+		application.appendLog("ERROR", "Remote Cluster Backend unavailable: "+remoteErr.Error())
 		return application
 	}
 	application.remote = remoteClient
@@ -166,7 +153,7 @@ func newApp(version string, embeddedHelperFiles fs.FS, dependencies appDependenc
 		},
 	})
 	if fileErr != nil {
-		application.appendLog("ERROR", "V2 file transfer manager unavailable: "+fileErr.Error())
+		application.appendLog("ERROR", "file transfer manager unavailable: "+fileErr.Error())
 	} else {
 		application.remoteFiles = remoteFiles
 	}
@@ -179,25 +166,20 @@ func newApp(version string, embeddedHelperFiles fs.FS, dependencies appDependenc
 		},
 	})
 	if execErr != nil {
-		application.appendLog("ERROR", "V2 Pod exec manager unavailable: "+execErr.Error())
+		application.appendLog("ERROR", "Pod exec manager unavailable: "+execErr.Error())
 	} else {
 		application.remoteExecs = remoteExecs
 	}
 
 	remoteSessions, sessionErr := clientremotesession.New(remoteClient, clientremotesession.Config{})
 	if sessionErr != nil {
-		application.appendLog("ERROR", "V2 Remote Session Manager unavailable: "+sessionErr.Error())
+		application.appendLog("ERROR", "Remote Session Manager unavailable: "+sessionErr.Error())
 		return application
 	}
 	application.remoteSessions = remoteSessions
-	remoteSSH, sshErr := clientpodssh.New(remoteClient, remoteSessions, clientpodssh.Config{})
-	if sshErr != nil {
-		application.appendLog("ERROR", "V2 Pod SSH Manager unavailable: "+sshErr.Error())
-	} else {
-		application.remoteSSH = remoteSSH
-	}
 	dataPlanes, dataPlaneErr := clientdataplane.NewManager(remoteSessions, clientdataplane.Config{
-		ClientVersion: version, TUNStarter: NewSingboxRuntime(application.appendLog),
+		ClientVersion: version, TLSConfig: developmentTLSConfig,
+		TUNStarter: NewSingboxRuntime(application.appendLog),
 		OnStatus: func(event clientdataplane.StatusEvent) {
 			if application.ctx != nil {
 				runtime.EventsEmit(application.ctx, "dataplane:status", event)
@@ -205,42 +187,50 @@ func newApp(version string, embeddedHelperFiles fs.FS, dependencies appDependenc
 		},
 	})
 	if dataPlaneErr != nil {
-		application.appendLog("ERROR", "V2 Data Plane Manager unavailable: "+dataPlaneErr.Error())
+		application.appendLog("ERROR", "Data Plane Manager unavailable: "+dataPlaneErr.Error())
 		return application
 	}
 	application.dataPlanes = dataPlanes
+	remoteSSH, sshErr := clientpodssh.New(remoteClient, remoteSessions, clientpodssh.Config{
+		HostTCPRegistrar: dataPlanes,
+	})
+	if sshErr != nil {
+		application.appendLog("ERROR", "Pod SSH Manager unavailable: "+sshErr.Error())
+	} else {
+		application.remoteSSH = remoteSSH
+	}
 	remoteForwards, portForwardErr := clientportforward.New(remoteClient, dataPlanes)
 	if portForwardErr != nil {
-		application.appendLog("ERROR", "V2 Port Forward Manager unavailable: "+portForwardErr.Error())
+		application.appendLog("ERROR", "Port Forward Manager unavailable: "+portForwardErr.Error())
 	} else {
 		application.remoteForwards = remoteForwards
 	}
 	remoteExchanges, exchangeErr := clientexchange.NewManager(remoteClient, clientexchange.Config{})
 	if exchangeErr != nil {
-		application.appendLog("ERROR", "V2 Exchange Manager unavailable: "+exchangeErr.Error())
+		application.appendLog("ERROR", "Exchange Manager unavailable: "+exchangeErr.Error())
 	} else {
 		application.remoteExchanges = remoteExchanges
 	}
 	remoteMirrors, mirrorErr := clientmirror.NewManager(remoteClient, clientmirror.Config{})
 	if mirrorErr != nil {
-		application.appendLog("ERROR", "V2 Mirror Manager unavailable: "+mirrorErr.Error())
+		application.appendLog("ERROR", "Mirror Manager unavailable: "+mirrorErr.Error())
 	} else {
 		application.remoteMirrors = remoteMirrors
 	}
 	remotePreviews, previewErr := clientpreview.NewManager(remoteClient, clientpreview.Config{})
 	if previewErr != nil {
-		application.appendLog("ERROR", "V2 Preview Manager unavailable: "+previewErr.Error())
+		application.appendLog("ERROR", "Preview Manager unavailable: "+previewErr.Error())
 	} else {
 		application.remotePreviews = remotePreviews
 	}
 
 	mcpSettingsPath := ""
 	if profilePath != "" {
-		mcpSettingsPath = filepath.Join(filepath.Dir(profilePath), "mcp-v2.json")
+		mcpSettingsPath = filepath.Join(filepath.Dir(profilePath), "mcp.json")
 	}
 	mcpStore, mcpStoreErr := mcp.NewSystemConfigStore(mcpSettingsPath)
 	if mcpStoreErr != nil {
-		application.appendLog("ERROR", "V2 MCP settings store unavailable: "+mcpStoreErr.Error())
+		application.appendLog("ERROR", "MCP settings store unavailable: "+mcpStoreErr.Error())
 		return application
 	}
 	mcpDependencies := mcp.RemoteDependencies{
@@ -268,12 +258,12 @@ func newApp(version string, embeddedHelperFiles fs.FS, dependencies appDependenc
 	}
 	mcpBackend, mcpBackendErr := mcp.NewRemoteBackend(mcpDependencies)
 	if mcpBackendErr != nil {
-		application.appendLog("ERROR", "V2 MCP Gateway backend unavailable: "+mcpBackendErr.Error())
+		application.appendLog("ERROR", "MCP Gateway backend unavailable: "+mcpBackendErr.Error())
 		return application
 	}
 	mcpController, mcpErr := mcp.NewController(mcpBackend, mcpStore, version, application.appendLog)
 	if mcpErr != nil {
-		application.appendLog("ERROR", "V2 MCP controller unavailable: "+mcpErr.Error())
+		application.appendLog("ERROR", "MCP controller unavailable: "+mcpErr.Error())
 		return application
 	}
 	application.mcp = mcpController
@@ -295,7 +285,7 @@ func ShowWindow(a *App) {
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	a.once.Do(func() {
-		a.appendLog("INFO", "V2 application startup initialized")
+		a.appendLog("INFO", "application startup initialized")
 		watcher, err := powerwatch.New(powerwatch.Config{OnWake: func(event powerwatch.Event) {
 			if a.dataPlanes == nil {
 				return
@@ -394,15 +384,10 @@ func (a *App) appendLog(level, message string) {
 
 func (a *App) Bootstrap() (BootstrapData, error) {
 	profiles := a.serverProfiles()
-	mode := "setup"
-	if profiles.ActiveProfileID != "" {
-		mode = "v2"
-	}
 	a.updateMu.RLock()
 	updateState := a.updateState
 	a.updateMu.RUnlock()
 	return BootstrapData{
-		Update: updateState, Platform: goruntime.GOOS, Mode: mode,
-		BackendMode: BackendModeRemote, ServerProfiles: profiles, Migration: a.migration,
+		Update: updateState, Platform: goruntime.GOOS, ServerProfiles: profiles,
 	}, nil
 }

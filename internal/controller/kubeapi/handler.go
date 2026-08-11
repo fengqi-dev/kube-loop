@@ -96,13 +96,20 @@ type namespaceDocument struct {
 }
 
 type podDocument struct {
-	Name       string   `json:"name"`
-	Namespace  string   `json:"namespace"`
-	Phase      string   `json:"phase,omitempty"`
-	PodIP      string   `json:"podIp,omitempty"`
-	NodeName   string   `json:"nodeName,omitempty"`
-	Ready      bool     `json:"ready"`
-	Containers []string `json:"containers"`
+	Name       string            `json:"name"`
+	Namespace  string            `json:"namespace"`
+	Phase      string            `json:"phase,omitempty"`
+	PodIP      string            `json:"podIp,omitempty"`
+	NodeName   string            `json:"nodeName,omitempty"`
+	Ready      bool              `json:"ready"`
+	Containers []string          `json:"containers"`
+	Ports      []podPortDocument `json:"ports"`
+}
+
+type podPortDocument struct {
+	Name     string `json:"name,omitempty"`
+	Port     int32  `json:"port"`
+	Protocol string `json:"protocol"`
 }
 
 type serviceDocument struct {
@@ -273,23 +280,18 @@ func (handler *Handler) discoverCapabilities(
 		{capability: "pods.files", policy: policyRequests("file-transfers", "create", "stream"), kubernetes: namespaced(authorizationv1.ResourceAttributes{Verb: "create", Resource: "pods", Subresource: "exec"})},
 		{capability: "pods.files.manage", policy: policyRequests("pod-files", "list", "create", "update", "delete", "get"), kubernetes: namespaced(authorizationv1.ResourceAttributes{Verb: "create", Resource: "pods", Subresource: "exec"})},
 		{capability: "services.exchange", policy: policyRequests("exchanges", "create", "get", "delete", "stream"), kubernetes: namespaced(
-			authorizationv1.ResourceAttributes{Verb: "get", Resource: "services"}, authorizationv1.ResourceAttributes{Verb: "update", Resource: "services"},
+			authorizationv1.ResourceAttributes{Verb: "get", Resource: "services"},
 			authorizationv1.ResourceAttributes{Verb: "get", Resource: "endpoints"},
 			authorizationv1.ResourceAttributes{Group: "discovery.k8s.io", Verb: "list", Resource: "endpointslices"},
-			authorizationv1.ResourceAttributes{Group: "discovery.k8s.io", Verb: "create", Resource: "endpointslices"},
-			authorizationv1.ResourceAttributes{Group: "discovery.k8s.io", Verb: "delete", Resource: "endpointslices"},
 		)},
 		{capability: "services.mirror", policy: policyRequests("mirrors", "create", "get", "delete", "stream"), kubernetes: namespaced(
-			authorizationv1.ResourceAttributes{Verb: "get", Resource: "services"}, authorizationv1.ResourceAttributes{Verb: "update", Resource: "services"},
+			authorizationv1.ResourceAttributes{Verb: "get", Resource: "services"},
 			authorizationv1.ResourceAttributes{Verb: "get", Resource: "endpoints"},
 			authorizationv1.ResourceAttributes{Group: "discovery.k8s.io", Verb: "list", Resource: "endpointslices"},
-			authorizationv1.ResourceAttributes{Group: "discovery.k8s.io", Verb: "create", Resource: "endpointslices"},
-			authorizationv1.ResourceAttributes{Group: "discovery.k8s.io", Verb: "delete", Resource: "endpointslices"},
 		)},
-		{capability: "services.preview", policy: policyRequests("previews", "create", "get", "delete", "stream"), kubernetes: namespaced(
-			authorizationv1.ResourceAttributes{Verb: "create", Resource: "services"},
-			authorizationv1.ResourceAttributes{Group: "discovery.k8s.io", Verb: "create", Resource: "endpointslices"},
-		)},
+		// Preview Kubernetes objects are owned and mutated by the Operator. The
+		// Controller only creates the TrafficBinding after the Gateway policy check.
+		{capability: "services.preview", policy: policyRequests("previews", "create", "get", "delete", "stream")},
 	}
 	subject := authorization.Subject{ID: principal.Subject, Groups: append([]string(nil), principal.Groups...)}
 	capabilities := make([]string, 0, len(candidates))
@@ -555,8 +557,14 @@ func validateName(field, value string, namespace bool) *controller.APIError {
 
 func podFromKubernetes(pod *corev1.Pod) podDocument {
 	containers := make([]string, 0, len(pod.Spec.Containers))
+	ports := make([]podPortDocument, 0)
 	for _, container := range pod.Spec.Containers {
 		containers = append(containers, container.Name)
+		for _, port := range container.Ports {
+			ports = append(ports, podPortDocument{
+				Name: port.Name, Port: port.ContainerPort, Protocol: string(port.Protocol),
+			})
+		}
 	}
 	ready := false
 	for _, condition := range pod.Status.Conditions {
@@ -567,7 +575,7 @@ func podFromKubernetes(pod *corev1.Pod) podDocument {
 	}
 	return podDocument{
 		Name: pod.Name, Namespace: pod.Namespace, Phase: string(pod.Status.Phase),
-		PodIP: pod.Status.PodIP, NodeName: pod.Spec.NodeName, Ready: ready, Containers: containers,
+		PodIP: pod.Status.PodIP, NodeName: pod.Spec.NodeName, Ready: ready, Containers: containers, Ports: ports,
 	}
 }
 

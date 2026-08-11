@@ -20,7 +20,7 @@ func TestConnectivityDialsActiveTCPForward(t *testing.T) {
 	}
 	defer listener.Close()
 
-	manager := NewManager(nil)
+	manager := NewManager()
 	manager.active["pf-1"] = &runtimeForward{
 		info: Info{
 			ID: "pf-1", Protocol: "tcp", Address: listener.Addr().String(),
@@ -33,14 +33,14 @@ func TestConnectivityDialsActiveTCPForward(t *testing.T) {
 }
 
 func TestConnectivityRejectsMissingForward(t *testing.T) {
-	manager := NewManager(nil)
+	manager := NewManager()
 	if err := manager.Test(context.Background(), "missing"); err == nil {
 		t.Fatal("expected missing port-forward error")
 	}
 }
 
 func TestConnectivityRejectsUDPForward(t *testing.T) {
-	manager := NewManager(nil)
+	manager := NewManager()
 	manager.active["pf-1"] = &runtimeForward{
 		info: Info{ID: "pf-1", Protocol: "udp", Address: "127.0.0.1:12345"},
 	}

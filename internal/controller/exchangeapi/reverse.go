@@ -10,7 +10,7 @@ import (
 )
 
 // ReverseListeners is the transport-only listener set shared by Exchange and
-// Preview until their Task plumbing is unified in V2-607. Kubernetes ownership
+// Preview until their Task plumbing is unified. Kubernetes ownership
 // and Task state remain outside this type.
 type ReverseListeners struct{ listeners *boundListeners }
 

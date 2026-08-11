@@ -13,6 +13,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
 import { ServerFileTransfer } from "@/components/server/server-file-transfer";
+import { ServerOverviewView } from "@/components/server/server-overview-view";
+import { ServerListView } from "@/components/server/server-list-view";
+import type { AppView } from "@/components/layout/navigation";
 import type {
   AuthSession,
   DataPlaneStatusEvent,
@@ -28,16 +31,29 @@ import type {
   ServerInventoryEvent,
   ServerProfile,
   ServerProfileState,
-  V1MigrationStatus,
 } from "@/types";
-import { AlertTriangle, ArrowRightLeft, Boxes, Copy, Globe2, ListTodo, LogIn, LogOut, Network, RefreshCw, Server, ShieldCheck, SquareTerminal, Trash2, UserRound } from "lucide-react";
+import { AlertTriangle, ArrowRightLeft, Boxes, Copy, Globe2, LogIn, LogOut, Network, RefreshCw, Server, ShieldCheck, SquareTerminal, Trash2, UserRound } from "lucide-react";
 import { lazy, Suspense, useEffect, useMemo, useState, type ReactNode } from "react";
 
 const ServerExecTerminal = lazy(() => import("@/components/server/server-exec-terminal").then((module) => ({
   default: module.ServerExecTerminal,
 })));
 
-export function ServerAccessView({ profiles, migration }: { profiles: ServerProfileState; migration: V1MigrationStatus }) {
+export function ServerAccessView({
+  profiles,
+  authSession,
+  management = false,
+  onProfilesChange,
+  onAuthChange,
+  onNavigate,
+}: {
+  profiles: ServerProfileState;
+  authSession?: AuthSession;
+  management?: boolean;
+  onProfilesChange?(profiles: ServerProfileState): void;
+  onAuthChange?(auth: AuthSession): void;
+  onNavigate?(view: AppView): void;
+}) {
   const [profileState, setProfileState] = useState(() => normalizeProfileState(profiles));
   const initialProfile = useMemo(
     () => profileState.profiles.find((item) => item.id === profileState.activeProfileId),
@@ -48,7 +64,6 @@ export function ServerAccessView({ profiles, migration }: { profiles: ServerProf
   const [discovery, setDiscovery] = useState<ServerDiscovery>();
   const [auth, setAuth] = useState<AuthSession>({ authenticated: false });
   const [inventory, setInventory] = useState<RemoteInventory>();
-	const [workspaceView, setWorkspaceView] = useState<"environment" | "tasks">("environment");
 	const [execTask, setExecTask] = useState<ServerExecTask>();
 	const [fileTasks, setFileTasks] = useState<ServerFileTransferTask[]>([]);
 	const [forwards, setForwards] = useState<ServerPortForwardInfo[]>([]);
@@ -84,6 +99,31 @@ export function ServerAccessView({ profiles, migration }: { profiles: ServerProf
   const [dataPlaneError, setDataPlaneError] = useState("");
   const [dataPlaneReason, setDataPlaneReason] = useState<DataPlaneStatusEvent["reason"]>();
   const [dataPlaneRetryable, setDataPlaneRetryable] = useState(false);
+  const authenticated = authSession?.authenticated ?? auth.authenticated;
+
+  useEffect(() => {
+    onProfilesChange?.(profileState);
+  }, [onProfilesChange, profileState]);
+
+  useEffect(() => {
+    onAuthChange?.(auth);
+  }, [auth, onAuthChange]);
+
+  useEffect(() => {
+    if (!authSession) return;
+    if (authSession.authenticated) return;
+    setInventory(undefined);
+    setDataPlaneError("");
+    setDataPlaneReason(undefined);
+    setDataPlaneRetryable(false);
+    setForwards([]);
+    setExchanges([]);
+    setMirrors([]);
+    setPreviews([]);
+    setSSHEndpoints([]);
+    setExecTask(undefined);
+    setFileTasks([]);
+  }, [authSession]);
 
   useEffect(() => {
     if (!initialProfile) return;
@@ -113,9 +153,9 @@ export function ServerAccessView({ profiles, migration }: { profiles: ServerProf
 			setInventory(remoteInventory);
 			setForwards(remoteForwards);
 			setExchanges(remoteExchanges);
-			setMirrors(remoteMirrors);
-			setPreviews(remotePreviews);
-			setSSHEndpoints(remoteSSH);
+		  setMirrors(remoteMirrors);
+		  setPreviews(remotePreviews);
+		  setSSHEndpoints(remoteSSH);
 		  }
         }
       })
@@ -176,10 +216,10 @@ export function ServerAccessView({ profiles, migration }: { profiles: ServerProf
     setBusy("discover");
     setError("");
     try {
-      const normalizedAddress = withHTTPS(address);
+      const normalizedAddress = address.trim();
       const document = await backend.testServerAddress(normalizedAddress);
       const result = await backend.saveServerProfile({
-        baseUrl: document.publicUrl,
+        baseUrl: normalizedAddress,
         displayName: document.serviceId,
         activate: true,
       });
@@ -190,6 +230,7 @@ export function ServerAccessView({ profiles, migration }: { profiles: ServerProf
       setProviderId(result.discovery.authMethods[0]?.id ?? "");
       const session = await backend.serverAuthStatus(result.profile.id);
       setAuth(session);
+	  onAuthChange?.(session);
       setProfileState(normalizeProfileState(await backend.serverProfiles()));
       setInventory(session.authenticated
         ? await backend.loadServerInventory(result.profile.id, result.profile.lastNamespace ?? "")
@@ -216,6 +257,7 @@ export function ServerAccessView({ profiles, migration }: { profiles: ServerProf
 	  }
     } catch (reason) {
       setError(messageOf(reason));
+      throw reason;
     } finally {
       setBusy(undefined);
     }
@@ -234,7 +276,12 @@ export function ServerAccessView({ profiles, migration }: { profiles: ServerProf
             ? await backend.loginServerStaticToken(profile.id, selectedProvider.id, staticToken)
             : await backend.loginServerAnonymous(profile.id, selectedProvider.id);
       setAuth(session);
-      setInventory(await backend.loadServerInventory(profile.id, profile.lastNamespace ?? ""));
+	  onAuthChange?.(session);
+	  const nextProfileState = normalizeProfileState(await backend.serverProfiles());
+	  const nextProfile = nextProfileState.profiles.find((item) => item.id === profile.id) ?? profile;
+	  setProfileState(nextProfileState);
+	  setProfile(nextProfile);
+      setInventory(await backend.loadServerInventory(profile.id, nextProfile.lastNamespace ?? ""));
 	  const [remoteForwards, remoteExchanges, remoteMirrors, remotePreviews, remoteSSH] = await Promise.all([
 		backend.listServerPortForwards(profile.id),
 		backend.listServerExchanges(profile.id),
@@ -247,6 +294,7 @@ export function ServerAccessView({ profiles, migration }: { profiles: ServerProf
 	  setMirrors(remoteMirrors);
 	  setPreviews(remotePreviews);
 	  setSSHEndpoints(remoteSSH);
+	  onNavigate?.("overview");
     } catch (reason) {
       setError(messageOf(reason));
     } finally {
@@ -266,6 +314,7 @@ export function ServerAccessView({ profiles, migration }: { profiles: ServerProf
       setError(messageOf(reason));
     } finally {
 	  clearWorkspaceState();
+	  onAuthChange?.({ authenticated: false });
 	  setSSHPod("");
 	  setSSHContainer("");
       setBusy(undefined);
@@ -279,6 +328,10 @@ export function ServerAccessView({ profiles, migration }: { profiles: ServerProf
     try {
       const session = await backend.refreshServerLogin(profile.id);
       setAuth(session);
+	  onAuthChange?.(session);
+	  const nextProfileState = normalizeProfileState(await backend.serverProfiles());
+	  setProfileState(nextProfileState);
+	  setProfile(nextProfileState.profiles.find((item) => item.id === profile.id) ?? profile);
       setInventory(await backend.loadServerInventory(profile.id, inventory?.namespace ?? profile.lastNamespace ?? ""));
     } catch (reason) {
       setError(messageOf(reason));
@@ -331,7 +384,6 @@ export function ServerAccessView({ profiles, migration }: { profiles: ServerProf
     setSSHEndpoints([]);
     setExecTask(undefined);
     setFileTasks([]);
-    setWorkspaceView("environment");
   }
 
   async function removeProfile() {
@@ -409,14 +461,26 @@ export function ServerAccessView({ profiles, migration }: { profiles: ServerProf
     }
   }
 
-  async function toggleTunnel() {
+  async function connectDataPlane(mode: "socks" | "tun") {
+    if (!profile || !inventory?.dataPlane || inventory.dataPlane.state === "connected" || busy) return;
+    setBusy("tunnel");
+    setError("");
+    try {
+      const dataPlane = await backend.connectServerDataPlane(profile.id, mode);
+      setInventory({ ...inventory, dataPlane });
+    } catch (reason) {
+      setError(messageOf(reason));
+    } finally {
+      setBusy(undefined);
+    }
+  }
+
+  async function disconnectDataPlane() {
     if (!profile || !inventory?.dataPlane || inventory.dataPlane.state !== "connected" || busy) return;
     setBusy("tunnel");
     setError("");
     try {
-      const dataPlane = inventory.dataPlane.mode === "tun"
-        ? await backend.stopServerTunnel(profile.id)
-        : await backend.startServerTunnel(profile.id);
+      const dataPlane = await backend.disconnectServerDataPlane(profile.id);
       setInventory({ ...inventory, dataPlane });
     } catch (reason) {
       setError(messageOf(reason));
@@ -655,43 +719,157 @@ export function ServerAccessView({ profiles, migration }: { profiles: ServerProf
 		}
 	}
 
-  return (
-    <main className="grid min-h-screen place-items-center bg-background px-6 py-10 text-foreground">
-      <div className={`w-full space-y-5 transition-[max-width] ${auth.authenticated ? "max-w-5xl" : "max-w-xl"}`}>
-        <div className="flex items-center justify-center gap-3">
-          <div className="grid size-10 place-items-center rounded-xl bg-primary text-primary-foreground">
-            <Globe2 size={21} />
-          </div>
-          <div>
-            <div className="font-heading text-lg font-semibold">KubeLoop</div>
-            <div className="text-xs text-muted-foreground">Gateway V2</div>
-          </div>
-        </div>
+  async function addServerFromList(serviceAddress: string) {
+    if (busy) return;
+    setBusy("discover");
+    setError("");
+    try {
+      const document = await backend.testServerAddress(serviceAddress);
+      const result = await backend.saveServerProfile({
+        baseUrl: serviceAddress,
+        displayName: document.serviceId,
+        activate: true,
+      });
+      const state = normalizeProfileState(await backend.serverProfiles());
+      setProfileState(state);
+      setProfile(result.profile);
+      setAddress(result.profile.baseUrl);
+      setDiscovery(result.discovery);
+      setProviderId(result.discovery.authMethods[0]?.id ?? "");
+      clearWorkspaceState();
+      const session = await backend.serverAuthStatus(result.profile.id);
+      setAuth(session);
+	  onAuthChange?.(session);
+      if (session.authenticated) {
+        setInventory(await backend.loadServerInventory(result.profile.id, result.profile.lastNamespace ?? ""));
+      }
+    } catch (reason) {
+      setError(messageOf(reason));
+      throw reason;
+    } finally {
+      setBusy(undefined);
+    }
+  }
 
+  async function retestServer(item: ServerProfile) {
+    if (busy) return;
+    setBusy("discover");
+    setError("");
+    try {
+      const document = await backend.testServerAddress(item.baseUrl);
+      if (item.id === profile?.id) setDiscovery(document);
+    } catch (reason) {
+      setError(messageOf(reason));
+      throw reason;
+    } finally {
+      setBusy(undefined);
+    }
+  }
+
+  async function removeServerFromList(id: string) {
+    if (busy) return;
+    setBusy("delete");
+    setError("");
+    try {
+      const removedActive = id === profile?.id;
+      const state = normalizeProfileState(await backend.deleteServerProfile(id));
+      setProfileState(state);
+      if (removedActive) {
+        const selected = state.profiles.find((item) => item.id === state.activeProfileId);
+        setProfile(selected);
+        setAddress(selected?.baseUrl ?? "");
+        setDiscovery(undefined);
+        clearWorkspaceState();
+      }
+    } catch (reason) {
+      setError(messageOf(reason));
+      throw reason;
+    } finally {
+      setBusy(undefined);
+    }
+  }
+
+  async function editServerFromList(item: ServerProfile, displayName: string, serviceAddress: string) {
+    if (busy) return;
+    setBusy("discover");
+    setError("");
+    try {
+      const active = item.id === profileState.activeProfileId;
+      const result = await backend.saveServerProfile({
+        id: item.id,
+        baseUrl: serviceAddress,
+        displayName,
+        activate: active,
+      });
+      const state = normalizeProfileState(await backend.serverProfiles());
+      setProfileState(state);
+      if (active) {
+        setProfile(result.profile);
+        setAddress(result.profile.baseUrl);
+        setDiscovery(result.discovery);
+      }
+    } catch (reason) {
+      setError(messageOf(reason));
+      throw reason;
+    } finally {
+      setBusy(undefined);
+    }
+  }
+
+  if (management) {
+    return (
+      <ServerListView
+        profiles={profileState.profiles}
+        activeProfileId={profileState.activeProfileId}
+        authenticated={authenticated}
+        busy={Boolean(busy)}
+        error={error}
+        onSelect={(id) => selectProfile(id)}
+        onAdd={addServerFromList}
+        onRetest={retestServer}
+        onEdit={editServerFromList}
+        onRemove={removeServerFromList}
+      />
+    );
+  }
+
+  if (!management && authenticated && inventory && profile) {
+    return (
+      <ServerOverviewView
+        profile={profile}
+        discovery={discovery}
+        inventory={inventory}
+        userName={profile.lastUserName}
+        busy={Boolean(busy)}
+        dataPlaneError={dataPlaneError}
+        dataPlaneReason={dataPlaneReason}
+        counts={{
+          podPortForwards: forwards.filter((item) => item.kind === "pod").length,
+          networkPortForwards: forwards.filter((item) => item.kind === "service").length,
+          exchanges: exchanges.length,
+          mirrors: mirrors.length,
+          previews: previews.length,
+        }}
+        onRefresh={() => void loadInventory()}
+        onConnect={(mode) => void connectDataPlane(mode)}
+        onDisconnect={() => void disconnectDataPlane()}
+        onNavigate={(view) => onNavigate?.(view)}
+      />
+    );
+  }
+
+  return (
+    <main className="grid min-h-full content-start justify-items-center bg-background text-foreground">
+      <div className={`w-full space-y-5 transition-[max-width] ${authenticated ? "max-w-5xl" : "max-w-xl"}`}>
         <Card className="shadow-lg">
           <CardHeader>
-            <CardTitle>{auth.authenticated ? "Server environment" : profile ? "Sign in to your Gateway" : "Connect to a Gateway"}</CardTitle>
+            <CardTitle>{management ? "Servers" : authenticated ? "Server environment" : profile ? "Sign in to your Gateway" : "Connect to a Gateway"}</CardTitle>
             <CardDescription>
               Enter the service address provided by your administrator. Kubernetes access and
               identity configuration stay in the Gateway.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-5">
-            {migration.legacyDetected ? (
-              <div className={`flex items-start gap-3 rounded-lg border p-4 text-sm ${migration.error ? "border-destructive/40 bg-destructive/5" : "border-amber-500/40 bg-amber-500/5"}`}>
-                <AlertTriangle className={`mt-0.5 shrink-0 ${migration.error ? "text-destructive" : "text-amber-600"}`} size={18} />
-                <div className="min-w-0">
-                  <div className="font-medium">V1 upgrade detected</div>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    KubeLoop did not import or upload kubeconfig, credentials, old Gateway Pods, or Kubernetes resource intents.
-                    Enter the Gateway service address provided by your administrator to continue with V2.
-                  </p>
-                  {migration.backupPath ? <code className="mt-2 block truncate text-[11px] text-muted-foreground" title={migration.backupPath}>Backup: {migration.backupPath}</code> : null}
-                  {migration.error ? <p className="mt-2 text-xs text-destructive">Backup failed: {migration.error}</p> : null}
-                </div>
-              </div>
-            ) : null}
-
             {profileState.profiles.length > 0 ? (
               <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
                 <div className="space-y-2">
@@ -724,7 +902,7 @@ export function ServerAccessView({ profiles, migration }: { profiles: ServerProf
                   inputMode="url"
                   autoCapitalize="none"
                   autoCorrect="off"
-                  placeholder="gateway.example.com"
+                  placeholder="https://gateway.example.com"
                   value={address}
                   disabled={Boolean(busy)}
                   onChange={(event) => setAddress(event.target.value)}
@@ -743,7 +921,7 @@ export function ServerAccessView({ profiles, migration }: { profiles: ServerProf
                 </Button>
               </div>
               <p className="text-xs text-muted-foreground">
-                HTTPS is added automatically. HTTP is accepted only for loopback development.
+                Use http:// for an unencrypted connection or https:// to enable TLS certificate verification.
               </p>
             </div>
 
@@ -761,7 +939,7 @@ export function ServerAccessView({ profiles, migration }: { profiles: ServerProf
               </div>
             ) : null}
 
-            {discovery && !auth.authenticated ? (
+            {discovery && !authenticated ? (
               <div className="space-y-4 border-t pt-5">
                 {discovery.authMethods.length > 1 ? (
                   <div className="space-y-2">
@@ -866,7 +1044,7 @@ export function ServerAccessView({ profiles, migration }: { profiles: ServerProf
               </div>
             ) : null}
 
-            {auth.authenticated ? (
+            {authenticated ? (
               <div className="flex items-start gap-3 rounded-lg border border-success/30 bg-success/5 p-4">
                 <ShieldCheck className="mt-0.5 text-success" size={20} />
                 <div>
@@ -879,7 +1057,7 @@ export function ServerAccessView({ profiles, migration }: { profiles: ServerProf
               </div>
             ) : null}
 
-            {auth.authenticated && inventory ? (
+            {!management && authenticated && inventory ? (
               <div className="space-y-4 border-t pt-5">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
                   <div className="grid flex-1 gap-2 sm:max-w-xs">
@@ -915,26 +1093,6 @@ export function ServerAccessView({ profiles, migration }: { profiles: ServerProf
                     </Button>
                   </div>
                 </div>
-
-				<nav aria-label="Server workspace" className="grid grid-cols-2 rounded-lg border bg-muted/30 p-1">
-				  <Button
-					type="button"
-					variant={workspaceView === "environment" ? "default" : "ghost"}
-					className="justify-center"
-					onClick={() => setWorkspaceView("environment")}
-				  >
-					<Globe2 size={15} /> Environment
-				  </Button>
-				  <Button
-					type="button"
-					variant={workspaceView === "tasks" ? "default" : "ghost"}
-					className="justify-center"
-					onClick={() => setWorkspaceView("tasks")}
-				  >
-					<ListTodo size={15} /> Task center
-					<TaskCount value={forwards.length + exchanges.length + mirrors.length + previews.length + sshEndpoints.length + (execTask ? 1 : 0) + fileTasks.filter((task) => isActiveFileTask(task.status)).length} />
-				  </Button>
-				</nav>
 
                 {inventory.network?.issues?.some((issue) => issue.severity === "warning") ? (
                   <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm">
@@ -992,51 +1150,13 @@ export function ServerAccessView({ profiles, migration }: { profiles: ServerProf
                     </div>
                     <div className="flex items-center gap-2">
                       <code className="rounded bg-background px-2 py-1 text-xs">{inventory.dataPlane.socksAddress}</code>
-                      <Button type="button" variant={inventory.dataPlane.mode === "tun" ? "outline" : "default"} size="sm" disabled={Boolean(busy)} onClick={() => void toggleTunnel()}>
+                      <Button type="button" variant={inventory.dataPlane.state === "connected" ? "outline" : "default"} size="sm" disabled={Boolean(busy)} onClick={() => inventory.dataPlane?.state === "connected" ? void disconnectDataPlane() : void connectDataPlane("socks")}>
                         {busy === "tunnel" ? <Spinner data-icon="inline-start" /> : <Network size={14} />}
-                        {inventory.dataPlane.mode === "tun" ? "Stop TUN" : "Enable TUN"}
+                        {inventory.dataPlane.state === "connected" ? "Disconnect" : "Connect"}
                       </Button>
                     </div>
                   </div>
                 ) : null}
-
-				{workspaceView === "tasks" ? <>
-				<TaskCenter
-				  forwards={forwards}
-				  exchanges={exchanges}
-				  mirrors={mirrors}
-				  previews={previews}
-				  sshEndpoints={sshEndpoints}
-				  execTask={execTask}
-				  fileTasks={fileTasks}
-				  busy={Boolean(busy)}
-				  onStopPortForward={(id) => void stopPortForward(id)}
-				  onStopExchange={(id) => void stopExchange(id)}
-				  onStopMirror={(id) => void stopMirror(id)}
-				  onStopPreview={(id) => void stopPreview(id)}
-				  onOpenSSH={(id) => void openPodSSH(id)}
-				  onStopSSH={(id) => void stopPodSSH(id)}
-				  onStopExec={(id) => {
-					if (!profile) return;
-					void backend.stopServerExec(profile.id, id).then(() => setExecTask(undefined)).catch((reason: unknown) => setError(messageOf(reason)));
-				  }}
-				  onCancelFile={(id) => {
-					if (!profile) return;
-					void backend.cancelServerFileTransfer(profile.id, id).catch((reason: unknown) => setError(messageOf(reason)));
-				  }}
-				  onResumeFile={(id) => {
-					if (!profile) return;
-					void backend.resumeServerFileTransfer(profile.id, id)
-					  .then((task) => setFileTasks((current) => [task, ...current.filter((item) => item.id !== task.id)]))
-					  .catch((reason: unknown) => setError(messageOf(reason)));
-				  }}
-				  onClearFileHistory={() => {
-					if (!profile) return;
-					void backend.clearServerFileTransferHistory(profile.id)
-					  .then(() => setFileTasks((current) => current.filter((task) => isActiveFileTask(task.status))))
-					  .catch((reason: unknown) => setError(messageOf(reason)));
-				  }}
-				/>
 
 				{inventory.dataPlane?.state === "connected" && inventory.capabilities.includes("ports.forward") ? (
 				  <div className="space-y-3 rounded-md border bg-muted/20 p-4">
@@ -1385,9 +1505,7 @@ export function ServerAccessView({ profiles, migration }: { profiles: ServerProf
 					onTasksChange={setFileTasks}
                   />
                 ) : null}
-				</> : null}
-
-				{workspaceView === "environment" ? inventory.namespaces.length === 0 ? (
+				{inventory.namespaces.length === 0 ? (
                   <p className="rounded-md border bg-muted/30 p-4 text-sm text-muted-foreground">
                     No namespaces are available under the current Gateway Policy.
                   </p>
@@ -1433,7 +1551,7 @@ export function ServerAccessView({ profiles, migration }: { profiles: ServerProf
                       ))}
                     </InventoryPanel>
                   </div>
-				) : null}
+				)}
               </div>
             ) : null}
 
@@ -1450,7 +1568,7 @@ export function ServerAccessView({ profiles, migration }: { profiles: ServerProf
                 {busy === "delete" ? <Spinner data-icon="inline-start" /> : <Trash2 size={14} />}
                 Remove server
               </Button>
-              {auth.authenticated ? (
+              {authenticated ? (
                 <div className="flex items-center gap-2">
                   <Button type="button" variant="ghost" size="sm" disabled={Boolean(busy)} onClick={() => void refreshLogin()}>
                     {busy === "refresh-login" ? <Spinner data-icon="inline-start" /> : <RefreshCw size={14} />}
@@ -1468,165 +1586,6 @@ export function ServerAccessView({ profiles, migration }: { profiles: ServerProf
       </div>
     </main>
   );
-}
-
-function TaskCount({ value }: { value: number }) {
-  return value > 0 ? (
-    <span className="ml-1 rounded-full bg-background/80 px-2 py-0.5 text-[11px] text-foreground">{value}</span>
-  ) : null;
-}
-
-function TaskCenter({
-  forwards,
-  exchanges,
-  mirrors,
-  previews,
-  sshEndpoints,
-  execTask,
-  fileTasks,
-  busy,
-  onStopPortForward,
-  onStopExchange,
-  onStopMirror,
-  onStopPreview,
-  onOpenSSH,
-  onStopSSH,
-  onStopExec,
-  onCancelFile,
-  onResumeFile,
-  onClearFileHistory,
-}: {
-  forwards: ServerPortForwardInfo[];
-  exchanges: ServerExchangeInfo[];
-  mirrors: ServerMirrorInfo[];
-  previews: ServerPreviewInfo[];
-  sshEndpoints: ServerPodSSHInfo[];
-  execTask?: ServerExecTask;
-  fileTasks: ServerFileTransferTask[];
-  busy: boolean;
-  onStopPortForward(id: string): void;
-  onStopExchange(id: string): void;
-  onStopMirror(id: string): void;
-  onStopPreview(id: string): void;
-  onOpenSSH(id: string): void;
-  onStopSSH(id: string): void;
-  onStopExec(id: string): void;
-  onCancelFile(id: string): void;
-  onResumeFile(id: string): void;
-  onClearFileHistory(): void;
-}) {
-  const rows: Array<{
-    key: string;
-    kind: string;
-    target: string;
-    detail: string;
-    state: string;
-    primary?: { label: string; run(): void };
-    stop?: () => void;
-  }> = [
-    ...forwards.map((item) => ({
-      key: `forward:${item.id}`,
-      kind: "Port Forward",
-      target: `${item.namespace} · ${item.kind}/${item.name}`,
-      detail: `${item.address} → ${item.remotePort}/${item.protocol}`,
-      state: item.state,
-      stop: () => onStopPortForward(item.id),
-    })),
-    ...exchanges.map((item) => ({
-      key: `exchange:${item.id}`,
-      kind: "Exchange",
-      target: `${item.namespace} · service/${item.service}`,
-      detail: item.targets.map((target) => `${target.servicePort}/${target.protocol} → ${target.localHost}:${target.localPort}`).join(", "),
-      state: item.state,
-      stop: () => onStopExchange(item.id),
-    })),
-    ...mirrors.map((item) => ({
-      key: `mirror:${item.id}`,
-      kind: "Mirror",
-      target: `${item.namespace} · service/${item.service}`,
-      detail: item.targets.map((target) => `${target.servicePort}/${target.protocol} ⇢ ${target.localHost}:${target.localPort}`).join(", "),
-      state: item.state,
-      stop: () => onStopMirror(item.id),
-    })),
-    ...previews.map((item) => ({
-      key: `preview:${item.id}`,
-      kind: "Preview",
-      target: `${item.namespace} · service/${item.name}`,
-      detail: item.targets.map((target) => `${target.servicePort}/${target.protocol} → ${target.localHost}:${target.localPort}`).join(", "),
-      state: item.state,
-      stop: () => onStopPreview(item.id),
-    })),
-    ...sshEndpoints.map((item) => ({
-      key: `ssh:${item.id}`,
-      kind: "Pod SSH",
-      target: `${item.namespace} · pod/${item.pod}`,
-      detail: item.command,
-      state: item.state,
-      primary: { label: "Open", run: () => onOpenSSH(item.id) },
-      stop: () => onStopSSH(item.id),
-    })),
-    ...(execTask ? [{
-      key: `exec:${execTask.id}`,
-      kind: "Pod Exec",
-      target: `${execTask.namespace} · pod/${execTask.pod}`,
-      detail: execTask.container || "default container",
-      state: execTask.state,
-      stop: () => onStopExec(execTask.id),
-    }] : []),
-    ...fileTasks.map((item) => ({
-      key: `file:${item.id}`,
-      kind: item.direction === "upload" ? "File Upload" : "File Download",
-      target: `${item.namespace} · pod/${item.pod}`,
-      detail: `${item.localPath} ↔ ${item.remotePath}`,
-      state: item.status,
-      primary: item.status === "interrupted" || item.status === "failed"
-        ? { label: "Resume", run: () => onResumeFile(item.id) }
-        : undefined,
-      stop: isActiveFileTask(item.status) ? () => onCancelFile(item.id) : undefined,
-    })),
-  ];
-
-  return (
-    <section aria-labelledby="task-center-title" className="space-y-3 rounded-md border bg-card p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <div id="task-center-title" className="flex items-center gap-2 font-medium"><ListTodo size={16} />Task center</div>
-          <div className="mt-1 text-xs text-muted-foreground">Session-bound operations for this Server and Environment are tracked in one place.</div>
-        </div>
-        <div className="flex items-center gap-2">
-          {fileTasks.some((task) => !isActiveFileTask(task.status)) ? (
-            <Button type="button" variant="ghost" size="sm" disabled={busy} onClick={onClearFileHistory}>Clear file history</Button>
-          ) : null}
-          <Badge variant="outline">{rows.length} total</Badge>
-        </div>
-      </div>
-      {rows.length === 0 ? (
-        <p className="rounded-md border border-dashed py-7 text-center text-sm text-muted-foreground">No tasks in this Session.</p>
-      ) : (
-        <div className="divide-y rounded-md border bg-background px-3">
-          {rows.map((row) => (
-            <div key={row.key} className="flex flex-col gap-2 py-3 text-sm sm:flex-row sm:items-center sm:justify-between">
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="font-medium">{row.kind}</span>
-                  <Badge variant="outline">{row.state}</Badge>
-                </div>
-                <div className="mt-1 truncate text-xs text-muted-foreground">{row.target} · {row.detail}</div>
-              </div>
-              <div className="flex shrink-0 gap-2">
-                {row.primary ? <Button type="button" size="sm" disabled={busy} onClick={row.primary.run}>{row.primary.label}</Button> : null}
-                {row.stop ? <Button type="button" size="sm" variant="outline" disabled={busy} onClick={row.stop}>Stop</Button> : null}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </section>
-  );
-}
-
-function isActiveFileTask(status: ServerFileTransferTask["status"]): boolean {
-  return status === "queued" || status === "preparing" || status === "running";
 }
 
 function normalizeProfileState(state: ServerProfileState): ServerProfileState {
@@ -1673,11 +1632,6 @@ function dataPlaneRetryLabel(reason: DataPlaneStatusEvent["reason"]): string {
   if (reason === "session_expired") return "Start new session";
   if (reason === "session_changed") return "Reload session";
   return "Retry connection";
-}
-
-function withHTTPS(value: string) {
-  const trimmed = value.trim();
-  return /^[a-z][a-z\d+.-]*:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
 }
 
 function messageOf(reason: unknown) {

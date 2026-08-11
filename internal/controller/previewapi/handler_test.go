@@ -110,6 +110,13 @@ func TestPreviewTaskIsOwnedIdempotentAndDurablyStopped(t *testing.T) {
 		document.State != "pending" || len(document.Ports) != 2 || document.Ports[0].Name != "udp-53" {
 		t.Fatalf("created Preview document=%#v err=%v", document, err)
 	}
+	if bytes.Contains(created.Body.Bytes(), []byte(`"expiresAt"`)) {
+		t.Fatalf("Preview response contains an expiration: %s", created.Body.String())
+	}
+	stored, err := stateStore.Tasks().GetByID(context.Background(), document.ID)
+	if err != nil || stored.ExpiresAt != nil {
+		t.Fatalf("stored Preview expiration=%v err=%v", stored.ExpiresAt, err)
+	}
 	replayed, apiError := previewRequest(handler, principal, http.MethodPost, path, body, "preview-1")
 	if apiError != nil || replayed.Code != http.StatusOK || replayed.Header().Get("Idempotent-Replayed") != "true" {
 		t.Fatalf("replayed Preview: status=%d error=%#v", replayed.Code, apiError)
@@ -132,7 +139,7 @@ func TestPreviewTaskIsOwnedIdempotentAndDurablyStopped(t *testing.T) {
 	if apiError != nil || stopped.Code != http.StatusOK {
 		t.Fatalf("stop pending Preview: status=%d error=%#v", stopped.Code, apiError)
 	}
-	stored, err := stateStore.Tasks().GetByID(context.Background(), document.ID)
+	stored, err = stateStore.Tasks().GetByID(context.Background(), document.ID)
 	if err != nil || stored.State != "stopped" {
 		t.Fatalf("stored Preview=%#v err=%v", stored, err)
 	}

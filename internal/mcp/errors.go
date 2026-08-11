@@ -7,8 +7,8 @@ import (
 	"net"
 	"strings"
 
-	"github.com/fengqi-dev/kube-loop/internal/clientv2/credentials"
-	clientremote "github.com/fengqi-dev/kube-loop/internal/clientv2/remote"
+	"github.com/fengqi-dev/kube-loop/internal/client/credentials"
+	clientremote "github.com/fengqi-dev/kube-loop/internal/client/remote"
 )
 
 type ErrorCode string

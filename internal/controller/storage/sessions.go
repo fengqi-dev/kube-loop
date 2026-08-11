@@ -260,7 +260,7 @@ func normalizeSession(session *Session) error {
 	if len(session.NetworkSpec) == 0 && session.NetworkSpecHash == "" {
 		// Schema migrations expire legacy Sessions without a NetworkSpec. Keeping
 		// them readable allows a clean lifecycle response, but they cannot issue a
-		// RelayTicket or be created through the V2 API.
+		// RelayTicket or be created through the API.
 	} else {
 		spec, err := networkspec.Decode(session.NetworkSpec)
 		if err != nil {

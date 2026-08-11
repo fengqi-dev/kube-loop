@@ -774,7 +774,7 @@ function ConnectionModePanel({
   onConnectionModeChange(mode: ConnectionMode): void;
 }) {
   const { t } = useI18n();
-  const address = `127.0.0.1:${socksPort || 7890}`;
+  const address = `127.0.0.1:${socksPort || 1080}`;
   const [helper, setHelper] = useState<HelperStatus | null>(null);
   const [helperAction, setHelperAction] = useState<
     "install" | "uninstall" | null

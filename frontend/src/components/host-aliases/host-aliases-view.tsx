@@ -23,10 +23,12 @@ function newDraft(domain = "", ip = ""): DraftAlias {
 }
 
 export function HostAliasesView({
-  contextName,
+  profileId,
+  profileName,
   ready,
 }: {
-  contextName: string;
+  profileId: string;
+  profileName?: string;
   ready: boolean;
 }) {
   const { t } = useI18n();
@@ -37,17 +39,17 @@ export function HostAliasesView({
 
   useEffect(() => {
     const generation = ++contextGeneration.current;
-    if (!contextName) {
+    if (!profileId) {
       setRows([]);
       return;
     }
     let active = true;
     setLoading(true);
     backend
-      .getHostAliases(contextName)
-      .then((items) => {
+      .getServerNetworkSettings(profileId)
+      .then((settings) => {
         if (!active || generation !== contextGeneration.current) return;
-        setRows((items ?? []).map((item) => newDraft(item.domain, item.ip)));
+        setRows((settings.hostAliases ?? []).map((item) => newDraft(item.domain, item.ip)));
       })
       .catch((error) => {
         if (!active || generation !== contextGeneration.current) return;
@@ -62,11 +64,11 @@ export function HostAliasesView({
     return () => {
       active = false;
     };
-  }, [contextName, t]);
+  }, [profileId, t]);
 
   async function persist(next: DraftAlias[], cleared: boolean): Promise<boolean> {
-    if (!contextName) return false;
-    const targetContext = contextName;
+    if (!profileId) return false;
+    const targetProfile = profileId;
     const generation = contextGeneration.current;
     const payload = next
       .map((row) => ({ domain: row.domain.trim(), ip: row.ip.trim() }))
@@ -79,7 +81,7 @@ export function HostAliasesView({
     }
     setSaving(true);
     try {
-      await backend.setHostAliases(targetContext, payload);
+      await backend.setServerHostAliases(targetProfile, payload);
       if (generation !== contextGeneration.current) return true;
       setRows(payload.map((item) => newDraft(item.domain, item.ip)));
       if (cleared || payload.length === 0) {
@@ -121,7 +123,7 @@ export function HostAliasesView({
             type="button"
             variant="outline"
             size="sm"
-            disabled={!contextName || saving || rows.length === 0}
+            disabled={!profileId || saving || rows.length === 0}
             onClick={() => void clearAll()}
           >
             {t("hosts.clearAll")}
@@ -130,7 +132,7 @@ export function HostAliasesView({
             type="button"
             variant="outline"
             size="sm"
-            disabled={!contextName || saving}
+            disabled={!profileId || saving}
             onClick={() => setRows((current) => [...current, newDraft()])}
           >
             <Plus size={14} />
@@ -139,7 +141,7 @@ export function HostAliasesView({
           <Button
             type="button"
             size="sm"
-            disabled={!contextName || saving || loading}
+            disabled={!profileId || saving || loading}
             onClick={() => void persist(rows, rows.length === 0)}
           >
             {t("hosts.save")}
@@ -147,12 +149,12 @@ export function HostAliasesView({
         </div>
       }
     >
-      {!contextName ? (
+      {!profileId ? (
         <p className="text-[13px] text-muted-foreground">{t("hosts.needContext")}</p>
       ) : (
         <div className="space-y-3">
           <p className="text-[12px] text-muted-foreground">
-            {t("hosts.contextHint").replace("{name}", contextName)}
+            {t("hosts.contextHint").replace("{name}", profileName || profileId)}
             {ready ? ` ${t("hosts.reconnectHint")}` : ""}
           </p>
           <div className="overflow-hidden rounded-lg border border-border">

@@ -98,6 +98,11 @@ export interface HostAlias {
   ip: string;
 }
 
+export interface ServerNetworkSettings {
+  dnsNamespace?: string;
+  hostAliases?: HostAlias[];
+}
+
 export interface Connection {
   id: string;
   network: string;
@@ -210,6 +215,7 @@ export interface ServerDiscovery {
 }
 
 export interface SaveServerProfileRequest {
+  id?: string;
   baseUrl: string;
   displayName?: string;
   activate: boolean;
@@ -222,6 +228,7 @@ export interface ServerProfileResult {
 
 export interface AuthSession {
   authenticated: boolean;
+  userName?: string;
   accessExpiresAt?: string;
   refreshExpiresAt?: string;
 }
@@ -239,6 +246,13 @@ export interface RemotePod {
   nodeName?: string;
   ready: boolean;
   containers: string[];
+  ports: RemotePodPort[];
+}
+
+export interface RemotePodPort {
+  name?: string;
+  port: number;
+  protocol: string;
 }
 
 export interface RemoteServicePort {
@@ -487,6 +501,15 @@ export interface ServerPodFileEntry {
   modifiedAt: string;
 }
 
+export interface ServerLocalFileEntry {
+  name: string;
+  path: string;
+  kind: "file" | "directory" | "symlink" | "other";
+  size: number;
+  mode: number;
+  modifiedAt: string;
+}
+
 export interface ServerPodFileList {
   sessionId: string;
   namespace: string;
@@ -550,16 +573,7 @@ export interface ServerInventoryEvent {
 export interface BootstrapData {
   update: UpdateInfo;
   platform: string;
-  mode: "setup" | "v2";
   serverProfiles: ServerProfileState;
-  migration: V1MigrationStatus;
-}
-
-export interface V1MigrationStatus {
-  legacyDetected: boolean;
-  backupPath?: string;
-  completedAt?: string;
-  error?: string;
 }
 
 export interface HelperStatus {

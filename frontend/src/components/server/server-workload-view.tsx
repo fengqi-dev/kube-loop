@@ -1,0 +1,341 @@
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Circle, Network, Square } from "lucide-react";
+import { backend } from "@/backend";
+import { ActionIconButton, portForwardIcon, sftpIcon, sshIcon } from "@/components/network/action-icons";
+import { ALL_NAMESPACES, ResourceToolbar } from "@/components/network/resource-toolbar";
+import { SFTPFileManagerDialog } from "@/components/sftp/sftp-file-manager-dialog";
+import { CopyableText } from "@/components/shared/copyable-text";
+import { EmptyState } from "@/components/shared/empty-state";
+import { PageShell } from "@/components/shared/page-shell";
+import { ResourcePagination, RESOURCE_PAGE_SIZE } from "@/components/shared/resource-pagination";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Spinner } from "@/components/ui/spinner";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { useI18n } from "@/i18n";
+import { cn } from "@/lib/utils";
+import type { RemoteInventory, RemotePod, ServerInventoryEvent, ServerPodSSHInfo, ServerPortForwardInfo } from "@/types";
+
+export function ServerWorkloadView({ profileId }: { profileId: string }) {
+  const { t } = useI18n();
+  const [inventory, setInventory] = useState<RemoteInventory>();
+  const [namespace, setNamespace] = useState("");
+  const [query, setQuery] = useState("");
+  const [page, setPage] = useState(1);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [selected, setSelected] = useState<RemotePod | null>(null);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [sftpOpen, setSFTPOpen] = useState(false);
+  const [remotePort, setRemotePort] = useState("");
+  const [protocol, setProtocol] = useState<"tcp" | "udp">("tcp");
+  const [localPort, setLocalPort] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [sshEndpoints, setSSHEndpoints] = useState<ServerPodSSHInfo[]>([]);
+  const [forwards, setForwards] = useState<ServerPortForwardInfo[]>([]);
+
+  const reload = useCallback(async (nextNamespace = namespace) => {
+    if (!profileId) {
+      setInventory(undefined);
+      return;
+    }
+    setLoading(true);
+    try {
+      const [next, endpoints, activeForwards] = await Promise.all([
+        backend.loadServerInventory(profileId, nextNamespace === ALL_NAMESPACES ? "" : nextNamespace),
+        backend.listServerPodSSH(profileId),
+        backend.listServerPortForwards(profileId),
+      ]);
+      setInventory({ ...next, pods: (next.pods ?? []).map((pod) => ({ ...pod, ports: pod.ports ?? [] })) });
+      setNamespace(next.namespace ?? "");
+      setSSHEndpoints(endpoints);
+      setForwards(activeForwards.filter((item) => item.kind === "pod"));
+      setError("");
+    } catch (reason) {
+      setError(messageOf(reason));
+    } finally {
+      setLoading(false);
+    }
+  }, [namespace, profileId]);
+
+  useEffect(() => {
+    void reload("");
+    // Reload only when the selected Server changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profileId]);
+
+  useEffect(() => {
+    const unsubscribe = window.runtime?.EventsOn("server-inventory:snapshot", (value: unknown) => {
+      const event = value as ServerInventoryEvent;
+      if (event.profileId !== profileId || event.resource !== "pods" || !event.snapshot?.pods) return;
+      setInventory((current) => current && current.namespace === event.namespace
+        ? { ...current, pods: event.snapshot!.pods!.map((pod) => ({ ...pod, ports: pod.ports ?? [] })) }
+        : current);
+    });
+    return () => unsubscribe?.();
+  }, [profileId]);
+
+  const namespaces = useMemo(() => (inventory?.namespaces ?? []).map((item) => item.name), [inventory?.namespaces]);
+  const filtered = useMemo(() => {
+    const normalized = query.trim().toLocaleLowerCase();
+    return (inventory?.pods ?? []).filter((pod) => !normalized || [
+      pod.name, pod.namespace, pod.podIp, pod.nodeName,
+    ].some((value) => value?.toLocaleLowerCase().includes(normalized)));
+  }, [inventory?.pods, query]);
+  const pageCount = Math.max(1, Math.ceil(filtered.length / RESOURCE_PAGE_SIZE));
+  const visiblePods = filtered.slice((page - 1) * RESOURCE_PAGE_SIZE, page * RESOURCE_PAGE_SIZE);
+
+  useEffect(() => setPage(1), [namespace, profileId, query]);
+  useEffect(() => setPage((current) => Math.min(current, pageCount)), [pageCount]);
+
+  async function startForward() {
+    if (!selected || !profileId || busy) return;
+    const remote = Number(remotePort);
+    const local = localPort.trim() ? Number(localPort) : 0;
+    if (!Number.isInteger(remote) || remote < 1 || remote > 65535 || !Number.isInteger(local) || local < 0 || local > 65535) {
+      setError("Enter valid remote and local ports.");
+      return;
+    }
+    setBusy(true);
+    try {
+      await backend.startServerPortForward({ profileId, kind: "pod", name: selected.name, protocol, remotePort: remote, localPort: local });
+      setDialogOpen(false);
+      setSelected(null);
+      setRemotePort("");
+      setLocalPort("");
+      await reload(namespace);
+    } catch (reason) {
+      setError(messageOf(reason));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function openSSH(pod: RemotePod, container: string) {
+    if (!profileId || busy) return;
+    setBusy(true);
+    try {
+      let endpoint = sshEndpoints.find((item) => item.pod === pod.name && item.container === container);
+      if (!endpoint) endpoint = await backend.startServerPodSSH({ profileId, pod: pod.name, container });
+      setSSHEndpoints((current) => [...current.filter((item) => item.id !== endpoint!.id), endpoint!]);
+      await backend.openServerPodSSH(profileId, endpoint.id);
+    } catch (reason) {
+      setError(messageOf(reason));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function stopForward(id: string) {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await backend.stopServerPortForward(profileId, id);
+      await reload(namespace);
+    } catch (reason) {
+      setError(messageOf(reason));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function stopSSH(id: string) {
+    if (busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      await backend.stopServerPodSSH(profileId, id);
+      setSSHEndpoints((current) => current.filter((item) => item.id !== id));
+    } catch (reason) {
+      setError(messageOf(reason));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function openSSHEndpoint(id: string) {
+    if (busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      await backend.openServerPodSSH(profileId, id);
+    } catch (reason) {
+      setError(messageOf(reason));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const ready = inventory?.dataPlane?.state === "connected";
+  const canForward = inventory?.capabilities.includes("ports.forward") ?? false;
+  const canExec = inventory?.capabilities.includes("pods.exec") ?? false;
+  const canFiles = inventory?.capabilities.includes("pods.files") ?? false;
+  const canManageFiles = inventory?.capabilities.includes("pods.files.manage") ?? false;
+
+  return (
+    <PageShell title={t("workload.title")} description={t("workload.description")}>
+      <ResourceToolbar
+        namespaces={namespaces}
+        namespace={namespace}
+        onNamespaceChange={(value) => { setNamespace(value); void reload(value); }}
+        query={query}
+        onQueryChange={setQuery}
+        searchPlaceholder={t("workload.search")}
+        count={filtered.length}
+        loading={loading}
+        disabled={!profileId}
+        onRefresh={() => void reload(namespace)}
+        allowAllNamespaces={false}
+      />
+
+      {!profileId ? (
+        <EmptyState icon={Network} title={t("network.waitingTitle")} detail={t("network.selectContext")} />
+      ) : (
+        <div className="overflow-hidden rounded-lg border bg-card">
+          <Table>
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
+                <TableHead className="h-9 w-40 min-w-40 max-w-40 text-[11px] font-medium text-muted-foreground">{t("network.colName")}</TableHead>
+                <TableHead className="h-9 text-[11px] font-medium text-muted-foreground">{t("network.colNamespace")}</TableHead>
+                <TableHead className="h-9 text-[11px] font-medium text-muted-foreground">{t("network.colIP")}</TableHead>
+                <TableHead className="h-9 text-[11px] font-medium text-muted-foreground">{t("network.colStatus")}</TableHead>
+                <TableHead className="h-9 text-[11px] font-medium text-muted-foreground">{t("network.colNode")}</TableHead>
+                <TableHead className="h-9 text-[11px] font-medium text-muted-foreground">{t("network.colPorts")}</TableHead>
+                <TableHead className="h-9 text-[11px] font-medium text-muted-foreground">{t("network.actions")}</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {loading ? (
+                <TableRow className="hover:bg-transparent">
+                  <TableCell colSpan={7} className="h-32 text-center text-[12px] text-muted-foreground">
+                    <Spinner className="mx-auto" />
+                  </TableCell>
+                </TableRow>
+              ) : visiblePods.length === 0 ? (
+                <TableRow className="hover:bg-transparent">
+                  <TableCell colSpan={7} className="h-32 text-center text-[12px] text-muted-foreground">
+                    {error || t("workload.empty")}
+                  </TableCell>
+                </TableRow>
+              ) : (
+                visiblePods.map((pod) => (
+                  <TableRow key={`${pod.namespace}/${pod.name}`}>
+                    <TableCell className="w-40 min-w-40 max-w-40 font-medium"><span className="block truncate" title={pod.name}>{pod.name}</span></TableCell>
+                    <TableCell className="text-primary">{pod.namespace}</TableCell>
+                    <TableCell className="font-mono text-[12px]"><CopyableText value={pod.podIp} /></TableCell>
+                    <TableCell><StatusPill ok={pod.ready} label={pod.ready ? t("network.ready") : pod.phase || t("network.notReady")} /></TableCell>
+                    <TableCell className="text-muted-foreground">{pod.nodeName || "—"}</TableCell>
+                    <TableCell className="font-mono text-[12px] text-muted-foreground">
+                      {(pod.ports ?? []).length > 0 ? (
+                        <div className="flex flex-col items-start gap-0.5">
+                          {(pod.ports ?? []).map((port) => (
+                            <CopyableText
+                              key={`${port.protocol}-${port.port}-${port.name || ""}`}
+                              value={pod.podIp ? `${pod.podIp}:${port.port}` : null}
+                              label={`${port.protocol}/${port.port}`}
+                              titleKey="network.copyAddress"
+                              successKey="network.addressCopied"
+                              failKey="network.addressCopyFailed"
+                              empty={`${port.protocol}/${port.port}`}
+                            />
+                          ))}
+                        </div>
+                      ) : "—"}
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-1">
+                        <ActionIconButton label={t("network.tabPortForward")} icon={portForwardIcon} disabled={!ready || !canForward} onClick={() => { const port = pod.ports?.[0]; setSelected(pod); setRemotePort(port ? String(port.port) : ""); setProtocol(port?.protocol.toLowerCase() === "udp" ? "udp" : "tcp"); setDialogOpen(true); }} />
+                        <ActionIconButton label={t("sftp.openManager")} icon={sftpIcon} disabled={!ready || (!canFiles && !canManageFiles)} onClick={() => { setSelected(pod); setSFTPOpen(true); }} />
+                        {pod.containers.map((container) => (
+                          <ActionIconButton key={container} label={`${t("workload.openSSH")} · ${container}`} icon={sshIcon} text={pod.containers.length > 1 ? container : undefined} disabled={!ready || !pod.ready || !canExec || busy} onClick={() => void openSSH(pod, container)} />
+                        ))}
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+          <ResourcePagination page={page} total={filtered.length} showWhenEmpty onPageChange={setPage} />
+        </div>
+      )}
+
+      {profileId ? <div className="overflow-hidden rounded-lg border bg-card">
+        <div className="border-b px-4 py-3 font-medium">Active operations</div>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Type</TableHead>
+              <TableHead>Target</TableHead>
+              <TableHead>Address / Target</TableHead>
+              <TableHead>State</TableHead>
+              <TableHead />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {forwards.map((item) => (
+              <TableRow key={item.id}>
+                <TableCell><Badge variant="outline">Port Forward</Badge></TableCell>
+                <TableCell>{`pod/${item.name}:${item.remotePort}`}</TableCell>
+                <TableCell className="font-mono text-xs">{item.address || "—"}</TableCell>
+                <TableCell>{item.state}</TableCell>
+                <TableCell>
+                  <div className="flex justify-end gap-1">
+                    <Button type="button" size="xs" variant="outline" disabled={busy} onClick={() => void backend.testServerPortForward(profileId, item.id).catch((reason: unknown) => setError(messageOf(reason)))}>Test</Button>
+                    <Button type="button" size="xs" variant="outline" disabled={busy} onClick={() => void stopForward(item.id)}><Square size={11} />Stop</Button>
+                  </div>
+                </TableCell>
+              </TableRow>
+            ))}
+            {sshEndpoints.map((item) => (
+              <TableRow key={item.id}>
+                <TableCell><Badge variant="outline">SSH</Badge></TableCell>
+                <TableCell>{`pod/${item.pod}${item.container ? ` · ${item.container}` : ""}`}</TableCell>
+                <TableCell className="font-mono text-xs">{item.address || item.podIp || "—"}</TableCell>
+                <TableCell>{item.state}</TableCell>
+                <TableCell>
+                  <div className="flex justify-end gap-1">
+                    <Button type="button" size="xs" variant="outline" disabled={busy} onClick={() => void openSSHEndpoint(item.id)}>Open</Button>
+                    <Button type="button" size="xs" variant="outline" disabled={busy} onClick={() => void stopSSH(item.id)}><Square size={11} />Stop</Button>
+                  </div>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+        {forwards.length + sshEndpoints.length === 0 ? <div className="p-8 text-center text-sm text-muted-foreground">No active operations.</div> : null}
+      </div> : null}
+
+      <SFTPFileManagerDialog
+        open={sftpOpen}
+        onOpenChange={(open) => { setSFTPOpen(open); if (!open) setSelected(null); }}
+        profileId={profileId}
+        pod={selected}
+      />
+
+      {error && filtered.length > 0 ? <p role="alert" className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">{error}</p> : null}
+
+      <Dialog open={dialogOpen} onOpenChange={(open) => { if (!busy) setDialogOpen(open); }}>
+        <DialogContent showCloseButton={!busy}>
+          <DialogHeader><DialogTitle>{t("portfwd.title")}</DialogTitle><DialogDescription>{selected ? `pod/${selected.namespace}/${selected.name}` : t("portfwd.description")}</DialogDescription></DialogHeader>
+          <div className="grid gap-3">
+            {selected?.ports?.length ? (
+              <select className="h-9 rounded-md border border-input bg-background px-3 text-sm" value={`${protocol}:${remotePort}`} onChange={(event) => { const [nextProtocol, nextPort] = event.target.value.split(":"); setProtocol(nextProtocol === "udp" ? "udp" : "tcp"); setRemotePort(nextPort ?? ""); }}>
+                {selected.ports.map((port) => <option key={`${port.protocol}-${port.port}-${port.name || ""}`} value={`${port.protocol.toLowerCase()}:${port.port}`}>{port.protocol}/{port.port}{port.name ? ` (${port.name})` : ""}</option>)}
+              </select>
+            ) : <Input value={remotePort} onChange={(event) => setRemotePort(event.target.value)} placeholder={t("portfwd.remotePort")} inputMode="numeric" />}
+            <Input value={localPort} onChange={(event) => setLocalPort(event.target.value)} placeholder={t("portfwd.localPortAuto")} inputMode="numeric" />
+          </div>
+          <DialogFooter><Button type="button" variant="outline" disabled={busy} onClick={() => setDialogOpen(false)}>{t("actions.cancel")}</Button><Button type="button" disabled={!selected || !remotePort || busy} onClick={() => void startForward()}>{busy ? <Spinner data-icon="inline-start" /> : null}{t("portfwd.start")}</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </PageShell>
+  );
+}
+
+function StatusPill({ ok, label }: { ok: boolean; label: string }) {
+  return <span className={cn("inline-flex items-center gap-1.5 text-[12px]", ok ? "text-success" : "text-muted-foreground")}><Circle size={8} className={ok ? "fill-success text-success" : "fill-muted-foreground/50 text-muted-foreground/50"} />{label}</span>;
+}
+function messageOf(reason: unknown) { return reason instanceof Error ? reason.message : String(reason); }

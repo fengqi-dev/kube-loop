@@ -6,10 +6,10 @@ import (
 	"testing"
 
 	"github.com/coder/websocket"
-	clientdataplane "github.com/fengqi-dev/kube-loop/internal/clientv2/dataplane"
-	clientexec "github.com/fengqi-dev/kube-loop/internal/clientv2/exec"
-	clientprofile "github.com/fengqi-dev/kube-loop/internal/clientv2/profile"
-	clientremote "github.com/fengqi-dev/kube-loop/internal/clientv2/remote"
+	clientdataplane "github.com/fengqi-dev/kube-loop/internal/client/dataplane"
+	clientexec "github.com/fengqi-dev/kube-loop/internal/client/exec"
+	clientprofile "github.com/fengqi-dev/kube-loop/internal/client/profile"
+	clientremote "github.com/fengqi-dev/kube-loop/internal/client/remote"
 )
 
 type fakeProfiles struct{ state clientprofile.State }

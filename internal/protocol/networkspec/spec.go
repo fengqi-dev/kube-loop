@@ -19,7 +19,7 @@ const (
 	MaximumJSONSize = 256 << 10
 )
 
-// Spec is the minimal, immutable cluster-network snapshot consumed by a V2
+// Spec is the minimal, immutable cluster-network snapshot consumed by a
 // desktop Session and enforced by RelayTicket/Data Plane target validation.
 type Spec struct {
 	Version        int      `json:"version"`

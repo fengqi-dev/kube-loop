@@ -87,11 +87,15 @@ func stageWindowsResources(root string) error {
 	if err := os.MkdirAll(resourcesDir, 0o755); err != nil {
 		return fmt.Errorf("create package resources directory: %w", err)
 	}
-	for _, name := range []string{
-		"kubeloop-helper.exe",
+	for _, obsolete := range []string{
 		"kubeloop-helper-install.exe",
 		"kubeloop-helper-uninstall.exe",
 	} {
+		if err := os.Remove(filepath.Join(resourcesDir, obsolete)); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("remove obsolete %s: %w", obsolete, err)
+		}
+	}
+	for _, name := range []string{"kubeloop-helper.exe"} {
 		src := filepath.Join(embeddedDir, name)
 		dst := filepath.Join(resourcesDir, name)
 		if err := copyFile(src, dst); err != nil {

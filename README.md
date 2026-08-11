@@ -202,14 +202,14 @@ Streamable HTTP.
 
 MCP is disabled by default, binds only to `127.0.0.1`, and enables a generated
 Bearer token by default. The token is stored in the operating-system credential
-vault; `mcp-v2.json` contains only non-secret settings.
+vault; `mcp.json` contains only non-secret settings.
 
-Every cluster operation uses the typed V2 Gateway SDK and the access token of
+Every cluster operation uses the typed Gateway SDK and the access token of
 the currently active Server Profile. MCP cannot select another saved Profile,
 cannot bypass Gateway policy or Kubernetes authorization, and does not load a
 local kubeconfig. Mutations require the exact `profileId`, `sessionId`, and
-`namespace` returned by the active Session. The V1 tools that changed local
-network overrides or installed the privileged Helper are not exposed in V2.
+`namespace` returned by the active Session. Local kubeconfig-driven cluster
+operations are not exposed.
 
 | Tool | Operations |
 | --- | --- |
@@ -262,9 +262,10 @@ npm ci --prefix frontend
 wails dev
 ```
 
-`wails dev` builds the frontend and platform Helper, then prepares a local
-Gateway image for Docker Desktop Kubernetes, Minikube, kind, or k3d. Set
-`KUBELOOP_GATEWAY_IMAGE` only when you need to override that image.
+`wails dev` builds the frontend, platform Helper, and patched sing-box; builds
+and loads local Controller, Gateway, and Operator images for Docker Desktop
+Kubernetes, Minikube, kind, or k3d; deploys the Helm chart to the active local
+cluster; and waits for all three workloads before starting the frontend watcher.
 
 ### Tests
 

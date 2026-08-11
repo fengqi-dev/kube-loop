@@ -9,128 +9,16 @@ import (
 	"net"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"runtime"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 
-	"github.com/fengqi-dev/kube-loop/internal/cluster"
 	"github.com/fengqi-dev/kube-loop/internal/helper"
-	"github.com/fengqi-dev/kube-loop/internal/session"
-	"github.com/fengqi-dev/kube-loop/internal/store"
 )
-
-// Helper enforces a single privileged TUN session; serialize Connect across tests.
-var tunMu sync.Mutex
-
-type LiveSession struct {
-	Manager  *session.Manager
-	Store    *store.Store
-	Provider *cluster.Provider
-	Client   kubernetes.Interface
-	State    session.State
-}
-
-func ConnectSession(
-	t *testing.T,
-	ctx context.Context,
-	req session.Request,
-	setup func(*session.Manager),
-) *LiveSession {
-	t.Helper()
-	tunMu.Lock()
-	locked := true
-	unlock := func() {
-		if locked {
-			locked = false
-			tunMu.Unlock()
-		}
-	}
-
-	// Clear any leftover privileged session before Connect.
-	StopAllHelperSessions()
-	// Give Linux nftables/auto_redirect a moment to drop the previous TUN path.
-	if runtime.GOOS == "linux" {
-		time.Sleep(500 * time.Millisecond)
-	}
-
-	provider := NewProvider(t)
-	stateStore, err := store.Open(filepath.Join(t.TempDir(), "state.json"))
-	if err != nil {
-		unlock()
-		t.Fatalf("open store: %v", err)
-	}
-	manager := session.NewManager(
-		provider,
-		session.WithStore(stateStore),
-		session.WithGatewayImage(GatewayImage()),
-	)
-	if setup != nil {
-		setup(manager)
-	}
-
-	connected := make(chan session.State, 1)
-	failed := make(chan session.State, 1)
-	manager.Subscribe(func(state session.State) {
-		switch state.Phase {
-		case session.PhaseConnected:
-			select {
-			case connected <- state:
-			default:
-			}
-		case session.PhaseError:
-			select {
-			case failed <- state:
-			default:
-			}
-		}
-	})
-
-	if req.Context == "" {
-		req.Context = KubeContext()
-	}
-	if req.Namespace == "" {
-		req.Namespace = EchoNamespace
-	}
-	if err := manager.Connect(ctx, req); err != nil {
-		unlock()
-		t.Fatalf("connect: %v", err)
-	}
-
-	var state session.State
-	select {
-	case state = <-connected:
-	case state = <-failed:
-		_ = manager.Disconnect()
-		StopAllHelperSessions()
-		unlock()
-		t.Fatalf("session failed: %s (%s)", state.Phase, state.Message)
-	case <-ctx.Done():
-		_ = manager.Disconnect()
-		StopAllHelperSessions()
-		unlock()
-		t.Fatal(ctx.Err())
-	}
-
-	t.Cleanup(func() {
-		_ = manager.Disconnect()
-		StopAllHelperSessions()
-		unlock()
-	})
-
-	return &LiveSession{
-		Manager:  manager,
-		Store:    stateStore,
-		Provider: provider,
-		Client:   KubeClient(t, provider),
-		State:    state,
-	}
-}
 
 func StopAllHelperSessions() {
 	client, err := helper.NewClient()

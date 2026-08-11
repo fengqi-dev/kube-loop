@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
 )
 
@@ -20,8 +21,13 @@ func TestReverseTCPRegisterAccept(t *testing.T) {
 	defer gatewayListener.Close()
 
 	server := NewServer(log.New(io.Discard, "", 0), time.Second)
-	go func() { _ = server.Serve(gatewayListener) }()
-	sessionToken, err := tunnel.NewSessionToken()
+	spec, specHash := gatewayTestNetworkSpec(t)
+	authorization := SessionAuthorization{
+		SessionID: "11111111-1111-4111-8111-111111111111", Generation: 1,
+		Namespace: "default", NetworkSpecHash: specHash,
+	}
+	go serveAuthorizedConnections(gatewayListener, server, authorization)
+	sessionToken, err := tunnel.RelaySessionToken(authorization.SessionID, authorization.Generation)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -31,7 +37,7 @@ func TestReverseTCPRegisterAccept(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer control.Close()
-	if err := tunnel.WriteControlSession(control, sessionToken); err != nil {
+	if err := tunnel.WriteAuthorizedControlSession(control, sessionToken, spec); err != nil {
 		t.Fatal(err)
 	}
 	if err := tunnel.ReadStatus(control); err != nil {
@@ -139,8 +145,13 @@ func TestReverseUDPRegisterAccept(t *testing.T) {
 	defer gatewayListener.Close()
 
 	server := NewServer(log.New(io.Discard, "", 0), time.Second)
-	go func() { _ = server.Serve(gatewayListener) }()
-	sessionToken, err := tunnel.NewSessionToken()
+	spec, specHash := gatewayTestNetworkSpec(t)
+	authorization := SessionAuthorization{
+		SessionID: "22222222-2222-4222-8222-222222222222", Generation: 1,
+		Namespace: "default", NetworkSpecHash: specHash,
+	}
+	go serveAuthorizedConnections(gatewayListener, server, authorization)
+	sessionToken, err := tunnel.RelaySessionToken(authorization.SessionID, authorization.Generation)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,7 +161,7 @@ func TestReverseUDPRegisterAccept(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer control.Close()
-	if err := tunnel.WriteControlSession(control, sessionToken); err != nil {
+	if err := tunnel.WriteAuthorizedControlSession(control, sessionToken, spec); err != nil {
 		t.Fatal(err)
 	}
 	if err := tunnel.ReadStatus(control); err != nil {
@@ -238,20 +249,40 @@ func TestReverseUDPRegisterAccept(t *testing.T) {
 }
 
 func TestGatewayIsolatesTenantListenersAndPendingStreams(t *testing.T) {
-	gatewayListener, err := net.Listen("tcp", "127.0.0.1:0")
+	listenerA, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer gatewayListener.Close()
+	defer listenerA.Close()
+	listenerB, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listenerB.Close()
 
 	server := NewServer(log.New(io.Discard, "", 0), time.Second)
-	go func() { _ = server.Serve(gatewayListener) }()
-
-	tokenA := tunnel.SessionToken{1}
-	tokenB := tunnel.SessionToken{2}
-	controlA := openTestControl(t, gatewayListener.Addr().String(), tokenA)
+	spec, specHash := gatewayTestNetworkSpec(t)
+	authorizationA := SessionAuthorization{
+		SessionID: "33333333-3333-4333-8333-333333333333", Generation: 1,
+		Namespace: "default", NetworkSpecHash: specHash,
+	}
+	authorizationB := SessionAuthorization{
+		SessionID: "44444444-4444-4444-8444-444444444444", Generation: 1,
+		Namespace: "default", NetworkSpecHash: specHash,
+	}
+	go serveAuthorizedConnections(listenerA, server, authorizationA)
+	go serveAuthorizedConnections(listenerB, server, authorizationB)
+	tokenA, err := tunnel.RelaySessionToken(authorizationA.SessionID, authorizationA.Generation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tokenB, err := tunnel.RelaySessionToken(authorizationB.SessionID, authorizationB.Generation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	controlA := openTestControl(t, listenerA.Addr().String(), tokenA, spec)
 	defer controlA.Close()
-	controlB := openTestControl(t, gatewayListener.Addr().String(), tokenB)
+	controlB := openTestControl(t, listenerB.Addr().String(), tokenB, spec)
 	defer controlB.Close()
 
 	const sharedID = "default/api:tcp:80"
@@ -279,7 +310,7 @@ func TestGatewayIsolatesTenantListenersAndPendingStreams(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	wrongTenant, err := net.Dial("tcp", gatewayListener.Addr().String())
+	wrongTenant, err := net.Dial("tcp", listenerB.Addr().String())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -291,7 +322,7 @@ func TestGatewayIsolatesTenantListenersAndPendingStreams(t *testing.T) {
 	}
 	_ = wrongTenant.Close()
 
-	owner, err := net.Dial("tcp", gatewayListener.Addr().String())
+	owner, err := net.Dial("tcp", listenerA.Addr().String())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -308,13 +339,14 @@ func openTestControl(
 	t *testing.T,
 	address string,
 	token tunnel.SessionToken,
+	spec networkspec.Spec,
 ) net.Conn {
 	t.Helper()
 	conn, err := net.Dial("tcp", address)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := tunnel.WriteControlSession(conn, token); err != nil {
+	if err := tunnel.WriteAuthorizedControlSession(conn, token, spec); err != nil {
 		_ = conn.Close()
 		t.Fatal(err)
 	}
@@ -323,6 +355,16 @@ func openTestControl(
 		t.Fatal(err)
 	}
 	return conn
+}
+
+func serveAuthorizedConnections(listener net.Listener, server *Server, authorization SessionAuthorization) {
+	for {
+		connection, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		go server.ServeConnForAuthorization(connection, authorization)
+	}
 }
 
 func registerTestIntercept(

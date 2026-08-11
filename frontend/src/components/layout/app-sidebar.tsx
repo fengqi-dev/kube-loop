@@ -1,8 +1,11 @@
 import {
   Bot,
   Boxes,
+  ChevronsUpDown,
   Gauge,
   Globe,
+  LogIn,
+  LogOut,
   Network,
   ScrollText,
   Server,
@@ -26,6 +29,7 @@ import {
 } from "@/components/ui/sidebar";
 import { useI18n } from "@/i18n";
 import { cn } from "@/lib/utils";
+import { useEffect, useRef, useState } from "react";
 
 const navigation: Array<{ id: Exclude<AppView, "settings">; icon: LucideIcon }> = [
   { id: "overview", icon: Gauge },
@@ -42,14 +46,42 @@ export function AppSidebar({
   view,
   connectionsAlert,
   updateAvailable,
+  authenticated,
+  userName,
+  logoutBusy,
   onNavigate,
+  onSignIn,
+  onLogout,
 }: {
   view: AppView;
   connectionsAlert?: boolean;
   updateAvailable: boolean;
+  authenticated?: boolean;
+  userName?: string;
+  logoutBusy?: boolean;
   onNavigate(view: AppView): void;
+  onSignIn(): void;
+  onLogout(): void;
 }) {
   const { t } = useI18n();
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const userMenuRef = useRef<HTMLLIElement>(null);
+
+  useEffect(() => {
+    if (!userMenuOpen) return;
+    function closeOnPointerDown(event: PointerEvent) {
+      if (!userMenuRef.current?.contains(event.target as Node)) setUserMenuOpen(false);
+    }
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") setUserMenuOpen(false);
+    }
+    document.addEventListener("pointerdown", closeOnPointerDown);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnPointerDown);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [userMenuOpen]);
 
   function menuItem(
     id: AppView,
@@ -121,12 +153,74 @@ export function AppSidebar({
         </SidebarGroup>
       </SidebarContent>
 
-      <SidebarFooter className="gap-2 p-3 group-data-[collapsible=icon]:px-2">
+      <SidebarFooter className="gap-2 p-2 group-data-[collapsible=icon]:px-2">
         <SidebarSeparator className="mx-0" />
         <SidebarMenu>
-          {menuItem("settings", Settings2, updateAvailable ? "primary" : undefined)}
+          <SidebarMenuItem ref={userMenuRef}>
+            <SidebarMenuButton
+              type="button"
+              size="default"
+              aria-label={authenticated ? userName || "Authenticated user" : "Sign in"}
+              aria-haspopup="menu"
+              aria-expanded={userMenuOpen}
+              data-state={userMenuOpen ? "open" : "closed"}
+              onClick={() => setUserMenuOpen((open) => !open)}
+              className="h-9 gap-2 rounded-lg data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground group-data-[collapsible=icon]:size-10! group-data-[collapsible=icon]:p-2!"
+            >
+              <span className={cn(
+                "grid size-6 shrink-0 place-items-center rounded-full text-[9px] font-semibold",
+                authenticated ? "bg-success text-success-foreground" : "bg-muted text-muted-foreground",
+              )}>
+                {authenticated ? initials(userName) : <LogIn size={14} />}
+              </span>
+              <span className="min-w-0 flex-1 text-left group-data-[collapsible=icon]:hidden">
+                <span className="block truncate text-[12px] font-medium">
+                  {authenticated ? userName || "Authenticated user" : "Sign in"}
+                </span>
+              </span>
+              <ChevronsUpDown size={14} className="ml-auto text-muted-foreground group-data-[collapsible=icon]:hidden" />
+              {updateAvailable ? <span className="absolute top-1 right-1 size-1.5 rounded-full bg-primary" /> : null}
+            </SidebarMenuButton>
+            {userMenuOpen ? (
+              <div role="menu" aria-label="User menu" className="absolute bottom-[calc(100%+0.5rem)] left-0 z-[100] w-full min-w-[160px] rounded-lg bg-popover p-1 text-popover-foreground shadow-md ring-1 ring-foreground/10">
+                <div className="flex items-center gap-2 p-1.5">
+                  <span className={cn(
+                    "grid size-6 shrink-0 place-items-center rounded-full text-[9px] font-semibold",
+                    authenticated ? "bg-success text-success-foreground" : "bg-muted text-muted-foreground",
+                  )}>
+                    {authenticated ? initials(userName) : <LogIn size={14} />}
+                  </span>
+                  <span className="truncate text-[12px] font-medium">
+                    {authenticated ? userName || "Authenticated user" : "Not signed in"}
+                  </span>
+                </div>
+                <div className="-mx-1 my-1 h-px bg-border" />
+                <button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground" onPointerDown={(event) => { event.preventDefault(); event.stopPropagation(); setUserMenuOpen(false); onNavigate("settings"); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setUserMenuOpen(false); onNavigate("settings"); } }}>
+                  <Settings2 size={16} />
+                  {t("nav.settings")}
+                  {updateAvailable ? <span className="ml-auto size-1.5 rounded-full bg-primary" /> : null}
+                </button>
+                <div className="-mx-1 my-1 h-px bg-border" />
+                {authenticated ? (
+                  <button type="button" role="menuitem" disabled={logoutBusy} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-destructive hover:bg-destructive/10 disabled:pointer-events-none disabled:opacity-50" onPointerDown={(event) => { event.preventDefault(); event.stopPropagation(); setUserMenuOpen(false); onLogout(); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setUserMenuOpen(false); onLogout(); } }}>
+                    <LogOut size={16} />
+                    {logoutBusy ? "Logging out…" : "Log out"}
+                  </button>
+                ) : (
+                  <button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground" onPointerDown={(event) => { event.preventDefault(); event.stopPropagation(); setUserMenuOpen(false); onSignIn(); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setUserMenuOpen(false); onSignIn(); } }}>
+                    <LogIn size={16} /> Sign in
+                  </button>
+                )}
+              </div>
+            ) : null}
+          </SidebarMenuItem>
         </SidebarMenu>
       </SidebarFooter>
     </Sidebar>
   );
+}
+
+function initials(value?: string) {
+  const parts = (value || "U").trim().split(/\s+/).filter(Boolean);
+  return parts.slice(0, 2).map((part) => part[0]?.toUpperCase()).join("") || "U";
 }

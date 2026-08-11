@@ -4,8 +4,8 @@ import (
 	"context"
 	"strings"
 
-	clientfiletransfer "github.com/fengqi-dev/kube-loop/internal/clientv2/filetransfer"
-	clientremote "github.com/fengqi-dev/kube-loop/internal/clientv2/remote"
+	clientfiletransfer "github.com/fengqi-dev/kube-loop/internal/client/filetransfer"
+	clientremote "github.com/fengqi-dev/kube-loop/internal/client/remote"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -108,7 +108,7 @@ type manageFileTransferOut struct {
 func registerTools(server *mcpsdk.Server, backend Backend) {
 	mcpsdk.AddTool(server, &mcpsdk.Tool{
 		Name: "manage_cluster",
-		Description: "Read Kubernetes resources through the authenticated V2 Gateway SDK. " +
+		Description: "Read Kubernetes resources through the authenticated Gateway SDK. " +
 			"profileId is always explicit; namespace is required for capabilities, Services, and Pods.",
 	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, input manageClusterIn) (*mcpsdk.CallToolResult, manageClusterOut, error) {
 		output, err := manageCluster(ctx, backend, input)
@@ -117,7 +117,7 @@ func registerTools(server *mcpsdk.Server, backend Backend) {
 
 	mcpsdk.AddTool(server, &mcpsdk.Tool{
 		Name: "manage_connection",
-		Description: "Inspect, connect, or disconnect the active V2 Gateway Session. " +
+		Description: "Inspect, connect, or disconnect the active Gateway Session. " +
 			"Disconnect requires the exact profileId, sessionId, and namespace returned by status/connect.",
 	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, input manageConnectionIn) (*mcpsdk.CallToolResult, manageConnectionOut, error) {
 		output, err := manageConnection(ctx, backend, input)
@@ -126,7 +126,7 @@ func registerTools(server *mcpsdk.Server, backend Backend) {
 
 	mcpsdk.AddTool(server, &mcpsdk.Tool{
 		Name: "manage_traffic",
-		Description: "Start, stop, or list V2 Exchange, Mirror, Preview, and Port Forward Tasks. " +
+		Description: "Start, stop, or list Exchange, Mirror, Preview, and Port Forward Tasks. " +
 			"Every mutation requires exact Profile, Session, namespace, target, and local endpoint parameters.",
 	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, input manageTrafficIn) (*mcpsdk.CallToolResult, manageTrafficOut, error) {
 		output, err := manageTraffic(ctx, backend, input)
@@ -135,7 +135,7 @@ func registerTools(server *mcpsdk.Server, backend Backend) {
 
 	mcpsdk.AddTool(server, &mcpsdk.Tool{
 		Name: "exec_pod_command",
-		Description: "Execute an exact argv in a Pod through the authenticated V2 Gateway exec stream. " +
+		Description: "Execute an exact argv in a Pod through the authenticated Gateway exec stream. " +
 			"No shell is inferred; stdout and stderr are base64-encoded JSON byte fields and capped at 1 MiB each.",
 	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, input podCommandIn) (*mcpsdk.CallToolResult, PodCommandResult, error) {
 		output, err := execPodCommand(ctx, backend, input)
@@ -144,7 +144,7 @@ func registerTools(server *mcpsdk.Server, backend Backend) {
 
 	mcpsdk.AddTool(server, &mcpsdk.Tool{
 		Name: "manage_file_transfer",
-		Description: "Start, list, or cancel V2 file transfers. Mutations require the exact active Session " +
+		Description: "Start, list, or cancel file transfers. Mutations require the exact active Session " +
 			"and explicit localPath, remotePath, direction, kind, Pod, container, and overwrite choice.",
 	}, func(_ context.Context, _ *mcpsdk.CallToolRequest, input manageFileTransferIn) (*mcpsdk.CallToolResult, manageFileTransferOut, error) {
 		output, err := manageFileTransfer(backend, input)

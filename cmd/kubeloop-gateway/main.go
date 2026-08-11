@@ -35,11 +35,6 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	legacyListenDefault := strings.TrimSpace(os.Getenv("KUBELOOP_GATEWAY_LEGACY_LISTEN"))
-	if legacyListenDefault == "" {
-		legacyListenDefault = strings.TrimSpace(os.Getenv("KUBELOOP_GATEWAY_LISTEN"))
-	}
-	listenAddress := flag.String("listen", legacyListenDefault, "legacy raw TCP listen address (disabled when empty)")
 	httpListenAddress := flag.String("http-listen", stringEnv("KUBELOOP_GATEWAY_HTTP_LISTEN", ":8080"), "WebSocket Gateway listen address")
 	httpPath := flag.String("http-path", stringEnv("KUBELOOP_GATEWAY_HTTP_PATH", websocketmux.DefaultPath), "WebSocket Gateway path")
 	verificationKeysFile := flag.String("relay-verification-keys-file", os.Getenv("KUBELOOP_RELAY_VERIFICATION_KEYS_FILE"), "RelayTicket public keys JSON file")
@@ -86,20 +81,8 @@ func main() {
 	signalContext, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stopSignals()
 	server := gateway.NewServer(logger, 10*time.Second)
-	errCh := make(chan error, 2)
+	errCh := make(chan error, 1)
 	serveCount := 0
-	var listener net.Listener
-	if strings.TrimSpace(*listenAddress) != "" {
-		listener, err = net.Listen("tcp", *listenAddress)
-		if err != nil {
-			errorLogger.Fatal(err)
-		}
-		serveCount++
-		go func() {
-			logger.Printf("legacy raw TCP Gateway %s listening on %s", version, *listenAddress)
-			errCh <- server.Serve(listener)
-		}()
-	}
 	var httpHandler *websocketmux.Handler
 	var cancelHTTP context.CancelFunc
 	var controlAgent *relayagent.Agent
@@ -255,9 +238,6 @@ func main() {
 			logger.Printf("report Data Plane drain failed: %v", err)
 		}
 		cancelDrainReport()
-	}
-	if listener != nil {
-		_ = listener.Close()
 	}
 	drainContext, cancelDrain := context.WithTimeout(context.Background(), *drainTimeout)
 	drainErr := server.Drain(drainContext)

@@ -41,6 +41,7 @@ import type {
 			ServerPreviewRequest,
 		ServerPodSSHInfo,
 	ServerPodSSHRequest,
+	ServerLocalFileEntry,
 	ServerExecEvent,
 	ServerExecRequest,
 	ServerExecTask,
@@ -49,6 +50,7 @@ import type {
 	ServerPodFileTarget,
 	ServerPodFileList,
 	ServerPodFileTask,
+	ServerNetworkSettings,
   Metrics,
   SessionIntentCounts,
   SessionState,
@@ -74,10 +76,20 @@ declare global {
 		  RefreshServerLogin(profileId: string): Promise<AuthSession>;
 		  LogoutServer(profileId: string): Promise<void>;
 		  LoadServerInventory(profileId: string, namespace: string): Promise<RemoteInventory>;
+		  ConnectServerDataPlane(profileId: string, mode: "socks" | "tun"): Promise<DataPlaneStatus>;
+		  DisconnectServerDataPlane(profileId: string): Promise<DataPlaneStatus>;
 		  StartServerTunnel(profileId: string): Promise<DataPlaneStatus>;
 		  StopServerTunnel(profileId: string): Promise<DataPlaneStatus>;
+		  GetServerSingBoxConfig(profileId: string): Promise<string>;
+		  GetServerNetworkSettings(profileId: string): Promise<ServerNetworkSettings>;
+		  SetServerDNSNamespace(profileId: string, namespace: string): Promise<ServerNetworkSettings>;
+		  SetServerHostAliases(profileId: string, aliases: HostAlias[]): Promise<ServerNetworkSettings>;
+		  ServerDataPlaneMetrics(profileId: string): Promise<Metrics>;
+		  ServerDataPlaneLogs(profileId: string): Promise<string[]>;
+		  TestServerDataPlane(profileId: string): Promise<void>;
 		  StartServerPortForward(request: ServerPortForwardRequest): Promise<ServerPortForwardInfo>;
 		  StopServerPortForward(profileId: string, taskId: string): Promise<void>;
+		  TestServerPortForward(profileId: string, taskId: string): Promise<void>;
 		  ListServerPortForwards(profileId: string): Promise<ServerPortForwardInfo[]>;
 			  StartServerExchange(request: ServerExchangeRequest): Promise<ServerExchangeInfo>;
 			  StopServerExchange(profileId: string, taskId: string): Promise<void>;
@@ -103,6 +115,11 @@ declare global {
 		  ClearServerFileTransferHistory(profileId: string): Promise<void>;
 		  PickServerUploadPath(kind: "file" | "directory"): Promise<string>;
 		  PickServerDownloadPath(kind: "file" | "directory", suggestedName: string): Promise<string>;
+		  ServerLocalHomeDirectory(): Promise<string>;
+		  ListServerLocalFiles(path: string): Promise<ServerLocalFileEntry[]>;
+		  CreateServerLocalFile(parent: string, name: string, kind: "file" | "directory"): Promise<void>;
+		  RenameServerLocalFile(path: string, name: string): Promise<void>;
+		  DeleteServerLocalFile(path: string): Promise<void>;
 		  ListServerPodFiles(target: ServerPodFileTarget): Promise<ServerPodFileList>;
 		  CreateServerPodFile(request: ServerPodFileTarget & { kind: "file" | "directory" }): Promise<ServerPodFileTask>;
 		  RenameServerPodFile(request: ServerPodFileTarget & { destination: string }): Promise<ServerPodFileTask>;
@@ -184,7 +201,6 @@ declare global {
           SessionIntentCounts(): Promise<SessionIntentCounts>;
           CheckForUpdates(): Promise<UpdateInfo>;
           OpenUpdatePage(): Promise<void>;
-          GetSingBoxConfig(): Promise<string>;
           HelperStatus(): Promise<HelperStatus>;
           InstallHelper(): Promise<void>;
           UninstallHelper(): Promise<void>;
@@ -236,16 +252,34 @@ export const backend = {
 		Promise.resolve().then(() => api().RefreshServerLogin(profileId)),
 	logoutServer: (profileId: string) =>
 		Promise.resolve().then(() => api().LogoutServer(profileId)),
-	loadServerInventory: (profileId: string, namespace = "") =>
-		Promise.resolve().then(() => api().LoadServerInventory(profileId, namespace)),
-	startServerTunnel: (profileId: string) =>
+		loadServerInventory: (profileId: string, namespace = "") =>
+			Promise.resolve().then(() => api().LoadServerInventory(profileId, namespace)),
+		connectServerDataPlane: (profileId: string, mode: "socks" | "tun") =>
+			Promise.resolve().then(() => api().ConnectServerDataPlane(profileId, mode)),
+		disconnectServerDataPlane: (profileId: string) =>
+			Promise.resolve().then(() => api().DisconnectServerDataPlane(profileId)),
+		startServerTunnel: (profileId: string) =>
 		Promise.resolve().then(() => api().StartServerTunnel(profileId)),
 	stopServerTunnel: (profileId: string) =>
 		Promise.resolve().then(() => api().StopServerTunnel(profileId)),
+	getServerNetworkSettings: (profileId: string) =>
+		Promise.resolve().then(() => api().GetServerNetworkSettings(profileId)),
+	setServerDNSNamespace: (profileId: string, namespace: string) =>
+		Promise.resolve().then(() => api().SetServerDNSNamespace(profileId, namespace)),
+	setServerHostAliases: (profileId: string, aliases: HostAlias[]) =>
+		Promise.resolve().then(() => api().SetServerHostAliases(profileId, aliases)),
+	serverDataPlaneMetrics: (profileId: string) =>
+		Promise.resolve().then(() => api().ServerDataPlaneMetrics(profileId)),
+	serverDataPlaneLogs: (profileId: string) =>
+		Promise.resolve().then(() => api().ServerDataPlaneLogs(profileId)),
+	testServerDataPlane: (profileId: string) =>
+		Promise.resolve().then(() => api().TestServerDataPlane(profileId)),
 	startServerPortForward: (request: ServerPortForwardRequest) =>
 		Promise.resolve().then(() => api().StartServerPortForward(request)),
 	stopServerPortForward: (profileId: string, taskId: string) =>
 		Promise.resolve().then(() => api().StopServerPortForward(profileId, taskId)),
+	testServerPortForward: (profileId: string, taskId: string) =>
+		Promise.resolve().then(() => api().TestServerPortForward(profileId, taskId)),
 	listServerPortForwards: (profileId: string) =>
 		Promise.resolve().then(() => api().ListServerPortForwards(profileId)),
 	startServerExchange: (request: ServerExchangeRequest) =>
@@ -296,6 +330,13 @@ export const backend = {
 		Promise.resolve().then(() => api().PickServerUploadPath(kind)),
 	pickServerDownloadPath: (kind: "file" | "directory", suggestedName: string) =>
 		Promise.resolve().then(() => api().PickServerDownloadPath(kind, suggestedName)),
+	serverLocalHomeDirectory: () => Promise.resolve().then(() => api().ServerLocalHomeDirectory()),
+	listServerLocalFiles: (path: string) => Promise.resolve().then(() => api().ListServerLocalFiles(path)),
+	createServerLocalFile: (parent: string, name: string, kind: "file" | "directory") =>
+		Promise.resolve().then(() => api().CreateServerLocalFile(parent, name, kind)),
+	renameServerLocalFile: (path: string, name: string) =>
+		Promise.resolve().then(() => api().RenameServerLocalFile(path, name)),
+	deleteServerLocalFile: (path: string) => Promise.resolve().then(() => api().DeleteServerLocalFile(path)),
 	listServerPodFiles: (target: ServerPodFileTarget) =>
 		Promise.resolve().then(() => api().ListServerPodFiles(target)),
 	createServerPodFile: (request: ServerPodFileTarget & { kind: "file" | "directory" }) =>
@@ -409,7 +450,8 @@ export const backend = {
     Promise.resolve().then(() => api().SessionIntentCounts()),
   checkForUpdates: () => Promise.resolve().then(() => api().CheckForUpdates()),
   openUpdatePage: () => Promise.resolve().then(() => api().OpenUpdatePage()),
-  getSingBoxConfig: () => Promise.resolve().then(() => api().GetSingBoxConfig()),
+	getServerSingBoxConfig: (profileId: string) =>
+		Promise.resolve().then(() => api().GetServerSingBoxConfig(profileId)),
   helperStatus: () => Promise.resolve().then(() => api().HelperStatus()),
   installHelper: () => Promise.resolve().then(() => api().InstallHelper()),
   uninstallHelper: () => Promise.resolve().then(() => api().UninstallHelper()),

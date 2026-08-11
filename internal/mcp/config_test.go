@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	clientremote "github.com/fengqi-dev/kube-loop/internal/clientv2/remote"
+	clientremote "github.com/fengqi-dev/kube-loop/internal/client/remote"
 	"github.com/zalando/go-keyring"
 )
 
@@ -42,7 +42,7 @@ func (secrets *memorySecrets) Delete(service, account string) error {
 }
 
 func TestSystemConfigStoreNeverWritesTokenToDisk(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "mcp-v2.json")
+	path := filepath.Join(t.TempDir(), "mcp.json")
 	secrets := &memorySecrets{}
 	store, err := newSystemConfigStore(path, secrets)
 	if err != nil {

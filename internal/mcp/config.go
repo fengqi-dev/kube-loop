@@ -18,7 +18,7 @@ const (
 	DefaultPort         = 30808
 	configVersion       = 1
 	maximumConfigBytes  = 64 << 10
-	keyringService      = "KubeLoop V2"
+	keyringService      = "KubeLoop"
 	keyringTokenAccount = "mcp:bearer-token"
 )
 
@@ -78,7 +78,7 @@ func DefaultConfigPath() (string, error) {
 	if err != nil {
 		return "", errors.New("find user home directory")
 	}
-	return filepath.Join(home, ".kubeloop", "mcp-v2.json"), nil
+	return filepath.Join(home, ".kubeloop", "mcp.json"), nil
 }
 
 func NewSystemConfigStore(path string) (*SystemConfigStore, error) {

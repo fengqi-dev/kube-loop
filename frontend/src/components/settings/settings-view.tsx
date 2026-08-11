@@ -42,6 +42,7 @@ import type { HelperStatus, UpdateInfo } from "@/types";
 import { appVersion } from "@/version";
 
 export function SettingsView({
+	profileId,
   ready,
   coreVersion,
   update,
@@ -49,6 +50,7 @@ export function SettingsView({
   onCheck,
   onOpen,
 }: {
+	profileId: string;
   ready: boolean;
   coreVersion?: string;
   update: UpdateInfo;
@@ -119,7 +121,7 @@ export function SettingsView({
     }
     setConfigBusy("full");
     try {
-      const text = await backend.getSingBoxConfig();
+		const text = await backend.getServerSingBoxConfig(profileId);
       setConfigText(text);
       setConfigView("full");
       setConfigOpen(true);
@@ -139,7 +141,7 @@ export function SettingsView({
     }
     setConfigBusy("dns");
     try {
-      const text = await backend.getSingBoxConfig();
+		const text = await backend.getServerSingBoxConfig(profileId);
       const config = JSON.parse(text) as { dns?: unknown };
       if (
         typeof config.dns !== "object" ||

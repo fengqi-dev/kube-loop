@@ -71,26 +71,6 @@ func NewServer(logger *log.Logger, dialTimeout time.Duration) *Server {
 	}
 }
 
-func (s *Server) Serve(listener net.Listener) error {
-	for {
-		connection, err := listener.Accept()
-		if err != nil {
-			if errors.Is(err, net.ErrClosed) {
-				return nil
-			}
-			return err
-		}
-		go s.ServeConn(connection)
-	}
-}
-
-// ServeConn handles one logical Gateway protocol connection. HTTP transports
-// use this to feed independently multiplexed streams into the same protocol
-// implementation as the raw TCP listener.
-func (s *Server) ServeConn(connection net.Conn) {
-	s.serveConn(connection, nil)
-}
-
 // ServeConnForAuthorization handles a logical protocol connection carried by
 // an authenticated WebSocket. The protocol key and registered NetworkSpec must
 // match the immutable Cluster Session claims in its RelayTicket.
@@ -111,7 +91,7 @@ func (s *Server) ServeConnForAuthorization(connection net.Conn, authorization Se
 	required := requiredAuthorization{
 		token: token, namespace: authorization.Namespace, networkSpecHash: authorization.NetworkSpecHash,
 	}
-	s.serveConn(connection, &required)
+	s.serveConn(connection, required)
 }
 
 type requiredAuthorization struct {
@@ -120,7 +100,7 @@ type requiredAuthorization struct {
 	networkSpecHash string
 }
 
-func (s *Server) serveConn(connection net.Conn, required *requiredAuthorization) {
+func (s *Server) serveConn(connection net.Conn, required requiredAuthorization) {
 	if !s.trackConnection(connection) {
 		_ = connection.Close()
 		return
@@ -202,7 +182,7 @@ func (s *Server) closeActiveConnections() {
 	}
 }
 
-func (s *Server) handle(client net.Conn, required *requiredAuthorization) {
+func (s *Server) handle(client net.Conn, required requiredAuthorization) {
 	_ = client.SetReadDeadline(time.Now().Add(15 * time.Second))
 	header, err := tunnel.ReadSessionHeader(client)
 	if err != nil {
@@ -213,7 +193,7 @@ func (s *Server) handle(client net.Conn, required *requiredAuthorization) {
 		return
 	}
 	_ = client.SetReadDeadline(time.Time{})
-	if required != nil && header.Token != required.token {
+	if header.Token != required.token {
 		_ = tunnel.WriteStatus(client, errors.New("Gateway session does not match RelayTicket"))
 		_ = client.Close()
 		return
@@ -221,12 +201,8 @@ func (s *Server) handle(client net.Conn, required *requiredAuthorization) {
 
 	switch header.Command {
 	case tunnel.CommandTCP, tunnel.CommandUDP:
-		s.handleOutbound(client, header, required)
+		s.handleOutbound(client, header, &required)
 	case tunnel.CommandControl:
-		if required == nil {
-			s.handleControl(client, header.Token, nil, "", "")
-			return
-		}
 		spec, readErr := tunnel.ReadAuthorizedControlSpec(client)
 		if readErr != nil {
 			_ = tunnel.WriteStatus(client, errors.New("authorized NetworkSpec is invalid"))
@@ -241,7 +217,7 @@ func (s *Server) handle(client net.Conn, required *requiredAuthorization) {
 		}
 		s.handleControl(client, header.Token, &spec, hash, required.namespace)
 	case tunnel.CommandAccept:
-		s.handleAccept(client, header.Token, required)
+		s.handleAccept(client, header.Token, &required)
 	default:
 		_ = tunnel.WriteStatus(client, fmt.Errorf("unsupported command %d", header.Command))
 		_ = client.Close()

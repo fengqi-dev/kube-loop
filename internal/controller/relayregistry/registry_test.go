@@ -96,7 +96,19 @@ func TestRegistrationHeartbeatGenerationGateAndNoSilentReassignment(t *testing.T
 	}
 	newGeneration.Generation = 3
 	if _, err := registry.Allocate(newGeneration); !errors.Is(err, ErrAssignedRelayUnavailable) {
-		t.Fatalf("existing Session was silently reassigned: %v", err)
+		t.Fatalf("Session was reassigned before the replacement Relay acknowledged control state: %v", err)
+	}
+	replacementHeartbeat := heartbeatRequest(reregistered.LeaseID, 100, 1)
+	if _, err := registry.Heartbeat(identity, replacementHeartbeat); err != nil {
+		t.Fatal(err)
+	}
+	newGeneration.Generation = 4
+	reassigned, err := registry.Allocate(newGeneration)
+	if err != nil {
+		t.Fatalf("reassign newer Session generation: %v", err)
+	}
+	if reassigned.RelayID != reregistered.RelayID || reassigned.LeaseID != reregistered.LeaseID {
+		t.Fatalf("replacement assignment = %#v", reassigned)
 	}
 }
 

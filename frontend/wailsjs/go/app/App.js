@@ -18,8 +18,20 @@ export function ClearServerFileTransferHistory(arg1) {
   return window['go']['app']['App']['ClearServerFileTransferHistory'](arg1);
 }
 
+export function ConnectServerDataPlane(arg1, arg2) {
+  return window['go']['app']['App']['ConnectServerDataPlane'](arg1, arg2);
+}
+
+export function CreateServerLocalFile(arg1, arg2, arg3) {
+  return window['go']['app']['App']['CreateServerLocalFile'](arg1, arg2, arg3);
+}
+
 export function CreateServerPodFile(arg1) {
   return window['go']['app']['App']['CreateServerPodFile'](arg1);
+}
+
+export function DeleteServerLocalFile(arg1) {
+  return window['go']['app']['App']['DeleteServerLocalFile'](arg1);
 }
 
 export function DeleteServerPodFile(arg1) {
@@ -30,8 +42,28 @@ export function DeleteServerProfile(arg1) {
   return window['go']['app']['App']['DeleteServerProfile'](arg1);
 }
 
+export function DisconnectServerDataPlane(arg1) {
+  return window['go']['app']['App']['DisconnectServerDataPlane'](arg1);
+}
+
 export function GetMCPStatus() {
   return window['go']['app']['App']['GetMCPStatus']();
+}
+
+export function GetServerNetworkSettings(arg1) {
+  return window['go']['app']['App']['GetServerNetworkSettings'](arg1);
+}
+
+export function GetServerSingBoxConfig(arg1) {
+  return window['go']['app']['App']['GetServerSingBoxConfig'](arg1);
+}
+
+export function HelperStatus() {
+  return window['go']['app']['App']['HelperStatus']();
+}
+
+export function InstallHelper() {
+  return window['go']['app']['App']['InstallHelper']();
 }
 
 export function InstallMCPClient(arg1) {
@@ -44,6 +76,10 @@ export function ListServerExchanges(arg1) {
 
 export function ListServerFileTransfers(arg1) {
   return window['go']['app']['App']['ListServerFileTransfers'](arg1);
+}
+
+export function ListServerLocalFiles(arg1) {
+  return window['go']['app']['App']['ListServerLocalFiles'](arg1);
 }
 
 export function ListServerMirrors(arg1) {
@@ -114,6 +150,10 @@ export function RegenerateMCPToken() {
   return window['go']['app']['App']['RegenerateMCPToken']();
 }
 
+export function RenameServerLocalFile(arg1, arg2) {
+  return window['go']['app']['App']['RenameServerLocalFile'](arg1, arg2);
+}
+
 export function RenameServerPodFile(arg1) {
   return window['go']['app']['App']['RenameServerPodFile'](arg1);
 }
@@ -138,6 +178,18 @@ export function ServerAuthStatus(arg1) {
   return window['go']['app']['App']['ServerAuthStatus'](arg1);
 }
 
+export function ServerDataPlaneLogs(arg1) {
+  return window['go']['app']['App']['ServerDataPlaneLogs'](arg1);
+}
+
+export function ServerDataPlaneMetrics(arg1) {
+  return window['go']['app']['App']['ServerDataPlaneMetrics'](arg1);
+}
+
+export function ServerLocalHomeDirectory() {
+  return window['go']['app']['App']['ServerLocalHomeDirectory']();
+}
+
 export function ServerProfiles() {
   return window['go']['app']['App']['ServerProfiles']();
 }
@@ -152,6 +204,14 @@ export function SetMCPPort(arg1) {
 
 export function SetMCPTokenEnabled(arg1) {
   return window['go']['app']['App']['SetMCPTokenEnabled'](arg1);
+}
+
+export function SetServerDNSNamespace(arg1, arg2) {
+  return window['go']['app']['App']['SetServerDNSNamespace'](arg1, arg2);
+}
+
+export function SetServerHostAliases(arg1, arg2) {
+  return window['go']['app']['App']['SetServerHostAliases'](arg1, arg2);
 }
 
 export function StartServerExchange(arg1) {
@@ -216,6 +276,18 @@ export function StopServerTunnel(arg1) {
 
 export function TestServerAddress(arg1) {
   return window['go']['app']['App']['TestServerAddress'](arg1);
+}
+
+export function TestServerDataPlane(arg1) {
+  return window['go']['app']['App']['TestServerDataPlane'](arg1);
+}
+
+export function TestServerPortForward(arg1, arg2) {
+  return window['go']['app']['App']['TestServerPortForward'](arg1, arg2);
+}
+
+export function UninstallHelper() {
+  return window['go']['app']['App']['UninstallHelper']();
 }
 
 export function WriteServerExecInput(arg1, arg2, arg3) {

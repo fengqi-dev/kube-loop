@@ -25,8 +25,6 @@ import (
 func main() {
 	operation := flag.String("operation", "", "install or uninstall")
 	source := flag.String("source", "", "helper service binary")
-	installTool := flag.String("install-tool", "", "separate Windows install tool")
-	uninstallTool := flag.String("uninstall-tool", "", "separate Windows uninstall tool")
 	singBox := flag.String("sing-box", "", "sing-box binary")
 	elevate := flag.Bool("elevate", false, "run the privileged child through sudo -n")
 	flag.Parse()
@@ -34,9 +32,9 @@ func main() {
 	var err error
 	switch *operation {
 	case "install":
-		err = install(*source, *installTool, *singBox, *elevate)
+		err = install(*source, *singBox, *elevate)
 	case "uninstall":
-		err = uninstall(*source, *uninstallTool, *elevate)
+		err = uninstall(*source, *elevate)
 	default:
 		err = fmt.Errorf("--operation must be install or uninstall")
 	}
@@ -46,7 +44,7 @@ func main() {
 	}
 }
 
-func install(source, installTool, singBox string, elevate bool) error {
+func install(source, singBox string, elevate bool) error {
 	if source == "" || singBox == "" {
 		return fmt.Errorf("--source and --sing-box are required")
 	}
@@ -75,10 +73,6 @@ func install(source, installTool, singBox string, elevate bool) error {
 
 	command := source
 	args := []string{"install"}
-	if installTool != "" {
-		command = installTool
-		args = nil
-	}
 	args = append(args,
 		"--source", source,
 		"--token", token,
@@ -95,11 +89,11 @@ func install(source, installTool, singBox string, elevate bool) error {
 	}
 
 	installedPath := helper.BinaryInstallPath()
-	if installTool != "" {
+	if runtime.GOOS == "windows" {
 		// manage-helper is run via "go run", so its own executable lives in a
-		// temporary directory. The Windows install tool selects its destination
-		// relative to the packaged tool instead.
-		installedPath = helper.BinaryInstallPathForExecutable(installTool)
+		// temporary directory. The packaged helper selects its destination from
+		// the application root containing the resource copy.
+		installedPath = helper.BinaryInstallPathForExecutable(source)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -140,7 +134,7 @@ func verifyInstalledBinary(source, installedPath string) error {
 	return nil
 }
 
-func uninstall(source, uninstallTool string, elevate bool) error {
+func uninstall(source string, elevate bool) error {
 	client, err := helper.NewClient()
 	if err == nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -150,12 +144,8 @@ func uninstall(source, uninstallTool string, elevate bool) error {
 
 	command := source
 	args := []string{"uninstall"}
-	if uninstallTool != "" {
-		command = uninstallTool
-		args = nil
-	}
 	if command == "" {
-		return fmt.Errorf("--source or --uninstall-tool is required")
+		return fmt.Errorf("--source is required")
 	}
 	if err := runPrivileged(command, args, elevate); err != nil {
 		return fmt.Errorf("uninstall helper: %w", err)

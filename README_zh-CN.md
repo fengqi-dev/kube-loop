@@ -240,9 +240,9 @@ npm ci --prefix frontend
 wails dev
 ```
 
-`wails dev` 会构建前端和平台 Helper，并为 Docker Desktop Kubernetes、Minikube、
-kind 或 k3d 准备本地 Gateway 镜像。仅在需要覆盖该镜像时设置
-`KUBELOOP_GATEWAY_IMAGE`。
+`wails dev` 会先构建前端、平台 Helper 和打过补丁的 sing-box，再为 Docker Desktop
+Kubernetes、Minikube、kind 或 k3d 构建并加载本地 Controller、Gateway、Operator 镜像，
+通过 Helm 部署到当前本地集群，等待三个工作负载全部就绪后再启动前端热更新。
 
 ### 测试
 

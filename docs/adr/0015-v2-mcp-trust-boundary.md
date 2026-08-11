@@ -104,7 +104,7 @@ exact `localhost`, `127.0.0.1`, or `::1` hostnames. Prefixes such as
 `localhost.evil.example` are rejected. Bearer authentication is enabled by
 default with a random 256-bit token.
 
-`mcp-v2.json` stores only version, enabled state, port, and token-auth switch
+`mcp.json` stores only version, enabled state, port, and token-auth switch
 with mode 0600. The bearer token is stored separately in the operating-system
 credential vault and is never serialized into the Server Profile or MCP
 settings file.
@@ -137,6 +137,6 @@ settings file.
 - **Retain Helper and network override tools behind confirmation text:** text is
   not an enforceable Gateway permission and cannot constrain an arbitrary MCP
   client.
-- **Store the MCP bearer token in `servers-v2.json` or `mcp-v2.json`:** both are
+- **Store the MCP bearer token in `servers.json` or `mcp.json`:** both are
   ordinary files and would violate the V2 rule that plaintext tokens stay out
   of profile/settings stores.

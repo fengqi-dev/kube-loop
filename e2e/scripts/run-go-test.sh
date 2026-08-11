@@ -61,10 +61,9 @@ echo "==> Running TUN e2e (log: ${LOG})"
 if [[ -n "${KUBELOOP_E2E_PACKAGES:-}" ]]; then
   read -r -a E2E_PACKAGES <<<"${KUBELOOP_E2E_PACKAGES}"
 else
-  # V2 clients only know the Gateway address. The older kubeconfig-driven
-  # packages remain available through KUBELOOP_E2E_PACKAGES for V1 maintenance,
-  # but are not part of the V2 acceptance gate.
-  E2E_PACKAGES=(./e2e/v2dataplane ./e2e/remotetun)
+  # Clients only know the Gateway address, so the acceptance gate exercises
+  # the authenticated Data Plane and remote TUN paths.
+  E2E_PACKAGES=(./e2e/dataplane ./e2e/remotetun)
 fi
 set +e
 go test -tags=e2e "${E2E_PACKAGES[@]}" -count=1 -timeout="${TIMEOUT}" -parallel=1 -p 1 -v "$@" 2>&1 | tee "${LOG}"

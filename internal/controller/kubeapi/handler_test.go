@@ -40,7 +40,7 @@ func TestReadOnlyKubernetesRoutesUsePrincipalAndStableDocuments(t *testing.T) {
 		case "/api/v1/namespaces/development":
 			_, _ = writer.Write([]byte(`{"apiVersion":"v1","kind":"Namespace","metadata":{"name":"development"},"status":{"phase":"Active"}}`))
 		case "/api/v1/namespaces/development/pods":
-			_, _ = writer.Write([]byte(`{"apiVersion":"v1","kind":"PodList","metadata":{"resourceVersion":"43"},"items":[{"metadata":{"name":"api-0","namespace":"development"},"spec":{"nodeName":"node-a","containers":[{"name":"api"},{"name":"sidecar"}]},"status":{"phase":"Running","podIP":"10.1.2.3","conditions":[{"type":"Ready","status":"True"}]}}]}`))
+			_, _ = writer.Write([]byte(`{"apiVersion":"v1","kind":"PodList","metadata":{"resourceVersion":"43"},"items":[{"metadata":{"name":"api-0","namespace":"development"},"spec":{"nodeName":"node-a","containers":[{"name":"api","ports":[{"name":"http","containerPort":8080,"protocol":"TCP"}]},{"name":"sidecar"}]},"status":{"phase":"Running","podIP":"10.1.2.3","conditions":[{"type":"Ready","status":"True"}]}}]}`))
 		case "/api/v1/namespaces/development/pods/api-0":
 			_, _ = writer.Write([]byte(`{"apiVersion":"v1","kind":"Pod","metadata":{"name":"api-0","namespace":"development"},"spec":{"containers":[{"name":"api"}]},"status":{"phase":"Running"}}`))
 		case "/api/v1/namespaces/development/services":
@@ -65,6 +65,10 @@ func TestReadOnlyKubernetesRoutesUsePrincipalAndStableDocuments(t *testing.T) {
 				t.Errorf("capability namespace = %q", attributes.Namespace)
 			}
 			allowed := !(attributes.Resource == "services" && attributes.Verb == "watch")
+			if (attributes.Resource == "services" || attributes.Resource == "endpoints" || attributes.Resource == "endpointslices") &&
+				(attributes.Verb == "create" || attributes.Verb == "update" || attributes.Verb == "delete") {
+				allowed = false
+			}
 			_, _ = writer.Write([]byte(`{"apiVersion":"authorization.k8s.io/v1","kind":"SelfSubjectAccessReview","status":{"allowed":` + strconv.FormatBool(allowed) + `}}`))
 		default:
 			http.NotFound(writer, request)
@@ -84,7 +88,7 @@ func TestReadOnlyKubernetesRoutesUsePrincipalAndStableDocuments(t *testing.T) {
 		}},
 		{path: "/api/v2/namespaces?limit=10&continue=next-page", want: []string{`"name":"development"`, `"continue":"page-2"`, `"resourceVersion":"42"`}},
 		{path: "/api/v2/namespaces/development", want: []string{`"status":"Active"`}},
-		{path: "/api/v2/namespaces/development/pods", want: []string{`"name":"api-0"`, `"ready":true`, `"containers":["api","sidecar"]`}},
+		{path: "/api/v2/namespaces/development/pods", want: []string{`"name":"api-0"`, `"ready":true`, `"containers":["api","sidecar"]`, `"ports":[{"name":"http","port":8080,"protocol":"TCP"}]`}},
 		{path: "/api/v2/namespaces/development/pods/api-0", want: []string{`"name":"api-0"`, `"phase":"Running"`}},
 		{path: "/api/v2/namespaces/development/services", want: []string{`"clusterIp":"10.96.0.10"`, `"targetPort":"8080"`}},
 		{path: "/api/v2/namespaces/development/services/api", want: []string{`"name":"api"`, `"port":80`}},
@@ -107,7 +111,7 @@ func TestReadOnlyKubernetesRoutesUsePrincipalAndStableDocuments(t *testing.T) {
 			}
 		})
 	}
-	expectedCalls := int32(len(tests) + 26)
+	expectedCalls := int32(len(tests) + 18)
 	if calls.Load() != expectedCalls {
 		t.Fatalf("upstream calls = %d, want %d", calls.Load(), expectedCalls)
 	}

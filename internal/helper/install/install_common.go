@@ -329,7 +329,7 @@ func UninstallFromCLI() error {
 		return err
 	}
 	current := helper.BinaryInstallPath()
-	_ = os.Remove(current)
+	removeInstalledBinary(current)
 	if legacy := helper.LegacyBinaryInstallPath(); legacy != "" {
 		_ = os.Remove(legacy)
 	}
@@ -338,6 +338,20 @@ func UninstallFromCLI() error {
 	_ = os.Remove(helper.SystemTokenPath())
 	_ = os.Remove(helper.SocketPath())
 	return nil
+}
+
+func removeInstalledBinary(path string) {
+	// A unified Windows helper performs uninstall from the same executable used
+	// by the service. Windows cannot unlink that executable while this process is
+	// running; keep the packaged resource so the desktop can install it again.
+	// The application uninstaller removes the containing directory after this
+	// command exits.
+	if runtime.GOOS == "windows" {
+		if executable, err := os.Executable(); err == nil && sameInstallPath(path, executable) {
+			return
+		}
+	}
+	_ = os.Remove(path)
 }
 
 func sameInstallPath(a, b string) bool {

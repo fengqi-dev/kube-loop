@@ -72,10 +72,6 @@ func TestWindowsInstallRecoversMissingServiceImagePath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	installTool, err := filepath.Abs(filepath.Join("..", "..", "build", "embedded", "kubeloop-helper-install.exe"))
-	if err != nil {
-		t.Fatal(err)
-	}
 	singBox, err := filepath.Abs(filepath.Join("..", "..", "build", "bin", "sing-box.exe"))
 	if err != nil {
 		t.Fatal(err)
@@ -83,19 +79,17 @@ func TestWindowsInstallRecoversMissingServiceImagePath(t *testing.T) {
 	if _, err := os.Stat(source); err != nil {
 		t.Fatalf("helper source: %v", err)
 	}
-	if _, err := os.Stat(installTool); err != nil {
-		t.Fatalf("helper install tool: %v", err)
-	}
 	if _, err := os.Stat(singBox); err != nil {
 		t.Fatalf("sing-box source: %v", err)
 	}
 
-	// Run the packaged install tool instead of calling InstallFromCLI from the
+	// Run the packaged helper instead of calling InstallFromCLI from the
 	// Go test process. On Windows the install root is derived from the running
 	// executable; using the test binary would point the service into go-build's
 	// temporary directory and leave the executable locked during test cleanup.
 	command := exec.Command(
-		installTool,
+		source,
+		"install",
 		"--source", source,
 		"--token", token,
 		"--uid", strconv.Itoa(0),

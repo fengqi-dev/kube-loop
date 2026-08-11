@@ -44,22 +44,20 @@ func main() {
 	}{
 		{pkg: "./cmd/kubeloop-helper", name: "kubeloop-helper"},
 	}
-	if goos == "windows" {
-		targets = append(targets,
-			struct {
-				pkg  string
-				name string
-			}{pkg: "./cmd/kubeloop-helper-install", name: "kubeloop-helper-install"},
-			struct {
-				pkg  string
-				name string
-			}{pkg: "./cmd/kubeloop-helper-uninstall", name: "kubeloop-helper-uninstall"},
-		)
-	}
 
 	embeddedDir := filepath.Join(root, "build", "embedded")
 	if err := os.MkdirAll(embeddedDir, 0o755); err != nil {
 		fatalf("create embedded helper directory: %v", err)
+	}
+	if goos == "windows" {
+		for _, obsolete := range []string{
+			"kubeloop-helper-install.exe",
+			"kubeloop-helper-uninstall.exe",
+		} {
+			if err := os.Remove(filepath.Join(embeddedDir, obsolete)); err != nil && !os.IsNotExist(err) {
+				fatalf("remove obsolete %s: %v", obsolete, err)
+			}
+		}
 	}
 
 	for _, target := range targets {

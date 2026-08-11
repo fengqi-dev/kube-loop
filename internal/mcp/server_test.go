@@ -50,7 +50,7 @@ func TestServerRejectsMissingBearer(t *testing.T) {
 	}
 }
 
-func TestServerPublishesOnlyV2GatewayTools(t *testing.T) {
+func TestServerPublishesOnlyGatewayTools(t *testing.T) {
 	backend := &fakeBackend{}
 	server := NewServer(backend, "test")
 	token := strings.Repeat("t", 64)

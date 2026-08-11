@@ -40,18 +40,20 @@ export function ResourcePagination({
   page,
   pageSize = RESOURCE_PAGE_SIZE,
   total,
+  showWhenEmpty = false,
   onPageChange,
 }: {
   page: number;
   pageSize?: number;
   total: number;
+  showWhenEmpty?: boolean;
   onPageChange(page: number): void;
 }) {
   const { t } = useI18n();
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
-  if (total === 0) return null;
+  if (total === 0 && !showWhenEmpty) return null;
 
-  const start = (page - 1) * pageSize + 1;
+  const start = total === 0 ? 0 : (page - 1) * pageSize + 1;
   const end = Math.min(page * pageSize, total);
 
   function navigate(nextPage: number) {

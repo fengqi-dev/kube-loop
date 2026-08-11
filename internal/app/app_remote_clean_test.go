@@ -10,16 +10,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fengqi-dev/kube-loop/internal/clientv2/credentials"
-	clientdiscovery "github.com/fengqi-dev/kube-loop/internal/clientv2/discovery"
-	clientremote "github.com/fengqi-dev/kube-loop/internal/clientv2/remote"
+	"github.com/fengqi-dev/kube-loop/internal/client/credentials"
+	clientdiscovery "github.com/fengqi-dev/kube-loop/internal/client/discovery"
+	clientremote "github.com/fengqi-dev/kube-loop/internal/client/remote"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
 	"github.com/google/uuid"
 )
 
 func TestCleanDirectoryWithOnlyServerURLBrowsesRemoteInventory(t *testing.T) {
 	cleanDirectory := t.TempDir()
-	profilePath := filepath.Join(cleanDirectory, "servers-v2.json")
+	profilePath := filepath.Join(cleanDirectory, "servers.json")
 	if entries, err := os.ReadDir(cleanDirectory); err != nil || len(entries) != 0 {
 		t.Fatalf("initial directory = %v, %v", entries, err)
 	}
@@ -86,7 +86,7 @@ func TestCleanDirectoryWithOnlyServerURLBrowsesRemoteInventory(t *testing.T) {
 	})
 	t.Cleanup(func() { application.shutdown(context.Background()) })
 	bootstrap, err := application.Bootstrap()
-	if err != nil || bootstrap.Mode != "setup" || len(bootstrap.ServerProfiles.Profiles) != 0 {
+	if err != nil || len(bootstrap.ServerProfiles.Profiles) != 0 {
 		t.Fatalf("clean bootstrap = %#v, %v", bootstrap, err)
 	}
 	profileResult, err := application.SaveServerProfile(SaveServerProfileRequest{BaseURL: server.URL, Activate: true})

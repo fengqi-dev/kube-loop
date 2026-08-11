@@ -217,17 +217,35 @@ func (registry *Registry) Allocate(request relaycontrol.AllocationRequest) (rela
 	if err := request.Validate(now); err != nil {
 		return relaycontrol.AllocationResponse{}, err
 	}
+	var displaced assignmentRecord
+	var displacedRelay *relayRecord
+	reservationReleased := false
+	reassigning := false
 	if existing, ok := registry.assignments[request.SessionID]; ok {
 		if request.NetworkSpecHash != existing.networkSpecHash || request.Generation < existing.generation {
 			return relaycontrol.AllocationResponse{}, ErrConflict
 		}
 		relay := registry.relays[existing.response.RelayID]
 		if relay == nil || relay.leaseID != existing.response.LeaseID || !registry.availableLocked(relay, now) {
-			return relaycontrol.AllocationResponse{}, ErrAssignedRelayUnavailable
+			// A newer authoritative Session generation is the fencing boundary that
+			// permits failover. Reusing the same generation would allow two Relays
+			// to accept tickets for one Session concurrently during a partition.
+			if request.Generation == existing.generation {
+				return relaycontrol.AllocationResponse{}, ErrAssignedRelayUnavailable
+			}
+			displaced = existing
+			displacedRelay = relay
+			reassigning = true
+			delete(registry.assignments, request.SessionID)
+			if relay != nil && relay.reservations > 0 {
+				relay.reservations--
+				reservationReleased = true
+			}
+		} else {
+			existing.generation = request.Generation
+			registry.assignments[request.SessionID] = existing
+			return existing.response, nil
 		}
-		existing.generation = request.Generation
-		registry.assignments[request.SessionID] = existing
-		return existing.response, nil
 	}
 	candidates := make([]*relayRecord, 0, len(registry.relays))
 	for _, relay := range registry.relays {
@@ -236,6 +254,13 @@ func (registry *Registry) Allocate(request relaycontrol.AllocationRequest) (rela
 		}
 	}
 	if len(candidates) == 0 {
+		if reassigning {
+			registry.assignments[request.SessionID] = displaced
+			if reservationReleased {
+				displacedRelay.reservations++
+			}
+			return relaycontrol.AllocationResponse{}, ErrAssignedRelayUnavailable
+		}
 		return relaycontrol.AllocationResponse{}, ErrUnavailable
 	}
 	slices.SortFunc(candidates, func(left, right *relayRecord) int {

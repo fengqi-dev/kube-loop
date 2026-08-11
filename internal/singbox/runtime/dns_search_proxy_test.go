@@ -1,9 +1,11 @@
 package runtime
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -14,21 +16,11 @@ import (
 func TestDNSSearchProxyUDPAndTCP(t *testing.T) {
 	upstreamAddr := startTestDNSUpstream(t)
 
-	publicTCP, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	publicPort := publicTCP.Addr().(*net.TCPAddr).Port
-	_ = publicTCP.Close()
-
 	host, upstreamHost, upstreamPort := "127.0.0.1", "127.0.0.1", upstreamAddr.Port
-	proxy, err := startDNSSearchProxy(
-		host, publicPort, upstreamHost, upstreamPort,
+	proxy, publicPort := startTestDNSSearchProxy(
+		t, host, upstreamHost, upstreamPort,
 		singbox.SearchDomains("default"), "cluster.local",
 	)
-	if err != nil {
-		t.Fatal(err)
-	}
 	defer func() { _ = proxy.Close() }()
 
 	req := new(dns.Msg)
@@ -86,20 +78,10 @@ func TestDNSSearchProxyPrefersExpandedClusterName(t *testing.T) {
 	})
 	upstreamAddr := startTestDNSUpstreamWithHandler(t, handler)
 
-	publicTCP, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	publicPort := publicTCP.Addr().(*net.TCPAddr).Port
-	_ = publicTCP.Close()
-
-	proxy, err := startDNSSearchProxy(
-		"127.0.0.1", publicPort, "127.0.0.1", upstreamAddr.Port,
+	proxy, publicPort := startTestDNSSearchProxy(
+		t, "127.0.0.1", "127.0.0.1", upstreamAddr.Port,
 		singbox.SearchDomains("default"), "cluster.local",
 	)
-	if err != nil {
-		t.Fatal(err)
-	}
 	defer func() { _ = proxy.Close() }()
 
 	req := new(dns.Msg)
@@ -123,20 +105,10 @@ func TestDNSSearchProxyPrefersExpandedClusterName(t *testing.T) {
 
 func TestDNSSearchProxyUpdatesHostAliases(t *testing.T) {
 	upstreamAddr := startTestDNSUpstream(t)
-	publicTCP, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	publicPort := publicTCP.Addr().(*net.TCPAddr).Port
-	_ = publicTCP.Close()
-
-	proxy, err := startDNSSearchProxy(
-		"127.0.0.1", publicPort, "127.0.0.1", upstreamAddr.Port,
+	proxy, publicPort := startTestDNSSearchProxy(
+		t, "127.0.0.1", "127.0.0.1", upstreamAddr.Port,
 		singbox.SearchDomains("default"), "cluster.local",
 	)
-	if err != nil {
-		t.Fatal(err)
-	}
 	defer func() { _ = proxy.Close() }()
 
 	target := net.JoinHostPort("127.0.0.1", fmt.Sprintf("%d", publicPort))
@@ -219,6 +191,35 @@ func startTestDNSUpstream(t *testing.T) *net.UDPAddr {
 		_ = w.WriteMsg(msg)
 	})
 	return startTestDNSUpstreamWithHandler(t, handler)
+}
+
+func startTestDNSSearchProxy(
+	t *testing.T,
+	publicHost, upstreamHost string,
+	upstreamPort int,
+	search []string,
+	clusterDomains ...string,
+) (*dnsSearchProxy, int) {
+	t.Helper()
+	for range 20 {
+		reservation, err := net.Listen("tcp", net.JoinHostPort(publicHost, "0"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		publicPort := reservation.Addr().(*net.TCPAddr).Port
+		_ = reservation.Close()
+		proxy, err := startDNSSearchProxy(
+			publicHost, publicPort, upstreamHost, upstreamPort, search, clusterDomains...,
+		)
+		if err == nil {
+			return proxy, publicPort
+		}
+		if !errors.Is(err, syscall.EADDRINUSE) {
+			t.Fatal(err)
+		}
+	}
+	t.Fatal("could not reserve a shared TCP/UDP DNS test port")
+	return nil, 0
 }
 
 func startTestDNSUpstreamWithHandler(t *testing.T, handler dns.Handler) *net.UDPAddr {

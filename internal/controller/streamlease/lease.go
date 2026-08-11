@@ -56,15 +56,19 @@ func Start(
 		return nil, nil, errors.New("Task identity is required for owner heartbeat")
 	}
 	now := config.Now().UTC()
-	expiresAt := session.ExpiresAt.UTC()
-	if !principal.AccessExpiresAt.IsZero() && principal.AccessExpiresAt.Before(expiresAt) {
-		expiresAt = principal.AccessExpiresAt.UTC()
-	}
-	remaining := expiresAt.Sub(now)
-	if remaining <= 0 {
+	if !session.ExpiresAt.After(now) || (!principal.AccessExpiresAt.IsZero() && !principal.AccessExpiresAt.After(now)) {
 		return nil, nil, errors.New("authorization lease expired")
 	}
-	ctx, cancel := context.WithTimeout(parent, remaining)
+	var ctx context.Context
+	var cancel context.CancelFunc
+	if principal.AccessExpiresAt.IsZero() || principal.FamilyID != "" {
+		// A refresh-token Family is checked throughout the stream, so a refreshed
+		// login must not leave the WebSocket bound to the opening access token's
+		// immutable expiry. Credentials without a Family retain that deadline.
+		ctx, cancel = context.WithCancel(parent)
+	} else {
+		ctx, cancel = context.WithDeadline(parent, principal.AccessExpiresAt.UTC())
+	}
 	go watch(ctx, cancel, store, principal, session.ID, config)
 	if config.Runtime != nil {
 		runtimeContext, release, err := config.Runtime.AttachRuntime(ctx, session.ID, config.TaskID)

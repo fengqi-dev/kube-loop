@@ -32,7 +32,7 @@ func TestDrainWaitsForActiveConnection(t *testing.T) {
 	server := NewServer(nil, time.Second)
 	client, gatewayConnection := net.Pipe()
 	defer client.Close()
-	go server.ServeConn(gatewayConnection)
+	go server.ServeConnForAuthorization(gatewayConnection, gatewayTestAuthorization(t))
 	waitForActiveConnections(t, server, 1)
 
 	drainResult := make(chan error, 1)
@@ -57,7 +57,7 @@ func TestDrainDeadlineClosesActiveConnections(t *testing.T) {
 	server := NewServer(nil, time.Second)
 	client, gatewayConnection := net.Pipe()
 	defer client.Close()
-	go server.ServeConn(gatewayConnection)
+	go server.ServeConnForAuthorization(gatewayConnection, gatewayTestAuthorization(t))
 	waitForActiveConnections(t, server, 1)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
@@ -74,9 +74,10 @@ func TestBeginDrainRejectsNewConnections(t *testing.T) {
 	server := NewServer(nil, time.Second)
 	server.BeginDrain()
 	client, gatewayConnection := net.Pipe()
+	authorization := gatewayTestAuthorization(t)
 	done := make(chan struct{})
 	go func() {
-		server.ServeConn(gatewayConnection)
+		server.ServeConnForAuthorization(gatewayConnection, authorization)
 		close(done)
 	}()
 	select {
@@ -90,11 +91,20 @@ func TestBeginDrainRejectsNewConnections(t *testing.T) {
 	_ = client.Close()
 }
 
+func gatewayTestAuthorization(t *testing.T) SessionAuthorization {
+	t.Helper()
+	_, specHash := gatewayTestNetworkSpec(t)
+	return SessionAuthorization{
+		SessionID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", Generation: 1,
+		Namespace: "default", NetworkSpecHash: specHash,
+	}
+}
+
 func TestAuthenticatedWebSocketSessionRejectsMismatchedProtocolTenant(t *testing.T) {
 	server := NewServer(nil, time.Second)
 	client, gatewayConnection := net.Pipe()
 	done := make(chan struct{})
-	_, specHash := gatewayTestNetworkSpec(t)
+	spec, specHash := gatewayTestNetworkSpec(t)
 	go func() {
 		server.ServeConnForAuthorization(gatewayConnection, SessionAuthorization{
 			SessionID: "33333333-3333-4333-8333-333333333333", Generation: 1,
@@ -106,11 +116,13 @@ func TestAuthenticatedWebSocketSessionRejectsMismatchedProtocolTenant(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := tunnel.WriteControlSession(client, wrongToken); err != nil {
-		t.Fatal(err)
-	}
+	writeDone := make(chan error, 1)
+	go func() { writeDone <- tunnel.WriteAuthorizedControlSession(client, wrongToken, spec) }()
 	if err := tunnel.ReadStatus(client); err == nil || !strings.Contains(err.Error(), "does not match RelayTicket") {
 		t.Fatalf("status error = %v", err)
+	}
+	if err := <-writeDone; err != nil && !errors.Is(err, net.ErrClosed) {
+		t.Logf("control writer closed after rejection: %v", err)
 	}
 	_ = client.Close()
 	select {

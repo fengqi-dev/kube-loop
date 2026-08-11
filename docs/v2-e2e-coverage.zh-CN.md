@@ -1,6 +1,6 @@
 # V2 远程功能对等 E2E 矩阵
 
-本文档是 V2-609 的验收清单。V2 用例必须通过类型化客户端、Controller API、远程 Task 和真实 Kubernetes 资源完成操作；桌面端不得读取 kubeconfig 或直接调用 Kubernetes API。测试集位于 `e2e/v2dataplane`，使用真实 Minikube、真实 SPDY exec/port-forward、真实 TCP/UDP 和当前工作树构建的 Gateway 镜像。
+本文档是 V2-609 的验收清单。V2 用例必须通过类型化客户端、Controller API、远程 Task 和真实 Kubernetes 资源完成操作；桌面端不得读取 kubeconfig 或直接调用 Kubernetes API。测试集位于 `e2e/dataplane`，使用真实 Minikube、真实 SPDY exec/port-forward、真实 TCP/UDP 和当前工作树构建的 Gateway 镜像。
 
 ## V1 功能到 V2 证据
 
@@ -46,8 +46,8 @@
 
 ## 身份、容量与平台证据
 
-- `internal/clientv2/auth/fullstack_oidc_test.go` 使用真实 TLS discovery、authorization redirect、PKCE、JWKS 和 RS256 ID Token，贯通桌面 loopback callback、Controller 登录、SQLite、Access/Refresh Token 轮换与撤销。
-- `internal/clientv2/auth/fullstack_ad_test.go` 使用真实 LDAPS BER 服务绑定、escaped filter 搜索、独立用户绑定、objectGUID/group/account-state 映射，贯通桌面登录、Controller、SQLite 与错误密码拒绝。
+- `internal/client/auth/fullstack_oidc_test.go` 使用真实 TLS discovery、authorization redirect、PKCE、JWKS 和 RS256 ID Token，贯通桌面 loopback callback、Controller 登录、SQLite、Access/Refresh Token 轮换与撤销。
+- `internal/client/auth/fullstack_ad_test.go` 使用真实 LDAPS BER 服务绑定、escaped filter 搜索、独立用户绑定、objectGUID/group/account-state 映射，贯通桌面登录、Controller、SQLite 与错误密码拒绝。
 - `make capacity-baseline` 验证全局/单用户物理 WSS、逻辑 stream 上限、容量释放，以及满载时 live/ready/metrics；三轮 32 KiB stream benchmark 记录吞吐和分配。`TestGatewayPodMultiUserCapacityRSSAndCleanup` 在单个真实 Gateway Pod 上以四名 Principal/四条物理 WSS/十六条逻辑 stream 验证限额、容量复用、集群内吞吐和 kubelet working-set 曲线；满载期间撤销 Token Family，确认 Preview Task、relay、TrafficBinding、Service、EndpointSlice 和 snapshot 在 5 秒预算内全部清理。
 - Windows/macOS workflow 运行全量本地测试和真实 Helper 安装、升级、ACL、DNS 恢复、卸载；Linux 额外运行完整 Minikube TUN。`e2e/remotetun` 已接入三平台 workflow，使用实际 Helper、sing-box TUN、WSS/smux Gateway、RelayTicket/NetworkSpec 和精确目标路由，验证休眠间隔触发 transport 刷新后 SOCKS 地址、TUN core 与 Helper Session 保持不变，且停止后无特权资源残留。最终门禁已由 GitHub Actions push workflow [31454657118](https://github.com/fengqi-dev/kube-loop/actions/runs/31454657118) 完成：Windows、macOS、Linux、Helm、主 Go 与前端六个作业全部通过，V2-803 已关闭。
 
@@ -59,8 +59,8 @@ KUBELOOP_E2E_CONTEXT=minikube \
 KUBELOOP_REMOTE_TUN_E2E=1 \
 KUBELOOP_GATEWAY_IMAGE=<由当前工作树构建的镜像> \
 KUBELOOP_SINGBOX_PATH=<当前 sing-box 路径> \
-KUBELOOP_E2E_PACKAGES='./e2e/v2dataplane ./e2e/remotetun' \
+KUBELOOP_E2E_PACKAGES='./e2e/dataplane ./e2e/remotetun' \
 bash ./e2e/scripts/run-go-test.sh
 ```
 
-通用入口会在目标 context 安装当前 TrafficBinding CRD，并以隔离 kubeconfig 启动当前工作树 Operator；专用 Kubebuilder 套件仍由 `make operator-test-e2e` 独立执行。2026-08-11 加入真实单 Pod 容量/RSS/满载撤权，以及 Helper/TUN/WSS 休眠恢复后，`e2e/v2dataplane` 完整复跑通过（`194.739s`），`e2e/remotetun` 通过（`1.647s`）。此前 File Transfer 同场景连续 10 次复跑通过；Preview 专项确认 TrafficBinding、Service、EndpointSlice 与 durable snapshot 全部释放（`30.398s`）；隔离 kubeconfig 的 Operator 部署、受保护 metrics、Preview TrafficBinding 调谐与 finalizer 清理套件 3/3 通过，且中断后可幂等重跑；`make helm-test-e2e` 在 Minikube Kubernetes v1.35.1 完整通过 SQLite/PostgreSQL 安装、独立升级、扩缩容、回滚、Pod 恢复、审计/管理撤权、数据保留和卸载/CRD retain。
+通用入口会在目标 context 安装当前 TrafficBinding CRD，并以隔离 kubeconfig 启动当前工作树 Operator；专用 Kubebuilder 套件仍由 `make operator-test-e2e` 独立执行。2026-08-11 加入真实单 Pod 容量/RSS/满载撤权，以及 Helper/TUN/WSS 休眠恢复后，`e2e/dataplane` 完整复跑通过（`194.739s`），`e2e/remotetun` 通过（`1.647s`）。此前 File Transfer 同场景连续 10 次复跑通过；Preview 专项确认 TrafficBinding、Service、EndpointSlice 与 durable snapshot 全部释放（`30.398s`）；隔离 kubeconfig 的 Operator 部署、受保护 metrics、Preview TrafficBinding 调谐与 finalizer 清理套件 3/3 通过，且中断后可幂等重跑；`make helm-test-e2e` 在 Minikube Kubernetes v1.35.1 完整通过 SQLite/PostgreSQL 安装、独立升级、扩缩容、回滚、Pod 恢复、审计/管理撤权、数据保留和卸载/CRD retain。

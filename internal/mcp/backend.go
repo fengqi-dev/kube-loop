@@ -3,12 +3,12 @@ package mcp
 import (
 	"context"
 
-	clientexchange "github.com/fengqi-dev/kube-loop/internal/clientv2/exchange"
-	clientfiletransfer "github.com/fengqi-dev/kube-loop/internal/clientv2/filetransfer"
-	clientmirror "github.com/fengqi-dev/kube-loop/internal/clientv2/mirror"
-	clientportforward "github.com/fengqi-dev/kube-loop/internal/clientv2/portforward"
-	clientpreview "github.com/fengqi-dev/kube-loop/internal/clientv2/preview"
-	clientremote "github.com/fengqi-dev/kube-loop/internal/clientv2/remote"
+	clientexchange "github.com/fengqi-dev/kube-loop/internal/client/exchange"
+	clientfiletransfer "github.com/fengqi-dev/kube-loop/internal/client/filetransfer"
+	clientmirror "github.com/fengqi-dev/kube-loop/internal/client/mirror"
+	clientportforward "github.com/fengqi-dev/kube-loop/internal/client/portforward"
+	clientpreview "github.com/fengqi-dev/kube-loop/internal/client/preview"
+	clientremote "github.com/fengqi-dev/kube-loop/internal/client/remote"
 )
 
 type LocalTarget struct {

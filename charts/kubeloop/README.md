@@ -1,12 +1,12 @@
 # KubeLoop Helm Chart
 
-This chart installs the V2 server as three independent workloads:
+This chart installs the server as three independent workloads:
 
 - `kubeloop-controller`: discovery, authentication/API boundary, durable Task ownership and creation/deletion of `TrafficBinding` intents.
 - `kubeloop-gateway`: WebSocket tunnel data plane. It has no database configuration and does not automount the general Kubernetes API credential. Registry mode projects only a short-lived, audience-bound Pod token.
 - `kubeloop-operator`: watches `TrafficBinding` and exclusively coordinates Preview/Exchange/Mirror Service, Endpoints and EndpointSlice mutations with finalizer-based restoration.
 
-The current V2 implementation slice exposes discovery, OIDC/AD login, token lifecycle, default-deny Gateway Policy, API audit, storage repositories, Kubernetes capability probes, read-only Namespace/Pod/Service inventory, owned Cluster Session lifecycles, short-lived RelayTicket-authenticated WebSocket transport, Session-bound Port Forward Tasks, Controller-owned Pod exec streams, resumable Controller-owned file-transfer Task streams, guarded remote directory management with desktop local-file integration, and TrafficBinding reconciliation through the Operator. The remaining security, observability and release milestones in the V2 roadmap still apply; do not treat a development image tag as a production release.
+The current implementation exposes discovery, OIDC/AD login, token lifecycle, default-deny Gateway Policy, API audit, storage repositories, Kubernetes capability probes, read-only Namespace/Pod/Service inventory, owned Cluster Session lifecycles, short-lived RelayTicket-authenticated WebSocket transport, Session-bound Port Forward Tasks, Controller-owned Pod exec streams, resumable Controller-owned file-transfer Task streams, guarded remote directory management with desktop local-file integration, and TrafficBinding reconciliation through the Operator. Do not treat a development image tag as a production release.
 
 Both workloads expose an independent `logLevel` value (`debug`, `info`, `warn`,
 or `error`). The binaries validate the value again at startup. Controller and
@@ -591,7 +591,7 @@ Forward policy path, and exec/file capabilities require `pods/exec`. Clients
 may cache this document only for a short period and must isolate it by the
 authenticated principal, namespace, and exact Gateway version; it is never a
 replacement for request-time authorization.
-Inventory responses use stable, minimal V2 documents rather than exposing raw
+Inventory responses use stable, minimal documents rather than exposing raw
 Kubernetes objects. List endpoints accept bounded `labelSelector` and
 `fieldSelector` values. Namespace list results are additionally filtered by
 the principal's namespace-scoped Gateway Policy. Watch streams share informers

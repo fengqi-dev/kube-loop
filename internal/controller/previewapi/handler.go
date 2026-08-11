@@ -48,7 +48,6 @@ type Document struct {
 	Ports     []Port           `json:"ports"`
 	CreatedAt time.Time        `json:"createdAt"`
 	UpdatedAt time.Time        `json:"updatedAt"`
-	ExpiresAt time.Time        `json:"expiresAt"`
 }
 
 type storedSpec struct {
@@ -153,11 +152,11 @@ func (handler *Handler) create(
 	canonical := storedSpec{Name: spec.Name, Ports: append([]Port(nil), spec.Ports...)}
 	specJSON, _ := json.Marshal(canonical)
 	now := handler.now().UTC()
-	expiresAt := session.ExpiresAt.UTC()
+	idempotencyExpiresAt := session.ExpiresAt.UTC()
 	task := storage.Task{
 		ID: uuid.NewString(), PrincipalID: principal.Subject, SessionID: session.ID,
 		Type: TaskType, State: remotetask.Pending, Spec: specJSON, IdempotencyKey: key,
-		CreatedAt: now, UpdatedAt: now, ExpiresAt: &expiresAt,
+		CreatedAt: now, UpdatedAt: now,
 	}
 	document := documentFrom(task, session.Namespace, canonical)
 	response, _ := json.Marshal(document)
@@ -165,7 +164,7 @@ func (handler *Handler) create(
 	err = handler.storage.WithinTransaction(request.Context(), func(repositories storage.Repositories) error {
 		record, reserved, err := repositories.Idempotency().Reserve(request.Context(), storage.IdempotencyRecord{
 			Scope: scope, Key: key, RequestHash: requestHash, ResourceType: TaskType,
-			ResourceID: task.ID, Response: response, CreatedAt: now, ExpiresAt: expiresAt,
+			ResourceID: task.ID, Response: response, CreatedAt: now, ExpiresAt: idempotencyExpiresAt,
 		})
 		if err != nil {
 			return err
@@ -329,16 +328,12 @@ func decodeTask(task storage.Task, namespace string) (Document, error) {
 }
 
 func documentFrom(task storage.Task, namespace string, spec storedSpec) Document {
-	expiresAt := time.Time{}
-	if task.ExpiresAt != nil {
-		expiresAt = task.ExpiresAt.UTC()
-	}
 	result := ownerResult{}
 	_ = json.Unmarshal(task.Result, &result)
 	return Document{
 		ID: task.ID, SessionID: task.SessionID, Namespace: namespace, State: task.State,
 		Name: spec.Name, ClusterIP: result.ClusterIP, Ports: append([]Port(nil), spec.Ports...),
-		CreatedAt: task.CreatedAt.UTC(), UpdatedAt: task.UpdatedAt.UTC(), ExpiresAt: expiresAt,
+		CreatedAt: task.CreatedAt.UTC(), UpdatedAt: task.UpdatedAt.UTC(),
 	}
 }
 

@@ -8,7 +8,7 @@ import (
 
 type LogFunc func(level, message string)
 
-// Controller owns the embedded MCP listener and its V2 settings store.
+// Controller owns the embedded MCP listener and its settings store.
 type Controller struct {
 	server *Server
 	store  ConfigStore

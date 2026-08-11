@@ -300,17 +300,16 @@ jobs:
           }
           go build -trimpath -o build/windows-ci/kubeloop-gateway.exe ./cmd/kubeloop-gateway
 
-      - name: Build helper install tools and sing-box
+      - name: Build helper and sing-box
         run: |
           go run ./build/helper-prebuild.go windows/amd64
           go run ./e2e/scripts/ensure-singbox.go
 
-      - name: Install helper through Windows install tool
+      - name: Install helper
         run: >
           go run ./e2e/scripts/manage-helper.go
           --operation install
           --source "${{ github.workspace }}\build\embedded\kubeloop-helper.exe"
-          --install-tool "${{ github.workspace }}\build\embedded\kubeloop-helper-install.exe"
           --sing-box "${{ github.workspace }}\build\bin\sing-box.exe"
 
       - name: Upgrade helper with a changed binary
@@ -319,7 +318,6 @@ jobs:
           go run ./e2e/scripts/manage-helper.go `
             --operation install `
             --source "${{ github.workspace }}\build\embedded\kubeloop-helper.exe" `
-            --install-tool "${{ github.workspace }}\build\embedded\kubeloop-helper-install.exe" `
             --sing-box "${{ github.workspace }}\build\bin\sing-box.exe"
 
       - name: Run Windows platform E2E
@@ -338,9 +336,9 @@ jobs:
         if: always()
         shell: pwsh
         run: |
-          $uninstallTool = "${{ github.workspace }}\build\embedded\kubeloop-helper-uninstall.exe"
-          if (Test-Path $uninstallTool) {
-            go run ./e2e/scripts/manage-helper.go --operation uninstall --uninstall-tool $uninstallTool
+          $helper = "${{ github.workspace }}\build\embedded\kubeloop-helper.exe"
+          if (Test-Path $helper) {
+            go run ./e2e/scripts/manage-helper.go --operation uninstall --source $helper
           }
 
   macos-e2e:

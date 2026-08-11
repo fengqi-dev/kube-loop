@@ -34,6 +34,7 @@ type Server struct {
 	HostUDP        HostUDPHandler
 
 	gatewayMu sync.RWMutex
+	hostMu    sync.RWMutex
 }
 
 // Bridge is the local SOCKS listener used by sing-box's kubernetes outbound.
@@ -43,6 +44,8 @@ type Bridge struct {
 }
 
 func (b *Bridge) SetHostTCPHandler(handler HostTCPHandler) {
+	b.server.hostMu.Lock()
+	defer b.server.hostMu.Unlock()
 	b.server.HostTCP = handler
 }
 
@@ -102,8 +105,11 @@ func (s *Server) handleConnect(
 		_ = socks5.SendReply(writer, statute.RepAddrTypeNotSupported, nil)
 		return err
 	}
-	if s.HostTCP != nil {
-		if serve, ok := s.HostTCP(host, port); ok && serve != nil {
+	s.hostMu.RLock()
+	hostTCP := s.HostTCP
+	s.hostMu.RUnlock()
+	if hostTCP != nil {
+		if serve, ok := hostTCP(host, port); ok && serve != nil {
 			client, ok := writer.(net.Conn)
 			if !ok {
 				_ = socks5.SendReply(writer, statute.RepServerFailure, nil)

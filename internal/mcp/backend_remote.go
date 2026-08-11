@@ -9,15 +9,15 @@ import (
 	"sync"
 	"time"
 
-	clientdataplane "github.com/fengqi-dev/kube-loop/internal/clientv2/dataplane"
-	clientexchange "github.com/fengqi-dev/kube-loop/internal/clientv2/exchange"
-	clientexec "github.com/fengqi-dev/kube-loop/internal/clientv2/exec"
-	clientfiletransfer "github.com/fengqi-dev/kube-loop/internal/clientv2/filetransfer"
-	clientmirror "github.com/fengqi-dev/kube-loop/internal/clientv2/mirror"
-	clientportforward "github.com/fengqi-dev/kube-loop/internal/clientv2/portforward"
-	clientpreview "github.com/fengqi-dev/kube-loop/internal/clientv2/preview"
-	clientprofile "github.com/fengqi-dev/kube-loop/internal/clientv2/profile"
-	clientremote "github.com/fengqi-dev/kube-loop/internal/clientv2/remote"
+	clientdataplane "github.com/fengqi-dev/kube-loop/internal/client/dataplane"
+	clientexchange "github.com/fengqi-dev/kube-loop/internal/client/exchange"
+	clientexec "github.com/fengqi-dev/kube-loop/internal/client/exec"
+	clientfiletransfer "github.com/fengqi-dev/kube-loop/internal/client/filetransfer"
+	clientmirror "github.com/fengqi-dev/kube-loop/internal/client/mirror"
+	clientportforward "github.com/fengqi-dev/kube-loop/internal/client/portforward"
+	clientpreview "github.com/fengqi-dev/kube-loop/internal/client/preview"
+	clientprofile "github.com/fengqi-dev/kube-loop/internal/client/profile"
+	clientremote "github.com/fengqi-dev/kube-loop/internal/client/remote"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/execstream"
 )
 
@@ -100,7 +100,7 @@ type RemoteDependencies struct {
 }
 
 // RemoteBackend is the only production MCP backend. It accepts only the
-// currently active Profile and delegates cluster work to clientv2 SDKs.
+// currently active Profile and delegates cluster work to the client SDKs.
 type RemoteBackend struct {
 	dependencies RemoteDependencies
 	sessionMu    sync.Mutex
@@ -109,7 +109,7 @@ type RemoteBackend struct {
 func NewRemoteBackend(dependencies RemoteDependencies) (*RemoteBackend, error) {
 	if dependencies.Profiles == nil || dependencies.Gateway == nil || dependencies.Sessions == nil ||
 		dependencies.DataPlanes == nil || dependencies.ExecClient == nil {
-		return nil, errors.New("MCP V2 Profile, Gateway, Session, Data Plane, and exec clients are required")
+		return nil, errors.New("MCP Profile, Gateway, Session, Data Plane, and exec clients are required")
 	}
 	return &RemoteBackend{dependencies: dependencies}, nil
 }

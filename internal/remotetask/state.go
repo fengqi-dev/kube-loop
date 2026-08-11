@@ -1,5 +1,5 @@
 // Package remotetask defines the shared lifecycle contract for every durable
-// V2 operation exposed by the Gateway.
+// operation exposed by the Gateway.
 package remotetask
 
 import (

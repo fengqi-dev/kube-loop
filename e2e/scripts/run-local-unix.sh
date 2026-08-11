@@ -123,14 +123,8 @@ export GOCACHE="${CACHE}"
 : >"${PLATFORM_LOG}"
 
 MAIN_PACKAGES=(
-  "./e2e/connect"
-  "./e2e/dns"
-  "./e2e/exchange"
-  "./e2e/harness"
-  "./e2e/mirror"
-  "./e2e/portfwd"
-  "./e2e/preview"
-  "./e2e/v2dataplane"
+  "./e2e/dataplane"
+  "./e2e/remotetun"
 )
 
 MAIN_EXIT=1

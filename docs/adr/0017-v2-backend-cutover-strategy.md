@@ -25,7 +25,7 @@ the production V2 desktop has exactly one backend mode: `remote`.
   intercept/port-forward adapters are the local reference implementation. They
   remain outside the desktop dependency graph and may only be used by their own
   unit tests and explicit V1 E2E packages.
-- `internal/clientv2` is the remote implementation. Its managers depend on
+- `internal/client` is the remote implementation. Its managers depend on
   narrow feature interfaces rather than Kubernetes types: discovery/inventory,
   ClusterSession, Data Plane, exec, file transfer/file operations, Port
   Forward, Exchange, Mirror, Preview and Pod SSH each accept a typed remote

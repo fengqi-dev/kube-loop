@@ -76,6 +76,10 @@ import type {
   FileManagerTarget,
   FileTransferTask,
   PodInfo,
+  RemotePod,
+  ServerFileTransferTask,
+  ServerLocalFileEntry,
+  ServerPodFileEntry,
 } from "@/types";
 
 type PaneSide = "local" | "remote";
@@ -98,12 +102,14 @@ export function SFTPFileManagerDialog({
   open,
   onOpenChange,
   contextName,
+  profileId,
   pod,
 }: {
   open: boolean;
   onOpenChange(open: boolean): void;
-  contextName: string;
-  pod: PodInfo | null;
+  contextName?: string;
+  profileId?: string;
+  pod: PodInfo | RemotePod | null;
 }) {
   const { t } = useI18n();
   const [container, setContainer] = useState("");
@@ -125,20 +131,25 @@ export function SFTPFileManagerDialog({
   const [operationBusy, setOperationBusy] = useState(false);
 
   const target = useMemo<FileManagerTarget | null>(() => {
-    if (!pod || !container || !contextName) return null;
+    const context = profileId || contextName;
+    if (!pod || !container || !context) return null;
     return {
-      context: contextName,
+      context,
       namespace: pod.namespace,
       pod: pod.name,
-      podUID: pod.uid,
+      podUID: "uid" in pod ? pod.uid : undefined,
       container,
     };
-  }, [container, contextName, pod]);
+  }, [container, contextName, pod, profileId]);
+
+  const serverMode = Boolean(profileId);
 
   const loadLocal = useCallback(async (nextPath: string) => {
     setLoadingLocal(true);
     try {
-      const entries = await backend.listLocalDirectory(nextPath);
+      const entries = serverMode
+        ? (await backend.listServerLocalFiles(nextPath)).map(serverLocalEntry)
+        : await backend.listLocalDirectory(nextPath);
       setLocalPath(nextPath);
       setLocalEntries(entries);
       setLocalSelected(null);
@@ -147,13 +158,17 @@ export function SFTPFileManagerDialog({
     } finally {
       setLoadingLocal(false);
     }
-  }, [t]);
+  }, [serverMode, t]);
 
   const loadRemote = useCallback(async (nextPath: string) => {
     if (!target) return;
     setLoadingRemote(true);
     try {
-      const entries = await backend.listPodDirectory(target, nextPath);
+      const entries = serverMode && profileId
+        ? (await backend.listServerPodFiles({
+            profileId, pod: target.pod, container: target.container, path: nextPath,
+          })).items.map(serverPodEntry)
+        : await backend.listPodDirectory(target, nextPath);
       setRemotePath(nextPath);
       setRemoteEntries(entries);
       setRemoteSelected(null);
@@ -162,9 +177,24 @@ export function SFTPFileManagerDialog({
     } finally {
       setLoadingRemote(false);
     }
-  }, [t, target]);
+  }, [profileId, serverMode, t, target]);
 
   useEffect(() => {
+    if (serverMode && profileId) {
+      const unsubscribe = backend.onServerFileTransfer((task) => {
+        if (task.profileId !== profileId) return;
+        const mapped = serverTransferTask(task, target);
+        setTasks((current) => [mapped, ...current.filter((item) => item.id !== mapped.id)]);
+        if (task.status === "completed" && targetMatches(mapped, target)) {
+          void loadLocal(localPath);
+          void loadRemote(remotePath);
+        }
+      });
+      void backend.listServerFileTransfers(profileId)
+        .then((items) => setTasks(items.map((item) => serverTransferTask(item, target))))
+        .catch(() => undefined);
+      return unsubscribe;
+    }
     const unsubscribe = backend.onTransfer((task) => {
       setTasks((current) => {
         const next = current.filter((item) => item.id !== task.id);
@@ -177,7 +207,7 @@ export function SFTPFileManagerDialog({
     });
     void backend.listFileTransfers().then(setTasks).catch(() => undefined);
     return unsubscribe;
-  }, [loadLocal, loadRemote, localPath, remotePath, target]);
+  }, [loadLocal, loadRemote, localPath, profileId, remotePath, serverMode, target]);
 
   useEffect(() => {
     if (!open || !pod) return;
@@ -186,9 +216,14 @@ export function SFTPFileManagerDialog({
     setRemoteEntries([]);
     setLocalSelected(null);
     setRemoteSelected(null);
-    void backend.localHomeDirectory().then((home) => loadLocal(home));
-    void backend.listFileTransfers().then(setTasks);
-  }, [loadLocal, open, pod]);
+    void (serverMode ? backend.serverLocalHomeDirectory() : backend.localHomeDirectory()).then((home) => loadLocal(home));
+    if (serverMode && profileId) {
+      void backend.listServerFileTransfers(profileId)
+        .then((items) => setTasks(items.map((item) => serverTransferTask(item, target))));
+    } else {
+      void backend.listFileTransfers().then(setTasks);
+    }
+  }, [loadLocal, open, pod, profileId, serverMode, target]);
 
   useEffect(() => {
     if (open && target) void loadRemote("/");
@@ -196,7 +231,9 @@ export function SFTPFileManagerDialog({
 
   async function chooseLocalDirectory() {
     try {
-      const selected = await backend.pickLocalDirectory();
+      const selected = serverMode
+        ? await backend.pickServerUploadPath("directory")
+        : await backend.pickLocalDirectory();
       if (selected) await loadLocal(selected);
     } catch (error) {
       toast.error(t("sftp.chooseFailed"), { description: errorMessage(error) });
@@ -234,13 +271,23 @@ export function SFTPFileManagerDialog({
     overwrite: boolean,
   ) {
     if (!target) return;
-    await backend.startFileTransfer({
-      direction,
-      target,
-      sourcePath: source.path,
-      destinationDir: direction === "upload" ? remotePath : localPath,
-      overwrite,
-    });
+    if (serverMode && profileId) {
+      const remoteFilePath = direction === "upload" ? joinRemotePath(remotePath, source.name) : source.path;
+      const localFilePath = direction === "upload" ? source.path : joinLocalPath(localPath, source.name);
+      await backend.startServerFileTransfer({
+        profileId, direction, kind: source.dir ? "directory" : "file",
+        pod: target.pod, container: target.container,
+        localPath: localFilePath, remotePath: remoteFilePath, overwrite,
+      });
+    } else {
+      await backend.startFileTransfer({
+        direction,
+        target,
+        sourcePath: source.path,
+        destinationDir: direction === "upload" ? remotePath : localPath,
+        overwrite,
+      });
+    }
     toast.success(t("sftp.transferQueued"));
   }
 
@@ -280,14 +327,22 @@ export function SFTPFileManagerDialog({
       switch (operation.kind) {
         case "create":
           if (operation.side === "local") {
-            if (operation.entryType === "file") {
+            if (serverMode) {
+              await backend.createServerLocalFile(localPath, name, operation.entryType);
+            } else if (operation.entryType === "file") {
               await backend.createLocalFile(localPath, name);
             } else {
               await backend.createLocalDirectory(localPath, name);
             }
             await loadLocal(localPath);
           } else if (target) {
-            if (operation.entryType === "file") {
+            if (serverMode && profileId) {
+              const task = await backend.createServerPodFile({
+                profileId, pod: target.pod, container: target.container,
+                path: joinRemotePath(remotePath, name), kind: operation.entryType,
+              });
+              requireStoppedPodFileTask(task);
+            } else if (operation.entryType === "file") {
               await backend.createPodFile(target, remotePath, name);
             } else {
               await backend.createPodDirectory(target, remotePath, name);
@@ -301,19 +356,37 @@ export function SFTPFileManagerDialog({
             return;
           }
           if (operation.side === "local") {
-            await backend.renameLocalPath(operation.entry.path, name);
+            if (serverMode) await backend.renameServerLocalFile(operation.entry.path, name);
+            else await backend.renameLocalPath(operation.entry.path, name);
             await loadLocal(localPath);
           } else if (target) {
-            await backend.renamePodPath(target, operation.entry.path, name);
+            if (serverMode && profileId) {
+              const task = await backend.renameServerPodFile({
+                profileId, pod: target.pod, container: target.container,
+                path: operation.entry.path, destination: joinRemotePath(remotePath, name),
+              });
+              requireStoppedPodFileTask(task);
+            } else {
+              await backend.renamePodPath(target, operation.entry.path, name);
+            }
             await loadRemote(remotePath);
           }
           break;
         case "delete":
           if (operation.side === "local") {
-            await backend.deleteLocalPath(operation.entry.path);
+            if (serverMode) await backend.deleteServerLocalFile(operation.entry.path);
+            else await backend.deleteLocalPath(operation.entry.path);
             await loadLocal(localPath);
           } else if (target) {
-            await backend.deletePodPath(target, operation.entry.path);
+            if (serverMode && profileId) {
+              const task = await backend.deleteServerPodFile({
+                profileId, pod: target.pod, container: target.container,
+                path: operation.entry.path, recursive: operation.entry.dir,
+              });
+              requireStoppedPodFileTask(task);
+            } else {
+              await backend.deletePodPath(target, operation.entry.path);
+            }
             await loadRemote(remotePath);
           }
           break;
@@ -471,8 +544,11 @@ export function SFTPFileManagerDialog({
           tab={taskTab}
           onTabChange={setTaskTab}
           tasks={visibleTasks}
+          profileId={profileId}
           onClear={() =>
-            void backend.clearFileTransferHistory().then(() =>
+            void (profileId
+              ? backend.clearServerFileTransferHistory(profileId)
+              : backend.clearFileTransferHistory()).then(() =>
               setTasks((current) =>
                 current.filter((task) =>
                   ["queued", "running", "paused"].includes(task.status),
@@ -834,11 +910,13 @@ function TransferPanel({
   tab,
   onTabChange,
   tasks,
+  profileId,
   onClear,
 }: {
   tab: TaskTab;
   onTabChange(tab: TaskTab): void;
   tasks: FileTransferTask[];
+  profileId?: string;
   onClear(): void;
 }) {
   const { t } = useI18n();
@@ -866,13 +944,13 @@ function TransferPanel({
       <div className="h-[144px] overflow-auto bg-card">
         {tasks.length === 0 ? (
           <div className="py-14 text-center text-[13px] text-foreground/55">{t("sftp.noTasks")}</div>
-        ) : tasks.map((task) => <TransferRow key={task.id} task={task} />)}
+        ) : tasks.map((task) => <TransferRow key={task.id} task={task} profileId={profileId} />)}
       </div>
     </Tabs>
   );
 }
 
-function TransferRow({ task }: { task: FileTransferTask }) {
+function TransferRow({ task, profileId }: { task: FileTransferTask; profileId?: string }) {
   const { t } = useI18n();
   const unknownTotal =
     task.directory && task.direction === "download" && task.totalBytes === 0;
@@ -911,18 +989,22 @@ function TransferRow({ task }: { task: FileTransferTask }) {
           : `${formatBytes(task.doneBytes)} / ${formatBytes(task.totalBytes)} · ${percent}%`}
       </div>
       <div className="flex justify-end gap-1">
-        {task.status === "running" || task.status === "queued" ? (
+        {!profileId && (task.status === "running" || task.status === "queued") ? (
           <Button size="icon-xs" variant="ghost" onClick={() => void backend.pauseFileTransfer(task.id)} aria-label={t("sftp.pause")}>
             <Pause />
           </Button>
         ) : null}
         {resumable ? (
-          <Button size="icon-xs" variant="ghost" onClick={() => void backend.resumeFileTransfer(task.id)} aria-label={t("sftp.resume")}>
+          <Button size="icon-xs" variant="ghost" onClick={() => void (profileId
+            ? backend.resumeServerFileTransfer(profileId, task.id)
+            : backend.resumeFileTransfer(task.id))} aria-label={t("sftp.resume")}>
             <Play />
           </Button>
         ) : null}
         {!["completed", "cancelled"].includes(task.status) ? (
-          <Button size="icon-xs" variant="ghost" onClick={() => void backend.cancelFileTransfer(task.id)} aria-label={t("sftp.cancel")}>
+          <Button size="icon-xs" variant="ghost" onClick={() => void (profileId
+            ? backend.cancelServerFileTransfer(profileId, task.id)
+            : backend.cancelFileTransfer(task.id))} aria-label={t("sftp.cancel")}>
             <Ban />
           </Button>
         ) : null}
@@ -936,7 +1018,8 @@ function targetMatches(task: FileTransferTask, target: FileManagerTarget | null)
   if (target.podUID && task.target.podUID) return target.podUID === task.target.podUID;
   return task.target.context === target.context &&
     task.target.namespace === target.namespace &&
-    task.target.pod === target.pod;
+    task.target.pod === target.pod &&
+    task.target.container === target.container;
 }
 
 function localParent(value: string) {
@@ -959,4 +1042,80 @@ function baseName(value: string) {
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
+}
+
+function serverLocalEntry(entry: ServerLocalFileEntry): FileEntry {
+  return {
+    name: entry.name,
+    path: entry.path,
+    dir: entry.kind === "directory",
+    size: entry.size,
+    mode: entry.mode,
+    modTime: entry.modifiedAt,
+  };
+}
+
+function serverPodEntry(entry: ServerPodFileEntry): FileEntry {
+  return {
+    name: entry.name,
+    path: entry.path,
+    dir: entry.kind === "directory",
+    size: entry.size,
+    mode: Number.parseInt(entry.mode, 8),
+    modTime: entry.modifiedAt,
+  };
+}
+
+function serverTransferTask(task: ServerFileTransferTask, target: FileManagerTarget | null): FileTransferTask {
+  const status: FileTransferTask["status"] = task.status === "preparing"
+    ? "queued"
+    : task.status === "interrupted"
+      ? "stale"
+      : task.status;
+  const taskContainer = task.container ?? "";
+  const taskTarget = target
+    && target.context === task.profileId
+    && target.namespace === task.namespace
+    && target.pod === task.pod
+    && target.container === taskContainer
+    ? target
+    : {
+        context: task.profileId,
+        namespace: task.namespace,
+        pod: task.pod,
+        container: taskContainer,
+      };
+  return {
+    id: task.id,
+    direction: task.direction,
+    target: taskTarget,
+    sourcePath: task.direction === "upload" ? task.localPath : task.remotePath,
+    destinationPath: task.direction === "upload" ? task.remotePath : task.localPath,
+    tempPath: task.temporaryPath,
+    directory: task.kind === "directory",
+    status,
+    totalBytes: task.totalBytes ?? 0,
+    doneBytes: task.doneBytes ?? 0,
+    sourceModTime: task.createdAt,
+    overwrite: task.overwrite ?? false,
+    error: task.error,
+    createdAt: task.createdAt,
+    updatedAt: task.updatedAt,
+    completedAt: task.completedAt,
+  };
+}
+
+function requireStoppedPodFileTask(task: { state: string; result: { error?: string } }) {
+  if (task.state !== "stopped") {
+    throw new Error(task.result.error || "Remote file operation failed.");
+  }
+}
+
+function joinRemotePath(parent: string, name: string) {
+  return parent === "/" ? `/${name}` : `${parent.replace(/\/$/, "")}/${name}`;
+}
+
+function joinLocalPath(parent: string, name: string) {
+  const separator = parent.includes("\\") ? "\\" : "/";
+  return `${parent.replace(/[\\/]+$/, "")}${separator}${name}`;
 }

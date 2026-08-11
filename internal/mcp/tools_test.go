@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	clientexchange "github.com/fengqi-dev/kube-loop/internal/clientv2/exchange"
-	clientfiletransfer "github.com/fengqi-dev/kube-loop/internal/clientv2/filetransfer"
-	clientportforward "github.com/fengqi-dev/kube-loop/internal/clientv2/portforward"
-	clientremote "github.com/fengqi-dev/kube-loop/internal/clientv2/remote"
+	clientexchange "github.com/fengqi-dev/kube-loop/internal/client/exchange"
+	clientfiletransfer "github.com/fengqi-dev/kube-loop/internal/client/filetransfer"
+	clientportforward "github.com/fengqi-dev/kube-loop/internal/client/portforward"
+	clientremote "github.com/fengqi-dev/kube-loop/internal/client/remote"
 )
 
 type fakeBackend struct {

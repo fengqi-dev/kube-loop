@@ -106,11 +106,11 @@ Section
     File /nonfatal "..\..\bin\wintun.dll"
     File "..\..\bin\LICENSE.sing-box.txt"
 
-    # Privileged helper service + install/uninstall tools (Clash Verge layout).
+    # Unified privileged helper used for service, install, and uninstall operations.
     SetOutPath "$INSTDIR\resources"
     File "..\..\bin\resources\kubeloop-helper.exe"
-    File "..\..\bin\resources\kubeloop-helper-install.exe"
-    File "..\..\bin\resources\kubeloop-helper-uninstall.exe"
+    Delete "$INSTDIR\resources\kubeloop-helper-install.exe"
+    Delete "$INSTDIR\resources\kubeloop-helper-uninstall.exe"
     SetOutPath $INSTDIR
 
     CreateShortcut "$SMPROGRAMS\${INFO_PRODUCTNAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}"
@@ -126,8 +126,8 @@ Section "uninstall"
     !insertmacro wails.setShellContext
 
     # Stop and remove the privileged helper service before deleting files.
-    IfFileExists "$INSTDIR\resources\kubeloop-helper-uninstall.exe" 0 +2
-      ExecWait '"$INSTDIR\resources\kubeloop-helper-uninstall.exe" --quiet'
+    IfFileExists "$INSTDIR\resources\kubeloop-helper.exe" 0 +2
+      ExecWait '"$INSTDIR\resources\kubeloop-helper.exe" uninstall'
 
     RMDir /r "$AppData\${PRODUCT_EXECUTABLE}" # Remove the WebView2 DataPath
 

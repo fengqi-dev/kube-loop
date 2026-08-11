@@ -26,12 +26,6 @@ func main() {
 		helperName += ".exe"
 	}
 	toolNames := []string{helperName}
-	if runtime.GOOS == "windows" {
-		toolNames = append(toolNames,
-			"kubeloop-helper-install.exe",
-			"kubeloop-helper-uninstall.exe",
-		)
-	}
 	toolDir := filepath.Join(root, "build", "bin")
 	if runtime.GOOS == "windows" {
 		// Windows package resources take precedence in LocateBundled*.

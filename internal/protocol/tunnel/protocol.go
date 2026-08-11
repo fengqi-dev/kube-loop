@@ -143,17 +143,8 @@ func ReadSessionHeader(r io.Reader) (SessionHeader, error) {
 	return SessionHeader{Command: header[4], Token: token}, nil
 }
 
-func WriteControlSession(w io.Writer, token SessionToken) error {
-	value, err := appendSessionHeader(nil, CommandControl, token)
-	if err != nil {
-		return err
-	}
-	return writeAll(w, value)
-}
-
 // WriteAuthorizedControlSession registers the immutable NetworkSpec snapshot
-// for a RelayTicket-bound Session. Raw V1 transports continue to use
-// WriteControlSession and never enter this branch on Data Plane.
+// for a RelayTicket-bound Session.
 func WriteAuthorizedControlSession(w io.Writer, token SessionToken, spec networkspec.Spec) error {
 	contents, err := networkspec.CanonicalJSON(spec)
 	if err != nil {

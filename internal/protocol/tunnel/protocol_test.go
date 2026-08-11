@@ -124,23 +124,6 @@ func TestAcceptRoundTrip(t *testing.T) {
 	}
 }
 
-func TestControlSessionHeader(t *testing.T) {
-	var stream bytes.Buffer
-	if err := WriteControlSession(&stream, protocolTestToken); err != nil {
-		t.Fatal(err)
-	}
-	header, err := ReadSessionHeader(&stream)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if header.Command != CommandControl {
-		t.Fatalf("command=%d", header.Command)
-	}
-	if header.Token != protocolTestToken {
-		t.Fatalf("token=%x", header.Token)
-	}
-}
-
 func TestAuthorizedControlSessionRoundTrip(t *testing.T) {
 	spec, err := networkspec.Normalize(networkspec.Spec{
 		PodCIDRs: []string{"10.2.0.0/16"}, ServiceCIDRs: []string{"10.96.0.0/12"},
@@ -197,13 +180,6 @@ func TestProtocolGoldenEncoding(t *testing.T) {
 				sessionHeaderBytes(CommandTCP),
 				0, 3, 'a', 'p', 'i', 0x1f, 0x90,
 			),
-		},
-		{
-			name: "control-session",
-			write: func(w io.Writer) error {
-				return WriteControlSession(w, protocolTestToken)
-			},
-			want: sessionHeaderBytes(CommandControl),
 		},
 		{
 			name: "accept",
