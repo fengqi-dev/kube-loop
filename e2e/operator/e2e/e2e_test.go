@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -62,7 +63,11 @@ var _ = Describe("Manager", Ordered, func() {
 	// and deleting the namespace.
 	AfterAll(func() {
 		By("cleaning up the curl pod for metrics")
-		cmd := exec.Command("kubectl", "delete", "pod", "curl-metrics", "-n", namespace)
+		cmd := exec.Command("kubectl", "delete", "pod", "curl-metrics", "-n", namespace, "--ignore-not-found")
+		_, _ = utils.Run(cmd)
+
+		By("cleaning up the metrics ClusterRoleBinding")
+		cmd = exec.Command("kubectl", "delete", "clusterrolebinding", metricsRoleBindingName, "--ignore-not-found")
 		_, _ = utils.Run(cmd)
 
 		By("undeploying the controller-manager")
@@ -158,12 +163,17 @@ var _ = Describe("Manager", Ordered, func() {
 		})
 
 		It("should ensure the metrics endpoint is serving metrics", func() {
+			By("removing a stale metrics ClusterRoleBinding from an interrupted run")
+			cmd := exec.Command("kubectl", "delete", "clusterrolebinding", metricsRoleBindingName, "--ignore-not-found")
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to remove stale ClusterRoleBinding")
+
 			By("creating a ClusterRoleBinding for the service account to allow access to metrics")
-			cmd := exec.Command("kubectl", "create", "clusterrolebinding", metricsRoleBindingName,
+			cmd = exec.Command("kubectl", "create", "clusterrolebinding", metricsRoleBindingName,
 				"--clusterrole=kubeloop-operator-metrics-reader",
 				fmt.Sprintf("--serviceaccount=%s:%s", namespace, serviceAccountName),
 			)
-			_, err := utils.Run(cmd)
+			_, err = utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred(), "Failed to create ClusterRoleBinding")
 
 			By("validating that the metrics service is available")
@@ -254,15 +264,97 @@ var _ = Describe("Manager", Ordered, func() {
 
 		// +kubebuilder:scaffold:e2e-webhooks-checks
 
-		// TODO: Customize the e2e test suite with scenarios specific to your project.
-		// Consider applying sample/CR(s) and check their status and/or verifying
-		// the reconciliation by using the metrics, i.e.:
-		// metricsOutput, err := getMetricsOutput()
-		// Expect(err).NotTo(HaveOccurred(), "Failed to retrieve logs from curl pod")
-		// Expect(metricsOutput).To(ContainSubstring(
-		//    fmt.Sprintf(`controller_runtime_reconcile_total{controller="%s",result="success"} 1`,
-		//    strings.ToLower(<Kind>),
-		// ))
+		It("should reconcile and clean up a Preview TrafficBinding", func() {
+			const (
+				bindingName = "preview-e2e"
+				serviceName = "preview-e2e"
+			)
+			manifest := fmt.Sprintf(`apiVersion: traffic.kubeloop.io/v1alpha1
+kind: TrafficBinding
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  mode: Preview
+  sessionID: 11111111-1111-4111-8111-111111111111
+  taskID: 22222222-2222-4222-8222-222222222222
+  sessionGeneration: 1
+  relay:
+    address: 192.0.2.10
+  preview:
+    serviceName: %s
+  ports:
+  - name: http
+    targetPort: 8080
+    relayPort: 32080
+    protocol: TCP
+  - name: dns
+    targetPort: 5353
+    relayPort: 32053
+    protocol: UDP
+`, bindingName, namespace, serviceName)
+
+			By("creating a project TrafficBinding CR")
+			cmd := exec.Command("kubectl", "apply", "-f", "-")
+			cmd.Stdin = strings.NewReader(manifest)
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to create Preview TrafficBinding")
+			DeferCleanup(func() {
+				cleanup := exec.Command(
+					"kubectl", "delete", "trafficbinding", bindingName,
+					"-n", namespace, "--ignore-not-found", "--wait=false",
+				)
+				_, _ = utils.Run(cleanup)
+			})
+
+			By("waiting for the Operator to publish authoritative Ready status")
+			Eventually(func(g Gomega) {
+				status := exec.Command(
+					"kubectl", "get", "trafficbinding", bindingName, "-n", namespace,
+					"-o", "jsonpath={.status.phase}{'|'}{.status.conditions[?(@.type=='Ready')].status}{'|'}{.status.observedGeneration}{'|'}{.status.serviceName}",
+				)
+				output, statusErr := utils.Run(status)
+				g.Expect(statusErr).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("Ready|True|1|" + serviceName))
+			}).Should(Succeed())
+
+			By("verifying the owned Service and EndpointSlice relay mapping")
+			service := exec.Command(
+				"kubectl", "get", "service", serviceName, "-n", namespace,
+				"-o", "jsonpath={.spec.selector}{'|'}{.spec.ports[0].port}{'|'}{.spec.ports[0].targetPort}{'|'}{.spec.ports[1].port}{'|'}{.spec.ports[1].targetPort}",
+			)
+			serviceOutput, err := utils.Run(service)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(serviceOutput).To(Equal("|8080|32080|5353|32053"))
+
+			slice := exec.Command(
+				"kubectl", "get", "endpointslice", "-n", namespace,
+				"-l", "kubernetes.io/service-name="+serviceName,
+				"-o", "jsonpath={.items[0].endpoints[0].addresses[0]}{'|'}{.items[0].endpoints[0].conditions.ready}{'|'}{.items[0].ports[0].port}{'|'}{.items[0].ports[1].port}",
+			)
+			sliceOutput, err := utils.Run(slice)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(sliceOutput).To(Equal("192.0.2.10|true|32080|32053"))
+
+			By("deleting the CR and waiting for finalizer-owned resources to disappear")
+			cmd = exec.Command(
+				"kubectl", "delete", "trafficbinding", bindingName,
+				"-n", namespace, "--wait=false",
+			)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+			Eventually(func(g Gomega) {
+				for _, command := range []*exec.Cmd{
+					exec.Command("kubectl", "get", "trafficbinding", bindingName, "-n", namespace, "--ignore-not-found", "-o", "name"),
+					exec.Command("kubectl", "get", "service", serviceName, "-n", namespace, "--ignore-not-found", "-o", "name"),
+					exec.Command("kubectl", "get", "endpointslice", "-n", namespace, "-l", "kubernetes.io/service-name="+serviceName, "-o", "name"),
+				} {
+					output, cleanupErr := utils.Run(command)
+					g.Expect(cleanupErr).NotTo(HaveOccurred())
+					g.Expect(strings.TrimSpace(output)).To(BeEmpty())
+				}
+			}).Should(Succeed())
+		})
 	})
 })
 

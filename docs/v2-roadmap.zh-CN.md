@@ -616,17 +616,17 @@ Gateway 使用统一的 `AuthProvider` 抽象，首期支持：
   - 在 Task 生命周期的每个步骤注入失败。
   - 验证 Exchange/Mirror/Preview 不遗留或错误恢复他人资源。
   - Gateway 重启后的回收器只处理带正确 owner identity 的过期资源。
-  - 2026-08-10（完成）：`make recovery-test` 以 race detector 覆盖统一 Task 状态机、Service/EndpointSlice/legacy Endpoints 快照、TrafficBinding finalizer、Controller stale-owner CAS、Port Forward/Exec/File/Exchange/Mirror/Preview 补偿和 maintenance 孤儿回收。故障注入覆盖 snapshot 持久化、部分 Apply、ready 前断连、显式停止、Token Family 撤销、Controller 重启、真实 Kubernetes 503、错误 owner/UID、同名用户资源接管和双 worker 竞争。通用 Minikube E2E 现在自动安装 CRD 并启动当前工作树 Operator；`e2e/v2dataplane` 8/8 复跑通过（173.842 秒），验证 Exchange/Mirror 恢复原 Service/Endpoint 表示、Preview 只清理仍由对应 TrafficBinding UID 控制的资源、Gateway Pod 重启与 NetworkSpec 权限刷新后本地 Task/端口/TUN 安全收敛。Preview 专项额外确认 TrafficBinding、Service、EndpointSlice 与 snapshot 全部释放（30.398 秒）；隔离 kubeconfig 的 Kubebuilder Operator 部署/metrics 套件 2/2 通过（181.297 秒）。
+  - 2026-08-11（完成）：`make recovery-test` 以 race detector 覆盖统一 Task 状态机、Service/EndpointSlice/legacy Endpoints 快照、TrafficBinding finalizer、Controller stale-owner CAS、Port Forward/Exec/File/Exchange/Mirror/Preview 补偿和 maintenance 孤儿回收。故障注入覆盖 snapshot 持久化、部分 Apply、ready 前断连、显式停止、Token Family 撤销、Controller 重启、真实 Kubernetes 503、错误 owner/UID、同名用户资源接管和双 worker 竞争。通用 Minikube E2E 自动安装 CRD 并启动当前工作树 Operator；`e2e/v2dataplane` 8/8 复跑通过（173.842 秒），验证 Exchange/Mirror 恢复原 Service/Endpoint 表示、Preview 只清理仍由对应 TrafficBinding UID 控制的资源、Gateway Pod 重启与 NetworkSpec 权限刷新后本地 Task/端口/TUN 安全收敛。隔离 kubeconfig 的 Kubebuilder Operator 部署、受保护 metrics、Preview TrafficBinding 调谐与 finalizer 清理套件 3/3 通过；真实验证 Service、EndpointSlice 端口映射和 CR 删除后的级联资源回收，并支持中断后幂等重跑。
 
 - [x] **V2-802：性能与容量测试。**
   - 建立单 Pod 的用户数、物理 WSS、逻辑 stream、吞吐和内存基线。
   - 验证限流不会阻塞健康检查、登出和资源清理。
   - 2026-08-11（完成）：在可重复的 Gateway 进程内容量门禁和三轮 CI benchmark 之外，新增单 Gateway Pod 的真实 Minikube 容量 E2E。测试以四名 Principal 建立四条物理 WSS 和十六条逻辑 stream，验证单用户/全局物理连接上限、每连接逻辑流上限、释放后容量复用，以及满载时 `/health/live`、`/health/ready` 和 `/metrics` 不被阻塞；并发 32 KiB 集群内往返吞吐实测 59.33 MiB/s，kubelet working-set 峰值 10.13 MiB、相对基线增长 5.42 MiB。满载期间通过真实 Controller/Operator 创建 Preview，Token Family 撤销后 130.48 ms 内停止 Task，并清空客户端 relay、TrafficBinding、Service、EndpointSlice 与 durable snapshot。独立用例 12.275 秒通过，完整 `e2e/v2dataplane` 复跑 194.739 秒通过。
 
-- [ ] **V2-803：跨平台客户端 E2E。**
+- [x] **V2-803：跨平台客户端 E2E。**
   - macOS、Windows、Linux 覆盖安装、登录、TUN、DNS、退出、升级和卸载。
   - 操作系统休眠、网络切换后 Session 能恢复或安全清理。
-  - 2026-08-11（验证中）：新增可移植的休眠间隔检测器和 Data Plane `ResumeAll` 恢复路径；唤醒时主动中断陈旧 transport、刷新权威 Session/RelayTicket，并原位重连，保持 SOCKS 地址和 Helper TUN Session 不变。`e2e/remotetun` 使用实际特权 Helper、sing-box TUN、WSS/smux Gateway、RelayTicket/NetworkSpec 授权和精确目标路由，在 macOS 上验证休眠间隔前后直接访问 `100.64.0.42:443` 均成功，且停止后 Helper Session 为零（1.647 秒）；Linux Minikube 同包与完整数据面复跑通过，Windows/Linux amd64 测试二进制已交叉编译。Windows/macOS/Linux CI 均已接入该真实 TUN/唤醒门禁；待远端三平台 workflow 实际通过后关闭本项。
+  - 2026-08-11（完成）：新增可移植的休眠间隔检测器和 Data Plane `ResumeAll` 恢复路径；唤醒时主动中断陈旧 transport、刷新权威 Session/RelayTicket，并原位重连，保持 SOCKS 地址和 Helper TUN Session 不变。`e2e/remotetun` 使用实际特权 Helper、sing-box TUN、WSS/smux Gateway、RelayTicket/NetworkSpec 授权和精确目标路由，验证休眠间隔前后直接访问 `100.64.0.42:443` 均成功，且停止后 Helper Session 为零。GitHub Actions push workflow [31454657118](https://github.com/fengqi-dev/kube-loop/actions/runs/31454657118) 的 Windows、macOS、Linux、Helm、主 Go 与前端六个作业全部通过：Windows/macOS 均完成 Helper 安装、升级、ACL/DNS 平台恢复、真实远端 TUN/唤醒和卸载；Linux 完成 Minikube V2 数据面及相同远端 TUN/唤醒门禁。Windows SQLite 路径、固定容器 Secret 路径、PodSSH WebSocket 关闭和 sing-box `.exe` 产物/夹具差异均已纳入回归。
 
 - [ ] **V2-804：可观测性。**
   - 添加 RED 指标、active session/stream/task gauge、Kubernetes API latency 和 cleanup failure。
