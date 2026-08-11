@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"regexp"
 	"slices"
 	"sort"
@@ -139,9 +140,7 @@ func (registry *Registry) ReplaceProvider(prepared *Registry, providerID string,
 	for {
 		active := registry.current.Load()
 		providers := make(map[string]Provider, len(active.providers)+1)
-		for id, provider := range active.providers {
-			providers[id] = provider
-		}
+		maps.Copy(providers, active.providers)
 		if enabled {
 			providers[providerID] = replacement
 		} else {

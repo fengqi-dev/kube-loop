@@ -95,7 +95,7 @@ func TestLimiterSeparatesSourcesAndBoundsBuckets(t *testing.T) {
 	if !limiter.allow("192.0.2.1") || limiter.allow("192.0.2.1") || !limiter.allow("192.0.2.2") {
 		t.Fatal("source limiter decisions are invalid")
 	}
-	for index := 0; index < maximumSourceBuckets+10; index++ {
+	for index := range maximumSourceBuckets + 10 {
 		_ = limiter.allow(string(rune(index + 1)))
 	}
 	if len(limiter.sources) > maximumSourceBuckets {

@@ -343,16 +343,12 @@ func (assignment compiledAssignment) matchesSubject(subject Subject) bool {
 }
 
 func matchesBootstrap(config BootstrapConfig, subject Subject) bool {
-	for _, value := range config.Subjects {
-		if value == subject.ID {
-			return true
-		}
+	if slices.Contains(config.Subjects, subject.ID) {
+		return true
 	}
 	for _, expected := range config.Groups {
-		for _, actual := range subject.Groups {
-			if expected == actual {
-				return true
-			}
+		if slices.Contains(subject.Groups, expected) {
+			return true
 		}
 	}
 	return false

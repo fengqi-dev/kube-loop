@@ -536,8 +536,8 @@ func (service *Service) CreateAuditExport(ctx context.Context, request AuditExpo
 	filterJSON, _ := json.Marshal(struct {
 		PrincipalID string    `json:"principalId,omitempty"`
 		Action      string    `json:"action,omitempty"`
-		After       time.Time `json:"after,omitempty"`
-		Before      time.Time `json:"before,omitempty"`
+		After       time.Time `json:"after"`
+		Before      time.Time `json:"before"`
 		Limit       int       `json:"limit"`
 	}{filter.PrincipalID, filter.Action, filter.After, filter.Before, filter.Limit})
 	requestHash := requestDigest(struct {
