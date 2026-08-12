@@ -26,6 +26,7 @@ import (
 func TestBreakGlassExchangeSetsHostCookieAndReturnsCSRF(t *testing.T) {
 	handler, _ := newTestHandler(t, Config{PublicURL: "https://gateway.example/base"}, true)
 	request := exchangeRequest(`{"credential":"valid"}`)
+	request.Header.Set(managementRequestHeader, "33333333-3333-4333-8333-333333333333")
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusCreated {
@@ -52,6 +53,9 @@ func TestBreakGlassExchangeSetsHostCookieAndReturnsCSRF(t *testing.T) {
 	if document.CSRFToken == "" || document.ExpiresAt == "" || document.RequestID == "" ||
 		response.Header.Get("Cache-Control") != "no-store" || response.Header.Get("WWW-Authenticate") != "" {
 		t.Fatalf("response=%+v headers=%v", document, response.Header)
+	}
+	if document.RequestID != "33333333-3333-4333-8333-333333333333" || response.Header.Get(managementRequestHeader) != document.RequestID {
+		t.Fatalf("management request ID mismatch: body=%q header=%q", document.RequestID, response.Header.Get(managementRequestHeader))
 	}
 }
 

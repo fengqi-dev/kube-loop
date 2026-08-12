@@ -20,6 +20,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/gateway/relayagent"
 	"github.com/fengqi-dev/kube-loop/internal/gateway/trafficapi"
 	"github.com/fengqi-dev/kube-loop/internal/gateway/websocketmux"
+	"github.com/fengqi-dev/kube-loop/internal/httpmiddleware"
 	"github.com/fengqi-dev/kube-loop/internal/logging"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/relayticket"
 	"github.com/labstack/echo/v5"
@@ -82,7 +83,7 @@ func main() {
 	errorLogger := slog.NewLogLogger(componentLogger.Handler(), slog.LevelError)
 	signalContext, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stopSignals()
-	server := gateway.NewServer(logger, 10*time.Second)
+	server := gateway.NewServer(componentLogger, 10*time.Second)
 	errCh := make(chan error, 1)
 	serveCount := 0
 	var httpHandler *websocketmux.Handler
@@ -149,13 +150,13 @@ func main() {
 					ExpiresAt: time.Unix(claims.ExpiresAt, 0).UTC(),
 				}, nil
 			}),
-			Logger: logger, StreamIdleTimeout: *streamIdleTimeout, HandshakeTimeout: *handshakeTimeout,
+			Logger: componentLogger, StreamIdleTimeout: *streamIdleTimeout, HandshakeTimeout: *handshakeTimeout,
 			ServerVersion: version, MinClientVersion: strings.TrimSpace(*minClientVersion),
 			MaxSessions: *maximumSessions, MaxSessionsPerUser: *maximumSessionsPerUser,
 			MaxStreamsPerSession: *maximumStreamsPerSession, MaxFrameBytes: *maximumFrameBytes,
 			Handle: func(identity websocketmux.Identity, connection net.Conn) {
 				server.ServeConnForAuthorization(connection, gateway.SessionAuthorization{
-					SessionID: identity.SessionID, Generation: identity.SessionGeneration,
+					RequestID: identity.RequestID, SessionID: identity.SessionID, Generation: identity.SessionGeneration,
 					Namespace:       identity.Namespace,
 					NetworkSpecHash: identity.NetworkSpecHash,
 				})
@@ -202,6 +203,8 @@ func main() {
 			errorLogger.Fatal(listenErr)
 		}
 		router := echo.New()
+		router.Use(httpmiddleware.RequestID())
+		router.Use(httpmiddleware.RequestLogger(componentLogger))
 		operations.NewHandler(operationsState, handler).Register(router)
 		router.Any(*httpPath, echo.WrapHandler(handler))
 		if registryMode {
@@ -225,9 +228,7 @@ func main() {
 				defaultHTTPErrorHandler(ctx, err)
 				return
 			}
-			writer, request := ctx.Response(), ctx.Request()
-			logger.Printf("WebSocket request rejected: remote=%s method=%s path=%s status=%d reason=path", request.RemoteAddr, request.Method, request.URL.Path, http.StatusNotFound)
-			http.NotFound(writer, request)
+			http.NotFound(ctx.Response(), ctx.Request())
 		}
 		httpContext, cancel := context.WithCancel(context.Background())
 		cancelHTTP = cancel

@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"crypto/tls"
 	"errors"
+	"log/slog"
 	"net/url"
 	"strconv"
 	"strings"
@@ -37,6 +38,7 @@ type relayRegistryOptions struct {
 	KubernetesClient    kubernetes.Interface
 	Context             context.Context
 	ControlPlanePodName string
+	Logger              *slog.Logger
 }
 
 type relayRegistryRuntime struct {
@@ -116,7 +118,7 @@ func newRelayRegistryRuntime(options relayRegistryOptions) (*relayRegistryRuntim
 	if err != nil {
 		return nil, err
 	}
-	handler, err := relayregistry.NewHTTPHandler(registry, authenticator)
+	handler, err := relayregistry.NewHTTPHandler(registry, authenticator, options.Logger)
 	if err != nil {
 		return nil, err
 	}

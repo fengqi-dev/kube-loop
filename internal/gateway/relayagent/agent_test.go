@@ -87,7 +87,7 @@ func TestAgentRegistersAppliesControlStateAndAcknowledgesHeartbeat(t *testing.T)
 	identity := relaycontrol.PeerIdentity{
 		TrustDomain: "cluster.local", Namespace: "kubeloop", ServiceAccount: "gateway", PodUID: "pod-uid",
 	}
-	handler, err := relayregistry.NewHTTPHandler(registry, staticRegistryAuthenticator{identity: identity})
+	handler, err := relayregistry.NewHTTPHandler(registry, staticRegistryAuthenticator{identity: identity}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

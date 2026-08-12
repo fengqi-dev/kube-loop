@@ -126,7 +126,7 @@ EOF
 
 curl --silent --show-error --fail \
   --header "Authorization: Bearer ${ACCESS_TOKEN}" \
-  "http://127.0.0.1:${LOCAL_PORT}/api/v2/version" | jq -e . >/dev/null
+  "http://127.0.0.1:${LOCAL_PORT}/kubeloop/api/version" | jq -e . >/dev/null
 
 GATEWAY_IDENTITY="system:serviceaccount:${NAMESPACE}:${CONTROL_PLANE_SERVICE_ACCOUNT}"
 audit_event_matches() {

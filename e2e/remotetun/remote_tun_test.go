@@ -7,7 +7,7 @@ import (
 	"crypto/ed25519"
 	"errors"
 	"io"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -212,7 +212,7 @@ func startGateway(
 	if err != nil {
 		t.Fatal(err)
 	}
-	core := gateway.NewServer(log.New(io.Discard, "", 0), 5*time.Second)
+	core := gateway.NewServer(slog.New(slog.NewTextHandler(io.Discard, nil)), 5*time.Second)
 	core.Dialer = mappedDialer{target: echo.Addr().String()}
 	handler, err := gatewaymux.NewHandler(gatewaymux.ServerConfig{
 		Authenticator: gatewaymux.AuthenticatorFunc(func(request *http.Request) (gatewaymux.Identity, error) {
@@ -229,7 +229,7 @@ func startGateway(
 		ServerVersion: "e2e", MaxSessions: 8, MaxSessionsPerUser: 2, MaxStreamsPerSession: 16,
 		Handle: func(identity gatewaymux.Identity, connection net.Conn) {
 			core.ServeConnForAuthorization(connection, gateway.SessionAuthorization{
-				SessionID: identity.SessionID, Generation: identity.SessionGeneration,
+				RequestID: identity.RequestID, SessionID: identity.SessionID, Generation: identity.SessionGeneration,
 				Namespace: identity.Namespace, NetworkSpecHash: identity.NetworkSpecHash,
 			})
 		},

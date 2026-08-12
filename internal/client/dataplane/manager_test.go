@@ -214,7 +214,7 @@ func TestManagerReusesSessionAndReplacesChangedSession(t *testing.T) {
 		t.Fatalf("metrics = %#v, %v", metrics, err)
 	}
 	logs, err := manager.Logs(context.Background(), serverProfile.ID)
-	if err != nil || len(logs) != 1 || logs[0] != "ready" {
+	if err != nil || len(logs) != 2 || !strings.Contains(logs[0], "[SOCKS] listening on ") || logs[1] != "[TUN] ready" {
 		t.Fatalf("logs = %#v, %v", logs, err)
 	}
 	if err := manager.UpdateDNSNamespace(context.Background(), serverProfile.ID, "observability"); err != nil {

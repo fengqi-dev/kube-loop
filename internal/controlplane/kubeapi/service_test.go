@@ -83,17 +83,17 @@ func TestReadOnlyKubernetesRoutesUsePrincipalAndStableDocuments(t *testing.T) {
 		path string
 		want []string
 	}{
-		{path: "/api/v2/version", want: []string{`"gitVersion":"v1.31.4"`, `"gatewayVersion":"v2-test"`}},
-		{path: "/api/v2/capabilities?namespace=development", want: []string{
+		{path: "/kubeloop/api/version", want: []string{`"gitVersion":"v1.31.4"`, `"gatewayVersion":"v2-test"`}},
+		{path: "/kubeloop/api/capabilities?namespace=development", want: []string{
 			`"schemaVersion":1`, `"principalId":"principal-123"`, `"namespace":"development"`, `"gatewayVersion":"v2-test"`,
 			`"capabilities":["pods.get","pods.list","pods.watch","services.get","services.list","cluster.tunnel","ports.forward","pods.exec","pods.files","pods.files.manage","services.exchange","services.mirror","services.preview"]`,
 		}},
-		{path: "/api/v2/namespaces?limit=10&continue=next-page", want: []string{`"name":"development"`, `"continue":"page-2"`, `"resourceVersion":"42"`}},
-		{path: "/api/v2/namespaces/development", want: []string{`"status":"Active"`}},
-		{path: "/api/v2/namespaces/development/pods", want: []string{`"name":"api-0"`, `"ready":true`, `"containers":["api","sidecar"]`, `"ports":[{"name":"http","port":8080,"protocol":"TCP"}]`}},
-		{path: "/api/v2/namespaces/development/pods/api-0", want: []string{`"name":"api-0"`, `"phase":"Running"`}},
-		{path: "/api/v2/namespaces/development/services", want: []string{`"clusterIp":"10.96.0.10"`, `"targetPort":"8080"`}},
-		{path: "/api/v2/namespaces/development/services/api", want: []string{`"name":"api"`, `"port":80`}},
+		{path: "/kubeloop/api/namespaces?limit=10&continue=next-page", want: []string{`"name":"development"`, `"continue":"page-2"`, `"resourceVersion":"42"`}},
+		{path: "/kubeloop/api/namespaces/development", want: []string{`"status":"Active"`}},
+		{path: "/kubeloop/api/namespaces/development/pods", want: []string{`"name":"api-0"`, `"ready":true`, `"containers":["api","sidecar"]`, `"ports":[{"name":"http","port":8080,"protocol":"TCP"}]`}},
+		{path: "/kubeloop/api/namespaces/development/pods/api-0", want: []string{`"name":"api-0"`, `"phase":"Running"`}},
+		{path: "/kubeloop/api/namespaces/development/services", want: []string{`"clusterIp":"10.96.0.10"`, `"targetPort":"8080"`}},
+		{path: "/kubeloop/api/namespaces/development/services/api", want: []string{`"name":"api"`, `"port":80`}},
 	}
 	for _, test := range tests {
 		t.Run(test.path, func(t *testing.T) {
@@ -130,15 +130,15 @@ func TestInvalidRoutesAndPaginationDoNotReachKubernetes(t *testing.T) {
 		status int
 		field  string
 	}{
-		{method: http.MethodGet, path: "/api/v2/namespaces?limit=0", status: http.StatusBadRequest, field: "limit"},
-		{method: http.MethodGet, path: "/api/v2/namespaces?limit=1&limit=2", status: http.StatusBadRequest, field: "limit"},
-		{method: http.MethodGet, path: "/api/v2/namespaces?watch=true", status: http.StatusBadRequest, field: "watch"},
-		{method: http.MethodGet, path: "/api/v2/namespaces?labelSelector=app%20in%20(", status: http.StatusBadRequest, field: "labelSelector"},
-		{method: http.MethodGet, path: "/api/v2/namespaces?fieldSelector=metadata.name%3Ddevelopment%0A", status: http.StatusBadRequest, field: "fieldSelector"},
-		{method: http.MethodGet, path: "/api/v2/capabilities", status: http.StatusBadRequest, field: "namespace"},
-		{method: http.MethodGet, path: "/api/v2/namespaces/Bad_Name/pods", status: http.StatusBadRequest, field: "namespace"},
-		{method: http.MethodGet, path: "/api/v2/namespaces/development/pods/", status: http.StatusNotFound},
-		{method: http.MethodPost, path: "/api/v2/namespaces", status: http.StatusNotFound},
+		{method: http.MethodGet, path: "/kubeloop/api/namespaces?limit=0", status: http.StatusBadRequest, field: "limit"},
+		{method: http.MethodGet, path: "/kubeloop/api/namespaces?limit=1&limit=2", status: http.StatusBadRequest, field: "limit"},
+		{method: http.MethodGet, path: "/kubeloop/api/namespaces?watch=true", status: http.StatusBadRequest, field: "watch"},
+		{method: http.MethodGet, path: "/kubeloop/api/namespaces?labelSelector=app%20in%20(", status: http.StatusBadRequest, field: "labelSelector"},
+		{method: http.MethodGet, path: "/kubeloop/api/namespaces?fieldSelector=metadata.name%3Ddevelopment%0A", status: http.StatusBadRequest, field: "fieldSelector"},
+		{method: http.MethodGet, path: "/kubeloop/api/capabilities", status: http.StatusBadRequest, field: "namespace"},
+		{method: http.MethodGet, path: "/kubeloop/api/namespaces/Bad_Name/pods", status: http.StatusBadRequest, field: "namespace"},
+		{method: http.MethodGet, path: "/kubeloop/api/namespaces/development/pods/", status: http.StatusNotFound},
+		{method: http.MethodPost, path: "/kubeloop/api/namespaces", status: http.StatusNotFound},
 	}
 	for _, test := range tests {
 		response := httptest.NewRecorder()
@@ -187,7 +187,7 @@ func TestNamespaceInventoryFiltersPolicyAndForwardsValidatedSelectors(t *testing
 	response := httptest.NewRecorder()
 	server.Handler().ServeHTTP(response, httptest.NewRequest(
 		http.MethodGet,
-		"/api/v2/namespaces?labelSelector=team%3Dplatform&fieldSelector=status.phase%3DActive",
+		"/kubeloop/api/namespaces?labelSelector=team%3Dplatform&fieldSelector=status.phase%3DActive",
 		nil,
 	))
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"name":"development"`) ||
@@ -205,7 +205,7 @@ func TestKubernetesErrorsAreSanitized(t *testing.T) {
 	defer upstream.Close()
 	server := newServer(t, upstream.URL)
 	response := httptest.NewRecorder()
-	server.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v2/namespaces", nil))
+	server.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/kubeloop/api/namespaces", nil))
 	if response.Code != http.StatusForbidden || strings.Contains(response.Body.String(), "secret RBAC details") {
 		t.Fatalf("status = %d body = %s", response.Code, response.Body.String())
 	}
@@ -232,7 +232,7 @@ func TestStreamCapabilitiesRequireBothCreateAndStreamPolicyOperations(t *testing
 	}
 	server := newServerWithPolicy(t, upstream.URL, policy)
 	response := httptest.NewRecorder()
-	server.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v2/capabilities?namespace=development", nil))
+	server.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/kubeloop/api/capabilities?namespace=development", nil))
 	if response.Code != http.StatusOK || strings.Contains(response.Body.String(), "pods.exec") || strings.Contains(response.Body.String(), "pods.files") {
 		t.Fatalf("status = %d body = %s", response.Code, response.Body.String())
 	}
@@ -256,7 +256,7 @@ func TestFileManagementCapabilityRequiresEveryPolicyOperation(t *testing.T) {
 	}
 	server := newServerWithPolicy(t, upstream.URL, policy)
 	response := httptest.NewRecorder()
-	server.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v2/capabilities?namespace=development", nil))
+	server.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/kubeloop/api/capabilities?namespace=development", nil))
 	if response.Code != http.StatusOK || strings.Contains(response.Body.String(), "pods.files.manage") {
 		t.Fatalf("status = %d body = %s", response.Code, response.Body.String())
 	}
@@ -281,7 +281,7 @@ func TestTunnelAndPortForwardCapabilitiesRequireCompleteGatewayPolicy(t *testing
 	}
 	server := newServerWithPolicy(t, upstream.URL, policy)
 	response := httptest.NewRecorder()
-	server.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v2/capabilities?namespace=development", nil))
+	server.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/kubeloop/api/capabilities?namespace=development", nil))
 	if response.Code != http.StatusOK {
 		t.Fatalf("status = %d body = %s", response.Code, response.Body.String())
 	}

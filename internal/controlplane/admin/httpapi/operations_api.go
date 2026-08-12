@@ -258,7 +258,7 @@ func (api *readAPI) createAuditExport(writer http.ResponseWriter, request *http.
 		writeOperationError(writer, request, err)
 		return
 	}
-	writer.Header().Set("Location", "/api/v2/admin/audit/exports/"+result.JobID)
+	writer.Header().Set("Location", "/kubeloop/api/admin/audit/exports/"+result.JobID)
 	if result.Replayed {
 		writer.Header().Set("Idempotent-Replayed", "true")
 	}

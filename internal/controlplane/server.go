@@ -11,8 +11,8 @@ import (
 
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/health"
 	controlplanemiddleware "github.com/fengqi-dev/kube-loop/internal/controlplane/middleware"
+	"github.com/fengqi-dev/kube-loop/internal/httpmiddleware"
 	"github.com/labstack/echo/v5"
-	echomiddleware "github.com/labstack/echo/v5/middleware"
 )
 
 const (
@@ -100,8 +100,8 @@ func NewServer(config Config, build BuildInfo, logger *slog.Logger, serverOption
 		}
 		defaultHTTPErrorHandler(ctx, err)
 	}
-	router.Use(echomiddleware.RequestID())
-	router.Use(controlplanemiddleware.RequestLogger(logger))
+	router.Use(httpmiddleware.RequestID())
+	router.Use(httpmiddleware.RequestLogger(logger))
 	router.GET(DiscoveryPath, func(ctx *echo.Context) error {
 		writer := ctx.Response()
 		document := discovery

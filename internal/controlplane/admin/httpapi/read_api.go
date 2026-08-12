@@ -237,8 +237,7 @@ func (api *readAPI) revokeCurrentSession(writer http.ResponseWriter, request *ht
 func (api *readAPI) authenticate(next echo.HandlerFunc) echo.HandlerFunc {
 	return func(echoContext *echo.Context) error {
 		writer, request := echoContext.Response(), echoContext.Request()
-		requestID := uuid.NewString()
-		writer.Header().Set(managementRequestHeader, requestID)
+		requestID := ensureRequestID(writer, request)
 		if request.Header.Get("Authorization") != "" || request.Header.Get("Sec-Fetch-Site") == "cross-site" ||
 			(request.Header.Get("Origin") != "" && request.Header.Get("Origin") != api.handler.origin) {
 			writeError(writer, http.StatusUnauthorized, "unauthenticated", "management authentication failed", requestID)

@@ -1,8 +1,11 @@
 package gateway
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"log/slog"
 	"net"
 	"net/netip"
 	"strings"
@@ -12,6 +15,24 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
 )
+
+func TestServeConnForAuthorizationLogsRequestID(t *testing.T) {
+	var logs bytes.Buffer
+	server := NewServer(slog.New(slog.NewJSONHandler(&logs, nil)), time.Second)
+	client, gatewayConnection := net.Pipe()
+	defer client.Close()
+	server.ServeConnForAuthorization(gatewayConnection, SessionAuthorization{
+		RequestID: "33333333-3333-4333-8333-333333333333", SessionID: "invalid", Generation: 1,
+	})
+
+	var event map[string]any
+	if err := json.Unmarshal(bytes.TrimSpace(logs.Bytes()), &event); err != nil {
+		t.Fatal(err)
+	}
+	if event["request_id"] != "33333333-3333-4333-8333-333333333333" || event["reason"] != "invalid_session" {
+		t.Fatalf("unexpected Gateway log: %#v", event)
+	}
+}
 
 func TestClusterAddressPolicy(t *testing.T) {
 	allowed := []string{"10.0.0.1", "172.16.1.2", "192.168.10.2", "fd00::1"}

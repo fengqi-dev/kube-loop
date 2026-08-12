@@ -50,11 +50,11 @@ func TestCleanDirectoryWithOnlyServerURLBrowsesRemoteInventory(t *testing.T) {
 			})
 		case "/auth/anonymous/guest/login":
 			writeAppTokenResponse(writer, "clean-access", "clean-refresh")
-		case "/api/v2/version":
+		case "/kubeloop/api/version":
 			_ = json.NewEncoder(writer).Encode(clientremote.Version{GitVersion: "v1.31.2", GatewayVersion: "v2-clean"})
-		case "/api/v2/namespaces":
+		case "/kubeloop/api/namespaces":
 			_, _ = writer.Write([]byte(`{"items":[{"name":"development","status":"Active"}]}`))
-		case "/api/v2/sessions":
+		case "/kubeloop/api/sessions":
 			now := time.Now().UTC()
 			snapshot := clientremote.Capabilities{
 				SchemaVersion: 1, PrincipalID: "principal-clean", Namespace: "development",
@@ -65,9 +65,9 @@ func TestCleanDirectoryWithOnlyServerURLBrowsesRemoteInventory(t *testing.T) {
 				CreatedAt: now, UpdatedAt: now, LastHeartbeatAt: now, ExpiresAt: now.Add(2 * time.Minute),
 				NetworkSpec: network, NetworkSpecHash: networkHash, Capabilities: &snapshot,
 			})
-		case "/api/v2/namespaces/development/pods":
+		case "/kubeloop/api/namespaces/development/pods":
 			_, _ = writer.Write([]byte(`{"items":[{"name":"api-0","namespace":"development","phase":"Running","ready":true,"containers":["api"]}]}`))
-		case "/api/v2/sessions/" + sessionID:
+		case "/kubeloop/api/sessions/" + sessionID:
 			now := time.Now().UTC()
 			_ = json.NewEncoder(writer).Encode(clientremote.Session{
 				ID: sessionID, Namespace: "development", State: "disconnected", Generation: 2,

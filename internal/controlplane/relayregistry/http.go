@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/fengqi-dev/kube-loop/internal/httpmiddleware"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/relaycontrol"
 	"github.com/labstack/echo/v5"
 )
@@ -99,12 +101,14 @@ type HTTPHandler struct {
 	router        *echo.Echo
 }
 
-func NewHTTPHandler(registry *Registry, authenticator Authenticator) (*HTTPHandler, error) {
+func NewHTTPHandler(registry *Registry, authenticator Authenticator, logger *slog.Logger) (*HTTPHandler, error) {
 	if registry == nil || authenticator == nil {
 		return nil, errors.New("Relay Registry and authenticator are required")
 	}
 	handler := &HTTPHandler{registry: registry, authenticator: authenticator}
 	router := echo.New()
+	router.Use(httpmiddleware.RequestID())
+	router.Use(httpmiddleware.RequestLogger(logger))
 	group := router.Group(InternalPathPrefix)
 	group.POST("/register", handler.register)
 	group.PUT("/heartbeat", handler.heartbeat)

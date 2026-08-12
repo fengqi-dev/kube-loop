@@ -37,7 +37,7 @@ snapshot; a RelayTicket derives its NetworkSpec digest from this stored value
 and never trusts a client-supplied digest.
 
 The create response also carries the current namespace capability snapshot.
-It is produced by the same discoverer as `GET /api/v2/capabilities`, so its
+It is produced by the same discoverer as `GET /kubeloop/api/capabilities`, so its
 schema, principal, namespace and Gateway-version bindings cannot diverge from
 the standalone endpoint. This authorization snapshot is advisory and may be
 cached briefly by the desktop; every operation remains independently

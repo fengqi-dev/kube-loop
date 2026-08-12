@@ -106,7 +106,7 @@ func TestExchangeTaskIsOwnedIdempotentAndDurablyStopped(t *testing.T) {
 		t.Fatal(err)
 	}
 	principal := controlplaneapi.Principal{Subject: principalID, DeviceID: "device"}
-	path := "/api/v2/sessions/" + sessionID + "/exchanges?namespace=development"
+	path := "/kubeloop/api/sessions/" + sessionID + "/exchanges?namespace=development"
 	body := []byte(`{"service":"api","ports":[{"servicePort":53,"protocol":"udp"},{"servicePort":80,"protocol":"tcp"}]}`)
 	created, apiError := exchangeRequest(handler, principal, http.MethodPost, path, body, "exchange-1")
 	if apiError != nil || created.Code != http.StatusCreated {
@@ -125,7 +125,7 @@ func TestExchangeTaskIsOwnedIdempotentAndDurablyStopped(t *testing.T) {
 	if apiError == nil || apiError.Code != controlplaneapi.CodeConflict || services.calls != 1 {
 		t.Fatalf("idempotency mismatch error=%#v calls=%d", apiError, services.calls)
 	}
-	taskPath := "/api/v2/sessions/" + sessionID + "/exchanges/" + document.ID + "?namespace=development"
+	taskPath := "/kubeloop/api/sessions/" + sessionID + "/exchanges/" + document.ID + "?namespace=development"
 	_, apiError = exchangeRequest(handler, controlplaneapi.Principal{Subject: uuid.NewString(), DeviceID: "other"}, http.MethodGet, taskPath, nil, "")
 	if apiError == nil || apiError.Code != controlplaneapi.CodeNotFound {
 		t.Fatalf("cross-principal get error=%#v", apiError)
@@ -149,7 +149,7 @@ func TestExchangeTaskIsOwnedIdempotentAndDurablyStopped(t *testing.T) {
 	if err := stateStore.Tasks().UpdateState(ctx, document.ID, "pending", "running", json.RawMessage(`{}`), now); err != nil {
 		t.Fatal(err)
 	}
-	taskPath = "/api/v2/sessions/" + sessionID + "/exchanges/" + document.ID + "?namespace=development"
+	taskPath = "/kubeloop/api/sessions/" + sessionID + "/exchanges/" + document.ID + "?namespace=development"
 	stopping, apiError := exchangeRequest(handler, principal, http.MethodDelete, taskPath, nil, "")
 	if apiError != nil || stopping.Code != http.StatusAccepted {
 		t.Fatalf("request running Exchange stop: status=%d error=%#v", stopping.Code, apiError)

@@ -239,9 +239,9 @@ func TestCapabilitiesCacheIsBoundedByPrincipalNamespaceCredentialAndGatewayVersi
 	principalID := "principal-a"
 	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		switch request.URL.Path {
-		case "/api/v2/version":
+		case "/kubeloop/api/version":
 			_ = json.NewEncoder(writer).Encode(Version{GitVersion: "v1.31.0", GatewayVersion: gatewayVersion})
-		case "/api/v2/capabilities":
+		case "/kubeloop/api/capabilities":
 			capabilityCalls.Add(1)
 			_ = json.NewEncoder(writer).Encode(Capabilities{
 				SchemaVersion: 1, PrincipalID: principalID, Namespace: request.URL.Query().Get("namespace"),
@@ -302,7 +302,7 @@ func TestContractHTTPResponseAllowsAdditiveFieldsButRejectsMissingRequiredFields
 	store := &memoryStore{value: validCredential(now)}
 	var missing atomic.Bool
 	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if request.URL.Path != "/api/v2/version" {
+		if request.URL.Path != "/kubeloop/api/version" {
 			http.NotFound(writer, request)
 			return
 		}
@@ -341,7 +341,7 @@ func TestSessionLifecycleUsesIdempotencyAndGenerationHeaders(t *testing.T) {
 			t.Errorf("namespace = %q", request.URL.Query().Get("namespace"))
 		}
 		switch {
-		case request.Method == http.MethodPost && request.URL.Path == "/api/v2/sessions":
+		case request.Method == http.MethodPost && request.URL.Path == "/kubeloop/api/sessions":
 			if request.Header.Get("Idempotency-Key") != "session-key" {
 				t.Errorf("Idempotency-Key = %q", request.Header.Get("Idempotency-Key"))
 			}
@@ -358,7 +358,7 @@ func TestSessionLifecycleUsesIdempotencyAndGenerationHeaders(t *testing.T) {
 			state = "disconnected"
 		}
 		var capabilities *Capabilities
-		if request.Method == http.MethodPost && request.URL.Path == "/api/v2/sessions" {
+		if request.Method == http.MethodPost && request.URL.Path == "/kubeloop/api/sessions" {
 			capabilities = &Capabilities{
 				SchemaVersion: 1, PrincipalID: "principal-1", Namespace: "development",
 				GatewayVersion: "v2-test", Capabilities: []string{"cluster.tunnel", "pods.list"},
@@ -403,7 +403,7 @@ func TestIssueRelayTicketUsesAuthenticatedJSONRequest(t *testing.T) {
 		CreatedAt: now, UpdatedAt: now, LastHeartbeatAt: now, ExpiresAt: now.Add(time.Minute),
 	}
 	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if request.Method != http.MethodPost || request.URL.Path != "/api/v2/sessions/"+session.ID+"/tickets" {
+		if request.Method != http.MethodPost || request.URL.Path != "/kubeloop/api/sessions/"+session.ID+"/tickets" {
 			t.Errorf("request = %s %s", request.Method, request.URL.Path)
 		}
 		if request.URL.Query().Get("namespace") != session.Namespace || request.Header.Get("Content-Type") != "application/json" ||
@@ -452,7 +452,7 @@ func TestPortForwardTaskLifecycleUsesSessionBoundGatewayAPI(t *testing.T) {
 	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		calls.Add(1)
 		if request.URL.Query().Get("namespace") != session.Namespace ||
-			!strings.HasPrefix(request.URL.Path, "/api/v2/sessions/"+session.ID+"/port-forwards") {
+			!strings.HasPrefix(request.URL.Path, "/kubeloop/api/sessions/"+session.ID+"/port-forwards") {
 			t.Errorf("request = %s %s?%s", request.Method, request.URL.Path, request.URL.RawQuery)
 		}
 		if request.Method == http.MethodPost {

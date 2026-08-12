@@ -140,7 +140,7 @@ func (api *readAPI) createPolicyDraft(writer http.ResponseWriter, request *http.
 		writePolicyError(writer, request, err)
 		return
 	}
-	writer.Header().Set("Location", "/api/v2/admin/policy/changes/"+result.Change.ID)
+	writer.Header().Set("Location", "/kubeloop/api/admin/policy/changes/"+result.Change.ID)
 	if result.Replayed {
 		writer.Header().Set("Idempotent-Replayed", "true")
 	}

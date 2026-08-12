@@ -427,7 +427,7 @@ func New(credentialStore credentials.Store, refresher TokenRefresher, config Con
 
 func (client *Client) Version(ctx context.Context, serverProfile profile.Profile) (Version, error) {
 	var result Version
-	if err := client.getJSON(ctx, serverProfile, "/api/v2/version", nil, &result); err != nil {
+	if err := client.getJSON(ctx, serverProfile, "/kubeloop/api/version", nil, &result); err != nil {
 		return Version{}, err
 	}
 	if strings.TrimSpace(result.GitVersion) == "" || strings.TrimSpace(result.GatewayVersion) == "" {
@@ -451,7 +451,7 @@ func (client *Client) Capabilities(ctx context.Context, serverProfile profile.Pr
 		return cached, nil
 	}
 	var result Capabilities
-	if err := client.getJSON(ctx, serverProfile, "/api/v2/capabilities", url.Values{"namespace": {namespace}}, &result); err != nil {
+	if err := client.getJSON(ctx, serverProfile, "/kubeloop/api/capabilities", url.Values{"namespace": {namespace}}, &result); err != nil {
 		return Capabilities{}, err
 	}
 	result, err = capability.Normalize(result)
@@ -566,14 +566,14 @@ func cloneCapabilityPointer(value *Capabilities) *Capabilities {
 }
 
 func (client *Client) Namespaces(ctx context.Context, serverProfile profile.Profile) ([]Namespace, error) {
-	return collectPages[Namespace](ctx, client, serverProfile, "/api/v2/namespaces")
+	return collectPages[Namespace](ctx, client, serverProfile, "/kubeloop/api/namespaces")
 }
 
 func (client *Client) Pods(ctx context.Context, serverProfile profile.Profile, namespace string) ([]Pod, error) {
 	if err := validateNamespace(namespace); err != nil {
 		return nil, err
 	}
-	pods, err := collectPages[Pod](ctx, client, serverProfile, "/api/v2/namespaces/"+url.PathEscape(namespace)+"/pods")
+	pods, err := collectPages[Pod](ctx, client, serverProfile, "/kubeloop/api/namespaces/"+url.PathEscape(namespace)+"/pods")
 	if err != nil {
 		return nil, err
 	}
@@ -592,7 +592,7 @@ func (client *Client) Services(ctx context.Context, serverProfile profile.Profil
 	if err := validateNamespace(namespace); err != nil {
 		return nil, err
 	}
-	return collectPages[Service](ctx, client, serverProfile, "/api/v2/namespaces/"+url.PathEscape(namespace)+"/services")
+	return collectPages[Service](ctx, client, serverProfile, "/kubeloop/api/namespaces/"+url.PathEscape(namespace)+"/services")
 }
 
 func (client *Client) CreateSession(
@@ -609,7 +609,7 @@ func (client *Client) CreateSession(
 	}
 	var result Session
 	if err := client.doJSON(
-		ctx, serverProfile, http.MethodPost, "/api/v2/sessions", url.Values{"namespace": {namespace}},
+		ctx, serverProfile, http.MethodPost, "/kubeloop/api/sessions", url.Values{"namespace": {namespace}},
 		http.Header{"Idempotency-Key": {idempotencyKey}}, &result,
 	); err != nil {
 		return Session{}, err
@@ -644,7 +644,7 @@ func (client *Client) GetSession(
 	}
 	var result Session
 	if err := client.doJSON(
-		ctx, serverProfile, http.MethodGet, "/api/v2/sessions/"+url.PathEscape(sessionID),
+		ctx, serverProfile, http.MethodGet, "/kubeloop/api/sessions/"+url.PathEscape(sessionID),
 		url.Values{"namespace": {namespace}}, nil, &result,
 	); err != nil {
 		return Session{}, err
@@ -662,7 +662,7 @@ func (client *Client) HeartbeatSession(
 	}
 	var result Session
 	if err := client.doJSON(
-		ctx, serverProfile, http.MethodPost, "/api/v2/sessions/"+url.PathEscape(current.ID)+"/heartbeat",
+		ctx, serverProfile, http.MethodPost, "/kubeloop/api/sessions/"+url.PathEscape(current.ID)+"/heartbeat",
 		url.Values{"namespace": {current.Namespace}}, generationHeader(current.Generation), &result,
 	); err != nil {
 		return Session{}, err
@@ -685,7 +685,7 @@ func (client *Client) DisconnectSession(
 	}
 	var result Session
 	if err := client.doJSON(
-		ctx, serverProfile, http.MethodDelete, "/api/v2/sessions/"+url.PathEscape(current.ID),
+		ctx, serverProfile, http.MethodDelete, "/kubeloop/api/sessions/"+url.PathEscape(current.ID),
 		url.Values{"namespace": {current.Namespace}}, generationHeader(current.Generation), &result,
 	); err != nil {
 		return Session{}, err
@@ -710,7 +710,7 @@ func (client *Client) IssueRelayTicket(
 	var result RelayTicket
 	if err := client.doJSONBody(
 		ctx, serverProfile, http.MethodPost,
-		"/api/v2/sessions/"+url.PathEscape(current.ID)+"/tickets",
+		"/kubeloop/api/sessions/"+url.PathEscape(current.ID)+"/tickets",
 		url.Values{"namespace": {current.Namespace}}, nil, body, &result,
 	); err != nil {
 		return RelayTicket{}, err
@@ -780,7 +780,7 @@ func (client *Client) CreatePortForward(
 	var result PortForwardTask
 	if err := client.doJSONBody(
 		ctx, serverProfile, http.MethodPost,
-		"/api/v2/sessions/"+url.PathEscape(current.ID)+"/port-forwards",
+		"/kubeloop/api/sessions/"+url.PathEscape(current.ID)+"/port-forwards",
 		url.Values{"namespace": {current.Namespace}},
 		http.Header{"Idempotency-Key": {idempotencyKey}}, body, &result,
 	); err != nil {
@@ -802,7 +802,7 @@ func (client *Client) ListPortForwards(
 	}
 	if err := client.doJSON(
 		ctx, serverProfile, http.MethodGet,
-		"/api/v2/sessions/"+url.PathEscape(current.ID)+"/port-forwards",
+		"/kubeloop/api/sessions/"+url.PathEscape(current.ID)+"/port-forwards",
 		url.Values{"namespace": {current.Namespace}}, nil, &result,
 	); err != nil {
 		return nil, err
@@ -835,7 +835,7 @@ func (client *Client) StopPortForward(
 	var result PortForwardTask
 	if err := client.doJSON(
 		ctx, serverProfile, http.MethodDelete,
-		"/api/v2/sessions/"+url.PathEscape(current.ID)+"/port-forwards/"+url.PathEscape(taskID),
+		"/kubeloop/api/sessions/"+url.PathEscape(current.ID)+"/port-forwards/"+url.PathEscape(taskID),
 		url.Values{"namespace": {current.Namespace}}, nil, &result,
 	); err != nil {
 		return PortForwardTask{}, err
@@ -864,7 +864,7 @@ func (client *Client) CreateExchange(
 	var result ExchangeTask
 	if err := client.doJSONBody(
 		ctx, serverProfile, http.MethodPost,
-		"/api/v2/sessions/"+url.PathEscape(current.ID)+"/exchanges",
+		"/kubeloop/api/sessions/"+url.PathEscape(current.ID)+"/exchanges",
 		url.Values{"namespace": {current.Namespace}},
 		http.Header{"Idempotency-Key": {idempotencyKey}}, body, &result,
 	); err != nil {
@@ -888,7 +888,7 @@ func (client *Client) GetExchange(
 	var result ExchangeTask
 	if err := client.doJSON(
 		ctx, serverProfile, http.MethodGet,
-		"/api/v2/sessions/"+url.PathEscape(current.ID)+"/exchanges/"+url.PathEscape(taskID),
+		"/kubeloop/api/sessions/"+url.PathEscape(current.ID)+"/exchanges/"+url.PathEscape(taskID),
 		url.Values{"namespace": {current.Namespace}}, nil, &result,
 	); err != nil {
 		return ExchangeTask{}, err
@@ -911,7 +911,7 @@ func (client *Client) StopExchange(
 	var result ExchangeTask
 	if err := client.doJSON(
 		ctx, serverProfile, http.MethodDelete,
-		"/api/v2/sessions/"+url.PathEscape(current.ID)+"/exchanges/"+url.PathEscape(taskID),
+		"/kubeloop/api/sessions/"+url.PathEscape(current.ID)+"/exchanges/"+url.PathEscape(taskID),
 		url.Values{"namespace": {current.Namespace}}, nil, &result,
 	); err != nil {
 		return ExchangeTask{}, err
@@ -956,7 +956,7 @@ func (client *Client) CreateMirror(
 	var result MirrorTask
 	if err := client.doJSONBody(
 		ctx, serverProfile, http.MethodPost,
-		"/api/v2/sessions/"+url.PathEscape(current.ID)+"/mirrors",
+		"/kubeloop/api/sessions/"+url.PathEscape(current.ID)+"/mirrors",
 		url.Values{"namespace": {current.Namespace}},
 		http.Header{"Idempotency-Key": {idempotencyKey}}, body, &result,
 	); err != nil {
@@ -980,7 +980,7 @@ func (client *Client) GetMirror(
 	var result MirrorTask
 	if err := client.doJSON(
 		ctx, serverProfile, http.MethodGet,
-		"/api/v2/sessions/"+url.PathEscape(current.ID)+"/mirrors/"+url.PathEscape(taskID),
+		"/kubeloop/api/sessions/"+url.PathEscape(current.ID)+"/mirrors/"+url.PathEscape(taskID),
 		url.Values{"namespace": {current.Namespace}}, nil, &result,
 	); err != nil {
 		return MirrorTask{}, err
@@ -1003,7 +1003,7 @@ func (client *Client) StopMirror(
 	var result MirrorTask
 	if err := client.doJSON(
 		ctx, serverProfile, http.MethodDelete,
-		"/api/v2/sessions/"+url.PathEscape(current.ID)+"/mirrors/"+url.PathEscape(taskID),
+		"/kubeloop/api/sessions/"+url.PathEscape(current.ID)+"/mirrors/"+url.PathEscape(taskID),
 		url.Values{"namespace": {current.Namespace}}, nil, &result,
 	); err != nil {
 		return MirrorTask{}, err
@@ -1048,7 +1048,7 @@ func (client *Client) CreatePreview(
 	var result PreviewTask
 	if err := client.doJSONBody(
 		ctx, serverProfile, http.MethodPost,
-		"/api/v2/sessions/"+url.PathEscape(current.ID)+"/previews",
+		"/kubeloop/api/sessions/"+url.PathEscape(current.ID)+"/previews",
 		url.Values{"namespace": {current.Namespace}},
 		http.Header{"Idempotency-Key": {idempotencyKey}}, body, &result,
 	); err != nil {
@@ -1072,7 +1072,7 @@ func (client *Client) GetPreview(
 	var result PreviewTask
 	if err := client.doJSON(
 		ctx, serverProfile, http.MethodGet,
-		"/api/v2/sessions/"+url.PathEscape(current.ID)+"/previews/"+url.PathEscape(taskID),
+		"/kubeloop/api/sessions/"+url.PathEscape(current.ID)+"/previews/"+url.PathEscape(taskID),
 		url.Values{"namespace": {current.Namespace}}, nil, &result,
 	); err != nil {
 		return PreviewTask{}, err
@@ -1095,7 +1095,7 @@ func (client *Client) StopPreview(
 	var result PreviewTask
 	if err := client.doJSON(
 		ctx, serverProfile, http.MethodDelete,
-		"/api/v2/sessions/"+url.PathEscape(current.ID)+"/previews/"+url.PathEscape(taskID),
+		"/kubeloop/api/sessions/"+url.PathEscape(current.ID)+"/previews/"+url.PathEscape(taskID),
 		url.Values{"namespace": {current.Namespace}}, nil, &result,
 	); err != nil {
 		return PreviewTask{}, err
@@ -1143,7 +1143,7 @@ func (client *Client) CreateExecTask(
 	var result ExecTask
 	if err := client.doJSONBody(
 		ctx, serverProfile, http.MethodPost,
-		"/api/v2/sessions/"+url.PathEscape(current.ID)+"/exec",
+		"/kubeloop/api/sessions/"+url.PathEscape(current.ID)+"/exec",
 		url.Values{"namespace": {current.Namespace}},
 		http.Header{"Idempotency-Key": {idempotencyKey}}, body, &result,
 	); err != nil {
@@ -1162,7 +1162,7 @@ func (client *Client) OpenExecStream(
 		return nil, errors.New("pending Pod exec Task is required")
 	}
 	return client.openTaskWebSocket(ctx, serverProfile, current,
-		"/api/v2/sessions/"+url.PathEscape(current.ID)+"/exec/"+url.PathEscape(task.ID)+"/stream")
+		"/kubeloop/api/sessions/"+url.PathEscape(current.ID)+"/exec/"+url.PathEscape(task.ID)+"/stream")
 }
 
 func (client *Client) CreateFileTransferTask(
@@ -1189,7 +1189,7 @@ func (client *Client) CreateFileTransferTask(
 	var result FileTransferTask
 	if err := client.doJSONBody(
 		ctx, serverProfile, http.MethodPost,
-		"/api/v2/sessions/"+url.PathEscape(current.ID)+"/file-transfers",
+		"/kubeloop/api/sessions/"+url.PathEscape(current.ID)+"/file-transfers",
 		url.Values{"namespace": {current.Namespace}},
 		http.Header{"Idempotency-Key": {idempotencyKey}}, body, &result,
 	); err != nil {
@@ -1213,7 +1213,7 @@ func (client *Client) GetFileTransferTask(
 	var result FileTransferTask
 	if err := client.doJSON(
 		ctx, serverProfile, http.MethodGet,
-		"/api/v2/sessions/"+url.PathEscape(current.ID)+"/file-transfers/"+url.PathEscape(taskID),
+		"/kubeloop/api/sessions/"+url.PathEscape(current.ID)+"/file-transfers/"+url.PathEscape(taskID),
 		url.Values{"namespace": {current.Namespace}}, nil, &result,
 	); err != nil {
 		return FileTransferTask{}, err
@@ -1231,7 +1231,7 @@ func (client *Client) OpenFileTransferStream(
 		return nil, errors.New("pending file transfer Task is required")
 	}
 	connection, err := client.openTaskWebSocket(ctx, serverProfile, current,
-		"/api/v2/sessions/"+url.PathEscape(current.ID)+"/file-transfers/"+url.PathEscape(task.ID)+"/stream")
+		"/kubeloop/api/sessions/"+url.PathEscape(current.ID)+"/file-transfers/"+url.PathEscape(task.ID)+"/stream")
 	if err == nil {
 		connection.SetReadLimit(filestream.MaximumData + 1)
 	}
@@ -1253,7 +1253,7 @@ func (client *Client) ListPodFiles(
 	body, _ := json.Marshal(spec)
 	var result PodFileList
 	if err := client.doJSONBody(ctx, serverProfile, http.MethodPost,
-		"/api/v2/sessions/"+url.PathEscape(current.ID)+"/pod-files/list",
+		"/kubeloop/api/sessions/"+url.PathEscape(current.ID)+"/pod-files/list",
 		url.Values{"namespace": {current.Namespace}}, nil, body, &result); err != nil {
 		return PodFileList{}, err
 	}
@@ -1282,7 +1282,7 @@ func (client *Client) CreatePodFileOperation(
 	body, _ := json.Marshal(spec)
 	var result PodFileTask
 	if err := client.doJSONBody(ctx, serverProfile, http.MethodPost,
-		"/api/v2/sessions/"+url.PathEscape(current.ID)+"/pod-files/"+action,
+		"/kubeloop/api/sessions/"+url.PathEscape(current.ID)+"/pod-files/"+action,
 		url.Values{"namespace": {current.Namespace}}, http.Header{"Idempotency-Key": {idempotencyKey}}, body, &result); err != nil {
 		return PodFileTask{}, err
 	}
@@ -1303,7 +1303,7 @@ func (client *Client) GetPodFileOperation(
 	}
 	var result PodFileTask
 	if err := client.doJSON(ctx, serverProfile, http.MethodGet,
-		"/api/v2/sessions/"+url.PathEscape(current.ID)+"/pod-files/operations/"+url.PathEscape(taskID),
+		"/kubeloop/api/sessions/"+url.PathEscape(current.ID)+"/pod-files/operations/"+url.PathEscape(taskID),
 		url.Values{"namespace": {current.Namespace}}, nil, &result); err != nil {
 		return PodFileTask{}, err
 	}

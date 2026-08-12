@@ -50,7 +50,7 @@ func TestAPIDefaultsToAuthenticationRequired(t *testing.T) {
 	server := newAPITestServer(t)
 	response := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodGet, APIPathPrefix+"/clusters", nil)
-	request.Header.Set(echo.HeaderXRequestID, "client-request-id")
+	request.Header.Set(echo.HeaderXRequestID, "33333333-3333-4333-8333-333333333333")
 	server.Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want %d", response.Code, http.StatusUnauthorized)
@@ -68,7 +68,7 @@ func TestAPIDefaultsToAuthenticationRequired(t *testing.T) {
 	if document.Error.RequestID != response.Header().Get(echo.HeaderXRequestID) {
 		t.Fatalf("body request ID %q differs from header %q", document.Error.RequestID, response.Header().Get(echo.HeaderXRequestID))
 	}
-	if document.Error.RequestID != "client-request-id" {
+	if document.Error.RequestID != "33333333-3333-4333-8333-333333333333" {
 		t.Fatalf("request ID = %q, want client-provided ID", document.Error.RequestID)
 	}
 }

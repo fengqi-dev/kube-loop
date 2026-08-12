@@ -49,7 +49,7 @@ Policy input is strictly decoded and size bounded. An update is fully compiled
 and validated before one atomic pointer swap; a failed update leaves the prior
 policy active. An absent or empty policy is deny-all.
 
-The authenticated `/api/v2` framework authorizes the normalized operation and
+The authenticated `/kubeloop/api` framework authorizes the normalized operation and
 resource scope before invoking its business handler. A denial always returns
 the same `FORBIDDEN` envelope and occurs before any resource lookup, so it does
 not disclose whether a resource exists. The authorization request and matched

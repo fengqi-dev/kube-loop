@@ -33,7 +33,7 @@ spec:
                 name: {{ include "kubeloop.controlPlaneName" . }}
                 port:
                   name: http
-          - path: /api
+          - path: /kubeloop/api
             pathType: Prefix
             backend:
               service:

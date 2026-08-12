@@ -7,7 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -386,7 +386,7 @@ func rawClientSession(t *testing.T, ctx context.Context, serverURL, token string
 func TestForwarderRejectsInvalidToken(t *testing.T) {
 	var logs bytes.Buffer
 	handler, err := NewHandler(ServerConfig{
-		Authenticator: testAuthenticator("correct"), Logger: log.New(&logs, "", 0), Handle: func(Identity, net.Conn) {},
+		Authenticator: testAuthenticator("correct"), Logger: slog.New(slog.NewJSONHandler(&logs, nil)), Handle: func(Identity, net.Conn) {},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -404,6 +404,24 @@ func TestForwarderRejectsInvalidToken(t *testing.T) {
 	}
 	if strings.Contains(logs.String(), "correct") || strings.Contains(logs.String(), "wrong") {
 		t.Fatalf("authentication log leaked a token: %q", logs.String())
+	}
+}
+
+func TestHandlerLogsRequestID(t *testing.T) {
+	var logs bytes.Buffer
+	handler, err := NewHandler(ServerConfig{
+		Authenticator: testAuthenticator("correct"),
+		Logger:        slog.New(slog.NewJSONHandler(&logs, nil)),
+		Handle:        func(Identity, net.Conn) {},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodGet, DefaultPath, nil)
+	request.Header.Set("X-Request-ID", "33333333-3333-4333-8333-333333333333")
+	handler.ServeHTTP(httptest.NewRecorder(), request)
+	if !strings.Contains(logs.String(), `"request_id":"33333333-3333-4333-8333-333333333333"`) {
+		t.Fatalf("request ID missing from Gateway log: %q", logs.String())
 	}
 }
 

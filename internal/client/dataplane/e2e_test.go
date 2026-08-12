@@ -5,7 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -108,7 +108,7 @@ func TestAuthenticatedWSSDataPlaneCarriesAuthorizedSOCKSTCPAndUDP(t *testing.T) 
 		halfCloseResult <- writeErr
 	}()
 	dialer := &echoDialer{halfCloseTarget: halfCloseListener.Addr().String()}
-	gatewayServer := gateway.NewServer(log.New(io.Discard, "", 0), time.Second)
+	gatewayServer := gateway.NewServer(slog.New(slog.NewTextHandler(io.Discard, nil)), time.Second)
 	gatewayServer.Dialer = dialer
 	ticketCalls := 0
 	deviceID := "22222222-2222-4222-8222-222222222222"
@@ -125,7 +125,7 @@ func TestAuthenticatedWSSDataPlaneCarriesAuthorizedSOCKSTCPAndUDP(t *testing.T) 
 		}),
 		Handle: func(identity servermux.Identity, connection net.Conn) {
 			gatewayServer.ServeConnForAuthorization(connection, gateway.SessionAuthorization{
-				SessionID: identity.SessionID, Generation: identity.SessionGeneration,
+				RequestID: identity.RequestID, SessionID: identity.SessionID, Generation: identity.SessionGeneration,
 				Namespace:       identity.Namespace,
 				NetworkSpecHash: identity.NetworkSpecHash,
 			})

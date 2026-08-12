@@ -58,7 +58,7 @@ func WithAuthRoutes(routes RouteRegistrar) ServerOption {
 }
 
 // WithManagementHandler installs the browser-only Management Plane below
-// /api/v2/admin without passing it through the ordinary Gateway Bearer chain.
+// /kubeloop/api/admin without passing it through the ordinary Gateway Bearer chain.
 func WithManagementHandler(handler http.Handler) ServerOption {
 	return func(options *serverOptions) { options.managementHandler = handler }
 }

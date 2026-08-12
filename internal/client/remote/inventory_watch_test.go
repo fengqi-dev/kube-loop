@@ -15,7 +15,7 @@ import (
 func TestInventoryWatchAuthenticatesAndValidatesSnapshotBinding(t *testing.T) {
 	now := time.Now().UTC()
 	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if request.URL.Path != "/api/v2/namespaces/development/pods" || request.URL.Query().Get("watch") != "true" ||
+		if request.URL.Path != "/kubeloop/api/namespaces/development/pods" || request.URL.Query().Get("watch") != "true" ||
 			request.Header.Get("Authorization") != "Bearer access-token" {
 			http.Error(writer, "invalid request", http.StatusBadRequest)
 			return

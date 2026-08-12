@@ -1,4 +1,4 @@
-package middleware
+package httpmiddleware
 
 import (
 	"log/slog"
@@ -8,6 +8,7 @@ import (
 	echomiddleware "github.com/labstack/echo/v5/middleware"
 )
 
+// RequestLogger returns Echo request logging middleware backed by slog.
 func RequestLogger(logger *slog.Logger) echo.MiddlewareFunc {
 	if logger == nil {
 		logger = slog.Default()
@@ -23,7 +24,7 @@ func RequestLogger(logger *slog.Logger) echo.MiddlewareFunc {
 		LogStatus:       true,
 		LogResponseSize: true,
 		LogValuesFunc: func(ctx *echo.Context, values echomiddleware.RequestLoggerValues) error {
-			level := slog.LevelDebug
+			level := slog.LevelInfo
 			switch {
 			case values.Status >= http.StatusInternalServerError:
 				level = slog.LevelError

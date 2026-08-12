@@ -70,7 +70,7 @@ func TestClusterSessionLifecycleIsOwnedIdempotentAndAudited(t *testing.T) {
 	server, stateStore, capture, principalID := newSessionTestServer(t, func() time.Time { return now })
 	defer stateStore.Close()
 
-	create := sessionRequest(t, server, http.MethodPost, "/api/v2/sessions?namespace=development", principalID, map[string]string{
+	create := sessionRequest(t, server, http.MethodPost, "/kubeloop/api/sessions?namespace=development", principalID, map[string]string{
 		sessionapi.IdempotencyHeader: "desktop-session-1",
 	})
 	if create.Code != http.StatusCreated || create.Header().Get("ETag") != `"1"` {
@@ -85,7 +85,7 @@ func TestClusterSessionLifecycleIsOwnedIdempotentAndAudited(t *testing.T) {
 		t.Fatalf("created session = %#v", document)
 	}
 
-	replay := sessionRequest(t, server, http.MethodPost, "/api/v2/sessions?namespace=development", principalID, map[string]string{
+	replay := sessionRequest(t, server, http.MethodPost, "/kubeloop/api/sessions?namespace=development", principalID, map[string]string{
 		sessionapi.IdempotencyHeader: "desktop-session-1",
 	})
 	replayed := decodeDocument(t, replay)
@@ -93,7 +93,7 @@ func TestClusterSessionLifecycleIsOwnedIdempotentAndAudited(t *testing.T) {
 		t.Fatalf("replay status = %d headers = %#v session = %#v", replay.Code, replay.Header(), replayed)
 	}
 
-	mismatch := sessionRequest(t, server, http.MethodPost, "/api/v2/sessions?namespace=production", principalID, map[string]string{
+	mismatch := sessionRequest(t, server, http.MethodPost, "/kubeloop/api/sessions?namespace=production", principalID, map[string]string{
 		sessionapi.IdempotencyHeader: "desktop-session-1",
 	})
 	if mismatch.Code != http.StatusConflict {
@@ -102,7 +102,7 @@ func TestClusterSessionLifecycleIsOwnedIdempotentAndAudited(t *testing.T) {
 
 	now = now.Add(30 * time.Second)
 	heartbeat := sessionRequest(t, server, http.MethodPost,
-		"/api/v2/sessions/"+document.ID+"/heartbeat?namespace=development", principalID,
+		"/kubeloop/api/sessions/"+document.ID+"/heartbeat?namespace=development", principalID,
 		map[string]string{"If-Match": `"1"`},
 	)
 	heartbeatDocument := decodeDocument(t, heartbeat)
@@ -111,7 +111,7 @@ func TestClusterSessionLifecycleIsOwnedIdempotentAndAudited(t *testing.T) {
 	}
 
 	stale := sessionRequest(t, server, http.MethodPost,
-		"/api/v2/sessions/"+document.ID+"/heartbeat?namespace=development", principalID,
+		"/kubeloop/api/sessions/"+document.ID+"/heartbeat?namespace=development", principalID,
 		map[string]string{"If-Match": `"1"`},
 	)
 	if stale.Code != http.StatusConflict {
@@ -120,7 +120,7 @@ func TestClusterSessionLifecycleIsOwnedIdempotentAndAudited(t *testing.T) {
 
 	otherPrincipal := uuid.NewString()
 	foreignRead := sessionRequest(t, server, http.MethodGet,
-		"/api/v2/sessions/"+document.ID+"?namespace=development", otherPrincipal, nil,
+		"/kubeloop/api/sessions/"+document.ID+"?namespace=development", otherPrincipal, nil,
 	)
 	if foreignRead.Code != http.StatusNotFound {
 		t.Fatalf("foreign read status = %d body = %s", foreignRead.Code, foreignRead.Body.String())
@@ -147,7 +147,7 @@ func TestClusterSessionLifecycleIsOwnedIdempotentAndAudited(t *testing.T) {
 	}
 
 	disconnect := sessionRequest(t, server, http.MethodDelete,
-		"/api/v2/sessions/"+document.ID+"?namespace=development", principalID,
+		"/kubeloop/api/sessions/"+document.ID+"?namespace=development", principalID,
 		map[string]string{"If-Match": `"2"`},
 	)
 	disconnected := decodeDocument(t, disconnect)
@@ -168,7 +168,7 @@ func TestClusterSessionLifecycleIsOwnedIdempotentAndAudited(t *testing.T) {
 	}
 
 	idempotentDisconnect := sessionRequest(t, server, http.MethodDelete,
-		"/api/v2/sessions/"+document.ID+"?namespace=development", principalID,
+		"/kubeloop/api/sessions/"+document.ID+"?namespace=development", principalID,
 		map[string]string{"If-Match": `"1"`},
 	)
 	if got := decodeDocument(t, idempotentDisconnect); idempotentDisconnect.Code != http.StatusOK || got.Generation != 3 {
@@ -192,20 +192,20 @@ func TestExpiredSessionCannotBeResurrected(t *testing.T) {
 	now := time.Date(2026, 8, 10, 2, 0, 0, 0, time.UTC)
 	server, stateStore, _, principalID := newSessionTestServer(t, func() time.Time { return now })
 	defer stateStore.Close()
-	create := sessionRequest(t, server, http.MethodPost, "/api/v2/sessions?namespace=development", principalID, map[string]string{
+	create := sessionRequest(t, server, http.MethodPost, "/kubeloop/api/sessions?namespace=development", principalID, map[string]string{
 		sessionapi.IdempotencyHeader: "expiring-session",
 	})
 	document := decodeDocument(t, create)
 	now = now.Add(3 * time.Minute)
 	heartbeat := sessionRequest(t, server, http.MethodPost,
-		"/api/v2/sessions/"+document.ID+"/heartbeat?namespace=development", principalID,
+		"/kubeloop/api/sessions/"+document.ID+"/heartbeat?namespace=development", principalID,
 		map[string]string{"If-Match": `"1"`},
 	)
 	if heartbeat.Code != http.StatusConflict {
 		t.Fatalf("expired heartbeat status = %d body = %s", heartbeat.Code, heartbeat.Body.String())
 	}
 	get := sessionRequest(t, server, http.MethodGet,
-		"/api/v2/sessions/"+document.ID+"?namespace=development", principalID, nil,
+		"/kubeloop/api/sessions/"+document.ID+"?namespace=development", principalID, nil,
 	)
 	if loaded := decodeDocument(t, get); loaded.State != "expired" || loaded.Generation != 2 {
 		t.Fatalf("expired session = %#v", loaded)
@@ -221,10 +221,10 @@ func TestSessionInputValidationStopsBeforeStorageLookup(t *testing.T) {
 		path    string
 		headers map[string]string
 	}{
-		{method: http.MethodPost, path: "/api/v2/sessions?namespace=Bad_Name", headers: map[string]string{sessionapi.IdempotencyHeader: "key"}},
-		{method: http.MethodPost, path: "/api/v2/sessions?namespace=development"},
-		{method: http.MethodPost, path: "/api/v2/sessions?namespace=development", headers: map[string]string{sessionapi.IdempotencyHeader: "bad key"}},
-		{method: http.MethodPost, path: "/api/v2/sessions/not-a-uuid/heartbeat?namespace=development", headers: map[string]string{"If-Match": `"1"`}},
+		{method: http.MethodPost, path: "/kubeloop/api/sessions?namespace=Bad_Name", headers: map[string]string{sessionapi.IdempotencyHeader: "key"}},
+		{method: http.MethodPost, path: "/kubeloop/api/sessions?namespace=development"},
+		{method: http.MethodPost, path: "/kubeloop/api/sessions?namespace=development", headers: map[string]string{sessionapi.IdempotencyHeader: "bad key"}},
+		{method: http.MethodPost, path: "/kubeloop/api/sessions/not-a-uuid/heartbeat?namespace=development", headers: map[string]string{"If-Match": `"1"`}},
 	}
 	for _, test := range tests {
 		response := sessionRequest(t, server, test.method, test.path, principalID, test.headers)

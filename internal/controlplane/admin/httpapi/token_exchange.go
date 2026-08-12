@@ -34,8 +34,7 @@ func WithTokenExchange(authenticator TokenAuthenticator) Option {
 }
 
 func (handler *Handler) exchangeToken(writer http.ResponseWriter, request *http.Request) {
-	requestID := uuid.NewString()
-	writer.Header().Set(managementRequestHeader, requestID)
+	requestID := ensureRequestID(writer, request)
 	_, sourceKey := sourceAddress(request.RemoteAddr)
 	if !handler.tokenLimit.allow(sourceKey) {
 		writeError(writer, http.StatusTooManyRequests, "rate_limited", "management authentication failed", requestID)

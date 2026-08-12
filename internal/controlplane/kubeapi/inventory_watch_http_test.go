@@ -55,7 +55,7 @@ func TestInventoryWatchHTTPStreamsAuthorizedResyncSnapshots(t *testing.T) {
 	defer httpServer.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	connection, _, err := websocket.Dial(ctx, "wss"+strings.TrimPrefix(httpServer.URL, "https")+"/api/v2/namespaces/development/pods?watch=true", &websocket.DialOptions{
+	connection, _, err := websocket.Dial(ctx, "wss"+strings.TrimPrefix(httpServer.URL, "https")+"/kubeloop/api/namespaces/development/pods?watch=true", &websocket.DialOptions{
 		HTTPClient: httpServer.Client(), CompressionMode: websocket.CompressionDisabled,
 	})
 	if err != nil {

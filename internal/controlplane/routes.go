@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	APIPathPrefix = "/api/v2"
+	APIPathPrefix = "/kubeloop/api"
 )
 
 // RouteRegistrar owns the HTTP routes for one API module.
@@ -80,7 +80,7 @@ type KubernetesEndpoints struct {
 	Service      EndpointFunc
 }
 
-// APIRoutes is the complete, explicit /api/v2 routing table. Feature packages
+// APIRoutes is the complete, explicit /kubeloop/api routing table. Feature packages
 // provide handlers, but they do not own HTTP methods or paths.
 type APIRoutes struct {
 	Tickets        TicketEndpoints

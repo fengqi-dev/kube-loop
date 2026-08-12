@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net"
 	"net/netip"
 	"strings"
@@ -20,6 +20,7 @@ import (
 )
 
 type SessionAuthorization struct {
+	RequestID       string
 	SessionID       string
 	Generation      uint64
 	Namespace       string
@@ -33,7 +34,7 @@ type tenantNetwork struct {
 }
 
 type Server struct {
-	Logger      *log.Logger
+	Logger      *slog.Logger
 	DialTimeout time.Duration
 	Resolver    IPResolver
 	Dialer      ContextDialer
@@ -50,7 +51,7 @@ type ContextDialer interface {
 	DialContext(context.Context, string, string) (net.Conn, error)
 }
 
-func NewServer(logger *log.Logger, dialTimeout time.Duration) *Server {
+func NewServer(logger *slog.Logger, dialTimeout time.Duration) *Server {
 	if dialTimeout == 0 {
 		dialTimeout = 10 * time.Second
 	}
@@ -69,24 +70,29 @@ func NewServer(logger *log.Logger, dialTimeout time.Duration) *Server {
 func (s *Server) ServeConnForAuthorization(connection net.Conn, authorization SessionAuthorization) {
 	token, err := tunnel.RelaySessionToken(authorization.SessionID, authorization.Generation)
 	if err != nil {
+		s.log(slog.LevelWarn, authorization.RequestID, "Gateway logical connection rejected", "reason", "invalid_session")
 		_ = connection.Close()
 		return
 	}
 	if !validNetworkSpecHash(authorization.NetworkSpecHash) {
+		s.log(slog.LevelWarn, authorization.RequestID, "Gateway logical connection rejected", "reason", "invalid_network_spec")
 		_ = connection.Close()
 		return
 	}
 	if !dnsname.ValidLabel(authorization.Namespace) {
+		s.log(slog.LevelWarn, authorization.RequestID, "Gateway logical connection rejected", "reason", "invalid_namespace")
 		_ = connection.Close()
 		return
 	}
 	required := requiredAuthorization{
-		token: token, namespace: authorization.Namespace, networkSpecHash: authorization.NetworkSpecHash,
+		requestID: authorization.RequestID, token: token,
+		namespace: authorization.Namespace, networkSpecHash: authorization.NetworkSpecHash,
 	}
 	s.serveConn(connection, required)
 }
 
 type requiredAuthorization struct {
+	requestID       string
 	token           tunnel.SessionToken
 	namespace       string
 	networkSpecHash string
@@ -94,6 +100,7 @@ type requiredAuthorization struct {
 
 func (s *Server) serveConn(connection net.Conn, required requiredAuthorization) {
 	if !s.trackConnection(connection) {
+		s.log(slog.LevelWarn, required.requestID, "Gateway logical connection rejected", "reason", "draining")
 		_ = connection.Close()
 		return
 	}
@@ -180,12 +187,13 @@ func (s *Server) handle(client net.Conn, required requiredAuthorization) {
 	if err != nil {
 		_ = client.Close()
 		if !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
-			s.logf("reject handshake from %s: %v", client.RemoteAddr(), err)
+			s.log(slog.LevelWarn, required.requestID, "Gateway tunnel handshake rejected", "remote", client.RemoteAddr(), "error", err)
 		}
 		return
 	}
 	_ = client.SetReadDeadline(time.Time{})
 	if header.Token != required.token {
+		s.log(slog.LevelWarn, required.requestID, "Gateway tunnel handshake rejected", "reason", "ticket_mismatch")
 		_ = tunnel.WriteStatus(client, errors.New("Gateway session does not match RelayTicket"))
 		_ = client.Close()
 		return
@@ -197,18 +205,21 @@ func (s *Server) handle(client net.Conn, required requiredAuthorization) {
 	case tunnel.CommandControl:
 		spec, readErr := tunnel.ReadAuthorizedControlSpec(client)
 		if readErr != nil {
+			s.log(slog.LevelWarn, required.requestID, "Gateway control stream rejected", "reason", "invalid_network_spec", "error", readErr)
 			_ = tunnel.WriteStatus(client, errors.New("authorized NetworkSpec is invalid"))
 			_ = client.Close()
 			return
 		}
 		hash, hashErr := networkspec.Hash(spec)
 		if hashErr != nil || hash != required.networkSpecHash {
+			s.log(slog.LevelWarn, required.requestID, "Gateway control stream rejected", "reason", "network_spec_mismatch", "error", hashErr)
 			_ = tunnel.WriteStatus(client, errors.New("NetworkSpec does not match RelayTicket"))
 			_ = client.Close()
 			return
 		}
 		s.handleControl(client, header.Token, spec, hash, required.namespace)
 	default:
+		s.log(slog.LevelWarn, required.requestID, "Gateway tunnel command rejected", "command", header.Command)
 		_ = tunnel.WriteStatus(client, fmt.Errorf("unsupported command %d", header.Command))
 		_ = client.Close()
 	}
@@ -219,11 +230,12 @@ func (s *Server) handleOutbound(client net.Conn, header tunnel.SessionHeader, re
 	spec, authorized, authorizationErr := s.authorizedNetwork(header.Token, required)
 	if authorizationErr != nil {
 		_ = tunnel.WriteStatus(client, authorizationErr)
+		s.log(slog.LevelWarn, required.requestID, "Gateway tunnel open rejected", "reason", "authorization", "error", authorizationErr)
 		return
 	}
 	request, err := tunnel.ReadOpenBody(client, header.Command)
 	if err != nil {
-		s.logf("reject open from %s: %v", client.RemoteAddr(), err)
+		s.log(slog.LevelWarn, required.requestID, "Gateway tunnel open rejected", "remote", client.RemoteAddr(), "error", err)
 		return
 	}
 
@@ -237,7 +249,7 @@ func (s *Server) handleOutbound(client net.Conn, header tunnel.SessionHeader, re
 	}
 	if err != nil {
 		_ = tunnel.WriteStatus(client, err)
-		s.logf("deny %s: %v", request.Address(), err)
+		s.log(slog.LevelWarn, required.requestID, "Gateway target denied", "target", request.Address(), "error", err)
 		return
 	}
 	network := "tcp"
@@ -251,6 +263,7 @@ func (s *Server) handleOutbound(client net.Conn, header tunnel.SessionHeader, re
 	target, err := dialer.DialContext(ctx, network, targetAddress)
 	if err != nil {
 		_ = tunnel.WriteStatus(client, fmt.Errorf("dial target: %w", err))
+		s.log(slog.LevelWarn, required.requestID, "Gateway target connection failed", "network", network, "target", targetAddress, "error", err)
 		return
 	}
 	defer target.Close()
@@ -367,8 +380,11 @@ func isClusterAddress(ip netip.Addr) bool {
 	return ip.IsPrivate() && !ip.IsLoopback() && !ip.IsLinkLocalUnicast() && !ip.IsMulticast()
 }
 
-func (s *Server) logf(format string, arguments ...any) {
+func (s *Server) log(level slog.Level, requestID, message string, attributes ...any) {
 	if s.Logger != nil {
-		s.Logger.Printf(format, arguments...)
+		arguments := make([]any, 0, len(attributes)+2)
+		arguments = append(arguments, "request_id", requestID)
+		arguments = append(arguments, attributes...)
+		s.Logger.Log(context.Background(), level, message, arguments...)
 	}
 }

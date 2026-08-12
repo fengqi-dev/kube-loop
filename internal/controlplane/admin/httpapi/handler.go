@@ -158,8 +158,7 @@ func (handler *Handler) securityHeaders(next echo.HandlerFunc) echo.HandlerFunc 
 }
 
 func (handler *Handler) exchangeBreakGlass(writer http.ResponseWriter, request *http.Request) {
-	requestID := uuid.NewString()
-	writer.Header().Set(managementRequestHeader, requestID)
+	requestID := ensureRequestID(writer, request)
 	source, sourceKey := sourceAddress(request.RemoteAddr)
 	if !handler.limiter.allow(sourceKey) {
 		writeError(writer, http.StatusTooManyRequests, "rate_limited", "management authentication failed", requestID)
@@ -207,6 +206,19 @@ func (handler *Handler) exchangeBreakGlass(writer http.ResponseWriter, request *
 		"expiresAt": issued.ExpiresAt.Format(time.RFC3339Nano),
 		"requestId": requestID,
 	})
+}
+
+func ensureRequestID(writer http.ResponseWriter, request *http.Request) string {
+	requestID := strings.TrimSpace(writer.Header().Get(managementRequestHeader))
+	if requestID == "" {
+		requestID = strings.TrimSpace(request.Header.Get(managementRequestHeader))
+	}
+	parsed, err := uuid.Parse(requestID)
+	if err != nil || parsed.String() != requestID {
+		requestID = uuid.NewString()
+	}
+	writer.Header().Set(managementRequestHeader, requestID)
+	return requestID
 }
 
 func sourceAddress(remote string) (netip.Addr, string) {

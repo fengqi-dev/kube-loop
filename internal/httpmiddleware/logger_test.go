@@ -1,0 +1,80 @@
+package httpmiddleware
+
+import (
+	"bytes"
+	"encoding/json"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/google/uuid"
+	"github.com/labstack/echo/v5"
+)
+
+func TestRequestLoggerUsesClientRequestID(t *testing.T) {
+	const clientRequestID = "33333333-3333-4333-8333-333333333333"
+	requestID := requestLog(t, clientRequestID)
+	if requestID != clientRequestID {
+		t.Fatalf("logged request ID = %q, want client-provided ID", requestID)
+	}
+}
+
+func TestRequestLoggerReplacesNonUUIDRequestID(t *testing.T) {
+	requestID := requestLog(t, "06a47d477b8014ee82a2d1eac579474f")
+	if requestID == "06a47d477b8014ee82a2d1eac579474f" || !canonicalUUID(requestID) {
+		t.Fatalf("non-UUID request ID was not replaced: %q", requestID)
+	}
+}
+
+func TestRequestLoggerUsesGeneratedRequestID(t *testing.T) {
+	requestID := requestLog(t, "")
+	parsed, err := uuid.Parse(requestID)
+	if err != nil {
+		t.Fatalf("generated request ID %q is not a UUID: %v", requestID, err)
+	}
+	if parsed.String() != requestID {
+		t.Fatalf("generated request ID %q is not in canonical UUID format", requestID)
+	}
+}
+
+func requestLog(t *testing.T, requestID string) string {
+	t.Helper()
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logs, nil))
+	router := echo.New()
+	router.Use(RequestID())
+	router.Use(RequestLogger(logger))
+	router.GET("/items/:id", func(ctx *echo.Context) error {
+		return ctx.JSON(http.StatusAccepted, map[string]string{"status": "accepted"})
+	})
+
+	request := httptest.NewRequest(http.MethodGet, "/items/42?token=secret", nil)
+	if requestID != "" {
+		request.Header.Set(echo.HeaderXRequestID, requestID)
+	}
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	responseRequestID := response.Header().Get(echo.HeaderXRequestID)
+	if responseRequestID == "" {
+		t.Fatal("response request ID is empty")
+	}
+	var event map[string]any
+	if err := json.Unmarshal(bytes.TrimSpace(logs.Bytes()), &event); err != nil {
+		t.Fatal(err)
+	}
+	if event["msg"] != "http request" || event["method"] != http.MethodGet ||
+		event["path"] != "/items/42" || event["route"] != "/items/:id" ||
+		event["status"] != float64(http.StatusAccepted) {
+		t.Fatalf("unexpected request log: %#v", event)
+	}
+	if bytes.Contains(logs.Bytes(), []byte("secret")) {
+		t.Fatalf("request log contains query parameter: %s", logs.String())
+	}
+	loggedRequestID, _ := event["request_id"].(string)
+	if loggedRequestID != responseRequestID {
+		t.Fatalf("logged request ID %q differs from response ID %q", loggedRequestID, responseRequestID)
+	}
+	return loggedRequestID
+}

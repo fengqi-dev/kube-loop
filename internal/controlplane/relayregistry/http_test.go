@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -31,7 +32,8 @@ func TestMTLSRegistrationAndHeartbeatUseCertificateIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler, err := NewHTTPHandler(registry, authenticator)
+	var logs bytes.Buffer
+	handler, err := NewHTTPHandler(registry, authenticator, slog.New(slog.NewJSONHandler(&logs, nil)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,6 +46,10 @@ func TestMTLSRegistrationAndHeartbeatUseCertificateIdentity(t *testing.T) {
 	response := serveInternal(t, handler, http.MethodPost, InternalPathPrefix+"/register", registrationRaw, validTLSState(t, "pod-a"))
 	if response.Code != http.StatusCreated {
 		t.Fatalf("registration status = %d body = %s", response.Code, response.Body.String())
+	}
+	requestID := response.Header().Get("X-Request-ID")
+	if requestID == "" || !strings.Contains(logs.String(), `"request_id":"`+requestID+`"`) {
+		t.Fatalf("Relay Registry request ID not correlated: header=%q logs=%q", requestID, logs.String())
 	}
 	registered, err := relaycontrol.DecodeRegistrationResponse(response.Body.Bytes(), clock.Now())
 	if err != nil {
@@ -81,7 +87,7 @@ func TestInternalHandlerRejectsUnverifiedIdentityAndBodyIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler, err := NewHTTPHandler(registry, authenticator)
+	handler, err := NewHTTPHandler(registry, authenticator, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

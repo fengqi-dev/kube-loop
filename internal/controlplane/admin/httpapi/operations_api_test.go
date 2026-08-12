@@ -82,7 +82,7 @@ func TestOperationsAPIEnforcesHeadersAndPersistsActions(t *testing.T) {
 	if export.Code != http.StatusAccepted || export.Header().Get("Location") == "" {
 		t.Fatalf("audit export status=%d headers=%v body=%s", export.Code, export.Header(), export.Body.String())
 	}
-	jobPath := strings.TrimPrefix(export.Header().Get("Location"), "/api/v2/admin")
+	jobPath := strings.TrimPrefix(export.Header().Get("Location"), "/kubeloop/api/admin")
 	pending := authenticatedGET(handler, cookie, jobPath)
 	if pending.Code != http.StatusAccepted || pending.Header().Get("Retry-After") != "1" {
 		t.Fatalf("pending audit export status=%d headers=%v body=%s", pending.Code, pending.Header(), pending.Body.String())

@@ -67,7 +67,7 @@ func (client *Client) OpenInventoryWatch(
 	} else {
 		endpoint.Scheme = "ws"
 	}
-	endpoint.Path = "/api/v2/namespaces/" + url.PathEscape(namespace) + "/" + string(resource)
+	endpoint.Path = "/kubeloop/api/namespaces/" + url.PathEscape(namespace) + "/" + string(resource)
 	endpoint.RawQuery = url.Values{"watch": {"true"}}.Encode()
 	credential, err := client.usableCredential(ctx, serverProfile, "")
 	if err != nil {

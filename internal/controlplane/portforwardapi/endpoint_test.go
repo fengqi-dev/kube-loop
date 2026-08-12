@@ -130,7 +130,7 @@ func TestPortForwardTaskLifecycleIsOwnedIdempotentAndPolicyMapped(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	path := "/api/v2/sessions/" + sessionID + "/port-forwards?namespace=development"
+	path := "/kubeloop/api/sessions/" + sessionID + "/port-forwards?namespace=development"
 	body := []byte(`{"kind":"service","name":"api","protocol":"tcp","remotePort":8443}`)
 	legacySpec := portforwardservice.Spec{Kind: "service", Name: "api", Protocol: "tcp", RemotePort: 8443}
 	legacySpecJSON, _ := json.Marshal(legacySpec)
@@ -191,7 +191,7 @@ func TestPortForwardTaskLifecycleIsOwnedIdempotentAndPolicyMapped(t *testing.T) 
 		t.Fatalf("list status = %d body = %s", listed.Code, listed.Body.String())
 	}
 	stopped := taskRequest(t, server, http.MethodDelete,
-		"/api/v2/sessions/"+sessionID+"/port-forwards/"+document.ID+"?namespace=development",
+		"/kubeloop/api/sessions/"+sessionID+"/port-forwards/"+document.ID+"?namespace=development",
 		principalID, "", nil,
 	)
 	if stopped.Code != http.StatusOK || decodeTaskDocument(t, stopped).State != "stopped" {
