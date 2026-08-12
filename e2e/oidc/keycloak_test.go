@@ -43,7 +43,7 @@ func TestKeycloakBrowserLoginRefreshAndRevoke(t *testing.T) {
 			if err != nil {
 				return err
 			}
-			command := exec.CommandContext(ctx, "node", "e2e/oidc/browser.mjs", target, username, password, artifacts)
+			command := exec.CommandContext(ctx, "node", "browser.mjs", target, username, password, artifacts)
 			command.Stdout = logFile
 			command.Stderr = logFile
 			err = command.Run()

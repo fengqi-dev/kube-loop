@@ -73,7 +73,7 @@ openssl req -x509 -newkey rsa:2048 -nodes -days 2 \
 REGISTRY_HOST="${RELEASE}-kubeloop-control-plane-relay.${KUBELOOP_NAMESPACE}.svc"
 openssl req -x509 -newkey rsa:2048 -nodes -days 2 \
   -keyout "${WORK_DIR}/registry-tls.key" -out "${WORK_DIR}/registry-tls.crt" \
-  -subj "/CN=${REGISTRY_HOST}" \
+  -subj "/CN=kubeloop-relay-registry" \
   -addext "subjectAltName=DNS:${REGISTRY_HOST}" >/dev/null 2>&1
 openssl req -x509 -newkey rsa:2048 -nodes -days 2 \
   -keyout "${WORK_DIR}/public-ca.key" -out "${WORK_DIR}/public-ca.crt" \

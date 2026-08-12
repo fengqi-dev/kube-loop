@@ -1022,6 +1022,9 @@ func installGatewayWithLimits(
 							Name: name, Image: harness.GatewayImage(), ImagePullPolicy: corev1.PullIfNotPresent,
 							Env: []corev1.EnvVar{
 								{Name: "KUBELOOP_GATEWAY_CONFIG_FILE", Value: "/etc/kubeloop/gateway/gateway.json"},
+								{Name: "KUBELOOP_POD_IP", ValueFrom: &corev1.EnvVarSource{
+									FieldRef: &corev1.ObjectFieldSelector{FieldPath: "status.podIP"},
+								}},
 							},
 							Ports: []corev1.ContainerPort{{Name: "http", ContainerPort: 8080}},
 							ReadinessProbe: &corev1.Probe{ProbeHandler: corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{

@@ -91,7 +91,7 @@ create_relay_material() {
   local registry_name="${release}-kubeloop-control-plane-relay.${namespace}.svc"
   openssl req -x509 -newkey rsa:2048 -nodes -days 2 \
     -keyout "${directory}/tls.key" -out "${directory}/tls.crt" \
-    -subj "/CN=${registry_name}" \
+    -subj "/CN=kubeloop-relay-registry" \
     -addext "subjectAltName=DNS:${registry_name}" >/dev/null 2>&1
   cp "${directory}/tls.crt" "${directory}/ca.crt"
   secret_args+=(
