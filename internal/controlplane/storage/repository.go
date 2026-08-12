@@ -146,6 +146,23 @@ type AdminSessionRepository interface {
 	DeleteExpired(context.Context, time.Time, int) (int64, error)
 }
 
+type LocalAdminUserRepository interface {
+	Create(context.Context, LocalAdminUser) error
+	GetByPrincipalID(context.Context, string) (LocalAdminUser, error)
+	GetByUsername(context.Context, string) (LocalAdminUser, error)
+	List(context.Context) ([]LocalAdminUser, error)
+	UpdatePassword(context.Context, string, string, time.Time) error
+	UpdateEnabled(context.Context, string, bool, time.Time) error
+	UpdateTOTP(context.Context, string, []byte, time.Time) error
+	MarkBootstrapComplete(context.Context, string, time.Time) error
+}
+
+type AdminRecoveryCodeRepository interface {
+	Replace(context.Context, string, [][]byte, time.Time) error
+	Consume(context.Context, string, []byte) error
+	DeleteByPrincipal(context.Context, string) error
+}
+
 type AdminPolicyRevisionRepository interface {
 	Create(context.Context, AdminPolicyRevision) (AdminPolicyRevision, error)
 	Get(context.Context, uint64) (AdminPolicyRevision, error)
@@ -190,6 +207,8 @@ type Repositories interface {
 	AuthTransactions() AuthTransactionRepository
 	ManagementState() ManagementStateRepository
 	AdminSessions() AdminSessionRepository
+	LocalAdminUsers() LocalAdminUserRepository
+	AdminRecoveryCodes() AdminRecoveryCodeRepository
 	AdminPolicyRevisions() AdminPolicyRevisionRepository
 	ProviderConfigRevisions() ProviderConfigRevisionRepository
 	AdminAssignments() AdminAssignmentRepository

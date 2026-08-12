@@ -12,15 +12,20 @@ import (
 var assets embed.FS
 
 type Handler struct {
-	assets fs.FS
+	assets         fs.FS
+	managementPath string
 }
 
-func New() http.Handler {
+func New(managementPaths ...string) http.Handler {
 	sub, err := fs.Sub(assets, "assets")
 	if err != nil {
 		panic(err)
 	}
-	return &Handler{assets: sub}
+	managementPath := "/kubeloop/api/admin"
+	if len(managementPaths) > 0 && strings.HasPrefix(managementPaths[0], "/") {
+		managementPath = strings.TrimSuffix(managementPaths[0], "/")
+	}
+	return &Handler{assets: sub, managementPath: managementPath}
 }
 
 func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
@@ -49,6 +54,9 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 	if err != nil {
 		http.NotFound(writer, request)
 		return
+	}
+	if path == "/index.html" {
+		content = []byte(strings.ReplaceAll(string(content), "{{MANAGEMENT_PATH}}", handler.managementPath))
 	}
 	writer.Header().Set("Cache-Control", "no-store")
 	writer.Header().Set("Content-Type", contentType)

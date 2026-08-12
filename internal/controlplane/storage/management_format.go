@@ -240,6 +240,7 @@ var exportTableSpecs = []tableSpec{
 		columns: []columnSpec{
 			{name: "id"}, {name: "schema_version", kind: columnInteger}, {name: "provider_id"},
 			{name: "state_hash", kind: columnBytes}, {name: "client_state"}, {name: "client_callback"},
+			{name: "client_id"}, {name: "scope"},
 			{name: "nonce"}, {name: "pkce_challenge"}, {name: "upstream_pkce_verifier"},
 			{name: "created_at"}, {name: "expires_at"},
 		},
@@ -250,7 +251,8 @@ var exportTableSpecs = []tableSpec{
 		name: "auth_exchanges",
 		columns: []columnSpec{
 			{name: "schema_version", kind: columnInteger}, {name: "code_hash", kind: columnBytes},
-			{name: "principal_id"}, {name: "provider_id"}, {name: "pkce_challenge"},
+			{name: "principal_id"}, {name: "provider_id"}, {name: "client_id"}, {name: "redirect_uri"},
+			{name: "scope"}, {name: "nonce"}, {name: "pkce_challenge"},
 			{name: "created_at"}, {name: "expires_at"},
 		},
 		orderBy:  []string{"code_hash"},

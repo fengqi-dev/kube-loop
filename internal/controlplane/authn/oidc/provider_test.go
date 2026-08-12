@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -17,9 +18,10 @@ import (
 )
 
 type testProviderMetadata struct {
-	PKCEMethods []string
-	Algorithms  []string
-	Claims      []string
+	PKCEMethods  []string
+	Algorithms   []string
+	Claims       []string
+	IssuerSuffix string
 }
 
 func TestProviderDiscoveryAuthorizationAndExchange(t *testing.T) {
@@ -91,6 +93,21 @@ func TestProviderRejectsUnsafeOrIncompleteDiscovery(t *testing.T) {
 	}
 }
 
+func TestProviderAcceptsExactIssuerWithTrailingSlash(t *testing.T) {
+	nonce := strings.Repeat("n", 43)
+	provider, _ := newTestProvider(t, testProviderMetadata{
+		PKCEMethods: []string{"S256"}, Algorithms: []string{"RS256"},
+		Claims: []string{"sub"}, IssuerSuffix: "/",
+	}, nonce)
+	identity, err := provider.Exchange(context.Background(), "authorization-code", strings.Repeat("v", 43), nonce)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(identity.Issuer, "/") {
+		t.Fatalf("issuer = %q", identity.Issuer)
+	}
+}
+
 func TestConfigRejectsUnsafeValues(t *testing.T) {
 	tests := []Config{
 		{ID: "corp", Issuer: "http://login.example.test", ClientID: "client", RedirectURL: "https://gateway.example.test/callback"},
@@ -102,6 +119,37 @@ func TestConfigRejectsUnsafeValues(t *testing.T) {
 		if _, err := config.normalized(); err == nil {
 			t.Fatalf("config succeeded: %#v", config)
 		}
+	}
+}
+
+func TestConfigPreservesIssuerTrailingSlash(t *testing.T) {
+	config, err := (Config{
+		ID: "auth0", Issuer: "https://tenant.auth0.com/", ClientID: "client",
+		RedirectURL: "https://gateway.example.test/oauth2/callback/auth0",
+	}).normalized()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.Issuer != "https://tenant.auth0.com/" {
+		t.Fatalf("issuer = %q", config.Issuer)
+	}
+}
+
+func TestClaimMappingSupportsExactAndNestedClaims(t *testing.T) {
+	claims := map[string]any{
+		"profile.name":                        "literal name",
+		"profile":                             map[string]any{"name": "nested name"},
+		"realm_access":                        map[string]any{"roles": []any{"developer", "operator"}},
+		"https://kubeloop.example.com/groups": []any{"platform", "security"},
+	}
+	if actual := stringClaim(claims, "profile.name"); actual != "literal name" {
+		t.Fatalf("exact claim = %q", actual)
+	}
+	if actual := stringListClaim(claims, "realm_access.roles"); !slices.Equal(actual, []string{"developer", "operator"}) {
+		t.Fatalf("nested groups = %#v", actual)
+	}
+	if actual := stringListClaim(claims, "https://kubeloop.example.com/groups"); !slices.Equal(actual, []string{"platform", "security"}) {
+		t.Fatalf("namespaced groups = %#v", actual)
 	}
 }
 
@@ -151,7 +199,7 @@ func newTestProvider(t *testing.T, metadata testProviderMetadata, nonce string) 
 	})
 	t.Cleanup(server.Close)
 	provider, err := New(context.Background(), Config{
-		ID: "corporate", DisplayName: "Corporate SSO", Issuer: server.URL,
+		ID: "corporate", DisplayName: "Corporate SSO", Issuer: server.URL + metadata.IssuerSuffix,
 		ClientID: "client", ClientSecret: "secret",
 		RedirectURL: "https://gateway.example.test/auth/callback/corporate",
 		HTTPClient:  server.Client(),
@@ -183,7 +231,7 @@ func newDiscoveryServer(
 		switch request.URL.Path {
 		case "/.well-known/openid-configuration":
 			_ = json.NewEncoder(writer).Encode(map[string]any{
-				"issuer": server.URL, "authorization_endpoint": server.URL + "/authorize",
+				"issuer": server.URL + metadata.IssuerSuffix, "authorization_endpoint": server.URL + "/authorize",
 				"token_endpoint": server.URL + "/token", "jwks_uri": server.URL + "/jwks",
 				"response_types_supported": []string{"code"}, "subject_types_supported": []string{"public"},
 				"id_token_signing_alg_values_supported": metadata.Algorithms,
@@ -196,7 +244,7 @@ func newDiscoveryServer(
 				http.Error(writer, "not configured", http.StatusBadRequest)
 				return
 			}
-			raw := token(server.URL, request)
+			raw := token(server.URL+metadata.IssuerSuffix, request)
 			_ = json.NewEncoder(writer).Encode(map[string]any{
 				"access_token": "access-token", "token_type": "Bearer", "expires_in": 60, "id_token": raw,
 			})

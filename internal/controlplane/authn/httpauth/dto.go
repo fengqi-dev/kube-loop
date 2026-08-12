@@ -1,55 +1,32 @@
 package httpauth
 
-import (
-	"bytes"
-	"encoding/json"
-	"errors"
-	"io"
-)
-
-type strictJSON[T any] struct{ Value T }
-
-func (body *strictJSON[T]) UnmarshalJSON(data []byte) error {
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&body.Value); err != nil {
-		return err
-	}
-	if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
-		return errors.New("request body must contain one JSON value")
-	}
-	return nil
-}
-
-type startRequest struct {
-	ClientCallback string `json:"clientCallback"`
-	State          string `json:"state"`
-	Nonce          string `json:"nonce"`
-	PKCEChallenge  string `json:"pkceChallenge"`
-}
-type startResponse struct {
-	AuthorizationURL string `json:"authorizationUrl"`
-	ExpiresAt        string `json:"expiresAt"`
-}
-type exchangeRequest struct {
-	Code         string `json:"code"`
-	PKCEVerifier string `json:"pkceVerifier"`
-	DeviceID     string `json:"deviceId"`
-}
-type refreshRequest struct {
-	RefreshToken string `json:"refreshToken"`
-}
-type anonymousRequest struct {
-	DeviceID string `json:"deviceId"`
-}
 type tokenResponse struct {
-	TokenType        string `json:"tokenType"`
-	AccessToken      string `json:"accessToken"`
-	AccessExpiresAt  string `json:"accessExpiresAt"`
-	RefreshToken     string `json:"refreshToken"`
-	RefreshExpiresAt string `json:"refreshExpiresAt"`
+	AccessToken      string `json:"access_token"`
+	TokenType        string `json:"token_type"`
+	ExpiresIn        int64  `json:"expires_in"`
+	RefreshToken     string `json:"refresh_token,omitempty"`
+	RefreshExpiresIn int64  `json:"refresh_expires_in,omitempty"`
+	IDToken          string `json:"id_token,omitempty"`
+	Scope            string `json:"scope,omitempty"`
 }
+
 type errorResponse struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
+	Error            string `json:"error"`
+	ErrorDescription string `json:"error_description,omitempty"`
+}
+
+type discoveryResponse struct {
+	Issuer                            string   `json:"issuer"`
+	AuthorizationEndpoint             string   `json:"authorization_endpoint"`
+	TokenEndpoint                     string   `json:"token_endpoint"`
+	UserInfoEndpoint                  string   `json:"userinfo_endpoint"`
+	JWKSURI                           string   `json:"jwks_uri"`
+	RevocationEndpoint                string   `json:"revocation_endpoint"`
+	ScopesSupported                   []string `json:"scopes_supported"`
+	ResponseTypesSupported            []string `json:"response_types_supported"`
+	GrantTypesSupported               []string `json:"grant_types_supported"`
+	SubjectTypesSupported             []string `json:"subject_types_supported"`
+	IDTokenSigningAlgorithmsSupported []string `json:"id_token_signing_alg_values_supported"`
+	CodeChallengeMethodsSupported     []string `json:"code_challenge_methods_supported"`
+	TokenEndpointAuthMethodsSupported []string `json:"token_endpoint_auth_methods_supported"`
 }

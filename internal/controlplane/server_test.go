@@ -106,19 +106,10 @@ func TestDiscoveryReadsDynamicAuthenticationMethods(t *testing.T) {
 	}
 }
 
-func TestManagementRouteIsIsolatedFromOrdinaryBearerFramework(t *testing.T) {
-	managementCalls := 0
-	management := http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		managementCalls++
-		if request.URL.Path != "/sessions/break-glass" {
-			t.Fatalf("management path = %q", request.URL.Path)
-		}
-		writer.WriteHeader(http.StatusCreated)
-	})
+func TestPublicServerDoesNotExposeManagementRoutes(t *testing.T) {
 	server, err := NewServer(
 		Config{PublicURL: "https://gateway.example.test"}, BuildInfo{},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
-		WithManagementHandler(management),
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -126,15 +117,8 @@ func TestManagementRouteIsIsolatedFromOrdinaryBearerFramework(t *testing.T) {
 	managementRequest := httptest.NewRequest(http.MethodPost, APIPathPrefix+"/admin/sessions/break-glass", nil)
 	managementResponse := httptest.NewRecorder()
 	server.Handler().ServeHTTP(managementResponse, managementRequest)
-	if managementResponse.Code != http.StatusCreated || managementCalls != 1 || managementResponse.Header().Get("WWW-Authenticate") != "" {
-		t.Fatalf("management status=%d calls=%d headers=%v", managementResponse.Code, managementCalls, managementResponse.Header())
-	}
-
-	ordinaryRequest := httptest.NewRequest(http.MethodGet, APIPathPrefix+"/namespaces/default/pods", nil)
-	ordinaryResponse := httptest.NewRecorder()
-	server.Handler().ServeHTTP(ordinaryResponse, ordinaryRequest)
-	if ordinaryResponse.Code != http.StatusUnauthorized || ordinaryResponse.Header().Get("WWW-Authenticate") != "Bearer" || managementCalls != 1 {
-		t.Fatalf("ordinary status=%d calls=%d headers=%v", ordinaryResponse.Code, managementCalls, ordinaryResponse.Header())
+	if managementResponse.Code != http.StatusNotFound || managementResponse.Header().Get("WWW-Authenticate") != "" {
+		t.Fatalf("management status=%d headers=%v", managementResponse.Code, managementResponse.Header())
 	}
 }
 

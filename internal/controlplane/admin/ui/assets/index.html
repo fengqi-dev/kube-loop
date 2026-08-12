@@ -5,8 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="light dark" />
     <title>KubeLoop Control</title>
-    <link rel="stylesheet" href="/kubeloop/api/admin/ui/app.css" />
-    <script src="/kubeloop/api/admin/ui/app.js" defer></script>
+    <meta name="kubeloop-management-path" content="{{MANAGEMENT_PATH}}" />
+    <link rel="stylesheet" href="{{MANAGEMENT_PATH}}/ui/app.css" />
+    <script src="{{MANAGEMENT_PATH}}/ui/app.js" defer></script>
   </head>
   <body>
     <div id="app" class="boot" aria-live="polite">

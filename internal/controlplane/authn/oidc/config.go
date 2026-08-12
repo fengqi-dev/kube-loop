@@ -45,7 +45,9 @@ type Config struct {
 func (config Config) normalized() (Config, error) {
 	config.ID = strings.TrimSpace(config.ID)
 	config.DisplayName = strings.TrimSpace(config.DisplayName)
-	config.Issuer = strings.TrimRight(strings.TrimSpace(config.Issuer), "/")
+	// The issuer is a protocol identifier and must remain byte-for-byte equal to
+	// the value advertised by OIDC discovery. Auth0 issuers commonly end in "/".
+	config.Issuer = strings.TrimSpace(config.Issuer)
 	config.ClientID = strings.TrimSpace(config.ClientID)
 	config.ClientSecretFile = strings.TrimSpace(config.ClientSecretFile)
 	config.RedirectURL = strings.TrimSpace(config.RedirectURL)

@@ -56,7 +56,7 @@ func TestBrowserAssetsDoNotPersistGatewayTokensOrLoadRemoteCode(t *testing.T) {
 			t.Fatalf("browser asset contains forbidden construct %q", forbidden)
 		}
 	}
-	if !strings.Contains(body, `tokens.accessToken = ""`) || !strings.Contains(body, `tokens.refreshToken = ""`) ||
+	if !strings.Contains(body, `tokens.access_token = ""`) || !strings.Contains(body, `tokens.refresh_token = ""`) ||
 		!strings.Contains(body, "sessionStorage.setItem(csrfStorageKey") {
 		t.Fatal("browser asset does not clear transient Gateway tokens or retain the synchronizer CSRF value")
 	}

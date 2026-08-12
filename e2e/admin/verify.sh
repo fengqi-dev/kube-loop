@@ -106,9 +106,12 @@ echo "CSRF rejection verified"
 
 # Seed a real Principal/Token Family through the installed anonymous provider;
 # the management operation below must persist revocation before it returns.
-LOGIN="$(curl --silent --show-error --fail --header 'Content-Type: application/json' \
-  --data '{"deviceId":"admin-revocation-e2e"}' "${BASE_URL}/auth/anonymous/audit/login")"
-ACCESS_TOKEN="$(jq -er '.accessToken' <<<"${LOGIN}")"
+LOGIN="$(curl --silent --show-error --fail --header 'Content-Type: application/x-www-form-urlencoded' \
+  --data-urlencode 'grant_type=urn:kubeloop:params:oauth:grant-type:anonymous' \
+  --data-urlencode 'provider=audit' --data-urlencode 'client_id=kubeloop-desktop' \
+  --data-urlencode 'device_id=admin-revocation-e2e' --data-urlencode 'scope=kubeloop.api' \
+  "${BASE_URL}/oauth2/token")"
+ACCESS_TOKEN="$(jq -er '.access_token' <<<"${LOGIN}")"
 JWT_PAYLOAD="$(cut -d. -f2 <<<"${ACCESS_TOKEN}" | tr '_-' '/+')"
 case $((${#JWT_PAYLOAD} % 4)) in 2) JWT_PAYLOAD="${JWT_PAYLOAD}==" ;; 3) JWT_PAYLOAD="${JWT_PAYLOAD}=" ;; esac
 PRINCIPAL_ID="$(printf '%s' "${JWT_PAYLOAD}" | base64 --decode | jq -er '.sub')"

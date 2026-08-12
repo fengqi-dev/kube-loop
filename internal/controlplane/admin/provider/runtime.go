@@ -252,7 +252,7 @@ func (runtime *Runtime) provider(candidate adminrevision.ProviderCandidate) (aut
 		}
 		return authconfig.Provider{ID: candidate.ID, Type: "oidc", DisplayName: config.DisplayName, OIDC: &authconfig.OIDCConfig{
 			Issuer: config.Issuer, ClientID: config.ClientID, ClientSecretFile: secretFile,
-			RedirectURL: runtime.publicURL + "/auth/callback/" + url.PathEscape(candidate.ID),
+			RedirectURL: runtime.publicURL + "/oauth2/callback/" + url.PathEscape(candidate.ID),
 			Scopes:      config.Scopes, AllowedSigningAlgs: config.AllowedSigningAlgs,
 			RequiredClaims: config.RequiredClaims, Claims: config.Claims, CAFile: caFile, HTTPTimeout: config.HTTPTimeout,
 		}}, true, nil

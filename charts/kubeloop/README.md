@@ -29,14 +29,35 @@ The chart routes the same origin without rewriting paths:
 | Public path | Backend |
 | --- | --- |
 | `/.well-known/*` | Control Plane |
-| `/auth/*` | Control Plane |
-| `/api/*` | Control Plane |
+| `/oauth2/*` | Control Plane OAuth 2.0 / OIDC Authorization Server |
+| `/kubeloop/api/*` except `/kubeloop/api/admin/*` | Control Plane public port |
 | `/tunnel` | Data Plane WebSocket endpoint |
 
 The Control Plane publishes that exact value in discovery and derives every OIDC
-callback as `<publicURL>/auth/callback/<providerID>`. Helm fails rendering when
+callback as `<publicURL>/oauth2/callback/<providerID>`. Helm fails rendering when
 a chart-managed route uses another hostname, when TLS is disabled, or when both
 Ingress and HTTPRoute are enabled.
+
+The browser Management Plane listens on a separate port and is intentionally
+excluded from the chart-managed Ingress and Gateway API routes. By default,
+open it through a local tunnel:
+
+```shell
+kubectl -n kubeloop port-forward svc/kubeloop-control-plane-management 8081:8081
+```
+
+Then visit `http://127.0.0.1:8081/kubeloop/api/admin/ui`. The public Control
+Plane listener returns 404 for `/kubeloop/api/admin/*`; the management Service
+is always ClusterIP even if the public Service is a LoadBalancer. To publish
+management access, use a separate restricted HTTPS origin and configure its exact value:
+
+```yaml
+controlPlane:
+  management:
+    publicURL: https://admin.kubeloop.example.com
+    listenPort: 8081
+    servicePort: 8081
+```
 
 For a Kubernetes Ingress, configure the timeout and request-size annotations
 required by the selected Ingress controlPlane. For example, ingress-nginx can be
@@ -96,6 +117,47 @@ conformance features. Verify that the selected implementation reports both;
 KubeLoop's TLS proxy integration test independently covers discovery routing,
 the Control Plane body limit, WSS upgrade and traffic after the proxy's ordinary
 HTTP write timeout.
+
+## Initial administrator and MFA
+
+By default, Helm creates a retained Kubernetes Secret for the first local
+Management Plane administrator. Its username defaults to `admin`; its password,
+32-byte MFA encryption key, and Ed25519 OAuth/OIDC signing key are generated
+with cryptographic randomness.
+The deployment reads the Secret from a read-only projected volume. On startup,
+Control Plane creates the local identity and a `platform-admin` assignment only
+when they do not already exist. A later Helm upgrade never replaces the stored
+password or duplicates the assignment.
+
+Retrieve the generated credentials from the commands printed by `helm install`
+and sign in through the separate Management Plane port. Local and upstream
+OIDC accounts both use the standard Authorization Code + PKCE flow. MFA is optional and is
+never forced at first login or user creation: a user may continue with password
+only, or independently enable TOTP under **账户安全**. After enrollment, that user
+must provide a current TOTP or recovery code at login. Ten one-time recovery
+codes are shown exactly once, and recovery-code login consumes the code
+atomically. TOTP secrets are encrypted at rest; passwords use Argon2id and
+neither plaintext value is written to the database or ConfigMap.
+
+To use an externally managed Secret instead, set:
+
+```yaml
+controlPlane:
+  management:
+    initialAdmin:
+      enabled: true
+      existingSecret: kubeloop-initial-admin
+      usernameKey: username
+      passwordKey: password
+      mfaEncryptionKeyKey: mfa-encryption-key
+```
+
+The MFA key must contain exactly 32 bytes and must remain stable for the life of
+the stored TOTP enrollments. When `initialAdmin.existingSecret` is used, also
+configure `controlPlane.auth.token.existingSecret` with an Ed25519 PKCS#8 key.
+Local users and password resets are managed from
+**用户管理**. Role grants continue to use the existing revisioned Management
+Policy editor, so local and OIDC principals share one RBAC and audit model.
 
 ## Relay Registry and RelayTicket keys
 
@@ -226,7 +288,81 @@ controlPlane:
 
 The token signing Secret value must be an Ed25519 private key in unencrypted PKCS#8 PEM form (for example, generated offline with `openssl genpkey -algorithm ED25519`). Keep the corresponding Secret under normal Kubernetes/External Secrets rotation controls.
 
-Register the exact callback `https://<public-origin>/auth/callback/corporate` at the identity provider. Control Plane startup fails closed if discovery does not match the configured issuer, endpoints are not HTTPS, PKCE S256 is not advertised, or no configured signing algorithm is supported.
+Register the exact callback `https://<public-origin>/oauth2/callback/corporate` at the identity provider. Control Plane startup fails closed if discovery does not match the configured issuer, endpoints are not HTTPS, PKCE S256 is not advertised, or no configured signing algorithm is supported.
+
+The configured issuer is compared exactly with OIDC discovery, including a
+trailing slash. Claim mappings first match the complete claim name and then use
+dot notation for nested JSON objects. This supports both Auth0 URI-style custom
+claims and Keycloak claims such as `realm_access.roles`.
+
+### Casdoor
+
+```yaml
+- id: casdoor
+  type: oidc
+  displayName: Casdoor
+  oidc:
+    issuer: https://sso.example.com
+    clientID: kubeloop
+    existingSecret: kubeloop-casdoor
+    clientSecretKey: client-secret
+    scopes: [openid, profile, email]
+    claims:
+      displayName: displayName
+      email: email
+      groups: groups
+```
+
+Register `https://<public-origin>/oauth2/callback/casdoor`. Casdoor does not
+always publish a group claim by default; configure the application to include a
+top-level string or string-array claim and set `claims.groups` to its name.
+
+### Keycloak
+
+```yaml
+- id: keycloak
+  type: oidc
+  displayName: Keycloak
+  oidc:
+    issuer: https://keycloak.example.com/realms/platform
+    clientID: kubeloop
+    existingSecret: kubeloop-keycloak
+    clientSecretKey: client-secret
+    scopes: [openid, profile, email, roles]
+    claims:
+      displayName: name
+      email: email
+      groups: realm_access.roles
+```
+
+Enable Standard Flow, confidential client authentication and PKCE S256, then
+register `https://<public-origin>/oauth2/callback/keycloak`. Ensure the selected
+roles or groups mapper adds the mapped claim to the ID token. A Group Membership
+mapper that emits a top-level `groups` array can instead use `groups: groups`.
+
+### Auth0
+
+```yaml
+- id: auth0
+  type: oidc
+  displayName: Auth0
+  oidc:
+    issuer: https://tenant.auth0.com/
+    clientID: kubeloop
+    existingSecret: kubeloop-auth0
+    clientSecretKey: client-secret
+    scopes: [openid, profile, email]
+    allowedSigningAlgs: [RS256]
+    claims:
+      displayName: name
+      email: email
+      groups: https://kubeloop.example.com/groups
+```
+
+Use a Regular Web Application with Client Secret Basic or Client Secret Post,
+RS256 signing and callback `https://<public-origin>/oauth2/callback/auth0`.
+Populate the namespaced group claim with an Auth0 Action when group-based policy
+is required.
 
 ## Development authentication (unsafe for production)
 

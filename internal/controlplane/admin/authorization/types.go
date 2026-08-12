@@ -39,6 +39,7 @@ const (
 	ResourcePolicy          Resource = "policy"
 	ResourceIdentityMapping Resource = "identity-mapping"
 	ResourcePrincipal       Resource = "principal"
+	ResourceUser            Resource = "user"
 	ResourceSession         Resource = "session"
 	ResourceTask            Resource = "task"
 	ResourceRelay           Resource = "relay"

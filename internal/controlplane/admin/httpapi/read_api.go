@@ -10,6 +10,7 @@ import (
 	"time"
 
 	adminauthorization "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/authorization"
+	adminlocaluser "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/localuser"
 	adminoperations "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/operations"
 	adminrevision "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/revision"
 	adminsession "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/session"
@@ -44,6 +45,7 @@ type handlerOptions struct {
 	policyReloader     PolicyReloader
 	providerService    *adminrevision.ProviderService
 	operationService   *adminoperations.Service
+	localUsers         *adminlocaluser.Service
 }
 
 type RelayStatusSource interface {
@@ -93,6 +95,19 @@ func WithOperationsAPI(service *adminoperations.Service) Option {
 	}
 }
 
+func WithLocalUsers(service *adminlocaluser.Service) Option {
+	return func(options *handlerOptions) error {
+		if service == nil {
+			return errors.New("management local user service is required")
+		}
+		if options.localUsers != nil {
+			return errors.New("management local user service is already configured")
+		}
+		options.localUsers = service
+		return nil
+	}
+}
+
 func WithReadAPI(authorizer *adminauthorization.Engine, status StatusSource, build BuildInfo) Option {
 	return func(options *handlerOptions) error {
 		if authorizer == nil || status == nil {
@@ -136,6 +151,7 @@ type readAPI struct {
 	reloader   PolicyReloader
 	providers  *adminrevision.ProviderService
 	operations *adminoperations.Service
+	localUsers *adminlocaluser.Service
 }
 
 type requestContextKey int
@@ -162,6 +178,9 @@ var capabilityChecks = []adminauthorization.Request{
 	{Resource: adminauthorization.ResourcePolicy, Operation: adminauthorization.OperationPublish},
 	{Resource: adminauthorization.ResourcePolicy, Operation: adminauthorization.OperationRollback},
 	{Resource: adminauthorization.ResourcePrincipal, Operation: adminauthorization.OperationList},
+	{Resource: adminauthorization.ResourceUser, Operation: adminauthorization.OperationList},
+	{Resource: adminauthorization.ResourceUser, Operation: adminauthorization.OperationCreate},
+	{Resource: adminauthorization.ResourceUser, Operation: adminauthorization.OperationUpdate},
 	{Resource: adminauthorization.ResourceSession, Operation: adminauthorization.OperationList},
 	{Resource: adminauthorization.ResourceSession, Operation: adminauthorization.OperationRevoke},
 	{Resource: adminauthorization.ResourceSession, Operation: adminauthorization.OperationStop},
@@ -215,6 +234,9 @@ func (api *readAPI) routes(router *echo.Echo) {
 		protected.POST("/audit/exports", adaptHandler(api.createAuditExport), api.permission(adminauthorization.ResourceAudit, adminauthorization.OperationExport))
 		protected.GET("/audit/exports/:jobID", adaptHandler(api.getAuditExport), api.permission(adminauthorization.ResourceAudit, adminauthorization.OperationExport))
 	}
+	if api.localUsers != nil {
+		api.localUserRoutes(protected)
+	}
 }
 
 func (api *readAPI) permission(resource adminauthorization.Resource, operation adminauthorization.Operation) echo.MiddlewareFunc {
@@ -237,6 +259,7 @@ func (api *readAPI) revokeCurrentSession(writer http.ResponseWriter, request *ht
 func (api *readAPI) authenticate(next echo.HandlerFunc) echo.HandlerFunc {
 	return func(echoContext *echo.Context) error {
 		writer, request := echoContext.Response(), echoContext.Request()
+		request.Body = http.MaxBytesReader(writer, request.Body, api.handler.maxBody)
 		requestID := ensureRequestID(writer, request)
 		if request.Header.Get("Authorization") != "" || request.Header.Get("Sec-Fetch-Site") == "cross-site" ||
 			(request.Header.Get("Origin") != "" && request.Header.Get("Origin") != api.handler.origin) {

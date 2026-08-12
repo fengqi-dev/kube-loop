@@ -18,11 +18,12 @@ func (repository *authTransactionRepository) CreateAttempt(ctx context.Context, 
 	}
 	query := repository.bind(`INSERT INTO auth_attempts(
 		id, schema_version, provider_id, state_hash, client_state, client_callback,
-		nonce, pkce_challenge, upstream_pkce_verifier, created_at, expires_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+		client_id, scope, nonce, pkce_challenge, upstream_pkce_verifier, created_at, expires_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	_, err := repository.executor.ExecContext(ctx, query,
 		attempt.ID, attempt.SchemaVersion, attempt.ProviderID, attempt.StateHash,
-		attempt.ClientState, attempt.ClientCallback, attempt.Nonce, attempt.PKCEChallenge,
+		attempt.ClientState, attempt.ClientCallback, attempt.ClientID, attempt.Scope,
+		attempt.Nonce, attempt.PKCEChallenge,
 		attempt.UpstreamPKCEVerifier,
 		formatTime(attempt.CreatedAt), formatTime(attempt.ExpiresAt),
 	)
@@ -40,7 +41,8 @@ func (repository *authTransactionRepository) ConsumeAttempt(
 	query := repository.bind(`DELETE FROM auth_attempts
 		WHERE state_hash = ? AND expires_at > ?
 		RETURNING id, schema_version, provider_id, state_hash, client_state,
-			client_callback, nonce, pkce_challenge, upstream_pkce_verifier, created_at, expires_at`)
+			client_callback, client_id, scope, nonce, pkce_challenge,
+			upstream_pkce_verifier, created_at, expires_at`)
 	attempt, err := scanAuthAttempt(repository.executor.QueryRowContext(ctx, query, stateHash, formatTime(now)))
 	if errors.Is(err, sql.ErrNoRows) {
 		return AuthAttempt{}, ErrNotFound
@@ -56,10 +58,12 @@ func (repository *authTransactionRepository) CreateExchange(ctx context.Context,
 		return err
 	}
 	query := repository.bind(`INSERT INTO auth_exchanges(
-		schema_version, code_hash, principal_id, provider_id, pkce_challenge, created_at, expires_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+		schema_version, code_hash, principal_id, provider_id, client_id, redirect_uri,
+		scope, nonce, pkce_challenge, created_at, expires_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	_, err := repository.executor.ExecContext(ctx, query,
 		exchange.SchemaVersion, exchange.CodeHash, exchange.PrincipalID, exchange.ProviderID,
+		exchange.ClientID, exchange.RedirectURI, exchange.Scope, exchange.Nonce,
 		exchange.PKCEChallenge, formatTime(exchange.CreatedAt), formatTime(exchange.ExpiresAt),
 	)
 	return mapWriteError(err)
@@ -76,7 +80,7 @@ func (repository *authTransactionRepository) ConsumeExchange(
 	query := repository.bind(`DELETE FROM auth_exchanges
 		WHERE code_hash = ? AND expires_at > ?
 		RETURNING schema_version, code_hash, principal_id, provider_id,
-			pkce_challenge, created_at, expires_at`)
+			client_id, redirect_uri, scope, nonce, pkce_challenge, created_at, expires_at`)
 	exchange, err := scanAuthExchange(repository.executor.QueryRowContext(ctx, query, codeHash, formatTime(now)))
 	if errors.Is(err, sql.ErrNoRows) {
 		return AuthExchange{}, ErrNotFound
@@ -119,6 +123,8 @@ func normalizeAuthAttempt(attempt *AuthAttempt) error {
 	attempt.ProviderID = strings.TrimSpace(attempt.ProviderID)
 	attempt.ClientState = strings.TrimSpace(attempt.ClientState)
 	attempt.ClientCallback = strings.TrimSpace(attempt.ClientCallback)
+	attempt.ClientID = strings.TrimSpace(attempt.ClientID)
+	attempt.Scope = strings.TrimSpace(attempt.Scope)
 	attempt.Nonce = strings.TrimSpace(attempt.Nonce)
 	attempt.PKCEChallenge = strings.TrimSpace(attempt.PKCEChallenge)
 	attempt.UpstreamPKCEVerifier = strings.TrimSpace(attempt.UpstreamPKCEVerifier)
@@ -126,7 +132,8 @@ func normalizeAuthAttempt(attempt *AuthAttempt) error {
 		return err
 	}
 	if attempt.ProviderID == "" || len(attempt.StateHash) != 32 || attempt.ClientState == "" ||
-		attempt.ClientCallback == "" || attempt.Nonce == "" || attempt.PKCEChallenge == "" {
+		attempt.ClientCallback == "" || attempt.ClientID == "" || attempt.Scope == "" ||
+		attempt.Nonce == "" || attempt.PKCEChallenge == "" {
 		return errors.New("authentication attempt fields are required")
 	}
 	if attempt.UpstreamPKCEVerifier == "" {
@@ -148,11 +155,16 @@ func normalizeAuthAttempt(attempt *AuthAttempt) error {
 func normalizeAuthExchange(exchange *AuthExchange) error {
 	exchange.PrincipalID = strings.TrimSpace(exchange.PrincipalID)
 	exchange.ProviderID = strings.TrimSpace(exchange.ProviderID)
+	exchange.ClientID = strings.TrimSpace(exchange.ClientID)
+	exchange.RedirectURI = strings.TrimSpace(exchange.RedirectURI)
+	exchange.Scope = strings.TrimSpace(exchange.Scope)
+	exchange.Nonce = strings.TrimSpace(exchange.Nonce)
 	exchange.PKCEChallenge = strings.TrimSpace(exchange.PKCEChallenge)
 	if err := validateUUID(exchange.PrincipalID, "exchange principal ID"); err != nil {
 		return err
 	}
-	if len(exchange.CodeHash) != 32 || exchange.ProviderID == "" || exchange.PKCEChallenge == "" {
+	if len(exchange.CodeHash) != 32 || exchange.ProviderID == "" || exchange.ClientID == "" ||
+		exchange.RedirectURI == "" || exchange.Scope == "" || exchange.PKCEChallenge == "" {
 		return errors.New("authentication exchange fields are required")
 	}
 	if exchange.SchemaVersion == 0 {
@@ -173,7 +185,7 @@ func scanAuthAttempt(row rowScanner) (AuthAttempt, error) {
 	var createdAt, expiresAt string
 	if err := row.Scan(
 		&attempt.ID, &attempt.SchemaVersion, &attempt.ProviderID, &attempt.StateHash,
-		&attempt.ClientState, &attempt.ClientCallback, &attempt.Nonce,
+		&attempt.ClientState, &attempt.ClientCallback, &attempt.ClientID, &attempt.Scope, &attempt.Nonce,
 		&attempt.PKCEChallenge, &attempt.UpstreamPKCEVerifier, &createdAt, &expiresAt,
 	); err != nil {
 		return AuthAttempt{}, err
@@ -193,7 +205,8 @@ func scanAuthExchange(row rowScanner) (AuthExchange, error) {
 	var createdAt, expiresAt string
 	if err := row.Scan(
 		&exchange.SchemaVersion, &exchange.CodeHash, &exchange.PrincipalID,
-		&exchange.ProviderID, &exchange.PKCEChallenge, &createdAt, &expiresAt,
+		&exchange.ProviderID, &exchange.ClientID, &exchange.RedirectURI, &exchange.Scope,
+		&exchange.Nonce, &exchange.PKCEChallenge, &createdAt, &expiresAt,
 	); err != nil {
 		return AuthExchange{}, err
 	}

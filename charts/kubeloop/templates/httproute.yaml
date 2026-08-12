@@ -61,7 +61,7 @@ spec:
             value: /.well-known
         - path:
             type: PathPrefix
-            value: /auth
+            value: /oauth2
         - path:
             type: PathPrefix
             value: /kubeloop/api

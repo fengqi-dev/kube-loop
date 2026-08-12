@@ -40,6 +40,10 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- printf "%s-relay" (include "kubeloop.controlPlaneName" .) | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
+{{- define "kubeloop.controlPlaneManagementName" -}}
+{{- printf "%s-management" (include "kubeloop.controlPlaneName" .) | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+
 {{- define "kubeloop.controlPlaneServiceAccountName" -}}
 {{- if .Values.controlPlane.serviceAccount.create -}}
 {{- default (include "kubeloop.controlPlaneName" .) .Values.controlPlane.serviceAccount.name -}}
@@ -130,4 +134,8 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 
 {{- define "kubeloop.controlPlaneAuthConfigName" -}}
 {{- printf "%s-auth-config" (include "kubeloop.controlPlaneName" .) | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+
+{{- define "kubeloop.initialAdminSecretName" -}}
+{{- default (printf "%s-initial-admin" (include "kubeloop.controlPlaneName" .)) .Values.controlPlane.management.initialAdmin.existingSecret | trunc 63 | trimSuffix "-" -}}
 {{- end -}}

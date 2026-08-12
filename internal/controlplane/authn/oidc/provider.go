@@ -170,12 +170,12 @@ func hasIntersection(left, right []string) bool {
 }
 
 func stringClaim(claims map[string]any, name string) string {
-	value, _ := claims[name].(string)
+	value, _ := claimValue(claims, name).(string)
 	return strings.TrimSpace(value)
 }
 
 func stringListClaim(claims map[string]any, name string) []string {
-	switch value := claims[name].(type) {
+	switch value := claimValue(claims, name).(type) {
 	case []any:
 		groups := make([]string, 0, len(value))
 		for _, item := range value {
@@ -192,4 +192,30 @@ func stringListClaim(claims map[string]any, name string) []string {
 		}
 	}
 	return nil
+}
+
+// claimValue first resolves the configured name literally so URI-style Auth0
+// custom claims and names containing dots remain valid. If no literal claim
+// exists, dot notation traverses JSON objects such as Keycloak's
+// realm_access.roles.
+func claimValue(claims map[string]any, name string) any {
+	if value, exists := claims[name]; exists {
+		return value
+	}
+	parts := strings.Split(name, ".")
+	if len(parts) < 2 {
+		return nil
+	}
+	var current any = claims
+	for _, part := range parts {
+		object, ok := current.(map[string]any)
+		if !ok || part == "" {
+			return nil
+		}
+		current, ok = object[part]
+		if !ok {
+			return nil
+		}
+	}
+	return current
 }

@@ -6,6 +6,7 @@ import (
 
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/authn/login"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/authn/token"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 )
 
 var (
@@ -18,20 +19,35 @@ var (
 )
 
 type StartRequest struct {
-	ProviderID, ClientCallback, State, Nonce, PKCEChallenge string
+	ProviderID, ClientID, ClientCallback, State, Nonce, PKCEChallenge, Scope string
 }
 
 type Service struct {
-	login     *login.Service
-	tokens    *token.Service
-	logins    *loginLimiter
+	login  *login.Service
+	tokens *token.Service
+	logins *loginLimiter
+	local  LocalAuthenticator
 }
 
-func New(loginService *login.Service, tokenService *token.Service) (*Service, error) {
+type LocalAuthenticator func(context.Context, string, []byte, string, string) (storage.Principal, error)
+
+type Option func(*Service)
+
+func WithLocalAuthenticator(authenticator LocalAuthenticator) Option {
+	return func(service *Service) { service.local = authenticator }
+}
+
+func New(loginService *login.Service, tokenService *token.Service, options ...Option) (*Service, error) {
 	if loginService == nil || tokenService == nil {
 		return nil, errors.New("login and token services are required")
 	}
-	return &Service{login: loginService, tokens: tokenService, logins: newLoginLimiter()}, nil
+	service := &Service{login: loginService, tokens: tokenService, logins: newLoginLimiter()}
+	for _, option := range options {
+		if option != nil {
+			option(service)
+		}
+	}
+	return service, nil
 }
 
 func (service *Service) Anonymous(ctx context.Context, providerID, remoteAddress, deviceID string) (token.Pair, error) {
@@ -56,13 +72,50 @@ func (service *Service) issue(ctx context.Context, result login.ExchangeResult, 
 
 func (service *Service) Start(ctx context.Context, request StartRequest) (login.BeginResult, error) {
 	result, err := service.login.Begin(ctx, login.BeginRequest{
-		ProviderID: request.ProviderID, ClientCallback: request.ClientCallback,
+		ProviderID: request.ProviderID, ClientID: request.ClientID, ClientCallback: request.ClientCallback,
 		ClientState: request.State, Nonce: request.Nonce, PKCEChallenge: request.PKCEChallenge,
+		Scope: request.Scope,
 	})
 	if err != nil {
 		return login.BeginResult{}, ErrInvalidLoginRequest
 	}
 	return result, nil
+}
+
+func (service *Service) StartLocal(ctx context.Context, request StartRequest) (login.LocalBeginResult, error) {
+	if service.local == nil {
+		return login.LocalBeginResult{}, ErrInvalidLoginRequest
+	}
+	result, err := service.login.BeginLocal(ctx, login.BeginRequest{
+		ProviderID: "local", ClientID: request.ClientID, ClientCallback: request.ClientCallback,
+		ClientState: request.State, Nonce: request.Nonce, PKCEChallenge: request.PKCEChallenge,
+		Scope: request.Scope,
+	})
+	if err != nil {
+		return login.LocalBeginResult{}, ErrInvalidLoginRequest
+	}
+	return result, nil
+}
+
+func (service *Service) CompleteLocal(
+	ctx context.Context,
+	transaction, username string,
+	password []byte,
+	secondFactor, requestID, remoteAddress string,
+) (string, error) {
+	if service.local == nil || !service.logins.allow("local", "password", remoteAddress) {
+		return "", ErrRateLimited
+	}
+	principal, err := service.local(ctx, username, password, secondFactor, requestID)
+	if err != nil {
+		return "", ErrInvalidCredentials
+	}
+	result, err := service.login.CompleteLocal(ctx, transaction, principal.ID)
+	if err != nil {
+		return "", ErrInvalidLoginRequest
+	}
+	service.logins.success("local", "password")
+	return result.RedirectURL, nil
 }
 
 func (service *Service) Callback(ctx context.Context, providerID, code, state string) (string, error) {
@@ -73,12 +126,19 @@ func (service *Service) Callback(ctx context.Context, providerID, code, state st
 	return result.RedirectURL, nil
 }
 
-func (service *Service) Exchange(ctx context.Context, code, verifier, deviceID string) (token.Pair, error) {
-	result, err := service.login.Exchange(ctx, code, verifier)
+func (service *Service) Exchange(
+	ctx context.Context,
+	code, verifier, clientID, redirectURI, deviceID string,
+) (token.Pair, string, error) {
+	result, err := service.login.Exchange(ctx, code, verifier, clientID, redirectURI)
 	if err != nil {
-		return token.Pair{}, ErrInvalidExchangeCode
+		return token.Pair{}, "", ErrInvalidExchangeCode
 	}
-	return service.issue(ctx, result, deviceID)
+	pair, err := service.tokens.IssueOIDC(ctx, result.Principal, deviceID, result.ClientID, result.Nonce)
+	if err != nil {
+		return token.Pair{}, "", ErrTokenUnavailable
+	}
+	return pair, result.Scope, nil
 }
 
 func (service *Service) Refresh(ctx context.Context, refreshToken string) (token.Pair, error) {
@@ -92,3 +152,9 @@ func (service *Service) Refresh(ctx context.Context, refreshToken string) (token
 func (service *Service) Revoke(ctx context.Context, refreshToken string) {
 	_ = service.tokens.Revoke(ctx, refreshToken)
 }
+
+func (service *Service) Authenticate(ctx context.Context, accessToken string) (token.AccessIdentity, error) {
+	return service.tokens.Authenticate(ctx, accessToken)
+}
+
+func (service *Service) TokenService() *token.Service { return service.tokens }

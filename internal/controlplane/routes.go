@@ -80,7 +80,7 @@ type KubernetesEndpoints struct {
 	Service      EndpointFunc
 }
 
-// APIRoutes is the complete, explicit /kubeloop/api routing table. Feature packages
+// APIRoutes is the complete, explicit Control Plane API routing table. Feature packages
 // provide handlers, but they do not own HTTP methods or paths.
 type APIRoutes struct {
 	Tickets        TicketEndpoints

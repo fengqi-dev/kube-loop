@@ -80,6 +80,8 @@ spec:
     - ports:
         - port: 8080
           protocol: TCP
+        - port: {{ .Values.controlPlane.management.listenPort }}
+          protocol: TCP
     {{- if .Values.controlPlane.relayRegistry.enabled }}
     - from:
         - podSelector:

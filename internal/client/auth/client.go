@@ -26,13 +26,12 @@ const (
 	DefaultLoginTimeout   = 5 * time.Minute
 	maxResponseBytes      = 64 << 10
 
-	CodeRateLimited        = "RATE_LIMITED"
-	CodeInvalidCredentials = "INVALID_CREDENTIALS"
-	CodeTokenUnavailable   = "TOKEN_UNAVAILABLE"
-	CodeInvalidLogin       = "INVALID_LOGIN_REQUEST"
-	CodeInvalidExchange    = "INVALID_EXCHANGE_CODE"
-	CodeInvalidRefresh     = "INVALID_REFRESH_TOKEN"
-	CodeInvalidArgument    = "INVALID_ARGUMENT"
+	CodeInvalidRequest         = "invalid_request"
+	CodeInvalidClient          = "invalid_client"
+	CodeInvalidGrant           = "invalid_grant"
+	CodeUnsupportedGrantType   = "unsupported_grant_type"
+	CodeInvalidToken           = "invalid_token"
+	CodeTemporarilyUnavailable = "temporarily_unavailable"
 )
 
 type BrowserOpener func(string) error
@@ -52,16 +51,24 @@ type Client struct {
 }
 
 type tokenResponse struct {
-	TokenType        string    `json:"tokenType"`
-	AccessToken      string    `json:"accessToken"`
-	AccessExpiresAt  time.Time `json:"accessExpiresAt"`
-	RefreshToken     string    `json:"refreshToken"`
-	RefreshExpiresAt time.Time `json:"refreshExpiresAt"`
+	TokenType        string `json:"token_type"`
+	AccessToken      string `json:"access_token"`
+	ExpiresIn        int64  `json:"expires_in"`
+	RefreshToken     string `json:"refresh_token"`
+	RefreshExpiresIn int64  `json:"refresh_expires_in"`
+	IDToken          string `json:"id_token"`
 }
 
 type errorResponse struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
+	Code    string `json:"error"`
+	Message string `json:"error_description"`
+}
+
+type providerMetadata struct {
+	Issuer                string `json:"issuer"`
+	AuthorizationEndpoint string `json:"authorization_endpoint"`
+	TokenEndpoint         string `json:"token_endpoint"`
+	RevocationEndpoint    string `json:"revocation_endpoint"`
 }
 
 // APIError is a typed authentication endpoint rejection. Callers can branch
@@ -119,9 +126,14 @@ func (client *Client) LoginAnonymous(
 		return credentials.Credential{}, errors.New("device ID is required")
 	}
 	var response tokenResponse
-	if err := client.postJSON(ctx, baseURL+"/auth/anonymous/"+providerID+"/login", struct {
-		DeviceID string `json:"deviceId"`
-	}{DeviceID: deviceID}, &response); err != nil {
+	metadata, err := client.discoverProvider(ctx, baseURL)
+	if err != nil {
+		return credentials.Credential{}, err
+	}
+	if err := client.postForm(ctx, metadata.TokenEndpoint, url.Values{
+		"grant_type": {"urn:kubeloop:params:oauth:grant-type:anonymous"}, "provider": {providerID},
+		"client_id": {DefaultClientID}, "device_id": {deviceID}, "scope": {"kubeloop.api"},
+	}, &response); err != nil {
 		return credentials.Credential{}, err
 	}
 	return credentialFromResponse(response, deviceID)
@@ -161,30 +173,26 @@ func (client *Client) LoginOIDC(
 	}
 	verifierHash := sha256.Sum256([]byte(verifier))
 	challenge := base64.RawURLEncoding.EncodeToString(verifierHash[:])
-	startBody := struct {
-		ClientCallback string `json:"clientCallback"`
-		State          string `json:"state"`
-		Nonce          string `json:"nonce"`
-		PKCEChallenge  string `json:"pkceChallenge"`
-	}{ClientCallback: callbackURL, State: state, Nonce: nonce, PKCEChallenge: challenge}
-	var startResponse struct {
-		AuthorizationURL string    `json:"authorizationUrl"`
-		ExpiresAt        time.Time `json:"expiresAt"`
-	}
-	if err := client.postJSON(ctx, baseURL+"/auth/oidc/"+providerID+"/start", startBody, &startResponse); err != nil {
+	metadata, err := client.discoverProvider(ctx, baseURL)
+	if err != nil {
 		return credentials.Credential{}, err
 	}
-	if startResponse.ExpiresAt.IsZero() || !startResponse.ExpiresAt.After(time.Now()) {
-		return credentials.Credential{}, errors.New("Gateway returned an expired login transaction")
+	authorizationURL, err := url.Parse(metadata.AuthorizationEndpoint)
+	if err != nil {
+		return credentials.Credential{}, errors.New("create authorization URL")
 	}
-	authorizationURL, err := url.Parse(startResponse.AuthorizationURL)
-	if err != nil || !authorizationURL.IsAbs() || authorizationURL.Scheme != "https" || authorizationURL.Host == "" {
-		return credentials.Credential{}, errors.New("Gateway returned an invalid authorization URL")
-	}
+	query := authorizationURL.Query()
+	query.Set("response_type", "code")
+	query.Set("client_id", DefaultClientID)
+	query.Set("redirect_uri", callbackURL)
+	query.Set("scope", "openid profile email offline_access kubeloop.api")
+	query.Set("state", state)
+	query.Set("nonce", nonce)
+	query.Set("code_challenge", challenge)
+	query.Set("code_challenge_method", "S256")
+	query.Set("provider", providerID)
+	authorizationURL.RawQuery = query.Encode()
 	loginDeadline := time.Now().Add(client.loginTimeout)
-	if startResponse.ExpiresAt.Before(loginDeadline) {
-		loginDeadline = startResponse.ExpiresAt
-	}
 	loginContext, cancel := context.WithDeadline(ctx, loginDeadline)
 	defer cancel()
 	callback := make(chan callbackResult, 1)
@@ -217,13 +225,11 @@ func (client *Client) LoginOIDC(
 	if result.err != nil {
 		return credentials.Credential{}, result.err
 	}
-	exchangeBody := struct {
-		Code         string `json:"code"`
-		PKCEVerifier string `json:"pkceVerifier"`
-		DeviceID     string `json:"deviceId"`
-	}{Code: result.code, PKCEVerifier: verifier, DeviceID: deviceID}
 	var response tokenResponse
-	if err := client.postJSON(ctx, baseURL+"/auth/token/exchange", exchangeBody, &response); err != nil {
+	if err := client.postForm(ctx, metadata.TokenEndpoint, url.Values{
+		"grant_type": {"authorization_code"}, "code": {result.code}, "code_verifier": {verifier},
+		"client_id": {DefaultClientID}, "redirect_uri": {callbackURL}, "device_id": {deviceID},
+	}, &response); err != nil {
 		return credentials.Credential{}, err
 	}
 	return credentialFromResponse(response, deviceID)
@@ -235,9 +241,14 @@ func (client *Client) Refresh(ctx context.Context, baseURL string, current crede
 		return credentials.Credential{}, err
 	}
 	var response tokenResponse
-	if err := client.postJSON(ctx, baseURL+"/auth/token/refresh", struct {
-		RefreshToken string `json:"refreshToken"`
-	}{RefreshToken: current.RefreshToken}, &response); err != nil {
+	metadata, err := client.discoverProvider(ctx, baseURL)
+	if err != nil {
+		return credentials.Credential{}, err
+	}
+	if err := client.postForm(ctx, metadata.TokenEndpoint, url.Values{
+		"grant_type": {"refresh_token"}, "refresh_token": {current.RefreshToken},
+		"client_id": {DefaultClientID}, "device_id": {current.DeviceID},
+	}, &response); err != nil {
 		return credentials.Credential{}, err
 	}
 	return credentialFromResponse(response, current.DeviceID)
@@ -248,25 +259,55 @@ func (client *Client) Revoke(ctx context.Context, baseURL, refreshToken string) 
 	if err != nil {
 		return err
 	}
-	return client.postJSON(ctx, baseURL+"/auth/token/revoke", struct {
-		RefreshToken string `json:"refreshToken"`
-	}{RefreshToken: refreshToken}, nil)
+	metadata, err := client.discoverProvider(ctx, baseURL)
+	if err != nil {
+		return err
+	}
+	return client.postForm(ctx, metadata.RevocationEndpoint, url.Values{
+		"token": {refreshToken}, "token_type_hint": {"refresh_token"}, "client_id": {DefaultClientID},
+	}, nil)
 }
 
-func (client *Client) postJSON(ctx context.Context, endpoint string, body, destination any) error {
-	raw, err := json.Marshal(body)
-	if err != nil {
-		return errors.New("encode authentication request")
+const DefaultClientID = "kubeloop-desktop"
+
+func (client *Client) discoverProvider(ctx context.Context, baseURL string) (providerMetadata, error) {
+	var metadata providerMetadata
+	if err := client.getJSON(ctx, baseURL+"/.well-known/openid-configuration", &metadata); err != nil {
+		return providerMetadata{}, err
 	}
-	defer clear(raw)
+	if metadata.Issuer != baseURL || !sameOriginEndpoint(baseURL, metadata.AuthorizationEndpoint) ||
+		!sameOriginEndpoint(baseURL, metadata.TokenEndpoint) || !sameOriginEndpoint(baseURL, metadata.RevocationEndpoint) {
+		return providerMetadata{}, errors.New("OIDC discovery returned invalid provider metadata")
+	}
+	return metadata, nil
+}
+
+func sameOriginEndpoint(baseURL, endpoint string) bool {
+	base, baseErr := url.Parse(baseURL)
+	target, targetErr := url.Parse(endpoint)
+	return baseErr == nil && targetErr == nil && target.IsAbs() && target.User == nil && target.RawQuery == "" &&
+		target.Fragment == "" && strings.EqualFold(base.Scheme, target.Scheme) && strings.EqualFold(base.Host, target.Host)
+}
+
+func (client *Client) getJSON(ctx context.Context, endpoint string, destination any) error {
+	return client.request(ctx, http.MethodGet, endpoint, "", nil, destination)
+}
+
+func (client *Client) postForm(ctx context.Context, endpoint string, form url.Values, destination any) error {
+	return client.request(ctx, http.MethodPost, endpoint, "application/x-www-form-urlencoded", []byte(form.Encode()), destination)
+}
+
+func (client *Client) request(ctx context.Context, method, endpoint, contentType string, raw []byte, destination any) error {
 	requestContext, cancel := context.WithTimeout(ctx, client.requestTimeout)
 	defer cancel()
-	request, err := http.NewRequestWithContext(requestContext, http.MethodPost, endpoint, bytes.NewReader(raw))
+	request, err := http.NewRequestWithContext(requestContext, method, endpoint, bytes.NewReader(raw))
 	if err != nil {
 		return errors.New("create authentication request")
 	}
 	request.Header.Set("Accept", "application/json")
-	request.Header.Set("Content-Type", "application/json")
+	if contentType != "" {
+		request.Header.Set("Content-Type", contentType)
+	}
 	response, err := client.httpClient.Do(request)
 	if err != nil {
 		if errors.Is(requestContext.Err(), context.DeadlineExceeded) {
@@ -359,12 +400,12 @@ func newLoopbackServer(expectedState string, result chan<- callbackResult) *http
 
 func credentialFromResponse(response tokenResponse, deviceID string) (credentials.Credential, error) {
 	if !strings.EqualFold(response.TokenType, "Bearer") || response.AccessToken == "" || response.RefreshToken == "" ||
-		response.AccessExpiresAt.IsZero() || response.RefreshExpiresAt.IsZero() {
+		response.ExpiresIn <= 0 || response.RefreshExpiresIn <= 0 {
 		return credentials.Credential{}, errors.New("Gateway returned an incomplete token response")
 	}
 	return credentials.Credential{
-		TokenType: "Bearer", AccessToken: response.AccessToken, AccessExpiresAt: response.AccessExpiresAt,
-		RefreshToken: response.RefreshToken, RefreshExpiresAt: response.RefreshExpiresAt, DeviceID: deviceID,
+		TokenType: "Bearer", AccessToken: response.AccessToken, AccessExpiresAt: time.Now().Add(time.Duration(response.ExpiresIn) * time.Second),
+		RefreshToken: response.RefreshToken, RefreshExpiresAt: time.Now().Add(time.Duration(response.RefreshExpiresIn) * time.Second), DeviceID: deviceID,
 	}, nil
 }
 

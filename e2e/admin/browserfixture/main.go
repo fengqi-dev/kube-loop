@@ -152,23 +152,21 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.Handle("/kubeloop/api/admin/", http.StripPrefix("/kubeloop/api/admin", management))
-	mux.HandleFunc("/auth/oidc/e2e-oidc/start", func(writer http.ResponseWriter, request *http.Request) {
-		var input struct {
-			ClientCallback string `json:"clientCallback"`
-			State          string `json:"state"`
-		}
-		if request.Method != http.MethodPost || json.NewDecoder(request.Body).Decode(&input) != nil ||
-			input.ClientCallback != "http://"+*listenAddress+"/kubeloop/api/admin/ui/callback" || input.State == "" {
+	mux.HandleFunc("/oauth2/authorize", func(writer http.ResponseWriter, request *http.Request) {
+		query := request.URL.Query()
+		if request.Method != http.MethodGet || query.Get("response_type") != "code" ||
+			query.Get("client_id") != "kubeloop-management" || query.Get("provider") != "e2e-oidc" ||
+			query.Get("redirect_uri") != "http://"+*listenAddress+"/kubeloop/api/admin/ui/callback" ||
+			query.Get("state") == "" || query.Get("code_challenge_method") != "S256" {
 			http.Error(writer, `{"error":{"message":"fixture OIDC request failed"}}`, http.StatusBadRequest)
 			return
 		}
 		authorize := url.URL{Scheme: "http", Host: *listenAddress, Path: "/mock/oidc/authorize"}
-		query := authorize.Query()
-		query.Set("callback", input.ClientCallback)
-		query.Set("state", input.State)
-		authorize.RawQuery = query.Encode()
-		writer.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(writer).Encode(map[string]string{"authorizationUrl": authorize.String()})
+		upstreamQuery := authorize.Query()
+		upstreamQuery.Set("callback", query.Get("redirect_uri"))
+		upstreamQuery.Set("state", query.Get("state"))
+		authorize.RawQuery = upstreamQuery.Encode()
+		http.Redirect(writer, request, authorize.String(), http.StatusFound)
 	})
 	mux.HandleFunc("/mock/oidc/authorize", func(writer http.ResponseWriter, request *http.Request) {
 		callback, err := url.Parse(request.URL.Query().Get("callback"))
@@ -182,12 +180,11 @@ func main() {
 		callback.RawQuery = query.Encode()
 		http.Redirect(writer, request, callback.String(), http.StatusFound)
 	})
-	mux.HandleFunc("/auth/token/exchange", func(writer http.ResponseWriter, request *http.Request) {
-		var input struct {
-			Code string `json:"code"`
-		}
-		if request.Method != http.MethodPost || json.NewDecoder(request.Body).Decode(&input) != nil ||
-			input.Code != "fixture-authorization-code" {
+	mux.HandleFunc("/oauth2/token", func(writer http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodPost || request.ParseForm() != nil ||
+			request.Form.Get("grant_type") != "authorization_code" ||
+			request.Form.Get("client_id") != "kubeloop-management" ||
+			request.Form.Get("code") != "fixture-authorization-code" {
 			http.Error(writer, `{"error":{"message":"fixture token exchange failed"}}`, http.StatusUnauthorized)
 			return
 		}
@@ -222,8 +219,7 @@ func main() {
 func writeTokens(writer http.ResponseWriter) {
 	writer.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(writer).Encode(map[string]any{
-		"tokenType": "Bearer", "accessToken": fixtureAccessToken,
-		"accessExpiresAt": time.Now().Add(5 * time.Minute), "refreshToken": "browser-fixture-refresh-token",
-		"refreshExpiresAt": time.Now().Add(time.Hour),
+		"token_type": "Bearer", "access_token": fixtureAccessToken, "expires_in": 300,
+		"refresh_token": "browser-fixture-refresh-token", "refresh_expires_in": 3600,
 	})
 }

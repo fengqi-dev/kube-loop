@@ -46,7 +46,7 @@ type Identity struct {
 func (identity Identity) ExternalID() (string, error) {
 	switch {
 	case identity.Issuer != "" || identity.Subject != "":
-		issuer := strings.TrimRight(strings.TrimSpace(identity.Issuer), "/")
+		issuer := strings.TrimSpace(identity.Issuer)
 		subject := strings.TrimSpace(identity.Subject)
 		if issuer == "" || subject == "" {
 			return "", errors.New("OIDC identity requires issuer and subject")

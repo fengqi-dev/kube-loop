@@ -87,7 +87,7 @@ func TestLoginServiceCompletesTwoLayerPKCEFlowOnce(t *testing.T) {
 		t.Fatalf("desktop redirect = %q", callback.RedirectURL)
 	}
 	exchangeCode := redirect.Query().Get("code")
-	result, err := service.Exchange(context.Background(), exchangeCode, clientVerifier)
+	result, err := service.Exchange(context.Background(), exchangeCode, clientVerifier, request.ClientID, request.ClientCallback)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +98,7 @@ func TestLoginServiceCompletesTwoLayerPKCEFlowOnce(t *testing.T) {
 	if _, err := store.Principals().GetByID(context.Background(), result.Principal.ID); err != nil {
 		t.Fatalf("principal was not persisted: %v", err)
 	}
-	if _, err := service.Exchange(context.Background(), exchangeCode, clientVerifier); !errors.Is(err, ErrExpiredOrReplayed) {
+	if _, err := service.Exchange(context.Background(), exchangeCode, clientVerifier, request.ClientID, request.ClientCallback); !errors.Is(err, ErrExpiredOrReplayed) {
 		t.Fatalf("exchange replay = %v", err)
 	}
 	if _, err := service.CompleteCallback(context.Background(), CallbackRequest{
@@ -151,6 +151,7 @@ func TestLoginServiceRejectsTamperingAndUnsafeCallbacks(t *testing.T) {
 func TestLoginServiceAllowsOnlyConfiguredHTTPSBrowserCallback(t *testing.T) {
 	service, _, _ := newTestService(t)
 	request := validBeginRequest(pkceChallenge(strings.Repeat("v", 43)))
+	request.ClientID = "kubeloop-management"
 	request.ClientCallback = "https://gateway.example.test/kubeloop/api/admin/ui/callback"
 	if _, err := service.Begin(context.Background(), request); err != nil {
 		t.Fatalf("configured browser callback error = %v", err)
@@ -195,10 +196,11 @@ func TestLoginServiceWrongVerifierConsumesExchangeCode(t *testing.T) {
 	}
 	redirect, _ := url.Parse(callback.RedirectURL)
 	code := redirect.Query().Get("code")
-	if _, err := service.Exchange(context.Background(), code, strings.Repeat("x", 43)); !errors.Is(err, ErrPKCEVerification) {
+	request := validBeginRequest(pkceChallenge(clientVerifier))
+	if _, err := service.Exchange(context.Background(), code, strings.Repeat("x", 43), request.ClientID, request.ClientCallback); !errors.Is(err, ErrPKCEVerification) {
 		t.Fatalf("wrong verifier error = %v", err)
 	}
-	if _, err := service.Exchange(context.Background(), code, clientVerifier); !errors.Is(err, ErrExpiredOrReplayed) {
+	if _, err := service.Exchange(context.Background(), code, clientVerifier, request.ClientID, request.ClientCallback); !errors.Is(err, ErrExpiredOrReplayed) {
 		t.Fatalf("burned code replay = %v", err)
 	}
 }
@@ -220,8 +222,11 @@ func newTestService(t *testing.T) (*Service, *fakeOIDCProvider, *storage.Store) 
 	values := [][]byte{bytes.Repeat([]byte{1}, 32), bytes.Repeat([]byte{2}, 32), bytes.Repeat([]byte{3}, 32)}
 	var randomMu sync.Mutex
 	service, err := New(registry, store, Config{
-		AllowedCallbacks: []string{"https://gateway.example.test/kubeloop/api/admin/ui/callback"},
-		Now:              func() time.Time { return time.Date(2026, 8, 9, 10, 0, 0, 0, time.UTC) },
+		Clients: []Client{
+			{ID: DefaultDesktopClientID, AllowLoopback: true, Scopes: []string{"openid", "kubeloop.api"}},
+			{ID: "kubeloop-management", RedirectURIs: []string{"https://gateway.example.test/kubeloop/api/admin/ui/callback"}, Scopes: []string{"openid", "kubeloop.api"}},
+		},
+		Now: func() time.Time { return time.Date(2026, 8, 9, 10, 0, 0, 0, time.UTC) },
 		Random: func(target []byte) error {
 			randomMu.Lock()
 			defer randomMu.Unlock()
@@ -241,7 +246,8 @@ func newTestService(t *testing.T) (*Service, *fakeOIDCProvider, *storage.Store) 
 
 func validBeginRequest(challenge string) BeginRequest {
 	return BeginRequest{
-		ProviderID: "corporate", ClientCallback: "http://127.0.0.1:49152/callback",
+		ProviderID: "corporate", ClientID: DefaultDesktopClientID,
+		ClientCallback: "http://127.0.0.1:49152/callback", Scope: "openid kubeloop.api",
 		ClientState: strings.Repeat("s", 43), Nonce: strings.Repeat("n", 43), PKCEChallenge: challenge,
 	}
 }

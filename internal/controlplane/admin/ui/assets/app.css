@@ -43,6 +43,7 @@ h2 { margin: 0 0 10px; font-size: 28px; letter-spacing: -.035em; }
 .secondary:hover, .ghost:hover { background: var(--accent-soft); border-color: #a9d9c8; }
 .ghost { background: transparent; color: var(--muted); }
 .auth-form { display: grid; gap: 14px; margin-top: 24px; padding-top: 22px; border-top: 1px solid var(--line); }
+.auth-form.local-login { margin-top: 28px; padding-top: 0; border-top: 0; }
 label { display: grid; gap: 7px; color: var(--muted); font-size: 13px; font-weight: 650; }
 input, select, textarea { width: 100%; min-height: 42px; border: 1px solid var(--line); border-radius: 9px; padding: 9px 11px; background: var(--panel); color: var(--ink); }
 .message { margin-top: 16px; padding: 11px 13px; border-radius: 9px; background: #fff3f0; color: var(--danger); font-size: 13px; line-height: 1.5; }
@@ -98,6 +99,13 @@ td { max-width: 360px; padding: 12px 14px; border-top: 1px solid var(--line); ve
 .policy-message.error { border-color: #efb3aa; background: #fff5f3; color: var(--danger); }
 .policy-rollback { display: grid; grid-template-columns: minmax(150px, .5fr) minmax(260px, 1fr) auto; align-items: end; gap: 12px; }
 .danger-action { color: var(--danger); border-color: #efb3aa; }
+.user-form { display: grid; grid-template-columns: repeat(4, minmax(150px, 1fr)) auto; align-items: end; gap: 12px; }
+.inline-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.inline-actions button { min-height: 34px; padding: 6px 10px; }
+.mfa-setup { display: grid; gap: 14px; margin-top: 18px; }
+.totp-qr { width: 256px; max-width: 100%; border: 10px solid white; border-radius: 12px; image-rendering: pixelated; }
+.secret-value { display: block; overflow-wrap: anywhere; border: 1px solid var(--line); border-radius: 9px; padding: 11px; background: var(--bg); user-select: all; }
+.recovery-codes pre { columns: 2; border: 1px solid var(--line); border-radius: 10px; padding: 18px; background: var(--bg); font-size: 15px; line-height: 1.8; user-select: all; }
 .mobile-menu { display: none; }
 
 @media (prefers-color-scheme: dark) {
@@ -123,7 +131,7 @@ td { max-width: 360px; padding: 12px 14px; border-top: 1px solid var(--line); ve
   .nav button { width: auto; white-space: nowrap; }
   .sidebar-foot { display: none; }
   .card, .card.wide { grid-column: 1 / -1; }
-  .policy-check-grid, .policy-rollback { grid-template-columns: 1fr; }
+  .policy-check-grid, .policy-rollback, .user-form { grid-template-columns: 1fr; }
 }
 
 @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }

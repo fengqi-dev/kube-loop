@@ -73,6 +73,10 @@ func TestSQLiteChartRendersIndependentSecureWorkloads(t *testing.T) {
 		valueAt(t, controlPlaneConfig, "data", "KUBELOOP_FILE_ALLOWED_ROOTS_JSON") != `["/"]` {
 		t.Fatalf("ControlPlane file limits = %#v", valueAt(t, controlPlaneConfig, "data"))
 	}
+	if valueAt(t, controlPlaneConfig, "data", "KUBELOOP_MANAGEMENT_LISTEN") != ":8081" ||
+		valueAt(t, controlPlaneConfig, "data", "KUBELOOP_MANAGEMENT_PUBLIC_URL") != "http://127.0.0.1:8081" {
+		t.Fatalf("Management Plane listener = %#v", valueAt(t, controlPlaneConfig, "data"))
+	}
 	if !containerHasEnvironment(t, controlPlane, "KUBELOOP_SQLITE_PATH") {
 		t.Fatal("ControlPlane is missing SQLite configuration")
 	}
@@ -107,13 +111,18 @@ func TestSQLiteChartRendersIndependentSecureWorkloads(t *testing.T) {
 		strings.Contains(string(dataPlaneYAML), "relay/signing-key.pem") {
 		t.Fatal("RelayTicket private signing key is not isolated to ControlPlane")
 	}
+	initialAdminSecret := objectByName(t, objects, "Secret", "test-kubeloop-control-plane-initial-admin")
+	if valueAt(t, initialAdminSecret, "data", "signing-key.pem") == "" ||
+		!strings.Contains(string(controlPlaneYAML), "token/signing-key.pem") {
+		t.Fatal("initial administrator install is missing its retained OAuth/OIDC signing key")
+	}
 	if countKind(objects, "Ingress") != 1 {
 		t.Fatal("expected one same-origin Ingress")
 	}
 	ingress := objectByName(t, objects, "Ingress", "test-kubeloop")
 	ingressYAML, _ := yaml.Marshal(ingress)
 	for _, want := range []string{
-		"host: kubeloop.example.test", "path: /.well-known", "path: /auth",
+		"host: kubeloop.example.test", "path: /.well-known", "path: /oauth2",
 		"path: /kubeloop/api", "path: /tunnel", "path: /traffic/v1", "pathType: Prefix", "tls:",
 	} {
 		if !strings.Contains(string(ingressYAML), want) {
@@ -121,10 +130,15 @@ func TestSQLiteChartRendersIndependentSecureWorkloads(t *testing.T) {
 		}
 	}
 	controlPlaneService := objectByName(t, objects, "Service", "test-kubeloop-control-plane")
+	managementService := objectByName(t, objects, "Service", "test-kubeloop-control-plane-management")
 	dataPlaneService := objectByName(t, objects, "Service", "test-kubeloop-gateway")
 	if serviceAppProtocol(t, controlPlaneService) != "http" || serviceAppProtocol(t, dataPlaneService) != "kubernetes.io/ws" {
 		t.Fatalf("backend appProtocols = controlPlane %q, data plane %q", serviceAppProtocol(t, controlPlaneService), serviceAppProtocol(t, dataPlaneService))
 	}
+	if valueAt(t, managementService, "spec", "type") != "ClusterIP" {
+		t.Fatal("Management Plane Service must remain ClusterIP-only")
+	}
+	assertServicePort(t, managementService, "management", 8081, "management")
 	if len(objectsByComponent(t, objects, "Service", "control-plane-relay-registry")) != 1 {
 		t.Fatal("expected one internal Relay Registry Service")
 	}
@@ -154,7 +168,7 @@ func TestGatewayAPIHTTPRouteUsesOneTLSOriginAndUnboundedWebSocketTimeout(t *test
 	for _, want := range []string{
 		"apiVersion: gateway.networking.k8s.io/v1", "name: shared-gateway",
 		"namespace: networking", "sectionName: https", "kubeloop.example.test",
-		"value: /.well-known", "value: /auth", "value: /kubeloop/api", "value: /tunnel", "value: /traffic/v1",
+		"value: /.well-known", "value: /oauth2", "value: /kubeloop/api", "value: /tunnel", "value: /traffic/v1",
 		"name: test-kubeloop-control-plane", "name: test-kubeloop-gateway",
 		"request: 30s", "backendRequest: 30s", "request: 0s", "backendRequest: 0s",
 	} {
@@ -331,7 +345,7 @@ func TestOIDCConfigurationSeparatesPublicConfigAndSecrets(t *testing.T) {
 		"--set", "controlPlane.auth.providers[0].id=corporate",
 		"--set", "controlPlane.auth.providers[0].type=oidc",
 		"--set", "controlPlane.auth.providers[0].displayName=Corporate SSO",
-		"--set", "controlPlane.auth.providers[0].oidc.issuer=https://login.example.test",
+		"--set", "controlPlane.auth.providers[0].oidc.issuer=https://tenant.auth0.com/",
 		"--set", "controlPlane.auth.providers[0].oidc.clientID=kubeloop",
 		"--set", "controlPlane.auth.providers[0].oidc.existingSecret=kubeloop-oidc",
 		"--set", "controlPlane.auth.providers[0].oidc.clientSecretKey=client-secret",
@@ -346,8 +360,8 @@ func TestOIDCConfigurationSeparatesPublicConfigAndSecrets(t *testing.T) {
 		t.Fatalf("auth.json is not a string: %#v", valueAt(t, authConfig, "data", "auth.json"))
 	}
 	for _, want := range []string{
-		`"issuer":"https://login.example.test"`,
-		`"redirectUrl":"https://kubeloop.example.test/auth/callback/corporate"`,
+		`"issuer":"https://tenant.auth0.com/"`,
+		`"redirectUrl":"https://kubeloop.example.test/oauth2/callback/corporate"`,
 		`"clientSecretFile":"/var/run/secrets/kubeloop/auth/corporate/client-secret"`,
 		`"caFile":"/var/run/secrets/kubeloop/auth/corporate/ca.crt"`,
 	} {
@@ -781,7 +795,7 @@ func TestChartRejectsUnsafeStorageConfigurations(t *testing.T) {
 		{name: "missing RBAC namespaces", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.rbac.scope=namespace"}, want: "controlPlane.rbac.namespaces must contain"},
 		{name: "invalid RBAC namespace", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.rbac.scope=namespace", "--set", "controlPlane.rbac.namespaces[0]=Team_A"}, want: "contains invalid namespace"},
 		{name: "duplicate RBAC namespace", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.rbac.scope=namespace", "--set", "controlPlane.rbac.namespaces[0]=team-a", "--set", "controlPlane.rbac.namespaces[1]=team-a"}, want: "contains duplicate namespace"},
-		{name: "token signing secret", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.auth.providers[0].id=corp", "--set", "controlPlane.auth.providers[0].type=oidc", "--set", "controlPlane.auth.providers[0].oidc.issuer=https://login.example.test", "--set", "controlPlane.auth.providers[0].oidc.clientID=kubeloop", "--set", "controlPlane.auth.providers[0].oidc.existingSecret=kubeloop-oidc", "--set", "controlPlane.auth.providers[0].oidc.clientSecretKey=client-secret"}, want: "controlPlane.auth.token.existingSecret is required"},
+		{name: "token signing secret", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.management.initialAdmin.enabled=false", "--set", "controlPlane.auth.providers[0].id=corp", "--set", "controlPlane.auth.providers[0].type=oidc", "--set", "controlPlane.auth.providers[0].oidc.issuer=https://login.example.test", "--set", "controlPlane.auth.providers[0].oidc.clientID=kubeloop", "--set", "controlPlane.auth.providers[0].oidc.existingSecret=kubeloop-oidc", "--set", "controlPlane.auth.providers[0].oidc.clientSecretKey=client-secret"}, want: "controlPlane.auth.token.existingSecret is required"},
 		{name: "OIDC secret", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.auth.token.existingSecret=kubeloop-token", "--set", "controlPlane.auth.providers[0].id=corp", "--set", "controlPlane.auth.providers[0].type=oidc", "--set", "controlPlane.auth.providers[0].oidc.issuer=https://login.example.test", "--set", "controlPlane.auth.providers[0].oidc.clientID=kubeloop"}, want: "existingSecret is required"},
 		{name: "unsupported auth type", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.auth.token.existingSecret=kubeloop-token", "--set", "controlPlane.auth.providers[0].id=corp", "--set", "controlPlane.auth.providers[0].type=saml"}, want: "must be oidc or anonymous"},
 		{name: "anonymous without development mode", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.auth.token.existingSecret=kubeloop-token", "--set", "controlPlane.auth.providers[0].id=guest", "--set", "controlPlane.auth.providers[0].type=anonymous", "--set", "controlPlane.auth.providers[0].anonymous.subject=guest"}, want: "requires controlPlane.auth.developmentMode=true"},
@@ -991,15 +1005,36 @@ func valueAt(t *testing.T, value any, path ...string) any {
 func serviceAppProtocol(t *testing.T, service map[string]any) string {
 	t.Helper()
 	ports, ok := valueAt(t, service, "spec", "ports").([]any)
-	if !ok || len(ports) != 1 {
+	if !ok {
 		t.Fatalf("Service ports = %#v", valueAt(t, service, "spec", "ports"))
 	}
-	port, ok := ports[0].(map[string]any)
-	if !ok {
-		t.Fatalf("Service port = %#v", ports[0])
+	for _, value := range ports {
+		port, ok := value.(map[string]any)
+		if ok && port["name"] == "http" {
+			appProtocol, _ := port["appProtocol"].(string)
+			return appProtocol
+		}
 	}
-	appProtocol, _ := port["appProtocol"].(string)
-	return appProtocol
+	t.Fatalf("Service has no http port: %#v", ports)
+	return ""
+}
+
+func assertServicePort(t *testing.T, service map[string]any, name string, portNumber int, targetPort string) {
+	t.Helper()
+	ports, ok := valueAt(t, service, "spec", "ports").([]any)
+	if !ok {
+		t.Fatalf("Service ports = %#v", valueAt(t, service, "spec", "ports"))
+	}
+	for _, value := range ports {
+		port, ok := value.(map[string]any)
+		if ok && port["name"] == name {
+			if port["port"] != portNumber || port["targetPort"] != targetPort {
+				t.Fatalf("Service port %s = %#v", name, port)
+			}
+			return
+		}
+	}
+	t.Fatalf("Service has no %s port: %#v", name, ports)
 }
 
 func assertRestrictedPodAndContainerSecurity(t *testing.T, deployment map[string]any) {

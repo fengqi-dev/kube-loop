@@ -101,7 +101,7 @@ func TestSameOriginTLSProxyPreservesControlPlaneLimitsAndLongLivedWebSocket(t *t
 	externalHandler = http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		switch {
 		case request.URL.Path == controlplane.DiscoveryPath,
-			strings.HasPrefix(request.URL.Path, "/auth"),
+			strings.HasPrefix(request.URL.Path, "/oauth2"),
 			strings.HasPrefix(request.URL.Path, controlplane.APIPathPrefix):
 			controlPlaneProxy.ServeHTTP(writer, request)
 		case request.URL.Path == "/tunnel":

@@ -1,13 +1,13 @@
 package httpauth
 
 import (
-	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/authn"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/authn/development"
@@ -36,10 +37,10 @@ func (provider *handlerOIDCProvider) Descriptor() authn.Descriptor {
 func (provider *handlerOIDCProvider) Check(context.Context) error { return nil }
 func (provider *handlerOIDCProvider) AuthorizationURL(state, nonce, challenge string) (string, error) {
 	provider.mu.Lock()
-	provider.state = state
-	provider.nonce = nonce
+	provider.state, provider.nonce = state, nonce
 	provider.mu.Unlock()
-	return "https://identity.example.test/authorize?state=" + url.QueryEscape(state) + "&code_challenge=" + url.QueryEscape(challenge), nil
+	return "https://identity.example.test/authorize?state=" + url.QueryEscape(state) +
+		"&code_challenge=" + url.QueryEscape(challenge), nil
 }
 func (provider *handlerOIDCProvider) Exchange(_ context.Context, code, verifier, nonce string) (authn.Identity, error) {
 	provider.mu.Lock()
@@ -47,128 +48,140 @@ func (provider *handlerOIDCProvider) Exchange(_ context.Context, code, verifier,
 	if code == "" || verifier == "" || nonce != provider.nonce {
 		return authn.Identity{}, login.ErrInvalidRequest
 	}
-	return authn.Identity{
-		ProviderID: "corp", Issuer: "https://identity.example.test", Subject: "subject",
-		DisplayName: "Ada", Groups: []string{"developers"},
-	}, nil
+	return authn.Identity{ProviderID: "corp", Issuer: "https://identity.example.test", Subject: "subject",
+		DisplayName: "Ada", Email: "ada@example.test", Groups: []string{"developers"}}, nil
 }
 
-func TestHTTPAuthenticationVerticalSlice(t *testing.T) {
+func TestOIDCAuthorizationCodePKCELifecycle(t *testing.T) {
 	handler, provider := newHandlerTestServer(t)
 	verifier := strings.Repeat("v", 43)
 	digest := sha256.Sum256([]byte(verifier))
 	challenge := base64.RawURLEncoding.EncodeToString(digest[:])
-	startBody := map[string]string{
-		"clientCallback": "http://127.0.0.1:49152/callback",
-		"state":          strings.Repeat("s", 43), "nonce": strings.Repeat("n", 43),
-		"pkceChallenge": challenge,
+	callbackURI := "http://127.0.0.1:49152/callback"
+	state, nonce := strings.Repeat("s", 43), strings.Repeat("n", 43)
+	authorizeQuery := url.Values{
+		"response_type": {"code"}, "client_id": {login.DefaultDesktopClientID}, "redirect_uri": {callbackURI},
+		"scope": {"openid profile email offline_access kubeloop.api"}, "state": {state}, "nonce": {nonce},
+		"code_challenge": {challenge}, "code_challenge_method": {"S256"}, "provider": {"corp"},
 	}
-	start := performJSON(t, handler, http.MethodPost, "/auth/oidc/corp/start", startBody)
-	if start.Code != http.StatusOK || start.Header().Get("Cache-Control") != "no-store" {
-		t.Fatalf("start status=%d body=%s", start.Code, start.Body.String())
-	}
-	var started startResponse
-	if err := json.Unmarshal(start.Body.Bytes(), &started); err != nil || started.AuthorizationURL == "" {
-		t.Fatalf("start response=%#v error=%v", started, err)
+	authorize := perform(t, handler, http.MethodGet, "/oauth2/authorize?"+authorizeQuery.Encode(), nil)
+	if authorize.Code != http.StatusFound || authorize.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("authorize status=%d body=%s", authorize.Code, authorize.Body.String())
 	}
 	provider.mu.Lock()
 	upstreamState := provider.state
 	provider.mu.Unlock()
-
-	callbackRequest := httptest.NewRequest(http.MethodGet,
-		"/auth/callback/corp?code=upstream-code&state="+url.QueryEscape(upstreamState), nil)
-	callback := httptest.NewRecorder()
-	serveHTTP(handler, callback, callbackRequest)
+	callback := perform(t, handler, http.MethodGet,
+		"/oauth2/callback/corp?code=upstream-code&state="+url.QueryEscape(upstreamState), nil)
 	if callback.Code != http.StatusSeeOther {
 		t.Fatalf("callback status=%d body=%s", callback.Code, callback.Body.String())
 	}
 	redirect, err := url.Parse(callback.Header().Get("Location"))
-	if err != nil || redirect.Host != "127.0.0.1:49152" || redirect.Query().Get("state") != startBody["state"] {
+	if err != nil || redirect.Query().Get("state") != state {
 		t.Fatalf("callback redirect=%q error=%v", callback.Header().Get("Location"), err)
 	}
-
-	exchange := performJSON(t, handler, http.MethodPost, "/auth/token/exchange", exchangeRequest{
-		Code: redirect.Query().Get("code"), PKCEVerifier: verifier, DeviceID: "desktop-test",
-	})
+	tokenForm := url.Values{"grant_type": {"authorization_code"}, "code": {redirect.Query().Get("code")},
+		"code_verifier": {verifier}, "client_id": {login.DefaultDesktopClientID},
+		"redirect_uri": {callbackURI}, "device_id": {"desktop-test"}}
+	exchange := performForm(t, handler, "/oauth2/token", tokenForm)
 	if exchange.Code != http.StatusOK {
-		t.Fatalf("exchange status=%d body=%s", exchange.Code, exchange.Body.String())
+		t.Fatalf("token status=%d body=%s", exchange.Code, exchange.Body.String())
 	}
 	var tokens tokenResponse
-	if err := json.Unmarshal(exchange.Body.Bytes(), &tokens); err != nil {
-		t.Fatal(err)
+	if err := json.Unmarshal(exchange.Body.Bytes(), &tokens); err != nil || tokens.AccessToken == "" ||
+		tokens.RefreshToken == "" || tokens.IDToken == "" || tokens.ExpiresIn <= 0 {
+		t.Fatalf("tokens=%#v error=%v", tokens, err)
 	}
-	if tokens.TokenType != "Bearer" || tokens.AccessToken == "" || tokens.RefreshToken == "" {
-		t.Fatalf("token response=%#v", tokens)
+	if replay := performForm(t, handler, "/oauth2/token", tokenForm); replay.Code != http.StatusBadRequest {
+		t.Fatalf("replay status=%d body=%s", replay.Code, replay.Body.String())
 	}
-	replay := performJSON(t, handler, http.MethodPost, "/auth/token/exchange", exchangeRequest{
-		Code: redirect.Query().Get("code"), PKCEVerifier: verifier, DeviceID: "desktop-test",
+	userinfoRequest := httptest.NewRequest(http.MethodGet, "/oauth2/userinfo", nil)
+	userinfoRequest.Header.Set("Authorization", "Bearer "+tokens.AccessToken)
+	userinfo := httptest.NewRecorder()
+	handler.ServeHTTP(userinfo, userinfoRequest)
+	if userinfo.Code != http.StatusOK || !strings.Contains(userinfo.Body.String(), `"name":"Ada"`) {
+		t.Fatalf("userinfo status=%d body=%s", userinfo.Code, userinfo.Body.String())
+	}
+	refresh := performForm(t, handler, "/oauth2/token", url.Values{
+		"grant_type": {"refresh_token"}, "refresh_token": {tokens.RefreshToken}, "client_id": {login.DefaultDesktopClientID},
 	})
-	if replay.Code != http.StatusBadRequest || strings.Contains(replay.Body.String(), redirect.Query().Get("code")) {
-		t.Fatalf("exchange replay status=%d body=%s", replay.Code, replay.Body.String())
-	}
-	refresh := performJSON(t, handler, http.MethodPost, "/auth/token/refresh", refreshRequest{RefreshToken: tokens.RefreshToken})
 	if refresh.Code != http.StatusOK {
 		t.Fatalf("refresh status=%d body=%s", refresh.Code, refresh.Body.String())
 	}
 }
 
-func TestHTTPAuthenticationRejectsUnknownJSONAndHidesRevocationExistence(t *testing.T) {
+func TestOIDCDiscoveryJWKSAndRevocation(t *testing.T) {
 	handler, _ := newHandlerTestServer(t)
-	request := httptest.NewRequest(http.MethodPost, "/auth/token/refresh", bytes.NewBufferString(`{"refreshToken":"secret","unknown":true}`))
-	request.Header.Set("Content-Type", "application/json")
-	response := httptest.NewRecorder()
-	serveHTTP(handler, response, request)
-	if response.Code != http.StatusBadRequest || strings.Contains(response.Body.String(), "secret") {
-		t.Fatalf("strict JSON status=%d body=%s", response.Code, response.Body.String())
+	for _, path := range []string{openidConfigurationPath, oauthMetadataPath, "/oauth2/jwks"} {
+		response := perform(t, handler, http.MethodGet, path, nil)
+		if response.Code != http.StatusOK {
+			t.Fatalf("GET %s status=%d body=%s", path, response.Code, response.Body.String())
+		}
 	}
-	oversizedSecret := strings.Repeat("oversized-auth-secret", maxAuthBodyBytes)
-	oversizedRequest := httptest.NewRequest(http.MethodPost, "/auth/token/refresh", strings.NewReader(oversizedSecret))
-	oversizedRequest.Header.Set("Content-Type", "application/json")
-	oversizedResponse := httptest.NewRecorder()
-	serveHTTP(handler, oversizedResponse, oversizedRequest)
-	if oversizedResponse.Code != http.StatusRequestEntityTooLarge || strings.Contains(oversizedResponse.Body.String(), "oversized-auth-secret") {
-		t.Fatalf("oversized auth status=%d body=%s", oversizedResponse.Code, oversizedResponse.Body.String())
+	revoke := performForm(t, handler, "/oauth2/revoke", url.Values{"token": {"not-a-token"}})
+	if revoke.Code != http.StatusOK {
+		t.Fatalf("revoke status=%d body=%s", revoke.Code, revoke.Body.String())
 	}
-	revoke := performJSON(t, handler, http.MethodPost, "/auth/token/revoke", refreshRequest{RefreshToken: "not-a-token"})
-	if revoke.Code != http.StatusNoContent {
-		t.Fatalf("idempotent revoke status=%d body=%s", revoke.Code, revoke.Body.String())
+	invalidRequest := httptest.NewRequest(http.MethodPost, "/oauth2/token", strings.NewReader(`{"grant_type":"refresh_token"}`))
+	invalidRequest.Header.Set("Content-Type", "application/json")
+	invalid := performRequest(handler, invalidRequest)
+	if invalid.Code != http.StatusBadRequest {
+		t.Fatalf("invalid content type status=%d", invalid.Code)
 	}
 }
 
-func TestHTTPAnonymousLoginIssuesStandardTokenLifecycle(t *testing.T) {
+func TestLocalAccountAuthorizationUsesSameOAuthCodeFlowAndMFA(t *testing.T) {
 	handler, _ := newHandlerTestServer(t)
-	anonymous := performJSON(t, handler, http.MethodPost, "/auth/anonymous/guest/login", anonymousRequest{
-		DeviceID: "desktop-anonymous",
-	})
-	if anonymous.Code != http.StatusOK {
-		t.Fatalf("anonymous login status=%d body=%s", anonymous.Code, anonymous.Body.String())
+	verifier := strings.Repeat("v", 43)
+	digest := sha256.Sum256([]byte(verifier))
+	callbackURI := "http://127.0.0.1:49152/callback"
+	query := url.Values{
+		"response_type": {"code"}, "client_id": {login.DefaultDesktopClientID}, "redirect_uri": {callbackURI},
+		"scope": {"openid kubeloop.api"}, "state": {strings.Repeat("s", 43)}, "nonce": {strings.Repeat("n", 43)},
+		"code_challenge": {base64.RawURLEncoding.EncodeToString(digest[:])}, "code_challenge_method": {"S256"},
+		"provider": {"local"},
 	}
-	var anonymousTokens tokenResponse
-	if err := json.Unmarshal(anonymous.Body.Bytes(), &anonymousTokens); err != nil ||
-		anonymousTokens.AccessToken == "" || anonymousTokens.RefreshToken == "" {
-		t.Fatalf("anonymous tokens=%#v error=%v", anonymousTokens, err)
+	page := perform(t, handler, http.MethodGet, "/oauth2/authorize?"+query.Encode(), nil)
+	if page.Code != http.StatusOK || !strings.Contains(page.Body.String(), `action="/oauth2/login/local"`) {
+		t.Fatalf("local authorize status=%d body=%s", page.Code, page.Body.String())
 	}
-	refresh := performJSON(t, handler, http.MethodPost, "/auth/token/refresh", refreshRequest{
-		RefreshToken: anonymousTokens.RefreshToken,
+	marker := `name="transaction" value="`
+	start := strings.Index(page.Body.String(), marker)
+	if start < 0 {
+		t.Fatal("local transaction is missing")
+	}
+	transaction := page.Body.String()[start+len(marker):]
+	transaction = transaction[:strings.IndexByte(transaction, '"')]
+	loginResponse := performForm(t, handler, "/oauth2/login/local", url.Values{
+		"transaction": {transaction}, "username": {"admin"}, "password": {"correct-password"},
+		"second_factor": {"123456"},
 	})
-	if refresh.Code != http.StatusOK {
-		t.Fatalf("anonymous refresh status=%d body=%s", refresh.Code, refresh.Body.String())
+	if loginResponse.Code != http.StatusSeeOther {
+		t.Fatalf("local login status=%d body=%s", loginResponse.Code, loginResponse.Body.String())
+	}
+	redirect, err := url.Parse(loginResponse.Header().Get("Location"))
+	if err != nil || redirect.Query().Get("code") == "" {
+		t.Fatalf("local redirect=%q error=%v", loginResponse.Header().Get("Location"), err)
+	}
+	tokens := performForm(t, handler, "/oauth2/token", url.Values{
+		"grant_type": {"authorization_code"}, "code": {redirect.Query().Get("code")},
+		"code_verifier": {verifier}, "client_id": {login.DefaultDesktopClientID}, "redirect_uri": {callbackURI},
+	})
+	if tokens.Code != http.StatusOK || !strings.Contains(tokens.Body.String(), `"id_token"`) {
+		t.Fatalf("local token status=%d body=%s", tokens.Code, tokens.Body.String())
 	}
 }
 
-func newHandlerTestServer(t *testing.T) (*Service, *handlerOIDCProvider) {
+func newHandlerTestServer(t *testing.T) (*echo.Echo, *handlerOIDCProvider) {
 	t.Helper()
-	store, err := storage.Open(context.Background(), storage.Config{
-		Backend: storage.BackendSQLite, SQLitePath: filepath.Join(t.TempDir(), "http-auth.db"),
-	})
+	store, err := storage.Open(t.Context(), storage.Config{Backend: storage.BackendSQLite,
+		SQLitePath: filepath.Join(t.TempDir(), "http-auth.db")})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
 	provider := &handlerOIDCProvider{}
-	anonymousProvider, err := development.NewAnonymous(
-		"guest", "Anonymous (unsafe)", development.IdentityConfig{Subject: "guest", Groups: []string{"developers"}},
-	)
+	anonymousProvider, err := development.NewAnonymous("guest", "Anonymous", development.IdentityConfig{Subject: "guest"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,7 +189,10 @@ func newHandlerTestServer(t *testing.T) (*Service, *handlerOIDCProvider) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	loginService, err := login.New(registry, store, login.Config{})
+	loginService, err := login.New(registry, store, login.Config{Clients: []login.Client{{
+		ID: login.DefaultDesktopClientID, AllowLoopback: true,
+		Scopes: []string{"openid", "profile", "email", "offline_access", "kubeloop.api"},
+	}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,34 +200,53 @@ func newHandlerTestServer(t *testing.T) (*Service, *handlerOIDCProvider) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tokenService, err := token.New(store, token.Config{
-		Issuer: "https://gateway.example.test", KeyID: "test", SigningKey: signingKey,
+	tokenService, err := token.New(store, token.Config{Issuer: "https://gateway.example.test", KeyID: "test", SigningKey: signingKey})
+	if err != nil {
+		t.Fatal(err)
+	}
+	localPrincipal, err := store.Principals().Upsert(t.Context(), storage.Principal{
+		ID: "b67fa049-a785-4d14-bcc7-e95289499591", Provider: "local", ExternalID: "admin",
+		DisplayName: "Administrator", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler, err := New(loginService, tokenService)
+	service, err := New(loginService, tokenService, WithLocalAuthenticator(func(
+		_ context.Context, username string, password []byte, secondFactor, _ string,
+	) (storage.Principal, error) {
+		if username != "admin" || string(password) != "correct-password" || secondFactor != "123456" {
+			return storage.Principal{}, errors.New("invalid credentials")
+		}
+		return localPrincipal, nil
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	return handler, provider
-}
-
-func performJSON(t *testing.T, handler *Service, method, path string, body any) *httptest.ResponseRecorder {
-	t.Helper()
-	data, err := json.Marshal(body)
-	if err != nil {
-		t.Fatal(err)
-	}
-	request := httptest.NewRequest(method, path, bytes.NewReader(data))
-	request.Header.Set("Content-Type", "application/json")
-	response := httptest.NewRecorder()
-	serveHTTP(handler, response, request)
-	return response
-}
-
-func serveHTTP(service *Service, writer http.ResponseWriter, request *http.Request) {
 	router := echo.New()
-	NewRoutes(service).RegisterRoutes(router.Group("/auth"))
-	router.ServeHTTP(writer, request)
+	NewRoutes(service).RegisterRoutes(router.Group(""))
+	return router, provider
+}
+
+func performForm(t *testing.T, handler http.Handler, path string, form url.Values) *httptest.ResponseRecorder {
+	t.Helper()
+	request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(form.Encode()))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	return performRequest(handler, request)
+}
+
+func perform(t *testing.T, handler http.Handler, method, path string, body *strings.Reader) *httptest.ResponseRecorder {
+	t.Helper()
+	var request *http.Request
+	if body == nil {
+		request = httptest.NewRequest(method, path, nil)
+	} else {
+		request = httptest.NewRequest(method, path, body)
+	}
+	return performRequest(handler, request)
+}
+
+func performRequest(handler http.Handler, request *http.Request) *httptest.ResponseRecorder {
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	return response
 }

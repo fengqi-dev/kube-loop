@@ -317,6 +317,7 @@ func testAuthTransactionRepository(t *testing.T, store *Store) {
 	attempt := AuthAttempt{
 		ID: uuid.NewString(), ProviderID: "corporate", StateHash: stateHash[:],
 		ClientState: "desktop-state", ClientCallback: "http://127.0.0.1:49152/callback",
+		ClientID: "kubeloop-desktop", Scope: "openid kubeloop.api",
 		Nonce: "nonce", PKCEChallenge: "challenge", UpstreamPKCEVerifier: "upstream-verifier",
 		CreatedAt: now, ExpiresAt: now.Add(time.Minute),
 	}
@@ -334,6 +335,8 @@ func testAuthTransactionRepository(t *testing.T, store *Store) {
 	codeHash := sha256.Sum256([]byte("single-use-exchange"))
 	exchange := AuthExchange{
 		CodeHash: codeHash[:], PrincipalID: principal.ID, ProviderID: "corporate",
+		ClientID: "kubeloop-desktop", RedirectURI: "http://127.0.0.1:49152/callback",
+		Scope: "openid kubeloop.api", Nonce: "nonce",
 		PKCEChallenge: "challenge", CreatedAt: now, ExpiresAt: now.Add(time.Minute),
 	}
 	if err := store.AuthTransactions().CreateExchange(ctx, exchange); err != nil {

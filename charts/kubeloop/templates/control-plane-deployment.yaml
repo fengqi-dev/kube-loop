@@ -35,6 +35,11 @@
 {{- $breakGlassAlias := trim (toString $breakGlass.secretAlias) -}}
 {{- $breakGlassSecret := dict -}}
 {{- $providerSecretAliases := default (dict) .Values.controlPlane.management.providerSecretAliases -}}
+{{- $initialAdmin := .Values.controlPlane.management.initialAdmin -}}
+{{- $tokenSecretName := .Values.controlPlane.auth.token.existingSecret -}}
+{{- if and (not $tokenSecretName) $initialAdmin.enabled (not $initialAdmin.existingSecret) -}}
+{{- $tokenSecretName = include "kubeloop.initialAdminSecretName" . -}}
+{{- end -}}
 {{- if $breakGlass.enabled -}}
 {{- if not (regexMatch "^[a-z][a-z0-9-]{0,62}$" $breakGlassAlias) -}}
 {{- fail "controlPlane.management.breakGlass.secretAlias must be a valid stable alias" -}}
@@ -141,6 +146,9 @@ spec:
             - name: http
               containerPort: 8080
               protocol: TCP
+            - name: management
+              containerPort: {{ .Values.controlPlane.management.listenPort }}
+              protocol: TCP
             {{- if .Values.controlPlane.relayRegistry.enabled }}
             - name: relay-mtls
               containerPort: {{ .Values.controlPlane.relayRegistry.listenPort }}
@@ -165,7 +173,7 @@ spec:
             - name: auth-secrets
               mountPath: /var/run/secrets/kubeloop/auth
               readOnly: true
-            {{- if or $breakGlass.enabled $providerSecretAliases }}
+            {{- if or $initialAdmin.enabled $breakGlass.enabled $providerSecretAliases }}
             - name: management-secrets
               mountPath: /var/run/secrets/kubeloop/management
               readOnly: true
@@ -192,9 +200,9 @@ spec:
                   items:
                     - key: {{ required "controlPlane.relay.signingKeyKey is required" .Values.controlPlane.relay.signingKeyKey }}
                       path: relay/signing-key.pem
-              {{- if or .Values.controlPlane.auth.providers $providerSecretAliases }}
+              {{- if or .Values.controlPlane.auth.providers $providerSecretAliases $initialAdmin.enabled }}
               - secret:
-                  name: {{ required "controlPlane.auth.token.existingSecret is required" .Values.controlPlane.auth.token.existingSecret }}
+                  name: {{ required "controlPlane.auth.token.existingSecret is required when the initial administrator uses an existing Secret" $tokenSecretName }}
                   items:
                     - key: {{ required "controlPlane.auth.token.signingKeyKey is required" .Values.controlPlane.auth.token.signingKeyKey }}
                       path: token/signing-key.pem
@@ -220,11 +228,22 @@ spec:
               {{- end }}
               {{- end }}
               {{- end }}
-        {{- if or $breakGlass.enabled $providerSecretAliases }}
+        {{- if or $initialAdmin.enabled $breakGlass.enabled $providerSecretAliases }}
         - name: management-secrets
           projected:
             defaultMode: 0400
             sources:
+              {{- if $initialAdmin.enabled }}
+              - secret:
+                  name: {{ include "kubeloop.initialAdminSecretName" . }}
+                  items:
+                    - key: {{ required "controlPlane.management.initialAdmin.usernameKey is required" $initialAdmin.usernameKey }}
+                      path: initial-admin/username
+                    - key: {{ required "controlPlane.management.initialAdmin.passwordKey is required" $initialAdmin.passwordKey }}
+                      path: initial-admin/password
+                    - key: {{ required "controlPlane.management.initialAdmin.mfaEncryptionKeyKey is required" $initialAdmin.mfaEncryptionKeyKey }}
+                      path: initial-admin/mfa-encryption-key
+              {{- end }}
               {{- if $breakGlass.enabled }}
               - secret:
                   name: {{ required (printf "controlPlane.management.breakGlass.secretAliases.%s.existingSecret is required" $breakGlassAlias) $breakGlassSecret.existingSecret }}

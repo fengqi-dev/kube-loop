@@ -37,11 +37,11 @@ type Store interface {
 }
 
 type Config struct {
-	AttemptTTL       time.Duration
-	ExchangeTTL      time.Duration
-	AllowedCallbacks []string
-	Now              func() time.Time
-	Random           func([]byte) error
+	AttemptTTL  time.Duration
+	ExchangeTTL time.Duration
+	Clients     []Client
+	Now         func() time.Time
+	Random      func([]byte) error
 }
 
 type Service struct {
@@ -49,22 +49,29 @@ type Service struct {
 	store       Store
 	attemptTTL  time.Duration
 	exchangeTTL time.Duration
-	callbacks   map[string]struct{}
+	clients     map[string]Client
 	now         func() time.Time
 	random      func([]byte) error
 }
 
 type BeginRequest struct {
 	ProviderID     string
+	ClientID       string
 	ClientCallback string
 	ClientState    string
 	Nonce          string
 	PKCEChallenge  string
+	Scope          string
 }
 
 type BeginResult struct {
 	AuthorizationURL string
 	ExpiresAt        time.Time
+}
+
+type LocalBeginResult struct {
+	Transaction string
+	ExpiresAt   time.Time
 }
 
 type CallbackRequest struct {
@@ -79,6 +86,18 @@ type CallbackResult struct {
 
 type ExchangeResult struct {
 	Principal storage.Principal
+	ClientID  string
+	Scope     string
+	Nonce     string
+}
+
+const DefaultDesktopClientID = "kubeloop-desktop"
+
+type Client struct {
+	ID            string
+	RedirectURIs  []string
+	AllowLoopback bool
+	Scopes        []string
 }
 
 func (service *Service) AuthenticateAnonymous(ctx context.Context, providerID string) (ExchangeResult, error) {
@@ -141,34 +160,45 @@ func New(providers *authn.Registry, store Store, config Config) (*Service, error
 			return err
 		}
 	}
-	callbacks := make(map[string]struct{}, len(config.AllowedCallbacks))
-	for _, value := range config.AllowedCallbacks {
-		callback, err := validateConfiguredCallback(value)
+	clients := make(map[string]Client, len(config.Clients))
+	for _, client := range config.Clients {
+		client.ID = strings.TrimSpace(client.ID)
+		if client.ID == "" || len(client.ID) > 128 || len(client.Scopes) == 0 {
+			return nil, errors.New("OAuth client ID and scopes are required")
+		}
+		if _, exists := clients[client.ID]; exists {
+			return nil, errors.New("OAuth client ID is duplicated")
+		}
+		scopes, err := normalizeScopes(strings.Join(client.Scopes, " "), nil)
 		if err != nil {
 			return nil, err
 		}
-		if _, exists := callbacks[callback]; exists {
-			return nil, errors.New("login callback allowlist contains a duplicate")
+		client.Scopes = strings.Fields(scopes)
+		for index, value := range client.RedirectURIs {
+			callback, callbackErr := validateConfiguredCallback(value)
+			if callbackErr != nil {
+				return nil, callbackErr
+			}
+			client.RedirectURIs[index] = callback
 		}
-		callbacks[callback] = struct{}{}
+		if len(client.RedirectURIs) == 0 && !client.AllowLoopback {
+			return nil, errors.New("OAuth client redirect URI is required")
+		}
+		clients[client.ID] = client
 	}
 	return &Service{
 		providers: providers, store: store,
 		attemptTTL: config.AttemptTTL, exchangeTTL: config.ExchangeTTL,
-		callbacks: callbacks, now: config.Now, random: config.Random,
+		clients: clients, now: config.Now, random: config.Random,
 	}, nil
 }
 
 func (service *Service) Begin(ctx context.Context, request BeginRequest) (BeginResult, error) {
-	request.ProviderID = strings.TrimSpace(request.ProviderID)
-	request.ClientState = strings.TrimSpace(request.ClientState)
-	request.Nonce = strings.TrimSpace(request.Nonce)
-	request.PKCEChallenge = strings.TrimSpace(request.PKCEChallenge)
-	callback, err := service.validateClientCallback(request.ClientCallback)
-	if err != nil || !boundedOpaqueValue(request.ClientState) || !boundedOpaqueValue(request.Nonce) ||
-		!validPKCEValue(request.PKCEChallenge) {
-		return BeginResult{}, ErrInvalidRequest
+	client, callback, scope, err := service.validateAuthorizationRequest(&request)
+	if err != nil {
+		return BeginResult{}, err
 	}
+	_ = client
 	provider, ok := service.providers.Provider(request.ProviderID)
 	if !ok {
 		return BeginResult{}, ErrUnknownProvider
@@ -193,19 +223,64 @@ func (service *Service) Begin(ctx context.Context, request BeginRequest) (BeginR
 	if err != nil {
 		return BeginResult{}, fmt.Errorf("create upstream authorization request: %w", err)
 	}
-	now := service.now().UTC()
-	hash := sha256.Sum256([]byte(upstreamState))
-	attempt := storage.AuthAttempt{
-		ID: uuid.NewString(), ProviderID: request.ProviderID, StateHash: hash[:],
-		ClientState: request.ClientState, ClientCallback: callback.String(),
-		Nonce: request.Nonce, PKCEChallenge: request.PKCEChallenge,
-		UpstreamPKCEVerifier: upstreamVerifier,
-		CreatedAt:            now, ExpiresAt: now.Add(service.attemptTTL),
-	}
+	attempt := service.newAttempt(request, callback, scope, upstreamState, upstreamVerifier)
 	if err := service.store.AuthTransactions().CreateAttempt(ctx, attempt); err != nil {
 		return BeginResult{}, errors.New("persist login transaction")
 	}
 	return BeginResult{AuthorizationURL: authorizationURL, ExpiresAt: attempt.ExpiresAt}, nil
+}
+
+func (service *Service) BeginLocal(ctx context.Context, request BeginRequest) (LocalBeginResult, error) {
+	request.ProviderID = "local"
+	_, callback, scope, err := service.validateAuthorizationRequest(&request)
+	if err != nil {
+		return LocalBeginResult{}, err
+	}
+	transaction, err := service.randomValue()
+	if err != nil {
+		return LocalBeginResult{}, errors.New("generate local login transaction")
+	}
+	attempt := service.newAttempt(request, callback, scope, transaction, "local")
+	if err := service.store.AuthTransactions().CreateAttempt(ctx, attempt); err != nil {
+		return LocalBeginResult{}, errors.New("persist local login transaction")
+	}
+	return LocalBeginResult{Transaction: transaction, ExpiresAt: attempt.ExpiresAt}, nil
+}
+
+func (service *Service) validateAuthorizationRequest(request *BeginRequest) (Client, *url.URL, string, error) {
+	request.ProviderID = strings.TrimSpace(request.ProviderID)
+	request.ClientID = strings.TrimSpace(request.ClientID)
+	request.ClientState = strings.TrimSpace(request.ClientState)
+	request.Nonce = strings.TrimSpace(request.Nonce)
+	request.PKCEChallenge = strings.TrimSpace(request.PKCEChallenge)
+	client, ok := service.clients[request.ClientID]
+	if !ok {
+		return Client{}, nil, "", ErrInvalidRequest
+	}
+	callback, err := validateClientCallback(client, request.ClientCallback)
+	scope, scopeErr := normalizeScopes(request.Scope, client.Scopes)
+	if err != nil || !boundedOpaqueValue(request.ClientState) || !boundedOpaqueValue(request.Nonce) ||
+		!validPKCEValue(request.PKCEChallenge) || scopeErr != nil {
+		return Client{}, nil, "", ErrInvalidRequest
+	}
+	return client, callback, scope, nil
+}
+
+func (service *Service) newAttempt(
+	request BeginRequest,
+	callback *url.URL,
+	scope, state, upstreamVerifier string,
+) storage.AuthAttempt {
+	now := service.now().UTC()
+	hash := sha256.Sum256([]byte(state))
+	return storage.AuthAttempt{
+		ID: uuid.NewString(), ProviderID: request.ProviderID, StateHash: hash[:],
+		ClientState: request.ClientState, ClientCallback: callback.String(),
+		ClientID: request.ClientID, Scope: scope,
+		Nonce: request.Nonce, PKCEChallenge: request.PKCEChallenge,
+		UpstreamPKCEVerifier: upstreamVerifier,
+		CreatedAt:            now, ExpiresAt: now.Add(service.attemptTTL),
+	}
 }
 
 func (service *Service) CompleteCallback(ctx context.Context, request CallbackRequest) (CallbackResult, error) {
@@ -244,25 +319,50 @@ func (service *Service) CompleteCallback(ctx context.Context, request CallbackRe
 	if err != nil || identity.ProviderID != attempt.ProviderID {
 		return CallbackResult{}, errors.New("upstream returned an invalid identity")
 	}
+	now := service.now().UTC()
+	principal, err := service.store.Principals().Upsert(ctx, storage.Principal{
+		ID: uuid.NewString(), Provider: identity.ProviderID, ExternalID: externalID,
+		DisplayName: identity.DisplayName, Email: identity.Email, Groups: identity.Groups,
+		CreatedAt: now, UpdatedAt: now,
+	})
+	if err != nil {
+		return CallbackResult{}, errors.New("persist authenticated identity")
+	}
+	return service.completeAttempt(ctx, attempt, principal)
+}
+
+func (service *Service) CompleteLocal(ctx context.Context, transaction, principalID string) (CallbackResult, error) {
+	hash := sha256.Sum256([]byte(strings.TrimSpace(transaction)))
+	attempt, err := service.store.AuthTransactions().ConsumeAttempt(ctx, hash[:], service.now().UTC())
+	if errors.Is(err, storage.ErrNotFound) {
+		return CallbackResult{}, ErrExpiredOrReplayed
+	}
+	if err != nil || attempt.ProviderID != "local" {
+		return CallbackResult{}, ErrInvalidRequest
+	}
+	principal, err := service.store.Principals().GetByID(ctx, strings.TrimSpace(principalID))
+	if err != nil || principal.Provider != "local" {
+		return CallbackResult{}, ErrInvalidRequest
+	}
+	return service.completeAttempt(ctx, attempt, principal)
+}
+
+func (service *Service) completeAttempt(
+	ctx context.Context,
+	attempt storage.AuthAttempt,
+	principal storage.Principal,
+) (CallbackResult, error) {
 	exchangeCode, err := service.randomValue()
 	if err != nil {
 		return CallbackResult{}, errors.New("generate exchange code")
 	}
 	exchangeHash := sha256.Sum256([]byte(exchangeCode))
 	now := service.now().UTC()
-	var principal storage.Principal
 	err = service.store.WithinTransaction(ctx, func(repositories storage.Repositories) error {
-		var err error
-		principal, err = repositories.Principals().Upsert(ctx, storage.Principal{
-			ID: uuid.NewString(), Provider: identity.ProviderID, ExternalID: externalID,
-			DisplayName: identity.DisplayName, Email: identity.Email, Groups: identity.Groups,
-			CreatedAt: now, UpdatedAt: now,
-		})
-		if err != nil {
-			return err
-		}
 		return repositories.AuthTransactions().CreateExchange(ctx, storage.AuthExchange{
-			CodeHash: exchangeHash[:], PrincipalID: principal.ID, ProviderID: identity.ProviderID,
+			CodeHash: exchangeHash[:], PrincipalID: principal.ID, ProviderID: principal.Provider,
+			ClientID: attempt.ClientID, RedirectURI: attempt.ClientCallback,
+			Scope: attempt.Scope, Nonce: attempt.Nonce,
 			PKCEChallenge: attempt.PKCEChallenge, CreatedAt: now, ExpiresAt: now.Add(service.exchangeTTL),
 		})
 	})
@@ -280,10 +380,15 @@ func (service *Service) CompleteCallback(ctx context.Context, request CallbackRe
 	return CallbackResult{RedirectURL: redirect.String()}, nil
 }
 
-func (service *Service) Exchange(ctx context.Context, code, pkceVerifier string) (ExchangeResult, error) {
+func (service *Service) Exchange(
+	ctx context.Context,
+	code, pkceVerifier, clientID, redirectURI string,
+) (ExchangeResult, error) {
 	code = strings.TrimSpace(code)
 	pkceVerifier = strings.TrimSpace(pkceVerifier)
-	if !boundedOpaqueValue(code) || !validPKCEValue(pkceVerifier) {
+	clientID = strings.TrimSpace(clientID)
+	redirectURI = strings.TrimSpace(redirectURI)
+	if !boundedOpaqueValue(code) || !validPKCEValue(pkceVerifier) || clientID == "" || redirectURI == "" {
 		return ExchangeResult{}, ErrInvalidRequest
 	}
 	hash := sha256.Sum256([]byte(code))
@@ -299,11 +404,15 @@ func (service *Service) Exchange(ctx context.Context, code, pkceVerifier string)
 	if subtle.ConstantTimeCompare([]byte(challenge), []byte(exchange.PKCEChallenge)) != 1 {
 		return ExchangeResult{}, ErrPKCEVerification
 	}
+	if subtle.ConstantTimeCompare([]byte(clientID), []byte(exchange.ClientID)) != 1 ||
+		subtle.ConstantTimeCompare([]byte(redirectURI), []byte(exchange.RedirectURI)) != 1 {
+		return ExchangeResult{}, ErrInvalidRequest
+	}
 	principal, err := service.store.Principals().GetByID(ctx, exchange.PrincipalID)
 	if err != nil {
 		return ExchangeResult{}, errors.New("load authenticated principal")
 	}
-	return ExchangeResult{Principal: principal}, nil
+	return ExchangeResult{Principal: principal, ClientID: exchange.ClientID, Scope: exchange.Scope, Nonce: exchange.Nonce}, nil
 }
 
 func (service *Service) randomValue() (string, error) {
@@ -347,18 +456,52 @@ func validateConfiguredCallback(value string) (string, error) {
 	return parsed.String(), nil
 }
 
-func (service *Service) validateClientCallback(value string) (*url.URL, error) {
-	if callback, err := validateLoopbackCallback(value); err == nil {
-		return callback, nil
+func validateClientCallback(client Client, value string) (*url.URL, error) {
+	if client.AllowLoopback {
+		if callback, err := validateLoopbackCallback(value); err == nil {
+			return callback, nil
+		}
 	}
 	parsed, err := url.Parse(strings.TrimSpace(value))
-	if err != nil || service == nil {
+	if err != nil {
 		return nil, ErrInvalidRequest
 	}
-	if _, allowed := service.callbacks[parsed.String()]; !allowed {
-		return nil, ErrInvalidRequest
+	for _, allowed := range client.RedirectURIs {
+		if subtle.ConstantTimeCompare([]byte(parsed.String()), []byte(allowed)) == 1 {
+			return parsed, nil
+		}
 	}
-	return parsed, nil
+	return nil, ErrInvalidRequest
+}
+
+func normalizeScopes(value string, allowed []string) (string, error) {
+	fields := strings.Fields(value)
+	if len(fields) == 0 {
+		return "", errors.New("OAuth scopes are required")
+	}
+	allowedSet := make(map[string]struct{}, len(allowed))
+	for _, scope := range allowed {
+		allowedSet[strings.TrimSpace(scope)] = struct{}{}
+	}
+	seen := make(map[string]struct{}, len(fields))
+	for _, scope := range fields {
+		if scope == "" || strings.ContainsAny(scope, "\"\\") {
+			return "", errors.New("OAuth scope is invalid")
+		}
+		if len(allowedSet) > 0 {
+			if _, ok := allowedSet[scope]; !ok {
+				return "", errors.New("OAuth scope is not allowed")
+			}
+		}
+		if _, duplicate := seen[scope]; duplicate {
+			return "", errors.New("OAuth scope is duplicated")
+		}
+		seen[scope] = struct{}{}
+	}
+	if _, ok := seen["openid"]; !ok {
+		return "", errors.New("openid scope is required")
+	}
+	return strings.Join(fields, " "), nil
 }
 
 func boundedOpaqueValue(value string) bool {

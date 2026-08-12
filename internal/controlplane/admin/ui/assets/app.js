@@ -1,7 +1,7 @@
 "use strict";
 
-const managementBase = "/kubeloop/api/admin";
-const authBase = "/auth";
+const managementBase = document.querySelector('meta[name="kubeloop-management-path"]').content;
+const authBase = "/oauth2";
 const csrfStorageKey = "kubeloop.admin.csrf";
 const oidcStorageKey = "kubeloop.admin.oidc";
 const deviceStorageKey = "kubeloop.admin.device";
@@ -24,6 +24,8 @@ const views = {
   overview: { title: "运行概览", description: "Control Plane、存储与管理策略状态。" },
   policy: { title: "管理策略", description: "以 revision、dry-run 和乐观并发安全管理后台角色。", capability: "admin.policy/read" },
   providers: { title: "身份 Provider", description: "验证并版本化发布 OIDC；Secret 只使用部署 allowlist 中的 alias。", capability: "admin.provider/read" },
+  users: { title: "用户管理", description: "创建、停用本地管理用户并重置密码。", capability: "admin.user/list" },
+  security: { title: "账户安全", description: "为当前本地账户启用 TOTP、保存恢复码或更新 MFA。" },
   principals: { title: "身份", description: "已通过 OIDC 解析的 Principal。", capability: "admin.principal/list", path: "/principals" },
   sessions: { title: "会话", description: "Cluster Session 生命周期与网络摘要。", capability: "admin.session/list", path: "/sessions", scoped: true },
   tasks: { title: "任务", description: "Preview、Exchange、Mirror、Port Forward 等远程任务。", capability: "admin.task/list", path: "/tasks", scoped: true },
@@ -98,13 +100,13 @@ async function exchangeManagement(tokens) {
   try {
     const issued = await requestJSON(`${managementBase}/sessions/token`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${tokens.accessToken}` },
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${tokens.access_token}` },
       body: "{}",
     });
     sessionStorage.setItem(csrfStorageKey, issued.csrfToken);
   } finally {
-    tokens.accessToken = "";
-    tokens.refreshToken = "";
+    tokens.access_token = "";
+    tokens.refresh_token = "";
   }
 }
 
@@ -121,10 +123,18 @@ async function finishOIDCCallback() {
   if (!returnedState || returnedState !== stored.state || !stored.verifier || !stored.deviceId) {
     throw new Error("OIDC 登录状态校验失败。");
   }
-  const tokens = await requestJSON(`${authBase}/token/exchange`, {
+  const form = new URLSearchParams({
+    grant_type: "authorization_code",
+    code,
+    code_verifier: stored.verifier,
+    client_id: "kubeloop-management",
+    redirect_uri: `${location.origin}${managementBase}/ui/callback`,
+    device_id: stored.deviceId,
+  });
+  const tokens = await requestJSON(`${authBase}/token`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ code, pkceVerifier: stored.verifier, deviceId: stored.deviceId }),
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: form.toString(),
   });
   await exchangeManagement(tokens);
   return true;
@@ -141,17 +151,19 @@ async function startOIDC(providerID) {
       deviceId: deviceID(),
     };
     sessionStorage.setItem(oidcStorageKey, JSON.stringify(transaction));
-    const result = await requestJSON(`${authBase}/oidc/${encodeURIComponent(providerID)}/start`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        clientCallback: `${location.origin}${managementBase}/ui/callback`,
-        state: transaction.state,
-        nonce: transaction.nonce,
-        pkceChallenge: await pkceChallenge(verifier),
-      }),
-    });
-    location.assign(result.authorizationUrl);
+    const authorize = new URL(`${authBase}/authorize`, location.origin);
+    authorize.search = new URLSearchParams({
+      response_type: "code",
+      client_id: "kubeloop-management",
+      redirect_uri: `${location.origin}${managementBase}/ui/callback`,
+      scope: "openid profile email offline_access kubeloop.api",
+      state: transaction.state,
+      nonce: transaction.nonce,
+      code_challenge: await pkceChallenge(verifier),
+      code_challenge_method: "S256",
+      provider: providerID,
+    }).toString();
+    location.assign(authorize.toString());
   } catch (error) {
     sessionStorage.removeItem(oidcStorageKey);
     showLoginMessage(error.message);
@@ -191,7 +203,7 @@ async function renderLogin(errorMessage = "") {
       <section class="login-pane">
         <div class="login-card">
           <p class="eyebrow">安全登录</p><h2>进入管理后台</h2>
-          <p class="subtle">使用 Gateway 已配置的 OIDC，或在紧急情况下使用 break-glass。</p>
+          <p class="subtle">使用本地管理员、企业 OIDC，或在紧急情况下使用 break-glass。</p>
           <div id="auth-options" class="auth-options"></div>
           <form id="breakglass-form" class="auth-form">
             <label>Break-glass 凭据 <input id="breakglass-credential" type="password" autocomplete="off" required></label>
@@ -207,8 +219,9 @@ async function renderLogin(errorMessage = "") {
   try { discovery = await requestJSON("/.well-known/kubeloop"); } catch { discovery = { authMethods: [] }; }
   const methods = Array.isArray(discovery.authMethods) ? discovery.authMethods : [];
   const options = document.getElementById("auth-options");
-  const oidc = methods.filter((method) => method.type === "oidc" && method.interaction === "browser");
-  oidc.forEach((method) => {
+  const browserMethods = methods.filter((method) =>
+    (method.type === "oidc" || method.type === "local") && method.interaction === "browser");
+  browserMethods.forEach((method) => {
     const button = text("button", `使用 ${method.displayName || method.id} 登录`, "auth-button");
     button.type = "button";
     button.addEventListener("click", () => startOIDC(method.id));
@@ -287,6 +300,8 @@ function openView(key) {
   if (key === "overview") loadOverview();
   else if (key === "policy") loadPolicy();
   else if (key === "providers") loadProviders();
+  else if (key === "users") loadUsers();
+  else if (key === "security") loadSecurity();
   else loadList();
 }
 
@@ -753,6 +768,159 @@ function displayValue(key, value) {
   }
   if (typeof value === "boolean") return value ? "是" : "否";
   return String(value);
+}
+
+function csrfJSON(method, body) {
+  return {
+    method,
+    headers: { "Content-Type": "application/json", "X-KubeLoop-CSRF": sessionStorage.getItem(csrfStorageKey) || "" },
+    body: JSON.stringify(body),
+  };
+}
+
+async function loadUsers() {
+  const content = document.getElementById("content");
+  content.replaceChildren(text("div", "正在加载用户…", "empty"));
+  try {
+    const result = await requestJSON(`${managementBase}/users`);
+    const roles = new Map();
+    if (capabilityAllowed("admin.policy/read")) {
+      try {
+        const policy = await requestJSON(`${managementBase}/policy`);
+        (policy.spec?.assignments || []).forEach((assignment) => {
+          (assignment.subjects || []).forEach((principalID) => {
+            const values = roles.get(principalID) || [];
+            values.push(assignment.role); roles.set(principalID, values);
+          });
+        });
+      } catch { /* User management remains available if policy detail is unavailable. */ }
+    }
+    const panel = document.createElement("section"); panel.className = "policy-panel compact";
+    panel.append(text("h2", "创建本地用户"));
+    panel.append(text("p", "新用户默认没有管理权限。创建后请在“管理策略”中按 Principal ID 分配角色。", "subtle"));
+    const form = document.createElement("form"); form.className = "user-form";
+    form.innerHTML = `<label>用户名<input name="username" required autocomplete="off"></label>
+      <label>显示名称<input name="displayName" autocomplete="off"></label>
+      <label>邮箱<input name="email" type="email" autocomplete="off"></label>
+      <label>初始密码<input name="password" type="password" minlength="12" autocomplete="new-password" required></label>
+      <button class="primary" type="submit">创建用户</button>`;
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const data = new FormData(form);
+      try {
+        await requestJSON(`${managementBase}/users`, csrfJSON("POST", Object.fromEntries(data.entries())));
+        form.reset(); await loadUsers();
+      } catch (error) { renderError(error.message); }
+    });
+    panel.append(form);
+
+    const wrap = document.createElement("div"); wrap.className = "table-wrap";
+    const users = Array.isArray(result.items) ? result.items : [];
+    if (!users.length) wrap.append(text("div", "尚无本地用户。", "empty"));
+    else {
+      const table = document.createElement("table");
+      table.innerHTML = "<thead><tr><th>用户名</th><th>名称</th><th>邮箱</th><th>角色</th><th>状态</th><th>MFA</th><th>操作</th></tr></thead>";
+      const body = document.createElement("tbody");
+      users.forEach((user) => {
+        const row = document.createElement("tr");
+        [user.username, user.displayName, user.email || "—"].forEach((value) => row.append(text("td", value)));
+        row.append(text("td", (roles.get(user.principalId) || []).join(", ") || "无权限"));
+        const status = document.createElement("td"); status.append(text("span", user.enabled ? "启用" : "停用", `pill ${user.enabled ? "active" : "failed"}`)); row.append(status);
+        row.append(text("td", user.mfaEnabled ? "TOTP + 恢复码" : "未启用"));
+        const actions = document.createElement("td"); actions.className = "inline-actions";
+        const toggle = text("button", user.enabled ? "停用" : "启用", "secondary"); toggle.type = "button";
+        toggle.addEventListener("click", async () => {
+          try { await requestJSON(`${managementBase}/users/${encodeURIComponent(user.principalId)}/status`, csrfJSON("PATCH", { enabled: !user.enabled })); await loadUsers(); }
+          catch (error) { renderError(error.message); }
+        });
+        const reset = text("button", "重置密码", "secondary"); reset.type = "button";
+        reset.addEventListener("click", async () => {
+          const password = window.prompt("输入不少于 12 个字符的新密码") || "";
+          if (!password) return;
+          try { await requestJSON(`${managementBase}/users/${encodeURIComponent(user.principalId)}/password`, csrfJSON("PUT", { password })); }
+          catch (error) { renderError(error.message); }
+        });
+        actions.append(toggle, reset); row.append(actions); body.append(row);
+      });
+      table.append(body); wrap.append(table);
+    }
+    content.replaceChildren(panel, wrap);
+  } catch (error) {
+    if (error.status === 401) { await renderLogin("管理会话已过期，请重新登录。"); return; }
+    renderError(error.message);
+  }
+}
+
+async function loadSecurity() {
+  const content = document.getElementById("content");
+  content.replaceChildren(text("div", "正在加载账户安全设置…", "empty"));
+  try {
+    const user = await requestJSON(`${managementBase}/users/me`);
+    const panel = document.createElement("section"); panel.className = "policy-panel";
+    panel.append(text("h2", `${user.displayName || user.username} 的 MFA`));
+    panel.append(text("p", user.mfaEnabled ? "TOTP 已启用。登录时可使用动态验证码或任一未使用的恢复码。" : "TOTP 尚未启用。启用后会生成 10 个一次性恢复码。", "subtle"));
+    if (!user.mfaEnabled) {
+      const start = text("button", "启用 TOTP", "primary"); start.type = "button";
+      start.addEventListener("click", async () => {
+        try {
+          const enrollment = await requestJSON(`${managementBase}/users/me/mfa/totp/start`, csrfJSON("POST", {}));
+          const setup = document.createElement("div"); setup.className = "mfa-setup";
+          setup.append(text("p", "在认证器中扫描/导入下面的 URI，或手工输入密钥。", "subtle"));
+          const qr = document.createElement("img"); qr.className = "totp-qr"; qr.src = enrollment.qrCodeDataUrl; qr.alt = "TOTP 注册二维码";
+          const secret = text("code", enrollment.secret, "secret-value");
+          const uri = text("code", enrollment.provisioningUri, "secret-value");
+          const code = document.createElement("input"); code.placeholder = "6 位动态验证码"; code.autocomplete = "one-time-code";
+          const confirm = text("button", "验证并启用", "primary"); confirm.type = "button";
+          confirm.addEventListener("click", async () => {
+            try {
+              const completed = await requestJSON(`${managementBase}/users/me/mfa/totp/confirm`, csrfJSON("POST", { enrollmentToken: enrollment.enrollmentToken, code: code.value }));
+              showRecoveryCodes(panel, completed.recoveryCodes || []);
+            } catch (error) { policyMessage(panel, error.message, "error"); }
+          });
+          setup.append(qr, policyField("手工密钥", secret), policyField("Provisioning URI", uri), policyField("动态验证码", code), confirm);
+          start.replaceWith(setup);
+        } catch (error) { policyMessage(panel, error.message, "error"); }
+      });
+      panel.append(start);
+    } else {
+      const regenerate = text("button", "重新生成恢复码", "secondary"); regenerate.type = "button";
+      regenerate.addEventListener("click", async () => {
+        const code = window.prompt("输入当前 TOTP 动态验证码") || "";
+        if (!code) return;
+        try {
+          const result = await requestJSON(`${managementBase}/users/me/mfa/recovery-codes`, csrfJSON("POST", { code }));
+          showRecoveryCodes(panel, result.recoveryCodes || []);
+        } catch (error) { policyMessage(panel, error.message, "error"); }
+      });
+      const disable = text("button", "关闭 TOTP", "secondary danger-action"); disable.type = "button";
+      disable.addEventListener("click", async () => {
+        const password = window.prompt("输入当前密码") || "";
+        if (!password) return;
+        const code = window.prompt("输入当前 TOTP 动态验证码") || "";
+        if (!code) return;
+        try {
+          await requestJSON(`${managementBase}/users/me/mfa/totp`, csrfJSON("DELETE", { password, code }));
+          await loadSecurity();
+        } catch (error) { policyMessage(panel, error.message, "error"); }
+      });
+      const actions = document.createElement("div"); actions.className = "policy-actions"; actions.append(regenerate, disable);
+      panel.append(actions);
+    }
+    content.replaceChildren(panel);
+  } catch (error) {
+    if (error.status === 404) {
+      content.replaceChildren(text("div", "当前会话来自企业 OIDC；TOTP 由上游身份提供方管理。", "empty")); return;
+    }
+    if (error.status === 401) { await renderLogin("管理会话已过期，请重新登录。"); return; }
+    renderError(error.message);
+  }
+}
+
+function showRecoveryCodes(panel, codes) {
+  const box = document.createElement("section"); box.className = "recovery-codes";
+  box.append(text("h2", "立即保存恢复码"), text("p", "每个恢复码只能使用一次，离开此页面后不会再次显示。", "subtle"));
+  const list = document.createElement("pre"); list.textContent = codes.join("\n"); box.append(list);
+  panel.replaceChildren(box);
 }
 
 async function loadList() {

@@ -62,10 +62,12 @@ if [[ "${CONTROL_PLANE_READY}" != "1" ]]; then
 fi
 
 LOGIN_RESPONSE="$(curl --silent --show-error --fail \
-  --header 'Content-Type: application/json' \
-  --data '{"deviceId":"impersonation-audit-device"}' \
-  "http://127.0.0.1:${LOCAL_PORT}/auth/anonymous/audit/login")"
-ACCESS_TOKEN="$(jq -er '.accessToken' <<<"${LOGIN_RESPONSE}")"
+  --header 'Content-Type: application/x-www-form-urlencoded' \
+  --data-urlencode 'grant_type=urn:kubeloop:params:oauth:grant-type:anonymous' \
+  --data-urlencode 'provider=audit' --data-urlencode 'client_id=kubeloop-desktop' \
+  --data-urlencode 'device_id=impersonation-audit-device' --data-urlencode 'scope=kubeloop.api' \
+  "http://127.0.0.1:${LOCAL_PORT}/oauth2/token")"
+ACCESS_TOKEN="$(jq -er '.access_token' <<<"${LOGIN_RESPONSE}")"
 PAYLOAD="$(cut -d. -f2 <<<"${ACCESS_TOKEN}" | tr '_-' '/+')"
 case $((${#PAYLOAD} % 4)) in
   2) PAYLOAD="${PAYLOAD}==" ;;

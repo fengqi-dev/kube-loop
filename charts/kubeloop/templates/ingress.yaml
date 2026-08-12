@@ -40,7 +40,7 @@ spec:
                 name: {{ include "kubeloop.controlPlaneName" . }}
                 port:
                   name: http
-          - path: /auth
+          - path: /oauth2
             pathType: Prefix
             backend:
               service:

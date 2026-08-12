@@ -73,7 +73,7 @@ func TestFullStackOIDCLoginRefreshAndRevoke(t *testing.T) {
 		case "/authorize":
 			query := request.URL.Query()
 			if query.Get("client_id") != "desktop-client" || query.Get("response_type") != "code" ||
-				query.Get("redirect_uri") != controllerURL+"/auth/callback/corporate" ||
+				query.Get("redirect_uri") != controllerURL+"/oauth2/callback/corporate" ||
 				query.Get("code_challenge_method") != "S256" || len(query.Get("nonce")) < 32 ||
 				len(query.Get("state")) < 32 || len(query.Get("code_challenge")) < 43 {
 				http.Error(writer, "invalid authorization request", http.StatusBadRequest)
@@ -129,7 +129,7 @@ func TestFullStackOIDCLoginRefreshAndRevoke(t *testing.T) {
 	provider, err := oidc.New(context.Background(), oidc.Config{
 		ID: "corporate", DisplayName: "Corporate OIDC", Issuer: providerURL,
 		ClientID: "desktop-client", ClientSecret: "client-secret",
-		RedirectURL: controllerURL + "/auth/callback/corporate", HTTPClient: providerServer.Client(),
+		RedirectURL: controllerURL + "/oauth2/callback/corporate", HTTPClient: providerServer.Client(),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -145,7 +145,10 @@ func TestFullStackOIDCLoginRefreshAndRevoke(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	loginService, err := login.New(registry, store, login.Config{})
+	loginService, err := login.New(registry, store, login.Config{Clients: []login.Client{{
+		ID: login.DefaultDesktopClientID, AllowLoopback: true,
+		Scopes: []string{"openid", "profile", "email", "offline_access", "kubeloop.api"},
+	}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +167,7 @@ func TestFullStackOIDCLoginRefreshAndRevoke(t *testing.T) {
 		t.Fatal(err)
 	}
 	authRouter := echo.New()
-	httpauth.NewRoutes(authService).RegisterRoutes(authRouter.Group("/auth"))
+	httpauth.NewRoutes(authService).RegisterRoutes(authRouter.Group(""))
 	controllerServer.Config.Handler = authRouter
 	controllerServer.StartTLS()
 	defer controllerServer.Close()

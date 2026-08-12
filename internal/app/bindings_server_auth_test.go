@@ -59,7 +59,11 @@ func TestAppAnonymousLoginUsesAdvertisedMethodAndSecureCredentialStore(t *testin
 				},
 				ProtocolMin: "2.0", ProtocolMax: "2.0",
 			})
-		case "/auth/anonymous/guest/login":
+		case "/.well-known/openid-configuration":
+			_ = json.NewEncoder(writer).Encode(map[string]any{"issuer": server.URL,
+				"authorization_endpoint": server.URL + "/oauth2/authorize", "token_endpoint": server.URL + "/oauth2/token",
+				"revocation_endpoint": server.URL + "/oauth2/revoke"})
+		case "/oauth2/token":
 			writeAppTokenResponse(writer, "anonymous-access", "anonymous-refresh")
 		default:
 			http.NotFound(writer, request)
@@ -134,7 +138,7 @@ func TestDeleteServerProfileClearsLocalStateWhenRemoteRevokeFails(t *testing.T) 
 
 func writeAppTokenResponse(writer http.ResponseWriter, access, refresh string) {
 	_ = json.NewEncoder(writer).Encode(map[string]any{
-		"tokenType": "Bearer", "accessToken": access, "refreshToken": refresh,
-		"accessExpiresAt": time.Now().Add(time.Minute), "refreshExpiresAt": time.Now().Add(time.Hour),
+		"token_type": "Bearer", "access_token": access, "refresh_token": refresh,
+		"expires_in": 60, "refresh_expires_in": 3600,
 	})
 }

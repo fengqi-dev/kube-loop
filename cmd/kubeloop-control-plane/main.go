@@ -1,10 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"errors"
 	"flag"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -20,6 +22,8 @@ import (
 	adminbreakglass "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/breakglass"
 	managementconfig "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/config"
 	adminhttpapi "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/httpapi"
+	adminhttpserver "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/httpserver"
+	adminlocaluser "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/localuser"
 	adminoperations "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/operations"
 	adminprovider "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/provider"
 	adminrevision "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/revision"
@@ -54,6 +58,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/logging"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/relaycontrol"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/relayticket"
+	"github.com/google/uuid"
 )
 
 var (
@@ -89,6 +94,11 @@ func main() {
 	authConfigFile := flag.String("auth-config", os.Getenv("KUBELOOP_AUTH_CONFIG_FILE"), "authentication provider JSON config file")
 	policyConfigFile := flag.String("policy-config", os.Getenv("KUBELOOP_POLICY_CONFIG_FILE"), "Gateway authorization policy JSON file")
 	managementConfigFile := flag.String("management-config", os.Getenv("KUBELOOP_MANAGEMENT_CONFIG_FILE"), "Control Plane Management Plane JSON config file")
+	managementListenAddress := flag.String("management-listen", envOrDefault("KUBELOOP_MANAGEMENT_LISTEN", adminhttpserver.DefaultListenAddress), "Management Plane listen address")
+	managementPublicURL := flag.String("management-public-url", envOrDefault("KUBELOOP_MANAGEMENT_PUBLIC_URL", "http://127.0.0.1:8081"), "Management Plane browser origin")
+	initialAdminUsernameFile := flag.String("initial-admin-username-file", os.Getenv("KUBELOOP_INITIAL_ADMIN_USERNAME_FILE"), "initial Management Plane administrator username file")
+	initialAdminPasswordFile := flag.String("initial-admin-password-file", os.Getenv("KUBELOOP_INITIAL_ADMIN_PASSWORD_FILE"), "initial Management Plane administrator password file")
+	managementMFAKeyFile := flag.String("management-mfa-key-file", os.Getenv("KUBELOOP_MANAGEMENT_MFA_KEY_FILE"), "32-byte Management Plane MFA encryption key file")
 	kubernetesConfigFile := flag.String("kubernetes-config", os.Getenv("KUBELOOP_KUBERNETES_CONFIG_FILE"), "Gateway Kubernetes Provider JSON config file")
 	tokenSigningKeyFile := flag.String("token-signing-key-file", os.Getenv("KUBELOOP_TOKEN_SIGNING_KEY_FILE"), "Ed25519 PKCS#8 token signing key file")
 	tokenKeyID := flag.String("token-key-id", envOrDefault("KUBELOOP_TOKEN_KEY_ID", "primary"), "token signing key ID")
@@ -179,6 +189,39 @@ func main() {
 			os.Exit(2)
 		}
 	}
+	localUsers, initialAdmin, err := initializeLocalUsers(signalContext, stateStore, *managementPublicURL,
+		*initialAdminUsernameFile, *initialAdminPasswordFile, *managementMFAKeyFile)
+	if err != nil {
+		_ = stateStore.Close()
+		logger.Error("initialize Management Plane administrator failed", "error", err)
+		os.Exit(2)
+	}
+	managementRevisionService, err := adminrevision.New(stateStore)
+	if err != nil {
+		_ = stateStore.Close()
+		logger.Error("initialize Management Plane revision service failed", "error", err)
+		os.Exit(2)
+	}
+	if initialAdmin.PrincipalID != "" {
+		bootstrapComplete, err := localUsers.BootstrapComplete(signalContext, initialAdmin.PrincipalID)
+		if err != nil {
+			_ = stateStore.Close()
+			logger.Error("read Management Plane administrator bootstrap state failed", "error", err)
+			os.Exit(1)
+		}
+		if !bootstrapComplete {
+			if err := ensureInitialAdminPolicy(signalContext, managementRevisionService, initialAdmin.PrincipalID); err != nil {
+				_ = stateStore.Close()
+				logger.Error("initialize Management Plane administrator policy failed", "error", err)
+				os.Exit(1)
+			}
+			if err := localUsers.MarkBootstrapComplete(signalContext, initialAdmin.PrincipalID); err != nil {
+				_ = stateStore.Close()
+				logger.Error("record Management Plane administrator bootstrap failed", "error", err)
+				os.Exit(1)
+			}
+		}
+	}
 	managementPolicyEngine, err := adminauthorization.NewDenyAll(
 		adminauthorization.WithBootstrap(managementFile.Bootstrap.AuthorizationConfig(), stateStore.ManagementState()),
 		adminauthorization.WithBreakGlass(breakGlassStore),
@@ -198,12 +241,6 @@ func main() {
 		_ = stateStore.Close()
 		logger.Error("load active Management Plane policy failed", "error", err)
 		os.Exit(1)
-	}
-	managementRevisionService, err := adminrevision.New(stateStore)
-	if err != nil {
-		_ = stateStore.Close()
-		logger.Error("initialize Management Plane revision service failed", "error", err)
-		os.Exit(2)
 	}
 	authRegistry, err := authconfig.Build(signalContext, authFile)
 	if err != nil {
@@ -534,6 +571,9 @@ func main() {
 		os.Exit(2)
 	}
 	methods := discoveryAuthMethods(authRegistry)
+	if localUsers != nil {
+		methods = append(methods, controlplane.AuthMethod{ID: "local", Type: "local", DisplayName: "Local account", Interaction: "browser"})
+	}
 	warnDevelopmentAuthentication(logger, authRegistry.Descriptors())
 	readiness := health.CheckFunc(func(ctx context.Context) error {
 		if err := stateStore.Check(ctx); err != nil {
@@ -555,12 +595,17 @@ func main() {
 		}
 		return kubernetesProvider.Check(ctx)
 	})
+	authMethodSource := controlplane.AuthMethodSourceFunc(func() []controlplane.AuthMethod {
+		result := discoveryAuthMethods(authRegistry)
+		if localUsers != nil {
+			result = append(result, controlplane.AuthMethod{ID: "local", Type: "local", DisplayName: "Local account", Interaction: "browser"})
+		}
+		return result
+	})
 	serverOptions := []controlplane.ServerOption{
 		controlplane.WithReadinessChecker(readiness), controlplane.WithAuthorizer(policyEngine),
 		controlplane.WithAuditSink(auditSink), controlplane.WithAPIRoutes(apiRoutes),
-		controlplane.WithAuthMethodSource(controlplane.AuthMethodSourceFunc(func() []controlplane.AuthMethod {
-			return discoveryAuthMethods(authRegistry)
-		})),
+		controlplane.WithAuthMethodSource(authMethodSource),
 	}
 	managementSessions, err := adminsession.New(stateStore, breakGlassStore)
 	if err != nil {
@@ -597,7 +642,8 @@ func main() {
 		os.Exit(2)
 	}
 	var tokenService *token.Service
-	if len(authRegistry.Descriptors()) > 0 || len(managementFile.ProviderSecretAliases) > 0 {
+	var authRoutes controlplane.RouteRegistrar
+	if len(authRegistry.Descriptors()) > 0 || len(managementFile.ProviderSecretAliases) > 0 || localUsers != nil {
 		signingKey, err := token.LoadSigningKey(*tokenSigningKeyFile)
 		if err != nil {
 			_ = stateStore.Close()
@@ -614,21 +660,40 @@ func main() {
 			os.Exit(2)
 		}
 		loginService, err := login.New(authRegistry, stateStore, login.Config{
-			AllowedCallbacks: []string{strings.TrimRight(*publicURL, "/") + "/kubeloop/api/admin/ui/callback"},
+			Clients: []login.Client{
+				{ID: login.DefaultDesktopClientID, AllowLoopback: true,
+					Scopes: []string{"openid", "profile", "email", "offline_access", "kubeloop.api"}},
+				{ID: "kubeloop-management",
+					RedirectURIs: []string{strings.TrimRight(*managementPublicURL, "/") + controlplane.APIPathPrefix + "/admin/ui/callback"},
+					Scopes:       []string{"openid", "profile", "email", "offline_access", "kubeloop.api"}},
+			},
 		})
 		if err != nil {
 			_ = stateStore.Close()
 			logger.Error("initialize login service failed", "error", err)
 			os.Exit(2)
 		}
-		authService, err := httpauth.New(loginService, tokenService)
+		var authOptions []httpauth.Option
+		if localUsers != nil {
+			authOptions = append(authOptions, httpauth.WithLocalAuthenticator(func(
+				ctx context.Context, username string, password []byte, secondFactor, requestID string,
+			) (controlplanestorage.Principal, error) {
+				user, authErr := localUsers.Authenticate(ctx, username, password, secondFactor, requestID)
+				if authErr != nil {
+					return controlplanestorage.Principal{}, authErr
+				}
+				return stateStore.Principals().GetByID(ctx, user.PrincipalID)
+			}))
+		}
+		authService, err := httpauth.New(loginService, tokenService, authOptions...)
 		if err != nil {
 			_ = stateStore.Close()
 			logger.Error("initialize authentication HTTP handler failed", "error", err)
 			os.Exit(2)
 		}
+		authRoutes = httpauth.NewRoutes(authService)
 		serverOptions = append(serverOptions,
-			controlplane.WithAuthRoutes(httpauth.NewRoutes(authService)),
+			controlplane.WithAuthRoutes(authRoutes),
 			controlplane.WithAuthenticator(authenticateWithTokens(tokenService)),
 		)
 	}
@@ -639,6 +704,9 @@ func main() {
 	), adminhttpapi.WithPolicyAPI(managementRevisionService, managementPolicyLoader),
 		adminhttpapi.WithProviderAPI(managedProviderService),
 		adminhttpapi.WithOperationsAPI(managementOperations)}
+	if localUsers != nil {
+		managementOptions = append(managementOptions, adminhttpapi.WithLocalUsers(localUsers))
+	}
 	if relayRegistry != nil {
 		managementOptions = append(managementOptions, adminhttpapi.WithRelayStatusSource(relayRegistry.registry))
 	}
@@ -646,14 +714,22 @@ func main() {
 		managementOptions = append(managementOptions, adminhttpapi.WithTokenExchange(tokenService))
 	}
 	managementHandler, err := adminhttpapi.New(
-		adminhttpapi.Config{PublicURL: *publicURL}, managementSessions, managementOptions...,
+		adminhttpapi.Config{PublicURL: *managementPublicURL}, managementSessions, managementOptions...,
 	)
 	if err != nil {
 		_ = stateStore.Close()
 		logger.Error("initialize Management Plane HTTP API failed", "error", err)
 		os.Exit(2)
 	}
-	serverOptions = append(serverOptions, controlplane.WithManagementHandler(managementHandler))
+	managementServer, err := adminhttpserver.New(
+		adminhttpserver.Config{ListenAddress: *managementListenAddress}, managementHandler,
+		authRoutes, authMethodSource, logger,
+	)
+	if err != nil {
+		_ = stateStore.Close()
+		logger.Error("invalid Management Plane server configuration", "error", err)
+		os.Exit(2)
+	}
 	server, err := controlplane.NewServer(controlplane.Config{
 		ListenAddress:       *listenAddress,
 		PublicURL:           *publicURL,
@@ -678,12 +754,20 @@ func main() {
 		logger.Error("listen failed", "address", server.ListenAddress(), "error", err)
 		os.Exit(1)
 	}
+	managementListener, err := net.Listen("tcp", managementServer.ListenAddress())
+	if err != nil {
+		_ = listener.Close()
+		_ = stateStore.Close()
+		logger.Error("Management Plane listen failed", "address", managementServer.ListenAddress(), "error", err)
+		os.Exit(1)
+	}
 	var relayServer *http.Server
 	var relayListener net.Listener
 	if relayRegistry != nil {
 		rawRelayListener, listenErr := net.Listen("tcp", relayRegistry.listenAddress)
 		if listenErr != nil {
 			_ = listener.Close()
+			_ = managementListener.Close()
 			_ = stateStore.Close()
 			logger.Error("Relay Registry listen failed", "address", relayRegistry.listenAddress, "error", listenErr)
 			os.Exit(1)
@@ -701,11 +785,12 @@ func main() {
 		"listen_address", listener.Addr().String(), "public_url", *publicURL,
 		"kubernetes_impersonation", kubernetesConfig.Impersonation.Enabled,
 	)
+	logger.Info("Management Plane started", "listen_address", managementListener.Addr().String(), "public_url", *managementPublicURL)
 	if relayListener != nil {
 		logger.Info("Relay Registry started", "listen_address", relayListener.Addr().String(), "transport", "mTLS")
 	}
 	go managedProviderRuntime.Run(signalContext)
-	serveCount := 1
+	serveCount := 2
 	if relayServer != nil {
 		serveCount++
 	}
@@ -733,6 +818,7 @@ func main() {
 		bindingRecovery.Run(signalContext)
 	}()
 	go func() { errCh <- server.Serve(listener) }()
+	go func() { errCh <- managementServer.Serve(managementListener) }()
 	if relayServer != nil {
 		go func() {
 			err := relayServer.Serve(relayListener)
@@ -759,6 +845,7 @@ func main() {
 	shutdownContext, cancel := context.WithTimeout(context.Background(), *shutdownTimeout)
 	defer cancel()
 	shutdownError := server.Shutdown(shutdownContext)
+	shutdownError = errors.Join(shutdownError, managementServer.Shutdown(shutdownContext))
 	shutdownError = errors.Join(shutdownError, sessionRuntime.Shutdown(shutdownContext))
 	if relayServer != nil {
 		shutdownError = errors.Join(shutdownError, relayServer.Shutdown(shutdownContext))
@@ -781,6 +868,105 @@ func main() {
 		logger.Error("Control Plane stopped with an error", "error", finalError)
 		os.Exit(1)
 	}
+}
+
+func initializeLocalUsers(
+	ctx context.Context,
+	store *controlplanestorage.Store,
+	issuer, usernameFile, passwordFile, mfaKeyFile string,
+) (*adminlocaluser.Service, adminlocaluser.User, error) {
+	usernameFile, passwordFile, mfaKeyFile = strings.TrimSpace(usernameFile), strings.TrimSpace(passwordFile), strings.TrimSpace(mfaKeyFile)
+	if usernameFile == "" && passwordFile == "" && mfaKeyFile == "" {
+		return nil, adminlocaluser.User{}, nil
+	}
+	if usernameFile == "" || passwordFile == "" || mfaKeyFile == "" {
+		return nil, adminlocaluser.User{}, errors.New("all initial administrator Secret files are required")
+	}
+	username, err := readSecretFile(usernameFile, 256)
+	if err != nil {
+		return nil, adminlocaluser.User{}, err
+	}
+	defer clear(username)
+	password, err := readSecretFile(passwordFile, 1024)
+	if err != nil {
+		return nil, adminlocaluser.User{}, err
+	}
+	defer clear(password)
+	mfaKey, err := readSecretFile(mfaKeyFile, 64)
+	if err != nil {
+		return nil, adminlocaluser.User{}, err
+	}
+	defer clear(mfaKey)
+	if len(mfaKey) != 32 {
+		return nil, adminlocaluser.User{}, errors.New("Management Plane MFA key must contain exactly 32 bytes")
+	}
+	service, err := adminlocaluser.New(store, mfaKey, issuer)
+	if err != nil {
+		return nil, adminlocaluser.User{}, err
+	}
+	user, _, err := service.EnsureInitial(ctx, adminlocaluser.CreateRequest{
+		Username: string(username), Password: password, DisplayName: "KubeLoop Administrator",
+	})
+	if err != nil {
+		return nil, adminlocaluser.User{}, err
+	}
+	return service, user, nil
+}
+
+func readSecretFile(path string, maximum int) ([]byte, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, errors.New("read Management Plane administrator Secret")
+	}
+	value := bytes.Clone(bytes.TrimSpace(raw))
+	clear(raw)
+	if len(value) == 0 || len(value) > maximum {
+		clear(value)
+		return nil, errors.New("Management Plane administrator Secret value is invalid")
+	}
+	return value, nil
+}
+
+func ensureInitialAdminPolicy(ctx context.Context, service *adminrevision.Service, principalID string) error {
+	if _, err := uuid.Parse(principalID); err != nil {
+		return errors.New("initial administrator principal ID is invalid")
+	}
+	state, err := service.CurrentPolicy(ctx)
+	if err != nil {
+		return err
+	}
+	for _, assignment := range state.Snapshot.Assignments {
+		if assignment.Role != adminauthorization.RolePlatformAdmin {
+			continue
+		}
+		for _, subject := range assignment.Subjects {
+			if subject == principalID {
+				return nil
+			}
+		}
+	}
+	expectedETag := state.Pointer.ETag
+	snapshot := state.Snapshot
+	snapshot.Revision = 0
+	snapshot.Assignments = append(snapshot.Assignments, adminauthorization.Assignment{
+		ID:   uuid.NewSHA1(uuid.NameSpaceURL, []byte("kubeloop:helm-admin:"+principalID)).String(),
+		Role: adminauthorization.RolePlatformAdmin, Subjects: []string{principalID},
+	})
+	idempotencyKey := fmt.Sprintf("initial-admin-policy-%s-%d", principalID, expectedETag)
+	requestID := uuid.NewString()
+	actor := adminrevision.Actor{PrincipalID: principalID, Authentication: adminauthorization.AuthenticationBootstrap}
+	draft, err := service.CreatePolicyDraft(ctx, adminrevision.PolicyDraftRequest{
+		Snapshot: snapshot, ExpectedETag: expectedETag, IdempotencyKey: idempotencyKey, Reason: "initialize Helm administrator",
+		RequestID: requestID, Actor: actor,
+	})
+	if err != nil {
+		return err
+	}
+	_, err = service.PublishPolicy(ctx, adminrevision.ActivateRequest{
+		ChangeID: draft.Change.ID, ExpectedETag: expectedETag, IdempotencyKey: idempotencyKey,
+		Reason: "initialize Helm administrator", RequestID: requestID, Actor: actor,
+	})
+	return err
 }
 
 func envOrDefault(name, fallback string) string {

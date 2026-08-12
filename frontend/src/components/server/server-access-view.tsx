@@ -270,7 +270,7 @@ export function ServerAccessView({
     setError("");
     try {
       let session: AuthSession;
-      if (selectedProvider.type === "oidc") {
+      if (selectedProvider.type === "oidc" || selectedProvider.type === "local") {
         session = await backend.loginServerOIDC(profile.id, selectedProvider.id);
       } else if (selectedProvider.type === "anonymous") {
         session = await backend.loginServerAnonymous(profile.id, selectedProvider.id);
@@ -977,9 +977,11 @@ export function ServerAccessView({
                     onClick={() => void login()}
                   >
                     {busy === "login" ? <Spinner data-icon="inline-start" /> : <LogIn size={15} />}
-                    {selectedProvider?.type === "oidc"
-                      ? "Continue in browser"
-                      : selectedProvider?.type === "anonymous"
+					{selectedProvider?.type === "oidc"
+					  ? "Continue in browser"
+					  : selectedProvider?.type === "local"
+						? "Continue with local account"
+					  : selectedProvider?.type === "anonymous"
                         ? "Continue anonymously"
                         : "Sign in"}
                   </Button>

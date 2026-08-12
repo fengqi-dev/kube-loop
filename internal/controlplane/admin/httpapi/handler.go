@@ -46,6 +46,7 @@ type Handler struct {
 	readAPI    *readAPI
 	tokenAuth  TokenAuthenticator
 	origin     string
+	apiPath    string
 	maxBody    int64
 	limiter    *exchangeLimiter
 	tokenLimit *exchangeLimiter
@@ -93,6 +94,7 @@ func New(config Config, sessions *adminsession.Service, optionValues ...Option) 
 	}
 	handler := &Handler{
 		sessions: sessions, origin: parsed.Scheme + "://" + parsed.Host,
+		apiPath: "/kubeloop/api",
 		maxBody: maxBody, limiter: newExchangeLimiter(globalAttempts, sourceAttempts, window),
 		tokenLimit: newExchangeLimiter(defaultTokenGlobal, defaultTokenSource, window),
 	}
@@ -104,9 +106,11 @@ func New(config Config, sessions *adminsession.Service, optionValues ...Option) 
 		handler.readAPI.reloader = options.policyReloader
 		handler.readAPI.providers = options.providerService
 		handler.readAPI.operations = options.operationService
+		handler.readAPI.localUsers = options.localUsers
 	} else if options.relayStatus != nil {
 		return nil, errors.New("management Relay status source requires the read API")
-	} else if options.policyService != nil || options.policyReloader != nil || options.providerService != nil || options.operationService != nil {
+	} else if options.policyService != nil || options.policyReloader != nil || options.providerService != nil ||
+		options.operationService != nil || options.localUsers != nil {
 		return nil, errors.New("management policy API requires the read API")
 	}
 	if options.tokenAuthenticator != nil {
@@ -117,7 +121,7 @@ func New(config Config, sessions *adminsession.Service, optionValues ...Option) 
 	}
 	router := echo.New()
 	router.Use(handler.securityHeaders)
-	mountHandler(router.Group("/ui"), adminui.New())
+	mountHandler(router.Group("/ui"), adminui.New(handler.apiPath+"/admin"))
 	router.POST("/sessions/break-glass", adaptHandler(handler.exchangeBreakGlass))
 	if handler.tokenAuth != nil {
 		router.POST("/sessions/token", adaptHandler(handler.exchangeToken))
@@ -197,14 +201,18 @@ func (handler *Handler) exchangeBreakGlass(writer http.ResponseWriter, request *
 		writeError(writer, http.StatusUnauthorized, "unauthenticated", "management authentication failed", requestID)
 		return
 	}
-	http.SetCookie(writer, &http.Cookie{
-		Name: SessionCookieName, Value: issued.SessionToken, Path: "/", Secure: true, HttpOnly: true,
-		SameSite: http.SameSiteStrictMode, MaxAge: max(1, int(time.Until(issued.ExpiresAt).Seconds())),
-	})
+	setSessionCookie(writer, issued)
 	writeJSON(writer, http.StatusCreated, map[string]any{
 		"csrfToken": issued.CSRFToken,
 		"expiresAt": issued.ExpiresAt.Format(time.RFC3339Nano),
 		"requestId": requestID,
+	})
+}
+
+func setSessionCookie(writer http.ResponseWriter, issued adminsession.Credentials) {
+	http.SetCookie(writer, &http.Cookie{
+		Name: SessionCookieName, Value: issued.SessionToken, Path: "/", Secure: true, HttpOnly: true,
+		SameSite: http.SameSiteStrictMode, MaxAge: max(1, int(time.Until(issued.ExpiresAt).Seconds())),
 	})
 }
 

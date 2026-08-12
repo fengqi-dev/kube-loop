@@ -117,6 +117,8 @@ type repositorySet struct {
 	authTransactions          *authTransactionRepository
 	managementState           *managementStateRepository
 	adminSessions             *adminSessionRepository
+	localAdminUsers           *localAdminUserRepository
+	adminRecoveryCodes        *adminRecoveryCodeRepository
 	adminPolicyRevisions      *adminPolicyRevisionRepository
 	providerConfigRevisions   *providerConfigRevisionRepository
 	adminAssignments          *adminAssignmentRepository
@@ -144,6 +146,8 @@ func newRepositorySet(backend Backend, executor sqlExecutor, orm bun.IDB) *repos
 		authTransactions:          &authTransactionRepository{repositoryBase: base},
 		managementState:           &managementStateRepository{repositoryBase: base},
 		adminSessions:             &adminSessionRepository{repositoryBase: base},
+		localAdminUsers:           &localAdminUserRepository{repositoryBase: base},
+		adminRecoveryCodes:        &adminRecoveryCodeRepository{repositoryBase: base},
 		adminPolicyRevisions:      &adminPolicyRevisionRepository{repositoryBase: base},
 		providerConfigRevisions:   &providerConfigRevisionRepository{repositoryBase: base},
 		adminAssignments:          &adminAssignmentRepository{repositoryBase: base},
@@ -208,6 +212,14 @@ func (repositories *repositorySet) ManagementState() ManagementStateRepository {
 
 func (repositories *repositorySet) AdminSessions() AdminSessionRepository {
 	return repositories.adminSessions
+}
+
+func (repositories *repositorySet) LocalAdminUsers() LocalAdminUserRepository {
+	return repositories.localAdminUsers
+}
+
+func (repositories *repositorySet) AdminRecoveryCodes() AdminRecoveryCodeRepository {
+	return repositories.adminRecoveryCodes
 }
 
 func (repositories *repositorySet) AdminPolicyRevisions() AdminPolicyRevisionRepository {

@@ -7,11 +7,29 @@ KubeLoop has been installed as three independent workloads:
 Service discovery:
   {{ required "publicURL is required" .Values.publicURL }}/.well-known/kubeloop
 
+{{- if .Values.controlPlane.management.initialAdmin.enabled }}
+Initial Management Plane administrator:
+  Username: kubectl -n {{ .Release.Namespace }} get secret {{ include "kubeloop.initialAdminSecretName" . }} -o jsonpath='{.data.{{ .Values.controlPlane.management.initialAdmin.usernameKey }}}' | base64 -d
+  Password: kubectl -n {{ .Release.Namespace }} get secret {{ include "kubeloop.initialAdminSecretName" . }} -o jsonpath='{.data.{{ .Values.controlPlane.management.initialAdmin.passwordKey }}}' | base64 -d
+
+The Secret is only a bootstrap input. Password values are not applied again
+after the local administrator exists in Control Plane storage. The Management
+Plane is not exposed on the public Control Plane port. Start a local tunnel:
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "kubeloop.controlPlaneManagementName" . }} 8081:{{ .Values.controlPlane.management.servicePort }}
+Then sign in at:
+  {{ required "controlPlane.management.publicURL is required" .Values.controlPlane.management.publicURL }}/kubeloop/api/admin/ui
+TOTP is optional. A user may enable it from Account Security and must then save
+the one-time recovery codes; users who do not enroll continue with password-only login.
+{{- end }}
+
 {{- if and (not .Values.ingress.enabled) (not .Values.gatewayAPI.enabled) }}
 Chart-managed external routing is disabled. Route the same public HTTPS origin as follows:
-  /.well-known, /auth and /api -> {{ include "kubeloop.controlPlaneName" . }}
+  /.well-known, /oauth2 and /kubeloop/api -> {{ include "kubeloop.controlPlaneName" . }}
   {{ .Values.dataPlane.tunnelPath }} -> {{ include "kubeloop.dataPlaneName" . }}
 {{- end }}
+The Management Plane port is intentionally excluded from chart-managed Ingress
+and Gateway API routes. If you publish it, use a separate restricted origin and
+set controlPlane.management.publicURL to that exact origin.
 {{- if .Values.ingress.enabled }}
 External access uses networking.k8s.io/v1 Ingress for {{ .Values.ingress.host }}.
 {{- end }}

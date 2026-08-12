@@ -100,7 +100,7 @@ func (api *readAPI) createProviderDraft(writer http.ResponseWriter, request *htt
 		writeProviderError(writer, request, err)
 		return
 	}
-	writer.Header().Set("Location", "/kubeloop/api/admin/providers/"+result.Revision.ProviderID+"/changes/"+result.Change.ID)
+	writer.Header().Set("Location", api.handler.apiPath+"/admin/providers/"+result.Revision.ProviderID+"/changes/"+result.Change.ID)
 	if result.Replayed {
 		writer.Header().Set("Idempotent-Replayed", "true")
 	}

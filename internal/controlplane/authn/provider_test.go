@@ -21,8 +21,15 @@ func TestIdentityExternalIDUsesImmutableOIDCIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if externalID != "https://login.example.com\x00248289761001" {
+	if externalID != "https://login.example.com/\x00248289761001" {
 		t.Fatalf("external ID = %q", externalID)
+	}
+	withoutSlash, err := (Identity{Issuer: "https://login.example.com", Subject: identity.Subject}).ExternalID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if withoutSlash == externalID {
+		t.Fatal("distinct OIDC issuer identifiers produced the same external ID")
 	}
 	identity.Email = "changed@example.com"
 	again, err := identity.ExternalID()

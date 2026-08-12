@@ -586,6 +586,70 @@ var migrations = []migration{{
 		)`,
 		`CREATE INDEX audit_export_jobs_pending_idx ON audit_export_jobs(state, created_at, id)`,
 	},
+}, {
+	version: 12,
+	sqlite: []string{
+		`CREATE TABLE local_admin_users (
+			principal_id TEXT PRIMARY KEY REFERENCES principals(id) ON DELETE CASCADE,
+			schema_version INTEGER NOT NULL CHECK (schema_version >= 1),
+			username TEXT NOT NULL UNIQUE,
+			password_hash TEXT NOT NULL,
+			enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
+			totp_secret_encrypted BLOB,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
+		`CREATE TABLE admin_recovery_codes (
+			principal_id TEXT NOT NULL REFERENCES local_admin_users(principal_id) ON DELETE CASCADE,
+			code_hash BLOB NOT NULL CHECK (length(code_hash) = 32),
+			created_at TEXT NOT NULL,
+			PRIMARY KEY (principal_id, code_hash)
+		)`,
+	},
+	postgresql: []string{
+		`CREATE TABLE local_admin_users (
+			principal_id TEXT PRIMARY KEY REFERENCES principals(id) ON DELETE CASCADE,
+			schema_version INTEGER NOT NULL CHECK (schema_version >= 1),
+			username TEXT NOT NULL UNIQUE,
+			password_hash TEXT NOT NULL,
+			enabled BOOLEAN NOT NULL DEFAULT TRUE,
+			totp_secret_encrypted BYTEA,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
+		`CREATE TABLE admin_recovery_codes (
+			principal_id TEXT NOT NULL REFERENCES local_admin_users(principal_id) ON DELETE CASCADE,
+			code_hash BYTEA NOT NULL CHECK (octet_length(code_hash) = 32),
+			created_at TEXT NOT NULL,
+			PRIMARY KEY (principal_id, code_hash)
+		)`,
+	},
+}, {
+	version: 13,
+	sqlite: []string{
+		`ALTER TABLE local_admin_users ADD COLUMN bootstrap_complete INTEGER NOT NULL DEFAULT 0 CHECK (bootstrap_complete IN (0, 1))`,
+	},
+	postgresql: []string{
+		`ALTER TABLE local_admin_users ADD COLUMN bootstrap_complete BOOLEAN NOT NULL DEFAULT FALSE`,
+	},
+}, {
+	version: 14,
+	sqlite: []string{
+		`ALTER TABLE auth_attempts ADD COLUMN client_id TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE auth_attempts ADD COLUMN scope TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE auth_exchanges ADD COLUMN client_id TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE auth_exchanges ADD COLUMN redirect_uri TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE auth_exchanges ADD COLUMN scope TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE auth_exchanges ADD COLUMN nonce TEXT NOT NULL DEFAULT ''`,
+	},
+	postgresql: []string{
+		`ALTER TABLE auth_attempts ADD COLUMN client_id TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE auth_attempts ADD COLUMN scope TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE auth_exchanges ADD COLUMN client_id TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE auth_exchanges ADD COLUMN redirect_uri TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE auth_exchanges ADD COLUMN scope TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE auth_exchanges ADD COLUMN nonce TEXT NOT NULL DEFAULT ''`,
+	},
 }}
 
 func currentSchemaVersion() int {

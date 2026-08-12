@@ -186,7 +186,7 @@ func (store *Store) migrate(ctx context.Context) error {
 		}
 		for statementIndex, statement := range statements {
 			if _, err := transaction.ExecContext(ctx, statement); err != nil {
-				return fmt.Errorf("apply storage migration %d statement %d", migration.version, statementIndex+1)
+				return fmt.Errorf("apply storage migration %d statement %d: %w", migration.version, statementIndex+1, err)
 			}
 		}
 		insert := `INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)`
@@ -286,6 +286,14 @@ func (store *Store) ManagementState() ManagementStateRepository {
 
 func (store *Store) AdminSessions() AdminSessionRepository {
 	return store.repositories.AdminSessions()
+}
+
+func (store *Store) LocalAdminUsers() LocalAdminUserRepository {
+	return store.repositories.LocalAdminUsers()
+}
+
+func (store *Store) AdminRecoveryCodes() AdminRecoveryCodeRepository {
+	return store.repositories.AdminRecoveryCodes()
 }
 
 func (store *Store) AdminPolicyRevisions() AdminPolicyRevisionRepository {

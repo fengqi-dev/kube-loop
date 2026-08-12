@@ -1,22 +1,19 @@
 package controlplane
 
 import (
-	"net/http"
-
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/authorization"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/health"
 )
 
 type serverOptions struct {
-	authenticator     controlplaneapi.Authenticator
-	authorizer        authorization.Authorizer
-	audit             AuditSink
-	apiRoutes         RouteRegistrar
-	readiness         health.Checker
-	authRoutes        RouteRegistrar
-	managementHandler http.Handler
-	authMethodSource  AuthMethodSource
+	authenticator    controlplaneapi.Authenticator
+	authorizer       authorization.Authorizer
+	audit            AuditSink
+	apiRoutes        RouteRegistrar
+	readiness        health.Checker
+	authRoutes       RouteRegistrar
+	authMethodSource AuthMethodSource
 }
 
 type AuthMethodSource interface {
@@ -55,10 +52,4 @@ func WithReadinessChecker(checker health.Checker) ServerOption {
 
 func WithAuthRoutes(routes RouteRegistrar) ServerOption {
 	return func(options *serverOptions) { options.authRoutes = routes }
-}
-
-// WithManagementHandler installs the browser-only Management Plane below
-// /kubeloop/api/admin without passing it through the ordinary Gateway Bearer chain.
-func WithManagementHandler(handler http.Handler) ServerOption {
-	return func(options *serverOptions) { options.managementHandler = handler }
 }

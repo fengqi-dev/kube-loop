@@ -67,6 +67,7 @@ type Pair struct {
 	AccessExpiresAt  time.Time
 	RefreshToken     string
 	RefreshExpiresAt time.Time
+	IDToken          string
 }
 
 type AccessIdentity struct {
@@ -144,6 +145,27 @@ func New(store Store, config Config) (*Service, error) {
 }
 
 func (service *Service) Issue(ctx context.Context, principal storage.Principal, deviceID string) (Pair, error) {
+	return service.issue(ctx, principal, deviceID, "", "")
+}
+
+func (service *Service) IssueOIDC(
+	ctx context.Context,
+	principal storage.Principal,
+	deviceID, clientID, nonce string,
+) (Pair, error) {
+	clientID = strings.TrimSpace(clientID)
+	nonce = strings.TrimSpace(nonce)
+	if clientID == "" || nonce == "" {
+		return Pair{}, errors.New("OIDC client ID and nonce are required")
+	}
+	return service.issue(ctx, principal, deviceID, clientID, nonce)
+}
+
+func (service *Service) issue(
+	ctx context.Context,
+	principal storage.Principal,
+	deviceID, clientID, nonce string,
+) (Pair, error) {
 	deviceID = strings.TrimSpace(deviceID)
 	if _, err := uuid.Parse(principal.ID); err != nil || deviceID == "" || len(deviceID) > 128 {
 		return Pair{}, errors.New("valid principal and device IDs are required")
@@ -172,10 +194,17 @@ func (service *Service) Issue(ctx context.Context, principal storage.Principal, 
 	if err != nil {
 		return Pair{}, errors.New("persist token family")
 	}
-	return Pair{
+	pair := Pair{
 		TokenType: "Bearer", AccessToken: accessToken, AccessExpiresAt: accessExpiry,
 		RefreshToken: refreshToken, RefreshExpiresAt: family.ExpiresAt,
-	}, nil
+	}
+	if clientID != "" {
+		pair.IDToken, err = service.signIDToken(principal, clientID, nonce, now, accessExpiry)
+		if err != nil {
+			return Pair{}, err
+		}
+	}
+	return pair, nil
 }
 
 func (service *Service) Refresh(ctx context.Context, refreshToken string) (Pair, error) {
@@ -334,6 +363,32 @@ func (service *Service) signAccess(
 		return "", time.Time{}, errors.New("sign access token")
 	}
 	return serialized, expiresAt, nil
+}
+
+func (service *Service) signIDToken(
+	principal storage.Principal,
+	clientID, nonce string,
+	now, expiresAt time.Time,
+) (string, error) {
+	serialized, err := jwt.Signed(service.signer).Claims(jwt.Claims{
+		Issuer: service.issuer, Subject: principal.ID, Audience: jwt.Audience{clientID},
+		Expiry: jwt.NewNumericDate(expiresAt), IssuedAt: jwt.NewNumericDate(now), ID: uuid.NewString(),
+	}).Claims(map[string]any{
+		"nonce": nonce, "name": principal.DisplayName, "email": principal.Email,
+		"groups": append([]string(nil), principal.Groups...),
+	}).Serialize()
+	if err != nil {
+		return "", errors.New("sign ID token")
+	}
+	return serialized, nil
+}
+
+func (service *Service) Issuer() string { return service.issuer }
+
+func (service *Service) KeySet() jose.JSONWebKeySet {
+	return jose.JSONWebKeySet{Keys: []jose.JSONWebKey{{
+		Key: service.publicKey, KeyID: service.keyID, Algorithm: string(jose.EdDSA), Use: "sig",
+	}}}
 }
 
 func (service *Service) newRefreshToken() (string, []byte, error) {

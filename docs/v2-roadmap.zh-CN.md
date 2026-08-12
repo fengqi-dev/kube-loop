@@ -73,7 +73,7 @@ Desktop Client
           ▼                    ▼
   Control Plane            Data Plane
   /well-known              /tunnel
-  /auth /api               authenticated WSS
+  /oauth2 /api             authenticated WSS
   Auth / Authorization     multiplex / relay
   Session / Task           TCP / UDP / DNS
   Kubernetes Provider      reverse streams
@@ -297,7 +297,7 @@ SQLite 模式的部署约束：
   - 支持 Ingress 和 Gateway API HTTPRoute，允许二选一。
   - 验证 WebSocket upgrade、长连接超时、请求体限制和 TLS。
   - `publicURL` 必须与 OAuth callback 和服务发现地址一致。
-  - 同一 Origin 下将 `/.well-known`、`/auth`、`/api` 路由到 Control Plane，将 `/tunnel` 路由到 Data Plane。
+  - 同一 Origin 下将 `/.well-known`、`/oauth2`、`/api` 路由到 Control Plane，将 `/tunnel` 路由到 Data Plane。
   - 2026-08-10（完成）：Helm 现支持互斥的 `networking.k8s.io/v1` Ingress 与 Gateway API v1.2+ `HTTPRoute`；HTTPRoute 可附着平台已有 Gateway，或由 Chart 创建带 HTTPS listener、TLS Terminate 和既有证书 Secret 的专用 Gateway。两种入口都以同一 hostname 将 `/.well-known`、`/auth`、`/api` 路由至 Control Plane，将精确 `/tunnel` 路由至 Data Plane；Service `appProtocol` 明确标识 HTTP 与 `kubernetes.io/ws`。Helm 对非 Origin `publicURL`、路由 hostname 不一致、Ingress 未启用 TLS、Ingress/HTTPRoute 同时启用、缺失 Gateway parent/HTTPS section、缺失 GatewayClass/证书和非零 tunnel timeout 全部 fail-fast。Control Plane 与客户端也只接受无 path/query/fragment 的单一 Origin；Discovery 原样发布该 Origin，OIDC redirect 固定由它派生为 `/auth/callback/<providerID>`。HTTPRoute Control Plane 请求保持 30 秒边界，WebSocket request/backend timeout 使用规范定义的 `0s`，由 Data Plane 自身 idle timeout 接管。新增 TLS 1.3 同源反向代理集成测试，真实验证 discovery/Control Plane/Data Plane 分流、请求体上限、WSS Upgrade，以及连接跨过普通 HTTP write timeout 后仍能双向传输；Helm contract tests 覆盖 Ingress、外部 Gateway、Chart-owned Gateway、TLS/Origin/互斥/timeout 校验和 OAuth callback 一致性。Ingress controller 专属的 WebSocket/超时/body-size annotations 与 Gateway API extended-conformance 要求已写入 Chart 运维文档。
 
 - [x] **V2-203：加入运行安全基线。**

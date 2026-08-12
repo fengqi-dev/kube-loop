@@ -37,7 +37,7 @@ func TestCleanDirectoryWithOnlyServerURLBrowsesRemoteInventory(t *testing.T) {
 	sessionID := uuid.NewString()
 	var server *httptest.Server
 	server = httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if request.URL.Path != clientdiscovery.Path && request.URL.Path != "/auth/anonymous/guest/login" &&
+		if request.URL.Path != clientdiscovery.Path && request.URL.Path != "/.well-known/openid-configuration" && request.URL.Path != "/oauth2/token" &&
 			request.Header.Get("Authorization") != "Bearer clean-access" {
 			t.Errorf("%s Authorization = %q", request.URL.Path, request.Header.Get("Authorization"))
 		}
@@ -48,7 +48,11 @@ func TestCleanDirectoryWithOnlyServerURLBrowsesRemoteInventory(t *testing.T) {
 				APIVersions: []string{"v2"}, ProtocolMin: "2.0", ProtocolMax: "2.0", ServerVersion: "2.0.0",
 				AuthMethods: []clientdiscovery.AuthMethod{{ID: "guest", Type: "anonymous", Interaction: "none"}},
 			})
-		case "/auth/anonymous/guest/login":
+		case "/.well-known/openid-configuration":
+			_ = json.NewEncoder(writer).Encode(map[string]any{"issuer": server.URL,
+				"authorization_endpoint": server.URL + "/oauth2/authorize", "token_endpoint": server.URL + "/oauth2/token",
+				"revocation_endpoint": server.URL + "/oauth2/revoke"})
+		case "/oauth2/token":
 			writeAppTokenResponse(writer, "clean-access", "clean-refresh")
 		case "/kubeloop/api/version":
 			_ = json.NewEncoder(writer).Encode(clientremote.Version{GitVersion: "v1.31.2", GatewayVersion: "v2-clean"})

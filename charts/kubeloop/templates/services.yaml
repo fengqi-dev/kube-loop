@@ -16,6 +16,25 @@ spec:
       targetPort: http
       protocol: TCP
       appProtocol: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "kubeloop.controlPlaneManagementName" . }}
+  labels:
+    {{- include "kubeloop.labels" . | nindent 4 }}
+    app.kubernetes.io/component: control-plane-management
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "kubeloop.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: control-plane
+  ports:
+    - name: management
+      port: {{ .Values.controlPlane.management.servicePort }}
+      targetPort: management
+      protocol: TCP
+      appProtocol: http
 {{- if .Values.controlPlane.relayRegistry.enabled }}
 ---
 apiVersion: v1

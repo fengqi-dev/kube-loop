@@ -17,6 +17,19 @@
 {{- fail "dataPlane.relayRegistry.maxWebSocketFrameBytes must be between 8192 and 16777216" }}
 {{- end }}
 {{- $management := .Values.controlPlane.management }}
+{{- if or (lt (int $management.listenPort) 1) (gt (int $management.listenPort) 65535) }}
+{{- fail "controlPlane.management.listenPort must be between 1 and 65535" }}
+{{- end }}
+{{- if or (lt (int $management.servicePort) 1) (gt (int $management.servicePort) 65535) }}
+{{- fail "controlPlane.management.servicePort must be between 1 and 65535" }}
+{{- end }}
+{{- if eq (int $management.listenPort) 8080 }}
+{{- fail "controlPlane.management.listenPort must differ from the public Control Plane port 8080" }}
+{{- end }}
+{{- if and $registryEnabled (eq (int $management.listenPort) (int .Values.controlPlane.relayRegistry.listenPort)) }}
+{{- fail "controlPlane.management.listenPort must differ from controlPlane.relayRegistry.listenPort" }}
+{{- end }}
+{{- $managementPublicURL := required "controlPlane.management.publicURL is required" $management.publicURL }}
 {{- $bootstrap := $management.bootstrap }}
 {{- range $index, $subject := $bootstrap.subjects }}
 {{- if not (regexMatch "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" $subject) }}
@@ -82,12 +95,19 @@ metadata:
 data:
   KUBELOOP_LISTEN: ":8080"
   KUBELOOP_PUBLIC_URL: {{ $publicURL | quote }}
+  KUBELOOP_MANAGEMENT_LISTEN: {{ printf ":%v" $management.listenPort | quote }}
+  KUBELOOP_MANAGEMENT_PUBLIC_URL: {{ $managementPublicURL | quote }}
   KUBELOOP_SERVICE_ID: {{ include "kubeloop.serviceID" . | quote }}
   KUBELOOP_TUNNEL_PATH: {{ .Values.dataPlane.tunnelPath | quote }}
   KUBELOOP_MIN_CLIENT_VERSION: {{ .Values.controlPlane.minClientVersion | quote }}
   KUBELOOP_AUTH_CONFIG_FILE: "/etc/kubeloop/auth/auth.json"
   KUBELOOP_POLICY_CONFIG_FILE: "/etc/kubeloop/auth/policy.json"
   KUBELOOP_MANAGEMENT_CONFIG_FILE: "/etc/kubeloop/auth/management.json"
+  {{- if .Values.controlPlane.management.initialAdmin.enabled }}
+  KUBELOOP_INITIAL_ADMIN_USERNAME_FILE: "/var/run/secrets/kubeloop/management/initial-admin/username"
+  KUBELOOP_INITIAL_ADMIN_PASSWORD_FILE: "/var/run/secrets/kubeloop/management/initial-admin/password"
+  KUBELOOP_MANAGEMENT_MFA_KEY_FILE: "/var/run/secrets/kubeloop/management/initial-admin/mfa-encryption-key"
+  {{- end }}
   KUBELOOP_KUBERNETES_CONFIG_FILE: "/etc/kubeloop/auth/kubernetes.json"
   KUBELOOP_TOKEN_SIGNING_KEY_FILE: "/var/run/secrets/kubeloop/auth/token/signing-key.pem"
   KUBELOOP_TOKEN_KEY_ID: {{ .Values.controlPlane.auth.token.keyID | quote }}
@@ -134,7 +154,7 @@ data:
       "issuer" $issuer
       "clientId" $clientID
       "clientSecretFile" (printf "/var/run/secrets/kubeloop/auth/%s/client-secret" $id)
-      "redirectUrl" (printf "%s/auth/callback/%s" (trimSuffix "/" $publicURL) $id)
+      "redirectUrl" (printf "%s/oauth2/callback/%s" (trimSuffix "/" $publicURL) $id)
       "scopes" (default (list "openid" "profile" "email") $oidc.scopes)
       "allowedSigningAlgs" (default (list "RS256") $oidc.allowedSigningAlgs)
       "requiredClaims" (default (list "sub") $oidc.requiredClaims)

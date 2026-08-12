@@ -116,11 +116,17 @@ func NewServer(config Config, build BuildInfo, logger *slog.Logger, serverOption
 	})
 	registerHealthRoutes(router, health.New(options.readiness, normalized.ReadinessTimeout))
 	if options.authRoutes != nil {
-		options.authRoutes.RegisterRoutes(router.Group("/auth"))
+		options.authRoutes.RegisterRoutes(router.Group(""))
 	}
-	if options.managementHandler != nil {
-		mountHTTPHandler(router.Group(APIPathPrefix+"/admin"), http.StripPrefix(APIPathPrefix+"/admin", options.managementHandler))
-	}
+	// The Management Plane is served by its own listener. Register explicit
+	// public-listener exclusions before the API group so its authentication
+	// middleware cannot turn these requests into a misleading 401 response.
+	router.Any(APIPathPrefix+"/admin", func(ctx *echo.Context) error {
+		return echo.ErrNotFound
+	})
+	router.Any(APIPathPrefix+"/admin/*", func(ctx *echo.Context) error {
+		return echo.ErrNotFound
+	})
 	apiGroup := router.Group(APIPathPrefix)
 	apiGroup.Use(controlplanemiddleware.New(controlplanemiddleware.Config{
 		APIPathPrefix:      APIPathPrefix,
@@ -150,12 +156,6 @@ func NewServer(config Config, build BuildInfo, logger *slog.Logger, serverOption
 			MaxHeaderBytes:    DefaultMaxHeaderBytes,
 		},
 	}, nil
-}
-
-func mountHTTPHandler(group *echo.Group, handler http.Handler) {
-	adapted := echo.WrapHandler(handler)
-	group.Any("", adapted)
-	group.Any("/*", adapted)
 }
 
 func (server *Server) ListenAddress() string {

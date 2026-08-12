@@ -188,6 +188,8 @@ type AuthAttempt struct {
 	StateHash            []byte
 	ClientState          string
 	ClientCallback       string
+	ClientID             string
+	Scope                string
 	Nonce                string
 	PKCEChallenge        string
 	UpstreamPKCEVerifier string
@@ -200,6 +202,10 @@ type AuthExchange struct {
 	CodeHash      []byte
 	PrincipalID   string
 	ProviderID    string
+	ClientID      string
+	RedirectURI   string
+	Scope         string
+	Nonce         string
 	PKCEChallenge string
 	CreatedAt     time.Time
 	ExpiresAt     time.Time
@@ -218,6 +224,20 @@ type AdminSession struct {
 	IdleExpiresAt        time.Time
 	AbsoluteExpiresAt    time.Time
 	RevokedAt            *time.Time
+}
+
+// LocalAdminUser stores management-plane credentials for a Principal. Password
+// and MFA material are always persisted as hashes or authenticated ciphertext.
+type LocalAdminUser struct {
+	PrincipalID         string
+	SchemaVersion       int
+	Username            string
+	PasswordHash        string
+	Enabled             bool
+	TOTPSecretEncrypted []byte
+	BootstrapComplete   bool
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
 }
 
 type AdminPolicyRevision struct {

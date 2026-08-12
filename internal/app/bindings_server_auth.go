@@ -22,7 +22,7 @@ type AuthSession struct {
 }
 
 func (a *App) LoginServerOIDC(profileID, providerID string) (AuthSession, error) {
-	serverProfile, method, err := a.authenticationTarget(profileID, providerID, "oidc")
+	serverProfile, method, err := a.authenticationTarget(profileID, providerID, "oidc", "local")
 	if err != nil {
 		return AuthSession{}, err
 	}
@@ -145,7 +145,7 @@ func (a *App) LogoutServer(profileID string) error {
 	return errors.Join(disconnectErr, revokeErr, deleteErr)
 }
 
-func (a *App) authenticationTarget(profileID, providerID, providerType string) (clientprofile.Profile, clientdiscovery.AuthMethod, error) {
+func (a *App) authenticationTarget(profileID, providerID string, providerTypes ...string) (clientprofile.Profile, clientdiscovery.AuthMethod, error) {
 	if a.auth == nil || a.credentials == nil {
 		return clientprofile.Profile{}, clientdiscovery.AuthMethod{}, errors.New("authentication is unavailable")
 	}
@@ -158,8 +158,12 @@ func (a *App) authenticationTarget(profileID, providerID, providerType string) (
 		return clientprofile.Profile{}, clientdiscovery.AuthMethod{}, err
 	}
 	for _, method := range document.AuthMethods {
-		if method.ID == providerID && method.Type == providerType {
-			return serverProfile, method, nil
+		if method.ID == providerID {
+			for _, providerType := range providerTypes {
+				if method.Type == providerType {
+					return serverProfile, method, nil
+				}
+			}
 		}
 	}
 	return clientprofile.Profile{}, clientdiscovery.AuthMethod{}, errors.New("selected authentication provider is not advertised by this server")

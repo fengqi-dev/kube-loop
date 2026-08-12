@@ -17,6 +17,7 @@ build/windows/icon.ico
 dist/
 frontend/dist/
 frontend/node_modules/
+e2e/oidc/node_modules/
 *.log
 *.kubeconfig
 *.swp

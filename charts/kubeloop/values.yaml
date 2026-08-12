@@ -46,6 +46,8 @@ controlPlane:
     #     claims:
     #       displayName: name
     #       email: email
+    #       # Literal names are checked first; dot notation can read nested
+    #       # objects such as Keycloak's realm_access.roles.
     #       groups: groups
     #     httpTimeout: 10s
     # - id: anonymous
@@ -94,6 +96,22 @@ controlPlane:
     #   operations: [get, list, watch]
     #   resourceKinds: [namespaces, pods, services]
   management:
+    # The browser Management Plane has an isolated HTTP listener. The default
+    # origin is intended for `kubectl port-forward`; set it to the exact HTTPS
+    # origin when publishing this port through a separately managed route.
+    publicURL: http://127.0.0.1:8081
+    listenPort: 8081
+    servicePort: 8081
+    initialAdmin:
+      # On first install Helm creates a Secret with a random password and MFA
+      # encryption key. MFA enrollment remains optional for every user. Set
+      # existingSecret to supply an externally managed Secret.
+      enabled: true
+      username: admin
+      existingSecret: ""
+      usernameKey: username
+      passwordKey: password
+      mfaEncryptionKeyKey: mfa-encryption-key
     bootstrap:
       # Exact stable Control Plane Principal UUIDs or normalized groups only.
       # Wildcards, upstream email addresses, and display names are rejected.

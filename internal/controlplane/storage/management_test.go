@@ -471,6 +471,7 @@ func seedManagementStore(t *testing.T, store *Store) managementSeed {
 	if err := store.AuthTransactions().CreateAttempt(ctx, AuthAttempt{
 		ID: uuid.NewString(), ProviderID: "corporate", StateHash: stateHash[:], ClientState: "client-state",
 		ClientCallback: "http://127.0.0.1:49152/callback", Nonce: "nonce", PKCEChallenge: "challenge",
+		ClientID: "kubeloop-desktop", Scope: "openid kubeloop.api",
 		UpstreamPKCEVerifier: "verifier", CreatedAt: now, ExpiresAt: now.Add(time.Minute),
 	}); err != nil {
 		t.Fatal(err)
@@ -478,6 +479,8 @@ func seedManagementStore(t *testing.T, store *Store) managementSeed {
 	codeHash := sha256.Sum256([]byte("management-exchange-code"))
 	if err := store.AuthTransactions().CreateExchange(ctx, AuthExchange{
 		CodeHash: codeHash[:], PrincipalID: principal.ID, ProviderID: "corporate", PKCEChallenge: "challenge",
+		ClientID: "kubeloop-desktop", RedirectURI: "http://127.0.0.1:49152/callback",
+		Scope: "openid kubeloop.api", Nonce: "nonce",
 		CreatedAt: now, ExpiresAt: now.Add(time.Minute),
 	}); err != nil {
 		t.Fatal(err)

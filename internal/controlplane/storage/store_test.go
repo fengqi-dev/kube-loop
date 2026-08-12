@@ -120,12 +120,25 @@ func testTaskStateMigrationPreservesLegacyTasks(t *testing.T, config Config) {
 		t.Fatal(err)
 	}
 	for _, table := range []string{
+		"admin_recovery_codes", "local_admin_users",
 		"audit_export_jobs",
 		"relay_desired_states",
 		"config_change_requests", "management_active_revisions", "admin_assignments",
 		"provider_config_revisions", "admin_policy_revisions",
 	} {
 		if _, err := store.db.ExecContext(ctx, `DROP TABLE `+table); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, statement := range []string{
+		`ALTER TABLE auth_attempts DROP COLUMN client_id`,
+		`ALTER TABLE auth_attempts DROP COLUMN scope`,
+		`ALTER TABLE auth_exchanges DROP COLUMN client_id`,
+		`ALTER TABLE auth_exchanges DROP COLUMN redirect_uri`,
+		`ALTER TABLE auth_exchanges DROP COLUMN scope`,
+		`ALTER TABLE auth_exchanges DROP COLUMN nonce`,
+	} {
+		if _, err := store.db.ExecContext(ctx, statement); err != nil {
 			t.Fatal(err)
 		}
 	}
