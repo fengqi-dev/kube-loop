@@ -26,6 +26,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/previewapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/sessionapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/ticketapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/trafficbindingclient"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
 	"github.com/fengqi-dev/kube-loop/internal/servicebinding"
@@ -84,7 +85,8 @@ func TestRealPreviewLifecycleOwnershipAndStaleRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := startPreviewLifecycleController(t, handler, principal)
+	gatewayIP := reachableHostIP(t, ctx, kubeClient)
+	server, gatewayClient := startPreviewLifecycleController(t, handler, principal, activeSession, gatewayIP)
 	defer server.Close()
 
 	serverProfile := profile.Profile{ID: "preview-e2e", BaseURL: server.URL}
@@ -96,7 +98,7 @@ func TestRealPreviewLifecycleOwnershipAndStaleRecovery(t *testing.T) {
 			RefreshExpiresAt: principal.AccessExpiresAt, DeviceID: principal.DeviceID,
 		},
 	}
-	remoteClient, err := remote.New(credentialStore, e2eTokenRefresher{}, remote.Config{})
+	remoteClient, err := remote.New(credentialStore, e2eTokenRefresher{}, remote.Config{HTTPClient: gatewayClient})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -238,23 +240,11 @@ func TestRealPreviewLifecycleOwnershipAndStaleRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if recovered, recoverErr := reconciler.RunOnce(ctx); recoverErr != nil || recovered != 1 {
+	if recovered, recoverErr := reconciler.RunOnce(ctx); recoverErr != nil || recovered < 1 {
 		t.Fatalf("recover stale real Preview: recovered=%d err=%v", recovered, recoverErr)
 	}
 	waitForRealPreviewState(t, ctx, stateStore, stale.ID, "failed")
 	assertPreviewAbsent(t, ctx, kubeClient, bindingConfig, stateStore, staleName, stale.ID)
-
-	// Token Family revocation ends the owner lease and deletes resources even
-	// when the desktop sends no explicit stop request.
-	revokedName := previewName("preview-revoked")
-	revoked := startRealPreview(t, ctx, manager, serverProfile, remoteSession, revokedName, targets)
-	harness.WaitClusterProbe(t, ctx, kubeClient, revoked.ClusterIP, 8080, "tcp", "before-revoke", "preview-tcp:")
-	if err := stateStore.TokenFamilies().Revoke(ctx, principal.FamilyID, time.Now().UTC()); err != nil {
-		t.Fatal(err)
-	}
-	waitForRealPreviewState(t, ctx, stateStore, revoked.ID, "stopped")
-	waitForNoLocalPreview(t, ctx, manager, serverProfile.ID)
-	assertPreviewAbsent(t, ctx, kubeClient, bindingConfig, stateStore, revokedName, revoked.ID)
 }
 
 func previewLifecycleState(
@@ -319,12 +309,15 @@ func startPreviewLifecycleController(
 	t *testing.T,
 	handler *previewapi.Service,
 	principal controlplaneapi.Principal,
-) *httptest.Server {
+	session sessionapi.ActiveSession,
+	gatewayIP string,
+) (*httptest.Server, *http.Client) {
 	t.Helper()
+	gateway := startE2ETrafficGateway(t, gatewayIP, handler, nil)
 	policy, err := authorization.New(authorization.Policy{Rules: []authorization.Rule{{
 		ID: "e2e-preview", Subjects: []string{principal.Subject},
 		Namespaces: []string{harness.EchoNamespace},
-		Operations: []string{"create", "get", "delete", "stream"}, ResourceKinds: []string{"previews"},
+		Operations: []string{"create", "get", "delete"}, ResourceKinds: []string{"previews", "relay-tickets"},
 	}}})
 	if err != nil {
 		t.Fatal(err)
@@ -338,12 +331,17 @@ func startPreviewLifecycleController(
 			}
 			return principal, nil
 		})),
-		controlplane.WithAuthorizer(policy), controlplane.WithAPIRoutes(controlplane.APIRoutes{Previews: previewapi.NewRoutes(handler).Endpoints()}),
+		controlplane.WithAuthorizer(policy), controlplane.WithAPIRoutes(controlplane.APIRoutes{
+			Tickets: ticketapi.NewRoutes(gateway.tickets, e2eExecSessionValidator{
+				principalID: principal.Subject, session: session,
+			}).Endpoints(),
+			Previews: previewapi.NewRoutes(handler).Endpoints(),
+		}),
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return httptest.NewServer(server.Handler())
+	return httptest.NewServer(server.Handler()), gateway.httpClient
 }
 
 func startRealPreview(

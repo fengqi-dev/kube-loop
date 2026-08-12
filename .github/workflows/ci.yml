@@ -280,14 +280,24 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Set up Operator EnvTest
+        shell: pwsh
+        run: |
+          $controllerRuntimeVersion = go list -m -f '{{.Version}}' sigs.k8s.io/controller-runtime
+          $kubernetesModuleVersion = go list -m -f '{{.Version}}' k8s.io/api
+          $kubernetesVersion = $kubernetesModuleVersion -replace '^v?[0-9]+\.([0-9]+).*$', '1.$1'
+          go install "sigs.k8s.io/controller-runtime/tools/setup-envtest@$controllerRuntimeVersion"
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+          $setupEnvTest = Join-Path (go env GOPATH) 'bin\setup-envtest.exe'
+          & $setupEnvTest use $kubernetesVersion --bin-dir "${{ github.workspace }}\build\tools" -p path
+
       - name: Vet
         run: go vet ./...
 
       - name: Run Windows tests
-        shell: pwsh
-        run: |
-          $packages = go list ./... | Where-Object { $_ -notlike '*/internal/operator/trafficbinding' }
-          go test $packages -count=1
+        run: go test ./... -count=1
 
       - name: Build Windows binaries
         shell: pwsh

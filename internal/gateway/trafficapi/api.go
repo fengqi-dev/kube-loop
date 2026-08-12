@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"strings"
 	"sync/atomic"
@@ -25,14 +26,15 @@ type ControlPlaneClient interface {
 }
 
 type Config struct {
-	GatewayIP       string
-	VerifyRequest   func(*http.Request) (relayticket.Claims, error)
-	ControlPlane    ControlPlaneClient
-	HeartbeatEvery  time.Duration
-	UDPIdleTimeout  time.Duration
-	ShutdownTimeout time.Duration
-	MaximumSessions int
-	OtherSessions   func() int
+	GatewayIP                string
+	VerifyRequest            func(*http.Request) (relayticket.Claims, error)
+	ControlPlane             ControlPlaneClient
+	MirrorPrimaryDialContext func(context.Context, string, string) (net.Conn, error)
+	HeartbeatEvery           time.Duration
+	UDPIdleTimeout           time.Duration
+	ShutdownTimeout          time.Duration
+	MaximumSessions          int
+	OtherSessions            func() int
 }
 
 type API struct {
@@ -140,7 +142,7 @@ func (api *API) stream(ctx *echo.Context) error {
 	if mode == trafficcontrol.ModeMirror {
 		var relay *mirrorrelay.Relay
 		relay, err = mirrorrelay.New(connection, listeners, prepared.Backends, mirrorrelay.Config{
-			UDPIdleTimeout: api.config.UDPIdleTimeout,
+			UDPIdleTimeout: api.config.UDPIdleTimeout, PrimaryDialContext: api.config.MirrorPrimaryDialContext,
 		})
 		if err == nil {
 			err = relay.Ready(runContext)

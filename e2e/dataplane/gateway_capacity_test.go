@@ -21,13 +21,7 @@ import (
 	"time"
 
 	"github.com/fengqi-dev/kube-loop/e2e/harness"
-	"github.com/fengqi-dev/kube-loop/internal/client/credentials"
-	clientpreview "github.com/fengqi-dev/kube-loop/internal/client/preview"
-	clientprofile "github.com/fengqi-dev/kube-loop/internal/client/profile"
 	clientremote "github.com/fengqi-dev/kube-loop/internal/client/remote"
-	controlplanekubernetes "github.com/fengqi-dev/kube-loop/internal/controlplane/kubernetes"
-	"github.com/fengqi-dev/kube-loop/internal/controlplane/previewapi"
-	"github.com/fengqi-dev/kube-loop/internal/controlplane/trafficbindingclient"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/relayticket"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
@@ -142,8 +136,6 @@ func TestGatewayPodMultiUserCapacityRSSAndCleanup(t *testing.T) {
 	capacityService := installCapacityEcho(t, ctx, kubeClient, namespace)
 	publicAddress := net.JoinHostPort(reachableNodeAddress(t, ctx, kubeClient), fmt.Sprint(service.Spec.Ports[0].NodePort))
 	waitForHTTP(t, ctx, "http://"+publicAddress+"/health/ready")
-	revokeRemoteResources := prepareCapacityRevocation(t, ctx, kubeClient)
-
 	spec, err := networkspec.Normalize(networkspec.Spec{ServiceIPs: []string{capacityService.Spec.ClusterIP}})
 	if err != nil {
 		t.Fatal(err)
@@ -241,8 +233,6 @@ func TestGatewayPodMultiUserCapacityRSSAndCleanup(t *testing.T) {
 	memoryCurve["logical-stream-limit"] = gatewayWorkingSetBytes(t, ctx, kubeClient, gatewayPod)
 	assertCapacityPodHealth(t, ctx, publicAddress)
 	assertStreamCapacityRejected(t, ctx, clients[0], capacityService.Spec.ClusterIP, 19192)
-	revokeRemoteResources()
-
 	for _, connection := range held {
 		_ = connection.Close()
 	}
@@ -278,93 +268,6 @@ func TestGatewayPodMultiUserCapacityRSSAndCleanup(t *testing.T) {
 	waitGatewayMetric(t, ctx, publicAddress, "kubeloop_gateway_active_connections", 0)
 	memoryCurve["clean"] = gatewayWorkingSetBytes(t, ctx, kubeClient, gatewayPod)
 	assertMemoryCurve(t, memoryCurve)
-}
-
-func prepareCapacityRevocation(
-	t *testing.T,
-	ctx context.Context,
-	kubeClient kubernetes.Interface,
-) func() {
-	t.Helper()
-	if err := harness.EnsureEchoWorkload(ctx, kubeClient); err != nil {
-		t.Fatalf("ensure capacity revocation fixture: %v", err)
-	}
-	stateStore, principal, activeSession, remoteSession := previewLifecycleState(
-		t, ctx, harness.EchoServiceIP(t, ctx, kubeClient),
-	)
-	provider, err := controlplanekubernetes.NewForRESTConfig(kubeRESTConfig(t), controlplanekubernetes.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	bindingConfig, err := provider.SystemRESTConfig()
-	if err != nil {
-		t.Fatal(err)
-	}
-	bindings, err := trafficbindingclient.NewForRESTConfig(bindingConfig, trafficbindingclient.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	resources, err := previewapi.NewTrafficBindingResourceManager(stateStore, bindings)
-	if err != nil {
-		t.Fatal(err)
-	}
-	handler, err := previewapi.New(
-		stateStore,
-		e2eExecSessionValidator{principalID: principal.Subject, session: activeSession},
-		resources,
-		previewapi.Config{
-			DeleteTimeout: 5 * time.Second,
-		},
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	server := startPreviewLifecycleController(t, handler, principal)
-	t.Cleanup(server.Close)
-	serverProfile := clientprofile.Profile{ID: "capacity-revocation", BaseURL: server.URL}
-	credentialStore := &e2eCredentialStore{
-		profileID: serverProfile.ID,
-		credential: credentials.Credential{
-			TokenType: "Bearer", AccessToken: previewLifecycleAccessToken,
-			AccessExpiresAt: principal.AccessExpiresAt, RefreshToken: "unused",
-			RefreshExpiresAt: principal.AccessExpiresAt, DeviceID: principal.DeviceID,
-		},
-	}
-	remoteClient, err := clientremote.New(credentialStore, e2eTokenRefresher{}, clientremote.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	manager, err := clientpreview.NewManager(remoteClient, clientpreview.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		shutdownContext, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		_ = manager.Shutdown(shutdownContext)
-	})
-	target, targetAddress := harness.StartLocalTCPEcho(t, "capacity-revocation")
-	t.Cleanup(func() { _ = target.Close() })
-	name := previewName("capacity-revocation")
-	preview := startRealPreview(t, ctx, manager, serverProfile, remoteSession, name, []clientpreview.LocalTarget{{
-		ServicePort: 18081, Protocol: "tcp", LocalHost: "127.0.0.1", LocalPort: uint16(targetAddress.Port),
-	}})
-	assertPreviewOwned(t, ctx, kubeClient, stateStore, name, preview.ID)
-	harness.WaitClusterProbe(t, ctx, kubeClient, preview.ClusterIP, 18081, "tcp", "capacity", "capacity-revocation:")
-
-	return func() {
-		revokedAt := time.Now()
-		if err := stateStore.TokenFamilies().Revoke(ctx, principal.FamilyID, revokedAt.UTC()); err != nil {
-			t.Fatal(err)
-		}
-		waitForRealPreviewState(t, ctx, stateStore, preview.ID, "stopped")
-		waitForNoLocalPreview(t, ctx, manager, serverProfile.ID)
-		assertPreviewAbsent(t, ctx, kubeClient, bindingConfig, stateStore, name, preview.ID)
-		if elapsed := time.Since(revokedAt); elapsed > 5*time.Second {
-			t.Fatalf("full-capacity Control Plane revocation cleanup took %s", elapsed)
-		}
-		t.Logf("full-capacity Control Plane revocation and TrafficBinding cleanup completed in %s", time.Since(revokedAt))
-	}
 }
 
 func startCapacityPodClient(

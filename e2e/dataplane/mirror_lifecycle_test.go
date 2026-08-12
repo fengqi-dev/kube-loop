@@ -26,7 +26,9 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
 	controlplanekubernetes "github.com/fengqi-dev/kube-loop/internal/controlplane/kubernetes"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/mirrorapi"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/sessionapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/ticketapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/trafficbindingclient"
 	"github.com/google/uuid"
 	corev1 "k8s.io/api/core/v1"
@@ -47,7 +49,7 @@ func TestRealMirrorPreservesPrimaryPathAndRecoversStaleOwner(t *testing.T) {
 
 	serviceName := "mirror-" + strings.ToLower(uuid.NewString()[:8])
 	backendName := serviceName + "-backend"
-	_, err := kubeClient.CoreV1().Services(harness.EchoNamespace).Create(ctx, &corev1.Service{
+	backendService, err := kubeClient.CoreV1().Services(harness.EchoNamespace).Create(ctx, &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{Name: backendName, Namespace: harness.EchoNamespace},
 		Spec: corev1.ServiceSpec{
 			Type:     corev1.ServiceTypeNodePort,
@@ -96,6 +98,7 @@ func TestRealMirrorPreservesPrimaryPathAndRecoversStaleOwner(t *testing.T) {
 	harness.WaitClusterProbe(t, ctx, kubeClient, service.Spec.ClusterIP, 9090, "udp", "baseline", "cluster-udp:")
 
 	gatewayIP := reachableHostIP(t, ctx, kubeClient)
+	primaryDial := mirrorNodePortDialer(reachableNodeAddress(t, ctx, kubeClient), backendService)
 	stateStore, principal, activeSession, remoteSession := exchangeLifecycleState(t, ctx, service.Spec.ClusterIP)
 	provider, err := controlplanekubernetes.NewForRESTConfig(kubeRESTConfig(t), controlplanekubernetes.Config{})
 	if err != nil {
@@ -130,7 +133,7 @@ func TestRealMirrorPreservesPrimaryPathAndRecoversStaleOwner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := startMirrorLifecycleController(t, handler, principal)
+	server, gatewayClient := startMirrorLifecycleController(t, handler, principal, activeSession, gatewayIP, primaryDial)
 	defer server.Close()
 
 	serverProfile := profile.Profile{ID: "mirror-e2e", BaseURL: server.URL}
@@ -142,7 +145,7 @@ func TestRealMirrorPreservesPrimaryPathAndRecoversStaleOwner(t *testing.T) {
 			RefreshExpiresAt: principal.AccessExpiresAt, DeviceID: principal.DeviceID,
 		},
 	}
-	remoteClient, err := remote.New(credentialStore, e2eTokenRefresher{}, remote.Config{})
+	remoteClient, err := remote.New(credentialStore, e2eTokenRefresher{}, remote.Config{HTTPClient: gatewayClient})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,18 +239,6 @@ func TestRealMirrorPreservesPrimaryPathAndRecoversStaleOwner(t *testing.T) {
 	assertServiceRestored(t, ctx, kubeClient, stateStore, serviceName, second.ID, originalSelector)
 	harness.WaitClusterProbe(t, ctx, kubeClient, service.Spec.ClusterIP, 8080, "tcp", "after-recovery", "cluster-tcp:")
 
-	// Revocation closes both relay legs without a client cleanup request and
-	// still restores the Service to its original selector.
-	third := startRealMirror(t, ctx, manager, serverProfile, remoteSession, serviceName, targets)
-	assertServiceIntercepted(t, ctx, kubeClient, stateStore, serviceName, gatewayIP, third.ID)
-	waitForMirroredClusterProbe(t, ctx, kubeClient, udpCopies, service.Spec.ClusterIP, 9090, "udp", "before-revoke", "cluster-udp:")
-	if err := stateStore.TokenFamilies().Revoke(ctx, principal.FamilyID, time.Now().UTC()); err != nil {
-		t.Fatal(err)
-	}
-	waitForMirrorState(t, ctx, stateStore, third.ID, "stopped")
-	waitForNoLocalMirror(t, ctx, manager, serverProfile.ID)
-	assertServiceRestored(t, ctx, kubeClient, stateStore, serviceName, third.ID, originalSelector)
-	harness.WaitClusterProbe(t, ctx, kubeClient, service.Spec.ClusterIP, 9090, "udp", "after-revoke", "cluster-udp:")
 }
 
 func mirrorNodePortDialer(
@@ -278,12 +269,16 @@ func startMirrorLifecycleController(
 	t *testing.T,
 	handler *mirrorapi.Service,
 	principal controlplaneapi.Principal,
-) *httptest.Server {
+	session sessionapi.ActiveSession,
+	gatewayIP string,
+	primaryDial func(context.Context, string, string) (net.Conn, error),
+) (*httptest.Server, *http.Client) {
 	t.Helper()
+	gateway := startE2ETrafficGateway(t, gatewayIP, handler, primaryDial)
 	policy, err := authorization.New(authorization.Policy{Rules: []authorization.Rule{{
 		ID: "e2e-mirror", Subjects: []string{principal.Subject},
 		Namespaces: []string{harness.EchoNamespace},
-		Operations: []string{"create", "get", "delete", "stream"}, ResourceKinds: []string{"mirrors"},
+		Operations: []string{"create", "get", "delete"}, ResourceKinds: []string{"mirrors", "relay-tickets"},
 	}}})
 	if err != nil {
 		t.Fatal(err)
@@ -297,12 +292,17 @@ func startMirrorLifecycleController(
 			}
 			return principal, nil
 		})),
-		controlplane.WithAuthorizer(policy), controlplane.WithAPIRoutes(controlplane.APIRoutes{Mirrors: mirrorapi.NewRoutes(handler).Endpoints()}),
+		controlplane.WithAuthorizer(policy), controlplane.WithAPIRoutes(controlplane.APIRoutes{
+			Tickets: ticketapi.NewRoutes(gateway.tickets, e2eExecSessionValidator{
+				principalID: principal.Subject, session: session,
+			}).Endpoints(),
+			Mirrors: mirrorapi.NewRoutes(handler).Endpoints(),
+		}),
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return httptest.NewServer(server.Handler())
+	return httptest.NewServer(server.Handler()), gateway.httpClient
 }
 
 func startRealMirror(

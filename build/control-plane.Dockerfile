@@ -6,6 +6,7 @@ RUN apk add --no-cache ca-certificates
 COPY go.mod go.sum ./
 RUN go mod download
 COPY cmd/kubeloop-control-plane ./cmd/kubeloop-control-plane
+COPY api ./api
 COPY internal ./internal
 RUN CGO_ENABLED=0 go build -trimpath \
   -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT}" \

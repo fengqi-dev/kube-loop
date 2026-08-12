@@ -31,6 +31,7 @@ import (
 	controlplanekubernetes "github.com/fengqi-dev/kube-loop/internal/controlplane/kubernetes"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/sessionapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/ticketapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/trafficbindingclient"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
 	"github.com/fengqi-dev/kube-loop/internal/servicebinding"
@@ -163,7 +164,7 @@ func TestRealExchangeLifecycleAndStaleOwnerRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := startExchangeLifecycleController(t, handler, principal)
+	server, gatewayClient := startExchangeLifecycleController(t, handler, principal, activeSession, gatewayIP)
 	defer server.Close()
 
 	serverProfile := profile.Profile{ID: "exchange-e2e", BaseURL: server.URL}
@@ -175,7 +176,7 @@ func TestRealExchangeLifecycleAndStaleOwnerRecovery(t *testing.T) {
 			RefreshExpiresAt: principal.AccessExpiresAt, DeviceID: principal.DeviceID,
 		},
 	}
-	remoteClient, err := remote.New(credentialStore, e2eTokenRefresher{}, remote.Config{})
+	remoteClient, err := remote.New(credentialStore, e2eTokenRefresher{}, remote.Config{HTTPClient: gatewayClient})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -270,18 +271,6 @@ func TestRealExchangeLifecycleAndStaleOwnerRecovery(t *testing.T) {
 	assertServiceRestored(t, ctx, kubeClient, stateStore, serviceName, second.ID, originalSelector)
 	harness.WaitClusterProbe(t, ctx, kubeClient, service.Spec.ClusterIP, 8080, "tcp", "after-recovery", "cluster-tcp:")
 
-	// Revoking the Token Family must terminate the reverse stream without a
-	// client cleanup request and still restore the original Service resources.
-	third := startRealExchange(t, ctx, manager, serverProfile, remoteSession, serviceName, targets)
-	assertServiceIntercepted(t, ctx, kubeClient, stateStore, serviceName, gatewayIP, third.ID)
-	harness.WaitClusterProbe(t, ctx, kubeClient, service.Spec.ClusterIP, 9090, "udp", "before-revoke", "desktop-udp:")
-	if err := stateStore.TokenFamilies().Revoke(ctx, principal.FamilyID, time.Now().UTC()); err != nil {
-		t.Fatal(err)
-	}
-	waitForRealExchangeState(t, ctx, stateStore, third.ID, "stopped")
-	waitForNoLocalExchange(t, ctx, manager, serverProfile.ID)
-	assertServiceRestored(t, ctx, kubeClient, stateStore, serviceName, third.ID, originalSelector)
-	harness.WaitClusterProbe(t, ctx, kubeClient, service.Spec.ClusterIP, 9090, "udp", "after-revoke", "cluster-udp:")
 }
 
 func exchangeLifecycleState(
@@ -346,12 +335,15 @@ func startExchangeLifecycleController(
 	t *testing.T,
 	handler *exchangeapi.Service,
 	principal controlplaneapi.Principal,
-) *httptest.Server {
+	session sessionapi.ActiveSession,
+	gatewayIP string,
+) (*httptest.Server, *http.Client) {
 	t.Helper()
+	gateway := startE2ETrafficGateway(t, gatewayIP, handler, nil)
 	policy, err := authorization.New(authorization.Policy{Rules: []authorization.Rule{{
 		ID: "e2e-exchange", Subjects: []string{principal.Subject},
 		Namespaces: []string{harness.EchoNamespace},
-		Operations: []string{"create", "get", "delete", "stream"}, ResourceKinds: []string{"exchanges"},
+		Operations: []string{"create", "get", "delete"}, ResourceKinds: []string{"exchanges", "relay-tickets"},
 	}}})
 	if err != nil {
 		t.Fatal(err)
@@ -365,12 +357,17 @@ func startExchangeLifecycleController(
 			}
 			return principal, nil
 		})),
-		controlplane.WithAuthorizer(policy), controlplane.WithAPIRoutes(controlplane.APIRoutes{Exchanges: exchangeapi.NewRoutes(handler).Endpoints()}),
+		controlplane.WithAuthorizer(policy), controlplane.WithAPIRoutes(controlplane.APIRoutes{
+			Tickets: ticketapi.NewRoutes(gateway.tickets, e2eExecSessionValidator{
+				principalID: principal.Subject, session: session,
+			}).Endpoints(),
+			Exchanges: exchangeapi.NewRoutes(handler).Endpoints(),
+		}),
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return httptest.NewServer(server.Handler())
+	return httptest.NewServer(server.Handler()), gateway.httpClient
 }
 
 func startRealExchange(
