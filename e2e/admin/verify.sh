@@ -6,10 +6,13 @@ NAMESPACE="${KUBELOOP_ADMIN_E2E_NAMESPACE:-kubeloop-helm-sqlite}"
 RELEASE="${KUBELOOP_ADMIN_E2E_RELEASE:-sqlite}"
 PUBLIC_ORIGIN="${KUBELOOP_ADMIN_E2E_PUBLIC_ORIGIN:-http://127.0.0.1:8081}"
 LOCAL_PORT="${KUBELOOP_ADMIN_E2E_LOCAL_PORT:-18081}"
+PUBLIC_LOCAL_PORT="${KUBELOOP_ADMIN_E2E_PUBLIC_LOCAL_PORT:-18080}"
 CREDENTIAL="${KUBELOOP_ADMIN_E2E_BREAK_GLASS_CREDENTIAL:-}"
 MANAGEMENT_SERVICE="${RELEASE}-kubeloop-control-plane-management"
+CONTROL_PLANE_SERVICE="${RELEASE}-kubeloop-control-plane"
 WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/kubeloop-admin-e2e.XXXXXX")"
 PORT_FORWARD_PID=""
+PUBLIC_PORT_FORWARD_PID=""
 
 if [[ -z "${CREDENTIAL}" ]]; then
   echo "KUBELOOP_ADMIN_E2E_BREAK_GLASS_CREDENTIAL is required" >&2
@@ -25,6 +28,10 @@ cleanup() {
   if [[ -n "${PORT_FORWARD_PID}" ]]; then
     kill "${PORT_FORWARD_PID}" >/dev/null 2>&1
     wait "${PORT_FORWARD_PID}" >/dev/null 2>&1
+  fi
+  if [[ -n "${PUBLIC_PORT_FORWARD_PID}" ]]; then
+    kill "${PUBLIC_PORT_FORWARD_PID}" >/dev/null 2>&1
+    wait "${PUBLIC_PORT_FORWARD_PID}" >/dev/null 2>&1
   fi
   case "${WORK_DIR}" in
     "${TMPDIR:-/tmp}"/kubeloop-admin-e2e.*) rm -rf -- "${WORK_DIR}" ;;
@@ -163,8 +170,24 @@ REVOKE_STATUS="$(admin_post "/principals/${PRINCIPAL_ID}/revoke" '' 'admin-e2e-r
   '{"reason":"revoke compromised e2e principal"}' "${WORK_DIR}/revoke.json")"
 [[ "${REVOKE_STATUS}" == "200" ]]
 jq -e --arg principal "${PRINCIPAL_ID}" '.principalId == $principal and .revokedCount >= 1' "${WORK_DIR}/revoke.json" >/dev/null
+
+kubectl port-forward --namespace "${NAMESPACE}" "service/${CONTROL_PLANE_SERVICE}" \
+  "${PUBLIC_LOCAL_PORT}:80" >"${WORK_DIR}/public-port-forward.log" 2>&1 &
+PUBLIC_PORT_FORWARD_PID=$!
+PUBLIC_BASE_URL="http://127.0.0.1:${PUBLIC_LOCAL_PORT}"
+for _ in $(seq 1 60); do
+  if curl --silent --fail "${PUBLIC_BASE_URL}/.well-known/kubeloop" >/dev/null 2>&1; then
+    break
+  fi
+  if ! kill -0 "${PUBLIC_PORT_FORWARD_PID}" >/dev/null 2>&1; then
+    cat "${WORK_DIR}/public-port-forward.log" >&2
+    exit 1
+  fi
+  sleep 1
+done
+curl --silent --show-error --fail "${PUBLIC_BASE_URL}/.well-known/kubeloop" >/dev/null
 TOKEN_STATUS="$(curl --silent --output "${WORK_DIR}/revoked-token.json" --write-out '%{http_code}' \
-  --header "Authorization: Bearer ${ACCESS_TOKEN}" "${BASE_URL}/kubeloop/api/version")"
+  --header "Authorization: Bearer ${ACCESS_TOKEN}" "${PUBLIC_BASE_URL}/kubeloop/api/version")"
 [[ "${TOKEN_STATUS}" == "401" ]]
 
 echo "Management security E2E passed (CSP, CSRF, concurrent publish, revocation)"
