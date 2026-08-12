@@ -3,6 +3,7 @@ package helm
 import (
 	"bytes"
 	"crypto/sha256"
+	"encoding/base64"
 	"errors"
 	"io"
 	"os"
@@ -112,6 +113,10 @@ func TestSQLiteChartRendersIndependentSecureWorkloads(t *testing.T) {
 		t.Fatal("RelayTicket private signing key is not isolated to ControlPlane")
 	}
 	initialAdminSecret := objectByName(t, objects, "Secret", "test-kubeloop-control-plane-initial-admin")
+	mfaEncryptionKey, err := base64.StdEncoding.DecodeString(valueAt(t, initialAdminSecret, "data", "mfa-encryption-key").(string))
+	if err != nil || len(mfaEncryptionKey) != 32 {
+		t.Fatalf("initial administrator MFA encryption key length = %d, error = %v", len(mfaEncryptionKey), err)
+	}
 	if valueAt(t, initialAdminSecret, "data", "signing-key.pem") == "" ||
 		!strings.Contains(string(controlPlaneYAML), "token/signing-key.pem") {
 		t.Fatal("initial administrator install is missing its retained OAuth/OIDC signing key")

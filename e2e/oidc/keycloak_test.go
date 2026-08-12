@@ -4,6 +4,8 @@ package oidc_test
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"io"
 	"net/http"
@@ -25,6 +27,7 @@ func TestKeycloakBrowserLoginRefreshAndRevoke(t *testing.T) {
 	username := requiredEnvironment(t, "KUBELOOP_OIDC_E2E_USERNAME")
 	password := requiredEnvironment(t, "KUBELOOP_OIDC_E2E_PASSWORD")
 	artifacts := requiredEnvironment(t, "KUBELOOP_OIDC_E2E_ARTIFACTS")
+	httpClient := trustedHTTPClient(t, requiredEnvironment(t, "KUBELOOP_OIDC_E2E_CA_FILE"))
 	if err := os.MkdirAll(artifacts, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -32,6 +35,7 @@ func TestKeycloakBrowserLoginRefreshAndRevoke(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
 	defer cancel()
 	client := clientauth.New(clientauth.Config{
+		HTTPClient:     httpClient,
 		RequestTimeout: 10 * time.Second,
 		LoginTimeout:   60 * time.Second,
 		OpenBrowser: func(target string) error {
@@ -63,7 +67,7 @@ func TestKeycloakBrowserLoginRefreshAndRevoke(t *testing.T) {
 		t.Fatal(err)
 	}
 	request.Header.Set("Authorization", "Bearer "+credential.AccessToken)
-	response, err := http.DefaultClient.Do(request)
+	response, err := httpClient.Do(request)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,6 +93,25 @@ func TestKeycloakBrowserLoginRefreshAndRevoke(t *testing.T) {
 	if _, err := client.Refresh(ctx, baseURL, refreshed); err == nil {
 		t.Fatal("revoked token family was refreshed")
 	}
+}
+
+func trustedHTTPClient(t *testing.T, certificateFile string) *http.Client {
+	t.Helper()
+	certificate, err := os.ReadFile(certificateFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	roots, err := x509.SystemCertPool()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !roots.AppendCertsFromPEM(certificate) {
+		t.Fatal("OIDC E2E CA file contains no certificates")
+	}
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.TLSClientConfig = &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12}
+	t.Cleanup(transport.CloseIdleConnections)
+	return &http.Client{Transport: transport}
 }
 
 func requiredEnvironment(t *testing.T, name string) string {

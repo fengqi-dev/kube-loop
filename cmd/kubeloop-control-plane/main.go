@@ -892,14 +892,11 @@ func initializeLocalUsers(
 		return nil, adminlocaluser.User{}, err
 	}
 	defer clear(password)
-	mfaKey, err := readSecretFile(mfaKeyFile, 64)
+	mfaKey, err := readBinarySecretFile(mfaKeyFile, 32)
 	if err != nil {
 		return nil, adminlocaluser.User{}, err
 	}
 	defer clear(mfaKey)
-	if len(mfaKey) != 32 {
-		return nil, adminlocaluser.User{}, errors.New("Management Plane MFA key must contain exactly 32 bytes")
-	}
 	service, err := adminlocaluser.New(store, mfaKey, issuer)
 	if err != nil {
 		return nil, adminlocaluser.User{}, err
@@ -923,6 +920,18 @@ func readSecretFile(path string, maximum int) ([]byte, error) {
 	if len(value) == 0 || len(value) > maximum {
 		clear(value)
 		return nil, errors.New("Management Plane administrator Secret value is invalid")
+	}
+	return value, nil
+}
+
+func readBinarySecretFile(path string, exactLength int) ([]byte, error) {
+	value, err := os.ReadFile(path)
+	if err != nil {
+		return nil, errors.New("read Management Plane administrator Secret")
+	}
+	if len(value) != exactLength {
+		clear(value)
+		return nil, fmt.Errorf("Management Plane MFA key must contain exactly %d bytes", exactLength)
 	}
 	return value, nil
 }

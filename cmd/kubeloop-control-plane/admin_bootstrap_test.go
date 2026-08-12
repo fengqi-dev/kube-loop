@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -10,6 +12,22 @@ import (
 	adminrevision "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/revision"
 	controlplanestorage "github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 )
+
+func TestReadBinarySecretFilePreservesWhitespaceBytes(t *testing.T) {
+	want := bytes.Repeat([]byte{0x42}, 32)
+	want[0], want[len(want)-1] = '\n', ' '
+	path := filepath.Join(t.TempDir(), "mfa-key")
+	if err := os.WriteFile(path, want, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := readBinarySecretFile(path, 32)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("binary Secret changed: got %x, want %x", got, want)
+	}
+}
 
 func TestEnsureInitialAdminPolicyIsOneTime(t *testing.T) {
 	ctx := context.Background()

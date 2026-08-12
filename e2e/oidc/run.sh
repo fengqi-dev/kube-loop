@@ -31,8 +31,10 @@ CLIENT_ID="kubeloop-e2e"
 CLIENT_SECRET="keycloak-client-secret"
 USERNAME="oidc-e2e-user"
 PASSWORD="oidc-e2e-password"
-PUBLIC_URL="http://127.0.0.1:18080"
+BACKEND_URL="http://127.0.0.1:18080"
+PUBLIC_URL="https://127.0.0.1:18443"
 PORT_FORWARD_PID=""
+TLS_PROXY_PID=""
 
 mkdir -p "${ARTIFACTS}"
 rm -f "${ARTIFACTS}"/*
@@ -43,6 +45,10 @@ cleanup() {
   if [[ -n "${PORT_FORWARD_PID}" ]]; then
     kill "${PORT_FORWARD_PID}" >/dev/null 2>&1 || true
     wait "${PORT_FORWARD_PID}" >/dev/null 2>&1 || true
+  fi
+  if [[ -n "${TLS_PROXY_PID}" ]]; then
+    kill "${TLS_PROXY_PID}" >/dev/null 2>&1 || true
+    wait "${TLS_PROXY_PID}" >/dev/null 2>&1 || true
   fi
   if [[ "${status}" == "0" || "${KUBELOOP_OIDC_E2E_KEEP_ON_FAILURE:-}" != "1" ]]; then
     helm uninstall "${RELEASE}" --namespace "${KUBELOOP_NAMESPACE}" --wait >/dev/null 2>&1 || true
@@ -64,6 +70,19 @@ openssl req -x509 -newkey rsa:2048 -nodes -days 2 \
   -keyout "${WORK_DIR}/tls.key" -out "${WORK_DIR}/tls.crt" \
   -subj "/CN=${KEYCLOAK_HOST}" \
   -addext "subjectAltName=DNS:${KEYCLOAK_HOST}" >/dev/null 2>&1
+openssl req -x509 -newkey rsa:2048 -nodes -days 2 \
+  -keyout "${WORK_DIR}/public-ca.key" -out "${WORK_DIR}/public-ca.crt" \
+  -subj "/CN=KubeLoop OIDC E2E CA" \
+  -addext "basicConstraints=critical,CA:TRUE" \
+  -addext "keyUsage=critical,keyCertSign,cRLSign" >/dev/null 2>&1
+openssl req -new -newkey rsa:2048 -nodes \
+  -keyout "${WORK_DIR}/public-tls.key" -out "${WORK_DIR}/public-tls.csr" \
+  -subj "/CN=127.0.0.1" \
+  -addext "subjectAltName=IP:127.0.0.1" >/dev/null 2>&1
+openssl x509 -req -days 2 \
+  -in "${WORK_DIR}/public-tls.csr" \
+  -CA "${WORK_DIR}/public-ca.crt" -CAkey "${WORK_DIR}/public-ca.key" -CAcreateserial \
+  -copy_extensions copy -out "${WORK_DIR}/public-tls.crt" >/dev/null 2>&1
 openssl genpkey -algorithm ED25519 -out "${WORK_DIR}/relay-signing-key.pem" >/dev/null 2>&1
 openssl pkey -in "${WORK_DIR}/relay-signing-key.pem" -pubout -out "${WORK_DIR}/relay-verification-key.pem" >/dev/null 2>&1
 openssl genpkey -algorithm ED25519 -out "${WORK_DIR}/token-signing-key.pem" >/dev/null 2>&1
@@ -262,16 +281,33 @@ kubectl port-forward --namespace "${KUBELOOP_NAMESPACE}" \
   "service/${RELEASE}-kubeloop-control-plane" 18080:80 >"${ARTIFACTS}/port-forward.log" 2>&1 &
 PORT_FORWARD_PID=$!
 for _ in $(seq 1 30); do
-  if curl --silent --show-error --fail "${PUBLIC_URL}/health/ready" >/dev/null; then
+  if curl --silent --show-error --fail "${BACKEND_URL}/health/ready" >/dev/null; then
     break
   fi
   sleep 1
 done
-curl --silent --show-error --fail "${PUBLIC_URL}/health/ready" >/dev/null
+curl --silent --show-error --fail "${BACKEND_URL}/health/ready" >/dev/null
+
+go build -o "${WORK_DIR}/tls-proxy" ./e2e/oidc/tlsproxy
+"${WORK_DIR}/tls-proxy" \
+  --listen 127.0.0.1:18443 --target "${BACKEND_URL}" \
+  --cert "${WORK_DIR}/public-tls.crt" --key "${WORK_DIR}/public-tls.key" \
+  >"${ARTIFACTS}/tls-proxy.log" 2>&1 &
+TLS_PROXY_PID=$!
+for _ in $(seq 1 30); do
+  if curl --silent --show-error --fail --cacert "${WORK_DIR}/public-ca.crt" \
+    "${PUBLIC_URL}/health/ready" >/dev/null; then
+    break
+  fi
+  sleep 1
+done
+curl --silent --show-error --fail --cacert "${WORK_DIR}/public-ca.crt" \
+  "${PUBLIC_URL}/health/ready" >/dev/null
 
 cd "${ROOT}"
 KUBELOOP_OIDC_E2E=1 \
 KUBELOOP_OIDC_E2E_BASE_URL="${PUBLIC_URL}" \
+KUBELOOP_OIDC_E2E_CA_FILE="${WORK_DIR}/public-ca.crt" \
 KUBELOOP_OIDC_E2E_USERNAME="${USERNAME}" \
 KUBELOOP_OIDC_E2E_PASSWORD="${PASSWORD}" \
 KUBELOOP_OIDC_E2E_ARTIFACTS="${ARTIFACTS}" \
