@@ -2,13 +2,12 @@
 
 !go.mod
 !go.sum
+!api
+!api/**/*.go
 !internal
-!internal/operator
-!internal/operator/api
-!internal/operator/api/**/*.go
-!internal/operator/trafficbinding
-!internal/operator/trafficbinding/**/*.go
-internal/operator/**/*_test.go
+!internal/controller
+!internal/controller/**/*.go
+internal/controller/**/*_test.go
 !cmd
 !cmd/kubeloop-operator
 !cmd/kubeloop-operator/**/*.go

@@ -31,7 +31,7 @@ POSTGRES_RELEASE="postgresql"
 POSTGRES_NAMESPACE="kubeloop-helm-postgresql"
 CRD="trafficbindings.traffic.kubeloop.io"
 
-CONTROLLER_IMAGE="${KUBELOOP_HELM_E2E_CONTROLLER_IMAGE:-kubeloop/controller:e2e}"
+CONTROL_PLANE_IMAGE="${KUBELOOP_HELM_E2E_CONTROL_PLANE_IMAGE:-kubeloop/control-plane:e2e}"
 DATA_PLANE_IMAGE="${KUBELOOP_HELM_E2E_DATA_PLANE_IMAGE:-kubeloop/gateway:e2e}"
 OPERATOR_IMAGE="${KUBELOOP_HELM_E2E_OPERATOR_IMAGE:-kubeloop/operator:e2e}"
 POSTGRES_IMAGE="${KUBELOOP_HELM_E2E_POSTGRES_IMAGE:-postgres:17-alpine}"
@@ -94,7 +94,7 @@ create_relay_material() {
     --from-file="signing-key.pem=${directory}/signing-key.pem"
   )
   if [[ "${registry_enabled}" == "true" ]]; then
-    local registry_name="${release}-kubeloop-controller-relay.${namespace}.svc"
+    local registry_name="${release}-kubeloop-control-plane-relay.${namespace}.svc"
     openssl req -x509 -newkey rsa:2048 -nodes -days 2 \
       -keyout "${directory}/tls.key" -out "${directory}/tls.crt" \
       -subj "/CN=${registry_name}" \
@@ -145,10 +145,10 @@ helm_apply() {
     --namespace "${namespace}"
     --wait --timeout 5m --history-max 10
     --set-string publicURL=https://kubeloop.e2e.invalid
-    --set-string "controller.relay.existingSecret=${release}-relay"
-    --set-string "controller.image.repository=$(image_repository "${CONTROLLER_IMAGE}")"
-    --set-string "controller.image.tag=$(image_tag "${CONTROLLER_IMAGE}")"
-    --set-string controller.image.pullPolicy=IfNotPresent
+    --set-string "controlPlane.relay.existingSecret=${release}-relay"
+    --set-string "controlPlane.image.repository=$(image_repository "${CONTROL_PLANE_IMAGE}")"
+    --set-string "controlPlane.image.tag=$(image_tag "${CONTROL_PLANE_IMAGE}")"
+    --set-string controlPlane.image.pullPolicy=IfNotPresent
     --set-string "dataPlane.image.repository=$(image_repository "${DATA_PLANE_IMAGE}")"
     --set-string "dataPlane.image.tag=$(image_tag "${DATA_PLANE_IMAGE}")"
     --set-string dataPlane.image.pullPolicy=IfNotPresent
@@ -158,34 +158,34 @@ helm_apply() {
   )
   if [[ "${mode}" == "sqlite" ]]; then
     args+=(
-      --set-string controller.relayRegistry.endpointAllowedHosts=.kubeloop.e2e.invalid
+      --set-string controlPlane.relayRegistry.endpointAllowedHosts=.kubeloop.e2e.invalid
       --set-string 'dataPlane.relayRegistry.endpoint=wss://{podName}.kubeloop.e2e.invalid/tunnel'
-      --set controller.auth.developmentMode=true
-      --set-string controller.auth.token.existingSecret="${release}-relay"
-      --set-string controller.auth.providers[0].id=audit
-      --set-string controller.auth.providers[0].type=anonymous
-      --set-string controller.auth.providers[0].displayName='Anonymous Audit E2E'
-      --set-string controller.auth.providers[0].anonymous.subject=audit-user
-      --set-string controller.auth.providers[0].anonymous.groups[0]=impersonation-audit
-      --set-string controller.auth.providers[0].anonymous.groups[1]=unmapped-claim
-      --set-string controller.policy.rules[0].id=impersonation-audit
-      --set-string controller.policy.rules[0].groups[0]=impersonation-audit
-      --set-string 'controller.policy.rules[0].namespaces[0]=$cluster'
-      --set-string controller.policy.rules[0].operations[0]=list
-      --set-string controller.policy.rules[0].resourceKinds[0]=version
-      --set controller.kubernetes.impersonation.enabled=true
-      --set-string controller.kubernetes.impersonation.usernamePrefix=kubeloop:
-      --set-string controller.kubernetes.impersonation.groupMappings.impersonation-audit[0]=kubeloop:audit-users
-      --set controller.management.breakGlass.enabled=true
-      --set-string controller.management.breakGlass.secretAlias=e2e
-      --set-string controller.management.breakGlass.secretAliases.e2e.existingSecret="${release}-management"
-      --set-string controller.management.breakGlass.secretAliases.e2e.credentialKey=credential
+      --set controlPlane.auth.developmentMode=true
+      --set-string controlPlane.auth.token.existingSecret="${release}-relay"
+      --set-string controlPlane.auth.providers[0].id=audit
+      --set-string controlPlane.auth.providers[0].type=anonymous
+      --set-string controlPlane.auth.providers[0].displayName='Anonymous Audit E2E'
+      --set-string controlPlane.auth.providers[0].anonymous.subject=audit-user
+      --set-string controlPlane.auth.providers[0].anonymous.groups[0]=impersonation-audit
+      --set-string controlPlane.auth.providers[0].anonymous.groups[1]=unmapped-claim
+      --set-string controlPlane.policy.rules[0].id=impersonation-audit
+      --set-string controlPlane.policy.rules[0].groups[0]=impersonation-audit
+      --set-string 'controlPlane.policy.rules[0].namespaces[0]=$cluster'
+      --set-string controlPlane.policy.rules[0].operations[0]=list
+      --set-string controlPlane.policy.rules[0].resourceKinds[0]=version
+      --set controlPlane.kubernetes.impersonation.enabled=true
+      --set-string controlPlane.kubernetes.impersonation.usernamePrefix=kubeloop:
+      --set-string controlPlane.kubernetes.impersonation.groupMappings.impersonation-audit[0]=kubeloop:audit-users
+      --set controlPlane.management.breakGlass.enabled=true
+      --set-string controlPlane.management.breakGlass.secretAlias=e2e
+      --set-string controlPlane.management.breakGlass.secretAliases.e2e.existingSecret="${release}-management"
+      --set-string controlPlane.management.breakGlass.secretAliases.e2e.credentialKey=credential
     )
   else
     args+=(
-      --set-string controller.storage.type=postgresql
-      --set-string "controller.storage.postgresql.existingSecret=${release}-postgresql"
-      --set controller.relayRegistry.enabled=false
+      --set-string controlPlane.storage.type=postgresql
+      --set-string "controlPlane.storage.postgresql.existingSecret=${release}-postgresql"
+      --set controlPlane.relayRegistry.enabled=false
       --set-string "dataPlane.relay.existingSecret=${release}-relay-verification"
     )
   fi
@@ -195,7 +195,7 @@ helm_apply() {
 rollout_all() {
   local namespace=$1
   local release=$2
-  for component in controller gateway operator; do
+  for component in control-plane gateway operator; do
     kubectl rollout status "deployment/${release}-kubeloop-${component}" \
       --namespace "${namespace}" --timeout=5m
   done
@@ -306,7 +306,7 @@ spec:
   volumes:
     - name: data
       persistentVolumeClaim:
-        claimName: ${SQLITE_RELEASE}-kubeloop-controller-data
+        claimName: ${SQLITE_RELEASE}-kubeloop-control-plane-data
 EOF
   if ! kubectl wait pod/sqlite-retention-probe --namespace "${SQLITE_NAMESPACE}" \
     --for=jsonpath='{.status.phase}'=Succeeded --timeout=2m; then
@@ -409,13 +409,13 @@ install_postgresql
 
 log "Install SQLite release with dynamic Relay Registry"
 helm_apply sqlite \
-  --set-string 'controller.podAnnotations.e2e\.kubeloop\.io/revision=v1' \
+  --set-string 'controlPlane.podAnnotations.e2e\.kubeloop\.io/revision=v1' \
   --set-string 'dataPlane.podAnnotations.e2e\.kubeloop\.io/revision=v1' \
   --set-string 'operator.podAnnotations.e2e\.kubeloop\.io/revision=v1'
 rollout_all "${SQLITE_NAMESPACE}" "${SQLITE_RELEASE}"
 CRD_UID="$(kubectl get crd "${CRD}" -o jsonpath='{.metadata.uid}')"
 kubectl explain trafficbinding.spec.mode >/dev/null
-SQLITE_PVC_UID="$(kubectl get pvc "${SQLITE_RELEASE}-kubeloop-controller-data" \
+SQLITE_PVC_UID="$(kubectl get pvc "${SQLITE_RELEASE}-kubeloop-control-plane-data" \
   --namespace "${SQLITE_NAMESPACE}" -o jsonpath='{.metadata.uid}')"
 sqlite_probe write
 
@@ -434,80 +434,80 @@ KUBELOOP_ADMIN_E2E_NAMESPACE="${SQLITE_NAMESPACE}" \
   KUBELOOP_ADMIN_E2E_BREAK_GLASS_CREDENTIAL="${SQLITE_BREAK_GLASS_CREDENTIAL}" \
   "${ROOT}/e2e/admin/verify.sh"
 
-log "Upgrade Controller without restarting Data Plane or Operator"
+log "Upgrade Control Plane without restarting Data Plane or Operator"
 DATA_PLANE_UIDS="$(pod_uids "${SQLITE_NAMESPACE}" "${SQLITE_RELEASE}" data-plane)"
 OPERATOR_UIDS="$(pod_uids "${SQLITE_NAMESPACE}" "${SQLITE_RELEASE}" operator)"
 helm_apply sqlite \
-  --set-string 'controller.podAnnotations.e2e\.kubeloop\.io/revision=v2' \
+  --set-string 'controlPlane.podAnnotations.e2e\.kubeloop\.io/revision=v2' \
   --set-string 'dataPlane.podAnnotations.e2e\.kubeloop\.io/revision=v1' \
   --set-string 'operator.podAnnotations.e2e\.kubeloop\.io/revision=v1'
-assert_equal "$(pod_uids "${SQLITE_NAMESPACE}" "${SQLITE_RELEASE}" data-plane)" "${DATA_PLANE_UIDS}" "Data Plane changed during Controller upgrade"
-assert_equal "$(pod_uids "${SQLITE_NAMESPACE}" "${SQLITE_RELEASE}" operator)" "${OPERATOR_UIDS}" "Operator changed during Controller upgrade"
+assert_equal "$(pod_uids "${SQLITE_NAMESPACE}" "${SQLITE_RELEASE}" data-plane)" "${DATA_PLANE_UIDS}" "Data Plane changed during Control Plane upgrade"
+assert_equal "$(pod_uids "${SQLITE_NAMESPACE}" "${SQLITE_RELEASE}" operator)" "${OPERATOR_UIDS}" "Operator changed during Control Plane upgrade"
 
-log "Upgrade Data Plane without restarting Controller or Operator"
-CONTROLLER_UIDS="$(pod_uids "${SQLITE_NAMESPACE}" "${SQLITE_RELEASE}" controller)"
+log "Upgrade Data Plane without restarting Control Plane or Operator"
+CONTROL_PLANE_UIDS="$(pod_uids "${SQLITE_NAMESPACE}" "${SQLITE_RELEASE}" control-plane)"
 OPERATOR_UIDS="$(pod_uids "${SQLITE_NAMESPACE}" "${SQLITE_RELEASE}" operator)"
 helm_apply sqlite \
-  --set-string 'controller.podAnnotations.e2e\.kubeloop\.io/revision=v2' \
+  --set-string 'controlPlane.podAnnotations.e2e\.kubeloop\.io/revision=v2' \
   --set-string 'dataPlane.podAnnotations.e2e\.kubeloop\.io/revision=v2' \
   --set-string 'operator.podAnnotations.e2e\.kubeloop\.io/revision=v1'
-assert_equal "$(pod_uids "${SQLITE_NAMESPACE}" "${SQLITE_RELEASE}" controller)" "${CONTROLLER_UIDS}" "Controller changed during Data Plane upgrade"
+assert_equal "$(pod_uids "${SQLITE_NAMESPACE}" "${SQLITE_RELEASE}" control-plane)" "${CONTROL_PLANE_UIDS}" "Control Plane changed during Data Plane upgrade"
 assert_equal "$(pod_uids "${SQLITE_NAMESPACE}" "${SQLITE_RELEASE}" operator)" "${OPERATOR_UIDS}" "Operator changed during Data Plane upgrade"
 
-log "Upgrade Operator without restarting Controller or Data Plane"
-CONTROLLER_UIDS="$(pod_uids "${SQLITE_NAMESPACE}" "${SQLITE_RELEASE}" controller)"
+log "Upgrade Operator without restarting Control Plane or Data Plane"
+CONTROL_PLANE_UIDS="$(pod_uids "${SQLITE_NAMESPACE}" "${SQLITE_RELEASE}" control-plane)"
 DATA_PLANE_UIDS="$(pod_uids "${SQLITE_NAMESPACE}" "${SQLITE_RELEASE}" data-plane)"
 helm_apply sqlite \
-  --set-string 'controller.podAnnotations.e2e\.kubeloop\.io/revision=v2' \
+  --set-string 'controlPlane.podAnnotations.e2e\.kubeloop\.io/revision=v2' \
   --set-string 'dataPlane.podAnnotations.e2e\.kubeloop\.io/revision=v2' \
   --set-string 'operator.podAnnotations.e2e\.kubeloop\.io/revision=v2'
-assert_equal "$(pod_uids "${SQLITE_NAMESPACE}" "${SQLITE_RELEASE}" controller)" "${CONTROLLER_UIDS}" "Controller changed during Operator upgrade"
+assert_equal "$(pod_uids "${SQLITE_NAMESPACE}" "${SQLITE_RELEASE}" control-plane)" "${CONTROL_PLANE_UIDS}" "Control Plane changed during Operator upgrade"
 assert_equal "$(pod_uids "${SQLITE_NAMESPACE}" "${SQLITE_RELEASE}" data-plane)" "${DATA_PLANE_UIDS}" "Data Plane changed during Operator upgrade"
 
 log "Rollback SQLite release and verify persistent data"
 helm rollback "${SQLITE_RELEASE}" 1 --namespace "${SQLITE_NAMESPACE}" --wait --timeout 5m
 rollout_all "${SQLITE_NAMESPACE}" "${SQLITE_RELEASE}"
-assert_equal "$(kubectl get pvc "${SQLITE_RELEASE}-kubeloop-controller-data" --namespace "${SQLITE_NAMESPACE}" -o jsonpath='{.metadata.uid}')" "${SQLITE_PVC_UID}" "SQLite PVC identity after rollback"
+assert_equal "$(kubectl get pvc "${SQLITE_RELEASE}-kubeloop-control-plane-data" --namespace "${SQLITE_NAMESPACE}" -o jsonpath='{.metadata.uid}')" "${SQLITE_PVC_UID}" "SQLite PVC identity after rollback"
 sqlite_probe read
 
-log "Scale Data Plane without restarting Controller or Operator"
-CONTROLLER_UIDS="$(pod_uids "${SQLITE_NAMESPACE}" "${SQLITE_RELEASE}" controller)"
+log "Scale Data Plane without restarting Control Plane or Operator"
+CONTROL_PLANE_UIDS="$(pod_uids "${SQLITE_NAMESPACE}" "${SQLITE_RELEASE}" control-plane)"
 OPERATOR_UIDS="$(pod_uids "${SQLITE_NAMESPACE}" "${SQLITE_RELEASE}" operator)"
 helm_apply sqlite \
   --set dataPlane.replicas=2 \
-  --set-string 'controller.podAnnotations.e2e\.kubeloop\.io/revision=v1' \
+  --set-string 'controlPlane.podAnnotations.e2e\.kubeloop\.io/revision=v1' \
   --set-string 'dataPlane.podAnnotations.e2e\.kubeloop\.io/revision=v1' \
   --set-string 'operator.podAnnotations.e2e\.kubeloop\.io/revision=v1' \
   --set-string 'dataPlane.relayRegistry.endpoint=wss://{podName}.kubeloop.e2e.invalid/tunnel'
 assert_replicas "${SQLITE_NAMESPACE}" "${SQLITE_RELEASE}-kubeloop-gateway" 2
-assert_equal "$(pod_uids "${SQLITE_NAMESPACE}" "${SQLITE_RELEASE}" controller)" "${CONTROLLER_UIDS}" "Controller changed during Data Plane scale"
+assert_equal "$(pod_uids "${SQLITE_NAMESPACE}" "${SQLITE_RELEASE}" control-plane)" "${CONTROL_PLANE_UIDS}" "Control Plane changed during Data Plane scale"
 assert_equal "$(pod_uids "${SQLITE_NAMESPACE}" "${SQLITE_RELEASE}" operator)" "${OPERATOR_UIDS}" "Operator changed during Data Plane scale"
 helm_apply sqlite \
   --set dataPlane.replicas=1 \
-  --set-string 'controller.podAnnotations.e2e\.kubeloop\.io/revision=v1' \
+  --set-string 'controlPlane.podAnnotations.e2e\.kubeloop\.io/revision=v1' \
   --set-string 'dataPlane.podAnnotations.e2e\.kubeloop\.io/revision=v1' \
   --set-string 'operator.podAnnotations.e2e\.kubeloop\.io/revision=v1'
 
-log "Scale Operator without restarting Controller or Data Plane"
-CONTROLLER_UIDS="$(pod_uids "${SQLITE_NAMESPACE}" "${SQLITE_RELEASE}" controller)"
+log "Scale Operator without restarting Control Plane or Data Plane"
+CONTROL_PLANE_UIDS="$(pod_uids "${SQLITE_NAMESPACE}" "${SQLITE_RELEASE}" control-plane)"
 DATA_PLANE_UIDS="$(pod_uids "${SQLITE_NAMESPACE}" "${SQLITE_RELEASE}" data-plane)"
 helm_apply sqlite \
   --set operator.replicas=2 \
-  --set-string 'controller.podAnnotations.e2e\.kubeloop\.io/revision=v1' \
+  --set-string 'controlPlane.podAnnotations.e2e\.kubeloop\.io/revision=v1' \
   --set-string 'dataPlane.podAnnotations.e2e\.kubeloop\.io/revision=v1' \
   --set-string 'operator.podAnnotations.e2e\.kubeloop\.io/revision=v1'
 assert_replicas "${SQLITE_NAMESPACE}" "${SQLITE_RELEASE}-kubeloop-operator" 2
-assert_equal "$(pod_uids "${SQLITE_NAMESPACE}" "${SQLITE_RELEASE}" controller)" "${CONTROLLER_UIDS}" "Controller changed during Operator scale"
+assert_equal "$(pod_uids "${SQLITE_NAMESPACE}" "${SQLITE_RELEASE}" control-plane)" "${CONTROL_PLANE_UIDS}" "Control Plane changed during Operator scale"
 assert_equal "$(pod_uids "${SQLITE_NAMESPACE}" "${SQLITE_RELEASE}" data-plane)" "${DATA_PLANE_UIDS}" "Data Plane changed during Operator scale"
 helm_apply sqlite \
   --set operator.replicas=1 \
-  --set-string 'controller.podAnnotations.e2e\.kubeloop\.io/revision=v1' \
+  --set-string 'controlPlane.podAnnotations.e2e\.kubeloop\.io/revision=v1' \
   --set-string 'dataPlane.podAnnotations.e2e\.kubeloop\.io/revision=v1' \
   --set-string 'operator.podAnnotations.e2e\.kubeloop\.io/revision=v1'
 rollout_all "${SQLITE_NAMESPACE}" "${SQLITE_RELEASE}"
 
 log "Recover all SQLite-mode components from Pod failure"
-restart_component "${SQLITE_NAMESPACE}" "${SQLITE_RELEASE}" controller "${SQLITE_RELEASE}-kubeloop-controller"
+restart_component "${SQLITE_NAMESPACE}" "${SQLITE_RELEASE}" control-plane "${SQLITE_RELEASE}-kubeloop-control-plane"
 restart_component "${SQLITE_NAMESPACE}" "${SQLITE_RELEASE}" data-plane "${SQLITE_RELEASE}-kubeloop-gateway"
 restart_component "${SQLITE_NAMESPACE}" "${SQLITE_RELEASE}" operator "${SQLITE_RELEASE}-kubeloop-operator"
 sqlite_probe read
@@ -518,24 +518,24 @@ rollout_all "${POSTGRES_NAMESPACE}" "${POSTGRES_RELEASE}"
 assert_equal "$(kubectl get crd "${CRD}" -o jsonpath='{.metadata.uid}')" "${CRD_UID}" "CRD identity after second Helm install"
 postgres_exec -c 'CREATE TABLE helm_e2e_retention (value text PRIMARY KEY); INSERT INTO helm_e2e_retention VALUES ('"'"'retained'"'"');' >/dev/null
 
-log "Scale PostgreSQL Controller without restarting other components"
+log "Scale PostgreSQL Control Plane without restarting other components"
 DATA_PLANE_UIDS="$(pod_uids "${POSTGRES_NAMESPACE}" "${POSTGRES_RELEASE}" data-plane)"
 OPERATOR_UIDS="$(pod_uids "${POSTGRES_NAMESPACE}" "${POSTGRES_RELEASE}" operator)"
 helm_apply postgresql \
-  --set controller.replicas=2 \
-  --set-string 'controller.podAnnotations.e2e\.kubeloop\.io/revision=v2'
-assert_replicas "${POSTGRES_NAMESPACE}" "${POSTGRES_RELEASE}-kubeloop-controller" 2
-assert_equal "$(pod_uids "${POSTGRES_NAMESPACE}" "${POSTGRES_RELEASE}" data-plane)" "${DATA_PLANE_UIDS}" "PostgreSQL Data Plane changed during Controller scale"
-assert_equal "$(pod_uids "${POSTGRES_NAMESPACE}" "${POSTGRES_RELEASE}" operator)" "${OPERATOR_UIDS}" "PostgreSQL Operator changed during Controller scale"
+  --set controlPlane.replicas=2 \
+  --set-string 'controlPlane.podAnnotations.e2e\.kubeloop\.io/revision=v2'
+assert_replicas "${POSTGRES_NAMESPACE}" "${POSTGRES_RELEASE}-kubeloop-control-plane" 2
+assert_equal "$(pod_uids "${POSTGRES_NAMESPACE}" "${POSTGRES_RELEASE}" data-plane)" "${DATA_PLANE_UIDS}" "PostgreSQL Data Plane changed during Control Plane scale"
+assert_equal "$(pod_uids "${POSTGRES_NAMESPACE}" "${POSTGRES_RELEASE}" operator)" "${OPERATOR_UIDS}" "PostgreSQL Operator changed during Control Plane scale"
 assert_equal "$(postgres_exec -Atc 'SELECT value FROM helm_e2e_retention;')" "retained" "PostgreSQL marker after upgrade"
 
 log "Rollback PostgreSQL release and verify database retention"
 helm rollback "${POSTGRES_RELEASE}" 1 --namespace "${POSTGRES_NAMESPACE}" --wait --timeout 5m
 rollout_all "${POSTGRES_NAMESPACE}" "${POSTGRES_RELEASE}"
-assert_replicas "${POSTGRES_NAMESPACE}" "${POSTGRES_RELEASE}-kubeloop-controller" 1
+assert_replicas "${POSTGRES_NAMESPACE}" "${POSTGRES_RELEASE}-kubeloop-control-plane" 1
 assert_equal "$(postgres_exec -Atc 'SELECT value FROM helm_e2e_retention;')" "retained" "PostgreSQL marker after rollback"
-restart_component "${POSTGRES_NAMESPACE}" "${POSTGRES_RELEASE}" controller "${POSTGRES_RELEASE}-kubeloop-controller"
-assert_equal "$(postgres_exec -Atc 'SELECT value FROM helm_e2e_retention;')" "retained" "PostgreSQL marker after Controller restart"
+restart_component "${POSTGRES_NAMESPACE}" "${POSTGRES_RELEASE}" control-plane "${POSTGRES_RELEASE}-kubeloop-control-plane"
+assert_equal "$(postgres_exec -Atc 'SELECT value FROM helm_e2e_retention;')" "retained" "PostgreSQL marker after Control Plane restart"
 
 log "Uninstall both releases and verify cleanup plus explicit CRD retention"
 helm uninstall "${SQLITE_RELEASE}" --namespace "${SQLITE_NAMESPACE}" --wait

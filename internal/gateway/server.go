@@ -11,7 +11,6 @@ import (
 	"net/netip"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/fengqi-dev/kube-loop/internal/dnsname"
@@ -40,12 +39,8 @@ type Server struct {
 	Dialer      ContextDialer
 
 	mu            sync.Mutex
-	nextStream    atomic.Uint64
-	controls      map[*controlSession]struct{}
 	tenants       map[tunnel.SessionToken]int
 	networks      map[tunnel.SessionToken]tenantNetwork
-	listeners     map[listenerKey]*interceptListener
-	pending       map[uint64]*pendingStream
 	connections   map[net.Conn]struct{}
 	draining      bool
 	connectionsWG sync.WaitGroup
@@ -62,11 +57,8 @@ func NewServer(logger *log.Logger, dialTimeout time.Duration) *Server {
 	return &Server{
 		Logger:      logger,
 		DialTimeout: dialTimeout,
-		controls:    make(map[*controlSession]struct{}),
 		tenants:     make(map[tunnel.SessionToken]int),
 		networks:    make(map[tunnel.SessionToken]tenantNetwork),
-		listeners:   make(map[listenerKey]*interceptListener),
-		pending:     make(map[uint64]*pendingStream),
 		connections: make(map[net.Conn]struct{}),
 	}
 }
@@ -215,9 +207,7 @@ func (s *Server) handle(client net.Conn, required requiredAuthorization) {
 			_ = client.Close()
 			return
 		}
-		s.handleControl(client, header.Token, &spec, hash, required.namespace)
-	case tunnel.CommandAccept:
-		s.handleAccept(client, header.Token, &required)
+		s.handleControl(client, header.Token, spec, hash, required.namespace)
 	default:
 		_ = tunnel.WriteStatus(client, fmt.Errorf("unsupported command %d", header.Command))
 		_ = client.Close()
@@ -273,31 +263,6 @@ func (s *Server) handleOutbound(client net.Conn, header tunnel.SessionHeader, re
 		return
 	}
 	relayTCP(client, target)
-}
-
-func (s *Server) handleAccept(client net.Conn, token tunnel.SessionToken, required *requiredAuthorization) {
-	if _, _, err := s.authorizedNetwork(token, required); err != nil {
-		_ = tunnel.WriteStatus(client, err)
-		_ = client.Close()
-		return
-	}
-	streamID, err := tunnel.ReadAcceptStreamID(client)
-	if err != nil {
-		_ = client.Close()
-		return
-	}
-	pending := s.takePendingFor(token, streamID)
-	if pending == nil {
-		_ = tunnel.WriteStatus(client, fmt.Errorf("unknown stream %d", streamID))
-		_ = client.Close()
-		return
-	}
-	if err := tunnel.WriteStatus(client, nil); err != nil {
-		pending.close()
-		_ = client.Close()
-		return
-	}
-	pending.serve(client)
 }
 
 func (s *Server) authorizedNetwork(

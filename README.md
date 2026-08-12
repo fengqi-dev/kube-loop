@@ -263,7 +263,7 @@ wails dev
 ```
 
 `wails dev` builds the frontend, platform Helper, and patched sing-box; builds
-and loads local Controller, Gateway, and Operator images for Docker Desktop
+and loads local Control Plane, Gateway, and Operator images for Docker Desktop
 Kubernetes, Minikube, kind, or k3d; deploys the Helm chart to the active local
 cluster; and waits for all three workloads before starting the frontend watcher.
 

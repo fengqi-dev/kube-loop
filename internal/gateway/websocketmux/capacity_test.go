@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/fengqi-dev/kube-loop/internal/gateway/operations"
-	"github.com/go-chi/chi/v5"
+	"github.com/labstack/echo/v5"
 )
 
 type capacityGatewayState struct{}
@@ -65,8 +65,8 @@ func TestCapacityLimitsSessionsAndStreamsWithoutBlockingHealth(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	router := chi.NewRouter()
-	router.Handle("/tunnel", handler)
+	router := echo.New()
+	router.Any("/tunnel", echo.WrapHandler(handler))
 	operations.NewHandler(capacityGatewayState{}, handler).Register(router)
 	server := httptest.NewServer(router)
 	defer server.Close()

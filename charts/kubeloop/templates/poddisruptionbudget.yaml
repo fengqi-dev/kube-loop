@@ -1,18 +1,18 @@
-{{- if and .Values.podDisruptionBudget.controller.enabled (eq .Values.controller.storage.type "postgresql") (gt (int .Values.controller.replicas) 1) }}
-{{- if or (lt (int .Values.podDisruptionBudget.controller.minAvailable) 1) (ge (int .Values.podDisruptionBudget.controller.minAvailable) (int .Values.controller.replicas) ) }}
-{{- fail "podDisruptionBudget.controller.minAvailable must be at least 1 and lower than controller.replicas" }}
+{{- if and .Values.podDisruptionBudget.controlPlane.enabled (eq .Values.controlPlane.storage.type "postgresql") (gt (int .Values.controlPlane.replicas) 1) }}
+{{- if or (lt (int .Values.podDisruptionBudget.controlPlane.minAvailable) 1) (ge (int .Values.podDisruptionBudget.controlPlane.minAvailable) (int .Values.controlPlane.replicas) ) }}
+{{- fail "podDisruptionBudget.controlPlane.minAvailable must be at least 1 and lower than controlPlane.replicas" }}
 {{- end }}
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
-  name: {{ include "kubeloop.controllerName" . }}
+  name: {{ include "kubeloop.controlPlaneName" . }}
   labels:
     {{- include "kubeloop.labels" . | nindent 4 }}
-    app.kubernetes.io/component: controller
+    app.kubernetes.io/component: control-plane
 spec:
-  minAvailable: {{ .Values.podDisruptionBudget.controller.minAvailable }}
+  minAvailable: {{ .Values.podDisruptionBudget.controlPlane.minAvailable }}
   selector:
     matchLabels:
       {{- include "kubeloop.selectorLabels" . | nindent 6 }}
-      app.kubernetes.io/component: controller
+      app.kubernetes.io/component: control-plane
 {{- end }}

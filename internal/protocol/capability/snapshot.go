@@ -14,7 +14,7 @@ const (
 )
 
 // Snapshot is the namespace-scoped intersection of Gateway policy and
-// Kubernetes authorization returned by the Controller.
+// Kubernetes authorization returned by the Control Plane.
 type Snapshot struct {
 	SchemaVersion  int      `json:"schemaVersion"`
 	PrincipalID    string   `json:"principalId"`

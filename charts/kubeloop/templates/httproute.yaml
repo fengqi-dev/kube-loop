@@ -66,18 +66,21 @@ spec:
             type: PathPrefix
             value: /api
       timeouts:
-        request: {{ .Values.gatewayAPI.timeouts.controller | quote }}
-        backendRequest: {{ .Values.gatewayAPI.timeouts.controller | quote }}
+        request: {{ .Values.gatewayAPI.timeouts.controlPlane | quote }}
+        backendRequest: {{ .Values.gatewayAPI.timeouts.controlPlane | quote }}
       backendRefs:
         - group: ""
           kind: Service
-          name: {{ include "kubeloop.controllerName" . }}
-          port: {{ .Values.controller.service.port }}
+          name: {{ include "kubeloop.controlPlaneName" . }}
+          port: {{ .Values.controlPlane.service.port }}
           weight: 1
     - matches:
         - path:
             type: Exact
             value: {{ .Values.dataPlane.tunnelPath }}
+        - path:
+            type: PathPrefix
+            value: /traffic/v1
       timeouts:
         request: {{ .Values.gatewayAPI.timeouts.tunnel | quote }}
         backendRequest: {{ .Values.gatewayAPI.timeouts.tunnel | quote }}

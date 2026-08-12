@@ -20,7 +20,6 @@ const (
 	CommandTCP     byte = 1
 	CommandUDP     byte = 2
 	CommandControl byte = 3
-	CommandAccept  byte = 4
 
 	StatusOK    byte = 0
 	StatusError byte = 1
@@ -173,22 +172,6 @@ func ReadAuthorizedControlSpec(r io.Reader) (networkspec.Spec, error) {
 		return networkspec.Spec{}, err
 	}
 	return networkspec.Decode(contents)
-}
-
-func WriteAccept(w io.Writer, streamID uint64, token SessionToken) error {
-	value, err := appendSessionHeader(make([]byte, 0, 45), CommandAccept, token)
-	if err != nil {
-		return err
-	}
-	return writeAll(w, binary.BigEndian.AppendUint64(value, streamID))
-}
-
-func ReadAcceptStreamID(r io.Reader) (uint64, error) {
-	var raw [8]byte
-	if _, err := io.ReadFull(r, raw[:]); err != nil {
-		return 0, err
-	}
-	return binary.BigEndian.Uint64(raw[:]), nil
 }
 
 func WriteStatus(w io.Writer, err error) error {

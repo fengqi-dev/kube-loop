@@ -72,7 +72,7 @@ Architecture tests fail if:
   `internal/cluster` or `internal/session`;
 - `clientv2` imports a local Kubernetes or server runtime package;
 - MCP imports local cluster/session/intercept/file manager packages; or
-- Data Plane imports Controller, Kubernetes, OAuth or database packages.
+- Data Plane imports Control Plane, Kubernetes, OAuth or database packages.
 
 Bootstrap tests assert both setup and active-profile states report the constant
 remote backend mode and do not read `KUBECONFIG`.

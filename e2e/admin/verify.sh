@@ -7,7 +7,7 @@ RELEASE="${KUBELOOP_ADMIN_E2E_RELEASE:-sqlite}"
 PUBLIC_ORIGIN="${KUBELOOP_ADMIN_E2E_PUBLIC_ORIGIN:-https://kubeloop.e2e.invalid}"
 LOCAL_PORT="${KUBELOOP_ADMIN_E2E_LOCAL_PORT:-18081}"
 CREDENTIAL="${KUBELOOP_ADMIN_E2E_BREAK_GLASS_CREDENTIAL:-}"
-CONTROLLER_SERVICE="${RELEASE}-kubeloop-controller"
+CONTROL_PLANE_SERVICE="${RELEASE}-kubeloop-control-plane"
 WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/kubeloop-admin-e2e.XXXXXX")"
 PORT_FORWARD_PID=""
 
@@ -33,7 +33,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-kubectl port-forward --namespace "${NAMESPACE}" "service/${CONTROLLER_SERVICE}" \
+kubectl port-forward --namespace "${NAMESPACE}" "service/${CONTROL_PLANE_SERVICE}" \
   "${LOCAL_PORT}:80" >"${WORK_DIR}/port-forward.log" 2>&1 &
 PORT_FORWARD_PID=$!
 BASE_URL="http://127.0.0.1:${LOCAL_PORT}"

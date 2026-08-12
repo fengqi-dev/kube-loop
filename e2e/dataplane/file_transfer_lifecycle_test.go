@@ -22,14 +22,15 @@ import (
 	clientfiletransfer "github.com/fengqi-dev/kube-loop/internal/client/filetransfer"
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
-	"github.com/fengqi-dev/kube-loop/internal/controller"
-	"github.com/fengqi-dev/kube-loop/internal/controller/authorization"
-	"github.com/fengqi-dev/kube-loop/internal/controller/execapi"
-	"github.com/fengqi-dev/kube-loop/internal/controller/fileapi"
-	"github.com/fengqi-dev/kube-loop/internal/controller/fileopsapi"
-	controllerkubernetes "github.com/fengqi-dev/kube-loop/internal/controller/kubernetes"
-	"github.com/fengqi-dev/kube-loop/internal/controller/sessionapi"
-	"github.com/fengqi-dev/kube-loop/internal/controller/storage"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/authorization"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/execapi"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/fileapi"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/fileopsapi"
+	controlplanekubernetes "github.com/fengqi-dev/kube-loop/internal/controlplane/kubernetes"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/sessionapi"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/filestream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
 	"github.com/google/uuid"
@@ -38,7 +39,7 @@ import (
 )
 
 type fileE2EIdentity struct {
-	principal controller.Principal
+	principal controlplaneapi.Principal
 	active    sessionapi.ActiveSession
 	session   remote.Session
 	familyID  string
@@ -77,7 +78,7 @@ func startFileController(
 	t.Helper()
 	listener, err := net.Listen("tcp", address)
 	if err != nil {
-		t.Fatalf("listen for file Controller: %v", err)
+		t.Fatalf("listen for file Control Plane: %v", err)
 	}
 	handler, err := fileapi.New(
 		stateStore,
@@ -104,28 +105,9 @@ func startFileController(
 		_ = listener.Close()
 		t.Fatal(err)
 	}
-	router := controller.NewAPIRouter()
-	for _, route := range []struct{ method, pattern string }{
-		{http.MethodPost, "/api/v2/sessions/{sessionID}/file-transfers"},
-		{http.MethodGet, "/api/v2/sessions/{sessionID}/file-transfers/{taskID}"},
-		{http.MethodGet, "/api/v2/sessions/{sessionID}/file-transfers/{taskID}/stream"},
-	} {
-		if err := router.Handle(route.method, route.pattern, handler); err != nil {
-			_ = listener.Close()
-			t.Fatal(err)
-		}
-	}
-	for _, route := range []struct{ method, pattern string }{
-		{http.MethodPost, "/api/v2/sessions/{sessionID}/pod-files/list"},
-		{http.MethodPost, "/api/v2/sessions/{sessionID}/pod-files/create"},
-		{http.MethodPost, "/api/v2/sessions/{sessionID}/pod-files/rename"},
-		{http.MethodPost, "/api/v2/sessions/{sessionID}/pod-files/delete"},
-		{http.MethodGet, "/api/v2/sessions/{sessionID}/pod-files/operations/{taskID}"},
-	} {
-		if err := router.Handle(route.method, route.pattern, operations); err != nil {
-			_ = listener.Close()
-			t.Fatal(err)
-		}
+	routes := controlplane.APIRoutes{
+		FileTransfers:  fileapi.NewRoutes(handler).Endpoints(),
+		FileOperations: fileopsapi.NewRoutes(operations).Endpoints(),
 	}
 	policy, err := authorization.New(authorization.Policy{Rules: []authorization.Rule{
 		{
@@ -143,16 +125,16 @@ func startFileController(
 		_ = listener.Close()
 		t.Fatal(err)
 	}
-	server, err := controller.NewServer(
-		controller.Config{PublicURL: "http://" + listener.Addr().String()}, controller.BuildInfo{},
+	server, err := controlplane.NewServer(
+		controlplane.Config{PublicURL: "http://" + listener.Addr().String()}, controlplane.BuildInfo{},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
-		controller.WithAuthenticator(controller.AuthenticatorFunc(func(request *http.Request) (controller.Principal, *controller.APIError) {
+		controlplane.WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(request *http.Request) (controlplaneapi.Principal, *controlplaneapi.Error) {
 			if request.Header.Get("Authorization") != "Bearer "+identity.token {
-				return controller.Principal{}, &controller.APIError{Code: controller.CodeUnauthenticated, Message: "invalid file E2E token"}
+				return controlplaneapi.Principal{}, &controlplaneapi.Error{Code: controlplaneapi.CodeUnauthenticated, Message: "invalid file E2E token"}
 			}
 			return identity.principal, nil
 		})),
-		controller.WithAuthorizer(policy), controller.WithAPIHandler(router),
+		controlplane.WithAuthorizer(policy), controlplane.WithAPIRoutes(routes),
 	)
 	if err != nil {
 		_ = listener.Close()
@@ -195,7 +177,7 @@ func createFileIdentity(
 		t.Fatal(err)
 	}
 	return fileE2EIdentity{
-		principal: controller.Principal{
+		principal: controlplaneapi.Principal{
 			Subject: principalID, DeviceID: deviceID, FamilyID: familyID, AccessExpiresAt: expiresAt,
 		},
 		active: sessionapi.ActiveSession{
@@ -248,11 +230,11 @@ func TestRealFileTransferRevocationControllerRestartAndResume(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	provider, err := controllerkubernetes.NewForRESTConfig(kubeRESTConfig(t), controllerkubernetes.Config{})
+	provider, err := controlplanekubernetes.NewForRESTConfig(kubeRESTConfig(t), controlplanekubernetes.Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	targets, err := fileapi.NewKubernetesTargetResolver(provider)
+	targets, err := controlplanekubernetes.NewContainerResolver(provider)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -348,7 +330,7 @@ func TestRealFileTransferRevocationControllerRestartAndResume(t *testing.T) {
 	controllerStopped = true
 	restartResult := waitForFileUpload(t, ctx, restartUpload)
 	if restartResult.err == nil || restartResult.task.ID == "" {
-		t.Fatalf("upload unexpectedly survived Controller restart: task=%#v result=%#v err=%v", restartResult.task, restartResult.result, restartResult.err)
+		t.Fatalf("upload unexpectedly survived Control Plane restart: task=%#v result=%#v err=%v", restartResult.task, restartResult.result, restartResult.err)
 	}
 	assertCancelledFileTask(t, waitForExecTaskState(t, ctx, stateStore, restartResult.task.ID, "stopped"))
 
@@ -361,7 +343,7 @@ func TestRealFileTransferRevocationControllerRestartAndResume(t *testing.T) {
 	)
 	if err != nil || completedResult.Status != filestream.ResultSucceeded ||
 		completedTask.Offset == 0 || completedTask.Offset >= uint64(len(payload)) {
-		t.Fatalf("resume real upload after Controller restart: task=%#v result=%#v err=%v", completedTask, completedResult, err)
+		t.Fatalf("resume real upload after Control Plane restart: task=%#v result=%#v err=%v", completedTask, completedResult, err)
 	}
 	var downloaded bytes.Buffer
 	_, downloadResult, err := clientfiletransfer.Download(

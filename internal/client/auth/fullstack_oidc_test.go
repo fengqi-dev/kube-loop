@@ -21,14 +21,15 @@ import (
 	"time"
 
 	clientauth "github.com/fengqi-dev/kube-loop/internal/client/auth"
-	"github.com/fengqi-dev/kube-loop/internal/controller/authn"
-	"github.com/fengqi-dev/kube-loop/internal/controller/authn/httpauth"
-	"github.com/fengqi-dev/kube-loop/internal/controller/authn/login"
-	"github.com/fengqi-dev/kube-loop/internal/controller/authn/oidc"
-	"github.com/fengqi-dev/kube-loop/internal/controller/authn/token"
-	"github.com/fengqi-dev/kube-loop/internal/controller/storage"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/authn"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/authn/httpauth"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/authn/login"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/authn/oidc"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/authn/token"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 	"github.com/go-jose/go-jose/v4"
 	"github.com/go-jose/go-jose/v4/jwt"
+	"github.com/labstack/echo/v5"
 )
 
 type oidcAuthorization struct {
@@ -153,16 +154,18 @@ func TestFullStackOIDCLoginRefreshAndRevoke(t *testing.T) {
 		t.Fatal(err)
 	}
 	tokenService, err := token.New(store, token.Config{
-		Issuer: controllerURL, KeyID: "controller-e2e", SigningKey: tokenKey,
+		Issuer: controllerURL, KeyID: "control-plane-e2e", SigningKey: tokenKey,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	authHandler, err := httpauth.New(loginService, tokenService)
+	authService, err := httpauth.New(loginService, tokenService)
 	if err != nil {
 		t.Fatal(err)
 	}
-	controllerServer.Config.Handler = authHandler
+	authRouter := echo.New()
+	httpauth.NewRoutes(authService).RegisterRoutes(authRouter.Group("/auth"))
+	controllerServer.Config.Handler = authRouter
 	controllerServer.StartTLS()
 	defer controllerServer.Close()
 

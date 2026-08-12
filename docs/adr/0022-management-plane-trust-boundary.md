@@ -1,4 +1,4 @@
-# ADR 0022：Controller Management Plane 信任边界
+# ADR 0022：Control Plane Management Plane 信任边界
 
 - 状态：Accepted
 - 日期：2026-08-10
@@ -9,7 +9,7 @@
 KubeLoop V2 需要一个企业管理后台，用于查看运行状态、身份、Session、Task、
 Relay 和审计，并在后续阶段管理访问策略、Provider 与高风险运维动作。管理面
 拥有比普通用户 API 更大的影响范围，但不能因此扩大 Data Plane、Operator 或
-Controller ServiceAccount 的权限，也不能建立第二套身份和密码系统。
+Control Plane ServiceAccount 的权限，也不能建立第二套身份和密码系统。
 
 本 ADR 冻结 Management Plane 的进程归属、初始管理员、应急访问、浏览器
 Session、CSRF、Secret 与审计边界。角色规则、Repository 和具体 API 分别在
@@ -30,15 +30,15 @@ V2-901～V2-907 实现；V2-908 统一完成浏览器和 Minikube E2E。
 | 信任区 | 可以持有 | 明确禁止 |
 | --- | --- | --- |
 | 浏览器 `/admin/` | UI 状态、内存中的 CSRF Token、脱敏响应 | Secret、Refresh Token、localStorage Token、数据库 DSN |
-| Controller Management Plane | 管理 Session、角色决策、管理 Repository、审计、受限 Secret alias | 任意 Kubernetes Proxy、任意脚本/SQL、向 Data Plane 下发管理表 |
-| Controller 普通 API | Gateway Token、普通用户策略、Session/Task | 仅凭普通 API 权限调用管理操作 |
+| Control Plane Management Plane | 管理 Session、角色决策、管理 Repository、审计、受限 Secret alias | 任意 Kubernetes Proxy、任意脚本/SQL、向 Data Plane 下发管理表 |
+| Control Plane 普通 API | Gateway Token、普通用户策略、Session/Task | 仅凭普通 API 权限调用管理操作 |
 | Data Plane | 短期 RelayTicket、公钥、吊销摘要、NetworkSpec | 管理 API、业务数据库、OIDC/AD Secret、管理角色和 Kubernetes 管理凭据 |
 | Operator | TrafficBinding CRD 和所需 Kubernetes client | 管理数据库、身份 Secret、管理 Session、绕过 owner/finalizer 规则 |
 | Kubernetes/外部 Secret 系统 | Secret 明文与轮换 | 向浏览器或管理 Repository 返回 Secret 明文 |
 
-`kubeloop-controller` 在同一 Go module、同一二进制和同一 Helm Chart 内提供
+`kubeloop-control-plane` 在同一 Go module、同一二进制和同一 Helm Chart 内提供
 `/admin/` 与 `/api/v2/admin/*`。不创建独立后台项目，不在
-`kubeloop-gateway` 注册管理路由，也不让 Data Plane 访问 Controller 数据库。
+`kubeloop-gateway` 注册管理路由，也不让 Data Plane 访问 Control Plane 数据库。
 
 ## 决策
 
@@ -50,7 +50,7 @@ V2-901～V2-907 实现；V2-908 统一完成浏览器和 Minikube E2E。
 namespace 范围。
 
 管理身份不能自动扩大 Kubernetes 权限。需要访问 Kubernetes 的诊断或运维动作
-仍受 Controller ServiceAccount、用户 impersonation、Gateway Policy 和
+仍受 Control Plane ServiceAccount、用户 impersonation、Gateway Policy 和
 owner-safe 资源规则约束。`platform-admin` 也不能获得任意 Kubernetes REST
 Proxy、Secret 读取、SQL 控制台或脚本执行能力。
 
@@ -60,29 +60,29 @@ Proxy、Secret 读取、SQL 控制台或脚本执行能力。
 
 ### 2. Bootstrap 管理员是有界且可退役的部署授权
 
-初次部署可通过 Helm 配置精确的 Controller Principal UUID 和/或规范化 group：
+初次部署可通过 Helm 配置精确的 Control Plane Principal UUID 和/或规范化 group：
 
 - 默认列表为空；subject 只接受内部稳定 Principal UUID，不接受 `*`、空值、
   email/display name 或客户端提交的 claim；新用户通常先使用受信 group bootstrap；
 - bootstrap 只授予 `platform-admin`，不修改普通 Gateway Policy；
-- 配置只来自 Controller Helm values/ConfigMap，Data Plane 不接收；
+- 配置只来自 Control Plane Helm values/ConfigMap，Data Plane 不接收；
 - 每次 bootstrap 登录和管理操作都带 `bootstrap=true` 高等级审计属性。
 
 首次发布至少包含一个有效 `platform-admin` assignment 的正式管理策略时，
-Controller 在同一数据库事务内写入 active revision、审计事件和不可自动回退的
-`bootstrapRetiredAt`。从此即使配置 revision 回滚、Controller 重启或旧 Helm
+Control Plane 在同一数据库事务内写入 active revision、审计事件和不可自动回退的
+`bootstrapRetiredAt`。从此即使配置 revision 回滚、Control Plane 重启或旧 Helm
 values 仍存在，也不能自动恢复 bootstrap 权限。
 
 部署操作者若需要在灾难恢复中重新启用 bootstrap，必须显式设置独立的
 `management.bootstrapRecovery.enabled=true`、变更 Helm release 并重启
-Controller。恢复模式启动和每次使用都写入安全日志及持久审计；正式 assignment
+Control Plane。恢复模式启动和每次使用都写入安全日志及持久审计；正式 assignment
 恢复后必须再次退役。应用 API 不能打开该模式。
 
 ### 3. Break-glass 默认关闭且不成为常驻管理员
 
 Break-glass 是部署操作者控制的应急入口，不是第二套日常账号系统：
 
-- 默认关闭，只能引用 Helm allowlist 中挂载到 Controller 的 Kubernetes/外部
+- 默认关闭，只能引用 Helm allowlist 中挂载到 Control Plane 的 Kubernetes/外部
   Secret alias；不接受 values 明文、环境命令参数、数据库值或 API 上传；
 - 凭据必须为至少 256 bit 随机值，只在固定的 break-glass Session 交换端点使用，
   以常量时间比较；原值不进入日志、指标、审计或数据库；
@@ -91,7 +91,7 @@ Break-glass 是部署操作者控制的应急入口，不是第二套日常账�
 - 成功后只签发最长 15 分钟、不可刷新、不可转为普通 Token Family 的管理
   Session；所有请求带 `breakGlass=true` 并产生高等级审计；
 - Secret 文件内容或 alias generation 变化时，旧 break-glass Session 立即失效；
-  Controller 不需要 `secrets/get` RBAC，只读取预先挂载的文件；
+  Control Plane 不需要 `secrets/get` RBAC，只读取预先挂载的文件；
 - 如果持久审计不可提交，break-glass 登录及写操作 fail closed。结构化安全日志
   是额外告警通道，不能替代持久审计。
 
@@ -148,7 +148,7 @@ V2.0 管理 API 不接收 OIDC Client Secret、AD Bind Password、数据库 DSN�
 枚举的差异化错误。Provider 验证由专用实现消费 alias，不提供任意 URL/host、文件
 路径或通用网络拨号测试。
 
-Secret 轮换由挂载文件更新和受控 Controller reload/rollout完成。新 Secret 验证
+Secret 轮换由挂载文件更新和受控 Control Plane reload/rollout完成。新 Secret 验证
 失败不替换当前 active Provider revision；旧 Secret 不复制进数据库用于回滚。
 
 ### 7. 审计是管理写操作的提交条件
@@ -177,13 +177,13 @@ Secret 轮换由挂载文件更新和受控 Controller reload/rollout完成。�
 | Bootstrap 长期成为后门 | 精确 subject/group、持久 retire marker、显式恢复模式和高等级审计 | 部署操作者本身仍是高权限信任主体 |
 | Break-glass 泄漏或暴力尝试 | Secret mount、256 bit、短期不可刷新 Session、限流、轮换失效、统一错误 | Secret 系统被攻陷时需要外部轮换与告警 |
 | CSRF 触发配置发布/撤销 | Strict Cookie、精确 Origin、Fetch Metadata、同步 Token、JSON-only | 同源 XSS 可绕过 CSRF，依赖 CSP 与输出编码 |
-| XSS/第三方脚本窃取管理能力 | 无第三方脚本、严格 CSP、HttpOnly Cookie、Token 不落存储、no-store | Controller/UI 供应链仍需依赖扫描和签名发布 |
+| XSS/第三方脚本窃取管理能力 | 无第三方脚本、严格 CSP、HttpOnly Cookie、Token 不落存储、no-store | Control Plane/UI 供应链仍需依赖扫描和签名发布 |
 | Session fixation、重放或撤销延迟 | 登录轮换、仅存哈希、短空闲/绝对 TTL、每请求 revision 校验 | 已进入的事务按事务边界完成，不能瞬时中断 |
 | 跨租户 IDOR/namespace-admin 越权 | 对象查找前授权、owner/scope 查询、统一 not-found/forbidden、稳定 cursor | V2-901/903 必须覆盖枚举和直接 ID 测试 |
 | Secret 经 API、日志、导出泄漏 | API 仅 alias、部署侧挂载、结构化 allowlist 审计、无原始 cause | Provider SDK 错误需统一脱敏适配 |
 | Provider 验证成为 SSRF/任意拨号 | 只验证版本化配置和预声明 alias，禁止通用 URL/host 测试 | 管理员配置的合法 Provider 仍是受信外部依赖 |
 | 并发发布静默覆盖或审计错位 | `If-Match`、整数 revision、事务内 active pointer + audit、幂等键 | PostgreSQL serialization retry 必须保持同一语义 |
-| 管理权限扩散到 Data Plane/Operator | 独立 Deployment/SA/NetworkPolicy；窄签名协议；不挂 DB/Secret | 被攻陷 Controller 仍可签发其既有协议允许的消息 |
+| 管理权限扩散到 Data Plane/Operator | 独立 Deployment/SA/NetworkPolicy；窄签名协议；不挂 DB/Secret | 被攻陷 Control Plane 仍可签发其既有协议允许的消息 |
 | 管理 API 资源耗尽 | body/page/limit/timeout 上限、稳定 cursor、导出异步、限流 | 合法管理员可制造负载，需 V2-903/907 配额指标 |
 | 审计被绕过或敏感数据进入审计 | 写入与审计同事务、高风险 fail closed、字段 allowlist、追加写 | 数据库超级用户不在应用威胁边界内 |
 
@@ -191,7 +191,7 @@ Secret 轮换由挂载文件更新和受控 Controller reload/rollout完成。�
 
 - 不创建独立管理项目、独立管理员密码库或 Data Plane 管理入口。
 - 不提供 SQL 控制台、任意 Kubernetes YAML 编辑、任意脚本/命令或通用网络探测。
-- 不让 Controller 因管理后台获得 `secrets/get/list/watch` 或通配 Kubernetes RBAC。
+- 不让 Control Plane 因管理后台获得 `secrets/get/list/watch` 或通配 Kubernetes RBAC。
 - 不允许浏览器提交、读取或导出 Secret 明文。
 - 不允许前端按钮、路由隐藏或客户端 capability 代替服务端授权。
 - 不在 V2-900 提前开放策略、Provider 或运维写 API；这些按 V2-905～907 交付。
@@ -210,7 +210,7 @@ Secret 轮换由挂载文件更新和受控 Controller reload/rollout完成。�
 
 ## 结果
 
-管理后台可以复用现有 Controller 身份、存储和授权基础设施，同时保持 Data Plane
+管理后台可以复用现有 Control Plane 身份、存储和授权基础设施，同时保持 Data Plane
 无数据库、无身份 Secret、无 Kubernetes 管理凭据的边界。代价是管理 Session、
 bootstrap 退役和事务审计必须成为正式持久化模型，并且 Secret provisioning 仍由
 部署系统负责，而不是由浏览器提供便利但高风险的明文写入。

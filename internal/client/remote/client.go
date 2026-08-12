@@ -26,6 +26,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/protocol/mirrorstream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/relayticket"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficcontrol"
 	"github.com/fengqi-dev/kube-loop/internal/remotetask"
 	"github.com/google/uuid"
 )
@@ -927,10 +928,7 @@ func (client *Client) OpenExchangeStream(
 	if _, err := validateExchangeTask(task, current); err != nil || task.State != "pending" {
 		return nil, errors.New("pending Exchange Task is required")
 	}
-	connection, err := client.openTaskWebSocket(
-		ctx, serverProfile, current,
-		"/api/v2/sessions/"+url.PathEscape(current.ID)+"/exchanges/"+url.PathEscape(task.ID)+"/stream",
-	)
+	connection, err := client.openTrafficWebSocket(ctx, serverProfile, current, trafficcontrol.ModeExchange, task.ID)
 	if err == nil {
 		connection.SetReadLimit(exchangestream.MaximumData + 14)
 	}
@@ -1022,10 +1020,7 @@ func (client *Client) OpenMirrorStream(
 	if _, err := validateMirrorTask(task, current); err != nil || task.State != "pending" {
 		return nil, errors.New("pending Mirror Task is required")
 	}
-	connection, err := client.openTaskWebSocket(
-		ctx, serverProfile, current,
-		"/api/v2/sessions/"+url.PathEscape(current.ID)+"/mirrors/"+url.PathEscape(task.ID)+"/stream",
-	)
+	connection, err := client.openTrafficWebSocket(ctx, serverProfile, current, trafficcontrol.ModeMirror, task.ID)
 	if err == nil {
 		connection.SetReadLimit(mirrorstream.MaximumData + mirrorstream.HeaderSize)
 	}
@@ -1117,10 +1112,7 @@ func (client *Client) OpenPreviewStream(
 	if _, err := validatePreviewTask(task, current); err != nil || task.State != "pending" {
 		return nil, errors.New("pending Preview Task is required")
 	}
-	connection, err := client.openTaskWebSocket(
-		ctx, serverProfile, current,
-		"/api/v2/sessions/"+url.PathEscape(current.ID)+"/previews/"+url.PathEscape(task.ID)+"/stream",
-	)
+	connection, err := client.openTrafficWebSocket(ctx, serverProfile, current, trafficcontrol.ModePreview, task.ID)
 	if err == nil {
 		connection.SetReadLimit(exchangestream.MaximumData + 14)
 	}
@@ -1355,6 +1347,29 @@ func (client *Client) openTaskWebSocket(
 		return nil, refreshErr
 	}
 	connection, _, err = client.dialWebSocket(ctx, endpoint.String(), credential.AccessToken)
+	return connection, err
+}
+
+func (client *Client) openTrafficWebSocket(
+	ctx context.Context,
+	serverProfile profile.Profile,
+	current Session,
+	mode trafficcontrol.Mode,
+	taskID string,
+) (*websocket.Conn, error) {
+	ticket, err := client.IssueRelayTicket(ctx, serverProfile, current)
+	if err != nil {
+		return nil, err
+	}
+	endpoint, err := url.Parse(ticket.Endpoint)
+	if err != nil || endpoint.Scheme != "wss" || endpoint.Host == "" {
+		return nil, errors.New("RelayTicket endpoint is invalid")
+	}
+	endpoint.Path = trafficcontrol.PublicPathPrefix + "/" + url.PathEscape(string(mode)) + "/" + url.PathEscape(taskID)
+	endpoint.RawPath = ""
+	endpoint.RawQuery = ""
+	endpoint.Fragment = ""
+	connection, _, err := client.dialWebSocket(ctx, endpoint.String(), ticket.Ticket)
 	return connection, err
 }
 

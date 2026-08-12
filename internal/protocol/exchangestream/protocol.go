@@ -24,7 +24,7 @@ const (
 )
 
 // Frame multiplexes reverse Service traffic over one authenticated WebSocket.
-// ServicePort is the stable Service port selected by the user; the Controller's
+// ServicePort is the stable Service port selected by the user; the Control Plane's
 // ephemeral listener port never crosses the desktop trust boundary.
 type Frame struct {
 	Type        byte

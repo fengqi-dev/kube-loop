@@ -19,13 +19,14 @@ import (
 	clientpreview "github.com/fengqi-dev/kube-loop/internal/client/preview"
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
-	"github.com/fengqi-dev/kube-loop/internal/controller"
-	"github.com/fengqi-dev/kube-loop/internal/controller/authorization"
-	controllerkubernetes "github.com/fengqi-dev/kube-loop/internal/controller/kubernetes"
-	"github.com/fengqi-dev/kube-loop/internal/controller/previewapi"
-	"github.com/fengqi-dev/kube-loop/internal/controller/sessionapi"
-	"github.com/fengqi-dev/kube-loop/internal/controller/storage"
-	"github.com/fengqi-dev/kube-loop/internal/controller/trafficbindingclient"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/authorization"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
+	controlplanekubernetes "github.com/fengqi-dev/kube-loop/internal/controlplane/kubernetes"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/previewapi"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/sessionapi"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/trafficbindingclient"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
 	"github.com/fengqi-dev/kube-loop/internal/servicebinding"
 	"github.com/google/uuid"
@@ -50,14 +51,13 @@ func TestRealPreviewLifecycleOwnershipAndStaleRecovery(t *testing.T) {
 		t.Fatalf("ensure real Preview fixture: %v", err)
 	}
 
-	gatewayIP := reachableHostIP(t, ctx, kubeClient)
 	stateStore, principal, activeSession, remoteSession := previewLifecycleState(
 		t, ctx, harness.EchoServiceIP(t, ctx, kubeClient),
 	)
 	kubeOutage := &temporaryKubernetesOutage{}
 	providerConfig := kubeRESTConfig(t)
 	providerConfig.WrapTransport = kubeOutage.WrapTransport
-	provider, err := controllerkubernetes.NewForRESTConfig(providerConfig, controllerkubernetes.Config{})
+	provider, err := controlplanekubernetes.NewForRESTConfig(providerConfig, controlplanekubernetes.Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,11 +78,7 @@ func TestRealPreviewLifecycleOwnershipAndStaleRecovery(t *testing.T) {
 		e2eExecSessionValidator{principalID: principal.Subject, session: activeSession},
 		realResources,
 		previewapi.Config{
-			GatewayIP: gatewayIP, OwnerID: "preview-e2e-owner",
-			CredentialCheckInterval: 25 * time.Millisecond,
-			TaskCheckInterval:       25 * time.Millisecond,
-			UDPIdleTimeout:          time.Second,
-			DeleteTimeout:           5 * time.Second,
+			DeleteTimeout: 5 * time.Second,
 		},
 	)
 	if err != nil {
@@ -230,15 +226,13 @@ func TestRealPreviewLifecycleOwnershipAndStaleRecovery(t *testing.T) {
 	if requests := kubeOutage.RequestCount(); requests == 0 {
 		t.Fatal("Preview cleanup did not exercise the simulated Kubernetes API outage")
 	}
-	assertSnapshotCount(t, stateStore, stale.ID, 1)
+	assertSnapshotCount(t, stateStore, stale.ID, 0)
 	kubeOutage.Disable()
 	time.Sleep(150 * time.Millisecond)
-	reconciler, err := previewapi.NewReconciler(
-		stateStore, realResources, slog.New(slog.NewTextHandler(io.Discard, nil)),
-		previewapi.RecoveryConfig{
-			OwnerID: "preview-e2e-replacement", GatewayIP: gatewayIP,
-			Interval: 100 * time.Millisecond, StaleAfter: 100 * time.Millisecond,
-			DeleteTimeout: 5 * time.Second,
+	reconciler, err := trafficbindingclient.NewReconciler(
+		bindings, stateStore.Tasks(), stateStore.Sessions(), slog.New(slog.NewTextHandler(io.Discard, nil)),
+		trafficbindingclient.ReconcilerConfig{
+			Interval: 100 * time.Millisecond, StaleAfter: 100 * time.Millisecond, CleanupTimeout: 5 * time.Second,
 		},
 	)
 	if err != nil {
@@ -267,7 +261,7 @@ func previewLifecycleState(
 	t *testing.T,
 	ctx context.Context,
 	serviceIP string,
-) (*storage.Store, controller.Principal, sessionapi.ActiveSession, remote.Session) {
+) (*storage.Store, controlplaneapi.Principal, sessionapi.ActiveSession, remote.Session) {
 	t.Helper()
 	stateStore, err := storage.Open(ctx, storage.Config{
 		Backend: storage.BackendSQLite, SQLitePath: filepath.Join(t.TempDir(), "preview-lifecycle.db"),
@@ -306,7 +300,7 @@ func previewLifecycleState(
 	}); err != nil {
 		t.Fatal(err)
 	}
-	principal := controller.Principal{
+	principal := controlplaneapi.Principal{
 		Subject: principalID, DeviceID: deviceID, FamilyID: familyID, AccessExpiresAt: expiresAt,
 	}
 	active := sessionapi.ActiveSession{
@@ -323,21 +317,10 @@ func previewLifecycleState(
 
 func startPreviewLifecycleController(
 	t *testing.T,
-	handler *previewapi.Handler,
-	principal controller.Principal,
+	handler *previewapi.Service,
+	principal controlplaneapi.Principal,
 ) *httptest.Server {
 	t.Helper()
-	router := controller.NewAPIRouter()
-	for _, route := range []struct{ method, pattern string }{
-		{http.MethodPost, "/api/v2/sessions/{sessionID}/previews"},
-		{http.MethodGet, "/api/v2/sessions/{sessionID}/previews/{taskID}"},
-		{http.MethodDelete, "/api/v2/sessions/{sessionID}/previews/{taskID}"},
-		{http.MethodGet, "/api/v2/sessions/{sessionID}/previews/{taskID}/stream"},
-	} {
-		if err := router.Handle(route.method, route.pattern, handler); err != nil {
-			t.Fatal(err)
-		}
-	}
 	policy, err := authorization.New(authorization.Policy{Rules: []authorization.Rule{{
 		ID: "e2e-preview", Subjects: []string{principal.Subject},
 		Namespaces: []string{harness.EchoNamespace},
@@ -346,16 +329,16 @@ func startPreviewLifecycleController(
 	if err != nil {
 		t.Fatal(err)
 	}
-	server, err := controller.NewServer(
-		controller.Config{PublicURL: "http://127.0.0.1"}, controller.BuildInfo{},
+	server, err := controlplane.NewServer(
+		controlplane.Config{PublicURL: "http://127.0.0.1"}, controlplane.BuildInfo{},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
-		controller.WithAuthenticator(controller.AuthenticatorFunc(func(request *http.Request) (controller.Principal, *controller.APIError) {
+		controlplane.WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(request *http.Request) (controlplaneapi.Principal, *controlplaneapi.Error) {
 			if request.Header.Get("Authorization") != "Bearer "+previewLifecycleAccessToken {
-				return controller.Principal{}, &controller.APIError{Code: controller.CodeUnauthenticated, Message: "invalid e2e access token"}
+				return controlplaneapi.Principal{}, &controlplaneapi.Error{Code: controlplaneapi.CodeUnauthenticated, Message: "invalid e2e access token"}
 			}
 			return principal, nil
 		})),
-		controller.WithAuthorizer(policy), controller.WithAPIHandler(router),
+		controlplane.WithAuthorizer(policy), controlplane.WithAPIRoutes(controlplane.APIRoutes{Previews: previewapi.NewRoutes(handler).Endpoints()}),
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -426,7 +409,7 @@ func assertPreviewOwned(
 		!previewOwnedByBinding(slices[0].OwnerReferences, bindingName, service.Annotations["traffic.kubeloop.io/binding-uid"]) {
 		t.Fatalf("owned Preview EndpointSlices=%#v err=%v", slices, err)
 	}
-	assertSnapshotCount(t, stateStore, taskID, 1)
+	assertSnapshotCount(t, stateStore, taskID, 0)
 }
 
 func previewOwnedByBinding(references []metav1.OwnerReference, name, uid string) bool {

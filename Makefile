@@ -30,7 +30,7 @@ ENVTEST_K8S_VERSION ?= $(shell v='$(call gomodver,k8s.io/api)'; \
 
 OPERATOR_E2E_PROFILE ?= kubeloop-operator-test-e2e
 HELM_E2E_PROFILE ?= kubeloop-helm-e2e
-HELM_E2E_CONTROLLER_IMAGE ?= kubeloop/controller:e2e
+HELM_E2E_CONTROL_PLANE_IMAGE ?= kubeloop/control-plane:e2e
 HELM_E2E_DATA_PLANE_IMAGE ?= kubeloop/gateway:e2e
 HELM_E2E_OPERATOR_IMAGE ?= kubeloop/operator:e2e
 HELM_E2E_POSTGRES_IMAGE ?= postgres:17-alpine
@@ -76,35 +76,36 @@ singbox-package: singbox-build ## Create local binary and reconstructable patch 
 
 .PHONY: operator-manifests manifests
 operator-manifests: controller-gen ## Generate Operator CRDs and RBAC from markers.
-	"$(CONTROLLER_GEN)" rbac:roleName=manager-role crd webhook paths="./internal/operator/..." output:crd:artifacts:config=config/crd/bases
+	"$(CONTROLLER_GEN)" rbac:roleName=manager-role crd webhook paths="./api/...;./internal/controller/..." output:crd:artifacts:config=config/crd/bases
+	cp config/crd/bases/traffic.kubeloop.io_trafficbindings.yaml charts/kubeloop/crds/traffic.kubeloop.io_trafficbindings.yaml
 manifests: operator-manifests ## Kubebuilder-compatible alias for Operator manifest generation.
 
 .PHONY: operator-generate generate
 operator-generate: controller-gen ## Generate Operator DeepCopy implementations.
-	"$(CONTROLLER_GEN)" object paths="./internal/operator/api/..."
+	"$(CONTROLLER_GEN)" object paths="./api/..."
 generate: operator-generate ## Kubebuilder-compatible alias for Operator code generation.
 
 .PHONY: operator-fmt
 operator-fmt: ## Format Operator source and tests.
-	go fmt ./internal/operator/... ./cmd/kubeloop-operator ./e2e/operator/...
+	go fmt ./api/... ./internal/controller/... ./cmd/kubeloop-operator ./e2e/operator/...
 
 .PHONY: operator-vet
 operator-vet: ## Run go vet for the Operator component.
-	go vet ./internal/operator/... ./cmd/kubeloop-operator
+	go vet ./api/... ./internal/controller/... ./cmd/kubeloop-operator
 
 .PHONY: operator-test
 operator-test: operator-manifests operator-generate operator-fmt operator-vet setup-envtest ## Run Operator unit and EnvTest suites.
 	mkdir -p build
 	KUBEBUILDER_ASSETS="$(shell "$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" \
-		go test ./internal/operator/... ./cmd/kubeloop-operator -coverprofile build/operator-cover.out
+		go test ./api/... ./internal/controller/... ./cmd/kubeloop-operator -coverprofile build/operator-cover.out
 
 .PHONY: operator-lint
 operator-lint: golangci-lint ## Lint only the Operator component.
-	"$(GOLANGCI_LINT)" run ./internal/operator/... ./cmd/kubeloop-operator
+	"$(GOLANGCI_LINT)" run ./api/... ./internal/controller/... ./cmd/kubeloop-operator
 
 .PHONY: operator-lint-fix
 operator-lint-fix: golangci-lint ## Apply safe lint fixes to the Operator component.
-	"$(GOLANGCI_LINT)" run --fix ./internal/operator/... ./cmd/kubeloop-operator
+	"$(GOLANGCI_LINT)" run --fix ./api/... ./internal/controller/... ./cmd/kubeloop-operator
 
 .PHONY: operator-lint-config
 operator-lint-config: golangci-lint ## Verify the repository lint configuration.
@@ -193,8 +194,8 @@ operator-cleanup-test-e2e: ## Delete the isolated Operator Minikube profile.
 ##@ Helm end-to-end tests
 
 .PHONY: helm-e2e-images
-helm-e2e-images: ## Build the Controller, Data Plane and Operator E2E images.
-	$(CONTAINER_TOOL) build -f build/controller.Dockerfile -t $(HELM_E2E_CONTROLLER_IMAGE) .
+helm-e2e-images: ## Build the Control Plane, Data Plane and Operator E2E images.
+	$(CONTAINER_TOOL) build -f build/control-plane.Dockerfile -t $(HELM_E2E_CONTROL_PLANE_IMAGE) .
 	$(CONTAINER_TOOL) build -f build/gateway.Dockerfile -t $(HELM_E2E_DATA_PLANE_IMAGE) .
 	$(CONTAINER_TOOL) build -f build/operator.Dockerfile -t $(HELM_E2E_OPERATOR_IMAGE) .
 
@@ -213,8 +214,8 @@ helm-setup-test-e2e: ## Start the dedicated Helm lifecycle Minikube profile with
 
 .PHONY: helm-load-test-e2e-images
 helm-load-test-e2e-images: helm-setup-test-e2e ## Build application images in Minikube and load dependency images.
-	$(MINIKUBE) --profile $(HELM_E2E_PROFILE) image build -f build/controller.Dockerfile -t $(HELM_E2E_CONTROLLER_IMAGE) .
-	@image='$(HELM_E2E_CONTROLLER_IMAGE)'; $(MINIKUBE) --profile $(HELM_E2E_PROFILE) image ls --format short | awk -v image="$$image" '$$0 == image || substr($$0, length($$0) - length(image) + 1) == image { found = 1 } END { exit !found }'
+	$(MINIKUBE) --profile $(HELM_E2E_PROFILE) image build -f build/control-plane.Dockerfile -t $(HELM_E2E_CONTROL_PLANE_IMAGE) .
+	@image='$(HELM_E2E_CONTROL_PLANE_IMAGE)'; $(MINIKUBE) --profile $(HELM_E2E_PROFILE) image ls --format short | awk -v image="$$image" '$$0 == image || substr($$0, length($$0) - length(image) + 1) == image { found = 1 } END { exit !found }'
 	$(MINIKUBE) --profile $(HELM_E2E_PROFILE) image build -f build/gateway.Dockerfile -t $(HELM_E2E_DATA_PLANE_IMAGE) .
 	@image='$(HELM_E2E_DATA_PLANE_IMAGE)'; $(MINIKUBE) --profile $(HELM_E2E_PROFILE) image ls --format short | awk -v image="$$image" '$$0 == image || substr($$0, length($$0) - length(image) + 1) == image { found = 1 } END { exit !found }'
 	$(MINIKUBE) --profile $(HELM_E2E_PROFILE) image build -f build/operator.Dockerfile -t $(HELM_E2E_OPERATOR_IMAGE) .
@@ -229,7 +230,7 @@ helm-test-e2e: helm-load-test-e2e-images ## Run install, upgrade, rollback, rete
 	KUBELOOP_HELM_E2E=1 \
 	KUBELOOP_HELM_E2E_CONTEXT=$(HELM_E2E_PROFILE) \
 	KUBELOOP_HELM_E2E_AUDIT_SOURCE=kube-apiserver \
-	KUBELOOP_HELM_E2E_CONTROLLER_IMAGE=$(HELM_E2E_CONTROLLER_IMAGE) \
+	KUBELOOP_HELM_E2E_CONTROL_PLANE_IMAGE=$(HELM_E2E_CONTROL_PLANE_IMAGE) \
 	KUBELOOP_HELM_E2E_DATA_PLANE_IMAGE=$(HELM_E2E_DATA_PLANE_IMAGE) \
 	KUBELOOP_HELM_E2E_OPERATOR_IMAGE=$(HELM_E2E_OPERATOR_IMAGE) \
 	KUBELOOP_HELM_E2E_POSTGRES_IMAGE=$(HELM_E2E_POSTGRES_IMAGE) \
@@ -257,16 +258,16 @@ recovery-test: ## Run resource recovery, owner-safety and Task lifecycle tests w
 	go test -race -count=1 \
 		./internal/remotetask \
 		./internal/servicebinding \
-		./internal/controller/storage \
-		./internal/controller/exchangeapi \
-		./internal/controller/mirrorapi \
-		./internal/controller/previewapi \
-		./internal/controller/portforwardapi \
-		./internal/controller/execapi \
-		./internal/controller/fileapi \
-		./internal/controller/trafficbindingclient \
-		./internal/controller/maintenance \
-		./internal/operator/trafficbinding
+		./internal/controlplane/storage \
+		./internal/controlplane/exchangeapi \
+		./internal/controlplane/mirrorapi \
+		./internal/controlplane/previewapi \
+		./internal/controlplane/portforwardapi \
+		./internal/controlplane/execapi \
+		./internal/controlplane/fileapi \
+		./internal/controlplane/trafficbindingclient \
+		./internal/controlplane/maintenance \
+		./internal/controller
 
 ##@ Tool dependencies
 

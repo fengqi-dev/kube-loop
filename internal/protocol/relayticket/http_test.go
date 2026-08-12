@@ -27,7 +27,7 @@ func TestRequestVerifierConsumesRelayTicketOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	verifier, err := NewVerifier(VerifierConfig{
-		Keys: map[string]ed25519.PublicKey{"primary": publicKey}, Issuer: "https://controller.example",
+		Keys: map[string]ed25519.PublicKey{"primary": publicKey}, Issuer: "https://control-plane.example",
 		Audience: "relay-a", RequiredOperation: "tunnel", Now: func() time.Time { return now },
 	})
 	if err != nil {
@@ -71,7 +71,7 @@ func TestRequestVerifierRejectsOlderSessionGeneration(t *testing.T) {
 		t.Fatal(err)
 	}
 	verifier, err := NewVerifier(VerifierConfig{
-		Keys: map[string]ed25519.PublicKey{"primary": publicKey}, Issuer: "https://controller.example",
+		Keys: map[string]ed25519.PublicKey{"primary": publicKey}, Issuer: "https://control-plane.example",
 		Audience: "relay-a", RequiredOperation: "tunnel", Now: func() time.Time { return now },
 	})
 	if err != nil {

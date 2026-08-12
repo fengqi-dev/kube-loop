@@ -10,7 +10,7 @@ Current contracts:
 - `exchangestream`, `execstream`, `filestream`, and `mirrorstream`: streaming
   operation frames.
 - `helper`: desktop-to-privileged-helper JSON-line RPC.
-- `networkspec`: the normalized network document exchanged by controller,
+- `networkspec`: the normalized network document exchanged by the control plane,
   gateway, and client.
 - `relaycontrol` and `relayticket`: relay control-plane messages and signed
   admission tickets.

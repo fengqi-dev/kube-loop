@@ -14,7 +14,7 @@ OAuth lifecycle, mutate host networking, and exercise whatever kubeconfig
 identity happened to be present on disk.
 
 V2 has a different trust boundary. Kubernetes credentials and operations live
-behind Controller/Gateway, while the desktop keeps only Server Profiles,
+behind Control Plane/Gateway, while the desktop keeps only Server Profiles,
 OAuth/AD credentials, authenticated remote Sessions, and local data-plane
 endpoints. MCP must be another caller of that same client boundary, not a
 compatibility path back to V1.

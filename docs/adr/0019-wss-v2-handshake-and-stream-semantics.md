@@ -13,10 +13,10 @@ before discovering an incompatible peer.
 
 The original roadmap described an Access Token at this boundary. V2-500 later
 made the narrower RelayTicket the authoritative Data Plane credential. The
-Controller validates the Access Token, Principal, device, policy and active
+Control Plane validates the Access Token, Principal, device, policy and active
 Cluster Session before issuing the short-lived, one-use ticket. Sending the
 Access Token to Data Plane again would widen its privilege and contradict the
-Controller/Data Plane split.
+Control Plane/Data Plane split.
 
 ## Decision
 
@@ -25,7 +25,7 @@ Controller/Data Plane split.
 The client performs these steps in order:
 
 1. Obtain a RelayTicket and its assigned Relay ID, WSS endpoint and device ID
-   from the authenticated Controller API.
+   from the authenticated Control Plane API.
 2. Upgrade one HTTPS request with `Authorization: Bearer <RelayTicket>` and the
    exact WebSocket subprotocol `kubeloop-mux-v2`; the response must advertise
    `KubeLoop-WSS-Version: 2.0`.
@@ -77,7 +77,7 @@ Handshake messages are binary WebSocket messages; text messages are invalid.
 
 The desktop clamps its local pool and per-connection stream use to the returned
 limits. Helm exposes the Data Plane limits and validates the frame and per-user
-bounds. The same `controller.minClientVersion` is enforced by discovery and
+bounds. The same `controlPlane.minClientVersion` is enforced by discovery and
 the WSS handshake.
 
 ### Multiplexed stream semantics

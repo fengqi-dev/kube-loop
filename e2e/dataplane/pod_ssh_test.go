@@ -22,11 +22,11 @@ import (
 	clientpodssh "github.com/fengqi-dev/kube-loop/internal/client/podssh"
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
-	"github.com/fengqi-dev/kube-loop/internal/controller"
-	"github.com/fengqi-dev/kube-loop/internal/controller/execapi"
-	controllerkubernetes "github.com/fengqi-dev/kube-loop/internal/controller/kubernetes"
-	"github.com/fengqi-dev/kube-loop/internal/controller/sessionapi"
-	"github.com/fengqi-dev/kube-loop/internal/controller/storage"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/execapi"
+	controlplanekubernetes "github.com/fengqi-dev/kube-loop/internal/controlplane/kubernetes"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/sessionapi"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 	localpodssh "github.com/fengqi-dev/kube-loop/internal/podssh"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
 	"github.com/fengqi-dev/kube-loop/internal/socksbridge"
@@ -152,7 +152,7 @@ func TestRealPodSSHThroughGatewayAndLocalIdentityIsolation(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	provider, err := controllerkubernetes.NewForRESTConfig(kubeRESTConfig(t), controllerkubernetes.Config{})
+	provider, err := controlplanekubernetes.NewForRESTConfig(kubeRESTConfig(t), controlplanekubernetes.Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,7 +160,7 @@ func TestRealPodSSHThroughGatewayAndLocalIdentityIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	principal := controller.Principal{
+	principal := controlplaneapi.Principal{
 		Subject: principalID, DeviceID: deviceID, FamilyID: familyID, AccessExpiresAt: expiresAt,
 	}
 	activeSession := sessionapi.ActiveSession{

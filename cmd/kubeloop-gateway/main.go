@@ -18,10 +18,11 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/gateway"
 	"github.com/fengqi-dev/kube-loop/internal/gateway/operations"
 	"github.com/fengqi-dev/kube-loop/internal/gateway/relayagent"
+	"github.com/fengqi-dev/kube-loop/internal/gateway/trafficapi"
 	"github.com/fengqi-dev/kube-loop/internal/gateway/websocketmux"
 	"github.com/fengqi-dev/kube-loop/internal/logging"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/relayticket"
-	"github.com/go-chi/chi/v5"
+	"github.com/labstack/echo/v5"
 )
 
 var version = "dev"
@@ -40,13 +41,14 @@ func main() {
 	verificationKeysFile := flag.String("relay-verification-keys-file", os.Getenv("KUBELOOP_RELAY_VERIFICATION_KEYS_FILE"), "RelayTicket public keys JSON file")
 	ticketIssuer := flag.String("relay-ticket-issuer", os.Getenv("KUBELOOP_RELAY_TICKET_ISSUER"), "expected RelayTicket issuer")
 	relayID := flag.String("relay-id", stringEnv("KUBELOOP_RELAY_ID", "primary"), "RelayTicket audience and Data Plane ID")
-	relayControllerURL := flag.String("relay-controller-url", os.Getenv("KUBELOOP_RELAY_CONTROLLER_URL"), "Controller mTLS Relay Registry HTTPS origin")
-	relayEndpoint := flag.String("relay-endpoint", os.Getenv("KUBELOOP_RELAY_ENDPOINT"), "externally routable WSS endpoint advertised to Controller")
+	relayControlPlaneURL := flag.String("relay-control-plane-url", os.Getenv("KUBELOOP_RELAY_CONTROL_PLANE_URL"), "Control Plane mTLS Relay Registry HTTPS origin")
+	relayEndpoint := flag.String("relay-endpoint", os.Getenv("KUBELOOP_RELAY_ENDPOINT"), "externally routable WSS endpoint advertised to Control Plane")
 	relayClientCertificateFile := flag.String("relay-client-cert-file", os.Getenv("KUBELOOP_RELAY_CLIENT_CERT_FILE"), "Relay Registry client certificate file")
 	relayClientPrivateKeyFile := flag.String("relay-client-key-file", os.Getenv("KUBELOOP_RELAY_CLIENT_KEY_FILE"), "Relay Registry client private key file")
 	relayServerCAFile := flag.String("relay-server-ca-file", os.Getenv("KUBELOOP_RELAY_SERVER_CA_FILE"), "Relay Registry server CA file")
 	relayServerName := flag.String("relay-server-name", os.Getenv("KUBELOOP_RELAY_SERVER_NAME"), "Relay Registry TLS server name override")
 	relayBearerTokenFile := flag.String("relay-bearer-token-file", os.Getenv("KUBELOOP_RELAY_BEARER_TOKEN_FILE"), "projected ServiceAccount token file for Relay Registry TokenReview")
+	gatewayIP := flag.String("gateway-ip", os.Getenv("KUBELOOP_POD_IP"), "Gateway Pod IP used by traffic listeners")
 	replayEntries := flag.Int("relay-replay-entries", relayticket.DefaultReplayEntries, "maximum live RelayTicket replay entries")
 	maximumSessions := flag.Int("max-websocket-sessions", 256, "maximum physical WebSocket sessions")
 	maximumSessionsPerUser := flag.Int("max-websocket-sessions-per-user", 8, "maximum physical WebSocket sessions per principal across devices")
@@ -86,7 +88,9 @@ func main() {
 	var httpHandler *websocketmux.Handler
 	var cancelHTTP context.CancelFunc
 	var controlAgent *relayagent.Agent
-	registryMode := strings.TrimSpace(*relayControllerURL) != ""
+	var runtimeReporter *relayRuntimeReporter
+	var verifyRequest func(*http.Request) (relayticket.Claims, error)
+	registryMode := strings.TrimSpace(*relayControlPlaneURL) != ""
 	if registryMode || strings.TrimSpace(*verificationKeysFile) != "" {
 		if !strings.HasPrefix(*httpPath, "/") {
 			errorLogger.Fatal("WebSocket Gateway path must start with /")
@@ -97,7 +101,6 @@ func main() {
 			uint64(*maximumSessions)*uint64(*maximumStreamsPerSession) > 1<<24 {
 			errorLogger.Fatal("Gateway WebSocket capacity configuration is invalid")
 		}
-		var verifyRequest func(*http.Request) (relayticket.Claims, error)
 		var dynamicAuthenticator *relayagent.TicketAuthenticator
 		if registryMode {
 			var authenticatorErr error
@@ -175,15 +178,15 @@ func main() {
 			if clientErr != nil {
 				errorLogger.Fatal(clientErr)
 			}
-			reporter := &relayRuntimeReporter{
+			runtimeReporter = &relayRuntimeReporter{
 				gateway: server, websocket: handler, maximumPhysical: uint32(*maximumSessions),
 				maximumLogical: uint32(uint64(*maximumSessions) * uint64(*maximumStreamsPerSession)),
 			}
 			var agentErr error
 			controlAgent, agentErr = relayagent.New(relayagent.Config{
-				ControllerURL: *relayControllerURL, Endpoint: advertisedEndpoint, HTTPClient: httpClient,
+				ControlPlaneURL: *relayControlPlaneURL, Endpoint: advertisedEndpoint, HTTPClient: httpClient,
 				BearerTokenFile: *relayBearerTokenFile,
-				Reporter:        reporter, Applier: dynamicAuthenticator, Logger: logger,
+				Reporter:        runtimeReporter, Applier: dynamicAuthenticator, Logger: logger,
 			})
 			if agentErr != nil {
 				errorLogger.Fatal(agentErr)
@@ -198,13 +201,34 @@ func main() {
 		if listenErr != nil {
 			errorLogger.Fatal(listenErr)
 		}
-		router := chi.NewRouter()
+		router := echo.New()
 		operations.NewHandler(operationsState, handler).Register(router)
-		router.Handle(*httpPath, handler)
-		router.NotFound(func(writer http.ResponseWriter, request *http.Request) {
+		router.Any(*httpPath, echo.WrapHandler(handler))
+		if registryMode {
+			trafficHandler, trafficErr := trafficapi.New(trafficapi.Config{
+				GatewayIP: strings.TrimSpace(*gatewayIP), VerifyRequest: verifyRequest, ControlPlane: controlAgent,
+				MaximumSessions: *maximumSessions, OtherSessions: handler.ActiveSessions,
+			})
+			if trafficErr != nil {
+				errorLogger.Fatal(trafficErr)
+			}
+			trafficHandler.RegisterRoutes(router)
+			runtimeReporter.SetTraffic(trafficHandler)
+		}
+		defaultHTTPErrorHandler := echo.DefaultHTTPErrorHandler(false)
+		router.HTTPErrorHandler = func(ctx *echo.Context, err error) {
+			if !errors.Is(err, echo.ErrNotFound) {
+				if errors.Is(err, echo.ErrMethodNotAllowed) {
+					allow := strings.ReplaceAll(ctx.Response().Header().Get(echo.HeaderAllow), http.MethodOptions+", ", "")
+					ctx.Response().Header().Set(echo.HeaderAllow, allow)
+				}
+				defaultHTTPErrorHandler(ctx, err)
+				return
+			}
+			writer, request := ctx.Response(), ctx.Request()
 			logger.Printf("WebSocket request rejected: remote=%s method=%s path=%s status=%d reason=path", request.RemoteAddr, request.Method, request.URL.Path, http.StatusNotFound)
 			http.NotFound(writer, request)
-		})
+		}
 		httpContext, cancel := context.WithCancel(context.Background())
 		cancelHTTP = cancel
 		serveCount++

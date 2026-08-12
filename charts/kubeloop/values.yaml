@@ -8,11 +8,11 @@ serviceID: ""
 
 imagePullSecrets: []
 
-controller:
+controlPlane:
   replicas: 1
   logLevel: info
   image:
-    repository: ghcr.io/fengqi-dev/kube-loop/controller
+    repository: ghcr.io/fengqi-dev/kube-loop/control-plane
     tag: ""
     pullPolicy: IfNotPresent
   minClientVersion: ""
@@ -64,7 +64,7 @@ controller:
     #     subject: anonymous
     #     groups: [developers]
   relay:
-    # Required. This Secret is mounted only into Controller and must contain
+    # Required. This Secret is mounted only into Control Plane and must contain
     # an Ed25519 PKCS#8 private key used to sign short-lived RelayTickets.
     existingSecret: ""
     signingKeyKey: signing-key.pem
@@ -87,7 +87,7 @@ controller:
     heartbeatAfter: 10s
     keyGeneration: 1
     keyValidity: 8760h
-    # Defaults to controller.relay.existingSecret when empty. It must contain
+    # Defaults to controlPlane.relay.existingSecret when empty. It must contain
     # the internal HTTPS server certificate/private key and issuing CA.
     existingSecret: ""
     serverCertificateKey: tls.crt
@@ -120,16 +120,16 @@ controller:
     #   resourceKinds: [namespaces, pods, services]
   management:
     bootstrap:
-      # Exact stable Controller Principal UUIDs or normalized groups only.
+      # Exact stable Control Plane Principal UUIDs or normalized groups only.
       # Wildcards, upstream email addresses, and display names are rejected.
       subjects: []
       groups: []
       # Disaster recovery must be explicitly enabled by a Helm change and
-      # Controller restart after the persistent bootstrap retirement marker is set.
+      # Control Plane restart after the persistent bootstrap retirement marker is set.
       recoveryEnabled: false
     breakGlass:
       # Disabled by default. The API never accepts this credential; the
-      # Controller reads the selected alias from a read-only Secret projection.
+      # Control Plane reads the selected alias from a read-only Secret projection.
       enabled: false
       secretAlias: ""
       sessionTTL: 15m
@@ -154,7 +154,7 @@ controller:
     userAgent: ""
     impersonation:
       # Disabled by default. Enabling this also requires the operator to grant
-      # the Controller ServiceAccount narrowly scoped impersonate RBAC.
+      # the Control Plane ServiceAccount narrowly scoped impersonate RBAC.
       enabled: false
       usernamePrefix: "kubeloop:"
       groupMappings: {}
@@ -276,12 +276,12 @@ dataPlane:
     id: primary
     replayEntries: 65536
   relayRegistry:
-    # Empty values are derived from the internal Controller Service and
+    # Empty values are derived from the internal Control Plane Service and
     # publicURL/tunnelPath. endpoint may instead be a per-Pod routable WSS URL.
-    controllerURL: ""
+    controlPlaneURL: ""
     endpoint: ""
     serverName: ""
-    # Required only when controller.relayRegistry.authentication=mtls. Each
+    # Required only when controlPlane.relayRegistry.authentication=mtls. Each
     # replica needs a distinct Pod-bound workload certificate; TokenReview is
     # the scalable default.
     existingSecret: ""
@@ -332,13 +332,20 @@ gatewayAPI:
     tls:
       secretName: ""
   timeouts:
-    # Controller requests remain bounded. A zero tunnel timeout is required
+    # Control Plane requests remain bounded. A zero tunnel timeout is required
     # for WebSocket sessions; Gateway API defines 0s as disabling the timeout.
-    controller: 30s
+    controlPlane: 30s
     tunnel: 0s
 
 networkPolicy:
   enabled: true
+  ingress:
+    # Gateway listeners use dynamic ports and receive Service traffic directly
+    # from workload Pods. Narrow these peers to the namespaces that may use
+    # Exchange, Preview, and Mirror in production.
+    dataPlane:
+      - from:
+          - namespaceSelector: {}
   egress:
     # Restricted egress needs installation-specific Kubernetes API, workload,
     # OIDC/AD and PostgreSQL CIDRs. Enabling it without explicit component
@@ -352,7 +359,7 @@ networkPolicy:
       podSelector:
         matchLabels:
           k8s-app: kube-dns
-    controller: []
+    controlPlane: []
     dataPlane: []
     operator: []
 
@@ -365,9 +372,9 @@ monitoring:
     scrapeTimeout: 10s
 
 podDisruptionBudget:
-  # Rendered only for a multi-replica PostgreSQL Controller. SQLite never
+  # Rendered only for a multi-replica PostgreSQL Control Plane. SQLite never
   # receives a PDB that could prevent voluntary maintenance.
-  controller:
+  controlPlane:
     enabled: true
     minAvailable: 1
 

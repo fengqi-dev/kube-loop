@@ -1,0 +1,369 @@
+{{- if .Values.controlPlane.rbac.create }}
+{{- $scope := required "controlPlane.rbac.scope is required" .Values.controlPlane.rbac.scope }}
+{{- if not (or (eq $scope "cluster") (eq $scope "namespace")) }}
+{{- fail "controlPlane.rbac.scope must be cluster or namespace" }}
+{{- end }}
+{{- if and (eq $scope "namespace") (eq (len .Values.controlPlane.rbac.namespaces) 0) }}
+{{- fail "controlPlane.rbac.namespaces must contain at least one namespace when scope=namespace" }}
+{{- end }}
+{{- $seenNamespaces := dict }}
+{{- range $namespace := .Values.controlPlane.rbac.namespaces }}
+{{- if or (gt (len $namespace) 63) (not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" $namespace)) }}
+{{- fail (printf "controlPlane.rbac.namespaces contains invalid namespace %q" $namespace) }}
+{{- end }}
+{{- if hasKey $seenNamespaces $namespace }}
+{{- fail (printf "controlPlane.rbac.namespaces contains duplicate namespace %q" $namespace) }}
+{{- end }}
+{{- $_ := set $seenNamespaces $namespace true }}
+{{- end }}
+{{- $controlPlaneName := include "kubeloop.controlPlaneName" . }}
+{{- $inventoryName := printf "%s-inventory" $controlPlaneName | trunc 63 | trimSuffix "-" }}
+{{- $execFileName := printf "%s-exec-file" $controlPlaneName | trunc 63 | trimSuffix "-" }}
+{{- $trafficName := printf "%s-traffic" $controlPlaneName | trunc 63 | trimSuffix "-" }}
+{{- $relayName := printf "%s-relay-registry" $controlPlaneName | trunc 63 | trimSuffix "-" }}
+{{- $dnsDiscoveryName := printf "%s-dns-discovery" $controlPlaneName | trunc 63 | trimSuffix "-" }}
+# Cluster-scoped discovery and authorization checks required by the Control Plane.
+# Workload read/write permissions are emitted separately below.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $controlPlaneName }}
+  labels:
+    {{- include "kubeloop.labels" . | nindent 4 }}
+    app.kubernetes.io/component: control-plane
+    app.kubernetes.io/part-of-permission-group: platform
+rules:
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["servicecidrs"]
+    verbs: ["get", "list"]
+  - apiGroups: ["authorization.k8s.io"]
+    resources: ["selfsubjectaccessreviews"]
+    verbs: ["create"]
+  {{- if and .Values.controlPlane.relayRegistry.enabled (eq .Values.controlPlane.relayRegistry.authentication "tokenreview") }}
+  - apiGroups: ["authentication.k8s.io"]
+    resources: ["tokenreviews"]
+    verbs: ["create"]
+  {{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $controlPlaneName }}
+  labels:
+    {{- include "kubeloop.labels" . | nindent 4 }}
+    app.kubernetes.io/component: control-plane
+    app.kubernetes.io/part-of-permission-group: platform
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $controlPlaneName }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "kubeloop.controlPlaneServiceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+---
+# CoreDNS metadata is Control Plane-owned cluster infrastructure. Restrict reads
+# to the two conventional object names in kube-system; Corefile contents are
+# parsed in-process and are never returned to clients.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $dnsDiscoveryName }}
+  namespace: kube-system
+  labels:
+    {{- include "kubeloop.labels" . | nindent 4 }}
+    app.kubernetes.io/component: control-plane
+    app.kubernetes.io/part-of-permission-group: dns-discovery
+rules:
+  - apiGroups: [""]
+    resources: ["services", "configmaps"]
+    resourceNames: ["kube-dns", "coredns"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $dnsDiscoveryName }}
+  namespace: kube-system
+  labels:
+    {{- include "kubeloop.labels" . | nindent 4 }}
+    app.kubernetes.io/component: control-plane
+    app.kubernetes.io/part-of-permission-group: dns-discovery
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $dnsDiscoveryName }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "kubeloop.controlPlaneServiceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- if .Values.controlPlane.relayRegistry.enabled }}
+---
+# Relay registration resolves only Control Plane/Data Plane Pods in the release
+# namespace. Keeping this as a Role avoids cluster-wide Pod visibility.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $relayName }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kubeloop.labels" . | nindent 4 }}
+    app.kubernetes.io/component: control-plane
+    app.kubernetes.io/part-of-permission-group: relay-registry
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $relayName }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kubeloop.labels" . | nindent 4 }}
+    app.kubernetes.io/component: control-plane
+    app.kubernetes.io/part-of-permission-group: relay-registry
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $relayName }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "kubeloop.controlPlaneServiceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}
+{{- if eq $scope "cluster" }}
+{{- if .Values.controlPlane.rbac.permissions.inventory.enabled }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $inventoryName }}
+  labels:
+    {{- include "kubeloop.labels" . | nindent 4 }}
+    app.kubernetes.io/component: control-plane
+    app.kubernetes.io/part-of-permission-group: inventory
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "services"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $inventoryName }}
+  labels:
+    {{- include "kubeloop.labels" . | nindent 4 }}
+    app.kubernetes.io/component: control-plane
+    app.kubernetes.io/part-of-permission-group: inventory
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $inventoryName }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "kubeloop.controlPlaneServiceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}
+{{- if .Values.controlPlane.rbac.permissions.execFile.enabled }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $execFileName }}
+  labels:
+    {{- include "kubeloop.labels" . | nindent 4 }}
+    app.kubernetes.io/component: control-plane
+    app.kubernetes.io/part-of-permission-group: exec-file
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $execFileName }}
+  labels:
+    {{- include "kubeloop.labels" . | nindent 4 }}
+    app.kubernetes.io/component: control-plane
+    app.kubernetes.io/part-of-permission-group: exec-file
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $execFileName }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "kubeloop.controlPlaneServiceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}
+{{- if .Values.controlPlane.rbac.permissions.traffic.enabled }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $trafficName }}
+  labels:
+    {{- include "kubeloop.labels" . | nindent 4 }}
+    app.kubernetes.io/component: control-plane
+    app.kubernetes.io/part-of-permission-group: traffic
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["services", "endpoints"]
+    verbs: ["get", "list"]
+  - apiGroups: ["discovery.k8s.io"]
+    resources: ["endpointslices"]
+    verbs: ["get", "list"]
+  - apiGroups: ["traffic.kubeloop.io"]
+    resources: ["trafficbindings"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $trafficName }}
+  labels:
+    {{- include "kubeloop.labels" . | nindent 4 }}
+    app.kubernetes.io/component: control-plane
+    app.kubernetes.io/part-of-permission-group: traffic
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $trafficName }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "kubeloop.controlPlaneServiceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}
+{{- else }}
+{{- range $namespace := .Values.controlPlane.rbac.namespaces }}
+{{- if $.Values.controlPlane.rbac.permissions.inventory.enabled }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $inventoryName }}
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "kubeloop.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: control-plane
+    app.kubernetes.io/part-of-permission-group: inventory
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "services"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $inventoryName }}
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "kubeloop.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: control-plane
+    app.kubernetes.io/part-of-permission-group: inventory
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $inventoryName }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "kubeloop.controlPlaneServiceAccountName" $ }}
+    namespace: {{ $.Release.Namespace }}
+{{- end }}
+{{- if $.Values.controlPlane.rbac.permissions.execFile.enabled }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $execFileName }}
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "kubeloop.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: control-plane
+    app.kubernetes.io/part-of-permission-group: exec-file
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $execFileName }}
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "kubeloop.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: control-plane
+    app.kubernetes.io/part-of-permission-group: exec-file
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $execFileName }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "kubeloop.controlPlaneServiceAccountName" $ }}
+    namespace: {{ $.Release.Namespace }}
+{{- end }}
+{{- if $.Values.controlPlane.rbac.permissions.traffic.enabled }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $trafficName }}
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "kubeloop.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: control-plane
+    app.kubernetes.io/part-of-permission-group: traffic
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["services", "endpoints"]
+    verbs: ["get", "list"]
+  - apiGroups: ["discovery.k8s.io"]
+    resources: ["endpointslices"]
+    verbs: ["get", "list"]
+  - apiGroups: ["traffic.kubeloop.io"]
+    resources: ["trafficbindings"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $trafficName }}
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "kubeloop.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: control-plane
+    app.kubernetes.io/part-of-permission-group: traffic
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $trafficName }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "kubeloop.controlPlaneServiceAccountName" $ }}
+    namespace: {{ $.Release.Namespace }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}

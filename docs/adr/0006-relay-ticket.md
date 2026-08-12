@@ -9,11 +9,11 @@ Accepted on 2026-08-10.
 The V1 WebSocket transport used one static shared bearer token. Possession of
 that token was not bound to a user, device, Cluster Session, relay instance or
 operation, and rotating it interrupted every client. The Data Plane must remain
-stateless with respect to the Controller database and identity providers.
+stateless with respect to the Control Plane database and identity providers.
 
 ## Decision
 
-Controller signs short-lived Ed25519 RelayTickets after normal access-token
+Control Plane signs short-lived Ed25519 RelayTickets after normal access-token
 authentication, Gateway Policy authorization and active Session ownership
 validation. Ticket schema v2 binds issuer, relay audience, principal, device,
 Session ID and generation, namespace, operation list, required Session NetworkSpec hash, key ID, issued
@@ -39,7 +39,7 @@ WebSocket must present the matching key, so a ticket cannot be reused to open
 streams for another Session. The protocol key is a partition identifier, not a
 credential; the RelayTicket is the authorization capability.
 
-The private key is projected only into Controller. Data Plane receives only a
+The private key is projected only into Control Plane. Data Plane receives only a
 public-key JSON Secret, has no database or Kubernetes ServiceAccount token, and
 does not query OIDC/AD. Tickets, authorization headers and claims are excluded
 from logs, metrics and audit payloads. Helm no longer creates a static shared

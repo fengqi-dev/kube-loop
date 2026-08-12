@@ -432,7 +432,7 @@ UDP Mirror must maintain independent state for each Gateway stream or client ses
 - Each Session generates independent random authentication credentials.
 - Credentials exist only in restricted configuration and KubeLoop memory.
 - Credentials become invalid immediately after the Session stops.
-- The Controller Secret is separate from the SOCKS authentication credentials.
+- The Control Plane Secret is separate from the SOCKS authentication credentials.
 
 ### 12.2 `local-out` Target Restrictions
 
@@ -453,7 +453,7 @@ Rejected by default:
 - the current cluster's Service CIDR;
 - Gateway port-forward addresses;
 - sing-box's own inbounds;
-- Controller, DNS, and SOCKS Bridge ports.
+- Control Plane, DNS, and SOCKS Bridge ports.
 
 ### 12.3 `kubernetes-out` Target Restrictions
 
@@ -490,7 +490,7 @@ The following cases must be rejected when starting a Session or creating a mappi
 4. Start the SOCKS Bridge
 5. Allocate fixed inbound ports and random authentication credentials
 6. Generate and start sing-box
-7. Verify the fixed inbounds and Controller
+7. Verify the fixed inbounds and Control Plane
 8. Start the Gateway control channel
 9. Restore persisted Exchange, Preview, Mirror, and Port Forward mappings
 10. Start accepting new business connections

@@ -21,6 +21,8 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/protocol/filestream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/mirrorstream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/relayticket"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficcontrol"
 	"github.com/fengqi-dev/kube-loop/internal/remotetask"
 	"github.com/google/uuid"
 )
@@ -510,10 +512,14 @@ func TestExchangeTaskLifecycleAndAuthenticatedReverseStream(t *testing.T) {
 	taskID := uuid.NewString()
 	state := remotetask.Pending
 	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if request.Header.Get("Authorization") != "Bearer access-token" || request.URL.Query().Get("namespace") != "development" {
-			t.Errorf("headers=%#v query=%s", request.Header, request.URL.RawQuery)
+		if strings.HasSuffix(request.URL.Path, "/tickets") {
+			_ = json.NewEncoder(writer).Encode(RelayTicket{TokenType: relayticket.Type, Ticket: "relay-ticket", ExpiresAt: now.Add(time.Minute), DeviceID: "device-1", RelayID: "relay-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", Endpoint: "wss://" + request.Host + "/tunnel"})
+			return
 		}
-		if strings.HasSuffix(request.URL.Path, "/stream") {
+		if strings.HasPrefix(request.URL.Path, trafficcontrol.PublicPathPrefix+"/") {
+			if request.Header.Get("Authorization") != "Bearer relay-ticket" {
+				t.Errorf("traffic authorization=%q", request.Header.Get("Authorization"))
+			}
 			connection, err := websocket.Accept(writer, request, nil)
 			if err != nil {
 				t.Error(err)
@@ -524,6 +530,9 @@ func TestExchangeTaskLifecycleAndAuthenticatedReverseStream(t *testing.T) {
 			_ = connection.Write(request.Context(), websocket.MessageBinary, ready)
 			_, _, _ = connection.Read(request.Context())
 			return
+		}
+		if request.Header.Get("Authorization") != "Bearer access-token" || request.URL.Query().Get("namespace") != "development" {
+			t.Errorf("headers=%#v query=%s", request.Header, request.URL.RawQuery)
 		}
 		if request.Method == http.MethodPost {
 			if request.Header.Get("Idempotency-Key") != "exchange-key" {
@@ -591,10 +600,14 @@ func TestMirrorTaskLifecycleAndAuthenticatedShadowStream(t *testing.T) {
 	taskID := uuid.NewString()
 	state := remotetask.Pending
 	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if request.Header.Get("Authorization") != "Bearer access-token" || request.URL.Query().Get("namespace") != "development" {
-			t.Errorf("headers=%#v query=%s", request.Header, request.URL.RawQuery)
+		if strings.HasSuffix(request.URL.Path, "/tickets") {
+			_ = json.NewEncoder(writer).Encode(RelayTicket{TokenType: relayticket.Type, Ticket: "relay-ticket", ExpiresAt: now.Add(time.Minute), DeviceID: "device-1", RelayID: "relay-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", Endpoint: "wss://" + request.Host + "/tunnel"})
+			return
 		}
-		if strings.HasSuffix(request.URL.Path, "/stream") {
+		if strings.HasPrefix(request.URL.Path, trafficcontrol.PublicPathPrefix+"/") {
+			if request.Header.Get("Authorization") != "Bearer relay-ticket" {
+				t.Errorf("traffic authorization=%q", request.Header.Get("Authorization"))
+			}
 			connection, err := websocket.Accept(writer, request, nil)
 			if err != nil {
 				t.Error(err)
@@ -605,6 +618,9 @@ func TestMirrorTaskLifecycleAndAuthenticatedShadowStream(t *testing.T) {
 			_ = connection.Write(request.Context(), websocket.MessageBinary, ready)
 			_, _, _ = connection.Read(request.Context())
 			return
+		}
+		if request.Header.Get("Authorization") != "Bearer access-token" || request.URL.Query().Get("namespace") != "development" {
+			t.Errorf("headers=%#v query=%s", request.Header, request.URL.RawQuery)
 		}
 		if request.Method == http.MethodPost {
 			if request.Header.Get("Idempotency-Key") != "mirror-key" {
@@ -672,10 +688,14 @@ func TestPreviewTaskLifecycleAndAuthenticatedReverseStream(t *testing.T) {
 	taskID := uuid.NewString()
 	var state atomic.Int32
 	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if request.Header.Get("Authorization") != "Bearer access-token" || request.URL.Query().Get("namespace") != "development" {
-			t.Errorf("headers=%#v query=%s", request.Header, request.URL.RawQuery)
+		if strings.HasSuffix(request.URL.Path, "/tickets") {
+			_ = json.NewEncoder(writer).Encode(RelayTicket{TokenType: relayticket.Type, Ticket: "relay-ticket", ExpiresAt: now.Add(time.Minute), DeviceID: "device-1", RelayID: "relay-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", Endpoint: "wss://" + request.Host + "/tunnel"})
+			return
 		}
-		if strings.HasSuffix(request.URL.Path, "/stream") {
+		if strings.HasPrefix(request.URL.Path, trafficcontrol.PublicPathPrefix+"/") {
+			if request.Header.Get("Authorization") != "Bearer relay-ticket" {
+				t.Errorf("traffic authorization=%q", request.Header.Get("Authorization"))
+			}
 			connection, err := websocket.Accept(writer, request, nil)
 			if err != nil {
 				t.Error(err)
@@ -687,6 +707,9 @@ func TestPreviewTaskLifecycleAndAuthenticatedReverseStream(t *testing.T) {
 			_ = connection.Write(request.Context(), websocket.MessageBinary, ready)
 			_, _, _ = connection.Read(request.Context())
 			return
+		}
+		if request.Header.Get("Authorization") != "Bearer access-token" || request.URL.Query().Get("namespace") != "development" {
+			t.Errorf("headers=%#v query=%s", request.Header, request.URL.RawQuery)
 		}
 		if request.Method == http.MethodPost {
 			if request.Header.Get("Idempotency-Key") != "preview-key" {

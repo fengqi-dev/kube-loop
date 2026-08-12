@@ -30,6 +30,7 @@ type Claims struct {
 	Issuer            string   `json:"iss"`
 	Audience          string   `json:"aud"`
 	PrincipalID       string   `json:"sub"`
+	Groups            []string `json:"groups,omitempty"`
 	DeviceID          string   `json:"device_id"`
 	SessionID         string   `json:"session_id"`
 	SessionGeneration uint64   `json:"session_generation"`
@@ -208,8 +209,18 @@ func validateClaims(claims Claims) error {
 		!validIdentifier(claims.PrincipalID, 256) || !validIdentifier(claims.DeviceID, 256) ||
 		!validIdentifier(claims.SessionID, 128) || !validIdentifier(claims.Namespace, 253) ||
 		claims.SessionGeneration == 0 || !validIdentifier(claims.TicketID, 128) ||
-		len(claims.Operations) == 0 || len(claims.Operations) > 16 {
+		len(claims.Groups) > 128 || len(claims.Operations) == 0 || len(claims.Operations) > 16 {
 		return errors.New("relay ticket claims are invalid")
+	}
+	groups := make(map[string]struct{}, len(claims.Groups))
+	for _, group := range claims.Groups {
+		if !validText(group, 256) {
+			return errors.New("relay ticket group is invalid")
+		}
+		if _, exists := groups[group]; exists {
+			return errors.New("relay ticket group is duplicated")
+		}
+		groups[group] = struct{}{}
 	}
 	seen := make(map[string]struct{}, len(claims.Operations))
 	for _, operation := range claims.Operations {

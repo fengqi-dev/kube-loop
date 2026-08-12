@@ -39,7 +39,7 @@ visible vocabulary:
 The storage repository validates every create and compare-and-swap transition.
 Terminal states are immutable. Only owned non-terminal states may update
 themselves as heartbeats. Invalid values and regressions are rejected before
-SQL execution, so all Controller replicas enforce the same graph.
+SQL execution, so all Control Plane replicas enforce the same graph.
 
 The initial implementation retains direct `pending -> running` for bounded,
 synchronous work such as Port Forward target authorization and remote file
@@ -57,7 +57,7 @@ explicit and optimistic-concurrency protected.
 - Exchange, Mirror, and Preview use `starting` while allocating listeners,
   persisting cleanup intent, and changing Kubernetes resources. They become
   `running` before emitting their protocol `ready` frame.
-- Port Forward is created as `running` only after the Controller has resolved
+- Port Forward is created as `running` only after the Control Plane has resolved
   and authorized the target and persisted its authoritative dial address.
 
 An upgrade or lease failure while `starting` records `failed`; no client sees a
@@ -65,7 +65,7 @@ false-ready `running` Task.
 
 ### Shared API and SDK contract
 
-Controller documents, storage models, and typed client Task DTOs all expose
+Control Plane documents, storage models, and typed client Task DTOs all expose
 `remotetask.State`. The SDK validates the shared vocabulary rather than keeping
 feature-local lists. JSON remains a string value, so the wire representation
 and generated desktop TypeScript model stay compatible.

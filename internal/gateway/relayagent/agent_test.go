@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fengqi-dev/kube-loop/internal/controller/relayregistry"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/relayregistry"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/relaycontrol"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/relayticket"
 	"github.com/google/uuid"
@@ -105,7 +105,7 @@ func TestAgentRegistersAppliesControlStateAndAcknowledgesHeartbeat(t *testing.T)
 	reporter := &testRuntimeReporter{}
 	applier := &testApplier{}
 	agent, err := New(Config{
-		ControllerURL: server.URL, Endpoint: "wss://relay.example/tunnel",
+		ControlPlaneURL: server.URL, Endpoint: "wss://relay.example/tunnel",
 		HTTPClient: server.Client(), BearerTokenFile: tokenFile, Reporter: reporter, Applier: applier,
 	})
 	if err != nil {
@@ -178,7 +178,7 @@ func TestTicketAuthenticatorAppliesAudienceAndRevocationAtomically(t *testing.T)
 		t.Fatal(err)
 	}
 	authenticator, err := NewTicketAuthenticator(TicketAuthenticatorConfig{
-		Issuer: "https://controller.example", RequiredOperation: "tunnel", ReplayEntries: 10,
+		Issuer: "https://controlPlane.example", RequiredOperation: "tunnel", ReplayEntries: 10,
 		Now: func() time.Time { return now },
 	})
 	if err != nil {
@@ -193,7 +193,7 @@ func TestTicketAuthenticatorAppliesAudienceAndRevocationAtomically(t *testing.T)
 		t.Fatal(err)
 	}
 	ticket, err := signer.Sign(relayticket.Claims{
-		Version: relayticket.Version, Issuer: "https://controller.example", Audience: relayID,
+		Version: relayticket.Version, Issuer: "https://controlPlane.example", Audience: relayID,
 		PrincipalID: uuid.NewString(), DeviceID: uuid.NewString(), SessionID: sessionID, SessionGeneration: 1,
 		Namespace: "development", Operations: []string{"tunnel"}, NetworkSpecHash: strings.Repeat("b", 64),
 		TicketID: uuid.NewString(), IssuedAt: now.Unix(), NotBefore: now.Unix(), ExpiresAt: now.Add(30 * time.Second).Unix(),

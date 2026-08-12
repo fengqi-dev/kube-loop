@@ -2,19 +2,19 @@
 
 This chart installs the server as three independent workloads:
 
-- `kubeloop-controller`: discovery, authentication/API boundary, durable Task ownership and creation/deletion of `TrafficBinding` intents.
+- `kubeloop-control-plane`: discovery, authentication/API boundary, durable Task ownership and creation/deletion of `TrafficBinding` intents.
 - `kubeloop-gateway`: WebSocket tunnel data plane. It has no database configuration and does not automount the general Kubernetes API credential. Registry mode projects only a short-lived, audience-bound Pod token.
 - `kubeloop-operator`: watches `TrafficBinding` and exclusively coordinates Preview/Exchange/Mirror Service, Endpoints and EndpointSlice mutations with finalizer-based restoration.
 
-The current implementation exposes discovery, OIDC/AD login, token lifecycle, default-deny Gateway Policy, API audit, storage repositories, Kubernetes capability probes, read-only Namespace/Pod/Service inventory, owned Cluster Session lifecycles, short-lived RelayTicket-authenticated WebSocket transport, Session-bound Port Forward Tasks, Controller-owned Pod exec streams, resumable Controller-owned file-transfer Task streams, guarded remote directory management with desktop local-file integration, and TrafficBinding reconciliation through the Operator. Do not treat a development image tag as a production release.
+The current implementation exposes discovery, OIDC/AD login, token lifecycle, default-deny Gateway Policy, API audit, storage repositories, Kubernetes capability probes, read-only Namespace/Pod/Service inventory, owned Cluster Session lifecycles, short-lived RelayTicket-authenticated WebSocket transport, Session-bound Port Forward Tasks, Control Plane-owned Pod exec streams, resumable Control Plane-owned file-transfer Task streams, guarded remote directory management with desktop local-file integration, and TrafficBinding reconciliation through the Operator. Do not treat a development image tag as a production release.
 
 Both workloads expose an independent `logLevel` value (`debug`, `info`, `warn`,
-or `error`). The binaries validate the value again at startup. Controller and
+or `error`). The binaries validate the value again at startup. Control Plane and
 Data Plane write structured JSON logs to stdout; changing one workload does not
 change the verbosity of the other.
 
 ```yaml
-controller:
+controlPlane:
   logLevel: info
 dataPlane:
   logLevel: info
@@ -28,19 +28,19 @@ The chart routes the same origin without rewriting paths:
 
 | Public path | Backend |
 | --- | --- |
-| `/.well-known/*` | Controller |
-| `/auth/*` | Controller |
-| `/api/*` | Controller |
+| `/.well-known/*` | Control Plane |
+| `/auth/*` | Control Plane |
+| `/api/*` | Control Plane |
 | `/tunnel` | Data Plane WebSocket endpoint |
 
-The Controller publishes that exact value in discovery and derives every OIDC
+The Control Plane publishes that exact value in discovery and derives every OIDC
 callback as `<publicURL>/auth/callback/<providerID>`. Helm fails rendering when
 a chart-managed route uses another hostname, when TLS is disabled, or when both
 Ingress and HTTPRoute are enabled.
 
 For a Kubernetes Ingress, configure the timeout and request-size annotations
-required by the selected Ingress controller. For example, ingress-nginx can be
-configured as follows; `proxy-body-size` should not exceed the Controller's
+required by the selected Ingress controlPlane. For example, ingress-nginx can be
+configured as follows; `proxy-body-size` should not exceed the Control Plane's
 `maxRequestBodyBytes` unless the backend is intentionally the tighter limit:
 
 ```yaml
@@ -94,22 +94,22 @@ gatewayAPI:
 Gateway API WebSocket backend protocol and request-timeout support are extended
 conformance features. Verify that the selected implementation reports both;
 KubeLoop's TLS proxy integration test independently covers discovery routing,
-the Controller body limit, WSS upgrade and traffic after the proxy's ordinary
+the Control Plane body limit, WSS upgrade and traffic after the proxy's ordinary
 HTTP write timeout.
 
 ## Relay Registry and RelayTicket keys
 
-RelayTicket authentication is asymmetric. Controller alone receives an
-Ed25519 PKCS#8 private key. A ready Data Plane registers with the Controller's
+RelayTicket authentication is asymmetric. Control Plane alone receives an
+Ed25519 PKCS#8 private key. A ready Data Plane registers with the Control Plane's
 internal HTTPS Service, receives the current public-key set and revocation
-summary, then acknowledges the applied generations by heartbeat. Controller
+summary, then acknowledges the applied generations by heartbeat. Control Plane
 derives the Relay ID from authenticated namespace, ServiceAccount and Pod UID;
 the registration body cannot choose it.
 
 Generate the RelayTicket signing key and a CA/server certificate for the
 internal Registry Service. The certificate SAN must cover its exact DNS name.
 For the installation example below that name is
-`kubeloop-kubeloop-controller-relay.kubeloop-system.svc`:
+`kubeloop-kubeloop-control-plane-relay.kubeloop-system.svc`:
 
 ```shell
 openssl genpkey -algorithm ED25519 -out relay-signing-key.pem
@@ -118,14 +118,14 @@ openssl req -x509 -newkey rsa:3072 -nodes -days 3650 \
   -subj '/CN=KubeLoop Relay Registry CA' \
   -keyout relay-registry-ca.key -out relay-registry-ca.crt
 openssl req -newkey rsa:3072 -nodes \
-  -subj '/CN=kubeloop-kubeloop-controller-relay.kubeloop-system.svc' \
-  -addext 'subjectAltName=DNS:kubeloop-kubeloop-controller-relay.kubeloop-system.svc' \
+  -subj '/CN=kubeloop-kubeloop-control-plane-relay.kubeloop-system.svc' \
+  -addext 'subjectAltName=DNS:kubeloop-kubeloop-control-plane-relay.kubeloop-system.svc' \
   -keyout relay-registry.key -out relay-registry.csr
 openssl x509 -req -days 365 -sha256 \
   -in relay-registry.csr -CA relay-registry-ca.crt -CAkey relay-registry-ca.key -CAcreateserial \
   -copy_extensions copy -out relay-registry.crt
 
-kubectl -n kubeloop-system create secret generic kubeloop-relay-controller \
+kubectl -n kubeloop-system create secret generic kubeloop-relay-control-plane \
   --from-file=signing-key.pem=relay-signing-key.pem \
   --from-file=tls.crt=relay-registry.crt \
   --from-file=tls.key=relay-registry.key \
@@ -134,7 +134,7 @@ kubectl -n kubeloop-system create secret generic kubeloop-relay-controller \
 
 The scalable default authentication is `tokenreview`. Data Plane keeps
 `automountServiceAccountToken: false`; Helm explicitly projects a ten-minute
-token whose only audience is `kubeloop-relay`. Controller verifies its Pod UID
+token whose only audience is `kubeloop-relay`. Control Plane verifies its Pod UID
 and ServiceAccount against Kubernetes before trusting topology or capacity.
 An mTLS/SPIFFE mode is also available, but each replica must receive a distinct
 Pod-bound client certificate.
@@ -146,14 +146,14 @@ The chart rejects a shared endpoint because it cannot guarantee a
 Relay-ID-bound Ticket reaches the selected Pod.
 
 The current Registry is process-local and the chart therefore requires one
-Controller replica while it is enabled. This is independent of Data Plane
-replica count. Controller HA will require the later shared Registry/storage
+Control Plane replica while it is enabled. This is independent of Data Plane
+replica count. Control Plane HA will require the later shared Registry/storage
 conformance milestone; the chart fails fast instead of creating split leases.
 
 ```yaml
-controller:
+controlPlane:
   relay:
-    existingSecret: kubeloop-relay-controller
+    existingSecret: kubeloop-relay-control-plane
     signingKeyKey: signing-key.pem
     keyID: primary
     ticketTTL: 1m
@@ -176,7 +176,7 @@ dataPlane:
 The Data Plane atomically consumes each Ticket `jti`, verifies issuer, derived
 Relay audience, key validity, revocation, expiry and `tunnel` scope, and binds
 every protocol stream to the Ticket's Cluster Session. A key rotation first
-publishes an overlapping generation; the Controller allocates only to relays
+publishes an overlapping generation; the Control Plane allocates only to relays
 that have acknowledged it. Keep the previous public key through the two-minute
 maximum Ticket window.
 
@@ -185,21 +185,21 @@ before any smux bytes. The Data Plane verifies protocol/client version and the
 device ID bound into the one-time RelayTicket, then returns `ServerHello` with
 the exact frame, logical-stream, physical-connection, per-user and idle limits.
 Rejected negotiation returns a stable code such as `VERSION_MISMATCH` and does
-not create a partially usable smux session. `controller.minClientVersion`
+not create a partially usable smux session. `controlPlane.minClientVersion`
 applies consistently to discovery and this WSS handshake.
 
 During rollout, Data Plane sends an immediate draining heartbeat, becomes
 unready, rejects new WSS/logical connections, and lets existing streams finish
-for `dataPlane.drainTimeout`. Controller stops new assignment to that lease.
+for `dataPlane.drainTimeout`. Control Plane stops new assignment to that lease.
 Remaining streams are explicitly closed; clients obtain a fresh assignment and
 generation-bound RelayTicket. Active streams are not described as migrated.
 
 ## OIDC Provider
 
-Create the confidential client secret separately, then reference it from values. The Secret is projected only into the Controller; issuer/client metadata is written to a separate ConfigMap and the Data Plane receives neither.
+Create the confidential client secret separately, then reference it from values. The Secret is projected only into the Control Plane; issuer/client metadata is written to a separate ConfigMap and the Data Plane receives neither.
 
 ```yaml
-controller:
+controlPlane:
   auth:
     token:
       existingSecret: kubeloop-token-signing
@@ -226,14 +226,14 @@ controller:
 
 The token signing Secret value must be an Ed25519 private key in unencrypted PKCS#8 PEM form (for example, generated offline with `openssl genpkey -algorithm ED25519`). Keep the corresponding Secret under normal Kubernetes/External Secrets rotation controls.
 
-Register the exact callback `https://<public-origin>/auth/callback/corporate` at the identity provider. Controller startup fails closed if discovery does not match the configured issuer, endpoints are not HTTPS, PKCE S256 is not advertised, or no configured signing algorithm is supported.
+Register the exact callback `https://<public-origin>/auth/callback/corporate` at the identity provider. Control Plane startup fails closed if discovery does not match the configured issuer, endpoints are not HTTPS, PKCE S256 is not advertised, or no configured signing algorithm is supported.
 
 ## Active Directory / LDAPS Provider
 
 Use this mode only when the directory is not already exposed through Entra ID, AD FS, Keycloak, Dex or another OIDC Broker. The default and recommended transport is LDAPS:
 
 ```yaml
-controller:
+controlPlane:
   auth:
     token:
       existingSecret: kubeloop-token-signing
@@ -259,7 +259,7 @@ controller:
 
 ## Development authentication (unsafe for production)
 
-`static-token` and `anonymous` are disabled unless `controller.auth.developmentMode=true`. Both are bootstrap login methods only: after login, Controller issues the same short-lived, refreshable Gateway Token Family used by OIDC and AD, so authorization, audit, Session and WSS enforcement are unchanged.
+`static-token` and `anonymous` are disabled unless `controlPlane.auth.developmentMode=true`. Both are bootstrap login methods only: after login, Control Plane issues the same short-lived, refreshable Gateway Token Family used by OIDC and AD, so authorization, audit, Session and WSS enforcement are unchanged.
 
 For a controlled development environment, create a random token of at least 32 characters and keep it in a Secret:
 
@@ -269,7 +269,7 @@ kubectl -n kubeloop-system create secret generic kubeloop-development-auth \
 ```
 
 ```yaml
-controller:
+controlPlane:
   auth:
     developmentMode: true
     token:
@@ -285,9 +285,9 @@ controller:
           groups: [developers]
 ```
 
-The static token is projected only into Controller, hashed in memory, never written to the auth ConfigMap, and cleared from client input after the request. Discovery advertises it explicitly as `type: static-token`, `interaction: token`.
+The static token is projected only into Control Plane, hashed in memory, never written to the auth ConfigMap, and cleared from client input after the request. Discovery advertises it explicitly as `type: static-token`, `interaction: token`.
 
-Anonymous mode requires the same explicit development gate and an `anonymous` Provider. It asks for no credential and therefore must never be enabled on a production or untrusted network. Controller emits a high-visibility `SECURITY WARNING` at every startup while it is enabled; discovery advertises `type: anonymous`, `interaction: none`.
+Anonymous mode requires the same explicit development gate and an `anonymous` Provider. It asks for no credential and therefore must never be enabled on a production or untrusted network. Control Plane emits a high-visibility `SECURITY WARNING` at every startup while it is enabled; discovery advertises `type: anonymous`, `interaction: none`.
 
 ## Gateway Policy
 
@@ -295,7 +295,7 @@ Authentication does not grant API access by itself. The default policy has no
 rules and denies every `/api/v2` operation. Add allow rules explicitly:
 
 ```yaml
-controller:
+controlPlane:
   policy:
     rules:
       - id: developers-discovery
@@ -347,18 +347,18 @@ controller:
 
 Every configured selector is required to match. Use `$cluster` for a
 cluster-scoped request, and use `*` only for an intentional wildcard grant.
-Policy is mounted only into the Controller. Invalid policy prevents Controller
+Policy is mounted only into the Control Plane. Invalid policy prevents Control Plane
 startup; a runtime update is compiled completely before it atomically replaces
 the prior policy.
 
 ## Management bootstrap and break-glass
 
-The Controller Management Plane has a separate deny-by-default role engine;
+The Control Plane Management Plane has a separate deny-by-default role engine;
 ordinary Gateway Policy access never grants an `admin.*` operation. Initial
 deployment may identify exact stable OIDC/AD subjects or normalized groups:
 
 ```yaml
-controller:
+controlPlane:
   management:
     bootstrap:
       subjects: ["00000000-0000-4000-8000-000000000001"]
@@ -366,14 +366,14 @@ controller:
       recoveryEnabled: false
 ```
 
-Subjects are Controller Principal UUIDs; wildcards, `$cluster`, upstream email
+Subjects are Control Plane Principal UUIDs; wildcards, `$cluster`, upstream email
 addresses, and display names are not valid bootstrap selectors. A normalized
 group is normally the practical first-install selector because a new Principal
 UUID is assigned at its first successful OIDC/AD login. After a formal
 `platform-admin` assignment revision is
 published, the persistent retirement marker prevents old values or a rollback
 from restoring bootstrap access. Disaster recovery requires an explicit Helm
-change to `recoveryEnabled: true` and a Controller restart, and still requires
+change to `recoveryEnabled: true` and a Control Plane restart, and still requires
 one of the configured exact identities.
 
 Break-glass is disabled by default. When enabled, the selected stable alias
@@ -381,7 +381,7 @@ must map to an existing Secret; the credential itself never enters values,
 ConfigMaps, the database, logs, Data Plane, or Operator:
 
 ```yaml
-controller:
+controlPlane:
   management:
     breakGlass:
       enabled: true
@@ -395,7 +395,7 @@ controller:
 ```
 
 The Secret value must be an unpadded base64url encoding of 32–64 random bytes.
-Controller validates it at startup and readiness, projects it read-only under
+Control Plane validates it at startup and readiness, projects it read-only under
 `/var/run/secrets/kubeloop/management`, compares credentials in constant time,
 and derives a SHA-256 generation so Secret rotation invalidates prior emergency
 sessions. Emergency sessions are non-refreshable and may never become ordinary
@@ -404,12 +404,12 @@ Gateway Token Families or RelayTickets.
 ## Managed OIDC / AD Provider revisions
 
 The Management Plane can validate, publish, and roll back OIDC/AD Providers
-without restarting the Controller. Secret values are never accepted by the
+without restarting the Control Plane. Secret values are never accepted by the
 browser API. First allowlist the Kubernetes Secret keys that may be selected by
 a revision and configure the Gateway token signing key:
 
 ```yaml
-controller:
+controlPlane:
   auth:
     token:
       existingSecret: kubeloop-token-signing
@@ -438,9 +438,9 @@ preserved.
 
 ## Kubernetes access
 
-The Controller and Operator use separate in-cluster ServiceAccounts; the
+The Control Plane and Operator use separate in-cluster ServiceAccounts; the
 desktop client never loads kubeconfig or talks directly to the Kubernetes API.
-Controller RBAC is split by workflow so an installation can disable
+Control Plane RBAC is split by workflow so an installation can disable
 capabilities it does not offer:
 
 | Permission group | Resources | Verbs | Used by |
@@ -457,7 +457,7 @@ capabilities it does not offer:
 The Operator role is independent: it may reconcile `trafficbindings` and their
 status/finalizers, read Pods, and create/update/delete Services, Endpoints and
 EndpointSlices. It receives no database, OIDC/AD, RelayTicket, exec/file or
-Secret permissions. Controller no longer writes those traffic resources
+Secret permissions. Control Plane no longer writes those traffic resources
 directly; CR deletion waits until the Operator finalizer completes restoration.
 
 The default `cluster` scope applies the enabled Inventory, exec/file and
@@ -465,7 +465,7 @@ traffic groups to every namespace. Each group has a distinct ClusterRole and
 ClusterRoleBinding:
 
 ```yaml
-controller:
+controlPlane:
   kubernetes:
     timeout: 15s
     qps: 20
@@ -486,7 +486,7 @@ Use `namespace` scope to render Roles and RoleBindings only in an explicit
 allowlist. Cluster-scoped workload writes are not emitted in this mode:
 
 ```yaml
-controller:
+controlPlane:
   rbac:
     create: true
     scope: namespace
@@ -510,23 +510,23 @@ Neither mode grants Secret reads, `nodes/proxy`, `impersonate`, wildcard
 resources, wildcard API groups, or wildcard verbs. Operator and Data Plane
 each have a different ServiceAccount. Data Plane is never included in a
 Kubernetes workload RBAC binding and keeps
-`automountServiceAccountToken: false`. Set `controller.rbac.create=false` only
-when equivalent Controller RBAC is managed externally.
+`automountServiceAccountToken: false`. Set `controlPlane.rbac.create=false` only
+when equivalent Control Plane RBAC is managed externally.
 
 Optional impersonation is a defense-in-depth layer. Identity groups are not
 forwarded automatically: each Kubernetes group must be explicitly mapped.
-The chart still does not grant the Controller permission to impersonate; the
+The chart still does not grant the Control Plane permission to impersonate; the
 operator must supply narrowly scoped RBAC separately and verify API Server audit
 events before enabling this mode.
 
 The repository's Minikube Helm lifecycle E2E enables API Server metadata auditing,
 grants a temporary exact-user/exact-group impersonation role outside this
 chart, calls `GET /api/v2/version`, and asserts that the audit event contains
-both the Controller ServiceAccount and the final prefixed Principal identity.
+both the Control Plane ServiceAccount and the final prefixed Principal identity.
 It also proves that an unmapped identity group is not forwarded.
 
 ```yaml
-controller:
+controlPlane:
   kubernetes:
     impersonation:
       enabled: true
@@ -561,7 +561,7 @@ Authenticated, policy-authorized clients can use:
 - `POST /api/v2/sessions/<id>/file-transfers?namespace=<name>` with
   `Idempotency-Key`, a Pod/container target, an absolute container path, and
   upload metadata when applicable. File uploads may include a stable UUID
-  `resumeId`; the Controller probes the Pod partial and returns the
+  `resumeId`; the Control Plane probes the Pod partial and returns the
   authoritative `offset` in the Task document.
 - `GET /api/v2/sessions/<id>/file-transfers/<task-id>?namespace=<name>`
 - `GET /api/v2/sessions/<id>/file-transfers/<task-id>/stream?namespace=<name>`
@@ -576,7 +576,7 @@ Authenticated, policy-authorized clients can use:
   Preview declares a new temporary Service name and one or more ports
 - `GET /api/v2/sessions/<id>/{exchanges,mirrors,previews}/<task-id>?namespace=<name>`
 - `DELETE /api/v2/sessions/<id>/{exchanges,mirrors,previews}/<task-id>?namespace=<name>`
-- `GET /api/v2/sessions/<id>/{exchanges,mirrors,previews}/<task-id>/stream?namespace=<name>`
+- `GET /traffic/v1/{exchange,mirror,preview}/<task-id>` on the assigned Data Plane endpoint, authenticated by a fresh RelayTicket
   as an authenticated reverse WebSocket stream. Preview resources carry the
   Task UUID as exact owner metadata; name conflicts are never overwritten and
   cleanup only deletes objects whose owner metadata still matches.
@@ -608,7 +608,7 @@ desktop maintains heartbeats and disconnects the Session before
 logout, profile deletion or application shutdown. The default heartbeat TTL is
 two minutes and the absolute maximum lifetime is eight hours:
 
-Active Controller streams are children of a Session runtime tree. Disconnect
+Active Control Plane streams are children of a Session runtime tree. Disconnect
 and process shutdown cancel that tree and wait for handlers to close sockets,
 reverse listeners and Kubernetes resources before releasing ownership. Exec
 and file Task owner heartbeats plus compare-and-swap recovery prevent a hard
@@ -616,7 +616,7 @@ restart from leaving permanent `starting`/`running` rows; resource-backed
 traffic workflows retain their typed recovery reconcilers.
 
 ```yaml
-controller:
+controlPlane:
   sessionTTL: 2m
   sessionMaxLifetime: 8h
   maintenanceInterval: 1m
@@ -624,7 +624,7 @@ controller:
 ```
 
 If a desktop exits without disconnecting, its heartbeat stops. After the
-Session TTL, the Controller's bounded maintenance pass removes the expired
+Session TTL, the Control Plane's bounded maintenance pass removes the expired
 Session and the database cascades removal to its Port Forward and other owned
 Tasks. `maintenanceInterval` bounds the additional cleanup delay.
 
@@ -637,7 +637,7 @@ dropped. Data Plane still does not automount a general Kubernetes API token.
 Ingress NetworkPolicies are enabled by default. Restricted egress is opt-in
 because the chart cannot safely infer the cluster's Kubernetes API address,
 authorized workload CIDRs, OIDC/AD endpoints or external PostgreSQL address.
-When enabled, Helm requires explicit allow rules for Controller, Data Plane and
+When enabled, Helm requires explicit allow rules for Control Plane, Data Plane and
 Operator; an incomplete policy fails rendering instead of producing workloads
 that hang at startup:
 
@@ -646,7 +646,7 @@ networkPolicy:
   enabled: true
   egress:
     enabled: true
-    controller:
+    controlPlane:
       - to:
           - ipBlock: {cidr: 10.96.0.1/32} # Kubernetes API
         ports:
@@ -670,15 +670,15 @@ networkPolicy:
 
 The default DNS peer selects `kube-system` Pods labeled `k8s-app=kube-dns` and
 can be overridden. Data Plane gets a separate automatic allowance only to the
-Controller Relay Registry port. Do not include the Kubernetes API, cloud
-metadata, Controller database or identity-provider CIDRs in its custom rules.
+Control Plane Relay Registry port. Do not include the Kubernetes API, cloud
+metadata, Control Plane database or identity-provider CIDRs in its custom rules.
 Limit workload peers with namespace/Pod labels or explicit cluster CIDRs;
 Gateway authorization and the Session NetworkSpec remain mandatory
 application-layer controls. NetworkPolicy enforcement requires a CNI that
 implements both ingress and egress policy.
 
 Topology spread is independently configurable through
-`controller.topologySpreadConstraints`, `dataPlane.topologySpreadConstraints`
+`controlPlane.topologySpreadConstraints`, `dataPlane.topologySpreadConstraints`
 and `operator.topologySpreadConstraints`. An optional Prometheus Operator
 `ServiceMonitor` scrapes only the Data Plane's aggregate `/metrics` endpoint:
 
@@ -687,19 +687,19 @@ monitoring:
   serviceMonitor:
     enabled: true
     labels: {release: prometheus}
-controller:
+controlPlane:
   topologySpreadConstraints:
     - maxSkew: 1
       topologyKey: topology.kubernetes.io/zone
       whenUnsatisfiable: DoNotSchedule
       labelSelector:
-        matchLabels: {app.kubernetes.io/component: controller}
+        matchLabels: {app.kubernetes.io/component: control-plane}
 ```
 
-The Controller PodDisruptionBudget is enabled by default only when PostgreSQL
-mode has more than one Controller replica. SQLite never renders a PDB, so its
+The Control Plane PodDisruptionBudget is enabled by default only when PostgreSQL
+mode has more than one Control Plane replica. SQLite never renders a PDB, so its
 single Pod cannot block voluntary node maintenance. Helm rejects a
-`minAvailable` value that is zero or greater than or equal to the Controller
+`minAvailable` value that is zero or greater than or equal to the Control Plane
 replica count.
 
 ### Health and metrics contract
@@ -708,7 +708,7 @@ Each workload has separate liveness and readiness probes:
 
 | Workload | Liveness | Readiness | Readiness dependencies |
 | --- | --- | --- | --- |
-| Controller | `/health/live` | `/health/ready` | State database, configured identity providers, and a bounded Kubernetes `/version` request |
+| Control Plane | `/health/live` | `/health/ready` | State database, configured identity providers, and a bounded Kubernetes `/version` request |
 | Data Plane | `/health/live` | `/health/ready` | Local tunnel runtime plus an acknowledged, unexpired Relay Registry lease when Registry mode is enabled |
 | Operator | `/healthz` | `/readyz` | controller-runtime manager health and readiness |
 
@@ -736,7 +736,7 @@ helm show crds ./charts/kubeloop | kubectl apply --server-side -f -
 helm upgrade kubeloop ./charts/kubeloop --namespace kubeloop-system ...
 ```
 
-`helm uninstall` removes the Controller, Data Plane, Operator, RBAC, Services,
+`helm uninstall` removes the Control Plane, Data Plane, Operator, RBAC, Services,
 policies and SQLite PVC, while the CRD remains. Delete it explicitly only after
 all KubeLoop releases and `TrafficBinding` resources have been removed.
 
@@ -757,14 +757,14 @@ explicit opt-in flag and expected dedicated context both match.
 
 ## Install
 
-The public URL is the only address desktop clients will need. It must be the HTTPS origin that routes discovery/API requests to the Controller and `/tunnel` to the Data Plane.
+The public URL is the only address desktop clients will need. It must be the HTTPS origin that routes discovery/API requests to the Control Plane and `/tunnel` to the Data Plane.
 
 ```shell
 helm upgrade --install kubeloop ./charts/kubeloop \
   --namespace kubeloop-system \
   --create-namespace \
   --set publicURL=https://kubeloop.example.com \
-  --set controller.relay.existingSecret=kubeloop-relay-controller \
+  --set controlPlane.relay.existingSecret=kubeloop-relay-control-plane \
   --set ingress.enabled=true \
   --set ingress.host=kubeloop.example.com \
   --set ingress.className=nginx \
@@ -779,10 +779,10 @@ curl https://kubeloop.example.com/.well-known/kubeloop
 
 ## Storage modes
 
-SQLite is the default. The chart enforces one Controller replica, `Recreate` updates and a persistent volume:
+SQLite is the default. The chart enforces one Control Plane replica, `Recreate` updates and a persistent volume:
 
 ```yaml
-controller:
+controlPlane:
   storage:
     type: sqlite
     sqlite:
@@ -791,10 +791,10 @@ controller:
         size: 1Gi
 ```
 
-The PostgreSQL deployment contract accepts an external DSN from a Secret and allows Controller replicas to scale independently:
+The PostgreSQL deployment contract accepts an external DSN from a Secret and allows Control Plane replicas to scale independently:
 
 ```yaml
-controller:
+controlPlane:
   replicas: 3
   storage:
     type: postgresql
@@ -817,4 +817,4 @@ kubectl -n kubeloop-system create secret generic kubeloop-postgresql \
   --from-literal=dsn='postgres://user:password@postgres.example:5432/kubeloop?sslmode=require'
 ```
 
-The Controller opens the selected backend, applies a server-side statement timeout, runs advisory-lock migrations before becoming ready and reports database availability through readiness. PostgreSQL transactions use serializable isolation and retry bounded serialization/deadlock failures. Principal, refresh-token family, Session, Task, resource snapshot, idempotency, authentication transaction and append-only audit repositories share the same storage contract.
+The Control Plane opens the selected backend, applies a server-side statement timeout, runs advisory-lock migrations before becoming ready and reports database availability through readiness. PostgreSQL transactions use serializable isolation and retry bounded serialization/deadlock failures. Principal, refresh-token family, Session, Task, resource snapshot, idempotency, authentication transaction and append-only audit repositories share the same storage contract.

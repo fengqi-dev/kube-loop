@@ -7,12 +7,12 @@
 
 V2 clients know only the Gateway service URL. They must not load kubeconfig,
 construct Kubernetes clients, infer cluster RBAC, or receive unrestricted raw
-Kubernetes objects. The Controller therefore needs one auditable boundary for
+Kubernetes objects. The Control Plane therefore needs one auditable boundary for
 all Kubernetes credentials, transport configuration and identity propagation.
 
 ## Decision
 
-The Controller creates its base `rest.Config` exclusively from the in-cluster
+The Control Plane creates its base `rest.Config` exclusively from the in-cluster
 ServiceAccount. The Provider copies this Config before every identity-specific
 change and enforces bounded timeout, QPS/Burst, a Gateway User-Agent, JSON media
 types and request contexts. It removes any pre-existing impersonation fields.
@@ -24,10 +24,10 @@ never creates `impersonate` permissions; operators enabling the feature must
 grant narrowly scoped RBAC separately.
 
 The CI Minikube profile enables a metadata-only API Server audit policy for
-`/version`. Its impersonation E2E logs in through the real Controller, grants a
+`/version`. Its impersonation E2E logs in through the real Control Plane, grants a
 temporary identity-specific `impersonate` role outside the chart, and calls the
 Gateway version API. The assertion requires one successful audit event whose
-authenticated `user` is the Controller ServiceAccount and whose
+authenticated `user` is the Control Plane ServiceAccount and whose
 `impersonatedUser` is the prefixed stable Principal ID with only the explicitly
 mapped group. The fixture also supplies an unmapped identity group and rejects
 any event that forwards it.

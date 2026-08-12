@@ -122,8 +122,8 @@ func TestRollingUpgradeNegotiatesHighestCommonVersion(t *testing.T) {
 		want  string
 	}{
 		{"same version", []string{v1}, []string{v1}, v1},
-		{"new Controller old Data Plane", []string{v2, v1}, []string{v1}, v1},
-		{"old Controller new Data Plane", []string{v1}, []string{v2, v1}, v1},
+		{"new Control Plane old Data Plane", []string{v2, v1}, []string{v1}, v1},
+		{"old Control Plane new Data Plane", []string{v1}, []string{v2, v1}, v1},
 		{"both new", []string{v2, v1}, []string{v1, v2}, v2},
 	} {
 		t.Run(test.name, func(t *testing.T) {

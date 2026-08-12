@@ -8,20 +8,20 @@
 
 A desktop Cluster Session selects one Kubernetes namespace. Kubernetes Pod and
 Service CIDRs are cluster-wide routing metadata, so allowing a whole CIDR would
-turn Data Plane into a cross-namespace proxy even when the Controller API had
+turn Data Plane into a cross-namespace proxy even when the Control Plane API had
 correctly authorized only one namespace. Pod IP reuse also means a snapshot
 that is never refreshed can eventually authorize a Pod that moved to another
 namespace.
 
 Data Plane deliberately has no Kubernetes client, business database, OIDC/AD
 configuration, or broad ServiceAccount. It therefore needs a bounded,
-cryptographically verifiable permission snapshot supplied by Controller.
+cryptographically verifiable permission snapshot supplied by Control Plane.
 
 ## Decision
 
 ### Authorization chain
 
-1. Every Controller request is authenticated to a Principal and mapped to a
+1. Every Control Plane request is authenticated to a Principal and mapped to a
    policy request containing operation, resource kind and namespace.
 2. Session creation lists Pods and Services through the Principal's
    impersonating Kubernetes client in exactly the selected namespace. A system
@@ -29,7 +29,7 @@ cryptographically verifiable permission snapshot supplied by Controller.
 3. `NetworkSpec` contains exact non-host-network Pod IPs and namespace Service
    ClusterIPs. Pod/Service CIDRs remain routing metadata and never grant dial
    permission. The cluster DNS Service IP is granted only on port 53.
-4. Controller persists canonical `NetworkSpec` JSON and its SHA-256 hash. A
+4. Control Plane persists canonical `NetworkSpec` JSON and its SHA-256 hash. A
    RelayTicket signs Principal, device, Session ID, Session generation,
    namespace, operation, assigned Relay, hash, expiry and one-use ticket ID.
 5. Data Plane verifies the Ed25519 signature, issuer, Relay audience, operation,
@@ -44,7 +44,7 @@ cryptographically verifiable permission snapshot supplied by Controller.
 
 ### Freshness and revocation
 
-Controller rediscovers and atomically replaces the namespace NetworkSpec on
+Control Plane rediscovers and atomically replaces the namespace NetworkSpec on
 every Session heartbeat. Discovery failure fails closed and does not extend the
 Session. A changed snapshot receives a new hash together with the next Session
 generation, so a new RelayTicket cannot register an older permission set.

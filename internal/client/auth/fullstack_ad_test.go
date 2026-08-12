@@ -18,14 +18,15 @@ import (
 	"time"
 
 	clientauth "github.com/fengqi-dev/kube-loop/internal/client/auth"
-	"github.com/fengqi-dev/kube-loop/internal/controller/authn"
-	"github.com/fengqi-dev/kube-loop/internal/controller/authn/ad"
-	"github.com/fengqi-dev/kube-loop/internal/controller/authn/httpauth"
-	"github.com/fengqi-dev/kube-loop/internal/controller/authn/login"
-	"github.com/fengqi-dev/kube-loop/internal/controller/authn/token"
-	"github.com/fengqi-dev/kube-loop/internal/controller/storage"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/authn"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/authn/ad"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/authn/httpauth"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/authn/login"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/authn/token"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 	ber "github.com/go-asn1-ber/asn1-ber"
 	"github.com/go-ldap/ldap/v3"
+	"github.com/labstack/echo/v5"
 )
 
 const (
@@ -87,16 +88,18 @@ func TestFullStackADLoginUsesRealLDAPSAndIssuesTokens(t *testing.T) {
 		t.Fatal(err)
 	}
 	tokenService, err := token.New(store, token.Config{
-		Issuer: controllerURL, KeyID: "ad-controller-e2e", SigningKey: signingKey,
+		Issuer: controllerURL, KeyID: "ad-control-plane-e2e", SigningKey: signingKey,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	authHandler, err := httpauth.New(loginService, tokenService)
+	authService, err := httpauth.New(loginService, tokenService)
 	if err != nil {
 		t.Fatal(err)
 	}
-	controllerServer.Config.Handler = authHandler
+	authRouter := echo.New()
+	httpauth.NewRoutes(authService).RegisterRoutes(authRouter.Group("/auth"))
+	controllerServer.Config.Handler = authRouter
 	controllerServer.StartTLS()
 	defer controllerServer.Close()
 

@@ -18,12 +18,13 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/fengqi-dev/kube-loop/e2e/harness"
-	"github.com/fengqi-dev/kube-loop/internal/controller"
-	"github.com/fengqi-dev/kube-loop/internal/controller/authorization"
-	"github.com/fengqi-dev/kube-loop/internal/controller/execapi"
-	controllerkubernetes "github.com/fengqi-dev/kube-loop/internal/controller/kubernetes"
-	"github.com/fengqi-dev/kube-loop/internal/controller/sessionapi"
-	"github.com/fengqi-dev/kube-loop/internal/controller/storage"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/authorization"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/execapi"
+	controlplanekubernetes "github.com/fengqi-dev/kube-loop/internal/controlplane/kubernetes"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/sessionapi"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/execstream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
 	"github.com/google/uuid"
@@ -45,7 +46,7 @@ func TestRealPodExecStopsWhenTokenFamilyIsRevoked(t *testing.T) {
 	podName := pods.Items[0].Name
 
 	stateStore, err := storage.Open(ctx, storage.Config{
-		Backend: storage.BackendSQLite, SQLitePath: filepath.Join(t.TempDir(), "v2-exec-e2e.db"), ControllerReplicas: 1,
+		Backend: storage.BackendSQLite, SQLitePath: filepath.Join(t.TempDir(), "v2-exec-e2e.db"), ControlPlaneReplicas: 1,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -86,7 +87,7 @@ func TestRealPodExecStopsWhenTokenFamilyIsRevoked(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	provider, err := controllerkubernetes.NewForRESTConfig(kubeRESTConfig(t), controllerkubernetes.Config{})
+	provider, err := controlplanekubernetes.NewForRESTConfig(kubeRESTConfig(t), controlplanekubernetes.Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,13 +107,6 @@ func TestRealPodExecStopsWhenTokenFamilyIsRevoked(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	router := controller.NewAPIRouter()
-	if err := router.Handle(http.MethodPost, "/api/v2/sessions/{sessionID}/exec", handler); err != nil {
-		t.Fatal(err)
-	}
-	if err := router.Handle(http.MethodGet, "/api/v2/sessions/{sessionID}/exec/{taskID}/stream", handler); err != nil {
-		t.Fatal(err)
-	}
 	policy, err := authorization.New(authorization.Policy{Rules: []authorization.Rule{{
 		ID: "e2e-exec", Subjects: []string{"*"}, Namespaces: []string{harness.EchoNamespace},
 		Operations: []string{"create", "stream"}, ResourceKinds: []string{"pod-exec"},
@@ -120,16 +114,16 @@ func TestRealPodExecStopsWhenTokenFamilyIsRevoked(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	principal := controller.Principal{
+	principal := controlplaneapi.Principal{
 		Subject: principalID, DeviceID: "e2e-device", FamilyID: familyID, AccessExpiresAt: expiresAt,
 	}
-	server, err := controller.NewServer(
-		controller.Config{PublicURL: "https://controller.e2e.invalid"}, controller.BuildInfo{},
+	server, err := controlplane.NewServer(
+		controlplane.Config{PublicURL: "https://controlplane.e2e.invalid"}, controlplane.BuildInfo{},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
-		controller.WithAuthenticator(controller.AuthenticatorFunc(func(*http.Request) (controller.Principal, *controller.APIError) {
+		controlplane.WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(*http.Request) (controlplaneapi.Principal, *controlplaneapi.Error) {
 			return principal, nil
 		})),
-		controller.WithAuthorizer(policy), controller.WithAPIHandler(router),
+		controlplane.WithAuthorizer(policy), controlplane.WithAPIRoutes(controlplane.APIRoutes{Exec: execapi.NewRoutes(handler).Endpoints()}),
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -194,11 +188,11 @@ type e2eExecSessionValidator struct {
 
 func (validator e2eExecSessionValidator) RequireActive(
 	_ context.Context,
-	principal controller.Principal,
+	principal controlplaneapi.Principal,
 	namespace, sessionID string,
-) (sessionapi.ActiveSession, *controller.APIError) {
+) (sessionapi.ActiveSession, *controlplaneapi.Error) {
 	if principal.Subject != validator.principalID || namespace != validator.session.Namespace || sessionID != validator.session.ID {
-		return sessionapi.ActiveSession{}, &controller.APIError{Code: controller.CodeNotFound, Message: "resource not found"}
+		return sessionapi.ActiveSession{}, &controlplaneapi.Error{Code: controlplaneapi.CodeNotFound, Message: "resource not found"}
 	}
 	return validator.session, nil
 }

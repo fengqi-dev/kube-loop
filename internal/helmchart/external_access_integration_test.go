@@ -16,8 +16,11 @@ import (
 
 	"github.com/coder/websocket"
 
-	"github.com/fengqi-dev/kube-loop/internal/controller"
-	"github.com/fengqi-dev/kube-loop/internal/controller/authorization"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/authorization"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
+	controlplanemiddleware "github.com/fengqi-dev/kube-loop/internal/controlplane/middleware"
+	"github.com/labstack/echo/v5"
 )
 
 const externalProxyWriteTimeout = 50 * time.Millisecond
@@ -32,7 +35,7 @@ func (externalAccessAuthorizer) Authorize(
 	return authorization.Decision{Allowed: true, RuleID: "external-access-test"}
 }
 
-func TestSameOriginTLSProxyPreservesControllerLimitsAndLongLivedWebSocket(t *testing.T) {
+func TestSameOriginTLSProxyPreservesControlPlaneLimitsAndLongLivedWebSocket(t *testing.T) {
 	var externalHandler http.Handler
 	external := httptest.NewUnstartedServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if externalHandler == nil {
@@ -45,30 +48,31 @@ func TestSameOriginTLSProxyPreservesControllerLimitsAndLongLivedWebSocket(t *tes
 	external.Config.WriteTimeout = externalProxyWriteTimeout
 	publicURL := "https://" + external.Listener.Addr().String()
 
-	controllerServer, err := controller.NewServer(
-		controller.Config{PublicURL: publicURL, MaxRequestBodyBytes: 16},
-		controller.BuildInfo{Version: "2.0.0-external-test"},
+	controlPlaneServer, err := controlplane.NewServer(
+		controlplane.Config{PublicURL: publicURL, MaxRequestBodyBytes: 16},
+		controlplane.BuildInfo{Version: "2.0.0-external-test"},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
-		controller.WithAuthenticator(controller.AuthenticatorFunc(func(*http.Request) (controller.Principal, *controller.APIError) {
-			return controller.Principal{Subject: "external-test-user"}, nil
+		controlplane.WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(*http.Request) (controlplaneapi.Principal, *controlplaneapi.Error) {
+			return controlplaneapi.Principal{Subject: "external-test-user"}, nil
 		})),
-		controller.WithAuthorizer(externalAccessAuthorizer{}),
-		controller.WithAPIHandler(controller.APIHandlerFunc(func(
-			_ http.ResponseWriter,
-			request *http.Request,
-			_ controller.Principal,
-		) *controller.APIError {
-			var body struct {
-				Name string `json:"name"`
-			}
-			return controller.DecodeJSON(request, &body)
+		controlplane.WithAuthorizer(externalAccessAuthorizer{}),
+		controlplane.WithAPIRoutes(controlplane.RouteRegistrarFunc(func(group *echo.Group) {
+			group.POST("/body-limit", controlplane.Endpoint(func(ctx *echo.Context, _ controlplaneapi.Principal) *controlplaneapi.Error {
+				var body struct {
+					Name string `json:"name"`
+				}
+				if err := ctx.Bind(&body); err != nil {
+					return controlplanemiddleware.BindingError(err)
+				}
+				return nil
+			}))
 		})),
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	controllerBackend := httptest.NewServer(markBackend("controller", controllerServer.Handler()))
-	t.Cleanup(controllerBackend.Close)
+	controlPlaneBackend := httptest.NewServer(markBackend("control-plane", controlPlaneServer.Handler()))
+	t.Cleanup(controlPlaneBackend.Close)
 
 	webSocketBackend := httptest.NewServer(markBackend("data-plane", http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		connection, acceptErr := websocket.Accept(writer, request, nil)
@@ -84,7 +88,7 @@ func TestSameOriginTLSProxyPreservesControllerLimitsAndLongLivedWebSocket(t *tes
 	})))
 	t.Cleanup(webSocketBackend.Close)
 
-	controllerTarget, err := url.Parse(controllerBackend.URL)
+	controlPlaneTarget, err := url.Parse(controlPlaneBackend.URL)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,14 +96,14 @@ func TestSameOriginTLSProxyPreservesControllerLimitsAndLongLivedWebSocket(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	controllerProxy := httputil.NewSingleHostReverseProxy(controllerTarget)
+	controlPlaneProxy := httputil.NewSingleHostReverseProxy(controlPlaneTarget)
 	dataPlaneProxy := httputil.NewSingleHostReverseProxy(dataPlaneTarget)
 	externalHandler = http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		switch {
-		case request.URL.Path == controller.DiscoveryPath,
+		case request.URL.Path == controlplane.DiscoveryPath,
 			strings.HasPrefix(request.URL.Path, "/auth"),
-			strings.HasPrefix(request.URL.Path, controller.APIPathPrefix):
-			controllerProxy.ServeHTTP(writer, request)
+			strings.HasPrefix(request.URL.Path, controlplane.APIPathPrefix):
+			controlPlaneProxy.ServeHTTP(writer, request)
 		case request.URL.Path == "/tunnel":
 			dataPlaneProxy.ServeHTTP(writer, request)
 		default:
@@ -109,7 +113,7 @@ func TestSameOriginTLSProxyPreservesControllerLimitsAndLongLivedWebSocket(t *tes
 	external.StartTLS()
 	t.Cleanup(external.Close)
 
-	response, err := external.Client().Get(external.URL + controller.DiscoveryPath)
+	response, err := external.Client().Get(external.URL + controlplane.DiscoveryPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,10 +121,10 @@ func TestSameOriginTLSProxyPreservesControllerLimitsAndLongLivedWebSocket(t *tes
 	if response.StatusCode != http.StatusOK || response.TLS == nil || response.TLS.Version != tls.VersionTLS13 {
 		t.Fatalf("TLS discovery status=%d TLS=%#v", response.StatusCode, response.TLS)
 	}
-	if response.Header.Get("X-KubeLoop-Test-Backend") != "controller" {
+	if response.Header.Get("X-KubeLoop-Test-Backend") != "control-plane" {
 		t.Fatalf("discovery backend = %q", response.Header.Get("X-KubeLoop-Test-Backend"))
 	}
-	var discovery controller.DiscoveryDocument
+	var discovery controlplane.DiscoveryDocument
 	if err := json.NewDecoder(response.Body).Decode(&discovery); err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +132,7 @@ func TestSameOriginTLSProxyPreservesControllerLimitsAndLongLivedWebSocket(t *tes
 		t.Fatalf("discovery external identity = %#v, proxy URL = %q", discovery, external.URL)
 	}
 
-	request, err := http.NewRequest(http.MethodPost, external.URL+controller.APIPathPrefix+"/body-limit", strings.NewReader(`{"name":"0123456789"}`))
+	request, err := http.NewRequest(http.MethodPost, external.URL+controlplane.APIPathPrefix+"/body-limit", strings.NewReader(`{"name":"0123456789"}`))
 	if err != nil {
 		t.Fatal(err)
 	}

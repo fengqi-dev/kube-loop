@@ -6,8 +6,8 @@ NAMESPACE="${KUBELOOP_IMPERSONATION_E2E_NAMESPACE:-kubeloop-helm-sqlite}"
 RELEASE="${KUBELOOP_IMPERSONATION_E2E_RELEASE:-sqlite}"
 AUDIT_SOURCE="${KUBELOOP_IMPERSONATION_E2E_AUDIT_SOURCE:-${KUBELOOP_IMPERSONATION_E2E_AUDIT_LOG:-}}"
 LOCAL_PORT="${KUBELOOP_IMPERSONATION_E2E_LOCAL_PORT:-18080}"
-CONTROLLER_SERVICE="${RELEASE}-kubeloop-controller"
-CONTROLLER_SERVICE_ACCOUNT="${RELEASE}-kubeloop-controller"
+CONTROL_PLANE_SERVICE="${RELEASE}-kubeloop-control-plane"
+CONTROL_PLANE_SERVICE_ACCOUNT="${RELEASE}-kubeloop-control-plane"
 RBAC_PREFIX="${RELEASE}-kubeloop-impersonation-e2e"
 IMPERSONATED_GROUP="kubeloop:audit-users"
 UNMAPPED_GROUP="unmapped-claim"
@@ -39,14 +39,14 @@ cleanup() {
 }
 trap cleanup EXIT
 
-kubectl port-forward --namespace "${NAMESPACE}" "service/${CONTROLLER_SERVICE}" \
+kubectl port-forward --namespace "${NAMESPACE}" "service/${CONTROL_PLANE_SERVICE}" \
   "${LOCAL_PORT}:80" >"${TMPDIR:-/tmp}/kubeloop-impersonation-port-forward.log" 2>&1 &
 PORT_FORWARD_PID=$!
 
-CONTROLLER_READY=0
+CONTROL_PLANE_READY=0
 for _ in $(seq 1 60); do
   if curl --silent --show-error --fail "http://127.0.0.1:${LOCAL_PORT}/.well-known/kubeloop" >/dev/null; then
-    CONTROLLER_READY=1
+    CONTROL_PLANE_READY=1
     break
   fi
   if ! kill -0 "${PORT_FORWARD_PID}" >/dev/null 2>&1; then
@@ -55,8 +55,8 @@ for _ in $(seq 1 60); do
   fi
   sleep 1
 done
-if [[ "${CONTROLLER_READY}" != "1" ]]; then
-  echo "Controller port-forward did not become ready" >&2
+if [[ "${CONTROL_PLANE_READY}" != "1" ]]; then
+  echo "Control Plane port-forward did not become ready" >&2
   cat "${TMPDIR:-/tmp}/kubeloop-impersonation-port-forward.log" >&2
   exit 1
 fi
@@ -99,7 +99,7 @@ roleRef:
   name: ${RBAC_PREFIX}-identity
 subjects:
   - kind: ServiceAccount
-    name: ${CONTROLLER_SERVICE_ACCOUNT}
+    name: ${CONTROL_PLANE_SERVICE_ACCOUNT}
     namespace: ${NAMESPACE}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -128,7 +128,7 @@ curl --silent --show-error --fail \
   --header "Authorization: Bearer ${ACCESS_TOKEN}" \
   "http://127.0.0.1:${LOCAL_PORT}/api/v2/version" | jq -e . >/dev/null
 
-GATEWAY_IDENTITY="system:serviceaccount:${NAMESPACE}:${CONTROLLER_SERVICE_ACCOUNT}"
+GATEWAY_IDENTITY="system:serviceaccount:${NAMESPACE}:${CONTROL_PLANE_SERVICE_ACCOUNT}"
 audit_event_matches() {
   local audit_events line
   if [[ "${AUDIT_SOURCE}" == "kube-apiserver" ]]; then

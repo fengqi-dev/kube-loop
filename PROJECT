@@ -16,6 +16,6 @@ resources:
   domain: kubeloop.io
   group: traffic
   kind: TrafficBinding
-  path: github.com/fengqi-dev/kube-loop/internal/operator/api/v1alpha1
+  path: github.com/fengqi-dev/kube-loop/api/v1alpha1
   version: v1alpha1
 version: "3"

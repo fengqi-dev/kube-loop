@@ -21,12 +21,13 @@ import (
 	clientmirror "github.com/fengqi-dev/kube-loop/internal/client/mirror"
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
-	"github.com/fengqi-dev/kube-loop/internal/controller"
-	"github.com/fengqi-dev/kube-loop/internal/controller/authorization"
-	controllerkubernetes "github.com/fengqi-dev/kube-loop/internal/controller/kubernetes"
-	"github.com/fengqi-dev/kube-loop/internal/controller/mirrorapi"
-	"github.com/fengqi-dev/kube-loop/internal/controller/storage"
-	"github.com/fengqi-dev/kube-loop/internal/controller/trafficbindingclient"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/authorization"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
+	controlplanekubernetes "github.com/fengqi-dev/kube-loop/internal/controlplane/kubernetes"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/mirrorapi"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/trafficbindingclient"
 	"github.com/google/uuid"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -46,7 +47,7 @@ func TestRealMirrorPreservesPrimaryPathAndRecoversStaleOwner(t *testing.T) {
 
 	serviceName := "mirror-" + strings.ToLower(uuid.NewString()[:8])
 	backendName := serviceName + "-backend"
-	backendService, err := kubeClient.CoreV1().Services(harness.EchoNamespace).Create(ctx, &corev1.Service{
+	_, err := kubeClient.CoreV1().Services(harness.EchoNamespace).Create(ctx, &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{Name: backendName, Namespace: harness.EchoNamespace},
 		Spec: corev1.ServiceSpec{
 			Type:     corev1.ServiceTypeNodePort,
@@ -96,11 +97,11 @@ func TestRealMirrorPreservesPrimaryPathAndRecoversStaleOwner(t *testing.T) {
 
 	gatewayIP := reachableHostIP(t, ctx, kubeClient)
 	stateStore, principal, activeSession, remoteSession := exchangeLifecycleState(t, ctx, service.Spec.ClusterIP)
-	provider, err := controllerkubernetes.NewForRESTConfig(kubeRESTConfig(t), controllerkubernetes.Config{})
+	provider, err := controlplanekubernetes.NewForRESTConfig(kubeRESTConfig(t), controlplanekubernetes.Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	resolver, err := mirrorapi.NewKubernetesServiceResolver(provider)
+	resolver, err := controlplanekubernetes.NewServiceResolver(provider)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,12 +124,7 @@ func TestRealMirrorPreservesPrimaryPathAndRecoversStaleOwner(t *testing.T) {
 		resolver,
 		mutator,
 		mirrorapi.Config{
-			GatewayIP: gatewayIP, OwnerID: "mirror-e2e-owner",
-			CredentialCheckInterval: 25 * time.Millisecond,
-			TaskCheckInterval:       25 * time.Millisecond,
-			UDPIdleTimeout:          time.Second,
-			RestoreTimeout:          5 * time.Second,
-			PrimaryDialContext:      mirrorNodePortDialer(reachableNodeAddress(t, ctx, kubeClient), backendService),
+			RestoreTimeout: 5 * time.Second,
 		},
 	)
 	if err != nil {
@@ -209,7 +205,7 @@ func TestRealMirrorPreservesPrimaryPathAndRecoversStaleOwner(t *testing.T) {
 	assertServiceRestored(t, ctx, kubeClient, stateStore, serviceName, crashed.ID, originalSelector)
 	harness.WaitClusterProbe(t, ctx, kubeClient, service.Spec.ClusterIP, 8080, "tcp", "after-client-crash", "cluster-tcp:")
 
-	// A replacement Controller must compensate a stale Mirror from the durable
+	// A replacement Control Plane must compensate a stale Mirror from the durable
 	// Service snapshot when the original owner fails during restoration.
 	second := startRealMirror(t, ctx, manager, serverProfile, remoteSession, serviceName, targets)
 	assertServiceIntercepted(t, ctx, kubeClient, stateStore, serviceName, gatewayIP, second.ID)
@@ -218,18 +214,16 @@ func TestRealMirrorPreservesPrimaryPathAndRecoversStaleOwner(t *testing.T) {
 	stopContext, stopCancel = context.WithTimeout(ctx, 20*time.Second)
 	if err := manager.Stop(stopContext, serverProfile.ID, second.ID); err != nil {
 		stopCancel()
-		t.Fatalf("stop Mirror during simulated Controller loss: %v", err)
+		t.Fatalf("stop Mirror during simulated Control Plane loss: %v", err)
 	}
 	stopCancel()
 	waitForMirrorState(t, ctx, stateStore, second.ID, "recovering")
-	assertSnapshotCount(t, stateStore, second.ID, 1)
+	assertSnapshotCount(t, stateStore, second.ID, 0)
 	time.Sleep(150 * time.Millisecond)
-	reconciler, err := mirrorapi.NewReconciler(
-		stateStore, realMutator, slog.New(slog.NewTextHandler(io.Discard, nil)),
-		mirrorapi.RecoveryConfig{
-			OwnerID: "mirror-e2e-replacement", GatewayIP: gatewayIP,
-			Interval: 100 * time.Millisecond, StaleAfter: 100 * time.Millisecond,
-			RestoreTimeout: 5 * time.Second,
+	reconciler, err := trafficbindingclient.NewReconciler(
+		bindings, stateStore.Tasks(), stateStore.Sessions(), slog.New(slog.NewTextHandler(io.Discard, nil)),
+		trafficbindingclient.ReconcilerConfig{
+			Interval: 100 * time.Millisecond, StaleAfter: 100 * time.Millisecond, CleanupTimeout: 5 * time.Second,
 		},
 	)
 	if err != nil {
@@ -282,21 +276,10 @@ func mirrorNodePortDialer(
 
 func startMirrorLifecycleController(
 	t *testing.T,
-	handler *mirrorapi.Handler,
-	principal controller.Principal,
+	handler *mirrorapi.Service,
+	principal controlplaneapi.Principal,
 ) *httptest.Server {
 	t.Helper()
-	router := controller.NewAPIRouter()
-	for _, route := range []struct{ method, pattern string }{
-		{http.MethodPost, "/api/v2/sessions/{sessionID}/mirrors"},
-		{http.MethodGet, "/api/v2/sessions/{sessionID}/mirrors/{taskID}"},
-		{http.MethodDelete, "/api/v2/sessions/{sessionID}/mirrors/{taskID}"},
-		{http.MethodGet, "/api/v2/sessions/{sessionID}/mirrors/{taskID}/stream"},
-	} {
-		if err := router.Handle(route.method, route.pattern, handler); err != nil {
-			t.Fatal(err)
-		}
-	}
 	policy, err := authorization.New(authorization.Policy{Rules: []authorization.Rule{{
 		ID: "e2e-mirror", Subjects: []string{principal.Subject},
 		Namespaces: []string{harness.EchoNamespace},
@@ -305,16 +288,16 @@ func startMirrorLifecycleController(
 	if err != nil {
 		t.Fatal(err)
 	}
-	server, err := controller.NewServer(
-		controller.Config{PublicURL: "http://127.0.0.1"}, controller.BuildInfo{},
+	server, err := controlplane.NewServer(
+		controlplane.Config{PublicURL: "http://127.0.0.1"}, controlplane.BuildInfo{},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
-		controller.WithAuthenticator(controller.AuthenticatorFunc(func(request *http.Request) (controller.Principal, *controller.APIError) {
+		controlplane.WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(request *http.Request) (controlplaneapi.Principal, *controlplaneapi.Error) {
 			if request.Header.Get("Authorization") != "Bearer "+mirrorLifecycleAccessToken {
-				return controller.Principal{}, &controller.APIError{Code: controller.CodeUnauthenticated, Message: "invalid e2e access token"}
+				return controlplaneapi.Principal{}, &controlplaneapi.Error{Code: controlplaneapi.CodeUnauthenticated, Message: "invalid e2e access token"}
 			}
 			return principal, nil
 		})),
-		controller.WithAuthorizer(policy), controller.WithAPIHandler(router),
+		controlplane.WithAuthorizer(policy), controlplane.WithAPIRoutes(controlplane.APIRoutes{Mirrors: mirrorapi.NewRoutes(handler).Endpoints()}),
 	)
 	if err != nil {
 		t.Fatal(err)

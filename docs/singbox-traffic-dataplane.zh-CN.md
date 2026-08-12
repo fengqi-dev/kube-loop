@@ -401,7 +401,7 @@ UDP Mirror 需要按 Gateway stream 或客户端会话维护独立状态：
 - 每个 Session 生成独立随机认证信息。
 - 凭证只存在于受限配置和 KubeLoop 内存中。
 - Session 停止后立即失效。
-- Controller Secret 与 SOCKS 认证凭证分离。
+- Control Plane Secret 与 SOCKS 认证凭证分离。
 
 ### 12.2 `local-out` 目标限制
 
@@ -422,7 +422,7 @@ UDP Mirror 需要按 Gateway stream 或客户端会话维护独立状态：
 - 当前集群 Service CIDR；
 - Gateway port-forward 地址；
 - sing-box 自身 inbound；
-- Controller、DNS 和 SOCKS Bridge 端口。
+- Control Plane、DNS 和 SOCKS Bridge 端口。
 
 ### 12.3 `kubernetes-out` 目标限制
 
@@ -458,7 +458,7 @@ Gateway 继续执行私有集群目标校验，形成桌面端与集群端双重
 4. 启动 SOCKS Bridge
 5. 分配固定 inbound 端口和随机认证
 6. 生成并启动 sing-box
-7. 验证固定 inbound 和 Controller
+7. 验证固定 inbound 和 Control Plane
 8. 启动 Gateway 控制通道
 9. 恢复持久化的 Exchange、Preview、Mirror 和 Port Forward
 10. 开始接收新业务连接

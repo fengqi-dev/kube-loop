@@ -160,7 +160,7 @@ export function ServerExecTerminal({
         <div>
           <div className="flex items-center gap-2 font-medium"><SquareTerminal size={16} /> Pod terminal</div>
           <div className="mt-1 text-xs text-muted-foreground">
-            Interactive exec runs in the Controller and is authorized by Gateway Policy plus Kubernetes RBAC.
+            Interactive exec runs in the Control Plane and is authorized by Gateway Policy plus Kubernetes RBAC.
           </div>
         </div>
         {task ? <span className="font-mono text-xs text-muted-foreground">{task.id.slice(0, 8)}</span> : null}

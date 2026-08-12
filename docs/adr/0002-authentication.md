@@ -14,13 +14,13 @@ V2 桌面客户端只配置 KubeLoop 服务地址。OIDC issuer、OAuth client�
 
 ### 1. 统一 Provider 边界
 
-Controller 提供 `AuthProvider` 抽象。Provider 只负责：
+Control Plane 提供 `AuthProvider` 抽象。Provider 只负责：
 
 - 声明公开的登录方式；
 - 校验管理员配置及上游可用性；
 - 完成一次身份验证并返回标准化 Identity。
 
-Provider 不签发 Gateway Access/Refresh Token，不执行 Kubernetes 授权，也不直接创建 Cluster Session。Token Service 将验证成功的 Identity 映射为稳定 Principal，之后所有 Controller API 和 Data Plane Ticket 都只信任 Gateway 自己签发的凭证。
+Provider 不签发 Gateway Access/Refresh Token，不执行 Kubernetes 授权，也不直接创建 Cluster Session。Token Service 将验证成功的 Identity 映射为稳定 Principal，之后所有 Control Plane API 和 Data Plane Ticket 都只信任 Gateway 自己签发的凭证。
 
 服务发现只公开 Provider ID、类型、显示名称和交互类型，不公开 issuer 内部配置、client secret、Bind DN、目录地址、claim mapping 或 CA 内容。
 
@@ -51,7 +51,7 @@ AD 身份主键为管理员配置的 directory ID 加不可变的 `objectGUID` �
 
 ### 3.1 开发认证必须显式解锁
 
-`static-token` 和 `anonymous` 只能在认证配置明确设置 `developmentMode: true` 后构造，Helm 默认值为 `false`，不能通过缺省空 Provider 意外进入匿名状态。`static-token` 从只读 Secret 文件读取至少 32 字符的随机值，仅保存 SHA-256 摘要并以常量时间比较；原始值不进入 ConfigMap、数据库、日志或 discovery。`anonymous` 不要求凭据，因此 Controller 每次启动都必须输出包含 `SECURITY WARNING` 和 `production_safe=false` 的高可见度警告。
+`static-token` 和 `anonymous` 只能在认证配置明确设置 `developmentMode: true` 后构造，Helm 默认值为 `false`，不能通过缺省空 Provider 意外进入匿名状态。`static-token` 从只读 Secret 文件读取至少 32 字符的随机值，仅保存 SHA-256 摘要并以常量时间比较；原始值不进入 ConfigMap、数据库、日志或 discovery。`anonymous` 不要求凭据，因此 Control Plane 每次启动都必须输出包含 `SECURITY WARNING` 和 `production_safe=false` 的高可见度警告。
 
 两者只替换最初的身份验证步骤：discovery 分别公开 `static-token/token` 和 `anonymous/none`，成功后仍创建稳定 Principal 并签发标准 Access/Refresh Token Family。后续 Gateway Policy、审计、Cluster Session、RelayTicket 和 WSS 不允许绕过统一认证与授权边界。桌面端只在当前 HTTPS Origin 提交开发 Token，并在请求后清空输入；anonymous 也通过一次显式登录获取可撤销的 Gateway Token，而不是让 API 中间件无条件放行。
 
@@ -59,9 +59,9 @@ AD 身份主键为管理员配置的 directory ID 加不可变的 `objectGUID` �
 
 无论 OIDC 或 AD，认证完成后均签发相同格式的短期 Access Token 和可轮换 Refresh Token Family。Refresh Token 只以单向哈希形式持久化；复用已轮换 Token 会撤销整个 Family。桌面端通过操作系统安全存储保存 Refresh Token，普通配置文件只保存服务地址和非敏感 UI 状态。
 
-退出登录、管理员撤销或检测复用时，Controller 撤销 Token Family，并关闭属于该 Principal/Device 的活动 Session；Data Plane 使用短期 RelayTicket，将撤销传播延迟限制在 Ticket 有效期内。
+退出登录、管理员撤销或检测复用时，Control Plane 撤销 Token Family，并关闭属于该 Principal/Device 的活动 Session；Data Plane 使用短期 RelayTicket，将撤销传播延迟限制在 Ticket 有效期内。
 
-Refresh 轮换和复用撤销必须在数据库事务中提交，不能在返回复用错误后以 best-effort 方式异步撤销。Token Family、历史 Refresh Token 哈希与撤销状态存放在 Controller Store，因此 Controller 重启后仍能继续验证 Access Token、轮换 Refresh Token，并识别重启前 Token 的复用。桌面退出登录先停止本地功能流并关闭 Data Plane WSS，再断开远端 Cluster Session，随后撤销 Token Family 并删除系统安全存储中的凭据；各清理步骤独立执行并汇总错误，避免某一步失败阻止其余清理。
+Refresh 轮换和复用撤销必须在数据库事务中提交，不能在返回复用错误后以 best-effort 方式异步撤销。Token Family、历史 Refresh Token 哈希与撤销状态存放在 Control Plane Store，因此 Control Plane 重启后仍能继续验证 Access Token、轮换 Refresh Token，并识别重启前 Token 的复用。桌面退出登录先停止本地功能流并关闭 Data Plane WSS，再断开远端 Cluster Session，随后撤销 Token Family 并删除系统安全存储中的凭据；各清理步骤独立执行并汇总错误，避免某一步失败阻止其余清理。
 
 ### 5. 明确不做
 
@@ -80,4 +80,4 @@ Refresh 轮换和复用撤销必须在数据库事务中提交，不能在返回
 
 ## 结果
 
-客户端 UX 可以稳定为“填写服务地址 → 发现登录方式 → 浏览器 OIDC、组织 AD 表单或显式开发登录 → 获得 Gateway Session”。新增 Provider 不会改变 Token、授权、Session 和 Data Plane 接口。代价是 Controller 必须维护短时登录事务、exchange code、Token rotation/revocation 和针对凭据入口的更严格限流。
+客户端 UX 可以稳定为“填写服务地址 → 发现登录方式 → 浏览器 OIDC、组织 AD 表单或显式开发登录 → 获得 Gateway Session”。新增 Provider 不会改变 Token、授权、Session 和 Data Plane 接口。代价是 Control Plane 必须维护短时登录事务、exchange code、Token rotation/revocation 和针对凭据入口的更严格限流。

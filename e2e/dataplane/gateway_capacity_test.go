@@ -25,9 +25,9 @@ import (
 	clientpreview "github.com/fengqi-dev/kube-loop/internal/client/preview"
 	clientprofile "github.com/fengqi-dev/kube-loop/internal/client/profile"
 	clientremote "github.com/fengqi-dev/kube-loop/internal/client/remote"
-	controllerkubernetes "github.com/fengqi-dev/kube-loop/internal/controller/kubernetes"
-	"github.com/fengqi-dev/kube-loop/internal/controller/previewapi"
-	"github.com/fengqi-dev/kube-loop/internal/controller/trafficbindingclient"
+	controlplanekubernetes "github.com/fengqi-dev/kube-loop/internal/controlplane/kubernetes"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/previewapi"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/trafficbindingclient"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/relayticket"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
@@ -292,7 +292,7 @@ func prepareCapacityRevocation(
 	stateStore, principal, activeSession, remoteSession := previewLifecycleState(
 		t, ctx, harness.EchoServiceIP(t, ctx, kubeClient),
 	)
-	provider, err := controllerkubernetes.NewForRESTConfig(kubeRESTConfig(t), controllerkubernetes.Config{})
+	provider, err := controlplanekubernetes.NewForRESTConfig(kubeRESTConfig(t), controlplanekubernetes.Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -313,11 +313,7 @@ func prepareCapacityRevocation(
 		e2eExecSessionValidator{principalID: principal.Subject, session: activeSession},
 		resources,
 		previewapi.Config{
-			GatewayIP: reachableHostIP(t, ctx, kubeClient), OwnerID: "capacity-revocation-owner",
-			CredentialCheckInterval: 25 * time.Millisecond,
-			TaskCheckInterval:       25 * time.Millisecond,
-			UDPIdleTimeout:          time.Second,
-			DeleteTimeout:           5 * time.Second,
+			DeleteTimeout: 5 * time.Second,
 		},
 	)
 	if err != nil {
@@ -365,9 +361,9 @@ func prepareCapacityRevocation(
 		waitForNoLocalPreview(t, ctx, manager, serverProfile.ID)
 		assertPreviewAbsent(t, ctx, kubeClient, bindingConfig, stateStore, name, preview.ID)
 		if elapsed := time.Since(revokedAt); elapsed > 5*time.Second {
-			t.Fatalf("full-capacity Controller revocation cleanup took %s", elapsed)
+			t.Fatalf("full-capacity Control Plane revocation cleanup took %s", elapsed)
 		}
-		t.Logf("full-capacity Controller revocation and TrafficBinding cleanup completed in %s", time.Since(revokedAt))
+		t.Logf("full-capacity Control Plane revocation and TrafficBinding cleanup completed in %s", time.Since(revokedAt))
 	}
 }
 

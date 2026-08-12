@@ -24,8 +24,8 @@ app.kubernetes.io/name: {{ include "kubeloop.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 
-{{- define "kubeloop.controllerName" -}}
-{{- printf "%s-controller" (include "kubeloop.fullname" .) | trunc 63 | trimSuffix "-" -}}
+{{- define "kubeloop.controlPlaneName" -}}
+{{- printf "%s-control-plane" (include "kubeloop.fullname" .) | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
 {{- define "kubeloop.dataPlaneName" -}}
@@ -36,15 +36,15 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- printf "%s-operator" (include "kubeloop.fullname" .) | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
-{{- define "kubeloop.controllerRegistryName" -}}
-{{- printf "%s-relay" (include "kubeloop.controllerName" .) | trunc 63 | trimSuffix "-" -}}
+{{- define "kubeloop.controlPlaneRegistryName" -}}
+{{- printf "%s-relay" (include "kubeloop.controlPlaneName" .) | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
-{{- define "kubeloop.controllerServiceAccountName" -}}
-{{- if .Values.controller.serviceAccount.create -}}
-{{- default (include "kubeloop.controllerName" .) .Values.controller.serviceAccount.name -}}
+{{- define "kubeloop.controlPlaneServiceAccountName" -}}
+{{- if .Values.controlPlane.serviceAccount.create -}}
+{{- default (include "kubeloop.controlPlaneName" .) .Values.controlPlane.serviceAccount.name -}}
 {{- else -}}
-{{- required "controller.serviceAccount.name is required when create=false" .Values.controller.serviceAccount.name -}}
+{{- required "controlPlane.serviceAccount.name is required when create=false" .Values.controlPlane.serviceAccount.name -}}
 {{- end -}}
 {{- end -}}
 
@@ -64,8 +64,8 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 {{- end -}}
 
-{{- define "kubeloop.controllerImage" -}}
-{{- printf "%s:%s" .Values.controller.image.repository (default .Chart.AppVersion .Values.controller.image.tag) -}}
+{{- define "kubeloop.controlPlaneImage" -}}
+{{- printf "%s:%s" .Values.controlPlane.image.repository (default .Chart.AppVersion .Values.controlPlane.image.tag) -}}
 {{- end -}}
 
 {{- define "kubeloop.dataPlaneImage" -}}
@@ -81,11 +81,11 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 
 {{- define "kubeloop.sqliteClaimName" -}}
-{{- default (printf "%s-data" (include "kubeloop.controllerName" .)) .Values.controller.storage.sqlite.persistence.existingClaim -}}
+{{- default (printf "%s-data" (include "kubeloop.controlPlaneName" .)) .Values.controlPlane.storage.sqlite.persistence.existingClaim -}}
 {{- end -}}
 
-{{- define "kubeloop.controllerConfigName" -}}
-{{- printf "%s-config" (include "kubeloop.controllerName" .) | trunc 63 | trimSuffix "-" -}}
+{{- define "kubeloop.controlPlaneConfigName" -}}
+{{- printf "%s-config" (include "kubeloop.controlPlaneName" .) | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
 {{- define "kubeloop.dataPlaneConfigName" -}}
@@ -121,13 +121,13 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- $_ := required "gatewayAPI.parentRef.name is required for an existing Gateway" .Values.gatewayAPI.parentRef.name -}}
 {{- $_ := required "gatewayAPI.parentRef.sectionName is required and must identify an HTTPS listener" .Values.gatewayAPI.parentRef.sectionName -}}
 {{- end -}}
-{{- $_ := required "gatewayAPI.timeouts.controller is required" .Values.gatewayAPI.timeouts.controller -}}
+{{- $_ := required "gatewayAPI.timeouts.controlPlane is required" .Values.gatewayAPI.timeouts.controlPlane -}}
 {{- if ne (toString .Values.gatewayAPI.timeouts.tunnel) "0s" -}}
 {{- fail "gatewayAPI.timeouts.tunnel must be 0s so the Gateway does not terminate long-lived WebSocket sessions" -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
 
-{{- define "kubeloop.controllerAuthConfigName" -}}
-{{- printf "%s-auth-config" (include "kubeloop.controllerName" .) | trunc 63 | trimSuffix "-" -}}
+{{- define "kubeloop.controlPlaneAuthConfigName" -}}
+{{- printf "%s-auth-config" (include "kubeloop.controlPlaneName" .) | trunc 63 | trimSuffix "-" -}}
 {{- end -}}

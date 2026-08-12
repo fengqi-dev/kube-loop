@@ -20,12 +20,13 @@ import (
 	clientexec "github.com/fengqi-dev/kube-loop/internal/client/exec"
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
-	"github.com/fengqi-dev/kube-loop/internal/controller"
-	"github.com/fengqi-dev/kube-loop/internal/controller/authorization"
-	"github.com/fengqi-dev/kube-loop/internal/controller/execapi"
-	controllerkubernetes "github.com/fengqi-dev/kube-loop/internal/controller/kubernetes"
-	"github.com/fengqi-dev/kube-loop/internal/controller/sessionapi"
-	"github.com/fengqi-dev/kube-loop/internal/controller/storage"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/authorization"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/execapi"
+	controlplanekubernetes "github.com/fengqi-dev/kube-loop/internal/controlplane/kubernetes"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/sessionapi"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/execstream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
 	"github.com/google/uuid"
@@ -35,7 +36,7 @@ import (
 const execLifecycleAccessToken = "e2e-exec-lifecycle"
 
 type runningExecController struct {
-	server   *controller.Server
+	server   *controlplane.Server
 	listener net.Listener
 	done     chan error
 }
@@ -45,13 +46,13 @@ func startExecController(
 	address string,
 	stateStore *storage.Store,
 	executor execapi.Executor,
-	principal controller.Principal,
+	principal controlplaneapi.Principal,
 	session sessionapi.ActiveSession,
 ) *runningExecController {
 	t.Helper()
 	listener, err := net.Listen("tcp", address)
 	if err != nil {
-		t.Fatalf("listen for exec Controller: %v", err)
+		t.Fatalf("listen for exec Control Plane: %v", err)
 	}
 	handler, err := execapi.New(
 		stateStore,
@@ -63,15 +64,6 @@ func startExecController(
 		_ = listener.Close()
 		t.Fatal(err)
 	}
-	router := controller.NewAPIRouter()
-	if err := router.Handle(http.MethodPost, "/api/v2/sessions/{sessionID}/exec", handler); err != nil {
-		_ = listener.Close()
-		t.Fatal(err)
-	}
-	if err := router.Handle(http.MethodGet, "/api/v2/sessions/{sessionID}/exec/{taskID}/stream", handler); err != nil {
-		_ = listener.Close()
-		t.Fatal(err)
-	}
 	policy, err := authorization.New(authorization.Policy{Rules: []authorization.Rule{{
 		ID: "e2e-exec-lifecycle", Subjects: []string{principal.Subject}, Namespaces: []string{session.Namespace},
 		Operations: []string{"create", "stream"}, ResourceKinds: []string{"pod-exec"},
@@ -80,16 +72,16 @@ func startExecController(
 		_ = listener.Close()
 		t.Fatal(err)
 	}
-	server, err := controller.NewServer(
-		controller.Config{PublicURL: "http://" + listener.Addr().String()}, controller.BuildInfo{},
+	server, err := controlplane.NewServer(
+		controlplane.Config{PublicURL: "http://" + listener.Addr().String()}, controlplane.BuildInfo{},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
-		controller.WithAuthenticator(controller.AuthenticatorFunc(func(request *http.Request) (controller.Principal, *controller.APIError) {
+		controlplane.WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(request *http.Request) (controlplaneapi.Principal, *controlplaneapi.Error) {
 			if request.Header.Get("Authorization") != "Bearer "+execLifecycleAccessToken {
-				return controller.Principal{}, &controller.APIError{Code: controller.CodeUnauthenticated, Message: "invalid e2e access token"}
+				return controlplaneapi.Principal{}, &controlplaneapi.Error{Code: controlplaneapi.CodeUnauthenticated, Message: "invalid e2e access token"}
 			}
 			return principal, nil
 		})),
-		controller.WithAuthorizer(policy), controller.WithAPIHandler(router),
+		controlplane.WithAuthorizer(policy), controlplane.WithAPIRoutes(controlplane.APIRoutes{Exec: execapi.NewRoutes(handler).Endpoints()}),
 	)
 	if err != nil {
 		_ = listener.Close()
@@ -107,15 +99,15 @@ func (running *runningExecController) Stop(t *testing.T) {
 	shutdownContext, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := running.server.Shutdown(shutdownContext); err != nil {
-		t.Fatalf("shutdown exec Controller: %v", err)
+		t.Fatalf("shutdown exec Control Plane: %v", err)
 	}
 	select {
 	case err := <-running.done:
 		if err != nil {
-			t.Fatalf("serve exec Controller: %v", err)
+			t.Fatalf("serve exec Control Plane: %v", err)
 		}
 	case <-shutdownContext.Done():
-		t.Fatal("exec Controller serve loop did not stop")
+		t.Fatal("exec Control Plane serve loop did not stop")
 	}
 }
 
@@ -169,7 +161,7 @@ func TestRealPodExecTTYDisconnectAndControllerRestart(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	provider, err := controllerkubernetes.NewForRESTConfig(kubeRESTConfig(t), controllerkubernetes.Config{})
+	provider, err := controlplanekubernetes.NewForRESTConfig(kubeRESTConfig(t), controlplanekubernetes.Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +169,7 @@ func TestRealPodExecTTYDisconnectAndControllerRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	principal := controller.Principal{
+	principal := controlplaneapi.Principal{
 		Subject: principalID, DeviceID: deviceID, FamilyID: familyID, AccessExpiresAt: expiresAt,
 	}
 	activeSession := sessionapi.ActiveSession{
@@ -263,7 +255,7 @@ func TestRealPodExecTTYDisconnectAndControllerRestart(t *testing.T) {
 		Pod: podName, Container: "echo", Command: []string{"printf", "after-restart"},
 	})
 	if err != nil {
-		t.Fatalf("start Pod exec after Controller restart: %v", err)
+		t.Fatalf("start Pod exec after Control Plane restart: %v", err)
 	}
 	afterOutput, afterExit := readExecToExit(t, ctx, afterRestart)
 	if afterExit.Code != 0 || afterExit.Cancelled || !strings.Contains(afterOutput, "after-restart") {

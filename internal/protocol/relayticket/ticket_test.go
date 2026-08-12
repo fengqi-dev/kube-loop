@@ -43,7 +43,8 @@ func TestRelayTicketRoundTripAndBindings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if verified.SessionID != claims.SessionID || verified.DeviceID != claims.DeviceID || verified.Namespace != claims.Namespace {
+	if verified.SessionID != claims.SessionID || verified.DeviceID != claims.DeviceID || verified.Namespace != claims.Namespace ||
+		len(verified.Groups) != 1 || verified.Groups[0] != "developers" {
 		t.Fatalf("verified claims = %#v", verified)
 	}
 
@@ -85,7 +86,7 @@ func TestRelayTicketRejectsTamperingAndInvalidTimes(t *testing.T) {
 	}
 	verifierAt := func(instant time.Time) *Verifier {
 		verifier, verifierErr := NewVerifier(VerifierConfig{
-			Keys: map[string]ed25519.PublicKey{"primary": publicKey}, Issuer: "https://controller.example",
+			Keys: map[string]ed25519.PublicKey{"primary": publicKey}, Issuer: "https://control-plane.example",
 			Audience: "relay-a", RequiredOperation: "tunnel", ClockSkew: time.Second,
 			Now: func() time.Time { return instant },
 		})
@@ -140,7 +141,7 @@ func TestRelayTicketStrictEncodingAndSizeLimit(t *testing.T) {
 		t.Fatal(err)
 	}
 	verifier, err := NewVerifier(VerifierConfig{
-		Keys: map[string]ed25519.PublicKey{"primary": publicKey}, Issuer: "https://controller.example",
+		Keys: map[string]ed25519.PublicKey{"primary": publicKey}, Issuer: "https://control-plane.example",
 		Audience: "relay-a", RequiredOperation: "tunnel", Now: func() time.Time { return now },
 	})
 	if err != nil {
@@ -260,8 +261,9 @@ func TestVerifierEnforcesPublishedKeyValidityWindow(t *testing.T) {
 
 func validClaims(now time.Time) Claims {
 	return Claims{
-		Version: Version, Issuer: "https://controller.example", Audience: "relay-a",
+		Version: Version, Issuer: "https://control-plane.example", Audience: "relay-a",
 		PrincipalID: "11111111-1111-4111-8111-111111111111",
+		Groups:      []string{"developers"},
 		DeviceID:    "22222222-2222-4222-8222-222222222222",
 		SessionID:   "33333333-3333-4333-8333-333333333333", SessionGeneration: 7, Namespace: "development",
 		Operations: []string{"tunnel"}, NetworkSpecHash: strings.Repeat("a", 64),

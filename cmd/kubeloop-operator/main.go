@@ -19,8 +19,8 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
-	trafficv1alpha1 "github.com/fengqi-dev/kube-loop/internal/operator/api/v1alpha1"
-	"github.com/fengqi-dev/kube-loop/internal/operator/trafficbinding"
+	trafficv1alpha1 "github.com/fengqi-dev/kube-loop/api/v1alpha1"
+	"github.com/fengqi-dev/kube-loop/internal/controller"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -162,7 +162,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := (&trafficbinding.TrafficBindingReconciler{
+	if err := (&controller.TrafficBindingReconciler{
 		Client:   mgr.GetClient(),
 		Scheme:   mgr.GetScheme(),
 		Recorder: mgr.GetEventRecorderFor("trafficbinding-controller"),

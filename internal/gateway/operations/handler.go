@@ -1,11 +1,11 @@
 package operations
 
 import (
-	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 
-	"github.com/go-chi/chi/v5"
+	"github.com/labstack/echo/v5"
 )
 
 const (
@@ -28,41 +28,47 @@ type WebSocketState interface {
 type Handler struct {
 	gateway   GatewayState
 	websocket WebSocketState
-	router    chi.Router
+	router    *echo.Echo
 }
 
 func NewHandler(gateway GatewayState, websocket WebSocketState) *Handler {
-	handler := &Handler{gateway: gateway, websocket: websocket, router: chi.NewRouter()}
-	handler.router.Get(LivePath, handler.live)
-	handler.router.Get(ReadyPath, handler.ready)
-	handler.router.Get(MetricsPath, handler.metrics)
+	handler := &Handler{gateway: gateway, websocket: websocket, router: echo.New()}
+	defaultHTTPErrorHandler := echo.DefaultHTTPErrorHandler(false)
+	handler.router.HTTPErrorHandler = func(ctx *echo.Context, err error) {
+		if errors.Is(err, echo.ErrMethodNotAllowed) {
+			ctx.Response().Header().Set(echo.HeaderAllow, http.MethodGet)
+		}
+		defaultHTTPErrorHandler(ctx, err)
+	}
+	handler.Register(handler.router)
 	return handler
 }
 
-func (handler *Handler) Register(router chi.Router) {
-	router.Get(LivePath, handler.live)
-	router.Get(ReadyPath, handler.ready)
-	router.Get(MetricsPath, handler.metrics)
+func (handler *Handler) Register(router *echo.Echo) {
+	router.GET(LivePath, handler.live)
+	router.GET(ReadyPath, handler.ready)
+	router.GET(MetricsPath, handler.metrics)
 }
 
 func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	handler.router.ServeHTTP(writer, request)
 }
 
-func (handler *Handler) live(writer http.ResponseWriter, request *http.Request) {
-	writeJSON(writer, http.StatusOK, map[string]string{"status": "ok"})
+func (handler *Handler) live(ctx *echo.Context) error {
+	ctx.Response().Header().Set(echo.HeaderCacheControl, "no-store")
+	return ctx.JSON(http.StatusOK, map[string]string{"status": "ok"})
 }
 
-func (handler *Handler) ready(writer http.ResponseWriter, request *http.Request) {
+func (handler *Handler) ready(ctx *echo.Context) error {
+	ctx.Response().Header().Set(echo.HeaderCacheControl, "no-store")
 	ready, status := handler.readiness()
 	if !ready {
-		writeJSON(writer, http.StatusServiceUnavailable, map[string]string{"status": status})
-		return
+		return ctx.JSON(http.StatusServiceUnavailable, map[string]string{"status": status})
 	}
-	writeJSON(writer, http.StatusOK, map[string]string{"status": "ready"})
+	return ctx.JSON(http.StatusOK, map[string]string{"status": "ready"})
 }
 
-func (handler *Handler) metrics(writer http.ResponseWriter, request *http.Request) {
+func (handler *Handler) metrics(ctx *echo.Context) error {
 	ready, _ := handler.readiness()
 	readyValue := 0
 	if ready {
@@ -83,8 +89,9 @@ func (handler *Handler) metrics(writer http.ResponseWriter, request *http.Reques
 			draining = 1
 		}
 	}
-	writer.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
-	writer.Header().Set("Cache-Control", "no-store")
+	writer := ctx.Response()
+	writer.Header().Set(echo.HeaderContentType, "text/plain; version=0.0.4; charset=utf-8")
+	writer.Header().Set(echo.HeaderCacheControl, "no-store")
 	writer.WriteHeader(http.StatusOK)
 	_, _ = fmt.Fprintf(writer, "# HELP kubeloop_gateway_ready Whether the data plane can accept new sessions.\n")
 	_, _ = fmt.Fprintf(writer, "# TYPE kubeloop_gateway_ready gauge\n")
@@ -98,6 +105,7 @@ func (handler *Handler) metrics(writer http.ResponseWriter, request *http.Reques
 	_, _ = fmt.Fprintf(writer, "# HELP kubeloop_gateway_active_websocket_sessions Active physical WebSocket sessions.\n")
 	_, _ = fmt.Fprintf(writer, "# TYPE kubeloop_gateway_active_websocket_sessions gauge\n")
 	_, _ = fmt.Fprintf(writer, "kubeloop_gateway_active_websocket_sessions %d\n", activeSessions)
+	return nil
 }
 
 func (handler *Handler) readiness() (bool, string) {
@@ -111,11 +119,4 @@ func (handler *Handler) readiness() (bool, string) {
 		return false, "unavailable"
 	}
 	return true, "ready"
-}
-
-func writeJSON(writer http.ResponseWriter, status int, value any) {
-	writer.Header().Set("Content-Type", "application/json; charset=utf-8")
-	writer.Header().Set("Cache-Control", "no-store")
-	writer.WriteHeader(status)
-	_ = json.NewEncoder(writer).Encode(value)
 }

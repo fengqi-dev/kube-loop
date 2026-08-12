@@ -24,13 +24,14 @@ import (
 	clientexchange "github.com/fengqi-dev/kube-loop/internal/client/exchange"
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
-	"github.com/fengqi-dev/kube-loop/internal/controller"
-	"github.com/fengqi-dev/kube-loop/internal/controller/authorization"
-	"github.com/fengqi-dev/kube-loop/internal/controller/exchangeapi"
-	controllerkubernetes "github.com/fengqi-dev/kube-loop/internal/controller/kubernetes"
-	"github.com/fengqi-dev/kube-loop/internal/controller/sessionapi"
-	"github.com/fengqi-dev/kube-loop/internal/controller/storage"
-	"github.com/fengqi-dev/kube-loop/internal/controller/trafficbindingclient"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/authorization"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/exchangeapi"
+	controlplanekubernetes "github.com/fengqi-dev/kube-loop/internal/controlplane/kubernetes"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/sessionapi"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/trafficbindingclient"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
 	"github.com/fengqi-dev/kube-loop/internal/servicebinding"
 	"github.com/google/uuid"
@@ -52,7 +53,7 @@ type failNextRestoreMutator struct {
 
 func (mutator *failNextRestoreMutator) Capture(
 	ctx context.Context,
-	principal controller.Principal,
+	principal controlplaneapi.Principal,
 	snapshot *servicebinding.ServiceInterceptSnapshot,
 ) error {
 	return mutator.delegate.Capture(ctx, principal, snapshot)
@@ -60,7 +61,7 @@ func (mutator *failNextRestoreMutator) Capture(
 
 func (mutator *failNextRestoreMutator) Apply(
 	ctx context.Context,
-	principal controller.Principal,
+	principal controlplaneapi.Principal,
 	snapshot servicebinding.ServiceInterceptSnapshot,
 	taskID string,
 ) error {
@@ -76,7 +77,7 @@ func (mutator *failNextRestoreMutator) Restore(
 	if mutator.failNext {
 		mutator.failNext = false
 		mutator.mu.Unlock()
-		return errors.New("simulated Controller loss before resource restoration")
+		return errors.New("simulated Control Plane loss before resource restoration")
 	}
 	mutator.mu.Unlock()
 	return mutator.delegate.Restore(ctx, snapshot, taskID)
@@ -129,11 +130,11 @@ func TestRealExchangeLifecycleAndStaleOwnerRecovery(t *testing.T) {
 	stateStore, principal, activeSession, remoteSession := exchangeLifecycleState(
 		t, ctx, service.Spec.ClusterIP,
 	)
-	provider, err := controllerkubernetes.NewForRESTConfig(kubeRESTConfig(t), controllerkubernetes.Config{})
+	provider, err := controlplanekubernetes.NewForRESTConfig(kubeRESTConfig(t), controlplanekubernetes.Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	resolver, err := exchangeapi.NewKubernetesServiceResolver(provider)
+	resolver, err := controlplanekubernetes.NewServiceResolver(provider)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,11 +157,7 @@ func TestRealExchangeLifecycleAndStaleOwnerRecovery(t *testing.T) {
 		resolver,
 		mutator,
 		exchangeapi.Config{
-			GatewayIP: gatewayIP, OwnerID: "exchange-e2e-owner",
-			CredentialCheckInterval: 25 * time.Millisecond,
-			TaskCheckInterval:       25 * time.Millisecond,
-			UDPIdleTimeout:          time.Second,
-			RestoreTimeout:          5 * time.Second,
+			RestoreTimeout: 5 * time.Second,
 		},
 	)
 	if err != nil {
@@ -241,7 +238,7 @@ func TestRealExchangeLifecycleAndStaleOwnerRecovery(t *testing.T) {
 	assertServiceRestored(t, ctx, kubeClient, stateStore, serviceName, crashed.ID, originalSelector)
 	harness.WaitClusterProbe(t, ctx, kubeClient, service.Spec.ClusterIP, 8080, "tcp", "after-client-crash", "cluster-tcp:")
 
-	// Simulate the old Controller dying after listeners are gone but before it
+	// Simulate the old Control Plane dying after listeners are gone but before it
 	// can restore the Service. The replacement worker must claim the durable
 	// recovering Task and compensate using its system Kubernetes identity.
 	second := startRealExchange(t, ctx, manager, serverProfile, remoteSession, serviceName, targets)
@@ -251,18 +248,16 @@ func TestRealExchangeLifecycleAndStaleOwnerRecovery(t *testing.T) {
 	stopContext, stopCancel = context.WithTimeout(ctx, 20*time.Second)
 	if err := manager.Stop(stopContext, serverProfile.ID, second.ID); err != nil {
 		stopCancel()
-		t.Fatalf("stop Exchange during simulated Controller loss: %v", err)
+		t.Fatalf("stop Exchange during simulated Control Plane loss: %v", err)
 	}
 	stopCancel()
 	waitForRealExchangeState(t, ctx, stateStore, second.ID, "recovering")
-	assertSnapshotCount(t, stateStore, second.ID, 1)
+	assertSnapshotCount(t, stateStore, second.ID, 0)
 	time.Sleep(150 * time.Millisecond)
-	reconciler, err := exchangeapi.NewReconciler(
-		stateStore, realMutator, slog.New(slog.NewTextHandler(io.Discard, nil)),
-		exchangeapi.RecoveryConfig{
-			OwnerID: "exchange-e2e-replacement", GatewayIP: gatewayIP,
-			Interval: 100 * time.Millisecond, StaleAfter: 100 * time.Millisecond,
-			RestoreTimeout: 5 * time.Second,
+	reconciler, err := trafficbindingclient.NewReconciler(
+		bindings, stateStore.Tasks(), stateStore.Sessions(), slog.New(slog.NewTextHandler(io.Discard, nil)),
+		trafficbindingclient.ReconcilerConfig{
+			Interval: 100 * time.Millisecond, StaleAfter: 100 * time.Millisecond, CleanupTimeout: 5 * time.Second,
 		},
 	)
 	if err != nil {
@@ -293,7 +288,7 @@ func exchangeLifecycleState(
 	t *testing.T,
 	ctx context.Context,
 	serviceIP string,
-) (*storage.Store, controller.Principal, sessionapi.ActiveSession, remote.Session) {
+) (*storage.Store, controlplaneapi.Principal, sessionapi.ActiveSession, remote.Session) {
 	t.Helper()
 	stateStore, err := storage.Open(ctx, storage.Config{
 		Backend: storage.BackendSQLite, SQLitePath: filepath.Join(t.TempDir(), "exchange-lifecycle.db"),
@@ -332,7 +327,7 @@ func exchangeLifecycleState(
 	}); err != nil {
 		t.Fatal(err)
 	}
-	principal := controller.Principal{
+	principal := controlplaneapi.Principal{
 		Subject: principalID, DeviceID: deviceID, FamilyID: familyID, AccessExpiresAt: expiresAt,
 	}
 	active := sessionapi.ActiveSession{
@@ -349,21 +344,10 @@ func exchangeLifecycleState(
 
 func startExchangeLifecycleController(
 	t *testing.T,
-	handler *exchangeapi.Handler,
-	principal controller.Principal,
+	handler *exchangeapi.Service,
+	principal controlplaneapi.Principal,
 ) *httptest.Server {
 	t.Helper()
-	router := controller.NewAPIRouter()
-	for _, route := range []struct{ method, pattern string }{
-		{http.MethodPost, "/api/v2/sessions/{sessionID}/exchanges"},
-		{http.MethodGet, "/api/v2/sessions/{sessionID}/exchanges/{taskID}"},
-		{http.MethodDelete, "/api/v2/sessions/{sessionID}/exchanges/{taskID}"},
-		{http.MethodGet, "/api/v2/sessions/{sessionID}/exchanges/{taskID}/stream"},
-	} {
-		if err := router.Handle(route.method, route.pattern, handler); err != nil {
-			t.Fatal(err)
-		}
-	}
 	policy, err := authorization.New(authorization.Policy{Rules: []authorization.Rule{{
 		ID: "e2e-exchange", Subjects: []string{principal.Subject},
 		Namespaces: []string{harness.EchoNamespace},
@@ -372,16 +356,16 @@ func startExchangeLifecycleController(
 	if err != nil {
 		t.Fatal(err)
 	}
-	server, err := controller.NewServer(
-		controller.Config{PublicURL: "http://127.0.0.1"}, controller.BuildInfo{},
+	server, err := controlplane.NewServer(
+		controlplane.Config{PublicURL: "http://127.0.0.1"}, controlplane.BuildInfo{},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
-		controller.WithAuthenticator(controller.AuthenticatorFunc(func(request *http.Request) (controller.Principal, *controller.APIError) {
+		controlplane.WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(request *http.Request) (controlplaneapi.Principal, *controlplaneapi.Error) {
 			if request.Header.Get("Authorization") != "Bearer "+exchangeLifecycleAccessToken {
-				return controller.Principal{}, &controller.APIError{Code: controller.CodeUnauthenticated, Message: "invalid e2e access token"}
+				return controlplaneapi.Principal{}, &controlplaneapi.Error{Code: controlplaneapi.CodeUnauthenticated, Message: "invalid e2e access token"}
 			}
 			return principal, nil
 		})),
-		controller.WithAuthorizer(policy), controller.WithAPIHandler(router),
+		controlplane.WithAuthorizer(policy), controlplane.WithAPIRoutes(controlplane.APIRoutes{Exchanges: exchangeapi.NewRoutes(handler).Endpoints()}),
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -453,7 +437,7 @@ func assertServiceIntercepted(
 			gatewayIP, lastService, lastSlices, err,
 		)
 	}
-	assertSnapshotCount(t, stateStore, taskID, 1)
+	assertSnapshotCount(t, stateStore, taskID, 0)
 }
 
 func assertServiceRestored(

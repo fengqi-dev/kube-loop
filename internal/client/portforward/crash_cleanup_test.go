@@ -16,12 +16,14 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/client/credentials"
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
-	"github.com/fengqi-dev/kube-loop/internal/controller"
-	"github.com/fengqi-dev/kube-loop/internal/controller/authorization"
-	"github.com/fengqi-dev/kube-loop/internal/controller/maintenance"
-	"github.com/fengqi-dev/kube-loop/internal/controller/portforwardapi"
-	"github.com/fengqi-dev/kube-loop/internal/controller/sessionapi"
-	"github.com/fengqi-dev/kube-loop/internal/controller/storage"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/authorization"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/maintenance"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/portforwardapi"
+	portforwardservice "github.com/fengqi-dev/kube-loop/internal/controlplane/portforwardapi/service"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/sessionapi"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/capability"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
 	"github.com/google/uuid"
@@ -80,15 +82,15 @@ type crashCapabilityDiscoverer struct{}
 
 func (crashCapabilityDiscoverer) DiscoverCapabilities(
 	context.Context,
-	controller.Principal,
+	controlplaneapi.Principal,
 	string,
-) (capability.Snapshot, *controller.APIError) {
+) (capability.Snapshot, *controlplaneapi.Error) {
 	return capability.Snapshot{}, nil
 }
 
 func (discoverer crashNetworkDiscoverer) Discover(
 	context.Context,
-	controller.Principal,
+	controlplaneapi.Principal,
 	string,
 ) (networkspec.Spec, error) {
 	return discoverer.spec, nil
@@ -98,7 +100,7 @@ type crashTargetResolver struct{}
 
 type crashBindingManager struct{}
 
-func (crashBindingManager) Activate(context.Context, sessionapi.ActiveSession, string, portforwardapi.Spec) (bool, error) {
+func (crashBindingManager) Activate(context.Context, sessionapi.ActiveSession, string, portforwardservice.Spec) (bool, error) {
 	return true, nil
 }
 
@@ -106,11 +108,11 @@ func (crashBindingManager) Delete(context.Context, string, string) error { retur
 
 func (crashTargetResolver) Resolve(
 	context.Context,
-	controller.Principal,
+	controlplaneapi.Principal,
 	string,
-	portforwardapi.Spec,
-) (portforwardapi.Target, error) {
-	return portforwardapi.Target{Host: "10.96.0.20", Port: 8080}, nil
+	portforwardservice.Spec,
+) (portforwardservice.Target, error) {
+	return portforwardservice.Target{Host: "10.96.0.20", Port: 8080}, nil
 }
 
 func TestCrashedClientTaskIsReclaimedAfterSessionExpiry(t *testing.T) {
@@ -159,21 +161,11 @@ func TestCrashedClientTaskIsReclaimedAfterSessionExpiry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	portForwardAPI, err := portforwardapi.New(stateStore, sessions, crashTargetResolver{}, crashBindingManager{}, portforwardapi.Config{
+	portForwardService, err := portforwardservice.New(stateStore, crashTargetResolver{}, crashBindingManager{}, portforwardservice.Config{
 		Now: func() time.Time { return now },
 	})
 	if err != nil {
 		t.Fatal(err)
-	}
-	router := controller.NewAPIRouter()
-	for _, route := range []struct{ method, pattern string }{
-		{http.MethodPost, "/api/v2/sessions/{sessionID}/port-forwards"},
-		{http.MethodGet, "/api/v2/sessions/{sessionID}/port-forwards"},
-		{http.MethodDelete, "/api/v2/sessions/{sessionID}/port-forwards/{taskID}"},
-	} {
-		if err := router.Handle(route.method, route.pattern, portForwardAPI); err != nil {
-			t.Fatal(err)
-		}
 	}
 	policy, err := authorization.New(authorization.Policy{Rules: []authorization.Rule{{
 		ID: "port-forward", Subjects: []string{principalID}, Namespaces: []string{"development"},
@@ -182,16 +174,16 @@ func TestCrashedClientTaskIsReclaimedAfterSessionExpiry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	apiServer, err := controller.NewServer(
-		controller.Config{PublicURL: "http://127.0.0.1"}, controller.BuildInfo{},
+	apiServer, err := controlplane.NewServer(
+		controlplane.Config{PublicURL: "http://127.0.0.1"}, controlplane.BuildInfo{},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
-		controller.WithAuthenticator(controller.AuthenticatorFunc(func(request *http.Request) (controller.Principal, *controller.APIError) {
+		controlplane.WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(request *http.Request) (controlplaneapi.Principal, *controlplaneapi.Error) {
 			if request.Header.Get("Authorization") != "Bearer crash-access" {
-				return controller.Principal{}, &controller.APIError{Code: controller.CodeUnauthenticated, Message: "invalid token"}
+				return controlplaneapi.Principal{}, &controlplaneapi.Error{Code: controlplaneapi.CodeUnauthenticated, Message: "invalid token"}
 			}
-			return controller.Principal{Subject: principalID, DeviceID: deviceID}, nil
+			return controlplaneapi.Principal{Subject: principalID, DeviceID: deviceID}, nil
 		})),
-		controller.WithAuthorizer(policy), controller.WithAPIHandler(router),
+		controlplane.WithAuthorizer(policy), controlplane.WithAPIRoutes(controlplane.APIRoutes{PortForwards: portforwardapi.NewRoutes(portForwardService, sessions).Endpoints()}),
 	)
 	if err != nil {
 		t.Fatal(err)

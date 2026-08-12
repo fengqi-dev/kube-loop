@@ -241,7 +241,7 @@ wails dev
 ```
 
 `wails dev` 会先构建前端、平台 Helper 和打过补丁的 sing-box，再为 Docker Desktop
-Kubernetes、Minikube、kind 或 k3d 构建并加载本地 Controller、Gateway、Operator 镜像，
+Kubernetes、Minikube、kind 或 k3d 构建并加载本地 Control Plane、Gateway、Operator 镜像，
 通过 Helm 部署到当前本地集群，等待三个工作负载全部就绪后再启动前端热更新。
 
 ### 测试

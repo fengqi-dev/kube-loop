@@ -60,7 +60,7 @@ only the top-level framework can create it after calling the configured
 `authorization.Authorizer`. This prevents a Task or WebSocket feature from
 bypassing Gateway Policy by dispatching the Router directly.
 
-RelayTicket creation is the `relay-tickets/create` resource. The Controller
+RelayTicket creation is the `relay-tickets/create` resource. The Control Plane
 issues the `tunnel` operation only after that request is allowed. The Data Plane
 does not own a second policy implementation: it verifies the signed Ticket,
 requires the `tunnel` operation, and binds every opened protocol stream to the
@@ -77,7 +77,7 @@ the ServiceAccount or impersonated user's Kubernetes RBAC permissions.
 - New HTTP resources, tasks, and stream types must define stable operation and
   resource-kind names, pass through the shared `authorization.Authorizer`, and
   retain the Router authorization-proof guard.
-- Policy and identity-provider configuration remain Controller-only ConfigMap
+- Policy and identity-provider configuration remain Control Plane-only ConfigMap
   data. Neither is mounted into the Data Plane.
 - API audit records contain principal ID, request ID, normalized scope, outcome,
   matched policy rule, status, and latency. They never contain request bodies,

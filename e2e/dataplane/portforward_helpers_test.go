@@ -22,12 +22,14 @@ import (
 	clientportforward "github.com/fengqi-dev/kube-loop/internal/client/portforward"
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
-	"github.com/fengqi-dev/kube-loop/internal/controller"
-	"github.com/fengqi-dev/kube-loop/internal/controller/authorization"
-	controllerkubernetes "github.com/fengqi-dev/kube-loop/internal/controller/kubernetes"
-	"github.com/fengqi-dev/kube-loop/internal/controller/portforwardapi"
-	"github.com/fengqi-dev/kube-loop/internal/controller/sessionapi"
-	"github.com/fengqi-dev/kube-loop/internal/controller/storage"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/authorization"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
+	controlplanekubernetes "github.com/fengqi-dev/kube-loop/internal/controlplane/kubernetes"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/portforwardapi"
+	portforwardservice "github.com/fengqi-dev/kube-loop/internal/controlplane/portforwardapi/service"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/sessionapi"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/capability"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
 	"k8s.io/client-go/rest"
@@ -43,15 +45,15 @@ type staticCapabilityDiscoverer struct{}
 
 func (staticCapabilityDiscoverer) DiscoverCapabilities(
 	context.Context,
-	controller.Principal,
+	controlplaneapi.Principal,
 	string,
-) (capability.Snapshot, *controller.APIError) {
+) (capability.Snapshot, *controlplaneapi.Error) {
 	return capability.Snapshot{}, nil
 }
 
 type e2eBindingManager struct{}
 
-func (e2eBindingManager) Activate(context.Context, sessionapi.ActiveSession, string, portforwardapi.Spec) (bool, error) {
+func (e2eBindingManager) Activate(context.Context, sessionapi.ActiveSession, string, portforwardservice.Spec) (bool, error) {
 	return true, nil
 }
 
@@ -59,7 +61,7 @@ func (e2eBindingManager) Delete(context.Context, string, string) error { return 
 
 func (discoverer staticNetworkDiscoverer) Discover(
 	context.Context,
-	controller.Principal,
+	controlplaneapi.Principal,
 	string,
 ) (networkspec.Spec, error) {
 	return discoverer.spec, nil
@@ -127,23 +129,23 @@ func startPortForwardControlPlane(
 	session remote.Session,
 ) *portForwardControlPlane {
 	t.Helper()
-	provider, err := controllerkubernetes.NewForRESTConfig(restConfig, controllerkubernetes.Config{})
+	provider, err := controlplanekubernetes.NewForRESTConfig(restConfig, controlplanekubernetes.Config{})
 	if err != nil {
 		t.Fatalf("create Port Forward Kubernetes Provider: %v", err)
 	}
-	resolver, err := portforwardapi.NewKubernetesResolver(provider)
+	resolver, err := controlplanekubernetes.NewPortForwardResolver(provider)
 	if err != nil {
 		t.Fatal(err)
 	}
 	stateStore, err := storage.Open(ctx, storage.Config{
-		Backend: storage.BackendSQLite, SQLitePath: filepath.Join(t.TempDir(), "port-forward-controller.db"),
+		Backend: storage.BackendSQLite, SQLitePath: filepath.Join(t.TempDir(), "port-forward-controlplane.db"),
 	})
 	if err != nil {
-		t.Fatalf("open Port Forward Controller storage: %v", err)
+		t.Fatalf("open Port Forward Control Plane storage: %v", err)
 	}
 	t.Cleanup(func() {
 		if err := stateStore.Close(); err != nil {
-			t.Logf("close Port Forward Controller storage: %v", err)
+			t.Logf("close Port Forward Control Plane storage: %v", err)
 		}
 	})
 	if _, err := stateStore.Principals().Upsert(ctx, storage.Principal{
@@ -172,19 +174,9 @@ func startPortForwardControlPlane(
 	if err != nil {
 		t.Fatalf("create Port Forward Session validator: %v", err)
 	}
-	portForwards, err := portforwardapi.New(stateStore, sessions, resolver, e2eBindingManager{}, portforwardapi.Config{})
+	portForwards, err := portforwardservice.New(stateStore, resolver, e2eBindingManager{}, portforwardservice.Config{})
 	if err != nil {
 		t.Fatalf("create Port Forward API: %v", err)
-	}
-	router := controller.NewAPIRouter()
-	for _, route := range []struct{ method, pattern string }{
-		{http.MethodPost, "/api/v2/sessions/{sessionID}/port-forwards"},
-		{http.MethodGet, "/api/v2/sessions/{sessionID}/port-forwards"},
-		{http.MethodDelete, "/api/v2/sessions/{sessionID}/port-forwards/{taskID}"},
-	} {
-		if err := router.Handle(route.method, route.pattern, portForwards); err != nil {
-			t.Fatalf("register Port Forward route: %v", err)
-		}
 	}
 	policy, err := authorization.New(authorization.Policy{Rules: []authorization.Rule{{
 		ID: "e2e-port-forward", Subjects: []string{principalID}, Namespaces: []string{session.Namespace},
@@ -193,19 +185,19 @@ func startPortForwardControlPlane(
 	if err != nil {
 		t.Fatal(err)
 	}
-	controllerServer, err := controller.NewServer(
-		controller.Config{PublicURL: "http://127.0.0.1"}, controller.BuildInfo{},
+	controllerServer, err := controlplane.NewServer(
+		controlplane.Config{PublicURL: "http://127.0.0.1"}, controlplane.BuildInfo{},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
-		controller.WithAuthenticator(controller.AuthenticatorFunc(func(request *http.Request) (controller.Principal, *controller.APIError) {
+		controlplane.WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(request *http.Request) (controlplaneapi.Principal, *controlplaneapi.Error) {
 			if request.Header.Get("Authorization") != "Bearer "+portForwardAccessToken {
-				return controller.Principal{}, &controller.APIError{Code: controller.CodeUnauthenticated, Message: "invalid e2e access token"}
+				return controlplaneapi.Principal{}, &controlplaneapi.Error{Code: controlplaneapi.CodeUnauthenticated, Message: "invalid e2e access token"}
 			}
-			return controller.Principal{Subject: principalID, DeviceID: deviceID}, nil
+			return controlplaneapi.Principal{Subject: principalID, DeviceID: deviceID}, nil
 		})),
-		controller.WithAuthorizer(policy), controller.WithAPIHandler(router),
+		controlplane.WithAuthorizer(policy), controlplane.WithAPIRoutes(controlplane.APIRoutes{PortForwards: portforwardapi.NewRoutes(portForwards, sessions).Endpoints()}),
 	)
 	if err != nil {
-		t.Fatalf("create Port Forward Controller: %v", err)
+		t.Fatalf("create Port Forward Control Plane: %v", err)
 	}
 	gatewayURL, err := url.Parse("http://" + gatewayAddress)
 	if err != nil {

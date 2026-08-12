@@ -32,7 +32,7 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: TrafficBinding is the Schema for the trafficbindings API.
+        description: TrafficBinding is the schema for the trafficbindings API.
         properties:
           apiVersion:
             description: |-
@@ -69,7 +69,7 @@ spec:
                 items:
                   description: |-
                     TrafficPort maps one Kubernetes target or Service port to an optional
-                    Controller relay listener.
+                    Gateway relay listener.
                   properties:
                     name:
                       description: name is the Service port name. The Operator derives
@@ -122,7 +122,7 @@ spec:
               relay:
                 description: |-
                   relay is required by Preview, Exchange and Mirror. It is a trusted
-                  Controller listener, never a desktop-provided destination.
+                  Gateway listener, never a desktop-provided destination.
                 properties:
                   address:
                     description: address must be one IPv4 or IPv6 literal.

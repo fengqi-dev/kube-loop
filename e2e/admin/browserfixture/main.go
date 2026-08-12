@@ -1,4 +1,4 @@
-// Command browserfixture starts the real Controller Management Plane UI and
+// Command browserfixture starts the real Control Plane Management Plane UI and
 // persistence stack on loopback for interactive browser acceptance testing.
 package main
 
@@ -22,12 +22,12 @@ import (
 	"syscall"
 	"time"
 
-	adminauthorization "github.com/fengqi-dev/kube-loop/internal/controller/admin/authorization"
-	adminhttpapi "github.com/fengqi-dev/kube-loop/internal/controller/admin/httpapi"
-	adminrevision "github.com/fengqi-dev/kube-loop/internal/controller/admin/revision"
-	adminsession "github.com/fengqi-dev/kube-loop/internal/controller/admin/session"
-	admintoken "github.com/fengqi-dev/kube-loop/internal/controller/authn/token"
-	controllerstorage "github.com/fengqi-dev/kube-loop/internal/controller/storage"
+	adminauthorization "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/authorization"
+	adminhttpapi "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/httpapi"
+	adminrevision "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/revision"
+	adminsession "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/session"
+	admintoken "github.com/fengqi-dev/kube-loop/internal/controlplane/authn/token"
+	controlplanestorage "github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 )
 
 const (
@@ -54,7 +54,7 @@ func (value *verifier) CurrentBreakGlassState(context.Context) (adminauthorizati
 }
 
 type tokenAuthenticator struct {
-	principal controllerstorage.Principal
+	principal controlplanestorage.Principal
 }
 
 func (value tokenAuthenticator) Authenticate(_ context.Context, token string) (admintoken.AccessIdentity, error) {
@@ -93,22 +93,22 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	store, err := controllerstorage.Open(ctx, controllerstorage.Config{
-		Backend: controllerstorage.BackendSQLite, SQLitePath: path,
+	store, err := controlplanestorage.Open(ctx, controlplanestorage.Config{
+		Backend: controlplanestorage.BackendSQLite, SQLitePath: path,
 	})
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer store.Close()
 	now := time.Now().UTC()
-	principal, err := store.Principals().Upsert(ctx, controllerstorage.Principal{
+	principal, err := store.Principals().Upsert(ctx, controlplanestorage.Principal{
 		ID: fixturePrincipalID, Provider: "browser-fixture", ExternalID: "administrator",
 		DisplayName: "Browser Administrator", Groups: []string{"browser-admins"}, CreatedAt: now, UpdatedAt: now,
 	})
 	if err != nil {
 		log.Fatal(err)
 	}
-	if err := store.TokenFamilies().Create(ctx, controllerstorage.TokenFamily{
+	if err := store.TokenFamilies().Create(ctx, controlplanestorage.TokenFamily{
 		ID: fixtureFamilyID, PrincipalID: fixturePrincipalID, DeviceID: "browser-fixture-device",
 		RefreshTokenHash: bytes.Repeat([]byte{7}, 32), CreatedAt: now, ExpiresAt: now.Add(time.Hour),
 	}); err != nil {

@@ -1,10 +1,10 @@
-{{- if and .Values.controller.relayRegistry.enabled (gt (int .Values.dataPlane.replicas) 1) (not (or (contains "{podName}" .Values.dataPlane.relayRegistry.endpoint) (contains "{podUID}" .Values.dataPlane.relayRegistry.endpoint))) -}}
+{{- if and .Values.controlPlane.relayRegistry.enabled (gt (int .Values.dataPlane.replicas) 1) (not (or (contains "{podName}" .Values.dataPlane.relayRegistry.endpoint) (contains "{podUID}" .Values.dataPlane.relayRegistry.endpoint))) -}}
 {{- fail "dataPlane.relayRegistry.endpoint must contain {podName} or {podUID} when dataPlane.replicas is greater than 1" -}}
 {{- end -}}
 {{- if or (le (int .Values.dataPlane.relayRegistry.maxWebSocketSessions) 0) (le (int .Values.dataPlane.relayRegistry.maxStreamsPerSession) 0) -}}
 {{- fail "dataPlane Relay capacity limits must be positive" -}}
 {{- end -}}
-{{- if and .Values.controller.relayRegistry.enabled (eq .Values.controller.relayRegistry.authentication "tokenreview") (lt (int .Values.dataPlane.relayRegistry.tokenExpirationSeconds) 600) -}}
+{{- if and .Values.controlPlane.relayRegistry.enabled (eq .Values.controlPlane.relayRegistry.authentication "tokenreview") (lt (int .Values.dataPlane.relayRegistry.tokenExpirationSeconds) 600) -}}
 {{- fail "dataPlane.relayRegistry.tokenExpirationSeconds must be at least 600" -}}
 {{- end -}}
 {{- $dataPlaneLogLevel := lower (toString .Values.dataPlane.logLevel) -}}
@@ -64,6 +64,10 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.uid
+            - name: KUBELOOP_POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
           args:
             - --relay-replay-entries={{ int .Values.dataPlane.relay.replayEntries }}
             - --max-websocket-sessions={{ int .Values.dataPlane.relayRegistry.maxWebSocketSessions }}
@@ -89,11 +93,11 @@ spec:
           resources:
             {{- toYaml .Values.dataPlane.resources | nindent 12 }}
           volumeMounts:
-            {{- if .Values.controller.relayRegistry.enabled }}
+            {{- if .Values.controlPlane.relayRegistry.enabled }}
             - name: relay-registry
               mountPath: /var/run/secrets/kubeloop/relay-registry
               readOnly: true
-            {{- if eq .Values.controller.relayRegistry.authentication "tokenreview" }}
+            {{- if eq .Values.controlPlane.relayRegistry.authentication "tokenreview" }}
             - name: relay-identity
               mountPath: /var/run/secrets/kubeloop/relay-identity
               readOnly: true
@@ -104,17 +108,17 @@ spec:
               readOnly: true
             {{- end }}
       volumes:
-        {{- if .Values.controller.relayRegistry.enabled }}
+        {{- if .Values.controlPlane.relayRegistry.enabled }}
         - name: relay-registry
           projected:
             defaultMode: 0400
             sources:
               - secret:
-                  name: {{ default .Values.controller.relay.existingSecret .Values.controller.relayRegistry.existingSecret | required "controller.relayRegistry.existingSecret or controller.relay.existingSecret is required" }}
+                  name: {{ default .Values.controlPlane.relay.existingSecret .Values.controlPlane.relayRegistry.existingSecret | required "controlPlane.relayRegistry.existingSecret or controlPlane.relay.existingSecret is required" }}
                   items:
-                    - key: {{ required "controller.relayRegistry.caKey is required" .Values.controller.relayRegistry.caKey }}
+                    - key: {{ required "controlPlane.relayRegistry.caKey is required" .Values.controlPlane.relayRegistry.caKey }}
                       path: ca.crt
-              {{- if eq .Values.controller.relayRegistry.authentication "mtls" }}
+              {{- if eq .Values.controlPlane.relayRegistry.authentication "mtls" }}
               - secret:
                   name: {{ required "dataPlane.relayRegistry.existingSecret is required for mTLS" .Values.dataPlane.relayRegistry.existingSecret }}
                   items:
@@ -123,14 +127,14 @@ spec:
                     - key: {{ required "dataPlane.relayRegistry.clientPrivateKeyKey is required" .Values.dataPlane.relayRegistry.clientPrivateKeyKey }}
                       path: tls.key
               {{- end }}
-        {{- if eq .Values.controller.relayRegistry.authentication "tokenreview" }}
+        {{- if eq .Values.controlPlane.relayRegistry.authentication "tokenreview" }}
         - name: relay-identity
           projected:
             defaultMode: 0400
             sources:
               - serviceAccountToken:
                   path: token
-                  audience: {{ .Values.controller.relayRegistry.tokenAudience | quote }}
+                  audience: {{ .Values.controlPlane.relayRegistry.tokenAudience | quote }}
                   expirationSeconds: {{ int .Values.dataPlane.relayRegistry.tokenExpirationSeconds }}
         {{- end }}
         {{- else }}

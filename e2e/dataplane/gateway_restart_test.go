@@ -43,7 +43,7 @@ import (
 )
 
 const (
-	testIssuer         = "https://controller.e2e.invalid"
+	testIssuer         = "https://control-plane.e2e.invalid"
 	testRelay          = "primary"
 	testKeyID          = "e2e"
 	testPath           = "/tunnel"

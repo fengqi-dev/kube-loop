@@ -1,0 +1,312 @@
+{{- $publicURL := required "publicURL is required (for example https://kubeloop.example.com)" .Values.publicURL -}}
+{{- $storageType := .Values.controlPlane.storage.type -}}
+{{- if and (ne $storageType "sqlite") (ne $storageType "postgresql") -}}
+{{- fail "controlPlane.storage.type must be sqlite or postgresql" -}}
+{{- end -}}
+{{- if and (eq $storageType "sqlite") (ne (int .Values.controlPlane.replicas) 1) -}}
+{{- fail "controlPlane.replicas must be 1 when controlPlane.storage.type=sqlite" -}}
+{{- end -}}
+{{- if and (eq $storageType "postgresql") (not .Values.controlPlane.storage.postgresql.existingSecret) -}}
+{{- fail "controlPlane.storage.postgresql.existingSecret is required for postgresql storage" -}}
+{{- end }}
+{{- if and (eq $storageType "postgresql") (le (int .Values.controlPlane.storage.postgresql.maxOpenConnections) 0) -}}
+{{- fail "controlPlane.storage.postgresql.maxOpenConnections must be positive" -}}
+{{- end }}
+{{- if and (eq $storageType "postgresql") (lt (int .Values.controlPlane.storage.postgresql.maxIdleConnections) 0) -}}
+{{- fail "controlPlane.storage.postgresql.maxIdleConnections must not be negative" -}}
+{{- end }}
+{{- if and (eq $storageType "postgresql") (gt (int .Values.controlPlane.storage.postgresql.maxIdleConnections) (int .Values.controlPlane.storage.postgresql.maxOpenConnections)) -}}
+{{- fail "controlPlane.storage.postgresql.maxIdleConnections must not exceed maxOpenConnections" -}}
+{{- end }}
+{{- if and (eq $storageType "postgresql") (or (lt (int .Values.controlPlane.storage.postgresql.transactionMaxRetries) 0) (gt (int .Values.controlPlane.storage.postgresql.transactionMaxRetries) 10)) -}}
+{{- fail "controlPlane.storage.postgresql.transactionMaxRetries must be between 0 and 10" -}}
+{{- end }}
+{{- if and .Values.controlPlane.relayRegistry.enabled (ne (int .Values.controlPlane.replicas) 1) -}}
+{{- fail "controlPlane.replicas must be 1 while the in-memory Relay Registry is enabled" -}}
+{{- end }}
+{{- if and (not .Values.controlPlane.relayRegistry.enabled) (ne .Values.controlPlane.relay.id .Values.dataPlane.relay.id) -}}
+{{- fail "controlPlane.relay.id and dataPlane.relay.id must match" -}}
+{{- end }}
+{{- $controlPlaneLogLevel := lower (toString .Values.controlPlane.logLevel) -}}
+{{- if not (has $controlPlaneLogLevel (list "debug" "info" "warn" "error")) -}}
+{{- fail "controlPlane.logLevel must be debug, info, warn, or error" -}}
+{{- end }}
+{{- $breakGlass := .Values.controlPlane.management.breakGlass -}}
+{{- $breakGlassAlias := trim (toString $breakGlass.secretAlias) -}}
+{{- $breakGlassSecret := dict -}}
+{{- $providerSecretAliases := default (dict) .Values.controlPlane.management.providerSecretAliases -}}
+{{- if $breakGlass.enabled -}}
+{{- if not (regexMatch "^[a-z][a-z0-9-]{0,62}$" $breakGlassAlias) -}}
+{{- fail "controlPlane.management.breakGlass.secretAlias must be a valid stable alias" -}}
+{{- end -}}
+{{- $breakGlassSecret = get (default (dict) $breakGlass.secretAliases) $breakGlassAlias -}}
+{{- if not $breakGlassSecret -}}
+{{- fail "controlPlane.management.breakGlass.secretAlias must select a configured secretAliases entry" -}}
+{{- end -}}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "kubeloop.controlPlaneName" . }}
+  labels:
+    {{- include "kubeloop.labels" . | nindent 4 }}
+    app.kubernetes.io/component: control-plane
+spec:
+  replicas: {{ .Values.controlPlane.replicas }}
+  strategy:
+    type: {{ ternary "Recreate" "RollingUpdate" (eq $storageType "sqlite") }}
+  selector:
+    matchLabels:
+      {{- include "kubeloop.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: control-plane
+  template:
+    metadata:
+      {{- with .Values.controlPlane.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "kubeloop.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: control-plane
+        {{- with .Values.controlPlane.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "kubeloop.controlPlaneServiceAccountName" . }}
+      automountServiceAccountToken: true
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      terminationGracePeriodSeconds: {{ .Values.controlPlane.terminationGracePeriodSeconds }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: control-plane
+          image: {{ include "kubeloop.controlPlaneImage" . | quote }}
+          imagePullPolicy: {{ .Values.controlPlane.image.pullPolicy }}
+          args:
+            - --api-request-timeout={{ .Values.controlPlane.apiRequestTimeout }}
+            - --max-request-body-bytes={{ int64 .Values.controlPlane.maxRequestBodyBytes }}
+            - --session-ttl={{ .Values.controlPlane.sessionTTL }}
+            - --session-max-lifetime={{ .Values.controlPlane.sessionMaxLifetime }}
+            - --maintenance-interval={{ .Values.controlPlane.maintenanceInterval }}
+            - --maintenance-batch-size={{ int .Values.controlPlane.maintenanceBatchSize }}
+            - --relay-ticket-ttl={{ .Values.controlPlane.relay.ticketTTL }}
+            - --shutdown-timeout={{ .Values.controlPlane.shutdownTimeout }}
+            - --log-level={{ $controlPlaneLogLevel }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "kubeloop.controlPlaneConfigName" . }}
+          env:
+            - name: KUBELOOP_POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            {{- if .Values.controlPlane.relayRegistry.enabled }}
+            - name: KUBELOOP_RELAY_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: KUBELOOP_RELAY_SERVICE_ACCOUNT
+              value: {{ include "kubeloop.dataPlaneServiceAccountName" . | quote }}
+            {{- end }}
+            - name: KUBELOOP_STORAGE_TYPE
+              value: {{ $storageType | quote }}
+            {{- if eq $storageType "sqlite" }}
+            - name: KUBELOOP_SQLITE_PATH
+              value: {{ .Values.controlPlane.storage.sqlite.path | quote }}
+            {{- else }}
+            - name: KUBELOOP_POSTGRESQL_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.controlPlane.storage.postgresql.existingSecret }}
+                  key: {{ .Values.controlPlane.storage.postgresql.dsnKey }}
+            - name: KUBELOOP_POSTGRESQL_CONNECT_TIMEOUT
+              value: {{ .Values.controlPlane.storage.postgresql.connectTimeout | quote }}
+            - name: KUBELOOP_POSTGRESQL_QUERY_TIMEOUT
+              value: {{ .Values.controlPlane.storage.postgresql.queryTimeout | quote }}
+            - name: KUBELOOP_POSTGRESQL_MAX_OPEN_CONNECTIONS
+              value: {{ int .Values.controlPlane.storage.postgresql.maxOpenConnections | quote }}
+            - name: KUBELOOP_POSTGRESQL_MAX_IDLE_CONNECTIONS
+              value: {{ int .Values.controlPlane.storage.postgresql.maxIdleConnections | quote }}
+            - name: KUBELOOP_POSTGRESQL_CONNECTION_MAX_LIFETIME
+              value: {{ .Values.controlPlane.storage.postgresql.connectionMaxLifetime | quote }}
+            - name: KUBELOOP_POSTGRESQL_TRANSACTION_MAX_RETRIES
+              value: {{ int .Values.controlPlane.storage.postgresql.transactionMaxRetries | quote }}
+            - name: KUBELOOP_POSTGRESQL_TRANSACTION_RETRY_BACKOFF
+              value: {{ .Values.controlPlane.storage.postgresql.transactionRetryBackoff | quote }}
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+            {{- if .Values.controlPlane.relayRegistry.enabled }}
+            - name: relay-mtls
+              containerPort: {{ .Values.controlPlane.relayRegistry.listenPort }}
+              protocol: TCP
+            {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: http
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: http
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          resources:
+            {{- toYaml .Values.controlPlane.resources | nindent 12 }}
+          volumeMounts:
+            - name: auth-config
+              mountPath: /etc/kubeloop/auth
+              readOnly: true
+            - name: auth-secrets
+              mountPath: /var/run/secrets/kubeloop/auth
+              readOnly: true
+            {{- if or $breakGlass.enabled $providerSecretAliases }}
+            - name: management-secrets
+              mountPath: /var/run/secrets/kubeloop/management
+              readOnly: true
+            {{- end }}
+            {{- if .Values.controlPlane.relayRegistry.enabled }}
+            - name: relay-registry-tls
+              mountPath: /var/run/secrets/kubeloop/relay-registry
+              readOnly: true
+            {{- end }}
+            {{- if eq $storageType "sqlite" }}
+            - name: data
+              mountPath: {{ dir .Values.controlPlane.storage.sqlite.path }}
+            {{- end }}
+      volumes:
+        - name: auth-config
+          configMap:
+            name: {{ include "kubeloop.controlPlaneAuthConfigName" . }}
+        - name: auth-secrets
+          projected:
+            defaultMode: 0400
+            sources:
+              - secret:
+                  name: {{ required "controlPlane.relay.existingSecret is required" .Values.controlPlane.relay.existingSecret }}
+                  items:
+                    - key: {{ required "controlPlane.relay.signingKeyKey is required" .Values.controlPlane.relay.signingKeyKey }}
+                      path: relay/signing-key.pem
+              {{- if or .Values.controlPlane.auth.providers $providerSecretAliases }}
+              - secret:
+                  name: {{ required "controlPlane.auth.token.existingSecret is required" .Values.controlPlane.auth.token.existingSecret }}
+                  items:
+                    - key: {{ required "controlPlane.auth.token.signingKeyKey is required" .Values.controlPlane.auth.token.signingKeyKey }}
+                      path: token/signing-key.pem
+              {{- end }}
+              {{- if .Values.controlPlane.auth.providers }}
+              {{- range $index, $provider := .Values.controlPlane.auth.providers }}
+              {{- $id := required (printf "controlPlane.auth.providers[%d].id is required" $index) $provider.id }}
+              {{- $type := required (printf "controlPlane.auth.providers[%d].type is required" $index) $provider.type }}
+              {{- if eq $type "oidc" }}
+              {{- $oidc := required (printf "controlPlane.auth.providers[%d].oidc is required" $index) $provider.oidc }}
+              - secret:
+                  name: {{ required (printf "controlPlane.auth.providers[%d].oidc.existingSecret is required" $index) $oidc.existingSecret }}
+                  items:
+                    - key: {{ required (printf "controlPlane.auth.providers[%d].oidc.clientSecretKey is required" $index) $oidc.clientSecretKey }}
+                      path: {{ printf "%s/client-secret" $id | quote }}
+                    {{- if $oidc.caKey }}
+                    - key: {{ $oidc.caKey }}
+                      path: {{ printf "%s/ca.crt" $id | quote }}
+                    {{- end }}
+              {{- else if eq $type "ad" }}
+              {{- $ad := required (printf "controlPlane.auth.providers[%d].ad is required" $index) $provider.ad }}
+              {{- if or $ad.bindDN $ad.caKey }}
+              - secret:
+                  name: {{ required (printf "controlPlane.auth.providers[%d].ad.existingSecret is required for configured AD secrets" $index) $ad.existingSecret }}
+                  items:
+                    {{- if $ad.bindDN }}
+                    - key: {{ required (printf "controlPlane.auth.providers[%d].ad.bindPasswordKey is required when bindDN is configured" $index) $ad.bindPasswordKey }}
+                      path: {{ printf "%s/bind-password" $id | quote }}
+                    {{- end }}
+                    {{- if $ad.caKey }}
+                    - key: {{ $ad.caKey }}
+                      path: {{ printf "%s/ca.crt" $id | quote }}
+                    {{- end }}
+              {{- end }}
+              {{- else if eq $type "static-token" }}
+              {{- $staticToken := required (printf "controlPlane.auth.providers[%d].staticToken is required" $index) $provider.staticToken }}
+              - secret:
+                  name: {{ required (printf "controlPlane.auth.providers[%d].staticToken.existingSecret is required" $index) $staticToken.existingSecret }}
+                  items:
+                    - key: {{ required (printf "controlPlane.auth.providers[%d].staticToken.tokenKey is required" $index) $staticToken.tokenKey }}
+                      path: {{ printf "%s/static-token" $id | quote }}
+              {{- else if eq $type "anonymous" }}
+              {{- else }}
+              {{- fail (printf "controlPlane.auth.providers[%d].type must be oidc, ad, static-token, or anonymous" $index) }}
+              {{- end }}
+              {{- end }}
+              {{- end }}
+        {{- if or $breakGlass.enabled $providerSecretAliases }}
+        - name: management-secrets
+          projected:
+            defaultMode: 0400
+            sources:
+              {{- if $breakGlass.enabled }}
+              - secret:
+                  name: {{ required (printf "controlPlane.management.breakGlass.secretAliases.%s.existingSecret is required" $breakGlassAlias) $breakGlassSecret.existingSecret }}
+                  items:
+                    - key: {{ required (printf "controlPlane.management.breakGlass.secretAliases.%s.credentialKey is required" $breakGlassAlias) $breakGlassSecret.credentialKey }}
+                      path: {{ printf "break-glass/%s/credential" $breakGlassAlias | quote }}
+              {{- end }}
+              {{- range $alias, $secret := $providerSecretAliases }}
+              - secret:
+                  name: {{ required (printf "controlPlane.management.providerSecretAliases.%s.existingSecret is required" $alias) $secret.existingSecret }}
+                  items:
+                    {{- if $secret.clientSecretKey }}
+                    - key: {{ $secret.clientSecretKey }}
+                      path: {{ printf "providers/%s/client-secret" $alias | quote }}
+                    {{- end }}
+                    {{- if $secret.bindPasswordKey }}
+                    - key: {{ $secret.bindPasswordKey }}
+                      path: {{ printf "providers/%s/bind-password" $alias | quote }}
+                    {{- end }}
+                    {{- if $secret.caKey }}
+                    - key: {{ $secret.caKey }}
+                      path: {{ printf "providers/%s/ca.crt" $alias | quote }}
+                    {{- end }}
+              {{- end }}
+        {{- end }}
+        {{- if .Values.controlPlane.relayRegistry.enabled }}
+        - name: relay-registry-tls
+          secret:
+            secretName: {{ default .Values.controlPlane.relay.existingSecret .Values.controlPlane.relayRegistry.existingSecret | required "controlPlane.relayRegistry.existingSecret or controlPlane.relay.existingSecret is required" }}
+            defaultMode: 0400
+            items:
+              - key: {{ required "controlPlane.relayRegistry.serverCertificateKey is required" .Values.controlPlane.relayRegistry.serverCertificateKey }}
+                path: tls.crt
+              - key: {{ required "controlPlane.relayRegistry.serverPrivateKeyKey is required" .Values.controlPlane.relayRegistry.serverPrivateKeyKey }}
+                path: tls.key
+              - key: {{ required "controlPlane.relayRegistry.caKey is required" .Values.controlPlane.relayRegistry.caKey }}
+                path: ca.crt
+        {{- end }}
+        {{- if eq $storageType "sqlite" }}
+        - name: data
+          {{- if .Values.controlPlane.storage.sqlite.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "kubeloop.sqliteClaimName" . }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        {{- end }}
+      {{- with .Values.controlPlane.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.controlPlane.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.controlPlane.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.controlPlane.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

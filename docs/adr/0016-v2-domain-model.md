@@ -5,7 +5,7 @@
 
 ## Context
 
-V2 separates a local desktop, a persistent Controller and a credential-free
+V2 separates a local desktop, a persistent Control Plane and a credential-free
 Data Plane. Earlier implementation milestones introduced the required records,
 but some names reflected storage mechanics (`TokenFamily`, `Session`) rather
 than the product domain. The ownership chain, persistence boundary and identity
@@ -22,12 +22,12 @@ DeviceSession, ClusterSession and, for mutations or streams, Task.
 | Aggregate | Canonical fields and identity | Owner and lifecycle | Persistence |
 | --- | --- | --- | --- |
 | `ServerProfile` | `schemaVersion`, server `id`, canonical `baseURL`, `tunnelPath`, display name and non-secret last-used UI fields | Owned by the local OS user. `id` is the server's stable discovery identity, not an authorization secret. | Versioned `servers.json`; no token, kubeconfig path or provider secret |
-| `Principal` | UUID v4 `id`, provider, immutable provider external key, mutable display name/email/groups | Created/upserted after OIDC or AD authentication. It is the root server-side user identity. | Controller database row with object schema version |
-| `DeviceSession` | UUID v4 `id`, Principal ID, stable client-generated Device ID, refresh-token hash, expiry/revocation | One login on one device. Refresh rotation records are children of this aggregate; replay revokes the whole DeviceSession. | Controller `token_families` row with object schema version; client projection in versioned keyring metadata |
-| `ClusterSession` | UUID v4 `id`, Principal ID, Device ID, cluster ID, namespace, state, generation, immutable NetworkSpec/hash, heartbeat and expiry | Owned jointly by the authenticated Principal and DeviceSession for exactly one cluster/namespace. It cannot be reactivated after stop or expiry. | Controller `sessions` row with object schema version |
-| `Task` | UUID v4 `id`, Principal ID, ClusterSession ID, type, unified state, immutable spec, result, idempotency key and expiry | A durable operation intent. It cannot outlive its ClusterSession except while a rollback snapshot requires compensation. | Controller `tasks` row with object schema version; local histories are versioned projections, never authority |
-| `Stream` | Owning Task/ClusterSession UUID, authenticated connection identity, protocol kind and connection-local channel handle | Ephemeral child of one Task or ClusterSession. The Controller/Data Plane replica that accepted the authenticated claim owns its context, sockets and lease. | Never persisted; payload, command output and traffic bytes are not stored |
-| `AuditEvent` | UUID v4 `id`, optional Principal ID, action, resource type/ID, outcome, request ID, safe metadata and timestamp | Append-only evidence emitted after authentication/ownership resolution. | Controller `audit_events` row with object schema version |
+| `Principal` | UUID v4 `id`, provider, immutable provider external key, mutable display name/email/groups | Created/upserted after OIDC or AD authentication. It is the root server-side user identity. | Control Plane database row with object schema version |
+| `DeviceSession` | UUID v4 `id`, Principal ID, stable client-generated Device ID, refresh-token hash, expiry/revocation | One login on one device. Refresh rotation records are children of this aggregate; replay revokes the whole DeviceSession. | Control Plane `token_families` row with object schema version; client projection in versioned keyring metadata |
+| `ClusterSession` | UUID v4 `id`, Principal ID, Device ID, cluster ID, namespace, state, generation, immutable NetworkSpec/hash, heartbeat and expiry | Owned jointly by the authenticated Principal and DeviceSession for exactly one cluster/namespace. It cannot be reactivated after stop or expiry. | Control Plane `sessions` row with object schema version |
+| `Task` | UUID v4 `id`, Principal ID, ClusterSession ID, type, unified state, immutable spec, result, idempotency key and expiry | A durable operation intent. It cannot outlive its ClusterSession except while a rollback snapshot requires compensation. | Control Plane `tasks` row with object schema version; local histories are versioned projections, never authority |
+| `Stream` | Owning Task/ClusterSession UUID, authenticated connection identity, protocol kind and connection-local channel handle | Ephemeral child of one Task or ClusterSession. The Control Plane/Data Plane replica that accepted the authenticated claim owns its context, sockets and lease. | Never persisted; payload, command output and traffic bytes are not stored |
+| `AuditEvent` | UUID v4 `id`, optional Principal ID, action, resource type/ID, outcome, request ID, safe metadata and timestamp | Append-only evidence emitted after authentication/ownership resolution. | Control Plane `audit_events` row with object schema version |
 
 The concrete client type remains `profile.Profile`, with
 `profile.ServerProfile` as its canonical domain alias;
@@ -64,7 +64,7 @@ Task's durable snapshot.
 - A missing object version is accepted only by an explicit legacy migration
   path and is normalized to version 1 before the next write. Unknown future
   versions fail closed; they are never silently truncated.
-- Controller database migrations and object schema versions are separate.
+- Control Plane database migrations and object schema versions are separate.
   A database migration changes physical storage; an object migration changes
   the encoded domain contract. ORM auto-migration remains forbidden.
 - Refresh-token history, idempotency rows and resource snapshots are child
@@ -106,7 +106,7 @@ fail-closed rule.
 - Product language can use DeviceSession and ClusterSession consistently while
   existing repository call sites remain source compatible during migration.
 - Every durable owner can be decoded and migrated independently, and a newer
-  object cannot be accidentally accepted by an older client or Controller.
+  object cannot be accidentally accepted by an older client or Control Plane.
 - A guessed Task, Session or channel value cannot cross the Principal,
   DeviceSession, namespace, authenticated-connection and Policy checks.
 - Stream loss is handled by cancellation and durable Task compensation; stream

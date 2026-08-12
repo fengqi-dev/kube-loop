@@ -1,6 +1,6 @@
 # Management Plane E2E
 
-`verify.sh` is invoked by `e2e/helm/run.sh` against the real Controller in the
+`verify.sh` is invoked by `e2e/helm/run.sh` against the real Control Plane in the
 dedicated Minikube profile. It verifies strict UI security headers, break-glass
 Management Session exchange, CSRF rejection, optimistic concurrent policy
 publish and durable Principal Token Family revocation.

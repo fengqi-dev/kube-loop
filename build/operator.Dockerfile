@@ -16,7 +16,8 @@ RUN go mod download
 # application sources out of the context makes the image build reproducible in
 # Minikube as well as ordinary Docker/BuildKit environments.
 COPY cmd/kubeloop-operator ./cmd/kubeloop-operator
-COPY internal/operator ./internal/operator
+COPY api ./api
+COPY internal/controller ./internal/controller
 
 # Build
 # the GOARCH has no default value to allow the binary to be built according to the host where the command

@@ -31,7 +31,7 @@ shutdown. Session IDs enter API audit only after the handler validates
 ownership.
 
 Creation also discovers and validates a versioned NetworkSpec through the
-Controller Kubernetes Provider. Its canonical JSON and SHA-256 digest are
+Control Plane Kubernetes Provider. Its canonical JSON and SHA-256 digest are
 stored immutably on the Session. Get, heartbeat and disconnect return the same
 snapshot; a RelayTicket derives its NetworkSpec digest from this stored value
 and never trusts a client-supplied digest.
@@ -53,7 +53,7 @@ authorized and Kubernetes RBAC changes are not persisted as Session state.
 - A successful create primes the desktop's bounded capability cache without a
   second network request. Heartbeat and disconnect preserve that local
   snapshot but do not treat it as authorization proof.
-- The Controller runs an immediate and periodic bounded maintenance pass.
+- The Control Plane runs an immediate and periodic bounded maintenance pass.
   Expired Sessions are deleted by heartbeat expiry; database foreign-key
   cascades remove their Tasks and snapshots, so a crashed desktop does not
   need to send a final request for server-side ownership to be reclaimed.

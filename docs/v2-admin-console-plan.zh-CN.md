@@ -1,14 +1,14 @@
 # KubeLoop V2 后台管理规划
 
 > 状态：已完成（V2-900～V2-908 已验收）
-> 目标：提供企业管理员可审计、可回滚的 Controller 管理面；不扩大 Data Plane 权限。
+> 目标：提供企业管理员可审计、可回滚的 Control Plane 管理面；不扩大 Data Plane 权限。
 
 管理面信任边界和威胁模型已冻结在
 [`adr/0022-management-plane-trust-boundary.md`](adr/0022-management-plane-trust-boundary.md)。
 
 ## 1. 产品边界
 
-后台管理属于 `kubeloop-controller` 的 Management Plane，使用同一 Go
+后台管理属于 `kubeloop-control-plane` 的 Management Plane，使用同一 Go
 module、同一存储和同一 Helm Chart。它不是新的独立项目，也不进入
 `kubeloop-gateway` Data Plane。建议路由：
 
@@ -45,7 +45,7 @@ Authorizer。前端隐藏按钮不能替代服务端鉴权。高风险操作要�
 
 ### 3.1 概览与运行状态
 
-- Controller、Data Plane、Operator 版本和兼容性。
+- Control Plane、Data Plane、Operator 版本和兼容性。
 - Relay ready/draining、容量、活动物理连接/逻辑流。
 - 活动 Principal、Device Session、Cluster Session、Task 和失败恢复数。
 - 数据库 backend/schema、迁移状态、SQLite 单副本约束和 PostgreSQL HA 状态。
@@ -107,7 +107,7 @@ Authorizer。前端隐藏按钮不能替代服务端鉴权。高风险操作要�
 不使用 ORM AutoMigrate；SQLite/PostgreSQL 继续共享显式 migration 与
 Repository contract。所有写操作在一个数据库事务内同时提交 revision、
 active pointer 和审计事件。使用整数 revision/ETag 做乐观并发，禁止最后写入
-静默覆盖。配置缓存以数据库 revision 为准，Controller 多副本通过轮询或
+静默覆盖。配置缓存以数据库 revision 为准，Control Plane 多副本通过轮询或
 轻量通知失效；Data Plane 只接收签名钥匙、吊销摘要等现有窄协议，不读取
 管理表。
 
@@ -148,13 +148,13 @@ regular-identity dry-run；draft 保存不可变 revision，publish/rollback 使
 session，Access/Refresh Token 仍不进入 Web Storage。
 
 V2-906 将 Helm 静态 Provider 作为基线，并把数据库已发布 OIDC/AD revision
-聚合为一个原子 Registry。Controller 启动及有界轮询按 active pointer 的
+聚合为一个原子 Registry。Control Plane 启动及有界轮询按 active pointer 的
 revision/ETag 指纹收敛；publish/rollback 在数据库 CAS 前完成 Secret alias
 解析、OIDC discovery/AD 连接和完整候选 Registry 构建，提交成功后只以 CAS
 合并发生变化的 Provider，避免并发发布覆盖无关 Provider。chi v5 管理 API 提供
 list/current/validate/draft/publish/rollback，全部写请求继续要求 Management
 Session、同源 CSRF、强 `If-Match` 和幂等键。Helm 只把 allowlist 中的 Secret key
-投影到 Controller 固定只读路径；数据库保存 alias，API/UI/审计只返回用途名，
+投影到 Control Plane 固定只读路径；数据库保存 alias，API/UI/审计只返回用途名，
 pending change 也不把 alias 写入 Web Storage。Provider 发布会即时更新 discovery、
 登录和 readiness。
 
@@ -175,5 +175,5 @@ IdP/目录，OIDC/AD 协议、TLS、LDAP filter 与限流继续由 Provider 安�
 - 初次部署即使管理 UI 关闭，也可完全通过 Helm 配置启动。
 - 没有 bootstrap 管理员时管理 API 必须 fail closed，而不是允许首个注册用户。
 - 所有 Secret 往返、配置发布、权限 dry-run、撤销和导出都有安全测试与审计。
-- SQLite 模式仍只允许单 Controller；多副本后台必须使用 PostgreSQL。
-- 任一配置 revision 回滚后，Controller readiness、登录和已授权用户主流程恢复。
+- SQLite 模式仍只允许单 Control Plane；多副本后台必须使用 PostgreSQL。
+- 任一配置 revision 回滚后，Control Plane readiness、登录和已授权用户主流程恢复。

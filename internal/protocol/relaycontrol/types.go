@@ -60,7 +60,7 @@ type RevokedSession struct {
 	ExpiresAt         time.Time `json:"expiresAt"`
 }
 
-// RegistrationRequest deliberately contains no Relay ID. The Controller
+// RegistrationRequest deliberately contains no Relay ID. The Control Plane
 // derives it from the authenticated transport identity, never from this body.
 type RegistrationRequest struct {
 	Envelope

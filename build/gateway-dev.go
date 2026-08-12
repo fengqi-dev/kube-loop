@@ -1,6 +1,6 @@
 //go:build ignore
 
-// Command gateway-dev prepares the content-addressed Controller, Gateway, and
+// Command gateway-dev prepares the content-addressed Control Plane, Gateway, and
 // Operator images used by wails dev, then deploys a complete development stack
 // to the active local cluster.
 package main
@@ -29,11 +29,11 @@ import (
 )
 
 const (
-	controllerImageRepository = "kube-loop-controller"
-	gatewayImageRepository    = "kube-loop-gateway"
-	operatorImageRepository   = "kube-loop-operator"
-	developmentNamespace      = "kubeloop-dev"
-	developmentRelease        = "kubeloop-dev"
+	controlPlaneImageRepository = "kube-loop-control-plane"
+	gatewayImageRepository      = "kube-loop-gateway"
+	operatorImageRepository     = "kube-loop-operator"
+	developmentNamespace        = "kubeloop-dev"
+	developmentRelease          = "kubeloop-dev"
 )
 
 func main() {
@@ -44,12 +44,12 @@ func main() {
 	if err := buildDevelopmentSingBox(root); err != nil {
 		fatalf("build local sing-box: %v", err)
 	}
-	controllerHash, err := controllerSourceHash(root)
+	controlPlaneHash, err := controlPlaneSourceHash(root)
 	if err != nil {
-		fatalf("hash Controller sources: %v", err)
+		fatalf("hash Control Plane sources: %v", err)
 	}
-	controllerImage := controllerImageRepository + ":dev-" + controllerHash[:12]
-	controllerBinary := filepath.Join(root, "build", "bin", "kubeloop-controller")
+	controlPlaneImage := controlPlaneImageRepository + ":dev-" + controlPlaneHash[:12]
+	controlPlaneBinary := filepath.Join(root, "build", "bin", "kubeloop-control-plane")
 	gatewayHash, err := gatewaySourceHash(root)
 	if err != nil {
 		fatalf("hash Gateway sources: %v", err)
@@ -64,18 +64,18 @@ func main() {
 	operatorBinary := filepath.Join(root, "build", "bin", "kubeloop-operator")
 	contextName := currentKubeContext()
 
-	fmt.Printf("==> Building local Controller image %s\n", controllerImage)
-	if err := buildLinuxBinary(root, controllerBinary, "./cmd/kubeloop-controller"); err != nil {
-		fatalf("build Controller binary: %v", err)
+	fmt.Printf("==> Building local Control Plane image %s\n", controlPlaneImage)
+	if err := buildLinuxBinary(root, controlPlaneBinary, "./cmd/kubeloop-control-plane"); err != nil {
+		fatalf("build Control Plane binary: %v", err)
 	}
-	if err := buildImage(root, contextName, controllerImage, "build/controller.e2e.Dockerfile"); err != nil {
-		fatalf("build Controller image: %v", err)
+	if err := buildImage(root, contextName, controlPlaneImage, "build/control-plane.e2e.Dockerfile"); err != nil {
+		fatalf("build Control Plane image: %v", err)
 	}
-	if err := loadIntoActiveLocalCluster(root, contextName, controllerImage); err != nil {
-		fatalf("load Controller image: %v", err)
+	if err := loadIntoActiveLocalCluster(root, contextName, controlPlaneImage); err != nil {
+		fatalf("load Control Plane image: %v", err)
 	}
-	if err := writeImageMetadata(root, "controller-image", controllerImage); err != nil {
-		fatalf("write Controller image metadata: %v", err)
+	if err := writeImageMetadata(root, "control-plane-image", controlPlaneImage); err != nil {
+		fatalf("write Control Plane image metadata: %v", err)
 	}
 
 	fmt.Printf("==> Building local Gateway image %s\n", gatewayImage)
@@ -110,15 +110,15 @@ func main() {
 	} else if !localClusterContext(contextName) {
 		fatalf("refusing to deploy the local development stack to non-local Kubernetes context %q", contextName)
 	} else {
-		publicURL, deployErr := deployDevelopmentStack(root, contextName, controllerImage, gatewayImage, operatorImage)
+		publicURL, deployErr := deployDevelopmentStack(root, contextName, controlPlaneImage, gatewayImage, operatorImage)
 		if deployErr != nil {
 			fatalf("deploy development stack: %v", deployErr)
 		}
 		fmt.Printf("==> KubeLoop development server: %s\n", publicURL)
 	}
 	fmt.Printf(
-		"==> Wails development images ready: Controller %s, Gateway %s, Operator %s\n",
-		controllerImage, gatewayImage, operatorImage,
+		"==> Wails development images ready: Control Plane %s, Gateway %s, Operator %s\n",
+		controlPlaneImage, gatewayImage, operatorImage,
 	)
 }
 
@@ -135,9 +135,9 @@ func buildDevelopmentSingBox(root string) error {
 	))
 }
 
-func controllerSourceHash(root string) (string, error) {
-	return sourceHash(root, []string{"go.mod", "go.sum", ".dockerignore", "build/controller.e2e.Dockerfile"}, []string{
-		"cmd/kubeloop-controller",
+func controlPlaneSourceHash(root string) (string, error) {
+	return sourceHash(root, []string{"go.mod", "go.sum", ".dockerignore", "build/control-plane.e2e.Dockerfile"}, []string{
+		"cmd/kubeloop-control-plane",
 		"internal",
 	})
 }
@@ -294,14 +294,14 @@ func localClusterContext(contextName string) bool {
 }
 
 func deployDevelopmentStack(
-	root, contextName, controllerImage, gatewayImage, operatorImage string,
+	root, contextName, controlPlaneImage, gatewayImage, operatorImage string,
 ) (string, error) {
 	host, err := developmentHost(contextName)
 	if err != nil {
 		return "", err
 	}
 	publicURL := "https://" + host
-	registryHost := developmentRelease + "-kubeloop-controller-relay." + developmentNamespace + ".svc"
+	registryHost := developmentRelease + "-kubeloop-control-plane-relay." + developmentNamespace + ".svc"
 	materialDirectory := filepath.Join(root, "build", "development")
 	if err := ensureDevelopmentMaterial(materialDirectory, []string{host, registryHost}); err != nil {
 		return "", err
@@ -334,7 +334,7 @@ func deployDevelopmentStack(
 	); err != nil {
 		return "", err
 	}
-	controllerRepository, controllerTag, err := splitImage(controllerImage)
+	controlPlaneRepository, controlPlaneTag, err := splitImage(controlPlaneImage)
 	if err != nil {
 		return "", err
 	}
@@ -353,33 +353,33 @@ func deployDevelopmentStack(
 		"--wait", "--timeout", "5m", "--history-max", "5",
 		"--set-string", "publicURL=" + publicURL,
 		"--set-string", "serviceID=kubeloop-dev",
-		"--set-string", "controller.image.repository=" + controllerRepository,
-		"--set-string", "controller.image.tag=" + controllerTag,
-		"--set-string", "controller.image.pullPolicy=IfNotPresent",
+		"--set-string", "controlPlane.image.repository=" + controlPlaneRepository,
+		"--set-string", "controlPlane.image.tag=" + controlPlaneTag,
+		"--set-string", "controlPlane.image.pullPolicy=IfNotPresent",
 		"--set-string", "dataPlane.image.repository=" + gatewayRepository,
 		"--set-string", "dataPlane.image.tag=" + gatewayTag,
 		"--set-string", "dataPlane.image.pullPolicy=IfNotPresent",
 		"--set-string", "operator.image.repository=" + operatorRepository,
 		"--set-string", "operator.image.tag=" + operatorTag,
 		"--set-string", "operator.image.pullPolicy=IfNotPresent",
-		"--set-string", "controller.relay.existingSecret=" + relaySecret,
-		"--set-string", "controller.relayRegistry.existingSecret=" + relaySecret,
-		"--set-string", "controller.relayRegistry.endpointAllowedHosts=" + host,
+		"--set-string", "controlPlane.relay.existingSecret=" + relaySecret,
+		"--set-string", "controlPlane.relayRegistry.existingSecret=" + relaySecret,
+		"--set-string", "controlPlane.relayRegistry.endpointAllowedHosts=" + host,
 		"--set-string", "dataPlane.relay.existingSecret=" + verificationSecret,
 		"--set-string", "dataPlane.relayRegistry.endpoint=wss://" + host + "/tunnel",
-		"--set", "controller.auth.developmentMode=true",
-		"--set-string", "controller.auth.token.existingSecret=" + relaySecret,
-		"--set-string", "controller.auth.providers[0].id=local-development",
-		"--set-string", "controller.auth.providers[0].type=anonymous",
-		"--set-string", "controller.auth.providers[0].displayName=Local Development",
-		"--set-string", "controller.auth.providers[0].anonymous.subject=local-developer",
-		"--set-string", "controller.auth.providers[0].anonymous.groups[0]=kubeloop-dev",
-		"--set-string", "controller.policy.rules[0].id=local-development",
-		"--set-string", "controller.policy.rules[0].groups[0]=kubeloop-dev",
-		"--set-string", "controller.policy.rules[0].namespaces[0]=*",
-		"--set-string", "controller.policy.rules[0].operations[0]=*",
-		"--set-string", "controller.policy.rules[0].resourceKinds[0]=*",
-		"--set-string", "controller.management.bootstrap.groups[0]=kubeloop-dev",
+		"--set", "controlPlane.auth.developmentMode=true",
+		"--set-string", "controlPlane.auth.token.existingSecret=" + relaySecret,
+		"--set-string", "controlPlane.auth.providers[0].id=local-development",
+		"--set-string", "controlPlane.auth.providers[0].type=anonymous",
+		"--set-string", "controlPlane.auth.providers[0].displayName=Local Development",
+		"--set-string", "controlPlane.auth.providers[0].anonymous.subject=local-developer",
+		"--set-string", "controlPlane.auth.providers[0].anonymous.groups[0]=kubeloop-dev",
+		"--set-string", "controlPlane.policy.rules[0].id=local-development",
+		"--set-string", "controlPlane.policy.rules[0].groups[0]=kubeloop-dev",
+		"--set-string", "controlPlane.policy.rules[0].namespaces[0]=*",
+		"--set-string", "controlPlane.policy.rules[0].operations[0]=*",
+		"--set-string", "controlPlane.policy.rules[0].resourceKinds[0]=*",
+		"--set-string", "controlPlane.management.bootstrap.groups[0]=kubeloop-dev",
 		"--set", "ingress.enabled=true",
 		"--set-string", "ingress.className=nginx",
 		"--set-string", "ingress.annotations.nginx\\.ingress\\.kubernetes\\.io/ssl-redirect=false",
@@ -642,10 +642,10 @@ func splitImage(image string) (string, string, error) {
 }
 
 func restartDevelopmentStack(root string) error {
-	// SQLite uses a Recreate Controller deployment. Bring it back before
+	// SQLite uses a Recreate Control Plane deployment. Bring it back before
 	// restarting its dependants so the Data Plane does not crash-loop while the
 	// relay registration endpoint is temporarily unavailable.
-	for _, component := range []string{"controller", "data-plane", "operator"} {
+	for _, component := range []string{"control-plane", "data-plane", "operator"} {
 		selector := "app.kubernetes.io/instance=" + developmentRelease +
 			",app.kubernetes.io/component=" + component
 		if err := run(root, exec.Command(

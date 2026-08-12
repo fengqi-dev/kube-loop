@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/fengqi-dev/kube-loop/internal/protocol/relaycontrol"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficcontrol"
 )
 
 type RuntimeReporter interface {
@@ -31,7 +32,7 @@ type ControlApplier interface {
 }
 
 type Config struct {
-	ControllerURL   string
+	ControlPlaneURL string
 	Endpoint        string
 	BearerTokenFile string
 	HTTPClient      *http.Client
@@ -56,13 +57,13 @@ type Agent struct {
 }
 
 func New(config Config) (*Agent, error) {
-	config.ControllerURL = strings.TrimRight(strings.TrimSpace(config.ControllerURL), "/")
+	config.ControlPlaneURL = strings.TrimRight(strings.TrimSpace(config.ControlPlaneURL), "/")
 	config.Endpoint = strings.TrimSpace(config.Endpoint)
-	controllerURL, err := url.Parse(config.ControllerURL)
-	if err != nil || controllerURL.Scheme != "https" || controllerURL.Host == "" ||
-		controllerURL.User != nil || controllerURL.RawQuery != "" || controllerURL.Fragment != "" ||
-		(controllerURL.Path != "" && controllerURL.Path != "/") {
-		return nil, errors.New("Relay Registry Controller URL must be an HTTPS origin")
+	controlPlaneURL, err := url.Parse(config.ControlPlaneURL)
+	if err != nil || controlPlaneURL.Scheme != "https" || controlPlaneURL.Host == "" ||
+		controlPlaneURL.User != nil || controlPlaneURL.RawQuery != "" || controlPlaneURL.Fragment != "" ||
+		(controlPlaneURL.Path != "" && controlPlaneURL.Path != "/") {
+		return nil, errors.New("Relay Registry ControlPlane URL must be an HTTPS origin")
 	}
 	endpoint, err := url.Parse(config.Endpoint)
 	if err != nil || endpoint.Scheme != "wss" || endpoint.Host == "" || endpoint.Path == "" ||
@@ -216,7 +217,7 @@ func call[T interface{ Validate(time.Time) error }, R any](
 	if err != nil {
 		return err
 	}
-	httpRequest, err := http.NewRequestWithContext(ctx, method, agent.config.ControllerURL+path, bytes.NewReader(raw))
+	httpRequest, err := http.NewRequestWithContext(ctx, method, agent.config.ControlPlaneURL+path, bytes.NewReader(raw))
 	if err != nil {
 		return errors.New("create Relay control request")
 	}
@@ -264,6 +265,8 @@ func (err *HTTPError) Error() string {
 	return fmt.Sprintf("Relay control HTTP %d (%s)", err.Status, err.Code)
 }
 
+func (err *HTTPError) HTTPStatus() int { return err.Status }
+
 func isLeaseError(err error) bool {
 	var httpError *HTTPError
 	return errors.As(err, &httpError) && (httpError.Status == http.StatusNotFound || httpError.Status == http.StatusConflict)
@@ -283,6 +286,58 @@ func (agent *Agent) RelayID() string {
 	agent.mu.RLock()
 	defer agent.mu.RUnlock()
 	return agent.relayID
+}
+
+// DoJSON calls an authenticated ControlPlane internal API over the same trusted
+// transport used by Relay registration.
+func (agent *Agent) DoJSON(ctx context.Context, method, path string, input, output any) error {
+	if agent == nil || ctx == nil || !strings.HasPrefix(path, "/internal/") {
+		return errors.New("Relay internal request is invalid")
+	}
+	raw, err := json.Marshal(input)
+	if err != nil || len(raw) == 0 || len(raw) > trafficcontrol.MaximumBodyBytes {
+		return errors.New("encode Relay internal request")
+	}
+	request, err := http.NewRequestWithContext(ctx, method, agent.config.ControlPlaneURL+path, bytes.NewReader(raw))
+	if err != nil {
+		return errors.New("create Relay internal request")
+	}
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Accept", "application/json")
+	if agent.config.BearerTokenFile != "" {
+		token, tokenErr := readBearerToken(agent.config.BearerTokenFile)
+		if tokenErr != nil {
+			return tokenErr
+		}
+		request.Header.Set("Authorization", "Bearer "+token)
+	}
+	response, err := agent.config.HTTPClient.Do(request)
+	if err != nil {
+		return fmt.Errorf("send Relay internal request: %w", err)
+	}
+	defer response.Body.Close()
+	responseRaw, readErr := io.ReadAll(io.LimitReader(response.Body, trafficcontrol.MaximumBodyBytes+1))
+	if readErr != nil || len(responseRaw) > trafficcontrol.MaximumBodyBytes {
+		return errors.New("read Relay internal response")
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		var document struct {
+			Error struct {
+				Code string `json:"code"`
+			} `json:"error"`
+		}
+		_ = json.Unmarshal(responseRaw, &document)
+		return &HTTPError{Status: response.StatusCode, Code: document.Error.Code}
+	}
+	if output == nil {
+		return nil
+	}
+	decoder := json.NewDecoder(bytes.NewReader(responseRaw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(output); err != nil {
+		return errors.New("decode Relay internal response")
+	}
+	return nil
 }
 
 func (agent *Agent) Done() <-chan struct{} { return agent.done }

@@ -2,7 +2,7 @@
 set -eu
 
 if [ -n "${KUBELOOP_TEST_POSTGRESQL_DSN:-}" ]; then
-  exec go test -race ./internal/controller/storage -count=1
+  exec go test -race ./internal/controlplane/storage -count=1
 fi
 
 if command -v podman >/dev/null 2>&1; then
@@ -51,4 +51,4 @@ if [ -z "$published_port" ]; then
 fi
 
 KUBELOOP_TEST_POSTGRESQL_DSN="postgres://kubeloop:kubeloop-test-only@127.0.0.1:${published_port}/kubeloop?sslmode=disable" \
-  go test -race ./internal/controller/storage -count=1
+  go test -race ./internal/controlplane/storage -count=1
