@@ -9,7 +9,7 @@ import (
 
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/taskstream"
-	"github.com/fengqi-dev/kube-loop/internal/remotetask"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/remotetask"
 )
 
 type taskStore struct {

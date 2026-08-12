@@ -1,6 +1,6 @@
 package websocketmux
 
-import shared "github.com/fengqi-dev/kube-loop/internal/websocketmux"
+import shared "github.com/fengqi-dev/kube-loop/internal/client/websocketmux"
 
 type ClientConfig = shared.ClientConfig
 type Forwarder = shared.Forwarder

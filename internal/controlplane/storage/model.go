@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/fengqi-dev/kube-loop/internal/remotetask"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/remotetask"
 )
 
 const ObjectSchemaVersion = 1

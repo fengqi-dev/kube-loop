@@ -16,7 +16,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/sessionapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/taskapi"
-	"github.com/fengqi-dev/kube-loop/internal/remotetask"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/remotetask"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v5"
 	"k8s.io/apimachinery/pkg/util/validation"

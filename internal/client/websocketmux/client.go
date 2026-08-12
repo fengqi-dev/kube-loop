@@ -14,8 +14,9 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/streamcopy"
+	protocolmux "github.com/fengqi-dev/kube-loop/internal/protocol/websocketmux"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/wssprotocol"
-	"github.com/fengqi-dev/kube-loop/internal/streamcopy"
 	"github.com/xtaci/smux"
 )
 
@@ -234,7 +235,7 @@ func (forwarder *Forwarder) forward(local net.Conn) {
 	}
 	defer stream.Close()
 	defer local.Close()
-	streamcopy.Bidirectional(local, NewStreamConn(stream))
+	streamcopy.Bidirectional(local, protocolmux.NewStreamConn(stream))
 }
 
 func (forwarder *Forwarder) openStream() (*smux.Stream, error) {

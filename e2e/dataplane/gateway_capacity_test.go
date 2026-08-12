@@ -22,10 +22,10 @@ import (
 
 	"github.com/fengqi-dev/kube-loop/e2e/harness"
 	clientremote "github.com/fengqi-dev/kube-loop/internal/client/remote"
+	"github.com/fengqi-dev/kube-loop/internal/client/websocketmux"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/relayticket"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
-	"github.com/fengqi-dev/kube-loop/internal/websocketmux"
 	"github.com/google/uuid"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"

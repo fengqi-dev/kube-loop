@@ -16,7 +16,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/relaycontrol"
-	"github.com/fengqi-dev/kube-loop/internal/remotetask"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/remotetask"
 	"github.com/google/uuid"
 )
 

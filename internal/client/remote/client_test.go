@@ -22,8 +22,8 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/protocol/mirrorstream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/relayticket"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/remotetask"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficcontrol"
-	"github.com/fengqi-dev/kube-loop/internal/remotetask"
 	"github.com/google/uuid"
 )
 

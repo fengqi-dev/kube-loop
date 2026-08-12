@@ -3,7 +3,7 @@ package execapi
 import (
 	"time"
 
-	"github.com/fengqi-dev/kube-loop/internal/remotetask"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/remotetask"
 )
 
 type Document struct {

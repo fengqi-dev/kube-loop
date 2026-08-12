@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/fengqi-dev/kube-loop/internal/remotetask"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/remotetask"
 	"github.com/google/uuid"
 )
 

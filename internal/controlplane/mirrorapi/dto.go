@@ -3,8 +3,8 @@ package mirrorapi
 import (
 	"time"
 
+	"github.com/fengqi-dev/kube-loop/internal/protocol/remotetask"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficmodel"
-	"github.com/fengqi-dev/kube-loop/internal/remotetask"
 )
 
 type Document struct {

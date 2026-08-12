@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	shared "github.com/fengqi-dev/kube-loop/internal/protocol/websocketmux"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/wssprotocol"
-	shared "github.com/fengqi-dev/kube-loop/internal/websocketmux"
 	"github.com/xtaci/smux"
 )
 

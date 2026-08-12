@@ -6,7 +6,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/fengqi-dev/kube-loop/internal/remotetask"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/remotetask"
 )
 
 var (

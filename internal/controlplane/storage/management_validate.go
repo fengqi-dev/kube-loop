@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/fengqi-dev/kube-loop/internal/remotetask"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/remotetask"
 )
 
 func validateExportDomainRow(spec tableSpec, row []json.RawMessage) error {

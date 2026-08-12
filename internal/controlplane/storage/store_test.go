@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
-	"github.com/fengqi-dev/kube-loop/internal/remotetask"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/remotetask"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
 )

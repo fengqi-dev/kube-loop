@@ -12,7 +12,7 @@ import (
 
 	trafficv1alpha1 "github.com/fengqi-dev/kube-loop/api/v1alpha1"
 	controlplanestorage "github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
-	"github.com/fengqi-dev/kube-loop/internal/remotetask"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/remotetask"
 )
 
 const (

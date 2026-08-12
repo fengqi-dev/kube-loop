@@ -18,8 +18,9 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	shared "github.com/fengqi-dev/kube-loop/internal/client/websocketmux"
+	protocolmux "github.com/fengqi-dev/kube-loop/internal/protocol/websocketmux"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/wssprotocol"
-	shared "github.com/fengqi-dev/kube-loop/internal/websocketmux"
 	"github.com/xtaci/smux"
 )
 
@@ -281,7 +282,7 @@ func TestMalformedStreamDoesNotClosePhysicalSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("physical session closed with malformed sibling: %v", err)
 	}
-	good := shared.NewStreamConn(goodRaw)
+	good := protocolmux.NewStreamConn(goodRaw)
 	defer good.Close()
 	if _, err := good.Write([]byte("healthy")); err != nil {
 		t.Fatal(err)
@@ -334,7 +335,7 @@ func TestIdleStreamTimesOutWithoutClosingPhysicalSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("physical session closed with idle sibling: %v", err)
 	}
-	good := shared.NewStreamConn(goodRaw)
+	good := protocolmux.NewStreamConn(goodRaw)
 	defer good.Close()
 	if _, err := good.Write([]byte{'G'}); err != nil {
 		t.Fatal(err)
@@ -467,7 +468,7 @@ func TestNewGenerationLetsExistingStreamFinishAndRejectsOlderNewStreams(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	oldStream := shared.NewStreamConn(oldRaw)
+	oldStream := protocolmux.NewStreamConn(oldRaw)
 	defer oldStream.Close()
 	if _, err := oldStream.Write([]byte{'H'}); err != nil {
 		t.Fatal(err)
@@ -484,7 +485,7 @@ func TestNewGenerationLetsExistingStreamFinishAndRejectsOlderNewStreams(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	newStream := shared.NewStreamConn(newRaw)
+	newStream := protocolmux.NewStreamConn(newRaw)
 	defer newStream.Close()
 	if _, err := newStream.Write([]byte{'N'}); err != nil {
 		t.Fatal(err)
@@ -503,7 +504,7 @@ func TestNewGenerationLetsExistingStreamFinishAndRejectsOlderNewStreams(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	stale := shared.NewStreamConn(staleRaw)
+	stale := protocolmux.NewStreamConn(staleRaw)
 	defer stale.Close()
 	_ = stale.SetDeadline(time.Now().Add(time.Second))
 	_, _ = stale.Write([]byte{'S'})
@@ -655,7 +656,7 @@ func TestWSSServerHelloPublishesExactLimitsBeforeSmux(t *testing.T) {
 	hello := message.ServerHello
 	if hello.ProtocolVersion != wssprotocol.Version || hello.ServerVersion != "2.5.0" ||
 		hello.Limits.MaximumFrameBytes != 768<<10 ||
-		hello.Limits.MaximumStreamFrameBytes != shared.MaximumStreamFrameBytes ||
+		hello.Limits.MaximumStreamFrameBytes != protocolmux.MaximumStreamFrameBytes ||
 		hello.Limits.MaximumStreamsPerConnection != 17 || hello.Limits.MaximumPhysicalConnections != 11 ||
 		hello.Limits.MaximumConnectionsPerUser != 3 || hello.Limits.StreamIdleTimeoutMillis != 90000 {
 		t.Fatalf("ServerHello limits = %#v", hello)
