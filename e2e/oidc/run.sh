@@ -115,7 +115,21 @@ jq -n \
       redirectUris: [$redirectURI],
       webOrigins: [],
       attributes: {"pkce.code.challenge.method": "S256"},
-      defaultClientScopes: ["web-origins", "acr", "roles", "profile", "email"]
+      defaultClientScopes: ["web-origins", "acr", "profile", "email"],
+      protocolMappers: [{
+        name: "KubeLoop realm roles",
+        protocol: "openid-connect",
+        protocolMapper: "oidc-usermodel-realm-role-mapper",
+        consentRequired: false,
+        config: {
+          "multivalued": "true",
+          "userinfo.token.claim": "true",
+          "id.token.claim": "true",
+          "access.token.claim": "true",
+          "claim.name": "groups",
+          "jsonType.label": "String"
+        }
+      }]
     }],
     users: [{
       username: $username,
@@ -270,7 +284,7 @@ helm upgrade --install "${RELEASE}" "${ROOT}/charts/kubeloop" \
   --set-string controlPlane.auth.providers[0].oidc.caKey=ca.crt \
   --set-string controlPlane.auth.providers[0].oidc.claims.displayName=preferred_username \
   --set-string controlPlane.auth.providers[0].oidc.claims.email=email \
-  --set-string controlPlane.auth.providers[0].oidc.claims.groups=realm_access.roles \
+  --set-string controlPlane.auth.providers[0].oidc.claims.groups=groups \
   --set-string controlPlane.policy.rules[0].id=oidc-e2e-namespaces \
   --set-string controlPlane.policy.rules[0].groups[0]=kubeloop-e2e-user \
   --set-string 'controlPlane.policy.rules[0].namespaces[0]=$cluster' \

@@ -75,6 +75,29 @@ func TestDiscoveryContract(t *testing.T) {
 	}
 }
 
+func TestDiscoveryAcceptsLocalBrowserAuthentication(t *testing.T) {
+	server, err := NewServer(Config{
+		PublicURL:   "https://gateway.example.test",
+		AuthMethods: []AuthMethod{{ID: "local", Type: "local", DisplayName: "Local account"}},
+	}, BuildInfo{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, DiscoveryPath, nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d", response.Code)
+	}
+	var document DiscoveryDocument
+	if err := json.Unmarshal(response.Body.Bytes(), &document); err != nil {
+		t.Fatal(err)
+	}
+	if len(document.AuthMethods) != 1 || document.AuthMethods[0].Type != "local" || document.AuthMethods[0].Interaction != "browser" {
+		t.Fatalf("authMethods = %#v", document.AuthMethods)
+	}
+}
+
 func TestDiscoveryReadsDynamicAuthenticationMethods(t *testing.T) {
 	methods := []AuthMethod{{ID: "first", Type: "oidc", Interaction: "browser"}}
 	server, err := NewServer(
@@ -268,6 +291,7 @@ func TestConfigValidation(t *testing.T) {
 		{PublicURL: "https://gateway.example.test", AuthMethods: []AuthMethod{{ID: "password", Type: "password"}}},
 		{PublicURL: "https://gateway.example.test", AuthMethods: []AuthMethod{{ID: "duplicate", Type: "oidc"}, {ID: "duplicate", Type: "anonymous"}}},
 		{PublicURL: "https://gateway.example.test", AuthMethods: []AuthMethod{{ID: "company", Type: "oidc", Interaction: "password"}}},
+		{PublicURL: "https://gateway.example.test", AuthMethods: []AuthMethod{{ID: "local", Type: "local", Interaction: "none"}}},
 	}
 	for _, config := range tests {
 		if _, err := NewServer(config, BuildInfo{}, nil); err == nil {

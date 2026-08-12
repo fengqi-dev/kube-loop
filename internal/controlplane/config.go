@@ -112,7 +112,7 @@ func (config Config) normalized() (Config, error) {
 		}
 		providerIDs[config.AuthMethods[index].ID] = struct{}{}
 		switch config.AuthMethods[index].Type {
-		case "oidc":
+		case "oidc", "local":
 			if config.AuthMethods[index].Interaction == "" {
 				config.AuthMethods[index].Interaction = "browser"
 			}
