@@ -280,24 +280,16 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Set up Operator EnvTest
-        shell: pwsh
-        run: |
-          $controllerRuntimeVersion = go list -m -f '{{.Version}}' sigs.k8s.io/controller-runtime
-          $kubernetesModuleVersion = go list -m -f '{{.Version}}' k8s.io/api
-          $kubernetesVersion = $kubernetesModuleVersion -replace '^v?[0-9]+\.([0-9]+).*$', '1.$1'
-          go install "sigs.k8s.io/controller-runtime/tools/setup-envtest@$controllerRuntimeVersion"
-          if ($LASTEXITCODE -ne 0) {
-            exit $LASTEXITCODE
-          }
-          $setupEnvTest = Join-Path (go env GOPATH) 'bin\setup-envtest.exe'
-          & $setupEnvTest use $kubernetesVersion --bin-dir "${{ github.workspace }}\build\tools" -p path
-
       - name: Vet
         run: go vet ./...
 
       - name: Run Windows tests
-        run: go test ./... -count=1
+        shell: pwsh
+        run: |
+          # EnvTest cannot stop kube-apiserver or etcd on Windows. The controller
+          # integration suite runs in the Linux and macOS jobs instead.
+          $packages = go list ./... | Where-Object { $_ -ne 'github.com/fengqi-dev/kube-loop/internal/controller' }
+          go test $packages -count=1
 
       - name: Build Windows binaries
         shell: pwsh
