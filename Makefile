@@ -257,7 +257,7 @@ capacity-baseline: ## Verify capacity limits and record logical-stream throughpu
 recovery-test: ## Run resource recovery, owner-safety and Task lifecycle tests with the race detector.
 	go test -race -count=1 \
 		./internal/remotetask \
-		./internal/servicebinding \
+		./internal/controlplane/servicebinding \
 		./internal/controlplane/storage \
 		./internal/controlplane/exchangeapi \
 		./internal/controlplane/mirrorapi \

@@ -440,9 +440,9 @@ func TestKubernetesDirectImportInventoryIsExhaustive(t *testing.T) {
 		"internal/controlplane/portforwardapi/service",
 		"internal/controlplane/previewapi",
 		"internal/controlplane/relayregistry",
+		"internal/controlplane/servicebinding",
 		"internal/controlplane/sessionapi",
 		"internal/controlplane/trafficbindingclient",
-		"internal/servicebinding",
 	}
 
 	seen := make(map[string]struct{}, len(want))

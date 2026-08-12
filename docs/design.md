@@ -107,7 +107,7 @@ The system has four trust boundaries:
 | React UI | Interaction, localization, rendering, and client-side async state |
 | Application bindings | Narrow Wails and MCP adapters over the same backend contracts |
 | `session.Manager` | One cluster lifecycle, published state, discovery, metrics, restore |
-| `portfwd.Manager` | Local listeners and active Port Forward runtimes |
+| `client/portforward.Manager` | Local listeners and active Port Forward runtimes |
 | `intercept.Manager` | Exchange/Service Mirror/Preview registry, control session, host routes |
 | Cluster provider | kubeconfig, RBAC probes, inventory, Gateway and Service mutations |
 | Privileged helper | sing-box process, TUN, routes, split DNS, protected recovery state |

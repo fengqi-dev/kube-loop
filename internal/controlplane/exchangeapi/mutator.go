@@ -7,9 +7,9 @@ import (
 	trafficv1alpha1 "github.com/fengqi-dev/kube-loop/api/v1alpha1"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/authorization"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/servicebinding"
 	controlplanestorage "github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/trafficbindingclient"
-	"github.com/fengqi-dev/kube-loop/internal/servicebinding"
 	"k8s.io/client-go/kubernetes"
 )
 

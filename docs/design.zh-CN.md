@@ -94,7 +94,7 @@ flowchart LR
 | React UI | 交互、本地化、渲染和客户端异步状态 |
 | Application binding | 基于相同后端契约的 Wails 与 MCP 薄适配层 |
 | `session.Manager` | 单个集群生命周期、发布状态、发现、指标和恢复 |
-| `portfwd.Manager` | 本地监听和活动 Port Forward runtime |
+| `client/portforward.Manager` | 本地监听和活动 Port Forward runtime |
 | `intercept.Manager` | Exchange/Service Mirror/Preview registry、control session 和 host route |
 | Cluster provider | kubeconfig、RBAC 探测、inventory、Gateway 和 Service 变更 |
 | Privileged Helper | sing-box 进程、TUN、路由、split DNS 和受保护恢复状态 |

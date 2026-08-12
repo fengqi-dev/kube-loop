@@ -51,9 +51,9 @@ the production V2 desktop has exactly one backend mode: `remote`.
 | Cluster Session/network | `session.Manager` | `clientv2/remotesession.Manager`, `clientv2/dataplane.Manager` | Remote only |
 | exec/TTY | `cluster.Provider.Exec` | `clientv2/exec.Client` and Manager | Remote only |
 | file transfer/operations | `filemanager.Manager` | `clientv2/filetransfer.Client` and Manager | Remote only |
-| Port Forward | `portfwd.Manager` | `clientv2/portforward` remote Client/Data Plane interfaces | Remote only |
+| Port Forward | `client/portforward/listener.Manager` | `client/portforward` remote Client/Data Plane interfaces | Remote only |
 | Exchange/Mirror/Preview | `intercept.Manager` | feature-specific `clientv2` Client/Session interfaces | Remote only |
-| Pod SSH | local `podssh.Executor` | `clientv2/podssh` remote exec interface | Remote only |
+| Pod SSH | `client/podssh/sshserver.Executor` | `client/podssh` remote exec interface | Remote only |
 | MCP | V1 local managers | `mcp.RemoteBackend` using typed Gateway SDK | Remote only |
 
 Manager unit tests validate behavior through these narrow interfaces using

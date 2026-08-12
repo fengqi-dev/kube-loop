@@ -8,13 +8,13 @@ import (
 	"strings"
 
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/servicebinding"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/sessionapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/taskstream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficcontrol"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficmodel"
 	"github.com/fengqi-dev/kube-loop/internal/remotetask"
-	"github.com/fengqi-dev/kube-loop/internal/servicebinding"
 	corev1 "k8s.io/api/core/v1"
 )
 

@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/fengqi-dev/kube-loop/internal/client/portforward/listener"
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
-	"github.com/fengqi-dev/kube-loop/internal/portfwd"
-	"github.com/fengqi-dev/kube-loop/internal/traffic"
+	"github.com/fengqi-dev/kube-loop/internal/client/traffic"
 	"github.com/google/uuid"
 )
 
@@ -52,17 +52,17 @@ func (fakeDataPlane) Dialer(string) (traffic.Dialer, error) { return traffic.Dia
 type fakeLocals struct {
 	startErr error
 	testErr  error
-	started  []portfwd.Request
+	started  []listener.Request
 	stopped  []string
 	tested   []string
 }
 
-func (locals *fakeLocals) StartResolved(request portfwd.Request, _ string, _ portfwd.TrafficDialer) (portfwd.Info, error) {
+func (locals *fakeLocals) StartResolved(request listener.Request, _ string, _ listener.TrafficDialer) (listener.Info, error) {
 	locals.started = append(locals.started, request)
 	if locals.startErr != nil {
-		return portfwd.Info{}, locals.startErr
+		return listener.Info{}, locals.startErr
 	}
-	return portfwd.Info{ID: "local-1", LocalPort: 49152, Address: "127.0.0.1:49152"}, nil
+	return listener.Info{ID: "local-1", LocalPort: 49152, Address: "127.0.0.1:49152"}, nil
 }
 
 func (locals *fakeLocals) Stop(id string) error {

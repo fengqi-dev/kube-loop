@@ -6,9 +6,9 @@ import (
 	"fmt"
 
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/servicebinding"
 	controlplanestorage "github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/trafficbindingclient"
-	"github.com/fengqi-dev/kube-loop/internal/servicebinding"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )

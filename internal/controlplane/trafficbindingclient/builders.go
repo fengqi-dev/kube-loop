@@ -7,7 +7,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	trafficv1alpha1 "github.com/fengqi-dev/kube-loop/api/v1alpha1"
-	"github.com/fengqi-dev/kube-loop/internal/servicebinding"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/servicebinding"
 )
 
 func NewInterceptBinding(

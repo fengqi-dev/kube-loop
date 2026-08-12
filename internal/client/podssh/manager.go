@@ -11,11 +11,11 @@ import (
 	"sync"
 
 	clientexec "github.com/fengqi-dev/kube-loop/internal/client/exec"
+	localpodssh "github.com/fengqi-dev/kube-loop/internal/client/podssh/sshserver"
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
-	localpodssh "github.com/fengqi-dev/kube-loop/internal/podssh"
+	"github.com/fengqi-dev/kube-loop/internal/client/socksbridge"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/execstream"
-	"github.com/fengqi-dev/kube-loop/internal/socksbridge"
 )
 
 type SessionSource interface {

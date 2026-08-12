@@ -1,4 +1,4 @@
-package podssh
+package sshserver
 
 import (
 	"crypto/ed25519"

@@ -31,7 +31,7 @@
 | `internal/controlplane/mirrorapi` | V2 Control Plane | 持久化 Task、只读捕获 Service/EndpointSlice 和原 backend，并通过 `TrafficBinding` 请求接管/恢复 | 声明式控制面 | Control Plane 只向已认证 Gateway 返回权威 backend；Gateway 保持 primary/shadow 数据流 |
 | `internal/controlplane/previewapi` | V2 Control Plane | 持久化 Task/cleanup intent，通过 `TrafficBinding` 请求 Preview Service，并读取 CR status 中的 ClusterIP | 声明式控制面 | Gateway 绑定 listener 并承载反向 WSS；停止与失主恢复由 Control Plane 删除 CR |
 | `internal/controlplane/relayregistry` | V2 Control Plane | TokenReview、按 UID/ServiceAccount 查询 Pod、读取 Node region/zone/hostname | 工作负载认证与控制面 | 只信任短期专用 audience 的 Pod-bound token 或 mTLS/SPIFFE；Relay ID 与拓扑均由权威身份派生，不接受注册 body 自报 |
-| `internal/servicebinding` | 共享类型与只读快照 | Service、Endpoint、EndpointSlice 快照类型与原 backend 解析 | 类型/控制面读 | Control Plane 只使用 Capture/解析和快照类型；Service/Endpoint 写入由 Operator 独占 |
+| `internal/controlplane/servicebinding` | 共享类型与只读快照 | Service、Endpoint、EndpointSlice 快照类型与原 backend 解析 | 类型/控制面读 | Control Plane 只使用 Capture/解析和快照类型；Service/Endpoint 写入由 Operator 独占 |
 | `internal/controlplane/sessionapi` | V2 Control Plane | 仅 Kubernetes DNS 名称校验工具 | 类型/校验 | 不发起 API 请求；可在后续移除该轻量依赖 |
 | `api/v1alpha1` | V2 Operator API | TrafficBinding CRD 类型、Service/EndpointSlice 回滚状态 | API 类型 | Control Plane 与 Operator 共享的声明式契约，不包含认证信息 |
 | `internal/controller` | V2 Operator Controller | PortForward 目标校验；Preview Service 创建；Exchange/Mirror Service 和端点接管、快照、恢复 | 声明式控制面写 | 使用 Operator ServiceAccount，按 finalizer 保证恢复；不处理数据流 |

@@ -8,10 +8,10 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/fengqi-dev/kube-loop/internal/client/portforward/listener"
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
-	"github.com/fengqi-dev/kube-loop/internal/portfwd"
-	"github.com/fengqi-dev/kube-loop/internal/traffic"
+	"github.com/fengqi-dev/kube-loop/internal/client/traffic"
 	"github.com/google/uuid"
 )
 
@@ -25,7 +25,7 @@ type DataPlane interface {
 }
 
 type localForwards interface {
-	StartResolved(portfwd.Request, string, portfwd.TrafficDialer) (portfwd.Info, error)
+	StartResolved(listener.Request, string, listener.TrafficDialer) (listener.Info, error)
 	Stop(string) error
 	Test(context.Context, string) error
 }
@@ -76,7 +76,7 @@ func New(client TaskClient, dataPlanes DataPlane) (*Manager, error) {
 		return nil, errors.New("Port Forward Task client and Data Plane are required")
 	}
 	return &Manager{
-		client: client, dataPlanes: dataPlanes, locals: portfwd.NewManager(),
+		client: client, dataPlanes: dataPlanes, locals: listener.NewManager(),
 		active: make(map[string]*activeForward),
 	}, nil
 }
@@ -101,7 +101,7 @@ func (manager *Manager) Start(
 	if err != nil {
 		return Info{}, err
 	}
-	local, err := manager.locals.StartResolved(portfwd.Request{
+	local, err := manager.locals.StartResolved(listener.Request{
 		Context: serverProfile.ID, Namespace: session.Namespace, Kind: task.Kind, Name: task.Name,
 		Protocol: task.Protocol, RemotePort: task.RemotePort, LocalPort: request.LocalPort,
 	}, task.DialAddress, dialer)

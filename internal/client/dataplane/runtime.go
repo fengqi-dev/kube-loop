@@ -13,10 +13,10 @@ import (
 
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
+	"github.com/fengqi-dev/kube-loop/internal/client/socksbridge"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
 	"github.com/fengqi-dev/kube-loop/internal/singbox"
-	"github.com/fengqi-dev/kube-loop/internal/socksbridge"
 	"github.com/fengqi-dev/kube-loop/internal/websocketmux"
 )
 
