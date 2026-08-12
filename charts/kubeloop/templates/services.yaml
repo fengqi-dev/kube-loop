@@ -35,7 +35,6 @@ spec:
       targetPort: management
       protocol: TCP
       appProtocol: http
-{{- if .Values.controlPlane.relayRegistry.enabled }}
 ---
 apiVersion: v1
 kind: Service
@@ -54,7 +53,6 @@ spec:
       port: {{ .Values.controlPlane.relayRegistry.servicePort }}
       targetPort: relay-mtls
       protocol: TCP
-{{- end }}
 ---
 apiVersion: v1
 kind: Service

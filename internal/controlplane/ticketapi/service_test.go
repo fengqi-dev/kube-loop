@@ -68,7 +68,7 @@ func TestIssueRelayTicketIsBoundToActiveSession(t *testing.T) {
 		NetworkSpecHash: strings.Repeat("a", 64),
 	}}
 	handler := newTicketRoutes(t, sessions, ticketservice.Config{
-		Issuer: "https://controlplane.example", Audience: "relay-a", TTL: time.Minute,
+		Issuer: "https://controlplane.example", TTL: time.Minute,
 		Now: func() time.Time { return now }, Signer: signer,
 	})
 	request := httptest.NewRequest(
@@ -191,7 +191,7 @@ func TestIssueRelayTicketRejectsInvalidInputBeforeSessionLookup(t *testing.T) {
 	}
 	sessions := &fakeSessions{}
 	handler := newTicketRoutes(t, sessions, ticketservice.Config{
-		Issuer: "https://controlplane.example", Audience: "relay-a", Signer: signer,
+		Issuer: "https://controlplane.example", Signer: signer,
 	})
 	tests := []struct {
 		name        string
@@ -231,7 +231,7 @@ func TestIssueRelayTicketDoesNotLeakSessionValidationDetails(t *testing.T) {
 	}
 	sessions := &fakeSessions{apiError: &controlplaneapi.Error{Code: controlplaneapi.CodeNotFound, Message: "resource not found"}}
 	handler := newTicketRoutes(t, sessions, ticketservice.Config{
-		Issuer: "https://controlplane.example", Audience: "relay-a", Signer: signer,
+		Issuer: "https://controlplane.example", Signer: signer,
 	})
 	request := httptest.NewRequest(
 		http.MethodPost,
@@ -262,6 +262,9 @@ func serveTicketHandler(
 
 func newTicketRoutes(t *testing.T, sessions SessionValidator, config ticketservice.Config) *Routes {
 	t.Helper()
+	if config.Allocator == nil {
+		config.Allocator = &fakeAllocator{response: relaycontrol.AllocationResponse{RelayID: "relay-a"}}
+	}
 	service, err := ticketservice.New(config)
 	if err != nil {
 		t.Fatal(err)

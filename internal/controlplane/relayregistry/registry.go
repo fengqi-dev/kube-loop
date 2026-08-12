@@ -3,6 +3,7 @@ package relayregistry
 import (
 	"errors"
 	"maps"
+	"net/url"
 	"slices"
 	"strings"
 	"sync"
@@ -23,6 +24,7 @@ type EndpointPolicy func(relaycontrol.PeerIdentity, string) error
 
 type Config struct {
 	Now               func() time.Time
+	TicketIssuer      string
 	LeaseDuration     time.Duration
 	HeartbeatAfter    time.Duration
 	SupportedVersions []string
@@ -78,6 +80,12 @@ type RelayStatus struct {
 func New(config Config) (*Registry, error) {
 	if config.Now == nil {
 		config.Now = time.Now
+	}
+	config.TicketIssuer = strings.TrimRight(strings.TrimSpace(config.TicketIssuer), "/")
+	issuer, err := url.Parse(config.TicketIssuer)
+	if err != nil || issuer.Scheme != "https" || issuer.Host == "" || issuer.User != nil ||
+		issuer.RawQuery != "" || issuer.Fragment != "" {
+		return nil, errors.New("Relay Registry Ticket issuer must be an absolute HTTPS URL")
 	}
 	if config.LeaseDuration == 0 {
 		config.LeaseDuration = 45 * time.Second
@@ -399,7 +407,8 @@ func (registry *Registry) registrationResponseLocked(relayID, selectedVersion st
 	relay := registry.relays[relayID]
 	return relaycontrol.RegistrationResponse{
 		Envelope: relaycontrol.NewRegistrationResponse().Envelope, SelectedVersion: selectedVersion,
-		RelayID: relay.relayID, LeaseID: relay.leaseID, LeaseExpiresAt: relay.leaseExpiresAt,
+		TicketIssuer: registry.config.TicketIssuer,
+		RelayID:      relay.relayID, LeaseID: relay.leaseID, LeaseExpiresAt: relay.leaseExpiresAt,
 		HeartbeatAfter: registry.config.HeartbeatAfter, DesiredState: relay.desiredState,
 		Keys:        cloneKeys(registry.config.VerificationKeys),
 		Revocations: cloneRevocations(registry.config.Revocations),

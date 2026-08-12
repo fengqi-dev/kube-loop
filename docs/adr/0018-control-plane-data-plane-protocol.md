@@ -117,8 +117,9 @@ a partitioned or probabilistic structure without silently changing v1.
 
 ## Consequences
 
-- Static Helm `relay-id` is now a compatibility input only; V2-113 will replace
-  allocation with authenticated leases and derived IDs.
+- Relay ID, Ticket issuer, verification keys and revocations are Control
+  Plane-owned state delivered over authenticated registration and heartbeat
+  responses; Data Plane has no static Relay compatibility configuration.
 - Control Plane can coordinate capacity, drain, key rollout and revocation without
   granting Data Plane database, OAuth/OIDC or Kubernetes credentials.
 - Active streams are never claimed to migrate. Recovery creates a new bounded

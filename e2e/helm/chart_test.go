@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -60,15 +61,19 @@ func TestSQLiteChartRendersIndependentSecureWorkloads(t *testing.T) {
 	}
 	controlPlaneConfig := objectByName(t, objects, "ConfigMap", "test-kubeloop-control-plane-config")
 	dataPlaneConfig := objectByName(t, objects, "ConfigMap", "test-kubeloop-gateway-config")
+	var gatewayConfig map[string]any
+	if err := json.Unmarshal([]byte(valueAt(t, dataPlaneConfig, "data", "gateway.json").(string)), &gatewayConfig); err != nil {
+		t.Fatal(err)
+	}
 	if valueAt(t, controlPlaneConfig, "data", "KUBELOOP_TUNNEL_PATH") != "/tunnel" ||
-		valueAt(t, dataPlaneConfig, "data", "KUBELOOP_GATEWAY_HTTP_PATH") != "/tunnel" {
+		valueAt(t, gatewayConfig, "http", "path") != "/tunnel" {
 		t.Fatal("ControlPlane discovery and Data Plane ingress use different tunnel paths")
 	}
-	if valueAt(t, dataPlaneConfig, "data", "KUBELOOP_GATEWAY_STREAM_IDLE_TIMEOUT") != "30m" {
-		t.Fatalf("Data Plane stream idle timeout = %#v", valueAt(t, dataPlaneConfig, "data", "KUBELOOP_GATEWAY_STREAM_IDLE_TIMEOUT"))
+	if valueAt(t, gatewayConfig, "websocket", "streamIdleTimeout") != "30m" {
+		t.Fatalf("Data Plane stream idle timeout = %#v", valueAt(t, gatewayConfig, "websocket", "streamIdleTimeout"))
 	}
-	if valueAt(t, dataPlaneConfig, "data", "KUBELOOP_MIN_CLIENT_VERSION") != "" {
-		t.Fatalf("Data Plane minimum client version = %#v", valueAt(t, dataPlaneConfig, "data", "KUBELOOP_MIN_CLIENT_VERSION"))
+	if valueAt(t, gatewayConfig, "minClientVersion") != "" {
+		t.Fatalf("Data Plane minimum client version = %#v", valueAt(t, gatewayConfig, "minClientVersion"))
 	}
 	if valueAt(t, controlPlaneConfig, "data", "KUBELOOP_FILE_MAX_BYTES") != "1073741824" ||
 		valueAt(t, controlPlaneConfig, "data", "KUBELOOP_FILE_ALLOWED_ROOTS_JSON") != `["/"]` {
@@ -90,8 +95,9 @@ func TestSQLiteChartRendersIndependentSecureWorkloads(t *testing.T) {
 		t.Fatal("ControlPlane is missing bounded Cluster Session lifetime configuration")
 	}
 	dataPlaneYAML, _ := yaml.Marshal(dataPlane)
-	if !strings.Contains(string(dataPlaneYAML), "--log-level=info") {
-		t.Fatal("Data Plane is missing its configured log level")
+	if strings.Contains(string(dataPlaneYAML), "args:") ||
+		!strings.Contains(string(dataPlaneYAML), "KUBELOOP_GATEWAY_CONFIG_FILE") {
+		t.Fatal("Data Plane must use only its mounted Gateway configuration file")
 	}
 	if containerHasEnvironment(t, dataPlane, "KUBELOOP_SQLITE_PATH") || containerHasEnvironment(t, dataPlane, "KUBELOOP_POSTGRESQL_DSN") {
 		t.Fatal("Data Plane received ControlPlane database configuration")
@@ -101,12 +107,14 @@ func TestSQLiteChartRendersIndependentSecureWorkloads(t *testing.T) {
 	}
 	if !strings.Contains(string(dataPlaneYAML), "relay-identity") ||
 		!strings.Contains(string(dataPlaneYAML), "audience: kubeloop-relay") ||
-		!strings.Contains(string(dataPlaneYAML), "--relay-replay-entries=65536") ||
-		!strings.Contains(string(dataPlaneYAML), "--max-websocket-sessions-per-user=8") ||
-		!strings.Contains(string(dataPlaneYAML), "--max-websocket-frame-bytes=1048576") ||
-		!strings.Contains(string(dataPlaneYAML), "--websocket-handshake-timeout=10s") ||
 		strings.Contains(string(dataPlaneYAML), "relay-verification-keys") {
 		t.Fatal("Data Plane is missing dynamic Relay registration, projected identity, or replay protection")
+	}
+	if valueAt(t, gatewayConfig, "relay", "replayEntries") != float64(65536) ||
+		valueAt(t, gatewayConfig, "websocket", "maxSessionsPerUser") != float64(8) ||
+		valueAt(t, gatewayConfig, "websocket", "maxFrameBytes") != float64(1048576) ||
+		valueAt(t, gatewayConfig, "websocket", "handshakeTimeout") != "10s" {
+		t.Fatalf("Gateway runtime limits = %#v", gatewayConfig)
 	}
 	if !strings.Contains(string(controlPlaneYAML), "relay/signing-key.pem") ||
 		strings.Contains(string(dataPlaneYAML), "relay/signing-key.pem") {
@@ -286,26 +294,20 @@ func TestRestrictedEgressRequiresExplicitPerComponentAllowRules(t *testing.T) {
 	}
 }
 
-func TestMonitoringTopologySpreadAndPostgreSQLPDBAreOptInAndScoped(t *testing.T) {
+func TestMonitoringAndTopologySpreadAreOptInAndScoped(t *testing.T) {
 	spread := `[{"maxSkew":1,"topologyKey":"topology.kubernetes.io/zone","whenUnsatisfiable":"DoNotSchedule","labelSelector":{"matchLabels":{"app.kubernetes.io/name":"kubeloop"}}}]`
 	objects := renderChart(t,
 		"--set", "publicURL=https://kubeloop.example.test",
 		"--set", "controlPlane.storage.type=postgresql",
 		"--set", "controlPlane.storage.postgresql.existingSecret=database",
-		"--set", "controlPlane.replicas=3",
-		"--set", "controlPlane.relayRegistry.enabled=false",
 		"--set", "monitoring.serviceMonitor.enabled=true",
 		"--set", "monitoring.serviceMonitor.labels.release=prometheus",
 		"--set-json", "controlPlane.topologySpreadConstraints="+spread,
 		"--set-json", "dataPlane.topologySpreadConstraints="+spread,
 		"--set-json", "operator.topologySpreadConstraints="+spread,
 	)
-	if countKind(objects, "PodDisruptionBudget") != 1 || countKind(objects, "ServiceMonitor") != 1 {
-		t.Fatalf("HA safety objects: PDB=%d ServiceMonitor=%d", countKind(objects, "PodDisruptionBudget"), countKind(objects, "ServiceMonitor"))
-	}
-	pdb := objectByName(t, objects, "PodDisruptionBudget", "test-kubeloop-control-plane")
-	if valueAt(t, pdb, "spec", "minAvailable") != 1 || valueAt(t, pdb, "metadata", "labels", "app.kubernetes.io/component") != "control-plane" {
-		t.Fatalf("ControlPlane PDB = %#v", pdb)
+	if countKind(objects, "PodDisruptionBudget") != 0 || countKind(objects, "ServiceMonitor") != 1 {
+		t.Fatalf("runtime objects: PDB=%d ServiceMonitor=%d", countKind(objects, "PodDisruptionBudget"), countKind(objects, "ServiceMonitor"))
 	}
 	monitor := objectByName(t, objects, "ServiceMonitor", "test-kubeloop-gateway")
 	monitorYAML, err := yaml.Marshal(monitor)
@@ -716,19 +718,17 @@ func TestKubernetesImpersonationRendersOnlyExplicitMappings(t *testing.T) {
 	}
 }
 
-func TestPostgreSQLChartAllowsControlPlaneHAWithoutPVC(t *testing.T) {
+func TestPostgreSQLChartUsesExternalStorageWithoutPVC(t *testing.T) {
 	objects := renderChart(t,
 		"--set", "publicURL=https://kubeloop.example.test",
-		"--set", "controlPlane.relayRegistry.enabled=false",
 		"--set", "controlPlane.storage.type=postgresql",
 		"--set", "controlPlane.storage.postgresql.existingSecret=database",
-		"--set", "controlPlane.replicas=3",
 	)
 	controlPlane := objectsByComponent(t, objects, "Deployment", "control-plane")[0]
 	if valueAt(t, controlPlane, "spec", "strategy", "type") != "RollingUpdate" {
 		t.Fatal("PostgreSQL ControlPlane must use RollingUpdate")
 	}
-	if valueAt(t, controlPlane, "spec", "replicas") != 3 {
+	if valueAt(t, controlPlane, "spec", "replicas") != 1 {
 		t.Fatalf("PostgreSQL ControlPlane replicas = %#v", valueAt(t, controlPlane, "spec", "replicas"))
 	}
 	if countKind(objects, "PersistentVolumeClaim") != 0 {
@@ -772,7 +772,6 @@ func TestChartRejectsUnsafeStorageConfigurations(t *testing.T) {
 		{name: "Gateway TLS certificate", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "gatewayAPI.enabled=true", "--set", "gatewayAPI.host=kubeloop.example.test", "--set", "gatewayAPI.gateway.create=true", "--set", "gatewayAPI.gateway.className=example"}, want: "tls.secretName is required"},
 		{name: "Gateway tunnel timeout", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "gatewayAPI.enabled=true", "--set", "gatewayAPI.host=kubeloop.example.test", "--set", "gatewayAPI.parentRef.name=shared", "--set", "gatewayAPI.parentRef.sectionName=https", "--set", "gatewayAPI.timeouts.tunnel=30m"}, want: "must be 0s"},
 		{name: "restricted egress without rules", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "networkPolicy.egress.enabled=true"}, want: "egress.controlPlane must contain"},
-		{name: "blocking ControlPlane PDB", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.storage.type=postgresql", "--set", "controlPlane.storage.postgresql.existingSecret=database", "--set", "controlPlane.replicas=2", "--set", "controlPlane.relayRegistry.enabled=false", "--set", "podDisruptionBudget.controlPlane.minAvailable=2"}, want: "must be at least 1 and lower"},
 		{name: "SQLite replicas", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.replicas=2"}, want: "controlPlane.replicas must be 1"},
 		{name: "PostgreSQL secret", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.storage.type=postgresql"}, want: "existingSecret is required"},
 		{name: "PostgreSQL max open", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.storage.type=postgresql", "--set", "controlPlane.storage.postgresql.existingSecret=database", "--set", "controlPlane.storage.postgresql.maxOpenConnections=0"}, want: "maxOpenConnections must be positive"},
@@ -780,8 +779,6 @@ func TestChartRejectsUnsafeStorageConfigurations(t *testing.T) {
 		{name: "PostgreSQL retries", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.storage.type=postgresql", "--set", "controlPlane.storage.postgresql.existingSecret=database", "--set", "controlPlane.storage.postgresql.transactionMaxRetries=11"}, want: "transactionMaxRetries must be between"},
 		{name: "unknown storage", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.storage.type=mysql"}, want: "must be sqlite or postgresql"},
 		{name: "ControlPlane relay secret", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set-string", "controlPlane.relay.existingSecret="}, want: "controlPlane.relay.existingSecret is required"},
-		{name: "Data Plane relay secret", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.relayRegistry.enabled=false", "--set-string", "dataPlane.relay.existingSecret="}, want: "dataPlane.relay.existingSecret is required"},
-		{name: "relay ID mismatch", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.relayRegistry.enabled=false", "--set", "dataPlane.relay.id=other"}, want: "must match"},
 		{name: "invalid Registry auth", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.relayRegistry.authentication=password"}, want: "must be tokenreview or mtls"},
 		{name: "multi-replica endpoint", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "dataPlane.replicas=2"}, want: "must contain {podName} or {podUID}"},
 		{name: "in-memory Registry ControlPlane replicas", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.storage.type=postgresql", "--set", "controlPlane.storage.postgresql.existingSecret=database", "--set", "controlPlane.replicas=2"}, want: "in-memory Relay Registry"},
@@ -858,7 +855,6 @@ func helmCommand(t *testing.T, extra ...string) *exec.Cmd {
 	args := []string{
 		"template", "test", chart, "--namespace", "kubeloop-system", "--include-crds",
 		"--set", "controlPlane.relay.existingSecret=test-relay-controlPlane",
-		"--set", "dataPlane.relay.existingSecret=test-relay-data-plane",
 	}
 	args = append(args, extra...)
 	return exec.Command(helm, args...)

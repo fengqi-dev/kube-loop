@@ -1,10 +1,10 @@
-{{- if and .Values.controlPlane.relayRegistry.enabled (gt (int .Values.dataPlane.replicas) 1) (not (or (contains "{podName}" .Values.dataPlane.relayRegistry.endpoint) (contains "{podUID}" .Values.dataPlane.relayRegistry.endpoint))) -}}
+{{- if and (gt (int .Values.dataPlane.replicas) 1) (not (or (contains "{podName}" .Values.dataPlane.relayRegistry.endpoint) (contains "{podUID}" .Values.dataPlane.relayRegistry.endpoint))) -}}
 {{- fail "dataPlane.relayRegistry.endpoint must contain {podName} or {podUID} when dataPlane.replicas is greater than 1" -}}
 {{- end -}}
 {{- if or (le (int .Values.dataPlane.relayRegistry.maxWebSocketSessions) 0) (le (int .Values.dataPlane.relayRegistry.maxStreamsPerSession) 0) -}}
 {{- fail "dataPlane Relay capacity limits must be positive" -}}
 {{- end -}}
-{{- if and .Values.controlPlane.relayRegistry.enabled (eq .Values.controlPlane.relayRegistry.authentication "tokenreview") (lt (int .Values.dataPlane.relayRegistry.tokenExpirationSeconds) 600) -}}
+{{- if and (eq .Values.controlPlane.relayRegistry.authentication "tokenreview") (lt (int .Values.dataPlane.relayRegistry.tokenExpirationSeconds) 600) -}}
 {{- fail "dataPlane.relayRegistry.tokenExpirationSeconds must be at least 600" -}}
 {{- end -}}
 {{- $dataPlaneLogLevel := lower (toString .Values.dataPlane.logLevel) -}}
@@ -52,10 +52,9 @@ spec:
         - name: gateway
           image: {{ include "kubeloop.dataPlaneImage" . | quote }}
           imagePullPolicy: {{ .Values.dataPlane.image.pullPolicy }}
-          envFrom:
-            - configMapRef:
-                name: {{ include "kubeloop.dataPlaneConfigName" . }}
           env:
+            - name: KUBELOOP_GATEWAY_CONFIG_FILE
+              value: /etc/kubeloop/gateway/gateway.json
             - name: KUBELOOP_POD_NAME
               valueFrom:
                 fieldRef:
@@ -68,14 +67,6 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: status.podIP
-          args:
-            - --relay-replay-entries={{ int .Values.dataPlane.relay.replayEntries }}
-            - --max-websocket-sessions={{ int .Values.dataPlane.relayRegistry.maxWebSocketSessions }}
-            - --max-websocket-sessions-per-user={{ int .Values.dataPlane.relayRegistry.maxWebSocketSessionsPerUser }}
-            - --max-streams-per-session={{ int .Values.dataPlane.relayRegistry.maxStreamsPerSession }}
-            - --max-websocket-frame-bytes={{ int .Values.dataPlane.relayRegistry.maxWebSocketFrameBytes }}
-            - --websocket-handshake-timeout={{ .Values.dataPlane.relayRegistry.handshakeTimeout }}
-            - --log-level={{ $dataPlaneLogLevel }}
           ports:
             - name: http
               containerPort: 8080
@@ -93,7 +84,9 @@ spec:
           resources:
             {{- toYaml .Values.dataPlane.resources | nindent 12 }}
           volumeMounts:
-            {{- if .Values.controlPlane.relayRegistry.enabled }}
+            - name: gateway-config
+              mountPath: /etc/kubeloop/gateway
+              readOnly: true
             - name: relay-registry
               mountPath: /var/run/secrets/kubeloop/relay-registry
               readOnly: true
@@ -102,13 +95,11 @@ spec:
               mountPath: /var/run/secrets/kubeloop/relay-identity
               readOnly: true
             {{- end }}
-            {{- else }}
-            - name: relay-verification-keys
-              mountPath: /var/run/secrets/kubeloop/relay
-              readOnly: true
-            {{- end }}
       volumes:
-        {{- if .Values.controlPlane.relayRegistry.enabled }}
+        - name: gateway-config
+          configMap:
+            name: {{ include "kubeloop.dataPlaneConfigName" . }}
+            defaultMode: 0444
         - name: relay-registry
           projected:
             defaultMode: 0400
@@ -136,15 +127,6 @@ spec:
                   path: token
                   audience: {{ .Values.controlPlane.relayRegistry.tokenAudience | quote }}
                   expirationSeconds: {{ int .Values.dataPlane.relayRegistry.tokenExpirationSeconds }}
-        {{- end }}
-        {{- else }}
-        - name: relay-verification-keys
-          secret:
-            secretName: {{ required "dataPlane.relay.existingSecret is required" .Values.dataPlane.relay.existingSecret }}
-            defaultMode: 0400
-            items:
-              - key: {{ required "dataPlane.relay.verificationKeysKey is required" .Values.dataPlane.relay.verificationKeysKey }}
-                path: verification-keys.json
         {{- end }}
       {{- with .Values.dataPlane.nodeSelector }}
       nodeSelector:

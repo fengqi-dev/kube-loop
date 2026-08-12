@@ -53,7 +53,7 @@ type relayRegistryRuntime struct {
 func newRelayRegistryRuntime(options relayRegistryOptions) (*relayRegistryRuntime, error) {
 	options.ListenAddress = strings.TrimSpace(options.ListenAddress)
 	if options.ListenAddress == "" {
-		return nil, nil
+		return nil, errors.New("Relay Registry listen address is required")
 	}
 	if options.KeyGeneration == 0 || options.KeyValidity < relayticket.MaximumLifetime ||
 		len(options.TicketSigningKey) != ed25519.PrivateKeySize {
@@ -79,7 +79,7 @@ func newRelayRegistryRuntime(options relayRegistryOptions) (*relayRegistryRuntim
 	}
 	registry, err := relayregistry.New(relayregistry.Config{
 		LeaseDuration: options.LeaseDuration, HeartbeatAfter: options.HeartbeatAfter,
-		VerificationKeys: keys, EndpointPolicy: endpointPolicy,
+		TicketIssuer: options.PublicURL, VerificationKeys: keys, EndpointPolicy: endpointPolicy,
 	})
 	if err != nil {
 		return nil, err

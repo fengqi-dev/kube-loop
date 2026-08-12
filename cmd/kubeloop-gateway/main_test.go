@@ -1,8 +1,9 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
-	"time"
 )
 
 type fakeRuntimeGateway struct {
@@ -17,33 +18,29 @@ type fakeRelayReadiness struct{ ready bool }
 
 func (state fakeRelayReadiness) Ready() bool { return state.ready }
 
-func TestGatewayEnvironmentDefaults(t *testing.T) {
-	t.Setenv("KUBELOOP_GATEWAY_HTTP_PATH", " /tunnel ")
-	if got := stringEnv("KUBELOOP_GATEWAY_HTTP_PATH", "/fallback"); got != "/tunnel" {
-		t.Fatalf("HTTP path = %q", got)
+func TestLoadGatewayConfigAppliesDefaults(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "gateway.json")
+	raw := []byte(`{"relay":{"controlPlaneURL":"https://registry.example.test","endpoint":"wss://relay.example.test/tunnel"}}`)
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
 	}
-	t.Setenv("KUBELOOP_GATEWAY_DRAIN_TIMEOUT", "45s")
-	if got, err := durationEnv("KUBELOOP_GATEWAY_DRAIN_TIMEOUT", time.Second); err != nil || got != 45*time.Second {
-		t.Fatalf("drain timeout = %v, error = %v", got, err)
+	config, err := loadGatewayConfig(path)
+	if err != nil {
+		t.Fatal(err)
 	}
-	t.Setenv("KUBELOOP_GATEWAY_STREAM_IDLE_TIMEOUT", "15m")
-	if got, err := durationEnv("KUBELOOP_GATEWAY_STREAM_IDLE_TIMEOUT", time.Second); err != nil || got != 15*time.Minute {
-		t.Fatalf("stream idle timeout = %v, error = %v", got, err)
+	if config.HTTP.Listen != ":8080" || config.HTTP.Path != "/v1/tunnel" || config.WebSocket.MaxSessions != 256 {
+		t.Fatalf("Gateway defaults = %#v", config)
 	}
 }
 
-func TestGatewayRejectsInvalidDurationEnvironment(t *testing.T) {
-	for _, name := range []string{"KUBELOOP_GATEWAY_DRAIN_TIMEOUT", "KUBELOOP_GATEWAY_STREAM_IDLE_TIMEOUT"} {
-		t.Run(name, func(t *testing.T) {
-			for _, value := range []string{"invalid", "0s", "-1s"} {
-				t.Run(value, func(t *testing.T) {
-					t.Setenv(name, value)
-					if _, err := durationEnv(name, time.Second); err == nil {
-						t.Fatalf("durationEnv accepted %q", value)
-					}
-				})
-			}
-		})
+func TestLoadGatewayConfigRejectsLegacyRelayFields(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "gateway.json")
+	raw := []byte(`{"relay":{"controlPlaneURL":"https://registry.example.test","endpoint":"wss://relay.example.test/tunnel","id":"legacy"}}`)
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loadGatewayConfig(path); err == nil {
+		t.Fatal("legacy Relay ID was accepted")
 	}
 }
 

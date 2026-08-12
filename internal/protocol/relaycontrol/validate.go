@@ -45,6 +45,9 @@ func (response RegistrationResponse) Validate(now time.Time) error {
 	if response.SelectedVersion != response.APIVersion {
 		return errors.New("relay selected protocol version is invalid")
 	}
+	if !validTicketIssuer(response.TicketIssuer) {
+		return errors.New("relay registration Ticket issuer is invalid")
+	}
 	if !validRelayID(response.RelayID) {
 		return errors.New("relay registration response ID is invalid")
 	}
@@ -87,6 +90,12 @@ func (response HeartbeatResponse) Validate(now time.Time) error {
 		return err
 	}
 	return response.Revocations.validate(now)
+}
+
+func validTicketIssuer(value string) bool {
+	parsed, err := url.Parse(value)
+	return err == nil && parsed.Scheme == "https" && parsed.Host != "" && parsed.User == nil &&
+		parsed.RawQuery == "" && parsed.Fragment == ""
 }
 
 func (request AllocationRequest) Validate(time.Time) error {

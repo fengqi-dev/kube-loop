@@ -12,7 +12,6 @@ import (
 )
 
 type TicketAuthenticatorConfig struct {
-	Issuer            string
 	RequiredOperation string
 	ReplayEntries     int
 	ClockSkew         time.Duration
@@ -24,6 +23,7 @@ type TicketAuthenticator struct {
 	config               TicketAuthenticatorConfig
 	requestVerifier      *relayticket.RequestVerifier
 	relayID              string
+	issuer               string
 	keyGeneration        uint64
 	revocationGeneration uint64
 }
@@ -33,7 +33,7 @@ func NewTicketAuthenticator(config TicketAuthenticatorConfig) (*TicketAuthentica
 		config.Now = time.Now
 	}
 	// Validate non-key verifier inputs without inventing a bootstrap trust key.
-	if config.Issuer == "" || config.RequiredOperation == "" {
+	if config.RequiredOperation == "" {
 		return nil, errors.New("dynamic RelayTicket authenticator configuration is invalid")
 	}
 	if _, err := relayticket.NewReplayGuard(config.ReplayEntries, config.Now); err != nil {
@@ -43,7 +43,7 @@ func NewTicketAuthenticator(config TicketAuthenticatorConfig) (*TicketAuthentica
 }
 
 func (authenticator *TicketAuthenticator) Apply(
-	relayID string,
+	issuer, relayID string,
 	keys relaycontrol.VerificationKeySet,
 	revocations relaycontrol.RevocationSummary,
 ) error {
@@ -66,7 +66,7 @@ func (authenticator *TicketAuthenticator) Apply(
 	}
 	verifier, err := relayticket.NewVerifier(relayticket.VerifierConfig{
 		Keys: verificationKeys, KeyValidity: validity,
-		Issuer: authenticator.config.Issuer, Audience: relayID,
+		Issuer: issuer, Audience: relayID,
 		RequiredOperation: authenticator.config.RequiredOperation,
 		ClockSkew:         authenticator.config.ClockSkew, Now: authenticator.config.Now,
 	})
@@ -85,6 +85,9 @@ func (authenticator *TicketAuthenticator) Apply(
 	defer authenticator.mu.Unlock()
 	if authenticator.relayID != "" && authenticator.relayID != relayID {
 		return errors.New("Relay identity changed within one Data Plane process")
+	}
+	if authenticator.issuer != "" && authenticator.issuer != issuer {
+		return errors.New("RelayTicket issuer changed within one Data Plane process")
 	}
 	if keys.Generation < authenticator.keyGeneration || revocations.Generation < authenticator.revocationGeneration {
 		return errors.New("Relay control generation moved backwards")
@@ -106,6 +109,7 @@ func (authenticator *TicketAuthenticator) Apply(
 		return err
 	}
 	authenticator.relayID = relayID
+	authenticator.issuer = issuer
 	authenticator.keyGeneration = keys.Generation
 	authenticator.revocationGeneration = revocations.Generation
 	return nil

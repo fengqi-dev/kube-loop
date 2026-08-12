@@ -6,9 +6,17 @@ import (
 	"bufio"
 	"context"
 	"crypto/ed25519"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
+	"math/big"
 	"net"
 	"net/http"
 	"os"
@@ -25,8 +33,10 @@ import (
 	clientremote "github.com/fengqi-dev/kube-loop/internal/client/remote"
 	"github.com/fengqi-dev/kube-loop/internal/client/traffic"
 	"github.com/fengqi-dev/kube-loop/internal/client/websocketmux"
+	controlplanerelayregistry "github.com/fengqi-dev/kube-loop/internal/controlplane/relayregistry"
 	"github.com/fengqi-dev/kube-loop/internal/helper"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/relaycontrol"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/relayticket"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
 	"github.com/fengqi-dev/kube-loop/internal/singbox"
@@ -44,7 +54,7 @@ import (
 
 const (
 	testIssuer         = "https://control-plane.e2e.invalid"
-	testRelay          = "primary"
+	testRelay          = "relay-0fbd7cd6c3222a8750011090563d60911c419e7502d47e451a4ee67126be606d"
 	testKeyID          = "e2e"
 	testPath           = "/tunnel"
 	slowConsumerScript = `import socket, time
@@ -104,11 +114,7 @@ func TestGatewayPodRestartRecoversDataPlane(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	verificationKeys, err := relayticket.MarshalVerificationKeys(map[string]ed25519.PublicKey{testKeyID: publicKey})
-	if err != nil {
-		t.Fatal(err)
-	}
-	installGateway(t, ctx, client, namespace, verificationKeys)
+	installGateway(t, ctx, client, namespace, publicKey)
 	service := waitForGateway(t, ctx, client, namespace)
 	unauthorizedNamespace := namespace + "-denied"
 	createNamespace(t, ctx, client, unauthorizedNamespace)
@@ -879,24 +885,125 @@ func deleteNamespace(t *testing.T, client kubernetes.Interface, namespace string
 	}
 }
 
-func installGateway(t *testing.T, ctx context.Context, client kubernetes.Interface, namespace string, verificationKeys []byte) {
-	installGatewayWithArgs(t, ctx, client, namespace, verificationKeys, nil)
+type gatewayTestLimits struct {
+	maxSessions          int
+	maxSessionsPerUser   int
+	maxStreamsPerSession int
 }
 
-func installGatewayWithArgs(
+type relayFixtureAuthenticator struct{}
+
+func (relayFixtureAuthenticator) Authenticate(*http.Request) (relaycontrol.PeerIdentity, error) {
+	return relaycontrol.PeerIdentity{
+		TrustDomain: "e2e", Namespace: "e2e", ServiceAccount: "gateway", PodUID: "gateway",
+	}, nil
+}
+
+func startRelayRegistryFixture(t *testing.T, publicKey ed25519.PublicKey) (string, []byte) {
+	t.Helper()
+	now := time.Now().UTC()
+	keys, err := relaycontrol.NewVerificationKeySet(
+		1, map[string]ed25519.PublicKey{testKeyID: publicKey}, now.Add(-time.Minute), now.Add(time.Hour),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry, err := controlplanerelayregistry.New(controlplanerelayregistry.Config{
+		TicketIssuer: testIssuer, VerificationKeys: keys,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler, err := controlplanerelayregistry.NewHTTPHandler(registry, relayFixtureAuthenticator{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	certificate, certificatePEM := relayFixtureCertificate(t)
+	listener, err := net.Listen("tcp", "0.0.0.0:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tlsListener := tls.NewListener(listener, &tls.Config{
+		MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{certificate},
+	})
+	server := &http.Server{Handler: handler, ReadHeaderTimeout: 5 * time.Second}
+	go func() { _ = server.Serve(tlsListener) }()
+	t.Cleanup(func() {
+		shutdownContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = server.Shutdown(shutdownContext)
+	})
+	return "https://host.minikube.internal:" + fmt.Sprint(listener.Addr().(*net.TCPAddr).Port), certificatePEM
+}
+
+func relayFixtureCertificate(t *testing.T) (tls.Certificate, []byte) {
+	t.Helper()
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	template := &x509.Certificate{
+		SerialNumber: big.NewInt(now.UnixNano()), Subject: pkix.Name{CommonName: "host.minikube.internal"},
+		DNSNames: []string{"host.minikube.internal"}, NotBefore: now.Add(-time.Minute), NotAfter: now.Add(time.Hour),
+		KeyUsage:    x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment | x509.KeyUsageCertSign,
+		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}, BasicConstraintsValid: true,
+		IsCA: true,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, template, template, &privateKey.PublicKey, privateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	certificatePEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+	privateKeyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(privateKey)})
+	certificate, err := tls.X509KeyPair(certificatePEM, privateKeyPEM)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return certificate, certificatePEM
+}
+
+func installGateway(t *testing.T, ctx context.Context, client kubernetes.Interface, namespace string, publicKey ed25519.PublicKey) {
+	installGatewayWithLimits(t, ctx, client, namespace, publicKey, nil)
+}
+
+func installGatewayWithLimits(
 	t *testing.T,
 	ctx context.Context,
 	client kubernetes.Interface,
 	namespace string,
-	verificationKeys []byte,
-	args []string,
+	publicKey ed25519.PublicKey,
+	limits *gatewayTestLimits,
 ) {
 	t.Helper()
 	const name = "kubeloop-gateway"
 	labels := map[string]string{"app.kubernetes.io/name": name, "app.kubernetes.io/component": "data-plane"}
-	_, err := client.CoreV1().Secrets(namespace).Create(ctx, &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: name + "-relay"},
-		Data:       map[string][]byte{"verification-keys.json": verificationKeys},
+	controlPlaneURL, serverCA := startRelayRegistryFixture(t, publicKey)
+	websocketConfig := map[string]any{}
+	if limits != nil {
+		websocketConfig["maxSessions"] = limits.maxSessions
+		websocketConfig["maxSessionsPerUser"] = limits.maxSessionsPerUser
+		websocketConfig["maxStreamsPerSession"] = limits.maxStreamsPerSession
+	}
+	configuration, err := json.Marshal(map[string]any{
+		"http": map[string]any{"path": testPath},
+		"relay": map[string]any{
+			"controlPlaneURL": controlPlaneURL, "endpoint": "wss://relay.e2e.invalid/tunnel",
+			"serverCAFile": "/var/run/kubeloop/relay/ca.crt",
+		},
+		"websocket": websocketConfig, "drainTimeout": "5s",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = client.CoreV1().ConfigMaps(namespace).Create(ctx, &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: name}, Data: map[string]string{"gateway.json": string(configuration)},
+	}, metav1.CreateOptions{})
+	if err != nil {
+		t.Fatalf("create Gateway configuration: %v", err)
+	}
+	_, err = client.CoreV1().Secrets(namespace).Create(ctx, &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: name + "-relay"}, Data: map[string][]byte{"ca.crt": serverCA},
 	}, metav1.CreateOptions{})
 	if err != nil {
 		t.Fatalf("create Gateway RelayTicket key Secret: %v", err)
@@ -913,25 +1020,27 @@ func installGatewayWithArgs(
 					Containers: []corev1.Container{
 						{
 							Name: name, Image: harness.GatewayImage(), ImagePullPolicy: corev1.PullIfNotPresent,
-							Args: append([]string(nil), args...),
 							Env: []corev1.EnvVar{
-								{Name: "KUBELOOP_GATEWAY_HTTP_LISTEN", Value: ":8080"},
-								{Name: "KUBELOOP_GATEWAY_HTTP_PATH", Value: testPath},
-								{Name: "KUBELOOP_RELAY_VERIFICATION_KEYS_FILE", Value: "/var/run/kubeloop/relay/verification-keys.json"},
-								{Name: "KUBELOOP_RELAY_TICKET_ISSUER", Value: testIssuer},
-								{Name: "KUBELOOP_RELAY_ID", Value: testRelay},
-								{Name: "KUBELOOP_GATEWAY_DRAIN_TIMEOUT", Value: "5s"},
+								{Name: "KUBELOOP_GATEWAY_CONFIG_FILE", Value: "/etc/kubeloop/gateway/gateway.json"},
 							},
 							Ports: []corev1.ContainerPort{{Name: "http", ContainerPort: 8080}},
 							ReadinessProbe: &corev1.Probe{ProbeHandler: corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{
 								Path: "/health/ready", Port: intstr.FromString("http"),
 							}}, PeriodSeconds: 1, FailureThreshold: 30},
-							VolumeMounts: []corev1.VolumeMount{{Name: "relay", MountPath: "/var/run/kubeloop/relay", ReadOnly: true}},
+							VolumeMounts: []corev1.VolumeMount{
+								{Name: "config", MountPath: "/etc/kubeloop/gateway", ReadOnly: true},
+								{Name: "relay", MountPath: "/var/run/kubeloop/relay", ReadOnly: true},
+							},
 						},
 					},
-					Volumes: []corev1.Volume{{Name: "relay", VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{
-						SecretName: name + "-relay",
-					}}}},
+					Volumes: []corev1.Volume{
+						{Name: "config", VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{
+							LocalObjectReference: corev1.LocalObjectReference{Name: name},
+						}}},
+						{Name: "relay", VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{
+							SecretName: name + "-relay",
+						}}},
+					},
 				},
 			},
 		},

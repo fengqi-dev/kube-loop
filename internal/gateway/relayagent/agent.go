@@ -27,7 +27,7 @@ type RuntimeReporter interface {
 }
 
 type ControlApplier interface {
-	Apply(string, relaycontrol.VerificationKeySet, relaycontrol.RevocationSummary) error
+	Apply(string, string, relaycontrol.VerificationKeySet, relaycontrol.RevocationSummary) error
 	AppliedGenerations() (uint64, uint64)
 }
 
@@ -47,6 +47,7 @@ type Agent struct {
 
 	mu             sync.RWMutex
 	relayID        string
+	ticketIssuer   string
 	leaseID        string
 	leaseExpiresAt time.Time
 	heartbeatAfter time.Duration
@@ -148,7 +149,7 @@ func (agent *Agent) register(ctx context.Context) error {
 	if err := call(agent, ctx, http.MethodPost, "/internal/v1/relays/register", request, relaycontrol.DecodeRegistrationResponse, &response); err != nil {
 		return err
 	}
-	if err := agent.config.Applier.Apply(response.RelayID, response.Keys, response.Revocations); err != nil {
+	if err := agent.config.Applier.Apply(response.TicketIssuer, response.RelayID, response.Keys, response.Revocations); err != nil {
 		return fmt.Errorf("apply Relay registration control state: %w", err)
 	}
 	if response.DesiredState == relaycontrol.StateDraining {
@@ -156,6 +157,7 @@ func (agent *Agent) register(ctx context.Context) error {
 	}
 	agent.mu.Lock()
 	agent.relayID = response.RelayID
+	agent.ticketIssuer = response.TicketIssuer
 	agent.leaseID = response.LeaseID
 	agent.leaseExpiresAt = response.LeaseExpiresAt
 	agent.heartbeatAfter = response.HeartbeatAfter
@@ -187,8 +189,9 @@ func (agent *Agent) heartbeat(ctx context.Context) error {
 	}
 	agent.mu.RLock()
 	relayID := agent.relayID
+	ticketIssuer := agent.ticketIssuer
 	agent.mu.RUnlock()
-	if err := agent.config.Applier.Apply(relayID, response.Keys, response.Revocations); err != nil {
+	if err := agent.config.Applier.Apply(ticketIssuer, relayID, response.Keys, response.Revocations); err != nil {
 		return fmt.Errorf("apply Relay heartbeat control state: %w", err)
 	}
 	if response.DesiredState == relaycontrol.StateDraining {

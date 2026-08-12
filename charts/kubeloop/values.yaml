@@ -63,13 +63,11 @@ controlPlane:
     signingKeyKey: signing-key.pem
     keyID: primary
     ticketTTL: 1m
-    id: primary
   relayRegistry:
     # The internal listener is a separate ClusterIP-only HTTPS service. By
     # default a short-lived, audience-bound projected ServiceAccount token is
     # authenticated through Kubernetes TokenReview; it is not the general Pod
     # API credential and automount remains disabled on Data Plane Pods.
-    enabled: true
     authentication: tokenreview
     listenPort: 9443
     servicePort: 9443
@@ -260,13 +258,6 @@ dataPlane:
   serviceAccount:
     create: true
     name: ""
-  relay:
-    # Required. The Secret is mounted only into Data Plane and contains a
-    # JSON key set with one or more Ed25519 public keys for rotation.
-    existingSecret: ""
-    verificationKeysKey: verification-keys.json
-    id: primary
-    replayEntries: 65536
   relayRegistry:
     # Empty values are derived from the internal Control Plane Service and
     # publicURL/tunnelPath. endpoint may instead be a per-Pod routable WSS URL.
@@ -280,6 +271,7 @@ dataPlane:
     clientCertificateKey: tls.crt
     clientPrivateKeyKey: tls.key
     tokenExpirationSeconds: 600
+    replayEntries: 65536
     maxWebSocketSessions: 256
     maxWebSocketSessionsPerUser: 8
     maxStreamsPerSession: 128

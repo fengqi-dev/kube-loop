@@ -75,6 +75,7 @@ type RegistrationRequest struct {
 type RegistrationResponse struct {
 	Envelope
 	SelectedVersion string             `json:"selectedVersion"`
+	TicketIssuer    string             `json:"ticketIssuer"`
 	RelayID         string             `json:"relayId"`
 	LeaseID         string             `json:"leaseId"`
 	LeaseExpiresAt  time.Time          `json:"leaseExpiresAt"`

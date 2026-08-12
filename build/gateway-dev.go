@@ -14,7 +14,6 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
-	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"io/fs"
@@ -321,12 +320,6 @@ func deployDevelopmentStack(
 	}); err != nil {
 		return "", err
 	}
-	verificationSecret := developmentRelease + "-relay-verification"
-	if err := applyGenericSecret(root, developmentNamespace, verificationSecret, map[string]string{
-		"verification-keys.json": filepath.Join(materialDirectory, "verification-keys.json"),
-	}); err != nil {
-		return "", err
-	}
 	ingressSecret := developmentRelease + "-ingress-tls"
 	if err := applyTLSSecret(
 		root, developmentNamespace, ingressSecret,
@@ -365,7 +358,6 @@ func deployDevelopmentStack(
 		"--set-string", "controlPlane.relay.existingSecret=" + relaySecret,
 		"--set-string", "controlPlane.relayRegistry.existingSecret=" + relaySecret,
 		"--set-string", "controlPlane.relayRegistry.endpointAllowedHosts=" + host,
-		"--set-string", "dataPlane.relay.existingSecret=" + verificationSecret,
 		"--set-string", "dataPlane.relayRegistry.endpoint=wss://" + host + "/tunnel",
 		"--set", "controlPlane.auth.developmentMode=true",
 		"--set-string", "controlPlane.auth.token.existingSecret=" + relaySecret,
@@ -429,7 +421,6 @@ func importDevelopmentMaterial(directory string) bool {
 		{secret: developmentRelease + "-relay", key: "tls.crt", mode: 0o644},
 		{secret: developmentRelease + "-relay", key: "tls.key", mode: 0o600},
 		{secret: developmentRelease + "-relay", key: "ca.crt", mode: 0o644},
-		{secret: developmentRelease + "-relay-verification", key: "verification-keys.json", mode: 0o644},
 	}
 	contents := make(map[string][]byte, len(files))
 	for _, file := range files {
@@ -476,7 +467,7 @@ func developmentMaterialValid(directory string, dnsNames []string) bool {
 			return false
 		}
 	}
-	for _, name := range []string{"ca.crt", "signing-key.pem", "verification-keys.json"} {
+	for _, name := range []string{"ca.crt", "signing-key.pem"} {
 		info, err := os.Stat(filepath.Join(directory, name))
 		if err != nil || info.IsDir() || info.Size() == 0 {
 			return false
@@ -501,7 +492,7 @@ func developmentHost(contextName string) (string, error) {
 }
 
 func writeDevelopmentMaterial(directory string, dnsNames []string) error {
-	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		return fmt.Errorf("generate development signing key: %w", err)
 	}
@@ -509,24 +500,7 @@ func writeDevelopmentMaterial(directory string, dnsNames []string) error {
 	if err != nil {
 		return fmt.Errorf("encode development signing key: %w", err)
 	}
-	publicDER, err := x509.MarshalPKIXPublicKey(publicKey)
-	if err != nil {
-		return fmt.Errorf("encode development verification key: %w", err)
-	}
 	privatePEM := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: privateDER})
-	publicPEM := pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: publicDER})
-	verificationKeys, err := json.Marshal(struct {
-		Keys []struct {
-			KeyID     string `json:"kid"`
-			PublicKey string `json:"publicKeyPem"`
-		} `json:"keys"`
-	}{Keys: []struct {
-		KeyID     string `json:"kid"`
-		PublicKey string `json:"publicKeyPem"`
-	}{{KeyID: "primary", PublicKey: string(publicPEM)}}})
-	if err != nil {
-		return fmt.Errorf("encode development verification keys: %w", err)
-	}
 	tlsKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		return fmt.Errorf("generate development TLS key: %w", err)
@@ -554,11 +528,10 @@ func writeDevelopmentMaterial(directory string, dnsNames []string) error {
 	tlsCertificate := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certificateDER})
 	tlsPrivateKey := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(tlsKey)})
 	files := map[string][]byte{
-		"signing-key.pem":        privatePEM,
-		"verification-keys.json": verificationKeys,
-		"tls.crt":                tlsCertificate,
-		"tls.key":                tlsPrivateKey,
-		"ca.crt":                 tlsCertificate,
+		"signing-key.pem": privatePEM,
+		"tls.crt":         tlsCertificate,
+		"tls.key":         tlsPrivateKey,
+		"ca.crt":          tlsCertificate,
 	}
 	for name, content := range files {
 		mode := os.FileMode(0o644)

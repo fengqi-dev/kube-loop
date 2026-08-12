@@ -21,11 +21,8 @@
 {{- if and (eq $storageType "postgresql") (or (lt (int .Values.controlPlane.storage.postgresql.transactionMaxRetries) 0) (gt (int .Values.controlPlane.storage.postgresql.transactionMaxRetries) 10)) -}}
 {{- fail "controlPlane.storage.postgresql.transactionMaxRetries must be between 0 and 10" -}}
 {{- end }}
-{{- if and .Values.controlPlane.relayRegistry.enabled (ne (int .Values.controlPlane.replicas) 1) -}}
-{{- fail "controlPlane.replicas must be 1 while the in-memory Relay Registry is enabled" -}}
-{{- end }}
-{{- if and (not .Values.controlPlane.relayRegistry.enabled) (ne .Values.controlPlane.relay.id .Values.dataPlane.relay.id) -}}
-{{- fail "controlPlane.relay.id and dataPlane.relay.id must match" -}}
+{{- if ne (int .Values.controlPlane.replicas) 1 -}}
+{{- fail "controlPlane.replicas must be 1 while using the in-memory Relay Registry" -}}
 {{- end }}
 {{- $controlPlaneLogLevel := lower (toString .Values.controlPlane.logLevel) -}}
 {{- if not (has $controlPlaneLogLevel (list "debug" "info" "warn" "error")) -}}
@@ -108,14 +105,12 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
-            {{- if .Values.controlPlane.relayRegistry.enabled }}
             - name: KUBELOOP_RELAY_NAMESPACE
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
             - name: KUBELOOP_RELAY_SERVICE_ACCOUNT
               value: {{ include "kubeloop.dataPlaneServiceAccountName" . | quote }}
-            {{- end }}
             - name: KUBELOOP_STORAGE_TYPE
               value: {{ $storageType | quote }}
             {{- if eq $storageType "sqlite" }}
@@ -149,11 +144,9 @@ spec:
             - name: management
               containerPort: {{ .Values.controlPlane.management.listenPort }}
               protocol: TCP
-            {{- if .Values.controlPlane.relayRegistry.enabled }}
             - name: relay-mtls
               containerPort: {{ .Values.controlPlane.relayRegistry.listenPort }}
               protocol: TCP
-            {{- end }}
           livenessProbe:
             httpGet:
               path: /health/live
@@ -178,11 +171,9 @@ spec:
               mountPath: /var/run/secrets/kubeloop/management
               readOnly: true
             {{- end }}
-            {{- if .Values.controlPlane.relayRegistry.enabled }}
             - name: relay-registry-tls
               mountPath: /var/run/secrets/kubeloop/relay-registry
               readOnly: true
-            {{- end }}
             {{- if eq $storageType "sqlite" }}
             - name: data
               mountPath: {{ dir .Values.controlPlane.storage.sqlite.path }}
@@ -265,7 +256,6 @@ spec:
                     {{- end }}
               {{- end }}
         {{- end }}
-        {{- if .Values.controlPlane.relayRegistry.enabled }}
         - name: relay-registry-tls
           secret:
             secretName: {{ default .Values.controlPlane.relay.existingSecret .Values.controlPlane.relayRegistry.existingSecret | required "controlPlane.relayRegistry.existingSecret or controlPlane.relay.existingSecret is required" }}
@@ -277,7 +267,6 @@ spec:
                 path: tls.key
               - key: {{ required "controlPlane.relayRegistry.caKey is required" .Values.controlPlane.relayRegistry.caKey }}
                 path: ca.crt
-        {{- end }}
         {{- if eq $storageType "sqlite" }}
         - name: data
           {{- if .Values.controlPlane.storage.sqlite.persistence.enabled }}

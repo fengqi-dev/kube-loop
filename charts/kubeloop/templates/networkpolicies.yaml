@@ -47,7 +47,6 @@ spec:
         - port: 53
           protocol: TCP
     {{- end }}
-    {{- if .Values.controlPlane.relayRegistry.enabled }}
     - to:
         - podSelector:
             matchLabels:
@@ -56,7 +55,6 @@ spec:
       ports:
         - port: {{ .Values.controlPlane.relayRegistry.listenPort }}
           protocol: TCP
-    {{- end }}
     {{- toYaml .Values.networkPolicy.egress.dataPlane | nindent 4 }}
   {{- end }}
 ---
@@ -82,7 +80,6 @@ spec:
           protocol: TCP
         - port: {{ .Values.controlPlane.management.listenPort }}
           protocol: TCP
-    {{- if .Values.controlPlane.relayRegistry.enabled }}
     - from:
         - podSelector:
             matchLabels:
@@ -91,7 +88,6 @@ spec:
       ports:
         - port: {{ .Values.controlPlane.relayRegistry.listenPort }}
           protocol: TCP
-    {{- end }}
   {{- if .Values.networkPolicy.egress.enabled }}
   egress:
     {{- if .Values.networkPolicy.egress.dns.enabled }}

@@ -46,7 +46,8 @@ func TestVersionedMessagesRoundTrip(t *testing.T) {
 		}, func(raw []byte, now time.Time) error { _, err := DecodeRegistrationRequest(raw, now); return err }},
 		{"registration response", RegistrationResponse{
 			Envelope: NewRegistrationResponse().Envelope, SelectedVersion: APIVersion,
-			RelayID: relayID, LeaseID: leaseID,
+			TicketIssuer: "https://control-plane.example.test",
+			RelayID:      relayID, LeaseID: leaseID,
 			LeaseExpiresAt: now.Add(time.Minute), HeartbeatAfter: 10 * time.Second,
 			DesiredState: StateReady, Keys: keys, Revocations: revocations,
 		}, func(raw []byte, now time.Time) error { _, err := DecodeRegistrationResponse(raw, now); return err }},

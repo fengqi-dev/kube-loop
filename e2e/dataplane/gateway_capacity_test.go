@@ -122,14 +122,8 @@ func TestGatewayPodMultiUserCapacityRSSAndCleanup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	verificationKeys, err := relayticket.MarshalVerificationKeys(map[string]ed25519.PublicKey{testKeyID: publicKey})
-	if err != nil {
-		t.Fatal(err)
-	}
-	installGatewayWithArgs(t, ctx, kubeClient, namespace, verificationKeys, []string{
-		"--max-websocket-sessions=" + strconv.Itoa(capacityPhysicalSessions),
-		"--max-websocket-sessions-per-user=1",
-		"--max-streams-per-session=" + strconv.Itoa(capacityStreamsPerWSS),
+	installGatewayWithLimits(t, ctx, kubeClient, namespace, publicKey, &gatewayTestLimits{
+		maxSessions: capacityPhysicalSessions, maxSessionsPerUser: 1, maxStreamsPerSession: capacityStreamsPerWSS,
 	})
 	service := waitForGateway(t, ctx, kubeClient, namespace)
 	gatewayPod := readyPodByLabel(t, ctx, kubeClient, namespace, "app.kubernetes.io/name=kubeloop-gateway")

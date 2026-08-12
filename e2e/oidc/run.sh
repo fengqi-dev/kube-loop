@@ -70,6 +70,11 @@ openssl req -x509 -newkey rsa:2048 -nodes -days 2 \
   -keyout "${WORK_DIR}/tls.key" -out "${WORK_DIR}/tls.crt" \
   -subj "/CN=${KEYCLOAK_HOST}" \
   -addext "subjectAltName=DNS:${KEYCLOAK_HOST}" >/dev/null 2>&1
+REGISTRY_HOST="${RELEASE}-kubeloop-control-plane-relay.${KUBELOOP_NAMESPACE}.svc"
+openssl req -x509 -newkey rsa:2048 -nodes -days 2 \
+  -keyout "${WORK_DIR}/registry-tls.key" -out "${WORK_DIR}/registry-tls.crt" \
+  -subj "/CN=${REGISTRY_HOST}" \
+  -addext "subjectAltName=DNS:${REGISTRY_HOST}" >/dev/null 2>&1
 openssl req -x509 -newkey rsa:2048 -nodes -days 2 \
   -keyout "${WORK_DIR}/public-ca.key" -out "${WORK_DIR}/public-ca.crt" \
   -subj "/CN=KubeLoop OIDC E2E CA" \
@@ -84,10 +89,7 @@ openssl x509 -req -days 2 \
   -CA "${WORK_DIR}/public-ca.crt" -CAkey "${WORK_DIR}/public-ca.key" -CAcreateserial \
   -copy_extensions copy -out "${WORK_DIR}/public-tls.crt" >/dev/null 2>&1
 openssl genpkey -algorithm ED25519 -out "${WORK_DIR}/relay-signing-key.pem" >/dev/null 2>&1
-openssl pkey -in "${WORK_DIR}/relay-signing-key.pem" -pubout -out "${WORK_DIR}/relay-verification-key.pem" >/dev/null 2>&1
 openssl genpkey -algorithm ED25519 -out "${WORK_DIR}/token-signing-key.pem" >/dev/null 2>&1
-jq -n --rawfile key "${WORK_DIR}/relay-verification-key.pem" \
-  '{keys: [{kid: "primary", publicKeyPem: $key}]}' >"${WORK_DIR}/verification-keys.json"
 
 jq -n \
   --arg clientID "${CLIENT_ID}" \
@@ -231,10 +233,10 @@ kubectl create secret generic oidc-credentials --namespace "${KUBELOOP_NAMESPACE
   --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 kubectl create secret generic oidc-signing --namespace "${KUBELOOP_NAMESPACE}" \
   --from-file="relay-signing-key.pem=${WORK_DIR}/relay-signing-key.pem" \
+  --from-file="tls.crt=${WORK_DIR}/registry-tls.crt" \
+  --from-file="tls.key=${WORK_DIR}/registry-tls.key" \
+  --from-file="ca.crt=${WORK_DIR}/registry-tls.crt" \
   --from-file="token-signing-key.pem=${WORK_DIR}/token-signing-key.pem" \
-  --dry-run=client -o yaml | kubectl apply -f - >/dev/null
-kubectl create secret generic oidc-verification --namespace "${KUBELOOP_NAMESPACE}" \
-  --from-file="verification-keys.json=${WORK_DIR}/verification-keys.json" \
   --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 
 image_repository() { printf '%s\n' "${1%:*}"; }
@@ -254,10 +256,8 @@ helm upgrade --install "${RELEASE}" "${ROOT}/charts/kubeloop" \
   --set-string operator.image.pullPolicy=IfNotPresent \
   --set controlPlane.storage.sqlite.persistence.enabled=false \
   --set controlPlane.management.initialAdmin.enabled=false \
-  --set controlPlane.relayRegistry.enabled=false \
   --set-string controlPlane.relay.existingSecret=oidc-signing \
   --set-string controlPlane.relay.signingKeyKey=relay-signing-key.pem \
-  --set-string dataPlane.relay.existingSecret=oidc-verification \
   --set-string controlPlane.auth.token.existingSecret=oidc-signing \
   --set-string controlPlane.auth.token.signingKeyKey=token-signing-key.pem \
   --set-string controlPlane.auth.providers[0].id=keycloak \

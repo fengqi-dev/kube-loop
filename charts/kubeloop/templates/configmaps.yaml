@@ -1,7 +1,6 @@
 {{- $publicURL := required "publicURL is required (for example https://kubeloop.example.com)" .Values.publicURL }}
 {{- include "kubeloop.validateExternalAccess" . }}
-{{- $registryEnabled := .Values.controlPlane.relayRegistry.enabled }}
-{{- if and $registryEnabled (not (or (eq .Values.controlPlane.relayRegistry.authentication "tokenreview") (eq .Values.controlPlane.relayRegistry.authentication "mtls"))) }}
+{{- if not (or (eq .Values.controlPlane.relayRegistry.authentication "tokenreview") (eq .Values.controlPlane.relayRegistry.authentication "mtls")) }}
 {{- fail "controlPlane.relayRegistry.authentication must be tokenreview or mtls" }}
 {{- end }}
 {{- if not .Values.controlPlane.files.allowedRoots }}
@@ -26,7 +25,7 @@
 {{- if eq (int $management.listenPort) 8080 }}
 {{- fail "controlPlane.management.listenPort must differ from the public Control Plane port 8080" }}
 {{- end }}
-{{- if and $registryEnabled (eq (int $management.listenPort) (int .Values.controlPlane.relayRegistry.listenPort)) }}
+{{- if eq (int $management.listenPort) (int .Values.controlPlane.relayRegistry.listenPort) }}
 {{- fail "controlPlane.management.listenPort must differ from controlPlane.relayRegistry.listenPort" }}
 {{- end }}
 {{- $managementPublicURL := required "controlPlane.management.publicURL is required" $management.publicURL }}
@@ -116,8 +115,6 @@ data:
   KUBELOOP_RELAY_TICKET_SIGNING_KEY_FILE: "/var/run/secrets/kubeloop/auth/relay/signing-key.pem"
   KUBELOOP_RELAY_TICKET_KEY_ID: {{ .Values.controlPlane.relay.keyID | quote }}
   KUBELOOP_RELAY_TICKET_TTL: {{ .Values.controlPlane.relay.ticketTTL | quote }}
-  KUBELOOP_RELAY_ID: {{ .Values.controlPlane.relay.id | quote }}
-  {{- if $registryEnabled }}
   KUBELOOP_RELAY_REGISTRY_LISTEN: {{ printf ":%v" .Values.controlPlane.relayRegistry.listenPort | quote }}
   KUBELOOP_RELAY_REGISTRY_CERT_FILE: "/var/run/secrets/kubeloop/relay-registry/tls.crt"
   KUBELOOP_RELAY_REGISTRY_KEY_FILE: "/var/run/secrets/kubeloop/relay-registry/tls.key"
@@ -131,7 +128,6 @@ data:
   KUBELOOP_RELAY_KEY_VALIDITY: {{ .Values.controlPlane.relayRegistry.keyValidity | quote }}
   {{- if eq .Values.controlPlane.relayRegistry.authentication "mtls" }}
   KUBELOOP_RELAY_REGISTRY_CLIENT_CA_FILE: "/var/run/secrets/kubeloop/relay-registry/ca.crt"
-  {{- end }}
   {{- end }}
   KUBELOOP_CONTROL_PLANE_REPLICAS: {{ .Values.controlPlane.replicas | quote }}
   KUBELOOP_FILE_MAX_BYTES: {{ .Values.controlPlane.files.maxBytes | int64 | quote }}
@@ -202,28 +198,32 @@ metadata:
     {{- include "kubeloop.labels" . | nindent 4 }}
     app.kubernetes.io/component: data-plane
 data:
-  KUBELOOP_GATEWAY_LEGACY_LISTEN: ""
-  KUBELOOP_GATEWAY_HTTP_LISTEN: ":8080"
-  KUBELOOP_GATEWAY_HTTP_PATH: {{ .Values.dataPlane.tunnelPath | quote }}
-  KUBELOOP_GATEWAY_DRAIN_TIMEOUT: {{ .Values.dataPlane.drainTimeout | quote }}
-  KUBELOOP_GATEWAY_STREAM_IDLE_TIMEOUT: {{ .Values.dataPlane.streamIdleTimeout | quote }}
-  KUBELOOP_MIN_CLIENT_VERSION: {{ .Values.controlPlane.minClientVersion | quote }}
-  {{- if $registryEnabled }}
   {{- if and (not .Values.dataPlane.relayRegistry.endpoint) (not (hasPrefix "https://" $publicURL)) }}
   {{- fail "dataPlane.relayRegistry.endpoint is required when publicURL is not HTTPS" }}
   {{- end }}
-  KUBELOOP_RELAY_CONTROL_PLANE_URL: {{ default (printf "https://%s.%s.svc:%v" (include "kubeloop.controlPlaneRegistryName" .) .Release.Namespace .Values.controlPlane.relayRegistry.servicePort) .Values.dataPlane.relayRegistry.controlPlaneURL | quote }}
-  KUBELOOP_RELAY_ENDPOINT: {{ default (printf "wss://%s%s" (trimPrefix "https://" (trimSuffix "/" $publicURL)) .Values.dataPlane.tunnelPath) .Values.dataPlane.relayRegistry.endpoint | quote }}
-  KUBELOOP_RELAY_SERVER_CA_FILE: "/var/run/secrets/kubeloop/relay-registry/ca.crt"
-  KUBELOOP_RELAY_SERVER_NAME: {{ default (printf "%s.%s.svc" (include "kubeloop.controlPlaneRegistryName" .) .Release.Namespace) .Values.dataPlane.relayRegistry.serverName | quote }}
+  {{- $gatewayRelay := dict
+    "controlPlaneURL" (default (printf "https://%s.%s.svc:%v" (include "kubeloop.controlPlaneRegistryName" .) .Release.Namespace .Values.controlPlane.relayRegistry.servicePort) .Values.dataPlane.relayRegistry.controlPlaneURL)
+    "endpoint" (default (printf "wss://%s%s" (trimPrefix "https://" (trimSuffix "/" $publicURL)) .Values.dataPlane.tunnelPath) .Values.dataPlane.relayRegistry.endpoint)
+    "serverCAFile" "/var/run/secrets/kubeloop/relay-registry/ca.crt"
+    "serverName" (default (printf "%s.%s.svc" (include "kubeloop.controlPlaneRegistryName" .) .Release.Namespace) .Values.dataPlane.relayRegistry.serverName)
+    "replayEntries" (int .Values.dataPlane.relayRegistry.replayEntries) }}
   {{- if eq .Values.controlPlane.relayRegistry.authentication "tokenreview" }}
-  KUBELOOP_RELAY_BEARER_TOKEN_FILE: "/var/run/secrets/kubeloop/relay-identity/token"
+  {{- $_ := set $gatewayRelay "bearerTokenFile" "/var/run/secrets/kubeloop/relay-identity/token" }}
   {{- else }}
-  KUBELOOP_RELAY_CLIENT_CERT_FILE: "/var/run/secrets/kubeloop/relay-registry/tls.crt"
-  KUBELOOP_RELAY_CLIENT_KEY_FILE: "/var/run/secrets/kubeloop/relay-registry/tls.key"
+  {{- $_ := set $gatewayRelay "clientCertificateFile" "/var/run/secrets/kubeloop/relay-registry/tls.crt" }}
+  {{- $_ := set $gatewayRelay "clientPrivateKeyFile" "/var/run/secrets/kubeloop/relay-registry/tls.key" }}
   {{- end }}
-  {{- else }}
-  KUBELOOP_RELAY_VERIFICATION_KEYS_FILE: "/var/run/secrets/kubeloop/relay/verification-keys.json"
-  {{- end }}
-  KUBELOOP_RELAY_TICKET_ISSUER: {{ $publicURL | quote }}
-  KUBELOOP_RELAY_ID: {{ .Values.dataPlane.relay.id | quote }}
+  gateway.json: |-
+    {{- dict
+      "http" (dict "listen" ":8080" "path" .Values.dataPlane.tunnelPath)
+      "relay" $gatewayRelay
+      "websocket" (dict
+        "maxSessions" (int .Values.dataPlane.relayRegistry.maxWebSocketSessions)
+        "maxSessionsPerUser" (int .Values.dataPlane.relayRegistry.maxWebSocketSessionsPerUser)
+        "maxStreamsPerSession" (int .Values.dataPlane.relayRegistry.maxStreamsPerSession)
+        "maxFrameBytes" (int64 .Values.dataPlane.relayRegistry.maxWebSocketFrameBytes)
+        "handshakeTimeout" .Values.dataPlane.relayRegistry.handshakeTimeout
+        "streamIdleTimeout" .Values.dataPlane.streamIdleTimeout)
+      "minClientVersion" .Values.controlPlane.minClientVersion
+      "drainTimeout" .Values.dataPlane.drainTimeout
+      "logLevel" .Values.dataPlane.logLevel | toPrettyJson | nindent 4 }}

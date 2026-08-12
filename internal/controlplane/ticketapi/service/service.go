@@ -27,7 +27,6 @@ type RelayAllocator interface {
 
 type Config struct {
 	Issuer    string
-	Audience  string
 	TTL       time.Duration
 	Now       func() time.Time
 	Signer    *relayticket.Signer
@@ -48,7 +47,6 @@ type IssueInput struct {
 
 type Service struct {
 	issuer    string
-	audience  string
 	ttl       time.Duration
 	now       func() time.Time
 	signer    *relayticket.Signer
@@ -58,9 +56,7 @@ type Service struct {
 
 func New(config Config) (*Service, error) {
 	config.Issuer = strings.TrimSpace(config.Issuer)
-	config.Audience = strings.TrimSpace(config.Audience)
-	if config.Signer == nil || config.Issuer == "" || len(config.Issuer) > 512 ||
-		(config.Allocator == nil && (config.Audience == "" || len(config.Audience) > 128)) {
+	if config.Signer == nil || config.Allocator == nil || config.Issuer == "" || len(config.Issuer) > 512 {
 		return nil, errors.New("RelayTicket service configuration is invalid")
 	}
 	if config.TTL == 0 {
@@ -73,7 +69,7 @@ func New(config Config) (*Service, error) {
 		config.Now = time.Now
 	}
 	return &Service{
-		issuer: config.Issuer, audience: config.Audience, ttl: config.TTL, now: config.Now,
+		issuer: config.Issuer, ttl: config.TTL, now: config.Now,
 		signer: config.Signer, allocator: config.Allocator, topology: cloneTopology(config.Topology),
 	}, nil
 }
@@ -87,23 +83,17 @@ func (service *Service) Issue(_ context.Context, input IssueInput) (entity.Ticke
 	if !expiresAt.After(now.Add(5 * time.Second)) {
 		return entity.Ticket{}, ErrSessionExpiresSoon
 	}
-	audience := service.audience
-	var assignment relaycontrol.AllocationResponse
-	if service.allocator != nil {
-		allocation := relaycontrol.NewAllocationRequest()
-		allocation.SessionID = input.SessionID
-		allocation.Generation = input.Generation
-		allocation.NetworkSpecHash = input.NetworkSpecHash
-		allocation.Topology = cloneTopology(service.topology)
-		var err error
-		assignment, err = service.allocator.Allocate(allocation)
-		if err != nil {
-			return entity.Ticket{}, errors.Join(ErrNoReadyDataPlane, err)
-		}
-		audience = assignment.RelayID
+	allocation := relaycontrol.NewAllocationRequest()
+	allocation.SessionID = input.SessionID
+	allocation.Generation = input.Generation
+	allocation.NetworkSpecHash = input.NetworkSpecHash
+	allocation.Topology = cloneTopology(service.topology)
+	assignment, err := service.allocator.Allocate(allocation)
+	if err != nil {
+		return entity.Ticket{}, errors.Join(ErrNoReadyDataPlane, err)
 	}
 	claims := relayticket.Claims{
-		Version: relayticket.Version, Issuer: service.issuer, Audience: audience,
+		Version: relayticket.Version, Issuer: service.issuer, Audience: assignment.RelayID,
 		PrincipalID: input.PrincipalID, Groups: append([]string(nil), input.Groups...), DeviceID: input.DeviceID,
 		SessionID: input.SessionID, SessionGeneration: input.Generation,
 		Namespace: input.Namespace, Operations: []string{OperationTunnel},

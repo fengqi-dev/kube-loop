@@ -226,7 +226,7 @@ func TestEndpointPolicyUsesAuthenticatedIdentity(t *testing.T) {
 	clock := &testClock{now: time.Now().UTC().Truncate(time.Second)}
 	keys := verificationKeys(t, clock.Now(), 1)
 	registry, err := New(Config{
-		Now: clock.Now, VerificationKeys: keys,
+		Now: clock.Now, TicketIssuer: "https://control-plane.example.test", VerificationKeys: keys,
 		EndpointPolicy: func(identity relaycontrol.PeerIdentity, endpoint string) error {
 			if identity.Namespace != "kubeloop-system" || !strings.Contains(endpoint, identity.PodUID) {
 				return errors.New("endpoint does not belong to authenticated Pod")
@@ -251,6 +251,7 @@ func newTestRegistry(t *testing.T, clock *testClock, maximumStreams uint32) *Reg
 	t.Helper()
 	registry, err := New(Config{
 		Now: clock.Now, LeaseDuration: 45 * time.Second, HeartbeatAfter: 10 * time.Second,
+		TicketIssuer:     "https://control-plane.example.test",
 		VerificationKeys: verificationKeys(t, clock.Now(), 1),
 		EndpointPolicy: func(_ relaycontrol.PeerIdentity, endpoint string) error {
 			if !strings.HasSuffix(endpoint, ".example.test/tunnel") {

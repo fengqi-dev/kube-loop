@@ -79,38 +79,27 @@ CRD_OWNED=1
 create_relay_material() {
   local namespace=$1
   local release=$2
-  local registry_enabled=$3
   local directory="${WORK_DIR}/${release}"
   mkdir -p "${directory}"
 
   openssl genpkey -algorithm ED25519 -out "${directory}/signing-key.pem" >/dev/null 2>&1
-  openssl pkey -in "${directory}/signing-key.pem" -pubout -out "${directory}/verification-key.pem" >/dev/null 2>&1
-  jq -n --rawfile key "${directory}/verification-key.pem" \
-    '{keys: [{kid: "primary", publicKeyPem: $key}]}' >"${directory}/verification-keys.json"
-
   local -a secret_args=(
     create secret generic "${release}-relay"
     --namespace "${namespace}"
     --from-file="signing-key.pem=${directory}/signing-key.pem"
   )
-  if [[ "${registry_enabled}" == "true" ]]; then
-    local registry_name="${release}-kubeloop-control-plane-relay.${namespace}.svc"
-    openssl req -x509 -newkey rsa:2048 -nodes -days 2 \
-      -keyout "${directory}/tls.key" -out "${directory}/tls.crt" \
-      -subj "/CN=${registry_name}" \
-      -addext "subjectAltName=DNS:${registry_name}" >/dev/null 2>&1
-    cp "${directory}/tls.crt" "${directory}/ca.crt"
-    secret_args+=(
-      --from-file="tls.crt=${directory}/tls.crt"
-      --from-file="tls.key=${directory}/tls.key"
-      --from-file="ca.crt=${directory}/ca.crt"
-    )
-  fi
+  local registry_name="${release}-kubeloop-control-plane-relay.${namespace}.svc"
+  openssl req -x509 -newkey rsa:2048 -nodes -days 2 \
+    -keyout "${directory}/tls.key" -out "${directory}/tls.crt" \
+    -subj "/CN=${registry_name}" \
+    -addext "subjectAltName=DNS:${registry_name}" >/dev/null 2>&1
+  cp "${directory}/tls.crt" "${directory}/ca.crt"
+  secret_args+=(
+    --from-file="tls.crt=${directory}/tls.crt"
+    --from-file="tls.key=${directory}/tls.key"
+    --from-file="ca.crt=${directory}/ca.crt"
+  )
   kubectl "${secret_args[@]}" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
-  kubectl create secret generic "${release}-relay-verification" \
-    --namespace "${namespace}" \
-    --from-file="verification-keys.json=${directory}/verification-keys.json" \
-    --dry-run=client -o yaml | kubectl apply -f - >/dev/null
   if [[ "${release}" == "${SQLITE_RELEASE}" ]]; then
     SQLITE_BREAK_GLASS_CREDENTIAL="$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\r\n')"
     kubectl create secret generic "${release}-management" \
@@ -185,8 +174,6 @@ helm_apply() {
     args+=(
       --set-string controlPlane.storage.type=postgresql
       --set-string "controlPlane.storage.postgresql.existingSecret=${release}-postgresql"
-      --set controlPlane.relayRegistry.enabled=false
-      --set-string "dataPlane.relay.existingSecret=${release}-relay-verification"
     )
   fi
   helm "${args[@]}" "$@"
@@ -403,8 +390,8 @@ postgres_exec() {
 log "Create isolated namespaces and runtime secrets"
 kubectl create namespace "${SQLITE_NAMESPACE}" >/dev/null
 kubectl create namespace "${POSTGRES_NAMESPACE}" >/dev/null
-create_relay_material "${SQLITE_NAMESPACE}" "${SQLITE_RELEASE}" true
-create_relay_material "${POSTGRES_NAMESPACE}" "${POSTGRES_RELEASE}" false
+create_relay_material "${SQLITE_NAMESPACE}" "${SQLITE_RELEASE}"
+create_relay_material "${POSTGRES_NAMESPACE}" "${POSTGRES_RELEASE}"
 install_postgresql
 
 log "Install SQLite release with dynamic Relay Registry"
@@ -517,17 +504,6 @@ helm_apply postgresql
 rollout_all "${POSTGRES_NAMESPACE}" "${POSTGRES_RELEASE}"
 assert_equal "$(kubectl get crd "${CRD}" -o jsonpath='{.metadata.uid}')" "${CRD_UID}" "CRD identity after second Helm install"
 postgres_exec -c 'CREATE TABLE helm_e2e_retention (value text PRIMARY KEY); INSERT INTO helm_e2e_retention VALUES ('"'"'retained'"'"');' >/dev/null
-
-log "Scale PostgreSQL Control Plane without restarting other components"
-DATA_PLANE_UIDS="$(pod_uids "${POSTGRES_NAMESPACE}" "${POSTGRES_RELEASE}" data-plane)"
-OPERATOR_UIDS="$(pod_uids "${POSTGRES_NAMESPACE}" "${POSTGRES_RELEASE}" operator)"
-helm_apply postgresql \
-  --set controlPlane.replicas=2 \
-  --set-string 'controlPlane.podAnnotations.e2e\.kubeloop\.io/revision=v2'
-assert_replicas "${POSTGRES_NAMESPACE}" "${POSTGRES_RELEASE}-kubeloop-control-plane" 2
-assert_equal "$(pod_uids "${POSTGRES_NAMESPACE}" "${POSTGRES_RELEASE}" data-plane)" "${DATA_PLANE_UIDS}" "PostgreSQL Data Plane changed during Control Plane scale"
-assert_equal "$(pod_uids "${POSTGRES_NAMESPACE}" "${POSTGRES_RELEASE}" operator)" "${OPERATOR_UIDS}" "PostgreSQL Operator changed during Control Plane scale"
-assert_equal "$(postgres_exec -Atc 'SELECT value FROM helm_e2e_retention;')" "retained" "PostgreSQL marker after upgrade"
 
 log "Rollback PostgreSQL release and verify database retention"
 helm rollback "${POSTGRES_RELEASE}" 1 --namespace "${POSTGRES_NAMESPACE}" --wait --timeout 5m

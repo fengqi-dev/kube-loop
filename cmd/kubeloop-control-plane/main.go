@@ -104,8 +104,7 @@ func main() {
 	tokenKeyID := flag.String("token-key-id", envOrDefault("KUBELOOP_TOKEN_KEY_ID", "primary"), "token signing key ID")
 	relayTicketSigningKeyFile := flag.String("relay-ticket-signing-key-file", os.Getenv("KUBELOOP_RELAY_TICKET_SIGNING_KEY_FILE"), "Ed25519 PKCS#8 RelayTicket signing key file")
 	relayTicketKeyID := flag.String("relay-ticket-key-id", envOrDefault("KUBELOOP_RELAY_TICKET_KEY_ID", "primary"), "RelayTicket signing key ID")
-	relayID := flag.String("relay-id", envOrDefault("KUBELOOP_RELAY_ID", "primary"), "RelayTicket audience and Data Plane ID")
-	relayRegistryListen := flag.String("relay-registry-listen", os.Getenv("KUBELOOP_RELAY_REGISTRY_LISTEN"), "mTLS Relay Registry listen address; empty keeps static compatibility mode")
+	relayRegistryListen := flag.String("relay-registry-listen", os.Getenv("KUBELOOP_RELAY_REGISTRY_LISTEN"), "internal Relay Registry listen address")
 	relayRegistryCertificateFile := flag.String("relay-registry-cert-file", os.Getenv("KUBELOOP_RELAY_REGISTRY_CERT_FILE"), "Relay Registry server certificate file")
 	relayRegistryPrivateKeyFile := flag.String("relay-registry-key-file", os.Getenv("KUBELOOP_RELAY_REGISTRY_KEY_FILE"), "Relay Registry server private key file")
 	relayRegistryClientCAFile := flag.String("relay-registry-client-ca-file", os.Getenv("KUBELOOP_RELAY_REGISTRY_CLIENT_CA_FILE"), "Relay Registry client CA file")
@@ -399,15 +398,9 @@ func main() {
 			}
 		}
 	}
-	var relayAllocator ticketservice.RelayAllocator
-	var relayAllocationTopology map[string]string
-	if relayRegistry != nil {
-		relayAllocator = relayRegistry.registry
-		relayAllocationTopology = relayRegistry.allocationTopology
-	}
 	relayTicketService, err := ticketservice.New(ticketservice.Config{
-		Issuer: *publicURL, Audience: *relayID, TTL: *relayTicketTTL, Signer: relaySigner,
-		Allocator: relayAllocator, Topology: relayAllocationTopology,
+		Issuer: *publicURL, TTL: *relayTicketTTL, Signer: relaySigner,
+		Allocator: relayRegistry.registry, Topology: relayRegistry.allocationTopology,
 	})
 	if err != nil {
 		_ = stateStore.Close()

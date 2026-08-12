@@ -45,7 +45,7 @@ rules:
   - apiGroups: ["authorization.k8s.io"]
     resources: ["selfsubjectaccessreviews"]
     verbs: ["create"]
-  {{- if and .Values.controlPlane.relayRegistry.enabled (eq .Values.controlPlane.relayRegistry.authentication "tokenreview") }}
+  {{- if eq .Values.controlPlane.relayRegistry.authentication "tokenreview" }}
   - apiGroups: ["authentication.k8s.io"]
     resources: ["tokenreviews"]
     verbs: ["create"]
@@ -103,7 +103,6 @@ subjects:
   - kind: ServiceAccount
     name: {{ include "kubeloop.controlPlaneServiceAccountName" . }}
     namespace: {{ .Release.Namespace }}
-{{- if .Values.controlPlane.relayRegistry.enabled }}
 ---
 # Relay registration resolves only Control Plane/Data Plane Pods in the release
 # namespace. Keeping this as a Role avoids cluster-wide Pod visibility.
@@ -138,7 +137,6 @@ subjects:
   - kind: ServiceAccount
     name: {{ include "kubeloop.controlPlaneServiceAccountName" . }}
     namespace: {{ .Release.Namespace }}
-{{- end }}
 {{- if eq $scope "cluster" }}
 {{- if .Values.controlPlane.rbac.permissions.inventory.enabled }}
 ---

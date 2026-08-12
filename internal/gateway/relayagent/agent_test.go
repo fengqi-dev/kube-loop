@@ -54,7 +54,7 @@ type testApplier struct {
 	revocationGeneration uint64
 }
 
-func (applier *testApplier) Apply(_ string, keys relaycontrol.VerificationKeySet, revocations relaycontrol.RevocationSummary) error {
+func (applier *testApplier) Apply(_, _ string, keys relaycontrol.VerificationKeySet, revocations relaycontrol.RevocationSummary) error {
 	applier.mu.Lock()
 	applier.keyGeneration = keys.Generation
 	applier.revocationGeneration = revocations.Generation
@@ -79,7 +79,8 @@ func TestAgentRegistersAppliesControlStateAndAcknowledgesHeartbeat(t *testing.T)
 		t.Fatal(err)
 	}
 	registry, err := relayregistry.New(relayregistry.Config{
-		VerificationKeys: keys, HeartbeatAfter: time.Second, LeaseDuration: 10 * time.Second,
+		TicketIssuer: "https://control-plane.example.test", VerificationKeys: keys,
+		HeartbeatAfter: time.Second, LeaseDuration: 10 * time.Second,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -178,15 +179,18 @@ func TestTicketAuthenticatorAppliesAudienceAndRevocationAtomically(t *testing.T)
 		t.Fatal(err)
 	}
 	authenticator, err := NewTicketAuthenticator(TicketAuthenticatorConfig{
-		Issuer: "https://controlPlane.example", RequiredOperation: "tunnel", ReplayEntries: 10,
+		RequiredOperation: "tunnel", ReplayEntries: 10,
 		Now: func() time.Time { return now },
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	relayID := "relay-" + strings.Repeat("a", 64)
-	if err := authenticator.Apply(relayID, keys, revocations); err != nil {
+	if err := authenticator.Apply("https://controlPlane.example", relayID, keys, revocations); err != nil {
 		t.Fatal(err)
+	}
+	if err := authenticator.Apply("https://replacement.example", relayID, keys, revocations); err == nil {
+		t.Fatal("RelayTicket issuer change was accepted")
 	}
 	signer, err := relayticket.NewSigner("primary", privateKey)
 	if err != nil {
