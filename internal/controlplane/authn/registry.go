@@ -63,14 +63,6 @@ func validateDescriptor(descriptor Descriptor) error {
 		if descriptor.Interaction != InteractionBrowser {
 			return errors.New("OIDC provider requires browser interaction")
 		}
-	case ProviderAD:
-		if descriptor.Interaction != InteractionPassword {
-			return errors.New("AD provider requires password interaction")
-		}
-	case ProviderStaticToken:
-		if descriptor.Interaction != InteractionToken {
-			return errors.New("static-token provider requires token interaction")
-		}
 	case ProviderAnonymous:
 		if descriptor.Interaction != InteractionNone {
 			return errors.New("anonymous provider requires none interaction")

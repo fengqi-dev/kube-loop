@@ -40,63 +40,6 @@ func (a *App) LoginServerOIDC(profileID, providerID string) (AuthSession, error)
 	return a.persistCredential(serverProfile, credential)
 }
 
-func (a *App) LoginServerAD(profileID, providerID, username, password string) (AuthSession, error) {
-	serverProfile, method, err := a.authenticationTarget(profileID, providerID, "ad")
-	if err != nil {
-		password = ""
-		return AuthSession{}, err
-	}
-	if method.Interaction != "password" {
-		password = ""
-		return AuthSession{}, errors.New("selected provider does not support password login")
-	}
-	deviceID, err := a.deviceID(serverProfile.ID)
-	if err != nil {
-		password = ""
-		return AuthSession{}, err
-	}
-	passwordBytes := []byte(password)
-	password = ""
-	credential, err := a.auth.LoginAD(a.context(), serverProfile.BaseURL, providerID, username, passwordBytes, deviceID)
-	if err != nil {
-		return AuthSession{}, err
-	}
-	session, err := a.persistCredential(serverProfile, credential)
-	if err != nil {
-		return AuthSession{}, err
-	}
-	serverProfile.LastUserName = strings.TrimSpace(username)
-	if err := a.profiles.Upsert(serverProfile); err != nil {
-		return AuthSession{}, fmt.Errorf("remember authenticated user: %w", err)
-	}
-	return session, nil
-}
-
-func (a *App) LoginServerStaticToken(profileID, providerID, staticToken string) (AuthSession, error) {
-	serverProfile, method, err := a.authenticationTarget(profileID, providerID, "static-token")
-	if err != nil {
-		staticToken = ""
-		return AuthSession{}, err
-	}
-	if method.Interaction != "token" {
-		staticToken = ""
-		return AuthSession{}, errors.New("selected provider does not support token login")
-	}
-	deviceID, err := a.deviceID(serverProfile.ID)
-	if err != nil {
-		staticToken = ""
-		return AuthSession{}, err
-	}
-	presented := []byte(staticToken)
-	staticToken = ""
-	credential, err := a.auth.LoginStaticToken(a.context(), serverProfile.BaseURL, providerID, presented, deviceID)
-	clear(presented)
-	if err != nil {
-		return AuthSession{}, err
-	}
-	return a.persistCredential(serverProfile, credential)
-}
-
 func (a *App) LoginServerAnonymous(profileID, providerID string) (AuthSession, error) {
 	serverProfile, method, err := a.authenticationTarget(profileID, providerID, "anonymous")
 	if err != nil {

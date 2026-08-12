@@ -69,8 +69,6 @@ declare global {
 		  SelectServerProfile(id: string): Promise<ServerProfileState>;
 		  DeleteServerProfile(id: string): Promise<ServerProfileState>;
 		  LoginServerOIDC(profileId: string, providerId: string): Promise<AuthSession>;
-		  LoginServerAD(profileId: string, providerId: string, username: string, password: string): Promise<AuthSession>;
-		  LoginServerStaticToken(profileId: string, providerId: string, staticToken: string): Promise<AuthSession>;
 		  LoginServerAnonymous(profileId: string, providerId: string): Promise<AuthSession>;
 		  ServerAuthStatus(profileId: string): Promise<AuthSession>;
 		  RefreshServerLogin(profileId: string): Promise<AuthSession>;
@@ -240,10 +238,6 @@ export const backend = {
 		Promise.resolve().then(() => api().DeleteServerProfile(id)),
 	loginServerOIDC: (profileId: string, providerId: string) =>
 		Promise.resolve().then(() => api().LoginServerOIDC(profileId, providerId)),
-	loginServerAD: (profileId: string, providerId: string, username: string, password: string) =>
-		Promise.resolve().then(() => api().LoginServerAD(profileId, providerId, username, password)),
-	loginServerStaticToken: (profileId: string, providerId: string, staticToken: string) =>
-		Promise.resolve().then(() => api().LoginServerStaticToken(profileId, providerId, staticToken)),
 	loginServerAnonymous: (profileId: string, providerId: string) =>
 		Promise.resolve().then(() => api().LoginServerAnonymous(profileId, providerId)),
 	serverAuthStatus: (profileId: string) =>

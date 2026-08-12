@@ -431,7 +431,7 @@ func (service *ProviderService) Rollback(ctx context.Context, request ProviderRo
 
 func normalizeProviderCandidate(candidate ProviderCandidate) (ProviderCandidate, error) {
 	candidate.ID, candidate.Type = strings.TrimSpace(candidate.ID), strings.ToLower(strings.TrimSpace(candidate.Type))
-	if !providerIdentifier.MatchString(candidate.ID) || (candidate.Type != "oidc" && candidate.Type != "ad") {
+	if !providerIdentifier.MatchString(candidate.ID) || candidate.Type != "oidc" {
 		return ProviderCandidate{}, ErrInvalidRequest
 	}
 	var err error

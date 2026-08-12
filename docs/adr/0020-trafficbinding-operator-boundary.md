@@ -13,7 +13,7 @@ Kubernetes lifecycle object. This made recovery depend on Control Plane workers
 and required the API ServiceAccount to retain broad mutation permissions.
 
 KubeLoop needs one durable, observable reconciliation contract for all four
-traffic workflows while keeping OAuth/OIDC/AD credentials and local desktop
+traffic workflows while keeping OAuth/OIDC credentials and local desktop
 addresses outside Kubernetes objects.
 
 ## Decision
@@ -53,7 +53,6 @@ before mutation so finalization has Kubernetes-durable rollback state.
   internal Echo HTTP claim/prepare/heartbeat/finish calls.
 - Control Plane can read Services and endpoint representations for authorization
   and stream routing, but cannot write them. Operator has no access to OAuth,
-  OIDC, AD or application storage.
 - Helm installs three workloads and the CRD. Control Plane and Operator use
   distinct ServiceAccounts and least-privilege RBAC.
 - Operator unavailability keeps new traffic Tasks pending or fails them with a

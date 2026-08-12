@@ -94,39 +94,7 @@ func TestOIDCLoopbackLoginUsesStatePKCEAndExchange(t *testing.T) {
 	}
 }
 
-func TestADLoginClearsPasswordAndUsesOnlySelectedOrigin(t *testing.T) {
-	password := []byte("correct horse battery staple")
-	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if request.URL.Path != "/auth/ad/corp/login" {
-			t.Fatalf("path = %q", request.URL.Path)
-		}
-		var body map[string]string
-		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
-			t.Fatal(err)
-		}
-		if body["username"] != "ada" || body["password"] != "correct horse battery staple" || body["deviceId"] != "device-1" {
-			t.Fatalf("body = %#v", body)
-		}
-		writeTokenResponse(t, writer)
-	}))
-	defer server.Close()
-	credential, err := New(Config{HTTPClient: server.Client()}).LoginAD(
-		context.Background(), server.URL, "corp", "ada", password, "device-1",
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if credential.AccessToken != "access-token" {
-		t.Fatalf("credential = %#v", credential)
-	}
-	for _, value := range password {
-		if value != 0 {
-			t.Fatalf("password was not cleared: %v", password)
-		}
-	}
-}
-
-func TestDevelopmentLoginsUseSelectedOriginAndClearStaticToken(t *testing.T) {
+func TestAnonymousLoginUsesSelectedOrigin(t *testing.T) {
 	requests := 0
 	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		requests++
@@ -135,10 +103,6 @@ func TestDevelopmentLoginsUseSelectedOriginAndClearStaticToken(t *testing.T) {
 			t.Fatal(err)
 		}
 		switch request.URL.Path {
-		case "/auth/static-token/local/login":
-			if body["token"] != "0123456789abcdef0123456789abcdef" || body["deviceId"] != "device-static" {
-				t.Fatalf("static-token body = %#v", body)
-			}
 		case "/auth/anonymous/guest/login":
 			if len(body) != 1 || body["deviceId"] != "device-anonymous" {
 				t.Fatalf("anonymous body = %#v", body)
@@ -150,25 +114,13 @@ func TestDevelopmentLoginsUseSelectedOriginAndClearStaticToken(t *testing.T) {
 	}))
 	defer server.Close()
 	client := New(Config{HTTPClient: server.Client()})
-	presented := []byte("0123456789abcdef0123456789abcdef")
-	staticCredential, err := client.LoginStaticToken(
-		context.Background(), server.URL, "local", presented, "device-static",
-	)
-	if err != nil || staticCredential.AccessToken != "access-token" {
-		t.Fatalf("static-token credential = %#v, %v", staticCredential, err)
-	}
-	for _, value := range presented {
-		if value != 0 {
-			t.Fatal("static token was not cleared")
-		}
-	}
 	anonymousCredential, err := client.LoginAnonymous(
 		context.Background(), server.URL, "guest", "device-anonymous",
 	)
 	if err != nil || anonymousCredential.RefreshToken != "refresh-token" {
 		t.Fatalf("anonymous credential = %#v, %v", anonymousCredential, err)
 	}
-	if requests != 2 {
+	if requests != 1 {
 		t.Fatalf("requests = %d", requests)
 	}
 }
@@ -225,10 +177,7 @@ func TestRefreshRevokeAndUnsafeTargets(t *testing.T) {
 	if requests != 2 {
 		t.Fatalf("requests = %d", requests)
 	}
-	if _, err := client.LoginAD(context.Background(), "http://remote.example.test", "corp", "ada", []byte("secret"), "device"); err == nil {
-		t.Fatal("plain HTTP remote AD login was accepted")
-	}
-	if _, err := client.LoginAD(context.Background(), server.URL, "../corp", "ada", []byte("secret"), "device"); err == nil {
+	if _, err := client.LoginAnonymous(context.Background(), server.URL, "../corp", "device"); err == nil {
 		t.Fatal("unsafe provider ID was accepted")
 	}
 }
@@ -240,19 +189,13 @@ func TestAuthenticationRejectionReturnsTypedAPIError(t *testing.T) {
 		_, _ = writer.Write([]byte(`{"code":"INVALID_CREDENTIALS","message":"credentials were rejected"}`))
 	}))
 	defer server.Close()
-	password := []byte("wrong-password")
-	_, err := New(Config{HTTPClient: server.Client()}).LoginAD(
-		context.Background(), server.URL, "corp", "ada", password, "device-1",
+	_, err := New(Config{HTTPClient: server.Client()}).LoginAnonymous(
+		context.Background(), server.URL, "guest", "device-1",
 	)
 	var apiError *APIError
 	if !errors.As(err, &apiError) || apiError.Status != http.StatusUnauthorized ||
 		apiError.Code != CodeInvalidCredentials || apiError.RequestID != "request-123" {
 		t.Fatalf("authentication error = %#v, %v", apiError, err)
-	}
-	for _, value := range password {
-		if value != 0 {
-			t.Fatal("password was not cleared after typed rejection")
-		}
 	}
 }
 

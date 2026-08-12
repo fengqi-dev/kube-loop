@@ -100,7 +100,7 @@ func TestDiscoveryReadsDynamicAuthenticationMethods(t *testing.T) {
 	if got := read().AuthMethods; len(got) != 1 || got[0].ID != "first" {
 		t.Fatalf("first discovery methods=%#v", got)
 	}
-	methods = []AuthMethod{{ID: "second", Type: "ad", Interaction: "password"}}
+	methods = []AuthMethod{{ID: "second", Type: "anonymous", Interaction: "none"}}
 	if got := read().AuthMethods; len(got) != 1 || got[0].ID != "second" {
 		t.Fatalf("updated discovery methods=%#v", got)
 	}
@@ -170,7 +170,7 @@ func TestShutdownCancelsAndWaitsForWebSocketHandlers(t *testing.T) {
 	}
 	serveDone := make(chan error, 1)
 	go func() { serveDone <- server.Serve(listener) }()
-	connection, _, err := websocket.Dial(context.Background(), "ws://"+listener.Addr().String()+"/api/v2/stream", nil)
+	connection, _, err := websocket.Dial(context.Background(), "ws://"+listener.Addr().String()+"/kubeloop/api/stream", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -255,6 +255,11 @@ func TestHealthAndMethodContracts(t *testing.T) {
 	if response.Code != http.StatusNotFound {
 		t.Fatalf("nested discovery status = %d", response.Code)
 	}
+	response = httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v2/version", nil))
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("legacy versioned API path status = %d", response.Code)
+	}
 }
 
 func TestServerAppliesBoundedRequestHeaders(t *testing.T) {
@@ -277,7 +282,7 @@ func TestConfigValidation(t *testing.T) {
 		{PublicURL: "https://gateway.example.test/team"},
 		{PublicURL: "https://gateway.example.test", ServiceID: "bad service"},
 		{PublicURL: "https://gateway.example.test", AuthMethods: []AuthMethod{{ID: "password", Type: "password"}}},
-		{PublicURL: "https://gateway.example.test", AuthMethods: []AuthMethod{{ID: "duplicate", Type: "oidc"}, {ID: "duplicate", Type: "ad"}}},
+		{PublicURL: "https://gateway.example.test", AuthMethods: []AuthMethod{{ID: "duplicate", Type: "oidc"}, {ID: "duplicate", Type: "anonymous"}}},
 		{PublicURL: "https://gateway.example.test", AuthMethods: []AuthMethod{{ID: "company", Type: "oidc", Interaction: "password"}}},
 	}
 	for _, config := range tests {

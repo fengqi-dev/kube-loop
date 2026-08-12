@@ -41,7 +41,6 @@ kubeloop-control-plane storage export \
 version、UTC 创建时间、Control Plane 创建版本、源后端、精确表/列清单和整个规范化
 内容的 SHA-256 校验和。
 
-OIDC/AD Provider 配置、客户端 Secret、AD 密码和数据库 DSN 从不进入导出格式。
 短期登录事务中的 state、nonce、PKCE verifier 和交换码摘要也不会导出；对应表在
 格式中保留空清单，使导入仍能验证目标完全为空。Refresh Token 仍只以数据库中已
 有的不可逆摘要形式迁移。

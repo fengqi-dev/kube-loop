@@ -214,31 +214,9 @@ spec:
                     - key: {{ $oidc.caKey }}
                       path: {{ printf "%s/ca.crt" $id | quote }}
                     {{- end }}
-              {{- else if eq $type "ad" }}
-              {{- $ad := required (printf "controlPlane.auth.providers[%d].ad is required" $index) $provider.ad }}
-              {{- if or $ad.bindDN $ad.caKey }}
-              - secret:
-                  name: {{ required (printf "controlPlane.auth.providers[%d].ad.existingSecret is required for configured AD secrets" $index) $ad.existingSecret }}
-                  items:
-                    {{- if $ad.bindDN }}
-                    - key: {{ required (printf "controlPlane.auth.providers[%d].ad.bindPasswordKey is required when bindDN is configured" $index) $ad.bindPasswordKey }}
-                      path: {{ printf "%s/bind-password" $id | quote }}
-                    {{- end }}
-                    {{- if $ad.caKey }}
-                    - key: {{ $ad.caKey }}
-                      path: {{ printf "%s/ca.crt" $id | quote }}
-                    {{- end }}
-              {{- end }}
-              {{- else if eq $type "static-token" }}
-              {{- $staticToken := required (printf "controlPlane.auth.providers[%d].staticToken is required" $index) $provider.staticToken }}
-              - secret:
-                  name: {{ required (printf "controlPlane.auth.providers[%d].staticToken.existingSecret is required" $index) $staticToken.existingSecret }}
-                  items:
-                    - key: {{ required (printf "controlPlane.auth.providers[%d].staticToken.tokenKey is required" $index) $staticToken.tokenKey }}
-                      path: {{ printf "%s/static-token" $id | quote }}
               {{- else if eq $type "anonymous" }}
               {{- else }}
-              {{- fail (printf "controlPlane.auth.providers[%d].type must be oidc, ad, static-token, or anonymous" $index) }}
+              {{- fail (printf "controlPlane.auth.providers[%d].type must be oidc or anonymous" $index) }}
               {{- end }}
               {{- end }}
               {{- end }}
@@ -261,10 +239,6 @@ spec:
                     {{- if $secret.clientSecretKey }}
                     - key: {{ $secret.clientSecretKey }}
                       path: {{ printf "providers/%s/client-secret" $alias | quote }}
-                    {{- end }}
-                    {{- if $secret.bindPasswordKey }}
-                    - key: {{ $secret.bindPasswordKey }}
-                      path: {{ printf "providers/%s/bind-password" $alias | quote }}
                     {{- end }}
                     {{- if $secret.caKey }}
                     - key: {{ $secret.caKey }}

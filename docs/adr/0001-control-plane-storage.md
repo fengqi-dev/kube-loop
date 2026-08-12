@@ -19,7 +19,7 @@ KubeLoop V2 将身份、Session、Task、资源恢复快照、幂等记录和审
 7. PostgreSQL 模式允许 Control Plane 多副本；migration 在同一事务内先获取数据库级 advisory lock，再创建/读取 migration 表并应用版本，避免多个新 Control Plane 同时首次启动的 DDL 竞态。
 8. PostgreSQL 连接使用有界连接池、连接寿命和连接超时；`statement_timeout` 作为连接级 runtime parameter 约束所有查询，而不只约束 readiness。共享事务使用 `SERIALIZABLE` 隔离级别，并仅对 SQLSTATE `40001`（serialization failure）和 `40P01`（deadlock）执行有界指数退避重试。事务回调必须只包含可重试的数据库操作。
 9. SQLite 与 PostgreSQL 之间不通过修改 DSN 自动迁移数据。切换后端必须使用显式、带 schema version 和校验和的 export/import 流程。
-10. 逻辑导出采用固定格式版本、精确表/列清单、稳定行顺序和规范化内容 SHA-256；文件记录数据库 schema version、UTC 创建时间、Control Plane 创建版本和源后端，但不序列化任何数据库、OIDC 或 AD 配置。短期认证事务的 state、nonce、PKCE verifier 和交换码数据明确不导出。
+10. 逻辑导出采用固定格式版本、精确表/列清单、稳定行顺序和规范化内容 SHA-256；文件记录数据库 schema version、UTC 创建时间、Control Plane 创建版本和源后端，但不序列化任何数据库、OIDC 配置。短期认证事务的 state、nonce、PKCE verifier 和交换码数据明确不导出。
 11. 逻辑导入只支持空 PostgreSQL，且必须由操作者提供审计身份和空库确认。格式与校验和在连接目标前验证；目标空库检查、全表写入和 `storage.import` 成功审计事件位于同一个锁表事务，任何失败整体回滚。
 12. SQLite 物理备份使用 `VACUUM INTO` 获取一致快照，发布前执行完整性/schema version 校验并计算 SHA-256；物理文件只用于 SQLite 恢复，不作为跨后端迁移格式。
 

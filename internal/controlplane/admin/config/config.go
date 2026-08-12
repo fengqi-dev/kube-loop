@@ -40,7 +40,6 @@ type ProviderSecretAliases map[string]ProviderSecretAlias
 
 type ProviderSecretAlias struct {
 	ClientSecretFile string `json:"clientSecretFile,omitempty"`
-	BindPasswordFile string `json:"bindPasswordFile,omitempty"`
 	CAFile           string `json:"caFile,omitempty"`
 }
 
@@ -53,8 +52,6 @@ func (aliases ProviderSecretAliases) Resolve(alias, use string) (string, error) 
 	switch strings.TrimSpace(use) {
 	case "client-secret":
 		path = entry.ClientSecretFile
-	case "bind-password":
-		path = entry.BindPasswordFile
 	case "ca":
 		path = entry.CAFile
 	default:
@@ -165,15 +162,13 @@ func normalizeProviderSecretAliases(aliases ProviderSecretAliases) (ProviderSecr
 			return nil, fmt.Errorf("management Provider Secret alias %q is invalid", alias)
 		}
 		entry.ClientSecretFile = strings.TrimSpace(entry.ClientSecretFile)
-		entry.BindPasswordFile = strings.TrimSpace(entry.BindPasswordFile)
 		entry.CAFile = strings.TrimSpace(entry.CAFile)
-		if entry.ClientSecretFile == "" && entry.BindPasswordFile == "" && entry.CAFile == "" {
+		if entry.ClientSecretFile == "" && entry.CAFile == "" {
 			return nil, fmt.Errorf("management Provider Secret alias %q has no projected keys", alias)
 		}
 		root := path.Join(providerSecretMountRoot, alias)
 		for use, actual := range map[string]string{
 			"client-secret": entry.ClientSecretFile,
-			"bind-password": entry.BindPasswordFile,
 			"ca.crt":        entry.CAFile,
 		} {
 			if actual != "" && actual != path.Join(root, use) {

@@ -11,7 +11,7 @@ through Helm. This is sufficient for a single known Data Plane Service, but it
 does not define registration, liveness/capacity, Session assignment, key
 rotation, revocation propagation or drain coordination for multiple replicas.
 
-The internal protocol is a separate trust boundary from the public `/api/v2`
+The internal protocol is a separate trust boundary from the public `/kubeloop/api`
 and `/tunnel` protocols. A desktop must never call it, and a JSON body must not
 be able to choose its own relay identity.
 
@@ -120,7 +120,7 @@ a partitioned or probabilistic structure without silently changing v1.
 - Static Helm `relay-id` is now a compatibility input only; V2-113 will replace
   allocation with authenticated leases and derived IDs.
 - Control Plane can coordinate capacity, drain, key rollout and revocation without
-  granting Data Plane database, OAuth/AD or Kubernetes credentials.
+  granting Data Plane database, OAuth/OIDC or Kubernetes credentials.
 - Active streams are never claimed to migrate. Recovery creates a new bounded
   assignment and RelayTicket after the old path is known unavailable.
 - Contract tests cover all six round trips, both directions of a two-version

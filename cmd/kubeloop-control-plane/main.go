@@ -340,6 +340,7 @@ func main() {
 		KeyGeneration: *relayKeyGeneration, KeyValidity: *relayKeyValidity,
 		TicketKeyID: *relayTicketKeyID, TicketSigningKey: relaySigningKey,
 		KubernetesClient: systemClient, Context: signalContext, ControlPlanePodName: os.Getenv("KUBELOOP_POD_NAME"),
+		Logger: logger,
 	})
 	if err != nil {
 		_ = stateStore.Close()
@@ -613,7 +614,7 @@ func main() {
 			os.Exit(2)
 		}
 		loginService, err := login.New(authRegistry, stateStore, login.Config{
-			AllowedCallbacks: []string{strings.TrimRight(*publicURL, "/") + "/api/v2/admin/ui/callback"},
+			AllowedCallbacks: []string{strings.TrimRight(*publicURL, "/") + "/kubeloop/api/admin/ui/callback"},
 		})
 		if err != nil {
 			_ = stateStore.Close()
@@ -806,9 +807,6 @@ func warnDevelopmentAuthentication(logger *slog.Logger, descriptors []authn.Desc
 		switch descriptor.Type {
 		case authn.ProviderAnonymous:
 			logger.Warn("!!! SECURITY WARNING: ANONYMOUS DEVELOPMENT AUTHENTICATION IS ENABLED !!!",
-				"provider_id", descriptor.ID, "production_safe", false)
-		case authn.ProviderStaticToken:
-			logger.Warn("development static-token authentication is enabled",
 				"provider_id", descriptor.ID, "production_safe", false)
 		}
 	}

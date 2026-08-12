@@ -26,15 +26,19 @@ type HostTCPHandler func(host string, port uint16) (serve func(net.Conn), ok boo
 // (not tunnel length-prefix framing).
 type HostUDPHandler func(host string, port uint16) (dial func(context.Context) (net.Conn, error), ok bool)
 
+type LogHandler func(message string)
+
 type Server struct {
 	GatewayAddress string
 	SessionToken   tunnel.SessionToken
 	DialTimeout    time.Duration
 	HostTCP        HostTCPHandler
 	HostUDP        HostUDPHandler
+	LogHandler     LogHandler
 
 	gatewayMu sync.RWMutex
 	hostMu    sync.RWMutex
+	logMu     sync.RWMutex
 }
 
 // Bridge is the local SOCKS listener used by sing-box's kubernetes outbound.
@@ -51,6 +55,12 @@ func (b *Bridge) SetHostTCPHandler(handler HostTCPHandler) {
 
 func (b *Bridge) SetHostUDPHandler(handler HostUDPHandler) {
 	b.server.HostUDP = handler
+}
+
+func (b *Bridge) SetLogHandler(handler LogHandler) {
+	b.server.logMu.Lock()
+	b.server.LogHandler = handler
+	b.server.logMu.Unlock()
 }
 
 // SetGatewayAddress switches new SOCKS requests to a replacement Kubernetes
@@ -167,6 +177,12 @@ func (s *Server) openGateway(
 	host string,
 	port uint16,
 ) (net.Conn, error) {
+	protocol := "TCP"
+	if command == tunnel.CommandUDP {
+		protocol = "UDP"
+	}
+	destination := net.JoinHostPort(host, strconv.Itoa(int(port)))
+	s.logf("%s connect %s", protocol, destination)
 	timeout := s.DialTimeout
 	if timeout == 0 {
 		timeout = 10 * time.Second
@@ -177,6 +193,7 @@ func (s *Server) openGateway(
 	s.gatewayMu.RUnlock()
 	connection, err := (&net.Dialer{Timeout: timeout}).DialContext(ctx, "tcp", gatewayAddress)
 	if err != nil {
+		s.logf("%s connect %s failed: %v", protocol, destination, err)
 		return nil, fmt.Errorf("connect gateway: %w", err)
 	}
 	request := tunnel.OpenRequest{
@@ -184,13 +201,25 @@ func (s *Server) openGateway(
 	}
 	if err := tunnel.WriteOpen(connection, request, sessionToken); err != nil {
 		connection.Close()
+		s.logf("%s connect %s failed: %v", protocol, destination, err)
 		return nil, err
 	}
 	if err := tunnel.ReadStatus(connection); err != nil {
 		connection.Close()
+		s.logf("%s connect %s failed: %v", protocol, destination, err)
 		return nil, err
 	}
+	s.logf("%s connected %s", protocol, destination)
 	return connection, nil
+}
+
+func (s *Server) logf(format string, values ...any) {
+	s.logMu.RLock()
+	handler := s.LogHandler
+	s.logMu.RUnlock()
+	if handler != nil {
+		handler(fmt.Sprintf(format, values...))
+	}
 }
 
 func destination(address *statute.AddrSpec) (string, uint16, error) {

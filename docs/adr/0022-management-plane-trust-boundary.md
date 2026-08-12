@@ -20,9 +20,8 @@ V2-901～V2-907 实现；V2-908 统一完成浏览器和 Minikube E2E。
 受保护资产包括：
 
 - 管理角色、namespace 委派、访问/网络策略及其历史 revision；
-- OIDC/AD 非 Secret 配置、Secret 引用和 Provider 启停状态；
+- OIDC 非 Secret 配置、Secret 引用和 Provider 启停状态；
 - Principal、Device/Token Family、Cluster Session、Task、Relay 和审计记录；
-- Relay 签名钥匙、数据库 DSN、OIDC Client Secret、AD Bind Password 和 CA；
 - 撤销、排空、停止、恢复、回滚和导出等高风险动作。
 
 信任区固定如下：
@@ -32,19 +31,19 @@ V2-901～V2-907 实现；V2-908 统一完成浏览器和 Minikube E2E。
 | 浏览器 `/admin/` | UI 状态、内存中的 CSRF Token、脱敏响应 | Secret、Refresh Token、localStorage Token、数据库 DSN |
 | Control Plane Management Plane | 管理 Session、角色决策、管理 Repository、审计、受限 Secret alias | 任意 Kubernetes Proxy、任意脚本/SQL、向 Data Plane 下发管理表 |
 | Control Plane 普通 API | Gateway Token、普通用户策略、Session/Task | 仅凭普通 API 权限调用管理操作 |
-| Data Plane | 短期 RelayTicket、公钥、吊销摘要、NetworkSpec | 管理 API、业务数据库、OIDC/AD Secret、管理角色和 Kubernetes 管理凭据 |
+| Data Plane | 短期 RelayTicket、公钥、吊销摘要、NetworkSpec | 管理 API、业务数据库、OIDC Secret、管理角色和 Kubernetes 管理凭据 |
 | Operator | TrafficBinding CRD 和所需 Kubernetes client | 管理数据库、身份 Secret、管理 Session、绕过 owner/finalizer 规则 |
 | Kubernetes/外部 Secret 系统 | Secret 明文与轮换 | 向浏览器或管理 Repository 返回 Secret 明文 |
 
 `kubeloop-control-plane` 在同一 Go module、同一二进制和同一 Helm Chart 内提供
-`/admin/` 与 `/api/v2/admin/*`。不创建独立后台项目，不在
+`/admin/` 与 `/kubeloop/api/admin/*`。不创建独立后台项目，不在
 `kubeloop-gateway` 注册管理路由，也不让 Data Plane 访问 Control Plane 数据库。
 
 ## 决策
 
 ### 1. 身份认证与管理授权分离
 
-管理面复用 ADR 0002 的 OIDC/AD 身份和 Gateway Token，不建立管理员用户名或
+管理面复用 ADR 0002 的 OIDC 身份和 Gateway Token，不建立管理员用户名或
 密码表。一次成功登录只证明 Principal 身份；每个管理请求仍必须通过独立的
 `admin.<resource>/<operation>` 授权，并按当前 revision 重新计算角色和可选
 namespace 范围。
@@ -111,7 +110,7 @@ HTML 或 JavaScript 持久状态。浏览器通过同源登录把已认证 Princ
   Principal 禁用、角色移除、Secret generation 变化或显式登出都会使其失效；
 - 每个请求重新读取或校验当前 assignment revision，Session 本身不缓存永久角色。
 
-Cookie 认证只在 `/api/v2/admin/*` 和管理 Session 端点生效，普通 `/api/v2/*`
+Cookie 认证只在 `/kubeloop/api/admin/*` 和管理 Session 端点生效，普通 `/kubeloop/api/*`
 不会因浏览器 Cookie 获得身份。非浏览器自动化必须使用短期 Bearer Token；Cookie
 和 Bearer 同时出现时拒绝请求，避免认证来源混淆。
 
@@ -138,7 +137,6 @@ nonce/hash。响应同时设置 `X-Content-Type-Options: nosniff`、严格
 
 ### 6. Secret 只以部署侧 alias 进入管理配置
 
-V2.0 管理 API 不接收 OIDC Client Secret、AD Bind Password、数据库 DSN、签名
 私钥、CA 文件或任意 Kubernetes Secret 明文。部署操作者先通过 Kubernetes 或
 外部 Secret 系统创建并挂载 Secret，再在 Helm 中声明稳定 alias；管理配置只可
 选择 allowlist 中的 alias。

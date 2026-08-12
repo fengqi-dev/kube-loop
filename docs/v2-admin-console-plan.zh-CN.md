@@ -13,16 +13,15 @@ module、同一存储和同一 Helm Chart。它不是新的独立项目，也不
 `kubeloop-gateway` Data Plane。建议路由：
 
 - Web UI：`/admin/`
-- Management API：`/api/v2/admin/*`
-- 普通用户 API：继续使用 `/api/v2/*`
+- Management API：`/kubeloop/api/admin/*`
+- 普通用户 API：继续使用 `/kubeloop/api/*`
 
 第一阶段不让管理后台直接编辑任意 Kubernetes 对象、不提供 SQL 控制台、
-不允许自定义脚本，也不把 OIDC Client Secret、AD Bind 密码或数据库 DSN
 返回浏览器。
 
 ## 2. 身份与权限
 
-后台复用现有 OIDC/AD 登录和 Gateway Token，不另建管理员密码库。初始
+后台复用现有 OIDC 登录和 Gateway Token，不另建管理员密码库。初始
 管理员通过 Helm 配置精确的 bootstrap Principal UUID/group；完成首次策略配置
 后由版本化管理策略接管。Break-glass 身份默认关闭，只能引用 Kubernetes
 Secret，并且每次使用必须产生高等级审计事件。
@@ -49,11 +48,11 @@ Authorizer。前端隐藏按钮不能替代服务端鉴权。高风险操作要�
 - Relay ready/draining、容量、活动物理连接/逻辑流。
 - 活动 Principal、Device Session、Cluster Session、Task 和失败恢复数。
 - 数据库 backend/schema、迁移状态、SQLite 单副本约束和 PostgreSQL HA 状态。
-- OIDC/AD、Kubernetes API、签名钥匙、Operator 和审计 sink 健康状态。
+- OIDC、Kubernetes API、签名钥匙、Operator 和审计 sink 健康状态。
 
 ### 3.2 身份 Provider
 
-- 查看 OIDC/AD Provider、claim/group mapping、启停状态和最近健康检查。
+- 查看 OIDC Provider、claim/group mapping、启停状态和最近健康检查。
 - 新建/修改采用“草稿 → 连通性验证 → 发布”的版本化流程。
 - 浏览器和管理 API 不提交 Secret 明文；部署操作者预先在 Kubernetes/外部
   Secret 系统中创建并挂载 Secret，再由管理配置选择 Helm allowlist 中的稳定
@@ -130,7 +129,7 @@ active pointer 和审计事件。使用整数 revision/ETag 做乐观并发，�
 | V2-903 | 已完成 | 只读管理 API | status/principal/session/task/relay/audit | 有界分页、脱敏、稳定错误与审计通过 |
 | V2-904 | 已完成 | 只读管理 UI | 概览、会话、任务、Relay、审计 | 不包含 Secret/Token，权限裁剪与可访问性通过 |
 | V2-905 | 已完成 | 访问/网络策略管理 | draft/dry-run/publish/rollback | 发布原子、旧会话权限即时失效、错误配置可回滚 |
-| V2-906 | 已完成 | Provider 管理 | OIDC/AD validation + Secret reference | 草稿验证不影响当前 Provider，Secret 不入 DB/响应/日志 |
+| V2-906 | 已完成 | Provider 管理 | OIDC validation + Secret reference | 草稿验证不影响当前 Provider，Secret 不入 DB/响应/日志 |
 | V2-907 | 已完成 | 运维动作 | revoke/drain/stop/recover/export | 全部幂等、owner-safe、失败可观测且可重试 |
 | V2-908 | 已完成 | 管理面安全/E2E | fuzz、race、浏览器和 Minikube E2E | CSRF/CSP/IDOR/并发发布/撤销/升级回滚通过 |
 
@@ -138,7 +137,7 @@ active pointer 和审计事件。使用整数 revision/ETag 做乐观并发，�
 Provider 写入和高风险运维动作最后开放。V2-900～907 完成代码后，再按当前
 约定统一执行 V2-908 E2E。
 
-V2-905 使用单例 `/api/v2/admin/policy` 资源管理五类管理角色及
+V2-905 使用单例 `/kubeloop/api/admin/policy` 资源管理五类管理角色及
 `namespace-admin` 委派。候选策略可在不改动 active pointer 的情况下执行
 regular-identity dry-run；draft 保存不可变 revision，publish/rollback 使用强
 整数 `If-Match` 做 CAS，并在成功事务后同步重载进程内 authorizer。所有 POST
@@ -147,10 +146,9 @@ regular-identity dry-run；draft 保存不可变 revision，publish/rollback 使
 编辑、dry-run、发布和回滚入口，pending change 元数据仅保存在当前浏览器
 session，Access/Refresh Token 仍不进入 Web Storage。
 
-V2-906 将 Helm 静态 Provider 作为基线，并把数据库已发布 OIDC/AD revision
+V2-906 将 Helm 静态 Provider 作为基线，并把数据库已发布 OIDC revision
 聚合为一个原子 Registry。Control Plane 启动及有界轮询按 active pointer 的
 revision/ETag 指纹收敛；publish/rollback 在数据库 CAS 前完成 Secret alias
-解析、OIDC discovery/AD 连接和完整候选 Registry 构建，提交成功后只以 CAS
 合并发生变化的 Provider，避免并发发布覆盖无关 Provider。chi v5 管理 API 提供
 list/current/validate/draft/publish/rollback，全部写请求继续要求 Management
 Session、同源 CSRF、强 `If-Match` 和幂等键。Helm 只把 allowlist 中的 Secret key
@@ -162,8 +160,6 @@ V2-908 增加管理 HTTP fuzz 入口，并对管理授权、Session、revision�
 SQLite/PostgreSQL Repository 和 UI 包执行 race。真实浏览器通过
 `e2e/admin/browserfixture` 复用生产 SQLite、Management Session、authorizer、
 revision、chi v5 API 与嵌入式 UI，完成桌面/390px 窄屏、break-glass、OIDC PKCE
-callback、AD 密码登录、列表导航和策略 dry-run；同源测试 Provider 只替代外部
-IdP/目录，OIDC/AD 协议、TLS、LDAP filter 与限流继续由 Provider 安全测试覆盖。
 `e2e/admin/verify.sh` 已并入 Minikube Helm 生命周期，验证 CSP、CSRF、同一 ETag
 并发发布只有一个成功、Principal Token Family 撤销后旧 Access Token 立即 401。
 同一轮 Helm E2E 验证 SQLite/PostgreSQL 安装、组件独立升级/扩缩容、PVC/外部数据库

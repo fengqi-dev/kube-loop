@@ -81,52 +81,6 @@ type ExchangeResult struct {
 	Principal storage.Principal
 }
 
-func (service *Service) AuthenticatePassword(
-	ctx context.Context,
-	providerID string,
-	credentials authn.PasswordCredentials,
-) (ExchangeResult, error) {
-	providerID = strings.TrimSpace(providerID)
-	provider, ok := service.providers.Provider(providerID)
-	if !ok {
-		zeroBytes(credentials.Password)
-		return ExchangeResult{}, ErrUnknownProvider
-	}
-	passwordProvider, ok := provider.(authn.PasswordProvider)
-	if !ok {
-		zeroBytes(credentials.Password)
-		return ExchangeResult{}, ErrInvalidRequest
-	}
-	identity, err := passwordProvider.AuthenticatePassword(ctx, credentials)
-	if err != nil {
-		return ExchangeResult{}, err
-	}
-	return service.persistDirectIdentity(ctx, providerID, identity)
-}
-
-func (service *Service) AuthenticateToken(
-	ctx context.Context,
-	providerID string,
-	credentials authn.TokenCredentials,
-) (ExchangeResult, error) {
-	providerID = strings.TrimSpace(providerID)
-	provider, ok := service.providers.Provider(providerID)
-	if !ok {
-		zeroBytes(credentials.Token)
-		return ExchangeResult{}, ErrUnknownProvider
-	}
-	tokenProvider, ok := provider.(authn.TokenProvider)
-	if !ok {
-		zeroBytes(credentials.Token)
-		return ExchangeResult{}, ErrInvalidRequest
-	}
-	identity, err := tokenProvider.AuthenticateToken(ctx, credentials)
-	if err != nil {
-		return ExchangeResult{}, err
-	}
-	return service.persistDirectIdentity(ctx, providerID, identity)
-}
-
 func (service *Service) AuthenticateAnonymous(ctx context.Context, providerID string) (ExchangeResult, error) {
 	providerID = strings.TrimSpace(providerID)
 	provider, ok := service.providers.Provider(providerID)
@@ -424,10 +378,4 @@ func validPKCEValue(value string) bool {
 		return false
 	}
 	return true
-}
-
-func zeroBytes(value []byte) {
-	for index := range value {
-		value[index] = 0
-	}
 }

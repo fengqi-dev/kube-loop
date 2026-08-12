@@ -106,63 +106,6 @@ func New(config Config) *Client {
 	return &Client{httpClient: &clone, requestTimeout: requestTimeout, loginTimeout: loginTimeout, openBrowser: config.OpenBrowser}
 }
 
-func (client *Client) LoginAD(
-	ctx context.Context,
-	baseURL, providerID, username string,
-	password []byte,
-	deviceID string,
-) (credentials.Credential, error) {
-	defer clear(password)
-	baseURL, err := validateTarget(baseURL, providerID)
-	if err != nil {
-		return credentials.Credential{}, err
-	}
-	body := struct {
-		Username string `json:"username"`
-		Password string `json:"password"`
-		DeviceID string `json:"deviceId"`
-	}{Username: strings.TrimSpace(username), Password: string(password), DeviceID: strings.TrimSpace(deviceID)}
-	if body.Username == "" || body.Password == "" || body.DeviceID == "" {
-		body.Password = ""
-		return credentials.Credential{}, errors.New("username, password and device ID are required")
-	}
-	var response tokenResponse
-	err = client.postJSON(ctx, baseURL+"/auth/ad/"+providerID+"/login", body, &response)
-	body.Password = ""
-	if err != nil {
-		return credentials.Credential{}, err
-	}
-	return credentialFromResponse(response, deviceID)
-}
-
-func (client *Client) LoginStaticToken(
-	ctx context.Context,
-	baseURL, providerID string,
-	staticToken []byte,
-	deviceID string,
-) (credentials.Credential, error) {
-	defer clear(staticToken)
-	baseURL, err := validateTarget(baseURL, providerID)
-	if err != nil {
-		return credentials.Credential{}, err
-	}
-	body := struct {
-		Token    string `json:"token"`
-		DeviceID string `json:"deviceId"`
-	}{Token: string(staticToken), DeviceID: strings.TrimSpace(deviceID)}
-	if body.Token == "" || body.DeviceID == "" {
-		body.Token = ""
-		return credentials.Credential{}, errors.New("static token and device ID are required")
-	}
-	var response tokenResponse
-	err = client.postJSON(ctx, baseURL+"/auth/static-token/"+providerID+"/login", body, &response)
-	body.Token = ""
-	if err != nil {
-		return credentials.Credential{}, err
-	}
-	return credentialFromResponse(response, deviceID)
-}
-
 func (client *Client) LoginAnonymous(
 	ctx context.Context,
 	baseURL, providerID, deviceID string,

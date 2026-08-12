@@ -91,9 +91,6 @@ export function ServerAccessView({
 	const [forwardRemotePort, setForwardRemotePort] = useState("");
 	const [forwardLocalPort, setForwardLocalPort] = useState("");
   const [providerId, setProviderId] = useState("");
-  const [username, setUsername] = useState(initialProfile?.lastUserName ?? "");
-  const [password, setPassword] = useState("");
-  const [staticToken, setStaticToken] = useState("");
   const [busy, setBusy] = useState<"discover" | "switch" | "login" | "refresh-login" | "logout" | "delete" | "inventory" | "tunnel" | "port-forward" | "exchange" | "mirror" | "preview" | "pod-ssh">();
   const [error, setError] = useState("");
   const [dataPlaneError, setDataPlaneError] = useState("");
@@ -139,7 +136,7 @@ export function ServerAccessView({
         if (!active) return;
         setDiscovery(document);
         setAuth(session);
-        setProviderId(document.authMethods[0]?.id ?? "");
+        setProviderId(supportedAuthMethods(document.authMethods)[0]?.id ?? "");
         if (session.authenticated) {
 		  const [remoteInventory, remoteForwards, remoteExchanges, remoteMirrors, remotePreviews, remoteSSH] = await Promise.all([
 			backend.loadServerInventory(initialProfile.id, initialProfile.lastNamespace ?? ""),
@@ -200,7 +197,11 @@ export function ServerAccessView({
     return () => unsubscribe?.();
   }, [profile]);
 
-  const selectedProvider = discovery?.authMethods.find((item) => item.id === providerId);
+  const authMethods = useMemo(
+    () => supportedAuthMethods(discovery?.authMethods ?? []),
+    [discovery],
+  );
+  const selectedProvider = authMethods.find((item) => item.id === providerId);
   const selectedSSHPod = inventory?.pods.find((item) => item.name === sshPod);
   const selectedExchangeService = inventory?.services.find((item) => item.name === exchangeService);
   const selectedExchangePort = selectedExchangeService?.ports.find(
@@ -227,7 +228,7 @@ export function ServerAccessView({
       setProfile(result.profile);
       setProfileState(normalizeProfileState(await backend.serverProfiles()));
       setDiscovery(result.discovery);
-      setProviderId(result.discovery.authMethods[0]?.id ?? "");
+      setProviderId(supportedAuthMethods(result.discovery.authMethods)[0]?.id ?? "");
       const session = await backend.serverAuthStatus(result.profile.id);
       setAuth(session);
 	  onAuthChange?.(session);
@@ -268,13 +269,14 @@ export function ServerAccessView({
     setBusy("login");
     setError("");
     try {
-      const session = selectedProvider.type === "oidc"
-        ? await backend.loginServerOIDC(profile.id, selectedProvider.id)
-        : selectedProvider.type === "ad"
-          ? await backend.loginServerAD(profile.id, selectedProvider.id, username, password)
-          : selectedProvider.type === "static-token"
-            ? await backend.loginServerStaticToken(profile.id, selectedProvider.id, staticToken)
-            : await backend.loginServerAnonymous(profile.id, selectedProvider.id);
+      let session: AuthSession;
+      if (selectedProvider.type === "oidc") {
+        session = await backend.loginServerOIDC(profile.id, selectedProvider.id);
+      } else if (selectedProvider.type === "anonymous") {
+        session = await backend.loginServerAnonymous(profile.id, selectedProvider.id);
+      } else {
+        throw new Error("This Gateway advertises an unsupported login method.");
+      }
       setAuth(session);
 	  onAuthChange?.(session);
 	  const nextProfileState = normalizeProfileState(await backend.serverProfiles());
@@ -298,8 +300,6 @@ export function ServerAccessView({
     } catch (reason) {
       setError(messageOf(reason));
     } finally {
-      setPassword("");
-      setStaticToken("");
       setBusy(undefined);
     }
   }
@@ -365,9 +365,6 @@ export function ServerAccessView({
     setAddress("");
     setDiscovery(undefined);
     setProviderId("");
-    setUsername("");
-    setPassword("");
-    setStaticToken("");
     clearWorkspaceState();
   }
 
@@ -398,8 +395,6 @@ export function ServerAccessView({
       setDiscovery(undefined);
       clearWorkspaceState();
       setProviderId("");
-      setUsername("");
-      setPassword("");
       setAddress(selected?.baseUrl ?? "");
     } catch (reason) {
       setError(messageOf(reason));
@@ -735,7 +730,7 @@ export function ServerAccessView({
       setProfile(result.profile);
       setAddress(result.profile.baseUrl);
       setDiscovery(result.discovery);
-      setProviderId(result.discovery.authMethods[0]?.id ?? "");
+      setProviderId(supportedAuthMethods(result.discovery.authMethods)[0]?.id ?? "");
       clearWorkspaceState();
       const session = await backend.serverAuthStatus(result.profile.id);
       setAuth(session);
@@ -941,7 +936,7 @@ export function ServerAccessView({
 
             {discovery && !authenticated ? (
               <div className="space-y-4 border-t pt-5">
-                {discovery.authMethods.length > 1 ? (
+                {authMethods.length > 1 ? (
                   <div className="space-y-2">
                     <Label htmlFor="auth-provider">Sign-in method</Label>
                     <select
@@ -951,62 +946,12 @@ export function ServerAccessView({
                       disabled={Boolean(busy)}
                       onChange={(event) => setProviderId(event.target.value)}
                     >
-                      {discovery.authMethods.map((method) => (
+                      {authMethods.map((method) => (
                         <option key={method.id} value={method.id}>
                           {method.displayName || method.id}
                         </option>
                       ))}
                     </select>
-                  </div>
-                ) : null}
-
-                {selectedProvider?.type === "ad" ? (
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <div className="space-y-2">
-                      <Label htmlFor="ad-username">Account</Label>
-                      <Input
-                        id="ad-username"
-                        autoCapitalize="none"
-                        autoComplete="username"
-                        value={username}
-                        disabled={Boolean(busy)}
-                        onChange={(event) => setUsername(event.target.value)}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="ad-password">Password</Label>
-                      <Input
-                        id="ad-password"
-                        type="password"
-                        autoComplete="current-password"
-                        value={password}
-                        disabled={Boolean(busy)}
-                        onChange={(event) => setPassword(event.target.value)}
-                        onKeyDown={(event) => {
-                          if (event.key === "Enter") void login();
-                        }}
-                      />
-                    </div>
-                  </div>
-                ) : null}
-
-                {selectedProvider?.type === "static-token" ? (
-                  <div className="space-y-2">
-                    <Label htmlFor="development-static-token">Development token</Label>
-                    <Input
-                      id="development-static-token"
-                      type="password"
-                      autoComplete="off"
-                      value={staticToken}
-                      disabled={Boolean(busy)}
-                      onChange={(event) => setStaticToken(event.target.value)}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter") void login();
-                      }}
-                    />
-                    <p className="text-xs text-muted-foreground">
-                      This mode is intended only for local development or controlled environments.
-                    </p>
                   </div>
                 ) : null}
 
@@ -1017,7 +962,7 @@ export function ServerAccessView({
                   </div>
                 ) : null}
 
-                {discovery.authMethods.length === 0 ? (
+                {authMethods.length === 0 ? (
                   <p className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
                     This Gateway has no login method configured.
                   </p>
@@ -1027,9 +972,7 @@ export function ServerAccessView({
                     className="w-full"
                     disabled={
                       Boolean(busy) ||
-                      !selectedProvider ||
-                      (selectedProvider.type === "ad" && (!username.trim() || !password)) ||
-                      (selectedProvider.type === "static-token" && !staticToken)
+                      !selectedProvider
                     }
                     onClick={() => void login()}
                   >
@@ -1590,6 +1533,10 @@ export function ServerAccessView({
 
 function normalizeProfileState(state: ServerProfileState): ServerProfileState {
   return { ...state, profiles: state.profiles ?? [] };
+}
+
+function supportedAuthMethods(methods: ServerDiscovery["authMethods"]): ServerDiscovery["authMethods"] {
+  return methods;
 }
 
 function InventoryPanel({

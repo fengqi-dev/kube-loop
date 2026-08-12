@@ -1,4 +1,4 @@
-// Package provider builds and atomically installs database-managed OIDC/AD
+// Package provider builds and atomically installs database-managed OIDC
 // Provider revisions without accepting Secret plaintext or arbitrary file paths.
 package provider
 
@@ -40,30 +40,6 @@ type OIDCConfig struct {
 	Claims             oidcprovider.ClaimMapping `json:"claims"`
 	HTTPTimeout        string                    `json:"httpTimeout,omitempty"`
 	Enabled            *bool                     `json:"enabled,omitempty"`
-}
-
-type ADConfig struct {
-	DisplayName                 string `json:"displayName,omitempty"`
-	DirectoryID                 string `json:"directoryId"`
-	URL                         string `json:"url"`
-	StartTLS                    bool   `json:"startTLS,omitempty"`
-	BaseDN                      string `json:"baseDn"`
-	UserFilter                  string `json:"userFilter,omitempty"`
-	BindDN                      string `json:"bindDn,omitempty"`
-	ObjectIDAttribute           string `json:"objectIdAttribute,omitempty"`
-	DisplayNameAttribute        string `json:"displayNameAttribute,omitempty"`
-	EmailAttribute              string `json:"emailAttribute,omitempty"`
-	GroupsAttribute             string `json:"groupsAttribute,omitempty"`
-	UserAccountControlAttribute string `json:"userAccountControlAttribute,omitempty"`
-	LockoutTimeAttribute        string `json:"lockoutTimeAttribute,omitempty"`
-	AccountExpiresAttribute     string `json:"accountExpiresAttribute,omitempty"`
-	PasswordLastSetAttribute    string `json:"passwordLastSetAttribute,omitempty"`
-	GroupNameAttribute          string `json:"groupNameAttribute,omitempty"`
-	NestedGroupDepth            int    `json:"nestedGroupDepth,omitempty"`
-	MaxGroups                   int    `json:"maxGroups,omitempty"`
-	ConnectTimeout              string `json:"connectTimeout,omitempty"`
-	RequestTimeout              string `json:"requestTimeout,omitempty"`
-	Enabled                     *bool  `json:"enabled,omitempty"`
 }
 
 type Runtime struct {
@@ -279,46 +255,6 @@ func (runtime *Runtime) provider(candidate adminrevision.ProviderCandidate) (aut
 			RedirectURL: runtime.publicURL + "/auth/callback/" + url.PathEscape(candidate.ID),
 			Scopes:      config.Scopes, AllowedSigningAlgs: config.AllowedSigningAlgs,
 			RequiredClaims: config.RequiredClaims, Claims: config.Claims, CAFile: caFile, HTTPTimeout: config.HTTPTimeout,
-		}}, true, nil
-	case "ad":
-		var config ADConfig
-		if err := decodeStrict(candidate.Config, &config); err != nil {
-			return authconfig.Provider{}, false, err
-		}
-		enabled := config.Enabled == nil || *config.Enabled
-		if !enabled {
-			return authconfig.Provider{ID: candidate.ID}, false, nil
-		}
-		required := []string{}
-		if strings.TrimSpace(config.BindDN) != "" {
-			required = append(required, "bind-password")
-		}
-		if err := exactAliases(aliases, required, []string{"bind-password", "ca"}); err != nil {
-			return authconfig.Provider{}, false, err
-		}
-		bindPasswordFile, caFile := "", ""
-		var err error
-		if aliases["bind-password"] != "" {
-			bindPasswordFile, err = runtime.secrets.Resolve(aliases["bind-password"], "bind-password")
-			if err != nil {
-				return authconfig.Provider{}, false, ErrUnavailable
-			}
-		}
-		if aliases["ca"] != "" {
-			caFile, err = runtime.secrets.Resolve(aliases["ca"], "ca")
-			if err != nil {
-				return authconfig.Provider{}, false, ErrUnavailable
-			}
-		}
-		return authconfig.Provider{ID: candidate.ID, Type: "ad", DisplayName: config.DisplayName, AD: &authconfig.ADConfig{
-			DirectoryID: config.DirectoryID, URL: config.URL, StartTLS: config.StartTLS, BaseDN: config.BaseDN,
-			UserFilter: config.UserFilter, BindDN: config.BindDN, BindPasswordFile: bindPasswordFile, CAFile: caFile,
-			ObjectIDAttribute: config.ObjectIDAttribute, DisplayNameAttribute: config.DisplayNameAttribute,
-			EmailAttribute: config.EmailAttribute, GroupsAttribute: config.GroupsAttribute,
-			UserAccountControlAttribute: config.UserAccountControlAttribute, LockoutTimeAttribute: config.LockoutTimeAttribute,
-			AccountExpiresAttribute: config.AccountExpiresAttribute, PasswordLastSetAttribute: config.PasswordLastSetAttribute,
-			GroupNameAttribute: config.GroupNameAttribute, NestedGroupDepth: config.NestedGroupDepth, MaxGroups: config.MaxGroups,
-			ConnectTimeout: config.ConnectTimeout, RequestTimeout: config.RequestTimeout,
 		}}, true, nil
 	default:
 		return authconfig.Provider{}, false, errors.New("unsupported managed Provider type")

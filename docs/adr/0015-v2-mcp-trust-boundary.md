@@ -15,7 +15,7 @@ identity happened to be present on disk.
 
 V2 has a different trust boundary. Kubernetes credentials and operations live
 behind Control Plane/Gateway, while the desktop keeps only Server Profiles,
-OAuth/AD credentials, authenticated remote Sessions, and local data-plane
+OAuth/OIDC credentials, authenticated remote Sessions, and local data-plane
 endpoints. MCP must be another caller of that same client boundary, not a
 compatibility path back to V1.
 
@@ -42,7 +42,7 @@ the backend snapshots the Server Profile Store and requires that ID to equal
 `ActiveProfileID`. A request for any other saved Profile returns `forbidden`
 without reaching Gateway.
 
-Gateway requests use the OAuth/OIDC or AD-derived access and refresh tokens
+Gateway requests use the OAuth/OIDC-derived access and refresh tokens
 already stored for that Profile. Token refresh follows the normal typed SDK
 path. Gateway policy, namespace authorization, Kubernetes SSAR, Session
 ownership, Task ownership, and token-family revocation therefore apply exactly

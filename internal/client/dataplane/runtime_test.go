@@ -43,6 +43,7 @@ type testBridge struct {
 	gateway    string
 	token      tunnel.SessionToken
 	hostTCP    socksbridge.HostTCPHandler
+	logHandler socksbridge.LogHandler
 }
 
 func (bridge *testBridge) Addr() net.Addr { return bridge.address }
@@ -68,6 +69,11 @@ func (bridge *testBridge) SetHostTCPHandler(handler socksbridge.HostTCPHandler) 
 	bridge.mu.Lock()
 	defer bridge.mu.Unlock()
 	bridge.hostTCP = handler
+}
+func (bridge *testBridge) SetLogHandler(handler socksbridge.LogHandler) {
+	bridge.mu.Lock()
+	defer bridge.mu.Unlock()
+	bridge.logHandler = handler
 }
 func (bridge *testBridge) snapshot() (string, bool) {
 	bridge.mu.Lock()
@@ -502,13 +508,14 @@ func TestRuntimeStoresNormalizedNetworkSettingsBeforeTUNStarts(t *testing.T) {
 	}
 }
 
-func TestRuntimeDiagnosticsRequireTUNAndDelegateErrors(t *testing.T) {
-	runtime := &Runtime{}
+func TestRuntimeDiagnosticsIncludeSOCKSAndTUNLogs(t *testing.T) {
+	runtime := &Runtime{socksLogs: []string{"12:00:00 [SOCKS] listening on 127.0.0.1:1080"}}
 	if _, err := runtime.Metrics(context.Background()); err == nil {
 		t.Fatal("metrics succeeded without TUN")
 	}
-	if _, err := runtime.Logs(context.Background()); err == nil {
-		t.Fatal("logs succeeded without TUN")
+	logs, err := runtime.Logs(context.Background())
+	if err != nil || !reflect.DeepEqual(logs, runtime.socksLogs) {
+		t.Fatalf("SOCKS logs = %#v, %v", logs, err)
 	}
 	if _, err := runtime.ConfigJSON(); err == nil {
 		t.Fatal("config succeeded without TUN")
@@ -521,6 +528,12 @@ func TestRuntimeDiagnosticsRequireTUNAndDelegateErrors(t *testing.T) {
 	}
 	if _, err := runtime.Logs(context.Background()); !errors.Is(err, logsFailure) {
 		t.Fatalf("logs error = %v", err)
+	}
+	runtime.tun = &testCore{done: make(chan struct{})}
+	logs, err = runtime.Logs(context.Background())
+	wantLogs := []string{"12:00:00 [SOCKS] listening on 127.0.0.1:1080", "[TUN] ready"}
+	if err != nil || !reflect.DeepEqual(logs, wantLogs) {
+		t.Fatalf("combined logs = %#v, %v; want %#v", logs, err, wantLogs)
 	}
 	config, err := runtime.ConfigJSON()
 	if err != nil || string(config) != "{\"version\":2}" {

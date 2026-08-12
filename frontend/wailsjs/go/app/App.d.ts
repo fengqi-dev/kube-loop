@@ -68,13 +68,9 @@ export function ListServerPreviews(arg1:string):Promise<Array<preview.Info>>;
 
 export function LoadServerInventory(arg1:string,arg2:string):Promise<app.RemoteInventory>;
 
-export function LoginServerAD(arg1:string,arg2:string,arg3:string,arg4:string):Promise<app.AuthSession>;
-
 export function LoginServerAnonymous(arg1:string,arg2:string):Promise<app.AuthSession>;
 
 export function LoginServerOIDC(arg1:string,arg2:string):Promise<app.AuthSession>;
-
-export function LoginServerStaticToken(arg1:string,arg2:string,arg3:string):Promise<app.AuthSession>;
 
 export function LogoutServer(arg1:string):Promise<void>;
 

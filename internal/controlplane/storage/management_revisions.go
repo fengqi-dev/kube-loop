@@ -138,8 +138,8 @@ func normalizeProviderConfigRevision(revision *ProviderConfigRevision) error {
 		return err
 	}
 	revision.ProviderType = strings.TrimSpace(revision.ProviderType)
-	if revision.ProviderType != "oidc" && revision.ProviderType != "ad" {
-		return errors.New("provider type must be oidc or ad")
+	if revision.ProviderType != "oidc" {
+		return errors.New("provider type must be oidc")
 	}
 	if revision.Config, err = canonicalJSONObject(revision.Config, "provider configuration"); err != nil {
 		return err

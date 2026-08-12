@@ -6,7 +6,7 @@ This chart installs the server as three independent workloads:
 - `kubeloop-gateway`: WebSocket tunnel data plane. It has no database configuration and does not automount the general Kubernetes API credential. Registry mode projects only a short-lived, audience-bound Pod token.
 - `kubeloop-operator`: watches `TrafficBinding` and exclusively coordinates Preview/Exchange/Mirror Service, Endpoints and EndpointSlice mutations with finalizer-based restoration.
 
-The current implementation exposes discovery, OIDC/AD login, token lifecycle, default-deny Gateway Policy, API audit, storage repositories, Kubernetes capability probes, read-only Namespace/Pod/Service inventory, owned Cluster Session lifecycles, short-lived RelayTicket-authenticated WebSocket transport, Session-bound Port Forward Tasks, Control Plane-owned Pod exec streams, resumable Control Plane-owned file-transfer Task streams, guarded remote directory management with desktop local-file integration, and TrafficBinding reconciliation through the Operator. Do not treat a development image tag as a production release.
+The current implementation exposes discovery, OIDC login, token lifecycle, default-deny Gateway Policy, API audit, storage repositories, Kubernetes capability probes, read-only Namespace/Pod/Service inventory, owned Cluster Session lifecycles, short-lived RelayTicket-authenticated WebSocket transport, Session-bound Port Forward Tasks, Control Plane-owned Pod exec streams, resumable Control Plane-owned file-transfer Task streams, guarded remote directory management with desktop local-file integration, and TrafficBinding reconciliation through the Operator. Do not treat a development image tag as a production release.
 
 Both workloads expose an independent `logLevel` value (`debug`, `info`, `warn`,
 or `error`). The binaries validate the value again at startup. Control Plane and
@@ -228,71 +228,14 @@ The token signing Secret value must be an Ed25519 private key in unencrypted PKC
 
 Register the exact callback `https://<public-origin>/auth/callback/corporate` at the identity provider. Control Plane startup fails closed if discovery does not match the configured issuer, endpoints are not HTTPS, PKCE S256 is not advertised, or no configured signing algorithm is supported.
 
-## Active Directory / LDAPS Provider
-
-Use this mode only when the directory is not already exposed through Entra ID, AD FS, Keycloak, Dex or another OIDC Broker. The default and recommended transport is LDAPS:
-
-```yaml
-controlPlane:
-  auth:
-    token:
-      existingSecret: kubeloop-token-signing
-    providers:
-      - id: legacy-ad
-        type: ad
-        displayName: Corporate Active Directory
-        ad:
-          directoryID: corp.example
-          url: ldaps://dc.corp.example:636
-          baseDN: DC=corp,DC=example
-          userFilter: "(&(objectClass=user)(sAMAccountName={username}))"
-          bindDN: CN=kubeloop-reader,OU=Service Accounts,DC=corp,DC=example
-          existingSecret: kubeloop-ad
-          bindPasswordKey: bind-password
-          caKey: ca.crt
-          objectIDAttribute: objectGUID
-          nestedGroupDepth: 0
-          maxGroups: 200
-```
-
-`ldap://` is rejected unless `startTLS: true` is explicitly set. TLS always verifies the server certificate and hostname. If `bindDN` is omitted, directory search must permit anonymous read of the configured user attributes. User passwords are used only for a fresh per-login bind and are never added to the ConfigMap, database, Token, audit metadata, logs or metrics.
-
 ## Development authentication (unsafe for production)
 
-`static-token` and `anonymous` are disabled unless `controlPlane.auth.developmentMode=true`. Both are bootstrap login methods only: after login, Control Plane issues the same short-lived, refreshable Gateway Token Family used by OIDC and AD, so authorization, audit, Session and WSS enforcement are unchanged.
-
-For a controlled development environment, create a random token of at least 32 characters and keep it in a Secret:
-
-```bash
-kubectl -n kubeloop-system create secret generic kubeloop-development-auth \
-  --from-literal=token="$(openssl rand -base64 32)"
-```
-
-```yaml
-controlPlane:
-  auth:
-    developmentMode: true
-    token:
-      existingSecret: kubeloop-token-signing
-    providers:
-      - id: local
-        type: static-token
-        displayName: Development Token
-        staticToken:
-          existingSecret: kubeloop-development-auth
-          tokenKey: token
-          subject: local-developer
-          groups: [developers]
-```
-
-The static token is projected only into Control Plane, hashed in memory, never written to the auth ConfigMap, and cleared from client input after the request. Discovery advertises it explicitly as `type: static-token`, `interaction: token`.
-
-Anonymous mode requires the same explicit development gate and an `anonymous` Provider. It asks for no credential and therefore must never be enabled on a production or untrusted network. Control Plane emits a high-visibility `SECURITY WARNING` at every startup while it is enabled; discovery advertises `type: anonymous`, `interaction: none`.
+Anonymous mode requires `controlPlane.auth.developmentMode=true` and an `anonymous` Provider. It asks for no credential and therefore must never be enabled on a production or untrusted network. After login, Control Plane issues the same short-lived, refreshable Gateway Token Family used by OIDC, so authorization, audit, Session and WSS enforcement are unchanged. Control Plane emits a high-visibility `SECURITY WARNING` at every startup while it is enabled; discovery advertises `type: anonymous`, `interaction: none`.
 
 ## Gateway Policy
 
 Authentication does not grant API access by itself. The default policy has no
-rules and denies every `/api/v2` operation. Add allow rules explicitly:
+rules and denies every `/kubeloop/api` operation. Add allow rules explicitly:
 
 ```yaml
 controlPlane:
@@ -355,7 +298,7 @@ the prior policy.
 
 The Control Plane Management Plane has a separate deny-by-default role engine;
 ordinary Gateway Policy access never grants an `admin.*` operation. Initial
-deployment may identify exact stable OIDC/AD subjects or normalized groups:
+deployment may identify exact stable OIDC subjects or normalized groups:
 
 ```yaml
 controlPlane:
@@ -369,7 +312,7 @@ controlPlane:
 Subjects are Control Plane Principal UUIDs; wildcards, `$cluster`, upstream email
 addresses, and display names are not valid bootstrap selectors. A normalized
 group is normally the practical first-install selector because a new Principal
-UUID is assigned at its first successful OIDC/AD login. After a formal
+UUID is assigned at its first successful OIDC login. After a formal
 `platform-admin` assignment revision is
 published, the persistent retirement marker prevents old values or a rollback
 from restoring bootstrap access. Disaster recovery requires an explicit Helm
@@ -401,9 +344,9 @@ and derives a SHA-256 generation so Secret rotation invalidates prior emergency
 sessions. Emergency sessions are non-refreshable and may never become ordinary
 Gateway Token Families or RelayTickets.
 
-## Managed OIDC / AD Provider revisions
+## Managed OIDC Provider revisions
 
-The Management Plane can validate, publish, and roll back OIDC/AD Providers
+The Management Plane can validate, publish, and roll back OIDC Providers
 without restarting the Control Plane. Secret values are never accepted by the
 browser API. First allowlist the Kubernetes Secret keys that may be selected by
 a revision and configure the Gateway token signing key:
@@ -417,16 +360,15 @@ controlPlane:
     providerSecretAliases:
       corporate:
         existingSecret: kubeloop-corporate-auth
-        clientSecretKey: oidc-client-secret # optional by Provider type
-        bindPasswordKey: ad-bind-password   # optional by Provider type
-        caKey: ca.crt                       # optional
+        clientSecretKey: oidc-client-secret
+        caKey: ca.crt # optional
 ```
 
 Helm projects only the selected keys under the fixed read-only
 `/var/run/secrets/kubeloop/management/providers/<alias>/` root. The management
 database stores only the alias and its non-sensitive use (`client-secret`,
 `bind-password`, or `ca`); API responses expose only use names and never echo
-alias values. `POST /api/v2/admin/providers/{id}/validate` performs discovery
+alias values. `POST /kubeloop/api/admin/providers/{id}/validate` performs discovery
 or directory connectivity checks without changing the live Registry. Draft,
 publish, and rollback use `/providers/{id}/drafts`,
 `/providers/{id}/changes/{changeID}/publish`, and
@@ -456,7 +398,7 @@ capabilities it does not offer:
 
 The Operator role is independent: it may reconcile `trafficbindings` and their
 status/finalizers, read Pods, and create/update/delete Services, Endpoints and
-EndpointSlices. It receives no database, OIDC/AD, RelayTicket, exec/file or
+EndpointSlices. It receives no database, OIDC, RelayTicket, exec/file or
 Secret permissions. Control Plane no longer writes those traffic resources
 directly; CR deletion waits until the Operator finalizer completes restoration.
 
@@ -521,7 +463,7 @@ events before enabling this mode.
 
 The repository's Minikube Helm lifecycle E2E enables API Server metadata auditing,
 grants a temporary exact-user/exact-group impersonation role outside this
-chart, calls `GET /api/v2/version`, and asserts that the audit event contains
+chart, calls `GET /kubeloop/api/version`, and asserts that the audit event contains
 both the Control Plane ServiceAccount and the final prefixed Principal identity.
 It also proves that an unmapped identity group is not forwarded.
 
@@ -537,52 +479,52 @@ controlPlane:
 
 Authenticated, policy-authorized clients can use:
 
-- `GET /api/v2/version`
-- `GET /api/v2/capabilities?namespace=<name>`
-- `GET /api/v2/namespaces[?limit=...&continue=...]`
-- `GET /api/v2/namespaces/<namespace>`
-- `GET /api/v2/namespaces/<namespace>/pods[/<name>]`
-- `GET /api/v2/namespaces/<namespace>/services[/<name>]`
-- `GET /api/v2/namespaces/<namespace>/{pods,services}?watch=true` as an
+- `GET /kubeloop/api/version`
+- `GET /kubeloop/api/capabilities?namespace=<name>`
+- `GET /kubeloop/api/namespaces[?limit=...&continue=...]`
+- `GET /kubeloop/api/namespaces/<namespace>`
+- `GET /kubeloop/api/namespaces/<namespace>/pods[/<name>]`
+- `GET /kubeloop/api/namespaces/<namespace>/services[/<name>]`
+- `GET /kubeloop/api/namespaces/<namespace>/{pods,services}?watch=true` as an
   authenticated WebSocket of versioned full snapshots
-- `POST /api/v2/sessions?namespace=<name>` with `Idempotency-Key`
-- `GET /api/v2/sessions/<id>?namespace=<name>`
-- `POST /api/v2/sessions/<id>/heartbeat?namespace=<name>` with `If-Match`
-- `DELETE /api/v2/sessions/<id>?namespace=<name>` with `If-Match`
-- `POST /api/v2/sessions/<id>/tickets?namespace=<name>` with JSON body
+- `POST /kubeloop/api/sessions?namespace=<name>` with `Idempotency-Key`
+- `GET /kubeloop/api/sessions/<id>?namespace=<name>`
+- `POST /kubeloop/api/sessions/<id>/heartbeat?namespace=<name>` with `If-Match`
+- `DELETE /kubeloop/api/sessions/<id>?namespace=<name>` with `If-Match`
+- `POST /kubeloop/api/sessions/<id>/tickets?namespace=<name>` with JSON body
   `{"networkSpecHash":"<optional lowercase sha256>"}`
-- `POST /api/v2/sessions/<id>/port-forwards?namespace=<name>` with
+- `POST /kubeloop/api/sessions/<id>/port-forwards?namespace=<name>` with
   `Idempotency-Key` and a Pod/Service target document
-- `GET /api/v2/sessions/<id>/port-forwards?namespace=<name>`
-- `DELETE /api/v2/sessions/<id>/port-forwards/<task-id>?namespace=<name>`
-- `POST /api/v2/sessions/<id>/exec?namespace=<name>` with `Idempotency-Key`
-- `GET /api/v2/sessions/<id>/exec/<task-id>/stream?namespace=<name>` as an
+- `GET /kubeloop/api/sessions/<id>/port-forwards?namespace=<name>`
+- `DELETE /kubeloop/api/sessions/<id>/port-forwards/<task-id>?namespace=<name>`
+- `POST /kubeloop/api/sessions/<id>/exec?namespace=<name>` with `Idempotency-Key`
+- `GET /kubeloop/api/sessions/<id>/exec/<task-id>/stream?namespace=<name>` as an
   authenticated binary WebSocket stream
-- `POST /api/v2/sessions/<id>/file-transfers?namespace=<name>` with
+- `POST /kubeloop/api/sessions/<id>/file-transfers?namespace=<name>` with
   `Idempotency-Key`, a Pod/container target, an absolute container path, and
   upload metadata when applicable. File uploads may include a stable UUID
   `resumeId`; the Control Plane probes the Pod partial and returns the
   authoritative `offset` in the Task document.
-- `GET /api/v2/sessions/<id>/file-transfers/<task-id>?namespace=<name>`
-- `GET /api/v2/sessions/<id>/file-transfers/<task-id>/stream?namespace=<name>`
+- `GET /kubeloop/api/sessions/<id>/file-transfers/<task-id>?namespace=<name>`
+- `GET /kubeloop/api/sessions/<id>/file-transfers/<task-id>/stream?namespace=<name>`
   as an authenticated binary WebSocket upload/download stream
-- `POST /api/v2/sessions/<id>/pod-files/list?namespace=<name>` with a
+- `POST /kubeloop/api/sessions/<id>/pod-files/list?namespace=<name>` with a
   Pod/container and absolute directory path
-- `POST /api/v2/sessions/<id>/pod-files/{create,rename,delete}?namespace=<name>`
+- `POST /kubeloop/api/sessions/<id>/pod-files/{create,rename,delete}?namespace=<name>`
   with `Idempotency-Key`; mutations return a terminal `pod-file-operation` Task
-- `GET /api/v2/sessions/<id>/pod-files/operations/<task-id>?namespace=<name>`
-- `POST /api/v2/sessions/<id>/{exchanges,mirrors,previews}?namespace=<name>`
+- `GET /kubeloop/api/sessions/<id>/pod-files/operations/<task-id>?namespace=<name>`
+- `POST /kubeloop/api/sessions/<id>/{exchanges,mirrors,previews}?namespace=<name>`
   with `Idempotency-Key`; Exchange and Mirror select an existing Service while
   Preview declares a new temporary Service name and one or more ports
-- `GET /api/v2/sessions/<id>/{exchanges,mirrors,previews}/<task-id>?namespace=<name>`
-- `DELETE /api/v2/sessions/<id>/{exchanges,mirrors,previews}/<task-id>?namespace=<name>`
+- `GET /kubeloop/api/sessions/<id>/{exchanges,mirrors,previews}/<task-id>?namespace=<name>`
+- `DELETE /kubeloop/api/sessions/<id>/{exchanges,mirrors,previews}/<task-id>?namespace=<name>`
 - `GET /traffic/v1/{exchange,mirror,preview}/<task-id>` on the assigned Data Plane endpoint, authenticated by a fresh RelayTicket
   as an authenticated reverse WebSocket stream. Preview resources carry the
   Task UUID as exact owner metadata; name conflicts are never overwritten and
   cleanup only deletes objects whose owner metadata still matches.
 
 Capability results are the intersection of Gateway Policy and Kubernetes RBAC.
-`/api/v2/version` returns both `gitVersion` (Kubernetes) and `gatewayVersion`.
+`/kubeloop/api/version` returns both `gitVersion` (Kubernetes) and `gatewayVersion`.
 The versioned capability document includes `schemaVersion`, `principalId`,
 `namespace`, `gatewayVersion`, and the authorized capability names. In addition
 to inventory and service workflow names, `cluster.tunnel` requires the complete
@@ -636,7 +578,7 @@ dropped. Data Plane still does not automount a general Kubernetes API token.
 
 Ingress NetworkPolicies are enabled by default. Restricted egress is opt-in
 because the chart cannot safely infer the cluster's Kubernetes API address,
-authorized workload CIDRs, OIDC/AD endpoints or external PostgreSQL address.
+authorized workload CIDRs, OIDC endpoints or external PostgreSQL address.
 When enabled, Helm requires explicit allow rules for Control Plane, Data Plane and
 Operator; an incomplete policy fails rendering instead of producing workloads
 that hang at startup:

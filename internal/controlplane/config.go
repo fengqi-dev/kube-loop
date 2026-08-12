@@ -119,17 +119,6 @@ func (config Config) normalized() (Config, error) {
 			if config.AuthMethods[index].Interaction != "browser" {
 				return Config{}, fmt.Errorf("auth method %d requires browser interaction", index)
 			}
-		case "ad":
-			if config.AuthMethods[index].Interaction == "" {
-				config.AuthMethods[index].Interaction = "password"
-			}
-			if config.AuthMethods[index].Interaction != "password" {
-				return Config{}, fmt.Errorf("auth method %d requires password interaction", index)
-			}
-		case "static-token":
-			if config.AuthMethods[index].Interaction != "token" {
-				return Config{}, fmt.Errorf("auth method %d requires token interaction", index)
-			}
 		case "anonymous":
 			if config.AuthMethods[index].Interaction != "none" {
 				return Config{}, fmt.Errorf("auth method %d requires none interaction", index)

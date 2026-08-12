@@ -9,29 +9,29 @@ import (
 	"time"
 )
 
-const passwordLimitWindow = time.Minute
+const loginLimitWindow = time.Minute
 
 type limitBucket struct {
 	started time.Time
 	count   int
 }
 
-type passwordLimiter struct {
+type loginLimiter struct {
 	mu       sync.Mutex
 	accounts map[string]limitBucket
 	clients  map[string]limitBucket
 	now      func() time.Time
 }
 
-func newPasswordLimiter() *passwordLimiter {
-	return &passwordLimiter{
+func newLoginLimiter() *loginLimiter {
+	return &loginLimiter{
 		accounts: make(map[string]limitBucket), clients: make(map[string]limitBucket), now: time.Now,
 	}
 }
 
-func (limiter *passwordLimiter) allow(providerID, username, remoteAddress string) bool {
+func (limiter *loginLimiter) allow(providerID, subject, remoteAddress string) bool {
 	now := limiter.now().UTC()
-	accountDigest := sha256.Sum256([]byte(providerID + "\x00" + strings.ToLower(strings.TrimSpace(username))))
+	accountDigest := sha256.Sum256([]byte(providerID + "\x00" + strings.ToLower(strings.TrimSpace(subject))))
 	accountKey := hex.EncodeToString(accountDigest[:])
 	clientKey := clientAddress(remoteAddress)
 	limiter.mu.Lock()
@@ -43,15 +43,15 @@ func (limiter *passwordLimiter) allow(providerID, username, remoteAddress string
 	return accountAllowed && clientAllowed
 }
 
-func (limiter *passwordLimiter) success(providerID, username string) {
-	digest := sha256.Sum256([]byte(providerID + "\x00" + strings.ToLower(strings.TrimSpace(username))))
+func (limiter *loginLimiter) success(providerID, subject string) {
+	digest := sha256.Sum256([]byte(providerID + "\x00" + strings.ToLower(strings.TrimSpace(subject))))
 	limiter.mu.Lock()
 	delete(limiter.accounts, hex.EncodeToString(digest[:]))
 	limiter.mu.Unlock()
 }
 
 func incrementBucket(bucket limitBucket, now time.Time, maximum int) (limitBucket, bool) {
-	if bucket.started.IsZero() || now.Sub(bucket.started) >= passwordLimitWindow {
+	if bucket.started.IsZero() || now.Sub(bucket.started) >= loginLimitWindow {
 		bucket = limitBucket{started: now}
 	}
 	if bucket.count >= maximum {

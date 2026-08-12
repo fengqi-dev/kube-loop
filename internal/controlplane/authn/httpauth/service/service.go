@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 
-	"github.com/fengqi-dev/kube-loop/internal/controlplane/authn"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/authn/login"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/authn/token"
 )
@@ -25,53 +24,25 @@ type StartRequest struct {
 type Service struct {
 	login     *login.Service
 	tokens    *token.Service
-	passwords *passwordLimiter
+	logins    *loginLimiter
 }
 
 func New(loginService *login.Service, tokenService *token.Service) (*Service, error) {
 	if loginService == nil || tokenService == nil {
 		return nil, errors.New("login and token services are required")
 	}
-	return &Service{login: loginService, tokens: tokenService, passwords: newPasswordLimiter()}, nil
-}
-
-func (service *Service) StaticToken(ctx context.Context, providerID, remoteAddress, value, deviceID string) (token.Pair, error) {
-	if !service.passwords.allow(providerID, "static-token", remoteAddress) {
-		return token.Pair{}, ErrRateLimited
-	}
-	presented := []byte(value)
-	result, err := service.login.AuthenticateToken(ctx, providerID, authn.TokenCredentials{Token: presented})
-	clear(presented)
-	if err != nil {
-		return token.Pair{}, ErrInvalidCredentials
-	}
-	service.passwords.success(providerID, "static-token")
-	return service.issue(ctx, result, deviceID)
+	return &Service{login: loginService, tokens: tokenService, logins: newLoginLimiter()}, nil
 }
 
 func (service *Service) Anonymous(ctx context.Context, providerID, remoteAddress, deviceID string) (token.Pair, error) {
-	if !service.passwords.allow(providerID, "anonymous", remoteAddress) {
+	if !service.logins.allow(providerID, "anonymous", remoteAddress) {
 		return token.Pair{}, ErrRateLimited
 	}
 	result, err := service.login.AuthenticateAnonymous(ctx, providerID)
 	if err != nil {
 		return token.Pair{}, ErrInvalidCredentials
 	}
-	service.passwords.success(providerID, "anonymous")
-	return service.issue(ctx, result, deviceID)
-}
-
-func (service *Service) Password(ctx context.Context, providerID, remoteAddress, username, password, deviceID string) (token.Pair, error) {
-	if !service.passwords.allow(providerID, username, remoteAddress) {
-		return token.Pair{}, ErrRateLimited
-	}
-	presented := []byte(password)
-	result, err := service.login.AuthenticatePassword(ctx, providerID, authn.PasswordCredentials{Username: username, Password: presented})
-	clear(presented)
-	if err != nil {
-		return token.Pair{}, ErrInvalidCredentials
-	}
-	service.passwords.success(providerID, username)
+	service.logins.success(providerID, "anonymous")
 	return service.issue(ctx, result, deviceID)
 }
 

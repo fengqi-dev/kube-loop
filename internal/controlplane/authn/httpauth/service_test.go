@@ -8,8 +8,6 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -30,23 +28,6 @@ type handlerOIDCProvider struct {
 	mu    sync.Mutex
 	state string
 	nonce string
-}
-
-type handlerADProvider struct{}
-
-func (*handlerADProvider) Descriptor() authn.Descriptor {
-	return authn.Descriptor{ID: "legacy-ad", Type: authn.ProviderAD, Interaction: authn.InteractionPassword}
-}
-func (*handlerADProvider) Check(context.Context) error { return nil }
-func (*handlerADProvider) AuthenticatePassword(_ context.Context, credentials authn.PasswordCredentials) (authn.Identity, error) {
-	defer clear(credentials.Password)
-	if credentials.Username != "ada" || string(credentials.Password) != "correct-password" {
-		return authn.Identity{}, errors.New("invalid credentials")
-	}
-	return authn.Identity{
-		ProviderID: "legacy-ad", DirectoryID: "corp", ObjectID: "object-guid",
-		DisplayName: "Ada", Groups: []string{"Developers"},
-	}, nil
 }
 
 func (provider *handlerOIDCProvider) Descriptor() authn.Descriptor {
@@ -154,77 +135,8 @@ func TestHTTPAuthenticationRejectsUnknownJSONAndHidesRevocationExistence(t *test
 	}
 }
 
-func TestHTTPPasswordLoginAndRateLimit(t *testing.T) {
+func TestHTTPAnonymousLoginIssuesStandardTokenLifecycle(t *testing.T) {
 	handler, _ := newHandlerTestServer(t)
-	login := performJSON(t, handler, http.MethodPost, "/auth/ad/legacy-ad/login", passwordRequest{
-		Username: "ada", Password: "correct-password", DeviceID: "desktop-ad",
-	})
-	if login.Code != http.StatusOK || strings.Contains(login.Body.String(), "correct-password") {
-		t.Fatalf("AD login status=%d body=%s", login.Code, login.Body.String())
-	}
-	var tokens tokenResponse
-	if err := json.Unmarshal(login.Body.Bytes(), &tokens); err != nil || tokens.AccessToken == "" || tokens.RefreshToken == "" {
-		t.Fatalf("AD tokens=%#v error=%v", tokens, err)
-	}
-	for attempt := range 5 {
-		response := performJSON(t, handler, http.MethodPost, "/auth/ad/legacy-ad/login", passwordRequest{
-			Username: "attacker-target", Password: "wrong-password", DeviceID: "desktop-ad",
-		})
-		if response.Code != http.StatusUnauthorized || strings.Contains(response.Body.String(), "wrong-password") {
-			t.Fatalf("failed AD login %d status=%d body=%s", attempt, response.Code, response.Body.String())
-		}
-	}
-	limited := performJSON(t, handler, http.MethodPost, "/auth/ad/legacy-ad/login", passwordRequest{
-		Username: "attacker-target", Password: "wrong-password", DeviceID: "desktop-ad",
-	})
-	if limited.Code != http.StatusTooManyRequests {
-		t.Fatalf("AD rate limit status=%d body=%s", limited.Code, limited.Body.String())
-	}
-}
-
-func TestHTTPPasswordLoginLimitsClientWideSpraying(t *testing.T) {
-	handler, _ := newHandlerTestServer(t)
-	for attempt := range 30 {
-		response := performJSON(t, handler, http.MethodPost, "/auth/ad/legacy-ad/login", passwordRequest{
-			Username: fmt.Sprintf("spray-target-%d", attempt), Password: "wrong-password", DeviceID: "desktop-spray",
-		})
-		if response.Code != http.StatusUnauthorized {
-			t.Fatalf("spray attempt %d status=%d body=%s", attempt, response.Code, response.Body.String())
-		}
-	}
-	limited := performJSON(t, handler, http.MethodPost, "/auth/ad/legacy-ad/login", passwordRequest{
-		Username: "another-target", Password: "wrong-password", DeviceID: "desktop-spray",
-	})
-	if limited.Code != http.StatusTooManyRequests || strings.Contains(limited.Body.String(), "another-target") {
-		t.Fatalf("client spray limit status=%d body=%s", limited.Code, limited.Body.String())
-	}
-}
-
-func TestHTTPDevelopmentLoginIssuesStandardTokenLifecycle(t *testing.T) {
-	handler, _ := newHandlerTestServer(t)
-	static := performJSON(t, handler, http.MethodPost, "/auth/static-token/local/login", staticTokenRequest{
-		Token: "0123456789abcdef0123456789abcdef", DeviceID: "desktop-static",
-	})
-	if static.Code != http.StatusOK || strings.Contains(static.Body.String(), "0123456789abcdef") {
-		t.Fatalf("static-token login status=%d body=%s", static.Code, static.Body.String())
-	}
-	var staticTokens tokenResponse
-	if err := json.Unmarshal(static.Body.Bytes(), &staticTokens); err != nil ||
-		staticTokens.AccessToken == "" || staticTokens.RefreshToken == "" {
-		t.Fatalf("static-token tokens=%#v error=%v", staticTokens, err)
-	}
-	refresh := performJSON(t, handler, http.MethodPost, "/auth/token/refresh", refreshRequest{
-		RefreshToken: staticTokens.RefreshToken,
-	})
-	if refresh.Code != http.StatusOK {
-		t.Fatalf("static-token refresh status=%d body=%s", refresh.Code, refresh.Body.String())
-	}
-	wrong := performJSON(t, handler, http.MethodPost, "/auth/static-token/local/login", staticTokenRequest{
-		Token: "fedcba9876543210fedcba9876543210", DeviceID: "desktop-static",
-	})
-	if wrong.Code != http.StatusUnauthorized || strings.Contains(wrong.Body.String(), "fedcba") {
-		t.Fatalf("wrong static-token status=%d body=%s", wrong.Code, wrong.Body.String())
-	}
 	anonymous := performJSON(t, handler, http.MethodPost, "/auth/anonymous/guest/login", anonymousRequest{
 		DeviceID: "desktop-anonymous",
 	})
@@ -235,6 +147,12 @@ func TestHTTPDevelopmentLoginIssuesStandardTokenLifecycle(t *testing.T) {
 	if err := json.Unmarshal(anonymous.Body.Bytes(), &anonymousTokens); err != nil ||
 		anonymousTokens.AccessToken == "" || anonymousTokens.RefreshToken == "" {
 		t.Fatalf("anonymous tokens=%#v error=%v", anonymousTokens, err)
+	}
+	refresh := performJSON(t, handler, http.MethodPost, "/auth/token/refresh", refreshRequest{
+		RefreshToken: anonymousTokens.RefreshToken,
+	})
+	if refresh.Code != http.StatusOK {
+		t.Fatalf("anonymous refresh status=%d body=%s", refresh.Code, refresh.Body.String())
 	}
 }
 
@@ -248,20 +166,13 @@ func newHandlerTestServer(t *testing.T) (*Service, *handlerOIDCProvider) {
 	}
 	t.Cleanup(func() { _ = store.Close() })
 	provider := &handlerOIDCProvider{}
-	staticProvider, err := development.NewStaticToken(
-		"local", "Development Token", []byte("0123456789abcdef0123456789abcdef"),
-		development.IdentityConfig{Subject: "developer", Groups: []string{"developers"}},
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
 	anonymousProvider, err := development.NewAnonymous(
 		"guest", "Anonymous (unsafe)", development.IdentityConfig{Subject: "guest", Groups: []string{"developers"}},
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	registry, err := authn.NewRegistry(provider, &handlerADProvider{}, staticProvider, anonymousProvider)
+	registry, err := authn.NewRegistry(provider, anonymousProvider)
 	if err != nil {
 		t.Fatal(err)
 	}

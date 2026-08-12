@@ -19,14 +19,13 @@ controlPlane:
   auth:
     # Public discovery is derived from configured Providers. Secrets are
     # mounted from existing Kubernetes Secrets and never written to ConfigMap.
-    # Required for static-token or anonymous Providers. Never enable this in
-    # production; anonymous mode grants every caller the configured identity.
+    # Required for anonymous Providers. Never enable this in production;
+    # anonymous mode grants every caller the configured identity.
     developmentMode: false
     providers: []
     token:
-      # Required when a static Provider or managed Provider Secret alias is
-      # configured. This lets the first managed Provider publish without a
-      # restart. The key is Ed25519 PKCS#8 PEM.
+      # Required when an authentication Provider is configured. The key is
+      # Ed25519 PKCS#8 PEM.
       existingSecret: ""
       signingKeyKey: signing-key.pem
       keyID: primary
@@ -49,14 +48,6 @@ controlPlane:
     #       email: email
     #       groups: groups
     #     httpTimeout: 10s
-    # - id: local-token
-    #   type: static-token
-    #   displayName: Development Token
-    #   staticToken:
-    #     existingSecret: kubeloop-development-auth
-    #     tokenKey: token
-    #     subject: local-developer
-    #     groups: [developers]
     # - id: anonymous
     #   type: anonymous
     #   displayName: Anonymous (unsafe)
@@ -93,22 +84,6 @@ controlPlane:
     serverCertificateKey: tls.crt
     serverPrivateKeyKey: tls.key
     caKey: ca.crt
-    # - id: legacy-ad
-    #   type: ad
-    #   displayName: Corporate Active Directory
-    #   ad:
-    #     directoryID: corp.example
-    #     url: ldaps://dc.corp.example:636
-    #     startTLS: false
-    #     baseDN: DC=corp,DC=example
-    #     userFilter: "(&(objectClass=user)(sAMAccountName={username}))"
-    #     bindDN: CN=kubeloop-reader,OU=Service Accounts,DC=corp,DC=example
-    #     existingSecret: kubeloop-ad
-    #     bindPasswordKey: bind-password
-    #     caKey: ca.crt
-    #     objectIDAttribute: objectGUID
-    #     nestedGroupDepth: 0
-    #     maxGroups: 200
   policy:
     # Rules are allow-only and evaluated by subject/group, namespace,
     # operation, and resource kind. An empty list is an explicit deny-all.
@@ -138,14 +113,13 @@ controlPlane:
       # emergency:
       #   existingSecret: kubeloop-break-glass
       #   credentialKey: credential
-    # Allowlisted aliases available to database-managed OIDC/AD Provider
+    # Allowlisted aliases available to database-managed OIDC Provider
     # revisions. The Management API accepts only alias names; Helm projects
     # selected keys into fixed read-only paths owned by the deployment.
     providerSecretAliases: {}
     # corporate:
     #   existingSecret: kubeloop-corporate-auth
     #   clientSecretKey: oidc-client-secret
-    #   bindPasswordKey: ad-bind-password
     #   caKey: ca.crt
   kubernetes:
     timeout: 15s
@@ -348,7 +322,7 @@ networkPolicy:
           - namespaceSelector: {}
   egress:
     # Restricted egress needs installation-specific Kubernetes API, workload,
-    # OIDC/AD and PostgreSQL CIDRs. Enabling it without explicit component
+    # OIDC and PostgreSQL CIDRs. Enabling it without explicit component
     # allow rules fails rendering instead of silently breaking the workloads.
     enabled: false
     dns:

@@ -11,19 +11,15 @@ import (
 type ProviderType string
 
 const (
-	ProviderOIDC        ProviderType = "oidc"
-	ProviderAD          ProviderType = "ad"
-	ProviderStaticToken ProviderType = "static-token"
-	ProviderAnonymous   ProviderType = "anonymous"
+	ProviderOIDC      ProviderType = "oidc"
+	ProviderAnonymous ProviderType = "anonymous"
 )
 
 type Interaction string
 
 const (
-	InteractionBrowser  Interaction = "browser"
-	InteractionPassword Interaction = "password"
-	InteractionToken    Interaction = "token"
-	InteractionNone     Interaction = "none"
+	InteractionBrowser Interaction = "browser"
+	InteractionNone    Interaction = "none"
 )
 
 type Descriptor struct {
@@ -36,13 +32,11 @@ type Descriptor struct {
 // Identity is the normalized result of one successful upstream
 // authentication. It is not a Gateway token and grants no permissions.
 type Identity struct {
-	ProviderID  string
-	Issuer      string
-	Subject     string
-	DirectoryID string
-	ObjectID    string
+	ProviderID string
+	Issuer     string
+	Subject    string
 	// DevelopmentSubject is reserved for explicitly enabled development
-	// authentication Providers. Production identities must use OIDC or AD.
+	// authentication Providers. Production identities use OIDC.
 	DevelopmentSubject string
 	DisplayName        string
 	Email              string
@@ -62,13 +56,6 @@ func (identity Identity) ExternalID() (string, error) {
 			return "", errors.New("OIDC identity issuer must be an absolute HTTPS URL")
 		}
 		return issuer + "\x00" + subject, nil
-	case identity.DirectoryID != "" || identity.ObjectID != "":
-		directoryID := strings.TrimSpace(identity.DirectoryID)
-		objectID := strings.TrimSpace(identity.ObjectID)
-		if directoryID == "" || objectID == "" {
-			return "", errors.New("AD identity requires directory ID and immutable object ID")
-		}
-		return directoryID + "\x00" + objectID, nil
 	case identity.DevelopmentSubject != "":
 		subject := strings.TrimSpace(identity.DevelopmentSubject)
 		if subject == "" || len(subject) > 256 {
@@ -82,7 +69,7 @@ func (identity Identity) ExternalID() (string, error) {
 
 // Provider validates upstream credentials and returns a normalized Identity.
 // Token issuance, authorization, persistence and sessions live outside this
-// interface so they cannot depend on a concrete OIDC or LDAP SDK.
+// interface so they cannot depend on a concrete OIDC SDK.
 type Provider interface {
 	Descriptor() Descriptor
 	Check(context.Context) error
@@ -121,25 +108,6 @@ type AuthorizationCodeProvider interface {
 	Provider
 	AuthorizationURL(state, nonce, pkceChallenge string) (string, error)
 	Exchange(context.Context, string, string, string) (Identity, error)
-}
-
-type PasswordCredentials struct {
-	Username string
-	Password []byte
-}
-
-type PasswordProvider interface {
-	Provider
-	AuthenticatePassword(context.Context, PasswordCredentials) (Identity, error)
-}
-
-type TokenCredentials struct {
-	Token []byte
-}
-
-type TokenProvider interface {
-	Provider
-	AuthenticateToken(context.Context, TokenCredentials) (Identity, error)
 }
 
 type AnonymousProvider interface {

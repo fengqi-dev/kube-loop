@@ -5,9 +5,7 @@ go 1.26.0
 require (
 	github.com/coder/websocket v1.8.15
 	github.com/coreos/go-oidc/v3 v3.20.0
-	github.com/go-asn1-ber/asn1-ber v1.5.8
 	github.com/go-jose/go-jose/v4 v4.1.4
-	github.com/go-ldap/ldap/v3 v3.4.13
 	github.com/google/uuid v1.6.0
 	github.com/hashicorp/go-version v1.9.0
 	github.com/jackc/pgx/v5 v5.10.0
@@ -41,7 +39,6 @@ require (
 require (
 	cel.dev/expr v0.25.1 // indirect
 	git.sr.ht/~jackmordaunt/go-toast/v2 v2.0.3 // indirect
-	github.com/Azure/go-ntlmssp v0.1.1 // indirect
 	github.com/Masterminds/semver/v3 v3.4.0 // indirect
 	github.com/antlr4-go/antlr/v4 v4.13.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect

@@ -60,15 +60,12 @@
 {{- fail (printf "controlPlane.management.providerSecretAliases.%s must use a valid stable alias" $alias) }}
 {{- end }}
 {{- $_ := required (printf "controlPlane.management.providerSecretAliases.%s.existingSecret is required" $alias) $secret.existingSecret }}
-{{- if not (or $secret.clientSecretKey $secret.bindPasswordKey $secret.caKey) }}
+{{- if not (or $secret.clientSecretKey $secret.caKey) }}
 {{- fail (printf "controlPlane.management.providerSecretAliases.%s must project at least one key" $alias) }}
 {{- end }}
 {{- $files := dict }}
 {{- if $secret.clientSecretKey }}
 {{- $_ := set $files "clientSecretFile" (printf "/var/run/secrets/kubeloop/management/providers/%s/client-secret" $alias) }}
-{{- end }}
-{{- if $secret.bindPasswordKey }}
-{{- $_ := set $files "bindPasswordFile" (printf "/var/run/secrets/kubeloop/management/providers/%s/bind-password" $alias) }}
 {{- end }}
 {{- if $secret.caKey }}
 {{- $_ := set $files "caFile" (printf "/var/run/secrets/kubeloop/management/providers/%s/ca.crt" $alias) }}
@@ -148,56 +145,6 @@ data:
 {{- $_ := set $oidcConfig "caFile" (printf "/var/run/secrets/kubeloop/auth/%s/ca.crt" $id) }}
 {{- end }}
 {{- $providers = append $providers (dict "id" $id "type" $type "displayName" (default "" $provider.displayName) "oidc" $oidcConfig) }}
-{{- else if eq $type "ad" }}
-{{- $ad := required (printf "controlPlane.auth.providers[%d].ad is required" $index) $provider.ad }}
-{{- $directoryID := required (printf "controlPlane.auth.providers[%d].ad.directoryID is required" $index) $ad.directoryID }}
-{{- $url := required (printf "controlPlane.auth.providers[%d].ad.url is required" $index) $ad.url }}
-{{- $baseDN := required (printf "controlPlane.auth.providers[%d].ad.baseDN is required" $index) $ad.baseDN }}
-{{- if and (not (hasPrefix "ldaps://" $url)) (not (and (hasPrefix "ldap://" $url) $ad.startTLS)) }}
-{{- fail (printf "controlPlane.auth.providers[%d].ad.url must use ldaps:// or explicitly enabled StartTLS" $index) }}
-{{- end }}
-{{- $adConfig := dict
-      "directoryId" $directoryID
-      "url" $url
-      "startTLS" (default false $ad.startTLS)
-      "baseDn" $baseDN
-      "userFilter" (default "(&(objectClass=user)(sAMAccountName={username}))" $ad.userFilter)
-      "bindDn" (default "" $ad.bindDN)
-      "objectIdAttribute" (default "objectGUID" $ad.objectIDAttribute)
-      "displayNameAttribute" (default "displayName" $ad.displayNameAttribute)
-      "emailAttribute" (default "mail" $ad.emailAttribute)
-      "groupsAttribute" (default "memberOf" $ad.groupsAttribute)
-      "groupNameAttribute" (default "cn" $ad.groupNameAttribute)
-      "nestedGroupDepth" (default 0 $ad.nestedGroupDepth)
-      "maxGroups" (default 200 $ad.maxGroups)
-      "connectTimeout" (default "5s" $ad.connectTimeout)
-      "requestTimeout" (default "5s" $ad.requestTimeout)
-}}
-{{- if $ad.bindDN }}
-{{- $_ := required (printf "controlPlane.auth.providers[%d].ad.existingSecret is required when bindDN is configured" $index) $ad.existingSecret }}
-{{- $_ := required (printf "controlPlane.auth.providers[%d].ad.bindPasswordKey is required when bindDN is configured" $index) $ad.bindPasswordKey }}
-{{- $_ := set $adConfig "bindPasswordFile" (printf "/var/run/secrets/kubeloop/auth/%s/bind-password" $id) }}
-{{- end }}
-{{- if $ad.caKey }}
-{{- $_ := required (printf "controlPlane.auth.providers[%d].ad.existingSecret is required when caKey is configured" $index) $ad.existingSecret }}
-{{- $_ := set $adConfig "caFile" (printf "/var/run/secrets/kubeloop/auth/%s/ca.crt" $id) }}
-{{- end }}
-{{- $providers = append $providers (dict "id" $id "type" $type "displayName" (default "" $provider.displayName) "ad" $adConfig) }}
-{{- else if eq $type "static-token" }}
-{{- if not $.Values.controlPlane.auth.developmentMode }}
-{{- fail (printf "controlPlane.auth.providers[%d] static-token requires controlPlane.auth.developmentMode=true" $index) }}
-{{- end }}
-{{- $staticToken := required (printf "controlPlane.auth.providers[%d].staticToken is required" $index) $provider.staticToken }}
-{{- $_ := required (printf "controlPlane.auth.providers[%d].staticToken.existingSecret is required" $index) $staticToken.existingSecret }}
-{{- $_ := required (printf "controlPlane.auth.providers[%d].staticToken.tokenKey is required" $index) $staticToken.tokenKey }}
-{{- $staticTokenConfig := dict
-      "tokenFile" (printf "/var/run/secrets/kubeloop/auth/%s/static-token" $id)
-      "subject" (default "developer" $staticToken.subject)
-      "displayName" (default "" $staticToken.displayName)
-      "email" (default "" $staticToken.email)
-      "groups" (default (list) $staticToken.groups)
-}}
-{{- $providers = append $providers (dict "id" $id "type" $type "displayName" (default "" $provider.displayName) "staticToken" $staticTokenConfig) }}
 {{- else if eq $type "anonymous" }}
 {{- if not $.Values.controlPlane.auth.developmentMode }}
 {{- fail (printf "controlPlane.auth.providers[%d] anonymous requires controlPlane.auth.developmentMode=true" $index) }}
@@ -211,7 +158,7 @@ data:
 }}
 {{- $providers = append $providers (dict "id" $id "type" $type "displayName" (default "" $provider.displayName) "anonymous" $anonymousConfig) }}
 {{- else }}
-{{- fail (printf "controlPlane.auth.providers[%d].type must be oidc, ad, static-token, or anonymous" $index) }}
+{{- fail (printf "controlPlane.auth.providers[%d].type must be oidc or anonymous" $index) }}
 {{- end }}
 {{- end }}
 apiVersion: v1

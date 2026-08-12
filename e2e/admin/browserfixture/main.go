@@ -151,26 +151,14 @@ func main() {
 	}
 
 	mux := http.NewServeMux()
-	mux.Handle("/api/v2/admin/", http.StripPrefix("/api/v2/admin", management))
-	mux.HandleFunc("/auth/ad/e2e-ad/login", func(writer http.ResponseWriter, request *http.Request) {
-		var input struct {
-			Username string `json:"username"`
-			Password string `json:"password"`
-		}
-		if request.Method != http.MethodPost || json.NewDecoder(request.Body).Decode(&input) != nil ||
-			input.Username != "administrator" || input.Password != "password" {
-			http.Error(writer, `{"error":{"message":"fixture authentication failed"}}`, http.StatusUnauthorized)
-			return
-		}
-		writeTokens(writer)
-	})
+	mux.Handle("/kubeloop/api/admin/", http.StripPrefix("/kubeloop/api/admin", management))
 	mux.HandleFunc("/auth/oidc/e2e-oidc/start", func(writer http.ResponseWriter, request *http.Request) {
 		var input struct {
 			ClientCallback string `json:"clientCallback"`
 			State          string `json:"state"`
 		}
 		if request.Method != http.MethodPost || json.NewDecoder(request.Body).Decode(&input) != nil ||
-			input.ClientCallback != "http://"+*listenAddress+"/api/v2/admin/ui/callback" || input.State == "" {
+			input.ClientCallback != "http://"+*listenAddress+"/kubeloop/api/admin/ui/callback" || input.State == "" {
 			http.Error(writer, `{"error":{"message":"fixture OIDC request failed"}}`, http.StatusBadRequest)
 			return
 		}
@@ -210,7 +198,6 @@ func main() {
 		_ = json.NewEncoder(writer).Encode(map[string]any{
 			"serviceId": "browser-fixture", "authMethods": []any{
 				map[string]string{"id": "e2e-oidc", "type": "oidc", "displayName": "Fixture OIDC", "interaction": "browser"},
-				map[string]string{"id": "e2e-ad", "type": "ad", "displayName": "Fixture AD", "interaction": "password"},
 			},
 		})
 	})
@@ -226,7 +213,7 @@ func main() {
 		defer cancel()
 		_ = server.Shutdown(shutdownContext)
 	}()
-	log.Printf("management browser fixture: http://%s/api/v2/admin/ui/ (credential %q)", *listenAddress, fixtureCredential)
+	log.Printf("management browser fixture: http://%s/kubeloop/api/admin/ui/ (credential %q)", *listenAddress, fixtureCredential)
 	if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatal(err)
 	}

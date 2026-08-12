@@ -17,6 +17,18 @@ import (
 	"github.com/things-go/go-socks5/statute"
 )
 
+func TestBridgeSetLogHandler(t *testing.T) {
+	var messages []string
+	bridge := &Bridge{server: &Server{}}
+	bridge.SetLogHandler(func(message string) {
+		messages = append(messages, message)
+	})
+	bridge.server.logf("TCP connected %s", "api.example.test:443")
+	if len(messages) != 1 || messages[0] != "TCP connected api.example.test:443" {
+		t.Fatalf("messages = %#v", messages)
+	}
+}
+
 var testSessionToken = tunnel.SessionToken{1}
 
 func TestSOCKSUDPPacketRoundTrip(t *testing.T) {

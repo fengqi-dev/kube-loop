@@ -21,8 +21,6 @@ func (routes *Routes) RegisterRoutes(group *echo.Group) {
 	group.Use(routes.securityHeaders, middleware.BodyLimit(maxAuthBodyBytes))
 	group.POST("/oidc/:providerID/start", routes.start)
 	group.GET("/callback/:providerID", routes.callback)
-	group.POST("/ad/:providerID/login", routes.password)
-	group.POST("/static-token/:providerID/login", routes.staticToken)
 	group.POST("/anonymous/:providerID/login", routes.anonymous)
 	group.POST("/token/exchange", routes.exchange)
 	group.POST("/token/refresh", routes.refresh)
@@ -40,17 +38,6 @@ func (routes *Routes) securityHeaders(next echo.HandlerFunc) echo.HandlerFunc {
 	}
 }
 
-func (routes *Routes) staticToken(ctx *echo.Context) error {
-	var requestBody strictJSON[staticTokenRequest]
-	body := &requestBody.Value
-	if !routes.bind(ctx, &requestBody) {
-		return nil
-	}
-	pair, err := routes.service.StaticToken(ctx.Request().Context(), ctx.Param("providerID"), ctx.Request().RemoteAddr, body.Token, body.DeviceID)
-	body.Token = ""
-	return routes.writePair(ctx, pair, err)
-}
-
 func (routes *Routes) anonymous(ctx *echo.Context) error {
 	var requestBody strictJSON[anonymousRequest]
 	body := &requestBody.Value
@@ -58,17 +45,6 @@ func (routes *Routes) anonymous(ctx *echo.Context) error {
 		return nil
 	}
 	pair, err := routes.service.Anonymous(ctx.Request().Context(), ctx.Param("providerID"), ctx.Request().RemoteAddr, body.DeviceID)
-	return routes.writePair(ctx, pair, err)
-}
-
-func (routes *Routes) password(ctx *echo.Context) error {
-	var requestBody strictJSON[passwordRequest]
-	body := &requestBody.Value
-	if !routes.bind(ctx, &requestBody) {
-		return nil
-	}
-	pair, err := routes.service.Password(ctx.Request().Context(), ctx.Param("providerID"), ctx.Request().RemoteAddr, body.Username, body.Password, body.DeviceID)
-	body.Password = ""
 	return routes.writePair(ctx, pair, err)
 }
 

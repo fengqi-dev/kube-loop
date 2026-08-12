@@ -21,7 +21,7 @@ ServiceAccount 部署，以便隔离 Kubernetes 资源协调权限。
 - `Exchange`：保存原 Service 端点快照后，将流量切换至 Gateway relay；删除 CR 时恢复。
 - `Mirror`：使用相同的可恢复 Kubernetes 资源生命周期，数据平面的复制语义由 Gateway 管理。
 
-Operator 只接受 Control Plane 写入的可信 relay 地址。客户端凭证、OAuth/OIDC/AD token 和本地桌面
+Operator 只接受 Control Plane 写入的可信 relay 地址。客户端凭证、OAuth/OIDC token 和本地桌面
 地址不会写入 CRD。
 
 ## Control Plane 与 Operator 的边界

@@ -39,15 +39,6 @@ type exchangeRequest struct {
 type refreshRequest struct {
 	RefreshToken string `json:"refreshToken"`
 }
-type passwordRequest struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
-	DeviceID string `json:"deviceId"`
-}
-type staticTokenRequest struct {
-	Token    string `json:"token"`
-	DeviceID string `json:"deviceId"`
-}
 type anonymousRequest struct {
 	DeviceID string `json:"deviceId"`
 }

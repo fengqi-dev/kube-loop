@@ -190,8 +190,6 @@ func (client *Client) validate(baseURL string, document Document) error {
 		seen[method.ID] = struct{}{}
 		switch {
 		case method.Type == "oidc" && method.Interaction == "browser":
-		case method.Type == "ad" && method.Interaction == "password":
-		case method.Type == "static-token" && method.Interaction == "token":
 		case method.Type == "anonymous" && method.Interaction == "none":
 		default:
 			return fmt.Errorf("service discovery returned unsupported authentication method %q", method.ID)

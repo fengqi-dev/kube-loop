@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/authn"
-	adprovider "github.com/fengqi-dev/kube-loop/internal/controlplane/authn/ad"
 	devprovider "github.com/fengqi-dev/kube-loop/internal/controlplane/authn/development"
 	oidcprovider "github.com/fengqi-dev/kube-loop/internal/controlplane/authn/oidc"
 )
@@ -26,13 +25,11 @@ type File struct {
 }
 
 type Provider struct {
-	ID          string             `json:"id"`
-	Type        string             `json:"type"`
-	DisplayName string             `json:"displayName,omitempty"`
-	OIDC        *OIDCConfig        `json:"oidc,omitempty"`
-	AD          *ADConfig          `json:"ad,omitempty"`
-	StaticToken *StaticTokenConfig `json:"staticToken,omitempty"`
-	Anonymous   *AnonymousConfig   `json:"anonymous,omitempty"`
+	ID          string           `json:"id"`
+	Type        string           `json:"type"`
+	DisplayName string           `json:"displayName,omitempty"`
+	OIDC        *OIDCConfig      `json:"oidc,omitempty"`
+	Anonymous   *AnonymousConfig `json:"anonymous,omitempty"`
 }
 
 type DevelopmentIdentityConfig struct {
@@ -42,37 +39,8 @@ type DevelopmentIdentityConfig struct {
 	Groups      []string `json:"groups,omitempty"`
 }
 
-type StaticTokenConfig struct {
-	TokenFile string `json:"tokenFile"`
-	DevelopmentIdentityConfig
-}
-
 type AnonymousConfig struct {
 	DevelopmentIdentityConfig
-}
-
-type ADConfig struct {
-	DirectoryID                 string `json:"directoryId"`
-	URL                         string `json:"url"`
-	StartTLS                    bool   `json:"startTLS,omitempty"`
-	BaseDN                      string `json:"baseDn"`
-	UserFilter                  string `json:"userFilter,omitempty"`
-	BindDN                      string `json:"bindDn,omitempty"`
-	BindPasswordFile            string `json:"bindPasswordFile,omitempty"`
-	CAFile                      string `json:"caFile,omitempty"`
-	ObjectIDAttribute           string `json:"objectIdAttribute,omitempty"`
-	DisplayNameAttribute        string `json:"displayNameAttribute,omitempty"`
-	EmailAttribute              string `json:"emailAttribute,omitempty"`
-	GroupsAttribute             string `json:"groupsAttribute,omitempty"`
-	UserAccountControlAttribute string `json:"userAccountControlAttribute,omitempty"`
-	LockoutTimeAttribute        string `json:"lockoutTimeAttribute,omitempty"`
-	AccountExpiresAttribute     string `json:"accountExpiresAttribute,omitempty"`
-	PasswordLastSetAttribute    string `json:"passwordLastSetAttribute,omitempty"`
-	GroupNameAttribute          string `json:"groupNameAttribute,omitempty"`
-	NestedGroupDepth            int    `json:"nestedGroupDepth,omitempty"`
-	MaxGroups                   int    `json:"maxGroups,omitempty"`
-	ConnectTimeout              string `json:"connectTimeout,omitempty"`
-	RequestTimeout              string `json:"requestTimeout,omitempty"`
 }
 
 type OIDCConfig struct {
@@ -121,7 +89,7 @@ func Build(ctx context.Context, config File) (*authn.Registry, error) {
 	providers := make([]authn.Provider, 0, len(config.Providers))
 	for index, item := range config.Providers {
 		providerType := strings.ToLower(strings.TrimSpace(item.Type))
-		if (providerType == "static-token" || providerType == "anonymous") && !config.DevelopmentMode {
+		if providerType == "anonymous" && !config.DevelopmentMode {
 			return nil, fmt.Errorf("auth provider %d requires explicit developmentMode", index)
 		}
 		switch providerType {
@@ -130,30 +98,6 @@ func Build(ctx context.Context, config File) (*authn.Registry, error) {
 				return nil, fmt.Errorf("auth provider %d requires oidc configuration", index)
 			}
 			provider, err := buildOIDC(ctx, item)
-			if err != nil {
-				return nil, fmt.Errorf("initialize auth provider %q: %w", item.ID, err)
-			}
-			providers = append(providers, provider)
-		case "ad":
-			if item.AD == nil {
-				return nil, fmt.Errorf("auth provider %d requires ad configuration", index)
-			}
-			provider, err := buildAD(ctx, item)
-			if err != nil {
-				return nil, fmt.Errorf("initialize auth provider %q: %w", item.ID, err)
-			}
-			providers = append(providers, provider)
-		case "static-token":
-			if item.StaticToken == nil {
-				return nil, fmt.Errorf("auth provider %d requires staticToken configuration", index)
-			}
-			rawToken, err := readSmallSecretBytes(item.StaticToken.TokenFile, "development static token")
-			if err != nil {
-				return nil, fmt.Errorf("initialize auth provider %q: %w", item.ID, err)
-			}
-			provider, err := devprovider.NewStaticToken(
-				item.ID, item.DisplayName, rawToken, developmentIdentity(item.StaticToken.DevelopmentIdentityConfig),
-			)
 			if err != nil {
 				return nil, fmt.Errorf("initialize auth provider %q: %w", item.ID, err)
 			}
@@ -207,56 +151,6 @@ func buildOIDC(ctx context.Context, item Provider) (*oidcprovider.Provider, erro
 	})
 }
 
-func buildAD(ctx context.Context, item Provider) (*adprovider.Provider, error) {
-	configuration := item.AD
-	connectTimeout, err := optionalDuration(configuration.ConnectTimeout, "AD connect timeout")
-	if err != nil {
-		return nil, err
-	}
-	requestTimeout, err := optionalDuration(configuration.RequestTimeout, "AD request timeout")
-	if err != nil {
-		return nil, err
-	}
-	bindPassword := ""
-	if strings.TrimSpace(configuration.BindPasswordFile) != "" {
-		bindPassword, err = readSmallSecret(configuration.BindPasswordFile, "AD bind password")
-		if err != nil {
-			return nil, err
-		}
-	}
-	roots, err := loadRoots(configuration.CAFile, "AD")
-	if err != nil {
-		return nil, err
-	}
-	return adprovider.New(ctx, adprovider.Config{
-		ID: item.ID, DisplayName: item.DisplayName,
-		DirectoryID: configuration.DirectoryID, URL: configuration.URL,
-		StartTLS: configuration.StartTLS, BaseDN: configuration.BaseDN,
-		UserFilter: configuration.UserFilter, BindDN: configuration.BindDN,
-		BindPassword: bindPassword, ObjectIDAttribute: configuration.ObjectIDAttribute,
-		DisplayNameAttribute: configuration.DisplayNameAttribute,
-		EmailAttribute:       configuration.EmailAttribute, GroupsAttribute: configuration.GroupsAttribute,
-		UserAccountControlAttribute: configuration.UserAccountControlAttribute,
-		LockoutTimeAttribute:        configuration.LockoutTimeAttribute,
-		AccountExpiresAttribute:     configuration.AccountExpiresAttribute,
-		PasswordLastSetAttribute:    configuration.PasswordLastSetAttribute,
-		GroupNameAttribute:          configuration.GroupNameAttribute,
-		NestedGroupDepth:            configuration.NestedGroupDepth, MaxGroups: configuration.MaxGroups,
-		ConnectTimeout: connectTimeout, RequestTimeout: requestTimeout, RootCAs: roots,
-	})
-}
-
-func optionalDuration(value, name string) (time.Duration, error) {
-	if strings.TrimSpace(value) == "" {
-		return 0, nil
-	}
-	duration, err := time.ParseDuration(value)
-	if err != nil || duration <= 0 {
-		return 0, fmt.Errorf("%s must be a positive duration", name)
-	}
-	return duration, nil
-}
-
 func loadRoots(path, label string) (*x509.CertPool, error) {
 	if strings.TrimSpace(path) == "" {
 		return nil, nil
@@ -273,33 +167,6 @@ func loadRoots(path, label string) (*x509.CertPool, error) {
 		return nil, fmt.Errorf("%s CA file contains no certificates", label)
 	}
 	return roots, nil
-}
-
-func readSmallSecret(path, label string) (string, error) {
-	data, err := readSmallSecretBytes(path, label)
-	if err != nil {
-		return "", err
-	}
-	defer clear(data)
-	return string(data), nil
-}
-
-func readSmallSecretBytes(path, label string) ([]byte, error) {
-	file, err := os.Open(strings.TrimSpace(path))
-	if err != nil {
-		return nil, fmt.Errorf("read %s file", label)
-	}
-	defer file.Close()
-	data, err := io.ReadAll(io.LimitReader(file, 64<<10+1))
-	if err != nil || len(data) > 64<<10 {
-		clear(data)
-		return nil, fmt.Errorf("read %s file", label)
-	}
-	data = bytes.TrimSpace(data)
-	if len(data) == 0 {
-		return nil, fmt.Errorf("%s file is empty", label)
-	}
-	return data, nil
 }
 
 func ensureJSONEOF(decoder *json.Decoder) error {

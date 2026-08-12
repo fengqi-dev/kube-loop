@@ -3,9 +3,8 @@
 > 状态：草案
 > 目标版本：v2.0.0
 > 规划基线：v1.11.0
-> 核心方向：Helm 安装集群内 Gateway；所有 Kubernetes 操作由 Gateway 执行；桌面客户端只配置服务地址，并通过 OIDC 或 Active Directory 登录。
 
-配套架构与关键流程图见 [`diagrams/kubeloop-v2-architecture.drawio`](diagrams/kubeloop-v2-architecture.drawio)。该文件包含整体架构、OIDC/AD 登录、Session/RelayTicket、核心数据路径、Traffic Task 生命周期和断线恢复六个可编辑页面。
+配套架构与关键流程图见 [`diagrams/kubeloop-v2-architecture.drawio`](diagrams/kubeloop-v2-architecture.drawio)。该文件包含整体架构、OIDC 登录、Session/RelayTicket、核心数据路径、Traffic Task 生命周期和断线恢复六个可编辑页面。
 
 ## 1. V2 目标
 
@@ -15,7 +14,6 @@ V2 将 KubeLoop 从“持有 kubeconfig 并直接访问 Kubernetes API 的桌面
 
 1. 管理员通过 Helm 安装并配置 KubeLoop Gateway。
 2. 用户在桌面客户端填写 `https://kubeloop.example.com`。
-3. 客户端读取服务发现信息，并按 Gateway 配置发起 OIDC 浏览器登录或 AD 登录。
 4. 身份认证成功后，客户端建立 HTTPS/WSS Session。
 5. 用户选择授权范围内的 Namespace，并使用网络连接、Port Forward、Pod SSH、文件传输、Exchange、Mirror 和 Preview。
 
@@ -23,7 +21,7 @@ V2 完成时应满足：
 
 - 桌面客户端不读取 kubeconfig，不直接访问 Kubernetes API Server。
 - Kubernetes 凭证、client-go 和资源恢复逻辑位于 Gateway。
-- OIDC/AD 配置由 Gateway 管理；普通客户端只填写服务地址。
+- OIDC 配置由 Gateway 管理；普通客户端只填写服务地址。
 - 每个 HTTP 请求和 WSS 逻辑流都经过身份认证、权限校验和审计。
 - 本地 TUN、路由、DNS、sing-box、Helper 和本地进程访问仍留在客户端。
 - Gateway 可通过 Helm 安装、升级、回滚和卸载。
@@ -88,8 +86,8 @@ Desktop Client
 
 | 组件 | 建议名称 | 权限与职责 |
 | --- | --- | --- |
-| Control Plane | `kubeloop-control-plane` | OIDC/AD、Token、Authorizer、审计、Storage、Kubernetes API、Session/Task 和资源恢复；持有受限 ServiceAccount 和必要 Secret |
-| Data Plane | `kubeloop-gateway` | WSS 多路复用、TCP/UDP/DNS、反向流量、流控和连接指标；不读取业务数据库、OAuth/AD Secret，也不持有 Kubernetes 管理凭证 |
+| Control Plane | `kubeloop-control-plane` | OIDC、Token、Authorizer、审计、Storage、Kubernetes API、Session/Task 和资源恢复；持有受限 ServiceAccount 和必要 Secret |
+| Data Plane | `kubeloop-gateway` | WSS 多路复用、TCP/UDP/DNS、反向流量、流控和连接指标；不读取业务数据库、OAuth/OIDC Secret，也不持有 Kubernetes 管理凭证 |
 
 客户端与 Gateway 之间分为三类协议：
 
@@ -99,7 +97,7 @@ Desktop Client
 
 不允许通过 WSS 建立未经控制面授权的目标连接。每个逻辑 Stream 必须包含 `sessionID`、`streamID`、操作类型和目标描述，并由 Gateway 再次执行授权。
 
-Control Plane 创建 Cluster Session 后签发短期、一次性或有限重用的 `RelayTicket`。Ticket 至少绑定 principal、device、session、目标 Data Plane、允许的操作、NetworkSpec 摘要、过期时间和唯一 ID。Data Plane 使用 Control Plane 的公开签名密钥离线验证 Ticket，不访问 OIDC/AD Provider，也不依赖每个 Stream 回调 Control Plane。
+Control Plane 创建 Cluster Session 后签发短期、一次性或有限重用的 `RelayTicket`。Ticket 至少绑定 principal、device、session、目标 Data Plane、允许的操作、NetworkSpec 摘要、过期时间和唯一 ID。Data Plane 使用 Control Plane 的公开签名密钥离线验证 Ticket，不访问 OIDC Provider，也不依赖每个 Stream 回调 Control Plane。
 
 Pod exec、日志、文件和 Kubernetes API port-forward 仍由持有 Kubernetes 权限的 Control Plane 创建；Data Plane 不为了传输性能获得宽泛的 `pods/exec` 或 `pods/portforward` 权限。后续如果性能数据证明必要，再单独设计权限极窄的 Operation Worker，不纳入 V2.0。
 
@@ -120,7 +118,6 @@ database:
 存储边界如下：
 
 - SQLite/PostgreSQL 保存 Principal、身份映射、Refresh Token 哈希、Device/Cluster Session 元数据、Task、幂等键、资源快照和审计事件。
-- OIDC Client Secret、AD Bind Secret、数据库 DSN 和签名密钥保存在 Kubernetes Secret 或外部 Secret 系统，不写数据库。
 - 活动 WSS/TCP/UDP Stream、socket、流控窗口和实时数据只存在 Data Plane 内存中。
 - Control Plane leader election 使用 Kubernetes Lease，不写业务表模拟分布式锁。
 - 文件内容、命令输出和流量内容默认不落服务端存储。
@@ -142,9 +139,8 @@ SQLite 模式的部署约束：
 | ID | 任务 | 产物 | 完成标准 |
 | --- | --- | --- | --- |
 | V2-001 | 编写客户端/Gateway 信任边界 ADR | `docs/adr/` 架构决策 | 明确凭证、Token、Kubernetes 权限和本地特权边界 |
-| V2-002 | 选择认证模型 | Authentication ADR | 确认 OIDC Broker、Entra ID/AD FS 和原生 AD/LDAPS 的边界，客户端统一使用 Gateway Session Token |
 | V2-003 | 选择授权模型 | Authorization ADR | 明确 Gateway Policy、Kubernetes Impersonation 或两者的优先顺序 |
-| V2-004 | 定义协议版本策略 | API version ADR | 明确 `/api/v2`、WSS protocol version、最低客户端版本和错误码 |
+| V2-004 | 定义协议版本策略 | API version ADR | 明确 `/kubeloop/api`、WSS protocol version、最低客户端版本和错误码 |
 | V2-005 | 定义 Session 所有权 | Session ADR | 明确用户、设备、Session、Task、Stream、Kubernetes 资源之间的归属 |
 | V2-006 | 定义 Gateway HA 边界 | HA ADR | 明确 v2.0 使用 sticky session，活动 Stream 不跨 Pod 迁移 |
 | V2-007 | 完成威胁建模 | Threat model | 覆盖 Token 盗用、callback 劫持、越权、SSRF、跨 Session 和资源残留 |
@@ -155,7 +151,6 @@ SQLite 模式的部署约束：
 
 2026-08-10：ORM 选型冻结在 `docs/adr/0007-control-plane-orm.md`。Control Plane 使用 Bun v1.2.18 作为 Repository 内部的 SQL-first ORM，保留现有 `database/sql` 驱动、显式版本化 migration 和业务层 Repository 接口；从 Cluster Session/NetworkSpec 开始逐仓储迁移，禁止 AutoMigrate。
 
-已完成：**V2-002** 的统一认证模型已冻结在 `docs/adr/0002-authentication.md`，确认 OIDC Broker 优先、原生 AD 仅通过 LDAPS/严格 StartTLS 兼容、桌面 PKCE/exchange code，以及所有 Provider 最终统一为 Gateway Token 和稳定 Principal。
 
 ## 5. Roadmap 总览
 
@@ -166,7 +161,7 @@ SQLite 模式的部署约束：
 | M0 架构冻结 | 1–2 周 | ADR、威胁模型、API 草案和迁移边界确定 |
 | M1 协议与双组件骨架 | 2 周 | 独立 Control Plane/Data Plane、发现接口、内部协议和类型化客户端可用 |
 | M2 Helm 与部署基线 | 2 周 | 可在测试集群安装、独立升级、访问和卸载两个组件 |
-| M3 OIDC/AD、授权与审计 | 2–3 周 | 客户端只凭服务地址完成登录并受到逐操作授权 |
+| M3 OIDC、授权与审计 | 2–3 周 | 客户端只凭服务地址完成登录并受到逐操作授权 |
 | M4 Kubernetes 控制面迁移 | 2–3 周 | 客户端资源查询和 Session 建立不再使用 kubeconfig |
 | M5 数据面迁移 | 2–3 周 | TUN/SOCKS 和多路复用流量完全经过远程 Gateway |
 | M6 功能迁移 | 3–4 周 | 现有核心功能全部改用远程 Gateway |
@@ -210,14 +205,14 @@ SQLite 模式的部署约束：
 
 - [x] **V2-111：建立 Data Plane 可执行入口。**
   - Data Plane 只装配 WSS、multiplexer、dialer、reverse relay、流控、指标和优雅排空。
-  - 构建检查确保其不依赖 Storage Repository、OIDC/LDAP SDK、Kubernetes Provider 或 Control Plane Secret 配置。
+  - 构建检查确保其不依赖 Storage Repository、OIDC SDK、Kubernetes Provider 或 Control Plane Secret 配置。
   - 提供独立镜像或同镜像不同 command；无论采用哪种打包方式，运行时必须是独立进程和 Pod。
   - 2026-08-09：`kubeloop-gateway` 已具备独立镜像和 Helm Deployment，支持 WSS/multiplexer、反向 relay、连接限制、live/ready/metrics、拒绝新连接、活动逻辑流排空和超时强制关闭；架构测试禁止其依赖 Control Plane、Kubernetes、OAuth、桌面 Store 和 Wails。迁移期暂留未暴露到 V2 Service 的 V1 raw TCP listener。
 
 - [x] **V2-112：定义 Control Plane/Data Plane 内部协议。**
   - 定义 Relay 注册、健康、容量、Session 分配、Ticket 公钥轮换、吊销摘要和排空状态。
   - 内部协议版本独立于客户端 API/WSS version，并有双版本滚动升级 contract test。
-  - 禁止通过内部协议传递 OIDC/AD Secret、Refresh Token 或用户密码。
+  - 禁止通过内部协议传递 OIDC Secret、Refresh Token 或用户密码。
   - 2026-08-10（完成）：ADR 0018 与 `internal/protocol/relaycontrol` 定义独立的 `relay.kubeloop.io/v1` 严格 JSON 协议，覆盖 `RelayRegistration/Result`、`RelayHeartbeat/Result`、`SessionAllocation/Assignment` 六类消息；全部消息限制 64 KiB、拒绝未知字段/版本/kind、多 JSON 文档和非法容量/时间/ID。注册 body 刻意没有 `relayId`；mTLS/SPIFFE（或等价受限工作负载证书）认证层生成 trust domain、namespace、ServiceAccount、Pod UID 的 `PeerIdentity`，Control Plane 以 SHA-256 派生稳定 Relay ID。协议上报物理连接/逻辑流容量、ready/draining 与已应用 key/revocation generation，返回不可猜测 lease、心跳期限、desired state、Ed25519 公钥集和吊销摘要。钥匙轮换要求先分发并获 ready Relay 确认，再切换签名，旧公钥保留至旧 Ticket 全过期；私钥永不进入 Data Plane。吊销摘要使用排序的 ClusterSession ID SHA-256、最大撤销 generation、expiry 与 canonical digest，支持本地 generation-bound 拒绝且不暴露 Principal。注册通过 ordered supported-version 列表协商最高共同版本；contract test 覆盖 old/new Control Plane 与 Data Plane 双向滚动升级回退到 v1、双方支持 v2 后才升级以及无共同版本拒绝。严格 unknown-field 测试同时证明 `refreshToken` 等 Secret 字段无法进入协议。`go test ./...`、`go vet ./...`、相关 race 与 `git diff --check` 通过。
 
 - [x] **V2-113：实现 Data Plane Registry。**
@@ -232,7 +227,7 @@ SQLite 模式的部署约束：
   - 增加缓存策略和 contract test。
   - 2026-08-09：已实现 discovery、`/health/live`、`/health/ready` 与 contract test；默认不声明尚未配置的认证方式和功能。
 
-- [x] **V2-102：建立 `/api/v2` HTTP 框架。**
+- [x] **V2-102：建立 `/kubeloop/api` HTTP 框架。**
   - 统一 request ID、JSON 编解码、错误映射、超时、body 大小限制和 panic recovery。
   - 所有 handler 依赖窄接口，禁止直接访问全局 clientset。
   - 2026-08-09：已实现 request ID、严格 JSON 解码、类型化错误、请求 context 超时、body 限制和 panic recovery；API 默认拒绝未认证请求，并通过 `Authenticator`/`APIHandler` 窄接口注入后续实现。
@@ -246,7 +241,7 @@ SQLite 模式的部署约束：
 - [x] **V2-104：生成或维护类型化客户端 SDK。**
   - 客户端封装 discovery、Token、HTTP API、WSS 和错误类型。
   - UI/Wails binding 不直接拼接 endpoint 或解析裸 JSON。
-  - 2026-08-10（完成）：`internal/client` 已作为纯客户端 SDK 边界，分别封装同源 discovery、OIDC/AD 登录与 Token 刷新/撤销、安全凭据存储、带并发单飞刷新和一次 401 重试的 `/api/v2` HTTP 客户端、RelayTicket/WSS v2 连接池、Cluster Session/Data Plane 以及 Port Forward、exec、文件、Pod SSH、Exchange、Mirror、Preview 等类型化远程 Task；所有请求/响应都有有界 body、超时、目标/字段/分页/Session 绑定校验，SDK 依赖图禁止 Control Plane、Data Plane 服务端、本地 Kubernetes、V1 Session/Store 和 Wails runtime。HTTP `APIError` 暴露 status、稳定 code、field、request ID；认证端点新增类型化 `auth.APIError`，discovery 新增 `CompatibilityError` 和 `VERSION_MISMATCH`/`CLIENT_VERSION_UNSUPPORTED` 常量，WSS 提供带支持版本的 `HandshakeError`，UI 无需解析错误字符串。桌面组合根只注入 SDK/Manager，V2 Wails bindings 只接收/返回领域 struct；新增架构测试扫描生产 bindings 与 `components/server`，禁止 `net/http`、裸 WebSocket、`fetch`、`JSON.parse`、`/api/v2` 和 `/auth/` 路径回流到 UI/Wails。Go 全量 test/vet 和前端 TypeScript/Vite production build 通过。
+  - 2026-08-10（完成）：`internal/client` 已作为纯客户端 SDK 边界，分别封装同源 discovery、OIDC 登录与 Token 刷新/撤销、安全凭据存储、带并发单飞刷新和一次 401 重试的 `/kubeloop/api` HTTP 客户端、RelayTicket/WSS v2 连接池、Cluster Session/Data Plane 以及 Port Forward、exec、文件、Pod SSH、Exchange、Mirror、Preview 等类型化远程 Task；所有请求/响应都有有界 body、超时、目标/字段/分页/Session 绑定校验，SDK 依赖图禁止 Control Plane、Data Plane 服务端、本地 Kubernetes、V1 Session/Store 和 Wails runtime。HTTP `APIError` 暴露 status、稳定 code、field、request ID；认证端点新增类型化 `auth.APIError`，discovery 新增 `CompatibilityError` 和 `VERSION_MISMATCH`/`CLIENT_VERSION_UNSUPPORTED` 常量，WSS 提供带支持版本的 `HandshakeError`，UI 无需解析错误字符串。桌面组合根只注入 SDK/Manager，V2 Wails bindings 只接收/返回领域 struct；新增架构测试扫描生产 bindings 与 `components/server`，禁止 `net/http`、裸 WebSocket、`fetch`、`JSON.parse`、`/kubeloop/api` 和 `/auth/` 路径回流到 UI/Wails。Go 全量 test/vet 和前端 TypeScript/Vite production build 通过。
 
 - [x] **V2-105：建立协议 Contract Test。**
   - 覆盖旧客户端、新 Gateway；新客户端、旧 Gateway；未知字段；缺失字段；版本不兼容。
@@ -279,9 +274,9 @@ SQLite 模式的部署约束：
 
 - [x] **V2-110：实现数据库导出、导入和备份工具。**
   - 支持 SQLite 一致性备份、逻辑导出、空 PostgreSQL 导入和导入前校验。
-  - 导出文件带 schema version、校验和和创建版本，不包含 OIDC/AD/数据库 Secret。
+  - 导出文件带 schema version、校验和和创建版本，不包含 OIDC/数据库 Secret。
   - 导入是显式、可审计、失败可回滚的离线管理操作。
-  - 2026-08-10（完成）：新增 `kubeloop-control-plane storage export|import|backup` 离线命令；数据库配置仍只从环境或 Secret 文件读取，不接受 DSN 参数。逻辑导出在 SQLite/PostgreSQL 单一快照内按稳定主键顺序生成固定格式，记录格式/schema version、UTC 时间、Control Plane 创建版本、源后端和规范化内容 SHA-256；精确校验表列、UUID、对象版本、时间、状态、NetworkSpec/哈希和 JSON，并明确排除 OIDC/AD 配置、数据库 Secret 及 state/nonce/PKCE verifier 等短期认证事务。SQLite 备份使用 `VACUUM INTO`，发布前执行 `quick_check`、schema 校验、SHA-256、`0600` 权限和原子发布，拒绝覆盖与符号链接。导入只允许显式 `--actor --confirm-empty` 的空 PostgreSQL：连接前验证完整文件，事务内对全部业务表加排他锁、复核空库、按外键顺序写入并追加 `storage.import` 审计，任何失败整体回滚。默认测试覆盖确定性、篡改/截断/错误版本、Secret 排除和 SQLite 一致性；真实 PostgreSQL 17 race 测试覆盖 SQLite→PostgreSQL、再导出、非空拒绝、成功审计和外键失败后全表为空。运维流程见 `docs/v2-storage-management.zh-CN.md`；全量 Go test/vet、CLI/Storage race、前端生产构建、Helm lint 与 SQLite/PostgreSQL HA template、`git diff --check` 均通过。
+  - 2026-08-10（完成）：新增 `kubeloop-control-plane storage export|import|backup` 离线命令；数据库配置仍只从环境或 Secret 文件读取，不接受 DSN 参数。逻辑导出在 SQLite/PostgreSQL 单一快照内按稳定主键顺序生成固定格式，记录格式/schema version、UTC 时间、Control Plane 创建版本、源后端和规范化内容 SHA-256；精确校验表列、UUID、对象版本、时间、状态、NetworkSpec/哈希和 JSON，并明确排除 OIDC 配置、数据库 Secret 及 state/nonce/PKCE verifier 等短期认证事务。SQLite 备份使用 `VACUUM INTO`，发布前执行 `quick_check`、schema 校验、SHA-256、`0600` 权限和原子发布，拒绝覆盖与符号链接。导入只允许显式 `--actor --confirm-empty` 的空 PostgreSQL：连接前验证完整文件，事务内对全部业务表加排他锁、复核空库、按外键顺序写入并追加 `storage.import` 审计，任何失败整体回滚。默认测试覆盖确定性、篡改/截断/错误版本、Secret 排除和 SQLite 一致性；真实 PostgreSQL 17 race 测试覆盖 SQLite→PostgreSQL、再导出、非空拒绝、成功审计和外键失败后全表为空。运维流程见 `docs/v2-storage-management.zh-CN.md`；全量 Go test/vet、CLI/Storage race、前端生产构建、Helm lint 与 SQLite/PostgreSQL HA template、`git diff --check` 均通过。
 
 ### M2：Helm 与部署基线
 
@@ -290,7 +285,6 @@ SQLite 模式的部署约束：
   - Values 提供 image、replicas、resources、log level、public URL、认证、授权和数据库配置。
   - SQLite 默认创建持久卷并强制 Control Plane 单副本/Recreate；PostgreSQL 模式允许多副本/RollingUpdate。
   - Data Plane 始终独立扩缩容，不挂载 Control Plane 数据库卷或认证 Secret。
-  - 2026-08-10（完成）：Chart 已提供 Control Plane/Data Plane 独立 Deployment、Service、ServiceAccount、ConfigMap、existing Secret 引用、镜像、资源、扩缩容、同源 public URL、NOTES 和组件级运维配置。Values 已接入 OIDC/私有 CA、AD/LDAPS、Token/Relay 密钥、默认拒绝授权策略、可选 Kubernetes impersonation 映射、SQLite/PostgreSQL，以及两组件独立 `debug|info|warn|error` 日志级别；二进制启动时再次校验日志级别，Control Plane 与 Data Plane 均输出结构化 JSON，Data Plane 的旧 `log.Logger` 接口通过固定 info/error 级别适配且致命错误不会被过滤。SQLite 强制单 Control Plane/Recreate/PVC，PostgreSQL 在关闭当前进程内 Relay Registry 后允许多副本/RollingUpdate 且不创建 PVC；Data Plane 始终独立 RollingUpdate/扩缩容，不接收数据库环境变量、PVC、OIDC/AD/Token Secret 或通用 ServiceAccount Token。Helm contract tests 覆盖资源/Secret 边界、两种存储策略、认证授权配置和非法 log level fail-fast；全量 Go test/vet、相关 race、前端构建、Helm lint、SQLite 与 PostgreSQL HA template、`git diff --check` 通过。
 
 - [x] **V2-201：设计最小 RBAC。**
   - 按只读 Inventory、exec/file、流量工作流拆分权限说明。
@@ -327,22 +321,18 @@ SQLite 模式的部署约束：
   - 验证 Control Plane 与 Data Plane 可以独立升级、扩缩容和失败重启。
   - 2026-08-10（完成）：新增受 context 与显式 opt-in 双重保护的 `e2e/helm/run.sh`、根 Makefile `helm-test-e2e`/镜像构建/Kind 清理入口，以及 CI `Helm Lifecycle E2E (Kind)` job。套件在两个隔离 namespace 真实安装完整 Chart：SQLite 模式启用动态 Relay Registry，以 PVC UID、非空数据库文件和持久标记验证三组件逐个升级、回滚及 Pod 重建后数据不丢失；Data Plane 与 Operator 分别扩缩容并断言其余组件 Pod UID 不变，Control Plane/Data Plane/Operator 均执行删除 Pod 后 readiness 恢复。PostgreSQL fixture 强制 TLS，Control Plane 从一副本独立扩到两副本、回滚并重启，以真实 SQL 表记录验证外部数据库数据保留，同时断言 Data Plane/Operator 不重启。CRD 测试固定首次安装、第二 release、升级、回滚和卸载期间 UID 不变，验证 Helm `crds/` 的 install-only/retain 语义，确认不存在 TrafficBinding 后才显式删除；卸载断言按本次 release instance 等待 namespaced 与 cluster RBAC 全部清空，不会误删集群已有 KubeLoop 测试资源。生产 Control Plane/Data Plane Dockerfile 已改为复制当前 `internal` 包布局，Operator 构建层也与根模块统一；CI race 路径同步迁移至 `internal/protocol/...`。完整套件已在 Minikube Kubernetes v1.35.1 实跑通过并确认测试 namespace/CRD 清理完成，原有 Deployment 未受影响。
 
-### M3：OIDC/AD、授权与审计
+### M3：OIDC、授权与审计
 
 Gateway 使用统一的 `AuthProvider` 抽象，首期支持：
 
-- `oidc`：标准 OIDC Provider，包括 Keycloak、Dex、Microsoft Entra ID 和支持 OIDC 的 AD FS。
-- `ldap`：面向没有 OIDC Provider 的本地 Active Directory，只允许 LDAPS 或经过严格校验的 StartTLS。
-- `static-token`：仅用于开发或受控环境。
 - `anonymous`：仅用于显式解锁的本地开发环境。
 
-如果企业 AD 已接入 Entra ID、AD FS、Keycloak 或 Dex，应优先使用 OIDC。原生 LDAP 登录缺少通用 MFA、条件访问和浏览器 SSO，只作为兼容方案。V2.0 不直接实现跨平台 Kerberos/IWA 桌面单点登录。
 
 - [x] **V2-299：定义统一 AuthProvider 接口。**
   - Provider 负责返回登录方式、验证身份并生成标准化 Principal，不直接签发 Gateway Access Token。
-  - Token Service、Authorizer 和 Session Registry 不依赖具体 OIDC/LDAP SDK。
+  - Token Service、Authorizer 和 Session Registry 不依赖具体 OIDC SDK。
   - discovery 只返回可公开的 Provider ID、类型、显示名称和登录交互类型。
-  - 2026-08-10：已实现 Provider/BrowserProvider/PasswordProvider/TokenProvider/AnonymousProvider 能力接口、标准 Identity、稳定 OIDC/AD/开发身份键和 fail-closed Registry；discovery 明确返回 `browser`/`password`/`token`/`none` 交互类型并拒绝重复 Provider ID 或类型不匹配。
+  - 2026-08-10：已实现 Provider、BrowserProvider 和 AnonymousProvider 能力接口、标准 Identity、稳定 OIDC/开发身份键和 fail-closed Registry；discovery 明确返回 `browser`/`none` 交互类型并拒绝重复 Provider ID 或类型不匹配。
 
 - [x] **V2-300：实现 OIDC Broker 配置。**
   - Helm 配置 issuer、client ID、Secret 引用、scope、claim mapping 和固定 callback URL。
@@ -350,14 +340,8 @@ Gateway 使用统一的 `AuthProvider` 抽象，首期支持：
   - 禁止通过客户端请求动态覆盖 issuer。
   - 2026-08-09：已接入标准 OIDC discovery/JWKS verifier，实现 issuer、HTTPS endpoint、PKCE S256、签名算法白名单和 required claims 启动校验；Authorization Code exchange 校验 PKCE、签名、audience、expiry、nonce 并映射标准 Identity，完整模拟 IdP 测试覆盖私有 CA HTTP client 复用。Helm 支持 issuer、client ID、scope、claim mapping、算法、超时，以及现有 Secret 中的 client secret/私有 CA 只读投影；公开配置与 Secret 分离且不进入 Data Plane。
 
-- [x] **V2-309：实现 Active Directory/LDAPS Provider。**
-  - Helm 配置 AD 地址、Base DN、用户/组搜索规则、CA Secret 引用和可选只读 Bind Account Secret。
-  - 禁止默认明文 LDAP；连接必须验证服务端证书和主机名。
   - 用户密码只用于当次 bind，不写入 Store、Token、日志、指标或审计事件。
   - 验证禁用、锁定、过期账号，并为搜索和 bind 设置严格超时与限流。
-  - 支持将 AD group 映射为标准化 Principal groups；嵌套组行为必须显式配置和设置深度上限。
-  - 验收：错误密码、禁用账号、证书错误、目录超时、LDAP 注入和暴力尝试均安全失败。
-  - 2026-08-09：已实现 LDAPS/严格 StartTLS Provider，启动时验证目录连接和可选只读 Bind Account；用户搜索对输入执行 RFC 4515 转义且最多返回一个账号，身份主键使用 directory ID + objectGUID/SID。登录检查 userAccountControl、lockoutTime、accountExpires 和 pwdLastSet，使用独立 TLS 连接执行用户 bind，并清零密码字节缓冲；支持直接/有限深度嵌套组与数量上限。HTTP 密码入口按账号哈希和来源限流，Helm 将 Bind Password/CA 只读投影到 Control Plane，测试覆盖错误密码、账号状态、注入、目录失败、暴力尝试和 Data Plane Secret 隔离。
 
 - [x] **V2-301：实现桌面登录流程。**
   - 客户端生成 state、nonce、PKCE verifier/challenge 和本地 loopback callback。
@@ -367,11 +351,7 @@ Gateway 使用统一的 `AuthProvider` 抽象，首期支持：
   - 2026-08-09：Control Plane 使用共享数据库保存短时登录事务和一次性 exchange code，state/code 仅持久化 SHA-256；桌面端已接入随机 `127.0.0.1` 端口的 loopback listener、系统浏览器调起、state/nonce/PKCE 和 exchange。桌面 PKCE 与 Gateway→IdP PKCE 分层独立，测试覆盖篡改 state、错误 verifier、重放与超时。
 
 - [x] **V2-310：实现客户端认证方式发现。**
-  - OIDC Provider 显示“使用浏览器登录”，LDAP/AD Provider 显示 Gateway 返回的组织名称和账号登录表单。
   - 多 Provider 场景先选择登录方式；只有一个 Provider 时直接进入对应流程。
-  - AD 密码只提交到当前 Server Profile 的 HTTPS Origin，并在请求完成后从 UI 状态清除。
-  - TLS 错误或非 HTTPS 远程地址下禁止提交 AD 密码。
-  - 2026-08-09：类型化客户端会先读取并校验 discovery，同源校验通过后才允许认证。首次使用页支持单/多 Provider，OIDC 显示浏览器登录，AD 显示组织名称和账号表单；AD 密码请求完成后立即从前端状态与后端字节缓冲清除，远程 HTTP 地址在发请求前即被拒绝。
 
 - [x] **V2-302：实现 Token 生命周期。**
   - Access Token 短期有效；Refresh Token 支持轮换、撤销和复用检测。
@@ -380,14 +360,10 @@ Gateway 使用统一的 `AuthProvider` 抽象，首期支持：
   - 2026-08-10：Control Plane 已实现 Ed25519 签名短期 Access Token、按 Device 的 Refresh Token Family、每次刷新轮换、历史哈希、并发消费保护、旧 Token 复用整族撤销、显式撤销和每次 API 认证时的 Family 状态校验；复用检测与整族撤销在同一数据库事务中提交，并验证 SQLite 上 Control Plane 重启前后的验证、轮换与撤销状态连续性。Helm 从只读 Secret 加载 PKCS#8 签名密钥。客户端使用版本化系统 Keychain/Credential Manager/Secret Service 条目保存 Access/Refresh Token 和 device ID，JSON Store 与 Wails 返回值不含 Token；刷新会原子切换凭据版本，退出会依次停止文件、Exec、SSH、端口转发、Exchange、Mirror、Preview，关闭 Data Plane WSS 和远端 Cluster Session，再撤销 Token 并删除本地凭据。单元测试覆盖并发 refresh 只有一个成功且整族撤销、显式注销断连幂等性、凭据部分写入回滚；Data Plane E2E 覆盖 Token Family 撤销后活动操作终止。
 
 - [x] **V2-303：提供开发认证模式。**
-  - `static-token` 仅用于开发/受控环境，并在 discovery 中明确标记。
   - `anonymous` 默认关闭，开启时打印高可见度安全警告。
-  - 2026-08-10：新增显式 `developmentMode` 门控，配置和 Helm 默认均为关闭；未解锁时 `static-token`/`anonymous` Provider 启动或渲染直接失败。static token 必须来自 Control Plane-only Secret 且至少 32 字符，Provider 只保留 SHA-256 摘要并常量时间比较，服务端和桌面端均在请求后清空可变凭据缓冲；Secret 不进入 ConfigMap、Data Plane、日志或 discovery。anonymous 每次 Control Plane 启动输出包含 `SECURITY WARNING` 与 `production_safe=false` 的醒目告警。两种登录方式在 discovery 中分别标记为 `static-token/token` 与 `anonymous/none`，桌面 UI 明确显示开发/危险提示；登录后统一签发标准短期 Access/Refresh Token Family，继续经过同一 Policy、审计、Session、RelayTicket 和 WSS 链路。测试覆盖默认拒绝、配置缺失、错误 Token、输入清零、标准 Token 刷新、客户端同源提交、Helm Secret 隔离及 anonymous 启动告警。
 
 - [x] **V2-304：实现 Principal 和身份映射。**
   - 标准化 subject、issuer、display name、email 和 groups。
-  - OIDC 用户主键使用 `issuer + subject`；AD 用户主键使用目录 ID + objectGUID/SID，禁止使用可变 email 或登录名作为唯一身份。
-  - 2026-08-09：OIDC callback 以 `issuer + subject`、AD 登录以 `directory ID + objectGUID/SID` Upsert 稳定 Principal；display name、email、groups 仅作为可刷新属性，不参与身份唯一性。两个 Provider 均经过同一个 Principal Repository、Token Service 和后续授权入口。
 
 - [x] **V2-305：实现 Gateway Policy。**
   - Policy 至少按 group、namespace、operation 和 resource kind 限制。
@@ -399,24 +375,24 @@ Gateway 使用统一的 `AuthProvider` 抽象，首期支持：
   - Claims 映射只能来自可信 issuer 和显式允许的 claim。
   - Chart 不默认授予宽泛 impersonate 权限。
   - 验证 API Server audit 中可以看到最终用户和 Gateway 身份。
-  - 2026-08-10：Kubernetes Provider 已支持默认关闭的 impersonation，用户名由固定前缀加稳定 principal ID 生成，组只来自显式 identity-group → Kubernetes-group 映射；未映射 claim 不会透传。派生 client 保留 Gateway ServiceAccount 凭据并发送最终 `Impersonate-User`/`Impersonate-Group`，System client 始终清空 impersonation。Chart contract test 固定默认及启用映射时都不生成任何 `impersonate` RBAC。Helm Minikube E2E 新增 API Server metadata audit policy：通过真实 Control Plane anonymous 开发登录取得标准 Token，临时创建精确用户/组的外部 RBAC，调用 `/api/v2/version`，随后从 audit event 同时断言 authenticated `user` 为 Control Plane ServiceAccount、`impersonatedUser` 为前缀化稳定 Principal、映射组存在且未映射 claim 不存在；临时 RBAC 在验证后删除，生产 Chart 保持最小权限。
+  - 2026-08-10：Kubernetes Provider 已支持默认关闭的 impersonation，用户名由固定前缀加稳定 principal ID 生成，组只来自显式 identity-group → Kubernetes-group 映射；未映射 claim 不会透传。派生 client 保留 Gateway ServiceAccount 凭据并发送最终 `Impersonate-User`/`Impersonate-Group`，System client 始终清空 impersonation。Chart contract test 固定默认及启用映射时都不生成任何 `impersonate` RBAC。Helm Minikube E2E 新增 API Server metadata audit policy：通过真实 Control Plane anonymous 开发登录取得标准 Token，临时创建精确用户/组的外部 RBAC，调用 `/kubeloop/api/version`，随后从 audit event 同时断言 authenticated `user` 为 Control Plane ServiceAccount、`impersonatedUser` 为前缀化稳定 Principal、映射组存在且未映射 claim 不存在；临时 RBAC 在验证后删除，生产 Chart 保持最小权限。
 
 - [x] **V2-307：实现统一授权中间层。**
   - HTTP handler、Task 创建和 WSS stream open 必须调用同一个 Authorizer。
   - 任何 feature manager 不允许绕过 Authorizer 直接创建流量。
-  - 2026-08-10（完成）：`/api/v2` 在任何业务 handler 前只调用同一个 `authorization.Authorizer`，并将规范化授权请求与命中 Rule 作为授权证明写入 context；拒绝发生在资源查询前且统一返回 `FORBIDDEN`。`APIRouter` 对 exact route、feature prefix 与 fallback 统一要求该允许证明，因此直接调用 Router 也无法绕过 Policy 进入 Task manager 或 WSS upgrade。契约测试覆盖 RelayTicket、Port Forward、Pod exec 创建，以及 Pod exec/file/exchange/mirror/preview stream 均恰好经过一次共享 Authorizer，并验证缺少证明时 feature handler 不会执行。RelayTicket 创建映射为独立的 `relay-tickets/create` 资源；Data Plane 不复制 Gateway Policy，而是只接受该授权结果签发且含 `tunnel` operation 的短期 Ticket，并将每个协议流绑定到 Ticket Session 与 NetworkSpec。
+  - 2026-08-10（完成）：`/kubeloop/api` 在任何业务 handler 前只调用同一个 `authorization.Authorizer`，并将规范化授权请求与命中 Rule 作为授权证明写入 context；拒绝发生在资源查询前且统一返回 `FORBIDDEN`。`APIRouter` 对 exact route、feature prefix 与 fallback 统一要求该允许证明，因此直接调用 Router 也无法绕过 Policy 进入 Task manager 或 WSS upgrade。契约测试覆盖 RelayTicket、Port Forward、Pod exec 创建，以及 Pod exec/file/exchange/mirror/preview stream 均恰好经过一次共享 Authorizer，并验证缺少证明时 feature handler 不会执行。RelayTicket 创建映射为独立的 `relay-tickets/create` 资源；Data Plane 不复制 Gateway Policy，而是只接受该授权结果签发且含 `tunnel` operation 的短期 Ticket，并将每个协议流绑定到 Ticket Session 与 NetworkSpec。
 
 - [x] **V2-308：实现审计日志。**
   - 记录 request ID、principal ID、session ID、operation、namespace、resource、result 和 latency。
   - Token、命令输出、文件内容、OIDC claims 原文不进入审计日志。
-  - 2026-08-10（完成）：所有 `/api/v2` 请求记录 request ID、principal ID、可信 session ID、operation、namespace、resource kind/name、授权 Rule、outcome、HTTP status 和 latency 到 append-only Audit Repository；拒绝也在资源查询前留下统一证据。真实 Task Repository 统一包装 `UpdateState/ClaimStale`，使 Port Forward、Pod exec、文件传输/管理、Exchange、Mirror、Preview 及其恢复 worker 的每次成功状态变化，都与 `task.transition` AuditEvent 在同一 SQLite/PostgreSQL 事务提交；audit append 失败会回滚状态 CAS。API transition 沿用框架 request ID，后台 transition 生成 `background-` correlation ID；事件只含 Principal/Task/Session ID、namespace、from/to state、source、outcome 与时间，不复制 Task spec/result、Token、OIDC claims、命令/输出、文件名/内容或网络 payload。SQLite/PostgreSQL 共用 conformance test 固定三个 lifecycle event 的字段与排序，Pod exec HTTP/WSS 测试固定 API/background correlation 及敏感字段白名单，故障注入测试证明 audit 表写失败时 Task 仍保持原状态。
+  - 2026-08-10（完成）：所有 `/kubeloop/api` 请求记录 request ID、principal ID、可信 session ID、operation、namespace、resource kind/name、授权 Rule、outcome、HTTP status 和 latency 到 append-only Audit Repository；拒绝也在资源查询前留下统一证据。真实 Task Repository 统一包装 `UpdateState/ClaimStale`，使 Port Forward、Pod exec、文件传输/管理、Exchange、Mirror、Preview 及其恢复 worker 的每次成功状态变化，都与 `task.transition` AuditEvent 在同一 SQLite/PostgreSQL 事务提交；audit append 失败会回滚状态 CAS。API transition 沿用框架 request ID，后台 transition 生成 `background-` correlation ID；事件只含 Principal/Task/Session ID、namespace、from/to state、source、outcome 与时间，不复制 Task spec/result、Token、OIDC claims、命令/输出、文件名/内容或网络 payload。SQLite/PostgreSQL 共用 conformance test 固定三个 lifecycle event 的字段与排序，Pod exec HTTP/WSS 测试固定 API/background correlation 及敏感字段白名单，故障注入测试证明 audit 表写失败时 Task 仍保持原状态。
 
 - [x] **V2-311：实现 RelayTicket。**
   - Control Plane 签发短期 Ticket，绑定 principal、device、session、relay、operation、NetworkSpec hash、expiry 和 jti。
   - Data Plane 离线验证签名、audience、expiry、jti 和 stream scope，不查询业务数据库。
   - 支持签名密钥轮换、短期双公钥窗口和紧急吊销；私钥只存在 Control Plane Secret。
   - 验收：Ticket 重放、跨 Relay、跨 Session、扩大 operation、篡改 NetworkSpec 和过期使用全部失败。
-  - 2026-08-10：已实现 Ed25519 紧凑签名 RelayTicket 与严格 JSON/base64url 解码；Ticket 绑定 issuer、relay audience、principal、device、Session、namespace、operation、可选 NetworkSpec SHA-256、iat/nbf/exp 和 jti，最大有效期两分钟。Control Plane 通过 `POST /api/v2/sessions/{id}/tickets` 在 Session 所有权/活动状态校验后签发；Data Plane 离线验签、原子消费有界 jti cache 防重放，并把 WebSocket 内所有协议租户键绑定到 Ticket Session。公钥文件支持最多八个 kid 的滚动双钥窗口，私钥只投影到 Control Plane；Helm 已移除静态共享 token 和默认 raw TCP 入口。篡改、过期、提前使用、未知 kid、跨 issuer/relay、scope 扩大、重复 jti 与跨 Session 协议键均有测试。
+  - 2026-08-10：已实现 Ed25519 紧凑签名 RelayTicket 与严格 JSON/base64url 解码；Ticket 绑定 issuer、relay audience、principal、device、Session、namespace、operation、可选 NetworkSpec SHA-256、iat/nbf/exp 和 jti，最大有效期两分钟。Control Plane 通过 `POST /kubeloop/api/sessions/{id}/tickets` 在 Session 所有权/活动状态校验后签发；Data Plane 离线验签、原子消费有界 jti cache 防重放，并把 WebSocket 内所有协议租户键绑定到 Ticket Session。公钥文件支持最多八个 kid 的滚动双钥窗口，私钥只投影到 Control Plane；Helm 已移除静态共享 token 和默认 raw TCP 入口。篡改、过期、提前使用、未知 kid、跨 issuer/relay、scope 扩大、重复 jti 与跨 Session 协议键均有测试。
 
 ### M4：Kubernetes 控制面迁移
 
@@ -428,7 +404,7 @@ Gateway 使用统一的 `AuthProvider` 抽象，首期支持：
 - [x] **V2-401：迁移 ServerVersion 和 Capability Probe。**
   - Gateway 返回经过授权的能力集合，而不是让客户端推测 RBAC。
   - 能力结果与 principal、namespace 和 Gateway 版本绑定。
-  - 2026-08-10（完成）：`/api/v2/version` 同时返回 Kubernetes 与 Gateway 版本；namespace 级 `/api/v2/capabilities` 是带 schema version 的授权快照，显式绑定 principal、namespace 与 Gateway build。能力由完整 Gateway Policy 工作流与 Kubernetes `SelfSubjectAccessReview` 取交集，覆盖 inventory、Tunnel（Session + RelayTicket）、Port Forward、exec、file、exchange、mirror 与 preview。客户端仅保留默认 30 秒、128 项的有界内存缓存，键包含 Server Profile/地址、当前设备与 refresh credential 的单向摘要、principal、namespace 和 Gateway version；登录切换、Token 轮换、namespace 变化、Gateway 升级或 TTL 到期都会重新探测，且每个实际请求仍独立授权。单元测试覆盖缺失任一工作流策略即不发布能力、响应绑定校验、缓存副本隔离、TTL 失效、Gateway 版本变化、principal/credential 变化和 namespace 隔离。
+  - 2026-08-10（完成）：`/kubeloop/api/version` 同时返回 Kubernetes 与 Gateway 版本；namespace 级 `/kubeloop/api/capabilities` 是带 schema version 的授权快照，显式绑定 principal、namespace 与 Gateway build。能力由完整 Gateway Policy 工作流与 Kubernetes `SelfSubjectAccessReview` 取交集，覆盖 inventory、Tunnel（Session + RelayTicket）、Port Forward、exec、file、exchange、mirror 与 preview。客户端仅保留默认 30 秒、128 项的有界内存缓存，键包含 Server Profile/地址、当前设备与 refresh credential 的单向摘要、principal、namespace 和 Gateway version；登录切换、Token 轮换、namespace 变化、Gateway 升级或 TTL 到期都会重新探测，且每个实际请求仍独立授权。单元测试覆盖缺失任一工作流策略即不发布能力、响应绑定校验、缓存副本隔离、TTL 失效、Gateway 版本变化、principal/credential 变化和 namespace 隔离。
 
 - [x] **V2-402：迁移 Namespace/Pod/Service Inventory。**
   - 提供分页、过滤和 watch/resync 机制。
@@ -443,10 +419,10 @@ Gateway 使用统一的 `AuthProvider` 抽象，首期支持：
   - 2026-08-10（完成）：Control Plane 使用 principal client 读取授权 namespace 的 Pod/Service，并使用 Control Plane system client 读取 Node PodCIDR、`ServiceCIDR` API，以及 `kube-system` 中固定名称的 kube-dns/CoreDNS Service 与 ConfigMap。Helm 仅授予 `kube-dns`/`coredns` 两个对象的 Service/ConfigMap `get` 权限；Corefile 在 256 KiB 边界内解析，只提取最多 16 个通过 DNS-1123 校验的 `kubernetes` plugin zone，内容永不返回客户端，缺失、过大、格式异常或无权限时安全降级为 `cluster.local`。发现结果经过特殊地址、重叠、数量、排序和去重校验，生成版本化 canonical JSON 与 SHA-256。桌面只消费 Session 返回值并检查本机路由冲突，不读取 kubeconfig；Data Plane 在实际拨号前以该快照限制 Pod CIDR、精确 Service IP、DNS 端口和 cluster domain，并拒绝 metadata、API Server、Node/公网及仅落入 Service CIDR 的地址。单元、race、Helm RBAC 契约和全量非 E2E 回归通过。
 
 - [x] **V2-404：实现 Cluster Session API。**
-  - `POST /api/v2/sessions` 创建 Session，返回 `sessionID`、能力、NetworkSpec 和过期时间。
+  - `POST /kubeloop/api/sessions` 创建 Session，返回 `sessionID`、能力、NetworkSpec 和过期时间。
   - 支持 get、heartbeat、disconnect 和幂等 create。
   - Session 与 principal/device 绑定，其他用户不能查询或停止。
-  - 2026-08-10（完成）：已实现 namespace query 预授权后的 create/get/heartbeat/disconnect；创建使用 `Idempotency-Key`，状态更新使用 generation/`If-Match` 乐观锁。Session 绑定 principal、device、cluster 和 namespace，TTL heartbeat 续期受绝对最大生命周期限制，过期会话不可复活；所有权不匹配统一返回 404。创建时由服务端发现 NetworkSpec，canonical JSON/hash 经 migration v5 持久化并随全部生命周期响应返回；RelayTicket 只绑定该持久化摘要，客户端自报摘要会被拒绝。创建响应同时携带由 `/api/v2/capabilities` 同一发现路径生成的完整 capability snapshot，使用共享 `internal/protocol/capability` 契约校验 schema、principal、namespace、Gateway version、条目边界与去重；客户端验证后直接填充按认证身份隔离的短期能力缓存，heartbeat/disconnect 只保留本地副本且每个实际操作仍重新授权。单元、客户端契约、关键 race、E2E build-only 编译和全量非 E2E 回归通过。
+  - 2026-08-10（完成）：已实现 namespace query 预授权后的 create/get/heartbeat/disconnect；创建使用 `Idempotency-Key`，状态更新使用 generation/`If-Match` 乐观锁。Session 绑定 principal、device、cluster 和 namespace，TTL heartbeat 续期受绝对最大生命周期限制，过期会话不可复活；所有权不匹配统一返回 404。创建时由服务端发现 NetworkSpec，canonical JSON/hash 经 migration v5 持久化并随全部生命周期响应返回；RelayTicket 只绑定该持久化摘要，客户端自报摘要会被拒绝。创建响应同时携带由 `/kubeloop/api/capabilities` 同一发现路径生成的完整 capability snapshot，使用共享 `internal/protocol/capability` 契约校验 schema、principal、namespace、Gateway version、条目边界与去重；客户端验证后直接填充按认证身份隔离的短期能力缓存，heartbeat/disconnect 只保留本地副本且每个实际操作仍重新授权。单元、客户端契约、关键 race、E2E build-only 编译和全量非 E2E 回归通过。
 
 - [x] **V2-405：实现服务端 Session Registry。**
   - 管理 Session、Task、Stream、反向监听和 Kubernetes 资源所有权。
@@ -572,7 +548,6 @@ Gateway 使用统一的 `AuthProvider` 抽象，首期支持：
 
 - [x] **V2-700：新增 Server Profile Store v2。**
   - 保存 server ID、base URL、显示名称、上次用户和 UI 偏好。
-  - 不保存 kubeconfig 路径、OIDC client secret、AD bind secret 或明文 Token。
   - Store 写入前备份，schema 迁移失败时可回滚。
   - 2026-08-09：已新增独立 `servers.json`，仅保存服务 ID、规范化 base URL、显示名称、上次用户和 UI 偏好；严格拒绝未知 Secret 字段。Store 使用同目录原子写、写前有效备份和损坏主文件回退，Token 与 device credential 只进入系统安全存储。
 
@@ -608,9 +583,7 @@ Gateway 使用统一的 `AuthProvider` 抽象，首期支持：
 ### M8：安全、可靠性和发布
 
 - [x] **V2-800：安全测试。**
-  - 覆盖 OAuth callback、Token replay、JWT confusion、LDAP 注入、密码喷洒、跨用户 IDOR、SSRF、路径穿越、stream 越权和日志泄露。
   - 对 Gateway HTTP/WSS 入口执行 fuzz 和大小限制测试。
-  - 2026-08-10（完成）：安全矩阵覆盖 OAuth state/nonce/PKCE/callback/交换码重放、Refresh Token 并发 replay 与整族撤销、JWT `alg=none`/HS256 confusion、AD filter 注入和账号/客户端双维度密码喷洒、统一 Authorizer 与 principal/session/namespace 所有权 IDOR、Gateway discovery/Origin/redirect 与 Provider 出站配置 SSRF 边界、文件/归档路径穿越、stream 单次 claim/续租越权以及 API/audit/readiness/storage/Task 日志脱敏。新增 64 KiB HTTP header 上限、16 KiB auth body 回归、Pod Exec WSS 连接级帧上限，并提供可持续运行的 Gateway HTTP 与 WSS exec frame fuzz target；本轮短时执行约 6 万/70 万输入无失败。完整映射见 `docs/v2-security-test-matrix.zh-CN.md`；Control Plane 全量 race 与全量非 E2E test/vet 通过。
 
 - [x] **V2-801：资源恢复测试。**
   - 在 Task 生命周期的每个步骤注入失败。
@@ -633,7 +606,7 @@ Gateway 使用统一的 `AuthProvider` 抽象，首期支持：
   - 日志和指标通过 request/session ID 关联，但不使用用户隐私数据作为指标 label。
 
 - [ ] **V2-805：发布与兼容文档。**
-  - 编写管理员 Helm 安装、OIDC/AD Provider、RBAC、升级回滚和故障排查文档。
+  - 编写管理员 Helm 安装、OIDC Provider、RBAC、升级回滚和故障排查文档。
   - 编写用户从 v1 迁移、登录、连接和常见错误文档。
   - 发布 protocol compatibility matrix。
 
@@ -659,17 +632,16 @@ Gateway 使用统一的 `AuthProvider` 抽象，首期支持：
   - 2026-08-10（完成）：新增 ADR 0022 和威胁模型，冻结 Control Plane-only Management Plane、无管理员默认拒绝、bootstrap 正式策略发布后持久退役、Secret-backed 短期 break-glass、专用 HttpOnly 管理 Session、同步 CSRF Token、严格 CSP、Secret alias-only API 和事务审计边界。Data Plane/Operator 不接收管理路由、数据库、身份 Secret 或管理角色；V2.0 管理 API 不接受 Secret 明文、任意 Kubernetes/SQL/脚本或通用网络探测。
 
 - [x] **V2-901：管理角色与授权。**
-  - 2026-08-10（完成）：已新增独立 Management Plane authorizer，固定 `platform-admin`、`security-admin`、`operator`、`auditor`、`namespace-admin` 五类角色和显式 `admin.<resource>/<operation>` 矩阵；namespace 委派、dry-run、revision 原子失效及鉴权前禁止对象查询均有单元/race 测试。Helm bootstrap 只接受 Principal UUID/精确 group；schema v7 持久保存不可自动回退的退役标记，并随 SQLite 备份、逻辑导出/PostgreSQL 导入保留。Break-glass 只从 Control Plane Secret alias 挂载读取 32～64 随机字节 base64url 凭据，常量时间比较、CIDR 限制和 Secret generation 轮换失效已实现。schema v8 新增只存 Session/CSRF SHA-256 的短期管理 Session；`POST /api/v2/admin/sessions/break-glass` 使用独立 chi v5 管理路由、可信 Origin、TLS（仅 loopback 可 HTTP）、全局/来源限流和 `__Host-kubeloop-admin` Cookie，Secret 轮换即时失效，成功 Session 与审计同事务提交，拒绝尝试只记录无原因高层审计。首个正式策略发布已在事务中永久退役 bootstrap。普通 OIDC/AD Access Token 现可通过独立限流的 `POST /api/v2/admin/sessions/token` 换取管理 Session；接口只接受同源、唯一 Bearer 和空 JSON 对象，事务内重新读取 Principal/Token Family，拒绝已撤销、过期或身份不匹配的 Family，只持久化 Session/CSRF SHA-256。普通 Session 使用 15 分钟滑动 idle 与 8 小时/Token Family 到期的较早绝对期限，每次请求重新解析当前 group 并检查 Family 状态；bootstrap 身份类型不会升级为普通角色。成功交换与所有有界失败均写入不含 Token 的审计。
+  - 2026-08-10（完成）：已新增独立 Management Plane authorizer，固定 `platform-admin`、`security-admin`、`operator`、`auditor`、`namespace-admin` 五类角色和显式 `admin.<resource>/<operation>` 矩阵；namespace 委派、dry-run、revision 原子失效及鉴权前禁止对象查询均有单元/race 测试。Helm bootstrap 只接受 Principal UUID/精确 group；schema v7 持久保存不可自动回退的退役标记，并随 SQLite 备份、逻辑导出/PostgreSQL 导入保留。Break-glass 只从 Control Plane Secret alias 挂载读取 32～64 随机字节 base64url 凭据，常量时间比较、CIDR 限制和 Secret generation 轮换失效已实现。schema v8 新增只存 Session/CSRF SHA-256 的短期管理 Session；`POST /kubeloop/api/admin/sessions/break-glass` 使用独立 chi v5 管理路由、可信 Origin、TLS（仅 loopback 可 HTTP）、全局/来源限流和 `__Host-kubeloop-admin` Cookie，Secret 轮换即时失效，成功 Session 与审计同事务提交，拒绝尝试只记录无原因高层审计。首个正式策略发布已在事务中永久退役 bootstrap。普通 OIDC Access Token 现可通过独立限流的 `POST /kubeloop/api/admin/sessions/token` 换取管理 Session；接口只接受同源、唯一 Bearer 和空 JSON 对象，事务内重新读取 Principal/Token Family，拒绝已撤销、过期或身份不匹配的 Family，只持久化 Session/CSRF SHA-256。普通 Session 使用 15 分钟滑动 idle 与 8 小时/Token Family 到期的较早绝对期限，每次请求重新解析当前 group 并检查 Family 状态；bootstrap 身份类型不会升级为普通角色。成功交换与所有有界失败均写入不含 Token 的审计。
 - [x] **V2-902：配置 revision Repository。**
   - 2026-08-10（完成）：schema v9 新增不可变 policy/provider revision、assignment、单调 active ETag 和幂等 change request；SQLite/PostgreSQL 共用 Repository contract、逻辑导出/导入与一致性验证。策略草稿、发布和回滚把 active pointer、状态、bootstrap 永久退役及 append-only 审计放在同一事务；并发发布使用 CAS，回滚 revision 时 ETag 仍递增。Control Plane 启动和轮询会交叉校验 revision spec/hash 与 assignment 行，再原子更新内存 authorizer；存储或聚合异常时立即 fail closed，恢复后可安全重载。
 - [x] **V2-903：只读管理 API。**
-  - 2026-08-10（完成）：独立 chi v5 管理路由已新增 Cookie Session 鉴权、当前 Principal group 解析、Token Family 吊销/过期检查、同源与重复 Cookie 拒绝，以及为后续写接口共用的同步 CSRF 中间件。`GET /api/v2/admin/capabilities` 和 `/status` 按当前 policy revision 服务端授权，只返回 Control Plane protocol、存储 backend/schema、集群能力键与当前身份匹配的 namespace capability scopes。Principal、Session、Task、Audit 已实现 SQLite/PostgreSQL 共用的 `(created_at,id)` 降序稳定 opaque cursor，严格限制过滤器和 1～100 页大小；Session/Task 的 namespace 授权在 Repository 查询前完成。Relay 使用线程安全 Registry snapshot、Relay ID cursor 与有界 state/online 过滤。响应隐藏 Principal external ID、Session NetworkSpec、Task spec/result/idempotency key、Relay endpoint/topology/身份和 Audit metadata；全部成功/拒绝路径写入不含 Token/Cookie/CSRF/Secret 的审计。Repository conformance 覆盖翻页期间插入新对象不造成重复或越界，HTTP 测试覆盖跨 namespace IDOR、游标类型、过滤器、分页、脱敏与稳定错误。
+  - 2026-08-10（完成）：独立 chi v5 管理路由已新增 Cookie Session 鉴权、当前 Principal group 解析、Token Family 吊销/过期检查、同源与重复 Cookie 拒绝，以及为后续写接口共用的同步 CSRF 中间件。`GET /kubeloop/api/admin/capabilities` 和 `/status` 按当前 policy revision 服务端授权，只返回 Control Plane protocol、存储 backend/schema、集群能力键与当前身份匹配的 namespace capability scopes。Principal、Session、Task、Audit 已实现 SQLite/PostgreSQL 共用的 `(created_at,id)` 降序稳定 opaque cursor，严格限制过滤器和 1～100 页大小；Session/Task 的 namespace 授权在 Repository 查询前完成。Relay 使用线程安全 Registry snapshot、Relay ID cursor 与有界 state/online 过滤。响应隐藏 Principal external ID、Session NetworkSpec、Task spec/result/idempotency key、Relay endpoint/topology/身份和 Audit metadata；全部成功/拒绝路径写入不含 Token/Cookie/CSRF/Secret 的审计。Repository conformance 覆盖翻页期间插入新对象不造成重复或越界，HTTP 测试覆盖跨 namespace IDOR、游标类型、过滤器、分页、脱敏与稳定错误。
 - [x] **V2-904：只读管理 UI。**
-  - 2026-08-10（完成）：Control Plane 在 `/api/v2/admin/ui` 内嵌无 CDN、无第三方运行时代码的响应式只读后台，覆盖运行状态、Principal、Cluster Session、Task、Relay 和 Audit；列表复用服务端 opaque cursor，namespace-admin 只显示当前身份 `namespaceScopes` 内的 namespace 与 Session/Task 导航，其他页面按 capability 完全裁剪。浏览器可从 discovery 选择 OIDC 或 AD，也可使用 break-glass；OIDC 管理回调必须由 Control Plane 以完整 URL 精确列入白名单，只允许 HTTPS 或 loopback HTTP，并继续使用 state、nonce 与两层 PKCE。Access/Refresh Token 仅在 JS 内存中用于一次管理 Session 交换，随后清空且不进入 localStorage/sessionStorage；管理 Cookie 保持 HttpOnly/SameSite=Strict，sessionStorage 只保存同步 CSRF 与短期 OIDC 事务材料。退出使用 CSRF 防护的 `DELETE /sessions/current`，在同一事务中撤销 Session 并审计。静态 handler 只允许 GET/HEAD 和三个固定资产，设置 `default-src 'none'`、self-only script/style/connect、frame/object/base 禁止及 COOP/CORP；自动测试检查固定路径、CSP、无远程代码/`eval`/Token 持久化，真实本地浏览器检查桌面和 390px 响应式布局、语义导航/表格及零控制台错误。Minikube/OIDC/AD 真实 E2E 仍按约定统一留到 V2-908。
+  - 2026-08-10（完成）：Control Plane 在 `/kubeloop/api/admin/ui` 内嵌无 CDN、无第三方运行时代码的响应式只读后台，覆盖运行状态、Principal、Cluster Session、Task、Relay 和 Audit；列表复用服务端 opaque cursor，namespace-admin 只显示当前身份 `namespaceScopes` 内的 namespace 与 Session/Task 导航，其他页面按 capability 完全裁剪。浏览器可从 discovery 选择 OIDC，也可使用 break-glass；OIDC 管理回调必须由 Control Plane 以完整 URL 精确列入白名单，只允许 HTTPS 或 loopback HTTP，并继续使用 state、nonce 与两层 PKCE。Access/Refresh Token 仅在 JS 内存中用于一次管理 Session 交换，随后清空且不进入 localStorage/sessionStorage；管理 Cookie 保持 HttpOnly/SameSite=Strict，sessionStorage 只保存同步 CSRF 与短期 OIDC 事务材料。退出使用 CSRF 防护的 `DELETE /sessions/current`，在同一事务中撤销 Session 并审计。静态 handler 只允许 GET/HEAD 和三个固定资产，设置 `default-src 'none'`、self-only script/style/connect、frame/object/base 禁止及 COOP/CORP；自动测试检查固定路径、CSP、无远程代码/`eval`/Token 持久化，真实本地浏览器检查桌面和 390px 响应式布局、语义导航/表格及零控制台错误。Minikube/OIDC 真实 E2E 仍按约定统一留到 V2-908。
 - [x] **V2-905：访问/网络策略管理。**
   - 2026-08-10（完成）：新增管理策略单例读取和 draft/dry-run/publish/rollback chi v5 API。所有 POST 统一经过 Cookie Management Session、同源校验和同步 CSRF，并要求强整数 `If-Match` 与有界 `Idempotency-Key`；draft/rollback 通过持久 change request 做请求哈希回放，publish 必须复用 draft 幂等键且按 change ID 可安全重试。服务端严格 JSON、64 KiB 请求上限和稳定 400/409/412/428/503 错误，候选 Snapshot 在内存 authorizer 中以 normal identity dry-run，不会制造 bootstrap/break-glass 上下文；缺少正式 `platform-admin` 的策略可验证但不可发布。发布/回滚继续在同一事务中提交 active pointer、bootstrap 永久退役和审计，成功后同步校验不可变 revision/assignment 聚合并原子刷新进程内 authorizer，失败立即 fail closed。内嵌控制台按 capability 裁剪策略读取、编辑、dry-run、发布和显式 revision 回滚，pending change 仅存 sessionStorage 且不包含 Token/Secret。SQLite HTTP 合约、幂等回放、错误幂等键、陈旧 ETag、CSRF、即时重载、回滚及 race 测试通过；Minikube/浏览器真实 E2E 仍留到 V2-908。
-- [x] **V2-906：OIDC/AD Provider 管理。**
-  - 2026-08-10（完成）：新增 OIDC/AD Provider validate/draft/publish/rollback revision 流程。Helm 静态 Provider 与数据库 active revision 聚合为不可变 Registry；发布在事务前解析部署 allowlist 的 Secret alias、执行 OIDC discovery/AD 连通性检查并预构建完整快照，数据库 CAS 成功后以 Registry CAS 只合并变更 Provider，保留并发无关发布。Control Plane 启动和按 active pointer revision/ETag 指纹轮询收敛，动态 discovery、登录与 readiness 使用同一原子 Registry。chi v5 管理 API/UI 继续强制 Cookie Session、RBAC、CSRF、强 If-Match 和幂等键，响应/审计/Web Storage 不回显 alias；Helm Secret key 仅投影到 Control Plane 固定只读路径，不进入 ConfigMap、Data Plane 或 Operator。SQLite 生命周期、HTTP 脱敏、并发 Registry、Helm contract、全量非 E2E 与目标 race 测试通过；真实 OIDC/AD/Minikube E2E 留到 V2-908。
+- [x] **V2-906：OIDC Provider 管理。**
 - [x] **V2-907：幂等、owner-safe 运维动作。**
   - 2026-08-10（完成）：新增统一的 `internal/controlplane/admin/operations` 服务和 chi v5 管理端点，支持撤销单个 Device Session、按 Principal 原子撤销全部 Token Family、按 generation 强制停止 Cluster Session、按 `updatedAt` 版本停止 Preview/Exchange/Mirror/Port Forward 等 Task、触发既有五类 owner-safe recovery reconciler，以及 Relay drain/recover。所有写入继续经过 Management Session、RBAC、同步 CSRF、有界原因与 SHA-256 幂等键；状态、幂等记录和成功审计在同一数据库事务提交，明文幂等键不进入数据库或审计。Session 先持久化停止再通知运行时，失败返回待收敛；Task 使用合法 `stopping/stopped` 状态交给现有 worker 清理，不移除 finalizer、不绕过 owner/UID 防护。schema v10 持久保存 Relay desired state 与单调 control version，Control Plane 重启时在 Relay 注册前恢复，离线 Relay 重新注册也不会意外接流。schema v11 提供异步审计导出任务，跨副本 CAS claim、30 秒 stale claim 接管、创建者隔离读取、最多 1000 条/4 MiB NDJSON 和稳定失败码；逻辑导出/导入包含 Relay 控制意图和审计导出任务。内嵌后台按 capability 显示撤销、停止、恢复、排空及导出操作。SQLite/PostgreSQL repository conformance、事务/重放/跨 owner/运行时待收敛、HTTP CSRF/ETag/幂等与非 E2E 全量测试通过；真实 Minikube/浏览器 E2E 留到 V2-908。
 - [x] **V2-908：管理面安全与统一 E2E。**
@@ -685,7 +657,7 @@ Kubernetes/外部 Secret alias。详细数据模型、API、依赖顺序和发�
 ADR / Threat Model
   → API + WSS Contract
   → Control Plane + Data Plane Skeleton + Helm
-  → OIDC/AD + Authorization
+  → OIDC + Authorization
   → Remote Kubernetes Provider + Session Registry
   → Cluster Data Stream
   → TUN/SOCKS
@@ -702,15 +674,14 @@ ADR / Threat Model
 
 - 新用户只填写服务地址即可发现服务器并登录。
 - 客户端在没有 kubeconfig 的机器上支持全部 V2 功能。
-- 登录、连接、选择 Namespace 的主流程不要求用户理解 OIDC 或 AD 参数。
-- 常见错误能区分 TLS、OIDC/AD 登录、权限、Gateway、Kubernetes API、本地 Helper 和数据面问题。
+- 登录、连接、选择 Namespace 的主流程不要求用户理解 OIDC 参数。
+- 常见错误能区分 TLS、OIDC 登录、权限、Gateway、Kubernetes API、本地 Helper 和数据面问题。
 
 ### 安全门槛
 
 - 所有非 discovery/health endpoint 默认要求认证。
 - 所有 Kubernetes 操作和 WSS stream 都执行授权。
 - Gateway 不能作为任意内网/公网代理。
-- Token、OIDC Secret、AD bind secret、kubeconfig 内容、文件内容和命令输出不进入日志。
 - 两个用户不能读取、停止或复用彼此的 Session、Task 和 Stream。
 
 ### 可靠性门槛
@@ -733,7 +704,7 @@ ADR / Threat Model
 为了尽快形成可运行的纵向切片，第一批只创建以下 Issue：
 
 1. V2-001：客户端/Gateway 信任边界 ADR。
-2. V2-002：OIDC/AD 认证模型与桌面登录 ADR。
+2. V2-002：OIDC 认证模型与桌面登录 ADR。
 3. V2-003：Gateway Policy/Impersonation 授权 ADR。
 4. V2-008：SQLite/PostgreSQL 存储 ADR。
 5. V2-009：Control Plane/Data Plane 拆分 ADR。
@@ -741,7 +712,7 @@ ADR / Threat Model
 7. V2-100：独立 Control Plane command。
 8. V2-111：独立 Data Plane command。
 9. V2-101：`/.well-known/kubeloop`。
-10. V2-102：`/api/v2` 基础框架。
+10. V2-102：`/kubeloop/api` 基础框架。
 11. V2-200：Helm Chart 最小安装。
 12. V2-201：最小 RBAC。
 13. V2-205：Helm install/uninstall E2E。

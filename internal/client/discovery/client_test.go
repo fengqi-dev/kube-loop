@@ -23,8 +23,6 @@ func TestDiscoverValidatesAndReturnsDocument(t *testing.T) {
 			APIVersions: []string{"v1", "v2"},
 			AuthMethods: []AuthMethod{
 				{ID: "company", Type: "oidc", Interaction: "browser"},
-				{ID: "ad", Type: "ad", Interaction: "password"},
-				{ID: "local", Type: "static-token", Interaction: "token"},
 				{ID: "guest", Type: "anonymous", Interaction: "none"},
 			},
 			Features: []string{"sessions"}, ServerVersion: "2.1.0", ProtocolMin: "2.0", ProtocolMax: "2.1", MinClientVersion: "2.0.0",
@@ -36,7 +34,7 @@ func TestDiscoverValidatesAndReturnsDocument(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if document.ServiceID != "production" || document.PublicURL != server.URL || document.TunnelPath != "/tunnel" || len(document.AuthMethods) != 4 {
+	if document.ServiceID != "production" || document.PublicURL != server.URL || document.TunnelPath != "/tunnel" || len(document.AuthMethods) != 2 {
 		t.Fatalf("document = %#v", document)
 	}
 }

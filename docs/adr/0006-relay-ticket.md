@@ -41,7 +41,7 @@ credential; the RelayTicket is the authorization capability.
 
 The private key is projected only into Control Plane. Data Plane receives only a
 public-key JSON Secret, has no database or Kubernetes ServiceAccount token, and
-does not query OIDC/AD. Tickets, authorization headers and claims are excluded
+does not query OIDC. Tickets, authorization headers and claims are excluded
 from logs, metrics and audit payloads. Helm no longer creates a static shared
 token and disables the raw TCP listener by default.
 

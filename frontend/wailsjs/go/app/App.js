@@ -106,20 +106,12 @@ export function LoadServerInventory(arg1, arg2) {
   return window['go']['app']['App']['LoadServerInventory'](arg1, arg2);
 }
 
-export function LoginServerAD(arg1, arg2, arg3, arg4) {
-  return window['go']['app']['App']['LoginServerAD'](arg1, arg2, arg3, arg4);
-}
-
 export function LoginServerAnonymous(arg1, arg2) {
   return window['go']['app']['App']['LoginServerAnonymous'](arg1, arg2);
 }
 
 export function LoginServerOIDC(arg1, arg2) {
   return window['go']['app']['App']['LoginServerOIDC'](arg1, arg2);
-}
-
-export function LoginServerStaticToken(arg1, arg2, arg3) {
-  return window['go']['app']['App']['LoginServerStaticToken'](arg1, arg2, arg3);
 }
 
 export function LogoutServer(arg1) {

@@ -13,24 +13,26 @@ export function ServerLogsView({ profileId }: { profileId: string }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (showLoading = true) => {
     if (!profileId) {
       setLines([]);
       return;
     }
-    setLoading(true);
+    if (showLoading) setLoading(true);
     try {
       setLines(await backend.serverDataPlaneLogs(profileId));
       setError("");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
     } finally {
-      setLoading(false);
+      if (showLoading) setLoading(false);
     }
   }, [profileId]);
 
   useEffect(() => {
     void refresh();
+    const timer = window.setInterval(() => void refresh(false), 1_000);
+    return () => window.clearInterval(timer);
   }, [refresh]);
 
   const visible = useMemo(() => {

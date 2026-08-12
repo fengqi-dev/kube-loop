@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -25,6 +26,7 @@ const (
 	DefaultStartTimeout     = 15 * time.Second
 	DefaultRecoveryAttempts = 5
 	DefaultRecoveryBackoff  = 500 * time.Millisecond
+	maxRuntimeLogLines      = 5_000
 )
 
 type Config struct {
@@ -52,6 +54,7 @@ type localBridge interface {
 	SetGatewayAddress(string)
 	SetGateway(string, tunnel.SessionToken)
 	SetHostTCPHandler(socksbridge.HostTCPHandler)
+	SetLogHandler(socksbridge.LogHandler)
 	Close() error
 }
 
@@ -88,6 +91,8 @@ type Runtime struct {
 	transportErr  error
 	errMu         sync.Mutex
 	err           error
+	logMu         sync.Mutex
+	socksLogs     []string
 }
 
 type Status struct {
@@ -156,6 +161,8 @@ func Start(
 			NetworkSpecHash: session.NetworkSpecHash,
 		},
 	}
+	bridge.SetLogHandler(runtime.appendSOCKSLog)
+	runtime.appendSOCKSLog("listening on " + bridge.Addr().String())
 	go runtime.watchControl(transport.control)
 	go runtime.watchContext(runtimeCtx)
 	return runtime, nil
@@ -455,10 +462,30 @@ func (runtime *Runtime) Logs(ctx context.Context) ([]string, error) {
 	runtime.stateMu.Lock()
 	core := runtime.tun
 	runtime.stateMu.Unlock()
+	runtime.logMu.Lock()
+	logs := slices.Clone(runtime.socksLogs)
+	runtime.logMu.Unlock()
 	if core == nil {
-		return nil, errors.New("TUN runtime is not running")
+		return logs, nil
 	}
-	return core.ReadLogs(ctx)
+	tunLogs, err := core.ReadLogs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, line := range tunLogs {
+		logs = append(logs, "[TUN] "+line)
+	}
+	return logs, nil
+}
+
+func (runtime *Runtime) appendSOCKSLog(message string) {
+	line := time.Now().Format("15:04:05") + " [SOCKS] " + message
+	runtime.logMu.Lock()
+	runtime.socksLogs = append(runtime.socksLogs, line)
+	if len(runtime.socksLogs) > maxRuntimeLogLines {
+		runtime.socksLogs = slices.Clone(runtime.socksLogs[len(runtime.socksLogs)-maxRuntimeLogLines:])
+	}
+	runtime.logMu.Unlock()
 }
 
 func (runtime *Runtime) ConfigJSON() ([]byte, error) {

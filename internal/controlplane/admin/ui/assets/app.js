@@ -1,6 +1,6 @@
 "use strict";
 
-const managementBase = "/api/v2/admin";
+const managementBase = "/kubeloop/api/admin";
 const authBase = "/auth";
 const csrfStorageKey = "kubeloop.admin.csrf";
 const oidcStorageKey = "kubeloop.admin.oidc";
@@ -23,8 +23,8 @@ const state = {
 const views = {
   overview: { title: "运行概览", description: "Control Plane、存储与管理策略状态。" },
   policy: { title: "管理策略", description: "以 revision、dry-run 和乐观并发安全管理后台角色。", capability: "admin.policy/read" },
-  providers: { title: "身份 Provider", description: "验证并版本化发布 OIDC / AD；Secret 只使用部署 allowlist 中的 alias。", capability: "admin.provider/read" },
-  principals: { title: "身份", description: "已通过 OIDC 或 AD 解析的 Principal。", capability: "admin.principal/list", path: "/principals" },
+  providers: { title: "身份 Provider", description: "验证并版本化发布 OIDC；Secret 只使用部署 allowlist 中的 alias。", capability: "admin.provider/read" },
+  principals: { title: "身份", description: "已通过 OIDC 解析的 Principal。", capability: "admin.principal/list", path: "/principals" },
   sessions: { title: "会话", description: "Cluster Session 生命周期与网络摘要。", capability: "admin.session/list", path: "/sessions", scoped: true },
   tasks: { title: "任务", description: "Preview、Exchange、Mirror、Port Forward 等远程任务。", capability: "admin.task/list", path: "/tasks", scoped: true },
   relays: { title: "Relay", description: "Data Plane 健康、容量和租约状态。", capability: "admin.relay/list", path: "/relays" },
@@ -159,15 +159,6 @@ async function startOIDC(providerID) {
   }
 }
 
-async function loginAD(providerID, username, password) {
-  const tokens = await requestJSON(`${authBase}/ad/${encodeURIComponent(providerID)}/login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username, password, deviceId: deviceID() }),
-  });
-  await exchangeManagement(tokens);
-}
-
 async function loginBreakGlass(credential) {
   const issued = await requestJSON(`${managementBase}/sessions/break-glass`, {
     method: "POST",
@@ -200,14 +191,8 @@ async function renderLogin(errorMessage = "") {
       <section class="login-pane">
         <div class="login-card">
           <p class="eyebrow">安全登录</p><h2>进入管理后台</h2>
-          <p class="subtle">使用 Gateway 已配置的 OIDC / AD，或在紧急情况下使用 break-glass。</p>
+          <p class="subtle">使用 Gateway 已配置的 OIDC，或在紧急情况下使用 break-glass。</p>
           <div id="auth-options" class="auth-options"></div>
-          <form id="ad-form" class="auth-form hidden">
-            <label>目录 <select id="ad-provider"></select></label>
-            <label>用户名 <input id="ad-username" autocomplete="username" required></label>
-            <label>密码 <input id="ad-password" type="password" autocomplete="current-password" required></label>
-            <button class="primary" type="submit">使用 AD 登录</button>
-          </form>
           <form id="breakglass-form" class="auth-form">
             <label>Break-glass 凭据 <input id="breakglass-credential" type="password" autocomplete="off" required></label>
             <button class="secondary" type="submit">紧急访问</button>
@@ -223,34 +208,12 @@ async function renderLogin(errorMessage = "") {
   const methods = Array.isArray(discovery.authMethods) ? discovery.authMethods : [];
   const options = document.getElementById("auth-options");
   const oidc = methods.filter((method) => method.type === "oidc" && method.interaction === "browser");
-  const ad = methods.filter((method) => method.type === "ad" && method.interaction === "password");
   oidc.forEach((method) => {
     const button = text("button", `使用 ${method.displayName || method.id} 登录`, "auth-button");
     button.type = "button";
     button.addEventListener("click", () => startOIDC(method.id));
     options.append(button);
   });
-  if (ad.length) {
-    const form = document.getElementById("ad-form");
-    const provider = document.getElementById("ad-provider");
-    ad.forEach((method) => {
-      const option = text("option", method.displayName || method.id);
-      option.value = method.id;
-      provider.append(option);
-    });
-    form.classList.remove("hidden");
-    form.addEventListener("submit", async (event) => {
-      event.preventDefault();
-      const passwordInput = document.getElementById("ad-password");
-      const password = passwordInput.value;
-      passwordInput.value = "";
-      setLoginBusy(true);
-      try {
-        await loginAD(provider.value, document.getElementById("ad-username").value, password);
-        await startApplication();
-      } catch (error) { showLoginMessage(error.message); setLoginBusy(false); }
-    });
-  }
   document.getElementById("breakglass-form").addEventListener("submit", async (event) => {
     event.preventDefault();
     const input = document.getElementById("breakglass-credential");
@@ -644,13 +607,7 @@ function pendingProviderDraft() {
   } catch { return null; }
 }
 
-function providerDefaults(type) {
-  if (type === "ad") {
-    return {
-      directoryId: "corp.example", url: "ldaps://dc.corp.example:636", baseDn: "DC=corp,DC=example",
-      userFilter: "(&(objectClass=user)(sAMAccountName={username}))", objectIdAttribute: "objectGUID",
-    };
-  }
+function providerDefaults() {
   return {
     issuer: "", clientId: "kubeloop", scopes: ["openid", "profile", "email"],
     allowedSigningAlgs: ["RS256"], requiredClaims: ["sub"], claims: { displayName: "name", email: "email", groups: "groups" },
@@ -669,21 +626,21 @@ async function loadProviders() {
     toolbar.append(copy, refresh);
 
     const summary = document.createElement("div"); summary.className = "grid policy-summary";
-    [["已发布", items.length], ["OIDC", items.filter((item) => item.type === "oidc").length], ["AD", items.filter((item) => item.type === "ad").length]].forEach(([label, value]) => {
+    [["已发布", items.length], ["OIDC", items.filter((item) => item.type === "oidc").length]].forEach(([label, value]) => {
       const card = document.createElement("article"); card.className = "card";
       card.append(text("div", label, "metric-label"), text("div", value, "metric")); summary.append(card);
     });
 
     const panel = document.createElement("section"); panel.className = "policy-panel";
     const heading = document.createElement("div"); heading.className = "policy-heading";
-    heading.append(text("div", "版本化配置", "metric-label"), text("h2", "OIDC / Active Directory")); panel.append(heading);
+    heading.append(text("div", "版本化配置", "metric-label"), text("h2", "OIDC")); panel.append(heading);
     const selector = document.createElement("select");
     const createOption = text("option", "新建 Provider"); createOption.value = ""; selector.append(createOption);
     items.forEach((item) => { const option = text("option", `${item.providerId} · ${item.type} · revision ${item.revision}`); option.value = item.providerId; selector.append(option); });
     const providerID = document.createElement("input"); providerID.placeholder = "稳定 Provider ID"; providerID.maxLength = 128;
     const type = document.createElement("select");
-    ["oidc", "ad"].forEach((value) => { const option = text("option", value.toUpperCase()); option.value = value; type.append(option); });
-    const config = document.createElement("textarea"); config.spellcheck = false; config.value = JSON.stringify(providerDefaults("oidc"), null, 2);
+    ["oidc"].forEach((value) => { const option = text("option", value.toUpperCase()); option.value = value; type.append(option); });
+    const config = document.createElement("textarea"); config.spellcheck = false; config.value = JSON.stringify(providerDefaults(), null, 2);
     const aliases = document.createElement("textarea"); aliases.spellcheck = false; aliases.value = JSON.stringify({ "client-secret": "" }, null, 2);
     const reason = document.createElement("input"); reason.maxLength = 512; reason.placeholder = "说明本次变更目的（至少 8 个字符）";
     let etag = 0;
@@ -691,21 +648,21 @@ async function loadProviders() {
       const item = items.find((candidate) => candidate.providerId === id);
       providerID.value = item?.providerId || ""; providerID.readOnly = Boolean(item);
       type.value = item?.type || "oidc"; type.disabled = Boolean(item);
-      config.value = JSON.stringify(item?.config || providerDefaults(type.value), null, 2);
-      aliases.value = JSON.stringify(type.value === "oidc" ? { "client-secret": "" } : {}, null, 2);
+      config.value = JSON.stringify(item?.config || providerDefaults(), null, 2);
+      aliases.value = JSON.stringify({ "client-secret": "" }, null, 2);
       etag = Number(item?.etag || 0);
       policyMessage(panel, item ? `当前 revision ${item.revision}，ETag ${etag}。请重新选择 Secret alias；服务不会回显 alias 值。` : "填写非敏感配置，并选择 Helm allowlist 中的 Secret alias。", "warning");
     };
     selector.addEventListener("change", () => selectProvider(selector.value));
     type.addEventListener("change", () => {
       if (!selector.value) {
-        config.value = JSON.stringify(providerDefaults(type.value), null, 2);
-        aliases.value = JSON.stringify(type.value === "oidc" ? { "client-secret": "" } : {}, null, 2);
+        config.value = JSON.stringify(providerDefaults(), null, 2);
+        aliases.value = JSON.stringify({ "client-secret": "" }, null, 2);
       }
     });
     panel.append(policyField("已有 Provider", selector), policyField("Provider ID", providerID), policyField("类型", type),
       policyField("非敏感配置 JSON", config), policyField("Secret alias JSON", aliases),
-      text("p", "仅填写 alias，例如 {\"client-secret\":\"corporate\"} 或 {\"bind-password\":\"corporate-ad\",\"ca\":\"corporate-ca\"}。不要填写 Secret 明文。", "subtle policy-help"),
+      text("p", "仅填写 alias，例如 {\"client-secret\":\"corporate\",\"ca\":\"corporate-ca\"}。不要填写 Secret 明文。", "subtle policy-help"),
       policyField("变更原因", reason));
     selectProvider("");
 

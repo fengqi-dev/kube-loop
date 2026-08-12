@@ -104,7 +104,7 @@ explicit KubeLoop FIN preserves request-EOF/response-after-EOF behavior.
 
 ## Consequences
 
-- Data Plane never receives the broader OAuth/OIDC/AD Access Token.
+- Data Plane never receives the broader OAuth/OIDC Access Token.
 - Protocol and client incompatibility is reported before smux exists, with a
   typed client error suitable for upgrade guidance.
 - A device response field is returned with each RelayTicket so the desktop can

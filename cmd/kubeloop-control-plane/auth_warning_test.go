@@ -13,7 +13,6 @@ func TestAnonymousDevelopmentAuthenticationEmitsHighVisibilityWarning(t *testing
 	var output bytes.Buffer
 	logger := slog.New(slog.NewTextHandler(&output, nil))
 	warnDevelopmentAuthentication(logger, []authn.Descriptor{
-		{ID: "local", Type: authn.ProviderStaticToken},
 		{ID: "guest", Type: authn.ProviderAnonymous},
 	})
 	logged := output.String()

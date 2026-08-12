@@ -92,7 +92,7 @@ func TestSQLiteChartRendersIndependentSecureWorkloads(t *testing.T) {
 		t.Fatal("Data Plane received ControlPlane database configuration")
 	}
 	if strings.Contains(string(dataPlaneYAML), "KUBELOOP_GATEWAY_TOKEN") || strings.Contains(string(dataPlaneYAML), "legacy-tcp") {
-		t.Fatal("Data Plane still exposes static-token or raw TCP compatibility paths")
+		t.Fatal("Data Plane still exposes legacy token or raw TCP compatibility paths")
 	}
 	if !strings.Contains(string(dataPlaneYAML), "relay-identity") ||
 		!strings.Contains(string(dataPlaneYAML), "audience: kubeloop-relay") ||
@@ -114,7 +114,7 @@ func TestSQLiteChartRendersIndependentSecureWorkloads(t *testing.T) {
 	ingressYAML, _ := yaml.Marshal(ingress)
 	for _, want := range []string{
 		"host: kubeloop.example.test", "path: /.well-known", "path: /auth",
-		"path: /api", "path: /tunnel", "path: /traffic/v1", "pathType: Prefix", "tls:",
+		"path: /kubeloop/api", "path: /tunnel", "path: /traffic/v1", "pathType: Prefix", "tls:",
 	} {
 		if !strings.Contains(string(ingressYAML), want) {
 			t.Fatalf("same-origin Ingress is missing %q: %s", want, ingressYAML)
@@ -154,7 +154,7 @@ func TestGatewayAPIHTTPRouteUsesOneTLSOriginAndUnboundedWebSocketTimeout(t *test
 	for _, want := range []string{
 		"apiVersion: gateway.networking.k8s.io/v1", "name: shared-gateway",
 		"namespace: networking", "sectionName: https", "kubeloop.example.test",
-		"value: /.well-known", "value: /auth", "value: /api", "value: /tunnel", "value: /traffic/v1",
+		"value: /.well-known", "value: /auth", "value: /kubeloop/api", "value: /tunnel", "value: /traffic/v1",
 		"name: test-kubeloop-control-plane", "name: test-kubeloop-gateway",
 		"request: 30s", "backendRequest: 30s", "request: 0s", "backendRequest: 0s",
 	} {
@@ -376,88 +376,21 @@ func TestOIDCConfigurationSeparatesPublicConfigAndSecrets(t *testing.T) {
 	}
 }
 
-func TestADConfigurationSeparatesDirectorySecretsFromDataPlane(t *testing.T) {
-	objects := renderChart(t,
-		"--set", "publicURL=https://kubeloop.example.test",
-		"--set", "controlPlane.auth.token.existingSecret=kubeloop-token",
-		"--set", "controlPlane.auth.providers[0].id=legacy-ad",
-		"--set", "controlPlane.auth.providers[0].type=ad",
-		"--set", "controlPlane.auth.providers[0].displayName=Corporate AD",
-		"--set", "controlPlane.auth.providers[0].ad.directoryID=corp.example",
-		"--set", "controlPlane.auth.providers[0].ad.url=ldaps://dc.corp.example:636",
-		"--set", `controlPlane.auth.providers[0].ad.baseDN=DC=corp\,DC=example`,
-		"--set", `controlPlane.auth.providers[0].ad.bindDN=CN=reader\,DC=corp\,DC=example`,
-		"--set", "controlPlane.auth.providers[0].ad.existingSecret=kubeloop-ad",
-		"--set", "controlPlane.auth.providers[0].ad.bindPasswordKey=bind-password",
-		"--set", "controlPlane.auth.providers[0].ad.caKey=ca.crt",
-	)
-	controlPlane := objectsByComponent(t, objects, "Deployment", "control-plane")[0]
-	dataPlane := objectsByComponent(t, objects, "Deployment", "data-plane")[0]
-	authConfig := objectByName(t, objects, "ConfigMap", "test-kubeloop-control-plane-auth-config")
-	authJSON := valueAt(t, authConfig, "data", "auth.json").(string)
-	for _, want := range []string{
-		`"type":"ad"`, `"directoryId":"corp.example"`,
-		`"url":"ldaps://dc.corp.example:636"`,
-		`"bindPasswordFile":"/var/run/secrets/kubeloop/auth/legacy-ad/bind-password"`,
-		`"caFile":"/var/run/secrets/kubeloop/auth/legacy-ad/ca.crt"`,
-	} {
-		if !strings.Contains(authJSON, want) {
-			t.Fatalf("AD auth config missing %s: %s", want, authJSON)
-		}
-	}
-	if strings.Contains(authJSON, "kubeloop-ad") || strings.Contains(authJSON, "kubeloop-token") {
-		t.Fatalf("AD Secret names leaked into ConfigMap: %s", authJSON)
-	}
-	controlPlaneYAML, _ := yaml.Marshal(controlPlane)
-	if !strings.Contains(string(controlPlaneYAML), "kubeloop-ad") || !strings.Contains(string(controlPlaneYAML), "bind-password") {
-		t.Fatal("ControlPlane does not project AD bind/CA Secret")
-	}
-	dataPlaneYAML, _ := yaml.Marshal(dataPlane)
-	if strings.Contains(string(dataPlaneYAML), "kubeloop-ad") || strings.Contains(string(dataPlaneYAML), "bind-password") {
-		t.Fatal("Data Plane received AD Secret configuration")
-	}
-}
-
-func TestDevelopmentAuthenticationRequiresExplicitModeAndIsControlPlaneOnly(t *testing.T) {
+func TestAnonymousAuthenticationRequiresExplicitMode(t *testing.T) {
 	objects := renderChart(t,
 		"--set", "publicURL=https://kubeloop.example.test",
 		"--set", "controlPlane.auth.developmentMode=true",
 		"--set", "controlPlane.auth.token.existingSecret=kubeloop-token",
-		"--set", "controlPlane.auth.providers[0].id=local",
-		"--set", "controlPlane.auth.providers[0].type=static-token",
-		"--set", "controlPlane.auth.providers[0].staticToken.existingSecret=kubeloop-development",
-		"--set", "controlPlane.auth.providers[0].staticToken.tokenKey=token",
-		"--set", "controlPlane.auth.providers[0].staticToken.subject=developer",
-		"--set", "controlPlane.auth.providers[0].staticToken.groups[0]=developers",
-		"--set", "controlPlane.auth.providers[1].id=guest",
-		"--set", "controlPlane.auth.providers[1].type=anonymous",
-		"--set", "controlPlane.auth.providers[1].anonymous.subject=guest",
+		"--set", "controlPlane.auth.providers[0].id=guest",
+		"--set", "controlPlane.auth.providers[0].type=anonymous",
+		"--set", "controlPlane.auth.providers[0].anonymous.subject=guest",
 	)
 	authConfig := objectByName(t, objects, "ConfigMap", "test-kubeloop-control-plane-auth-config")
 	authJSON := valueAt(t, authConfig, "data", "auth.json").(string)
-	for _, want := range []string{
-		`"developmentMode":true`, `"type":"static-token"`,
-		`"tokenFile":"/var/run/secrets/kubeloop/auth/local/static-token"`,
-		`"type":"anonymous"`, `"subject":"guest"`,
-	} {
+	for _, want := range []string{`"developmentMode":true`, `"type":"anonymous"`, `"subject":"guest"`} {
 		if !strings.Contains(authJSON, want) {
 			t.Fatalf("development auth config missing %s: %s", want, authJSON)
 		}
-	}
-	if strings.Contains(authJSON, "kubeloop-development") || strings.Contains(authJSON, `"token":"`) {
-		t.Fatalf("development Secret leaked into ConfigMap: %s", authJSON)
-	}
-	controlPlane := objectsByComponent(t, objects, "Deployment", "control-plane")[0]
-	dataPlane := objectsByComponent(t, objects, "Deployment", "data-plane")[0]
-	controlPlaneYAML, _ := yaml.Marshal(controlPlane)
-	dataPlaneYAML, _ := yaml.Marshal(dataPlane)
-	if !strings.Contains(string(controlPlaneYAML), "kubeloop-development") ||
-		!strings.Contains(string(controlPlaneYAML), "local/static-token") {
-		t.Fatal("ControlPlane does not project the development static-token Secret")
-	}
-	if strings.Contains(string(dataPlaneYAML), "kubeloop-development") ||
-		strings.Contains(string(dataPlaneYAML), "local/static-token") {
-		t.Fatal("Data Plane received the development static-token Secret")
 	}
 }
 
@@ -850,10 +783,8 @@ func TestChartRejectsUnsafeStorageConfigurations(t *testing.T) {
 		{name: "duplicate RBAC namespace", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.rbac.scope=namespace", "--set", "controlPlane.rbac.namespaces[0]=team-a", "--set", "controlPlane.rbac.namespaces[1]=team-a"}, want: "contains duplicate namespace"},
 		{name: "token signing secret", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.auth.providers[0].id=corp", "--set", "controlPlane.auth.providers[0].type=oidc", "--set", "controlPlane.auth.providers[0].oidc.issuer=https://login.example.test", "--set", "controlPlane.auth.providers[0].oidc.clientID=kubeloop", "--set", "controlPlane.auth.providers[0].oidc.existingSecret=kubeloop-oidc", "--set", "controlPlane.auth.providers[0].oidc.clientSecretKey=client-secret"}, want: "controlPlane.auth.token.existingSecret is required"},
 		{name: "OIDC secret", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.auth.token.existingSecret=kubeloop-token", "--set", "controlPlane.auth.providers[0].id=corp", "--set", "controlPlane.auth.providers[0].type=oidc", "--set", "controlPlane.auth.providers[0].oidc.issuer=https://login.example.test", "--set", "controlPlane.auth.providers[0].oidc.clientID=kubeloop"}, want: "existingSecret is required"},
-		{name: "unsupported auth type", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.auth.token.existingSecret=kubeloop-token", "--set", "controlPlane.auth.providers[0].id=corp", "--set", "controlPlane.auth.providers[0].type=saml"}, want: "must be oidc, ad, static-token, or anonymous"},
-		{name: "static token without development mode", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.auth.token.existingSecret=kubeloop-token", "--set", "controlPlane.auth.providers[0].id=local", "--set", "controlPlane.auth.providers[0].type=static-token", "--set", "controlPlane.auth.providers[0].staticToken.existingSecret=development", "--set", "controlPlane.auth.providers[0].staticToken.tokenKey=token"}, want: "requires controlPlane.auth.developmentMode=true"},
+		{name: "unsupported auth type", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.auth.token.existingSecret=kubeloop-token", "--set", "controlPlane.auth.providers[0].id=corp", "--set", "controlPlane.auth.providers[0].type=saml"}, want: "must be oidc or anonymous"},
 		{name: "anonymous without development mode", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.auth.token.existingSecret=kubeloop-token", "--set", "controlPlane.auth.providers[0].id=guest", "--set", "controlPlane.auth.providers[0].type=anonymous", "--set", "controlPlane.auth.providers[0].anonymous.subject=guest"}, want: "requires controlPlane.auth.developmentMode=true"},
-		{name: "plain AD LDAP", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.auth.token.existingSecret=kubeloop-token", "--set", "controlPlane.auth.providers[0].id=ad", "--set", "controlPlane.auth.providers[0].type=ad", "--set", "controlPlane.auth.providers[0].ad.directoryID=corp", "--set", "controlPlane.auth.providers[0].ad.url=ldap://dc.example.test:389", "--set", `controlPlane.auth.providers[0].ad.baseDN=DC=example\,DC=test`}, want: "must use ldaps:// or explicitly enabled StartTLS"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

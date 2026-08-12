@@ -13,7 +13,7 @@ correctly authorized only one namespace. Pod IP reuse also means a snapshot
 that is never refreshed can eventually authorize a Pod that moved to another
 namespace.
 
-Data Plane deliberately has no Kubernetes client, business database, OIDC/AD
+Data Plane deliberately has no Kubernetes client, business database, OIDC
 configuration, or broad ServiceAccount. It therefore needs a bounded,
 cryptographically verifiable permission snapshot supplied by Control Plane.
 

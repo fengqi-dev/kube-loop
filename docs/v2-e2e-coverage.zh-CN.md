@@ -47,7 +47,6 @@
 ## 身份、容量与平台证据
 
 - `internal/client/auth/fullstack_oidc_test.go` 使用真实 TLS discovery、authorization redirect、PKCE、JWKS 和 RS256 ID Token，贯通桌面 loopback callback、Control Plane 登录、SQLite、Access/Refresh Token 轮换与撤销。
-- `internal/client/auth/fullstack_ad_test.go` 使用真实 LDAPS BER 服务绑定、escaped filter 搜索、独立用户绑定、objectGUID/group/account-state 映射，贯通桌面登录、Control Plane、SQLite 与错误密码拒绝。
 - `make capacity-baseline` 验证全局/单用户物理 WSS、逻辑 stream 上限、容量释放，以及满载时 live/ready/metrics；三轮 32 KiB stream benchmark 记录吞吐和分配。`TestGatewayPodMultiUserCapacityRSSAndCleanup` 在单个真实 Gateway Pod 上以四名 Principal/四条物理 WSS/十六条逻辑 stream 验证限额、容量复用、集群内吞吐和 kubelet working-set 曲线；满载期间撤销 Token Family，确认 Preview Task、relay、TrafficBinding、Service、EndpointSlice 和 snapshot 在 5 秒预算内全部清理。
 - Windows/macOS workflow 运行全量本地测试和真实 Helper 安装、升级、ACL、DNS 恢复、卸载；Linux 额外运行完整 Minikube TUN。`e2e/remotetun` 已接入三平台 workflow，使用实际 Helper、sing-box TUN、WSS/smux Gateway、RelayTicket/NetworkSpec 和精确目标路由，验证休眠间隔触发 transport 刷新后 SOCKS 地址、TUN core 与 Helper Session 保持不变，且停止后无特权资源残留。最终门禁已由 GitHub Actions push workflow [31454657118](https://github.com/fengqi-dev/kube-loop/actions/runs/31454657118) 完成：Windows、macOS、Linux、Helm、主 Go 与前端六个作业全部通过，V2-803 已关闭。
 

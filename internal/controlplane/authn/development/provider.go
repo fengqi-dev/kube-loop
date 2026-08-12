@@ -1,18 +1,13 @@
 package development
 
 import (
-	"bytes"
 	"context"
-	"crypto/sha256"
-	"crypto/subtle"
 	"errors"
 	"slices"
 	"strings"
 
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/authn"
 )
-
-const minimumStaticTokenBytes = 32
 
 type IdentityConfig struct {
 	Subject     string
@@ -21,38 +16,12 @@ type IdentityConfig struct {
 	Groups      []string
 }
 
-type StaticToken struct {
-	descriptor authn.Descriptor
-	identity   authn.Identity
-	tokenHash  [sha256.Size]byte
-}
-
 type Anonymous struct {
 	descriptor authn.Descriptor
 	identity   authn.Identity
 }
 
-var _ authn.TokenProvider = (*StaticToken)(nil)
 var _ authn.AnonymousProvider = (*Anonymous)(nil)
-
-func NewStaticToken(id, displayName string, rawToken []byte, identityConfig IdentityConfig) (*StaticToken, error) {
-	defer clear(rawToken)
-	rawToken = bytes.TrimSpace(rawToken)
-	if len(rawToken) < minimumStaticTokenBytes {
-		return nil, errors.New("development static token must contain at least 32 characters")
-	}
-	identity, err := developmentIdentity(id, identityConfig, "developer")
-	if err != nil {
-		return nil, err
-	}
-	return &StaticToken{
-		descriptor: authn.Descriptor{
-			ID: id, Type: authn.ProviderStaticToken, DisplayName: displayName, Interaction: authn.InteractionToken,
-		},
-		identity:  identity,
-		tokenHash: sha256.Sum256(rawToken),
-	}, nil
-}
 
 func NewAnonymous(id, displayName string, identityConfig IdentityConfig) (*Anonymous, error) {
 	identity, err := developmentIdentity(id, identityConfig, "anonymous")
@@ -65,18 +34,6 @@ func NewAnonymous(id, displayName string, identityConfig IdentityConfig) (*Anony
 		},
 		identity: identity,
 	}, nil
-}
-
-func (provider *StaticToken) Descriptor() authn.Descriptor { return provider.descriptor }
-func (provider *StaticToken) Check(context.Context) error  { return nil }
-
-func (provider *StaticToken) AuthenticateToken(_ context.Context, credentials authn.TokenCredentials) (authn.Identity, error) {
-	defer clear(credentials.Token)
-	presented := sha256.Sum256(credentials.Token)
-	if subtle.ConstantTimeCompare(presented[:], provider.tokenHash[:]) != 1 {
-		return authn.Identity{}, errors.New("invalid development token")
-	}
-	return cloneIdentity(provider.identity), nil
 }
 
 func (provider *Anonymous) Descriptor() authn.Descriptor { return provider.descriptor }
