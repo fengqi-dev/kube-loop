@@ -3,7 +3,6 @@
 package dataplane
 
 import (
-	"bytes"
 	"context"
 	"io"
 	"log/slog"
@@ -261,7 +260,7 @@ func previewLifecycleState(
 	}
 	t.Cleanup(func() { _ = stateStore.Close() })
 	now := time.Now().UTC()
-	principalID, familyID, sessionID := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	principalID, authorizationID, sessionID := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	deviceID := "preview-e2e-device"
 	if _, err := stateStore.Principals().Upsert(ctx, storage.Principal{
 		ID: principalID, Provider: "e2e", ExternalID: "preview-lifecycle",
@@ -270,12 +269,7 @@ func previewLifecycleState(
 		t.Fatal(err)
 	}
 	expiresAt := now.Add(10 * time.Minute)
-	if err := stateStore.TokenFamilies().Create(ctx, storage.TokenFamily{
-		ID: familyID, PrincipalID: principalID, DeviceID: deviceID,
-		RefreshTokenHash: bytes.Repeat([]byte{9}, 32), CreatedAt: now, ExpiresAt: expiresAt,
-	}); err != nil {
-		t.Fatal(err)
-	}
+	createOAuthGrant(t, ctx, stateStore, authorizationID, principalID, deviceID, 9, now, expiresAt)
 	network, err := networkspec.Normalize(networkspec.Spec{ServiceIPs: []string{serviceIP}})
 	if err != nil {
 		t.Fatal(err)
@@ -291,7 +285,7 @@ func previewLifecycleState(
 		t.Fatal(err)
 	}
 	principal := controlplaneapi.Principal{
-		Subject: principalID, DeviceID: deviceID, FamilyID: familyID, AccessExpiresAt: expiresAt,
+		Subject: principalID, DeviceID: deviceID, AuthorizationID: authorizationID, AccessExpiresAt: expiresAt,
 	}
 	active := sessionapi.ActiveSession{
 		ID: sessionID, Namespace: harness.EchoNamespace, Generation: 1,
@@ -559,7 +553,7 @@ func waitForNoLocalPreview(
 		case <-ctx.Done():
 			t.Fatal(ctx.Err())
 		case <-deadline.C:
-			t.Fatal("local Preview relay did not stop after Token Family revocation")
+			t.Fatal("local Preview relay did not stop after OAuth grant revocation")
 		case <-ticker.C:
 		}
 	}

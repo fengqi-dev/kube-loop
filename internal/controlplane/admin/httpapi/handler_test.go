@@ -17,7 +17,7 @@ import (
 
 	adminauthorization "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/authorization"
 	adminsession "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/session"
-	admintoken "github.com/fengqi-dev/kube-loop/internal/controlplane/authn/token"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/authn"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v5"
@@ -108,7 +108,7 @@ func TestReadAPIRequiresCookieAndReturnsAuthorizedCapabilitiesAndStatus(t *testi
 	if err := json.Unmarshal(status.Body.Bytes(), &statusDocument); err != nil {
 		t.Fatal(err)
 	}
-	if statusDocument.ControlPlane.Version != "v2-test" || statusDocument.Storage.Backend != "sqlite" || statusDocument.Storage.SchemaVersion < 9 {
+	if statusDocument.ControlPlane.Version != "v2-test" || statusDocument.Storage.Backend != "sqlite" || statusDocument.Storage.SchemaVersion < 18 {
 		t.Fatalf("status document=%+v", statusDocument)
 	}
 	events, err := store.Audit().List(context.Background(), storage.AuditFilter{Limit: 100})
@@ -206,7 +206,7 @@ func TestGatewayTokenExchangeCreatesNormalAndBootstrapManagementSessions(t *test
 			if bootstrap {
 				wantAuthentication = "bootstrap"
 			}
-			if stored.AuthenticationType != wantAuthentication || stored.PrincipalID == "" || stored.TokenFamilyID == "" {
+			if stored.AuthenticationType != wantAuthentication || stored.PrincipalID == "" || stored.AuthorizationID == "" {
 				t.Fatalf("stored session=%+v", stored)
 			}
 			statusRequest := httptest.NewRequest(http.MethodGet, "/status", nil)
@@ -383,11 +383,11 @@ func newReadTestHandler(t *testing.T, authorizeBreakGlass bool) (*Handler, *stor
 	return handler, store
 }
 
-type tokenAuthenticatorStub struct{ identity admintoken.AccessIdentity }
+type tokenAuthenticatorStub struct{ identity authn.AccessIdentity }
 
-func (authenticator tokenAuthenticatorStub) Authenticate(_ context.Context, value string) (admintoken.AccessIdentity, error) {
+func (authenticator tokenAuthenticatorStub) Authenticate(_ context.Context, value string) (authn.AccessIdentity, error) {
 	if value != "valid-access-token" {
-		return admintoken.AccessIdentity{}, errors.New("invalid token")
+		return authn.AccessIdentity{}, errors.New("invalid token")
 	}
 	return authenticator.identity, nil
 }
@@ -413,11 +413,11 @@ func newPrincipalTokenHandler(t *testing.T, bootstrap bool, extraOptions ...Opti
 	if err != nil {
 		t.Fatal(err)
 	}
-	family := storage.TokenFamily{
-		ID: uuid.NewString(), PrincipalID: principal.ID, DeviceID: "browser",
-		RefreshTokenHash: bytes.Repeat([]byte{22}, 32), CreatedAt: now, ExpiresAt: now.Add(time.Hour),
-	}
-	if err := store.TokenFamilies().Create(context.Background(), family); err != nil {
+	authorizationID := uuid.NewString()
+	if err := store.OAuthSessions().Create(context.Background(), storage.OAuthSession{
+		Kind: "refresh_token", SignatureHash: bytes.Repeat([]byte{22}, 32), RequestID: authorizationID,
+		RequestJSON: []byte(`{}`), Status: "active", CreatedAt: now, ExpiresAt: now.Add(time.Hour),
+	}); err != nil {
 		t.Fatal(err)
 	}
 	sessions, err := adminsession.New(store)
@@ -431,8 +431,9 @@ func newPrincipalTokenHandler(t *testing.T, bootstrap bool, extraOptions ...Opti
 		))
 	} else {
 		authorizer, err = adminauthorization.New(adminauthorization.Snapshot{
-			Version: adminauthorization.CurrentVersion, Revision: 1, Assignments: []adminauthorization.Assignment{{
-				ID: uuid.NewString(), Role: adminauthorization.RolePlatformAdmin, Subjects: []string{principal.ID},
+			Version: adminauthorization.CurrentVersion, Revision: 1, Bindings: []adminauthorization.Binding{{
+				ID: uuid.NewString(), Subject: adminauthorization.SubjectRef{Type: adminauthorization.SubjectPrincipal, PrincipalID: principal.ID}, RoleID: adminauthorization.RolePlatformAdmin,
+				Scope: adminauthorization.BindingScope{Type: adminauthorization.ScopePlatform}, ManagedBy: adminauthorization.ManagedByPlatform,
 			}},
 		})
 	}
@@ -443,8 +444,8 @@ func newPrincipalTokenHandler(t *testing.T, bootstrap bool, extraOptions ...Opti
 		WithReadAPI(authorizer, store, BuildInfo{
 			Version: "v2-test", Commit: "test", ProtocolMin: "2.0", ProtocolMax: "2.0",
 		}),
-		WithTokenExchange(tokenAuthenticatorStub{identity: admintoken.AccessIdentity{
-			Principal: principal, FamilyID: family.ID, DeviceID: family.DeviceID, AccessExpiresAt: now.Add(5 * time.Minute),
+		WithTokenExchange(tokenAuthenticatorStub{identity: authn.AccessIdentity{
+			Principal: principal, AuthorizationID: authorizationID, DeviceID: "browser", AccessExpiresAt: now.Add(5 * time.Minute),
 		}}),
 	}
 	options = append(options, extraOptions...)

@@ -3,7 +3,7 @@
 `verify.sh` is invoked by `e2e/helm/run.sh` against the real Control Plane in the
 dedicated Minikube profile. It verifies strict UI security headers, break-glass
 Management Session exchange, CSRF rejection, optimistic concurrent policy
-publish and durable Principal Token Family revocation.
+publish and durable Principal OAuth grant revocation.
 
 The browser fixture runs the production SQLite repositories, Management
 Session service, authorizer, revision service, chi v5 HTTP API and embedded UI.

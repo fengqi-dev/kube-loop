@@ -37,8 +37,8 @@ func TestPolicyRevisionPublishAndRollbackAreTransactional(t *testing.T) {
 		t.Fatalf("replayed draft = %#v, %v", replayed, err)
 	}
 	mismatched := firstSnapshot
-	mismatched.Assignments = append([]adminauthorization.Assignment(nil), firstSnapshot.Assignments...)
-	mismatched.Assignments[0].Role = adminauthorization.RoleAuditor
+	mismatched.Bindings = append([]adminauthorization.Binding(nil), firstSnapshot.Bindings...)
+	mismatched.Bindings[0].RoleID = adminauthorization.RoleAuditor
 	if _, err := service.CreatePolicyDraft(ctx, PolicyDraftRequest{
 		Snapshot: mismatched, IdempotencyKey: "policy-create-key-0001", Reason: "establish formal administration",
 		RequestID: "request-create-mismatch", Actor: actor,
@@ -65,13 +65,11 @@ func TestPolicyRevisionPublishAndRollbackAreTransactional(t *testing.T) {
 		t.Fatalf("bootstrap retired = %t, %v", retired, err)
 	}
 
-	// Stable assignment IDs are intentionally reused across immutable policy
+	// Stable binding IDs are intentionally reused across immutable policy
 	// revisions so history and audit references keep their identity.
 	secondSnapshot := firstSnapshot
-	secondSnapshot.Assignments = append([]adminauthorization.Assignment(nil), firstSnapshot.Assignments...)
-	secondSnapshot.Assignments = append(secondSnapshot.Assignments, adminauthorization.Assignment{
-		ID: uuid.NewString(), Role: adminauthorization.RoleAuditor, Subjects: []string{principal.ID},
-	})
+	secondSnapshot.Bindings = append([]adminauthorization.Binding(nil), firstSnapshot.Bindings...)
+	secondSnapshot.Bindings = append(secondSnapshot.Bindings, platformBinding(uuid.NewString(), adminauthorization.RoleAuditor, principal.ID))
 	second := createPolicyDraft(t, service, PolicyDraftRequest{
 		Snapshot: secondSnapshot, ExpectedETag: 1, IdempotencyKey: "policy-create-key-0002",
 		Reason: "add audit visibility", RequestID: "request-create-2", Actor: actor,
@@ -88,7 +86,7 @@ func TestPolicyRevisionPublishAndRollbackAreTransactional(t *testing.T) {
 		IdempotencyKey: "policy-rollback-key-1", Reason: "restore known-good policy",
 		RequestID: "request-rollback-1", Actor: actor,
 	})
-	if err != nil || rolledBack.Active.Revision != first.Revision.Revision || rolledBack.Active.ETag != 3 {
+	if err != nil || rolledBack.Active.Revision <= second.Revision.Revision || rolledBack.Active.ETag != 3 {
 		t.Fatalf("rollback = %#v, %v", rolledBack, err)
 	}
 	replayedRollback, err := service.RollbackPolicy(ctx, RollbackRequest{
@@ -186,11 +184,13 @@ func createPolicyDraft(t *testing.T, service *Service, request PolicyDraftReques
 
 func policySnapshot(principalID string) adminauthorization.Snapshot {
 	return adminauthorization.Snapshot{
-		Version: adminauthorization.CurrentVersion,
-		Assignments: []adminauthorization.Assignment{{
-			ID: uuid.NewString(), Role: adminauthorization.RolePlatformAdmin, Subjects: []string{principalID},
-		}},
+		Version:  adminauthorization.CurrentVersion,
+		Bindings: []adminauthorization.Binding{platformBinding(uuid.NewString(), adminauthorization.RolePlatformAdmin, principalID)},
 	}
+}
+
+func platformBinding(id string, role adminauthorization.Role, principalID string) adminauthorization.Binding {
+	return adminauthorization.Binding{ID: id, Subject: adminauthorization.SubjectRef{Type: adminauthorization.SubjectPrincipal, PrincipalID: principalID}, RoleID: role, Scope: adminauthorization.BindingScope{Type: adminauthorization.ScopePlatform}, ManagedBy: adminauthorization.ManagedByPlatform}
 }
 
 func openTestStore(t *testing.T) *storage.Store {

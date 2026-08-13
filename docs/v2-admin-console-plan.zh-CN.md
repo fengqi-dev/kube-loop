@@ -46,7 +46,7 @@ Authorizer。前端隐藏按钮不能替代服务端鉴权。高风险操作要�
 
 - Control Plane、Data Plane、Operator 版本和兼容性。
 - Relay ready/draining、容量、活动物理连接/逻辑流。
-- 活动 Principal、Device Session、Cluster Session、Task 和失败恢复数。
+- 活动 Principal、OAuth Grant、Cluster Session、Task 和失败恢复数。
 - 数据库 backend/schema、迁移状态、SQLite 单副本约束和 PostgreSQL HA 状态。
 - OIDC、Kubernetes API、签名钥匙、Operator 和审计 sink 健康状态。
 
@@ -73,7 +73,7 @@ Authorizer。前端隐藏按钮不能替代服务端鉴权。高风险操作要�
 ### 3.4 用户、设备与会话
 
 - Principal、身份 Provider 映射、组和最近登录。
-- Device/Refresh Token Family 状态；撤销单设备或整个 Principal 的 Token。
+- OAuth Grant 状态；撤销单设备或整个 Principal 的 Token。
 - Cluster Session namespace、generation、NetworkSpec hash、Relay、过期时间。
 - 强制断开必须先持久化撤销，再通知运行时；失败显示为待收敛状态。
 
@@ -100,7 +100,7 @@ Authorizer。前端隐藏按钮不能替代服务端鉴权。高风险操作要�
 - `admin_assignments`：管理角色及可选 namespace 范围。
 - `config_change_requests`：草稿、校验、发布、回滚状态和幂等键。
 - `admin_sessions`：只保存随机管理 Session ID 的哈希、Principal、认证类型、
-  Token Family、期限和撤销状态，不保存 Gateway Token 或 CSRF Token 明文。
+  OAuth grant、期限和撤销状态，不保存 Gateway Token 或 CSRF Token 明文。
 - 管理元数据保存 bootstrap 永久退役标记；revision 回滚不能隐式重新启用它。
 
 不使用 ORM AutoMigrate；SQLite/PostgreSQL 继续共享显式 migration 与
@@ -161,7 +161,7 @@ SQLite/PostgreSQL Repository 和 UI 包执行 race。真实浏览器通过
 `e2e/admin/browserfixture` 复用生产 SQLite、Management Session、authorizer、
 revision、chi v5 API 与嵌入式 UI，完成桌面/390px 窄屏、break-glass、OIDC PKCE
 `e2e/admin/verify.sh` 已并入 Minikube Helm 生命周期，验证 CSP、CSRF、同一 ETag
-并发发布只有一个成功、Principal Token Family 撤销后旧 Access Token 立即 401。
+并发发布只有一个成功、Principal OAuth grant 撤销后旧 Access Token 立即 401。
 同一轮 Helm E2E 验证 SQLite/PostgreSQL 安装、组件独立升级/扩缩容、PVC/外部数据库
 持久化、回滚、Pod 故障恢复、卸载与 CRD 保留；跨租户 IDOR 继续由授权前置且不读取
 对象的单元/竞态测试覆盖。2026-08-10 最终复跑全部通过。

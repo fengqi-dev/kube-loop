@@ -1,6 +1,5 @@
-// Package authorization implements the Control Plane Management Plane RBAC
-// contract. It is intentionally separate from the ordinary Gateway policy
-// engine in internal/controlplane/authorization.
+// Package authorization implements KubeLoop's unified authorization model.
+// Management and Gateway requests are evaluated by the same immutable policy.
 package authorization
 
 import (
@@ -9,17 +8,7 @@ import (
 	"strings"
 )
 
-const CurrentVersion = 1
-
-type Role string
-
-const (
-	RolePlatformAdmin  Role = "platform-admin"
-	RoleSecurityAdmin  Role = "security-admin"
-	RoleOperator       Role = "operator"
-	RoleAuditor        Role = "auditor"
-	RoleNamespaceAdmin Role = "namespace-admin"
-)
+const CurrentVersion = 2
 
 type AuthenticationType string
 
@@ -29,12 +18,120 @@ const (
 	AuthenticationBreakGlass AuthenticationType = "break-glass"
 )
 
+type Effect string
+
+const (
+	EffectAllow Effect = "allow"
+	EffectDeny  Effect = "deny"
+)
+
+type Capability string
+
+type Role string
+
+const (
+	RolePlatformAdmin     Role = "platform-admin"
+	RoleSecurityAdmin     Role = "security-admin"
+	RoleOperator          Role = "operator"
+	RoleAuditor           Role = "auditor"
+	RoleNamespaceAdmin    Role = "namespace-admin"
+	RoleNamespaceOperator Role = "namespace-operator"
+	RoleNamespaceViewer   Role = "namespace-viewer"
+)
+
+type SubjectType string
+
+const (
+	SubjectPrincipal SubjectType = "principal"
+	SubjectGroup     SubjectType = "group"
+)
+
+type ScopeType string
+
+const (
+	ScopePlatform   ScopeType = "platform"
+	ScopeNamespaces ScopeType = "namespaces"
+)
+
+type ManagedBy string
+
+const (
+	ManagedByPlatform  ManagedBy = "platform"
+	ManagedByDelegated ManagedBy = "delegated"
+)
+
+type Subject struct {
+	ID                   string
+	Provider             string
+	Groups               []string
+	Authentication       AuthenticationType
+	BreakGlassGeneration string
+}
+
+type SubjectRef struct {
+	Type        SubjectType `json:"type"`
+	PrincipalID string      `json:"principalId,omitempty"`
+	ProviderID  string      `json:"providerId,omitempty"`
+	GroupName   string      `json:"groupName,omitempty"`
+}
+
+type NamespaceSelector struct {
+	MatchLabels      map[string]string          `json:"matchLabels,omitempty"`
+	MatchExpressions []LabelSelectorRequirement `json:"matchExpressions,omitempty"`
+}
+
+type LabelSelectorRequirement struct {
+	Key      string   `json:"key"`
+	Operator string   `json:"operator"`
+	Values   []string `json:"values,omitempty"`
+}
+
+type BindingScope struct {
+	Type           ScopeType           `json:"type"`
+	Names          []string            `json:"names,omitempty"`
+	LabelSelectors []NamespaceSelector `json:"labelSelectors,omitempty"`
+}
+
+type Statement struct {
+	Effect       Effect       `json:"effect"`
+	Capabilities []Capability `json:"capabilities"`
+}
+
+type RoleDefinition struct {
+	ID          Role        `json:"id"`
+	DisplayName string      `json:"displayName"`
+	Description string      `json:"description,omitempty"`
+	Delegatable bool        `json:"delegatable,omitempty"`
+	BuiltIn     bool        `json:"builtIn,omitempty"`
+	Statements  []Statement `json:"statements"`
+}
+
+type Binding struct {
+	ID        string       `json:"id"`
+	Subject   SubjectRef   `json:"subject"`
+	RoleID    Role         `json:"roleId"`
+	Scope     BindingScope `json:"scope"`
+	ManagedBy ManagedBy    `json:"managedBy"`
+	CreatedBy string       `json:"createdBy,omitempty"`
+}
+
+type Snapshot struct {
+	Version  int              `json:"version"`
+	Revision uint64           `json:"revision"`
+	Roles    []RoleDefinition `json:"roles,omitempty"`
+	Bindings []Binding        `json:"bindings"`
+}
+
+// Resource and Operation remain internal request-construction helpers. Public
+// policy documents contain Capability IDs only.
 type Resource string
+type Operation string
 
 const (
 	ResourceStatus          Resource = "status"
 	ResourceConfiguration   Resource = "configuration"
 	ResourceProvider        Resource = "provider"
+	ResourceOAuthClient     Resource = "oauth-client"
 	ResourceAssignment      Resource = "assignment"
 	ResourcePolicy          Resource = "policy"
 	ResourceIdentityMapping Resource = "identity-mapping"
@@ -50,8 +147,6 @@ const (
 	ResourceNamespaceMember Resource = "namespace-member"
 	ResourceNamespacePolicy Resource = "namespace-policy"
 )
-
-type Operation string
 
 const (
 	OperationRead     Operation = "read"
@@ -70,107 +165,94 @@ const (
 	OperationExport   Operation = "export"
 )
 
-type Subject struct {
-	ID                   string
-	Groups               []string
-	Authentication       AuthenticationType
-	BreakGlassGeneration string
-}
-
 type Request struct {
-	Resource     Resource
-	Operation    Operation
-	Namespace    string
-	ResourceName string
+	Capability      Capability
+	Resource        Resource
+	Operation       Operation
+	Namespace       string
+	ResourceName    string
+	NamespaceLabels map[string]string
+	LabelsAvailable bool
 }
 
 func (request Request) Key() string {
-	return "admin." + string(request.Resource) + "/" + string(request.Operation)
+	if request.Capability != "" {
+		return string(request.Capability)
+	}
+	if request.Namespace != "" {
+		switch request.Resource {
+		case ResourceSession, ResourceTask:
+			if request.Operation == OperationStop || request.Operation == OperationRevoke || request.Operation == OperationDelete {
+				return "namespace.tasks.stop"
+			}
+			return "namespace.tasks.read"
+		case ResourceNamespaceMember, ResourceNamespacePolicy:
+			if request.Operation == OperationRead || request.Operation == OperationList {
+				return "namespace.authorization.read"
+			}
+			return "namespace.authorization.delegate"
+		}
+	}
+	return capabilityForManagement(request.Resource, request.Operation)
 }
 
 type Reason string
 
 const (
 	ReasonAllowed                   Reason = "allowed"
-	ReasonInvalidRequest            Reason = "invalid-request"
-	ReasonNoMatchingAssignment      Reason = "no-matching-assignment"
-	ReasonBootstrapStateUnavailable Reason = "bootstrap-state-unavailable"
-	ReasonBootstrapRetired          Reason = "bootstrap-retired"
-	ReasonBreakGlassUnavailable     Reason = "break-glass-unavailable"
-	ReasonBreakGlassStale           Reason = "break-glass-stale"
+	ReasonInvalidRequest            Reason = "invalid_request"
+	ReasonNoMatchingAllow           Reason = "no_matching_allow"
+	ReasonExplicitDeny              Reason = "explicit_deny"
+	ReasonScopeUnavailable          Reason = "scope_unavailable"
+	ReasonBootstrapStateUnavailable Reason = "bootstrap_state_unavailable"
+	ReasonBootstrapRetired          Reason = "bootstrap_retired"
+	ReasonBreakGlassUnavailable     Reason = "break_glass_unavailable"
+	ReasonBreakGlassStale           Reason = "break_glass_stale"
 )
 
+type Match struct {
+	BindingID  string     `json:"bindingId"`
+	RoleID     Role       `json:"roleId"`
+	Effect     Effect     `json:"effect"`
+	Capability Capability `json:"capability"`
+	Scope      ScopeType  `json:"scope"`
+}
+
 type Decision struct {
-	Allowed        bool
-	Reason         Reason
-	Role           Role
-	AssignmentID   string
-	Revision       uint64
-	Scope          string
-	Authentication AuthenticationType
-}
-
-type Assignment struct {
-	ID         string   `json:"id"`
-	Role       Role     `json:"role"`
-	Subjects   []string `json:"subjects,omitempty"`
-	Groups     []string `json:"groups,omitempty"`
-	Namespaces []string `json:"namespaces,omitempty"`
-}
-
-type RoleDefinition struct {
-	ID          Role     `json:"id"`
-	DisplayName string   `json:"displayName"`
-	Description string   `json:"description,omitempty"`
-	Permissions []string `json:"permissions"`
-}
-
-type Snapshot struct {
-	Version     int              `json:"version"`
-	Revision    uint64           `json:"revision"`
-	Roles       []RoleDefinition `json:"roles,omitempty"`
-	Assignments []Assignment     `json:"assignments"`
+	Allowed        bool               `json:"allowed"`
+	Reason         Reason             `json:"reason"`
+	Revision       uint64             `json:"revision"`
+	MatchingAllow  []Match            `json:"matchingAllow,omitempty"`
+	MatchingDeny   []Match            `json:"matchingDeny,omitempty"`
+	Authentication AuthenticationType `json:"authenticationType,omitempty"`
 }
 
 type BootstrapConfig struct {
-	Subjects        []string
-	Groups          []string
-	RecoveryEnabled bool
+	Subjects, Groups []string
+	RecoveryEnabled  bool
 }
-
 type BootstrapState interface {
 	BootstrapRetired(context.Context) (bool, error)
 }
-
 type BreakGlassState struct {
 	Enabled    bool
 	Generation string
 }
-
 type BreakGlassStateReader interface {
 	CurrentBreakGlassState(context.Context) (BreakGlassState, error)
 }
 
-var ErrForbidden = errors.New("management operation is not permitted")
+var ErrForbidden = errors.New("operation is not permitted")
 
-// LookupAuthorized ensures an object repository is never consulted before the
-// caller's management scope is authorized. The callback receives the already
-// authorized namespace and stable resource name so implementations can issue a
-// scope-constrained query instead of fetching globally and filtering later.
-func LookupAuthorized[T any](
-	ctx context.Context,
-	engine *Engine,
-	subject Subject,
-	request Request,
-	lookup func(context.Context, string, string) (T, error),
-) (T, Decision, error) {
+func LookupAuthorized[T any](ctx context.Context, engine *Engine, subject Subject, request Request,
+	lookup func(context.Context, string, string) (T, error)) (T, Decision, error) {
 	var zero T
 	decision := engine.Authorize(ctx, subject, request)
 	if !decision.Allowed {
 		return zero, decision, ErrForbidden
 	}
 	if lookup == nil {
-		return zero, decision, errors.New("management object lookup is unavailable")
+		return zero, decision, errors.New("authorized object lookup is unavailable")
 	}
 	value, err := lookup(ctx, strings.TrimSpace(request.Namespace), strings.TrimSpace(request.ResourceName))
 	return value, decision, err

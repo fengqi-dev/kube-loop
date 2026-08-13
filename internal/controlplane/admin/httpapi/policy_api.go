@@ -21,15 +21,16 @@ const (
 )
 
 type policySpec struct {
-	Version     int                                 `json:"version"`
-	Roles       []adminauthorization.RoleDefinition `json:"roles,omitempty"`
-	Assignments []adminauthorization.Assignment     `json:"assignments"`
+	Version  int                                 `json:"version"`
+	Roles    []adminauthorization.RoleDefinition `json:"roles,omitempty"`
+	Bindings []adminauthorization.Binding        `json:"bindings"`
 }
 
 type policyCheck struct {
 	Subject struct {
-		ID     string   `json:"id"`
-		Groups []string `json:"groups,omitempty"`
+		ID       string   `json:"id"`
+		Provider string   `json:"provider,omitempty"`
+		Groups   []string `json:"groups,omitempty"`
 	} `json:"subject"`
 	Request adminauthorization.Request `json:"request"`
 }
@@ -46,8 +47,9 @@ func (api *readAPI) currentPolicy(ctx *echo.Context) error {
 	api.audit(request, subjectFromRequest(request), "admin.policy/read", "success")
 	document := map[string]any{
 		"active": state.Active, "etag": state.Pointer.ETag, "revision": state.Snapshot.Revision,
-		"spec":                 policySpec{Version: state.Snapshot.Version, Roles: state.Snapshot.Roles, Assignments: state.Snapshot.Assignments},
-		"availablePermissions": adminauthorization.AvailablePermissions(),
+		"spec":                  policySpec{Version: state.Snapshot.Version, Roles: state.Snapshot.Roles, Bindings: state.Snapshot.Bindings},
+		"availableCapabilities": adminauthorization.AvailableCapabilities(),
+		"builtInRoles":          adminauthorization.BuiltInRoleDefinitions(),
 	}
 	if state.Active {
 		document["createdAt"] = state.Revision.CreatedAt
@@ -101,19 +103,16 @@ func (api *readAPI) dryRunPolicy(ctx *echo.Context) error {
 		writeError(writer, http.StatusBadRequest, "invalid_policy", "management policy is invalid", requestID(request))
 		return nil
 	}
-	decisions := make([]map[string]any, 0, len(input.Checks))
+	decisions := make([]adminauthorization.Decision, 0, len(input.Checks))
 	for _, check := range input.Checks {
 		decision := engine.DryRun(request.Context(), adminauthorization.Subject{
-			ID: check.Subject.ID, Groups: append([]string(nil), check.Subject.Groups...),
+			ID: check.Subject.ID, Provider: check.Subject.Provider, Groups: append([]string(nil), check.Subject.Groups...),
 		}, check.Request)
-		decisions = append(decisions, map[string]any{
-			"allowed": decision.Allowed, "reason": decision.Reason, "role": decision.Role,
-			"assignmentId": decision.AssignmentID, "scope": decision.Scope, "revision": decision.Revision,
-		})
+		decisions = append(decisions, decision)
 	}
 	api.audit(request, subjectFromRequest(request), "admin.policy/dry-run", "success")
 	writeJSON(writer, http.StatusOK, map[string]any{
-		"valid": true, "publishable": hasPlatformAdministrator(input.Spec.Assignments),
+		"valid": true, "publishable": hasPlatformAdministrator(input.Spec.Bindings),
 		"baseEtag": expectedETag, "decisions": decisions,
 	})
 	return nil
@@ -148,7 +147,7 @@ func (api *readAPI) createPolicyDraft(ctx *echo.Context) error {
 		writePolicyError(writer, request, err)
 		return nil
 	}
-	writer.Header().Set("Location", api.handler.pathPrefix+"/policy/changes/"+result.Change.ID)
+	writer.Header().Set("Location", api.handler.pathPrefix+"/authorization/changes/"+result.Change.ID)
 	if result.Replayed {
 		writer.Header().Set("Idempotent-Replayed", "true")
 	}
@@ -245,8 +244,8 @@ func (api *readAPI) rollbackPolicy(ctx *echo.Context) error {
 func (spec policySpec) snapshot(revision uint64) adminauthorization.Snapshot {
 	return adminauthorization.Snapshot{
 		Version: spec.Version, Revision: revision,
-		Roles:       append([]adminauthorization.RoleDefinition(nil), spec.Roles...),
-		Assignments: append([]adminauthorization.Assignment(nil), spec.Assignments...),
+		Roles:    append([]adminauthorization.RoleDefinition(nil), spec.Roles...),
+		Bindings: append([]adminauthorization.Binding(nil), spec.Bindings...),
 	}
 }
 
@@ -322,10 +321,11 @@ func validChangeReason(value string) bool {
 	return len(value) >= 8 && len(value) <= 512 && !strings.ContainsAny(value, "\x00\r\n")
 }
 
-func hasPlatformAdministrator(assignments []adminauthorization.Assignment) bool {
-	for _, assignment := range assignments {
-		if assignment.Role == adminauthorization.RolePlatformAdmin &&
-			(len(assignment.Subjects) > 0 || len(assignment.Groups) > 0) {
+func hasPlatformAdministrator(bindings []adminauthorization.Binding) bool {
+	for _, binding := range bindings {
+		if binding.RoleID == adminauthorization.RolePlatformAdmin &&
+			binding.Subject.Type == adminauthorization.SubjectPrincipal &&
+			binding.Scope.Type == adminauthorization.ScopePlatform {
 			return true
 		}
 	}

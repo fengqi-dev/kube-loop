@@ -80,7 +80,7 @@ remote backend mode and do not read `KUBECONFIG`.
 ## Consequences
 
 - The desktop remains service-address-only and cannot accidentally bypass
-  Gateway Policy, Token Family revocation, ClusterSession ownership or audit.
+  Gateway Policy, OAuth grant revocation, ClusterSession ownership or audit.
 - No active Session can change backend authority in place. Switching server or
   namespace first drains all remote tasks and disconnects the old Session.
 - Migration comparison remains available in isolated tests without carrying a

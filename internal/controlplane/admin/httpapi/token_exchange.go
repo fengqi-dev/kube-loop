@@ -11,14 +11,14 @@ import (
 	"time"
 
 	adminauthorization "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/authorization"
-	admintoken "github.com/fengqi-dev/kube-loop/internal/controlplane/authn/token"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/authn"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v5"
 )
 
 type TokenAuthenticator interface {
-	Authenticate(context.Context, string) (admintoken.AccessIdentity, error)
+	Authenticate(context.Context, string) (authn.AccessIdentity, error)
 }
 
 func WithTokenExchange(authenticator TokenAuthenticator) Option {
@@ -87,7 +87,7 @@ func (handler *Handler) exchangeToken(ctx *echo.Context) error {
 		authentication = adminauthorization.AuthenticationBootstrap
 	}
 	issued, err := handler.sessions.ExchangePrincipal(
-		request.Context(), identity.Principal.ID, identity.FamilyID, authentication, requestID,
+		request.Context(), identity.Principal.ID, identity.AuthorizationID, authentication, requestID,
 	)
 	if err != nil {
 		writeError(writer, http.StatusUnauthorized, "unauthenticated", "management authentication failed", requestID)

@@ -11,17 +11,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 )
 
-type secretResolverStub map[string]string
-
-func (resolver secretResolverStub) Resolve(alias, use string) (string, error) {
-	value, ok := resolver[alias+":"+use]
-	if !ok {
-		return "", ErrUnavailable
-	}
-	return value, nil
-}
-
-func TestRuntimeUsesOnlyAllowlistedAliasesAndAtomicallyInstallsAggregate(t *testing.T) {
+func TestRuntimeUsesDatabaseCredentialsAndAtomicallyInstallsAggregate(t *testing.T) {
 	store, err := storage.Open(context.Background(), storage.Config{
 		Backend: storage.BackendSQLite, SQLitePath: filepath.Join(t.TempDir(), "provider.db"),
 	})
@@ -34,31 +24,26 @@ func TestRuntimeUsesOnlyAllowlistedAliasesAndAtomicallyInstallsAggregate(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	runtime, err := NewRuntime(store, registry, baseline, secretResolverStub{
-		"corporate:client-secret": "/fixed/corporate/client-secret",
-		"corporate:ca":            "/fixed/corporate/ca.crt",
-	}, "https://gateway.example", 0)
+	runtime, err := NewRuntime(store, registry, "https://gateway.example", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	candidate := adminrevision.ProviderCandidate{
 		ID: "oidc", Type: "oidc",
-		Config:        json.RawMessage(`{"issuer":"https://issuer.example","clientId":"kubeloop","claims":{}}`),
-		SecretAliases: json.RawMessage(`{"ca":"corporate","client-secret":"corporate"}`),
+		Config: json.RawMessage(`{"issuer":"https://issuer.example","clientId":"kubeloop","clientSecret":"database-secret","caPem":"database-ca","claims":{}}`),
 	}
 	item, enabled, err := runtime.provider(candidate)
 	if err != nil || !enabled || item.OIDC == nil ||
-		item.OIDC.ClientSecretFile != "/fixed/corporate/client-secret" || item.OIDC.CAFile != "/fixed/corporate/ca.crt" {
+		item.OIDC.ClientSecret != "database-secret" || item.OIDC.CAPEM != "database-ca" || item.OIDC.ClientSecretFile != "" {
 		t.Fatalf("resolved Provider = %#v, enabled=%v, error=%v", item, enabled, err)
 	}
-	candidate.SecretAliases = json.RawMessage(`{"client-secret":"unknown"}`)
+	candidate.Config = json.RawMessage(`{"issuer":"https://issuer.example","clientId":"kubeloop","claims":{}}`)
 	if _, _, err := runtime.provider(candidate); err == nil {
-		t.Fatal("unknown Secret alias was accepted")
+		t.Fatal("missing database client Secret was accepted")
 	}
 
 	disabled := adminrevision.ProviderCandidate{ID: "managed", Type: "oidc",
-		Config:        json.RawMessage(`{"issuer":"https://issuer.example","clientId":"unused","claims":{},"enabled":false}`),
-		SecretAliases: json.RawMessage(`{}`)}
+		Config: json.RawMessage(`{"issuer":"https://issuer.example","clientId":"unused","clientSecret":"database-secret","claims":{},"enabled":false}`)}
 	install, err := runtime.Prepare(context.Background(), disabled)
 	if err != nil {
 		t.Fatal(err)

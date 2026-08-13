@@ -6,7 +6,18 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 )
+
+// AccessIdentity is reconstructed from an opaque OAuth access token.
+type AccessIdentity struct {
+	Principal       storage.Principal
+	AuthorizationID string
+	DeviceID        string
+	TokenID         string
+	AccessExpiresAt time.Time
+}
 
 type ProviderType string
 

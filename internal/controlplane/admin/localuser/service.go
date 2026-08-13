@@ -246,7 +246,7 @@ func (service *Service) SetEnabled(ctx context.Context, principalID string, enab
 			return err
 		}
 		if !enabled {
-			_, err := repositories.TokenFamilies().RevokeByPrincipal(ctx, principalID, now)
+			_, err := repositories.OAuthSessions().RevokePrincipal(ctx, principalID, now)
 			return err
 		}
 		return nil
@@ -275,7 +275,7 @@ func (service *Service) SetPassword(ctx context.Context, principalID string, pas
 		if err := repositories.LocalAdminUsers().UpdatePassword(ctx, principalID, hash, now); err != nil {
 			return err
 		}
-		_, err := repositories.TokenFamilies().RevokeByPrincipal(ctx, principalID, now)
+		_, err := repositories.OAuthSessions().RevokePrincipal(ctx, principalID, now)
 		return err
 	})
 }

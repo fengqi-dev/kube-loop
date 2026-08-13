@@ -5,16 +5,19 @@
   "workspaces": [
     "apps/desktop",
     "apps/admin",
+    "apps/auth",
     "apps/site"
   ],
   "scripts": {
     "dev": "npm run dev --workspace=kube-loop-frontend",
     "dev:wails": "npm run dev:wails --workspace=kube-loop-frontend",
     "dev:admin": "npm run dev --workspace=kubeloop-admin-frontend",
+    "dev:auth": "npm run dev --workspace=kubeloop-auth-frontend",
     "dev:site": "npm run dev --workspace=kubeloop-site",
-    "build": "npm run build:frontend && npm run build:admin && npm run build:site",
+    "build": "npm run build:frontend && npm run build:admin && npm run build:auth && npm run build:site",
     "build:frontend": "npm run build --workspace=kube-loop-frontend",
     "build:admin": "npm run build --workspace=kubeloop-admin-frontend",
+    "build:auth": "npm run build --workspace=kubeloop-auth-frontend",
     "build:site": "npm run build --workspace=kubeloop-site",
     "test": "npm run test --workspaces --if-present",
     "test:admin": "npm run test --workspace=kubeloop-admin-frontend"

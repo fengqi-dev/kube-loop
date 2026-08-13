@@ -53,12 +53,11 @@ type Client struct {
 }
 
 type tokenResponse struct {
-	TokenType        string `json:"token_type"`
-	AccessToken      string `json:"access_token"`
-	ExpiresIn        int64  `json:"expires_in"`
-	RefreshToken     string `json:"refresh_token"`
-	RefreshExpiresIn int64  `json:"refresh_expires_in"`
-	IDToken          string `json:"id_token"`
+	TokenType    string `json:"token_type"`
+	AccessToken  string `json:"access_token"`
+	ExpiresIn    int64  `json:"expires_in"`
+	RefreshToken string `json:"refresh_token"`
+	IDToken      string `json:"id_token"`
 }
 
 type errorResponse struct {
@@ -386,12 +385,12 @@ func newLoopbackServer(expectedState string, result chan<- callbackResult) *http
 
 func credentialFromResponse(response tokenResponse, deviceID string) (credentials.Credential, error) {
 	if !strings.EqualFold(response.TokenType, "Bearer") || response.AccessToken == "" || response.RefreshToken == "" ||
-		response.ExpiresIn <= 0 || response.RefreshExpiresIn <= 0 {
-		return credentials.Credential{}, errors.New("Gateway returned an incomplete token response")
+		response.ExpiresIn <= 0 {
+		return credentials.Credential{}, errors.New("OAuth server returned an incomplete token response")
 	}
 	return credentials.Credential{
 		TokenType: "Bearer", AccessToken: response.AccessToken, AccessExpiresAt: time.Now().Add(time.Duration(response.ExpiresIn) * time.Second),
-		RefreshToken: response.RefreshToken, RefreshExpiresAt: time.Now().Add(time.Duration(response.RefreshExpiresIn) * time.Second), DeviceID: deviceID,
+		RefreshToken: response.RefreshToken, DeviceID: deviceID,
 	}, nil
 }
 

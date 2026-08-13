@@ -229,7 +229,7 @@ func TestPodExecTaskAndWebSocketStreamAreOwnedAndSingleUse(t *testing.T) {
 	}
 }
 
-func TestPodExecStreamStopsWhenTokenFamilyIsRevoked(t *testing.T) {
+func TestPodExecStreamStopsWhenOAuthGrantIsRevoked(t *testing.T) {
 	now := time.Now().UTC()
 	stateStore, err := storage.Open(context.Background(), storage.Config{
 		Backend: storage.BackendSQLite, SQLitePath: filepath.Join(t.TempDir(), "exec-revoke.db"), ControlPlaneReplicas: 1,
@@ -238,15 +238,16 @@ func TestPodExecStreamStopsWhenTokenFamilyIsRevoked(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer stateStore.Close()
-	principalID, familyID, sessionID := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	principalID, authorizationID, sessionID := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	if _, err := stateStore.Principals().Upsert(context.Background(), storage.Principal{
 		ID: principalID, Provider: "test", ExternalID: "revoked-user", CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := stateStore.TokenFamilies().Create(context.Background(), storage.TokenFamily{
-		ID: familyID, PrincipalID: principalID, DeviceID: "device",
-		RefreshTokenHash: bytes.Repeat([]byte{9}, 32), CreatedAt: now, ExpiresAt: now.Add(time.Hour),
+	if err := stateStore.OAuthSessions().Create(context.Background(), storage.OAuthSession{
+		Kind: "access_token", SignatureHash: bytes.Repeat([]byte{9}, 32), RequestID: authorizationID,
+		PrincipalID: principalID, ClientID: "test-client", DeviceID: "device",
+		RequestJSON: json.RawMessage(`{}`), CreatedAt: now, ExpiresAt: now.Add(time.Hour),
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -277,7 +278,7 @@ func TestPodExecStreamStopsWhenTokenFamilyIsRevoked(t *testing.T) {
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
 		controlplane.WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(*http.Request) (controlplaneapi.Principal, *controlplaneapi.Error) {
 			return controlplaneapi.Principal{
-				Subject: principalID, DeviceID: "device", FamilyID: familyID, AccessExpiresAt: expiresAt,
+				Subject: principalID, DeviceID: "device", AuthorizationID: authorizationID, AccessExpiresAt: expiresAt,
 			}, nil
 		})), controlplane.WithAuthorizer(policy), controlplane.WithAPIRoutes(controlplane.APIRoutes{Exec: execapi.NewRoutes(handler).Endpoints()}))
 	if err != nil {
@@ -312,7 +313,7 @@ func TestPodExecStreamStopsWhenTokenFamilyIsRevoked(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("Kubernetes exec did not start")
 	}
-	if err := stateStore.TokenFamilies().Revoke(context.Background(), familyID, time.Now().UTC()); err != nil {
+	if err := stateStore.OAuthSessions().RevokeRequest(context.Background(), authorizationID, time.Now().UTC()); err != nil {
 		t.Fatal(err)
 	}
 	readContext, readCancel := context.WithTimeout(context.Background(), time.Second)

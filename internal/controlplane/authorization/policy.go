@@ -17,15 +17,18 @@ var (
 )
 
 type Subject struct {
-	ID     string
-	Groups []string
+	ID       string
+	Provider string
+	Groups   []string
 }
 
 type Request struct {
-	Operation    string
-	Namespace    string
-	ResourceKind string
-	ResourceName string
+	Operation       string
+	Namespace       string
+	ResourceKind    string
+	ResourceName    string
+	NamespaceLabels map[string]string
+	LabelsAvailable bool
 }
 
 type Decision struct {

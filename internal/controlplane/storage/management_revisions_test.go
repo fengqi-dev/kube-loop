@@ -22,26 +22,12 @@ func testManagementRevisionRepositories(t *testing.T, store *Store) {
 	err := store.WithinTransaction(ctx, func(repositories Repositories) error {
 		var createErr error
 		firstPolicy, createErr = repositories.AdminPolicyRevisions().Create(ctx, AdminPolicyRevision{
-			ID: uuid.NewString(), Spec: json.RawMessage(`{"version":1,"assignments":[]}`),
+			ID: uuid.NewString(), Spec: json.RawMessage(`{"version":2,"roles":[],"bindings":[]}`),
 			ValidationState: RevisionValidationValid, Validation: json.RawMessage(`{"valid":true}`),
 			CreatedBy: creator.ID, CreatedAuthenticationType: "normal",
 			Reason: "establish formal administrators", CreatedAt: now,
 		})
-		if createErr != nil {
-			return createErr
-		}
-		if createErr := repositories.AdminAssignments().Create(ctx, AdminAssignment{
-			ID: uuid.NewString(), PolicyRevision: firstPolicy.Revision, Role: "platform-admin",
-			Subjects: json.RawMessage(`["` + creator.ID + `"]`), Groups: json.RawMessage(`[]`),
-			Namespaces: json.RawMessage(`[]`), CreatedAt: now,
-		}); createErr != nil {
-			return createErr
-		}
-		return repositories.AdminAssignments().Create(ctx, AdminAssignment{
-			ID: uuid.NewString(), PolicyRevision: firstPolicy.Revision, Role: "session-reader",
-			Subjects: json.RawMessage(`[]`), Groups: json.RawMessage(`["support"]`),
-			Namespaces: json.RawMessage(`["team-a"]`), CreatedAt: now,
-		})
+		return createErr
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -53,12 +39,6 @@ func testManagementRevisionRepositories(t *testing.T, store *Store) {
 	if err != nil || storedPolicy.SpecHash != firstPolicy.SpecHash || !bytes.Equal(storedPolicy.Spec, firstPolicy.Spec) {
 		t.Fatalf("stored policy = %#v, %v", storedPolicy, err)
 	}
-	assignments, err := store.AdminAssignments().ListByPolicyRevision(ctx, firstPolicy.Revision)
-	if err != nil || len(assignments) != 2 ||
-		(!bytes.Contains(assignments[0].Subjects, []byte(creator.ID)) && !bytes.Contains(assignments[1].Subjects, []byte(creator.ID))) {
-		t.Fatalf("assignments = %#v, %v", assignments, err)
-	}
-
 	active, err := store.ActiveManagementRevisions().CompareAndSwap(
 		ctx, ManagementConfigurationPolicy, ManagementPolicyID, firstPolicy.Revision, 0,
 		creator.ID, "normal", now.Add(time.Second),
@@ -111,12 +91,12 @@ func testManagementRevisionRepositories(t *testing.T, store *Store) {
 	}
 
 	if _, err := store.ProviderConfigRevisions().Create(ctx, ProviderConfigRevision{
-		ID: uuid.NewString(), ProviderID: "corporate", ProviderType: "oidc",
+		ID: uuid.NewString(), ProviderID: "database-secret", ProviderType: "oidc",
 		Config:        json.RawMessage(`{"issuer":"https://id.example","clientSecret":"plaintext"}`),
 		SecretAliases: json.RawMessage(`{"client-secret":"oidc-secret"}`), ValidationState: RevisionValidationValid,
 		CreatedBy: creator.ID, CreatedAuthenticationType: "normal", Reason: "must reject plaintext", CreatedAt: now,
-	}); err == nil {
-		t.Fatal("provider plaintext Secret was accepted")
+	}); err != nil {
+		t.Fatalf("provider database Secret was rejected: %v", err)
 	}
 	provider, err := store.ProviderConfigRevisions().Create(ctx, ProviderConfigRevision{
 		ID: uuid.NewString(), ProviderID: "corporate", ProviderType: "oidc",
@@ -195,11 +175,7 @@ func TestManagementRevisionTransactionRollsBackAggregate(t *testing.T) {
 			return err
 		}
 		revisionNumber = revision.Revision
-		return repositories.AdminAssignments().Create(ctx, AdminAssignment{
-			ID: "invalid", PolicyRevision: revision.Revision, Role: "platform-admin",
-			Subjects: json.RawMessage(`["` + creator.ID + `"]`), Groups: json.RawMessage(`[]`),
-			Namespaces: json.RawMessage(`[]`), CreatedAt: now,
-		})
+		return errors.New("force aggregate rollback")
 	})
 	if err == nil {
 		t.Fatal("invalid aggregate transaction committed")

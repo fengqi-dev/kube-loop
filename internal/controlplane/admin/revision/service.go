@@ -102,7 +102,7 @@ func (service *Service) CurrentPolicy(ctx context.Context) (PolicyState, error) 
 	)
 	if errors.Is(err, storage.ErrNotFound) {
 		return PolicyState{Snapshot: adminauthorization.Snapshot{
-			Version: adminauthorization.CurrentVersion, Roles: []adminauthorization.RoleDefinition{}, Assignments: []adminauthorization.Assignment{},
+			Version: adminauthorization.CurrentVersion, Roles: []adminauthorization.RoleDefinition{}, Bindings: []adminauthorization.Binding{},
 		}}, nil
 	}
 	if err != nil {
@@ -117,15 +117,7 @@ func (service *Service) CurrentPolicy(ctx context.Context) (PolicyState, error) 
 	if err != nil {
 		return PolicyState{}, err
 	}
-	assignments, err := service.store.AdminAssignments().ListByPolicyRevision(ctx, revision.Revision)
-	if err != nil {
-		return PolicyState{}, fmt.Errorf("%w: read active policy assignments", ErrPolicyUnavailable)
-	}
-	stored, err := assignmentSnapshot(assignments, revision.Revision, snapshot.Roles)
-	if err != nil || !equalAssignments(snapshot.Assignments, stored.Assignments) {
-		return PolicyState{}, fmt.Errorf("%w: active policy aggregate disagrees", ErrPolicyUnavailable)
-	}
-	return PolicyState{Active: true, Pointer: active, Revision: revision, Snapshot: stored}, nil
+	return PolicyState{Active: true, Pointer: active, Revision: revision, Snapshot: snapshot}, nil
 }
 
 func (service *Service) CreatePolicyDraft(ctx context.Context, request PolicyDraftRequest) (PolicyDraft, error) {
@@ -148,10 +140,10 @@ func (service *Service) CreatePolicyDraft(ctx context.Context, request PolicyDra
 		return PolicyDraft{}, ErrInvalidRequest
 	}
 	spec, err := json.Marshal(struct {
-		Version     int                                 `json:"version"`
-		Roles       []adminauthorization.RoleDefinition `json:"roles,omitempty"`
-		Assignments []adminauthorization.Assignment     `json:"assignments"`
-	}{Version: snapshot.Version, Roles: snapshot.Roles, Assignments: snapshot.Assignments})
+		Version  int                                 `json:"version"`
+		Roles    []adminauthorization.RoleDefinition `json:"roles,omitempty"`
+		Bindings []adminauthorization.Binding        `json:"bindings"`
+	}{Version: snapshot.Version, Roles: snapshot.Roles, Bindings: snapshot.Bindings})
 	if err != nil {
 		return PolicyDraft{}, ErrInvalidRequest
 	}
@@ -198,16 +190,8 @@ func (service *Service) CreatePolicyDraft(ctx context.Context, request PolicyDra
 		if createErr != nil {
 			return createErr
 		}
-		for _, assignment := range snapshot.Assignments {
-			subjects := marshalStringSlice(assignment.Subjects)
-			groups := marshalStringSlice(assignment.Groups)
-			namespaces := marshalStringSlice(assignment.Namespaces)
-			if err := repositories.AdminAssignments().Create(ctx, storage.AdminAssignment{
-				ID: assignment.ID, PolicyRevision: revision.Revision, Role: string(assignment.Role),
-				Subjects: subjects, Groups: groups, Namespaces: namespaces, CreatedAt: now,
-			}); err != nil {
-				return err
-			}
+		if createErr := persistAuthorizationDefinitions(ctx, repositories.AuthorizationDefinitions(), revision.Revision, snapshot, actorID); createErr != nil {
+			return createErr
 		}
 		change := storage.ConfigChangeRequest{
 			ID: changeID, ConfigurationType: storage.ManagementConfigurationPolicy,
@@ -239,6 +223,54 @@ func (service *Service) CreatePolicyDraft(ctx context.Context, request PolicyDra
 	return result, nil
 }
 
+func persistAuthorizationDefinitions(
+	ctx context.Context,
+	repository storage.AuthorizationDefinitionRepository,
+	revision uint64,
+	snapshot adminauthorization.Snapshot,
+	actorID string,
+) error {
+	roles := append(adminauthorization.BuiltInRoleDefinitions(), snapshot.Roles...)
+	for _, role := range roles {
+		definition, err := json.Marshal(role)
+		if err != nil {
+			return err
+		}
+		if err := repository.CreateRole(ctx, storage.AuthorizationRoleRecord{
+			Revision: revision, ID: string(role.ID), Definition: definition,
+		}); err != nil {
+			return err
+		}
+	}
+	for _, binding := range snapshot.Bindings {
+		names, err := json.Marshal(binding.Scope.Names)
+		if err != nil {
+			return err
+		}
+		selectors, err := json.Marshal(binding.Scope.LabelSelectors)
+		if err != nil {
+			return err
+		}
+		document, err := json.Marshal(binding)
+		if err != nil {
+			return err
+		}
+		createdBy := strings.TrimSpace(binding.CreatedBy)
+		if createdBy == "" {
+			createdBy = actorID
+		}
+		if err := repository.CreateBinding(ctx, storage.AuthorizationBindingRecord{
+			Revision: revision, ID: binding.ID, RoleID: string(binding.RoleID), SubjectType: string(binding.Subject.Type),
+			PrincipalID: binding.Subject.PrincipalID, ProviderID: binding.Subject.ProviderID, GroupName: binding.Subject.GroupName,
+			ScopeType: string(binding.Scope.Type), NamespaceNames: names, LabelSelectors: selectors,
+			ManagedBy: string(binding.ManagedBy), CreatedBy: createdBy, Binding: document,
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (service *Service) PublishPolicy(ctx context.Context, request ActivateRequest) (Activation, error) {
 	return service.activatePolicy(ctx, request)
 }
@@ -263,7 +295,7 @@ func (service *Service) RollbackPolicy(ctx context.Context, request RollbackRequ
 		Reason         string `json:"reason"`
 	}{request.TargetRevision, request.ExpectedETag, request.Reason})
 	now := service.now().UTC()
-	changeID, auditID := service.newID(), service.newID()
+	revisionID, changeID, auditID := service.newID(), service.newID(), service.newID()
 	result := Activation{}
 	err = service.store.WithinTransaction(ctx, func(repositories storage.Repositories) error {
 		existing, lookupErr := repositories.ConfigChangeRequests().GetByIdempotencyHash(
@@ -297,14 +329,31 @@ func (service *Service) RollbackPolicy(ctx context.Context, request RollbackRequ
 		if active.ETag != request.ExpectedETag || active.Revision == request.TargetRevision {
 			return storage.ErrConflict
 		}
-		assignments, err := repositories.AdminAssignments().ListByPolicyRevision(ctx, request.TargetRevision)
-		if err != nil || !hasPlatformAdmin(assignments) {
+		target, err := repositories.AdminPolicyRevisions().Get(ctx, request.TargetRevision)
+		if err != nil || !revisionCanBePublished(target, actorID, authenticationType) {
 			return storage.ErrConflict
+		}
+		targetSnapshot, err := decodePolicySpec(target.Spec, target.Revision)
+		if err != nil {
+			return storage.ErrConflict
+		}
+		rollbackRevision, err := repositories.AdminPolicyRevisions().Create(ctx, storage.AdminPolicyRevision{
+			ID: revisionID, Spec: append(json.RawMessage(nil), target.Spec...),
+			ValidationState: storage.RevisionValidationValid,
+			Validation:      json.RawMessage(`{"valid":true,"operation":"rollback"}`),
+			CreatedBy:       actorID, CreatedAuthenticationType: authenticationType,
+			Reason: request.Reason, CreatedAt: now,
+		})
+		if err != nil {
+			return err
+		}
+		if err := persistAuthorizationDefinitions(ctx, repositories.AuthorizationDefinitions(), rollbackRevision.Revision, targetSnapshot, actorID); err != nil {
+			return err
 		}
 		change := storage.ConfigChangeRequest{
 			ID: changeID, ConfigurationType: storage.ManagementConfigurationPolicy,
 			ConfigurationID: storage.ManagementPolicyID, BaseRevision: active.Revision, BaseETag: active.ETag,
-			ProposedRevision: request.TargetRevision, Status: storage.ChangeStatusValidated,
+			ProposedRevision: rollbackRevision.Revision, Status: storage.ChangeStatusValidated,
 			IdempotencyHash: idempotencyHash[:], RequestHash: requestHash,
 			RequestedBy: actorID, RequestedAuthenticationType: authenticationType,
 			Reason: request.Reason, Validation: json.RawMessage(`{"valid":true,"operation":"rollback"}`),
@@ -315,7 +364,7 @@ func (service *Service) RollbackPolicy(ctx context.Context, request RollbackRequ
 		}
 		next, err := repositories.ActiveManagementRevisions().CompareAndSwap(
 			ctx, storage.ManagementConfigurationPolicy, storage.ManagementPolicyID,
-			request.TargetRevision, active.ETag, actorID, authenticationType, now,
+			rollbackRevision.Revision, active.ETag, actorID, authenticationType, now,
 		)
 		if err != nil {
 			return err
@@ -335,7 +384,8 @@ func (service *Service) RollbackPolicy(ctx context.Context, request RollbackRequ
 			ResourceID: change.ID, Outcome: "success", RequestID: request.RequestID,
 			Metadata: auditMetadata(authenticationType, request.Reason, map[string]any{
 				"changeId": change.ID, "oldRevision": active.Revision, "newRevision": next.Revision,
-				"oldEtag": active.ETag, "newEtag": next.ETag,
+				"sourceRevision": request.TargetRevision,
+				"oldEtag":        active.ETag, "newEtag": next.ETag,
 				"idempotencyKeyHash": hex.EncodeToString(idempotencyHash[:]),
 			}), CreatedAt: now,
 		}); err != nil {
@@ -395,11 +445,11 @@ func (service *Service) activatePolicy(ctx context.Context, request ActivateRequ
 		if change.Status != storage.ChangeStatusValidated {
 			return storage.ErrConflict
 		}
-		assignments, err := repositories.AdminAssignments().ListByPolicyRevision(ctx, change.ProposedRevision)
+		proposed, err := repositories.AdminPolicyRevisions().Get(ctx, change.ProposedRevision)
 		if err != nil {
 			return err
 		}
-		if !hasPlatformAdmin(assignments) {
+		if !revisionCanBePublished(proposed, actorID, authenticationType) {
 			return storage.ErrConflict
 		}
 		active, err := repositories.ActiveManagementRevisions().CompareAndSwap(
@@ -498,22 +548,41 @@ func auditMetadata(authenticationType, reason string, values map[string]any) jso
 	return encoded
 }
 
-func hasPlatformAdmin(assignments []storage.AdminAssignment) bool {
-	for _, assignment := range assignments {
-		if assignment.Role == string(adminauthorization.RolePlatformAdmin) &&
-			(string(assignment.Subjects) != "[]" || string(assignment.Groups) != "[]") {
+func revisionHasPlatformAdmin(revision storage.AdminPolicyRevision) bool {
+	snapshot, err := decodePolicySpec(revision.Spec, revision.Revision)
+	if err != nil {
+		return false
+	}
+	for _, binding := range snapshot.Bindings {
+		if binding.RoleID == adminauthorization.RolePlatformAdmin && binding.Subject.Type == adminauthorization.SubjectPrincipal && binding.Scope.Type == adminauthorization.ScopePlatform {
 			return true
 		}
 	}
 	return false
 }
 
-func marshalStringSlice(values []string) json.RawMessage {
-	if values == nil {
-		values = []string{}
+func revisionCanBePublished(
+	revision storage.AdminPolicyRevision,
+	actorID string,
+	authentication string,
+) bool {
+	if !revisionHasPlatformAdmin(revision) {
+		return false
 	}
-	encoded, _ := json.Marshal(values)
-	return encoded
+	if authentication == string(adminauthorization.AuthenticationBreakGlass) {
+		return true
+	}
+	snapshot, err := decodePolicySpec(revision.Spec, revision.Revision)
+	if err != nil {
+		return false
+	}
+	engine, err := adminauthorization.New(snapshot)
+	if err != nil {
+		return false
+	}
+	return engine.Authorize(context.Background(), adminauthorization.Subject{ID: actorID}, adminauthorization.Request{
+		Capability: "platform.authorization.publish",
+	}).Allowed
 }
 
 func mapServiceError(err error) error {

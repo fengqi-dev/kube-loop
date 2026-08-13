@@ -32,13 +32,14 @@ type Provider struct {
 type OIDCConfig struct {
 	Issuer             string                    `json:"issuer"`
 	ClientID           string                    `json:"clientId"`
+	ClientSecret       string                    `json:"clientSecret,omitempty"`
 	ClientSecretFile   string                    `json:"clientSecretFile"`
 	RedirectURL        string                    `json:"redirectUrl"`
 	Scopes             []string                  `json:"scopes,omitempty"`
 	AllowedSigningAlgs []string                  `json:"allowedSigningAlgs,omitempty"`
 	RequiredClaims     []string                  `json:"requiredClaims,omitempty"`
 	Claims             oidcprovider.ClaimMapping `json:"claims"`
-	CAFile             string                    `json:"caFile,omitempty"`
+	CAPEM              string                    `json:"caPem,omitempty"`
 	HTTPTimeout        string                    `json:"httpTimeout,omitempty"`
 }
 
@@ -102,27 +103,23 @@ func buildOIDC(ctx context.Context, item Provider) (*oidcprovider.Provider, erro
 			return nil, errors.New("OIDC HTTP timeout must be a positive duration")
 		}
 	}
-	roots, err := loadRoots(configuration.CAFile, "OIDC")
+	roots, err := loadRoots([]byte(configuration.CAPEM), "OIDC")
 	if err != nil {
 		return nil, err
 	}
 	return oidcprovider.New(ctx, oidcprovider.Config{
 		ID: item.ID, DisplayName: item.DisplayName,
 		Issuer: configuration.Issuer, ClientID: configuration.ClientID,
-		ClientSecretFile: configuration.ClientSecretFile, RedirectURL: configuration.RedirectURL,
+		ClientSecret: configuration.ClientSecret, ClientSecretFile: configuration.ClientSecretFile, RedirectURL: configuration.RedirectURL,
 		Scopes: configuration.Scopes, AllowedSigningAlgs: configuration.AllowedSigningAlgs,
 		RequiredClaims: configuration.RequiredClaims, Claims: configuration.Claims,
 		HTTPTimeout: timeout, RootCAs: roots,
 	})
 }
 
-func loadRoots(path, label string) (*x509.CertPool, error) {
-	if strings.TrimSpace(path) == "" {
+func loadRoots(pem []byte, label string) (*x509.CertPool, error) {
+	if len(bytes.TrimSpace(pem)) == 0 {
 		return nil, nil
-	}
-	pem, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("read %s CA file", label)
 	}
 	roots, err := x509.SystemCertPool()
 	if err != nil || roots == nil {

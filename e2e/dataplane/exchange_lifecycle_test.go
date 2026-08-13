@@ -3,7 +3,6 @@
 package dataplane
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -287,7 +286,7 @@ func exchangeLifecycleState(
 	}
 	t.Cleanup(func() { _ = stateStore.Close() })
 	now := time.Now().UTC()
-	principalID, familyID, sessionID := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	principalID, authorizationID, sessionID := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	deviceID := "exchange-e2e-device"
 	if _, err := stateStore.Principals().Upsert(ctx, storage.Principal{
 		ID: principalID, Provider: "e2e", ExternalID: "exchange-lifecycle",
@@ -296,12 +295,7 @@ func exchangeLifecycleState(
 		t.Fatal(err)
 	}
 	expiresAt := now.Add(10 * time.Minute)
-	if err := stateStore.TokenFamilies().Create(ctx, storage.TokenFamily{
-		ID: familyID, PrincipalID: principalID, DeviceID: deviceID,
-		RefreshTokenHash: bytes.Repeat([]byte{8}, 32), CreatedAt: now, ExpiresAt: expiresAt,
-	}); err != nil {
-		t.Fatal(err)
-	}
+	createOAuthGrant(t, ctx, stateStore, authorizationID, principalID, deviceID, 8, now, expiresAt)
 	network, err := networkspec.Normalize(networkspec.Spec{ServiceIPs: []string{serviceIP}})
 	if err != nil {
 		t.Fatal(err)
@@ -317,7 +311,7 @@ func exchangeLifecycleState(
 		t.Fatal(err)
 	}
 	principal := controlplaneapi.Principal{
-		Subject: principalID, DeviceID: deviceID, FamilyID: familyID, AccessExpiresAt: expiresAt,
+		Subject: principalID, DeviceID: deviceID, AuthorizationID: authorizationID, AccessExpiresAt: expiresAt,
 	}
 	active := sessionapi.ActiveSession{
 		ID: sessionID, Namespace: harness.EchoNamespace, Generation: 1,
@@ -519,7 +513,7 @@ func waitForNoLocalExchange(
 		case <-ctx.Done():
 			t.Fatal(ctx.Err())
 		case <-deadline.C:
-			t.Fatal("local Exchange relay did not stop after Token Family revocation")
+			t.Fatal("local Exchange relay did not stop after OAuth grant revocation")
 		case <-ticker.C:
 		}
 	}

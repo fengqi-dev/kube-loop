@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"sort"
+	"strings"
 
 	adminrevision "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/revision"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
@@ -12,10 +12,9 @@ import (
 )
 
 type providerInput struct {
-	Type          string            `json:"type"`
-	Config        json.RawMessage   `json:"config"`
-	SecretAliases map[string]string `json:"secretAliases"`
-	Reason        string            `json:"reason,omitempty"`
+	Type   string          `json:"type"`
+	Config json.RawMessage `json:"config"`
+	Reason string          `json:"reason,omitempty"`
 }
 
 func (api *readAPI) listProviders(ctx *echo.Context) error {
@@ -117,7 +116,7 @@ func (api *readAPI) createProviderDraft(ctx *echo.Context) error {
 		"changeId": result.Change.ID, "revision": result.Revision.Revision,
 		"baseRevision": result.Change.BaseRevision, "baseEtag": result.Change.BaseETag,
 		"status": result.Change.Status, "replayed": result.Replayed,
-		"secretUses": providerSecretUses(result.Revision.SecretAliases),
+		"clientSecretConfigured": providerClientSecretConfigured(result.Revision.Config),
 	})
 	return nil
 }
@@ -198,11 +197,7 @@ func (api *readAPI) rollbackProvider(ctx *echo.Context) error {
 }
 
 func providerCandidate(id string, input providerInput) adminrevision.ProviderCandidate {
-	if input.SecretAliases == nil {
-		input.SecretAliases = map[string]string{}
-	}
-	aliases, _ := json.Marshal(input.SecretAliases)
-	return adminrevision.ProviderCandidate{ID: id, Type: input.Type, Config: input.Config, SecretAliases: aliases}
+	return adminrevision.ProviderCandidate{ID: id, Type: input.Type, Config: input.Config}
 }
 
 func providerETagMatches(request *http.Request, service *adminrevision.ProviderService, expected uint64) bool {
@@ -218,23 +213,29 @@ func providerDocument(state adminrevision.ProviderState) map[string]any {
 	document["providerId"] = state.Revision.ProviderID
 	document["type"] = state.Revision.ProviderType
 	document["revision"] = state.Revision.Revision
-	document["config"] = state.Revision.Config
-	document["secretUses"] = providerSecretUses(state.Revision.SecretAliases)
+	document["config"] = redactProviderConfig(state.Revision.Config)
+	document["clientSecretConfigured"] = providerClientSecretConfigured(state.Revision.Config)
 	document["validation"] = state.Revision.Validation
 	document["reason"] = state.Revision.Reason
 	document["createdAt"] = state.Revision.CreatedAt
 	return document
 }
 
-func providerSecretUses(raw json.RawMessage) []string {
-	aliases := make(map[string]string)
-	_ = json.Unmarshal(raw, &aliases)
-	uses := make([]string, 0, len(aliases))
-	for use := range aliases {
-		uses = append(uses, use)
+func redactProviderConfig(raw json.RawMessage) json.RawMessage {
+	var config map[string]any
+	if json.Unmarshal(raw, &config) != nil {
+		return json.RawMessage(`{}`)
 	}
-	sort.Strings(uses)
-	return uses
+	delete(config, "clientSecret")
+	redacted, _ := json.Marshal(config)
+	return redacted
+}
+
+func providerClientSecretConfigured(raw json.RawMessage) bool {
+	var config struct {
+		ClientSecret string `json:"clientSecret"`
+	}
+	return json.Unmarshal(raw, &config) == nil && strings.TrimSpace(config.ClientSecret) != ""
 }
 
 func writeProviderError(writer http.ResponseWriter, request *http.Request, err error) {

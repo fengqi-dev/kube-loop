@@ -57,16 +57,12 @@ func TestSQLiteChartRendersIndependentSecureWorkloads(t *testing.T) {
 	if countKind(objects, "PersistentVolumeClaim") != 1 {
 		t.Fatalf("SQLite PVC count = %d", countKind(objects, "PersistentVolumeClaim"))
 	}
-	if countKind(objects, "ConfigMap") != 2 {
-		t.Fatalf("component ConfigMap count = %d", countKind(objects, "ConfigMap"))
+	if countKind(objects, "ConfigMap") != 1 {
+		t.Fatalf("shared ConfigMap count = %d", countKind(objects, "ConfigMap"))
 	}
-	controlPlaneConfig := objectByName(t, objects, "ConfigMap", "test-kubeloop-control-plane-config")
+	controlPlaneConfig := objectByName(t, objects, "ConfigMap", "test-kubeloop-config")
 	controlPlaneDocument := parseControlPlaneConfig(t, controlPlaneConfig)
-	dataPlaneConfig := objectByName(t, objects, "ConfigMap", "test-kubeloop-gateway-config")
-	var gatewayConfig map[string]any
-	if err := json.Unmarshal([]byte(valueAt(t, dataPlaneConfig, "data", "gateway.json").(string)), &gatewayConfig); err != nil {
-		t.Fatal(err)
-	}
+	gatewayConfig := parseUnifiedConfig(t, controlPlaneConfig)["gateway"].(map[string]any)
 	if valueAt(t, controlPlaneDocument, "api", "tunnelPath") != "/tunnel" ||
 		valueAt(t, gatewayConfig, "http", "path") != "/tunnel" {
 		t.Fatal("ControlPlane discovery and Data Plane ingress use different tunnel paths")
@@ -77,7 +73,7 @@ func TestSQLiteChartRendersIndependentSecureWorkloads(t *testing.T) {
 	if valueAt(t, gatewayConfig, "minClientVersion") != "" {
 		t.Fatalf("Data Plane minimum client version = %#v", valueAt(t, gatewayConfig, "minClientVersion"))
 	}
-	if valueAt(t, controlPlaneDocument, "files", "maxBytes") != 1073741824 ||
+	if valueAt(t, controlPlaneDocument, "files", "maxBytes") != float64(1073741824) ||
 		len(valueAt(t, controlPlaneDocument, "files", "allowedRoots").([]any)) != 1 {
 		t.Fatalf("ControlPlane file limits = %#v", valueAt(t, controlPlaneDocument, "files"))
 	}
@@ -91,11 +87,22 @@ func TestSQLiteChartRendersIndependentSecureWorkloads(t *testing.T) {
 		t.Fatal("ControlPlane is missing SQLite configuration in its YAML document")
 	}
 	controlPlaneYAML, _ := yaml.Marshal(controlPlane)
-	if !strings.Contains(string(controlPlaneYAML), "--config=/etc/kubeloop/control-plane.yaml") ||
+	if !strings.Contains(string(controlPlaneYAML), "--config=/etc/kubeloop/kubeloop.yaml") ||
 		strings.Contains(string(controlPlaneYAML), "--session-ttl") || strings.Contains(string(controlPlaneYAML), "envFrom:") {
 		t.Fatal("ControlPlane must start from only its mounted YAML configuration")
 	}
 	dataPlaneYAML, _ := yaml.Marshal(dataPlane)
+	for component, document := range map[string]string{"control-plane": string(controlPlaneYAML), "data-plane": string(dataPlaneYAML)} {
+		if !strings.Contains(document, "name: test-kubeloop-config") || !strings.Contains(document, "checksum/config:") {
+			t.Fatalf("%s does not use the rollout-aware shared ConfigMap", component)
+		}
+	}
+	if !strings.Contains(string(controlPlaneYAML), "key: kubeloop.yaml") {
+		t.Fatal("Control Plane does not project the unified kubeloop.yaml")
+	}
+	if !strings.Contains(string(dataPlaneYAML), "key: kubeloop.yaml") {
+		t.Fatal("Data Plane does not project the unified kubeloop.yaml")
+	}
 	if strings.Contains(string(dataPlaneYAML), "args:") ||
 		!strings.Contains(string(dataPlaneYAML), "KUBELOOP_GATEWAY_CONFIG_FILE") {
 		t.Fatal("Data Plane must use only its mounted Gateway configuration file")
@@ -126,9 +133,17 @@ func TestSQLiteChartRendersIndependentSecureWorkloads(t *testing.T) {
 	if err != nil || len(mfaEncryptionKey) != 32 {
 		t.Fatalf("initial administrator MFA encryption key length = %d, error = %v", len(mfaEncryptionKey), err)
 	}
-	if valueAt(t, initialAdminSecret, "data", "signing-key.pem") == "" ||
-		!strings.Contains(string(controlPlaneYAML), "token/signing-key.pem") {
-		t.Fatal("initial administrator install is missing its retained OAuth/OIDC signing key")
+	authSecret := objectByName(t, objects, "Secret", "test-kubeloop-control-plane-auth")
+	for _, key := range []string{"oidc-signing-key.pem", "hmac-secret"} {
+		if valueAt(t, authSecret, "data", key) == "" {
+			t.Fatalf("independent authentication Secret is missing %q", key)
+		}
+	}
+	if _, coupled := initialAdminSecret["signing-key.pem"]; coupled ||
+		strings.Contains(string(controlPlaneYAML), "oauth/signing-key.pem") ||
+		!strings.Contains(string(controlPlaneYAML), "oauth/oidc-signing-key.pem") ||
+		!strings.Contains(string(controlPlaneYAML), "oauth/hmac-secret") {
+		t.Fatal("OAuth/OIDC key material is not isolated from the initial administrator Secret")
 	}
 	if countKind(objects, "Ingress") != 1 {
 		t.Fatal("expected one same-origin Ingress")
@@ -348,80 +363,49 @@ func TestTrafficBindingCRDMatchesGeneratedManifest(t *testing.T) {
 	}
 }
 
-func TestOIDCConfigurationSeparatesPublicConfigAndSecrets(t *testing.T) {
-	objects := renderChart(t,
-		"--set", "publicURL=https://kubeloop.example.test",
-		"--set", "controlPlane.auth.providers[0].id=corporate",
-		"--set", "controlPlane.auth.providers[0].type=oidc",
-		"--set", "controlPlane.auth.providers[0].displayName=Corporate SSO",
-		"--set", "controlPlane.auth.providers[0].oidc.issuer=https://tenant.auth0.com/",
-		"--set", "controlPlane.auth.providers[0].oidc.clientID=kubeloop",
-		"--set", "controlPlane.auth.providers[0].oidc.existingSecret=kubeloop-oidc",
-		"--set", "controlPlane.auth.providers[0].oidc.clientSecretKey=client-secret",
-		"--set", "controlPlane.auth.providers[0].oidc.caKey=ca.crt",
-		"--set", "controlPlane.auth.token.existingSecret=kubeloop-token",
-	)
-	controlPlane := objectsByComponent(t, objects, "Deployment", "control-plane")[0]
-	dataPlane := objectsByComponent(t, objects, "Deployment", "data-plane")[0]
-	authJSON := controlPlaneConfigRaw(t, objects)
-	for _, want := range []string{
-		`issuer: "https://tenant.auth0.com/"`,
-		`redirectUrl: "https://kubeloop.example.test/oauth2/callback/corporate"`,
-		`clientSecretFile: "/var/run/secrets/kubeloop/auth/corporate/client-secret"`,
-		`caFile: "/var/run/secrets/kubeloop/auth/corporate/ca.crt"`,
-	} {
-		if !strings.Contains(authJSON, want) {
-			t.Fatalf("auth config missing %s: %s", want, authJSON)
+func TestOIDCProvidersAreNotConfiguredOrMountedByHelm(t *testing.T) {
+	objects := renderChart(t, "--set", "publicURL=https://kubeloop.example.test")
+	config := controlPlaneConfigRaw(t, objects)
+	for _, forbidden := range []string{"providers:", "clientSecret", "providerSecretAliases", "management/providers"} {
+		if strings.Contains(config, forbidden) {
+			t.Fatalf("database-managed Provider field %q leaked into Helm config: %s", forbidden, config)
 		}
 	}
-	if strings.Contains(authJSON, "kubeloop-oidc") || strings.Contains(authJSON, "kubeloop-token") {
-		t.Fatalf("Kubernetes Secret reference leaked into public config: %s", authJSON)
-	}
-	controlPlaneYAML, err := yaml.Marshal(controlPlane)
+	deployment, err := yaml.Marshal(objectsByComponent(t, objects, "Deployment", "control-plane")[0])
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(controlPlaneYAML), "kubeloop-oidc") ||
-		!strings.Contains(string(controlPlaneYAML), "kubeloop-token") ||
-		!strings.Contains(string(controlPlaneYAML), "auth-secrets") {
-		t.Fatal("ControlPlane does not project the OIDC Secret")
-	}
-	dataPlaneYAML, err := yaml.Marshal(dataPlane)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(dataPlaneYAML), "kubeloop-oidc") || strings.Contains(string(dataPlaneYAML), "auth-secrets") {
-		t.Fatal("Data Plane received OIDC Secret configuration")
+	if strings.Contains(string(deployment), "management/providers") {
+		t.Fatal("Control Plane still mounts database-managed Provider credentials")
 	}
 }
 
-func TestGatewayPolicyRendersAsControlPlaneOnlyDenyByDefaultConfig(t *testing.T) {
-	defaultObjects := renderChart(t, "--set", "publicURL=https://kubeloop.example.test")
-	defaultConfig := parseControlPlaneConfig(t, objectByName(t, defaultObjects, "ConfigMap", "test-kubeloop-control-plane-config"))
-	if rules := valueAt(t, defaultConfig, "authorization", "rules").([]any); len(rules) != 0 {
-		t.Fatalf("default authorization rules = %#v", rules)
-	}
-
-	objects := renderChart(t,
-		"--set", "publicURL=https://kubeloop.example.test",
-		"--set", "controlPlane.policy.rules[0].id=developers-read",
-		"--set", "controlPlane.policy.rules[0].groups[0]=developers",
-		"--set", "controlPlane.policy.rules[0].namespaces[0]=development",
-		"--set", "controlPlane.policy.rules[0].operations[0]=list",
-		"--set", "controlPlane.policy.rules[0].resourceKinds[0]=pods",
-	)
-	policyJSON := controlPlaneConfigRaw(t, objects)
-	for _, want := range []string{
-		`"id":"developers-read"`, `"groups":["developers"]`,
-		`"namespaces":["development"]`, `"operations":["list"]`, `"resourceKinds":["pods"]`,
-	} {
-		if !strings.Contains(policyJSON, want) {
-			t.Fatalf("policy config missing %s: %s", want, policyJSON)
+func TestAuthorizationIsDatabaseManaged(t *testing.T) {
+	objects := renderChart(t, "--set", "publicURL=https://kubeloop.example.test")
+	config := controlPlaneConfigRaw(t, objects)
+	for _, forbidden := range []string{`"authorization"`, `"policy"`, `"rules"`} {
+		if strings.Contains(config, forbidden) {
+			t.Fatalf("database-managed authorization field %s leaked into Helm config: %s", forbidden, config)
 		}
 	}
-	dataPlaneYAML, _ := yaml.Marshal(objectsByComponent(t, objects, "Deployment", "data-plane")[0])
-	if strings.Contains(string(dataPlaneYAML), "policy.json") || strings.Contains(string(dataPlaneYAML), "developers-read") {
-		t.Fatal("Data Plane received Gateway policy configuration")
+}
+
+func TestDevelopmentPresetIsLocalAndDoesNotEnableManagementBootstrap(t *testing.T) {
+	objects := renderChart(t,
+		"--set", "publicURL=https://kubeloop.192.168.64.70.sslip.io",
+		"--set", "controlPlane.management.publicURL=https://kubeloop.192.168.64.70.sslip.io",
+		"--set", "controlPlane.development.enabled=true",
+	)
+	config := controlPlaneConfigRaw(t, objects)
+	for _, want := range []string{`"subjects":[]`, `"groups":[]`, `"recoveryEnabled":false`} {
+		if !strings.Contains(config, want) {
+			t.Fatalf("development config missing %s: %s", want, config)
+		}
+	}
+	for _, forbidden := range []string{"development-authenticated-full-access", "development-policy"} {
+		if strings.Contains(config, forbidden) {
+			t.Fatalf("development mode leaked authorization preset %q: %s", forbidden, config)
+		}
 	}
 }
 
@@ -430,7 +414,6 @@ func TestManagementBootstrapRemainsControlPlaneOnly(t *testing.T) {
 	defaultJSON := controlPlaneConfigRaw(t, defaultObjects)
 	for _, want := range []string{
 		`"subjects":[]`, `"groups":[]`, `"recoveryEnabled":false`,
-		`providerSecretAliases: {}`,
 	} {
 		if !strings.Contains(defaultJSON, want) {
 			t.Fatalf("default management config missing %s: %s", want, defaultJSON)
@@ -468,47 +451,10 @@ func TestManagementBootstrapRemainsControlPlaneOnly(t *testing.T) {
 	}
 }
 
-func TestManagedProviderSecretAliasesAreFixedControlPlaneOnlyProjections(t *testing.T) {
-	objects := renderChart(t,
-		"--set", "publicURL=https://kubeloop.example.test",
-		"--set", "controlPlane.auth.token.existingSecret=kubeloop-token",
-		"--set", "controlPlane.management.providerSecretAliases.corporate.existingSecret=kubeloop-corporate",
-		"--set", "controlPlane.management.providerSecretAliases.corporate.clientSecretKey=oidc-secret",
-		"--set", "controlPlane.management.providerSecretAliases.corporate.caKey=ca.pem",
-	)
-	managementJSON := controlPlaneConfigRaw(t, objects)
-	for _, want := range []string{
-		`providerSecretAliases: {"corporate":`,
-		`"clientSecretFile":"/var/run/secrets/kubeloop/management/providers/corporate/client-secret"`,
-		`"caFile":"/var/run/secrets/kubeloop/management/providers/corporate/ca.crt"`,
-	} {
-		if !strings.Contains(managementJSON, want) {
-			t.Fatalf("managed Provider config missing %s: %s", want, managementJSON)
-		}
-	}
-	for _, forbidden := range []string{"kubeloop-corporate", "oidc-secret", "ca.pem"} {
-		if strings.Contains(managementJSON, forbidden) {
-			t.Fatalf("Kubernetes Secret detail %q leaked into management config", forbidden)
-		}
-	}
-	controlPlaneYAML, _ := yaml.Marshal(objectsByComponent(t, objects, "Deployment", "control-plane")[0])
-	for _, want := range []string{"kubeloop-corporate", "providers/corporate/client-secret", "providers/corporate/ca.crt", "kubeloop-token"} {
-		if !strings.Contains(string(controlPlaneYAML), want) {
-			t.Fatalf("ControlPlane managed Provider projection missing %q", want)
-		}
-	}
-	for _, component := range []string{"data-plane", "operator"} {
-		componentYAML, _ := yaml.Marshal(objectsByComponent(t, objects, "Deployment", component)[0])
-		if strings.Contains(string(componentYAML), "kubeloop-corporate") || strings.Contains(string(componentYAML), "providers/corporate") {
-			t.Fatalf("%s received managed Provider Secret", component)
-		}
-	}
-}
-
 func TestKubernetesProviderUsesControlPlaneServiceAccountWithoutDefaultImpersonation(t *testing.T) {
 	objects := renderChart(t, "--set", "publicURL=https://kubeloop.example.test")
 	kubernetesJSON := controlPlaneConfigRaw(t, objects)
-	for _, want := range []string{`"enabled":false`, `timeout: "15s"`, `qps: 20`, `burst: 40`} {
+	for _, want := range []string{`"enabled":false`, `"timeout":"15s"`, `"qps":20`, `"burst":40`} {
 		if !strings.Contains(kubernetesJSON, want) {
 			t.Fatalf("Kubernetes Provider config missing %s: %s", want, kubernetesJSON)
 		}
@@ -700,9 +646,9 @@ func TestExternalDatasourceChartUsesNoSQLitePVC(t *testing.T) {
 	}
 	configYAML := controlPlaneConfigRaw(t, objects)
 	for _, want := range []string{
-		`datasourceURLFile: "/var/run/secrets/kubeloop/storage/datasource-url"`, `connectTimeout: "10s"`,
-		`queryTimeout: "5s"`, `maxOpenConnections: 20`, `maxIdleConnections: 5`,
-		`connectionMaxLifetime: "30m"`, `transactionMaxRetries: 3`, `transactionRetryBackoff: "25ms"`,
+		`"datasourceURLFile":"/var/run/secrets/kubeloop/storage/datasource-url"`, `"connectTimeout":"10s"`,
+		`"queryTimeout":"5s"`, `"maxOpenConnections":20`, `"maxIdleConnections":5`,
+		`"connectionMaxLifetime":"30m"`, `"transactionMaxRetries":3`, `"transactionRetryBackoff":"25ms"`,
 	} {
 		if !strings.Contains(configYAML, want) {
 			t.Fatalf("external datasource YAML configuration missing %q: %s", want, configYAML)
@@ -721,6 +667,7 @@ func TestChartRejectsUnsafeStorageConfigurations(t *testing.T) {
 		want string
 	}{
 		{name: "missing public URL", want: "publicURL is required"},
+		{name: "development on external origin", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.development.enabled=true"}, want: "requires a local"},
 		{name: "public URL path", args: []string{"--set", "publicURL=https://kubeloop.example.test/base"}, want: "must be one HTTPS origin"},
 		{name: "two external routes", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.management.publicURL=https://kubeloop.example.test", "--set", "ingress.enabled=true", "--set", "ingress.host=kubeloop.example.test", "--set", "gatewayAPI.enabled=true", "--set", "gatewayAPI.host=kubeloop.example.test"}, want: "mutually exclusive"},
 		{name: "Ingress origin mismatch", args: []string{"--set", "publicURL=https://other.example.test", "--set", "controlPlane.management.publicURL=https://other.example.test", "--set", "ingress.enabled=true", "--set", "ingress.host=kubeloop.example.test"}, want: "exactly equal"},
@@ -751,9 +698,8 @@ func TestChartRejectsUnsafeStorageConfigurations(t *testing.T) {
 		{name: "missing RBAC namespaces", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.rbac.scope=namespace"}, want: "controlPlane.rbac.namespaces must contain"},
 		{name: "invalid RBAC namespace", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.rbac.scope=namespace", "--set", "controlPlane.rbac.namespaces[0]=Team_A"}, want: "contains invalid namespace"},
 		{name: "duplicate RBAC namespace", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.rbac.scope=namespace", "--set", "controlPlane.rbac.namespaces[0]=team-a", "--set", "controlPlane.rbac.namespaces[1]=team-a"}, want: "contains duplicate namespace"},
-		{name: "token signing secret", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.management.initialAdmin.enabled=false", "--set", "controlPlane.auth.providers[0].id=corp", "--set", "controlPlane.auth.providers[0].type=oidc", "--set", "controlPlane.auth.providers[0].oidc.issuer=https://login.example.test", "--set", "controlPlane.auth.providers[0].oidc.clientID=kubeloop", "--set", "controlPlane.auth.providers[0].oidc.existingSecret=kubeloop-oidc", "--set", "controlPlane.auth.providers[0].oidc.clientSecretKey=client-secret"}, want: "controlPlane.auth.token.existingSecret is required"},
-		{name: "OIDC secret", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.auth.token.existingSecret=kubeloop-token", "--set", "controlPlane.auth.providers[0].id=corp", "--set", "controlPlane.auth.providers[0].type=oidc", "--set", "controlPlane.auth.providers[0].oidc.issuer=https://login.example.test", "--set", "controlPlane.auth.providers[0].oidc.clientID=kubeloop"}, want: "existingSecret is required"},
-		{name: "unsupported auth type", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.auth.token.existingSecret=kubeloop-token", "--set", "controlPlane.auth.providers[0].id=corp", "--set", "controlPlane.auth.providers[0].type=saml"}, want: "must be oidc"},
+		{name: "empty OIDC signing key", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set-string", "controlPlane.auth.oauth.oidcSigningKeyKey="}, want: "oidcSigningKeyKey is required"},
+		{name: "empty HMAC key", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set-string", "controlPlane.auth.oauth.hmacSecretKey="}, want: "hmacSecretKey is required"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -1047,23 +993,41 @@ func mustYAML(t *testing.T, value any) string {
 
 func controlPlaneConfigRaw(t *testing.T, objects []map[string]any) string {
 	t.Helper()
-	config := objectByName(t, objects, "ConfigMap", "test-kubeloop-control-plane-config")
-	raw, ok := valueAt(t, config, "data", "control-plane.yaml").(string)
-	if !ok {
-		t.Fatalf("control-plane.yaml is not a string: %#v", valueAt(t, config, "data"))
+	config := objectByName(t, objects, "ConfigMap", "test-kubeloop-config")
+	controlPlane, err := json.Marshal(parseUnifiedConfig(t, config)["controlPlane"])
+	if err != nil {
+		t.Fatal(err)
 	}
-	return raw
+	return string(controlPlane)
 }
 
 func parseControlPlaneConfig(t *testing.T, configMap map[string]any) map[string]any {
 	t.Helper()
-	raw, ok := valueAt(t, configMap, "data", "control-plane.yaml").(string)
+	document := parseUnifiedConfig(t, configMap)
+	controlPlane, ok := document["controlPlane"].(map[string]any)
 	if !ok {
-		t.Fatalf("control-plane.yaml is not a string: %#v", valueAt(t, configMap, "data"))
+		t.Fatalf("controlPlane is not an object: %#v", document["controlPlane"])
+	}
+	return controlPlane
+}
+
+func parseUnifiedConfig(t *testing.T, configMap map[string]any) map[string]any {
+	t.Helper()
+	raw, ok := valueAt(t, configMap, "data", "kubeloop.yaml").(string)
+	if !ok {
+		t.Fatalf("kubeloop.yaml is not a string: %#v", valueAt(t, configMap, "data"))
+	}
+	var yamlConfig map[string]any
+	if err := yaml.Unmarshal([]byte(raw), &yamlConfig); err != nil {
+		t.Fatalf("parse kubeloop.yaml: %v", err)
+	}
+	normalized, err := json.Marshal(yamlConfig)
+	if err != nil {
+		t.Fatal(err)
 	}
 	var config map[string]any
-	if err := yaml.Unmarshal([]byte(raw), &config); err != nil {
-		t.Fatalf("parse control-plane.yaml: %v", err)
+	if err := json.Unmarshal(normalized, &config); err != nil {
+		t.Fatal(err)
 	}
 	return config
 }

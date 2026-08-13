@@ -10,8 +10,6 @@ import (
 
 	"github.com/fengqi-dev/kube-loop/internal/controlplane"
 	managementconfig "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/config"
-	authconfig "github.com/fengqi-dev/kube-loop/internal/controlplane/authn/config"
-	"github.com/fengqi-dev/kube-loop/internal/controlplane/authorization"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/fileapi"
 	controlplanekubernetes "github.com/fengqi-dev/kube-loop/internal/controlplane/kubernetes"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/maintenance"
@@ -26,7 +24,6 @@ const maximumControlPlaneConfigBytes = 4 << 20
 type controlPlaneConfigDocument struct {
 	API            apiConfig            `json:"api"`
 	Authentication authenticationConfig `json:"authentication"`
-	Authorization  authorization.Policy `json:"authorization"`
 	Management     managementConfig     `json:"management"`
 	Kubernetes     kubernetesConfig     `json:"kubernetes"`
 	Relay          relayConfig          `json:"relay"`
@@ -49,24 +46,23 @@ type apiConfig struct {
 }
 
 type authenticationConfig struct {
-	Providers []authconfig.Provider `json:"providers"`
-	Token     tokenConfig           `json:"token"`
+	OAuth oauthConfig `json:"oauth"`
 }
 
-type tokenConfig struct {
-	SigningKeyFile string `json:"signingKeyFile"`
-	KeyID          string `json:"keyID"`
-	AccessTTL      string `json:"accessTTL"`
-	RefreshTTL     string `json:"refreshTTL"`
+type oauthConfig struct {
+	OIDCSigningKeyFile string `json:"oidcSigningKeyFile"`
+	HMACSecretFile     string `json:"hmacSecretFile"`
+	KeyID              string `json:"keyID"`
+	AccessTTL          string `json:"accessTTL"`
+	RefreshTTL         string `json:"refreshTTL"`
 }
 
 type managementConfig struct {
-	Listen                string                                 `json:"listen"`
-	PublicURL             string                                 `json:"publicURL"`
-	InitialAdmin          initialAdminConfig                     `json:"initialAdmin"`
-	Bootstrap             managementconfig.BootstrapConfig       `json:"bootstrap"`
-	BreakGlass            managementconfig.BreakGlassConfig      `json:"breakGlass"`
-	ProviderSecretAliases managementconfig.ProviderSecretAliases `json:"providerSecretAliases,omitempty"`
+	Listen       string                            `json:"listen"`
+	PublicURL    string                            `json:"publicURL"`
+	InitialAdmin initialAdminConfig                `json:"initialAdmin"`
+	Bootstrap    managementconfig.BootstrapConfig  `json:"bootstrap"`
+	BreakGlass   managementconfig.BreakGlassConfig `json:"breakGlass"`
 }
 
 type initialAdminConfig struct {
@@ -150,11 +146,14 @@ type loggingConfig struct {
 	Level string `json:"level"`
 }
 
+type kubeloopConfigDocument struct {
+	ControlPlane *controlPlaneConfigDocument `json:"controlPlane"`
+	Gateway      any                         `json:"gateway"`
+}
+
 type loadedControlPlaneConfig struct {
 	Document            controlPlaneConfigDocument
-	Authentication      authconfig.File
 	Management          managementconfig.File
-	Policy              authorization.Policy
 	Kubernetes          controlplanekubernetes.Config
 	Storage             controlplanestorage.Config
 	Files               fileapi.Config
@@ -188,26 +187,23 @@ func loadControlPlaneConfig(path string) (loadedControlPlaneConfig, error) {
 	if len(raw) > maximumControlPlaneConfigBytes {
 		return loadedControlPlaneConfig{}, errors.New("Control Plane config exceeds 4 MiB")
 	}
-	var document controlPlaneConfigDocument
-	if err := yaml.UnmarshalStrict(raw, &document); err != nil {
+	var root kubeloopConfigDocument
+	if err := yaml.UnmarshalStrict(raw, &root); err != nil {
 		return loadedControlPlaneConfig{}, fmt.Errorf("decode Control Plane YAML: %w", err)
 	}
-	return normalizeControlPlaneConfig(document)
+	if root.ControlPlane == nil || root.Gateway == nil {
+		return loadedControlPlaneConfig{}, errors.New("unified configuration requires controlPlane and gateway")
+	}
+	return normalizeControlPlaneConfig(*root.ControlPlane)
 }
 
 func normalizeControlPlaneConfig(document controlPlaneConfigDocument) (loadedControlPlaneConfig, error) {
 	applyControlPlaneDefaults(&document)
 	result := loadedControlPlaneConfig{Document: document}
-	result.Authentication = authconfig.File{Providers: document.Authentication.Providers}
 	var err error
 	result.Management, err = managementconfig.Normalize(managementconfig.File{
 		Bootstrap: document.Management.Bootstrap, BreakGlass: document.Management.BreakGlass,
-		ProviderSecretAliases: document.Management.ProviderSecretAliases,
 	})
-	if err != nil {
-		return loadedControlPlaneConfig{}, err
-	}
-	result.Policy, err = authorization.Normalize(document.Authorization)
 	if err != nil {
 		return loadedControlPlaneConfig{}, err
 	}
@@ -224,8 +220,8 @@ func normalizeControlPlaneConfig(document controlPlaneConfigDocument) (loadedCon
 		raw    string
 		target *time.Duration
 	}{
-		"authentication.token.accessTTL":  {document.Authentication.Token.AccessTTL, &result.AccessTokenTTL},
-		"authentication.token.refreshTTL": {document.Authentication.Token.RefreshTTL, &result.RefreshTokenTTL},
+		"authentication.oauth.accessTTL":  {document.Authentication.OAuth.AccessTTL, &result.AccessTokenTTL},
+		"authentication.oauth.refreshTTL": {document.Authentication.OAuth.RefreshTTL, &result.RefreshTokenTTL},
 		"sessions.ttl":                    {document.Sessions.TTL, &result.SessionTTL},
 		"sessions.maxLifetime":            {document.Sessions.MaxLifetime, &result.SessionMaxLifetime},
 		"relay.ticket.ttl":                {document.Relay.Ticket.TTL, &result.RelayTicketTTL},
@@ -269,14 +265,14 @@ func applyControlPlaneDefaults(document *controlPlaneConfigDocument) {
 	if document.Management.PublicURL == "" {
 		document.Management.PublicURL = "http://127.0.0.1:8081"
 	}
-	if document.Authentication.Token.KeyID == "" {
-		document.Authentication.Token.KeyID = "primary"
+	if document.Authentication.OAuth.KeyID == "" {
+		document.Authentication.OAuth.KeyID = "primary"
 	}
-	if document.Authentication.Token.AccessTTL == "" {
-		document.Authentication.Token.AccessTTL = (5 * time.Minute).String()
+	if document.Authentication.OAuth.AccessTTL == "" {
+		document.Authentication.OAuth.AccessTTL = (5 * time.Minute).String()
 	}
-	if document.Authentication.Token.RefreshTTL == "" {
-		document.Authentication.Token.RefreshTTL = (30 * 24 * time.Hour).String()
+	if document.Authentication.OAuth.RefreshTTL == "" {
+		document.Authentication.OAuth.RefreshTTL = (30 * 24 * time.Hour).String()
 	}
 	if document.Sessions.TTL == "" {
 		document.Sessions.TTL = sessionapi.DefaultSessionTTL.String()

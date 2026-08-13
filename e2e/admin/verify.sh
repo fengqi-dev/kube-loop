@@ -94,7 +94,7 @@ admin_post() {
 
 admin_get /status | jq -e '.storage.backend == "sqlite" and (.storage.schemaVersion >= 11)' >/dev/null
 admin_get /capabilities | jq -e '.authenticationType == "break-glass" and (.capabilities | length > 0)' >/dev/null
-POLICY_STATE="$(admin_get /policy)"
+POLICY_STATE="$(admin_get /authorization)"
 BASE_ETAG="$(jq -er '.etag | select(type == "number" and . >= 0 and floor == .)' <<<"${POLICY_STATE}")"
 
 NO_CSRF_STATUS="$(curl --silent --output "${WORK_DIR}/csrf.json" --write-out '%{http_code}' \
@@ -102,7 +102,7 @@ NO_CSRF_STATUS="$(curl --silent --output "${WORK_DIR}/csrf.json" --write-out '%{
   --header 'Content-Type: application/json' --header "If-Match: \"${BASE_ETAG}\"" \
   --header 'Idempotency-Key: admin-e2e-no-csrf-0001' \
   --data '{"spec":{"version":1,"assignments":[]},"checks":[],"reason":"verify csrf rejection"}' \
-  "${BASE_URL}/api/admin/policy/dry-run")"
+  "${BASE_URL}/api/admin/authorization/dry-run")"
 [[ "${NO_CSRF_STATUS}" == "403" ]]
 echo "CSRF rejection verified"
 
@@ -114,8 +114,8 @@ KEY_ONE='admin-e2e-policy-draft-0001'
 KEY_TWO='admin-e2e-policy-draft-0002'
 BODY_ONE="$(jq -nc --argjson spec "${SPEC_ONE}" '{spec:$spec,reason:"publish primary platform administrators"}')"
 BODY_TWO="$(jq -nc --argjson spec "${SPEC_TWO}" '{spec:$spec,reason:"publish secondary platform administrators"}')"
-STATUS_ONE="$(admin_post /policy/drafts "${BASE_ETAG}" "${KEY_ONE}" "${BODY_ONE}" "${WORK_DIR}/draft-one.json")"
-STATUS_TWO="$(admin_post /policy/drafts "${BASE_ETAG}" "${KEY_TWO}" "${BODY_TWO}" "${WORK_DIR}/draft-two.json")"
+STATUS_ONE="$(admin_post /authorization/drafts "${BASE_ETAG}" "${KEY_ONE}" "${BODY_ONE}" "${WORK_DIR}/draft-one.json")"
+STATUS_TWO="$(admin_post /authorization/drafts "${BASE_ETAG}" "${KEY_TWO}" "${BODY_TWO}" "${WORK_DIR}/draft-two.json")"
 if [[ "${STATUS_ONE}" != "201" || "${STATUS_TWO}" != "201" ]]; then
   echo "policy draft status: ${STATUS_ONE}/${STATUS_TWO}" >&2
   jq -c '{error}' "${WORK_DIR}/draft-one.json" "${WORK_DIR}/draft-two.json" >&2 || true
@@ -127,10 +127,10 @@ CHANGE_TWO="$(jq -er '.changeId' "${WORK_DIR}/draft-two.json")"
 REVISION_ONE="$(jq -er '.revision' "${WORK_DIR}/draft-one.json")"
 REVISION_TWO="$(jq -er '.revision' "${WORK_DIR}/draft-two.json")"
 
-admin_post "/policy/changes/${CHANGE_ONE}/publish" "${BASE_ETAG}" "${KEY_ONE}" \
+admin_post "/authorization/changes/${CHANGE_ONE}/publish" "${BASE_ETAG}" "${KEY_ONE}" \
   '{"reason":"publish primary platform administrators"}' "${WORK_DIR}/publish-one.json" >"${WORK_DIR}/publish-one.status" &
 PID_ONE=$!
-admin_post "/policy/changes/${CHANGE_TWO}/publish" "${BASE_ETAG}" "${KEY_TWO}" \
+admin_post "/authorization/changes/${CHANGE_TWO}/publish" "${BASE_ETAG}" "${KEY_TWO}" \
   '{"reason":"publish secondary platform administrators"}' "${WORK_DIR}/publish-two.json" >"${WORK_DIR}/publish-two.status" &
 PID_TWO=$!
 wait "${PID_ONE}"
@@ -143,7 +143,7 @@ if [[ "$(cat "${WORK_DIR}/publish-one.status")" == "200" ]]; then
 else
   ACTIVE_REVISION="${REVISION_TWO}"
 fi
-admin_get /policy | jq -e --argjson revision "${ACTIVE_REVISION}" --argjson etag "${BASE_ETAG}" \
+admin_get /authorization | jq -e --argjson revision "${ACTIVE_REVISION}" --argjson etag "${BASE_ETAG}" \
   '.active and .revision == $revision and .etag == ($etag + 1)' >/dev/null
 
 echo "Management security E2E passed (CSP, CSRF, concurrent publish)"

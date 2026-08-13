@@ -24,30 +24,6 @@ type PrincipalRepository interface {
 	List(context.Context, PrincipalListFilter) ([]Principal, error)
 }
 
-type TokenFamilyRepository interface {
-	// Create enforces unique IDs and refresh-token hashes.
-	Create(context.Context, TokenFamily) error
-	GetByID(context.Context, string) (TokenFamily, error)
-	// Revoke is idempotent and never clears an earlier revocation timestamp.
-	Revoke(context.Context, string, time.Time) error
-	// RevokeByPrincipal atomically revokes every active Device Session owned by
-	// one Principal and returns the number newly revoked.
-	RevokeByPrincipal(context.Context, string, time.Time) (int64, error)
-	// RotateHash changes the current hash only when it still matches the
-	// expected token, providing an optimistic guard for refresh rotation.
-	RotateHash(context.Context, string, []byte, []byte) error
-	// DeleteExpired performs bounded cleanup and returns the deleted row count.
-	DeleteExpired(context.Context, time.Time, int) (int64, error)
-}
-
-type RefreshTokenRepository interface {
-	Create(context.Context, RefreshTokenRecord) error
-	GetByHash(context.Context, []byte) (RefreshTokenRecord, error)
-	// MarkUsed atomically transitions active -> used and returns ErrConflict if
-	// another request already consumed the token.
-	MarkUsed(context.Context, []byte, time.Time) error
-}
-
 type SessionRepository interface {
 	Create(context.Context, Session) error
 	GetByID(context.Context, string) (Session, error)
@@ -116,17 +92,6 @@ type AuditExportJobRepository interface {
 	Complete(context.Context, string, string, string, string, time.Time) error
 }
 
-type AuthTransactionRepository interface {
-	// CreateAttempt stores only a hash of the upstream OIDC state. ConsumeAttempt
-	// atomically deletes and returns one unexpired attempt, preventing callback replay.
-	CreateAttempt(context.Context, AuthAttempt) error
-	ConsumeAttempt(context.Context, []byte, time.Time) (AuthAttempt, error)
-	// Exchange codes are also persisted only as hashes and consumed exactly once.
-	CreateExchange(context.Context, AuthExchange) error
-	ConsumeExchange(context.Context, []byte, time.Time) (AuthExchange, error)
-	DeleteExpired(context.Context, time.Time, int) (int64, error)
-}
-
 type ManagementStateRepository interface {
 	// BootstrapRetired fails closed at the authorization layer when storage is
 	// unavailable. A missing singleton row means bootstrap has never retired.
@@ -142,6 +107,52 @@ type AdminSessionRepository interface {
 	// Touch uses the observed last-seen timestamp as an optimistic guard and
 	// refuses revoked or already expired sessions.
 	Touch(context.Context, []byte, time.Time, time.Time, time.Time, time.Time) error
+	Revoke(context.Context, []byte, time.Time) error
+	RevokeAuthorization(context.Context, string, time.Time) error
+	DeleteExpired(context.Context, time.Time, int) (int64, error)
+}
+
+type OAuthClientRepository interface {
+	Create(context.Context, OAuthClient) error
+	Get(context.Context, string) (OAuthClient, error)
+	List(context.Context) ([]OAuthClient, error)
+	Update(context.Context, OAuthClient) error
+	Delete(context.Context, string) error
+	SetSecret(context.Context, OAuthClientSecret) error
+	GetSecret(context.Context, string) (OAuthClientSecret, error)
+}
+
+type OAuthSessionRepository interface {
+	Create(context.Context, OAuthSession) error
+	Get(context.Context, string, []byte) (OAuthSession, error)
+	Consume(context.Context, string, []byte, time.Time) (OAuthSession, error)
+	Delete(context.Context, string, []byte) error
+	RevokeRequest(context.Context, string, time.Time) error
+	RevokePrincipal(context.Context, string, time.Time) (int64, error)
+	RequestOwner(context.Context, string) (string, string, error)
+	RequestActive(context.Context, string, time.Time) (bool, error)
+	DeleteExpired(context.Context, time.Time, int) (int64, error)
+}
+
+type OAuthAuthorizationRequestRepository interface {
+	Create(context.Context, OAuthAuthorizationRequest) error
+	Get(context.Context, []byte, time.Time) (OAuthAuthorizationRequest, error)
+	Consume(context.Context, []byte, time.Time) (OAuthAuthorizationRequest, error)
+	SetUpstream(context.Context, []byte, []byte, json.RawMessage, string, time.Time) error
+	ConsumeUpstream(context.Context, []byte, time.Time) (OAuthAuthorizationRequest, error)
+	Continue(context.Context, []byte, []byte, []byte, string, time.Time) error
+	DeleteExpired(context.Context, time.Time, int) (int64, error)
+}
+
+type OAuthConsentRepository interface {
+	Grant(context.Context, OAuthConsent) error
+	Has(context.Context, string, string, []byte) (bool, error)
+	RevokeClient(context.Context, string, string) error
+}
+
+type OAuthBrowserSessionRepository interface {
+	Create(context.Context, OAuthBrowserSession) error
+	Get(context.Context, []byte, time.Time) (OAuthBrowserSession, error)
 	Revoke(context.Context, []byte, time.Time) error
 	DeleteExpired(context.Context, time.Time, int) (int64, error)
 }
@@ -168,14 +179,14 @@ type AdminPolicyRevisionRepository interface {
 	Get(context.Context, uint64) (AdminPolicyRevision, error)
 }
 
+type AuthorizationDefinitionRepository interface {
+	CreateRole(context.Context, AuthorizationRoleRecord) error
+	CreateBinding(context.Context, AuthorizationBindingRecord) error
+}
+
 type ProviderConfigRevisionRepository interface {
 	Create(context.Context, ProviderConfigRevision) (ProviderConfigRevision, error)
 	Get(context.Context, uint64) (ProviderConfigRevision, error)
-}
-
-type AdminAssignmentRepository interface {
-	Create(context.Context, AdminAssignment) error
-	ListByPolicyRevision(context.Context, uint64) ([]AdminAssignment, error)
 }
 
 type ActiveManagementRevisionRepository interface {
@@ -195,8 +206,6 @@ type ConfigChangeRequestRepository interface {
 
 type Repositories interface {
 	Principals() PrincipalRepository
-	TokenFamilies() TokenFamilyRepository
-	RefreshTokens() RefreshTokenRepository
 	Sessions() SessionRepository
 	Tasks() TaskRepository
 	ResourceSnapshots() ResourceSnapshotRepository
@@ -204,16 +213,20 @@ type Repositories interface {
 	Audit() AuditRepository
 	RelayDesiredStates() RelayDesiredStateRepository
 	AuditExportJobs() AuditExportJobRepository
-	AuthTransactions() AuthTransactionRepository
 	ManagementState() ManagementStateRepository
 	AdminSessions() AdminSessionRepository
 	LocalAdminUsers() LocalAdminUserRepository
 	AdminRecoveryCodes() AdminRecoveryCodeRepository
 	AdminPolicyRevisions() AdminPolicyRevisionRepository
+	AuthorizationDefinitions() AuthorizationDefinitionRepository
 	ProviderConfigRevisions() ProviderConfigRevisionRepository
-	AdminAssignments() AdminAssignmentRepository
 	ActiveManagementRevisions() ActiveManagementRevisionRepository
 	ConfigChangeRequests() ConfigChangeRequestRepository
+	OAuthClients() OAuthClientRepository
+	OAuthSessions() OAuthSessionRepository
+	OAuthConsents() OAuthConsentRepository
+	OAuthAuthorizationRequests() OAuthAuthorizationRequestRepository
+	OAuthBrowserSessions() OAuthBrowserSessionRepository
 }
 
 type TransactionManager interface {
@@ -223,4 +236,14 @@ type TransactionManager interface {
 	// callback again after a serialization failure or deadlock, so callbacks must
 	// contain database work only and remain safe to retry.
 	WithinTransaction(context.Context, func(Repositories) error) error
+}
+
+type RepositoryTransaction interface {
+	Repositories() Repositories
+	Commit() error
+	Rollback() error
+}
+
+type ExplicitTransactionManager interface {
+	BeginTransaction(context.Context) (RepositoryTransaction, error)
 }

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/authorization"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/sessionapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/streamlease"
@@ -53,6 +54,9 @@ func (handler *Service) stream(
 	leaseContext, cancel, err := streamlease.Start(request.Context(), handler.storage, principal, session, streamlease.Config{
 		Now: handler.now, CheckInterval: handler.credentialCheckInterval,
 		Runtime: streamlease.RuntimeFrom(handler.sessions), TaskID: task.ID, HeartbeatTask: true,
+		Authorizer: handler.authorizer, Authorization: authorization.Request{
+			Operation: "stream", Namespace: session.Namespace, ResourceKind: "file-transfers", ResourceName: task.ID,
+		},
 	})
 	if err != nil {
 		handler.persistState(task.ID, remotetask.Starting, remotetask.Failed, streamResult{Error: "authorization lease expired"})

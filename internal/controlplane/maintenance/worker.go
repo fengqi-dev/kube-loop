@@ -24,15 +24,16 @@ type Config struct {
 }
 
 type Report struct {
-	Sessions         int64
-	AdminSessions    int64
-	TokenFamilies    int64
-	Idempotency      int64
-	AuthTransactions int64
+	Sessions             int64
+	AdminSessions        int64
+	OAuthSessions        int64
+	OAuthAuthorizations  int64
+	OAuthBrowserSessions int64
+	Idempotency          int64
 }
 
 func (report Report) Total() int64 {
-	return report.Sessions + report.AdminSessions + report.TokenFamilies + report.Idempotency + report.AuthTransactions
+	return report.Sessions + report.AdminSessions + report.OAuthSessions + report.OAuthAuthorizations + report.OAuthBrowserSessions + report.Idempotency
 }
 
 type Worker struct {
@@ -106,10 +107,10 @@ func (worker *Worker) RunOnce(ctx context.Context) (Report, error) {
 	report := Report{}
 	var result error
 
-	count, err := worker.repositories.AuthTransactions().DeleteExpired(operationContext, before, worker.batchSize)
-	report.AuthTransactions = count
+	count, err := worker.repositories.OAuthAuthorizationRequests().DeleteExpired(operationContext, before, worker.batchSize)
+	report.OAuthAuthorizations = count
 	if err != nil {
-		result = errors.Join(result, fmt.Errorf("clean expired authentication transactions: %w", err))
+		result = errors.Join(result, fmt.Errorf("clean expired OAuth authorization requests: %w", err))
 	}
 	count, err = worker.repositories.AdminSessions().DeleteExpired(operationContext, before, worker.batchSize)
 	report.AdminSessions = count
@@ -126,10 +127,15 @@ func (worker *Worker) RunOnce(ctx context.Context) (Report, error) {
 	if err != nil {
 		result = errors.Join(result, fmt.Errorf("clean expired Sessions and Tasks: %w", err))
 	}
-	count, err = worker.repositories.TokenFamilies().DeleteExpired(operationContext, before, worker.batchSize)
-	report.TokenFamilies = count
+	count, err = worker.repositories.OAuthSessions().DeleteExpired(operationContext, before, worker.batchSize)
+	report.OAuthSessions = count
 	if err != nil {
-		result = errors.Join(result, fmt.Errorf("clean expired token families: %w", err))
+		result = errors.Join(result, fmt.Errorf("clean expired OAuth sessions: %w", err))
+	}
+	count, err = worker.repositories.OAuthBrowserSessions().DeleteExpired(operationContext, before, worker.batchSize)
+	report.OAuthBrowserSessions = count
+	if err != nil {
+		result = errors.Join(result, fmt.Errorf("clean expired OAuth browser sessions: %w", err))
 	}
 	return report, result
 }
@@ -146,9 +152,10 @@ func (worker *Worker) runAndLog(ctx context.Context) {
 		worker.logger.InfoContext(ctx, "Control Plane maintenance removed expired records",
 			"sessions", report.Sessions,
 			"admin_sessions", report.AdminSessions,
-			"token_families", report.TokenFamilies,
+			"oauth_sessions", report.OAuthSessions,
+			"oauth_authorizations", report.OAuthAuthorizations,
+			"oauth_browser_sessions", report.OAuthBrowserSessions,
 			"idempotency_records", report.Idempotency,
-			"auth_transactions", report.AuthTransactions,
 		)
 	}
 }

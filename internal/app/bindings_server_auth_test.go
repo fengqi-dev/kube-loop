@@ -128,6 +128,6 @@ func TestDeleteServerProfileClearsLocalStateWhenRemoteRevokeFails(t *testing.T) 
 func writeAppTokenResponse(writer http.ResponseWriter, access, refresh string) {
 	_ = json.NewEncoder(writer).Encode(map[string]any{
 		"token_type": "Bearer", "access_token": access, "refresh_token": refresh,
-		"expires_in": 60, "refresh_expires_in": 3600,
+		"expires_in": 60,
 	})
 }

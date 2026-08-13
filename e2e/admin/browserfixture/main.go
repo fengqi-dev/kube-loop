@@ -3,7 +3,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
@@ -26,16 +25,16 @@ import (
 	adminhttpapi "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/httpapi"
 	adminrevision "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/revision"
 	adminsession "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/session"
-	admintoken "github.com/fengqi-dev/kube-loop/internal/controlplane/authn/token"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/authn"
 	controlplanestorage "github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 	"github.com/labstack/echo/v5"
 )
 
 const (
-	fixtureCredential  = "valid"
-	fixtureAccessToken = "browser-fixture-access-token"
-	fixturePrincipalID = "11111111-1111-4111-8111-111111111111"
-	fixtureFamilyID    = "22222222-2222-4222-8222-222222222222"
+	fixtureCredential      = "valid"
+	fixtureAccessToken     = "browser-fixture-access-token"
+	fixturePrincipalID     = "11111111-1111-4111-8111-111111111111"
+	fixtureAuthorizationID = "22222222-2222-4222-8222-222222222222"
 )
 
 type verifier struct{ generation string }
@@ -58,12 +57,12 @@ type tokenAuthenticator struct {
 	principal controlplanestorage.Principal
 }
 
-func (value tokenAuthenticator) Authenticate(_ context.Context, token string) (admintoken.AccessIdentity, error) {
+func (value tokenAuthenticator) Authenticate(_ context.Context, token string) (authn.AccessIdentity, error) {
 	if token != fixtureAccessToken {
-		return admintoken.AccessIdentity{}, errors.New("invalid fixture access token")
+		return authn.AccessIdentity{}, errors.New("invalid fixture access token")
 	}
-	return admintoken.AccessIdentity{
-		Principal: value.principal, FamilyID: fixtureFamilyID, DeviceID: "browser-fixture-device",
+	return authn.AccessIdentity{
+		Principal: value.principal, AuthorizationID: fixtureAuthorizationID, DeviceID: "browser-fixture-device",
 		TokenID: "33333333-3333-4333-8333-333333333333", AccessExpiresAt: time.Now().Add(5 * time.Minute),
 	}, nil
 }
@@ -109,9 +108,11 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	if err := store.TokenFamilies().Create(ctx, controlplanestorage.TokenFamily{
-		ID: fixtureFamilyID, PrincipalID: fixturePrincipalID, DeviceID: "browser-fixture-device",
-		RefreshTokenHash: bytes.Repeat([]byte{7}, 32), CreatedAt: now, ExpiresAt: now.Add(time.Hour),
+	signatureHash := sha256.Sum256([]byte("browser-fixture-access-token"))
+	if err := store.OAuthSessions().Create(ctx, controlplanestorage.OAuthSession{
+		Kind: "access_token", SignatureHash: signatureHash[:], RequestID: fixtureAuthorizationID,
+		PrincipalID: fixturePrincipalID, ClientID: "kubeloop-management", DeviceID: "browser-fixture-device",
+		RequestJSON: json.RawMessage(`{}`), CreatedAt: now, ExpiresAt: now.Add(time.Hour),
 	}); err != nil {
 		log.Fatal(err)
 	}
@@ -124,9 +125,11 @@ func main() {
 	}
 	authorizer, err := adminauthorization.New(adminauthorization.Snapshot{
 		Version: adminauthorization.CurrentVersion, Revision: 1,
-		Assignments: []adminauthorization.Assignment{{
-			ID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", Role: adminauthorization.RolePlatformAdmin,
-			Subjects: []string{fixturePrincipalID},
+		Bindings: []adminauthorization.Binding{{
+			ID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", RoleID: adminauthorization.RolePlatformAdmin,
+			Subject:   adminauthorization.SubjectRef{Type: adminauthorization.SubjectPrincipal, PrincipalID: fixturePrincipalID},
+			Scope:     adminauthorization.BindingScope{Type: adminauthorization.ScopePlatform},
+			ManagedBy: adminauthorization.ManagedByPlatform,
 		}},
 	}, adminauthorization.WithBreakGlass(breakGlass))
 	if err != nil {
@@ -223,6 +226,6 @@ func writeTokens(writer http.ResponseWriter) {
 	writer.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(writer).Encode(map[string]any{
 		"token_type": "Bearer", "access_token": fixtureAccessToken, "expires_in": 300,
-		"refresh_token": "browser-fixture-refresh-token", "refresh_expires_in": 3600,
+		"refresh_token": "browser-fixture-refresh-token",
 	})
 }

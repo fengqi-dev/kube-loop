@@ -111,26 +111,26 @@ func TestRevocationsAreOwnerSafeAndAtomicWithAudit(t *testing.T) {
 		t.Fatal(err)
 	}
 	service.now = func() time.Time { return now }
-	family := storage.TokenFamily{
-		ID: uuid.NewString(), PrincipalID: principal.ID, DeviceID: "laptop",
-		RefreshTokenHash: bytes.Repeat([]byte{8}, 32), CreatedAt: now.Add(-time.Hour), ExpiresAt: now.Add(time.Hour),
+	grant := storage.OAuthSession{
+		Kind: "refresh_token", SignatureHash: bytes.Repeat([]byte{8}, 32), RequestID: uuid.NewString(), PrincipalID: principal.ID,
+		ClientID: "desktop", DeviceID: "laptop", RequestJSON: []byte(`{}`), Status: "active", CreatedAt: now.Add(-time.Hour), ExpiresAt: now.Add(time.Hour),
 	}
-	if err := store.TokenFamilies().Create(context.Background(), family); err != nil {
+	if err := store.OAuthSessions().Create(context.Background(), grant); err != nil {
 		t.Fatal(err)
 	}
 	base := Request{
 		Actor:          Actor{PrincipalID: principal.ID, Authentication: adminauthorization.AuthenticationNormal},
 		IdempotencyKey: "operation-key-00000002", Reason: "revoke lost device", RequestID: uuid.NewString(),
 	}
-	_, err = service.RevokeDeviceSession(context.Background(), RevokeDeviceSessionRequest{
-		Request: base, PrincipalID: uuid.NewString(), DeviceSessionID: family.ID,
+	_, err = service.RevokeOAuthGrant(context.Background(), RevokeOAuthGrantRequest{
+		Request: base, PrincipalID: uuid.NewString(), AuthorizationID: grant.RequestID,
 	})
 	if !errors.Is(err, storage.ErrNotFound) {
 		t.Fatalf("cross-Principal revoke error = %v", err)
 	}
-	loaded, _ := store.TokenFamilies().GetByID(context.Background(), family.ID)
-	if loaded.RevokedAt != nil {
-		t.Fatal("cross-Principal revoke changed the Device Session")
+	active, _ := store.OAuthSessions().RequestActive(context.Background(), grant.RequestID, now)
+	if !active {
+		t.Fatal("cross-Principal revoke changed the OAuth grant")
 	}
 	base.IdempotencyKey = "operation-key-00000003"
 	result, err := service.RevokePrincipal(context.Background(), RevokePrincipalRequest{

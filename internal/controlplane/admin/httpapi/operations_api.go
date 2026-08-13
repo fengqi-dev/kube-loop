@@ -43,30 +43,30 @@ func (api *readAPI) revokePrincipalSessions(ctx *echo.Context) error {
 	return nil
 }
 
-func (api *readAPI) revokeDeviceSession(ctx *echo.Context) error {
+func (api *readAPI) revokeOAuthGrant(ctx *echo.Context) error {
 	writer, request := ctx.Response(), ctx.Request()
 	key, ok := operationIdempotencyKey(writer, request)
 	if !ok {
-		api.audit(request, subjectFromRequest(request), "admin.device-session/revoke", "failure")
+		api.audit(request, subjectFromRequest(request), "admin.oauth-grant/revoke", "failure")
 		return nil
 	}
 	var input struct {
 		Reason string `json:"reason"`
 	}
 	if !decodePolicyJSON(writer, request, &input) || !validChangeReason(input.Reason) {
-		api.audit(request, subjectFromRequest(request), "admin.device-session/revoke", "failure")
+		api.audit(request, subjectFromRequest(request), "admin.oauth-grant/revoke", "failure")
 		return nil
 	}
-	result, err := api.operations.RevokeDeviceSession(request.Context(), adminoperations.RevokeDeviceSessionRequest{
+	result, err := api.operations.RevokeOAuthGrant(request.Context(), adminoperations.RevokeOAuthGrantRequest{
 		Request: adminoperations.Request{
 			Actor: operationActor(subjectFromRequest(request)), IdempotencyKey: key,
 			Reason: input.Reason, RequestID: requestID(request),
 		},
 		PrincipalID:     strings.TrimSpace(request.PathValue("principalID")),
-		DeviceSessionID: strings.TrimSpace(request.PathValue("deviceSessionID")),
+		AuthorizationID: strings.TrimSpace(request.PathValue("authorizationID")),
 	})
 	if err != nil {
-		api.audit(request, subjectFromRequest(request), "admin.device-session/revoke", "failure")
+		api.audit(request, subjectFromRequest(request), "admin.oauth-grant/revoke", "failure")
 		writeOperationError(writer, request, err)
 		return nil
 	}

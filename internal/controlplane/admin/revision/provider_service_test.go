@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -47,8 +48,7 @@ func TestProviderRevisionWorkflowValidatesBeforeAtomicPublishAndRollback(t *test
 	firstRequest := ProviderDraftRequest{
 		Candidate: ProviderCandidate{
 			ID: "corporate", Type: "oidc",
-			Config:        json.RawMessage(`{"issuer":"https://id.example","clientId":"kubeloop"}`),
-			SecretAliases: json.RawMessage(`{"client-secret":"corporate-oidc"}`),
+			Config: json.RawMessage(`{"issuer":"https://id.example","clientId":"kubeloop","clientSecret":"database-secret"}`),
 		},
 		IdempotencyKey: "provider-create-key-001", Reason: "create corporate identity provider",
 		RequestID: "provider-create-1", Actor: actor,
@@ -94,6 +94,9 @@ func TestProviderRevisionWorkflowValidatesBeforeAtomicPublishAndRollback(t *test
 	second, err := service.CreateDraft(ctx, secondRequest)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !strings.Contains(string(second.Revision.Config), "database-secret") {
+		t.Fatal("blank client Secret did not retain the active database value")
 	}
 	lifecycle.prepareErr = errors.New("connectivity failed")
 	if _, err := service.Publish(ctx, ProviderActivateRequest{

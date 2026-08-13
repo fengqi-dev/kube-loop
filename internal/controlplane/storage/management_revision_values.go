@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"regexp"
 	"sort"
@@ -153,42 +152,6 @@ func normalizeSecretAliases(value json.RawMessage) (json.RawMessage, error) {
 		}
 	}
 	return canonical, nil
-}
-
-func rejectPlaintextSecrets(value json.RawMessage) error {
-	var root any
-	decoder := json.NewDecoder(bytes.NewReader(value))
-	decoder.UseNumber()
-	if err := decoder.Decode(&root); err != nil {
-		return errors.New("decode provider configuration")
-	}
-	forbidden := map[string]struct{}{
-		"clientsecret": {}, "bindpassword": {}, "password": {}, "privatekey": {},
-		"signingkey": {}, "credential": {}, "databasedsn": {}, "postgresqldsn": {},
-	}
-	var inspect func(any) error
-	inspect = func(current any) error {
-		switch typed := current.(type) {
-		case map[string]any:
-			for key, nested := range typed {
-				normalizedKey := strings.ToLower(strings.NewReplacer("_", "", "-", "", ".", "").Replace(key))
-				if _, found := forbidden[normalizedKey]; found {
-					return fmt.Errorf("provider configuration field %q may not contain Secret plaintext", key)
-				}
-				if err := inspect(nested); err != nil {
-					return err
-				}
-			}
-		case []any:
-			for _, nested := range typed {
-				if err := inspect(nested); err != nil {
-					return err
-				}
-			}
-		}
-		return nil
-	}
-	return inspect(root)
 }
 
 func normalizeNamespaces(value json.RawMessage) (json.RawMessage, []string, error) {

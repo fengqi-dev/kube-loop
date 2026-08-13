@@ -1,5 +1,9 @@
 {{- $publicURL := required "publicURL is required (for example https://kubeloop.example.com)" .Values.publicURL }}
 {{- include "kubeloop.validateExternalAccess" . }}
+{{- $development := .Values.controlPlane.development.enabled -}}
+{{- if and $development (not (regexMatch "^https://(localhost|127\\.[0-9]+\\.[0-9]+\\.[0-9]+|kubeloop\\.local|kubeloop\\.[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+\\.sslip\\.io)(:[0-9]+)?$" $publicURL)) -}}
+{{- fail "controlPlane.development.enabled requires a local, loopback, or kubeloop.<IPv4>.sslip.io publicURL" -}}
+{{- end -}}
 {{- if not (or (eq .Values.controlPlane.relayRegistry.authentication "tokenreview") (eq .Values.controlPlane.relayRegistry.authentication "mtls")) }}
 {{- fail "controlPlane.relayRegistry.authentication must be tokenreview or mtls" }}
 {{- end }}
@@ -43,154 +47,96 @@
 {{- if and $bootstrap.recoveryEnabled (not (or $bootstrap.subjects $bootstrap.groups)) }}
 {{- fail "controlPlane.management.bootstrap.recoveryEnabled requires a bootstrap subject or group" }}
 {{- end }}
-{{- $providerSecretAliases := dict }}
-{{- range $alias, $secret := (default (dict) $management.providerSecretAliases) }}
-{{- if not (regexMatch "^[a-z][a-z0-9-]{0,62}$" $alias) }}
-{{- fail (printf "controlPlane.management.providerSecretAliases.%s must use a valid stable alias" $alias) }}
-{{- end }}
-{{- $_ := required (printf "controlPlane.management.providerSecretAliases.%s.existingSecret is required" $alias) $secret.existingSecret }}
-{{- if not (or $secret.clientSecretKey $secret.caKey) }}
-{{- fail (printf "controlPlane.management.providerSecretAliases.%s must project at least one key" $alias) }}
-{{- end }}
-{{- $files := dict }}
-{{- if $secret.clientSecretKey }}
-{{- $_ := set $files "clientSecretFile" (printf "/var/run/secrets/kubeloop/management/providers/%s/client-secret" $alias) }}
-{{- end }}
-{{- if $secret.caKey }}
-{{- $_ := set $files "caFile" (printf "/var/run/secrets/kubeloop/management/providers/%s/ca.crt" $alias) }}
-{{- end }}
-{{- $_ := set $providerSecretAliases $alias $files }}
-{{- end }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: {{ include "kubeloop.controlPlaneConfigName" . }}
+  name: {{ include "kubeloop.configName" . }}
   labels:
     {{- include "kubeloop.labels" . | nindent 4 }}
-    app.kubernetes.io/component: control-plane
+    app.kubernetes.io/component: configuration
 data:
-  control-plane.yaml: |
-    api:
-      listen: ":8080"
-      publicURL: {{ $publicURL | quote }}
-      serviceID: {{ include "kubeloop.serviceID" . | quote }}
-      tunnelPath: {{ .Values.dataPlane.tunnelPath | quote }}
-      minClientVersion: {{ .Values.controlPlane.minClientVersion | quote }}
-      shutdownTimeout: {{ .Values.controlPlane.shutdownTimeout | quote }}
-      requestTimeout: {{ .Values.controlPlane.apiRequestTimeout | quote }}
-      maxRequestBodyBytes: {{ int64 .Values.controlPlane.maxRequestBodyBytes }}
-    authentication:
-      providers:
-      {{- range $index, $provider := .Values.controlPlane.auth.providers }}
-        {{- $id := required (printf "controlPlane.auth.providers[%d].id is required" $index) $provider.id }}
-        {{- if not (regexMatch "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$" $id) }}
-        {{- fail (printf "controlPlane.auth.providers[%d].id must be URL-safe" $index) }}
+  kubeloop.yaml: |
+    controlPlane:
+      api:
+        listen: ":8080"
+        publicURL: {{ $publicURL | quote }}
+        serviceID: {{ include "kubeloop.serviceID" . | quote }}
+        tunnelPath: {{ .Values.dataPlane.tunnelPath | quote }}
+        minClientVersion: {{ .Values.controlPlane.minClientVersion | quote }}
+        shutdownTimeout: {{ .Values.controlPlane.shutdownTimeout | quote }}
+        requestTimeout: {{ .Values.controlPlane.apiRequestTimeout | quote }}
+        maxRequestBodyBytes: {{ int64 .Values.controlPlane.maxRequestBodyBytes }}
+      authentication:
+        oauth:
+          oidcSigningKeyFile: "/var/run/secrets/kubeloop/auth/oauth/oidc-signing-key.pem"
+          hmacSecretFile: "/var/run/secrets/kubeloop/auth/oauth/hmac-secret"
+          keyID: {{ .Values.controlPlane.auth.oauth.keyID | quote }}
+          accessTTL: {{ .Values.controlPlane.auth.oauth.accessTTL | quote }}
+          refreshTTL: {{ .Values.controlPlane.auth.oauth.refreshTTL | quote }}
+      management:
+        listen: {{ printf ":%v" $management.listenPort | quote }}
+        publicURL: {{ $managementPublicURL | quote }}
+        initialAdmin:
+          {{- if .Values.controlPlane.management.initialAdmin.enabled }}
+          usernameFile: "/var/run/secrets/kubeloop/management/initial-admin/username"
+          passwordFile: "/var/run/secrets/kubeloop/management/initial-admin/password"
+          mfaEncryptionKeyFile: "/var/run/secrets/kubeloop/management/initial-admin/mfa-encryption-key"
+          {{- end }}
+        bootstrap: {{ dict "subjects" (default (list) $bootstrap.subjects) "groups" (default (list) $bootstrap.groups) "recoveryEnabled" $bootstrap.recoveryEnabled | toJson }}
+      kubernetes:
+        timeout: {{ .Values.controlPlane.kubernetes.timeout | quote }}
+        qps: {{ .Values.controlPlane.kubernetes.qps }}
+        burst: {{ .Values.controlPlane.kubernetes.burst }}
+        userAgent: {{ .Values.controlPlane.kubernetes.userAgent | quote }}
+        impersonation: {{ dict "enabled" .Values.controlPlane.kubernetes.impersonation.enabled "usernamePrefix" .Values.controlPlane.kubernetes.impersonation.usernamePrefix "groupMappings" (default (dict) .Values.controlPlane.kubernetes.impersonation.groupMappings) | toJson }}
+      relay:
+        ticket:
+          signingKeyFile: "/var/run/secrets/kubeloop/auth/relay/signing-key.pem"
+          keyID: {{ .Values.controlPlane.relay.keyID | quote }}
+          ttl: {{ .Values.controlPlane.relay.ticketTTL | quote }}
+        registry:
+          listen: {{ printf ":%v" .Values.controlPlane.relayRegistry.listenPort | quote }}
+          certificateFile: "/var/run/secrets/kubeloop/relay-registry/tls.crt"
+          privateKeyFile: "/var/run/secrets/kubeloop/relay-registry/tls.key"
+          {{- if eq .Values.controlPlane.relayRegistry.authentication "mtls" }}
+          clientCAFile: "/var/run/secrets/kubeloop/relay-registry/ca.crt"
+          {{- end }}
+          authentication: {{ .Values.controlPlane.relayRegistry.authentication | quote }}
+          tokenAudience: {{ .Values.controlPlane.relayRegistry.tokenAudience | quote }}
+          trustDomain: {{ .Values.controlPlane.relayRegistry.trustDomain | quote }}
+          namespace: {{ .Release.Namespace | quote }}
+          serviceAccount: {{ include "kubeloop.dataPlaneServiceAccountName" . | quote }}
+          endpointAllowedHosts: {{ .Values.controlPlane.relayRegistry.endpointAllowedHosts | quote }}
+          leaseDuration: {{ .Values.controlPlane.relayRegistry.leaseDuration | quote }}
+          heartbeatAfter: {{ .Values.controlPlane.relayRegistry.heartbeatAfter | quote }}
+          keyGeneration: {{ .Values.controlPlane.relayRegistry.keyGeneration }}
+          keyValidity: {{ .Values.controlPlane.relayRegistry.keyValidity | quote }}
+      sessions:
+        ttl: {{ .Values.controlPlane.sessionTTL | quote }}
+        maxLifetime: {{ .Values.controlPlane.sessionMaxLifetime | quote }}
+      storage:
+        replicas: {{ .Values.controlPlane.replicas }}
+        sqlite:
+          path: {{ .Values.controlPlane.storage.sqlite.path | quote }}
+        {{- if .Values.controlPlane.storage.datasource.existingSecret }}
+        datasourceURLFile: "/var/run/secrets/kubeloop/storage/datasource-url"
+        allowInsecureDatasource: {{ .Values.controlPlane.storage.datasource.allowInsecure }}
         {{- end }}
-        {{- $type := required (printf "controlPlane.auth.providers[%d].type is required" $index) $provider.type }}
-        - id: {{ $id | quote }}
-          type: {{ $type | quote }}
-          displayName: {{ default "" $provider.displayName | quote }}
-        {{- if eq $type "oidc" }}
-          {{- $oidc := required (printf "controlPlane.auth.providers[%d].oidc is required" $index) $provider.oidc }}
-          oidc:
-            issuer: {{ required (printf "controlPlane.auth.providers[%d].oidc.issuer is required" $index) $oidc.issuer | quote }}
-            clientId: {{ required (printf "controlPlane.auth.providers[%d].oidc.clientID is required" $index) $oidc.clientID | quote }}
-            clientSecretFile: {{ printf "/var/run/secrets/kubeloop/auth/%s/client-secret" $id | quote }}
-            redirectUrl: {{ printf "%s/oauth2/callback/%s" (trimSuffix "/" $publicURL) $id | quote }}
-            scopes: {{ default (list "openid" "profile" "email") $oidc.scopes | toJson }}
-            allowedSigningAlgs: {{ default (list "RS256") $oidc.allowedSigningAlgs | toJson }}
-            requiredClaims: {{ default (list "sub") $oidc.requiredClaims | toJson }}
-            claims: {{ default (dict) $oidc.claims | toJson }}
-            httpTimeout: {{ default "10s" $oidc.httpTimeout | quote }}
-            {{- if $oidc.caKey }}
-            caFile: {{ printf "/var/run/secrets/kubeloop/auth/%s/ca.crt" $id | quote }}
-            {{- end }}
-        {{- else }}
-          {{- fail (printf "controlPlane.auth.providers[%d].type must be oidc" $index) }}
-        {{- end }}
-      {{- end }}
-      token:
-        signingKeyFile: "/var/run/secrets/kubeloop/auth/token/signing-key.pem"
-        keyID: {{ .Values.controlPlane.auth.token.keyID | quote }}
-        accessTTL: {{ .Values.controlPlane.auth.token.accessTTL | quote }}
-        refreshTTL: {{ .Values.controlPlane.auth.token.refreshTTL | quote }}
-    authorization:
-      version: 1
-      rules: {{ default (list) .Values.controlPlane.policy.rules | toJson }}
-    management:
-      listen: {{ printf ":%v" $management.listenPort | quote }}
-      publicURL: {{ $managementPublicURL | quote }}
-      initialAdmin:
-        {{- if .Values.controlPlane.management.initialAdmin.enabled }}
-        usernameFile: "/var/run/secrets/kubeloop/management/initial-admin/username"
-        passwordFile: "/var/run/secrets/kubeloop/management/initial-admin/password"
-        mfaEncryptionKeyFile: "/var/run/secrets/kubeloop/management/initial-admin/mfa-encryption-key"
-        {{- end }}
-      bootstrap: {{ dict "subjects" (default (list) $bootstrap.subjects) "groups" (default (list) $bootstrap.groups) "recoveryEnabled" $bootstrap.recoveryEnabled | toJson }}
-      providerSecretAliases: {{ $providerSecretAliases | toJson }}
-    kubernetes:
-      timeout: {{ .Values.controlPlane.kubernetes.timeout | quote }}
-      qps: {{ .Values.controlPlane.kubernetes.qps }}
-      burst: {{ .Values.controlPlane.kubernetes.burst }}
-      userAgent: {{ .Values.controlPlane.kubernetes.userAgent | quote }}
-      impersonation: {{ dict "enabled" .Values.controlPlane.kubernetes.impersonation.enabled "usernamePrefix" .Values.controlPlane.kubernetes.impersonation.usernamePrefix "groupMappings" (default (dict) .Values.controlPlane.kubernetes.impersonation.groupMappings) | toJson }}
-    relay:
-      ticket:
-        signingKeyFile: "/var/run/secrets/kubeloop/auth/relay/signing-key.pem"
-        keyID: {{ .Values.controlPlane.relay.keyID | quote }}
-        ttl: {{ .Values.controlPlane.relay.ticketTTL | quote }}
-      registry:
-        listen: {{ printf ":%v" .Values.controlPlane.relayRegistry.listenPort | quote }}
-        certificateFile: "/var/run/secrets/kubeloop/relay-registry/tls.crt"
-        privateKeyFile: "/var/run/secrets/kubeloop/relay-registry/tls.key"
-        {{- if eq .Values.controlPlane.relayRegistry.authentication "mtls" }}
-        clientCAFile: "/var/run/secrets/kubeloop/relay-registry/ca.crt"
-        {{- end }}
-        authentication: {{ .Values.controlPlane.relayRegistry.authentication | quote }}
-        tokenAudience: {{ .Values.controlPlane.relayRegistry.tokenAudience | quote }}
-        trustDomain: {{ .Values.controlPlane.relayRegistry.trustDomain | quote }}
-        namespace: {{ .Release.Namespace | quote }}
-        serviceAccount: {{ include "kubeloop.dataPlaneServiceAccountName" . | quote }}
-        endpointAllowedHosts: {{ .Values.controlPlane.relayRegistry.endpointAllowedHosts | quote }}
-        leaseDuration: {{ .Values.controlPlane.relayRegistry.leaseDuration | quote }}
-        heartbeatAfter: {{ .Values.controlPlane.relayRegistry.heartbeatAfter | quote }}
-        keyGeneration: {{ .Values.controlPlane.relayRegistry.keyGeneration }}
-        keyValidity: {{ .Values.controlPlane.relayRegistry.keyValidity | quote }}
-    sessions:
-      ttl: {{ .Values.controlPlane.sessionTTL | quote }}
-      maxLifetime: {{ .Values.controlPlane.sessionMaxLifetime | quote }}
-    storage:
-      replicas: {{ .Values.controlPlane.replicas }}
-      sqlite:
-        path: {{ .Values.controlPlane.storage.sqlite.path | quote }}
-      {{- if .Values.controlPlane.storage.datasource.existingSecret }}
-      datasourceURLFile: "/var/run/secrets/kubeloop/storage/datasource-url"
-      allowInsecureDatasource: {{ .Values.controlPlane.storage.datasource.allowInsecure }}
-      {{- end }}
-      connectTimeout: {{ .Values.controlPlane.storage.connectTimeout | quote }}
-      queryTimeout: {{ .Values.controlPlane.storage.queryTimeout | quote }}
-      maxOpenConnections: {{ .Values.controlPlane.storage.maxOpenConnections }}
-      maxIdleConnections: {{ .Values.controlPlane.storage.maxIdleConnections }}
-      connectionMaxLifetime: {{ .Values.controlPlane.storage.connectionMaxLifetime | quote }}
-      transactionMaxRetries: {{ .Values.controlPlane.storage.transactionMaxRetries }}
-      transactionRetryBackoff: {{ .Values.controlPlane.storage.transactionRetryBackoff | quote }}
-    maintenance:
-      interval: {{ .Values.controlPlane.maintenanceInterval | quote }}
-      batchSize: {{ .Values.controlPlane.maintenanceBatchSize }}
-    files:
-      maxBytes: {{ int64 .Values.controlPlane.files.maxBytes }}
-      allowedRoots: {{ .Values.controlPlane.files.allowedRoots | toJson }}
-    logging:
-      level: {{ lower (toString .Values.controlPlane.logLevel) | quote }}
----
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: {{ include "kubeloop.dataPlaneConfigName" . }}
-  labels:
-    {{- include "kubeloop.labels" . | nindent 4 }}
-    app.kubernetes.io/component: data-plane
-data:
+        connectTimeout: {{ .Values.controlPlane.storage.connectTimeout | quote }}
+        queryTimeout: {{ .Values.controlPlane.storage.queryTimeout | quote }}
+        maxOpenConnections: {{ .Values.controlPlane.storage.maxOpenConnections }}
+        maxIdleConnections: {{ .Values.controlPlane.storage.maxIdleConnections }}
+        connectionMaxLifetime: {{ .Values.controlPlane.storage.connectionMaxLifetime | quote }}
+        transactionMaxRetries: {{ .Values.controlPlane.storage.transactionMaxRetries }}
+        transactionRetryBackoff: {{ .Values.controlPlane.storage.transactionRetryBackoff | quote }}
+      maintenance:
+        interval: {{ .Values.controlPlane.maintenanceInterval | quote }}
+        batchSize: {{ .Values.controlPlane.maintenanceBatchSize }}
+      files:
+        maxBytes: {{ int64 .Values.controlPlane.files.maxBytes }}
+        allowedRoots: {{ .Values.controlPlane.files.allowedRoots | toJson }}
+      logging:
+        level: {{ lower (toString .Values.controlPlane.logLevel) | quote }}
   {{- if and (not .Values.dataPlane.relayRegistry.endpoint) (not (hasPrefix "https://" $publicURL)) }}
   {{- fail "dataPlane.relayRegistry.endpoint is required when publicURL is not HTTPS" }}
   {{- end }}
@@ -206,7 +152,7 @@ data:
   {{- $_ := set $gatewayRelay "clientCertificateFile" "/var/run/secrets/kubeloop/relay-registry/tls.crt" }}
   {{- $_ := set $gatewayRelay "clientPrivateKeyFile" "/var/run/secrets/kubeloop/relay-registry/tls.key" }}
   {{- end }}
-  gateway.json: |-
+    gateway:
     {{- dict
       "http" (dict "listen" ":8080" "path" .Values.dataPlane.tunnelPath)
       "relay" $gatewayRelay
@@ -219,4 +165,4 @@ data:
         "streamIdleTimeout" .Values.dataPlane.streamIdleTimeout)
       "minClientVersion" .Values.controlPlane.minClientVersion
       "drainTimeout" .Values.dataPlane.drainTimeout
-      "logLevel" .Values.dataPlane.logLevel | toPrettyJson | nindent 4 }}
+      "logLevel" .Values.dataPlane.logLevel | toYaml | nindent 6 }}

@@ -34,6 +34,18 @@ type Store struct {
 
 var _ Repositories = (*Store)(nil)
 var _ TransactionManager = (*Store)(nil)
+var _ ExplicitTransactionManager = (*Store)(nil)
+
+type repositoryTransaction struct {
+	transaction  bun.Tx
+	repositories Repositories
+}
+
+func (transaction *repositoryTransaction) Repositories() Repositories {
+	return transaction.repositories
+}
+func (transaction *repositoryTransaction) Commit() error   { return transaction.transaction.Commit() }
+func (transaction *repositoryTransaction) Rollback() error { return transaction.transaction.Rollback() }
 
 func Open(ctx context.Context, rawConfig Config) (*Store, error) {
 	config, err := rawConfig.normalized()
@@ -203,6 +215,9 @@ func (store *Store) migrate(ctx context.Context) error {
 	if version > currentSchemaVersion() {
 		return fmt.Errorf("storage schema version %d is newer than supported version %d", version, currentSchemaVersion())
 	}
+	if version > 0 && version < baselineSchemaVersion {
+		return fmt.Errorf("storage schema version %d predates breaking baseline %d; rebuild the database", version, baselineSchemaVersion)
+	}
 	for _, migration := range migrations {
 		if migration.version <= version {
 			continue
@@ -280,14 +295,6 @@ func (store *Store) Principals() PrincipalRepository {
 	return store.repositories.Principals()
 }
 
-func (store *Store) TokenFamilies() TokenFamilyRepository {
-	return store.repositories.TokenFamilies()
-}
-
-func (store *Store) RefreshTokens() RefreshTokenRepository {
-	return store.repositories.RefreshTokens()
-}
-
 func (store *Store) Sessions() SessionRepository {
 	return store.repositories.Sessions()
 }
@@ -316,10 +323,6 @@ func (store *Store) AuditExportJobs() AuditExportJobRepository {
 	return store.repositories.AuditExportJobs()
 }
 
-func (store *Store) AuthTransactions() AuthTransactionRepository {
-	return store.repositories.AuthTransactions()
-}
-
 func (store *Store) ManagementState() ManagementStateRepository {
 	return store.repositories.ManagementState()
 }
@@ -340,12 +343,12 @@ func (store *Store) AdminPolicyRevisions() AdminPolicyRevisionRepository {
 	return store.repositories.AdminPolicyRevisions()
 }
 
-func (store *Store) ProviderConfigRevisions() ProviderConfigRevisionRepository {
-	return store.repositories.ProviderConfigRevisions()
+func (store *Store) AuthorizationDefinitions() AuthorizationDefinitionRepository {
+	return store.repositories.AuthorizationDefinitions()
 }
 
-func (store *Store) AdminAssignments() AdminAssignmentRepository {
-	return store.repositories.AdminAssignments()
+func (store *Store) ProviderConfigRevisions() ProviderConfigRevisionRepository {
+	return store.repositories.ProviderConfigRevisions()
 }
 
 func (store *Store) ActiveManagementRevisions() ActiveManagementRevisionRepository {
@@ -354,6 +357,16 @@ func (store *Store) ActiveManagementRevisions() ActiveManagementRevisionReposito
 
 func (store *Store) ConfigChangeRequests() ConfigChangeRequestRepository {
 	return store.repositories.ConfigChangeRequests()
+}
+
+func (store *Store) OAuthClients() OAuthClientRepository   { return store.repositories.OAuthClients() }
+func (store *Store) OAuthSessions() OAuthSessionRepository { return store.repositories.OAuthSessions() }
+func (store *Store) OAuthConsents() OAuthConsentRepository { return store.repositories.OAuthConsents() }
+func (store *Store) OAuthAuthorizationRequests() OAuthAuthorizationRequestRepository {
+	return store.repositories.OAuthAuthorizationRequests()
+}
+func (store *Store) OAuthBrowserSessions() OAuthBrowserSessionRepository {
+	return store.repositories.OAuthBrowserSessions()
 }
 
 func (store *Store) WithinTransaction(ctx context.Context, function func(Repositories) error) error {
@@ -370,6 +383,19 @@ func (store *Store) WithinTransaction(ctx context.Context, function func(Reposit
 			return err
 		}
 	}
+}
+
+func (store *Store) BeginTransaction(ctx context.Context) (RepositoryTransaction, error) {
+	var options *sql.TxOptions
+	if store.backend != BackendSQLite {
+		options = &sql.TxOptions{Isolation: sql.LevelSerializable}
+	}
+	transaction, err := store.orm.BeginTx(ctx, options)
+	if err != nil {
+		return nil, databaseError("begin storage transaction", err)
+	}
+	return &repositoryTransaction{transaction: transaction,
+		repositories: newRepositorySet(store.backend, transaction.Tx, transaction)}, nil
 }
 
 func (store *Store) withinTransactionAttempt(ctx context.Context, function func(Repositories) error) error {

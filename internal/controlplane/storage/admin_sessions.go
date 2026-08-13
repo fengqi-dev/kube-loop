@@ -22,12 +22,12 @@ func (repository *adminSessionRepository) Create(ctx context.Context, session Ad
 		return err
 	}
 	query := repository.bind(`INSERT INTO admin_sessions (
-		id_hash, schema_version, principal_id, token_family_id, authentication_type,
+		id_hash, schema_version, principal_id, authorization_id, authentication_type,
 		break_glass_generation, csrf_token_hash, created_at, last_seen_at,
 		idle_expires_at, absolute_expires_at, revoked_at
 	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	_, err := repository.executor.ExecContext(ctx, query,
-		session.IDHash, session.SchemaVersion, nullableString(session.PrincipalID), nullableString(session.TokenFamilyID),
+		session.IDHash, session.SchemaVersion, nullableString(session.PrincipalID), nullableString(session.AuthorizationID),
 		session.AuthenticationType, session.BreakGlassGeneration, session.CSRFTokenHash,
 		formatTime(session.CreatedAt), formatTime(session.LastSeenAt), formatTime(session.IdleExpiresAt),
 		formatTime(session.AbsoluteExpiresAt), nullableTime(session.RevokedAt),
@@ -40,7 +40,7 @@ func (repository *adminSessionRepository) GetByHash(ctx context.Context, idHash 
 		return AdminSession{}, errors.New("management session hash must be a SHA-256 value")
 	}
 	query := repository.bind(`SELECT
-		id_hash, schema_version, principal_id, token_family_id, authentication_type,
+		id_hash, schema_version, principal_id, authorization_id, authentication_type,
 		break_glass_generation, csrf_token_hash, created_at, last_seen_at,
 		idle_expires_at, absolute_expires_at, revoked_at
 		FROM admin_sessions WHERE id_hash = ?`)
@@ -105,6 +105,14 @@ func (repository *adminSessionRepository) Revoke(ctx context.Context, idHash []b
 	return nil
 }
 
+func (repository *adminSessionRepository) RevokeAuthorization(ctx context.Context, authorizationID string, revokedAt time.Time) error {
+	if strings.TrimSpace(authorizationID) == "" || revokedAt.IsZero() {
+		return errors.New("management authorization and revocation time are required")
+	}
+	_, err := repository.executor.ExecContext(ctx, repository.bind(`UPDATE admin_sessions SET revoked_at = COALESCE(revoked_at, ?) WHERE authorization_id = ?`), formatTime(revokedAt), authorizationID)
+	return mapWriteError(err)
+}
+
 func (repository *adminSessionRepository) DeleteExpired(ctx context.Context, before time.Time, limit int) (int64, error) {
 	limit, err := boundedLimit(limit)
 	if err != nil {
@@ -139,7 +147,7 @@ func (repository *adminSessionRepository) DeleteExpired(ctx context.Context, bef
 
 func normalizeAdminSession(session *AdminSession) error {
 	session.PrincipalID = strings.TrimSpace(session.PrincipalID)
-	session.TokenFamilyID = strings.TrimSpace(session.TokenFamilyID)
+	session.AuthorizationID = strings.TrimSpace(session.AuthorizationID)
 	session.AuthenticationType = strings.TrimSpace(session.AuthenticationType)
 	session.BreakGlassGeneration = strings.TrimSpace(session.BreakGlassGeneration)
 	if len(session.IDHash) != sha256Size || len(session.CSRFTokenHash) != sha256Size {
@@ -148,12 +156,12 @@ func normalizeAdminSession(session *AdminSession) error {
 	switch session.AuthenticationType {
 	case "normal", "bootstrap":
 		if validateUUID(session.PrincipalID, "management session principal ID") != nil ||
-			validateUUID(session.TokenFamilyID, "management session token family ID") != nil || session.BreakGlassGeneration != "" {
+			validateUUID(session.AuthorizationID, "management session authorization ID") != nil || session.BreakGlassGeneration != "" {
 			return errors.New("authenticated management session identity is invalid")
 		}
 	case "break-glass":
 		decoded, err := base64.RawURLEncoding.DecodeString(session.BreakGlassGeneration)
-		if session.PrincipalID != "" || session.TokenFamilyID != "" || err != nil || len(decoded) != sha256Size {
+		if session.PrincipalID != "" || session.AuthorizationID != "" || err != nil || len(decoded) != sha256Size {
 			clear(decoded)
 			return errors.New("break-glass management session identity is invalid")
 		}
@@ -184,17 +192,17 @@ func normalizeAdminSession(session *AdminSession) error {
 
 func scanAdminSession(row rowScanner) (AdminSession, error) {
 	var session AdminSession
-	var principalID, tokenFamilyID, revokedAt sql.NullString
+	var principalID, authorizationID, revokedAt sql.NullString
 	var createdAt, lastSeenAt, idleExpiresAt, absoluteExpiresAt string
 	if err := row.Scan(
-		&session.IDHash, &session.SchemaVersion, &principalID, &tokenFamilyID, &session.AuthenticationType,
+		&session.IDHash, &session.SchemaVersion, &principalID, &authorizationID, &session.AuthenticationType,
 		&session.BreakGlassGeneration, &session.CSRFTokenHash, &createdAt, &lastSeenAt,
 		&idleExpiresAt, &absoluteExpiresAt, &revokedAt,
 	); err != nil {
 		return AdminSession{}, err
 	}
 	session.PrincipalID = principalID.String
-	session.TokenFamilyID = tokenFamilyID.String
+	session.AuthorizationID = authorizationID.String
 	var err error
 	if session.CreatedAt, err = parseTime(createdAt, "management session creation time"); err != nil {
 		return AdminSession{}, err

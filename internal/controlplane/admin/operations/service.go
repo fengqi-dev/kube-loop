@@ -72,10 +72,10 @@ type Request struct {
 	RequestID      string
 }
 
-type RevokeDeviceSessionRequest struct {
+type RevokeOAuthGrantRequest struct {
 	Request
 	PrincipalID     string
-	DeviceSessionID string
+	AuthorizationID string
 }
 
 type RevokePrincipalRequest struct {
@@ -114,7 +114,7 @@ type AuditExportRequest struct {
 
 type RevocationResult struct {
 	PrincipalID     string    `json:"principalId"`
-	DeviceSessionID string    `json:"deviceSessionId,omitempty"`
+	AuthorizationID string    `json:"authorizationId,omitempty"`
 	RevokedCount    int64     `json:"revokedCount"`
 	RevokedAt       time.Time `json:"revokedAt"`
 	Replayed        bool      `json:"replayed"`
@@ -200,16 +200,16 @@ func (service *Service) ConfigureRecovery(runner RecoveryRunner) error {
 
 func (service *Service) RecoveryAvailable() bool { return service != nil && service.recovery != nil }
 
-func (service *Service) RevokeDeviceSession(ctx context.Context, request RevokeDeviceSessionRequest) (RevocationResult, error) {
-	common, err := normalizeRequest(request.Request, "admin.device-session.revoke")
-	if err != nil || !validUUID(request.PrincipalID) || !validUUID(request.DeviceSessionID) {
+func (service *Service) RevokeOAuthGrant(ctx context.Context, request RevokeOAuthGrantRequest) (RevocationResult, error) {
+	common, err := normalizeRequest(request.Request, "admin.oauth-grant.revoke")
+	if err != nil || !validUUID(request.PrincipalID) || !validUUID(request.AuthorizationID) {
 		return RevocationResult{}, ErrInvalidRequest
 	}
 	requestHash := requestDigest(struct {
-		PrincipalID string `json:"principalId"`
-		SessionID   string `json:"deviceSessionId"`
-		Reason      string `json:"reason"`
-	}{request.PrincipalID, request.DeviceSessionID, common.reason})
+		PrincipalID     string `json:"principalId"`
+		AuthorizationID string `json:"authorizationId"`
+		Reason          string `json:"reason"`
+	}{request.PrincipalID, request.AuthorizationID, common.reason})
 	result := RevocationResult{}
 	err = service.store.WithinTransaction(ctx, func(repositories storage.Repositories) error {
 		replayed, lookupErr := replay(repositories, ctx, common.scope, common.keyHash, requestHash, &result)
@@ -219,26 +219,31 @@ func (service *Service) RevokeDeviceSession(ctx context.Context, request RevokeD
 			}
 			return lookupErr
 		}
-		family, getErr := repositories.TokenFamilies().GetByID(ctx, request.DeviceSessionID)
+		principalID, _, getErr := repositories.OAuthSessions().RequestOwner(ctx, request.AuthorizationID)
 		if getErr != nil {
 			return getErr
 		}
-		if family.PrincipalID != request.PrincipalID {
+		if principalID != request.PrincipalID {
 			return storage.ErrNotFound
 		}
 		revokedAt := service.now().UTC()
-		count := int64(1)
-		if family.RevokedAt != nil {
-			revokedAt, count = family.RevokedAt.UTC(), 0
-		} else if revokeErr := repositories.TokenFamilies().Revoke(ctx, family.ID, revokedAt); revokeErr != nil {
+		active, activeErr := repositories.OAuthSessions().RequestActive(ctx, request.AuthorizationID, revokedAt)
+		if activeErr != nil {
+			return activeErr
+		}
+		count := int64(0)
+		if active {
+			count = 1
+		}
+		if revokeErr := repositories.OAuthSessions().RevokeRequest(ctx, request.AuthorizationID, revokedAt); revokeErr != nil {
 			return revokeErr
 		}
 		result = RevocationResult{
-			PrincipalID: family.PrincipalID, DeviceSessionID: family.ID,
+			PrincipalID: principalID, AuthorizationID: request.AuthorizationID,
 			RevokedCount: count, RevokedAt: revokedAt,
 		}
-		return service.persistSuccess(ctx, repositories, common, requestHash, "device-session", family.ID,
-			"admin.device-session.revoke", map[string]any{"targetPrincipalId": family.PrincipalID}, result)
+		return service.persistSuccess(ctx, repositories, common, requestHash, "oauth-grant", request.AuthorizationID,
+			"admin.oauth-grant.revoke", map[string]any{"targetPrincipalId": principalID}, result)
 	})
 	if err != nil {
 		return RevocationResult{}, mapError(err)
@@ -268,13 +273,13 @@ func (service *Service) RevokePrincipal(ctx context.Context, request RevokePrinc
 			return getErr
 		}
 		revokedAt := service.now().UTC()
-		count, revokeErr := repositories.TokenFamilies().RevokeByPrincipal(ctx, request.PrincipalID, revokedAt)
+		count, revokeErr := repositories.OAuthSessions().RevokePrincipal(ctx, request.PrincipalID, revokedAt)
 		if revokeErr != nil {
 			return revokeErr
 		}
 		result = RevocationResult{PrincipalID: request.PrincipalID, RevokedCount: count, RevokedAt: revokedAt}
 		return service.persistSuccess(ctx, repositories, common, requestHash, "principal", request.PrincipalID,
-			"admin.principal.revoke", map[string]any{"revokedDeviceSessionCount": count}, result)
+			"admin.principal.revoke", map[string]any{"revokedOAuthGrantCount": count}, result)
 	})
 	if err != nil {
 		return RevocationResult{}, mapError(err)

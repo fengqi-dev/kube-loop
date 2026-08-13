@@ -4,9 +4,9 @@
 
 | 攻击面 | 主要控制 | 回归测试 |
 | --- | --- | --- |
-| OAuth/OIDC callback 篡改与重放 | loopback callback 白名单、state/nonce/PKCE、一次性交换码、Provider 绑定 | `internal/controlplane/authn/login/service_test.go`、`internal/controlplane/authn/httpauth/handler_test.go`、`internal/controlplane/authn/oidc/provider_test.go` |
-| Refresh Token replay | 单次旋转、并发 CAS、整族撤销、重启后保留撤销状态 | `internal/controlplane/authn/token/service_test.go` |
-| JWT confusion | Access Token 仅接受 EdDSA，并绑定 `kid`、`typ=JWT`、issuer、audience、时间和 token family | `internal/controlplane/authn/token/service_test.go` |
+| OAuth/OIDC callback 篡改与重放 | loopback callback 白名单、state/nonce/PKCE、一次性交换码、Provider 绑定 | `internal/controlplane/authn/oauthserver/provider_test.go`、`internal/controlplane/authn/oidc/provider_test.go` |
+| Refresh Token replay | Fosite 单次旋转、事务消费、OAuth grant 整体撤销、重启后保留撤销状态 | `internal/controlplane/authn/oauthserver/provider_test.go`、`internal/controlplane/storage/oauth_test.go` |
+| Token confusion | Access Token 使用 opaque token 并通过 Fosite 内部 introspection 校验；ID Token 仅接受 ES256 | `internal/controlplane/authn/oauthserver/provider_test.go` |
 | 跨用户 IDOR 与 stream 越权 | 统一 Authorizer 前置；Session、Task、Stream 同时绑定 principal/session/namespace；无权访问统一返回 403/404 | `internal/controlplane/api_test.go`、各 `*api/handler_test.go` 与 `*api/stream_test.go` |
 | 路径穿越与归档攻击 | 绝对远程根校验、清理路径、拒绝 `..`、symlink/hardlink/device、限制归档条目/大小/输出 | `internal/controlplane/fileapi/path_test.go`、`executor_test.go`、`handler_test.go`、`fileopsapi/operator_test.go` |
 | 请求与 WSS 资源耗尽 | HTTP header 64 KiB；API body 1 MiB 可配置；auth body 16 KiB；协议帧固定最大值；WebSocket compression 关闭 | `internal/controlplane/server_test.go`、`api_test.go`、`authn/httpauth/handler_test.go`、各 stream/protocol test |

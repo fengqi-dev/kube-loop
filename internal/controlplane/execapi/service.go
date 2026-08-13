@@ -13,6 +13,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/authorization"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
 	controlplanemiddleware "github.com/fengqi-dev/kube-loop/internal/controlplane/middleware"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/sessionapi"
@@ -40,6 +41,7 @@ type SessionValidator interface {
 type Config struct {
 	Now                     func() time.Time
 	CredentialCheckInterval time.Duration
+	Authorizer              authorization.Authorizer
 }
 
 type Service struct {
@@ -48,6 +50,7 @@ type Service struct {
 	executor                Executor
 	now                     func() time.Time
 	credentialCheckInterval time.Duration
+	authorizer              authorization.Authorizer
 }
 
 func New(storageBackend Storage, sessions SessionValidator, executor Executor, config Config) (*Service, error) {
@@ -58,7 +61,7 @@ func New(storageBackend Storage, sessions SessionValidator, executor Executor, c
 		config.Now = time.Now
 	}
 	if config.CredentialCheckInterval == 0 {
-		config.CredentialCheckInterval = 5 * time.Second
+		config.CredentialCheckInterval = 500 * time.Millisecond
 	}
 	if config.CredentialCheckInterval < 10*time.Millisecond || config.CredentialCheckInterval > 30*time.Second {
 		return nil, errors.New("Pod exec credential check interval must be between 10ms and 30s")
@@ -66,6 +69,7 @@ func New(storageBackend Storage, sessions SessionValidator, executor Executor, c
 	return &Service{
 		storage: storageBackend, sessions: sessions, executor: executor, now: config.Now,
 		credentialCheckInterval: config.CredentialCheckInterval,
+		authorizer:              config.Authorizer,
 	}, nil
 }
 
@@ -195,6 +199,9 @@ func (handler *Service) stream(
 	streamContext, cancel, contextErr := streamlease.Start(request.Context(), handler.storage, principal, session, streamlease.Config{
 		Now: handler.now, CheckInterval: handler.credentialCheckInterval,
 		Runtime: streamlease.RuntimeFrom(handler.sessions), TaskID: task.ID, HeartbeatTask: true,
+		Authorizer: handler.authorizer, Authorization: authorization.Request{
+			Operation: "stream", Namespace: session.Namespace, ResourceKind: "pod-exec", ResourceName: task.ID,
+		},
 	})
 	if contextErr != nil {
 		_ = handler.storage.Tasks().UpdateState(context.Background(), task.ID, remotetask.Starting, remotetask.Failed, json.RawMessage(`{"error":"authorization lease expired"}`), handler.now().UTC())

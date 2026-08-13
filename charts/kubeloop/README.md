@@ -125,10 +125,11 @@ HTTP write timeout.
 
 ## Initial administrator and MFA
 
-By default, Helm creates a retained Kubernetes Secret for the first local
-Management Plane administrator. Its username defaults to `admin`; its password,
-32-byte MFA encryption key, and Ed25519 OAuth/OIDC signing key are generated
-with cryptographic randomness.
+By default, Helm creates separate retained Kubernetes Secrets for the first
+local Management Plane administrator and the OAuth/OIDC service. The initial
+administrator Secret contains the username, password and 32-byte MFA encryption
+key. The independent auth Secret contains an ECDSA P-256 private key for ES256
+ID Tokens and a 32-byte HMAC secret for Fosite opaque tokens.
 The deployment reads the Secret from a read-only projected volume. On startup,
 Control Plane creates the local identity and a `platform-admin` assignment only
 when they do not already exist. A later Helm upgrade never replaces the stored
@@ -158,8 +159,10 @@ controlPlane:
 ```
 
 The MFA key must contain exactly 32 bytes and must remain stable for the life of
-the stored TOTP enrollments. When `initialAdmin.existingSecret` is used, also
-configure `controlPlane.auth.token.existingSecret` with an Ed25519 PKCS#8 key.
+the stored TOTP enrollments. To manage OAuth/OIDC key material externally, set
+`controlPlane.auth.oauth.existingSecret` to a Secret containing
+`oidc-signing-key.pem` (ECDSA P-256, PKCS#8 PEM) and `hmac-secret` (exactly 32
+bytes). Never reuse the RelayTicket or initial administrator Secret for it.
 Local users and password resets are managed from
 **用户管理**. Role grants continue to use the existing revisioned Management
 Policy editor, so local and OIDC principals share one RBAC and audit model.
@@ -263,35 +266,14 @@ generation-bound RelayTicket. Active streams are not described as migrated.
 
 ## OIDC Provider
 
-Create the confidential client secret separately, then reference it from values. The Secret is projected only into the Control Plane; issuer/client metadata is written to the unified `control-plane.yaml` ConfigMap and the Data Plane receives neither.
-
-```yaml
-controlPlane:
-  auth:
-    token:
-      existingSecret: kubeloop-token-signing
-      signingKeyKey: signing-key.pem
-      keyID: primary
-    providers:
-      - id: corporate
-        type: oidc
-        displayName: Corporate SSO
-        oidc:
-          issuer: https://login.example.com
-          clientID: kubeloop
-          existingSecret: kubeloop-oidc
-          clientSecretKey: client-secret
-          # caKey: ca.crt  # optional private CA in the same Secret
-          scopes: [openid, profile, email, groups]
-          allowedSigningAlgs: [RS256]
-          requiredClaims: [sub]
-          claims:
-            displayName: name
-            email: email
-            groups: groups
-```
-
-The token signing Secret value must be an Ed25519 private key in unencrypted PKCS#8 PEM form (for example, generated offline with `openssl genpkey -algorithm ED25519`). Keep the corresponding Secret under normal Kubernetes/External Secrets rotation controls.
+OIDC Providers and their client secrets are created from the Management UI and
+stored in the Control Plane database. Helm values and mounted Kubernetes
+Secrets are deliberately not accepted as Provider configuration. In **Identity
+Providers**, enter the Provider ID, display name, issuer, client ID, client
+secret, optional private CA PEM, scopes, signing algorithms and claim mappings,
+validate connectivity, create a draft, then publish it. The client secret is
+redacted from every read response but remains available to the runtime from the
+deployment database.
 
 Register the exact callback `https://<public-origin>/oauth2/callback/corporate` at the identity provider. Control Plane startup fails closed if discovery does not match the configured issuer, endpoints are not HTTPS, PKCE S256 is not advertised, or no configured signing algorithm is supported.
 
@@ -300,136 +282,38 @@ trailing slash. Claim mappings first match the complete claim name and then use
 dot notation for nested JSON objects. This supports both Auth0 URI-style custom
 claims and Keycloak claims such as `realm_access.roles`.
 
-### Casdoor
-
-```yaml
-- id: casdoor
-  type: oidc
-  displayName: Casdoor
-  oidc:
-    issuer: https://sso.example.com
-    clientID: kubeloop
-    existingSecret: kubeloop-casdoor
-    clientSecretKey: client-secret
-    scopes: [openid, profile, email]
-    claims:
-      displayName: displayName
-      email: email
-      groups: groups
-```
-
-Register `https://<public-origin>/oauth2/callback/casdoor`. Casdoor does not
-always publish a group claim by default; configure the application to include a
-top-level string or string-array claim and set `claims.groups` to its name.
+For Casdoor, use scopes `openid profile email`, map `displayName` to
+`displayName`, and map `groups` to the configured top-level group claim.
+Register `https://<public-origin>/oauth2/callback/casdoor`.
 
 ### Keycloak
-
-```yaml
-- id: keycloak
-  type: oidc
-  displayName: Keycloak
-  oidc:
-    issuer: https://keycloak.example.com/realms/platform
-    clientID: kubeloop
-    existingSecret: kubeloop-keycloak
-    clientSecretKey: client-secret
-    scopes: [openid, profile, email, roles]
-    claims:
-      displayName: name
-      email: email
-      groups: realm_access.roles
-```
 
 Enable Standard Flow, confidential client authentication and PKCE S256, then
 register `https://<public-origin>/oauth2/callback/keycloak`. Ensure the selected
 roles or groups mapper adds the mapped claim to the ID token. A Group Membership
 mapper that emits a top-level `groups` array can instead use `groups: groups`.
+Use the realm issuer, scopes `openid profile email roles`, and map groups to
+`realm_access.roles` when using the realm-role mapper.
 
 ### Auth0
-
-```yaml
-- id: auth0
-  type: oidc
-  displayName: Auth0
-  oidc:
-    issuer: https://tenant.auth0.com/
-    clientID: kubeloop
-    existingSecret: kubeloop-auth0
-    clientSecretKey: client-secret
-    scopes: [openid, profile, email]
-    allowedSigningAlgs: [RS256]
-    claims:
-      displayName: name
-      email: email
-      groups: https://kubeloop.example.com/groups
-```
 
 Use a Regular Web Application with Client Secret Basic or Client Secret Post,
 RS256 signing and callback `https://<public-origin>/oauth2/callback/auth0`.
 Populate the namespaced group claim with an Auth0 Action when group-based policy
-is required.
+is required, then enter that full URI in the Management UI's groups claim.
 
-## Gateway Policy
+## Authorization
 
-Authentication does not grant API access by itself. The default policy has no
-rules and denies every `/kubeloop/api` operation. Add allow rules explicitly:
+Authentication does not grant API access by itself. Roles, bindings, explicit
+Allow/Deny statements and Namespace scopes are stored in the Control Plane
+database and managed from the Admin **Access Control** page. Helm does not
+accept authorization rules.
 
-```yaml
-controlPlane:
-  policy:
-    rules:
-      - id: developers-discovery
-        groups: [developers]
-        namespaces: [$cluster]
-        operations: [get, list]
-        resourceKinds: [version, namespaces]
-      - id: developers-inventory
-        groups: [developers]
-        namespaces: [development]
-        operations: [get, list, watch]
-        resourceKinds: [capabilities, pods, services]
-      - id: developers-session
-        groups: [developers]
-        namespaces: [development]
-        operations: [create, get, heartbeat, delete]
-        resourceKinds: [sessions]
-      - id: developers-relay
-        groups: [developers]
-        namespaces: [development]
-        operations: [create]
-        resourceKinds: [relay-tickets]
-      - id: developers-port-forward
-        groups: [developers]
-        namespaces: [development]
-        operations: [create, list, delete]
-        resourceKinds: [port-forwards]
-      - id: developers-pod-exec
-        groups: [developers]
-        namespaces: [development]
-        operations: [create, stream]
-        resourceKinds: [pod-exec]
-      - id: developers-files
-        groups: [developers]
-        namespaces: [development]
-        operations: [create, get, stream]
-        resourceKinds: [file-transfers]
-      - id: developers-file-management
-        groups: [developers]
-        namespaces: [development]
-        operations: [list, create, update, delete, get]
-        resourceKinds: [pod-files]
-      - id: developers-service-streams
-        groups: [developers]
-        namespaces: [development]
-        operations: [create, get, delete, stream]
-        resourceKinds: [exchanges, mirrors, previews]
-```
-
-Every configured selector is required to match. Use `$cluster` for a
-cluster-scoped request, and use `*` only for an intentional wildcard grant.
-Policy is mounted only into the Control Plane. Invalid policy prevents Control Plane
-startup; a runtime update is compiled completely before it atomically replaces
-the prior policy.
+Bindings target either one Principal UUID or one provider-scoped group. A
+Namespace scope uses exact names and/or Kubernetes label selectors. Publishing
+creates an immutable revision which the Control Plane compiles completely before
+atomically replacing the active snapshot. Explicit Deny statements override
+Allow statements, and missing Namespace labels fail closed.
 
 ## Management bootstrap
 
@@ -459,28 +343,10 @@ one of the configured exact identities.
 ## Managed OIDC Provider revisions
 
 The Management Plane can validate, publish, and roll back OIDC Providers
-without restarting the Control Plane. Secret values are never accepted by the
-browser API. First allowlist the Kubernetes Secret keys that may be selected by
-a revision and configure the Gateway token signing key:
-
-```yaml
-controlPlane:
-  auth:
-    token:
-      existingSecret: kubeloop-token-signing
-  management:
-    providerSecretAliases:
-      corporate:
-        existingSecret: kubeloop-corporate-auth
-        clientSecretKey: oidc-client-secret
-        caKey: ca.crt # optional
-```
-
-Helm projects only the selected keys under the fixed read-only
-`/var/run/secrets/kubeloop/management/providers/<alias>/` root. The management
-database stores only the alias and its non-sensitive use (`client-secret`,
-`bind-password`, or `ca`); API responses expose only use names and never echo
-alias values. `POST /api/admin/providers/{id}/validate` performs discovery
+without restarting the Control Plane. Provider metadata and credentials are
+versioned together in the database; responses only report whether a client
+secret is configured and never echo it. `POST
+/api/admin/providers/{id}/validate` performs discovery
 or directory connectivity checks without changing the live Registry. Draft,
 publish, and rollback use `/providers/{id}/drafts`,
 `/providers/{id}/changes/{changeID}/publish`, and

@@ -19,9 +19,6 @@ func TestLoadDefaultsToDisabledDenyAllManagementAccess(t *testing.T) {
 	if config.BreakGlass.Enabled || config.BreakGlass.ParsedSessionTTL() != 15*time.Minute || len(config.BreakGlass.ParsedSourceCIDRs()) != 0 {
 		t.Fatalf("break-glass = %#v", config.BreakGlass)
 	}
-	if len(config.ProviderSecretAliases) != 0 {
-		t.Fatalf("provider Secret aliases = %#v", config.ProviderSecretAliases)
-	}
 }
 
 func TestLoadStrictManagementConfiguration(t *testing.T) {
@@ -34,8 +31,7 @@ func TestLoadStrictManagementConfiguration(t *testing.T) {
 			"secretFile":"/var/run/secrets/kubeloop/management/break-glass/emergency/credential",
 			"sessionTtl":"10m",
 			"allowedSourceCidrs":["10.0.0.0/8","2001:db8::/32"]
-		},
-		"providerSecretAliases":{"corporate":{"clientSecretFile":"/var/run/secrets/kubeloop/management/providers/corporate/client-secret","caFile":"/var/run/secrets/kubeloop/management/providers/corporate/ca.crt"}}
+		}
 	}`
 	if err := os.WriteFile(path, []byte(document), 0o600); err != nil {
 		t.Fatal(err)
@@ -49,12 +45,6 @@ func TestLoadStrictManagementConfiguration(t *testing.T) {
 	}
 	if config.BreakGlass.ParsedSessionTTL() != 10*time.Minute || len(config.BreakGlass.ParsedSourceCIDRs()) != 2 {
 		t.Fatalf("break-glass = %#v", config.BreakGlass)
-	}
-	if path, err := config.ProviderSecretAliases.Resolve("corporate", "client-secret"); err != nil || !strings.HasSuffix(path, "/corporate/client-secret") {
-		t.Fatalf("resolve Provider Secret = %q, %v", path, err)
-	}
-	if _, err := config.ProviderSecretAliases.Resolve("corporate", "bind-password"); err == nil {
-		t.Fatal("unconfigured Provider Secret use resolved")
 	}
 }
 
@@ -70,9 +60,7 @@ func TestLoadRejectsSecretMaterialAndUnsafeBreakGlassConfiguration(t *testing.T)
 		{name: "long session", document: `{"bootstrap":{"subjects":[],"groups":[],"recoveryEnabled":false},"breakGlass":{"enabled":true,"secretAlias":"emergency","secretFile":"/var/run/secrets/kubeloop/management/break-glass/emergency/credential","sessionTtl":"16m"}}`},
 		{name: "uncanonical CIDR", document: `{"bootstrap":{"subjects":[],"groups":[],"recoveryEnabled":false},"breakGlass":{"enabled":true,"secretAlias":"emergency","secretFile":"/var/run/secrets/kubeloop/management/break-glass/emergency/credential","allowedSourceCidrs":["10.1.2.3/8"]}}`},
 		{name: "disabled with alias", document: `{"bootstrap":{"subjects":[],"groups":[],"recoveryEnabled":false},"breakGlass":{"enabled":false,"secretAlias":"emergency"}}`},
-		{name: "provider alias arbitrary path", document: `{"providerSecretAliases":{"corporate":{"clientSecretFile":"/tmp/client-secret"}}}`},
-		{name: "provider alias unknown key", document: `{"providerSecretAliases":{"corporate":{"secret":"plaintext"}}}`},
-		{name: "provider alias no key", document: `{"providerSecretAliases":{"corporate":{}}}`},
+		{name: "removed provider aliases", document: `{"providerSecretAliases":{}}`},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

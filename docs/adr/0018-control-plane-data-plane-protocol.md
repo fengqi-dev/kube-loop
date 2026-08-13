@@ -105,7 +105,7 @@ The summary has a monotonic generation, validity window and canonical digest.
 Each sorted entry contains SHA-256 of a revoked ClusterSession ID, the maximum
 revoked Session generation and an expiry after the last possibly valid
 RelayTicket. Data Plane hashes the ticket's Session ID and rejects it when its
-generation is at or below a live entry. This allows Token Family/Session
+generation is at or below a live entry. This allows OAuth grant/Session
 revocation without exposing Principal IDs in relay metrics or logs.
 
 The digest covers each entry's hash, maximum generation and expiry; modified,

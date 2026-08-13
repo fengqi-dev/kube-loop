@@ -26,7 +26,7 @@ KubeLoop V2 将身份、Session、Task、资源恢复快照、幂等记录和审
 - Datasource Secret 不进入 Helm NOTES、Pod annotation、日志或 API 响应。
 - 驱动错误以保留 cause、隐藏诊断文本的内部错误包装传递，只向日志/API 暴露稳定操作消息；这样既能按 SQLSTATE 重试，也不会泄露 DSN、schema、表名或查询片段。
 - readiness 只返回 `ready` 或 `unavailable`，不返回后端类型、路径、主机、用户名或驱动错误。
-- Refresh Token 只持久化慢哈希或不可逆摘要，不保存明文 Token。
+- OAuth token、code 与 challenge 只持久化 SHA-256 signature/hash，不保存明文。
 
 ## 部署约束
 

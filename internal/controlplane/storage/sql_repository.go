@@ -128,26 +128,28 @@ func isRetryableTransactionError(err error) bool {
 }
 
 type repositorySet struct {
-	principals                *principalRepository
-	tokenFamilies             *tokenFamilyRepository
-	refreshTokens             *refreshTokenRepository
-	sessions                  *sessionRepository
-	tasks                     TaskRepository
-	resourceSnapshots         *resourceSnapshotRepository
-	idempotency               *idempotencyRepository
-	audit                     *auditRepository
-	relayDesiredStates        *relayDesiredStateRepository
-	auditExportJobs           *auditExportJobRepository
-	authTransactions          *authTransactionRepository
-	managementState           *managementStateRepository
-	adminSessions             *adminSessionRepository
-	localAdminUsers           *localAdminUserRepository
-	adminRecoveryCodes        *adminRecoveryCodeRepository
-	adminPolicyRevisions      *adminPolicyRevisionRepository
-	providerConfigRevisions   *providerConfigRevisionRepository
-	adminAssignments          *adminAssignmentRepository
-	activeManagementRevisions *activeManagementRevisionRepository
-	configChangeRequests      *configChangeRequestRepository
+	principals                 *principalRepository
+	sessions                   *sessionRepository
+	tasks                      TaskRepository
+	resourceSnapshots          *resourceSnapshotRepository
+	idempotency                *idempotencyRepository
+	audit                      *auditRepository
+	relayDesiredStates         *relayDesiredStateRepository
+	auditExportJobs            *auditExportJobRepository
+	managementState            *managementStateRepository
+	adminSessions              *adminSessionRepository
+	localAdminUsers            *localAdminUserRepository
+	adminRecoveryCodes         *adminRecoveryCodeRepository
+	adminPolicyRevisions       *adminPolicyRevisionRepository
+	authorizationDefinitions   *authorizationDefinitionRepository
+	providerConfigRevisions    *providerConfigRevisionRepository
+	activeManagementRevisions  *activeManagementRevisionRepository
+	configChangeRequests       *configChangeRequestRepository
+	oauthClients               *oauthClientRepository
+	oauthSessions              *oauthSessionRepository
+	oauthConsents              *oauthConsentRepository
+	oauthAuthorizationRequests *oauthAuthorizationRequestRepository
+	oauthBrowserSessions       *oauthBrowserSessionRepository
 }
 
 func newRepositorySet(backend Backend, executor sqlExecutor, orm bun.IDB) *repositorySet {
@@ -155,28 +157,30 @@ func newRepositorySet(backend Backend, executor sqlExecutor, orm bun.IDB) *repos
 	sessions := &sessionRepository{repositoryBase: base}
 	audit := &auditRepository{repositoryBase: base}
 	return &repositorySet{
-		principals:    &principalRepository{repositoryBase: base},
-		tokenFamilies: &tokenFamilyRepository{repositoryBase: base},
-		refreshTokens: &refreshTokenRepository{repositoryBase: base},
-		sessions:      sessions,
+		principals: &principalRepository{repositoryBase: base},
+		sessions:   sessions,
 		tasks: &auditedTaskRepository{
 			delegate: &taskRepository{repositoryBase: base}, sessions: sessions, audit: audit,
 		},
-		resourceSnapshots:         &resourceSnapshotRepository{repositoryBase: base},
-		idempotency:               &idempotencyRepository{repositoryBase: base},
-		audit:                     audit,
-		relayDesiredStates:        &relayDesiredStateRepository{repositoryBase: base},
-		auditExportJobs:           &auditExportJobRepository{repositoryBase: base},
-		authTransactions:          &authTransactionRepository{repositoryBase: base},
-		managementState:           &managementStateRepository{repositoryBase: base},
-		adminSessions:             &adminSessionRepository{repositoryBase: base},
-		localAdminUsers:           &localAdminUserRepository{repositoryBase: base},
-		adminRecoveryCodes:        &adminRecoveryCodeRepository{repositoryBase: base},
-		adminPolicyRevisions:      &adminPolicyRevisionRepository{repositoryBase: base},
-		providerConfigRevisions:   &providerConfigRevisionRepository{repositoryBase: base},
-		adminAssignments:          &adminAssignmentRepository{repositoryBase: base},
-		activeManagementRevisions: &activeManagementRevisionRepository{repositoryBase: base},
-		configChangeRequests:      &configChangeRequestRepository{repositoryBase: base},
+		resourceSnapshots:          &resourceSnapshotRepository{repositoryBase: base},
+		idempotency:                &idempotencyRepository{repositoryBase: base},
+		audit:                      audit,
+		relayDesiredStates:         &relayDesiredStateRepository{repositoryBase: base},
+		auditExportJobs:            &auditExportJobRepository{repositoryBase: base},
+		managementState:            &managementStateRepository{repositoryBase: base},
+		adminSessions:              &adminSessionRepository{repositoryBase: base},
+		localAdminUsers:            &localAdminUserRepository{repositoryBase: base},
+		adminRecoveryCodes:         &adminRecoveryCodeRepository{repositoryBase: base},
+		adminPolicyRevisions:       &adminPolicyRevisionRepository{repositoryBase: base},
+		authorizationDefinitions:   &authorizationDefinitionRepository{repositoryBase: base},
+		providerConfigRevisions:    &providerConfigRevisionRepository{repositoryBase: base},
+		activeManagementRevisions:  &activeManagementRevisionRepository{repositoryBase: base},
+		configChangeRequests:       &configChangeRequestRepository{repositoryBase: base},
+		oauthClients:               &oauthClientRepository{repositoryBase: base},
+		oauthSessions:              &oauthSessionRepository{repositoryBase: base},
+		oauthConsents:              &oauthConsentRepository{repositoryBase: base},
+		oauthAuthorizationRequests: &oauthAuthorizationRequestRepository{repositoryBase: base},
+		oauthBrowserSessions:       &oauthBrowserSessionRepository{repositoryBase: base},
 	}
 }
 
@@ -188,14 +192,6 @@ func (repositories *repositorySet) setTaskTransactionManager(manager Transaction
 
 func (repositories *repositorySet) Principals() PrincipalRepository {
 	return repositories.principals
-}
-
-func (repositories *repositorySet) TokenFamilies() TokenFamilyRepository {
-	return repositories.tokenFamilies
-}
-
-func (repositories *repositorySet) RefreshTokens() RefreshTokenRepository {
-	return repositories.refreshTokens
 }
 
 func (repositories *repositorySet) Sessions() SessionRepository {
@@ -226,10 +222,6 @@ func (repositories *repositorySet) AuditExportJobs() AuditExportJobRepository {
 	return repositories.auditExportJobs
 }
 
-func (repositories *repositorySet) AuthTransactions() AuthTransactionRepository {
-	return repositories.authTransactions
-}
-
 func (repositories *repositorySet) ManagementState() ManagementStateRepository {
 	return repositories.managementState
 }
@@ -250,12 +242,12 @@ func (repositories *repositorySet) AdminPolicyRevisions() AdminPolicyRevisionRep
 	return repositories.adminPolicyRevisions
 }
 
-func (repositories *repositorySet) ProviderConfigRevisions() ProviderConfigRevisionRepository {
-	return repositories.providerConfigRevisions
+func (repositories *repositorySet) AuthorizationDefinitions() AuthorizationDefinitionRepository {
+	return repositories.authorizationDefinitions
 }
 
-func (repositories *repositorySet) AdminAssignments() AdminAssignmentRepository {
-	return repositories.adminAssignments
+func (repositories *repositorySet) ProviderConfigRevisions() ProviderConfigRevisionRepository {
+	return repositories.providerConfigRevisions
 }
 
 func (repositories *repositorySet) ActiveManagementRevisions() ActiveManagementRevisionRepository {
@@ -264,4 +256,20 @@ func (repositories *repositorySet) ActiveManagementRevisions() ActiveManagementR
 
 func (repositories *repositorySet) ConfigChangeRequests() ConfigChangeRequestRepository {
 	return repositories.configChangeRequests
+}
+
+func (repositories *repositorySet) OAuthClients() OAuthClientRepository {
+	return repositories.oauthClients
+}
+func (repositories *repositorySet) OAuthSessions() OAuthSessionRepository {
+	return repositories.oauthSessions
+}
+func (repositories *repositorySet) OAuthConsents() OAuthConsentRepository {
+	return repositories.oauthConsents
+}
+func (repositories *repositorySet) OAuthAuthorizationRequests() OAuthAuthorizationRequestRepository {
+	return repositories.oauthAuthorizationRequests
+}
+func (repositories *repositorySet) OAuthBrowserSessions() OAuthBrowserSessionRepository {
+	return repositories.oauthBrowserSessions
 }

@@ -1,22 +1,21 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/fengqi-dev/kube-loop/internal/gateway/websocketmux"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/relayticket"
+	"sigs.k8s.io/yaml"
 )
 
 const (
 	gatewayConfigFileEnvironment = "KUBELOOP_GATEWAY_CONFIG_FILE"
-	maximumGatewayConfigBytes    = 64 << 10
+	maximumGatewayConfigBytes    = 4 << 20
 )
 
 type gatewayConfig struct {
@@ -56,10 +55,18 @@ type gatewayWebSocketConfig struct {
 type jsonDuration struct{ time.Duration }
 
 func (duration *jsonDuration) UnmarshalJSON(raw []byte) error {
+	return duration.unmarshal(raw)
+}
+
+func (duration *jsonDuration) unmarshal(raw []byte) error {
 	var value string
 	if err := json.Unmarshal(raw, &value); err != nil {
 		return errors.New("duration must be a string")
 	}
+	return duration.parse(value)
+}
+
+func (duration *jsonDuration) parse(value string) error {
 	parsed, err := time.ParseDuration(strings.TrimSpace(value))
 	if err != nil || parsed <= 0 {
 		return fmt.Errorf("duration %q must be positive", value)
@@ -94,15 +101,21 @@ func loadGatewayConfig(path string) (gatewayConfig, error) {
 	if len(raw) == 0 || len(raw) > maximumGatewayConfigBytes {
 		return gatewayConfig{}, errors.New("Gateway configuration size is invalid")
 	}
-	config := defaultGatewayConfig()
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&config); err != nil {
+	var fields map[string]any
+	if err := yaml.Unmarshal(raw, &fields); err != nil {
 		return gatewayConfig{}, fmt.Errorf("decode Gateway configuration: %w", err)
 	}
-	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-		return gatewayConfig{}, errors.New("Gateway configuration must contain one JSON object")
+	if fields["controlPlane"] == nil || fields["gateway"] == nil {
+		return gatewayConfig{}, errors.New("unified configuration requires controlPlane and gateway")
 	}
+	root := struct {
+		ControlPlane any           `json:"controlPlane"`
+		Gateway      gatewayConfig `json:"gateway"`
+	}{Gateway: defaultGatewayConfig()}
+	if err := yaml.UnmarshalStrict(raw, &root); err != nil {
+		return gatewayConfig{}, fmt.Errorf("decode Gateway configuration: %w", err)
+	}
+	config := root.Gateway
 	if err := config.normalizeAndValidate(); err != nil {
 		return gatewayConfig{}, err
 	}

@@ -83,6 +83,9 @@ func TestOIDCLoopbackLoginUsesStatePKCEAndExchange(t *testing.T) {
 	if credential.AccessToken != "access-token" || credential.RefreshToken != "refresh-token" || credential.DeviceID != "device-1" {
 		t.Fatalf("credential = %#v", credential)
 	}
+	if !credential.RefreshExpiresAt.IsZero() {
+		t.Fatalf("standard OAuth response inferred a refresh expiry: %s", credential.RefreshExpiresAt)
+	}
 	if browserCallbacks != 1 {
 		t.Fatalf("browser callbacks = %d, want 1", browserCallbacks)
 	}
@@ -181,7 +184,7 @@ func writeTokenResponse(t *testing.T, writer http.ResponseWriter) {
 	t.Helper()
 	_ = json.NewEncoder(writer).Encode(map[string]any{
 		"token_type": "Bearer", "access_token": "access-token", "refresh_token": "refresh-token",
-		"expires_in": 60, "refresh_expires_in": 3600,
+		"expires_in": 60,
 	})
 }
 

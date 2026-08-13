@@ -7,6 +7,6 @@ import (
 
 func subjectFor(principal controlplaneapi.Principal) authorization.Subject {
 	return authorization.Subject{
-		ID: principal.Subject, Groups: append([]string(nil), principal.Groups...),
+		ID: principal.Subject, Provider: principal.Provider, Groups: append([]string(nil), principal.Groups...),
 	}
 }

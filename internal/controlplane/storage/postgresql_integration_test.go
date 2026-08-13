@@ -1,7 +1,6 @@
 package storage
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
 	"errors"
@@ -60,26 +59,12 @@ func TestPostgreSQLBackendIntegration(t *testing.T) {
 
 	ctx := context.Background()
 	now := time.Date(2026, 8, 10, 9, 0, 0, 0, time.UTC)
-	principal, err := store.Principals().Upsert(ctx, Principal{
+	_, err = store.Principals().Upsert(ctx, Principal{
 		ID: uuid.NewString(), Provider: "oidc", ExternalID: "postgres-user", CreatedAt: now,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	hash := bytes.Repeat([]byte{7}, 32)
-	family := TokenFamily{
-		ID: uuid.NewString(), PrincipalID: principal.ID, DeviceID: "device-a",
-		RefreshTokenHash: hash, CreatedAt: now, ExpiresAt: now.Add(time.Hour),
-	}
-	if err := store.TokenFamilies().Create(ctx, family); err != nil {
-		t.Fatal(err)
-	}
-	duplicate := family
-	duplicate.ID = uuid.NewString()
-	if err := store.TokenFamilies().Create(ctx, duplicate); !errors.Is(err, ErrConflict) {
-		t.Fatalf("database unique constraint error = %v", err)
-	}
-
 	rollbackID := uuid.NewString()
 	sentinel := errors.New("rollback")
 	err = store.WithinTransaction(ctx, func(repositories Repositories) error {
@@ -99,12 +84,6 @@ func TestPostgreSQLBackendIntegration(t *testing.T) {
 	}
 }
 
-func TestPostgreSQLTaskStateMigrationPreservesLegacyTasks(t *testing.T) {
-	config, cleanup := newPostgreSQLIntegrationConfig(t)
-	defer cleanup()
-	testTaskStateMigrationPreservesLegacyTasks(t, config)
-}
-
 func TestPostgreSQLMigrationFailureRollsBackVersion(t *testing.T) {
 	config, cleanup := newPostgreSQLIntegrationConfig(t)
 	defer cleanup()
@@ -119,7 +98,7 @@ func TestPostgreSQLMigrationFailureRollsBackVersion(t *testing.T) {
 	if err := database.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Open(context.Background(), config); err == nil || !strings.Contains(err.Error(), "migration 1") {
+	if _, err := Open(context.Background(), config); err == nil || !strings.Contains(err.Error(), "migration 20") {
 		t.Fatalf("PostgreSQL migration error = %v", err)
 	}
 	database, err = sql.Open("pgx", config.DatasourceURL)

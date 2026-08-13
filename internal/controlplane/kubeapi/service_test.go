@@ -177,7 +177,6 @@ func TestNamespaceInventoryFiltersPolicyAndForwardsValidatedSelectors(t *testing
 	}))
 	defer upstream.Close()
 	policy, err := authorization.New(authorization.Policy{Rules: []authorization.Rule{
-		{ID: "namespace-candidates", Subjects: []string{"*"}, Namespaces: []string{"$cluster"}, Operations: []string{"list"}, ResourceKinds: []string{"namespaces"}},
 		{ID: "development-inventory", Subjects: []string{"*"}, Namespaces: []string{"development"}, Operations: []string{"list"}, ResourceKinds: []string{"capabilities"}},
 	}})
 	if err != nil {
@@ -193,6 +192,25 @@ func TestNamespaceInventoryFiltersPolicyAndForwardsValidatedSelectors(t *testing
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"name":"development"`) ||
 		strings.Contains(response.Body.String(), "secret") {
 		t.Fatalf("filtered namespaces status = %d body = %s", response.Code, response.Body.String())
+	}
+}
+
+func TestNamespaceInventoryReturnsEmptyListWithoutNamespaceAuthorization(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		if request.URL.Path != "/api/v1/namespaces" {
+			http.NotFound(writer, request)
+			return
+		}
+		_, _ = writer.Write([]byte(`{"apiVersion":"v1","kind":"NamespaceList","metadata":{"resourceVersion":"42"},"items":[{"metadata":{"name":"secret"},"status":{"phase":"Active"}}]}`))
+	}))
+	defer upstream.Close()
+	server := newServerWithPolicy(t, upstream.URL, authorization.NewDenyAll())
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/kubeloop/api/namespaces", nil))
+	if response.Code != http.StatusOK || strings.Contains(response.Body.String(), "secret") ||
+		!strings.Contains(response.Body.String(), `"items":[]`) {
+		t.Fatalf("unauthorized namespace list status = %d body = %s", response.Code, response.Body.String())
 	}
 }
 

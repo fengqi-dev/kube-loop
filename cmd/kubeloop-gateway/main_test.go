@@ -19,8 +19,8 @@ type fakeRelayReadiness struct{ ready bool }
 func (state fakeRelayReadiness) Ready() bool { return state.ready }
 
 func TestLoadGatewayConfigAppliesDefaults(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "gateway.json")
-	raw := []byte(`{"relay":{"controlPlaneURL":"https://registry.example.test","endpoint":"wss://relay.example.test/tunnel"}}`)
+	path := filepath.Join(t.TempDir(), "kubeloop.yaml")
+	raw := []byte("controlPlane: {}\ngateway:\n  relay:\n    controlPlaneURL: https://registry.example.test\n    endpoint: wss://relay.example.test/tunnel\n")
 	if err := os.WriteFile(path, raw, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -34,13 +34,31 @@ func TestLoadGatewayConfigAppliesDefaults(t *testing.T) {
 }
 
 func TestLoadGatewayConfigRejectsLegacyRelayFields(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "gateway.json")
-	raw := []byte(`{"relay":{"controlPlaneURL":"https://registry.example.test","endpoint":"wss://relay.example.test/tunnel","id":"legacy"}}`)
+	path := filepath.Join(t.TempDir(), "kubeloop.yaml")
+	raw := []byte("controlPlane: {}\ngateway:\n  relay:\n    controlPlaneURL: https://registry.example.test\n    endpoint: wss://relay.example.test/tunnel\n    id: legacy\n")
 	if err := os.WriteFile(path, raw, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := loadGatewayConfig(path); err == nil {
 		t.Fatal("legacy Relay ID was accepted")
+	}
+}
+
+func TestLoadGatewayConfigRequiresUnifiedDocument(t *testing.T) {
+	tests := map[string]string{
+		"legacy root":     "relay:\n  controlPlaneURL: https://registry.example.test\n",
+		"missing control": "gateway:\n  relay:\n    controlPlaneURL: https://registry.example.test\n",
+	}
+	for name, raw := range tests {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "kubeloop.yaml")
+			if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := loadGatewayConfig(path); err == nil {
+				t.Fatal("non-unified configuration was accepted")
+			}
+		})
 	}
 }
 
@@ -58,7 +76,7 @@ func TestExpandRelayEndpointUsesDownwardAPIIdentity(t *testing.T) {
 }
 
 func TestLoadGatewayEnvironment(t *testing.T) {
-	t.Setenv("KUBELOOP_GATEWAY_CONFIG_FILE", " /etc/kubeloop/gateway.json ")
+	t.Setenv("KUBELOOP_GATEWAY_CONFIG_FILE", " /etc/kubeloop/gateway/kubeloop.yaml ")
 	t.Setenv("KUBELOOP_POD_NAME", " gateway-7 ")
 	t.Setenv("KUBELOOP_POD_UID", " pod-uid ")
 	t.Setenv("KUBELOOP_POD_IP", " 10.0.0.7 ")
@@ -67,7 +85,7 @@ func TestLoadGatewayEnvironment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if environment.ConfigFile != "/etc/kubeloop/gateway.json" || environment.PodName != "gateway-7" ||
+	if environment.ConfigFile != "/etc/kubeloop/gateway/kubeloop.yaml" || environment.PodName != "gateway-7" ||
 		environment.PodUID != "pod-uid" || environment.PodIP != "10.0.0.7" {
 		t.Fatalf("Gateway environment = %#v", environment)
 	}

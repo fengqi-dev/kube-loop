@@ -371,7 +371,7 @@ func waitForNoLocalMirror(
 		case <-ctx.Done():
 			t.Fatal(ctx.Err())
 		case <-deadline.C:
-			t.Fatal("local Mirror relay did not stop after Token Family revocation")
+			t.Fatal("local Mirror relay did not stop after OAuth grant revocation")
 		case <-ticker.C:
 		}
 	}

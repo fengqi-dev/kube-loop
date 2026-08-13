@@ -9,8 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"reflect"
-	"sort"
 	"sync"
 	"time"
 
@@ -18,7 +16,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 )
 
-const DefaultPolicyReloadInterval = 2 * time.Second
+const DefaultPolicyReloadInterval = 500 * time.Millisecond
 
 var ErrPolicyUnavailable = errors.New("management policy is unavailable")
 
@@ -82,15 +80,7 @@ func (loader *PolicyLoader) Load(ctx context.Context) error {
 	if err != nil {
 		return loader.fail(err)
 	}
-	assignments, err := loader.repositories.AdminAssignments().ListByPolicyRevision(ctx, revision.Revision)
-	if err != nil {
-		return loader.fail(fmt.Errorf("%w: read policy assignments", ErrPolicyUnavailable))
-	}
-	stored, err := assignmentSnapshot(assignments, revision.Revision, snapshot.Roles)
-	if err != nil || !equalAssignments(snapshot.Assignments, stored.Assignments) {
-		return loader.fail(fmt.Errorf("%w: revision and assignment records disagree", ErrPolicyUnavailable))
-	}
-	if err := loader.engine.Apply(stored, active.ETag); err != nil {
+	if err := loader.engine.Apply(snapshot, active.ETag); err != nil {
 		return loader.fail(fmt.Errorf("%w: compile active revision", ErrPolicyUnavailable))
 	}
 	loader.setError(nil)
@@ -132,9 +122,9 @@ func decodePolicySpec(spec json.RawMessage, revision uint64) (adminauthorization
 	decoder := json.NewDecoder(bytes.NewReader(spec))
 	decoder.DisallowUnknownFields()
 	var value struct {
-		Version     int                                 `json:"version"`
-		Roles       []adminauthorization.RoleDefinition `json:"roles,omitempty"`
-		Assignments []adminauthorization.Assignment     `json:"assignments"`
+		Version  int                                 `json:"version"`
+		Roles    []adminauthorization.RoleDefinition `json:"roles,omitempty"`
+		Bindings []adminauthorization.Binding        `json:"bindings"`
 	}
 	if err := decoder.Decode(&value); err != nil {
 		return adminauthorization.Snapshot{}, fmt.Errorf("%w: decode policy revision", ErrPolicyUnavailable)
@@ -142,60 +132,11 @@ func decodePolicySpec(spec json.RawMessage, revision uint64) (adminauthorization
 	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		return adminauthorization.Snapshot{}, fmt.Errorf("%w: policy revision has trailing content", ErrPolicyUnavailable)
 	}
-	snapshot := adminauthorization.Snapshot{Version: value.Version, Revision: revision, Roles: value.Roles, Assignments: value.Assignments}
+	snapshot := adminauthorization.Snapshot{Version: value.Version, Revision: revision, Roles: value.Roles, Bindings: value.Bindings}
 	if _, err := adminauthorization.New(snapshot); err != nil {
 		return adminauthorization.Snapshot{}, fmt.Errorf("%w: validate policy revision", ErrPolicyUnavailable)
 	}
 	return snapshot, nil
-}
-
-func assignmentSnapshot(rows []storage.AdminAssignment, revision uint64, roles []adminauthorization.RoleDefinition) (adminauthorization.Snapshot, error) {
-	result := adminauthorization.Snapshot{
-		Version: adminauthorization.CurrentVersion, Revision: revision,
-		Roles:       append([]adminauthorization.RoleDefinition(nil), roles...),
-		Assignments: make([]adminauthorization.Assignment, 0, len(rows)),
-	}
-	for _, row := range rows {
-		if row.PolicyRevision != revision {
-			return adminauthorization.Snapshot{}, ErrPolicyUnavailable
-		}
-		assignment := adminauthorization.Assignment{ID: row.ID, Role: adminauthorization.Role(row.Role)}
-		if err := json.Unmarshal(row.Subjects, &assignment.Subjects); err != nil {
-			return adminauthorization.Snapshot{}, ErrPolicyUnavailable
-		}
-		if err := json.Unmarshal(row.Groups, &assignment.Groups); err != nil {
-			return adminauthorization.Snapshot{}, ErrPolicyUnavailable
-		}
-		if err := json.Unmarshal(row.Namespaces, &assignment.Namespaces); err != nil {
-			return adminauthorization.Snapshot{}, ErrPolicyUnavailable
-		}
-		result.Assignments = append(result.Assignments, assignment)
-	}
-	if _, err := adminauthorization.New(result); err != nil {
-		return adminauthorization.Snapshot{}, ErrPolicyUnavailable
-	}
-	return result, nil
-}
-
-func equalAssignments(left, right []adminauthorization.Assignment) bool {
-	left = canonicalAssignments(left)
-	right = canonicalAssignments(right)
-	return reflect.DeepEqual(left, right)
-}
-
-func canonicalAssignments(source []adminauthorization.Assignment) []adminauthorization.Assignment {
-	result := make([]adminauthorization.Assignment, len(source))
-	for index, assignment := range source {
-		assignment.Subjects = append([]string(nil), assignment.Subjects...)
-		assignment.Groups = append([]string(nil), assignment.Groups...)
-		assignment.Namespaces = append([]string(nil), assignment.Namespaces...)
-		sort.Strings(assignment.Subjects)
-		sort.Strings(assignment.Groups)
-		sort.Strings(assignment.Namespaces)
-		result[index] = assignment
-	}
-	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
-	return result
 }
 
 func policySpecHash(spec json.RawMessage) string {

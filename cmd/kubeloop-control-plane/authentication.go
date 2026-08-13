@@ -6,7 +6,7 @@ import (
 
 	"github.com/fengqi-dev/kube-loop/internal/controlplane"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/authn"
-	"github.com/fengqi-dev/kube-loop/internal/controlplane/authn/token"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/authn/oauthserver"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
 )
 
@@ -22,33 +22,19 @@ func discoveryAuthMethods(registry *authn.Registry) []controlplane.AuthMethod {
 	return methods
 }
 
-func authenticateWithTokens(tokenService *token.Service) controlplaneapi.AuthenticatorFunc {
+func authenticateWithFosite(endpoints *oauthserver.Endpoints) controlplaneapi.AuthenticatorFunc {
 	return func(request *http.Request) (controlplaneapi.Principal, *controlplaneapi.Error) {
-		headers := request.Header.Values("Authorization")
-		if len(headers) != 1 {
-			return controlplaneapi.Principal{}, &controlplaneapi.Error{
-				Code: controlplaneapi.CodeUnauthenticated, Message: "authentication required",
-			}
-		}
-		parts := strings.Fields(headers[0])
+		parts := strings.Fields(request.Header.Get("Authorization"))
 		if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
-			return controlplaneapi.Principal{}, &controlplaneapi.Error{
-				Code: controlplaneapi.CodeUnauthenticated, Message: "authentication required",
-			}
+			return controlplaneapi.Principal{}, &controlplaneapi.Error{Code: controlplaneapi.CodeUnauthenticated, Message: "authentication required"}
 		}
-		identity, err := tokenService.Authenticate(request.Context(), parts[1])
+		identity, err := endpoints.Authenticate(request.Context(), parts[1])
 		if err != nil {
-			return controlplaneapi.Principal{}, &controlplaneapi.Error{
-				Code: controlplaneapi.CodeUnauthenticated, Message: "access token is invalid",
-			}
+			return controlplaneapi.Principal{}, &controlplaneapi.Error{Code: controlplaneapi.CodeUnauthenticated, Message: "access token is invalid"}
 		}
 		principal := identity.Principal
-		return controlplaneapi.Principal{
-			Subject: principal.ID, Provider: principal.Provider,
-			DisplayName: principal.DisplayName, Email: principal.Email,
-			Groups:   append([]string(nil), principal.Groups...),
-			DeviceID: identity.DeviceID, FamilyID: identity.FamilyID,
-			AccessExpiresAt: identity.AccessExpiresAt,
-		}, nil
+		return controlplaneapi.Principal{Subject: principal.ID, Provider: principal.Provider, DisplayName: principal.DisplayName,
+			Email: principal.Email, Groups: append([]string(nil), principal.Groups...), DeviceID: identity.DeviceID,
+			AuthorizationID: identity.AuthorizationID, AccessExpiresAt: identity.AccessExpiresAt}, nil
 	}
 }

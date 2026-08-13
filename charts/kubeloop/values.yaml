@@ -11,42 +11,24 @@ imagePullSecrets: []
 controlPlane:
   replicas: 1
   logLevel: info
+  development:
+    # Local-only runtime preset for Wails and disposable clusters. Authorization
+    # is still database-managed and deny-by-default.
+    enabled: false
   image:
     repository: ghcr.io/fengqi-dev/kube-loop/control-plane
     tag: ""
     pullPolicy: IfNotPresent
   minClientVersion: ""
   auth:
-    # Public discovery is derived from configured Providers. Secrets are
-    # mounted from existing Kubernetes Secrets and never written to ConfigMap.
-    providers: []
-    token:
-      # Required when an authentication Provider is configured. The key is
-      # Ed25519 PKCS#8 PEM.
+    oauth:
+      # Independent authentication Secret. Helm creates and keeps the keys when omitted.
       existingSecret: ""
-      signingKeyKey: signing-key.pem
+      oidcSigningKeyKey: oidc-signing-key.pem
+      hmacSecretKey: hmac-secret
       keyID: primary
       accessTTL: 5m
       refreshTTL: 720h
-    # - id: corporate
-    #   type: oidc
-    #   displayName: Corporate SSO
-    #   oidc:
-    #     issuer: https://login.example.com
-    #     clientID: kubeloop
-    #     existingSecret: kubeloop-oidc
-    #     clientSecretKey: client-secret
-    #     caKey: "" # optional key in the same Secret for a private CA
-    #     scopes: [openid, profile, email, groups]
-    #     allowedSigningAlgs: [RS256]
-    #     requiredClaims: [sub]
-    #     claims:
-    #       displayName: name
-    #       email: email
-    #       # Literal names are checked first; dot notation can read nested
-    #       # objects such as Keycloak's realm_access.roles.
-    #       groups: groups
-    #     httpTimeout: 10s
   relay:
     # Required. This Secret is mounted only into Control Plane and must contain
     # an Ed25519 PKCS#8 private key used to sign short-lived RelayTickets.
@@ -75,15 +57,6 @@ controlPlane:
     serverCertificateKey: tls.crt
     serverPrivateKeyKey: tls.key
     caKey: ca.crt
-  policy:
-    # Rules are allow-only and evaluated by subject/group, namespace,
-    # operation, and resource kind. An empty list is an explicit deny-all.
-    rules: []
-    # - id: developers-read
-    #   groups: [developers]
-    #   namespaces: [development]
-    #   operations: [get, list, watch]
-    #   resourceKinds: [namespaces, pods, services]
   management:
     # The browser Management Plane has an isolated HTTP listener. The default
     # origin is intended for `kubectl port-forward`; set it to the exact HTTPS
@@ -109,14 +82,6 @@ controlPlane:
       # Disaster recovery must be explicitly enabled by a Helm change and
       # Control Plane restart after the persistent bootstrap retirement marker is set.
       recoveryEnabled: false
-    # Allowlisted aliases available to database-managed OIDC Provider
-    # revisions. The Management API accepts only alias names; Helm projects
-    # selected keys into fixed read-only paths owned by the deployment.
-    providerSecretAliases: {}
-    # corporate:
-    #   existingSecret: kubeloop-corporate-auth
-    #   clientSecretKey: oidc-client-secret
-    #   caKey: ca.crt
   kubernetes:
     timeout: 15s
     qps: 20

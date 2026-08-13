@@ -40,7 +40,7 @@ type Principal struct {
 	Email           string
 	Groups          []string
 	DeviceID        string
-	FamilyID        string
+	AuthorizationID string
 	AccessExpiresAt time.Time
 }
 

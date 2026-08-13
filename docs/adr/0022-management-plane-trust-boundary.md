@@ -21,7 +21,7 @@ V2-901～V2-907 实现；V2-908 统一完成浏览器和 Minikube E2E。
 
 - 管理角色、namespace 委派、访问/网络策略及其历史 revision；
 - OIDC 非 Secret 配置、Secret 引用和 Provider 启停状态；
-- Principal、Device/Token Family、Cluster Session、Task、Relay 和审计记录；
+- Principal、Device/OAuth grant、Cluster Session、Task、Relay 和审计记录；
 - 撤销、排空、停止、恢复、回滚和导出等高风险动作。
 
 信任区固定如下：
@@ -87,7 +87,7 @@ Break-glass 是部署操作者控制的应急入口，不是第二套日常账�
   以常量时间比较；原值不进入日志、指标、审计或数据库；
 - 端点执行严格速率限制，可选来源 CIDR 限制，并且只接受受信 public Origin 的
   TLS 请求；失败响应不区分“未启用”和“凭据错误”；
-- 成功后只签发最长 15 分钟、不可刷新、不可转为普通 Token Family 的管理
+- 成功后只签发最长 15 分钟、不可刷新、不可转为普通 OAuth grant 的管理
   Session；所有请求带 `breakGlass=true` 并产生高等级审计；
 - Secret 文件内容或 alias generation 变化时，旧 break-glass Session 立即失效；
   Control Plane 不需要 `secrets/get` RBAC，只读取预先挂载的文件；
@@ -106,7 +106,7 @@ HTML 或 JavaScript 持久状态。浏览器通过同源登录把已认证 Princ
 - `__Host-kubeloop-admin`；`Secure`、`HttpOnly`、`SameSite=Strict`、`Path=/`；
 - 登录后轮换 Session ID，避免 fixation；数据库只保存随机 ID 的哈希；
 - 15 分钟空闲、最多 8 小时绝对生命周期；高风险动作可要求近期重新认证；
-- 绑定 Principal、Token Family、创建时间和当前认证上下文；Token Family 撤销、
+- 绑定 Principal、OAuth grant、创建时间和当前认证上下文；OAuth grant 撤销、
   Principal 禁用、角色移除、Secret generation 变化或显式登出都会使其失效；
 - 每个请求重新读取或校验当前 assignment revision，Session 本身不缓存永久角色。
 

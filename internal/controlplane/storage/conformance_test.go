@@ -3,7 +3,6 @@ package storage
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -37,14 +36,12 @@ func TestPostgreSQLRepositoryConformance(t *testing.T) {
 
 func testRepositoryConformance(t *testing.T, store *Store) {
 	t.Helper()
-	t.Run("token families", func(t *testing.T) { testTokenFamilyRepository(t, store) })
 	t.Run("sessions tasks and snapshots", func(t *testing.T) { testSessionTaskSnapshotRepositories(t, store) })
 	t.Run("idempotency", func(t *testing.T) { testIdempotencyRepository(t, store) })
 	t.Run("audit", func(t *testing.T) { testAuditRepository(t, store) })
 	t.Run("Relay desired states", func(t *testing.T) { testRelayDesiredStateRepository(t, store) })
 	t.Run("audit export jobs", func(t *testing.T) { testAuditExportJobRepository(t, store) })
 	t.Run("management list pagination", func(t *testing.T) { testManagementListPagination(t, store) })
-	t.Run("authentication transactions", func(t *testing.T) { testAuthTransactionRepository(t, store) })
 	t.Run("management sessions", func(t *testing.T) { testAdminSessionRepositoryConformance(t, store) })
 	t.Run("management revisions", func(t *testing.T) { testManagementRevisionRepositories(t, store) })
 	t.Run("transactions", func(t *testing.T) { testTransactions(t, store) })
@@ -306,163 +303,6 @@ func testStableRepositoryErrors(t *testing.T, store *Store) {
 	record.RequestHash = "sha256:second"
 	if _, _, err := store.Idempotency().Reserve(ctx, record); !errors.Is(err, ErrIdempotencyMismatch) {
 		t.Fatalf("idempotency mismatch error = %v", err)
-	}
-}
-
-func testAuthTransactionRepository(t *testing.T, store *Store) {
-	ctx := context.Background()
-	now := time.Date(2026, 8, 9, 8, 0, 0, 0, time.UTC)
-	principal := createTestPrincipal(t, store.Principals(), "auth-transaction-user")
-	stateHash := sha256.Sum256([]byte("upstream-state"))
-	attempt := AuthAttempt{
-		ID: uuid.NewString(), ProviderID: "corporate", StateHash: stateHash[:],
-		ClientState: "desktop-state", ClientCallback: "http://127.0.0.1:49152/callback",
-		ClientID: "kubeloop-desktop", Scope: "openid kubeloop.api",
-		Nonce: "nonce", PKCEChallenge: "challenge", UpstreamPKCEVerifier: "upstream-verifier",
-		CreatedAt: now, ExpiresAt: now.Add(time.Minute),
-	}
-	if err := store.AuthTransactions().CreateAttempt(ctx, attempt); err != nil {
-		t.Fatal(err)
-	}
-	consumed, err := store.AuthTransactions().ConsumeAttempt(ctx, stateHash[:], now.Add(time.Second))
-	if err != nil || consumed.ID != attempt.ID || consumed.ClientState != attempt.ClientState {
-		t.Fatalf("consumed attempt = %#v, %v", consumed, err)
-	}
-	if _, err := store.AuthTransactions().ConsumeAttempt(ctx, stateHash[:], now.Add(time.Second)); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("attempt replay = %v", err)
-	}
-
-	codeHash := sha256.Sum256([]byte("single-use-exchange"))
-	exchange := AuthExchange{
-		CodeHash: codeHash[:], PrincipalID: principal.ID, ProviderID: "corporate",
-		ClientID: "kubeloop-desktop", RedirectURI: "http://127.0.0.1:49152/callback",
-		Scope: "openid kubeloop.api", Nonce: "nonce",
-		PKCEChallenge: "challenge", CreatedAt: now, ExpiresAt: now.Add(time.Minute),
-	}
-	if err := store.AuthTransactions().CreateExchange(ctx, exchange); err != nil {
-		t.Fatal(err)
-	}
-	var successes atomic.Int32
-	var group sync.WaitGroup
-	for range 8 {
-		group.Go(func() {
-			if _, err := store.AuthTransactions().ConsumeExchange(ctx, codeHash[:], now.Add(time.Second)); err == nil {
-				successes.Add(1)
-			} else if !errors.Is(err, ErrNotFound) {
-				t.Errorf("consume exchange: %v", err)
-			}
-		})
-	}
-	group.Wait()
-	if successes.Load() != 1 {
-		t.Fatalf("successful exchange consumers = %d", successes.Load())
-	}
-
-	expiredState := sha256.Sum256([]byte("expired-state"))
-	expired := attempt
-	expired.ID = uuid.NewString()
-	expired.StateHash = expiredState[:]
-	expired.CreatedAt = now.Add(-2 * time.Minute)
-	expired.ExpiresAt = now.Add(-time.Minute)
-	if err := store.AuthTransactions().CreateAttempt(ctx, expired); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := store.AuthTransactions().ConsumeAttempt(ctx, expiredState[:], now); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("expired attempt consumption = %v", err)
-	}
-	deleted, err := store.AuthTransactions().DeleteExpired(ctx, now, 10)
-	if err != nil || deleted != 1 {
-		t.Fatalf("deleted auth transactions = %d, %v", deleted, err)
-	}
-}
-
-func testTokenFamilyRepository(t *testing.T, store *Store) {
-	ctx := context.Background()
-	principal := createTestPrincipal(t, store.Principals(), "token-user")
-	now := time.Date(2026, 8, 9, 2, 0, 0, 0, time.UTC)
-	family := TokenFamily{
-		ID: uuid.NewString(), PrincipalID: principal.ID, DeviceID: "device-1",
-		RefreshTokenHash: bytes.Repeat([]byte{1}, 32), CreatedAt: now, ExpiresAt: now.Add(time.Hour),
-	}
-	if err := store.TokenFamilies().Create(ctx, family); err != nil {
-		t.Fatal(err)
-	}
-	loaded, err := store.TokenFamilies().GetByID(ctx, family.ID)
-	if err != nil || loaded.DeviceID != family.DeviceID || !bytes.Equal(loaded.RefreshTokenHash, family.RefreshTokenHash) {
-		t.Fatalf("loaded token family = %#v, %v", loaded, err)
-	}
-	duplicate := family
-	duplicate.ID = uuid.NewString()
-	if err := store.TokenFamilies().Create(ctx, duplicate); !errors.Is(err, ErrConflict) {
-		t.Fatalf("duplicate token hash error = %v", err)
-	}
-	current := RefreshTokenRecord{TokenHash: family.RefreshTokenHash, FamilyID: family.ID, CreatedAt: now}
-	if err := store.RefreshTokens().Create(ctx, current); err != nil {
-		t.Fatal(err)
-	}
-	loadedRefresh, err := store.RefreshTokens().GetByHash(ctx, current.TokenHash)
-	if err != nil || loadedRefresh.Status != "active" || loadedRefresh.FamilyID != family.ID {
-		t.Fatalf("loaded refresh token = %#v, %v", loadedRefresh, err)
-	}
-	usedAt := now.Add(time.Minute)
-	if err := store.RefreshTokens().MarkUsed(ctx, current.TokenHash, usedAt); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.RefreshTokens().MarkUsed(ctx, current.TokenHash, usedAt); !errors.Is(err, ErrConflict) {
-		t.Fatalf("refresh token reuse error = %v", err)
-	}
-	nextHash := bytes.Repeat([]byte{3}, 32)
-	if err := store.TokenFamilies().RotateHash(ctx, family.ID, family.RefreshTokenHash, nextHash); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.RefreshTokens().Create(ctx, RefreshTokenRecord{
-		TokenHash: nextHash, FamilyID: family.ID, CreatedAt: usedAt,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.TokenFamilies().RotateHash(ctx, family.ID, family.RefreshTokenHash, bytes.Repeat([]byte{4}, 32)); !errors.Is(err, ErrConflict) {
-		t.Fatalf("stale family rotation error = %v", err)
-	}
-	firstRevocation := now.Add(10 * time.Minute)
-	if err := store.TokenFamilies().Revoke(ctx, family.ID, firstRevocation); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.TokenFamilies().Revoke(ctx, family.ID, firstRevocation.Add(time.Minute)); err != nil {
-		t.Fatal(err)
-	}
-	loaded, err = store.TokenFamilies().GetByID(ctx, family.ID)
-	if err != nil || loaded.RevokedAt == nil || !loaded.RevokedAt.Equal(firstRevocation) {
-		t.Fatalf("idempotent revocation = %#v, %v", loaded.RevokedAt, err)
-	}
-	batchFamily := TokenFamily{
-		ID: uuid.NewString(), PrincipalID: principal.ID, DeviceID: "batch-device",
-		RefreshTokenHash: bytes.Repeat([]byte{5}, 32), CreatedAt: now, ExpiresAt: now.Add(time.Hour),
-	}
-	if err := store.TokenFamilies().Create(ctx, batchFamily); err != nil {
-		t.Fatal(err)
-	}
-	batchRevocation := now.Add(20 * time.Minute)
-	count, err := store.TokenFamilies().RevokeByPrincipal(ctx, principal.ID, batchRevocation)
-	if err != nil || count != 1 {
-		t.Fatalf("principal token family revocation = %d, %v", count, err)
-	}
-	count, err = store.TokenFamilies().RevokeByPrincipal(ctx, principal.ID, batchRevocation.Add(time.Minute))
-	if err != nil || count != 0 {
-		t.Fatalf("replayed principal token family revocation = %d, %v", count, err)
-	}
-	expired := TokenFamily{
-		ID: uuid.NewString(), PrincipalID: principal.ID, DeviceID: "expired",
-		RefreshTokenHash: bytes.Repeat([]byte{2}, 32), CreatedAt: now.Add(-2 * time.Hour), ExpiresAt: now.Add(-time.Hour),
-	}
-	if err := store.TokenFamilies().Create(ctx, expired); err != nil {
-		t.Fatal(err)
-	}
-	deleted, err := store.TokenFamilies().DeleteExpired(ctx, now, 1)
-	if err != nil || deleted != 1 {
-		t.Fatalf("deleted token families = %d, %v", deleted, err)
-	}
-	if _, err := store.TokenFamilies().GetByID(ctx, expired.ID); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("expired token family still exists: %v", err)
 	}
 }
 

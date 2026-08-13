@@ -130,7 +130,7 @@ func (repository *activeManagementRevisionRepository) requireValidTarget(
 	var validationState string
 	var err error
 	if kind == ManagementConfigurationPolicy {
-		query := repository.bind(`SELECT validation_state FROM admin_policy_revisions WHERE revision = ?`)
+		query := repository.bind(`SELECT validation_state FROM authorization_revisions WHERE revision = ?`)
 		err = repository.executor.QueryRowContext(ctx, query, revision).Scan(&validationState)
 	} else {
 		query := repository.bind(`SELECT validation_state FROM provider_config_revisions

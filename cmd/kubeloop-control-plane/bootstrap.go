@@ -10,11 +10,11 @@ import (
 	adminprovider "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/provider"
 	adminrevision "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/revision"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/authn"
-	authconfig "github.com/fengqi-dev/kube-loop/internal/controlplane/authn/config"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/authorization"
 	controlplanekubernetes "github.com/fengqi-dev/kube-loop/internal/controlplane/kubernetes"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/maintenance"
 	controlplanestorage "github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 type bootstrapRuntime struct {
@@ -27,7 +27,7 @@ type bootstrapRuntime struct {
 	AuthRegistry              *authn.Registry
 	ManagedProviderRuntime    *adminprovider.Runtime
 	ManagedProviderService    *adminrevision.ProviderService
-	PolicyEngine              *authorization.Engine
+	PolicyEngine              authorization.Authorizer
 	KubernetesConfig          controlplanekubernetes.Config
 	KubernetesProvider        *controlplanekubernetes.Provider
 }
@@ -51,7 +51,6 @@ func bootstrapControlPlane(
 		logger.Error("initialize Control Plane maintenance worker failed", "error", err)
 		os.Exit(2)
 	}
-	authFile := config.Authentication
 	managementFile := config.Management
 	localUsers, initialAdmin, err := initializeLocalUsers(signalContext, stateStore, config.Document.Management.PublicURL,
 		config.Document.Management.InitialAdmin.UsernameFile,
@@ -107,14 +106,14 @@ func bootstrapControlPlane(
 		logger.Error("load active Management Plane policy failed", "error", err)
 		os.Exit(1)
 	}
-	authRegistry, err := authconfig.Build(signalContext, authFile)
+	authRegistry, err := authn.NewRegistry()
 	if err != nil {
 		_ = stateStore.Close()
-		logger.Error("initialize authentication providers failed", "error", err)
+		logger.Error("initialize authentication registry failed", "error", err)
 		os.Exit(1)
 	}
 	managedProviderRuntime, err := adminprovider.NewRuntime(
-		stateStore, authRegistry, authFile, managementFile.ProviderSecretAliases, config.Document.API.PublicURL, 0,
+		stateStore, authRegistry, config.Document.API.PublicURL, 0,
 	)
 	if err != nil {
 		_ = stateStore.Close()
@@ -132,13 +131,6 @@ func bootstrapControlPlane(
 		logger.Error("initialize managed authentication Provider service failed", "error", err)
 		os.Exit(2)
 	}
-	policy := config.Policy
-	policyEngine, err := authorization.New(policy)
-	if err != nil {
-		_ = stateStore.Close()
-		logger.Error("initialize Gateway policy failed", "error", err)
-		os.Exit(2)
-	}
 	kubernetesConfig := config.Kubernetes
 	if kubernetesConfig.UserAgent == controlplanekubernetes.DefaultUserAgent {
 		kubernetesConfig.UserAgent = "kube-loop-control-plane/" + version
@@ -149,6 +141,17 @@ func bootstrapControlPlane(
 		logger.Error("initialize in-cluster Kubernetes Provider failed", "error", err)
 		os.Exit(1)
 	}
+	policyEngine := authorization.NewUnified(managementPolicyEngine, func(ctx context.Context, namespace string) (map[string]string, error) {
+		client, err := kubernetesProvider.SystemClient()
+		if err != nil {
+			return nil, err
+		}
+		item, err := client.CoreV1().Namespaces().Get(ctx, namespace, metav1.GetOptions{})
+		if err != nil {
+			return nil, err
+		}
+		return item.Labels, nil
+	})
 	return &bootstrapRuntime{
 		Store: stateStore, MaintenanceWorker: maintenanceWorker, LocalUsers: localUsers,
 		ManagementRevisionService: managementRevisionService,

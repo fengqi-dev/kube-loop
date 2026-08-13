@@ -1,195 +1,160 @@
 package authorization
 
-import "slices"
-
-type scope uint8
-
-const (
-	scopeCluster scope = 1 << iota
-	scopeNamespace
-	scopeAny = scopeCluster | scopeNamespace
+import (
+	"slices"
+	"strings"
 )
 
-type permission struct {
-	resource  Resource
-	operation Operation
-	scope     scope
+const (
+	CapabilityNamespaceAccess Capability = "namespace.access"
+)
+
+var capabilityCatalog = []Capability{
+	"platform.overview.read", "platform.configuration.read", "platform.configuration.manage",
+	"platform.identity.providers.read", "platform.identity.providers.manage", "platform.identity.principals.read",
+	"platform.identity.users.read", "platform.identity.users.manage", "platform.oauth-clients.read", "platform.oauth-clients.manage",
+	"platform.authorization.read", "platform.authorization.manage", "platform.authorization.publish",
+	"platform.authorization.rollback", "platform.authorization.simulate", "platform.sessions.read", "platform.sessions.revoke",
+	"platform.tasks.read", "platform.tasks.stop", "platform.relays.read", "platform.relays.manage",
+	"platform.audit.read", "platform.audit.export", "platform.diagnostics.read",
+	CapabilityNamespaceAccess, "namespace.resources.read", "namespace.exec.open", "namespace.port-forward.open",
+	"namespace.files.download", "namespace.files.upload", "namespace.intercepts.read", "namespace.intercepts.manage",
+	"namespace.previews.read", "namespace.previews.manage", "namespace.tasks.read", "namespace.tasks.stop",
+	"namespace.authorization.read", "namespace.authorization.delegate",
 }
 
-var resourceScopes = map[Resource]scope{
-	ResourceStatus:          scopeCluster,
-	ResourceConfiguration:   scopeCluster,
-	ResourceProvider:        scopeCluster,
-	ResourceAssignment:      scopeCluster,
-	ResourcePolicy:          scopeCluster,
-	ResourceIdentityMapping: scopeCluster,
-	ResourcePrincipal:       scopeCluster,
-	ResourceUser:            scopeCluster,
-	ResourceSession:         scopeAny,
-	ResourceTask:            scopeAny,
-	ResourceRelay:           scopeCluster,
-	ResourceAudit:           scopeCluster,
-	ResourceDiagnostic:      scopeCluster,
-	ResourceStorage:         scopeCluster,
-	ResourceUpgrade:         scopeCluster,
-	ResourceNamespaceMember: scopeNamespace,
-	ResourceNamespacePolicy: scopeNamespace,
-}
+var capabilitySet = func() map[Capability]struct{} {
+	result := make(map[Capability]struct{}, len(capabilityCatalog))
+	for _, capability := range capabilityCatalog {
+		result[capability] = struct{}{}
+	}
+	return result
+}()
 
-var rolePermissions = compilePermissions(map[Role][]permission{
-	RolePlatformAdmin: {
-		{ResourceStatus, OperationRead, scopeCluster},
-		{ResourceConfiguration, OperationRead, scopeCluster}, {ResourceConfiguration, OperationUpdate, scopeCluster},
-		{ResourceConfiguration, OperationPublish, scopeCluster}, {ResourceConfiguration, OperationRollback, scopeCluster},
-		{ResourceProvider, OperationRead, scopeCluster}, {ResourceProvider, OperationList, scopeCluster},
-		{ResourceProvider, OperationCreate, scopeCluster}, {ResourceProvider, OperationUpdate, scopeCluster},
-		{ResourceProvider, OperationDelete, scopeCluster}, {ResourceProvider, OperationValidate, scopeCluster},
-		{ResourceProvider, OperationPublish, scopeCluster}, {ResourceProvider, OperationRollback, scopeCluster},
-		{ResourceAssignment, OperationRead, scopeCluster}, {ResourceAssignment, OperationList, scopeCluster},
-		{ResourceAssignment, OperationCreate, scopeCluster}, {ResourceAssignment, OperationUpdate, scopeCluster},
-		{ResourceAssignment, OperationDelete, scopeCluster}, {ResourceAssignment, OperationPublish, scopeCluster},
-		{ResourceAssignment, OperationRollback, scopeCluster},
-		{ResourcePolicy, OperationRead, scopeCluster}, {ResourcePolicy, OperationList, scopeCluster},
-		{ResourcePolicy, OperationCreate, scopeCluster}, {ResourcePolicy, OperationUpdate, scopeCluster},
-		{ResourcePolicy, OperationDelete, scopeCluster}, {ResourcePolicy, OperationValidate, scopeCluster},
-		{ResourcePolicy, OperationDryRun, scopeCluster}, {ResourcePolicy, OperationPublish, scopeCluster},
-		{ResourcePolicy, OperationRollback, scopeCluster},
-		{ResourceIdentityMapping, OperationRead, scopeCluster}, {ResourceIdentityMapping, OperationList, scopeCluster},
-		{ResourceIdentityMapping, OperationCreate, scopeCluster}, {ResourceIdentityMapping, OperationUpdate, scopeCluster},
-		{ResourceIdentityMapping, OperationDelete, scopeCluster}, {ResourceIdentityMapping, OperationPublish, scopeCluster},
-		{ResourceIdentityMapping, OperationRollback, scopeCluster},
-		{ResourcePrincipal, OperationRead, scopeCluster}, {ResourcePrincipal, OperationList, scopeCluster},
-		{ResourceUser, OperationRead, scopeCluster}, {ResourceUser, OperationList, scopeCluster},
-		{ResourceUser, OperationCreate, scopeCluster}, {ResourceUser, OperationUpdate, scopeCluster},
-		{ResourceSession, OperationRead, scopeAny}, {ResourceSession, OperationList, scopeAny},
-		{ResourceSession, OperationRevoke, scopeAny}, {ResourceSession, OperationStop, scopeAny},
-		{ResourceTask, OperationRead, scopeAny}, {ResourceTask, OperationList, scopeAny},
-		{ResourceTask, OperationStop, scopeAny}, {ResourceTask, OperationRecover, scopeAny},
-		{ResourceRelay, OperationRead, scopeCluster}, {ResourceRelay, OperationList, scopeCluster},
-		{ResourceRelay, OperationDrain, scopeCluster}, {ResourceRelay, OperationRecover, scopeCluster},
-		{ResourceAudit, OperationRead, scopeCluster}, {ResourceAudit, OperationList, scopeCluster},
-		{ResourceAudit, OperationExport, scopeCluster},
-		{ResourceDiagnostic, OperationRead, scopeCluster}, {ResourceDiagnostic, OperationCreate, scopeCluster},
-		{ResourceDiagnostic, OperationExport, scopeCluster},
-		{ResourceStorage, OperationRead, scopeCluster},
-		{ResourceUpgrade, OperationRead, scopeCluster}, {ResourceUpgrade, OperationUpdate, scopeCluster},
-		{ResourceNamespaceMember, OperationRead, scopeNamespace}, {ResourceNamespaceMember, OperationList, scopeNamespace},
-		{ResourceNamespaceMember, OperationCreate, scopeNamespace}, {ResourceNamespaceMember, OperationUpdate, scopeNamespace},
-		{ResourceNamespaceMember, OperationDelete, scopeNamespace},
-		{ResourceNamespacePolicy, OperationRead, scopeNamespace}, {ResourceNamespacePolicy, OperationList, scopeNamespace},
-		{ResourceNamespacePolicy, OperationCreate, scopeNamespace}, {ResourceNamespacePolicy, OperationUpdate, scopeNamespace},
-		{ResourceNamespacePolicy, OperationDelete, scopeNamespace}, {ResourceNamespacePolicy, OperationValidate, scopeNamespace},
-		{ResourceNamespacePolicy, OperationDryRun, scopeNamespace}, {ResourceNamespacePolicy, OperationPublish, scopeNamespace},
-		{ResourceNamespacePolicy, OperationRollback, scopeNamespace},
-	},
-	RoleSecurityAdmin: {
-		{ResourceStatus, OperationRead, scopeCluster},
-		{ResourceConfiguration, OperationRead, scopeCluster},
-		{ResourceProvider, OperationRead, scopeCluster}, {ResourceProvider, OperationList, scopeCluster},
-		{ResourceAssignment, OperationRead, scopeCluster}, {ResourceAssignment, OperationList, scopeCluster},
-		{ResourcePolicy, OperationRead, scopeCluster}, {ResourcePolicy, OperationList, scopeCluster},
-		{ResourcePolicy, OperationCreate, scopeCluster}, {ResourcePolicy, OperationUpdate, scopeCluster},
-		{ResourcePolicy, OperationDelete, scopeCluster}, {ResourcePolicy, OperationValidate, scopeCluster},
-		{ResourcePolicy, OperationDryRun, scopeCluster}, {ResourcePolicy, OperationPublish, scopeCluster},
-		{ResourcePolicy, OperationRollback, scopeCluster},
-		{ResourceIdentityMapping, OperationRead, scopeCluster}, {ResourceIdentityMapping, OperationList, scopeCluster},
-		{ResourceIdentityMapping, OperationCreate, scopeCluster}, {ResourceIdentityMapping, OperationUpdate, scopeCluster},
-		{ResourceIdentityMapping, OperationDelete, scopeCluster}, {ResourceIdentityMapping, OperationPublish, scopeCluster},
-		{ResourceIdentityMapping, OperationRollback, scopeCluster},
-		{ResourcePrincipal, OperationRead, scopeCluster}, {ResourcePrincipal, OperationList, scopeCluster},
-		{ResourceUser, OperationRead, scopeCluster}, {ResourceUser, OperationList, scopeCluster},
-		{ResourceUser, OperationCreate, scopeCluster}, {ResourceUser, OperationUpdate, scopeCluster},
-		{ResourceSession, OperationRead, scopeAny}, {ResourceSession, OperationList, scopeAny},
-		{ResourceSession, OperationRevoke, scopeAny},
-		{ResourceTask, OperationRead, scopeAny}, {ResourceTask, OperationList, scopeAny},
-		{ResourceAudit, OperationRead, scopeCluster}, {ResourceAudit, OperationList, scopeCluster},
-		{ResourceAudit, OperationExport, scopeCluster},
-		{ResourceNamespaceMember, OperationRead, scopeNamespace}, {ResourceNamespaceMember, OperationList, scopeNamespace},
-		{ResourceNamespaceMember, OperationCreate, scopeNamespace}, {ResourceNamespaceMember, OperationUpdate, scopeNamespace},
-		{ResourceNamespaceMember, OperationDelete, scopeNamespace},
-		{ResourceNamespacePolicy, OperationRead, scopeNamespace}, {ResourceNamespacePolicy, OperationList, scopeNamespace},
-		{ResourceNamespacePolicy, OperationCreate, scopeNamespace}, {ResourceNamespacePolicy, OperationUpdate, scopeNamespace},
-		{ResourceNamespacePolicy, OperationDelete, scopeNamespace}, {ResourceNamespacePolicy, OperationValidate, scopeNamespace},
-		{ResourceNamespacePolicy, OperationDryRun, scopeNamespace}, {ResourceNamespacePolicy, OperationPublish, scopeNamespace},
-		{ResourceNamespacePolicy, OperationRollback, scopeNamespace},
-	},
-	RoleOperator: {
-		{ResourceStatus, OperationRead, scopeCluster},
-		{ResourceSession, OperationRead, scopeAny}, {ResourceSession, OperationList, scopeAny},
-		{ResourceSession, OperationStop, scopeAny},
-		{ResourceTask, OperationRead, scopeAny}, {ResourceTask, OperationList, scopeAny},
-		{ResourceTask, OperationStop, scopeAny}, {ResourceTask, OperationRecover, scopeAny},
-		{ResourceRelay, OperationRead, scopeCluster}, {ResourceRelay, OperationList, scopeCluster},
-		{ResourceRelay, OperationDrain, scopeCluster}, {ResourceRelay, OperationRecover, scopeCluster},
-		{ResourceDiagnostic, OperationRead, scopeCluster}, {ResourceDiagnostic, OperationCreate, scopeCluster},
-		{ResourceDiagnostic, OperationExport, scopeCluster},
-	},
-	RoleAuditor: {
-		{ResourceStatus, OperationRead, scopeCluster},
-		{ResourceConfiguration, OperationRead, scopeCluster},
-		{ResourceProvider, OperationRead, scopeCluster}, {ResourceProvider, OperationList, scopeCluster},
-		{ResourceAssignment, OperationRead, scopeCluster}, {ResourceAssignment, OperationList, scopeCluster},
-		{ResourcePolicy, OperationRead, scopeCluster}, {ResourcePolicy, OperationList, scopeCluster},
-		{ResourceIdentityMapping, OperationRead, scopeCluster}, {ResourceIdentityMapping, OperationList, scopeCluster},
-		{ResourcePrincipal, OperationRead, scopeCluster}, {ResourcePrincipal, OperationList, scopeCluster},
-		{ResourceSession, OperationRead, scopeAny}, {ResourceSession, OperationList, scopeAny},
-		{ResourceTask, OperationRead, scopeAny}, {ResourceTask, OperationList, scopeAny},
-		{ResourceRelay, OperationRead, scopeCluster}, {ResourceRelay, OperationList, scopeCluster},
-		{ResourceAudit, OperationRead, scopeCluster}, {ResourceAudit, OperationList, scopeCluster},
-		{ResourceStorage, OperationRead, scopeCluster},
-		{ResourceUpgrade, OperationRead, scopeCluster},
-		{ResourceNamespaceMember, OperationRead, scopeNamespace}, {ResourceNamespaceMember, OperationList, scopeNamespace},
-		{ResourceNamespacePolicy, OperationRead, scopeNamespace}, {ResourceNamespacePolicy, OperationList, scopeNamespace},
-	},
-	RoleNamespaceAdmin: {
-		{ResourceNamespaceMember, OperationRead, scopeNamespace}, {ResourceNamespaceMember, OperationList, scopeNamespace},
-		{ResourceNamespaceMember, OperationCreate, scopeNamespace}, {ResourceNamespaceMember, OperationUpdate, scopeNamespace},
-		{ResourceNamespaceMember, OperationDelete, scopeNamespace},
-		{ResourceNamespacePolicy, OperationRead, scopeNamespace}, {ResourceNamespacePolicy, OperationList, scopeNamespace},
-		{ResourceNamespacePolicy, OperationCreate, scopeNamespace}, {ResourceNamespacePolicy, OperationUpdate, scopeNamespace},
-		{ResourceNamespacePolicy, OperationDelete, scopeNamespace}, {ResourceNamespacePolicy, OperationValidate, scopeNamespace},
-		{ResourceNamespacePolicy, OperationDryRun, scopeNamespace}, {ResourceNamespacePolicy, OperationPublish, scopeNamespace},
-		{ResourceNamespacePolicy, OperationRollback, scopeNamespace},
-		{ResourceSession, OperationRead, scopeNamespace}, {ResourceSession, OperationList, scopeNamespace},
-		{ResourceTask, OperationRead, scopeNamespace}, {ResourceTask, OperationList, scopeNamespace},
-	},
-})
-
+func AvailableCapabilities() []Capability { return append([]Capability(nil), capabilityCatalog...) }
 func AvailablePermissions() []string {
-	permissions := rolePermissions[RolePlatformAdmin]
-	result := make([]string, 0)
-	for resource, operations := range permissions {
-		for operation := range operations {
-			result = append(result, Request{Resource: resource, Operation: operation}.Key())
-		}
+	result := make([]string, len(capabilityCatalog))
+	for i, value := range capabilityCatalog {
+		result[i] = string(value)
 	}
-	slices.Sort(result)
 	return result
 }
 
-func compilePermissions(source map[Role][]permission) map[Role]map[Resource]map[Operation]scope {
-	result := make(map[Role]map[Resource]map[Operation]scope, len(source))
-	for role, permissions := range source {
-		resources := make(map[Resource]map[Operation]scope)
-		for _, item := range permissions {
-			operations := resources[item.resource]
-			if operations == nil {
-				operations = make(map[Operation]scope)
-				resources[item.resource] = operations
+func allow(capabilities ...Capability) Statement {
+	return Statement{Effect: EffectAllow, Capabilities: capabilities}
+}
+
+func BuiltInRoleDefinitions() []RoleDefinition {
+	platform := append([]Capability(nil), capabilityCatalog...)
+	security := capabilitiesWithPrefixes("platform.overview.", "platform.identity.", "platform.oauth-clients.", "platform.sessions.", "platform.audit.")
+	security = append(security, "platform.authorization.read", "platform.authorization.simulate")
+	operator := []Capability{"platform.overview.read", "platform.configuration.read", "platform.configuration.manage", "platform.tasks.read", "platform.tasks.stop", "platform.relays.read", "platform.relays.manage", "platform.diagnostics.read"}
+	auditor := capabilitiesWithSuffix(".read")
+	auditor = append(auditor, "platform.audit.export")
+	namespaceAll := capabilitiesWithPrefixes("namespace.")
+	namespaceOperator := slices.DeleteFunc(append([]Capability(nil), namespaceAll...), func(value Capability) bool { return value == "namespace.authorization.delegate" })
+	namespaceViewer := []Capability{CapabilityNamespaceAccess, "namespace.resources.read", "namespace.intercepts.read", "namespace.previews.read", "namespace.tasks.read", "namespace.authorization.read"}
+	return []RoleDefinition{
+		{ID: RolePlatformAdmin, DisplayName: "Platform Admin", BuiltIn: true, Statements: []Statement{allow(platform...)}},
+		{ID: RoleSecurityAdmin, DisplayName: "Security Admin", BuiltIn: true, Statements: []Statement{allow(security...)}},
+		{ID: RoleOperator, DisplayName: "Operator", BuiltIn: true, Statements: []Statement{allow(operator...)}},
+		{ID: RoleAuditor, DisplayName: "Auditor", BuiltIn: true, Statements: []Statement{allow(auditor...)}},
+		{ID: RoleNamespaceAdmin, DisplayName: "Namespace Admin", BuiltIn: true, Statements: []Statement{allow(namespaceAll...)}},
+		{ID: RoleNamespaceOperator, DisplayName: "Namespace Operator", Delegatable: true, BuiltIn: true, Statements: []Statement{allow(namespaceOperator...)}},
+		{ID: RoleNamespaceViewer, DisplayName: "Namespace Viewer", Delegatable: true, BuiltIn: true, Statements: []Statement{allow(namespaceViewer...)}},
+	}
+}
+
+func capabilitiesWithPrefixes(prefixes ...string) []Capability {
+	result := []Capability{}
+	for _, capability := range capabilityCatalog {
+		for _, prefix := range prefixes {
+			if strings.HasPrefix(string(capability), prefix) {
+				result = append(result, capability)
+				break
 			}
-			operations[item.operation] |= item.scope
 		}
-		result[role] = resources
+	}
+	return result
+}
+func capabilitiesWithSuffix(suffix string) []Capability {
+	result := []Capability{}
+	for _, c := range capabilityCatalog {
+		if strings.HasSuffix(string(c), suffix) {
+			result = append(result, c)
+		}
 	}
 	return result
 }
 
-func roleAllows(role Role, request Request) bool {
-	operations := rolePermissions[role][request.Resource]
-	allowedScope := operations[request.Operation]
-	requestedScope := scopeCluster
-	if request.Namespace != "" {
-		requestedScope = scopeNamespace
+func capabilityForManagement(resource Resource, operation Operation) string {
+	manage := operation != OperationRead && operation != OperationList
+	switch resource {
+	case ResourceStatus:
+		return "platform.overview.read"
+	case ResourceConfiguration:
+		if manage {
+			return "platform.configuration.manage"
+		}
+		return "platform.configuration.read"
+	case ResourceProvider:
+		if manage {
+			return "platform.identity.providers.manage"
+		}
+		return "platform.identity.providers.read"
+	case ResourceOAuthClient:
+		if manage {
+			return "platform.oauth-clients.manage"
+		}
+		return "platform.oauth-clients.read"
+	case ResourcePrincipal, ResourceIdentityMapping:
+		return "platform.identity.principals.read"
+	case ResourceUser:
+		if manage {
+			return "platform.identity.users.manage"
+		}
+		return "platform.identity.users.read"
+	case ResourcePolicy, ResourceAssignment:
+		switch operation {
+		case OperationPublish:
+			return "platform.authorization.publish"
+		case OperationRollback:
+			return "platform.authorization.rollback"
+		case OperationDryRun, OperationValidate:
+			return "platform.authorization.simulate"
+		}
+		if manage {
+			return "platform.authorization.manage"
+		}
+		return "platform.authorization.read"
+	case ResourceSession:
+		if manage {
+			return "platform.sessions.revoke"
+		}
+		return "platform.sessions.read"
+	case ResourceTask:
+		if manage {
+			return "platform.tasks.stop"
+		}
+		return "platform.tasks.read"
+	case ResourceRelay:
+		if manage {
+			return "platform.relays.manage"
+		}
+		return "platform.relays.read"
+	case ResourceAudit:
+		if operation == OperationExport {
+			return "platform.audit.export"
+		}
+		return "platform.audit.read"
+	case ResourceDiagnostic, ResourceStorage, ResourceUpgrade:
+		return "platform.diagnostics.read"
+	case ResourceNamespaceMember, ResourceNamespacePolicy:
+		if manage {
+			return "namespace.authorization.delegate"
+		}
+		return "namespace.authorization.read"
+	default:
+		return ""
 	}
-	return allowedScope&requestedScope != 0
 }

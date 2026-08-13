@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/fengqi-dev/kube-loop/internal/controlplane"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/authorization"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
 	controlplanemiddleware "github.com/fengqi-dev/kube-loop/internal/controlplane/middleware"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/sessionapi"
@@ -52,6 +53,7 @@ type Config struct {
 	MaximumBytes            uint64
 	AllowedPathRoots        []string
 	CredentialCheckInterval time.Duration
+	Authorizer              authorization.Authorizer
 }
 
 type Service struct {
@@ -63,6 +65,7 @@ type Service struct {
 	maximumBytes            uint64
 	allowedRoots            []string
 	credentialCheckInterval time.Duration
+	authorizer              authorization.Authorizer
 }
 
 func New(
@@ -85,7 +88,7 @@ func New(
 		return nil, errors.New("file transfer maximum size must be between 256 KiB and 1 TiB")
 	}
 	if config.CredentialCheckInterval == 0 {
-		config.CredentialCheckInterval = 5 * time.Second
+		config.CredentialCheckInterval = 500 * time.Millisecond
 	}
 	if config.CredentialCheckInterval < 10*time.Millisecond || config.CredentialCheckInterval > 30*time.Second {
 		return nil, errors.New("file transfer credential check interval must be between 10ms and 30s")
@@ -97,6 +100,7 @@ func New(
 	return &Service{
 		storage: storageBackend, sessions: sessions, targets: targets, executor: executor, now: config.Now,
 		maximumBytes: config.MaximumBytes, allowedRoots: roots, credentialCheckInterval: config.CredentialCheckInterval,
+		authorizer: config.Authorizer,
 	}, nil
 }
 

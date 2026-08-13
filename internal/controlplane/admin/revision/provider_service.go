@@ -21,10 +21,9 @@ var providerIdentifier = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,126
 var ErrProviderUnavailable = errors.New("management Provider is unavailable")
 
 type ProviderCandidate struct {
-	ID            string
-	Type          string
-	Config        json.RawMessage
-	SecretAliases json.RawMessage
+	ID     string
+	Type   string
+	Config json.RawMessage
 }
 
 type ProviderValidator interface {
@@ -32,8 +31,8 @@ type ProviderValidator interface {
 }
 
 type ProviderActivator interface {
-	// Prepare resolves Secret aliases, validates connectivity and returns an
-	// infallible atomic runtime install closure. It must not mutate the live
+	// Prepare validates connectivity and returns an infallible atomic runtime
+	// install closure. It must not mutate the live
 	// Registry before that closure is invoked after the database commit.
 	Prepare(context.Context, ProviderCandidate) (func(), error)
 }
@@ -80,7 +79,7 @@ type ProviderState struct {
 }
 
 func (service *ProviderService) Validate(ctx context.Context, candidate ProviderCandidate) (json.RawMessage, error) {
-	candidate, err := normalizeProviderCandidate(candidate)
+	candidate, err := service.prepareCandidate(ctx, candidate)
 	if err != nil {
 		return nil, err
 	}
@@ -153,7 +152,7 @@ func (service *ProviderService) CreateDraft(ctx context.Context, request Provide
 		return ProviderDraft{}, err
 	}
 	request.RequestID, request.Reason = strings.TrimSpace(request.RequestID), strings.TrimSpace(request.Reason)
-	candidate, err := normalizeProviderCandidate(request.Candidate)
+	candidate, err := service.prepareCandidate(ctx, request.Candidate)
 	if err != nil || request.RequestID == "" || request.Reason == "" {
 		return ProviderDraft{}, ErrInvalidRequest
 	}
@@ -213,7 +212,7 @@ func (service *ProviderService) CreateDraft(ctx context.Context, request Provide
 		}
 		revision, createErr := repositories.ProviderConfigRevisions().Create(ctx, storage.ProviderConfigRevision{
 			ID: revisionID, ProviderID: candidate.ID, ProviderType: candidate.Type,
-			Config: candidate.Config, SecretAliases: candidate.SecretAliases,
+			Config: candidate.Config, SecretAliases: json.RawMessage(`{}`),
 			ValidationState: storage.RevisionValidationValid, Validation: validation,
 			CreatedBy: actorID, CreatedAuthenticationType: authenticationType, Reason: request.Reason, CreatedAt: now,
 		})
@@ -438,10 +437,49 @@ func normalizeProviderCandidate(candidate ProviderCandidate) (ProviderCandidate,
 	if candidate.Config, err = canonicalProviderObject(candidate.Config); err != nil {
 		return ProviderCandidate{}, err
 	}
-	if candidate.SecretAliases, err = canonicalProviderObject(candidate.SecretAliases); err != nil {
+	return candidate, nil
+}
+
+func (service *ProviderService) prepareCandidate(ctx context.Context, candidate ProviderCandidate) (ProviderCandidate, error) {
+	candidate, err := normalizeProviderCandidate(candidate)
+	if err != nil {
 		return ProviderCandidate{}, err
 	}
+	var next map[string]json.RawMessage
+	if json.Unmarshal(candidate.Config, &next) != nil {
+		return ProviderCandidate{}, ErrInvalidRequest
+	}
+	if secretConfigured(next["clientSecret"]) {
+		return candidate, nil
+	}
+	active, err := service.store.ActiveManagementRevisions().Get(
+		ctx, storage.ManagementConfigurationProvider, candidate.ID,
+	)
+	if errors.Is(err, storage.ErrNotFound) {
+		return candidate, nil
+	}
+	if err != nil {
+		return ProviderCandidate{}, err
+	}
+	current, err := service.store.ProviderConfigRevisions().Get(ctx, active.Revision)
+	if err != nil || current.ProviderID != candidate.ID {
+		return ProviderCandidate{}, ErrProviderUnavailable
+	}
+	var previous map[string]json.RawMessage
+	if json.Unmarshal(current.Config, &previous) != nil || !secretConfigured(previous["clientSecret"]) {
+		return ProviderCandidate{}, ErrInvalidRequest
+	}
+	next["clientSecret"] = append(json.RawMessage(nil), previous["clientSecret"]...)
+	candidate.Config, err = json.Marshal(next)
+	if err != nil {
+		return ProviderCandidate{}, ErrInvalidRequest
+	}
 	return candidate, nil
+}
+
+func secretConfigured(raw json.RawMessage) bool {
+	var value string
+	return json.Unmarshal(raw, &value) == nil && strings.TrimSpace(value) != ""
 }
 
 func canonicalProviderObject(value json.RawMessage) (json.RawMessage, error) {
@@ -479,7 +517,7 @@ func currentProviderBase(ctx context.Context, repositories storage.Repositories,
 
 func providerCandidate(revision storage.ProviderConfigRevision) ProviderCandidate {
 	return ProviderCandidate{ID: revision.ProviderID, Type: revision.ProviderType,
-		Config: append(json.RawMessage(nil), revision.Config...), SecretAliases: append(json.RawMessage(nil), revision.SecretAliases...)}
+		Config: append(json.RawMessage(nil), revision.Config...)}
 }
 
 func providerConfigHash(value json.RawMessage) string { return hashRequest(json.RawMessage(value)) }

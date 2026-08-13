@@ -28,10 +28,11 @@ spec:
       app.kubernetes.io/component: data-plane
   template:
     metadata:
-      {{- with .Values.dataPlane.podAnnotations }}
       annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmaps.yaml") . | sha256sum }}
+        {{- with .Values.dataPlane.podAnnotations }}
         {{- toYaml . | nindent 8 }}
-      {{- end }}
+        {{- end }}
       labels:
         {{- include "kubeloop.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: data-plane
@@ -54,7 +55,7 @@ spec:
           imagePullPolicy: {{ .Values.dataPlane.image.pullPolicy }}
           env:
             - name: KUBELOOP_GATEWAY_CONFIG_FILE
-              value: /etc/kubeloop/gateway/gateway.json
+              value: /etc/kubeloop/gateway/kubeloop.yaml
             - name: KUBELOOP_POD_NAME
               valueFrom:
                 fieldRef:
@@ -98,8 +99,11 @@ spec:
       volumes:
         - name: gateway-config
           configMap:
-            name: {{ include "kubeloop.dataPlaneConfigName" . }}
+            name: {{ include "kubeloop.configName" . }}
             defaultMode: 0444
+            items:
+              - key: kubeloop.yaml
+                path: kubeloop.yaml
         - name: relay-registry
           projected:
             defaultMode: 0400

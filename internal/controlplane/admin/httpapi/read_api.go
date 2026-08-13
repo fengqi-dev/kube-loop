@@ -46,6 +46,18 @@ type handlerOptions struct {
 	providerService    *adminrevision.ProviderService
 	operationService   *adminoperations.Service
 	localUsers         *adminlocaluser.Service
+	oauthRepositories  storage.Repositories
+	oauthTransactions  storage.TransactionManager
+}
+
+func WithOAuthClients(repositories storage.Repositories, transactions storage.TransactionManager) Option {
+	return func(options *handlerOptions) error {
+		if repositories == nil || transactions == nil {
+			return errors.New("OAuth client API repositories are required")
+		}
+		options.oauthRepositories, options.oauthTransactions = repositories, transactions
+		return nil
+	}
 }
 
 type RelayStatusSource interface {
@@ -142,16 +154,18 @@ func WithRelayStatusSource(source RelayStatusSource) Option {
 }
 
 type readAPI struct {
-	handler    *Handler
-	authorizer *adminauthorization.Engine
-	status     StatusSource
-	relays     RelayStatusSource
-	build      BuildInfo
-	policy     *adminrevision.Service
-	reloader   PolicyReloader
-	providers  *adminrevision.ProviderService
-	operations *adminoperations.Service
-	localUsers *adminlocaluser.Service
+	handler           *Handler
+	authorizer        *adminauthorization.Engine
+	status            StatusSource
+	relays            RelayStatusSource
+	build             BuildInfo
+	policy            *adminrevision.Service
+	reloader          PolicyReloader
+	providers         *adminrevision.ProviderService
+	operations        *adminoperations.Service
+	localUsers        *adminlocaluser.Service
+	oauthRepositories storage.Repositories
+	oauthTransactions storage.TransactionManager
 }
 
 type requestContextKey int
@@ -171,6 +185,11 @@ var capabilityChecks = []adminauthorization.Request{
 	{Resource: adminauthorization.ResourceProvider, Operation: adminauthorization.OperationValidate},
 	{Resource: adminauthorization.ResourceProvider, Operation: adminauthorization.OperationPublish},
 	{Resource: adminauthorization.ResourceProvider, Operation: adminauthorization.OperationRollback},
+	{Resource: adminauthorization.ResourceOAuthClient, Operation: adminauthorization.OperationList},
+	{Resource: adminauthorization.ResourceOAuthClient, Operation: adminauthorization.OperationCreate},
+	{Resource: adminauthorization.ResourceOAuthClient, Operation: adminauthorization.OperationUpdate},
+	{Resource: adminauthorization.ResourceOAuthClient, Operation: adminauthorization.OperationDelete},
+	{Resource: adminauthorization.ResourceOAuthClient, Operation: adminauthorization.OperationRevoke},
 	{Resource: adminauthorization.ResourceAssignment, Operation: adminauthorization.OperationList},
 	{Resource: adminauthorization.ResourcePolicy, Operation: adminauthorization.OperationRead},
 	{Resource: adminauthorization.ResourcePolicy, Operation: adminauthorization.OperationCreate},
@@ -207,11 +226,15 @@ func (api *readAPI) routes(group *echo.Group) {
 	protected.GET("/audit", api.listAudit, api.permission(adminauthorization.ResourceAudit, adminauthorization.OperationList))
 	protected.GET("/relays", api.listRelays, api.permission(adminauthorization.ResourceRelay, adminauthorization.OperationList))
 	if api.policy != nil {
-		protected.GET("/policy", api.currentPolicy, api.permission(adminauthorization.ResourcePolicy, adminauthorization.OperationRead))
-		protected.POST("/policy/dry-run", api.dryRunPolicy, api.permission(adminauthorization.ResourcePolicy, adminauthorization.OperationDryRun))
-		protected.POST("/policy/drafts", api.createPolicyDraft, api.permission(adminauthorization.ResourcePolicy, adminauthorization.OperationCreate))
-		protected.POST("/policy/changes/:changeID/publish", api.publishPolicy, api.permission(adminauthorization.ResourcePolicy, adminauthorization.OperationPublish))
-		protected.POST("/policy/rollback", api.rollbackPolicy, api.permission(adminauthorization.ResourcePolicy, adminauthorization.OperationRollback))
+		protected.GET("/authorization", api.currentPolicy, api.permission(adminauthorization.ResourcePolicy, adminauthorization.OperationRead))
+		protected.POST("/authorization/dry-run", api.dryRunPolicy, api.permission(adminauthorization.ResourcePolicy, adminauthorization.OperationDryRun))
+		protected.POST("/authorization/drafts", api.createPolicyDraft, api.permission(adminauthorization.ResourcePolicy, adminauthorization.OperationCreate))
+		protected.POST("/authorization/changes/:changeID/publish", api.publishPolicy, api.permission(adminauthorization.ResourcePolicy, adminauthorization.OperationPublish))
+		protected.POST("/authorization/rollback", api.rollbackPolicy, api.permission(adminauthorization.ResourcePolicy, adminauthorization.OperationRollback))
+		protected.GET("/authorization/delegations", api.listDelegations)
+		protected.GET("/authorization/delegations/principals", api.listDelegationPrincipals)
+		protected.PUT("/authorization/delegations/:bindingID", api.putDelegation)
+		protected.DELETE("/authorization/delegations/:bindingID", api.deleteDelegation)
 	}
 	if api.providers != nil {
 		protected.GET("/providers", api.listProviders, api.permission(adminauthorization.ResourceProvider, adminauthorization.OperationList))
@@ -221,9 +244,18 @@ func (api *readAPI) routes(group *echo.Group) {
 		protected.POST("/providers/:providerID/changes/:changeID/publish", api.publishProvider, api.permission(adminauthorization.ResourceProvider, adminauthorization.OperationPublish))
 		protected.POST("/providers/:providerID/rollback", api.rollbackProvider, api.permission(adminauthorization.ResourceProvider, adminauthorization.OperationRollback))
 	}
+	if api.oauthRepositories != nil {
+		protected.GET("/oauth-clients", api.listOAuthClients, api.permission(adminauthorization.ResourceOAuthClient, adminauthorization.OperationList))
+		protected.POST("/oauth-clients", api.createOAuthClient, api.permission(adminauthorization.ResourceOAuthClient, adminauthorization.OperationCreate))
+		protected.PUT("/oauth-clients/:clientID", api.updateOAuthClient, api.permission(adminauthorization.ResourceOAuthClient, adminauthorization.OperationUpdate))
+		protected.POST("/oauth-clients/:clientID/secret", api.rotateOAuthClientSecret, api.permission(adminauthorization.ResourceOAuthClient, adminauthorization.OperationUpdate))
+		protected.POST("/oauth-clients/:clientID/enabled", api.setOAuthClientEnabled, api.permission(adminauthorization.ResourceOAuthClient, adminauthorization.OperationUpdate))
+		protected.DELETE("/oauth-clients/:clientID", api.deleteOAuthClient, api.permission(adminauthorization.ResourceOAuthClient, adminauthorization.OperationDelete))
+		protected.DELETE("/oauth-clients/:clientID/consents/:principalID", api.revokeOAuthConsent, api.permission(adminauthorization.ResourceOAuthClient, adminauthorization.OperationRevoke))
+	}
 	if api.operations != nil {
 		protected.POST("/principals/:principalID/revoke", api.revokePrincipalSessions, api.permission(adminauthorization.ResourceSession, adminauthorization.OperationRevoke))
-		protected.POST("/principals/:principalID/device-sessions/:deviceSessionID/revoke", api.revokeDeviceSession, api.permission(adminauthorization.ResourceSession, adminauthorization.OperationRevoke))
+		protected.POST("/principals/:principalID/oauth-grants/:authorizationID/revoke", api.revokeOAuthGrant, api.permission(adminauthorization.ResourceSession, adminauthorization.OperationRevoke))
 		protected.POST("/sessions/:sessionID/stop", api.stopSession, api.permission(adminauthorization.ResourceSession, adminauthorization.OperationStop))
 		protected.POST("/tasks/:taskID/stop", api.stopTask, api.permission(adminauthorization.ResourceTask, adminauthorization.OperationStop))
 		if api.operations.RelayAvailable() {
@@ -337,19 +369,29 @@ func (api *readAPI) authorizedCapabilities(
 	subject adminauthorization.Subject,
 ) ([]string, []map[string]any) {
 	capabilities := make([]string, 0, len(capabilityChecks))
+	seenPlatform := make(map[string]struct{})
 	for _, permission := range capabilityChecks {
+		key := permission.Key()
 		if api.authorizer.Authorize(ctx, subject, permission).Allowed {
-			capabilities = append(capabilities, permission.Key())
+			if _, duplicate := seenPlatform[key]; !duplicate {
+				capabilities = append(capabilities, key)
+				seenPlatform[key] = struct{}{}
+			}
 		}
 	}
 	sort.Strings(capabilities)
 	namespaceScopes := make([]map[string]any, 0)
 	for _, namespace := range api.authorizer.DelegatedNamespaces(subject) {
 		allowed := make([]string, 0, len(capabilityChecks))
+		seen := make(map[string]struct{})
 		for _, permission := range capabilityChecks {
 			permission.Namespace = namespace
 			if api.authorizer.Authorize(ctx, subject, permission).Allowed {
-				allowed = append(allowed, permission.Key())
+				key := permission.Key()
+				if _, duplicate := seen[key]; !duplicate {
+					allowed = append(allowed, key)
+					seen[key] = struct{}{}
+				}
 			}
 		}
 		sort.Strings(allowed)

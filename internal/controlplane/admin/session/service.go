@@ -153,21 +153,21 @@ func (service *Service) ExchangeBreakGlass(
 }
 
 // ExchangePrincipal creates a browser-only Management Session from an already
-// verified Gateway access-token identity. The Token Family is re-read inside
+// verified Gateway access-token identity. The OAuth grant is re-read inside
 // the transaction so revocation racing the exchange fails closed.
 func (service *Service) ExchangePrincipal(
 	ctx context.Context,
-	principalID, familyID string,
+	principalID, authorizationID string,
 	authentication adminauthorization.AuthenticationType,
 	requestID string,
 ) (Credentials, error) {
 	principalID = strings.TrimSpace(principalID)
-	familyID = strings.TrimSpace(familyID)
+	authorizationID = strings.TrimSpace(authorizationID)
 	requestID = strings.TrimSpace(requestID)
 	if _, err := uuid.Parse(principalID); err != nil {
 		return Credentials{}, ErrAuthenticationFailed
 	}
-	if _, err := uuid.Parse(familyID); err != nil || requestID == "" ||
+	if _, err := uuid.Parse(authorizationID); err != nil || requestID == "" ||
 		(authentication != adminauthorization.AuthenticationNormal && authentication != adminauthorization.AuthenticationBootstrap) {
 		return Credentials{}, ErrAuthenticationFailed
 	}
@@ -188,20 +188,20 @@ func (service *Service) ExchangePrincipal(
 	eventID := service.newID()
 	var expiresAt time.Time
 	err = service.store.WithinTransaction(ctx, func(repositories storage.Repositories) error {
-		family, err := repositories.TokenFamilies().GetByID(ctx, familyID)
-		if err != nil || family.PrincipalID != principalID || family.RevokedAt != nil || !family.ExpiresAt.After(now) {
+		active, err := repositories.OAuthSessions().RequestActive(ctx, authorizationID, now)
+		if err != nil || !active {
 			return ErrAuthenticationFailed
 		}
 		if _, err := repositories.Principals().GetByID(ctx, principalID); err != nil {
 			return ErrAuthenticationFailed
 		}
-		expiresAt = minTime(family.ExpiresAt, now.Add(normalSessionAbsoluteTTL))
+		expiresAt = now.Add(normalSessionAbsoluteTTL)
 		idleExpiresAt := minTime(expiresAt, now.Add(normalSessionIdleTTL))
 		if !idleExpiresAt.After(now) {
 			return ErrAuthenticationFailed
 		}
 		if err := repositories.AdminSessions().Create(ctx, storage.AdminSession{
-			IDHash: sessionHash[:], PrincipalID: principalID, TokenFamilyID: familyID,
+			IDHash: sessionHash[:], PrincipalID: principalID, AuthorizationID: authorizationID,
 			AuthenticationType: string(authentication), CSRFTokenHash: csrfHash[:],
 			CreatedAt: now, LastSeenAt: now, IdleExpiresAt: idleExpiresAt, AbsoluteExpiresAt: expiresAt,
 		}); err != nil {
@@ -296,8 +296,8 @@ func (service *Service) Authenticate(ctx context.Context, token string) (storage
 		}
 	} else if stored.AuthenticationType == string(adminauthorization.AuthenticationNormal) ||
 		stored.AuthenticationType == string(adminauthorization.AuthenticationBootstrap) {
-		family, err := service.store.TokenFamilies().GetByID(ctx, stored.TokenFamilyID)
-		if err != nil || family.PrincipalID != stored.PrincipalID || family.RevokedAt != nil || !family.ExpiresAt.After(now) {
+		active, err := service.store.OAuthSessions().RequestActive(ctx, stored.AuthorizationID, now)
+		if err != nil || !active {
 			return storage.AdminSession{}, ErrSessionInvalid
 		}
 		if now.Sub(stored.LastSeenAt) >= time.Minute {

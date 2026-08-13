@@ -79,7 +79,7 @@ func TestBreakGlassSecretRotationInvalidatesIssuedSession(t *testing.T) {
 	}
 }
 
-func TestAuthenticateSubjectUsesCurrentGroupsAndTokenFamilyRevocation(t *testing.T) {
+func TestAuthenticateSubjectUsesCurrentGroupsAndOAuthGrantRevocation(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
 	now := time.Date(2026, 8, 10, 11, 30, 0, 0, time.UTC)
@@ -90,17 +90,17 @@ func TestAuthenticateSubjectUsesCurrentGroupsAndTokenFamilyRevocation(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	familyID := uuid.NewString()
-	if err := store.TokenFamilies().Create(ctx, storage.TokenFamily{
-		ID: familyID, PrincipalID: principal.ID, DeviceID: "management-browser",
-		RefreshTokenHash: bytes.Repeat([]byte{8}, 32), CreatedAt: now, ExpiresAt: now.Add(time.Hour),
+	authorizationID := uuid.NewString()
+	if err := store.OAuthSessions().Create(ctx, storage.OAuthSession{
+		Kind: "access_token", SignatureHash: bytes.Repeat([]byte{8}, 32), RequestID: authorizationID,
+		RequestJSON: []byte(`{}`), Status: "active", CreatedAt: now, ExpiresAt: now.Add(time.Hour),
 	}); err != nil {
 		t.Fatal(err)
 	}
 	token := opaqueToken(10)
 	tokenHash := sha256.Sum256([]byte(token))
 	if err := store.AdminSessions().Create(ctx, storage.AdminSession{
-		IDHash: tokenHash[:], PrincipalID: principal.ID, TokenFamilyID: familyID,
+		IDHash: tokenHash[:], PrincipalID: principal.ID, AuthorizationID: authorizationID,
 		AuthenticationType: string(adminauthorization.AuthenticationNormal), CSRFTokenHash: bytes.Repeat([]byte{9}, 32),
 		CreatedAt: now, LastSeenAt: now, IdleExpiresAt: now.Add(15 * time.Minute), AbsoluteExpiresAt: now.Add(time.Hour),
 	}); err != nil {
@@ -118,11 +118,11 @@ func TestAuthenticateSubjectUsesCurrentGroupsAndTokenFamilyRevocation(t *testing
 	if err != nil || subject.ID != principal.ID || len(subject.Groups) != 1 || subject.Groups[0] != "security" {
 		t.Fatalf("subject=%#v error=%v", subject, err)
 	}
-	if err := store.TokenFamilies().Revoke(ctx, familyID, now); err != nil {
+	if err := store.OAuthSessions().RevokeRequest(ctx, authorizationID, now); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := service.AuthenticateSubject(ctx, token); !errors.Is(err, ErrSessionInvalid) {
-		t.Fatalf("revoked family authentication error = %v", err)
+		t.Fatalf("revoked OAuth grant authentication error = %v", err)
 	}
 }
 
@@ -137,18 +137,18 @@ func TestPrincipalExchangePersistsDedicatedSessionAndAudit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	family := storage.TokenFamily{
-		ID: uuid.NewString(), PrincipalID: principal.ID, DeviceID: "browser",
-		RefreshTokenHash: bytes.Repeat([]byte{12}, 32), CreatedAt: now, ExpiresAt: now.Add(24 * time.Hour),
-	}
-	if err := store.TokenFamilies().Create(ctx, family); err != nil {
+	authorizationID := uuid.NewString()
+	if err := store.OAuthSessions().Create(ctx, storage.OAuthSession{
+		Kind: "refresh_token", SignatureHash: bytes.Repeat([]byte{12}, 32), RequestID: authorizationID,
+		RequestJSON: []byte(`{}`), Status: "active", CreatedAt: now, ExpiresAt: now.Add(24 * time.Hour),
+	}); err != nil {
 		t.Fatal(err)
 	}
 	service, _ := New(store, &fakeBreakGlassVerifier{})
 	service.now = func() time.Time { return now }
 	service.random = bytes.NewReader(append(bytes.Repeat([]byte{13}, 32), bytes.Repeat([]byte{14}, 32)...))
 	issued, err := service.ExchangePrincipal(
-		ctx, principal.ID, family.ID, adminauthorization.AuthenticationNormal, "request-principal-1",
+		ctx, principal.ID, authorizationID, adminauthorization.AuthenticationNormal, "request-principal-1",
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -161,7 +161,7 @@ func TestPrincipalExchangePersistsDedicatedSessionAndAudit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stored.PrincipalID != principal.ID || stored.TokenFamilyID != family.ID ||
+	if stored.PrincipalID != principal.ID || stored.AuthorizationID != authorizationID ||
 		stored.AuthenticationType != "normal" || stored.IdleExpiresAt != now.Add(normalSessionIdleTTL) {
 		t.Fatalf("stored principal session=%+v", stored)
 	}
@@ -180,14 +180,14 @@ func TestPrincipalExchangePersistsDedicatedSessionAndAudit(t *testing.T) {
 	if err != nil || len(events) != 1 || events[0].PrincipalID != principal.ID || events[0].RequestID != "request-principal-1" {
 		t.Fatalf("principal exchange audit=%+v error=%v", events, err)
 	}
-	if err := store.TokenFamilies().Revoke(ctx, family.ID, now); err != nil {
+	if err := store.OAuthSessions().RevokeRequest(ctx, authorizationID, now); err != nil {
 		t.Fatal(err)
 	}
 	service.random = bytes.NewReader(append(bytes.Repeat([]byte{15}, 32), bytes.Repeat([]byte{16}, 32)...))
 	if _, err := service.ExchangePrincipal(
-		ctx, principal.ID, family.ID, adminauthorization.AuthenticationNormal, "request-principal-2",
+		ctx, principal.ID, authorizationID, adminauthorization.AuthenticationNormal, "request-principal-2",
 	); !errors.Is(err, ErrAuthenticationFailed) {
-		t.Fatalf("revoked family exchange error=%v", err)
+		t.Fatalf("revoked OAuth grant exchange error=%v", err)
 	}
 }
 

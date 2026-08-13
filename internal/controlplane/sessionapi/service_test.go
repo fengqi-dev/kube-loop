@@ -32,6 +32,26 @@ type staticNetworkDiscoverer struct{}
 
 type staticCapabilityDiscoverer struct{}
 
+type revocableCapabilityDiscoverer struct{ revoked bool }
+
+func (discoverer *revocableCapabilityDiscoverer) DiscoverCapabilities(
+	ctx context.Context,
+	principal controlplaneapi.Principal,
+	namespace string,
+) (capability.Snapshot, *controlplaneapi.Error) {
+	if discoverer.revoked {
+		snapshot, err := capability.Normalize(capability.Snapshot{
+			SchemaVersion: capability.SchemaVersion, PrincipalID: principal.Subject,
+			Namespace: namespace, GatewayVersion: "v2-test",
+		})
+		if err != nil {
+			return capability.Snapshot{}, &controlplaneapi.Error{Code: controlplaneapi.CodeInternal, Cause: err}
+		}
+		return snapshot, nil
+	}
+	return staticCapabilityDiscoverer{}.DiscoverCapabilities(ctx, principal, namespace)
+}
+
 func (staticCapabilityDiscoverer) DiscoverCapabilities(
 	_ context.Context,
 	principal controlplaneapi.Principal,
@@ -212,6 +232,29 @@ func TestExpiredSessionCannotBeResurrected(t *testing.T) {
 	}
 }
 
+func TestHeartbeatDisconnectsRuntimeAfterPolicyRevocation(t *testing.T) {
+	now := time.Date(2026, 8, 10, 2, 30, 0, 0, time.UTC)
+	discoverer := &revocableCapabilityDiscoverer{}
+	server, stateStore, _, principalID := newSessionTestServerWithCapabilities(t, func() time.Time { return now }, discoverer)
+	defer stateStore.Close()
+	created := sessionRequest(t, server, http.MethodPost, "/api/sessions?namespace=development", principalID, map[string]string{
+		sessionapi.IdempotencyHeader: "revocable-session",
+	})
+	document := decodeDocument(t, created)
+	discoverer.revoked = true
+	heartbeat := sessionRequest(t, server, http.MethodPost,
+		"/api/sessions/"+document.ID+"/heartbeat?namespace=development", principalID,
+		map[string]string{"If-Match": `"1"`},
+	)
+	if heartbeat.Code != http.StatusForbidden {
+		t.Fatalf("revoked heartbeat status = %d body = %s", heartbeat.Code, heartbeat.Body.String())
+	}
+	stored, err := stateStore.Sessions().GetByID(context.Background(), document.ID)
+	if err != nil || stored.State != "disconnected" || stored.Generation != 2 {
+		t.Fatalf("revoked session = %#v, %v", stored, err)
+	}
+}
+
 func TestSessionInputValidationStopsBeforeStorageLookup(t *testing.T) {
 	now := time.Now()
 	server, stateStore, _, principalID := newSessionTestServer(t, func() time.Time { return now })
@@ -238,6 +281,14 @@ func newSessionTestServer(
 	t *testing.T,
 	now func() time.Time,
 ) (*controlplane.Server, *storage.Store, *auditCapture, string) {
+	return newSessionTestServerWithCapabilities(t, now, staticCapabilityDiscoverer{})
+}
+
+func newSessionTestServerWithCapabilities(
+	t *testing.T,
+	now func() time.Time,
+	discoverer sessionapi.CapabilityDiscoverer,
+) (*controlplane.Server, *storage.Store, *auditCapture, string) {
 	t.Helper()
 	stateStore, err := storage.Open(context.Background(), storage.Config{
 		Backend: storage.BackendSQLite, SQLitePath: filepath.Join(t.TempDir(), "sessions.db"), ControlPlaneReplicas: 1,
@@ -255,7 +306,7 @@ func newSessionTestServer(
 	}
 	handler, err := sessionapi.New(stateStore, sessionapi.Config{
 		ClusterID: "test-cluster", SessionTTL: 2 * time.Minute, MaxLifetime: time.Hour, Now: now,
-		Networks: staticNetworkDiscoverer{}, Capabilities: staticCapabilityDiscoverer{},
+		Networks: staticNetworkDiscoverer{}, Capabilities: discoverer,
 	})
 	if err != nil {
 		stateStore.Close()

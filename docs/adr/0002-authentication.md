@@ -41,19 +41,19 @@ OIDC 身份主键为规范化 `issuer + subject`。必须严格校验 issuer、�
 
 ### 3. 本地账户
 
-Control Plane 提供本地用户名、密码与可选 TOTP 登录。本地账户由 Management Plane 创建和禁用，密码只保存强哈希，认证成功后走与 OIDC 相同的 Authorization Code、PKCE、Gateway Token 和 Session 流程。浏览器已有有效的 Management Session 时可直接完成授权回调。
+Control Plane 提供本地用户名、密码与可选 TOTP 登录。本地账户由 Management Plane 创建和禁用，密码只保存强哈希，认证成功后进入同一个 Fosite OAuth/OIDC Provider。浏览器已有有效的 OAuth SSO Session 时可直接完成授权回调。
 
 ### 4. Gateway Token 边界
 
-OIDC 或本地账户认证完成后均签发相同格式的短期 Access Token 和可轮换 Refresh Token Family。Refresh Token 只以单向哈希形式持久化；复用已轮换 Token 会撤销整个 Family。桌面端通过操作系统安全存储保存 Refresh Token，普通配置文件只保存服务地址和非敏感 UI 状态。
+OIDC 或本地账户认证完成后均由 Fosite 签发 opaque Access Token；允许 `offline_access` 的流程可以获得可轮换 Refresh Token，OIDC 流程的 ID Token 使用 ES256。数据库只保存 token signature 的 SHA-256 与稳定的 Fosite request/session DTO，不保存 token、code 或 challenge 明文。Refresh Token 重放会撤销整个 OAuth grant。桌面端通过操作系统安全存储保存 Refresh Token，普通配置文件只保存服务地址和非敏感 UI 状态。
 
-退出登录、管理员撤销或检测复用时，Control Plane 撤销 Token Family，并关闭属于该 Principal/Device 的活动 Session；Data Plane 使用短期 RelayTicket，将撤销传播延迟限制在 Ticket 有效期内。
+退出登录、管理员撤销或检测复用时，Control Plane 撤销 OAuth grant，并关闭属于该 Principal/Device 的活动 Session；Data Plane 使用短期 RelayTicket，将撤销传播延迟限制在 Ticket 有效期内。
 
-Refresh 轮换和复用撤销必须在数据库事务中提交，不能在返回复用错误后以 best-effort 方式异步撤销。Token Family、历史 Refresh Token 哈希与撤销状态存放在 Control Plane Store，因此 Control Plane 重启后仍能继续验证 Access Token、轮换 Refresh Token，并识别重启前 Token 的复用。桌面退出登录先停止本地功能流并关闭 Data Plane WSS，再断开远端 Cluster Session，随后撤销 Token Family 并删除系统安全存储中的凭据；各清理步骤独立执行并汇总错误，避免某一步失败阻止其余清理。
+Refresh 轮换、code 消费和 grant 撤销必须在数据库事务中提交，不能在返回复用错误后以 best-effort 方式异步撤销。OAuth request/session 与撤销状态存放在 Control Plane Store，因此 Control Plane 重启后仍能 introspect opaque Access Token、轮换 Refresh Token，并识别重放。桌面退出登录先停止本地功能流并关闭 Data Plane WSS，再断开远端 Cluster Session，随后撤销 OAuth grant 并删除系统安全存储中的凭据；各清理步骤独立执行并汇总错误，避免某一步失败阻止其余清理。
 
 ### 5. 明确不做
 
-- V2.0 不实现 Resource Owner Password Credentials。
+- Password Grant 只允许管理员显式启用的 confidential Client，并且只验证 KubeLoop Local account；启用 MFA 的账户必须提交 second factor。
 - V2.0 不允许客户端上传 issuer、JWKS 或 claim mapping。
 - 不提供无需凭据的登录方式。
 

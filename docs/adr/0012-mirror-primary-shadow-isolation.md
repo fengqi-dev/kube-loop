@@ -67,7 +67,7 @@ cancel all actors immediately.
 
 The Control Plane replica that owns the authenticated WebSocket also owns the
 Gateway listeners, primary sockets, authorization lease and restoration. Stop,
-Token Family or Session revocation, WebSocket loss and graceful shutdown close
+OAuth grant or Session revocation, WebSocket loss and graceful shutdown close
 listeners and active sockets, restore the snapshot through the Control Plane
 system Kubernetes client, and only then remove the snapshot. Restore failure
 keeps the Task in `recovering`; stale-owner reconciliation uses the observed
@@ -89,5 +89,5 @@ same durable compensation.
 - Real Minikube coverage proves TCP and UDP requests traverse the managed
   EndpointSlice and original Pod backend while the local target receives the
   same request copy. It also proves local responses cannot replace primary
-  responses, and that explicit stop, abrupt desktop loss, Token Family
+  responses, and that explicit stop, abrupt desktop loss, OAuth grant
   revocation and stale-owner recovery restore the original Service resources.

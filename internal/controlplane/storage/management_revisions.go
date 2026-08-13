@@ -16,12 +16,12 @@ func (repository *adminPolicyRevisionRepository) Create(ctx context.Context, rev
 	if err := normalizeAdminPolicyRevision(&revision); err != nil {
 		return AdminPolicyRevision{}, err
 	}
-	query := repository.bind(`INSERT INTO admin_policy_revisions(
+	query := repository.bind(`INSERT INTO authorization_revisions(
 		id, schema_version, spec_json, spec_hash, validation_state, validation_json, created_by,
 		created_authentication_type, reason, created_at
 	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING revision`)
 	if repository.backend == BackendPostgreSQL {
-		query = `INSERT INTO admin_policy_revisions(
+		query = `INSERT INTO authorization_revisions(
 			id, schema_version, spec_json, spec_hash, validation_state, validation_json, created_by,
 			created_authentication_type, reason, created_at
 		) VALUES ($1, $2, $3::jsonb, $4, $5, $6::jsonb, $7, $8, $9, $10) RETURNING revision`
@@ -60,7 +60,7 @@ func (repository *adminPolicyRevisionRepository) Get(ctx context.Context, number
 	}
 	query := repository.bind(`SELECT revision, id, schema_version, spec_json, spec_hash, validation_state,
 		validation_json, created_by, created_authentication_type, reason, created_at
-		FROM admin_policy_revisions WHERE revision = ?`)
+		FROM authorization_revisions WHERE revision = ?`)
 	revision, err := scanAdminPolicyRevision(repository.executor.QueryRowContext(ctx, query, number))
 	if errors.Is(err, sql.ErrNoRows) {
 		return AdminPolicyRevision{}, ErrNotFound
@@ -176,9 +176,6 @@ func normalizeProviderConfigRevision(revision *ProviderConfigRevision) error {
 		return errors.New("provider type must be oidc")
 	}
 	if revision.Config, err = canonicalJSONObject(revision.Config, "provider configuration"); err != nil {
-		return err
-	}
-	if err := rejectPlaintextSecrets(revision.Config); err != nil {
 		return err
 	}
 	revision.ConfigHash = jsonSHA256(revision.Config)

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"slices"
 	"strings"
 
 	adminauthorization "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/authorization"
@@ -90,20 +89,22 @@ func ensureInitialAdminPolicy(ctx context.Context, service *adminrevision.Servic
 	if err != nil {
 		return err
 	}
-	for _, assignment := range state.Snapshot.Assignments {
-		if assignment.Role != adminauthorization.RolePlatformAdmin {
+	for _, binding := range state.Snapshot.Bindings {
+		if binding.RoleID != adminauthorization.RolePlatformAdmin {
 			continue
 		}
-		if slices.Contains(assignment.Subjects, principalID) {
+		if binding.Subject.Type == adminauthorization.SubjectPrincipal && binding.Subject.PrincipalID == principalID {
 			return nil
 		}
 	}
 	expectedETag := state.Pointer.ETag
 	snapshot := state.Snapshot
 	snapshot.Revision = 0
-	snapshot.Assignments = append(snapshot.Assignments, adminauthorization.Assignment{
-		ID:   uuid.NewSHA1(uuid.NameSpaceURL, []byte("kubeloop:helm-admin:"+principalID)).String(),
-		Role: adminauthorization.RolePlatformAdmin, Subjects: []string{principalID},
+	snapshot.Bindings = append(snapshot.Bindings, adminauthorization.Binding{
+		ID:      uuid.NewSHA1(uuid.NameSpaceURL, []byte("kubeloop:initial-admin:"+principalID)).String(),
+		Subject: adminauthorization.SubjectRef{Type: adminauthorization.SubjectPrincipal, PrincipalID: principalID},
+		RoleID:  adminauthorization.RolePlatformAdmin, Scope: adminauthorization.BindingScope{Type: adminauthorization.ScopePlatform},
+		ManagedBy: adminauthorization.ManagedByPlatform, CreatedBy: principalID,
 	})
 	idempotencyKey := fmt.Sprintf("initial-admin-policy-%s-%d", principalID, expectedETag)
 	requestID := uuid.NewString()

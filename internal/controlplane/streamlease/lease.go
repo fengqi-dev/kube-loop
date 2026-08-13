@@ -5,13 +5,14 @@ import (
 	"errors"
 	"time"
 
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/authorization"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/sessionapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 )
 
 type Store interface {
-	TokenFamilies() storage.TokenFamilyRepository
+	OAuthSessions() storage.OAuthSessionRepository
 	Sessions() storage.SessionRepository
 	Tasks() storage.TaskRepository
 }
@@ -22,6 +23,8 @@ type Config struct {
 	Runtime       RuntimeRegistry
 	TaskID        string
 	HeartbeatTask bool
+	Authorizer    authorization.Authorizer
+	Authorization authorization.Request
 }
 
 type RuntimeRegistry interface {
@@ -47,7 +50,7 @@ func Start(
 		config.Now = time.Now
 	}
 	if config.CheckInterval == 0 {
-		config.CheckInterval = 5 * time.Second
+		config.CheckInterval = 500 * time.Millisecond
 	}
 	if config.CheckInterval < 10*time.Millisecond || config.CheckInterval > 30*time.Second {
 		return nil, nil, errors.New("authorization lease check interval must be between 10ms and 30s")
@@ -61,8 +64,8 @@ func Start(
 	}
 	var ctx context.Context
 	var cancel context.CancelFunc
-	if principal.AccessExpiresAt.IsZero() || principal.FamilyID != "" {
-		// A refresh-token Family is checked throughout the stream, so a refreshed
+	if principal.AccessExpiresAt.IsZero() || principal.AuthorizationID != "" {
+		// The OAuth grant is checked throughout the stream, so a refreshed
 		// login must not leave the WebSocket bound to the opening access token's
 		// immutable expiry. Credentials without a Family retain that deadline.
 		ctx, cancel = context.WithCancel(parent)
@@ -101,11 +104,16 @@ func watch(
 		case <-ticker.C:
 			checkContext, checkCancel := context.WithTimeout(ctx, config.CheckInterval)
 			valid := true
-			if principal.FamilyID != "" {
-				family, err := store.TokenFamilies().GetByID(checkContext, principal.FamilyID)
+			if config.Authorizer != nil {
+				valid = config.Authorizer.Authorize(checkContext, authorization.Subject{
+					ID: principal.Subject, Provider: principal.Provider, Groups: append([]string(nil), principal.Groups...),
+				}, config.Authorization).Allowed
+			}
+			if principal.AuthorizationID != "" {
+				principalID, deviceID, err := store.OAuthSessions().RequestOwner(checkContext, principal.AuthorizationID)
+				active, activeErr := store.OAuthSessions().RequestActive(checkContext, principal.AuthorizationID, config.Now().UTC())
 				now := config.Now().UTC()
-				valid = err == nil && family.PrincipalID == principal.Subject && family.DeviceID == principal.DeviceID &&
-					family.RevokedAt == nil && family.ExpiresAt.After(now)
+				valid = err == nil && activeErr == nil && active && principalID == principal.Subject && deviceID == principal.DeviceID && !now.IsZero()
 			}
 			if valid {
 				storedSession, err := store.Sessions().GetByID(checkContext, sessionID)

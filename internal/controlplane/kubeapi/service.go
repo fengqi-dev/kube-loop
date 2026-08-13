@@ -103,7 +103,7 @@ func (handler *Service) DiscoverCapabilities(
 	namespace string,
 ) (capability.Snapshot, *controlplaneapi.Error) {
 	client, err := handler.provider.ClientFor(authorization.Subject{
-		ID: principal.Subject, Groups: append([]string(nil), principal.Groups...),
+		ID: principal.Subject, Provider: principal.Provider, Groups: append([]string(nil), principal.Groups...),
 	})
 	if err != nil {
 		return capability.Snapshot{}, &controlplaneapi.Error{
@@ -172,7 +172,7 @@ func (handler *Service) discoverCapabilities(
 		// Control Plane only creates the TrafficBinding after the Gateway policy check.
 		{capability: "services.preview", policy: policyRequests("previews", "create", "get", "delete", "stream")},
 	}
-	subject := authorization.Subject{ID: principal.Subject, Groups: append([]string(nil), principal.Groups...)}
+	subject := authorization.Subject{ID: principal.Subject, Provider: principal.Provider, Groups: append([]string(nil), principal.Groups...)}
 	capabilities := make([]string, 0, len(candidates))
 	for _, candidate := range candidates {
 		policyAllowed := true
@@ -244,10 +244,10 @@ func (handler *Service) namespaces(
 		return mapKubernetesError(err)
 	}
 	items := make([]namespaceDocument, 0, len(result.Items))
-	subject := authorization.Subject{ID: principal.Subject, Groups: append([]string(nil), principal.Groups...)}
+	subject := authorization.Subject{ID: principal.Subject, Provider: principal.Provider, Groups: append([]string(nil), principal.Groups...)}
 	for _, item := range result.Items {
 		decision := handler.authorizer.Authorize(request.Context(), subject, authorization.Request{
-			Operation: "list", Namespace: item.Name, ResourceKind: "capabilities",
+			Operation: "list", Namespace: item.Name, ResourceKind: "capabilities", NamespaceLabels: item.Labels, LabelsAvailable: true,
 		})
 		if !decision.Allowed {
 			continue

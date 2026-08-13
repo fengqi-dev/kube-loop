@@ -99,6 +99,15 @@ create_relay_material() {
     --from-file="ca.crt=${directory}/ca.crt"
   )
   kubectl "${secret_args[@]}" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+
+  openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 \
+    -out "${directory}/oidc-signing-key.pem" >/dev/null 2>&1
+  openssl rand -hex 16 >"${directory}/hmac-secret"
+  kubectl create secret generic "${release}-auth" \
+    --namespace "${namespace}" \
+    --from-file="oidc-signing-key.pem=${directory}/oidc-signing-key.pem" \
+    --from-file="hmac-secret=${directory}/hmac-secret" \
+    --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 }
 
 image_repository() {
@@ -127,6 +136,7 @@ helm_apply() {
     --wait --timeout 5m --history-max 10
     --set-string publicURL=https://kubeloop.e2e.invalid
     --set-string "controlPlane.relay.existingSecret=${release}-relay"
+    --set-string "controlPlane.auth.oauth.existingSecret=${release}-auth"
     --set-string "controlPlane.image.repository=$(image_repository "${CONTROL_PLANE_IMAGE}")"
     --set-string "controlPlane.image.tag=$(image_tag "${CONTROL_PLANE_IMAGE}")"
     --set-string controlPlane.image.pullPolicy=IfNotPresent
@@ -141,7 +151,6 @@ helm_apply() {
     args+=(
       --set-string controlPlane.relayRegistry.endpointAllowedHosts=.kubeloop.e2e.invalid
       --set-string 'dataPlane.relayRegistry.endpoint=wss://{podName}.kubeloop.e2e.invalid/tunnel'
-      --set-string controlPlane.auth.token.existingSecret="${release}-relay"
     )
   else
     args+=(

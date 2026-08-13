@@ -165,20 +165,18 @@ func (api *readAPI) wouldRemoveLastPlatformAdmin(request *http.Request, principa
 		localEnabled[user.PrincipalID] = user.Enabled
 	}
 	targetIsAdmin := false
-	for _, assignment := range policy.Snapshot.Assignments {
-		if assignment.Role != adminauthorization.RolePlatformAdmin {
+	for _, binding := range policy.Snapshot.Bindings {
+		if binding.RoleID != adminauthorization.RolePlatformAdmin {
 			continue
 		}
-		if len(assignment.Groups) > 0 {
+		if binding.Subject.Type == adminauthorization.SubjectGroup {
 			return false
 		}
-		for _, subject := range assignment.Subjects {
+		if binding.Subject.Type == adminauthorization.SubjectPrincipal {
+			subject := binding.Subject.PrincipalID
 			if subject == principalID {
 				targetIsAdmin = true
-				continue
-			}
-			enabled, local := localEnabled[subject]
-			if !local || enabled {
+			} else if enabled, local := localEnabled[subject]; !local || enabled {
 				return false
 			}
 		}

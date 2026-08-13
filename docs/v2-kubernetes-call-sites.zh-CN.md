@@ -57,7 +57,7 @@
 
 ## 调用规则
 
-1. 所有用户触发的 Kubernetes 调用必须先完成 Access Token、Token Family、Principal、Gateway Policy、Cluster Session/namespace 所有权校验；有对应 Kubernetes verb 时再执行 SSAR。
+1. 所有用户触发的 Kubernetes 调用必须先完成 Access Token、OAuth grant、Principal、Gateway Policy、Cluster Session/namespace 所有权校验；有对应 Kubernetes verb 时再执行 SSAR。
 2. Control Plane 使用 `ClientFor(subject)` 完成用户意图解析和授权；Operator 只接受已经授权并写入的 `TrafficBinding`，使用自己的 ServiceAccount 执行可恢复的声明式写入。
 3. 流式调用由创建流的 Control Plane 副本持有授权 lease；Token 撤销、客户端断开或 shutdown 必须取消 Kubernetes stream。Data Plane 只能处理网络数据流，不能创建 exec/file Kubernetes stream。
 4. Kubernetes 对象写入必须先持久化 Task/TrafficBinding 与 rollback/cleanup intent。Operator 在实际变更前将快照写入 CR status，并通过 finalizer 重试恢复。

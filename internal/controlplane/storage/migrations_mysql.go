@@ -7,11 +7,13 @@ var mysqlIndexedTextColumns = map[string]struct{}{
 	"cluster_id": {}, "state": {}, "type": {}, "idempotency_key": {}, "task_id": {},
 	"kind": {}, "namespace": {}, "name": {}, "scope": {}, "key": {},
 	"resource_type": {}, "resource_id": {}, "action": {}, "outcome": {}, "request_id": {},
-	"provider_id": {}, "family_id": {}, "status": {}, "configuration_type": {},
+	"provider_id": {}, "status": {}, "configuration_type": {},
 	"configuration_id": {}, "role": {}, "relay_id": {}, "desired_state": {}, "username": {},
 	"authentication_type": {}, "created_authentication_type": {}, "updated_authentication_type": {},
 	"requested_authentication_type": {}, "validation_state": {}, "provider_type": {},
-	"requested_by": {},
+	"requested_by": {}, "client_id": {},
+	"authorization_id": {},
+	"subject_type":     {}, "group_name": {},
 }
 
 var mysqlTimeColumns = map[string]struct{}{
@@ -31,6 +33,7 @@ func mysqlMigrationStatements(sqlite []string) []string {
 func mysqlMigrationStatement(statement string) string {
 	statement = strings.ReplaceAll(statement, "INTEGER PRIMARY KEY AUTOINCREMENT", "BIGINT AUTO_INCREMENT PRIMARY KEY")
 	statement = strings.ReplaceAll(statement, "policy_revision INTEGER", "policy_revision BIGINT")
+	statement = strings.ReplaceAll(statement, "revision INTEGER", "revision BIGINT")
 	statement = strings.ReplaceAll(statement, "BLOB", "VARBINARY(255)")
 	lines := strings.Split(statement, "\n")
 	for index, line := range lines {

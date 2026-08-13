@@ -31,7 +31,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-func TestRealPodExecStopsWhenTokenFamilyIsRevoked(t *testing.T) {
+func TestRealPodExecStopsWhenOAuthGrantIsRevoked(t *testing.T) {
 	harness.RequireE2E(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
@@ -53,18 +53,13 @@ func TestRealPodExecStopsWhenTokenFamilyIsRevoked(t *testing.T) {
 	}
 	defer stateStore.Close()
 	now := time.Now().UTC()
-	principalID, familyID, sessionID := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	principalID, authorizationID, sessionID := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	if _, err := stateStore.Principals().Upsert(ctx, storage.Principal{
 		ID: principalID, Provider: "e2e", ExternalID: "real-pod-user", CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := stateStore.TokenFamilies().Create(ctx, storage.TokenFamily{
-		ID: familyID, PrincipalID: principalID, DeviceID: "e2e-device",
-		RefreshTokenHash: bytes.Repeat([]byte{7}, 32), CreatedAt: now, ExpiresAt: now.Add(2 * time.Minute),
-	}); err != nil {
-		t.Fatal(err)
-	}
+	createOAuthGrant(t, ctx, stateStore, authorizationID, principalID, "e2e-device", 7, now, now.Add(2*time.Minute))
 	spec, err := networkspec.Normalize(networkspec.Spec{ServiceIPs: []string{"10.96.0.10"}})
 	if err != nil {
 		t.Fatal(err)
@@ -115,7 +110,7 @@ func TestRealPodExecStopsWhenTokenFamilyIsRevoked(t *testing.T) {
 		t.Fatal(err)
 	}
 	principal := controlplaneapi.Principal{
-		Subject: principalID, DeviceID: "e2e-device", FamilyID: familyID, AccessExpiresAt: expiresAt,
+		Subject: principalID, DeviceID: "e2e-device", AuthorizationID: authorizationID, AccessExpiresAt: expiresAt,
 	}
 	server, err := controlplane.NewServer(
 		controlplane.Config{PublicURL: "https://controlplane.e2e.invalid"}, controlplane.BuildInfo{},
@@ -168,7 +163,7 @@ func TestRealPodExecStopsWhenTokenFamilyIsRevoked(t *testing.T) {
 	defer connection.CloseNow()
 	waitForExecOutput(t, ctx, connection, "v2-exec-started")
 
-	if err := stateStore.TokenFamilies().Revoke(ctx, familyID, time.Now().UTC()); err != nil {
+	if err := stateStore.OAuthSessions().RevokeRequest(ctx, authorizationID, time.Now().UTC()); err != nil {
 		t.Fatal(err)
 	}
 	exit := waitForCancelledExit(t, ctx, connection)

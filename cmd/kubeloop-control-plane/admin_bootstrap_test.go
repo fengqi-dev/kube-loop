@@ -54,8 +54,8 @@ func TestEnsureInitialAdminPolicyIsOneTime(t *testing.T) {
 		t.Fatal(err)
 	}
 	first, err := revisions.CurrentPolicy(ctx)
-	if err != nil || !first.Active || len(first.Snapshot.Assignments) != 1 ||
-		first.Snapshot.Assignments[0].Role != adminauthorization.RolePlatformAdmin {
+	if err != nil || !first.Active || len(first.Snapshot.Bindings) != 1 ||
+		first.Snapshot.Bindings[0].RoleID != adminauthorization.RolePlatformAdmin {
 		t.Fatalf("initial policy = %#v, %v", first, err)
 	}
 	if err := ensureInitialAdminPolicy(ctx, revisions, admin.PrincipalID); err != nil {

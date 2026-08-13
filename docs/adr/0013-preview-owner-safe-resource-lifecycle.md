@@ -66,7 +66,7 @@ The WebSocket owner jointly owns:
 - Kubernetes resource cleanup.
 
 Durable stop is requested before the desktop sends the stream stop frame. A
-disconnect, Token Family revocation, Access Token expiry, Session termination,
+disconnect, OAuth grant revocation, Access Token expiry, Session termination,
 Control Plane shutdown, or explicit stop closes listeners and invokes the same
 cleanup path.
 

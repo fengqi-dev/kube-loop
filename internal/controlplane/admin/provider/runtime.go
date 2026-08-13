@@ -1,5 +1,6 @@
 // Package provider builds and atomically installs database-managed OIDC
-// Provider revisions without accepting Secret plaintext or arbitrary file paths.
+// Provider revisions. Provider credentials are loaded only from database
+// revisions and are never resolved from arbitrary filesystem paths.
 package provider
 
 import (
@@ -26,14 +27,12 @@ const DefaultReloadInterval = 2 * time.Second
 
 var ErrUnavailable = errors.New("managed authentication Providers are unavailable")
 
-type SecretResolver interface {
-	Resolve(alias, use string) (string, error)
-}
-
 type OIDCConfig struct {
 	DisplayName        string                    `json:"displayName,omitempty"`
 	Issuer             string                    `json:"issuer"`
 	ClientID           string                    `json:"clientId"`
+	ClientSecret       string                    `json:"clientSecret"`
+	CAPEM              string                    `json:"caPem,omitempty"`
 	Scopes             []string                  `json:"scopes,omitempty"`
 	AllowedSigningAlgs []string                  `json:"allowedSigningAlgs,omitempty"`
 	RequiredClaims     []string                  `json:"requiredClaims,omitempty"`
@@ -45,8 +44,6 @@ type OIDCConfig struct {
 type Runtime struct {
 	repositories storage.Repositories
 	registry     *authn.Registry
-	baseline     authconfig.File
-	secrets      SecretResolver
 	publicURL    string
 	interval     time.Duration
 	apply        sync.Mutex
@@ -59,12 +56,10 @@ type Runtime struct {
 func NewRuntime(
 	repositories storage.Repositories,
 	registry *authn.Registry,
-	baseline authconfig.File,
-	secrets SecretResolver,
 	publicURL string,
 	interval time.Duration,
 ) (*Runtime, error) {
-	if repositories == nil || registry == nil || secrets == nil {
+	if repositories == nil || registry == nil {
 		return nil, errors.New("managed Provider runtime dependencies are required")
 	}
 	parsed, err := url.Parse(strings.TrimRight(strings.TrimSpace(publicURL), "/"))
@@ -77,7 +72,7 @@ func NewRuntime(
 	if interval < 100*time.Millisecond || interval > time.Minute {
 		return nil, errors.New("managed Provider reload interval must be between 100ms and 1m")
 	}
-	return &Runtime{repositories: repositories, registry: registry, baseline: cloneFile(baseline), secrets: secrets,
+	return &Runtime{repositories: repositories, registry: registry,
 		publicURL: parsed.String(), interval: interval}, nil
 }
 
@@ -163,10 +158,7 @@ func (runtime *Runtime) Check(context.Context) error {
 }
 
 func (runtime *Runtime) build(ctx context.Context, override *adminrevision.ProviderCandidate) (*authn.Registry, error) {
-	providers := make(map[string]authconfig.Provider, len(runtime.baseline.Providers)+1)
-	for _, item := range runtime.baseline.Providers {
-		providers[item.ID] = item
-	}
+	providers := make(map[string]authconfig.Provider)
 	pointers, err := runtime.repositories.ActiveManagementRevisions().List(ctx, storage.ManagementConfigurationProvider)
 	if err != nil {
 		return nil, ErrUnavailable
@@ -180,7 +172,7 @@ func (runtime *Runtime) build(ctx context.Context, override *adminrevision.Provi
 			return nil, ErrUnavailable
 		}
 		item, enabled, err := runtime.provider(adminrevision.ProviderCandidate{
-			ID: revision.ProviderID, Type: revision.ProviderType, Config: revision.Config, SecretAliases: revision.SecretAliases,
+			ID: revision.ProviderID, Type: revision.ProviderType, Config: revision.Config,
 		})
 		if err != nil {
 			return nil, err
@@ -222,39 +214,25 @@ func (runtime *Runtime) build(ctx context.Context, override *adminrevision.Provi
 }
 
 func (runtime *Runtime) provider(candidate adminrevision.ProviderCandidate) (authconfig.Provider, bool, error) {
-	aliases := make(map[string]string)
-	if err := decodeStrict(candidate.SecretAliases, &aliases); err != nil {
-		return authconfig.Provider{}, false, err
-	}
 	switch candidate.Type {
 	case "oidc":
 		var config OIDCConfig
 		if err := decodeStrict(candidate.Config, &config); err != nil {
 			return authconfig.Provider{}, false, err
 		}
+		if strings.TrimSpace(config.ClientSecret) == "" {
+			return authconfig.Provider{}, false, errors.New("managed Provider client Secret is required")
+		}
 		enabled := config.Enabled == nil || *config.Enabled
 		if !enabled {
 			return authconfig.Provider{ID: candidate.ID}, false, nil
 		}
-		if err := exactAliases(aliases, []string{"client-secret"}, []string{"ca"}); err != nil {
-			return authconfig.Provider{}, false, err
-		}
-		secretFile, err := runtime.secrets.Resolve(aliases["client-secret"], "client-secret")
-		if err != nil {
-			return authconfig.Provider{}, false, ErrUnavailable
-		}
-		caFile := ""
-		if aliases["ca"] != "" {
-			caFile, err = runtime.secrets.Resolve(aliases["ca"], "ca")
-			if err != nil {
-				return authconfig.Provider{}, false, ErrUnavailable
-			}
-		}
 		return authconfig.Provider{ID: candidate.ID, Type: "oidc", DisplayName: config.DisplayName, OIDC: &authconfig.OIDCConfig{
-			Issuer: config.Issuer, ClientID: config.ClientID, ClientSecretFile: secretFile,
+			Issuer: config.Issuer, ClientID: config.ClientID, ClientSecret: config.ClientSecret,
+			CAPEM:       config.CAPEM,
 			RedirectURL: runtime.publicURL + "/oauth2/callback/" + url.PathEscape(candidate.ID),
 			Scopes:      config.Scopes, AllowedSigningAlgs: config.AllowedSigningAlgs,
-			RequiredClaims: config.RequiredClaims, Claims: config.Claims, CAFile: caFile, HTTPTimeout: config.HTTPTimeout,
+			RequiredClaims: config.RequiredClaims, Claims: config.Claims, HTTPTimeout: config.HTTPTimeout,
 		}}, true, nil
 	default:
 		return authconfig.Provider{}, false, errors.New("unsupported managed Provider type")
@@ -271,31 +249,6 @@ func decodeStrict(raw json.RawMessage, destination any) error {
 		return errors.New("managed Provider configuration has trailing content")
 	}
 	return nil
-}
-
-func exactAliases(aliases map[string]string, required, optional []string) error {
-	allowed := make(map[string]struct{}, len(required)+len(optional))
-	for _, use := range append(append([]string(nil), required...), optional...) {
-		allowed[use] = struct{}{}
-	}
-	for use, alias := range aliases {
-		if _, ok := allowed[use]; !ok || strings.TrimSpace(alias) == "" {
-			return fmt.Errorf("managed Provider Secret alias use %q is invalid", use)
-		}
-	}
-	for _, use := range required {
-		if strings.TrimSpace(aliases[use]) == "" {
-			return fmt.Errorf("managed Provider Secret alias %q is required", use)
-		}
-	}
-	return nil
-}
-
-func cloneFile(source authconfig.File) authconfig.File {
-	encoded, _ := json.Marshal(source)
-	var result authconfig.File
-	_ = json.Unmarshal(encoded, &result)
-	return result
 }
 
 func (runtime *Runtime) setError(err error) {

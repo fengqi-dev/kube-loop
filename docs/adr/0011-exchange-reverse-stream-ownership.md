@@ -43,7 +43,7 @@ preserve datagram boundaries and are independently idle-bounded. The desktop
 dials only the local targets explicitly retained in its in-memory request; a
 Gateway response cannot replace them with an arbitrary local address.
 
-Client disconnect, Token Family or Session lease invalidation, explicit Task
+Client disconnect, OAuth grant or Session lease invalidation, explicit Task
 stop and graceful Control Plane shutdown all close listeners first, restore the
 snapshot, and then persist the terminal Task state. A stop request handled by a
 different replica marks the Task as stopping; the owner observes that durable
@@ -76,6 +76,6 @@ rollback snapshot.
 - Real Minikube coverage sends TCP and UDP traffic from Pods through the
   intercepted Service, Control Plane listeners and reverse WSS into loopback-only
   desktop targets. It rejects mixed Gateway/Pod endpoint convergence and
-  verifies explicit stop, abrupt desktop loss, Token Family revocation and a
+  verifies explicit stop, abrupt desktop loss, OAuth grant revocation and a
   replacement Control Plane restoring a stale owner before normal Service traffic
   resumes.

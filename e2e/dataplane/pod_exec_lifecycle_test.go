@@ -3,7 +3,6 @@
 package dataplane
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -133,19 +132,14 @@ func TestRealPodExecTTYDisconnectAndControllerRestart(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = stateStore.Close() })
 	now := time.Now().UTC()
-	principalID, familyID, sessionID := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	principalID, authorizationID, sessionID := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	deviceID := "e2e-exec-device"
 	if _, err := stateStore.Principals().Upsert(ctx, storage.Principal{
 		ID: principalID, Provider: "e2e", ExternalID: "exec-lifecycle", CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := stateStore.TokenFamilies().Create(ctx, storage.TokenFamily{
-		ID: familyID, PrincipalID: principalID, DeviceID: deviceID,
-		RefreshTokenHash: bytes.Repeat([]byte{9}, 32), CreatedAt: now, ExpiresAt: now.Add(5 * time.Minute),
-	}); err != nil {
-		t.Fatal(err)
-	}
+	createOAuthGrant(t, ctx, stateStore, authorizationID, principalID, deviceID, 9, now, now.Add(5*time.Minute))
 	network, err := networkspec.Normalize(networkspec.Spec{ServiceIPs: []string{"10.96.0.10"}})
 	if err != nil {
 		t.Fatal(err)
@@ -170,7 +164,7 @@ func TestRealPodExecTTYDisconnectAndControllerRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	principal := controlplaneapi.Principal{
-		Subject: principalID, DeviceID: deviceID, FamilyID: familyID, AccessExpiresAt: expiresAt,
+		Subject: principalID, DeviceID: deviceID, AuthorizationID: authorizationID, AccessExpiresAt: expiresAt,
 	}
 	activeSession := sessionapi.ActiveSession{
 		ID: sessionID, Namespace: harness.EchoNamespace, Generation: 1,

@@ -11,16 +11,18 @@ import (
 	"sync/atomic"
 
 	"github.com/google/uuid"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 )
 
 var (
-	assignmentIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
-	roleIDPattern       = regexp.MustCompile(`^[a-z][a-z0-9-]{2,63}$`)
-	namespacePattern    = regexp.MustCompile(`^[a-z0-9](?:[-a-z0-9]{0,61}[a-z0-9])?$`)
+	bindingIDPattern  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
+	roleIDPattern     = regexp.MustCompile(`^[a-z][a-z0-9-]{2,63}$`)
+	namespacePattern  = regexp.MustCompile(`^[a-z0-9](?:[-a-z0-9]{0,61}[a-z0-9])?$`)
+	providerIDPattern = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,126}[A-Za-z0-9])?$`)
 )
 
 type Option func(*engineOptions) error
-
 type engineOptions struct {
 	bootstrap       BootstrapConfig
 	bootstrapState  BootstrapState
@@ -29,56 +31,46 @@ type engineOptions struct {
 
 func WithBootstrap(config BootstrapConfig, state BootstrapState) Option {
 	return func(options *engineOptions) error {
-		compiledSubjects, err := compileSubjects(config.Subjects, "bootstrap subjects")
+		subjects, err := compileSubjects(config.Subjects, "bootstrap subjects")
 		if err != nil {
 			return err
 		}
-		compiledGroups, err := compileExactValues(config.Groups, "bootstrap groups")
+		groups, err := compileExactValues(config.Groups, "bootstrap groups")
 		if err != nil {
 			return err
 		}
-		if len(compiledSubjects) == 0 && len(compiledGroups) == 0 {
+		if len(subjects) == 0 && len(groups) == 0 {
 			if config.RecoveryEnabled {
-				return errors.New("bootstrap recovery requires at least one subject or group")
+				return errors.New("bootstrap recovery requires an identity")
 			}
-			options.bootstrap = BootstrapConfig{}
-			options.bootstrapState = nil
 			return nil
 		}
-		options.bootstrap = BootstrapConfig{
-			Subjects: compiledSubjects, Groups: compiledGroups, RecoveryEnabled: config.RecoveryEnabled,
-		}
-		options.bootstrapState = state
+		options.bootstrap, options.bootstrapState = BootstrapConfig{Subjects: subjects, Groups: groups, RecoveryEnabled: config.RecoveryEnabled}, state
 		return nil
 	}
 }
-
 func WithBreakGlass(state BreakGlassStateReader) Option {
-	return func(options *engineOptions) error {
-		options.breakGlassState = state
-		return nil
-	}
+	return func(options *engineOptions) error { options.breakGlassState = state; return nil }
 }
 
 type Engine struct {
 	snapshot atomic.Pointer[compiledSnapshot]
 	options  engineOptions
 }
-
 type compiledSnapshot struct {
-	revision    uint64
-	etag        uint64
-	available   bool
-	roles       map[Role]map[string]struct{}
-	assignments []compiledAssignment
+	revision, etag uint64
+	available      bool
+	roles          map[Role]compiledRole
+	bindings       []compiledBinding
 }
-
-type compiledAssignment struct {
-	id         string
-	role       Role
-	subjects   map[string]struct{}
-	groups     map[string]struct{}
-	namespaces map[string]struct{}
+type compiledRole struct {
+	definition RoleDefinition
+	effects    map[Capability]Effect
+}
+type compiledBinding struct {
+	definition     Binding
+	namespaceNames map[string]struct{}
+	selectors      []labels.Selector
 }
 
 func New(snapshot Snapshot, optionValues ...Option) (*Engine, error) {
@@ -98,100 +90,28 @@ func New(snapshot Snapshot, optionValues ...Option) (*Engine, error) {
 	engine.snapshot.Store(compiled)
 	return engine, nil
 }
-
-func NewDenyAll(optionValues ...Option) (*Engine, error) {
-	return New(Snapshot{Version: CurrentVersion, Assignments: []Assignment{}}, optionValues...)
+func NewDenyAll(options ...Option) (*Engine, error) {
+	return New(Snapshot{Version: CurrentVersion, Bindings: []Binding{}}, options...)
 }
-
 func (engine *Engine) Revision() uint64 {
 	if engine == nil || engine.snapshot.Load() == nil {
 		return 0
 	}
 	return engine.snapshot.Load().revision
 }
-
 func (engine *Engine) ETag() uint64 {
 	if engine == nil || engine.snapshot.Load() == nil {
 		return 0
 	}
 	return engine.snapshot.Load().etag
 }
-
 func (engine *Engine) Available() bool {
-	if engine == nil || engine.snapshot.Load() == nil {
-		return false
-	}
-	return engine.snapshot.Load().available
+	return engine != nil && engine.snapshot.Load() != nil && engine.snapshot.Load().available
 }
 
-// DelegatedNamespaces returns only namespace-admin scopes matching the current
-// regular identity. Callers must still authorize every concrete operation;
-// this is capability discovery, not an authorization decision.
-func (engine *Engine) DelegatedNamespaces(subject Subject) []string {
-	if engine == nil || subject.Authentication != AuthenticationNormal {
-		return nil
-	}
-	subject.ID = strings.TrimSpace(subject.ID)
-	if _, err := uuid.Parse(subject.ID); err != nil {
-		return nil
-	}
-	groups, err := compileExactValues(subject.Groups, "groups")
-	if err != nil {
-		return nil
-	}
-	subject.Groups = groups
-	snapshot := engine.snapshot.Load()
-	if snapshot == nil || !snapshot.available {
-		return nil
-	}
-	namespaces := make(map[string]struct{})
-	for _, assignment := range snapshot.assignments {
-		if len(assignment.namespaces) == 0 || !assignment.matchesSubject(subject) {
-			continue
-		}
-		for namespace := range assignment.namespaces {
-			namespaces[namespace] = struct{}{}
-		}
-	}
-	result := make([]string, 0, len(namespaces))
-	for namespace := range namespaces {
-		result = append(result, namespace)
-	}
-	slices.Sort(result)
-	return result
-}
-
-func (engine *Engine) Update(snapshot Snapshot) error {
-	if engine == nil {
-		return errors.New("management authorizer is nil")
-	}
-	compiled, err := compileSnapshot(snapshot)
-	if err != nil {
-		return err
-	}
-	active := engine.snapshot.Load()
-	if active != nil && compiled.revision <= active.revision {
-		return fmt.Errorf("management policy revision %d must be newer than active revision %d", compiled.revision, active.revision)
-	}
-	if active != nil {
-		compiled.etag = active.etag + 1
-	} else {
-		compiled.etag = 1
-	}
-	engine.snapshot.Store(compiled)
-	return nil
-}
-
-// Apply installs the database-selected active snapshot. Unlike Update it may
-// move to an older immutable revision during rollback; the active pointer ETag
-// must always increase, preventing stale pollers from restoring newer-looking
-// but no longer active content.
 func (engine *Engine) Apply(snapshot Snapshot, etag uint64) error {
-	if engine == nil {
-		return errors.New("management authorizer is nil")
-	}
-	if etag == 0 {
-		return errors.New("management policy ETag must be positive")
+	if engine == nil || etag == 0 {
+		return errors.New("authorization engine and positive ETag are required")
 	}
 	compiled, err := compileSnapshot(snapshot)
 	if err != nil {
@@ -199,169 +119,175 @@ func (engine *Engine) Apply(snapshot Snapshot, etag uint64) error {
 	}
 	active := engine.snapshot.Load()
 	if active != nil && (etag < active.etag || etag == active.etag && active.available) {
-		return fmt.Errorf("management policy ETag %d must be newer than active ETag %d", etag, active.etag)
+		return fmt.Errorf("authorization ETag %d is not newer than %d", etag, active.etag)
 	}
-	compiled.etag = etag
-	compiled.available = true
+	compiled.etag, compiled.available = etag, true
 	engine.snapshot.Store(compiled)
 	return nil
 }
-
-// FailClosed immediately removes all database-backed grants while preserving
-// the last observed revision and ETag. A later Apply with that same ETag may
-// restore a verified snapshot after a transient storage failure.
+func (engine *Engine) Update(snapshot Snapshot) error {
+	if engine == nil {
+		return errors.New("authorization engine is nil")
+	}
+	compiled, err := compileSnapshot(snapshot)
+	if err != nil {
+		return err
+	}
+	active := engine.snapshot.Load()
+	if active != nil && compiled.revision <= active.revision {
+		return errors.New("authorization revision must increase")
+	}
+	if active == nil {
+		compiled.etag = 1
+	} else {
+		compiled.etag = active.etag + 1
+	}
+	engine.snapshot.Store(compiled)
+	return nil
+}
 func (engine *Engine) FailClosed() {
 	if engine == nil {
 		return
 	}
 	active := engine.snapshot.Load()
-	if active == nil || !active.available {
-		return
+	if active != nil && active.available {
+		engine.snapshot.Store(&compiledSnapshot{revision: active.revision, etag: active.etag})
 	}
-	engine.snapshot.Store(&compiledSnapshot{revision: active.revision, etag: active.etag})
 }
 
 func (engine *Engine) Authorize(ctx context.Context, subject Subject, request Request) Decision {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if engine == nil {
-		return Decision{Reason: ReasonNoMatchingAssignment}
-	}
-	snapshot := engine.snapshot.Load()
-	revision := uint64(0)
-	if snapshot != nil {
-		revision = snapshot.revision
-	}
+	snapshot := engineSnapshot(engine)
+	revision := snapshotRevision(snapshot)
 	subject, request, valid := normalize(subject, request)
 	if !valid {
 		return Decision{Reason: ReasonInvalidRequest, Revision: revision}
 	}
+	if request.Namespace != "" && !request.LabelsAvailable && labelsRequiredForDecision(snapshot, subject, request) {
+		return Decision{Reason: ReasonScopeUnavailable, Revision: revision}
+	}
 	if subject.Authentication == AuthenticationBreakGlass {
-		return engine.authorizeBreakGlass(ctx, subject, request, revision)
+		return engine.authorizeBreakGlass(ctx, subject, revision)
 	}
 	if subject.Authentication != AuthenticationNormal && subject.Authentication != AuthenticationBootstrap {
 		return Decision{Reason: ReasonInvalidRequest, Revision: revision}
 	}
-	if subject.Authentication == AuthenticationNormal && snapshot != nil {
-		for _, assignment := range snapshot.assignments {
-			if assignment.matches(subject, request) && snapshot.roleAllows(assignment.role, request) {
-				return allowedDecision(request, revision, assignment.role, assignment.id, AuthenticationNormal)
+	decision := evaluate(snapshot, subject, request)
+	if decision.Allowed || decision.Reason == ReasonExplicitDeny {
+		return decision
+	}
+	return engine.authorizeBootstrap(ctx, subject, request, decision)
+}
+
+// UsesNamespaceSelectors reports whether the active immutable snapshot needs
+// Kubernetes Namespace labels to make at least one authorization decision.
+func (engine *Engine) UsesNamespaceSelectors() bool {
+	return snapshotUsesSelectors(engineSnapshot(engine))
+}
+
+func evaluate(snapshot *compiledSnapshot, subject Subject, request Request) Decision {
+	decision := Decision{Reason: ReasonNoMatchingAllow, Revision: snapshotRevision(snapshot), Authentication: AuthenticationNormal}
+	if snapshot == nil || !snapshot.available {
+		return decision
+	}
+	required := []Capability{request.Capability}
+	if request.Namespace != "" && request.Capability != CapabilityNamespaceAccess {
+		required = append([]Capability{CapabilityNamespaceAccess}, required...)
+	}
+	for _, capability := range required {
+		allows := []Match{}
+		denies := []Match{}
+		for _, binding := range snapshot.bindings {
+			if !binding.matchesSubject(subject) || !binding.matchesScope(request) {
+				continue
+			}
+			role := snapshot.roles[binding.definition.RoleID]
+			effect, exists := role.effects[capability]
+			if !exists {
+				continue
+			}
+			match := Match{BindingID: binding.definition.ID, RoleID: binding.definition.RoleID, Effect: effect, Capability: capability, Scope: binding.definition.Scope.Type}
+			if effect == EffectDeny {
+				denies = append(denies, match)
+			} else {
+				allows = append(allows, match)
 			}
 		}
+		decision.MatchingAllow = append(decision.MatchingAllow, allows...)
+		decision.MatchingDeny = append(decision.MatchingDeny, denies...)
+		if len(denies) > 0 {
+			decision.Reason = ReasonExplicitDeny
+			return decision
+		}
+		if len(allows) == 0 {
+			return decision
+		}
 	}
-	if !matchesBootstrap(engine.options.bootstrap, subject) {
-		return Decision{Reason: ReasonNoMatchingAssignment, Revision: revision}
+	decision.Allowed, decision.Reason = true, ReasonAllowed
+	return decision
+}
+
+func (engine *Engine) DryRun(ctx context.Context, subject Subject, request Request) Decision {
+	subject.Authentication, subject.BreakGlassGeneration = AuthenticationNormal, ""
+	return engine.Authorize(ctx, subject, request)
+}
+func (engine *Engine) authorizeBootstrap(ctx context.Context, subject Subject, request Request, denied Decision) Decision {
+	if engine == nil || !matchesBootstrap(engine.options.bootstrap, subject) {
+		return denied
 	}
 	if engine.options.bootstrapState == nil {
-		return Decision{Reason: ReasonBootstrapStateUnavailable, Revision: revision}
+		denied.Reason = ReasonBootstrapStateUnavailable
+		return denied
 	}
 	retired, err := engine.options.bootstrapState.BootstrapRetired(ctx)
 	if err != nil {
-		return Decision{Reason: ReasonBootstrapStateUnavailable, Revision: revision}
+		denied.Reason = ReasonBootstrapStateUnavailable
+		return denied
 	}
 	if retired && !engine.options.bootstrap.RecoveryEnabled {
-		return Decision{Reason: ReasonBootstrapRetired, Revision: revision}
+		denied.Reason = ReasonBootstrapRetired
+		return denied
 	}
-	if !roleAllows(RolePlatformAdmin, request) {
-		return Decision{Reason: ReasonNoMatchingAssignment, Revision: revision}
+	if !strings.HasPrefix(string(request.Capability), "platform.") {
+		return denied
 	}
-	return allowedDecision(request, revision, RolePlatformAdmin, "", AuthenticationBootstrap)
+	return Decision{Allowed: true, Reason: ReasonAllowed, Revision: denied.Revision, Authentication: AuthenticationBootstrap}
 }
-
-// DryRun evaluates a regular identity against the current revision. It cannot
-// be used to manufacture bootstrap or break-glass authentication context.
-func (engine *Engine) DryRun(ctx context.Context, subject Subject, request Request) Decision {
-	subject.Authentication = AuthenticationNormal
-	subject.BreakGlassGeneration = ""
-	return engine.Authorize(ctx, subject, request)
-}
-
-func (engine *Engine) authorizeBreakGlass(
-	ctx context.Context,
-	subject Subject,
-	request Request,
-	revision uint64,
-) Decision {
-	if engine.options.breakGlassState == nil {
+func (engine *Engine) authorizeBreakGlass(ctx context.Context, subject Subject, revision uint64) Decision {
+	if engine == nil || engine.options.breakGlassState == nil {
 		return Decision{Reason: ReasonBreakGlassUnavailable, Revision: revision}
 	}
 	state, err := engine.options.breakGlassState.CurrentBreakGlassState(ctx)
 	if err != nil || !state.Enabled || state.Generation == "" {
 		return Decision{Reason: ReasonBreakGlassUnavailable, Revision: revision}
 	}
-	if subject.BreakGlassGeneration == "" || subtle.ConstantTimeCompare(
-		[]byte(subject.BreakGlassGeneration), []byte(state.Generation),
-	) != 1 {
+	if subject.BreakGlassGeneration == "" || subtle.ConstantTimeCompare([]byte(subject.BreakGlassGeneration), []byte(state.Generation)) != 1 {
 		return Decision{Reason: ReasonBreakGlassStale, Revision: revision}
 	}
-	if !roleAllows(RolePlatformAdmin, request) {
-		return Decision{Reason: ReasonNoMatchingAssignment, Revision: revision}
-	}
-	return allowedDecision(request, revision, RolePlatformAdmin, "", AuthenticationBreakGlass)
+	return Decision{Allowed: true, Reason: ReasonAllowed, Revision: revision, Authentication: AuthenticationBreakGlass}
 }
 
-func allowedDecision(
-	request Request,
-	revision uint64,
-	role Role,
-	assignmentID string,
-	authentication AuthenticationType,
-) Decision {
-	scopeValue := "$cluster"
-	if request.Namespace != "" {
-		scopeValue = request.Namespace
+func (engine *Engine) DelegatedNamespaces(subject Subject) []string {
+	snapshot := engineSnapshot(engine)
+	if snapshot == nil {
+		return nil
 	}
-	return Decision{
-		Allowed: true, Reason: ReasonAllowed, Role: role, AssignmentID: assignmentID,
-		Revision: revision, Scope: scopeValue, Authentication: authentication,
-	}
-}
-
-func (assignment compiledAssignment) matches(subject Subject, request Request) bool {
-	if !assignment.matchesSubject(subject) {
-		return false
-	}
-	if len(assignment.namespaces) == 0 {
-		return true
-	}
-	_, namespaceMatch := assignment.namespaces[request.Namespace]
-	return namespaceMatch
-}
-
-func (snapshot *compiledSnapshot) roleAllows(role Role, request Request) bool {
-	if permissions, exists := snapshot.roles[role]; exists {
-		_, allowed := permissions[request.Key()]
-		return allowed
-	}
-	return roleAllows(role, request)
-}
-
-func (assignment compiledAssignment) matchesSubject(subject Subject) bool {
-	_, subjectMatch := assignment.subjects[subject.ID]
-	groupMatch := false
-	for _, group := range subject.Groups {
-		if _, exists := assignment.groups[group]; exists {
-			groupMatch = true
-			break
+	result := map[string]struct{}{}
+	for _, binding := range snapshot.bindings {
+		if binding.matchesSubject(subject) {
+			for name := range binding.namespaceNames {
+				result[name] = struct{}{}
+			}
 		}
 	}
-	if !subjectMatch && !groupMatch {
-		return false
+	values := make([]string, 0, len(result))
+	for value := range result {
+		values = append(values, value)
 	}
-	return true
-}
-
-func matchesBootstrap(config BootstrapConfig, subject Subject) bool {
-	if slices.Contains(config.Subjects, subject.ID) {
-		return true
-	}
-	for _, expected := range config.Groups {
-		if slices.Contains(subject.Groups, expected) {
-			return true
-		}
-	}
-	return false
+	slices.Sort(values)
+	return values
 }
 
 func compileSnapshot(snapshot Snapshot) (*compiledSnapshot, error) {
@@ -369,191 +295,314 @@ func compileSnapshot(snapshot Snapshot) (*compiledSnapshot, error) {
 		snapshot.Version = CurrentVersion
 	}
 	if snapshot.Version != CurrentVersion {
-		return nil, fmt.Errorf("unsupported management policy version %d", snapshot.Version)
+		return nil, fmt.Errorf("unsupported authorization policy version %d", snapshot.Version)
 	}
-	if len(snapshot.Assignments) > 0 && snapshot.Revision == 0 {
-		return nil, errors.New("management policy with assignments requires a positive revision")
+	if len(snapshot.Bindings) > 0 && snapshot.Revision == 0 {
+		return nil, errors.New("authorization bindings require a revision")
 	}
-	seen := make(map[string]struct{}, len(snapshot.Assignments))
-	compiled := &compiledSnapshot{
-		revision: snapshot.Revision, available: true,
-		roles:       make(map[Role]map[string]struct{}, len(snapshot.Roles)),
-		assignments: make([]compiledAssignment, 0, len(snapshot.Assignments)),
-	}
-	for index, role := range snapshot.Roles {
-		role.ID = Role(strings.TrimSpace(string(role.ID)))
-		role.DisplayName = strings.TrimSpace(role.DisplayName)
-		role.Description = strings.TrimSpace(role.Description)
-		if !roleIDPattern.MatchString(string(role.ID)) || len(role.DisplayName) == 0 || len(role.DisplayName) > 128 || len(role.Description) > 512 {
-			return nil, fmt.Errorf("management role %d is invalid", index)
-		}
-		if _, reserved := rolePermissions[role.ID]; reserved {
-			return nil, fmt.Errorf("management role %q conflicts with a built-in role", role.ID)
-		}
-		if _, duplicate := compiled.roles[role.ID]; duplicate {
-			return nil, fmt.Errorf("management role %d has duplicate ID %q", index, role.ID)
-		}
-		if len(role.Permissions) == 0 || len(role.Permissions) > 256 {
-			return nil, fmt.Errorf("management role %q requires one to 256 permissions", role.ID)
-		}
-		permissions := make(map[string]struct{}, len(role.Permissions))
-		for _, permission := range role.Permissions {
-			permission = strings.TrimSpace(permission)
-			if !validPermissionKey(permission) {
-				return nil, fmt.Errorf("management role %q contains unsupported permission %q", role.ID, permission)
-			}
-			if _, duplicate := permissions[permission]; duplicate {
-				return nil, fmt.Errorf("management role %q contains duplicate permission %q", role.ID, permission)
-			}
-			permissions[permission] = struct{}{}
-		}
-		compiled.roles[role.ID] = permissions
-	}
-	for index, assignment := range snapshot.Assignments {
-		assignment.ID = strings.TrimSpace(assignment.ID)
-		if !assignmentIDPattern.MatchString(assignment.ID) {
-			return nil, fmt.Errorf("management assignment %d has an invalid ID", index)
-		}
-		if _, exists := seen[assignment.ID]; exists {
-			return nil, fmt.Errorf("management assignment %d has duplicate ID %q", index, assignment.ID)
-		}
-		seen[assignment.ID] = struct{}{}
-		_, builtIn := rolePermissions[assignment.Role]
-		_, custom := compiled.roles[assignment.Role]
-		if !builtIn && !custom {
-			return nil, fmt.Errorf("management assignment %q has unsupported role %q", assignment.ID, assignment.Role)
-		}
-		subjects, err := compileSubjects(assignment.Subjects, "subjects")
+	compiled := &compiledSnapshot{revision: snapshot.Revision, available: true, roles: map[Role]compiledRole{}, bindings: make([]compiledBinding, 0, len(snapshot.Bindings))}
+	for _, definition := range append(BuiltInRoleDefinitions(), snapshot.Roles...) {
+		role, err := compileRole(definition, definition.BuiltIn)
 		if err != nil {
-			return nil, fmt.Errorf("management assignment %q: %w", assignment.ID, err)
+			return nil, err
 		}
-		groups, err := compileExactValues(assignment.Groups, "groups")
+		if _, exists := compiled.roles[definition.ID]; exists {
+			return nil, fmt.Errorf("duplicate role %q", definition.ID)
+		}
+		compiled.roles[definition.ID] = role
+	}
+	seen := map[string]struct{}{}
+	for _, definition := range snapshot.Bindings {
+		binding, err := compileBinding(definition)
 		if err != nil {
-			return nil, fmt.Errorf("management assignment %q: %w", assignment.ID, err)
+			return nil, err
 		}
-		if len(subjects) == 0 && len(groups) == 0 {
-			return nil, fmt.Errorf("management assignment %q requires subjects or groups", assignment.ID)
+		if _, exists := seen[definition.ID]; exists {
+			return nil, fmt.Errorf("duplicate binding %q", definition.ID)
 		}
-		namespaces, err := compileNamespaces(assignment.Namespaces)
-		if err != nil {
-			return nil, fmt.Errorf("management assignment %q: %w", assignment.ID, err)
+		seen[definition.ID] = struct{}{}
+		role, exists := compiled.roles[definition.RoleID]
+		if !exists {
+			return nil, fmt.Errorf("binding %q references unknown role", definition.ID)
 		}
-		if assignment.Role == RoleNamespaceAdmin && len(namespaces) == 0 {
-			return nil, fmt.Errorf("management assignment %q namespace-admin requires namespaces", assignment.ID)
+		if definition.ManagedBy == ManagedByDelegated && !validDelegatableRole(role.definition) {
+			return nil, fmt.Errorf("binding %q references a non-delegatable role", definition.ID)
 		}
-		if builtIn && assignment.Role != RoleNamespaceAdmin && len(namespaces) != 0 {
-			return nil, fmt.Errorf("management assignment %q role %q must not declare namespace delegation", assignment.ID, assignment.Role)
+		if roleHasPlatformCapability(role) && definition.Scope.Type != ScopePlatform {
+			return nil, fmt.Errorf("binding %q applies a platform role outside platform scope", definition.ID)
 		}
-		compiled.assignments = append(compiled.assignments, compiledAssignment{
-			id: assignment.ID, role: assignment.Role,
-			subjects: stringSet(subjects), groups: stringSet(groups), namespaces: stringSet(namespaces),
-		})
+		compiled.bindings = append(compiled.bindings, binding)
 	}
 	return compiled, nil
 }
-
-func validPermissionKey(value string) bool {
-	if !strings.HasPrefix(value, "admin.") {
-		return false
+func compileRole(definition RoleDefinition, builtIn bool) (compiledRole, error) {
+	definition.ID, definition.DisplayName, definition.Description = Role(strings.TrimSpace(string(definition.ID))), strings.TrimSpace(definition.DisplayName), strings.TrimSpace(definition.Description)
+	if !roleIDPattern.MatchString(string(definition.ID)) || definition.DisplayName == "" || len(definition.DisplayName) > 128 || len(definition.Description) > 512 {
+		return compiledRole{}, errors.New("authorization role is invalid")
 	}
-	resourceValue, operationValue, ok := strings.Cut(strings.TrimPrefix(value, "admin."), "/")
-	if !ok || resourceValue == "" || operationValue == "" || strings.Contains(operationValue, "/") {
-		return false
+	if !builtIn {
+		for _, role := range BuiltInRoleDefinitions() {
+			if role.ID == definition.ID {
+				return compiledRole{}, errors.New("custom role conflicts with built-in role")
+			}
+		}
 	}
-	resource, operation := Resource(resourceValue), Operation(operationValue)
-	return rolePermissions[RolePlatformAdmin][resource][operation] != 0
+	if len(definition.Statements) == 0 || len(definition.Statements) > 64 {
+		return compiledRole{}, errors.New("authorization role requires statements")
+	}
+	effects := map[Capability]Effect{}
+	for _, statement := range definition.Statements {
+		if statement.Effect != EffectAllow && statement.Effect != EffectDeny || len(statement.Capabilities) == 0 {
+			return compiledRole{}, errors.New("authorization statement is invalid")
+		}
+		for _, capability := range statement.Capabilities {
+			if _, valid := capabilitySet[capability]; !valid {
+				return compiledRole{}, fmt.Errorf("unsupported capability %q", capability)
+			}
+			if previous, duplicate := effects[capability]; duplicate && previous != statement.Effect {
+				return compiledRole{}, fmt.Errorf("role %q both allows and denies %q", definition.ID, capability)
+			}
+			effects[capability] = statement.Effect
+		}
+	}
+	return compiledRole{definition: definition, effects: effects}, nil
 }
-
+func compileBinding(definition Binding) (compiledBinding, error) {
+	definition.ID, definition.CreatedBy = strings.TrimSpace(definition.ID), strings.TrimSpace(definition.CreatedBy)
+	if !bindingIDPattern.MatchString(definition.ID) {
+		return compiledBinding{}, errors.New("authorization binding ID is invalid")
+	}
+	if definition.ManagedBy == "" {
+		definition.ManagedBy = ManagedByPlatform
+	}
+	if definition.ManagedBy != ManagedByPlatform && definition.ManagedBy != ManagedByDelegated {
+		return compiledBinding{}, errors.New("authorization binding owner is invalid")
+	}
+	if err := validateSubjectRef(&definition.Subject); err != nil {
+		return compiledBinding{}, err
+	}
+	compiled := compiledBinding{definition: definition, namespaceNames: map[string]struct{}{}}
+	switch definition.Scope.Type {
+	case ScopePlatform:
+		if len(definition.Scope.Names) != 0 || len(definition.Scope.LabelSelectors) != 0 {
+			return compiledBinding{}, errors.New("platform scope cannot contain namespaces")
+		}
+	case ScopeNamespaces:
+		if len(definition.Scope.Names) == 0 && len(definition.Scope.LabelSelectors) == 0 {
+			return compiledBinding{}, errors.New("namespace scope cannot be empty")
+		}
+		for _, name := range definition.Scope.Names {
+			name = strings.TrimSpace(name)
+			if !namespacePattern.MatchString(name) {
+				return compiledBinding{}, errors.New("namespace scope contains an invalid name")
+			}
+			if _, duplicate := compiled.namespaceNames[name]; duplicate {
+				return compiledBinding{}, errors.New("namespace scope contains duplicate names")
+			}
+			compiled.namespaceNames[name] = struct{}{}
+		}
+		if definition.ManagedBy == ManagedByDelegated && len(definition.Scope.LabelSelectors) != 0 {
+			return compiledBinding{}, errors.New("delegated bindings cannot use label selectors")
+		}
+		for _, selector := range definition.Scope.LabelSelectors {
+			value, err := compileLabelSelector(selector)
+			if err != nil {
+				return compiledBinding{}, err
+			}
+			compiled.selectors = append(compiled.selectors, value)
+		}
+	default:
+		return compiledBinding{}, errors.New("authorization binding scope is invalid")
+	}
+	return compiled, nil
+}
+func validateSubjectRef(subject *SubjectRef) error {
+	subject.PrincipalID, subject.ProviderID, subject.GroupName = strings.TrimSpace(subject.PrincipalID), strings.TrimSpace(subject.ProviderID), strings.TrimSpace(subject.GroupName)
+	switch subject.Type {
+	case SubjectPrincipal:
+		if uuid.Validate(subject.PrincipalID) != nil || subject.ProviderID != "" || subject.GroupName != "" {
+			return errors.New("principal binding subject is invalid")
+		}
+	case SubjectGroup:
+		if subject.PrincipalID != "" || !providerIDPattern.MatchString(subject.ProviderID) || subject.GroupName == "" || len(subject.GroupName) > 512 || subject.GroupName == "*" {
+			return errors.New("group binding subject is invalid")
+		}
+	default:
+		return errors.New("authorization binding subject type is invalid")
+	}
+	return nil
+}
+func compileLabelSelector(selector NamespaceSelector) (labels.Selector, error) {
+	if len(selector.MatchLabels) == 0 && len(selector.MatchExpressions) == 0 {
+		return nil, errors.New("empty namespace label selector is forbidden")
+	}
+	value := &metav1.LabelSelector{MatchLabels: selector.MatchLabels}
+	for _, expression := range selector.MatchExpressions {
+		value.MatchExpressions = append(value.MatchExpressions, metav1.LabelSelectorRequirement{Key: expression.Key, Operator: metav1.LabelSelectorOperator(expression.Operator), Values: expression.Values})
+	}
+	compiled, err := metav1.LabelSelectorAsSelector(value)
+	if err != nil {
+		return nil, fmt.Errorf("compile namespace label selector: %w", err)
+	}
+	return compiled, nil
+}
+func (binding compiledBinding) matchesSubject(subject Subject) bool {
+	if binding.definition.Subject.Type == SubjectPrincipal {
+		return binding.definition.Subject.PrincipalID == subject.ID
+	}
+	return binding.definition.Subject.ProviderID == subject.Provider && slices.Contains(subject.Groups, binding.definition.Subject.GroupName)
+}
+func (binding compiledBinding) matchesScope(request Request) bool {
+	if binding.definition.Scope.Type == ScopePlatform {
+		return request.Namespace == "" || strings.HasPrefix(string(request.Capability), "namespace.")
+	}
+	if request.Namespace == "" {
+		return false
+	}
+	if _, exists := binding.namespaceNames[request.Namespace]; exists {
+		return true
+	}
+	if !request.LabelsAvailable {
+		return false
+	}
+	set := labels.Set(request.NamespaceLabels)
+	for _, selector := range binding.selectors {
+		if selector.Matches(set) {
+			return true
+		}
+	}
+	return false
+}
 func normalize(subject Subject, request Request) (Subject, Request, bool) {
-	subject.ID = strings.TrimSpace(subject.ID)
+	subject.ID, subject.Provider, subject.BreakGlassGeneration = strings.TrimSpace(subject.ID), strings.TrimSpace(subject.Provider), strings.TrimSpace(subject.BreakGlassGeneration)
 	if subject.Authentication == "" {
 		subject.Authentication = AuthenticationNormal
 	}
-	if subject.ID == "" || len(subject.ID) > 512 {
+	if subject.Authentication != AuthenticationBreakGlass && uuid.Validate(subject.ID) != nil {
 		return Subject{}, Request{}, false
-	}
-	if subject.Authentication != AuthenticationBreakGlass {
-		if _, err := uuid.Parse(subject.ID); err != nil {
-			return Subject{}, Request{}, false
-		}
 	}
 	groups, err := compileExactValues(subject.Groups, "groups")
 	if err != nil {
 		return Subject{}, Request{}, false
 	}
 	subject.Groups = groups
-	subject.BreakGlassGeneration = strings.TrimSpace(subject.BreakGlassGeneration)
-	request.Resource = Resource(strings.ToLower(strings.TrimSpace(string(request.Resource))))
-	request.Operation = Operation(strings.ToLower(strings.TrimSpace(string(request.Operation))))
-	request.Namespace = strings.TrimSpace(request.Namespace)
-	request.ResourceName = strings.TrimSpace(request.ResourceName)
-	allowedScopes, resourceExists := resourceScopes[request.Resource]
-	if !resourceExists || rolePermissions[RolePlatformAdmin][request.Resource][request.Operation] == 0 || len(request.ResourceName) > 512 {
+	request.Capability = Capability(strings.TrimSpace(request.Key()))
+	if _, exists := capabilitySet[request.Capability]; !exists {
 		return Subject{}, Request{}, false
 	}
-	requestedScope := scopeCluster
-	if request.Namespace != "" {
-		if !namespacePattern.MatchString(request.Namespace) {
-			return Subject{}, Request{}, false
-		}
-		requestedScope = scopeNamespace
+	request.Namespace, request.ResourceName = strings.TrimSpace(request.Namespace), strings.TrimSpace(request.ResourceName)
+	if request.Namespace != "" && !namespacePattern.MatchString(request.Namespace) || len(request.ResourceName) > 512 {
+		return Subject{}, Request{}, false
 	}
-	if allowedScopes&requestedScope == 0 {
+	if strings.HasPrefix(string(request.Capability), "namespace.") != (request.Namespace != "") {
 		return Subject{}, Request{}, false
 	}
 	return subject, request, true
 }
-
-func compileExactValues(values []string, field string) ([]string, error) {
-	if len(values) > 512 {
-		return nil, fmt.Errorf("%s exceeds 512 entries", field)
-	}
-	result := make([]string, 0, len(values))
-	seen := make(map[string]struct{}, len(values))
-	for _, value := range values {
-		value = strings.TrimSpace(value)
-		if value == "" || len(value) > 512 || value == "*" || value == "$cluster" {
-			return nil, fmt.Errorf("%s contains an invalid exact value", field)
-		}
-		if _, exists := seen[value]; exists {
-			return nil, fmt.Errorf("%s contains duplicate value %q", field, value)
-		}
-		seen[value] = struct{}{}
-		result = append(result, value)
-	}
-	return result, nil
-}
-
 func compileSubjects(values []string, field string) ([]string, error) {
 	result, err := compileExactValues(values, field)
 	if err != nil {
 		return nil, err
 	}
 	for _, value := range result {
-		if _, err := uuid.Parse(value); err != nil {
-			return nil, fmt.Errorf("%s contains a non-Principal UUID", field)
+		if uuid.Validate(value) != nil {
+			return nil, fmt.Errorf("%s contains an invalid principal", field)
 		}
 	}
 	return result, nil
 }
-
-func compileNamespaces(values []string) ([]string, error) {
-	result, err := compileExactValues(values, "namespaces")
-	if err != nil {
-		return nil, err
+func compileExactValues(values []string, field string) ([]string, error) {
+	if len(values) > 512 {
+		return nil, fmt.Errorf("%s exceeds 512 entries", field)
 	}
-	for _, namespace := range result {
-		if !namespacePattern.MatchString(namespace) {
-			return nil, fmt.Errorf("namespaces contains invalid namespace %q", namespace)
-		}
-	}
-	return result, nil
-}
-
-func stringSet(values []string) map[string]struct{} {
-	result := make(map[string]struct{}, len(values))
+	result := []string{}
+	seen := map[string]struct{}{}
 	for _, value := range values {
-		result[value] = struct{}{}
+		value = strings.TrimSpace(value)
+		if value == "" || len(value) > 512 || value == "*" || value == "$cluster" {
+			return nil, fmt.Errorf("%s contains an invalid value", field)
+		}
+		if _, duplicate := seen[value]; duplicate {
+			return nil, fmt.Errorf("%s contains duplicate values", field)
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
 	}
-	return result
+	slices.Sort(result)
+	return result, nil
+}
+func matchesBootstrap(config BootstrapConfig, subject Subject) bool {
+	return slices.Contains(config.Subjects, subject.ID) || slices.ContainsFunc(config.Groups, func(group string) bool { return slices.Contains(subject.Groups, group) })
+}
+func validDelegatableRole(role RoleDefinition) bool {
+	if !role.Delegatable {
+		return false
+	}
+	for _, statement := range role.Statements {
+		if statement.Effect != EffectAllow {
+			return false
+		}
+		for _, capability := range statement.Capabilities {
+			if !strings.HasPrefix(string(capability), "namespace.") || capability == "namespace.authorization.delegate" {
+				return false
+			}
+		}
+	}
+	return true
+}
+func roleHasPlatformCapability(role compiledRole) bool {
+	for capability := range role.effects {
+		if strings.HasPrefix(string(capability), "platform.") {
+			return true
+		}
+	}
+	return false
+}
+func engineSnapshot(engine *Engine) *compiledSnapshot {
+	if engine == nil {
+		return nil
+	}
+	return engine.snapshot.Load()
+}
+func snapshotRevision(snapshot *compiledSnapshot) uint64 {
+	if snapshot == nil {
+		return 0
+	}
+	return snapshot.revision
+}
+func snapshotUsesSelectors(snapshot *compiledSnapshot) bool {
+	if snapshot == nil {
+		return false
+	}
+	for _, binding := range snapshot.bindings {
+		if len(binding.selectors) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func labelsRequiredForDecision(snapshot *compiledSnapshot, subject Subject, request Request) bool {
+	if snapshot == nil {
+		return false
+	}
+	required := []Capability{request.Capability}
+	if request.Capability != CapabilityNamespaceAccess {
+		required = append(required, CapabilityNamespaceAccess)
+	}
+	for _, binding := range snapshot.bindings {
+		if len(binding.selectors) == 0 || !binding.matchesSubject(subject) || binding.definition.Scope.Type != ScopeNamespaces {
+			continue
+		}
+		if _, exact := binding.namespaceNames[request.Namespace]; exact {
+			continue
+		}
+		role := snapshot.roles[binding.definition.RoleID]
+		for _, capability := range required {
+			if _, relevant := role.effects[capability]; relevant {
+				return true
+			}
+		}
+	}
+	return false
 }

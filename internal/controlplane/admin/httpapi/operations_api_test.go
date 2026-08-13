@@ -46,11 +46,28 @@ func TestOperationsAPIEnforcesHeadersAndPersistsActions(t *testing.T) {
 		t.Fatalf("Session stop replay status=%d headers=%v body=%s", replay.Code, replay.Header(), replay.Body.String())
 	}
 
-	family := storage.TokenFamily{
-		ID: uuid.NewString(), PrincipalID: principal.ID, DeviceID: "browser",
-		RefreshTokenHash: bytes.Repeat([]byte{7}, 32), CreatedAt: time.Now().UTC().Add(-time.Hour), ExpiresAt: time.Now().UTC().Add(time.Hour),
+	grant := storage.OAuthSession{
+		Kind: "refresh_token", SignatureHash: bytes.Repeat([]byte{7}, 32), RequestID: uuid.NewString(), PrincipalID: principal.ID,
+		ClientID: "desktop", DeviceID: "browser", RequestJSON: []byte(`{}`), Status: "active", CreatedAt: time.Now().UTC().Add(-time.Hour), ExpiresAt: time.Now().UTC().Add(time.Hour),
 	}
-	if err := store.TokenFamilies().Create(context.Background(), family); err != nil {
+	if err := store.OAuthSessions().Create(context.Background(), grant); err != nil {
+		t.Fatal(err)
+	}
+	revokedGrant := policyWrite(t, handler, cookie, csrf,
+		"/principals/"+principal.ID+"/oauth-grants/"+grant.RequestID+"/revoke", "",
+		"operation-http-grant-001", map[string]string{"reason": "revoke compromised authorization"})
+	if revokedGrant.Code != http.StatusOK ||
+		!strings.Contains(revokedGrant.Body.String(), `"authorizationId":"`+grant.RequestID+`"`) ||
+		strings.Contains(revokedGrant.Body.String(), "deviceSessionId") {
+		t.Fatalf("OAuth grant revoke status=%d body=%s", revokedGrant.Code, revokedGrant.Body.String())
+	}
+	active, err := store.OAuthSessions().RequestActive(context.Background(), grant.RequestID, time.Now().UTC())
+	if err != nil || active {
+		t.Fatalf("revoked OAuth grant active=%v, %v", active, err)
+	}
+	grant.SignatureHash = bytes.Repeat([]byte{8}, 32)
+	grant.RequestID = uuid.NewString()
+	if err := store.OAuthSessions().Create(context.Background(), grant); err != nil {
 		t.Fatal(err)
 	}
 	revoked := policyWrite(t, handler, cookie, csrf, "/principals/"+principal.ID+"/revoke", "",
@@ -58,9 +75,9 @@ func TestOperationsAPIEnforcesHeadersAndPersistsActions(t *testing.T) {
 	if revoked.Code != http.StatusOK || !strings.Contains(revoked.Body.String(), `"revokedCount":1`) {
 		t.Fatalf("Principal revoke status=%d body=%s", revoked.Code, revoked.Body.String())
 	}
-	loaded, err := store.TokenFamilies().GetByID(context.Background(), family.ID)
-	if err != nil || loaded.RevokedAt == nil {
-		t.Fatalf("revoked Device Session = %#v, %v", loaded, err)
+	active, err = store.OAuthSessions().RequestActive(context.Background(), grant.RequestID, time.Now().UTC())
+	if err != nil || active {
+		t.Fatalf("revoked OAuth grant active=%v, %v", active, err)
 	}
 	events, err := store.Audit().List(context.Background(), storage.AuditFilter{Limit: 100})
 	if err != nil {

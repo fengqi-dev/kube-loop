@@ -91,7 +91,7 @@ func TestKeycloakBrowserLoginRefreshAndRevoke(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := client.Refresh(ctx, baseURL, refreshed); err == nil {
-		t.Fatal("revoked token family was refreshed")
+		t.Fatal("revoked OAuth grant was refreshed")
 	}
 }
 

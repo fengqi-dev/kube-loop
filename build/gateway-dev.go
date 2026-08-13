@@ -7,13 +7,17 @@ package main
 
 import (
 	"bytes"
+	"crypto/ecdsa"
 	"crypto/ed25519"
+	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/hex"
+	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -34,6 +38,7 @@ const (
 	operatorImageRepository     = "kube-loop-operator"
 	developmentNamespace        = "kubeloop-dev"
 	developmentRelease          = "kubeloop-dev"
+	developmentStorageBaseline  = "18"
 )
 
 func main() {
@@ -306,6 +311,9 @@ func deployDevelopmentStack(
 	if err := ensureDevelopmentMaterial(materialDirectory, []string{host, registryHost}); err != nil {
 		return "", err
 	}
+	if err := ensureDevelopmentAuthMaterial(materialDirectory); err != nil {
+		return "", err
+	}
 	ingressCertificate, ingressKey, ingressCA, err := generateDevelopmentIngressCertificate(
 		root, materialDirectory, host,
 	)
@@ -318,12 +326,22 @@ func deployDevelopmentStack(
 	if err := applyNamespace(root, developmentNamespace); err != nil {
 		return "", err
 	}
+	if err := resetDevelopmentStorageForBaseline(root, materialDirectory); err != nil {
+		return "", err
+	}
 	relaySecret := developmentRelease + "-relay"
 	if err := applyGenericSecret(root, developmentNamespace, relaySecret, map[string]string{
 		"signing-key.pem": filepath.Join(materialDirectory, "signing-key.pem"),
 		"tls.crt":         filepath.Join(materialDirectory, "tls.crt"),
 		"tls.key":         filepath.Join(materialDirectory, "tls.key"),
 		"ca.crt":          filepath.Join(materialDirectory, "ca.crt"),
+	}); err != nil {
+		return "", err
+	}
+	authSecret := developmentRelease + "-auth"
+	if err := applyGenericSecret(root, developmentNamespace, authSecret, map[string]string{
+		"oidc-signing-key.pem": filepath.Join(materialDirectory, "oidc-signing-key.pem"),
+		"hmac-secret":          filepath.Join(materialDirectory, "hmac-secret"),
 	}); err != nil {
 		return "", err
 	}
@@ -347,10 +365,13 @@ func deployDevelopmentStack(
 		return "", err
 	}
 	chart := filepath.Join(root, "charts", "kubeloop")
+	if err := recoverDevelopmentHelmRelease(root); err != nil {
+		return "", err
+	}
 	arguments := []string{
 		"upgrade", "--install", developmentRelease, chart,
 		"--namespace", developmentNamespace,
-		"--reset-values", "--wait", "--timeout", "5m", "--history-max", "5",
+		"--reset-values", "--wait", "--rollback-on-failure", "--cleanup-on-fail", "--timeout", "5m", "--history-max", "5",
 		"--set-string", "publicURL=" + publicURL,
 		"--set-string", "controlPlane.management.publicURL=" + publicURL,
 		"--set-string", "serviceID=kubeloop-dev",
@@ -365,15 +386,10 @@ func deployDevelopmentStack(
 		"--set-string", "operator.image.pullPolicy=IfNotPresent",
 		"--set-string", "controlPlane.relay.existingSecret=" + relaySecret,
 		"--set-string", "controlPlane.relayRegistry.existingSecret=" + relaySecret,
+		"--set-string", "controlPlane.auth.oauth.existingSecret=" + authSecret,
 		"--set-string", "controlPlane.relayRegistry.endpointAllowedHosts=" + host,
 		"--set-string", "dataPlane.relayRegistry.endpoint=wss://" + host + "/tunnel",
-		"--set-string", "controlPlane.auth.token.existingSecret=" + relaySecret,
-		"--set-string", "controlPlane.policy.rules[0].id=development-access",
-		"--set-string", "controlPlane.policy.rules[0].subjects[0]=*",
-		"--set-string", "controlPlane.policy.rules[0].namespaces[0]=*",
-		"--set-string", "controlPlane.policy.rules[0].operations[0]=*",
-		"--set-string", "controlPlane.policy.rules[0].resourceKinds[0]=*",
-		"--set-string", "controlPlane.management.bootstrap.groups[0]=kubeloop-dev",
+		"--set", "controlPlane.development.enabled=true",
 		"--set", "ingress.enabled=true",
 		"--set-string", "ingress.className=nginx",
 		"--set-string", "ingress.annotations.nginx\\.ingress\\.kubernetes\\.io/ssl-redirect=true",
@@ -394,6 +410,136 @@ func deployDevelopmentStack(
 		return "", err
 	}
 	return publicURL, nil
+}
+
+func recoverDevelopmentHelmRelease(root string) error {
+	statusCommand := exec.Command(
+		"helm", "status", developmentRelease, "--namespace", developmentNamespace, "--output", "json",
+	)
+	statusOutput, err := statusCommand.Output()
+	if err != nil {
+		return nil
+	}
+	var status struct {
+		Info struct {
+			Status string `json:"status"`
+		} `json:"info"`
+	}
+	if json.Unmarshal(statusOutput, &status) != nil || !strings.HasPrefix(status.Info.Status, "pending-") {
+		return nil
+	}
+	historyOutput, err := exec.Command(
+		"helm", "history", developmentRelease, "--namespace", developmentNamespace, "--output", "json",
+	).Output()
+	if err != nil {
+		return errors.New("inspect pending development Helm release")
+	}
+	var history []struct {
+		Revision int    `json:"revision"`
+		Status   string `json:"status"`
+	}
+	if err := json.Unmarshal(historyOutput, &history); err != nil {
+		return errors.New("decode development Helm history")
+	}
+	rollbackRevision := 0
+	for _, revision := range history {
+		if (revision.Status == "deployed" || revision.Status == "superseded") && revision.Revision > rollbackRevision {
+			rollbackRevision = revision.Revision
+		}
+	}
+	if rollbackRevision > 0 {
+		fmt.Printf("==> Recovering pending Helm release with revision %d\n", rollbackRevision)
+		if err := run(root, exec.Command(
+			"helm", "rollback", developmentRelease, fmt.Sprint(rollbackRevision),
+			"--namespace", developmentNamespace, "--wait", "--timeout", "3m",
+		)); err != nil {
+			return fmt.Errorf("recover pending development Helm release: %w", err)
+		}
+		return nil
+	}
+	fmt.Printf("==> Removing incomplete Helm release without a successful revision\n")
+	if err := run(root, exec.Command(
+		"helm", "uninstall", developmentRelease, "--namespace", developmentNamespace, "--wait", "--timeout", "3m",
+	)); err != nil {
+		return fmt.Errorf("remove incomplete development Helm release: %w", err)
+	}
+	return nil
+}
+
+func resetDevelopmentStorageForBaseline(root, directory string) error {
+	marker := filepath.Join(directory, "storage-baseline")
+	current, err := os.ReadFile(marker)
+	if err == nil && strings.TrimSpace(string(current)) == developmentStorageBaseline {
+		return nil
+	}
+	pvc := developmentRelease + "-kubeloop-control-plane-data"
+	fmt.Printf("==> Resetting development SQLite storage for schema baseline %s\n", developmentStorageBaseline)
+	deployment := developmentRelease + "-kubeloop-control-plane"
+	if err := run(root, exec.Command(
+		"kubectl", "scale", "deployment", deployment, "--replicas=0",
+		"--namespace", developmentNamespace,
+	)); err != nil {
+		return fmt.Errorf("stop development Control Plane before storage reset: %w", err)
+	}
+	if err := run(root, exec.Command(
+		"kubectl", "wait", "--for=delete", "pod",
+		"--namespace", developmentNamespace,
+		"--selector", "app.kubernetes.io/instance="+developmentRelease+",app.kubernetes.io/component=control-plane",
+		"--timeout=90s",
+	)); err != nil {
+		return fmt.Errorf("wait for development Control Plane shutdown: %w", err)
+	}
+	if err := run(root, exec.Command(
+		"kubectl", "delete", "persistentvolumeclaim", pvc,
+		"--namespace", developmentNamespace, "--ignore-not-found", "--wait=true",
+	)); err != nil {
+		return fmt.Errorf("reset development SQLite storage: %w", err)
+	}
+	if err := os.WriteFile(marker, []byte(developmentStorageBaseline+"\n"), 0o600); err != nil {
+		return fmt.Errorf("record development storage baseline: %w", err)
+	}
+	return nil
+}
+
+func ensureDevelopmentAuthMaterial(directory string) error {
+	signingKeyPath := filepath.Join(directory, "oidc-signing-key.pem")
+	hmacSecretPath := filepath.Join(directory, "hmac-secret")
+	if signingKey, err := os.ReadFile(signingKeyPath); err == nil {
+		block, rest := pem.Decode(signingKey)
+		parsed, parseErr := x509.ParsePKCS8PrivateKey(blockBytes(block))
+		key, validKey := parsed.(*ecdsa.PrivateKey)
+		hmacSecret, hmacErr := os.ReadFile(hmacSecretPath)
+		if block != nil && len(strings.TrimSpace(string(rest))) == 0 && parseErr == nil && validKey &&
+			key.Curve == elliptic.P256() && hmacErr == nil && len(strings.TrimSpace(string(hmacSecret))) == 32 {
+			return nil
+		}
+	}
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return fmt.Errorf("generate development OIDC signing key: %w", err)
+	}
+	encoded, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		return fmt.Errorf("encode development OIDC signing key: %w", err)
+	}
+	if err := os.WriteFile(signingKeyPath, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: encoded}), 0o600); err != nil {
+		return fmt.Errorf("write development OIDC signing key: %w", err)
+	}
+	random := make([]byte, 16)
+	if _, err := rand.Read(random); err != nil {
+		return fmt.Errorf("generate development HMAC secret: %w", err)
+	}
+	if err := os.WriteFile(hmacSecretPath, []byte(hex.EncodeToString(random)), 0o600); err != nil {
+		return fmt.Errorf("write development HMAC secret: %w", err)
+	}
+	return nil
+}
+
+func blockBytes(block *pem.Block) []byte {
+	if block == nil {
+		return nil
+	}
+	return block.Bytes
 }
 
 func ensureDevelopmentMaterial(directory string, dnsNames []string) error {

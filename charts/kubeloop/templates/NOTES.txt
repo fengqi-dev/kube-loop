@@ -4,6 +4,10 @@ KubeLoop has been installed as three independent workloads:
   Data Plane: {{ include "kubeloop.dataPlaneName" . }}
   Operator: {{ include "kubeloop.operatorName" . }}
 
+{{- if .Values.controlPlane.development.enabled }}
+Development mode is enabled. Authorization remains database-managed and deny-by-default.
+{{- end }}
+
 Service discovery:
   {{ required "publicURL is required" .Values.publicURL }}/.well-known/kubeloop
 

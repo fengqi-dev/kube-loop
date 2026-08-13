@@ -81,41 +81,41 @@ func TestLeaseFollowsHeartbeatExtendedSessionExpiry(t *testing.T) {
 	}
 }
 
-func TestLeaseTerminatesAfterTokenFamilyRevocation(t *testing.T) {
+func TestLeaseTerminatesAfterOAuthGrantRevocation(t *testing.T) {
 	stateStore, principalID, sessionID, now := createLeaseStore(t)
 	defer stateStore.Close()
-	familyID := uuid.NewString()
-	if err := stateStore.TokenFamilies().Create(context.Background(), storage.TokenFamily{
-		ID: familyID, PrincipalID: principalID, DeviceID: "device",
-		RefreshTokenHash: bytes.Repeat([]byte{7}, 32), CreatedAt: now, ExpiresAt: now.Add(time.Hour),
+	authorizationID := uuid.NewString()
+	if err := stateStore.OAuthSessions().Create(context.Background(), storage.OAuthSession{
+		Kind: "refresh_token", SignatureHash: bytes.Repeat([]byte{7}, 32), RequestID: authorizationID,
+		PrincipalID: principalID, ClientID: "desktop", DeviceID: "device", RequestJSON: []byte(`{}`), Status: "active", CreatedAt: now, ExpiresAt: now.Add(time.Hour),
 	}); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel, err := Start(context.Background(), stateStore, controlplaneapi.Principal{
-		Subject: principalID, DeviceID: "device", FamilyID: familyID,
+		Subject: principalID, DeviceID: "device", AuthorizationID: authorizationID,
 	}, sessionapi.ActiveSession{ID: sessionID, ExpiresAt: now.Add(time.Hour)}, Config{CheckInterval: 10 * time.Millisecond})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer cancel()
-	if err := stateStore.TokenFamilies().Revoke(context.Background(), familyID, time.Now().UTC()); err != nil {
+	if err := stateStore.OAuthSessions().RevokeRequest(context.Background(), authorizationID, time.Now().UTC()); err != nil {
 		t.Fatal(err)
 	}
-	waitForCancellation(t, ctx, "revoked Token Family")
+	waitForCancellation(t, ctx, "revoked OAuth grant")
 }
 
 func TestFamilyBackedLeaseOutlivesOpeningAccessToken(t *testing.T) {
 	stateStore, principalID, sessionID, now := createLeaseStore(t)
 	defer stateStore.Close()
-	familyID := uuid.NewString()
-	if err := stateStore.TokenFamilies().Create(context.Background(), storage.TokenFamily{
-		ID: familyID, PrincipalID: principalID, DeviceID: "device",
-		RefreshTokenHash: bytes.Repeat([]byte{8}, 32), CreatedAt: now, ExpiresAt: now.Add(time.Hour),
+	authorizationID := uuid.NewString()
+	if err := stateStore.OAuthSessions().Create(context.Background(), storage.OAuthSession{
+		Kind: "refresh_token", SignatureHash: bytes.Repeat([]byte{8}, 32), RequestID: authorizationID,
+		PrincipalID: principalID, ClientID: "desktop", DeviceID: "device", RequestJSON: []byte(`{}`), Status: "active", CreatedAt: now, ExpiresAt: now.Add(time.Hour),
 	}); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel, err := Start(context.Background(), stateStore, controlplaneapi.Principal{
-		Subject: principalID, DeviceID: "device", FamilyID: familyID, AccessExpiresAt: time.Now().Add(30 * time.Millisecond),
+		Subject: principalID, DeviceID: "device", AuthorizationID: authorizationID, AccessExpiresAt: time.Now().Add(30 * time.Millisecond),
 	}, sessionapi.ActiveSession{ID: sessionID, ExpiresAt: now.Add(time.Hour)}, Config{CheckInterval: 10 * time.Millisecond})
 	if err != nil {
 		t.Fatal(err)
@@ -126,10 +126,10 @@ func TestFamilyBackedLeaseOutlivesOpeningAccessToken(t *testing.T) {
 		t.Fatalf("opening access-token expiry terminated a Family-backed lease: %v", ctx.Err())
 	case <-time.After(60 * time.Millisecond):
 	}
-	if err := stateStore.TokenFamilies().Revoke(context.Background(), familyID, time.Now().UTC()); err != nil {
+	if err := stateStore.OAuthSessions().RevokeRequest(context.Background(), authorizationID, time.Now().UTC()); err != nil {
 		t.Fatal(err)
 	}
-	waitForCancellation(t, ctx, "revoked Token Family after access-token refresh")
+	waitForCancellation(t, ctx, "revoked OAuth grant after access-token refresh")
 }
 
 func TestLeaseTerminatesAfterSessionStops(t *testing.T) {

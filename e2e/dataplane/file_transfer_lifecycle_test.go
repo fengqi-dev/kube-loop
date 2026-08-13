@@ -39,11 +39,11 @@ import (
 )
 
 type fileE2EIdentity struct {
-	principal controlplaneapi.Principal
-	active    sessionapi.ActiveSession
-	session   remote.Session
-	familyID  string
-	token     string
+	principal       controlplaneapi.Principal
+	active          sessionapi.ActiveSession
+	session         remote.Session
+	authorizationID string
+	token           string
 }
 
 type fileUploadResult struct {
@@ -156,14 +156,9 @@ func createFileIdentity(
 ) fileE2EIdentity {
 	t.Helper()
 	now := time.Now().UTC()
-	familyID, sessionID := uuid.NewString(), uuid.NewString()
+	authorizationID, sessionID := uuid.NewString(), uuid.NewString()
 	expiresAt := now.Add(5 * time.Minute)
-	if err := stateStore.TokenFamilies().Create(ctx, storage.TokenFamily{
-		ID: familyID, PrincipalID: principalID, DeviceID: deviceID,
-		RefreshTokenHash: bytes.Repeat([]byte{hashByte}, 32), CreatedAt: now, ExpiresAt: expiresAt,
-	}); err != nil {
-		t.Fatal(err)
-	}
+	createOAuthGrant(t, ctx, stateStore, authorizationID, principalID, deviceID, hashByte, now, expiresAt)
 	networkJSON, err := networkspec.CanonicalJSON(network)
 	if err != nil {
 		t.Fatal(err)
@@ -178,7 +173,7 @@ func createFileIdentity(
 	}
 	return fileE2EIdentity{
 		principal: controlplaneapi.Principal{
-			Subject: principalID, DeviceID: deviceID, FamilyID: familyID, AccessExpiresAt: expiresAt,
+			Subject: principalID, DeviceID: deviceID, AuthorizationID: authorizationID, AccessExpiresAt: expiresAt,
 		},
 		active: sessionapi.ActiveSession{
 			ID: sessionID, Namespace: namespace, Generation: 1,
@@ -189,8 +184,8 @@ func createFileIdentity(
 			CreatedAt: now, UpdatedAt: now, LastHeartbeatAt: now, ExpiresAt: expiresAt,
 			NetworkSpec: network, NetworkSpecHash: networkHash,
 		},
-		familyID: familyID,
-		token:    token,
+		authorizationID: authorizationID,
+		token:           token,
 	}
 }
 
@@ -295,7 +290,7 @@ func TestRealFileTransferRevocationControllerRestartAndResume(t *testing.T) {
 	}()
 	waitForFileProgress(t, ctx, firstProgress, firstUpload)
 	revokedAt := time.Now()
-	if err := stateStore.TokenFamilies().Revoke(ctx, firstIdentity.familyID, revokedAt.UTC()); err != nil {
+	if err := stateStore.OAuthSessions().RevokeRequest(ctx, firstIdentity.authorizationID, revokedAt.UTC()); err != nil {
 		t.Fatal(err)
 	}
 	firstResult := waitForFileUpload(t, ctx, firstUpload)

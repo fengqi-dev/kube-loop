@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -245,6 +246,19 @@ func (handler *Service) heartbeat(
 	now := handler.now().UTC()
 	if session.State != "active" || !session.ExpiresAt.After(now) {
 		return &controlplaneapi.Error{Code: controlplaneapi.CodeConflict, Message: "Session is not active"}
+	}
+	currentCapabilities, capabilityError := handler.capabilities.DiscoverCapabilities(request.Context(), principal, namespace)
+	if capabilityError != nil {
+		return capabilityError
+	}
+	if !slices.Contains(currentCapabilities.Capabilities, "cluster.tunnel") {
+		if err := handler.storage.Sessions().UpdateState(request.Context(), session.ID, generation, "disconnected", now); err != nil {
+			return mapStorageError(err)
+		}
+		if apiError := handler.disconnectRuntime(request.Context(), session.ID); apiError != nil {
+			return apiError
+		}
+		return &controlplaneapi.Error{Code: controlplaneapi.CodeForbidden, Message: "Session access was revoked"}
 	}
 	maximumExpiry := session.CreatedAt.Add(handler.maxLifetime)
 	nextExpiry := now.Add(handler.sessionTTL)

@@ -16,8 +16,7 @@ import (
 	adminoperations "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/operations"
 	adminsession "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/session"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/authn/httpauth"
-	"github.com/fengqi-dev/kube-loop/internal/controlplane/authn/login"
-	"github.com/fengqi-dev/kube-loop/internal/controlplane/authn/token"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/authn/oauthserver"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/health"
 	controlplanestorage "github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 	"github.com/fengqi-dev/kube-loop/internal/logging"
@@ -54,6 +53,15 @@ func main() {
 	defer stop()
 	bootstrap := bootstrapControlPlane(signalContext, config, logger)
 	stateStore := bootstrap.Store
+	if err := controlplanestorage.EnsureBuiltinOAuthClients(
+		signalContext,
+		stateStore.OAuthClients(),
+		strings.TrimRight(config.Document.Management.PublicURL, "/")+controlplane.AdminAPIPathPrefix+"/ui/callback",
+	); err != nil {
+		_ = stateStore.Close()
+		logger.Error("initialize built-in OAuth clients failed", "error", err)
+		os.Exit(2)
+	}
 	maintenanceWorker := bootstrap.MaintenanceWorker
 	localUsers := bootstrap.LocalUsers
 	managementRevisionService := bootstrap.ManagementRevisionService
@@ -142,73 +150,57 @@ func main() {
 		logger.Error("initialize Management recovery runner failed", "error", err)
 		os.Exit(2)
 	}
-	var tokenService *token.Service
 	var authRoutes controlplane.RouteRegistrar
-	if len(authRegistry.Descriptors()) > 0 || len(config.Management.ProviderSecretAliases) > 0 || localUsers != nil {
-		signingKey, err := token.LoadSigningKey(config.Document.Authentication.Token.SigningKeyFile)
-		if err != nil {
-			_ = stateStore.Close()
-			logger.Error("load token signing key failed", "error", err)
-			os.Exit(2)
-		}
-		tokenService, err = token.New(stateStore, token.Config{
-			Issuer: config.Document.API.PublicURL, KeyID: config.Document.Authentication.Token.KeyID, SigningKey: signingKey,
-			AccessTTL: config.AccessTokenTTL, RefreshTTL: config.RefreshTokenTTL,
-		})
-		if err != nil {
-			_ = stateStore.Close()
-			logger.Error("initialize token service failed", "error", err)
-			os.Exit(2)
-		}
-		loginService, err := login.New(authRegistry, stateStore, login.Config{
-			Clients: []login.Client{
-				{ID: login.DefaultDesktopClientID, AllowLoopback: true,
-					Scopes: []string{"openid", "profile", "email", "offline_access", "kubeloop.api"}},
-				{ID: "kubeloop-management",
-					RedirectURIs: []string{strings.TrimRight(config.Document.Management.PublicURL, "/") + controlplane.AdminAPIPathPrefix + "/ui/callback"},
-					Scopes:       []string{"openid", "profile", "email", "offline_access", "kubeloop.api"}},
-			},
-		})
-		if err != nil {
-			_ = stateStore.Close()
-			logger.Error("initialize login service failed", "error", err)
-			os.Exit(2)
-		}
-		var authOptions []httpauth.Option
+	var fositeEndpoints *oauthserver.Endpoints
+	if len(authRegistry.Descriptors()) > 0 || localUsers != nil {
+		var passwordAuthenticator oauthserver.PasswordAuthenticator
 		if localUsers != nil {
-			authOptions = append(authOptions, httpauth.WithLocalAuthenticator(func(
-				ctx context.Context, username string, password []byte, secondFactor, requestID string,
-			) (controlplanestorage.Principal, error) {
+			passwordAuthenticator = func(ctx context.Context, username string, password []byte, secondFactor, requestID, clientID, sourceIP string) (controlplanestorage.Principal, error) {
 				user, authErr := localUsers.Authenticate(ctx, username, password, secondFactor, requestID)
 				if authErr != nil {
 					return controlplanestorage.Principal{}, authErr
 				}
 				return stateStore.Principals().GetByID(ctx, user.PrincipalID)
-			}))
+			}
 		}
-		authService, err := httpauth.New(loginService, tokenService, authOptions...)
+		fositeStorage, err := oauthserver.NewStorage(stateStore, passwordAuthenticator)
 		if err != nil {
 			_ = stateStore.Close()
-			logger.Error("initialize authentication HTTP handler failed", "error", err)
+			logger.Error("initialize Fosite storage failed", "error", err)
 			os.Exit(2)
 		}
-		authRoutes = httpauth.NewRoutes(authService, httpauth.WithExistingSession(
-			adminhttpapi.SessionCookieName,
-			func(ctx context.Context, sessionToken string) (controlplanestorage.Principal, error) {
-				stored, authErr := managementSessions.Authenticate(ctx, sessionToken)
-				if authErr != nil || stored.PrincipalID == "" {
-					return controlplanestorage.Principal{}, adminsession.ErrSessionInvalid
-				}
-				principal, authErr := stateStore.Principals().GetByID(ctx, stored.PrincipalID)
-				if authErr != nil || principal.Provider != "local" {
-					return controlplanestorage.Principal{}, adminsession.ErrSessionInvalid
-				}
-				return principal, nil
-			},
-		))
+		oidcSigningKey, err := oauthserver.LoadSigningKey(config.Document.Authentication.OAuth.OIDCSigningKeyFile)
+		if err != nil {
+			_ = stateStore.Close()
+			logger.Error("load OIDC signing key failed", "error", err)
+			os.Exit(2)
+		}
+		hmacSecret, err := oauthserver.LoadHMACSecret(config.Document.Authentication.OAuth.HMACSecretFile)
+		if err != nil {
+			_ = stateStore.Close()
+			logger.Error("load Fosite HMAC secret failed", "error", err)
+			os.Exit(2)
+		}
+		fositeProvider, err := oauthserver.NewProvider(fositeStorage, oauthserver.Config{
+			Issuer: config.Document.API.PublicURL, HMACSecret: hmacSecret, SigningKey: oidcSigningKey,
+			AccessTokenTTL: config.AccessTokenTTL, RefreshTokenTTL: config.RefreshTokenTTL,
+		})
+		if err != nil {
+			_ = stateStore.Close()
+			logger.Error("initialize Fosite provider failed", "error", err)
+			os.Exit(2)
+		}
+		fositeEndpoints, err = oauthserver.NewEndpoints(fositeProvider, stateStore, config.Document.Authentication.OAuth.KeyID, oidcSigningKey, fositeStorage)
+		if err != nil {
+			_ = stateStore.Close()
+			logger.Error("initialize Fosite endpoints failed", "error", err)
+			os.Exit(2)
+		}
+		fositeEndpoints.SetProviderRegistry(authRegistry)
+		authRoutes = httpauth.NewRoutes(fositeEndpoints, httpauth.WithIssuer(config.Document.API.PublicURL))
 		serverOptions = append(serverOptions,
 			controlplane.WithAuthRoutes(authRoutes),
-			controlplane.WithAuthenticator(authenticateWithTokens(tokenService)),
+			controlplane.WithAuthenticator(authenticateWithFosite(fositeEndpoints)),
 		)
 	}
 	managementOptions := []adminhttpapi.Option{adminhttpapi.WithReadAPI(
@@ -217,6 +209,7 @@ func main() {
 		},
 	), adminhttpapi.WithPolicyAPI(managementRevisionService, managementPolicyLoader),
 		adminhttpapi.WithProviderAPI(managedProviderService),
+		adminhttpapi.WithOAuthClients(stateStore, stateStore),
 		adminhttpapi.WithOperationsAPI(managementOperations)}
 	if localUsers != nil {
 		managementOptions = append(managementOptions, adminhttpapi.WithLocalUsers(localUsers))
@@ -224,8 +217,8 @@ func main() {
 	if relayRegistry != nil {
 		managementOptions = append(managementOptions, adminhttpapi.WithRelayStatusSource(relayRegistry.registry))
 	}
-	if tokenService != nil {
-		managementOptions = append(managementOptions, adminhttpapi.WithTokenExchange(tokenService))
+	if authRoutes != nil {
+		managementOptions = append(managementOptions, adminhttpapi.WithTokenExchange(fositeEndpoints))
 	}
 	managementHandler, err := adminhttpapi.New(
 		adminhttpapi.Config{PublicURL: config.Document.Management.PublicURL}, managementSessions, managementOptions...,

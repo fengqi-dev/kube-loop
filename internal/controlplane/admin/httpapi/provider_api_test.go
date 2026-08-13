@@ -43,10 +43,9 @@ func TestProviderAPIValidatesPublishesRedactsAndRollsBack(t *testing.T) {
 	}
 
 	first := map[string]any{
-		"type":          "oidc",
-		"config":        map[string]any{"issuer": "https://issuer.example", "clientId": "kubeloop", "claims": map[string]string{}},
-		"secretAliases": map[string]string{"client-secret": "corporate-secret"},
-		"reason":        "configure corporate identity Provider",
+		"type":   "oidc",
+		"config": map[string]any{"issuer": "https://issuer.example", "clientId": "kubeloop", "clientSecret": "corporate-secret", "claims": map[string]string{}},
+		"reason": "configure corporate identity Provider",
 	}
 	validated := policyWrite(t, handler, cookie, csrf, "/providers/corporate/validate", `"0"`, "provider-validate-key-01", first)
 	if validated.Code != http.StatusOK || !strings.Contains(validated.Body.String(), `"connectivity":"ready"`) {
@@ -68,7 +67,7 @@ func TestProviderAPIValidatesPublishesRedactsAndRollsBack(t *testing.T) {
 		t.Fatalf("publish status=%d headers=%v body=%s", published.Code, published.Header(), published.Body.String())
 	}
 	current = authenticatedGET(handler, cookie, "/providers/corporate")
-	if current.Code != http.StatusOK || !strings.Contains(current.Body.String(), `"secretUses":["client-secret"]`) ||
+	if current.Code != http.StatusOK || !strings.Contains(current.Body.String(), `"clientSecretConfigured":true`) ||
 		strings.Contains(current.Body.String(), "corporate-secret") {
 		t.Fatalf("current Provider status=%d body=%s", current.Code, current.Body.String())
 	}

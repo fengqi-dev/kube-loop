@@ -103,6 +103,8 @@ func New(config Config, sessions *adminsession.Service, optionValues ...Option) 
 		handler.readAPI.policy = options.policyService
 		handler.readAPI.reloader = options.policyReloader
 		handler.readAPI.providers = options.providerService
+		handler.readAPI.oauthRepositories = options.oauthRepositories
+		handler.readAPI.oauthTransactions = options.oauthTransactions
 		handler.readAPI.operations = options.operationService
 		handler.readAPI.localUsers = options.localUsers
 	} else if options.relayStatus != nil {

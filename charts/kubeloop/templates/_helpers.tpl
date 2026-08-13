@@ -88,12 +88,8 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- default (printf "%s-data" (include "kubeloop.controlPlaneName" .)) .Values.controlPlane.storage.sqlite.persistence.existingClaim -}}
 {{- end -}}
 
-{{- define "kubeloop.controlPlaneConfigName" -}}
-{{- printf "%s-config" (include "kubeloop.controlPlaneName" .) | trunc 63 | trimSuffix "-" -}}
-{{- end -}}
-
-{{- define "kubeloop.dataPlaneConfigName" -}}
-{{- printf "%s-config" (include "kubeloop.dataPlaneName" .) | trunc 63 | trimSuffix "-" -}}
+{{- define "kubeloop.configName" -}}
+{{- printf "%s-config" (include "kubeloop.fullname" .) | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
 {{- define "kubeloop.validateExternalAccess" -}}
@@ -141,4 +137,8 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 
 {{- define "kubeloop.initialAdminSecretName" -}}
 {{- default (printf "%s-initial-admin" (include "kubeloop.controlPlaneName" .)) .Values.controlPlane.management.initialAdmin.existingSecret | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+
+{{- define "kubeloop.authSecretName" -}}
+{{- default (printf "%s-auth" (include "kubeloop.controlPlaneName" .)) .Values.controlPlane.auth.oauth.existingSecret | trunc 63 | trimSuffix "-" -}}
 {{- end -}}

@@ -13,7 +13,7 @@ import (
 
 	adminauthorization "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/authorization"
 	adminsession "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/session"
-	admintoken "github.com/fengqi-dev/kube-loop/internal/controlplane/authn/token"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/authn"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/relayregistry"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/relaycontrol"
@@ -150,8 +150,7 @@ func TestNamespaceAdminListsOnlyExplicitNamespaceBeforeObjectLookup(t *testing.T
 	}
 	capabilities := authenticatedGET(handler, cookie, "/capabilities")
 	if capabilities.Code != http.StatusOK || !strings.Contains(capabilities.Body.String(), `"namespace":"payments"`) ||
-		!strings.Contains(capabilities.Body.String(), `"admin.session/list"`) ||
-		!strings.Contains(capabilities.Body.String(), `"admin.task/list"`) ||
+		!strings.Contains(capabilities.Body.String(), `"namespace.tasks.read"`) ||
 		strings.Contains(capabilities.Body.String(), `"namespace":"other"`) {
 		t.Fatalf("namespace capabilities status=%d body=%s", capabilities.Code, capabilities.Body.String())
 	}
@@ -255,11 +254,11 @@ func newNamespaceTokenHandler(t *testing.T, namespace string) (*Handler, *storag
 	if err != nil {
 		t.Fatal(err)
 	}
-	family := storage.TokenFamily{
-		ID: uuid.NewString(), PrincipalID: principal.ID, DeviceID: "browser", RefreshTokenHash: bytes.Repeat([]byte{24}, 32),
-		CreatedAt: now, ExpiresAt: now.Add(time.Hour),
-	}
-	if err := store.TokenFamilies().Create(context.Background(), family); err != nil {
+	authorizationID := uuid.NewString()
+	if err := store.OAuthSessions().Create(context.Background(), storage.OAuthSession{
+		Kind: "refresh_token", SignatureHash: bytes.Repeat([]byte{24}, 32), RequestID: authorizationID,
+		RequestJSON: []byte(`{}`), Status: "active", CreatedAt: now, ExpiresAt: now.Add(time.Hour),
+	}); err != nil {
 		t.Fatal(err)
 	}
 	sessions, err := adminsession.New(store)
@@ -267,9 +266,9 @@ func newNamespaceTokenHandler(t *testing.T, namespace string) (*Handler, *storag
 		t.Fatal(err)
 	}
 	authorizer, err := adminauthorization.New(adminauthorization.Snapshot{
-		Version: adminauthorization.CurrentVersion, Revision: 1, Assignments: []adminauthorization.Assignment{{
-			ID: uuid.NewString(), Role: adminauthorization.RoleNamespaceAdmin,
-			Subjects: []string{principal.ID}, Namespaces: []string{namespace},
+		Version: adminauthorization.CurrentVersion, Revision: 1, Bindings: []adminauthorization.Binding{{
+			ID: uuid.NewString(), Subject: adminauthorization.SubjectRef{Type: adminauthorization.SubjectPrincipal, PrincipalID: principal.ID}, RoleID: adminauthorization.RoleNamespaceAdmin,
+			Scope: adminauthorization.BindingScope{Type: adminauthorization.ScopeNamespaces, Names: []string{namespace}}, ManagedBy: adminauthorization.ManagedByPlatform,
 		}},
 	})
 	if err != nil {
@@ -278,8 +277,8 @@ func newNamespaceTokenHandler(t *testing.T, namespace string) (*Handler, *storag
 	handler, err := New(
 		Config{PublicURL: "https://gateway.example"}, sessions,
 		WithReadAPI(authorizer, store, BuildInfo{Version: "test", Commit: "test", ProtocolMin: "2.0", ProtocolMax: "2.0"}),
-		WithTokenExchange(tokenAuthenticatorStub{identity: admintoken.AccessIdentity{
-			Principal: principal, FamilyID: family.ID, DeviceID: family.DeviceID, AccessExpiresAt: now.Add(time.Minute),
+		WithTokenExchange(tokenAuthenticatorStub{identity: authn.AccessIdentity{
+			Principal: principal, AuthorizationID: authorizationID, DeviceID: "browser", AccessExpiresAt: now.Add(time.Minute),
 		}}),
 	)
 	if err != nil {

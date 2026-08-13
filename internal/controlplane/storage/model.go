@@ -50,30 +50,6 @@ type TaskListFilter struct {
 	Limit       int
 }
 
-// DeviceSession is the server-side authentication session for one stable
-// client device. Refresh-token rotation records are children of this aggregate.
-type DeviceSession struct {
-	ID               string
-	SchemaVersion    int
-	PrincipalID      string
-	DeviceID         string
-	RefreshTokenHash []byte
-	CreatedAt        time.Time
-	ExpiresAt        time.Time
-	RevokedAt        *time.Time
-}
-
-// TokenFamily is retained as the repository/API name for refresh-token logic.
-type TokenFamily = DeviceSession
-
-type RefreshTokenRecord struct {
-	TokenHash []byte
-	FamilyID  string
-	Status    string
-	CreatedAt time.Time
-	UsedAt    *time.Time
-}
-
 // ClusterSession owns one principal/device/cluster/namespace runtime scope.
 type ClusterSession struct {
 	ID              string
@@ -181,41 +157,11 @@ type AuditExportJob struct {
 	ExpiresAt                   time.Time
 }
 
-type AuthAttempt struct {
-	ID                   string
-	SchemaVersion        int
-	ProviderID           string
-	StateHash            []byte
-	ClientState          string
-	ClientCallback       string
-	ClientID             string
-	Scope                string
-	Nonce                string
-	PKCEChallenge        string
-	UpstreamPKCEVerifier string
-	CreatedAt            time.Time
-	ExpiresAt            time.Time
-}
-
-type AuthExchange struct {
-	SchemaVersion int
-	CodeHash      []byte
-	PrincipalID   string
-	ProviderID    string
-	ClientID      string
-	RedirectURI   string
-	Scope         string
-	Nonce         string
-	PKCEChallenge string
-	CreatedAt     time.Time
-	ExpiresAt     time.Time
-}
-
 type AdminSession struct {
 	IDHash               []byte
 	SchemaVersion        int
 	PrincipalID          string
-	TokenFamilyID        string
+	AuthorizationID      string
 	AuthenticationType   string
 	BreakGlassGeneration string
 	CSRFTokenHash        []byte
@@ -224,6 +170,80 @@ type AdminSession struct {
 	IdleExpiresAt        time.Time
 	AbsoluteExpiresAt    time.Time
 	RevokedAt            *time.Time
+}
+
+// OAuthClient is the durable, administrator-managed OAuth 2.0 client record.
+// Secret material is deliberately stored separately so reads cannot accidentally
+// disclose even the password hash through ordinary client APIs.
+type OAuthClient struct {
+	ID                 string
+	SchemaVersion      int
+	Name               string
+	Public             bool
+	RedirectURIs       []string
+	GrantTypes         []string
+	ResponseTypes      []string
+	Scopes             []string
+	Trusted            bool
+	Enabled            bool
+	Builtin            bool
+	MachinePrincipalID string
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+}
+
+type OAuthClientSecret struct {
+	ClientID      string
+	SchemaVersion int
+	SecretHash    []byte
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
+
+type OAuthSession struct {
+	Kind          string
+	SignatureHash []byte
+	RequestID     string
+	PrincipalID   string
+	ClientID      string
+	DeviceID      string
+	RequestJSON   json.RawMessage
+	Status        string
+	CreatedAt     time.Time
+	ExpiresAt     time.Time
+	RevokedAt     *time.Time
+}
+
+type OAuthAuthorizationRequest struct {
+	ChallengeHash     []byte
+	UpstreamStateHash []byte
+	RequestID         string
+	RequestJSON       json.RawMessage
+	CSRFHash          []byte
+	PrincipalID       string
+	ProviderID        string
+	Status            string
+	CreatedAt         time.Time
+	ExpiresAt         time.Time
+}
+
+type OAuthConsent struct {
+	PrincipalID string
+	ClientID    string
+	ScopeHash   []byte
+	Scopes      []string
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
+type OAuthBrowserSession struct {
+	IDHash      []byte
+	PrincipalID string
+	ProviderID  string
+	AuthTime    time.Time
+	CreatedAt   time.Time
+	ExpiresAt   time.Time
+	RevokedAt   *time.Time
 }
 
 // LocalAdminUser stores management-plane credentials for a Principal. Password
@@ -271,15 +291,26 @@ type ProviderConfigRevision struct {
 	CreatedAt                 time.Time
 }
 
-type AdminAssignment struct {
+type AuthorizationRoleRecord struct {
+	Revision   uint64
+	ID         string
+	Definition json.RawMessage
+}
+
+type AuthorizationBindingRecord struct {
+	Revision       uint64
 	ID             string
-	SchemaVersion  int
-	PolicyRevision uint64
-	Role           string
-	Subjects       json.RawMessage
-	Groups         json.RawMessage
-	Namespaces     json.RawMessage
-	CreatedAt      time.Time
+	RoleID         string
+	SubjectType    string
+	PrincipalID    string
+	ProviderID     string
+	GroupName      string
+	ScopeType      string
+	NamespaceNames json.RawMessage
+	LabelSelectors json.RawMessage
+	ManagedBy      string
+	CreatedBy      string
+	Binding        json.RawMessage
 }
 
 type ActiveManagementRevision struct {

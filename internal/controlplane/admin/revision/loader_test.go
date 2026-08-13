@@ -37,11 +37,11 @@ func TestPolicyLoaderInstallsPublishedAggregateAndFailsClosed(t *testing.T) {
 		Snapshot: adminauthorization.Snapshot{
 			Version: adminauthorization.CurrentVersion,
 			Roles: []adminauthorization.RoleDefinition{{
-				ID: "session-reader", DisplayName: "Session reader", Permissions: []string{"admin.session/read"},
+				ID: "session-reader", DisplayName: "Session reader", Statements: []adminauthorization.Statement{{Effect: adminauthorization.EffectAllow, Capabilities: []adminauthorization.Capability{"platform.sessions.read"}}},
 			}},
-			Assignments: []adminauthorization.Assignment{
-				{ID: uuid.NewString(), Role: adminauthorization.RolePlatformAdmin, Subjects: []string{principalID}},
-				{ID: uuid.NewString(), Role: "session-reader", Subjects: []string{customPrincipalID}},
+			Bindings: []adminauthorization.Binding{
+				platformBinding(uuid.NewString(), adminauthorization.RolePlatformAdmin, principalID),
+				platformBinding(uuid.NewString(), "session-reader", customPrincipalID),
 			},
 		},
 		IdempotencyKey: "loader-create-key-0001", Reason: "install first admin", RequestID: uuid.NewString(),
@@ -73,7 +73,7 @@ func TestPolicyLoaderInstallsPublishedAggregateAndFailsClosed(t *testing.T) {
 	customDecision := engine.Authorize(ctx, adminauthorization.Subject{ID: customPrincipalID}, adminauthorization.Request{
 		Resource: adminauthorization.ResourceSession, Operation: adminauthorization.OperationRead,
 	})
-	if !customDecision.Allowed || customDecision.Role != "session-reader" {
+	if !customDecision.Allowed || len(customDecision.MatchingAllow) != 1 || customDecision.MatchingAllow[0].RoleID != "session-reader" {
 		t.Fatalf("published custom role decision = %#v", customDecision)
 	}
 
@@ -93,7 +93,7 @@ func TestPolicyLoaderInstallsPublishedAggregateAndFailsClosed(t *testing.T) {
 	}
 }
 
-func TestPolicyLoaderRejectsRevisionAssignmentMismatch(t *testing.T) {
+func TestPolicyLoaderRejectsInvalidRevision(t *testing.T) {
 	ctx := context.Background()
 	store := openLoaderStore(t)
 	defer store.Close()
@@ -107,7 +107,7 @@ func TestPolicyLoaderRejectsRevisionAssignmentMismatch(t *testing.T) {
 	}
 	now := time.Now().UTC()
 	revision, err := store.AdminPolicyRevisions().Create(ctx, storage.AdminPolicyRevision{
-		ID: uuid.NewString(), Spec: []byte(`{"version":1,"assignments":[{"id":"` + uuid.NewString() + `","role":"platform-admin","groups":["admins"]}]}`),
+		ID: uuid.NewString(), Spec: []byte(`{"version":2,"bindings":[{"id":"bad","roleId":"platform-admin"}]}`),
 		ValidationState: storage.RevisionValidationValid, Validation: []byte(`{"valid":true}`),
 		CreatedBy: storage.ManagementActorBreakGlass, CreatedAuthenticationType: string(adminauthorization.AuthenticationBreakGlass),
 		Reason: "mismatch test", CreatedAt: now,
@@ -122,7 +122,7 @@ func TestPolicyLoaderRejectsRevisionAssignmentMismatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := loader.Load(ctx); !errors.Is(err, ErrPolicyUnavailable) {
-		t.Fatalf("mismatched aggregate load = %v", err)
+		t.Fatalf("invalid aggregate load = %v", err)
 	}
 	if engine.Available() {
 		t.Fatal("mismatched aggregate left engine available")

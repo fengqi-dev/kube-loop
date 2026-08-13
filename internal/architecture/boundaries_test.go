@@ -89,6 +89,7 @@ func TestKubernetesDirectImportInventoryIsExhaustive(t *testing.T) {
 		"cmd/kubeloop-control-plane",
 		"cmd/kubeloop-operator",
 		"internal/controller",
+		"internal/controlplane/admin/authorization",
 		"internal/controlplane/exchangeapi",
 		"internal/controlplane/execapi",
 		"internal/controlplane/fileapi",

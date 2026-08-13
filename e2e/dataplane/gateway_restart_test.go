@@ -986,18 +986,21 @@ func installGatewayWithLimits(
 		websocketConfig["maxStreamsPerSession"] = limits.maxStreamsPerSession
 	}
 	configuration, err := json.Marshal(map[string]any{
-		"http": map[string]any{"path": testPath},
-		"relay": map[string]any{
-			"controlPlaneURL": controlPlaneURL, "endpoint": "wss://relay.e2e.invalid/tunnel",
-			"serverCAFile": "/var/run/kubeloop/relay/ca.crt",
+		"controlPlane": map[string]any{},
+		"gateway": map[string]any{
+			"http": map[string]any{"path": testPath},
+			"relay": map[string]any{
+				"controlPlaneURL": controlPlaneURL, "endpoint": "wss://relay.e2e.invalid/tunnel",
+				"serverCAFile": "/var/run/kubeloop/relay/ca.crt",
+			},
+			"websocket": websocketConfig, "drainTimeout": "5s",
 		},
-		"websocket": websocketConfig, "drainTimeout": "5s",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, err = client.CoreV1().ConfigMaps(namespace).Create(ctx, &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{Name: name}, Data: map[string]string{"gateway.json": string(configuration)},
+		ObjectMeta: metav1.ObjectMeta{Name: name}, Data: map[string]string{"kubeloop.yaml": string(configuration)},
 	}, metav1.CreateOptions{})
 	if err != nil {
 		t.Fatalf("create Gateway configuration: %v", err)
@@ -1021,7 +1024,7 @@ func installGatewayWithLimits(
 						{
 							Name: name, Image: harness.GatewayImage(), ImagePullPolicy: corev1.PullIfNotPresent,
 							Env: []corev1.EnvVar{
-								{Name: "KUBELOOP_GATEWAY_CONFIG_FILE", Value: "/etc/kubeloop/gateway/gateway.json"},
+								{Name: "KUBELOOP_GATEWAY_CONFIG_FILE", Value: "/etc/kubeloop/gateway/kubeloop.yaml"},
 								{Name: "KUBELOOP_POD_IP", ValueFrom: &corev1.EnvVarSource{
 									FieldRef: &corev1.ObjectFieldSelector{FieldPath: "status.podIP"},
 								}},

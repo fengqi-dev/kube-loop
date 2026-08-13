@@ -36,6 +36,79 @@ PUBLIC_URL="https://127.0.0.1:18443"
 PORT_FORWARD_PID=""
 TLS_PROXY_PID=""
 
+provision_database_provider() {
+  local cookie_jar="${WORK_DIR}/admin-cookies.txt"
+  local verifier challenge state nonce transaction authorization_csrf location code token csrf change_id
+  verifier="$(openssl rand -base64 48 | tr '+/' '-_' | tr -d '=\n')"
+  challenge="$(printf '%s' "${verifier}" | openssl dgst -binary -sha256 | openssl base64 -A | tr '+/' '-_' | tr -d '=')"
+  state="$(openssl rand -hex 24)"
+  nonce="$(openssl rand -hex 24)"
+  curl --silent --show-error --fail --location --cacert "${WORK_DIR}/public-ca.crt" \
+    --cookie-jar "${cookie_jar}" \
+    --get "${PUBLIC_URL}/oauth2/authorize" \
+    --data-urlencode response_type=code \
+    --data-urlencode client_id=kubeloop-management \
+    --data-urlencode "redirect_uri=${PUBLIC_URL}/api/admin/ui/callback" \
+    --data-urlencode 'scope=openid profile email offline_access kubeloop.api' \
+    --data-urlencode "state=${state}" \
+    --data-urlencode "nonce=${nonce}" \
+    --data-urlencode "code_challenge=${challenge}" \
+    --data-urlencode code_challenge_method=S256 \
+    --data-urlencode provider=local >"${WORK_DIR}/local-login.html"
+  transaction="$(sed -n 's/.*name="transaction" value="\([^"]*\)".*/\1/p' "${WORK_DIR}/local-login.html" | head -1)"
+  authorization_csrf="$(sed -n 's/.*name="csrf" value="\([^"]*\)".*/\1/p' "${WORK_DIR}/local-login.html" | head -1)"
+  [[ -n "${transaction}" && -n "${authorization_csrf}" ]] || { echo "local login transaction is missing" >&2; return 1; }
+  local admin_secret="${RELEASE}-kubeloop-control-plane-initial-admin"
+  local admin_username admin_password
+  admin_username="$(kubectl get secret "${admin_secret}" --namespace "${KUBELOOP_NAMESPACE}" -o jsonpath='{.data.username}' | base64 -d)"
+  admin_password="$(kubectl get secret "${admin_secret}" --namespace "${KUBELOOP_NAMESPACE}" -o jsonpath='{.data.password}' | base64 -d)"
+  curl --silent --show-error --cacert "${WORK_DIR}/public-ca.crt" \
+    --cookie "${cookie_jar}" --cookie-jar "${cookie_jar}" \
+    --dump-header "${WORK_DIR}/local-login.headers" --output /dev/null \
+    --request POST "${PUBLIC_URL}/oauth2/login/local" \
+    --header 'Content-Type: application/x-www-form-urlencoded' \
+    --data-urlencode "transaction=${transaction}" \
+    --data-urlencode "csrf=${authorization_csrf}" \
+    --data-urlencode "username=${admin_username}" \
+    --data-urlencode "password=${admin_password}" \
+    --data-urlencode decision=allow
+  location="$(awk 'BEGIN{IGNORECASE=1} /^location:/{sub(/^[^:]+:[[:space:]]*/, ""); sub(/\r$/, ""); print; exit}' "${WORK_DIR}/local-login.headers")"
+  code="$(printf '%s' "${location}" | sed -n 's/.*[?&]code=\([^&]*\).*/\1/p')"
+  [[ -n "${code}" ]] || { echo "local login authorization code is missing" >&2; return 1; }
+  token="$(curl --silent --show-error --fail --cacert "${WORK_DIR}/public-ca.crt" \
+    --request POST "${PUBLIC_URL}/oauth2/token" \
+    --header 'Content-Type: application/x-www-form-urlencoded' \
+    --data-urlencode grant_type=authorization_code \
+    --data-urlencode "code=${code}" \
+    --data-urlencode "code_verifier=${verifier}" \
+    --data-urlencode client_id=kubeloop-management \
+    --data-urlencode "redirect_uri=${PUBLIC_URL}/api/admin/ui/callback" \
+    --data-urlencode device_id=oidc-e2e-bootstrap | jq -er '.access_token')"
+  csrf="$(curl --silent --show-error --fail --cacert "${WORK_DIR}/public-ca.crt" \
+    --cookie "${cookie_jar}" --cookie-jar "${cookie_jar}" \
+    --request POST "${PUBLIC_URL}/api/admin/sessions/token" \
+    --header "Origin: ${PUBLIC_URL}" --header 'Sec-Fetch-Site: same-origin' \
+    --header 'Content-Type: application/json' --header "Authorization: Bearer ${token}" \
+    --data '{}' | jq -er '.csrfToken')"
+  jq -n --arg issuer "${ISSUER}" --arg client_id "${CLIENT_ID}" \
+    --arg client_secret "${CLIENT_SECRET}" --rawfile ca_pem "${WORK_DIR}/tls.crt" \
+    '{type:"oidc",reason:"configure Keycloak E2E Provider",config:{displayName:"Keycloak E2E",issuer:$issuer,clientId:$client_id,clientSecret:$client_secret,caPem:$ca_pem,scopes:["openid","profile","email"],allowedSigningAlgs:["RS256"],requiredClaims:["sub"],claims:{subject:"sub",displayName:"preferred_username",email:"email",groups:"groups"},httpTimeout:"10s",enabled:true}}' \
+    >"${WORK_DIR}/provider.json"
+  change_id="$(curl --silent --show-error --fail --cacert "${WORK_DIR}/public-ca.crt" \
+    --cookie "${cookie_jar}" --request POST "${PUBLIC_URL}/api/admin/providers/keycloak/drafts" \
+    --header "Origin: ${PUBLIC_URL}" --header 'Content-Type: application/json' \
+    --header "X-KubeLoop-CSRF: ${csrf}" --header 'If-Match: "0"' \
+    --header 'Idempotency-Key: oidc-e2e-provider-create-01' \
+    --data-binary "@${WORK_DIR}/provider.json" | jq -er '.changeId')"
+  curl --silent --show-error --fail --cacert "${WORK_DIR}/public-ca.crt" \
+    --cookie "${cookie_jar}" --request POST \
+    "${PUBLIC_URL}/api/admin/providers/keycloak/changes/${change_id}/publish" \
+    --header "Origin: ${PUBLIC_URL}" --header 'Content-Type: application/json' \
+    --header "X-KubeLoop-CSRF: ${csrf}" --header 'If-Match: "0"' \
+    --header 'Idempotency-Key: oidc-e2e-provider-create-01' \
+    --data '{"reason":"publish Keycloak E2E Provider"}' >/dev/null
+}
+
 mkdir -p "${ARTIFACTS}"
 rm -f "${ARTIFACTS}"/*
 
@@ -89,7 +162,9 @@ openssl x509 -req -days 2 \
   -CA "${WORK_DIR}/public-ca.crt" -CAkey "${WORK_DIR}/public-ca.key" -CAcreateserial \
   -copy_extensions copy -out "${WORK_DIR}/public-tls.crt" >/dev/null 2>&1
 openssl genpkey -algorithm ED25519 -out "${WORK_DIR}/relay-signing-key.pem" >/dev/null 2>&1
-openssl genpkey -algorithm ED25519 -out "${WORK_DIR}/token-signing-key.pem" >/dev/null 2>&1
+openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 \
+  -out "${WORK_DIR}/oidc-signing-key.pem" >/dev/null 2>&1
+openssl rand -hex 16 >"${WORK_DIR}/hmac-secret"
 
 jq -n \
   --arg clientID "${CLIENT_ID}" \
@@ -242,15 +317,15 @@ curl --silent --show-error --fail --cacert "${WORK_DIR}/tls.crt" \
   "${ISSUER}/.well-known/openid-configuration" >/dev/null
 
 kubectl create namespace "${KUBELOOP_NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
-kubectl create secret generic oidc-credentials --namespace "${KUBELOOP_NAMESPACE}" \
-  --from-literal="client-secret=${CLIENT_SECRET}" --from-file="ca.crt=${WORK_DIR}/tls.crt" \
-  --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 kubectl create secret generic oidc-signing --namespace "${KUBELOOP_NAMESPACE}" \
   --from-file="relay-signing-key.pem=${WORK_DIR}/relay-signing-key.pem" \
   --from-file="tls.crt=${WORK_DIR}/registry-tls.crt" \
   --from-file="tls.key=${WORK_DIR}/registry-tls.key" \
   --from-file="ca.crt=${WORK_DIR}/registry-tls.crt" \
-  --from-file="token-signing-key.pem=${WORK_DIR}/token-signing-key.pem" \
+  --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+kubectl create secret generic oidc-auth --namespace "${KUBELOOP_NAMESPACE}" \
+  --from-file="oidc-signing-key.pem=${WORK_DIR}/oidc-signing-key.pem" \
+  --from-file="hmac-secret=${WORK_DIR}/hmac-secret" \
   --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 
 image_repository() { printf '%s\n' "${1%:*}"; }
@@ -272,24 +347,7 @@ helm upgrade --install "${RELEASE}" "${ROOT}/charts/kubeloop" \
   --set controlPlane.management.initialAdmin.enabled=false \
   --set-string controlPlane.relay.existingSecret=oidc-signing \
   --set-string controlPlane.relay.signingKeyKey=relay-signing-key.pem \
-  --set-string controlPlane.auth.token.existingSecret=oidc-signing \
-  --set-string controlPlane.auth.token.signingKeyKey=token-signing-key.pem \
-  --set-string controlPlane.auth.providers[0].id=keycloak \
-  --set-string controlPlane.auth.providers[0].type=oidc \
-  --set-string controlPlane.auth.providers[0].displayName='Keycloak E2E' \
-  --set-string "controlPlane.auth.providers[0].oidc.issuer=${ISSUER}" \
-  --set-string "controlPlane.auth.providers[0].oidc.clientID=${CLIENT_ID}" \
-  --set-string controlPlane.auth.providers[0].oidc.existingSecret=oidc-credentials \
-  --set-string controlPlane.auth.providers[0].oidc.clientSecretKey=client-secret \
-  --set-string controlPlane.auth.providers[0].oidc.caKey=ca.crt \
-  --set-string controlPlane.auth.providers[0].oidc.claims.displayName=preferred_username \
-  --set-string controlPlane.auth.providers[0].oidc.claims.email=email \
-  --set-string controlPlane.auth.providers[0].oidc.claims.groups=groups \
-  --set-string controlPlane.policy.rules[0].id=oidc-e2e-namespaces \
-  --set-string controlPlane.policy.rules[0].groups[0]=kubeloop-e2e-user \
-  --set-string 'controlPlane.policy.rules[0].namespaces[0]=$cluster' \
-  --set-string controlPlane.policy.rules[0].operations[0]=list \
-  --set-string controlPlane.policy.rules[0].resourceKinds[0]=namespaces
+  --set-string controlPlane.auth.oauth.existingSecret=oidc-auth
 
 kubectl port-forward --namespace "${KUBELOOP_NAMESPACE}" \
   "service/${RELEASE}-kubeloop-control-plane" 18080:80 >"${ARTIFACTS}/port-forward.log" 2>&1 &
@@ -317,6 +375,8 @@ for _ in $(seq 1 30); do
 done
 curl --silent --show-error --fail --cacert "${WORK_DIR}/public-ca.crt" \
   "${PUBLIC_URL}/health/ready" >/dev/null
+
+provision_database_provider
 
 cd "${ROOT}"
 KUBELOOP_OIDC_E2E=1 \

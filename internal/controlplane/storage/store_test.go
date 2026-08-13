@@ -3,7 +3,6 @@ package storage
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -15,8 +14,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/remotetask"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
 )
@@ -57,109 +54,6 @@ func TestSQLiteFileURLUsesPortableAbsoluteURI(t *testing.T) {
 	}
 	if got, want := sqliteFileURL(`D:\a\kube-loop\state.db`, true), `file:///D:/a/kube-loop/state.db`; got != want {
 		t.Fatalf("Windows SQLite URL = %q, want %q", got, want)
-	}
-}
-
-func TestSQLiteTaskStateMigrationPreservesLegacyTasks(t *testing.T) {
-	testTaskStateMigrationPreservesLegacyTasks(t, Config{
-		Backend: BackendSQLite, SQLitePath: filepath.Join(t.TempDir(), "legacy-tasks.db"),
-	})
-}
-
-func testTaskStateMigrationPreservesLegacyTasks(t *testing.T, config Config) {
-	t.Helper()
-	store, err := Open(context.Background(), config)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx := context.Background()
-	now := time.Date(2026, 8, 10, 8, 0, 0, 0, time.UTC)
-	principal, err := store.Principals().Upsert(ctx, Principal{
-		ID: uuid.NewString(), Provider: "oidc", ExternalID: "legacy-owner", CreatedAt: now,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	network, err := networkspec.Normalize(networkspec.Spec{
-		PodCIDRs: []string{"10.2.0.0/16"}, ServiceCIDRs: []string{"10.96.0.0/12"},
-		ServiceIPs: []string{"10.96.0.10"}, DNSServer: "10.96.0.10",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	networkJSON, _ := networkspec.CanonicalJSON(network)
-	networkHash, _ := networkspec.Hash(network)
-	session := Session{
-		ID: uuid.NewString(), PrincipalID: principal.ID, DeviceID: "legacy-client", ClusterID: "cluster-a",
-		Namespace: "development", State: "active", Generation: 1, CreatedAt: now, UpdatedAt: now,
-		LastHeartbeatAt: now, ExpiresAt: now.Add(time.Hour), NetworkSpec: networkJSON, NetworkSpecHash: networkHash,
-	}
-	if err := store.Sessions().Create(ctx, session); err != nil {
-		t.Fatal(err)
-	}
-	expiresAt := session.ExpiresAt
-	activeID, preparingID := uuid.NewString(), uuid.NewString()
-	for _, task := range []Task{
-		{ID: activeID, PrincipalID: principal.ID, SessionID: session.ID, Type: "port-forward", State: remotetask.Running, Spec: json.RawMessage(`{}`), IdempotencyKey: "legacy-active", CreatedAt: now, UpdatedAt: now, ExpiresAt: &expiresAt},
-		{ID: preparingID, PrincipalID: principal.ID, SessionID: session.ID, Type: "exchange", State: remotetask.Starting, Spec: json.RawMessage(`{}`), IdempotencyKey: "legacy-preparing", CreatedAt: now, UpdatedAt: now, ExpiresAt: &expiresAt},
-	} {
-		if err := store.Tasks().Create(ctx, task); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if _, err := store.db.ExecContext(ctx, store.repositories.principals.bind(`UPDATE tasks SET state = 'active' WHERE id = ?`), activeID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := store.db.ExecContext(ctx, store.repositories.principals.bind(`UPDATE tasks SET state = 'preparing' WHERE id = ?`), preparingID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := store.db.ExecContext(ctx, `DROP TABLE management_metadata`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := store.db.ExecContext(ctx, `DROP TABLE admin_sessions`); err != nil {
-		t.Fatal(err)
-	}
-	for _, table := range []string{
-		"admin_recovery_codes", "local_admin_users",
-		"audit_export_jobs",
-		"relay_desired_states",
-		"config_change_requests", "management_active_revisions", "admin_assignments",
-		"provider_config_revisions", "admin_policy_revisions",
-	} {
-		if _, err := store.db.ExecContext(ctx, `DROP TABLE `+table); err != nil {
-			t.Fatal(err)
-		}
-	}
-	for _, statement := range []string{
-		`ALTER TABLE auth_attempts DROP COLUMN client_id`,
-		`ALTER TABLE auth_attempts DROP COLUMN scope`,
-		`ALTER TABLE auth_exchanges DROP COLUMN client_id`,
-		`ALTER TABLE auth_exchanges DROP COLUMN redirect_uri`,
-		`ALTER TABLE auth_exchanges DROP COLUMN scope`,
-		`ALTER TABLE auth_exchanges DROP COLUMN nonce`,
-	} {
-		if _, err := store.db.ExecContext(ctx, statement); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if _, err := store.db.ExecContext(ctx, `DELETE FROM schema_migrations WHERE version >= 6`); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.Close(); err != nil {
-		t.Fatal(err)
-	}
-	store, err = Open(ctx, config)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
-	active, err := store.Tasks().GetByID(ctx, activeID)
-	if err != nil || active.State != remotetask.Running {
-		t.Fatalf("migrated active Task = %#v, %v", active, err)
-	}
-	preparing, err := store.Tasks().GetByID(ctx, preparingID)
-	if err != nil || preparing.State != remotetask.Starting {
-		t.Fatalf("migrated preparing Task = %#v, %v", preparing, err)
 	}
 }
 
@@ -290,7 +184,7 @@ func TestSQLiteMigrationFailureRollsBackVersion(t *testing.T) {
 	if err := database.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Open(context.Background(), Config{Backend: BackendSQLite, SQLitePath: path}); err == nil || !strings.Contains(err.Error(), "migration 1") {
+	if _, err := Open(context.Background(), Config{Backend: BackendSQLite, SQLitePath: path}); err == nil || !strings.Contains(err.Error(), "migration 20") {
 		t.Fatalf("Open migration error = %v", err)
 	}
 	database, err = sql.Open("sqlite", path)
@@ -311,6 +205,27 @@ func TestSQLiteMigrationFailureRollsBackVersion(t *testing.T) {
 	}
 	if version != 0 {
 		t.Fatalf("failed migration recorded schema version %d", version)
+	}
+}
+
+func TestSQLiteRejectsSchemaBeforeBreakingBaseline(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "legacy.db")
+	database, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`INSERT INTO schema_migrations(version, applied_at) VALUES (17, 'now')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	_, err = Open(context.Background(), Config{Backend: BackendSQLite, SQLitePath: path})
+	if err == nil || !strings.Contains(err.Error(), "rebuild the database") {
+		t.Fatalf("Open legacy schema error = %v", err)
 	}
 }
 
@@ -465,17 +380,43 @@ func TestStorageConfigurationSecurity(t *testing.T) {
 }
 
 func TestMySQLMigrationDialectConversion(t *testing.T) {
+	converted := strings.Builder{}
 	for _, migration := range migrations {
 		statements := migration.mysql
 		if len(statements) == 0 {
 			statements = mysqlMigrationStatements(migration.sqlite)
 		}
 		for _, statement := range statements {
+			converted.WriteString(statement)
 			for _, forbidden := range []string{"AUTOINCREMENT", " BLOB", "idempotency_`key`"} {
 				if strings.Contains(statement, forbidden) {
 					t.Fatalf("MySQL migration %d contains %q: %s", migration.version, forbidden, statement)
 				}
 			}
+		}
+	}
+	for _, required := range []string{"CREATE TABLE authorization_revisions", "CREATE TABLE authorization_roles", "CREATE TABLE authorization_bindings", "definition_json", "binding_json"} {
+		if !strings.Contains(converted.String(), required) {
+			t.Fatalf("MySQL authorization migration is missing %q", required)
+		}
+	}
+}
+
+func TestPostgreSQLMigrationDialectConversion(t *testing.T) {
+	converted := strings.Join(migrations[0].postgresql, "\n")
+	for _, statement := range migrations[0].postgresql {
+		for _, required := range []string{"public BOOLEAN", "trusted BOOLEAN", "request_json JSONB", "groups_json JSONB"} {
+			if strings.Contains(statement, strings.Fields(required)[0]+" ") && !strings.Contains(statement, required) {
+				t.Fatalf("PostgreSQL migration did not convert %q: %s", required, statement)
+			}
+		}
+		if strings.Contains(statement, "BLOB") || strings.Contains(statement, "AUTOINCREMENT") {
+			t.Fatalf("PostgreSQL migration contains SQLite syntax: %s", statement)
+		}
+	}
+	for _, required := range []string{"CREATE TABLE authorization_revisions", "CREATE TABLE authorization_roles", "CREATE TABLE authorization_bindings", "definition_json JSONB", "binding_json JSONB"} {
+		if !strings.Contains(converted, required) {
+			t.Fatalf("PostgreSQL authorization migration is missing %q", required)
 		}
 	}
 }

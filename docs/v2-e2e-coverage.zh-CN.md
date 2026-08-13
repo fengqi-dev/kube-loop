@@ -16,7 +16,7 @@
 | Mirror TCP/UDP | `TestRealMirrorPreservesPrimaryPathAndRecoversStaleOwner` | 原 Pod 响应始终为主路径，桌面只收到副本；本地响应不能泄漏；覆盖停止、崩溃、撤权和恢复。 |
 | Preview TCP/UDP | `TestRealPreviewLifecycleOwnershipAndStaleRecovery` | 创建真实 Service/EndpointSlice；名称冲突与用户接管安全；停止、崩溃、撤权和恢复按 TrafficBinding name/UID/controller reference 清理。 |
 | Pod exec/TTY | `TestRealPodExecTTYDisconnectAndControllerRestart` | 真实 SPDY exec、stdin、TTY resize、异常 WebSocket 关闭、Control Plane 停止/重启及重启后再次执行。 |
-| Pod exec 撤权 | `TestRealPodExecStopsWhenTokenFamilyIsRevoked` | Token Family 撤销主动终止真实 Pod 命令并写入取消终态。 |
+| Pod exec 撤权 | `TestRealPodExecStopsWhenOAuthGrantIsRevoked` | OAuth grant 撤销主动终止真实 Pod 命令并写入取消终态。 |
 | 文件上传/下载与恢复 | `TestRealFileTransferRevocationControllerRestartAndResume` | 8 MiB 真实文件、校验和、撤权、Control Plane 重启、Pod 端 partial resume 和完整下载校验。 |
 | 文件管理特殊路径、目录 | `TestRealFileTransferRevocationControllerRestartAndResume` | 含空格、单引号、`$`、`;` 的创建/改名/列表/删除；嵌套文件和空目录双向传输并保持内容。 |
 | Pod SSH 命令与容器目标 | `TestRealPodSSHThroughGatewayAndLocalIdentityIsolation` | loopback SSH 经远程 exec 到指定容器；非所有者本地公钥被拒绝。 |
@@ -31,7 +31,7 @@
 | 客户端崩溃 | Data Plane core `Done/Err` 注入；Exchange/Mirror/Preview `CloseNow`；Pod exec 异常 WebSocket 关闭 | 异常 Task 进入 `failed` 或取消终态，但资源必须恢复且 snapshot 清零；本地 SOCKS/TUN/DNS 必须清理。 |
 | Gateway 崩溃 | 删除真实 Gateway Pod | 活跃流在 drain 窗口结束；稳定 SOCKS/TUN/Port Forward 地址不变；Session generation 和 RelayTicket 刷新后恢复。 |
 | Control Plane 崩溃/重启 | Pod exec、文件传输、Exchange/Mirror/Preview stale owner | 活跃工作终止或保留恢复意图；接替 Control Plane 可继续执行或补偿 Kubernetes 资源。 |
-| Token Family 撤销 | Exchange、Mirror、Preview、Pod exec、文件传输 | 无需客户端 DELETE，授权 lease 主动终止；所有资源与流被清理。 |
+| OAuth grant 撤销 | Exchange、Mirror、Preview、Pod exec、文件传输 | 无需客户端 DELETE，授权 lease 主动终止；所有资源与流被清理。 |
 | Kubernetes API 暂时不可用 | Preview lifecycle 的 client-go transport 503 gate | 真实删除请求命中 503，Task 与 snapshot 保持 `recovering`；API 恢复后接替 Reconciler 完成精确所有者清理。 |
 | 网络路径中断与权限刷新 | loopback Gateway proxy 切到不可达地址、heartbeat 刷新 NetworkSpec 后切换备用路径 | TUN 不允许静默旁路；本地 SOCKS/Port Forward 地址保持；NetworkSpec 变化时旧 Helper session 被清理并按新 allowlist 重装，随后普通 Gateway 重启不重复重装。 |
 | 多身份隔离 | 两名 Principal、跨 Session token、metrics | 跨 Session 控制令牌拒绝；指标不暴露 Principal、Device 或 Session ID。 |
@@ -47,7 +47,7 @@
 ## 身份、容量与平台证据
 
 - `internal/client/auth/fullstack_oidc_test.go` 使用真实 TLS discovery、authorization redirect、PKCE、JWKS 和 RS256 ID Token，贯通桌面 loopback callback、Control Plane 登录、SQLite、Access/Refresh Token 轮换与撤销。
-- `make capacity-baseline` 验证全局/单用户物理 WSS、逻辑 stream 上限、容量释放，以及满载时 live/ready/metrics；三轮 32 KiB stream benchmark 记录吞吐和分配。`TestGatewayPodMultiUserCapacityRSSAndCleanup` 在单个真实 Gateway Pod 上以四名 Principal/四条物理 WSS/十六条逻辑 stream 验证限额、容量复用、集群内吞吐和 kubelet working-set 曲线；满载期间撤销 Token Family，确认 Preview Task、relay、TrafficBinding、Service、EndpointSlice 和 snapshot 在 5 秒预算内全部清理。
+- `make capacity-baseline` 验证全局/单用户物理 WSS、逻辑 stream 上限、容量释放，以及满载时 live/ready/metrics；三轮 32 KiB stream benchmark 记录吞吐和分配。`TestGatewayPodMultiUserCapacityRSSAndCleanup` 在单个真实 Gateway Pod 上以四名 Principal/四条物理 WSS/十六条逻辑 stream 验证限额、容量复用、集群内吞吐和 kubelet working-set 曲线；满载期间撤销 OAuth grant，确认 Preview Task、relay、TrafficBinding、Service、EndpointSlice 和 snapshot 在 5 秒预算内全部清理。
 - Windows/macOS workflow 运行全量本地测试和真实 Helper 安装、升级、ACL、DNS 恢复、卸载；Linux 额外运行完整 Minikube TUN。`e2e/remotetun` 已接入三平台 workflow，使用实际 Helper、sing-box TUN、WSS/smux Gateway、RelayTicket/NetworkSpec 和精确目标路由，验证休眠间隔触发 transport 刷新后 SOCKS 地址、TUN core 与 Helper Session 保持不变，且停止后无特权资源残留。最终门禁已由 GitHub Actions push workflow [31454657118](https://github.com/fengqi-dev/kube-loop/actions/runs/31454657118) 完成：Windows、macOS、Linux、Helm、主 Go 与前端六个作业全部通过，V2-803 已关闭。
 
 ## 运行方式

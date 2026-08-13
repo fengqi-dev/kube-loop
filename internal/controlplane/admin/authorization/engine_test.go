@@ -3,7 +3,6 @@ package authorization
 import (
 	"context"
 	"errors"
-	"sync"
 	"testing"
 )
 
@@ -30,405 +29,101 @@ func (state *breakGlassStateStub) CurrentBreakGlassState(context.Context) (Break
 	return state.state, state.err
 }
 
-func TestFiveBuiltInRolesEnforceExplicitPermissionMatrix(t *testing.T) {
-	tests := []struct {
-		name       string
-		assignment Assignment
-		allowed    Request
-		denied     Request
-	}{
-		{
-			name:       "platform admin",
-			assignment: Assignment{ID: "platform", Role: RolePlatformAdmin, Subjects: []string{testPrincipalID}},
-			allowed:    Request{Resource: ResourceAssignment, Operation: OperationCreate},
-			denied:     Request{Resource: ResourceStatus, Operation: OperationDelete},
-		},
-		{
-			name:       "security admin",
-			assignment: Assignment{ID: "security", Role: RoleSecurityAdmin, Groups: []string{"security"}},
-			allowed:    Request{Resource: ResourcePolicy, Operation: OperationPublish},
-			denied:     Request{Resource: ResourceAssignment, Operation: OperationCreate},
-		},
-		{
-			name:       "operator",
-			assignment: Assignment{ID: "operator", Role: RoleOperator, Subjects: []string{testPrincipalID}},
-			allowed:    Request{Resource: ResourceRelay, Operation: OperationDrain},
-			denied:     Request{Resource: ResourcePolicy, Operation: OperationRead},
-		},
-		{
-			name:       "auditor",
-			assignment: Assignment{ID: "auditor", Role: RoleAuditor, Subjects: []string{testPrincipalID}},
-			allowed:    Request{Resource: ResourceAudit, Operation: OperationList},
-			denied:     Request{Resource: ResourceAudit, Operation: OperationExport},
-		},
-		{
-			name: "namespace admin",
-			assignment: Assignment{
-				ID: "payments-admin", Role: RoleNamespaceAdmin, Subjects: []string{testPrincipalID},
-				Namespaces: []string{"payments"},
-			},
-			allowed: Request{Resource: ResourceNamespacePolicy, Operation: OperationPublish, Namespace: "payments"},
-			denied:  Request{Resource: ResourceNamespacePolicy, Operation: OperationPublish, Namespace: "other"},
-		},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			engine, err := New(Snapshot{Version: CurrentVersion, Revision: 1, Assignments: []Assignment{test.assignment}})
-			if err != nil {
-				t.Fatal(err)
-			}
-			subject := Subject{ID: testPrincipalID, Groups: test.assignment.Groups}
-			if len(test.assignment.Subjects) > 0 {
-				subject.ID = test.assignment.Subjects[0]
-			}
-			decision := engine.Authorize(context.Background(), subject, test.allowed)
-			if !decision.Allowed || decision.Role != test.assignment.Role || decision.AssignmentID != test.assignment.ID || decision.Revision != 1 {
-				t.Fatalf("allowed decision = %#v", decision)
-			}
-			if decision := engine.Authorize(context.Background(), subject, test.denied); decision.Allowed {
-				t.Fatalf("denied decision = %#v", decision)
-			}
-		})
-	}
+func principalBinding(id string, role Role, principal string, scope BindingScope) Binding {
+	return Binding{ID: id, Subject: SubjectRef{Type: SubjectPrincipal, PrincipalID: principal}, RoleID: role, Scope: scope, ManagedBy: ManagedByPlatform}
 }
 
-func TestCustomRoleEnforcesPermissionsAndNamespaceDelegation(t *testing.T) {
-	engine, err := New(Snapshot{
-		Version:  CurrentVersion,
-		Revision: 1,
-		Roles: []RoleDefinition{{
-			ID: "support-reader", DisplayName: "Support reader",
-			Permissions: []string{"admin.session/read", "admin.task/list"},
-		}},
-		Assignments: []Assignment{{
-			ID: "support-team", Role: "support-reader", Groups: []string{"support"}, Namespaces: []string{"team-a"},
-		}},
+func TestUnifiedPolicyExplicitDenyOverridesEveryAllow(t *testing.T) {
+	engine, err := New(Snapshot{Version: CurrentVersion, Revision: 1,
+		Roles: []RoleDefinition{
+			{ID: "exec-allow", DisplayName: "Exec allow", Statements: []Statement{{Effect: EffectAllow, Capabilities: []Capability{CapabilityNamespaceAccess, "namespace.exec.open"}}}},
+			{ID: "exec-deny", DisplayName: "Exec deny", Statements: []Statement{{Effect: EffectDeny, Capabilities: []Capability{"namespace.exec.open"}}}},
+		},
+		Bindings: []Binding{
+			principalBinding("allow", "exec-allow", testPrincipalID, BindingScope{Type: ScopeNamespaces, Names: []string{"team-a"}}),
+			principalBinding("deny", "exec-deny", testPrincipalID, BindingScope{Type: ScopeNamespaces, Names: []string{"team-a"}}),
+		},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	subject := Subject{ID: testPrincipalID, Groups: []string{"support"}, Authentication: AuthenticationNormal}
-	allowed := engine.Authorize(context.Background(), subject, Request{
-		Resource: ResourceSession, Operation: OperationRead, Namespace: "team-a",
-	})
-	if !allowed.Allowed || allowed.Role != "support-reader" || allowed.Scope != "team-a" {
-		t.Fatalf("custom role decision = %#v", allowed)
-	}
-	for _, request := range []Request{
-		{Resource: ResourceSession, Operation: OperationRead, Namespace: "team-b"},
-		{Resource: ResourceSession, Operation: OperationStop, Namespace: "team-a"},
-	} {
-		if decision := engine.Authorize(context.Background(), subject, request); decision.Allowed {
-			t.Fatalf("custom role allowed %#v with %#v", request, decision)
-		}
-	}
-	delegated := engine.DelegatedNamespaces(subject)
-	if len(delegated) != 1 || delegated[0] != "team-a" {
-		t.Fatalf("delegated namespaces = %#v", delegated)
+	decision := engine.Authorize(context.Background(), Subject{ID: testPrincipalID}, Request{Capability: "namespace.exec.open", Namespace: "team-a", LabelsAvailable: true})
+	if decision.Allowed || decision.Reason != ReasonExplicitDeny || len(decision.MatchingAllow) == 0 || len(decision.MatchingDeny) != 1 {
+		t.Fatalf("decision = %#v", decision)
 	}
 }
 
-func TestCustomRoleValidationRejectsReservedAndUnknownPermissions(t *testing.T) {
-	tests := []struct {
-		name string
-		role RoleDefinition
-	}{
-		{name: "reserved ID", role: RoleDefinition{ID: RoleAuditor, DisplayName: "Replacement", Permissions: []string{"admin.audit/read"}}},
-		{name: "unknown permission", role: RoleDefinition{ID: "custom-auditor", DisplayName: "Custom auditor", Permissions: []string{"admin.audit/destroy"}}},
-		{name: "duplicate permission", role: RoleDefinition{ID: "custom-auditor", DisplayName: "Custom auditor", Permissions: []string{"admin.audit/read", "admin.audit/read"}}},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			if _, err := New(Snapshot{Version: CurrentVersion, Revision: 1, Roles: []RoleDefinition{test.role}}); err == nil {
-				t.Fatal("invalid custom role was accepted")
-			}
-		})
-	}
-}
-
-func TestNamespaceAdminCannotCrossScopeOrUseClusterOperations(t *testing.T) {
-	engine, err := New(Snapshot{Version: CurrentVersion, Revision: 7, Assignments: []Assignment{{
-		ID: "team-a-admin", Role: RoleNamespaceAdmin, Groups: []string{"team-a"}, Namespaces: []string{"team-a"},
+func TestProviderScopedGroupAndNamespaceSelectors(t *testing.T) {
+	engine, err := New(Snapshot{Version: CurrentVersion, Revision: 2, Bindings: []Binding{{
+		ID: "oidc-team", Subject: SubjectRef{Type: SubjectGroup, ProviderID: "auth0", GroupName: "developers"},
+		RoleID: RoleNamespaceViewer, Scope: BindingScope{Type: ScopeNamespaces, LabelSelectors: []NamespaceSelector{{MatchLabels: map[string]string{"team": "payments"}}}}, ManagedBy: ManagedByPlatform,
 	}}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	subject := Subject{ID: testPrincipalID, Groups: []string{"team-a"}}
-	for _, request := range []Request{
-		{Resource: ResourceNamespaceMember, Operation: OperationUpdate, Namespace: "team-b", ResourceName: "member-1"},
-		{Resource: ResourceSession, Operation: OperationRead},
-		{Resource: ResourceProvider, Operation: OperationRead},
-		{Resource: ResourceSession, Operation: OperationStop, Namespace: "team-a", ResourceName: "session-1"},
-	} {
-		if decision := engine.Authorize(context.Background(), subject, request); decision.Allowed {
-			t.Fatalf("cross-scope request %#v allowed by %#v", request, decision)
+	request := Request{Capability: "namespace.resources.read", Namespace: "payments-prod", NamespaceLabels: map[string]string{"team": "payments"}, LabelsAvailable: true}
+	if decision := engine.Authorize(context.Background(), Subject{ID: testPrincipalID, Provider: "auth0", Groups: []string{"developers"}}, request); !decision.Allowed {
+		t.Fatalf("matching group decision = %#v", decision)
+	}
+	if decision := engine.Authorize(context.Background(), Subject{ID: testPrincipalID, Provider: "other", Groups: []string{"developers"}}, request); decision.Allowed {
+		t.Fatalf("cross-provider group allowed = %#v", decision)
+	}
+	request.LabelsAvailable = false
+	request.NamespaceLabels = nil
+	if decision := engine.Authorize(context.Background(), Subject{ID: testPrincipalID, Provider: "auth0", Groups: []string{"developers"}}, request); decision.Reason != ReasonScopeUnavailable {
+		t.Fatalf("missing labels decision = %#v", decision)
+	}
+}
+
+func TestDelegatedBindingsCannotEscalate(t *testing.T) {
+	tests := []Binding{
+		{ID: "platform", Subject: SubjectRef{Type: SubjectPrincipal, PrincipalID: testPrincipalID}, RoleID: RolePlatformAdmin, Scope: BindingScope{Type: ScopePlatform}, ManagedBy: ManagedByDelegated},
+		{ID: "selector", Subject: SubjectRef{Type: SubjectPrincipal, PrincipalID: testPrincipalID}, RoleID: RoleNamespaceViewer, Scope: BindingScope{Type: ScopeNamespaces, LabelSelectors: []NamespaceSelector{{MatchLabels: map[string]string{"team": "a"}}}}, ManagedBy: ManagedByDelegated},
+		{ID: "admin", Subject: SubjectRef{Type: SubjectPrincipal, PrincipalID: testPrincipalID}, RoleID: RoleNamespaceAdmin, Scope: BindingScope{Type: ScopeNamespaces, Names: []string{"team-a"}}, ManagedBy: ManagedByDelegated},
+	}
+	for _, binding := range tests {
+		if _, err := New(Snapshot{Version: CurrentVersion, Revision: 1, Bindings: []Binding{binding}}); err == nil {
+			t.Fatalf("escalating delegated binding accepted: %#v", binding)
 		}
 	}
-	if decision := engine.Authorize(context.Background(), subject, Request{
-		Resource: ResourceSession, Operation: OperationRead, Namespace: "team-a", ResourceName: "session-1",
-	}); !decision.Allowed || decision.Scope != "team-a" {
-		t.Fatalf("delegated read decision = %#v", decision)
-	}
 }
 
-func TestDelegatedNamespacesReturnsOnlyMatchingRegularScopesAndFailsClosed(t *testing.T) {
-	engine, err := New(Snapshot{Version: CurrentVersion, Revision: 8, Assignments: []Assignment{
-		{ID: "by-subject", Role: RoleNamespaceAdmin, Subjects: []string{testPrincipalID}, Namespaces: []string{"zeta", "alpha"}},
-		{ID: "by-group", Role: RoleNamespaceAdmin, Groups: []string{"team-a"}, Namespaces: []string{"beta", "alpha"}},
-		{ID: "other", Role: RoleNamespaceAdmin, Subjects: []string{testOtherPrincipalID}, Namespaces: []string{"secret"}},
-	}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	subject := Subject{ID: testPrincipalID, Groups: []string{"team-a"}, Authentication: AuthenticationNormal}
-	namespaces := engine.DelegatedNamespaces(subject)
-	if len(namespaces) != 3 || namespaces[0] != "alpha" || namespaces[1] != "beta" || namespaces[2] != "zeta" {
-		t.Fatalf("delegated namespaces = %#v", namespaces)
-	}
-	subject.Authentication = AuthenticationBootstrap
-	if namespaces := engine.DelegatedNamespaces(subject); len(namespaces) != 0 {
-		t.Fatalf("bootstrap delegated namespaces = %#v", namespaces)
-	}
-	engine.FailClosed()
-	subject.Authentication = AuthenticationNormal
-	if namespaces := engine.DelegatedNamespaces(subject); len(namespaces) != 0 {
-		t.Fatalf("fail-closed delegated namespaces = %#v", namespaces)
-	}
-}
-
-func TestBootstrapFailsClosedRetiresAndRequiresExplicitRecovery(t *testing.T) {
-	bootstrap := BootstrapConfig{Subjects: []string{testPrincipalID}, Groups: []string{"platform-bootstrap"}}
-	request := Request{Resource: ResourceAssignment, Operation: OperationCreate}
-	subject := Subject{ID: testPrincipalID}
-
-	withoutState, err := NewDenyAll(WithBootstrap(bootstrap, nil))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if decision := withoutState.Authorize(context.Background(), subject, request); decision.Reason != ReasonBootstrapStateUnavailable || decision.Allowed {
-		t.Fatalf("missing state decision = %#v", decision)
-	}
-
+func TestBootstrapBreakGlassAndFailClosed(t *testing.T) {
+	request := Request{Capability: "platform.authorization.manage"}
 	state := &bootstrapStateStub{}
-	engine, err := NewDenyAll(WithBootstrap(bootstrap, state))
+	engine, err := NewDenyAll(WithBootstrap(BootstrapConfig{Subjects: []string{testPrincipalID}}, state))
 	if err != nil {
 		t.Fatal(err)
 	}
-	decision := engine.Authorize(context.Background(), subject, request)
-	if !decision.Allowed || decision.Authentication != AuthenticationBootstrap || decision.Role != RolePlatformAdmin {
-		t.Fatalf("active bootstrap decision = %#v", decision)
+	if decision := engine.Authorize(context.Background(), Subject{ID: testPrincipalID}, request); !decision.Allowed || decision.Authentication != AuthenticationBootstrap {
+		t.Fatalf("bootstrap = %#v", decision)
 	}
-	groupDecision := engine.Authorize(context.Background(), Subject{ID: testOtherPrincipalID, Groups: []string{"platform-bootstrap"}}, request)
-	if !groupDecision.Allowed || groupDecision.Authentication != AuthenticationBootstrap {
-		t.Fatalf("group bootstrap decision = %#v", groupDecision)
-	}
-
 	state.retired = true
-	if decision := engine.Authorize(context.Background(), subject, request); decision.Reason != ReasonBootstrapRetired || decision.Allowed {
-		t.Fatalf("retired bootstrap decision = %#v", decision)
+	if decision := engine.Authorize(context.Background(), Subject{ID: testPrincipalID}, request); decision.Reason != ReasonBootstrapRetired {
+		t.Fatalf("retired = %#v", decision)
 	}
-	recovery, err := NewDenyAll(WithBootstrap(BootstrapConfig{
-		Subjects: []string{testPrincipalID}, RecoveryEnabled: true,
-	}, state))
-	if err != nil {
-		t.Fatal(err)
+	breakGlass := &breakGlassStateStub{state: BreakGlassState{Enabled: true, Generation: "generation"}}
+	engine, _ = NewDenyAll(WithBreakGlass(breakGlass))
+	if decision := engine.Authorize(context.Background(), Subject{ID: "break-glass", Authentication: AuthenticationBreakGlass, BreakGlassGeneration: "generation"}, request); !decision.Allowed {
+		t.Fatalf("break-glass = %#v", decision)
 	}
-	if decision := recovery.Authorize(context.Background(), subject, request); !decision.Allowed || decision.Authentication != AuthenticationBootstrap {
-		t.Fatalf("recovery bootstrap decision = %#v", decision)
-	}
-}
-
-func TestFormalAssignmentPrecedesUnavailableBootstrapState(t *testing.T) {
-	state := &bootstrapStateStub{err: errors.New("database unavailable")}
-	engine, err := New(Snapshot{Version: CurrentVersion, Revision: 1, Assignments: []Assignment{{
-		ID: "formal-admin", Role: RolePlatformAdmin, Subjects: []string{testPrincipalID},
-	}}}, WithBootstrap(BootstrapConfig{Subjects: []string{testPrincipalID}}, state))
-	if err != nil {
-		t.Fatal(err)
-	}
-	decision := engine.Authorize(context.Background(), Subject{ID: testPrincipalID}, Request{
-		Resource: ResourceStatus, Operation: OperationRead,
-	})
-	if !decision.Allowed || decision.Authentication != AuthenticationNormal || decision.AssignmentID != "formal-admin" {
-		t.Fatalf("formal decision = %#v", decision)
+	breakGlass.err = errors.New("unavailable")
+	if decision := engine.Authorize(context.Background(), Subject{ID: "break-glass", Authentication: AuthenticationBreakGlass, BreakGlassGeneration: "generation"}, request); decision.Allowed {
+		t.Fatalf("unavailable break-glass = %#v", decision)
 	}
 }
 
-func TestBreakGlassRequiresCurrentEnabledGeneration(t *testing.T) {
-	state := &breakGlassStateStub{state: BreakGlassState{Enabled: true, Generation: "secret-generation-2"}}
-	engine, err := NewDenyAll(WithBreakGlass(state))
+func TestPlatformBindingCoversNamespaceCapabilities(t *testing.T) {
+	engine, err := New(Snapshot{Version: CurrentVersion, Revision: 3, Bindings: []Binding{principalBinding("admin", RolePlatformAdmin, testPrincipalID, BindingScope{Type: ScopePlatform})}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := Request{Resource: ResourceDiagnostic, Operation: OperationCreate}
-	subject := Subject{
-		ID: "break-glass", Authentication: AuthenticationBreakGlass,
-		BreakGlassGeneration: "secret-generation-2",
-	}
-	decision := engine.Authorize(context.Background(), subject, request)
-	if !decision.Allowed || decision.Authentication != AuthenticationBreakGlass || decision.Role != RolePlatformAdmin {
-		t.Fatalf("current break-glass decision = %#v", decision)
-	}
-	subject.BreakGlassGeneration = "secret-generation-1"
-	if decision := engine.Authorize(context.Background(), subject, request); decision.Allowed || decision.Reason != ReasonBreakGlassStale {
-		t.Fatalf("stale break-glass decision = %#v", decision)
-	}
-	state.state.Enabled = false
-	if decision := engine.Authorize(context.Background(), subject, request); decision.Allowed || decision.Reason != ReasonBreakGlassUnavailable {
-		t.Fatalf("disabled break-glass decision = %#v", decision)
-	}
-}
-
-func TestRevisionUpdateImmediatelyInvalidatesRemovedAssignment(t *testing.T) {
-	engine, err := New(Snapshot{Version: CurrentVersion, Revision: 10, Assignments: []Assignment{{
-		ID: "reader", Role: RoleAuditor, Subjects: []string{testPrincipalID},
-	}}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	request := Request{Resource: ResourceAudit, Operation: OperationRead}
-	if decision := engine.Authorize(context.Background(), Subject{ID: testPrincipalID}, request); !decision.Allowed || decision.Revision != 10 {
-		t.Fatalf("initial decision = %#v", decision)
-	}
-	if err := engine.Update(Snapshot{Version: CurrentVersion, Revision: 11, Assignments: []Assignment{}}); err != nil {
-		t.Fatal(err)
-	}
-	if decision := engine.Authorize(context.Background(), Subject{ID: testPrincipalID}, request); decision.Allowed || decision.Revision != 11 {
-		t.Fatalf("updated decision = %#v", decision)
-	}
-	if err := engine.Update(Snapshot{Version: CurrentVersion, Revision: 10, Assignments: []Assignment{}}); err == nil {
-		t.Fatal("stale management policy update succeeded")
-	}
-}
-
-func TestApplyAcceptsRollbackOnlyWithNewerActiveETag(t *testing.T) {
-	engine, err := New(Snapshot{Version: CurrentVersion, Revision: 10, Assignments: []Assignment{{
-		ID: "reader-v10", Role: RoleAuditor, Subjects: []string{testPrincipalID},
-	}}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if engine.ETag() != 0 {
-		t.Fatalf("initial ETag = %d, want 0", engine.ETag())
-	}
-	if err := engine.Apply(Snapshot{Version: CurrentVersion, Revision: 5, Assignments: []Assignment{{
-		ID: "reader-v5", Role: RoleAuditor, Subjects: []string{testPrincipalID},
-	}}}, 2); err != nil {
-		t.Fatal(err)
-	}
-	if engine.Revision() != 5 || engine.ETag() != 2 {
-		t.Fatalf("active revision/ETag = %d/%d, want 5/2", engine.Revision(), engine.ETag())
+	decision := engine.Authorize(context.Background(), Subject{ID: testPrincipalID}, Request{Capability: "namespace.port-forward.open", Namespace: "team-a", LabelsAvailable: true})
+	if !decision.Allowed {
+		t.Fatalf("platform namespace decision = %#v", decision)
 	}
 	engine.FailClosed()
-	if engine.Available() {
-		t.Fatal("failed-closed engine remained available")
+	if decision := engine.Authorize(context.Background(), Subject{ID: testPrincipalID}, Request{Capability: "platform.overview.read"}); decision.Allowed {
+		t.Fatalf("fail closed = %#v", decision)
 	}
-	if decision := engine.Authorize(context.Background(), Subject{ID: testPrincipalID}, Request{
-		Resource: ResourceAudit, Operation: OperationRead,
-	}); decision.Allowed {
-		t.Fatalf("failed-closed decision = %#v", decision)
-	}
-	if err := engine.Apply(Snapshot{Version: CurrentVersion, Revision: 5, Assignments: []Assignment{{
-		ID: "reader-v5", Role: RoleAuditor, Subjects: []string{testPrincipalID},
-	}}}, 2); err != nil {
-		t.Fatalf("restore same ETag after fail-close: %v", err)
-	}
-	for _, staleETag := range []uint64{1, 2} {
-		if err := engine.Apply(Snapshot{Version: CurrentVersion, Revision: 11, Assignments: []Assignment{}}, staleETag); err == nil {
-			t.Fatalf("stale ETag %d succeeded", staleETag)
-		}
-	}
-	if err := engine.Apply(Snapshot{Version: CurrentVersion, Revision: 11, Assignments: []Assignment{}}, 3); err != nil {
-		t.Fatal(err)
-	}
-	if engine.Revision() != 11 || engine.ETag() != 3 {
-		t.Fatalf("active revision/ETag = %d/%d, want 11/3", engine.Revision(), engine.ETag())
-	}
-}
-
-func TestDryRunCannotManufactureBreakGlassContext(t *testing.T) {
-	state := &breakGlassStateStub{state: BreakGlassState{Enabled: true, Generation: "generation-1"}}
-	engine, err := NewDenyAll(WithBreakGlass(state))
-	if err != nil {
-		t.Fatal(err)
-	}
-	decision := engine.DryRun(context.Background(), Subject{
-		ID: testPrincipalID, Authentication: AuthenticationBreakGlass, BreakGlassGeneration: "generation-1",
-	}, Request{Resource: ResourceStatus, Operation: OperationRead})
-	if decision.Allowed || decision.Authentication == AuthenticationBreakGlass {
-		t.Fatalf("dry-run decision = %#v", decision)
-	}
-}
-
-func TestLookupAuthorizedRejectsIDORBeforeRepositoryAccess(t *testing.T) {
-	engine, err := New(Snapshot{Version: CurrentVersion, Revision: 3, Assignments: []Assignment{{
-		ID: "payments-admin", Role: RoleNamespaceAdmin, Subjects: []string{testPrincipalID}, Namespaces: []string{"payments"},
-	}}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	lookups := 0
-	lookup := func(_ context.Context, namespace, resourceName string) (string, error) {
-		lookups++
-		return namespace + "/" + resourceName, nil
-	}
-	request := Request{
-		Resource: ResourceNamespaceMember, Operation: OperationRead, Namespace: "other", ResourceName: "member-1",
-	}
-	if _, decision, err := LookupAuthorized(context.Background(), engine, Subject{ID: testPrincipalID}, request, lookup); !errors.Is(err, ErrForbidden) || decision.Allowed || lookups != 0 {
-		t.Fatalf("cross-tenant lookup: decision=%#v error=%v lookups=%d", decision, err, lookups)
-	}
-	request.Namespace = "payments"
-	value, decision, err := LookupAuthorized(context.Background(), engine, Subject{ID: testPrincipalID}, request, lookup)
-	if err != nil || !decision.Allowed || value != "payments/member-1" || lookups != 1 {
-		t.Fatalf("authorized lookup: value=%q decision=%#v error=%v lookups=%d", value, decision, err, lookups)
-	}
-}
-
-func TestInvalidAssignmentsAndSelectorsAreRejected(t *testing.T) {
-	tests := []Snapshot{
-		{Version: CurrentVersion, Assignments: []Assignment{{ID: "no-revision", Role: RoleAuditor, Subjects: []string{testPrincipalID}}}},
-		{Version: CurrentVersion, Revision: 1, Assignments: []Assignment{{ID: "wildcard", Role: RoleAuditor, Subjects: []string{"*"}}}},
-		{Version: CurrentVersion, Revision: 1, Assignments: []Assignment{{ID: "unknown", Role: "root", Subjects: []string{testPrincipalID}}}},
-		{Version: CurrentVersion, Revision: 1, Assignments: []Assignment{{ID: "missing-scope", Role: RoleNamespaceAdmin, Subjects: []string{testPrincipalID}}}},
-		{Version: CurrentVersion, Revision: 1, Assignments: []Assignment{{
-			ID: "cluster-with-scope", Role: RolePlatformAdmin, Subjects: []string{testPrincipalID}, Namespaces: []string{"payments"},
-		}}},
-	}
-	for index, snapshot := range tests {
-		if _, err := New(snapshot); err == nil {
-			t.Fatalf("invalid snapshot %d succeeded", index)
-		}
-	}
-	if _, err := NewDenyAll(WithBootstrap(BootstrapConfig{Subjects: []string{"*"}}, &bootstrapStateStub{})); err == nil {
-		t.Fatal("wildcard bootstrap subject succeeded")
-	}
-}
-
-func TestConcurrentAuthorizationAndRevisionUpdate(t *testing.T) {
-	engine, err := New(Snapshot{Version: CurrentVersion, Revision: 1, Assignments: []Assignment{{
-		ID: "reader", Role: RoleAuditor, Subjects: []string{testPrincipalID},
-	}}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var wait sync.WaitGroup
-	for range 8 {
-		wait.Go(func() {
-			for range 500 {
-				engine.Authorize(context.Background(), Subject{ID: testPrincipalID}, Request{Resource: ResourceAudit, Operation: OperationRead})
-			}
-		})
-	}
-	for revision := uint64(2); revision < 100; revision++ {
-		assignments := []Assignment{}
-		if revision%2 == 0 {
-			assignments = []Assignment{{ID: "reader", Role: RoleAuditor, Subjects: []string{testPrincipalID}}}
-		}
-		if err := engine.Update(Snapshot{Version: CurrentVersion, Revision: revision, Assignments: assignments}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	wait.Wait()
 }

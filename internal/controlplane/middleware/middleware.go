@@ -131,16 +131,19 @@ func New(config Config) echo.MiddlewareFunc {
 				writeError(ctx, requestID, &controlplaneapi.Error{Code: controlplaneapi.CodeUnauthenticated, Message: "authentication required"})
 				return nil
 			}
-			decision := config.Authorizer.Authorize(request.Context(), authorization.Subject{
-				ID: principal.Subject, Groups: append([]string(nil), principal.Groups...),
-			}, authorizationRequest)
-			if !decision.Allowed {
-				writeError(ctx, requestID, &controlplaneapi.Error{Code: controlplaneapi.CodeForbidden, Message: "operation is not permitted"})
-				return nil
+			requestContext = request.Context()
+			if !isNamespaceCollectionList(authorizationRequest) && !isSessionHeartbeat(authorizationRequest) {
+				decision := config.Authorizer.Authorize(request.Context(), authorization.Subject{
+					ID: principal.Subject, Provider: principal.Provider, Groups: append([]string(nil), principal.Groups...),
+				}, authorizationRequest)
+				if !decision.Allowed {
+					writeError(ctx, requestID, &controlplaneapi.Error{Code: controlplaneapi.CodeForbidden, Message: "operation is not permitted"})
+					return nil
+				}
+				requestContext = context.WithValue(requestContext, authorizationContextKey{}, authorizationContextValue{
+					request: authorizationRequest, decision: decision,
+				})
 			}
-			requestContext = context.WithValue(request.Context(), authorizationContextKey{}, authorizationContextValue{
-				request: authorizationRequest, decision: decision,
-			})
 			requestContext = context.WithValue(requestContext, principalContextKey{}, principal)
 			request = request.WithContext(requestContext)
 			ctx.SetRequest(request)
@@ -161,6 +164,23 @@ func New(config Config) echo.MiddlewareFunc {
 			return nil
 		}
 	}
+}
+
+// The namespace collection is authorized per returned namespace by kubeapi.
+// A cluster-scoped pre-check here would reject principals that only have
+// namespace-scoped grants before the response can be filtered.
+func isNamespaceCollectionList(request authorization.Request) bool {
+	return request.Operation == "list" && request.Namespace == "" &&
+		request.ResourceKind == "namespaces" && request.ResourceName == ""
+}
+
+// Session heartbeats re-evaluate the complete policy and Kubernetes capability
+// intersection inside sessionapi. Keeping this request out of the early gate
+// lets that service actively disconnect the runtime and settle its Tasks when
+// access has been revoked, instead of merely returning 403 while traffic lives on.
+func isSessionHeartbeat(request authorization.Request) bool {
+	return request.Operation == "heartbeat" && request.ResourceKind == "sessions" &&
+		request.Namespace != "" && request.ResourceName != ""
 }
 
 func isWebSocketUpgrade(request *http.Request) bool {
