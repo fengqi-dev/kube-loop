@@ -28,7 +28,7 @@ func TestBreakGlassExchangeSetsHostCookieAndReturnsCSRF(t *testing.T) {
 	request := exchangeRequest(`{"credential":"valid"}`)
 	request.Header.Set(managementRequestHeader, "33333333-3333-4333-8333-333333333333")
 	recorder := httptest.NewRecorder()
-	handler.ServeHTTP(recorder, request)
+	serveHTTP(handler, recorder, request)
 	if recorder.Code != http.StatusCreated {
 		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
@@ -79,7 +79,7 @@ func TestBreakGlassExchangeEnforcesOriginShapeAndRateLimit(t *testing.T) {
 	crossSite := exchangeRequest(`{"credential":"valid"}`)
 	crossSite.Header.Set("Origin", "https://attacker.example")
 	first := httptest.NewRecorder()
-	handler.ServeHTTP(first, crossSite)
+	serveHTTP(handler, first, crossSite)
 	if first.Code != http.StatusUnauthorized {
 		t.Fatalf("cross-site status=%d", first.Code)
 	}
@@ -129,7 +129,7 @@ func TestManagementPublicURLRequiresTLSOutsideLoopback(t *testing.T) {
 func TestReadAPIRequiresCookieAndReturnsAuthorizedCapabilitiesAndStatus(t *testing.T) {
 	handler, store := newReadTestHandler(t, true)
 	unauthenticated := httptest.NewRecorder()
-	handler.ServeHTTP(unauthenticated, httptest.NewRequest(http.MethodGet, "/capabilities", nil))
+	serveHTTP(handler, unauthenticated, httptest.NewRequest(http.MethodGet, "/capabilities", nil))
 	if unauthenticated.Code != http.StatusUnauthorized {
 		t.Fatalf("unauthenticated status=%d body=%s", unauthenticated.Code, unauthenticated.Body.String())
 	}
@@ -143,7 +143,7 @@ func TestReadAPIRequiresCookieAndReturnsAuthorizedCapabilitiesAndStatus(t *testi
 	capabilityRequest.AddCookie(cookie)
 	capabilityRequest.Header.Set("Sec-Fetch-Site", "same-origin")
 	capabilities := httptest.NewRecorder()
-	handler.ServeHTTP(capabilities, capabilityRequest)
+	serveHTTP(handler, capabilities, capabilityRequest)
 	if capabilities.Code != http.StatusOK || capabilities.Header().Get(managementRequestHeader) == "" {
 		t.Fatalf("capability status=%d headers=%v body=%s", capabilities.Code, capabilities.Header(), capabilities.Body.String())
 	}
@@ -161,7 +161,7 @@ func TestReadAPIRequiresCookieAndReturnsAuthorizedCapabilitiesAndStatus(t *testi
 	statusRequest := httptest.NewRequest(http.MethodGet, "/status", nil)
 	statusRequest.AddCookie(cookie)
 	status := httptest.NewRecorder()
-	handler.ServeHTTP(status, statusRequest)
+	serveHTTP(handler, status, statusRequest)
 	if status.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", status.Code, status.Body.String())
 	}
@@ -195,7 +195,7 @@ func TestReadAPIRejectsCrossSiteDuplicateCookieAndUnauthorizedRole(t *testing.T)
 	crossSite.AddCookie(cookie)
 	crossSite.Header.Set("Sec-Fetch-Site", "cross-site")
 	crossSiteRecorder := httptest.NewRecorder()
-	handler.ServeHTTP(crossSiteRecorder, crossSite)
+	serveHTTP(handler, crossSiteRecorder, crossSite)
 	if crossSiteRecorder.Code != http.StatusUnauthorized {
 		t.Fatalf("cross-site status=%d", crossSiteRecorder.Code)
 	}
@@ -203,7 +203,7 @@ func TestReadAPIRejectsCrossSiteDuplicateCookieAndUnauthorizedRole(t *testing.T)
 	duplicate := httptest.NewRequest(http.MethodGet, "/status", nil)
 	duplicate.Header.Add("Cookie", SessionCookieName+"="+cookie.Value+"; "+SessionCookieName+"="+cookie.Value)
 	duplicateRecorder := httptest.NewRecorder()
-	handler.ServeHTTP(duplicateRecorder, duplicate)
+	serveHTTP(handler, duplicateRecorder, duplicate)
 	if duplicateRecorder.Code != http.StatusUnauthorized {
 		t.Fatalf("duplicate-cookie status=%d", duplicateRecorder.Code)
 	}
@@ -211,7 +211,7 @@ func TestReadAPIRejectsCrossSiteDuplicateCookieAndUnauthorizedRole(t *testing.T)
 	denied := httptest.NewRequest(http.MethodGet, "/status", nil)
 	denied.AddCookie(cookie)
 	deniedRecorder := httptest.NewRecorder()
-	handler.ServeHTTP(deniedRecorder, denied)
+	serveHTTP(handler, deniedRecorder, denied)
 	if deniedRecorder.Code != http.StatusForbidden {
 		t.Fatalf("denied status=%d body=%s", deniedRecorder.Code, deniedRecorder.Body.String())
 	}
@@ -263,7 +263,7 @@ func TestGatewayTokenExchangeCreatesNormalAndBootstrapManagementSessions(t *test
 			request.Header.Set("Content-Type", "application/json")
 			request.Header.Set("Authorization", "Bearer valid-access-token")
 			recorder := httptest.NewRecorder()
-			handler.ServeHTTP(recorder, request)
+			serveHTTP(handler, recorder, request)
 			if recorder.Code != http.StatusCreated || len(recorder.Result().Cookies()) != 1 {
 				t.Fatalf("exchange status=%d body=%s", recorder.Code, recorder.Body.String())
 			}
@@ -289,7 +289,7 @@ func TestGatewayTokenExchangeCreatesNormalAndBootstrapManagementSessions(t *test
 			statusRequest := httptest.NewRequest(http.MethodGet, "/status", nil)
 			statusRequest.AddCookie(cookie)
 			status := httptest.NewRecorder()
-			handler.ServeHTTP(status, statusRequest)
+			serveHTTP(handler, status, statusRequest)
 			if status.Code != http.StatusOK {
 				t.Fatalf("status after exchange=%d body=%s", status.Code, status.Body.String())
 			}
@@ -304,12 +304,12 @@ func TestGatewayTokenExchangeCreatesNormalAndBootstrapManagementSessions(t *test
 			logoutRequest.Header.Set("Origin", "https://gateway.example")
 			logoutRequest.Header.Set(CSRFHeaderName, issued.CSRFToken)
 			logout := httptest.NewRecorder()
-			handler.ServeHTTP(logout, logoutRequest)
+			serveHTTP(handler, logout, logoutRequest)
 			if logout.Code != http.StatusNoContent || len(logout.Result().Cookies()) != 1 || logout.Result().Cookies()[0].MaxAge != -1 {
 				t.Fatalf("logout status=%d headers=%v body=%s", logout.Code, logout.Header(), logout.Body.String())
 			}
 			statusAfterLogout := httptest.NewRecorder()
-			handler.ServeHTTP(statusAfterLogout, statusRequest)
+			serveHTTP(handler, statusAfterLogout, statusRequest)
 			if statusAfterLogout.Code != http.StatusUnauthorized {
 				t.Fatalf("status after logout=%d body=%s", statusAfterLogout.Code, statusAfterLogout.Body.String())
 			}
@@ -325,7 +325,7 @@ func TestManagementUIIsPublicButStrictlySandboxed(t *testing.T) {
 	handler, _ := newPrincipalTokenHandler(t, false)
 	request := httptest.NewRequest(http.MethodGet, "/ui", nil)
 	recorder := httptest.NewRecorder()
-	handler.ServeHTTP(recorder, request)
+	serveHTTP(handler, recorder, request)
 	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), "KubeLoop Control") ||
 		!strings.Contains(recorder.Header().Get("Content-Security-Policy"), "script-src 'self'") {
 		t.Fatalf("UI status=%d CSP=%q body=%s", recorder.Code, recorder.Header().Get("Content-Security-Policy"), recorder.Body.String())
@@ -345,7 +345,7 @@ func TestGatewayTokenExchangeRejectsMalformedBearerAndCrossSite(t *testing.T) {
 		request.Header.Set("Authorization", "Bearer valid-access-token")
 		mutate(request)
 		recorder := httptest.NewRecorder()
-		handler.ServeHTTP(recorder, request)
+		serveHTTP(handler, recorder, request)
 		if recorder.Code != http.StatusUnauthorized {
 			t.Fatalf("rejected exchange status=%d body=%s", recorder.Code, recorder.Body.String())
 		}
@@ -367,7 +367,7 @@ func TestGatewayTokenExchangeRejectsNonEmptyOrNullJSONAndAudits(t *testing.T) {
 		request.Header.Set("Content-Type", "application/json")
 		request.Header.Set("Authorization", "Bearer valid-access-token")
 		recorder := httptest.NewRecorder()
-		handler.ServeHTTP(recorder, request)
+		serveHTTP(handler, recorder, request)
 		if recorder.Code != http.StatusBadRequest {
 			t.Fatalf("body=%q status=%d response=%s", body, recorder.Code, recorder.Body.String())
 		}
@@ -540,9 +540,9 @@ func exchangeRequest(body string) *http.Request {
 	return request
 }
 
-func performExchange(handler http.Handler, body string) *httptest.ResponseRecorder {
+func performExchange(handler *Handler, body string) *httptest.ResponseRecorder {
 	recorder := httptest.NewRecorder()
-	handler.ServeHTTP(recorder, exchangeRequest(body))
+	serveHTTP(handler, recorder, exchangeRequest(body))
 	return recorder
 }
 

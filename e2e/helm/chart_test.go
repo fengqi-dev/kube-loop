@@ -136,7 +136,7 @@ func TestSQLiteChartRendersIndependentSecureWorkloads(t *testing.T) {
 	ingressYAML, _ := yaml.Marshal(ingress)
 	for _, want := range []string{
 		"host: kubeloop.example.test", "path: /.well-known", "path: /oauth2",
-		"path: /kubeloop/api", "path: /tunnel", "path: /traffic/v1", "pathType: Prefix", "tls:",
+		"path: /kubeloop/api", "path: /api/sessions", "path: /tunnel", "path: /traffic/v1", "pathType: Prefix", "tls:",
 	} {
 		if !strings.Contains(string(ingressYAML), want) {
 			t.Fatalf("same-origin Ingress is missing %q: %s", want, ingressYAML)
@@ -181,7 +181,7 @@ func TestGatewayAPIHTTPRouteUsesOneTLSOriginAndUnboundedWebSocketTimeout(t *test
 	for _, want := range []string{
 		"apiVersion: gateway.networking.k8s.io/v1", "name: shared-gateway",
 		"namespace: networking", "sectionName: https", "kubeloop.example.test",
-		"value: /.well-known", "value: /oauth2", "value: /kubeloop/api", "value: /tunnel", "value: /traffic/v1",
+		"value: /.well-known", "value: /oauth2", "value: /kubeloop/api", "value: /api/sessions", "value: /tunnel", "value: /traffic/v1",
 		"name: test-kubeloop-control-plane", "name: test-kubeloop-gateway",
 		"request: 30s", "backendRequest: 30s", "request: 0s", "backendRequest: 0s",
 	} {

@@ -12,6 +12,7 @@ import (
 	adminauthorization "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/authorization"
 	adminrevision "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/revision"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
+	"github.com/labstack/echo/v5"
 )
 
 const (
@@ -32,12 +33,13 @@ type policyCheck struct {
 	Request adminauthorization.Request `json:"request"`
 }
 
-func (api *readAPI) currentPolicy(writer http.ResponseWriter, request *http.Request) {
+func (api *readAPI) currentPolicy(ctx *echo.Context) error {
+	writer, request := ctx.Response(), ctx.Request()
 	state, err := api.policy.CurrentPolicy(request.Context())
 	if err != nil {
 		api.audit(request, subjectFromRequest(request), "admin.policy/read", "failure")
 		writePolicyError(writer, request, err)
-		return
+		return nil
 	}
 	writer.Header().Set("ETag", strongETag(state.Pointer.ETag))
 	api.audit(request, subjectFromRequest(request), "admin.policy/read", "success")
@@ -50,13 +52,15 @@ func (api *readAPI) currentPolicy(writer http.ResponseWriter, request *http.Requ
 		document["reason"] = state.Revision.Reason
 	}
 	writeJSON(writer, http.StatusOK, document)
+	return nil
 }
 
-func (api *readAPI) dryRunPolicy(writer http.ResponseWriter, request *http.Request) {
+func (api *readAPI) dryRunPolicy(ctx *echo.Context) error {
+	writer, request := ctx.Response(), ctx.Request()
 	expectedETag, idempotencyKey, ok := policyWriteHeaders(writer, request)
 	if !ok {
 		api.audit(request, subjectFromRequest(request), "admin.policy/dry-run", "failure")
-		return
+		return nil
 	}
 	_ = idempotencyKey // Dry-run is deterministic and has no state to reserve.
 	var input struct {
@@ -66,23 +70,23 @@ func (api *readAPI) dryRunPolicy(writer http.ResponseWriter, request *http.Reque
 	}
 	if !decodePolicyJSON(writer, request, &input) {
 		api.audit(request, subjectFromRequest(request), "admin.policy/dry-run", "failure")
-		return
+		return nil
 	}
 	if len(input.Checks) > maximumDryRunChecks || !validChangeReason(input.Reason) {
 		api.audit(request, subjectFromRequest(request), "admin.policy/dry-run", "failure")
 		writeError(writer, http.StatusBadRequest, "invalid_request", "policy dry-run request is invalid", requestID(request))
-		return
+		return nil
 	}
 	state, err := api.policy.CurrentPolicy(request.Context())
 	if err != nil {
 		api.audit(request, subjectFromRequest(request), "admin.policy/dry-run", "failure")
 		writePolicyError(writer, request, err)
-		return
+		return nil
 	}
 	if state.Pointer.ETag != expectedETag {
 		api.audit(request, subjectFromRequest(request), "admin.policy/dry-run", "failure")
 		writeError(writer, http.StatusPreconditionFailed, "etag_mismatch", "management policy changed", requestID(request))
-		return
+		return nil
 	}
 	revision := state.Snapshot.Revision
 	if revision == 0 {
@@ -93,7 +97,7 @@ func (api *readAPI) dryRunPolicy(writer http.ResponseWriter, request *http.Reque
 	if err != nil {
 		api.audit(request, subjectFromRequest(request), "admin.policy/dry-run", "failure")
 		writeError(writer, http.StatusBadRequest, "invalid_policy", "management policy is invalid", requestID(request))
-		return
+		return nil
 	}
 	decisions := make([]map[string]any, 0, len(input.Checks))
 	for _, check := range input.Checks {
@@ -110,13 +114,15 @@ func (api *readAPI) dryRunPolicy(writer http.ResponseWriter, request *http.Reque
 		"valid": true, "publishable": hasPlatformAdministrator(input.Spec.Assignments),
 		"baseEtag": expectedETag, "decisions": decisions,
 	})
+	return nil
 }
 
-func (api *readAPI) createPolicyDraft(writer http.ResponseWriter, request *http.Request) {
+func (api *readAPI) createPolicyDraft(ctx *echo.Context) error {
+	writer, request := ctx.Response(), ctx.Request()
 	expectedETag, idempotencyKey, ok := policyWriteHeaders(writer, request)
 	if !ok {
 		api.audit(request, subjectFromRequest(request), "admin.policy/create", "failure")
-		return
+		return nil
 	}
 	var input struct {
 		Spec   policySpec `json:"spec"`
@@ -124,12 +130,12 @@ func (api *readAPI) createPolicyDraft(writer http.ResponseWriter, request *http.
 	}
 	if !decodePolicyJSON(writer, request, &input) {
 		api.audit(request, subjectFromRequest(request), "admin.policy/create", "failure")
-		return
+		return nil
 	}
 	if !validChangeReason(input.Reason) {
 		api.audit(request, subjectFromRequest(request), "admin.policy/create", "failure")
 		writeError(writer, http.StatusBadRequest, "invalid_request", "policy draft request is invalid", requestID(request))
-		return
+		return nil
 	}
 	result, err := api.policy.CreatePolicyDraft(request.Context(), adminrevision.PolicyDraftRequest{
 		Snapshot: input.Spec.snapshot(0), ExpectedETag: expectedETag, IdempotencyKey: idempotencyKey,
@@ -138,9 +144,9 @@ func (api *readAPI) createPolicyDraft(writer http.ResponseWriter, request *http.
 	if err != nil {
 		api.audit(request, subjectFromRequest(request), "admin.policy/create", "failure")
 		writePolicyError(writer, request, err)
-		return
+		return nil
 	}
-	writer.Header().Set("Location", api.handler.apiPath+"/admin/policy/changes/"+result.Change.ID)
+	writer.Header().Set("Location", api.handler.pathPrefix+"/policy/changes/"+result.Change.ID)
 	if result.Replayed {
 		writer.Header().Set("Idempotent-Replayed", "true")
 	}
@@ -149,13 +155,15 @@ func (api *readAPI) createPolicyDraft(writer http.ResponseWriter, request *http.
 		"baseRevision": result.Change.BaseRevision, "baseEtag": result.Change.BaseETag,
 		"status": result.Change.Status, "replayed": result.Replayed,
 	})
+	return nil
 }
 
-func (api *readAPI) publishPolicy(writer http.ResponseWriter, request *http.Request) {
+func (api *readAPI) publishPolicy(ctx *echo.Context) error {
+	writer, request := ctx.Response(), ctx.Request()
 	expectedETag, idempotencyKey, ok := policyWriteHeaders(writer, request)
 	if !ok {
 		api.audit(request, subjectFromRequest(request), "admin.policy/publish", "failure")
-		return
+		return nil
 	}
 	changeID := strings.TrimSpace(request.PathValue("changeID"))
 	var input struct {
@@ -163,12 +171,12 @@ func (api *readAPI) publishPolicy(writer http.ResponseWriter, request *http.Requ
 	}
 	if !decodePolicyJSON(writer, request, &input) {
 		api.audit(request, subjectFromRequest(request), "admin.policy/publish", "failure")
-		return
+		return nil
 	}
 	if changeID == "" || !validChangeReason(input.Reason) {
 		api.audit(request, subjectFromRequest(request), "admin.policy/publish", "failure")
 		writeError(writer, http.StatusBadRequest, "invalid_request", "policy publish request is invalid", requestID(request))
-		return
+		return nil
 	}
 	result, err := api.policy.PublishPolicy(request.Context(), adminrevision.ActivateRequest{
 		ChangeID: changeID, ExpectedETag: expectedETag, IdempotencyKey: idempotencyKey,
@@ -177,24 +185,26 @@ func (api *readAPI) publishPolicy(writer http.ResponseWriter, request *http.Requ
 	if err != nil {
 		api.audit(request, subjectFromRequest(request), "admin.policy/publish", "failure")
 		writePolicyError(writer, request, err)
-		return
+		return nil
 	}
 	if err := api.reloader.Load(request.Context()); err != nil {
 		writeError(writer, http.StatusServiceUnavailable, "policy_reload_failed", "policy was stored but is not yet available", requestID(request))
-		return
+		return nil
 	}
 	writer.Header().Set("ETag", strongETag(result.Active.ETag))
 	if result.Replayed {
 		writer.Header().Set("Idempotent-Replayed", "true")
 	}
 	writeJSON(writer, http.StatusOK, activationDocument(result))
+	return nil
 }
 
-func (api *readAPI) rollbackPolicy(writer http.ResponseWriter, request *http.Request) {
+func (api *readAPI) rollbackPolicy(ctx *echo.Context) error {
+	writer, request := ctx.Response(), ctx.Request()
 	expectedETag, idempotencyKey, ok := policyWriteHeaders(writer, request)
 	if !ok {
 		api.audit(request, subjectFromRequest(request), "admin.policy/rollback", "failure")
-		return
+		return nil
 	}
 	var input struct {
 		TargetRevision uint64 `json:"targetRevision"`
@@ -202,12 +212,12 @@ func (api *readAPI) rollbackPolicy(writer http.ResponseWriter, request *http.Req
 	}
 	if !decodePolicyJSON(writer, request, &input) {
 		api.audit(request, subjectFromRequest(request), "admin.policy/rollback", "failure")
-		return
+		return nil
 	}
 	if input.TargetRevision == 0 || !validChangeReason(input.Reason) {
 		api.audit(request, subjectFromRequest(request), "admin.policy/rollback", "failure")
 		writeError(writer, http.StatusBadRequest, "invalid_request", "policy rollback request is invalid", requestID(request))
-		return
+		return nil
 	}
 	result, err := api.policy.RollbackPolicy(request.Context(), adminrevision.RollbackRequest{
 		TargetRevision: input.TargetRevision, ExpectedETag: expectedETag, IdempotencyKey: idempotencyKey,
@@ -216,17 +226,18 @@ func (api *readAPI) rollbackPolicy(writer http.ResponseWriter, request *http.Req
 	if err != nil {
 		api.audit(request, subjectFromRequest(request), "admin.policy/rollback", "failure")
 		writePolicyError(writer, request, err)
-		return
+		return nil
 	}
 	if err := api.reloader.Load(request.Context()); err != nil {
 		writeError(writer, http.StatusServiceUnavailable, "policy_reload_failed", "policy was stored but is not yet available", requestID(request))
-		return
+		return nil
 	}
 	writer.Header().Set("ETag", strongETag(result.Active.ETag))
 	if result.Replayed {
 		writer.Header().Set("Idempotent-Replayed", "true")
 	}
 	writeJSON(writer, http.StatusOK, activationDocument(result))
+	return nil
 }
 
 func (spec policySpec) snapshot(revision uint64) adminauthorization.Snapshot {

@@ -46,7 +46,7 @@ func TestLoadServerInventoryUsesCapabilitiesAndRemembersNamespace(t *testing.T) 
 				t.Fatalf("namespace query = %q", request.URL.Query().Get("namespace"))
 			}
 			_, _ = writer.Write([]byte(`{"schemaVersion":1,"principalId":"principal-1","namespace":"development","gatewayVersion":"v2-test","capabilities":["pods.list"]}`))
-		case "/kubeloop/api/sessions":
+		case "/api/sessions":
 			now := time.Now().UTC()
 			_ = json.NewEncoder(writer).Encode(clientremote.Session{
 				ID: uuid.NewString(), Namespace: "development", State: "active", Generation: 1,

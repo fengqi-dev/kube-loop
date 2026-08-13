@@ -10,12 +10,18 @@ import (
 )
 
 const (
-	APIPathPrefix = "/kubeloop/api"
+	APIPathPrefix        = "/kubeloop/api"
+	SessionAPIPathPrefix = "/api"
+	AdminAPIPathPrefix   = "/api/admin"
 )
 
 // RouteRegistrar owns the HTTP routes for one API module.
 type RouteRegistrar interface {
 	RegisterRoutes(*echo.Group)
+}
+
+type SessionRouteRegistrar interface {
+	RegisterSessionRoutes(*echo.Group)
 }
 
 func registerHealthRoutes(router *echo.Echo, handler *health.Handler) {
@@ -96,6 +102,19 @@ type APIRoutes struct {
 }
 
 func (routes APIRoutes) RegisterRoutes(group *echo.Group) {
+	registerRoute(group, http.MethodGet, "/version", routes.Kubernetes.Version)
+	registerRoute(group, http.MethodGet, "/capabilities", routes.Kubernetes.Capabilities)
+	registerRoute(group, http.MethodGet, "/namespaces", routes.Kubernetes.Namespaces)
+	registerRoute(group, http.MethodGet, "/namespaces/:namespace", routes.Kubernetes.Namespace)
+	registerRoute(group, http.MethodGet, "/namespaces/:namespace/pods", routes.Kubernetes.Pods)
+	registerRoute(group, http.MethodGet, "/namespaces/:namespace/pods/:name", routes.Kubernetes.Pod)
+	registerRoute(group, http.MethodGet, "/namespaces/:namespace/services", routes.Kubernetes.Services)
+	registerRoute(group, http.MethodGet, "/namespaces/:namespace/services/:name", routes.Kubernetes.Service)
+}
+
+// RegisterSessionRoutes registers Session lifecycle and task resources under
+// /api/sessions, independently from the general /kubeloop/api resource API.
+func (routes APIRoutes) RegisterSessionRoutes(group *echo.Group) {
 	registerRoute(group, http.MethodPost, "/sessions/:sessionID/tickets", routes.Tickets.Issue)
 
 	registerRoute(group, http.MethodPost, "/sessions/:sessionID/port-forwards", routes.PortForwards.Create)
@@ -131,15 +150,6 @@ func (routes APIRoutes) RegisterRoutes(group *echo.Group) {
 	registerRoute(group, http.MethodGet, "/sessions/:sessionID", routes.Sessions.Get)
 	registerRoute(group, http.MethodPost, "/sessions/:sessionID/heartbeat", routes.Sessions.Heartbeat)
 	registerRoute(group, http.MethodDelete, "/sessions/:sessionID", routes.Sessions.Disconnect)
-
-	registerRoute(group, http.MethodGet, "/version", routes.Kubernetes.Version)
-	registerRoute(group, http.MethodGet, "/capabilities", routes.Kubernetes.Capabilities)
-	registerRoute(group, http.MethodGet, "/namespaces", routes.Kubernetes.Namespaces)
-	registerRoute(group, http.MethodGet, "/namespaces/:namespace", routes.Kubernetes.Namespace)
-	registerRoute(group, http.MethodGet, "/namespaces/:namespace/pods", routes.Kubernetes.Pods)
-	registerRoute(group, http.MethodGet, "/namespaces/:namespace/pods/:name", routes.Kubernetes.Pod)
-	registerRoute(group, http.MethodGet, "/namespaces/:namespace/services", routes.Kubernetes.Services)
-	registerRoute(group, http.MethodGet, "/namespaces/:namespace/services/:name", routes.Kubernetes.Service)
 }
 
 func registerRoute(group *echo.Group, method, path string, endpoint EndpointFunc) {

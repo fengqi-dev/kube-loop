@@ -657,7 +657,7 @@ func main() {
 				{ID: login.DefaultDesktopClientID, AllowLoopback: true,
 					Scopes: []string{"openid", "profile", "email", "offline_access", "kubeloop.api"}},
 				{ID: "kubeloop-management",
-					RedirectURIs: []string{strings.TrimRight(*managementPublicURL, "/") + controlplane.APIPathPrefix + "/admin/ui/callback"},
+					RedirectURIs: []string{strings.TrimRight(*managementPublicURL, "/") + controlplane.AdminAPIPathPrefix + "/ui/callback"},
 					Scopes:       []string{"openid", "profile", "email", "offline_access", "kubeloop.api"}},
 			},
 		})

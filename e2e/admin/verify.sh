@@ -57,7 +57,7 @@ done
 curl --silent --show-error --fail "${BASE_URL}/.well-known/kubeloop" >/dev/null
 
 curl --silent --show-error --fail --dump-header "${WORK_DIR}/ui.headers" \
-  --output "${WORK_DIR}/ui.html" "${BASE_URL}/kubeloop/api/admin/ui/"
+  --output "${WORK_DIR}/ui.html" "${BASE_URL}/api/admin/ui/"
 grep -qi '^Content-Security-Policy:.*script-src '\''self'\''' "${WORK_DIR}/ui.headers"
 grep -qi '^X-Frame-Options: DENY' "${WORK_DIR}/ui.headers"
 if grep -Eq 'https?://[^" ]+' "${WORK_DIR}/ui.html"; then
@@ -70,7 +70,7 @@ EXCHANGE_BODY="$(jq -nc --arg credential "${CREDENTIAL}" '{credential:$credentia
 curl --silent --show-error --fail --dump-header "${WORK_DIR}/exchange.headers" \
   --output "${WORK_DIR}/exchange.json" \
   --header "Origin: ${PUBLIC_ORIGIN}" --header 'Content-Type: application/json' \
-  --data "${EXCHANGE_BODY}" "${BASE_URL}/kubeloop/api/admin/sessions/break-glass"
+  --data "${EXCHANGE_BODY}" "${BASE_URL}/api/admin/sessions/break-glass"
 CSRF="$(jq -er '.csrfToken' "${WORK_DIR}/exchange.json")"
 COOKIE="$(awk 'BEGIN{IGNORECASE=1} /^Set-Cookie:/ {sub(/^[^:]+:[[:space:]]*/, ""); split($0, parts, ";"); print parts[1]; exit}' "${WORK_DIR}/exchange.headers" | tr -d '\r')"
 if [[ -z "${COOKIE}" ]]; then
@@ -80,7 +80,7 @@ fi
 echo "Break-glass Management Session established"
 
 admin_get() {
-  curl --silent --show-error --fail --header "Cookie: ${COOKIE}" "${BASE_URL}/kubeloop/api/admin$1"
+  curl --silent --show-error --fail --header "Cookie: ${COOKIE}" "${BASE_URL}/api/admin$1"
 }
 
 admin_post() {
@@ -96,7 +96,7 @@ admin_post() {
     headers+=(--header "If-Match: \"${etag}\"")
   fi
   curl --silent --show-error --output "${output}" --write-out '%{http_code}' \
-    "${headers[@]}" --data "${body}" "${BASE_URL}/kubeloop/api/admin${path}"
+    "${headers[@]}" --data "${body}" "${BASE_URL}/api/admin${path}"
 }
 
 admin_get /status | jq -e '.storage.backend == "sqlite" and (.storage.schemaVersion >= 11)' >/dev/null
@@ -109,7 +109,7 @@ NO_CSRF_STATUS="$(curl --silent --output "${WORK_DIR}/csrf.json" --write-out '%{
   --header 'Content-Type: application/json' --header "If-Match: \"${BASE_ETAG}\"" \
   --header 'Idempotency-Key: admin-e2e-no-csrf-0001' \
   --data '{"spec":{"version":1,"assignments":[]},"checks":[],"reason":"verify csrf rejection"}' \
-  "${BASE_URL}/kubeloop/api/admin/policy/dry-run")"
+  "${BASE_URL}/api/admin/policy/dry-run")"
 [[ "${NO_CSRF_STATUS}" == "403" ]]
 echo "CSRF rejection verified"
 

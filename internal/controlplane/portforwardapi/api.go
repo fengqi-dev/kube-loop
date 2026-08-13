@@ -90,7 +90,7 @@ func (routes *Routes) create(
 	}
 	ctx.Response().Header().Set("Location", fmt.Sprintf(
 		"%s/sessions/%s/port-forwards/%s?namespace=%s",
-		controlplane.APIPathPrefix, session.ID, result.PortForward.ID, session.Namespace,
+		controlplane.SessionAPIPathPrefix, session.ID, result.PortForward.ID, session.Namespace,
 	))
 	if result.Replayed {
 		ctx.Response().Header().Set("Idempotent-Replayed", "true")

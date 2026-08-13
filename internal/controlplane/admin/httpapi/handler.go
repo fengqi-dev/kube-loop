@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/fengqi-dev/kube-loop/internal/controlplane"
 	adminsession "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/session"
 	adminui "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/ui"
 	"github.com/google/uuid"
@@ -46,11 +47,10 @@ type Handler struct {
 	readAPI    *readAPI
 	tokenAuth  TokenAuthenticator
 	origin     string
-	apiPath    string
+	pathPrefix string
 	maxBody    int64
 	limiter    *exchangeLimiter
 	tokenLimit *exchangeLimiter
-	router     http.Handler
 }
 
 func New(config Config, sessions *adminsession.Service, optionValues ...Option) (*Handler, error) {
@@ -94,8 +94,8 @@ func New(config Config, sessions *adminsession.Service, optionValues ...Option) 
 	}
 	handler := &Handler{
 		sessions: sessions, origin: parsed.Scheme + "://" + parsed.Host,
-		apiPath: "/kubeloop/api",
-		maxBody: maxBody, limiter: newExchangeLimiter(globalAttempts, sourceAttempts, window),
+		pathPrefix: controlplane.AdminAPIPathPrefix,
+		maxBody:    maxBody, limiter: newExchangeLimiter(globalAttempts, sourceAttempts, window),
 		tokenLimit: newExchangeLimiter(defaultTokenGlobal, defaultTokenSource, window),
 	}
 	if options.readAPI != nil {
@@ -119,37 +119,28 @@ func New(config Config, sessions *adminsession.Service, optionValues ...Option) 
 		}
 		handler.tokenAuth = options.tokenAuthenticator
 	}
-	router := echo.New()
-	router.Use(handler.securityHeaders)
-	mountHandler(router.Group("/ui"), adminui.New(handler.apiPath+"/admin"))
-	router.POST("/sessions/break-glass", adaptHandler(handler.exchangeBreakGlass))
-	if handler.tokenAuth != nil {
-		router.POST("/sessions/token", adaptHandler(handler.exchangeToken))
-	}
-	if handler.readAPI != nil {
-		handler.readAPI.routes(router)
-	}
-	handler.router = router
 	return handler, nil
 }
 
-func adaptHandler(handler http.HandlerFunc) echo.HandlerFunc {
-	return echo.WrapHandler(handler)
-}
-
-func mountHandler(group *echo.Group, handler http.Handler) {
-	adapted := echo.WrapHandler(handler)
-	group.Any("", adapted)
-	group.Any("/*", adapted)
-}
-
-func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
-	handler.router.ServeHTTP(writer, request)
+func (handler *Handler) RegisterRoutes(group *echo.Group) {
+	group.Use(handler.securityHeaders)
+	adminui.New(handler.pathPrefix).RegisterRoutes(group.Group("/ui"))
+	group.POST("/sessions/break-glass", handler.exchangeBreakGlass)
+	if handler.tokenAuth != nil {
+		group.POST("/sessions/token", handler.exchangeToken)
+	}
+	if handler.readAPI != nil {
+		handler.readAPI.routes(group)
+	}
 }
 
 func (handler *Handler) securityHeaders(next echo.HandlerFunc) echo.HandlerFunc {
 	return func(ctx *echo.Context) error {
 		writer := ctx.Response()
+		request := ctx.Request()
+		for _, value := range ctx.PathValues() {
+			request.SetPathValue(value.Name, value.Value)
+		}
 		writer.Header().Set("Cache-Control", "no-store")
 		writer.Header().Set("Pragma", "no-cache")
 		writer.Header().Set("X-Content-Type-Options", "nosniff")
@@ -161,22 +152,23 @@ func (handler *Handler) securityHeaders(next echo.HandlerFunc) echo.HandlerFunc 
 	}
 }
 
-func (handler *Handler) exchangeBreakGlass(writer http.ResponseWriter, request *http.Request) {
+func (handler *Handler) exchangeBreakGlass(ctx *echo.Context) error {
+	writer, request := ctx.Response(), ctx.Request()
 	requestID := ensureRequestID(writer, request)
 	source, sourceKey := sourceAddress(request.RemoteAddr)
 	if !handler.limiter.allow(sourceKey) {
 		writeError(writer, http.StatusTooManyRequests, "rate_limited", "management authentication failed", requestID)
-		return
+		return nil
 	}
 	if request.Header.Get("Origin") != handler.origin || request.Header.Get("Authorization") != "" ||
 		request.Header.Get("Sec-Fetch-Site") == "cross-site" {
 		writeError(writer, http.StatusUnauthorized, "unauthenticated", "management authentication failed", requestID)
-		return
+		return nil
 	}
 	mediaType, _, err := mime.ParseMediaType(request.Header.Get("Content-Type"))
 	if err != nil || mediaType != "application/json" {
 		writeError(writer, http.StatusUnsupportedMediaType, "invalid_request", "application/json is required", requestID)
-		return
+		return nil
 	}
 	request.Body = http.MaxBytesReader(writer, request.Body, handler.maxBody)
 	decoder := json.NewDecoder(request.Body)
@@ -187,19 +179,19 @@ func (handler *Handler) exchangeBreakGlass(writer http.ResponseWriter, request *
 	if err := decoder.Decode(&input); err != nil || strings.TrimSpace(input.Credential) == "" {
 		input.Credential = ""
 		writeError(writer, http.StatusBadRequest, "invalid_request", "invalid request", requestID)
-		return
+		return nil
 	}
 	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		input.Credential = ""
 		writeError(writer, http.StatusBadRequest, "invalid_request", "invalid request", requestID)
-		return
+		return nil
 	}
 	credential := []byte(input.Credential)
 	input.Credential = ""
 	issued, err := handler.sessions.ExchangeBreakGlass(request.Context(), source, credential, requestID)
 	if err != nil {
 		writeError(writer, http.StatusUnauthorized, "unauthenticated", "management authentication failed", requestID)
-		return
+		return nil
 	}
 	setSessionCookie(writer, issued)
 	writeJSON(writer, http.StatusCreated, map[string]any{
@@ -207,6 +199,7 @@ func (handler *Handler) exchangeBreakGlass(writer http.ResponseWriter, request *
 		"expiresAt": issued.ExpiresAt.Format(time.RFC3339Nano),
 		"requestId": requestID,
 	})
+	return nil
 }
 
 func setSessionCookie(writer http.ResponseWriter, issued adminsession.Credentials) {

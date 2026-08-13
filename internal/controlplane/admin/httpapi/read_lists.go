@@ -20,6 +20,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/protocol/relaycontrol"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/remotetask"
 	"github.com/google/uuid"
+	"github.com/labstack/echo/v5"
 )
 
 const (
@@ -111,12 +112,13 @@ type relayCursorDocument struct {
 	RelayID string `json:"relayId"`
 }
 
-func (api *readAPI) listPrincipals(writer http.ResponseWriter, request *http.Request) {
+func (api *readAPI) listPrincipals(ctx *echo.Context) error {
+	writer, request := ctx.Response(), ctx.Request()
 	parameters, err := parseListParameters(request, "principals", "provider")
 	provider := strings.TrimSpace(parameters.query.Get("provider"))
 	if err != nil || len(provider) > 128 || strings.ContainsAny(provider, "\x00\r\n") {
 		writeListError(writer, request, http.StatusBadRequest, "invalid_request", "management list query is invalid")
-		return
+		return nil
 	}
 	principals, err := api.status.Principals().List(request.Context(), storage.PrincipalListFilter{
 		Provider: provider, Cursor: parameters.cursor, Limit: parameters.limit + 1,
@@ -124,7 +126,7 @@ func (api *readAPI) listPrincipals(writer http.ResponseWriter, request *http.Req
 	if err != nil {
 		api.audit(request, subjectFromRequest(request), "admin.principal/list", "failure")
 		writeListError(writer, request, http.StatusServiceUnavailable, "unavailable", "management principal list is unavailable")
-		return
+		return nil
 	}
 	hasMore := len(principals) > parameters.limit
 	if hasMore {
@@ -139,9 +141,11 @@ func (api *readAPI) listPrincipals(writer http.ResponseWriter, request *http.Req
 	}
 	api.audit(request, subjectFromRequest(request), "admin.principal/list", "success")
 	writeJSON(writer, http.StatusOK, listResponse("principals", items, principals, hasMore))
+	return nil
 }
 
-func (api *readAPI) listSessions(writer http.ResponseWriter, request *http.Request) {
+func (api *readAPI) listSessions(ctx *echo.Context) error {
+	writer, request := ctx.Response(), ctx.Request()
 	parameters, err := parseListParameters(request, "sessions", "principalId", "namespace", "state")
 	principalID := strings.TrimSpace(parameters.query.Get("principalId"))
 	namespace := strings.TrimSpace(parameters.query.Get("namespace"))
@@ -149,11 +153,11 @@ func (api *readAPI) listSessions(writer http.ResponseWriter, request *http.Reque
 	if err != nil || !validOptionalUUID(principalID) || !validOptionalNamespace(namespace) ||
 		len(state) > 64 || strings.ContainsAny(state, "\x00\r\n") {
 		writeListError(writer, request, http.StatusBadRequest, "invalid_request", "management list query is invalid")
-		return
+		return nil
 	}
 	if !api.authorizeScopedList(request, adminauthorization.ResourceSession, namespace) {
 		writeListError(writer, request, http.StatusForbidden, "forbidden", "management operation is not permitted")
-		return
+		return nil
 	}
 	sessions, err := api.status.Sessions().List(request.Context(), storage.SessionListFilter{
 		PrincipalID: principalID, Namespace: namespace, State: state,
@@ -162,7 +166,7 @@ func (api *readAPI) listSessions(writer http.ResponseWriter, request *http.Reque
 	if err != nil {
 		api.audit(request, subjectFromRequest(request), "admin.session/list", "failure")
 		writeListError(writer, request, http.StatusServiceUnavailable, "unavailable", "management session list is unavailable")
-		return
+		return nil
 	}
 	hasMore := len(sessions) > parameters.limit
 	if hasMore {
@@ -180,9 +184,11 @@ func (api *readAPI) listSessions(writer http.ResponseWriter, request *http.Reque
 	}
 	api.audit(request, subjectFromRequest(request), "admin.session/list", "success")
 	writeJSON(writer, http.StatusOK, listResponse("sessions", items, sessions, hasMore))
+	return nil
 }
 
-func (api *readAPI) listTasks(writer http.ResponseWriter, request *http.Request) {
+func (api *readAPI) listTasks(ctx *echo.Context) error {
+	writer, request := ctx.Response(), ctx.Request()
 	parameters, err := parseListParameters(request, "tasks", "principalId", "sessionId", "namespace", "type", "state")
 	principalID := strings.TrimSpace(parameters.query.Get("principalId"))
 	sessionID := strings.TrimSpace(parameters.query.Get("sessionId"))
@@ -193,11 +199,11 @@ func (api *readAPI) listTasks(writer http.ResponseWriter, request *http.Request)
 		!validOptionalNamespace(namespace) || len(taskType) > 128 || strings.ContainsAny(taskType, "\x00\r\n") ||
 		(state != "" && !state.Valid()) {
 		writeListError(writer, request, http.StatusBadRequest, "invalid_request", "management list query is invalid")
-		return
+		return nil
 	}
 	if !api.authorizeScopedList(request, adminauthorization.ResourceTask, namespace) {
 		writeListError(writer, request, http.StatusForbidden, "forbidden", "management operation is not permitted")
-		return
+		return nil
 	}
 	tasks, err := api.status.Tasks().List(request.Context(), storage.TaskListFilter{
 		PrincipalID: principalID, SessionID: sessionID, Namespace: namespace,
@@ -207,7 +213,7 @@ func (api *readAPI) listTasks(writer http.ResponseWriter, request *http.Request)
 	if err != nil {
 		api.audit(request, subjectFromRequest(request), "admin.task/list", "failure")
 		writeListError(writer, request, http.StatusServiceUnavailable, "unavailable", "management task list is unavailable")
-		return
+		return nil
 	}
 	hasMore := len(tasks) > parameters.limit
 	if hasMore {
@@ -223,15 +229,17 @@ func (api *readAPI) listTasks(writer http.ResponseWriter, request *http.Request)
 	}
 	api.audit(request, subjectFromRequest(request), "admin.task/list", "success")
 	writeJSON(writer, http.StatusOK, listResponse("tasks", items, tasks, hasMore))
+	return nil
 }
 
-func (api *readAPI) listAudit(writer http.ResponseWriter, request *http.Request) {
+func (api *readAPI) listAudit(ctx *echo.Context) error {
+	writer, request := ctx.Response(), ctx.Request()
 	parameters, err := parseListParameters(request, "audit", "principalId", "action", "after", "before")
 	principalID := strings.TrimSpace(parameters.query.Get("principalId"))
 	action := strings.TrimSpace(parameters.query.Get("action"))
 	if err != nil || !validOptionalUUID(principalID) || len(action) > 256 || strings.ContainsAny(action, "\x00\r\n") {
 		writeListError(writer, request, http.StatusBadRequest, "invalid_request", "management list query is invalid")
-		return
+		return nil
 	}
 	filter := storage.AuditFilter{
 		PrincipalID: principalID, Action: action,
@@ -239,18 +247,18 @@ func (api *readAPI) listAudit(writer http.ResponseWriter, request *http.Request)
 	}
 	if filter.After, err = optionalTime(parameters.query.Get("after")); err != nil {
 		writeListError(writer, request, http.StatusBadRequest, "invalid_request", "management list query is invalid")
-		return
+		return nil
 	}
 	if filter.Before, err = optionalTime(parameters.query.Get("before")); err != nil ||
 		(!filter.After.IsZero() && !filter.Before.IsZero() && !filter.Before.After(filter.After)) {
 		writeListError(writer, request, http.StatusBadRequest, "invalid_request", "management list query is invalid")
-		return
+		return nil
 	}
 	events, err := api.status.Audit().List(request.Context(), filter)
 	if err != nil {
 		api.audit(request, subjectFromRequest(request), "admin.audit/list", "failure")
 		writeListError(writer, request, http.StatusServiceUnavailable, "unavailable", "management audit list is unavailable")
-		return
+		return nil
 	}
 	hasMore := len(events) > parameters.limit
 	if hasMore {
@@ -266,13 +274,15 @@ func (api *readAPI) listAudit(writer http.ResponseWriter, request *http.Request)
 	}
 	api.audit(request, subjectFromRequest(request), "admin.audit/list", "success")
 	writeJSON(writer, http.StatusOK, listResponse("audit", items, events, hasMore))
+	return nil
 }
 
-func (api *readAPI) listRelays(writer http.ResponseWriter, request *http.Request) {
+func (api *readAPI) listRelays(ctx *echo.Context) error {
+	writer, request := ctx.Response(), ctx.Request()
 	limit, after, state, online, err := parseRelayListParameters(request)
 	if err != nil {
 		writeListError(writer, request, http.StatusBadRequest, "invalid_request", "management list query is invalid")
-		return
+		return nil
 	}
 	statuses := []relayregistry.RelayStatus(nil)
 	if api.relays != nil {
@@ -282,7 +292,7 @@ func (api *readAPI) listRelays(writer http.ResponseWriter, request *http.Request
 	if err != nil {
 		api.audit(request, subjectFromRequest(request), "admin.relay/list", "failure")
 		writeListError(writer, request, http.StatusServiceUnavailable, "unavailable", "management Relay list is unavailable")
-		return
+		return nil
 	}
 	versions := make(map[string]uint64, len(durableStates))
 	for _, desired := range durableStates {
@@ -318,6 +328,7 @@ func (api *readAPI) listRelays(writer http.ResponseWriter, request *http.Request
 	}
 	api.audit(request, subjectFromRequest(request), "admin.relay/list", "success")
 	writeJSON(writer, http.StatusOK, response)
+	return nil
 }
 
 func (api *readAPI) authorizeScopedList(request *http.Request, resource adminauthorization.Resource, namespace string) bool {

@@ -142,7 +142,7 @@ func (handler *Service) create(ctx *echo.Context, principal controlplaneapi.Prin
 	if err != nil {
 		return internalError(err)
 	}
-	ctx.Response().Header().Set("Location", fmt.Sprintf("%s/sessions/%s/mirrors/%s?namespace=%s", controlplane.APIPathPrefix, session.ID, task.ID, session.Namespace))
+	ctx.Response().Header().Set("Location", fmt.Sprintf("%s/sessions/%s/mirrors/%s?namespace=%s", controlplane.SessionAPIPathPrefix, session.ID, task.ID, session.Namespace))
 	if !created {
 		ctx.Response().Header().Set("Idempotent-Replayed", "true")
 	}

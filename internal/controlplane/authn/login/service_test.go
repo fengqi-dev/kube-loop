@@ -152,7 +152,7 @@ func TestLoginServiceAllowsOnlyConfiguredHTTPSBrowserCallback(t *testing.T) {
 	service, _, _ := newTestService(t)
 	request := validBeginRequest(pkceChallenge(strings.Repeat("v", 43)))
 	request.ClientID = "kubeloop-management"
-	request.ClientCallback = "https://gateway.example.test/kubeloop/api/admin/ui/callback"
+	request.ClientCallback = "https://gateway.example.test/api/admin/ui/callback"
 	if _, err := service.Begin(context.Background(), request); err != nil {
 		t.Fatalf("configured browser callback error = %v", err)
 	}
@@ -160,18 +160,18 @@ func TestLoginServiceAllowsOnlyConfiguredHTTPSBrowserCallback(t *testing.T) {
 
 func TestConfiguredBrowserCallbackRejectsRemoteHTTP(t *testing.T) {
 	for _, value := range []string{
-		"http://gateway.example.test/kubeloop/api/admin/ui/callback",
-		"https://gateway.example.test/kubeloop/api/admin/ui/callback?next=attacker",
-		"https://user@gateway.example.test/kubeloop/api/admin/ui/callback",
+		"http://gateway.example.test/api/admin/ui/callback",
+		"https://gateway.example.test/api/admin/ui/callback?next=attacker",
+		"https://user@gateway.example.test/api/admin/ui/callback",
 	} {
 		if _, err := validateConfiguredCallback(value); err == nil {
 			t.Fatalf("configured callback %q was accepted", value)
 		}
 	}
 	for _, value := range []string{
-		"https://gateway.example.test/kubeloop/api/admin/ui/callback",
-		"http://127.0.0.1:8080/kubeloop/api/admin/ui/callback",
-		"http://localhost:8080/kubeloop/api/admin/ui/callback",
+		"https://gateway.example.test/api/admin/ui/callback",
+		"http://127.0.0.1:8080/api/admin/ui/callback",
+		"http://localhost:8080/api/admin/ui/callback",
 	} {
 		if _, err := validateConfiguredCallback(value); err != nil {
 			t.Fatalf("configured callback %q error=%v", value, err)
@@ -224,7 +224,7 @@ func newTestService(t *testing.T) (*Service, *fakeOIDCProvider, *storage.Store) 
 	service, err := New(registry, store, Config{
 		Clients: []Client{
 			{ID: DefaultDesktopClientID, AllowLoopback: true, Scopes: []string{"openid", "kubeloop.api"}},
-			{ID: "kubeloop-management", RedirectURIs: []string{"https://gateway.example.test/kubeloop/api/admin/ui/callback"}, Scopes: []string{"openid", "kubeloop.api"}},
+			{ID: "kubeloop-management", RedirectURIs: []string{"https://gateway.example.test/api/admin/ui/callback"}, Scopes: []string{"openid", "kubeloop.api"}},
 		},
 		Now: func() time.Time { return time.Date(2026, 8, 9, 10, 0, 0, 0, time.UTC) },
 		Random: func(target []byte) error {

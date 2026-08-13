@@ -9,6 +9,14 @@ import (
 )
 
 func testEndpoint(function any) RouteRegistrar {
+	return testRouteRegistrar(function, false)
+}
+
+func sessionTestEndpoint(function any) RouteRegistrar {
+	return testRouteRegistrar(function, true)
+}
+
+func testRouteRegistrar(function any, session bool) RouteRegistrar {
 	var endpoint EndpointFunc
 	switch function := function.(type) {
 	case EndpointFunc:
@@ -20,11 +28,25 @@ func testEndpoint(function any) RouteRegistrar {
 	default:
 		panic("unsupported test endpoint")
 	}
-	return RouteRegistrarFunc(func(group *echo.Group) {
+	register := func(group *echo.Group) {
 		handler := Endpoint(endpoint)
 		group.Any("", handler)
 		group.Any("/*", handler)
-	})
+	}
+	if session {
+		return testSessionRouteRegistrar{registerSessionRoutes: register}
+	}
+	return RouteRegistrarFunc(register)
+}
+
+type testSessionRouteRegistrar struct {
+	registerSessionRoutes func(*echo.Group)
+}
+
+func (testSessionRouteRegistrar) RegisterRoutes(*echo.Group) {}
+
+func (registrar testSessionRouteRegistrar) RegisterSessionRoutes(group *echo.Group) {
+	registrar.registerSessionRoutes(group)
 }
 
 func writeTestJSON(writer http.ResponseWriter, status int, value any) {

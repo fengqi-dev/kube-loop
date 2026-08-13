@@ -101,7 +101,7 @@ func TestPreviewTaskIsOwnedIdempotentAndDurablyStopped(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	path := "/kubeloop/api/sessions/" + active.ID + "/previews?namespace=development"
+	path := "/api/sessions/" + active.ID + "/previews?namespace=development"
 	body := []byte(`{"name":"local-api","ports":[{"servicePort":53,"protocol":"udp"},{"name":"http","servicePort":80,"protocol":"tcp"}]}`)
 	created, apiError := previewRequest(handler, principal, http.MethodPost, path, body, "preview-1")
 	if apiError != nil || created.Code != http.StatusCreated {
@@ -130,7 +130,7 @@ func TestPreviewTaskIsOwnedIdempotentAndDurablyStopped(t *testing.T) {
 	if apiError == nil || apiError.Code != controlplaneapi.CodeConflict {
 		t.Fatalf("idempotency mismatch error=%#v", apiError)
 	}
-	taskPath := "/kubeloop/api/sessions/" + active.ID + "/previews/" + document.ID + "?namespace=development"
+	taskPath := "/api/sessions/" + active.ID + "/previews/" + document.ID + "?namespace=development"
 	_, apiError = previewRequest(
 		handler, controlplaneapi.Principal{Subject: uuid.NewString()}, http.MethodGet, taskPath, nil, "",
 	)
@@ -156,7 +156,7 @@ func TestPreviewRequestValidationRejectsInvalidKubernetesNames(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	path := "/kubeloop/api/sessions/" + active.ID + "/previews?namespace=development"
+	path := "/api/sessions/" + active.ID + "/previews?namespace=development"
 	for _, body := range [][]byte{
 		[]byte(`{"name":"Existing_Name","ports":[{"servicePort":80,"protocol":"tcp"}]}`),
 		[]byte(`{"name":"local-api","ports":[{"name":"bad_name","servicePort":80,"protocol":"tcp"}]}`),
@@ -227,9 +227,9 @@ func previewRequest(
 func serveAPI(handler *Service, writer http.ResponseWriter, request *http.Request, principal controlplaneapi.Principal) *controlplaneapi.Error {
 	routes := NewRoutes(handler)
 	parts := strings.Split(strings.Trim(request.URL.Path, "/"), "/")
-	request.SetPathValue("sessionID", parts[3])
-	if len(parts) > 5 {
-		request.SetPathValue("taskID", parts[5])
+	request.SetPathValue("sessionID", parts[2])
+	if len(parts) > 4 {
+		request.SetPathValue("taskID", parts[4])
 	}
 	switch {
 	case request.Method == http.MethodPost:

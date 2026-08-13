@@ -233,7 +233,7 @@ func TestFileTransferTaskIsValidatedOwnedAndIdempotent(t *testing.T) {
 		t.Fatalf("target resolver calls = %d", resolver.calls)
 	}
 	resolver.mu.Unlock()
-	getRequest, _ := http.NewRequest(http.MethodGet, httpServer.URL+"/kubeloop/api/sessions/"+sessionID+"/file-transfers/"+document.ID+"?namespace=development", nil)
+	getRequest, _ := http.NewRequest(http.MethodGet, httpServer.URL+"/api/sessions/"+sessionID+"/file-transfers/"+document.ID+"?namespace=development", nil)
 	getRequest.Header.Set("X-Principal", principalID)
 	getResponse, err := http.DefaultClient.Do(getRequest)
 	if err != nil {
@@ -267,7 +267,7 @@ func TestFileTransferRejectsTraversalRootAndUntrustedDownloadMetadata(t *testing
 		{Direction: "download", Kind: "file", Pod: "api-0", RemotePath: "/workspace/data", Size: 1, Checksum: strings.Repeat("00", 32)},
 	} {
 		raw, _ := json.Marshal(spec)
-		request := httptest.NewRequest(http.MethodPost, "/kubeloop/api/sessions/"+sessionID+"/file-transfers?namespace=development", bytes.NewReader(raw))
+		request := httptest.NewRequest(http.MethodPost, "/api/sessions/"+sessionID+"/file-transfers?namespace=development", bytes.NewReader(raw))
 		request.Header.Set("Content-Type", "application/json")
 		request.Header.Set("Idempotency-Key", uuid.NewString())
 		response := httptest.NewRecorder()
@@ -296,7 +296,7 @@ func TestFileTransferTaskUsesControlPlaneAuthoritativeResumeOffset(t *testing.T)
 	}
 	resumeID := uuid.NewString()
 	body := `{"direction":"upload","kind":"file","pod":"api-0","remotePath":"/workspace/data.bin","size":20,"checksum":"` + strings.Repeat("ab", 32) + `","resumeId":"` + resumeID + `"}`
-	request := httptest.NewRequest(http.MethodPost, "/kubeloop/api/sessions/"+sessionID+"/file-transfers?namespace=development", strings.NewReader(body))
+	request := httptest.NewRequest(http.MethodPost, "/api/sessions/"+sessionID+"/file-transfers?namespace=development", strings.NewReader(body))
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Idempotency-Key", "resume-offset")
 	response := httptest.NewRecorder()
@@ -409,7 +409,7 @@ func dialFileStream(t *testing.T, streamURL, principalID string) *websocket.Conn
 }
 
 func fileStreamURL(baseURL, sessionID, taskID string) string {
-	return "ws" + strings.TrimPrefix(baseURL, "http") + "/kubeloop/api/sessions/" + sessionID +
+	return "ws" + strings.TrimPrefix(baseURL, "http") + "/api/sessions/" + sessionID +
 		"/file-transfers/" + taskID + "/stream?namespace=development"
 }
 
@@ -485,7 +485,7 @@ func createTask(
 	wantStatus int,
 ) fileapi.Document {
 	t.Helper()
-	request, _ := http.NewRequest(http.MethodPost, baseURL+"/kubeloop/api/sessions/"+sessionID+"/file-transfers?namespace=development", strings.NewReader(body))
+	request, _ := http.NewRequest(http.MethodPost, baseURL+"/api/sessions/"+sessionID+"/file-transfers?namespace=development", strings.NewReader(body))
 	request.Header.Set("X-Principal", principalID)
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Idempotency-Key", key)

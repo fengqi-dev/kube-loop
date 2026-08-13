@@ -50,7 +50,7 @@ func FuzzManagementEntryBoundedRedactedAndFailClosed(f *testing.F) {
 			request.Header.Set("Authorization", "Bearer "+secret)
 		}
 		response := httptest.NewRecorder()
-		handler.ServeHTTP(response, request)
+		serveHTTP(handler, response, request)
 		if response.Body.Len() > 16<<10 {
 			t.Fatalf("management response exceeded bound: %d", response.Body.Len())
 		}

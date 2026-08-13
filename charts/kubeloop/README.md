@@ -30,7 +30,8 @@ The chart routes the same origin without rewriting paths:
 | --- | --- |
 | `/.well-known/*` | Control Plane |
 | `/oauth2/*` | Control Plane OAuth 2.0 / OIDC Authorization Server |
-| `/kubeloop/api/*` except `/kubeloop/api/admin/*` | Control Plane public port |
+| `/kubeloop/api/*` | Control Plane public port |
+| `/api/sessions/*` | Control Plane Session API |
 | `/tunnel` | Data Plane WebSocket endpoint |
 
 The Control Plane publishes that exact value in discovery and derives every OIDC
@@ -46,8 +47,8 @@ open it through a local tunnel:
 kubectl -n kubeloop port-forward svc/kubeloop-control-plane-management 8081:8081
 ```
 
-Then visit `http://127.0.0.1:8081/kubeloop/api/admin/ui`. The public Control
-Plane listener returns 404 for `/kubeloop/api/admin/*`; the management Service
+Then visit `http://127.0.0.1:8081/api/admin/ui`. The public Control
+Plane listener returns 404 for `/api/admin/*`; the management Service
 is always ClusterIP even if the public Service is a LoadBalancer. To publish
 management access, use a separate restricted HTTPS origin and configure its exact value:
 
@@ -504,7 +505,7 @@ Helm projects only the selected keys under the fixed read-only
 `/var/run/secrets/kubeloop/management/providers/<alias>/` root. The management
 database stores only the alias and its non-sensitive use (`client-secret`,
 `bind-password`, or `ca`); API responses expose only use names and never echo
-alias values. `POST /kubeloop/api/admin/providers/{id}/validate` performs discovery
+alias values. `POST /api/admin/providers/{id}/validate` performs discovery
 or directory connectivity checks without changing the live Registry. Draft,
 publish, and rollback use `/providers/{id}/drafts`,
 `/providers/{id}/changes/{changeID}/publish`, and
@@ -623,37 +624,37 @@ Authenticated, policy-authorized clients can use:
 - `GET /kubeloop/api/namespaces/<namespace>/services[/<name>]`
 - `GET /kubeloop/api/namespaces/<namespace>/{pods,services}?watch=true` as an
   authenticated WebSocket of versioned full snapshots
-- `POST /kubeloop/api/sessions?namespace=<name>` with `Idempotency-Key`
-- `GET /kubeloop/api/sessions/<id>?namespace=<name>`
-- `POST /kubeloop/api/sessions/<id>/heartbeat?namespace=<name>` with `If-Match`
-- `DELETE /kubeloop/api/sessions/<id>?namespace=<name>` with `If-Match`
-- `POST /kubeloop/api/sessions/<id>/tickets?namespace=<name>` with JSON body
+- `POST /api/sessions?namespace=<name>` with `Idempotency-Key`
+- `GET /api/sessions/<id>?namespace=<name>`
+- `POST /api/sessions/<id>/heartbeat?namespace=<name>` with `If-Match`
+- `DELETE /api/sessions/<id>?namespace=<name>` with `If-Match`
+- `POST /api/sessions/<id>/tickets?namespace=<name>` with JSON body
   `{"networkSpecHash":"<optional lowercase sha256>"}`
-- `POST /kubeloop/api/sessions/<id>/port-forwards?namespace=<name>` with
+- `POST /api/sessions/<id>/port-forwards?namespace=<name>` with
   `Idempotency-Key` and a Pod/Service target document
-- `GET /kubeloop/api/sessions/<id>/port-forwards?namespace=<name>`
-- `DELETE /kubeloop/api/sessions/<id>/port-forwards/<task-id>?namespace=<name>`
-- `POST /kubeloop/api/sessions/<id>/exec?namespace=<name>` with `Idempotency-Key`
-- `GET /kubeloop/api/sessions/<id>/exec/<task-id>/stream?namespace=<name>` as an
+- `GET /api/sessions/<id>/port-forwards?namespace=<name>`
+- `DELETE /api/sessions/<id>/port-forwards/<task-id>?namespace=<name>`
+- `POST /api/sessions/<id>/exec?namespace=<name>` with `Idempotency-Key`
+- `GET /api/sessions/<id>/exec/<task-id>/stream?namespace=<name>` as an
   authenticated binary WebSocket stream
-- `POST /kubeloop/api/sessions/<id>/file-transfers?namespace=<name>` with
+- `POST /api/sessions/<id>/file-transfers?namespace=<name>` with
   `Idempotency-Key`, a Pod/container target, an absolute container path, and
   upload metadata when applicable. File uploads may include a stable UUID
   `resumeId`; the Control Plane probes the Pod partial and returns the
   authoritative `offset` in the Task document.
-- `GET /kubeloop/api/sessions/<id>/file-transfers/<task-id>?namespace=<name>`
-- `GET /kubeloop/api/sessions/<id>/file-transfers/<task-id>/stream?namespace=<name>`
+- `GET /api/sessions/<id>/file-transfers/<task-id>?namespace=<name>`
+- `GET /api/sessions/<id>/file-transfers/<task-id>/stream?namespace=<name>`
   as an authenticated binary WebSocket upload/download stream
-- `POST /kubeloop/api/sessions/<id>/pod-files/list?namespace=<name>` with a
+- `POST /api/sessions/<id>/pod-files/list?namespace=<name>` with a
   Pod/container and absolute directory path
-- `POST /kubeloop/api/sessions/<id>/pod-files/{create,rename,delete}?namespace=<name>`
+- `POST /api/sessions/<id>/pod-files/{create,rename,delete}?namespace=<name>`
   with `Idempotency-Key`; mutations return a terminal `pod-file-operation` Task
-- `GET /kubeloop/api/sessions/<id>/pod-files/operations/<task-id>?namespace=<name>`
-- `POST /kubeloop/api/sessions/<id>/{exchanges,mirrors,previews}?namespace=<name>`
+- `GET /api/sessions/<id>/pod-files/operations/<task-id>?namespace=<name>`
+- `POST /api/sessions/<id>/{exchanges,mirrors,previews}?namespace=<name>`
   with `Idempotency-Key`; Exchange and Mirror select an existing Service while
   Preview declares a new temporary Service name and one or more ports
-- `GET /kubeloop/api/sessions/<id>/{exchanges,mirrors,previews}/<task-id>?namespace=<name>`
-- `DELETE /kubeloop/api/sessions/<id>/{exchanges,mirrors,previews}/<task-id>?namespace=<name>`
+- `GET /api/sessions/<id>/{exchanges,mirrors,previews}/<task-id>?namespace=<name>`
+- `DELETE /api/sessions/<id>/{exchanges,mirrors,previews}/<task-id>?namespace=<name>`
 - `GET /traffic/v1/{exchange,mirror,preview}/<task-id>` on the assigned Data Plane endpoint, authenticated by a fresh RelayTicket
   as an authenticated reverse WebSocket stream. Preview resources carry the
   Task UUID as exact owner metadata; name conflicts are never overwritten and

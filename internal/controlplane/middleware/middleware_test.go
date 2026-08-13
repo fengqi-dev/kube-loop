@@ -32,7 +32,7 @@ func TestErrorStatusMapping(t *testing.T) {
 }
 
 func TestWebSocketUpgradeDetectionIsStrict(t *testing.T) {
-	request := httptest.NewRequest(http.MethodGet, "/kubeloop/api/sessions/id/exec/id/stream", nil)
+	request := httptest.NewRequest(http.MethodGet, "/api/sessions/id/exec/id/stream", nil)
 	request.Header.Set("Connection", "keep-alive, Upgrade")
 	request.Header.Set("Upgrade", "websocket")
 	if !isWebSocketUpgrade(request) {

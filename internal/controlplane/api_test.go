@@ -237,11 +237,11 @@ func TestUnifiedAuthorizerGatesTaskCreationAndControlPlaneStreams(t *testing.T) 
 	tests := []struct {
 		name, method, path, operation, resourceKind string
 	}{
-		{"relay ticket", http.MethodPost, APIPathPrefix + "/sessions/session-1/tickets?namespace=development", "create", "relay-tickets"},
-		{"port forward", http.MethodPost, APIPathPrefix + "/sessions/session-1/port-forwards?namespace=development", "create", "port-forwards"},
-		{"pod exec", http.MethodPost, APIPathPrefix + "/sessions/session-1/exec?namespace=development", "create", "pod-exec"},
-		{"pod exec stream", http.MethodGet, APIPathPrefix + "/sessions/session-1/exec/task-1/stream?namespace=development", "stream", "pod-exec"},
-		{"file stream", http.MethodGet, APIPathPrefix + "/sessions/session-1/file-transfers/task-1/stream?namespace=development", "stream", "file-transfers"},
+		{"relay ticket", http.MethodPost, SessionAPIPathPrefix + "/sessions/session-1/tickets?namespace=development", "create", "relay-tickets"},
+		{"port forward", http.MethodPost, SessionAPIPathPrefix + "/sessions/session-1/port-forwards?namespace=development", "create", "port-forwards"},
+		{"pod exec", http.MethodPost, SessionAPIPathPrefix + "/sessions/session-1/exec?namespace=development", "create", "pod-exec"},
+		{"pod exec stream", http.MethodGet, SessionAPIPathPrefix + "/sessions/session-1/exec/task-1/stream?namespace=development", "stream", "pod-exec"},
+		{"file stream", http.MethodGet, SessionAPIPathPrefix + "/sessions/session-1/file-transfers/task-1/stream?namespace=development", "stream", "file-transfers"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -252,7 +252,7 @@ func TestUnifiedAuthorizerGatesTaskCreationAndControlPlaneStreams(t *testing.T) 
 					return controlplaneapi.Principal{Subject: "principal-1", Groups: []string{"developers"}}, nil
 				})),
 				WithAuthorizer(authorizer),
-				WithAPIRoutes(testEndpoint(func(writer http.ResponseWriter, _ *http.Request, _ controlplaneapi.Principal) *controlplaneapi.Error {
+				WithAPIRoutes(sessionTestEndpoint(func(writer http.ResponseWriter, _ *http.Request, _ controlplaneapi.Principal) *controlplaneapi.Error {
 					handled = true
 					writer.WriteHeader(http.StatusNoContent)
 					return nil
@@ -268,6 +268,33 @@ func TestUnifiedAuthorizerGatesTaskCreationAndControlPlaneStreams(t *testing.T) 
 				t.Fatalf("subject = %#v, request = %#v", authorizer.subject, authorizer.request)
 			}
 		})
+	}
+}
+
+func TestSessionRoutesDoNotUseKubeloopPrefix(t *testing.T) {
+	handled := false
+	server := newAPITestServer(t,
+		WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(*http.Request) (controlplaneapi.Principal, *controlplaneapi.Error) {
+			return controlplaneapi.Principal{Subject: "user-123"}, nil
+		})),
+		WithAuthorizer(allowAllAuthorizer(t)),
+		WithAPIRoutes(APIRoutes{Sessions: SessionEndpoints{Create: func(ctx *echo.Context, _ controlplaneapi.Principal) *controlplaneapi.Error {
+			handled = true
+			return nil
+		}}}),
+	)
+
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/sessions?namespace=development", nil))
+	if !handled || response.Code != http.StatusOK {
+		t.Fatalf("new route handled = %t, status = %d", handled, response.Code)
+	}
+
+	handled = false
+	response = httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/kubeloop/api/sessions?namespace=development", nil))
+	if handled || response.Code != http.StatusNotFound {
+		t.Fatalf("legacy route handled = %t, status = %d", handled, response.Code)
 	}
 }
 

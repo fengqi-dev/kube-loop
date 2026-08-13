@@ -245,7 +245,7 @@ func request(t *testing.T, method, sessionID, suffix, body, key string) *http.Re
 	} else {
 		content = bytes.NewReader(nil)
 	}
-	request := httptest.NewRequest(method, "/kubeloop/api/sessions/"+sessionID+"/pod-files/"+suffix+"?namespace=development", content)
+	request := httptest.NewRequest(method, "/api/sessions/"+sessionID+"/pod-files/"+suffix+"?namespace=development", content)
 	if body != "" {
 		request.Header.Set("Content-Type", "application/json")
 	}

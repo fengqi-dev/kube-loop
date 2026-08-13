@@ -58,7 +58,7 @@ func TestCleanDirectoryWithOnlyServerURLBrowsesRemoteInventory(t *testing.T) {
 			_ = json.NewEncoder(writer).Encode(clientremote.Version{GitVersion: "v1.31.2", GatewayVersion: "v2-clean"})
 		case "/kubeloop/api/namespaces":
 			_, _ = writer.Write([]byte(`{"items":[{"name":"development","status":"Active"}]}`))
-		case "/kubeloop/api/sessions":
+		case "/api/sessions":
 			now := time.Now().UTC()
 			snapshot := clientremote.Capabilities{
 				SchemaVersion: 1, PrincipalID: "principal-clean", Namespace: "development",
@@ -71,7 +71,7 @@ func TestCleanDirectoryWithOnlyServerURLBrowsesRemoteInventory(t *testing.T) {
 			})
 		case "/kubeloop/api/namespaces/development/pods":
 			_, _ = writer.Write([]byte(`{"items":[{"name":"api-0","namespace":"development","phase":"Running","ready":true,"containers":["api"]}]}`))
-		case "/kubeloop/api/sessions/" + sessionID:
+		case "/api/sessions/" + sessionID:
 			now := time.Now().UTC()
 			_ = json.NewEncoder(writer).Encode(clientremote.Session{
 				ID: sessionID, Namespace: "development", State: "disconnected", Generation: 2,

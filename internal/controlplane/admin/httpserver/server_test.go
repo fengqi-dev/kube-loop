@@ -18,11 +18,10 @@ func (testRoutes) RegisterRoutes(group *echo.Group) {
 }
 
 func TestServerExposesOnlyManagementAndLoginRoutes(t *testing.T) {
-	management := http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if request.URL.Path != "/ui" {
-			t.Fatalf("management path = %q", request.URL.Path)
-		}
-		writer.WriteHeader(http.StatusOK)
+	management := controlplane.RouteRegistrarFunc(func(group *echo.Group) {
+		group.GET("/ui", func(ctx *echo.Context) error {
+			return ctx.NoContent(http.StatusOK)
+		})
 	})
 	server, err := New(Config{ListenAddress: "127.0.0.1:0"}, management, testRoutes{},
 		controlplane.AuthMethodSourceFunc(func() []controlplane.AuthMethod {
@@ -36,7 +35,8 @@ func TestServerExposesOnlyManagementAndLoginRoutes(t *testing.T) {
 		path   string
 		status int
 	}{
-		{name: "management", path: controlplane.APIPathPrefix + "/admin/ui", status: http.StatusOK},
+		{name: "management", path: controlplane.AdminAPIPathPrefix + "/ui", status: http.StatusOK},
+		{name: "legacy management path", path: "/kubeloop/api/admin/ui", status: http.StatusNotFound},
 		{name: "auth", path: "/test", status: http.StatusNoContent},
 		{name: "discovery", path: controlplane.DiscoveryPath, status: http.StatusOK},
 		{name: "ordinary API excluded", path: controlplane.APIPathPrefix + "/status", status: http.StatusNotFound},

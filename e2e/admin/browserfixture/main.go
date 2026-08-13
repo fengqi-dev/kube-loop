@@ -28,6 +28,7 @@ import (
 	adminsession "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/session"
 	admintoken "github.com/fengqi-dev/kube-loop/internal/controlplane/authn/token"
 	controlplanestorage "github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
+	"github.com/labstack/echo/v5"
 )
 
 const (
@@ -150,13 +151,15 @@ func main() {
 		log.Fatal(err)
 	}
 
+	router := echo.New()
+	management.RegisterRoutes(router.Group("/api/admin"))
 	mux := http.NewServeMux()
-	mux.Handle("/kubeloop/api/admin/", http.StripPrefix("/kubeloop/api/admin", management))
+	mux.Handle("/api/admin/", router)
 	mux.HandleFunc("/oauth2/authorize", func(writer http.ResponseWriter, request *http.Request) {
 		query := request.URL.Query()
 		if request.Method != http.MethodGet || query.Get("response_type") != "code" ||
 			query.Get("client_id") != "kubeloop-management" || query.Get("provider") != "e2e-oidc" ||
-			query.Get("redirect_uri") != "http://"+*listenAddress+"/kubeloop/api/admin/ui/callback" ||
+			query.Get("redirect_uri") != "http://"+*listenAddress+"/api/admin/ui/callback" ||
 			query.Get("state") == "" || query.Get("code_challenge_method") != "S256" {
 			http.Error(writer, `{"error":{"message":"fixture OIDC request failed"}}`, http.StatusBadRequest)
 			return
@@ -210,7 +213,7 @@ func main() {
 		defer cancel()
 		_ = server.Shutdown(shutdownContext)
 	}()
-	log.Printf("management browser fixture: http://%s/kubeloop/api/admin/ui/ (credential %q)", *listenAddress, fixtureCredential)
+	log.Printf("management browser fixture: http://%s/api/admin/ui/ (credential %q)", *listenAddress, fixtureCredential)
 	if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatal(err)
 	}

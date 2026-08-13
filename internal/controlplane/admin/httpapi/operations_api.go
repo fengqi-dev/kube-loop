@@ -9,13 +9,15 @@ import (
 	adminauthorization "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/authorization"
 	adminoperations "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/operations"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
+	"github.com/labstack/echo/v5"
 )
 
-func (api *readAPI) revokePrincipalSessions(writer http.ResponseWriter, request *http.Request) {
+func (api *readAPI) revokePrincipalSessions(ctx *echo.Context) error {
+	writer, request := ctx.Response(), ctx.Request()
 	key, ok := operationIdempotencyKey(writer, request)
 	if !ok {
 		api.audit(request, subjectFromRequest(request), "admin.principal/revoke", "failure")
-		return
+		return nil
 	}
 	principalID := strings.TrimSpace(request.PathValue("principalID"))
 	var input struct {
@@ -23,7 +25,7 @@ func (api *readAPI) revokePrincipalSessions(writer http.ResponseWriter, request 
 	}
 	if !decodePolicyJSON(writer, request, &input) || !validChangeReason(input.Reason) {
 		api.audit(request, subjectFromRequest(request), "admin.principal/revoke", "failure")
-		return
+		return nil
 	}
 	result, err := api.operations.RevokePrincipal(request.Context(), adminoperations.RevokePrincipalRequest{
 		Request: adminoperations.Request{
@@ -35,23 +37,25 @@ func (api *readAPI) revokePrincipalSessions(writer http.ResponseWriter, request 
 	if err != nil {
 		api.audit(request, subjectFromRequest(request), "admin.principal/revoke", "failure")
 		writeOperationError(writer, request, err)
-		return
+		return nil
 	}
 	writeOperationResult(writer, result.Replayed, result)
+	return nil
 }
 
-func (api *readAPI) revokeDeviceSession(writer http.ResponseWriter, request *http.Request) {
+func (api *readAPI) revokeDeviceSession(ctx *echo.Context) error {
+	writer, request := ctx.Response(), ctx.Request()
 	key, ok := operationIdempotencyKey(writer, request)
 	if !ok {
 		api.audit(request, subjectFromRequest(request), "admin.device-session/revoke", "failure")
-		return
+		return nil
 	}
 	var input struct {
 		Reason string `json:"reason"`
 	}
 	if !decodePolicyJSON(writer, request, &input) || !validChangeReason(input.Reason) {
 		api.audit(request, subjectFromRequest(request), "admin.device-session/revoke", "failure")
-		return
+		return nil
 	}
 	result, err := api.operations.RevokeDeviceSession(request.Context(), adminoperations.RevokeDeviceSessionRequest{
 		Request: adminoperations.Request{
@@ -64,23 +68,25 @@ func (api *readAPI) revokeDeviceSession(writer http.ResponseWriter, request *htt
 	if err != nil {
 		api.audit(request, subjectFromRequest(request), "admin.device-session/revoke", "failure")
 		writeOperationError(writer, request, err)
-		return
+		return nil
 	}
 	writeOperationResult(writer, result.Replayed, result)
+	return nil
 }
 
-func (api *readAPI) stopSession(writer http.ResponseWriter, request *http.Request) {
+func (api *readAPI) stopSession(ctx *echo.Context) error {
+	writer, request := ctx.Response(), ctx.Request()
 	expectedGeneration, key, ok := policyWriteHeaders(writer, request)
 	if !ok {
 		api.audit(request, subjectFromRequest(request), "admin.session/stop", "failure")
-		return
+		return nil
 	}
 	var input struct {
 		Reason string `json:"reason"`
 	}
 	if !decodePolicyJSON(writer, request, &input) || !validChangeReason(input.Reason) {
 		api.audit(request, subjectFromRequest(request), "admin.session/stop", "failure")
-		return
+		return nil
 	}
 	result, err := api.operations.StopSession(request.Context(), adminoperations.StopSessionRequest{
 		Request: adminoperations.Request{
@@ -92,27 +98,29 @@ func (api *readAPI) stopSession(writer http.ResponseWriter, request *http.Reques
 	if err != nil {
 		api.audit(request, subjectFromRequest(request), "admin.session/stop", "failure")
 		writeOperationError(writer, request, err)
-		return
+		return nil
 	}
 	writer.Header().Set("ETag", strongETag(result.Generation))
 	if !result.RuntimeConverged {
 		writer.Header().Set("Retry-After", "1")
 	}
 	writeOperationResult(writer, result.Replayed, result)
+	return nil
 }
 
-func (api *readAPI) stopTask(writer http.ResponseWriter, request *http.Request) {
+func (api *readAPI) stopTask(ctx *echo.Context) error {
+	writer, request := ctx.Response(), ctx.Request()
 	expectedVersion, key, ok := policyWriteHeaders(writer, request)
 	if !ok {
 		api.audit(request, subjectFromRequest(request), "admin.task/stop", "failure")
-		return
+		return nil
 	}
 	var input struct {
 		Reason string `json:"reason"`
 	}
 	if !decodePolicyJSON(writer, request, &input) || !validChangeReason(input.Reason) {
 		api.audit(request, subjectFromRequest(request), "admin.task/stop", "failure")
-		return
+		return nil
 	}
 	result, err := api.operations.StopTask(request.Context(), adminoperations.StopTaskRequest{
 		Request: adminoperations.Request{
@@ -124,7 +132,7 @@ func (api *readAPI) stopTask(writer http.ResponseWriter, request *http.Request) 
 	if err != nil {
 		api.audit(request, subjectFromRequest(request), "admin.task/stop", "failure")
 		writeOperationError(writer, request, err)
-		return
+		return nil
 	}
 	writer.Header().Set("ETag", strongETag(result.Version))
 	if result.PendingConvergence {
@@ -134,14 +142,19 @@ func (api *readAPI) stopTask(writer http.ResponseWriter, request *http.Request) 
 		writer.Header().Set("Idempotent-Replayed", "true")
 	}
 	writeJSON(writer, map[bool]int{true: http.StatusAccepted, false: http.StatusOK}[result.PendingConvergence], result)
+	return nil
 }
 
-func (api *readAPI) drainRelay(writer http.ResponseWriter, request *http.Request) {
+func (api *readAPI) drainRelay(ctx *echo.Context) error {
+	writer, request := ctx.Response(), ctx.Request()
 	api.changeRelayState(writer, request, true)
+	return nil
 }
 
-func (api *readAPI) recoverRelay(writer http.ResponseWriter, request *http.Request) {
+func (api *readAPI) recoverRelay(ctx *echo.Context) error {
+	writer, request := ctx.Response(), ctx.Request()
 	api.changeRelayState(writer, request, false)
+	return nil
 }
 
 func (api *readAPI) changeRelayState(writer http.ResponseWriter, request *http.Request, drain bool) {
@@ -190,18 +203,19 @@ func (api *readAPI) changeRelayState(writer http.ResponseWriter, request *http.R
 	writeJSON(writer, map[bool]int{true: http.StatusAccepted, false: http.StatusOK}[result.PendingConvergence], result)
 }
 
-func (api *readAPI) triggerRecovery(writer http.ResponseWriter, request *http.Request) {
+func (api *readAPI) triggerRecovery(ctx *echo.Context) error {
+	writer, request := ctx.Response(), ctx.Request()
 	key, ok := operationIdempotencyKey(writer, request)
 	if !ok {
 		api.audit(request, subjectFromRequest(request), "admin.recovery/run", "failure")
-		return
+		return nil
 	}
 	var input struct {
 		Reason string `json:"reason"`
 	}
 	if !decodePolicyJSON(writer, request, &input) || !validChangeReason(input.Reason) {
 		api.audit(request, subjectFromRequest(request), "admin.recovery/run", "failure")
-		return
+		return nil
 	}
 	result, err := api.operations.TriggerRecovery(request.Context(), adminoperations.TriggerRecoveryRequest{Request: adminoperations.Request{
 		Actor: operationActor(subjectFromRequest(request)), IdempotencyKey: key,
@@ -210,7 +224,7 @@ func (api *readAPI) triggerRecovery(writer http.ResponseWriter, request *http.Re
 	if err != nil {
 		api.audit(request, subjectFromRequest(request), "admin.recovery/run", "failure")
 		writeOperationError(writer, request, err)
-		return
+		return nil
 	}
 	if result.Replayed {
 		writer.Header().Set("Idempotent-Replayed", "true")
@@ -219,13 +233,15 @@ func (api *readAPI) triggerRecovery(writer http.ResponseWriter, request *http.Re
 		writer.Header().Set("Retry-After", "1")
 	}
 	writeJSON(writer, map[bool]int{true: http.StatusAccepted, false: http.StatusOK}[result.PendingConvergence], result)
+	return nil
 }
 
-func (api *readAPI) createAuditExport(writer http.ResponseWriter, request *http.Request) {
+func (api *readAPI) createAuditExport(ctx *echo.Context) error {
+	writer, request := ctx.Response(), ctx.Request()
 	key, ok := operationIdempotencyKey(writer, request)
 	if !ok {
 		api.audit(request, subjectFromRequest(request), "admin.audit/export", "failure")
-		return
+		return nil
 	}
 	var input struct {
 		PrincipalID string `json:"principalId"`
@@ -237,14 +253,14 @@ func (api *readAPI) createAuditExport(writer http.ResponseWriter, request *http.
 	}
 	if !decodePolicyJSON(writer, request, &input) || !validChangeReason(input.Reason) {
 		api.audit(request, subjectFromRequest(request), "admin.audit/export", "failure")
-		return
+		return nil
 	}
 	after, afterErr := optionalTime(input.After)
 	before, beforeErr := optionalTime(input.Before)
 	if afterErr != nil || beforeErr != nil {
 		api.audit(request, subjectFromRequest(request), "admin.audit/export", "failure")
 		writeError(writer, http.StatusBadRequest, "invalid_request", "audit export filter is invalid", requestID(request))
-		return
+		return nil
 	}
 	result, err := api.operations.CreateAuditExport(request.Context(), adminoperations.AuditExportRequest{
 		Request: adminoperations.Request{
@@ -256,23 +272,25 @@ func (api *readAPI) createAuditExport(writer http.ResponseWriter, request *http.
 	if err != nil {
 		api.audit(request, subjectFromRequest(request), "admin.audit/export", "failure")
 		writeOperationError(writer, request, err)
-		return
+		return nil
 	}
-	writer.Header().Set("Location", api.handler.apiPath+"/admin/audit/exports/"+result.JobID)
+	writer.Header().Set("Location", api.handler.pathPrefix+"/audit/exports/"+result.JobID)
 	if result.Replayed {
 		writer.Header().Set("Idempotent-Replayed", "true")
 	}
 	writeJSON(writer, http.StatusAccepted, result)
+	return nil
 }
 
-func (api *readAPI) getAuditExport(writer http.ResponseWriter, request *http.Request) {
+func (api *readAPI) getAuditExport(ctx *echo.Context) error {
+	writer, request := ctx.Response(), ctx.Request()
 	result, data, err := api.operations.GetAuditExport(
 		request.Context(), operationActor(subjectFromRequest(request)), strings.TrimSpace(request.PathValue("jobID")),
 	)
 	if err != nil {
 		api.audit(request, subjectFromRequest(request), "admin.audit-export/read", "failure")
 		writeOperationError(writer, request, err)
-		return
+		return nil
 	}
 	api.audit(request, subjectFromRequest(request), "admin.audit-export/read", "success")
 	if result.State != "succeeded" {
@@ -281,13 +299,14 @@ func (api *readAPI) getAuditExport(writer http.ResponseWriter, request *http.Req
 			writer.Header().Set("Retry-After", "1")
 		}
 		writeJSON(writer, map[bool]int{true: http.StatusAccepted, false: http.StatusOK}[pending], result)
-		return
+		return nil
 	}
 	writer.Header().Set("Content-Type", "application/x-ndjson; charset=utf-8")
 	writer.Header().Set("Content-Disposition", `attachment; filename="kubeloop-audit-`+result.JobID+`.ndjson"`)
 	writer.Header().Set("Content-Length", strconv.Itoa(len(data)))
 	writer.WriteHeader(http.StatusOK)
 	_, _ = writer.Write([]byte(data))
+	return nil
 }
 
 func operationActor(subject adminauthorization.Subject) adminoperations.Actor {

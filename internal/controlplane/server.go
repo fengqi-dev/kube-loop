@@ -121,24 +121,21 @@ func NewServer(config Config, build BuildInfo, logger *slog.Logger, serverOption
 	// The Management Plane is served by its own listener. Register explicit
 	// public-listener exclusions before the API group so its authentication
 	// middleware cannot turn these requests into a misleading 401 response.
-	router.Any(APIPathPrefix+"/admin", func(ctx *echo.Context) error {
+	router.Any(AdminAPIPathPrefix, func(ctx *echo.Context) error {
 		return echo.ErrNotFound
 	})
-	router.Any(APIPathPrefix+"/admin/*", func(ctx *echo.Context) error {
+	router.Any(AdminAPIPathPrefix+"/*", func(ctx *echo.Context) error {
 		return echo.ErrNotFound
 	})
 	apiGroup := router.Group(APIPathPrefix)
-	apiGroup.Use(controlplanemiddleware.New(controlplanemiddleware.Config{
-		APIPathPrefix:      APIPathPrefix,
-		RequestTimeout:     normalized.APIRequestTimeout,
-		MaxRequestBodySize: normalized.MaxRequestBodyBytes,
-		Logger:             logger,
-		Authenticator:      options.authenticator,
-		Authorizer:         options.authorizer,
-		Audit:              options.audit,
-	}))
+	apiGroup.Use(apiMiddleware(APIPathPrefix, normalized, logger, options))
 	if options.apiRoutes != nil {
 		options.apiRoutes.RegisterRoutes(apiGroup)
+	}
+	if sessionRoutes, ok := options.apiRoutes.(SessionRouteRegistrar); ok {
+		sessionGroup := router.Group(SessionAPIPathPrefix)
+		sessionGroup.Use(apiMiddleware(SessionAPIPathPrefix, normalized, logger, options))
+		sessionRoutes.RegisterSessionRoutes(sessionGroup)
 	}
 	serverContext, cancel := context.WithCancel(context.Background())
 	active := controlplanemiddleware.NewRequestTracker()
@@ -156,6 +153,18 @@ func NewServer(config Config, build BuildInfo, logger *slog.Logger, serverOption
 			MaxHeaderBytes:    DefaultMaxHeaderBytes,
 		},
 	}, nil
+}
+
+func apiMiddleware(prefix string, config Config, logger *slog.Logger, options serverOptions) echo.MiddlewareFunc {
+	return controlplanemiddleware.New(controlplanemiddleware.Config{
+		APIPathPrefix:      prefix,
+		RequestTimeout:     config.APIRequestTimeout,
+		MaxRequestBodySize: config.MaxRequestBodyBytes,
+		Logger:             logger,
+		Authenticator:      options.authenticator,
+		Authorizer:         options.authorizer,
+		Audit:              options.audit,
+	})
 }
 
 func (server *Server) ListenAddress() string {

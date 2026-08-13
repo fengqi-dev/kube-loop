@@ -13,7 +13,7 @@ module、同一存储和同一 Helm Chart。它不是新的独立项目，也不
 `kubeloop-gateway` Data Plane。建议路由：
 
 - Web UI：`/admin/`
-- Management API：`/kubeloop/api/admin/*`
+- Management API：`/api/admin/*`
 - 普通用户 API：继续使用 `/kubeloop/api/*`
 
 第一阶段不让管理后台直接编辑任意 Kubernetes 对象、不提供 SQL 控制台、
@@ -137,7 +137,7 @@ active pointer 和审计事件。使用整数 revision/ETag 做乐观并发，�
 Provider 写入和高风险运维动作最后开放。V2-900～907 完成代码后，再按当前
 约定统一执行 V2-908 E2E。
 
-V2-905 使用单例 `/kubeloop/api/admin/policy` 资源管理五类管理角色及
+V2-905 使用单例 `/api/admin/policy` 资源管理五类管理角色及
 `namespace-admin` 委派。候选策略可在不改动 active pointer 的情况下执行
 regular-identity dry-run；draft 保存不可变 revision，publish/rollback 使用强
 整数 `If-Match` 做 CAS，并在成功事务后同步重载进程内 authorizer。所有 POST

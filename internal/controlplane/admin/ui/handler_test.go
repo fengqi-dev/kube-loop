@@ -5,6 +5,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/labstack/echo/v5"
 )
 
 func TestHandlerServesOnlyFixedManagementAssetsWithStrictCSP(t *testing.T) {
@@ -21,7 +23,7 @@ func TestHandlerServesOnlyFixedManagementAssetsWithStrictCSP(t *testing.T) {
 	} {
 		request := httptest.NewRequest(http.MethodGet, test.path, nil)
 		recorder := httptest.NewRecorder()
-		handler.ServeHTTP(recorder, request)
+		serveUI(handler, recorder, request)
 		if recorder.Code != http.StatusOK || !strings.HasPrefix(recorder.Header().Get("Content-Type"), test.contentType) ||
 			!strings.Contains(recorder.Body.String(), test.contains) {
 			t.Fatalf("path=%s status=%d type=%q body=%q", test.path, recorder.Code, recorder.Header().Get("Content-Type"), recorder.Body.String())
@@ -34,14 +36,14 @@ func TestHandlerServesOnlyFixedManagementAssetsWithStrictCSP(t *testing.T) {
 
 	for _, path := range []string{"/ui/unknown", "/ui/../handler.go"} {
 		recorder := httptest.NewRecorder()
-		handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
+		serveUI(handler, recorder, httptest.NewRequest(http.MethodGet, path, nil))
 		if recorder.Code != http.StatusNotFound {
 			t.Fatalf("path=%s status=%d", path, recorder.Code)
 		}
 	}
 	method := httptest.NewRecorder()
-	handler.ServeHTTP(method, httptest.NewRequest(http.MethodPost, "/ui", nil))
-	if method.Code != http.StatusMethodNotAllowed || method.Header().Get("Allow") != "GET, HEAD" {
+	serveUI(handler, method, httptest.NewRequest(http.MethodPost, "/ui", nil))
+	if method.Code != http.StatusMethodNotAllowed || method.Header().Get("Allow") != "OPTIONS, GET, HEAD" {
 		t.Fatalf("method status=%d allow=%q", method.Code, method.Header().Get("Allow"))
 	}
 }
@@ -49,7 +51,7 @@ func TestHandlerServesOnlyFixedManagementAssetsWithStrictCSP(t *testing.T) {
 func TestBrowserAssetsDoNotPersistGatewayTokensOrLoadRemoteCode(t *testing.T) {
 	handler := New()
 	recorder := httptest.NewRecorder()
-	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/ui/app.js", nil))
+	serveUI(handler, recorder, httptest.NewRequest(http.MethodGet, "/ui/app.js", nil))
 	body := recorder.Body.String()
 	for _, forbidden := range []string{"localStorage", "eval(", "new Function(", "https://", "http://"} {
 		if strings.Contains(body, forbidden) {
@@ -63,4 +65,10 @@ func TestBrowserAssetsDoNotPersistGatewayTokensOrLoadRemoteCode(t *testing.T) {
 	if strings.Contains(body, "hasCapability(") {
 		t.Fatal("browser asset references the removed capability helper")
 	}
+}
+
+func serveUI(handler *Handler, writer http.ResponseWriter, request *http.Request) {
+	router := echo.New()
+	handler.RegisterRoutes(router.Group("/ui"))
+	router.ServeHTTP(writer, request)
 }

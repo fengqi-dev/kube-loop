@@ -65,6 +65,9 @@ spec:
         - path:
             type: PathPrefix
             value: /kubeloop/api
+        - path:
+            type: PathPrefix
+            value: /api/sessions
       timeouts:
         request: {{ .Values.gatewayAPI.timeouts.controlPlane | quote }}
         backendRequest: {{ .Values.gatewayAPI.timeouts.controlPlane | quote }}

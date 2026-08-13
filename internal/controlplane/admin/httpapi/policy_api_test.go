@@ -208,7 +208,7 @@ func newPolicyTestHandler(t *testing.T) (*Handler, *storage.Store, *adminauthori
 	return handler, store, engine
 }
 
-func exchangeBreakGlassSession(t *testing.T, handler http.Handler) (*http.Cookie, string) {
+func exchangeBreakGlassSession(t *testing.T, handler *Handler) (*http.Cookie, string) {
 	t.Helper()
 	exchange := performExchange(handler, `{"credential":"valid"}`)
 	if exchange.Code != http.StatusCreated || len(exchange.Result().Cookies()) != 1 {
@@ -225,7 +225,7 @@ func exchangeBreakGlassSession(t *testing.T, handler http.Handler) (*http.Cookie
 
 func policyWrite(
 	t *testing.T,
-	handler http.Handler,
+	handler *Handler,
 	cookie *http.Cookie,
 	csrf, path, etag, key string,
 	body any,
@@ -249,6 +249,6 @@ func policyWrite(
 		request.Header.Set("Idempotency-Key", key)
 	}
 	recorder := httptest.NewRecorder()
-	handler.ServeHTTP(recorder, request)
+	serveHTTP(handler, recorder, request)
 	return recorder
 }

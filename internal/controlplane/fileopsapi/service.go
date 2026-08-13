@@ -174,7 +174,7 @@ func (handler *Service) mutate(ctx *echo.Context, principal controlplaneapi.Prin
 	if err != nil {
 		return internalError(err)
 	}
-	ctx.Response().Header().Set("Location", fmt.Sprintf("%s/sessions/%s/pod-files/operations/%s?namespace=%s", controlplane.APIPathPrefix, session.ID, task.ID, session.Namespace))
+	ctx.Response().Header().Set("Location", fmt.Sprintf("%s/sessions/%s/pod-files/operations/%s?namespace=%s", controlplane.SessionAPIPathPrefix, session.ID, task.ID, session.Namespace))
 	writeJSON(ctx, map[bool]int{true: http.StatusCreated, false: http.StatusOK}[created], document)
 	return nil
 }

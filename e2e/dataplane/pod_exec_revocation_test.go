@@ -138,7 +138,7 @@ func TestRealPodExecStopsWhenTokenFamilyIsRevoked(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	createURL := fmt.Sprintf("%s/kubeloop/api/sessions/%s/exec?namespace=%s", httpServer.URL, sessionID, harness.EchoNamespace)
+	createURL := fmt.Sprintf("%s/api/sessions/%s/exec?namespace=%s", httpServer.URL, sessionID, harness.EchoNamespace)
 	createRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, createURL, bytes.NewReader(createBody))
 	if err != nil {
 		t.Fatal(err)
@@ -155,7 +155,7 @@ func TestRealPodExecStopsWhenTokenFamilyIsRevoked(t *testing.T) {
 		t.Fatalf("create real Pod exec Task: status=%d task=%#v err=%v", createResponse.StatusCode, task, err)
 	}
 	streamURL := fmt.Sprintf(
-		"ws%s/kubeloop/api/sessions/%s/exec/%s/stream?namespace=%s",
+		"ws%s/api/sessions/%s/exec/%s/stream?namespace=%s",
 		strings.TrimPrefix(httpServer.URL, "http"), sessionID, task.ID, harness.EchoNamespace,
 	)
 	connection, response, err := websocket.Dial(ctx, streamURL, nil)

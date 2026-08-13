@@ -216,7 +216,7 @@ func (stub relayStatusStub) Snapshot() []relayregistry.RelayStatus {
 	return append([]relayregistry.RelayStatus(nil), stub.statuses...)
 }
 
-func exchangeManagementToken(t *testing.T, handler http.Handler) *http.Cookie {
+func exchangeManagementToken(t *testing.T, handler *Handler) *http.Cookie {
 	t.Helper()
 	request := httptest.NewRequest(http.MethodPost, "/sessions/token", bytes.NewBufferString(`{}`))
 	request.RemoteAddr = "192.0.2.40:5000"
@@ -224,18 +224,18 @@ func exchangeManagementToken(t *testing.T, handler http.Handler) *http.Cookie {
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Authorization", "Bearer valid-access-token")
 	recorder := httptest.NewRecorder()
-	handler.ServeHTTP(recorder, request)
+	serveHTTP(handler, recorder, request)
 	if recorder.Code != http.StatusCreated || len(recorder.Result().Cookies()) != 1 {
 		t.Fatalf("token exchange status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 	return recorder.Result().Cookies()[0]
 }
 
-func authenticatedGET(handler http.Handler, cookie *http.Cookie, path string) *httptest.ResponseRecorder {
+func authenticatedGET(handler *Handler, cookie *http.Cookie, path string) *httptest.ResponseRecorder {
 	request := httptest.NewRequest(http.MethodGet, path, nil)
 	request.AddCookie(cookie)
 	recorder := httptest.NewRecorder()
-	handler.ServeHTTP(recorder, request)
+	serveHTTP(handler, recorder, request)
 	return recorder
 }
 

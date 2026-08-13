@@ -31,7 +31,7 @@ type Server struct {
 
 func New(
 	config Config,
-	management http.Handler,
+	management controlplane.RouteRegistrar,
 	authRoutes controlplane.RouteRegistrar,
 	authMethods controlplane.AuthMethodSource,
 	logger *slog.Logger,
@@ -63,8 +63,7 @@ func New(
 	if authRoutes != nil {
 		authRoutes.RegisterRoutes(router.Group(""))
 	}
-	managementPath := controlplane.APIPathPrefix + "/admin"
-	mount(router.Group(managementPath), http.StripPrefix(managementPath, management))
+	management.RegisterRoutes(router.Group(controlplane.AdminAPIPathPrefix))
 
 	serverContext, cancel := context.WithCancel(context.Background())
 	active := controlplanemiddleware.NewRequestTracker()
@@ -82,12 +81,6 @@ func New(
 			MaxHeaderBytes:    controlplane.DefaultMaxHeaderBytes,
 		},
 	}, nil
-}
-
-func mount(group *echo.Group, handler http.Handler) {
-	adapted := echo.WrapHandler(handler)
-	group.Any("", adapted)
-	group.Any("/*", adapted)
 }
 
 func (server *Server) ListenAddress() string { return server.listenAddress }

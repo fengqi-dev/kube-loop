@@ -106,7 +106,7 @@ func TestMirrorTaskIsOwnedIdempotentAndDurablyStopped(t *testing.T) {
 		t.Fatal(err)
 	}
 	principal := controlplaneapi.Principal{Subject: principalID, DeviceID: "device"}
-	path := "/kubeloop/api/sessions/" + sessionID + "/mirrors?namespace=development"
+	path := "/api/sessions/" + sessionID + "/mirrors?namespace=development"
 	body := []byte(`{"service":"api","ports":[{"servicePort":53,"protocol":"udp"},{"servicePort":80,"protocol":"tcp"}]}`)
 	created, apiError := mirrorRequest(handler, principal, http.MethodPost, path, body, "mirror-1")
 	if apiError != nil || created.Code != http.StatusCreated {
@@ -125,7 +125,7 @@ func TestMirrorTaskIsOwnedIdempotentAndDurablyStopped(t *testing.T) {
 	if apiError == nil || apiError.Code != controlplaneapi.CodeConflict || services.calls != 1 {
 		t.Fatalf("idempotency mismatch error=%#v calls=%d", apiError, services.calls)
 	}
-	taskPath := "/kubeloop/api/sessions/" + sessionID + "/mirrors/" + document.ID + "?namespace=development"
+	taskPath := "/api/sessions/" + sessionID + "/mirrors/" + document.ID + "?namespace=development"
 	_, apiError = mirrorRequest(handler, controlplaneapi.Principal{Subject: uuid.NewString(), DeviceID: "other"}, http.MethodGet, taskPath, nil, "")
 	if apiError == nil || apiError.Code != controlplaneapi.CodeNotFound {
 		t.Fatalf("cross-principal get error=%#v", apiError)
@@ -149,7 +149,7 @@ func TestMirrorTaskIsOwnedIdempotentAndDurablyStopped(t *testing.T) {
 	if err := stateStore.Tasks().UpdateState(ctx, document.ID, "pending", "running", json.RawMessage(`{}`), now); err != nil {
 		t.Fatal(err)
 	}
-	taskPath = "/kubeloop/api/sessions/" + sessionID + "/mirrors/" + document.ID + "?namespace=development"
+	taskPath = "/api/sessions/" + sessionID + "/mirrors/" + document.ID + "?namespace=development"
 	stopping, apiError := mirrorRequest(handler, principal, http.MethodDelete, taskPath, nil, "")
 	if apiError != nil || stopping.Code != http.StatusAccepted {
 		t.Fatalf("request running Mirror stop: status=%d error=%#v", stopping.Code, apiError)
@@ -181,9 +181,9 @@ func mirrorRequest(
 func serveAPI(handler *Service, writer http.ResponseWriter, request *http.Request, principal controlplaneapi.Principal) *controlplaneapi.Error {
 	routes := NewRoutes(handler)
 	parts := strings.Split(strings.Trim(request.URL.Path, "/"), "/")
-	request.SetPathValue("sessionID", parts[3])
-	if len(parts) > 5 {
-		request.SetPathValue("taskID", parts[5])
+	request.SetPathValue("sessionID", parts[2])
+	if len(parts) > 4 {
+		request.SetPathValue("taskID", parts[4])
 	}
 	switch {
 	case request.Method == http.MethodPost:

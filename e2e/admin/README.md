@@ -14,7 +14,7 @@ the real Management Token exchange.
 go run ./e2e/admin/browserfixture --listen 127.0.0.1:18181
 ```
 
-Open `http://127.0.0.1:18181/kubeloop/api/admin/ui/`. The fixture accepts:
+Open `http://127.0.0.1:18181/api/admin/ui/`. The fixture accepts:
 
 - OIDC: `Fixture OIDC` (automatic same-origin authorization redirect)
 - break-glass: `valid`

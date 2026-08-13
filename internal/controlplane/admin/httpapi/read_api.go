@@ -194,45 +194,45 @@ var capabilityChecks = []adminauthorization.Request{
 	{Resource: adminauthorization.ResourceAudit, Operation: adminauthorization.OperationExport},
 }
 
-func (api *readAPI) routes(router *echo.Echo) {
-	protected := router.Group("", api.authenticate)
-	protected.GET("/capabilities", adaptHandler(api.capabilities))
-	protected.DELETE("/sessions/current", adaptHandler(api.revokeCurrentSession))
-	protected.GET("/status", adaptHandler(api.systemStatus), api.permission(adminauthorization.ResourceStatus, adminauthorization.OperationRead))
-	protected.GET("/principals", adaptHandler(api.listPrincipals), api.permission(adminauthorization.ResourcePrincipal, adminauthorization.OperationList))
-	protected.GET("/sessions", adaptHandler(api.listSessions))
-	protected.GET("/tasks", adaptHandler(api.listTasks))
-	protected.GET("/audit", adaptHandler(api.listAudit), api.permission(adminauthorization.ResourceAudit, adminauthorization.OperationList))
-	protected.GET("/relays", adaptHandler(api.listRelays), api.permission(adminauthorization.ResourceRelay, adminauthorization.OperationList))
+func (api *readAPI) routes(group *echo.Group) {
+	protected := group.Group("", api.authenticate)
+	protected.GET("/capabilities", api.capabilities)
+	protected.DELETE("/sessions/current", api.revokeCurrentSession)
+	protected.GET("/status", api.systemStatus, api.permission(adminauthorization.ResourceStatus, adminauthorization.OperationRead))
+	protected.GET("/principals", api.listPrincipals, api.permission(adminauthorization.ResourcePrincipal, adminauthorization.OperationList))
+	protected.GET("/sessions", api.listSessions)
+	protected.GET("/tasks", api.listTasks)
+	protected.GET("/audit", api.listAudit, api.permission(adminauthorization.ResourceAudit, adminauthorization.OperationList))
+	protected.GET("/relays", api.listRelays, api.permission(adminauthorization.ResourceRelay, adminauthorization.OperationList))
 	if api.policy != nil {
-		protected.GET("/policy", adaptHandler(api.currentPolicy), api.permission(adminauthorization.ResourcePolicy, adminauthorization.OperationRead))
-		protected.POST("/policy/dry-run", adaptHandler(api.dryRunPolicy), api.permission(adminauthorization.ResourcePolicy, adminauthorization.OperationDryRun))
-		protected.POST("/policy/drafts", adaptHandler(api.createPolicyDraft), api.permission(adminauthorization.ResourcePolicy, adminauthorization.OperationCreate))
-		protected.POST("/policy/changes/:changeID/publish", adaptHandler(api.publishPolicy), api.permission(adminauthorization.ResourcePolicy, adminauthorization.OperationPublish))
-		protected.POST("/policy/rollback", adaptHandler(api.rollbackPolicy), api.permission(adminauthorization.ResourcePolicy, adminauthorization.OperationRollback))
+		protected.GET("/policy", api.currentPolicy, api.permission(adminauthorization.ResourcePolicy, adminauthorization.OperationRead))
+		protected.POST("/policy/dry-run", api.dryRunPolicy, api.permission(adminauthorization.ResourcePolicy, adminauthorization.OperationDryRun))
+		protected.POST("/policy/drafts", api.createPolicyDraft, api.permission(adminauthorization.ResourcePolicy, adminauthorization.OperationCreate))
+		protected.POST("/policy/changes/:changeID/publish", api.publishPolicy, api.permission(adminauthorization.ResourcePolicy, adminauthorization.OperationPublish))
+		protected.POST("/policy/rollback", api.rollbackPolicy, api.permission(adminauthorization.ResourcePolicy, adminauthorization.OperationRollback))
 	}
 	if api.providers != nil {
-		protected.GET("/providers", adaptHandler(api.listProviders), api.permission(adminauthorization.ResourceProvider, adminauthorization.OperationList))
-		protected.GET("/providers/:providerID", adaptHandler(api.currentProvider), api.permission(adminauthorization.ResourceProvider, adminauthorization.OperationRead))
-		protected.POST("/providers/:providerID/validate", adaptHandler(api.validateProvider), api.permission(adminauthorization.ResourceProvider, adminauthorization.OperationValidate))
-		protected.POST("/providers/:providerID/drafts", adaptHandler(api.createProviderDraft), api.permission(adminauthorization.ResourceProvider, adminauthorization.OperationCreate))
-		protected.POST("/providers/:providerID/changes/:changeID/publish", adaptHandler(api.publishProvider), api.permission(adminauthorization.ResourceProvider, adminauthorization.OperationPublish))
-		protected.POST("/providers/:providerID/rollback", adaptHandler(api.rollbackProvider), api.permission(adminauthorization.ResourceProvider, adminauthorization.OperationRollback))
+		protected.GET("/providers", api.listProviders, api.permission(adminauthorization.ResourceProvider, adminauthorization.OperationList))
+		protected.GET("/providers/:providerID", api.currentProvider, api.permission(adminauthorization.ResourceProvider, adminauthorization.OperationRead))
+		protected.POST("/providers/:providerID/validate", api.validateProvider, api.permission(adminauthorization.ResourceProvider, adminauthorization.OperationValidate))
+		protected.POST("/providers/:providerID/drafts", api.createProviderDraft, api.permission(adminauthorization.ResourceProvider, adminauthorization.OperationCreate))
+		protected.POST("/providers/:providerID/changes/:changeID/publish", api.publishProvider, api.permission(adminauthorization.ResourceProvider, adminauthorization.OperationPublish))
+		protected.POST("/providers/:providerID/rollback", api.rollbackProvider, api.permission(adminauthorization.ResourceProvider, adminauthorization.OperationRollback))
 	}
 	if api.operations != nil {
-		protected.POST("/principals/:principalID/revoke", adaptHandler(api.revokePrincipalSessions), api.permission(adminauthorization.ResourceSession, adminauthorization.OperationRevoke))
-		protected.POST("/principals/:principalID/device-sessions/:deviceSessionID/revoke", adaptHandler(api.revokeDeviceSession), api.permission(adminauthorization.ResourceSession, adminauthorization.OperationRevoke))
-		protected.POST("/sessions/:sessionID/stop", adaptHandler(api.stopSession), api.permission(adminauthorization.ResourceSession, adminauthorization.OperationStop))
-		protected.POST("/tasks/:taskID/stop", adaptHandler(api.stopTask), api.permission(adminauthorization.ResourceTask, adminauthorization.OperationStop))
+		protected.POST("/principals/:principalID/revoke", api.revokePrincipalSessions, api.permission(adminauthorization.ResourceSession, adminauthorization.OperationRevoke))
+		protected.POST("/principals/:principalID/device-sessions/:deviceSessionID/revoke", api.revokeDeviceSession, api.permission(adminauthorization.ResourceSession, adminauthorization.OperationRevoke))
+		protected.POST("/sessions/:sessionID/stop", api.stopSession, api.permission(adminauthorization.ResourceSession, adminauthorization.OperationStop))
+		protected.POST("/tasks/:taskID/stop", api.stopTask, api.permission(adminauthorization.ResourceTask, adminauthorization.OperationStop))
 		if api.operations.RelayAvailable() {
-			protected.POST("/relays/:relayID/drain", adaptHandler(api.drainRelay), api.permission(adminauthorization.ResourceRelay, adminauthorization.OperationDrain))
-			protected.POST("/relays/:relayID/recover", adaptHandler(api.recoverRelay), api.permission(adminauthorization.ResourceRelay, adminauthorization.OperationRecover))
+			protected.POST("/relays/:relayID/drain", api.drainRelay, api.permission(adminauthorization.ResourceRelay, adminauthorization.OperationDrain))
+			protected.POST("/relays/:relayID/recover", api.recoverRelay, api.permission(adminauthorization.ResourceRelay, adminauthorization.OperationRecover))
 		}
 		if api.operations.RecoveryAvailable() {
-			protected.POST("/tasks/recovery", adaptHandler(api.triggerRecovery), api.permission(adminauthorization.ResourceTask, adminauthorization.OperationRecover))
+			protected.POST("/tasks/recovery", api.triggerRecovery, api.permission(adminauthorization.ResourceTask, adminauthorization.OperationRecover))
 		}
-		protected.POST("/audit/exports", adaptHandler(api.createAuditExport), api.permission(adminauthorization.ResourceAudit, adminauthorization.OperationExport))
-		protected.GET("/audit/exports/:jobID", adaptHandler(api.getAuditExport), api.permission(adminauthorization.ResourceAudit, adminauthorization.OperationExport))
+		protected.POST("/audit/exports", api.createAuditExport, api.permission(adminauthorization.ResourceAudit, adminauthorization.OperationExport))
+		protected.GET("/audit/exports/:jobID", api.getAuditExport, api.permission(adminauthorization.ResourceAudit, adminauthorization.OperationExport))
 	}
 	if api.localUsers != nil {
 		api.localUserRoutes(protected)
@@ -243,17 +243,19 @@ func (api *readAPI) permission(resource adminauthorization.Resource, operation a
 	return api.require(adminauthorization.Request{Resource: resource, Operation: operation})
 }
 
-func (api *readAPI) revokeCurrentSession(writer http.ResponseWriter, request *http.Request) {
+func (api *readAPI) revokeCurrentSession(ctx *echo.Context) error {
+	writer, request := ctx.Response(), ctx.Request()
 	stored, ok := request.Context().Value(sessionContextKey).(storage.AdminSession)
 	if !ok || api.handler.sessions.Revoke(request.Context(), stored, requestID(request)) != nil {
 		writeError(writer, http.StatusServiceUnavailable, "unavailable", "management session could not be revoked", requestID(request))
-		return
+		return nil
 	}
 	http.SetCookie(writer, &http.Cookie{
 		Name: SessionCookieName, Value: "", Path: "/", Secure: true, HttpOnly: true,
 		SameSite: http.SameSiteStrictMode, MaxAge: -1, Expires: time.Unix(1, 0).UTC(),
 	})
 	writer.WriteHeader(http.StatusNoContent)
+	return nil
 }
 
 func (api *readAPI) authenticate(next echo.HandlerFunc) echo.HandlerFunc {
@@ -313,7 +315,8 @@ func (api *readAPI) require(permission adminauthorization.Request) echo.Middlewa
 	}
 }
 
-func (api *readAPI) capabilities(writer http.ResponseWriter, request *http.Request) {
+func (api *readAPI) capabilities(ctx *echo.Context) error {
+	writer, request := ctx.Response(), ctx.Request()
 	subject, _ := request.Context().Value(subjectContextKey).(adminauthorization.Subject)
 	capabilities := make([]string, 0, len(capabilityChecks))
 	for _, permission := range capabilityChecks {
@@ -344,19 +347,21 @@ func (api *readAPI) capabilities(writer http.ResponseWriter, request *http.Reque
 		"policyRevision":     api.authorizer.Revision(),
 		"policyEtag":         api.authorizer.ETag(),
 	})
+	return nil
 }
 
-func (api *readAPI) systemStatus(writer http.ResponseWriter, request *http.Request) {
+func (api *readAPI) systemStatus(ctx *echo.Context) error {
+	writer, request := ctx.Response(), ctx.Request()
 	if err := api.status.Check(request.Context()); err != nil {
 		api.audit(request, subjectFromRequest(request), "admin.status/read", "failure")
 		writeError(writer, http.StatusServiceUnavailable, "unavailable", "management status is unavailable", requestID(request))
-		return
+		return nil
 	}
 	schemaVersion, err := api.status.SchemaVersion(request.Context())
 	if err != nil {
 		api.audit(request, subjectFromRequest(request), "admin.status/read", "failure")
 		writeError(writer, http.StatusServiceUnavailable, "unavailable", "management status is unavailable", requestID(request))
-		return
+		return nil
 	}
 	api.audit(request, subjectFromRequest(request), "admin.status/read", "success")
 	writeJSON(writer, http.StatusOK, map[string]any{
@@ -371,6 +376,7 @@ func (api *readAPI) systemStatus(writer http.ResponseWriter, request *http.Reque
 			"status": "ready", "revision": api.authorizer.Revision(), "etag": api.authorizer.ETag(),
 		},
 	})
+	return nil
 }
 
 func requestID(request *http.Request) string {

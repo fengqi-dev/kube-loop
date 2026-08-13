@@ -36,7 +36,7 @@ V2-901～V2-907 实现；V2-908 统一完成浏览器和 Minikube E2E。
 | Kubernetes/外部 Secret 系统 | Secret 明文与轮换 | 向浏览器或管理 Repository 返回 Secret 明文 |
 
 `kubeloop-control-plane` 在同一 Go module、同一二进制和同一 Helm Chart 内提供
-`/admin/` 与 `/kubeloop/api/admin/*`。不创建独立后台项目，不在
+`/admin/` 与 `/api/admin/*`。不创建独立后台项目，不在
 `kubeloop-gateway` 注册管理路由，也不让 Data Plane 访问 Control Plane 数据库。
 
 ## 决策
@@ -110,7 +110,7 @@ HTML 或 JavaScript 持久状态。浏览器通过同源登录把已认证 Princ
   Principal 禁用、角色移除、Secret generation 变化或显式登出都会使其失效；
 - 每个请求重新读取或校验当前 assignment revision，Session 本身不缓存永久角色。
 
-Cookie 认证只在 `/kubeloop/api/admin/*` 和管理 Session 端点生效，普通 `/kubeloop/api/*`
+Cookie 认证只在 `/api/admin/*` 和管理 Session 端点生效，普通 `/kubeloop/api/*`
 不会因浏览器 Cookie 获得身份。非浏览器自动化必须使用短期 Bearer Token；Cookie
 和 Bearer 同时出现时拒绝请求，避免认证来源混淆。
 

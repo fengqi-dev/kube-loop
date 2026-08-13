@@ -138,7 +138,7 @@ func TestPodExecTaskAndWebSocketStreamAreOwnedAndSingleUse(t *testing.T) {
 	}
 	httpServer := httptest.NewServer(server.Handler())
 	defer httpServer.Close()
-	createRequest, _ := http.NewRequest(http.MethodPost, httpServer.URL+"/kubeloop/api/sessions/"+sessionID+"/exec?namespace=development",
+	createRequest, _ := http.NewRequest(http.MethodPost, httpServer.URL+"/api/sessions/"+sessionID+"/exec?namespace=development",
 		bytes.NewBufferString(`{"pod":"api-0","container":"api","command":["/bin/sh"],"tty":false}`))
 	createRequest.Header.Set("X-Principal", principalID)
 	createRequest.Header.Set("Content-Type", "application/json")
@@ -152,7 +152,7 @@ func TestPodExecTaskAndWebSocketStreamAreOwnedAndSingleUse(t *testing.T) {
 	if createResponse.StatusCode != http.StatusCreated || json.NewDecoder(createResponse.Body).Decode(&document) != nil || document.State != "pending" {
 		t.Fatalf("create status = %d task = %#v", createResponse.StatusCode, document)
 	}
-	streamURL := "ws" + strings.TrimPrefix(httpServer.URL, "http") + "/kubeloop/api/sessions/" + sessionID + "/exec/" + document.ID + "/stream?namespace=development"
+	streamURL := "ws" + strings.TrimPrefix(httpServer.URL, "http") + "/api/sessions/" + sessionID + "/exec/" + document.ID + "/stream?namespace=development"
 	connection, response, err := websocket.Dial(context.Background(), streamURL, &websocket.DialOptions{HTTPHeader: http.Header{"X-Principal": {principalID}}})
 	if err != nil {
 		if response != nil {
@@ -285,7 +285,7 @@ func TestPodExecStreamStopsWhenTokenFamilyIsRevoked(t *testing.T) {
 	}
 	httpServer := httptest.NewServer(server.Handler())
 	defer httpServer.Close()
-	createRequest, _ := http.NewRequest(http.MethodPost, httpServer.URL+"/kubeloop/api/sessions/"+sessionID+"/exec?namespace=development",
+	createRequest, _ := http.NewRequest(http.MethodPost, httpServer.URL+"/api/sessions/"+sessionID+"/exec?namespace=development",
 		bytes.NewBufferString(`{"pod":"api-0","container":"api","command":["/bin/sh"],"tty":true}`))
 	createRequest.Header.Set("Content-Type", "application/json")
 	createRequest.Header.Set("Idempotency-Key", "exec-revoke")
@@ -298,7 +298,7 @@ func TestPodExecStreamStopsWhenTokenFamilyIsRevoked(t *testing.T) {
 	if createResponse.StatusCode != http.StatusCreated || json.NewDecoder(createResponse.Body).Decode(&document) != nil {
 		t.Fatalf("create status = %d task = %#v", createResponse.StatusCode, document)
 	}
-	streamURL := "ws" + strings.TrimPrefix(httpServer.URL, "http") + "/kubeloop/api/sessions/" + sessionID + "/exec/" + document.ID + "/stream?namespace=development"
+	streamURL := "ws" + strings.TrimPrefix(httpServer.URL, "http") + "/api/sessions/" + sessionID + "/exec/" + document.ID + "/stream?namespace=development"
 	connection, response, err := websocket.Dial(context.Background(), streamURL, nil)
 	if err != nil {
 		if response != nil {
