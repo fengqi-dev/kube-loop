@@ -196,8 +196,10 @@ var capabilityChecks = []adminauthorization.Request{
 
 func (api *readAPI) routes(group *echo.Group) {
 	protected := group.Group("", api.authenticate)
+	protected.GET("/bootstrap", api.bootstrap)
 	protected.GET("/capabilities", api.capabilities)
 	protected.DELETE("/sessions/current", api.revokeCurrentSession)
+	protected.GET("/overview", api.overview, api.permission(adminauthorization.ResourceStatus, adminauthorization.OperationRead))
 	protected.GET("/status", api.systemStatus, api.permission(adminauthorization.ResourceStatus, adminauthorization.OperationRead))
 	protected.GET("/principals", api.listPrincipals, api.permission(adminauthorization.ResourcePrincipal, adminauthorization.OperationList))
 	protected.GET("/sessions", api.listSessions)
@@ -318,27 +320,7 @@ func (api *readAPI) require(permission adminauthorization.Request) echo.Middlewa
 func (api *readAPI) capabilities(ctx *echo.Context) error {
 	writer, request := ctx.Response(), ctx.Request()
 	subject, _ := request.Context().Value(subjectContextKey).(adminauthorization.Subject)
-	capabilities := make([]string, 0, len(capabilityChecks))
-	for _, permission := range capabilityChecks {
-		if api.authorizer.Authorize(request.Context(), subject, permission).Allowed {
-			capabilities = append(capabilities, permission.Key())
-		}
-	}
-	sort.Strings(capabilities)
-	namespaceScopes := make([]map[string]any, 0)
-	for _, namespace := range api.authorizer.DelegatedNamespaces(subject) {
-		allowed := make([]string, 0, len(capabilityChecks))
-		for _, permission := range capabilityChecks {
-			permission.Namespace = namespace
-			if api.authorizer.Authorize(request.Context(), subject, permission).Allowed {
-				allowed = append(allowed, permission.Key())
-			}
-		}
-		sort.Strings(allowed)
-		if len(allowed) > 0 {
-			namespaceScopes = append(namespaceScopes, map[string]any{"namespace": namespace, "capabilities": allowed})
-		}
-	}
+	capabilities, namespaceScopes := api.authorizedCapabilities(request.Context(), subject)
 	api.audit(request, subject, "admin.capabilities/read", "success")
 	writeJSON(writer, http.StatusOK, map[string]any{
 		"authenticationType": subject.Authentication,
@@ -348,6 +330,34 @@ func (api *readAPI) capabilities(ctx *echo.Context) error {
 		"policyEtag":         api.authorizer.ETag(),
 	})
 	return nil
+}
+
+func (api *readAPI) authorizedCapabilities(
+	ctx context.Context,
+	subject adminauthorization.Subject,
+) ([]string, []map[string]any) {
+	capabilities := make([]string, 0, len(capabilityChecks))
+	for _, permission := range capabilityChecks {
+		if api.authorizer.Authorize(ctx, subject, permission).Allowed {
+			capabilities = append(capabilities, permission.Key())
+		}
+	}
+	sort.Strings(capabilities)
+	namespaceScopes := make([]map[string]any, 0)
+	for _, namespace := range api.authorizer.DelegatedNamespaces(subject) {
+		allowed := make([]string, 0, len(capabilityChecks))
+		for _, permission := range capabilityChecks {
+			permission.Namespace = namespace
+			if api.authorizer.Authorize(ctx, subject, permission).Allowed {
+				allowed = append(allowed, permission.Key())
+			}
+		}
+		sort.Strings(allowed)
+		if len(allowed) > 0 {
+			namespaceScopes = append(namespaceScopes, map[string]any{"namespace": namespace, "capabilities": allowed})
+		}
+	}
+	return capabilities, namespaceScopes
 }
 
 func (api *readAPI) systemStatus(ctx *echo.Context) error {

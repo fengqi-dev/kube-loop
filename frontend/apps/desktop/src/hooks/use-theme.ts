@@ -11,7 +11,7 @@ import {
 import {
   WindowSetDarkTheme,
   WindowSetLightTheme,
-} from "../../wailsjs/runtime/runtime";
+} from "../../../../wailsjs/runtime/runtime";
 
 export type ThemePreference = "light" | "dark" | "system";
 export type ResolvedTheme = "light" | "dark";

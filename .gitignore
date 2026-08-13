@@ -15,8 +15,10 @@ build/windows/icon.ico
 .gocache-e2e/
 .codegraph/
 dist/
+node_modules/
 frontend/dist/
-frontend/node_modules/
+frontend/apps/admin/dist/
+frontend/apps/desktop/dist/
 e2e/oidc/node_modules/
 *.log
 *.kubeconfig

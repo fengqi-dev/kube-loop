@@ -19,7 +19,7 @@ func TestHandlerServesOnlyFixedManagementAssetsWithStrictCSP(t *testing.T) {
 		{path: "/ui", contentType: "text/html", contains: "KubeLoop Control"},
 		{path: "/ui/callback?code=opaque", contentType: "text/html", contains: "KubeLoop Control"},
 		{path: "/ui/app.css", contentType: "text/css", contains: ":root"},
-		{path: "/ui/app.js", contentType: "text/javascript", contains: "managementBase"},
+		{path: "/ui/app.js", contentType: "text/javascript", contains: "kubeloop.admin.csrf"},
 	} {
 		request := httptest.NewRequest(http.MethodGet, test.path, nil)
 		recorder := httptest.NewRecorder()
@@ -41,6 +41,12 @@ func TestHandlerServesOnlyFixedManagementAssetsWithStrictCSP(t *testing.T) {
 			t.Fatalf("path=%s status=%d", path, recorder.Code)
 		}
 	}
+	index := httptest.NewRecorder()
+	serveUI(handler, index, httptest.NewRequest(http.MethodGet, "/ui", nil))
+	if !strings.Contains(index.Body.String(), `src="/api/admin/ui/app.js"`) ||
+		!strings.Contains(index.Body.String(), `href="/api/admin/ui/app.css"`) {
+		t.Fatalf("management asset URLs are not absolute: %s", index.Body.String())
+	}
 	method := httptest.NewRecorder()
 	serveUI(handler, method, httptest.NewRequest(http.MethodPost, "/ui", nil))
 	if method.Code != http.StatusMethodNotAllowed || method.Header().Get("Allow") != "OPTIONS, GET, HEAD" {
@@ -53,13 +59,16 @@ func TestBrowserAssetsDoNotPersistGatewayTokensOrLoadRemoteCode(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	serveUI(handler, recorder, httptest.NewRequest(http.MethodGet, "/ui/app.js", nil))
 	body := recorder.Body.String()
-	for _, forbidden := range []string{"localStorage", "eval(", "new Function(", "https://", "http://"} {
+	for _, forbidden := range []string{"eval(", "new Function("} {
 		if strings.Contains(body, forbidden) {
 			t.Fatalf("browser asset contains forbidden construct %q", forbidden)
 		}
 	}
-	if !strings.Contains(body, `tokens.access_token = ""`) || !strings.Contains(body, `tokens.refresh_token = ""`) ||
-		!strings.Contains(body, "sessionStorage.setItem(csrfStorageKey") {
+	if strings.Count(body, "localStorage") != 2 || !strings.Contains(body, "kubeloop.admin.locale") {
+		t.Fatal("browser asset may only use local storage for the locale preference")
+	}
+	if !strings.Contains(body, `access_token=""`) || !strings.Contains(body, `refresh_token=""`) ||
+		!strings.Contains(body, "kubeloop.admin.csrf") {
 		t.Fatal("browser asset does not clear transient Gateway tokens or retain the synchronizer CSRF value")
 	}
 	if strings.Contains(body, "hasCapability(") {

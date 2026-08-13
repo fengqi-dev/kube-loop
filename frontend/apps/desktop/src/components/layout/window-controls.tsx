@@ -1,7 +1,7 @@
 import { Minus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useI18n } from "@/i18n";
-import { WindowHide, WindowMinimise } from "../../../wailsjs/runtime/runtime";
+import { WindowHide, WindowMinimise } from "../../../../../wailsjs/runtime/runtime";
 
 export function WindowControls() {
   const { t } = useI18n();

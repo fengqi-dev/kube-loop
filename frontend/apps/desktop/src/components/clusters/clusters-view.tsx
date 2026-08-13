@@ -9,7 +9,7 @@ import {
   Wifi,
   WifiOff,
 } from "lucide-react";
-import { ClipboardGetText } from "../../../wailsjs/runtime/runtime";
+import { ClipboardGetText } from "../../../../../wailsjs/runtime/runtime";
 import { toast } from "sonner";
 import { EmptyState } from "@/components/shared/empty-state";
 import { PageShell } from "@/components/shared/page-shell";

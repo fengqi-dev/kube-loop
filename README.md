@@ -254,6 +254,11 @@ the trust boundaries and capability model.
 
 Requirements: Go 1.26+, Node.js 22+, and Wails 2.13.
 
+The web code is an npm workspaces monorepo under `frontend/`: the Wails
+desktop application lives in `frontend/apps/desktop`, while the embedded
+Control Plane admin console lives in `frontend/apps/admin`. Both applications
+share one `frontend/package-lock.json` and one dependency installation.
+
 ```bash
 git clone --recurse-submodules https://github.com/fengqi-dev/kube-loop.git
 cd kube-loop
@@ -271,6 +276,7 @@ cluster; and waits for all three workloads before starting the frontend watcher.
 
 ```bash
 npm run build --prefix frontend
+npm test --prefix frontend
 go test ./...
 ```
 

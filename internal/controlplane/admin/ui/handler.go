@@ -1,4 +1,4 @@
-// Package ui serves the dependency-free browser Management Plane shell.
+// Package ui serves the embedded browser Management Plane application.
 package ui
 
 import (
@@ -60,7 +60,10 @@ func (handler *Handler) serve(ctx *echo.Context) error {
 		return nil
 	}
 	if path == "/index.html" {
-		content = []byte(strings.ReplaceAll(string(content), "{{MANAGEMENT_PATH}}", handler.managementPath))
+		document := strings.ReplaceAll(string(content), "{{MANAGEMENT_PATH}}", handler.managementPath)
+		document = strings.ReplaceAll(document, `src="./app.js"`, `src="`+handler.managementPath+`/ui/app.js"`)
+		document = strings.ReplaceAll(document, `href="./app.css"`, `href="`+handler.managementPath+`/ui/app.css"`)
+		content = []byte(document)
 	}
 	writer.Header().Set("Cache-Control", "no-store")
 	writer.Header().Set("Content-Type", contentType)
