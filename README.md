@@ -5,123 +5,85 @@
 [![Latest release](https://img.shields.io/github/v/release/fengqi-dev/kube-loop)](https://github.com/fengqi-dev/kube-loop/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-[English](README.md) | [简体中文](README_zh-CN.md)
+[English](README.md) · [简体中文](README_zh-CN.md)
 
 **[Website](https://fengqi-dev.github.io/kube-loop/)** ·
 **[Download](https://github.com/fengqi-dev/kube-loop/releases/latest)** ·
-**[Documentation](#documentation)**
+**[Design](docs/design.md)**
 
-KubeLoop is a desktop network tool for Kubernetes development. It connects your
-workstation to a cluster like a focused VPN, so browsers, IDEs, CLIs, and SDKs
-can directly use Pod IPs, ClusterIP Services, and `*.cluster.local` names.
+KubeLoop is a desktop network tool for Kubernetes development. It connects a
+workstation to cluster networking like a focused VPN, so browsers, IDEs, CLIs,
+and SDKs can use Pod IPs, ClusterIP Services, and cluster DNS directly.
 
-![KubeLoop overview](site/assets/kubeloop-social-preview.png)
+## Why KubeLoop
 
-## Highlights
-
-- **Transparent access** — use cluster addresses from ordinary local applications.
-- **Split routing** — only Kubernetes traffic enters the tunnel.
-- **No public gateway** — traffic travels through Kubernetes API Server
-  port-forward; no NodePort, LoadBalancer, or Ingress is required.
-- **One desktop workflow** — connect, inspect, forward, exchange, mirror, preview,
-  transfer files, and diagnose from one UI.
+- **Transparent cluster access** — use real cluster addresses from ordinary local applications.
+- **Focused routing** — only discovered or configured Kubernetes routes enter the tunnel.
+- **No public gateway** — traffic reaches an unprivileged Gateway through Kubernetes API Server port-forward.
+- **Local iteration tools** — Port Forward, Exchange, Mirror, and Preview cover outbound and inbound traffic.
+- **Desktop workflow** — inspect workloads, use Pod SSH/SFTP, transfer files, and diagnose connections in one UI.
 - **Cross-platform** — macOS, Windows, and Linux on amd64 and arm64.
-- **No `kubectl` dependency** — KubeLoop talks to Kubernetes directly through
-  client-go and your kubeconfig.
+- **No `kubectl` runtime dependency** — the desktop app uses client-go and the selected kubeconfig directly.
 
-## Quick start
+## Install
 
-### 1. Install
-
-**macOS or Linux**
+### macOS and Linux
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/fengqi-dev/kube-loop/main/scripts/install.sh | bash
 ```
 
-The installer selects the latest release and the current CPU architecture.
-On macOS it downloads a DMG; on Linux it installs a deb/rpm when available or
-extracts a tarball.
-
-To choose a release or Linux package format:
+To select a version or Linux package format:
 
 ```bash
 VERSION=v1.5.0 PACKAGE=deb \
   bash -c "$(curl -fsSL https://raw.githubusercontent.com/fengqi-dev/kube-loop/main/scripts/install.sh)"
 ```
 
-Supported `PACKAGE` values are `deb`, `rpm`, and `tarball`.
+`PACKAGE` may be `deb`, `rpm`, or `tarball`.
 
-**Homebrew**
+Homebrew is also supported:
 
 ```bash
 brew tap kube-loop/kubeloop https://github.com/fengqi-dev/kube-loop
 brew install --cask kubeloop
 ```
 
-**Windows**
+### Windows
 
 ```powershell
 irm https://raw.githubusercontent.com/fengqi-dev/kube-loop/main/scripts/install.ps1 | iex
 ```
 
-DMG, NSIS installer, portable zip, deb, rpm, and tar.gz packages are also
-available from [GitHub Releases](https://github.com/fengqi-dev/kube-loop/releases/latest).
-Every release includes `SHA256SUMS`.
+DMG, NSIS, portable zip, deb, rpm, and tar.gz artifacts are available from
+[GitHub Releases](https://github.com/fengqi-dev/kube-loop/releases/latest).
+Each release includes `SHA256SUMS`.
 
-### 2. Connect
+## Connect
 
-1. Make sure your workstation can reach the Kubernetes API Server and has a
-   valid kubeconfig.
-2. Open KubeLoop and choose a kubeconfig Context and default Namespace.
+1. Ensure the workstation can reach the Kubernetes API Server and has a valid kubeconfig.
+2. Open KubeLoop and select a Context and default Namespace.
 3. Click **Connect**.
-4. Approve the local virtual-network Helper installation on first use.
-5. KubeLoop installs or upgrades its unprivileged Gateway in
-   `kubeloop-system` when your Kubernetes permissions allow it.
+4. Approve installation of the local network Helper on first use.
+5. When permitted, KubeLoop installs or upgrades its unprivileged Gateway in `kubeloop-system`.
 
-Once connected, open a ClusterIP, Pod IP, or cluster DNS name from any local
-application.
+Once connected, use a ClusterIP, Pod IP, or cluster DNS name from any local application.
 
-## What you can do
+## Development workflows
 
-| Goal | Workflow |
-| --- | --- |
-| Access an internal Service | Connect, then use its ClusterIP or DNS name |
-| Debug a Pod directly | Connect, then use its Pod IP |
-| SSH or SFTP to a Pod without `sshd` | Enable **SSH** for the Pod in **Workload** |
-| Expose a Pod or Service port locally | **Port Forward** |
-| Route an existing Service to a local app | **Exchange** |
-| Copy Service requests to a local observer | **Service Mirror** |
-| Expose a local app through a temporary ClusterIP | **Preview** |
-| Move files between the workstation and a Pod | **File Manager** |
-
-### Traffic workflows
-
-- **Exchange** preserves an existing Service's ClusterIP and DNS name while
-  replacing its backends with a local process.
-- **Service Mirror** keeps the original Pods on the primary path and sends a
-  copy of each request to a local shadow process. Shadow responses are discarded.
-- **Preview** creates a temporary ClusterIP Service backed by a local process.
+| Workflow | Traffic path | Use it to |
+| --- | --- | --- |
+| Transparent access | Local app → cluster | Open internal Services or debug Pod IPs directly |
+| Port Forward | Local port → Pod or Service | Expose one cluster port on `localhost` |
+| Exchange | Existing Service → local app | Replace Service backends while preserving ClusterIP and DNS |
+| Mirror | Existing Service → Pods + local shadow | Observe a copy without putting the local app on the primary path |
+| Preview | New temporary Service → local app | Make a local application reachable from the cluster |
+| Pod SSH/SFTP | Local SSH client → `pods/exec` | Use a shell or transfer files without running `sshd` in the container |
 
 KubeLoop restores or removes affected Services, Endpoints, and EndpointSlices
 when a workflow stops or the cluster connection closes.
 
-### Pod SSH
-
-Pod SSH works in TUN mode without installing or running `sshd` in the container.
-KubeLoop authenticates the local SSH client with the user's standard SSH identity
-and maps the SSH channel to Kubernetes `pods/exec`.
-
-- The SSH login name selects the Kubernetes container; it does not change the
-  process user inside the container.
-- Interactive shells and remote commands require `/bin/sh`.
-- `scp` and `sftp` use the built-in SFTP adapter. File transfer requires `tar`
-  in the container.
-- If no `id_ed25519`, `id_ecdsa`, or `id_rsa` identity exists, KubeLoop creates
-  `~/.ssh/id_ed25519` without overwriting an existing identity.
-- Disconnecting removes the runtime-only SSH endpoints without modifying Pods.
-
-## How it works
+## Architecture
 
 ```text
 Local applications
@@ -133,235 +95,81 @@ Local applications
   → Pods / Services / CoreDNS
 ```
 
-Only discovered or manually configured cluster routes enter the tunnel. The
-Gateway makes the final in-cluster connection and has no ServiceAccount token,
-`hostNetwork`, `privileged`, or `NET_ADMIN`.
+The Gateway makes the final in-cluster connection. It has no ServiceAccount
+token and does not use `hostNetwork`, `privileged`, or `NET_ADMIN`. The local
+Helper manages only KubeLoop's sing-box process, TUN interface, routes, split
+DNS, and recovery state.
 
-The local Helper is installed once and manages only KubeLoop's sing-box process,
-TUN interface, routes, split DNS, and recovery state. It can be inspected or
-removed from Settings.
+Read [System design](docs/design.md) and
+[Unified traffic data plane](docs/singbox-traffic-dataplane.md) for the full
+control-plane, data-plane, and recovery model.
 
-For the complete control plane, data plane, and recovery design, see
-[System design](docs/design.md) and
-[Unified traffic data plane](docs/singbox-traffic-dataplane.md).
+## Pod SSH
 
-## Kubernetes permissions
+Pod SSH works in TUN mode without installing `sshd` in a container. KubeLoop
+authenticates the local SSH client and maps the channel to Kubernetes `pods/exec`.
 
-KubeLoop uses the identity from the selected kubeconfig Context. The Gateway
-does not contain Kubernetes credentials or call the Kubernetes API.
-
-The desktop identity needs access to Pods and Services in each Namespace it
-will use, including `kubeloop-system`. Cluster-level reads are used only for
-automatic network discovery; when they are unavailable, you can enter the
-network values manually. Ask an administrator to precreate `kubeloop-system`
-if your identity cannot create Namespaces.
-
-<details>
-<summary>Example namespace Role</summary>
-
-```yaml
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: kubeloop
-  namespace: <namespace>
-rules:
-  - apiGroups: [""]
-    resources: ["pods"]
-    verbs: ["get", "list", "watch"]
-  - apiGroups: [""]
-    resources: ["pods/exec", "pods/portforward"]
-    verbs: ["create"]
-  - apiGroups: [""]
-    resources: ["services"]
-    verbs: ["get", "list", "watch", "create", "update", "delete"]
-  - apiGroups: [""]
-    resources: ["endpoints"]
-    verbs: ["get", "create", "update"]
-  - apiGroups: ["discovery.k8s.io"]
-    resources: ["endpointslices"]
-    verbs: ["get", "list", "create", "update", "delete"]
-  - apiGroups: ["apps"]
-    resources: ["deployments"]
-    verbs: ["get", "list", "watch", "create", "update"]
-```
-
-Bind this Role to the kubeconfig user in every Namespace KubeLoop may access.
-
-</details>
+- The SSH login name selects the container; it does not change the process user.
+- Interactive shells and remote commands require `/bin/sh`.
+- `scp` and `sftp` use the built-in SFTP adapter; transfers require `tar` in the container.
+- KubeLoop can create a missing `~/.ssh/id_ed25519` without overwriting an existing identity.
+- Disconnecting removes runtime-only SSH endpoints without modifying Pods.
 
 ## MCP for editors and agents
 
-KubeLoop can expose its backend as a local
+KubeLoop can expose a local
 [Model Context Protocol](https://modelcontextprotocol.io/) server over
-Streamable HTTP.
+Streamable HTTP for Codex, Claude Code, Cursor, and VS Code.
 
-1. Open the **MCP** page.
-2. Select Codex, Claude Code, Cursor, or VS Code.
-3. Click **Install MCP server**, or copy the generated configuration.
+MCP is disabled by default, listens only on `127.0.0.1`, and uses a generated
+Bearer token by default. Cluster operations use the active authenticated
+Gateway Session; MCP does not load a local kubeconfig or bypass Gateway policy
+and Kubernetes authorization.
 
-MCP is disabled by default, binds only to `127.0.0.1`, and enables a generated
-Bearer token by default. The token is stored in the operating-system credential
-vault; `mcp.json` contains only non-secret settings.
-
-Every cluster operation uses the typed Gateway SDK and the access token of
-the currently active Server Profile. MCP cannot select another saved Profile,
-cannot bypass Gateway policy or Kubernetes authorization, and does not load a
-local kubeconfig. Mutations require the exact `profileId`, `sessionId`, and
-`namespace` returned by the active Session. Local kubeconfig-driven cluster
-operations are not exposed.
-
-| Tool | Operations |
+| Tool | Scope |
 | --- | --- |
-| `manage_cluster` | Read Kubernetes version/capabilities; list Namespaces, Services, and Pods through Gateway |
-| `manage_connection` | Read, connect, or explicitly disconnect the active Gateway Session |
-| `manage_traffic` | Start, stop, and list Exchange, Mirror, Preview, and Port Forward Tasks |
+| `manage_cluster` | Read cluster capabilities; list Namespaces, Services, and Pods |
+| `manage_connection` | Read, connect, or explicitly disconnect the active Session |
+| `manage_traffic` | Start, stop, and list Port Forward, Exchange, Mirror, and Preview Tasks |
 | `exec_pod_command` | Execute an exact argv through the authenticated Gateway exec stream |
-| `manage_file_transfer` | Start, list, or explicitly cancel local ↔ Pod transfers |
+| `manage_file_transfer` | Start, list, or cancel local ↔ Pod transfers |
 
-See the [MCP guide](https://fengqi-dev.github.io/kube-loop/mcp.html) for setup
-and request examples.
+See the [website MCP guide](https://fengqi-dev.github.io/kube-loop/#/mcp) for setup.
 
-## Security
+## Build from source
 
-- kubeconfig credentials stay in the Go desktop process.
-- The Gateway is unprivileged, has no Kubernetes credentials, and has no public
-  network endpoint.
-- Every connection uses a random 256-bit Gateway capability.
-- The privileged Helper accepts authenticated, field-constrained IPC rather
-  than arbitrary commands or executable paths.
-- sing-box and feature inbounds listen locally and use per-session credentials.
-- Cluster routes are limited to validated Pod and Service destinations.
-- Resource mutations are transactional and recoverable.
-- Logs redact credentials, certificates, tokens, and kubeconfig content.
+Requirements:
 
-See [Security and permissions](docs/design.md#11-security-and-permissions) for
-the trust boundaries and capability model.
-
-## Platform support
-
-| Area | Support |
-| --- | --- |
-| Desktop | macOS, Windows, Linux |
-| CPU | amd64, arm64 |
-| UI | System-aware light/dark theme; English and 简体中文 |
-| Packages | DMG, NSIS, zip, deb, rpm, tar.gz, Homebrew Cask |
-| Application state | `~/.kubeloop` |
-| Network core | Pinned sing-box bundled with every release |
-| Updates | GitHub Release check from Settings |
-
-## Development
-
-Requirements: Go 1.26+, Node.js 22+, and Wails 2.13.
-
-The web code is an npm workspaces monorepo under `frontend/`: the Wails
-desktop application lives in `frontend/apps/desktop`, while the embedded
-Control Plane admin console lives in `frontend/apps/admin`. Both applications
-share one `frontend/package-lock.json` and one dependency installation.
+- Go version declared in [`go.mod`](go.mod)
+- Node.js 22+
+- Platform prerequisites for [Wails](https://wails.io/docs/gettingstarted/installation)
 
 ```bash
-git clone --recurse-submodules https://github.com/fengqi-dev/kube-loop.git
-cd kube-loop
-go install github.com/wailsapp/wails/v2/cmd/wails@v2.13.0
-npm ci --prefix frontend
-wails dev
+make build
 ```
 
-`wails dev` builds the frontend, platform Helper, and patched sing-box; builds
-and loads local Control Plane, Gateway, and Operator images for Docker Desktop
-Kubernetes, Minikube, kind, or k3d; deploys the Helm chart to the active local
-cluster; and waits for all three workloads before starting the frontend watcher.
-
-### Tests
+Useful frontend commands:
 
 ```bash
-npm run build --prefix frontend
-npm test --prefix frontend
-go test ./...
+cd frontend
+npm ci
+npm run dev          # desktop frontend
+npm run dev:admin    # admin console
+npm run dev:site     # public website
+npm run build:site   # writes the production site to ../site
 ```
 
-Run the Minikube end-to-end suite with:
-
-```bash
-./e2e/run.sh
-```
-
-Platform-local suites:
-
-```bash
-./e2e/scripts/run-local-macos.sh --timeout 25m
-./e2e/scripts/run-local-linux.sh --timeout 25m
-```
-
-```powershell
-.\e2e\scripts\run-local-windows.ps1 -Timeout 25m
-```
-
-<details>
-<summary>Debug the bundled sing-box source</summary>
-
-Initialize the submodule if the repository was cloned without it:
-
-```bash
-git submodule update --init --recursive
-```
-
-In VS Code, start `Wails: Debug KubeLoop`, connect to a cluster, then start
-`third_party: Debug Sing-box`. Delve attaches to the root-owned sing-box
-process. TCP and UDP SOCKS outbound breakpoints are in
-`third_party/sing-box/protocol/socks/outbound.go`.
-
-For command-line development:
-
-```bash
-KUBELOOP_SINGBOX_SOURCE=debug wails dev
-sudo "$(go env GOPATH)/bin/dlv" attach "$(pgrep -n -x sing-box)"
-```
-
-</details>
-
-<details>
-<summary>Build the release sing-box patch set</summary>
-
-Release builds do not maintain a sing-box fork. They export the exact pinned
-upstream revision, apply the repository patch set in an isolated source tree,
-and retain only the gVisor TUN stack and Clash API build features used by
-KubeLoop.
-
-```bash
-git submodule update --init --recursive
-make singbox-patch-check
-make singbox-package
-```
-
-The binary archive, reconstructable patch archive, and SHA-256 checksums are
-written to `dist/`. See
-[`third_party/patches/sing-box/README.md`](third_party/patches/sing-box/README.md)
-for the pinned source revision, retained features, measured size reduction, and
-update procedure.
-
-</details>
-
-### Build
-
-```bash
-VERSION=v2.0.0-beta.1
-VITE_APP_VERSION="$VERSION" wails build -ldflags "-X main.version=${VERSION}"
-```
-
-Pushing a `v*` tag triggers the release workflow for desktop packages, Gateway
-binaries and image, checksums, the Homebrew Cask, and the project website.
+The Admin Console and public website both use React, Vite, Tailwind CSS 4, and
+shadcn conventions. GitHub Pages rebuilds the website before deployment.
 
 ## Documentation
 
-- [Product guide](https://fengqi-dev.github.io/kube-loop/product.html)
-- [Workflows](https://fengqi-dev.github.io/kube-loop/workflows.html)
 - [System design](docs/design.md)
-- [Unified traffic data plane](docs/singbox-traffic-dataplane.md)
-- [Third-party notices](THIRD_PARTY_NOTICES.md)
+- [Operator guide](docs/operator.zh-CN.md)
+- [Traffic data plane](docs/singbox-traffic-dataplane.md)
+- [Security test matrix](docs/v2-security-test-matrix.zh-CN.md)
+- [Architecture decisions](docs/adr/)
 
 ## License
 
-KubeLoop is available under the [MIT License](LICENSE). Bundled third-party
-components retain their own licenses; see
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+[MIT](LICENSE)
