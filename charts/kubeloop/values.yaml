@@ -19,9 +19,6 @@ controlPlane:
   auth:
     # Public discovery is derived from configured Providers. Secrets are
     # mounted from existing Kubernetes Secrets and never written to ConfigMap.
-    # Required for anonymous Providers. Never enable this in production;
-    # anonymous mode grants every caller the configured identity.
-    developmentMode: false
     providers: []
     token:
       # Required when an authentication Provider is configured. The key is
@@ -50,12 +47,6 @@ controlPlane:
     #       # objects such as Keycloak's realm_access.roles.
     #       groups: groups
     #     httpTimeout: 10s
-    # - id: anonymous
-    #   type: anonymous
-    #   displayName: Anonymous (unsafe)
-    #   anonymous:
-    #     subject: anonymous
-    #     groups: [developers]
   relay:
     # Required. This Secret is mounted only into Control Plane and must contain
     # an Ed25519 PKCS#8 private key used to sign short-lived RelayTickets.
@@ -179,9 +170,8 @@ controlPlane:
     create: true
     name: ""
   storage:
-    # sqlite is the safe single-replica default. postgresql permits HA once
-    # the external DSN Secret is configured.
-    type: sqlite
+    # SQLite is used when datasource.existingSecret is empty. The Secret value
+    # must otherwise be a postgresql:// or mysql:// datasource URL.
     sqlite:
       path: /var/lib/kubeloop/kubeloop.db
       persistence:
@@ -191,16 +181,17 @@ controlPlane:
         accessModes:
           - ReadWriteOnce
         size: 1Gi
-    postgresql:
+    datasource:
       existingSecret: ""
-      dsnKey: dsn
-      connectTimeout: 10s
-      queryTimeout: 5s
-      maxOpenConnections: 20
-      maxIdleConnections: 5
-      connectionMaxLifetime: 30m
-      transactionMaxRetries: 3
-      transactionRetryBackoff: 25ms
+      urlKey: datasource-url
+      allowInsecure: false
+    connectTimeout: 10s
+    queryTimeout: 5s
+    maxOpenConnections: 20
+    maxIdleConnections: 5
+    connectionMaxLifetime: 30m
+    transactionMaxRetries: 3
+    transactionRetryBackoff: 25ms
   resources: {}
   topologySpreadConstraints: []
   nodeSelector: {}
@@ -345,7 +336,7 @@ monitoring:
     scrapeTimeout: 10s
 
 podDisruptionBudget:
-  # Rendered only for a multi-replica PostgreSQL Control Plane. SQLite never
+  # Rendered only for a multi-replica external-datasource Control Plane. SQLite never
   # receives a PDB that could prevent voluntary maintenance.
   controlPlane:
     enabled: true

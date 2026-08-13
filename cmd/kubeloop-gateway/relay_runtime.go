@@ -2,7 +2,6 @@ package main
 
 import (
 	"errors"
-	"os"
 	"strings"
 	"sync"
 
@@ -12,20 +11,22 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/protocol/relaycontrol"
 )
 
-func expandRelayEndpoint(template string) (string, error) {
+func expandRelayEndpoint(template string, environment gatewayEnvironment) (string, error) {
 	result := strings.TrimSpace(template)
-	for placeholder, environment := range map[string]string{
-		"{podName}": "KUBELOOP_POD_NAME",
-		"{podUID}":  "KUBELOOP_POD_UID",
+	for placeholder, metadata := range map[string]struct {
+		name  string
+		value string
+	}{
+		"{podName}": {name: "KUBELOOP_POD_NAME", value: environment.PodName},
+		"{podUID}":  {name: "KUBELOOP_POD_UID", value: environment.PodUID},
 	} {
 		if !strings.Contains(result, placeholder) {
 			continue
 		}
-		value := strings.TrimSpace(os.Getenv(environment))
-		if value == "" {
-			return "", errors.New(environment + " is required by the Relay endpoint template")
+		if metadata.value == "" {
+			return "", errors.New(metadata.name + " is required by the Relay endpoint template")
 		}
-		result = strings.ReplaceAll(result, placeholder, value)
+		result = strings.ReplaceAll(result, placeholder, metadata.value)
 	}
 	if strings.ContainsAny(result, "{}") {
 		return "", errors.New("Relay endpoint contains an unknown template placeholder")

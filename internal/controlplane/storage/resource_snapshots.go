@@ -28,6 +28,13 @@ func (repository *resourceSnapshotRepository) Put(ctx context.Context, snapshot 
 		ON CONFLICT(task_id, kind, namespace, name) DO UPDATE SET
 			schema_version=excluded.schema_version, data_json=excluded.data_json, created_at=excluded.created_at`
 	}
+	if repository.backend == BackendMySQL {
+		query = `INSERT INTO resource_snapshots(
+			id, schema_version, task_id, kind, namespace, name, data_json, created_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		ON DUPLICATE KEY UPDATE schema_version=VALUES(schema_version),
+			data_json=VALUES(data_json), created_at=VALUES(created_at)`
+	}
 	_, err := repository.executor.ExecContext(ctx, query,
 		snapshot.ID, snapshot.SchemaVersion, snapshot.TaskID, snapshot.Kind,
 		snapshot.Namespace, snapshot.Name, string(snapshot.Data), formatTime(snapshot.CreatedAt),

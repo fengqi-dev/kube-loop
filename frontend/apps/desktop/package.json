@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "dev:wails": "go run ../../../build/gateway-dev.go && vite",
+    "dev:wails": "npm --prefix ../.. run build:admin && go run ../../../build/gateway-dev.go && vite",
     "build": "tsc && vite build"
   },
   "dependencies": {

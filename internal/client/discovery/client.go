@@ -191,7 +191,6 @@ func (client *Client) validate(baseURL string, document Document) error {
 		switch {
 		case method.Type == "oidc" && method.Interaction == "browser":
 		case method.Type == "local" && method.Interaction == "browser":
-		case method.Type == "anonymous" && method.Interaction == "none":
 		default:
 			return fmt.Errorf("service discovery returned unsupported authentication method %q", method.ID)
 		}

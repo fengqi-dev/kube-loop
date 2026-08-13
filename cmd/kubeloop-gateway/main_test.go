@@ -45,14 +45,39 @@ func TestLoadGatewayConfigRejectsLegacyRelayFields(t *testing.T) {
 }
 
 func TestExpandRelayEndpointUsesDownwardAPIIdentity(t *testing.T) {
-	t.Setenv("KUBELOOP_POD_NAME", "gateway-7")
-	t.Setenv("KUBELOOP_POD_UID", "44444444-4444-4444-8444-444444444444")
-	endpoint, err := expandRelayEndpoint("wss://{podName}.relay.example/tunnel/{podUID}")
+	endpoint, err := expandRelayEndpoint(
+		"wss://{podName}.relay.example/tunnel/{podUID}",
+		gatewayEnvironment{PodName: "gateway-7", PodUID: "44444444-4444-4444-8444-444444444444"},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if endpoint != "wss://gateway-7.relay.example/tunnel/44444444-4444-4444-8444-444444444444" {
 		t.Fatalf("endpoint = %q", endpoint)
+	}
+}
+
+func TestLoadGatewayEnvironment(t *testing.T) {
+	t.Setenv("KUBELOOP_GATEWAY_CONFIG_FILE", " /etc/kubeloop/gateway.json ")
+	t.Setenv("KUBELOOP_POD_NAME", " gateway-7 ")
+	t.Setenv("KUBELOOP_POD_UID", " pod-uid ")
+	t.Setenv("KUBELOOP_POD_IP", " 10.0.0.7 ")
+
+	environment, err := loadGatewayEnvironment()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if environment.ConfigFile != "/etc/kubeloop/gateway.json" || environment.PodName != "gateway-7" ||
+		environment.PodUID != "pod-uid" || environment.PodIP != "10.0.0.7" {
+		t.Fatalf("Gateway environment = %#v", environment)
+	}
+}
+
+func TestLoadGatewayEnvironmentRequiresConfigFile(t *testing.T) {
+	t.Setenv("KUBELOOP_GATEWAY_CONFIG_FILE", "")
+
+	if _, err := loadGatewayEnvironment(); err == nil {
+		t.Fatal("missing Gateway configuration file was accepted")
 	}
 }
 

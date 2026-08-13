@@ -31,9 +31,17 @@ func TestPolicyAPICompletesDraftDryRunPublishAndRollback(t *testing.T) {
 	}
 
 	formalPrincipal := uuid.NewString()
-	firstSpec := policySpec{Version: adminauthorization.CurrentVersion, Assignments: []adminauthorization.Assignment{{
-		ID: uuid.NewString(), Role: adminauthorization.RolePlatformAdmin, Subjects: []string{formalPrincipal},
-	}}}
+	customPrincipal := uuid.NewString()
+	firstSpec := policySpec{
+		Version: adminauthorization.CurrentVersion,
+		Roles: []adminauthorization.RoleDefinition{{
+			ID: "session-reader", DisplayName: "Session reader", Permissions: []string{"admin.session/read"},
+		}},
+		Assignments: []adminauthorization.Assignment{
+			{ID: uuid.NewString(), Role: adminauthorization.RolePlatformAdmin, Subjects: []string{formalPrincipal}},
+			{ID: uuid.NewString(), Role: "session-reader", Subjects: []string{customPrincipal}},
+		},
+	}
 	firstKey := "policy-http-create-0001"
 	firstDraft := policyWrite(t, handler, cookie, csrf, "/policy/drafts", `"0"`, firstKey, map[string]any{
 		"spec": firstSpec, "reason": "establish formal administrators",
@@ -66,6 +74,11 @@ func TestPolicyAPICompletesDraftDryRunPublishAndRollback(t *testing.T) {
 		engine.Revision() != first.Revision || engine.ETag() != 1 {
 		t.Fatalf("first publish status=%d etag=%q engine=%d/%d body=%s",
 			published.Code, published.Header().Get("ETag"), engine.Revision(), engine.ETag(), published.Body.String())
+	}
+	if decision := engine.Authorize(context.Background(), adminauthorization.Subject{ID: customPrincipal}, adminauthorization.Request{
+		Resource: adminauthorization.ResourceSession, Operation: adminauthorization.OperationRead,
+	}); !decision.Allowed || decision.Role != "session-reader" {
+		t.Fatalf("custom role decision = %#v", decision)
 	}
 	publishReplay := policyWrite(t, handler, cookie, csrf, "/policy/changes/"+first.ChangeID+"/publish", `"0"`,
 		firstKey, map[string]any{"reason": "retry formal administrator publish"})
@@ -125,7 +138,10 @@ func TestPolicyAPICompletesDraftDryRunPublishAndRollback(t *testing.T) {
 
 	current = authenticatedGET(handler, cookie, "/policy")
 	if current.Code != http.StatusOK || current.Header().Get("ETag") != `"3"` ||
-		!strings.Contains(current.Body.String(), `"active":true`) {
+		!strings.Contains(current.Body.String(), `"active":true`) ||
+		!strings.Contains(current.Body.String(), `"id":"session-reader"`) ||
+		!strings.Contains(current.Body.String(), `"admin.session/read"`) ||
+		!strings.Contains(current.Body.String(), `"availablePermissions"`) {
 		t.Fatalf("active current policy status=%d headers=%v body=%s", current.Code, current.Header(), current.Body.String())
 	}
 	events, err := store.Audit().List(context.Background(), storage.AuditFilter{Limit: 100})

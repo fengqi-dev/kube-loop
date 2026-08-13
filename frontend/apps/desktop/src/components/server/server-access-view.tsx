@@ -32,8 +32,8 @@ import type {
   ServerProfile,
   ServerProfileState,
 } from "@/types";
-import { AlertTriangle, ArrowRightLeft, Boxes, Copy, Globe2, LogIn, LogOut, Network, RefreshCw, Server, ShieldCheck, SquareTerminal, Trash2, UserRound } from "lucide-react";
-import { lazy, Suspense, useEffect, useMemo, useState, type ReactNode } from "react";
+import { ArrowRightLeft, Boxes, Copy, Globe2, LogIn, LogOut, Network, RefreshCw, Server, ShieldCheck, SquareTerminal, Trash2, UserRound } from "lucide-react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 const ServerExecTerminal = lazy(() => import("@/components/server/server-exec-terminal").then((module) => ({
   default: module.ServerExecTerminal,
@@ -92,6 +92,9 @@ export function ServerAccessView({
 	const [forwardLocalPort, setForwardLocalPort] = useState("");
   const [providerId, setProviderId] = useState("");
   const [busy, setBusy] = useState<"discover" | "switch" | "login" | "refresh-login" | "logout" | "delete" | "inventory" | "tunnel" | "port-forward" | "exchange" | "mirror" | "preview" | "pod-ssh">();
+  const [loginCancelBusy, setLoginCancelBusy] = useState(false);
+  const loginInFlight = useRef(false);
+  const loginCancelled = useRef(false);
   const [error, setError] = useState("");
   const [dataPlaneError, setDataPlaneError] = useState("");
   const [dataPlaneReason, setDataPlaneReason] = useState<DataPlaneStatusEvent["reason"]>();
@@ -181,6 +184,13 @@ export function ServerAccessView({
     return () => unsubscribe?.();
   }, [profile]);
 
+  useEffect(() => () => {
+    if (loginInFlight.current) {
+      loginCancelled.current = true;
+      void backend.cancelServerLogin();
+    }
+  }, []);
+
   useEffect(() => {
     const unsubscribe = window.runtime?.EventsOn("server-inventory:snapshot", (value: unknown) => {
       const event = value as ServerInventoryEvent;
@@ -268,12 +278,12 @@ export function ServerAccessView({
     if (!profile || !selectedProvider || busy) return;
     setBusy("login");
     setError("");
+    loginInFlight.current = true;
+    loginCancelled.current = false;
     try {
       let session: AuthSession;
       if (selectedProvider.type === "oidc" || selectedProvider.type === "local") {
         session = await backend.loginServerOIDC(profile.id, selectedProvider.id);
-      } else if (selectedProvider.type === "anonymous") {
-        session = await backend.loginServerAnonymous(profile.id, selectedProvider.id);
       } else {
         throw new Error("This Gateway advertises an unsupported login method.");
       }
@@ -298,9 +308,26 @@ export function ServerAccessView({
 	  setSSHEndpoints(remoteSSH);
 	  onNavigate?.("overview");
     } catch (reason) {
-      setError(messageOf(reason));
+      if (!loginCancelled.current) setError(messageOf(reason));
     } finally {
+      loginInFlight.current = false;
+      loginCancelled.current = false;
+      setLoginCancelBusy(false);
       setBusy(undefined);
+    }
+  }
+
+  async function cancelLogin() {
+    if (busy !== "login" || loginCancelBusy) return;
+    loginCancelled.current = true;
+    setLoginCancelBusy(true);
+    setError("");
+    try {
+      await backend.cancelServerLogin();
+    } catch (reason) {
+      loginCancelled.current = false;
+      setLoginCancelBusy(false);
+      setError(messageOf(reason));
     }
   }
 
@@ -955,36 +982,37 @@ export function ServerAccessView({
                   </div>
                 ) : null}
 
-                {selectedProvider?.type === "anonymous" ? (
-                  <div className="flex gap-2 rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
-                    <AlertTriangle className="mt-0.5 shrink-0" size={16} />
-                    Anonymous development access is enabled. No identity credential will be requested.
-                  </div>
-                ) : null}
-
                 {authMethods.length === 0 ? (
                   <p className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
                     This Gateway has no login method configured.
                   </p>
                 ) : (
-                  <Button
-                    type="button"
-                    className="w-full"
-                    disabled={
-                      Boolean(busy) ||
-                      !selectedProvider
-                    }
-                    onClick={() => void login()}
-                  >
-                    {busy === "login" ? <Spinner data-icon="inline-start" /> : <LogIn size={15} />}
-					{selectedProvider?.type === "oidc"
-					  ? "Continue in browser"
-					  : selectedProvider?.type === "local"
-						? "Continue with local account"
-					  : selectedProvider?.type === "anonymous"
-                        ? "Continue anonymously"
-                        : "Sign in"}
-                  </Button>
+                  busy === "login" ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="w-full"
+                      disabled={loginCancelBusy}
+                      onClick={() => void cancelLogin()}
+                    >
+                      {loginCancelBusy ? <Spinner data-icon="inline-start" /> : null}
+                      {loginCancelBusy ? "Cancelling…" : "Cancel sign-in"}
+                    </Button>
+                  ) : (
+                    <Button
+                      type="button"
+                      className="w-full"
+                      disabled={Boolean(busy) || !selectedProvider}
+                      onClick={() => void login()}
+                    >
+                      <LogIn size={15} />
+					  {selectedProvider?.type === "oidc"
+					    ? "Continue in browser"
+					    : selectedProvider?.type === "local"
+						  ? "Continue with local account"
+						  : "Sign in"}
+                    </Button>
+                  )
                 )}
               </div>
             ) : null}

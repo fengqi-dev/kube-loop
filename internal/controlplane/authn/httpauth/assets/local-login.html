@@ -43,7 +43,7 @@
           <p>输入本地管理员凭据以继续访问管理后台。</p>
         </header>
 
-        <form method="post" action="/oauth2/login/local" class="form-stack">
+        <form method="post" action="{{.Action}}" class="form-stack">
           <input type="hidden" name="transaction" value="{{.Transaction}}">
 
           <div class="field">

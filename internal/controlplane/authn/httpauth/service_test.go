@@ -18,7 +18,6 @@ import (
 	"time"
 
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/authn"
-	"github.com/fengqi-dev/kube-loop/internal/controlplane/authn/development"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/authn/login"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/authn/token"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
@@ -142,11 +141,14 @@ func TestLocalAccountAuthorizationUsesSameOAuthCodeFlowAndMFA(t *testing.T) {
 		"provider": {"local"},
 	}
 	page := perform(t, handler, http.MethodGet, "/oauth2/authorize?"+query.Encode(), nil)
-	if page.Code != http.StatusOK || !strings.Contains(page.Body.String(), `action="/oauth2/login/local"`) {
+	if page.Code != http.StatusOK ||
+		!strings.Contains(page.Body.String(), `action="https://gateway.example.test/oauth2/login/local"`) {
 		t.Fatalf("local authorize status=%d body=%s", page.Code, page.Body.String())
 	}
 	if !strings.Contains(page.Body.String(), `href="/oauth2/assets/login.css"`) ||
-		!strings.Contains(page.Header().Get("Content-Security-Policy"), "style-src 'self'") {
+		!strings.Contains(page.Header().Get("Content-Security-Policy"), "style-src 'self'") ||
+		!strings.Contains(page.Header().Get("Content-Security-Policy"),
+			"form-action 'self' https://gateway.example.test http://127.0.0.1:49152") {
 		t.Fatalf("local login page does not load its same-origin shadcn styles")
 	}
 	styles := perform(t, handler, http.MethodGet, "/oauth2/assets/login.css", nil)
@@ -181,6 +183,58 @@ func TestLocalAccountAuthorizationUsesSameOAuthCodeFlowAndMFA(t *testing.T) {
 	}
 }
 
+func TestLocalAuthorizationReusesValidExistingBrowserSession(t *testing.T) {
+	handler, _ := newHandlerTestServer(t)
+	verifier := strings.Repeat("v", 43)
+	digest := sha256.Sum256([]byte(verifier))
+	callbackURI := "http://127.0.0.1:49152/callback"
+	query := url.Values{
+		"response_type": {"code"}, "client_id": {login.DefaultDesktopClientID}, "redirect_uri": {callbackURI},
+		"scope": {"openid kubeloop.api"}, "state": {strings.Repeat("s", 43)}, "nonce": {strings.Repeat("n", 43)},
+		"code_challenge": {base64.RawURLEncoding.EncodeToString(digest[:])}, "code_challenge_method": {"S256"},
+		"provider": {"local"},
+	}
+	request := httptest.NewRequest(http.MethodGet, "/oauth2/authorize?"+query.Encode(), nil)
+	request.AddCookie(&http.Cookie{Name: "__Host-kubeloop-admin", Value: "valid-admin-session"})
+	response := performRequest(handler, request)
+	if response.Code != http.StatusSeeOther {
+		t.Fatalf("existing-session authorize status=%d body=%s", response.Code, response.Body.String())
+	}
+	redirect, err := url.Parse(response.Header().Get("Location"))
+	if err != nil || redirect.Query().Get("code") == "" || redirect.Query().Get("state") != strings.Repeat("s", 43) {
+		t.Fatalf("existing-session redirect=%q error=%v", response.Header().Get("Location"), err)
+	}
+}
+
+func TestFormActionOriginAllowsOnlyExplicitHTTPOrigins(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		want  string
+	}{
+		{name: "desktop IPv4 loopback", value: "http://127.0.0.1:49152/callback", want: "http://127.0.0.1:49152"},
+		{name: "desktop IPv6 loopback", value: "http://[::1]:49152/callback", want: "http://[::1]:49152"},
+		{name: "configured HTTPS callback", value: "https://console.example.test/oauth/callback", want: "https://console.example.test"},
+		{name: "reject script scheme", value: "javascript:alert(1)"},
+		{name: "reject user info", value: "https://user@example.test/callback"},
+		{name: "reject missing host", value: "https:///callback"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := formActionOrigin(test.value)
+			if test.want == "" {
+				if err == nil {
+					t.Fatalf("formActionOrigin(%q) = %q, want error", test.value, got)
+				}
+				return
+			}
+			if err != nil || got != test.want {
+				t.Fatalf("formActionOrigin(%q) = %q, %v; want %q", test.value, got, err, test.want)
+			}
+		})
+	}
+}
+
 func newHandlerTestServer(t *testing.T) (*echo.Echo, *handlerOIDCProvider) {
 	t.Helper()
 	store, err := storage.Open(t.Context(), storage.Config{Backend: storage.BackendSQLite,
@@ -190,11 +244,7 @@ func newHandlerTestServer(t *testing.T) (*echo.Echo, *handlerOIDCProvider) {
 	}
 	t.Cleanup(func() { _ = store.Close() })
 	provider := &handlerOIDCProvider{}
-	anonymousProvider, err := development.NewAnonymous("guest", "Anonymous", development.IdentityConfig{Subject: "guest"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	registry, err := authn.NewRegistry(provider, anonymousProvider)
+	registry, err := authn.NewRegistry(provider)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -232,7 +282,14 @@ func newHandlerTestServer(t *testing.T) (*echo.Echo, *handlerOIDCProvider) {
 		t.Fatal(err)
 	}
 	router := echo.New()
-	NewRoutes(service).RegisterRoutes(router.Group(""))
+	NewRoutes(service, WithExistingSession("__Host-kubeloop-admin", func(
+		_ context.Context, sessionToken string,
+	) (storage.Principal, error) {
+		if sessionToken != "valid-admin-session" {
+			return storage.Principal{}, errors.New("invalid session")
+		}
+		return localPrincipal, nil
+	})).RegisterRoutes(router.Group(""))
 	return router, provider
 }
 

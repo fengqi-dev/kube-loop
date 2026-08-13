@@ -7,7 +7,6 @@ import (
 	"errors"
 	"log/slog"
 	"net/url"
-	"strconv"
 	"strings"
 	"time"
 
@@ -155,16 +154,4 @@ func registryAllowedHosts(configured, publicURL string) ([]string, error) {
 		return nil, errors.New("public URL is required to derive the Relay endpoint host")
 	}
 	return []string{parsed.Hostname()}, nil
-}
-
-func uint64EnvOrDefault(name string, fallback uint64) (uint64, error) {
-	value := strings.TrimSpace(envOrDefault(name, ""))
-	if value == "" {
-		return fallback, nil
-	}
-	parsed, err := strconv.ParseUint(value, 10, 64)
-	if err != nil || parsed == 0 {
-		return 0, errors.New(name + " must be a positive integer")
-	}
-	return parsed, nil
 }

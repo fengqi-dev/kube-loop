@@ -125,6 +125,11 @@ func (repository *adminSessionRepository) DeleteExpired(ctx context.Context, bef
 			ORDER BY absolute_expires_at LIMIT $4
 		)`
 	}
+	if repository.backend == BackendMySQL {
+		query = `DELETE FROM admin_sessions
+			WHERE idle_expires_at < ? OR absolute_expires_at < ? OR (revoked_at IS NOT NULL AND revoked_at < ?)
+			ORDER BY absolute_expires_at LIMIT ?`
+	}
 	result, err := repository.executor.ExecContext(ctx, query, formatTime(before), formatTime(before), formatTime(before), limit)
 	if err != nil {
 		return 0, databaseError("delete expired management sessions", err)

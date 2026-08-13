@@ -86,7 +86,7 @@ func (loader *PolicyLoader) Load(ctx context.Context) error {
 	if err != nil {
 		return loader.fail(fmt.Errorf("%w: read policy assignments", ErrPolicyUnavailable))
 	}
-	stored, err := assignmentSnapshot(assignments, revision.Revision)
+	stored, err := assignmentSnapshot(assignments, revision.Revision, snapshot.Roles)
 	if err != nil || !equalAssignments(snapshot.Assignments, stored.Assignments) {
 		return loader.fail(fmt.Errorf("%w: revision and assignment records disagree", ErrPolicyUnavailable))
 	}
@@ -132,8 +132,9 @@ func decodePolicySpec(spec json.RawMessage, revision uint64) (adminauthorization
 	decoder := json.NewDecoder(bytes.NewReader(spec))
 	decoder.DisallowUnknownFields()
 	var value struct {
-		Version     int                             `json:"version"`
-		Assignments []adminauthorization.Assignment `json:"assignments"`
+		Version     int                                 `json:"version"`
+		Roles       []adminauthorization.RoleDefinition `json:"roles,omitempty"`
+		Assignments []adminauthorization.Assignment     `json:"assignments"`
 	}
 	if err := decoder.Decode(&value); err != nil {
 		return adminauthorization.Snapshot{}, fmt.Errorf("%w: decode policy revision", ErrPolicyUnavailable)
@@ -141,16 +142,17 @@ func decodePolicySpec(spec json.RawMessage, revision uint64) (adminauthorization
 	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		return adminauthorization.Snapshot{}, fmt.Errorf("%w: policy revision has trailing content", ErrPolicyUnavailable)
 	}
-	snapshot := adminauthorization.Snapshot{Version: value.Version, Revision: revision, Assignments: value.Assignments}
+	snapshot := adminauthorization.Snapshot{Version: value.Version, Revision: revision, Roles: value.Roles, Assignments: value.Assignments}
 	if _, err := adminauthorization.New(snapshot); err != nil {
 		return adminauthorization.Snapshot{}, fmt.Errorf("%w: validate policy revision", ErrPolicyUnavailable)
 	}
 	return snapshot, nil
 }
 
-func assignmentSnapshot(rows []storage.AdminAssignment, revision uint64) (adminauthorization.Snapshot, error) {
+func assignmentSnapshot(rows []storage.AdminAssignment, revision uint64, roles []adminauthorization.RoleDefinition) (adminauthorization.Snapshot, error) {
 	result := adminauthorization.Snapshot{
 		Version: adminauthorization.CurrentVersion, Revision: revision,
+		Roles:       append([]adminauthorization.RoleDefinition(nil), roles...),
 		Assignments: make([]adminauthorization.Assignment, 0, len(rows)),
 	}
 	for _, row := range rows {

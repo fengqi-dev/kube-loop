@@ -10,6 +10,10 @@ export function CancelServerFileTransfer(arg1, arg2) {
   return window['go']['app']['App']['CancelServerFileTransfer'](arg1, arg2);
 }
 
+export function CancelServerLogin() {
+  return window['go']['app']['App']['CancelServerLogin']();
+}
+
 export function CheckForUpdates() {
   return window['go']['app']['App']['CheckForUpdates']();
 }
@@ -104,10 +108,6 @@ export function ListServerPreviews(arg1) {
 
 export function LoadServerInventory(arg1, arg2) {
   return window['go']['app']['App']['LoadServerInventory'](arg1, arg2);
-}
-
-export function LoginServerAnonymous(arg1, arg2) {
-  return window['go']['app']['App']['LoginServerAnonymous'](arg1, arg2);
 }
 
 export function LoginServerOIDC(arg1, arg2) {

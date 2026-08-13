@@ -1,10 +1,12 @@
 package app
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -22,6 +24,12 @@ type AuthSession struct {
 }
 
 func (a *App) LoginServerOIDC(profileID, providerID string) (AuthSession, error) {
+	loginContext, finishLogin, err := a.beginServerLogin()
+	if err != nil {
+		return AuthSession{}, err
+	}
+	defer finishLogin()
+
 	serverProfile, method, err := a.authenticationTarget(profileID, providerID, "oidc", "local")
 	if err != nil {
 		return AuthSession{}, err
@@ -33,30 +41,42 @@ func (a *App) LoginServerOIDC(profileID, providerID string) (AuthSession, error)
 	if err != nil {
 		return AuthSession{}, err
 	}
-	credential, err := a.auth.LoginOIDC(a.context(), serverProfile.BaseURL, providerID, deviceID)
+	credential, err := a.auth.LoginOIDC(loginContext, serverProfile.BaseURL, providerID, deviceID)
 	if err != nil {
 		return AuthSession{}, err
 	}
 	return a.persistCredential(serverProfile, credential)
 }
 
-func (a *App) LoginServerAnonymous(profileID, providerID string) (AuthSession, error) {
-	serverProfile, method, err := a.authenticationTarget(profileID, providerID, "anonymous")
-	if err != nil {
-		return AuthSession{}, err
+// CancelServerLogin stops the active browser-based login, if any. It is
+// intentionally idempotent so UI cleanup can call it safely while unmounting.
+func (a *App) CancelServerLogin() {
+	a.serverLoginMu.Lock()
+	attempt := a.serverLogin
+	a.serverLogin = nil
+	a.serverLoginMu.Unlock()
+	if attempt != nil {
+		attempt.cancel()
 	}
-	if method.Interaction != "none" {
-		return AuthSession{}, errors.New("selected provider does not support anonymous login")
+}
+
+func (a *App) beginServerLogin() (context.Context, func(), error) {
+	a.serverLoginMu.Lock()
+	defer a.serverLoginMu.Unlock()
+	if a.serverLogin != nil {
+		return nil, nil, errors.New("a browser login is already in progress")
 	}
-	deviceID, err := a.deviceID(serverProfile.ID)
-	if err != nil {
-		return AuthSession{}, err
-	}
-	credential, err := a.auth.LoginAnonymous(a.context(), serverProfile.BaseURL, providerID, deviceID)
-	if err != nil {
-		return AuthSession{}, err
-	}
-	return a.persistCredential(serverProfile, credential)
+	loginContext, cancel := context.WithCancel(a.context())
+	attempt := &serverLoginAttempt{cancel: cancel}
+	a.serverLogin = attempt
+	return loginContext, func() {
+		a.serverLoginMu.Lock()
+		if a.serverLogin == attempt {
+			a.serverLogin = nil
+		}
+		a.serverLoginMu.Unlock()
+		cancel()
+	}, nil
 }
 
 func (a *App) ServerAuthStatus(profileID string) (AuthSession, error) {
@@ -159,10 +179,8 @@ func (a *App) authenticationTarget(profileID, providerID string, providerTypes .
 	}
 	for _, method := range document.AuthMethods {
 		if method.ID == providerID {
-			for _, providerType := range providerTypes {
-				if method.Type == providerType {
-					return serverProfile, method, nil
-				}
+			if slices.Contains(providerTypes, method.Type) {
+				return serverProfile, method, nil
 			}
 		}
 	}
@@ -240,7 +258,7 @@ func tokenUserName(token string) string {
 	if json.Unmarshal(payload, &claims) != nil {
 		return ""
 	}
-	for _, value := range []string{claims.PreferredUserName, claims.UserName, claims.Name, claims.Email, claims.Subject} {
+	for _, value := range []string{claims.Name, claims.PreferredUserName, claims.UserName, claims.Email, claims.Subject} {
 		if value = strings.TrimSpace(value); value != "" {
 			return value
 		}

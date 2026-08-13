@@ -123,7 +123,7 @@ func TestDiscoveryReadsDynamicAuthenticationMethods(t *testing.T) {
 	if got := read().AuthMethods; len(got) != 1 || got[0].ID != "first" {
 		t.Fatalf("first discovery methods=%#v", got)
 	}
-	methods = []AuthMethod{{ID: "second", Type: "anonymous", Interaction: "none"}}
+	methods = []AuthMethod{{ID: "second", Type: "oidc", Interaction: "browser"}}
 	if got := read().AuthMethods; len(got) != 1 || got[0].ID != "second" {
 		t.Fatalf("updated discovery methods=%#v", got)
 	}
@@ -289,7 +289,7 @@ func TestConfigValidation(t *testing.T) {
 		{PublicURL: "https://gateway.example.test/team"},
 		{PublicURL: "https://gateway.example.test", ServiceID: "bad service"},
 		{PublicURL: "https://gateway.example.test", AuthMethods: []AuthMethod{{ID: "password", Type: "password"}}},
-		{PublicURL: "https://gateway.example.test", AuthMethods: []AuthMethod{{ID: "duplicate", Type: "oidc"}, {ID: "duplicate", Type: "anonymous"}}},
+		{PublicURL: "https://gateway.example.test", AuthMethods: []AuthMethod{{ID: "duplicate", Type: "oidc"}, {ID: "duplicate", Type: "oidc"}}},
 		{PublicURL: "https://gateway.example.test", AuthMethods: []AuthMethod{{ID: "company", Type: "oidc", Interaction: "password"}}},
 		{PublicURL: "https://gateway.example.test", AuthMethods: []AuthMethod{{ID: "local", Type: "local", Interaction: "none"}}},
 	}

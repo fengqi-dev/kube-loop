@@ -50,26 +50,6 @@ func New(loginService *login.Service, tokenService *token.Service, options ...Op
 	return service, nil
 }
 
-func (service *Service) Anonymous(ctx context.Context, providerID, remoteAddress, deviceID string) (token.Pair, error) {
-	if !service.logins.allow(providerID, "anonymous", remoteAddress) {
-		return token.Pair{}, ErrRateLimited
-	}
-	result, err := service.login.AuthenticateAnonymous(ctx, providerID)
-	if err != nil {
-		return token.Pair{}, ErrInvalidCredentials
-	}
-	service.logins.success(providerID, "anonymous")
-	return service.issue(ctx, result, deviceID)
-}
-
-func (service *Service) issue(ctx context.Context, result login.ExchangeResult, deviceID string) (token.Pair, error) {
-	pair, err := service.tokens.Issue(ctx, result.Principal, deviceID)
-	if err != nil {
-		return token.Pair{}, ErrTokenUnavailable
-	}
-	return pair, nil
-}
-
 func (service *Service) Start(ctx context.Context, request StartRequest) (login.BeginResult, error) {
 	result, err := service.login.Begin(ctx, login.BeginRequest{
 		ProviderID: request.ProviderID, ClientID: request.ClientID, ClientCallback: request.ClientCallback,
@@ -115,6 +95,22 @@ func (service *Service) CompleteLocal(
 		return "", ErrInvalidLoginRequest
 	}
 	service.logins.success("local", "password")
+	return result.RedirectURL, nil
+}
+
+// CompleteLocalPrincipal completes a local authorization transaction for a
+// Principal whose existing browser session has already been authenticated by
+// the caller. CompleteLocal still validates that the transaction and stored
+// Principal belong to the local provider.
+func (service *Service) CompleteLocalPrincipal(
+	ctx context.Context,
+	transaction string,
+	principal storage.Principal,
+) (string, error) {
+	result, err := service.login.CompleteLocal(ctx, transaction, principal.ID)
+	if err != nil {
+		return "", ErrInvalidLoginRequest
+	}
 	return result.RedirectURL, nil
 }
 

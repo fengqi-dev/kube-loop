@@ -63,10 +63,6 @@ func validateDescriptor(descriptor Descriptor) error {
 		if descriptor.Interaction != InteractionBrowser {
 			return errors.New("OIDC provider requires browser interaction")
 		}
-	case ProviderAnonymous:
-		if descriptor.Interaction != InteractionNone {
-			return errors.New("anonymous provider requires none interaction")
-		}
 	default:
 		return fmt.Errorf("unsupported provider type %q", descriptor.Type)
 	}

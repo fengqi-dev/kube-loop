@@ -30,10 +30,17 @@ func testManagementRevisionRepositories(t *testing.T, store *Store) {
 		if createErr != nil {
 			return createErr
 		}
-		return repositories.AdminAssignments().Create(ctx, AdminAssignment{
+		if createErr := repositories.AdminAssignments().Create(ctx, AdminAssignment{
 			ID: uuid.NewString(), PolicyRevision: firstPolicy.Revision, Role: "platform-admin",
 			Subjects: json.RawMessage(`["` + creator.ID + `"]`), Groups: json.RawMessage(`[]`),
 			Namespaces: json.RawMessage(`[]`), CreatedAt: now,
+		}); createErr != nil {
+			return createErr
+		}
+		return repositories.AdminAssignments().Create(ctx, AdminAssignment{
+			ID: uuid.NewString(), PolicyRevision: firstPolicy.Revision, Role: "session-reader",
+			Subjects: json.RawMessage(`[]`), Groups: json.RawMessage(`["support"]`),
+			Namespaces: json.RawMessage(`["team-a"]`), CreatedAt: now,
 		})
 	})
 	if err != nil {
@@ -47,7 +54,8 @@ func testManagementRevisionRepositories(t *testing.T, store *Store) {
 		t.Fatalf("stored policy = %#v, %v", storedPolicy, err)
 	}
 	assignments, err := store.AdminAssignments().ListByPolicyRevision(ctx, firstPolicy.Revision)
-	if err != nil || len(assignments) != 1 || !bytes.Contains(assignments[0].Subjects, []byte(creator.ID)) {
+	if err != nil || len(assignments) != 2 ||
+		(!bytes.Contains(assignments[0].Subjects, []byte(creator.ID)) && !bytes.Contains(assignments[1].Subjects, []byte(creator.ID))) {
 		t.Fatalf("assignments = %#v, %v", assignments, err)
 	}
 

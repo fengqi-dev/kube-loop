@@ -98,6 +98,7 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 
 {{- define "kubeloop.validateExternalAccess" -}}
 {{- $publicURL := trimSuffix "/" (trim .Values.publicURL) -}}
+{{- $managementPublicURL := trimSuffix "/" (trim .Values.controlPlane.management.publicURL) -}}
 {{- if not (regexMatch `^(https://[^/?#]+|http://(localhost|127\.0\.0\.1|\[::1\])(:[0-9]+)?)$` $publicURL) -}}
 {{- fail "publicURL must be one HTTPS origin without a path, query or fragment (HTTP is allowed only for loopback development)" -}}
 {{- end -}}
@@ -105,6 +106,9 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- fail "ingress.enabled and gatewayAPI.enabled are mutually exclusive" -}}
 {{- end -}}
 {{- if .Values.ingress.enabled -}}
+{{- if ne $managementPublicURL $publicURL -}}
+{{- fail "controlPlane.management.publicURL must equal publicURL when ingress is enabled" -}}
+{{- end -}}
 {{- $host := required "ingress.host is required when ingress.enabled=true" .Values.ingress.host -}}
 {{- if ne $publicURL (printf "https://%s" $host) -}}
 {{- fail "publicURL must exactly equal https://<ingress.host> when ingress is enabled" -}}
@@ -114,6 +118,9 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 {{- end -}}
 {{- if .Values.gatewayAPI.enabled -}}
+{{- if ne $managementPublicURL $publicURL -}}
+{{- fail "controlPlane.management.publicURL must equal publicURL when Gateway API is enabled" -}}
+{{- end -}}
 {{- $host := required "gatewayAPI.host is required when gatewayAPI.enabled=true" .Values.gatewayAPI.host -}}
 {{- if ne $publicURL (printf "https://%s" $host) -}}
 {{- fail "publicURL must exactly equal https://<gatewayAPI.host> when Gateway API is enabled" -}}
@@ -130,10 +137,6 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- fail "gatewayAPI.timeouts.tunnel must be 0s so the Gateway does not terminate long-lived WebSocket sessions" -}}
 {{- end -}}
 {{- end -}}
-{{- end -}}
-
-{{- define "kubeloop.controlPlaneAuthConfigName" -}}
-{{- printf "%s-auth-config" (include "kubeloop.controlPlaneName" .) | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
 {{- define "kubeloop.initialAdminSecretName" -}}

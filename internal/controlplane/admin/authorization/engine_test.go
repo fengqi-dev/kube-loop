@@ -93,6 +93,60 @@ func TestFiveBuiltInRolesEnforceExplicitPermissionMatrix(t *testing.T) {
 	}
 }
 
+func TestCustomRoleEnforcesPermissionsAndNamespaceDelegation(t *testing.T) {
+	engine, err := New(Snapshot{
+		Version:  CurrentVersion,
+		Revision: 1,
+		Roles: []RoleDefinition{{
+			ID: "support-reader", DisplayName: "Support reader",
+			Permissions: []string{"admin.session/read", "admin.task/list"},
+		}},
+		Assignments: []Assignment{{
+			ID: "support-team", Role: "support-reader", Groups: []string{"support"}, Namespaces: []string{"team-a"},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	subject := Subject{ID: testPrincipalID, Groups: []string{"support"}, Authentication: AuthenticationNormal}
+	allowed := engine.Authorize(context.Background(), subject, Request{
+		Resource: ResourceSession, Operation: OperationRead, Namespace: "team-a",
+	})
+	if !allowed.Allowed || allowed.Role != "support-reader" || allowed.Scope != "team-a" {
+		t.Fatalf("custom role decision = %#v", allowed)
+	}
+	for _, request := range []Request{
+		{Resource: ResourceSession, Operation: OperationRead, Namespace: "team-b"},
+		{Resource: ResourceSession, Operation: OperationStop, Namespace: "team-a"},
+	} {
+		if decision := engine.Authorize(context.Background(), subject, request); decision.Allowed {
+			t.Fatalf("custom role allowed %#v with %#v", request, decision)
+		}
+	}
+	delegated := engine.DelegatedNamespaces(subject)
+	if len(delegated) != 1 || delegated[0] != "team-a" {
+		t.Fatalf("delegated namespaces = %#v", delegated)
+	}
+}
+
+func TestCustomRoleValidationRejectsReservedAndUnknownPermissions(t *testing.T) {
+	tests := []struct {
+		name string
+		role RoleDefinition
+	}{
+		{name: "reserved ID", role: RoleDefinition{ID: RoleAuditor, DisplayName: "Replacement", Permissions: []string{"admin.audit/read"}}},
+		{name: "unknown permission", role: RoleDefinition{ID: "custom-auditor", DisplayName: "Custom auditor", Permissions: []string{"admin.audit/destroy"}}},
+		{name: "duplicate permission", role: RoleDefinition{ID: "custom-auditor", DisplayName: "Custom auditor", Permissions: []string{"admin.audit/read", "admin.audit/read"}}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := New(Snapshot{Version: CurrentVersion, Revision: 1, Roles: []RoleDefinition{test.role}}); err == nil {
+				t.Fatal("invalid custom role was accepted")
+			}
+		})
+	}
+}
+
 func TestNamespaceAdminCannotCrossScopeOrUseClusterOperations(t *testing.T) {
 	engine, err := New(Snapshot{Version: CurrentVersion, Revision: 7, Assignments: []Assignment{{
 		ID: "team-a-admin", Role: RoleNamespaceAdmin, Groups: []string{"team-a"}, Namespaces: []string{"team-a"},

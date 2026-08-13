@@ -98,7 +98,7 @@ func (config BreakGlassConfig) ParsedSourceCIDRs() []netip.Prefix {
 func Load(path string) (File, error) {
 	path = strings.TrimSpace(path)
 	if path == "" {
-		return normalize(File{})
+		return Normalize(File{})
 	}
 	file, err := os.Open(path)
 	if err != nil {
@@ -121,10 +121,11 @@ func Load(path string) (File, error) {
 	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		return File{}, errors.New("management configuration must contain one JSON document")
 	}
-	return normalize(config)
+	return Normalize(config)
 }
 
-func normalize(config File) (File, error) {
+// Normalize validates and applies defaults to deployment-owned management settings.
+func Normalize(config File) (File, error) {
 	if config.Bootstrap.Subjects == nil {
 		config.Bootstrap.Subjects = []string{}
 	}

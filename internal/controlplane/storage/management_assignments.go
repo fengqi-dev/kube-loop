@@ -4,8 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"regexp"
 	"strings"
 )
+
+var managementRolePattern = regexp.MustCompile(`^[a-z][a-z0-9-]{2,63}$`)
 
 type adminAssignmentRepository struct{ repositoryBase }
 
@@ -59,9 +62,7 @@ func normalizeAdminAssignment(assignment *AdminAssignment) error {
 		return errors.New("management assignment identity is invalid")
 	}
 	assignment.Role = strings.TrimSpace(assignment.Role)
-	switch assignment.Role {
-	case "platform-admin", "security-admin", "operator", "auditor", "namespace-admin":
-	default:
+	if !managementRolePattern.MatchString(assignment.Role) {
 		return errors.New("management assignment role is invalid")
 	}
 	var err error
@@ -82,7 +83,7 @@ func normalizeAdminAssignment(assignment *AdminAssignment) error {
 	if assignment.Role == "namespace-admin" && len(namespaces) == 0 {
 		return errors.New("namespace-admin assignment requires namespace scope")
 	}
-	if assignment.Role != "namespace-admin" && len(namespaces) != 0 {
+	if assignment.Role != "namespace-admin" && isBuiltInManagementRole(assignment.Role) && len(namespaces) != 0 {
 		return errors.New("only namespace-admin assignments may contain namespace scope")
 	}
 	assignment.Namespaces = namespacesJSON
@@ -94,6 +95,15 @@ func normalizeAdminAssignment(assignment *AdminAssignment) error {
 	}
 	assignment.CreatedAt = assignment.CreatedAt.UTC()
 	return nil
+}
+
+func isBuiltInManagementRole(role string) bool {
+	switch role {
+	case "platform-admin", "security-admin", "operator", "auditor", "namespace-admin":
+		return true
+	default:
+		return false
+	}
 }
 
 func scanAdminAssignment(row rowScanner) (AdminAssignment, error) {

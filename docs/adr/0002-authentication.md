@@ -8,7 +8,7 @@
 
 V2 桌面客户端只配置 KubeLoop 服务地址。OIDC issuer、OAuth client 和 claim/group mapping 都属于 Gateway 管理配置，不能下发为客户端配置或由客户端请求动态覆盖。
 
-桌面应用是无法可靠保守静态 secret 的 native app，因此企业认证统一使用浏览器 OIDC；本地开发仅允许显式启用 anonymous。后续 Token、授权、Session 和审计使用同一种标准化身份。
+桌面应用是无法可靠保守静态 secret 的 native app，因此企业认证统一使用浏览器 OIDC；自托管与开发环境使用 Control Plane 管理的本地账户。后续 Token、授权、Session 和审计使用同一种标准化身份。
 
 ## 决策
 
@@ -39,15 +39,13 @@ Keycloak、Dex、Microsoft Entra ID 和其他标准 Provider 统一使用 Author
 
 OIDC 身份主键为规范化 `issuer + subject`。必须严格校验 issuer、签名、audience、时间、nonce 和所允许的算法；不得以 email、preferred_username 或 display name 作为稳定主键。启动 readiness 前验证 discovery metadata、JWKS 可达性、authorization/token endpoint 使用 HTTPS，以及 Provider 支持所需能力。管理员配置是 issuer 的唯一来源。
 
-### 3. 开发认证必须显式解锁
+### 3. 本地账户
 
-`anonymous` 只能在认证配置明确设置 `developmentMode: true` 后构造，Helm 默认值为 `false`，不能通过缺省空 Provider 意外进入匿名状态。Control Plane 每次启动都必须输出包含 `SECURITY WARNING` 和 `production_safe=false` 的高可见度警告。
-
-Anonymous 只替换最初的身份验证步骤：discovery 公开 `anonymous/none`，成功后仍创建稳定 Principal 并签发标准 Access/Refresh Token Family。后续 Gateway Policy、审计、Cluster Session、RelayTicket 和 WSS 不允许绕过统一认证与授权边界。Anonymous 也通过一次显式登录获取可撤销的 Gateway Token，而不是让 API 中间件无条件放行。
+Control Plane 提供本地用户名、密码与可选 TOTP 登录。本地账户由 Management Plane 创建和禁用，密码只保存强哈希，认证成功后走与 OIDC 相同的 Authorization Code、PKCE、Gateway Token 和 Session 流程。浏览器已有有效的 Management Session 时可直接完成授权回调。
 
 ### 4. Gateway Token 边界
 
-OIDC 或 anonymous 认证完成后均签发相同格式的短期 Access Token 和可轮换 Refresh Token Family。Refresh Token 只以单向哈希形式持久化；复用已轮换 Token 会撤销整个 Family。桌面端通过操作系统安全存储保存 Refresh Token，普通配置文件只保存服务地址和非敏感 UI 状态。
+OIDC 或本地账户认证完成后均签发相同格式的短期 Access Token 和可轮换 Refresh Token Family。Refresh Token 只以单向哈希形式持久化；复用已轮换 Token 会撤销整个 Family。桌面端通过操作系统安全存储保存 Refresh Token，普通配置文件只保存服务地址和非敏感 UI 状态。
 
 退出登录、管理员撤销或检测复用时，Control Plane 撤销 Token Family，并关闭属于该 Principal/Device 的活动 Session；Data Plane 使用短期 RelayTicket，将撤销传播延迟限制在 Ticket 有效期内。
 
@@ -57,7 +55,7 @@ Refresh 轮换和复用撤销必须在数据库事务中提交，不能在返回
 
 - V2.0 不实现 Resource Owner Password Credentials。
 - V2.0 不允许客户端上传 issuer、JWKS 或 claim mapping。
-- `anonymous` 仅用于显式开发模式，不能作为生产默认值。
+- 不提供无需凭据的登录方式。
 
 ## 安全依据
 
@@ -67,4 +65,4 @@ Refresh 轮换和复用撤销必须在数据库事务中提交，不能在返回
 
 ## 结果
 
-客户端 UX 稳定为“填写服务地址 → 发现登录方式 → 浏览器 OIDC 或显式 anonymous 开发登录 → 获得 Gateway Session”。Provider 不会改变 Token、授权、Session 和 Data Plane 接口。代价是 Control Plane 必须维护短时登录事务、exchange code 和 Token rotation/revocation。
+客户端 UX 稳定为“填写服务地址 → 发现登录方式 → 浏览器 OIDC 或本地账户登录 → 获得 Gateway Session”。Provider 不会改变 Token、授权、Session 和 Data Plane 接口。代价是 Control Plane 必须维护短时登录事务、exchange code 和 Token rotation/revocation。

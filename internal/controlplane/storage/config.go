@@ -6,10 +6,11 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
+	env "github.com/Netflix/go-env"
+	"github.com/go-sql-driver/mysql"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -18,21 +19,22 @@ type Backend string
 const (
 	BackendSQLite     Backend = "sqlite"
 	BackendPostgreSQL Backend = "postgresql"
+	BackendMySQL      Backend = "mysql"
 
-	DefaultSQLitePath                        = "kubeloop.db"
-	DefaultBusyTimeout                       = 5 * time.Second
-	DefaultConnectTimeout                    = 10 * time.Second
-	DefaultQueryTimeout                      = 5 * time.Second
-	DefaultPostgreSQLMaxOpen                 = 20
-	DefaultPostgreSQLMaxIdle                 = 5
-	DefaultPostgreSQLTransactionMaxRetries   = 3
-	DefaultPostgreSQLTransactionRetryBackoff = 25 * time.Millisecond
+	DefaultSQLitePath              = "kubeloop.db"
+	DefaultBusyTimeout             = 5 * time.Second
+	DefaultConnectTimeout          = 10 * time.Second
+	DefaultQueryTimeout            = 5 * time.Second
+	DefaultMaxOpen                 = 20
+	DefaultMaxIdle                 = 5
+	DefaultTransactionMaxRetries   = 3
+	DefaultTransactionRetryBackoff = 25 * time.Millisecond
 )
 
 type Config struct {
 	Backend                 Backend
 	SQLitePath              string
-	PostgreSQLDSN           string
+	DatasourceURL           string
 	ControlPlaneReplicas    int
 	BusyTimeout             time.Duration
 	ConnectTimeout          time.Duration
@@ -42,87 +44,61 @@ type Config struct {
 	ConnectionMaxLifetime   time.Duration
 	TransactionMaxRetries   int
 	TransactionRetryBackoff time.Duration
-	AllowInsecurePostgreSQL bool
+	AllowInsecureDatasource bool
+}
+
+type storageEnvironment struct {
+	SQLitePath              string        `env:"KUBELOOP_SQLITE_PATH"`
+	DatasourceURL           string        `env:"KUBELOOP_DATASOURCE_URL"`
+	DatasourceURLFile       string        `env:"KUBELOOP_DATASOURCE_URL_FILE"`
+	ControlPlaneReplicas    int           `env:"KUBELOOP_CONTROL_PLANE_REPLICAS,default=1"`
+	ConnectTimeout          time.Duration `env:"KUBELOOP_DATASOURCE_CONNECT_TIMEOUT"`
+	QueryTimeout            time.Duration `env:"KUBELOOP_DATASOURCE_QUERY_TIMEOUT"`
+	MaxOpenConnections      int           `env:"KUBELOOP_DATASOURCE_MAX_OPEN_CONNECTIONS"`
+	MaxIdleConnections      int           `env:"KUBELOOP_DATASOURCE_MAX_IDLE_CONNECTIONS"`
+	ConnectionMaxLifetime   time.Duration `env:"KUBELOOP_DATASOURCE_CONNECTION_MAX_LIFETIME"`
+	TransactionMaxRetries   int           `env:"KUBELOOP_DATASOURCE_TRANSACTION_MAX_RETRIES"`
+	TransactionRetryBackoff time.Duration `env:"KUBELOOP_DATASOURCE_TRANSACTION_RETRY_BACKOFF"`
+	AllowInsecureDatasource bool          `env:"KUBELOOP_DATASOURCE_ALLOW_INSECURE"`
 }
 
 func ConfigFromEnv() (Config, error) {
+	var environment storageEnvironment
+	if _, err := env.UnmarshalFromEnviron(&environment); err != nil {
+		return Config{}, fmt.Errorf("decode storage environment: %w", err)
+	}
 	config := Config{
-		Backend:              Backend(strings.ToLower(strings.TrimSpace(os.Getenv("KUBELOOP_STORAGE_TYPE")))),
-		SQLitePath:           strings.TrimSpace(os.Getenv("KUBELOOP_SQLITE_PATH")),
-		PostgreSQLDSN:        strings.TrimSpace(os.Getenv("KUBELOOP_POSTGRESQL_DSN")),
-		ControlPlaneReplicas: 1,
+		SQLitePath: strings.TrimSpace(environment.SQLitePath), DatasourceURL: strings.TrimSpace(environment.DatasourceURL),
+		ControlPlaneReplicas: environment.ControlPlaneReplicas, ConnectTimeout: environment.ConnectTimeout,
+		QueryTimeout: environment.QueryTimeout, MaxOpenConnections: environment.MaxOpenConnections,
+		MaxIdleConnections: environment.MaxIdleConnections, ConnectionMaxLifetime: environment.ConnectionMaxLifetime,
+		TransactionMaxRetries: environment.TransactionMaxRetries, TransactionRetryBackoff: environment.TransactionRetryBackoff,
+		AllowInsecureDatasource: environment.AllowInsecureDatasource,
 	}
-	if raw := strings.TrimSpace(os.Getenv("KUBELOOP_CONTROL_PLANE_REPLICAS")); raw != "" {
-		replicas, err := strconv.Atoi(raw)
-		if err != nil {
-			return Config{}, fmt.Errorf("parse KUBELOOP_CONTROL_PLANE_REPLICAS: %w", err)
-		}
-		config.ControlPlaneReplicas = replicas
-	}
-	if file := strings.TrimSpace(os.Getenv("KUBELOOP_POSTGRESQL_DSN_FILE")); file != "" {
-		if config.PostgreSQLDSN != "" {
-			return Config{}, errors.New("configure only one of KUBELOOP_POSTGRESQL_DSN and KUBELOOP_POSTGRESQL_DSN_FILE")
+	if file := strings.TrimSpace(environment.DatasourceURLFile); file != "" {
+		if config.DatasourceURL != "" {
+			return Config{}, errors.New("configure only one of KUBELOOP_DATASOURCE_URL and KUBELOOP_DATASOURCE_URL_FILE")
 		}
 		content, err := os.ReadFile(filepath.Clean(file))
 		if err != nil {
-			return Config{}, fmt.Errorf("read PostgreSQL DSN file: %w", err)
+			return Config{}, errors.New("read datasource URL file")
 		}
-		config.PostgreSQLDSN = strings.TrimSpace(string(content))
+		config.DatasourceURL = strings.TrimSpace(string(content))
 	}
-	if err := applyDurationEnv("KUBELOOP_POSTGRESQL_CONNECT_TIMEOUT", &config.ConnectTimeout); err != nil {
-		return Config{}, err
-	}
-	if err := applyDurationEnv("KUBELOOP_POSTGRESQL_QUERY_TIMEOUT", &config.QueryTimeout); err != nil {
-		return Config{}, err
-	}
-	if err := applyIntEnv("KUBELOOP_POSTGRESQL_MAX_OPEN_CONNECTIONS", &config.MaxOpenConnections); err != nil {
-		return Config{}, err
-	}
-	if err := applyIntEnv("KUBELOOP_POSTGRESQL_MAX_IDLE_CONNECTIONS", &config.MaxIdleConnections); err != nil {
-		return Config{}, err
-	}
-	if err := applyDurationEnv("KUBELOOP_POSTGRESQL_CONNECTION_MAX_LIFETIME", &config.ConnectionMaxLifetime); err != nil {
-		return Config{}, err
-	}
-	if err := applyIntEnv("KUBELOOP_POSTGRESQL_TRANSACTION_MAX_RETRIES", &config.TransactionMaxRetries); err != nil {
-		return Config{}, err
-	}
-	if err := applyDurationEnv("KUBELOOP_POSTGRESQL_TRANSACTION_RETRY_BACKOFF", &config.TransactionRetryBackoff); err != nil {
-		return Config{}, err
-	}
-	return config.normalized()
+	return Normalize(config)
 }
 
-func applyDurationEnv(name string, destination *time.Duration) error {
-	raw := strings.TrimSpace(os.Getenv(name))
-	if raw == "" {
-		return nil
-	}
-	value, err := time.ParseDuration(raw)
+// Normalize validates and applies defaults to Control Plane storage settings.
+func Normalize(config Config) (Config, error) {
+	config.DatasourceURL = strings.TrimSpace(config.DatasourceURL)
+	backend, err := datasourceBackend(config.DatasourceURL)
 	if err != nil {
-		return fmt.Errorf("parse %s: %w", name, err)
+		return Config{}, err
 	}
-	*destination = value
-	return nil
-}
-
-func applyIntEnv(name string, destination *int) error {
-	raw := strings.TrimSpace(os.Getenv(name))
-	if raw == "" {
-		return nil
+	if config.Backend != "" && config.Backend != backend {
+		return Config{}, errors.New("storage backend conflicts with datasource URL")
 	}
-	value, err := strconv.Atoi(raw)
-	if err != nil {
-		return fmt.Errorf("parse %s: %w", name, err)
-	}
-	*destination = value
-	return nil
-}
-
-func (config Config) normalized() (Config, error) {
-	if config.Backend == "" {
-		config.Backend = BackendSQLite
-	}
+	config.Backend = backend
 	if config.ControlPlaneReplicas < 0 {
 		return Config{}, errors.New("Control Plane replicas must not be negative")
 	}
@@ -144,8 +120,7 @@ func (config Config) normalized() (Config, error) {
 	if config.ConnectionMaxLifetime == 0 {
 		config.ConnectionMaxLifetime = 30 * time.Minute
 	}
-	switch config.Backend {
-	case BackendSQLite:
+	if config.Backend == BackendSQLite {
 		if config.ControlPlaneReplicas != 1 {
 			return Config{}, errors.New("SQLite storage requires exactly one Control Plane replica")
 		}
@@ -155,49 +130,82 @@ func (config Config) normalized() (Config, error) {
 		config.SQLitePath = filepath.Clean(config.SQLitePath)
 		config.MaxOpenConnections = 1
 		config.MaxIdleConnections = 1
-	case BackendPostgreSQL:
-		if strings.TrimSpace(config.PostgreSQLDSN) == "" {
-			return Config{}, errors.New("PostgreSQL DSN is required")
-		}
-		parsed, err := pgx.ParseConfig(config.PostgreSQLDSN)
-		if err != nil {
-			return Config{}, errors.New("PostgreSQL DSN is invalid")
-		}
-		if !postgreSQLTLSRequired(parsed) && !config.AllowInsecurePostgreSQL {
-			return Config{}, errors.New("PostgreSQL TLS is required; set sslmode=require or stronger")
-		}
-		if config.MaxOpenConnections < 0 {
-			return Config{}, errors.New("PostgreSQL max open connections must not be negative")
-		}
-		if config.MaxOpenConnections == 0 {
-			config.MaxOpenConnections = DefaultPostgreSQLMaxOpen
-		}
-		if config.MaxIdleConnections < 0 {
-			return Config{}, errors.New("PostgreSQL max idle connections must not be negative")
-		}
-		if config.MaxIdleConnections == 0 {
-			config.MaxIdleConnections = min(DefaultPostgreSQLMaxIdle, config.MaxOpenConnections)
-		}
-		if config.MaxIdleConnections > config.MaxOpenConnections {
-			return Config{}, errors.New("PostgreSQL max idle connections must not exceed max open connections")
-		}
-		if config.TransactionMaxRetries < 0 || config.TransactionMaxRetries > 10 {
-			return Config{}, errors.New("PostgreSQL transaction max retries must be between 0 and 10")
-		}
-		if config.TransactionMaxRetries == 0 {
-			config.TransactionMaxRetries = DefaultPostgreSQLTransactionMaxRetries
-		}
-		if config.TransactionRetryBackoff < 0 || config.TransactionRetryBackoff > time.Second {
-			return Config{}, errors.New("PostgreSQL transaction retry backoff must be between 0 and 1s")
-		}
-		if config.TransactionRetryBackoff == 0 {
-			config.TransactionRetryBackoff = DefaultPostgreSQLTransactionRetryBackoff
-		}
-	default:
-		return Config{}, fmt.Errorf("unsupported storage backend %q", config.Backend)
+		return config, nil
+	}
+	if err := validateDatasource(config); err != nil {
+		return Config{}, err
+	}
+	if config.MaxOpenConnections < 0 {
+		return Config{}, errors.New("datasource max open connections must not be negative")
+	}
+	if config.MaxOpenConnections == 0 {
+		config.MaxOpenConnections = DefaultMaxOpen
+	}
+	if config.MaxIdleConnections < 0 {
+		return Config{}, errors.New("datasource max idle connections must not be negative")
+	}
+	if config.MaxIdleConnections == 0 {
+		config.MaxIdleConnections = min(DefaultMaxIdle, config.MaxOpenConnections)
+	}
+	if config.MaxIdleConnections > config.MaxOpenConnections {
+		return Config{}, errors.New("datasource max idle connections must not exceed max open connections")
+	}
+	if config.TransactionMaxRetries < 0 || config.TransactionMaxRetries > 10 {
+		return Config{}, errors.New("datasource transaction max retries must be between 0 and 10")
+	}
+	if config.TransactionMaxRetries == 0 {
+		config.TransactionMaxRetries = DefaultTransactionMaxRetries
+	}
+	if config.TransactionRetryBackoff < 0 || config.TransactionRetryBackoff > time.Second {
+		return Config{}, errors.New("datasource transaction retry backoff must be between 0 and 1s")
+	}
+	if config.TransactionRetryBackoff == 0 {
+		config.TransactionRetryBackoff = DefaultTransactionRetryBackoff
 	}
 	return config, nil
 }
+
+func datasourceBackend(raw string) (Backend, error) {
+	if raw == "" {
+		return BackendSQLite, nil
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || !parsed.IsAbs() {
+		return "", errors.New("datasource URL is invalid")
+	}
+	switch strings.ToLower(parsed.Scheme) {
+	case "postgres", "postgresql":
+		return BackendPostgreSQL, nil
+	case "mysql":
+		return BackendMySQL, nil
+	default:
+		return "", errors.New("datasource URL must use postgresql or mysql")
+	}
+}
+
+func validateDatasource(config Config) error {
+	switch config.Backend {
+	case BackendPostgreSQL:
+		parsed, err := pgx.ParseConfig(config.DatasourceURL)
+		if err != nil {
+			return errors.New("PostgreSQL datasource URL is invalid")
+		}
+		if !postgreSQLTLSRequired(parsed) && !config.AllowInsecureDatasource {
+			return errors.New("PostgreSQL datasource TLS is required; set sslmode=require or stronger")
+		}
+	case BackendMySQL:
+		parsed, err := parseMySQLURL(config.DatasourceURL)
+		if err != nil {
+			return err
+		}
+		if !mysqlTLSRequired(parsed.TLSConfig) && !config.AllowInsecureDatasource {
+			return errors.New("MySQL datasource TLS is required; set tls=true")
+		}
+	}
+	return nil
+}
+
+func (config Config) normalized() (Config, error) { return Normalize(config) }
 
 func postgreSQLTLSRequired(config *pgx.ConnConfig) bool {
 	if config == nil || config.TLSConfig == nil {
@@ -211,25 +219,57 @@ func postgreSQLTLSRequired(config *pgx.ConnConfig) bool {
 	return true
 }
 
-func RedactedPostgreSQLDSN(raw string) string {
+func mysqlTLSRequired(value string) bool {
+	value = strings.ToLower(strings.TrimSpace(value))
+	return value != "" && value != "false" && value != "preferred" && value != "skip-verify"
+}
+
+func parseMySQLURL(raw string) (*mysql.Config, error) {
 	parsed, err := url.Parse(raw)
-	if err == nil && parsed.IsAbs() && (parsed.Scheme == "postgres" || parsed.Scheme == "postgresql") {
-		if parsed.User != nil {
-			username := parsed.User.Username()
-			parsed.User = url.UserPassword(username, "REDACTED")
-		}
-		query := parsed.Query()
-		for key := range query {
-			lower := strings.ToLower(key)
-			if lower == "password" || lower == "passfile" {
-				query.Set(key, "REDACTED")
-			}
-		}
-		parsed.RawQuery = query.Encode()
-		return parsed.String()
+	if err != nil || parsed.Scheme != "mysql" || parsed.Host == "" || strings.TrimPrefix(parsed.Path, "/") == "" {
+		return nil, errors.New("MySQL datasource URL is invalid")
 	}
-	// Keyword/value DSNs allow quoted values containing whitespace and escape
-	// sequences. Returning a reconstructed subset is easy to get wrong, so hide
-	// the entire non-URL DSN instead of risking a partial credential disclosure.
-	return "[REDACTED PostgreSQL DSN]"
+	config := mysql.NewConfig()
+	config.Net = "tcp"
+	config.ClientFoundRows = true
+	config.Addr = parsed.Host
+	config.DBName = strings.TrimPrefix(parsed.Path, "/")
+	if parsed.User != nil {
+		config.User = parsed.User.Username()
+		config.Passwd, _ = parsed.User.Password()
+	}
+	config.Params = make(map[string]string)
+	for key, values := range parsed.Query() {
+		if len(values) != 1 {
+			return nil, errors.New("MySQL datasource URL contains duplicate parameters")
+		}
+		switch key {
+		case "tls":
+			config.TLSConfig = values[0]
+		case "charset", "collation", "time_zone":
+			config.Params[key] = values[0]
+		default:
+			return nil, fmt.Errorf("MySQL datasource URL parameter %q is not supported", key)
+		}
+	}
+	return config, nil
+}
+
+func RedactedDatasourceURL(raw string) string {
+	parsed, err := url.Parse(raw)
+	if err != nil || !parsed.IsAbs() {
+		return "[REDACTED datasource URL]"
+	}
+	if parsed.User != nil {
+		parsed.User = url.UserPassword(parsed.User.Username(), "REDACTED")
+	}
+	query := parsed.Query()
+	for key := range query {
+		lower := strings.ToLower(key)
+		if lower == "password" || lower == "passfile" {
+			query.Set(key, "REDACTED")
+		}
+	}
+	parsed.RawQuery = query.Encode()
+	return parsed.String()
 }

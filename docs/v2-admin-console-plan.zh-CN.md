@@ -171,5 +171,5 @@ revision、chi v5 API 与嵌入式 UI，完成桌面/390px 窄屏、break-glass�
 - 初次部署即使管理 UI 关闭，也可完全通过 Helm 配置启动。
 - 没有 bootstrap 管理员时管理 API 必须 fail closed，而不是允许首个注册用户。
 - 所有 Secret 往返、配置发布、权限 dry-run、撤销和导出都有安全测试与审计。
-- SQLite 模式仍只允许单 Control Plane；多副本后台必须使用 PostgreSQL。
+- SQLite 模式仍只允许单 Control Plane；多副本后台必须使用 PostgreSQL 或 MySQL datasource。
 - 任一配置 revision 回滚后，Control Plane readiness、登录和已授权用户主流程恢复。

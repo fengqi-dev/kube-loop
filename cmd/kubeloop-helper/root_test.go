@@ -12,7 +12,6 @@ func TestRootCommandVersion(t *testing.T) {
 	t.Parallel()
 
 	for _, args := range [][]string{{"version"}, {"--version"}} {
-		args := args
 		t.Run(strings.Join(args, "_"), func(t *testing.T) {
 			t.Parallel()
 			stdout, stderr, exitCode := executeForTest(t, args, commandDependencies{}, "1.2.3")

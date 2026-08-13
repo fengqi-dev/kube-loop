@@ -128,9 +128,9 @@ SQLite 模式的部署约束：
 - 数据库目录必须挂载持久卷；未配置持久卷时只允许显式的开发模式。
 - 数据库文件、journal/WAL 和临时文件必须位于同一个本地或具备可靠 POSIX 文件锁语义的块存储文件系统。
 - 不支持把 SQLite 文件直接放到 NFS、SMB 或其他共享网络文件系统，也不支持多个 Pod 同时打开同一个数据库文件。
-- SQLite 模式不提供 Control Plane HA；需要多个 Control Plane 副本时必须使用 PostgreSQL。
+- SQLite 模式不提供 Control Plane HA；需要多个 Control Plane 副本时必须配置 PostgreSQL 或 MySQL datasource URL。
 
-外部数据源在 V2.0 只正式支持 PostgreSQL，不承诺任意 SQL 数据库兼容。SQLite 和 PostgreSQL 必须共享同一套逻辑 schema version 和 repository contract，但允许各自使用不同、经过测试的 SQL dialect。切换数据库需要显式 export/import，不通过修改 DSN 自动迁移数据。
+外部数据源支持 PostgreSQL 与 MySQL，通过 `datasourceURL` scheme 自动选择方言；未配置时使用 SQLite。三种后端共享同一套逻辑 schema version 和 repository contract。
 
 ## 4. 必须先冻结的架构决策
 
@@ -272,12 +272,6 @@ SQLite 模式的部署约束：
   - 两种 Backend 产生相同领域结果和稳定错误，不要求底层 SQL 完全相同。
   - 2026-08-10（完成）：`testRepositoryConformance` 将 Token Family/Refresh Token、Session/Task/Snapshot、Idempotency、Audit、认证事务和共享事务的同一套用例运行于 SQLite 与真实 PostgreSQL；共同验证数据库约束、稳定 `ErrNotFound`/`ErrConflict`/`ErrIdempotencyMismatch`、提交/错误回滚/恐慌回滚、单次消费、乐观并发、16 路身份与幂等写竞争及有界过期清理。`testTaskStateMigrationPreservesLegacyTasks` 在两种后端从历史 schema v5 重放 v6 并产生相同领域状态；两者都验证 migration 失败不记录版本、高版本拒绝，PostgreSQL 另验证 6 路并发首次 migration。`testRestartRecovery` 对两种后端关闭再打开后检查已提交数据恢复、未提交数据不复活和 readiness；PostgreSQL JSONB 读取会重新规范化 NetworkSpec，保证领域结果与 SQLite 字节稳定。新增 `scripts/test-postgresql.sh`：可使用外部 DSN，或自动创建并清理独立 PostgreSQL 17 Podman/Docker 容器，以 race 模式运行整个 Storage suite。SQLite 默认测试、真实 PostgreSQL 全套 race、全量 Go test/vet 与 `git diff --check` 通过。
 
-- [x] **V2-110：实现数据库导出、导入和备份工具。**
-  - 支持 SQLite 一致性备份、逻辑导出、空 PostgreSQL 导入和导入前校验。
-  - 导出文件带 schema version、校验和和创建版本，不包含 OIDC/数据库 Secret。
-  - 导入是显式、可审计、失败可回滚的离线管理操作。
-  - 2026-08-10（完成）：新增 `kubeloop-control-plane storage export|import|backup` 离线命令；数据库配置仍只从环境或 Secret 文件读取，不接受 DSN 参数。逻辑导出在 SQLite/PostgreSQL 单一快照内按稳定主键顺序生成固定格式，记录格式/schema version、UTC 时间、Control Plane 创建版本、源后端和规范化内容 SHA-256；精确校验表列、UUID、对象版本、时间、状态、NetworkSpec/哈希和 JSON，并明确排除 OIDC 配置、数据库 Secret 及 state/nonce/PKCE verifier 等短期认证事务。SQLite 备份使用 `VACUUM INTO`，发布前执行 `quick_check`、schema 校验、SHA-256、`0600` 权限和原子发布，拒绝覆盖与符号链接。导入只允许显式 `--actor --confirm-empty` 的空 PostgreSQL：连接前验证完整文件，事务内对全部业务表加排他锁、复核空库、按外键顺序写入并追加 `storage.import` 审计，任何失败整体回滚。默认测试覆盖确定性、篡改/截断/错误版本、Secret 排除和 SQLite 一致性；真实 PostgreSQL 17 race 测试覆盖 SQLite→PostgreSQL、再导出、非空拒绝、成功审计和外键失败后全表为空。运维流程见 `docs/v2-storage-management.zh-CN.md`；全量 Go test/vet、CLI/Storage race、前端生产构建、Helm lint 与 SQLite/PostgreSQL HA template、`git diff --check` 均通过。
-
 ### M2：Helm 与部署基线
 
 - [x] **V2-200：创建 Helm Chart。**
@@ -323,16 +317,13 @@ SQLite 模式的部署约束：
 
 ### M3：OIDC、授权与审计
 
-Gateway 使用统一的 `AuthProvider` 抽象，首期支持：
-
-- `anonymous`：仅用于显式解锁的本地开发环境。
-
+Gateway 使用统一的 `AuthProvider` 抽象，支持 OIDC，并通过独立的本地账户服务覆盖自托管与开发环境。
 
 - [x] **V2-299：定义统一 AuthProvider 接口。**
   - Provider 负责返回登录方式、验证身份并生成标准化 Principal，不直接签发 Gateway Access Token。
   - Token Service、Authorizer 和 Session Registry 不依赖具体 OIDC SDK。
   - discovery 只返回可公开的 Provider ID、类型、显示名称和登录交互类型。
-  - 2026-08-10：已实现 Provider、BrowserProvider 和 AnonymousProvider 能力接口、标准 Identity、稳定 OIDC/开发身份键和 fail-closed Registry；discovery 明确返回 `browser`/`none` 交互类型并拒绝重复 Provider ID 或类型不匹配。
+  - 2026-08-10：已实现 Provider 和 BrowserProvider 能力接口、标准 Identity、稳定 OIDC 身份键和 fail-closed Registry；discovery 明确返回浏览器交互类型并拒绝重复 Provider ID 或类型不匹配。
 
 - [x] **V2-300：实现 OIDC Broker 配置。**
   - Helm 配置 issuer、client ID、Secret 引用、scope、claim mapping 和固定 callback URL。
@@ -359,9 +350,6 @@ Gateway 使用统一的 `AuthProvider` 抽象，首期支持：
   - 退出登录立即关闭相关 WSS 和 Cluster Session。
   - 2026-08-10：Control Plane 已实现 Ed25519 签名短期 Access Token、按 Device 的 Refresh Token Family、每次刷新轮换、历史哈希、并发消费保护、旧 Token 复用整族撤销、显式撤销和每次 API 认证时的 Family 状态校验；复用检测与整族撤销在同一数据库事务中提交，并验证 SQLite 上 Control Plane 重启前后的验证、轮换与撤销状态连续性。Helm 从只读 Secret 加载 PKCS#8 签名密钥。客户端使用版本化系统 Keychain/Credential Manager/Secret Service 条目保存 Access/Refresh Token 和 device ID，JSON Store 与 Wails 返回值不含 Token；刷新会原子切换凭据版本，退出会依次停止文件、Exec、SSH、端口转发、Exchange、Mirror、Preview，关闭 Data Plane WSS 和远端 Cluster Session，再撤销 Token 并删除本地凭据。单元测试覆盖并发 refresh 只有一个成功且整族撤销、显式注销断连幂等性、凭据部分写入回滚；Data Plane E2E 覆盖 Token Family 撤销后活动操作终止。
 
-- [x] **V2-303：提供开发认证模式。**
-  - `anonymous` 默认关闭，开启时打印高可见度安全警告。
-
 - [x] **V2-304：实现 Principal 和身份映射。**
   - 标准化 subject、issuer、display name、email 和 groups。
 
@@ -375,7 +363,7 @@ Gateway 使用统一的 `AuthProvider` 抽象，首期支持：
   - Claims 映射只能来自可信 issuer 和显式允许的 claim。
   - Chart 不默认授予宽泛 impersonate 权限。
   - 验证 API Server audit 中可以看到最终用户和 Gateway 身份。
-  - 2026-08-10：Kubernetes Provider 已支持默认关闭的 impersonation，用户名由固定前缀加稳定 principal ID 生成，组只来自显式 identity-group → Kubernetes-group 映射；未映射 claim 不会透传。派生 client 保留 Gateway ServiceAccount 凭据并发送最终 `Impersonate-User`/`Impersonate-Group`，System client 始终清空 impersonation。Chart contract test 固定默认及启用映射时都不生成任何 `impersonate` RBAC。Helm Minikube E2E 新增 API Server metadata audit policy：通过真实 Control Plane anonymous 开发登录取得标准 Token，临时创建精确用户/组的外部 RBAC，调用 `/kubeloop/api/version`，随后从 audit event 同时断言 authenticated `user` 为 Control Plane ServiceAccount、`impersonatedUser` 为前缀化稳定 Principal、映射组存在且未映射 claim 不存在；临时 RBAC 在验证后删除，生产 Chart 保持最小权限。
+  - 2026-08-10：Kubernetes Provider 已支持默认关闭的 impersonation，用户名由固定前缀加稳定 principal ID 生成，组只来自显式 identity-group → Kubernetes-group 映射；未映射 claim 不会透传。派生 client 保留 Gateway ServiceAccount 凭据并发送最终 `Impersonate-User`/`Impersonate-Group`，System client 始终清空 impersonation。Chart contract test 固定默认及启用映射时都不生成任何 `impersonate` RBAC，生产 Chart 保持最小权限。
 
 - [x] **V2-307：实现统一授权中间层。**
   - HTTP handler、Task 创建和 WSS stream open 必须调用同一个 Authorizer。
@@ -434,7 +422,7 @@ Gateway 使用统一的 `AuthProvider` 抽象，首期支持：
   - Clusters 页面替换为 Server/Namespace 页面。
   - v2 模式下不调用 kubeconfig inventory、probe 或 Kubernetes client。
   - 加入测试，确保只配置 URL 的干净用户目录可以完成资源浏览。
-  - 2026-08-10（完成）：桌面组合根统一使用 RemoteClusterBackend 所需的 Profile、Discovery、认证、Remote Session 和 Data Plane 组件，React 入口仅展示 Server/Namespace 远程资源流程。Inventory 按服务端 capability 获取 Pod/Service，只有 `cluster.tunnel` 可用时才建立 Data Plane，能力被移除时会主动断开旧连接。新增干净临时用户目录的全组合测试：仅保存 Gateway URL，经 anonymous discovery/login 后完成 Session 建立和 Pod 浏览，并验证不读取或生成 kubeconfig；依赖架构测试、全量非 E2E test/vet 与前端生产构建通过。
+  - 2026-08-10（完成）：桌面组合根统一使用 RemoteClusterBackend 所需的 Profile、Discovery、认证、Remote Session 和 Data Plane 组件，React 入口仅展示 Server/Namespace 远程资源流程。Inventory 按服务端 capability 获取 Pod/Service，只有 `cluster.tunnel` 可用时才建立 Data Plane，能力被移除时会主动断开旧连接。新增干净临时用户目录的全组合测试：仅保存 Gateway URL，使用安全凭据完成 Session 建立和 Pod 浏览，并验证不读取或生成 kubeconfig；依赖架构测试、全量非 E2E test/vet 与前端生产构建通过。
 
 ### M5：远程数据面迁移
 

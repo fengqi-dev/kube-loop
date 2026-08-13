@@ -26,6 +26,23 @@ func (repository *adminPolicyRevisionRepository) Create(ctx context.Context, rev
 			created_authentication_type, reason, created_at
 		) VALUES ($1, $2, $3::jsonb, $4, $5, $6::jsonb, $7, $8, $9, $10) RETURNING revision`
 	}
+	if repository.backend == BackendMySQL {
+		query = strings.TrimSuffix(query, " RETURNING revision")
+		result, err := repository.executor.ExecContext(ctx, query,
+			revision.ID, revision.SchemaVersion, string(revision.Spec), revision.SpecHash, revision.ValidationState,
+			nullableJSON(revision.Validation), revision.CreatedBy, revision.CreatedAuthenticationType,
+			revision.Reason, formatTime(revision.CreatedAt),
+		)
+		if err != nil {
+			return AdminPolicyRevision{}, mapWriteError(err)
+		}
+		inserted, err := result.LastInsertId()
+		if err != nil || inserted <= 0 {
+			return AdminPolicyRevision{}, errors.New("read policy revision")
+		}
+		revision.Revision = uint64(inserted)
+		return revision, nil
+	}
 	err := repository.executor.QueryRowContext(ctx, query,
 		revision.ID, revision.SchemaVersion, string(revision.Spec), revision.SpecHash, revision.ValidationState,
 		nullableJSON(revision.Validation), revision.CreatedBy, revision.CreatedAuthenticationType,
@@ -67,6 +84,23 @@ func (repository *providerConfigRevisionRepository) Create(ctx context.Context, 
 			id, schema_version, provider_id, provider_type, config_json, config_hash, secret_aliases_json,
 			validation_state, validation_json, created_by, created_authentication_type, reason, created_at
 		) VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7::jsonb, $8, $9::jsonb, $10, $11, $12, $13) RETURNING revision`
+	}
+	if repository.backend == BackendMySQL {
+		query = strings.TrimSuffix(query, " RETURNING revision")
+		result, err := repository.executor.ExecContext(ctx, query,
+			revision.ID, revision.SchemaVersion, revision.ProviderID, revision.ProviderType, string(revision.Config),
+			revision.ConfigHash, string(revision.SecretAliases), revision.ValidationState, nullableJSON(revision.Validation),
+			revision.CreatedBy, revision.CreatedAuthenticationType, revision.Reason, formatTime(revision.CreatedAt),
+		)
+		if err != nil {
+			return ProviderConfigRevision{}, mapWriteError(err)
+		}
+		inserted, err := result.LastInsertId()
+		if err != nil || inserted <= 0 {
+			return ProviderConfigRevision{}, errors.New("read provider revision")
+		}
+		revision.Revision = uint64(inserted)
+		return revision, nil
 	}
 	err := repository.executor.QueryRowContext(ctx, query,
 		revision.ID, revision.SchemaVersion, revision.ProviderID, revision.ProviderType, string(revision.Config),

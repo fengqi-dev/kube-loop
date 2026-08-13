@@ -32,10 +32,18 @@ func TestPolicyLoaderInstallsPublishedAggregateAndFailsClosed(t *testing.T) {
 		t.Fatal(err)
 	}
 	principalID := uuid.NewString()
+	customPrincipalID := uuid.NewString()
 	draft, err := service.CreatePolicyDraft(ctx, PolicyDraftRequest{
-		Snapshot: adminauthorization.Snapshot{Version: adminauthorization.CurrentVersion, Assignments: []adminauthorization.Assignment{{
-			ID: uuid.NewString(), Role: adminauthorization.RolePlatformAdmin, Subjects: []string{principalID},
-		}}},
+		Snapshot: adminauthorization.Snapshot{
+			Version: adminauthorization.CurrentVersion,
+			Roles: []adminauthorization.RoleDefinition{{
+				ID: "session-reader", DisplayName: "Session reader", Permissions: []string{"admin.session/read"},
+			}},
+			Assignments: []adminauthorization.Assignment{
+				{ID: uuid.NewString(), Role: adminauthorization.RolePlatformAdmin, Subjects: []string{principalID}},
+				{ID: uuid.NewString(), Role: "session-reader", Subjects: []string{customPrincipalID}},
+			},
+		},
 		IdempotencyKey: "loader-create-key-0001", Reason: "install first admin", RequestID: uuid.NewString(),
 		Actor: Actor{Authentication: adminauthorization.AuthenticationBreakGlass},
 	})
@@ -61,6 +69,12 @@ func TestPolicyLoaderInstallsPublishedAggregateAndFailsClosed(t *testing.T) {
 	})
 	if !decision.Allowed {
 		t.Fatalf("published administrator decision = %#v", decision)
+	}
+	customDecision := engine.Authorize(ctx, adminauthorization.Subject{ID: customPrincipalID}, adminauthorization.Request{
+		Resource: adminauthorization.ResourceSession, Operation: adminauthorization.OperationRead,
+	})
+	if !customDecision.Allowed || customDecision.Role != "session-reader" {
+		t.Fatalf("published custom role decision = %#v", customDecision)
 	}
 
 	if err := store.Close(); err != nil {

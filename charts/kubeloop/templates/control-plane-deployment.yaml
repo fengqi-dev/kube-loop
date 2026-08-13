@@ -1,25 +1,19 @@
 {{- $publicURL := required "publicURL is required (for example https://kubeloop.example.com)" .Values.publicURL -}}
-{{- $storageType := .Values.controlPlane.storage.type -}}
-{{- if and (ne $storageType "sqlite") (ne $storageType "postgresql") -}}
-{{- fail "controlPlane.storage.type must be sqlite or postgresql" -}}
-{{- end -}}
-{{- if and (eq $storageType "sqlite") (ne (int .Values.controlPlane.replicas) 1) -}}
-{{- fail "controlPlane.replicas must be 1 when controlPlane.storage.type=sqlite" -}}
-{{- end -}}
-{{- if and (eq $storageType "postgresql") (not .Values.controlPlane.storage.postgresql.existingSecret) -}}
-{{- fail "controlPlane.storage.postgresql.existingSecret is required for postgresql storage" -}}
+{{- $datasourceSecret := .Values.controlPlane.storage.datasource.existingSecret -}}
+{{- if and (not $datasourceSecret) (ne (int .Values.controlPlane.replicas) 1) -}}
+{{- fail "controlPlane.replicas must be 1 when using default SQLite storage" -}}
 {{- end }}
-{{- if and (eq $storageType "postgresql") (le (int .Values.controlPlane.storage.postgresql.maxOpenConnections) 0) -}}
-{{- fail "controlPlane.storage.postgresql.maxOpenConnections must be positive" -}}
+{{- if and $datasourceSecret (le (int .Values.controlPlane.storage.maxOpenConnections) 0) -}}
+{{- fail "controlPlane.storage.maxOpenConnections must be positive" -}}
 {{- end }}
-{{- if and (eq $storageType "postgresql") (lt (int .Values.controlPlane.storage.postgresql.maxIdleConnections) 0) -}}
-{{- fail "controlPlane.storage.postgresql.maxIdleConnections must not be negative" -}}
+{{- if and $datasourceSecret (lt (int .Values.controlPlane.storage.maxIdleConnections) 0) -}}
+{{- fail "controlPlane.storage.maxIdleConnections must not be negative" -}}
 {{- end }}
-{{- if and (eq $storageType "postgresql") (gt (int .Values.controlPlane.storage.postgresql.maxIdleConnections) (int .Values.controlPlane.storage.postgresql.maxOpenConnections)) -}}
-{{- fail "controlPlane.storage.postgresql.maxIdleConnections must not exceed maxOpenConnections" -}}
+{{- if and $datasourceSecret (gt (int .Values.controlPlane.storage.maxIdleConnections) (int .Values.controlPlane.storage.maxOpenConnections)) -}}
+{{- fail "controlPlane.storage.maxIdleConnections must not exceed maxOpenConnections" -}}
 {{- end }}
-{{- if and (eq $storageType "postgresql") (or (lt (int .Values.controlPlane.storage.postgresql.transactionMaxRetries) 0) (gt (int .Values.controlPlane.storage.postgresql.transactionMaxRetries) 10)) -}}
-{{- fail "controlPlane.storage.postgresql.transactionMaxRetries must be between 0 and 10" -}}
+{{- if and $datasourceSecret (or (lt (int .Values.controlPlane.storage.transactionMaxRetries) 0) (gt (int .Values.controlPlane.storage.transactionMaxRetries) 10)) -}}
+{{- fail "controlPlane.storage.transactionMaxRetries must be between 0 and 10" -}}
 {{- end }}
 {{- if ne (int .Values.controlPlane.replicas) 1 -}}
 {{- fail "controlPlane.replicas must be 1 while using the in-memory Relay Registry" -}}
@@ -44,7 +38,7 @@ metadata:
 spec:
   replicas: {{ .Values.controlPlane.replicas }}
   strategy:
-    type: {{ ternary "Recreate" "RollingUpdate" (eq $storageType "sqlite") }}
+    type: {{ ternary "Recreate" "RollingUpdate" (not $datasourceSecret) }}
   selector:
     matchLabels:
       {{- include "kubeloop.selectorLabels" . | nindent 6 }}
@@ -76,55 +70,12 @@ spec:
           image: {{ include "kubeloop.controlPlaneImage" . | quote }}
           imagePullPolicy: {{ .Values.controlPlane.image.pullPolicy }}
           args:
-            - --api-request-timeout={{ .Values.controlPlane.apiRequestTimeout }}
-            - --max-request-body-bytes={{ int64 .Values.controlPlane.maxRequestBodyBytes }}
-            - --session-ttl={{ .Values.controlPlane.sessionTTL }}
-            - --session-max-lifetime={{ .Values.controlPlane.sessionMaxLifetime }}
-            - --maintenance-interval={{ .Values.controlPlane.maintenanceInterval }}
-            - --maintenance-batch-size={{ int .Values.controlPlane.maintenanceBatchSize }}
-            - --relay-ticket-ttl={{ .Values.controlPlane.relay.ticketTTL }}
-            - --shutdown-timeout={{ .Values.controlPlane.shutdownTimeout }}
-            - --log-level={{ $controlPlaneLogLevel }}
-          envFrom:
-            - configMapRef:
-                name: {{ include "kubeloop.controlPlaneConfigName" . }}
+            - --config=/etc/kubeloop/control-plane.yaml
           env:
             - name: KUBELOOP_POD_NAME
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
-            - name: KUBELOOP_RELAY_NAMESPACE
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.namespace
-            - name: KUBELOOP_RELAY_SERVICE_ACCOUNT
-              value: {{ include "kubeloop.dataPlaneServiceAccountName" . | quote }}
-            - name: KUBELOOP_STORAGE_TYPE
-              value: {{ $storageType | quote }}
-            {{- if eq $storageType "sqlite" }}
-            - name: KUBELOOP_SQLITE_PATH
-              value: {{ .Values.controlPlane.storage.sqlite.path | quote }}
-            {{- else }}
-            - name: KUBELOOP_POSTGRESQL_DSN
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.controlPlane.storage.postgresql.existingSecret }}
-                  key: {{ .Values.controlPlane.storage.postgresql.dsnKey }}
-            - name: KUBELOOP_POSTGRESQL_CONNECT_TIMEOUT
-              value: {{ .Values.controlPlane.storage.postgresql.connectTimeout | quote }}
-            - name: KUBELOOP_POSTGRESQL_QUERY_TIMEOUT
-              value: {{ .Values.controlPlane.storage.postgresql.queryTimeout | quote }}
-            - name: KUBELOOP_POSTGRESQL_MAX_OPEN_CONNECTIONS
-              value: {{ int .Values.controlPlane.storage.postgresql.maxOpenConnections | quote }}
-            - name: KUBELOOP_POSTGRESQL_MAX_IDLE_CONNECTIONS
-              value: {{ int .Values.controlPlane.storage.postgresql.maxIdleConnections | quote }}
-            - name: KUBELOOP_POSTGRESQL_CONNECTION_MAX_LIFETIME
-              value: {{ .Values.controlPlane.storage.postgresql.connectionMaxLifetime | quote }}
-            - name: KUBELOOP_POSTGRESQL_TRANSACTION_MAX_RETRIES
-              value: {{ int .Values.controlPlane.storage.postgresql.transactionMaxRetries | quote }}
-            - name: KUBELOOP_POSTGRESQL_TRANSACTION_RETRY_BACKOFF
-              value: {{ .Values.controlPlane.storage.postgresql.transactionRetryBackoff | quote }}
-            {{- end }}
           ports:
             - name: http
               containerPort: 8080
@@ -148,8 +99,8 @@ spec:
           resources:
             {{- toYaml .Values.controlPlane.resources | nindent 12 }}
           volumeMounts:
-            - name: auth-config
-              mountPath: /etc/kubeloop/auth
+            - name: control-plane-config
+              mountPath: /etc/kubeloop
               readOnly: true
             - name: auth-secrets
               mountPath: /var/run/secrets/kubeloop/auth
@@ -162,14 +113,18 @@ spec:
             - name: relay-registry-tls
               mountPath: /var/run/secrets/kubeloop/relay-registry
               readOnly: true
-            {{- if eq $storageType "sqlite" }}
+            {{- if not $datasourceSecret }}
             - name: data
               mountPath: {{ dir .Values.controlPlane.storage.sqlite.path }}
+            {{- else }}
+            - name: storage-secret
+              mountPath: /var/run/secrets/kubeloop/storage
+              readOnly: true
             {{- end }}
       volumes:
-        - name: auth-config
+        - name: control-plane-config
           configMap:
-            name: {{ include "kubeloop.controlPlaneAuthConfigName" . }}
+            name: {{ include "kubeloop.controlPlaneConfigName" . }}
         - name: auth-secrets
           projected:
             defaultMode: 0400
@@ -201,9 +156,8 @@ spec:
                     - key: {{ $oidc.caKey }}
                       path: {{ printf "%s/ca.crt" $id | quote }}
                     {{- end }}
-              {{- else if eq $type "anonymous" }}
               {{- else }}
-              {{- fail (printf "controlPlane.auth.providers[%d].type must be oidc or anonymous" $index) }}
+              {{- fail (printf "controlPlane.auth.providers[%d].type must be oidc" $index) }}
               {{- end }}
               {{- end }}
               {{- end }}
@@ -248,7 +202,7 @@ spec:
                 path: tls.key
               - key: {{ required "controlPlane.relayRegistry.caKey is required" .Values.controlPlane.relayRegistry.caKey }}
                 path: ca.crt
-        {{- if eq $storageType "sqlite" }}
+        {{- if not $datasourceSecret }}
         - name: data
           {{- if .Values.controlPlane.storage.sqlite.persistence.enabled }}
           persistentVolumeClaim:
@@ -256,6 +210,14 @@ spec:
           {{- else }}
           emptyDir: {}
           {{- end }}
+        {{- else }}
+        - name: storage-secret
+          secret:
+            secretName: {{ .Values.controlPlane.storage.datasource.existingSecret }}
+            defaultMode: 0400
+            items:
+              - key: {{ .Values.controlPlane.storage.datasource.urlKey }}
+                path: datasource-url
         {{- end }}
       {{- with .Values.controlPlane.nodeSelector }}
       nodeSelector:

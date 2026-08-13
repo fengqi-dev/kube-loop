@@ -14,5 +14,6 @@ export interface Overview {
   recentAudit: Record<string, unknown>[];
 }
 export interface Assignment { id: string; role: string; subjects?: string[]; groups?: string[]; namespaces?: string[] }
-export interface Policy { active: boolean; etag: number; revision: number; spec: { version: number; assignments: Assignment[] } }
+export interface RoleDefinition { id: string; displayName: string; description?: string; permissions: string[] }
+export interface Policy { active: boolean; etag: number; revision: number; availablePermissions: string[]; spec: { version: number; roles?: RoleDefinition[]; assignments: Assignment[] } }
 export interface ListResponse { items: Record<string, unknown>[]; nextCursor?: string }

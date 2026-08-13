@@ -119,10 +119,6 @@ func (config Config) normalized() (Config, error) {
 			if config.AuthMethods[index].Interaction != "browser" {
 				return Config{}, fmt.Errorf("auth method %d requires browser interaction", index)
 			}
-		case "anonymous":
-			if config.AuthMethods[index].Interaction != "none" {
-				return Config{}, fmt.Errorf("auth method %d requires none interaction", index)
-			}
 		default:
 			return Config{}, fmt.Errorf("auth method %d has unsupported type %q", index, config.AuthMethods[index].Type)
 		}

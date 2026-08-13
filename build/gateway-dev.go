@@ -15,6 +15,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io/fs"
 	"math/big"
@@ -305,7 +306,13 @@ func deployDevelopmentStack(
 	if err := ensureDevelopmentMaterial(materialDirectory, []string{host, registryHost}); err != nil {
 		return "", err
 	}
-	if err := writeEmbeddedDevelopmentCA(root, filepath.Join(materialDirectory, "ca.crt")); err != nil {
+	ingressCertificate, ingressKey, ingressCA, err := generateDevelopmentIngressCertificate(
+		root, materialDirectory, host,
+	)
+	if err != nil {
+		return "", err
+	}
+	if err := writeEmbeddedDevelopmentCA(root, ingressCA); err != nil {
 		return "", err
 	}
 	if err := applyNamespace(root, developmentNamespace); err != nil {
@@ -323,7 +330,7 @@ func deployDevelopmentStack(
 	ingressSecret := developmentRelease + "-ingress-tls"
 	if err := applyTLSSecret(
 		root, developmentNamespace, ingressSecret,
-		filepath.Join(materialDirectory, "tls.crt"), filepath.Join(materialDirectory, "tls.key"),
+		ingressCertificate, ingressKey,
 	); err != nil {
 		return "", err
 	}
@@ -343,8 +350,9 @@ func deployDevelopmentStack(
 	arguments := []string{
 		"upgrade", "--install", developmentRelease, chart,
 		"--namespace", developmentNamespace,
-		"--wait", "--timeout", "5m", "--history-max", "5",
+		"--reset-values", "--wait", "--timeout", "5m", "--history-max", "5",
 		"--set-string", "publicURL=" + publicURL,
+		"--set-string", "controlPlane.management.publicURL=" + publicURL,
 		"--set-string", "serviceID=kubeloop-dev",
 		"--set-string", "controlPlane.image.repository=" + controlPlaneRepository,
 		"--set-string", "controlPlane.image.tag=" + controlPlaneTag,
@@ -359,22 +367,16 @@ func deployDevelopmentStack(
 		"--set-string", "controlPlane.relayRegistry.existingSecret=" + relaySecret,
 		"--set-string", "controlPlane.relayRegistry.endpointAllowedHosts=" + host,
 		"--set-string", "dataPlane.relayRegistry.endpoint=wss://" + host + "/tunnel",
-		"--set", "controlPlane.auth.developmentMode=true",
 		"--set-string", "controlPlane.auth.token.existingSecret=" + relaySecret,
-		"--set-string", "controlPlane.auth.providers[0].id=local-development",
-		"--set-string", "controlPlane.auth.providers[0].type=anonymous",
-		"--set-string", "controlPlane.auth.providers[0].displayName=Local Development",
-		"--set-string", "controlPlane.auth.providers[0].anonymous.subject=local-developer",
-		"--set-string", "controlPlane.auth.providers[0].anonymous.groups[0]=kubeloop-dev",
-		"--set-string", "controlPlane.policy.rules[0].id=local-development",
-		"--set-string", "controlPlane.policy.rules[0].groups[0]=kubeloop-dev",
+		"--set-string", "controlPlane.policy.rules[0].id=development-access",
+		"--set-string", "controlPlane.policy.rules[0].subjects[0]=*",
 		"--set-string", "controlPlane.policy.rules[0].namespaces[0]=*",
 		"--set-string", "controlPlane.policy.rules[0].operations[0]=*",
 		"--set-string", "controlPlane.policy.rules[0].resourceKinds[0]=*",
 		"--set-string", "controlPlane.management.bootstrap.groups[0]=kubeloop-dev",
 		"--set", "ingress.enabled=true",
 		"--set-string", "ingress.className=nginx",
-		"--set-string", "ingress.annotations.nginx\\.ingress\\.kubernetes\\.io/ssl-redirect=false",
+		"--set-string", "ingress.annotations.nginx\\.ingress\\.kubernetes\\.io/ssl-redirect=true",
 		"--set-string", "ingress.host=" + host,
 		"--set", "ingress.tls.enabled=true",
 		"--set-string", "ingress.tls.secretName=" + ingressSecret,
@@ -408,6 +410,87 @@ func ensureDevelopmentMaterial(directory string, dnsNames []string) error {
 	}
 	fmt.Printf("==> Generating development TLS and Relay keys in %s\n", directory)
 	return writeDevelopmentMaterial(directory, dnsNames)
+}
+
+func generateDevelopmentIngressCertificate(root, directory, host string) (string, string, string, error) {
+	mkcert, err := exec.LookPath("mkcert")
+	if err != nil {
+		return "", "", "", errors.New("mkcert is required for development TLS; install it and ensure it is available in PATH")
+	}
+	if err := os.MkdirAll(directory, 0o700); err != nil {
+		return "", "", "", fmt.Errorf("create development material directory: %w", err)
+	}
+	fmt.Printf("==> Installing the mkcert development CA in the local trust store\n")
+	if err := run(root, exec.Command(mkcert, "-install")); err != nil {
+		return "", "", "", fmt.Errorf("install mkcert development CA: %w", err)
+	}
+	caRootOutput, err := exec.Command(mkcert, "-CAROOT").Output()
+	if err != nil {
+		return "", "", "", fmt.Errorf("find mkcert CA root: %w", err)
+	}
+	caRoot := strings.TrimSpace(string(caRootOutput))
+	if caRoot == "" {
+		return "", "", "", errors.New("mkcert returned an empty CA root")
+	}
+	caCertificate := filepath.Join(caRoot, "rootCA.pem")
+	certificate := filepath.Join(directory, "ingress-tls.crt")
+	privateKey := filepath.Join(directory, "ingress-tls.key")
+	for _, target := range []string{certificate, privateKey} {
+		if err := os.Remove(target); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return "", "", "", fmt.Errorf("remove previous development ingress certificate material: %w", err)
+		}
+	}
+	fmt.Printf("==> Generating mkcert TLS certificate for %s\n", host)
+	command := exec.Command(
+		mkcert,
+		"-cert-file", certificate,
+		"-key-file", privateKey,
+		host,
+	)
+	if err := run(root, command); err != nil {
+		return "", "", "", fmt.Errorf("generate mkcert development ingress certificate: %w", err)
+	}
+	if err := os.Chmod(certificate, 0o644); err != nil {
+		return "", "", "", fmt.Errorf("set development ingress certificate permissions: %w", err)
+	}
+	if err := os.Chmod(privateKey, 0o600); err != nil {
+		return "", "", "", fmt.Errorf("set development ingress private key permissions: %w", err)
+	}
+	if err := validateDevelopmentIngressCertificate(certificate, privateKey, caCertificate, host); err != nil {
+		return "", "", "", err
+	}
+	return certificate, privateKey, caCertificate, nil
+}
+
+func validateDevelopmentIngressCertificate(certificateFile, privateKeyFile, caFile, host string) error {
+	certificatePEM, err := os.ReadFile(certificateFile)
+	if err != nil {
+		return fmt.Errorf("read development ingress certificate: %w", err)
+	}
+	privateKeyPEM, err := os.ReadFile(privateKeyFile)
+	if err != nil {
+		return fmt.Errorf("read development ingress private key: %w", err)
+	}
+	pair, err := tls.X509KeyPair(certificatePEM, privateKeyPEM)
+	if err != nil || len(pair.Certificate) == 0 {
+		return errors.New("parse development ingress certificate pair")
+	}
+	leaf, err := x509.ParseCertificate(pair.Certificate[0])
+	if err != nil {
+		return errors.New("parse development ingress leaf certificate")
+	}
+	caPEM, err := os.ReadFile(caFile)
+	if err != nil {
+		return fmt.Errorf("read mkcert development CA: %w", err)
+	}
+	roots := x509.NewCertPool()
+	if !roots.AppendCertsFromPEM(caPEM) {
+		return errors.New("parse mkcert development CA")
+	}
+	if _, err := leaf.Verify(x509.VerifyOptions{DNSName: host, Roots: roots}); err != nil {
+		return fmt.Errorf("verify mkcert development ingress certificate: %w", err)
+	}
+	return nil
 }
 
 func importDevelopmentMaterial(directory string) bool {

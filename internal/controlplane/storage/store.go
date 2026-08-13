@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/uptrace/bun"
+	"github.com/uptrace/bun/dialect/mysqldialect"
 	"github.com/uptrace/bun/dialect/pgdialect"
 	"github.com/uptrace/bun/dialect/sqlitedialect"
 	_ "modernc.org/sqlite"
@@ -40,14 +41,15 @@ func Open(ctx context.Context, rawConfig Config) (*Store, error) {
 		return nil, err
 	}
 	var database *sql.DB
-	if config.Backend == BackendSQLite {
+	switch config.Backend {
+	case BackendSQLite:
 		dsn, prepareErr := prepareSQLite(config)
 		if prepareErr != nil {
 			return nil, prepareErr
 		}
 		database, err = sql.Open("sqlite", dsn)
-	} else {
-		postgresConfig, parseErr := pgx.ParseConfig(config.PostgreSQLDSN)
+	case BackendPostgreSQL:
+		postgresConfig, parseErr := pgx.ParseConfig(config.DatasourceURL)
 		if parseErr != nil {
 			return nil, errors.New("initialize PostgreSQL storage configuration")
 		}
@@ -58,6 +60,16 @@ func Open(ctx context.Context, rawConfig Config) (*Store, error) {
 		queryTimeoutMilliseconds := (config.QueryTimeout + time.Millisecond - 1) / time.Millisecond
 		postgresConfig.RuntimeParams["statement_timeout"] = strconv.FormatInt(int64(queryTimeoutMilliseconds), 10)
 		database = stdlib.OpenDB(*postgresConfig)
+	case BackendMySQL:
+		mysqlConfig, parseErr := parseMySQLURL(config.DatasourceURL)
+		if parseErr != nil {
+			return nil, errors.New("initialize MySQL storage configuration")
+		}
+		mysqlConfig.Timeout = config.ConnectTimeout
+		mysqlConfig.ReadTimeout = config.QueryTimeout
+		mysqlConfig.WriteTimeout = config.QueryTimeout
+		mysqlConfig.RejectReadOnly = true
+		database, err = sql.Open("mysql", mysqlConfig.FormatDSN())
 	}
 	if err != nil {
 		return nil, fmt.Errorf("initialize %s storage driver", config.Backend)
@@ -72,8 +84,11 @@ func Open(ctx context.Context, rawConfig Config) (*Store, error) {
 		return nil, fmt.Errorf("connect to %s storage: %w", config.Backend, err)
 	}
 	orm := bun.NewDB(database, pgdialect.New())
-	if config.Backend == BackendSQLite {
+	switch config.Backend {
+	case BackendSQLite:
 		orm = bun.NewDB(database, sqlitedialect.New())
+	case BackendMySQL:
+		orm = bun.NewDB(database, mysqldialect.New())
 	}
 	store := &Store{
 		db: database, orm: orm, backend: config.Backend, queryTimeout: config.QueryTimeout,
@@ -158,10 +173,22 @@ func (store *Store) migrate(ctx context.Context) error {
 		return errors.New("begin storage migration")
 	}
 	defer transaction.Rollback()
+	mysqlMigrationLock := false
+	defer func() {
+		if mysqlMigrationLock {
+			_, _ = transaction.ExecContext(context.WithoutCancel(ctx), `SELECT RELEASE_LOCK('kubeloop-storage-migration')`)
+		}
+	}()
 	if store.backend == BackendPostgreSQL {
 		if _, err := transaction.ExecContext(ctx, `SELECT pg_advisory_xact_lock(1263816527)`); err != nil {
 			return errors.New("acquire PostgreSQL migration lock")
 		}
+	} else if store.backend == BackendMySQL {
+		var acquired int
+		if err := transaction.QueryRowContext(ctx, `SELECT GET_LOCK('kubeloop-storage-migration', 10)`).Scan(&acquired); err != nil || acquired != 1 {
+			return errors.New("acquire MySQL migration lock")
+		}
+		mysqlMigrationLock = true
 	}
 	if _, err := transaction.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (
 		version INTEGER PRIMARY KEY,
@@ -181,8 +208,15 @@ func (store *Store) migrate(ctx context.Context) error {
 			continue
 		}
 		statements := migration.sqlite
-		if store.backend == BackendPostgreSQL {
+		switch store.backend {
+		case BackendPostgreSQL:
 			statements = migration.postgresql
+		case BackendMySQL:
+			if len(migration.mysql) > 0 {
+				statements = migration.mysql
+			} else {
+				statements = mysqlMigrationStatements(migration.sqlite)
+			}
 		}
 		for statementIndex, statement := range statements {
 			if _, err := transaction.ExecContext(ctx, statement); err != nil {
@@ -193,6 +227,12 @@ func (store *Store) migrate(ctx context.Context) error {
 		if _, err := transaction.ExecContext(ctx, insert, migration.version, formatTime(time.Now())); err != nil {
 			return fmt.Errorf("record storage migration %d", migration.version)
 		}
+	}
+	if mysqlMigrationLock {
+		if _, err := transaction.ExecContext(ctx, `SELECT RELEASE_LOCK('kubeloop-storage-migration')`); err != nil {
+			return errors.New("release MySQL migration lock")
+		}
+		mysqlMigrationLock = false
 	}
 	if err := transaction.Commit(); err != nil {
 		return errors.New("commit storage migration")
@@ -322,7 +362,7 @@ func (store *Store) WithinTransaction(ctx context.Context, function func(Reposit
 	}
 	for attempt := 0; ; attempt++ {
 		err := store.withinTransactionAttempt(ctx, function)
-		if err == nil || store.backend != BackendPostgreSQL ||
+		if err == nil || store.backend == BackendSQLite ||
 			!isRetryableTransactionError(err) || attempt >= store.transactionMaxRetries {
 			return err
 		}
@@ -334,7 +374,7 @@ func (store *Store) WithinTransaction(ctx context.Context, function func(Reposit
 
 func (store *Store) withinTransactionAttempt(ctx context.Context, function func(Repositories) error) error {
 	var options *sql.TxOptions
-	if store.backend == BackendPostgreSQL {
+	if store.backend != BackendSQLite {
 		options = &sql.TxOptions{Isolation: sql.LevelSerializable}
 	}
 	transaction, err := store.orm.BeginTx(ctx, options)

@@ -195,7 +195,7 @@ export interface ServerProfileState {
 
 export interface AuthMethod {
   id: string;
-  type: "oidc" | "local" | "anonymous";
+  type: "oidc" | "local";
   displayName?: string;
   interaction: "browser" | "none";
 }

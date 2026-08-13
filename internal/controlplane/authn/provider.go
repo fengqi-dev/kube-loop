@@ -10,17 +10,11 @@ import (
 
 type ProviderType string
 
-const (
-	ProviderOIDC      ProviderType = "oidc"
-	ProviderAnonymous ProviderType = "anonymous"
-)
+const ProviderOIDC ProviderType = "oidc"
 
 type Interaction string
 
-const (
-	InteractionBrowser Interaction = "browser"
-	InteractionNone    Interaction = "none"
-)
+const InteractionBrowser Interaction = "browser"
 
 type Descriptor struct {
 	ID          string       `json:"id"`
@@ -32,15 +26,12 @@ type Descriptor struct {
 // Identity is the normalized result of one successful upstream
 // authentication. It is not a Gateway token and grants no permissions.
 type Identity struct {
-	ProviderID string
-	Issuer     string
-	Subject    string
-	// DevelopmentSubject is reserved for explicitly enabled development
-	// authentication Providers. Production identities use OIDC.
-	DevelopmentSubject string
-	DisplayName        string
-	Email              string
-	Groups             []string
+	ProviderID  string
+	Issuer      string
+	Subject     string
+	DisplayName string
+	Email       string
+	Groups      []string
 }
 
 func (identity Identity) ExternalID() (string, error) {
@@ -56,12 +47,6 @@ func (identity Identity) ExternalID() (string, error) {
 			return "", errors.New("OIDC identity issuer must be an absolute HTTPS URL")
 		}
 		return issuer + "\x00" + subject, nil
-	case identity.DevelopmentSubject != "":
-		subject := strings.TrimSpace(identity.DevelopmentSubject)
-		if subject == "" || len(subject) > 256 {
-			return "", errors.New("development identity subject is invalid")
-		}
-		return subject, nil
 	default:
 		return "", errors.New("identity has no stable external ID")
 	}
@@ -108,9 +93,4 @@ type AuthorizationCodeProvider interface {
 	Provider
 	AuthorizationURL(state, nonce, pkceChallenge string) (string, error)
 	Exchange(context.Context, string, string, string) (Identity, error)
-}
-
-type AnonymousProvider interface {
-	Provider
-	AuthenticateAnonymous(context.Context) (Identity, error)
 }

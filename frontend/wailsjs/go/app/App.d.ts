@@ -20,6 +20,8 @@ export function Bootstrap():Promise<app.BootstrapData>;
 
 export function CancelServerFileTransfer(arg1:string,arg2:string):Promise<void>;
 
+export function CancelServerLogin():Promise<void>;
+
 export function CheckForUpdates():Promise<update.Info>;
 
 export function ClearServerFileTransferHistory(arg1:string):Promise<void>;
@@ -67,8 +69,6 @@ export function ListServerPortForwards(arg1:string):Promise<Array<portforward.In
 export function ListServerPreviews(arg1:string):Promise<Array<preview.Info>>;
 
 export function LoadServerInventory(arg1:string,arg2:string):Promise<app.RemoteInventory>;
-
-export function LoginServerAnonymous(arg1:string,arg2:string):Promise<app.AuthSession>;
 
 export function LoginServerOIDC(arg1:string,arg2:string):Promise<app.AuthSession>;
 

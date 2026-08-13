@@ -427,30 +427,56 @@ func TestStorageConfigurationSecurity(t *testing.T) {
 	if _, err := (Config{Backend: BackendSQLite, SQLitePath: "db", ControlPlaneReplicas: 2}).normalized(); err == nil {
 		t.Fatal("SQLite accepted multiple Control Plane replicas")
 	}
-	if _, err := (Config{Backend: BackendPostgreSQL, PostgreSQLDSN: "postgres://user:secret@db.example/test?sslmode=disable"}).normalized(); err == nil {
+	if _, err := (Config{DatasourceURL: "postgres://user:secret@db.example/test?sslmode=disable"}).normalized(); err == nil {
 		t.Fatal("PostgreSQL accepted disabled TLS")
 	}
-	if _, err := (Config{Backend: BackendPostgreSQL, PostgreSQLDSN: "postgres://user:secret@db.example/test?sslmode=prefer"}).normalized(); err == nil {
+	if _, err := (Config{DatasourceURL: "postgres://user:secret@db.example/test?sslmode=prefer"}).normalized(); err == nil {
 		t.Fatal("PostgreSQL accepted downgrade-capable preferred TLS")
 	}
-	if _, err := (Config{Backend: BackendPostgreSQL, PostgreSQLDSN: "postgres://user:secret@db.example/test?sslmode=require"}).normalized(); err != nil {
+	if _, err := (Config{DatasourceURL: "postgres://user:secret@db.example/test?sslmode=require"}).normalized(); err != nil {
 		t.Fatalf("PostgreSQL TLS config rejected: %v", err)
 	}
-	redacted := RedactedPostgreSQLDSN("postgres://user:secret@db.example/test?sslmode=require")
+	mysqlConfig, err := (Config{DatasourceURL: "mysql://user:secret@db.example/test?tls=true"}).normalized()
+	if err != nil || mysqlConfig.Backend != BackendMySQL {
+		t.Fatalf("MySQL datasource URL rejected: %#v, %v", mysqlConfig, err)
+	}
+	if _, err := (Config{DatasourceURL: "mysql://user:secret@db.example/test?tls=false"}).normalized(); err == nil {
+		t.Fatal("MySQL accepted disabled TLS")
+	}
+	if _, err := (Config{DatasourceURL: "mariadb://user:secret@db.example/test"}).normalized(); err == nil {
+		t.Fatal("unsupported datasource scheme was accepted")
+	}
+	redacted := RedactedDatasourceURL("postgres://user:secret@db.example/test?sslmode=require")
 	if strings.Contains(redacted, "secret") || !strings.Contains(redacted, "REDACTED") {
 		t.Fatalf("redacted DSN = %q", redacted)
 	}
-	redacted = RedactedPostgreSQLDSN("host=db.example user=app password=secret sslmode=require")
+	redacted = RedactedDatasourceURL("host=db.example user=app password=secret sslmode=require")
 	if strings.Contains(redacted, "secret") || !strings.Contains(redacted, "REDACTED") {
 		t.Fatalf("keyword DSN was not redacted: %q", redacted)
 	}
-	redacted = RedactedPostgreSQLDSN("host=db.example user=app password='secret with spaces' sslmode=require")
+	redacted = RedactedDatasourceURL("host=db.example user=app password='secret with spaces' sslmode=require")
 	if strings.Contains(redacted, "secret with spaces") || !strings.Contains(redacted, "REDACTED") {
 		t.Fatalf("quoted keyword DSN was not fully redacted: %q", redacted)
 	}
-	redacted = RedactedPostgreSQLDSN("postgres://user@db.example/test?sslmode=require&password=query-secret")
+	redacted = RedactedDatasourceURL("postgres://user@db.example/test?sslmode=require&password=query-secret")
 	if strings.Contains(redacted, "query-secret") || !strings.Contains(redacted, "REDACTED") {
 		t.Fatalf("URL query password was not redacted: %q", redacted)
+	}
+}
+
+func TestMySQLMigrationDialectConversion(t *testing.T) {
+	for _, migration := range migrations {
+		statements := migration.mysql
+		if len(statements) == 0 {
+			statements = mysqlMigrationStatements(migration.sqlite)
+		}
+		for _, statement := range statements {
+			for _, forbidden := range []string{"AUTOINCREMENT", " BLOB", "idempotency_`key`"} {
+				if strings.Contains(statement, forbidden) {
+					t.Fatalf("MySQL migration %d contains %q: %s", migration.version, forbidden, statement)
+				}
+			}
+		}
 	}
 }
 
@@ -471,33 +497,31 @@ func TestPostgreSQLDriverErrorsRemainRedactedAndRetryable(t *testing.T) {
 	}
 }
 
-func TestConfigFromEnvReadsDSNFileWithoutMixingSources(t *testing.T) {
+func TestConfigFromEnvReadsDatasourceURLFileWithoutMixingSources(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "dsn")
 	if err := os.WriteFile(file, []byte("postgres://user:secret@db.example/test?sslmode=require\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("KUBELOOP_STORAGE_TYPE", "postgresql")
-	t.Setenv("KUBELOOP_POSTGRESQL_DSN_FILE", file)
+	t.Setenv("KUBELOOP_DATASOURCE_URL_FILE", file)
 	config, err := ConfigFromEnv()
-	if err != nil || config.Backend != BackendPostgreSQL || config.PostgreSQLDSN == "" {
+	if err != nil || config.Backend != BackendPostgreSQL || config.DatasourceURL == "" {
 		t.Fatalf("ConfigFromEnv = %#v, %v", config, err)
 	}
-	t.Setenv("KUBELOOP_POSTGRESQL_DSN", "postgres://other:secret@db.example/test?sslmode=require")
+	t.Setenv("KUBELOOP_DATASOURCE_URL", "postgres://other:secret@db.example/test?sslmode=require")
 	if _, err := ConfigFromEnv(); err == nil {
 		t.Fatal("ConfigFromEnv accepted both DSN sources")
 	}
 }
 
-func TestConfigFromEnvParsesPostgreSQLPoolTimeoutAndRetrySettings(t *testing.T) {
-	t.Setenv("KUBELOOP_STORAGE_TYPE", "postgresql")
-	t.Setenv("KUBELOOP_POSTGRESQL_DSN", "postgres://user:secret@db.example/test?sslmode=require")
-	t.Setenv("KUBELOOP_POSTGRESQL_CONNECT_TIMEOUT", "7s")
-	t.Setenv("KUBELOOP_POSTGRESQL_QUERY_TIMEOUT", "3s")
-	t.Setenv("KUBELOOP_POSTGRESQL_MAX_OPEN_CONNECTIONS", "12")
-	t.Setenv("KUBELOOP_POSTGRESQL_MAX_IDLE_CONNECTIONS", "4")
-	t.Setenv("KUBELOOP_POSTGRESQL_CONNECTION_MAX_LIFETIME", "20m")
-	t.Setenv("KUBELOOP_POSTGRESQL_TRANSACTION_MAX_RETRIES", "5")
-	t.Setenv("KUBELOOP_POSTGRESQL_TRANSACTION_RETRY_BACKOFF", "40ms")
+func TestConfigFromEnvParsesDatasourcePoolTimeoutAndRetrySettings(t *testing.T) {
+	t.Setenv("KUBELOOP_DATASOURCE_URL", "postgres://user:secret@db.example/test?sslmode=require")
+	t.Setenv("KUBELOOP_DATASOURCE_CONNECT_TIMEOUT", "7s")
+	t.Setenv("KUBELOOP_DATASOURCE_QUERY_TIMEOUT", "3s")
+	t.Setenv("KUBELOOP_DATASOURCE_MAX_OPEN_CONNECTIONS", "12")
+	t.Setenv("KUBELOOP_DATASOURCE_MAX_IDLE_CONNECTIONS", "4")
+	t.Setenv("KUBELOOP_DATASOURCE_CONNECTION_MAX_LIFETIME", "20m")
+	t.Setenv("KUBELOOP_DATASOURCE_TRANSACTION_MAX_RETRIES", "5")
+	t.Setenv("KUBELOOP_DATASOURCE_TRANSACTION_RETRY_BACKOFF", "40ms")
 	config, err := ConfigFromEnv()
 	if err != nil {
 		t.Fatal(err)
@@ -508,9 +532,21 @@ func TestConfigFromEnvParsesPostgreSQLPoolTimeoutAndRetrySettings(t *testing.T) 
 		config.TransactionRetryBackoff != 40*time.Millisecond {
 		t.Fatalf("PostgreSQL tuning config = %#v", config)
 	}
-	t.Setenv("KUBELOOP_POSTGRESQL_MAX_OPEN_CONNECTIONS", "invalid")
-	if _, err := ConfigFromEnv(); err == nil || !strings.Contains(err.Error(), "KUBELOOP_POSTGRESQL_MAX_OPEN_CONNECTIONS") {
+	t.Setenv("KUBELOOP_DATASOURCE_MAX_OPEN_CONNECTIONS", "invalid")
+	if _, err := ConfigFromEnv(); err == nil || !strings.Contains(err.Error(), "decode storage environment") {
 		t.Fatalf("invalid PostgreSQL pool error = %v", err)
+	}
+}
+
+func TestConfigFromEnvParsesDatasourceSecurityBoolean(t *testing.T) {
+	t.Setenv("KUBELOOP_DATASOURCE_URL", "mysql://user:secret@db.example/test?tls=false")
+	t.Setenv("KUBELOOP_DATASOURCE_ALLOW_INSECURE", "true")
+	config, err := ConfigFromEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.Backend != BackendMySQL || !config.AllowInsecureDatasource || config.ControlPlaneReplicas != 1 {
+		t.Fatalf("environment config = %#v", config)
 	}
 }
 

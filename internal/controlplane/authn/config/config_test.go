@@ -46,34 +46,3 @@ func TestBuildRejectsUnknownOrIncompleteProvider(t *testing.T) {
 		t.Fatal("expected missing OIDC config rejection")
 	}
 }
-
-func TestBuildDevelopmentProvidersRequireExplicitMode(t *testing.T) {
-	anonymous := Provider{ID: "guest", Type: "anonymous", Anonymous: &AnonymousConfig{
-		DevelopmentIdentityConfig: DevelopmentIdentityConfig{Subject: "guest"},
-	}}
-	if _, err := Build(t.Context(), File{Providers: []Provider{anonymous}}); err == nil {
-		t.Fatal("anonymous provider was enabled without developmentMode")
-	}
-	registry, err := Build(t.Context(), File{DevelopmentMode: true, Providers: []Provider{
-		{ID: "guest", Type: "anonymous", Anonymous: &AnonymousConfig{
-			DevelopmentIdentityConfig: DevelopmentIdentityConfig{Subject: "guest"},
-		}},
-	}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	descriptors := registry.Descriptors()
-	if len(descriptors) != 1 || descriptors[0].Type != "anonymous" || descriptors[0].Interaction != "none" {
-		t.Fatalf("development descriptors = %#v", descriptors)
-	}
-}
-
-func TestBuildRejectsIncompleteDevelopmentProviders(t *testing.T) {
-	for _, provider := range []Provider{
-		{ID: "anonymous", Type: "anonymous"},
-	} {
-		if _, err := Build(t.Context(), File{DevelopmentMode: true, Providers: []Provider{provider}}); err == nil {
-			t.Fatalf("incomplete provider %#v was accepted", provider)
-		}
-	}
-}

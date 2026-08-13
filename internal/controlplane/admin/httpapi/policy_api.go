@@ -21,8 +21,9 @@ const (
 )
 
 type policySpec struct {
-	Version     int                             `json:"version"`
-	Assignments []adminauthorization.Assignment `json:"assignments"`
+	Version     int                                 `json:"version"`
+	Roles       []adminauthorization.RoleDefinition `json:"roles,omitempty"`
+	Assignments []adminauthorization.Assignment     `json:"assignments"`
 }
 
 type policyCheck struct {
@@ -45,7 +46,8 @@ func (api *readAPI) currentPolicy(ctx *echo.Context) error {
 	api.audit(request, subjectFromRequest(request), "admin.policy/read", "success")
 	document := map[string]any{
 		"active": state.Active, "etag": state.Pointer.ETag, "revision": state.Snapshot.Revision,
-		"spec": policySpec{Version: state.Snapshot.Version, Assignments: state.Snapshot.Assignments},
+		"spec":                 policySpec{Version: state.Snapshot.Version, Roles: state.Snapshot.Roles, Assignments: state.Snapshot.Assignments},
+		"availablePermissions": adminauthorization.AvailablePermissions(),
 	}
 	if state.Active {
 		document["createdAt"] = state.Revision.CreatedAt
@@ -243,6 +245,7 @@ func (api *readAPI) rollbackPolicy(ctx *echo.Context) error {
 func (spec policySpec) snapshot(revision uint64) adminauthorization.Snapshot {
 	return adminauthorization.Snapshot{
 		Version: spec.Version, Revision: revision,
+		Roles:       append([]adminauthorization.RoleDefinition(nil), spec.Roles...),
 		Assignments: append([]adminauthorization.Assignment(nil), spec.Assignments...),
 	}
 }

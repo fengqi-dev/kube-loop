@@ -37,17 +37,19 @@ const (
 type BrowserOpener func(string) error
 
 type Config struct {
-	HTTPClient     *http.Client
-	RequestTimeout time.Duration
-	LoginTimeout   time.Duration
-	OpenBrowser    BrowserOpener
+	HTTPClient      *http.Client
+	RequestTimeout  time.Duration
+	LoginTimeout    time.Duration
+	OpenBrowser     BrowserOpener
+	BrowserCallback func()
 }
 
 type Client struct {
-	httpClient     *http.Client
-	requestTimeout time.Duration
-	loginTimeout   time.Duration
-	openBrowser    BrowserOpener
+	httpClient      *http.Client
+	requestTimeout  time.Duration
+	loginTimeout    time.Duration
+	openBrowser     BrowserOpener
+	browserCallback func()
 }
 
 type tokenResponse struct {
@@ -110,33 +112,10 @@ func New(config Config) *Client {
 	}
 	clone := *httpClient
 	clone.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	return &Client{httpClient: &clone, requestTimeout: requestTimeout, loginTimeout: loginTimeout, openBrowser: config.OpenBrowser}
-}
-
-func (client *Client) LoginAnonymous(
-	ctx context.Context,
-	baseURL, providerID, deviceID string,
-) (credentials.Credential, error) {
-	baseURL, err := validateTarget(baseURL, providerID)
-	if err != nil {
-		return credentials.Credential{}, err
+	return &Client{
+		httpClient: &clone, requestTimeout: requestTimeout, loginTimeout: loginTimeout,
+		openBrowser: config.OpenBrowser, browserCallback: config.BrowserCallback,
 	}
-	deviceID = strings.TrimSpace(deviceID)
-	if deviceID == "" {
-		return credentials.Credential{}, errors.New("device ID is required")
-	}
-	var response tokenResponse
-	metadata, err := client.discoverProvider(ctx, baseURL)
-	if err != nil {
-		return credentials.Credential{}, err
-	}
-	if err := client.postForm(ctx, metadata.TokenEndpoint, url.Values{
-		"grant_type": {"urn:kubeloop:params:oauth:grant-type:anonymous"}, "provider": {providerID},
-		"client_id": {DefaultClientID}, "device_id": {deviceID}, "scope": {"kubeloop.api"},
-	}, &response); err != nil {
-		return credentials.Credential{}, err
-	}
-	return credentialFromResponse(response, deviceID)
 }
 
 func (client *Client) LoginOIDC(
@@ -210,6 +189,9 @@ func (client *Client) LoginOIDC(
 	var result callbackResult
 	select {
 	case result = <-callback:
+		if client.browserCallback != nil {
+			client.browserCallback()
+		}
 	case <-loginContext.Done():
 		_ = server.Close()
 		<-serveDone
@@ -385,9 +367,13 @@ func newLoopbackServer(expectedState string, result chan<- callbackResult) *http
 		}
 		select {
 		case result <- callbackResult{code: code}:
-			writer.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			closeScript := "window.close();"
+			digest := sha256.Sum256([]byte(closeScript))
+			writer.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'sha256-"+
+				base64.StdEncoding.EncodeToString(digest[:])+"'; frame-ancestors 'none'; base-uri 'none'")
+			writer.Header().Set("Content-Type", "text/html; charset=utf-8")
 			writer.WriteHeader(http.StatusOK)
-			_, _ = writer.Write([]byte("KubeLoop login complete. You can close this window.\n"))
+			_, _ = writer.Write([]byte("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><title>KubeLoop login complete</title></head><body><p>Login complete. Returning to KubeLoop…</p><script>" + closeScript + "</script></body></html>"))
 		default:
 			http.Error(writer, "login callback already consumed", http.StatusConflict)
 		}

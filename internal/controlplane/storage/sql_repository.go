@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	mysqldriver "github.com/go-sql-driver/mysql"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/uptrace/bun"
@@ -39,6 +40,28 @@ func (base repositoryBase) bind(query string) string {
 		}
 	}
 	return builder.String()
+}
+
+func (base repositoryBase) withMySQLTransaction(ctx context.Context, function func(sqlExecutor) error) error {
+	if transaction, ok := base.executor.(*sql.Tx); ok {
+		return function(transaction)
+	}
+	database, ok := base.executor.(*sql.DB)
+	if !ok {
+		return errors.New("MySQL transaction executor is unavailable")
+	}
+	transaction, err := database.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	if err != nil {
+		return databaseError("begin MySQL storage transaction", err)
+	}
+	defer transaction.Rollback()
+	if err := function(transaction); err != nil {
+		return err
+	}
+	if err := transaction.Commit(); err != nil {
+		return databaseError("commit MySQL storage transaction", err)
+	}
+	return nil
 }
 
 func validateUUID(id, field string) error {
@@ -97,10 +120,11 @@ func mapWriteError(err error) error {
 
 func isRetryableTransactionError(err error) bool {
 	var postgresError *pgconn.PgError
-	if !errors.As(err, &postgresError) {
-		return false
+	if errors.As(err, &postgresError) {
+		return postgresError.Code == "40001" || postgresError.Code == "40P01"
 	}
-	return postgresError.Code == "40001" || postgresError.Code == "40P01"
+	var mysqlError *mysqldriver.MySQLError
+	return errors.As(err, &mysqlError) && (mysqlError.Number == 1205 || mysqlError.Number == 1213)
 }
 
 type repositorySet struct {

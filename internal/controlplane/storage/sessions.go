@@ -158,7 +158,7 @@ func (repository *sessionRepository) Heartbeat(
 	result, err := repository.orm.NewUpdate().Model((*sessionRow)(nil)).
 		Set("generation = generation + 1").Set("updated_at = ?", formatTime(updatedAt)).
 		Set("last_heartbeat_at = ?", formatTime(updatedAt)).Set("expires_at = ?", formatTime(expiresAt)).
-		Set("network_spec_json = ?", canonicalSpec).Set("network_spec_hash = ?", canonicalHash).
+		Set("network_spec_json = ?", string(canonicalSpec)).Set("network_spec_hash = ?", canonicalHash).
 		Where("id = ?", id).Where("generation = ?", int64(generation)).Where("state = ?", "active").Exec(ctx)
 	if err != nil {
 		return mapWriteError(err)
@@ -221,6 +221,11 @@ func (repository *sessionRepository) DeleteExpired(ctx context.Context, before t
 				WHERE t.session_id = s.id
 			) ORDER BY s.expires_at LIMIT $2
 		)`
+	} else if repository.backend == BackendMySQL {
+		query = `DELETE FROM sessions WHERE expires_at < ? AND NOT EXISTS (
+			SELECT 1 FROM tasks AS t INNER JOIN resource_snapshots AS r ON r.task_id = t.id
+			WHERE t.session_id = sessions.id
+		) ORDER BY expires_at LIMIT ?`
 	} else {
 		query = repository.bind(query)
 	}

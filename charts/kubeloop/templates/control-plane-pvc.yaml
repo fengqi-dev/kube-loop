@@ -1,4 +1,4 @@
-{{- if and (eq .Values.controlPlane.storage.type "sqlite") .Values.controlPlane.storage.sqlite.persistence.enabled (not .Values.controlPlane.storage.sqlite.persistence.existingClaim) }}
+{{- if and (not .Values.controlPlane.storage.datasource.existingSecret) .Values.controlPlane.storage.sqlite.persistence.enabled (not .Values.controlPlane.storage.sqlite.persistence.existingClaim) }}
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:

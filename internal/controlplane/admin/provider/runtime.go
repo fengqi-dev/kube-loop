@@ -207,7 +207,7 @@ func (runtime *Runtime) build(ctx context.Context, override *adminrevision.Provi
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
-	file := authconfig.File{DevelopmentMode: runtime.baseline.DevelopmentMode, Providers: make([]authconfig.Provider, 0, len(ids))}
+	file := authconfig.File{Providers: make([]authconfig.Provider, 0, len(ids))}
 	for _, id := range ids {
 		file.Providers = append(file.Providers, providers[id])
 	}

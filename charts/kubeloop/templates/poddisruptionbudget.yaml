@@ -1,4 +1,4 @@
-{{- if and .Values.podDisruptionBudget.controlPlane.enabled (eq .Values.controlPlane.storage.type "postgresql") (gt (int .Values.controlPlane.replicas) 1) }}
+{{- if and .Values.podDisruptionBudget.controlPlane.enabled .Values.controlPlane.storage.datasource.existingSecret (gt (int .Values.controlPlane.replicas) 1) }}
 {{- if or (lt (int .Values.podDisruptionBudget.controlPlane.minAvailable) 1) (ge (int .Values.podDisruptionBudget.controlPlane.minAvailable) (int .Values.controlPlane.replicas) ) }}
 {{- fail "podDisruptionBudget.controlPlane.minAvailable must be at least 1 and lower than controlPlane.replicas" }}
 {{- end }}

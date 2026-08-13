@@ -124,6 +124,8 @@ func (repository *tokenFamilyRepository) DeleteExpired(ctx context.Context, befo
 		query = `DELETE FROM token_families WHERE ctid IN (
 			SELECT ctid FROM token_families WHERE expires_at < $1 ORDER BY expires_at LIMIT $2
 		)`
+	} else if repository.backend == BackendMySQL {
+		query = `DELETE FROM token_families WHERE expires_at < ? ORDER BY expires_at LIMIT ?`
 	} else {
 		query = repository.bind(query)
 	}

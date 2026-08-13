@@ -100,44 +100,6 @@ type Client struct {
 	Scopes        []string
 }
 
-func (service *Service) AuthenticateAnonymous(ctx context.Context, providerID string) (ExchangeResult, error) {
-	providerID = strings.TrimSpace(providerID)
-	provider, ok := service.providers.Provider(providerID)
-	if !ok {
-		return ExchangeResult{}, ErrUnknownProvider
-	}
-	anonymousProvider, ok := provider.(authn.AnonymousProvider)
-	if !ok {
-		return ExchangeResult{}, ErrInvalidRequest
-	}
-	identity, err := anonymousProvider.AuthenticateAnonymous(ctx)
-	if err != nil {
-		return ExchangeResult{}, err
-	}
-	return service.persistDirectIdentity(ctx, providerID, identity)
-}
-
-func (service *Service) persistDirectIdentity(
-	ctx context.Context,
-	providerID string,
-	identity authn.Identity,
-) (ExchangeResult, error) {
-	externalID, err := identity.ExternalID()
-	if err != nil || identity.ProviderID != providerID {
-		return ExchangeResult{}, errors.New("authentication provider returned an invalid identity")
-	}
-	now := service.now().UTC()
-	principal, err := service.store.Principals().Upsert(ctx, storage.Principal{
-		ID: uuid.NewString(), Provider: identity.ProviderID, ExternalID: externalID,
-		DisplayName: identity.DisplayName, Email: identity.Email, Groups: identity.Groups,
-		CreatedAt: now, UpdatedAt: now,
-	})
-	if err != nil {
-		return ExchangeResult{}, errors.New("persist authenticated identity")
-	}
-	return ExchangeResult{Principal: principal}, nil
-}
-
 func New(providers *authn.Registry, store Store, config Config) (*Service, error) {
 	if providers == nil || store == nil {
 		return nil, errors.New("login providers and store are required")

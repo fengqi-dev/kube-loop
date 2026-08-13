@@ -18,6 +18,7 @@ var localLoginTemplate = template.Must(template.New("local-login").Parse(localLo
 
 type localLoginPage struct {
 	Transaction string
+	Action      string
 }
 
 func (routes *Routes) localLoginStyles(ctx *echo.Context) error {

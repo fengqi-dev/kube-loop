@@ -29,11 +29,7 @@ func TestRuntimeUsesOnlyAllowlistedAliasesAndAtomicallyInstallsAggregate(t *test
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	baseline := authconfig.File{DevelopmentMode: true, Providers: []authconfig.Provider{{
-		ID: "managed", Type: "anonymous", Anonymous: &authconfig.AnonymousConfig{
-			DevelopmentIdentityConfig: authconfig.DevelopmentIdentityConfig{Subject: "developer"},
-		},
-	}}}
+	baseline := authconfig.File{}
 	registry, err := authconfig.Build(context.Background(), baseline)
 	if err != nil {
 		t.Fatal(err)
@@ -67,7 +63,7 @@ func TestRuntimeUsesOnlyAllowlistedAliasesAndAtomicallyInstallsAggregate(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(registry.Descriptors()) != 1 {
+	if len(registry.Descriptors()) != 0 {
 		t.Fatal("Prepare mutated the live Registry")
 	}
 	install()

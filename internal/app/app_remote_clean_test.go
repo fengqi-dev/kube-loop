@@ -46,7 +46,7 @@ func TestCleanDirectoryWithOnlyServerURLBrowsesRemoteInventory(t *testing.T) {
 			_ = json.NewEncoder(writer).Encode(clientdiscovery.Document{
 				ServiceID: "clean-service", PublicURL: server.URL, TunnelPath: "/tunnel",
 				APIVersions: []string{"v2"}, ProtocolMin: "2.0", ProtocolMax: "2.0", ServerVersion: "2.0.0",
-				AuthMethods: []clientdiscovery.AuthMethod{{ID: "guest", Type: "anonymous", Interaction: "none"}},
+				AuthMethods: []clientdiscovery.AuthMethod{{ID: "local", Type: "local", Interaction: "browser"}},
 			})
 		case "/.well-known/openid-configuration":
 			_ = json.NewEncoder(writer).Encode(map[string]any{"issuer": server.URL,
@@ -97,7 +97,10 @@ func TestCleanDirectoryWithOnlyServerURLBrowsesRemoteInventory(t *testing.T) {
 	if err != nil || profileResult.Profile.ID != "clean-service" {
 		t.Fatalf("save URL-only profile = %#v, %v", profileResult, err)
 	}
-	if _, err := application.LoginServerAnonymous("clean-service", "guest"); err != nil {
+	if err := credentialStore.Set("clean-service", credentials.Credential{
+		AccessToken: "clean-access", RefreshToken: "clean-refresh", DeviceID: "clean-device",
+		AccessExpiresAt: time.Now().Add(time.Hour), RefreshExpiresAt: time.Now().Add(24 * time.Hour),
+	}); err != nil {
 		t.Fatal(err)
 	}
 	inventory, err := application.LoadServerInventory("clean-service", "")

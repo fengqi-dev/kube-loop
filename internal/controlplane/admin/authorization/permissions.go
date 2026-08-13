@@ -1,5 +1,7 @@
 package authorization
 
+import "slices"
+
 type scope uint8
 
 const (
@@ -152,6 +154,18 @@ var rolePermissions = compilePermissions(map[Role][]permission{
 		{ResourceTask, OperationRead, scopeNamespace}, {ResourceTask, OperationList, scopeNamespace},
 	},
 })
+
+func AvailablePermissions() []string {
+	permissions := rolePermissions[RolePlatformAdmin]
+	result := make([]string, 0)
+	for resource, operations := range permissions {
+		for operation := range operations {
+			result = append(result, Request{Resource: resource, Operation: operation}.Key())
+		}
+	}
+	slices.Sort(result)
+	return result
+}
 
 func compilePermissions(source map[Role][]permission) map[Role]map[Resource]map[Operation]scope {
 	result := make(map[Role]map[Resource]map[Operation]scope, len(source))

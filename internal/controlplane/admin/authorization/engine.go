@@ -15,6 +15,7 @@ import (
 
 var (
 	assignmentIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
+	roleIDPattern       = regexp.MustCompile(`^[a-z][a-z0-9-]{2,63}$`)
 	namespacePattern    = regexp.MustCompile(`^[a-z0-9](?:[-a-z0-9]{0,61}[a-z0-9])?$`)
 )
 
@@ -68,6 +69,7 @@ type compiledSnapshot struct {
 	revision    uint64
 	etag        uint64
 	available   bool
+	roles       map[Role]map[string]struct{}
 	assignments []compiledAssignment
 }
 
@@ -144,7 +146,7 @@ func (engine *Engine) DelegatedNamespaces(subject Subject) []string {
 	}
 	namespaces := make(map[string]struct{})
 	for _, assignment := range snapshot.assignments {
-		if assignment.role != RoleNamespaceAdmin || !assignment.matchesSubject(subject) {
+		if len(assignment.namespaces) == 0 || !assignment.matchesSubject(subject) {
 			continue
 		}
 		for namespace := range assignment.namespaces {
@@ -243,7 +245,7 @@ func (engine *Engine) Authorize(ctx context.Context, subject Subject, request Re
 	}
 	if subject.Authentication == AuthenticationNormal && snapshot != nil {
 		for _, assignment := range snapshot.assignments {
-			if assignment.matches(subject, request) && roleAllows(assignment.role, request) {
+			if assignment.matches(subject, request) && snapshot.roleAllows(assignment.role, request) {
 				return allowedDecision(request, revision, assignment.role, assignment.id, AuthenticationNormal)
 			}
 		}
@@ -320,11 +322,19 @@ func (assignment compiledAssignment) matches(subject Subject, request Request) b
 	if !assignment.matchesSubject(subject) {
 		return false
 	}
-	if assignment.role != RoleNamespaceAdmin {
+	if len(assignment.namespaces) == 0 {
 		return true
 	}
 	_, namespaceMatch := assignment.namespaces[request.Namespace]
 	return namespaceMatch
+}
+
+func (snapshot *compiledSnapshot) roleAllows(role Role, request Request) bool {
+	if permissions, exists := snapshot.roles[role]; exists {
+		_, allowed := permissions[request.Key()]
+		return allowed
+	}
+	return roleAllows(role, request)
 }
 
 func (assignment compiledAssignment) matchesSubject(subject Subject) bool {
@@ -367,7 +377,37 @@ func compileSnapshot(snapshot Snapshot) (*compiledSnapshot, error) {
 	seen := make(map[string]struct{}, len(snapshot.Assignments))
 	compiled := &compiledSnapshot{
 		revision: snapshot.Revision, available: true,
+		roles:       make(map[Role]map[string]struct{}, len(snapshot.Roles)),
 		assignments: make([]compiledAssignment, 0, len(snapshot.Assignments)),
+	}
+	for index, role := range snapshot.Roles {
+		role.ID = Role(strings.TrimSpace(string(role.ID)))
+		role.DisplayName = strings.TrimSpace(role.DisplayName)
+		role.Description = strings.TrimSpace(role.Description)
+		if !roleIDPattern.MatchString(string(role.ID)) || len(role.DisplayName) == 0 || len(role.DisplayName) > 128 || len(role.Description) > 512 {
+			return nil, fmt.Errorf("management role %d is invalid", index)
+		}
+		if _, reserved := rolePermissions[role.ID]; reserved {
+			return nil, fmt.Errorf("management role %q conflicts with a built-in role", role.ID)
+		}
+		if _, duplicate := compiled.roles[role.ID]; duplicate {
+			return nil, fmt.Errorf("management role %d has duplicate ID %q", index, role.ID)
+		}
+		if len(role.Permissions) == 0 || len(role.Permissions) > 256 {
+			return nil, fmt.Errorf("management role %q requires one to 256 permissions", role.ID)
+		}
+		permissions := make(map[string]struct{}, len(role.Permissions))
+		for _, permission := range role.Permissions {
+			permission = strings.TrimSpace(permission)
+			if !validPermissionKey(permission) {
+				return nil, fmt.Errorf("management role %q contains unsupported permission %q", role.ID, permission)
+			}
+			if _, duplicate := permissions[permission]; duplicate {
+				return nil, fmt.Errorf("management role %q contains duplicate permission %q", role.ID, permission)
+			}
+			permissions[permission] = struct{}{}
+		}
+		compiled.roles[role.ID] = permissions
 	}
 	for index, assignment := range snapshot.Assignments {
 		assignment.ID = strings.TrimSpace(assignment.ID)
@@ -378,7 +418,9 @@ func compileSnapshot(snapshot Snapshot) (*compiledSnapshot, error) {
 			return nil, fmt.Errorf("management assignment %d has duplicate ID %q", index, assignment.ID)
 		}
 		seen[assignment.ID] = struct{}{}
-		if _, exists := rolePermissions[assignment.Role]; !exists {
+		_, builtIn := rolePermissions[assignment.Role]
+		_, custom := compiled.roles[assignment.Role]
+		if !builtIn && !custom {
 			return nil, fmt.Errorf("management assignment %q has unsupported role %q", assignment.ID, assignment.Role)
 		}
 		subjects, err := compileSubjects(assignment.Subjects, "subjects")
@@ -399,7 +441,7 @@ func compileSnapshot(snapshot Snapshot) (*compiledSnapshot, error) {
 		if assignment.Role == RoleNamespaceAdmin && len(namespaces) == 0 {
 			return nil, fmt.Errorf("management assignment %q namespace-admin requires namespaces", assignment.ID)
 		}
-		if assignment.Role != RoleNamespaceAdmin && len(namespaces) != 0 {
+		if builtIn && assignment.Role != RoleNamespaceAdmin && len(namespaces) != 0 {
 			return nil, fmt.Errorf("management assignment %q role %q must not declare namespace delegation", assignment.ID, assignment.Role)
 		}
 		compiled.assignments = append(compiled.assignments, compiledAssignment{
@@ -408,6 +450,18 @@ func compileSnapshot(snapshot Snapshot) (*compiledSnapshot, error) {
 		})
 	}
 	return compiled, nil
+}
+
+func validPermissionKey(value string) bool {
+	if !strings.HasPrefix(value, "admin.") {
+		return false
+	}
+	resourceValue, operationValue, ok := strings.Cut(strings.TrimPrefix(value, "admin."), "/")
+	if !ok || resourceValue == "" || operationValue == "" || strings.Contains(operationValue, "/") {
+		return false
+	}
+	resource, operation := Resource(resourceValue), Operation(operationValue)
+	return rolePermissions[RolePlatformAdmin][resource][operation] != 0
 }
 
 func normalize(subject Subject, request Request) (Subject, Request, bool) {

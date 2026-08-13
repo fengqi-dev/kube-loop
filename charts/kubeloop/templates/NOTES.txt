@@ -13,9 +13,11 @@ Initial Management Plane administrator:
   Password: kubectl -n {{ .Release.Namespace }} get secret {{ include "kubeloop.initialAdminSecretName" . }} -o jsonpath='{.data.{{ .Values.controlPlane.management.initialAdmin.passwordKey }}}' | base64 -d
 
 The Secret is only a bootstrap input. Password values are not applied again
-after the local administrator exists in Control Plane storage. The Management
-Plane is not exposed on the public Control Plane port. Start a local tunnel:
+after the local administrator exists in Control Plane storage.
+{{- if and (not .Values.ingress.enabled) (not .Values.gatewayAPI.enabled) }}
+Start a local tunnel:
   kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "kubeloop.controlPlaneManagementName" . }} 8081:{{ .Values.controlPlane.management.servicePort }}
+{{- end }}
 Then sign in at:
   {{ required "controlPlane.management.publicURL is required" .Values.controlPlane.management.publicURL }}/api/admin/ui
 TOTP is optional. A user may enable it from Account Security and must then save
@@ -25,21 +27,19 @@ the one-time recovery codes; users who do not enroll continue with password-only
 {{- if and (not .Values.ingress.enabled) (not .Values.gatewayAPI.enabled) }}
 Chart-managed external routing is disabled. Route the same public HTTPS origin as follows:
   /.well-known, /oauth2, /kubeloop/api and /api/sessions -> {{ include "kubeloop.controlPlaneName" . }}
+  /api/admin -> {{ include "kubeloop.controlPlaneManagementName" . }}
   {{ .Values.dataPlane.tunnelPath }} -> {{ include "kubeloop.dataPlaneName" . }}
 {{- end }}
-The Management Plane port is intentionally excluded from chart-managed Ingress
-and Gateway API routes. If you publish it, use a separate restricted origin and
-set controlPlane.management.publicURL to that exact origin.
 {{- if .Values.ingress.enabled }}
-External access uses networking.k8s.io/v1 Ingress for {{ .Values.ingress.host }}.
+External access, including the Management Plane, uses networking.k8s.io/v1 Ingress for {{ .Values.ingress.host }}.
 {{- end }}
 {{- if .Values.gatewayAPI.enabled }}
-External access uses gateway.networking.k8s.io/v1 HTTPRoute for {{ .Values.gatewayAPI.host }}.
+External access, including the Management Plane, uses gateway.networking.k8s.io/v1 HTTPRoute for {{ .Values.gatewayAPI.host }}.
 Confirm the Route Accepted/ResolvedRefs conditions and HTTPS listener certificate before login.
 {{- end }}
 
-Storage mode: {{ .Values.controlPlane.storage.type }}
-{{- if eq .Values.controlPlane.storage.type "sqlite" }}
+Storage mode: {{ ternary "external datasource" "SQLite" (not (empty .Values.controlPlane.storage.datasource.existingSecret)) }}
+{{- if not .Values.controlPlane.storage.datasource.existingSecret }}
 SQLite mode intentionally runs one Control Plane replica with Recreate updates.
-Use controlPlane.storage.type=postgresql for future Control Plane HA.
+Configure controlPlane.storage.datasource.existingSecret with a PostgreSQL or MySQL datasource URL for external storage.
 {{- end }}

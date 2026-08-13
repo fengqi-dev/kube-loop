@@ -4,6 +4,7 @@ type migration struct {
 	version    int
 	sqlite     []string
 	postgresql []string
+	mysql      []string
 }
 
 var migrations = []migration{{
@@ -649,6 +650,67 @@ var migrations = []migration{{
 		`ALTER TABLE auth_exchanges ADD COLUMN redirect_uri TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE auth_exchanges ADD COLUMN scope TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE auth_exchanges ADD COLUMN nonce TEXT NOT NULL DEFAULT ''`,
+	},
+}, {
+	version: 15,
+	sqlite: []string{
+		`ALTER TABLE admin_assignments RENAME TO admin_assignments_fixed_roles`,
+		`CREATE TABLE admin_assignments (
+			id TEXT NOT NULL,
+			schema_version INTEGER NOT NULL CHECK (schema_version >= 1),
+			policy_revision INTEGER NOT NULL REFERENCES admin_policy_revisions(revision) ON DELETE RESTRICT,
+			role TEXT NOT NULL,
+			subjects_json TEXT NOT NULL,
+			groups_json TEXT NOT NULL,
+			namespaces_json TEXT NOT NULL,
+			created_at TEXT NOT NULL,
+			PRIMARY KEY(policy_revision, id)
+		)`,
+		`INSERT INTO admin_assignments(id, schema_version, policy_revision, role, subjects_json, groups_json, namespaces_json, created_at)
+			SELECT id, schema_version, policy_revision, role, subjects_json, groups_json, namespaces_json, created_at
+			FROM admin_assignments_fixed_roles`,
+		`DROP TABLE admin_assignments_fixed_roles`,
+		`CREATE INDEX admin_assignments_revision_idx ON admin_assignments(policy_revision, role, id)`,
+	},
+	postgresql: []string{
+		`ALTER TABLE admin_assignments RENAME TO admin_assignments_fixed_roles`,
+		`CREATE TABLE admin_assignments (
+			id TEXT NOT NULL,
+			schema_version INTEGER NOT NULL CHECK (schema_version >= 1),
+			policy_revision BIGINT NOT NULL REFERENCES admin_policy_revisions(revision) ON DELETE RESTRICT,
+			role TEXT NOT NULL,
+			subjects_json JSONB NOT NULL,
+			groups_json JSONB NOT NULL,
+			namespaces_json JSONB NOT NULL,
+			created_at TEXT NOT NULL,
+			PRIMARY KEY(policy_revision, id)
+		)`,
+		`INSERT INTO admin_assignments(id, schema_version, policy_revision, role, subjects_json, groups_json, namespaces_json, created_at)
+			SELECT id, schema_version, policy_revision, role, subjects_json, groups_json, namespaces_json, created_at
+			FROM admin_assignments_fixed_roles`,
+		`DROP TABLE admin_assignments_fixed_roles`,
+		`CREATE INDEX admin_assignments_revision_idx ON admin_assignments(policy_revision, role, id)`,
+	},
+	mysql: []string{
+		`CREATE TABLE admin_assignments_custom_roles (
+			id VARCHAR(128) NOT NULL,
+			schema_version INTEGER NOT NULL CHECK (schema_version >= 1),
+			policy_revision BIGINT NOT NULL,
+			role VARCHAR(128) NOT NULL,
+			subjects_json LONGTEXT NOT NULL,
+			groups_json LONGTEXT NOT NULL,
+			namespaces_json LONGTEXT NOT NULL,
+			created_at VARCHAR(64) NOT NULL,
+			PRIMARY KEY(policy_revision, id),
+			CONSTRAINT fk_admin_assignments_custom_roles_policy FOREIGN KEY(policy_revision)
+				REFERENCES admin_policy_revisions(revision) ON DELETE RESTRICT
+		)`,
+		`INSERT INTO admin_assignments_custom_roles(id, schema_version, policy_revision, role, subjects_json, groups_json, namespaces_json, created_at)
+			SELECT id, schema_version, policy_revision, role, subjects_json, groups_json, namespaces_json, created_at
+			FROM admin_assignments`,
+		`DROP TABLE admin_assignments`,
+		`RENAME TABLE admin_assignments_custom_roles TO admin_assignments`,
+		`CREATE INDEX admin_assignments_revision_idx ON admin_assignments(policy_revision, role, id)`,
 	},
 }}
 

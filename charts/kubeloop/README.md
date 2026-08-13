@@ -32,6 +32,7 @@ The chart routes the same origin without rewriting paths:
 | `/oauth2/*` | Control Plane OAuth 2.0 / OIDC Authorization Server |
 | `/kubeloop/api/*` | Control Plane public port |
 | `/api/sessions/*` | Control Plane Session API |
+| `/api/admin/*` | Isolated Management Service |
 | `/tunnel` | Data Plane WebSocket endpoint |
 
 The Control Plane publishes that exact value in discovery and derives every OIDC
@@ -39,30 +40,33 @@ callback as `<publicURL>/oauth2/callback/<providerID>`. Helm fails rendering whe
 a chart-managed route uses another hostname, when TLS is disabled, or when both
 Ingress and HTTPRoute are enabled.
 
-The browser Management Plane listens on a separate port and is intentionally
-excluded from the chart-managed Ingress and Gateway API routes. By default,
-open it through a local tunnel:
+The browser Management Plane listens on a separate port. Chart-managed Ingress
+and Gateway API routes expose `/api/admin/*` on the same HTTPS origin while
+keeping the Service itself private. Set `controlPlane.management.publicURL` to
+the same value as `publicURL` when either route is enabled.
+
+Without a chart-managed external route, open it through a local tunnel:
 
 ```shell
 kubectl -n kubeloop port-forward svc/kubeloop-control-plane-management 8081:8081
 ```
 
-Then visit `http://127.0.0.1:8081/api/admin/ui`. The public Control
-Plane listener returns 404 for `/api/admin/*`; the management Service
-is always ClusterIP even if the public Service is a LoadBalancer. To publish
-management access, use a separate restricted HTTPS origin and configure its exact value:
+Then visit `http://127.0.0.1:8081/api/admin/ui`. The management Service remains
+ClusterIP even if the public Service is a LoadBalancer. For same-origin access:
 
 ```yaml
 controlPlane:
   management:
-    publicURL: https://admin.kubeloop.example.com
+    publicURL: https://kubeloop.example.com
     listenPort: 8081
     servicePort: 8081
 ```
 
-For a Kubernetes Ingress, configure the timeout and request-size annotations
-required by the selected Ingress controlPlane. For example, ingress-nginx can be
-configured as follows; `proxy-body-size` should not exceed the Control Plane's
+For a Kubernetes Ingress, the chart routes `/api/admin` to the isolated
+Management Service on the same HTTPS origin. Configure the timeout and
+request-size annotations required by the selected Ingress controller. For
+example, ingress-nginx can be configured as follows; `proxy-body-size` should
+not exceed the Control Plane's
 `maxRequestBodyBytes` unless the backend is intentionally the tighter limit:
 
 ```yaml
@@ -259,7 +263,7 @@ generation-bound RelayTicket. Active streams are not described as migrated.
 
 ## OIDC Provider
 
-Create the confidential client secret separately, then reference it from values. The Secret is projected only into the Control Plane; issuer/client metadata is written to a separate ConfigMap and the Data Plane receives neither.
+Create the confidential client secret separately, then reference it from values. The Secret is projected only into the Control Plane; issuer/client metadata is written to the unified `control-plane.yaml` ConfigMap and the Data Plane receives neither.
 
 ```yaml
 controlPlane:
@@ -364,10 +368,6 @@ Use a Regular Web Application with Client Secret Basic or Client Secret Post,
 RS256 signing and callback `https://<public-origin>/oauth2/callback/auth0`.
 Populate the namespaced group claim with an Auth0 Action when group-based policy
 is required.
-
-## Development authentication (unsafe for production)
-
-Anonymous mode requires `controlPlane.auth.developmentMode=true` and an `anonymous` Provider. It asks for no credential and therefore must never be enabled on a production or untrusted network. After login, Control Plane issues the same short-lived, refreshable Gateway Token Family used by OIDC, so authorization, audit, Session and WSS enforcement are unchanged. Control Plane emits a high-visibility `SECURITY WARNING` at every startup while it is enabled; discovery advertises `type: anonymous`, `interaction: none`.
 
 ## Gateway Policy
 
@@ -750,7 +750,7 @@ controlPlane:
         matchLabels: {app.kubernetes.io/component: control-plane}
 ```
 
-The Control Plane PodDisruptionBudget is enabled by default only when PostgreSQL
+The Control Plane PodDisruptionBudget is enabled by default only when an external datasource
 mode has more than one Control Plane replica. SQLite never renders a PDB, so its
 single Pod cannot block voluntary node maintenance. Helm rejects a
 `minAvailable` value that is zero or greater than or equal to the Control Plane
@@ -838,37 +838,35 @@ SQLite is the default. The chart enforces one Control Plane replica, `Recreate` 
 ```yaml
 controlPlane:
   storage:
-    type: sqlite
     sqlite:
       persistence:
         enabled: true
         size: 1Gi
 ```
 
-The PostgreSQL deployment contract accepts an external DSN from a Secret and allows Control Plane replicas to scale independently:
+External PostgreSQL and MySQL databases are selected by the datasource URL scheme. The URL is read from a Secret and external storage allows RollingUpdate deployments:
 
 ```yaml
 controlPlane:
-  replicas: 3
+  replicas: 1
   storage:
-    type: postgresql
-    postgresql:
-      existingSecret: kubeloop-postgresql
-      dsnKey: dsn
-      connectTimeout: 10s
-      queryTimeout: 5s
-      maxOpenConnections: 20
-      maxIdleConnections: 5
-      connectionMaxLifetime: 30m
-      transactionMaxRetries: 3
-      transactionRetryBackoff: 25ms
+    datasource:
+      existingSecret: kubeloop-datasource
+      urlKey: datasource-url
+    connectTimeout: 10s
+    queryTimeout: 5s
+    maxOpenConnections: 20
+    maxIdleConnections: 5
+    connectionMaxLifetime: 30m
+    transactionMaxRetries: 3
+    transactionRetryBackoff: 25ms
 ```
 
 Create the referenced Secret without putting the DSN in Helm values:
 
 ```shell
-kubectl -n kubeloop-system create secret generic kubeloop-postgresql \
-  --from-literal=dsn='postgres://user:password@postgres.example:5432/kubeloop?sslmode=require'
+kubectl -n kubeloop-system create secret generic kubeloop-datasource \
+  --from-literal=datasource-url='postgresql://user:password@postgres.example:5432/kubeloop?sslmode=require'
 ```
 
-The Control Plane opens the selected backend, applies a server-side statement timeout, runs advisory-lock migrations before becoming ready and reports database availability through readiness. PostgreSQL transactions use serializable isolation and retry bounded serialization/deadlock failures. Principal, refresh-token family, Session, Task, resource snapshot, idempotency, authentication transaction and append-only audit repositories share the same storage contract.
+Use `mysql://user:password@mysql.example:3306/kubeloop?tls=true` for MySQL. The Control Plane detects the dialect from the URL, runs advisory-lock migrations before becoming ready, and reports database availability through readiness. External-database transactions use serializable isolation and bounded deadlock/serialization retries.

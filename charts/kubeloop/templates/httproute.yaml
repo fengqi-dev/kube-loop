@@ -79,6 +79,19 @@ spec:
           weight: 1
     - matches:
         - path:
+            type: PathPrefix
+            value: /api/admin
+      timeouts:
+        request: {{ .Values.gatewayAPI.timeouts.controlPlane | quote }}
+        backendRequest: {{ .Values.gatewayAPI.timeouts.controlPlane | quote }}
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: {{ include "kubeloop.controlPlaneManagementName" . }}
+          port: {{ .Values.controlPlane.management.servicePort }}
+          weight: 1
+    - matches:
+        - path:
             type: Exact
             value: {{ .Values.dataPlane.tunnelPath }}
         - path:

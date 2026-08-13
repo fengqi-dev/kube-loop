@@ -102,7 +102,7 @@ func (service *Service) CurrentPolicy(ctx context.Context) (PolicyState, error) 
 	)
 	if errors.Is(err, storage.ErrNotFound) {
 		return PolicyState{Snapshot: adminauthorization.Snapshot{
-			Version: adminauthorization.CurrentVersion, Assignments: []adminauthorization.Assignment{},
+			Version: adminauthorization.CurrentVersion, Roles: []adminauthorization.RoleDefinition{}, Assignments: []adminauthorization.Assignment{},
 		}}, nil
 	}
 	if err != nil {
@@ -121,7 +121,7 @@ func (service *Service) CurrentPolicy(ctx context.Context) (PolicyState, error) 
 	if err != nil {
 		return PolicyState{}, fmt.Errorf("%w: read active policy assignments", ErrPolicyUnavailable)
 	}
-	stored, err := assignmentSnapshot(assignments, revision.Revision)
+	stored, err := assignmentSnapshot(assignments, revision.Revision, snapshot.Roles)
 	if err != nil || !equalAssignments(snapshot.Assignments, stored.Assignments) {
 		return PolicyState{}, fmt.Errorf("%w: active policy aggregate disagrees", ErrPolicyUnavailable)
 	}
@@ -148,9 +148,10 @@ func (service *Service) CreatePolicyDraft(ctx context.Context, request PolicyDra
 		return PolicyDraft{}, ErrInvalidRequest
 	}
 	spec, err := json.Marshal(struct {
-		Version     int                             `json:"version"`
-		Assignments []adminauthorization.Assignment `json:"assignments"`
-	}{Version: snapshot.Version, Assignments: snapshot.Assignments})
+		Version     int                                 `json:"version"`
+		Roles       []adminauthorization.RoleDefinition `json:"roles,omitempty"`
+		Assignments []adminauthorization.Assignment     `json:"assignments"`
+	}{Version: snapshot.Version, Roles: snapshot.Roles, Assignments: snapshot.Assignments})
 	if err != nil {
 		return PolicyDraft{}, ErrInvalidRequest
 	}

@@ -38,6 +38,36 @@ func (repository *authTransactionRepository) ConsumeAttempt(
 	if len(stateHash) != 32 || now.IsZero() {
 		return AuthAttempt{}, errors.New("state hash and current time are required")
 	}
+	if repository.backend == BackendMySQL {
+		var attempt AuthAttempt
+		err := repository.withMySQLTransaction(ctx, func(executor sqlExecutor) error {
+			query := `SELECT id, schema_version, provider_id, state_hash, client_state,
+				client_callback, client_id, scope, nonce, pkce_challenge,
+				upstream_pkce_verifier, created_at, expires_at FROM auth_attempts
+				WHERE state_hash = ? AND expires_at > ? FOR UPDATE`
+			var err error
+			attempt, err = scanAuthAttempt(executor.QueryRowContext(ctx, query, stateHash, formatTime(now)))
+			if err != nil {
+				return err
+			}
+			result, err := executor.ExecContext(ctx, `DELETE FROM auth_attempts WHERE state_hash = ?`, stateHash)
+			if err != nil {
+				return err
+			}
+			count, err := rowsAffected(result)
+			if err != nil || count != 1 {
+				return ErrNotFound
+			}
+			return nil
+		})
+		if errors.Is(err, sql.ErrNoRows) {
+			return AuthAttempt{}, ErrNotFound
+		}
+		if err != nil {
+			return AuthAttempt{}, databaseError("consume authentication attempt", err)
+		}
+		return attempt, nil
+	}
 	query := repository.bind(`DELETE FROM auth_attempts
 		WHERE state_hash = ? AND expires_at > ?
 		RETURNING id, schema_version, provider_id, state_hash, client_state,
@@ -77,6 +107,35 @@ func (repository *authTransactionRepository) ConsumeExchange(
 	if len(codeHash) != 32 || now.IsZero() {
 		return AuthExchange{}, errors.New("exchange code hash and current time are required")
 	}
+	if repository.backend == BackendMySQL {
+		var exchange AuthExchange
+		err := repository.withMySQLTransaction(ctx, func(executor sqlExecutor) error {
+			query := `SELECT schema_version, code_hash, principal_id, provider_id,
+				client_id, redirect_uri, scope, nonce, pkce_challenge, created_at, expires_at
+				FROM auth_exchanges WHERE code_hash = ? AND expires_at > ? FOR UPDATE`
+			var err error
+			exchange, err = scanAuthExchange(executor.QueryRowContext(ctx, query, codeHash, formatTime(now)))
+			if err != nil {
+				return err
+			}
+			result, err := executor.ExecContext(ctx, `DELETE FROM auth_exchanges WHERE code_hash = ?`, codeHash)
+			if err != nil {
+				return err
+			}
+			count, err := rowsAffected(result)
+			if err != nil || count != 1 {
+				return ErrNotFound
+			}
+			return nil
+		})
+		if errors.Is(err, sql.ErrNoRows) {
+			return AuthExchange{}, ErrNotFound
+		}
+		if err != nil {
+			return AuthExchange{}, databaseError("consume authentication exchange", err)
+		}
+		return exchange, nil
+	}
 	query := repository.bind(`DELETE FROM auth_exchanges
 		WHERE code_hash = ? AND expires_at > ?
 		RETURNING schema_version, code_hash, principal_id, provider_id,
@@ -105,6 +164,9 @@ func (repository *authTransactionRepository) DeleteExpired(ctx context.Context, 
 			query = `DELETE FROM ` + table + ` WHERE ctid IN (
 				SELECT ctid FROM ` + table + ` WHERE expires_at < $1 ORDER BY expires_at LIMIT $2
 			)`
+		}
+		if repository.backend == BackendMySQL {
+			query = `DELETE FROM ` + table + ` WHERE expires_at < ? ORDER BY expires_at LIMIT ?`
 		}
 		result, err := repository.executor.ExecContext(ctx, query, formatTime(before), limit)
 		if err != nil {

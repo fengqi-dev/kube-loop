@@ -69,8 +69,12 @@ type Installer struct {
 
 func (i *Installer) Ensure(ctx context.Context) (string, error) {
 	if !i.DisableOverride {
-		if override := os.Getenv("KUBELOOP_SINGBOX_PATH"); override != "" {
-			return validateBinary(override)
+		environment, err := loadInstallerEnvironment()
+		if err != nil {
+			return "", err
+		}
+		if environment.SingBoxPath != "" {
+			return validateBinary(environment.SingBoxPath)
 		}
 	}
 	var missing []string

@@ -27,7 +27,11 @@ import (
 var version = "dev"
 
 func main() {
-	config, err := loadGatewayConfig(os.Getenv(gatewayConfigFileEnvironment))
+	environment, err := loadGatewayEnvironment()
+	if err != nil {
+		log.Fatal(err)
+	}
+	config, err := loadGatewayConfig(environment.ConfigFile)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -92,7 +96,7 @@ func main() {
 	}
 	httpHandler = handler
 	operationsState := operationsGatewayState{gateway: server}
-	advertisedEndpoint, endpointErr := expandRelayEndpoint(config.Relay.Endpoint)
+	advertisedEndpoint, endpointErr := expandRelayEndpoint(config.Relay.Endpoint, environment)
 	if endpointErr != nil {
 		errorLogger.Fatal(endpointErr)
 	}
@@ -131,7 +135,7 @@ func main() {
 	operations.NewHandler(operationsState, handler).Register(router)
 	router.Any(config.HTTP.Path, echo.WrapHandler(handler))
 	trafficHandler, trafficErr := trafficapi.New(trafficapi.Config{
-		GatewayIP: strings.TrimSpace(os.Getenv("KUBELOOP_POD_IP")), VerifyRequest: verifyRequest, ControlPlane: controlAgent,
+		GatewayIP: environment.PodIP, VerifyRequest: verifyRequest, ControlPlane: controlAgent,
 		MaximumSessions: config.WebSocket.MaxSessions, OtherSessions: handler.ActiveSessions,
 	})
 	if trafficErr != nil {

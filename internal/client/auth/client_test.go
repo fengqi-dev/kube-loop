@@ -20,6 +20,7 @@ import (
 func TestOIDCLoopbackLoginUsesStatePKCEAndExchange(t *testing.T) {
 	var server *httptest.Server
 	var challenge string
+	browserCallbacks := 0
 	exchangeCode := strings.Repeat("c", 43)
 	server = httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		switch request.URL.Path {
@@ -41,7 +42,8 @@ func TestOIDCLoopbackLoginUsesStatePKCEAndExchange(t *testing.T) {
 	}))
 	defer server.Close()
 	client := New(Config{
-		HTTPClient: server.Client(),
+		HTTPClient:      server.Client(),
+		BrowserCallback: func() { browserCallbacks++ },
 		OpenBrowser: func(target string) error {
 			authorize, err := url.Parse(target)
 			if err != nil {
@@ -81,41 +83,8 @@ func TestOIDCLoopbackLoginUsesStatePKCEAndExchange(t *testing.T) {
 	if credential.AccessToken != "access-token" || credential.RefreshToken != "refresh-token" || credential.DeviceID != "device-1" {
 		t.Fatalf("credential = %#v", credential)
 	}
-}
-
-func TestAnonymousLoginUsesSelectedOrigin(t *testing.T) {
-	requests := 0
-	var server *httptest.Server
-	server = httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		requests++
-		if request.URL.Path == "/.well-known/openid-configuration" {
-			writeProviderMetadata(t, writer, server.URL)
-			return
-		}
-		if err := request.ParseForm(); err != nil {
-			t.Fatal(err)
-		}
-		switch request.URL.Path {
-		case "/oauth2/token":
-			if request.Form.Get("grant_type") != "urn:kubeloop:params:oauth:grant-type:anonymous" ||
-				request.Form.Get("provider") != "guest" || request.Form.Get("device_id") != "device-anonymous" {
-				t.Fatalf("anonymous form = %#v", request.Form)
-			}
-		default:
-			t.Fatalf("path = %q", request.URL.Path)
-		}
-		writeTokenResponse(t, writer)
-	}))
-	defer server.Close()
-	client := New(Config{HTTPClient: server.Client()})
-	anonymousCredential, err := client.LoginAnonymous(
-		context.Background(), server.URL, "guest", "device-anonymous",
-	)
-	if err != nil || anonymousCredential.RefreshToken != "refresh-token" {
-		t.Fatalf("anonymous credential = %#v, %v", anonymousCredential, err)
-	}
-	if requests != 2 {
-		t.Fatalf("requests = %d", requests)
+	if browserCallbacks != 1 {
+		t.Fatalf("browser callbacks = %d, want 1", browserCallbacks)
 	}
 }
 
@@ -140,7 +109,17 @@ func TestLoopbackCallbackRejectsTamperedStateWithoutConsumingLogin(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
+	body, readErr := io.ReadAll(response.Body)
 	response.Body.Close()
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if response.StatusCode != http.StatusOK ||
+		!strings.HasPrefix(response.Header.Get("Content-Type"), "text/html") ||
+		!strings.Contains(response.Header.Get("Content-Security-Policy"), "script-src 'sha256-") ||
+		!strings.Contains(string(body), "window.close();") {
+		t.Fatalf("valid callback response status=%d headers=%v body=%s", response.StatusCode, response.Header, body)
+	}
 	if result := <-results; result.err != nil || result.code == "" {
 		t.Fatalf("valid callback result = %#v", result)
 	}
@@ -174,9 +153,6 @@ func TestRefreshRevokeAndUnsafeTargets(t *testing.T) {
 	if requests != 4 {
 		t.Fatalf("requests = %d", requests)
 	}
-	if _, err := client.LoginAnonymous(context.Background(), server.URL, "../corp", "device"); err == nil {
-		t.Fatal("unsafe provider ID was accepted")
-	}
 }
 
 func TestAuthenticationRejectionReturnsTypedAPIError(t *testing.T) {
@@ -191,8 +167,8 @@ func TestAuthenticationRejectionReturnsTypedAPIError(t *testing.T) {
 		_, _ = writer.Write([]byte(`{"error":"invalid_grant","error_description":"credentials were rejected"}`))
 	}))
 	defer server.Close()
-	_, err := New(Config{HTTPClient: server.Client()}).LoginAnonymous(
-		context.Background(), server.URL, "guest", "device-1",
+	_, err := New(Config{HTTPClient: server.Client()}).Refresh(
+		context.Background(), server.URL, credentialForTest(),
 	)
 	var apiError *APIError
 	if !errors.As(err, &apiError) || apiError.Status != http.StatusUnauthorized ||

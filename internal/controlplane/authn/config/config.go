@@ -13,34 +13,20 @@ import (
 	"time"
 
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/authn"
-	devprovider "github.com/fengqi-dev/kube-loop/internal/controlplane/authn/development"
 	oidcprovider "github.com/fengqi-dev/kube-loop/internal/controlplane/authn/oidc"
 )
 
 const maxConfigBytes = 1 << 20
 
 type File struct {
-	DevelopmentMode bool       `json:"developmentMode,omitempty"`
-	Providers       []Provider `json:"providers"`
+	Providers []Provider `json:"providers"`
 }
 
 type Provider struct {
-	ID          string           `json:"id"`
-	Type        string           `json:"type"`
-	DisplayName string           `json:"displayName,omitempty"`
-	OIDC        *OIDCConfig      `json:"oidc,omitempty"`
-	Anonymous   *AnonymousConfig `json:"anonymous,omitempty"`
-}
-
-type DevelopmentIdentityConfig struct {
-	Subject     string   `json:"subject,omitempty"`
-	DisplayName string   `json:"displayName,omitempty"`
-	Email       string   `json:"email,omitempty"`
-	Groups      []string `json:"groups,omitempty"`
-}
-
-type AnonymousConfig struct {
-	DevelopmentIdentityConfig
+	ID          string      `json:"id"`
+	Type        string      `json:"type"`
+	DisplayName string      `json:"displayName,omitempty"`
+	OIDC        *OIDCConfig `json:"oidc,omitempty"`
 }
 
 type OIDCConfig struct {
@@ -89,9 +75,6 @@ func Build(ctx context.Context, config File) (*authn.Registry, error) {
 	providers := make([]authn.Provider, 0, len(config.Providers))
 	for index, item := range config.Providers {
 		providerType := strings.ToLower(strings.TrimSpace(item.Type))
-		if providerType == "anonymous" && !config.DevelopmentMode {
-			return nil, fmt.Errorf("auth provider %d requires explicit developmentMode", index)
-		}
 		switch providerType {
 		case "oidc":
 			if item.OIDC == nil {
@@ -102,29 +85,11 @@ func Build(ctx context.Context, config File) (*authn.Registry, error) {
 				return nil, fmt.Errorf("initialize auth provider %q: %w", item.ID, err)
 			}
 			providers = append(providers, provider)
-		case "anonymous":
-			if item.Anonymous == nil {
-				return nil, fmt.Errorf("auth provider %d requires anonymous configuration", index)
-			}
-			provider, err := devprovider.NewAnonymous(
-				item.ID, item.DisplayName, developmentIdentity(item.Anonymous.DevelopmentIdentityConfig),
-			)
-			if err != nil {
-				return nil, fmt.Errorf("initialize auth provider %q: %w", item.ID, err)
-			}
-			providers = append(providers, provider)
 		default:
 			return nil, fmt.Errorf("auth provider %d has unsupported type %q", index, item.Type)
 		}
 	}
 	return authn.NewRegistry(providers...)
-}
-
-func developmentIdentity(config DevelopmentIdentityConfig) devprovider.IdentityConfig {
-	return devprovider.IdentityConfig{
-		Subject: config.Subject, DisplayName: config.DisplayName, Email: config.Email,
-		Groups: append([]string(nil), config.Groups...),
-	}
 }
 
 func buildOIDC(ctx context.Context, item Provider) (*oidcprovider.Provider, error) {

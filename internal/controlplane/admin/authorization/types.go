@@ -118,10 +118,18 @@ type Assignment struct {
 	Namespaces []string `json:"namespaces,omitempty"`
 }
 
+type RoleDefinition struct {
+	ID          Role     `json:"id"`
+	DisplayName string   `json:"displayName"`
+	Description string   `json:"description,omitempty"`
+	Permissions []string `json:"permissions"`
+}
+
 type Snapshot struct {
-	Version     int          `json:"version"`
-	Revision    uint64       `json:"revision"`
-	Assignments []Assignment `json:"assignments"`
+	Version     int              `json:"version"`
+	Revision    uint64           `json:"revision"`
+	Roles       []RoleDefinition `json:"roles,omitempty"`
+	Assignments []Assignment     `json:"assignments"`
 }
 
 type BootstrapConfig struct {

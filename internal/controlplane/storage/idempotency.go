@@ -32,6 +32,12 @@ func (repository *idempotencyRepository) Reserve(
 		) VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9)
 		ON CONFLICT(scope, key) DO NOTHING`
 	}
+	if repository.backend == BackendMySQL {
+		query = `INSERT IGNORE INTO idempotency_records(
+			schema_version, scope, ` + "`key`" + `, request_hash, resource_type, resource_id,
+			response_json, created_at, expires_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	}
 	result, err := repository.executor.ExecContext(ctx, query,
 		record.SchemaVersion, record.Scope, record.Key, record.RequestHash,
 		record.ResourceType, record.ResourceID, nullableJSON(record.Response),
@@ -66,6 +72,10 @@ func (repository *idempotencyRepository) Get(ctx context.Context, scope, key str
 	query := repository.bind(`SELECT schema_version, scope, key, request_hash, resource_type,
 		resource_id, response_json, created_at, expires_at
 		FROM idempotency_records WHERE scope = ? AND key = ?`)
+	if repository.backend == BackendMySQL {
+		query = "SELECT schema_version, scope, `key`, request_hash, resource_type, resource_id, response_json, " +
+			"created_at, expires_at FROM idempotency_records WHERE scope = ? AND `key` = ?"
+	}
 	record, err := scanIdempotencyRecord(repository.executor.QueryRowContext(ctx, query, scope, key))
 	if errors.Is(err, sql.ErrNoRows) {
 		return IdempotencyRecord{}, ErrNotFound
@@ -88,6 +98,9 @@ func (repository *idempotencyRepository) DeleteExpired(ctx context.Context, befo
 		query = `DELETE FROM idempotency_records WHERE ctid IN (
 			SELECT ctid FROM idempotency_records WHERE expires_at < $1 ORDER BY expires_at LIMIT $2
 		)`
+	}
+	if repository.backend == BackendMySQL {
+		query = `DELETE FROM idempotency_records WHERE expires_at < ? ORDER BY expires_at LIMIT ?`
 	}
 	result, err := repository.executor.ExecContext(ctx, query, formatTime(before), limit)
 	if err != nil {

@@ -108,7 +108,7 @@ func TestPostgreSQLTaskStateMigrationPreservesLegacyTasks(t *testing.T) {
 func TestPostgreSQLMigrationFailureRollsBackVersion(t *testing.T) {
 	config, cleanup := newPostgreSQLIntegrationConfig(t)
 	defer cleanup()
-	database, err := sql.Open("pgx", config.PostgreSQLDSN)
+	database, err := sql.Open("pgx", config.DatasourceURL)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,7 +122,7 @@ func TestPostgreSQLMigrationFailureRollsBackVersion(t *testing.T) {
 	if _, err := Open(context.Background(), config); err == nil || !strings.Contains(err.Error(), "migration 1") {
 		t.Fatalf("PostgreSQL migration error = %v", err)
 	}
-	database, err = sql.Open("pgx", config.PostgreSQLDSN)
+	database, err = sql.Open("pgx", config.DatasourceURL)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -295,9 +295,9 @@ func newPostgreSQLIntegrationConfig(t *testing.T) (Config, func()) {
 		_ = admin.Close()
 	}
 	return Config{
-		Backend: BackendPostgreSQL, PostgreSQLDSN: testURL.String(),
+		Backend: BackendPostgreSQL, DatasourceURL: testURL.String(),
 		ConnectTimeout: 10 * time.Second, QueryTimeout: 5 * time.Second,
 		MaxOpenConnections: 10, MaxIdleConnections: 5,
-		AllowInsecurePostgreSQL: testConfig.TLSConfig == nil,
+		AllowInsecureDatasource: testConfig.TLSConfig == nil,
 	}, cleanup
 }

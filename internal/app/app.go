@@ -60,6 +60,12 @@ type App struct {
 	inventoryWatchProfile string
 	inventoryWatchCancel  context.CancelFunc
 	powerWatchCancel      context.CancelFunc
+	serverLoginMu         sync.Mutex
+	serverLogin           *serverLoginAttempt
+}
+
+type serverLoginAttempt struct {
+	cancel context.CancelFunc
 }
 
 type BootstrapData struct {
@@ -128,13 +134,23 @@ func newApp(version string, embeddedHelperFiles fs.FS, dependencies appDependenc
 	if developmentTLSErr != nil {
 		application.appendLog("WARN", "Development Gateway CA unavailable: "+developmentTLSErr.Error())
 	}
-	application.auth = clientauth.New(clientauth.Config{HTTPClient: dependencies.httpClient, OpenBrowser: func(target string) error {
-		if application.ctx == nil {
-			return errors.New("application is not ready")
-		}
-		runtime.BrowserOpenURL(application.ctx, target)
-		return nil
-	}})
+	application.auth = clientauth.New(clientauth.Config{
+		HTTPClient: dependencies.httpClient,
+		OpenBrowser: func(target string) error {
+			if application.ctx == nil {
+				return errors.New("application is not ready")
+			}
+			runtime.BrowserOpenURL(application.ctx, target)
+			return nil
+		},
+		BrowserCallback: func() {
+			if application.ctx == nil {
+				return
+			}
+			runtime.WindowUnminimise(application.ctx)
+			runtime.Show(application.ctx)
+		},
+	})
 	remoteClient, remoteErr := clientremote.New(
 		application.credentials, application.auth, clientremote.Config{HTTPClient: dependencies.httpClient},
 	)

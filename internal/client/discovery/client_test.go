@@ -23,7 +23,7 @@ func TestDiscoverValidatesAndReturnsDocument(t *testing.T) {
 			APIVersions: []string{"v1", "v2"},
 			AuthMethods: []AuthMethod{
 				{ID: "company", Type: "oidc", Interaction: "browser"},
-				{ID: "guest", Type: "anonymous", Interaction: "none"},
+				{ID: "local", Type: "local", Interaction: "browser"},
 			},
 			Features: []string{"sessions"}, ServerVersion: "2.1.0", ProtocolMin: "2.0", ProtocolMax: "2.1", MinClientVersion: "2.0.0",
 		})
@@ -45,7 +45,7 @@ func TestDiscoverPreservesExplicitConfiguredScheme(t *testing.T) {
 		_ = json.NewEncoder(writer).Encode(Document{
 			ServiceID: "development", PublicURL: strings.Replace(server.URL, "http://", "https://", 1),
 			TunnelPath: "/tunnel", APIVersions: []string{"v2"},
-			AuthMethods: []AuthMethod{{ID: "guest", Type: "anonymous", Interaction: "none"}},
+			AuthMethods: []AuthMethod{{ID: "local", Type: "local", Interaction: "browser"}},
 			ProtocolMin: "2.0", ProtocolMax: "2.0",
 		})
 	}))

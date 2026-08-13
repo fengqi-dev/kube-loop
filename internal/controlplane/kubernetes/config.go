@@ -50,7 +50,7 @@ type impersonationConfigFile struct {
 func Load(path string) (Config, error) {
 	path = strings.TrimSpace(path)
 	if path == "" {
-		return Config{}.normalized()
+		return Normalize(Config{})
 	}
 	file, err := os.Open(path)
 	if err != nil {
@@ -87,10 +87,11 @@ func Load(path string) (Config, error) {
 			return Config{}, fmt.Errorf("parse Kubernetes timeout: %w", err)
 		}
 	}
-	return config.normalized()
+	return Normalize(config)
 }
 
-func (config Config) normalized() (Config, error) {
+// Normalize validates and applies defaults to Kubernetes provider settings.
+func Normalize(config Config) (Config, error) {
 	if config.Timeout == 0 {
 		config.Timeout = DefaultTimeout
 	}
@@ -142,6 +143,10 @@ func (config Config) normalized() (Config, error) {
 	}
 	config.Impersonation = impersonation
 	return config, nil
+}
+
+func (config Config) normalized() (Config, error) {
+	return Normalize(config)
 }
 
 func ensureJSONEOF(decoder *json.Decoder) error {

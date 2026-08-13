@@ -3,9 +3,9 @@ package fileapi
 import (
 	"encoding/json"
 	"errors"
-	"os"
-	"strconv"
 	"strings"
+
+	env "github.com/Netflix/go-env"
 )
 
 const (
@@ -13,19 +13,26 @@ const (
 	allowedRootsEnv = "KUBELOOP_FILE_ALLOWED_ROOTS_JSON"
 )
 
+type fileEnvironment struct {
+	MaximumBytes uint64          `env:"KUBELOOP_FILE_MAX_BYTES"`
+	AllowedRoots jsonStringSlice `env:"KUBELOOP_FILE_ALLOWED_ROOTS_JSON"`
+}
+
+type jsonStringSlice []string
+
+func (value *jsonStringSlice) UnmarshalEnvironmentValue(raw string) error {
+	var decoded []string
+	if err := json.Unmarshal([]byte(strings.TrimSpace(raw)), &decoded); err != nil || len(decoded) == 0 {
+		return errors.New("KUBELOOP_FILE_ALLOWED_ROOTS_JSON must be a non-empty JSON string array")
+	}
+	*value = decoded
+	return nil
+}
+
 func ConfigFromEnv() (Config, error) {
-	config := Config{}
-	if raw := strings.TrimSpace(os.Getenv(maximumBytesEnv)); raw != "" {
-		value, err := strconv.ParseUint(raw, 10, 64)
-		if err != nil {
-			return Config{}, errors.New("KUBELOOP_FILE_MAX_BYTES must be an unsigned integer")
-		}
-		config.MaximumBytes = value
+	var environment fileEnvironment
+	if _, err := env.UnmarshalFromEnviron(&environment); err != nil {
+		return Config{}, err
 	}
-	if raw := strings.TrimSpace(os.Getenv(allowedRootsEnv)); raw != "" {
-		if err := json.Unmarshal([]byte(raw), &config.AllowedPathRoots); err != nil || len(config.AllowedPathRoots) == 0 {
-			return Config{}, errors.New("KUBELOOP_FILE_ALLOWED_ROOTS_JSON must be a non-empty JSON string array")
-		}
-	}
-	return config, nil
+	return Config{MaximumBytes: environment.MaximumBytes, AllowedPathRoots: []string(environment.AllowedRoots)}, nil
 }

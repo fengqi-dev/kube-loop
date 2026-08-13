@@ -37,6 +37,11 @@ func Load(path string) (Policy, error) {
 	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		return Policy{}, errors.New("Gateway policy configuration must contain one JSON document")
 	}
+	return Normalize(policy)
+}
+
+// Normalize validates and applies defaults to a Gateway authorization policy.
+func Normalize(policy Policy) (Policy, error) {
 	if _, err := compile(policy); err != nil {
 		return Policy{}, err
 	}

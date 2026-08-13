@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	mysqldriver "github.com/go-sql-driver/mysql"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
 )
@@ -46,6 +47,21 @@ func (repository *principalRepository) Upsert(ctx context.Context, principal Pri
 			groups_json=excluded.groups_json,
 			updated_at=excluded.updated_at
 		RETURNING id, schema_version, provider, external_id, display_name, email, groups_json, created_at, updated_at`
+	}
+	if repository.backend == BackendMySQL {
+		query = `INSERT INTO principals(
+			id, schema_version, provider, external_id, display_name, email, groups_json, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON DUPLICATE KEY UPDATE
+			schema_version=VALUES(schema_version), display_name=VALUES(display_name),
+			email=VALUES(email), groups_json=VALUES(groups_json), updated_at=VALUES(updated_at)`
+		if _, err := repository.executor.ExecContext(ctx, query,
+			principal.ID, principal.SchemaVersion, principal.Provider, principal.ExternalID,
+			principal.DisplayName, principal.Email, string(groups), formatTime(principal.CreatedAt), formatTime(principal.UpdatedAt),
+		); err != nil {
+			return Principal{}, mapWriteError(err)
+		}
+		return repository.GetByIdentity(ctx, principal.Provider, principal.ExternalID)
 	}
 	row := repository.executor.QueryRowContext(ctx, query,
 		principal.ID, principal.SchemaVersion, principal.Provider, principal.ExternalID,
@@ -200,6 +216,10 @@ func normalizePrincipal(principal *Principal) error {
 func isConstraintError(err error) bool {
 	var postgresError *pgconn.PgError
 	if errors.As(err, &postgresError) && strings.HasPrefix(postgresError.Code, "23") {
+		return true
+	}
+	var mysqlError *mysqldriver.MySQLError
+	if errors.As(err, &mysqlError) && (mysqlError.Number == 1062 || mysqlError.Number == 1451 || mysqlError.Number == 1452 || mysqlError.Number == 3819) {
 		return true
 	}
 	message := strings.ToLower(err.Error())

@@ -1,6 +1,7 @@
 package httpauth
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/url"
@@ -9,6 +10,7 @@ import (
 
 	httpauthservice "github.com/fengqi-dev/kube-loop/internal/controlplane/authn/httpauth/service"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/authn/token"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 	"github.com/labstack/echo/v5"
 	"github.com/labstack/echo/v5/middleware"
 )
@@ -18,12 +20,34 @@ const (
 	oauthPath               = "/oauth2"
 	openidConfigurationPath = "/.well-known/openid-configuration"
 	oauthMetadataPath       = "/.well-known/oauth-authorization-server"
-	anonymousGrantType      = "urn:kubeloop:params:oauth:grant-type:anonymous"
 )
 
-type Routes struct{ service *httpauthservice.Service }
+type ExistingSessionAuthenticator func(context.Context, string) (storage.Principal, error)
 
-func NewRoutes(service *httpauthservice.Service) *Routes { return &Routes{service: service} }
+type RouteOption func(*Routes)
+
+type Routes struct {
+	service               *httpauthservice.Service
+	existingSessionCookie string
+	existingSessionAuth   ExistingSessionAuthenticator
+}
+
+func WithExistingSession(cookieName string, authenticator ExistingSessionAuthenticator) RouteOption {
+	return func(routes *Routes) {
+		routes.existingSessionCookie = strings.TrimSpace(cookieName)
+		routes.existingSessionAuth = authenticator
+	}
+}
+
+func NewRoutes(service *httpauthservice.Service, options ...RouteOption) *Routes {
+	routes := &Routes{service: service}
+	for _, option := range options {
+		if option != nil {
+			option(routes)
+		}
+	}
+	return routes
+}
 
 func (routes *Routes) RegisterRoutes(group *echo.Group) {
 	group.Use(routes.securityHeaders)
@@ -59,7 +83,7 @@ func (routes *Routes) discovery(ctx *echo.Context) error {
 		JWKSURI: issuer + oauthPath + "/jwks", RevocationEndpoint: issuer + oauthPath + "/revoke",
 		ScopesSupported:                   []string{"openid", "profile", "email", "offline_access", "kubeloop.api"},
 		ResponseTypesSupported:            []string{"code"},
-		GrantTypesSupported:               []string{"authorization_code", "refresh_token", anonymousGrantType},
+		GrantTypesSupported:               []string{"authorization_code", "refresh_token"},
 		SubjectTypesSupported:             []string{"public"},
 		IDTokenSigningAlgorithmsSupported: []string{"EdDSA"},
 		CodeChallengeMethodsSupported:     []string{"S256"},
@@ -79,19 +103,53 @@ func (routes *Routes) authorize(ctx *echo.Context) error {
 		PKCEChallenge: query.Get("code_challenge"), Scope: query.Get("scope"),
 	}
 	if request.ProviderID == "local" {
+		callbackOrigin, err := formActionOrigin(request.ClientCallback)
+		if err != nil {
+			return routes.oauthError(ctx, http.StatusBadRequest, "invalid_request", "authorization request was rejected")
+		}
 		result, err := routes.service.StartLocal(ctx.Request().Context(), request)
 		if err != nil {
 			return routes.oauthError(ctx, http.StatusBadRequest, "invalid_request", "authorization request was rejected")
 		}
-		ctx.Response().Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
+		if redirectURL, ok := routes.completeExistingSession(ctx, result.Transaction); ok {
+			return ctx.Redirect(http.StatusSeeOther, redirectURL)
+		}
+		canonicalOrigin := strings.TrimRight(routes.service.TokenService().Issuer(), "/")
+		loginAction := canonicalOrigin + oauthPath + "/login/local"
+		ctx.Response().Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; form-action 'self' "+canonicalOrigin+" "+callbackOrigin+"; frame-ancestors 'none'; base-uri 'none'")
 		ctx.Response().Header().Set("Content-Type", "text/html; charset=utf-8")
-		return localLoginTemplate.Execute(ctx.Response(), localLoginPage{Transaction: result.Transaction})
+		return localLoginTemplate.Execute(ctx.Response(), localLoginPage{Transaction: result.Transaction, Action: loginAction})
 	}
 	result, err := routes.service.Start(ctx.Request().Context(), request)
 	if err != nil {
 		return routes.oauthError(ctx, http.StatusBadRequest, "invalid_request", "authorization request was rejected")
 	}
 	return ctx.Redirect(http.StatusFound, result.AuthorizationURL)
+}
+
+func (routes *Routes) completeExistingSession(ctx *echo.Context, transaction string) (string, bool) {
+	if routes.existingSessionCookie == "" || routes.existingSessionAuth == nil {
+		return "", false
+	}
+	cookie, err := ctx.Request().Cookie(routes.existingSessionCookie)
+	if err != nil || strings.TrimSpace(cookie.Value) == "" {
+		return "", false
+	}
+	principal, err := routes.existingSessionAuth(ctx.Request().Context(), cookie.Value)
+	if err != nil || principal.Provider != "local" {
+		return "", false
+	}
+	redirectURL, err := routes.service.CompleteLocalPrincipal(ctx.Request().Context(), transaction, principal)
+	return redirectURL, err == nil
+}
+
+func formActionOrigin(value string) (string, error) {
+	parsed, err := url.Parse(strings.TrimSpace(value))
+	if err != nil || parsed.User != nil || parsed.Host == "" ||
+		(parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return "", errors.New("invalid form action origin")
+	}
+	return parsed.Scheme + "://" + parsed.Host, nil
 }
 
 func (routes *Routes) localLogin(ctx *echo.Context) error {
@@ -139,10 +197,6 @@ func (routes *Routes) token(ctx *echo.Context) error {
 	case "refresh_token":
 		pair, err := routes.service.Refresh(ctx.Request().Context(), form.Get("refresh_token"))
 		return routes.writePair(ctx, pair, "", err)
-	case anonymousGrantType:
-		pair, err := routes.service.Anonymous(ctx.Request().Context(), form.Get("provider"),
-			ctx.Request().RemoteAddr, deviceID(form))
-		return routes.writePair(ctx, pair, form.Get("scope"), err)
 	default:
 		return routes.oauthError(ctx, http.StatusBadRequest, "unsupported_grant_type", "grant type is not supported")
 	}
@@ -195,10 +249,7 @@ func (routes *Routes) writePair(ctx *echo.Context, pair token.Pair, scope string
 	if err != nil {
 		return routes.writeServiceError(ctx, err)
 	}
-	expiresIn := int64(time.Until(pair.AccessExpiresAt).Seconds())
-	if expiresIn < 0 {
-		expiresIn = 0
-	}
+	expiresIn := max(int64(time.Until(pair.AccessExpiresAt).Seconds()), 0)
 	return ctx.JSON(http.StatusOK, tokenResponse{TokenType: pair.TokenType, AccessToken: pair.AccessToken,
 		ExpiresIn: expiresIn, RefreshToken: pair.RefreshToken,
 		RefreshExpiresIn: max(int64(time.Until(pair.RefreshExpiresAt).Seconds()), 0),

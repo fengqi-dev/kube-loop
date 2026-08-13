@@ -85,6 +85,11 @@ func (repository *activeManagementRevisionRepository) CompareAndSwap(
 		query := repository.bind(`INSERT INTO management_active_revisions(
 			configuration_type, configuration_id, revision, etag, updated_by, updated_authentication_type, updated_at
 		) VALUES (?, ?, ?, 1, ?, ?, ?) ON CONFLICT(configuration_type, configuration_id) DO NOTHING`)
+		if repository.backend == BackendMySQL {
+			query = `INSERT IGNORE INTO management_active_revisions(
+				configuration_type, configuration_id, revision, etag, updated_by, updated_authentication_type, updated_at
+			) VALUES (?, ?, ?, 1, ?, ?, ?)`
+		}
 		result, err := repository.executor.ExecContext(
 			ctx, query, kind, configurationID, revision, updatedBy, updatedAuthenticationType, formatTime(updatedAt),
 		)

@@ -42,14 +42,14 @@ func TestRegistryValidatesAndDoesNotExposeProviderConfiguration(t *testing.T) {
 	oidc := fakeProvider{descriptor: Descriptor{
 		ID: "corporate", Type: ProviderOIDC, DisplayName: "Corporate SSO", Interaction: InteractionBrowser,
 	}}
-	anonymous := fakeProvider{descriptor: Descriptor{
-		ID: "guest", Type: ProviderAnonymous, DisplayName: "Anonymous", Interaction: InteractionNone,
+	second := fakeProvider{descriptor: Descriptor{
+		ID: "partner", Type: ProviderOIDC, DisplayName: "Partner SSO", Interaction: InteractionBrowser,
 	}}
-	registry, err := NewRegistry(oidc, anonymous)
+	registry, err := NewRegistry(oidc, second)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []Descriptor{oidc.descriptor, anonymous.descriptor}
+	want := []Descriptor{oidc.descriptor, second.descriptor}
 	if got := registry.Descriptors(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("descriptors = %#v", got)
 	}
@@ -65,7 +65,7 @@ func TestRegistryRejectsDuplicateAndInvalidProviders(t *testing.T) {
 	if _, err := NewRegistry(valid, valid); err == nil {
 		t.Fatal("expected duplicate provider error")
 	}
-	invalid := fakeProvider{descriptor: Descriptor{ID: "corp", Type: ProviderOIDC, Interaction: InteractionNone}}
+	invalid := fakeProvider{descriptor: Descriptor{ID: "corp", Type: ProviderOIDC, Interaction: "none"}}
 	if _, err := NewRegistry(invalid); err == nil {
 		t.Fatal("expected interaction mismatch")
 	}
@@ -87,7 +87,7 @@ func TestRegistryCheckFailsClosed(t *testing.T) {
 
 func TestRegistryReplaceAtomicallyUpdatesAllReaders(t *testing.T) {
 	first := fakeProvider{descriptor: Descriptor{ID: "first", Type: ProviderOIDC, Interaction: InteractionBrowser}}
-	second := fakeProvider{descriptor: Descriptor{ID: "second", Type: ProviderAnonymous, Interaction: InteractionNone}}
+	second := fakeProvider{descriptor: Descriptor{ID: "second", Type: ProviderOIDC, Interaction: InteractionBrowser}}
 	registry, err := NewRegistry(first)
 	if err != nil {
 		t.Fatal(err)
@@ -103,7 +103,7 @@ func TestRegistryReplaceAtomicallyUpdatesAllReaders(t *testing.T) {
 		t.Fatal("replaced provider remained visible")
 	}
 	provider, exists := registry.Provider("second")
-	if !exists || provider.Descriptor().Type != ProviderAnonymous || len(registry.Descriptors()) != 1 {
+	if !exists || provider.Descriptor().Type != ProviderOIDC || len(registry.Descriptors()) != 1 {
 		t.Fatalf("replacement snapshot provider=%#v exists=%v descriptors=%#v", provider, exists, registry.Descriptors())
 	}
 	if err := registry.Replace(nil); err == nil {
@@ -113,7 +113,7 @@ func TestRegistryReplaceAtomicallyUpdatesAllReaders(t *testing.T) {
 
 func TestRegistryReplaceProviderPreservesUnrelatedConcurrentUpdates(t *testing.T) {
 	first := fakeProvider{descriptor: Descriptor{ID: "first", Type: ProviderOIDC, Interaction: InteractionBrowser}}
-	second := fakeProvider{descriptor: Descriptor{ID: "second", Type: ProviderAnonymous, Interaction: InteractionNone}}
+	second := fakeProvider{descriptor: Descriptor{ID: "second", Type: ProviderOIDC, Interaction: InteractionBrowser}}
 	registry, err := NewRegistry()
 	if err != nil {
 		t.Fatal(err)

@@ -141,27 +141,11 @@ helm_apply() {
     args+=(
       --set-string controlPlane.relayRegistry.endpointAllowedHosts=.kubeloop.e2e.invalid
       --set-string 'dataPlane.relayRegistry.endpoint=wss://{podName}.kubeloop.e2e.invalid/tunnel'
-      --set controlPlane.auth.developmentMode=true
       --set-string controlPlane.auth.token.existingSecret="${release}-relay"
-      --set-string controlPlane.auth.providers[0].id=audit
-      --set-string controlPlane.auth.providers[0].type=anonymous
-      --set-string controlPlane.auth.providers[0].displayName='Anonymous Audit E2E'
-      --set-string controlPlane.auth.providers[0].anonymous.subject=audit-user
-      --set-string controlPlane.auth.providers[0].anonymous.groups[0]=impersonation-audit
-      --set-string controlPlane.auth.providers[0].anonymous.groups[1]=unmapped-claim
-      --set-string controlPlane.policy.rules[0].id=impersonation-audit
-      --set-string controlPlane.policy.rules[0].groups[0]=impersonation-audit
-      --set-string 'controlPlane.policy.rules[0].namespaces[0]=$cluster'
-      --set-string controlPlane.policy.rules[0].operations[0]=list
-      --set-string controlPlane.policy.rules[0].resourceKinds[0]=version
-      --set controlPlane.kubernetes.impersonation.enabled=true
-      --set-string controlPlane.kubernetes.impersonation.usernamePrefix=kubeloop:
-      --set-string controlPlane.kubernetes.impersonation.groupMappings.impersonation-audit[0]=kubeloop:audit-users
     )
   else
     args+=(
-      --set-string controlPlane.storage.type=postgresql
-      --set-string "controlPlane.storage.postgresql.existingSecret=${release}-postgresql"
+      --set-string "controlPlane.storage.datasource.existingSecret=${release}-postgresql"
     )
   fi
   helm "${args[@]}" "$@"
@@ -366,7 +350,7 @@ EOF
   kubectl rollout status deployment/postgresql --namespace "${POSTGRES_NAMESPACE}" --timeout=5m
   kubectl create secret generic "${POSTGRES_RELEASE}-postgresql" \
     --namespace "${POSTGRES_NAMESPACE}" \
-    --from-literal="dsn=postgres://kubeloop:kubeloop-e2e@postgresql.${POSTGRES_NAMESPACE}.svc:5432/kubeloop?sslmode=require" \
+    --from-literal="datasource-url=postgres://kubeloop:kubeloop-e2e@postgresql.${POSTGRES_NAMESPACE}.svc:5432/kubeloop?sslmode=require" \
     --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 }
 
@@ -393,15 +377,6 @@ kubectl explain trafficbinding.spec.mode >/dev/null
 SQLITE_PVC_UID="$(kubectl get pvc "${SQLITE_RELEASE}-kubeloop-control-plane-data" \
   --namespace "${SQLITE_NAMESPACE}" -o jsonpath='{.metadata.uid}')"
 sqlite_probe write
-
-AUDIT_SOURCE="${KUBELOOP_HELM_E2E_AUDIT_SOURCE:-${KUBELOOP_HELM_E2E_AUDIT_LOG:-}}"
-if [[ -n "${AUDIT_SOURCE}" ]]; then
-  log "Verify Kubernetes API audit records Gateway and impersonated identities"
-  KUBELOOP_IMPERSONATION_E2E_NAMESPACE="${SQLITE_NAMESPACE}" \
-    KUBELOOP_IMPERSONATION_E2E_RELEASE="${SQLITE_RELEASE}" \
-    KUBELOOP_IMPERSONATION_E2E_AUDIT_SOURCE="${AUDIT_SOURCE}" \
-    "${ROOT}/e2e/impersonation/verify.sh"
-fi
 
 log "Upgrade Control Plane without restarting Data Plane or Operator"
 DATA_PLANE_UIDS="$(pod_uids "${SQLITE_NAMESPACE}" "${SQLITE_RELEASE}" data-plane)"
