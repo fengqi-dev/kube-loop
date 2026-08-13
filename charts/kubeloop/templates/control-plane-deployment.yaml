@@ -28,24 +28,12 @@
 {{- if not (has $controlPlaneLogLevel (list "debug" "info" "warn" "error")) -}}
 {{- fail "controlPlane.logLevel must be debug, info, warn, or error" -}}
 {{- end }}
-{{- $breakGlass := .Values.controlPlane.management.breakGlass -}}
-{{- $breakGlassAlias := trim (toString $breakGlass.secretAlias) -}}
-{{- $breakGlassSecret := dict -}}
 {{- $providerSecretAliases := default (dict) .Values.controlPlane.management.providerSecretAliases -}}
 {{- $initialAdmin := .Values.controlPlane.management.initialAdmin -}}
 {{- $tokenSecretName := .Values.controlPlane.auth.token.existingSecret -}}
 {{- if and (not $tokenSecretName) $initialAdmin.enabled (not $initialAdmin.existingSecret) -}}
 {{- $tokenSecretName = include "kubeloop.initialAdminSecretName" . -}}
 {{- end -}}
-{{- if $breakGlass.enabled -}}
-{{- if not (regexMatch "^[a-z][a-z0-9-]{0,62}$" $breakGlassAlias) -}}
-{{- fail "controlPlane.management.breakGlass.secretAlias must be a valid stable alias" -}}
-{{- end -}}
-{{- $breakGlassSecret = get (default (dict) $breakGlass.secretAliases) $breakGlassAlias -}}
-{{- if not $breakGlassSecret -}}
-{{- fail "controlPlane.management.breakGlass.secretAlias must select a configured secretAliases entry" -}}
-{{- end -}}
-{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -166,7 +154,7 @@ spec:
             - name: auth-secrets
               mountPath: /var/run/secrets/kubeloop/auth
               readOnly: true
-            {{- if or $initialAdmin.enabled $breakGlass.enabled $providerSecretAliases }}
+            {{- if or $initialAdmin.enabled $providerSecretAliases }}
             - name: management-secrets
               mountPath: /var/run/secrets/kubeloop/management
               readOnly: true
@@ -219,7 +207,7 @@ spec:
               {{- end }}
               {{- end }}
               {{- end }}
-        {{- if or $initialAdmin.enabled $breakGlass.enabled $providerSecretAliases }}
+        {{- if or $initialAdmin.enabled $providerSecretAliases }}
         - name: management-secrets
           projected:
             defaultMode: 0400
@@ -234,13 +222,6 @@ spec:
                       path: initial-admin/password
                     - key: {{ required "controlPlane.management.initialAdmin.mfaEncryptionKeyKey is required" $initialAdmin.mfaEncryptionKeyKey }}
                       path: initial-admin/mfa-encryption-key
-              {{- end }}
-              {{- if $breakGlass.enabled }}
-              - secret:
-                  name: {{ required (printf "controlPlane.management.breakGlass.secretAliases.%s.existingSecret is required" $breakGlassAlias) $breakGlassSecret.existingSecret }}
-                  items:
-                    - key: {{ required (printf "controlPlane.management.breakGlass.secretAliases.%s.credentialKey is required" $breakGlassAlias) $breakGlassSecret.credentialKey }}
-                      path: {{ printf "break-glass/%s/credential" $breakGlassAlias | quote }}
               {{- end }}
               {{- range $alias, $secret := $providerSecretAliases }}
               - secret:

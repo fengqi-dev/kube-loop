@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -210,17 +211,13 @@ func newPolicyTestHandler(t *testing.T) (*Handler, *storage.Store, *adminauthori
 
 func exchangeBreakGlassSession(t *testing.T, handler *Handler) (*http.Cookie, string) {
 	t.Helper()
-	exchange := performExchange(handler, `{"credential":"valid"}`)
-	if exchange.Code != http.StatusCreated || len(exchange.Result().Cookies()) != 1 {
-		t.Fatalf("break-glass exchange status=%d body=%s", exchange.Code, exchange.Body.String())
+	issued, err := handler.sessions.ExchangeBreakGlass(
+		context.Background(), netip.MustParseAddr("192.0.2.20"), []byte("valid"), uuid.NewString(),
+	)
+	if err != nil {
+		t.Fatal(err)
 	}
-	var result struct {
-		CSRFToken string `json:"csrfToken"`
-	}
-	if json.Unmarshal(exchange.Body.Bytes(), &result) != nil || result.CSRFToken == "" {
-		t.Fatalf("break-glass exchange body=%s", exchange.Body.String())
-	}
-	return exchange.Result().Cookies()[0], result.CSRFToken
+	return &http.Cookie{Name: SessionCookieName, Value: issued.SessionToken}, issued.CSRFToken
 }
 
 func policyWrite(

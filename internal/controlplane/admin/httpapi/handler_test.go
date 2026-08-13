@@ -23,75 +23,11 @@ import (
 	"github.com/labstack/echo/v5"
 )
 
-func TestBreakGlassExchangeSetsHostCookieAndReturnsCSRF(t *testing.T) {
-	handler, _ := newTestHandler(t, Config{PublicURL: "https://gateway.example/base"}, true)
-	request := exchangeRequest(`{"credential":"valid"}`)
-	request.Header.Set(managementRequestHeader, "33333333-3333-4333-8333-333333333333")
-	recorder := httptest.NewRecorder()
-	serveHTTP(handler, recorder, request)
-	if recorder.Code != http.StatusCreated {
-		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
-	}
-	response := recorder.Result()
-	cookies := response.Cookies()
-	if len(cookies) != 1 {
-		t.Fatalf("cookies=%v", cookies)
-	}
-	cookie := cookies[0]
-	if cookie.Name != SessionCookieName || cookie.Value == "" || cookie.Path != "/" ||
-		!cookie.Secure || !cookie.HttpOnly || cookie.SameSite != http.SameSiteStrictMode || cookie.MaxAge < 1 {
-		t.Fatalf("cookie=%+v", cookie)
-	}
-	var document struct {
-		CSRFToken string `json:"csrfToken"`
-		ExpiresAt string `json:"expiresAt"`
-		RequestID string `json:"requestId"`
-	}
-	if err := json.NewDecoder(response.Body).Decode(&document); err != nil {
-		t.Fatal(err)
-	}
-	if document.CSRFToken == "" || document.ExpiresAt == "" || document.RequestID == "" ||
-		response.Header.Get("Cache-Control") != "no-store" || response.Header.Get("WWW-Authenticate") != "" {
-		t.Fatalf("response=%+v headers=%v", document, response.Header)
-	}
-	if document.RequestID != "33333333-3333-4333-8333-333333333333" || response.Header.Get(managementRequestHeader) != document.RequestID {
-		t.Fatalf("management request ID mismatch: body=%q header=%q", document.RequestID, response.Header.Get(managementRequestHeader))
-	}
-}
-
-func TestDisabledAndWrongBreakGlassCredentialsAreIndistinguishable(t *testing.T) {
-	wrongHandler, _ := newTestHandler(t, Config{PublicURL: "https://gateway.example"}, true)
-	disabledHandler, _ := newTestHandler(t, Config{PublicURL: "https://gateway.example"}, false)
-	wrong := performExchange(wrongHandler, `{"credential":"wrong"}`)
-	disabled := performExchange(disabledHandler, `{"credential":"valid"}`)
-	if wrong.Code != http.StatusUnauthorized || disabled.Code != http.StatusUnauthorized {
-		t.Fatalf("statuses wrong=%d disabled=%d", wrong.Code, disabled.Code)
-	}
-	if errorSignature(t, wrong) != errorSignature(t, disabled) {
-		t.Fatalf("wrong=%s disabled=%s", wrong.Body.String(), disabled.Body.String())
-	}
-}
-
-func TestBreakGlassExchangeEnforcesOriginShapeAndRateLimit(t *testing.T) {
-	handler, _ := newTestHandler(t, Config{
-		PublicURL: "https://gateway.example", GlobalAttempts: 2, SourceAttempts: 1, RateLimitWindow: time.Minute,
-	}, true)
-	crossSite := exchangeRequest(`{"credential":"valid"}`)
-	crossSite.Header.Set("Origin", "https://attacker.example")
-	first := httptest.NewRecorder()
-	serveHTTP(handler, first, crossSite)
-	if first.Code != http.StatusUnauthorized {
-		t.Fatalf("cross-site status=%d", first.Code)
-	}
-	second := performExchange(handler, `{"credential":"valid"}`)
-	if second.Code != http.StatusTooManyRequests {
-		t.Fatalf("rate-limit status=%d body=%s", second.Code, second.Body.String())
-	}
-
-	strictHandler, _ := newTestHandler(t, Config{PublicURL: "https://gateway.example"}, true)
-	unknown := performExchange(strictHandler, `{"credential":"valid","extra":true}`)
-	if unknown.Code != http.StatusBadRequest {
-		t.Fatalf("unknown-field status=%d body=%s", unknown.Code, unknown.Body.String())
+func TestBreakGlassSessionRouteIsNotRegistered(t *testing.T) {
+	handler, _ := newTestHandler(t, Config{PublicURL: "https://gateway.example"}, true)
+	response := performExchange(handler, `{"credential":"valid"}`)
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
 }
 
@@ -116,8 +52,7 @@ func TestManagementPublicURLRequiresTLSOutsideLoopback(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	generation := base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{4}, 32))
-	sessions, _ := adminsession.New(store, &testVerifier{enabled: true, generation: generation})
+	sessions, _ := adminsession.New(store)
 	if _, err := New(Config{PublicURL: "http://gateway.example"}, sessions); err == nil {
 		t.Fatal("non-loopback HTTP public URL was accepted")
 	}
@@ -134,11 +69,7 @@ func TestReadAPIRequiresCookieAndReturnsAuthorizedCapabilitiesAndStatus(t *testi
 		t.Fatalf("unauthenticated status=%d body=%s", unauthenticated.Code, unauthenticated.Body.String())
 	}
 
-	exchange := performExchange(handler, `{"credential":"valid"}`)
-	if exchange.Code != http.StatusCreated || len(exchange.Result().Cookies()) != 1 {
-		t.Fatalf("exchange status=%d body=%s", exchange.Code, exchange.Body.String())
-	}
-	cookie := exchange.Result().Cookies()[0]
+	cookie, _ := issueLegacySession(t, handler)
 	capabilityRequest := httptest.NewRequest(http.MethodGet, "/capabilities", nil)
 	capabilityRequest.AddCookie(cookie)
 	capabilityRequest.Header.Set("Sec-Fetch-Site", "same-origin")
@@ -188,8 +119,7 @@ func TestReadAPIRequiresCookieAndReturnsAuthorizedCapabilitiesAndStatus(t *testi
 
 func TestReadAPIRejectsCrossSiteDuplicateCookieAndUnauthorizedRole(t *testing.T) {
 	handler, _ := newReadTestHandler(t, false)
-	exchange := performExchange(handler, `{"credential":"valid"}`)
-	cookie := exchange.Result().Cookies()[0]
+	cookie, _ := issueLegacySession(t, handler)
 
 	crossSite := httptest.NewRequest(http.MethodGet, "/status", nil)
 	crossSite.AddCookie(cookie)
@@ -219,14 +149,7 @@ func TestReadAPIRejectsCrossSiteDuplicateCookieAndUnauthorizedRole(t *testing.T)
 
 func TestAuthenticatedManagementWritesRequireSynchronousCSRFToken(t *testing.T) {
 	handler, _ := newReadTestHandler(t, true)
-	exchange := performExchange(handler, `{"credential":"valid"}`)
-	cookie := exchange.Result().Cookies()[0]
-	var issued struct {
-		CSRFToken string `json:"csrfToken"`
-	}
-	if err := json.Unmarshal(exchange.Body.Bytes(), &issued); err != nil {
-		t.Fatal(err)
-	}
+	cookie, csrf := issueLegacySession(t, handler)
 	protected := echo.New()
 	protected.POST("/future-write", func(ctx *echo.Context) error {
 		return ctx.NoContent(http.StatusNoContent)
@@ -244,7 +167,7 @@ func TestAuthenticatedManagementWritesRequireSynchronousCSRFToken(t *testing.T) 
 	valid := httptest.NewRequest(http.MethodPost, "/future-write", nil)
 	valid.AddCookie(cookie)
 	valid.Header.Set("Origin", "https://gateway.example")
-	valid.Header.Set(CSRFHeaderName, issued.CSRFToken)
+	valid.Header.Set(CSRFHeaderName, csrf)
 	validRecorder := httptest.NewRecorder()
 	protected.ServeHTTP(validRecorder, valid)
 	if validRecorder.Code != http.StatusNoContent {
@@ -412,7 +335,8 @@ func newTestHandler(t *testing.T, config Config, enabled bool) (*Handler, *stora
 	}
 	t.Cleanup(func() { _ = store.Close() })
 	generation := base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{4}, 32))
-	sessions, err := adminsession.New(store, &testVerifier{enabled: enabled, generation: generation})
+	verifier := &testVerifier{enabled: enabled, generation: generation}
+	sessions, err := adminsession.New(store, verifier)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -496,8 +420,7 @@ func newPrincipalTokenHandler(t *testing.T, bootstrap bool, extraOptions ...Opti
 	if err := store.TokenFamilies().Create(context.Background(), family); err != nil {
 		t.Fatal(err)
 	}
-	verifier := &testVerifier{enabled: false}
-	sessions, err := adminsession.New(store, verifier)
+	sessions, err := adminsession.New(store)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -544,6 +467,17 @@ func performExchange(handler *Handler, body string) *httptest.ResponseRecorder {
 	recorder := httptest.NewRecorder()
 	serveHTTP(handler, recorder, exchangeRequest(body))
 	return recorder
+}
+
+func issueLegacySession(t *testing.T, handler *Handler) (*http.Cookie, string) {
+	t.Helper()
+	issued, err := handler.sessions.ExchangeBreakGlass(
+		context.Background(), netip.MustParseAddr("192.0.2.20"), []byte("valid"), uuid.NewString(),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &http.Cookie{Name: SessionCookieName, Value: issued.SessionToken}, issued.CSRFToken
 }
 
 func errorSignature(t *testing.T, recorder *httptest.ResponseRecorder) string {

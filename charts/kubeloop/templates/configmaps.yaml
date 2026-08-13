@@ -43,29 +43,6 @@
 {{- if and $bootstrap.recoveryEnabled (not (or $bootstrap.subjects $bootstrap.groups)) }}
 {{- fail "controlPlane.management.bootstrap.recoveryEnabled requires a bootstrap subject or group" }}
 {{- end }}
-{{- $breakGlass := $management.breakGlass }}
-{{- $breakGlassAlias := trim (toString $breakGlass.secretAlias) }}
-{{- $breakGlassConfig := dict "enabled" false "secretAlias" "" "secretFile" "" "sessionTtl" "" "allowedSourceCidrs" (list) }}
-{{- if $breakGlass.enabled }}
-{{- if not (regexMatch "^[a-z][a-z0-9-]{0,62}$" $breakGlassAlias) }}
-{{- fail "controlPlane.management.breakGlass.secretAlias must be a valid stable alias" }}
-{{- end }}
-{{- $breakGlassSecret := get (default (dict) $breakGlass.secretAliases) $breakGlassAlias }}
-{{- if not $breakGlassSecret }}
-{{- fail "controlPlane.management.breakGlass.secretAlias must select a configured secretAliases entry" }}
-{{- end }}
-{{- $_ := required (printf "controlPlane.management.breakGlass.secretAliases.%s.existingSecret is required" $breakGlassAlias) $breakGlassSecret.existingSecret }}
-{{- $_ := required (printf "controlPlane.management.breakGlass.secretAliases.%s.credentialKey is required" $breakGlassAlias) $breakGlassSecret.credentialKey }}
-{{- $breakGlassConfig = dict
-      "enabled" true
-      "secretAlias" $breakGlassAlias
-      "secretFile" (printf "/var/run/secrets/kubeloop/management/break-glass/%s/credential" $breakGlassAlias)
-      "sessionTtl" (default "15m" $breakGlass.sessionTTL)
-      "allowedSourceCidrs" (default (list) $breakGlass.allowedSourceCIDRs)
-}}
-{{- else if $breakGlassAlias }}
-{{- fail "controlPlane.management.breakGlass.secretAlias must be empty while break-glass is disabled" }}
-{{- end }}
 {{- $providerSecretAliases := dict }}
 {{- range $alias, $secret := (default (dict) $management.providerSecretAliases) }}
 {{- if not (regexMatch "^[a-z][a-z0-9-]{0,62}$" $alias) }}
@@ -187,7 +164,7 @@ metadata:
 data:
   auth.json: {{ dict "developmentMode" .Values.controlPlane.auth.developmentMode "providers" $providers | toJson | quote }}
   policy.json: {{ dict "version" 1 "rules" (default (list) .Values.controlPlane.policy.rules) | toJson | quote }}
-  management.json: {{ dict "bootstrap" (dict "subjects" (default (list) $bootstrap.subjects) "groups" (default (list) $bootstrap.groups) "recoveryEnabled" $bootstrap.recoveryEnabled) "breakGlass" $breakGlassConfig "providerSecretAliases" $providerSecretAliases | toJson | quote }}
+  management.json: {{ dict "bootstrap" (dict "subjects" (default (list) $bootstrap.subjects) "groups" (default (list) $bootstrap.groups) "recoveryEnabled" $bootstrap.recoveryEnabled) "providerSecretAliases" $providerSecretAliases | toJson | quote }}
   kubernetes.json: {{ dict "timeout" .Values.controlPlane.kubernetes.timeout "qps" .Values.controlPlane.kubernetes.qps "burst" .Values.controlPlane.kubernetes.burst "userAgent" .Values.controlPlane.kubernetes.userAgent "impersonation" (dict "enabled" .Values.controlPlane.kubernetes.impersonation.enabled "usernamePrefix" .Values.controlPlane.kubernetes.impersonation.usernamePrefix "groupMappings" (default (dict) .Values.controlPlane.kubernetes.impersonation.groupMappings)) | toJson | quote }}
 ---
 apiVersion: v1

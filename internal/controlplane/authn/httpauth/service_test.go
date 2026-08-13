@@ -145,6 +145,15 @@ func TestLocalAccountAuthorizationUsesSameOAuthCodeFlowAndMFA(t *testing.T) {
 	if page.Code != http.StatusOK || !strings.Contains(page.Body.String(), `action="/oauth2/login/local"`) {
 		t.Fatalf("local authorize status=%d body=%s", page.Code, page.Body.String())
 	}
+	if !strings.Contains(page.Body.String(), `href="/oauth2/assets/login.css"`) ||
+		!strings.Contains(page.Header().Get("Content-Security-Policy"), "style-src 'self'") {
+		t.Fatalf("local login page does not load its same-origin shadcn styles")
+	}
+	styles := perform(t, handler, http.MethodGet, "/oauth2/assets/login.css", nil)
+	if styles.Code != http.StatusOK || !strings.HasPrefix(styles.Header().Get("Content-Type"), "text/css") ||
+		!strings.Contains(styles.Body.String(), "--primary:") {
+		t.Fatalf("local login styles status=%d content-type=%q", styles.Code, styles.Header().Get("Content-Type"))
+	}
 	marker := `name="transaction" value="`
 	start := strings.Index(page.Body.String(), marker)
 	if start < 0 {

@@ -431,7 +431,7 @@ Policy is mounted only into the Control Plane. Invalid policy prevents Control P
 startup; a runtime update is compiled completely before it atomically replaces
 the prior policy.
 
-## Management bootstrap and break-glass
+## Management bootstrap
 
 The Control Plane Management Plane has a separate deny-by-default role engine;
 ordinary Gateway Policy access never grants an `admin.*` operation. Initial
@@ -455,31 +455,6 @@ published, the persistent retirement marker prevents old values or a rollback
 from restoring bootstrap access. Disaster recovery requires an explicit Helm
 change to `recoveryEnabled: true` and a Control Plane restart, and still requires
 one of the configured exact identities.
-
-Break-glass is disabled by default. When enabled, the selected stable alias
-must map to an existing Secret; the credential itself never enters values,
-ConfigMaps, the database, logs, Data Plane, or Operator:
-
-```yaml
-controlPlane:
-  management:
-    breakGlass:
-      enabled: true
-      secretAlias: emergency
-      sessionTTL: 10m
-      allowedSourceCIDRs: ["10.0.0.0/8"]
-      secretAliases:
-        emergency:
-          existingSecret: kubeloop-break-glass
-          credentialKey: credential
-```
-
-The Secret value must be an unpadded base64url encoding of 32–64 random bytes.
-Control Plane validates it at startup and readiness, projects it read-only under
-`/var/run/secrets/kubeloop/management`, compares credentials in constant time,
-and derives a SHA-256 generation so Secret rotation invalidates prior emergency
-sessions. Emergency sessions are non-refreshable and may never become ordinary
-Gateway Token Families or RelayTickets.
 
 ## Managed OIDC Provider revisions
 

@@ -118,17 +118,6 @@ controlPlane:
       # Disaster recovery must be explicitly enabled by a Helm change and
       # Control Plane restart after the persistent bootstrap retirement marker is set.
       recoveryEnabled: false
-    breakGlass:
-      # Disabled by default. The API never accepts this credential; the
-      # Control Plane reads the selected alias from a read-only Secret projection.
-      enabled: false
-      secretAlias: ""
-      sessionTTL: 15m
-      allowedSourceCIDRs: []
-      secretAliases: {}
-      # emergency:
-      #   existingSecret: kubeloop-break-glass
-      #   credentialKey: credential
     # Allowlisted aliases available to database-managed OIDC Provider
     # revisions. The Management API accepts only alias names; Helm projects
     # selected keys into fixed read-only paths owned by the deployment.

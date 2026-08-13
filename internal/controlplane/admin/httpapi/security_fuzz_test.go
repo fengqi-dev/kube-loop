@@ -1,9 +1,7 @@
 package httpapi
 
 import (
-	"bytes"
 	"context"
-	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -22,8 +20,7 @@ func FuzzManagementEntryBoundedRedactedAndFailClosed(f *testing.F) {
 		f.Fatal(err)
 	}
 	f.Cleanup(func() { _ = store.Close() })
-	generation := base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{6}, 32))
-	sessions, err := adminsession.New(store, &testVerifier{enabled: true, generation: generation})
+	sessions, err := adminsession.New(store)
 	if err != nil {
 		f.Fatal(err)
 	}

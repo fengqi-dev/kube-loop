@@ -19,7 +19,6 @@ import (
 
 	"github.com/fengqi-dev/kube-loop/internal/controlplane"
 	adminauthorization "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/authorization"
-	adminbreakglass "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/breakglass"
 	managementconfig "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/config"
 	adminhttpapi "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/httpapi"
 	adminhttpserver "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/httpserver"
@@ -175,19 +174,6 @@ func main() {
 		logger.Error("load Management Plane configuration failed", "error", err)
 		os.Exit(2)
 	}
-	breakGlassStore, err := adminbreakglass.New(managementFile.BreakGlass)
-	if err != nil {
-		_ = stateStore.Close()
-		logger.Error("initialize Management Plane emergency authentication failed", "error", err)
-		os.Exit(2)
-	}
-	if managementFile.BreakGlass.Enabled {
-		if _, err := breakGlassStore.CurrentBreakGlassState(signalContext); err != nil {
-			_ = stateStore.Close()
-			logger.Error("validate Management Plane emergency credential failed", "error", err)
-			os.Exit(2)
-		}
-	}
 	localUsers, initialAdmin, err := initializeLocalUsers(signalContext, stateStore, *managementPublicURL,
 		*initialAdminUsernameFile, *initialAdminPasswordFile, *managementMFAKeyFile)
 	if err != nil {
@@ -223,7 +209,6 @@ func main() {
 	}
 	managementPolicyEngine, err := adminauthorization.NewDenyAll(
 		adminauthorization.WithBootstrap(managementFile.Bootstrap.AuthorizationConfig(), stateStore.ManagementState()),
-		adminauthorization.WithBreakGlass(breakGlassStore),
 	)
 	if err != nil {
 		_ = stateStore.Close()
@@ -578,11 +563,6 @@ func main() {
 		if err := managedProviderRuntime.Check(ctx); err != nil {
 			return err
 		}
-		if managementFile.BreakGlass.Enabled {
-			if _, err := breakGlassStore.CurrentBreakGlassState(ctx); err != nil {
-				return err
-			}
-		}
 		if err := authRegistry.Check(ctx); err != nil {
 			return err
 		}
@@ -600,7 +580,7 @@ func main() {
 		controlplane.WithAuditSink(auditSink), controlplane.WithAPIRoutes(apiRoutes),
 		controlplane.WithAuthMethodSource(authMethodSource),
 	}
-	managementSessions, err := adminsession.New(stateStore, breakGlassStore)
+	managementSessions, err := adminsession.New(stateStore)
 	if err != nil {
 		_ = stateStore.Close()
 		logger.Error("initialize Management Session service failed", "error", err)

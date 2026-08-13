@@ -446,13 +446,12 @@ func TestGatewayPolicyRendersAsControlPlaneOnlyDenyByDefaultConfig(t *testing.T)
 	}
 }
 
-func TestManagementBootstrapAndBreakGlassRemainControlPlaneOnly(t *testing.T) {
+func TestManagementBootstrapRemainsControlPlaneOnly(t *testing.T) {
 	defaultObjects := renderChart(t, "--set", "publicURL=https://kubeloop.example.test")
 	defaultConfig := objectByName(t, defaultObjects, "ConfigMap", "test-kubeloop-control-plane-auth-config")
 	defaultJSON := valueAt(t, defaultConfig, "data", "management.json").(string)
 	for _, want := range []string{
 		`"subjects":[]`, `"groups":[]`, `"recoveryEnabled":false`,
-		`"enabled":false`, `"secretAlias":""`, `"sessionTtl":""`,
 		`"providerSecretAliases":{}`,
 	} {
 		if !strings.Contains(defaultJSON, want) {
@@ -464,38 +463,27 @@ func TestManagementBootstrapAndBreakGlassRemainControlPlaneOnly(t *testing.T) {
 		"--set", "publicURL=https://kubeloop.example.test",
 		"--set", "controlPlane.management.bootstrap.subjects[0]=00000000-0000-4000-8000-000000000001",
 		"--set", "controlPlane.management.bootstrap.groups[0]=platform-bootstrap",
-		"--set", "controlPlane.management.breakGlass.enabled=true",
-		"--set", "controlPlane.management.breakGlass.secretAlias=emergency",
-		"--set", "controlPlane.management.breakGlass.sessionTTL=10m",
-		"--set", "controlPlane.management.breakGlass.allowedSourceCIDRs[0]=10.0.0.0/8",
-		"--set", "controlPlane.management.breakGlass.secretAliases.emergency.existingSecret=kubeloop-break-glass",
-		"--set", "controlPlane.management.breakGlass.secretAliases.emergency.credentialKey=credential",
 	)
 	config := objectByName(t, objects, "ConfigMap", "test-kubeloop-control-plane-auth-config")
 	managementJSON := valueAt(t, config, "data", "management.json").(string)
 	for _, want := range []string{
 		`"subjects":["00000000-0000-4000-8000-000000000001"]`, `"groups":["platform-bootstrap"]`,
-		`"enabled":true`, `"secretAlias":"emergency"`, `"sessionTtl":"10m"`,
-		`"secretFile":"/var/run/secrets/kubeloop/management/break-glass/emergency/credential"`,
-		`"allowedSourceCidrs":["10.0.0.0/8"]`,
 	} {
 		if !strings.Contains(managementJSON, want) {
 			t.Fatalf("management config missing %s: %s", want, managementJSON)
 		}
 	}
-	if strings.Contains(managementJSON, "kubeloop-break-glass") || strings.Contains(managementJSON, `"credentialKey"`) {
-		t.Fatalf("Kubernetes Secret reference leaked into management config: %s", managementJSON)
+	if strings.Contains(strings.ToLower(managementJSON), "breakglass") {
+		t.Fatalf("removed break-glass configuration remains present: %s", managementJSON)
 	}
 	controlPlane := objectsByComponent(t, objects, "Deployment", "control-plane")[0]
 	controlPlaneYAML, _ := yaml.Marshal(controlPlane)
-	for _, want := range []string{"management-secrets", "kubeloop-break-glass", "break-glass/emergency/credential"} {
-		if !strings.Contains(string(controlPlaneYAML), want) {
-			t.Fatalf("ControlPlane management Secret projection missing %q: %s", want, controlPlaneYAML)
-		}
+	if strings.Contains(string(controlPlaneYAML), "break-glass") {
+		t.Fatalf("ControlPlane still projects a break-glass Secret: %s", controlPlaneYAML)
 	}
 	for _, component := range []string{"data-plane", "operator"} {
 		componentYAML, _ := yaml.Marshal(objectsByComponent(t, objects, "Deployment", component)[0])
-		for _, forbidden := range []string{"management-secrets", "kubeloop-break-glass", "break-glass/emergency"} {
+		for _, forbidden := range []string{"management-secrets", "break-glass"} {
 			if strings.Contains(string(componentYAML), forbidden) {
 				t.Fatalf("%s received Management Plane Secret %q", component, forbidden)
 			}
@@ -789,9 +777,6 @@ func TestChartRejectsUnsafeStorageConfigurations(t *testing.T) {
 		{name: "ControlPlane log level", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.logLevel=trace"}, want: "controlPlane.logLevel must be"},
 		{name: "wildcard management bootstrap", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set-string", "controlPlane.management.bootstrap.subjects[0]=*"}, want: "must be an exact stable Principal UUID"},
 		{name: "management recovery without identity", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.management.bootstrap.recoveryEnabled=true"}, want: "requires a bootstrap subject or group"},
-		{name: "break-glass without alias", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.management.breakGlass.enabled=true"}, want: "secretAlias must be a valid stable alias"},
-		{name: "unknown break-glass alias", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.management.breakGlass.enabled=true", "--set", "controlPlane.management.breakGlass.secretAlias=emergency"}, want: "must select a configured secretAliases entry"},
-		{name: "disabled break-glass alias", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.management.breakGlass.secretAlias=emergency"}, want: "must be empty while break-glass is disabled"},
 		{name: "Data Plane log level", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "dataPlane.logLevel=verbose"}, want: "dataPlane.logLevel must be"},
 		{name: "invalid RBAC scope", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.rbac.scope=tenant"}, want: "controlPlane.rbac.scope must be cluster or namespace"},
 		{name: "missing RBAC namespaces", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.rbac.scope=namespace"}, want: "controlPlane.rbac.namespaces must contain"},

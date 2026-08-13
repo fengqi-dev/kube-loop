@@ -2,7 +2,6 @@ package httpauth
 
 import (
 	"errors"
-	"html/template"
 	"net/http"
 	"net/url"
 	"strings"
@@ -13,15 +12,6 @@ import (
 	"github.com/labstack/echo/v5"
 	"github.com/labstack/echo/v5/middleware"
 )
-
-var localLoginTemplate = template.Must(template.New("local-login").Parse(`<!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>KubeLoop 登录</title></head><body><main><h1>KubeLoop 登录</h1>
-<form method="post" action="/oauth2/login/local"><input type="hidden" name="transaction" value="{{.}}">
-<label>用户名 <input name="username" autocomplete="username" required></label><br>
-<label>密码 <input type="password" name="password" autocomplete="current-password" required></label><br>
-<label>MFA 或恢复码（已启用时填写） <input name="second_factor" autocomplete="one-time-code"></label><br>
-<button type="submit">登录</button></form></main></body></html>`))
 
 const (
 	maxAuthBodyBytes        = 16 << 10
@@ -39,6 +29,7 @@ func (routes *Routes) RegisterRoutes(group *echo.Group) {
 	group.Use(routes.securityHeaders)
 	group.GET(openidConfigurationPath, routes.discovery)
 	group.GET(oauthMetadataPath, routes.discovery)
+	group.GET(oauthPath+"/assets/login.css", routes.localLoginStyles)
 	group.GET(oauthPath+"/authorize", routes.authorize)
 	group.GET(oauthPath+"/callback/:providerID", routes.callback)
 	group.POST(oauthPath+"/login/local", routes.localLogin, middleware.BodyLimit(maxAuthBodyBytes))
@@ -92,9 +83,9 @@ func (routes *Routes) authorize(ctx *echo.Context) error {
 		if err != nil {
 			return routes.oauthError(ctx, http.StatusBadRequest, "invalid_request", "authorization request was rejected")
 		}
-		ctx.Response().Header().Set("Content-Security-Policy", "default-src 'none'; form-action 'self'; frame-ancestors 'none'")
+		ctx.Response().Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
 		ctx.Response().Header().Set("Content-Type", "text/html; charset=utf-8")
-		return localLoginTemplate.Execute(ctx.Response(), result.Transaction)
+		return localLoginTemplate.Execute(ctx.Response(), localLoginPage{Transaction: result.Transaction})
 	}
 	result, err := routes.service.Start(ctx.Request().Context(), request)
 	if err != nil {

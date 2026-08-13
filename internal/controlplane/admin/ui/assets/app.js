@@ -171,15 +171,6 @@ async function startOIDC(providerID) {
   }
 }
 
-async function loginBreakGlass(credential) {
-  const issued = await requestJSON(`${managementBase}/sessions/break-glass`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ credential }),
-  });
-  sessionStorage.setItem(csrfStorageKey, issued.csrfToken);
-}
-
 function setLoginBusy(busy) {
   document.querySelectorAll(".login-card button, .login-card input, .login-card select").forEach((node) => { node.disabled = busy; });
 }
@@ -203,12 +194,8 @@ async function renderLogin(errorMessage = "") {
       <section class="login-pane">
         <div class="login-card">
           <p class="eyebrow">安全登录</p><h2>进入管理后台</h2>
-          <p class="subtle">使用本地管理员、企业 OIDC，或在紧急情况下使用 break-glass。</p>
+          <p class="subtle">使用本地管理员或企业 OIDC 安全登录。</p>
           <div id="auth-options" class="auth-options"></div>
-          <form id="breakglass-form" class="auth-form">
-            <label>Break-glass 凭据 <input id="breakglass-credential" type="password" autocomplete="off" required></label>
-            <button class="secondary" type="submit">紧急访问</button>
-          </form>
           <p id="login-message" class="message hidden" role="alert"></p>
         </div>
       </section>
@@ -226,15 +213,6 @@ async function renderLogin(errorMessage = "") {
     button.type = "button";
     button.addEventListener("click", () => startOIDC(method.id));
     options.append(button);
-  });
-  document.getElementById("breakglass-form").addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const input = document.getElementById("breakglass-credential");
-    const credential = input.value;
-    input.value = "";
-    setLoginBusy(true);
-    try { await loginBreakGlass(credential); await startApplication(); }
-    catch (error) { showLoginMessage(error.message); setLoginBusy(false); }
   });
 }
 

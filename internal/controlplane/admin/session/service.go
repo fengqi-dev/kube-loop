@@ -61,9 +61,13 @@ type Service struct {
 	newID      func() string
 }
 
-func New(store Store, breakGlass BreakGlassVerifier) (*Service, error) {
-	if store == nil || breakGlass == nil {
-		return nil, errors.New("management session storage and break-glass verifier are required")
+func New(store Store, breakGlassValues ...BreakGlassVerifier) (*Service, error) {
+	if store == nil || len(breakGlassValues) > 1 {
+		return nil, errors.New("management session storage is required")
+	}
+	var breakGlass BreakGlassVerifier
+	if len(breakGlassValues) == 1 {
+		breakGlass = breakGlassValues[0]
 	}
 	return &Service{store: store, breakGlass: breakGlass, random: rand.Reader, now: time.Now, newID: uuid.NewString}, nil
 }
@@ -283,6 +287,9 @@ func (service *Service) Authenticate(ctx context.Context, token string) (storage
 		return storage.AdminSession{}, ErrSessionInvalid
 	}
 	if stored.AuthenticationType == string(adminauthorization.AuthenticationBreakGlass) {
+		if service.breakGlass == nil {
+			return storage.AdminSession{}, ErrSessionInvalid
+		}
 		state, err := service.breakGlass.CurrentBreakGlassState(ctx)
 		if err != nil || !state.Enabled || !sameString(stored.BreakGlassGeneration, state.Generation) {
 			return storage.AdminSession{}, ErrSessionInvalid

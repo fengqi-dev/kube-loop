@@ -36,7 +36,6 @@ DATA_PLANE_IMAGE="${KUBELOOP_HELM_E2E_DATA_PLANE_IMAGE:-kubeloop/gateway:e2e}"
 OPERATOR_IMAGE="${KUBELOOP_HELM_E2E_OPERATOR_IMAGE:-kubeloop/operator:e2e}"
 POSTGRES_IMAGE="${KUBELOOP_HELM_E2E_POSTGRES_IMAGE:-postgres:17-alpine}"
 BUSYBOX_IMAGE="${KUBELOOP_HELM_E2E_BUSYBOX_IMAGE:-busybox:1.36.1}"
-SQLITE_BREAK_GLASS_CREDENTIAL=""
 
 CRD_OWNED=0
 
@@ -100,13 +99,6 @@ create_relay_material() {
     --from-file="ca.crt=${directory}/ca.crt"
   )
   kubectl "${secret_args[@]}" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
-  if [[ "${release}" == "${SQLITE_RELEASE}" ]]; then
-    SQLITE_BREAK_GLASS_CREDENTIAL="$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\r\n')"
-    kubectl create secret generic "${release}-management" \
-      --namespace "${namespace}" \
-      --from-literal="credential=${SQLITE_BREAK_GLASS_CREDENTIAL}" \
-      --dry-run=client -o yaml | kubectl apply -f - >/dev/null
-  fi
 }
 
 image_repository() {
@@ -165,10 +157,6 @@ helm_apply() {
       --set controlPlane.kubernetes.impersonation.enabled=true
       --set-string controlPlane.kubernetes.impersonation.usernamePrefix=kubeloop:
       --set-string controlPlane.kubernetes.impersonation.groupMappings.impersonation-audit[0]=kubeloop:audit-users
-      --set controlPlane.management.breakGlass.enabled=true
-      --set-string controlPlane.management.breakGlass.secretAlias=e2e
-      --set-string controlPlane.management.breakGlass.secretAliases.e2e.existingSecret="${release}-management"
-      --set-string controlPlane.management.breakGlass.secretAliases.e2e.credentialKey=credential
     )
   else
     args+=(
@@ -414,12 +402,6 @@ if [[ -n "${AUDIT_SOURCE}" ]]; then
     KUBELOOP_IMPERSONATION_E2E_AUDIT_SOURCE="${AUDIT_SOURCE}" \
     "${ROOT}/e2e/impersonation/verify.sh"
 fi
-
-log "Verify Management Plane security and revocation flows"
-KUBELOOP_ADMIN_E2E_NAMESPACE="${SQLITE_NAMESPACE}" \
-  KUBELOOP_ADMIN_E2E_RELEASE="${SQLITE_RELEASE}" \
-  KUBELOOP_ADMIN_E2E_BREAK_GLASS_CREDENTIAL="${SQLITE_BREAK_GLASS_CREDENTIAL}" \
-  "${ROOT}/e2e/admin/verify.sh"
 
 log "Upgrade Control Plane without restarting Data Plane or Operator"
 DATA_PLANE_UIDS="$(pod_uids "${SQLITE_NAMESPACE}" "${SQLITE_RELEASE}" data-plane)"

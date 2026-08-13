@@ -6,8 +6,6 @@ package httpapi
 import (
 	"encoding/json"
 	"errors"
-	"io"
-	"mime"
 	"net"
 	"net/http"
 	"net/netip"
@@ -125,7 +123,6 @@ func New(config Config, sessions *adminsession.Service, optionValues ...Option) 
 func (handler *Handler) RegisterRoutes(group *echo.Group) {
 	group.Use(handler.securityHeaders)
 	adminui.New(handler.pathPrefix).RegisterRoutes(group.Group("/ui"))
-	group.POST("/sessions/break-glass", handler.exchangeBreakGlass)
 	if handler.tokenAuth != nil {
 		group.POST("/sessions/token", handler.exchangeToken)
 	}
@@ -150,56 +147,6 @@ func (handler *Handler) securityHeaders(next echo.HandlerFunc) echo.HandlerFunc 
 		writer.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
 		return next(ctx)
 	}
-}
-
-func (handler *Handler) exchangeBreakGlass(ctx *echo.Context) error {
-	writer, request := ctx.Response(), ctx.Request()
-	requestID := ensureRequestID(writer, request)
-	source, sourceKey := sourceAddress(request.RemoteAddr)
-	if !handler.limiter.allow(sourceKey) {
-		writeError(writer, http.StatusTooManyRequests, "rate_limited", "management authentication failed", requestID)
-		return nil
-	}
-	if request.Header.Get("Origin") != handler.origin || request.Header.Get("Authorization") != "" ||
-		request.Header.Get("Sec-Fetch-Site") == "cross-site" {
-		writeError(writer, http.StatusUnauthorized, "unauthenticated", "management authentication failed", requestID)
-		return nil
-	}
-	mediaType, _, err := mime.ParseMediaType(request.Header.Get("Content-Type"))
-	if err != nil || mediaType != "application/json" {
-		writeError(writer, http.StatusUnsupportedMediaType, "invalid_request", "application/json is required", requestID)
-		return nil
-	}
-	request.Body = http.MaxBytesReader(writer, request.Body, handler.maxBody)
-	decoder := json.NewDecoder(request.Body)
-	decoder.DisallowUnknownFields()
-	var input struct {
-		Credential string `json:"credential"`
-	}
-	if err := decoder.Decode(&input); err != nil || strings.TrimSpace(input.Credential) == "" {
-		input.Credential = ""
-		writeError(writer, http.StatusBadRequest, "invalid_request", "invalid request", requestID)
-		return nil
-	}
-	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-		input.Credential = ""
-		writeError(writer, http.StatusBadRequest, "invalid_request", "invalid request", requestID)
-		return nil
-	}
-	credential := []byte(input.Credential)
-	input.Credential = ""
-	issued, err := handler.sessions.ExchangeBreakGlass(request.Context(), source, credential, requestID)
-	if err != nil {
-		writeError(writer, http.StatusUnauthorized, "unauthenticated", "management authentication failed", requestID)
-		return nil
-	}
-	setSessionCookie(writer, issued)
-	writeJSON(writer, http.StatusCreated, map[string]any{
-		"csrfToken": issued.CSRFToken,
-		"expiresAt": issued.ExpiresAt.Format(time.RFC3339Nano),
-		"requestId": requestID,
-	})
-	return nil
 }
 
 func setSessionCookie(writer http.ResponseWriter, issued adminsession.Credentials) {

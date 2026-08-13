@@ -262,7 +262,7 @@ func newNamespaceTokenHandler(t *testing.T, namespace string) (*Handler, *storag
 	if err := store.TokenFamilies().Create(context.Background(), family); err != nil {
 		t.Fatal(err)
 	}
-	sessions, err := adminsession.New(store, &testVerifier{})
+	sessions, err := adminsession.New(store)
 	if err != nil {
 		t.Fatal(err)
 	}
