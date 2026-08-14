@@ -67,6 +67,7 @@ func newRootCommand(dependencies commandDependencies, commandVersion string) *co
 		newRunCommand(dependencies),
 		newElevatedCommand(dependencies),
 		newVersionCommand(commandVersion),
+		newIdentityCommand(commandVersion),
 	)
 	return root
 }

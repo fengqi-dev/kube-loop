@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { KeyRound, ShieldCheck } from "lucide-react";
+import { authenticationError } from "./auth-error";
 import "./styles.css";
 
 type Locale = "zh-CN" | "en-US";
@@ -53,6 +54,7 @@ function App() {
   };
   const transaction = query.get("transaction") || "",
     csrf = query.get("csrf") || "";
+  const errorMessage = authenticationError(locale, query.get("error"));
   if (!session && provider !== "local")
     return (
       <main>
@@ -118,10 +120,12 @@ function App() {
         </div>
         <h1>{text.title}</h1>
         <p>{text.hint}</p>
+        {errorMessage && <div className="error" role="alert">{errorMessage}</div>}
         <form method="post" action="/oauth2/login/local">
           <input type="hidden" name="transaction" value={transaction} />
           <input type="hidden" name="csrf" value={csrf} />
           <input type="hidden" name="session" value={String(session)} />
+          <input type="hidden" name="return_to" value={location.search} />
           {!session && (
             <>
               <label>

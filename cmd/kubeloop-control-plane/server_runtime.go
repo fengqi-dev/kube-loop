@@ -15,7 +15,7 @@ import (
 	adminhttpserver "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/httpserver"
 	adminoperations "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/operations"
 	adminprovider "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/provider"
-	adminrevision "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/revision"
+	adminconfig "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/managementconfig"
 	controlplanekubernetes "github.com/fengqi-dev/kube-loop/internal/controlplane/kubernetes"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/maintenance"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/sessionregistry"
@@ -34,7 +34,7 @@ type serverRuntimeOptions struct {
 	RelayRegistry          *relayRegistryRuntime
 	KubernetesConfig       controlplanekubernetes.Config
 	ManagedProviderRuntime *adminprovider.Runtime
-	ManagementPolicyLoader *adminrevision.PolicyLoader
+	ManagementPolicyLoader *adminconfig.PolicyLoader
 	SessionRecovery        *sessionregistry.Reconciler
 	ManagementOperations   *adminoperations.Service
 	MaintenanceWorker      *maintenance.Worker

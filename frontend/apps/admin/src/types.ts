@@ -1,6 +1,8 @@
 export type ViewKey =
   | "overview"
-  | "policy"
+  | "roles"
+  | "permissions"
+  | "assignments"
   | "delegations"
   | "providers"
   | "oauthClients"
@@ -19,7 +21,6 @@ export interface Capabilities {
   capabilities: string[];
   namespaceScopes: Scope[];
   authenticationType: string;
-  policyRevision: number;
 }
 export interface Bootstrap {
   identity: { id: string; groups: string[] };
@@ -33,8 +34,6 @@ export interface Bootstrap {
   authorization: {
     capabilities: string[];
     namespaceScopes: Scope[];
-    policyRevision: number;
-    policyEtag: number;
   };
 }
 export interface Overview {
@@ -50,8 +49,6 @@ export interface Overview {
   };
   security: {
     authenticationType: string;
-    policyRevision: number;
-    policyEtag: number;
   };
   runtime: {
     activeSessions: { count: number; truncated: boolean };
@@ -101,9 +98,7 @@ export interface RoleDefinition {
   statements: Array<{ effect: "allow" | "deny"; capabilities: string[] }>;
 }
 export interface Policy {
-  active: boolean;
-  etag: number;
-  revision: number;
+	active: boolean;
   availableCapabilities: string[];
   builtInRoles: RoleDefinition[];
   spec: {
@@ -113,9 +108,7 @@ export interface Policy {
   };
 }
 export interface DelegationState {
-  namespace: string;
-  etag: number;
-  revision: number;
+	namespace: string;
   bindings: Assignment[];
   roles: RoleDefinition[];
 }

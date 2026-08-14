@@ -4,6 +4,7 @@ export const managementBase =
     ?.content.replace(/\/$/, "") || "/api/admin";
 const authBase = "/oauth2";
 export const csrfStorageKey = "kubeloop.admin.csrf";
+export const authenticationLostEvent = "kubeloop:admin-authentication-lost";
 const oidcStorageKey = "kubeloop.admin.oidc";
 const deviceStorageKey = "kubeloop.admin.device";
 
@@ -16,6 +17,17 @@ export class ApiError extends Error {
   ) {
     super(message);
   }
+}
+
+export function oidcCallbackError(code: string | null) {
+  if (!code) return undefined;
+  if (code === "access_denied")
+    return new ApiError(
+      "Authorization was cancelled.",
+      400,
+      "OIDC_ACCESS_DENIED",
+    );
+  return new ApiError("Authorization failed.", 400, "OIDC_AUTHORIZATION_FAILED");
 }
 
 export function resolveRequestPath(path: string) {
@@ -53,7 +65,7 @@ export async function request<T>(
       message?: string;
       code?: string;
     } | null;
-    throw new ApiError(
+    const error = new ApiError(
       value?.error?.message ||
         value?.message ||
         `Request failed (${response.status})`,
@@ -61,6 +73,9 @@ export async function request<T>(
       value?.error?.code || value?.code || "REQUEST_FAILED",
       value?.error?.requestId,
     );
+    if (response.status === 401 && target.startsWith(managementBase))
+      window.dispatchEvent(new Event(authenticationLostEvent));
+    throw error;
   }
   if (response.status !== 204 && body === null)
     throw new ApiError(
@@ -71,18 +86,71 @@ export async function request<T>(
   return body as T;
 }
 
+export async function waitForAuditExport(
+  jobId: string,
+  options: { attempts?: number; delayMs?: number } = {},
+): Promise<Blob> {
+  const attempts = options.attempts ?? 60;
+  const delayMs = options.delayMs ?? 1000;
+  const target = resolveRequestPath(
+    `/audit/exports/${encodeURIComponent(jobId)}`,
+  );
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    const response = await fetch(target, {
+      credentials: "same-origin",
+      cache: "no-store",
+      headers: { Accept: "application/x-ndjson, application/json" },
+    });
+    if (response.status === 401) {
+      window.dispatchEvent(new Event(authenticationLostEvent));
+    }
+    if (!response.ok && response.status !== 202)
+      throw new ApiError(
+        `Audit export failed (${response.status})`,
+        response.status,
+        "AUDIT_EXPORT_FAILED",
+      );
+    if (response.status === 200 && response.headers.get("Content-Type")?.includes("application/x-ndjson"))
+      return response.blob();
+    const result = (await response.json()) as {
+      state?: string;
+      errorCode?: string;
+    };
+    if (result.state === "failed")
+      throw new ApiError(
+        result.errorCode || "Audit export failed.",
+        response.status,
+        result.errorCode || "AUDIT_EXPORT_FAILED",
+      );
+    if (attempt + 1 < attempts)
+      await new Promise<void>((resolve) => window.setTimeout(resolve, delayMs));
+  }
+  throw new ApiError(
+    "Audit export did not complete in time.",
+    408,
+    "AUDIT_EXPORT_TIMEOUT",
+  );
+}
+
 export function mutation<T>(
   path: string,
   method: string,
   body?: unknown,
-  options: { etag?: number; idempotent?: boolean } = {},
+  options: {
+    etag?: number;
+    idempotent?: boolean;
+    idempotencyKey?: string;
+  } = {},
 ) {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     "X-KubeLoop-CSRF": sessionStorage.getItem(csrfStorageKey) || "",
   };
   if (options.etag !== undefined) headers["If-Match"] = `"${options.etag}"`;
-  if (options.idempotent) headers["Idempotency-Key"] = crypto.randomUUID();
+  if (options.idempotencyKey)
+    headers["Idempotency-Key"] = options.idempotencyKey;
+  else if (options.idempotent)
+    headers["Idempotency-Key"] = crypto.randomUUID();
   return request<T>(path, {
     method,
     headers,
@@ -147,8 +215,9 @@ export async function startOIDC(provider: string) {
 export async function finishOIDCCallback() {
   const query = new URLSearchParams(location.search);
   const code = query.get("code");
+  const authorizationError = oidcCallbackError(query.get("error"));
   const returnedState = query.get("state");
-  if (!code && !returnedState) return false;
+  if (!code && !returnedState && !authorizationError) return false;
   const storedRaw = sessionStorage.getItem(oidcStorageKey);
   sessionStorage.removeItem(oidcStorageKey);
   history.replaceState({}, "", `${managementBase}/ui${location.hash}`);
@@ -174,9 +243,16 @@ export async function finishOIDCCallback() {
       400,
       "OIDC_STATE_INVALID",
     );
+  if (authorizationError) throw authorizationError;
+  if (!code)
+    throw new ApiError(
+      "OIDC authorization code is missing.",
+      400,
+      "OIDC_CODE_MISSING",
+    );
   const form = new URLSearchParams({
     grant_type: "authorization_code",
-    code: code!,
+    code,
     code_verifier: stored.verifier,
     client_id: "kubeloop-management",
     redirect_uri: `${location.origin}${managementBase}/ui/callback`,

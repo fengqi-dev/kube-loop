@@ -1,4 +1,4 @@
-package revision
+package managementconfig
 
 import (
 	"context"
@@ -50,8 +50,8 @@ func TestPolicyLoaderInstallsPublishedAggregateAndFailsClosed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	activation, err := service.PublishPolicy(ctx, ActivateRequest{
-		ChangeID: draft.Change.ID, ExpectedETag: 0, IdempotencyKey: "loader-create-key-0001",
+	_, err = service.PublishPolicy(ctx, ActivateRequest{
+		ChangeID: draft.Change.ID, IdempotencyKey: "loader-create-key-0001",
 		Reason: "publish first admin", RequestID: uuid.NewString(),
 		Actor: Actor{Authentication: adminauthorization.AuthenticationBreakGlass},
 	})
@@ -61,8 +61,8 @@ func TestPolicyLoaderInstallsPublishedAggregateAndFailsClosed(t *testing.T) {
 	if err := loader.Load(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if engine.Revision() != activation.Active.Revision || engine.ETag() != activation.Active.ETag || !engine.Available() {
-		t.Fatalf("engine revision/ETag/available = %d/%d/%v", engine.Revision(), engine.ETag(), engine.Available())
+	if !engine.Available() {
+		t.Fatal("engine is unavailable after loading the published configuration")
 	}
 	decision := engine.Authorize(ctx, adminauthorization.Subject{ID: principalID}, adminauthorization.Request{
 		Resource: adminauthorization.ResourcePolicy, Operation: adminauthorization.OperationPublish,
@@ -93,7 +93,7 @@ func TestPolicyLoaderInstallsPublishedAggregateAndFailsClosed(t *testing.T) {
 	}
 }
 
-func TestPolicyLoaderRejectsInvalidRevision(t *testing.T) {
+func TestPolicyLoaderRejectsInvalidConfig(t *testing.T) {
 	ctx := context.Background()
 	store := openLoaderStore(t)
 	defer store.Close()
@@ -106,17 +106,17 @@ func TestPolicyLoaderRejectsInvalidRevision(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
-	revision, err := store.AdminPolicyRevisions().Create(ctx, storage.AdminPolicyRevision{
+	config, err := store.AdminPolicyConfigs().Create(ctx, storage.AdminPolicyConfig{
 		ID: uuid.NewString(), Spec: []byte(`{"version":2,"bindings":[{"id":"bad","roleId":"platform-admin"}]}`),
-		ValidationState: storage.RevisionValidationValid, Validation: []byte(`{"valid":true}`),
+		ValidationState: storage.ConfigValidationValid, Validation: []byte(`{"valid":true}`),
 		CreatedBy: storage.ManagementActorBreakGlass, CreatedAuthenticationType: string(adminauthorization.AuthenticationBreakGlass),
 		Reason: "mismatch test", CreatedAt: now,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.ActiveManagementRevisions().CompareAndSwap(
-		ctx, storage.ManagementConfigurationPolicy, storage.ManagementPolicyID, revision.Revision, 0,
+	if _, err := store.ActiveManagementConfigs().Set(
+		ctx, storage.ManagementConfigurationPolicy, storage.ManagementPolicyID, config.ID,
 		storage.ManagementActorBreakGlass, string(adminauthorization.AuthenticationBreakGlass), now,
 	); err != nil {
 		t.Fatal(err)

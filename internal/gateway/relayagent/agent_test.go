@@ -4,12 +4,15 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -92,9 +95,14 @@ func TestAgentRegistersAppliesControlStateAndAcknowledgesHeartbeat(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
+	var requests atomic.Int32
 	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.Header.Get("Authorization") != "Bearer projected-token" {
 			t.Errorf("Authorization = %q", request.Header.Get("Authorization"))
+		}
+		if requests.Add(1) <= 2 {
+			http.Error(writer, "Control Plane is starting", http.StatusServiceUnavailable)
+			return
 		}
 		handler.ServeHTTP(writer, request)
 	}))
@@ -108,6 +116,7 @@ func TestAgentRegistersAppliesControlStateAndAcknowledgesHeartbeat(t *testing.T)
 	agent, err := New(Config{
 		ControlPlaneURL: server.URL, Endpoint: "wss://relay.example/tunnel",
 		HTTPClient: server.Client(), BearerTokenFile: tokenFile, Reporter: reporter, Applier: applier,
+		RegistrationAttempts: 3, RegistrationRetryDelay: 10 * time.Millisecond,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -123,11 +132,49 @@ func TestAgentRegistersAppliesControlStateAndAcknowledgesHeartbeat(t *testing.T)
 	if len(statuses) != 1 || statuses[0].AppliedKeyGeneration != 1 || statuses[0].RelayID != agent.RelayID() {
 		t.Fatalf("Registry status = %#v", statuses)
 	}
+	if requests.Load() != 4 {
+		t.Fatalf("Control Plane requests = %d, want two failed registrations, one registration, and one heartbeat", requests.Load())
+	}
 	agent.Stop()
 	select {
 	case <-agent.Done():
 	case <-time.After(time.Second):
 		t.Fatal("Agent did not stop")
+	}
+}
+
+func TestAgentStartDoesNotRetryPermanentRegistrationFailure(t *testing.T) {
+	var requests atomic.Int32
+	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		http.Error(writer, "unauthorized", http.StatusUnauthorized)
+	}))
+	defer server.Close()
+
+	agent, err := New(Config{
+		ControlPlaneURL: server.URL, Endpoint: "wss://relay.example/tunnel",
+		HTTPClient: server.Client(), Reporter: &testRuntimeReporter{}, Applier: &testApplier{},
+		RegistrationAttempts: 3, RegistrationRetryDelay: 10 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := agent.Start(t.Context()); err == nil {
+		t.Fatal("Agent start accepted a permanent registration failure")
+	}
+	if requests.Load() != 1 {
+		t.Fatalf("Control Plane requests = %d, want 1", requests.Load())
+	}
+}
+
+func TestRetryableRegistrationErrorIncludesConnectionFailure(t *testing.T) {
+	err := fmt.Errorf("register relay: %w", &url.Error{
+		Op:  "Post",
+		URL: "https://control-plane.invalid/relay/v1/relays/register",
+		Err: errors.New("connection refused"),
+	})
+	if !retryableRegistrationError(err) {
+		t.Fatal("expected a wrapped connection failure to be retryable")
 	}
 }
 

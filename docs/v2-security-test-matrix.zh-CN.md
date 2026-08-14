@@ -12,7 +12,9 @@
 | 请求与 WSS 资源耗尽 | HTTP header 64 KiB；API body 1 MiB 可配置；auth body 16 KiB；协议帧固定最大值；WebSocket compression 关闭 | `internal/controlplane/server_test.go`、`api_test.go`、`authn/httpauth/handler_test.go`、各 stream/protocol test |
 | 敏感信息泄露 | API 错误、readiness、audit、数据库错误和任务结果使用稳定脱敏消息；不记录 token、claims、命令、内容或 DSN Secret | `internal/controlplane/api_test.go`、`server_test.go`、`audit_test.go`、`storage/*_test.go` 与各任务测试 |
 | 管理面 CSRF/CSP 与 Token 暂存 | 同源 HttpOnly Session、同步 CSRF、严格 CSP、无第三方脚本，Access/Refresh Token 交换后清零 | `internal/controlplane/admin/httpapi/*_test.go`、`internal/controlplane/admin/ui/*_test.go`、`e2e/admin/verify.sh`、`e2e/admin/browserfixture` |
-| 管理策略竞态与高风险操作 | 强 ETag CAS、幂等键、事务审计；先持久化撤销再收敛运行时 | `internal/controlplane/admin/revision/*_test.go`、`internal/controlplane/admin/operations/*_test.go`、`e2e/admin/verify.sh` |
+| 管理策略发布与高风险操作 | 配置写入使用幂等键和事务审计；先持久化撤销再收敛运行时；运行时资源保留 generation/version 并发保护 | `internal/controlplane/admin/managementconfig/*_test.go`、`internal/controlplane/admin/operations/*_test.go`、`e2e/admin/verify.sh` |
+| 管理角色最小权限与会话撤销 | Namespace Admin/Auditor 实际授予与撤销；失权路由收敛；零权限 Overview 不请求平台状态；只读写控件裁剪；Revoke all grants 后既有 Management Session 首次受保护请求返回登录页 | `docs/v2-admin-ui-regression-2026-08-14.zh-CN.md`、`frontend/apps/admin/src/ui-validation.test.ts`、`internal/controlplane/admin/httpapi/*_test.go` |
+| 审计证据导出 | UI 留在 Audit Log 轮询异步 Job，NDJSON 文件落盘，创建与读取操作均写入审计 | `docs/v2-admin-ui-regression-2026-08-14.zh-CN.md`、`internal/controlplane/admin/operations/*_test.go` |
 
 ## Fuzz 入口
 

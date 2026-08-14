@@ -97,14 +97,14 @@ provision_database_provider() {
   change_id="$(curl --silent --show-error --fail --cacert "${WORK_DIR}/public-ca.crt" \
     --cookie "${cookie_jar}" --request POST "${PUBLIC_URL}/api/admin/providers/keycloak/drafts" \
     --header "Origin: ${PUBLIC_URL}" --header 'Content-Type: application/json' \
-    --header "X-KubeLoop-CSRF: ${csrf}" --header 'If-Match: "0"' \
+    --header "X-KubeLoop-CSRF: ${csrf}" \
     --header 'Idempotency-Key: oidc-e2e-provider-create-01' \
     --data-binary "@${WORK_DIR}/provider.json" | jq -er '.changeId')"
   curl --silent --show-error --fail --cacert "${WORK_DIR}/public-ca.crt" \
     --cookie "${cookie_jar}" --request POST \
     "${PUBLIC_URL}/api/admin/providers/keycloak/changes/${change_id}/publish" \
     --header "Origin: ${PUBLIC_URL}" --header 'Content-Type: application/json' \
-    --header "X-KubeLoop-CSRF: ${csrf}" --header 'If-Match: "0"' \
+    --header "X-KubeLoop-CSRF: ${csrf}" \
     --header 'Idempotency-Key: oidc-e2e-provider-create-01' \
     --data '{"reason":"publish Keycloak E2E Provider"}' >/dev/null
 }

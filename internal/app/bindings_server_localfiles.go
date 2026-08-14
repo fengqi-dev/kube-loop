@@ -15,7 +15,7 @@ type ServerLocalFileEntry struct {
 	Kind       string    `json:"kind"`
 	Size       int64     `json:"size"`
 	Mode       uint32    `json:"mode"`
-	ModifiedAt time.Time `json:"modifiedAt"`
+	ModifiedAt time.Time `json:"modifiedAt" ts_type:"string"`
 }
 
 func (a *App) ServerLocalHomeDirectory() (string, error) {

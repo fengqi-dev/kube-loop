@@ -7,7 +7,6 @@ import {
   LogIn,
   LogOut,
   Network,
-  ScrollText,
   Server,
   Settings2,
   Waypoints,
@@ -39,7 +38,6 @@ const navigation: Array<{ id: Exclude<AppView, "settings">; icon: LucideIcon }> 
   { id: "network", icon: Network },
   { id: "host-aliases", icon: Globe },
   { id: "mcp", icon: Bot },
-  { id: "logs", icon: ScrollText },
 ];
 
 export function AppSidebar({

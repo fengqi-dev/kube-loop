@@ -134,7 +134,7 @@ export function ServerOverviewView({
     try {
       await backend.testServerDataPlane(profile.id);
       toast.success("Network connectivity test passed", {
-        description: "Local SOCKS, Gateway transport, and cluster DNS are reachable.",
+        description: `${selectedMode === "tun" ? "System TUN" : "Local SOCKS"}, Gateway transport, and cluster DNS are reachable.`,
       });
     } catch (reason) {
       toast.error("Network connectivity test failed", {

@@ -43,7 +43,7 @@ func testRepositoryConformance(t *testing.T, store *Store) {
 	t.Run("audit export jobs", func(t *testing.T) { testAuditExportJobRepository(t, store) })
 	t.Run("management list pagination", func(t *testing.T) { testManagementListPagination(t, store) })
 	t.Run("management sessions", func(t *testing.T) { testAdminSessionRepositoryConformance(t, store) })
-	t.Run("management revisions", func(t *testing.T) { testManagementRevisionRepositories(t, store) })
+	t.Run("management configs", func(t *testing.T) { testManagementConfigRepositories(t, store) })
 	t.Run("transactions", func(t *testing.T) { testTransactions(t, store) })
 	t.Run("concurrent identity and idempotency", func(t *testing.T) { testConcurrentIdentityAndIdempotency(t, store) })
 	t.Run("stable errors", func(t *testing.T) { testStableRepositoryErrors(t, store) })

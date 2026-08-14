@@ -39,8 +39,7 @@ func TestBootstrapRequiresAuthenticationAndConsolidatesSessionAuthorization(t *t
 		document.Session.AbsoluteExpiresAt.IsZero() {
 		t.Fatalf("session=%+v", document.Session)
 	}
-	if len(document.Authorization.Capabilities) == 0 || document.Authorization.PolicyRevision != 1 ||
-		document.Authorization.PolicyETag != handler.readAPI.authorizer.ETag() {
+	if len(document.Authorization.Capabilities) == 0 {
 		t.Fatalf("authorization=%+v", document.Authorization)
 	}
 }

@@ -5,6 +5,8 @@ package trafficbindingclient
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"reflect"
@@ -17,6 +19,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -25,16 +28,18 @@ import (
 )
 
 const (
-	bindingNamePrefix = "kubeloop-"
-	managedByLabel    = "app.kubernetes.io/managed-by"
-	managedByValue    = "kubeloop-control-plane"
-	taskIDLabel       = "traffic.kubeloop.io/task-id"
-	sessionIDLabel    = "traffic.kubeloop.io/session-id"
-	defaultPoll       = 100 * time.Millisecond
+	bindingNamePrefix   = "kubeloop-"
+	managedByLabel      = "app.kubernetes.io/managed-by"
+	managedByValue      = "kubeloop-control-plane"
+	controlPlaneIDLabel = "traffic.kubeloop.io/control-plane-id"
+	taskIDLabel         = "traffic.kubeloop.io/task-id"
+	sessionIDLabel      = "traffic.kubeloop.io/session-id"
+	defaultPoll         = 100 * time.Millisecond
 )
 
 type Config struct {
-	PollInterval time.Duration
+	PollInterval   time.Duration
+	ControlPlaneID string
 }
 
 type Lifecycle interface {
@@ -43,8 +48,9 @@ type Lifecycle interface {
 }
 
 type Manager struct {
-	client       client.Client
-	pollInterval time.Duration
+	client         client.Client
+	pollInterval   time.Duration
+	controlPlaneID string
 }
 
 func NewForRESTConfig(config *rest.Config, options Config) (*Manager, error) {
@@ -72,7 +78,11 @@ func New(kubernetesClient client.Client, config Config) (*Manager, error) {
 	if config.PollInterval < 10*time.Millisecond || config.PollInterval > 10*time.Second {
 		return nil, errors.New("TrafficBinding poll interval must be between 10ms and 10s")
 	}
-	return &Manager{client: kubernetesClient, pollInterval: config.PollInterval}, nil
+	config.ControlPlaneID = controlPlaneID(config.ControlPlaneID)
+	return &Manager{
+		client: kubernetesClient, pollInterval: config.PollInterval,
+		controlPlaneID: config.ControlPlaneID,
+	}, nil
 }
 
 // Activate creates the immutable Task-owned binding and waits until the
@@ -100,6 +110,7 @@ func (manager *Manager) Activate(
 		desired.Labels = make(map[string]string, 3)
 	}
 	desired.Labels[managedByLabel] = managedByValue
+	desired.Labels[controlPlaneIDLabel] = manager.controlPlaneID
 	desired.Labels[taskIDLabel] = desired.Spec.TaskID
 	desired.Labels[sessionIDLabel] = desired.Spec.SessionID
 
@@ -112,7 +123,9 @@ func (manager *Manager) Activate(
 		if getErr := manager.client.Get(ctx, client.ObjectKeyFromObject(desired), existing); getErr != nil {
 			return nil, false, fmt.Errorf("read existing TrafficBinding %s/%s: %w", desired.Namespace, desired.Name, getErr)
 		}
-		if !reflect.DeepEqual(existing.Spec, desired.Spec) || existing.Labels[taskIDLabel] != desired.Spec.TaskID {
+		if !reflect.DeepEqual(existing.Spec, desired.Spec) ||
+			existing.Labels[taskIDLabel] != desired.Spec.TaskID ||
+			existing.Labels[controlPlaneIDLabel] != manager.controlPlaneID {
 			return nil, false, fmt.Errorf("TrafficBinding %s/%s conflicts with another Task", desired.Namespace, desired.Name)
 		}
 		managed = true
@@ -167,7 +180,8 @@ func (manager *Manager) Delete(ctx context.Context, namespace, taskID string) er
 		}
 		return fmt.Errorf("read TrafficBinding %s/%s for deletion: %w", key.Namespace, key.Name, err)
 	}
-	if binding.Spec.TaskID != taskID || binding.Labels[taskIDLabel] != taskID {
+	if binding.Spec.TaskID != taskID || binding.Labels[taskIDLabel] != taskID ||
+		binding.Labels[controlPlaneIDLabel] != manager.controlPlaneID {
 		return fmt.Errorf("TrafficBinding %s/%s is not owned by Task %s", key.Namespace, key.Name, taskID)
 	}
 	if binding.DeletionTimestamp.IsZero() {
@@ -187,6 +201,18 @@ func (manager *Manager) Delete(ctx context.Context, namespace, taskID string) er
 			return false, nil
 		}
 	})
+}
+
+func controlPlaneID(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "kubeloop"
+	}
+	if len(validation.IsValidLabelValue(value)) == 0 {
+		return value
+	}
+	digest := sha256.Sum256([]byte(value))
+	return "sha256-" + hex.EncodeToString(digest[:8])
 }
 
 func NameForTask(taskID string) (string, error) {

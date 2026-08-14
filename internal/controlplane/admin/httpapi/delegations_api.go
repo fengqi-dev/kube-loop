@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	adminauthorization "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/authorization"
-	adminrevision "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/revision"
+	adminconfig "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/managementconfig"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 	"github.com/labstack/echo/v5"
 )
@@ -53,10 +53,9 @@ func (api *readAPI) listDelegations(ctx *echo.Context) error {
 			items = append(items, binding)
 		}
 	}
-	ctx.Response().Header().Set("ETag", strongETag(state.Pointer.ETag))
 	return ctx.JSON(http.StatusOK, map[string]any{
-		"namespace": namespace, "etag": state.Pointer.ETag, "revision": state.Snapshot.Revision,
-		"bindings": items, "roles": delegatableRoles(state.Snapshot.Roles),
+		"namespace": namespace,
+		"bindings":  items, "roles": delegatableRoles(state.Snapshot.Roles),
 	})
 }
 
@@ -94,12 +93,12 @@ func (api *readAPI) applyDelegation(ctx *echo.Context, namespace, reason string,
 		writeError(ctx.Response(), http.StatusForbidden, "forbidden", "namespace delegation is not permitted", requestID(request))
 		return
 	}
-	expectedETag, idempotencyKey, ok := policyWriteHeaders(ctx.Response(), request)
+	idempotencyKey, ok := policyWriteHeaders(ctx.Response(), request)
 	if !ok {
 		return
 	}
-	result, err := api.policy.ApplyDelegation(request.Context(), adminrevision.DelegationRequest{
-		Binding: binding, DeleteID: deleteID, Namespace: namespace, ExpectedETag: expectedETag,
+	result, err := api.policy.ApplyDelegation(request.Context(), adminconfig.DelegationRequest{
+		Binding: binding, DeleteID: deleteID, Namespace: namespace,
 		IdempotencyKey: idempotencyKey, Reason: reason, RequestID: requestID(request), Actor: policyActor(subjectFromRequest(request)),
 	})
 	if err != nil {
@@ -114,7 +113,6 @@ func (api *readAPI) applyDelegation(ctx *echo.Context, namespace, reason string,
 		writeError(ctx.Response(), http.StatusServiceUnavailable, "policy_reload_failed", "delegation was stored but is not yet available", requestID(request))
 		return
 	}
-	ctx.Response().Header().Set("ETag", strongETag(result.Active.ETag))
 	if result.Replayed {
 		ctx.Response().Header().Set("Idempotent-Replayed", "true")
 	}

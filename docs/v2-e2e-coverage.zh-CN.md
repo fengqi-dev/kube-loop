@@ -50,6 +50,27 @@
 - `make capacity-baseline` 验证全局/单用户物理 WSS、逻辑 stream 上限、容量释放，以及满载时 live/ready/metrics；三轮 32 KiB stream benchmark 记录吞吐和分配。`TestGatewayPodMultiUserCapacityRSSAndCleanup` 在单个真实 Gateway Pod 上以四名 Principal/四条物理 WSS/十六条逻辑 stream 验证限额、容量复用、集群内吞吐和 kubelet working-set 曲线；满载期间撤销 OAuth grant，确认 Preview Task、relay、TrafficBinding、Service、EndpointSlice 和 snapshot 在 5 秒预算内全部清理。
 - Windows/macOS workflow 运行全量本地测试和真实 Helper 安装、升级、ACL、DNS 恢复、卸载；Linux 额外运行完整 Minikube TUN。`e2e/remotetun` 已接入三平台 workflow，使用实际 Helper、sing-box TUN、WSS/smux Gateway、RelayTicket/NetworkSpec 和精确目标路由，验证休眠间隔触发 transport 刷新后 SOCKS 地址、TUN core 与 Helper Session 保持不变，且停止后无特权资源残留。最终门禁已由 GitHub Actions push workflow [31454657118](https://github.com/fengqi-dev/kube-loop/actions/runs/31454657118) 完成：Windows、macOS、Linux、Helm、主 Go 与前端六个作业全部通过，V2-803 已关闭。
 
+## 管理后台浏览器回归
+
+2026-08-13 至 2026-08-14 的真实 Minikube UI 回归通过 Local account/PKCE、
+Management Session、用户创建、重复用户名拒绝、密码重置、禁用、无角色最小权限和
+主要管理页面只读加载；同时发现策略 Draft 发布幂等键冲突、390px 导航覆盖、取消授权
+通用 400、认证失败无反馈以及 browserfixture 路由不完整。完整复现、环境最终状态和
+复验条件见 [`v2-admin-ui-regression-2026-08-14.zh-CN.md`](v2-admin-ui-regression-2026-08-14.zh-CN.md)。
+其中策略发布缺陷在修复前阻断管理权限写入的浏览器 E2E；修复部署后已完成
+Namespace Admin / `default` 的创建、发布、受限导航验证与撤销闭环。清理后测试用户已
+禁用且没有活动角色绑定。
+
+2026-08-14 已完成上述代码修复：策略/Provider draft 与 publish 复用幂等键，认证取消
+和失败提示、401 会话失效、URL 前置校验、列表状态隔离、移动导航关闭及审计导出轮询
+均已落地；browserfixture 已补齐真实管理服务并通过运行态路由与导出 worker 冒烟。
+Admin 27 项、Auth 3 项 Vitest、管理/认证生产构建以及相关 Go 管理面测试通过。真实
+Minikube 的 Namespace Admin 与 Auditor 授予/撤销、只读控件、受限用户导航、移动
+视口、认证反馈和会话撤销均已复验；审计导出后端任务、轮询及 29,195 字节 NDJSON
+文件落盘成功。角色撤销后的 hash view 已自动收敛到 Overview；零权限 Overview 不再
+请求受保护的系统概览接口，并显示明确的受限状态。两项均已在 Revision 39/41 完成真实
+浏览器回归。
+
 ## 运行方式
 
 ```bash

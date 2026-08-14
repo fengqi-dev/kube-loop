@@ -19,8 +19,8 @@ import (
 type AuthSession struct {
 	Authenticated    bool      `json:"authenticated"`
 	UserName         string    `json:"userName,omitempty"`
-	AccessExpiresAt  time.Time `json:"accessExpiresAt"`
-	RefreshExpiresAt time.Time `json:"refreshExpiresAt"`
+	AccessExpiresAt  time.Time `json:"accessExpiresAt" ts_type:"string"`
+	RefreshExpiresAt time.Time `json:"refreshExpiresAt" ts_type:"string"`
 }
 
 func (a *App) LoginServerOIDC(profileID, providerID string) (AuthSession, error) {
@@ -221,8 +221,16 @@ func (a *App) persistCredential(serverProfile clientprofile.Profile, credential 
 		return AuthSession{}, err
 	}
 	session := authSession(credential)
+	profileChanged := false
+	if credential.PrincipalID != "" && credential.PrincipalID != serverProfile.LastPrincipalID {
+		serverProfile.LastPrincipalID = credential.PrincipalID
+		profileChanged = true
+	}
 	if session.UserName != "" && session.UserName != serverProfile.LastUserName {
 		serverProfile.LastUserName = session.UserName
+		profileChanged = true
+	}
+	if profileChanged {
 		if err := a.profiles.Upsert(serverProfile); err != nil {
 			_ = a.credentials.Delete(serverProfile.ID)
 			_ = a.auth.Revoke(a.context(), serverProfile.BaseURL, credential.RefreshToken)
@@ -233,8 +241,12 @@ func (a *App) persistCredential(serverProfile clientprofile.Profile, credential 
 }
 
 func authSession(credential credentials.Credential) AuthSession {
+	userName := strings.TrimSpace(credential.UserName)
+	if userName == "" {
+		userName = tokenUserName(credential.AccessToken)
+	}
 	return AuthSession{
-		Authenticated: true, UserName: tokenUserName(credential.AccessToken), AccessExpiresAt: credential.AccessExpiresAt,
+		Authenticated: true, UserName: userName, AccessExpiresAt: credential.AccessExpiresAt,
 		RefreshExpiresAt: credential.RefreshExpiresAt,
 	}
 }

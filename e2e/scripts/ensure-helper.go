@@ -26,6 +26,9 @@ func main() {
 		helperName += ".exe"
 	}
 	toolNames := []string{helperName}
+	if runtime.GOOS == "darwin" {
+		toolNames = append(toolNames, "kubeloop-supervisor")
+	}
 	toolDir := filepath.Join(root, "build", "bin")
 	if runtime.GOOS == "windows" {
 		// Windows package resources take precedence in LocateBundled*.
@@ -66,7 +69,7 @@ func main() {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	if err := helperinstall.EnsureInstall(ctx); err != nil {
+	if err := helperinstall.EnsureCurrentInstall(ctx); err != nil {
 		fatal(err)
 	}
 	fmt.Println("helper ready")

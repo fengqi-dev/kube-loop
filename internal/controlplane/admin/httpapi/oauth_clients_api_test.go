@@ -46,6 +46,34 @@ func TestOAuthClientCRUDAndSecretRotation(t *testing.T) {
 	}
 }
 
+func TestOAuthClientRedirectURIValidation(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name     string
+		redirect string
+		valid    bool
+	}{
+		{name: "https", redirect: "https://client.example/callback", valid: true},
+		{name: "IPv4 loopback", redirect: "http://127.0.0.1:8080/callback", valid: true},
+		{name: "IPv6 loopback", redirect: "http://[::1]:8080/callback", valid: true},
+		{name: "non-loopback HTTP", redirect: "http://client.example/callback"},
+		{name: "userinfo", redirect: "https://user@client.example/callback"},
+		{name: "fragment", redirect: "https://client.example/callback#token"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := oauthClientFromInput(oauthClientInput{
+				ID: "client", Name: "Client", Public: true,
+				RedirectURIs: []string{test.redirect}, GrantTypes: []string{"authorization_code"},
+				ResponseTypes: []string{"code"}, Scopes: []string{"openid"}, Enabled: true,
+			})
+			if (err == nil) != test.valid {
+				t.Fatalf("oauthClientFromInput() error = %v, valid = %t", err, test.valid)
+			}
+		})
+	}
+}
+
 // WithOAuthClients validates interfaces before the real store is returned by
 // newPrincipalTokenHandler; these lightweight stores are used only to satisfy
 // construction and are immediately replaced above.

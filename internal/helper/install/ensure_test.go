@@ -17,6 +17,118 @@ import (
 	helperprotocol "github.com/fengqi-dev/kube-loop/internal/protocol/helper"
 )
 
+func TestCanReuseInstalledHelper(t *testing.T) {
+	healthy := helper.Status{
+		Running:   true,
+		CoreReady: true,
+		Version:   "dev",
+		Protocol:  helperprotocol.Version,
+	}
+	tests := []struct {
+		name               string
+		status             helper.Status
+		enforceBinaryMatch bool
+		needsBinaryUpdate  bool
+		want               bool
+	}{
+		{
+			name:              "development automatic startup permits binary drift",
+			status:            healthy,
+			needsBinaryUpdate: true,
+			want:              true,
+		},
+		{
+			name:               "explicit install rejects binary drift",
+			status:             healthy,
+			enforceBinaryMatch: true,
+			needsBinaryUpdate:  true,
+		},
+		{
+			name:               "strict install reuses matching binary",
+			status:             healthy,
+			enforceBinaryMatch: true,
+			want:               true,
+		},
+		{
+			name: "stopped helper is not reusable",
+			status: helper.Status{
+				CoreReady: true,
+				Version:   "dev",
+				Protocol:  helperprotocol.Version,
+			},
+		},
+		{
+			name: "helper without core is not reusable",
+			status: helper.Status{
+				Running:  true,
+				Version:  "dev",
+				Protocol: helperprotocol.Version,
+			},
+		},
+		{
+			name: "version mismatch is not reusable",
+			status: helper.Status{
+				Running:   true,
+				CoreReady: true,
+				Version:   "old",
+				Protocol:  helperprotocol.Version,
+			},
+		},
+		{
+			name: "protocol mismatch is not reusable",
+			status: helper.Status{
+				Running:   true,
+				CoreReady: true,
+				Version:   "dev",
+				Protocol:  helperprotocol.Version + 1,
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := canReuseInstalledHelper(
+				test.status,
+				"dev",
+				helperprotocol.Version,
+				test.enforceBinaryMatch,
+				test.needsBinaryUpdate,
+			)
+			if got != test.want {
+				t.Fatalf("canReuseInstalledHelper() = %v, want %v", got, test.want)
+			}
+		})
+	}
+}
+
+func TestMustMatchBundledHelper(t *testing.T) {
+	tests := []struct {
+		name                 string
+		requireCurrentBinary bool
+		developmentBuild     bool
+		want                 bool
+	}{
+		{name: "automatic development startup permits drift", developmentBuild: true},
+		{
+			name:                 "explicit development install requires match",
+			requireCurrentBinary: true,
+			developmentBuild:     true,
+			want:                 true,
+		},
+		{name: "automatic release startup requires match", want: true},
+		{name: "explicit release install requires match", requireCurrentBinary: true, want: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := mustMatchBundledHelper(test.requireCurrentBinary, test.developmentBuild)
+			if got != test.want {
+				t.Fatalf("mustMatchBundledHelper() = %v, want %v", got, test.want)
+			}
+		})
+	}
+}
+
 func TestMaterializeBundledHelper(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

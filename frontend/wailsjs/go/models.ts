@@ -3,10 +3,8 @@ export namespace app {
 	export class AuthSession {
 	    authenticated: boolean;
 	    userName?: string;
-	    // Go type: time
-	    accessExpiresAt: any;
-	    // Go type: time
-	    refreshExpiresAt: any;
+	    accessExpiresAt: string;
+	    refreshExpiresAt: string;
 
 	    static createFrom(source: any = {}) {
 	        return new AuthSession(source);
@@ -16,27 +14,9 @@ export namespace app {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.authenticated = source["authenticated"];
 	        this.userName = source["userName"];
-	        this.accessExpiresAt = this.convertValues(source["accessExpiresAt"], null);
-	        this.refreshExpiresAt = this.convertValues(source["refreshExpiresAt"], null);
+	        this.accessExpiresAt = source["accessExpiresAt"];
+	        this.refreshExpiresAt = source["refreshExpiresAt"];
 	    }
-
-		convertValues(a: any, classs: any, asMap: boolean = false): any {
-		    if (!a) {
-		        return a;
-		    }
-		    if (a.slice && a.map) {
-		        return (a as any[]).map(elem => this.convertValues(elem, classs));
-		    } else if ("object" === typeof a) {
-		        if (asMap) {
-		            for (const key of Object.keys(a)) {
-		                a[key] = new classs(a[key]);
-		            }
-		            return a;
-		        }
-		        return new classs(a);
-		    }
-		    return a;
-		}
 	}
 	export class BootstrapData {
 	    update: update.Info;
@@ -168,8 +148,7 @@ export namespace app {
 	    kind: string;
 	    size: number;
 	    mode: number;
-	    // Go type: time
-	    modifiedAt: any;
+	    modifiedAt: string;
 
 	    static createFrom(source: any = {}) {
 	        return new ServerLocalFileEntry(source);
@@ -182,26 +161,8 @@ export namespace app {
 	        this.kind = source["kind"];
 	        this.size = source["size"];
 	        this.mode = source["mode"];
-	        this.modifiedAt = this.convertValues(source["modifiedAt"], null);
+	        this.modifiedAt = source["modifiedAt"];
 	    }
-
-		convertValues(a: any, classs: any, asMap: boolean = false): any {
-		    if (!a) {
-		        return a;
-		    }
-		    if (a.slice && a.map) {
-		        return (a as any[]).map(elem => this.convertValues(elem, classs));
-		    } else if ("object" === typeof a) {
-		        if (asMap) {
-		            for (const key of Object.keys(a)) {
-		                a[key] = new classs(a[key]);
-		            }
-		            return a;
-		        }
-		        return new classs(a);
-		    }
-		    return a;
-		}
 	}
 	export class ServerNetworkSettings {
 	    dnsNamespace?: string;
@@ -620,12 +581,9 @@ export namespace filetransfer {
 	    resumeId?: string;
 	    temporaryPath?: string;
 	    error?: string;
-	    // Go type: time
-	    createdAt: any;
-	    // Go type: time
-	    updatedAt: any;
-	    // Go type: time
-	    completedAt?: any;
+	    createdAt: string;
+	    updatedAt: string;
+	    completedAt?: string;
 
 	    static createFrom(source: any = {}) {
 	        return new Task(source);
@@ -652,28 +610,10 @@ export namespace filetransfer {
 	        this.resumeId = source["resumeId"];
 	        this.temporaryPath = source["temporaryPath"];
 	        this.error = source["error"];
-	        this.createdAt = this.convertValues(source["createdAt"], null);
-	        this.updatedAt = this.convertValues(source["updatedAt"], null);
-	        this.completedAt = this.convertValues(source["completedAt"], null);
+	        this.createdAt = source["createdAt"];
+	        this.updatedAt = source["updatedAt"];
+	        this.completedAt = source["completedAt"];
 	    }
-
-		convertValues(a: any, classs: any, asMap: boolean = false): any {
-		    if (!a) {
-		        return a;
-		    }
-		    if (a.slice && a.map) {
-		        return (a as any[]).map(elem => this.convertValues(elem, classs));
-		    } else if ("object" === typeof a) {
-		        if (asMap) {
-		            for (const key of Object.keys(a)) {
-		                a[key] = new classs(a[key]);
-		            }
-		            return a;
-		        }
-		        return new classs(a);
-		    }
-		    return a;
-		}
 	}
 
 }
@@ -1238,12 +1178,9 @@ export namespace remote {
 	    pod: string;
 	    container?: string;
 	    tty: boolean;
-	    // Go type: time
-	    createdAt: any;
-	    // Go type: time
-	    updatedAt: any;
-	    // Go type: time
-	    expiresAt: any;
+	    createdAt: string;
+	    updatedAt: string;
+	    expiresAt: string;
 
 	    static createFrom(source: any = {}) {
 	        return new ExecTask(source);
@@ -1258,28 +1195,10 @@ export namespace remote {
 	        this.pod = source["pod"];
 	        this.container = source["container"];
 	        this.tty = source["tty"];
-	        this.createdAt = this.convertValues(source["createdAt"], null);
-	        this.updatedAt = this.convertValues(source["updatedAt"], null);
-	        this.expiresAt = this.convertValues(source["expiresAt"], null);
+	        this.createdAt = source["createdAt"];
+	        this.updatedAt = source["updatedAt"];
+	        this.expiresAt = source["expiresAt"];
 	    }
-
-		convertValues(a: any, classs: any, asMap: boolean = false): any {
-		    if (!a) {
-		        return a;
-		    }
-		    if (a.slice && a.map) {
-		        return (a as any[]).map(elem => this.convertValues(elem, classs));
-		    } else if ("object" === typeof a) {
-		        if (asMap) {
-		            for (const key of Object.keys(a)) {
-		                a[key] = new classs(a[key]);
-		            }
-		            return a;
-		        }
-		        return new classs(a);
-		    }
-		    return a;
-		}
 	}
 	export class Namespace {
 	    name: string;
@@ -1361,8 +1280,7 @@ export namespace remote {
 	    kind: string;
 	    size: number;
 	    mode: string;
-	    // Go type: time
-	    modifiedAt: any;
+	    modifiedAt: string;
 
 	    static createFrom(source: any = {}) {
 	        return new PodFileEntry(source);
@@ -1375,26 +1293,8 @@ export namespace remote {
 	        this.kind = source["kind"];
 	        this.size = source["size"];
 	        this.mode = source["mode"];
-	        this.modifiedAt = this.convertValues(source["modifiedAt"], null);
+	        this.modifiedAt = source["modifiedAt"];
 	    }
-
-		convertValues(a: any, classs: any, asMap: boolean = false): any {
-		    if (!a) {
-		        return a;
-		    }
-		    if (a.slice && a.map) {
-		        return (a as any[]).map(elem => this.convertValues(elem, classs));
-		    } else if ("object" === typeof a) {
-		        if (asMap) {
-		            for (const key of Object.keys(a)) {
-		                a[key] = new classs(a[key]);
-		            }
-		            return a;
-		        }
-		        return new classs(a);
-		    }
-		    return a;
-		}
 	}
 	export class PodFileList {
 	    sessionId: string;
@@ -1463,12 +1363,9 @@ export namespace remote {
 	    kind?: string;
 	    recursive?: boolean;
 	    result: PodFileResult;
-	    // Go type: time
-	    createdAt: any;
-	    // Go type: time
-	    updatedAt: any;
-	    // Go type: time
-	    expiresAt: any;
+	    createdAt: string;
+	    updatedAt: string;
+	    expiresAt: string;
 
 	    static createFrom(source: any = {}) {
 	        return new PodFileTask(source);
@@ -1488,9 +1385,9 @@ export namespace remote {
 	        this.kind = source["kind"];
 	        this.recursive = source["recursive"];
 	        this.result = this.convertValues(source["result"], PodFileResult);
-	        this.createdAt = this.convertValues(source["createdAt"], null);
-	        this.updatedAt = this.convertValues(source["updatedAt"], null);
-	        this.expiresAt = this.convertValues(source["expiresAt"], null);
+	        this.createdAt = source["createdAt"];
+	        this.updatedAt = source["updatedAt"];
+	        this.expiresAt = source["expiresAt"];
 	    }
 
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -1576,14 +1473,10 @@ export namespace remote {
 	    namespace: string;
 	    state: string;
 	    generation: number;
-	    // Go type: time
-	    createdAt: any;
-	    // Go type: time
-	    updatedAt: any;
-	    // Go type: time
-	    lastHeartbeatAt: any;
-	    // Go type: time
-	    expiresAt: any;
+	    createdAt: string;
+	    updatedAt: string;
+	    lastHeartbeatAt: string;
+	    expiresAt: string;
 	    networkSpec: networkspec.Spec;
 	    networkSpecHash: string;
 	    capabilities?: capability.Snapshot;
@@ -1598,10 +1491,10 @@ export namespace remote {
 	        this.namespace = source["namespace"];
 	        this.state = source["state"];
 	        this.generation = source["generation"];
-	        this.createdAt = this.convertValues(source["createdAt"], null);
-	        this.updatedAt = this.convertValues(source["updatedAt"], null);
-	        this.lastHeartbeatAt = this.convertValues(source["lastHeartbeatAt"], null);
-	        this.expiresAt = this.convertValues(source["expiresAt"], null);
+	        this.createdAt = source["createdAt"];
+	        this.updatedAt = source["updatedAt"];
+	        this.lastHeartbeatAt = source["lastHeartbeatAt"];
+	        this.expiresAt = source["expiresAt"];
 	        this.networkSpec = this.convertValues(source["networkSpec"], networkspec.Spec);
 	        this.networkSpecHash = source["networkSpecHash"];
 	        this.capabilities = this.convertValues(source["capabilities"], capability.Snapshot);
@@ -1739,10 +1632,8 @@ export namespace update {
 	    latestVersion?: string;
 	    available: boolean;
 	    url: string;
-	    // Go type: time
-	    publishedAt: any;
-	    // Go type: time
-	    checkedAt: any;
+	    publishedAt: string;
+	    checkedAt: string;
 	    error?: string;
 
 	    static createFrom(source: any = {}) {
@@ -1755,28 +1646,10 @@ export namespace update {
 	        this.latestVersion = source["latestVersion"];
 	        this.available = source["available"];
 	        this.url = source["url"];
-	        this.publishedAt = this.convertValues(source["publishedAt"], null);
-	        this.checkedAt = this.convertValues(source["checkedAt"], null);
+	        this.publishedAt = source["publishedAt"];
+	        this.checkedAt = source["checkedAt"];
 	        this.error = source["error"];
 	    }
-
-		convertValues(a: any, classs: any, asMap: boolean = false): any {
-		    if (!a) {
-		        return a;
-		    }
-		    if (a.slice && a.map) {
-		        return (a as any[]).map(elem => this.convertValues(elem, classs));
-		    } else if ("object" === typeof a) {
-		        if (asMap) {
-		            for (const key of Object.keys(a)) {
-		                a[key] = new classs(a[key]);
-		            }
-		            return a;
-		        }
-		        return new classs(a);
-		    }
-		    return a;
-		}
 	}
 
 }

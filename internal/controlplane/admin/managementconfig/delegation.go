@@ -1,4 +1,4 @@
-package revision
+package managementconfig
 
 import (
 	"context"
@@ -15,14 +15,13 @@ type DelegationRequest struct {
 	Binding        *adminauthorization.Binding
 	DeleteID       string
 	Namespace      string
-	ExpectedETag   uint64
 	IdempotencyKey string
 	Reason         string
 	RequestID      string
 	Actor          Actor
 }
 
-// ApplyDelegation creates and activates a new immutable authorization revision.
+// ApplyDelegation creates and activates a new immutable authorization policy.
 // The caller must separately prove namespace.authorization.delegate for the
 // exact Namespace; this method constrains the mutation so that proof cannot be
 // reused for another Namespace or a platform-managed binding.
@@ -33,7 +32,7 @@ func (service *Service) ApplyDelegation(ctx context.Context, request DelegationR
 	}
 	request.Namespace, request.DeleteID = strings.TrimSpace(request.Namespace), strings.TrimSpace(request.DeleteID)
 	request.Reason, request.RequestID = strings.TrimSpace(request.Reason), strings.TrimSpace(request.RequestID)
-	if request.Namespace == "" || request.ExpectedETag == 0 || request.Reason == "" || request.RequestID == "" ||
+	if request.Namespace == "" || request.Reason == "" || request.RequestID == "" ||
 		(request.Binding == nil) == (request.DeleteID == "") {
 		return Activation{}, ErrInvalidRequest
 	}
@@ -42,14 +41,13 @@ func (service *Service) ApplyDelegation(ctx context.Context, request DelegationR
 		return Activation{}, err
 	}
 	requestHash := hashRequest(struct {
-		Binding      *adminauthorization.Binding `json:"binding,omitempty"`
-		DeleteID     string                      `json:"deleteId,omitempty"`
-		Namespace    string                      `json:"namespace"`
-		ExpectedETag uint64                      `json:"expectedEtag"`
-		Reason       string                      `json:"reason"`
-	}{request.Binding, request.DeleteID, request.Namespace, request.ExpectedETag, request.Reason})
+		Binding   *adminauthorization.Binding `json:"binding,omitempty"`
+		DeleteID  string                      `json:"deleteId,omitempty"`
+		Namespace string                      `json:"namespace"`
+		Reason    string                      `json:"reason"`
+	}{request.Binding, request.DeleteID, request.Namespace, request.Reason})
 	now := service.now().UTC()
-	revisionID, changeID, auditID := service.newID(), service.newID(), service.newID()
+	configID, changeID, auditID := service.newID(), service.newID(), service.newID()
 	result := Activation{}
 	err = service.store.WithinTransaction(ctx, func(repositories storage.Repositories) error {
 		existing, lookupErr := repositories.ConfigChangeRequests().GetByIdempotencyHash(
@@ -60,26 +58,25 @@ func (service *Service) ApplyDelegation(ctx context.Context, request DelegationR
 			if existing.RequestHash != requestHash || existing.Status != storage.ChangeStatusPublished {
 				return storage.ErrIdempotencyMismatch
 			}
-			result = Activation{Active: storage.ActiveManagementRevision{
-				ConfigurationType: storage.ManagementConfigurationPolicy,
-				ConfigurationID:   storage.ManagementPolicyID,
-				Revision:          existing.ProposedRevision, ETag: existing.BaseETag + 1,
-				UpdatedBy: actorID, UpdatedAuthenticationType: authenticationType, UpdatedAt: existing.UpdatedAt,
-			}, ChangeID: existing.ID, Replayed: true}
+			active, getErr := repositories.ActiveManagementConfigs().Get(ctx, storage.ManagementConfigurationPolicy, storage.ManagementPolicyID)
+			if getErr != nil || active.ObjectID != existing.ProposedObjectID {
+				return storage.ErrConflict
+			}
+			result = Activation{Active: active, ChangeID: existing.ID, Replayed: true}
 			return nil
 		}
 		if !errors.Is(lookupErr, storage.ErrNotFound) {
 			return lookupErr
 		}
-		active, err := repositories.ActiveManagementRevisions().Get(ctx, storage.ManagementConfigurationPolicy, storage.ManagementPolicyID)
-		if err != nil || active.ETag != request.ExpectedETag {
+		active, err := repositories.ActiveManagementConfigs().Get(ctx, storage.ManagementConfigurationPolicy, storage.ManagementPolicyID)
+		if err != nil {
 			return storage.ErrConflict
 		}
-		current, err := repositories.AdminPolicyRevisions().Get(ctx, active.Revision)
+		current, err := repositories.AdminPolicyConfigs().Get(ctx, active.ObjectID)
 		if err != nil {
 			return err
 		}
-		snapshot, err := decodePolicySpec(current.Spec, current.Revision)
+		snapshot, err := decodePolicySpec(current.Spec)
 		if err != nil {
 			return err
 		}
@@ -120,10 +117,8 @@ func (service *Service) ApplyDelegation(ctx context.Context, request DelegationR
 			}
 			nextBindings = filtered
 		}
-		snapshot.Bindings, snapshot.Revision = nextBindings, 0
-		validation := snapshot
-		validation.Revision = active.Revision + 1
-		if _, err := adminauthorization.New(validation); err != nil {
+		snapshot.Bindings = nextBindings
+		if _, err := adminauthorization.New(snapshot); err != nil {
 			return ErrInvalidRequest
 		}
 		spec, err := json.Marshal(struct {
@@ -134,22 +129,22 @@ func (service *Service) ApplyDelegation(ctx context.Context, request DelegationR
 		if err != nil {
 			return err
 		}
-		revision, err := repositories.AdminPolicyRevisions().Create(ctx, storage.AdminPolicyRevision{
-			ID: revisionID, Spec: spec, ValidationState: storage.RevisionValidationValid,
+		config, err := repositories.AdminPolicyConfigs().Create(ctx, storage.AdminPolicyConfig{
+			ID: configID, Spec: spec, ValidationState: storage.ConfigValidationValid,
 			Validation: json.RawMessage(`{"valid":true,"operation":"delegation"}`), CreatedBy: actorID,
 			CreatedAuthenticationType: authenticationType, Reason: request.Reason, CreatedAt: now,
 		})
 		if err != nil {
 			return err
 		}
-		if err := persistAuthorizationDefinitions(ctx, repositories.AuthorizationDefinitions(), revision.Revision, snapshot, actorID); err != nil {
+		if err := persistAuthorizationDefinitions(ctx, repositories.AuthorizationDefinitions(), config.ID, snapshot, actorID); err != nil {
 			return err
 		}
 		change := storage.ConfigChangeRequest{
 			ID: changeID, ConfigurationType: storage.ManagementConfigurationPolicy,
-			ConfigurationID: storage.ManagementPolicyID, BaseRevision: active.Revision,
-			BaseETag: active.ETag, ProposedRevision: revision.Revision,
-			Status: storage.ChangeStatusValidated, IdempotencyHash: idempotencyHash[:], RequestHash: requestHash,
+			ConfigurationID: storage.ManagementPolicyID, BaseObjectID: active.ObjectID,
+			ProposedObjectID: config.ID,
+			Status:           storage.ChangeStatusValidated, IdempotencyHash: idempotencyHash[:], RequestHash: requestHash,
 			RequestedBy: actorID, RequestedAuthenticationType: authenticationType,
 			Reason: request.Reason, Validation: json.RawMessage(`{"valid":true,"operation":"delegation"}`),
 			CreatedAt: now, UpdatedAt: now,
@@ -157,8 +152,8 @@ func (service *Service) ApplyDelegation(ctx context.Context, request DelegationR
 		if err := repositories.ConfigChangeRequests().Create(ctx, change); err != nil {
 			return err
 		}
-		next, err := repositories.ActiveManagementRevisions().CompareAndSwap(ctx, storage.ManagementConfigurationPolicy,
-			storage.ManagementPolicyID, revision.Revision, active.ETag, actorID, authenticationType, now)
+		next, err := repositories.ActiveManagementConfigs().Set(ctx, storage.ManagementConfigurationPolicy,
+			storage.ManagementPolicyID, config.ID, actorID, authenticationType, now)
 		if err != nil {
 			return err
 		}
@@ -176,8 +171,7 @@ func (service *Service) ApplyDelegation(ctx context.Context, request DelegationR
 			ID: auditID, PrincipalID: principalID, Action: action, ResourceType: "authorization-binding",
 			ResourceID: bindingID, Outcome: "success", RequestID: request.RequestID,
 			Metadata: auditMetadata(authenticationType, request.Reason, map[string]any{
-				"namespace": request.Namespace, "oldRevision": active.Revision, "newRevision": next.Revision,
-				"oldEtag": active.ETag, "newEtag": next.ETag, "changeId": change.ID,
+				"namespace": request.Namespace, "previousObjectId": active.ObjectID, "objectId": next.ObjectID, "changeId": change.ID,
 				"idempotencyKeyHash": hex.EncodeToString(idempotencyHash[:]),
 			}), CreatedAt: now,
 		}); err != nil {

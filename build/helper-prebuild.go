@@ -44,6 +44,12 @@ func main() {
 	}{
 		{pkg: "./cmd/kubeloop-helper", name: "kubeloop-helper"},
 	}
+	if goos == "darwin" {
+		targets = append(targets, struct {
+			pkg  string
+			name string
+		}{pkg: "./cmd/kubeloop-supervisor", name: "kubeloop-supervisor"})
+	}
 
 	embeddedDir := filepath.Join(root, "build", "embedded")
 	if err := os.MkdirAll(embeddedDir, 0o755); err != nil {

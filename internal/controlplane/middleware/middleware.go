@@ -132,7 +132,7 @@ func New(config Config) echo.MiddlewareFunc {
 				return nil
 			}
 			requestContext = request.Context()
-			if !isNamespaceCollectionList(authorizationRequest) && !isSessionHeartbeat(authorizationRequest) {
+			if !isNamespaceCollectionList(authorizationRequest) && !isAuthenticatedMetadataRead(authorizationRequest) && !isSessionHeartbeat(authorizationRequest) {
 				decision := config.Authorizer.Authorize(request.Context(), authorization.Subject{
 					ID: principal.Subject, Provider: principal.Provider, Groups: append([]string(nil), principal.Groups...),
 				}, authorizationRequest)
@@ -172,6 +172,14 @@ func New(config Config) echo.MiddlewareFunc {
 func isNamespaceCollectionList(request authorization.Request) bool {
 	return request.Operation == "list" && request.Namespace == "" &&
 		request.ResourceKind == "namespaces" && request.ResourceName == ""
+}
+
+// Version discovery is required before the client has selected a Namespace.
+// Authentication still applies, while namespace authorization is enforced by
+// the subsequent capability and inventory requests.
+func isAuthenticatedMetadataRead(request authorization.Request) bool {
+	return request.Operation == "list" && request.Namespace == "" &&
+		request.ResourceKind == "version" && request.ResourceName == ""
 }
 
 // Session heartbeats re-evaluate the complete policy and Kubernetes capability

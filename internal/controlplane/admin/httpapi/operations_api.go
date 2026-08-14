@@ -76,7 +76,7 @@ func (api *readAPI) revokeOAuthGrant(ctx *echo.Context) error {
 
 func (api *readAPI) stopSession(ctx *echo.Context) error {
 	writer, request := ctx.Response(), ctx.Request()
-	expectedGeneration, key, ok := policyWriteHeaders(writer, request)
+	expectedGeneration, key, ok := operationWriteHeaders(writer, request)
 	if !ok {
 		api.audit(request, subjectFromRequest(request), "admin.session/stop", "failure")
 		return nil
@@ -110,7 +110,7 @@ func (api *readAPI) stopSession(ctx *echo.Context) error {
 
 func (api *readAPI) stopTask(ctx *echo.Context) error {
 	writer, request := ctx.Response(), ctx.Request()
-	expectedVersion, key, ok := policyWriteHeaders(writer, request)
+	expectedVersion, key, ok := operationWriteHeaders(writer, request)
 	if !ok {
 		api.audit(request, subjectFromRequest(request), "admin.task/stop", "failure")
 		return nil
@@ -158,7 +158,7 @@ func (api *readAPI) recoverRelay(ctx *echo.Context) error {
 }
 
 func (api *readAPI) changeRelayState(writer http.ResponseWriter, request *http.Request, drain bool) {
-	expectedVersion, key, ok := policyWriteHeaders(writer, request)
+	expectedVersion, key, ok := operationWriteHeaders(writer, request)
 	action := "admin.relay/recover"
 	if drain {
 		action = "admin.relay/drain"
@@ -330,6 +330,28 @@ func operationIdempotencyKey(writer http.ResponseWriter, request *http.Request) 
 	}
 	return key, true
 }
+
+func operationWriteHeaders(writer http.ResponseWriter, request *http.Request) (uint64, string, bool) {
+	values := request.Header.Values("If-Match")
+	if len(values) != 1 {
+		writeError(writer, http.StatusPreconditionRequired, "precondition_required", "a strong If-Match value is required", requestID(request))
+		return 0, "", false
+	}
+	value := strings.TrimSpace(values[0])
+	if len(value) < 3 || value[0] != '"' || value[len(value)-1] != '"' || strings.Contains(value, ",") {
+		writeError(writer, http.StatusPreconditionRequired, "precondition_required", "a strong If-Match value is required", requestID(request))
+		return 0, "", false
+	}
+	expected, err := strconv.ParseUint(value[1:len(value)-1], 10, 64)
+	if err != nil {
+		writeError(writer, http.StatusPreconditionRequired, "precondition_required", "a strong If-Match value is required", requestID(request))
+		return 0, "", false
+	}
+	key, ok := operationIdempotencyKey(writer, request)
+	return expected, key, ok
+}
+
+func strongETag(value uint64) string { return `"` + strconv.FormatUint(value, 10) + `"` }
 
 func writeOperationResult(writer http.ResponseWriter, replayed bool, result any) {
 	if replayed {

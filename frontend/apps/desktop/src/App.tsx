@@ -7,7 +7,6 @@ import type { AppView } from "@/components/layout/navigation";
 import { MCPView } from "@/components/mcp/mcp-view";
 import { WindowControls } from "@/components/layout/window-controls";
 import { ServerAccessView } from "@/components/server/server-access-view";
-import { ServerLogsView } from "@/components/server/server-logs-view";
 import { ServerNetworkView } from "@/components/server/server-network-view";
 import { ServerWorkloadView } from "@/components/server/server-workload-view";
 import { SettingsView } from "@/components/settings/settings-view";
@@ -172,7 +171,7 @@ function App() {
         connectionsAlert={Boolean(metrics?.connections?.length)}
         updateAvailable={data.update.available}
         authenticated={auth.authenticated}
-        userName={auth.userName || activeProfile?.lastUserName}
+        userName={auth.userName}
         logoutBusy={logoutBusy}
         onNavigate={setView}
         onSignIn={() => setView("overview")}
@@ -192,8 +191,6 @@ function App() {
               profileName={activeProfile?.displayName}
               ready={Boolean(metrics)}
             />
-          ) : view === "logs" ? (
-            <ServerLogsView profileId={activeProfile?.id ?? ""} />
           ) : view === "workload" ? (
             <ServerWorkloadView profileId={activeProfile?.id ?? ""} />
           ) : view === "network" ? (

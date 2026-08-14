@@ -18,15 +18,14 @@ const (
 	ManagementConfigurationProvider = "provider"
 	ManagementPolicyID              = "global"
 
-	RevisionValidationDraft   = "draft"
-	RevisionValidationValid   = "valid"
-	RevisionValidationInvalid = "invalid"
+	ConfigValidationDraft   = "draft"
+	ConfigValidationValid   = "valid"
+	ConfigValidationInvalid = "invalid"
 
 	ChangeStatusDraft         = "draft"
 	ChangeStatusValidated     = "validated"
 	ChangeStatusPublished     = "published"
 	ChangeStatusRejected      = "rejected"
-	ChangeStatusRolledBack    = "rolled-back"
 	ManagementActorBreakGlass = "break-glass"
 )
 
@@ -102,9 +101,9 @@ func normalizeReason(value string) (string, error) {
 	return value, nil
 }
 
-func validRevisionState(value string) bool {
+func validConfigState(value string) bool {
 	switch value {
-	case RevisionValidationDraft, RevisionValidationValid, RevisionValidationInvalid:
+	case ConfigValidationDraft, ConfigValidationValid, ConfigValidationInvalid:
 		return true
 	default:
 		return false
@@ -213,8 +212,6 @@ func validChangeTransition(current, next string) bool {
 		return next == ChangeStatusValidated || next == ChangeStatusRejected
 	case ChangeStatusValidated:
 		return next == ChangeStatusPublished || next == ChangeStatusRejected
-	case ChangeStatusPublished:
-		return next == ChangeStatusRolledBack
 	default:
 		return false
 	}

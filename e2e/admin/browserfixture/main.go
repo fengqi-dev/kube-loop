@@ -23,7 +23,9 @@ import (
 
 	adminauthorization "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/authorization"
 	adminhttpapi "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/httpapi"
-	adminrevision "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/revision"
+	adminlocaluser "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/localuser"
+	adminoperations "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/operations"
+	adminconfig "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/managementconfig"
 	adminsession "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/session"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/authn"
 	controlplanestorage "github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
@@ -33,7 +35,6 @@ import (
 const (
 	fixtureCredential      = "valid"
 	fixtureAccessToken     = "browser-fixture-access-token"
-	fixturePrincipalID     = "11111111-1111-4111-8111-111111111111"
 	fixtureAuthorizationID = "22222222-2222-4222-8222-222222222222"
 )
 
@@ -55,6 +56,20 @@ func (value *verifier) CurrentBreakGlassState(context.Context) (adminauthorizati
 
 type tokenAuthenticator struct {
 	principal controlplanestorage.Principal
+}
+
+type fixtureSessionRuntime struct{}
+
+func (fixtureSessionRuntime) Disconnect(context.Context, string) error { return nil }
+
+type fixtureProviderLifecycle struct{}
+
+func (fixtureProviderLifecycle) Validate(context.Context, adminconfig.ProviderCandidate) (json.RawMessage, error) {
+	return json.RawMessage(`{"valid":true,"fixture":true}`), nil
+}
+
+func (fixtureProviderLifecycle) Prepare(context.Context, adminconfig.ProviderCandidate) (func(), error) {
+	return func() {}, nil
 }
 
 func (value tokenAuthenticator) Authenticate(_ context.Context, token string) (authn.AccessIdentity, error) {
@@ -101,17 +116,25 @@ func main() {
 	}
 	defer store.Close()
 	now := time.Now().UTC()
-	principal, err := store.Principals().Upsert(ctx, controlplanestorage.Principal{
-		ID: fixturePrincipalID, Provider: "browser-fixture", ExternalID: "administrator",
-		DisplayName: "Browser Administrator", Groups: []string{"browser-admins"}, CreatedAt: now, UpdatedAt: now,
+	localUsers, err := adminlocaluser.New(store, []byte("0123456789abcdef0123456789abcdef"), "KubeLoop Browser Fixture")
+	if err != nil {
+		log.Fatal(err)
+	}
+	localUser, _, err := localUsers.EnsureInitial(ctx, adminlocaluser.CreateRequest{
+		Username: "browser-admin", Password: []byte("Browser-Fixture-Password-2026!"),
+		DisplayName: "Browser Administrator", Email: "browser-admin@example.test",
 	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	principal, err := store.Principals().GetByID(ctx, localUser.PrincipalID)
 	if err != nil {
 		log.Fatal(err)
 	}
 	signatureHash := sha256.Sum256([]byte("browser-fixture-access-token"))
 	if err := store.OAuthSessions().Create(ctx, controlplanestorage.OAuthSession{
 		Kind: "access_token", SignatureHash: signatureHash[:], RequestID: fixtureAuthorizationID,
-		PrincipalID: fixturePrincipalID, ClientID: "kubeloop-management", DeviceID: "browser-fixture-device",
+		PrincipalID: principal.ID, ClientID: "kubeloop-management", DeviceID: "browser-fixture-device",
 		RequestJSON: json.RawMessage(`{}`), CreatedAt: now, ExpiresAt: now.Add(time.Hour),
 	}); err != nil {
 		log.Fatal(err)
@@ -124,10 +147,10 @@ func main() {
 		log.Fatal(err)
 	}
 	authorizer, err := adminauthorization.New(adminauthorization.Snapshot{
-		Version: adminauthorization.CurrentVersion, Revision: 1,
+		Version: adminauthorization.CurrentVersion,
 		Bindings: []adminauthorization.Binding{{
 			ID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", RoleID: adminauthorization.RolePlatformAdmin,
-			Subject:   adminauthorization.SubjectRef{Type: adminauthorization.SubjectPrincipal, PrincipalID: fixturePrincipalID},
+			Subject:   adminauthorization.SubjectRef{Type: adminauthorization.SubjectPrincipal, PrincipalID: principal.ID},
 			Scope:     adminauthorization.BindingScope{Type: adminauthorization.ScopePlatform},
 			ManagedBy: adminauthorization.ManagedByPlatform,
 		}},
@@ -135,19 +158,38 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	loader, err := adminrevision.NewPolicyLoader(store, authorizer, 0)
+	loader, err := adminconfig.NewPolicyLoader(store, authorizer, 0)
 	if err != nil {
 		log.Fatal(err)
 	}
-	revisions, err := adminrevision.New(store)
+	revisions, err := adminconfig.New(store)
 	if err != nil {
 		log.Fatal(err)
 	}
+	providerLifecycle := fixtureProviderLifecycle{}
+	providers, err := adminconfig.NewProviderService(store, providerLifecycle, providerLifecycle)
+	if err != nil {
+		log.Fatal(err)
+	}
+	operations, err := adminoperations.New(store, fixtureSessionRuntime{})
+	if err != nil {
+		log.Fatal(err)
+	}
+	if err := operations.ConfigureRecovery(adminoperations.RecoveryRunnerFunc(func(context.Context) (map[string]int, error) {
+		return map[string]int{"browser-fixture": 0}, nil
+	})); err != nil {
+		log.Fatal(err)
+	}
+	go operations.Run(ctx)
 	management, err := adminhttpapi.New(adminhttpapi.Config{PublicURL: "http://" + *listenAddress}, sessions,
 		adminhttpapi.WithReadAPI(authorizer, store, adminhttpapi.BuildInfo{
 			Version: "e2e", Commit: "browser-fixture", ProtocolMin: "2.0", ProtocolMax: "2.0",
 		}),
 		adminhttpapi.WithPolicyAPI(revisions, loader),
+		adminhttpapi.WithProviderAPI(providers),
+		adminhttpapi.WithOAuthClients(store, store),
+		adminhttpapi.WithOperationsAPI(operations),
+		adminhttpapi.WithLocalUsers(localUsers),
 		adminhttpapi.WithTokenExchange(tokenAuthenticator{principal: principal}),
 	)
 	if err != nil {
@@ -216,7 +258,7 @@ func main() {
 		defer cancel()
 		_ = server.Shutdown(shutdownContext)
 	}()
-	log.Printf("management browser fixture: http://%s/api/admin/ui/ (credential %q)", *listenAddress, fixtureCredential)
+	log.Printf("management browser fixture: http://%s/api/admin/ui/", *listenAddress)
 	if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatal(err)
 	}

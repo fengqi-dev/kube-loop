@@ -52,7 +52,9 @@ func buildAPIRuntime(
 		logger.Error("initialize TrafficBinding REST configuration failed", "error", err)
 		os.Exit(1)
 	}
-	trafficBindings, err := trafficbindingclient.NewForRESTConfig(bindingRESTConfig, trafficbindingclient.Config{})
+	trafficBindings, err := trafficbindingclient.NewForRESTConfig(bindingRESTConfig, trafficbindingclient.Config{
+		ControlPlaneID: config.Document.API.ServiceID,
+	})
 	if err != nil {
 		_ = store.Close()
 		logger.Error("initialize TrafficBinding client failed", "error", err)

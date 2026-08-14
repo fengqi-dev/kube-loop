@@ -19,10 +19,10 @@ V2-901～V2-907 实现；V2-908 统一完成浏览器和 Minikube E2E。
 
 受保护资产包括：
 
-- 管理角色、namespace 委派、访问/网络策略及其历史 revision；
+- 管理角色、namespace 委派、访问/网络策略配置；
 - OIDC 非 Secret 配置、Secret 引用和 Provider 启停状态；
 - Principal、Device/OAuth grant、Cluster Session、Task、Relay 和审计记录；
-- 撤销、排空、停止、恢复、回滚和导出等高风险动作。
+- 撤销、排空、停止、恢复和导出等高风险动作。
 
 信任区固定如下：
 
@@ -45,7 +45,7 @@ V2-901～V2-907 实现；V2-908 统一完成浏览器和 Minikube E2E。
 
 管理面复用 ADR 0002 的 OIDC 身份和 Gateway Token，不建立管理员用户名或
 密码表。一次成功登录只证明 Principal 身份；每个管理请求仍必须通过独立的
-`admin.<resource>/<operation>` 授权，并按当前 revision 重新计算角色和可选
+`admin.<resource>/<operation>` 授权，并按当前配置重新计算角色和可选
 namespace 范围。
 
 管理身份不能自动扩大 Kubernetes 权限。需要访问 Kubernetes 的诊断或运维动作
@@ -68,9 +68,9 @@ Proxy、Secret 读取、SQL 控制台或脚本执行能力。
 - 每次 bootstrap 登录和管理操作都带 `bootstrap=true` 高等级审计属性。
 
 首次发布至少包含一个有效 `platform-admin` assignment 的正式管理策略时，
-Control Plane 在同一数据库事务内写入 active revision、审计事件和不可自动回退的
-`bootstrapRetiredAt`。从此即使配置 revision 回滚、Control Plane 重启或旧 Helm
-values 仍存在，也不能自动恢复 bootstrap 权限。
+Control Plane 在同一数据库事务内写入 active configuration pointer、审计事件和
+不可自动回退的 `bootstrapRetiredAt`。从此即使 Control Plane 重启或旧 Helm values
+仍存在，也不能自动恢复 bootstrap 权限。
 
 部署操作者若需要在灾难恢复中重新启用 bootstrap，必须显式设置独立的
 `management.bootstrapRecovery.enabled=true`、变更 Helm release 并重启
@@ -94,8 +94,8 @@ Break-glass 是部署操作者控制的应急入口，不是第二套日常账�
 - 如果持久审计不可提交，break-glass 登录及写操作 fail closed。结构化安全日志
   是额外告警通道，不能替代持久审计。
 
-Break-glass 不进入 Data Plane，不签发 RelayTicket，不绕过 Repository 乐观并发、
-变更原因、幂等键或 owner-safe 检查。
+Break-glass 不进入 Data Plane，不签发 RelayTicket，不绕过变更原因、幂等键、
+事务审计或 owner-safe 检查。
 
 ### 4. 浏览器使用专用管理 Session
 
@@ -108,7 +108,7 @@ HTML 或 JavaScript 持久状态。浏览器通过同源登录把已认证 Princ
 - 15 分钟空闲、最多 8 小时绝对生命周期；高风险动作可要求近期重新认证；
 - 绑定 Principal、OAuth grant、创建时间和当前认证上下文；OAuth grant 撤销、
   Principal 禁用、角色移除、Secret generation 变化或显式登出都会使其失效；
-- 每个请求重新读取或校验当前 assignment revision，Session 本身不缓存永久角色。
+- 每个请求重新读取或校验当前 assignment 配置，Session 本身不缓存永久角色。
 
 Cookie 认证只在 `/api/admin/*` 和管理 Session 端点生效，普通 `/kubeloop/api/*`
 不会因浏览器 Cookie 获得身份。非浏览器自动化必须使用短期 Bearer Token；Cookie
@@ -122,8 +122,8 @@ Cookie 认证只在 `/api/admin/*` 和管理 Session 端点生效，普通 `/kub
 2. `Sec-Fetch-Site` 存在时只能为 `same-origin`；
 3. `X-KubeLoop-CSRF` 与管理 Session 关联的同步 Token 常量时间匹配；
 4. `Content-Type` 为允许的 JSON 类型，严格解码且拒绝未知字段和尾随内容；
-5. 操作不使用 GET/HEAD，写接口同时要求 `Idempotency-Key`，修改/发布/回滚还
-   要求 `If-Match` 和非空、长度受限的变更原因。
+5. 操作不使用 GET/HEAD，配置写接口同时要求 `Idempotency-Key` 和非空、长度受限的
+   变更原因；运行时资源按各自 generation/version 使用 `If-Match`。
 
 CSRF Token 只保存在页面内存并在 Session 轮换后更新。Bearer-only 请求不依赖
 Cookie，仍要求 JSON Content-Type 和管理授权。CORS 默认不允许其他 Origin，
@@ -141,23 +141,23 @@ nonce/hash。响应同时设置 `X-Content-Type-Options: nosniff`、严格
 外部 Secret 系统创建并挂载 Secret，再在 Helm 中声明稳定 alias；管理配置只可
 选择 allowlist 中的 alias。
 
-数据库仅保存 alias、非敏感用途、配置 revision、可选掩码和最近验证结果。API、
+数据库仅保存 alias、非敏感用途、配置对象、可选掩码和最近验证结果。API、
 导出、审计和日志不返回 Secret 文件路径、namespace/name/key、长度、哈希或可用于
 枚举的差异化错误。Provider 验证由专用实现消费 alias，不提供任意 URL/host、文件
 路径或通用网络拨号测试。
 
 Secret 轮换由挂载文件更新和受控 Control Plane reload/rollout完成。新 Secret 验证
-失败不替换当前 active Provider revision；旧 Secret 不复制进数据库用于回滚。
+失败不替换当前 active Provider 配置；旧 Secret 不复制进数据库。
 
 ### 7. 审计是管理写操作的提交条件
 
 普通 API 框架审计继续记录 request ID、Principal、规范化 operation/scope、命中
 规则、HTTP 结果和耗时。管理面额外要求：
 
-- 配置发布、回滚、角色变更、撤销、排空、停止、恢复和导出在同一数据库事务内
-  写业务 revision/状态与 append-only 审计；审计失败则业务写入回滚；
+- 配置发布、角色变更、撤销、排空、停止、恢复和导出在同一数据库事务内
+  写业务对象/状态与 append-only 审计；审计失败则中止业务写入；
 - 记录 actor、认证类型（normal/bootstrap/break-glass）、目标稳定 ID、旧/新
-  revision、幂等键摘要、变更原因、结果和 request ID；
+  object ID、幂等键摘要、变更原因、结果和 request ID；
 - 不记录请求体、Token、Cookie、CSRF Token、Secret/Secret ref 细节、身份原始
   claims、文件内容、命令输出、流量正文或数据库错误 cause；
 - 拒绝、冲突、校验失败和越权尝试也产生有界的安全审计；审计存储不可用时高风险
@@ -176,11 +176,11 @@ Secret 轮换由挂载文件更新和受控 Control Plane reload/rollout完成�
 | Break-glass 泄漏或暴力尝试 | Secret mount、256 bit、短期不可刷新 Session、限流、轮换失效、统一错误 | Secret 系统被攻陷时需要外部轮换与告警 |
 | CSRF 触发配置发布/撤销 | Strict Cookie、精确 Origin、Fetch Metadata、同步 Token、JSON-only | 同源 XSS 可绕过 CSRF，依赖 CSP 与输出编码 |
 | XSS/第三方脚本窃取管理能力 | 无第三方脚本、严格 CSP、HttpOnly Cookie、Token 不落存储、no-store | Control Plane/UI 供应链仍需依赖扫描和签名发布 |
-| Session fixation、重放或撤销延迟 | 登录轮换、仅存哈希、短空闲/绝对 TTL、每请求 revision 校验 | 已进入的事务按事务边界完成，不能瞬时中断 |
+| Session fixation、重放或撤销延迟 | 登录轮换、仅存哈希、短空闲/绝对 TTL、每请求配置校验 | 已进入的事务按事务边界完成，不能瞬时中断 |
 | 跨租户 IDOR/namespace-admin 越权 | 对象查找前授权、owner/scope 查询、统一 not-found/forbidden、稳定 cursor | V2-901/903 必须覆盖枚举和直接 ID 测试 |
 | Secret 经 API、日志、导出泄漏 | API 仅 alias、部署侧挂载、结构化 allowlist 审计、无原始 cause | Provider SDK 错误需统一脱敏适配 |
 | Provider 验证成为 SSRF/任意拨号 | 只验证版本化配置和预声明 alias，禁止通用 URL/host 测试 | 管理员配置的合法 Provider 仍是受信外部依赖 |
-| 并发发布静默覆盖或审计错位 | `If-Match`、整数 revision、事务内 active pointer + audit、幂等键 | PostgreSQL serialization retry 必须保持同一语义 |
+| 配置发布与审计错位 | 事务内 active pointer + audit、幂等键 | PostgreSQL serialization retry 必须保持同一语义；并发发布采用最后提交的配置 |
 | 管理权限扩散到 Data Plane/Operator | 独立 Deployment/SA/NetworkPolicy；窄签名协议；不挂 DB/Secret | 被攻陷 Control Plane 仍可签发其既有协议允许的消息 |
 | 管理 API 资源耗尽 | body/page/limit/timeout 上限、稳定 cursor、导出异步、限流 | 合法管理员可制造负载，需 V2-903/907 配额指标 |
 | 审计被绕过或敏感数据进入审计 | 写入与审计同事务、高风险 fail closed、字段 allowlist、追加写 | 数据库超级用户不在应用威胁边界内 |
@@ -197,12 +197,12 @@ Secret 轮换由挂载文件更新和受控 Control Plane reload/rollout完成�
 ## 实现与验证义务
 
 - V2-901：实现五类角色、bootstrap retire/recovery、break-glass 与 namespace 委派，
-  覆盖无管理员 fail-closed、IDOR 和角色 revision 失效。
-- V2-902：显式 migration 和 Bun Repository 包含管理 revision、assignment、变更
+  覆盖无管理员 fail-closed、IDOR 和角色配置失效。
+- V2-902：显式 migration 和 Bun Repository 包含管理配置对象、assignment、变更
   请求、管理 Session 哈希及 retire marker；SQLite/PostgreSQL conformance 一致。
 - V2-903/904：只读 API/UI 严格脱敏、有界分页、CSP、Cookie 和 CSRF contract。
-- V2-905～907：所有写操作执行 ETag、幂等、原因、事务审计、回滚和 Secret alias
-  约束；旧连接按既有 Ticket/Session 有界失效。
+- V2-905～907：配置写操作执行幂等、原因、事务审计和 Secret alias 约束；运行时
+  资源继续使用各自版本并发保护；旧连接按既有 Ticket/Session 有界失效。
 - V2-908：fuzz/race、跨租户 IDOR、CSRF/CSP 浏览器测试、并发发布、Secret 泄漏、
   撤销、升级/回滚和 Minikube E2E。在此前继续遵守“不提前跑统一 E2E”的约定。
 

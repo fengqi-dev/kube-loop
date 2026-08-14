@@ -16,7 +16,7 @@ import (
 
 const (
 	serviceName                     = "KubeLoop"
-	credentialMetadataSchemaVersion = 1
+	credentialMetadataSchemaVersion = 2
 )
 
 var ErrNotFound = errors.New("credentials not found")
@@ -28,6 +28,8 @@ type Credential struct {
 	RefreshToken     string
 	RefreshExpiresAt time.Time
 	DeviceID         string
+	PrincipalID      string
+	UserName         string
 }
 
 type Store interface {
@@ -53,6 +55,8 @@ type metadata struct {
 	AccessExpiresAt  time.Time `json:"accessExpiresAt"`
 	RefreshExpiresAt time.Time `json:"refreshExpiresAt"`
 	DeviceID         string    `json:"deviceId"`
+	PrincipalID      string    `json:"principalId,omitempty"`
+	UserName         string    `json:"userName,omitempty"`
 }
 
 type systemBackend struct{}
@@ -98,6 +102,7 @@ func (store *SystemStore) Set(profileID string, credential Credential) error {
 		SchemaVersion: credentialMetadataSchemaVersion,
 		TokenType:     credential.TokenType, AccessExpiresAt: credential.AccessExpiresAt.UTC(),
 		RefreshExpiresAt: credential.RefreshExpiresAt.UTC(), DeviceID: credential.DeviceID,
+		PrincipalID: strings.TrimSpace(credential.PrincipalID), UserName: strings.TrimSpace(credential.UserName),
 	})
 	if err != nil {
 		return errors.New("encode credential metadata")
@@ -160,9 +165,9 @@ func (store *SystemStore) Get(profileID string) (Credential, error) {
 	if details.SchemaVersion == 0 {
 		// Older metadata used the same field semantics but did not carry an
 		// object-level version.
-		details.SchemaVersion = credentialMetadataSchemaVersion
+		details.SchemaVersion = 1
 	}
-	if details.SchemaVersion != credentialMetadataSchemaVersion {
+	if details.SchemaVersion < 1 || details.SchemaVersion > credentialMetadataSchemaVersion {
 		return Credential{}, errors.New("system keyring credential metadata version is unsupported")
 	}
 	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
@@ -171,6 +176,7 @@ func (store *SystemStore) Get(profileID string) (Credential, error) {
 	return Credential{
 		TokenType: details.TokenType, AccessToken: accessToken, AccessExpiresAt: details.AccessExpiresAt,
 		RefreshToken: refreshToken, RefreshExpiresAt: details.RefreshExpiresAt, DeviceID: details.DeviceID,
+		PrincipalID: strings.TrimSpace(details.PrincipalID), UserName: strings.TrimSpace(details.UserName),
 	}, nil
 }
 

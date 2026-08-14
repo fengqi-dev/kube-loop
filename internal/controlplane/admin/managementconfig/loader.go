@@ -1,4 +1,4 @@
-package revision
+package managementconfig
 
 import (
 	"bytes"
@@ -21,15 +21,16 @@ const DefaultPolicyReloadInterval = 500 * time.Millisecond
 var ErrPolicyUnavailable = errors.New("management policy is unavailable")
 
 // PolicyLoader verifies the immutable policy aggregate before installing its
-// active revision. Any read or consistency failure immediately removes all
+// active policy. Any read or consistency failure immediately removes all
 // database-backed grants from the in-memory authorizer.
 type PolicyLoader struct {
 	repositories storage.Repositories
 	engine       *adminauthorization.Engine
 	interval     time.Duration
 
-	mu      sync.RWMutex
-	lastErr error
+	mu             sync.RWMutex
+	lastErr        error
+	loadedObjectID string
 }
 
 func NewPolicyLoader(
@@ -50,39 +51,36 @@ func NewPolicyLoader(
 }
 
 func (loader *PolicyLoader) Load(ctx context.Context) error {
-	active, err := loader.repositories.ActiveManagementRevisions().Get(
+	active, err := loader.repositories.ActiveManagementConfigs().Get(
 		ctx, storage.ManagementConfigurationPolicy, storage.ManagementPolicyID,
 	)
-	if errors.Is(err, storage.ErrNotFound) && loader.engine.ETag() == 0 {
+	if errors.Is(err, storage.ErrNotFound) && loader.loadedObjectID == "" {
 		loader.setError(nil)
 		return nil
 	}
 	if err != nil {
-		return loader.fail(fmt.Errorf("%w: read active revision", ErrPolicyUnavailable))
+		return loader.fail(fmt.Errorf("%w: read active policy", ErrPolicyUnavailable))
 	}
-	if active.ETag < loader.engine.ETag() ||
-		active.ETag == loader.engine.ETag() && active.Revision != loader.engine.Revision() {
-		return loader.fail(fmt.Errorf("%w: active pointer moved backwards", ErrPolicyUnavailable))
-	}
-	if active.ETag == loader.engine.ETag() && loader.engine.Available() {
+	if active.ObjectID == loader.loadedObjectID && loader.engine.Available() {
 		loader.setError(nil)
 		return nil
 	}
 
-	revision, err := loader.repositories.AdminPolicyRevisions().Get(ctx, active.Revision)
+	config, err := loader.repositories.AdminPolicyConfigs().Get(ctx, active.ObjectID)
 	if err != nil {
-		return loader.fail(fmt.Errorf("%w: read immutable revision", ErrPolicyUnavailable))
+		return loader.fail(fmt.Errorf("%w: read policy configuration", ErrPolicyUnavailable))
 	}
-	if revision.ValidationState != storage.RevisionValidationValid || revision.SpecHash != policySpecHash(revision.Spec) {
-		return loader.fail(fmt.Errorf("%w: immutable revision failed verification", ErrPolicyUnavailable))
+	if config.ValidationState != storage.ConfigValidationValid || config.SpecHash != policySpecHash(config.Spec) {
+		return loader.fail(fmt.Errorf("%w: policy configuration failed verification", ErrPolicyUnavailable))
 	}
-	snapshot, err := decodePolicySpec(revision.Spec, revision.Revision)
+	snapshot, err := decodePolicySpec(config.Spec)
 	if err != nil {
 		return loader.fail(err)
 	}
-	if err := loader.engine.Apply(snapshot, active.ETag); err != nil {
-		return loader.fail(fmt.Errorf("%w: compile active revision", ErrPolicyUnavailable))
+	if err := loader.engine.Apply(snapshot); err != nil {
+		return loader.fail(fmt.Errorf("%w: compile active policy", ErrPolicyUnavailable))
 	}
+	loader.loadedObjectID = active.ObjectID
 	loader.setError(nil)
 	return nil
 }
@@ -118,7 +116,7 @@ func (loader *PolicyLoader) setError(err error) {
 	loader.mu.Unlock()
 }
 
-func decodePolicySpec(spec json.RawMessage, revision uint64) (adminauthorization.Snapshot, error) {
+func decodePolicySpec(spec json.RawMessage) (adminauthorization.Snapshot, error) {
 	decoder := json.NewDecoder(bytes.NewReader(spec))
 	decoder.DisallowUnknownFields()
 	var value struct {
@@ -127,14 +125,14 @@ func decodePolicySpec(spec json.RawMessage, revision uint64) (adminauthorization
 		Bindings []adminauthorization.Binding        `json:"bindings"`
 	}
 	if err := decoder.Decode(&value); err != nil {
-		return adminauthorization.Snapshot{}, fmt.Errorf("%w: decode policy revision", ErrPolicyUnavailable)
+		return adminauthorization.Snapshot{}, fmt.Errorf("%w: decode policy configuration", ErrPolicyUnavailable)
 	}
 	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-		return adminauthorization.Snapshot{}, fmt.Errorf("%w: policy revision has trailing content", ErrPolicyUnavailable)
+		return adminauthorization.Snapshot{}, fmt.Errorf("%w: policy configuration has trailing content", ErrPolicyUnavailable)
 	}
-	snapshot := adminauthorization.Snapshot{Version: value.Version, Revision: revision, Roles: value.Roles, Bindings: value.Bindings}
+	snapshot := adminauthorization.Snapshot{Version: value.Version, Roles: value.Roles, Bindings: value.Bindings}
 	if _, err := adminauthorization.New(snapshot); err != nil {
-		return adminauthorization.Snapshot{}, fmt.Errorf("%w: validate policy revision", ErrPolicyUnavailable)
+		return adminauthorization.Snapshot{}, fmt.Errorf("%w: validate policy configuration", ErrPolicyUnavailable)
 	}
 	return snapshot, nil
 }

@@ -140,10 +140,10 @@ type repositorySet struct {
 	adminSessions              *adminSessionRepository
 	localAdminUsers            *localAdminUserRepository
 	adminRecoveryCodes         *adminRecoveryCodeRepository
-	adminPolicyRevisions       *adminPolicyRevisionRepository
+	adminPolicyConfigs         *adminPolicyConfigRepository
 	authorizationDefinitions   *authorizationDefinitionRepository
-	providerConfigRevisions    *providerConfigRevisionRepository
-	activeManagementRevisions  *activeManagementRevisionRepository
+	providerConfigs            *providerConfigRepository
+	activeManagementConfigs    *activeManagementConfigRepository
 	configChangeRequests       *configChangeRequestRepository
 	oauthClients               *oauthClientRepository
 	oauthSessions              *oauthSessionRepository
@@ -171,10 +171,10 @@ func newRepositorySet(backend Backend, executor sqlExecutor, orm bun.IDB) *repos
 		adminSessions:              &adminSessionRepository{repositoryBase: base},
 		localAdminUsers:            &localAdminUserRepository{repositoryBase: base},
 		adminRecoveryCodes:         &adminRecoveryCodeRepository{repositoryBase: base},
-		adminPolicyRevisions:       &adminPolicyRevisionRepository{repositoryBase: base},
+		adminPolicyConfigs:         &adminPolicyConfigRepository{repositoryBase: base},
 		authorizationDefinitions:   &authorizationDefinitionRepository{repositoryBase: base},
-		providerConfigRevisions:    &providerConfigRevisionRepository{repositoryBase: base},
-		activeManagementRevisions:  &activeManagementRevisionRepository{repositoryBase: base},
+		providerConfigs:            &providerConfigRepository{repositoryBase: base},
+		activeManagementConfigs:    &activeManagementConfigRepository{repositoryBase: base},
 		configChangeRequests:       &configChangeRequestRepository{repositoryBase: base},
 		oauthClients:               &oauthClientRepository{repositoryBase: base},
 		oauthSessions:              &oauthSessionRepository{repositoryBase: base},
@@ -238,20 +238,20 @@ func (repositories *repositorySet) AdminRecoveryCodes() AdminRecoveryCodeReposit
 	return repositories.adminRecoveryCodes
 }
 
-func (repositories *repositorySet) AdminPolicyRevisions() AdminPolicyRevisionRepository {
-	return repositories.adminPolicyRevisions
+func (repositories *repositorySet) AdminPolicyConfigs() AdminPolicyConfigRepository {
+	return repositories.adminPolicyConfigs
 }
 
 func (repositories *repositorySet) AuthorizationDefinitions() AuthorizationDefinitionRepository {
 	return repositories.authorizationDefinitions
 }
 
-func (repositories *repositorySet) ProviderConfigRevisions() ProviderConfigRevisionRepository {
-	return repositories.providerConfigRevisions
+func (repositories *repositorySet) ProviderConfigs() ProviderConfigRepository {
+	return repositories.providerConfigs
 }
 
-func (repositories *repositorySet) ActiveManagementRevisions() ActiveManagementRevisionRepository {
-	return repositories.activeManagementRevisions
+func (repositories *repositorySet) ActiveManagementConfigs() ActiveManagementConfigRepository {
+	return repositories.activeManagementConfigs
 }
 
 func (repositories *repositorySet) ConfigChangeRequests() ConfigChangeRequestRepository {

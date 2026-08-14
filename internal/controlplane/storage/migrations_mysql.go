@@ -33,7 +33,6 @@ func mysqlMigrationStatements(sqlite []string) []string {
 func mysqlMigrationStatement(statement string) string {
 	statement = strings.ReplaceAll(statement, "INTEGER PRIMARY KEY AUTOINCREMENT", "BIGINT AUTO_INCREMENT PRIMARY KEY")
 	statement = strings.ReplaceAll(statement, "policy_revision INTEGER", "policy_revision BIGINT")
-	statement = strings.ReplaceAll(statement, "revision INTEGER", "revision BIGINT")
 	statement = strings.ReplaceAll(statement, "BLOB", "VARBINARY(255)")
 	lines := strings.Split(statement, "\n")
 	for index, line := range lines {

@@ -98,7 +98,7 @@ type ManagementStateRepository interface {
 	BootstrapRetired(context.Context) (bool, error)
 	// RetireBootstrap is irreversible through the application repository. It is
 	// idempotent and returns true only when this call persisted the marker.
-	RetireBootstrap(context.Context, uint64, time.Time) (bool, error)
+	RetireBootstrap(context.Context, time.Time) (bool, error)
 }
 
 type AdminSessionRepository interface {
@@ -174,9 +174,9 @@ type AdminRecoveryCodeRepository interface {
 	DeleteByPrincipal(context.Context, string) error
 }
 
-type AdminPolicyRevisionRepository interface {
-	Create(context.Context, AdminPolicyRevision) (AdminPolicyRevision, error)
-	Get(context.Context, uint64) (AdminPolicyRevision, error)
+type AdminPolicyConfigRepository interface {
+	Create(context.Context, AdminPolicyConfig) (AdminPolicyConfig, error)
+	Get(context.Context, string) (AdminPolicyConfig, error)
 }
 
 type AuthorizationDefinitionRepository interface {
@@ -184,17 +184,15 @@ type AuthorizationDefinitionRepository interface {
 	CreateBinding(context.Context, AuthorizationBindingRecord) error
 }
 
-type ProviderConfigRevisionRepository interface {
-	Create(context.Context, ProviderConfigRevision) (ProviderConfigRevision, error)
-	Get(context.Context, uint64) (ProviderConfigRevision, error)
+type ProviderConfigRepository interface {
+	Create(context.Context, ProviderConfig) (ProviderConfig, error)
+	Get(context.Context, string) (ProviderConfig, error)
 }
 
-type ActiveManagementRevisionRepository interface {
-	Get(context.Context, string, string) (ActiveManagementRevision, error)
-	List(context.Context, string) ([]ActiveManagementRevision, error)
-	// CompareAndSwap changes an active pointer only when its monotonic ETag still
-	// matches. expectedETag=0 creates the first pointer; rollback never lowers ETag.
-	CompareAndSwap(context.Context, string, string, uint64, uint64, string, string, time.Time) (ActiveManagementRevision, error)
+type ActiveManagementConfigRepository interface {
+	Get(context.Context, string, string) (ActiveManagementConfig, error)
+	List(context.Context, string) ([]ActiveManagementConfig, error)
+	Set(context.Context, string, string, string, string, string, time.Time) (ActiveManagementConfig, error)
 }
 
 type ConfigChangeRequestRepository interface {
@@ -217,10 +215,10 @@ type Repositories interface {
 	AdminSessions() AdminSessionRepository
 	LocalAdminUsers() LocalAdminUserRepository
 	AdminRecoveryCodes() AdminRecoveryCodeRepository
-	AdminPolicyRevisions() AdminPolicyRevisionRepository
+	AdminPolicyConfigs() AdminPolicyConfigRepository
 	AuthorizationDefinitions() AuthorizationDefinitionRepository
-	ProviderConfigRevisions() ProviderConfigRevisionRepository
-	ActiveManagementRevisions() ActiveManagementRevisionRepository
+	ProviderConfigs() ProviderConfigRepository
+	ActiveManagementConfigs() ActiveManagementConfigRepository
 	ConfigChangeRequests() ConfigChangeRequestRepository
 	OAuthClients() OAuthClientRepository
 	OAuthSessions() OAuthSessionRepository

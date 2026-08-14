@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strings"
 
-	adminrevision "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/revision"
+	adminconfig "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/managementconfig"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 	"github.com/labstack/echo/v5"
 )
@@ -42,7 +42,6 @@ func (api *readAPI) currentProvider(ctx *echo.Context) error {
 		writeProviderError(writer, request, err)
 		return nil
 	}
-	writer.Header().Set("ETag", strongETag(state.Pointer.ETag))
 	api.audit(request, subjectFromRequest(request), "admin.provider/read", "success")
 	writeJSON(writer, http.StatusOK, providerDocument(state))
 	return nil
@@ -50,11 +49,6 @@ func (api *readAPI) currentProvider(ctx *echo.Context) error {
 
 func (api *readAPI) validateProvider(ctx *echo.Context) error {
 	writer, request := ctx.Response(), ctx.Request()
-	expectedETag, _, ok := policyWriteHeaders(writer, request)
-	if !ok {
-		api.audit(request, subjectFromRequest(request), "admin.provider/validate", "failure")
-		return nil
-	}
 	var input providerInput
 	if !decodePolicyJSON(writer, request, &input) {
 		api.audit(request, subjectFromRequest(request), "admin.provider/validate", "failure")
@@ -65,10 +59,6 @@ func (api *readAPI) validateProvider(ctx *echo.Context) error {
 		writeError(writer, http.StatusBadRequest, "invalid_request", "Provider validation request is invalid", requestID(request))
 		return nil
 	}
-	if !providerETagMatches(request, api.providers, expectedETag) {
-		writeError(writer, http.StatusPreconditionFailed, "etag_mismatch", "Provider changed", requestID(request))
-		return nil
-	}
 	validation, err := api.providers.Validate(request.Context(), providerCandidate(request.PathValue("providerID"), input))
 	if err != nil {
 		api.audit(request, subjectFromRequest(request), "admin.provider/validate", "failure")
@@ -76,13 +66,13 @@ func (api *readAPI) validateProvider(ctx *echo.Context) error {
 		return nil
 	}
 	api.audit(request, subjectFromRequest(request), "admin.provider/validate", "success")
-	writeJSON(writer, http.StatusOK, map[string]any{"valid": true, "baseEtag": expectedETag, "validation": validation})
+	writeJSON(writer, http.StatusOK, map[string]any{"valid": true, "validation": validation})
 	return nil
 }
 
 func (api *readAPI) createProviderDraft(ctx *echo.Context) error {
 	writer, request := ctx.Response(), ctx.Request()
-	expectedETag, idempotencyKey, ok := policyWriteHeaders(writer, request)
+	idempotencyKey, ok := policyWriteHeaders(writer, request)
 	if !ok {
 		api.audit(request, subjectFromRequest(request), "admin.provider/create", "failure")
 		return nil
@@ -97,8 +87,8 @@ func (api *readAPI) createProviderDraft(ctx *echo.Context) error {
 		writeError(writer, http.StatusBadRequest, "invalid_request", "Provider draft request is invalid", requestID(request))
 		return nil
 	}
-	result, err := api.providers.CreateDraft(request.Context(), adminrevision.ProviderDraftRequest{
-		Candidate: providerCandidate(request.PathValue("providerID"), input), ExpectedETag: expectedETag,
+	result, err := api.providers.CreateDraft(request.Context(), adminconfig.ProviderDraftRequest{
+		Candidate:      providerCandidate(request.PathValue("providerID"), input),
 		IdempotencyKey: idempotencyKey, Reason: input.Reason, RequestID: requestID(request),
 		Actor: policyActor(subjectFromRequest(request)),
 	})
@@ -107,23 +97,22 @@ func (api *readAPI) createProviderDraft(ctx *echo.Context) error {
 		writeProviderError(writer, request, err)
 		return nil
 	}
-	writer.Header().Set("Location", api.handler.pathPrefix+"/providers/"+result.Revision.ProviderID+"/changes/"+result.Change.ID)
+	writer.Header().Set("Location", api.handler.pathPrefix+"/providers/"+result.Config.ProviderID+"/changes/"+result.Change.ID)
 	if result.Replayed {
 		writer.Header().Set("Idempotent-Replayed", "true")
 	}
 	writeJSON(writer, map[bool]int{true: http.StatusOK, false: http.StatusCreated}[result.Replayed], map[string]any{
-		"providerId": result.Revision.ProviderID, "type": result.Revision.ProviderType,
-		"changeId": result.Change.ID, "revision": result.Revision.Revision,
-		"baseRevision": result.Change.BaseRevision, "baseEtag": result.Change.BaseETag,
+		"providerId": result.Config.ProviderID, "type": result.Config.ProviderType,
+		"changeId": result.Change.ID, "objectId": result.Config.ID,
 		"status": result.Change.Status, "replayed": result.Replayed,
-		"clientSecretConfigured": providerClientSecretConfigured(result.Revision.Config),
+		"clientSecretConfigured": providerClientSecretConfigured(result.Config.Config),
 	})
 	return nil
 }
 
 func (api *readAPI) publishProvider(ctx *echo.Context) error {
 	writer, request := ctx.Response(), ctx.Request()
-	expectedETag, idempotencyKey, ok := policyWriteHeaders(writer, request)
+	idempotencyKey, ok := policyWriteHeaders(writer, request)
 	if !ok {
 		api.audit(request, subjectFromRequest(request), "admin.provider/publish", "failure")
 		return nil
@@ -140,9 +129,9 @@ func (api *readAPI) publishProvider(ctx *echo.Context) error {
 		writeError(writer, http.StatusBadRequest, "invalid_request", "Provider publish request is invalid", requestID(request))
 		return nil
 	}
-	result, err := api.providers.Publish(request.Context(), adminrevision.ProviderActivateRequest{
+	result, err := api.providers.Publish(request.Context(), adminconfig.ProviderActivateRequest{
 		ProviderID: request.PathValue("providerID"), ChangeID: request.PathValue("changeID"),
-		ExpectedETag: expectedETag, IdempotencyKey: idempotencyKey, Reason: input.Reason,
+		IdempotencyKey: idempotencyKey, Reason: input.Reason,
 		RequestID: requestID(request), Actor: policyActor(subjectFromRequest(request)),
 	})
 	if err != nil {
@@ -150,7 +139,6 @@ func (api *readAPI) publishProvider(ctx *echo.Context) error {
 		writeProviderError(writer, request, err)
 		return nil
 	}
-	writer.Header().Set("ETag", strongETag(result.Active.ETag))
 	if result.Replayed {
 		writer.Header().Set("Idempotent-Replayed", "true")
 	}
@@ -158,66 +146,23 @@ func (api *readAPI) publishProvider(ctx *echo.Context) error {
 	return nil
 }
 
-func (api *readAPI) rollbackProvider(ctx *echo.Context) error {
-	writer, request := ctx.Response(), ctx.Request()
-	expectedETag, idempotencyKey, ok := policyWriteHeaders(writer, request)
-	if !ok {
-		api.audit(request, subjectFromRequest(request), "admin.provider/rollback", "failure")
-		return nil
-	}
-	var input struct {
-		TargetRevision uint64 `json:"targetRevision"`
-		Reason         string `json:"reason"`
-	}
-	if !decodePolicyJSON(writer, request, &input) {
-		api.audit(request, subjectFromRequest(request), "admin.provider/rollback", "failure")
-		return nil
-	}
-	if input.TargetRevision == 0 || !validChangeReason(input.Reason) {
-		api.audit(request, subjectFromRequest(request), "admin.provider/rollback", "failure")
-		writeError(writer, http.StatusBadRequest, "invalid_request", "Provider rollback request is invalid", requestID(request))
-		return nil
-	}
-	result, err := api.providers.Rollback(request.Context(), adminrevision.ProviderRollbackRequest{
-		ProviderID: request.PathValue("providerID"), TargetRevision: input.TargetRevision,
-		ExpectedETag: expectedETag, IdempotencyKey: idempotencyKey, Reason: input.Reason,
-		RequestID: requestID(request), Actor: policyActor(subjectFromRequest(request)),
-	})
-	if err != nil {
-		api.audit(request, subjectFromRequest(request), "admin.provider/rollback", "failure")
-		writeProviderError(writer, request, err)
-		return nil
-	}
-	writer.Header().Set("ETag", strongETag(result.Active.ETag))
-	if result.Replayed {
-		writer.Header().Set("Idempotent-Replayed", "true")
-	}
-	writeJSON(writer, http.StatusOK, activationDocument(result))
-	return nil
+func providerCandidate(id string, input providerInput) adminconfig.ProviderCandidate {
+	return adminconfig.ProviderCandidate{ID: id, Type: input.Type, Config: input.Config}
 }
 
-func providerCandidate(id string, input providerInput) adminrevision.ProviderCandidate {
-	return adminrevision.ProviderCandidate{ID: id, Type: input.Type, Config: input.Config}
-}
-
-func providerETagMatches(request *http.Request, service *adminrevision.ProviderService, expected uint64) bool {
-	state, err := service.Current(request.Context(), request.PathValue("providerID"))
-	return err == nil && state.Pointer.ETag == expected
-}
-
-func providerDocument(state adminrevision.ProviderState) map[string]any {
-	document := map[string]any{"active": state.Active, "etag": state.Pointer.ETag}
+func providerDocument(state adminconfig.ProviderState) map[string]any {
+	document := map[string]any{"active": state.Active}
 	if !state.Active {
 		return document
 	}
-	document["providerId"] = state.Revision.ProviderID
-	document["type"] = state.Revision.ProviderType
-	document["revision"] = state.Revision.Revision
-	document["config"] = redactProviderConfig(state.Revision.Config)
-	document["clientSecretConfigured"] = providerClientSecretConfigured(state.Revision.Config)
-	document["validation"] = state.Revision.Validation
-	document["reason"] = state.Revision.Reason
-	document["createdAt"] = state.Revision.CreatedAt
+	document["providerId"] = state.Config.ProviderID
+	document["type"] = state.Config.ProviderType
+	document["objectId"] = state.Config.ID
+	document["config"] = redactProviderConfig(state.Config.Config)
+	document["clientSecretConfigured"] = providerClientSecretConfigured(state.Config.Config)
+	document["validation"] = state.Config.Validation
+	document["reason"] = state.Config.Reason
+	document["createdAt"] = state.Config.CreatedAt
 	return document
 }
 
@@ -242,9 +187,9 @@ func writeProviderError(writer http.ResponseWriter, request *http.Request, err e
 	switch {
 	case errors.Is(err, storage.ErrIdempotencyMismatch):
 		writeError(writer, http.StatusConflict, "idempotency_mismatch", "Idempotency-Key was already used for another request", requestID(request))
-	case errors.Is(err, adminrevision.ErrConflict), errors.Is(err, storage.ErrConflict):
-		writeError(writer, http.StatusPreconditionFailed, "etag_mismatch", "Provider changed", requestID(request))
-	case errors.Is(err, adminrevision.ErrInvalidRequest):
+	case errors.Is(err, adminconfig.ErrConflict), errors.Is(err, storage.ErrConflict):
+		writeError(writer, http.StatusConflict, "configuration_conflict", "Provider change conflicts with current state", requestID(request))
+	case errors.Is(err, adminconfig.ErrInvalidRequest):
 		writeError(writer, http.StatusBadRequest, "invalid_provider", "Provider request is invalid", requestID(request))
 	case errors.Is(err, storage.ErrNotFound):
 		writeError(writer, http.StatusNotFound, "not_found", "Provider change was not found", requestID(request))

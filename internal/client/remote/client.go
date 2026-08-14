@@ -171,10 +171,10 @@ type Session struct {
 	Namespace       string           `json:"namespace"`
 	State           string           `json:"state"`
 	Generation      uint64           `json:"generation"`
-	CreatedAt       time.Time        `json:"createdAt"`
-	UpdatedAt       time.Time        `json:"updatedAt"`
-	LastHeartbeatAt time.Time        `json:"lastHeartbeatAt"`
-	ExpiresAt       time.Time        `json:"expiresAt"`
+	CreatedAt       time.Time        `json:"createdAt" ts_type:"string"`
+	UpdatedAt       time.Time        `json:"updatedAt" ts_type:"string"`
+	LastHeartbeatAt time.Time        `json:"lastHeartbeatAt" ts_type:"string"`
+	ExpiresAt       time.Time        `json:"expiresAt" ts_type:"string"`
 	NetworkSpec     networkspec.Spec `json:"networkSpec"`
 	NetworkSpecHash string           `json:"networkSpecHash"`
 	Capabilities    *Capabilities    `json:"capabilities,omitempty"`
@@ -183,7 +183,7 @@ type Session struct {
 type RelayTicket struct {
 	TokenType string    `json:"tokenType"`
 	Ticket    string    `json:"ticket"`
-	ExpiresAt time.Time `json:"expiresAt"`
+	ExpiresAt time.Time `json:"expiresAt" ts_type:"string"`
 	DeviceID  string    `json:"deviceId"`
 	RelayID   string    `json:"relayId,omitempty"`
 	Endpoint  string    `json:"endpoint,omitempty"`
@@ -206,9 +206,9 @@ type PortForwardTask struct {
 	Protocol    string           `json:"protocol"`
 	RemotePort  uint16           `json:"remotePort"`
 	DialAddress string           `json:"dialAddress"`
-	CreatedAt   time.Time        `json:"createdAt"`
-	UpdatedAt   time.Time        `json:"updatedAt"`
-	ExpiresAt   time.Time        `json:"expiresAt"`
+	CreatedAt   time.Time        `json:"createdAt" ts_type:"string"`
+	UpdatedAt   time.Time        `json:"updatedAt" ts_type:"string"`
+	ExpiresAt   time.Time        `json:"expiresAt" ts_type:"string"`
 }
 
 type ExchangePort struct {
@@ -230,9 +230,9 @@ type ExchangeTask struct {
 	Service   string           `json:"service"`
 	ClusterIP string           `json:"clusterIp"`
 	Ports     []ExchangePort   `json:"ports"`
-	CreatedAt time.Time        `json:"createdAt"`
-	UpdatedAt time.Time        `json:"updatedAt"`
-	ExpiresAt time.Time        `json:"expiresAt"`
+	CreatedAt time.Time        `json:"createdAt" ts_type:"string"`
+	UpdatedAt time.Time        `json:"updatedAt" ts_type:"string"`
+	ExpiresAt time.Time        `json:"expiresAt" ts_type:"string"`
 }
 
 type MirrorPort struct {
@@ -254,9 +254,9 @@ type MirrorTask struct {
 	Service   string           `json:"service"`
 	ClusterIP string           `json:"clusterIp"`
 	Ports     []MirrorPort     `json:"ports"`
-	CreatedAt time.Time        `json:"createdAt"`
-	UpdatedAt time.Time        `json:"updatedAt"`
-	ExpiresAt time.Time        `json:"expiresAt"`
+	CreatedAt time.Time        `json:"createdAt" ts_type:"string"`
+	UpdatedAt time.Time        `json:"updatedAt" ts_type:"string"`
+	ExpiresAt time.Time        `json:"expiresAt" ts_type:"string"`
 }
 
 type PreviewPort struct {
@@ -278,8 +278,8 @@ type PreviewTask struct {
 	Name      string           `json:"name"`
 	ClusterIP string           `json:"clusterIp,omitempty"`
 	Ports     []PreviewPort    `json:"ports"`
-	CreatedAt time.Time        `json:"createdAt"`
-	UpdatedAt time.Time        `json:"updatedAt"`
+	CreatedAt time.Time        `json:"createdAt" ts_type:"string"`
+	UpdatedAt time.Time        `json:"updatedAt" ts_type:"string"`
 }
 
 type ExecSpec struct {
@@ -297,9 +297,9 @@ type ExecTask struct {
 	Pod       string           `json:"pod"`
 	Container string           `json:"container,omitempty"`
 	TTY       bool             `json:"tty"`
-	CreatedAt time.Time        `json:"createdAt"`
-	UpdatedAt time.Time        `json:"updatedAt"`
-	ExpiresAt time.Time        `json:"expiresAt"`
+	CreatedAt time.Time        `json:"createdAt" ts_type:"string"`
+	UpdatedAt time.Time        `json:"updatedAt" ts_type:"string"`
+	ExpiresAt time.Time        `json:"expiresAt" ts_type:"string"`
 }
 
 type FileTransferSpec struct {
@@ -330,9 +330,9 @@ type FileTransferTask struct {
 	Checksum   string           `json:"checksum,omitempty"`
 	Overwrite  bool             `json:"overwrite,omitempty"`
 	ResumeID   string           `json:"resumeId,omitempty"`
-	CreatedAt  time.Time        `json:"createdAt"`
-	UpdatedAt  time.Time        `json:"updatedAt"`
-	ExpiresAt  time.Time        `json:"expiresAt"`
+	CreatedAt  time.Time        `json:"createdAt" ts_type:"string"`
+	UpdatedAt  time.Time        `json:"updatedAt" ts_type:"string"`
+	ExpiresAt  time.Time        `json:"expiresAt" ts_type:"string"`
 }
 
 type PodFileSpec struct {
@@ -350,7 +350,7 @@ type PodFileEntry struct {
 	Kind       string    `json:"kind"`
 	Size       int64     `json:"size"`
 	Mode       string    `json:"mode"`
-	ModifiedAt time.Time `json:"modifiedAt"`
+	ModifiedAt time.Time `json:"modifiedAt" ts_type:"string"`
 }
 
 type PodFileList struct {
@@ -380,9 +380,9 @@ type PodFileTask struct {
 	Kind        string           `json:"kind,omitempty"`
 	Recursive   bool             `json:"recursive,omitempty"`
 	Result      PodFileResult    `json:"result"`
-	CreatedAt   time.Time        `json:"createdAt"`
-	UpdatedAt   time.Time        `json:"updatedAt"`
-	ExpiresAt   time.Time        `json:"expiresAt"`
+	CreatedAt   time.Time        `json:"createdAt" ts_type:"string"`
+	UpdatedAt   time.Time        `json:"updatedAt" ts_type:"string"`
+	ExpiresAt   time.Time        `json:"expiresAt" ts_type:"string"`
 }
 
 type page[T any] struct {

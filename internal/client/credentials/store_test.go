@@ -49,6 +49,7 @@ func TestSystemStoreUsesVersionedKeyringEntries(t *testing.T) {
 	credential := Credential{
 		TokenType: "Bearer", AccessToken: "access-one", RefreshToken: "refresh-one", DeviceID: "device-1",
 		AccessExpiresAt: time.Now().Add(time.Minute), RefreshExpiresAt: time.Now().Add(time.Hour),
+		PrincipalID: "principal-1", UserName: "Example User",
 	}
 	if err := store.Set("profile-1", credential); err != nil {
 		t.Fatal(err)
@@ -57,7 +58,8 @@ func TestSystemStoreUsesVersionedKeyringEntries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.AccessToken != credential.AccessToken || got.RefreshToken != credential.RefreshToken || got.DeviceID != credential.DeviceID {
+	if got.AccessToken != credential.AccessToken || got.RefreshToken != credential.RefreshToken || got.DeviceID != credential.DeviceID ||
+		got.PrincipalID != credential.PrincipalID || got.UserName != credential.UserName {
 		t.Fatalf("credential = %#v", got)
 	}
 	prefix, err := accountPrefix("profile-1")
@@ -108,7 +110,11 @@ func TestSystemStoreReadsLegacyMetadataAndRejectsFutureSchema(t *testing.T) {
 	if credential, err := store.Get("profile-1"); err != nil || credential.DeviceID != "device-1" {
 		t.Fatalf("legacy metadata credential = %#v err = %v", credential, err)
 	}
-	install(`{"schemaVersion":2,"deviceId":"device-1"}`)
+	install(`{"schemaVersion":1,"deviceId":"device-1"}`)
+	if credential, err := store.Get("profile-1"); err != nil || credential.DeviceID != "device-1" {
+		t.Fatalf("version 1 metadata credential = %#v err = %v", credential, err)
+	}
+	install(`{"schemaVersion":3,"deviceId":"device-1"}`)
 	if _, err := store.Get("profile-1"); err == nil {
 		t.Fatal("future credential metadata schema was accepted")
 	}

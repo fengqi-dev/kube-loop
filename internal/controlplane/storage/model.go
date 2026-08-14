@@ -260,8 +260,7 @@ type LocalAdminUser struct {
 	UpdatedAt           time.Time
 }
 
-type AdminPolicyRevision struct {
-	Revision                  uint64
+type AdminPolicyConfig struct {
 	ID                        string
 	SchemaVersion             int
 	Spec                      json.RawMessage
@@ -274,8 +273,7 @@ type AdminPolicyRevision struct {
 	CreatedAt                 time.Time
 }
 
-type ProviderConfigRevision struct {
-	Revision                  uint64
+type ProviderConfig struct {
 	ID                        string
 	SchemaVersion             int
 	ProviderID                string
@@ -292,13 +290,13 @@ type ProviderConfigRevision struct {
 }
 
 type AuthorizationRoleRecord struct {
-	Revision   uint64
+	PolicyID   string
 	ID         string
 	Definition json.RawMessage
 }
 
 type AuthorizationBindingRecord struct {
-	Revision       uint64
+	PolicyID       string
 	ID             string
 	RoleID         string
 	SubjectType    string
@@ -313,11 +311,10 @@ type AuthorizationBindingRecord struct {
 	Binding        json.RawMessage
 }
 
-type ActiveManagementRevision struct {
+type ActiveManagementConfig struct {
 	ConfigurationType         string
 	ConfigurationID           string
-	Revision                  uint64
-	ETag                      uint64
+	ObjectID                  string
 	UpdatedBy                 string
 	UpdatedAuthenticationType string
 	UpdatedAt                 time.Time
@@ -328,9 +325,8 @@ type ConfigChangeRequest struct {
 	SchemaVersion               int
 	ConfigurationType           string
 	ConfigurationID             string
-	BaseRevision                uint64
-	BaseETag                    uint64
-	ProposedRevision            uint64
+	BaseObjectID                string
+	ProposedObjectID            string
 	Status                      string
 	IdempotencyHash             []byte
 	RequestHash                 string

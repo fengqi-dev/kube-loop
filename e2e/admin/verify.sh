@@ -77,7 +77,7 @@ admin_get() {
 }
 
 admin_post() {
-  local path=$1 etag=$2 key=$3 body=$4 output=$5
+  local path=$1 key=$2 body=$3 output=$4
   local -a headers=(
     --header "Cookie: ${COOKIE}"
     --header "Origin: ${PUBLIC_ORIGIN}"
@@ -85,9 +85,6 @@ admin_post() {
     --header "X-KubeLoop-CSRF: ${CSRF}"
     --header "Idempotency-Key: ${key}"
   )
-  if [[ -n "${etag}" ]]; then
-    headers+=(--header "If-Match: \"${etag}\"")
-  fi
   curl --silent --show-error --output "${output}" --write-out '%{http_code}' \
     "${headers[@]}" --data "${body}" "${BASE_URL}/api/admin${path}"
 }
@@ -95,11 +92,11 @@ admin_post() {
 admin_get /status | jq -e '.storage.backend == "sqlite" and (.storage.schemaVersion >= 11)' >/dev/null
 admin_get /capabilities | jq -e '.authenticationType == "break-glass" and (.capabilities | length > 0)' >/dev/null
 POLICY_STATE="$(admin_get /authorization)"
-BASE_ETAG="$(jq -er '.etag | select(type == "number" and . >= 0 and floor == .)' <<<"${POLICY_STATE}")"
+jq -e '.active == false or (.active == true and (.objectId | type == "string"))' <<<"${POLICY_STATE}" >/dev/null
 
 NO_CSRF_STATUS="$(curl --silent --output "${WORK_DIR}/csrf.json" --write-out '%{http_code}' \
   --header "Cookie: ${COOKIE}" --header "Origin: ${PUBLIC_ORIGIN}" \
-  --header 'Content-Type: application/json' --header "If-Match: \"${BASE_ETAG}\"" \
+  --header 'Content-Type: application/json' \
   --header 'Idempotency-Key: admin-e2e-no-csrf-0001' \
   --data '{"spec":{"version":1,"assignments":[]},"checks":[],"reason":"verify csrf rejection"}' \
   "${BASE_URL}/api/admin/authorization/dry-run")"
@@ -114,36 +111,25 @@ KEY_ONE='admin-e2e-policy-draft-0001'
 KEY_TWO='admin-e2e-policy-draft-0002'
 BODY_ONE="$(jq -nc --argjson spec "${SPEC_ONE}" '{spec:$spec,reason:"publish primary platform administrators"}')"
 BODY_TWO="$(jq -nc --argjson spec "${SPEC_TWO}" '{spec:$spec,reason:"publish secondary platform administrators"}')"
-STATUS_ONE="$(admin_post /authorization/drafts "${BASE_ETAG}" "${KEY_ONE}" "${BODY_ONE}" "${WORK_DIR}/draft-one.json")"
-STATUS_TWO="$(admin_post /authorization/drafts "${BASE_ETAG}" "${KEY_TWO}" "${BODY_TWO}" "${WORK_DIR}/draft-two.json")"
+STATUS_ONE="$(admin_post /authorization/drafts "${KEY_ONE}" "${BODY_ONE}" "${WORK_DIR}/draft-one.json")"
+STATUS_TWO="$(admin_post /authorization/drafts "${KEY_TWO}" "${BODY_TWO}" "${WORK_DIR}/draft-two.json")"
 if [[ "${STATUS_ONE}" != "201" || "${STATUS_TWO}" != "201" ]]; then
   echo "policy draft status: ${STATUS_ONE}/${STATUS_TWO}" >&2
   jq -c '{error}' "${WORK_DIR}/draft-one.json" "${WORK_DIR}/draft-two.json" >&2 || true
   exit 1
 fi
-echo "Concurrent policy candidates created"
+echo "Policy candidates created"
 CHANGE_ONE="$(jq -er '.changeId' "${WORK_DIR}/draft-one.json")"
 CHANGE_TWO="$(jq -er '.changeId' "${WORK_DIR}/draft-two.json")"
-REVISION_ONE="$(jq -er '.revision' "${WORK_DIR}/draft-one.json")"
-REVISION_TWO="$(jq -er '.revision' "${WORK_DIR}/draft-two.json")"
+OBJECT_ONE="$(jq -er '.objectId' "${WORK_DIR}/draft-one.json")"
+OBJECT_TWO="$(jq -er '.objectId' "${WORK_DIR}/draft-two.json")"
 
-admin_post "/authorization/changes/${CHANGE_ONE}/publish" "${BASE_ETAG}" "${KEY_ONE}" \
-  '{"reason":"publish primary platform administrators"}' "${WORK_DIR}/publish-one.json" >"${WORK_DIR}/publish-one.status" &
-PID_ONE=$!
-admin_post "/authorization/changes/${CHANGE_TWO}/publish" "${BASE_ETAG}" "${KEY_TWO}" \
-  '{"reason":"publish secondary platform administrators"}' "${WORK_DIR}/publish-two.json" >"${WORK_DIR}/publish-two.status" &
-PID_TWO=$!
-wait "${PID_ONE}"
-wait "${PID_TWO}"
-PUBLISH_STATUSES="$(sort "${WORK_DIR}/publish-one.status" "${WORK_DIR}/publish-two.status" | tr '\n' ' ' | sed 's/ $//')"
-[[ "${PUBLISH_STATUSES}" == "200 412" ]]
-echo "Concurrent policy publish CAS verified"
-if [[ "$(cat "${WORK_DIR}/publish-one.status")" == "200" ]]; then
-  ACTIVE_REVISION="${REVISION_ONE}"
-else
-  ACTIVE_REVISION="${REVISION_TWO}"
-fi
-admin_get /authorization | jq -e --argjson revision "${ACTIVE_REVISION}" --argjson etag "${BASE_ETAG}" \
-  '.active and .revision == $revision and .etag == ($etag + 1)' >/dev/null
+[[ "$(admin_post "/authorization/changes/${CHANGE_ONE}/publish" "${KEY_ONE}" \
+  '{"reason":"publish primary platform administrators"}' "${WORK_DIR}/publish-one.json")" == "200" ]]
+admin_get /authorization | jq -e --arg objectID "${OBJECT_ONE}" '.active and .objectId == $objectID' >/dev/null
+[[ "$(admin_post "/authorization/changes/${CHANGE_TWO}/publish" "${KEY_TWO}" \
+  '{"reason":"publish secondary platform administrators"}' "${WORK_DIR}/publish-two.json")" == "200" ]]
+admin_get /authorization | jq -e --arg objectID "${OBJECT_TWO}" '.active and .objectId == $objectID' >/dev/null
+echo "Policy publish and active configuration replacement verified"
 
-echo "Management security E2E passed (CSP, CSRF, concurrent publish)"
+echo "Management security E2E passed (CSP, CSRF, publish)"

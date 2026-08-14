@@ -232,7 +232,17 @@ func (client *Client) Refresh(ctx context.Context, baseURL string, current crede
 	}, &response); err != nil {
 		return credentials.Credential{}, err
 	}
-	return credentialFromResponse(response, current.DeviceID)
+	next, err := credentialFromResponse(response, current.DeviceID)
+	if err != nil {
+		return credentials.Credential{}, err
+	}
+	if next.PrincipalID == "" {
+		next.PrincipalID = current.PrincipalID
+	}
+	if next.UserName == "" {
+		next.UserName = current.UserName
+	}
+	return next, nil
 }
 
 func (client *Client) Revoke(ctx context.Context, baseURL, refreshToken string) error {
@@ -388,10 +398,39 @@ func credentialFromResponse(response tokenResponse, deviceID string) (credential
 		response.ExpiresIn <= 0 {
 		return credentials.Credential{}, errors.New("OAuth server returned an incomplete token response")
 	}
+	principalID, userName := identityFromIDToken(response.IDToken)
 	return credentials.Credential{
 		TokenType: "Bearer", AccessToken: response.AccessToken, AccessExpiresAt: time.Now().Add(time.Duration(response.ExpiresIn) * time.Second),
-		RefreshToken: response.RefreshToken, DeviceID: deviceID,
+		RefreshToken: response.RefreshToken, DeviceID: deviceID, PrincipalID: principalID, UserName: userName,
 	}, nil
+}
+
+func identityFromIDToken(token string) (string, string) {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return "", ""
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return "", ""
+	}
+	var claims struct {
+		Subject           string `json:"sub"`
+		Name              string `json:"name"`
+		PreferredUserName string `json:"preferred_username"`
+		UserName          string `json:"username"`
+		Email             string `json:"email"`
+	}
+	if json.Unmarshal(payload, &claims) != nil {
+		return "", ""
+	}
+	principalID := strings.TrimSpace(claims.Subject)
+	for _, value := range []string{claims.Name, claims.PreferredUserName, claims.UserName, claims.Email, principalID} {
+		if value = strings.TrimSpace(value); value != "" {
+			return principalID, value
+		}
+	}
+	return principalID, ""
 }
 
 func validateTarget(baseURL, providerID string) (string, error) {

@@ -151,6 +151,8 @@ func TestNamespaceAdminListsOnlyExplicitNamespaceBeforeObjectLookup(t *testing.T
 	capabilities := authenticatedGET(handler, cookie, "/capabilities")
 	if capabilities.Code != http.StatusOK || !strings.Contains(capabilities.Body.String(), `"namespace":"payments"`) ||
 		!strings.Contains(capabilities.Body.String(), `"namespace.tasks.read"`) ||
+		!strings.Contains(capabilities.Body.String(), `"namespace.authorization.read"`) ||
+		!strings.Contains(capabilities.Body.String(), `"namespace.authorization.delegate"`) ||
 		strings.Contains(capabilities.Body.String(), `"namespace":"other"`) {
 		t.Fatalf("namespace capabilities status=%d body=%s", capabilities.Code, capabilities.Body.String())
 	}
@@ -266,7 +268,7 @@ func newNamespaceTokenHandler(t *testing.T, namespace string) (*Handler, *storag
 		t.Fatal(err)
 	}
 	authorizer, err := adminauthorization.New(adminauthorization.Snapshot{
-		Version: adminauthorization.CurrentVersion, Revision: 1, Bindings: []adminauthorization.Binding{{
+		Version: adminauthorization.CurrentVersion, Bindings: []adminauthorization.Binding{{
 			ID: uuid.NewString(), Subject: adminauthorization.SubjectRef{Type: adminauthorization.SubjectPrincipal, PrincipalID: principal.ID}, RoleID: adminauthorization.RoleNamespaceAdmin,
 			Scope: adminauthorization.BindingScope{Type: adminauthorization.ScopeNamespaces, Names: []string{namespace}}, ManagedBy: adminauthorization.ManagedByPlatform,
 		}},

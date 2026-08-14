@@ -13,19 +13,19 @@ import (
 	"testing"
 
 	adminauthorization "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/authorization"
+	adminconfig "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/managementconfig"
 	adminoperations "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/operations"
-	adminrevision "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/revision"
 	adminsession "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/session"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 	"github.com/google/uuid"
 )
 
-func TestPolicyAPICompletesDraftDryRunPublishAndRollback(t *testing.T) {
+func TestPolicyAPICompletesDraftDryRunAndPublish(t *testing.T) {
 	handler, store, engine := newPolicyTestHandler(t)
 	cookie, csrf := exchangeBreakGlassSession(t, handler)
 
 	current := authenticatedGET(handler, cookie, "/authorization")
-	if current.Code != http.StatusOK || current.Header().Get("ETag") != `"0"` ||
+	if current.Code != http.StatusOK ||
 		!strings.Contains(current.Body.String(), `"active":false`) ||
 		!strings.Contains(current.Body.String(), `"builtInRoles"`) ||
 		!strings.Contains(current.Body.String(), `"id":"platform-admin"`) ||
@@ -46,7 +46,7 @@ func TestPolicyAPICompletesDraftDryRunPublishAndRollback(t *testing.T) {
 		},
 	}
 	firstKey := "policy-http-create-0001"
-	firstDraft := policyWrite(t, handler, cookie, csrf, "/authorization/drafts", `"0"`, firstKey, map[string]any{
+	firstDraft := policyWrite(t, handler, cookie, csrf, "/authorization/drafts", firstKey, map[string]any{
 		"spec": firstSpec, "reason": "establish formal administrators",
 	})
 	if firstDraft.Code != http.StatusCreated {
@@ -54,42 +54,41 @@ func TestPolicyAPICompletesDraftDryRunPublishAndRollback(t *testing.T) {
 	}
 	var first struct {
 		ChangeID string `json:"changeId"`
-		Revision uint64 `json:"revision"`
+		ObjectID string `json:"objectId"`
 	}
-	if json.Unmarshal(firstDraft.Body.Bytes(), &first) != nil || first.ChangeID == "" || first.Revision == 0 {
+	if json.Unmarshal(firstDraft.Body.Bytes(), &first) != nil || first.ChangeID == "" || first.ObjectID == "" {
 		t.Fatalf("first draft body=%s", firstDraft.Body.String())
 	}
-	replay := policyWrite(t, handler, cookie, csrf, "/authorization/drafts", `"0"`, firstKey, map[string]any{
+	replay := policyWrite(t, handler, cookie, csrf, "/authorization/drafts", firstKey, map[string]any{
 		"spec": firstSpec, "reason": "establish formal administrators",
 	})
 	if replay.Code != http.StatusOK || replay.Header().Get("Idempotent-Replayed") != "true" {
 		t.Fatalf("draft replay status=%d headers=%v body=%s", replay.Code, replay.Header(), replay.Body.String())
 	}
 
-	wrongKey := policyWrite(t, handler, cookie, csrf, "/authorization/changes/"+first.ChangeID+"/publish", `"0"`,
+	wrongKey := policyWrite(t, handler, cookie, csrf, "/authorization/changes/"+first.ChangeID+"/publish",
 		"policy-http-wrong-0001", map[string]any{"reason": "publish formal administrators"})
 	if wrongKey.Code != http.StatusConflict {
 		t.Fatalf("wrong publish key status=%d body=%s", wrongKey.Code, wrongKey.Body.String())
 	}
-	published := policyWrite(t, handler, cookie, csrf, "/authorization/changes/"+first.ChangeID+"/publish", `"0"`,
+	published := policyWrite(t, handler, cookie, csrf, "/authorization/changes/"+first.ChangeID+"/publish",
 		firstKey, map[string]any{"reason": "publish formal administrators"})
-	if published.Code != http.StatusOK || published.Header().Get("ETag") != `"1"` ||
-		engine.Revision() != first.Revision || engine.ETag() != 1 {
-		t.Fatalf("first publish status=%d etag=%q engine=%d/%d body=%s",
-			published.Code, published.Header().Get("ETag"), engine.Revision(), engine.ETag(), published.Body.String())
+	if published.Code != http.StatusOK || !engine.Available() {
+		t.Fatalf("first publish status=%d engine available=%t body=%s",
+			published.Code, engine.Available(), published.Body.String())
 	}
 	if decision := engine.Authorize(context.Background(), adminauthorization.Subject{ID: customPrincipal}, adminauthorization.Request{
 		Resource: adminauthorization.ResourceSession, Operation: adminauthorization.OperationRead,
 	}); !decision.Allowed || len(decision.MatchingAllow) != 1 || decision.MatchingAllow[0].RoleID != "session-reader" {
 		t.Fatalf("custom role decision = %#v", decision)
 	}
-	publishReplay := policyWrite(t, handler, cookie, csrf, "/authorization/changes/"+first.ChangeID+"/publish", `"0"`,
+	publishReplay := policyWrite(t, handler, cookie, csrf, "/authorization/changes/"+first.ChangeID+"/publish",
 		firstKey, map[string]any{"reason": "retry formal administrator publish"})
 	if publishReplay.Code != http.StatusOK || publishReplay.Header().Get("Idempotent-Replayed") != "true" {
 		t.Fatalf("publish replay status=%d headers=%v body=%s", publishReplay.Code, publishReplay.Header(), publishReplay.Body.String())
 	}
 
-	dryRun := policyWrite(t, handler, cookie, csrf, "/authorization/dry-run", `"1"`, "policy-http-dryrun-0001", map[string]any{
+	dryRun := policyWrite(t, handler, cookie, csrf, "/authorization/dry-run", "policy-http-dryrun-0001", map[string]any{
 		"spec": firstSpec, "reason": "verify formal administrator access",
 		"checks": []policyCheck{{
 			Subject: struct {
@@ -105,41 +104,28 @@ func TestPolicyAPICompletesDraftDryRunPublishAndRollback(t *testing.T) {
 		t.Fatalf("dry-run status=%d body=%s", dryRun.Code, dryRun.Body.String())
 	}
 
-	stale := policyWrite(t, handler, cookie, csrf, "/authorization/drafts", `"0"`, "policy-http-stale-0001", map[string]any{
-		"spec": firstSpec, "reason": "attempt a stale policy change",
-	})
-	if stale.Code != http.StatusPreconditionFailed {
-		t.Fatalf("stale draft status=%d body=%s", stale.Code, stale.Body.String())
-	}
-
 	secondSpec := firstSpec
 	secondSpec.Bindings = append([]adminauthorization.Binding(nil), firstSpec.Bindings...)
 	secondSpec.Bindings = append(secondSpec.Bindings, adminauthorization.Binding{ID: uuid.NewString(), Subject: adminauthorization.SubjectRef{Type: adminauthorization.SubjectGroup, ProviderID: "oidc", GroupName: "auditors"}, RoleID: adminauthorization.RoleAuditor, Scope: adminauthorization.BindingScope{Type: adminauthorization.ScopePlatform}, ManagedBy: adminauthorization.ManagedByPlatform})
 	secondKey := "policy-http-create-0002"
-	secondDraft := policyWrite(t, handler, cookie, csrf, "/authorization/drafts", `"1"`, secondKey, map[string]any{
+	secondDraft := policyWrite(t, handler, cookie, csrf, "/authorization/drafts", secondKey, map[string]any{
 		"spec": secondSpec, "reason": "add read only audit access",
 	})
 	var second struct {
 		ChangeID string `json:"changeId"`
-		Revision uint64 `json:"revision"`
+		ObjectID string `json:"objectId"`
 	}
 	if secondDraft.Code != http.StatusCreated || json.Unmarshal(secondDraft.Body.Bytes(), &second) != nil {
 		t.Fatalf("second draft status=%d body=%s", secondDraft.Code, secondDraft.Body.String())
 	}
-	secondPublish := policyWrite(t, handler, cookie, csrf, "/authorization/changes/"+second.ChangeID+"/publish", `"1"`,
+	secondPublish := policyWrite(t, handler, cookie, csrf, "/authorization/changes/"+second.ChangeID+"/publish",
 		secondKey, map[string]any{"reason": "publish read only audit access"})
-	if secondPublish.Code != http.StatusOK || engine.ETag() != 2 {
-		t.Fatalf("second publish status=%d engine etag=%d body=%s", secondPublish.Code, engine.ETag(), secondPublish.Body.String())
-	}
-	rollback := policyWrite(t, handler, cookie, csrf, "/authorization/rollback", `"2"`, "policy-http-rollback-01", map[string]any{
-		"targetRevision": first.Revision, "reason": "restore the known good policy",
-	})
-	if rollback.Code != http.StatusOK || rollback.Header().Get("ETag") != `"3"` || engine.Revision() <= second.Revision || engine.ETag() != 3 {
-		t.Fatalf("rollback status=%d engine=%d/%d body=%s", rollback.Code, engine.Revision(), engine.ETag(), rollback.Body.String())
+	if secondPublish.Code != http.StatusOK || !engine.Available() {
+		t.Fatalf("second publish status=%d engine available=%t body=%s", secondPublish.Code, engine.Available(), secondPublish.Body.String())
 	}
 
 	current = authenticatedGET(handler, cookie, "/authorization")
-	if current.Code != http.StatusOK || current.Header().Get("ETag") != `"3"` ||
+	if current.Code != http.StatusOK ||
 		!strings.Contains(current.Body.String(), `"active":true`) ||
 		!strings.Contains(current.Body.String(), `"id":"session-reader"`) ||
 		!strings.Contains(current.Body.String(), `"platform.sessions.read"`) ||
@@ -161,24 +147,20 @@ func testPlatformBinding(id string, role adminauthorization.Role, principalID st
 	return adminauthorization.Binding{ID: id, Subject: adminauthorization.SubjectRef{Type: adminauthorization.SubjectPrincipal, PrincipalID: principalID}, RoleID: role, Scope: adminauthorization.BindingScope{Type: adminauthorization.ScopePlatform}, ManagedBy: adminauthorization.ManagedByPlatform}
 }
 
-func TestPolicyAPIRequiresCSRFPreconditionIdempotencyAndStrictJSON(t *testing.T) {
+func TestPolicyAPIRequiresCSRFIdempotencyAndStrictJSON(t *testing.T) {
 	handler, _, _ := newPolicyTestHandler(t)
 	cookie, csrf := exchangeBreakGlassSession(t, handler)
 	body := map[string]any{"spec": policySpec{Version: adminauthorization.CurrentVersion, Bindings: []adminauthorization.Binding{}}, "reason": "validate request boundaries"}
 
-	missingCSRF := policyWrite(t, handler, cookie, "", "/authorization/dry-run", `"0"`, "policy-boundary-key-01", body)
+	missingCSRF := policyWrite(t, handler, cookie, "", "/authorization/dry-run", "policy-boundary-key-01", body)
 	if missingCSRF.Code != http.StatusForbidden {
 		t.Fatalf("missing CSRF status=%d body=%s", missingCSRF.Code, missingCSRF.Body.String())
 	}
-	missingETag := policyWrite(t, handler, cookie, csrf, "/authorization/dry-run", "", "policy-boundary-key-02", body)
-	if missingETag.Code != http.StatusPreconditionRequired {
-		t.Fatalf("missing If-Match status=%d body=%s", missingETag.Code, missingETag.Body.String())
-	}
-	missingKey := policyWrite(t, handler, cookie, csrf, "/authorization/dry-run", `"0"`, "", body)
+	missingKey := policyWrite(t, handler, cookie, csrf, "/authorization/drafts", "", body)
 	if missingKey.Code != http.StatusBadRequest {
 		t.Fatalf("missing idempotency key status=%d body=%s", missingKey.Code, missingKey.Body.String())
 	}
-	unknown := policyWrite(t, handler, cookie, csrf, "/authorization/dry-run", `"0"`, "policy-boundary-key-03", map[string]any{
+	unknown := policyWrite(t, handler, cookie, csrf, "/authorization/dry-run", "policy-boundary-key-03", map[string]any{
 		"spec": body["spec"], "reason": body["reason"], "unknown": true,
 	})
 	if unknown.Code != http.StatusBadRequest {
@@ -205,11 +187,11 @@ func newPolicyTestHandler(t *testing.T) (*Handler, *storage.Store, *adminauthori
 	if err != nil {
 		t.Fatal(err)
 	}
-	loader, err := adminrevision.NewPolicyLoader(store, engine, 0)
+	loader, err := adminconfig.NewPolicyLoader(store, engine, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	service, err := adminrevision.New(store)
+	service, err := adminconfig.New(store)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -246,7 +228,7 @@ func policyWrite(
 	t *testing.T,
 	handler *Handler,
 	cookie *http.Cookie,
-	csrf, path, etag, key string,
+	csrf, path, key string,
 	body any,
 ) *httptest.ResponseRecorder {
 	t.Helper()
@@ -260,9 +242,6 @@ func policyWrite(
 	request.Header.Set("Content-Type", "application/json")
 	if csrf != "" {
 		request.Header.Set(CSRFHeaderName, csrf)
-	}
-	if etag != "" {
-		request.Header.Set("If-Match", etag)
 	}
 	if key != "" {
 		request.Header.Set("Idempotency-Key", key)

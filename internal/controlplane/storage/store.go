@@ -339,20 +339,20 @@ func (store *Store) AdminRecoveryCodes() AdminRecoveryCodeRepository {
 	return store.repositories.AdminRecoveryCodes()
 }
 
-func (store *Store) AdminPolicyRevisions() AdminPolicyRevisionRepository {
-	return store.repositories.AdminPolicyRevisions()
+func (store *Store) AdminPolicyConfigs() AdminPolicyConfigRepository {
+	return store.repositories.AdminPolicyConfigs()
 }
 
 func (store *Store) AuthorizationDefinitions() AuthorizationDefinitionRepository {
 	return store.repositories.AuthorizationDefinitions()
 }
 
-func (store *Store) ProviderConfigRevisions() ProviderConfigRevisionRepository {
-	return store.repositories.ProviderConfigRevisions()
+func (store *Store) ProviderConfigs() ProviderConfigRepository {
+	return store.repositories.ProviderConfigs()
 }
 
-func (store *Store) ActiveManagementRevisions() ActiveManagementRevisionRepository {
-	return store.repositories.ActiveManagementRevisions()
+func (store *Store) ActiveManagementConfigs() ActiveManagementConfigRepository {
+	return store.repositories.ActiveManagementConfigs()
 }
 
 func (store *Store) ConfigChangeRequests() ConfigChangeRequestRepository {

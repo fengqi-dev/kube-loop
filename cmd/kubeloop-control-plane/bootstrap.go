@@ -7,8 +7,8 @@ import (
 
 	adminauthorization "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/authorization"
 	adminlocaluser "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/localuser"
+	adminconfig "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/managementconfig"
 	adminprovider "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/provider"
-	adminrevision "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/revision"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/authn"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/authorization"
 	controlplanekubernetes "github.com/fengqi-dev/kube-loop/internal/controlplane/kubernetes"
@@ -21,12 +21,12 @@ type bootstrapRuntime struct {
 	Store                     *controlplanestorage.Store
 	MaintenanceWorker         *maintenance.Worker
 	LocalUsers                *adminlocaluser.Service
-	ManagementRevisionService *adminrevision.Service
+	ManagementRevisionService *adminconfig.Service
 	ManagementPolicyEngine    *adminauthorization.Engine
-	ManagementPolicyLoader    *adminrevision.PolicyLoader
+	ManagementPolicyLoader    *adminconfig.PolicyLoader
 	AuthRegistry              *authn.Registry
 	ManagedProviderRuntime    *adminprovider.Runtime
-	ManagedProviderService    *adminrevision.ProviderService
+	ManagedProviderService    *adminconfig.ProviderService
 	PolicyEngine              authorization.Authorizer
 	KubernetesConfig          controlplanekubernetes.Config
 	KubernetesProvider        *controlplanekubernetes.Provider
@@ -61,10 +61,10 @@ func bootstrapControlPlane(
 		logger.Error("initialize Management Plane administrator failed", "error", err)
 		os.Exit(2)
 	}
-	managementRevisionService, err := adminrevision.New(stateStore)
+	managementRevisionService, err := adminconfig.New(stateStore)
 	if err != nil {
 		_ = stateStore.Close()
-		logger.Error("initialize Management Plane revision service failed", "error", err)
+		logger.Error("initialize Management Plane configuration service failed", "error", err)
 		os.Exit(2)
 	}
 	if initialAdmin.PrincipalID != "" {
@@ -95,7 +95,7 @@ func bootstrapControlPlane(
 		logger.Error("initialize Management Plane authorization failed", "error", err)
 		os.Exit(2)
 	}
-	managementPolicyLoader, err := adminrevision.NewPolicyLoader(stateStore, managementPolicyEngine, 0)
+	managementPolicyLoader, err := adminconfig.NewPolicyLoader(stateStore, managementPolicyEngine, 0)
 	if err != nil {
 		_ = stateStore.Close()
 		logger.Error("initialize Management Plane policy loader failed", "error", err)
@@ -125,7 +125,7 @@ func bootstrapControlPlane(
 		logger.Error("load active managed authentication Providers failed", "error", err)
 		os.Exit(1)
 	}
-	managedProviderService, err := adminrevision.NewProviderService(stateStore, managedProviderRuntime, managedProviderRuntime)
+	managedProviderService, err := adminconfig.NewProviderService(stateStore, managedProviderRuntime, managedProviderRuntime)
 	if err != nil {
 		_ = stateStore.Close()
 		logger.Error("initialize managed authentication Provider service failed", "error", err)

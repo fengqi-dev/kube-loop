@@ -64,9 +64,9 @@ type Task struct {
 	ResumeID      string     `json:"resumeId,omitempty"`
 	TemporaryPath string     `json:"temporaryPath,omitempty"`
 	Error         string     `json:"error,omitempty"`
-	CreatedAt     time.Time  `json:"createdAt"`
-	UpdatedAt     time.Time  `json:"updatedAt"`
-	CompletedAt   *time.Time `json:"completedAt,omitempty"`
+	CreatedAt     time.Time  `json:"createdAt" ts_type:"string"`
+	UpdatedAt     time.Time  `json:"updatedAt" ts_type:"string"`
+	CompletedAt   *time.Time `json:"completedAt,omitempty" ts_type:"string"`
 }
 
 type Config struct {

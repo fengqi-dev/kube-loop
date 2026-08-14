@@ -10,7 +10,7 @@ import (
 
 	adminauthorization "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/authorization"
 	adminlocaluser "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/localuser"
-	adminrevision "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/revision"
+	adminconfig "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/managementconfig"
 	controlplanestorage "github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 	"github.com/google/uuid"
 )
@@ -81,7 +81,7 @@ func readBinarySecretFile(path string, exactLength int) ([]byte, error) {
 	return value, nil
 }
 
-func ensureInitialAdminPolicy(ctx context.Context, service *adminrevision.Service, principalID string) error {
+func ensureInitialAdminPolicy(ctx context.Context, service *adminconfig.Service, principalID string) error {
 	if _, err := uuid.Parse(principalID); err != nil {
 		return errors.New("initial administrator principal ID is invalid")
 	}
@@ -97,27 +97,25 @@ func ensureInitialAdminPolicy(ctx context.Context, service *adminrevision.Servic
 			return nil
 		}
 	}
-	expectedETag := state.Pointer.ETag
 	snapshot := state.Snapshot
-	snapshot.Revision = 0
 	snapshot.Bindings = append(snapshot.Bindings, adminauthorization.Binding{
 		ID:      uuid.NewSHA1(uuid.NameSpaceURL, []byte("kubeloop:initial-admin:"+principalID)).String(),
 		Subject: adminauthorization.SubjectRef{Type: adminauthorization.SubjectPrincipal, PrincipalID: principalID},
 		RoleID:  adminauthorization.RolePlatformAdmin, Scope: adminauthorization.BindingScope{Type: adminauthorization.ScopePlatform},
 		ManagedBy: adminauthorization.ManagedByPlatform, CreatedBy: principalID,
 	})
-	idempotencyKey := fmt.Sprintf("initial-admin-policy-%s-%d", principalID, expectedETag)
+	idempotencyKey := fmt.Sprintf("initial-admin-policy-%s-%s", principalID, state.Pointer.ObjectID)
 	requestID := uuid.NewString()
-	actor := adminrevision.Actor{PrincipalID: principalID, Authentication: adminauthorization.AuthenticationBootstrap}
-	draft, err := service.CreatePolicyDraft(ctx, adminrevision.PolicyDraftRequest{
-		Snapshot: snapshot, ExpectedETag: expectedETag, IdempotencyKey: idempotencyKey, Reason: "initialize Helm administrator",
+	actor := adminconfig.Actor{PrincipalID: principalID, Authentication: adminauthorization.AuthenticationBootstrap}
+	draft, err := service.CreatePolicyDraft(ctx, adminconfig.PolicyDraftRequest{
+		Snapshot: snapshot, IdempotencyKey: idempotencyKey, Reason: "initialize Helm administrator",
 		RequestID: requestID, Actor: actor,
 	})
 	if err != nil {
 		return err
 	}
-	_, err = service.PublishPolicy(ctx, adminrevision.ActivateRequest{
-		ChangeID: draft.Change.ID, ExpectedETag: expectedETag, IdempotencyKey: idempotencyKey,
+	_, err = service.PublishPolicy(ctx, adminconfig.ActivateRequest{
+		ChangeID: draft.Change.ID, IdempotencyKey: idempotencyKey,
 		Reason: "initialize Helm administrator", RequestID: requestID, Actor: actor,
 	})
 	return err

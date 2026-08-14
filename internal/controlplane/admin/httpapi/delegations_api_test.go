@@ -13,7 +13,7 @@ func TestNamespaceDelegationAuthorizationIsExactAndCannotCrossScope(t *testing.T
 	principalID := uuid.NewString()
 	engine, err := adminauthorization.New(adminauthorization.Snapshot{
 		Version:  adminauthorization.CurrentVersion,
-		Revision: 1,
+
 		Bindings: []adminauthorization.Binding{{
 			ID: uuid.NewString(),
 			Subject: adminauthorization.SubjectRef{

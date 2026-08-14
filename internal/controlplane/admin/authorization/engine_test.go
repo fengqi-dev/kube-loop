@@ -34,7 +34,7 @@ func principalBinding(id string, role Role, principal string, scope BindingScope
 }
 
 func TestUnifiedPolicyExplicitDenyOverridesEveryAllow(t *testing.T) {
-	engine, err := New(Snapshot{Version: CurrentVersion, Revision: 1,
+	engine, err := New(Snapshot{Version: CurrentVersion,
 		Roles: []RoleDefinition{
 			{ID: "exec-allow", DisplayName: "Exec allow", Statements: []Statement{{Effect: EffectAllow, Capabilities: []Capability{CapabilityNamespaceAccess, "namespace.exec.open"}}}},
 			{ID: "exec-deny", DisplayName: "Exec deny", Statements: []Statement{{Effect: EffectDeny, Capabilities: []Capability{"namespace.exec.open"}}}},
@@ -54,7 +54,7 @@ func TestUnifiedPolicyExplicitDenyOverridesEveryAllow(t *testing.T) {
 }
 
 func TestProviderScopedGroupAndNamespaceSelectors(t *testing.T) {
-	engine, err := New(Snapshot{Version: CurrentVersion, Revision: 2, Bindings: []Binding{{
+	engine, err := New(Snapshot{Version: CurrentVersion, Bindings: []Binding{{
 		ID: "oidc-team", Subject: SubjectRef{Type: SubjectGroup, ProviderID: "auth0", GroupName: "developers"},
 		RoleID: RoleNamespaceViewer, Scope: BindingScope{Type: ScopeNamespaces, LabelSelectors: []NamespaceSelector{{MatchLabels: map[string]string{"team": "payments"}}}}, ManagedBy: ManagedByPlatform,
 	}}})
@@ -82,7 +82,7 @@ func TestDelegatedBindingsCannotEscalate(t *testing.T) {
 		{ID: "admin", Subject: SubjectRef{Type: SubjectPrincipal, PrincipalID: testPrincipalID}, RoleID: RoleNamespaceAdmin, Scope: BindingScope{Type: ScopeNamespaces, Names: []string{"team-a"}}, ManagedBy: ManagedByDelegated},
 	}
 	for _, binding := range tests {
-		if _, err := New(Snapshot{Version: CurrentVersion, Revision: 1, Bindings: []Binding{binding}}); err == nil {
+		if _, err := New(Snapshot{Version: CurrentVersion, Bindings: []Binding{binding}}); err == nil {
 			t.Fatalf("escalating delegated binding accepted: %#v", binding)
 		}
 	}
@@ -114,7 +114,7 @@ func TestBootstrapBreakGlassAndFailClosed(t *testing.T) {
 }
 
 func TestPlatformBindingCoversNamespaceCapabilities(t *testing.T) {
-	engine, err := New(Snapshot{Version: CurrentVersion, Revision: 3, Bindings: []Binding{principalBinding("admin", RolePlatformAdmin, testPrincipalID, BindingScope{Type: ScopePlatform})}})
+	engine, err := New(Snapshot{Version: CurrentVersion, Bindings: []Binding{principalBinding("admin", RolePlatformAdmin, testPrincipalID, BindingScope{Type: ScopePlatform})}})
 	if err != nil {
 		t.Fatal(err)
 	}

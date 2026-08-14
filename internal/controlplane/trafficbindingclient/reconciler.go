@@ -201,7 +201,9 @@ func (reconciler *Reconciler) deferRecovery(task controlplanestorage.Task, now t
 
 func (reconciler *Reconciler) removeOrphanedBindings(ctx context.Context) (int, error) {
 	bindings := &trafficv1alpha1.TrafficBindingList{}
-	if err := reconciler.manager.client.List(ctx, bindings, client.MatchingLabels{managedByLabel: managedByValue}, client.Limit(reconciler.batchSize)); err != nil {
+	if err := reconciler.manager.client.List(ctx, bindings, client.MatchingLabels{
+		managedByLabel: managedByValue, controlPlaneIDLabel: reconciler.manager.controlPlaneID,
+	}, client.Limit(reconciler.batchSize)); err != nil {
 		return 0, fmt.Errorf("list TrafficBindings: %w", err)
 	}
 	removed := 0

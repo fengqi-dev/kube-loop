@@ -117,7 +117,6 @@ type Binding struct {
 
 type Snapshot struct {
 	Version  int              `json:"version"`
-	Revision uint64           `json:"revision"`
 	Roles    []RoleDefinition `json:"roles,omitempty"`
 	Bindings []Binding        `json:"bindings"`
 }
@@ -157,7 +156,6 @@ const (
 	OperationValidate Operation = "validate"
 	OperationDryRun   Operation = "dry-run"
 	OperationPublish  Operation = "publish"
-	OperationRollback Operation = "rollback"
 	OperationRevoke   Operation = "revoke"
 	OperationDrain    Operation = "drain"
 	OperationStop     Operation = "stop"
@@ -221,7 +219,6 @@ type Match struct {
 type Decision struct {
 	Allowed        bool               `json:"allowed"`
 	Reason         Reason             `json:"reason"`
-	Revision       uint64             `json:"revision"`
 	MatchingAllow  []Match            `json:"matchingAllow,omitempty"`
 	MatchingDeny   []Match            `json:"matchingDeny,omitempty"`
 	Authentication AuthenticationType `json:"authenticationType,omitempty"`

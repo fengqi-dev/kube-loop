@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	adminrevision "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/revision"
+	adminconfig "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/managementconfig"
 	authconfig "github.com/fengqi-dev/kube-loop/internal/controlplane/authn/config"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 )
@@ -28,7 +28,7 @@ func TestRuntimeUsesDatabaseCredentialsAndAtomicallyInstallsAggregate(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	candidate := adminrevision.ProviderCandidate{
+	candidate := adminconfig.ProviderCandidate{
 		ID: "oidc", Type: "oidc",
 		Config: json.RawMessage(`{"issuer":"https://issuer.example","clientId":"kubeloop","clientSecret":"database-secret","caPem":"database-ca","claims":{}}`),
 	}
@@ -42,7 +42,7 @@ func TestRuntimeUsesDatabaseCredentialsAndAtomicallyInstallsAggregate(t *testing
 		t.Fatal("missing database client Secret was accepted")
 	}
 
-	disabled := adminrevision.ProviderCandidate{ID: "managed", Type: "oidc",
+	disabled := adminconfig.ProviderCandidate{ID: "managed", Type: "oidc",
 		Config: json.RawMessage(`{"issuer":"https://issuer.example","clientId":"unused","clientSecret":"database-secret","claims":{},"enabled":false}`)}
 	install, err := runtime.Prepare(context.Background(), disabled)
 	if err != nil {

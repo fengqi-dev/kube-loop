@@ -8,157 +8,128 @@ import (
 	"time"
 )
 
-type activeManagementRevisionRepository struct{ repositoryBase }
+type activeManagementConfigRepository struct{ repositoryBase }
 
-func (repository *activeManagementRevisionRepository) List(
-	ctx context.Context, kind string,
-) ([]ActiveManagementRevision, error) {
+func (repository *activeManagementConfigRepository) List(ctx context.Context, kind string) ([]ActiveManagementConfig, error) {
 	kind = strings.TrimSpace(kind)
 	if kind != ManagementConfigurationPolicy && kind != ManagementConfigurationProvider {
 		return nil, errors.New("management configuration type is invalid")
 	}
-	query := repository.bind(`SELECT configuration_type, configuration_id, revision, etag, updated_by,
-		updated_authentication_type, updated_at FROM management_active_revisions
+	query := repository.bind(`SELECT configuration_type, configuration_id, object_id, updated_by,
+		updated_authentication_type, updated_at FROM management_active_configs
 		WHERE configuration_type = ? ORDER BY configuration_id ASC`)
 	rows, err := repository.executor.QueryContext(ctx, query, kind)
 	if err != nil {
-		return nil, databaseError("list active management revisions", err)
+		return nil, databaseError("list active management configurations", err)
 	}
 	defer rows.Close()
-	result := make([]ActiveManagementRevision, 0)
+	result := make([]ActiveManagementConfig, 0)
 	for rows.Next() {
-		active, scanErr := scanActiveManagementRevision(rows)
+		active, scanErr := scanActiveManagementConfig(rows)
 		if scanErr != nil {
 			return nil, scanErr
 		}
 		result = append(result, active)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, databaseError("iterate active management revisions", err)
+		return nil, databaseError("iterate active management configurations", err)
 	}
 	return result, nil
 }
 
-func (repository *activeManagementRevisionRepository) Get(
-	ctx context.Context, kind, configurationID string,
-) (ActiveManagementRevision, error) {
+func (repository *activeManagementConfigRepository) Get(ctx context.Context, kind, configurationID string) (ActiveManagementConfig, error) {
 	kind, configurationID, err := normalizeConfigurationIdentity(kind, configurationID)
 	if err != nil {
-		return ActiveManagementRevision{}, err
+		return ActiveManagementConfig{}, err
 	}
-	query := repository.bind(`SELECT configuration_type, configuration_id, revision, etag, updated_by,
-		updated_authentication_type, updated_at
-		FROM management_active_revisions WHERE configuration_type = ? AND configuration_id = ?`)
-	active, err := scanActiveManagementRevision(repository.executor.QueryRowContext(ctx, query, kind, configurationID))
+	query := repository.bind(`SELECT configuration_type, configuration_id, object_id, updated_by,
+		updated_authentication_type, updated_at FROM management_active_configs
+		WHERE configuration_type = ? AND configuration_id = ?`)
+	active, err := scanActiveManagementConfig(repository.executor.QueryRowContext(ctx, query, kind, configurationID))
 	if errors.Is(err, sql.ErrNoRows) {
-		return ActiveManagementRevision{}, ErrNotFound
+		return ActiveManagementConfig{}, ErrNotFound
 	}
 	if err != nil {
-		return ActiveManagementRevision{}, databaseError("read active management revision", err)
+		return ActiveManagementConfig{}, databaseError("read active management configuration", err)
 	}
 	return active, nil
 }
 
-func (repository *activeManagementRevisionRepository) CompareAndSwap(
+func (repository *activeManagementConfigRepository) Set(
 	ctx context.Context,
-	kind, configurationID string,
-	revision, expectedETag uint64,
-	updatedBy, updatedAuthenticationType string,
+	kind, configurationID, objectID, updatedBy, updatedAuthenticationType string,
 	updatedAt time.Time,
-) (ActiveManagementRevision, error) {
+) (ActiveManagementConfig, error) {
 	kind, configurationID, err := normalizeConfigurationIdentity(kind, configurationID)
 	if err != nil {
-		return ActiveManagementRevision{}, err
+		return ActiveManagementConfig{}, err
 	}
-	if revision == 0 || updatedAt.IsZero() {
-		return ActiveManagementRevision{}, errors.New("active management revision values are invalid")
+	if validateUUID(strings.TrimSpace(objectID), "management configuration object ID") != nil || updatedAt.IsZero() {
+		return ActiveManagementConfig{}, errors.New("active management configuration values are invalid")
 	}
 	updatedBy, updatedAuthenticationType, err = normalizeManagementActor(updatedBy, updatedAuthenticationType)
 	if err != nil {
-		return ActiveManagementRevision{}, err
+		return ActiveManagementConfig{}, err
 	}
-	if err := repository.requireValidTarget(ctx, kind, configurationID, revision); err != nil {
-		return ActiveManagementRevision{}, err
+	if err := repository.requireValidTarget(ctx, kind, configurationID, objectID); err != nil {
+		return ActiveManagementConfig{}, err
 	}
 	updatedAt = updatedAt.UTC()
-	if expectedETag == 0 {
-		query := repository.bind(`INSERT INTO management_active_revisions(
-			configuration_type, configuration_id, revision, etag, updated_by, updated_authentication_type, updated_at
-		) VALUES (?, ?, ?, 1, ?, ?, ?) ON CONFLICT(configuration_type, configuration_id) DO NOTHING`)
-		if repository.backend == BackendMySQL {
-			query = `INSERT IGNORE INTO management_active_revisions(
-				configuration_type, configuration_id, revision, etag, updated_by, updated_authentication_type, updated_at
-			) VALUES (?, ?, ?, 1, ?, ?, ?)`
-		}
-		result, err := repository.executor.ExecContext(
-			ctx, query, kind, configurationID, revision, updatedBy, updatedAuthenticationType, formatTime(updatedAt),
-		)
-		if err != nil {
-			return ActiveManagementRevision{}, mapWriteError(err)
-		}
-		count, err := rowsAffected(result)
-		if err != nil {
-			return ActiveManagementRevision{}, err
-		}
-		if count != 1 {
-			return ActiveManagementRevision{}, ErrConflict
-		}
-	} else {
-		query := repository.bind(`UPDATE management_active_revisions SET
-			revision = ?, etag = etag + 1, updated_by = ?, updated_authentication_type = ?, updated_at = ?
-			WHERE configuration_type = ? AND configuration_id = ? AND etag = ?`)
-		result, err := repository.executor.ExecContext(ctx, query,
-			revision, updatedBy, updatedAuthenticationType, formatTime(updatedAt), kind, configurationID, expectedETag,
-		)
-		if err != nil {
-			return ActiveManagementRevision{}, mapWriteError(err)
-		}
-		count, err := rowsAffected(result)
-		if err != nil {
-			return ActiveManagementRevision{}, err
-		}
-		if count != 1 {
-			return ActiveManagementRevision{}, ErrConflict
+	query := repository.bind(`UPDATE management_active_configs SET object_id = ?, updated_by = ?,
+		updated_authentication_type = ?, updated_at = ? WHERE configuration_type = ? AND configuration_id = ?`)
+	result, err := repository.executor.ExecContext(ctx, query, objectID, updatedBy,
+		updatedAuthenticationType, formatTime(updatedAt), kind, configurationID)
+	if err != nil {
+		return ActiveManagementConfig{}, mapWriteError(err)
+	}
+	count, err := rowsAffected(result)
+	if err != nil {
+		return ActiveManagementConfig{}, err
+	}
+	if count == 0 {
+		query = repository.bind(`INSERT INTO management_active_configs(
+			configuration_type, configuration_id, object_id, updated_by, updated_authentication_type, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?)`)
+		if _, err := repository.executor.ExecContext(ctx, query, kind, configurationID, objectID,
+			updatedBy, updatedAuthenticationType, formatTime(updatedAt)); err != nil {
+			return ActiveManagementConfig{}, mapWriteError(err)
 		}
 	}
 	return repository.Get(ctx, kind, configurationID)
 }
 
-func (repository *activeManagementRevisionRepository) requireValidTarget(
-	ctx context.Context, kind, configurationID string, revision uint64,
-) error {
+func (repository *activeManagementConfigRepository) requireValidTarget(ctx context.Context, kind, configurationID, objectID string) error {
 	var validationState string
 	var err error
 	if kind == ManagementConfigurationPolicy {
-		query := repository.bind(`SELECT validation_state FROM authorization_revisions WHERE revision = ?`)
-		err = repository.executor.QueryRowContext(ctx, query, revision).Scan(&validationState)
+		query := repository.bind(`SELECT validation_state FROM authorization_policies WHERE id = ?`)
+		err = repository.executor.QueryRowContext(ctx, query, objectID).Scan(&validationState)
 	} else {
-		query := repository.bind(`SELECT validation_state FROM provider_config_revisions
-			WHERE revision = ? AND provider_id = ?`)
-		err = repository.executor.QueryRowContext(ctx, query, revision, configurationID).Scan(&validationState)
+		query := repository.bind(`SELECT validation_state FROM provider_configs WHERE id = ? AND provider_id = ?`)
+		err = repository.executor.QueryRowContext(ctx, query, objectID, configurationID).Scan(&validationState)
 	}
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrNotFound
 	}
 	if err != nil {
-		return databaseError("validate active management revision target", err)
+		return databaseError("validate active management configuration target", err)
 	}
-	if validationState != RevisionValidationValid {
+	if validationState != ConfigValidationValid {
 		return ErrConflict
 	}
 	return nil
 }
 
-func scanActiveManagementRevision(row rowScanner) (ActiveManagementRevision, error) {
-	var active ActiveManagementRevision
+func scanActiveManagementConfig(row rowScanner) (ActiveManagementConfig, error) {
+	var active ActiveManagementConfig
 	var updatedAt string
-	if err := row.Scan(&active.ConfigurationType, &active.ConfigurationID, &active.Revision,
-		&active.ETag, &active.UpdatedBy, &active.UpdatedAuthenticationType, &updatedAt); err != nil {
-		return ActiveManagementRevision{}, err
+	if err := row.Scan(&active.ConfigurationType, &active.ConfigurationID, &active.ObjectID,
+		&active.UpdatedBy, &active.UpdatedAuthenticationType, &updatedAt); err != nil {
+		return ActiveManagementConfig{}, err
 	}
 	var err error
-	if active.UpdatedAt, err = parseTime(updatedAt, "active management revision update time"); err != nil {
-		return ActiveManagementRevision{}, err
+	if active.UpdatedAt, err = parseTime(updatedAt, "active management configuration update time"); err != nil {
+		return ActiveManagementConfig{}, err
 	}
 	return active, nil
 }

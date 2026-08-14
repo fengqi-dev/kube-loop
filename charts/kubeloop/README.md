@@ -311,8 +311,8 @@ accept authorization rules.
 
 Bindings target either one Principal UUID or one provider-scoped group. A
 Namespace scope uses exact names and/or Kubernetes label selectors. Publishing
-creates an immutable revision which the Control Plane compiles completely before
-atomically replacing the active snapshot. Explicit Deny statements override
+creates a configuration object which the Control Plane compiles completely before
+atomically replacing the active snapshot pointer. Explicit Deny statements override
 Allow statements, and missing Namespace labels fail closed.
 
 ## Management bootstrap
@@ -334,24 +334,22 @@ Subjects are Control Plane Principal UUIDs; wildcards, `$cluster`, upstream emai
 addresses, and display names are not valid bootstrap selectors. A normalized
 group is normally the practical first-install selector because a new Principal
 UUID is assigned at its first successful OIDC login. After a formal
-`platform-admin` assignment revision is
-published, the persistent retirement marker prevents old values or a rollback
-from restoring bootstrap access. Disaster recovery requires an explicit Helm
+`platform-admin` assignment configuration is published, the persistent retirement
+marker prevents old Helm values from restoring bootstrap access. Disaster recovery requires an explicit Helm
 change to `recoveryEnabled: true` and a Control Plane restart, and still requires
 one of the configured exact identities.
 
-## Managed OIDC Provider revisions
+## Managed OIDC Provider configurations
 
-The Management Plane can validate, publish, and roll back OIDC Providers
+The Management Plane can validate and publish OIDC Providers
 without restarting the Control Plane. Provider metadata and credentials are
-versioned together in the database; responses only report whether a client
+stored together in the database; responses only report whether a client
 secret is configured and never echo it. `POST
 /api/admin/providers/{id}/validate` performs discovery
-or directory connectivity checks without changing the live Registry. Draft,
-publish, and rollback use `/providers/{id}/drafts`,
-`/providers/{id}/changes/{changeID}/publish`, and
-`/providers/{id}/rollback`; every write requires the Management Session CSRF
-header, a strong `If-Match`, and an `Idempotency-Key`. A publish prebuilds the
+or directory connectivity checks without changing the live Registry. Draft
+and publish use `/providers/{id}/drafts` and
+`/providers/{id}/changes/{changeID}/publish`; every write requires the Management Session CSRF
+header and an `Idempotency-Key`. A publish prebuilds the
 complete candidate Registry before committing its active pointer, then applies
 only the changed Provider atomically so unrelated concurrent publications are
 preserved.

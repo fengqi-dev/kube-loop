@@ -30,6 +30,7 @@ import (
 	clientremotesession "github.com/fengqi-dev/kube-loop/internal/client/remotesession"
 	"github.com/fengqi-dev/kube-loop/internal/helper"
 	"github.com/fengqi-dev/kube-loop/internal/mcp"
+	"github.com/fengqi-dev/kube-loop/internal/supervisor"
 	"github.com/fengqi-dev/kube-loop/internal/update"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -91,6 +92,7 @@ func newApp(version string, embeddedHelperFiles fs.FS, dependencies appDependenc
 	registerEmbeddedHelpers(embeddedHelperFiles)
 	if version != "" {
 		helper.Version = version
+		supervisor.Version = version
 	}
 	var developmentTLSConfig *tls.Config
 	var developmentTLSErr error

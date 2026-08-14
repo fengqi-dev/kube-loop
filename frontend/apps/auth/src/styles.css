@@ -87,6 +87,15 @@ p {
   color: var(--muted);
   margin: 0 0 26px;
 }
+.error {
+  margin: -10px 0 20px;
+  padding: 11px 12px;
+  border: 1px solid #dc262666;
+  border-radius: var(--radius);
+  color: #b91c1c;
+  background: #dc26260d;
+  font-size: 13px;
+}
 form {
   display: grid;
   gap: 15px;

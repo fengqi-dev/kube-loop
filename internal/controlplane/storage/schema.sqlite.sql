@@ -37,8 +37,7 @@ CREATE TABLE audit_events (
 );
 CREATE TABLE management_metadata (
  id INTEGER PRIMARY KEY CHECK (id = 1), bootstrap_retired_at TEXT,
- bootstrap_retired_revision INTEGER CHECK (bootstrap_retired_revision IS NULL OR bootstrap_retired_revision >= 1),
- updated_at TEXT NOT NULL, CHECK ((bootstrap_retired_at IS NULL) = (bootstrap_retired_revision IS NULL))
+ updated_at TEXT NOT NULL
 );
 CREATE TABLE admin_sessions (
  id_hash BLOB PRIMARY KEY CHECK (length(id_hash) = 32), schema_version INTEGER NOT NULL CHECK (schema_version >= 1),
@@ -50,8 +49,8 @@ CREATE TABLE admin_sessions (
  CHECK ((authentication_type = 'break-glass' AND principal_id IS NULL AND authorization_id IS NULL AND break_glass_generation <> '') OR
  (authentication_type IN ('normal', 'bootstrap') AND principal_id IS NOT NULL AND authorization_id IS NOT NULL AND break_glass_generation = ''))
 );
-CREATE TABLE authorization_revisions (
- revision INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE,
+CREATE TABLE authorization_policies (
+ id TEXT PRIMARY KEY,
  schema_version INTEGER NOT NULL CHECK (schema_version >= 1), spec_json TEXT NOT NULL,
  spec_hash TEXT NOT NULL CHECK (length(spec_hash) = 64),
  validation_state TEXT NOT NULL CHECK (validation_state IN ('draft', 'valid', 'invalid')), validation_json TEXT,
@@ -59,24 +58,24 @@ CREATE TABLE authorization_revisions (
  reason TEXT NOT NULL, created_at TEXT NOT NULL
 );
 CREATE TABLE authorization_roles (
- revision INTEGER NOT NULL REFERENCES authorization_revisions(revision) ON DELETE RESTRICT,
+ policy_id TEXT NOT NULL REFERENCES authorization_policies(id) ON DELETE RESTRICT,
  id TEXT NOT NULL, definition_json TEXT NOT NULL,
- PRIMARY KEY (revision, id)
+ PRIMARY KEY (policy_id, id)
 );
 CREATE TABLE authorization_bindings (
- revision INTEGER NOT NULL REFERENCES authorization_revisions(revision) ON DELETE RESTRICT,
+ policy_id TEXT NOT NULL REFERENCES authorization_policies(id) ON DELETE RESTRICT,
  id TEXT NOT NULL, role_id TEXT NOT NULL, subject_type TEXT NOT NULL CHECK (subject_type IN ('principal', 'group')),
  principal_id TEXT, provider_id TEXT, group_name TEXT, scope_type TEXT NOT NULL CHECK (scope_type IN ('platform', 'namespaces')),
  namespace_names_json TEXT NOT NULL, label_selectors_json TEXT NOT NULL,
  managed_by TEXT NOT NULL CHECK (managed_by IN ('platform', 'delegated')), created_by TEXT NOT NULL,
  binding_json TEXT NOT NULL,
- PRIMARY KEY (revision, id),
- FOREIGN KEY (revision, role_id) REFERENCES authorization_roles(revision, id) ON DELETE RESTRICT,
+ PRIMARY KEY (policy_id, id),
+ FOREIGN KEY (policy_id, role_id) REFERENCES authorization_roles(policy_id, id) ON DELETE RESTRICT,
  CHECK ((subject_type = 'principal' AND principal_id IS NOT NULL AND provider_id IS NULL AND group_name IS NULL) OR
  (subject_type = 'group' AND principal_id IS NULL AND provider_id IS NOT NULL AND group_name IS NOT NULL))
 );
-CREATE TABLE provider_config_revisions (
- revision INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE,
+CREATE TABLE provider_configs (
+ id TEXT PRIMARY KEY,
  schema_version INTEGER NOT NULL CHECK (schema_version >= 1), provider_id TEXT NOT NULL,
  provider_type TEXT NOT NULL CHECK (provider_type = 'oidc'), config_json TEXT NOT NULL,
  config_hash TEXT NOT NULL CHECK (length(config_hash) = 64), secret_aliases_json TEXT NOT NULL,
@@ -84,17 +83,17 @@ CREATE TABLE provider_config_revisions (
  created_by TEXT NOT NULL, created_authentication_type TEXT NOT NULL CHECK (created_authentication_type IN ('normal', 'bootstrap', 'break-glass')),
  reason TEXT NOT NULL, created_at TEXT NOT NULL
 );
-CREATE TABLE management_active_revisions (
+CREATE TABLE management_active_configs (
  configuration_type TEXT NOT NULL CHECK (configuration_type IN ('policy', 'provider')),
- configuration_id TEXT NOT NULL, revision INTEGER NOT NULL CHECK (revision > 0), etag INTEGER NOT NULL CHECK (etag > 0),
+ configuration_id TEXT NOT NULL, object_id TEXT NOT NULL,
  updated_by TEXT NOT NULL, updated_authentication_type TEXT NOT NULL CHECK (updated_authentication_type IN ('normal', 'bootstrap', 'break-glass')),
  updated_at TEXT NOT NULL, PRIMARY KEY (configuration_type, configuration_id)
 );
 CREATE TABLE config_change_requests (
  id TEXT PRIMARY KEY, schema_version INTEGER NOT NULL CHECK (schema_version >= 1),
  configuration_type TEXT NOT NULL CHECK (configuration_type IN ('policy', 'provider')), configuration_id TEXT NOT NULL,
- base_revision INTEGER, base_etag INTEGER NOT NULL CHECK (base_etag >= 0), proposed_revision INTEGER NOT NULL CHECK (proposed_revision > 0),
- status TEXT NOT NULL CHECK (status IN ('draft', 'validated', 'published', 'rejected', 'rolled-back')),
+ base_object_id TEXT, proposed_object_id TEXT NOT NULL,
+ status TEXT NOT NULL CHECK (status IN ('draft', 'validated', 'published', 'rejected')),
  idempotency_hash BLOB NOT NULL CHECK (length(idempotency_hash) = 32), request_hash TEXT NOT NULL CHECK (length(request_hash) = 64),
  requested_by TEXT NOT NULL, requested_authentication_type TEXT NOT NULL CHECK (requested_authentication_type IN ('normal', 'bootstrap', 'break-glass')),
  reason TEXT NOT NULL, validation_json TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
@@ -174,10 +173,10 @@ CREATE INDEX audit_events_principal_idx ON audit_events(principal_id, created_at
 CREATE INDEX admin_sessions_principal_idx ON admin_sessions(principal_id, absolute_expires_at);
 CREATE INDEX admin_sessions_authorization_idx ON admin_sessions(authorization_id, revoked_at);
 CREATE INDEX admin_sessions_expiry_idx ON admin_sessions(idle_expires_at, absolute_expires_at);
-CREATE INDEX provider_config_revisions_provider_idx ON provider_config_revisions(provider_id, revision DESC);
-CREATE INDEX authorization_revisions_created_idx ON authorization_revisions(created_at, revision);
-CREATE INDEX authorization_bindings_subject_idx ON authorization_bindings(subject_type, principal_id, provider_id, group_name, revision);
-CREATE INDEX authorization_bindings_role_idx ON authorization_bindings(revision, role_id, id);
+CREATE INDEX provider_configs_provider_idx ON provider_configs(provider_id, created_at DESC);
+CREATE INDEX authorization_policies_created_idx ON authorization_policies(created_at, id);
+CREATE INDEX authorization_bindings_subject_idx ON authorization_bindings(subject_type, principal_id, provider_id, group_name, policy_id);
+CREATE INDEX authorization_bindings_role_idx ON authorization_bindings(policy_id, role_id, id);
 CREATE INDEX config_change_requests_status_idx ON config_change_requests(status, updated_at, id);
 CREATE INDEX audit_export_jobs_pending_idx ON audit_export_jobs(state, created_at, id);
 CREATE INDEX oauth_authorization_requests_expiry_idx ON oauth_authorization_requests(status, expires_at);

@@ -6,11 +6,10 @@ import (
 	"io"
 	"mime"
 	"net/http"
-	"strconv"
 	"strings"
 
 	adminauthorization "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/authorization"
-	adminrevision "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/revision"
+	adminconfig "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/managementconfig"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 	"github.com/labstack/echo/v5"
 )
@@ -43,17 +42,16 @@ func (api *readAPI) currentPolicy(ctx *echo.Context) error {
 		writePolicyError(writer, request, err)
 		return nil
 	}
-	writer.Header().Set("ETag", strongETag(state.Pointer.ETag))
 	api.audit(request, subjectFromRequest(request), "admin.policy/read", "success")
 	document := map[string]any{
-		"active": state.Active, "etag": state.Pointer.ETag, "revision": state.Snapshot.Revision,
+		"active":                state.Active,
 		"spec":                  policySpec{Version: state.Snapshot.Version, Roles: state.Snapshot.Roles, Bindings: state.Snapshot.Bindings},
 		"availableCapabilities": adminauthorization.AvailableCapabilities(),
 		"builtInRoles":          adminauthorization.BuiltInRoleDefinitions(),
 	}
 	if state.Active {
-		document["createdAt"] = state.Revision.CreatedAt
-		document["reason"] = state.Revision.Reason
+		document["createdAt"] = state.Config.CreatedAt
+		document["reason"] = state.Config.Reason
 	}
 	writeJSON(writer, http.StatusOK, document)
 	return nil
@@ -61,12 +59,6 @@ func (api *readAPI) currentPolicy(ctx *echo.Context) error {
 
 func (api *readAPI) dryRunPolicy(ctx *echo.Context) error {
 	writer, request := ctx.Response(), ctx.Request()
-	expectedETag, idempotencyKey, ok := policyWriteHeaders(writer, request)
-	if !ok {
-		api.audit(request, subjectFromRequest(request), "admin.policy/dry-run", "failure")
-		return nil
-	}
-	_ = idempotencyKey // Dry-run is deterministic and has no state to reserve.
 	var input struct {
 		Spec   policySpec    `json:"spec"`
 		Checks []policyCheck `json:"checks"`
@@ -81,22 +73,7 @@ func (api *readAPI) dryRunPolicy(ctx *echo.Context) error {
 		writeError(writer, http.StatusBadRequest, "invalid_request", "policy dry-run request is invalid", requestID(request))
 		return nil
 	}
-	state, err := api.policy.CurrentPolicy(request.Context())
-	if err != nil {
-		api.audit(request, subjectFromRequest(request), "admin.policy/dry-run", "failure")
-		writePolicyError(writer, request, err)
-		return nil
-	}
-	if state.Pointer.ETag != expectedETag {
-		api.audit(request, subjectFromRequest(request), "admin.policy/dry-run", "failure")
-		writeError(writer, http.StatusPreconditionFailed, "etag_mismatch", "management policy changed", requestID(request))
-		return nil
-	}
-	revision := state.Snapshot.Revision
-	if revision == 0 {
-		revision = 1
-	}
-	snapshot := input.Spec.snapshot(revision)
+	snapshot := input.Spec.snapshot()
 	engine, err := adminauthorization.New(snapshot)
 	if err != nil {
 		api.audit(request, subjectFromRequest(request), "admin.policy/dry-run", "failure")
@@ -113,14 +90,14 @@ func (api *readAPI) dryRunPolicy(ctx *echo.Context) error {
 	api.audit(request, subjectFromRequest(request), "admin.policy/dry-run", "success")
 	writeJSON(writer, http.StatusOK, map[string]any{
 		"valid": true, "publishable": hasPlatformAdministrator(input.Spec.Bindings),
-		"baseEtag": expectedETag, "decisions": decisions,
+		"decisions": decisions,
 	})
 	return nil
 }
 
 func (api *readAPI) createPolicyDraft(ctx *echo.Context) error {
 	writer, request := ctx.Response(), ctx.Request()
-	expectedETag, idempotencyKey, ok := policyWriteHeaders(writer, request)
+	idempotencyKey, ok := policyWriteHeaders(writer, request)
 	if !ok {
 		api.audit(request, subjectFromRequest(request), "admin.policy/create", "failure")
 		return nil
@@ -138,8 +115,8 @@ func (api *readAPI) createPolicyDraft(ctx *echo.Context) error {
 		writeError(writer, http.StatusBadRequest, "invalid_request", "policy draft request is invalid", requestID(request))
 		return nil
 	}
-	result, err := api.policy.CreatePolicyDraft(request.Context(), adminrevision.PolicyDraftRequest{
-		Snapshot: input.Spec.snapshot(0), ExpectedETag: expectedETag, IdempotencyKey: idempotencyKey,
+	result, err := api.policy.CreatePolicyDraft(request.Context(), adminconfig.PolicyDraftRequest{
+		Snapshot: input.Spec.snapshot(), IdempotencyKey: idempotencyKey,
 		Reason: input.Reason, RequestID: requestID(request), Actor: policyActor(subjectFromRequest(request)),
 	})
 	if err != nil {
@@ -152,8 +129,7 @@ func (api *readAPI) createPolicyDraft(ctx *echo.Context) error {
 		writer.Header().Set("Idempotent-Replayed", "true")
 	}
 	writeJSON(writer, map[bool]int{true: http.StatusOK, false: http.StatusCreated}[result.Replayed], map[string]any{
-		"changeId": result.Change.ID, "revision": result.Revision.Revision,
-		"baseRevision": result.Change.BaseRevision, "baseEtag": result.Change.BaseETag,
+		"changeId": result.Change.ID, "objectId": result.Config.ID,
 		"status": result.Change.Status, "replayed": result.Replayed,
 	})
 	return nil
@@ -161,7 +137,7 @@ func (api *readAPI) createPolicyDraft(ctx *echo.Context) error {
 
 func (api *readAPI) publishPolicy(ctx *echo.Context) error {
 	writer, request := ctx.Response(), ctx.Request()
-	expectedETag, idempotencyKey, ok := policyWriteHeaders(writer, request)
+	idempotencyKey, ok := policyWriteHeaders(writer, request)
 	if !ok {
 		api.audit(request, subjectFromRequest(request), "admin.policy/publish", "failure")
 		return nil
@@ -179,8 +155,8 @@ func (api *readAPI) publishPolicy(ctx *echo.Context) error {
 		writeError(writer, http.StatusBadRequest, "invalid_request", "policy publish request is invalid", requestID(request))
 		return nil
 	}
-	result, err := api.policy.PublishPolicy(request.Context(), adminrevision.ActivateRequest{
-		ChangeID: changeID, ExpectedETag: expectedETag, IdempotencyKey: idempotencyKey,
+	result, err := api.policy.PublishPolicy(request.Context(), adminconfig.ActivateRequest{
+		ChangeID: changeID, IdempotencyKey: idempotencyKey,
 		Reason: input.Reason, RequestID: requestID(request), Actor: policyActor(subjectFromRequest(request)),
 	})
 	if err != nil {
@@ -192,7 +168,6 @@ func (api *readAPI) publishPolicy(ctx *echo.Context) error {
 		writeError(writer, http.StatusServiceUnavailable, "policy_reload_failed", "policy was stored but is not yet available", requestID(request))
 		return nil
 	}
-	writer.Header().Set("ETag", strongETag(result.Active.ETag))
 	if result.Replayed {
 		writer.Header().Set("Idempotent-Replayed", "true")
 	}
@@ -200,101 +175,41 @@ func (api *readAPI) publishPolicy(ctx *echo.Context) error {
 	return nil
 }
 
-func (api *readAPI) rollbackPolicy(ctx *echo.Context) error {
-	writer, request := ctx.Response(), ctx.Request()
-	expectedETag, idempotencyKey, ok := policyWriteHeaders(writer, request)
-	if !ok {
-		api.audit(request, subjectFromRequest(request), "admin.policy/rollback", "failure")
-		return nil
-	}
-	var input struct {
-		TargetRevision uint64 `json:"targetRevision"`
-		Reason         string `json:"reason"`
-	}
-	if !decodePolicyJSON(writer, request, &input) {
-		api.audit(request, subjectFromRequest(request), "admin.policy/rollback", "failure")
-		return nil
-	}
-	if input.TargetRevision == 0 || !validChangeReason(input.Reason) {
-		api.audit(request, subjectFromRequest(request), "admin.policy/rollback", "failure")
-		writeError(writer, http.StatusBadRequest, "invalid_request", "policy rollback request is invalid", requestID(request))
-		return nil
-	}
-	result, err := api.policy.RollbackPolicy(request.Context(), adminrevision.RollbackRequest{
-		TargetRevision: input.TargetRevision, ExpectedETag: expectedETag, IdempotencyKey: idempotencyKey,
-		Reason: input.Reason, RequestID: requestID(request), Actor: policyActor(subjectFromRequest(request)),
-	})
-	if err != nil {
-		api.audit(request, subjectFromRequest(request), "admin.policy/rollback", "failure")
-		writePolicyError(writer, request, err)
-		return nil
-	}
-	if err := api.reloader.Load(request.Context()); err != nil {
-		writeError(writer, http.StatusServiceUnavailable, "policy_reload_failed", "policy was stored but is not yet available", requestID(request))
-		return nil
-	}
-	writer.Header().Set("ETag", strongETag(result.Active.ETag))
-	if result.Replayed {
-		writer.Header().Set("Idempotent-Replayed", "true")
-	}
-	writeJSON(writer, http.StatusOK, activationDocument(result))
-	return nil
-}
-
-func (spec policySpec) snapshot(revision uint64) adminauthorization.Snapshot {
+func (spec policySpec) snapshot() adminauthorization.Snapshot {
 	return adminauthorization.Snapshot{
-		Version: spec.Version, Revision: revision,
+		Version:  spec.Version,
 		Roles:    append([]adminauthorization.RoleDefinition(nil), spec.Roles...),
 		Bindings: append([]adminauthorization.Binding(nil), spec.Bindings...),
 	}
 }
 
-func activationDocument(result adminrevision.Activation) map[string]any {
+func activationDocument(result adminconfig.Activation) map[string]any {
 	return map[string]any{
-		"changeId": result.ChangeID, "revision": result.Active.Revision,
-		"etag": result.Active.ETag, "replayed": result.Replayed,
+		"changeId": result.ChangeID, "objectId": result.Active.ObjectID, "replayed": result.Replayed,
 	}
 }
 
-func policyActor(subject adminauthorization.Subject) adminrevision.Actor {
+func policyActor(subject adminauthorization.Subject) adminconfig.Actor {
 	principalID := subject.ID
 	if subject.Authentication == adminauthorization.AuthenticationBreakGlass {
 		principalID = ""
 	}
-	return adminrevision.Actor{PrincipalID: principalID, Authentication: subject.Authentication}
+	return adminconfig.Actor{PrincipalID: principalID, Authentication: subject.Authentication}
 }
 
-func policyWriteHeaders(writer http.ResponseWriter, request *http.Request) (uint64, string, bool) {
-	etag, err := parseIfMatch(request.Header.Values("If-Match"))
-	if err != nil {
-		writeError(writer, http.StatusPreconditionRequired, "precondition_required", "a strong If-Match ETag is required", requestID(request))
-		return 0, "", false
-	}
+func policyWriteHeaders(writer http.ResponseWriter, request *http.Request) (string, bool) {
 	keys := request.Header.Values("Idempotency-Key")
 	if len(keys) != 1 {
 		writeError(writer, http.StatusBadRequest, "invalid_idempotency_key", "a single Idempotency-Key is required", requestID(request))
-		return 0, "", false
+		return "", false
 	}
 	key := strings.TrimSpace(keys[0])
 	if len(key) < 16 || len(key) > 256 || strings.ContainsAny(key, "\x00\r\n") {
 		writeError(writer, http.StatusBadRequest, "invalid_idempotency_key", "Idempotency-Key is invalid", requestID(request))
-		return 0, "", false
+		return "", false
 	}
-	return etag, key, true
+	return key, true
 }
-
-func parseIfMatch(values []string) (uint64, error) {
-	if len(values) != 1 {
-		return 0, errors.New("If-Match is required")
-	}
-	value := strings.TrimSpace(values[0])
-	if len(value) < 3 || value[0] != '"' || value[len(value)-1] != '"' || strings.Contains(value, ",") {
-		return 0, errors.New("If-Match must be a strong integer ETag")
-	}
-	return strconv.ParseUint(value[1:len(value)-1], 10, 64)
-}
-
-func strongETag(value uint64) string { return `"` + strconv.FormatUint(value, 10) + `"` }
 
 func decodePolicyJSON(writer http.ResponseWriter, request *http.Request, destination any) bool {
 	mediaType, _, err := mime.ParseMediaType(request.Header.Get("Content-Type"))
@@ -336,9 +251,9 @@ func writePolicyError(writer http.ResponseWriter, request *http.Request, err err
 	switch {
 	case errors.Is(err, storage.ErrIdempotencyMismatch):
 		writeError(writer, http.StatusConflict, "idempotency_mismatch", "Idempotency-Key was already used for another request", requestID(request))
-	case errors.Is(err, adminrevision.ErrConflict), errors.Is(err, storage.ErrConflict):
-		writeError(writer, http.StatusPreconditionFailed, "etag_mismatch", "management policy changed", requestID(request))
-	case errors.Is(err, adminrevision.ErrInvalidRequest):
+	case errors.Is(err, adminconfig.ErrConflict), errors.Is(err, storage.ErrConflict):
+		writeError(writer, http.StatusConflict, "configuration_conflict", "management policy change conflicts with current state", requestID(request))
+	case errors.Is(err, adminconfig.ErrInvalidRequest):
 		writeError(writer, http.StatusBadRequest, "invalid_policy", "management policy request is invalid", requestID(request))
 	case errors.Is(err, storage.ErrNotFound):
 		writeError(writer, http.StatusNotFound, "not_found", "management policy change was not found", requestID(request))

@@ -16,7 +16,7 @@ import (
 	"sync"
 	"time"
 
-	adminrevision "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/revision"
+	adminconfig "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/managementconfig"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/authn"
 	authconfig "github.com/fengqi-dev/kube-loop/internal/controlplane/authn/config"
 	oidcprovider "github.com/fengqi-dev/kube-loop/internal/controlplane/authn/oidc"
@@ -76,7 +76,7 @@ func NewRuntime(
 		publicURL: parsed.String(), interval: interval}, nil
 }
 
-func (runtime *Runtime) Validate(ctx context.Context, candidate adminrevision.ProviderCandidate) (json.RawMessage, error) {
+func (runtime *Runtime) Validate(ctx context.Context, candidate adminconfig.ProviderCandidate) (json.RawMessage, error) {
 	provider, enabled, err := runtime.provider(candidate)
 	if err != nil {
 		return nil, err
@@ -94,7 +94,7 @@ func (runtime *Runtime) Validate(ctx context.Context, candidate adminrevision.Pr
 	return json.RawMessage(`{"valid":true,"connectivity":"ready"}`), nil
 }
 
-func (runtime *Runtime) Prepare(ctx context.Context, candidate adminrevision.ProviderCandidate) (func(), error) {
+func (runtime *Runtime) Prepare(ctx context.Context, candidate adminconfig.ProviderCandidate) (func(), error) {
 	next, err := runtime.build(ctx, &candidate)
 	if err != nil {
 		return nil, err
@@ -157,9 +157,9 @@ func (runtime *Runtime) Check(context.Context) error {
 	return runtime.lastErr
 }
 
-func (runtime *Runtime) build(ctx context.Context, override *adminrevision.ProviderCandidate) (*authn.Registry, error) {
+func (runtime *Runtime) build(ctx context.Context, override *adminconfig.ProviderCandidate) (*authn.Registry, error) {
 	providers := make(map[string]authconfig.Provider)
-	pointers, err := runtime.repositories.ActiveManagementRevisions().List(ctx, storage.ManagementConfigurationProvider)
+	pointers, err := runtime.repositories.ActiveManagementConfigs().List(ctx, storage.ManagementConfigurationProvider)
 	if err != nil {
 		return nil, ErrUnavailable
 	}
@@ -167,12 +167,12 @@ func (runtime *Runtime) build(ctx context.Context, override *adminrevision.Provi
 		if override != nil && pointer.ConfigurationID == override.ID {
 			continue
 		}
-		revision, err := runtime.repositories.ProviderConfigRevisions().Get(ctx, pointer.Revision)
-		if err != nil || revision.ProviderID != pointer.ConfigurationID || revision.ValidationState != storage.RevisionValidationValid {
+		config, err := runtime.repositories.ProviderConfigs().Get(ctx, pointer.ObjectID)
+		if err != nil || config.ProviderID != pointer.ConfigurationID || config.ValidationState != storage.ConfigValidationValid {
 			return nil, ErrUnavailable
 		}
-		item, enabled, err := runtime.provider(adminrevision.ProviderCandidate{
-			ID: revision.ProviderID, Type: revision.ProviderType, Config: revision.Config,
+		item, enabled, err := runtime.provider(adminconfig.ProviderCandidate{
+			ID: config.ProviderID, Type: config.ProviderType, Config: config.Config,
 		})
 		if err != nil {
 			return nil, err
@@ -213,7 +213,7 @@ func (runtime *Runtime) build(ctx context.Context, override *adminrevision.Provi
 	return registry, nil
 }
 
-func (runtime *Runtime) provider(candidate adminrevision.ProviderCandidate) (authconfig.Provider, bool, error) {
+func (runtime *Runtime) provider(candidate adminconfig.ProviderCandidate) (authconfig.Provider, bool, error) {
 	switch candidate.Type {
 	case "oidc":
 		var config OIDCConfig
@@ -258,13 +258,13 @@ func (runtime *Runtime) setError(err error) {
 }
 
 func (runtime *Runtime) activeFingerprint(ctx context.Context) (string, error) {
-	pointers, err := runtime.repositories.ActiveManagementRevisions().List(ctx, storage.ManagementConfigurationProvider)
+	pointers, err := runtime.repositories.ActiveManagementConfigs().List(ctx, storage.ManagementConfigurationProvider)
 	if err != nil {
 		return "", ErrUnavailable
 	}
 	var value strings.Builder
 	for _, pointer := range pointers {
-		fmt.Fprintf(&value, "%d:%s:%d:%d;", len(pointer.ConfigurationID), pointer.ConfigurationID, pointer.Revision, pointer.ETag)
+		fmt.Fprintf(&value, "%d:%s:%s;", len(pointer.ConfigurationID), pointer.ConfigurationID, pointer.ObjectID)
 	}
 	return value.String(), nil
 }
@@ -282,6 +282,6 @@ func (runtime *Runtime) setLoaded(fingerprint string) {
 }
 
 var (
-	_ adminrevision.ProviderValidator = (*Runtime)(nil)
-	_ adminrevision.ProviderActivator = (*Runtime)(nil)
+	_ adminconfig.ProviderValidator = (*Runtime)(nil)
+	_ adminconfig.ProviderActivator = (*Runtime)(nil)
 )

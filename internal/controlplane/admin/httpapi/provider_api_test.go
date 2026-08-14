@@ -12,7 +12,7 @@ import (
 	"testing"
 
 	adminauthorization "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/authorization"
-	adminrevision "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/revision"
+	adminconfig "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/managementconfig"
 	adminsession "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/session"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 )
@@ -22,11 +22,11 @@ type providerRuntimeStub struct {
 	installs int
 }
 
-func (runtime *providerRuntimeStub) Validate(_ context.Context, candidate adminrevision.ProviderCandidate) (json.RawMessage, error) {
+func (runtime *providerRuntimeStub) Validate(_ context.Context, candidate adminconfig.ProviderCandidate) (json.RawMessage, error) {
 	return json.RawMessage(`{"valid":true,"connectivity":"ready"}`), nil
 }
 
-func (runtime *providerRuntimeStub) Prepare(_ context.Context, candidate adminrevision.ProviderCandidate) (func(), error) {
+func (runtime *providerRuntimeStub) Prepare(_ context.Context, candidate adminconfig.ProviderCandidate) (func(), error) {
 	return func() {
 		runtime.mu.Lock()
 		runtime.installs++
@@ -34,11 +34,11 @@ func (runtime *providerRuntimeStub) Prepare(_ context.Context, candidate adminre
 	}, nil
 }
 
-func TestProviderAPIValidatesPublishesRedactsAndRollsBack(t *testing.T) {
+func TestProviderAPIValidatesPublishesAndRedacts(t *testing.T) {
 	handler, store, runtime := newProviderTestHandler(t)
 	cookie, csrf := exchangeBreakGlassSession(t, handler)
 	current := authenticatedGET(handler, cookie, "/providers/corporate")
-	if current.Code != http.StatusOK || current.Header().Get("ETag") != `"0"` || !strings.Contains(current.Body.String(), `"active":false`) {
+	if current.Code != http.StatusOK || !strings.Contains(current.Body.String(), `"active":false`) {
 		t.Fatalf("empty Provider status=%d headers=%v body=%s", current.Code, current.Header(), current.Body.String())
 	}
 
@@ -47,23 +47,23 @@ func TestProviderAPIValidatesPublishesRedactsAndRollsBack(t *testing.T) {
 		"config": map[string]any{"issuer": "https://issuer.example", "clientId": "kubeloop", "clientSecret": "corporate-secret", "claims": map[string]string{}},
 		"reason": "configure corporate identity Provider",
 	}
-	validated := policyWrite(t, handler, cookie, csrf, "/providers/corporate/validate", `"0"`, "provider-validate-key-01", first)
+	validated := policyWrite(t, handler, cookie, csrf, "/providers/corporate/validate", "provider-validate-key-01", first)
 	if validated.Code != http.StatusOK || !strings.Contains(validated.Body.String(), `"connectivity":"ready"`) {
 		t.Fatalf("validation status=%d body=%s", validated.Code, validated.Body.String())
 	}
 	key := "provider-create-key-0001"
-	draft := policyWrite(t, handler, cookie, csrf, "/providers/corporate/drafts", `"0"`, key, first)
+	draft := policyWrite(t, handler, cookie, csrf, "/providers/corporate/drafts", key, first)
 	var created struct {
 		ChangeID string `json:"changeId"`
-		Revision uint64 `json:"revision"`
+		ObjectID string `json:"objectId"`
 	}
 	if draft.Code != http.StatusCreated || json.Unmarshal(draft.Body.Bytes(), &created) != nil || created.ChangeID == "" ||
 		strings.Contains(draft.Body.String(), "corporate-secret") {
 		t.Fatalf("draft status=%d body=%s", draft.Code, draft.Body.String())
 	}
-	published := policyWrite(t, handler, cookie, csrf, "/providers/corporate/changes/"+created.ChangeID+"/publish", `"0"`, key,
+	published := policyWrite(t, handler, cookie, csrf, "/providers/corporate/changes/"+created.ChangeID+"/publish", key,
 		map[string]any{"reason": "publish corporate identity Provider"})
-	if published.Code != http.StatusOK || published.Header().Get("ETag") != `"1"` {
+	if published.Code != http.StatusOK {
 		t.Fatalf("publish status=%d headers=%v body=%s", published.Code, published.Header(), published.Body.String())
 	}
 	current = authenticatedGET(handler, cookie, "/providers/corporate")
@@ -80,27 +80,22 @@ func TestProviderAPIValidatesPublishesRedactsAndRollsBack(t *testing.T) {
 	second["config"] = map[string]any{"issuer": "https://issuer.example", "clientId": "kubeloop-v2", "claims": map[string]string{}}
 	second["reason"] = "rotate corporate Provider client configuration"
 	secondKey := "provider-create-key-0002"
-	secondDraft := policyWrite(t, handler, cookie, csrf, "/providers/corporate/drafts", `"1"`, secondKey, second)
+	secondDraft := policyWrite(t, handler, cookie, csrf, "/providers/corporate/drafts", secondKey, second)
 	var next struct {
 		ChangeID string `json:"changeId"`
 	}
 	if secondDraft.Code != http.StatusCreated || json.Unmarshal(secondDraft.Body.Bytes(), &next) != nil {
 		t.Fatalf("second draft status=%d body=%s", secondDraft.Code, secondDraft.Body.String())
 	}
-	secondPublish := policyWrite(t, handler, cookie, csrf, "/providers/corporate/changes/"+next.ChangeID+"/publish", `"1"`, secondKey,
+	secondPublish := policyWrite(t, handler, cookie, csrf, "/providers/corporate/changes/"+next.ChangeID+"/publish", secondKey,
 		map[string]any{"reason": "publish rotated Provider client configuration"})
-	if secondPublish.Code != http.StatusOK || secondPublish.Header().Get("ETag") != `"2"` {
+	if secondPublish.Code != http.StatusOK {
 		t.Fatalf("second publish status=%d body=%s", secondPublish.Code, secondPublish.Body.String())
-	}
-	rollback := policyWrite(t, handler, cookie, csrf, "/providers/corporate/rollback", `"2"`, "provider-rollback-key-01",
-		map[string]any{"targetRevision": created.Revision, "reason": "restore known good Provider configuration"})
-	if rollback.Code != http.StatusOK || rollback.Header().Get("ETag") != `"3"` {
-		t.Fatalf("rollback status=%d body=%s", rollback.Code, rollback.Body.String())
 	}
 	runtime.mu.Lock()
 	installs := runtime.installs
 	runtime.mu.Unlock()
-	if installs != 3 {
+	if installs != 2 {
 		t.Fatalf("runtime installs=%d", installs)
 	}
 	events, err := store.Audit().List(context.Background(), storage.AuditFilter{Limit: 100})
@@ -134,7 +129,7 @@ func newProviderTestHandler(t *testing.T) (*Handler, *storage.Store, *providerRu
 		t.Fatal(err)
 	}
 	runtime := &providerRuntimeStub{}
-	service, err := adminrevision.NewProviderService(store, runtime, runtime)
+	service, err := adminconfig.NewProviderService(store, runtime, runtime)
 	if err != nil {
 		t.Fatal(err)
 	}

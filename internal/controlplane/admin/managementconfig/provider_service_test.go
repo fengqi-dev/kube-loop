@@ -1,4 +1,4 @@
-package revision
+package managementconfig
 
 import (
 	"context"
@@ -33,7 +33,7 @@ func (stub *providerLifecycleStub) Prepare(_ context.Context, candidate Provider
 	return func() { stub.installed = append(stub.installed, candidate) }, nil
 }
 
-func TestProviderRevisionWorkflowValidatesBeforeAtomicPublishAndRollback(t *testing.T) {
+func TestProviderConfigWorkflowValidatesBeforeAtomicPublish(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
 	now := time.Date(2026, 8, 10, 18, 0, 0, 0, time.UTC)
@@ -54,7 +54,7 @@ func TestProviderRevisionWorkflowValidatesBeforeAtomicPublishAndRollback(t *test
 		RequestID: "provider-create-1", Actor: actor,
 	}
 	first, err := service.CreateDraft(ctx, firstRequest)
-	if err != nil || first.Revision.Revision == 0 || first.Change.Status != storage.ChangeStatusValidated || lifecycle.validations != 1 {
+	if err != nil || first.Config.ID == "" || first.Change.Status != storage.ChangeStatusValidated || lifecycle.validations != 1 {
 		t.Fatalf("first Provider draft=%#v validations=%d error=%v", first, lifecycle.validations, err)
 	}
 	lifecycle.validateErr = errors.New("upstream unavailable")
@@ -77,16 +77,15 @@ func TestProviderRevisionWorkflowValidatesBeforeAtomicPublishAndRollback(t *test
 		ProviderID: "corporate", ChangeID: first.Change.ID, IdempotencyKey: firstRequest.IdempotencyKey,
 		Reason: "publish corporate identity provider", RequestID: "provider-publish-1", Actor: actor,
 	})
-	if err != nil || published.Active.ETag != 1 || len(lifecycle.installed) != 1 {
+	if err != nil || published.Active.ObjectID != first.Config.ID || len(lifecycle.installed) != 1 {
 		t.Fatalf("first Provider publish=%#v installed=%d error=%v", published, len(lifecycle.installed), err)
 	}
 	current, err := service.Current(ctx, "corporate")
-	if err != nil || !current.Active || current.Revision.Revision != first.Revision.Revision {
+	if err != nil || !current.Active || current.Config.ID != first.Config.ID {
 		t.Fatalf("current Provider=%#v error=%v", current, err)
 	}
 
 	secondRequest := firstRequest
-	secondRequest.ExpectedETag = 1
 	secondRequest.IdempotencyKey = "provider-create-key-002"
 	secondRequest.RequestID = "provider-create-2"
 	secondRequest.Reason = "change corporate provider display name"
@@ -95,42 +94,26 @@ func TestProviderRevisionWorkflowValidatesBeforeAtomicPublishAndRollback(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(second.Revision.Config), "database-secret") {
+	if !strings.Contains(string(second.Config.Config), "database-secret") {
 		t.Fatal("blank client Secret did not retain the active database value")
 	}
 	lifecycle.prepareErr = errors.New("connectivity failed")
 	if _, err := service.Publish(ctx, ProviderActivateRequest{
-		ProviderID: "corporate", ChangeID: second.Change.ID, ExpectedETag: 1, IdempotencyKey: secondRequest.IdempotencyKey,
+		ProviderID: "corporate", ChangeID: second.Change.ID, IdempotencyKey: secondRequest.IdempotencyKey,
 		Reason: "publish display name change", RequestID: "provider-publish-failed", Actor: actor,
 	}); err == nil {
 		t.Fatal("Provider publish succeeded when runtime preparation failed")
 	}
 	current, _ = service.Current(ctx, "corporate")
-	if current.Pointer.ETag != 1 || current.Revision.Revision != first.Revision.Revision || len(lifecycle.installed) != 1 {
+	if current.Pointer.ObjectID != first.Config.ID || current.Config.ID != first.Config.ID || len(lifecycle.installed) != 1 {
 		t.Fatalf("failed preparation replaced current Provider: %#v installed=%d", current, len(lifecycle.installed))
 	}
 	lifecycle.prepareErr = nil
 	secondPublished, err := service.Publish(ctx, ProviderActivateRequest{
-		ProviderID: "corporate", ChangeID: second.Change.ID, ExpectedETag: 1, IdempotencyKey: secondRequest.IdempotencyKey,
+		ProviderID: "corporate", ChangeID: second.Change.ID, IdempotencyKey: secondRequest.IdempotencyKey,
 		Reason: "publish display name change", RequestID: "provider-publish-2", Actor: actor,
 	})
-	if err != nil || secondPublished.Active.ETag != 2 || len(lifecycle.installed) != 2 {
+	if err != nil || secondPublished.Active.ObjectID != second.Config.ID || len(lifecycle.installed) != 2 {
 		t.Fatalf("second Provider publish=%#v installed=%d error=%v", secondPublished, len(lifecycle.installed), err)
-	}
-	rolledBack, err := service.Rollback(ctx, ProviderRollbackRequest{
-		ProviderID: "corporate", TargetRevision: first.Revision.Revision, ExpectedETag: 2,
-		IdempotencyKey: "provider-rollback-key-01", Reason: "restore known good identity provider",
-		RequestID: "provider-rollback-1", Actor: actor,
-	})
-	if err != nil || rolledBack.Active.ETag != 3 || rolledBack.Active.Revision != first.Revision.Revision || len(lifecycle.installed) != 3 {
-		t.Fatalf("Provider rollback=%#v installed=%d error=%v", rolledBack, len(lifecycle.installed), err)
-	}
-	replayedRollback, err := service.Rollback(ctx, ProviderRollbackRequest{
-		ProviderID: "corporate", TargetRevision: first.Revision.Revision, ExpectedETag: 2,
-		IdempotencyKey: "provider-rollback-key-01", Reason: "restore known good identity provider",
-		RequestID: "provider-rollback-retry", Actor: actor,
-	})
-	if err != nil || !replayedRollback.Replayed || len(lifecycle.installed) != 4 {
-		t.Fatalf("Provider rollback replay=%#v installed=%d error=%v", replayedRollback, len(lifecycle.installed), err)
 	}
 }

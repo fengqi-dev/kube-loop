@@ -58,6 +58,13 @@ func TestTokenUserNamePrefersDisplayName(t *testing.T) {
 	}
 }
 
+func TestAuthSessionUsesPersistedOIDCIdentityForOpaqueAccessToken(t *testing.T) {
+	session := authSession(credentials.Credential{AccessToken: "opaque-token", UserName: "Example User"})
+	if !session.Authenticated || session.UserName != "Example User" {
+		t.Fatalf("auth session = %#v", session)
+	}
+}
+
 type memoryCredentialStore struct {
 	values map[string]credentials.Credential
 }

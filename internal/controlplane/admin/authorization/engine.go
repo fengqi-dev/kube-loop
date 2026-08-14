@@ -58,10 +58,9 @@ type Engine struct {
 	options  engineOptions
 }
 type compiledSnapshot struct {
-	revision, etag uint64
-	available      bool
-	roles          map[Role]compiledRole
-	bindings       []compiledBinding
+	available bool
+	roles     map[Role]compiledRole
+	bindings  []compiledBinding
 }
 type compiledRole struct {
 	definition RoleDefinition
@@ -93,35 +92,18 @@ func New(snapshot Snapshot, optionValues ...Option) (*Engine, error) {
 func NewDenyAll(options ...Option) (*Engine, error) {
 	return New(Snapshot{Version: CurrentVersion, Bindings: []Binding{}}, options...)
 }
-func (engine *Engine) Revision() uint64 {
-	if engine == nil || engine.snapshot.Load() == nil {
-		return 0
-	}
-	return engine.snapshot.Load().revision
-}
-func (engine *Engine) ETag() uint64 {
-	if engine == nil || engine.snapshot.Load() == nil {
-		return 0
-	}
-	return engine.snapshot.Load().etag
-}
 func (engine *Engine) Available() bool {
 	return engine != nil && engine.snapshot.Load() != nil && engine.snapshot.Load().available
 }
 
-func (engine *Engine) Apply(snapshot Snapshot, etag uint64) error {
-	if engine == nil || etag == 0 {
-		return errors.New("authorization engine and positive ETag are required")
+func (engine *Engine) Apply(snapshot Snapshot) error {
+	if engine == nil {
+		return errors.New("authorization engine is nil")
 	}
 	compiled, err := compileSnapshot(snapshot)
 	if err != nil {
 		return err
 	}
-	active := engine.snapshot.Load()
-	if active != nil && (etag < active.etag || etag == active.etag && active.available) {
-		return fmt.Errorf("authorization ETag %d is not newer than %d", etag, active.etag)
-	}
-	compiled.etag, compiled.available = etag, true
 	engine.snapshot.Store(compiled)
 	return nil
 }
@@ -133,15 +115,6 @@ func (engine *Engine) Update(snapshot Snapshot) error {
 	if err != nil {
 		return err
 	}
-	active := engine.snapshot.Load()
-	if active != nil && compiled.revision <= active.revision {
-		return errors.New("authorization revision must increase")
-	}
-	if active == nil {
-		compiled.etag = 1
-	} else {
-		compiled.etag = active.etag + 1
-	}
 	engine.snapshot.Store(compiled)
 	return nil
 }
@@ -149,9 +122,8 @@ func (engine *Engine) FailClosed() {
 	if engine == nil {
 		return
 	}
-	active := engine.snapshot.Load()
-	if active != nil && active.available {
-		engine.snapshot.Store(&compiledSnapshot{revision: active.revision, etag: active.etag})
+	if active := engine.snapshot.Load(); active != nil && active.available {
+		engine.snapshot.Store(&compiledSnapshot{})
 	}
 }
 
@@ -160,19 +132,18 @@ func (engine *Engine) Authorize(ctx context.Context, subject Subject, request Re
 		ctx = context.Background()
 	}
 	snapshot := engineSnapshot(engine)
-	revision := snapshotRevision(snapshot)
 	subject, request, valid := normalize(subject, request)
 	if !valid {
-		return Decision{Reason: ReasonInvalidRequest, Revision: revision}
+		return Decision{Reason: ReasonInvalidRequest}
 	}
 	if request.Namespace != "" && !request.LabelsAvailable && labelsRequiredForDecision(snapshot, subject, request) {
-		return Decision{Reason: ReasonScopeUnavailable, Revision: revision}
+		return Decision{Reason: ReasonScopeUnavailable}
 	}
 	if subject.Authentication == AuthenticationBreakGlass {
-		return engine.authorizeBreakGlass(ctx, subject, revision)
+		return engine.authorizeBreakGlass(ctx, subject)
 	}
 	if subject.Authentication != AuthenticationNormal && subject.Authentication != AuthenticationBootstrap {
-		return Decision{Reason: ReasonInvalidRequest, Revision: revision}
+		return Decision{Reason: ReasonInvalidRequest}
 	}
 	decision := evaluate(snapshot, subject, request)
 	if decision.Allowed || decision.Reason == ReasonExplicitDeny {
@@ -188,7 +159,7 @@ func (engine *Engine) UsesNamespaceSelectors() bool {
 }
 
 func evaluate(snapshot *compiledSnapshot, subject Subject, request Request) Decision {
-	decision := Decision{Reason: ReasonNoMatchingAllow, Revision: snapshotRevision(snapshot), Authentication: AuthenticationNormal}
+	decision := Decision{Reason: ReasonNoMatchingAllow, Authentication: AuthenticationNormal}
 	if snapshot == nil || !snapshot.available {
 		return decision
 	}
@@ -253,20 +224,20 @@ func (engine *Engine) authorizeBootstrap(ctx context.Context, subject Subject, r
 	if !strings.HasPrefix(string(request.Capability), "platform.") {
 		return denied
 	}
-	return Decision{Allowed: true, Reason: ReasonAllowed, Revision: denied.Revision, Authentication: AuthenticationBootstrap}
+	return Decision{Allowed: true, Reason: ReasonAllowed, Authentication: AuthenticationBootstrap}
 }
-func (engine *Engine) authorizeBreakGlass(ctx context.Context, subject Subject, revision uint64) Decision {
+func (engine *Engine) authorizeBreakGlass(ctx context.Context, subject Subject) Decision {
 	if engine == nil || engine.options.breakGlassState == nil {
-		return Decision{Reason: ReasonBreakGlassUnavailable, Revision: revision}
+		return Decision{Reason: ReasonBreakGlassUnavailable}
 	}
 	state, err := engine.options.breakGlassState.CurrentBreakGlassState(ctx)
 	if err != nil || !state.Enabled || state.Generation == "" {
-		return Decision{Reason: ReasonBreakGlassUnavailable, Revision: revision}
+		return Decision{Reason: ReasonBreakGlassUnavailable}
 	}
 	if subject.BreakGlassGeneration == "" || subtle.ConstantTimeCompare([]byte(subject.BreakGlassGeneration), []byte(state.Generation)) != 1 {
-		return Decision{Reason: ReasonBreakGlassStale, Revision: revision}
+		return Decision{Reason: ReasonBreakGlassStale}
 	}
-	return Decision{Allowed: true, Reason: ReasonAllowed, Revision: revision, Authentication: AuthenticationBreakGlass}
+	return Decision{Allowed: true, Reason: ReasonAllowed, Authentication: AuthenticationBreakGlass}
 }
 
 func (engine *Engine) DelegatedNamespaces(subject Subject) []string {
@@ -297,10 +268,7 @@ func compileSnapshot(snapshot Snapshot) (*compiledSnapshot, error) {
 	if snapshot.Version != CurrentVersion {
 		return nil, fmt.Errorf("unsupported authorization policy version %d", snapshot.Version)
 	}
-	if len(snapshot.Bindings) > 0 && snapshot.Revision == 0 {
-		return nil, errors.New("authorization bindings require a revision")
-	}
-	compiled := &compiledSnapshot{revision: snapshot.Revision, available: true, roles: map[Role]compiledRole{}, bindings: make([]compiledBinding, 0, len(snapshot.Bindings))}
+	compiled := &compiledSnapshot{available: true, roles: map[Role]compiledRole{}, bindings: make([]compiledBinding, 0, len(snapshot.Bindings))}
 	for _, definition := range append(BuiltInRoleDefinitions(), snapshot.Roles...) {
 		role, err := compileRole(definition, definition.BuiltIn)
 		if err != nil {
@@ -563,12 +531,6 @@ func engineSnapshot(engine *Engine) *compiledSnapshot {
 		return nil
 	}
 	return engine.snapshot.Load()
-}
-func snapshotRevision(snapshot *compiledSnapshot) uint64 {
-	if snapshot == nil {
-		return 0
-	}
-	return snapshot.revision
 }
 func snapshotUsesSelectors(snapshot *compiledSnapshot) bool {
 	if snapshot == nil {

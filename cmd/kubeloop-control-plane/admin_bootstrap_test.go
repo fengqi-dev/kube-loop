@@ -9,7 +9,7 @@ import (
 
 	adminauthorization "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/authorization"
 	adminlocaluser "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/localuser"
-	adminrevision "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/revision"
+	adminconfig "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/managementconfig"
 	controlplanestorage "github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 )
 
@@ -46,7 +46,7 @@ func TestEnsureInitialAdminPolicyIsOneTime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	revisions, err := adminrevision.New(store)
+	revisions, err := adminconfig.New(store)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +62,7 @@ func TestEnsureInitialAdminPolicyIsOneTime(t *testing.T) {
 		t.Fatal(err)
 	}
 	second, err := revisions.CurrentPolicy(ctx)
-	if err != nil || second.Pointer.ETag != first.Pointer.ETag || second.Pointer.Revision != first.Pointer.Revision {
+	if err != nil || second.Pointer.ObjectID != first.Pointer.ObjectID {
 		t.Fatalf("repeated bootstrap changed policy: first=%#v second=%#v err=%v", first.Pointer, second.Pointer, err)
 	}
 }

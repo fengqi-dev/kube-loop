@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import {
   ApiError,
+  authenticationLostEvent,
   csrfStorageKey,
   finishOIDCCallback,
   logout,
@@ -29,6 +30,7 @@ import {
   mutation,
   request,
   startOIDC,
+  waitForAuditExport,
 } from "./api";
 import {
   Button,
@@ -70,6 +72,17 @@ import {
   RoleDefinition,
   ViewKey,
 } from "./types";
+import {
+  roleSupportsNamespaces,
+  validateAssignment,
+} from "./policy-validation";
+import {
+  authorizedView,
+  canReadOverview,
+  hasCapability,
+  validOAuthRedirectURI,
+  validOIDCIssuer,
+} from "./ui-validation";
 
 type AuthState = {
   status: "loading" | "login" | "success" | "ready";
@@ -78,12 +91,22 @@ type AuthState = {
 };
 const viewMeta: Record<
   ViewKey,
-  { title: MessageKey; description: MessageKey; capability?: string }
+  { title: MessageKey; description: MessageKey; capability?: string | string[] }
 > = {
   overview: { title: "overview", description: "overviewDesc" },
-  policy: {
-    title: "policy",
-    description: "policyDesc",
+  roles: {
+    title: "roles",
+    description: "rolesDesc",
+    capability: "platform.authorization.read",
+  },
+  permissions: {
+    title: "permissionsPolicy",
+    description: "permissionsPolicyDesc",
+    capability: "platform.authorization.read",
+  },
+  assignments: {
+    title: "assignments",
+    description: "assignmentsDesc",
     capability: "platform.authorization.read",
   },
   delegations: {
@@ -115,12 +138,12 @@ const viewMeta: Record<
   sessions: {
     title: "sessions",
     description: "sessionsDesc",
-    capability: "platform.sessions.read",
+    capability: ["platform.sessions.read", "namespace.tasks.read"],
   },
   tasks: {
     title: "tasks",
     description: "tasksDesc",
-    capability: "platform.tasks.read",
+    capability: ["platform.tasks.read", "namespace.tasks.read"],
   },
   relays: {
     title: "relays",
@@ -194,10 +217,31 @@ export default function App() {
     void bootstrap();
   }, [bootstrap]);
   useEffect(() => {
+    const onAuthenticationLost = () => {
+      sessionStorage.removeItem(csrfStorageKey);
+      setAuth({ status: "login" });
+    };
+    addEventListener(authenticationLostEvent, onAuthenticationLost);
+    return () =>
+      removeEventListener(authenticationLostEvent, onAuthenticationLost);
+  }, []);
+  useEffect(() => {
     const onHash = () => setView(hashView());
     addEventListener("hashchange", onHash);
     return () => removeEventListener("hashchange", onHash);
   }, []);
+  useEffect(() => {
+    if (auth.status !== "ready" || !auth.capabilities) return;
+    const next = authorizedView(
+      auth.capabilities,
+      view,
+      viewMeta[view].capability,
+    );
+    if (next !== view) {
+      setHashView(next);
+      setMenuOpen(false);
+    }
+  }, [auth, view]);
   const context = useMemo(() => ({ locale, setLocale, t }), [locale, t]);
   return (
     <I18nContext.Provider value={context}>
@@ -363,7 +407,9 @@ function Login({
 
 const icons: Record<ViewKey, typeof Activity> = {
   overview: LayoutDashboard,
-  policy: ShieldCheck,
+  roles: ShieldCheck,
+  permissions: BookOpenCheck,
+  assignments: UsersRound,
   delegations: UsersRound,
   providers: Network,
   oauthClients: KeyRound,
@@ -381,7 +427,10 @@ const navGroups: { label: MessageKey; items: ViewKey[] }[] = [
     label: "navIdentity",
     items: ["users", "principals", "providers", "oauthClients", "security"],
   },
-  { label: "navGovernance", items: ["policy", "delegations"] },
+  {
+    label: "navGovernance",
+    items: ["roles", "permissions", "assignments", "delegations"],
+  },
   { label: "navRuntime", items: ["sessions", "tasks", "relays"] },
   { label: "navCompliance", items: ["audit"] },
 ];
@@ -405,12 +454,21 @@ function Shell({
   setLocale: (value: Locale) => void;
 }) {
   const { t } = useI18n();
-  const allowed = (capability?: string) =>
-    !capability ||
-    capabilities.capabilities.includes(capability) ||
-    capabilities.namespaceScopes.some((scope) =>
-      scope.capabilities?.includes(capability),
-    );
+  useEffect(() => {
+    if (!menuOpen) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMenuOpen(false);
+    };
+    addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      removeEventListener("keydown", closeOnEscape);
+    };
+  }, [menuOpen, setMenuOpen]);
+  const allowed = (capability?: string | string[]) =>
+    hasCapability(capabilities, capability);
   return (
     <div className="app-shell">
       <aside className={`sidebar ${menuOpen ? "open" : ""}`}>
@@ -457,10 +515,6 @@ function Shell({
           })}
         </nav>
         <div className="sidebar-footer">
-          <div>
-            <span>{t("policyRevision")}</span>
-            <strong>#{capabilities.policyRevision || 0}</strong>
-          </div>
           <button onClick={() => void onLogout()}>
             <LogOut size={16} />
             {t("logout")}
@@ -518,14 +572,25 @@ function PageRouter({
   allowed: (capability?: string) => boolean;
 }) {
   if (view === "overview") return <Overview capabilities={capabilities} />;
-  if (view === "policy") return <PolicyPage allowed={allowed} />;
+  if (view === "roles") return <PolicyPage allowed={allowed} mode="roles" />;
+  if (view === "permissions")
+    return <PermissionPolicyPage allowed={allowed} />;
+  if (view === "assignments")
+    return <PolicyPage allowed={allowed} mode="assignments" />;
   if (view === "delegations")
     return <DelegationsPage capabilities={capabilities} />;
   if (view === "providers") return <ProvidersPage allowed={allowed} />;
   if (view === "oauthClients") return <OAuthClientsPage allowed={allowed} />;
   if (view === "users") return <UsersPage allowed={allowed} />;
   if (view === "security") return <SecurityPage />;
-  return <ListPage view={view} capabilities={capabilities} allowed={allowed} />;
+  return (
+    <ListPage
+      key={view}
+      view={view}
+      capabilities={capabilities}
+      allowed={allowed}
+    />
+  );
 }
 
 function useAsync<T>(loader: () => Promise<T>, deps: unknown[]) {
@@ -566,21 +631,25 @@ async function loadPrincipalOptions(): Promise<PrincipalOption[]> {
 
 function Overview({ capabilities }: { capabilities: Capabilities }) {
   const { t } = useI18n();
-  const status = useAsync<OverviewData>(
-    () => request<OverviewData>("/overview"),
-    [capabilities.policyRevision],
+  const canReadStatus = canReadOverview(capabilities);
+  const status = useAsync<OverviewData | undefined>(
+    () =>
+      canReadStatus
+        ? request<OverviewData>("/overview")
+        : Promise.resolve(undefined),
+    [canReadStatus],
   );
   return (
     <>
       <PageHeader
         title={t("overview")}
         description={t("overviewDesc")}
-        actions={
+        actions={canReadStatus ? (
           <Button onClick={() => void status.reload()}>
             <RefreshCw size={15} />
             {t("refresh")}
           </Button>
-        }
+        ) : undefined}
       />
       <div className="metrics">
         <Metric
@@ -594,10 +663,6 @@ function Overview({ capabilities }: { capabilities: Capabilities }) {
         <Metric
           label={t("delegations")}
           value={capabilities.namespaceScopes.length}
-        />
-        <Metric
-          label={t("policyRevision")}
-          value={`#${capabilities.policyRevision || 0}`}
         />
       </div>
       <section className="panel">
@@ -618,7 +683,9 @@ function Overview({ capabilities }: { capabilities: Capabilities }) {
             </span>
           )}
         </div>
-        {status.loading ? (
+        {!canReadStatus ? (
+          <Notice>{t("overviewRestricted")}</Notice>
+        ) : status.loading ? (
           <Loading />
         ) : status.error ? (
           <Notice>{status.error}</Notice>
@@ -732,7 +799,7 @@ function DelegationsPage({ capabilities }: { capabilities: Capabilities }) {
           roleId,
           reason,
         },
-        { etag: state.data.etag, idempotent: true },
+        { idempotent: true },
       );
       setOpen(false);
       setReason("");
@@ -754,7 +821,7 @@ function DelegationsPage({ capabilities }: { capabilities: Capabilities }) {
         `/authorization/delegations/${encodeURIComponent(binding.id)}`,
         "DELETE",
         { namespace, reason: deletionReason },
-        { etag: state.data.etag, idempotent: true },
+        { idempotent: true },
       );
       await state.reload();
     } catch (error) {
@@ -935,7 +1002,7 @@ function DelegationsPage({ capabilities }: { capabilities: Capabilities }) {
   );
 }
 
-function PolicyPage({
+function PermissionPolicyPage({
   allowed,
 }: {
   allowed: (capability?: string) => boolean;
@@ -945,6 +1012,56 @@ function PolicyPage({
   const principals = useAsync(
     () =>
       allowed("platform.identity.principals.read")
+        ? loadPrincipalOptions()
+        : Promise.resolve([] as PrincipalOption[]),
+    [],
+  );
+  return (
+    <>
+      <PageHeader
+        title={t("permissionsPolicy")}
+        description={t("permissionsPolicyDesc")}
+        actions={
+          <Button onClick={() => void current.reload()}>
+            <RefreshCw size={15} />
+            {t("refresh")}
+          </Button>
+        }
+      />
+      {current.loading ? (
+        <Loading />
+      ) : current.error ? (
+        <Notice>{current.error}</Notice>
+      ) : (
+        <>
+          <div className="metrics compact">
+            <Metric
+              label={t("current")}
+              value={current.data?.active ? t("active") : "Bootstrap"}
+            />
+          </div>
+          <PermissionRelations
+            policy={current.data}
+            principals={principals.data || []}
+          />
+        </>
+      )}
+    </>
+  );
+}
+
+function PolicyPage({
+  allowed,
+  mode,
+}: {
+  allowed: (capability?: string) => boolean;
+  mode: "roles" | "assignments";
+}) {
+  const { t } = useI18n();
+  const current = useAsync(() => request<Policy>("/authorization"), []);
+  const principals = useAsync(
+    () =>
+      mode === "assignments" && allowed("platform.identity.principals.read")
         ? loadPrincipalOptions()
         : Promise.resolve([] as PrincipalOption[]),
     [],
@@ -959,12 +1076,11 @@ function PolicyPage({
   const [busy, setBusy] = useState("");
   const [pending, setPending] = useState<{
     changeId: string;
-    revision: number;
-    baseEtag: number;
+    idempotencyKey: string;
   }>();
-  const [rollbackTarget, setRollbackTarget] = useState("");
-  const [confirmRollback, setConfirmRollback] = useState(false);
   const [roleOpen, setRoleOpen] = useState(false);
+  const pageTitle = mode === "roles" ? "roles" : "assignments";
+  const pageDescription = mode === "roles" ? "rolesDesc" : "assignmentsDesc";
   useEffect(() => {
     if (current.data) {
       setRoles(current.data.spec?.roles || []);
@@ -972,6 +1088,9 @@ function PolicyPage({
     }
   }, [current.data]);
   const spec = { version: current.data?.spec.version || 2, roles, bindings: assignments };
+  const policyValidationError = assignments
+    .map((assignment) => validateAssignment(assignment, roles))
+    .find(Boolean);
   const change = (index: number, patch: Partial<Assignment>) =>
     setAssignments((items) =>
       items.map((item, at) => (at === index ? { ...item, ...patch } : item)),
@@ -993,14 +1112,14 @@ function PolicyPage({
     setMessage(undefined);
     try {
       if (kind === "publish" && pending) {
-        const result = await mutation<{ revision: number; etag: number }>(
+        await mutation(
           `/authorization/changes/${encodeURIComponent(pending.changeId)}/publish`,
           "POST",
           { reason: reason || "publish validated policy" },
-          { etag: pending.baseEtag, idempotent: true },
+          { idempotencyKey: pending.idempotencyKey },
         );
         setMessage({
-          text: `Revision ${result.revision} · ETag ${result.etag}`,
+          text: "Policy published.",
           tone: "success",
         });
         setPending(undefined);
@@ -1010,7 +1129,7 @@ function PolicyPage({
           "/authorization/dry-run",
           "POST",
           { spec, checks: [], reason: reason || "validate candidate policy" },
-          { etag: current.data.etag, idempotent: true },
+          {},
         );
         setMessage({
           text: result.publishable
@@ -1019,19 +1138,19 @@ function PolicyPage({
           tone: result.publishable ? "success" : "warning",
         });
       } else {
+        const idempotencyKey = crypto.randomUUID();
         const result = await mutation<{
           changeId: string;
-          revision: number;
-          baseEtag: number;
+          objectId: string;
         }>(
           "/authorization/drafts",
           "POST",
           { spec, reason },
-          { etag: current.data.etag, idempotent: true },
+          { idempotencyKey },
         );
-        setPending(result);
+        setPending({ changeId: result.changeId, idempotencyKey });
         setMessage({
-          text: `Draft revision ${result.revision} is ready to publish.`,
+          text: "Draft is ready to publish.",
           tone: "success",
         });
       }
@@ -1041,34 +1160,11 @@ function PolicyPage({
       setBusy("");
     }
   };
-  const rollback = async (rollbackReason: string) => {
-    if (!current.data) return;
-    setBusy("rollback");
-    try {
-      const result = await mutation<{ revision: number; etag: number }>(
-        "/authorization/rollback",
-        "POST",
-        { targetRevision: Number(rollbackTarget), reason: rollbackReason },
-        { etag: current.data.etag, idempotent: true },
-      );
-      setMessage({
-        text: `${t("revision")} ${result.revision} · ETag ${result.etag}`,
-        tone: "success",
-      });
-      setConfirmRollback(false);
-      setRollbackTarget("");
-      await current.reload();
-    } catch (error) {
-      setMessage({ text: (error as Error).message, tone: "error" });
-    } finally {
-      setBusy("");
-    }
-  };
   return (
     <>
       <PageHeader
-        title={t("policy")}
-        description={t("policyDesc")}
+        title={t(pageTitle)}
+        description={t(pageDescription)}
         actions={
           <Button onClick={() => void current.reload()}>
             <RefreshCw size={15} />
@@ -1087,41 +1183,57 @@ function PolicyPage({
               label={t("current")}
               value={current.data?.active ? t("active") : "Bootstrap"}
             />
-            <Metric
-              label={t("revision")}
-              value={`#${current.data?.revision || 0}`}
-            />
-            <Metric label="ETag" value={current.data?.etag || 0} />
           </div>
-          <PermissionRelations
-            policy={current.data}
-            principals={principals.data || []}
-          />
           <section className="panel assignment-panel">
             <div className="section-title">
               <div>
                 <span className="section-icon">
-                  <ShieldCheck size={18} />
+                  {mode === "roles" ? (
+                    <ShieldCheck size={18} />
+                  ) : (
+                    <UsersRound size={18} />
+                  )}
                 </span>
                 <div>
-                  <h2>{t("assignments")}</h2>
-                  <p>{t("groupFirst")}</p>
+                  <h2>{t(mode === "roles" ? "roles" : "assignmentList")}</h2>
+                  <p>{t(mode === "roles" ? "rolesDesc" : "groupFirst")}</p>
                 </div>
               </div>
               {allowed("platform.authorization.manage") && (
                 <div className="footer-buttons">
-                  <Button onClick={() => setRoleOpen(true)}>
-                    {t("createRole")}
-                  </Button>
-                  <Button onClick={add}>
-                    <UsersRound size={15} />
-                    {t("addAssignment")}
-                  </Button>
+                  {mode === "roles" ? (
+                    <Button onClick={() => setRoleOpen(true)}>
+                      {t("createRole")}
+                    </Button>
+                  ) : (
+                    <Button onClick={add}>
+                      <UsersRound size={15} />
+                      {t("addAssignment")}
+                    </Button>
+                  )}
                 </div>
               )}
             </div>
             {message && <Notice tone={message.tone}>{message.text}</Notice>}
-            {roles.length > 0 && (
+            {policyValidationError && (
+              <Notice tone="error">{policyValidationError}</Notice>
+            )}
+            {mode === "roles" && (
+              <div className="custom-role-list">
+                <strong>{t("builtInRoles")}</strong>
+                {(current.data?.builtInRoles || []).map((role) => (
+                  <div className="custom-role" key={role.id}>
+                    <div>
+                      <b>{role.displayName}</b>
+                      <span>
+                        {role.id} · {roleCapabilities(role).length} {t("permissions")}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            {mode === "roles" && roles.length > 0 && (
               <div className="custom-role-list">
                 <strong>{t("customRoles")}</strong>
                 {roles.map((role) => (
@@ -1151,26 +1263,28 @@ function PolicyPage({
                 ))}
               </div>
             )}
-            <div className="assignment-list">
-              {assignments.map((assignment, index) => (
-                <AssignmentRow
-                  key={assignment.id}
-                  assignment={assignment}
-                  roles={roles}
-                  principals={principals.data || []}
-                  principalsLoading={principals.loading}
-                  principalsError={principals.error}
-                  onChange={(patch) => change(index, patch)}
-                  onRemove={() =>
-                    setAssignments((items) =>
-                      items.filter((_, at) => at !== index),
-                    )
-                  }
-                  readOnly={!allowed("platform.authorization.manage")}
-                />
-              ))}
-              {!assignments.length && <Empty>{t("empty")}</Empty>}
-            </div>
+            {mode === "assignments" && (
+              <div className="assignment-list">
+                {assignments.map((assignment, index) => (
+                  <AssignmentRow
+                    key={assignment.id}
+                    assignment={assignment}
+                    roles={roles}
+                    principals={principals.data || []}
+                    principalsLoading={principals.loading}
+                    principalsError={principals.error}
+                    onChange={(patch) => change(index, patch)}
+                    onRemove={() =>
+                      setAssignments((items) =>
+                        items.filter((_, at) => at !== index),
+                      )
+                    }
+                    readOnly={!allowed("platform.authorization.manage")}
+                  />
+                ))}
+                {!assignments.length && <Empty>{t("empty")}</Empty>}
+              </div>
+            )}
             {allowed("platform.authorization.manage") && (
               <div className="policy-footer">
                 <label className="grow">
@@ -1187,6 +1301,7 @@ function PolicyPage({
                   {allowed("platform.authorization.simulate") && (
                     <Button
                       busy={busy === "validate"}
+                      disabled={!!policyValidationError}
                       onClick={() => void invoke("validate")}
                     >
                       {t("validate")}
@@ -1195,7 +1310,9 @@ function PolicyPage({
                   <Button
                     kind="primary"
                     busy={busy === "draft"}
-                    disabled={reason.trim().length < 8}
+                    disabled={
+                      reason.trim().length < 8 || !!policyValidationError
+                    }
                     onClick={() => void invoke("draft")}
                   >
                     {t("saveDraft")}
@@ -1206,32 +1323,9 @@ function PolicyPage({
                       busy={busy === "publish"}
                       onClick={() => void invoke("publish")}
                     >
-                      {t("publish")} #{pending.revision}
+                      {t("publish")}
                       <ChevronRight size={15} />
                     </Button>
-                  )}
-                  {allowed("platform.authorization.rollback") && (
-                    <>
-                      <label>
-                        {t("targetRevision")}
-                        <input
-                          type="number"
-                          min="1"
-                          max={Math.max(1, (current.data?.revision || 1) - 1)}
-                          value={rollbackTarget}
-                          onChange={(event) =>
-                            setRollbackTarget(event.target.value)
-                          }
-                        />
-                      </label>
-                      <Button
-                        kind="danger"
-                        disabled={!rollbackTarget}
-                        onClick={() => setConfirmRollback(true)}
-                      >
-                        {t("rollback")}
-                      </Button>
-                    </>
                   )}
                 </div>
               </div>
@@ -1239,24 +1333,18 @@ function PolicyPage({
           </section>
         </>
       )}
-      <RoleDialog
-        open={roleOpen}
-        permissions={current.data?.availableCapabilities || []}
-        reservedIds={roles.map((role) => role.id)}
-        onClose={() => setRoleOpen(false)}
-        onConfirm={(role) => {
-          setRoles((items) => [...items, role]);
-          setRoleOpen(false);
-        }}
-      />
-      <ConfirmDialog
-        open={confirmRollback}
-        title={t("rollback")}
-        detail={`${t("targetRevision")}: ${rollbackTarget}`}
-        busy={busy === "rollback"}
-        onClose={() => setConfirmRollback(false)}
-        onConfirm={(rollbackReason) => void rollback(rollbackReason)}
-      />
+      {mode === "roles" && (
+        <RoleDialog
+          open={roleOpen}
+          permissions={current.data?.availableCapabilities || []}
+          reservedIds={roles.map((role) => role.id)}
+          onClose={() => setRoleOpen(false)}
+          onConfirm={(role) => {
+            setRoles((items) => [...items, role]);
+            setRoleOpen(false);
+          }}
+        />
+      )}
     </>
   );
 }
@@ -1392,9 +1480,7 @@ function AssignmentRow({
   const value = groupMode
     ? assignment.subject.groupName || ""
     : assignment.subject.principalId || "";
-  const supportsNamespaces =
-    assignment.roleId.startsWith("namespace-") ||
-    roles.some((role) => role.id === assignment.roleId && roleCapabilities(role).some((capability) => capability.startsWith("namespace.")));
+  const supportsNamespaces = roleSupportsNamespaces(assignment.roleId, roles);
   const normalizedSearch = principalSearch.trim().toLowerCase();
   const visiblePrincipals = principals.filter((principal) => {
     if (principal.id === value) return true;
@@ -1496,7 +1582,7 @@ function AssignmentRow({
             const role = event.target.value;
             onChange({
               roleId: role,
-              scope: role.startsWith("namespace-") || roles.some((item) => item.id === role && roleCapabilities(item).some((capability) => capability.startsWith("namespace.")))
+              scope: roleSupportsNamespaces(role, roles)
                 ? { ...assignment.scope, type: "namespaces", names: assignment.scope.names || [] }
                 : { type: "platform", names: [], labelSelectors: [] },
             });
@@ -1755,12 +1841,10 @@ function ProvidersPage({
   const [pending, setPending] = useState<{
     providerId: string;
     changeId: string;
-    revision: number;
-    baseEtag: number;
+    idempotencyKey: string;
   }>();
-  const [rollbackTarget, setRollbackTarget] = useState("");
-  const [confirmRollback, setConfirmRollback] = useState(false);
   const selectedItem = items.find((item) => item.providerId === selected);
+  const issuerValid = validOIDCIssuer(form.issuer.trim());
   useEffect(() => {
     if (selectedItem) {
       const config = selectedItem.config || {};
@@ -1823,27 +1907,25 @@ function ProvidersPage({
         mode === "validate"
           ? `/providers/${encodeURIComponent(id)}/validate`
           : `/providers/${encodeURIComponent(id)}/drafts`;
+      const idempotencyKey = crypto.randomUUID();
       const result = await mutation<{
         providerId?: string;
         changeId?: string;
-        revision?: number;
-        baseEtag?: number;
+        objectId?: string;
       }>(path, "POST", body, {
-        etag: Number(selectedItem?.etag || 0),
-        idempotent: true,
+        idempotencyKey,
       });
       if (mode === "draft" && result.changeId)
         setPending({
           providerId: result.providerId || id,
           changeId: result.changeId,
-          revision: Number(result.revision || 0),
-          baseEtag: Number(result.baseEtag || 0),
+          idempotencyKey,
         });
       setMessage({
         text:
           mode === "validate"
             ? t("connectivity")
-            : `${t("saveDraft")} · #${result.revision}`,
+            : t("saveDraft"),
         tone: "success",
       });
       await listed.reload();
@@ -1857,40 +1939,17 @@ function ProvidersPage({
     if (!pending) return;
     setBusy("publish");
     try {
-      const result = await mutation<{ revision: number; etag: number }>(
+      await mutation(
         `/providers/${encodeURIComponent(pending.providerId)}/changes/${encodeURIComponent(pending.changeId)}/publish`,
         "POST",
         { reason: form.reason },
-        { etag: pending.baseEtag, idempotent: true },
+        { idempotencyKey: pending.idempotencyKey },
       );
       setMessage({
-        text: `${t("publish")} · #${result.revision}`,
+        text: t("publish"),
         tone: "success",
       });
       setPending(undefined);
-      await listed.reload();
-    } catch (error) {
-      setMessage({ text: (error as Error).message, tone: "error" });
-    } finally {
-      setBusy("");
-    }
-  };
-  const rollback = async (reason: string) => {
-    if (!selectedItem) return;
-    setBusy("rollback");
-    try {
-      const result = await mutation<{ revision: number }>(
-        `/providers/${encodeURIComponent(selected)}/rollback`,
-        "POST",
-        { targetRevision: Number(rollbackTarget), reason },
-        { etag: Number(selectedItem.etag || 0), idempotent: true },
-      );
-      setMessage({
-        text: `${t("rollback")} · #${result.revision}`,
-        tone: "success",
-      });
-      setConfirmRollback(false);
-      setRollbackTarget("");
       await listed.reload();
     } catch (error) {
       setMessage({ text: (error as Error).message, tone: "error" });
@@ -1939,9 +1998,7 @@ function ProvidersPage({
                 </span>
                 <span>
                   <strong>{item.providerId}</strong>
-                  <small>
-                    {item.type} · {t("revision")} {item.revision || 0}
-                  </small>
+                  <small>{item.type}</small>
                 </span>
                 <span className={`state-dot ${item.active ? "active" : ""}`} />
               </button>
@@ -1981,6 +2038,9 @@ function ProvidersPage({
           <section className="panel form-panel">
             <h2>{selected || t("selectProvider")}</h2>
             {message && <Notice tone={message.tone}>{message.text}</Notice>}
+            {!issuerValid && form.issuer.trim() && (
+              <Notice>Issuer URL must be an absolute HTTPS URL without credentials, query parameters, or a fragment.</Notice>
+            )}
             <div className="form-grid">
               <label>
                 {t("providerId")}
@@ -2151,23 +2211,12 @@ function ProvidersPage({
                   placeholder={t("operationReason")}
                 />
               </label>
-              {selected && allowed("platform.identity.providers.manage") && (
-                <label>
-                  {t("targetRevision")}
-                  <input
-                    type="number"
-                    min="1"
-                    max={Math.max(1, Number(selectedItem?.revision || 1) - 1)}
-                    value={rollbackTarget}
-                    onChange={(event) => setRollbackTarget(event.target.value)}
-                  />
-                </label>
-              )}
             </div>
             <div className="panel-actions">
               {allowed("platform.identity.providers.manage") && (
                 <Button
                   busy={busy === "validate"}
+                  disabled={!issuerValid}
                   onClick={() => void submit("validate")}
                 >
                   {t("connectivity")}
@@ -2177,7 +2226,7 @@ function ProvidersPage({
                 <Button
                   kind="primary"
                   busy={busy === "draft"}
-                  disabled={form.reason.length < 8}
+                  disabled={form.reason.length < 8 || !issuerValid}
                   onClick={() => void submit("draft")}
                 >
                   {t("saveDraft")}
@@ -2189,30 +2238,13 @@ function ProvidersPage({
                   busy={busy === "publish"}
                   onClick={() => void publish()}
                 >
-                  {t("publish")} #{pending.revision}
-                </Button>
-              )}
-              {selected && allowed("platform.identity.providers.manage") && (
-                <Button
-                  kind="danger"
-                  disabled={!rollbackTarget}
-                  onClick={() => setConfirmRollback(true)}
-                >
-                  {t("rollback")}
+                  {t("publish")}
                 </Button>
               )}
             </div>
           </section>
         </div>
       )}
-      <ConfirmDialog
-        open={confirmRollback}
-        title={t("rollback")}
-        detail={`${selected} · ${t("targetRevision")} ${rollbackTarget}`}
-        busy={busy === "rollback"}
-        onClose={() => setConfirmRollback(false)}
-        onConfirm={(reason) => void rollback(reason)}
-      />
     </>
   );
 }
@@ -2540,6 +2572,11 @@ function OAuthClientDialog({
     value.grantTypes.some((grant) =>
       ["implicit", "password"].includes(grant),
     ) || value.responseTypes.some((response) => response.includes("token"));
+  const redirectUris = value.redirectUris
+    .map((item) => item.trim())
+    .filter(Boolean);
+  const redirectUrisValid =
+    redirectUris.length > 0 && redirectUris.every(validOAuthRedirectURI);
   return (
     <Dialog
       open
@@ -2642,6 +2679,13 @@ function OAuthClientDialog({
               : "Implicit, hybrid, and password flows increase credential exposure. Enable only for controlled compatibility cases."}
           </Notice>
         )}
+        {!redirectUrisValid && value.redirectUris.some((item) => item.trim()) && (
+          <Notice>
+            {locale === "zh-CN"
+              ? "Redirect URI 必须使用 HTTPS；仅 localhost、127.0.0.1 或 ::1 可使用 HTTP，且不能包含 fragment。"
+              : "Redirect URIs must use HTTPS. Only localhost, 127.0.0.1, or ::1 may use HTTP, and fragments are not allowed."}
+          </Notice>
+        )}
         <DialogFooter>
           <Button onClick={onClose}>
             {locale === "zh-CN" ? "取消" : "Cancel"}
@@ -2652,7 +2696,7 @@ function OAuthClientDialog({
             disabled={
               !value.id ||
               !value.name ||
-              !value.redirectUris.some(Boolean) ||
+              !redirectUrisValid ||
               !value.grantTypes.length ||
               !value.responseTypes.length ||
               !value.scopes.length
@@ -3075,7 +3119,9 @@ const listConfig: Record<
   Exclude<
     ViewKey,
     | "overview"
-    | "policy"
+    | "roles"
+    | "permissions"
+    | "assignments"
     | "delegations"
     | "providers"
     | "oauthClients"
@@ -3150,7 +3196,9 @@ function ListPage({
   view: Exclude<
     ViewKey,
     | "overview"
-    | "policy"
+    | "roles"
+    | "permissions"
+    | "assignments"
     | "delegations"
     | "providers"
     | "oauthClients"
@@ -3371,10 +3419,17 @@ function ListPage({
               { reason },
               { etag: confirm.etag, idempotent: true },
             );
-            if (view === "audit" && created.jobId)
-              location.assign(
-                `${managementBase}/audit/exports/${encodeURIComponent(created.jobId)}`,
-              );
+            if (view === "audit" && created.jobId) {
+              const blob = await waitForAuditExport(created.jobId);
+              const url = URL.createObjectURL(blob);
+              const anchor = document.createElement("a");
+              anchor.href = url;
+              anchor.download = `kubeloop-audit-${created.jobId}.ndjson`;
+              document.body.append(anchor);
+              anchor.click();
+              anchor.remove();
+              URL.revokeObjectURL(url);
+            }
             setConfirm(undefined);
             await result.reload();
           } finally {

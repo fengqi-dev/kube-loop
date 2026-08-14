@@ -16,8 +16,7 @@ var postgresqlJSONColumns = map[string]struct{}{
 }
 
 var postgresqlBigIntColumns = map[string]struct{}{
-	"id": {}, "generation": {}, "bootstrap_retired_revision": {}, "policy_revision": {}, "revision": {},
-	"etag": {}, "base_revision": {}, "base_etag": {}, "proposed_revision": {}, "version": {},
+	"id": {}, "generation": {}, "version": {},
 }
 
 func postgresqlMigrationStatements(sqlite []string) []string {

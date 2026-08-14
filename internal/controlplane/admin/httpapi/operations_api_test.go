@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -29,18 +30,18 @@ func TestOperationsAPIEnforcesHeadersAndPersistsActions(t *testing.T) {
 	cookie, csrf := exchangeBreakGlassSession(t, handler)
 	principal, session := seedOperationSession(t, store)
 
-	missingCSRF := policyWrite(t, handler, cookie, "", "/sessions/"+session.ID+"/stop", `"1"`,
+	missingCSRF := operationWrite(t, handler, cookie, "", "/sessions/"+session.ID+"/stop", `"1"`,
 		"operation-http-stop-0001", map[string]string{"reason": "incident response"})
 	if missingCSRF.Code != http.StatusForbidden {
 		t.Fatalf("missing CSRF status=%d body=%s", missingCSRF.Code, missingCSRF.Body.String())
 	}
-	stopped := policyWrite(t, handler, cookie, csrf, "/sessions/"+session.ID+"/stop", `"1"`,
+	stopped := operationWrite(t, handler, cookie, csrf, "/sessions/"+session.ID+"/stop", `"1"`,
 		"operation-http-stop-0001", map[string]string{"reason": "incident response"})
 	if stopped.Code != http.StatusOK || stopped.Header().Get("ETag") != `"2"` ||
 		!strings.Contains(stopped.Body.String(), `"runtimeConverged":true`) {
 		t.Fatalf("Session stop status=%d headers=%v body=%s", stopped.Code, stopped.Header(), stopped.Body.String())
 	}
-	replay := policyWrite(t, handler, cookie, csrf, "/sessions/"+session.ID+"/stop", `"1"`,
+	replay := operationWrite(t, handler, cookie, csrf, "/sessions/"+session.ID+"/stop", `"1"`,
 		"operation-http-stop-0001", map[string]string{"reason": "incident response"})
 	if replay.Code != http.StatusOK || replay.Header().Get("Idempotent-Replayed") != "true" {
 		t.Fatalf("Session stop replay status=%d headers=%v body=%s", replay.Code, replay.Header(), replay.Body.String())
@@ -53,7 +54,7 @@ func TestOperationsAPIEnforcesHeadersAndPersistsActions(t *testing.T) {
 	if err := store.OAuthSessions().Create(context.Background(), grant); err != nil {
 		t.Fatal(err)
 	}
-	revokedGrant := policyWrite(t, handler, cookie, csrf,
+	revokedGrant := operationWrite(t, handler, cookie, csrf,
 		"/principals/"+principal.ID+"/oauth-grants/"+grant.RequestID+"/revoke", "",
 		"operation-http-grant-001", map[string]string{"reason": "revoke compromised authorization"})
 	if revokedGrant.Code != http.StatusOK ||
@@ -70,7 +71,7 @@ func TestOperationsAPIEnforcesHeadersAndPersistsActions(t *testing.T) {
 	if err := store.OAuthSessions().Create(context.Background(), grant); err != nil {
 		t.Fatal(err)
 	}
-	revoked := policyWrite(t, handler, cookie, csrf, "/principals/"+principal.ID+"/revoke", "",
+	revoked := operationWrite(t, handler, cookie, csrf, "/principals/"+principal.ID+"/revoke", "",
 		"operation-http-revoke-01", map[string]string{"reason": "disable compromised identity"})
 	if revoked.Code != http.StatusOK || !strings.Contains(revoked.Body.String(), `"revokedCount":1`) {
 		t.Fatalf("Principal revoke status=%d body=%s", revoked.Code, revoked.Body.String())
@@ -89,12 +90,12 @@ func TestOperationsAPIEnforcesHeadersAndPersistsActions(t *testing.T) {
 		}
 	}
 
-	recovery := policyWrite(t, handler, cookie, csrf, "/tasks/recovery", "",
+	recovery := operationWrite(t, handler, cookie, csrf, "/tasks/recovery", "",
 		"operation-http-recover-01", map[string]string{"reason": "reconcile stale resources"})
 	if recovery.Code != http.StatusOK || !strings.Contains(recovery.Body.String(), `"preview":0`) {
 		t.Fatalf("recovery status=%d body=%s", recovery.Code, recovery.Body.String())
 	}
-	export := policyWrite(t, handler, cookie, csrf, "/audit/exports", "",
+	export := operationWrite(t, handler, cookie, csrf, "/audit/exports", "",
 		"operation-http-export-001", map[string]any{"action": "admin.session.stop", "limit": 10, "reason": "export incident evidence"})
 	if export.Code != http.StatusAccepted || export.Header().Get("Location") == "" {
 		t.Fatalf("audit export status=%d headers=%v body=%s", export.Code, export.Header(), export.Body.String())
@@ -104,6 +105,36 @@ func TestOperationsAPIEnforcesHeadersAndPersistsActions(t *testing.T) {
 	if pending.Code != http.StatusAccepted || pending.Header().Get("Retry-After") != "1" {
 		t.Fatalf("pending audit export status=%d headers=%v body=%s", pending.Code, pending.Header(), pending.Body.String())
 	}
+}
+
+func operationWrite(
+	t *testing.T,
+	handler *Handler,
+	cookie *http.Cookie,
+	csrf, path, etag, key string,
+	body any,
+) *httptest.ResponseRecorder {
+	t.Helper()
+	encoded, err := json.Marshal(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(encoded))
+	request.AddCookie(cookie)
+	request.Header.Set("Origin", "https://gateway.example")
+	request.Header.Set("Content-Type", "application/json")
+	if csrf != "" {
+		request.Header.Set(CSRFHeaderName, csrf)
+	}
+	if etag != "" {
+		request.Header.Set("If-Match", etag)
+	}
+	if key != "" {
+		request.Header.Set("Idempotency-Key", key)
+	}
+	recorder := httptest.NewRecorder()
+	serveHTTP(handler, recorder, request)
+	return recorder
 }
 
 func seedOperationSession(t *testing.T, store *storage.Store) (storage.Principal, storage.Session) {

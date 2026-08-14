@@ -221,7 +221,7 @@ func oauthClientFromInput(input oauthClientInput) (storage.OAuthClient, error) {
 	}
 	for _, redirect := range client.RedirectURIs {
 		parsed, err := url.Parse(redirect)
-		if err != nil || parsed.Fragment != "" || parsed.Host == "" || (parsed.Scheme != "https" && !(parsed.Scheme == "http" && (parsed.Hostname() == "127.0.0.1" || parsed.Hostname() == "[::1]" || parsed.Hostname() == "localhost"))) {
+		if err != nil || parsed.User != nil || parsed.Fragment != "" || parsed.Host == "" || (parsed.Scheme != "https" && !(parsed.Scheme == "http" && (parsed.Hostname() == "127.0.0.1" || parsed.Hostname() == "::1" || parsed.Hostname() == "localhost"))) {
 			return storage.OAuthClient{}, errors.New("OAuth client redirect URI is invalid")
 		}
 	}

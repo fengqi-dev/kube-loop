@@ -184,7 +184,7 @@ func TestSQLiteMigrationFailureRollsBackVersion(t *testing.T) {
 	if err := database.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Open(context.Background(), Config{Backend: BackendSQLite, SQLitePath: path}); err == nil || !strings.Contains(err.Error(), "migration 20") {
+	if _, err := Open(context.Background(), Config{Backend: BackendSQLite, SQLitePath: path}); err == nil || !strings.Contains(err.Error(), "migration 21") {
 		t.Fatalf("Open migration error = %v", err)
 	}
 	database, err = sql.Open("sqlite", path)
@@ -395,7 +395,7 @@ func TestMySQLMigrationDialectConversion(t *testing.T) {
 			}
 		}
 	}
-	for _, required := range []string{"CREATE TABLE authorization_revisions", "CREATE TABLE authorization_roles", "CREATE TABLE authorization_bindings", "definition_json", "binding_json"} {
+	for _, required := range []string{"CREATE TABLE authorization_policies", "CREATE TABLE authorization_roles", "CREATE TABLE authorization_bindings", "definition_json", "binding_json"} {
 		if !strings.Contains(converted.String(), required) {
 			t.Fatalf("MySQL authorization migration is missing %q", required)
 		}
@@ -414,7 +414,7 @@ func TestPostgreSQLMigrationDialectConversion(t *testing.T) {
 			t.Fatalf("PostgreSQL migration contains SQLite syntax: %s", statement)
 		}
 	}
-	for _, required := range []string{"CREATE TABLE authorization_revisions", "CREATE TABLE authorization_roles", "CREATE TABLE authorization_bindings", "definition_json JSONB", "binding_json JSONB"} {
+	for _, required := range []string{"CREATE TABLE authorization_policies", "CREATE TABLE authorization_roles", "CREATE TABLE authorization_bindings", "definition_json JSONB", "binding_json JSONB"} {
 		if !strings.Contains(converted, required) {
 			t.Fatalf("PostgreSQL authorization migration is missing %q", required)
 		}

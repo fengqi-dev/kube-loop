@@ -1,13 +1,23 @@
 package middleware
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/authorization"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
 	"github.com/labstack/echo/v5"
 )
+
+type recordingAuthorizer struct{ calls int }
+
+func (authorizer *recordingAuthorizer) Authorize(context.Context, authorization.Subject, authorization.Request) authorization.Decision {
+	authorizer.calls++
+	return authorization.Decision{}
+}
 
 func TestErrorStatusMapping(t *testing.T) {
 	tests := map[controlplaneapi.ErrorCode]int{
@@ -41,5 +51,31 @@ func TestWebSocketUpgradeDetectionIsStrict(t *testing.T) {
 	request.Method = http.MethodPost
 	if isWebSocketUpgrade(request) {
 		t.Fatal("non-GET request bypassed the API timeout")
+	}
+}
+
+func TestAuthenticatedVersionDiscoveryRunsBeforeNamespaceAuthorization(t *testing.T) {
+	authorizer := &recordingAuthorizer{}
+	middleware := New(Config{
+		APIPathPrefix:      "/kubeloop/api",
+		RequestTimeout:     time.Second,
+		MaxRequestBodySize: 1 << 20,
+		Authenticator: controlplaneapi.AuthenticatorFunc(func(*http.Request) (controlplaneapi.Principal, *controlplaneapi.Error) {
+			return controlplaneapi.Principal{Subject: "81a678af-e99c-4411-99dc-57fd59d83189", Provider: "local"}, nil
+		}),
+		Authorizer: authorizer,
+	})
+	request := httptest.NewRequest(http.MethodGet, "/kubeloop/api/version", nil)
+	response := httptest.NewRecorder()
+	ctx := echo.New().NewContext(request, response)
+	err := middleware(func(ctx *echo.Context) error { return ctx.NoContent(http.StatusNoContent) })(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("version status = %d", response.Code)
+	}
+	if authorizer.calls != 0 {
+		t.Fatalf("version authorization calls = %d", authorizer.calls)
 	}
 }

@@ -112,7 +112,9 @@ func TestRealMirrorPreservesPrimaryPathAndRecoversStaleOwner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	bindings, err := trafficbindingclient.NewForRESTConfig(bindingConfig, trafficbindingclient.Config{})
+	bindings, err := trafficbindingclient.NewForRESTConfig(bindingConfig, trafficbindingclient.Config{
+		ControlPlaneID: e2eTrafficControlPlaneID,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

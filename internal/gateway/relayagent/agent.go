@@ -32,15 +32,22 @@ type ControlApplier interface {
 }
 
 type Config struct {
-	ControlPlaneURL string
-	Endpoint        string
-	BearerTokenFile string
-	HTTPClient      *http.Client
-	Reporter        RuntimeReporter
-	Applier         ControlApplier
-	Now             func() time.Time
-	Logger          *log.Logger
+	ControlPlaneURL        string
+	Endpoint               string
+	BearerTokenFile        string
+	HTTPClient             *http.Client
+	Reporter               RuntimeReporter
+	Applier                ControlApplier
+	Now                    func() time.Time
+	Logger                 *log.Logger
+	RegistrationAttempts   int
+	RegistrationRetryDelay time.Duration
 }
+
+const (
+	defaultRegistrationAttempts   = 10
+	defaultRegistrationRetryDelay = 500 * time.Millisecond
+)
 
 type Agent struct {
 	config Config
@@ -78,6 +85,16 @@ func New(config Config) (*Agent, error) {
 	if config.Now == nil {
 		config.Now = time.Now
 	}
+	if config.RegistrationAttempts == 0 {
+		config.RegistrationAttempts = defaultRegistrationAttempts
+	}
+	if config.RegistrationRetryDelay == 0 {
+		config.RegistrationRetryDelay = defaultRegistrationRetryDelay
+	}
+	if config.RegistrationAttempts < 1 || config.RegistrationAttempts > 100 ||
+		config.RegistrationRetryDelay < 10*time.Millisecond || config.RegistrationRetryDelay > 30*time.Second {
+		return nil, errors.New("Relay Agent registration retry policy is invalid")
+	}
 	return &Agent{config: config, done: make(chan struct{})}, nil
 }
 
@@ -91,8 +108,26 @@ func (agent *Agent) Start(ctx context.Context) error {
 		return errors.New("Relay Agent is already started")
 	}
 	agent.mu.Unlock()
-	if err := agent.register(ctx); err != nil {
-		return err
+	var err error
+	for attempt := 1; attempt <= agent.config.RegistrationAttempts; attempt++ {
+		err = agent.register(ctx)
+		if err == nil {
+			break
+		}
+		if !retryableRegistrationError(err) || attempt == agent.config.RegistrationAttempts {
+			return err
+		}
+		agent.log(
+			"Relay registration failed (attempt %d/%d); retrying in %s: %v",
+			attempt, agent.config.RegistrationAttempts, agent.config.RegistrationRetryDelay, err,
+		)
+		timer := time.NewTimer(agent.config.RegistrationRetryDelay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
 	}
 	runContext, cancel := context.WithCancel(ctx)
 	agent.mu.Lock()
@@ -101,6 +136,15 @@ func (agent *Agent) Start(ctx context.Context) error {
 	agent.mu.Unlock()
 	go agent.run(runContext)
 	return nil
+}
+
+func retryableRegistrationError(err error) bool {
+	var httpError *HTTPError
+	if errors.As(err, &httpError) {
+		return httpError.Status == http.StatusTooManyRequests || httpError.Status >= http.StatusInternalServerError
+	}
+	var requestError *url.Error
+	return errors.As(err, &requestError)
 }
 
 func (agent *Agent) run(ctx context.Context) {

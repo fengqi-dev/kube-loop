@@ -4,6 +4,7 @@ build/local-release/
 build/tools/
 build/operator-cover.out
 build/embedded/kubeloop-helper*
+build/embedded/kubeloop-supervisor*
 build/embedded/gateway-image
 build/embedded/control-plane-image
 build/embedded/operator-image

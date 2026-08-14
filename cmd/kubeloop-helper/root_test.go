@@ -28,6 +28,18 @@ func TestRootCommandVersion(t *testing.T) {
 	}
 }
 
+func TestIdentityCommand(t *testing.T) {
+	t.Parallel()
+	stdout, stderr, exitCode := executeForTest(t, []string{"identity"}, commandDependencies{}, "1.2.3")
+	if exitCode != 0 || stderr != "" {
+		t.Fatalf("exit code = %d, stderr = %q", exitCode, stderr)
+	}
+	want := `{"kind":"kubeloop-helper","version":"1.2.3","protocol":6}` + "\n"
+	if stdout != want {
+		t.Fatalf("stdout = %q, want %q", stdout, want)
+	}
+}
+
 func TestInstallCommand(t *testing.T) {
 	t.Parallel()
 

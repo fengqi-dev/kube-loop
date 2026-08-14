@@ -1,4 +1,4 @@
-package revision
+package managementconfig
 
 import (
 	"context"
@@ -13,7 +13,7 @@ import (
 	"github.com/google/uuid"
 )
 
-func TestPolicyRevisionPublishAndRollbackAreTransactional(t *testing.T) {
+func TestPolicyConfigPublishIsTransactional(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
 	now := time.Date(2026, 8, 10, 15, 0, 0, 0, time.UTC)
@@ -24,16 +24,16 @@ func TestPolicyRevisionPublishAndRollbackAreTransactional(t *testing.T) {
 	firstSnapshot := policySnapshot(principal.ID)
 
 	first := createPolicyDraft(t, service, PolicyDraftRequest{
-		Snapshot: firstSnapshot, ExpectedETag: 0,
+		Snapshot:       firstSnapshot,
 		IdempotencyKey: "policy-create-key-0001", Reason: "establish formal administration",
 		RequestID: "request-create-1", Actor: actor,
 	})
 	replayed, err := service.CreatePolicyDraft(ctx, PolicyDraftRequest{
-		Snapshot: firstSnapshot, ExpectedETag: 0,
+		Snapshot:       firstSnapshot,
 		IdempotencyKey: "policy-create-key-0001", Reason: "establish formal administration",
 		RequestID: "request-create-replay", Actor: actor,
 	})
-	if err != nil || !replayed.Replayed || replayed.Revision.Revision != first.Revision.Revision {
+	if err != nil || !replayed.Replayed || replayed.Config.ID != first.Config.ID {
 		t.Fatalf("replayed draft = %#v, %v", replayed, err)
 	}
 	mismatched := firstSnapshot
@@ -47,17 +47,17 @@ func TestPolicyRevisionPublishAndRollbackAreTransactional(t *testing.T) {
 	}
 
 	published, err := service.PublishPolicy(ctx, ActivateRequest{
-		ChangeID: first.Change.ID, ExpectedETag: 0, IdempotencyKey: "policy-create-key-0001", Reason: "activate first administrators",
+		ChangeID: first.Change.ID, IdempotencyKey: "policy-create-key-0001", Reason: "activate first administrators",
 		RequestID: "request-publish-1", Actor: actor,
 	})
-	if err != nil || published.Active.Revision != first.Revision.Revision || published.Active.ETag != 1 {
+	if err != nil || published.Active.ObjectID != first.Config.ID {
 		t.Fatalf("first publish = %#v, %v", published, err)
 	}
 	replayedPublish, err := service.PublishPolicy(ctx, ActivateRequest{
-		ChangeID: first.Change.ID, ExpectedETag: 0, IdempotencyKey: "policy-create-key-0001", Reason: "retry activate first administrators",
+		ChangeID: first.Change.ID, IdempotencyKey: "policy-create-key-0001", Reason: "retry activate first administrators",
 		RequestID: "request-publish-1-retry", Actor: actor,
 	})
-	if err != nil || !replayedPublish.Replayed || replayedPublish.Active.ETag != 1 {
+	if err != nil || !replayedPublish.Replayed || replayedPublish.Active.ObjectID != first.Config.ID {
 		t.Fatalf("publish replay = %#v, %v", replayedPublish, err)
 	}
 	retired, err := store.ManagementState().BootstrapRetired(ctx)
@@ -65,51 +65,29 @@ func TestPolicyRevisionPublishAndRollbackAreTransactional(t *testing.T) {
 		t.Fatalf("bootstrap retired = %t, %v", retired, err)
 	}
 
-	// Stable binding IDs are intentionally reused across immutable policy
-	// revisions so history and audit references keep their identity.
+	// Stable binding IDs are intentionally reused across policy configurations
+	// so audit references keep their identity.
 	secondSnapshot := firstSnapshot
 	secondSnapshot.Bindings = append([]adminauthorization.Binding(nil), firstSnapshot.Bindings...)
 	secondSnapshot.Bindings = append(secondSnapshot.Bindings, platformBinding(uuid.NewString(), adminauthorization.RoleAuditor, principal.ID))
 	second := createPolicyDraft(t, service, PolicyDraftRequest{
-		Snapshot: secondSnapshot, ExpectedETag: 1, IdempotencyKey: "policy-create-key-0002",
+		Snapshot: secondSnapshot, IdempotencyKey: "policy-create-key-0002",
 		Reason: "add audit visibility", RequestID: "request-create-2", Actor: actor,
 	})
 	published, err = service.PublishPolicy(ctx, ActivateRequest{
-		ChangeID: second.Change.ID, ExpectedETag: 1, IdempotencyKey: "policy-create-key-0002", Reason: "activate audit visibility",
+		ChangeID: second.Change.ID, IdempotencyKey: "policy-create-key-0002", Reason: "activate audit visibility",
 		RequestID: "request-publish-2", Actor: actor,
 	})
-	if err != nil || published.Active.Revision != second.Revision.Revision || published.Active.ETag != 2 {
+	if err != nil || published.Active.ObjectID != second.Config.ID {
 		t.Fatalf("second publish = %#v, %v", published, err)
 	}
-	rolledBack, err := service.RollbackPolicy(ctx, RollbackRequest{
-		TargetRevision: first.Revision.Revision, ExpectedETag: 2,
-		IdempotencyKey: "policy-rollback-key-1", Reason: "restore known-good policy",
-		RequestID: "request-rollback-1", Actor: actor,
-	})
-	if err != nil || rolledBack.Active.Revision <= second.Revision.Revision || rolledBack.Active.ETag != 3 {
-		t.Fatalf("rollback = %#v, %v", rolledBack, err)
-	}
-	replayedRollback, err := service.RollbackPolicy(ctx, RollbackRequest{
-		TargetRevision: first.Revision.Revision, ExpectedETag: 2,
-		IdempotencyKey: "policy-rollback-key-1", Reason: "restore known-good policy",
-		RequestID: "request-rollback-replay", Actor: actor,
-	})
-	if err != nil || !replayedRollback.Replayed || replayedRollback.Active.ETag != 3 {
-		t.Fatalf("rollback replay = %#v, %v", replayedRollback, err)
-	}
-	if _, err := service.PublishPolicy(ctx, ActivateRequest{
-		ChangeID: second.Change.ID, ExpectedETag: 1, IdempotencyKey: "policy-create-key-0002", Reason: "stale republish",
-		RequestID: "request-stale", Actor: actor,
-	}); !errors.Is(err, ErrConflict) {
-		t.Fatalf("stale publish = %v", err)
-	}
 	events, err := store.Audit().List(ctx, storage.AuditFilter{Limit: 100})
-	if err != nil || len(events) != 5 {
+	if err != nil || len(events) != 4 {
 		t.Fatalf("audit events = %d, %v", len(events), err)
 	}
 }
 
-func TestPolicyPublishAuditFailureRollsBackPointerAndBootstrapRetirement(t *testing.T) {
+func TestPolicyPublishAuditFailureAbortsPointerAndBootstrapRetirement(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
 	now := time.Date(2026, 8, 10, 16, 0, 0, 0, time.UTC)
@@ -118,8 +96,8 @@ func TestPolicyPublishAuditFailureRollsBackPointerAndBootstrapRetirement(t *test
 	service.now = func() time.Time { return now }
 	actor := Actor{PrincipalID: principal.ID, Authentication: adminauthorization.AuthenticationNormal}
 	draft := createPolicyDraft(t, service, PolicyDraftRequest{
-		Snapshot: policySnapshot(principal.ID), IdempotencyKey: "audit-rollback-key-1",
-		Reason: "prepare rollback test", RequestID: "request-draft", Actor: actor,
+		Snapshot: policySnapshot(principal.ID), IdempotencyKey: "audit-failure-key-1",
+		Reason: "prepare audit failure test", RequestID: "request-draft", Actor: actor,
 	})
 	collision := uuid.NewString()
 	if err := store.Audit().Append(ctx, storage.AuditEvent{
@@ -129,23 +107,23 @@ func TestPolicyPublishAuditFailureRollsBackPointerAndBootstrapRetirement(t *test
 	}
 	service.newID = func() string { return collision }
 	if _, err := service.PublishPolicy(ctx, ActivateRequest{
-		ChangeID: draft.Change.ID, ExpectedETag: 0, IdempotencyKey: "audit-rollback-key-1", Reason: "must roll back",
+		ChangeID: draft.Change.ID, IdempotencyKey: "audit-failure-key-1", Reason: "must remain atomic",
 		RequestID: "request-publish", Actor: actor,
 	}); err == nil {
 		t.Fatal("publish succeeded when audit insert failed")
 	}
-	if _, err := store.ActiveManagementRevisions().Get(
+	if _, err := store.ActiveManagementConfigs().Get(
 		ctx, storage.ManagementConfigurationPolicy, storage.ManagementPolicyID,
 	); !errors.Is(err, storage.ErrNotFound) {
-		t.Fatalf("rolled-back active pointer lookup = %v", err)
+		t.Fatalf("active pointer after aborted publish = %v", err)
 	}
 	retired, err := store.ManagementState().BootstrapRetired(ctx)
 	if err != nil || retired {
-		t.Fatalf("bootstrap retired after rollback = %t, %v", retired, err)
+		t.Fatalf("bootstrap retired after aborted publish = %t, %v", retired, err)
 	}
 	change, err := store.ConfigChangeRequests().GetByID(ctx, draft.Change.ID)
 	if err != nil || change.Status != storage.ChangeStatusValidated {
-		t.Fatalf("change after rollback = %#v, %v", change, err)
+		t.Fatalf("change after aborted publish = %#v, %v", change, err)
 	}
 }
 
@@ -159,7 +137,7 @@ func TestBreakGlassActorCanCreateAndPublishWithoutPrincipalRow(t *testing.T) {
 		Reason: "recover formal administration", RequestID: "request-break-glass-create", Actor: actor,
 	})
 	activation, err := service.PublishPolicy(context.Background(), ActivateRequest{
-		ChangeID: draft.Change.ID, ExpectedETag: 0, IdempotencyKey: "break-glass-policy-key", Reason: "recover formal administration",
+		ChangeID: draft.Change.ID, IdempotencyKey: "break-glass-policy-key", Reason: "recover formal administration",
 		RequestID: "request-break-glass-publish", Actor: actor,
 	})
 	if err != nil || activation.Active.UpdatedBy != storage.ManagementActorBreakGlass ||

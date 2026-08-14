@@ -861,7 +861,7 @@ export function ServerAccessView({
         profile={profile}
         discovery={discovery}
         inventory={inventory}
-        userName={profile.lastUserName}
+        userName={auth.userName}
         busy={Boolean(busy)}
         dataPlaneError={dataPlaneError}
         dataPlaneReason={dataPlaneReason}
@@ -1049,7 +1049,7 @@ export function ServerAccessView({
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge variant="outline"><Server size={12} />{profile?.displayName || discovery?.serviceId}</Badge>
-                    <Badge variant="outline"><UserRound size={12} />{profile?.lastUserName || "Authenticated user"}</Badge>
+                    <Badge variant="outline"><UserRound size={12} />{auth.userName || "Authenticated user"}</Badge>
                     <Badge variant="outline">Kubernetes {inventory.kubernetesVersion}</Badge>
                     {inventory.gatewayVersion ? <Badge variant="outline">Gateway {inventory.gatewayVersion}</Badge> : null}
                     {inventory.session ? <Badge variant="outline">Session {inventory.session.state}</Badge> : null}

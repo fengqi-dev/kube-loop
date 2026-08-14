@@ -38,7 +38,7 @@ const (
 	operatorImageRepository     = "kube-loop-operator"
 	developmentNamespace        = "kubeloop-dev"
 	developmentRelease          = "kubeloop-dev"
-	developmentStorageBaseline  = "18"
+	developmentStorageBaseline  = "21"
 )
 
 func main() {
@@ -326,7 +326,12 @@ func deployDevelopmentStack(
 	if err := applyNamespace(root, developmentNamespace); err != nil {
 		return "", err
 	}
-	if err := resetDevelopmentStorageForBaseline(root, materialDirectory); err != nil {
+	// Recover Helm before resetting storage. A rollback may briefly start an old
+	// Control Plane and initialize its old breaking baseline on a fresh volume.
+	if err := recoverDevelopmentHelmRelease(root); err != nil {
+		return "", err
+	}
+	if err := resetDevelopmentStorageForBaseline(root, contextName, materialDirectory); err != nil {
 		return "", err
 	}
 	relaySecret := developmentRelease + "-relay"
@@ -365,9 +370,6 @@ func deployDevelopmentStack(
 		return "", err
 	}
 	chart := filepath.Join(root, "charts", "kubeloop")
-	if err := recoverDevelopmentHelmRelease(root); err != nil {
-		return "", err
-	}
 	arguments := []string{
 		"upgrade", "--install", developmentRelease, chart,
 		"--namespace", developmentNamespace,
@@ -466,13 +468,19 @@ func recoverDevelopmentHelmRelease(root string) error {
 	return nil
 }
 
-func resetDevelopmentStorageForBaseline(root, directory string) error {
+func resetDevelopmentStorageForBaseline(root, contextName, directory string) error {
 	marker := filepath.Join(directory, "storage-baseline")
 	current, err := os.ReadFile(marker)
 	if err == nil && strings.TrimSpace(string(current)) == developmentStorageBaseline {
 		return nil
 	}
 	pvc := developmentRelease + "-kubeloop-control-plane-data"
+	volumeOutput, _ := exec.Command(
+		"kubectl", "get", "persistentvolumeclaim", pvc,
+		"--namespace", developmentNamespace,
+		"--output", "jsonpath={.spec.volumeName}",
+	).Output()
+	volumeName := strings.TrimSpace(string(volumeOutput))
 	fmt.Printf("==> Resetting development SQLite storage for schema baseline %s\n", developmentStorageBaseline)
 	deployment := developmentRelease + "-kubeloop-control-plane"
 	if err := run(root, exec.Command(
@@ -494,6 +502,28 @@ func resetDevelopmentStorageForBaseline(root, directory string) error {
 		"--namespace", developmentNamespace, "--ignore-not-found", "--wait=true",
 	)); err != nil {
 		return fmt.Errorf("reset development SQLite storage: %w", err)
+	}
+	// Minikube's hostPath provisioner removes the backing directory while the PV
+	// is deleted. Waiting only for the PVC can race a Helm recreation with that
+	// cleanup and silently preserve an incompatible SQLite database.
+	if volumeName != "" {
+		if err := run(root, exec.Command(
+			"kubectl", "wait", "--for=delete", "persistentvolume/"+volumeName,
+			"--timeout=90s",
+		)); err != nil {
+			return fmt.Errorf("wait for development SQLite volume cleanup: %w", err)
+		}
+	}
+	if profile, ok := minikubeProfile(contextName); ok {
+		backingDirectory := filepath.Join(
+			"/tmp/hostpath-provisioner", developmentNamespace, pvc,
+		)
+		cleanup := "if [ -d " + backingDirectory + " ]; then sudo find " + backingDirectory + " -mindepth 1 -maxdepth 1 -delete; fi"
+		if err := run(root, exec.Command(
+			"minikube", "-p", profile, "ssh", "--", cleanup,
+		)); err != nil {
+			return fmt.Errorf("clear Minikube development SQLite directory: %w", err)
+		}
 	}
 	if err := os.WriteFile(marker, []byte(developmentStorageBaseline+"\n"), 0o600); err != nil {
 		return fmt.Errorf("record development storage baseline: %w", err)

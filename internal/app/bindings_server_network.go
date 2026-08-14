@@ -140,7 +140,7 @@ func (a *App) HelperStatus() helper.Status {
 
 func (a *App) InstallHelper() error {
 	a.appendLog("INFO", "installing privileged helper")
-	if err := helperinstall.EnsureInstall(a.context()); err != nil {
+	if err := helperinstall.EnsureCurrentInstall(a.context()); err != nil {
 		a.appendLog("ERROR", fmt.Sprintf("install privileged helper: %v", err))
 		return err
 	}

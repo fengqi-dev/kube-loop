@@ -32,14 +32,10 @@ func (repository *managementStateRepository) BootstrapRetired(ctx context.Contex
 
 func (repository *managementStateRepository) RetireBootstrap(
 	ctx context.Context,
-	revision uint64,
 	retiredAt time.Time,
 ) (bool, error) {
 	if repository == nil {
 		return false, errors.New("management state repository is unavailable")
-	}
-	if revision == 0 {
-		return false, errors.New("management bootstrap retirement revision must be positive")
 	}
 	if retiredAt.IsZero() {
 		return false, errors.New("management bootstrap retirement time is required")
@@ -47,24 +43,22 @@ func (repository *managementStateRepository) RetireBootstrap(
 	retiredAt = retiredAt.UTC()
 	query := repository.bind(`
 		INSERT INTO management_metadata (
-			id, bootstrap_retired_at, bootstrap_retired_revision, updated_at
-		) VALUES (?, ?, ?, ?)
+			id, bootstrap_retired_at, updated_at
+		) VALUES (?, ?, ?)
 		ON CONFLICT (id) DO UPDATE SET
 			bootstrap_retired_at = excluded.bootstrap_retired_at,
-			bootstrap_retired_revision = excluded.bootstrap_retired_revision,
 			updated_at = excluded.updated_at
 		WHERE management_metadata.bootstrap_retired_at IS NULL
 	`)
 	if repository.backend == BackendMySQL {
 		query = `INSERT INTO management_metadata (
-			id, bootstrap_retired_at, bootstrap_retired_revision, updated_at
-		) VALUES (?, ?, ?, ?)
+			id, bootstrap_retired_at, updated_at
+		) VALUES (?, ?, ?)
 		ON DUPLICATE KEY UPDATE
-			bootstrap_retired_revision = IF(bootstrap_retired_at IS NULL, VALUES(bootstrap_retired_revision), bootstrap_retired_revision),
 			updated_at = IF(bootstrap_retired_at IS NULL, VALUES(updated_at), updated_at),
 			bootstrap_retired_at = IF(bootstrap_retired_at IS NULL, VALUES(bootstrap_retired_at), bootstrap_retired_at)`
 	}
-	result, err := repository.executor.ExecContext(ctx, query, 1, formatTime(retiredAt), revision, formatTime(retiredAt))
+	result, err := repository.executor.ExecContext(ctx, query, 1, formatTime(retiredAt), formatTime(retiredAt))
 	if err != nil {
 		return false, mapWriteError(err)
 	}

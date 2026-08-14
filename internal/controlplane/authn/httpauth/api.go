@@ -208,6 +208,9 @@ func (routes *Routes) localLogin(ctx *echo.Context) error {
 		var err error
 		principal, err = routes.fosite.AuthenticateLocal(ctx.Request().Context(), form.Get("username"), password, form.Get("second_factor"), requestID)
 		if err != nil {
+			if target := browserLoginErrorURL(form); target != "" {
+				return ctx.Redirect(http.StatusSeeOther, target)
+			}
 			return writeBrowserError(ctx)
 		}
 		sessionToken, sessionErr := routes.fosite.CreateBrowserSession(ctx.Request().Context(), principal, browserSessionTTL)
@@ -298,6 +301,21 @@ func duplicateParameter(values url.Values) bool {
 		}
 	}
 	return false
+}
+
+func browserLoginErrorURL(form url.Values) string {
+	raw := form.Get("return_to")
+	if !strings.HasPrefix(raw, "?") {
+		return ""
+	}
+	query, err := url.ParseQuery(strings.TrimPrefix(raw, "?"))
+	if err != nil || len(query["transaction"]) != 1 || len(query["csrf"]) != 1 ||
+		query.Get("transaction") == "" || query.Get("transaction") != form.Get("transaction") ||
+		query.Get("csrf") == "" || query.Get("csrf") != form.Get("csrf") {
+		return ""
+	}
+	query.Set("error", "authentication_failed")
+	return oauthPath + "/ui/?" + query.Encode()
 }
 
 func writeBrowserError(ctx *echo.Context) error {

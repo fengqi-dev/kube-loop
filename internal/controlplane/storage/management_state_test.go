@@ -18,23 +18,22 @@ func TestManagementBootstrapRetirementIsPersistentAndIrreversible(t *testing.T) 
 		t.Fatalf("initial retired = %t, error = %v", retired, err)
 	}
 	retiredAt := time.Date(2026, 8, 10, 15, 0, 0, 0, time.UTC)
-	changed, err := store.ManagementState().RetireBootstrap(ctx, 7, retiredAt)
+	changed, err := store.ManagementState().RetireBootstrap(ctx, retiredAt)
 	if err != nil || !changed {
 		t.Fatalf("first retirement changed = %t, error = %v", changed, err)
 	}
-	changed, err = store.ManagementState().RetireBootstrap(ctx, 8, retiredAt.Add(time.Hour))
+	changed, err = store.ManagementState().RetireBootstrap(ctx, retiredAt.Add(time.Hour))
 	if err != nil || changed {
 		t.Fatalf("second retirement changed = %t, error = %v", changed, err)
 	}
 	var storedAt string
-	var storedRevision uint64
 	if err := store.db.QueryRowContext(ctx,
-		`SELECT bootstrap_retired_at, bootstrap_retired_revision FROM management_metadata WHERE id = 1`,
-	).Scan(&storedAt, &storedRevision); err != nil {
+		`SELECT bootstrap_retired_at FROM management_metadata WHERE id = 1`,
+	).Scan(&storedAt); err != nil {
 		t.Fatal(err)
 	}
-	if storedAt != formatTime(retiredAt) || storedRevision != 7 {
-		t.Fatalf("retirement marker = %q revision %d", storedAt, storedRevision)
+	if storedAt != formatTime(retiredAt) {
+		t.Fatalf("retirement marker = %q", storedAt)
 	}
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
@@ -46,11 +45,11 @@ func TestManagementBootstrapRetirementIsPersistentAndIrreversible(t *testing.T) 
 }
 
 func TestManagementBootstrapRetirementRollsBackWithTransaction(t *testing.T) {
-	store := openSQLiteTestStore(t, filepath.Join(t.TempDir(), "management-rollback.db"))
+	store := openSQLiteTestStore(t, filepath.Join(t.TempDir(), "management-transaction.db"))
 	ctx := context.Background()
 	wantError := errors.New("publish failed")
 	err := store.WithinTransaction(ctx, func(repositories Repositories) error {
-		changed, retireErr := repositories.ManagementState().RetireBootstrap(ctx, 1, time.Now().UTC())
+		changed, retireErr := repositories.ManagementState().RetireBootstrap(ctx, time.Now().UTC())
 		if retireErr != nil || !changed {
 			t.Fatalf("transaction retirement changed = %t, error = %v", changed, retireErr)
 		}
@@ -79,7 +78,7 @@ func TestManagementStateDrivesBootstrapAuthorizationFailClosed(t *testing.T) {
 	if decision := engine.Authorize(context.Background(), subject, request); !decision.Allowed {
 		t.Fatalf("initial bootstrap decision = %#v", decision)
 	}
-	if _, err := store.ManagementState().RetireBootstrap(context.Background(), 1, time.Now().UTC()); err != nil {
+	if _, err := store.ManagementState().RetireBootstrap(context.Background(), time.Now().UTC()); err != nil {
 		t.Fatal(err)
 	}
 	if decision := engine.Authorize(context.Background(), subject, request); decision.Allowed || decision.Reason != adminauthorization.ReasonBootstrapRetired {
@@ -95,10 +94,7 @@ func TestManagementStateDrivesBootstrapAuthorizationFailClosed(t *testing.T) {
 
 func TestManagementBootstrapRetirementRejectsInvalidInput(t *testing.T) {
 	store := openSQLiteTestStore(t, filepath.Join(t.TempDir(), "management-invalid.db"))
-	if _, err := store.ManagementState().RetireBootstrap(context.Background(), 0, time.Now()); err == nil {
-		t.Fatal("zero retirement revision succeeded")
-	}
-	if _, err := store.ManagementState().RetireBootstrap(context.Background(), 1, time.Time{}); err == nil {
+	if _, err := store.ManagementState().RetireBootstrap(context.Background(), time.Time{}); err == nil {
 		t.Fatal("zero retirement time succeeded")
 	}
 }

@@ -1,4 +1,4 @@
-package revision
+package managementconfig
 
 import (
 	"context"
@@ -11,7 +11,7 @@ import (
 	"github.com/google/uuid"
 )
 
-func TestApplyDelegationConstrainsScopeAndCreatesImmutableRevision(t *testing.T) {
+func TestApplyDelegationConstrainsScopeAndCreatesConfig(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
 	now := time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC)
@@ -39,11 +39,11 @@ func TestApplyDelegationConstrainsScopeAndCreatesImmutableRevision(t *testing.T)
 			ManagedBy: adminauthorization.ManagedByPlatform,
 			Scope:     adminauthorization.BindingScope{Type: adminauthorization.ScopePlatform},
 		},
-		Namespace: "team-a", ExpectedETag: published.Active.ETag,
+		Namespace:      "team-a",
 		IdempotencyKey: "delegation-team-a-read-key",
 		Reason:         "delegate namespace read access", RequestID: uuid.NewString(), Actor: actor,
 	})
-	if err != nil || delegated.Active.Revision <= published.Active.Revision || delegated.Active.ETag != published.Active.ETag+1 {
+	if err != nil || delegated.Active.ObjectID == published.Active.ObjectID {
 		t.Fatalf("delegation = %#v, %v", delegated, err)
 	}
 	state, err := service.CurrentPolicy(ctx)
@@ -60,8 +60,8 @@ func TestApplyDelegationConstrainsScopeAndCreatesImmutableRevision(t *testing.T)
 		stored.Scope.Type != adminauthorization.ScopeNamespaces || len(stored.Scope.Names) != 1 || stored.Scope.Names[0] != "team-a" {
 		t.Fatalf("stored delegated binding = %#v", stored)
 	}
-	if _, err := store.AdminPolicyRevisions().Get(ctx, published.Active.Revision); err != nil {
-		t.Fatalf("prior immutable revision was lost: %v", err)
+	if _, err := store.AdminPolicyConfigs().Get(ctx, published.Active.ObjectID); err != nil {
+		t.Fatalf("prior configuration was lost: %v", err)
 	}
 	replayed, err := service.ApplyDelegation(ctx, DelegationRequest{
 		Binding: &adminauthorization.Binding{
@@ -70,11 +70,11 @@ func TestApplyDelegationConstrainsScopeAndCreatesImmutableRevision(t *testing.T)
 			ManagedBy: adminauthorization.ManagedByPlatform,
 			Scope:     adminauthorization.BindingScope{Type: adminauthorization.ScopePlatform},
 		},
-		Namespace: "team-a", ExpectedETag: published.Active.ETag,
+		Namespace:      "team-a",
 		IdempotencyKey: "delegation-team-a-read-key",
 		Reason:         "delegate namespace read access", RequestID: uuid.NewString(), Actor: actor,
 	})
-	if err != nil || !replayed.Replayed || replayed.Active.Revision != delegated.Active.Revision || replayed.Active.ETag != delegated.Active.ETag {
+	if err != nil || !replayed.Replayed || replayed.Active.ObjectID != delegated.Active.ObjectID {
 		t.Fatalf("delegation replay = %#v, %v", replayed, err)
 	}
 }
@@ -91,7 +91,7 @@ func TestApplyDelegationRejectsEscalationAndCrossNamespaceMutation(t *testing.T)
 		Snapshot: policySnapshot(principal.ID), IdempotencyKey: "delegation-escalation-policy-key",
 		Reason: "establish namespace administrator", RequestID: uuid.NewString(), Actor: actor,
 	})
-	published, err := service.PublishPolicy(ctx, ActivateRequest{
+	_, err := service.PublishPolicy(ctx, ActivateRequest{
 		ChangeID: draft.Change.ID, IdempotencyKey: "delegation-escalation-policy-key",
 		Reason: "publish namespace administrator", RequestID: uuid.NewString(), Actor: actor,
 	})
@@ -103,7 +103,7 @@ func TestApplyDelegationRejectsEscalationAndCrossNamespaceMutation(t *testing.T)
 			ID: uuid.NewString(), Subject: adminauthorization.SubjectRef{Type: adminauthorization.SubjectPrincipal, PrincipalID: uuid.NewString()},
 			RoleID: adminauthorization.RolePlatformAdmin,
 		},
-		Namespace: "team-a", ExpectedETag: published.Active.ETag,
+		Namespace:      "team-a",
 		IdempotencyKey: "delegation-platform-escalation-key",
 		Reason:         "attempt platform escalation", RequestID: uuid.NewString(), Actor: actor,
 	})
@@ -112,11 +112,11 @@ func TestApplyDelegationRejectsEscalationAndCrossNamespaceMutation(t *testing.T)
 	}
 
 	validID := uuid.NewString()
-	created, err := service.ApplyDelegation(ctx, DelegationRequest{
+	_, err = service.ApplyDelegation(ctx, DelegationRequest{
 		Binding: &adminauthorization.Binding{
 			ID: validID, Subject: adminauthorization.SubjectRef{Type: adminauthorization.SubjectPrincipal, PrincipalID: uuid.NewString()},
 			RoleID: adminauthorization.RoleNamespaceViewer,
-		}, Namespace: "team-a", ExpectedETag: published.Active.ETag,
+		}, Namespace: "team-a",
 		IdempotencyKey: "delegation-team-a-create-key",
 		Reason:         "create team a delegation", RequestID: uuid.NewString(), Actor: actor,
 	})
@@ -124,7 +124,7 @@ func TestApplyDelegationRejectsEscalationAndCrossNamespaceMutation(t *testing.T)
 		t.Fatal(err)
 	}
 	_, err = service.ApplyDelegation(ctx, DelegationRequest{
-		DeleteID: validID, Namespace: "team-b", ExpectedETag: created.Active.ETag,
+		DeleteID: validID, Namespace: "team-b",
 		IdempotencyKey: "delegation-cross-namespace-delete-key",
 		Reason:         "cross namespace delete attempt", RequestID: uuid.NewString(), Actor: actor,
 	})

@@ -18,7 +18,8 @@ import (
 )
 
 const (
-	helperServiceName = "kubeloop-helper"
+	helperServiceName     = "kubeloop-helper"
+	supervisorServiceName = "kubeloop-supervisor"
 )
 
 var (
@@ -49,12 +50,32 @@ func SetBundledFile(name string, content []byte) {
 	bundledHashes[name] = hex.EncodeToString(sum[:])
 }
 
-// EnsureInstall installs or upgrades the helper when missing/outdated, then waits for ping.
+// EnsureInstall makes the helper available for automatic TUN startup. Release
+// builds always require the installed binary to match the bundled helper. Dev
+// builds reuse a healthy, protocol-compatible helper so wails dev does not
+// request administrator authorization after every helper rebuild.
 func EnsureInstall(ctx context.Context) error {
+	return ensureInstall(ctx, false)
+}
+
+// EnsureCurrentInstall installs or upgrades to the exact bundled helper. Use it
+// for explicit user-driven installs and E2E setup where binary drift must not be
+// accepted, including in development builds.
+func EnsureCurrentInstall(ctx context.Context) error {
+	return ensureInstall(ctx, true)
+}
+
+func ensureInstall(ctx context.Context, requireCurrentBinary bool) error {
 	ensureInstallMu.Lock()
 	defer ensureInstallMu.Unlock()
 
 	status := helper.GetStatus(ctx)
+	enforceBinaryMatch := mustMatchBundledHelper(requireCurrentBinary, helper.IsDevBuild())
+	if !enforceBinaryMatch && canReuseInstalledHelper(
+		status, helper.Version, helperprotocol.Version, false, false,
+	) {
+		return nil
+	}
 	source, locateErr := LocateBundledHelper()
 	needsBinaryUpdate := false
 	if locateErr == nil {
@@ -64,8 +85,9 @@ func EnsureInstall(ctx context.Context) error {
 			return hashErr
 		}
 	}
-	if status.Running && status.Version == helper.Version &&
-		status.Protocol == helperprotocol.Version && status.CoreReady && !needsBinaryUpdate {
+	if canReuseInstalledHelper(
+		status, helper.Version, helperprotocol.Version, enforceBinaryMatch, needsBinaryUpdate,
+	) && !requiresSupervisorCheck(enforceBinaryMatch) {
 		return nil
 	}
 	if locateErr != nil {
@@ -87,7 +109,7 @@ func EnsureInstall(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := ElevateInstall(ctx, source, sourceSHA256, token, currentUID(), home, singBoxPath); err != nil {
+	if err := installCurrentHelper(ctx, source, sourceSHA256, token, currentUID(), home, singBoxPath); err != nil {
 		return err
 	}
 	client := &helper.Client{Token: token}
@@ -104,6 +126,24 @@ func EnsureInstall(ctx context.Context) error {
 		}
 		return response, pingErr
 	})
+}
+
+func mustMatchBundledHelper(requireCurrentBinary, developmentBuild bool) bool {
+	return requireCurrentBinary || !developmentBuild
+}
+
+func canReuseInstalledHelper(
+	status helper.Status,
+	expectedVersion string,
+	expectedProtocol int,
+	enforceBinaryMatch bool,
+	needsBinaryUpdate bool,
+) bool {
+	if !status.Running || !status.CoreReady || status.Version != expectedVersion ||
+		status.Protocol != expectedProtocol {
+		return false
+	}
+	return !enforceBinaryMatch || !needsBinaryUpdate
 }
 
 func waitForHelperReady(
@@ -166,6 +206,10 @@ func Uninstall(ctx context.Context) error {
 
 func LocateBundledHelper() (string, error) {
 	return locateBundledTool(helperServiceName)
+}
+
+func LocateBundledSupervisor() (string, error) {
+	return locateBundledTool(supervisorServiceName)
 }
 
 func locateBundledTool(baseName string) (string, error) {
@@ -319,7 +363,10 @@ func materializeBundledFile(name string) (string, bool, error) {
 }
 
 func bundledHelperSHA256(source string) (string, error) {
-	name := helperBinaryName(helperServiceName)
+	return bundledToolSHA256(helperBinaryName(helperServiceName), source)
+}
+
+func bundledToolSHA256(name, source string) (string, error) {
 	bundledFilesMu.RLock()
 	if hash := bundledHashes[name]; hash != "" {
 		bundledFilesMu.RUnlock()

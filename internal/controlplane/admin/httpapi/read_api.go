@@ -11,8 +11,8 @@ import (
 
 	adminauthorization "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/authorization"
 	adminlocaluser "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/localuser"
+	adminconfig "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/managementconfig"
 	adminoperations "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/operations"
-	adminrevision "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/revision"
 	adminsession "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/session"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/relayregistry"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
@@ -41,9 +41,9 @@ type handlerOptions struct {
 	readAPI            *readAPI
 	tokenAuthenticator TokenAuthenticator
 	relayStatus        RelayStatusSource
-	policyService      *adminrevision.Service
+	policyService      *adminconfig.Service
 	policyReloader     PolicyReloader
-	providerService    *adminrevision.ProviderService
+	providerService    *adminconfig.ProviderService
 	operationService   *adminoperations.Service
 	localUsers         *adminlocaluser.Service
 	oauthRepositories  storage.Repositories
@@ -68,7 +68,7 @@ type PolicyReloader interface {
 	Load(context.Context) error
 }
 
-func WithPolicyAPI(service *adminrevision.Service, reloader PolicyReloader) Option {
+func WithPolicyAPI(service *adminconfig.Service, reloader PolicyReloader) Option {
 	return func(options *handlerOptions) error {
 		if service == nil || reloader == nil {
 			return errors.New("management policy API dependencies are required")
@@ -81,7 +81,7 @@ func WithPolicyAPI(service *adminrevision.Service, reloader PolicyReloader) Opti
 	}
 }
 
-func WithProviderAPI(service *adminrevision.ProviderService) Option {
+func WithProviderAPI(service *adminconfig.ProviderService) Option {
 	return func(options *handlerOptions) error {
 		if service == nil {
 			return errors.New("management Provider API service is required")
@@ -159,9 +159,9 @@ type readAPI struct {
 	status            StatusSource
 	relays            RelayStatusSource
 	build             BuildInfo
-	policy            *adminrevision.Service
+	policy            *adminconfig.Service
 	reloader          PolicyReloader
-	providers         *adminrevision.ProviderService
+	providers         *adminconfig.ProviderService
 	operations        *adminoperations.Service
 	localUsers        *adminlocaluser.Service
 	oauthRepositories storage.Repositories
@@ -184,18 +184,18 @@ var capabilityChecks = []adminauthorization.Request{
 	{Resource: adminauthorization.ResourceProvider, Operation: adminauthorization.OperationCreate},
 	{Resource: adminauthorization.ResourceProvider, Operation: adminauthorization.OperationValidate},
 	{Resource: adminauthorization.ResourceProvider, Operation: adminauthorization.OperationPublish},
-	{Resource: adminauthorization.ResourceProvider, Operation: adminauthorization.OperationRollback},
 	{Resource: adminauthorization.ResourceOAuthClient, Operation: adminauthorization.OperationList},
 	{Resource: adminauthorization.ResourceOAuthClient, Operation: adminauthorization.OperationCreate},
 	{Resource: adminauthorization.ResourceOAuthClient, Operation: adminauthorization.OperationUpdate},
 	{Resource: adminauthorization.ResourceOAuthClient, Operation: adminauthorization.OperationDelete},
 	{Resource: adminauthorization.ResourceOAuthClient, Operation: adminauthorization.OperationRevoke},
 	{Resource: adminauthorization.ResourceAssignment, Operation: adminauthorization.OperationList},
+	{Resource: adminauthorization.ResourceNamespacePolicy, Operation: adminauthorization.OperationRead},
+	{Resource: adminauthorization.ResourceNamespacePolicy, Operation: adminauthorization.OperationCreate},
 	{Resource: adminauthorization.ResourcePolicy, Operation: adminauthorization.OperationRead},
 	{Resource: adminauthorization.ResourcePolicy, Operation: adminauthorization.OperationCreate},
 	{Resource: adminauthorization.ResourcePolicy, Operation: adminauthorization.OperationDryRun},
 	{Resource: adminauthorization.ResourcePolicy, Operation: adminauthorization.OperationPublish},
-	{Resource: adminauthorization.ResourcePolicy, Operation: adminauthorization.OperationRollback},
 	{Resource: adminauthorization.ResourcePrincipal, Operation: adminauthorization.OperationList},
 	{Resource: adminauthorization.ResourceUser, Operation: adminauthorization.OperationList},
 	{Resource: adminauthorization.ResourceUser, Operation: adminauthorization.OperationCreate},
@@ -230,7 +230,6 @@ func (api *readAPI) routes(group *echo.Group) {
 		protected.POST("/authorization/dry-run", api.dryRunPolicy, api.permission(adminauthorization.ResourcePolicy, adminauthorization.OperationDryRun))
 		protected.POST("/authorization/drafts", api.createPolicyDraft, api.permission(adminauthorization.ResourcePolicy, adminauthorization.OperationCreate))
 		protected.POST("/authorization/changes/:changeID/publish", api.publishPolicy, api.permission(adminauthorization.ResourcePolicy, adminauthorization.OperationPublish))
-		protected.POST("/authorization/rollback", api.rollbackPolicy, api.permission(adminauthorization.ResourcePolicy, adminauthorization.OperationRollback))
 		protected.GET("/authorization/delegations", api.listDelegations)
 		protected.GET("/authorization/delegations/principals", api.listDelegationPrincipals)
 		protected.PUT("/authorization/delegations/:bindingID", api.putDelegation)
@@ -242,7 +241,6 @@ func (api *readAPI) routes(group *echo.Group) {
 		protected.POST("/providers/:providerID/validate", api.validateProvider, api.permission(adminauthorization.ResourceProvider, adminauthorization.OperationValidate))
 		protected.POST("/providers/:providerID/drafts", api.createProviderDraft, api.permission(adminauthorization.ResourceProvider, adminauthorization.OperationCreate))
 		protected.POST("/providers/:providerID/changes/:changeID/publish", api.publishProvider, api.permission(adminauthorization.ResourceProvider, adminauthorization.OperationPublish))
-		protected.POST("/providers/:providerID/rollback", api.rollbackProvider, api.permission(adminauthorization.ResourceProvider, adminauthorization.OperationRollback))
 	}
 	if api.oauthRepositories != nil {
 		protected.GET("/oauth-clients", api.listOAuthClients, api.permission(adminauthorization.ResourceOAuthClient, adminauthorization.OperationList))
@@ -358,8 +356,6 @@ func (api *readAPI) capabilities(ctx *echo.Context) error {
 		"authenticationType": subject.Authentication,
 		"capabilities":       capabilities,
 		"namespaceScopes":    namespaceScopes,
-		"policyRevision":     api.authorizer.Revision(),
-		"policyEtag":         api.authorizer.ETag(),
 	})
 	return nil
 }
@@ -424,9 +420,7 @@ func (api *readAPI) systemStatus(ctx *echo.Context) error {
 		"storage": map[string]any{
 			"status": "ready", "backend": api.status.Backend(), "schemaVersion": schemaVersion,
 		},
-		"managementPolicy": map[string]any{
-			"status": "ready", "revision": api.authorizer.Revision(), "etag": api.authorizer.ETag(),
-		},
+		"managementPolicy": map[string]any{"status": "ready"},
 	})
 	return nil
 }
@@ -450,10 +444,7 @@ func (api *readAPI) audit(
 	if subject.Authentication == adminauthorization.AuthenticationBreakGlass {
 		principalID = ""
 	}
-	metadata, err := json.Marshal(map[string]any{
-		"authenticationType": subject.Authentication,
-		"policyRevision":     api.authorizer.Revision(),
-	})
+	metadata, err := json.Marshal(map[string]any{"authenticationType": subject.Authentication})
 	if err != nil {
 		return
 	}

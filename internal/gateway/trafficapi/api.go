@@ -137,7 +137,7 @@ func (api *API) stream(ctx *echo.Context) error {
 	heartbeatDone := make(chan struct{})
 	go func() {
 		defer close(heartbeatDone)
-		api.heartbeat(runContext, cancel, mode, claim.TaskID)
+		api.heartbeat(runContext, cancel, connection, mode, claim.TaskID)
 	}()
 	if mode == trafficcontrol.ModeMirror {
 		var relay *mirrorrelay.Relay
@@ -186,6 +186,7 @@ func (api *API) BeginDrain() { api.draining.Store(true) }
 func (api *API) heartbeat(
 	ctx context.Context,
 	cancel context.CancelCauseFunc,
+	connection *websocket.Conn,
 	mode trafficcontrol.Mode,
 	taskID string,
 ) {
@@ -198,6 +199,11 @@ func (api *API) heartbeat(
 		case <-ticker.C:
 		}
 		requestContext, requestCancel := context.WithTimeout(ctx, api.config.HeartbeatEvery)
+		if err := connection.Ping(requestContext); err != nil {
+			requestCancel()
+			cancel(fmt.Errorf("traffic WebSocket keepalive: %w", err))
+			return
+		}
 		var response trafficcontrol.HeartbeatResponse
 		err := api.config.ControlPlane.DoJSON(requestContext, http.MethodPut, trafficcontrol.InternalPathPrefix+"/heartbeat", trafficcontrol.HeartbeatRequest{
 			Mode: mode, TaskID: taskID, RelayID: api.config.ControlPlane.RelayID(),

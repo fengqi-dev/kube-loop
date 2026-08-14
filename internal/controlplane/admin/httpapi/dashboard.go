@@ -31,8 +31,6 @@ type bootstrapSessionDocument struct {
 type bootstrapAuthorizationDocument struct {
 	Capabilities    []string         `json:"capabilities"`
 	NamespaceScopes []map[string]any `json:"namespaceScopes"`
-	PolicyRevision  uint64           `json:"policyRevision"`
-	PolicyETag      uint64           `json:"policyEtag"`
 }
 
 type bootstrapDocument struct {
@@ -77,7 +75,6 @@ func (api *readAPI) bootstrap(ctx *echo.Context) error {
 		},
 		Authorization: bootstrapAuthorizationDocument{
 			Capabilities: capabilities, NamespaceScopes: namespaceScopes,
-			PolicyRevision: api.authorizer.Revision(), PolicyETag: api.authorizer.ETag(),
 		},
 	})
 	return nil
@@ -139,10 +136,7 @@ func (api *readAPI) overview(ctx *echo.Context) error {
 				"status": "ready", "backend": api.status.Backend(), "schemaVersion": schemaVersion,
 			},
 		},
-		"security": map[string]any{
-			"authenticationType": subject.Authentication,
-			"policyRevision":     api.authorizer.Revision(), "policyEtag": api.authorizer.ETag(),
-		},
+		"security": map[string]any{"authenticationType": subject.Authentication},
 		"runtime": map[string]any{
 			"activeSessions": overviewCountDocument{
 				Count: min(len(activeSessions), overviewCountLimit-1), Truncated: len(activeSessions) == overviewCountLimit,

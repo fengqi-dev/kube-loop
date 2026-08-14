@@ -431,7 +431,7 @@ func newPrincipalTokenHandler(t *testing.T, bootstrap bool, extraOptions ...Opti
 		))
 	} else {
 		authorizer, err = adminauthorization.New(adminauthorization.Snapshot{
-			Version: adminauthorization.CurrentVersion, Revision: 1, Bindings: []adminauthorization.Binding{{
+			Version: adminauthorization.CurrentVersion, Bindings: []adminauthorization.Binding{{
 				ID: uuid.NewString(), Subject: adminauthorization.SubjectRef{Type: adminauthorization.SubjectPrincipal, PrincipalID: principal.ID}, RoleID: adminauthorization.RolePlatformAdmin,
 				Scope: adminauthorization.BindingScope{Type: adminauthorization.ScopePlatform}, ManagedBy: adminauthorization.ManagedByPlatform,
 			}},

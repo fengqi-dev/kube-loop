@@ -2,9 +2,11 @@ package trafficapi_test
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -22,6 +24,30 @@ type fakeController struct {
 	taskID   string
 	prepared chan trafficcontrol.PrepareRequest
 	finished chan trafficcontrol.FinishRequest
+}
+
+type writeCountingListener struct {
+	net.Listener
+	written atomic.Int64
+}
+
+func (listener *writeCountingListener) Accept() (net.Conn, error) {
+	connection, err := listener.Listener.Accept()
+	if err != nil {
+		return nil, err
+	}
+	return &writeCountingConnection{Conn: connection, written: &listener.written}, nil
+}
+
+type writeCountingConnection struct {
+	net.Conn
+	written *atomic.Int64
+}
+
+func (connection *writeCountingConnection) Write(contents []byte) (int, error) {
+	count, err := connection.Conn.Write(contents)
+	connection.written.Add(int64(count))
+	return count, err
 }
 
 func (controlPlane *fakeController) RelayID() string { return "relay-test" }
@@ -60,7 +86,7 @@ func TestExchangeWebSocketRunsOnGatewayAndReportsLifecycle(t *testing.T) {
 		finished: make(chan trafficcontrol.FinishRequest, 1),
 	}
 	api, err := trafficapi.New(trafficapi.Config{
-		GatewayIP: "127.0.0.1", ControlPlane: controlPlane, HeartbeatEvery: time.Hour,
+		GatewayIP: "127.0.0.1", ControlPlane: controlPlane, HeartbeatEvery: 20 * time.Millisecond,
 		VerifyRequest: func(request *http.Request) (relayticket.Claims, error) {
 			return relayticket.Claims{
 				PrincipalID: "user-1", Groups: []string{"developers"}, DeviceID: "device-1",
@@ -73,7 +99,10 @@ func TestExchangeWebSocketRunsOnGatewayAndReportsLifecycle(t *testing.T) {
 	}
 	router := echo.New()
 	api.RegisterRoutes(router)
-	server := httptest.NewServer(router)
+	server := httptest.NewUnstartedServer(router)
+	listener := &writeCountingListener{Listener: server.Listener}
+	server.Listener = listener
+	server.Start()
 	defer server.Close()
 
 	endpoint := "ws" + strings.TrimPrefix(server.URL, "http") + trafficcontrol.PublicPathPrefix + "/exchange/" + taskID
@@ -89,6 +118,21 @@ func TestExchangeWebSocketRunsOnGatewayAndReportsLifecycle(t *testing.T) {
 	frame, err := exchangestream.Decode(encoded)
 	if err != nil || frame.Type != exchangestream.Ready {
 		t.Fatalf("ready frame = %#v, err = %v", frame, err)
+	}
+	writtenAfterReady := listener.written.Load()
+	readContext, cancelRead := context.WithCancel(context.Background())
+	defer cancelRead()
+	readDone := make(chan error, 1)
+	go func() {
+		_, _, readErr := connection.Read(readContext)
+		readDone <- readErr
+	}()
+	deadline := time.Now().Add(time.Second)
+	for listener.written.Load() == writtenAfterReady && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if listener.written.Load() == writtenAfterReady {
+		t.Fatal("traffic WebSocket heartbeat did not write a keepalive frame")
 	}
 	stop, _ := exchangestream.Encode(exchangestream.Frame{Type: exchangestream.Stop})
 	if err := connection.Write(context.Background(), websocket.MessageBinary, stop); err != nil {

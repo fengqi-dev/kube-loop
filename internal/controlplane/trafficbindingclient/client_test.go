@@ -105,7 +105,7 @@ func (reader sessionReader) GetByID(_ context.Context, id string) (controlplanes
 
 func TestActivateWaitsForReadyAndIsIdempotent(t *testing.T) {
 	kubernetesClient := fakeClient(t)
-	manager, err := New(kubernetesClient, Config{PollInterval: 10 * time.Millisecond})
+	manager, err := New(kubernetesClient, Config{PollInterval: 10 * time.Millisecond, ControlPlaneID: "control-plane-a"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +137,9 @@ func TestActivateWaitsForReadyAndIsIdempotent(t *testing.T) {
 	if err := <-statusDone; err != nil {
 		t.Fatal(err)
 	}
-	if ready.Name != name || ready.Labels[taskIDLabel] != binding.Spec.TaskID || ready.Labels[sessionIDLabel] != binding.Spec.SessionID {
+	if ready.Name != name || ready.Labels[taskIDLabel] != binding.Spec.TaskID ||
+		ready.Labels[sessionIDLabel] != binding.Spec.SessionID ||
+		ready.Labels[controlPlaneIDLabel] != manager.controlPlaneID {
 		t.Fatalf("unexpected ready binding: %#v", ready.ObjectMeta)
 	}
 	if _, managed, err := manager.Activate(context.Background(), binding); err != nil || !managed {
@@ -196,10 +198,15 @@ func TestReconcilerDeletesOnlyOrphanedBindings(t *testing.T) {
 	}
 	live := testBinding()
 	orphan := testBinding()
-	for _, binding := range []*trafficv1alpha1.TrafficBinding{live, orphan} {
+	foreign := testBinding()
+	for _, binding := range []*trafficv1alpha1.TrafficBinding{live, orphan, foreign} {
 		binding.Name, _ = NameForTask(binding.Spec.TaskID)
 		binding.Labels = map[string]string{
-			managedByLabel: managedByValue, taskIDLabel: binding.Spec.TaskID, sessionIDLabel: binding.Spec.SessionID,
+			managedByLabel: managedByValue, controlPlaneIDLabel: manager.controlPlaneID,
+			taskIDLabel: binding.Spec.TaskID, sessionIDLabel: binding.Spec.SessionID,
+		}
+		if binding == foreign {
+			binding.Labels[controlPlaneIDLabel] = "control-plane-b"
 		}
 		if err := kubernetesClient.Create(context.Background(), binding); err != nil {
 			t.Fatal(err)
@@ -227,6 +234,9 @@ func TestReconcilerDeletesOnlyOrphanedBindings(t *testing.T) {
 	if err := kubernetesClient.Get(context.Background(), client.ObjectKeyFromObject(orphan), &trafficv1alpha1.TrafficBinding{}); err == nil {
 		t.Fatal("orphaned binding still exists")
 	}
+	if err := kubernetesClient.Get(context.Background(), client.ObjectKeyFromObject(foreign), &trafficv1alpha1.TrafficBinding{}); err != nil {
+		t.Fatalf("foreign Control Plane binding was removed: %v", err)
+	}
 }
 
 func TestReconcilerClaimsStaleTaskAndLetsOperatorFinalizerOwnCleanup(t *testing.T) {
@@ -239,7 +249,8 @@ func TestReconcilerClaimsStaleTaskAndLetsOperatorFinalizerOwnCleanup(t *testing.
 	binding.Spec.Mode = trafficv1alpha1.TrafficBindingModeExchange
 	binding.Name, _ = NameForTask(binding.Spec.TaskID)
 	binding.Labels = map[string]string{
-		managedByLabel: managedByValue, taskIDLabel: binding.Spec.TaskID, sessionIDLabel: binding.Spec.SessionID,
+		managedByLabel: managedByValue, controlPlaneIDLabel: manager.controlPlaneID,
+		taskIDLabel: binding.Spec.TaskID, sessionIDLabel: binding.Spec.SessionID,
 	}
 	if err := kubernetesClient.Create(context.Background(), binding); err != nil {
 		t.Fatal(err)
@@ -268,6 +279,25 @@ func TestReconcilerClaimsStaleTaskAndLetsOperatorFinalizerOwnCleanup(t *testing.
 	getErr := kubernetesClient.Get(context.Background(), client.ObjectKeyFromObject(binding), &trafficv1alpha1.TrafficBinding{})
 	if !apierrors.IsNotFound(getErr) {
 		t.Fatalf("stale TrafficBinding get error = %v, want not found", getErr)
+	}
+}
+
+func TestControlPlaneIDProducesStableLabelValues(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		want  string
+	}{
+		{name: "default", value: "", want: "kubeloop"},
+		{name: "readable", value: " kubeloop-dev ", want: "kubeloop-dev"},
+		{name: "invalid", value: "control plane", want: "sha256-a32b176c56bea1f4"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := controlPlaneID(test.value); got != test.want {
+				t.Fatalf("controlPlaneID(%q) = %q, want %q", test.value, got, test.want)
+			}
+		})
 	}
 }
 

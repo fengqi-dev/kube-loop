@@ -14,7 +14,7 @@ var capabilityCatalog = []Capability{
 	"platform.identity.providers.read", "platform.identity.providers.manage", "platform.identity.principals.read",
 	"platform.identity.users.read", "platform.identity.users.manage", "platform.oauth-clients.read", "platform.oauth-clients.manage",
 	"platform.authorization.read", "platform.authorization.manage", "platform.authorization.publish",
-	"platform.authorization.rollback", "platform.authorization.simulate", "platform.sessions.read", "platform.sessions.revoke",
+	"platform.authorization.simulate", "platform.sessions.read", "platform.sessions.revoke",
 	"platform.tasks.read", "platform.tasks.stop", "platform.relays.read", "platform.relays.manage",
 	"platform.audit.read", "platform.audit.export", "platform.diagnostics.read",
 	CapabilityNamespaceAccess, "namespace.resources.read", "namespace.exec.open", "namespace.port-forward.open",
@@ -118,8 +118,6 @@ func capabilityForManagement(resource Resource, operation Operation) string {
 		switch operation {
 		case OperationPublish:
 			return "platform.authorization.publish"
-		case OperationRollback:
-			return "platform.authorization.rollback"
 		case OperationDryRun, OperationValidate:
 			return "platform.authorization.simulate"
 		}
