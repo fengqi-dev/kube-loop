@@ -4,6 +4,7 @@ import "strings"
 
 var postgresqlBooleanColumns = map[string]struct{}{
 	"enabled": {}, "bootstrap_complete": {}, "public": {}, "trusted": {}, "builtin": {}, "primary_email": {},
+	"system": {},
 }
 
 var postgresqlJSONColumns = map[string]struct{}{
