@@ -31,7 +31,7 @@ spec:
     app.kubernetes.io/component: control-plane
   ports:
     - name: management
-      port: {{ .Values.controlPlane.management.servicePort }}
+      port: {{ .Values.controlPlane.admin.servicePort }}
       targetPort: management
       protocol: TCP
       appProtocol: http

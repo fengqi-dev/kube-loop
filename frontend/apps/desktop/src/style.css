@@ -311,6 +311,67 @@
   }
 }
 
+@keyframes connection-toggle-led-flicker {
+  0%,
+  18%,
+  54%,
+  100% {
+    opacity: 1;
+    box-shadow:
+      0 0 6px var(--primary),
+      0 0 17px color-mix(in srgb, var(--primary) 70%, transparent),
+      0 0 32px color-mix(in srgb, var(--primary) 35%, transparent);
+  }
+  20%,
+  50% {
+    opacity: 0.52;
+    box-shadow: 0 0 7px color-mix(in srgb, var(--primary) 45%, transparent);
+  }
+}
+
+@keyframes connection-toggle-led-ready {
+  0%,
+  100% {
+    transform: scale(0.94);
+  }
+  50% {
+    transform: scale(1.08);
+  }
+}
+
+@keyframes connection-toggle-loading-dot {
+  0%,
+  70%,
+  100% {
+    opacity: 0.4;
+    transform: translateY(1px) scale(0.82);
+  }
+  35% {
+    opacity: 1;
+    transform: translateY(-2px) scale(1);
+  }
+}
+
+.connection-toggle-led-flicker {
+  animation: connection-toggle-led-flicker 520ms steps(2) infinite;
+}
+
+.connection-toggle-led-ready {
+  animation: connection-toggle-led-ready 1.9s ease-in-out infinite;
+}
+
+.connection-toggle-loading-dot {
+  animation: connection-toggle-loading-dot 840ms ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .connection-toggle-led-flicker,
+  .connection-toggle-led-ready,
+  .connection-toggle-loading-dot {
+    animation: none;
+  }
+}
+
 .connection-magic-star {
   clip-path: polygon(
     50% 0%,

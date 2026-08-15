@@ -158,7 +158,7 @@ func registerRoute(group *echo.Group, method, path string, endpoint EndpointFunc
 	}
 }
 
-type EndpointFunc func(*echo.Context, controlplaneapi.Principal) *controlplaneapi.Error
+type EndpointFunc func(*echo.Context, controlplaneapi.Identity) *controlplaneapi.Error
 
 // Endpoint adapts an API endpoint to Echo and copies Echo v5 path values to the
 // standard request so transport-independent services can use Request.PathValue.
@@ -168,11 +168,11 @@ func Endpoint(function EndpointFunc) echo.HandlerFunc {
 		for _, value := range ctx.PathValues() {
 			request.SetPathValue(value.Name, value.Value)
 		}
-		principal, ok := controlplanemiddleware.PrincipalFromContext(request.Context())
+		identity, ok := controlplanemiddleware.IdentityFromContext(request.Context())
 		if !ok {
 			return &controlplaneapi.Error{Code: controlplaneapi.CodeUnauthenticated, Message: "authentication required"}
 		}
-		if apiError := function(ctx, principal); apiError != nil {
+		if apiError := function(ctx, identity); apiError != nil {
 			return apiError
 		}
 		return nil

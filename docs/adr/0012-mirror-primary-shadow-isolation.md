@@ -25,7 +25,7 @@ shadow would let local backpressure stall production traffic.
 
 ## Decision
 
-Mirror is a distinct Session- and Principal-owned Task, protocol and recovery
+Mirror is a distinct Session- and Identity-owned Task, protocol and recovery
 queue. It reuses the compensating Service-intercept resource mechanism, but not
 the Exchange data-path semantics.
 

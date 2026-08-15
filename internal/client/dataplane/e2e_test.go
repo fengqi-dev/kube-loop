@@ -118,7 +118,7 @@ func TestAuthenticatedWSSDataPlaneCarriesAuthorizedSOCKSTCPAndUDP(t *testing.T) 
 				return servermux.Identity{}, errors.New("missing RelayTicket")
 			}
 			return servermux.Identity{
-				PrincipalID: "principal", DeviceID: deviceID, SessionID: sessionID,
+				IdentityID: "identity", DeviceID: deviceID, SessionID: sessionID,
 				SessionGeneration: 1, Namespace: "development", NetworkSpecHash: hash,
 				ExpiresAt: time.Now().Add(time.Minute),
 			}, nil

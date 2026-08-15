@@ -17,7 +17,7 @@ const (
 // Kubernetes authorization returned by the Control Plane.
 type Snapshot struct {
 	SchemaVersion  int      `json:"schemaVersion"`
-	PrincipalID    string   `json:"principalId"`
+	IdentityID     string   `json:"identityId"`
 	Namespace      string   `json:"namespace"`
 	GatewayVersion string   `json:"gatewayVersion"`
 	Capabilities   []string `json:"capabilities"`
@@ -29,8 +29,8 @@ func Normalize(input Snapshot) (Snapshot, error) {
 	if input.SchemaVersion != SchemaVersion {
 		return Snapshot{}, errors.New("unsupported capability snapshot schema")
 	}
-	if !validOpaque(input.PrincipalID, 512) {
-		return Snapshot{}, errors.New("capability principal binding is invalid")
+	if !validOpaque(input.IdentityID, 512) {
+		return Snapshot{}, errors.New("capability identity binding is invalid")
 	}
 	if input.Namespace != strings.ToLower(strings.TrimSpace(input.Namespace)) ||
 		!dnsname.ValidLabel(input.Namespace) {

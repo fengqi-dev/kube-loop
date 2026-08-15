@@ -81,7 +81,7 @@ func TestOIDCLoopbackLoginUsesStatePKCEAndExchange(t *testing.T) {
 		t.Fatal(err)
 	}
 	if credential.AccessToken != "access-token" || credential.RefreshToken != "refresh-token" || credential.DeviceID != "device-1" ||
-		credential.PrincipalID != "principal-1" || credential.UserName != "Example User" {
+		credential.IdentityID != "identity-1" || credential.UserName != "Example User" {
 		t.Fatalf("credential = %#v", credential)
 	}
 	if !credential.RefreshExpiresAt.IsZero() {
@@ -155,7 +155,7 @@ func TestRefreshRevokeAndUnsafeTargets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if refreshed.PrincipalID != current.PrincipalID || refreshed.UserName != current.UserName {
+	if refreshed.IdentityID != current.IdentityID || refreshed.UserName != current.UserName {
 		t.Fatalf("refreshed identity = %#v", refreshed)
 	}
 	if err := client.Revoke(context.Background(), server.URL, current.RefreshToken); err != nil {
@@ -208,11 +208,11 @@ func credentialForTest() credentials.Credential {
 	return credentials.Credential{
 		TokenType: "Bearer", AccessToken: "old-access", RefreshToken: "old-refresh", DeviceID: "device-1",
 		AccessExpiresAt: time.Now().Add(time.Minute), RefreshExpiresAt: time.Now().Add(time.Hour),
-		PrincipalID: "principal-1", UserName: "Example User",
+		IdentityID: "identity-1", UserName: "Example User",
 	}
 }
 
 func testIDToken() string {
-	payload := base64.RawURLEncoding.EncodeToString([]byte(`{"sub":"principal-1","name":"Example User","email":"user@example.test"}`))
+	payload := base64.RawURLEncoding.EncodeToString([]byte(`{"sub":"identity-1","name":"Example User","email":"user@example.test"}`))
 	return "header." + payload + ".signature"
 }

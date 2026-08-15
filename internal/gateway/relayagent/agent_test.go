@@ -245,7 +245,7 @@ func TestTicketAuthenticatorAppliesAudienceAndRevocationAtomically(t *testing.T)
 	}
 	ticket, err := signer.Sign(relayticket.Claims{
 		Version: relayticket.Version, Issuer: "https://controlPlane.example", Audience: relayID,
-		PrincipalID: uuid.NewString(), DeviceID: uuid.NewString(), SessionID: sessionID, SessionGeneration: 1,
+		IdentityID: uuid.NewString(), DeviceID: uuid.NewString(), SessionID: sessionID, SessionGeneration: 1,
 		Namespace: "development", Operations: []string{"tunnel"}, NetworkSpecHash: strings.Repeat("b", 64),
 		TicketID: uuid.NewString(), IssuedAt: now.Unix(), NotBefore: now.Unix(), ExpiresAt: now.Add(30 * time.Second).Unix(),
 	})

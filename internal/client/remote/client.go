@@ -111,13 +111,13 @@ type capabilityAuthScope struct {
 }
 
 type capabilityBinding struct {
-	PrincipalID    string
+	IdentityID     string
 	GatewayVersion string
 }
 
 type capabilityCacheKey struct {
 	Scope          capabilityAuthScope
-	PrincipalID    string
+	IdentityID     string
 	Namespace      string
 	GatewayVersion string
 }
@@ -495,11 +495,11 @@ func (client *Client) cachedCapabilities(scope capabilityAuthScope, namespace st
 	client.capabilityMu.Lock()
 	defer client.capabilityMu.Unlock()
 	binding, ok := client.capabilityBind[scope]
-	if !ok || binding.PrincipalID == "" || binding.GatewayVersion == "" {
+	if !ok || binding.IdentityID == "" || binding.GatewayVersion == "" {
 		return Capabilities{}, false
 	}
 	key := capabilityCacheKey{
-		Scope: scope, PrincipalID: binding.PrincipalID, Namespace: namespace, GatewayVersion: binding.GatewayVersion,
+		Scope: scope, IdentityID: binding.IdentityID, Namespace: namespace, GatewayVersion: binding.GatewayVersion,
 	}
 	entry, ok := client.capabilityCache[key]
 	if !ok {
@@ -516,7 +516,7 @@ func (client *Client) storeCapabilities(scope capabilityAuthScope, value Capabil
 	now := client.now()
 	client.capabilityMu.Lock()
 	defer client.capabilityMu.Unlock()
-	binding := capabilityBinding{PrincipalID: value.PrincipalID, GatewayVersion: value.GatewayVersion}
+	binding := capabilityBinding{IdentityID: value.IdentityID, GatewayVersion: value.GatewayVersion}
 	if current, ok := client.capabilityBind[scope]; ok && current != binding {
 		client.evictCapabilityScopeLocked(scope)
 	}
@@ -537,7 +537,7 @@ func (client *Client) storeCapabilities(scope capabilityAuthScope, value Capabil
 		delete(client.capabilityCache, oldestKey)
 	}
 	key := capabilityCacheKey{
-		Scope: scope, PrincipalID: value.PrincipalID, Namespace: value.Namespace, GatewayVersion: value.GatewayVersion,
+		Scope: scope, IdentityID: value.IdentityID, Namespace: value.Namespace, GatewayVersion: value.GatewayVersion,
 	}
 	client.capabilityCache[key] = capabilityCacheEntry{
 		Value: cloneCapabilities(value), CachedAt: now, ExpiresAt: now.Add(client.capabilityTTL),

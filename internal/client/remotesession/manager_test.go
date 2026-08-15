@@ -225,6 +225,41 @@ func TestHeartbeatFailureBlocksTicketsUntilRefreshRecovers(t *testing.T) {
 	}
 }
 
+func TestConnectReplacesSessionRemovedByGateway(t *testing.T) {
+	gateway := &fakeGateway{}
+	manager, err := New(gateway, Config{HeartbeatInterval: time.Hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+	serverProfile := profile.Profile{ID: "service-1", BaseURL: "https://gateway.example.test"}
+	initial, err := manager.Connect(context.Background(), serverProfile, "development")
+	if err != nil {
+		t.Fatal(err)
+	}
+	gateway.mu.Lock()
+	gateway.heartbeatErr = &remote.APIError{Status: 404, Code: remote.CodeNotFound, Message: "resource not found"}
+	gateway.mu.Unlock()
+	if _, err := manager.Refresh(context.Background(), serverProfile.ID); err == nil {
+		t.Fatal("expected the removed Session heartbeat to fail")
+	}
+
+	gateway.mu.Lock()
+	gateway.heartbeatErr = nil
+	gateway.mu.Unlock()
+	replacement, err := manager.Connect(context.Background(), serverProfile, "development")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if replacement.ID == initial.ID {
+		t.Fatalf("reused removed Session %q", replacement.ID)
+	}
+	gateway.mu.Lock()
+	defer gateway.mu.Unlock()
+	if len(gateway.createKeys) != 2 {
+		t.Fatalf("created Sessions = %d, want 2", len(gateway.createKeys))
+	}
+}
+
 func TestShutdownReportsDisconnectFailureAndCanRetry(t *testing.T) {
 	gateway := &fakeGateway{}
 	manager, err := New(gateway, Config{HeartbeatInterval: time.Hour})

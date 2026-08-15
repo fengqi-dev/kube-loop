@@ -41,12 +41,12 @@ const (
 )
 
 type remoteSessionSource struct {
-	mu        sync.Mutex
-	signer    *relayticket.Signer
-	endpoint  string
-	principal string
-	device    string
-	session   clientremote.Session
+	mu       sync.Mutex
+	signer   *relayticket.Signer
+	endpoint string
+	identity string
+	device   string
+	session  clientremote.Session
 }
 
 func (source *remoteSessionSource) RelayTicketSource(string) func(context.Context) (clientremote.RelayTicket, error) {
@@ -56,7 +56,7 @@ func (source *remoteSessionSource) RelayTicketSource(string) func(context.Contex
 		now := time.Now().UTC().Truncate(time.Second)
 		ticket, err := source.signer.Sign(relayticket.Claims{
 			Version: relayticket.Version, Issuer: remoteIssuer, Audience: remoteRelayID,
-			PrincipalID: source.principal, DeviceID: source.device,
+			IdentityID: source.identity, DeviceID: source.device,
 			SessionID: source.session.ID, SessionGeneration: source.session.Generation,
 			Namespace: source.session.Namespace, NetworkSpecHash: source.session.NetworkSpecHash,
 			Operations: []string{"tunnel"}, TicketID: uuid.NewString(),
@@ -119,7 +119,7 @@ func TestRemoteGatewayTUNSurvivesSystemWakeRefresh(t *testing.T) {
 	}
 	source := &remoteSessionSource{
 		signer: signer, endpoint: "ws" + strings.TrimPrefix(server.URL, "http") + remotePath,
-		principal: uuid.NewString(), device: uuid.NewString(), session: session,
+		identity: uuid.NewString(), device: uuid.NewString(), session: session,
 	}
 	events := make(chan clientdataplane.StatusEvent, 16)
 	manager, err := clientdataplane.NewManager(source, clientdataplane.Config{
@@ -221,7 +221,7 @@ func startGateway(
 				return gatewaymux.Identity{}, err
 			}
 			return gatewaymux.Identity{
-				PrincipalID: claims.PrincipalID, DeviceID: claims.DeviceID, SessionID: claims.SessionID,
+				IdentityID: claims.IdentityID, DeviceID: claims.DeviceID, SessionID: claims.SessionID,
 				SessionGeneration: claims.SessionGeneration, Namespace: claims.Namespace,
 				NetworkSpecHash: claims.NetworkSpecHash, ExpiresAt: time.Unix(claims.ExpiresAt, 0).UTC(),
 			}, nil

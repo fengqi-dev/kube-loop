@@ -32,7 +32,7 @@ type localShellPodExecutor struct{}
 
 func (localShellPodExecutor) Exec(
 	ctx context.Context,
-	_ controlplaneapi.Principal,
+	_ controlplaneapi.Identity,
 	_ string,
 	spec execapi.Spec,
 	streams execapi.Streams,
@@ -44,7 +44,7 @@ func (localShellPodExecutor) Exec(
 
 func (executor *recordingPodExecutor) Exec(
 	_ context.Context,
-	_ controlplaneapi.Principal,
+	_ controlplaneapi.Identity,
 	_ string,
 	spec execapi.Spec,
 	streams execapi.Streams,
@@ -77,7 +77,7 @@ func TestKubernetesTransferExecutorUsesOnlyGeneratedQuotedCommands(t *testing.T)
 		RemotePath: remote, Size: uint64(len(contents)), Checksum: fmt.Sprintf("%x", checksum),
 		AllowedRoot: "/workspace",
 	}
-	outcome, err := executor.Upload(context.Background(), controlplaneapi.Principal{Subject: "user"}, "development", taskID, spec, bytes.NewReader(contents))
+	outcome, err := executor.Upload(context.Background(), controlplaneapi.Identity{Subject: "user"}, "development", taskID, spec, bytes.NewReader(contents))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,7 +152,7 @@ func TestKubernetesTransferExecutorRejectsParentSymlinkOutsideAllowedRoot(t *tes
 		RemotePath: filepath.ToSlash(filepath.Join(allowed, "escape", "data.bin")),
 		Size:       uint64(len(contents)), Checksum: fmt.Sprintf("%x", checksum), AllowedRoot: filepath.ToSlash(allowed),
 	}
-	if _, err := executor.Upload(context.Background(), controlplaneapi.Principal{Subject: "user"}, "development", "task", spec, bytes.NewReader(contents)); err == nil {
+	if _, err := executor.Upload(context.Background(), controlplaneapi.Identity{Subject: "user"}, "development", "task", spec, bytes.NewReader(contents)); err == nil {
 		t.Fatal("parent symlink outside allowed root was accepted")
 	}
 	if _, err := os.Lstat(filepath.Join(outside, "data.bin.kubeloop-task.part")); !os.IsNotExist(err) {
@@ -181,12 +181,12 @@ func TestKubernetesTransferExecutorNegotiatesAndResumesStablePartialUpload(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	offset, err := executor.UploadOffset(context.Background(), controlplaneapi.Principal{Subject: "user"}, "development", spec)
+	offset, err := executor.UploadOffset(context.Background(), controlplaneapi.Identity{Subject: "user"}, "development", spec)
 	if err != nil || offset != 7 {
 		t.Fatalf("offset = %d err = %v", offset, err)
 	}
 	spec.Offset = offset
-	outcome, err := executor.Upload(context.Background(), controlplaneapi.Principal{Subject: "user"}, "development", "new-task", spec, bytes.NewReader(contents[offset:]))
+	outcome, err := executor.Upload(context.Background(), controlplaneapi.Identity{Subject: "user"}, "development", "new-task", spec, bytes.NewReader(contents[offset:]))
 	if err != nil || outcome.Transferred != uint64(len(contents)) || outcome.Checksum != checksum {
 		t.Fatalf("outcome = %#v err = %v", outcome, err)
 	}

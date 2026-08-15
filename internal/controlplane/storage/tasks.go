@@ -21,17 +21,17 @@ func (repository *taskRepository) Create(ctx context.Context, task Task) error {
 		return err
 	}
 	query := repository.bind(`INSERT INTO tasks(
-		id, schema_version, principal_id, session_id, type, state, spec_json, result_json,
+		id, schema_version, identity_id, session_id, type, state, spec_json, result_json,
 		idempotency_key, created_at, updated_at, expires_at
 	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if repository.backend == BackendPostgreSQL {
 		query = `INSERT INTO tasks(
-			id, schema_version, principal_id, session_id, type, state, spec_json, result_json,
+			id, schema_version, identity_id, session_id, type, state, spec_json, result_json,
 			idempotency_key, created_at, updated_at, expires_at
 		) VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9, $10, $11, $12)`
 	}
 	_, err := repository.executor.ExecContext(ctx, query,
-		task.ID, task.SchemaVersion, task.PrincipalID, task.SessionID, task.Type, task.State,
+		task.ID, task.SchemaVersion, task.IdentityID, task.SessionID, task.Type, task.State,
 		string(task.Spec), nullableJSON(task.Result), task.IdempotencyKey,
 		formatTime(task.CreatedAt), formatTime(task.UpdatedAt), nullableTime(task.ExpiresAt),
 	)
@@ -42,7 +42,7 @@ func (repository *taskRepository) GetByID(ctx context.Context, id string) (Task,
 	if err := validateUUID(id, "task ID"); err != nil {
 		return Task{}, err
 	}
-	query := repository.bind(`SELECT id, schema_version, principal_id, session_id, type, state, spec_json,
+	query := repository.bind(`SELECT id, schema_version, identity_id, session_id, type, state, spec_json,
 		result_json, idempotency_key, created_at, updated_at, expires_at FROM tasks WHERE id = ?`)
 	task, err := scanTask(repository.executor.QueryRowContext(ctx, query, id))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -59,12 +59,12 @@ func (repository *taskRepository) List(ctx context.Context, filter TaskListFilte
 	if err != nil {
 		return nil, err
 	}
-	filter.PrincipalID = strings.TrimSpace(filter.PrincipalID)
+	filter.IdentityID = strings.TrimSpace(filter.IdentityID)
 	filter.SessionID = strings.TrimSpace(filter.SessionID)
 	filter.Namespace = strings.TrimSpace(filter.Namespace)
 	filter.Type = strings.TrimSpace(filter.Type)
-	if filter.PrincipalID != "" && validateUUID(filter.PrincipalID, "task principal ID") != nil {
-		return nil, errors.New("task principal filter is invalid")
+	if filter.IdentityID != "" && validateUUID(filter.IdentityID, "task identity ID") != nil {
+		return nil, errors.New("task identity filter is invalid")
 	}
 	if filter.SessionID != "" && validateUUID(filter.SessionID, "task session ID") != nil {
 		return nil, errors.New("task session filter is invalid")
@@ -78,13 +78,13 @@ func (repository *taskRepository) List(ctx context.Context, filter TaskListFilte
 	if filter.State != "" && !filter.State.Valid() {
 		return nil, errors.New("task state filter is invalid")
 	}
-	query := `SELECT t.id, t.schema_version, t.principal_id, t.session_id, t.type, t.state, t.spec_json,
+	query := `SELECT t.id, t.schema_version, t.identity_id, t.session_id, t.type, t.state, t.spec_json,
 		t.result_json, t.idempotency_key, t.created_at, t.updated_at, t.expires_at
 		FROM tasks AS t INNER JOIN sessions AS s ON s.id = t.session_id WHERE 1=1`
 	arguments := make([]any, 0, 13)
-	if filter.PrincipalID != "" {
-		query += ` AND t.principal_id = ?`
-		arguments = append(arguments, filter.PrincipalID)
+	if filter.IdentityID != "" {
+		query += ` AND t.identity_id = ?`
+		arguments = append(arguments, filter.IdentityID)
 	}
 	if filter.SessionID != "" {
 		query += ` AND t.session_id = ?`
@@ -172,7 +172,7 @@ func (repository *taskRepository) ListBySession(ctx context.Context, sessionID s
 	if limit <= 0 || limit > 1000 {
 		return nil, errors.New("task list limit must be between 1 and 1000")
 	}
-	query := repository.bind(`SELECT id, schema_version, principal_id, session_id, type, state, spec_json,
+	query := repository.bind(`SELECT id, schema_version, identity_id, session_id, type, state, spec_json,
 		result_json, idempotency_key, created_at, updated_at, expires_at
 		FROM tasks WHERE session_id = ? ORDER BY updated_at DESC, id ASC LIMIT ?`)
 	rows, err := repository.executor.QueryContext(ctx, query, sessionID, limit)
@@ -222,7 +222,7 @@ func (repository *taskRepository) ListStaleByTypeStates(
 		arguments = append(arguments, state)
 	}
 	arguments = append(arguments, formatTime(before), limit)
-	query := fmt.Sprintf(`SELECT id, schema_version, principal_id, session_id, type, state, spec_json,
+	query := fmt.Sprintf(`SELECT id, schema_version, identity_id, session_id, type, state, spec_json,
 		result_json, idempotency_key, created_at, updated_at, expires_at
 		FROM tasks WHERE type = ? AND state IN (%s) AND updated_at < ?
 		ORDER BY updated_at ASC, id ASC LIMIT ?`, strings.Join(placeholders, ","))
@@ -300,7 +300,7 @@ func normalizeTask(task *Task) error {
 	if err := validateUUID(task.ID, "task ID"); err != nil {
 		return err
 	}
-	if err := validateUUID(task.PrincipalID, "principal ID"); err != nil {
+	if err := validateUUID(task.IdentityID, "identity ID"); err != nil {
 		return err
 	}
 	if err := validateUUID(task.SessionID, "session ID"); err != nil {
@@ -347,7 +347,7 @@ func scanTask(row rowScanner) (Task, error) {
 		expiresAt            sql.NullString
 	)
 	if err := row.Scan(
-		&task.ID, &task.SchemaVersion, &task.PrincipalID, &task.SessionID, &task.Type,
+		&task.ID, &task.SchemaVersion, &task.IdentityID, &task.SessionID, &task.Type,
 		&task.State, &spec, &result, &task.IdempotencyKey, &createdAt, &updatedAt, &expiresAt,
 	); err != nil {
 		return Task{}, err

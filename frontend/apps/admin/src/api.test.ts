@@ -10,7 +10,10 @@ import {
   waitForAuditExport,
 } from "./api";
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  sessionStorage.clear();
+  vi.restoreAllMocks();
+});
 
 describe("resolveRequestPath", () => {
   it("places admin resources under the configured management base", () => {
@@ -26,6 +29,29 @@ describe("resolveRequestPath", () => {
 });
 
 describe("mutation", () => {
+  it("uses the CSRF cookie when a new tab has no session storage token", async () => {
+    vi.spyOn(document, "cookie", "get").mockReturnValue(
+      "__Host-kubeloop-admin-csrf=cookie-token",
+    );
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    await mutation("/groups", "POST", {});
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${managementBase}/groups`,
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          "X-KubeLoop-CSRF": "cookie-token",
+        }),
+      }),
+    );
+  });
+
   it("reuses an explicit idempotency key for related mutations", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(() =>
       Promise.resolve(new Response(JSON.stringify({ ok: true }), {

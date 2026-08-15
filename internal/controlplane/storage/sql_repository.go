@@ -25,6 +25,26 @@ type sqlExecutor interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
 
+type rowScanner interface {
+	Scan(...any) error
+}
+
+func collectStringColumn(rows *sql.Rows, operation string) ([]string, error) {
+	defer rows.Close()
+	values := make([]string, 0)
+	for rows.Next() {
+		var value string
+		if err := rows.Scan(&value); err != nil {
+			return nil, databaseError("decode "+operation, err)
+		}
+		values = append(values, value)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, databaseError("iterate "+operation, err)
+	}
+	return values, nil
+}
+
 func (base repositoryBase) bind(query string) string {
 	if base.backend != BackendPostgreSQL {
 		return query
@@ -64,6 +84,28 @@ func (base repositoryBase) withMySQLTransaction(ctx context.Context, function fu
 	return nil
 }
 
+func nullableBytes(value []byte) any {
+	if len(value) == 0 {
+		return nil
+	}
+	return value
+}
+
+func isConstraintError(err error) bool {
+	var postgresError *pgconn.PgError
+	if errors.As(err, &postgresError) && strings.HasPrefix(postgresError.Code, "23") {
+		return true
+	}
+	var mysqlError *mysqldriver.MySQLError
+	if errors.As(err, &mysqlError) && (mysqlError.Number == 1062 || mysqlError.Number == 1451 || mysqlError.Number == 1452 || mysqlError.Number == 3819) {
+		return true
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "unique constraint") ||
+		strings.Contains(message, "duplicate key") ||
+		strings.Contains(message, "constraint failed")
+}
+
 func validateUUID(id, field string) error {
 	if _, err := uuid.Parse(id); err != nil {
 		return fmt.Errorf("%s must be a UUID", field)
@@ -87,6 +129,17 @@ func rowsAffected(result sql.Result) (int64, error) {
 		return 0, databaseError("read affected storage rows", err)
 	}
 	return count, nil
+}
+
+func expectOne(result sql.Result) error {
+	count, err := rowsAffected(result)
+	if err != nil {
+		return err
+	}
+	if count != 1 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // databaseOperationError keeps the driver error available to transaction
@@ -128,7 +181,13 @@ func isRetryableTransactionError(err error) bool {
 }
 
 type repositorySet struct {
-	principals                 *principalRepository
+	identities                 *identityRepository
+	organizations              *organizationRepository
+	groups                     *groupRepository
+	invitations                *invitationRepository
+	bootstrapTokens            *bootstrapTokenRepository
+	credentials                *credentialRepository
+	securityPolicies           *securityPolicyRepository
 	sessions                   *sessionRepository
 	tasks                      TaskRepository
 	resourceSnapshots          *resourceSnapshotRepository
@@ -136,15 +195,7 @@ type repositorySet struct {
 	audit                      *auditRepository
 	relayDesiredStates         *relayDesiredStateRepository
 	auditExportJobs            *auditExportJobRepository
-	managementState            *managementStateRepository
 	adminSessions              *adminSessionRepository
-	localAdminUsers            *localAdminUserRepository
-	adminRecoveryCodes         *adminRecoveryCodeRepository
-	adminPolicyConfigs         *adminPolicyConfigRepository
-	authorizationDefinitions   *authorizationDefinitionRepository
-	providerConfigs            *providerConfigRepository
-	activeManagementConfigs    *activeManagementConfigRepository
-	configChangeRequests       *configChangeRequestRepository
 	oauthClients               *oauthClientRepository
 	oauthSessions              *oauthSessionRepository
 	oauthConsents              *oauthConsentRepository
@@ -157,8 +208,14 @@ func newRepositorySet(backend Backend, executor sqlExecutor, orm bun.IDB) *repos
 	sessions := &sessionRepository{repositoryBase: base}
 	audit := &auditRepository{repositoryBase: base}
 	return &repositorySet{
-		principals: &principalRepository{repositoryBase: base},
-		sessions:   sessions,
+		identities:       &identityRepository{repositoryBase: base},
+		organizations:    &organizationRepository{repositoryBase: base},
+		groups:           &groupRepository{repositoryBase: base},
+		invitations:      &invitationRepository{repositoryBase: base},
+		bootstrapTokens:  &bootstrapTokenRepository{repositoryBase: base},
+		credentials:      &credentialRepository{repositoryBase: base},
+		securityPolicies: &securityPolicyRepository{repositoryBase: base},
+		sessions:         sessions,
 		tasks: &auditedTaskRepository{
 			delegate: &taskRepository{repositoryBase: base}, sessions: sessions, audit: audit,
 		},
@@ -167,15 +224,7 @@ func newRepositorySet(backend Backend, executor sqlExecutor, orm bun.IDB) *repos
 		audit:                      audit,
 		relayDesiredStates:         &relayDesiredStateRepository{repositoryBase: base},
 		auditExportJobs:            &auditExportJobRepository{repositoryBase: base},
-		managementState:            &managementStateRepository{repositoryBase: base},
 		adminSessions:              &adminSessionRepository{repositoryBase: base},
-		localAdminUsers:            &localAdminUserRepository{repositoryBase: base},
-		adminRecoveryCodes:         &adminRecoveryCodeRepository{repositoryBase: base},
-		adminPolicyConfigs:         &adminPolicyConfigRepository{repositoryBase: base},
-		authorizationDefinitions:   &authorizationDefinitionRepository{repositoryBase: base},
-		providerConfigs:            &providerConfigRepository{repositoryBase: base},
-		activeManagementConfigs:    &activeManagementConfigRepository{repositoryBase: base},
-		configChangeRequests:       &configChangeRequestRepository{repositoryBase: base},
 		oauthClients:               &oauthClientRepository{repositoryBase: base},
 		oauthSessions:              &oauthSessionRepository{repositoryBase: base},
 		oauthConsents:              &oauthConsentRepository{repositoryBase: base},
@@ -190,8 +239,30 @@ func (repositories *repositorySet) setTaskTransactionManager(manager Transaction
 	}
 }
 
-func (repositories *repositorySet) Principals() PrincipalRepository {
-	return repositories.principals
+func (repositories *repositorySet) Identities() IdentityRepository {
+	return repositories.identities
+}
+
+func (repositories *repositorySet) Organizations() OrganizationRepository {
+	return repositories.organizations
+}
+
+func (repositories *repositorySet) Groups() GroupRepository { return repositories.groups }
+
+func (repositories *repositorySet) Invitations() InvitationRepository {
+	return repositories.invitations
+}
+
+func (repositories *repositorySet) BootstrapTokens() BootstrapTokenRepository {
+	return repositories.bootstrapTokens
+}
+
+func (repositories *repositorySet) Credentials() CredentialRepository {
+	return repositories.credentials
+}
+
+func (repositories *repositorySet) SecurityPolicies() SecurityPolicyRepository {
+	return repositories.securityPolicies
 }
 
 func (repositories *repositorySet) Sessions() SessionRepository {
@@ -222,40 +293,8 @@ func (repositories *repositorySet) AuditExportJobs() AuditExportJobRepository {
 	return repositories.auditExportJobs
 }
 
-func (repositories *repositorySet) ManagementState() ManagementStateRepository {
-	return repositories.managementState
-}
-
 func (repositories *repositorySet) AdminSessions() AdminSessionRepository {
 	return repositories.adminSessions
-}
-
-func (repositories *repositorySet) LocalAdminUsers() LocalAdminUserRepository {
-	return repositories.localAdminUsers
-}
-
-func (repositories *repositorySet) AdminRecoveryCodes() AdminRecoveryCodeRepository {
-	return repositories.adminRecoveryCodes
-}
-
-func (repositories *repositorySet) AdminPolicyConfigs() AdminPolicyConfigRepository {
-	return repositories.adminPolicyConfigs
-}
-
-func (repositories *repositorySet) AuthorizationDefinitions() AuthorizationDefinitionRepository {
-	return repositories.authorizationDefinitions
-}
-
-func (repositories *repositorySet) ProviderConfigs() ProviderConfigRepository {
-	return repositories.providerConfigs
-}
-
-func (repositories *repositorySet) ActiveManagementConfigs() ActiveManagementConfigRepository {
-	return repositories.activeManagementConfigs
-}
-
-func (repositories *repositorySet) ConfigChangeRequests() ConfigChangeRequestRepository {
-	return repositories.configChangeRequests
 }
 
 func (repositories *repositorySet) OAuthClients() OAuthClientRepository {

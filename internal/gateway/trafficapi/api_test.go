@@ -89,7 +89,7 @@ func TestExchangeWebSocketRunsOnGatewayAndReportsLifecycle(t *testing.T) {
 		GatewayIP: "127.0.0.1", ControlPlane: controlPlane, HeartbeatEvery: 20 * time.Millisecond,
 		VerifyRequest: func(request *http.Request) (relayticket.Claims, error) {
 			return relayticket.Claims{
-				PrincipalID: "user-1", Groups: []string{"developers"}, DeviceID: "device-1",
+				IdentityID: "user-1", Groups: []string{"developers"}, DeviceID: "device-1",
 				SessionID: uuid.NewString(), SessionGeneration: 1, Namespace: "development",
 			}, nil
 		},

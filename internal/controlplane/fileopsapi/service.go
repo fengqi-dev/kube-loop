@@ -39,7 +39,7 @@ type Storage interface {
 }
 
 type SessionValidator interface {
-	RequireActive(context.Context, controlplaneapi.Principal, string, string) (sessionapi.ActiveSession, *controlplaneapi.Error)
+	RequireActive(context.Context, controlplaneapi.Identity, string, string) (sessionapi.ActiveSession, *controlplaneapi.Error)
 }
 
 type Config struct {
@@ -70,7 +70,7 @@ func New(storageBackend Storage, sessions SessionValidator, targets fileapi.Targ
 	return &Service{storage: storageBackend, sessions: sessions, targets: targets, operator: operator, now: config.Now, allowedRoots: roots}, nil
 }
 
-func (handler *Service) list(ctx *echo.Context, principal controlplaneapi.Principal, session sessionapi.ActiveSession) *controlplaneapi.Error {
+func (handler *Service) list(ctx *echo.Context, identity controlplaneapi.Identity, session sessionapi.ActiveSession) *controlplaneapi.Error {
 	request := ctx.Request()
 	spec := Spec{}
 	if err := ctx.Bind(&spec); err != nil {
@@ -80,12 +80,12 @@ func (handler *Service) list(ctx *echo.Context, principal controlplaneapi.Princi
 	if apiError := handler.normalize(&spec); apiError != nil {
 		return apiError
 	}
-	container, err := handler.targets.ResolveContainer(request.Context(), principal, session.Namespace, spec.Pod, spec.Container)
+	container, err := handler.targets.ResolveContainer(request.Context(), identity, session.Namespace, spec.Pod, spec.Container)
 	if err != nil {
 		return targetError(err)
 	}
 	spec.Container = container
-	items, err := handler.operator.List(request.Context(), principal, session.Namespace, spec)
+	items, err := handler.operator.List(request.Context(), identity, session.Namespace, spec)
 	if err != nil {
 		return &controlplaneapi.Error{Code: controlplaneapi.CodeUnavailable, Message: "remote directory could not be read", Cause: err}
 	}
@@ -95,7 +95,7 @@ func (handler *Service) list(ctx *echo.Context, principal controlplaneapi.Princi
 	return nil
 }
 
-func (handler *Service) mutate(ctx *echo.Context, principal controlplaneapi.Principal, session sessionapi.ActiveSession, action string) *controlplaneapi.Error {
+func (handler *Service) mutate(ctx *echo.Context, identity controlplaneapi.Identity, session sessionapi.ActiveSession, action string) *controlplaneapi.Error {
 	request := ctx.Request()
 	spec := Spec{}
 	if err := ctx.Bind(&spec); err != nil {
@@ -113,8 +113,8 @@ func (handler *Service) mutate(ctx *echo.Context, principal controlplaneapi.Prin
 	if err != nil {
 		return internalError(err)
 	}
-	scope := taskapi.Scope(TaskType, principal.Subject)
-	if task, replayed, apiError := handler.replay(request.Context(), scope, key, requestHash, principal, session); apiError != nil {
+	scope := taskapi.Scope(TaskType, identity.Subject)
+	if task, replayed, apiError := handler.replay(request.Context(), scope, key, requestHash, identity, session); apiError != nil {
 		return apiError
 	} else if replayed {
 		document, err := decodeTask(task, session.Namespace)
@@ -125,7 +125,7 @@ func (handler *Service) mutate(ctx *echo.Context, principal controlplaneapi.Prin
 		writeJSON(ctx, http.StatusOK, document)
 		return nil
 	}
-	container, err := handler.targets.ResolveContainer(request.Context(), principal, session.Namespace, spec.Pod, spec.Container)
+	container, err := handler.targets.ResolveContainer(request.Context(), identity, session.Namespace, spec.Pod, spec.Container)
 	if err != nil {
 		return targetError(err)
 	}
@@ -133,7 +133,7 @@ func (handler *Service) mutate(ctx *echo.Context, principal controlplaneapi.Prin
 	specJSON, _ := json.Marshal(spec)
 	now, expiresAt := handler.now().UTC(), session.ExpiresAt.UTC()
 	task := storage.Task{
-		ID: uuid.NewString(), PrincipalID: principal.Subject, SessionID: session.ID, Type: TaskType, State: remotetask.Pending,
+		ID: uuid.NewString(), IdentityID: identity.Subject, SessionID: session.ID, Type: TaskType, State: remotetask.Pending,
 		Spec: specJSON, IdempotencyKey: key, CreatedAt: now, UpdatedAt: now, ExpiresAt: &expiresAt,
 	}
 	created := false
@@ -147,7 +147,7 @@ func (handler *Service) mutate(ctx *echo.Context, principal controlplaneapi.Prin
 		}
 		if !reserved {
 			existing, loadErr := repositories.Tasks().GetByID(request.Context(), record.ResourceID)
-			if loadErr != nil || !owned(existing, principal, session) {
+			if loadErr != nil || !owned(existing, identity, session) {
 				return storage.ErrNotFound
 			}
 			task = existing
@@ -163,7 +163,7 @@ func (handler *Service) mutate(ctx *echo.Context, principal controlplaneapi.Prin
 		return storageError(err)
 	}
 	if created {
-		task, err = handler.execute(request.Context(), principal, session.Namespace, task, spec)
+		task, err = handler.execute(request.Context(), identity, session.Namespace, task, spec)
 		if err != nil {
 			return internalError(err)
 		}
@@ -179,13 +179,13 @@ func (handler *Service) mutate(ctx *echo.Context, principal controlplaneapi.Prin
 	return nil
 }
 
-func (handler *Service) execute(ctx context.Context, principal controlplaneapi.Principal, namespace string, task storage.Task, spec Spec) (storage.Task, error) {
+func (handler *Service) execute(ctx context.Context, identity controlplaneapi.Identity, namespace string, task storage.Task, spec Spec) (storage.Task, error) {
 	if err := handler.storage.Tasks().UpdateState(ctx, task.ID, remotetask.Pending, remotetask.Running, json.RawMessage(`{}`), handler.now().UTC()); err != nil {
 		return storage.Task{}, err
 	}
 	next := remotetask.Stopped
 	result := Result{Completed: true}
-	if err := handler.operator.Mutate(ctx, principal, namespace, spec); err != nil {
+	if err := handler.operator.Mutate(ctx, identity, namespace, spec); err != nil {
 		next = remotetask.Failed
 		result = Result{Error: "remote file operation failed"}
 	}
@@ -196,7 +196,7 @@ func (handler *Service) execute(ctx context.Context, principal controlplaneapi.P
 	return handler.storage.Tasks().GetByID(ctx, task.ID)
 }
 
-func (handler *Service) replay(ctx context.Context, scope, key, hash string, principal controlplaneapi.Principal, session sessionapi.ActiveSession) (storage.Task, bool, *controlplaneapi.Error) {
+func (handler *Service) replay(ctx context.Context, scope, key, hash string, identity controlplaneapi.Identity, session sessionapi.ActiveSession) (storage.Task, bool, *controlplaneapi.Error) {
 	record, err := handler.storage.Idempotency().Get(ctx, scope, key)
 	if errors.Is(err, storage.ErrNotFound) {
 		return storage.Task{}, false, nil
@@ -208,19 +208,19 @@ func (handler *Service) replay(ctx context.Context, scope, key, hash string, pri
 		return storage.Task{}, false, storageError(storage.ErrIdempotencyMismatch)
 	}
 	task, err := handler.storage.Tasks().GetByID(ctx, record.ResourceID)
-	if err != nil || !owned(task, principal, session) {
+	if err != nil || !owned(task, identity, session) {
 		return storage.Task{}, false, notFound()
 	}
 	return task, true, nil
 }
 
-func (handler *Service) get(ctx *echo.Context, principal controlplaneapi.Principal, session sessionapi.ActiveSession, taskID string) *controlplaneapi.Error {
+func (handler *Service) get(ctx *echo.Context, identity controlplaneapi.Identity, session sessionapi.ActiveSession, taskID string) *controlplaneapi.Error {
 	request := ctx.Request()
 	if _, err := uuid.Parse(taskID); err != nil {
 		return notFound()
 	}
 	task, err := handler.storage.Tasks().GetByID(request.Context(), taskID)
-	if err != nil || !owned(task, principal, session) {
+	if err != nil || !owned(task, identity, session) {
 		return notFound()
 	}
 	document, err := decodeTask(task, session.Namespace)
@@ -313,8 +313,8 @@ func decodeTask(task storage.Task, namespace string) (Document, error) {
 	}, nil
 }
 
-func owned(task storage.Task, principal controlplaneapi.Principal, session sessionapi.ActiveSession) bool {
-	return task.Type == TaskType && task.PrincipalID == principal.Subject && task.SessionID == session.ID
+func owned(task storage.Task, identity controlplaneapi.Identity, session sessionapi.ActiveSession) bool {
+	return task.Type == TaskType && task.IdentityID == identity.Subject && task.SessionID == session.ID
 }
 
 func namespaceFromQuery(request *http.Request) (string, *controlplaneapi.Error) {

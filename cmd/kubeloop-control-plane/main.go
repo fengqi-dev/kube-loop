@@ -56,7 +56,7 @@ func main() {
 	if err := controlplanestorage.EnsureBuiltinOAuthClients(
 		signalContext,
 		stateStore.OAuthClients(),
-		strings.TrimRight(config.Document.Management.PublicURL, "/")+controlplane.AdminAPIPathPrefix+"/ui/callback",
+		strings.TrimRight(config.Document.Admin.PublicURL, "/")+controlplane.AdminAPIPathPrefix+"/ui/callback",
 	); err != nil {
 		_ = stateStore.Close()
 		logger.Error("initialize built-in OAuth clients failed", "error", err)
@@ -64,12 +64,9 @@ func main() {
 	}
 	maintenanceWorker := bootstrap.MaintenanceWorker
 	localUsers := bootstrap.LocalUsers
-	managementRevisionService := bootstrap.ManagementRevisionService
+	iamBootstrap := bootstrap.IAMBootstrap
 	managementPolicyEngine := bootstrap.ManagementPolicyEngine
-	managementPolicyLoader := bootstrap.ManagementPolicyLoader
-	authRegistry := bootstrap.AuthRegistry
-	managedProviderRuntime := bootstrap.ManagedProviderRuntime
-	managedProviderService := bootstrap.ManagedProviderService
+	iamLoader := bootstrap.IAMLoader
 	policyEngine := bootstrap.PolicyEngine
 	kubernetesConfig := bootstrap.KubernetesConfig
 	kubernetesProvider := bootstrap.KubernetesProvider
@@ -85,31 +82,18 @@ func main() {
 		logger.Error("initialize API audit sink failed", "error", err)
 		os.Exit(2)
 	}
-	methods := discoveryAuthMethods(authRegistry)
-	if localUsers != nil {
-		methods = append(methods, controlplane.AuthMethod{ID: "local", Type: "local", DisplayName: "Local account", Interaction: "browser"})
-	}
+	methods := []controlplane.AuthMethod{{ID: "local", Type: "local", DisplayName: "Local account", Interaction: "browser"}}
 	readiness := health.CheckFunc(func(ctx context.Context) error {
 		if err := stateStore.Check(ctx); err != nil {
 			return err
 		}
-		if err := managementPolicyLoader.Check(ctx); err != nil {
-			return err
-		}
-		if err := managedProviderRuntime.Check(ctx); err != nil {
-			return err
-		}
-		if err := authRegistry.Check(ctx); err != nil {
+		if err := iamLoader.Check(ctx); err != nil {
 			return err
 		}
 		return kubernetesProvider.Check(ctx)
 	})
 	authMethodSource := controlplane.AuthMethodSourceFunc(func() []controlplane.AuthMethod {
-		result := discoveryAuthMethods(authRegistry)
-		if localUsers != nil {
-			result = append(result, controlplane.AuthMethod{ID: "local", Type: "local", DisplayName: "Local account", Interaction: "browser"})
-		}
-		return result
+		return append([]controlplane.AuthMethod(nil), methods...)
 	})
 	serverOptions := []controlplane.ServerOption{
 		controlplane.WithReadinessChecker(readiness), controlplane.WithAuthorizer(policyEngine),
@@ -152,18 +136,8 @@ func main() {
 	}
 	var authRoutes controlplane.RouteRegistrar
 	var fositeEndpoints *oauthserver.Endpoints
-	if len(authRegistry.Descriptors()) > 0 || localUsers != nil {
-		var passwordAuthenticator oauthserver.PasswordAuthenticator
-		if localUsers != nil {
-			passwordAuthenticator = func(ctx context.Context, username string, password []byte, secondFactor, requestID, clientID, sourceIP string) (controlplanestorage.Principal, error) {
-				user, authErr := localUsers.Authenticate(ctx, username, password, secondFactor, requestID)
-				if authErr != nil {
-					return controlplanestorage.Principal{}, authErr
-				}
-				return stateStore.Principals().GetByID(ctx, user.PrincipalID)
-			}
-		}
-		fositeStorage, err := oauthserver.NewStorage(stateStore, passwordAuthenticator)
+	if localUsers != nil {
+		fositeStorage, err := oauthserver.NewStorage(stateStore)
 		if err != nil {
 			_ = stateStore.Close()
 			logger.Error("initialize Fosite storage failed", "error", err)
@@ -190,13 +164,21 @@ func main() {
 			logger.Error("initialize Fosite provider failed", "error", err)
 			os.Exit(2)
 		}
-		fositeEndpoints, err = oauthserver.NewEndpoints(fositeProvider, stateStore, config.Document.Authentication.OAuth.KeyID, oidcSigningKey, fositeStorage)
+		fositeEndpoints, err = oauthserver.NewEndpoints(fositeProvider, stateStore, config.Document.Authentication.OAuth.KeyID, oidcSigningKey)
 		if err != nil {
 			_ = stateStore.Close()
 			logger.Error("initialize Fosite endpoints failed", "error", err)
 			os.Exit(2)
 		}
-		fositeEndpoints.SetProviderRegistry(authRegistry)
+		if localUsers != nil {
+			fositeEndpoints.SetLocalAuthenticator(func(ctx context.Context, username string, password []byte, requestID string) (controlplanestorage.Identity, error) {
+				user, authErr := localUsers.Authenticate(ctx, username, password, requestID)
+				if authErr != nil {
+					return controlplanestorage.Identity{}, authErr
+				}
+				return stateStore.Identities().GetByID(ctx, user.IdentityID)
+			})
+		}
 		authRoutes = httpauth.NewRoutes(fositeEndpoints, httpauth.WithIssuer(config.Document.API.PublicURL))
 		serverOptions = append(serverOptions,
 			controlplane.WithAuthRoutes(authRoutes),
@@ -207,8 +189,8 @@ func main() {
 		managementPolicyEngine, stateStore, adminhttpapi.BuildInfo{
 			Version: version, Commit: commit, ProtocolMin: protocolMin, ProtocolMax: protocolMax,
 		},
-	), adminhttpapi.WithPolicyAPI(managementRevisionService, managementPolicyLoader),
-		adminhttpapi.WithProviderAPI(managedProviderService),
+	), adminhttpapi.WithIAM(iamLoader),
+		adminhttpapi.WithBootstrap(iamBootstrap),
 		adminhttpapi.WithOAuthClients(stateStore, stateStore),
 		adminhttpapi.WithOperationsAPI(managementOperations)}
 	if localUsers != nil {
@@ -221,7 +203,7 @@ func main() {
 		managementOptions = append(managementOptions, adminhttpapi.WithTokenExchange(fositeEndpoints))
 	}
 	managementHandler, err := adminhttpapi.New(
-		adminhttpapi.Config{PublicURL: config.Document.Management.PublicURL}, managementSessions, managementOptions...,
+		adminhttpapi.Config{PublicURL: config.Document.Admin.PublicURL}, managementSessions, managementOptions...,
 	)
 	if err != nil {
 		_ = stateStore.Close()
@@ -229,7 +211,7 @@ func main() {
 		os.Exit(2)
 	}
 	managementServer, err := adminhttpserver.New(
-		adminhttpserver.Config{ListenAddress: config.Document.Management.Listen}, managementHandler,
+		adminhttpserver.Config{ListenAddress: config.Document.Admin.Listen}, managementHandler,
 		authRoutes, authMethodSource, logger,
 	)
 	if err != nil {
@@ -258,8 +240,8 @@ func main() {
 	serveControlPlane(serverRuntimeOptions{
 		Context: signalContext, Stop: stop, Config: config, Logger: logger, Store: stateStore,
 		Server: server, ManagementServer: managementServer, RelayRegistry: relayRegistry,
-		KubernetesConfig: kubernetesConfig, ManagedProviderRuntime: managedProviderRuntime,
-		ManagementPolicyLoader: managementPolicyLoader, SessionRecovery: sessionRecovery,
+		KubernetesConfig: kubernetesConfig,
+		IAMLoader:        iamLoader, SessionRecovery: sessionRecovery,
 		ManagementOperations: managementOperations, MaintenanceWorker: maintenanceWorker,
 		BindingRecovery: bindingRecovery, SessionRuntime: sessionRuntime,
 	})

@@ -17,7 +17,7 @@ import (
 
 type AuditRecord struct {
 	RequestID    string
-	PrincipalID  string
+	IdentityID   string
 	SessionID    string
 	Operation    string
 	Namespace    string
@@ -45,8 +45,8 @@ type Config struct {
 
 func New(config Config) echo.MiddlewareFunc {
 	if config.Authenticator == nil {
-		config.Authenticator = controlplaneapi.AuthenticatorFunc(func(*http.Request) (controlplaneapi.Principal, *controlplaneapi.Error) {
-			return controlplaneapi.Principal{}, &controlplaneapi.Error{Code: controlplaneapi.CodeUnauthenticated, Message: "authentication required"}
+		config.Authenticator = controlplaneapi.AuthenticatorFunc(func(*http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
+			return controlplaneapi.Identity{}, &controlplaneapi.Error{Code: controlplaneapi.CodeUnauthenticated, Message: "authentication required"}
 		})
 	}
 	if config.Authorizer == nil {
@@ -70,7 +70,7 @@ func New(config Config) echo.MiddlewareFunc {
 			request = request.WithContext(requestContext)
 			ctx.SetRequest(request)
 			authorizationRequest := authorizationRequestForHTTP(request, config.APIPathPrefix)
-			var principal controlplaneapi.Principal
+			var identity controlplaneapi.Identity
 			response.Header().Set("Cache-Control", "no-store")
 			cancel := func() {}
 			if !isWebSocketUpgrade(request) {
@@ -105,7 +105,7 @@ func New(config Config) echo.MiddlewareFunc {
 					status = http.StatusOK
 				}
 				record := AuditRecord{
-					RequestID: requestID, PrincipalID: principal.Subject, SessionID: auditState.sessionID,
+					RequestID: requestID, IdentityID: identity.Subject, SessionID: auditState.sessionID,
 					Operation: authorizationRequest.Operation, Namespace: authorizationRequest.Namespace,
 					ResourceKind: authorizationRequest.ResourceKind, ResourceName: authorizationRequest.ResourceName,
 					Outcome: auditOutcome(status), HTTPStatus: status, Duration: time.Since(startedAt),
@@ -119,7 +119,7 @@ func New(config Config) echo.MiddlewareFunc {
 			}()
 
 			var authenticationError *controlplaneapi.Error
-			principal, authenticationError = config.Authenticator.Authenticate(request)
+			identity, authenticationError = config.Authenticator.Authenticate(request)
 			if authenticationError != nil {
 				if authenticationError.Code == controlplaneapi.CodeUnauthenticated {
 					response.Header().Set("WWW-Authenticate", "Bearer")
@@ -127,14 +127,14 @@ func New(config Config) echo.MiddlewareFunc {
 				writeError(ctx, requestID, authenticationError)
 				return nil
 			}
-			if principal.Subject == "" {
+			if identity.Subject == "" {
 				writeError(ctx, requestID, &controlplaneapi.Error{Code: controlplaneapi.CodeUnauthenticated, Message: "authentication required"})
 				return nil
 			}
 			requestContext = request.Context()
 			if !isNamespaceCollectionList(authorizationRequest) && !isAuthenticatedMetadataRead(authorizationRequest) && !isSessionHeartbeat(authorizationRequest) {
 				decision := config.Authorizer.Authorize(request.Context(), authorization.Subject{
-					ID: principal.Subject, Provider: principal.Provider, Groups: append([]string(nil), principal.Groups...),
+					ID: identity.Subject, Provider: identity.Provider, Groups: append([]string(nil), identity.Groups...),
 				}, authorizationRequest)
 				if !decision.Allowed {
 					writeError(ctx, requestID, &controlplaneapi.Error{Code: controlplaneapi.CodeForbidden, Message: "operation is not permitted"})
@@ -144,7 +144,7 @@ func New(config Config) echo.MiddlewareFunc {
 					request: authorizationRequest, decision: decision,
 				})
 			}
-			requestContext = context.WithValue(requestContext, principalContextKey{}, principal)
+			requestContext = context.WithValue(requestContext, identityContextKey{}, identity)
 			request = request.WithContext(requestContext)
 			ctx.SetRequest(request)
 
@@ -167,7 +167,7 @@ func New(config Config) echo.MiddlewareFunc {
 }
 
 // The namespace collection is authorized per returned namespace by kubeapi.
-// A cluster-scoped pre-check here would reject principals that only have
+// A cluster-scoped pre-check here would reject identities that only have
 // namespace-scoped grants before the response can be filtered.
 func isNamespaceCollectionList(request authorization.Request) bool {
 	return request.Operation == "list" && request.Namespace == "" &&

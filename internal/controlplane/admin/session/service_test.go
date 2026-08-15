@@ -83,9 +83,9 @@ func TestAuthenticateSubjectUsesCurrentGroupsAndOAuthGrantRevocation(t *testing.
 	ctx := context.Background()
 	store := openTestStore(t)
 	now := time.Date(2026, 8, 10, 11, 30, 0, 0, time.UTC)
-	principal, err := store.Principals().Upsert(ctx, storage.Principal{
-		ID: uuid.NewString(), Provider: "oidc", ExternalID: "management-user",
-		Groups: []string{"auditors"}, CreatedAt: now, UpdatedAt: now,
+	identity, err := store.Identities().Create(ctx, storage.Identity{
+		ID: uuid.NewString(), Type: "human", DisplayName: "Test Identity", Status: "active",
+		CreatedAt: now, UpdatedAt: now,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -100,7 +100,7 @@ func TestAuthenticateSubjectUsesCurrentGroupsAndOAuthGrantRevocation(t *testing.
 	token := opaqueToken(10)
 	tokenHash := sha256.Sum256([]byte(token))
 	if err := store.AdminSessions().Create(ctx, storage.AdminSession{
-		IDHash: tokenHash[:], PrincipalID: principal.ID, AuthorizationID: authorizationID,
+		IDHash: tokenHash[:], IdentityID: identity.ID, AuthorizationID: authorizationID,
 		AuthenticationType: string(adminauthorization.AuthenticationNormal), CSRFTokenHash: bytes.Repeat([]byte{9}, 32),
 		CreatedAt: now, LastSeenAt: now, IdleExpiresAt: now.Add(15 * time.Minute), AbsoluteExpiresAt: now.Add(time.Hour),
 	}); err != nil {
@@ -108,14 +108,22 @@ func TestAuthenticateSubjectUsesCurrentGroupsAndOAuthGrantRevocation(t *testing.
 	}
 	service, _ := New(store, &fakeBreakGlassVerifier{})
 	service.now = func() time.Time { return now }
-	if _, err := store.Principals().Upsert(ctx, storage.Principal{
-		ID: uuid.NewString(), Provider: principal.Provider, ExternalID: principal.ExternalID,
-		Groups: []string{"security"}, CreatedAt: now, UpdatedAt: now.Add(time.Second),
-	}); err != nil {
+	organizationID := uuid.NewString()
+	if err := store.Organizations().Create(ctx, storage.Organization{ID: organizationID, Name: "Security", Slug: "security", Status: "active", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Organizations().AddMember(ctx, storage.OrganizationMembership{OrganizationID: organizationID, IdentityID: identity.ID, Status: "active", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	groupID := uuid.NewString()
+	if err := store.Groups().Create(ctx, storage.Group{ID: groupID, OrganizationID: organizationID, Name: "security", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Groups().AddMember(ctx, storage.GroupMembership{GroupID: groupID, IdentityID: identity.ID, CreatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
 	_, subject, err := service.AuthenticateSubject(ctx, token)
-	if err != nil || subject.ID != principal.ID || len(subject.Groups) != 1 || subject.Groups[0] != "security" {
+	if err != nil || subject.ID != identity.ID || len(subject.Groups) != 1 || subject.Groups[0] != groupID {
 		t.Fatalf("subject=%#v error=%v", subject, err)
 	}
 	if err := store.OAuthSessions().RevokeRequest(ctx, authorizationID, now); err != nil {
@@ -126,13 +134,13 @@ func TestAuthenticateSubjectUsesCurrentGroupsAndOAuthGrantRevocation(t *testing.
 	}
 }
 
-func TestPrincipalExchangePersistsDedicatedSessionAndAudit(t *testing.T) {
+func TestIdentityExchangePersistsDedicatedSessionAndAudit(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
 	now := time.Date(2026, 8, 10, 11, 45, 0, 0, time.UTC)
-	principal, err := store.Principals().Upsert(ctx, storage.Principal{
-		ID: uuid.NewString(), Provider: "oidc", ExternalID: "admin-user",
-		Groups: []string{"platform"}, CreatedAt: now, UpdatedAt: now,
+	identity, err := store.Identities().Create(ctx, storage.Identity{
+		ID: uuid.NewString(), Type: "human", DisplayName: "Test Identity", Status: "active",
+		CreatedAt: now, UpdatedAt: now,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -147,8 +155,8 @@ func TestPrincipalExchangePersistsDedicatedSessionAndAudit(t *testing.T) {
 	service, _ := New(store, &fakeBreakGlassVerifier{})
 	service.now = func() time.Time { return now }
 	service.random = bytes.NewReader(append(bytes.Repeat([]byte{13}, 32), bytes.Repeat([]byte{14}, 32)...))
-	issued, err := service.ExchangePrincipal(
-		ctx, principal.ID, authorizationID, adminauthorization.AuthenticationNormal, "request-principal-1",
+	issued, err := service.ExchangeIdentity(
+		ctx, identity.ID, authorizationID, adminauthorization.AuthenticationNormal, "request-identity-1",
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -161,9 +169,9 @@ func TestPrincipalExchangePersistsDedicatedSessionAndAudit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stored.PrincipalID != principal.ID || stored.AuthorizationID != authorizationID ||
+	if stored.IdentityID != identity.ID || stored.AuthorizationID != authorizationID ||
 		stored.AuthenticationType != "normal" || stored.IdleExpiresAt != now.Add(normalSessionIdleTTL) {
-		t.Fatalf("stored principal session=%+v", stored)
+		t.Fatalf("stored identity session=%+v", stored)
 	}
 	if err := VerifyCSRF(stored, issued.CSRFToken); err != nil {
 		t.Fatal(err)
@@ -176,16 +184,16 @@ func TestPrincipalExchangePersistsDedicatedSessionAndAudit(t *testing.T) {
 	if err != nil || stored.IdleExpiresAt != now.Add(2*time.Minute+normalSessionIdleTTL) {
 		t.Fatalf("sliding idle session=%+v error=%v", stored, err)
 	}
-	events, err := store.Audit().List(ctx, storage.AuditFilter{Action: principalExchangeAudit})
-	if err != nil || len(events) != 1 || events[0].PrincipalID != principal.ID || events[0].RequestID != "request-principal-1" {
-		t.Fatalf("principal exchange audit=%+v error=%v", events, err)
+	events, err := store.Audit().List(ctx, storage.AuditFilter{Action: identityExchangeAudit})
+	if err != nil || len(events) != 1 || events[0].IdentityID != identity.ID || events[0].RequestID != "request-identity-1" {
+		t.Fatalf("identity exchange audit=%+v error=%v", events, err)
 	}
 	if err := store.OAuthSessions().RevokeRequest(ctx, authorizationID, now); err != nil {
 		t.Fatal(err)
 	}
 	service.random = bytes.NewReader(append(bytes.Repeat([]byte{15}, 32), bytes.Repeat([]byte{16}, 32)...))
-	if _, err := service.ExchangePrincipal(
-		ctx, principal.ID, authorizationID, adminauthorization.AuthenticationNormal, "request-principal-2",
+	if _, err := service.ExchangeIdentity(
+		ctx, identity.ID, authorizationID, adminauthorization.AuthenticationNormal, "request-identity-2",
 	); !errors.Is(err, ErrAuthenticationFailed) {
 		t.Fatalf("revoked OAuth grant exchange error=%v", err)
 	}

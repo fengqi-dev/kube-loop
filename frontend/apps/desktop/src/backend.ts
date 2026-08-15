@@ -80,6 +80,7 @@ declare global {
 		  StopServerTunnel(profileId: string): Promise<DataPlaneStatus>;
 		  GetServerSingBoxConfig(profileId: string): Promise<string>;
 		  GetServerNetworkSettings(profileId: string): Promise<ServerNetworkSettings>;
+		  SetServerSOCKSPort(profileId: string, port: number): Promise<ServerNetworkSettings>;
 		  SetServerDNSNamespace(profileId: string, namespace: string): Promise<ServerNetworkSettings>;
 		  SetServerHostAliases(profileId: string, aliases: HostAlias[]): Promise<ServerNetworkSettings>;
 		  ServerDataPlaneMetrics(profileId: string): Promise<Metrics>;
@@ -225,6 +226,17 @@ function api() {
   return app;
 }
 
+function normalizeRemoteInventory(inventory: RemoteInventory): RemoteInventory {
+  return {
+    ...inventory,
+    namespaces: Array.isArray(inventory.namespaces) ? inventory.namespaces : [],
+    capabilities: Array.isArray(inventory.capabilities) ? inventory.capabilities : [],
+    pods: Array.isArray(inventory.pods) ? inventory.pods : [],
+    services: Array.isArray(inventory.services) ? inventory.services : [],
+    namespace: inventory.namespace?.trim() || undefined,
+  };
+}
+
 export const backend = {
   bootstrap: () => Promise.resolve().then(() => api().Bootstrap()),
 	serverProfiles: () => Promise.resolve().then(() => api().ServerProfiles()),
@@ -246,7 +258,9 @@ export const backend = {
 	logoutServer: (profileId: string) =>
 		Promise.resolve().then(() => api().LogoutServer(profileId)),
 		loadServerInventory: (profileId: string, namespace = "") =>
-			Promise.resolve().then(() => api().LoadServerInventory(profileId, namespace)),
+			Promise.resolve()
+				.then(() => api().LoadServerInventory(profileId, namespace))
+				.then(normalizeRemoteInventory),
 		connectServerDataPlane: (profileId: string, mode: "socks" | "tun") =>
 			Promise.resolve().then(() => api().ConnectServerDataPlane(profileId, mode)),
 		disconnectServerDataPlane: (profileId: string) =>
@@ -257,6 +271,8 @@ export const backend = {
 		Promise.resolve().then(() => api().StopServerTunnel(profileId)),
 	getServerNetworkSettings: (profileId: string) =>
 		Promise.resolve().then(() => api().GetServerNetworkSettings(profileId)),
+	setServerSOCKSPort: (profileId: string, port: number) =>
+		Promise.resolve().then(() => api().SetServerSOCKSPort(profileId, port)),
 	setServerDNSNamespace: (profileId: string, namespace: string) =>
 		Promise.resolve().then(() => api().SetServerDNSNamespace(profileId, namespace)),
 	setServerHostAliases: (profileId: string, aliases: HostAlias[]) =>

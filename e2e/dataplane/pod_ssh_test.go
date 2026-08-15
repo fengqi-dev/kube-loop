@@ -118,14 +118,14 @@ func TestRealPodSSHThroughGatewayAndLocalIdentityIsolation(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = stateStore.Close() })
 	now := time.Now().UTC()
-	principalID, authorizationID, sessionID := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	identityID, authorizationID, sessionID := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	deviceID := "e2e-pod-ssh-device"
-	if _, err := stateStore.Principals().Upsert(ctx, storage.Principal{
-		ID: principalID, Provider: "e2e", ExternalID: "pod-ssh", CreatedAt: now, UpdatedAt: now,
+	if _, err := stateStore.Identities().Create(ctx, storage.Identity{
+		ID: identityID, Type: "human", DisplayName: "Test Identity", Status: "active", CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	createOAuthGrant(t, ctx, stateStore, authorizationID, principalID, deviceID, 7, now, now.Add(5*time.Minute))
+	createOAuthGrant(t, ctx, stateStore, authorizationID, identityID, deviceID, 7, now, now.Add(5*time.Minute))
 	network, err := networkspec.Normalize(networkspec.Spec{ServiceIPs: []string{"10.96.0.10"}})
 	if err != nil {
 		t.Fatal(err)
@@ -140,7 +140,7 @@ func TestRealPodSSHThroughGatewayAndLocalIdentityIsolation(t *testing.T) {
 	}
 	expiresAt := now.Add(5 * time.Minute)
 	if err := stateStore.Sessions().Create(ctx, storage.Session{
-		ID: sessionID, PrincipalID: principalID, DeviceID: deviceID, ClusterID: "minikube",
+		ID: sessionID, IdentityID: identityID, DeviceID: deviceID, ClusterID: "minikube",
 		Namespace: harness.EchoNamespace, State: "active", Generation: 1,
 		NetworkSpec: networkJSON, NetworkSpecHash: networkHash,
 		CreatedAt: now, UpdatedAt: now, LastHeartbeatAt: now, ExpiresAt: expiresAt,
@@ -155,14 +155,14 @@ func TestRealPodSSHThroughGatewayAndLocalIdentityIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	principal := controlplaneapi.Principal{
-		Subject: principalID, DeviceID: deviceID, AuthorizationID: authorizationID, AccessExpiresAt: expiresAt,
+	identity := controlplaneapi.Identity{
+		Subject: identityID, DeviceID: deviceID, AuthorizationID: authorizationID, AccessExpiresAt: expiresAt,
 	}
 	activeSession := sessionapi.ActiveSession{
 		ID: sessionID, Namespace: harness.EchoNamespace, Generation: 1,
 		ExpiresAt: expiresAt, NetworkSpecHash: networkHash,
 	}
-	running := startExecController(t, "127.0.0.1:0", stateStore, executor, principal, activeSession)
+	running := startExecController(t, "127.0.0.1:0", stateStore, executor, identity, activeSession)
 	t.Cleanup(func() { running.Stop(t) })
 	serverProfile := profile.Profile{ID: "e2e-pod-ssh", BaseURL: "http://" + running.Address()}
 	credentialStore := &e2eCredentialStore{

@@ -44,19 +44,20 @@ type cursorDocument struct {
 	ID        string    `json:"id"`
 }
 
-type principalDocument struct {
-	ID          string    `json:"id"`
-	Provider    string    `json:"provider"`
-	DisplayName string    `json:"displayName,omitempty"`
-	Email       string    `json:"email,omitempty"`
-	Groups      []string  `json:"groups"`
-	CreatedAt   time.Time `json:"createdAt"`
-	UpdatedAt   time.Time `json:"updatedAt"`
+type identityDocument struct {
+	ID           string    `json:"id"`
+	Type         string    `json:"type"`
+	DisplayName  string    `json:"displayName,omitempty"`
+	PrimaryEmail string    `json:"primaryEmail,omitempty"`
+	Status       string    `json:"status"`
+	Groups       []string  `json:"groups"`
+	CreatedAt    time.Time `json:"createdAt"`
+	UpdatedAt    time.Time `json:"updatedAt"`
 }
 
 type sessionDocument struct {
 	ID                string    `json:"id"`
-	PrincipalID       string    `json:"principalId"`
+	IdentityID        string    `json:"identityId"`
 	DeviceID          string    `json:"deviceId"`
 	ClusterID         string    `json:"clusterId"`
 	Namespace         string    `json:"namespace"`
@@ -70,20 +71,20 @@ type sessionDocument struct {
 }
 
 type taskDocument struct {
-	ID          string     `json:"id"`
-	PrincipalID string     `json:"principalId"`
-	SessionID   string     `json:"sessionId"`
-	Type        string     `json:"type"`
-	State       string     `json:"state"`
-	CreatedAt   time.Time  `json:"createdAt"`
-	UpdatedAt   time.Time  `json:"updatedAt"`
-	Version     uint64     `json:"version"`
-	ExpiresAt   *time.Time `json:"expiresAt,omitempty"`
+	ID         string     `json:"id"`
+	IdentityID string     `json:"identityId"`
+	SessionID  string     `json:"sessionId"`
+	Type       string     `json:"type"`
+	State      string     `json:"state"`
+	CreatedAt  time.Time  `json:"createdAt"`
+	UpdatedAt  time.Time  `json:"updatedAt"`
+	Version    uint64     `json:"version"`
+	ExpiresAt  *time.Time `json:"expiresAt,omitempty"`
 }
 
 type auditDocument struct {
 	ID           string    `json:"id"`
-	PrincipalID  string    `json:"principalId,omitempty"`
+	IdentityID   string    `json:"identityId,omitempty"`
 	Action       string    `json:"action"`
 	ResourceType string    `json:"resourceType,omitempty"`
 	ResourceID   string    `json:"resourceId,omitempty"`
@@ -106,51 +107,70 @@ type relayDocument struct {
 	ControlVersion              uint64                `json:"controlVersion"`
 }
 
+type oauthGrantDocument struct {
+	AuthorizationID string     `json:"authorizationId"`
+	IdentityID      string     `json:"identityId"`
+	ClientID        string     `json:"clientId"`
+	DeviceID        string     `json:"deviceId"`
+	Scopes          []string   `json:"scopes"`
+	Status          string     `json:"status"`
+	CreatedAt       time.Time  `json:"createdAt"`
+	ExpiresAt       time.Time  `json:"expiresAt"`
+	RevokedAt       *time.Time `json:"revokedAt,omitempty"`
+}
+
 type relayCursorDocument struct {
 	Version int    `json:"v"`
 	Kind    string `json:"kind"`
 	RelayID string `json:"relayId"`
 }
 
-func (api *readAPI) listPrincipals(ctx *echo.Context) error {
+func (api *readAPI) listIdentities(ctx *echo.Context) error {
 	writer, request := ctx.Response(), ctx.Request()
-	parameters, err := parseListParameters(request, "principals", "provider")
-	provider := strings.TrimSpace(parameters.query.Get("provider"))
-	if err != nil || len(provider) > 128 || strings.ContainsAny(provider, "\x00\r\n") {
+	parameters, err := parseListParameters(request, "identities", "type", "status", "search")
+	identityType := strings.TrimSpace(parameters.query.Get("type"))
+	status := strings.TrimSpace(parameters.query.Get("status"))
+	search := strings.TrimSpace(parameters.query.Get("search"))
+	if err != nil || len(identityType) > 32 || len(status) > 32 || len(search) > 256 || strings.ContainsAny(identityType+status+search, "\x00\r\n") {
 		writeListError(writer, request, http.StatusBadRequest, "invalid_request", "management list query is invalid")
 		return nil
 	}
-	principals, err := api.status.Principals().List(request.Context(), storage.PrincipalListFilter{
-		Provider: provider, Cursor: parameters.cursor, Limit: parameters.limit + 1,
+	identities, err := api.status.Identities().List(request.Context(), storage.IdentityListFilter{
+		Type: identityType, Status: status, Search: search, Cursor: parameters.cursor, Limit: parameters.limit + 1,
 	})
 	if err != nil {
-		api.audit(request, subjectFromRequest(request), "admin.principal/list", "failure")
-		writeListError(writer, request, http.StatusServiceUnavailable, "unavailable", "management principal list is unavailable")
+		api.audit(request, subjectFromRequest(request), "admin.identity/list", "failure")
+		writeListError(writer, request, http.StatusServiceUnavailable, "unavailable", "management identity list is unavailable")
 		return nil
 	}
-	hasMore := len(principals) > parameters.limit
+	hasMore := len(identities) > parameters.limit
 	if hasMore {
-		principals = principals[:parameters.limit]
+		identities = identities[:parameters.limit]
 	}
-	items := make([]principalDocument, 0, len(principals))
-	for _, principal := range principals {
-		items = append(items, principalDocument{
-			ID: principal.ID, Provider: principal.Provider, DisplayName: principal.DisplayName, Email: principal.Email,
-			Groups: slices.Clone(principal.Groups), CreatedAt: principal.CreatedAt, UpdatedAt: principal.UpdatedAt,
+	items := make([]identityDocument, 0, len(identities))
+	for _, identity := range identities {
+		groups, groupErr := api.identityGroupIDs(request.Context(), identity.ID)
+		if groupErr != nil {
+			writeListError(writer, request, http.StatusServiceUnavailable, "unavailable", "identity group membership is unavailable")
+			return nil
+		}
+		items = append(items, identityDocument{
+			ID: identity.ID, Type: identity.Type, DisplayName: identity.DisplayName, PrimaryEmail: identity.PrimaryEmail,
+			Status: identity.Status, Groups: groups, CreatedAt: identity.CreatedAt, UpdatedAt: identity.UpdatedAt,
 		})
 	}
-	api.audit(request, subjectFromRequest(request), "admin.principal/list", "success")
-	writeJSON(writer, http.StatusOK, listResponse("principals", items, principals, hasMore))
+	api.audit(request, subjectFromRequest(request), "admin.identity/list", "success")
+	writeJSON(writer, http.StatusOK, listResponse("identities", items, identities, hasMore))
 	return nil
 }
 
 func (api *readAPI) listSessions(ctx *echo.Context) error {
 	writer, request := ctx.Response(), ctx.Request()
-	parameters, err := parseListParameters(request, "sessions", "principalId", "namespace", "state")
-	principalID := strings.TrimSpace(parameters.query.Get("principalId"))
+	parameters, err := parseListParameters(request, "sessions", "identityId", "namespace", "state")
+	identityID := strings.TrimSpace(parameters.query.Get("identityId"))
 	namespace := strings.TrimSpace(parameters.query.Get("namespace"))
 	state := strings.TrimSpace(parameters.query.Get("state"))
-	if err != nil || !validOptionalUUID(principalID) || !validOptionalNamespace(namespace) ||
+	if err != nil || !validOptionalUUID(identityID) || !validOptionalNamespace(namespace) ||
 		len(state) > 64 || strings.ContainsAny(state, "\x00\r\n") {
 		writeListError(writer, request, http.StatusBadRequest, "invalid_request", "management list query is invalid")
 		return nil
@@ -160,7 +180,7 @@ func (api *readAPI) listSessions(ctx *echo.Context) error {
 		return nil
 	}
 	sessions, err := api.status.Sessions().List(request.Context(), storage.SessionListFilter{
-		PrincipalID: principalID, Namespace: namespace, State: state,
+		IdentityID: identityID, Namespace: namespace, State: state,
 		Cursor: parameters.cursor, Limit: parameters.limit + 1,
 	})
 	if err != nil {
@@ -175,7 +195,7 @@ func (api *readAPI) listSessions(ctx *echo.Context) error {
 	items := make([]sessionDocument, 0, len(sessions))
 	for _, session := range sessions {
 		items = append(items, sessionDocument{
-			ID: session.ID, PrincipalID: session.PrincipalID, DeviceID: session.DeviceID,
+			ID: session.ID, IdentityID: session.IdentityID, DeviceID: session.DeviceID,
 			ClusterID: session.ClusterID, Namespace: session.Namespace, State: session.State,
 			Generation: session.Generation, NetworkSpecSHA256: session.NetworkSpecHash,
 			CreatedAt: session.CreatedAt, UpdatedAt: session.UpdatedAt,
@@ -187,15 +207,52 @@ func (api *readAPI) listSessions(ctx *echo.Context) error {
 	return nil
 }
 
+func (api *readAPI) listOAuthGrants(ctx *echo.Context) error {
+	writer, request := ctx.Response(), ctx.Request()
+	parameters, err := parseListParameters(request, "oauth-grants", "identityId", "clientId", "status")
+	identityID := strings.TrimSpace(parameters.query.Get("identityId"))
+	clientID := strings.TrimSpace(parameters.query.Get("clientId"))
+	status := strings.TrimSpace(parameters.query.Get("status"))
+	if err != nil || !validOptionalUUID(identityID) || len(clientID) > 128 || strings.ContainsAny(clientID, "\x00\r\n") ||
+		status != "" && status != "active" && status != "revoked" && status != "expired" {
+		writeListError(writer, request, http.StatusBadRequest, "invalid_request", "OAuth grant list query is invalid")
+		return nil
+	}
+	grants, err := api.status.OAuthSessions().ListGrants(request.Context(), storage.OAuthGrantListFilter{
+		IdentityID: identityID, ClientID: clientID, Status: status,
+		Cursor: parameters.cursor, Limit: parameters.limit + 1, Now: time.Now().UTC(),
+	})
+	if err != nil {
+		api.audit(request, subjectFromRequest(request), "admin.oauth-grant/list", "failure")
+		writeListError(writer, request, http.StatusServiceUnavailable, "unavailable", "OAuth grant list is unavailable")
+		return nil
+	}
+	hasMore := len(grants) > parameters.limit
+	if hasMore {
+		grants = grants[:parameters.limit]
+	}
+	items := make([]oauthGrantDocument, 0, len(grants))
+	for _, grant := range grants {
+		items = append(items, oauthGrantDocument{
+			AuthorizationID: grant.RequestID, IdentityID: grant.IdentityID, ClientID: grant.ClientID,
+			DeviceID: grant.DeviceID, Scopes: grant.Scopes, Status: grant.Status,
+			CreatedAt: grant.CreatedAt, ExpiresAt: grant.ExpiresAt, RevokedAt: grant.RevokedAt,
+		})
+	}
+	api.audit(request, subjectFromRequest(request), "admin.oauth-grant/list", "success")
+	writeJSON(writer, http.StatusOK, listResponse("oauth-grants", items, grants, hasMore))
+	return nil
+}
+
 func (api *readAPI) listTasks(ctx *echo.Context) error {
 	writer, request := ctx.Response(), ctx.Request()
-	parameters, err := parseListParameters(request, "tasks", "principalId", "sessionId", "namespace", "type", "state")
-	principalID := strings.TrimSpace(parameters.query.Get("principalId"))
+	parameters, err := parseListParameters(request, "tasks", "identityId", "sessionId", "namespace", "type", "state")
+	identityID := strings.TrimSpace(parameters.query.Get("identityId"))
 	sessionID := strings.TrimSpace(parameters.query.Get("sessionId"))
 	namespace := strings.TrimSpace(parameters.query.Get("namespace"))
 	taskType := strings.TrimSpace(parameters.query.Get("type"))
 	state := remotetask.State(strings.TrimSpace(parameters.query.Get("state")))
-	if err != nil || !validOptionalUUID(principalID) || !validOptionalUUID(sessionID) ||
+	if err != nil || !validOptionalUUID(identityID) || !validOptionalUUID(sessionID) ||
 		!validOptionalNamespace(namespace) || len(taskType) > 128 || strings.ContainsAny(taskType, "\x00\r\n") ||
 		(state != "" && !state.Valid()) {
 		writeListError(writer, request, http.StatusBadRequest, "invalid_request", "management list query is invalid")
@@ -206,7 +263,7 @@ func (api *readAPI) listTasks(ctx *echo.Context) error {
 		return nil
 	}
 	tasks, err := api.status.Tasks().List(request.Context(), storage.TaskListFilter{
-		PrincipalID: principalID, SessionID: sessionID, Namespace: namespace,
+		IdentityID: identityID, SessionID: sessionID, Namespace: namespace,
 		Type: taskType, State: state,
 		Cursor: parameters.cursor, Limit: parameters.limit + 1,
 	})
@@ -222,7 +279,7 @@ func (api *readAPI) listTasks(ctx *echo.Context) error {
 	items := make([]taskDocument, 0, len(tasks))
 	for _, task := range tasks {
 		items = append(items, taskDocument{
-			ID: task.ID, PrincipalID: task.PrincipalID, SessionID: task.SessionID,
+			ID: task.ID, IdentityID: task.IdentityID, SessionID: task.SessionID,
 			Type: task.Type, State: string(task.State), CreatedAt: task.CreatedAt, UpdatedAt: task.UpdatedAt,
 			Version: uint64(task.UpdatedAt.UTC().UnixNano()), ExpiresAt: task.ExpiresAt,
 		})
@@ -234,15 +291,15 @@ func (api *readAPI) listTasks(ctx *echo.Context) error {
 
 func (api *readAPI) listAudit(ctx *echo.Context) error {
 	writer, request := ctx.Response(), ctx.Request()
-	parameters, err := parseListParameters(request, "audit", "principalId", "action", "after", "before")
-	principalID := strings.TrimSpace(parameters.query.Get("principalId"))
+	parameters, err := parseListParameters(request, "audit", "identityId", "action", "after", "before")
+	identityID := strings.TrimSpace(parameters.query.Get("identityId"))
 	action := strings.TrimSpace(parameters.query.Get("action"))
-	if err != nil || !validOptionalUUID(principalID) || len(action) > 256 || strings.ContainsAny(action, "\x00\r\n") {
+	if err != nil || !validOptionalUUID(identityID) || len(action) > 256 || strings.ContainsAny(action, "\x00\r\n") {
 		writeListError(writer, request, http.StatusBadRequest, "invalid_request", "management list query is invalid")
 		return nil
 	}
 	filter := storage.AuditFilter{
-		PrincipalID: principalID, Action: action,
+		IdentityID: identityID, Action: action,
 		Cursor: parameters.cursor, Limit: parameters.limit + 1,
 	}
 	if filter.After, err = optionalTime(parameters.query.Get("after")); err != nil {
@@ -267,7 +324,7 @@ func (api *readAPI) listAudit(ctx *echo.Context) error {
 	items := make([]auditDocument, 0, len(events))
 	for _, event := range events {
 		items = append(items, auditDocument{
-			ID: event.ID, PrincipalID: event.PrincipalID, Action: event.Action,
+			ID: event.ID, IdentityID: event.IdentityID, Action: event.Action,
 			ResourceType: event.ResourceType, ResourceID: event.ResourceID,
 			Outcome: event.Outcome, RequestID: event.RequestID, CreatedAt: event.CreatedAt,
 		})
@@ -406,7 +463,7 @@ func listResponse[T any, R interface{ ~[]E }, E any](kind string, items T, rows 
 		var createdAt time.Time
 		var id string
 		switch value := any(rows[len(rows)-1]).(type) {
-		case storage.Principal:
+		case storage.Identity:
 			createdAt, id = value.CreatedAt, value.ID
 		case storage.Session:
 			createdAt, id = value.CreatedAt, value.ID
@@ -414,6 +471,8 @@ func listResponse[T any, R interface{ ~[]E }, E any](kind string, items T, rows 
 			createdAt, id = value.CreatedAt, value.ID
 		case storage.AuditEvent:
 			createdAt, id = value.CreatedAt, value.ID
+		case storage.OAuthGrant:
+			createdAt, id = value.CreatedAt, value.RequestID
 		}
 		response["nextCursor"] = encodeCursor(kind, createdAt, id)
 	}

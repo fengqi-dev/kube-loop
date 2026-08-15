@@ -27,7 +27,7 @@ type previewTestSessions struct{ session sessionapi.ActiveSession }
 
 func (sessions previewTestSessions) RequireActive(
 	_ context.Context,
-	_ controlplaneapi.Principal,
+	_ controlplaneapi.Identity,
 	namespace, sessionID string,
 ) (sessionapi.ActiveSession, *controlplaneapi.Error) {
 	if namespace != sessions.session.Namespace || sessionID != sessions.session.ID {
@@ -48,7 +48,7 @@ type recordingPreviewResources struct {
 
 func (resources *recordingPreviewResources) Create(
 	_ context.Context,
-	_ controlplaneapi.Principal,
+	_ controlplaneapi.Identity,
 	snapshot servicebinding.PreviewServiceSnapshot,
 	previewID string,
 ) (*corev1.Service, error) {
@@ -91,7 +91,7 @@ func (resources *recordingPreviewResources) state() (servicebinding.PreviewServi
 }
 
 func TestPreviewTaskIsOwnedIdempotentAndDurablyStopped(t *testing.T) {
-	stateStore, principal, active := previewTestStore(t)
+	stateStore, identity, active := previewTestStore(t)
 	now := time.Now().UTC()
 	resources := &recordingPreviewResources{}
 	handler, err := New(
@@ -103,7 +103,7 @@ func TestPreviewTaskIsOwnedIdempotentAndDurablyStopped(t *testing.T) {
 	}
 	path := "/api/sessions/" + active.ID + "/previews?namespace=development"
 	body := []byte(`{"name":"local-api","ports":[{"servicePort":53,"protocol":"udp"},{"name":"http","servicePort":80,"protocol":"tcp"}]}`)
-	created, apiError := previewRequest(handler, principal, http.MethodPost, path, body, "preview-1")
+	created, apiError := previewRequest(handler, identity, http.MethodPost, path, body, "preview-1")
 	if apiError != nil || created.Code != http.StatusCreated {
 		t.Fatalf("create Preview: status=%d error=%#v body=%s", created.Code, apiError, created.Body.String())
 	}
@@ -119,12 +119,12 @@ func TestPreviewTaskIsOwnedIdempotentAndDurablyStopped(t *testing.T) {
 	if err != nil || stored.ExpiresAt != nil {
 		t.Fatalf("stored Preview expiration=%v err=%v", stored.ExpiresAt, err)
 	}
-	replayed, apiError := previewRequest(handler, principal, http.MethodPost, path, body, "preview-1")
+	replayed, apiError := previewRequest(handler, identity, http.MethodPost, path, body, "preview-1")
 	if apiError != nil || replayed.Code != http.StatusOK || replayed.Header().Get("Idempotent-Replayed") != "true" {
 		t.Fatalf("replayed Preview: status=%d error=%#v", replayed.Code, apiError)
 	}
 	_, apiError = previewRequest(
-		handler, principal, http.MethodPost, path,
+		handler, identity, http.MethodPost, path,
 		[]byte(`{"name":"other","ports":[{"servicePort":80,"protocol":"tcp"}]}`), "preview-1",
 	)
 	if apiError == nil || apiError.Code != controlplaneapi.CodeConflict {
@@ -132,12 +132,12 @@ func TestPreviewTaskIsOwnedIdempotentAndDurablyStopped(t *testing.T) {
 	}
 	taskPath := "/api/sessions/" + active.ID + "/previews/" + document.ID + "?namespace=development"
 	_, apiError = previewRequest(
-		handler, controlplaneapi.Principal{Subject: uuid.NewString()}, http.MethodGet, taskPath, nil, "",
+		handler, controlplaneapi.Identity{Subject: uuid.NewString()}, http.MethodGet, taskPath, nil, "",
 	)
 	if apiError == nil || apiError.Code != controlplaneapi.CodeNotFound {
-		t.Fatalf("cross-principal get error=%#v", apiError)
+		t.Fatalf("cross-identity get error=%#v", apiError)
 	}
-	stopped, apiError := previewRequest(handler, principal, http.MethodDelete, taskPath, nil, "")
+	stopped, apiError := previewRequest(handler, identity, http.MethodDelete, taskPath, nil, "")
 	if apiError != nil || stopped.Code != http.StatusOK {
 		t.Fatalf("stop pending Preview: status=%d error=%#v", stopped.Code, apiError)
 	}
@@ -148,7 +148,7 @@ func TestPreviewTaskIsOwnedIdempotentAndDurablyStopped(t *testing.T) {
 }
 
 func TestPreviewRequestValidationRejectsInvalidKubernetesNames(t *testing.T) {
-	stateStore, principal, active := previewTestStore(t)
+	stateStore, identity, active := previewTestStore(t)
 	handler, err := New(
 		stateStore, previewTestSessions{session: active}, &recordingPreviewResources{},
 		Config{},
@@ -162,14 +162,14 @@ func TestPreviewRequestValidationRejectsInvalidKubernetesNames(t *testing.T) {
 		[]byte(`{"name":"local-api","ports":[{"name":"bad_name","servicePort":80,"protocol":"tcp"}]}`),
 		[]byte(`{"name":"local-api","ports":[{"name":"http","servicePort":80,"protocol":"tcp"},{"name":"http","servicePort":81,"protocol":"tcp"}]}`),
 	} {
-		_, apiError := previewRequest(handler, principal, http.MethodPost, path, body, uuid.NewString())
+		_, apiError := previewRequest(handler, identity, http.MethodPost, path, body, uuid.NewString())
 		if apiError == nil || apiError.Code != controlplaneapi.CodeInvalidArgument {
 			t.Fatalf("invalid Preview body=%s error=%#v", body, apiError)
 		}
 	}
 }
 
-func previewTestStore(t *testing.T) (*storage.Store, controlplaneapi.Principal, sessionapi.ActiveSession) {
+func previewTestStore(t *testing.T) (*storage.Store, controlplaneapi.Identity, sessionapi.ActiveSession) {
 	t.Helper()
 	ctx := context.Background()
 	stateStore, err := storage.Open(ctx, storage.Config{
@@ -180,9 +180,9 @@ func previewTestStore(t *testing.T) (*storage.Store, controlplaneapi.Principal, 
 	}
 	t.Cleanup(func() { _ = stateStore.Close() })
 	now := time.Now().UTC()
-	principalID, sessionID := uuid.NewString(), uuid.NewString()
-	if _, err := stateStore.Principals().Upsert(ctx, storage.Principal{
-		ID: principalID, Provider: "test", ExternalID: "preview-user", CreatedAt: now, UpdatedAt: now,
+	identityID, sessionID := uuid.NewString(), uuid.NewString()
+	if _, err := stateStore.Identities().Create(ctx, storage.Identity{
+		ID: identityID, Type: "human", DisplayName: "Test Identity", Status: "active", CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -194,7 +194,7 @@ func previewTestStore(t *testing.T) (*storage.Store, controlplaneapi.Principal, 
 	networkHash, _ := networkspec.Hash(network)
 	expiresAt := now.Add(time.Hour)
 	if err := stateStore.Sessions().Create(ctx, storage.Session{
-		ID: sessionID, PrincipalID: principalID, DeviceID: "device", ClusterID: "cluster",
+		ID: sessionID, IdentityID: identityID, DeviceID: "device", ClusterID: "cluster",
 		Namespace: "development", State: "active", Generation: 1,
 		NetworkSpec: networkJSON, NetworkSpecHash: networkHash,
 		CreatedAt: now, UpdatedAt: now, LastHeartbeatAt: now, ExpiresAt: expiresAt,
@@ -202,13 +202,13 @@ func previewTestStore(t *testing.T) (*storage.Store, controlplaneapi.Principal, 
 		t.Fatal(err)
 	}
 	return stateStore,
-		controlplaneapi.Principal{Subject: principalID, DeviceID: "device"},
+		controlplaneapi.Identity{Subject: identityID, DeviceID: "device"},
 		sessionapi.ActiveSession{ID: sessionID, Namespace: "development", Generation: 1, ExpiresAt: expiresAt}
 }
 
 func previewRequest(
 	handler *Service,
-	principal controlplaneapi.Principal,
+	identity controlplaneapi.Identity,
 	method, path string,
 	body []byte,
 	idempotency string,
@@ -221,10 +221,10 @@ func previewRequest(
 		request.Header.Set(sessionapi.IdempotencyHeader, idempotency)
 	}
 	response := httptest.NewRecorder()
-	return response, serveAPI(handler, response, request, principal)
+	return response, serveAPI(handler, response, request, identity)
 }
 
-func serveAPI(handler *Service, writer http.ResponseWriter, request *http.Request, principal controlplaneapi.Principal) *controlplaneapi.Error {
+func serveAPI(handler *Service, writer http.ResponseWriter, request *http.Request, identity controlplaneapi.Identity) *controlplaneapi.Error {
 	routes := NewRoutes(handler)
 	parts := strings.Split(strings.Trim(request.URL.Path, "/"), "/")
 	request.SetPathValue("sessionID", parts[2])
@@ -233,10 +233,10 @@ func serveAPI(handler *Service, writer http.ResponseWriter, request *http.Reques
 	}
 	switch {
 	case request.Method == http.MethodPost:
-		return routes.withSession(handler.create)(echo.New().NewContext(request, writer), principal)
+		return routes.withSession(handler.create)(echo.New().NewContext(request, writer), identity)
 	case request.Method == http.MethodDelete:
-		return routes.withTask(handler.stop)(echo.New().NewContext(request, writer), principal)
+		return routes.withTask(handler.stop)(echo.New().NewContext(request, writer), identity)
 	default:
-		return routes.withTask(handler.get)(echo.New().NewContext(request, writer), principal)
+		return routes.withTask(handler.get)(echo.New().NewContext(request, writer), identity)
 	}
 }

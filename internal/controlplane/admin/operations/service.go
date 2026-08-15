@@ -61,7 +61,7 @@ func (function RecoveryRunnerFunc) RunOnce(ctx context.Context) (map[string]int,
 }
 
 type Actor struct {
-	PrincipalID    string
+	IdentityID     string
 	Authentication adminauthorization.AuthenticationType
 }
 
@@ -74,13 +74,13 @@ type Request struct {
 
 type RevokeOAuthGrantRequest struct {
 	Request
-	PrincipalID     string
+	IdentityID      string
 	AuthorizationID string
 }
 
-type RevokePrincipalRequest struct {
+type RevokeIdentityRequest struct {
 	Request
-	PrincipalID string
+	IdentityID string
 }
 
 type StopSessionRequest struct {
@@ -105,15 +105,15 @@ type TriggerRecoveryRequest struct{ Request }
 
 type AuditExportRequest struct {
 	Request
-	PrincipalID string
-	Action      string
-	After       time.Time
-	Before      time.Time
-	Limit       int
+	IdentityID string
+	Action     string
+	After      time.Time
+	Before     time.Time
+	Limit      int
 }
 
 type RevocationResult struct {
-	PrincipalID     string    `json:"principalId"`
+	IdentityID      string    `json:"identityId"`
 	AuthorizationID string    `json:"authorizationId,omitempty"`
 	RevokedCount    int64     `json:"revokedCount"`
 	RevokedAt       time.Time `json:"revokedAt"`
@@ -202,14 +202,14 @@ func (service *Service) RecoveryAvailable() bool { return service != nil && serv
 
 func (service *Service) RevokeOAuthGrant(ctx context.Context, request RevokeOAuthGrantRequest) (RevocationResult, error) {
 	common, err := normalizeRequest(request.Request, "admin.oauth-grant.revoke")
-	if err != nil || !validUUID(request.PrincipalID) || !validUUID(request.AuthorizationID) {
+	if err != nil || !validUUID(request.IdentityID) || !validUUID(request.AuthorizationID) {
 		return RevocationResult{}, ErrInvalidRequest
 	}
 	requestHash := requestDigest(struct {
-		PrincipalID     string `json:"principalId"`
+		IdentityID      string `json:"identityId"`
 		AuthorizationID string `json:"authorizationId"`
 		Reason          string `json:"reason"`
-	}{request.PrincipalID, request.AuthorizationID, common.reason})
+	}{request.IdentityID, request.AuthorizationID, common.reason})
 	result := RevocationResult{}
 	err = service.store.WithinTransaction(ctx, func(repositories storage.Repositories) error {
 		replayed, lookupErr := replay(repositories, ctx, common.scope, common.keyHash, requestHash, &result)
@@ -219,11 +219,11 @@ func (service *Service) RevokeOAuthGrant(ctx context.Context, request RevokeOAut
 			}
 			return lookupErr
 		}
-		principalID, _, getErr := repositories.OAuthSessions().RequestOwner(ctx, request.AuthorizationID)
+		identityID, _, getErr := repositories.OAuthSessions().RequestOwner(ctx, request.AuthorizationID)
 		if getErr != nil {
 			return getErr
 		}
-		if principalID != request.PrincipalID {
+		if identityID != request.IdentityID {
 			return storage.ErrNotFound
 		}
 		revokedAt := service.now().UTC()
@@ -239,11 +239,11 @@ func (service *Service) RevokeOAuthGrant(ctx context.Context, request RevokeOAut
 			return revokeErr
 		}
 		result = RevocationResult{
-			PrincipalID: principalID, AuthorizationID: request.AuthorizationID,
+			IdentityID: identityID, AuthorizationID: request.AuthorizationID,
 			RevokedCount: count, RevokedAt: revokedAt,
 		}
 		return service.persistSuccess(ctx, repositories, common, requestHash, "oauth-grant", request.AuthorizationID,
-			"admin.oauth-grant.revoke", map[string]any{"targetPrincipalId": principalID}, result)
+			"admin.oauth-grant.revoke", map[string]any{"targetIdentityId": identityID}, result)
 	})
 	if err != nil {
 		return RevocationResult{}, mapError(err)
@@ -251,15 +251,15 @@ func (service *Service) RevokeOAuthGrant(ctx context.Context, request RevokeOAut
 	return result, nil
 }
 
-func (service *Service) RevokePrincipal(ctx context.Context, request RevokePrincipalRequest) (RevocationResult, error) {
-	common, err := normalizeRequest(request.Request, "admin.principal.revoke")
-	if err != nil || !validUUID(request.PrincipalID) {
+func (service *Service) RevokeIdentity(ctx context.Context, request RevokeIdentityRequest) (RevocationResult, error) {
+	common, err := normalizeRequest(request.Request, "admin.identity.revoke")
+	if err != nil || !validUUID(request.IdentityID) {
 		return RevocationResult{}, ErrInvalidRequest
 	}
 	requestHash := requestDigest(struct {
-		PrincipalID string `json:"principalId"`
-		Reason      string `json:"reason"`
-	}{request.PrincipalID, common.reason})
+		IdentityID string `json:"identityId"`
+		Reason     string `json:"reason"`
+	}{request.IdentityID, common.reason})
 	result := RevocationResult{}
 	err = service.store.WithinTransaction(ctx, func(repositories storage.Repositories) error {
 		replayed, lookupErr := replay(repositories, ctx, common.scope, common.keyHash, requestHash, &result)
@@ -269,17 +269,17 @@ func (service *Service) RevokePrincipal(ctx context.Context, request RevokePrinc
 			}
 			return lookupErr
 		}
-		if _, getErr := repositories.Principals().GetByID(ctx, request.PrincipalID); getErr != nil {
+		if _, getErr := repositories.Identities().GetByID(ctx, request.IdentityID); getErr != nil {
 			return getErr
 		}
 		revokedAt := service.now().UTC()
-		count, revokeErr := repositories.OAuthSessions().RevokePrincipal(ctx, request.PrincipalID, revokedAt)
+		count, revokeErr := repositories.OAuthSessions().RevokeIdentity(ctx, request.IdentityID, revokedAt)
 		if revokeErr != nil {
 			return revokeErr
 		}
-		result = RevocationResult{PrincipalID: request.PrincipalID, RevokedCount: count, RevokedAt: revokedAt}
-		return service.persistSuccess(ctx, repositories, common, requestHash, "principal", request.PrincipalID,
-			"admin.principal.revoke", map[string]any{"revokedOAuthGrantCount": count}, result)
+		result = RevocationResult{IdentityID: request.IdentityID, RevokedCount: count, RevokedAt: revokedAt}
+		return service.persistSuccess(ctx, repositories, common, requestHash, "identity", request.IdentityID,
+			"admin.identity.revoke", map[string]any{"revokedOAuthGrantCount": count}, result)
 	})
 	if err != nil {
 		return RevocationResult{}, mapError(err)
@@ -524,27 +524,27 @@ func (service *Service) TriggerRecovery(ctx context.Context, request TriggerReco
 
 func (service *Service) CreateAuditExport(ctx context.Context, request AuditExportRequest) (AuditExportResult, error) {
 	common, err := normalizeRequest(request.Request, "admin.audit.export")
-	request.PrincipalID, request.Action = strings.TrimSpace(request.PrincipalID), strings.TrimSpace(request.Action)
+	request.IdentityID, request.Action = strings.TrimSpace(request.IdentityID), strings.TrimSpace(request.Action)
 	if request.Limit == 0 {
 		request.Limit = maximumExportRows
 	}
 	if err != nil || request.Limit < 1 || request.Limit > maximumExportRows ||
-		(request.PrincipalID != "" && !validUUID(request.PrincipalID)) || len(request.Action) > 256 ||
+		(request.IdentityID != "" && !validUUID(request.IdentityID)) || len(request.Action) > 256 ||
 		strings.ContainsAny(request.Action, "\x00\r\n") ||
 		(!request.After.IsZero() && !request.Before.IsZero() && !request.Before.After(request.After)) {
 		return AuditExportResult{}, ErrInvalidRequest
 	}
 	filter := storage.AuditFilter{
-		PrincipalID: request.PrincipalID, Action: request.Action,
+		IdentityID: request.IdentityID, Action: request.Action,
 		After: request.After.UTC(), Before: request.Before.UTC(), Limit: request.Limit,
 	}
 	filterJSON, _ := json.Marshal(struct {
-		PrincipalID string    `json:"principalId,omitempty"`
-		Action      string    `json:"action,omitempty"`
-		After       time.Time `json:"after"`
-		Before      time.Time `json:"before"`
-		Limit       int       `json:"limit"`
-	}{filter.PrincipalID, filter.Action, filter.After, filter.Before, filter.Limit})
+		IdentityID string    `json:"identityId,omitempty"`
+		Action     string    `json:"action,omitempty"`
+		After      time.Time `json:"after"`
+		Before     time.Time `json:"before"`
+		Limit      int       `json:"limit"`
+	}{filter.IdentityID, filter.Action, filter.After, filter.Before, filter.Limit})
 	requestHash := requestDigest(struct {
 		Filter json.RawMessage `json:"filter"`
 		Reason string          `json:"reason"`
@@ -630,17 +630,17 @@ func (service *Service) runAuditExports(ctx context.Context) {
 
 func (service *Service) buildAuditExport(ctx context.Context, raw json.RawMessage) (string, string) {
 	var filter struct {
-		PrincipalID string    `json:"principalId"`
-		Action      string    `json:"action"`
-		After       time.Time `json:"after"`
-		Before      time.Time `json:"before"`
-		Limit       int       `json:"limit"`
+		IdentityID string    `json:"identityId"`
+		Action     string    `json:"action"`
+		After      time.Time `json:"after"`
+		Before     time.Time `json:"before"`
+		Limit      int       `json:"limit"`
 	}
 	if json.Unmarshal(raw, &filter) != nil || filter.Limit < 1 || filter.Limit > maximumExportRows {
 		return "", "invalid_filter"
 	}
 	events, err := service.store.Audit().List(ctx, storage.AuditFilter{
-		PrincipalID: filter.PrincipalID, Action: filter.Action, After: filter.After, Before: filter.Before, Limit: filter.Limit,
+		IdentityID: filter.IdentityID, Action: filter.Action, After: filter.After, Before: filter.Before, Limit: filter.Limit,
 	})
 	if err != nil {
 		return "", "storage_unavailable"
@@ -649,7 +649,7 @@ func (service *Service) buildAuditExport(ctx context.Context, raw json.RawMessag
 	for _, event := range events {
 		line, marshalErr := json.Marshal(struct {
 			ID           string          `json:"id"`
-			PrincipalID  string          `json:"principalId,omitempty"`
+			IdentityID   string          `json:"identityId,omitempty"`
 			Action       string          `json:"action"`
 			ResourceType string          `json:"resourceType,omitempty"`
 			ResourceID   string          `json:"resourceId,omitempty"`
@@ -657,7 +657,7 @@ func (service *Service) buildAuditExport(ctx context.Context, raw json.RawMessag
 			RequestID    string          `json:"requestId"`
 			Metadata     json.RawMessage `json:"metadata,omitempty"`
 			CreatedAt    time.Time       `json:"createdAt"`
-		}{event.ID, event.PrincipalID, event.Action, event.ResourceType, event.ResourceID, event.Outcome, event.RequestID, event.Metadata, event.CreatedAt})
+		}{event.ID, event.IdentityID, event.Action, event.ResourceType, event.ResourceID, event.Outcome, event.RequestID, event.Metadata, event.CreatedAt})
 		if marshalErr != nil || output.Len()+len(line)+1 > maximumExportBytes {
 			return "", "export_too_large"
 		}
@@ -678,8 +678,8 @@ func auditExportResult(job storage.AuditExportJob) AuditExportResult {
 }
 
 type normalizedRequest struct {
-	actorID, principalID, authenticationType string
-	scope, keyHash, reason, requestID        string
+	actorID, identityID, authenticationType string
+	scope, keyHash, reason, requestID       string
 }
 
 func normalizeRequest(request Request, action string) (normalizedRequest, error) {
@@ -688,10 +688,10 @@ func normalizeRequest(request Request, action string) (normalizedRequest, error)
 	if len(request.Reason) < 8 || len(request.Reason) > 512 || strings.ContainsAny(request.Reason, "\x00\r\n") || request.RequestID == "" {
 		return normalizedRequest{}, ErrInvalidRequest
 	}
-	actorID, principalID := strings.TrimSpace(request.Actor.PrincipalID), strings.TrimSpace(request.Actor.PrincipalID)
+	actorID, identityID := strings.TrimSpace(request.Actor.IdentityID), strings.TrimSpace(request.Actor.IdentityID)
 	authenticationType := string(request.Actor.Authentication)
 	switch request.Actor.Authentication {
-	case adminauthorization.AuthenticationNormal, adminauthorization.AuthenticationBootstrap:
+	case adminauthorization.AuthenticationNormal:
 		if !validUUID(actorID) {
 			return normalizedRequest{}, ErrInvalidRequest
 		}
@@ -699,7 +699,7 @@ func normalizeRequest(request Request, action string) (normalizedRequest, error)
 		if actorID != "" {
 			return normalizedRequest{}, ErrInvalidRequest
 		}
-		actorID, principalID = storage.ManagementActorBreakGlass, ""
+		actorID, identityID = storage.ManagementActorBreakGlass, ""
 	default:
 		return normalizedRequest{}, ErrInvalidRequest
 	}
@@ -710,7 +710,7 @@ func normalizeRequest(request Request, action string) (normalizedRequest, error)
 	digest := sha256.Sum256([]byte(key))
 	keyHash := hex.EncodeToString(digest[:])
 	return normalizedRequest{
-		actorID: actorID, principalID: principalID, authenticationType: authenticationType,
+		actorID: actorID, identityID: identityID, authenticationType: authenticationType,
 		scope:   fmt.Sprintf("admin-operation:%s:%s:%s", authenticationType, actorID, action),
 		keyHash: keyHash, reason: request.Reason, requestID: request.RequestID,
 	}, nil
@@ -769,7 +769,7 @@ func (service *Service) persistSuccess(
 		return err
 	}
 	return repositories.Audit().Append(ctx, storage.AuditEvent{
-		ID: service.newID(), PrincipalID: request.principalID, Action: action,
+		ID: service.newID(), IdentityID: request.identityID, Action: action,
 		ResourceType: resourceType, ResourceID: resourceID, Outcome: "success",
 		RequestID: request.requestID, Metadata: auditMetadata, CreatedAt: now,
 	})

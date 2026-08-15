@@ -26,11 +26,11 @@ func NewPortForwardResolver(provider ClientProvider) (*PortForwardResolver, erro
 
 func (r *PortForwardResolver) Resolve(
 	ctx context.Context,
-	principal controlplaneapi.Principal,
+	identity controlplaneapi.Identity,
 	namespace string,
 	spec portforwardservice.Spec,
 ) (portforwardservice.Target, error) {
-	client, err := r.provider.ClientFor(subjectFor(principal))
+	client, err := r.provider.ClientFor(subjectFor(identity))
 	if err != nil {
 		return portforwardservice.Target{}, err
 	}

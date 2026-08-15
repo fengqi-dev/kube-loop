@@ -30,9 +30,9 @@ func testRestartRecovery(t *testing.T, config Config) {
 	}
 	now := time.Date(2026, 8, 10, 11, 0, 0, 0, time.UTC)
 	persistedID := uuid.NewString()
-	if _, err := store.Principals().Upsert(ctx, Principal{
-		ID: persistedID, Provider: "oidc-recovery", ExternalID: uuid.NewString(),
-		DisplayName: "Persisted", CreatedAt: now,
+	if _, err := store.Identities().Create(ctx, Identity{
+		ID: persistedID, Type: "human", DisplayName: "Persisted User", Status: "active",
+		CreatedAt: now,
 	}); err != nil {
 		_ = store.Close()
 		t.Fatal(err)
@@ -40,8 +40,8 @@ func testRestartRecovery(t *testing.T, config Config) {
 	rolledBackID := uuid.NewString()
 	sentinel := errors.New("force rollback before restart")
 	if err := store.WithinTransaction(ctx, func(repositories Repositories) error {
-		_, err := repositories.Principals().Upsert(ctx, Principal{
-			ID: rolledBackID, Provider: "oidc-recovery", ExternalID: uuid.NewString(), CreatedAt: now,
+		_, err := repositories.Identities().Create(ctx, Identity{
+			ID: rolledBackID, Type: "human", DisplayName: "Rolled Back User", Status: "active", CreatedAt: now,
 		})
 		if err != nil {
 			return err
@@ -63,11 +63,11 @@ func testRestartRecovery(t *testing.T, config Config) {
 	if err := store.Check(ctx); err != nil {
 		t.Fatal(err)
 	}
-	persisted, err := store.Principals().GetByID(ctx, persistedID)
-	if err != nil || persisted.DisplayName != "Persisted" {
-		t.Fatalf("persisted principal after restart = %#v, %v", persisted, err)
+	persisted, err := store.Identities().GetByID(ctx, persistedID)
+	if err != nil || persisted.DisplayName != "Persisted User" {
+		t.Fatalf("persisted identity after restart = %#v, %v", persisted, err)
 	}
-	if _, err := store.Principals().GetByID(ctx, rolledBackID); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("rolled-back principal recovered after restart: %v", err)
+	if _, err := store.Identities().GetByID(ctx, rolledBackID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("rolled-back identity recovered after restart: %v", err)
 	}
 }

@@ -6,30 +6,26 @@ import (
 	"os"
 
 	adminauthorization "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/authorization"
+	adminbootstrap "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/bootstrap"
+	adminiam "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/iam"
 	adminlocaluser "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/localuser"
-	adminconfig "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/managementconfig"
-	adminprovider "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/provider"
-	"github.com/fengqi-dev/kube-loop/internal/controlplane/authn"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/authorization"
 	controlplanekubernetes "github.com/fengqi-dev/kube-loop/internal/controlplane/kubernetes"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/maintenance"
 	controlplanestorage "github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"github.com/google/uuid"
 )
 
 type bootstrapRuntime struct {
-	Store                     *controlplanestorage.Store
-	MaintenanceWorker         *maintenance.Worker
-	LocalUsers                *adminlocaluser.Service
-	ManagementRevisionService *adminconfig.Service
-	ManagementPolicyEngine    *adminauthorization.Engine
-	ManagementPolicyLoader    *adminconfig.PolicyLoader
-	AuthRegistry              *authn.Registry
-	ManagedProviderRuntime    *adminprovider.Runtime
-	ManagedProviderService    *adminconfig.ProviderService
-	PolicyEngine              authorization.Authorizer
-	KubernetesConfig          controlplanekubernetes.Config
-	KubernetesProvider        *controlplanekubernetes.Provider
+	Store                  *controlplanestorage.Store
+	MaintenanceWorker      *maintenance.Worker
+	LocalUsers             *adminlocaluser.Service
+	IAMBootstrap           *adminbootstrap.Service
+	ManagementPolicyEngine *adminauthorization.Engine
+	IAMLoader              *adminiam.Loader
+	PolicyEngine           authorization.Authorizer
+	KubernetesConfig       controlplanekubernetes.Config
+	KubernetesProvider     *controlplanekubernetes.Provider
 }
 
 func bootstrapControlPlane(
@@ -51,85 +47,82 @@ func bootstrapControlPlane(
 		logger.Error("initialize Control Plane maintenance worker failed", "error", err)
 		os.Exit(2)
 	}
-	managementFile := config.Management
-	localUsers, initialAdmin, err := initializeLocalUsers(signalContext, stateStore, config.Document.Management.PublicURL,
-		config.Document.Management.InitialAdmin.UsernameFile,
-		config.Document.Management.InitialAdmin.PasswordFile,
-		config.Document.Management.InitialAdmin.MFAEncryptionKeyFile)
+	localUsers, err := initializeLocalUsers(signalContext, stateStore)
 	if err != nil {
 		_ = stateStore.Close()
 		logger.Error("initialize Management Plane administrator failed", "error", err)
 		os.Exit(2)
 	}
-	managementRevisionService, err := adminconfig.New(stateStore)
-	if err != nil {
-		_ = stateStore.Close()
-		logger.Error("initialize Management Plane configuration service failed", "error", err)
-		os.Exit(2)
-	}
-	if initialAdmin.PrincipalID != "" {
-		bootstrapComplete, err := localUsers.BootstrapComplete(signalContext, initialAdmin.PrincipalID)
-		if err != nil {
-			_ = stateStore.Close()
-			logger.Error("read Management Plane administrator bootstrap state failed", "error", err)
-			os.Exit(1)
-		}
-		if !bootstrapComplete {
-			if err := ensureInitialAdminPolicy(signalContext, managementRevisionService, initialAdmin.PrincipalID); err != nil {
-				_ = stateStore.Close()
-				logger.Error("initialize Management Plane administrator policy failed", "error", err)
-				os.Exit(1)
-			}
-			if err := localUsers.MarkBootstrapComplete(signalContext, initialAdmin.PrincipalID); err != nil {
-				_ = stateStore.Close()
-				logger.Error("record Management Plane administrator bootstrap failed", "error", err)
-				os.Exit(1)
-			}
-		}
-	}
-	managementPolicyEngine, err := adminauthorization.NewDenyAll(
-		adminauthorization.WithBootstrap(managementFile.Bootstrap.AuthorizationConfig(), stateStore.ManagementState()),
-	)
+	managementPolicyEngine, err := adminauthorization.NewDenyAll()
 	if err != nil {
 		_ = stateStore.Close()
 		logger.Error("initialize Management Plane authorization failed", "error", err)
 		os.Exit(2)
 	}
-	managementPolicyLoader, err := adminconfig.NewPolicyLoader(stateStore, managementPolicyEngine, 0)
+	iamLoader, err := adminiam.NewLoader(stateStore, managementPolicyEngine)
 	if err != nil {
 		_ = stateStore.Close()
 		logger.Error("initialize Management Plane policy loader failed", "error", err)
 		os.Exit(2)
 	}
-	if err := managementPolicyLoader.Load(signalContext); err != nil {
+	iamBootstrap, err := adminbootstrap.New(stateStore, localUsers)
+	if err != nil {
+		_ = stateStore.Close()
+		logger.Error("initialize IAM bootstrap failed", "error", err)
+		os.Exit(2)
+	}
+	bootstrapConfig := config.Document.Admin.Bootstrap
+	if bootstrapConfig.Enabled {
+		var configuredPassword []byte
+		if bootstrapConfig.PasswordFile != "" {
+			configuredPassword, err = readInitialPasswordFile(bootstrapConfig.PasswordFile)
+			if err != nil {
+				_ = stateStore.Close()
+				logger.Error("load default IAM identity password failed", "error", err)
+				os.Exit(2)
+			}
+			defer clear(configuredPassword)
+		}
+		result, initialPassword, created, bootstrapErr := iamBootstrap.CompleteDefault(
+			signalContext,
+			adminbootstrap.DefaultRequest{
+				Username: bootstrapConfig.Username, Password: configuredPassword,
+				DisplayName: bootstrapConfig.DisplayName, Email: bootstrapConfig.Email,
+				RequestID: uuid.NewString(),
+			},
+		)
+		if bootstrapErr != nil {
+			_ = stateStore.Close()
+			logger.Error("initialize default IAM identity and organization failed", "error", bootstrapErr)
+			os.Exit(2)
+		}
+		if created {
+			if bootstrapConfig.PasswordFile == "" {
+				logger.Warn("default IAM identity and organization created; the initial password will not be shown again",
+					"username", result.Identity.Username, "initial_password", initialPassword,
+					"organization", result.Organization.Name, "organization_slug", result.Organization.Slug)
+			} else {
+				logger.Warn("default IAM identity and organization created; retrieve the initial password from its configured Secret",
+					"username", result.Identity.Username, "organization", result.Organization.Name,
+					"organization_slug", result.Organization.Slug)
+			}
+		}
+	} else {
+		bootstrapToken, bootstrapExpiresAt, bootstrapErr := iamBootstrap.EnsureToken(signalContext)
+		if bootstrapErr != nil {
+			_ = stateStore.Close()
+			logger.Error("initialize IAM bootstrap token failed", "error", bootstrapErr)
+			os.Exit(2)
+		}
+		if bootstrapToken != "" {
+			logger.Warn("one-time IAM bootstrap token generated; it will not be shown again",
+				"token", bootstrapToken, "expires_at", bootstrapExpiresAt)
+		}
+	}
+	if err := iamLoader.Load(signalContext); err != nil {
 		_ = stateStore.Close()
 		logger.Error("load active Management Plane policy failed", "error", err)
 		os.Exit(1)
-	}
-	authRegistry, err := authn.NewRegistry()
-	if err != nil {
-		_ = stateStore.Close()
-		logger.Error("initialize authentication registry failed", "error", err)
-		os.Exit(1)
-	}
-	managedProviderRuntime, err := adminprovider.NewRuntime(
-		stateStore, authRegistry, config.Document.API.PublicURL, 0,
-	)
-	if err != nil {
-		_ = stateStore.Close()
-		logger.Error("initialize managed authentication Provider runtime failed", "error", err)
-		os.Exit(2)
-	}
-	if err := managedProviderRuntime.Load(signalContext); err != nil {
-		_ = stateStore.Close()
-		logger.Error("load active managed authentication Providers failed", "error", err)
-		os.Exit(1)
-	}
-	managedProviderService, err := adminconfig.NewProviderService(stateStore, managedProviderRuntime, managedProviderRuntime)
-	if err != nil {
-		_ = stateStore.Close()
-		logger.Error("initialize managed authentication Provider service failed", "error", err)
-		os.Exit(2)
 	}
 	kubernetesConfig := config.Kubernetes
 	if kubernetesConfig.UserAgent == controlplanekubernetes.DefaultUserAgent {
@@ -141,23 +134,11 @@ func bootstrapControlPlane(
 		logger.Error("initialize in-cluster Kubernetes Provider failed", "error", err)
 		os.Exit(1)
 	}
-	policyEngine := authorization.NewUnified(managementPolicyEngine, func(ctx context.Context, namespace string) (map[string]string, error) {
-		client, err := kubernetesProvider.SystemClient()
-		if err != nil {
-			return nil, err
-		}
-		item, err := client.CoreV1().Namespaces().Get(ctx, namespace, metav1.GetOptions{})
-		if err != nil {
-			return nil, err
-		}
-		return item.Labels, nil
-	})
+	policyEngine := authorization.NewUnified(managementPolicyEngine, nil)
 	return &bootstrapRuntime{
-		Store: stateStore, MaintenanceWorker: maintenanceWorker, LocalUsers: localUsers,
-		ManagementRevisionService: managementRevisionService,
-		ManagementPolicyEngine:    managementPolicyEngine, ManagementPolicyLoader: managementPolicyLoader,
-		AuthRegistry: authRegistry, ManagedProviderRuntime: managedProviderRuntime,
-		ManagedProviderService: managedProviderService, PolicyEngine: policyEngine,
+		Store: stateStore, MaintenanceWorker: maintenanceWorker, LocalUsers: localUsers, IAMBootstrap: iamBootstrap,
+		ManagementPolicyEngine: managementPolicyEngine, IAMLoader: iamLoader,
+		PolicyEngine:     policyEngine,
 		KubernetesConfig: kubernetesConfig, KubernetesProvider: kubernetesProvider,
 	}
 }

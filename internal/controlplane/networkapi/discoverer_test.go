@@ -31,7 +31,7 @@ func (provider *fakeProvider) SystemClient() (kubernetes.Interface, error) {
 	return provider.systemClient, nil
 }
 
-func TestDiscoverUsesPrincipalClientAndReturnsNormalizedSpec(t *testing.T) {
+func TestDiscoverUsesIdentityClientAndReturnsNormalizedSpec(t *testing.T) {
 	provider := &fakeProvider{
 		client: fake.NewClientset(
 			&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "development"}, Status: corev1.PodStatus{PodIP: "10.2.1.9"}},
@@ -48,13 +48,13 @@ func TestDiscoverUsesPrincipalClientAndReturnsNormalizedSpec(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	spec, err := discoverer.Discover(context.Background(), controlplaneapi.Principal{
-		Subject: "principal-a", Groups: []string{"developers"},
+	spec, err := discoverer.Discover(context.Background(), controlplaneapi.Identity{
+		Subject: "identity-a", Groups: []string{"developers"},
 	}, "development")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if provider.subject.ID != "principal-a" || len(provider.subject.Groups) != 1 || provider.systemCalls != 1 ||
+	if provider.subject.ID != "identity-a" || len(provider.subject.Groups) != 1 || provider.systemCalls != 1 ||
 		len(spec.PodCIDRs) == 0 || !slices.Equal(spec.PodIPs, []string{"10.2.1.9"}) ||
 		len(spec.ServiceCIDRs) == 0 || spec.DNSServer != "10.96.0.10" ||
 		!slices.Equal(spec.ClusterDomains, []string{"cluster.local", "corp.internal"}) {

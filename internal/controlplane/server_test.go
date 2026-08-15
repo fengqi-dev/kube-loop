@@ -151,11 +151,11 @@ func TestShutdownCancelsAndWaitsForWebSocketHandlers(t *testing.T) {
 	server, err := NewServer(
 		Config{PublicURL: "http://127.0.0.1"}, BuildInfo{},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
-		WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(*http.Request) (controlplaneapi.Principal, *controlplaneapi.Error) {
-			return controlplaneapi.Principal{Subject: "test-user"}, nil
+		WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(*http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
+			return controlplaneapi.Identity{Subject: "test-user"}, nil
 		})),
 		WithAuthorizer(shutdownAllowAuthorizer{}),
-		WithAPIRoutes(testEndpoint(func(writer http.ResponseWriter, request *http.Request, _ controlplaneapi.Principal) *controlplaneapi.Error {
+		WithAPIRoutes(testEndpoint(func(writer http.ResponseWriter, request *http.Request, _ controlplaneapi.Identity) *controlplaneapi.Error {
 			connection, err := websocket.Accept(writer, request, nil)
 			if err != nil {
 				return &controlplaneapi.Error{Code: controlplaneapi.CodeInternal, Message: err.Error()}

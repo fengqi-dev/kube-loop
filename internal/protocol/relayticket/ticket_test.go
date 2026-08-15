@@ -262,10 +262,10 @@ func TestVerifierEnforcesPublishedKeyValidityWindow(t *testing.T) {
 func validClaims(now time.Time) Claims {
 	return Claims{
 		Version: Version, Issuer: "https://control-plane.example", Audience: "relay-a",
-		PrincipalID: "11111111-1111-4111-8111-111111111111",
-		Groups:      []string{"developers"},
-		DeviceID:    "22222222-2222-4222-8222-222222222222",
-		SessionID:   "33333333-3333-4333-8333-333333333333", SessionGeneration: 7, Namespace: "development",
+		IdentityID: "11111111-1111-4111-8111-111111111111",
+		Groups:     []string{"developers"},
+		DeviceID:   "22222222-2222-4222-8222-222222222222",
+		SessionID:  "33333333-3333-4333-8333-333333333333", SessionGeneration: 7, Namespace: "development",
 		Operations: []string{"tunnel"}, NetworkSpecHash: strings.Repeat("a", 64),
 		TicketID: "44444444-4444-4444-8444-444444444444",
 		IssuedAt: now.Unix(), NotBefore: now.Unix(), ExpiresAt: now.Add(time.Minute).Unix(),

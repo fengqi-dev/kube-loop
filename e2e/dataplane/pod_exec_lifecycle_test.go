@@ -45,7 +45,7 @@ func startExecController(
 	address string,
 	stateStore *storage.Store,
 	executor execapi.Executor,
-	principal controlplaneapi.Principal,
+	identity controlplaneapi.Identity,
 	session sessionapi.ActiveSession,
 ) *runningExecController {
 	t.Helper()
@@ -55,7 +55,7 @@ func startExecController(
 	}
 	handler, err := execapi.New(
 		stateStore,
-		e2eExecSessionValidator{principalID: principal.Subject, session: session},
+		e2eExecSessionValidator{identityID: identity.Subject, session: session},
 		executor,
 		execapi.Config{CredentialCheckInterval: 25 * time.Millisecond},
 	)
@@ -64,7 +64,7 @@ func startExecController(
 		t.Fatal(err)
 	}
 	policy, err := authorization.New(authorization.Policy{Rules: []authorization.Rule{{
-		ID: "e2e-exec-lifecycle", Subjects: []string{principal.Subject}, Namespaces: []string{session.Namespace},
+		ID: "e2e-exec-lifecycle", Subjects: []string{identity.Subject}, Namespaces: []string{session.Namespace},
 		Operations: []string{"create", "stream"}, ResourceKinds: []string{"pod-exec"},
 	}}})
 	if err != nil {
@@ -74,11 +74,11 @@ func startExecController(
 	server, err := controlplane.NewServer(
 		controlplane.Config{PublicURL: "http://" + listener.Addr().String()}, controlplane.BuildInfo{},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
-		controlplane.WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(request *http.Request) (controlplaneapi.Principal, *controlplaneapi.Error) {
+		controlplane.WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(request *http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
 			if request.Header.Get("Authorization") != "Bearer "+execLifecycleAccessToken {
-				return controlplaneapi.Principal{}, &controlplaneapi.Error{Code: controlplaneapi.CodeUnauthenticated, Message: "invalid e2e access token"}
+				return controlplaneapi.Identity{}, &controlplaneapi.Error{Code: controlplaneapi.CodeUnauthenticated, Message: "invalid e2e access token"}
 			}
-			return principal, nil
+			return identity, nil
 		})),
 		controlplane.WithAuthorizer(policy), controlplane.WithAPIRoutes(controlplane.APIRoutes{Exec: execapi.NewRoutes(handler).Endpoints()}),
 	)
@@ -132,14 +132,14 @@ func TestRealPodExecTTYDisconnectAndControllerRestart(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = stateStore.Close() })
 	now := time.Now().UTC()
-	principalID, authorizationID, sessionID := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	identityID, authorizationID, sessionID := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	deviceID := "e2e-exec-device"
-	if _, err := stateStore.Principals().Upsert(ctx, storage.Principal{
-		ID: principalID, Provider: "e2e", ExternalID: "exec-lifecycle", CreatedAt: now, UpdatedAt: now,
+	if _, err := stateStore.Identities().Create(ctx, storage.Identity{
+		ID: identityID, Type: "human", DisplayName: "Test Identity", Status: "active", CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	createOAuthGrant(t, ctx, stateStore, authorizationID, principalID, deviceID, 9, now, now.Add(5*time.Minute))
+	createOAuthGrant(t, ctx, stateStore, authorizationID, identityID, deviceID, 9, now, now.Add(5*time.Minute))
 	network, err := networkspec.Normalize(networkspec.Spec{ServiceIPs: []string{"10.96.0.10"}})
 	if err != nil {
 		t.Fatal(err)
@@ -148,7 +148,7 @@ func TestRealPodExecTTYDisconnectAndControllerRestart(t *testing.T) {
 	networkHash, _ := networkspec.Hash(network)
 	expiresAt := now.Add(5 * time.Minute)
 	if err := stateStore.Sessions().Create(ctx, storage.Session{
-		ID: sessionID, PrincipalID: principalID, DeviceID: deviceID, ClusterID: "minikube",
+		ID: sessionID, IdentityID: identityID, DeviceID: deviceID, ClusterID: "minikube",
 		Namespace: harness.EchoNamespace, State: "active", Generation: 1,
 		NetworkSpec: networkJSON, NetworkSpecHash: networkHash,
 		CreatedAt: now, UpdatedAt: now, LastHeartbeatAt: now, ExpiresAt: expiresAt,
@@ -163,14 +163,14 @@ func TestRealPodExecTTYDisconnectAndControllerRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	principal := controlplaneapi.Principal{
-		Subject: principalID, DeviceID: deviceID, AuthorizationID: authorizationID, AccessExpiresAt: expiresAt,
+	identity := controlplaneapi.Identity{
+		Subject: identityID, DeviceID: deviceID, AuthorizationID: authorizationID, AccessExpiresAt: expiresAt,
 	}
 	activeSession := sessionapi.ActiveSession{
 		ID: sessionID, Namespace: harness.EchoNamespace, Generation: 1,
 		ExpiresAt: expiresAt, NetworkSpecHash: networkHash,
 	}
-	running := startExecController(t, "127.0.0.1:0", stateStore, executor, principal, activeSession)
+	running := startExecController(t, "127.0.0.1:0", stateStore, executor, identity, activeSession)
 	controllerAddress := running.Address()
 	controllerStopped := false
 	t.Cleanup(func() {
@@ -243,7 +243,7 @@ func TestRealPodExecTTYDisconnectAndControllerRestart(t *testing.T) {
 	assertCancelledTaskResult(t, waitForExecTaskState(t, ctx, stateStore, restartStream.Task().ID, "stopped"))
 	_ = restartStream.Close()
 
-	running = startExecController(t, controllerAddress, stateStore, executor, principal, activeSession)
+	running = startExecController(t, controllerAddress, stateStore, executor, identity, activeSession)
 	controllerStopped = false
 	afterRestart, err := clientexec.Start(ctx, remoteClient, serverProfile, remoteSession, remote.ExecSpec{
 		Pod: podName, Container: "echo", Command: []string{"printf", "after-restart"},

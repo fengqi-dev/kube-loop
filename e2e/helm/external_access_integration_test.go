@@ -52,12 +52,12 @@ func TestSameOriginTLSProxyPreservesControlPlaneLimitsAndLongLivedWebSocket(t *t
 		controlplane.Config{PublicURL: publicURL, MaxRequestBodyBytes: 16},
 		controlplane.BuildInfo{Version: "2.0.0-external-test"},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
-		controlplane.WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(*http.Request) (controlplaneapi.Principal, *controlplaneapi.Error) {
-			return controlplaneapi.Principal{Subject: "external-test-user"}, nil
+		controlplane.WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(*http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
+			return controlplaneapi.Identity{Subject: "external-test-user"}, nil
 		})),
 		controlplane.WithAuthorizer(externalAccessAuthorizer{}),
 		controlplane.WithAPIRoutes(controlplane.RouteRegistrarFunc(func(group *echo.Group) {
-			group.POST("/body-limit", controlplane.Endpoint(func(ctx *echo.Context, _ controlplaneapi.Principal) *controlplaneapi.Error {
+			group.POST("/body-limit", controlplane.Endpoint(func(ctx *echo.Context, _ controlplaneapi.Identity) *controlplaneapi.Error {
 				var body struct {
 					Name string `json:"name"`
 				}

@@ -206,6 +206,10 @@ export function SetServerHostAliases(arg1, arg2) {
   return window['go']['app']['App']['SetServerHostAliases'](arg1, arg2);
 }
 
+export function SetServerSOCKSPort(arg1, arg2) {
+  return window['go']['app']['App']['SetServerSOCKSPort'](arg1, arg2);
+}
+
 export function StartServerExchange(arg1) {
   return window['go']['app']['App']['StartServerExchange'](arg1);
 }

@@ -12,6 +12,7 @@ import (
 	"errors"
 	"io"
 	"net/netip"
+	"slices"
 	"strings"
 	"time"
 
@@ -26,7 +27,7 @@ const (
 	normalSessionIdleTTL     = 15 * time.Minute
 	normalSessionAbsoluteTTL = 8 * time.Hour
 	breakGlassExchangeAudit  = "admin.session.break-glass.exchange"
-	principalExchangeAudit   = "admin.session.principal.exchange"
+	identityExchangeAudit    = "admin.session.identity.exchange"
 	sessionRevokeAudit       = "admin.session.revoke"
 )
 
@@ -152,23 +153,22 @@ func (service *Service) ExchangeBreakGlass(
 	}, nil
 }
 
-// ExchangePrincipal creates a browser-only Management Session from an already
+// ExchangeIdentity creates a browser-only Management Session from an already
 // verified Gateway access-token identity. The OAuth grant is re-read inside
 // the transaction so revocation racing the exchange fails closed.
-func (service *Service) ExchangePrincipal(
+func (service *Service) ExchangeIdentity(
 	ctx context.Context,
-	principalID, authorizationID string,
+	identityID, authorizationID string,
 	authentication adminauthorization.AuthenticationType,
 	requestID string,
 ) (Credentials, error) {
-	principalID = strings.TrimSpace(principalID)
+	identityID = strings.TrimSpace(identityID)
 	authorizationID = strings.TrimSpace(authorizationID)
 	requestID = strings.TrimSpace(requestID)
-	if _, err := uuid.Parse(principalID); err != nil {
+	if _, err := uuid.Parse(identityID); err != nil {
 		return Credentials{}, ErrAuthenticationFailed
 	}
-	if _, err := uuid.Parse(authorizationID); err != nil || requestID == "" ||
-		(authentication != adminauthorization.AuthenticationNormal && authentication != adminauthorization.AuthenticationBootstrap) {
+	if _, err := uuid.Parse(authorizationID); err != nil || requestID == "" || authentication != adminauthorization.AuthenticationNormal {
 		return Credentials{}, ErrAuthenticationFailed
 	}
 	sessionToken, err := randomToken(service.random)
@@ -192,7 +192,7 @@ func (service *Service) ExchangePrincipal(
 		if err != nil || !active {
 			return ErrAuthenticationFailed
 		}
-		if _, err := repositories.Principals().GetByID(ctx, principalID); err != nil {
+		if _, err := repositories.Identities().GetByID(ctx, identityID); err != nil {
 			return ErrAuthenticationFailed
 		}
 		expiresAt = now.Add(normalSessionAbsoluteTTL)
@@ -201,7 +201,7 @@ func (service *Service) ExchangePrincipal(
 			return ErrAuthenticationFailed
 		}
 		if err := repositories.AdminSessions().Create(ctx, storage.AdminSession{
-			IDHash: sessionHash[:], PrincipalID: principalID, AuthorizationID: authorizationID,
+			IDHash: sessionHash[:], IdentityID: identityID, AuthorizationID: authorizationID,
 			AuthenticationType: string(authentication), CSRFTokenHash: csrfHash[:],
 			CreatedAt: now, LastSeenAt: now, IdleExpiresAt: idleExpiresAt, AbsoluteExpiresAt: expiresAt,
 		}); err != nil {
@@ -215,7 +215,7 @@ func (service *Service) ExchangePrincipal(
 			return err
 		}
 		return repositories.Audit().Append(ctx, storage.AuditEvent{
-			ID: eventID, PrincipalID: principalID, Action: principalExchangeAudit,
+			ID: eventID, IdentityID: identityID, Action: identityExchangeAudit,
 			ResourceType: "admin-session", Outcome: "success", RequestID: requestID,
 			Metadata: metadata, CreatedAt: now,
 		})
@@ -247,9 +247,9 @@ func (service *Service) Revoke(ctx context.Context, stored storage.AdminSession,
 		return ErrSessionInvalid
 	}
 	now := service.now().UTC()
-	principalID := stored.PrincipalID
+	identityID := stored.IdentityID
 	if stored.AuthenticationType == string(adminauthorization.AuthenticationBreakGlass) {
-		principalID = ""
+		identityID = ""
 	}
 	metadata, err := json.Marshal(map[string]string{"authenticationType": stored.AuthenticationType})
 	if err != nil {
@@ -260,7 +260,7 @@ func (service *Service) Revoke(ctx context.Context, stored storage.AdminSession,
 			return err
 		}
 		return repositories.Audit().Append(ctx, storage.AuditEvent{
-			ID: service.newID(), PrincipalID: principalID, Action: sessionRevokeAudit,
+			ID: service.newID(), IdentityID: identityID, Action: sessionRevokeAudit,
 			ResourceType: "admin-session", Outcome: "success", RequestID: requestID,
 			Metadata: metadata, CreatedAt: now,
 		})
@@ -294,8 +294,7 @@ func (service *Service) Authenticate(ctx context.Context, token string) (storage
 		if err != nil || !state.Enabled || !sameString(stored.BreakGlassGeneration, state.Generation) {
 			return storage.AdminSession{}, ErrSessionInvalid
 		}
-	} else if stored.AuthenticationType == string(adminauthorization.AuthenticationNormal) ||
-		stored.AuthenticationType == string(adminauthorization.AuthenticationBootstrap) {
+	} else if stored.AuthenticationType == string(adminauthorization.AuthenticationNormal) {
 		active, err := service.store.OAuthSessions().RequestActive(ctx, stored.AuthorizationID, now)
 		if err != nil || !active {
 			return storage.AdminSession{}, ErrSessionInvalid
@@ -322,9 +321,9 @@ func (service *Service) Authenticate(ctx context.Context, token string) (storage
 	return stored, nil
 }
 
-// AuthenticateSubject resolves current Principal groups on every request, so
+// AuthenticateSubject resolves current Identity groups on every request, so
 // group removal takes effect without waiting for the browser session to expire.
-// Break-glass identity never consults or manufactures a Principal row.
+// Break-glass identity never consults or manufactures a Identity row.
 func (service *Service) AuthenticateSubject(
 	ctx context.Context,
 	token string,
@@ -339,17 +338,38 @@ func (service *Service) AuthenticateSubject(
 		subject.BreakGlassGeneration = stored.BreakGlassGeneration
 		return stored, subject, nil
 	}
-	if subject.Authentication != adminauthorization.AuthenticationNormal &&
-		subject.Authentication != adminauthorization.AuthenticationBootstrap {
+	if subject.Authentication != adminauthorization.AuthenticationNormal {
 		return storage.AdminSession{}, adminauthorization.Subject{}, ErrSessionInvalid
 	}
-	principal, err := service.store.Principals().GetByID(ctx, stored.PrincipalID)
+	identity, err := service.store.Identities().GetByID(ctx, stored.IdentityID)
+	if err != nil || identity.Status != "active" {
+		return storage.AdminSession{}, adminauthorization.Subject{}, ErrSessionInvalid
+	}
+	subject.ID = identity.ID
+	subject.Groups, err = service.identityGroups(ctx, identity.ID)
 	if err != nil {
 		return storage.AdminSession{}, adminauthorization.Subject{}, ErrSessionInvalid
 	}
-	subject.ID = principal.ID
-	subject.Groups = append([]string(nil), principal.Groups...)
 	return stored, subject, nil
+}
+
+func (service *Service) identityGroups(ctx context.Context, identityID string) ([]string, error) {
+	organizations, err := service.store.Organizations().ListForIdentity(ctx, identityID)
+	if err != nil {
+		return nil, err
+	}
+	groups := make([]string, 0)
+	for _, organization := range organizations {
+		items, listErr := service.store.Groups().ListForIdentity(ctx, organization.ID, identityID)
+		if listErr != nil {
+			return nil, listErr
+		}
+		for _, group := range items {
+			groups = append(groups, group.ID)
+		}
+	}
+	slices.Sort(groups)
+	return slices.Compact(groups), nil
 }
 
 func VerifyCSRF(stored storage.AdminSession, token string) error {

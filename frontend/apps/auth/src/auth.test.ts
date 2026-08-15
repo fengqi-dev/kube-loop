@@ -6,12 +6,12 @@ describe("authorization UI contract", () => {
     const persistedKeys = ["kubeloop.locale"];
     expect(persistedKeys).toEqual(["kubeloop.locale"]);
     expect(persistedKeys.join(" ")).not.toMatch(
-      /transaction|csrf|password|second_factor/,
+      /transaction|csrf|password/,
     );
   });
 
   it("posts only to same-origin OAuth endpoints", () => {
-    const endpoints = ["/oauth2/login/local", "/oauth2/login/provider"];
+    const endpoints = ["/oauth2/login/local"];
     expect(endpoints.every((endpoint) => endpoint.startsWith("/oauth2/"))).toBe(
       true,
     );

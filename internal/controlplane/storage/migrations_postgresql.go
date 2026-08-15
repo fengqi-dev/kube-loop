@@ -3,16 +3,14 @@ package storage
 import "strings"
 
 var postgresqlBooleanColumns = map[string]struct{}{
-	"enabled": {}, "bootstrap_complete": {}, "public": {}, "trusted": {}, "builtin": {},
+	"enabled": {}, "bootstrap_complete": {}, "public": {}, "trusted": {}, "builtin": {}, "primary_email": {},
 }
 
 var postgresqlJSONColumns = map[string]struct{}{
-	"groups_json": {}, "network_spec_json": {}, "spec_json": {}, "result_json": {}, "data_json": {},
-	"response_json": {}, "metadata_json": {}, "validation_json": {}, "config_json": {},
-	"secret_aliases_json": {}, "subjects_json": {}, "namespaces_json": {}, "filter_json": {},
-	"redirect_uris_json": {}, "grant_types_json": {}, "response_types_json": {}, "scopes_json": {},
-	"request_json":    {},
-	"definition_json": {}, "namespace_names_json": {}, "label_selectors_json": {}, "binding_json": {},
+	"claims_json": {}, "network_spec_json": {}, "spec_json": {}, "result_json": {}, "data_json": {},
+	"response_json": {}, "metadata_json": {}, "filter_json": {}, "redirect_uris_json": {},
+	"grant_types_json": {}, "scopes_json": {}, "request_json": {}, "permissions_json": {},
+	"transports_json": {}, "group_mappings_json": {},
 }
 
 var postgresqlBigIntColumns = map[string]struct{}{
@@ -30,7 +28,7 @@ func postgresqlMigrationStatements(sqlite []string) []string {
 func postgresqlMigrationStatement(statement string) string {
 	statement = strings.ReplaceAll(statement, "INTEGER PRIMARY KEY AUTOINCREMENT", "BIGSERIAL PRIMARY KEY")
 	statement = strings.ReplaceAll(statement, "BLOB", "BYTEA")
-	for _, column := range []string{"id_hash", "csrf_token_hash", "code_hash", "state_hash", "idempotency_hash", "challenge_hash", "upstream_state_hash", "signature_hash", "scope_hash"} {
+	for _, column := range []string{"id_hash", "csrf_token_hash", "code_hash", "token_hash", "challenge_hash", "upstream_state_hash", "signature_hash", "scope_hash"} {
 		statement = strings.ReplaceAll(statement, "length("+column+")", "octet_length("+column+")")
 	}
 	for column := range postgresqlBooleanColumns {

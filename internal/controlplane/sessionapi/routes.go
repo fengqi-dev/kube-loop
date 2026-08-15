@@ -19,11 +19,11 @@ func (handler *Routes) Endpoints() controlplane.SessionEndpoints {
 	}
 }
 
-type namespaceHandler func(*echo.Context, controlplaneapi.Principal, string) *controlplaneapi.Error
-type sessionHandler func(*echo.Context, controlplaneapi.Principal, string, string) *controlplaneapi.Error
+type namespaceHandler func(*echo.Context, controlplaneapi.Identity, string) *controlplaneapi.Error
+type sessionHandler func(*echo.Context, controlplaneapi.Identity, string, string) *controlplaneapi.Error
 
 func (handler *Routes) withNamespace(next namespaceHandler) controlplane.EndpointFunc {
-	return func(ctx *echo.Context, principal controlplaneapi.Principal) *controlplaneapi.Error {
+	return func(ctx *echo.Context, identity controlplaneapi.Identity) *controlplaneapi.Error {
 		request := ctx.Request()
 		namespace, apiError := namespaceFromQuery(request)
 		if apiError != nil {
@@ -32,12 +32,12 @@ func (handler *Routes) withNamespace(next namespaceHandler) controlplane.Endpoin
 		if apiError := requireEmptyBody(request); apiError != nil {
 			return apiError
 		}
-		return next(ctx, principal, namespace)
+		return next(ctx, identity, namespace)
 	}
 }
 
 func (handler *Routes) withSession(next sessionHandler) controlplane.EndpointFunc {
-	return handler.withNamespace(func(ctx *echo.Context, principal controlplaneapi.Principal, namespace string) *controlplaneapi.Error {
-		return next(ctx, principal, namespace, ctx.Request().PathValue("sessionID"))
+	return handler.withNamespace(func(ctx *echo.Context, identity controlplaneapi.Identity, namespace string) *controlplaneapi.Error {
+		return next(ctx, identity, namespace, ctx.Request().PathValue("sessionID"))
 	})
 }

@@ -34,7 +34,7 @@ func (allocator *fakeAllocator) Allocate(request relaycontrol.AllocationRequest)
 type fakeSessions struct {
 	binding      sessionapi.ActiveSession
 	apiError     *controlplaneapi.Error
-	principal    controlplaneapi.Principal
+	identity     controlplaneapi.Identity
 	namespace    string
 	sessionID    string
 	validateCall int
@@ -42,11 +42,11 @@ type fakeSessions struct {
 
 func (sessions *fakeSessions) RequireActive(
 	_ context.Context,
-	principal controlplaneapi.Principal,
+	identity controlplaneapi.Identity,
 	namespace, sessionID string,
 ) (sessionapi.ActiveSession, *controlplaneapi.Error) {
 	sessions.validateCall++
-	sessions.principal = principal
+	sessions.identity = identity
 	sessions.namespace = namespace
 	sessions.sessionID = sessionID
 	return sessions.binding, sessions.apiError
@@ -78,12 +78,12 @@ func TestIssueRelayTicketIsBoundToActiveSession(t *testing.T) {
 	)
 	request.Header.Set("Content-Type", "application/json")
 	response := httptest.NewRecorder()
-	principal := controlplaneapi.Principal{
+	identity := controlplaneapi.Identity{
 		Subject:  "11111111-1111-4111-8111-111111111111",
 		DeviceID: "22222222-2222-4222-8222-222222222222",
 		Groups:   []string{"developers"},
 	}
-	if apiError := serveTicketHandler(handler, response, request, principal); apiError != nil {
+	if apiError := serveTicketHandler(handler, response, request, identity); apiError != nil {
 		t.Fatalf("issue error = %v", apiError)
 	}
 	if response.Code != http.StatusCreated {
@@ -93,7 +93,7 @@ func TestIssueRelayTicketIsBoundToActiveSession(t *testing.T) {
 	if err := json.NewDecoder(response.Body).Decode(&document); err != nil {
 		t.Fatal(err)
 	}
-	if document.TokenType != relayticket.Type || document.DeviceID != principal.DeviceID ||
+	if document.TokenType != relayticket.Type || document.DeviceID != identity.DeviceID ||
 		!document.ExpiresAt.Equal(now.Add(45*time.Second)) {
 		t.Fatalf("response = %#v", document)
 	}
@@ -108,12 +108,12 @@ func TestIssueRelayTicketIsBoundToActiveSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if claims.PrincipalID != principal.Subject || claims.DeviceID != principal.DeviceID ||
+	if claims.IdentityID != identity.Subject || claims.DeviceID != identity.DeviceID ||
 		claims.SessionID != sessionID || claims.SessionGeneration != 7 || claims.Namespace != "development" ||
 		claims.NetworkSpecHash != strings.Repeat("a", 64) || len(claims.Groups) != 1 || claims.Groups[0] != "developers" {
 		t.Fatalf("claims = %#v", claims)
 	}
-	if sessions.validateCall != 1 || sessions.principal.Subject != principal.Subject ||
+	if sessions.validateCall != 1 || sessions.identity.Subject != identity.Subject ||
 		sessions.namespace != "development" || sessions.sessionID != sessionID {
 		t.Fatalf("session validation = %#v", sessions)
 	}
@@ -150,7 +150,7 @@ func TestIssueRelayTicketUsesRegistryAssignment(t *testing.T) {
 	)
 	request.Header.Set("Content-Type", "application/json")
 	response := httptest.NewRecorder()
-	if apiError := serveTicketHandler(handler, response, request, controlplaneapi.Principal{
+	if apiError := serveTicketHandler(handler, response, request, controlplaneapi.Identity{
 		Subject: "11111111-1111-4111-8111-111111111111", DeviceID: "22222222-2222-4222-8222-222222222222",
 	}); apiError != nil {
 		t.Fatalf("issue error = %v", apiError)
@@ -207,7 +207,7 @@ func TestIssueRelayTicketRejectsInvalidInputBeforeSessionLookup(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			request := httptest.NewRequest(http.MethodPost, test.url, strings.NewReader(test.body))
 			request.Header.Set("Content-Type", test.contentType)
-			apiError := serveTicketHandler(handler, httptest.NewRecorder(), request, controlplaneapi.Principal{
+			apiError := serveTicketHandler(handler, httptest.NewRecorder(), request, controlplaneapi.Identity{
 				Subject: "11111111-1111-4111-8111-111111111111", DeviceID: "22222222-2222-4222-8222-222222222222",
 			})
 			if apiError == nil || (apiError.Code != controlplaneapi.CodeInvalidArgument && apiError.Code != controlplaneapi.CodeNotFound) {
@@ -239,7 +239,7 @@ func TestIssueRelayTicketDoesNotLeakSessionValidationDetails(t *testing.T) {
 		strings.NewReader(`{}`),
 	)
 	request.Header.Set("Content-Type", "application/json")
-	apiError := serveTicketHandler(handler, httptest.NewRecorder(), request, controlplaneapi.Principal{
+	apiError := serveTicketHandler(handler, httptest.NewRecorder(), request, controlplaneapi.Identity{
 		Subject: "foreign", DeviceID: "foreign-device",
 	})
 	if apiError == nil || apiError.Code != controlplaneapi.CodeNotFound || apiError.Message != "resource not found" {
@@ -251,13 +251,13 @@ func serveTicketHandler(
 	handler *Routes,
 	writer http.ResponseWriter,
 	request *http.Request,
-	principal controlplaneapi.Principal,
+	identity controlplaneapi.Identity,
 ) *controlplaneapi.Error {
 	parts := strings.Split(strings.Trim(request.URL.Path, "/"), "/")
 	if len(parts) >= 3 {
 		request.SetPathValue("sessionID", parts[2])
 	}
-	return handler.issue(echo.New().NewContext(request, writer), principal)
+	return handler.issue(echo.New().NewContext(request, writer), identity)
 }
 
 func newTicketRoutes(t *testing.T, sessions SessionValidator, config ticketservice.Config) *Routes {

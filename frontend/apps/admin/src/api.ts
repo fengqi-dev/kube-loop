@@ -4,6 +4,7 @@ export const managementBase =
     ?.content.replace(/\/$/, "") || "/api/admin";
 const authBase = "/oauth2";
 export const csrfStorageKey = "kubeloop.admin.csrf";
+const csrfCookieName = "__Host-kubeloop-admin-csrf";
 export const authenticationLostEvent = "kubeloop:admin-authentication-lost";
 const oidcStorageKey = "kubeloop.admin.oidc";
 const deviceStorageKey = "kubeloop.admin.device";
@@ -144,7 +145,7 @@ export function mutation<T>(
 ) {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
-    "X-KubeLoop-CSRF": sessionStorage.getItem(csrfStorageKey) || "",
+    "X-KubeLoop-CSRF": csrfToken(),
   };
   if (options.etag !== undefined) headers["If-Match"] = `"${options.etag}"`;
   if (options.idempotencyKey)
@@ -156,6 +157,17 @@ export function mutation<T>(
     headers,
     body: body === undefined ? undefined : JSON.stringify(body),
   });
+}
+
+function csrfToken() {
+  const stored = sessionStorage.getItem(csrfStorageKey);
+  if (stored) return stored;
+  const prefix = `${csrfCookieName}=`;
+  const cookie = document.cookie
+    .split(";")
+    .map((value) => value.trim())
+    .find((value) => value.startsWith(prefix));
+  return cookie ? decodeURIComponent(cookie.slice(prefix.length)) : "";
 }
 
 function base64url(bytes: Uint8Array) {
@@ -287,7 +299,7 @@ export async function finishOIDCCallback() {
 }
 
 export async function logout() {
-  const csrf = sessionStorage.getItem(csrfStorageKey) || "";
+  const csrf = csrfToken();
   let failure: unknown;
   try {
     for (const operation of [

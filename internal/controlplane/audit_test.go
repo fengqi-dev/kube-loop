@@ -43,7 +43,7 @@ func TestStorageAuditSinkPersistsOnlyStructuredMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 	err = sink.Record(context.Background(), AuditRecord{
-		RequestID: "request-1", PrincipalID: "5d7e7980-33df-4f93-a91f-ff6a48725384",
+		RequestID: "request-1", IdentityID: "5d7e7980-33df-4f93-a91f-ff6a48725384",
 		SessionID: "session-1", Operation: "list", Namespace: "payments",
 		ResourceKind: "pods", Outcome: "success", PolicyRuleID: "payments-read",
 		HTTPStatus: http.StatusOK, Duration: 25 * time.Millisecond,
@@ -82,11 +82,11 @@ func TestAPIAuditCapturesAllowedAndDeniedOutcomes(t *testing.T) {
 	}
 	sink := &recordingAuditSink{}
 	server := newAPITestServer(t,
-		WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(*http.Request) (controlplaneapi.Principal, *controlplaneapi.Error) {
-			return controlplaneapi.Principal{Subject: "5d7e7980-33df-4f93-a91f-ff6a48725384", Groups: []string{"developers"}}, nil
+		WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(*http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
+			return controlplaneapi.Identity{Subject: "5d7e7980-33df-4f93-a91f-ff6a48725384", Groups: []string{"developers"}}, nil
 		})),
 		WithAuthorizer(engine), WithAuditSink(sink),
-		WithAPIRoutes(testEndpoint(func(writer http.ResponseWriter, _ *http.Request, _ controlplaneapi.Principal) *controlplaneapi.Error {
+		WithAPIRoutes(testEndpoint(func(writer http.ResponseWriter, _ *http.Request, _ controlplaneapi.Identity) *controlplaneapi.Error {
 			writeTestJSON(writer, http.StatusOK, map[string]string{"status": "ok"})
 			return nil
 		})),

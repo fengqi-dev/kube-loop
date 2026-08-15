@@ -60,8 +60,8 @@ func Hash(encoded []byte) string {
 	return hex.EncodeToString(digest[:])
 }
 
-func Scope(taskType, principalID string) string {
-	return "task:" + taskType + ":" + principalID
+func Scope(taskType, identityID string) string {
+	return "task:" + taskType + ":" + identityID
 }
 
 func Matches(stored string, candidates ...string) bool {

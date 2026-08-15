@@ -22,7 +22,7 @@ type sessionRow struct {
 
 	ID              string          `bun:"id,pk"`
 	SchemaVersion   int             `bun:"schema_version"`
-	PrincipalID     string          `bun:"principal_id"`
+	IdentityID      string          `bun:"identity_id"`
 	DeviceID        string          `bun:"device_id"`
 	ClusterID       string          `bun:"cluster_id"`
 	Namespace       string          `bun:"namespace"`
@@ -65,11 +65,11 @@ func (repository *sessionRepository) List(ctx context.Context, filter SessionLis
 	if err != nil {
 		return nil, err
 	}
-	filter.PrincipalID = strings.TrimSpace(filter.PrincipalID)
+	filter.IdentityID = strings.TrimSpace(filter.IdentityID)
 	filter.Namespace = strings.TrimSpace(filter.Namespace)
 	filter.State = strings.TrimSpace(filter.State)
-	if filter.PrincipalID != "" && validateUUID(filter.PrincipalID, "session principal ID") != nil {
-		return nil, errors.New("session principal filter is invalid")
+	if filter.IdentityID != "" && validateUUID(filter.IdentityID, "session identity ID") != nil {
+		return nil, errors.New("session identity filter is invalid")
 	}
 	if filter.Namespace != "" && !dns1123Label.MatchString(filter.Namespace) {
 		return nil, errors.New("session namespace filter is invalid")
@@ -77,13 +77,13 @@ func (repository *sessionRepository) List(ctx context.Context, filter SessionLis
 	if len(filter.State) > 64 || strings.ContainsAny(filter.State, "\x00\r\n") {
 		return nil, errors.New("session state filter is invalid")
 	}
-	query := `SELECT id, schema_version, principal_id, device_id, cluster_id, namespace, state, generation,
+	query := `SELECT id, schema_version, identity_id, device_id, cluster_id, namespace, state, generation,
 		network_spec_json, network_spec_hash, created_at, updated_at, last_heartbeat_at, expires_at
 		FROM sessions WHERE 1=1`
 	arguments := make([]any, 0, 9)
-	if filter.PrincipalID != "" {
-		query += ` AND principal_id = ?`
-		arguments = append(arguments, filter.PrincipalID)
+	if filter.IdentityID != "" {
+		query += ` AND identity_id = ?`
+		arguments = append(arguments, filter.IdentityID)
 	}
 	if filter.Namespace != "" {
 		query += ` AND namespace = ?`
@@ -119,7 +119,7 @@ func scanSession(row rowScanner) (Session, error) {
 	var value sessionRow
 	var networkSpec []byte
 	if err := row.Scan(
-		&value.ID, &value.SchemaVersion, &value.PrincipalID, &value.DeviceID, &value.ClusterID,
+		&value.ID, &value.SchemaVersion, &value.IdentityID, &value.DeviceID, &value.ClusterID,
 		&value.Namespace, &value.State, &value.Generation, &networkSpec, &value.NetworkSpecHash,
 		&value.CreatedAt, &value.UpdatedAt, &value.LastHeartbeatAt, &value.ExpiresAt,
 	); err != nil {
@@ -240,7 +240,7 @@ func normalizeSession(session *Session) error {
 	if err := validateUUID(session.ID, "session ID"); err != nil {
 		return err
 	}
-	if err := validateUUID(session.PrincipalID, "principal ID"); err != nil {
+	if err := validateUUID(session.IdentityID, "identity ID"); err != nil {
 		return err
 	}
 	session.DeviceID = strings.TrimSpace(session.DeviceID)
@@ -299,7 +299,7 @@ func normalizeSession(session *Session) error {
 
 func rowFromSession(session Session) sessionRow {
 	return sessionRow{
-		ID: session.ID, SchemaVersion: session.SchemaVersion, PrincipalID: session.PrincipalID,
+		ID: session.ID, SchemaVersion: session.SchemaVersion, IdentityID: session.IdentityID,
 		DeviceID: session.DeviceID, ClusterID: session.ClusterID, Namespace: session.Namespace,
 		State: session.State, Generation: int64(session.Generation), NetworkSpec: session.NetworkSpec,
 		NetworkSpecHash: session.NetworkSpecHash, CreatedAt: formatTime(session.CreatedAt),
@@ -313,7 +313,7 @@ func sessionFromRow(row sessionRow) (Session, error) {
 		return Session{}, errors.New("decode session generation")
 	}
 	session := Session{
-		ID: row.ID, SchemaVersion: row.SchemaVersion, PrincipalID: row.PrincipalID, DeviceID: row.DeviceID,
+		ID: row.ID, SchemaVersion: row.SchemaVersion, IdentityID: row.IdentityID, DeviceID: row.DeviceID,
 		ClusterID: row.ClusterID, Namespace: row.Namespace, State: row.State, Generation: uint64(row.Generation),
 		NetworkSpec: append(json.RawMessage(nil), row.NetworkSpec...), NetworkSpecHash: row.NetworkSpecHash,
 	}

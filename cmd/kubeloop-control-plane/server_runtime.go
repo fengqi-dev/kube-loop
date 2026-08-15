@@ -13,9 +13,8 @@ import (
 
 	"github.com/fengqi-dev/kube-loop/internal/controlplane"
 	adminhttpserver "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/httpserver"
+	adminiam "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/iam"
 	adminoperations "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/operations"
-	adminprovider "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/provider"
-	adminconfig "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/managementconfig"
 	controlplanekubernetes "github.com/fengqi-dev/kube-loop/internal/controlplane/kubernetes"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/maintenance"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/sessionregistry"
@@ -24,22 +23,21 @@ import (
 )
 
 type serverRuntimeOptions struct {
-	Context                context.Context
-	Stop                   context.CancelFunc
-	Config                 loadedControlPlaneConfig
-	Logger                 *slog.Logger
-	Store                  *controlplanestorage.Store
-	Server                 *controlplane.Server
-	ManagementServer       *adminhttpserver.Server
-	RelayRegistry          *relayRegistryRuntime
-	KubernetesConfig       controlplanekubernetes.Config
-	ManagedProviderRuntime *adminprovider.Runtime
-	ManagementPolicyLoader *adminconfig.PolicyLoader
-	SessionRecovery        *sessionregistry.Reconciler
-	ManagementOperations   *adminoperations.Service
-	MaintenanceWorker      *maintenance.Worker
-	BindingRecovery        *trafficbindingclient.Reconciler
-	SessionRuntime         *sessionregistry.Registry
+	Context              context.Context
+	Stop                 context.CancelFunc
+	Config               loadedControlPlaneConfig
+	Logger               *slog.Logger
+	Store                *controlplanestorage.Store
+	Server               *controlplane.Server
+	ManagementServer     *adminhttpserver.Server
+	RelayRegistry        *relayRegistryRuntime
+	KubernetesConfig     controlplanekubernetes.Config
+	IAMLoader            *adminiam.Loader
+	SessionRecovery      *sessionregistry.Reconciler
+	ManagementOperations *adminoperations.Service
+	MaintenanceWorker    *maintenance.Worker
+	BindingRecovery      *trafficbindingclient.Reconciler
+	SessionRuntime       *sessionregistry.Registry
 }
 
 func serveControlPlane(options serverRuntimeOptions) {
@@ -80,21 +78,20 @@ func serveControlPlane(options serverRuntimeOptions) {
 		"listen_address", listener.Addr().String(), "public_url", options.Config.Document.API.PublicURL,
 		"kubernetes_impersonation", options.KubernetesConfig.Impersonation.Enabled,
 	)
-	options.Logger.Info("Management Plane started", "listen_address", managementListener.Addr().String(), "public_url", options.Config.Document.Management.PublicURL)
+	options.Logger.Info("Management Plane started", "listen_address", managementListener.Addr().String(), "public_url", options.Config.Document.Admin.PublicURL)
 	if relayListener != nil {
 		options.Logger.Info("Relay Registry started", "listen_address", relayListener.Addr().String(), "transport", "mTLS")
 	}
-	go options.ManagedProviderRuntime.Run(options.Context)
 	serveCount := 2
 	if relayServer != nil {
 		serveCount++
 	}
 	errCh := make(chan error, serveCount)
 	var backgroundWorkers sync.WaitGroup
-	backgroundWorkers.Add(5)
+	backgroundWorkers.Add(4)
 	go func() {
 		defer backgroundWorkers.Done()
-		options.ManagementPolicyLoader.Run(options.Context)
+		options.IAMLoader.Run(options.Context)
 	}()
 	go func() {
 		defer backgroundWorkers.Done()

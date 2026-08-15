@@ -99,7 +99,7 @@ func TestRealMirrorPreservesPrimaryPathAndRecoversStaleOwner(t *testing.T) {
 
 	gatewayIP := reachableHostIP(t, ctx, kubeClient)
 	primaryDial := mirrorNodePortDialer(reachableNodeAddress(t, ctx, kubeClient), backendService)
-	stateStore, principal, activeSession, remoteSession := exchangeLifecycleState(t, ctx, service.Spec.ClusterIP)
+	stateStore, identity, activeSession, remoteSession := exchangeLifecycleState(t, ctx, service.Spec.ClusterIP)
 	provider, err := controlplanekubernetes.NewForRESTConfig(kubeRESTConfig(t), controlplanekubernetes.Config{})
 	if err != nil {
 		t.Fatal(err)
@@ -125,7 +125,7 @@ func TestRealMirrorPreservesPrimaryPathAndRecoversStaleOwner(t *testing.T) {
 	mutator := &failNextRestoreMutator{delegate: realMutator}
 	handler, err := mirrorapi.New(
 		stateStore,
-		e2eExecSessionValidator{principalID: principal.Subject, session: activeSession},
+		e2eExecSessionValidator{identityID: identity.Subject, session: activeSession},
 		resolver,
 		mutator,
 		mirrorapi.Config{
@@ -135,7 +135,7 @@ func TestRealMirrorPreservesPrimaryPathAndRecoversStaleOwner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server, gatewayClient := startMirrorLifecycleController(t, handler, principal, activeSession, gatewayIP, primaryDial)
+	server, gatewayClient := startMirrorLifecycleController(t, handler, identity, activeSession, gatewayIP, primaryDial)
 	defer server.Close()
 
 	serverProfile := profile.Profile{ID: "mirror-e2e", BaseURL: server.URL}
@@ -143,8 +143,8 @@ func TestRealMirrorPreservesPrimaryPathAndRecoversStaleOwner(t *testing.T) {
 		profileID: serverProfile.ID,
 		credential: credentials.Credential{
 			TokenType: "Bearer", AccessToken: mirrorLifecycleAccessToken,
-			AccessExpiresAt: principal.AccessExpiresAt, RefreshToken: "unused",
-			RefreshExpiresAt: principal.AccessExpiresAt, DeviceID: principal.DeviceID,
+			AccessExpiresAt: identity.AccessExpiresAt, RefreshToken: "unused",
+			RefreshExpiresAt: identity.AccessExpiresAt, DeviceID: identity.DeviceID,
 		},
 	}
 	remoteClient, err := remote.New(credentialStore, e2eTokenRefresher{}, remote.Config{HTTPClient: gatewayClient})
@@ -270,7 +270,7 @@ func mirrorNodePortDialer(
 func startMirrorLifecycleController(
 	t *testing.T,
 	handler *mirrorapi.Service,
-	principal controlplaneapi.Principal,
+	identity controlplaneapi.Identity,
 	session sessionapi.ActiveSession,
 	gatewayIP string,
 	primaryDial func(context.Context, string, string) (net.Conn, error),
@@ -278,7 +278,7 @@ func startMirrorLifecycleController(
 	t.Helper()
 	gateway := startE2ETrafficGateway(t, gatewayIP, handler, primaryDial)
 	policy, err := authorization.New(authorization.Policy{Rules: []authorization.Rule{{
-		ID: "e2e-mirror", Subjects: []string{principal.Subject},
+		ID: "e2e-mirror", Subjects: []string{identity.Subject},
 		Namespaces: []string{harness.EchoNamespace},
 		Operations: []string{"create", "get", "delete"}, ResourceKinds: []string{"mirrors", "relay-tickets"},
 	}}})
@@ -288,15 +288,15 @@ func startMirrorLifecycleController(
 	server, err := controlplane.NewServer(
 		controlplane.Config{PublicURL: "http://127.0.0.1"}, controlplane.BuildInfo{},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
-		controlplane.WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(request *http.Request) (controlplaneapi.Principal, *controlplaneapi.Error) {
+		controlplane.WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(request *http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
 			if request.Header.Get("Authorization") != "Bearer "+mirrorLifecycleAccessToken {
-				return controlplaneapi.Principal{}, &controlplaneapi.Error{Code: controlplaneapi.CodeUnauthenticated, Message: "invalid e2e access token"}
+				return controlplaneapi.Identity{}, &controlplaneapi.Error{Code: controlplaneapi.CodeUnauthenticated, Message: "invalid e2e access token"}
 			}
-			return principal, nil
+			return identity, nil
 		})),
 		controlplane.WithAuthorizer(policy), controlplane.WithAPIRoutes(controlplane.APIRoutes{
 			Tickets: ticketapi.NewRoutes(gateway.tickets, e2eExecSessionValidator{
-				principalID: principal.Subject, session: session,
+				identityID: identity.Subject, session: session,
 			}).Endpoints(),
 			Mirrors: mirrorapi.NewRoutes(handler).Endpoints(),
 		}),

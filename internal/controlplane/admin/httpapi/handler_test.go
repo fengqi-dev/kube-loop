@@ -61,16 +61,16 @@ func TestManagementPublicURLRequiresTLSOutsideLoopback(t *testing.T) {
 	}
 }
 
-func TestReadAPIRequiresCookieAndReturnsAuthorizedCapabilitiesAndStatus(t *testing.T) {
+func TestReadAPIRequiresCookieAndReturnsAuthorizationSummaryAndStatus(t *testing.T) {
 	handler, store := newReadTestHandler(t, true)
 	unauthenticated := httptest.NewRecorder()
-	serveHTTP(handler, unauthenticated, httptest.NewRequest(http.MethodGet, "/capabilities", nil))
+	serveHTTP(handler, unauthenticated, httptest.NewRequest(http.MethodGet, "/bootstrap", nil))
 	if unauthenticated.Code != http.StatusUnauthorized {
 		t.Fatalf("unauthenticated status=%d body=%s", unauthenticated.Code, unauthenticated.Body.String())
 	}
 
 	cookie, _ := issueLegacySession(t, handler)
-	capabilityRequest := httptest.NewRequest(http.MethodGet, "/capabilities", nil)
+	capabilityRequest := httptest.NewRequest(http.MethodGet, "/bootstrap", nil)
 	capabilityRequest.AddCookie(cookie)
 	capabilityRequest.Header.Set("Sec-Fetch-Site", "same-origin")
 	capabilities := httptest.NewRecorder()
@@ -79,13 +79,17 @@ func TestReadAPIRequiresCookieAndReturnsAuthorizedCapabilitiesAndStatus(t *testi
 		t.Fatalf("capability status=%d headers=%v body=%s", capabilities.Code, capabilities.Header(), capabilities.Body.String())
 	}
 	var capabilityDocument struct {
-		AuthenticationType string   `json:"authenticationType"`
-		Capabilities       []string `json:"capabilities"`
+		Session struct {
+			AuthenticationType string `json:"authenticationType"`
+		} `json:"session"`
+		Authorization struct {
+			Administrator bool `json:"administrator"`
+		} `json:"authorization"`
 	}
 	if err := json.Unmarshal(capabilities.Body.Bytes(), &capabilityDocument); err != nil {
 		t.Fatal(err)
 	}
-	if capabilityDocument.AuthenticationType != "break-glass" || len(capabilityDocument.Capabilities) == 0 {
+	if capabilityDocument.Session.AuthenticationType != "break-glass" || !capabilityDocument.Authorization.Administrator {
 		t.Fatalf("capability document=%+v", capabilityDocument)
 	}
 
@@ -175,10 +179,10 @@ func TestAuthenticatedManagementWritesRequireSynchronousCSRFToken(t *testing.T) 
 	}
 }
 
-func TestGatewayTokenExchangeCreatesNormalAndBootstrapManagementSessions(t *testing.T) {
-	for _, bootstrap := range []bool{false, true} {
+func TestGatewayTokenExchangeCreatesNormalManagementSession(t *testing.T) {
+	for _, bootstrap := range []bool{false} {
 		t.Run(map[bool]string{false: "normal", true: "bootstrap"}[bootstrap], func(t *testing.T) {
-			handler, store := newPrincipalTokenHandler(t, bootstrap)
+			handler, store := newIdentityTokenHandler(t, bootstrap)
 			request := httptest.NewRequest(http.MethodPost, "/sessions/token", bytes.NewBufferString(`{}`))
 			request.RemoteAddr = "192.0.2.30:5000"
 			request.Header.Set("Origin", "https://gateway.example")
@@ -187,7 +191,7 @@ func TestGatewayTokenExchangeCreatesNormalAndBootstrapManagementSessions(t *test
 			request.Header.Set("Authorization", "Bearer valid-access-token")
 			recorder := httptest.NewRecorder()
 			serveHTTP(handler, recorder, request)
-			if recorder.Code != http.StatusCreated || len(recorder.Result().Cookies()) != 1 {
+			if recorder.Code != http.StatusCreated || len(recorder.Result().Cookies()) != 2 {
 				t.Fatalf("exchange status=%d body=%s", recorder.Code, recorder.Body.String())
 			}
 			var issued struct {
@@ -197,6 +201,10 @@ func TestGatewayTokenExchangeCreatesNormalAndBootstrapManagementSessions(t *test
 				t.Fatalf("exchange response=%s error=%v", recorder.Body.String(), err)
 			}
 			cookie := recorder.Result().Cookies()[0]
+			csrfCookie := recorder.Result().Cookies()[1]
+			if csrfCookie.Name != CSRFCookieName || csrfCookie.Value != issued.CSRFToken || csrfCookie.HttpOnly || !csrfCookie.Secure {
+				t.Fatalf("CSRF cookie=%+v", csrfCookie)
+			}
 			digest := sha256.Sum256([]byte(cookie.Value))
 			stored, err := store.AdminSessions().GetByHash(context.Background(), digest[:])
 			if err != nil {
@@ -206,7 +214,7 @@ func TestGatewayTokenExchangeCreatesNormalAndBootstrapManagementSessions(t *test
 			if bootstrap {
 				wantAuthentication = "bootstrap"
 			}
-			if stored.AuthenticationType != wantAuthentication || stored.PrincipalID == "" || stored.AuthorizationID == "" {
+			if stored.AuthenticationType != wantAuthentication || stored.IdentityID == "" || stored.AuthorizationID == "" {
 				t.Fatalf("stored session=%+v", stored)
 			}
 			statusRequest := httptest.NewRequest(http.MethodGet, "/status", nil)
@@ -217,7 +225,7 @@ func TestGatewayTokenExchangeCreatesNormalAndBootstrapManagementSessions(t *test
 				t.Fatalf("status after exchange=%d body=%s", status.Code, status.Body.String())
 			}
 			events, err := store.Audit().List(context.Background(), storage.AuditFilter{
-				Action: "admin.session.principal.exchange",
+				Action: "admin.session.identity.exchange",
 			})
 			if err != nil || len(events) != 1 || events[0].Outcome != "success" {
 				t.Fatalf("exchange audit=%+v error=%v", events, err)
@@ -228,7 +236,9 @@ func TestGatewayTokenExchangeCreatesNormalAndBootstrapManagementSessions(t *test
 			logoutRequest.Header.Set(CSRFHeaderName, issued.CSRFToken)
 			logout := httptest.NewRecorder()
 			serveHTTP(handler, logout, logoutRequest)
-			if logout.Code != http.StatusNoContent || len(logout.Result().Cookies()) != 1 || logout.Result().Cookies()[0].MaxAge != -1 {
+			logoutCookies := logout.Result().Cookies()
+			if logout.Code != http.StatusNoContent || len(logoutCookies) != 2 ||
+				logoutCookies[0].MaxAge != -1 || logoutCookies[1].Name != CSRFCookieName || logoutCookies[1].MaxAge != -1 {
 				t.Fatalf("logout status=%d headers=%v body=%s", logout.Code, logout.Header(), logout.Body.String())
 			}
 			statusAfterLogout := httptest.NewRecorder()
@@ -245,7 +255,7 @@ func TestGatewayTokenExchangeCreatesNormalAndBootstrapManagementSessions(t *test
 }
 
 func TestManagementUIIsPublicButStrictlySandboxed(t *testing.T) {
-	handler, _ := newPrincipalTokenHandler(t, false)
+	handler, _ := newIdentityTokenHandler(t, false)
 	request := httptest.NewRequest(http.MethodGet, "/ui", nil)
 	recorder := httptest.NewRecorder()
 	serveHTTP(handler, recorder, request)
@@ -256,7 +266,7 @@ func TestManagementUIIsPublicButStrictlySandboxed(t *testing.T) {
 }
 
 func TestGatewayTokenExchangeRejectsMalformedBearerAndCrossSite(t *testing.T) {
-	handler, store := newPrincipalTokenHandler(t, false)
+	handler, store := newIdentityTokenHandler(t, false)
 	for _, mutate := range []func(*http.Request){
 		func(request *http.Request) { request.Header.Set("Authorization", "Basic invalid") },
 		func(request *http.Request) { request.Header.Set("Origin", "https://attacker.example") },
@@ -274,7 +284,7 @@ func TestGatewayTokenExchangeRejectsMalformedBearerAndCrossSite(t *testing.T) {
 		}
 	}
 	events, err := store.Audit().List(context.Background(), storage.AuditFilter{
-		Action: "admin.session.principal.exchange",
+		Action: "admin.session.identity.exchange",
 	})
 	if err != nil || len(events) != 2 || events[0].Outcome != "failure" || events[1].Outcome != "failure" {
 		t.Fatalf("failure audit=%+v error=%v", events, err)
@@ -282,7 +292,7 @@ func TestGatewayTokenExchangeRejectsMalformedBearerAndCrossSite(t *testing.T) {
 }
 
 func TestGatewayTokenExchangeRejectsNonEmptyOrNullJSONAndAudits(t *testing.T) {
-	handler, store := newPrincipalTokenHandler(t, false)
+	handler, store := newIdentityTokenHandler(t, false)
 	for _, body := range []string{`null`, `{"unexpected":true}`, `{`} {
 		request := httptest.NewRequest(http.MethodPost, "/sessions/token", bytes.NewBufferString(body))
 		request.RemoteAddr = "192.0.2.32:5000"
@@ -295,7 +305,7 @@ func TestGatewayTokenExchangeRejectsNonEmptyOrNullJSONAndAudits(t *testing.T) {
 			t.Fatalf("body=%q status=%d response=%s", body, recorder.Code, recorder.Body.String())
 		}
 	}
-	events, err := store.Audit().List(context.Background(), storage.AuditFilter{Action: "admin.session.principal.exchange"})
+	events, err := store.Audit().List(context.Background(), storage.AuditFilter{Action: "admin.session.identity.exchange"})
 	if err != nil || len(events) != 3 {
 		t.Fatalf("malformed exchange audit=%+v error=%v", events, err)
 	}
@@ -392,11 +402,7 @@ func (authenticator tokenAuthenticatorStub) Authenticate(_ context.Context, valu
 	return authenticator.identity, nil
 }
 
-type bootstrapStateStub struct{}
-
-func (bootstrapStateStub) BootstrapRetired(context.Context) (bool, error) { return false, nil }
-
-func newPrincipalTokenHandler(t *testing.T, bootstrap bool, extraOptions ...Option) (*Handler, *storage.Store) {
+func newIdentityTokenHandler(t *testing.T, bootstrap bool, extraOptions ...Option) (*Handler, *storage.Store) {
 	t.Helper()
 	store, err := storage.Open(context.Background(), storage.Config{
 		Backend: storage.BackendSQLite, SQLitePath: filepath.Join(t.TempDir(), "management.db"),
@@ -406,8 +412,8 @@ func newPrincipalTokenHandler(t *testing.T, bootstrap bool, extraOptions ...Opti
 	}
 	t.Cleanup(func() { _ = store.Close() })
 	now := time.Now().UTC()
-	principal, err := store.Principals().Upsert(context.Background(), storage.Principal{
-		ID: uuid.NewString(), Provider: "oidc", ExternalID: uuid.NewString(), Groups: []string{"platform"},
+	identity, err := store.Identities().Create(context.Background(), storage.Identity{
+		ID: uuid.NewString(), Type: "human", DisplayName: "Test Identity", Status: "active",
 		CreatedAt: now, UpdatedAt: now,
 	})
 	if err != nil {
@@ -424,19 +430,25 @@ func newPrincipalTokenHandler(t *testing.T, bootstrap bool, extraOptions ...Opti
 	if err != nil {
 		t.Fatal(err)
 	}
-	var authorizer *adminauthorization.Engine
-	if bootstrap {
-		authorizer, err = adminauthorization.NewDenyAll(adminauthorization.WithBootstrap(
-			adminauthorization.BootstrapConfig{Groups: []string{"platform"}}, bootstrapStateStub{},
-		))
-	} else {
-		authorizer, err = adminauthorization.New(adminauthorization.Snapshot{
-			Version: adminauthorization.CurrentVersion, Bindings: []adminauthorization.Binding{{
-				ID: uuid.NewString(), Subject: adminauthorization.SubjectRef{Type: adminauthorization.SubjectPrincipal, PrincipalID: principal.ID}, RoleID: adminauthorization.RolePlatformAdmin,
-				Scope: adminauthorization.BindingScope{Type: adminauthorization.ScopePlatform}, ManagedBy: adminauthorization.ManagedByPlatform,
-			}},
-		})
+	_ = bootstrap
+	administratorGroupID := uuid.NewString()
+	organizationID := uuid.NewString()
+	if err := store.Organizations().Create(context.Background(), storage.Organization{ID: organizationID, Name: "Test", Slug: "test", Status: "active", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatal(err)
 	}
+	if err := store.Organizations().AddMember(context.Background(), storage.OrganizationMembership{OrganizationID: organizationID, IdentityID: identity.ID, Status: "active", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Groups().Create(context.Background(), storage.Group{ID: administratorGroupID, OrganizationID: organizationID, Name: "Administrators", System: true, CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Groups().AddMember(context.Background(), storage.GroupMembership{GroupID: administratorGroupID, IdentityID: identity.ID, SourceType: "manual", CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	authorizer, err := adminauthorization.New(adminauthorization.Snapshot{
+		Version: adminauthorization.CurrentVersion,
+		Groups:  []adminauthorization.GroupAccess{{GroupID: administratorGroupID, Administrator: true}},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -445,7 +457,7 @@ func newPrincipalTokenHandler(t *testing.T, bootstrap bool, extraOptions ...Opti
 			Version: "v2-test", Commit: "test", ProtocolMin: "2.0", ProtocolMax: "2.0",
 		}),
 		WithTokenExchange(tokenAuthenticatorStub{identity: authn.AccessIdentity{
-			Principal: principal, AuthorizationID: authorizationID, DeviceID: "browser", AccessExpiresAt: now.Add(5 * time.Minute),
+			Identity: identity, Groups: []string{administratorGroupID}, AuthorizationID: authorizationID, DeviceID: "browser", AccessExpiresAt: now.Add(5 * time.Minute),
 		}}),
 	}
 	options = append(options, extraOptions...)

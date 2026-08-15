@@ -20,7 +20,7 @@ import (
 
 type Identity struct {
 	RequestID         string
-	PrincipalID       string
+	IdentityID        string
 	DeviceID          string
 	SessionID         string
 	SessionGeneration uint64
@@ -135,7 +135,7 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 	identity, err := h.config.Authenticator.Authenticate(request)
-	if err != nil || identity.PrincipalID == "" || identity.DeviceID == "" || identity.SessionID == "" ||
+	if err != nil || identity.IdentityID == "" || identity.DeviceID == "" || identity.SessionID == "" ||
 		identity.SessionGeneration == 0 || !identity.ExpiresAt.After(time.Now()) {
 		h.log(requestID, "WebSocket request rejected: remote=%s method=%s path=%s status=%d reason=authentication", request.RemoteAddr, request.Method, request.URL.Path, http.StatusUnauthorized)
 		writer.Header().Set("WWW-Authenticate", "Bearer")
@@ -299,7 +299,7 @@ func (h *Handler) reject(requestID string, connection *websocket.Conn, rejection
 }
 
 func (h *Handler) acquireUser(identity Identity) bool {
-	key := identity.PrincipalID
+	key := identity.IdentityID
 	h.userMu.Lock()
 	defer h.userMu.Unlock()
 	if h.userSessions[key] >= h.config.MaxSessionsPerUser {
@@ -310,7 +310,7 @@ func (h *Handler) acquireUser(identity Identity) bool {
 }
 
 func (h *Handler) releaseUser(identity Identity) {
-	key := identity.PrincipalID
+	key := identity.IdentityID
 	h.userMu.Lock()
 	defer h.userMu.Unlock()
 	if h.userSessions[key] <= 1 {

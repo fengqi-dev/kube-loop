@@ -31,16 +31,17 @@ type State struct {
 }
 
 type Profile struct {
-	SchemaVersion   int         `json:"schemaVersion"`
-	ID              string      `json:"id"`
-	BaseURL         string      `json:"baseUrl"`
-	TunnelPath      string      `json:"tunnelPath"`
-	DisplayName     string      `json:"displayName,omitempty"`
-	LastPrincipalID string      `json:"lastPrincipalId,omitempty"`
-	LastUserName    string      `json:"lastUserName,omitempty"`
-	LastNamespace   string      `json:"lastNamespace,omitempty"`
-	DNSNamespace    string      `json:"dnsNamespace,omitempty"`
-	HostAliases     []HostAlias `json:"hostAliases,omitempty"`
+	SchemaVersion  int         `json:"schemaVersion"`
+	ID             string      `json:"id"`
+	BaseURL        string      `json:"baseUrl"`
+	TunnelPath     string      `json:"tunnelPath"`
+	DisplayName    string      `json:"displayName,omitempty"`
+	LastIdentityID string      `json:"lastIdentityId,omitempty"`
+	LastUserName   string      `json:"lastUserName,omitempty"`
+	LastNamespace  string      `json:"lastNamespace,omitempty"`
+	DNSNamespace   string      `json:"dnsNamespace,omitempty"`
+	SOCKSPort      int         `json:"socksPort,omitempty"`
+	HostAliases    []HostAlias `json:"hostAliases,omitempty"`
 }
 
 type HostAlias struct {
@@ -265,10 +266,13 @@ func normalizeProfile(profile Profile) (Profile, error) {
 	}
 	profile.ID = strings.TrimSpace(profile.ID)
 	profile.DisplayName = strings.TrimSpace(profile.DisplayName)
-	profile.LastPrincipalID = strings.TrimSpace(profile.LastPrincipalID)
+	profile.LastIdentityID = strings.TrimSpace(profile.LastIdentityID)
 	profile.LastUserName = strings.TrimSpace(profile.LastUserName)
 	profile.LastNamespace = strings.TrimSpace(profile.LastNamespace)
 	profile.DNSNamespace = strings.TrimSpace(profile.DNSNamespace)
+	if profile.SOCKSPort < 0 || profile.SOCKSPort > 65535 {
+		return Profile{}, errors.New("Server Profile SOCKS port must be between 1 and 65535")
+	}
 	if profile.DNSNamespace != "" && !dnsname.ValidLabel(profile.DNSNamespace) {
 		return Profile{}, errors.New("Server Profile DNS namespace is invalid")
 	}

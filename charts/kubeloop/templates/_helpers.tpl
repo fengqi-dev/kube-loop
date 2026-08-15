@@ -94,7 +94,7 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 
 {{- define "kubeloop.validateExternalAccess" -}}
 {{- $publicURL := trimSuffix "/" (trim .Values.publicURL) -}}
-{{- $managementPublicURL := trimSuffix "/" (trim .Values.controlPlane.management.publicURL) -}}
+{{- $adminPublicURL := trimSuffix "/" (trim .Values.controlPlane.admin.publicURL) -}}
 {{- if not (regexMatch `^(https://[^/?#]+|http://(localhost|127\.0\.0\.1|\[::1\])(:[0-9]+)?)$` $publicURL) -}}
 {{- fail "publicURL must be one HTTPS origin without a path, query or fragment (HTTP is allowed only for loopback development)" -}}
 {{- end -}}
@@ -102,8 +102,8 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- fail "ingress.enabled and gatewayAPI.enabled are mutually exclusive" -}}
 {{- end -}}
 {{- if .Values.ingress.enabled -}}
-{{- if ne $managementPublicURL $publicURL -}}
-{{- fail "controlPlane.management.publicURL must equal publicURL when ingress is enabled" -}}
+{{- if ne $adminPublicURL $publicURL -}}
+{{- fail "controlPlane.admin.publicURL must equal publicURL when ingress is enabled" -}}
 {{- end -}}
 {{- $host := required "ingress.host is required when ingress.enabled=true" .Values.ingress.host -}}
 {{- if ne $publicURL (printf "https://%s" $host) -}}
@@ -114,8 +114,8 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 {{- end -}}
 {{- if .Values.gatewayAPI.enabled -}}
-{{- if ne $managementPublicURL $publicURL -}}
-{{- fail "controlPlane.management.publicURL must equal publicURL when Gateway API is enabled" -}}
+{{- if ne $adminPublicURL $publicURL -}}
+{{- fail "controlPlane.admin.publicURL must equal publicURL when Gateway API is enabled" -}}
 {{- end -}}
 {{- $host := required "gatewayAPI.host is required when gatewayAPI.enabled=true" .Values.gatewayAPI.host -}}
 {{- if ne $publicURL (printf "https://%s" $host) -}}
@@ -135,10 +135,10 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 {{- end -}}
 
-{{- define "kubeloop.initialAdminSecretName" -}}
-{{- default (printf "%s-initial-admin" (include "kubeloop.controlPlaneName" .)) .Values.controlPlane.management.initialAdmin.existingSecret | trunc 63 | trimSuffix "-" -}}
-{{- end -}}
-
 {{- define "kubeloop.authSecretName" -}}
 {{- default (printf "%s-auth" (include "kubeloop.controlPlaneName" .)) .Values.controlPlane.auth.oauth.existingSecret | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+
+{{- define "kubeloop.iamBootstrapSecretName" -}}
+{{- default (printf "%s-iam-bootstrap" (include "kubeloop.controlPlaneName" .)) .Values.controlPlane.admin.bootstrap.existingSecret | trunc 63 | trimSuffix "-" -}}
 {{- end -}}

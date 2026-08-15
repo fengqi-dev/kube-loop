@@ -18,7 +18,7 @@ unowned rollback snapshot.
 
 ## Decision
 
-Exchange is a Session- and Principal-owned Control Plane Task. Task creation only
+Exchange is a Session- and Identity-owned Control Plane Task. Task creation only
 validates the requested Service-port-to-local-target mapping and persists a
 pending Task. The authenticated reverse WebSocket claim selects the owner: the
 Control Plane replica handling that upgraded request allocates ephemeral TCP/UDP

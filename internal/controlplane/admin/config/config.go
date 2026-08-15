@@ -1,6 +1,5 @@
 // Package config loads deployment-owned Control Plane Management Plane settings.
-// It contains only bootstrap identities and an optional mounted break-glass
-// Secret reference. Authentication Providers are managed in the database.
+// It contains only the optional mounted break-glass Secret reference.
 package config
 
 import (
@@ -15,8 +14,6 @@ import (
 	"regexp"
 	"strings"
 	"time"
-
-	adminauthorization "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/authorization"
 )
 
 const (
@@ -29,21 +26,7 @@ const (
 var aliasPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,62}$`)
 
 type File struct {
-	Bootstrap  BootstrapConfig  `json:"bootstrap"`
 	BreakGlass BreakGlassConfig `json:"breakGlass"`
-}
-
-type BootstrapConfig struct {
-	Subjects        []string `json:"subjects"`
-	Groups          []string `json:"groups"`
-	RecoveryEnabled bool     `json:"recoveryEnabled"`
-}
-
-func (config BootstrapConfig) AuthorizationConfig() adminauthorization.BootstrapConfig {
-	return adminauthorization.BootstrapConfig{
-		Subjects: append([]string(nil), config.Subjects...), Groups: append([]string(nil), config.Groups...),
-		RecoveryEnabled: config.RecoveryEnabled,
-	}
 }
 
 type BreakGlassConfig struct {
@@ -96,17 +79,6 @@ func Load(path string) (File, error) {
 
 // Normalize validates and applies defaults to deployment-owned management settings.
 func Normalize(config File) (File, error) {
-	if config.Bootstrap.Subjects == nil {
-		config.Bootstrap.Subjects = []string{}
-	}
-	if config.Bootstrap.Groups == nil {
-		config.Bootstrap.Groups = []string{}
-	}
-	if _, err := adminauthorization.NewDenyAll(adminauthorization.WithBootstrap(
-		config.Bootstrap.AuthorizationConfig(), nil,
-	)); err != nil {
-		return File{}, fmt.Errorf("invalid management bootstrap configuration: %w", err)
-	}
 	breakGlass, err := normalizeBreakGlass(config.BreakGlass)
 	if err != nil {
 		return File{}, err

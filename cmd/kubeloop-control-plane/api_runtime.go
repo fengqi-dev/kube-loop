@@ -71,6 +71,9 @@ func buildAPIRuntime(
 	kubernetesAPI, err := kubeapi.New(
 		kubernetesProvider,
 		kubeapi.WithCapabilityAuthorizer(policyEngine),
+		kubeapi.WithAuthorizedNamespaces(func(ctx context.Context, identityID string, groupIDs []string) ([]string, error) {
+			return store.Groups().ListAuthorizedNamespaces(ctx, identityID, groupIDs)
+		}),
 		kubeapi.WithGatewayVersion(version),
 	)
 	if err != nil {

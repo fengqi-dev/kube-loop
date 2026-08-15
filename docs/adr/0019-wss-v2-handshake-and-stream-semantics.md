@@ -13,7 +13,7 @@ before discovering an incompatible peer.
 
 The original roadmap described an Access Token at this boundary. V2-500 later
 made the narrower RelayTicket the authoritative Data Plane credential. The
-Control Plane validates the Access Token, Principal, device, policy and active
+Control Plane validates the Access Token, Identity, device, policy and active
 Cluster Session before issuing the short-lived, one-use ticket. Sending the
 Access Token to Data Plane again would widen its privilege and contradict the
 Control Plane/Data Plane split.
@@ -71,7 +71,7 @@ Handshake messages are binary WebSocket messages; text messages are invalid.
 - maximum 64-KiB logical-stream data-frame bytes;
 - maximum concurrent logical streams per physical connection;
 - maximum physical connections on the Data Plane;
-- maximum physical connections per Principal, shared across that Principal's
+- maximum physical connections per Identity, shared across that Identity's
   devices;
 - logical-stream idle timeout in explicit milliseconds.
 
@@ -110,7 +110,7 @@ explicit KubeLoop FIN preserves request-EOF/response-after-EOF behavior.
 - A device response field is returned with each RelayTicket so the desktop can
   construct `ClientHello`; Data Plane independently compares it with the signed
   claim.
-- Per-user connection accounting keys on Principal, not Principal plus device,
+- Per-user connection accounting keys on Identity, not Identity plus device,
   so adding devices cannot bypass the limit.
 - Contract tests cover strict documents, explicit version/client/device/capacity
   rejection, exact advertised limits, no partial session, multiplexed data,

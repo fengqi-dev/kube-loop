@@ -222,8 +222,8 @@ func (a *App) persistCredential(serverProfile clientprofile.Profile, credential 
 	}
 	session := authSession(credential)
 	profileChanged := false
-	if credential.PrincipalID != "" && credential.PrincipalID != serverProfile.LastPrincipalID {
-		serverProfile.LastPrincipalID = credential.PrincipalID
+	if credential.IdentityID != "" && credential.IdentityID != serverProfile.LastIdentityID {
+		serverProfile.LastIdentityID = credential.IdentityID
 		profileChanged = true
 	}
 	if session.UserName != "" && session.UserName != serverProfile.LastUserName {

@@ -72,7 +72,7 @@ func main() {
 				return websocketmux.Identity{}, errors.New("RelayTicket NetworkSpec binding is required")
 			}
 			return websocketmux.Identity{
-				PrincipalID: claims.PrincipalID, DeviceID: claims.DeviceID, SessionID: claims.SessionID,
+				IdentityID: claims.IdentityID, DeviceID: claims.DeviceID, SessionID: claims.SessionID,
 				SessionGeneration: claims.SessionGeneration,
 				Namespace:         claims.Namespace, NetworkSpecHash: claims.NetworkSpecHash,
 				ExpiresAt: time.Unix(claims.ExpiresAt, 0).UTC(),

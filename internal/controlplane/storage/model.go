@@ -9,16 +9,14 @@ import (
 
 const ObjectSchemaVersion = 1
 
-type Principal struct {
-	ID            string
-	SchemaVersion int
-	Provider      string
-	ExternalID    string
-	DisplayName   string
-	Email         string
-	Groups        []string
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+type Identity struct {
+	ID           string    `json:"id"`
+	Type         string    `json:"type"`
+	DisplayName  string    `json:"displayName"`
+	PrimaryEmail string    `json:"primaryEmail,omitempty"`
+	Status       string    `json:"status"`
+	CreatedAt    time.Time `json:"createdAt"`
+	UpdatedAt    time.Time `json:"updatedAt"`
 }
 
 type PageCursor struct {
@@ -26,35 +24,116 @@ type PageCursor struct {
 	ID        string
 }
 
-type PrincipalListFilter struct {
-	Provider string
-	Cursor   *PageCursor
-	Limit    int
+type IdentityListFilter struct {
+	Type   string
+	Status string
+	Search string
+	Cursor *PageCursor
+	Limit  int
+}
+
+type Organization struct {
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	Slug      string    `json:"slug"`
+	Status    string    `json:"status"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+type OrganizationMembership struct {
+	OrganizationID string    `json:"organizationId"`
+	IdentityID     string    `json:"identityId"`
+	Status         string    `json:"status"`
+	CreatedAt      time.Time `json:"createdAt"`
+	UpdatedAt      time.Time `json:"updatedAt"`
+}
+
+type Group struct {
+	ID             string    `json:"id"`
+	OrganizationID string    `json:"organizationId"`
+	Name           string    `json:"name"`
+	Description    string    `json:"description"`
+	System         bool      `json:"system"`
+	CreatedAt      time.Time `json:"createdAt"`
+	UpdatedAt      time.Time `json:"updatedAt"`
+}
+
+type GroupNamespace struct {
+	GroupID   string    `json:"groupId"`
+	Namespace string    `json:"namespace"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+type GroupMembership struct {
+	GroupID    string    `json:"groupId"`
+	IdentityID string    `json:"identityId"`
+	SourceType string    `json:"sourceType"`
+	SourceID   string    `json:"sourceId,omitempty"`
+	CreatedAt  time.Time `json:"createdAt"`
+}
+
+type Invitation struct {
+	ID             string     `json:"id"`
+	OrganizationID string     `json:"organizationId"`
+	Email          string     `json:"email"`
+	GroupID        string     `json:"groupId"`
+	TokenHash      []byte     `json:"-"`
+	Status         string     `json:"status"`
+	InvitedBy      string     `json:"invitedBy"`
+	CreatedAt      time.Time  `json:"createdAt"`
+	ExpiresAt      time.Time  `json:"expiresAt"`
+	AcceptedAt     *time.Time `json:"acceptedAt,omitempty"`
+}
+
+type BootstrapToken struct {
+	TokenHash  []byte
+	CreatedAt  time.Time
+	ExpiresAt  time.Time
+	ConsumedAt *time.Time
+}
+
+type PasswordCredential struct {
+	IdentityID   string
+	Username     string
+	PasswordHash string
+	Enabled      bool
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+}
+
+type SecurityPolicy struct {
+	ScopeType      string
+	OrganizationID string
+	Spec           json.RawMessage
+	Revision       uint64
+	UpdatedBy      string
+	UpdatedAt      time.Time
 }
 
 type SessionListFilter struct {
-	PrincipalID string
-	Namespace   string
-	State       string
-	Cursor      *PageCursor
-	Limit       int
+	IdentityID string
+	Namespace  string
+	State      string
+	Cursor     *PageCursor
+	Limit      int
 }
 
 type TaskListFilter struct {
-	PrincipalID string
-	SessionID   string
-	Namespace   string
-	Type        string
-	State       remotetask.State
-	Cursor      *PageCursor
-	Limit       int
+	IdentityID string
+	SessionID  string
+	Namespace  string
+	Type       string
+	State      remotetask.State
+	Cursor     *PageCursor
+	Limit      int
 }
 
-// ClusterSession owns one principal/device/cluster/namespace runtime scope.
+// ClusterSession owns one identity/device/cluster/namespace runtime scope.
 type ClusterSession struct {
 	ID              string
 	SchemaVersion   int
-	PrincipalID     string
+	IdentityID      string
 	DeviceID        string
 	ClusterID       string
 	Namespace       string
@@ -74,7 +153,7 @@ type Session = ClusterSession
 type Task struct {
 	ID             string
 	SchemaVersion  int
-	PrincipalID    string
+	IdentityID     string
 	SessionID      string
 	Type           string
 	State          remotetask.State
@@ -112,7 +191,7 @@ type IdempotencyRecord struct {
 type AuditEvent struct {
 	ID            string
 	SchemaVersion int
-	PrincipalID   string
+	IdentityID    string
 	Action        string
 	ResourceType  string
 	ResourceID    string
@@ -123,12 +202,12 @@ type AuditEvent struct {
 }
 
 type AuditFilter struct {
-	PrincipalID string
-	Action      string
-	After       time.Time
-	Before      time.Time
-	Cursor      *PageCursor
-	Limit       int
+	IdentityID string
+	Action     string
+	After      time.Time
+	Before     time.Time
+	Cursor     *PageCursor
+	Limit      int
 }
 
 type RelayDesiredState struct {
@@ -160,11 +239,12 @@ type AuditExportJob struct {
 type AdminSession struct {
 	IDHash               []byte
 	SchemaVersion        int
-	PrincipalID          string
+	IdentityID           string
 	AuthorizationID      string
 	AuthenticationType   string
 	BreakGlassGeneration string
 	CSRFTokenHash        []byte
+	AuthenticatedAt      time.Time
 	CreatedAt            time.Time
 	LastSeenAt           time.Time
 	IdleExpiresAt        time.Time
@@ -176,35 +256,33 @@ type AdminSession struct {
 // Secret material is deliberately stored separately so reads cannot accidentally
 // disclose even the password hash through ordinary client APIs.
 type OAuthClient struct {
-	ID                 string
-	SchemaVersion      int
-	Name               string
-	Public             bool
-	RedirectURIs       []string
-	GrantTypes         []string
-	ResponseTypes      []string
-	Scopes             []string
-	Trusted            bool
-	Enabled            bool
-	Builtin            bool
-	MachinePrincipalID string
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
+	ID                string
+	OrganizationID    string
+	Name              string
+	Public            bool
+	RedirectURIs      []string
+	GrantTypes        []string
+	Scopes            []string
+	Trusted           bool
+	Enabled           bool
+	Builtin           bool
+	MachineIdentityID string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 }
 
 type OAuthClientSecret struct {
-	ClientID      string
-	SchemaVersion int
-	SecretHash    []byte
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	ClientID   string
+	SecretHash []byte
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
 }
 
 type OAuthSession struct {
 	Kind          string
 	SignatureHash []byte
 	RequestID     string
-	PrincipalID   string
+	IdentityID    string
 	ClientID      string
 	DeviceID      string
 	RequestJSON   json.RawMessage
@@ -214,13 +292,34 @@ type OAuthSession struct {
 	RevokedAt     *time.Time
 }
 
+type OAuthGrant struct {
+	RequestID  string
+	IdentityID string
+	ClientID   string
+	DeviceID   string
+	Scopes     []string
+	Status     string
+	CreatedAt  time.Time
+	ExpiresAt  time.Time
+	RevokedAt  *time.Time
+}
+
+type OAuthGrantListFilter struct {
+	IdentityID string
+	ClientID   string
+	Status     string
+	Cursor     *PageCursor
+	Limit      int
+	Now        time.Time
+}
+
 type OAuthAuthorizationRequest struct {
 	ChallengeHash     []byte
 	UpstreamStateHash []byte
 	RequestID         string
 	RequestJSON       json.RawMessage
 	CSRFHash          []byte
-	PrincipalID       string
+	IdentityID        string
 	ProviderID        string
 	Status            string
 	CreatedAt         time.Time
@@ -228,112 +327,20 @@ type OAuthAuthorizationRequest struct {
 }
 
 type OAuthConsent struct {
-	PrincipalID string
-	ClientID    string
-	ScopeHash   []byte
-	Scopes      []string
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	IdentityID string
+	ClientID   string
+	ScopeHash  []byte
+	Scopes     []string
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
 }
 
 type OAuthBrowserSession struct {
-	IDHash      []byte
-	PrincipalID string
-	ProviderID  string
-	AuthTime    time.Time
-	CreatedAt   time.Time
-	ExpiresAt   time.Time
-	RevokedAt   *time.Time
-}
-
-// LocalAdminUser stores management-plane credentials for a Principal. Password
-// and MFA material are always persisted as hashes or authenticated ciphertext.
-type LocalAdminUser struct {
-	PrincipalID         string
-	SchemaVersion       int
-	Username            string
-	PasswordHash        string
-	Enabled             bool
-	TOTPSecretEncrypted []byte
-	BootstrapComplete   bool
-	CreatedAt           time.Time
-	UpdatedAt           time.Time
-}
-
-type AdminPolicyConfig struct {
-	ID                        string
-	SchemaVersion             int
-	Spec                      json.RawMessage
-	SpecHash                  string
-	ValidationState           string
-	Validation                json.RawMessage
-	CreatedBy                 string
-	CreatedAuthenticationType string
-	Reason                    string
-	CreatedAt                 time.Time
-}
-
-type ProviderConfig struct {
-	ID                        string
-	SchemaVersion             int
-	ProviderID                string
-	ProviderType              string
-	Config                    json.RawMessage
-	ConfigHash                string
-	SecretAliases             json.RawMessage
-	ValidationState           string
-	Validation                json.RawMessage
-	CreatedBy                 string
-	CreatedAuthenticationType string
-	Reason                    string
-	CreatedAt                 time.Time
-}
-
-type AuthorizationRoleRecord struct {
-	PolicyID   string
-	ID         string
-	Definition json.RawMessage
-}
-
-type AuthorizationBindingRecord struct {
-	PolicyID       string
-	ID             string
-	RoleID         string
-	SubjectType    string
-	PrincipalID    string
-	ProviderID     string
-	GroupName      string
-	ScopeType      string
-	NamespaceNames json.RawMessage
-	LabelSelectors json.RawMessage
-	ManagedBy      string
-	CreatedBy      string
-	Binding        json.RawMessage
-}
-
-type ActiveManagementConfig struct {
-	ConfigurationType         string
-	ConfigurationID           string
-	ObjectID                  string
-	UpdatedBy                 string
-	UpdatedAuthenticationType string
-	UpdatedAt                 time.Time
-}
-
-type ConfigChangeRequest struct {
-	ID                          string
-	SchemaVersion               int
-	ConfigurationType           string
-	ConfigurationID             string
-	BaseObjectID                string
-	ProposedObjectID            string
-	Status                      string
-	IdempotencyHash             []byte
-	RequestHash                 string
-	RequestedBy                 string
-	RequestedAuthenticationType string
-	Reason                      string
-	Validation                  json.RawMessage
-	CreatedAt                   time.Time
-	UpdatedAt                   time.Time
+	IDHash     []byte
+	IdentityID string
+	ProviderID string
+	AuthTime   time.Time
+	CreatedAt  time.Time
+	ExpiresAt  time.Time
+	RevokedAt  *time.Time
 }

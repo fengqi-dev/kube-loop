@@ -22,6 +22,7 @@ import (
 
 const (
 	SessionCookieName       = "__Host-kubeloop-admin"
+	CSRFCookieName          = "__Host-kubeloop-admin-csrf"
 	CSRFHeaderName          = "X-KubeLoop-CSRF"
 	defaultMaxBodyBytes     = int64(1024)
 	defaultGlobalAttempts   = 30
@@ -100,16 +101,15 @@ func New(config Config, sessions *adminsession.Service, optionValues ...Option) 
 		handler.readAPI = options.readAPI
 		handler.readAPI.handler = handler
 		handler.readAPI.relays = options.relayStatus
-		handler.readAPI.policy = options.policyService
-		handler.readAPI.reloader = options.policyReloader
-		handler.readAPI.providers = options.providerService
+		handler.readAPI.authorizationReloader = options.authorizationReloader
 		handler.readAPI.oauthRepositories = options.oauthRepositories
 		handler.readAPI.oauthTransactions = options.oauthTransactions
 		handler.readAPI.operations = options.operationService
 		handler.readAPI.localUsers = options.localUsers
+		handler.readAPI.bootstrapService = options.bootstrapService
 	} else if options.relayStatus != nil {
 		return nil, errors.New("management Relay status source requires the read API")
-	} else if options.policyService != nil || options.policyReloader != nil || options.providerService != nil ||
+	} else if options.authorizationReloader != nil ||
 		options.operationService != nil || options.localUsers != nil {
 		return nil, errors.New("management policy API requires the read API")
 	}
@@ -146,7 +146,7 @@ func (handler *Handler) securityHeaders(next echo.HandlerFunc) echo.HandlerFunc 
 		writer.Header().Set("Referrer-Policy", "no-referrer")
 		writer.Header().Set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'; base-uri 'none'")
 		writer.Header().Set("X-Frame-Options", "DENY")
-		writer.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+		writer.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=(), publickey-credentials-create=(), publickey-credentials-get=()")
 		return next(ctx)
 	}
 }
@@ -154,6 +154,10 @@ func (handler *Handler) securityHeaders(next echo.HandlerFunc) echo.HandlerFunc 
 func setSessionCookie(writer http.ResponseWriter, issued adminsession.Credentials) {
 	http.SetCookie(writer, &http.Cookie{
 		Name: SessionCookieName, Value: issued.SessionToken, Path: "/", Secure: true, HttpOnly: true,
+		SameSite: http.SameSiteLaxMode, MaxAge: max(1, int(time.Until(issued.ExpiresAt).Seconds())),
+	})
+	http.SetCookie(writer, &http.Cookie{
+		Name: CSRFCookieName, Value: issued.CSRFToken, Path: "/", Secure: true,
 		SameSite: http.SameSiteStrictMode, MaxAge: max(1, int(time.Until(issued.ExpiresAt).Seconds())),
 	})
 }

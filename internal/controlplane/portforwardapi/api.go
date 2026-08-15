@@ -17,7 +17,7 @@ import (
 )
 
 type SessionValidator interface {
-	RequireActive(context.Context, controlplaneapi.Principal, string, string) (sessionapi.ActiveSession, *controlplaneapi.Error)
+	RequireActive(context.Context, controlplaneapi.Identity, string, string) (sessionapi.ActiveSession, *controlplaneapi.Error)
 }
 
 type Routes struct {
@@ -37,31 +37,31 @@ func (routes *Routes) Endpoints() controlplane.PortForwardEndpoints {
 	}
 }
 
-type sessionHandler func(*echo.Context, controlplaneapi.Principal, sessionapi.ActiveSession) *controlplaneapi.Error
-type taskHandler func(*echo.Context, controlplaneapi.Principal, sessionapi.ActiveSession, string) *controlplaneapi.Error
+type sessionHandler func(*echo.Context, controlplaneapi.Identity, sessionapi.ActiveSession) *controlplaneapi.Error
+type taskHandler func(*echo.Context, controlplaneapi.Identity, sessionapi.ActiveSession, string) *controlplaneapi.Error
 
 func (routes *Routes) withSession(next sessionHandler) controlplane.EndpointFunc {
-	return func(ctx *echo.Context, principal controlplaneapi.Principal) *controlplaneapi.Error {
-		active, apiError := routes.activeSession(ctx.Request(), principal)
+	return func(ctx *echo.Context, identity controlplaneapi.Identity) *controlplaneapi.Error {
+		active, apiError := routes.activeSession(ctx.Request(), identity)
 		if apiError != nil {
 			return apiError
 		}
-		return next(ctx, principal, active)
+		return next(ctx, identity, active)
 	}
 }
 
 func (routes *Routes) withTask(next taskHandler) controlplane.EndpointFunc {
-	return routes.withSession(func(ctx *echo.Context, principal controlplaneapi.Principal, active sessionapi.ActiveSession) *controlplaneapi.Error {
-		return next(ctx, principal, active, ctx.Request().PathValue("taskID"))
+	return routes.withSession(func(ctx *echo.Context, identity controlplaneapi.Identity, active sessionapi.ActiveSession) *controlplaneapi.Error {
+		return next(ctx, identity, active, ctx.Request().PathValue("taskID"))
 	})
 }
 
-func (routes *Routes) activeSession(request *http.Request, principal controlplaneapi.Principal) (sessionapi.ActiveSession, *controlplaneapi.Error) {
+func (routes *Routes) activeSession(request *http.Request, identity controlplaneapi.Identity) (sessionapi.ActiveSession, *controlplaneapi.Error) {
 	namespace, apiError := namespaceFromQuery(request)
 	if apiError != nil {
 		return sessionapi.ActiveSession{}, apiError
 	}
-	active, apiError := routes.sessions.RequireActive(request.Context(), principal, namespace, request.PathValue("sessionID"))
+	active, apiError := routes.sessions.RequireActive(request.Context(), identity, namespace, request.PathValue("sessionID"))
 	if apiError != nil {
 		return sessionapi.ActiveSession{}, apiError
 	}
@@ -71,7 +71,7 @@ func (routes *Routes) activeSession(request *http.Request, principal controlplan
 
 func (routes *Routes) create(
 	ctx *echo.Context,
-	principal controlplaneapi.Principal,
+	identity controlplaneapi.Identity,
 	session sessionapi.ActiveSession,
 ) *controlplaneapi.Error {
 	var spec portforwardservice.Spec
@@ -83,7 +83,7 @@ func (routes *Routes) create(
 		return apiError
 	}
 	result, apiError := routes.service.Create(
-		ctx.Request().Context(), principal, session, spec, idempotencyKey,
+		ctx.Request().Context(), identity, session, spec, idempotencyKey,
 	)
 	if apiError != nil {
 		return apiError
@@ -105,13 +105,13 @@ func (routes *Routes) create(
 
 func (routes *Routes) list(
 	ctx *echo.Context,
-	principal controlplaneapi.Principal,
+	identity controlplaneapi.Identity,
 	session sessionapi.ActiveSession,
 ) *controlplaneapi.Error {
 	if apiError := requireEmptyBody(ctx.Request()); apiError != nil {
 		return apiError
 	}
-	portForwards, apiError := routes.service.List(ctx.Request().Context(), principal, session)
+	portForwards, apiError := routes.service.List(ctx.Request().Context(), identity, session)
 	if apiError != nil {
 		return apiError
 	}
@@ -125,14 +125,14 @@ func (routes *Routes) list(
 
 func (routes *Routes) stop(
 	ctx *echo.Context,
-	principal controlplaneapi.Principal,
+	identity controlplaneapi.Identity,
 	session sessionapi.ActiveSession,
 	taskID string,
 ) *controlplaneapi.Error {
 	if apiError := requireEmptyBody(ctx.Request()); apiError != nil {
 		return apiError
 	}
-	portForward, apiError := routes.service.Stop(ctx.Request().Context(), principal, session, taskID)
+	portForward, apiError := routes.service.Stop(ctx.Request().Context(), identity, session, taskID)
 	if apiError != nil {
 		return apiError
 	}

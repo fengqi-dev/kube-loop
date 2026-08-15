@@ -15,7 +15,7 @@ import (
 func TestTaskTransitionRollsBackWhenAuditAppendFails(t *testing.T) {
 	store := openSQLiteTestStore(t, filepath.Join(t.TempDir(), "task-audit-rollback.db"))
 	ctx := context.Background()
-	principal := createTestPrincipal(t, store.Principals(), "task-audit-rollback")
+	identity := createTestIdentity(t, store.Identities(), "task-audit-rollback")
 	now := time.Date(2026, 8, 10, 13, 0, 0, 0, time.UTC)
 	spec, err := networkspec.Normalize(networkspec.Spec{ServiceIPs: []string{"10.96.0.10"}})
 	if err != nil {
@@ -24,7 +24,7 @@ func TestTaskTransitionRollsBackWhenAuditAppendFails(t *testing.T) {
 	specJSON, _ := networkspec.CanonicalJSON(spec)
 	specHash, _ := networkspec.Hash(spec)
 	session := Session{
-		ID: uuid.NewString(), PrincipalID: principal.ID, DeviceID: "audit-device", ClusterID: "cluster-a",
+		ID: uuid.NewString(), IdentityID: identity.ID, DeviceID: "audit-device", ClusterID: "cluster-a",
 		Namespace: "development", State: "active", NetworkSpec: specJSON, NetworkSpecHash: specHash,
 		CreatedAt: now, UpdatedAt: now, LastHeartbeatAt: now, ExpiresAt: now.Add(time.Hour),
 	}
@@ -32,7 +32,7 @@ func TestTaskTransitionRollsBackWhenAuditAppendFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	task := Task{
-		ID: uuid.NewString(), PrincipalID: principal.ID, SessionID: session.ID,
+		ID: uuid.NewString(), IdentityID: identity.ID, SessionID: session.ID,
 		Type: "pod-exec", State: remotetask.Pending, Spec: json.RawMessage(`{"pod":"api"}`),
 		IdempotencyKey: "task-audit-rollback", CreatedAt: now, UpdatedAt: now,
 	}

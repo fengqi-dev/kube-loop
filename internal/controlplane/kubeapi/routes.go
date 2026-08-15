@@ -25,19 +25,19 @@ func (handler *Routes) Endpoints() controlplane.KubernetesEndpoints {
 	}
 }
 
-type clientHandler func(*echo.Context, controlplaneapi.Principal, kubernetesclient.Interface) *controlplaneapi.Error
+type clientHandler func(*echo.Context, controlplaneapi.Identity, kubernetesclient.Interface) *controlplaneapi.Error
 
 func (handler *Routes) withClient(next clientHandler) controlplane.EndpointFunc {
-	return func(ctx *echo.Context, principal controlplaneapi.Principal) *controlplaneapi.Error {
-		client, err := handler.provider.ClientFor(authorization.Subject{ID: principal.Subject, Groups: append([]string(nil), principal.Groups...)})
+	return func(ctx *echo.Context, identity controlplaneapi.Identity) *controlplaneapi.Error {
+		client, err := handler.provider.ClientFor(authorization.Subject{ID: identity.Subject, Groups: append([]string(nil), identity.Groups...)})
 		if err != nil {
 			return &controlplaneapi.Error{Code: controlplaneapi.CodeUnavailable, Message: "Kubernetes API is unavailable", Cause: err}
 		}
-		return next(ctx, principal, client)
+		return next(ctx, identity, client)
 	}
 }
 
-func (handler *Routes) routeVersion(ctx *echo.Context, _ controlplaneapi.Principal, client kubernetesclient.Interface) *controlplaneapi.Error {
+func (handler *Routes) routeVersion(ctx *echo.Context, _ controlplaneapi.Identity, client kubernetesclient.Interface) *controlplaneapi.Error {
 	request := ctx.Request()
 	if apiError := rejectQuery(request); apiError != nil {
 		return apiError
@@ -45,20 +45,20 @@ func (handler *Routes) routeVersion(ctx *echo.Context, _ controlplaneapi.Princip
 	return handler.version(ctx, client)
 }
 
-func (handler *Routes) routeCapabilities(ctx *echo.Context, principal controlplaneapi.Principal, client kubernetesclient.Interface) *controlplaneapi.Error {
+func (handler *Routes) routeCapabilities(ctx *echo.Context, identity controlplaneapi.Identity, client kubernetesclient.Interface) *controlplaneapi.Error {
 	request := ctx.Request()
 	namespace, apiError := capabilityNamespace(request)
 	if apiError != nil {
 		return apiError
 	}
-	return handler.capabilities(ctx, client, principal, namespace)
+	return handler.capabilities(ctx, client, identity, namespace)
 }
 
-func (handler *Routes) routeNamespaces(ctx *echo.Context, principal controlplaneapi.Principal, client kubernetesclient.Interface) *controlplaneapi.Error {
-	return handler.namespaces(ctx, client, principal)
+func (handler *Routes) routeNamespaces(ctx *echo.Context, identity controlplaneapi.Identity, client kubernetesclient.Interface) *controlplaneapi.Error {
+	return handler.namespaces(ctx, client, identity)
 }
 
-func (handler *Routes) routeNamespace(ctx *echo.Context, _ controlplaneapi.Principal, client kubernetesclient.Interface) *controlplaneapi.Error {
+func (handler *Routes) routeNamespace(ctx *echo.Context, _ controlplaneapi.Identity, client kubernetesclient.Interface) *controlplaneapi.Error {
 	request := ctx.Request()
 	namespace := ctx.Request().PathValue("namespace")
 	if apiError := validateName("namespace", namespace, true); apiError != nil {
@@ -70,22 +70,22 @@ func (handler *Routes) routeNamespace(ctx *echo.Context, _ controlplaneapi.Princ
 	return handler.namespace(ctx, client, namespace)
 }
 
-func (handler *Routes) routePods(ctx *echo.Context, principal controlplaneapi.Principal, client kubernetesclient.Interface) *controlplaneapi.Error {
-	return handler.routeInventory(ctx, principal, client, inventoryPods)
+func (handler *Routes) routePods(ctx *echo.Context, identity controlplaneapi.Identity, client kubernetesclient.Interface) *controlplaneapi.Error {
+	return handler.routeInventory(ctx, identity, client, inventoryPods)
 }
 
-func (handler *Routes) routeServices(ctx *echo.Context, principal controlplaneapi.Principal, client kubernetesclient.Interface) *controlplaneapi.Error {
-	return handler.routeInventory(ctx, principal, client, inventoryServices)
+func (handler *Routes) routeServices(ctx *echo.Context, identity controlplaneapi.Identity, client kubernetesclient.Interface) *controlplaneapi.Error {
+	return handler.routeInventory(ctx, identity, client, inventoryServices)
 }
 
-func (handler *Routes) routeInventory(ctx *echo.Context, principal controlplaneapi.Principal, client kubernetesclient.Interface, kind inventoryResource) *controlplaneapi.Error {
+func (handler *Routes) routeInventory(ctx *echo.Context, identity controlplaneapi.Identity, client kubernetesclient.Interface, kind inventoryResource) *controlplaneapi.Error {
 	request := ctx.Request()
 	namespace := ctx.Request().PathValue("namespace")
 	if apiError := validateName("namespace", namespace, true); apiError != nil {
 		return apiError
 	}
 	if request.URL.Query().Get("watch") == "true" {
-		return handler.watchInventory(ctx.Response(), request, client, principal, namespace, kind)
+		return handler.watchInventory(ctx.Response(), request, client, identity, namespace, kind)
 	}
 	if kind == inventoryPods {
 		return handler.pods(ctx, client, namespace)
@@ -93,11 +93,11 @@ func (handler *Routes) routeInventory(ctx *echo.Context, principal controlplanea
 	return handler.services(ctx, client, namespace)
 }
 
-func (handler *Routes) routePod(ctx *echo.Context, _ controlplaneapi.Principal, client kubernetesclient.Interface) *controlplaneapi.Error {
+func (handler *Routes) routePod(ctx *echo.Context, _ controlplaneapi.Identity, client kubernetesclient.Interface) *controlplaneapi.Error {
 	return handler.routeObject(ctx, client, inventoryPods)
 }
 
-func (handler *Routes) routeService(ctx *echo.Context, _ controlplaneapi.Principal, client kubernetesclient.Interface) *controlplaneapi.Error {
+func (handler *Routes) routeService(ctx *echo.Context, _ controlplaneapi.Identity, client kubernetesclient.Interface) *controlplaneapi.Error {
 	return handler.routeObject(ctx, client, inventoryServices)
 }
 

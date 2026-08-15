@@ -30,13 +30,13 @@ type Outcome struct {
 type DownloadMetadata struct{ Total uint64 }
 
 type TransferExecutor interface {
-	Upload(context.Context, controlplaneapi.Principal, string, string, Spec, io.Reader) (Outcome, error)
-	Download(context.Context, controlplaneapi.Principal, string, string, Spec, func(DownloadMetadata) error, io.Writer) (Outcome, error)
-	UploadOffset(context.Context, controlplaneapi.Principal, string, Spec) (uint64, error)
+	Upload(context.Context, controlplaneapi.Identity, string, string, Spec, io.Reader) (Outcome, error)
+	Download(context.Context, controlplaneapi.Identity, string, string, Spec, func(DownloadMetadata) error, io.Writer) (Outcome, error)
+	UploadOffset(context.Context, controlplaneapi.Identity, string, Spec) (uint64, error)
 }
 
 type PodExecutor interface {
-	Exec(context.Context, controlplaneapi.Principal, string, execapi.Spec, execapi.Streams) error
+	Exec(context.Context, controlplaneapi.Identity, string, execapi.Spec, execapi.Streams) error
 }
 
 type KubernetesTransferExecutor struct {
@@ -59,7 +59,7 @@ func NewKubernetesTransferExecutor(pods PodExecutor, maximumBytes uint64) (*Kube
 
 func (executor *KubernetesTransferExecutor) Upload(
 	ctx context.Context,
-	principal controlplaneapi.Principal,
+	identity controlplaneapi.Identity,
 	namespace, taskID string,
 	spec Spec,
 	input io.Reader,
@@ -75,14 +75,14 @@ func (executor *KubernetesTransferExecutor) Upload(
 		if spec.Offset != 0 {
 			return Outcome{}, errors.New("directory upload cannot resume from a byte offset")
 		}
-		if err := executor.uploadValidatedArchive(ctx, principal, namespace, spec, temporaryArchive, input); err != nil {
-			executor.remove(ctx, principal, namespace, spec, temporaryArchive)
+		if err := executor.uploadValidatedArchive(ctx, identity, namespace, spec, temporaryArchive, input); err != nil {
+			executor.remove(ctx, identity, namespace, spec, temporaryArchive)
 			return Outcome{}, err
 		}
-	} else if err := executor.uploadFile(ctx, principal, namespace, spec, temporaryArchive, input); err != nil {
+	} else if err := executor.uploadFile(ctx, identity, namespace, spec, temporaryArchive, input); err != nil {
 		return Outcome{}, err
 	}
-	size, checksum, err := executor.inspectFile(ctx, principal, namespace, spec, temporaryArchive)
+	size, checksum, err := executor.inspectFile(ctx, identity, namespace, spec, temporaryArchive)
 	if err != nil {
 		return Outcome{}, err
 	}
@@ -97,25 +97,25 @@ func (executor *KubernetesTransferExecutor) Upload(
 		script := "set -eu; rm -rf -- " + shellquote.Join(temporaryDirectory) +
 			"; mkdir -p -- " + shellquote.Join(temporaryDirectory) +
 			"; tar xf " + shellquote.Join(temporaryArchive) + " -C " + shellquote.Join(temporaryDirectory)
-		if err := executor.shell(ctx, principal, namespace, spec, script, nil, io.Discard); err != nil {
-			executor.remove(ctx, principal, namespace, spec, temporaryDirectory)
+		if err := executor.shell(ctx, identity, namespace, spec, script, nil, io.Discard); err != nil {
+			executor.remove(ctx, identity, namespace, spec, temporaryDirectory)
 			return Outcome{}, err
 		}
 		finalSource = temporaryDirectory
 		cleanupSource = temporaryArchive
 	}
-	if err := executor.finalize(ctx, principal, namespace, spec, finalSource); err != nil {
+	if err := executor.finalize(ctx, identity, namespace, spec, finalSource); err != nil {
 		return Outcome{}, err
 	}
 	if cleanupSource != "" {
-		executor.remove(ctx, principal, namespace, spec, cleanupSource)
+		executor.remove(ctx, identity, namespace, spec, cleanupSource)
 	}
 	return Outcome{Transferred: spec.Size, Checksum: checksum, HasChecksum: true}, nil
 }
 
 func (executor *KubernetesTransferExecutor) UploadOffset(
 	ctx context.Context,
-	principal controlplaneapi.Principal,
+	identity controlplaneapi.Identity,
 	namespace string,
 	spec Spec,
 ) (uint64, error) {
@@ -126,7 +126,7 @@ func (executor *KubernetesTransferExecutor) UploadOffset(
 	var stdout bytes.Buffer
 	quoted := shellquote.Join(temporary)
 	script := "if [ -L " + quoted + " ]; then exit 74; elif [ -f " + quoted + " ]; then wc -c < " + quoted + "; elif [ -e " + quoted + " ]; then exit 75; else echo 0; fi"
-	if err := executor.shell(ctx, principal, namespace, spec, script, nil, &stdout); err != nil {
+	if err := executor.shell(ctx, identity, namespace, spec, script, nil, &stdout); err != nil {
 		return 0, err
 	}
 	offset, err := strconv.ParseUint(strings.TrimSpace(stdout.String()), 10, 64)
@@ -146,7 +146,7 @@ func uploadTemporaryPath(spec Spec, taskID string) string {
 
 func (executor *KubernetesTransferExecutor) Download(
 	ctx context.Context,
-	principal controlplaneapi.Principal,
+	identity controlplaneapi.Identity,
 	namespace, _ string,
 	spec Spec,
 	metadata func(DownloadMetadata) error,
@@ -159,7 +159,7 @@ func (executor *KubernetesTransferExecutor) Download(
 		return Outcome{}, errors.New("download allowed root is required")
 	}
 	if spec.Kind == KindFile {
-		size, checksum, err := executor.inspectFile(ctx, principal, namespace, spec, spec.RemotePath)
+		size, checksum, err := executor.inspectFile(ctx, identity, namespace, spec, spec.RemotePath)
 		if err != nil {
 			return Outcome{}, err
 		}
@@ -173,7 +173,7 @@ func (executor *KubernetesTransferExecutor) Download(
 		if spec.Offset > 0 {
 			script = "test ! -L " + shellquote.Join(spec.RemotePath) + "; tail -c +" + strconv.FormatUint(spec.Offset+1, 10) + " -- " + shellquote.Join(spec.RemotePath)
 		}
-		if err := executor.shell(ctx, principal, namespace, spec, script, nil, output); err != nil {
+		if err := executor.shell(ctx, identity, namespace, spec, script, nil, output); err != nil {
 			return Outcome{}, err
 		}
 		return Outcome{Transferred: size, Checksum: checksum, HasChecksum: true}, nil
@@ -189,7 +189,7 @@ func (executor *KubernetesTransferExecutor) Download(
 	go func() {
 		script := "test ! -L " + shellquote.Join(spec.RemotePath) + "; test -d " + shellquote.Join(spec.RemotePath) +
 			"; tar cf - -C " + shellquote.Join(spec.RemotePath) + " ."
-		err := executor.shell(ctx, principal, namespace, spec, script, nil, writer)
+		err := executor.shell(ctx, identity, namespace, spec, script, nil, writer)
 		_ = writer.CloseWithError(err)
 		execResult <- err
 	}()
@@ -214,7 +214,7 @@ func (executor *KubernetesTransferExecutor) Download(
 
 func (executor *KubernetesTransferExecutor) uploadFile(
 	ctx context.Context,
-	principal controlplaneapi.Principal,
+	identity controlplaneapi.Identity,
 	namespace string,
 	spec Spec,
 	temporary string,
@@ -229,12 +229,12 @@ func (executor *KubernetesTransferExecutor) uploadFile(
 	}
 	script := "set -eu; mkdir -p -- " + shellquote.Join(parent) + "; " + precondition +
 		"cat " + operator + " " + shellquote.Join(temporary)
-	return executor.shell(ctx, principal, namespace, spec, script, input, io.Discard)
+	return executor.shell(ctx, identity, namespace, spec, script, input, io.Discard)
 }
 
 func (executor *KubernetesTransferExecutor) uploadValidatedArchive(
 	ctx context.Context,
-	principal controlplaneapi.Principal,
+	identity controlplaneapi.Identity,
 	namespace string,
 	spec Spec,
 	temporary string,
@@ -248,7 +248,7 @@ func (executor *KubernetesTransferExecutor) uploadValidatedArchive(
 		validationResult <- err
 	}()
 	script := "set -eu; mkdir -p -- " + shellquote.Join(path.Dir(temporary)) + "; cat > " + shellquote.Join(temporary)
-	execErr := executor.shell(ctx, principal, namespace, spec, script, reader, io.Discard)
+	execErr := executor.shell(ctx, identity, namespace, spec, script, reader, io.Discard)
 	if execErr != nil {
 		_ = reader.CloseWithError(execErr)
 	}
@@ -261,7 +261,7 @@ func (executor *KubernetesTransferExecutor) uploadValidatedArchive(
 
 func (executor *KubernetesTransferExecutor) inspectFile(
 	ctx context.Context,
-	principal controlplaneapi.Principal,
+	identity controlplaneapi.Identity,
 	namespace string,
 	spec Spec,
 	filename string,
@@ -269,7 +269,7 @@ func (executor *KubernetesTransferExecutor) inspectFile(
 	var stdout bytes.Buffer
 	script := "test ! -L " + shellquote.Join(filename) + "; test -f " + shellquote.Join(filename) + "; wc -c < " + shellquote.Join(filename) +
 		"; sha256sum -- " + shellquote.Join(filename)
-	if err := executor.shell(ctx, principal, namespace, spec, script, nil, &stdout); err != nil {
+	if err := executor.shell(ctx, identity, namespace, spec, script, nil, &stdout); err != nil {
 		return 0, [32]byte{}, err
 	}
 	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
@@ -295,7 +295,7 @@ func (executor *KubernetesTransferExecutor) inspectFile(
 
 func (executor *KubernetesTransferExecutor) finalize(
 	ctx context.Context,
-	principal controlplaneapi.Principal,
+	identity controlplaneapi.Identity,
 	namespace string,
 	spec Spec,
 	temporary string,
@@ -304,22 +304,22 @@ func (executor *KubernetesTransferExecutor) finalize(
 	if spec.Overwrite {
 		script = "set -eu; rm -rf -- " + shellquote.Join(spec.RemotePath) + "; mv -- " + shellquote.Join(temporary) + " " + shellquote.Join(spec.RemotePath)
 	}
-	return executor.shell(ctx, principal, namespace, spec, script, nil, io.Discard)
+	return executor.shell(ctx, identity, namespace, spec, script, nil, io.Discard)
 }
 
 func (executor *KubernetesTransferExecutor) remove(
 	ctx context.Context,
-	principal controlplaneapi.Principal,
+	identity controlplaneapi.Identity,
 	namespace string,
 	spec Spec,
 	filename string,
 ) {
-	_ = executor.shell(ctx, principal, namespace, spec, "rm -rf -- "+shellquote.Join(filename), nil, io.Discard)
+	_ = executor.shell(ctx, identity, namespace, spec, "rm -rf -- "+shellquote.Join(filename), nil, io.Discard)
 }
 
 func (executor *KubernetesTransferExecutor) shell(
 	ctx context.Context,
-	principal controlplaneapi.Principal,
+	identity controlplaneapi.Identity,
 	namespace string,
 	spec Spec,
 	script string,
@@ -335,7 +335,7 @@ func (executor *KubernetesTransferExecutor) shell(
 	}
 	script = physicalPathGuard(spec.AllowedRoot, guardTarget) + script
 	stderr := &limitedBuffer{maximum: 4096}
-	err := executor.pods.Exec(ctx, principal, namespace, execapi.Spec{
+	err := executor.pods.Exec(ctx, identity, namespace, execapi.Spec{
 		Pod: spec.Pod, Container: spec.Container, Command: []string{"/bin/sh", "-c", script},
 	}, execapi.Streams{Stdin: stdin, Stdout: stdout, Stderr: stderr})
 	if err != nil {

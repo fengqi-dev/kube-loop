@@ -88,7 +88,7 @@ helper binds the request hash to:
 2. namespace;
 3. canonical JSON request specification.
 
-The reservation scope is `task:<task-type>:<principal-id>`. Reservation and
+The reservation scope is `task:<task-type>:<identity-id>`. Reservation and
 Task creation occur in one transaction. A retry with the same scope, key, and
 hash returns the original Task; the same key with a different hash returns a
 conflict. The hash byte format preserves the existing Exchange, Mirror,
@@ -105,7 +105,7 @@ remote file operations, Exchange, Mirror, Preview, and all recovery workers;
 new Task kinds cannot silently omit lifecycle auditing while using the shared
 Repository.
 
-Each transition event contains only the Principal ID, Task type/ID, request or
+Each transition event contains only the Identity ID, Task type/ID, request or
 background correlation ID, Session ID, namespace, previous/next state, source,
 outcome, and timestamp. Task spec/result JSON, command arguments and output,
 file names or contents, network payloads, Tokens, and identity claims are never

@@ -15,7 +15,7 @@ stateless with respect to the Control Plane database and identity providers.
 
 Control Plane signs short-lived Ed25519 RelayTickets after normal access-token
 authentication, Gateway Policy authorization and active Session ownership
-validation. Ticket schema v2 binds issuer, relay audience, principal, device,
+validation. Ticket schema v2 binds issuer, relay audience, identity, device,
 Session ID and generation, namespace, operation list, required Session NetworkSpec hash, key ID, issued
 and not-before times, expiry and a unique ticket ID. Lifetime is at most two
 minutes and never exceeds the current Session expiry.

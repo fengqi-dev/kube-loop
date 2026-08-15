@@ -5,14 +5,10 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
-	"net"
 	"net/url"
-	"strings"
-	"sync"
 	"time"
 
 	controlstorage "github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
-	"github.com/google/uuid"
 	"github.com/ory/fosite"
 	"github.com/ory/fosite/handler/oauth2"
 	"github.com/ory/fosite/handler/openid"
@@ -27,63 +23,8 @@ const (
 	kindRefreshToken      = "refresh_token"
 )
 
-type PasswordAuthenticator func(context.Context, string, []byte, string, string, string, string) (controlstorage.Principal, error)
-
-type passwordMetadata struct{ secondFactor, requestID, clientID, sourceIP string }
-type passwordMetadataKey struct{}
-
-func WithPasswordMetadata(ctx context.Context, secondFactor, requestID, clientID, sourceIP string) context.Context {
-	return context.WithValue(ctx, passwordMetadataKey{}, passwordMetadata{secondFactor: secondFactor, requestID: requestID, clientID: clientID, sourceIP: sourceIP})
-}
-
 type Storage struct {
-	repositories          controlstorage.Repositories
-	passwordAuthenticator PasswordAuthenticator
-	passwordLimiter       *passwordGrantLimiter
-}
-
-type passwordGrantLimiter struct {
-	mu      sync.Mutex
-	buckets map[string]passwordGrantBucket
-}
-
-type passwordGrantBucket struct {
-	started time.Time
-	count   int
-}
-
-func newPasswordGrantLimiter() *passwordGrantLimiter {
-	return &passwordGrantLimiter{buckets: make(map[string]passwordGrantBucket)}
-}
-
-func (limiter *passwordGrantLimiter) allow(clientID, username, remote string) bool {
-	host, _, err := net.SplitHostPort(remote)
-	if err == nil {
-		remote = host
-	}
-	now := time.Now().UTC()
-	keys := []struct {
-		value   string
-		maximum int
-	}{
-		{"ip\x00" + remote, 30}, {"client\x00" + clientID, 60}, {"user\x00" + strings.ToLower(strings.TrimSpace(username)), 5},
-	}
-	limiter.mu.Lock()
-	defer limiter.mu.Unlock()
-	allowed := true
-	for _, key := range keys {
-		bucket := limiter.buckets[key.value]
-		if bucket.started.IsZero() || now.Sub(bucket.started) >= time.Minute {
-			bucket = passwordGrantBucket{started: now}
-		}
-		if bucket.count >= key.maximum {
-			allowed = false
-		} else {
-			bucket.count++
-		}
-		limiter.buckets[key.value] = bucket
-	}
-	return allowed
+	repositories controlstorage.Repositories
 }
 
 type transactionContextKey struct{}
@@ -105,15 +46,11 @@ var (
 	} = (*Storage)(nil)
 )
 
-func NewStorage(repositories controlstorage.Repositories, authenticators ...PasswordAuthenticator) (*Storage, error) {
+func NewStorage(repositories controlstorage.Repositories) (*Storage, error) {
 	if repositories == nil {
 		return nil, errors.New("OAuth repositories are required")
 	}
-	storage := &Storage{repositories: repositories, passwordLimiter: newPasswordGrantLimiter()}
-	if len(authenticators) > 0 {
-		storage.passwordAuthenticator = authenticators[0]
-	}
-	return storage, nil
+	return &Storage{repositories: repositories}, nil
 }
 
 func (storage *Storage) repositoriesFor(ctx context.Context) controlstorage.Repositories {
@@ -151,32 +88,6 @@ func (storage *Storage) Rollback(ctx context.Context) error {
 	return transaction.transaction.Rollback()
 }
 
-func (storage *Storage) Authenticate(ctx context.Context, username, password string) (string, error) {
-	if storage.passwordAuthenticator == nil {
-		return "", fosite.ErrNotFound
-	}
-	metadata, _ := ctx.Value(passwordMetadataKey{}).(passwordMetadata)
-	if !storage.passwordLimiter.allow(metadata.clientID, username, metadata.sourceIP) {
-		storage.auditPassword(ctx, "", metadata, "rate_limited")
-		return "", fosite.ErrTemporarilyUnavailable.WithHint("Password grant rate limit exceeded.")
-	}
-	principal, err := storage.passwordAuthenticator(ctx, username, []byte(password), metadata.secondFactor, metadata.requestID, metadata.clientID, metadata.sourceIP)
-	if err != nil {
-		storage.auditPassword(ctx, "", metadata, "failure")
-		return "", fosite.ErrNotFound
-	}
-	storage.auditPassword(ctx, principal.ID, metadata, "success")
-	return principal.ID, nil
-}
-
-func (storage *Storage) auditPassword(ctx context.Context, principalID string, metadata passwordMetadata, outcome string) {
-	details, _ := json.Marshal(map[string]string{"clientId": metadata.clientID, "sourceIp": metadata.sourceIP})
-	_ = storage.repositoriesFor(ctx).Audit().Append(ctx, controlstorage.AuditEvent{
-		ID: uuid.NewString(), PrincipalID: principalID, Action: "oauth.password.grant", ResourceType: "oauth-client",
-		ResourceID: metadata.clientID, Outcome: outcome, RequestID: metadata.requestID, Metadata: details, CreatedAt: time.Now().UTC(),
-	})
-}
-
 func (storage *Storage) GetClient(ctx context.Context, id string) (fosite.Client, error) {
 	client, err := storage.repositoriesFor(ctx).OAuthClients().Get(ctx, id)
 	if errors.Is(err, controlstorage.ErrNotFound) || (err == nil && !client.Enabled) {
@@ -202,7 +113,7 @@ func (storage *Storage) GetClient(ctx context.Context, id string) (fosite.Client
 	}
 	return &fosite.DefaultOpenIDConnectClient{DefaultClient: &fosite.DefaultClient{
 		ID: client.ID, Secret: secret, RedirectURIs: client.RedirectURIs, GrantTypes: client.GrantTypes,
-		ResponseTypes: client.ResponseTypes, Scopes: client.Scopes, Audience: []string{"kubeloop.api"}, Public: client.Public,
+		ResponseTypes: []string{"code"}, Scopes: client.Scopes, Audience: []string{"kubeloop.api"}, Public: client.Public,
 	}, TokenEndpointAuthMethod: authMethod}, nil
 }
 
@@ -274,12 +185,12 @@ func (storage *Storage) create(ctx context.Context, kind, signature string, requ
 		expires = time.Now().UTC().Add(10 * time.Minute)
 	}
 	session, _ := request.GetSession().(*Session)
-	principalID, deviceID := "", ""
+	identityID, deviceID := "", ""
 	if session != nil {
-		principalID, deviceID = session.PrincipalID, session.DeviceID
+		identityID, deviceID = session.IdentityID, session.DeviceID
 	}
 	return storage.repositoriesFor(ctx).OAuthSessions().Create(ctx, controlstorage.OAuthSession{Kind: kind,
-		SignatureHash: signatureHash(signature), RequestID: request.GetID(), PrincipalID: principalID,
+		SignatureHash: signatureHash(signature), RequestID: request.GetID(), IdentityID: identityID,
 		ClientID: request.GetClient().GetID(), DeviceID: deviceID, RequestJSON: raw, Status: "active",
 		CreatedAt: time.Now().UTC(), ExpiresAt: expires})
 }

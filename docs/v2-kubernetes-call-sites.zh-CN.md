@@ -7,7 +7,7 @@
 ## 边界结论
 
 - V2 桌面客户端只连接用户填写的服务地址。当前桌面可执行依赖图不包含 `k8s.io/*`、`internal/cluster` 或 `internal/session`，不读取 kubeconfig，也不创建 Kubernetes REST client。
-- `kubeloop-control-plane` 是 API/认证/Task 控制面，负责用户态读取、SSAR、exec/file 等流式调用以及创建 `TrafficBinding`；启用 impersonation 时，面向用户的调用使用由认证 Principal 派生的 client。
+- `kubeloop-control-plane` 是 API/认证/Task 控制面，负责用户态读取、SSAR、exec/file 等流式调用以及创建 `TrafficBinding`；启用 impersonation 时，面向用户的调用使用由认证 Identity 派生的 client。
 - `kubeloop-operator` 是独立进程入口，只 watch `TrafficBinding` 并协调 Service、Endpoints 和 EndpointSlice。它使用独立 ServiceAccount，不能处理 OAuth token、客户端 WSS 或普通业务 API。
 - `kubeloop-gateway` Data Plane 不依赖 `k8s.io/*`，且不自动挂载通用 Kubernetes API credential。默认 Registry 模式只显式投影短期、限定 `kubeloop-relay` audience、Pod-bound 的 ServiceAccount Token，用于 Control Plane TokenReview 工作负载认证；它不能替代 RelayTicket，也不授予 Data Plane 调用 Kubernetes API 的能力。数据流仍只按 Control Plane 签发的 RelayTicket 和 NetworkSpec 处理已授权网络流。
 - Helper 只管理本机 TUN、路由和 DNS，不接触 Kubernetes。Helm 负责统一安装/升级 Control Plane、Gateway、Operator 三个服务端组件，桌面不再创建 Namespace、Deployment、Secret、Service 或 Ingress。
@@ -21,7 +21,7 @@
 | `cmd/kubeloop-operator` | V2 Operator 组合根 | 装配 controller-runtime Manager、TrafficBinding scheme 和 Reconciler | 凭据装配 | 只运行声明式 Kubernetes 资源协调，不暴露用户 API |
 | `internal/controlplane/kubernetes` | V2 Control Plane | in-cluster config、typed client、可选 impersonation、`/version` readiness、system compensation client | 凭据入口 | 唯一 V2 Kubernetes client 工厂 |
 | `internal/controlplane/kubeapi` | V2 Control Plane | `/version`、Namespace/Pod/Service list/get、SelfSubjectAccessReview | 控制面 | HTTPS API；Policy 后再执行 Kubernetes 授权检查 |
-| `internal/controlplane/networkapi` | V2 Control Plane | Node/ServiceCIDR、namespace Pod/Service，以及固定名称的 kube-dns/CoreDNS Service 与 ConfigMap | 控制面 | 创建 Cluster Session 前发现并规范化 NetworkSpec；namespace 资源使用 principal client，集群网络元数据使用受限的 Control Plane system client |
+| `internal/controlplane/networkapi` | V2 Control Plane | Node/ServiceCIDR、namespace Pod/Service，以及固定名称的 kube-dns/CoreDNS Service 与 ConfigMap | 控制面 | 创建 Cluster Session 前发现并规范化 NetworkSpec；namespace 资源使用 identity client，集群网络元数据使用受限的 Control Plane system client |
 | `internal/controlplane/portforwardapi` | V2 Control Plane | Pod/Service get，解析 PodIP/ClusterIP 与端口 | 控制面 | 只解析并授权目标；实际字节由 Data Plane WSS 转发 |
 | `internal/controlplane/trafficbindingclient` | V2 Control Plane | 使用 Control Plane ServiceAccount 创建、读取、等待和删除 `TrafficBinding`；清理数据库中已不存在或已终态 Task 的孤儿 CR | 声明式控制面 | 不直接写 Service/Endpoints/EndpointSlice；Task 先持久化，CR Ready 后才开放数据流，删除等待 Operator finalizer 完成 |
 | `internal/controlplane/execapi` | V2 Control Plane | Pod get、`pods/exec` SPDY、stdin/stdout/stderr/TTY resize | 流式 | Control Plane WSS 所有者持有 SPDY 流和授权 lease |
@@ -44,7 +44,7 @@
 | --- | --- | --- | --- | --- |
 | Namespace | `cluster.Provider.Namespaces` | `controlplane/kubeapi` | 无 | 已迁移 |
 | Inventory | `ListServices`、`ListPods`、`inventory.Watch` | `controlplane/kubeapi` 分页 API | 无；当前不开放 watch | 已迁移 |
-| ServerVersion/Capability | `ServerVersion`、`ProbeCapabilities` | `controlplane/kubeapi` | 无 | 已迁移；版本化能力文档绑定 principal/namespace/Gateway version，客户端使用 30 秒有界内存缓存 |
+| ServerVersion/Capability | `ServerVersion`、`ProbeCapabilities` | `controlplane/kubeapi` | 无 | 已迁移；版本化能力文档绑定 identity/namespace/Gateway version，客户端使用 30 秒有界内存缓存 |
 | 网络发现 | `cluster/discovery.Discover` | `controlplane/networkapi` | 无 | 已迁移到 Session NetworkSpec |
 | Gateway 安装与发现 | `EnsureGateway`、`gatewayruntime.Ensure*` | Helm release | Data Plane 自身 | 已移出桌面；Helm 完整验收属于 V2-200～205 |
 | Service/Pod Port Forward | `StartPortForward`、`kubeportforward.Start` | `controlplane/portforwardapi` → `TrafficBinding` → Operator 校验 | Data Plane WSS | 已接入；Task 持久化后等待 CR Ready，停止/孤儿回收删除 CR |
@@ -57,7 +57,7 @@
 
 ## 调用规则
 
-1. 所有用户触发的 Kubernetes 调用必须先完成 Access Token、OAuth grant、Principal、Gateway Policy、Cluster Session/namespace 所有权校验；有对应 Kubernetes verb 时再执行 SSAR。
+1. 所有用户触发的 Kubernetes 调用必须先完成 Access Token、OAuth grant、Identity、Gateway Policy、Cluster Session/namespace 所有权校验；有对应 Kubernetes verb 时再执行 SSAR。
 2. Control Plane 使用 `ClientFor(subject)` 完成用户意图解析和授权；Operator 只接受已经授权并写入的 `TrafficBinding`，使用自己的 ServiceAccount 执行可恢复的声明式写入。
 3. 流式调用由创建流的 Control Plane 副本持有授权 lease；Token 撤销、客户端断开或 shutdown 必须取消 Kubernetes stream。Data Plane 只能处理网络数据流，不能创建 exec/file Kubernetes stream。
 4. Kubernetes 对象写入必须先持久化 Task/TrafficBinding 与 rollback/cleanup intent。Operator 在实际变更前将快照写入 CR status，并通过 finalizer 重试恢复。

@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/authn/oauthserver"
-	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 	"github.com/labstack/echo/v5"
 	"github.com/labstack/echo/v5/middleware"
 )
@@ -51,8 +50,6 @@ func (routes *Routes) RegisterRoutes(group *echo.Group) {
 	group.GET(oauthPath+"/ui", routes.authUI)
 	group.GET(oauthPath+"/ui/*", routes.authUI)
 	group.GET(oauthPath+"/authorize", routes.authorize)
-	group.GET(oauthPath+"/callback/:providerID", routes.callback)
-	group.POST(oauthPath+"/login/provider", routes.providerLogin, middleware.BodyLimit(maxAuthBodyBytes))
 	group.POST(oauthPath+"/login/local", routes.localLogin, middleware.BodyLimit(maxAuthBodyBytes))
 	group.POST(oauthPath+"/token", routes.token, middleware.BodyLimit(maxAuthBodyBytes))
 	group.POST(oauthPath+"/revoke", routes.revoke, middleware.BodyLimit(maxAuthBodyBytes))
@@ -69,6 +66,7 @@ func (routes *Routes) securityHeaders(next echo.HandlerFunc) echo.HandlerFunc {
 		header.Set("Pragma", "no-cache")
 		header.Set("Referrer-Policy", "no-referrer")
 		header.Set("X-Content-Type-Options", "nosniff")
+		header.Set("Permissions-Policy", "publickey-credentials-get=()")
 		return next(ctx)
 	}
 }
@@ -80,8 +78,8 @@ func (routes *Routes) discovery(ctx *echo.Context) error {
 		TokenEndpoint: issuer + oauthPath + "/token", UserInfoEndpoint: issuer + oauthPath + "/userinfo",
 		JWKSURI: issuer + oauthPath + "/jwks", RevocationEndpoint: issuer + oauthPath + "/revoke",
 		ScopesSupported:                   []string{"openid", "profile", "email", "offline_access", "kubeloop.api"},
-		ResponseTypesSupported:            []string{"code", "token", "id_token", "id_token token", "code token", "code id_token", "code id_token token"},
-		GrantTypesSupported:               []string{"authorization_code", "refresh_token", "password", "client_credentials", "implicit"},
+		ResponseTypesSupported:            []string{"code"},
+		GrantTypesSupported:               []string{"authorization_code", "refresh_token", "client_credentials"},
 		SubjectTypesSupported:             []string{"public"},
 		IDTokenSigningAlgorithmsSupported: []string{"ES256"},
 		CodeChallengeMethodsSupported:     []string{"S256"},
@@ -94,18 +92,7 @@ func (routes *Routes) authorize(ctx *echo.Context) error {
 	if err != nil {
 		return routes.oauthError(ctx, http.StatusBadRequest, "invalid_request", "authorization request was rejected")
 	}
-	if queryProvider := ctx.QueryParam("provider"); queryProvider != "" && queryProvider != "local" {
-		prompt := strings.Fields(ctx.QueryParam("prompt"))
-		if slices.Contains(prompt, "none") || slices.Contains(prompt, "login") && slices.Contains(prompt, "none") {
-			return routes.completeAuthorizationError(ctx, challenge, "login_required")
-		}
-		authorizationURL, beginErr := routes.fosite.BeginUpstreamAuthorization(ctx.Request().Context(), challenge.Transaction, challenge.CSRF, queryProvider)
-		if beginErr != nil {
-			return routes.completeAuthorizationError(ctx, challenge, "login_required")
-		}
-		return ctx.Redirect(http.StatusSeeOther, authorizationURL)
-	}
-	principal, hasSession := routes.existingPrincipal(ctx)
+	identity, hasSession := routes.existingIdentity(ctx)
 	prompt := strings.Fields(ctx.QueryParam("prompt"))
 	if slices.Contains(prompt, "login") {
 		hasSession = false
@@ -118,10 +105,9 @@ func (routes *Routes) authorize(ctx *echo.Context) error {
 		return routes.completeAuthorizationError(ctx, challenge, "consent_required")
 	}
 	if hasSession && !forceConsent {
-		required, consentErr := routes.fosite.ConsentRequired(ctx.Request().Context(), challenge, principal.ID)
+		required, consentErr := routes.fosite.ConsentRequired(ctx.Request().Context(), challenge, identity.Identity.ID)
 		if consentErr == nil && !required {
-			authTime, _ := ctx.Get("oauth.browser.auth_time").(time.Time)
-			_ = routes.fosite.CompleteAuthorization(ctx.Response(), ctx.Request(), challenge.Transaction, challenge.CSRF, principal, false, authTime)
+			_ = routes.fosite.CompleteAuthorization(ctx.Response(), ctx.Request(), challenge.Transaction, challenge.CSRF, identity, false)
 			return nil
 		}
 		if slices.Contains(prompt, "none") && consentErr == nil && required {
@@ -134,34 +120,19 @@ func (routes *Routes) authorize(ctx *echo.Context) error {
 	uiQuery := url.Values{"transaction": {challenge.Transaction}, "csrf": {challenge.CSRF}, "client": {challenge.Client.Name},
 		"session": {strconv.FormatBool(hasSession)}, "consent": {strconv.FormatBool(!challenge.Trusted)},
 		"scope": {strings.Join(challenge.Scopes, " ")}}
-	for _, descriptor := range routes.fosite.ProviderDescriptors() {
-		uiQuery.Add("provider", descriptor.ID+"\x00"+descriptor.DisplayName)
-	}
 	return ctx.Redirect(http.StatusSeeOther, oauthPath+"/ui/?"+uiQuery.Encode())
 }
 
-func (routes *Routes) providerLogin(ctx *echo.Context) error {
-	form, ok := routes.bindForm(ctx)
-	if !ok {
-		return nil
-	}
-	authorizationURL, err := routes.fosite.BeginUpstreamAuthorization(ctx.Request().Context(), form.Get("transaction"), form.Get("csrf"), form.Get("provider"))
-	if err != nil {
-		return writeBrowserError(ctx)
-	}
-	return ctx.Redirect(http.StatusSeeOther, authorizationURL)
-}
-
-func (routes *Routes) existingPrincipal(ctx *echo.Context) (storage.Principal, bool) {
+func (routes *Routes) existingIdentity(ctx *echo.Context) (oauthserver.BrowserIdentity, bool) {
 	cookie, err := ctx.Request().Cookie(browserSessionCookie)
 	if err == nil && strings.TrimSpace(cookie.Value) != "" {
 		identity, identityErr := routes.fosite.BrowserIdentity(ctx.Request().Context(), cookie.Value)
 		if identityErr == nil {
 			ctx.Set("oauth.browser.auth_time", identity.AuthTime)
-			return identity.Principal, true
+			return identity, true
 		}
 	}
-	return storage.Principal{}, false
+	return oauthserver.BrowserIdentity{}, false
 }
 
 func sessionTooOld(ctx *echo.Context, raw string) bool {
@@ -203,35 +174,24 @@ func (routes *Routes) localLogin(ctx *echo.Context) error {
 		}
 		return nil
 	}
-	principal, ok := routes.existingPrincipal(ctx)
+	identity, ok := routes.existingIdentity(ctx)
 	if !ok || form.Get("session") != "true" {
 		var err error
-		principal, err = routes.fosite.AuthenticateLocal(ctx.Request().Context(), form.Get("username"), password, form.Get("second_factor"), requestID)
+		identity, err = routes.fosite.AuthenticateLocal(ctx.Request().Context(), form.Get("username"), password, requestID)
 		if err != nil {
-			if target := browserLoginErrorURL(form); target != "" {
+			if target := browserLoginErrorURL(form, "authentication_failed"); target != "" {
 				return ctx.Redirect(http.StatusSeeOther, target)
 			}
 			return writeBrowserError(ctx)
 		}
-		sessionToken, sessionErr := routes.fosite.CreateBrowserSession(ctx.Request().Context(), principal, browserSessionTTL)
+		sessionToken, sessionErr := routes.fosite.CreateBrowserSession(ctx.Request().Context(), identity, browserSessionTTL)
 		if sessionErr != nil {
 			return writeBrowserError(ctx)
 		}
 		ctx.SetCookie(&http.Cookie{Name: browserSessionCookie, Value: sessionToken, Path: "/", Secure: true,
 			HttpOnly: true, SameSite: http.SameSiteLaxMode, MaxAge: int(browserSessionTTL.Seconds())})
 	}
-	authTime, _ := ctx.Get("oauth.browser.auth_time").(time.Time)
-	if err := routes.fosite.CompleteAuthorization(ctx.Response(), ctx.Request(), form.Get("transaction"), form.Get("csrf"), principal, form.Get("decision") == "allow", authTime); err != nil {
-		return writeBrowserError(ctx)
-	}
-	return nil
-}
-
-func (routes *Routes) callback(ctx *echo.Context) error {
-	if ctx.QueryParam("error") != "" {
-		return writeBrowserError(ctx)
-	}
-	if err := routes.fosite.CompleteUpstreamAuthorization(ctx.Response(), ctx.Request(), ctx.Param("providerID"), ctx.QueryParam("code"), ctx.QueryParam("state")); err != nil {
+	if err := routes.fosite.CompleteAuthorization(ctx.Response(), ctx.Request(), form.Get("transaction"), form.Get("csrf"), identity, form.Get("decision") == "allow"); err != nil {
 		return writeBrowserError(ctx)
 	}
 	return nil
@@ -275,7 +235,7 @@ func (routes *Routes) userInfo(ctx *echo.Context) error {
 		ctx.Response().Header().Set("WWW-Authenticate", `Bearer error="invalid_token"`)
 		return routes.oauthError(ctx, http.StatusUnauthorized, "invalid_token", "access token was rejected")
 	}
-	return ctx.JSON(http.StatusOK, map[string]any{"sub": session.PrincipalID, "name": session.DisplayName, "email": session.Email, "groups": session.Groups})
+	return ctx.JSON(http.StatusOK, map[string]any{"sub": session.IdentityID, "name": session.DisplayName, "email": session.Email, "groups": session.Groups})
 }
 
 func (routes *Routes) bindForm(ctx *echo.Context) (url.Values, bool) {
@@ -303,7 +263,7 @@ func duplicateParameter(values url.Values) bool {
 	return false
 }
 
-func browserLoginErrorURL(form url.Values) string {
+func browserLoginErrorURL(form url.Values, code string) string {
 	raw := form.Get("return_to")
 	if !strings.HasPrefix(raw, "?") {
 		return ""
@@ -314,7 +274,7 @@ func browserLoginErrorURL(form url.Values) string {
 		query.Get("csrf") == "" || query.Get("csrf") != form.Get("csrf") {
 		return ""
 	}
-	query.Set("error", "authentication_failed")
+	query.Set("error", code)
 	return oauthPath + "/ui/?" + query.Encode()
 }
 

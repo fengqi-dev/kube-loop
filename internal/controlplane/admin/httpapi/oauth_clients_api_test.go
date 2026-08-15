@@ -11,35 +11,37 @@ import (
 )
 
 func TestOAuthClientCRUDAndSecretRotation(t *testing.T) {
-	handler, store := newPrincipalTokenHandler(t, false, WithOAuthClients(nilSafeRepositories(t), nilSafeTransactions(t)))
+	handler, store := newIdentityTokenHandler(t, false, WithOAuthClients(nilSafeRepositories(t), nilSafeTransactions(t)))
 	// Replace the helpers' temporary stores with the handler's actual store.
 	handler.readAPI.oauthRepositories = store
 	handler.readAPI.oauthTransactions = store
-	cookie, csrf := exchangePrincipalSession(t, handler)
+	cookie, csrf := exchangeIdentitySession(t, handler)
 
 	created := oauthClientWrite(t, handler, cookie, csrf, http.MethodPost, "/oauth-clients", map[string]any{
 		"id": "automation", "name": "Automation", "public": false, "redirectUris": []string{"https://client.example/callback"},
-		"grantTypes": []string{"client_credentials"}, "responseTypes": []string{"code"}, "scopes": []string{"kubeloop.api"}, "enabled": true,
+		"grantTypes": []string{"client_credentials"}, "scopes": []string{"kubeloop.api"}, "enabled": true,
+		"reason": "create automation client",
 	})
 	if created.Code != http.StatusCreated {
 		t.Fatalf("create status=%d body=%s", created.Code, created.Body.String())
 	}
 	var document map[string]any
-	if json.Unmarshal(created.Body.Bytes(), &document) != nil || document["clientSecret"] == "" || document["machinePrincipalId"] == "" {
+	if json.Unmarshal(created.Body.Bytes(), &document) != nil || document["clientSecret"] == "" || document["machineIdentityId"] == "" {
 		t.Fatalf("create body=%s", created.Body.String())
 	}
 	if _, err := store.OAuthClients().GetSecret(t.Context(), "automation"); err != nil {
 		t.Fatal(err)
 	}
 
-	rotated := oauthClientWrite(t, handler, cookie, csrf, http.MethodPost, "/oauth-clients/automation/secret", map[string]any{})
+	rotated := oauthClientWrite(t, handler, cookie, csrf, http.MethodPost, "/oauth-clients/automation/secret", map[string]any{"reason": "rotate automation secret"})
 	if rotated.Code != http.StatusOK || !bytes.Contains(rotated.Body.Bytes(), []byte("clientSecret")) {
 		t.Fatalf("rotate status=%d body=%s", rotated.Code, rotated.Body.String())
 	}
 
 	invalid := oauthClientWrite(t, handler, cookie, csrf, http.MethodPost, "/oauth-clients", map[string]any{
 		"id": "unsafe", "name": "Unsafe", "public": true, "redirectUris": []string{"https://client.example/callback"},
-		"grantTypes": []string{"password"}, "responseTypes": []string{"code"}, "scopes": []string{"kubeloop.api"}, "enabled": true,
+		"grantTypes": []string{"password"}, "scopes": []string{"kubeloop.api"}, "enabled": true,
+		"reason": "reject unsupported grant",
 	})
 	if invalid.Code != http.StatusBadRequest {
 		t.Fatalf("unsafe public password client status=%d body=%s", invalid.Code, invalid.Body.String())
@@ -65,7 +67,7 @@ func TestOAuthClientRedirectURIValidation(t *testing.T) {
 			_, err := oauthClientFromInput(oauthClientInput{
 				ID: "client", Name: "Client", Public: true,
 				RedirectURIs: []string{test.redirect}, GrantTypes: []string{"authorization_code"},
-				ResponseTypes: []string{"code"}, Scopes: []string{"openid"}, Enabled: true,
+				Scopes: []string{"openid"}, Enabled: true,
 			})
 			if (err == nil) != test.valid {
 				t.Fatalf("oauthClientFromInput() error = %v, valid = %t", err, test.valid)
@@ -75,7 +77,7 @@ func TestOAuthClientRedirectURIValidation(t *testing.T) {
 }
 
 // WithOAuthClients validates interfaces before the real store is returned by
-// newPrincipalTokenHandler; these lightweight stores are used only to satisfy
+// newIdentityTokenHandler; these lightweight stores are used only to satisfy
 // construction and are immediately replaced above.
 func nilSafeRepositories(t *testing.T) storage.Repositories {
 	t.Helper()
@@ -106,7 +108,7 @@ func oauthClientWrite(t *testing.T, handler *Handler, cookie *http.Cookie, csrf,
 	return recorder
 }
 
-func exchangePrincipalSession(t *testing.T, handler *Handler) (*http.Cookie, string) {
+func exchangeIdentitySession(t *testing.T, handler *Handler) (*http.Cookie, string) {
 	t.Helper()
 	request := httptest.NewRequest(http.MethodPost, "/sessions/token", bytes.NewBufferString(`{}`))
 	request.RemoteAddr = "192.0.2.30:5000"

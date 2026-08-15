@@ -16,10 +16,10 @@ import (
 )
 
 func TestLeaseUsesEarliestAccessAndSessionExpiry(t *testing.T) {
-	stateStore, principalID, sessionID, now := createLeaseStore(t)
+	stateStore, identityID, sessionID, now := createLeaseStore(t)
 	defer stateStore.Close()
-	ctx, cancel, err := Start(context.Background(), stateStore, controlplaneapi.Principal{
-		Subject: principalID, DeviceID: "device", AccessExpiresAt: now.Add(30 * time.Millisecond),
+	ctx, cancel, err := Start(context.Background(), stateStore, controlplaneapi.Identity{
+		Subject: identityID, DeviceID: "device", AccessExpiresAt: now.Add(30 * time.Millisecond),
 	}, sessionapi.ActiveSession{ID: sessionID, ExpiresAt: now.Add(time.Hour)}, Config{
 		Now: func() time.Time { return now }, CheckInterval: 20 * time.Millisecond,
 	})
@@ -35,13 +35,13 @@ func TestLeaseUsesEarliestAccessAndSessionExpiry(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("access token expiry did not terminate the lease")
 	}
-	if _, _, err := Start(context.Background(), stateStore, controlplaneapi.Principal{}, sessionapi.ActiveSession{ExpiresAt: now}, Config{Now: func() time.Time { return now }}); err == nil {
+	if _, _, err := Start(context.Background(), stateStore, controlplaneapi.Identity{}, sessionapi.ActiveSession{ExpiresAt: now}, Config{Now: func() time.Time { return now }}); err == nil {
 		t.Fatal("expired Session produced a lease")
 	}
 }
 
 func TestLeaseFollowsHeartbeatExtendedSessionExpiry(t *testing.T) {
-	stateStore, principalID, sessionID, _ := createLeaseStore(t)
+	stateStore, identityID, sessionID, _ := createLeaseStore(t)
 	defer stateStore.Close()
 	stored, err := stateStore.Sessions().GetByID(context.Background(), sessionID)
 	if err != nil {
@@ -57,8 +57,8 @@ func TestLeaseFollowsHeartbeatExtendedSessionExpiry(t *testing.T) {
 	); err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel, err := Start(context.Background(), stateStore, controlplaneapi.Principal{
-		Subject: principalID, DeviceID: "device",
+	ctx, cancel, err := Start(context.Background(), stateStore, controlplaneapi.Identity{
+		Subject: identityID, DeviceID: "device",
 	}, sessionapi.ActiveSession{ID: sessionID, ExpiresAt: initialExpiry}, Config{
 		Now: now, CheckInterval: 10 * time.Millisecond,
 	})
@@ -82,17 +82,17 @@ func TestLeaseFollowsHeartbeatExtendedSessionExpiry(t *testing.T) {
 }
 
 func TestLeaseTerminatesAfterOAuthGrantRevocation(t *testing.T) {
-	stateStore, principalID, sessionID, now := createLeaseStore(t)
+	stateStore, identityID, sessionID, now := createLeaseStore(t)
 	defer stateStore.Close()
 	authorizationID := uuid.NewString()
 	if err := stateStore.OAuthSessions().Create(context.Background(), storage.OAuthSession{
 		Kind: "refresh_token", SignatureHash: bytes.Repeat([]byte{7}, 32), RequestID: authorizationID,
-		PrincipalID: principalID, ClientID: "desktop", DeviceID: "device", RequestJSON: []byte(`{}`), Status: "active", CreatedAt: now, ExpiresAt: now.Add(time.Hour),
+		IdentityID: identityID, ClientID: "desktop", DeviceID: "device", RequestJSON: []byte(`{}`), Status: "active", CreatedAt: now, ExpiresAt: now.Add(time.Hour),
 	}); err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel, err := Start(context.Background(), stateStore, controlplaneapi.Principal{
-		Subject: principalID, DeviceID: "device", AuthorizationID: authorizationID,
+	ctx, cancel, err := Start(context.Background(), stateStore, controlplaneapi.Identity{
+		Subject: identityID, DeviceID: "device", AuthorizationID: authorizationID,
 	}, sessionapi.ActiveSession{ID: sessionID, ExpiresAt: now.Add(time.Hour)}, Config{CheckInterval: 10 * time.Millisecond})
 	if err != nil {
 		t.Fatal(err)
@@ -105,17 +105,17 @@ func TestLeaseTerminatesAfterOAuthGrantRevocation(t *testing.T) {
 }
 
 func TestFamilyBackedLeaseOutlivesOpeningAccessToken(t *testing.T) {
-	stateStore, principalID, sessionID, now := createLeaseStore(t)
+	stateStore, identityID, sessionID, now := createLeaseStore(t)
 	defer stateStore.Close()
 	authorizationID := uuid.NewString()
 	if err := stateStore.OAuthSessions().Create(context.Background(), storage.OAuthSession{
 		Kind: "refresh_token", SignatureHash: bytes.Repeat([]byte{8}, 32), RequestID: authorizationID,
-		PrincipalID: principalID, ClientID: "desktop", DeviceID: "device", RequestJSON: []byte(`{}`), Status: "active", CreatedAt: now, ExpiresAt: now.Add(time.Hour),
+		IdentityID: identityID, ClientID: "desktop", DeviceID: "device", RequestJSON: []byte(`{}`), Status: "active", CreatedAt: now, ExpiresAt: now.Add(time.Hour),
 	}); err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel, err := Start(context.Background(), stateStore, controlplaneapi.Principal{
-		Subject: principalID, DeviceID: "device", AuthorizationID: authorizationID, AccessExpiresAt: time.Now().Add(30 * time.Millisecond),
+	ctx, cancel, err := Start(context.Background(), stateStore, controlplaneapi.Identity{
+		Subject: identityID, DeviceID: "device", AuthorizationID: authorizationID, AccessExpiresAt: time.Now().Add(30 * time.Millisecond),
 	}, sessionapi.ActiveSession{ID: sessionID, ExpiresAt: now.Add(time.Hour)}, Config{CheckInterval: 10 * time.Millisecond})
 	if err != nil {
 		t.Fatal(err)
@@ -133,10 +133,10 @@ func TestFamilyBackedLeaseOutlivesOpeningAccessToken(t *testing.T) {
 }
 
 func TestLeaseTerminatesAfterSessionStops(t *testing.T) {
-	stateStore, principalID, sessionID, now := createLeaseStore(t)
+	stateStore, identityID, sessionID, now := createLeaseStore(t)
 	defer stateStore.Close()
-	ctx, cancel, err := Start(context.Background(), stateStore, controlplaneapi.Principal{
-		Subject: principalID, DeviceID: "device",
+	ctx, cancel, err := Start(context.Background(), stateStore, controlplaneapi.Identity{
+		Subject: identityID, DeviceID: "device",
 	}, sessionapi.ActiveSession{ID: sessionID, ExpiresAt: now.Add(time.Hour)}, Config{CheckInterval: 10 * time.Millisecond})
 	if err != nil {
 		t.Fatal(err)
@@ -157,9 +157,9 @@ func createLeaseStore(t *testing.T) (*storage.Store, string, string, time.Time) 
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
-	principalID, sessionID := uuid.NewString(), uuid.NewString()
-	if _, err := stateStore.Principals().Upsert(context.Background(), storage.Principal{
-		ID: principalID, Provider: "test", ExternalID: "lease-user", CreatedAt: now, UpdatedAt: now,
+	identityID, sessionID := uuid.NewString(), uuid.NewString()
+	if _, err := stateStore.Identities().Create(context.Background(), storage.Identity{
+		ID: identityID, Type: "human", DisplayName: "Test Identity", Status: "active", CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -167,14 +167,14 @@ func createLeaseStore(t *testing.T) (*storage.Store, string, string, time.Time) 
 	networkJSON, _ := networkspec.CanonicalJSON(network)
 	networkHash, _ := networkspec.Hash(network)
 	if err := stateStore.Sessions().Create(context.Background(), storage.Session{
-		ID: sessionID, PrincipalID: principalID, DeviceID: "device", ClusterID: "cluster",
+		ID: sessionID, IdentityID: identityID, DeviceID: "device", ClusterID: "cluster",
 		Namespace: "development", State: "active", Generation: 1,
 		NetworkSpec: networkJSON, NetworkSpecHash: networkHash,
 		CreatedAt: now, UpdatedAt: now, LastHeartbeatAt: now, ExpiresAt: now.Add(time.Hour),
 	}); err != nil {
 		t.Fatal(err)
 	}
-	return stateStore, principalID, sessionID, now
+	return stateStore, identityID, sessionID, now
 }
 
 func waitForCancellation(t *testing.T, ctx context.Context, reason string) {

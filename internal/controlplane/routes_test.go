@@ -21,9 +21,9 @@ func testRouteRegistrar(function any, session bool) RouteRegistrar {
 	switch function := function.(type) {
 	case EndpointFunc:
 		endpoint = function
-	case func(http.ResponseWriter, *http.Request, controlplaneapi.Principal) *controlplaneapi.Error:
-		endpoint = func(ctx *echo.Context, principal controlplaneapi.Principal) *controlplaneapi.Error {
-			return function(ctx.Response(), ctx.Request(), principal)
+	case func(http.ResponseWriter, *http.Request, controlplaneapi.Identity) *controlplaneapi.Error:
+		endpoint = func(ctx *echo.Context, identity controlplaneapi.Identity) *controlplaneapi.Error {
+			return function(ctx.Response(), ctx.Request(), identity)
 		}
 	default:
 		panic("unsupported test endpoint")

@@ -43,7 +43,6 @@ func testRepositoryConformance(t *testing.T, store *Store) {
 	t.Run("audit export jobs", func(t *testing.T) { testAuditExportJobRepository(t, store) })
 	t.Run("management list pagination", func(t *testing.T) { testManagementListPagination(t, store) })
 	t.Run("management sessions", func(t *testing.T) { testAdminSessionRepositoryConformance(t, store) })
-	t.Run("management configs", func(t *testing.T) { testManagementConfigRepositories(t, store) })
 	t.Run("transactions", func(t *testing.T) { testTransactions(t, store) })
 	t.Run("concurrent identity and idempotency", func(t *testing.T) { testConcurrentIdentityAndIdempotency(t, store) })
 	t.Run("stable errors", func(t *testing.T) { testStableRepositoryErrors(t, store) })
@@ -112,40 +111,40 @@ func testAuditExportJobRepository(t *testing.T, store *Store) {
 func testManagementListPagination(t *testing.T, store *Store) {
 	ctx := context.Background()
 	now := time.Date(2026, 8, 11, 9, 0, 0, 0, time.UTC)
-	provider := "pagination-" + uuid.NewString()
-	principals := make([]Principal, 0, 3)
+	search := "pagination-" + uuid.NewString()
+	identities := make([]Identity, 0, 3)
 	for index := range 3 {
-		principal, err := store.Principals().Upsert(ctx, Principal{
-			ID: uuid.NewString(), Provider: provider, ExternalID: fmt.Sprintf("user-%d", index),
+		identity, err := store.Identities().Create(ctx, Identity{
+			ID: uuid.NewString(), Type: "human", DisplayName: fmt.Sprintf("%s-user-%d", search, index), Status: "active",
 			CreatedAt: now.Add(time.Duration(index) * time.Second), UpdatedAt: now.Add(time.Duration(index) * time.Second),
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
-		principals = append(principals, principal)
+		identities = append(identities, identity)
 	}
-	firstPrincipals, err := store.Principals().List(ctx, PrincipalListFilter{Provider: provider, Limit: 2})
-	if err != nil || len(firstPrincipals) != 2 || firstPrincipals[0].ID != principals[2].ID || firstPrincipals[1].ID != principals[1].ID {
-		t.Fatalf("first principal page=%#v error=%v", firstPrincipals, err)
+	firstIdentities, err := store.Identities().List(ctx, IdentityListFilter{Search: search, Limit: 2})
+	if err != nil || len(firstIdentities) != 2 || firstIdentities[0].ID != identities[2].ID || firstIdentities[1].ID != identities[1].ID {
+		t.Fatalf("first identity page=%#v error=%v", firstIdentities, err)
 	}
-	if _, err := store.Principals().Upsert(ctx, Principal{
-		ID: uuid.NewString(), Provider: provider, ExternalID: "inserted-after-page-one",
+	if _, err := store.Identities().Create(ctx, Identity{
+		ID: uuid.NewString(), Type: "human", DisplayName: search + "-inserted-after-page-one", Status: "active",
 		CreatedAt: now.Add(10 * time.Second), UpdatedAt: now.Add(10 * time.Second),
 	}); err != nil {
 		t.Fatal(err)
 	}
-	secondPrincipals, err := store.Principals().List(ctx, PrincipalListFilter{
-		Provider: provider, Limit: 2, Cursor: pageCursor(firstPrincipals[1].CreatedAt, firstPrincipals[1].ID),
+	secondIdentities, err := store.Identities().List(ctx, IdentityListFilter{
+		Search: search, Limit: 2, Cursor: pageCursor(firstIdentities[1].CreatedAt, firstIdentities[1].ID),
 	})
-	if err != nil || len(secondPrincipals) != 1 || secondPrincipals[0].ID != principals[0].ID {
-		t.Fatalf("second principal page=%#v error=%v", secondPrincipals, err)
+	if err != nil || len(secondIdentities) != 1 || secondIdentities[0].ID != identities[0].ID {
+		t.Fatalf("second identity page=%#v error=%v", secondIdentities, err)
 	}
 
 	sessions := make([]Session, 0, 3)
 	for index := range 3 {
 		createdAt := now.Add(time.Duration(index) * time.Minute)
 		session := Session{
-			ID: uuid.NewString(), PrincipalID: principals[0].ID, DeviceID: fmt.Sprintf("device-%d", index),
+			ID: uuid.NewString(), IdentityID: identities[0].ID, DeviceID: fmt.Sprintf("device-%d", index),
 			ClusterID: "cluster-pagination", Namespace: "pagination", State: "active",
 			CreatedAt: createdAt, ExpiresAt: createdAt.Add(time.Hour),
 		}
@@ -169,7 +168,7 @@ func testManagementListPagination(t *testing.T, store *Store) {
 	for index := range 3 {
 		createdAt := now.Add(time.Duration(index) * time.Minute)
 		task := Task{
-			ID: uuid.NewString(), PrincipalID: principals[0].ID, SessionID: sessions[index].ID,
+			ID: uuid.NewString(), IdentityID: identities[0].ID, SessionID: sessions[index].ID,
 			Type: "pagination-task", State: remotetask.Pending, Spec: json.RawMessage(`{"safe":true}`),
 			IdempotencyKey: fmt.Sprintf("pagination-%d", index), CreatedAt: createdAt, UpdatedAt: createdAt,
 		}
@@ -193,7 +192,7 @@ func testManagementListPagination(t *testing.T, store *Store) {
 	events := make([]AuditEvent, 0, 3)
 	for index := range 3 {
 		event := AuditEvent{
-			ID: uuid.NewString(), PrincipalID: principals[0].ID, Action: action, Outcome: "success",
+			ID: uuid.NewString(), IdentityID: identities[0].ID, Action: action, Outcome: "success",
 			RequestID: fmt.Sprintf("pagination-request-%d", index), CreatedAt: now.Add(time.Duration(index) * time.Minute),
 		}
 		if err := store.Audit().Append(ctx, event); err != nil {
@@ -215,49 +214,17 @@ func testManagementListPagination(t *testing.T, store *Store) {
 
 func testConcurrentIdentityAndIdempotency(t *testing.T, store *Store) {
 	ctx := context.Background()
-	externalID := "concurrent-" + uuid.NewString()
 	const workers = 16
-	principalIDs := make(chan string, workers)
-	errorsCh := make(chan error, workers)
-	var group sync.WaitGroup
-	for range workers {
-		group.Go(func() {
-			principal, err := store.Principals().Upsert(ctx, Principal{
-				ID: uuid.NewString(), Provider: "oidc-conformance", ExternalID: externalID,
-			})
-			if err != nil {
-				errorsCh <- err
-				return
-			}
-			principalIDs <- principal.ID
-		})
-	}
-	group.Wait()
-	close(principalIDs)
-	close(errorsCh)
-	for err := range errorsCh {
-		t.Error(err)
-	}
-	stableID := ""
-	for id := range principalIDs {
-		if stableID == "" {
-			stableID = id
-		} else if id != stableID {
-			t.Fatalf("concurrent identity returned IDs %q and %q", stableID, id)
-		}
-	}
-	if stableID == "" {
-		t.Fatal("concurrent identity upsert returned no principal")
-	}
+	identity := createTestIdentity(t, store.Identities(), "concurrent")
 
 	now := time.Date(2026, 8, 10, 10, 0, 0, 0, time.UTC)
 	record := IdempotencyRecord{
-		Scope: "conformance:" + stableID, Key: "concurrent", RequestHash: "sha256:concurrent",
+		Scope: "conformance:" + identity.ID, Key: "concurrent", RequestHash: "sha256:concurrent",
 		ResourceType: "task", ResourceID: uuid.NewString(), CreatedAt: now, ExpiresAt: now.Add(time.Hour),
 	}
 	var created atomic.Int32
-	errorsCh = make(chan error, workers)
-	group = sync.WaitGroup{}
+	errorsCh := make(chan error, workers)
+	var group sync.WaitGroup
 	for range workers {
 		group.Go(func() {
 			stored, wasCreated, err := store.Idempotency().Reserve(ctx, record)
@@ -286,10 +253,10 @@ func testConcurrentIdentityAndIdempotency(t *testing.T, store *Store) {
 
 func testStableRepositoryErrors(t *testing.T, store *Store) {
 	ctx := context.Background()
-	if _, err := store.Principals().GetByID(ctx, "not-a-uuid"); err == nil || err.Error() != "principal ID must be a UUID" {
+	if _, err := store.Identities().GetByID(ctx, "not-a-uuid"); err == nil || err.Error() != "identity ID must be a UUID" {
 		t.Fatalf("invalid ID error = %v", err)
 	}
-	if _, err := store.Principals().GetByID(ctx, uuid.NewString()); !errors.Is(err, ErrNotFound) {
+	if _, err := store.Identities().GetByID(ctx, uuid.NewString()); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("missing object error = %v", err)
 	}
 	record := IdempotencyRecord{
@@ -308,7 +275,7 @@ func testStableRepositoryErrors(t *testing.T, store *Store) {
 
 func testSessionTaskSnapshotRepositories(t *testing.T, store *Store) {
 	ctx := context.Background()
-	principal := createTestPrincipal(t, store.Principals(), "session-user")
+	identity := createTestIdentity(t, store.Identities(), "session-user")
 	now := time.Date(2026, 8, 9, 3, 0, 0, 100, time.UTC)
 	spec, err := networkspec.Normalize(networkspec.Spec{
 		PodCIDRs: []string{"10.2.0.0/16"}, ServiceCIDRs: []string{"10.96.0.0/12"},
@@ -320,7 +287,7 @@ func testSessionTaskSnapshotRepositories(t *testing.T, store *Store) {
 	specJSON, _ := networkspec.CanonicalJSON(spec)
 	specHash, _ := networkspec.Hash(spec)
 	session := Session{
-		ID: uuid.NewString(), PrincipalID: principal.ID, DeviceID: "device-2", ClusterID: "cluster-a",
+		ID: uuid.NewString(), IdentityID: identity.ID, DeviceID: "device-2", ClusterID: "cluster-a",
 		Namespace: "development", State: "starting", CreatedAt: now, ExpiresAt: now.Add(time.Hour),
 		NetworkSpec: specJSON, NetworkSpecHash: specHash,
 	}
@@ -349,7 +316,7 @@ func testSessionTaskSnapshotRepositories(t *testing.T, store *Store) {
 		t.Fatalf("heartbeat session = %#v, %v", loadedSession, err)
 	}
 	task := Task{
-		ID: uuid.NewString(), PrincipalID: principal.ID, SessionID: session.ID,
+		ID: uuid.NewString(), IdentityID: identity.ID, SessionID: session.ID,
 		Type: "port-forward", State: "pending", Spec: json.RawMessage(`{"port":8080}`),
 		IdempotencyKey: "task-key", CreatedAt: now,
 	}
@@ -405,7 +372,7 @@ func testSessionTaskSnapshotRepositories(t *testing.T, store *Store) {
 		{remotetask.Pending, remotetask.Running},
 	}
 	for index, event := range transitions {
-		if event.PrincipalID != principal.ID || event.ResourceType != "port-forward" ||
+		if event.IdentityID != identity.ID || event.ResourceType != "port-forward" ||
 			event.ResourceID != task.ID || event.Outcome != "success" {
 			t.Fatalf("Task transition audit event = %#v", event)
 		}
@@ -469,14 +436,14 @@ func testSessionTaskSnapshotRepositories(t *testing.T, store *Store) {
 	}
 
 	expiredSession := Session{
-		ID: uuid.NewString(), PrincipalID: principal.ID, DeviceID: "expired", ClusterID: "cluster-a",
+		ID: uuid.NewString(), IdentityID: identity.ID, DeviceID: "expired", ClusterID: "cluster-a",
 		Namespace: "development", State: "stopped", CreatedAt: now.Add(-2 * time.Hour), ExpiresAt: now.Add(-time.Hour),
 	}
 	if err := store.Sessions().Create(ctx, expiredSession); err != nil {
 		t.Fatal(err)
 	}
 	protectedTask := Task{
-		ID: uuid.NewString(), PrincipalID: principal.ID, SessionID: expiredSession.ID,
+		ID: uuid.NewString(), IdentityID: identity.ID, SessionID: expiredSession.ID,
 		Type: "exchange", State: "running", Spec: json.RawMessage(`{"service":"api"}`),
 		IdempotencyKey: "protected-exchange", CreatedAt: now.Add(-2 * time.Hour), UpdatedAt: now.Add(-time.Hour),
 	}
@@ -506,7 +473,7 @@ func testIdempotencyRepository(t *testing.T, store *Store) {
 	ctx := context.Background()
 	now := time.Date(2026, 8, 9, 4, 0, 0, 0, time.UTC)
 	record := IdempotencyRecord{
-		Scope: "principal:one", Key: "request-1", RequestHash: "sha256:aaa",
+		Scope: "identity:one", Key: "request-1", RequestHash: "sha256:aaa",
 		ResourceType: "task", ResourceID: uuid.NewString(), Response: json.RawMessage(`{"accepted":true}`),
 		CreatedAt: now, ExpiresAt: now.Add(time.Hour),
 	}
@@ -538,11 +505,11 @@ func testIdempotencyRepository(t *testing.T, store *Store) {
 
 func testAuditRepository(t *testing.T, store *Store) {
 	ctx := context.Background()
-	principal := createTestPrincipal(t, store.Principals(), "audit-user")
+	identity := createTestIdentity(t, store.Identities(), "audit-user")
 	now := time.Date(2026, 8, 9, 5, 0, 0, 0, time.UTC)
 	for index, action := range []string{"session.create", "task.create", "task.stop"} {
 		if err := store.Audit().Append(ctx, AuditEvent{
-			ID: uuid.NewString(), PrincipalID: principal.ID, Action: action,
+			ID: uuid.NewString(), IdentityID: identity.ID, Action: action,
 			ResourceType: "task", ResourceID: fmt.Sprintf("resource-%d", index),
 			Outcome: "allowed", RequestID: fmt.Sprintf("request-%d", index),
 			Metadata: json.RawMessage(`{"safe":true}`), CreatedAt: now.Add(time.Duration(index) * time.Second),
@@ -551,7 +518,7 @@ func testAuditRepository(t *testing.T, store *Store) {
 		}
 	}
 	events, err := store.Audit().List(ctx, AuditFilter{
-		PrincipalID: principal.ID, Action: "task.create", After: now, Before: now.Add(3 * time.Second), Limit: 10,
+		IdentityID: identity.ID, Action: "task.create", After: now, Before: now.Add(3 * time.Second), Limit: 10,
 	})
 	if err != nil || len(events) != 1 || events[0].Action != "task.create" {
 		t.Fatalf("filtered audit events = %#v, %v", events, err)
@@ -563,7 +530,7 @@ func testTransactions(t *testing.T, store *Store) {
 	rollbackID := uuid.NewString()
 	sentinel := errors.New("rollback")
 	err := store.WithinTransaction(ctx, func(repositories Repositories) error {
-		_, err := repositories.Principals().Upsert(ctx, Principal{ID: rollbackID, Provider: "oidc", ExternalID: "rollback"})
+		_, err := repositories.Identities().Create(ctx, Identity{ID: rollbackID, Type: "human", DisplayName: "Rollback", Status: "active"})
 		if err != nil {
 			return err
 		}
@@ -572,18 +539,18 @@ func testTransactions(t *testing.T, store *Store) {
 	if !errors.Is(err, sentinel) {
 		t.Fatalf("transaction error = %v", err)
 	}
-	if _, err := store.Principals().GetByID(ctx, rollbackID); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("rolled-back principal lookup = %v", err)
+	if _, err := store.Identities().GetByID(ctx, rollbackID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("rolled-back identity lookup = %v", err)
 	}
 	commitID := uuid.NewString()
 	if err := store.WithinTransaction(ctx, func(repositories Repositories) error {
-		_, err := repositories.Principals().Upsert(ctx, Principal{ID: commitID, Provider: "oidc", ExternalID: "commit"})
+		_, err := repositories.Identities().Create(ctx, Identity{ID: commitID, Type: "human", DisplayName: "Commit", Status: "active"})
 		return err
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.Principals().GetByID(ctx, commitID); err != nil {
-		t.Fatalf("committed principal lookup = %v", err)
+	if _, err := store.Identities().GetByID(ctx, commitID); err != nil {
+		t.Fatalf("committed identity lookup = %v", err)
 	}
 	panicID := uuid.NewString()
 	func() {
@@ -593,22 +560,22 @@ func testTransactions(t *testing.T, store *Store) {
 			}
 		}()
 		_ = store.WithinTransaction(ctx, func(repositories Repositories) error {
-			_, _ = repositories.Principals().Upsert(ctx, Principal{ID: panicID, Provider: "oidc", ExternalID: "panic"})
+			_, _ = repositories.Identities().Create(ctx, Identity{ID: panicID, Type: "human", DisplayName: "Panic", Status: "active"})
 			panic("stop")
 		})
 	}()
-	if _, err := store.Principals().GetByID(ctx, panicID); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("panic transaction principal lookup = %v", err)
+	if _, err := store.Identities().GetByID(ctx, panicID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("panic transaction identity lookup = %v", err)
 	}
 }
 
-func createTestPrincipal(t *testing.T, repository PrincipalRepository, externalID string) Principal {
+func createTestIdentity(t *testing.T, repository IdentityRepository, externalID string) Identity {
 	t.Helper()
-	principal, err := repository.Upsert(context.Background(), Principal{
-		ID: uuid.NewString(), Provider: "oidc-test", ExternalID: externalID,
+	identity, err := repository.Create(context.Background(), Identity{
+		ID: uuid.NewString(), Type: "human", DisplayName: externalID, Status: "active",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return principal
+	return identity
 }

@@ -51,7 +51,7 @@ func TestRealPreviewLifecycleOwnershipAndStaleRecovery(t *testing.T) {
 		t.Fatalf("ensure real Preview fixture: %v", err)
 	}
 
-	stateStore, principal, activeSession, remoteSession := previewLifecycleState(
+	stateStore, identity, activeSession, remoteSession := previewLifecycleState(
 		t, ctx, harness.EchoServiceIP(t, ctx, kubeClient),
 	)
 	kubeOutage := &temporaryKubernetesOutage{}
@@ -77,7 +77,7 @@ func TestRealPreviewLifecycleOwnershipAndStaleRecovery(t *testing.T) {
 	}
 	handler, err := previewapi.New(
 		stateStore,
-		e2eExecSessionValidator{principalID: principal.Subject, session: activeSession},
+		e2eExecSessionValidator{identityID: identity.Subject, session: activeSession},
 		realResources,
 		previewapi.Config{
 			DeleteTimeout: 5 * time.Second,
@@ -87,7 +87,7 @@ func TestRealPreviewLifecycleOwnershipAndStaleRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	gatewayIP := reachableHostIP(t, ctx, kubeClient)
-	server, gatewayClient := startPreviewLifecycleController(t, handler, principal, activeSession, gatewayIP)
+	server, gatewayClient := startPreviewLifecycleController(t, handler, identity, activeSession, gatewayIP)
 	defer server.Close()
 
 	serverProfile := profile.Profile{ID: "preview-e2e", BaseURL: server.URL}
@@ -95,8 +95,8 @@ func TestRealPreviewLifecycleOwnershipAndStaleRecovery(t *testing.T) {
 		profileID: serverProfile.ID,
 		credential: credentials.Credential{
 			TokenType: "Bearer", AccessToken: previewLifecycleAccessToken,
-			AccessExpiresAt: principal.AccessExpiresAt, RefreshToken: "unused",
-			RefreshExpiresAt: principal.AccessExpiresAt, DeviceID: principal.DeviceID,
+			AccessExpiresAt: identity.AccessExpiresAt, RefreshToken: "unused",
+			RefreshExpiresAt: identity.AccessExpiresAt, DeviceID: identity.DeviceID,
 		},
 	}
 	remoteClient, err := remote.New(credentialStore, e2eTokenRefresher{}, remote.Config{HTTPClient: gatewayClient})
@@ -252,7 +252,7 @@ func previewLifecycleState(
 	t *testing.T,
 	ctx context.Context,
 	serviceIP string,
-) (*storage.Store, controlplaneapi.Principal, sessionapi.ActiveSession, remote.Session) {
+) (*storage.Store, controlplaneapi.Identity, sessionapi.ActiveSession, remote.Session) {
 	t.Helper()
 	stateStore, err := storage.Open(ctx, storage.Config{
 		Backend: storage.BackendSQLite, SQLitePath: filepath.Join(t.TempDir(), "preview-lifecycle.db"),
@@ -262,16 +262,16 @@ func previewLifecycleState(
 	}
 	t.Cleanup(func() { _ = stateStore.Close() })
 	now := time.Now().UTC()
-	principalID, authorizationID, sessionID := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	identityID, authorizationID, sessionID := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	deviceID := "preview-e2e-device"
-	if _, err := stateStore.Principals().Upsert(ctx, storage.Principal{
-		ID: principalID, Provider: "e2e", ExternalID: "preview-lifecycle",
+	if _, err := stateStore.Identities().Create(ctx, storage.Identity{
+		ID: identityID, Type: "human", DisplayName: "Test Identity", Status: "active",
 		CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatal(err)
 	}
 	expiresAt := now.Add(10 * time.Minute)
-	createOAuthGrant(t, ctx, stateStore, authorizationID, principalID, deviceID, 9, now, expiresAt)
+	createOAuthGrant(t, ctx, stateStore, authorizationID, identityID, deviceID, 9, now, expiresAt)
 	network, err := networkspec.Normalize(networkspec.Spec{ServiceIPs: []string{serviceIP}})
 	if err != nil {
 		t.Fatal(err)
@@ -279,15 +279,15 @@ func previewLifecycleState(
 	networkJSON, _ := networkspec.CanonicalJSON(network)
 	networkHash, _ := networkspec.Hash(network)
 	if err := stateStore.Sessions().Create(ctx, storage.Session{
-		ID: sessionID, PrincipalID: principalID, DeviceID: deviceID, ClusterID: "minikube",
+		ID: sessionID, IdentityID: identityID, DeviceID: deviceID, ClusterID: "minikube",
 		Namespace: harness.EchoNamespace, State: "active", Generation: 1,
 		NetworkSpec: networkJSON, NetworkSpecHash: networkHash,
 		CreatedAt: now, UpdatedAt: now, LastHeartbeatAt: now, ExpiresAt: expiresAt,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	principal := controlplaneapi.Principal{
-		Subject: principalID, DeviceID: deviceID, AuthorizationID: authorizationID, AccessExpiresAt: expiresAt,
+	identity := controlplaneapi.Identity{
+		Subject: identityID, DeviceID: deviceID, AuthorizationID: authorizationID, AccessExpiresAt: expiresAt,
 	}
 	active := sessionapi.ActiveSession{
 		ID: sessionID, Namespace: harness.EchoNamespace, Generation: 1,
@@ -298,20 +298,20 @@ func previewLifecycleState(
 		CreatedAt: now, UpdatedAt: now, LastHeartbeatAt: now, ExpiresAt: expiresAt,
 		NetworkSpec: network, NetworkSpecHash: networkHash,
 	}
-	return stateStore, principal, active, clientSession
+	return stateStore, identity, active, clientSession
 }
 
 func startPreviewLifecycleController(
 	t *testing.T,
 	handler *previewapi.Service,
-	principal controlplaneapi.Principal,
+	identity controlplaneapi.Identity,
 	session sessionapi.ActiveSession,
 	gatewayIP string,
 ) (*httptest.Server, *http.Client) {
 	t.Helper()
 	gateway := startE2ETrafficGateway(t, gatewayIP, handler, nil)
 	policy, err := authorization.New(authorization.Policy{Rules: []authorization.Rule{{
-		ID: "e2e-preview", Subjects: []string{principal.Subject},
+		ID: "e2e-preview", Subjects: []string{identity.Subject},
 		Namespaces: []string{harness.EchoNamespace},
 		Operations: []string{"create", "get", "delete"}, ResourceKinds: []string{"previews", "relay-tickets"},
 	}}})
@@ -321,15 +321,15 @@ func startPreviewLifecycleController(
 	server, err := controlplane.NewServer(
 		controlplane.Config{PublicURL: "http://127.0.0.1"}, controlplane.BuildInfo{},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
-		controlplane.WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(request *http.Request) (controlplaneapi.Principal, *controlplaneapi.Error) {
+		controlplane.WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(request *http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
 			if request.Header.Get("Authorization") != "Bearer "+previewLifecycleAccessToken {
-				return controlplaneapi.Principal{}, &controlplaneapi.Error{Code: controlplaneapi.CodeUnauthenticated, Message: "invalid e2e access token"}
+				return controlplaneapi.Identity{}, &controlplaneapi.Error{Code: controlplaneapi.CodeUnauthenticated, Message: "invalid e2e access token"}
 			}
-			return principal, nil
+			return identity, nil
 		})),
 		controlplane.WithAuthorizer(policy), controlplane.WithAPIRoutes(controlplane.APIRoutes{
 			Tickets: ticketapi.NewRoutes(gateway.tickets, e2eExecSessionValidator{
-				principalID: principal.Subject, session: session,
+				identityID: identity.Subject, session: session,
 			}).Endpoints(),
 			Previews: previewapi.NewRoutes(handler).Endpoints(),
 		}),

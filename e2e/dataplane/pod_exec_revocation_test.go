@@ -53,13 +53,13 @@ func TestRealPodExecStopsWhenOAuthGrantIsRevoked(t *testing.T) {
 	}
 	defer stateStore.Close()
 	now := time.Now().UTC()
-	principalID, authorizationID, sessionID := uuid.NewString(), uuid.NewString(), uuid.NewString()
-	if _, err := stateStore.Principals().Upsert(ctx, storage.Principal{
-		ID: principalID, Provider: "e2e", ExternalID: "real-pod-user", CreatedAt: now, UpdatedAt: now,
+	identityID, authorizationID, sessionID := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	if _, err := stateStore.Identities().Create(ctx, storage.Identity{
+		ID: identityID, Type: "human", DisplayName: "Test Identity", Status: "active", CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	createOAuthGrant(t, ctx, stateStore, authorizationID, principalID, "e2e-device", 7, now, now.Add(2*time.Minute))
+	createOAuthGrant(t, ctx, stateStore, authorizationID, identityID, "e2e-device", 7, now, now.Add(2*time.Minute))
 	spec, err := networkspec.Normalize(networkspec.Spec{ServiceIPs: []string{"10.96.0.10"}})
 	if err != nil {
 		t.Fatal(err)
@@ -74,7 +74,7 @@ func TestRealPodExecStopsWhenOAuthGrantIsRevoked(t *testing.T) {
 	}
 	expiresAt := now.Add(2 * time.Minute)
 	if err := stateStore.Sessions().Create(ctx, storage.Session{
-		ID: sessionID, PrincipalID: principalID, DeviceID: "e2e-device", ClusterID: "minikube",
+		ID: sessionID, IdentityID: identityID, DeviceID: "e2e-device", ClusterID: "minikube",
 		Namespace: harness.EchoNamespace, State: "active", Generation: 1,
 		NetworkSpec: specJSON, NetworkSpecHash: specHash,
 		CreatedAt: now, UpdatedAt: now, LastHeartbeatAt: now, ExpiresAt: expiresAt,
@@ -95,7 +95,7 @@ func TestRealPodExecStopsWhenOAuthGrantIsRevoked(t *testing.T) {
 	}
 	handler, err := execapi.New(
 		stateStore,
-		e2eExecSessionValidator{principalID: principalID, session: activeSession},
+		e2eExecSessionValidator{identityID: identityID, session: activeSession},
 		executor,
 		execapi.Config{CredentialCheckInterval: 25 * time.Millisecond},
 	)
@@ -109,14 +109,14 @@ func TestRealPodExecStopsWhenOAuthGrantIsRevoked(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	principal := controlplaneapi.Principal{
-		Subject: principalID, DeviceID: "e2e-device", AuthorizationID: authorizationID, AccessExpiresAt: expiresAt,
+	identity := controlplaneapi.Identity{
+		Subject: identityID, DeviceID: "e2e-device", AuthorizationID: authorizationID, AccessExpiresAt: expiresAt,
 	}
 	server, err := controlplane.NewServer(
 		controlplane.Config{PublicURL: "https://controlplane.e2e.invalid"}, controlplane.BuildInfo{},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
-		controlplane.WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(*http.Request) (controlplaneapi.Principal, *controlplaneapi.Error) {
-			return principal, nil
+		controlplane.WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(*http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
+			return identity, nil
 		})),
 		controlplane.WithAuthorizer(policy), controlplane.WithAPIRoutes(controlplane.APIRoutes{Exec: execapi.NewRoutes(handler).Endpoints()}),
 	)
@@ -177,16 +177,16 @@ func TestRealPodExecStopsWhenOAuthGrantIsRevoked(t *testing.T) {
 }
 
 type e2eExecSessionValidator struct {
-	principalID string
-	session     sessionapi.ActiveSession
+	identityID string
+	session    sessionapi.ActiveSession
 }
 
 func (validator e2eExecSessionValidator) RequireActive(
 	_ context.Context,
-	principal controlplaneapi.Principal,
+	identity controlplaneapi.Identity,
 	namespace, sessionID string,
 ) (sessionapi.ActiveSession, *controlplaneapi.Error) {
-	if principal.Subject != validator.principalID || namespace != validator.session.Namespace || sessionID != validator.session.ID {
+	if identity.Subject != validator.identityID || namespace != validator.session.Namespace || sessionID != validator.session.ID {
 		return sessionapi.ActiveSession{}, &controlplaneapi.Error{Code: controlplaneapi.CodeNotFound, Message: "resource not found"}
 	}
 	return validator.session, nil

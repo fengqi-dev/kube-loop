@@ -236,8 +236,8 @@ func (client *Client) Refresh(ctx context.Context, baseURL string, current crede
 	if err != nil {
 		return credentials.Credential{}, err
 	}
-	if next.PrincipalID == "" {
-		next.PrincipalID = current.PrincipalID
+	if next.IdentityID == "" {
+		next.IdentityID = current.IdentityID
 	}
 	if next.UserName == "" {
 		next.UserName = current.UserName
@@ -398,10 +398,10 @@ func credentialFromResponse(response tokenResponse, deviceID string) (credential
 		response.ExpiresIn <= 0 {
 		return credentials.Credential{}, errors.New("OAuth server returned an incomplete token response")
 	}
-	principalID, userName := identityFromIDToken(response.IDToken)
+	identityID, userName := identityFromIDToken(response.IDToken)
 	return credentials.Credential{
 		TokenType: "Bearer", AccessToken: response.AccessToken, AccessExpiresAt: time.Now().Add(time.Duration(response.ExpiresIn) * time.Second),
-		RefreshToken: response.RefreshToken, DeviceID: deviceID, PrincipalID: principalID, UserName: userName,
+		RefreshToken: response.RefreshToken, DeviceID: deviceID, IdentityID: identityID, UserName: userName,
 	}, nil
 }
 
@@ -424,13 +424,13 @@ func identityFromIDToken(token string) (string, string) {
 	if json.Unmarshal(payload, &claims) != nil {
 		return "", ""
 	}
-	principalID := strings.TrimSpace(claims.Subject)
-	for _, value := range []string{claims.Name, claims.PreferredUserName, claims.UserName, claims.Email, principalID} {
+	identityID := strings.TrimSpace(claims.Subject)
+	for _, value := range []string{claims.Name, claims.PreferredUserName, claims.UserName, claims.Email, identityID} {
 		if value = strings.TrimSpace(value); value != "" {
-			return principalID, value
+			return identityID, value
 		}
 	}
-	return principalID, ""
+	return identityID, ""
 }
 
 func validateTarget(baseURL, providerID string) (string, error) {

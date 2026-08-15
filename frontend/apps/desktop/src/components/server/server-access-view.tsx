@@ -102,12 +102,18 @@ export function ServerAccessView({
   const authenticated = authSession?.authenticated ?? auth.authenticated;
 
   useEffect(() => {
+    const next = normalizeProfileState(profiles);
+    setProfileState((current) => JSON.stringify(current) === JSON.stringify(next) ? current : next);
+  }, [profiles]);
+
+  useEffect(() => {
     onProfilesChange?.(profileState);
   }, [onProfilesChange, profileState]);
 
   useEffect(() => {
+    if (management) return;
     onAuthChange?.(auth);
-  }, [auth, onAuthChange]);
+  }, [auth, management, onAuthChange]);
 
   useEffect(() => {
     if (!authSession) return;
@@ -126,7 +132,7 @@ export function ServerAccessView({
   }, [authSession]);
 
   useEffect(() => {
-    if (!initialProfile) return;
+    if (management || !initialProfile) return;
     let active = true;
     setProfile(initialProfile);
     setAddress(initialProfile.baseUrl);
@@ -141,22 +147,28 @@ export function ServerAccessView({
         setAuth(session);
         setProviderId(supportedAuthMethods(document.authMethods)[0]?.id ?? "");
         if (session.authenticated) {
-		  const [remoteInventory, remoteForwards, remoteExchanges, remoteMirrors, remotePreviews, remoteSSH] = await Promise.all([
-			backend.loadServerInventory(initialProfile.id, initialProfile.lastNamespace ?? ""),
-			backend.listServerPortForwards(initialProfile.id),
-			backend.listServerExchanges(initialProfile.id),
-			backend.listServerMirrors(initialProfile.id),
-			backend.listServerPreviews(initialProfile.id),
-			backend.listServerPodSSH(initialProfile.id),
-		  ]);
-		  if (active) {
-			setInventory(remoteInventory);
-			setForwards(remoteForwards);
-			setExchanges(remoteExchanges);
-		  setMirrors(remoteMirrors);
-		  setPreviews(remotePreviews);
-		  setSSHEndpoints(remoteSSH);
-		  }
+          const remoteInventory = await backend.loadServerInventory(
+            initialProfile.id,
+            initialProfile.lastNamespace ?? "",
+          );
+          if (!active) return;
+          setInventory(remoteInventory);
+          setBusy(undefined);
+
+          const sessionResources = await Promise.allSettled([
+            backend.listServerPortForwards(initialProfile.id),
+            backend.listServerExchanges(initialProfile.id),
+            backend.listServerMirrors(initialProfile.id),
+            backend.listServerPreviews(initialProfile.id),
+            backend.listServerPodSSH(initialProfile.id),
+          ]);
+          if (!active) return;
+          const [remoteForwards, remoteExchanges, remoteMirrors, remotePreviews, remoteSSH] = sessionResources;
+          if (remoteForwards.status === "fulfilled") setForwards(remoteForwards.value);
+          if (remoteExchanges.status === "fulfilled") setExchanges(remoteExchanges.value);
+          if (remoteMirrors.status === "fulfilled") setMirrors(remoteMirrors.value);
+          if (remotePreviews.status === "fulfilled") setPreviews(remotePreviews.value);
+          if (remoteSSH.status === "fulfilled") setSSHEndpoints(remoteSSH.value);
         }
       })
       .catch((reason: unknown) => {
@@ -168,7 +180,7 @@ export function ServerAccessView({
     return () => {
       active = false;
     };
-  }, [initialProfile]);
+  }, [initialProfile, management]);
 
   useEffect(() => {
     const unsubscribe = window.runtime?.EventsOn("dataplane:status", (value: unknown) => {
@@ -484,7 +496,7 @@ export function ServerAccessView({
   }
 
   async function connectDataPlane(mode: "socks" | "tun") {
-    if (!profile || !inventory?.dataPlane || inventory.dataPlane.state === "connected" || busy) return;
+    if (!profile || !inventory || inventory.dataPlane?.state === "connected" || busy) return;
     setBusy("tunnel");
     setError("");
     try {
@@ -855,6 +867,67 @@ export function ServerAccessView({
     );
   }
 
+  if (!management && authenticated && !inventory) {
+    const loadingEnvironment = Boolean(profile) && (Boolean(busy) || !error);
+    return (
+      <div className="mx-auto max-w-[1360px]">
+        <Card className="gap-0 border-dashed py-0 shadow-none">
+          <CardContent className="grid min-h-[360px] place-items-center p-6 text-center">
+            <div className="max-w-sm">
+              <div className="mx-auto grid size-12 place-items-center rounded-md border bg-muted/40 text-muted-foreground">
+                {loadingEnvironment ? <Spinner className="size-5" /> : <Server size={20} strokeWidth={1.6} />}
+              </div>
+              <h2 className="mt-4 text-sm font-medium">
+                {loadingEnvironment ? "Loading server environment" : "Server environment unavailable"}
+              </h2>
+              <p className="mt-1.5 text-xs leading-5 text-muted-foreground">
+                {error || (profile
+                  ? "Your sign-in is complete. KubeLoop is loading namespaces and the active Gateway session."
+                  : "Your sign-in is complete, but no active Server is selected.")}
+              </p>
+              {!loadingEnvironment ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="mt-4"
+                  onClick={() => profile ? void loadInventory(profile.lastNamespace ?? "") : onNavigate?.("clusters")}
+                >
+                  {profile ? <RefreshCw size={13} data-icon="inline-start" /> : <Server size={13} data-icon="inline-start" />}
+                  {profile ? "Retry loading" : "Manage servers"}
+                </Button>
+              ) : null}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  if (!management && authenticated && inventory && profile && !inventory.namespace) {
+    return (
+      <div className="mx-auto max-w-[1360px]">
+        <Card className="gap-0 border-dashed py-0 shadow-none">
+          <CardContent className="grid min-h-[360px] place-items-center p-6 text-center">
+            <div className="max-w-sm">
+              <div className="mx-auto grid size-12 place-items-center rounded-md border bg-muted/40 text-muted-foreground">
+                <Boxes size={20} strokeWidth={1.6} />
+              </div>
+              <h2 className="mt-4 text-sm font-medium">Namespace unavailable</h2>
+              <p className="mt-1.5 text-xs leading-5 text-muted-foreground">
+                No namespace is available under the current Gateway policy. Refresh after access is granted or the namespace list finishes loading.
+              </p>
+              <Button type="button" variant="outline" size="sm" className="mt-4" disabled={Boolean(busy)} onClick={() => void loadInventory()}>
+                {busy ? <Spinner data-icon="inline-start" /> : <RefreshCw size={13} data-icon="inline-start" />}
+                Refresh namespaces
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   if (!management && authenticated && inventory && profile) {
     return (
       <ServerOverviewView
@@ -873,7 +946,7 @@ export function ServerAccessView({
           previews: previews.length,
         }}
         onRefresh={() => void loadInventory()}
-        onConnect={(mode) => void connectDataPlane(mode)}
+        onConnect={connectDataPlane}
         onDisconnect={() => void disconnectDataPlane()}
         onNavigate={(view) => onNavigate?.(view)}
       />

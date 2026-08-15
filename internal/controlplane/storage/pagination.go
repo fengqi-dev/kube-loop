@@ -5,10 +5,12 @@ import (
 	"time"
 )
 
-const maximumManagementPageFetch = 101
+// MaximumManagementPageFetch is the largest page repositories accept. Callers
+// may request one item beyond the public page size to detect truncation.
+const MaximumManagementPageFetch = 101
 
 func normalizePage(limit int, cursor *PageCursor) (int, *PageCursor, error) {
-	if limit <= 0 || limit > maximumManagementPageFetch {
+	if limit <= 0 || limit > MaximumManagementPageFetch {
 		return 0, nil, errors.New("management list limit must be between 1 and 101")
 	}
 	normalized, err := normalizeCursor(cursor)

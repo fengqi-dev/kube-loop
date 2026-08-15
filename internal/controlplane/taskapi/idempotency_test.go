@@ -46,7 +46,7 @@ func TestRequestHashBindsSessionNamespaceAndCanonicalJSON(t *testing.T) {
 	if !Matches(first, "legacy", first) || Matches(first, "legacy") {
 		t.Fatal("candidate matching is invalid")
 	}
-	if Scope("pod-exec", "principal") != "task:pod-exec:principal" {
+	if Scope("pod-exec", "identity") != "task:pod-exec:identity" {
 		t.Fatal("Task scope is unstable")
 	}
 }

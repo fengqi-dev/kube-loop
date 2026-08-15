@@ -241,7 +241,7 @@ func (handler *Service) watchInventory(
 	writer http.ResponseWriter,
 	request *http.Request,
 	client kubernetes.Interface,
-	principal controlplaneapi.Principal,
+	identity controlplaneapi.Identity,
 	namespace string,
 	resource inventoryResource,
 ) *controlplaneapi.Error {
@@ -250,12 +250,12 @@ func (handler *Service) watchInventory(
 	}
 	watchContext := request.Context()
 	cancel := func() {}
-	if !principal.AccessExpiresAt.IsZero() {
-		watchContext, cancel = context.WithDeadline(watchContext, principal.AccessExpiresAt)
+	if !identity.AccessExpiresAt.IsZero() {
+		watchContext, cancel = context.WithDeadline(watchContext, identity.AccessExpiresAt)
 	}
 	defer cancel()
 	updates, unsubscribe, err := handler.inventory.subscribe(watchContext, authorization.Subject{
-		ID: principal.Subject, Groups: append([]string(nil), principal.Groups...),
+		ID: identity.Subject, Groups: append([]string(nil), identity.Groups...),
 	}, client, namespace, resource)
 	if err != nil {
 		return &controlplaneapi.Error{Code: controlplaneapi.CodeUnavailable, Message: "Inventory Watch is unavailable", Cause: err}

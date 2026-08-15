@@ -25,11 +25,11 @@ func FuzzGatewayHTTPEntryBoundedAndRedacted(f *testing.F) {
 	server, err := NewServer(
 		Config{PublicURL: "https://gateway.example.test", MaxRequestBodyBytes: 256}, BuildInfo{},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
-		WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(*http.Request) (controlplaneapi.Principal, *controlplaneapi.Error) {
-			return controlplaneapi.Principal{Subject: "fuzz-principal"}, nil
+		WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(*http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
+			return controlplaneapi.Identity{Subject: "fuzz-identity"}, nil
 		})),
 		WithAuthorizer(policy),
-		WithAPIRoutes(testEndpoint(EndpointFunc(func(ctx *echo.Context, _ controlplaneapi.Principal) *controlplaneapi.Error {
+		WithAPIRoutes(testEndpoint(EndpointFunc(func(ctx *echo.Context, _ controlplaneapi.Identity) *controlplaneapi.Error {
 			request := ctx.Request()
 			if request.Method == http.MethodPost {
 				var body struct {

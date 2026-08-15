@@ -13,12 +13,12 @@ import (
 )
 
 func createOAuthGrant(t *testing.T, ctx context.Context, store *storage.Store,
-	authorizationID, principalID, deviceID string, signatureByte byte, createdAt, expiresAt time.Time,
+	authorizationID, identityID, deviceID string, signatureByte byte, createdAt, expiresAt time.Time,
 ) {
 	t.Helper()
 	if err := store.OAuthSessions().Create(ctx, storage.OAuthSession{
 		Kind: "access_token", SignatureHash: bytes.Repeat([]byte{signatureByte}, 32), RequestID: authorizationID,
-		PrincipalID: principalID, ClientID: "e2e-client", DeviceID: deviceID,
+		IdentityID: identityID, ClientID: "e2e-client", DeviceID: deviceID,
 		RequestJSON: json.RawMessage(`{}`), CreatedAt: createdAt, ExpiresAt: expiresAt,
 	}); err != nil {
 		t.Fatal(err)

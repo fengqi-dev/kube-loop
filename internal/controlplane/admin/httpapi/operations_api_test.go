@@ -3,13 +3,19 @@ package httpapi
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	adminauthorization "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/authorization"
+	adminoperations "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/operations"
+	adminsession "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/session"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
 	"github.com/google/uuid"
@@ -25,10 +31,52 @@ func (noopRecoveryRunner) RunOnce(context.Context) (map[string]int, error) {
 	return map[string]int{"preview": 0}, nil
 }
 
+func newPolicyTestHandler(t *testing.T) (*Handler, *storage.Store, *adminauthorization.Engine) {
+	t.Helper()
+	store, err := storage.Open(context.Background(), storage.Config{Backend: storage.BackendSQLite, SQLitePath: filepath.Join(t.TempDir(), "management.db")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	generation := base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{9}, 32))
+	verifier := &testVerifier{enabled: true, generation: generation}
+	sessions, err := adminsession.New(store, verifier)
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine, err := adminauthorization.NewDenyAll(adminauthorization.WithBreakGlass(verifier))
+	if err != nil {
+		t.Fatal(err)
+	}
+	operations, err := adminoperations.New(store, noopSessionRuntime{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := operations.ConfigureRecovery(noopRecoveryRunner{}); err != nil {
+		t.Fatal(err)
+	}
+	handler, err := New(Config{PublicURL: "https://gateway.example"}, sessions,
+		WithReadAPI(engine, store, BuildInfo{Version: "test", Commit: "test", ProtocolMin: "2.0", ProtocolMax: "2.0"}),
+		WithOperationsAPI(operations))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return handler, store, engine
+}
+
+func exchangeBreakGlassSession(t *testing.T, handler *Handler) (*http.Cookie, string) {
+	t.Helper()
+	issued, err := handler.sessions.ExchangeBreakGlass(context.Background(), netip.MustParseAddr("192.0.2.20"), []byte("valid"), uuid.NewString())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &http.Cookie{Name: SessionCookieName, Value: issued.SessionToken}, issued.CSRFToken
+}
+
 func TestOperationsAPIEnforcesHeadersAndPersistsActions(t *testing.T) {
 	handler, store, _ := newPolicyTestHandler(t)
 	cookie, csrf := exchangeBreakGlassSession(t, handler)
-	principal, session := seedOperationSession(t, store)
+	identity, session := seedOperationSession(t, store)
 
 	missingCSRF := operationWrite(t, handler, cookie, "", "/sessions/"+session.ID+"/stop", `"1"`,
 		"operation-http-stop-0001", map[string]string{"reason": "incident response"})
@@ -48,14 +96,14 @@ func TestOperationsAPIEnforcesHeadersAndPersistsActions(t *testing.T) {
 	}
 
 	grant := storage.OAuthSession{
-		Kind: "refresh_token", SignatureHash: bytes.Repeat([]byte{7}, 32), RequestID: uuid.NewString(), PrincipalID: principal.ID,
+		Kind: "refresh_token", SignatureHash: bytes.Repeat([]byte{7}, 32), RequestID: uuid.NewString(), IdentityID: identity.ID,
 		ClientID: "desktop", DeviceID: "browser", RequestJSON: []byte(`{}`), Status: "active", CreatedAt: time.Now().UTC().Add(-time.Hour), ExpiresAt: time.Now().UTC().Add(time.Hour),
 	}
 	if err := store.OAuthSessions().Create(context.Background(), grant); err != nil {
 		t.Fatal(err)
 	}
 	revokedGrant := operationWrite(t, handler, cookie, csrf,
-		"/principals/"+principal.ID+"/oauth-grants/"+grant.RequestID+"/revoke", "",
+		"/identities/"+identity.ID+"/oauth-grants/"+grant.RequestID+"/revoke", "",
 		"operation-http-grant-001", map[string]string{"reason": "revoke compromised authorization"})
 	if revokedGrant.Code != http.StatusOK ||
 		!strings.Contains(revokedGrant.Body.String(), `"authorizationId":"`+grant.RequestID+`"`) ||
@@ -71,10 +119,10 @@ func TestOperationsAPIEnforcesHeadersAndPersistsActions(t *testing.T) {
 	if err := store.OAuthSessions().Create(context.Background(), grant); err != nil {
 		t.Fatal(err)
 	}
-	revoked := operationWrite(t, handler, cookie, csrf, "/principals/"+principal.ID+"/revoke", "",
+	revoked := operationWrite(t, handler, cookie, csrf, "/identities/"+identity.ID+"/revoke", "",
 		"operation-http-revoke-01", map[string]string{"reason": "disable compromised identity"})
 	if revoked.Code != http.StatusOK || !strings.Contains(revoked.Body.String(), `"revokedCount":1`) {
-		t.Fatalf("Principal revoke status=%d body=%s", revoked.Code, revoked.Body.String())
+		t.Fatalf("Identity revoke status=%d body=%s", revoked.Code, revoked.Body.String())
 	}
 	active, err = store.OAuthSessions().RequestActive(context.Background(), grant.RequestID, time.Now().UTC())
 	if err != nil || active {
@@ -137,11 +185,11 @@ func operationWrite(
 	return recorder
 }
 
-func seedOperationSession(t *testing.T, store *storage.Store) (storage.Principal, storage.Session) {
+func seedOperationSession(t *testing.T, store *storage.Store) (storage.Identity, storage.Session) {
 	t.Helper()
 	now := time.Now().UTC()
-	principal, err := store.Principals().Upsert(context.Background(), storage.Principal{
-		ID: uuid.NewString(), Provider: "oidc", ExternalID: uuid.NewString(), CreatedAt: now,
+	identity, err := store.Identities().Create(context.Background(), storage.Identity{
+		ID: uuid.NewString(), Type: "human", DisplayName: "Test Identity", Status: "active", CreatedAt: now,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -156,12 +204,12 @@ func seedOperationSession(t *testing.T, store *storage.Store) (storage.Principal
 	specJSON, _ := networkspec.CanonicalJSON(spec)
 	specHash, _ := networkspec.Hash(spec)
 	session := storage.Session{
-		ID: uuid.NewString(), PrincipalID: principal.ID, DeviceID: "device", ClusterID: "cluster",
+		ID: uuid.NewString(), IdentityID: identity.ID, DeviceID: "device", ClusterID: "cluster",
 		Namespace: "default", State: "active", Generation: 1, NetworkSpec: json.RawMessage(specJSON), NetworkSpecHash: specHash,
 		CreatedAt: now, UpdatedAt: now, LastHeartbeatAt: now, ExpiresAt: now.Add(time.Hour),
 	}
 	if err := store.Sessions().Create(context.Background(), session); err != nil {
 		t.Fatal(err)
 	}
-	return principal, session
+	return identity, session
 }

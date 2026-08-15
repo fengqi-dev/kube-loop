@@ -21,7 +21,7 @@ import (
 
 func (handler *Service) stream(
 	ctx *echo.Context,
-	principal controlplaneapi.Principal,
+	identity controlplaneapi.Identity,
 	session sessionapi.ActiveSession,
 	taskID string,
 ) *controlplaneapi.Error {
@@ -31,7 +31,7 @@ func (handler *Service) stream(
 		return notFound()
 	}
 	task, err := handler.storage.Tasks().GetByID(request.Context(), taskID)
-	if err != nil || !owned(task, principal, session) {
+	if err != nil || !owned(task, identity, session) {
 		return notFound()
 	}
 	if task.State != remotetask.Pending {
@@ -51,7 +51,7 @@ func (handler *Service) stream(
 	}
 	defer connection.CloseNow()
 	connection.SetReadLimit(filestream.MaximumData + 1)
-	leaseContext, cancel, err := streamlease.Start(request.Context(), handler.storage, principal, session, streamlease.Config{
+	leaseContext, cancel, err := streamlease.Start(request.Context(), handler.storage, identity, session, streamlease.Config{
 		Now: handler.now, CheckInterval: handler.credentialCheckInterval,
 		Runtime: streamlease.RuntimeFrom(handler.sessions), TaskID: task.ID, HeartbeatTask: true,
 		Authorizer: handler.authorizer, Authorization: authorization.Request{
@@ -73,11 +73,11 @@ func (handler *Service) stream(
 	var transferErr error
 	if spec.Direction == DirectionUpload {
 		outcome, transferErr = handler.upload(
-			leaseContext, cancel, connection, &writeMu, principal, session.Namespace, task.ID, spec,
+			leaseContext, cancel, connection, &writeMu, identity, session.Namespace, task.ID, spec,
 		)
 	} else {
 		outcome, transferErr = handler.download(
-			leaseContext, request.Context(), cancel, connection, &writeMu, principal, session.Namespace, task.ID, spec,
+			leaseContext, request.Context(), cancel, connection, &writeMu, identity, session.Namespace, task.ID, spec,
 		)
 	}
 	cancelled := leaseContext.Err() != nil || errors.Is(transferErr, context.Canceled)
@@ -103,7 +103,7 @@ func (handler *Service) upload(
 	cancel context.CancelFunc,
 	connection *websocket.Conn,
 	writeMu *sync.Mutex,
-	principal controlplaneapi.Principal,
+	identity controlplaneapi.Identity,
 	namespace, taskID string,
 	spec Spec,
 ) (Outcome, error) {
@@ -116,7 +116,7 @@ func (handler *Service) upload(
 		}
 		inputResult <- err
 	}()
-	outcome, transferErr := handler.executor.Upload(leaseContext, principal, namespace, taskID, spec, reader)
+	outcome, transferErr := handler.executor.Upload(leaseContext, identity, namespace, taskID, spec, reader)
 	_ = reader.CloseWithError(transferErr)
 	inputErr := <-inputResult
 	if transferErr != nil {
@@ -130,7 +130,7 @@ func (handler *Service) download(
 	cancel context.CancelFunc,
 	connection *websocket.Conn,
 	writeMu *sync.Mutex,
-	principal controlplaneapi.Principal,
+	identity controlplaneapi.Identity,
 	namespace, taskID string,
 	spec Spec,
 ) (Outcome, error) {
@@ -140,7 +140,7 @@ func (handler *Service) download(
 		transferred: spec.Offset, maximum: handler.maximumBytes,
 	}
 	outcome, err := handler.executor.Download(
-		leaseContext, principal, namespace, taskID, spec,
+		leaseContext, identity, namespace, taskID, spec,
 		func(metadata DownloadMetadata) error {
 			output.total = metadata.Total
 			return output.progress()

@@ -47,7 +47,7 @@ already stored for that Profile. Token refresh follows the normal typed SDK
 path. Gateway policy, namespace authorization, Kubernetes SSAR, Session
 ownership, Task ownership, and token-family revocation therefore apply exactly
 as they do to the desktop UI. MCP has no independent Kubernetes identity and
-cannot obtain permissions beyond the signed-in principal.
+cannot obtain permissions beyond the signed-in identity.
 
 ### Explicit mutation identity
 

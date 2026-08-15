@@ -53,19 +53,19 @@ type failNextRestoreMutator struct {
 
 func (mutator *failNextRestoreMutator) Capture(
 	ctx context.Context,
-	principal controlplaneapi.Principal,
+	identity controlplaneapi.Identity,
 	snapshot *servicebinding.ServiceInterceptSnapshot,
 ) error {
-	return mutator.delegate.Capture(ctx, principal, snapshot)
+	return mutator.delegate.Capture(ctx, identity, snapshot)
 }
 
 func (mutator *failNextRestoreMutator) Apply(
 	ctx context.Context,
-	principal controlplaneapi.Principal,
+	identity controlplaneapi.Identity,
 	snapshot servicebinding.ServiceInterceptSnapshot,
 	taskID string,
 ) error {
-	return mutator.delegate.Apply(ctx, principal, snapshot, taskID)
+	return mutator.delegate.Apply(ctx, identity, snapshot, taskID)
 }
 
 func (mutator *failNextRestoreMutator) Restore(
@@ -127,7 +127,7 @@ func TestRealExchangeLifecycleAndStaleOwnerRecovery(t *testing.T) {
 	harness.WaitClusterProbe(t, ctx, kubeClient, service.Spec.ClusterIP, 9090, "udp", "baseline", "cluster-udp:")
 
 	gatewayIP := reachableHostIP(t, ctx, kubeClient)
-	stateStore, principal, activeSession, remoteSession := exchangeLifecycleState(
+	stateStore, identity, activeSession, remoteSession := exchangeLifecycleState(
 		t, ctx, service.Spec.ClusterIP,
 	)
 	provider, err := controlplanekubernetes.NewForRESTConfig(kubeRESTConfig(t), controlplanekubernetes.Config{})
@@ -155,7 +155,7 @@ func TestRealExchangeLifecycleAndStaleOwnerRecovery(t *testing.T) {
 	mutator := &failNextRestoreMutator{delegate: realMutator}
 	handler, err := exchangeapi.New(
 		stateStore,
-		e2eExecSessionValidator{principalID: principal.Subject, session: activeSession},
+		e2eExecSessionValidator{identityID: identity.Subject, session: activeSession},
 		resolver,
 		mutator,
 		exchangeapi.Config{
@@ -165,7 +165,7 @@ func TestRealExchangeLifecycleAndStaleOwnerRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server, gatewayClient := startExchangeLifecycleController(t, handler, principal, activeSession, gatewayIP)
+	server, gatewayClient := startExchangeLifecycleController(t, handler, identity, activeSession, gatewayIP)
 	defer server.Close()
 
 	serverProfile := profile.Profile{ID: "exchange-e2e", BaseURL: server.URL}
@@ -173,8 +173,8 @@ func TestRealExchangeLifecycleAndStaleOwnerRecovery(t *testing.T) {
 		profileID: serverProfile.ID,
 		credential: credentials.Credential{
 			TokenType: "Bearer", AccessToken: exchangeLifecycleAccessToken,
-			AccessExpiresAt: principal.AccessExpiresAt, RefreshToken: "unused",
-			RefreshExpiresAt: principal.AccessExpiresAt, DeviceID: principal.DeviceID,
+			AccessExpiresAt: identity.AccessExpiresAt, RefreshToken: "unused",
+			RefreshExpiresAt: identity.AccessExpiresAt, DeviceID: identity.DeviceID,
 		},
 	}
 	remoteClient, err := remote.New(credentialStore, e2eTokenRefresher{}, remote.Config{HTTPClient: gatewayClient})
@@ -278,7 +278,7 @@ func exchangeLifecycleState(
 	t *testing.T,
 	ctx context.Context,
 	serviceIP string,
-) (*storage.Store, controlplaneapi.Principal, sessionapi.ActiveSession, remote.Session) {
+) (*storage.Store, controlplaneapi.Identity, sessionapi.ActiveSession, remote.Session) {
 	t.Helper()
 	stateStore, err := storage.Open(ctx, storage.Config{
 		Backend: storage.BackendSQLite, SQLitePath: filepath.Join(t.TempDir(), "exchange-lifecycle.db"),
@@ -288,16 +288,16 @@ func exchangeLifecycleState(
 	}
 	t.Cleanup(func() { _ = stateStore.Close() })
 	now := time.Now().UTC()
-	principalID, authorizationID, sessionID := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	identityID, authorizationID, sessionID := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	deviceID := "exchange-e2e-device"
-	if _, err := stateStore.Principals().Upsert(ctx, storage.Principal{
-		ID: principalID, Provider: "e2e", ExternalID: "exchange-lifecycle",
+	if _, err := stateStore.Identities().Create(ctx, storage.Identity{
+		ID: identityID, Type: "human", DisplayName: "Test Identity", Status: "active",
 		CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatal(err)
 	}
 	expiresAt := now.Add(10 * time.Minute)
-	createOAuthGrant(t, ctx, stateStore, authorizationID, principalID, deviceID, 8, now, expiresAt)
+	createOAuthGrant(t, ctx, stateStore, authorizationID, identityID, deviceID, 8, now, expiresAt)
 	network, err := networkspec.Normalize(networkspec.Spec{ServiceIPs: []string{serviceIP}})
 	if err != nil {
 		t.Fatal(err)
@@ -305,15 +305,15 @@ func exchangeLifecycleState(
 	networkJSON, _ := networkspec.CanonicalJSON(network)
 	networkHash, _ := networkspec.Hash(network)
 	if err := stateStore.Sessions().Create(ctx, storage.Session{
-		ID: sessionID, PrincipalID: principalID, DeviceID: deviceID, ClusterID: "minikube",
+		ID: sessionID, IdentityID: identityID, DeviceID: deviceID, ClusterID: "minikube",
 		Namespace: harness.EchoNamespace, State: "active", Generation: 1,
 		NetworkSpec: networkJSON, NetworkSpecHash: networkHash,
 		CreatedAt: now, UpdatedAt: now, LastHeartbeatAt: now, ExpiresAt: expiresAt,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	principal := controlplaneapi.Principal{
-		Subject: principalID, DeviceID: deviceID, AuthorizationID: authorizationID, AccessExpiresAt: expiresAt,
+	identity := controlplaneapi.Identity{
+		Subject: identityID, DeviceID: deviceID, AuthorizationID: authorizationID, AccessExpiresAt: expiresAt,
 	}
 	active := sessionapi.ActiveSession{
 		ID: sessionID, Namespace: harness.EchoNamespace, Generation: 1,
@@ -324,20 +324,20 @@ func exchangeLifecycleState(
 		CreatedAt: now, UpdatedAt: now, LastHeartbeatAt: now, ExpiresAt: expiresAt,
 		NetworkSpec: network, NetworkSpecHash: networkHash,
 	}
-	return stateStore, principal, active, clientSession
+	return stateStore, identity, active, clientSession
 }
 
 func startExchangeLifecycleController(
 	t *testing.T,
 	handler *exchangeapi.Service,
-	principal controlplaneapi.Principal,
+	identity controlplaneapi.Identity,
 	session sessionapi.ActiveSession,
 	gatewayIP string,
 ) (*httptest.Server, *http.Client) {
 	t.Helper()
 	gateway := startE2ETrafficGateway(t, gatewayIP, handler, nil)
 	policy, err := authorization.New(authorization.Policy{Rules: []authorization.Rule{{
-		ID: "e2e-exchange", Subjects: []string{principal.Subject},
+		ID: "e2e-exchange", Subjects: []string{identity.Subject},
 		Namespaces: []string{harness.EchoNamespace},
 		Operations: []string{"create", "get", "delete"}, ResourceKinds: []string{"exchanges", "relay-tickets"},
 	}}})
@@ -347,15 +347,15 @@ func startExchangeLifecycleController(
 	server, err := controlplane.NewServer(
 		controlplane.Config{PublicURL: "http://127.0.0.1"}, controlplane.BuildInfo{},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
-		controlplane.WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(request *http.Request) (controlplaneapi.Principal, *controlplaneapi.Error) {
+		controlplane.WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(request *http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
 			if request.Header.Get("Authorization") != "Bearer "+exchangeLifecycleAccessToken {
-				return controlplaneapi.Principal{}, &controlplaneapi.Error{Code: controlplaneapi.CodeUnauthenticated, Message: "invalid e2e access token"}
+				return controlplaneapi.Identity{}, &controlplaneapi.Error{Code: controlplaneapi.CodeUnauthenticated, Message: "invalid e2e access token"}
 			}
-			return principal, nil
+			return identity, nil
 		})),
 		controlplane.WithAuthorizer(policy), controlplane.WithAPIRoutes(controlplane.APIRoutes{
 			Tickets: ticketapi.NewRoutes(gateway.tickets, e2eExecSessionValidator{
-				principalID: principal.Subject, session: session,
+				identityID: identity.Subject, session: session,
 			}).Endpoints(),
 			Exchanges: exchangeapi.NewRoutes(handler).Endpoints(),
 		}),

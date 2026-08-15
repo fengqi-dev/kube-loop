@@ -82,7 +82,7 @@ type crashCapabilityDiscoverer struct{}
 
 func (crashCapabilityDiscoverer) DiscoverCapabilities(
 	context.Context,
-	controlplaneapi.Principal,
+	controlplaneapi.Identity,
 	string,
 ) (capability.Snapshot, *controlplaneapi.Error) {
 	return capability.Snapshot{}, nil
@@ -90,7 +90,7 @@ func (crashCapabilityDiscoverer) DiscoverCapabilities(
 
 func (discoverer crashNetworkDiscoverer) Discover(
 	context.Context,
-	controlplaneapi.Principal,
+	controlplaneapi.Identity,
 	string,
 ) (networkspec.Spec, error) {
 	return discoverer.spec, nil
@@ -108,7 +108,7 @@ func (crashBindingManager) Delete(context.Context, string, string) error { retur
 
 func (crashTargetResolver) Resolve(
 	context.Context,
-	controlplaneapi.Principal,
+	controlplaneapi.Identity,
 	string,
 	portforwardservice.Spec,
 ) (portforwardservice.Target, error) {
@@ -126,11 +126,11 @@ func TestCrashedClientTaskIsReclaimedAfterSessionExpiry(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = stateStore.Close() })
-	principalID := uuid.NewString()
+	identityID := uuid.NewString()
 	sessionID := uuid.NewString()
 	deviceID := "crashed-desktop"
-	if _, err := stateStore.Principals().Upsert(ctx, storage.Principal{
-		ID: principalID, Provider: "e2e", ExternalID: principalID, CreatedAt: now, UpdatedAt: now,
+	if _, err := stateStore.Identities().Create(ctx, storage.Identity{
+		ID: identityID, Type: "human", DisplayName: "Test Identity", Status: "active", CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -147,7 +147,7 @@ func TestCrashedClientTaskIsReclaimedAfterSessionExpiry(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := stateStore.Sessions().Create(ctx, storage.Session{
-		ID: sessionID, PrincipalID: principalID, DeviceID: deviceID, ClusterID: "cluster-a",
+		ID: sessionID, IdentityID: identityID, DeviceID: deviceID, ClusterID: "cluster-a",
 		Namespace: "development", State: "active", Generation: 1,
 		NetworkSpec: networkJSON, NetworkSpecHash: networkHash,
 		CreatedAt: now, UpdatedAt: now, LastHeartbeatAt: now, ExpiresAt: expiresAt,
@@ -168,7 +168,7 @@ func TestCrashedClientTaskIsReclaimedAfterSessionExpiry(t *testing.T) {
 		t.Fatal(err)
 	}
 	policy, err := authorization.New(authorization.Policy{Rules: []authorization.Rule{{
-		ID: "port-forward", Subjects: []string{principalID}, Namespaces: []string{"development"},
+		ID: "port-forward", Subjects: []string{identityID}, Namespaces: []string{"development"},
 		Operations: []string{"create", "list", "delete"}, ResourceKinds: []string{"port-forwards"},
 	}}})
 	if err != nil {
@@ -177,11 +177,11 @@ func TestCrashedClientTaskIsReclaimedAfterSessionExpiry(t *testing.T) {
 	apiServer, err := controlplane.NewServer(
 		controlplane.Config{PublicURL: "http://127.0.0.1"}, controlplane.BuildInfo{},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
-		controlplane.WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(request *http.Request) (controlplaneapi.Principal, *controlplaneapi.Error) {
+		controlplane.WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(request *http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
 			if request.Header.Get("Authorization") != "Bearer crash-access" {
-				return controlplaneapi.Principal{}, &controlplaneapi.Error{Code: controlplaneapi.CodeUnauthenticated, Message: "invalid token"}
+				return controlplaneapi.Identity{}, &controlplaneapi.Error{Code: controlplaneapi.CodeUnauthenticated, Message: "invalid token"}
 			}
-			return controlplaneapi.Principal{Subject: principalID, DeviceID: deviceID}, nil
+			return controlplaneapi.Identity{Subject: identityID, DeviceID: deviceID}, nil
 		})),
 		controlplane.WithAuthorizer(policy), controlplane.WithAPIRoutes(controlplane.APIRoutes{PortForwards: portforwardapi.NewRoutes(portForwardService, sessions).Endpoints()}),
 	)

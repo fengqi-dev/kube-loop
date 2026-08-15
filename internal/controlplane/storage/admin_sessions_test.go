@@ -22,11 +22,11 @@ func testAdminSessionRepositoryConformance(t *testing.T, store *Store) {
 	t.Helper()
 	ctx := context.Background()
 	now := time.Date(2026, 8, 10, 16, 0, 0, 0, time.UTC)
-	principalID, authorizationID := seedAdminSessionIdentity(t, store, now)
+	identityID, authorizationID := seedAdminSessionIdentity(t, store, now)
 	idHash := sha256.Sum256([]byte("management-session-id"))
 	csrfHash := sha256.Sum256([]byte("management-csrf-token"))
 	session := AdminSession{
-		IDHash: idHash[:], PrincipalID: principalID, AuthorizationID: authorizationID, AuthenticationType: "normal",
+		IDHash: idHash[:], IdentityID: identityID, AuthorizationID: authorizationID, AuthenticationType: "normal",
 		CSRFTokenHash: csrfHash[:], CreatedAt: now, LastSeenAt: now,
 		IdleExpiresAt: now.Add(15 * time.Minute), AbsoluteExpiresAt: now.Add(8 * time.Hour),
 	}
@@ -34,7 +34,7 @@ func testAdminSessionRepositoryConformance(t *testing.T, store *Store) {
 		t.Fatal(err)
 	}
 	got, err := store.AdminSessions().GetByHash(ctx, idHash[:])
-	if err != nil || got.PrincipalID != principalID || got.AuthorizationID != authorizationID || got.AuthenticationType != "normal" ||
+	if err != nil || got.IdentityID != identityID || got.AuthorizationID != authorizationID || got.AuthenticationType != "normal" ||
 		got.SchemaVersion != ObjectSchemaVersion || string(got.CSRFTokenHash) != string(csrfHash[:]) {
 		t.Fatalf("stored management session = %#v, error = %v", got, err)
 	}
@@ -65,7 +65,7 @@ func testAdminSessionRepositoryConformance(t *testing.T, store *Store) {
 	}
 }
 
-func TestBreakGlassAdminSessionRequiresGenerationAndNoPrincipal(t *testing.T) {
+func TestBreakGlassAdminSessionRequiresGenerationAndNoIdentity(t *testing.T) {
 	store := openSQLiteTestStore(t, filepath.Join(t.TempDir(), "break-glass-session.db"))
 	now := time.Date(2026, 8, 10, 16, 30, 0, 0, time.UTC)
 	idHash := sha256.Sum256([]byte("break-glass-session"))
@@ -80,15 +80,15 @@ func TestBreakGlassAdminSessionRequiresGenerationAndNoPrincipal(t *testing.T) {
 		t.Fatal(err)
 	}
 	stored, err := store.AdminSessions().GetByHash(context.Background(), idHash[:])
-	if err != nil || stored.PrincipalID != "" || stored.AuthorizationID != "" || stored.BreakGlassGeneration != session.BreakGlassGeneration {
+	if err != nil || stored.IdentityID != "" || stored.AuthorizationID != "" || stored.BreakGlassGeneration != session.BreakGlassGeneration {
 		t.Fatalf("stored break-glass session = %#v, error = %v", stored, err)
 	}
 	invalid := session
 	invalid.IDHash = append([]byte(nil), idHash[:]...)
 	invalid.IDHash[0]++
-	invalid.PrincipalID = uuid.NewString()
+	invalid.IdentityID = uuid.NewString()
 	if err := store.AdminSessions().Create(context.Background(), invalid); err == nil {
-		t.Fatal("break-glass session with a Principal succeeded")
+		t.Fatal("break-glass session with a Identity succeeded")
 	}
 	invalid = session
 	invalid.IDHash = append([]byte(nil), idHash[:]...)
@@ -102,14 +102,14 @@ func TestBreakGlassAdminSessionRequiresGenerationAndNoPrincipal(t *testing.T) {
 func TestAdminSessionRepositoryRejectsInvalidHashesAndLifetime(t *testing.T) {
 	store := openSQLiteTestStore(t, filepath.Join(t.TempDir(), "invalid-admin-session.db"))
 	now := time.Now().UTC()
-	principalID, authorizationID := seedAdminSessionIdentity(t, store, now)
+	identityID, authorizationID := seedAdminSessionIdentity(t, store, now)
 	validHash := make([]byte, sha256Size)
 	tests := []AdminSession{
-		{IDHash: []byte("short"), CSRFTokenHash: validHash, PrincipalID: principalID, AuthorizationID: authorizationID, AuthenticationType: "normal", CreatedAt: now, LastSeenAt: now, IdleExpiresAt: now.Add(time.Minute), AbsoluteExpiresAt: now.Add(time.Hour)},
-		{IDHash: validHash, CSRFTokenHash: []byte("short"), PrincipalID: principalID, AuthorizationID: authorizationID, AuthenticationType: "normal", CreatedAt: now, LastSeenAt: now, IdleExpiresAt: now.Add(time.Minute), AbsoluteExpiresAt: now.Add(time.Hour)},
+		{IDHash: []byte("short"), CSRFTokenHash: validHash, IdentityID: identityID, AuthorizationID: authorizationID, AuthenticationType: "normal", CreatedAt: now, LastSeenAt: now, IdleExpiresAt: now.Add(time.Minute), AbsoluteExpiresAt: now.Add(time.Hour)},
+		{IDHash: validHash, CSRFTokenHash: []byte("short"), IdentityID: identityID, AuthorizationID: authorizationID, AuthenticationType: "normal", CreatedAt: now, LastSeenAt: now, IdleExpiresAt: now.Add(time.Minute), AbsoluteExpiresAt: now.Add(time.Hour)},
 		{IDHash: validHash, CSRFTokenHash: validHash, AuthenticationType: "normal", CreatedAt: now, LastSeenAt: now, IdleExpiresAt: now.Add(time.Minute), AbsoluteExpiresAt: now.Add(time.Hour)},
-		{IDHash: validHash, CSRFTokenHash: validHash, PrincipalID: principalID, AuthorizationID: authorizationID, AuthenticationType: "unknown", CreatedAt: now, LastSeenAt: now, IdleExpiresAt: now.Add(time.Minute), AbsoluteExpiresAt: now.Add(time.Hour)},
-		{IDHash: validHash, CSRFTokenHash: validHash, PrincipalID: principalID, AuthorizationID: authorizationID, AuthenticationType: "normal", CreatedAt: now, LastSeenAt: now, IdleExpiresAt: now.Add(2 * time.Hour), AbsoluteExpiresAt: now.Add(time.Hour)},
+		{IDHash: validHash, CSRFTokenHash: validHash, IdentityID: identityID, AuthorizationID: authorizationID, AuthenticationType: "unknown", CreatedAt: now, LastSeenAt: now, IdleExpiresAt: now.Add(time.Minute), AbsoluteExpiresAt: now.Add(time.Hour)},
+		{IDHash: validHash, CSRFTokenHash: validHash, IdentityID: identityID, AuthorizationID: authorizationID, AuthenticationType: "normal", CreatedAt: now, LastSeenAt: now, IdleExpiresAt: now.Add(2 * time.Hour), AbsoluteExpiresAt: now.Add(time.Hour)},
 	}
 	for index, session := range tests {
 		session.IDHash = append([]byte(nil), session.IDHash...)
@@ -124,9 +124,9 @@ func TestAdminSessionRepositoryRejectsInvalidHashesAndLifetime(t *testing.T) {
 
 func seedAdminSessionIdentity(t *testing.T, store *Store, now time.Time) (string, string) {
 	t.Helper()
-	principalID := uuid.NewString()
-	if _, err := store.Principals().Upsert(context.Background(), Principal{
-		ID: principalID, Provider: "test", ExternalID: principalID, CreatedAt: now, UpdatedAt: now,
+	identityID := uuid.NewString()
+	if _, err := store.Identities().Create(context.Background(), Identity{
+		ID: identityID, Type: "human", DisplayName: "Test User", Status: "active", CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -134,10 +134,10 @@ func seedAdminSessionIdentity(t *testing.T, store *Store, now time.Time) (string
 	signatureHash := sha256.Sum256([]byte("access-" + authorizationID))
 	if err := store.OAuthSessions().Create(context.Background(), OAuthSession{
 		Kind: "access_token", SignatureHash: signatureHash[:], RequestID: authorizationID,
-		PrincipalID: principalID, ClientID: "kubeloop-management", DeviceID: "management-device",
+		IdentityID: identityID, ClientID: "kubeloop-management", DeviceID: "management-device",
 		RequestJSON: json.RawMessage(`{}`), CreatedAt: now, ExpiresAt: now.Add(24 * time.Hour),
 	}); err != nil {
 		t.Fatal(err)
 	}
-	return principalID, authorizationID
+	return identityID, authorizationID
 }

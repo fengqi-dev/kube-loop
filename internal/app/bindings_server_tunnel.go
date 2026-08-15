@@ -19,7 +19,10 @@ func (a *App) ConnectServerDataPlane(profileID, mode string) (clientdataplane.St
 	}
 	session, err := a.remoteSessions.Current(serverProfile.ID)
 	if err != nil {
-		return clientdataplane.Status{}, err
+		session, err = a.remoteSessions.Connect(a.context(), serverProfile, session.Namespace)
+		if err != nil {
+			return clientdataplane.Status{}, err
+		}
 	}
 	mode = strings.ToLower(strings.TrimSpace(mode))
 	if mode != "socks" && mode != "tun" {

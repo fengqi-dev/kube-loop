@@ -26,6 +26,13 @@ func TestServerNetworkSettingsPersistWithoutActiveDataPlane(t *testing.T) {
 	if settings.DNSNamespace != "development" {
 		t.Fatalf("DNS namespace = %q", settings.DNSNamespace)
 	}
+	settings, err = application.SetServerSOCKSPort("service-1", 2080)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if settings.SOCKSPort != 2080 {
+		t.Fatalf("SOCKS port = %d", settings.SOCKSPort)
+	}
 	settings, err = application.SetServerHostAliases("service-1", []clientprofile.HostAlias{
 		{Domain: "API.Development.SVC.Cluster.Local.", IP: "10.96.0.20"},
 	})
@@ -40,7 +47,7 @@ func TestServerNetworkSettingsPersistWithoutActiveDataPlane(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stored.DNSNamespace != "development" || len(stored.HostAliases) != 1 {
+	if stored.DNSNamespace != "development" || stored.SOCKSPort != 2080 || len(stored.HostAliases) != 1 {
 		t.Fatalf("stored settings = %#v", stored)
 	}
 }
@@ -64,6 +71,9 @@ func TestServerNetworkSettingsRejectInvalidValues(t *testing.T) {
 		{Domain: "api.example", IP: "2001:db8::1"},
 	}); err == nil {
 		t.Fatal("IPv6 host alias was accepted")
+	}
+	if _, err := application.SetServerSOCKSPort("service-1", 0); err == nil {
+		t.Fatal("invalid SOCKS port was accepted")
 	}
 	stored, err := application.GetServerNetworkSettings("service-1")
 	if err != nil {

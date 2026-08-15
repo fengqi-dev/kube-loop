@@ -57,13 +57,9 @@ func NewProvider(storage *Storage, raw Config) (fosite.OAuth2Provider, error) {
 	}
 	return compose.Compose(config, storage, strategy,
 		compose.OAuth2AuthorizeExplicitFactory,
-		compose.OAuth2AuthorizeImplicitFactory,
 		compose.OAuth2RefreshTokenGrantFactory,
-		compose.OAuth2ResourceOwnerPasswordCredentialsFactory,
 		compose.OAuth2ClientCredentialsGrantFactory,
 		compose.OpenIDConnectExplicitFactory,
-		compose.OpenIDConnectImplicitFactory,
-		compose.OpenIDConnectHybridFactory,
 		compose.OpenIDConnectRefreshFactory,
 		compose.OAuth2TokenIntrospectionFactory,
 		compose.OAuth2TokenRevocationFactory,

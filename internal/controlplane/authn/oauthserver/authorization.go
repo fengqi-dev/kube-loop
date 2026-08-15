@@ -9,12 +9,10 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"net/url"
 	"slices"
 	"strings"
 	"time"
 
-	"github.com/fengqi-dev/kube-loop/internal/controlplane/authn"
 	controlstorage "github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 	"github.com/google/uuid"
 	"github.com/ory/fosite"
@@ -29,23 +27,22 @@ type AuthorizationChallenge struct {
 }
 
 type BrowserIdentity struct {
-	Principal controlstorage.Principal
-	AuthTime  time.Time
-}
-
-func (endpoints *Endpoints) ConsentRequired(ctx context.Context, challenge AuthorizationChallenge, principalID string) (bool, error) {
-	if challenge.Trusted {
-		return false, nil
-	}
-	has, err := endpoints.repositories.OAuthConsents().Has(ctx, principalID, challenge.Client.ID, exactScopeHash(challenge.Scopes))
-	return !has, err
+	Identity   controlstorage.Identity
+	ProviderID string
+	Groups     []string
+	AuthTime   time.Time
 }
 
 type authorizationRequestDTO struct {
-	URL              string `json:"url"`
-	UpstreamState    string `json:"upstream_state,omitempty"`
-	UpstreamNonce    string `json:"upstream_nonce,omitempty"`
-	UpstreamVerifier string `json:"upstream_verifier,omitempty"`
+	URL string `json:"url"`
+}
+
+func (endpoints *Endpoints) ConsentRequired(ctx context.Context, challenge AuthorizationChallenge, identityID string) (bool, error) {
+	if challenge.Trusted {
+		return false, nil
+	}
+	has, err := endpoints.repositories.OAuthConsents().Has(ctx, identityID, challenge.Client.ID, exactScopeHash(challenge.Scopes))
+	return !has, err
 }
 
 func (endpoints *Endpoints) BeginAuthorization(ctx context.Context, request *http.Request) (AuthorizationChallenge, error) {
@@ -74,31 +71,34 @@ func (endpoints *Endpoints) BeginAuthorization(ctx context.Context, request *htt
 		return AuthorizationChallenge{}, errors.New("encode OAuth authorization request")
 	}
 	now := time.Now().UTC()
-	err = endpoints.repositories.OAuthAuthorizationRequests().Create(ctx, controlstorage.OAuthAuthorizationRequest{
+	if err := endpoints.repositories.OAuthAuthorizationRequests().Create(ctx, controlstorage.OAuthAuthorizationRequest{
 		ChallengeHash: signatureHash(transaction), RequestID: uuid.NewString(), RequestJSON: raw,
-		CSRFHash: signatureHash(csrf), ProviderID: request.URL.Query().Get("provider"), Status: "pending",
+		CSRFHash: signatureHash(csrf), ProviderID: "local", Status: "pending",
 		CreatedAt: now, ExpiresAt: now.Add(10 * time.Minute),
-	})
-	if err != nil {
+	}); err != nil {
 		return AuthorizationChallenge{}, err
 	}
 	return AuthorizationChallenge{Transaction: transaction, CSRF: csrf, Client: client,
 		Scopes: append([]string(nil), authorizeRequest.GetRequestedScopes()...), Trusted: client.Builtin || client.Trusted}, nil
 }
 
-func (endpoints *Endpoints) AuthenticateLocal(ctx context.Context, username string, password []byte, secondFactor, requestID string) (controlstorage.Principal, error) {
-	if endpoints == nil || endpoints.repositories == nil {
-		return controlstorage.Principal{}, fosite.ErrServerError
+func (endpoints *Endpoints) AuthenticateLocal(ctx context.Context, username string, password []byte, requestID string) (BrowserIdentity, error) {
+	if endpoints == nil || endpoints.repositories == nil || endpoints.localAuth == nil {
+		return BrowserIdentity{}, fosite.ErrServerError
 	}
-	storage, ok := endpoints.providerStorage()
-	if !ok || storage.passwordAuthenticator == nil {
-		return controlstorage.Principal{}, fosite.ErrNotFound
+	identity, err := endpoints.localAuth(ctx, username, password, requestID)
+	if err != nil {
+		return BrowserIdentity{}, err
 	}
-	return storage.passwordAuthenticator(ctx, username, password, secondFactor, requestID, "browser", "")
+	groups, err := endpoints.identityGroups(ctx, identity.ID)
+	if err != nil {
+		return BrowserIdentity{}, err
+	}
+	return BrowserIdentity{Identity: identity, ProviderID: "local", Groups: groups, AuthTime: time.Now().UTC()}, nil
 }
 
-func (endpoints *Endpoints) CreateBrowserSession(ctx context.Context, principal controlstorage.Principal, ttl time.Duration) (string, error) {
-	if principal.ID == "" || principal.Provider == "" || ttl <= 0 {
+func (endpoints *Endpoints) CreateBrowserSession(ctx context.Context, identity BrowserIdentity, ttl time.Duration) (string, error) {
+	if identity.Identity.ID == "" || identity.ProviderID != "local" || ttl <= 0 {
 		return "", fosite.ErrServerError
 	}
 	token, err := randomAuthorizationValue()
@@ -107,7 +107,7 @@ func (endpoints *Endpoints) CreateBrowserSession(ctx context.Context, principal 
 	}
 	now := time.Now().UTC()
 	err = endpoints.repositories.OAuthBrowserSessions().Create(ctx, controlstorage.OAuthBrowserSession{
-		IDHash: signatureHash(token), PrincipalID: principal.ID, ProviderID: principal.Provider,
+		IDHash: signatureHash(token), IdentityID: identity.Identity.ID, ProviderID: "local",
 		AuthTime: now, CreatedAt: now, ExpiresAt: now.Add(ttl),
 	})
 	return token, err
@@ -118,11 +118,18 @@ func (endpoints *Endpoints) BrowserIdentity(ctx context.Context, token string) (
 	if err != nil {
 		return BrowserIdentity{}, err
 	}
-	principal, err := endpoints.repositories.Principals().GetByID(ctx, stored.PrincipalID)
-	if err != nil || principal.Provider != stored.ProviderID {
+	if stored.ProviderID != "local" {
 		return BrowserIdentity{}, fosite.ErrNotFound
 	}
-	return BrowserIdentity{Principal: principal, AuthTime: stored.AuthTime}, nil
+	identity, err := endpoints.repositories.Identities().GetByID(ctx, stored.IdentityID)
+	if err != nil || identity.Status != "active" {
+		return BrowserIdentity{}, fosite.ErrNotFound
+	}
+	groups, err := endpoints.identityGroups(ctx, identity.ID)
+	if err != nil {
+		return BrowserIdentity{}, fosite.ErrNotFound
+	}
+	return BrowserIdentity{Identity: identity, ProviderID: "local", Groups: groups, AuthTime: stored.AuthTime}, nil
 }
 
 func (endpoints *Endpoints) RevokeBrowserSession(ctx context.Context, token string) error {
@@ -136,164 +143,22 @@ func (endpoints *Endpoints) RevokeBrowserSession(ctx context.Context, token stri
 	return err
 }
 
-func (endpoints *Endpoints) BeginUpstreamAuthorization(ctx context.Context, transaction, csrf, providerID string) (string, error) {
-	stored, err := endpoints.repositories.OAuthAuthorizationRequests().Get(ctx, signatureHash(transaction), time.Now().UTC())
-	if err != nil || subtle.ConstantTimeCompare(stored.CSRFHash, signatureHash(csrf)) != 1 || endpoints.registry == nil {
-		return "", fosite.ErrInvalidRequest
+func (endpoints *Endpoints) CompleteAuthorization(rw http.ResponseWriter, request *http.Request, transaction, csrf string, identity BrowserIdentity, allow bool) error {
+	stored, err := endpoints.repositories.OAuthAuthorizationRequests().Consume(request.Context(), signatureHash(transaction), time.Now().UTC())
+	if err != nil || subtle.ConstantTimeCompare(stored.CSRFHash, signatureHash(csrf)) != 1 {
+		return fosite.ErrInvalidRequest
 	}
-	provider, ok := endpoints.registry.Provider(strings.TrimSpace(providerID))
-	if !ok {
-		return "", fosite.ErrInvalidRequest
+	return endpoints.completeStoredAuthorization(rw, request, stored, identity, allow)
+}
+
+func (endpoints *Endpoints) completeStoredAuthorization(rw http.ResponseWriter, request *http.Request, stored controlstorage.OAuthAuthorizationRequest, browserIdentity BrowserIdentity, allow bool) error {
+	now := time.Now().UTC()
+	if browserIdentity.AuthTime.IsZero() {
+		browserIdentity.AuthTime = now
 	}
-	browser, ok := provider.(authn.AuthorizationCodeProvider)
-	if !ok {
-		return "", fosite.ErrInvalidRequest
-	}
-	state, err := randomAuthorizationValue()
-	if err != nil {
-		return "", err
-	}
-	nonce, err := randomAuthorizationValue()
-	if err != nil {
-		return "", err
-	}
-	verifier, err := randomAuthorizationValue()
-	if err != nil {
-		return "", err
-	}
-	challenge := signatureHash(verifier)
-	authorizationURL, err := browser.AuthorizationURL(state, nonce, base64.RawURLEncoding.EncodeToString(challenge))
-	if err != nil {
-		return "", err
-	}
+	identity := browserIdentity.Identity
 	var dto authorizationRequestDTO
 	if json.Unmarshal(stored.RequestJSON, &dto) != nil {
-		return "", fosite.ErrServerError
-	}
-	dto.UpstreamState, dto.UpstreamNonce, dto.UpstreamVerifier = state, nonce, verifier
-	raw, err := json.Marshal(dto)
-	if err != nil {
-		return "", fosite.ErrServerError
-	}
-	if err := endpoints.repositories.OAuthAuthorizationRequests().SetUpstream(ctx, stored.ChallengeHash, signatureHash(state), raw, providerID, time.Now().UTC()); err != nil {
-		return "", fosite.ErrServerError
-	}
-	return authorizationURL, nil
-}
-
-func (endpoints *Endpoints) CompleteUpstreamAuthorization(rw http.ResponseWriter, request *http.Request, providerID, code, state string) error {
-	stored, err := endpoints.repositories.OAuthAuthorizationRequests().ConsumeUpstream(request.Context(), signatureHash(state), time.Now().UTC())
-	if err != nil || stored.ProviderID != providerID || endpoints.registry == nil {
-		return fosite.ErrInvalidRequest
-	}
-	provider, ok := endpoints.registry.Provider(providerID)
-	if !ok {
-		return fosite.ErrInvalidRequest
-	}
-	browser, ok := provider.(authn.AuthorizationCodeProvider)
-	if !ok {
-		return fosite.ErrInvalidRequest
-	}
-	var dto authorizationRequestDTO
-	if json.Unmarshal(stored.RequestJSON, &dto) != nil || subtle.ConstantTimeCompare([]byte(dto.UpstreamState), []byte(state)) != 1 {
-		return fosite.ErrInvalidRequest
-	}
-	identity, err := browser.Exchange(request.Context(), code, dto.UpstreamVerifier, dto.UpstreamNonce)
-	if err != nil || identity.ProviderID != providerID {
-		return fosite.ErrAccessDenied
-	}
-	externalID, err := identity.ExternalID()
-	if err != nil {
-		return fosite.ErrAccessDenied
-	}
-	now := time.Now().UTC()
-	principal, err := endpoints.repositories.Principals().Upsert(request.Context(), controlstorage.Principal{
-		ID: uuid.NewString(), Provider: identity.ProviderID, ExternalID: externalID, DisplayName: identity.DisplayName,
-		Email: identity.Email, Groups: identity.Groups, CreatedAt: now, UpdatedAt: now,
-	})
-	if err != nil {
-		return fosite.ErrServerError
-	}
-	identityToken, err := endpoints.CreateBrowserSession(request.Context(), principal, browserSessionLifetime)
-	if err != nil {
-		return fosite.ErrServerError
-	}
-	http.SetCookie(rw, &http.Cookie{Name: BrowserSessionCookie, Value: identityToken, Path: "/", Secure: true,
-		HttpOnly: true, SameSite: http.SameSiteLaxMode, MaxAge: int(browserSessionLifetime.Seconds())})
-	var originalDTO authorizationRequestDTO
-	if json.Unmarshal(stored.RequestJSON, &originalDTO) != nil {
-		return fosite.ErrServerError
-	}
-	original, err := http.NewRequestWithContext(request.Context(), http.MethodGet, originalDTO.URL, nil)
-	if err != nil {
-		return fosite.ErrServerError
-	}
-	authorizeRequest, err := endpoints.provider.NewAuthorizeRequest(request.Context(), original)
-	if err != nil {
-		return err
-	}
-	client, err := endpoints.repositories.OAuthClients().Get(request.Context(), authorizeRequest.GetClient().GetID())
-	if err != nil {
-		return fosite.ErrInvalidClient
-	}
-	scopes := append([]string(nil), authorizeRequest.GetRequestedScopes()...)
-	consented, err := endpoints.repositories.OAuthConsents().Has(request.Context(), principal.ID, client.ID, exactScopeHash(scopes))
-	if err != nil {
-		return fosite.ErrServerError
-	}
-	if !client.Builtin && !client.Trusted && !consented {
-		transaction, randomErr := randomAuthorizationValue()
-		if randomErr != nil {
-			return fosite.ErrServerError
-		}
-		csrf, randomErr := randomAuthorizationValue()
-		if randomErr != nil {
-			return fosite.ErrServerError
-		}
-		if err := endpoints.repositories.OAuthAuthorizationRequests().Continue(request.Context(), stored.ChallengeHash,
-			signatureHash(transaction), signatureHash(csrf), principal.ID, now); err != nil {
-			return fosite.ErrServerError
-		}
-		query := url.Values{"transaction": {transaction}, "csrf": {csrf}, "client": {client.Name}, "session": {"true"}, "consent": {"true"}, "scope": {strings.Join(scopes, " ")}}
-		http.Redirect(rw, request, "/oauth2/ui/?"+query.Encode(), http.StatusSeeOther)
-		return nil
-	}
-	consumed, err := endpoints.repositories.OAuthAuthorizationRequests().Consume(request.Context(), stored.ChallengeHash, now)
-	if err != nil {
-		return fosite.ErrInvalidRequest
-	}
-	return endpoints.completeStoredAuthorization(rw, request, consumed, principal, false, now)
-}
-
-// providerStorage is deliberately supplied through the Endpoints constructor;
-// it avoids relying on Fosite implementation internals.
-func (endpoints *Endpoints) providerStorage() (*Storage, bool) {
-	return endpoints.storage, endpoints.storage != nil
-}
-
-func (endpoints *Endpoints) CompleteAuthorization(rw http.ResponseWriter, request *http.Request, transaction, csrf string, principal controlstorage.Principal, allow bool, authTimes ...time.Time) error {
-	now := time.Now().UTC()
-	stored, err := endpoints.repositories.OAuthAuthorizationRequests().Consume(request.Context(), signatureHash(transaction), now)
-	if err != nil {
-		return fosite.ErrInvalidRequest
-	}
-	if subtle.ConstantTimeCompare(stored.CSRFHash, signatureHash(csrf)) != 1 {
-		return fosite.ErrInvalidRequest
-	}
-	authTime := time.Time{}
-	if len(authTimes) > 0 {
-		authTime = authTimes[0]
-	}
-	return endpoints.completeStoredAuthorization(rw, request, stored, principal, allow, authTime)
-}
-
-func (endpoints *Endpoints) completeStoredAuthorization(rw http.ResponseWriter, request *http.Request, stored controlstorage.OAuthAuthorizationRequest, principal controlstorage.Principal, allow bool, authTime time.Time) error {
-	now := time.Now().UTC()
-	if authTime.IsZero() {
-		authTime = now
-	}
-	var dto authorizationRequestDTO
-	if err := json.Unmarshal(stored.RequestJSON, &dto); err != nil {
 		return fosite.ErrServerError
 	}
 	original, err := http.NewRequestWithContext(request.Context(), http.MethodGet, dto.URL, nil)
@@ -306,15 +171,14 @@ func (endpoints *Endpoints) completeStoredAuthorization(rw http.ResponseWriter, 
 		return err
 	}
 	client, err := endpoints.repositories.OAuthClients().Get(request.Context(), authorizeRequest.GetClient().GetID())
-	if err != nil {
-		endpoints.provider.WriteAuthorizeError(request.Context(), rw, authorizeRequest, fosite.ErrInvalidClient)
-		return err
+	if err != nil || !endpoints.identityAllowedForClient(request.Context(), identity.ID, client) {
+		endpoints.provider.WriteAuthorizeError(request.Context(), rw, authorizeRequest, fosite.ErrAccessDenied)
+		return fosite.ErrAccessDenied
 	}
 	scopes := append([]string(nil), authorizeRequest.GetRequestedScopes()...)
 	scopeHash := exactScopeHash(scopes)
-	consented, err := endpoints.repositories.OAuthConsents().Has(request.Context(), principal.ID, client.ID, scopeHash)
+	consented, err := endpoints.repositories.OAuthConsents().Has(request.Context(), identity.ID, client.ID, scopeHash)
 	if err != nil {
-		endpoints.provider.WriteAuthorizeError(request.Context(), rw, authorizeRequest, fosite.ErrServerError)
 		return err
 	}
 	if !client.Builtin && !client.Trusted && !consented && !allow {
@@ -322,8 +186,10 @@ func (endpoints *Endpoints) completeStoredAuthorization(rw http.ResponseWriter, 
 		return fosite.ErrAccessDenied
 	}
 	if allow && !client.Builtin && !client.Trusted && !consented {
-		if err := endpoints.repositories.OAuthConsents().Grant(request.Context(), controlstorage.OAuthConsent{PrincipalID: principal.ID, ClientID: client.ID, ScopeHash: scopeHash, Scopes: scopes, CreatedAt: now, UpdatedAt: now}); err != nil {
-			endpoints.provider.WriteAuthorizeError(request.Context(), rw, authorizeRequest, fosite.ErrServerError)
+		if err := endpoints.repositories.OAuthConsents().Grant(request.Context(), controlstorage.OAuthConsent{
+			IdentityID: identity.ID, ClientID: client.ID, ScopeHash: scopeHash, Scopes: scopes,
+			CreatedAt: now, UpdatedAt: now,
+		}); err != nil {
 			return err
 		}
 	}
@@ -331,20 +197,18 @@ func (endpoints *Endpoints) completeStoredAuthorization(rw http.ResponseWriter, 
 		authorizeRequest.GrantScope(scope)
 	}
 	session := NewSession()
-	session.PrincipalID = principal.ID
-	session.ProviderID = principal.Provider
-	session.DisplayName = principal.DisplayName
-	session.Email = principal.Email
-	session.Groups = append([]string(nil), principal.Groups...)
+	session.IdentityID, session.ProviderID = identity.ID, "local"
+	session.DisplayName, session.Email = identity.DisplayName, identity.PrimaryEmail
+	session.Groups = append([]string(nil), browserIdentity.Groups...)
 	session.AuthorizationID = authorizeRequest.GetID()
-	session.SetSubject(principal.ID)
-	session.IDTokenClaims().Subject = principal.ID
-	session.IDTokenClaims().AuthTime = authTime
+	session.SetSubject(identity.ID)
+	session.IDTokenClaims().Subject = identity.ID
+	session.IDTokenClaims().AuthTime = browserIdentity.AuthTime
 	session.IDTokenClaims().RequestedAt = authorizeRequest.GetRequestedAt()
-	session.IDTokenClaims().AuthenticationMethodsReferences = []string{principal.Provider}
-	session.IDTokenClaims().Add("name", principal.DisplayName)
-	session.IDTokenClaims().Add("email", principal.Email)
-	session.IDTokenClaims().Add("groups", principal.Groups)
+	session.IDTokenClaims().AuthenticationMethodsReferences = []string{"pwd"}
+	session.IDTokenClaims().Add("name", identity.DisplayName)
+	session.IDTokenClaims().Add("email", identity.PrimaryEmail)
+	session.IDTokenClaims().Add("groups", browserIdentity.Groups)
 	response, err := endpoints.provider.NewAuthorizeResponse(request.Context(), authorizeRequest, session)
 	if err != nil {
 		endpoints.provider.WriteAuthorizeError(request.Context(), rw, authorizeRequest, err)
@@ -352,6 +216,16 @@ func (endpoints *Endpoints) completeStoredAuthorization(rw http.ResponseWriter, 
 	}
 	endpoints.provider.WriteAuthorizeResponse(request.Context(), rw, authorizeRequest, response)
 	return nil
+}
+
+func (endpoints *Endpoints) identityAllowedForClient(ctx context.Context, identityID string, client controlstorage.OAuthClient) bool {
+	if client.OrganizationID == "" {
+		return true
+	}
+	members, err := endpoints.repositories.Organizations().ListMembers(ctx, client.OrganizationID, controlstorage.MaximumManagementPageFetch)
+	return err == nil && slices.ContainsFunc(members, func(member controlstorage.OrganizationMembership) bool {
+		return member.IdentityID == identityID && member.Status == "active"
+	})
 }
 
 func (endpoints *Endpoints) CancelAuthorization(rw http.ResponseWriter, request *http.Request, transaction, csrf string) error {
@@ -392,6 +266,7 @@ func randomAuthorizationValue() (string, error) {
 	}
 	return base64.RawURLEncoding.EncodeToString(raw), nil
 }
+
 func exactScopeHash(scopes []string) []byte {
 	scopes = append([]string(nil), scopes...)
 	slices.Sort(scopes)

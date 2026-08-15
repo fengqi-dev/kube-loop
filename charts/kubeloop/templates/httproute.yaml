@@ -88,7 +88,7 @@ spec:
         - group: ""
           kind: Service
           name: {{ include "kubeloop.controlPlaneManagementName" . }}
-          port: {{ .Values.controlPlane.management.servicePort }}
+          port: {{ .Values.controlPlane.admin.servicePort }}
           weight: 1
     - matches:
         - path:

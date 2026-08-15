@@ -12,7 +12,7 @@ import (
 // introspected without a second identity lookup.
 type Session struct {
 	*openid.DefaultSession
-	PrincipalID     string   `json:"principal_id"`
+	IdentityID      string   `json:"identity_id"`
 	ProviderID      string   `json:"provider_id"`
 	Groups          []string `json:"groups,omitempty"`
 	DisplayName     string   `json:"display_name,omitempty"`

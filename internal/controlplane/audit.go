@@ -40,7 +40,7 @@ func (sink *storageAuditSink) Record(ctx context.Context, record AuditRecord) er
 		return errors.New("encode audit metadata")
 	}
 	return sink.repository.Append(ctx, storage.AuditEvent{
-		ID: uuid.NewString(), PrincipalID: record.PrincipalID, Action: record.Operation,
+		ID: uuid.NewString(), IdentityID: record.IdentityID, Action: record.Operation,
 		ResourceType: record.ResourceKind, ResourceID: record.ResourceName,
 		Outcome: record.Outcome, RequestID: record.RequestID, Metadata: metadata,
 		CreatedAt: time.Now().UTC(),

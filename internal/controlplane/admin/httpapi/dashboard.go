@@ -16,8 +16,11 @@ import (
 const overviewCountLimit = 101
 
 type bootstrapIdentityDocument struct {
-	ID     string   `json:"id"`
-	Groups []string `json:"groups"`
+	ID          string   `json:"id"`
+	DisplayName string   `json:"displayName"`
+	Email       string   `json:"email,omitempty"`
+	Type        string   `json:"type"`
+	Groups      []string `json:"groups"`
 }
 
 type bootstrapSessionDocument struct {
@@ -29,8 +32,8 @@ type bootstrapSessionDocument struct {
 }
 
 type bootstrapAuthorizationDocument struct {
-	Capabilities    []string         `json:"capabilities"`
-	NamespaceScopes []map[string]any `json:"namespaceScopes"`
+	Administrator bool     `json:"administrator"`
+	Namespaces    []string `json:"namespaces"`
 }
 
 type bootstrapDocument struct {
@@ -60,21 +63,33 @@ func (api *readAPI) bootstrap(ctx *echo.Context) error {
 		writeError(writer, http.StatusUnauthorized, "unauthenticated", "management authentication failed", requestID(request))
 		return nil
 	}
-	capabilities, namespaceScopes := api.authorizedCapabilities(request.Context(), subject)
+	administrator := api.authorizer.Authorize(request.Context(), subject, adminauthorization.Request{
+		Resource: adminauthorization.ResourceStatus, Operation: adminauthorization.OperationRead,
+	}).Allowed
+	namespaces := api.authorizer.AuthorizedNamespaces(subject)
 	groups := slices.Clone(subject.Groups)
 	if groups == nil {
 		groups = []string{}
 	}
+	identity, err := api.status.Identities().GetByID(request.Context(), subject.ID)
+	if err != nil {
+		if stored.AuthenticationType != "break-glass" || subject.ID != storage.ManagementActorBreakGlass {
+			writeError(writer, http.StatusUnauthorized, "unauthenticated", "management identity is unavailable", requestID(request))
+			return nil
+		}
+		identity = storage.Identity{ID: subject.ID, Type: "machine", DisplayName: "Emergency access", Status: "active"}
+	}
 	api.audit(request, subject, "admin.bootstrap/read", "success")
 	writeJSON(writer, http.StatusOK, bootstrapDocument{
-		Identity: bootstrapIdentityDocument{ID: subject.ID, Groups: groups},
+		Identity: bootstrapIdentityDocument{ID: subject.ID, DisplayName: identity.DisplayName,
+			Email: identity.PrimaryEmail, Type: identity.Type, Groups: groups},
 		Session: bootstrapSessionDocument{
 			AuthenticationType: stored.AuthenticationType,
 			CreatedAt:          stored.CreatedAt, LastSeenAt: stored.LastSeenAt,
 			IdleExpiresAt: stored.IdleExpiresAt, AbsoluteExpiresAt: stored.AbsoluteExpiresAt,
 		},
 		Authorization: bootstrapAuthorizationDocument{
-			Capabilities: capabilities, NamespaceScopes: namespaceScopes,
+			Administrator: administrator, Namespaces: namespaces,
 		},
 	})
 	return nil
@@ -118,7 +133,7 @@ func (api *readAPI) overview(ctx *echo.Context) error {
 		recentAudit = make([]auditDocument, 0, len(events))
 		for _, event := range events {
 			recentAudit = append(recentAudit, auditDocument{
-				ID: event.ID, PrincipalID: event.PrincipalID, Action: event.Action,
+				ID: event.ID, IdentityID: event.IdentityID, Action: event.Action,
 				ResourceType: event.ResourceType, ResourceID: event.ResourceID,
 				Outcome: event.Outcome, RequestID: event.RequestID, CreatedAt: event.CreatedAt,
 			})

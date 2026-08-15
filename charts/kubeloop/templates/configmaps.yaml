@@ -19,34 +19,20 @@
 {{- if or (lt (int64 .Values.dataPlane.relayRegistry.maxWebSocketFrameBytes) 8192) (gt (int64 .Values.dataPlane.relayRegistry.maxWebSocketFrameBytes) 16777216) }}
 {{- fail "dataPlane.relayRegistry.maxWebSocketFrameBytes must be between 8192 and 16777216" }}
 {{- end }}
-{{- $management := .Values.controlPlane.management }}
-{{- if or (lt (int $management.listenPort) 1) (gt (int $management.listenPort) 65535) }}
-{{- fail "controlPlane.management.listenPort must be between 1 and 65535" }}
+{{- $admin := .Values.controlPlane.admin }}
+{{- if or (lt (int $admin.listenPort) 1) (gt (int $admin.listenPort) 65535) }}
+{{- fail "controlPlane.admin.listenPort must be between 1 and 65535" }}
 {{- end }}
-{{- if or (lt (int $management.servicePort) 1) (gt (int $management.servicePort) 65535) }}
-{{- fail "controlPlane.management.servicePort must be between 1 and 65535" }}
+{{- if or (lt (int $admin.servicePort) 1) (gt (int $admin.servicePort) 65535) }}
+{{- fail "controlPlane.admin.servicePort must be between 1 and 65535" }}
 {{- end }}
-{{- if eq (int $management.listenPort) 8080 }}
-{{- fail "controlPlane.management.listenPort must differ from the public Control Plane port 8080" }}
+{{- if eq (int $admin.listenPort) 8080 }}
+{{- fail "controlPlane.admin.listenPort must differ from the public Control Plane port 8080" }}
 {{- end }}
-{{- if eq (int $management.listenPort) (int .Values.controlPlane.relayRegistry.listenPort) }}
-{{- fail "controlPlane.management.listenPort must differ from controlPlane.relayRegistry.listenPort" }}
+{{- if eq (int $admin.listenPort) (int .Values.controlPlane.relayRegistry.listenPort) }}
+{{- fail "controlPlane.admin.listenPort must differ from controlPlane.relayRegistry.listenPort" }}
 {{- end }}
-{{- $managementPublicURL := required "controlPlane.management.publicURL is required" $management.publicURL }}
-{{- $bootstrap := $management.bootstrap }}
-{{- range $index, $subject := $bootstrap.subjects }}
-{{- if not (regexMatch "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" $subject) }}
-{{- fail (printf "controlPlane.management.bootstrap.subjects[%d] must be an exact stable Principal UUID" $index) }}
-{{- end }}
-{{- end }}
-{{- range $index, $group := $bootstrap.groups }}
-{{- if or (not $group) (eq $group "*") (eq $group "$cluster") }}
-{{- fail (printf "controlPlane.management.bootstrap.groups[%d] must be an exact stable group" $index) }}
-{{- end }}
-{{- end }}
-{{- if and $bootstrap.recoveryEnabled (not (or $bootstrap.subjects $bootstrap.groups)) }}
-{{- fail "controlPlane.management.bootstrap.recoveryEnabled requires a bootstrap subject or group" }}
-{{- end }}
+{{- $adminPublicURL := required "controlPlane.admin.publicURL is required" $admin.publicURL }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -73,16 +59,17 @@ data:
           keyID: {{ .Values.controlPlane.auth.oauth.keyID | quote }}
           accessTTL: {{ .Values.controlPlane.auth.oauth.accessTTL | quote }}
           refreshTTL: {{ .Values.controlPlane.auth.oauth.refreshTTL | quote }}
-      management:
-        listen: {{ printf ":%v" $management.listenPort | quote }}
-        publicURL: {{ $managementPublicURL | quote }}
-        initialAdmin:
-          {{- if .Values.controlPlane.management.initialAdmin.enabled }}
-          usernameFile: "/var/run/secrets/kubeloop/management/initial-admin/username"
-          passwordFile: "/var/run/secrets/kubeloop/management/initial-admin/password"
-          mfaEncryptionKeyFile: "/var/run/secrets/kubeloop/management/initial-admin/mfa-encryption-key"
+      admin:
+        listen: {{ printf ":%v" $admin.listenPort | quote }}
+        publicURL: {{ $adminPublicURL | quote }}
+        bootstrap:
+          enabled: {{ $admin.bootstrap.enabled }}
+          username: {{ $admin.bootstrap.username | quote }}
+          {{- if $admin.bootstrap.enabled }}
+          passwordFile: "/var/run/secrets/kubeloop/auth/bootstrap/initial-password"
           {{- end }}
-        bootstrap: {{ dict "subjects" (default (list) $bootstrap.subjects) "groups" (default (list) $bootstrap.groups) "recoveryEnabled" $bootstrap.recoveryEnabled | toJson }}
+          displayName: {{ $admin.bootstrap.displayName | quote }}
+          email: {{ $admin.bootstrap.email | quote }}
       kubernetes:
         timeout: {{ .Values.controlPlane.kubernetes.timeout | quote }}
         qps: {{ .Values.controlPlane.kubernetes.qps }}

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -113,7 +115,7 @@ func (manager *Manager) Connect(ctx context.Context, serverProfile profile.Profi
 			}
 		}
 	}
-	runtime, err := Start(ctx, serverProfile, session, manager.sessions.RelayTicketSource(serverProfile.ID), manager.config)
+	runtime, err := Start(ctx, serverProfile, session, manager.sessions.RelayTicketSource(serverProfile.ID), runtimeConfig(manager.config, serverProfile))
 	if err != nil {
 		return Status{}, err
 	}
@@ -133,6 +135,13 @@ func (manager *Manager) Connect(ctx context.Context, serverProfile profile.Profi
 	go manager.watch(serverProfile.ID, entry, runtime, runtime.TransportDone())
 	manager.emit(serverProfile.ID, runtime.Status(), nil)
 	return runtime.Status(), nil
+}
+
+func runtimeConfig(config Config, serverProfile profile.Profile) Config {
+	if serverProfile.SOCKSPort != 0 {
+		config.ListenAddress = net.JoinHostPort("127.0.0.1", strconv.Itoa(serverProfile.SOCKSPort))
+	}
+	return config
 }
 
 // SetHostTCPHandler installs a profile-scoped host-side TCP interception

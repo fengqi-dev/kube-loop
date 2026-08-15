@@ -41,11 +41,11 @@ func NewDiscoverer(provider Provider) (*Discoverer, error) {
 
 func (discoverer *Discoverer) Discover(
 	ctx context.Context,
-	principal controlplaneapi.Principal,
+	identity controlplaneapi.Identity,
 	namespace string,
 ) (networkspec.Spec, error) {
-	principalClient, err := discoverer.provider.ClientFor(authorization.Subject{
-		ID: principal.Subject, Groups: principal.Groups,
+	identityClient, err := discoverer.provider.ClientFor(authorization.Subject{
+		ID: identity.Subject, Groups: identity.Groups,
 	})
 	if err != nil {
 		return networkspec.Spec{}, errors.New("create Kubernetes client for NetworkSpec discovery")
@@ -54,12 +54,12 @@ func (discoverer *Discoverer) Discover(
 	if err != nil {
 		return networkspec.Spec{}, errors.New("create system Kubernetes client for NetworkSpec discovery")
 	}
-	return discover(ctx, principalClient, systemClient, namespace)
+	return discover(ctx, identityClient, systemClient, namespace)
 }
 
 func discover(
 	ctx context.Context,
-	principalClient, systemClient kubernetesclient.Interface,
+	identityClient, systemClient kubernetesclient.Interface,
 	namespace string,
 ) (networkspec.Spec, error) {
 	podCIDRs := make(map[string]struct{})
@@ -71,8 +71,8 @@ func discover(
 			}
 		}
 	}
-	pods, podErr := principalClient.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{})
-	services, serviceErr := principalClient.CoreV1().Services(namespace).List(ctx, metav1.ListOptions{})
+	pods, podErr := identityClient.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{})
+	services, serviceErr := identityClient.CoreV1().Services(namespace).List(ctx, metav1.ListOptions{})
 	if podErr != nil && serviceErr != nil {
 		return networkspec.Spec{}, errors.New("read namespace network resources")
 	}

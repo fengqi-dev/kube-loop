@@ -18,21 +18,21 @@ func (repository *auditRepository) Append(ctx context.Context, event AuditEvent)
 		return err
 	}
 	query := repository.bind(`INSERT INTO audit_events(
-		id, schema_version, principal_id, action, resource_type, resource_id,
+		id, schema_version, identity_id, action, resource_type, resource_id,
 		outcome, request_id, metadata_json, created_at
 	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if repository.backend == BackendPostgreSQL {
 		query = `INSERT INTO audit_events(
-			id, schema_version, principal_id, action, resource_type, resource_id,
+			id, schema_version, identity_id, action, resource_type, resource_id,
 			outcome, request_id, metadata_json, created_at
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10)`
 	}
-	var principalID any
-	if event.PrincipalID != "" {
-		principalID = event.PrincipalID
+	var identityID any
+	if event.IdentityID != "" {
+		identityID = event.IdentityID
 	}
 	_, err := repository.executor.ExecContext(ctx, query,
-		event.ID, event.SchemaVersion, principalID, event.Action, event.ResourceType,
+		event.ID, event.SchemaVersion, identityID, event.Action, event.ResourceType,
 		event.ResourceID, event.Outcome, event.RequestID, nullableJSON(event.Metadata), formatTime(event.CreatedAt),
 	)
 	return mapWriteError(err)
@@ -50,15 +50,15 @@ func (repository *auditRepository) List(ctx context.Context, filter AuditFilter)
 	if err != nil {
 		return nil, err
 	}
-	query := `SELECT id, schema_version, principal_id, action, resource_type, resource_id,
+	query := `SELECT id, schema_version, identity_id, action, resource_type, resource_id,
 		outcome, request_id, metadata_json, created_at FROM audit_events WHERE 1=1`
 	var arguments []any
-	if filter.PrincipalID != "" {
-		if err := validateUUID(filter.PrincipalID, "principal ID"); err != nil {
+	if filter.IdentityID != "" {
+		if err := validateUUID(filter.IdentityID, "identity ID"); err != nil {
 			return nil, err
 		}
-		query += ` AND principal_id = ?`
-		arguments = append(arguments, filter.PrincipalID)
+		query += ` AND identity_id = ?`
+		arguments = append(arguments, filter.IdentityID)
 	}
 	if filter.Action != "" {
 		query += ` AND action = ?`
@@ -101,8 +101,8 @@ func normalizeAuditEvent(event *AuditEvent) error {
 	if err := validateUUID(event.ID, "audit event ID"); err != nil {
 		return err
 	}
-	if event.PrincipalID != "" {
-		if err := validateUUID(event.PrincipalID, "principal ID"); err != nil {
+	if event.IdentityID != "" {
+		if err := validateUUID(event.IdentityID, "identity ID"); err != nil {
 			return err
 		}
 	}
@@ -133,19 +133,19 @@ func normalizeAuditEvent(event *AuditEvent) error {
 
 func scanAuditEvent(row rowScanner) (AuditEvent, error) {
 	var (
-		event       AuditEvent
-		principalID sql.NullString
-		metadata    []byte
-		createdAt   string
+		event      AuditEvent
+		identityID sql.NullString
+		metadata   []byte
+		createdAt  string
 	)
 	if err := row.Scan(
-		&event.ID, &event.SchemaVersion, &principalID, &event.Action, &event.ResourceType,
+		&event.ID, &event.SchemaVersion, &identityID, &event.Action, &event.ResourceType,
 		&event.ResourceID, &event.Outcome, &event.RequestID, &metadata, &createdAt,
 	); err != nil {
 		return AuditEvent{}, err
 	}
-	if principalID.Valid {
-		event.PrincipalID = principalID.String
+	if identityID.Valid {
+		event.IdentityID = identityID.String
 	}
 	if len(metadata) > 0 {
 		event.Metadata = append(json.RawMessage(nil), metadata...)

@@ -17,7 +17,7 @@ func TestInventoryWatchSharesInformerAndSlowSubscriberKeepsLatestSnapshot(t *tes
 	hub := newInventoryWatchHub(20 * time.Millisecond)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	subject := authorization.Subject{ID: "principal-1", Groups: []string{"developers"}}
+	subject := authorization.Subject{ID: "identity-1", Groups: []string{"developers"}}
 	slow, stopSlow, err := hub.subscribe(ctx, subject, client, "development", inventoryPods)
 	if err != nil {
 		t.Fatal(err)

@@ -45,7 +45,7 @@ func TestLoadServerInventoryUsesCapabilitiesAndRemembersNamespace(t *testing.T) 
 			if request.URL.Query().Get("namespace") != "development" {
 				t.Fatalf("namespace query = %q", request.URL.Query().Get("namespace"))
 			}
-			_, _ = writer.Write([]byte(`{"schemaVersion":1,"principalId":"principal-1","namespace":"development","gatewayVersion":"v2-test","capabilities":["pods.list"]}`))
+			_, _ = writer.Write([]byte(`{"schemaVersion":1,"identityId":"identity-1","namespace":"development","gatewayVersion":"v2-test","capabilities":["pods.list"]}`))
 		case "/api/sessions":
 			now := time.Now().UTC()
 			_ = json.NewEncoder(writer).Encode(clientremote.Session{
@@ -53,7 +53,7 @@ func TestLoadServerInventoryUsesCapabilitiesAndRemembersNamespace(t *testing.T) 
 				CreatedAt: now, UpdatedAt: now, LastHeartbeatAt: now, ExpiresAt: now.Add(2 * time.Minute),
 				NetworkSpec: spec, NetworkSpecHash: specHash,
 				Capabilities: &clientremote.Capabilities{
-					SchemaVersion: 1, PrincipalID: "principal-1", Namespace: "development",
+					SchemaVersion: 1, IdentityID: "identity-1", Namespace: "development",
 					GatewayVersion: "v2-test", Capabilities: []string{"pods.list"},
 				},
 			})

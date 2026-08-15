@@ -25,7 +25,7 @@ const (
 )
 
 type Identity struct {
-	PrincipalID       string   `json:"principalId"`
+	IdentityID        string   `json:"identityId"`
 	Groups            []string `json:"groups,omitempty"`
 	DeviceID          string   `json:"deviceId"`
 	SessionID         string   `json:"sessionId"`
@@ -109,7 +109,7 @@ func (request ClaimRequest) Validate() error {
 }
 
 func (identity Identity) Validate() error {
-	if !validText(identity.PrincipalID, 256) || !validText(identity.DeviceID, 256) ||
+	if !validText(identity.IdentityID, 256) || !validText(identity.DeviceID, 256) ||
 		!validTaskID(identity.SessionID) || identity.SessionGeneration == 0 ||
 		!validText(identity.Namespace, 63) || len(identity.Groups) > 128 {
 		return errors.New("traffic identity is invalid")

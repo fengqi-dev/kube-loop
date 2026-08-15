@@ -56,7 +56,7 @@ func (provider *Provider) RESTConfigFor(subject authorization.Subject) (*rest.Co
 	}
 	subject.ID = strings.TrimSpace(subject.ID)
 	if !safeValue(subject.ID, 256) {
-		return nil, errors.New("authenticated principal ID is invalid for Kubernetes impersonation")
+		return nil, errors.New("authenticated identity ID is invalid for Kubernetes impersonation")
 	}
 	config.Impersonate.UserName = provider.config.Impersonation.UsernamePrefix + subject.ID
 	groups := make(map[string]struct{})

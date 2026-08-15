@@ -29,6 +29,7 @@ export function ConnectionOrb({
   phase,
   busy = false,
   disconnecting = false,
+  variant = "orb",
   disabled,
   ariaLabel,
   onClick,
@@ -36,6 +37,7 @@ export function ConnectionOrb({
   phase: SessionState["phase"];
   busy?: boolean;
   disconnecting?: boolean;
+  variant?: "orb" | "toggle";
   disabled?: boolean;
   ariaLabel: string;
   onClick(): void;
@@ -46,6 +48,74 @@ export function ConnectionOrb({
   const connecting =
     !disconnecting && (isBusyPhase(phase) || (busy && phase !== "connected"));
   const progress = phaseProgress[phase] ?? (connecting ? 8 : 0);
+
+  if (variant === "toggle") {
+    const transitioning = connecting || (working && !error);
+
+    return (
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={onClick}
+        aria-label={ariaLabel}
+        aria-busy={working}
+        aria-pressed={ready}
+        title={ariaLabel}
+        className={cn(
+          "group flex h-[60px] w-[168px] shrink-0 items-center justify-end gap-[12px] rounded-xl px-1 outline-none",
+          "focus-visible:ring-3 focus-visible:ring-ring/50",
+          "disabled:pointer-events-none disabled:opacity-65",
+        )}
+      >
+        <span
+          aria-hidden
+          className={cn(
+            "relative h-[52px] w-[128px] shrink-0 overflow-hidden rounded-full border transition-[background-color,border-color,box-shadow] duration-300",
+            ready && "border-success/35 bg-success/90 shadow-[inset_0_-6px_12px_color-mix(in_srgb,var(--success)_55%,transparent),0_7px_18px_-10px_color-mix(in_srgb,var(--success)_50%,transparent)]",
+            transitioning && "border-primary/35 bg-primary/90 shadow-[inset_0_-6px_12px_color-mix(in_srgb,var(--primary)_55%,transparent),0_7px_18px_-10px_color-mix(in_srgb,var(--primary)_50%,transparent)]",
+            error && "border-destructive/35 bg-destructive/90",
+            !ready && !transitioning && !error && "border-border/80 bg-muted-foreground/30 shadow-[inset_0_-6px_12px_color-mix(in_srgb,var(--muted-foreground)_22%,transparent)] group-hover:bg-muted-foreground/38",
+          )}
+        >
+          <span
+            className={cn(
+              "absolute top-1/2 -translate-y-1/2 font-mono text-[12px] font-semibold tracking-[0.08em] transition-all duration-300",
+              ready ? "left-5 text-white" : transitioning ? "right-3 text-white" : error ? "right-4 text-white" : "right-4 text-muted-foreground",
+            )}
+          >
+            {transitioning ? (
+              <span className="flex items-center gap-1" aria-hidden>
+                {Array.from({ length: 3 }, (_, index) => (
+                  <i
+                    key={index}
+                    className="connection-toggle-loading-dot size-1.5 rounded-full bg-white"
+                    style={{ animationDelay: `${index * 140}ms` }}
+                  />
+                ))}
+              </span>
+            ) : ready ? "ON" : error ? "ERR" : "OFF"}
+          </span>
+          <span
+            className={cn(
+              "absolute top-1/2 left-1 size-[40px] -translate-y-1/2 rounded-full border border-border/70 bg-gradient-to-br from-white to-slate-100 shadow-[0_4px_10px_rgba(58,82,101,0.22)] transition-transform duration-500 ease-[cubic-bezier(0.2,0.9,0.25,1.15)]",
+              ready && "translate-x-[80px]",
+              transitioning && "translate-x-[40px]",
+            )}
+          />
+        </span>
+        <span
+          aria-hidden
+          className={cn(
+            "relative size-3.5 shrink-0 rounded-full border transition-all duration-300",
+            ready && "connection-toggle-led-ready border-success/40 bg-success shadow-[0_0_7px_var(--success),0_0_18px_color-mix(in_srgb,var(--success)_65%,transparent)]",
+            transitioning && "connection-toggle-led-flicker border-primary/40 bg-primary",
+            error && "border-destructive/40 bg-destructive shadow-[0_0_8px_color-mix(in_srgb,var(--destructive)_70%,transparent)]",
+            !ready && !transitioning && !error && "border-border bg-muted-foreground/35",
+          )}
+        />
+      </button>
+    );
+  }
 
   return (
     <button

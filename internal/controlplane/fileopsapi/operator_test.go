@@ -13,7 +13,7 @@ import (
 
 type localPodExecutor struct{}
 
-func (localPodExecutor) Exec(ctx context.Context, _ controlplaneapi.Principal, _ string, spec execapi.Spec, streams execapi.Streams) error {
+func (localPodExecutor) Exec(ctx context.Context, _ controlplaneapi.Identity, _ string, spec execapi.Spec, streams execapi.Streams) error {
 	command := exec.CommandContext(ctx, spec.Command[0], spec.Command[1:]...)
 	command.Stdin, command.Stdout, command.Stderr = streams.Stdin, streams.Stdout, streams.Stderr
 	return command.Run()
@@ -57,7 +57,7 @@ func TestKubernetesOperatorRejectsParentAndTargetSymlinkEscape(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, target := range []string{filepath.Join(root, "escaped", "created"), filepath.Join(root, "target-link")} {
-		err := operator.Mutate(context.Background(), controlplaneapi.Principal{Subject: "user"}, "development", Spec{
+		err := operator.Mutate(context.Background(), controlplaneapi.Identity{Subject: "user"}, "development", Spec{
 			Action: ActionCreate, Kind: KindFile, Pod: "api-0", Container: "api", Path: target, AllowedRoot: root,
 		})
 		if err == nil {
@@ -81,5 +81,5 @@ func TestBoundedBufferRejectsOversizedOutput(t *testing.T) {
 }
 
 var _ interface {
-	Exec(context.Context, controlplaneapi.Principal, string, execapi.Spec, execapi.Streams) error
+	Exec(context.Context, controlplaneapi.Identity, string, execapi.Spec, execapi.Streams) error
 } = localPodExecutor{}

@@ -28,16 +28,16 @@ import (
 )
 
 type sessionValidator struct {
-	principal string
-	session   sessionapi.ActiveSession
+	identity string
+	session  sessionapi.ActiveSession
 }
 
 func (validator sessionValidator) RequireActive(
 	_ context.Context,
-	principal controlplaneapi.Principal,
+	identity controlplaneapi.Identity,
 	namespace, id string,
 ) (sessionapi.ActiveSession, *controlplaneapi.Error) {
-	if principal.Subject != validator.principal || namespace != validator.session.Namespace || id != validator.session.ID {
+	if identity.Subject != validator.identity || namespace != validator.session.Namespace || id != validator.session.ID {
 		return sessionapi.ActiveSession{}, &controlplaneapi.Error{Code: controlplaneapi.CodeNotFound, Message: "resource not found"}
 	}
 	return validator.session, nil
@@ -51,13 +51,13 @@ type fakeExecutor struct {
 
 type blockingExecutor struct{ started chan struct{} }
 
-func (executor *blockingExecutor) Validate(context.Context, controlplaneapi.Principal, string, execapi.Spec) error {
+func (executor *blockingExecutor) Validate(context.Context, controlplaneapi.Identity, string, execapi.Spec) error {
 	return nil
 }
 
 func (executor *blockingExecutor) Exec(
 	ctx context.Context,
-	_ controlplaneapi.Principal,
+	_ controlplaneapi.Identity,
 	_ string,
 	_ execapi.Spec,
 	_ execapi.Streams,
@@ -67,7 +67,7 @@ func (executor *blockingExecutor) Exec(
 	return ctx.Err()
 }
 
-func (executor *fakeExecutor) Validate(context.Context, controlplaneapi.Principal, string, execapi.Spec) error {
+func (executor *fakeExecutor) Validate(context.Context, controlplaneapi.Identity, string, execapi.Spec) error {
 	executor.mu.Lock()
 	executor.validated++
 	executor.mu.Unlock()
@@ -76,7 +76,7 @@ func (executor *fakeExecutor) Validate(context.Context, controlplaneapi.Principa
 
 func (executor *fakeExecutor) Exec(
 	_ context.Context,
-	_ controlplaneapi.Principal,
+	_ controlplaneapi.Identity,
 	_ string,
 	_ execapi.Spec,
 	streams execapi.Streams,
@@ -98,10 +98,10 @@ func TestPodExecTaskAndWebSocketStreamAreOwnedAndSingleUse(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer stateStore.Close()
-	principalID := uuid.NewString()
+	identityID := uuid.NewString()
 	sessionID := uuid.NewString()
-	if _, err := stateStore.Principals().Upsert(context.Background(), storage.Principal{
-		ID: principalID, Provider: "test", ExternalID: "user", CreatedAt: now, UpdatedAt: now,
+	if _, err := stateStore.Identities().Create(context.Background(), storage.Identity{
+		ID: identityID, Type: "human", DisplayName: "Test Identity", Status: "active", CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +110,7 @@ func TestPodExecTaskAndWebSocketStreamAreOwnedAndSingleUse(t *testing.T) {
 	networkHash, _ := networkspec.Hash(network)
 	expiresAt := now.Add(time.Hour)
 	if err := stateStore.Sessions().Create(context.Background(), storage.Session{
-		ID: sessionID, PrincipalID: principalID, DeviceID: "device", ClusterID: "cluster",
+		ID: sessionID, IdentityID: identityID, DeviceID: "device", ClusterID: "cluster",
 		Namespace: "development", State: "active", Generation: 1,
 		NetworkSpec: networkJSON, NetworkSpecHash: networkHash,
 		CreatedAt: now, UpdatedAt: now, LastHeartbeatAt: now, ExpiresAt: expiresAt,
@@ -118,7 +118,7 @@ func TestPodExecTaskAndWebSocketStreamAreOwnedAndSingleUse(t *testing.T) {
 		t.Fatal(err)
 	}
 	executor := &fakeExecutor{}
-	handler, err := execapi.New(stateStore, sessionValidator{principal: principalID, session: sessionapi.ActiveSession{
+	handler, err := execapi.New(stateStore, sessionValidator{identity: identityID, session: sessionapi.ActiveSession{
 		ID: sessionID, Namespace: "development", ExpiresAt: expiresAt, NetworkSpecHash: networkHash,
 	}}, executor, execapi.Config{Now: func() time.Time { return now }})
 	if err != nil {
@@ -130,8 +130,8 @@ func TestPodExecTaskAndWebSocketStreamAreOwnedAndSingleUse(t *testing.T) {
 	}}})
 	server, err := controlplane.NewServer(controlplane.Config{PublicURL: "https://gateway.example.test"}, controlplane.BuildInfo{},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
-		controlplane.WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(request *http.Request) (controlplaneapi.Principal, *controlplaneapi.Error) {
-			return controlplaneapi.Principal{Subject: request.Header.Get("X-Principal"), DeviceID: "device"}, nil
+		controlplane.WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(request *http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
+			return controlplaneapi.Identity{Subject: request.Header.Get("X-Identity"), DeviceID: "device"}, nil
 		})), controlplane.WithAuthorizer(policy), controlplane.WithAPIRoutes(controlplane.APIRoutes{Exec: execapi.NewRoutes(handler).Endpoints()}))
 	if err != nil {
 		t.Fatal(err)
@@ -140,7 +140,7 @@ func TestPodExecTaskAndWebSocketStreamAreOwnedAndSingleUse(t *testing.T) {
 	defer httpServer.Close()
 	createRequest, _ := http.NewRequest(http.MethodPost, httpServer.URL+"/api/sessions/"+sessionID+"/exec?namespace=development",
 		bytes.NewBufferString(`{"pod":"api-0","container":"api","command":["/bin/sh"],"tty":false}`))
-	createRequest.Header.Set("X-Principal", principalID)
+	createRequest.Header.Set("X-Identity", identityID)
 	createRequest.Header.Set("Content-Type", "application/json")
 	createRequest.Header.Set("Idempotency-Key", "exec-1")
 	createResponse, err := http.DefaultClient.Do(createRequest)
@@ -153,7 +153,7 @@ func TestPodExecTaskAndWebSocketStreamAreOwnedAndSingleUse(t *testing.T) {
 		t.Fatalf("create status = %d task = %#v", createResponse.StatusCode, document)
 	}
 	streamURL := "ws" + strings.TrimPrefix(httpServer.URL, "http") + "/api/sessions/" + sessionID + "/exec/" + document.ID + "/stream?namespace=development"
-	connection, response, err := websocket.Dial(context.Background(), streamURL, &websocket.DialOptions{HTTPHeader: http.Header{"X-Principal": {principalID}}})
+	connection, response, err := websocket.Dial(context.Background(), streamURL, &websocket.DialOptions{HTTPHeader: http.Header{"X-Identity": {identityID}}})
 	if err != nil {
 		if response != nil {
 			t.Fatalf("dial status = %d err = %v", response.StatusCode, err)
@@ -199,7 +199,7 @@ func TestPodExecTaskAndWebSocketStreamAreOwnedAndSingleUse(t *testing.T) {
 	}
 	apiEvents, backgroundEvents := 0, 0
 	for _, event := range transitionEvents {
-		if event.PrincipalID != principalID || event.ResourceType != execapi.TaskType || event.ResourceID != document.ID {
+		if event.IdentityID != identityID || event.ResourceType != execapi.TaskType || event.ResourceID != document.ID {
 			t.Fatalf("Task transition audit event = %#v", event)
 		}
 		metadata := string(event.Metadata)
@@ -218,7 +218,7 @@ func TestPodExecTaskAndWebSocketStreamAreOwnedAndSingleUse(t *testing.T) {
 	if apiEvents != 2 || backgroundEvents != 1 {
 		t.Fatalf("Task transition audit sources: api=%d background=%d", apiEvents, backgroundEvents)
 	}
-	_, replayResponse, replayErr := websocket.Dial(context.Background(), streamURL, &websocket.DialOptions{HTTPHeader: http.Header{"X-Principal": {principalID}}})
+	_, replayResponse, replayErr := websocket.Dial(context.Background(), streamURL, &websocket.DialOptions{HTTPHeader: http.Header{"X-Identity": {identityID}}})
 	if replayErr == nil || replayResponse == nil || replayResponse.StatusCode != http.StatusConflict {
 		t.Fatalf("replay response = %#v err = %v", replayResponse, replayErr)
 	}
@@ -238,15 +238,15 @@ func TestPodExecStreamStopsWhenOAuthGrantIsRevoked(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer stateStore.Close()
-	principalID, authorizationID, sessionID := uuid.NewString(), uuid.NewString(), uuid.NewString()
-	if _, err := stateStore.Principals().Upsert(context.Background(), storage.Principal{
-		ID: principalID, Provider: "test", ExternalID: "revoked-user", CreatedAt: now, UpdatedAt: now,
+	identityID, authorizationID, sessionID := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	if _, err := stateStore.Identities().Create(context.Background(), storage.Identity{
+		ID: identityID, Type: "human", DisplayName: "Test Identity", Status: "active", CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatal(err)
 	}
 	if err := stateStore.OAuthSessions().Create(context.Background(), storage.OAuthSession{
 		Kind: "access_token", SignatureHash: bytes.Repeat([]byte{9}, 32), RequestID: authorizationID,
-		PrincipalID: principalID, ClientID: "test-client", DeviceID: "device",
+		IdentityID: identityID, ClientID: "test-client", DeviceID: "device",
 		RequestJSON: json.RawMessage(`{}`), CreatedAt: now, ExpiresAt: now.Add(time.Hour),
 	}); err != nil {
 		t.Fatal(err)
@@ -256,7 +256,7 @@ func TestPodExecStreamStopsWhenOAuthGrantIsRevoked(t *testing.T) {
 	networkHash, _ := networkspec.Hash(network)
 	expiresAt := now.Add(time.Hour)
 	if err := stateStore.Sessions().Create(context.Background(), storage.Session{
-		ID: sessionID, PrincipalID: principalID, DeviceID: "device", ClusterID: "cluster",
+		ID: sessionID, IdentityID: identityID, DeviceID: "device", ClusterID: "cluster",
 		Namespace: "development", State: "active", Generation: 1,
 		NetworkSpec: networkJSON, NetworkSpecHash: networkHash,
 		CreatedAt: now, UpdatedAt: now, LastHeartbeatAt: now, ExpiresAt: expiresAt,
@@ -264,7 +264,7 @@ func TestPodExecStreamStopsWhenOAuthGrantIsRevoked(t *testing.T) {
 		t.Fatal(err)
 	}
 	executor := &blockingExecutor{started: make(chan struct{})}
-	handler, err := execapi.New(stateStore, sessionValidator{principal: principalID, session: sessionapi.ActiveSession{
+	handler, err := execapi.New(stateStore, sessionValidator{identity: identityID, session: sessionapi.ActiveSession{
 		ID: sessionID, Namespace: "development", ExpiresAt: expiresAt, NetworkSpecHash: networkHash,
 	}}, executor, execapi.Config{CredentialCheckInterval: 10 * time.Millisecond})
 	if err != nil {
@@ -276,9 +276,9 @@ func TestPodExecStreamStopsWhenOAuthGrantIsRevoked(t *testing.T) {
 	}}})
 	server, err := controlplane.NewServer(controlplane.Config{PublicURL: "https://gateway.example.test"}, controlplane.BuildInfo{},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
-		controlplane.WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(*http.Request) (controlplaneapi.Principal, *controlplaneapi.Error) {
-			return controlplaneapi.Principal{
-				Subject: principalID, DeviceID: "device", AuthorizationID: authorizationID, AccessExpiresAt: expiresAt,
+		controlplane.WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(*http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
+			return controlplaneapi.Identity{
+				Subject: identityID, DeviceID: "device", AuthorizationID: authorizationID, AccessExpiresAt: expiresAt,
 			}, nil
 		})), controlplane.WithAuthorizer(policy), controlplane.WithAPIRoutes(controlplane.APIRoutes{Exec: execapi.NewRoutes(handler).Endpoints()}))
 	if err != nil {

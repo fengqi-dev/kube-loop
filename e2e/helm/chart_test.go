@@ -3,7 +3,6 @@ package helm
 import (
 	"bytes"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
@@ -20,7 +19,7 @@ import (
 func TestSQLiteChartRendersIndependentSecureWorkloads(t *testing.T) {
 	objects := renderChart(t,
 		"--set", "publicURL=https://kubeloop.example.test",
-		"--set", "controlPlane.management.publicURL=https://kubeloop.example.test",
+		"--set", "controlPlane.admin.publicURL=https://kubeloop.example.test",
 		"--set", "ingress.enabled=true",
 		"--set", "ingress.host=kubeloop.example.test",
 	)
@@ -77,9 +76,9 @@ func TestSQLiteChartRendersIndependentSecureWorkloads(t *testing.T) {
 		len(valueAt(t, controlPlaneDocument, "files", "allowedRoots").([]any)) != 1 {
 		t.Fatalf("ControlPlane file limits = %#v", valueAt(t, controlPlaneDocument, "files"))
 	}
-	if valueAt(t, controlPlaneDocument, "management", "listen") != ":8081" ||
-		valueAt(t, controlPlaneDocument, "management", "publicURL") != "https://kubeloop.example.test" {
-		t.Fatalf("Management Plane listener = %#v", valueAt(t, controlPlaneDocument, "management"))
+	if valueAt(t, controlPlaneDocument, "admin", "listen") != ":8081" ||
+		valueAt(t, controlPlaneDocument, "admin", "publicURL") != "https://kubeloop.example.test" {
+		t.Fatalf("Admin listener = %#v", valueAt(t, controlPlaneDocument, "admin"))
 	}
 	storageDocument := valueAt(t, controlPlaneDocument, "storage").(map[string]any)
 	if _, configured := storageDocument["datasourceURLFile"]; configured ||
@@ -128,22 +127,24 @@ func TestSQLiteChartRendersIndependentSecureWorkloads(t *testing.T) {
 		strings.Contains(string(dataPlaneYAML), "relay/signing-key.pem") {
 		t.Fatal("RelayTicket private signing key is not isolated to ControlPlane")
 	}
-	initialAdminSecret := objectByName(t, objects, "Secret", "test-kubeloop-control-plane-initial-admin")
-	mfaEncryptionKey, err := base64.StdEncoding.DecodeString(valueAt(t, initialAdminSecret, "data", "mfa-encryption-key").(string))
-	if err != nil || len(mfaEncryptionKey) != 32 {
-		t.Fatalf("initial administrator MFA encryption key length = %d, error = %v", len(mfaEncryptionKey), err)
-	}
 	authSecret := objectByName(t, objects, "Secret", "test-kubeloop-control-plane-auth")
 	for _, key := range []string{"oidc-signing-key.pem", "hmac-secret"} {
 		if valueAt(t, authSecret, "data", key) == "" {
 			t.Fatalf("independent authentication Secret is missing %q", key)
 		}
 	}
-	if _, coupled := initialAdminSecret["signing-key.pem"]; coupled ||
-		strings.Contains(string(controlPlaneYAML), "oauth/signing-key.pem") ||
+	if strings.Contains(string(controlPlaneYAML), "oauth/signing-key.pem") ||
 		!strings.Contains(string(controlPlaneYAML), "oauth/oidc-signing-key.pem") ||
 		!strings.Contains(string(controlPlaneYAML), "oauth/hmac-secret") {
-		t.Fatal("OAuth/OIDC key material is not isolated from the initial administrator Secret")
+		t.Fatal("OAuth HMAC and OIDC signing key material are not mounted independently")
+	}
+	bootstrapSecret := objectByName(t, objects, "Secret", "test-kubeloop-control-plane-iam-bootstrap")
+	if valueAt(t, bootstrapSecret, "data", "initial-password") == "" {
+		t.Fatal("generated IAM bootstrap Secret is missing the initial password")
+	}
+	if !strings.Contains(string(controlPlaneYAML), "test-kubeloop-control-plane-iam-bootstrap") ||
+		!strings.Contains(string(controlPlaneYAML), "bootstrap/initial-password") {
+		t.Fatal("Control Plane does not mount the IAM bootstrap Secret")
 	}
 	if countKind(objects, "Ingress") != 1 {
 		t.Fatal("expected one same-origin Ingress")
@@ -180,7 +181,7 @@ func TestSQLiteChartRendersIndependentSecureWorkloads(t *testing.T) {
 func TestGatewayAPIHTTPRouteUsesOneTLSOriginAndUnboundedWebSocketTimeout(t *testing.T) {
 	objects := renderChart(t,
 		"--set", "publicURL=https://kubeloop.example.test",
-		"--set", "controlPlane.management.publicURL=https://kubeloop.example.test",
+		"--set", "controlPlane.admin.publicURL=https://kubeloop.example.test",
 		"--set", "gatewayAPI.enabled=true",
 		"--set", "gatewayAPI.host=kubeloop.example.test",
 		"--set", "gatewayAPI.parentRef.name=shared-gateway",
@@ -211,7 +212,7 @@ func TestGatewayAPIHTTPRouteUsesOneTLSOriginAndUnboundedWebSocketTimeout(t *test
 func TestGatewayAPIChartCanOwnTheHTTPSGateway(t *testing.T) {
 	objects := renderChart(t,
 		"--set", "publicURL=https://kubeloop.example.test",
-		"--set", "controlPlane.management.publicURL=https://kubeloop.example.test",
+		"--set", "controlPlane.admin.publicURL=https://kubeloop.example.test",
 		"--set", "gatewayAPI.enabled=true",
 		"--set", "gatewayAPI.host=kubeloop.example.test",
 		"--set", "gatewayAPI.gateway.create=true",
@@ -390,64 +391,69 @@ func TestAuthorizationIsDatabaseManaged(t *testing.T) {
 	}
 }
 
-func TestDevelopmentPresetIsLocalAndDoesNotEnableManagementBootstrap(t *testing.T) {
+func TestDevelopmentPresetDoesNotEnableAuthorizationBypass(t *testing.T) {
 	objects := renderChart(t,
 		"--set", "publicURL=https://kubeloop.192.168.64.70.sslip.io",
-		"--set", "controlPlane.management.publicURL=https://kubeloop.192.168.64.70.sslip.io",
+		"--set", "controlPlane.admin.publicURL=https://kubeloop.192.168.64.70.sslip.io",
 		"--set", "controlPlane.development.enabled=true",
 	)
 	config := controlPlaneConfigRaw(t, objects)
-	for _, want := range []string{`"subjects":[]`, `"groups":[]`, `"recoveryEnabled":false`} {
-		if !strings.Contains(config, want) {
-			t.Fatalf("development config missing %s: %s", want, config)
-		}
-	}
-	for _, forbidden := range []string{"development-authenticated-full-access", "development-policy"} {
+	for _, forbidden := range []string{"development-authenticated-full-access", "development-policy", `"initialAdmin"`} {
 		if strings.Contains(config, forbidden) {
-			t.Fatalf("development mode leaked authorization preset %q: %s", forbidden, config)
+			t.Fatalf("development mode leaked removed authorization preset %q: %s", forbidden, config)
 		}
 	}
 }
 
-func TestManagementBootstrapRemainsControlPlaneOnly(t *testing.T) {
-	defaultObjects := renderChart(t, "--set", "publicURL=https://kubeloop.example.test")
-	defaultJSON := controlPlaneConfigRaw(t, defaultObjects)
-	for _, want := range []string{
-		`"subjects":[]`, `"groups":[]`, `"recoveryEnabled":false`,
-	} {
-		if !strings.Contains(defaultJSON, want) {
-			t.Fatalf("default management config missing %s: %s", want, defaultJSON)
+func TestIAMBootstrapDefaultsCreateInitialAdministratorAndOrganization(t *testing.T) {
+	objects := renderChart(t, "--set", "publicURL=https://kubeloop.example.test")
+	config := controlPlaneConfigRaw(t, objects)
+	for _, want := range []string{`"bootstrap"`, `"enabled":true`, `"passwordFile":"/var/run/secrets/kubeloop/auth/bootstrap/initial-password"`, `"username":"admin"`,
+		`"displayName":"KubeLoop Administrator"`} {
+		if !strings.Contains(config, want) {
+			t.Fatalf("default IAM bootstrap is missing %q: %s", want, config)
 		}
 	}
+	for _, forbidden := range []string{`"initialAdmin"`, `"recoveryEnabled"`} {
+		if strings.Contains(config, forbidden) {
+			t.Fatalf("removed legacy IAM configuration %q remains in Control Plane YAML: %s", forbidden, config)
+		}
+	}
+}
 
+func TestIAMBootstrapCanUseAnExistingSecret(t *testing.T) {
 	objects := renderChart(t,
 		"--set", "publicURL=https://kubeloop.example.test",
-		"--set", "controlPlane.management.bootstrap.subjects[0]=00000000-0000-4000-8000-000000000001",
-		"--set", "controlPlane.management.bootstrap.groups[0]=platform-bootstrap",
+		"--set", "controlPlane.admin.bootstrap.existingSecret=operator-managed-bootstrap",
+		"--set", "controlPlane.admin.bootstrap.passwordKey=password",
 	)
-	managementJSON := controlPlaneConfigRaw(t, objects)
-	for _, want := range []string{
-		`"subjects":["00000000-0000-4000-8000-000000000001"]`, `"groups":["platform-bootstrap"]`,
-	} {
-		if !strings.Contains(managementJSON, want) {
-			t.Fatalf("management config missing %s: %s", want, managementJSON)
+	for _, object := range objects {
+		if object["kind"] == "Secret" && valueAt(t, object, "metadata", "name") == "test-kubeloop-control-plane-iam-bootstrap" {
+			t.Fatal("chart generated an IAM bootstrap Secret while an existing Secret was configured")
 		}
-	}
-	if strings.Contains(strings.ToLower(managementJSON), "breakglass") {
-		t.Fatalf("removed break-glass configuration remains present: %s", managementJSON)
 	}
 	controlPlane := objectsByComponent(t, objects, "Deployment", "control-plane")[0]
 	controlPlaneYAML, _ := yaml.Marshal(controlPlane)
-	if strings.Contains(string(controlPlaneYAML), "break-glass") {
-		t.Fatalf("ControlPlane still projects a break-glass Secret: %s", controlPlaneYAML)
-	}
-	for _, component := range []string{"data-plane", "operator"} {
-		componentYAML, _ := yaml.Marshal(objectsByComponent(t, objects, "Deployment", component)[0])
-		for _, forbidden := range []string{"management-secrets", "break-glass"} {
-			if strings.Contains(string(componentYAML), forbidden) {
-				t.Fatalf("%s received Management Plane Secret %q", component, forbidden)
-			}
+	for _, want := range []string{"operator-managed-bootstrap", "key: password", "path: bootstrap/initial-password"} {
+		if !strings.Contains(string(controlPlaneYAML), want) {
+			t.Fatalf("existing IAM bootstrap Secret mount is missing %q: %s", want, controlPlaneYAML)
 		}
+	}
+}
+
+func TestIAMBootstrapCanBeDisabled(t *testing.T) {
+	objects := renderChart(t,
+		"--set", "publicURL=https://kubeloop.example.test",
+		"--set", "controlPlane.admin.bootstrap.enabled=false",
+	)
+	config := controlPlaneConfigRaw(t, objects)
+	if !strings.Contains(config, `"enabled":false`) || strings.Contains(config, `"passwordFile"`) {
+		t.Fatalf("disabled IAM bootstrap config is invalid: %s", config)
+	}
+	controlPlane := objectsByComponent(t, objects, "Deployment", "control-plane")[0]
+	controlPlaneYAML, _ := yaml.Marshal(controlPlane)
+	if strings.Contains(string(controlPlaneYAML), "iam-bootstrap") || strings.Contains(string(controlPlaneYAML), "bootstrap/initial-password") {
+		t.Fatalf("disabled IAM bootstrap still mounts a Secret: %s", controlPlaneYAML)
 	}
 }
 
@@ -669,14 +675,14 @@ func TestChartRejectsUnsafeStorageConfigurations(t *testing.T) {
 		{name: "missing public URL", want: "publicURL is required"},
 		{name: "development on external origin", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.development.enabled=true"}, want: "requires a local"},
 		{name: "public URL path", args: []string{"--set", "publicURL=https://kubeloop.example.test/base"}, want: "must be one HTTPS origin"},
-		{name: "two external routes", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.management.publicURL=https://kubeloop.example.test", "--set", "ingress.enabled=true", "--set", "ingress.host=kubeloop.example.test", "--set", "gatewayAPI.enabled=true", "--set", "gatewayAPI.host=kubeloop.example.test"}, want: "mutually exclusive"},
-		{name: "Ingress origin mismatch", args: []string{"--set", "publicURL=https://other.example.test", "--set", "controlPlane.management.publicURL=https://other.example.test", "--set", "ingress.enabled=true", "--set", "ingress.host=kubeloop.example.test"}, want: "exactly equal"},
-		{name: "Ingress without TLS", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.management.publicURL=https://kubeloop.example.test", "--set", "ingress.enabled=true", "--set", "ingress.host=kubeloop.example.test", "--set", "ingress.tls.enabled=false"}, want: "TLS"},
-		{name: "Gateway origin mismatch", args: []string{"--set", "publicURL=https://other.example.test", "--set", "controlPlane.management.publicURL=https://other.example.test", "--set", "gatewayAPI.enabled=true", "--set", "gatewayAPI.host=kubeloop.example.test"}, want: "exactly equal"},
-		{name: "Gateway parent", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.management.publicURL=https://kubeloop.example.test", "--set", "gatewayAPI.enabled=true", "--set", "gatewayAPI.host=kubeloop.example.test"}, want: "parentRef.name is required"},
-		{name: "Gateway class", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.management.publicURL=https://kubeloop.example.test", "--set", "gatewayAPI.enabled=true", "--set", "gatewayAPI.host=kubeloop.example.test", "--set", "gatewayAPI.gateway.create=true"}, want: "className is required"},
-		{name: "Gateway TLS certificate", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.management.publicURL=https://kubeloop.example.test", "--set", "gatewayAPI.enabled=true", "--set", "gatewayAPI.host=kubeloop.example.test", "--set", "gatewayAPI.gateway.create=true", "--set", "gatewayAPI.gateway.className=example"}, want: "tls.secretName is required"},
-		{name: "Gateway tunnel timeout", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.management.publicURL=https://kubeloop.example.test", "--set", "gatewayAPI.enabled=true", "--set", "gatewayAPI.host=kubeloop.example.test", "--set", "gatewayAPI.parentRef.name=shared", "--set", "gatewayAPI.parentRef.sectionName=https", "--set", "gatewayAPI.timeouts.tunnel=30m"}, want: "must be 0s"},
+		{name: "two external routes", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.admin.publicURL=https://kubeloop.example.test", "--set", "ingress.enabled=true", "--set", "ingress.host=kubeloop.example.test", "--set", "gatewayAPI.enabled=true", "--set", "gatewayAPI.host=kubeloop.example.test"}, want: "mutually exclusive"},
+		{name: "Ingress origin mismatch", args: []string{"--set", "publicURL=https://other.example.test", "--set", "controlPlane.admin.publicURL=https://other.example.test", "--set", "ingress.enabled=true", "--set", "ingress.host=kubeloop.example.test"}, want: "exactly equal"},
+		{name: "Ingress without TLS", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.admin.publicURL=https://kubeloop.example.test", "--set", "ingress.enabled=true", "--set", "ingress.host=kubeloop.example.test", "--set", "ingress.tls.enabled=false"}, want: "TLS"},
+		{name: "Gateway origin mismatch", args: []string{"--set", "publicURL=https://other.example.test", "--set", "controlPlane.admin.publicURL=https://other.example.test", "--set", "gatewayAPI.enabled=true", "--set", "gatewayAPI.host=kubeloop.example.test"}, want: "exactly equal"},
+		{name: "Gateway parent", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.admin.publicURL=https://kubeloop.example.test", "--set", "gatewayAPI.enabled=true", "--set", "gatewayAPI.host=kubeloop.example.test"}, want: "parentRef.name is required"},
+		{name: "Gateway class", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.admin.publicURL=https://kubeloop.example.test", "--set", "gatewayAPI.enabled=true", "--set", "gatewayAPI.host=kubeloop.example.test", "--set", "gatewayAPI.gateway.create=true"}, want: "className is required"},
+		{name: "Gateway TLS certificate", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.admin.publicURL=https://kubeloop.example.test", "--set", "gatewayAPI.enabled=true", "--set", "gatewayAPI.host=kubeloop.example.test", "--set", "gatewayAPI.gateway.create=true", "--set", "gatewayAPI.gateway.className=example"}, want: "tls.secretName is required"},
+		{name: "Gateway tunnel timeout", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.admin.publicURL=https://kubeloop.example.test", "--set", "gatewayAPI.enabled=true", "--set", "gatewayAPI.host=kubeloop.example.test", "--set", "gatewayAPI.parentRef.name=shared", "--set", "gatewayAPI.parentRef.sectionName=https", "--set", "gatewayAPI.timeouts.tunnel=30m"}, want: "must be 0s"},
 		{name: "restricted egress without rules", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "networkPolicy.egress.enabled=true"}, want: "egress.controlPlane must contain"},
 		{name: "SQLite replicas", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.replicas=2"}, want: "controlPlane.replicas must be 1"},
 		{name: "datasource max open", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.storage.datasource.existingSecret=database", "--set", "controlPlane.storage.maxOpenConnections=0"}, want: "maxOpenConnections must be positive"},
@@ -691,8 +697,6 @@ func TestChartRejectsUnsafeStorageConfigurations(t *testing.T) {
 		{name: "per-user WSS capacity", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "dataPlane.relayRegistry.maxWebSocketSessions=2", "--set", "dataPlane.relayRegistry.maxWebSocketSessionsPerUser=3"}, want: "maxWebSocketSessionsPerUser"},
 		{name: "WSS frame size", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "dataPlane.relayRegistry.maxWebSocketFrameBytes=1024"}, want: "maxWebSocketFrameBytes"},
 		{name: "ControlPlane log level", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.logLevel=trace"}, want: "controlPlane.logLevel must be"},
-		{name: "wildcard management bootstrap", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set-string", "controlPlane.management.bootstrap.subjects[0]=*"}, want: "must be an exact stable Principal UUID"},
-		{name: "management recovery without identity", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.management.bootstrap.recoveryEnabled=true"}, want: "requires a bootstrap subject or group"},
 		{name: "Data Plane log level", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "dataPlane.logLevel=verbose"}, want: "dataPlane.logLevel must be"},
 		{name: "invalid RBAC scope", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.rbac.scope=tenant"}, want: "controlPlane.rbac.scope must be cluster or namespace"},
 		{name: "missing RBAC namespaces", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.rbac.scope=namespace"}, want: "controlPlane.rbac.namespaces must contain"},

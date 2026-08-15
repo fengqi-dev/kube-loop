@@ -35,7 +35,7 @@ type Storage interface {
 }
 
 type SessionValidator interface {
-	RequireActive(context.Context, controlplaneapi.Principal, string, string) (sessionapi.ActiveSession, *controlplaneapi.Error)
+	RequireActive(context.Context, controlplaneapi.Identity, string, string) (sessionapi.ActiveSession, *controlplaneapi.Error)
 }
 
 type Config struct {
@@ -75,7 +75,7 @@ func New(storageBackend Storage, sessions SessionValidator, executor Executor, c
 
 func (handler *Service) create(
 	ctx *echo.Context,
-	principal controlplaneapi.Principal,
+	identity controlplaneapi.Identity,
 	session sessionapi.ActiveSession,
 ) *controlplaneapi.Error {
 	request := ctx.Request()
@@ -95,13 +95,13 @@ func (handler *Service) create(
 	if err != nil {
 		return internalError(err)
 	}
-	scope := taskapi.Scope(TaskType, principal.Subject)
+	scope := taskapi.Scope(TaskType, identity.Subject)
 	if record, err := handler.storage.Idempotency().Get(request.Context(), scope, key); err == nil {
 		if record.RequestHash != requestHash {
 			return storageError(storage.ErrIdempotencyMismatch)
 		}
 		task, err := handler.storage.Tasks().GetByID(request.Context(), record.ResourceID)
-		if err != nil || !owned(task, principal, session) {
+		if err != nil || !owned(task, identity, session) {
 			return notFound()
 		}
 		document, err := decodeTask(task, session.Namespace)
@@ -114,13 +114,13 @@ func (handler *Service) create(
 	} else if !errors.Is(err, storage.ErrNotFound) {
 		return storageError(err)
 	}
-	if err := handler.executor.Validate(request.Context(), principal, session.Namespace, spec); err != nil {
+	if err := handler.executor.Validate(request.Context(), identity, session.Namespace, spec); err != nil {
 		return &controlplaneapi.Error{Code: controlplaneapi.CodeInvalidArgument, Message: "Pod exec target is unavailable", Cause: err}
 	}
 	now := handler.now().UTC()
 	expiresAt := session.ExpiresAt.UTC()
 	task := storage.Task{
-		ID: uuid.NewString(), PrincipalID: principal.Subject, SessionID: session.ID,
+		ID: uuid.NewString(), IdentityID: identity.Subject, SessionID: session.ID,
 		Type: TaskType, State: remotetask.Pending, Spec: specJSON, IdempotencyKey: key,
 		CreatedAt: now, UpdatedAt: now, ExpiresAt: &expiresAt,
 	}
@@ -166,7 +166,7 @@ func (handler *Service) create(
 
 func (handler *Service) stream(
 	ctx *echo.Context,
-	principal controlplaneapi.Principal,
+	identity controlplaneapi.Identity,
 	session sessionapi.ActiveSession,
 	taskID string,
 ) *controlplaneapi.Error {
@@ -176,7 +176,7 @@ func (handler *Service) stream(
 		return notFound()
 	}
 	task, err := handler.storage.Tasks().GetByID(request.Context(), taskID)
-	if err != nil || !owned(task, principal, session) {
+	if err != nil || !owned(task, identity, session) {
 		return notFound()
 	}
 	if task.State != remotetask.Pending {
@@ -196,7 +196,7 @@ func (handler *Service) stream(
 	}
 	defer connection.CloseNow()
 	connection.SetReadLimit(execstream.MaximumPayload + 1)
-	streamContext, cancel, contextErr := streamlease.Start(request.Context(), handler.storage, principal, session, streamlease.Config{
+	streamContext, cancel, contextErr := streamlease.Start(request.Context(), handler.storage, identity, session, streamlease.Config{
 		Now: handler.now, CheckInterval: handler.credentialCheckInterval,
 		Runtime: streamlease.RuntimeFrom(handler.sessions), TaskID: task.ID, HeartbeatTask: true,
 		Authorizer: handler.authorizer, Authorization: authorization.Request{
@@ -231,7 +231,7 @@ func (handler *Service) stream(
 	if !spec.TTY {
 		streams.Stderr = frameWriter{ctx: streamContext, connection: connection, frameType: execstream.Stderr, mu: &writeMu}
 	}
-	execErr := handler.executor.Exec(streamContext, principal, session.Namespace, spec, streams)
+	execErr := handler.executor.Exec(streamContext, identity, session.Namespace, spec, streams)
 	cancelled := streamContext.Err() != nil
 	_ = stdinWriter.Close()
 	exitStatus := statusFromError(execErr, cancelled)
@@ -297,8 +297,8 @@ func normalizeSpec(spec *Spec) *controlplaneapi.Error {
 	return nil
 }
 
-func owned(task storage.Task, principal controlplaneapi.Principal, session sessionapi.ActiveSession) bool {
-	return task.Type == TaskType && task.PrincipalID == principal.Subject && task.SessionID == session.ID
+func owned(task storage.Task, identity controlplaneapi.Identity, session sessionapi.ActiveSession) bool {
+	return task.Type == TaskType && task.IdentityID == identity.Subject && task.SessionID == session.ID
 }
 
 func specFromTask(task storage.Task) (Spec, error) {

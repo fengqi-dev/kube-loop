@@ -10,13 +10,13 @@ import (
 type oauthBrowserSessionRepository struct{ repositoryBase }
 
 func (repository *oauthBrowserSessionRepository) Create(ctx context.Context, session OAuthBrowserSession) error {
-	if len(session.IDHash) != sha256Size || session.PrincipalID == "" || session.ProviderID == "" ||
+	if len(session.IDHash) != sha256Size || session.IdentityID == "" || session.ProviderID == "" ||
 		session.AuthTime.IsZero() || session.CreatedAt.IsZero() || !session.ExpiresAt.After(session.CreatedAt) {
 		return errors.New("OAuth browser session is invalid")
 	}
 	_, err := repository.executor.ExecContext(ctx, repository.bind(`INSERT INTO oauth_browser_sessions(
-		id_hash, principal_id, provider_id, auth_time, created_at, expires_at, revoked_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?)`), session.IDHash, session.PrincipalID, session.ProviderID,
+		id_hash, identity_id, provider_id, auth_time, created_at, expires_at, revoked_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?)`), session.IDHash, session.IdentityID, session.ProviderID,
 		formatTime(session.AuthTime), formatTime(session.CreatedAt), formatTime(session.ExpiresAt), nullableTime(session.RevokedAt))
 	return mapWriteError(err)
 }
@@ -28,10 +28,10 @@ func (repository *oauthBrowserSessionRepository) Get(ctx context.Context, hash [
 	var value OAuthBrowserSession
 	var authTime, createdAt, expiresAt string
 	var revokedAt sql.NullString
-	err := repository.executor.QueryRowContext(ctx, repository.bind(`SELECT id_hash, principal_id, provider_id,
+	err := repository.executor.QueryRowContext(ctx, repository.bind(`SELECT id_hash, identity_id, provider_id,
 		auth_time, created_at, expires_at, revoked_at FROM oauth_browser_sessions
 		WHERE id_hash = ? AND revoked_at IS NULL AND expires_at > ?`), hash, formatTime(now)).Scan(
-		&value.IDHash, &value.PrincipalID, &value.ProviderID, &authTime, &createdAt, &expiresAt, &revokedAt)
+		&value.IDHash, &value.IdentityID, &value.ProviderID, &authTime, &createdAt, &expiresAt, &revokedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return OAuthBrowserSession{}, ErrNotFound
 	}

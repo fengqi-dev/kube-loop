@@ -25,9 +25,9 @@ func TestReconcilerTerminatesOnlyStaleStreamOwners(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	principalID, sessionID := uuid.NewString(), uuid.NewString()
-	if _, err := store.Principals().Upsert(ctx, storage.Principal{
-		ID: principalID, Provider: "test", ExternalID: "runtime-user", CreatedAt: now, UpdatedAt: now,
+	identityID, sessionID := uuid.NewString(), uuid.NewString()
+	if _, err := store.Identities().Create(ctx, storage.Identity{
+		ID: identityID, Type: "human", DisplayName: "Test Identity", Status: "active", CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -35,7 +35,7 @@ func TestReconcilerTerminatesOnlyStaleStreamOwners(t *testing.T) {
 	networkJSON, _ := networkspec.CanonicalJSON(network)
 	networkHash, _ := networkspec.Hash(network)
 	if err := store.Sessions().Create(ctx, storage.Session{
-		ID: sessionID, PrincipalID: principalID, DeviceID: "device", ClusterID: "cluster",
+		ID: sessionID, IdentityID: identityID, DeviceID: "device", ClusterID: "cluster",
 		Namespace: "development", State: "active", NetworkSpec: networkJSON, NetworkSpecHash: networkHash,
 		CreatedAt: now.Add(-time.Hour), UpdatedAt: now, LastHeartbeatAt: now, ExpiresAt: now.Add(time.Hour),
 	}); err != nil {
@@ -43,22 +43,22 @@ func TestReconcilerTerminatesOnlyStaleStreamOwners(t *testing.T) {
 	}
 	tasks := map[string]storage.Task{
 		"stale-exec": {
-			ID: uuid.NewString(), PrincipalID: principalID, SessionID: sessionID, Type: "pod-exec",
+			ID: uuid.NewString(), IdentityID: identityID, SessionID: sessionID, Type: "pod-exec",
 			State: remotetask.Running, Spec: json.RawMessage(`{}`), Result: json.RawMessage(`{"exitCode":0}`),
 			IdempotencyKey: "stale-exec", CreatedAt: now.Add(-time.Minute), UpdatedAt: now.Add(-time.Minute),
 		},
 		"stopping-file": {
-			ID: uuid.NewString(), PrincipalID: principalID, SessionID: sessionID, Type: "file-transfer",
+			ID: uuid.NewString(), IdentityID: identityID, SessionID: sessionID, Type: "file-transfer",
 			State: remotetask.Stopping, Spec: json.RawMessage(`{}`), Result: json.RawMessage(`{"bytes":10}`),
 			IdempotencyKey: "stopping-file", CreatedAt: now.Add(-time.Minute), UpdatedAt: now.Add(-time.Minute),
 		},
 		"live-exec": {
-			ID: uuid.NewString(), PrincipalID: principalID, SessionID: sessionID, Type: "pod-exec",
+			ID: uuid.NewString(), IdentityID: identityID, SessionID: sessionID, Type: "pod-exec",
 			State: remotetask.Running, Spec: json.RawMessage(`{}`), Result: json.RawMessage(`{}`),
 			IdempotencyKey: "live-exec", CreatedAt: now.Add(-time.Minute), UpdatedAt: now.Add(-time.Second),
 		},
 		"live-port-forward": {
-			ID: uuid.NewString(), PrincipalID: principalID, SessionID: sessionID, Type: "port-forward",
+			ID: uuid.NewString(), IdentityID: identityID, SessionID: sessionID, Type: "port-forward",
 			State: remotetask.Running, Spec: json.RawMessage(`{}`), Result: json.RawMessage(`{}`),
 			IdempotencyKey: "live-port-forward", CreatedAt: now.Add(-time.Minute), UpdatedAt: now.Add(-time.Minute),
 		},

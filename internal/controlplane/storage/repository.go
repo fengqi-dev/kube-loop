@@ -15,13 +15,66 @@ var (
 	ErrIdempotencyMismatch = errors.New("idempotency key was used for a different request")
 )
 
-type PrincipalRepository interface {
-	// Upsert preserves the stable ID and CreatedAt of an existing
-	// (provider, external ID) identity while refreshing profile attributes.
-	Upsert(context.Context, Principal) (Principal, error)
-	GetByID(context.Context, string) (Principal, error)
-	GetByIdentity(context.Context, string, string) (Principal, error)
-	List(context.Context, PrincipalListFilter) ([]Principal, error)
+type IdentityRepository interface {
+	Create(context.Context, Identity) (Identity, error)
+	Update(context.Context, Identity) error
+	GetByID(context.Context, string) (Identity, error)
+	List(context.Context, IdentityListFilter) ([]Identity, error)
+}
+
+type OrganizationRepository interface {
+	Create(context.Context, Organization) error
+	Get(context.Context, string) (Organization, error)
+	List(context.Context, int) ([]Organization, error)
+	AddMember(context.Context, OrganizationMembership) error
+	RemoveMember(context.Context, string, string) error
+	ListMembers(context.Context, string, int) ([]OrganizationMembership, error)
+	ListForIdentity(context.Context, string) ([]Organization, error)
+}
+
+type GroupRepository interface {
+	Create(context.Context, Group) error
+	Get(context.Context, string) (Group, error)
+	List(context.Context, string, int) ([]Group, error)
+	Update(context.Context, Group) error
+	Delete(context.Context, string) error
+	AddMember(context.Context, GroupMembership) error
+	RemoveMember(context.Context, string, string) error
+	ListMembers(context.Context, string, int) ([]GroupMembership, error)
+	ListForIdentity(context.Context, string, string) ([]Group, error)
+	PutNamespace(context.Context, GroupNamespace) error
+	DeleteNamespace(context.Context, string, string) error
+	ListNamespaces(context.Context, string) ([]GroupNamespace, error)
+	ListAuthorizedNamespaces(context.Context, string, []string) ([]string, error)
+	IsAdministrator(context.Context, string, []string) (bool, error)
+}
+
+type InvitationRepository interface {
+	Create(context.Context, Invitation) error
+	GetByTokenHash(context.Context, []byte, time.Time) (Invitation, error)
+	List(context.Context, string, int) ([]Invitation, error)
+	Accept(context.Context, string, string, time.Time) error
+	Revoke(context.Context, string, time.Time) error
+}
+
+type BootstrapTokenRepository interface {
+	Create(context.Context, BootstrapToken) error
+	Get(context.Context) (BootstrapToken, error)
+	Consume(context.Context, []byte, time.Time) error
+}
+
+type CredentialRepository interface {
+	CreatePassword(context.Context, PasswordCredential) error
+	GetPasswordByIdentity(context.Context, string) (PasswordCredential, error)
+	GetPasswordByUsername(context.Context, string) (PasswordCredential, error)
+	UpdatePassword(context.Context, string, string, time.Time) error
+	SetPasswordEnabled(context.Context, string, bool, time.Time) error
+}
+
+type SecurityPolicyRepository interface {
+	Put(context.Context, SecurityPolicy, uint64) (SecurityPolicy, error)
+	GetPlatform(context.Context) (SecurityPolicy, error)
+	GetOrganization(context.Context, string) (SecurityPolicy, error)
 }
 
 type SessionRepository interface {
@@ -38,7 +91,7 @@ type SessionRepository interface {
 }
 
 type TaskRepository interface {
-	// Create enforces one idempotency key per Principal.
+	// Create enforces one idempotency key per Identity.
 	Create(context.Context, Task) error
 	GetByID(context.Context, string) (Task, error)
 	List(context.Context, TaskListFilter) ([]Task, error)
@@ -92,15 +145,6 @@ type AuditExportJobRepository interface {
 	Complete(context.Context, string, string, string, string, time.Time) error
 }
 
-type ManagementStateRepository interface {
-	// BootstrapRetired fails closed at the authorization layer when storage is
-	// unavailable. A missing singleton row means bootstrap has never retired.
-	BootstrapRetired(context.Context) (bool, error)
-	// RetireBootstrap is irreversible through the application repository. It is
-	// idempotent and returns true only when this call persisted the marker.
-	RetireBootstrap(context.Context, time.Time) (bool, error)
-}
-
 type AdminSessionRepository interface {
 	Create(context.Context, AdminSession) error
 	GetByHash(context.Context, []byte) (AdminSession, error)
@@ -124,11 +168,12 @@ type OAuthClientRepository interface {
 
 type OAuthSessionRepository interface {
 	Create(context.Context, OAuthSession) error
+	ListGrants(context.Context, OAuthGrantListFilter) ([]OAuthGrant, error)
 	Get(context.Context, string, []byte) (OAuthSession, error)
 	Consume(context.Context, string, []byte, time.Time) (OAuthSession, error)
 	Delete(context.Context, string, []byte) error
 	RevokeRequest(context.Context, string, time.Time) error
-	RevokePrincipal(context.Context, string, time.Time) (int64, error)
+	RevokeIdentity(context.Context, string, time.Time) (int64, error)
 	RequestOwner(context.Context, string) (string, string, error)
 	RequestActive(context.Context, string, time.Time) (bool, error)
 	DeleteExpired(context.Context, time.Time, int) (int64, error)
@@ -157,53 +202,14 @@ type OAuthBrowserSessionRepository interface {
 	DeleteExpired(context.Context, time.Time, int) (int64, error)
 }
 
-type LocalAdminUserRepository interface {
-	Create(context.Context, LocalAdminUser) error
-	GetByPrincipalID(context.Context, string) (LocalAdminUser, error)
-	GetByUsername(context.Context, string) (LocalAdminUser, error)
-	List(context.Context) ([]LocalAdminUser, error)
-	UpdatePassword(context.Context, string, string, time.Time) error
-	UpdateEnabled(context.Context, string, bool, time.Time) error
-	UpdateTOTP(context.Context, string, []byte, time.Time) error
-	MarkBootstrapComplete(context.Context, string, time.Time) error
-}
-
-type AdminRecoveryCodeRepository interface {
-	Replace(context.Context, string, [][]byte, time.Time) error
-	Consume(context.Context, string, []byte) error
-	DeleteByPrincipal(context.Context, string) error
-}
-
-type AdminPolicyConfigRepository interface {
-	Create(context.Context, AdminPolicyConfig) (AdminPolicyConfig, error)
-	Get(context.Context, string) (AdminPolicyConfig, error)
-}
-
-type AuthorizationDefinitionRepository interface {
-	CreateRole(context.Context, AuthorizationRoleRecord) error
-	CreateBinding(context.Context, AuthorizationBindingRecord) error
-}
-
-type ProviderConfigRepository interface {
-	Create(context.Context, ProviderConfig) (ProviderConfig, error)
-	Get(context.Context, string) (ProviderConfig, error)
-}
-
-type ActiveManagementConfigRepository interface {
-	Get(context.Context, string, string) (ActiveManagementConfig, error)
-	List(context.Context, string) ([]ActiveManagementConfig, error)
-	Set(context.Context, string, string, string, string, string, time.Time) (ActiveManagementConfig, error)
-}
-
-type ConfigChangeRequestRepository interface {
-	Create(context.Context, ConfigChangeRequest) error
-	GetByID(context.Context, string) (ConfigChangeRequest, error)
-	GetByIdempotencyHash(context.Context, string, string, string, string, []byte) (ConfigChangeRequest, error)
-	UpdateStatus(context.Context, string, string, string, json.RawMessage, time.Time) error
-}
-
 type Repositories interface {
-	Principals() PrincipalRepository
+	Identities() IdentityRepository
+	Organizations() OrganizationRepository
+	Groups() GroupRepository
+	Invitations() InvitationRepository
+	BootstrapTokens() BootstrapTokenRepository
+	Credentials() CredentialRepository
+	SecurityPolicies() SecurityPolicyRepository
 	Sessions() SessionRepository
 	Tasks() TaskRepository
 	ResourceSnapshots() ResourceSnapshotRepository
@@ -211,15 +217,7 @@ type Repositories interface {
 	Audit() AuditRepository
 	RelayDesiredStates() RelayDesiredStateRepository
 	AuditExportJobs() AuditExportJobRepository
-	ManagementState() ManagementStateRepository
 	AdminSessions() AdminSessionRepository
-	LocalAdminUsers() LocalAdminUserRepository
-	AdminRecoveryCodes() AdminRecoveryCodeRepository
-	AdminPolicyConfigs() AdminPolicyConfigRepository
-	AuthorizationDefinitions() AuthorizationDefinitionRepository
-	ProviderConfigs() ProviderConfigRepository
-	ActiveManagementConfigs() ActiveManagementConfigRepository
-	ConfigChangeRequests() ConfigChangeRequestRepository
 	OAuthClients() OAuthClientRepository
 	OAuthSessions() OAuthSessionRepository
 	OAuthConsents() OAuthConsentRepository

@@ -154,20 +154,20 @@ func TestGatewayPodMultiUserCapacityRSSAndCleanup(t *testing.T) {
 	for index := range capacityPhysicalSessions {
 		client := startCapacityPodClient(
 			t, ctx, signer, publicAddress, namespace, spec, specHash,
-			fmt.Sprintf("capacity-principal-%d", index), uuid.NewString(),
+			fmt.Sprintf("capacity-identity-%d", index), uuid.NewString(),
 		)
 		clients = append(clients, client)
 		waitGatewayMetric(t, ctx, publicAddress, "kubeloop_gateway_active_websocket_sessions", index+1)
 		memoryCurve[fmt.Sprintf("users-%d", index+1)] = gatewayWorkingSetBytes(t, ctx, kubeClient, gatewayPod)
 		if index == 0 {
 			assertCapacityConnectionRejected(
-				t, ctx, signer, publicAddress, namespace, specHash, client.source.principalID, uuid.NewString(),
+				t, ctx, signer, publicAddress, namespace, specHash, client.source.identityID, uuid.NewString(),
 			)
 		}
 	}
 
-	// A second device for an existing Principal is rejected even before the
-	// global limit can be exceeded. A new Principal is rejected at the global
+	// A second device for an existing Identity is rejected even before the
+	// global limit can be exceeded. A new Identity is rejected at the global
 	// physical WSS limit.
 	assertCapacityConnectionRejected(t, ctx, signer, publicAddress, namespace, specHash, "capacity-overflow", uuid.NewString())
 	assertCapacityPodHealth(t, ctx, publicAddress)
@@ -270,7 +270,7 @@ func startCapacityPodClient(
 	signer *relayticket.Signer,
 	gatewayAddress, namespace string,
 	spec networkspec.Spec,
-	specHash, principalID, deviceID string,
+	specHash, identityID, deviceID string,
 ) *capacityClient {
 	t.Helper()
 	now := time.Now().UTC()
@@ -279,7 +279,7 @@ func startCapacityPodClient(
 		CreatedAt: now, UpdatedAt: now, LastHeartbeatAt: now, ExpiresAt: now.Add(5 * time.Minute),
 		NetworkSpec: spec, NetworkSpecHash: specHash,
 	}
-	source := &e2eSessionSource{signer: signer, session: session, principalID: principalID, deviceID: deviceID}
+	source := &e2eSessionSource{signer: signer, session: session, identityID: identityID, deviceID: deviceID}
 	ticketSource := source.RelayTicketSource("capacity")
 	forwarder, err := websocketmux.Start(ctx, websocketmux.ClientConfig{
 		URL: "ws://" + gatewayAddress + testPath, DeviceID: deviceID,
@@ -318,13 +318,13 @@ func assertCapacityConnectionRejected(
 	t *testing.T,
 	ctx context.Context,
 	signer *relayticket.Signer,
-	gatewayAddress, namespace, specHash, principalID, deviceID string,
+	gatewayAddress, namespace, specHash, identityID, deviceID string,
 ) {
 	t.Helper()
 	now := time.Now().UTC().Truncate(time.Second)
 	ticket, err := signer.Sign(relayticket.Claims{
 		Version: relayticket.Version, Issuer: testIssuer, Audience: testRelay,
-		PrincipalID: principalID, DeviceID: deviceID, SessionID: uuid.NewString(), SessionGeneration: 1,
+		IdentityID: identityID, DeviceID: deviceID, SessionID: uuid.NewString(), SessionGeneration: 1,
 		Namespace: namespace, Operations: []string{"tunnel"}, NetworkSpecHash: specHash,
 		TicketID: uuid.NewString(), IssuedAt: now.Unix(), NotBefore: now.Unix(), ExpiresAt: now.Add(time.Minute).Unix(),
 	})

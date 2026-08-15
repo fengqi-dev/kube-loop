@@ -8,11 +8,11 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
 )
 
-type principalContextKey struct{}
+type identityContextKey struct{}
 
-func PrincipalFromContext(ctx context.Context) (controlplaneapi.Principal, bool) {
-	principal, ok := ctx.Value(principalContextKey{}).(controlplaneapi.Principal)
-	return principal, ok && principal.Subject != ""
+func IdentityFromContext(ctx context.Context) (controlplaneapi.Identity, bool) {
+	identity, ok := ctx.Value(identityContextKey{}).(controlplaneapi.Identity)
+	return identity, ok && identity.Subject != ""
 }
 
 type authorizationContextKey struct{}

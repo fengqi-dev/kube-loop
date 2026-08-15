@@ -35,7 +35,7 @@ type Config struct {
 }
 
 type IssueInput struct {
-	PrincipalID      string
+	IdentityID       string
 	Groups           []string
 	DeviceID         string
 	SessionID        string
@@ -94,7 +94,7 @@ func (service *Service) Issue(_ context.Context, input IssueInput) (entity.Ticke
 	}
 	claims := relayticket.Claims{
 		Version: relayticket.Version, Issuer: service.issuer, Audience: assignment.RelayID,
-		PrincipalID: input.PrincipalID, Groups: append([]string(nil), input.Groups...), DeviceID: input.DeviceID,
+		IdentityID: input.IdentityID, Groups: append([]string(nil), input.Groups...), DeviceID: input.DeviceID,
 		SessionID: input.SessionID, SessionGeneration: input.Generation,
 		Namespace: input.Namespace, Operations: []string{OperationTunnel},
 		NetworkSpecHash: input.NetworkSpecHash, TicketID: uuid.NewString(),

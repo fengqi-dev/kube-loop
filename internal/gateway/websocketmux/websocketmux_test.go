@@ -452,9 +452,9 @@ func TestNewGenerationLetsExistingStreamFinishAndRejectsOlderNewStreams(t *testi
 		Authenticator: AuthenticatorFunc(func(request *http.Request) (Identity, error) {
 			switch request.Header.Get("Authorization") {
 			case "Bearer generation-1":
-				return Identity{PrincipalID: "principal", DeviceID: testDeviceID, SessionID: sessionID, SessionGeneration: 1, ExpiresAt: testTicketExpiry()}, nil
+				return Identity{IdentityID: "identity", DeviceID: testDeviceID, SessionID: sessionID, SessionGeneration: 1, ExpiresAt: testTicketExpiry()}, nil
 			case "Bearer generation-2":
-				return Identity{PrincipalID: "principal", DeviceID: testDeviceID, SessionID: sessionID, SessionGeneration: 2, ExpiresAt: testTicketExpiry()}, nil
+				return Identity{IdentityID: "identity", DeviceID: testDeviceID, SessionID: sessionID, SessionGeneration: 2, ExpiresAt: testTicketExpiry()}, nil
 			default:
 				return Identity{}, fmt.Errorf("authentication failed")
 			}
@@ -591,15 +591,15 @@ func TestWSSHandshakeReturnsTypedVersionAndClientVersionRejections(t *testing.T)
 	waitForActiveSessions(t, handler, 0)
 }
 
-func TestWSSHandshakeBindsDeviceAndLimitsConnectionsPerPrincipal(t *testing.T) {
+func TestWSSHandshakeBindsDeviceAndLimitsConnectionsPerIdentity(t *testing.T) {
 	const secondDeviceID = "44444444-4444-4444-8444-444444444444"
 	handler, err := NewHandler(ServerConfig{
 		Authenticator: AuthenticatorFunc(func(request *http.Request) (Identity, error) {
 			switch request.Header.Get("Authorization") {
 			case "Bearer first":
-				return Identity{PrincipalID: "principal", DeviceID: testDeviceID, SessionID: "33333333-3333-4333-8333-333333333333", SessionGeneration: 1, ExpiresAt: testTicketExpiry()}, nil
+				return Identity{IdentityID: "identity", DeviceID: testDeviceID, SessionID: "33333333-3333-4333-8333-333333333333", SessionGeneration: 1, ExpiresAt: testTicketExpiry()}, nil
 			case "Bearer second":
-				return Identity{PrincipalID: "principal", DeviceID: secondDeviceID, SessionID: "55555555-5555-4555-8555-555555555555", SessionGeneration: 1, ExpiresAt: testTicketExpiry()}, nil
+				return Identity{IdentityID: "identity", DeviceID: secondDeviceID, SessionID: "55555555-5555-4555-8555-555555555555", SessionGeneration: 1, ExpiresAt: testTicketExpiry()}, nil
 			default:
 				return Identity{}, errors.New("authentication failed")
 			}
@@ -710,7 +710,7 @@ func testAuthenticator(expected string) AuthenticatorFunc {
 		if request.Header.Get("Authorization") != "Bearer "+expected {
 			return Identity{}, fmt.Errorf("authentication failed")
 		}
-		return Identity{PrincipalID: "principal", DeviceID: testDeviceID, SessionID: "33333333-3333-4333-8333-333333333333", SessionGeneration: 1, ExpiresAt: testTicketExpiry()}, nil
+		return Identity{IdentityID: "identity", DeviceID: testDeviceID, SessionID: "33333333-3333-4333-8333-333333333333", SessionGeneration: 1, ExpiresAt: testTicketExpiry()}, nil
 	}
 }
 
@@ -722,7 +722,7 @@ func TestHandlerRejectsExpiredRelayTicketIdentity(t *testing.T) {
 	handler, err := NewHandler(ServerConfig{
 		Authenticator: AuthenticatorFunc(func(*http.Request) (Identity, error) {
 			return Identity{
-				PrincipalID: "principal", DeviceID: testDeviceID,
+				IdentityID: "identity", DeviceID: testDeviceID,
 				SessionID: "33333333-3333-4333-8333-333333333333", SessionGeneration: 1,
 				ExpiresAt: time.Now().Add(-time.Second),
 			}, nil

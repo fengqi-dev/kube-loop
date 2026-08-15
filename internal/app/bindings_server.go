@@ -84,8 +84,9 @@ func (a *App) SaveServerProfile(request SaveServerProfileRequest) (ServerProfile
 	serverProfile := clientprofile.Profile{
 		SchemaVersion: clientprofile.ProfileSchemaVersion,
 		ID:            document.ServiceID, BaseURL: baseURL, TunnelPath: document.TunnelPath, DisplayName: displayName,
-		LastPrincipalID: previous.LastPrincipalID, LastUserName: previous.LastUserName,
+		LastIdentityID: previous.LastIdentityID, LastUserName: previous.LastUserName,
 		LastNamespace: previous.LastNamespace, DNSNamespace: previous.DNSNamespace,
+		SOCKSPort:   previous.SOCKSPort,
 		HostAliases: append([]clientprofile.HostAlias{}, previous.HostAliases...),
 	}
 	if err := a.profiles.Upsert(serverProfile); err != nil {

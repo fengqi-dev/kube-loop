@@ -46,8 +46,17 @@ jobs:
       - name: Build management frontend
         run: npm run build:admin --prefix frontend
 
-      - name: Verify embedded management assets
-        run: git diff --exit-code -- internal/controlplane/admin/ui/assets
+      - name: Test authentication frontend
+        run: npm run test:auth --prefix frontend
+
+      - name: Build authentication frontend
+        run: npm run build:auth --prefix frontend
+
+      - name: Verify embedded browser assets
+        run: |
+          git diff --exit-code -- \
+            internal/controlplane/admin/ui/assets \
+            internal/controlplane/authn/httpauth/ui/assets
 
       - name: Upload frontend dist
         uses: actions/upload-artifact@v7
@@ -193,97 +202,6 @@ jobs:
             done
           done
 
-  oidc-e2e-keycloak:
-    name: OIDC E2E (Keycloak)
-    needs: go
-    runs-on: ubuntu-24.04
-    timeout-minutes: 35
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v6
-
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: e2e/oidc/package-lock.json
-
-      - name: Set up Helm
-        uses: azure/setup-helm@v4
-
-      - name: Set up Minikube
-        uses: medyagh/setup-minikube@v0.0.21
-        with:
-          start: false
-
-      - name: Install Playwright Chromium
-        run: |
-          npm ci --prefix e2e/oidc
-          cd e2e/oidc
-          npx playwright install --with-deps chromium
-
-      - name: Start isolated cluster and load images
-        shell: bash
-        run: |
-          set -euo pipefail
-          minikube start --profile kubeloop-oidc-e2e --driver docker --cpus 2 --memory 5120
-          minikube --profile kubeloop-oidc-e2e image build \
-            -f build/control-plane.Dockerfile -t kubeloop/control-plane:e2e .
-          minikube --profile kubeloop-oidc-e2e image build \
-            -f build/gateway.Dockerfile -t kubeloop/gateway:e2e .
-          minikube --profile kubeloop-oidc-e2e image build \
-            -f build/operator.Dockerfile -t kubeloop/operator:e2e .
-          minikube --profile kubeloop-oidc-e2e image load --remote \
-            quay.io/keycloak/keycloak:26.3.5
-
-      - name: Run Keycloak browser login E2E
-        id: oidc-e2e
-        shell: bash
-        env:
-          KUBELOOP_OIDC_E2E: "1"
-          KUBELOOP_OIDC_E2E_CONTEXT: kubeloop-oidc-e2e
-          KUBELOOP_OIDC_E2E_KEEP_ON_FAILURE: "1"
-          KUBELOOP_OIDC_E2E_ARTIFACTS: ${{ github.workspace }}/build/oidc-e2e-artifacts
-        run: ./e2e/oidc/run.sh
-
-      - name: Collect OIDC E2E diagnostics
-        if: failure()
-        shell: bash
-        run: |
-          mkdir -p build/oidc-e2e-artifacts
-          kubectl get nodes,pods,deployments,replicasets,services --all-namespaces -o wide \
-            >build/oidc-e2e-artifacts/kubernetes-resources.log 2>&1 || true
-          kubectl get events --all-namespaces --sort-by=.lastTimestamp \
-            >build/oidc-e2e-artifacts/kubernetes-events.log 2>&1 || true
-          kubectl describe pods --namespace kubeloop-oidc \
-            >build/oidc-e2e-artifacts/kubeloop-pods.log 2>&1 || true
-          kubectl logs --namespace kubeloop-oidc \
-            --selector app.kubernetes.io/component=control-plane --all-containers --tail=-1 \
-            >build/oidc-e2e-artifacts/control-plane.log 2>&1 || true
-          kubectl logs --namespace kubeloop-oidc-provider \
-            --selector app=keycloak --all-containers --tail=-1 \
-            >build/oidc-e2e-artifacts/keycloak.log 2>&1 || true
-
-      - name: Upload OIDC E2E artifacts
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: oidc-e2e-keycloak
-          path: build/oidc-e2e-artifacts
-          if-no-files-found: warn
-          retention-days: 7
-
-      - name: Delete isolated cluster
-        if: always()
-        run: minikube delete --profile kubeloop-oidc-e2e || true
-
   e2e:
     name: Linux E2E (Minikube)
     needs: go
@@ -343,6 +261,23 @@ jobs:
           go run ./e2e/scripts/helper-ping.go
           go run ./e2e/scripts/stop-helper.go || true
 
+      - name: Run Linux platform E2E
+        shell: bash
+        run: |
+          set -euo pipefail
+          go test -tags=e2e -c \
+            -o build/bin/helper-platform-e2e.test ./e2e/platform
+          KUBELOOP_PLATFORM_E2E=1 \
+            build/bin/helper-platform-e2e.test \
+              -test.v \
+              -test.timeout=5m \
+              -test.skip '^TestPlatformDNSApplyAndRestore$'
+          sudo -n env KUBELOOP_PLATFORM_E2E=1 \
+            build/bin/helper-platform-e2e.test \
+              -test.v \
+              -test.timeout=5m \
+              -test.run '^TestPlatformDNSApplyAndRestore$'
+
       - name: Run Minikube e2e tests
         shell: bash
         env:
@@ -358,6 +293,35 @@ jobs:
         if: always()
         shell: bash
         run: go run ./e2e/scripts/stop-helper.go || true
+
+  operator-e2e:
+    name: Operator E2E (Minikube)
+    needs: go
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up Minikube
+        uses: medyagh/setup-minikube@v0.0.21
+        with:
+          start: false
+
+      - name: Run Operator E2E
+        env:
+          MINIKUBE_DRIVER: docker
+        run: make operator-test-e2e
+
+      - name: Delete isolated cluster
+        if: always()
+        run: make operator-cleanup-test-e2e
 
   windows-e2e:
     name: Windows Helper E2E

@@ -137,7 +137,7 @@ func (repository *auditedTaskRepository) appendTransition(
 		return errors.New("encode Task transition audit metadata")
 	}
 	return repository.audit.Append(ctx, AuditEvent{
-		ID: uuid.NewString(), PrincipalID: task.PrincipalID, Action: TaskTransitionAuditAction,
+		ID: uuid.NewString(), IdentityID: task.IdentityID, Action: TaskTransitionAuditAction,
 		ResourceType: task.Type, ResourceID: task.ID, Outcome: "success",
 		RequestID: requestID, Metadata: metadata, CreatedAt: createdAt.UTC(),
 	})

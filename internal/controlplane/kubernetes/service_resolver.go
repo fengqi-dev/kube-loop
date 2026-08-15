@@ -32,12 +32,12 @@ func NewServiceResolver(provider ClientProvider) (*ServiceResolver, error) {
 
 func (r *ServiceResolver) ResolveService(
 	ctx context.Context,
-	principal controlplaneapi.Principal,
+	identity controlplaneapi.Identity,
 	namespace string,
 	serviceName string,
 	requested []trafficmodel.Port,
 ) (trafficmodel.ResolvedService, error) {
-	client, err := r.provider.ClientFor(subjectFor(principal))
+	client, err := r.provider.ClientFor(subjectFor(identity))
 	if err != nil {
 		return trafficmodel.ResolvedService{}, err
 	}

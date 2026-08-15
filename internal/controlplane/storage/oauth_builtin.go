@@ -23,16 +23,16 @@ func EnsureBuiltinOAuthClients(ctx context.Context, repository OAuthClientReposi
 		{
 			ID: DesktopOAuthClientID, Name: "KubeLoop Desktop", Public: true,
 			RedirectURIs: []string{"http://127.0.0.1/callback"},
-			GrantTypes:   []string{"authorization_code", "refresh_token"}, ResponseTypes: []string{"code"},
-			Scopes:  []string{"openid", "profile", "email", "offline_access", "kubeloop.api"},
-			Trusted: true, Enabled: true, Builtin: true, CreatedAt: now, UpdatedAt: now,
+			GrantTypes:   []string{"authorization_code", "refresh_token"},
+			Scopes:       []string{"openid", "profile", "email", "offline_access", "kubeloop.api"},
+			Trusted:      true, Enabled: true, Builtin: true, CreatedAt: now, UpdatedAt: now,
 		},
 		{
 			ID: ManagementOAuthClientID, Name: "KubeLoop Management", Public: true,
 			RedirectURIs: []string{managementRedirectURI},
-			GrantTypes:   []string{"authorization_code", "refresh_token"}, ResponseTypes: []string{"code"},
-			Scopes:  []string{"openid", "profile", "email", "offline_access", "kubeloop.api"},
-			Trusted: true, Enabled: true, Builtin: true, CreatedAt: now, UpdatedAt: now,
+			GrantTypes:   []string{"authorization_code", "refresh_token"},
+			Scopes:       []string{"openid", "profile", "email", "offline_access", "kubeloop.api"},
+			Trusted:      true, Enabled: true, Builtin: true, CreatedAt: now, UpdatedAt: now,
 		},
 	}
 	for _, client := range clients {

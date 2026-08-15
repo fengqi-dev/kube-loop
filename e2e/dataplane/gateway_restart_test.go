@@ -185,13 +185,13 @@ func TestGatewayPodRestartRecoversDataPlane(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	principalID := uuid.NewString()
+	identityID := uuid.NewString()
 	deviceID := "e2e-device-a"
 	source := &e2eSessionSource{
-		signer: signer, session: session, principalID: principalID, deviceID: deviceID,
+		signer: signer, session: session, identityID: identityID, deviceID: deviceID,
 	}
 	controlPlane := startPortForwardControlPlane(
-		t, ctx, kubeRESTConfig(t), proxy.Address(), "e2e", principalID, deviceID, session,
+		t, ctx, kubeRESTConfig(t), proxy.Address(), "e2e", identityID, deviceID, session,
 	)
 	harness.StopAllHelperSessions()
 	t.Cleanup(harness.StopAllHelperSessions)
@@ -383,7 +383,7 @@ func TestGatewayPodRestartRecoversDataPlane(t *testing.T) {
 	secondSession.ID = uuid.NewString()
 	secondSession.Generation = 1
 	secondSource := &e2eSessionSource{
-		signer: signer, session: secondSession, principalID: uuid.NewString(), deviceID: "e2e-device-b",
+		signer: signer, session: secondSession, identityID: uuid.NewString(), deviceID: "e2e-device-b",
 	}
 	secondManager, err := clientdataplane.NewManager(secondSource, clientdataplane.Config{
 		StartTimeout: 10 * time.Second, RecoveryAttempts: 3, RecoveryBackoff: 200 * time.Millisecond,
@@ -395,15 +395,15 @@ func TestGatewayPodRestartRecoversDataPlane(t *testing.T) {
 		ID: "e2e-b", BaseURL: controlPlane.profile.BaseURL, TunnelPath: testPath,
 	}, secondSession)
 	if err != nil {
-		t.Fatalf("connect second principal: %v", err)
+		t.Fatalf("connect second identity: %v", err)
 	}
 	if err := requestThroughSOCKS(ctx, secondStatus.SOCKSAddress, target); err != nil {
-		t.Fatalf("second principal cluster request: %v", err)
+		t.Fatalf("second identity cluster request: %v", err)
 	}
 	assertCrossSessionRejected(t, ctx, proxy.Address(), source, secondSession.ID, spec)
 	assertMetricsHideIdentity(t, ctx, proxy.Address(), source, secondSource)
 	if err := secondManager.Shutdown(); err != nil {
-		t.Fatalf("shutdown second principal: %v", err)
+		t.Fatalf("shutdown second identity: %v", err)
 	}
 	initialGeneration, initialTickets := source.snapshot()
 
@@ -635,12 +635,12 @@ func (proxy *loopbackProxy) accept() {
 }
 
 type e2eSessionSource struct {
-	mu          sync.Mutex
-	signer      *relayticket.Signer
-	session     clientremote.Session
-	principalID string
-	deviceID    string
-	tickets     int
+	mu         sync.Mutex
+	signer     *relayticket.Signer
+	session    clientremote.Session
+	identityID string
+	deviceID   string
+	tickets    int
 }
 
 type recordingTUNStarter struct {
@@ -722,7 +722,7 @@ func (source *e2eSessionSource) RelayTicketSource(string) func(context.Context) 
 		now := time.Now().UTC().Truncate(time.Second)
 		ticket, err := source.signer.Sign(relayticket.Claims{
 			Version: relayticket.Version, Issuer: testIssuer, Audience: testRelay,
-			PrincipalID: source.principalID, DeviceID: source.deviceID,
+			IdentityID: source.identityID, DeviceID: source.deviceID,
 			SessionID: source.session.ID, SessionGeneration: source.session.Generation,
 			Namespace:  source.session.Namespace,
 			Operations: []string{"tunnel"}, NetworkSpecHash: source.session.NetworkSpecHash,
@@ -800,7 +800,7 @@ func assertMetricsHideIdentity(
 	metrics := string(raw)
 	for _, source := range sources {
 		source.mu.Lock()
-		values := []string{source.principalID, source.deviceID, source.session.ID}
+		values := []string{source.identityID, source.deviceID, source.session.ID}
 		source.mu.Unlock()
 		for _, value := range values {
 			if value != "" && strings.Contains(metrics, value) {

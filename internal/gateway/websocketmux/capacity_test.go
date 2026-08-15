@@ -25,15 +25,15 @@ func (capacityGatewayState) ActiveConnections() int { return 0 }
 func TestCapacityLimitsSessionsAndStreamsWithoutBlockingHealth(t *testing.T) {
 	identities := map[string]Identity{
 		"one": {
-			PrincipalID: "principal-one", DeviceID: "11111111-1111-4111-8111-111111111111",
+			IdentityID: "identity-one", DeviceID: "11111111-1111-4111-8111-111111111111",
 			SessionID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", SessionGeneration: 1, ExpiresAt: time.Now().Add(time.Minute),
 		},
 		"two": {
-			PrincipalID: "principal-two", DeviceID: "22222222-2222-4222-8222-222222222222",
+			IdentityID: "identity-two", DeviceID: "22222222-2222-4222-8222-222222222222",
 			SessionID: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", SessionGeneration: 1, ExpiresAt: time.Now().Add(time.Minute),
 		},
 		"three": {
-			PrincipalID: "principal-three", DeviceID: "33333333-3333-4333-8333-333333333333",
+			IdentityID: "identity-three", DeviceID: "33333333-3333-4333-8333-333333333333",
 			SessionID: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", SessionGeneration: 1, ExpiresAt: time.Now().Add(time.Minute),
 		},
 	}
@@ -177,7 +177,7 @@ func assertCapacityHealth(t *testing.T, baseURL string) {
 
 func BenchmarkGatewayLogicalStreamRoundTrip(b *testing.B) {
 	identity := Identity{
-		PrincipalID: "benchmark-principal", DeviceID: "44444444-4444-4444-8444-444444444444",
+		IdentityID: "benchmark-identity", DeviceID: "44444444-4444-4444-8444-444444444444",
 		SessionID: "dddddddd-dddd-4ddd-8ddd-dddddddddddd", SessionGeneration: 1,
 		ExpiresAt: time.Now().Add(10 * time.Minute),
 	}

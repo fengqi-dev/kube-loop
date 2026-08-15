@@ -12,30 +12,30 @@ import (
 	"github.com/labstack/echo/v5"
 )
 
-func (api *readAPI) revokePrincipalSessions(ctx *echo.Context) error {
+func (api *readAPI) revokeIdentitySessions(ctx *echo.Context) error {
 	writer, request := ctx.Response(), ctx.Request()
 	key, ok := operationIdempotencyKey(writer, request)
 	if !ok {
-		api.audit(request, subjectFromRequest(request), "admin.principal/revoke", "failure")
+		api.audit(request, subjectFromRequest(request), "admin.identity/revoke", "failure")
 		return nil
 	}
-	principalID := strings.TrimSpace(request.PathValue("principalID"))
+	identityID := strings.TrimSpace(request.PathValue("identityID"))
 	var input struct {
 		Reason string `json:"reason"`
 	}
 	if !decodePolicyJSON(writer, request, &input) || !validChangeReason(input.Reason) {
-		api.audit(request, subjectFromRequest(request), "admin.principal/revoke", "failure")
+		api.audit(request, subjectFromRequest(request), "admin.identity/revoke", "failure")
 		return nil
 	}
-	result, err := api.operations.RevokePrincipal(request.Context(), adminoperations.RevokePrincipalRequest{
+	result, err := api.operations.RevokeIdentity(request.Context(), adminoperations.RevokeIdentityRequest{
 		Request: adminoperations.Request{
 			Actor: operationActor(subjectFromRequest(request)), IdempotencyKey: key,
 			Reason: input.Reason, RequestID: requestID(request),
 		},
-		PrincipalID: principalID,
+		IdentityID: identityID,
 	})
 	if err != nil {
-		api.audit(request, subjectFromRequest(request), "admin.principal/revoke", "failure")
+		api.audit(request, subjectFromRequest(request), "admin.identity/revoke", "failure")
 		writeOperationError(writer, request, err)
 		return nil
 	}
@@ -62,7 +62,7 @@ func (api *readAPI) revokeOAuthGrant(ctx *echo.Context) error {
 			Actor: operationActor(subjectFromRequest(request)), IdempotencyKey: key,
 			Reason: input.Reason, RequestID: requestID(request),
 		},
-		PrincipalID:     strings.TrimSpace(request.PathValue("principalID")),
+		IdentityID:      strings.TrimSpace(request.PathValue("identityID")),
 		AuthorizationID: strings.TrimSpace(request.PathValue("authorizationID")),
 	})
 	if err != nil {
@@ -244,12 +244,12 @@ func (api *readAPI) createAuditExport(ctx *echo.Context) error {
 		return nil
 	}
 	var input struct {
-		PrincipalID string `json:"principalId"`
-		Action      string `json:"action"`
-		After       string `json:"after"`
-		Before      string `json:"before"`
-		Limit       int    `json:"limit"`
-		Reason      string `json:"reason"`
+		IdentityID string `json:"identityId"`
+		Action     string `json:"action"`
+		After      string `json:"after"`
+		Before     string `json:"before"`
+		Limit      int    `json:"limit"`
+		Reason     string `json:"reason"`
 	}
 	if !decodePolicyJSON(writer, request, &input) || !validChangeReason(input.Reason) {
 		api.audit(request, subjectFromRequest(request), "admin.audit/export", "failure")
@@ -267,7 +267,7 @@ func (api *readAPI) createAuditExport(ctx *echo.Context) error {
 			Actor: operationActor(subjectFromRequest(request)), IdempotencyKey: key,
 			Reason: input.Reason, RequestID: requestID(request),
 		},
-		PrincipalID: input.PrincipalID, Action: input.Action, After: after, Before: before, Limit: input.Limit,
+		IdentityID: input.IdentityID, Action: input.Action, After: after, Before: before, Limit: input.Limit,
 	})
 	if err != nil {
 		api.audit(request, subjectFromRequest(request), "admin.audit/export", "failure")
@@ -310,11 +310,11 @@ func (api *readAPI) getAuditExport(ctx *echo.Context) error {
 }
 
 func operationActor(subject adminauthorization.Subject) adminoperations.Actor {
-	principalID := subject.ID
+	identityID := subject.ID
 	if subject.Authentication == adminauthorization.AuthenticationBreakGlass {
-		principalID = ""
+		identityID = ""
 	}
-	return adminoperations.Actor{PrincipalID: principalID, Authentication: subject.Authentication}
+	return adminoperations.Actor{IdentityID: identityID, Authentication: subject.Authentication}
 }
 
 func operationIdempotencyKey(writer http.ResponseWriter, request *http.Request) (string, bool) {

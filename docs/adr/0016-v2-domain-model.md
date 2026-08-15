@@ -12,7 +12,7 @@ than the product domain. The ownership chain, persistence boundary and identity
 rules must be explicit before adding more protocols or migration behavior.
 
 This decision builds on ADR 0005. It does not make a WebSocket or bearer token
-an owner: every operation must resolve back to a stable Principal,
+an owner: every operation must resolve back to a stable Identity,
 OAuth Grant, ClusterSession and, for mutations or streams, Task.
 
 ## Decision
@@ -22,12 +22,12 @@ OAuth Grant, ClusterSession and, for mutations or streams, Task.
 | Aggregate | Canonical fields and identity | Owner and lifecycle | Persistence |
 | --- | --- | --- | --- |
 | `ServerProfile` | `schemaVersion`, server `id`, canonical `baseURL`, `tunnelPath`, display name and non-secret last-used UI fields | Owned by the local OS user. `id` is the server's stable discovery identity, not an authorization secret. | Versioned `servers.json`; no token, kubeconfig path or provider secret |
-| `Principal` | UUID v4 `id`, provider, immutable provider external key, mutable display name/email/groups | Created/upserted after OIDC authentication. It is the root server-side user identity. | Control Plane database row with object schema version |
-| `OAuth Grant` | Fosite request ID, Principal ID, Client ID, stable client-generated Device ID, hashed token signatures, expiry/revocation | One OAuth authorization. Refresh rotation and replay revoke the complete grant. | Control Plane `oauth_sessions` rows and versioned client keyring metadata |
-| `ClusterSession` | UUID v4 `id`, Principal ID, Device ID, cluster ID, namespace, state, generation, immutable NetworkSpec/hash, heartbeat and expiry | Owned jointly by the authenticated Principal and OAuth Grant for exactly one cluster/namespace. It cannot be reactivated after stop or expiry. | Control Plane `sessions` row with object schema version |
-| `Task` | UUID v4 `id`, Principal ID, ClusterSession ID, type, unified state, immutable spec, result, idempotency key and expiry | A durable operation intent. It cannot outlive its ClusterSession except while a rollback snapshot requires compensation. | Control Plane `tasks` row with object schema version; local histories are versioned projections, never authority |
+| `Identity` | UUID v4 `id`, provider, immutable provider external key, mutable display name/email/groups | Created/upserted after OIDC authentication. It is the root server-side user identity. | Control Plane database row with object schema version |
+| `OAuth Grant` | Fosite request ID, Identity ID, Client ID, stable client-generated Device ID, hashed token signatures, expiry/revocation | One OAuth authorization. Refresh rotation and replay revoke the complete grant. | Control Plane `oauth_sessions` rows and versioned client keyring metadata |
+| `ClusterSession` | UUID v4 `id`, Identity ID, Device ID, cluster ID, namespace, state, generation, immutable NetworkSpec/hash, heartbeat and expiry | Owned jointly by the authenticated Identity and OAuth Grant for exactly one cluster/namespace. It cannot be reactivated after stop or expiry. | Control Plane `sessions` row with object schema version |
+| `Task` | UUID v4 `id`, Identity ID, ClusterSession ID, type, unified state, immutable spec, result, idempotency key and expiry | A durable operation intent. It cannot outlive its ClusterSession except while a rollback snapshot requires compensation. | Control Plane `tasks` row with object schema version; local histories are versioned projections, never authority |
 | `Stream` | Owning Task/ClusterSession UUID, authenticated connection identity, protocol kind and connection-local channel handle | Ephemeral child of one Task or ClusterSession. The Control Plane/Data Plane replica that accepted the authenticated claim owns its context, sockets and lease. | Never persisted; payload, command output and traffic bytes are not stored |
-| `AuditEvent` | UUID v4 `id`, optional Principal ID, action, resource type/ID, outcome, request ID, safe metadata and timestamp | Append-only evidence emitted after authentication/ownership resolution. | Control Plane `audit_events` row with object schema version |
+| `AuditEvent` | UUID v4 `id`, optional Identity ID, action, resource type/ID, outcome, request ID, safe metadata and timestamp | Append-only evidence emitted after authentication/ownership resolution. | Control Plane `audit_events` row with object schema version |
 
 The concrete client type remains `profile.Profile`, with
 `profile.ServerProfile` as its canonical domain alias;
@@ -41,7 +41,7 @@ The only valid server-side ownership chain is:
 
 ```text
 ServerProfile (local routing/configuration only)
-  -> Principal
+  -> Identity
     -> OAuth Grant
       -> ClusterSession (cluster + namespace + NetworkSpec)
         -> Task
@@ -76,13 +76,13 @@ Task's durable snapshot.
 
 `ServerProfile`, keyring credential metadata and local file-transfer Task
 history now normalize legacy missing object versions and reject future
-versions. Principal, OAuth Grant, ClusterSession, server Task, resource
+versions. Identity, OAuth Grant, ClusterSession, server Task, resource
 snapshot, idempotency and AuditEvent repositories already apply the same
 fail-closed rule.
 
 ### Identity rules
 
-- Principal, OAuth Grant, ClusterSession, Task, ResourceSnapshot, AuditEvent,
+- Identity, OAuth Grant, ClusterSession, Task, ResourceSnapshot, AuditEvent,
   RelayTicket and authentication transaction IDs are generated from
   cryptographically random UUID v4 values. Device IDs are also client-generated
   UUID v4 values and remain stable for the profile until logout/removal.
@@ -107,7 +107,7 @@ fail-closed rule.
   existing repository call sites remain source compatible during migration.
 - Every durable owner can be decoded and migrated independently, and a newer
   object cannot be accidentally accepted by an older client or Control Plane.
-- A guessed Task, Session or channel value cannot cross the Principal,
+- A guessed Task, Session or channel value cannot cross the Identity,
   OAuth Grant, namespace, authenticated-connection and Policy checks.
 - Stream loss is handled by cancellation and durable Task compensation; stream
   frames themselves do not become a second persistence system.

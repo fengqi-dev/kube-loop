@@ -9,15 +9,15 @@ import (
 
 // UnifiedAuthorizer adapts Gateway request metadata to the same immutable
 // capability policy used by the Management API. It contains no policy state.
-type NamespaceLabelResolver func(context.Context, string) (map[string]string, error)
+type NamespaceOrganizationResolver func(context.Context, string) (string, error)
 
 type UnifiedAuthorizer struct {
-	engine        *adminauthorization.Engine
-	resolveLabels NamespaceLabelResolver
+	engine              *adminauthorization.Engine
+	resolveOrganization NamespaceOrganizationResolver
 }
 
-func NewUnified(engine *adminauthorization.Engine, resolveLabels NamespaceLabelResolver) *UnifiedAuthorizer {
-	return &UnifiedAuthorizer{engine: engine, resolveLabels: resolveLabels}
+func NewUnified(engine *adminauthorization.Engine, resolver NamespaceOrganizationResolver) *UnifiedAuthorizer {
+	return &UnifiedAuthorizer{engine: engine, resolveOrganization: resolver}
 }
 
 func (authorizer *UnifiedAuthorizer) Authorize(ctx context.Context, subject Subject, request Request) Decision {
@@ -28,23 +28,18 @@ func (authorizer *UnifiedAuthorizer) Authorize(ctx context.Context, subject Subj
 	if capability == "" {
 		return Decision{}
 	}
-	if request.Namespace != "" && !request.LabelsAvailable && authorizer.engine.UsesNamespaceSelectors() && authorizer.resolveLabels != nil {
-		labels, err := authorizer.resolveLabels(ctx, request.Namespace)
-		if err == nil {
-			request.NamespaceLabels, request.LabelsAvailable = labels, true
-		}
+	organizationID := ""
+	if request.Namespace != "" && authorizer.resolveOrganization != nil {
+		organizationID, _ = authorizer.resolveOrganization(ctx, request.Namespace)
 	}
 	decision := authorizer.engine.Authorize(ctx, adminauthorization.Subject{
-		ID: subject.ID, Provider: subject.Provider, Groups: append([]string(nil), subject.Groups...),
+		ID: subject.ID, Groups: append([]string(nil), subject.Groups...),
 	}, adminauthorization.Request{
-		Capability: capability, Namespace: request.Namespace, ResourceName: request.ResourceName,
-		NamespaceLabels: cloneLabels(request.NamespaceLabels), LabelsAvailable: request.LabelsAvailable,
+		Capability: capability, OrganizationID: organizationID, Namespace: request.Namespace, ResourceName: request.ResourceName,
 	})
 	result := Decision{Allowed: decision.Allowed}
-	if len(decision.MatchingDeny) > 0 {
-		result.RuleID = decision.MatchingDeny[0].BindingID
-	} else if len(decision.MatchingAllow) > 0 {
-		result.RuleID = decision.MatchingAllow[0].BindingID
+	if len(decision.MatchingAllow) > 0 {
+		result.RuleID = decision.MatchingAllow[0].GroupID
 	}
 	return result
 }
@@ -83,15 +78,4 @@ func gatewayCapability(request Request) adminauthorization.Capability {
 	default:
 		return ""
 	}
-}
-
-func cloneLabels(source map[string]string) map[string]string {
-	if source == nil {
-		return nil
-	}
-	result := make(map[string]string, len(source))
-	for key, value := range source {
-		result[key] = value
-	}
-	return result
 }

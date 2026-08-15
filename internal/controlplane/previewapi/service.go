@@ -31,7 +31,7 @@ type Storage interface {
 }
 
 type SessionValidator interface {
-	RequireActive(context.Context, controlplaneapi.Principal, string, string) (sessionapi.ActiveSession, *controlplaneapi.Error)
+	RequireActive(context.Context, controlplaneapi.Identity, string, string) (sessionapi.ActiveSession, *controlplaneapi.Error)
 }
 
 type Service struct {
@@ -54,7 +54,7 @@ func New(storageBackend Storage, sessions SessionValidator, resources ResourceMa
 
 func (handler *Service) create(
 	ctx *echo.Context,
-	principal controlplaneapi.Principal,
+	identity controlplaneapi.Identity,
 	session sessionapi.ActiveSession,
 ) *controlplaneapi.Error {
 	request := ctx.Request()
@@ -73,13 +73,13 @@ func (handler *Service) create(
 	if err != nil {
 		return internalError(err)
 	}
-	scope := taskapi.Scope(TaskType, principal.Subject)
+	scope := taskapi.Scope(TaskType, identity.Subject)
 	if record, err := handler.storage.Idempotency().Get(request.Context(), scope, key); err == nil {
 		if record.RequestHash != requestHash {
 			return storageError(storage.ErrIdempotencyMismatch)
 		}
 		task, err := handler.storage.Tasks().GetByID(request.Context(), record.ResourceID)
-		if err != nil || !owned(task, principal, session) {
+		if err != nil || !owned(task, identity, session) {
 			return notFound()
 		}
 		document, err := decodeTask(task, session.Namespace)
@@ -97,7 +97,7 @@ func (handler *Service) create(
 	now := handler.now().UTC()
 	idempotencyExpiresAt := session.ExpiresAt.UTC()
 	task := storage.Task{
-		ID: uuid.NewString(), PrincipalID: principal.Subject, SessionID: session.ID,
+		ID: uuid.NewString(), IdentityID: identity.Subject, SessionID: session.ID,
 		Type: TaskType, State: remotetask.Pending, Spec: specJSON, IdempotencyKey: key,
 		CreatedAt: now, UpdatedAt: now,
 	}
@@ -114,7 +114,7 @@ func (handler *Service) create(
 		}
 		if !reserved {
 			existing, err := repositories.Tasks().GetByID(request.Context(), record.ResourceID)
-			if err != nil || !owned(existing, principal, session) {
+			if err != nil || !owned(existing, identity, session) {
 				return storage.ErrNotFound
 			}
 			task = existing
@@ -146,12 +146,12 @@ func (handler *Service) create(
 
 func (handler *Service) get(
 	ctx *echo.Context,
-	principal controlplaneapi.Principal,
+	identity controlplaneapi.Identity,
 	session sessionapi.ActiveSession,
 	taskID string,
 ) *controlplaneapi.Error {
 	request := ctx.Request()
-	task, apiError := handler.ownedTask(request.Context(), principal, session, taskID)
+	task, apiError := handler.ownedTask(request.Context(), identity, session, taskID)
 	if apiError != nil {
 		return apiError
 	}
@@ -165,12 +165,12 @@ func (handler *Service) get(
 
 func (handler *Service) stop(
 	ctx *echo.Context,
-	principal controlplaneapi.Principal,
+	identity controlplaneapi.Identity,
 	session sessionapi.ActiveSession,
 	taskID string,
 ) *controlplaneapi.Error {
 	request := ctx.Request()
-	task, apiError := handler.ownedTask(request.Context(), principal, session, taskID)
+	task, apiError := handler.ownedTask(request.Context(), identity, session, taskID)
 	if apiError != nil {
 		return apiError
 	}
@@ -205,7 +205,7 @@ func (handler *Service) stop(
 
 func (handler *Service) ownedTask(
 	ctx context.Context,
-	principal controlplaneapi.Principal,
+	identity controlplaneapi.Identity,
 	session sessionapi.ActiveSession,
 	taskID string,
 ) (storage.Task, *controlplaneapi.Error) {
@@ -213,7 +213,7 @@ func (handler *Service) ownedTask(
 		return storage.Task{}, notFound()
 	}
 	task, err := handler.storage.Tasks().GetByID(ctx, taskID)
-	if err != nil || !owned(task, principal, session) {
+	if err != nil || !owned(task, identity, session) {
 		return storage.Task{}, notFound()
 	}
 	return task, nil
@@ -280,8 +280,8 @@ func documentFrom(task storage.Task, namespace string, spec storedSpec) Document
 	}
 }
 
-func owned(task storage.Task, principal controlplaneapi.Principal, session sessionapi.ActiveSession) bool {
-	return task.Type == TaskType && task.PrincipalID == principal.Subject && task.SessionID == session.ID
+func owned(task storage.Task, identity controlplaneapi.Identity, session sessionapi.ActiveSession) bool {
+	return task.Type == TaskType && task.IdentityID == identity.Subject && task.SessionID == session.ID
 }
 
 func namespaceFromQuery(request *http.Request) (string, *controlplaneapi.Error) {

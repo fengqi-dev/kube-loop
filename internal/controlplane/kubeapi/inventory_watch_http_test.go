@@ -43,8 +43,8 @@ func TestInventoryWatchHTTPStreamsAuthorizedResyncSnapshots(t *testing.T) {
 	server, err := controlplane.NewServer(
 		controlplane.Config{PublicURL: "https://gateway.example.test"}, controlplane.BuildInfo{},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
-		controlplane.WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(*http.Request) (controlplaneapi.Principal, *controlplaneapi.Error) {
-			return controlplaneapi.Principal{Subject: "principal-1"}, nil
+		controlplane.WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(*http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
+			return controlplaneapi.Identity{Subject: "identity-1"}, nil
 		})),
 		controlplane.WithAuthorizer(policy), controlplane.WithAPIRoutes(controlplane.APIRoutes{Kubernetes: kubeapi.NewRoutes(handler).Endpoints()}),
 	)

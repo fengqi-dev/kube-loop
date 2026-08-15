@@ -14,8 +14,8 @@ import (
 )
 
 type ResourceMutator interface {
-	Capture(context.Context, controlplaneapi.Principal, *servicebinding.ServiceInterceptSnapshot) error
-	Apply(context.Context, controlplaneapi.Principal, servicebinding.ServiceInterceptSnapshot, string) error
+	Capture(context.Context, controlplaneapi.Identity, *servicebinding.ServiceInterceptSnapshot) error
+	Apply(context.Context, controlplaneapi.Identity, servicebinding.ServiceInterceptSnapshot, string) error
 	Restore(context.Context, servicebinding.ServiceInterceptSnapshot, string) error
 }
 
@@ -42,10 +42,10 @@ func NewTrafficBindingResourceMutator(
 
 func (mutator *TrafficBindingResourceMutator) Capture(
 	ctx context.Context,
-	principal controlplaneapi.Principal,
+	identity controlplaneapi.Identity,
 	snapshot *servicebinding.ServiceInterceptSnapshot,
 ) error {
-	client, err := mutator.userClient(principal)
+	client, err := mutator.userClient(identity)
 	if err != nil {
 		return err
 	}
@@ -54,7 +54,7 @@ func (mutator *TrafficBindingResourceMutator) Capture(
 
 func (mutator *TrafficBindingResourceMutator) Apply(
 	ctx context.Context,
-	principal controlplaneapi.Principal,
+	identity controlplaneapi.Identity,
 	snapshot servicebinding.ServiceInterceptSnapshot,
 	interceptID string,
 ) error {
@@ -78,9 +78,9 @@ func (mutator *TrafficBindingResourceMutator) Restore(
 	return mutator.bindings.Delete(ctx, snapshot.Namespace, interceptID)
 }
 
-func (mutator *TrafficBindingResourceMutator) userClient(principal controlplaneapi.Principal) (kubernetes.Interface, error) {
+func (mutator *TrafficBindingResourceMutator) userClient(identity controlplaneapi.Identity) (kubernetes.Interface, error) {
 	return mutator.provider.ClientFor(authorization.Subject{
-		ID: principal.Subject, Groups: append([]string(nil), principal.Groups...),
+		ID: identity.Subject, Groups: append([]string(nil), identity.Groups...),
 	})
 }
 

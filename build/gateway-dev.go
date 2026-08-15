@@ -38,7 +38,7 @@ const (
 	operatorImageRepository     = "kube-loop-operator"
 	developmentNamespace        = "kubeloop-dev"
 	developmentRelease          = "kubeloop-dev"
-	developmentStorageBaseline  = "21"
+	developmentStorageBaseline  = "24"
 )
 
 func main() {
@@ -301,6 +301,10 @@ func localClusterContext(contextName string) bool {
 func deployDevelopmentStack(
 	root, contextName, controlPlaneImage, gatewayImage, operatorImage string,
 ) (string, error) {
+	serviceID := strings.TrimSpace(os.Getenv("KUBELOOP_DEV_SERVICE_ID"))
+	if serviceID == "" {
+		serviceID = "kubeloop-dev"
+	}
 	host, err := developmentHost(contextName)
 	if err != nil {
 		return "", err
@@ -375,8 +379,8 @@ func deployDevelopmentStack(
 		"--namespace", developmentNamespace,
 		"--reset-values", "--wait", "--rollback-on-failure", "--cleanup-on-fail", "--timeout", "5m", "--history-max", "5",
 		"--set-string", "publicURL=" + publicURL,
-		"--set-string", "controlPlane.management.publicURL=" + publicURL,
-		"--set-string", "serviceID=kubeloop-dev",
+		"--set-string", "controlPlane.admin.publicURL=" + publicURL,
+		"--set-string", "serviceID=" + serviceID,
 		"--set-string", "controlPlane.image.repository=" + controlPlaneRepository,
 		"--set-string", "controlPlane.image.tag=" + controlPlaneTag,
 		"--set-string", "controlPlane.image.pullPolicy=IfNotPresent",
@@ -430,36 +434,11 @@ func recoverDevelopmentHelmRelease(root string) error {
 	if json.Unmarshal(statusOutput, &status) != nil || !strings.HasPrefix(status.Info.Status, "pending-") {
 		return nil
 	}
-	historyOutput, err := exec.Command(
-		"helm", "history", developmentRelease, "--namespace", developmentNamespace, "--output", "json",
-	).Output()
-	if err != nil {
-		return errors.New("inspect pending development Helm release")
-	}
-	var history []struct {
-		Revision int    `json:"revision"`
-		Status   string `json:"status"`
-	}
-	if err := json.Unmarshal(historyOutput, &history); err != nil {
-		return errors.New("decode development Helm history")
-	}
-	rollbackRevision := 0
-	for _, revision := range history {
-		if (revision.Status == "deployed" || revision.Status == "superseded") && revision.Revision > rollbackRevision {
-			rollbackRevision = revision.Revision
-		}
-	}
-	if rollbackRevision > 0 {
-		fmt.Printf("==> Recovering pending Helm release with revision %d\n", rollbackRevision)
-		if err := run(root, exec.Command(
-			"helm", "rollback", developmentRelease, fmt.Sprint(rollbackRevision),
-			"--namespace", developmentNamespace, "--wait", "--timeout", "3m",
-		)); err != nil {
-			return fmt.Errorf("recover pending development Helm release: %w", err)
-		}
-		return nil
-	}
-	fmt.Printf("==> Removing incomplete Helm release without a successful revision\n")
+	fmt.Printf("==> Removing pending development Helm release before a clean install\n")
+	return removeDevelopmentHelmRelease(root)
+}
+
+func removeDevelopmentHelmRelease(root string) error {
 	if err := run(root, exec.Command(
 		"helm", "uninstall", developmentRelease, "--namespace", developmentNamespace, "--wait", "--timeout", "3m",
 	)); err != nil {
@@ -483,19 +462,28 @@ func resetDevelopmentStorageForBaseline(root, contextName, directory string) err
 	volumeName := strings.TrimSpace(string(volumeOutput))
 	fmt.Printf("==> Resetting development SQLite storage for schema baseline %s\n", developmentStorageBaseline)
 	deployment := developmentRelease + "-kubeloop-control-plane"
-	if err := run(root, exec.Command(
-		"kubectl", "scale", "deployment", deployment, "--replicas=0",
-		"--namespace", developmentNamespace,
-	)); err != nil {
-		return fmt.Errorf("stop development Control Plane before storage reset: %w", err)
+	deploymentOutput, err := exec.Command(
+		"kubectl", "get", "deployment", deployment,
+		"--namespace", developmentNamespace, "--ignore-not-found", "--output=name",
+	).Output()
+	if err != nil {
+		return fmt.Errorf("inspect development Control Plane before storage reset: %w", err)
 	}
-	if err := run(root, exec.Command(
-		"kubectl", "wait", "--for=delete", "pod",
-		"--namespace", developmentNamespace,
-		"--selector", "app.kubernetes.io/instance="+developmentRelease+",app.kubernetes.io/component=control-plane",
-		"--timeout=90s",
-	)); err != nil {
-		return fmt.Errorf("wait for development Control Plane shutdown: %w", err)
+	if strings.TrimSpace(string(deploymentOutput)) != "" {
+		if err := run(root, exec.Command(
+			"kubectl", "scale", "deployment", deployment, "--replicas=0",
+			"--namespace", developmentNamespace,
+		)); err != nil {
+			return fmt.Errorf("stop development Control Plane before storage reset: %w", err)
+		}
+		if err := run(root, exec.Command(
+			"kubectl", "wait", "--for=delete", "pod",
+			"--namespace", developmentNamespace,
+			"--selector", "app.kubernetes.io/instance="+developmentRelease+",app.kubernetes.io/component=control-plane",
+			"--timeout=90s",
+		)); err != nil {
+			return fmt.Errorf("wait for development Control Plane shutdown: %w", err)
+		}
 	}
 	if err := run(root, exec.Command(
 		"kubectl", "delete", "persistentvolumeclaim", pvc,

@@ -53,12 +53,12 @@ func TestImpersonationUsesOnlyExplicitGroupMappings(t *testing.T) {
 		t.Fatal(err)
 	}
 	config, err := provider.RESTConfigFor(authorization.Subject{
-		ID: "principal-123", Groups: []string{"developers", "unmapped", "operators"},
+		ID: "identity-123", Groups: []string{"developers", "unmapped", "operators"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if config.Impersonate.UserName != "kubeloop:user:principal-123" {
+	if config.Impersonate.UserName != "kubeloop:user:identity-123" {
 		t.Fatalf("unexpected impersonated user %q", config.Impersonate.UserName)
 	}
 	want := []string{"shared", "team:dev", "team:ops"}
@@ -76,7 +76,7 @@ func TestImpersonatingClientPreservesGatewayCredentialAndSendsMappedIdentity(t *
 		if request.Header.Get("Authorization") != "Bearer gateway-service-account-token" {
 			t.Fatalf("Gateway credential = %q", request.Header.Get("Authorization"))
 		}
-		if request.Header.Get("Impersonate-User") != "kubeloop:principal-123" {
+		if request.Header.Get("Impersonate-User") != "kubeloop:identity-123" {
 			t.Fatalf("Impersonate-User = %q", request.Header.Get("Impersonate-User"))
 		}
 		groups := request.Header.Values("Impersonate-Group")
@@ -97,7 +97,7 @@ func TestImpersonatingClientPreservesGatewayCredentialAndSendsMappedIdentity(t *
 		t.Fatal(err)
 	}
 	client, err := provider.ClientFor(authorization.Subject{
-		ID: "principal-123", Groups: []string{"trusted-claim", "unmapped-claim"},
+		ID: "identity-123", Groups: []string{"trusted-claim", "unmapped-claim"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -107,7 +107,7 @@ func TestImpersonatingClientPreservesGatewayCredentialAndSendsMappedIdentity(t *
 	}
 }
 
-func TestImpersonationRejectsUnsafeConfigurationAndPrincipal(t *testing.T) {
+func TestImpersonationRejectsUnsafeConfigurationAndIdentity(t *testing.T) {
 	for _, config := range []Config{
 		{Impersonation: ImpersonationConfig{Enabled: true, UsernamePrefix: "system:masters:"}},
 		{Impersonation: ImpersonationConfig{Enabled: true, GroupMappings: map[string][]string{"bad\n": {"dev"}}}},
@@ -123,8 +123,8 @@ func TestImpersonationRejectsUnsafeConfigurationAndPrincipal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := provider.RESTConfigFor(authorization.Subject{ID: "bad\nprincipal"}); err == nil {
-		t.Fatal("expected unsafe principal to fail")
+	if _, err := provider.RESTConfigFor(authorization.Subject{ID: "bad\nidentity"}); err == nil {
+		t.Fatal("expected unsafe identity to fail")
 	}
 }
 

@@ -61,7 +61,7 @@ func TestCleanDirectoryWithOnlyServerURLBrowsesRemoteInventory(t *testing.T) {
 		case "/api/sessions":
 			now := time.Now().UTC()
 			snapshot := clientremote.Capabilities{
-				SchemaVersion: 1, PrincipalID: "principal-clean", Namespace: "development",
+				SchemaVersion: 1, IdentityID: "identity-clean", Namespace: "development",
 				GatewayVersion: "v2-clean", Capabilities: []string{"pods.list"},
 			}
 			_ = json.NewEncoder(writer).Encode(clientremote.Session{

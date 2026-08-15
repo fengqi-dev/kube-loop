@@ -39,7 +39,7 @@ import (
 )
 
 type fileE2EIdentity struct {
-	principal       controlplaneapi.Principal
+	identity        controlplaneapi.Identity
 	active          sessionapi.ActiveSession
 	session         remote.Session
 	authorizationID string
@@ -82,7 +82,7 @@ func startFileController(
 	}
 	handler, err := fileapi.New(
 		stateStore,
-		e2eExecSessionValidator{principalID: identity.principal.Subject, session: identity.active},
+		e2eExecSessionValidator{identityID: identity.identity.Subject, session: identity.active},
 		targets,
 		transfers,
 		fileapi.Config{
@@ -96,7 +96,7 @@ func startFileController(
 	}
 	operations, err := fileopsapi.New(
 		stateStore,
-		e2eExecSessionValidator{principalID: identity.principal.Subject, session: identity.active},
+		e2eExecSessionValidator{identityID: identity.identity.Subject, session: identity.active},
 		targets,
 		fileOperations,
 		fileopsapi.Config{AllowedPathRoots: []string{"/tmp"}},
@@ -111,12 +111,12 @@ func startFileController(
 	}
 	policy, err := authorization.New(authorization.Policy{Rules: []authorization.Rule{
 		{
-			ID: "e2e-file-transfer", Subjects: []string{identity.principal.Subject},
+			ID: "e2e-file-transfer", Subjects: []string{identity.identity.Subject},
 			Namespaces: []string{identity.session.Namespace}, Operations: []string{"create", "get", "stream"},
 			ResourceKinds: []string{"file-transfers"},
 		},
 		{
-			ID: "e2e-file-operations", Subjects: []string{identity.principal.Subject},
+			ID: "e2e-file-operations", Subjects: []string{identity.identity.Subject},
 			Namespaces: []string{identity.session.Namespace}, Operations: []string{"list", "create", "update", "delete", "get"},
 			ResourceKinds: []string{"pod-files"},
 		},
@@ -128,11 +128,11 @@ func startFileController(
 	server, err := controlplane.NewServer(
 		controlplane.Config{PublicURL: "http://" + listener.Addr().String()}, controlplane.BuildInfo{},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
-		controlplane.WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(request *http.Request) (controlplaneapi.Principal, *controlplaneapi.Error) {
+		controlplane.WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(request *http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
 			if request.Header.Get("Authorization") != "Bearer "+identity.token {
-				return controlplaneapi.Principal{}, &controlplaneapi.Error{Code: controlplaneapi.CodeUnauthenticated, Message: "invalid file E2E token"}
+				return controlplaneapi.Identity{}, &controlplaneapi.Error{Code: controlplaneapi.CodeUnauthenticated, Message: "invalid file E2E token"}
 			}
-			return identity.principal, nil
+			return identity.identity, nil
 		})),
 		controlplane.WithAuthorizer(policy), controlplane.WithAPIRoutes(routes),
 	)
@@ -149,7 +149,7 @@ func createFileIdentity(
 	t *testing.T,
 	ctx context.Context,
 	stateStore *storage.Store,
-	principalID, deviceID, namespace string,
+	identityID, deviceID, namespace string,
 	network networkspec.Spec,
 	networkHash, token string,
 	hashByte byte,
@@ -158,13 +158,13 @@ func createFileIdentity(
 	now := time.Now().UTC()
 	authorizationID, sessionID := uuid.NewString(), uuid.NewString()
 	expiresAt := now.Add(5 * time.Minute)
-	createOAuthGrant(t, ctx, stateStore, authorizationID, principalID, deviceID, hashByte, now, expiresAt)
+	createOAuthGrant(t, ctx, stateStore, authorizationID, identityID, deviceID, hashByte, now, expiresAt)
 	networkJSON, err := networkspec.CanonicalJSON(network)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := stateStore.Sessions().Create(ctx, storage.Session{
-		ID: sessionID, PrincipalID: principalID, DeviceID: deviceID, ClusterID: "minikube",
+		ID: sessionID, IdentityID: identityID, DeviceID: deviceID, ClusterID: "minikube",
 		Namespace: namespace, State: "active", Generation: 1,
 		NetworkSpec: networkJSON, NetworkSpecHash: networkHash,
 		CreatedAt: now, UpdatedAt: now, LastHeartbeatAt: now, ExpiresAt: expiresAt,
@@ -172,8 +172,8 @@ func createFileIdentity(
 		t.Fatal(err)
 	}
 	return fileE2EIdentity{
-		principal: controlplaneapi.Principal{
-			Subject: principalID, DeviceID: deviceID, AuthorizationID: authorizationID, AccessExpiresAt: expiresAt,
+		identity: controlplaneapi.Identity{
+			Subject: identityID, DeviceID: deviceID, AuthorizationID: authorizationID, AccessExpiresAt: expiresAt,
 		},
 		active: sessionapi.ActiveSession{
 			ID: sessionID, Namespace: namespace, Generation: 1,
@@ -211,9 +211,9 @@ func TestRealFileTransferRevocationControllerRestartAndResume(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = stateStore.Close() })
 	now := time.Now().UTC()
-	principalID, deviceID := uuid.NewString(), "e2e-file-device"
-	if _, err := stateStore.Principals().Upsert(ctx, storage.Principal{
-		ID: principalID, Provider: "e2e", ExternalID: "file-lifecycle", CreatedAt: now, UpdatedAt: now,
+	identityID, deviceID := uuid.NewString(), "e2e-file-device"
+	if _, err := stateStore.Identities().Create(ctx, storage.Identity{
+		ID: identityID, Type: "human", DisplayName: "Test Identity", Status: "active", CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -246,7 +246,7 @@ func TestRealFileTransferRevocationControllerRestartAndResume(t *testing.T) {
 		t.Fatal(err)
 	}
 	firstIdentity := createFileIdentity(
-		t, ctx, stateStore, principalID, deviceID, harness.EchoNamespace,
+		t, ctx, stateStore, identityID, deviceID, harness.EchoNamespace,
 		network, networkHash, "e2e-file-revoked", 5,
 	)
 	running := startFileController(t, "127.0.0.1:0", stateStore, targets, transfers, fileOperations, firstIdentity)
@@ -272,7 +272,7 @@ func TestRealFileTransferRevocationControllerRestartAndResume(t *testing.T) {
 			revokedPath, revokedPath + ".kubeloop-" + revokedResumeID + ".part",
 			restartPath, restartPath + ".kubeloop-" + restartResumeID + ".part",
 		}, " ")
-		_ = podExecutor.Exec(cleanupContext, firstIdentity.principal, harness.EchoNamespace, execapi.Spec{
+		_ = podExecutor.Exec(cleanupContext, firstIdentity.identity, harness.EchoNamespace, execapi.Spec{
 			Pod: podName, Container: "echo", Command: []string{"/bin/sh", "-c", command},
 		}, execapi.Streams{Stdout: io.Discard, Stderr: io.Discard})
 	})
@@ -302,7 +302,7 @@ func TestRealFileTransferRevocationControllerRestartAndResume(t *testing.T) {
 	running.Stop(t)
 	controllerStopped = true
 	secondIdentity := createFileIdentity(
-		t, ctx, stateStore, principalID, deviceID, harness.EchoNamespace,
+		t, ctx, stateStore, identityID, deviceID, harness.EchoNamespace,
 		network, networkHash, "e2e-file-active", 6,
 	)
 	running = startFileController(t, controllerAddress, stateStore, targets, transfers, fileOperations, secondIdentity)
@@ -362,7 +362,7 @@ func TestRealFileTransferRevocationControllerRestartAndResume(t *testing.T) {
 	t.Cleanup(func() {
 		cleanupContext, cleanupCancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cleanupCancel()
-		_ = podExecutor.Exec(cleanupContext, secondIdentity.principal, harness.EchoNamespace, execapi.Spec{
+		_ = podExecutor.Exec(cleanupContext, secondIdentity.identity, harness.EchoNamespace, execapi.Spec{
 			Pod: podName, Container: "echo",
 			Command: []string{"/bin/sh", "-c", "rm -rf -- " + shellquote.Join(specialRoot)},
 		}, execapi.Streams{Stdout: io.Discard, Stderr: io.Discard})
@@ -506,9 +506,9 @@ func newFileRemoteClient(t *testing.T, profileID string, identity fileE2EIdentit
 	store := &e2eCredentialStore{
 		profileID: profileID,
 		credential: credentials.Credential{
-			TokenType: "Bearer", AccessToken: identity.token, AccessExpiresAt: identity.principal.AccessExpiresAt,
-			RefreshToken: "unused", RefreshExpiresAt: identity.principal.AccessExpiresAt,
-			DeviceID: identity.principal.DeviceID,
+			TokenType: "Bearer", AccessToken: identity.token, AccessExpiresAt: identity.identity.AccessExpiresAt,
+			RefreshToken: "unused", RefreshExpiresAt: identity.identity.AccessExpiresAt,
+			DeviceID: identity.identity.DeviceID,
 		},
 	}
 	client, err := remote.New(store, e2eTokenRefresher{}, remote.Config{})

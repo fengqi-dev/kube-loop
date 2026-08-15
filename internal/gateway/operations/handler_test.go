@@ -79,7 +79,7 @@ func TestMetricsExposeOnlyAggregateRuntimeState(t *testing.T) {
 			t.Errorf("metrics missing %q: %s", metric, response.Body.String())
 		}
 	}
-	for _, sensitive := range []string{"token", "email", "principal", "session_id", "target", "endpoint"} {
+	for _, sensitive := range []string{"token", "email", "identity", "session_id", "target", "endpoint"} {
 		if strings.Contains(strings.ToLower(response.Body.String()), sensitive) {
 			t.Errorf("metrics expose sensitive or high-cardinality field %q: %s", sensitive, response.Body.String())
 		}

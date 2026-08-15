@@ -35,14 +35,13 @@ The chart routes the same origin without rewriting paths:
 | `/api/admin/*` | Isolated Management Service |
 | `/tunnel` | Data Plane WebSocket endpoint |
 
-The Control Plane publishes that exact value in discovery and derives every OIDC
-callback as `<publicURL>/oauth2/callback/<providerID>`. Helm fails rendering when
-a chart-managed route uses another hostname, when TLS is disabled, or when both
-Ingress and HTTPRoute are enabled.
+The Control Plane publishes that exact value as its OAuth2/OIDC issuer. Helm
+fails rendering when a chart-managed route uses another hostname, when TLS is
+disabled, or when both Ingress and HTTPRoute are enabled.
 
 The browser Management Plane listens on a separate port. Chart-managed Ingress
 and Gateway API routes expose `/api/admin/*` on the same HTTPS origin while
-keeping the Service itself private. Set `controlPlane.management.publicURL` to
+keeping the Service itself private. Set `controlPlane.admin.publicURL` to
 the same value as `publicURL` when either route is enabled.
 
 Without a chart-managed external route, open it through a local tunnel:
@@ -56,7 +55,7 @@ ClusterIP even if the public Service is a LoadBalancer. For same-origin access:
 
 ```yaml
 controlPlane:
-  management:
+  admin:
     publicURL: https://kubeloop.example.com
     listenPort: 8081
     servicePort: 8081
@@ -123,49 +122,27 @@ KubeLoop's TLS proxy integration test independently covers discovery routing,
 the Control Plane body limit, WSS upgrade and traffic after the proxy's ordinary
 HTTP write timeout.
 
-## Initial administrator and MFA
+## IAM bootstrap and authentication keys
 
-By default, Helm creates separate retained Kubernetes Secrets for the first
-local Management Plane administrator and the OAuth/OIDC service. The initial
-administrator Secret contains the username, password and 32-byte MFA encryption
-key. The independent auth Secret contains an ECDSA P-256 private key for ES256
-ID Tokens and a 32-byte HMAC secret for Fosite opaque tokens.
-The deployment reads the Secret from a read-only projected volume. On startup,
-Control Plane creates the local identity and a `platform-admin` assignment only
-when they do not already exist. A later Helm upgrade never replaces the stored
-password or duplicates the assignment.
+A new database creates the configured `controlPlane.admin.bootstrap` human
+Identity, organization, `Administrators` group, group membership,
+the default `KubeLoop` organization and its system `Administrators` group in
+one transaction. Helm
+stores a random initial password in the retained IAM bootstrap Secret;
+Control Plane reads it from a read-only mount and requires replacement on first
+sign-in. Existing IAM data is never recreated or reset. Read it with the command
+printed by `helm install`, then delete the Secret after the password is changed.
+Set `controlPlane.admin.bootstrap.enabled=false` to retain the manual single-use
+bootstrap-token flow instead.
 
-Retrieve the generated credentials from the commands printed by `helm install`
-and sign in through the separate Management Plane port. Local and upstream
-OIDC accounts both use the standard Authorization Code + PKCE flow. MFA is optional and is
-never forced at first login or user creation: a user may continue with password
-only, or independently enable TOTP under **账户安全**. After enrollment, that user
-must provide a current TOTP or recovery code at login. Ten one-time recovery
-codes are shown exactly once, and recovery-code login consumes the code
-atomically. TOTP secrets are encrypted at rest; passwords use Argon2id and
-neither plaintext value is written to the database or ConfigMap.
+The retained auth Secret contains two independent values:
 
-To use an externally managed Secret instead, set:
+- `oidc-signing-key.pem`: ECDSA P-256 PKCS#8 key for ES256 ID Tokens;
+- `hmac-secret`: exactly 32 bytes for Fosite opaque token signatures;
 
-```yaml
-controlPlane:
-  management:
-    initialAdmin:
-      enabled: true
-      existingSecret: kubeloop-initial-admin
-      usernameKey: username
-      passwordKey: password
-      mfaEncryptionKeyKey: mfa-encryption-key
-```
-
-The MFA key must contain exactly 32 bytes and must remain stable for the life of
-the stored TOTP enrollments. To manage OAuth/OIDC key material externally, set
-`controlPlane.auth.oauth.existingSecret` to a Secret containing
-`oidc-signing-key.pem` (ECDSA P-256, PKCS#8 PEM) and `hmac-secret` (exactly 32
-bytes). Never reuse the RelayTicket or initial administrator Secret for it.
-Local users and password resets are managed from
-**用户管理**. Role grants continue to use the existing revisioned Management
-Policy editor, so local and OIDC principals share one RBAC and audit model.
+Set `controlPlane.auth.oauth.existingSecret` to manage these keys externally.
+Never reuse RelayTicket keys or database credentials. Passwords use Argon2id;
+KubeLoop authentication uses local username and password credentials only.
 
 ## Relay Registry and RelayTicket keys
 
@@ -264,95 +241,27 @@ for `dataPlane.drainTimeout`. Control Plane stops new assignment to that lease.
 Remaining streams are explicitly closed; clients obtain a fresh assignment and
 generation-bound RelayTicket. Active streams are not described as migrated.
 
-## OIDC Provider
-
-OIDC Providers and their client secrets are created from the Management UI and
-stored in the Control Plane database. Helm values and mounted Kubernetes
-Secrets are deliberately not accepted as Provider configuration. In **Identity
-Providers**, enter the Provider ID, display name, issuer, client ID, client
-secret, optional private CA PEM, scopes, signing algorithms and claim mappings,
-validate connectivity, create a draft, then publish it. The client secret is
-redacted from every read response but remains available to the runtime from the
-deployment database.
-
-Register the exact callback `https://<public-origin>/oauth2/callback/corporate` at the identity provider. Control Plane startup fails closed if discovery does not match the configured issuer, endpoints are not HTTPS, PKCE S256 is not advertised, or no configured signing algorithm is supported.
-
-The configured issuer is compared exactly with OIDC discovery, including a
-trailing slash. Claim mappings first match the complete claim name and then use
-dot notation for nested JSON objects. This supports both Auth0 URI-style custom
-claims and Keycloak claims such as `realm_access.roles`.
-
-For Casdoor, use scopes `openid profile email`, map `displayName` to
-`displayName`, and map `groups` to the configured top-level group claim.
-Register `https://<public-origin>/oauth2/callback/casdoor`.
-
-### Keycloak
-
-Enable Standard Flow, confidential client authentication and PKCE S256, then
-register `https://<public-origin>/oauth2/callback/keycloak`. Ensure the selected
-roles or groups mapper adds the mapped claim to the ID token. A Group Membership
-mapper that emits a top-level `groups` array can instead use `groups: groups`.
-Use the realm issuer, scopes `openid profile email roles`, and map groups to
-`realm_access.roles` when using the realm-role mapper.
-
-### Auth0
-
-Use a Regular Web Application with Client Secret Basic or Client Secret Post,
-RS256 signing and callback `https://<public-origin>/oauth2/callback/auth0`.
-Populate the namespaced group claim with an Auth0 Action when group-based policy
-is required, then enter that full URI in the Management UI's groups claim.
-
 ## Authorization
 
-Authentication does not grant API access by itself. Roles, bindings, explicit
-Allow/Deny statements and Namespace scopes are stored in the Control Plane
+Authentication does not grant API access by itself. Roles, bindings and
+Namespace scopes are stored in the Control Plane
 database and managed from the Admin **Access Control** page. Helm does not
 accept authorization rules.
 
-Bindings target either one Principal UUID or one provider-scoped group. A
-Namespace scope uses exact names and/or Kubernetes label selectors. Publishing
-creates a configuration object which the Control Plane compiles completely before
-atomically replacing the active snapshot pointer. Explicit Deny statements override
-Allow statements, and missing Namespace labels fail closed.
+Bindings target an Identity or organization Group selected in the Admin UI.
+Scopes are platform, organization or one exact Namespace. Namespace ownership
+and effective access are filtered in the repository query; the API never loads
+all Namespaces and hides unauthorized rows afterwards.
 
 ## Management bootstrap
 
-The Control Plane Management Plane has a separate deny-by-default role engine;
-ordinary Gateway Policy access never grants an `admin.*` operation. Initial
-deployment may identify exact stable OIDC subjects or normalized groups:
-
-```yaml
-controlPlane:
-  management:
-    bootstrap:
-      subjects: ["00000000-0000-4000-8000-000000000001"]
-      groups: ["platform-bootstrap"]
-      recoveryEnabled: false
-```
-
-Subjects are Control Plane Principal UUIDs; wildcards, `$cluster`, upstream email
-addresses, and display names are not valid bootstrap selectors. A normalized
-group is normally the practical first-install selector because a new Principal
-UUID is assigned at its first successful OIDC login. After a formal
-`platform-admin` assignment configuration is published, the persistent retirement
-marker prevents old Helm values from restoring bootstrap access. Disaster recovery requires an explicit Helm
-change to `recoveryEnabled: true` and a Control Plane restart, and still requires
-one of the configured exact identities.
-
-## Managed OIDC Provider configurations
-
-The Management Plane can validate and publish OIDC Providers
-without restarting the Control Plane. Provider metadata and credentials are
-stored together in the database; responses only report whether a client
-secret is configured and never echo it. `POST
-/api/admin/providers/{id}/validate` performs discovery
-or directory connectivity checks without changing the live Registry. Draft
-and publish use `/providers/{id}/drafts` and
-`/providers/{id}/changes/{changeID}/publish`; every write requires the Management Session CSRF
-header and an `Idempotency-Key`. A publish prebuilds the
-complete candidate Registry before committing its active pointer, then applies
-only the changed Provider atomically so unrelated concurrent publications are
-preserved.
+The Control Plane uses a deny-by-default role engine; ordinary runtime access
+never grants IAM administration. Automatic bootstrap runs only against an empty
+IAM database, creates one platform administrator and organization atomically,
+and requires replacement of the random initial password on first sign-in. It
+has no group fallback, recovery switch or first-login promotion. When automatic
+bootstrap is disabled, the database-backed single-use token flow remains
+available for an operator-driven initialization.
 
 ## Kubernetes access
 
@@ -440,7 +349,7 @@ events before enabling this mode.
 The repository's Minikube Helm lifecycle E2E enables API Server metadata auditing,
 grants a temporary exact-user/exact-group impersonation role outside this
 chart, calls `GET /kubeloop/api/version`, and asserts that the audit event contains
-both the Control Plane ServiceAccount and the final prefixed Principal identity.
+both the Control Plane ServiceAccount and the final prefixed Identity identity.
 It also proves that an unmapped identity group is not forwarded.
 
 ```yaml
@@ -501,27 +410,27 @@ Authenticated, policy-authorized clients can use:
 
 Capability results are the intersection of Gateway Policy and Kubernetes RBAC.
 `/kubeloop/api/version` returns both `gitVersion` (Kubernetes) and `gatewayVersion`.
-The versioned capability document includes `schemaVersion`, `principalId`,
+The versioned capability document includes `schemaVersion`, `identityId`,
 `namespace`, `gatewayVersion`, and the authorized capability names. In addition
 to inventory and service workflow names, `cluster.tunnel` requires the complete
 Session/RelayTicket policy path, `ports.forward` requires the complete Port
 Forward policy path, and exec/file capabilities require `pods/exec`. Clients
 may cache this document only for a short period and must isolate it by the
-authenticated principal, namespace, and exact Gateway version; it is never a
+authenticated identity, namespace, and exact Gateway version; it is never a
 replacement for request-time authorization.
 Inventory responses use stable, minimal documents rather than exposing raw
 Kubernetes objects. List endpoints accept bounded `labelSelector` and
 `fieldSelector` values. Namespace list results are additionally filtered by
-the principal's namespace-scoped Gateway Policy. Watch streams share informers
+the identity's namespace-scoped Gateway Policy. Watch streams share informers
 only for the same identity/namespace/resource and keep a one-snapshot mailbox
 per client, so slow clients drop intermediate states instead of blocking the
 informer; periodic resync repairs any dropped edge.
 
 Cluster Session creation returns the immutable NetworkSpec and the same
-principal/namespace/Gateway-version-bound capability snapshot exposed by the
+identity/namespace/Gateway-version-bound capability snapshot exposed by the
 capability endpoint. The client validates both and uses the latter to prime its
 short-lived capability cache; it does not replace per-request authorization.
-Sessions are bound to the authenticated principal, device and namespace. The
+Sessions are bound to the authenticated identity, device and namespace. The
 desktop maintains heartbeats and disconnects the Session before
 logout, profile deletion or application shutdown. The default heartbeat TTL is
 two minutes and the absolute maximum lifetime is eight hours:
@@ -638,7 +547,7 @@ perform a full Kubernetes inventory scan.
 
 The Data Plane `/metrics` endpoint exposes only unlabeled aggregate gauges for
 readiness, drain state, logical tunnel connections, and physical WebSocket
-sessions. It must not expose tokens, email addresses, principals, session IDs,
+sessions. It must not expose tokens, email addresses, identities, session IDs,
 target addresses, or other user-controlled/high-cardinality labels. The
 optional `ServiceMonitor` targets only this endpoint.
 

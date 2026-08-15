@@ -7,7 +7,6 @@ import {
   Eye,
   Globe2,
   Network,
-  RadioTower,
   RefreshCw,
   Server,
   ShieldCheck,
@@ -21,6 +20,7 @@ import type { AppView } from "@/components/layout/navigation";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useI18n } from "@/i18n";
@@ -63,14 +63,17 @@ export function ServerOverviewView({
     previews: number;
   };
   onRefresh(): void;
-  onConnect(mode: "socks" | "tun"): void;
+  onConnect(mode: "socks" | "tun"): Promise<void>;
   onDisconnect(): void;
   onNavigate(view: AppView): void;
 }) {
   const { t } = useI18n();
   const dataPlane = inventory.dataPlane;
-  const ready = dataPlane?.state === "connected";
-  const phase: SessionState["phase"] = ready
+  const [pendingMode, setPendingMode] = useState<"socks" | "tun">();
+  const ready = dataPlane?.state === "connected" && !pendingMode;
+  const phase: SessionState["phase"] = pendingMode
+    ? "starting-tunnel"
+    : ready
     ? "connected"
     : dataPlane?.state === "error"
       ? "error"
@@ -78,11 +81,12 @@ export function ServerOverviewView({
         ? "starting-tunnel"
         : "idle";
   const networkSpec = inventory.session?.networkSpec;
-  const warnings = inventory.network?.issues?.filter((issue) => issue.severity === "warning") ?? [];
   const [selectedMode, setSelectedMode] = useState<"socks" | "tun">(dataPlane?.mode || "socks");
   const [helper, setHelper] = useState<HelperStatus | null>(null);
   const [helperAction, setHelperAction] = useState<"install" | "uninstall" | null>(null);
-  const [testingConnectivity, setTestingConnectivity] = useState(false);
+  const [socksPort, setSocksPort] = useState(profile.socksPort || 1080);
+  const [socksPortInput, setSocksPortInput] = useState(String(profile.socksPort || 1080));
+  const [savingSocksPort, setSavingSocksPort] = useState(false);
   const refreshHelper = useCallback(async () => {
     try {
       setHelper(await backend.helperStatus());
@@ -95,8 +99,34 @@ export function ServerOverviewView({
 
   useEffect(() => { void refreshHelper(); }, [refreshHelper]);
   useEffect(() => {
-    if (dataPlane?.state === "connected") setSelectedMode(dataPlane.mode || "socks");
-  }, [profile.id, dataPlane?.state, dataPlane?.mode]);
+    let active = true;
+    void backend.getServerNetworkSettings(profile.id).then((settings) => {
+      if (!active) return;
+      setSocksPort(settings.socksPort);
+      setSocksPortInput(String(settings.socksPort));
+    }).catch((reason) => {
+      if (active) toast.error("Could not load SOCKS port", {
+        description: reason instanceof Error ? reason.message : String(reason),
+      });
+    });
+    return () => { active = false; };
+  }, [profile.id]);
+  useEffect(() => {
+    if (!busy && !pendingMode && dataPlane?.state === "connected") {
+      setSelectedMode(dataPlane.mode || "socks");
+    }
+  }, [profile.id, busy, pendingMode, dataPlane?.state, dataPlane?.mode]);
+
+  async function connectSelectedMode() {
+    if (pendingMode) return;
+    const mode = selectedMode;
+    setPendingMode(mode);
+    try {
+      await onConnect(mode);
+    } finally {
+      setPendingMode(undefined);
+    }
+  }
 
   async function installHelper() {
     setHelperAction("install");
@@ -128,20 +158,24 @@ export function ServerOverviewView({
     }
   }
 
-  async function testConnectivity() {
-    if (!ready || testingConnectivity) return;
-    setTestingConnectivity(true);
+  async function saveSocksPort() {
+    const port = Number(socksPortInput);
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+      toast.error("SOCKS port must be between 1 and 65535");
+      return;
+    }
+    setSavingSocksPort(true);
     try {
-      await backend.testServerDataPlane(profile.id);
-      toast.success("Network connectivity test passed", {
-        description: `${selectedMode === "tun" ? "System TUN" : "Local SOCKS"}, Gateway transport, and cluster DNS are reachable.`,
-      });
+      const settings = await backend.setServerSOCKSPort(profile.id, port);
+      setSocksPort(settings.socksPort);
+      setSocksPortInput(String(settings.socksPort));
+      toast.success("SOCKS port saved", { description: `The next connection will listen on 127.0.0.1:${settings.socksPort}.` });
     } catch (reason) {
-      toast.error("Network connectivity test failed", {
+      toast.error("Could not save SOCKS port", {
         description: reason instanceof Error ? reason.message : String(reason),
       });
     } finally {
-      setTestingConnectivity(false);
+      setSavingSocksPort(false);
     }
   }
 
@@ -155,91 +189,180 @@ export function ServerOverviewView({
         : t("settings.helperMissing");
 
   const socksAddress = dataPlane?.socksAddress || "127.0.0.1:1080";
+  const parsedSocksPort = Number(socksPortInput);
+  const socksPortValid = Number.isInteger(parsedSocksPort) && parsedSocksPort >= 1 && parsedSocksPort <= 65535;
+  const socksPortDirty = socksPortValid && parsedSocksPort !== socksPort;
 
   return (
-    <div className="mx-auto max-w-[1280px]">
-      <div className="grid items-start gap-3 lg:grid-cols-2">
-        <Card className="gap-0 overflow-hidden py-0 shadow-none lg:col-span-2">
-          <CardContent className="flex flex-col gap-2.5 p-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex min-w-0 items-center gap-3">
-              <div className="grid size-8 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
-                <Server size={17} />
-              </div>
-              <div className="min-w-0">
-                <div className="truncate text-[15px] font-semibold">{profile.displayName || discovery?.serviceId || profile.id}</div>
-                <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[10px] text-muted-foreground">
-                  <span>Kubernetes {inventory.kubernetesVersion || "—"}</span>
-                  <span>Gateway {inventory.gatewayVersion || "—"}</span>
-                  <span>Session {inventory.session?.state || "unavailable"}</span>
-                  <span className="truncate">{userName || "Authenticated user"}</span>
+    <div className="mx-auto max-w-[1360px]">
+      <div className="grid items-stretch gap-3 lg:grid-cols-12">
+        <Card className="gap-0 overflow-hidden py-0 shadow-none lg:col-span-12">
+          <CardContent className="p-4">
+            <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4">
+              <div className="grid min-w-0 gap-4 sm:grid-cols-[minmax(0,0.9fr)_minmax(0,1.2fr)] sm:items-center">
+                <div className="flex min-w-0 items-center gap-3">
+                  <div className="grid size-9 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
+                    <Server size={18} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[10px] font-medium tracking-[0.12em] text-muted-foreground uppercase">Target server</div>
+                    <div className="mt-1 truncate text-[15px] font-semibold">{profile.displayName || discovery?.serviceId || profile.id}</div>
+                    <div className="mt-0.5 truncate font-mono text-[9px] text-muted-foreground" title={profile.baseUrl}>{profile.baseUrl}</div>
+                  </div>
+                  <Button type="button" variant="ghost" size="icon-xs" className="shrink-0" title="Refresh server" aria-label="Refresh server" disabled={busy} onClick={onRefresh}>
+                    {busy ? <Spinner /> : <RefreshCw size={13} />}
+                  </Button>
                 </div>
-                <div className="mt-1 truncate font-mono text-[10px] text-muted-foreground" title={profile.baseUrl}>{profile.baseUrl}</div>
-              </div>
-            </div>
-            <Button type="button" variant="outline" size="sm" className="shrink-0 self-end sm:self-auto" disabled={busy} onClick={onRefresh}>
-              {busy ? <Spinner data-icon="inline-start" /> : <RefreshCw size={13} data-icon="inline-start" />}
-              Refresh
-            </Button>
-          </CardContent>
-        </Card>
 
-        <Card className="gap-0 overflow-hidden py-0 shadow-none lg:col-span-2">
-          <CardContent className="p-3">
-            <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-4">
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className={cn("size-2 rounded-full", ready ? "bg-success" : phase === "error" ? "bg-destructive" : phase === "starting-tunnel" ? "animate-pulse bg-primary" : "bg-muted-foreground/40")} />
-                  <h2 className="text-lg font-semibold tracking-tight">
-                    {ready ? dataPlane?.mode === "tun" ? "System TUN is connected" : "Remote cluster proxy is ready" : phase === "error" ? "Data Plane unavailable" : phase === "starting-tunnel" ? "Connecting Data Plane" : "Data Plane disconnected"}
-                  </h2>
+                <div className="min-w-0 sm:border-l sm:pl-4">
+                  <div className="text-[10px] font-medium tracking-[0.12em] text-muted-foreground uppercase">Connection</div>
+                  <div className="mt-1 flex items-center gap-2">
+                    <span className={cn("size-2 shrink-0 rounded-full", ready ? "bg-success" : phase === "error" ? "bg-destructive" : phase === "starting-tunnel" ? "animate-pulse bg-primary" : "bg-muted-foreground/40")} />
+                    <h2 className="truncate text-[15px] font-semibold tracking-tight">
+                      {pendingMode ? pendingMode === "tun" ? "Connecting System TUN" : "Connecting cluster proxy" : ready ? dataPlane?.mode === "tun" ? "System TUN is connected" : "Remote cluster proxy is ready" : phase === "error" ? "Data Plane unavailable" : phase === "starting-tunnel" ? "Connecting Data Plane" : "Data Plane disconnected"}
+                    </h2>
+                  </div>
+                  <p className="mt-1 text-[10px] text-muted-foreground">RelayTicket-bound Gateway transport</p>
                 </div>
-                <p className="mt-1 text-[11px] text-muted-foreground">RelayTicket-bound Gateway transport</p>
               </div>
+
               <ConnectionOrb
                 phase={phase}
                 busy={busy}
-                disabled={busy || !inventory.capabilities.includes("cluster.tunnel") || (!ready && selectedMode === "tun" && !helperCurrent)}
+                variant="toggle"
+                disabled={busy || Boolean(pendingMode) || !inventory.capabilities.includes("cluster.tunnel") || (!ready && selectedMode === "tun" && !helperCurrent)}
                 ariaLabel={ready ? "Disconnect" : "Connect"}
-                onClick={() => ready ? onDisconnect() : onConnect(selectedMode)}
+                onClick={() => ready ? onDisconnect() : void connectSelectedMode()}
               />
             </div>
 
-            <div className="mt-2.5 grid gap-2.5 md:grid-cols-[220px_minmax(0,1fr)]">
-              <ToggleGroup
-                type="single"
-                value={selectedMode}
-                disabled={ready || busy}
-                onValueChange={(mode) => { if (mode === "socks" || mode === "tun") setSelectedMode(mode); }}
-                className="grid w-full grid-cols-2 gap-1 self-start rounded-lg bg-muted/70 p-1"
-              >
-                <ToggleGroupItem value="socks" className="h-8 rounded-md text-[11px] data-[state=on]:bg-background data-[state=on]:shadow-sm"><Network size={13} /> SOCKS</ToggleGroupItem>
-                <ToggleGroupItem value="tun" className="h-8 rounded-md text-[11px] data-[state=on]:bg-background data-[state=on]:shadow-sm"><Cable size={13} /> TUN</ToggleGroupItem>
-              </ToggleGroup>
+            <div className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 border-y py-3 sm:grid-cols-3 xl:grid-cols-6">
+              <ServerValue label="Kubernetes" value={inventory.kubernetesVersion} />
+              <ServerValue label="Gateway" value={inventory.gatewayVersion} />
+              <ServerValue label="Pod CIDR" value={networkSpec?.podCIDRs?.join(", ")} />
+              <ServerValue label="Service CIDR" value={networkSpec?.serviceCIDRs?.join(", ")} />
+              <ServerValue label="Session" value={inventory.session?.state} />
+              <ServerValue label="Identity" value={userName || "Authenticated user"} />
+            </div>
 
-              <div className="min-h-10 rounded-lg bg-muted/35 px-3 py-2">
+            <div className="pt-4">
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <div className="text-[10px] font-medium tracking-[0.12em] text-muted-foreground uppercase">
+                  {t("overview.connectionMode")}
+                </div>
+                <div className="text-[9px] font-medium text-muted-foreground">
+                  {selectedMode === "tun" ? t("overview.tunMode") : t("overview.socksProxy")}
+                </div>
+              </div>
+              <div className="overflow-hidden rounded-xl border bg-muted/25 p-1">
+                <ToggleGroup
+                  type="single"
+                  value={selectedMode}
+                  disabled={ready || busy}
+                  onValueChange={(mode) => { if (mode === "socks" || mode === "tun") setSelectedMode(mode); }}
+                  className="grid w-full grid-cols-1 gap-1 sm:grid-cols-2"
+                >
+                  <ToggleGroupItem
+                    value="tun"
+                    aria-label={t("overview.tunMode")}
+                    className="group h-auto min-h-[64px] items-stretch justify-start whitespace-normal rounded-lg border border-transparent bg-transparent p-3 text-left shadow-none data-[state=on]:border-border/80 data-[state=on]:bg-background data-[state=on]:shadow-sm"
+                  >
+                    <span className="flex w-full min-w-0 items-start gap-3">
+                      <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-background text-muted-foreground shadow-xs ring-1 ring-border/70 group-data-[state=on]:bg-primary/10 group-data-[state=on]:text-primary group-data-[state=on]:ring-primary/20">
+                        <Cable size={15} />
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="flex items-center justify-between gap-2">
+                          <strong className="text-[12px] font-semibold">{t("overview.tunMode")}</strong>
+                          {ready && dataPlane?.mode === "tun" ? <ModeActiveLabel label={t("overview.modeActive")} /> : null}
+                        </span>
+                        <span className="mt-1 flex items-center gap-1.5 text-[10px] leading-4 text-muted-foreground">
+                          <i className={cn("size-1.5 shrink-0 rounded-full", helperCurrent ? "bg-success" : "bg-muted-foreground/40")} />
+                          {t("overview.tunModeDesc")} · {helperLabel}
+                        </span>
+                      </span>
+                    </span>
+                  </ToggleGroupItem>
+                  <ToggleGroupItem
+                    value="socks"
+                    aria-label={t("overview.socksProxy")}
+                    className="group h-auto min-h-[64px] items-stretch justify-start whitespace-normal rounded-lg border border-transparent bg-transparent p-3 text-left shadow-none data-[state=on]:border-border/80 data-[state=on]:bg-background data-[state=on]:shadow-sm"
+                  >
+                    <span className="flex w-full min-w-0 items-start gap-3">
+                      <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-background text-muted-foreground shadow-xs ring-1 ring-border/70 group-data-[state=on]:bg-primary/10 group-data-[state=on]:text-primary group-data-[state=on]:ring-primary/20">
+                        <Network size={15} />
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="flex items-center justify-between gap-2">
+                          <strong className="text-[12px] font-semibold">{t("overview.socksProxy")}</strong>
+                          {ready && dataPlane?.mode === "socks" ? <ModeActiveLabel label={t("overview.modeActive")} /> : null}
+                        </span>
+                        <span className="mt-1 block text-[10px] leading-4 text-muted-foreground">{t("overview.socksModeDesc")}</span>
+                      </span>
+                    </span>
+                  </ToggleGroupItem>
+                </ToggleGroup>
+
+              <div className="mt-1 min-h-[58px] rounded-lg border border-border/70 bg-background/80 px-3 py-2.5">
                 {selectedMode === "socks" ? (
                   <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="text-[9px] font-medium tracking-wide text-muted-foreground uppercase">SOCKS5 listener</div>
-                      <code className="mt-1 block truncate text-[12px]" title={socksAddress}>{socksAddress}</code>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[9px] leading-4 text-muted-foreground">{t("overview.socksHint")}</div>
+                      <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                        <code className="text-[11px] font-medium text-muted-foreground">127.0.0.1:</code>
+                        <Input
+                          type="number"
+                          inputMode="numeric"
+                          min={1}
+                          max={65535}
+                          step={1}
+                          value={socksPortInput}
+                          disabled={ready || busy || savingSocksPort}
+                          aria-label="SOCKS port"
+                          className="h-7 w-[88px] px-2 font-mono text-[11px]"
+                          onChange={(event) => setSocksPortInput(event.target.value)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter" && socksPortDirty) void saveSocksPort();
+                          }}
+                        />
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-7 px-2 text-[10px]"
+                          disabled={ready || busy || savingSocksPort || !socksPortDirty}
+                          onClick={() => void saveSocksPort()}
+                        >
+                          {savingSocksPort ? <Spinner data-icon="inline-start" /> : null}
+                          Save
+                        </Button>
+                        {ready ? (
+                          <code className="ml-1 truncate text-[10px] text-muted-foreground" title={socksAddress}>Active: socks5h://{socksAddress}</code>
+                        ) : null}
+                      </div>
                     </div>
                     <Button
                       type="button"
                       variant="outline"
-                      size="icon-xs"
+                      size="sm"
+                      className="h-7 px-2 text-[10px]"
                       disabled={!ready}
                       title={t("overview.socksCopy")}
                       aria-label={t("overview.socksCopy")}
-                      onClick={() => void navigator.clipboard.writeText(socksAddress).then(() => toast.success(t("overview.socksCopied")), () => toast.error(t("overview.socksCopyFailed")))}
+                      onClick={() => void navigator.clipboard.writeText(proxyEnvironmentVariables(socksAddress)).then(() => toast.success(t("overview.socksCopied")), () => toast.error(t("overview.socksCopyFailed")))}
                     >
-                      <Copy size={12} />
+                      <Copy size={12} data-icon="inline-start" />
+                      {t("overview.socksCopy")}
                     </Button>
                   </div>
                 ) : (
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div className="min-w-0">
-                      <div className="text-[9px] font-medium tracking-wide text-muted-foreground uppercase">System routing helper</div>
-                      <div className="mt-1 truncate text-[11px] text-muted-foreground">{helperLabel} · Pod IP and Service IP routing</div>
+                      <div className="text-[9px] leading-4 text-muted-foreground">{t("overview.tunHint")}</div>
+                      <div className="mt-1 flex items-center gap-1.5 text-[11px] font-medium">
+                        <ShieldCheck size={12} className={helperCurrent ? "text-success" : "text-muted-foreground"} />
+                        {t("overview.tunHelper")}: {helperLabel}
+                      </div>
                     </div>
                     <div className="flex shrink-0 items-center gap-1.5">
                       {!helperCurrent ? (
@@ -257,6 +380,7 @@ export function ServerOverviewView({
                   </div>
                 )}
               </div>
+              </div>
             </div>
 
             {dataPlaneError ? (
@@ -264,47 +388,12 @@ export function ServerOverviewView({
                 <AlertDescription className="truncate text-[11px]" title={dataPlaneError}>{failureTitle(dataPlaneReason)} · {dataPlaneError}</AlertDescription>
               </Alert>
             ) : null}
+
+            <div className="mt-4 border-t pt-3">
+              <SessionMetrics counts={counts} onNavigate={onNavigate} />
+            </div>
           </CardContent>
         </Card>
-
-        <Card className="gap-0 overflow-hidden py-0 shadow-none">
-          <div className="flex items-center justify-between gap-3 px-3 pt-2.5 pb-1.5">
-            <span className="text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
-              {t("overview.clusterNetwork")}
-            </span>
-            <div className="flex min-w-0 items-center gap-1.5">
-              <span className="truncate font-mono text-[10px] text-muted-foreground">
-                {inventory.network?.routingMode || "proxy"} · {inventory.network?.strictRoute ? "strict route" : "standard route"}
-              </span>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-xs"
-                disabled={!ready || busy || testingConnectivity}
-                title="Test network connectivity"
-                aria-label="Test network connectivity"
-                onClick={() => void testConnectivity()}
-              >
-                {testingConnectivity ? <Spinner /> : <RadioTower size={12} />}
-              </Button>
-            </div>
-          </div>
-          {warnings.length > 0 ? (
-            <div className="border-t px-4 py-3">
-              <Alert className="py-2">
-                <AlertDescription className="text-[11px]">{warnings.map((item) => item.message).join(" · ")}</AlertDescription>
-              </Alert>
-            </div>
-          ) : null}
-          <CardContent className="grid grid-cols-2 gap-x-3 gap-y-2 px-3 py-2.5">
-            <NetworkValue label={t("overview.clusterDomain")} value={networkSpec?.clusterDomains.join(", ")} />
-            <NetworkValue label={t("overview.podNetwork")} value={networkSpec?.podCIDRs.join(", ")} />
-            <NetworkValue label={t("overview.serviceNetwork")} value={networkSpec?.serviceCIDRs.join(", ")} />
-            <NetworkValue label={t("overview.clusterDns")} value={networkSpec?.dnsServer} />
-          </CardContent>
-        </Card>
-
-        <SessionMetrics counts={counts} onNavigate={onNavigate} />
       </div>
     </div>
   );
@@ -332,39 +421,67 @@ function SessionMetrics({
     { group: t("overview.networkGroup"), icon: Eye, label: t("network.tabPreview"), value: counts.previews, view: "network" },
   ];
   return (
-    <Card className="gap-0 overflow-hidden py-0 shadow-none">
-      <CardContent className="px-3 py-2.5">
-        <div className="mb-1.5 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">{t("overview.sessionsPanel")}</div>
-        <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-5">
-          {rows.map((row) => (
-            <Button
-              key={`${row.group}-${row.label}`}
-              type="button"
-              variant="ghost"
-              title={`${row.group} · ${row.label}`}
-              onClick={() => onNavigate(row.view)}
-              className="flex h-9 min-w-0 items-center justify-start gap-1.5 rounded-md border bg-background/80 px-2 text-left hover:bg-accent/60"
-            >
-              <row.icon className="shrink-0 text-muted-foreground" size={12} />
-              <span className="min-w-0 flex-1 truncate text-[9px] text-foreground">{row.label}</span>
-              <span className="ml-auto font-mono text-[12px] font-semibold tabular-nums">{row.value}</span>
-            </Button>
-          ))}
-        </div>
-      </CardContent>
-    </Card>
+    <section>
+      <div className="mb-1.5 flex items-center justify-between gap-3">
+        <span className="text-[10px] font-medium tracking-wide text-muted-foreground uppercase">{t("overview.sessionsPanel")}</span>
+        <span className="font-mono text-[10px] text-muted-foreground">{rows.reduce((total, row) => total + row.value, 0)} active</span>
+      </div>
+      <div className="grid grid-cols-2 gap-1.5 lg:grid-cols-5">
+        {rows.map((row) => (
+          <Button
+            key={`${row.group}-${row.label}`}
+            type="button"
+            variant="ghost"
+            title={`${row.group} · ${row.label}`}
+            onClick={() => onNavigate(row.view)}
+            className="flex h-9 min-w-0 items-center justify-start gap-1.5 rounded-md border bg-background/80 px-2 text-left hover:bg-accent/60 last:col-span-2 lg:last:col-span-1"
+          >
+            <row.icon className="shrink-0 text-muted-foreground" size={12} />
+            <span className="min-w-0 flex-1 truncate text-[9px] text-foreground">
+              <span className="text-muted-foreground">{row.group}</span>
+              <span className="px-1 text-muted-foreground/60">·</span>
+              {row.label}
+            </span>
+            <span className="ml-auto font-mono text-[12px] font-semibold tabular-nums">{row.value}</span>
+          </Button>
+        ))}
+      </div>
+    </section>
   );
 }
 
-function NetworkValue({ label, value }: { label: string; value?: string }) {
+function ServerValue({ label, value }: { label: string; value?: string }) {
   return (
-    <div className="min-w-0 space-y-1 text-[11px]">
-      <div className="truncate text-[10px] text-muted-foreground">{label}</div>
-      <div className="h-6 truncate rounded-md border border-input bg-muted/25 px-2 py-1 font-mono text-[10px]" title={value || "—"}>
-        {value || "—"}
-      </div>
+    <div className="min-w-0">
+      <div className="text-[9px] font-medium tracking-wide text-muted-foreground uppercase">{label}</div>
+      <div className="mt-1 truncate text-[11px] font-medium" title={value || "—"}>{value || "—"}</div>
     </div>
   );
+}
+
+function ModeActiveLabel({ label }: { label: string }) {
+  return (
+    <span className="flex shrink-0 items-center gap-1 text-[9px] font-medium text-success">
+      <i className="size-1.5 rounded-full bg-success" />
+      {label}
+    </span>
+  );
+}
+
+function proxyEnvironmentVariables(address: string): string {
+  const proxy = `socks5h://${address}`;
+  if (navigator.userAgent.toLowerCase().includes("windows")) {
+    return [
+      `$env:HTTP_PROXY = "${proxy}"`,
+      `$env:HTTPS_PROXY = "${proxy}"`,
+      `$env:ALL_PROXY = "${proxy}"`,
+    ].join("\r\n");
+  }
+  return [
+    `export HTTP_PROXY="${proxy}"`,
+    `export HTTPS_PROXY="${proxy}"`,
+    `export ALL_PROXY="${proxy}"`,
+  ].join("\n");
 }
 
 function failureTitle(reason?: DataPlaneStatusEvent["reason"]) {

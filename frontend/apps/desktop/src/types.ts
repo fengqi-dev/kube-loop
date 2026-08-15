@@ -100,6 +100,7 @@ export interface HostAlias {
 
 export interface ServerNetworkSettings {
   dnsNamespace?: string;
+  socksPort: number;
   hostAliases?: HostAlias[];
 }
 
@@ -182,9 +183,10 @@ export interface ServerProfile {
   baseUrl: string;
   tunnelPath: string;
   displayName?: string;
-  lastPrincipalId?: string;
+  lastIdentityId?: string;
   lastUserName?: string;
   lastNamespace?: string;
+  socksPort?: number;
 }
 
 export interface ServerProfileState {

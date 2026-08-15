@@ -16,7 +16,7 @@ import (
 )
 
 func TestBootstrapRequiresAuthenticationAndConsolidatesSessionAuthorization(t *testing.T) {
-	handler, _ := newPrincipalTokenHandler(t, false)
+	handler, _ := newIdentityTokenHandler(t, false)
 	unauthenticated := httptest.NewRecorder()
 	serveHTTP(handler, unauthenticated, httptest.NewRequest(http.MethodGet, "/bootstrap", nil))
 	if unauthenticated.Code != http.StatusUnauthorized {
@@ -32,14 +32,14 @@ func TestBootstrapRequiresAuthenticationAndConsolidatesSessionAuthorization(t *t
 	if err := json.Unmarshal(response.Body.Bytes(), &document); err != nil {
 		t.Fatal(err)
 	}
-	if document.Identity.ID == "" || len(document.Identity.Groups) != 1 || document.Identity.Groups[0] != "platform" {
+	if document.Identity.ID == "" || len(document.Identity.Groups) != 1 {
 		t.Fatalf("identity=%+v", document.Identity)
 	}
 	if document.Session.AuthenticationType != "normal" || document.Session.CreatedAt.IsZero() ||
 		document.Session.AbsoluteExpiresAt.IsZero() {
 		t.Fatalf("session=%+v", document.Session)
 	}
-	if len(document.Authorization.Capabilities) == 0 {
+	if !document.Authorization.Administrator || len(document.Authorization.Namespaces) != 0 {
 		t.Fatalf("authorization=%+v", document.Authorization)
 	}
 }
@@ -55,7 +55,7 @@ func TestBootstrapRemainsAvailableWithoutPrivilegesButOverviewRequiresStatusRead
 	if err := json.Unmarshal(bootstrap.Body.Bytes(), &document); err != nil {
 		t.Fatal(err)
 	}
-	if document.Identity.Groups == nil || len(document.Authorization.Capabilities) != 0 {
+	if document.Identity.Groups == nil || document.Authorization.Administrator || len(document.Authorization.Namespaces) != 0 {
 		t.Fatalf("bootstrap document=%+v", document)
 	}
 	overview := authenticatedGET(handler, cookie, "/overview")
@@ -64,8 +64,52 @@ func TestBootstrapRemainsAvailableWithoutPrivilegesButOverviewRequiresStatusRead
 	}
 }
 
+func TestEffectiveAuthorizationDescribesAdministratorAndNamespaceAccess(t *testing.T) {
+	t.Run("administrator", func(t *testing.T) {
+		handler, _ := newIdentityTokenHandler(t, false)
+		response := authenticatedGET(handler, exchangeManagementToken(t, handler), "/authorization/effective")
+		if response.Code != http.StatusOK {
+			t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+		}
+		var document effectiveAuthorizationDocument
+		if err := json.Unmarshal(response.Body.Bytes(), &document); err != nil {
+			t.Fatal(err)
+		}
+		if !document.Administrator || len(document.Capabilities) == 0 {
+			t.Fatalf("document=%+v", document)
+		}
+		for _, capability := range document.Capabilities {
+			if !capability.Allowed {
+				t.Fatalf("administrator capability=%+v", capability)
+			}
+		}
+	})
+
+	t.Run("namespace user", func(t *testing.T) {
+		handler, _, _ := newNamespaceTokenHandler(t, "payments")
+		response := authenticatedGET(handler, exchangeManagementToken(t, handler), "/authorization/effective")
+		if response.Code != http.StatusOK {
+			t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+		}
+		var document effectiveAuthorizationDocument
+		if err := json.Unmarshal(response.Body.Bytes(), &document); err != nil {
+			t.Fatal(err)
+		}
+		if document.Administrator || len(document.Namespaces) != 1 || document.Namespaces[0] != "payments" {
+			t.Fatalf("document=%+v", document)
+		}
+		allowed := map[string]bool{}
+		for _, capability := range document.Capabilities {
+			allowed[capability.ID] = capability.Allowed
+		}
+		if !allowed["namespace.access"] || allowed["platform.overview.read"] {
+			t.Fatalf("capabilities=%v", allowed)
+		}
+	})
+}
+
 func TestOverviewReturnsBoundedRuntimeAndRelaySummary(t *testing.T) {
-	handler, store := newPrincipalTokenHandler(t, false, WithRelayStatusSource(relayStatusStub{statuses: []relayregistry.RelayStatus{
+	handler, store := newIdentityTokenHandler(t, false, WithRelayStatusSource(relayStatusStub{statuses: []relayregistry.RelayStatus{
 		{
 			RelayID: "relay-ready", State: relaycontrol.StateReady, DesiredState: relaycontrol.StateReady,
 			Online: true, Reservations: 2,
@@ -77,21 +121,21 @@ func TestOverviewReturnsBoundedRuntimeAndRelaySummary(t *testing.T) {
 	}}))
 	cookie := exchangeManagementToken(t, handler)
 	now := time.Now().UTC().Add(-time.Minute)
-	principal, err := store.Principals().Upsert(context.Background(), storage.Principal{
-		ID: uuid.NewString(), Provider: "oidc", ExternalID: "overview-owner", CreatedAt: now, UpdatedAt: now,
+	identity, err := store.Identities().Create(context.Background(), storage.Identity{
+		ID: uuid.NewString(), Type: "human", DisplayName: "Test Identity", Status: "active", CreatedAt: now, UpdatedAt: now,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	session := storage.Session{
-		ID: uuid.NewString(), PrincipalID: principal.ID, DeviceID: "device", ClusterID: "cluster",
+		ID: uuid.NewString(), IdentityID: identity.ID, DeviceID: "device", ClusterID: "cluster",
 		Namespace: "overview", State: "active", CreatedAt: now, ExpiresAt: now.Add(time.Hour),
 	}
 	if err := store.Sessions().Create(context.Background(), session); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.Tasks().Create(context.Background(), storage.Task{
-		ID: uuid.NewString(), PrincipalID: principal.ID, SessionID: session.ID, Type: "pod-exec",
+		ID: uuid.NewString(), IdentityID: identity.ID, SessionID: session.ID, Type: "pod-exec",
 		State: remotetask.Running, Spec: json.RawMessage(`{}`), Result: json.RawMessage(`{}`),
 		IdempotencyKey: "overview-task", CreatedAt: now, UpdatedAt: now,
 	}); err != nil {

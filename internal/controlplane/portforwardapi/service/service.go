@@ -25,7 +25,7 @@ type Storage interface {
 }
 
 type Resolver interface {
-	Resolve(context.Context, controlplaneapi.Principal, string, Spec) (Target, error)
+	Resolve(context.Context, controlplaneapi.Identity, string, Spec) (Target, error)
 }
 
 type BindingManager interface {
@@ -62,7 +62,7 @@ func New(storageBackend Storage, resolver Resolver, bindings BindingManager, con
 
 func (service *Service) Create(
 	ctx context.Context,
-	principal controlplaneapi.Principal,
+	identity controlplaneapi.Identity,
 	session sessionapi.ActiveSession,
 	spec Spec,
 	idempotencyKey string,
@@ -80,7 +80,7 @@ func (service *Service) Create(
 	if err != nil {
 		return CreateResult{}, internalError(err)
 	}
-	scope := taskapi.Scope(TaskType, principal.Subject)
+	scope := taskapi.Scope(TaskType, identity.Subject)
 	if record, getErr := service.storage.Idempotency().Get(ctx, scope, idempotencyKey); getErr == nil {
 		if !taskapi.Matches(record.RequestHash, requestHash, legacyRequestHash) {
 			return CreateResult{}, mapStorageError(storage.ErrIdempotencyMismatch)
@@ -92,7 +92,7 @@ func (service *Service) Create(
 		if taskErr != nil {
 			return CreateResult{}, mapStorageError(taskErr)
 		}
-		if !owned(existing, principal, session) {
+		if !owned(existing, identity, session) {
 			return CreateResult{}, notFound()
 		}
 		if apiError := service.activate(ctx, session, &existing); apiError != nil {
@@ -106,7 +106,7 @@ func (service *Service) Create(
 	} else if !errors.Is(getErr, storage.ErrNotFound) {
 		return CreateResult{}, mapStorageError(getErr)
 	}
-	target, err := service.resolver.Resolve(ctx, principal, session.Namespace, spec)
+	target, err := service.resolver.Resolve(ctx, identity, session.Namespace, spec)
 	if err != nil {
 		return CreateResult{}, &controlplaneapi.Error{Code: controlplaneapi.CodeUnavailable, Message: "Kubernetes Port Forward target resolution failed", Cause: err}
 	}
@@ -118,7 +118,7 @@ func (service *Service) Create(
 	targetJSON, _ := json.Marshal(target)
 	expiresAt := session.ExpiresAt.UTC()
 	task := storage.Task{
-		ID: uuid.NewString(), PrincipalID: principal.Subject, SessionID: session.ID,
+		ID: uuid.NewString(), IdentityID: identity.Subject, SessionID: session.ID,
 		Type: TaskType, State: remotetask.Pending, Spec: specJSON, Result: targetJSON,
 		IdempotencyKey: idempotencyKey, CreatedAt: now, UpdatedAt: now, ExpiresAt: &expiresAt,
 	}
@@ -141,7 +141,7 @@ func (service *Service) Create(
 			if getErr != nil {
 				return getErr
 			}
-			if !owned(existing, principal, session) {
+			if !owned(existing, identity, session) {
 				return storage.ErrNotFound
 			}
 			task = existing
@@ -168,7 +168,7 @@ func (service *Service) Create(
 
 func (service *Service) List(
 	ctx context.Context,
-	principal controlplaneapi.Principal,
+	identity controlplaneapi.Identity,
 	session sessionapi.ActiveSession,
 ) ([]PortForward, *controlplaneapi.Error) {
 	tasks, err := service.storage.Tasks().ListBySession(ctx, session.ID, 1000)
@@ -177,7 +177,7 @@ func (service *Service) List(
 	}
 	items := make([]PortForward, 0, len(tasks))
 	for _, task := range tasks {
-		if task.Type != TaskType || task.PrincipalID != principal.Subject {
+		if task.Type != TaskType || task.IdentityID != identity.Subject {
 			continue
 		}
 		portForward, decodeErr := decodeTask(task, session.Namespace)
@@ -191,7 +191,7 @@ func (service *Service) List(
 
 func (service *Service) Stop(
 	ctx context.Context,
-	principal controlplaneapi.Principal,
+	identity controlplaneapi.Identity,
 	session sessionapi.ActiveSession,
 	taskID string,
 ) (PortForward, *controlplaneapi.Error) {
@@ -199,7 +199,7 @@ func (service *Service) Stop(
 		return PortForward{}, notFound()
 	}
 	task, err := service.storage.Tasks().GetByID(ctx, taskID)
-	if err != nil || !owned(task, principal, session) {
+	if err != nil || !owned(task, identity, session) {
 		if err != nil && !errors.Is(err, storage.ErrNotFound) {
 			return PortForward{}, mapStorageError(err)
 		}
@@ -288,8 +288,8 @@ func validateTarget(target Target) error {
 	return nil
 }
 
-func owned(task storage.Task, principal controlplaneapi.Principal, session sessionapi.ActiveSession) bool {
-	return task.Type == TaskType && task.PrincipalID == principal.Subject && task.SessionID == session.ID
+func owned(task storage.Task, identity controlplaneapi.Identity, session sessionapi.ActiveSession) bool {
+	return task.Type == TaskType && task.IdentityID == identity.Subject && task.SessionID == session.ID
 }
 
 func portForwardFromTask(task storage.Task, namespace string) PortForward {

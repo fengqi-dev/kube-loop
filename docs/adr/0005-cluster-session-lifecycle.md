@@ -12,7 +12,7 @@ owners.
 
 ## Decision
 
-A Cluster Session is bound to a stable principal ID, device ID, Gateway cluster
+A Cluster Session is bound to a stable identity ID, device ID, Gateway cluster
 ID and namespace. Creation is authorized for that namespace and requires an
 `Idempotency-Key`. Matching retries return the original Session; using the key
 for a different namespace returns a conflict.
@@ -21,7 +21,7 @@ Every Session has a monotonically increasing generation. Heartbeat and
 disconnect use an `If-Match` generation so concurrent or stale clients cannot
 overwrite newer state. Heartbeat extends a short expiry but never beyond the
 absolute maximum lifetime. Once expired or disconnected, a Session cannot be
-reactivated. Reads and mutations by another principal, device or namespace
+reactivated. Reads and mutations by another identity, device or namespace
 return the same not-found response.
 
 The desktop keeps the idempotency key across an ambiguous create failure,
@@ -38,7 +38,7 @@ and never trusts a client-supplied digest.
 
 The create response also carries the current namespace capability snapshot.
 It is produced by the same discoverer as `GET /kubeloop/api/capabilities`, so its
-schema, principal, namespace and Gateway-version bindings cannot diverge from
+schema, identity, namespace and Gateway-version bindings cannot diverge from
 the standalone endpoint. This authorization snapshot is advisory and may be
 cached briefly by the desktop; every operation remains independently
 authorized and Kubernetes RBAC changes are not persisted as Session state.

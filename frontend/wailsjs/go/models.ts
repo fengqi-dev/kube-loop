@@ -166,6 +166,7 @@ export namespace app {
 	}
 	export class ServerNetworkSettings {
 	    dnsNamespace?: string;
+	    socksPort: number;
 	    hostAliases?: profile.HostAlias[];
 
 	    static createFrom(source: any = {}) {
@@ -175,6 +176,7 @@ export namespace app {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.dnsNamespace = source["dnsNamespace"];
+	        this.socksPort = source["socksPort"];
 	        this.hostAliases = this.convertValues(source["hostAliases"], profile.HostAlias);
 	    }
 
@@ -329,7 +331,7 @@ export namespace capability {
 
 	export class Snapshot {
 	    schemaVersion: number;
-	    principalId: string;
+	    identityId: string;
 	    namespace: string;
 	    gatewayVersion: string;
 	    capabilities: string[];
@@ -341,7 +343,7 @@ export namespace capability {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.schemaVersion = source["schemaVersion"];
-	        this.principalId = source["principalId"];
+	        this.identityId = source["identityId"];
 	        this.namespace = source["namespace"];
 	        this.gatewayVersion = source["gatewayVersion"];
 	        this.capabilities = source["capabilities"];
@@ -1089,10 +1091,11 @@ export namespace profile {
 	    baseUrl: string;
 	    tunnelPath: string;
 	    displayName?: string;
-	    lastPrincipalId?: string;
+	    lastIdentityId?: string;
 	    lastUserName?: string;
 	    lastNamespace?: string;
 	    dnsNamespace?: string;
+	    socksPort?: number;
 	    hostAliases?: HostAlias[];
 
 	    static createFrom(source: any = {}) {
@@ -1106,10 +1109,11 @@ export namespace profile {
 	        this.baseUrl = source["baseUrl"];
 	        this.tunnelPath = source["tunnelPath"];
 	        this.displayName = source["displayName"];
-	        this.lastPrincipalId = source["lastPrincipalId"];
+	        this.lastIdentityId = source["lastIdentityId"];
 	        this.lastUserName = source["lastUserName"];
 	        this.lastNamespace = source["lastNamespace"];
 	        this.dnsNamespace = source["dnsNamespace"];
+	        this.socksPort = source["socksPort"];
 	        this.hostAliases = this.convertValues(source["hostAliases"], HostAlias);
 	    }
 
@@ -1653,4 +1657,3 @@ export namespace update {
 	}
 
 }
-

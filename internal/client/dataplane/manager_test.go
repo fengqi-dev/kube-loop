@@ -148,6 +148,16 @@ func (tickets *testTickets) Refresh(context.Context, string) (remote.Session, er
 	return tickets.session, nil
 }
 
+func TestRuntimeConfigUsesProfileSOCKSPort(t *testing.T) {
+	base := Config{ListenAddress: "127.0.0.1:1080"}
+	if got := runtimeConfig(base, profile.Profile{}).ListenAddress; got != base.ListenAddress {
+		t.Fatalf("default listen address = %q", got)
+	}
+	if got := runtimeConfig(base, profile.Profile{SOCKSPort: 2080}).ListenAddress; got != "127.0.0.1:2080" {
+		t.Fatalf("profile listen address = %q", got)
+	}
+}
+
 func TestManagerReusesSessionAndReplacesChangedSession(t *testing.T) {
 	spec, err := networkspec.Normalize(networkspec.Spec{
 		PodCIDRs: []string{"10.42.0.0/16"}, PodIPs: []string{"10.43.7.9"},

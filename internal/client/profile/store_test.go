@@ -17,7 +17,7 @@ func TestServerProfileStorePersistsOnlyNonSecretState(t *testing.T) {
 	profile := Profile{
 		ID: "service-1", BaseURL: "https://gateway.example.test/",
 		TunnelPath:  "/relay/tunnel",
-		DisplayName: "Production", LastPrincipalID: "principal-1",
+		DisplayName: "Production", LastIdentityID: "identity-1",
 		LastUserName: "Ada", LastNamespace: "payments",
 	}
 	if err := store.Upsert(profile); err != nil {
@@ -75,6 +75,24 @@ func TestServerProfileStoreDefaultsAndValidatesTunnelPath(t *testing.T) {
 	for _, value := range []string{"https://evil.test/tunnel", "//evil.test/tunnel", "/relay/../tunnel", "/tunnel?token=secret"} {
 		if err := store.Upsert(Profile{ID: "two", BaseURL: "https://two.example.test", TunnelPath: value}); err == nil {
 			t.Fatalf("unsafe tunnel path accepted: %q", value)
+		}
+	}
+}
+
+func TestServerProfileStorePersistsAndValidatesSOCKSPort(t *testing.T) {
+	store, err := Open(filepath.Join(t.TempDir(), "servers.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Upsert(Profile{ID: "one", BaseURL: "https://one.example.test", SOCKSPort: 2080}); err != nil {
+		t.Fatal(err)
+	}
+	if got := store.Snapshot().Profiles[0].SOCKSPort; got != 2080 {
+		t.Fatalf("SOCKS port = %d", got)
+	}
+	for _, port := range []int{-1, 65536} {
+		if err := store.Upsert(Profile{ID: "invalid", BaseURL: "https://invalid.example.test", SOCKSPort: port}); err == nil {
+			t.Fatalf("invalid SOCKS port accepted: %d", port)
 		}
 	}
 }

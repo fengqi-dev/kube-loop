@@ -7,7 +7,7 @@ import (
 
 func TestNormalizeValidatesBindingsAndDeduplicates(t *testing.T) {
 	got, err := Normalize(Snapshot{
-		SchemaVersion: SchemaVersion, PrincipalID: "oidc:user-1", Namespace: "development",
+		SchemaVersion: SchemaVersion, IdentityID: "oidc:user-1", Namespace: "development",
 		GatewayVersion: "v2-test", Capabilities: []string{"pods.list", "cluster.tunnel", "pods.list"},
 	})
 	if err != nil {
@@ -18,7 +18,7 @@ func TestNormalizeValidatesBindingsAndDeduplicates(t *testing.T) {
 	}
 	for name, mutate := range map[string]func(*Snapshot){
 		"schema":     func(value *Snapshot) { value.SchemaVersion++ },
-		"principal":  func(value *Snapshot) { value.PrincipalID = " principal" },
+		"identity":   func(value *Snapshot) { value.IdentityID = " identity" },
 		"namespace":  func(value *Snapshot) { value.Namespace = "Bad_Name" },
 		"gateway":    func(value *Snapshot) { value.GatewayVersion = "v2\nforged" },
 		"capability": func(value *Snapshot) { value.Capabilities = []string{"Pods.List"} },

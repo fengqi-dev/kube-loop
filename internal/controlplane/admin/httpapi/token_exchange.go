@@ -79,24 +79,14 @@ func (handler *Handler) exchangeToken(ctx *echo.Context) error {
 		writeError(writer, http.StatusUnauthorized, "unauthenticated", "management authentication failed", requestID)
 		return nil
 	}
-	authentication := adminauthorization.AuthenticationNormal
-	bootstrapDecision := handler.readAPI.authorizer.Authorize(request.Context(), adminauthorization.Subject{
-		ID: identity.Principal.ID, Groups: identity.Principal.Groups,
-	}, adminauthorization.Request{Resource: adminauthorization.ResourceStatus, Operation: adminauthorization.OperationRead})
-	if bootstrapDecision.Allowed && bootstrapDecision.Authentication == adminauthorization.AuthenticationBootstrap {
-		authentication = adminauthorization.AuthenticationBootstrap
-	}
-	issued, err := handler.sessions.ExchangePrincipal(
-		request.Context(), identity.Principal.ID, identity.AuthorizationID, authentication, requestID,
+	issued, err := handler.sessions.ExchangeIdentity(
+		request.Context(), identity.Identity.ID, identity.AuthorizationID, adminauthorization.AuthenticationNormal, requestID,
 	)
 	if err != nil {
 		writeError(writer, http.StatusUnauthorized, "unauthenticated", "management authentication failed", requestID)
 		return nil
 	}
-	http.SetCookie(writer, &http.Cookie{
-		Name: SessionCookieName, Value: issued.SessionToken, Path: "/", Secure: true, HttpOnly: true,
-		SameSite: http.SameSiteStrictMode, MaxAge: max(1, int(time.Until(issued.ExpiresAt).Seconds())),
-	})
+	setSessionCookie(writer, issued)
 	succeeded = true
 	writeJSON(writer, http.StatusCreated, map[string]any{
 		"csrfToken": issued.CSRFToken, "expiresAt": issued.ExpiresAt.Format(time.RFC3339Nano), "requestId": requestID,
@@ -121,7 +111,7 @@ func (handler *Handler) recordTokenExchangeFailure(request *http.Request, reques
 		return
 	}
 	_ = handler.readAPI.status.Audit().Append(request.Context(), storage.AuditEvent{
-		ID: uuid.NewString(), Action: "admin.session.principal.exchange", ResourceType: "admin-session",
+		ID: uuid.NewString(), Action: "admin.session.identity.exchange", ResourceType: "admin-session",
 		Outcome: "failure", RequestID: requestID, Metadata: metadata, CreatedAt: time.Now().UTC(),
 	})
 }

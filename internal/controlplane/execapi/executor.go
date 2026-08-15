@@ -26,8 +26,8 @@ type Streams struct {
 }
 
 type Executor interface {
-	Validate(context.Context, controlplaneapi.Principal, string, Spec) error
-	Exec(context.Context, controlplaneapi.Principal, string, Spec, Streams) error
+	Validate(context.Context, controlplaneapi.Identity, string, Spec) error
+	Exec(context.Context, controlplaneapi.Identity, string, Spec, Streams) error
 }
 
 type Provider interface {
@@ -46,11 +46,11 @@ func NewKubernetesExecutor(provider Provider) (*KubernetesExecutor, error) {
 
 func (executor *KubernetesExecutor) Validate(
 	ctx context.Context,
-	principal controlplaneapi.Principal,
+	identity controlplaneapi.Identity,
 	namespace string,
 	spec Spec,
 ) error {
-	subject := authorization.Subject{ID: principal.Subject, Groups: append([]string(nil), principal.Groups...)}
+	subject := authorization.Subject{ID: identity.Subject, Groups: append([]string(nil), identity.Groups...)}
 	client, err := executor.provider.ClientFor(subject)
 	if err != nil {
 		return err
@@ -86,12 +86,12 @@ func (executor *KubernetesExecutor) Validate(
 
 func (executor *KubernetesExecutor) Exec(
 	ctx context.Context,
-	principal controlplaneapi.Principal,
+	identity controlplaneapi.Identity,
 	namespace string,
 	spec Spec,
 	streams Streams,
 ) error {
-	subject := authorization.Subject{ID: principal.Subject, Groups: append([]string(nil), principal.Groups...)}
+	subject := authorization.Subject{ID: identity.Subject, Groups: append([]string(nil), identity.Groups...)}
 	config, err := executor.provider.RESTConfigFor(subject)
 	if err != nil {
 		return err

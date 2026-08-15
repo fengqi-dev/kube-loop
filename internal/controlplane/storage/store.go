@@ -291,8 +291,24 @@ func (store *Store) SchemaVersion(ctx context.Context) (int, error) {
 	return version, nil
 }
 
-func (store *Store) Principals() PrincipalRepository {
-	return store.repositories.Principals()
+func (store *Store) Identities() IdentityRepository {
+	return store.repositories.Identities()
+}
+
+func (store *Store) Organizations() OrganizationRepository { return store.repositories.Organizations() }
+
+func (store *Store) Groups() GroupRepository { return store.repositories.Groups() }
+
+func (store *Store) Invitations() InvitationRepository { return store.repositories.Invitations() }
+
+func (store *Store) BootstrapTokens() BootstrapTokenRepository {
+	return store.repositories.BootstrapTokens()
+}
+
+func (store *Store) Credentials() CredentialRepository { return store.repositories.Credentials() }
+
+func (store *Store) SecurityPolicies() SecurityPolicyRepository {
+	return store.repositories.SecurityPolicies()
 }
 
 func (store *Store) Sessions() SessionRepository {
@@ -323,40 +339,8 @@ func (store *Store) AuditExportJobs() AuditExportJobRepository {
 	return store.repositories.AuditExportJobs()
 }
 
-func (store *Store) ManagementState() ManagementStateRepository {
-	return store.repositories.ManagementState()
-}
-
 func (store *Store) AdminSessions() AdminSessionRepository {
 	return store.repositories.AdminSessions()
-}
-
-func (store *Store) LocalAdminUsers() LocalAdminUserRepository {
-	return store.repositories.LocalAdminUsers()
-}
-
-func (store *Store) AdminRecoveryCodes() AdminRecoveryCodeRepository {
-	return store.repositories.AdminRecoveryCodes()
-}
-
-func (store *Store) AdminPolicyConfigs() AdminPolicyConfigRepository {
-	return store.repositories.AdminPolicyConfigs()
-}
-
-func (store *Store) AuthorizationDefinitions() AuthorizationDefinitionRepository {
-	return store.repositories.AuthorizationDefinitions()
-}
-
-func (store *Store) ProviderConfigs() ProviderConfigRepository {
-	return store.repositories.ProviderConfigs()
-}
-
-func (store *Store) ActiveManagementConfigs() ActiveManagementConfigRepository {
-	return store.repositories.ActiveManagementConfigs()
-}
-
-func (store *Store) ConfigChangeRequests() ConfigChangeRequestRepository {
-	return store.repositories.ConfigChangeRequests()
 }
 
 func (store *Store) OAuthClients() OAuthClientRepository   { return store.repositories.OAuthClients() }

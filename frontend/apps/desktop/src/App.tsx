@@ -180,7 +180,16 @@ function App() {
       <SidebarInset className="min-w-0 overflow-hidden">
         <AppHeader view={view} onOpenSettings={() => setView("settings")} />
         <div className={`min-h-0 flex-1 overflow-y-auto px-6 py-5 ${view === "overview" ? "scrollbar-none !py-3" : ""}`}>
-          {view === "connections" ? (
+          <div className={view === "overview" ? undefined : "hidden"}>
+            <ServerAccessView
+              profiles={profiles}
+              authSession={auth}
+              onProfilesChange={setProfiles}
+              onAuthChange={updateAuth}
+              onNavigate={setView}
+            />
+          </div>
+          {view === "overview" ? null : view === "connections" ? (
             <div className="space-y-3">
               {metricsError ? <p className="text-sm text-muted-foreground">{metricsError}</p> : null}
               <ConnectionsView ready={Boolean(metrics)} metrics={metrics} />
@@ -212,18 +221,9 @@ function App() {
               authSession={auth}
               management
               onProfilesChange={setProfiles}
-              onAuthChange={updateAuth}
               onNavigate={setView}
             />
-          ) : (
-            <ServerAccessView
-              profiles={profiles}
-              authSession={auth}
-              onProfilesChange={setProfiles}
-              onAuthChange={updateAuth}
-              onNavigate={setView}
-            />
-          )}
+          ) : null}
         </div>
       </SidebarInset>
     </SidebarProvider>

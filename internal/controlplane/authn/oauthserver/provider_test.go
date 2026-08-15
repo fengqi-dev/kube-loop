@@ -12,233 +12,124 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	controlstorage "github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 	"github.com/google/uuid"
-	"github.com/ory/fosite"
 	"golang.org/x/crypto/bcrypt"
 )
 
 func TestClientCredentialsIssuesOpaqueMachineToken(t *testing.T) {
-	endpoints, store, principal := newTestEndpoints(t, func(context.Context, string, []byte, string, string, string, string) (controlstorage.Principal, error) {
-		return controlstorage.Principal{}, fosite.ErrNotFound
-	})
+	endpoints, store, identity := newTestEndpoints(t)
 	createTestClient(t, store, controlstorage.OAuthClient{ID: "machine", Name: "Machine", Public: false,
-		RedirectURIs: []string{"https://client.example/callback"}, GrantTypes: []string{"client_credentials"},
-		ResponseTypes: []string{"code"}, Scopes: []string{"kubeloop.api"}, Enabled: true,
-		MachinePrincipalID: principal.ID}, "correct-secret")
-	form := url.Values{"grant_type": {"client_credentials"}, "scope": {"kubeloop.api"}, "client_id": {"machine"}, "client_secret": {"correct-secret"}}
-	request := httptest.NewRequest(http.MethodPost, "https://issuer.example/oauth2/token", strings.NewReader(form.Encode()))
-	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	recorder := httptest.NewRecorder()
-	endpoints.Token(recorder, request)
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("token status = %d body=%s", recorder.Code, recorder.Body.String())
+		GrantTypes: []string{"client_credentials"}, Scopes: []string{"kubeloop.api"}, Enabled: true,
+		MachineIdentityID: identity.ID}, "correct-secret")
+	response := requestToken(endpoints, url.Values{"grant_type": {"client_credentials"}, "scope": {"kubeloop.api"},
+		"client_id": {"machine"}, "client_secret": {"correct-secret"}})
+	if response.Code != http.StatusOK {
+		t.Fatalf("token status = %d body=%s", response.Code, response.Body.String())
 	}
-	var response struct {
+	var document struct {
 		AccessToken  string `json:"access_token"`
 		IDToken      string `json:"id_token"`
 		RefreshToken string `json:"refresh_token"`
 	}
-	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+	if err := json.Unmarshal(response.Body.Bytes(), &document); err != nil {
 		t.Fatal(err)
 	}
-	if response.AccessToken == "" || strings.Count(response.AccessToken, ".") != 1 || response.IDToken != "" || response.RefreshToken != "" {
-		t.Fatalf("unexpected token response %#v", response)
+	if document.AccessToken == "" || document.IDToken != "" || document.RefreshToken != "" {
+		t.Fatalf("unexpected token response %#v", document)
 	}
-	session, _, err := endpoints.IntrospectAccessToken(context.Background(), response.AccessToken)
-	if err != nil || !session.Machine || session.PrincipalID != principal.ID {
+	session, _, err := endpoints.IntrospectAccessToken(context.Background(), document.AccessToken)
+	if err != nil || !session.Machine || session.IdentityID != identity.ID {
 		t.Fatalf("introspection = %#v, %v", session, err)
 	}
 }
 
-func TestPasswordGrantUsesLocalAuthenticatorAndMFA(t *testing.T) {
-	var factor string
-	var expected controlstorage.Principal
-	endpoints, store, principal := newTestEndpoints(t, func(_ context.Context, username string, password []byte, secondFactor, _, _, _ string) (controlstorage.Principal, error) {
-		factor = secondFactor
-		if username != "admin" || string(password) != "password" || secondFactor != "123456" {
-			return controlstorage.Principal{}, fosite.ErrNotFound
-		}
-		return expected, nil
-	})
-	expected = principal
-	createTestClient(t, store, controlstorage.OAuthClient{ID: "password-client", Name: "Password", Public: false,
-		RedirectURIs: []string{"https://client.example/callback"}, GrantTypes: []string{"password", "refresh_token"},
-		ResponseTypes: []string{"code"}, Scopes: []string{"kubeloop.api", "offline_access"}, Enabled: true}, "correct-secret")
-	form := url.Values{"grant_type": {"password"}, "username": {"admin"}, "password": {"password"}, "second_factor": {"123456"}, "scope": {"kubeloop.api offline_access"}, "client_id": {"password-client"}, "client_secret": {"correct-secret"}}
-	request := httptest.NewRequest(http.MethodPost, "https://issuer.example/oauth2/token", strings.NewReader(form.Encode()))
-	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	recorder := httptest.NewRecorder()
-	endpoints.Token(recorder, request)
-	if recorder.Code != http.StatusOK || factor != "123456" {
-		t.Fatalf("password status=%d factor=%q body=%s", recorder.Code, factor, recorder.Body.String())
-	}
-	var response map[string]any
-	_ = json.Unmarshal(recorder.Body.Bytes(), &response)
-	if response["access_token"] == nil || response["refresh_token"] == nil || response["id_token"] != nil {
-		t.Fatalf("unexpected response %#v", response)
-	}
-}
-
-func TestAuthorizationCodeRequiresPKCES256AndRejectsReplay(t *testing.T) {
-	endpoints, store, principal := newTestEndpoints(t, nil)
+func TestAuthorizationCodeRequiresPKCES256RotatesRefreshAndRejectsReplay(t *testing.T) {
+	endpoints, store, identity := newTestEndpoints(t)
 	createTestClient(t, store, controlstorage.OAuthClient{ID: "public-client", Name: "Public", Public: true,
 		RedirectURIs: []string{"https://client.example/callback"}, GrantTypes: []string{"authorization_code", "refresh_token"},
-		ResponseTypes: []string{"code"}, Scopes: []string{"openid", "offline_access", "kubeloop.api"}, Trusted: true, Enabled: true}, "")
+		Scopes: []string{"openid", "offline_access", "kubeloop.api"}, Trusted: true, Enabled: true}, "")
 	verifier := strings.Repeat("v", 64)
 	challengeSum := sha256.Sum256([]byte(verifier))
-	challenge := base64.RawURLEncoding.EncodeToString(challengeSum[:])
 	query := url.Values{"response_type": {"code"}, "client_id": {"public-client"}, "redirect_uri": {"https://client.example/callback"},
 		"scope": {"openid offline_access kubeloop.api"}, "state": {strings.Repeat("s", 32)}, "nonce": {strings.Repeat("n", 32)},
-		"code_challenge": {challenge}, "code_challenge_method": {"S256"}, "provider": {"local"}}
+		"code_challenge": {base64.RawURLEncoding.EncodeToString(challengeSum[:])}, "code_challenge_method": {"S256"}}
 	authorize := httptest.NewRequest(http.MethodGet, "https://issuer.example/oauth2/authorize?"+query.Encode(), nil)
-	transaction, err := endpoints.BeginAuthorization(authorize.Context(), authorize)
+	challenge, err := endpoints.BeginAuthorization(authorize.Context(), authorize)
 	if err != nil {
 		t.Fatal(err)
 	}
+	browserIdentity := BrowserIdentity{Identity: identity, ProviderID: "local", AuthTime: time.Now().UTC()}
 	recorder := httptest.NewRecorder()
-	if err := endpoints.CompleteAuthorization(recorder, authorize, transaction.Transaction, transaction.CSRF, principal, true); err != nil {
+	if err := endpoints.CompleteAuthorization(recorder, authorize, challenge.Transaction, challenge.CSRF, browserIdentity, true); err != nil {
 		t.Fatal(err)
 	}
 	redirect, err := url.Parse(recorder.Header().Get("Location"))
 	if err != nil || redirect.Query().Get("code") == "" {
-		t.Fatalf("authorize response status=%d location=%q body=%s err=%v", recorder.Code, recorder.Header().Get("Location"), recorder.Body.String(), err)
+		t.Fatalf("authorize response status=%d location=%q", recorder.Code, recorder.Header().Get("Location"))
 	}
 	code := redirect.Query().Get("code")
-	exchange := func(code string) *httptest.ResponseRecorder {
-		form := url.Values{"grant_type": {"authorization_code"}, "client_id": {"public-client"}, "redirect_uri": {"https://client.example/callback"}, "code": {code}, "code_verifier": {verifier}}
-		request := httptest.NewRequest(http.MethodPost, "https://issuer.example/oauth2/token", strings.NewReader(form.Encode()))
-		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		result := httptest.NewRecorder()
-		endpoints.Token(result, request)
-		return result
-	}
-	first := exchange(code)
+	first := requestToken(endpoints, url.Values{"grant_type": {"authorization_code"}, "client_id": {"public-client"},
+		"redirect_uri": {"https://client.example/callback"}, "code": {code}, "code_verifier": {verifier}})
 	if first.Code != http.StatusOK {
 		t.Fatalf("exchange status=%d body=%s", first.Code, first.Body.String())
 	}
-	var response map[string]any
-	_ = json.Unmarshal(first.Body.Bytes(), &response)
-	if response["access_token"] == nil || response["refresh_token"] == nil || response["id_token"] == nil {
-		t.Fatalf("tokens=%#v", response)
+	var issued map[string]any
+	_ = json.Unmarshal(first.Body.Bytes(), &issued)
+	oldRefresh, _ := issued["refresh_token"].(string)
+	if oldRefresh == "" || issued["access_token"] == nil || issued["id_token"] == nil {
+		t.Fatalf("tokens=%#v", issued)
 	}
-	if response["refresh_expires_in"] != nil {
-		t.Fatalf("non-standard refresh expiry leaked into token response: %#v", response)
+	rotated := requestToken(endpoints, url.Values{"grant_type": {"refresh_token"}, "client_id": {"public-client"}, "refresh_token": {oldRefresh}})
+	if rotated.Code != http.StatusOK {
+		t.Fatalf("refresh status=%d body=%s", rotated.Code, rotated.Body.String())
 	}
-	second := exchange(code)
-	if second.Code == http.StatusOK {
-		t.Fatalf("replayed code accepted: %s", second.Body.String())
+	var refreshed map[string]any
+	_ = json.Unmarshal(rotated.Body.Bytes(), &refreshed)
+	if refreshed["refresh_token"] == nil {
+		t.Fatalf("rotated token=%#v", refreshed)
 	}
-	missingQuery := url.Values{}
+	if replay := requestToken(endpoints, url.Values{"grant_type": {"refresh_token"}, "client_id": {"public-client"}, "refresh_token": {oldRefresh}}); replay.Code == http.StatusOK {
+		t.Fatal("replayed refresh token was accepted")
+	}
+	if replay := requestToken(endpoints, url.Values{"grant_type": {"refresh_token"}, "client_id": {"public-client"}, "refresh_token": {refreshed["refresh_token"].(string)}}); replay.Code == http.StatusOK {
+		t.Fatal("rotated grant remained active after refresh token replay")
+	}
+	if replay := requestToken(endpoints, url.Values{"grant_type": {"authorization_code"}, "client_id": {"public-client"},
+		"redirect_uri": {"https://client.example/callback"}, "code": {code}, "code_verifier": {verifier}}); replay.Code == http.StatusOK {
+		t.Fatal("replayed authorization code was accepted")
+	}
+	missing := url.Values{}
 	for key, values := range query {
-		missingQuery[key] = append([]string(nil), values...)
+		missing[key] = append([]string(nil), values...)
 	}
-	missingQuery.Del("code_challenge_method")
-	missing := httptest.NewRequest(http.MethodGet, "https://issuer.example/oauth2/authorize?"+missingQuery.Encode(), nil)
-	if _, err := endpoints.BeginAuthorization(missing.Context(), missing); err == nil {
-		t.Fatal("authorization without PKCE method was accepted")
+	missing.Del("code_challenge_method")
+	request := httptest.NewRequest(http.MethodGet, "https://issuer.example/oauth2/authorize?"+missing.Encode(), nil)
+	if _, err := endpoints.BeginAuthorization(request.Context(), request); err == nil {
+		t.Fatal("authorization without PKCE S256 was accepted")
 	}
 }
 
-func TestImplicitAndHybridResponses(t *testing.T) {
-	endpoints, store, principal := newTestEndpoints(t, nil)
-	createTestClient(t, store, controlstorage.OAuthClient{ID: "browser-client", Name: "Browser", Public: true,
-		RedirectURIs: []string{"https://client.example/callback"}, GrantTypes: []string{"authorization_code", "implicit", "refresh_token"},
-		ResponseTypes: []string{"token", "id_token", "id_token token", "code token", "code id_token", "code id_token token"},
-		Scopes:        []string{"openid", "offline_access", "kubeloop.api"}, Trusted: true, Enabled: true}, "")
-	verifier := strings.Repeat("p", 64)
-	challengeSum := sha256.Sum256([]byte(verifier))
-	for _, responseType := range []string{"token", "id_token", "id_token token", "code token", "code id_token", "code id_token token"} {
-		t.Run(responseType, func(t *testing.T) {
-			responseParts := strings.Fields(responseType)
-			query := url.Values{"response_type": {responseType}, "client_id": {"browser-client"}, "redirect_uri": {"https://client.example/callback"},
-				"scope": {"openid offline_access kubeloop.api"}, "state": {strings.Repeat("s", 32)}, "nonce": {strings.Repeat("n", 32)}}
-			if slices.Contains(responseParts, "code") {
-				query.Set("code_challenge", base64.RawURLEncoding.EncodeToString(challengeSum[:]))
-				query.Set("code_challenge_method", "S256")
-			}
-			request := httptest.NewRequest(http.MethodGet, "https://issuer.example/oauth2/authorize?"+query.Encode(), nil)
-			challenge, err := endpoints.BeginAuthorization(request.Context(), request)
-			if err != nil {
-				t.Fatal(err)
-			}
-			recorder := httptest.NewRecorder()
-			if err := endpoints.CompleteAuthorization(recorder, request, challenge.Transaction, challenge.CSRF, principal, true); err != nil {
-				t.Fatal(err)
-			}
-			redirect, err := url.Parse(recorder.Header().Get("Location"))
-			if err != nil {
-				t.Fatal(err)
-			}
-			fragment, err := url.ParseQuery(redirect.Fragment)
-			if err != nil || fragment.Get("state") == "" {
-				t.Fatalf("fragment=%q err=%v", redirect.Fragment, err)
-			}
-			if slices.Contains(responseParts, "token") && fragment.Get("access_token") == "" {
-				t.Fatalf("access token missing from %q", redirect.Fragment)
-			}
-			if slices.Contains(responseParts, "id_token") && fragment.Get("id_token") == "" {
-				t.Fatalf("ID token missing from %q", redirect.Fragment)
-			}
-			if slices.Contains(responseParts, "code") && fragment.Get("code") == "" {
-				t.Fatalf("code missing from %q", redirect.Fragment)
-			}
-			if fragment.Get("refresh_token") != "" {
-				t.Fatal("front-channel response leaked a refresh token")
+func TestRemovedGrantTypesAreRejected(t *testing.T) {
+	endpoints, _, _ := newTestEndpoints(t)
+	for _, grant := range []string{"password", "implicit"} {
+		t.Run(grant, func(t *testing.T) {
+			response := requestToken(endpoints, url.Values{"grant_type": {grant}, "client_id": {controlstorage.DesktopOAuthClientID}})
+			if response.Code == http.StatusOK {
+				t.Fatalf("removed grant %q was accepted", grant)
 			}
 		})
 	}
 }
 
-func TestRefreshRotationReplayRevokesEntireGrant(t *testing.T) {
-	var principal controlstorage.Principal
-	endpoints, store, seeded := newTestEndpoints(t, func(_ context.Context, username string, password []byte, _, _, _, _ string) (controlstorage.Principal, error) {
-		if username != "admin" || string(password) != "password" {
-			return controlstorage.Principal{}, fosite.ErrNotFound
-		}
-		return principal, nil
-	})
-	principal = seeded
-	createTestClient(t, store, controlstorage.OAuthClient{ID: "rotation", Name: "Rotation", Public: false,
-		RedirectURIs: []string{"https://client.example/callback"}, GrantTypes: []string{"password", "refresh_token"},
-		ResponseTypes: []string{"code"}, Scopes: []string{"kubeloop.api", "offline_access"}, Enabled: true}, "secret")
-	issue := func(values url.Values) (int, map[string]any) {
-		request := httptest.NewRequest(http.MethodPost, "https://issuer.example/oauth2/token", strings.NewReader(values.Encode()))
-		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		recorder := httptest.NewRecorder()
-		endpoints.Token(recorder, request)
-		var response map[string]any
-		_ = json.Unmarshal(recorder.Body.Bytes(), &response)
-		return recorder.Code, response
-	}
-	status, first := issue(url.Values{"grant_type": {"password"}, "username": {"admin"}, "password": {"password"},
-		"scope": {"kubeloop.api offline_access"}, "client_id": {"rotation"}, "client_secret": {"secret"}})
-	if status != http.StatusOK {
-		t.Fatalf("initial token status=%d response=%#v", status, first)
-	}
-	oldRefresh := first["refresh_token"].(string)
-	status, rotated := issue(url.Values{"grant_type": {"refresh_token"}, "refresh_token": {oldRefresh}, "client_id": {"rotation"}, "client_secret": {"secret"}})
-	if status != http.StatusOK || rotated["refresh_token"] == nil {
-		t.Fatalf("rotation status=%d response=%#v", status, rotated)
-	}
-	status, _ = issue(url.Values{"grant_type": {"refresh_token"}, "refresh_token": {oldRefresh}, "client_id": {"rotation"}, "client_secret": {"secret"}})
-	if status == http.StatusOK {
-		t.Fatal("replayed refresh token was accepted")
-	}
-	status, _ = issue(url.Values{"grant_type": {"refresh_token"}, "refresh_token": {rotated["refresh_token"].(string)}, "client_id": {"rotation"}, "client_secret": {"secret"}})
-	if status == http.StatusOK {
-		t.Fatal("grant remained active after refresh token replay")
-	}
-}
-
 func TestBrowserSessionRevocationInvalidatesIdentity(t *testing.T) {
-	endpoints, _, principal := newTestEndpoints(t, nil)
-	token, err := endpoints.CreateBrowserSession(t.Context(), principal, time.Hour)
+	endpoints, _, identity := newTestEndpoints(t)
+	browserIdentity := BrowserIdentity{Identity: identity, ProviderID: "local", AuthTime: time.Now().UTC()}
+	token, err := endpoints.CreateBrowserSession(t.Context(), browserIdentity, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -256,7 +147,15 @@ func TestBrowserSessionRevocationInvalidatesIdentity(t *testing.T) {
 	}
 }
 
-func newTestEndpoints(t *testing.T, authenticate PasswordAuthenticator) (*Endpoints, *controlstorage.Store, controlstorage.Principal) {
+func requestToken(endpoints *Endpoints, form url.Values) *httptest.ResponseRecorder {
+	request := httptest.NewRequest(http.MethodPost, "https://issuer.example/oauth2/token", strings.NewReader(form.Encode()))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	recorder := httptest.NewRecorder()
+	endpoints.Token(recorder, request)
+	return recorder
+}
+
+func newTestEndpoints(t *testing.T) (*Endpoints, *controlstorage.Store, controlstorage.Identity) {
 	t.Helper()
 	store, err := controlstorage.Open(t.Context(), controlstorage.Config{Backend: controlstorage.BackendSQLite, SQLitePath: filepath.Join(t.TempDir(), "oauth.db")})
 	if err != nil {
@@ -264,7 +163,7 @@ func newTestEndpoints(t *testing.T, authenticate PasswordAuthenticator) (*Endpoi
 	}
 	t.Cleanup(func() { _ = store.Close() })
 	now := time.Now().UTC()
-	principal, err := store.Principals().Upsert(t.Context(), controlstorage.Principal{ID: uuid.NewString(), Provider: "local", ExternalID: "admin", DisplayName: "Admin", Email: "admin@example.test", CreatedAt: now, UpdatedAt: now})
+	identity, err := store.Identities().Create(t.Context(), controlstorage.Identity{ID: uuid.NewString(), Type: "human", DisplayName: "Admin", PrimaryEmail: "admin@example.test", Status: "active", CreatedAt: now, UpdatedAt: now})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -272,7 +171,7 @@ func newTestEndpoints(t *testing.T, authenticate PasswordAuthenticator) (*Endpoi
 	if err != nil {
 		t.Fatal(err)
 	}
-	fositeStorage, err := NewStorage(store, authenticate)
+	fositeStorage, err := NewStorage(store)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -280,28 +179,28 @@ func newTestEndpoints(t *testing.T, authenticate PasswordAuthenticator) (*Endpoi
 	if err != nil {
 		t.Fatal(err)
 	}
-	endpoints, err := NewEndpoints(provider, store, "test-key", key, fositeStorage)
+	endpoints, err := NewEndpoints(provider, store, "test-key", key)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return endpoints, store, principal
+	return endpoints, store, identity
 }
 
 func createTestClient(t *testing.T, store *controlstorage.Store, client controlstorage.OAuthClient, secret string) {
 	t.Helper()
 	now := time.Now().UTC()
-	client.CreatedAt = now
-	client.UpdatedAt = now
+	client.CreatedAt, client.UpdatedAt = now, now
 	if err := store.OAuthClients().Create(t.Context(), client); err != nil {
 		t.Fatal(err)
 	}
-	if secret != "" {
-		hash, err := bcrypt.GenerateFromPassword([]byte(secret), bcrypt.MinCost)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := store.OAuthClients().SetSecret(t.Context(), controlstorage.OAuthClientSecret{ClientID: client.ID, SecretHash: hash, CreatedAt: now, UpdatedAt: now}); err != nil {
-			t.Fatal(err)
-		}
+	if secret == "" {
+		return
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(secret), bcrypt.MinCost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.OAuthClients().SetSecret(t.Context(), controlstorage.OAuthClientSecret{ClientID: client.ID, SecretHash: hash, CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -25,8 +25,8 @@ import (
 )
 
 type testSessions struct {
-	principalID string
-	session     sessionapi.ActiveSession
+	identityID string
+	session    sessionapi.ActiveSession
 }
 
 func serveAPI(
@@ -34,7 +34,7 @@ func serveAPI(
 	handler *fileopsapi.Service,
 	response *httptest.ResponseRecorder,
 	request *http.Request,
-	principal controlplaneapi.Principal,
+	identity controlplaneapi.Identity,
 ) *controlplaneapi.Error {
 	t.Helper()
 	policy, err := authorization.New(authorization.Policy{Rules: []authorization.Rule{{
@@ -47,8 +47,8 @@ func serveAPI(
 	server, err := controlplane.NewServer(
 		controlplane.Config{PublicURL: "https://gateway.example.test"}, controlplane.BuildInfo{},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
-		controlplane.WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(*http.Request) (controlplaneapi.Principal, *controlplaneapi.Error) {
-			return principal, nil
+		controlplane.WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(*http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
+			return identity, nil
 		})),
 		controlplane.WithAuthorizer(policy), controlplane.WithAPIRoutes(controlplane.APIRoutes{FileOperations: fileopsapi.NewRoutes(handler).Endpoints()}),
 	)
@@ -66,8 +66,8 @@ func serveAPI(
 	return &controlplaneapi.Error{Code: code, Message: response.Body.String()}
 }
 
-func (sessions testSessions) RequireActive(_ context.Context, principal controlplaneapi.Principal, namespace, sessionID string) (sessionapi.ActiveSession, *controlplaneapi.Error) {
-	if principal.Subject != sessions.principalID || namespace != sessions.session.Namespace || sessionID != sessions.session.ID {
+func (sessions testSessions) RequireActive(_ context.Context, identity controlplaneapi.Identity, namespace, sessionID string) (sessionapi.ActiveSession, *controlplaneapi.Error) {
+	if identity.Subject != sessions.identityID || namespace != sessions.session.Namespace || sessionID != sessions.session.ID {
 		return sessionapi.ActiveSession{}, &controlplaneapi.Error{Code: controlplaneapi.CodeNotFound, Message: "resource not found"}
 	}
 	return sessions.session, nil
@@ -78,7 +78,7 @@ type testTargets struct {
 	calls int
 }
 
-func (targets *testTargets) ResolveContainer(_ context.Context, _ controlplaneapi.Principal, namespace, pod, container string) (string, error) {
+func (targets *testTargets) ResolveContainer(_ context.Context, _ controlplaneapi.Identity, namespace, pod, container string) (string, error) {
 	targets.mu.Lock()
 	targets.calls++
 	targets.mu.Unlock()
@@ -98,14 +98,14 @@ type testOperator struct {
 	fail        bool
 }
 
-func (operator *testOperator) List(_ context.Context, _ controlplaneapi.Principal, _ string, spec fileopsapi.Spec) ([]fileopsapi.Entry, error) {
+func (operator *testOperator) List(_ context.Context, _ controlplaneapi.Identity, _ string, spec fileopsapi.Spec) ([]fileopsapi.Entry, error) {
 	operator.mu.Lock()
 	operator.listCalls++
 	operator.mu.Unlock()
 	return []fileopsapi.Entry{{Name: "logs", Path: spec.Path + "/logs", Kind: fileopsapi.KindDirectory}}, nil
 }
 
-func (operator *testOperator) Mutate(context.Context, controlplaneapi.Principal, string, fileopsapi.Spec) error {
+func (operator *testOperator) Mutate(context.Context, controlplaneapi.Identity, string, fileopsapi.Spec) error {
 	operator.mu.Lock()
 	defer operator.mu.Unlock()
 	operator.mutateCalls++
@@ -117,10 +117,10 @@ func (operator *testOperator) Mutate(context.Context, controlplaneapi.Principal,
 
 func TestListAndMutationTaskAreValidatedOwnedAndIdempotent(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Millisecond)
-	stateStore, principalID, sessionID, expiresAt := createStore(t, now)
+	stateStore, identityID, sessionID, expiresAt := createStore(t, now)
 	defer stateStore.Close()
 	targets, operator := &testTargets{}, &testOperator{}
-	handler, err := fileopsapi.New(stateStore, testSessions{principalID: principalID, session: sessionapi.ActiveSession{
+	handler, err := fileopsapi.New(stateStore, testSessions{identityID: identityID, session: sessionapi.ActiveSession{
 		ID: sessionID, Namespace: "development", ExpiresAt: expiresAt,
 	}}, targets, operator, fileopsapi.Config{Now: func() time.Time { return now }, AllowedPathRoots: []string{"/workspace"}})
 	if err != nil {
@@ -129,7 +129,7 @@ func TestListAndMutationTaskAreValidatedOwnedAndIdempotent(t *testing.T) {
 
 	listRequest := request(t, http.MethodPost, sessionID, "list", `{"pod":"api-0","path":"/workspace"}`, "")
 	listResponse := httptest.NewRecorder()
-	if apiError := serveAPI(t, handler, listResponse, listRequest, controlplaneapi.Principal{Subject: principalID}); apiError != nil {
+	if apiError := serveAPI(t, handler, listResponse, listRequest, controlplaneapi.Identity{Subject: identityID}); apiError != nil {
 		t.Fatal(apiError)
 	}
 	var listing fileopsapi.ListDocument
@@ -141,11 +141,11 @@ func TestListAndMutationTaskAreValidatedOwnedAndIdempotent(t *testing.T) {
 	}
 
 	createBody := `{"pod":"api-0","path":"/workspace/new","kind":"directory"}`
-	created := mutate(t, handler, principalID, sessionID, "create", createBody, "operation-1", http.StatusCreated)
+	created := mutate(t, handler, identityID, sessionID, "create", createBody, "operation-1", http.StatusCreated)
 	if created.State != "stopped" || !created.Result.Completed || created.Container != "api" {
 		t.Fatalf("created task = %#v", created)
 	}
-	replayed := mutate(t, handler, principalID, sessionID, "create", createBody, "operation-1", http.StatusOK)
+	replayed := mutate(t, handler, identityID, sessionID, "create", createBody, "operation-1", http.StatusOK)
 	if replayed.ID != created.ID {
 		t.Fatalf("replayed task ID = %q, want %q", replayed.ID, created.ID)
 	}
@@ -162,7 +162,7 @@ func TestListAndMutationTaskAreValidatedOwnedAndIdempotent(t *testing.T) {
 
 	getRequest := request(t, http.MethodGet, sessionID, "operations/"+created.ID, "", "")
 	getResponse := httptest.NewRecorder()
-	if apiError := serveAPI(t, handler, getResponse, getRequest, controlplaneapi.Principal{Subject: principalID}); apiError != nil {
+	if apiError := serveAPI(t, handler, getResponse, getRequest, controlplaneapi.Identity{Subject: identityID}); apiError != nil {
 		t.Fatal(apiError)
 	}
 	if getResponse.Code != http.StatusOK {
@@ -172,16 +172,16 @@ func TestListAndMutationTaskAreValidatedOwnedAndIdempotent(t *testing.T) {
 
 func TestMutationFailureIsPersistedWithoutLeakingExecutorDetail(t *testing.T) {
 	now := time.Now().UTC()
-	stateStore, principalID, sessionID, expiresAt := createStore(t, now)
+	stateStore, identityID, sessionID, expiresAt := createStore(t, now)
 	defer stateStore.Close()
 	operator := &testOperator{fail: true}
-	handler, err := fileopsapi.New(stateStore, testSessions{principalID: principalID, session: sessionapi.ActiveSession{
+	handler, err := fileopsapi.New(stateStore, testSessions{identityID: identityID, session: sessionapi.ActiveSession{
 		ID: sessionID, Namespace: "development", ExpiresAt: expiresAt,
 	}}, &testTargets{}, operator, fileopsapi.Config{AllowedPathRoots: []string{"/workspace"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	document := mutate(t, handler, principalID, sessionID, "delete", `{"pod":"api-0","path":"/workspace/cache","recursive":true}`, "failure-1", http.StatusCreated)
+	document := mutate(t, handler, identityID, sessionID, "delete", `{"pod":"api-0","path":"/workspace/cache","recursive":true}`, "failure-1", http.StatusCreated)
 	if document.State != "failed" || document.Result.Error != "remote file operation failed" || document.Result.Completed {
 		t.Fatalf("failed task = %#v", document)
 	}
@@ -193,10 +193,10 @@ func TestMutationFailureIsPersistedWithoutLeakingExecutorDetail(t *testing.T) {
 
 func TestInvalidAndRootMutationNeverReachKubernetes(t *testing.T) {
 	now := time.Now().UTC()
-	stateStore, principalID, sessionID, expiresAt := createStore(t, now)
+	stateStore, identityID, sessionID, expiresAt := createStore(t, now)
 	defer stateStore.Close()
 	targets := &testTargets{}
-	handler, err := fileopsapi.New(stateStore, testSessions{principalID: principalID, session: sessionapi.ActiveSession{
+	handler, err := fileopsapi.New(stateStore, testSessions{identityID: identityID, session: sessionapi.ActiveSession{
 		ID: sessionID, Namespace: "development", ExpiresAt: expiresAt,
 	}}, targets, &testOperator{}, fileopsapi.Config{AllowedPathRoots: []string{"/workspace"}})
 	if err != nil {
@@ -208,7 +208,7 @@ func TestInvalidAndRootMutationNeverReachKubernetes(t *testing.T) {
 		{"delete", `{"pod":"api-0","path":"/workspace/../etc","recursive":true}`},
 	} {
 		response := httptest.NewRecorder()
-		apiError := serveAPI(t, handler, response, request(t, http.MethodPost, sessionID, test.action, test.body, uuid.NewString()), controlplaneapi.Principal{Subject: principalID})
+		apiError := serveAPI(t, handler, response, request(t, http.MethodPost, sessionID, test.action, test.body, uuid.NewString()), controlplaneapi.Identity{Subject: identityID})
 		if apiError == nil || apiError.Code != controlplaneapi.CodeInvalidArgument {
 			t.Fatalf("%s error = %#v", test.action, apiError)
 		}
@@ -220,10 +220,10 @@ func TestInvalidAndRootMutationNeverReachKubernetes(t *testing.T) {
 	}
 }
 
-func mutate(t *testing.T, handler *fileopsapi.Service, principalID, sessionID, action, body, key string, status int) fileopsapi.Document {
+func mutate(t *testing.T, handler *fileopsapi.Service, identityID, sessionID, action, body, key string, status int) fileopsapi.Document {
 	t.Helper()
 	response := httptest.NewRecorder()
-	apiError := serveAPI(t, handler, response, request(t, http.MethodPost, sessionID, action, body, key), controlplaneapi.Principal{Subject: principalID})
+	apiError := serveAPI(t, handler, response, request(t, http.MethodPost, sessionID, action, body, key), controlplaneapi.Identity{Subject: identityID})
 	if apiError != nil {
 		t.Fatal(apiError)
 	}
@@ -263,9 +263,9 @@ func createStore(t *testing.T, now time.Time) (*storage.Store, string, string, t
 	if err != nil {
 		t.Fatal(err)
 	}
-	principalID, sessionID := uuid.NewString(), uuid.NewString()
-	if _, err := stateStore.Principals().Upsert(context.Background(), storage.Principal{
-		ID: principalID, Provider: "test", ExternalID: "file-operations-user", CreatedAt: now, UpdatedAt: now,
+	identityID, sessionID := uuid.NewString(), uuid.NewString()
+	if _, err := stateStore.Identities().Create(context.Background(), storage.Identity{
+		ID: identityID, Type: "human", DisplayName: "Test Identity", Status: "active", CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -274,11 +274,11 @@ func createStore(t *testing.T, now time.Time) (*storage.Store, string, string, t
 	networkHash, _ := networkspec.Hash(network)
 	expiresAt := now.Add(time.Hour)
 	if err := stateStore.Sessions().Create(context.Background(), storage.Session{
-		ID: sessionID, PrincipalID: principalID, DeviceID: "device", ClusterID: "cluster", Namespace: "development",
+		ID: sessionID, IdentityID: identityID, DeviceID: "device", ClusterID: "cluster", Namespace: "development",
 		State: "active", Generation: 1, NetworkSpec: networkJSON, NetworkSpecHash: networkHash,
 		CreatedAt: now, UpdatedAt: now, LastHeartbeatAt: now, ExpiresAt: expiresAt,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	return stateStore, principalID, sessionID, expiresAt
+	return stateStore, identityID, sessionID, expiresAt
 }

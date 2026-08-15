@@ -14,6 +14,10 @@ permissions:
   packages: write
 
 jobs:
+  ui-e2e:
+    name: Full UI release gate
+    uses: ./.github/workflows/ui-e2e.yml
+
   desktop:
     name: Desktop (${{ matrix.name }})
     runs-on: ${{ matrix.runner }}
@@ -265,6 +269,7 @@ jobs:
   publish:
     name: Publish GitHub Release
     needs:
+      - ui-e2e
       - desktop
       - gateway
       - gateway-image

@@ -24,8 +24,8 @@ const (
 )
 
 type Operator interface {
-	List(context.Context, controlplaneapi.Principal, string, Spec) ([]Entry, error)
-	Mutate(context.Context, controlplaneapi.Principal, string, Spec) error
+	List(context.Context, controlplaneapi.Identity, string, Spec) ([]Entry, error)
+	Mutate(context.Context, controlplaneapi.Identity, string, Spec) error
 }
 
 type KubernetesOperator struct {
@@ -43,7 +43,7 @@ func NewKubernetesOperator(pods fileapi.PodExecutor) (*KubernetesOperator, error
 
 func (operator *KubernetesOperator) List(
 	ctx context.Context,
-	principal controlplaneapi.Principal,
+	identity controlplaneapi.Identity,
 	namespace string,
 	spec Spec,
 ) ([]Entry, error) {
@@ -52,7 +52,7 @@ func (operator *KubernetesOperator) List(
 		"test ! -L " + shellquote.Join(spec.Path) + "; test -d " + shellquote.Join(spec.Path) + "; " +
 		"find " + shellquote.Join(spec.Path) + " -mindepth 1 -maxdepth 1 -exec sh -c " + shellquote.Join(inner) + " sh {} +"
 	output := &boundedBuffer{maximum: operator.maximumOutput}
-	if err := operator.shell(ctx, principal, namespace, spec, script, output); err != nil {
+	if err := operator.shell(ctx, identity, namespace, spec, script, output); err != nil {
 		return nil, err
 	}
 	entries, err := parseEntries(output.Bytes(), operator.maximumEntries)
@@ -70,7 +70,7 @@ func (operator *KubernetesOperator) List(
 
 func (operator *KubernetesOperator) Mutate(
 	ctx context.Context,
-	principal controlplaneapi.Principal,
+	identity controlplaneapi.Identity,
 	namespace string,
 	spec Spec,
 ) error {
@@ -100,19 +100,19 @@ func (operator *KubernetesOperator) Mutate(
 	default:
 		return errors.New("unsupported remote file action")
 	}
-	return operator.shell(ctx, principal, namespace, spec, script, io.Discard)
+	return operator.shell(ctx, identity, namespace, spec, script, io.Discard)
 }
 
 func (operator *KubernetesOperator) shell(
 	ctx context.Context,
-	principal controlplaneapi.Principal,
+	identity controlplaneapi.Identity,
 	namespace string,
 	spec Spec,
 	script string,
 	stdout io.Writer,
 ) error {
 	stderr := &boundedBuffer{maximum: 4096}
-	err := operator.pods.Exec(ctx, principal, namespace, execapi.Spec{
+	err := operator.pods.Exec(ctx, identity, namespace, execapi.Spec{
 		Pod: spec.Pod, Container: spec.Container, Command: []string{"/bin/sh", "-c", "set -eu; " + script},
 	}, execapi.Streams{Stdout: stdout, Stderr: stderr})
 	if err != nil {

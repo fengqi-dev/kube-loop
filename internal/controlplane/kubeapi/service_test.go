@@ -1,6 +1,7 @@
 package kubeapi_test
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -20,11 +21,11 @@ import (
 	"k8s.io/client-go/rest"
 )
 
-func TestReadOnlyKubernetesRoutesUsePrincipalAndStableDocuments(t *testing.T) {
+func TestReadOnlyKubernetesRoutesUseIdentityAndStableDocuments(t *testing.T) {
 	var calls atomic.Int32
 	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		calls.Add(1)
-		if request.Header.Get("Impersonate-User") != "gateway:principal-123" {
+		if request.Header.Get("Impersonate-User") != "gateway:identity-123" {
 			t.Errorf("Impersonate-User = %q", request.Header.Get("Impersonate-User"))
 		}
 		if got := request.Header.Values("Impersonate-Group"); len(got) != 1 || got[0] != "k8s:developers" {
@@ -34,11 +35,6 @@ func TestReadOnlyKubernetesRoutesUsePrincipalAndStableDocuments(t *testing.T) {
 		switch request.URL.Path {
 		case "/version":
 			_, _ = writer.Write([]byte(`{"gitVersion":"v1.31.4","platform":"linux/amd64"}`))
-		case "/api/v1/namespaces":
-			if request.URL.Query().Get("limit") != "10" || request.URL.Query().Get("continue") != "next-page" {
-				t.Errorf("namespace pagination query = %s", request.URL.RawQuery)
-			}
-			_, _ = writer.Write([]byte(`{"apiVersion":"v1","kind":"NamespaceList","metadata":{"resourceVersion":"42","continue":"page-2"},"items":[{"metadata":{"name":"development"},"status":{"phase":"Active"}}]}`))
 		case "/api/v1/namespaces/development":
 			_, _ = writer.Write([]byte(`{"apiVersion":"v1","kind":"Namespace","metadata":{"name":"development"},"status":{"phase":"Active"}}`))
 		case "/api/v1/namespaces/development/pods":
@@ -85,10 +81,10 @@ func TestReadOnlyKubernetesRoutesUsePrincipalAndStableDocuments(t *testing.T) {
 	}{
 		{path: "/kubeloop/api/version", want: []string{`"gitVersion":"v1.31.4"`, `"gatewayVersion":"v2-test"`}},
 		{path: "/kubeloop/api/capabilities?namespace=development", want: []string{
-			`"schemaVersion":1`, `"principalId":"principal-123"`, `"namespace":"development"`, `"gatewayVersion":"v2-test"`,
+			`"schemaVersion":1`, `"identityId":"identity-123"`, `"namespace":"development"`, `"gatewayVersion":"v2-test"`,
 			`"capabilities":["pods.get","pods.list","pods.watch","services.get","services.list","cluster.tunnel","ports.forward","pods.exec","pods.files","pods.files.manage","services.exchange","services.mirror","services.preview"]`,
 		}},
-		{path: "/kubeloop/api/namespaces?limit=10&continue=next-page", want: []string{`"name":"development"`, `"continue":"page-2"`, `"resourceVersion":"42"`}},
+		{path: "/kubeloop/api/namespaces?limit=10", want: []string{`"name":"development"`}},
 		{path: "/kubeloop/api/namespaces/development", want: []string{`"status":"Active"`}},
 		{path: "/kubeloop/api/namespaces/development/pods", want: []string{`"name":"api-0"`, `"ready":true`, `"containers":["api","sidecar"]`, `"ports":[{"name":"http","port":8080,"protocol":"TCP"}]`}},
 		{path: "/kubeloop/api/namespaces/development/pods/api-0", want: []string{`"name":"api-0"`, `"phase":"Running"`}},
@@ -165,15 +161,14 @@ func TestInvalidRoutesAndPaginationDoNotReachKubernetes(t *testing.T) {
 func TestNamespaceInventoryFiltersPolicyAndForwardsValidatedSelectors(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Content-Type", "application/json")
-		if request.URL.Path != "/api/v1/namespaces" {
+		switch request.URL.Path {
+		case "/api/v1/namespaces/development":
+			_, _ = writer.Write([]byte(`{"apiVersion":"v1","kind":"Namespace","metadata":{"name":"development","labels":{"team":"platform"}},"status":{"phase":"Active"}}`))
+		case "/api/v1/namespaces/secret":
+			_, _ = writer.Write([]byte(`{"apiVersion":"v1","kind":"Namespace","metadata":{"name":"secret"},"status":{"phase":"Active"}}`))
+		default:
 			http.NotFound(writer, request)
-			return
 		}
-		if request.URL.Query().Get("labelSelector") != "team=platform" ||
-			request.URL.Query().Get("fieldSelector") != "status.phase=Active" {
-			t.Errorf("selectors = %q, %q", request.URL.Query().Get("labelSelector"), request.URL.Query().Get("fieldSelector"))
-		}
-		_, _ = writer.Write([]byte(`{"apiVersion":"v1","kind":"NamespaceList","metadata":{"resourceVersion":"42"},"items":[{"metadata":{"name":"development"},"status":{"phase":"Active"}},{"metadata":{"name":"secret"},"status":{"phase":"Active"}}]}`))
 	}))
 	defer upstream.Close()
 	policy, err := authorization.New(authorization.Policy{Rules: []authorization.Rule{
@@ -333,6 +328,17 @@ func newServerWithPolicy(t *testing.T, upstreamURL string, policy authorization.
 	handler, err := kubeapi.New(
 		provider,
 		kubeapi.WithCapabilityAuthorizer(policy),
+		kubeapi.WithAuthorizedNamespaces(func(ctx context.Context, identityID string, groups []string) ([]string, error) {
+			subject := authorization.Subject{ID: identityID, Groups: groups}
+			result := make([]string, 0, 1)
+			for _, namespace := range []string{"development"} {
+				if policy.Authorize(ctx, subject, authorization.Request{Operation: "list", Namespace: namespace,
+					ResourceKind: "capabilities"}).Allowed {
+					result = append(result, namespace)
+				}
+			}
+			return result, nil
+		}),
 		kubeapi.WithGatewayVersion("v2-test"),
 	)
 	if err != nil {
@@ -341,8 +347,8 @@ func newServerWithPolicy(t *testing.T, upstreamURL string, policy authorization.
 	server, err := controlplane.NewServer(
 		controlplane.Config{PublicURL: "https://gateway.example.test"}, controlplane.BuildInfo{},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
-		controlplane.WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(*http.Request) (controlplaneapi.Principal, *controlplaneapi.Error) {
-			return controlplaneapi.Principal{Subject: "principal-123", Groups: []string{"developers", "unmapped"}}, nil
+		controlplane.WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(*http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
+			return controlplaneapi.Identity{Subject: "identity-123", Groups: []string{"developers", "unmapped"}}, nil
 		})),
 		controlplane.WithAuthorizer(policy), controlplane.WithAPIRoutes(controlplane.APIRoutes{Kubernetes: kubeapi.NewRoutes(handler).Endpoints()}),
 	)

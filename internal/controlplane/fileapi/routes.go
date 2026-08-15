@@ -22,32 +22,32 @@ func (handler *Routes) Endpoints() controlplane.FileTransferEndpoints {
 	}
 }
 
-type sessionHandler func(*echo.Context, controlplaneapi.Principal, sessionapi.ActiveSession) *controlplaneapi.Error
-type taskHandler func(*echo.Context, controlplaneapi.Principal, sessionapi.ActiveSession, string) *controlplaneapi.Error
+type sessionHandler func(*echo.Context, controlplaneapi.Identity, sessionapi.ActiveSession) *controlplaneapi.Error
+type taskHandler func(*echo.Context, controlplaneapi.Identity, sessionapi.ActiveSession, string) *controlplaneapi.Error
 
 func (handler *Routes) withSession(next sessionHandler) controlplane.EndpointFunc {
-	return func(ctx *echo.Context, principal controlplaneapi.Principal) *controlplaneapi.Error {
+	return func(ctx *echo.Context, identity controlplaneapi.Identity) *controlplaneapi.Error {
 		request := ctx.Request()
-		session, apiError := handler.activeSession(request, principal)
+		session, apiError := handler.activeSession(request, identity)
 		if apiError != nil {
 			return apiError
 		}
-		return next(ctx, principal, session)
+		return next(ctx, identity, session)
 	}
 }
 
 func (handler *Routes) withTask(next taskHandler) controlplane.EndpointFunc {
-	return handler.withSession(func(ctx *echo.Context, principal controlplaneapi.Principal, session sessionapi.ActiveSession) *controlplaneapi.Error {
-		return next(ctx, principal, session, ctx.Request().PathValue("taskID"))
+	return handler.withSession(func(ctx *echo.Context, identity controlplaneapi.Identity, session sessionapi.ActiveSession) *controlplaneapi.Error {
+		return next(ctx, identity, session, ctx.Request().PathValue("taskID"))
 	})
 }
 
-func (handler *Routes) activeSession(request *http.Request, principal controlplaneapi.Principal) (sessionapi.ActiveSession, *controlplaneapi.Error) {
+func (handler *Routes) activeSession(request *http.Request, identity controlplaneapi.Identity) (sessionapi.ActiveSession, *controlplaneapi.Error) {
 	namespace, apiError := namespaceFromQuery(request)
 	if apiError != nil {
 		return sessionapi.ActiveSession{}, apiError
 	}
-	session, apiError := handler.sessions.RequireActive(request.Context(), principal, namespace, request.PathValue("sessionID"))
+	session, apiError := handler.sessions.RequireActive(request.Context(), identity, namespace, request.PathValue("sessionID"))
 	if apiError != nil {
 		return sessionapi.ActiveSession{}, apiError
 	}

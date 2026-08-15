@@ -8,8 +8,10 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"os"
 	"path/filepath"
 	goruntime "runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -85,7 +87,9 @@ type appDependencies struct {
 // kubeconfig or Kubernetes client: all cluster operations
 // are performed remotely through the configured Gateway service.
 func NewApp(version string, embeddedHelperFiles fs.FS) *App {
-	return newApp(version, embeddedHelperFiles, appDependencies{})
+	return newApp(version, embeddedHelperFiles, appDependencies{
+		profilePath: strings.TrimSpace(os.Getenv("KUBELOOP_PROFILE_PATH")),
+	})
 }
 
 func newApp(version string, embeddedHelperFiles fs.FS, dependencies appDependencies) *App {

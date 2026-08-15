@@ -1,68 +1,47 @@
-# ADR 0002：Gateway 统一认证与桌面登录模型
+# ADR 0002：内置 IAM 与 OAuth2/OIDC 边界
 
 - 状态：Accepted
-- 日期：2026-08-09
-- 决策范围：V2.0
-
-## 背景
-
-V2 桌面客户端只配置 KubeLoop 服务地址。OIDC issuer、OAuth client 和 claim/group mapping 都属于 Gateway 管理配置，不能下发为客户端配置或由客户端请求动态覆盖。
-
-桌面应用是无法可靠保守静态 secret 的 native app，因此企业认证统一使用浏览器 OIDC；自托管与开发环境使用 Control Plane 管理的本地账户。后续 Token、授权、Session 和审计使用同一种标准化身份。
+- 日期：2026-08-15
+- 决策范围：IAM baseline 24
 
 ## 决策
 
-### 1. 统一 Provider 边界
+Control Plane 内置身份目录、本地认证、用户组、授权、OAuth2/OIDC 与审计。
+Fosite 只负责 OAuth2/OIDC 协议状态机，不拥有 Identity、用户组或 Namespace 授权。
 
-Control Plane 提供 `AuthProvider` 抽象。Provider 只负责：
+身份统一使用 `Identity`：`human` 表示人员，`machine` 表示 OAuth Client
+Credentials 对应的机器身份。系统只有一个固定的 `KubeLoop` 组织。
 
-- 声明公开的登录方式；
-- 校验管理员配置及上游可用性；
-- 完成一次身份验证并返回标准化 Identity。
+人员认证只支持本地用户名和 Argon2id 密码。不支持外部身份 Provider、
+第二因素、恢复凭据或公共注册。管理员创建密码后，用户可以直接登录。
 
-Provider 不签发 Gateway Access/Refresh Token，不执行 Kubernetes 授权，也不直接创建 Cluster Session。Token Service 将验证成功的 Identity 映射为稳定 Principal，之后所有 Control Plane API 和 Data Plane Ticket 都只信任 Gateway 自己签发的凭证。
+OAuth2/OIDC 只发布并实现：
 
-服务发现只公开 Provider ID、类型、显示名称和交互类型，不公开 issuer 内部配置、client secret、claim mapping 或 CA 内容。
+- Authorization Code + PKCE S256；
+- Refresh Token rotation；
+- confidential Client 的 Client Credentials。
 
-### 2. OIDC 为首选企业认证方式
+不实现 Resource Owner Password Credentials、Implicit 或 Hybrid。内置
+`kubeloop-desktop` 与 `kubeloop-management` 是不可删除的 public Client，只能使用
+Authorization Code + PKCE。Access Token 为 opaque token，ID Token 使用 ES256；
+Refresh Token 重放撤销整个 grant。
 
-Keycloak、Dex、Microsoft Entra ID 和其他标准 Provider 统一使用 Authorization Code Flow。Gateway 是固定配置的 confidential OIDC client，负责 IdP callback、code exchange、ID Token/JWKS 校验和 claim mapping；桌面端不直接获得 IdP token。
+浏览器 SSO 使用 `HttpOnly; Secure; SameSite=Lax` Cookie。OAuth challenge、CSRF 和
+Token 不写入 localStorage；localStorage 只保存语言。
 
-每次桌面登录必须同时使用：
+## 授权
 
-- 随机且单次的 `state` 与 `nonce`；
-- PKCE `S256` challenge；
-- 固定 Gateway callback URL；
-- Gateway 生成、短时、单次、绑定 Provider、客户端 callback 和 PKCE challenge 的 exchange code。
+用户必须属于一个或多个扁平用户组。普通组直接关联可访问的 Namespace；
+系统 `Administrators` 组拥有管理权和全部 Namespace 访问。不实现自定义角色、
+直接用户绑定、委派或按 operation/resource kind 细分的授权。
 
-客户端只把 exchange code 发送到其随机端口的 loopback callback，然后用原始 PKCE verifier 向同一 Gateway Origin 换取 Gateway Token。允许的桌面 callback 仅为 `http://127.0.0.1:{ephemeral-port}/...`、`http://[::1]:{ephemeral-port}/...`，或未来显式注册并验证所有权的 app link；禁止任意 redirect URI 和通配 host。
+Namespace 列表必须在 repository 查询阶段按用户组有效授权过滤。
 
-OIDC 身份主键为规范化 `issuer + subject`。必须严格校验 issuer、签名、audience、时间、nonce 和所允许的算法；不得以 email、preferred_username 或 display name 作为稳定主键。启动 readiness 前验证 discovery metadata、JWKS 可达性、authorization/token endpoint 使用 HTTPS，以及 Provider 支持所需能力。管理员配置是 issuer 的唯一来源。
+## 数据与升级
 
-### 3. 本地账户
+IAM 使用单一全新 baseline，不迁移旧认证表、Token、Session、用户或授权数据。
+发现旧 baseline 时拒绝启动，程序不会自动删除数据。
 
-Control Plane 提供本地用户名、密码与可选 TOTP 登录。本地账户由 Management Plane 创建和禁用，密码只保存强哈希，认证成功后进入同一个 Fosite OAuth/OIDC Provider。浏览器已有有效的 OAuth SSO Session 时可直接完成授权回调。
-
-### 4. Gateway Token 边界
-
-OIDC 或本地账户认证完成后均由 Fosite 签发 opaque Access Token；允许 `offline_access` 的流程可以获得可轮换 Refresh Token，OIDC 流程的 ID Token 使用 ES256。数据库只保存 token signature 的 SHA-256 与稳定的 Fosite request/session DTO，不保存 token、code 或 challenge 明文。Refresh Token 重放会撤销整个 OAuth grant。桌面端通过操作系统安全存储保存 Refresh Token，普通配置文件只保存服务地址和非敏感 UI 状态。
-
-退出登录、管理员撤销或检测复用时，Control Plane 撤销 OAuth grant，并关闭属于该 Principal/Device 的活动 Session；Data Plane 使用短期 RelayTicket，将撤销传播延迟限制在 Ticket 有效期内。
-
-Refresh 轮换、code 消费和 grant 撤销必须在数据库事务中提交，不能在返回复用错误后以 best-effort 方式异步撤销。OAuth request/session 与撤销状态存放在 Control Plane Store，因此 Control Plane 重启后仍能 introspect opaque Access Token、轮换 Refresh Token，并识别重放。桌面退出登录先停止本地功能流并关闭 Data Plane WSS，再断开远端 Cluster Session，随后撤销 OAuth grant 并删除系统安全存储中的凭据；各清理步骤独立执行并汇总错误，避免某一步失败阻止其余清理。
-
-### 5. 明确不做
-
-- Password Grant 只允许管理员显式启用的 confidential Client，并且只验证 KubeLoop Local account；启用 MFA 的账户必须提交 second factor。
-- V2.0 不允许客户端上传 issuer、JWKS 或 claim mapping。
-- 不提供无需凭据的登录方式。
-
-## 安全依据
-
-- OIDC Core 要求校验 issuer、audience、签名和 nonce，并以 issuer/subject 组合标识身份。
-- OAuth Native Apps BCP 规定 native app 不能依赖共享 client secret，并推荐桌面 loopback redirect 与 PKCE。
-- OAuth Security BCP 要求 Authorization Code + PKCE、防止 redirect/open-redirect、code injection、mix-up 和重放。
-
-## 结果
-
-客户端 UX 稳定为“填写服务地址 → 发现登录方式 → 浏览器 OIDC 或本地账户登录 → 获得 Gateway Session”。Provider 不会改变 Token、授权、Session 和 Data Plane 接口。代价是 Control Plane 必须维护短时登录事务、exchange code 和 Token rotation/revocation。
+新库首次启动原子创建管理员、固定 `KubeLoop` 组织和系统 `Administrators` 组。
+初始密码由 Helm 生成并保存在独立 Kubernetes Secret 中。
+OAuth HMAC 与 ES256 私钥必须相互独立。

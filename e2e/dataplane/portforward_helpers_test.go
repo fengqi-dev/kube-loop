@@ -45,7 +45,7 @@ type staticCapabilityDiscoverer struct{}
 
 func (staticCapabilityDiscoverer) DiscoverCapabilities(
 	context.Context,
-	controlplaneapi.Principal,
+	controlplaneapi.Identity,
 	string,
 ) (capability.Snapshot, *controlplaneapi.Error) {
 	return capability.Snapshot{}, nil
@@ -61,7 +61,7 @@ func (e2eBindingManager) Delete(context.Context, string, string) error { return 
 
 func (discoverer staticNetworkDiscoverer) Discover(
 	context.Context,
-	controlplaneapi.Principal,
+	controlplaneapi.Identity,
 	string,
 ) (networkspec.Spec, error) {
 	return discoverer.spec, nil
@@ -124,7 +124,7 @@ func startPortForwardControlPlane(
 	restConfig *rest.Config,
 	gatewayAddress string,
 	serverProfileID string,
-	principalID string,
+	identityID string,
 	deviceID string,
 	session remote.Session,
 ) *portForwardControlPlane {
@@ -148,18 +148,18 @@ func startPortForwardControlPlane(
 			t.Logf("close Port Forward Control Plane storage: %v", err)
 		}
 	})
-	if _, err := stateStore.Principals().Upsert(ctx, storage.Principal{
-		ID: principalID, Provider: "e2e", ExternalID: principalID,
+	if _, err := stateStore.Identities().Create(ctx, storage.Identity{
+		ID: identityID, Type: "human", DisplayName: "Test Identity", Status: "active",
 		CreatedAt: session.CreatedAt, UpdatedAt: session.UpdatedAt,
 	}); err != nil {
-		t.Fatalf("create Port Forward principal: %v", err)
+		t.Fatalf("create Port Forward identity: %v", err)
 	}
 	specJSON, err := networkspec.CanonicalJSON(session.NetworkSpec)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := stateStore.Sessions().Create(ctx, storage.Session{
-		ID: session.ID, PrincipalID: principalID, DeviceID: deviceID, ClusterID: "e2e",
+		ID: session.ID, IdentityID: identityID, DeviceID: deviceID, ClusterID: "e2e",
 		Namespace: session.Namespace, State: "active", Generation: session.Generation,
 		NetworkSpec: specJSON, NetworkSpecHash: session.NetworkSpecHash,
 		CreatedAt: session.CreatedAt, UpdatedAt: session.UpdatedAt,
@@ -179,7 +179,7 @@ func startPortForwardControlPlane(
 		t.Fatalf("create Port Forward API: %v", err)
 	}
 	policy, err := authorization.New(authorization.Policy{Rules: []authorization.Rule{{
-		ID: "e2e-port-forward", Subjects: []string{principalID}, Namespaces: []string{session.Namespace},
+		ID: "e2e-port-forward", Subjects: []string{identityID}, Namespaces: []string{session.Namespace},
 		Operations: []string{"create", "list", "delete"}, ResourceKinds: []string{"port-forwards"},
 	}}})
 	if err != nil {
@@ -188,11 +188,11 @@ func startPortForwardControlPlane(
 	controllerServer, err := controlplane.NewServer(
 		controlplane.Config{PublicURL: "http://127.0.0.1"}, controlplane.BuildInfo{},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
-		controlplane.WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(request *http.Request) (controlplaneapi.Principal, *controlplaneapi.Error) {
+		controlplane.WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(request *http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
 			if request.Header.Get("Authorization") != "Bearer "+portForwardAccessToken {
-				return controlplaneapi.Principal{}, &controlplaneapi.Error{Code: controlplaneapi.CodeUnauthenticated, Message: "invalid e2e access token"}
+				return controlplaneapi.Identity{}, &controlplaneapi.Error{Code: controlplaneapi.CodeUnauthenticated, Message: "invalid e2e access token"}
 			}
-			return controlplaneapi.Principal{Subject: principalID, DeviceID: deviceID}, nil
+			return controlplaneapi.Identity{Subject: identityID, DeviceID: deviceID}, nil
 		})),
 		controlplane.WithAuthorizer(policy), controlplane.WithAPIRoutes(controlplane.APIRoutes{PortForwards: portforwardapi.NewRoutes(portForwards, sessions).Endpoints()}),
 	)

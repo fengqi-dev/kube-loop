@@ -1,118 +1,163 @@
 export type ViewKey =
   | "overview"
-  | "roles"
-  | "permissions"
-  | "assignments"
-  | "delegations"
-  | "providers"
-  | "oauthClients"
   | "users"
-  | "security"
-  | "principals"
+  | "groups"
+  | "invitations"
+  | "oauthClients"
+  | "policies"
   | "sessions"
-  | "tasks"
-  | "relays"
-  | "audit";
-export interface Scope {
-  namespace: string;
-  capabilities?: string[];
-}
-export interface Capabilities {
-  capabilities: string[];
-  namespaceScopes: Scope[];
-  authenticationType: string;
-}
+  | "grants"
+  | "audit"
+  | "runtime";
+
 export interface Bootstrap {
-  identity: { id: string; groups: string[] };
-  session: {
-    authenticationType: string;
-    createdAt: string;
-    lastSeenAt: string;
-    idleExpiresAt: string;
-    absoluteExpiresAt: string;
+  identity: {
+    id: string;
+    displayName: string;
+    email?: string;
+    type: "human" | "machine";
+    groups: string[];
   };
-  authorization: {
-    capabilities: string[];
-    namespaceScopes: Scope[];
-  };
+  session: { authenticationType: string };
+  authorization: { administrator: boolean; namespaces: string[] };
 }
+export interface ListResponse<T = Record<string, unknown>> {
+  items: T[];
+  nextCursor?: string;
+}
+export interface Organization {
+  id: string;
+  name: string;
+  slug: string;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+}
+export interface Group {
+  id: string;
+  organizationId: string;
+  name: string;
+  description: string;
+  system: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+export interface Identity {
+  id: string;
+  type: "human" | "machine";
+  displayName: string;
+  primaryEmail?: string;
+  status: string;
+  groups?: string[];
+}
+export interface Invitation {
+  id: string;
+  organizationId: string;
+  email: string;
+  groupId: string;
+  status: string;
+  expiresAt: string;
+}
+export interface OAuthClient {
+  id: string;
+  organizationId?: string;
+  name: string;
+  public: boolean;
+  redirectUris: string[];
+  grantTypes: string[];
+  scopes: string[];
+  trusted: boolean;
+  enabled: boolean;
+  builtin: boolean;
+  machineIdentityId?: string;
+  updatedAt: string;
+}
+
 export interface Overview {
   generatedAt: string;
   system: {
-    controlPlane: {
-      version: string;
-      commit: string;
-      protocolMin: string;
-      protocolMax: string;
-    };
+    controlPlane: { version: string; commit: string; protocolMin: string; protocolMax: string };
     storage: { status: string; backend: string; schemaVersion: number };
   };
-  security: {
-    authenticationType: string;
-  };
+  security: { authenticationType: string };
   runtime: {
     activeSessions: { count: number; truncated: boolean };
     activeTasks: { count: number; truncated: boolean };
-    relays: {
-      total: number;
-      online: number;
-      ready: number;
-      draining: number;
-      reservations: number;
-    };
+    relays: { total: number; online: number; ready: number; draining: number; reservations: number };
   };
-  recentAudit: Record<string, unknown>[];
+  recentAudit: AuditEvent[];
 }
-export interface Assignment {
+
+export interface EffectiveAuthorization {
+  identityId: string;
+  groups: string[];
+  administrator: boolean;
+  namespaces: string[];
+  capabilities: Array<{
+    id: string;
+    scope: "platform" | "organization" | "namespace";
+    allowed: boolean;
+    namespaces?: string[];
+    matchingGroupIds?: string[];
+  }>;
+}
+
+export interface RuntimeSession {
   id: string;
-  subject: {
-    type: "principal" | "group";
-    principalId?: string;
-    providerId?: string;
-    groupName?: string;
-  };
-  roleId: string;
-  scope: {
-    type: "platform" | "namespaces";
-    names?: string[];
-    labelSelectors?: Array<{
-      matchLabels?: Record<string, string>;
-      matchExpressions?: Array<{ key: string; operator: string; values?: string[] }>;
-    }>;
-  };
-  managedBy: "platform" | "delegated";
-  createdBy?: string;
+  identityId: string;
+  deviceId: string;
+  clusterId: string;
+  namespace: string;
+  state: string;
+  generation: number;
+  createdAt: string;
+  updatedAt: string;
+  lastHeartbeatAt: string;
+  expiresAt: string;
 }
-export interface PrincipalOption {
+
+export interface OAuthGrant {
+  authorizationId: string;
+  identityId: string;
+  clientId: string;
+  deviceId: string;
+  scopes: string[];
+  status: string;
+  createdAt: string;
+  expiresAt: string;
+  revokedAt?: string;
+}
+
+export interface AuditEvent {
   id: string;
-  provider: string;
-  displayName?: string;
-  email?: string;
+  identityId?: string;
+  action: string;
+  resourceType?: string;
+  resourceId?: string;
+  outcome: string;
+  requestId: string;
+  createdAt: string;
 }
-export interface RoleDefinition {
+
+export interface RuntimeTask {
   id: string;
-  displayName: string;
-  description?: string;
-  delegatable?: boolean;
-  builtIn?: boolean;
-  statements: Array<{ effect: "allow" | "deny"; capabilities: string[] }>;
+  identityId: string;
+  sessionId: string;
+  type: string;
+  state: string;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+  expiresAt?: string;
 }
-export interface Policy {
-	active: boolean;
-  availableCapabilities: string[];
-  builtInRoles: RoleDefinition[];
-  spec: {
-    version: number;
-    roles?: RoleDefinition[];
-    bindings: Assignment[];
-  };
-}
-export interface DelegationState {
-	namespace: string;
-  bindings: Assignment[];
-  roles: RoleDefinition[];
-}
-export interface ListResponse {
-  items: Record<string, unknown>[];
-  nextCursor?: string;
+
+export interface RelayStatus {
+  relayId: string;
+  state: string;
+  desiredState: string;
+  online: boolean;
+  reservations: number;
+  controlVersion: number;
+  lastHeartbeatAt: string;
+  leaseExpiresAt: string;
 }

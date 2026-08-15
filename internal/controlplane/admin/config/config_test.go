@@ -13,18 +13,14 @@ func TestLoadDefaultsToDisabledDenyAllManagementAccess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(config.Bootstrap.Subjects) != 0 || len(config.Bootstrap.Groups) != 0 || config.Bootstrap.RecoveryEnabled {
-		t.Fatalf("bootstrap = %#v", config.Bootstrap)
-	}
 	if config.BreakGlass.Enabled || config.BreakGlass.ParsedSessionTTL() != 15*time.Minute || len(config.BreakGlass.ParsedSourceCIDRs()) != 0 {
 		t.Fatalf("break-glass = %#v", config.BreakGlass)
 	}
 }
 
-func TestLoadStrictManagementConfiguration(t *testing.T) {
+func TestLoadStrictAdminConfiguration(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "management.json")
 	document := `{
-		"bootstrap":{"subjects":["00000000-0000-4000-8000-000000000001"],"groups":["platform-bootstrap"],"recoveryEnabled":false},
 		"breakGlass":{
 			"enabled":true,
 			"secretAlias":"emergency",
@@ -39,9 +35,6 @@ func TestLoadStrictManagementConfiguration(t *testing.T) {
 	config, err := Load(path)
 	if err != nil {
 		t.Fatal(err)
-	}
-	if config.Bootstrap.Subjects[0] != "00000000-0000-4000-8000-000000000001" || config.Bootstrap.Groups[0] != "platform-bootstrap" {
-		t.Fatalf("bootstrap = %#v", config.Bootstrap)
 	}
 	if config.BreakGlass.ParsedSessionTTL() != 10*time.Minute || len(config.BreakGlass.ParsedSourceCIDRs()) != 2 {
 		t.Fatalf("break-glass = %#v", config.BreakGlass)

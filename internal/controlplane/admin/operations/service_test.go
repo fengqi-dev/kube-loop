@@ -66,7 +66,7 @@ func (runtime *testRuntime) Disconnect(ctx context.Context, sessionID string) er
 }
 
 func TestStopSessionCommitsAuditBeforeRuntimeAndReplays(t *testing.T) {
-	store, principal, session, now := newTestAggregate(t)
+	store, identity, session, now := newTestAggregate(t)
 	runtime := &testRuntime{store: store, wantSession: session.ID}
 	service, err := New(store, runtime)
 	if err != nil {
@@ -76,7 +76,7 @@ func TestStopSessionCommitsAuditBeforeRuntimeAndReplays(t *testing.T) {
 	key := "operation-key-00000001"
 	request := StopSessionRequest{
 		Request: Request{
-			Actor:          Actor{PrincipalID: principal.ID, Authentication: adminauthorization.AuthenticationNormal},
+			Actor:          Actor{IdentityID: identity.ID, Authentication: adminauthorization.AuthenticationNormal},
 			IdempotencyKey: key, Reason: "security response", RequestID: uuid.NewString(),
 		},
 		SessionID: session.ID, ExpectedGeneration: 1,
@@ -94,7 +94,7 @@ func TestStopSessionCommitsAuditBeforeRuntimeAndReplays(t *testing.T) {
 		t.Fatalf("Session stop audit = %#v, %v", events, err)
 	}
 	digest := sha256.Sum256([]byte(key))
-	scope := "admin-operation:normal:" + principal.ID + ":admin.session.stop"
+	scope := "admin-operation:normal:" + identity.ID + ":admin.session.stop"
 	if _, err := store.Idempotency().Get(context.Background(), scope, key); !errors.Is(err, storage.ErrNotFound) {
 		t.Fatalf("plaintext idempotency key was persisted: %v", err)
 	}
@@ -104,7 +104,7 @@ func TestStopSessionCommitsAuditBeforeRuntimeAndReplays(t *testing.T) {
 }
 
 func TestRevocationsAreOwnerSafeAndAtomicWithAudit(t *testing.T) {
-	store, principal, _, now := newTestAggregate(t)
+	store, identity, _, now := newTestAggregate(t)
 	runtime := &testRuntime{store: store}
 	service, err := New(store, runtime)
 	if err != nil {
@@ -112,47 +112,47 @@ func TestRevocationsAreOwnerSafeAndAtomicWithAudit(t *testing.T) {
 	}
 	service.now = func() time.Time { return now }
 	grant := storage.OAuthSession{
-		Kind: "refresh_token", SignatureHash: bytes.Repeat([]byte{8}, 32), RequestID: uuid.NewString(), PrincipalID: principal.ID,
+		Kind: "refresh_token", SignatureHash: bytes.Repeat([]byte{8}, 32), RequestID: uuid.NewString(), IdentityID: identity.ID,
 		ClientID: "desktop", DeviceID: "laptop", RequestJSON: []byte(`{}`), Status: "active", CreatedAt: now.Add(-time.Hour), ExpiresAt: now.Add(time.Hour),
 	}
 	if err := store.OAuthSessions().Create(context.Background(), grant); err != nil {
 		t.Fatal(err)
 	}
 	base := Request{
-		Actor:          Actor{PrincipalID: principal.ID, Authentication: adminauthorization.AuthenticationNormal},
+		Actor:          Actor{IdentityID: identity.ID, Authentication: adminauthorization.AuthenticationNormal},
 		IdempotencyKey: "operation-key-00000002", Reason: "revoke lost device", RequestID: uuid.NewString(),
 	}
 	_, err = service.RevokeOAuthGrant(context.Background(), RevokeOAuthGrantRequest{
-		Request: base, PrincipalID: uuid.NewString(), AuthorizationID: grant.RequestID,
+		Request: base, IdentityID: uuid.NewString(), AuthorizationID: grant.RequestID,
 	})
 	if !errors.Is(err, storage.ErrNotFound) {
-		t.Fatalf("cross-Principal revoke error = %v", err)
+		t.Fatalf("cross-Identity revoke error = %v", err)
 	}
 	active, _ := store.OAuthSessions().RequestActive(context.Background(), grant.RequestID, now)
 	if !active {
-		t.Fatal("cross-Principal revoke changed the OAuth grant")
+		t.Fatal("cross-Identity revoke changed the OAuth grant")
 	}
 	base.IdempotencyKey = "operation-key-00000003"
-	result, err := service.RevokePrincipal(context.Background(), RevokePrincipalRequest{
-		Request: base, PrincipalID: principal.ID,
+	result, err := service.RevokeIdentity(context.Background(), RevokeIdentityRequest{
+		Request: base, IdentityID: identity.ID,
 	})
 	if err != nil || result.RevokedCount != 1 {
-		t.Fatalf("RevokePrincipal = %#v, %v", result, err)
+		t.Fatalf("RevokeIdentity = %#v, %v", result, err)
 	}
-	events, err := store.Audit().List(context.Background(), storage.AuditFilter{Action: "admin.principal.revoke"})
+	events, err := store.Audit().List(context.Background(), storage.AuditFilter{Action: "admin.identity.revoke"})
 	if err != nil || len(events) != 1 {
-		t.Fatalf("Principal revoke audit = %#v, %v", events, err)
+		t.Fatalf("Identity revoke audit = %#v, %v", events, err)
 	}
 }
 
 func TestStopSessionReportsPendingRuntimeConvergence(t *testing.T) {
-	store, principal, session, now := newTestAggregate(t)
+	store, identity, session, now := newTestAggregate(t)
 	runtime := &testRuntime{store: store, wantSession: session.ID, err: errors.New("runtime timeout")}
 	service, _ := New(store, runtime)
 	service.now = func() time.Time { return now }
 	result, err := service.StopSession(context.Background(), StopSessionRequest{
 		Request: Request{
-			Actor:          Actor{PrincipalID: principal.ID, Authentication: adminauthorization.AuthenticationNormal},
+			Actor:          Actor{IdentityID: identity.ID, Authentication: adminauthorization.AuthenticationNormal},
 			IdempotencyKey: "operation-key-00000004", Reason: "force stop incident", RequestID: uuid.NewString(),
 		},
 		SessionID: session.ID, ExpectedGeneration: 1,
@@ -167,11 +167,11 @@ func TestStopSessionReportsPendingRuntimeConvergence(t *testing.T) {
 }
 
 func TestStopTaskUsesObservedVersionAndDurableTransition(t *testing.T) {
-	store, principal, session, now := newTestAggregate(t)
+	store, identity, session, now := newTestAggregate(t)
 	service, _ := New(store, &testRuntime{store: store})
 	service.now = func() time.Time { return now }
 	task := storage.Task{
-		ID: uuid.NewString(), PrincipalID: principal.ID, SessionID: session.ID, Type: "preview",
+		ID: uuid.NewString(), IdentityID: identity.ID, SessionID: session.ID, Type: "preview",
 		State: remotetask.Running, Spec: []byte(`{"namespace":"default"}`), IdempotencyKey: "task-create-00000001",
 		CreatedAt: now.Add(-time.Hour), UpdatedAt: now.Add(-time.Minute),
 	}
@@ -180,7 +180,7 @@ func TestStopTaskUsesObservedVersionAndDurableTransition(t *testing.T) {
 	}
 	request := StopTaskRequest{
 		Request: Request{
-			Actor:          Actor{PrincipalID: principal.ID, Authentication: adminauthorization.AuthenticationNormal},
+			Actor:          Actor{IdentityID: identity.ID, Authentication: adminauthorization.AuthenticationNormal},
 			IdempotencyKey: "operation-key-00000005", Reason: "stop stale preview", RequestID: uuid.NewString(),
 		},
 		TaskID: task.ID, ExpectedVersion: taskVersion(task.UpdatedAt),
@@ -201,7 +201,7 @@ func TestStopTaskUsesObservedVersionAndDurableTransition(t *testing.T) {
 }
 
 func TestRelayDrainAndRecoveryPersistAcrossRuntimeConvergence(t *testing.T) {
-	store, principal, _, now := newTestAggregate(t)
+	store, identity, _, now := newTestAggregate(t)
 	relays := &testRelayRuntime{statuses: []relayregistry.RelayStatus{{
 		RelayID: "relay-a", State: relaycontrol.StateReady, DesiredState: relaycontrol.StateReady, Online: true,
 	}}}
@@ -211,7 +211,7 @@ func TestRelayDrainAndRecoveryPersistAcrossRuntimeConvergence(t *testing.T) {
 	}
 	service.now = func() time.Time { return now }
 	base := Request{
-		Actor:  Actor{PrincipalID: principal.ID, Authentication: adminauthorization.AuthenticationNormal},
+		Actor:  Actor{IdentityID: identity.ID, Authentication: adminauthorization.AuthenticationNormal},
 		Reason: "planned Relay maintenance", RequestID: uuid.NewString(),
 	}
 	base.IdempotencyKey = "operation-key-relay-0001"
@@ -239,7 +239,7 @@ func TestRelayDrainAndRecoveryPersistAcrossRuntimeConvergence(t *testing.T) {
 }
 
 func TestRecoveryTriggerIsDurableIdempotentAndRerunnable(t *testing.T) {
-	store, principal, _, now := newTestAggregate(t)
+	store, identity, _, now := newTestAggregate(t)
 	service, _ := New(store, &testRuntime{store: store})
 	service.now = func() time.Time { return now }
 	runner := &testRecoveryRunner{counts: map[string]int{"preview": 2}}
@@ -247,7 +247,7 @@ func TestRecoveryTriggerIsDurableIdempotentAndRerunnable(t *testing.T) {
 		t.Fatal(err)
 	}
 	request := TriggerRecoveryRequest{Request: Request{
-		Actor:          Actor{PrincipalID: principal.ID, Authentication: adminauthorization.AuthenticationNormal},
+		Actor:          Actor{IdentityID: identity.ID, Authentication: adminauthorization.AuthenticationNormal},
 		IdempotencyKey: "operation-key-recovery-01", Reason: "recover stale resources", RequestID: uuid.NewString(),
 	}}
 	result, err := service.TriggerRecovery(context.Background(), request)
@@ -261,17 +261,17 @@ func TestRecoveryTriggerIsDurableIdempotentAndRerunnable(t *testing.T) {
 }
 
 func TestAuditExportRunsAsBoundedDurableOwnerScopedJob(t *testing.T) {
-	store, principal, _, now := newTestAggregate(t)
+	store, identity, _, now := newTestAggregate(t)
 	service, _ := New(store, &testRuntime{store: store})
 	service.now = func() time.Time { return now }
 	if err := store.Audit().Append(context.Background(), storage.AuditEvent{
-		ID: uuid.NewString(), PrincipalID: principal.ID, Action: "admin.test.action", ResourceType: "task",
+		ID: uuid.NewString(), IdentityID: identity.ID, Action: "admin.test.action", ResourceType: "task",
 		ResourceID: uuid.NewString(), Outcome: "success", RequestID: uuid.NewString(),
 		Metadata: []byte(`{"safe":true}`), CreatedAt: now.Add(-time.Minute),
 	}); err != nil {
 		t.Fatal(err)
 	}
-	actor := Actor{PrincipalID: principal.ID, Authentication: adminauthorization.AuthenticationNormal}
+	actor := Actor{IdentityID: identity.ID, Authentication: adminauthorization.AuthenticationNormal}
 	created, err := service.CreateAuditExport(context.Background(), AuditExportRequest{
 		Request: Request{
 			Actor: actor, IdempotencyKey: "operation-key-export-0001", Reason: "export incident evidence", RequestID: uuid.NewString(),
@@ -287,7 +287,7 @@ func TestAuditExportRunsAsBoundedDurableOwnerScopedJob(t *testing.T) {
 		!strings.HasSuffix(data, "\n") {
 		t.Fatalf("completed audit export = %#v, %q, %v", completed, data, err)
 	}
-	other := Actor{PrincipalID: uuid.NewString(), Authentication: adminauthorization.AuthenticationNormal}
+	other := Actor{IdentityID: uuid.NewString(), Authentication: adminauthorization.AuthenticationNormal}
 	if _, _, err := service.GetAuditExport(context.Background(), other, created.JobID); !errors.Is(err, storage.ErrNotFound) {
 		t.Fatalf("cross-owner audit export read error = %v", err)
 	}
@@ -302,7 +302,7 @@ func TestAuditExportRunsAsBoundedDurableOwnerScopedJob(t *testing.T) {
 	}
 }
 
-func newTestAggregate(t *testing.T) (*storage.Store, storage.Principal, storage.Session, time.Time) {
+func newTestAggregate(t *testing.T) (*storage.Store, storage.Identity, storage.Session, time.Time) {
 	t.Helper()
 	store, err := storage.Open(context.Background(), storage.Config{
 		Backend: storage.BackendSQLite, SQLitePath: filepath.Join(t.TempDir(), "operations.db"),
@@ -312,8 +312,8 @@ func newTestAggregate(t *testing.T) (*storage.Store, storage.Principal, storage.
 	}
 	t.Cleanup(func() { _ = store.Close() })
 	now := time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC)
-	principal, err := store.Principals().Upsert(context.Background(), storage.Principal{
-		ID: uuid.NewString(), Provider: "oidc", ExternalID: "operator", CreatedAt: now.Add(-time.Hour),
+	identity, err := store.Identities().Create(context.Background(), storage.Identity{
+		ID: uuid.NewString(), Type: "human", DisplayName: "Test Identity", Status: "active", CreatedAt: now.Add(-time.Hour),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -334,7 +334,7 @@ func newTestAggregate(t *testing.T) (*storage.Store, storage.Principal, storage.
 		t.Fatal(err)
 	}
 	session := storage.Session{
-		ID: uuid.NewString(), PrincipalID: principal.ID, DeviceID: "workstation", ClusterID: "cluster-a",
+		ID: uuid.NewString(), IdentityID: identity.ID, DeviceID: "workstation", ClusterID: "cluster-a",
 		Namespace: "default", State: "active", Generation: 1, NetworkSpec: specJSON, NetworkSpecHash: specHash,
 		CreatedAt: now.Add(-time.Hour), UpdatedAt: now.Add(-time.Minute), LastHeartbeatAt: now.Add(-time.Minute),
 		ExpiresAt: now.Add(time.Hour),
@@ -342,5 +342,5 @@ func newTestAggregate(t *testing.T) (*storage.Store, storage.Principal, storage.
 	if err := store.Sessions().Create(context.Background(), session); err != nil {
 		t.Fatal(err)
 	}
-	return store, principal, session, now
+	return store, identity, session, now
 }

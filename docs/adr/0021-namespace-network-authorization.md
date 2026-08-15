@@ -21,16 +21,16 @@ cryptographically verifiable permission snapshot supplied by Control Plane.
 
 ### Authorization chain
 
-1. Every Control Plane request is authenticated to a Principal and mapped to a
+1. Every Control Plane request is authenticated to a Identity and mapped to a
    policy request containing operation, resource kind and namespace.
-2. Session creation lists Pods and Services through the Principal's
+2. Session creation lists Pods and Services through the Identity's
    impersonating Kubernetes client in exactly the selected namespace. A system
    client may read only cluster routing metadata and CoreDNS configuration.
 3. `NetworkSpec` contains exact non-host-network Pod IPs and namespace Service
    ClusterIPs. Pod/Service CIDRs remain routing metadata and never grant dial
    permission. The cluster DNS Service IP is granted only on port 53.
 4. Control Plane persists canonical `NetworkSpec` JSON and its SHA-256 hash. A
-   RelayTicket signs Principal, device, Session ID, Session generation,
+   RelayTicket signs Identity, device, Session ID, Session generation,
    namespace, operation, assigned Relay, hash, expiry and one-use ticket ID.
 5. Data Plane verifies the Ed25519 signature, issuer, Relay audience, operation,
    generation, revocation, expiry and replay state before accepting WSS. The
@@ -60,7 +60,7 @@ deny new tickets and connections.
 
 The V2.0 permission unit is a namespace:
 
-- Gateway Policy decides whether a Principal/group may create or use a Session
+- Gateway Policy decides whether a Identity/group may create or use a Session
   in that namespace.
 - Kubernetes impersonation remains the second authorization gate for resource
   discovery and operations.

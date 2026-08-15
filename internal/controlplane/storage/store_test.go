@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -57,76 +56,34 @@ func TestSQLiteFileURLUsesPortableAbsoluteURI(t *testing.T) {
 	}
 }
 
-func TestSQLitePrincipalRepositoryPersistsIdentity(t *testing.T) {
+func TestSQLiteIdentityRepositoryPersistsIdentity(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "kubeloop.db")
 	store := openSQLiteTestStore(t, path)
 	created := time.Date(2026, 8, 9, 1, 2, 3, 0, time.UTC)
-	first, err := store.Principals().Upsert(context.Background(), Principal{
-		ID: uuid.NewString(), Provider: "oidc-company", ExternalID: "subject-1",
-		DisplayName: "First Name", Email: "first@example.test", Groups: []string{"developers"}, CreatedAt: created,
+	first, err := store.Identities().Create(context.Background(), Identity{
+		ID: uuid.NewString(), Type: "human", DisplayName: "First Name", PrimaryEmail: "first@example.test",
+		Status: "active", CreatedAt: created,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	updated, err := store.Principals().Upsert(context.Background(), Principal{
-		ID: uuid.NewString(), Provider: "oidc-company", ExternalID: "subject-1",
-		DisplayName: "Updated Name", Email: "updated@example.test", Groups: []string{"developers", "admins"},
-		CreatedAt: created.Add(time.Hour), UpdatedAt: created.Add(2 * time.Hour),
-	})
-	if err != nil {
+	first.DisplayName = "Updated Name"
+	first.PrimaryEmail = "updated@example.test"
+	first.UpdatedAt = created.Add(2 * time.Hour)
+	if err := store.Identities().Update(context.Background(), first); err != nil {
 		t.Fatal(err)
 	}
-	if updated.ID != first.ID || !updated.CreatedAt.Equal(first.CreatedAt) {
-		t.Fatalf("identity upsert replaced stable fields: first=%#v updated=%#v", first, updated)
-	}
-	if updated.DisplayName != "Updated Name" || len(updated.Groups) != 2 {
-		t.Fatalf("identity upsert did not update profile: %#v", updated)
-	}
-	byID, err := store.Principals().GetByID(context.Background(), first.ID)
-	if err != nil || byID.Email != "updated@example.test" {
+	byID, err := store.Identities().GetByID(context.Background(), first.ID)
+	if err != nil || byID.PrimaryEmail != "updated@example.test" || byID.DisplayName != "Updated Name" {
 		t.Fatalf("GetByID = %#v, %v", byID, err)
 	}
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
 	store = openSQLiteTestStore(t, path)
-	byIdentity, err := store.Principals().GetByIdentity(context.Background(), "oidc-company", "subject-1")
-	if err != nil || byIdentity.ID != first.ID {
-		t.Fatalf("persisted identity = %#v, %v", byIdentity, err)
-	}
-}
-
-func TestSQLiteConcurrentIdentityUpsertHasOneStableID(t *testing.T) {
-	store := openSQLiteTestStore(t, filepath.Join(t.TempDir(), "kubeloop.db"))
-	const workers = 16
-	results := make(chan string, workers)
-	errorsCh := make(chan error, workers)
-	var wait sync.WaitGroup
-	for range workers {
-		wait.Go(func() {
-			principal, err := store.Principals().Upsert(context.Background(), Principal{
-				ID: uuid.NewString(), Provider: "oidc", ExternalID: "same-subject",
-			})
-			if err != nil {
-				errorsCh <- err
-				return
-			}
-			results <- principal.ID
-		})
-	}
-	wait.Wait()
-	close(results)
-	close(errorsCh)
-	for err := range errorsCh {
-		t.Error(err)
-	}
-	stableID := ""
-	for id := range results {
-		if stableID == "" {
-			stableID = id
-		} else if id != stableID {
-			t.Errorf("identity returned multiple IDs: %s and %s", stableID, id)
-		}
+	persisted, err := store.Identities().GetByID(context.Background(), first.ID)
+	if err != nil || persisted.ID != first.ID {
+		t.Fatalf("persisted identity = %#v, %v", persisted, err)
 	}
 }
 
@@ -178,13 +135,13 @@ func TestSQLiteMigrationFailureRollsBackVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := database.Exec(`CREATE TABLE principals (broken TEXT)`); err != nil {
+	if _, err := database.Exec(`CREATE TABLE identities (broken TEXT)`); err != nil {
 		t.Fatal(err)
 	}
 	if err := database.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Open(context.Background(), Config{Backend: BackendSQLite, SQLitePath: path}); err == nil || !strings.Contains(err.Error(), "migration 21") {
+	if _, err := Open(context.Background(), Config{Backend: BackendSQLite, SQLitePath: path}); err == nil || !strings.Contains(err.Error(), "migration 24") {
 		t.Fatalf("Open migration error = %v", err)
 	}
 	database, err = sql.Open("sqlite", path)
@@ -208,7 +165,7 @@ func TestSQLiteMigrationFailureRollsBackVersion(t *testing.T) {
 	}
 }
 
-func TestSQLiteRejectsSchemaBeforeBreakingBaseline(t *testing.T) {
+func TestSQLiteRejectsPreviousBreakingBaseline(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "legacy.db")
 	database, err := sql.Open("sqlite", path)
 	if err != nil {
@@ -217,7 +174,7 @@ func TestSQLiteRejectsSchemaBeforeBreakingBaseline(t *testing.T) {
 	if _, err := database.Exec(`CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := database.Exec(`INSERT INTO schema_migrations(version, applied_at) VALUES (17, 'now')`); err != nil {
+	if _, err := database.Exec(`INSERT INTO schema_migrations(version, applied_at) VALUES (23, 'now')`); err != nil {
 		t.Fatal(err)
 	}
 	if err := database.Close(); err != nil {
@@ -294,19 +251,19 @@ func TestSQLiteRecoversAfterProcessExitDuringTransaction(t *testing.T) {
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	principalID := uuid.NewString()
+	identityID := uuid.NewString()
 	command := exec.Command(os.Args[0], "-test.run=^TestSQLiteCrashHelper$")
 	command.Env = append(os.Environ(),
 		"KUBELOOP_SQLITE_CRASH_HELPER=1",
 		"KUBELOOP_SQLITE_CRASH_PATH="+path,
-		"KUBELOOP_SQLITE_CRASH_PRINCIPAL="+principalID,
+		"KUBELOOP_SQLITE_CRASH_IDENTITY="+identityID,
 	)
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("crash helper: %v: %s", err, output)
 	}
 	store = openSQLiteTestStore(t, path)
-	if _, err := store.Principals().GetByID(context.Background(), principalID); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("uncommitted principal survived process exit: %v", err)
+	if _, err := store.Identities().GetByID(context.Background(), identityID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("uncommitted identity survived process exit: %v", err)
 	}
 	if err := store.checkSQLiteIntegrity(context.Background()); err != nil {
 		t.Fatal(err)
@@ -328,8 +285,8 @@ func TestSQLiteCrashHelper(t *testing.T) {
 		os.Exit(3)
 	}
 	repositories := newRepositorySet(BackendSQLite, transaction.Tx, transaction)
-	_, err = repositories.Principals().Upsert(context.Background(), Principal{
-		ID: os.Getenv("KUBELOOP_SQLITE_CRASH_PRINCIPAL"), Provider: "oidc", ExternalID: "crash-helper",
+	_, err = repositories.Identities().Create(context.Background(), Identity{
+		ID: os.Getenv("KUBELOOP_SQLITE_CRASH_IDENTITY"), Type: "human", DisplayName: "Crash Helper", Status: "active",
 	})
 	if err != nil {
 		os.Exit(4)
@@ -395,7 +352,7 @@ func TestMySQLMigrationDialectConversion(t *testing.T) {
 			}
 		}
 	}
-	for _, required := range []string{"CREATE TABLE authorization_policies", "CREATE TABLE authorization_roles", "CREATE TABLE authorization_bindings", "definition_json", "binding_json"} {
+	for _, required := range []string{"CREATE TABLE identities", "CREATE TABLE organizations", "CREATE TABLE iam_groups", "CREATE TABLE group_namespaces"} {
 		if !strings.Contains(converted.String(), required) {
 			t.Fatalf("MySQL authorization migration is missing %q", required)
 		}
@@ -405,7 +362,7 @@ func TestMySQLMigrationDialectConversion(t *testing.T) {
 func TestPostgreSQLMigrationDialectConversion(t *testing.T) {
 	converted := strings.Join(migrations[0].postgresql, "\n")
 	for _, statement := range migrations[0].postgresql {
-		for _, required := range []string{"public BOOLEAN", "trusted BOOLEAN", "request_json JSONB", "groups_json JSONB"} {
+		for _, required := range []string{"public BOOLEAN", "trusted BOOLEAN", "request_json JSONB"} {
 			if strings.Contains(statement, strings.Fields(required)[0]+" ") && !strings.Contains(statement, required) {
 				t.Fatalf("PostgreSQL migration did not convert %q: %s", required, statement)
 			}
@@ -414,7 +371,7 @@ func TestPostgreSQLMigrationDialectConversion(t *testing.T) {
 			t.Fatalf("PostgreSQL migration contains SQLite syntax: %s", statement)
 		}
 	}
-	for _, required := range []string{"CREATE TABLE authorization_policies", "CREATE TABLE authorization_roles", "CREATE TABLE authorization_bindings", "definition_json JSONB", "binding_json JSONB"} {
+	for _, required := range []string{"CREATE TABLE identities", "CREATE TABLE organizations", "CREATE TABLE iam_groups", "CREATE TABLE group_namespaces"} {
 		if !strings.Contains(converted, required) {
 			t.Fatalf("PostgreSQL authorization migration is missing %q", required)
 		}
@@ -512,9 +469,9 @@ func assertSQLitePragma(t *testing.T, store *Store, name, expected string) {
 	}
 }
 
-func TestPrincipalNotFoundUsesStableError(t *testing.T) {
+func TestIdentityNotFoundUsesStableError(t *testing.T) {
 	store := openSQLiteTestStore(t, filepath.Join(t.TempDir(), "kubeloop.db"))
-	_, err := store.Principals().GetByID(context.Background(), uuid.NewString())
+	_, err := store.Identities().GetByID(context.Background(), uuid.NewString())
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("GetByID error = %v", err)
 	}

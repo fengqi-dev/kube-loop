@@ -24,12 +24,12 @@ func NewContainerResolver(provider ClientProvider) (*ContainerResolver, error) {
 
 func (r *ContainerResolver) ResolveContainer(
 	ctx context.Context,
-	principal controlplaneapi.Principal,
+	identity controlplaneapi.Identity,
 	namespace string,
 	podName string,
 	containerName string,
 ) (string, error) {
-	client, err := r.provider.ClientFor(subjectFor(principal))
+	client, err := r.provider.ClientFor(subjectFor(identity))
 	if err != nil {
 		return "", err
 	}

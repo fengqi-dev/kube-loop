@@ -73,16 +73,16 @@ func TestAPIDefaultsToAuthenticationRequired(t *testing.T) {
 	}
 }
 
-func TestAPIProvidesPrincipalRequestIDAndDeadline(t *testing.T) {
+func TestAPIProvidesIdentityRequestIDAndDeadline(t *testing.T) {
 	var handled bool
 	server := newAPITestServer(t,
-		WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(*http.Request) (controlplaneapi.Principal, *controlplaneapi.Error) {
-			return controlplaneapi.Principal{Subject: "user-123"}, nil
+		WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(*http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
+			return controlplaneapi.Identity{Subject: "user-123"}, nil
 		})),
-		WithAPIRoutes(testEndpoint(func(writer http.ResponseWriter, request *http.Request, principal controlplaneapi.Principal) *controlplaneapi.Error {
+		WithAPIRoutes(testEndpoint(func(writer http.ResponseWriter, request *http.Request, identity controlplaneapi.Identity) *controlplaneapi.Error {
 			handled = true
-			if principal.Subject != "user-123" {
-				t.Fatalf("subject = %q", principal.Subject)
+			if identity.Subject != "user-123" {
+				t.Fatalf("subject = %q", identity.Subject)
 			}
 			if controlplanemiddleware.RequestIDFromContext(request.Context()) == "" {
 				t.Fatal("request ID missing from context")
@@ -111,10 +111,10 @@ func TestAPIBodyLimitAndEchoBinding(t *testing.T) {
 		Config{PublicURL: "https://gateway.example.test", MaxRequestBodyBytes: 16},
 		BuildInfo{},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
-		WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(*http.Request) (controlplaneapi.Principal, *controlplaneapi.Error) {
-			return controlplaneapi.Principal{Subject: "user-123"}, nil
+		WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(*http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
+			return controlplaneapi.Identity{Subject: "user-123"}, nil
 		})),
-		WithAPIRoutes(testEndpoint(EndpointFunc(func(ctx *echo.Context, _ controlplaneapi.Principal) *controlplaneapi.Error {
+		WithAPIRoutes(testEndpoint(EndpointFunc(func(ctx *echo.Context, _ controlplaneapi.Identity) *controlplaneapi.Error {
 			var body input
 			if err := ctx.Bind(&body); err != nil {
 				return controlplanemiddleware.BindingError(err)
@@ -160,10 +160,10 @@ func TestAPIBodyLimitAndEchoBinding(t *testing.T) {
 
 func TestAPIRecoversPanicWithoutLeakingIt(t *testing.T) {
 	server := newAPITestServer(t,
-		WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(*http.Request) (controlplaneapi.Principal, *controlplaneapi.Error) {
-			return controlplaneapi.Principal{Subject: "user-123"}, nil
+		WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(*http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
+			return controlplaneapi.Identity{Subject: "user-123"}, nil
 		})),
-		WithAPIRoutes(testEndpoint(func(http.ResponseWriter, *http.Request, controlplaneapi.Principal) *controlplaneapi.Error {
+		WithAPIRoutes(testEndpoint(func(http.ResponseWriter, *http.Request, controlplaneapi.Identity) *controlplaneapi.Error {
 			panic("secret panic detail")
 		})),
 		WithAuthorizer(allowAllAuthorizer(t)),
@@ -184,10 +184,10 @@ func TestAPIRecoversPanicWithoutLeakingIt(t *testing.T) {
 func TestAPIDefaultPolicyDeniesBeforeHandlerWithoutLeakingResourceExistence(t *testing.T) {
 	handled := false
 	server := newAPITestServer(t,
-		WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(*http.Request) (controlplaneapi.Principal, *controlplaneapi.Error) {
-			return controlplaneapi.Principal{Subject: "user-123", Groups: []string{"developers"}}, nil
+		WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(*http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
+			return controlplaneapi.Identity{Subject: "user-123", Groups: []string{"developers"}}, nil
 		})),
-		WithAPIRoutes(testEndpoint(func(http.ResponseWriter, *http.Request, controlplaneapi.Principal) *controlplaneapi.Error {
+		WithAPIRoutes(testEndpoint(func(http.ResponseWriter, *http.Request, controlplaneapi.Identity) *controlplaneapi.Error {
 			handled = true
 			return nil
 		})),
@@ -212,11 +212,11 @@ func TestAPIMapsRequestToPolicyAndStoresDecisionInContext(t *testing.T) {
 		t.Fatal(err)
 	}
 	server := newAPITestServer(t,
-		WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(*http.Request) (controlplaneapi.Principal, *controlplaneapi.Error) {
-			return controlplaneapi.Principal{Subject: "user-123", Groups: []string{"developers"}}, nil
+		WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(*http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
+			return controlplaneapi.Identity{Subject: "user-123", Groups: []string{"developers"}}, nil
 		})),
 		WithAuthorizer(engine),
-		WithAPIRoutes(testEndpoint(func(writer http.ResponseWriter, request *http.Request, _ controlplaneapi.Principal) *controlplaneapi.Error {
+		WithAPIRoutes(testEndpoint(func(writer http.ResponseWriter, request *http.Request, _ controlplaneapi.Identity) *controlplaneapi.Error {
 			authorizationRequest, decision, ok := controlplanemiddleware.AuthorizationFromContext(request.Context())
 			if !ok || authorizationRequest.Operation != "get" || authorizationRequest.Namespace != "payments" ||
 				authorizationRequest.ResourceKind != "pods" || authorizationRequest.ResourceName != "pod-1" || decision.RuleID != "payments-read" {
@@ -248,11 +248,11 @@ func TestUnifiedAuthorizerGatesTaskCreationAndControlPlaneStreams(t *testing.T) 
 			handled := false
 			authorizer := &recordingAuthorizer{decision: authorization.Decision{Allowed: true, RuleID: "unified"}}
 			server := newAPITestServer(t,
-				WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(*http.Request) (controlplaneapi.Principal, *controlplaneapi.Error) {
-					return controlplaneapi.Principal{Subject: "principal-1", Groups: []string{"developers"}}, nil
+				WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(*http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
+					return controlplaneapi.Identity{Subject: "identity-1", Groups: []string{"developers"}}, nil
 				})),
 				WithAuthorizer(authorizer),
-				WithAPIRoutes(sessionTestEndpoint(func(writer http.ResponseWriter, _ *http.Request, _ controlplaneapi.Principal) *controlplaneapi.Error {
+				WithAPIRoutes(sessionTestEndpoint(func(writer http.ResponseWriter, _ *http.Request, _ controlplaneapi.Identity) *controlplaneapi.Error {
 					handled = true
 					writer.WriteHeader(http.StatusNoContent)
 					return nil
@@ -263,7 +263,7 @@ func TestUnifiedAuthorizerGatesTaskCreationAndControlPlaneStreams(t *testing.T) 
 			if !handled || response.Code != http.StatusNoContent || authorizer.calls != 1 {
 				t.Fatalf("handled = %t, status = %d, authorizer calls = %d", handled, response.Code, authorizer.calls)
 			}
-			if authorizer.subject.ID != "principal-1" || authorizer.request.Operation != test.operation ||
+			if authorizer.subject.ID != "identity-1" || authorizer.request.Operation != test.operation ||
 				authorizer.request.Namespace != "development" || authorizer.request.ResourceKind != test.resourceKind {
 				t.Fatalf("subject = %#v, request = %#v", authorizer.subject, authorizer.request)
 			}
@@ -274,11 +274,11 @@ func TestUnifiedAuthorizerGatesTaskCreationAndControlPlaneStreams(t *testing.T) 
 func TestSessionRoutesDoNotUseKubeloopPrefix(t *testing.T) {
 	handled := false
 	server := newAPITestServer(t,
-		WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(*http.Request) (controlplaneapi.Principal, *controlplaneapi.Error) {
-			return controlplaneapi.Principal{Subject: "user-123"}, nil
+		WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(*http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
+			return controlplaneapi.Identity{Subject: "user-123"}, nil
 		})),
 		WithAuthorizer(allowAllAuthorizer(t)),
-		WithAPIRoutes(APIRoutes{Sessions: SessionEndpoints{Create: func(ctx *echo.Context, _ controlplaneapi.Principal) *controlplaneapi.Error {
+		WithAPIRoutes(APIRoutes{Sessions: SessionEndpoints{Create: func(ctx *echo.Context, _ controlplaneapi.Identity) *controlplaneapi.Error {
 			handled = true
 			return nil
 		}}}),

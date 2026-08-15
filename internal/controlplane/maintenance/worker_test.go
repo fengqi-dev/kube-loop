@@ -27,15 +27,15 @@ func TestRunOnceDeletesExpiredSessionAndCascadesTask(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	principal, err := store.Principals().Upsert(ctx, storage.Principal{
-		ID: uuid.NewString(), Provider: "oidc", ExternalID: "maintenance-user", CreatedAt: now.Add(-time.Hour),
+	identity, err := store.Identities().Create(ctx, storage.Identity{
+		ID: uuid.NewString(), Type: "human", DisplayName: "Test Identity", Status: "active", CreatedAt: now.Add(-time.Hour),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	expiredSession := storage.Session{
-		ID: uuid.NewString(), PrincipalID: principal.ID, DeviceID: "crashed-client", ClusterID: "cluster-a",
+		ID: uuid.NewString(), IdentityID: identity.ID, DeviceID: "crashed-client", ClusterID: "cluster-a",
 		Namespace: "development", State: "active", CreatedAt: now.Add(-time.Hour),
 		UpdatedAt: now.Add(-time.Minute), LastHeartbeatAt: now.Add(-time.Minute), ExpiresAt: now.Add(-time.Second),
 	}
@@ -44,7 +44,7 @@ func TestRunOnceDeletesExpiredSessionAndCascadesTask(t *testing.T) {
 	}
 	expiry := expiredSession.ExpiresAt
 	expiredTask := storage.Task{
-		ID: uuid.NewString(), PrincipalID: principal.ID, SessionID: expiredSession.ID,
+		ID: uuid.NewString(), IdentityID: identity.ID, SessionID: expiredSession.ID,
 		Type: "port-forward", State: remotetask.Running, Spec: json.RawMessage(`{"kind":"service"}`),
 		IdempotencyKey: "crashed-port-forward", CreatedAt: now.Add(-time.Minute), ExpiresAt: &expiry,
 	}

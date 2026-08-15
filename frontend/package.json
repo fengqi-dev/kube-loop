@@ -20,7 +20,8 @@
     "build:auth": "npm run build --workspace=kubeloop-auth-frontend",
     "build:site": "npm run build --workspace=kubeloop-site",
     "test": "npm run test --workspaces --if-present",
-    "test:admin": "npm run test --workspace=kubeloop-admin-frontend"
+    "test:admin": "npm run test --workspace=kubeloop-admin-frontend",
+    "test:auth": "npm run test --workspace=kubeloop-auth-frontend"
   },
   "engines": {
     "node": ">=22"

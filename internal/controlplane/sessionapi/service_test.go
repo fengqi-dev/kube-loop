@@ -36,12 +36,12 @@ type revocableCapabilityDiscoverer struct{ revoked bool }
 
 func (discoverer *revocableCapabilityDiscoverer) DiscoverCapabilities(
 	ctx context.Context,
-	principal controlplaneapi.Principal,
+	identity controlplaneapi.Identity,
 	namespace string,
 ) (capability.Snapshot, *controlplaneapi.Error) {
 	if discoverer.revoked {
 		snapshot, err := capability.Normalize(capability.Snapshot{
-			SchemaVersion: capability.SchemaVersion, PrincipalID: principal.Subject,
+			SchemaVersion: capability.SchemaVersion, IdentityID: identity.Subject,
 			Namespace: namespace, GatewayVersion: "v2-test",
 		})
 		if err != nil {
@@ -49,16 +49,16 @@ func (discoverer *revocableCapabilityDiscoverer) DiscoverCapabilities(
 		}
 		return snapshot, nil
 	}
-	return staticCapabilityDiscoverer{}.DiscoverCapabilities(ctx, principal, namespace)
+	return staticCapabilityDiscoverer{}.DiscoverCapabilities(ctx, identity, namespace)
 }
 
 func (staticCapabilityDiscoverer) DiscoverCapabilities(
 	_ context.Context,
-	principal controlplaneapi.Principal,
+	identity controlplaneapi.Identity,
 	namespace string,
 ) (capability.Snapshot, *controlplaneapi.Error) {
 	snapshot, err := capability.Normalize(capability.Snapshot{
-		SchemaVersion: capability.SchemaVersion, PrincipalID: principal.Subject, Namespace: namespace,
+		SchemaVersion: capability.SchemaVersion, IdentityID: identity.Subject, Namespace: namespace,
 		GatewayVersion: "v2-test", Capabilities: []string{"cluster.tunnel", "pods.list"},
 	})
 	if err != nil {
@@ -69,7 +69,7 @@ func (staticCapabilityDiscoverer) DiscoverCapabilities(
 
 func (staticNetworkDiscoverer) Discover(
 	context.Context,
-	controlplaneapi.Principal,
+	controlplaneapi.Identity,
 	string,
 ) (networkspec.Spec, error) {
 	return networkspec.Normalize(networkspec.Spec{
@@ -87,10 +87,10 @@ func (capture *auditCapture) Record(_ context.Context, record controlplane.Audit
 
 func TestClusterSessionLifecycleIsOwnedIdempotentAndAudited(t *testing.T) {
 	now := time.Date(2026, 8, 10, 1, 0, 0, 0, time.UTC)
-	server, stateStore, capture, principalID := newSessionTestServer(t, func() time.Time { return now })
+	server, stateStore, capture, identityID := newSessionTestServer(t, func() time.Time { return now })
 	defer stateStore.Close()
 
-	create := sessionRequest(t, server, http.MethodPost, "/api/sessions?namespace=development", principalID, map[string]string{
+	create := sessionRequest(t, server, http.MethodPost, "/api/sessions?namespace=development", identityID, map[string]string{
 		sessionapi.IdempotencyHeader: "desktop-session-1",
 	})
 	if create.Code != http.StatusCreated || create.Header().Get("ETag") != `"1"` {
@@ -100,12 +100,12 @@ func TestClusterSessionLifecycleIsOwnedIdempotentAndAudited(t *testing.T) {
 	if document.ID == "" || document.Namespace != "development" || document.State != "active" || document.Generation != 1 ||
 		document.NetworkSpec.Version != networkspec.Version || len(document.NetworkSpec.PodCIDRs) == 0 ||
 		len(document.NetworkSpecHash) != 64 || document.Capabilities == nil ||
-		document.Capabilities.PrincipalID != principalID || document.Capabilities.Namespace != "development" ||
+		document.Capabilities.IdentityID != identityID || document.Capabilities.Namespace != "development" ||
 		len(document.Capabilities.Capabilities) != 2 {
 		t.Fatalf("created session = %#v", document)
 	}
 
-	replay := sessionRequest(t, server, http.MethodPost, "/api/sessions?namespace=development", principalID, map[string]string{
+	replay := sessionRequest(t, server, http.MethodPost, "/api/sessions?namespace=development", identityID, map[string]string{
 		sessionapi.IdempotencyHeader: "desktop-session-1",
 	})
 	replayed := decodeDocument(t, replay)
@@ -113,7 +113,7 @@ func TestClusterSessionLifecycleIsOwnedIdempotentAndAudited(t *testing.T) {
 		t.Fatalf("replay status = %d headers = %#v session = %#v", replay.Code, replay.Header(), replayed)
 	}
 
-	mismatch := sessionRequest(t, server, http.MethodPost, "/api/sessions?namespace=production", principalID, map[string]string{
+	mismatch := sessionRequest(t, server, http.MethodPost, "/api/sessions?namespace=production", identityID, map[string]string{
 		sessionapi.IdempotencyHeader: "desktop-session-1",
 	})
 	if mismatch.Code != http.StatusConflict {
@@ -122,7 +122,7 @@ func TestClusterSessionLifecycleIsOwnedIdempotentAndAudited(t *testing.T) {
 
 	now = now.Add(30 * time.Second)
 	heartbeat := sessionRequest(t, server, http.MethodPost,
-		"/api/sessions/"+document.ID+"/heartbeat?namespace=development", principalID,
+		"/api/sessions/"+document.ID+"/heartbeat?namespace=development", identityID,
 		map[string]string{"If-Match": `"1"`},
 	)
 	heartbeatDocument := decodeDocument(t, heartbeat)
@@ -131,16 +131,16 @@ func TestClusterSessionLifecycleIsOwnedIdempotentAndAudited(t *testing.T) {
 	}
 
 	stale := sessionRequest(t, server, http.MethodPost,
-		"/api/sessions/"+document.ID+"/heartbeat?namespace=development", principalID,
+		"/api/sessions/"+document.ID+"/heartbeat?namespace=development", identityID,
 		map[string]string{"If-Match": `"1"`},
 	)
 	if stale.Code != http.StatusConflict {
 		t.Fatalf("stale heartbeat status = %d body = %s", stale.Code, stale.Body.String())
 	}
 
-	otherPrincipal := uuid.NewString()
+	otherIdentity := uuid.NewString()
 	foreignRead := sessionRequest(t, server, http.MethodGet,
-		"/api/sessions/"+document.ID+"?namespace=development", otherPrincipal, nil,
+		"/api/sessions/"+document.ID+"?namespace=development", otherIdentity, nil,
 	)
 	if foreignRead.Code != http.StatusNotFound {
 		t.Fatalf("foreign read status = %d body = %s", foreignRead.Code, foreignRead.Body.String())
@@ -158,7 +158,7 @@ func TestClusterSessionLifecycleIsOwnedIdempotentAndAudited(t *testing.T) {
 		taskIDs[taskType] = taskID
 		expiresAt := document.ExpiresAt
 		if err := stateStore.Tasks().Create(context.Background(), storage.Task{
-			ID: taskID, PrincipalID: principalID, SessionID: document.ID, Type: taskType,
+			ID: taskID, IdentityID: identityID, SessionID: document.ID, Type: taskType,
 			State: state, Spec: json.RawMessage(`{}`), Result: json.RawMessage(`{}`),
 			IdempotencyKey: "task-" + taskType, CreatedAt: now, UpdatedAt: now, ExpiresAt: &expiresAt,
 		}); err != nil {
@@ -167,7 +167,7 @@ func TestClusterSessionLifecycleIsOwnedIdempotentAndAudited(t *testing.T) {
 	}
 
 	disconnect := sessionRequest(t, server, http.MethodDelete,
-		"/api/sessions/"+document.ID+"?namespace=development", principalID,
+		"/api/sessions/"+document.ID+"?namespace=development", identityID,
 		map[string]string{"If-Match": `"2"`},
 	)
 	disconnected := decodeDocument(t, disconnect)
@@ -188,7 +188,7 @@ func TestClusterSessionLifecycleIsOwnedIdempotentAndAudited(t *testing.T) {
 	}
 
 	idempotentDisconnect := sessionRequest(t, server, http.MethodDelete,
-		"/api/sessions/"+document.ID+"?namespace=development", principalID,
+		"/api/sessions/"+document.ID+"?namespace=development", identityID,
 		map[string]string{"If-Match": `"1"`},
 	)
 	if got := decodeDocument(t, idempotentDisconnect); idempotentDisconnect.Code != http.StatusOK || got.Generation != 3 {
@@ -210,22 +210,22 @@ func TestClusterSessionLifecycleIsOwnedIdempotentAndAudited(t *testing.T) {
 
 func TestExpiredSessionCannotBeResurrected(t *testing.T) {
 	now := time.Date(2026, 8, 10, 2, 0, 0, 0, time.UTC)
-	server, stateStore, _, principalID := newSessionTestServer(t, func() time.Time { return now })
+	server, stateStore, _, identityID := newSessionTestServer(t, func() time.Time { return now })
 	defer stateStore.Close()
-	create := sessionRequest(t, server, http.MethodPost, "/api/sessions?namespace=development", principalID, map[string]string{
+	create := sessionRequest(t, server, http.MethodPost, "/api/sessions?namespace=development", identityID, map[string]string{
 		sessionapi.IdempotencyHeader: "expiring-session",
 	})
 	document := decodeDocument(t, create)
 	now = now.Add(3 * time.Minute)
 	heartbeat := sessionRequest(t, server, http.MethodPost,
-		"/api/sessions/"+document.ID+"/heartbeat?namespace=development", principalID,
+		"/api/sessions/"+document.ID+"/heartbeat?namespace=development", identityID,
 		map[string]string{"If-Match": `"1"`},
 	)
 	if heartbeat.Code != http.StatusConflict {
 		t.Fatalf("expired heartbeat status = %d body = %s", heartbeat.Code, heartbeat.Body.String())
 	}
 	get := sessionRequest(t, server, http.MethodGet,
-		"/api/sessions/"+document.ID+"?namespace=development", principalID, nil,
+		"/api/sessions/"+document.ID+"?namespace=development", identityID, nil,
 	)
 	if loaded := decodeDocument(t, get); loaded.State != "expired" || loaded.Generation != 2 {
 		t.Fatalf("expired session = %#v", loaded)
@@ -235,15 +235,15 @@ func TestExpiredSessionCannotBeResurrected(t *testing.T) {
 func TestHeartbeatDisconnectsRuntimeAfterPolicyRevocation(t *testing.T) {
 	now := time.Date(2026, 8, 10, 2, 30, 0, 0, time.UTC)
 	discoverer := &revocableCapabilityDiscoverer{}
-	server, stateStore, _, principalID := newSessionTestServerWithCapabilities(t, func() time.Time { return now }, discoverer)
+	server, stateStore, _, identityID := newSessionTestServerWithCapabilities(t, func() time.Time { return now }, discoverer)
 	defer stateStore.Close()
-	created := sessionRequest(t, server, http.MethodPost, "/api/sessions?namespace=development", principalID, map[string]string{
+	created := sessionRequest(t, server, http.MethodPost, "/api/sessions?namespace=development", identityID, map[string]string{
 		sessionapi.IdempotencyHeader: "revocable-session",
 	})
 	document := decodeDocument(t, created)
 	discoverer.revoked = true
 	heartbeat := sessionRequest(t, server, http.MethodPost,
-		"/api/sessions/"+document.ID+"/heartbeat?namespace=development", principalID,
+		"/api/sessions/"+document.ID+"/heartbeat?namespace=development", identityID,
 		map[string]string{"If-Match": `"1"`},
 	)
 	if heartbeat.Code != http.StatusForbidden {
@@ -257,7 +257,7 @@ func TestHeartbeatDisconnectsRuntimeAfterPolicyRevocation(t *testing.T) {
 
 func TestSessionInputValidationStopsBeforeStorageLookup(t *testing.T) {
 	now := time.Now()
-	server, stateStore, _, principalID := newSessionTestServer(t, func() time.Time { return now })
+	server, stateStore, _, identityID := newSessionTestServer(t, func() time.Time { return now })
 	defer stateStore.Close()
 	tests := []struct {
 		method  string
@@ -270,7 +270,7 @@ func TestSessionInputValidationStopsBeforeStorageLookup(t *testing.T) {
 		{method: http.MethodPost, path: "/api/sessions/not-a-uuid/heartbeat?namespace=development", headers: map[string]string{"If-Match": `"1"`}},
 	}
 	for _, test := range tests {
-		response := sessionRequest(t, server, test.method, test.path, principalID, test.headers)
+		response := sessionRequest(t, server, test.method, test.path, identityID, test.headers)
 		if response.Code != http.StatusBadRequest && response.Code != http.StatusNotFound {
 			t.Fatalf("%s status = %d body = %s", test.path, response.Code, response.Body.String())
 		}
@@ -296,10 +296,10 @@ func newSessionTestServerWithCapabilities(
 	if err != nil {
 		t.Fatal(err)
 	}
-	principalID := uuid.NewString()
+	identityID := uuid.NewString()
 	createdAt := now().UTC()
-	if _, err := stateStore.Principals().Upsert(context.Background(), storage.Principal{
-		ID: principalID, Provider: "test", ExternalID: "user-1", CreatedAt: createdAt, UpdatedAt: createdAt,
+	if _, err := stateStore.Identities().Create(context.Background(), storage.Identity{
+		ID: identityID, Type: "human", DisplayName: "Test Identity", Status: "active", CreatedAt: createdAt, UpdatedAt: createdAt,
 	}); err != nil {
 		stateStore.Close()
 		t.Fatal(err)
@@ -324,12 +324,12 @@ func newSessionTestServerWithCapabilities(
 	server, err := controlplane.NewServer(
 		controlplane.Config{PublicURL: "https://gateway.example.test"}, controlplane.BuildInfo{},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
-		controlplane.WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(request *http.Request) (controlplaneapi.Principal, *controlplaneapi.Error) {
-			subject := request.Header.Get("X-Test-Principal")
+		controlplane.WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(request *http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
+			subject := request.Header.Get("X-Test-Identity")
 			if subject == "" {
-				subject = principalID
+				subject = identityID
 			}
-			return controlplaneapi.Principal{Subject: subject, DeviceID: "device-1"}, nil
+			return controlplaneapi.Identity{Subject: subject, DeviceID: "device-1"}, nil
 		})),
 		controlplane.WithAuthorizer(policy), controlplane.WithAuditSink(capture), controlplane.WithAPIRoutes(controlplane.APIRoutes{Sessions: sessionapi.NewRoutes(handler).Endpoints()}),
 	)
@@ -337,18 +337,18 @@ func newSessionTestServerWithCapabilities(
 		stateStore.Close()
 		t.Fatal(err)
 	}
-	return server, stateStore, capture, principalID
+	return server, stateStore, capture, identityID
 }
 
 func sessionRequest(
 	t *testing.T,
 	server *controlplane.Server,
-	method, path, principalID string,
+	method, path, identityID string,
 	headers map[string]string,
 ) *httptest.ResponseRecorder {
 	t.Helper()
 	request := httptest.NewRequest(method, path, nil)
-	request.Header.Set("X-Test-Principal", principalID)
+	request.Header.Set("X-Test-Identity", identityID)
 	for key, value := range headers {
 		request.Header.Set(key, value)
 	}

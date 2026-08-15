@@ -39,11 +39,11 @@ type Storage interface {
 }
 
 type NetworkDiscoverer interface {
-	Discover(context.Context, controlplaneapi.Principal, string) (networkspec.Spec, error)
+	Discover(context.Context, controlplaneapi.Identity, string) (networkspec.Spec, error)
 }
 
 type CapabilityDiscoverer interface {
-	DiscoverCapabilities(context.Context, controlplaneapi.Principal, string) (capability.Snapshot, *controlplaneapi.Error)
+	DiscoverCapabilities(context.Context, controlplaneapi.Identity, string) (capability.Snapshot, *controlplaneapi.Error)
 }
 
 type Config struct {
@@ -102,10 +102,10 @@ func New(storageBackend Storage, config Config) (*Service, error) {
 
 func (handler *Service) RequireActive(
 	ctx context.Context,
-	principal controlplaneapi.Principal,
+	identity controlplaneapi.Identity,
 	namespace, id string,
 ) (ActiveSession, *controlplaneapi.Error) {
-	session, apiError := handler.loadOwned(ctx, principal, namespace, id)
+	session, apiError := handler.loadOwned(ctx, identity, namespace, id)
 	if apiError != nil {
 		return ActiveSession{}, apiError
 	}
@@ -126,11 +126,11 @@ func (handler *Service) RequireActive(
 
 func (handler *Service) create(
 	ctx *echo.Context,
-	principal controlplaneapi.Principal,
+	identity controlplaneapi.Identity,
 	namespace string,
 ) *controlplaneapi.Error {
 	request := ctx.Request()
-	if strings.TrimSpace(principal.Subject) == "" || strings.TrimSpace(principal.DeviceID) == "" {
+	if strings.TrimSpace(identity.Subject) == "" || strings.TrimSpace(identity.DeviceID) == "" {
 		return &controlplaneapi.Error{Code: controlplaneapi.CodeUnauthenticated, Message: "authenticated device identity is required"}
 	}
 	idempotencyKey, apiError := idempotencyKey(request)
@@ -138,11 +138,11 @@ func (handler *Service) create(
 		return apiError
 	}
 	now := handler.now().UTC()
-	capabilitySnapshot, apiError := handler.capabilities.DiscoverCapabilities(request.Context(), principal, namespace)
+	capabilitySnapshot, apiError := handler.capabilities.DiscoverCapabilities(request.Context(), identity, namespace)
 	if apiError != nil {
 		return apiError
 	}
-	spec, err := handler.networks.Discover(request.Context(), principal, namespace)
+	spec, err := handler.networks.Discover(request.Context(), identity, namespace)
 	if err != nil {
 		return &controlplaneapi.Error{Code: controlplaneapi.CodeUnavailable, Message: "Kubernetes NetworkSpec discovery failed", Cause: err}
 	}
@@ -155,7 +155,7 @@ func (handler *Service) create(
 		return &controlplaneapi.Error{Code: controlplaneapi.CodeInternal, Message: "NetworkSpec validation failed", Cause: err}
 	}
 	session := storage.Session{
-		ID: uuid.NewString(), PrincipalID: principal.Subject, DeviceID: principal.DeviceID,
+		ID: uuid.NewString(), IdentityID: identity.Subject, DeviceID: identity.DeviceID,
 		ClusterID: handler.clusterID, Namespace: namespace, State: "active",
 		Generation:  1,
 		NetworkSpec: specJSON, NetworkSpecHash: specHash,
@@ -171,7 +171,7 @@ func (handler *Service) create(
 	created := false
 	err = handler.storage.WithinTransaction(request.Context(), func(repositories storage.Repositories) error {
 		record, reserved, reserveErr := repositories.Idempotency().Reserve(request.Context(), storage.IdempotencyRecord{
-			Scope: "session:create:" + principal.Subject, Key: idempotencyKey, RequestHash: requestHash,
+			Scope: "session:create:" + identity.Subject, Key: idempotencyKey, RequestHash: requestHash,
 			ResourceType: "session", ResourceID: session.ID, Response: responseJSON,
 			CreatedAt: now, ExpiresAt: now.Add(handler.maxLifetime),
 		})
@@ -186,7 +186,7 @@ func (handler *Service) create(
 			if getErr != nil {
 				return getErr
 			}
-			if !ownedBy(existing, principal, namespace) {
+			if !ownedBy(existing, identity, namespace) {
 				return storage.ErrNotFound
 			}
 			session = existing
@@ -215,11 +215,11 @@ func (handler *Service) create(
 
 func (handler *Service) get(
 	ctx *echo.Context,
-	principal controlplaneapi.Principal,
+	identity controlplaneapi.Identity,
 	namespace, id string,
 ) *controlplaneapi.Error {
 	request := ctx.Request()
-	session, apiError := handler.loadOwned(request.Context(), principal, namespace, id)
+	session, apiError := handler.loadOwned(request.Context(), identity, namespace, id)
 	if apiError != nil {
 		return apiError
 	}
@@ -230,7 +230,7 @@ func (handler *Service) get(
 
 func (handler *Service) heartbeat(
 	ctx *echo.Context,
-	principal controlplaneapi.Principal,
+	identity controlplaneapi.Identity,
 	namespace, id string,
 ) *controlplaneapi.Error {
 	request := ctx.Request()
@@ -238,7 +238,7 @@ func (handler *Service) heartbeat(
 	if apiError != nil {
 		return apiError
 	}
-	session, apiError := handler.loadOwned(request.Context(), principal, namespace, id)
+	session, apiError := handler.loadOwned(request.Context(), identity, namespace, id)
 	if apiError != nil {
 		return apiError
 	}
@@ -247,7 +247,7 @@ func (handler *Service) heartbeat(
 	if session.State != "active" || !session.ExpiresAt.After(now) {
 		return &controlplaneapi.Error{Code: controlplaneapi.CodeConflict, Message: "Session is not active"}
 	}
-	currentCapabilities, capabilityError := handler.capabilities.DiscoverCapabilities(request.Context(), principal, namespace)
+	currentCapabilities, capabilityError := handler.capabilities.DiscoverCapabilities(request.Context(), identity, namespace)
 	if capabilityError != nil {
 		return capabilityError
 	}
@@ -268,7 +268,7 @@ func (handler *Service) heartbeat(
 	if !nextExpiry.After(now) {
 		return &controlplaneapi.Error{Code: controlplaneapi.CodeConflict, Message: "Session maximum lifetime has elapsed"}
 	}
-	spec, err := handler.networks.Discover(request.Context(), principal, namespace)
+	spec, err := handler.networks.Discover(request.Context(), identity, namespace)
 	if err != nil {
 		return &controlplaneapi.Error{Code: controlplaneapi.CodeUnavailable, Message: "Kubernetes NetworkSpec refresh failed", Cause: err}
 	}
@@ -295,7 +295,7 @@ func (handler *Service) heartbeat(
 
 func (handler *Service) disconnect(
 	ctx *echo.Context,
-	principal controlplaneapi.Principal,
+	identity controlplaneapi.Identity,
 	namespace, id string,
 ) *controlplaneapi.Error {
 	request := ctx.Request()
@@ -303,7 +303,7 @@ func (handler *Service) disconnect(
 	if apiError != nil {
 		return apiError
 	}
-	session, apiError := handler.loadOwned(request.Context(), principal, namespace, id)
+	session, apiError := handler.loadOwned(request.Context(), identity, namespace, id)
 	if apiError != nil {
 		return apiError
 	}
@@ -386,14 +386,14 @@ func (handler *Service) settleOwnedTasks(ctx context.Context, sessionID string) 
 
 func (handler *Service) loadOwned(
 	ctx context.Context,
-	principal controlplaneapi.Principal,
+	identity controlplaneapi.Identity,
 	namespace, id string,
 ) (storage.Session, *controlplaneapi.Error) {
 	if _, err := uuid.Parse(id); err != nil {
 		return storage.Session{}, notFound()
 	}
 	session, err := handler.storage.Sessions().GetByID(ctx, id)
-	if err != nil || !ownedBy(session, principal, namespace) {
+	if err != nil || !ownedBy(session, identity, namespace) {
 		if err != nil && !errors.Is(err, storage.ErrNotFound) {
 			return storage.Session{}, mapStorageError(err)
 		}
@@ -423,8 +423,8 @@ func (handler *Service) loadOwned(
 	return session, nil
 }
 
-func ownedBy(session storage.Session, principal controlplaneapi.Principal, namespace string) bool {
-	return session.PrincipalID == principal.Subject && session.DeviceID == principal.DeviceID && session.Namespace == namespace
+func ownedBy(session storage.Session, identity controlplaneapi.Identity, namespace string) bool {
+	return session.IdentityID == identity.Subject && session.DeviceID == identity.DeviceID && session.Namespace == namespace
 }
 
 func documentFromSession(session storage.Session) Document {

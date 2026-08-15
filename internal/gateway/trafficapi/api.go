@@ -91,7 +91,7 @@ func (api *API) stream(ctx *echo.Context) error {
 	}
 	mode := trafficcontrol.Mode(ctx.Param("mode"))
 	identity := trafficcontrol.Identity{
-		PrincipalID: claims.PrincipalID, Groups: append([]string(nil), claims.Groups...), DeviceID: claims.DeviceID,
+		IdentityID: claims.IdentityID, Groups: append([]string(nil), claims.Groups...), DeviceID: claims.DeviceID,
 		SessionID: claims.SessionID, SessionGeneration: claims.SessionGeneration, Namespace: claims.Namespace,
 	}
 	claimRequest := trafficcontrol.ClaimRequest{Mode: mode, TaskID: ctx.Param("taskID"), Identity: identity}

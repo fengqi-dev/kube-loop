@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/fengqi-dev/kube-loop/internal/controlplane"
-	managementconfig "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/config"
+	adminconfig "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/config"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/fileapi"
 	controlplanekubernetes "github.com/fengqi-dev/kube-loop/internal/controlplane/kubernetes"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/maintenance"
@@ -24,7 +24,7 @@ const maximumControlPlaneConfigBytes = 4 << 20
 type controlPlaneConfigDocument struct {
 	API            apiConfig            `json:"api"`
 	Authentication authenticationConfig `json:"authentication"`
-	Management     managementConfig     `json:"management"`
+	Admin          adminConfig          `json:"admin"`
 	Kubernetes     kubernetesConfig     `json:"kubernetes"`
 	Relay          relayConfig          `json:"relay"`
 	Sessions       sessionsConfig       `json:"sessions"`
@@ -57,18 +57,19 @@ type oauthConfig struct {
 	RefreshTTL         string `json:"refreshTTL"`
 }
 
-type managementConfig struct {
-	Listen       string                            `json:"listen"`
-	PublicURL    string                            `json:"publicURL"`
-	InitialAdmin initialAdminConfig                `json:"initialAdmin"`
-	Bootstrap    managementconfig.BootstrapConfig  `json:"bootstrap"`
-	BreakGlass   managementconfig.BreakGlassConfig `json:"breakGlass"`
+type adminConfig struct {
+	Listen     string                       `json:"listen"`
+	PublicURL  string                       `json:"publicURL"`
+	Bootstrap  adminBootstrapConfig         `json:"bootstrap"`
+	BreakGlass adminconfig.BreakGlassConfig `json:"breakGlass"`
 }
 
-type initialAdminConfig struct {
-	UsernameFile         string `json:"usernameFile,omitempty"`
-	PasswordFile         string `json:"passwordFile,omitempty"`
-	MFAEncryptionKeyFile string `json:"mfaEncryptionKeyFile,omitempty"`
+type adminBootstrapConfig struct {
+	Enabled      bool   `json:"enabled"`
+	Username     string `json:"username"`
+	PasswordFile string `json:"passwordFile,omitempty"`
+	DisplayName  string `json:"displayName"`
+	Email        string `json:"email,omitempty"`
 }
 
 type kubernetesConfig struct {
@@ -153,7 +154,7 @@ type kubeloopConfigDocument struct {
 
 type loadedControlPlaneConfig struct {
 	Document            controlPlaneConfigDocument
-	Management          managementconfig.File
+	Admin               adminconfig.File
 	Kubernetes          controlplanekubernetes.Config
 	Storage             controlplanestorage.Config
 	Files               fileapi.Config
@@ -201,8 +202,8 @@ func normalizeControlPlaneConfig(document controlPlaneConfigDocument) (loadedCon
 	applyControlPlaneDefaults(&document)
 	result := loadedControlPlaneConfig{Document: document}
 	var err error
-	result.Management, err = managementconfig.Normalize(managementconfig.File{
-		Bootstrap: document.Management.Bootstrap, BreakGlass: document.Management.BreakGlass,
+	result.Admin, err = adminconfig.Normalize(adminconfig.File{
+		BreakGlass: document.Admin.BreakGlass,
 	})
 	if err != nil {
 		return loadedControlPlaneConfig{}, err
@@ -237,6 +238,15 @@ func normalizeControlPlaneConfig(document controlPlaneConfigDocument) (loadedCon
 			return loadedControlPlaneConfig{}, err
 		}
 	}
+	if strings.TrimSpace(document.Authentication.OAuth.OIDCSigningKeyFile) == "" ||
+		strings.TrimSpace(document.Authentication.OAuth.HMACSecretFile) == "" {
+		return loadedControlPlaneConfig{}, errors.New("authentication OAuth key files are required")
+	}
+	if document.Admin.Bootstrap.Enabled &&
+		(strings.TrimSpace(document.Admin.Bootstrap.Username) == "" ||
+			strings.TrimSpace(document.Admin.Bootstrap.DisplayName) == "") {
+		return loadedControlPlaneConfig{}, errors.New("admin bootstrap identity and organization are required")
+	}
 	return result, nil
 }
 
@@ -259,11 +269,17 @@ func applyControlPlaneDefaults(document *controlPlaneConfigDocument) {
 	if document.API.MaxRequestBodyBytes == 0 {
 		document.API.MaxRequestBodyBytes = controlplane.DefaultMaxRequestBodyBytes
 	}
-	if document.Management.Listen == "" {
-		document.Management.Listen = ":8081"
+	if document.Admin.Listen == "" {
+		document.Admin.Listen = ":8081"
 	}
-	if document.Management.PublicURL == "" {
-		document.Management.PublicURL = "http://127.0.0.1:8081"
+	if document.Admin.PublicURL == "" {
+		document.Admin.PublicURL = "http://127.0.0.1:8081"
+	}
+	if document.Admin.Bootstrap.Username == "" {
+		document.Admin.Bootstrap.Username = "admin"
+	}
+	if document.Admin.Bootstrap.DisplayName == "" {
+		document.Admin.Bootstrap.DisplayName = "KubeLoop Administrator"
 	}
 	if document.Authentication.OAuth.KeyID == "" {
 		document.Authentication.OAuth.KeyID = "primary"

@@ -27,8 +27,12 @@ controlPlane:
       hmacSecretFile: /run/secrets/hmac
       accessTTL: 7m
       refreshTTL: 48h
-  management:
+  admin:
     publicURL: https://kubeloop.example.com
+    bootstrap:
+      enabled: true
+      username: root-admin
+      displayName: Root Administrator
   kubernetes:
     timeout: 20s
   relay:
@@ -80,6 +84,9 @@ gateway: {}
 	}
 	if config.Storage.DatasourceURL != "postgres://user:secret@database/test?sslmode=require" {
 		t.Fatal("datasource URL file was not loaded")
+	}
+	if !config.Document.Admin.Bootstrap.Enabled || config.Document.Admin.Bootstrap.Username != "root-admin" {
+		t.Fatalf("admin bootstrap=%+v", config.Document.Admin.Bootstrap)
 	}
 }
 

@@ -29,7 +29,7 @@ type Claims struct {
 	Version           int      `json:"ver"`
 	Issuer            string   `json:"iss"`
 	Audience          string   `json:"aud"`
-	PrincipalID       string   `json:"sub"`
+	IdentityID        string   `json:"sub"`
 	Groups            []string `json:"groups,omitempty"`
 	DeviceID          string   `json:"device_id"`
 	SessionID         string   `json:"session_id"`
@@ -206,7 +206,7 @@ func (verifier *Verifier) Verify(ticket string) (Claims, error) {
 
 func validateClaims(claims Claims) error {
 	if claims.Version != Version || !validText(claims.Issuer, 512) || !validIdentifier(claims.Audience, 128) ||
-		!validIdentifier(claims.PrincipalID, 256) || !validIdentifier(claims.DeviceID, 256) ||
+		!validIdentifier(claims.IdentityID, 256) || !validIdentifier(claims.DeviceID, 256) ||
 		!validIdentifier(claims.SessionID, 128) || !validIdentifier(claims.Namespace, 253) ||
 		claims.SessionGeneration == 0 || !validIdentifier(claims.TicketID, 128) ||
 		len(claims.Groups) > 128 || len(claims.Operations) == 0 || len(claims.Operations) > 16 {

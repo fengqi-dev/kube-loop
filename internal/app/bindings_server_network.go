@@ -14,8 +14,11 @@ import (
 
 type ServerNetworkSettings struct {
 	DNSNamespace string                    `json:"dnsNamespace,omitempty"`
+	SOCKSPort    int                       `json:"socksPort"`
 	HostAliases  []clientprofile.HostAlias `json:"hostAliases,omitempty"`
 }
+
+const defaultServerSOCKSPort = 1080
 
 func (a *App) GetServerNetworkSettings(profileID string) (ServerNetworkSettings, error) {
 	serverProfile, err := a.serverProfile(profileID)
@@ -46,6 +49,25 @@ func (a *App) SetServerDNSNamespace(profileID, namespace string) (ServerNetworkS
 				return ServerNetworkSettings{}, updateErr
 			}
 		}
+	}
+	return networkSettings(stored), nil
+}
+
+func (a *App) SetServerSOCKSPort(profileID string, port int) (ServerNetworkSettings, error) {
+	if port < 1 || port > 65535 {
+		return ServerNetworkSettings{}, errors.New("SOCKS port must be between 1 and 65535")
+	}
+	serverProfile, err := a.serverProfile(profileID)
+	if err != nil {
+		return ServerNetworkSettings{}, err
+	}
+	serverProfile.SOCKSPort = port
+	if err := a.profiles.Upsert(serverProfile); err != nil {
+		return ServerNetworkSettings{}, err
+	}
+	stored, err := a.serverProfile(profileID)
+	if err != nil {
+		return ServerNetworkSettings{}, err
 	}
 	return networkSettings(stored), nil
 }
@@ -157,8 +179,13 @@ func (a *App) UninstallHelper() error {
 }
 
 func networkSettings(serverProfile clientprofile.Profile) ServerNetworkSettings {
+	socksPort := serverProfile.SOCKSPort
+	if socksPort == 0 {
+		socksPort = defaultServerSOCKSPort
+	}
 	return ServerNetworkSettings{
 		DNSNamespace: serverProfile.DNSNamespace,
+		SOCKSPort:    socksPort,
 		HostAliases:  append([]clientprofile.HostAlias{}, serverProfile.HostAliases...),
 	}
 }

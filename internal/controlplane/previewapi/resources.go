@@ -14,7 +14,7 @@ import (
 )
 
 type ResourceManager interface {
-	Create(context.Context, controlplaneapi.Principal, servicebinding.PreviewServiceSnapshot, string) (*corev1.Service, error)
+	Create(context.Context, controlplaneapi.Identity, servicebinding.PreviewServiceSnapshot, string) (*corev1.Service, error)
 	Delete(context.Context, servicebinding.PreviewServiceSnapshot, string) error
 }
 
@@ -35,7 +35,7 @@ func NewTrafficBindingResourceManager(
 
 func (manager *TrafficBindingResourceManager) Create(
 	ctx context.Context,
-	_ controlplaneapi.Principal,
+	_ controlplaneapi.Identity,
 	snapshot servicebinding.PreviewServiceSnapshot,
 	previewID string,
 ) (*corev1.Service, error) {

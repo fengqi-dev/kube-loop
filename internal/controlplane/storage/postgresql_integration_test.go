@@ -59,8 +59,8 @@ func TestPostgreSQLBackendIntegration(t *testing.T) {
 
 	ctx := context.Background()
 	now := time.Date(2026, 8, 10, 9, 0, 0, 0, time.UTC)
-	_, err = store.Principals().Upsert(ctx, Principal{
-		ID: uuid.NewString(), Provider: "oidc", ExternalID: "postgres-user", CreatedAt: now,
+	_, err = store.Identities().Create(ctx, Identity{
+		ID: uuid.NewString(), Type: "human", DisplayName: "PostgreSQL User", Status: "active", CreatedAt: now,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -68,8 +68,8 @@ func TestPostgreSQLBackendIntegration(t *testing.T) {
 	rollbackID := uuid.NewString()
 	sentinel := errors.New("rollback")
 	err = store.WithinTransaction(ctx, func(repositories Repositories) error {
-		_, err := repositories.Principals().Upsert(ctx, Principal{
-			ID: rollbackID, Provider: "oidc", ExternalID: "rolled-back", CreatedAt: now,
+		_, err := repositories.Identities().Create(ctx, Identity{
+			ID: rollbackID, Type: "human", DisplayName: "Rolled Back", Status: "active", CreatedAt: now,
 		})
 		if err != nil {
 			return err
@@ -79,8 +79,8 @@ func TestPostgreSQLBackendIntegration(t *testing.T) {
 	if !errors.Is(err, sentinel) {
 		t.Fatalf("rollback error = %v", err)
 	}
-	if _, err := store.Principals().GetByID(ctx, rollbackID); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("rolled-back principal lookup = %v", err)
+	if _, err := store.Identities().GetByID(ctx, rollbackID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("rolled-back identity lookup = %v", err)
 	}
 }
 
@@ -91,7 +91,7 @@ func TestPostgreSQLMigrationFailureRollsBackVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := database.Exec(`CREATE TABLE principals (broken TEXT)`); err != nil {
+	if _, err := database.Exec(`CREATE TABLE identities (broken TEXT)`); err != nil {
 		_ = database.Close()
 		t.Fatal(err)
 	}
@@ -193,14 +193,14 @@ func TestPostgreSQLConcurrentMigrationsAndSerializableRetryIntegration(t *testin
 					return errors.New("unexpected repository implementation")
 				}
 				var isolation string
-				if err := set.principals.executor.QueryRowContext(ctx, `SHOW transaction_isolation`).Scan(&isolation); err != nil {
+				if err := set.identities.executor.QueryRowContext(ctx, `SHOW transaction_isolation`).Scan(&isolation); err != nil {
 					return databaseError("read transaction isolation", err)
 				}
 				if isolation != "serializable" {
 					return errors.New("PostgreSQL transaction is not serializable")
 				}
 				var value int
-				if err := set.principals.executor.QueryRowContext(ctx, `SELECT value FROM retry_counter WHERE id = 1`).Scan(&value); err != nil {
+				if err := set.identities.executor.QueryRowContext(ctx, `SELECT value FROM retry_counter WHERE id = 1`).Scan(&value); err != nil {
 					return databaseError("read retry counter", err)
 				}
 				readNumber := firstReads.Add(1)
@@ -214,7 +214,7 @@ func TestPostgreSQLConcurrentMigrationsAndSerializableRetryIntegration(t *testin
 						return ctx.Err()
 					}
 				}
-				if _, err := set.principals.executor.ExecContext(ctx, `UPDATE retry_counter SET value = $1 WHERE id = 1`, value+1); err != nil {
+				if _, err := set.identities.executor.ExecContext(ctx, `UPDATE retry_counter SET value = $1 WHERE id = 1`, value+1); err != nil {
 					return databaseError("update retry counter", err)
 				}
 				return nil

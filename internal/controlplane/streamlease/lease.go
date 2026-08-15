@@ -39,7 +39,7 @@ func RuntimeFrom(value any) RuntimeRegistry {
 func Start(
 	parent context.Context,
 	store Store,
-	principal controlplaneapi.Principal,
+	identity controlplaneapi.Identity,
 	session sessionapi.ActiveSession,
 	config Config,
 ) (context.Context, context.CancelFunc, error) {
@@ -59,20 +59,20 @@ func Start(
 		return nil, nil, errors.New("Task identity is required for owner heartbeat")
 	}
 	now := config.Now().UTC()
-	if !session.ExpiresAt.After(now) || (!principal.AccessExpiresAt.IsZero() && !principal.AccessExpiresAt.After(now)) {
+	if !session.ExpiresAt.After(now) || (!identity.AccessExpiresAt.IsZero() && !identity.AccessExpiresAt.After(now)) {
 		return nil, nil, errors.New("authorization lease expired")
 	}
 	var ctx context.Context
 	var cancel context.CancelFunc
-	if principal.AccessExpiresAt.IsZero() || principal.AuthorizationID != "" {
+	if identity.AccessExpiresAt.IsZero() || identity.AuthorizationID != "" {
 		// The OAuth grant is checked throughout the stream, so a refreshed
 		// login must not leave the WebSocket bound to the opening access token's
 		// immutable expiry. Credentials without a Family retain that deadline.
 		ctx, cancel = context.WithCancel(parent)
 	} else {
-		ctx, cancel = context.WithDeadline(parent, principal.AccessExpiresAt.UTC())
+		ctx, cancel = context.WithDeadline(parent, identity.AccessExpiresAt.UTC())
 	}
-	go watch(ctx, cancel, store, principal, session.ID, config)
+	go watch(ctx, cancel, store, identity, session.ID, config)
 	if config.Runtime != nil {
 		runtimeContext, release, err := config.Runtime.AttachRuntime(ctx, session.ID, config.TaskID)
 		if err != nil {
@@ -91,7 +91,7 @@ func watch(
 	ctx context.Context,
 	cancel context.CancelFunc,
 	store Store,
-	principal controlplaneapi.Principal,
+	identity controlplaneapi.Identity,
 	sessionID string,
 	config Config,
 ) {
@@ -106,24 +106,24 @@ func watch(
 			valid := true
 			if config.Authorizer != nil {
 				valid = config.Authorizer.Authorize(checkContext, authorization.Subject{
-					ID: principal.Subject, Provider: principal.Provider, Groups: append([]string(nil), principal.Groups...),
+					ID: identity.Subject, Provider: identity.Provider, Groups: append([]string(nil), identity.Groups...),
 				}, config.Authorization).Allowed
 			}
-			if principal.AuthorizationID != "" {
-				principalID, deviceID, err := store.OAuthSessions().RequestOwner(checkContext, principal.AuthorizationID)
-				active, activeErr := store.OAuthSessions().RequestActive(checkContext, principal.AuthorizationID, config.Now().UTC())
+			if identity.AuthorizationID != "" {
+				identityID, deviceID, err := store.OAuthSessions().RequestOwner(checkContext, identity.AuthorizationID)
+				active, activeErr := store.OAuthSessions().RequestActive(checkContext, identity.AuthorizationID, config.Now().UTC())
 				now := config.Now().UTC()
-				valid = err == nil && activeErr == nil && active && principalID == principal.Subject && deviceID == principal.DeviceID && !now.IsZero()
+				valid = err == nil && activeErr == nil && active && identityID == identity.Subject && deviceID == identity.DeviceID && !now.IsZero()
 			}
 			if valid {
 				storedSession, err := store.Sessions().GetByID(checkContext, sessionID)
 				now := config.Now().UTC()
-				valid = err == nil && storedSession.PrincipalID == principal.Subject && storedSession.DeviceID == principal.DeviceID &&
+				valid = err == nil && storedSession.IdentityID == identity.Subject && storedSession.DeviceID == identity.DeviceID &&
 					storedSession.State == "active" && storedSession.ExpiresAt.After(now)
 			}
 			if valid && config.HeartbeatTask {
 				task, err := store.Tasks().GetByID(checkContext, config.TaskID)
-				valid = err == nil && task.SessionID == sessionID && task.PrincipalID == principal.Subject && task.State.Owned()
+				valid = err == nil && task.SessionID == sessionID && task.IdentityID == identity.Subject && task.State.Owned()
 				if valid {
 					err = store.Tasks().UpdateState(
 						checkContext, task.ID, task.State, task.State, task.Result, config.Now().UTC(),

@@ -5,8 +5,8 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
 )
 
-func subjectFor(principal controlplaneapi.Principal) authorization.Subject {
+func subjectFor(identity controlplaneapi.Identity) authorization.Subject {
 	return authorization.Subject{
-		ID: principal.Subject, Provider: principal.Provider, Groups: append([]string(nil), principal.Groups...),
+		ID: identity.Subject, Provider: identity.Provider, Groups: append([]string(nil), identity.Groups...),
 	}
 }

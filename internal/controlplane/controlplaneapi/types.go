@@ -33,7 +33,7 @@ func (e *Error) Error() string {
 	return e.Message
 }
 
-type Principal struct {
+type Identity struct {
 	Subject         string
 	Provider        string
 	DisplayName     string
@@ -45,11 +45,11 @@ type Principal struct {
 }
 
 type Authenticator interface {
-	Authenticate(*http.Request) (Principal, *Error)
+	Authenticate(*http.Request) (Identity, *Error)
 }
 
-type AuthenticatorFunc func(*http.Request) (Principal, *Error)
+type AuthenticatorFunc func(*http.Request) (Identity, *Error)
 
-func (f AuthenticatorFunc) Authenticate(request *http.Request) (Principal, *Error) {
+func (f AuthenticatorFunc) Authenticate(request *http.Request) (Identity, *Error) {
 	return f(request)
 }

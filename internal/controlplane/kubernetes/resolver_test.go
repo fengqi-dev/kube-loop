@@ -41,7 +41,7 @@ func TestServiceResolverRequiresEveryRequestedPortToBeAuthoritative(t *testing.T
 	}
 	service, err := resolver.ResolveService(
 		context.Background(),
-		controlplaneapi.Principal{Subject: "user"},
+		controlplaneapi.Identity{Subject: "user"},
 		"development",
 		"api",
 		[]trafficmodel.Port{{ServicePort: 53, Protocol: "udp"}, {ServicePort: 80, Protocol: "tcp"}},
@@ -52,7 +52,7 @@ func TestServiceResolverRequiresEveryRequestedPortToBeAuthoritative(t *testing.T
 
 	if _, err := resolver.ResolveService(
 		context.Background(),
-		controlplaneapi.Principal{Subject: "user"},
+		controlplaneapi.Identity{Subject: "user"},
 		"development",
 		"api",
 		[]trafficmodel.Port{{ServicePort: 53, Protocol: "tcp"}},
@@ -81,20 +81,20 @@ func TestPortForwardResolverResolvesPodAndService(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	principal := controlplaneapi.Principal{Subject: "user"}
-	pod, err := resolver.Resolve(context.Background(), principal, "development", portforwardservice.Spec{
+	identity := controlplaneapi.Identity{Subject: "user"}
+	pod, err := resolver.Resolve(context.Background(), identity, "development", portforwardservice.Spec{
 		Kind: "pod", Name: "api-0", Protocol: "tcp", RemotePort: 8080,
 	})
 	if err != nil || pod.Address() != "10.244.1.7:8080" {
 		t.Fatalf("pod target = %#v err = %v", pod, err)
 	}
-	service, err := resolver.Resolve(context.Background(), principal, "development", portforwardservice.Spec{
+	service, err := resolver.Resolve(context.Background(), identity, "development", portforwardservice.Spec{
 		Kind: "service", Name: "api", Protocol: "tcp", RemotePort: 8443,
 	})
 	if err != nil || service.Address() != "10.96.0.20:8443" {
 		t.Fatalf("service target = %#v err = %v", service, err)
 	}
-	if _, err := resolver.Resolve(context.Background(), principal, "development", portforwardservice.Spec{
+	if _, err := resolver.Resolve(context.Background(), identity, "development", portforwardservice.Spec{
 		Kind: "service", Name: "api", Protocol: "udp", RemotePort: 8443,
 	}); err == nil {
 		t.Fatal("mismatched protocol was accepted")
@@ -120,15 +120,15 @@ func TestContainerResolverSelectsAndValidatesContainer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	principal := controlplaneapi.Principal{Subject: "user"}
-	container, err := resolver.ResolveContainer(context.Background(), principal, "development", "single", "")
+	identity := controlplaneapi.Identity{Subject: "user"}
+	container, err := resolver.ResolveContainer(context.Background(), identity, "development", "single", "")
 	if err != nil || container != "app" {
 		t.Fatalf("container = %q, err = %v", container, err)
 	}
-	if _, err := resolver.ResolveContainer(context.Background(), principal, "development", "multiple", ""); err == nil {
+	if _, err := resolver.ResolveContainer(context.Background(), identity, "development", "multiple", ""); err == nil {
 		t.Fatal("multiple containers were accepted without an explicit name")
 	}
-	if _, err := resolver.ResolveContainer(context.Background(), principal, "development", "multiple", "missing"); err == nil {
+	if _, err := resolver.ResolveContainer(context.Background(), identity, "development", "multiple", "missing"); err == nil {
 		t.Fatal("unknown container was accepted")
 	}
 }

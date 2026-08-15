@@ -214,7 +214,7 @@ func TestCapabilitiesValidateNamespaceAndResponseBinding(t *testing.T) {
 	store := &memoryStore{value: validCredential(now)}
 	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		_ = json.NewEncoder(writer).Encode(Capabilities{
-			SchemaVersion: 1, PrincipalID: "principal-1", Namespace: "other", GatewayVersion: "v2-test", Capabilities: []string{},
+			SchemaVersion: 1, IdentityID: "identity-1", Namespace: "other", GatewayVersion: "v2-test", Capabilities: []string{},
 		})
 	}))
 	defer server.Close()
@@ -231,12 +231,12 @@ func TestCapabilitiesValidateNamespaceAndResponseBinding(t *testing.T) {
 	}
 }
 
-func TestCapabilitiesCacheIsBoundedByPrincipalNamespaceCredentialAndGatewayVersion(t *testing.T) {
+func TestCapabilitiesCacheIsBoundedByIdentityNamespaceCredentialAndGatewayVersion(t *testing.T) {
 	now := time.Now().UTC()
 	store := &memoryStore{value: validCredential(now)}
 	var capabilityCalls atomic.Int32
 	gatewayVersion := "v2-a"
-	principalID := "principal-a"
+	identityID := "identity-a"
 	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		switch request.URL.Path {
 		case "/kubeloop/api/version":
@@ -244,7 +244,7 @@ func TestCapabilitiesCacheIsBoundedByPrincipalNamespaceCredentialAndGatewayVersi
 		case "/kubeloop/api/capabilities":
 			capabilityCalls.Add(1)
 			_ = json.NewEncoder(writer).Encode(Capabilities{
-				SchemaVersion: 1, PrincipalID: principalID, Namespace: request.URL.Query().Get("namespace"),
+				SchemaVersion: 1, IdentityID: identityID, Namespace: request.URL.Query().Get("namespace"),
 				GatewayVersion: gatewayVersion, Capabilities: []string{"pods.list"},
 			})
 		default:
@@ -284,13 +284,13 @@ func TestCapabilitiesCacheIsBoundedByPrincipalNamespaceCredentialAndGatewayVersi
 		t.Fatalf("Gateway-version cache binding = %#v, calls = %d, error = %v", updated, capabilityCalls.Load(), err)
 	}
 	store.mu.Lock()
-	store.value.RefreshToken = "refresh-other-principal"
-	store.value.AccessToken = "access-other-principal"
+	store.value.RefreshToken = "refresh-other-identity"
+	store.value.AccessToken = "access-other-identity"
 	store.mu.Unlock()
-	principalID = "principal-b"
+	identityID = "identity-b"
 	updated, err = client.Capabilities(context.Background(), serverProfile, "development")
-	if err != nil || capabilityCalls.Load() != 4 || updated.PrincipalID != "principal-b" {
-		t.Fatalf("principal cache binding = %#v, calls = %d, error = %v", updated, capabilityCalls.Load(), err)
+	if err != nil || capabilityCalls.Load() != 4 || updated.IdentityID != "identity-b" {
+		t.Fatalf("identity cache binding = %#v, calls = %d, error = %v", updated, capabilityCalls.Load(), err)
 	}
 	if _, err := client.Capabilities(context.Background(), serverProfile, "staging"); err != nil || capabilityCalls.Load() != 5 {
 		t.Fatalf("namespace cache binding calls = %d, error = %v", capabilityCalls.Load(), err)
@@ -360,7 +360,7 @@ func TestSessionLifecycleUsesIdempotencyAndGenerationHeaders(t *testing.T) {
 		var capabilities *Capabilities
 		if request.Method == http.MethodPost && request.URL.Path == "/api/sessions" {
 			capabilities = &Capabilities{
-				SchemaVersion: 1, PrincipalID: "principal-1", Namespace: "development",
+				SchemaVersion: 1, IdentityID: "identity-1", Namespace: "development",
 				GatewayVersion: "v2-test", Capabilities: []string{"cluster.tunnel", "pods.list"},
 			}
 		}

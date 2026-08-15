@@ -28,7 +28,7 @@ type Credential struct {
 	RefreshToken     string
 	RefreshExpiresAt time.Time
 	DeviceID         string
-	PrincipalID      string
+	IdentityID       string
 	UserName         string
 }
 
@@ -55,7 +55,7 @@ type metadata struct {
 	AccessExpiresAt  time.Time `json:"accessExpiresAt"`
 	RefreshExpiresAt time.Time `json:"refreshExpiresAt"`
 	DeviceID         string    `json:"deviceId"`
-	PrincipalID      string    `json:"principalId,omitempty"`
+	IdentityID       string    `json:"identityId,omitempty"`
 	UserName         string    `json:"userName,omitempty"`
 }
 
@@ -102,7 +102,7 @@ func (store *SystemStore) Set(profileID string, credential Credential) error {
 		SchemaVersion: credentialMetadataSchemaVersion,
 		TokenType:     credential.TokenType, AccessExpiresAt: credential.AccessExpiresAt.UTC(),
 		RefreshExpiresAt: credential.RefreshExpiresAt.UTC(), DeviceID: credential.DeviceID,
-		PrincipalID: strings.TrimSpace(credential.PrincipalID), UserName: strings.TrimSpace(credential.UserName),
+		IdentityID: strings.TrimSpace(credential.IdentityID), UserName: strings.TrimSpace(credential.UserName),
 	})
 	if err != nil {
 		return errors.New("encode credential metadata")
@@ -176,7 +176,7 @@ func (store *SystemStore) Get(profileID string) (Credential, error) {
 	return Credential{
 		TokenType: details.TokenType, AccessToken: accessToken, AccessExpiresAt: details.AccessExpiresAt,
 		RefreshToken: refreshToken, RefreshExpiresAt: details.RefreshExpiresAt, DeviceID: details.DeviceID,
-		PrincipalID: strings.TrimSpace(details.PrincipalID), UserName: strings.TrimSpace(details.UserName),
+		IdentityID: strings.TrimSpace(details.IdentityID), UserName: strings.TrimSpace(details.UserName),
 	}, nil
 }
 

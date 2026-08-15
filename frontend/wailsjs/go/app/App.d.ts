@@ -118,6 +118,8 @@ export function SetServerDNSNamespace(arg1:string,arg2:string):Promise<app.Serve
 
 export function SetServerHostAliases(arg1:string,arg2:Array<profile.HostAlias>):Promise<app.ServerNetworkSettings>;
 
+export function SetServerSOCKSPort(arg1:string,arg2:number):Promise<app.ServerNetworkSettings>;
+
 export function StartServerExchange(arg1:exchange.Request):Promise<exchange.Info>;
 
 export function StartServerExec(arg1:app.ServerExecRequest):Promise<remote.ExecTask>;

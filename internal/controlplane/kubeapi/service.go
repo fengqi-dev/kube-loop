@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -36,11 +38,12 @@ type ClientProvider interface {
 }
 
 type Service struct {
-	provider        ClientProvider
-	authorizer      authorization.Authorizer
-	gatewayVersion  string
-	inventory       *inventoryWatchHub
-	inventoryResync time.Duration
+	provider             ClientProvider
+	authorizer           authorization.Authorizer
+	gatewayVersion       string
+	inventory            *inventoryWatchHub
+	inventoryResync      time.Duration
+	authorizedNamespaces func(context.Context, string, []string) ([]string, error)
 }
 
 type Option func(*Service)
@@ -55,6 +58,10 @@ func WithGatewayVersion(version string) Option {
 
 func WithInventoryResync(interval time.Duration) Option {
 	return func(handler *Service) { handler.inventoryResync = interval }
+}
+
+func WithAuthorizedNamespaces(resolver func(context.Context, string, []string) ([]string, error)) Option {
+	return func(handler *Service) { handler.authorizedNamespaces = resolver }
 }
 
 func New(provider ClientProvider, options ...Option) (*Service, error) {
@@ -83,11 +90,11 @@ func New(provider ClientProvider, options ...Option) (*Service, error) {
 func (handler *Service) capabilities(
 	ctx *echo.Context,
 	client kubernetesclient.Interface,
-	principal controlplaneapi.Principal,
+	identity controlplaneapi.Identity,
 	namespace string,
 ) *controlplaneapi.Error {
 	request := ctx.Request()
-	snapshot, apiError := handler.discoverCapabilities(request.Context(), client, principal, namespace)
+	snapshot, apiError := handler.discoverCapabilities(request.Context(), client, identity, namespace)
 	if apiError != nil {
 		return apiError
 	}
@@ -99,24 +106,24 @@ func (handler *Service) capabilities(
 // GET /capabilities so Session creation cannot drift from the advertised API.
 func (handler *Service) DiscoverCapabilities(
 	ctx context.Context,
-	principal controlplaneapi.Principal,
+	identity controlplaneapi.Identity,
 	namespace string,
 ) (capability.Snapshot, *controlplaneapi.Error) {
 	client, err := handler.provider.ClientFor(authorization.Subject{
-		ID: principal.Subject, Provider: principal.Provider, Groups: append([]string(nil), principal.Groups...),
+		ID: identity.Subject, Provider: identity.Provider, Groups: append([]string(nil), identity.Groups...),
 	})
 	if err != nil {
 		return capability.Snapshot{}, &controlplaneapi.Error{
 			Code: controlplaneapi.CodeUnavailable, Message: "Kubernetes API is unavailable", Cause: err,
 		}
 	}
-	return handler.discoverCapabilities(ctx, client, principal, namespace)
+	return handler.discoverCapabilities(ctx, client, identity, namespace)
 }
 
 func (handler *Service) discoverCapabilities(
 	ctx context.Context,
 	client kubernetesclient.Interface,
-	principal controlplaneapi.Principal,
+	identity controlplaneapi.Identity,
 	namespace string,
 ) (capability.Snapshot, *controlplaneapi.Error) {
 	type candidate struct {
@@ -172,7 +179,7 @@ func (handler *Service) discoverCapabilities(
 		// Control Plane only creates the TrafficBinding after the Gateway policy check.
 		{capability: "services.preview", policy: policyRequests("previews", "create", "get", "delete", "stream")},
 	}
-	subject := authorization.Subject{ID: principal.Subject, Provider: principal.Provider, Groups: append([]string(nil), principal.Groups...)}
+	subject := authorization.Subject{ID: identity.Subject, Provider: identity.Provider, Groups: append([]string(nil), identity.Groups...)}
 	capabilities := make([]string, 0, len(candidates))
 	for _, candidate := range candidates {
 		policyAllowed := true
@@ -204,7 +211,7 @@ func (handler *Service) discoverCapabilities(
 		}
 	}
 	snapshot, err := capability.Normalize(capability.Snapshot{
-		SchemaVersion: capability.SchemaVersion, PrincipalID: principal.Subject, Namespace: namespace,
+		SchemaVersion: capability.SchemaVersion, IdentityID: identity.Subject, Namespace: namespace,
 		GatewayVersion: handler.gatewayVersion, Capabilities: capabilities,
 	})
 	if err != nil {
@@ -232,30 +239,65 @@ func (handler *Service) version(ctx *echo.Context, client kubernetesclient.Inter
 func (handler *Service) namespaces(
 	ctx *echo.Context,
 	client kubernetesclient.Interface,
-	principal controlplaneapi.Principal,
+	identity controlplaneapi.Identity,
 ) *controlplaneapi.Error {
 	request := ctx.Request()
 	options, apiError := listOptions(request)
 	if apiError != nil {
 		return apiError
 	}
-	result, err := client.CoreV1().Namespaces().List(request.Context(), options)
-	if err != nil {
-		return mapKubernetesError(err)
+	if handler.authorizedNamespaces == nil {
+		return &controlplaneapi.Error{Code: controlplaneapi.CodeUnavailable, Message: "Namespace authorization repository is unavailable"}
 	}
-	items := make([]namespaceDocument, 0, len(result.Items))
-	subject := authorization.Subject{ID: principal.Subject, Provider: principal.Provider, Groups: append([]string(nil), principal.Groups...)}
-	for _, item := range result.Items {
-		decision := handler.authorizer.Authorize(request.Context(), subject, authorization.Request{
-			Operation: "list", Namespace: item.Name, ResourceKind: "capabilities", NamespaceLabels: item.Labels, LabelsAvailable: true,
-		})
-		if !decision.Allowed {
+	names, err := handler.authorizedNamespaces(request.Context(), identity.Subject, identity.Groups)
+	if err != nil {
+		return &controlplaneapi.Error{Code: controlplaneapi.CodeUnavailable, Message: "Namespace authorization is unavailable", Cause: err}
+	}
+	if slices.Contains(names, "*") {
+		result, listErr := client.CoreV1().Namespaces().List(request.Context(), options)
+		if listErr != nil {
+			return mapKubernetesError(listErr)
+		}
+		items := make([]namespaceDocument, 0, len(result.Items))
+		for index := range result.Items {
+			items = append(items, namespaceDocument{Name: result.Items[index].Name, Status: string(result.Items[index].Status.Phase)})
+		}
+		writeJSON(ctx, listDocument[namespaceDocument]{Items: items, Continue: result.Continue, ResourceVersion: result.ResourceVersion})
+		return nil
+	}
+	sort.Strings(names)
+	start := 0
+	if options.Continue != "" {
+		start = sort.SearchStrings(names, options.Continue)
+		for start < len(names) && names[start] <= options.Continue {
+			start++
+		}
+	}
+	end := min(len(names), start+int(options.Limit))
+	items := make([]namespaceDocument, 0, end-start)
+	labelSelector, _ := labels.Parse(options.LabelSelector)
+	fieldSelector, _ := fields.ParseSelector(options.FieldSelector)
+	for _, name := range names[start:end] {
+		item, getErr := client.CoreV1().Namespaces().Get(request.Context(), name, metav1.GetOptions{})
+		if apierrors.IsNotFound(getErr) {
+			continue
+		}
+		if getErr != nil {
+			return mapKubernetesError(getErr)
+		}
+		if !labelSelector.Matches(labels.Set(item.Labels)) || !fieldSelector.Matches(fields.Set{
+			"metadata.name": item.Name, "status.phase": string(item.Status.Phase),
+		}) {
 			continue
 		}
 		items = append(items, namespaceDocument{Name: item.Name, Status: string(item.Status.Phase)})
 	}
+	continueToken := ""
+	if end < len(names) && end > start {
+		continueToken = names[end-1]
+	}
 	writeJSON(ctx, listDocument[namespaceDocument]{
-		Items: items, Continue: result.Continue, ResourceVersion: result.ResourceVersion,
+		Items: items, Continue: continueToken,
 	})
 	return nil
 }

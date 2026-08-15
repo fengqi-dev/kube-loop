@@ -16,7 +16,7 @@ model so a feature cannot accidentally invent a weaker permission check.
 KubeLoop uses an allow-only Gateway Policy with implicit deny. A rule matches
 all configured dimensions:
 
-- stable principal ID and/or normalized identity group;
+- stable identity ID and/or normalized identity group;
 - namespace (`$cluster` for cluster-scoped requests, `*` only when explicitly
   granting all namespaces);
 - operation, such as `get`, `list`, `watch`, `create`, `update`, `patch`, or
@@ -79,6 +79,6 @@ the ServiceAccount or impersonated user's Kubernetes RBAC permissions.
   retain the Router authorization-proof guard.
 - Policy and identity-provider configuration remain Control Plane-only ConfigMap
   data. Neither is mounted into the Data Plane.
-- API audit records contain principal ID, request ID, normalized scope, outcome,
+- API audit records contain identity ID, request ID, normalized scope, outcome,
   matched policy rule, status, and latency. They never contain request bodies,
   tokens, identity claims, file contents, command output, or passwords.

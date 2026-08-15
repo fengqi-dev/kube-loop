@@ -21,35 +21,25 @@ type Endpoints struct {
 	repositories controlstorage.Repositories
 	keyID        string
 	signingKey   *ecdsa.PrivateKey
-	storage      *Storage
-	registry     *authn.Registry
+	localAuth    LocalAuthenticator
 }
+
+type LocalAuthenticator func(context.Context, string, []byte, string) (controlstorage.Identity, error)
 
 const (
 	BrowserSessionCookie   = "__Host-kubeloop-sso"
 	browserSessionLifetime = 12 * time.Hour
 )
 
-func (endpoints *Endpoints) SetProviderRegistry(registry *authn.Registry) {
-	endpoints.registry = registry
+func (endpoints *Endpoints) SetLocalAuthenticator(authenticator LocalAuthenticator) {
+	endpoints.localAuth = authenticator
 }
 
-func (endpoints *Endpoints) ProviderDescriptors() []authn.Descriptor {
-	if endpoints == nil || endpoints.registry == nil {
-		return nil
-	}
-	return endpoints.registry.Descriptors()
-}
-
-func NewEndpoints(provider fosite.OAuth2Provider, repositories controlstorage.Repositories, keyID string, signingKey *ecdsa.PrivateKey, stores ...*Storage) (*Endpoints, error) {
+func NewEndpoints(provider fosite.OAuth2Provider, repositories controlstorage.Repositories, keyID string, signingKey *ecdsa.PrivateKey) (*Endpoints, error) {
 	if provider == nil || repositories == nil || signingKey == nil || strings.TrimSpace(keyID) == "" {
 		return nil, errors.New("Fosite provider and repositories are required")
 	}
-	result := &Endpoints{provider: provider, repositories: repositories, keyID: strings.TrimSpace(keyID), signingKey: signingKey}
-	if len(stores) > 0 {
-		result.storage = stores[0]
-	}
-	return result, nil
+	return &Endpoints{provider: provider, repositories: repositories, keyID: strings.TrimSpace(keyID), signingKey: signingKey}, nil
 }
 
 func (endpoints *Endpoints) KeySet() jose.JSONWebKeySet {
@@ -57,8 +47,7 @@ func (endpoints *Endpoints) KeySet() jose.JSONWebKeySet {
 }
 
 func (endpoints *Endpoints) Token(rw http.ResponseWriter, request *http.Request) {
-	ctx := WithPasswordMetadata(request.Context(), request.FormValue("second_factor"), request.Header.Get("X-Request-ID"),
-		request.FormValue("client_id"), request.RemoteAddr)
+	ctx := request.Context()
 	normalizeClientSecretPost(request)
 	session := NewSession()
 	session.DeviceID = strings.TrimSpace(request.FormValue("device_id"))
@@ -83,29 +72,20 @@ func (endpoints *Endpoints) Token(rw http.ResponseWriter, request *http.Request)
 		return
 	}
 	grant := accessRequest.GetGrantTypes()
-	if grant.Has("password") {
-		if client.Public {
-			endpoints.provider.WriteAccessError(ctx, rw, accessRequest, fosite.ErrUnauthorizedClient)
-			return
-		}
-		if err := endpoints.enrichPrincipal(ctx, session, session.GetSubject()); err != nil {
-			endpoints.provider.WriteAccessError(ctx, rw, accessRequest, fosite.ErrInvalidGrant)
-			return
-		}
-	}
 	if grant.Has("client_credentials") {
-		if client.Public || client.MachinePrincipalID == "" || containsIdentityScope(accessRequest.GetRequestedScopes()) {
+		if client.Public || client.MachineIdentityID == "" || containsIdentityScope(accessRequest.GetRequestedScopes()) {
 			endpoints.provider.WriteAccessError(ctx, rw, accessRequest, fosite.ErrUnauthorizedClient)
 			return
 		}
-		if err := endpoints.enrichPrincipal(ctx, session, client.MachinePrincipalID); err != nil {
+		if err := endpoints.enrichIdentity(ctx, session, client.MachineIdentityID); err != nil {
 			endpoints.provider.WriteAccessError(ctx, rw, accessRequest, fosite.ErrInvalidClient)
 			return
 		}
 		session.Machine = true
-		session.SetSubject(client.MachinePrincipalID)
+		session.ProviderID = "client_credentials"
+		session.SetSubject(client.MachineIdentityID)
 	}
-	if grant.Has("password") || grant.Has("client_credentials") {
+	if grant.Has("client_credentials") {
 		for _, scope := range accessRequest.GetRequestedScopes() {
 			accessRequest.GrantScope(scope)
 		}
@@ -125,11 +105,12 @@ func (endpoints *Endpoints) Authenticate(ctx context.Context, token string) (aut
 	if err != nil {
 		return authn.AccessIdentity{}, err
 	}
-	principal, err := endpoints.repositories.Principals().GetByID(ctx, session.PrincipalID)
+	identity, err := endpoints.repositories.Identities().GetByID(ctx, session.IdentityID)
 	if err != nil {
 		return authn.AccessIdentity{}, err
 	}
-	return authn.AccessIdentity{Principal: principal, AuthorizationID: session.AuthorizationID, DeviceID: session.DeviceID,
+	return authn.AccessIdentity{Identity: identity, ProviderID: session.ProviderID, Groups: append([]string(nil), session.Groups...),
+		AuthorizationID: session.AuthorizationID, DeviceID: session.DeviceID,
 		TokenID: requester.GetID(), AccessExpiresAt: requester.GetSession().GetExpiresAt(fosite.AccessToken)}, nil
 }
 
@@ -138,7 +119,10 @@ func (endpoints *Endpoints) Authenticate(ctx context.Context, token string) (aut
 // normalized to the equivalent Basic credentials before Fosite authenticates
 // the request. The plaintext secret is removed from the form immediately.
 func normalizeClientSecretPost(request *http.Request) {
-	if _, _, ok := request.BasicAuth(); ok || request.PostForm == nil {
+	if _, _, ok := request.BasicAuth(); ok {
+		return
+	}
+	if err := request.ParseForm(); err != nil {
 		return
 	}
 	clientID, secret := request.PostForm.Get("client_id"), request.PostForm.Get("client_secret")
@@ -165,24 +149,48 @@ func (endpoints *Endpoints) IntrospectAccessToken(ctx context.Context, token str
 		return nil, nil, fosite.ErrInactiveToken
 	}
 	stored, ok := requester.GetSession().(*Session)
-	if !ok || stored.PrincipalID == "" {
+	if !ok || stored.IdentityID == "" {
 		return nil, nil, fosite.ErrInactiveToken
 	}
 	return stored, requester, nil
 }
 
-func (endpoints *Endpoints) enrichPrincipal(ctx context.Context, session *Session, id string) error {
-	principal, err := endpoints.repositories.Principals().GetByID(ctx, id)
+func (endpoints *Endpoints) enrichIdentity(ctx context.Context, session *Session, id string) error {
+	identity, err := endpoints.repositories.Identities().GetByID(ctx, id)
 	if err != nil {
 		return err
 	}
-	session.PrincipalID = principal.ID
-	session.ProviderID = principal.Provider
-	session.DisplayName = principal.DisplayName
-	session.Email = principal.Email
-	session.Groups = append([]string(nil), principal.Groups...)
-	session.SetSubject(principal.ID)
+	if identity.Status != "active" {
+		return controlstorage.ErrNotFound
+	}
+	session.IdentityID = identity.ID
+	session.DisplayName = identity.DisplayName
+	session.Email = identity.PrimaryEmail
+	session.Groups, err = endpoints.identityGroups(ctx, identity.ID)
+	if err != nil {
+		return err
+	}
+	session.SetSubject(identity.ID)
 	return nil
+}
+
+func (endpoints *Endpoints) identityGroups(ctx context.Context, identityID string) ([]string, error) {
+	organizations, err := endpoints.repositories.Organizations().ListForIdentity(ctx, identityID)
+	if err != nil {
+		return nil, err
+	}
+	groups := make([]string, 0)
+	for _, organization := range organizations {
+		memberships, err := endpoints.repositories.Groups().ListForIdentity(ctx, organization.ID, identityID)
+		if err != nil {
+			return nil, err
+		}
+		for _, group := range memberships {
+			groups = append(groups, group.ID)
+		}
+	}
+	slices.Sort(groups)
+	return slices.Compact(groups), nil
 }
 
 func containsIdentityScope(scopes fosite.Arguments) bool {

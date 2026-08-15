@@ -14,7 +14,7 @@ func TestBrowserLoginErrorURL(t *testing.T) {
 		"transaction": {"transaction-1"},
 		"csrf":        {"csrf-1"},
 		"return_to":   {returnTo},
-	})
+	}, "authentication_failed")
 	if !strings.HasPrefix(target, oauthPath+"/ui/?") {
 		t.Fatalf("unexpected redirect target %q", target)
 	}
@@ -37,7 +37,7 @@ func TestBrowserLoginErrorURLRejectsTamperedReturnTarget(t *testing.T) {
 		"transaction": {"transaction-1"},
 		"csrf":        {"csrf-1"},
 		"return_to":   {"?transaction=other&csrf=csrf-1"},
-	})
+	}, "authentication_failed")
 	if target != "" {
 		t.Fatalf("target = %q, want empty", target)
 	}

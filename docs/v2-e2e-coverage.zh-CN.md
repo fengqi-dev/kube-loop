@@ -11,7 +11,7 @@
 | 手工网络范围 | `TestGatewayPodRestartRecoversV2DataPlane` | Session 使用显式、哈希绑定的 PodCIDR、ServiceIP、DNS 和 cluster domain NetworkSpec。 |
 | 集群 DNS、更新与清理 | `TestGatewayPodRestartRecoversV2DataPlane` | SOCKS 和 TUN 解析真实 `*.svc.cluster.local`；正常停止与核心异常退出后 Helper/DNS 清理。 |
 | Service/Pod Port Forward | `TestGatewayPodRestartRecoversV2DataPlane` | Service 与 Pod 两类目标分别覆盖 TCP/UDP；重连前后本地端口稳定，停止后端口释放且 Task 为 `stopped`。 |
-| HTTP Gateway 多路复用 | `TestGatewayPodRestartRecoversV2DataPlane` | 同一 Gateway 上并发快/慢流、四个 Port Forward、两名 Principal；慢流不阻塞兄弟流。 |
+| HTTP Gateway 多路复用 | `TestGatewayPodRestartRecoversV2DataPlane` | 同一 Gateway 上并发快/慢流、四个 Port Forward、两名 Identity；慢流不阻塞兄弟流。 |
 | Exchange TCP/UDP | `TestRealExchangeLifecycleAndStaleOwnerRecovery` | 集群 Service 流量到桌面本地目标；正常停止、客户端崩溃、撤权和 stale-owner 恢复均还原 Service。 |
 | Mirror TCP/UDP | `TestRealMirrorPreservesPrimaryPathAndRecoversStaleOwner` | 原 Pod 响应始终为主路径，桌面只收到副本；本地响应不能泄漏；覆盖停止、崩溃、撤权和恢复。 |
 | Preview TCP/UDP | `TestRealPreviewLifecycleOwnershipAndStaleRecovery` | 创建真实 Service/EndpointSlice；名称冲突与用户接管安全；停止、崩溃、撤权和恢复按 TrafficBinding name/UID/controller reference 清理。 |
@@ -34,7 +34,7 @@
 | OAuth grant 撤销 | Exchange、Mirror、Preview、Pod exec、文件传输 | 无需客户端 DELETE，授权 lease 主动终止；所有资源与流被清理。 |
 | Kubernetes API 暂时不可用 | Preview lifecycle 的 client-go transport 503 gate | 真实删除请求命中 503，Task 与 snapshot 保持 `recovering`；API 恢复后接替 Reconciler 完成精确所有者清理。 |
 | 网络路径中断与权限刷新 | loopback Gateway proxy 切到不可达地址、heartbeat 刷新 NetworkSpec 后切换备用路径 | TUN 不允许静默旁路；本地 SOCKS/Port Forward 地址保持；NetworkSpec 变化时旧 Helper session 被清理并按新 allowlist 重装，随后普通 Gateway 重启不重复重装。 |
-| 多身份隔离 | 两名 Principal、跨 Session token、metrics | 跨 Session 控制令牌拒绝；指标不暴露 Principal、Device 或 Session ID。 |
+| 多身份隔离 | 两名 Identity、跨 Session token、metrics | 跨 Session 控制令牌拒绝；指标不暴露 Identity、Device 或 Session ID。 |
 
 ## Kubernetes 资源不变量
 
@@ -46,30 +46,25 @@
 
 ## 身份、容量与平台证据
 
-- `internal/client/auth/fullstack_oidc_test.go` 使用真实 TLS discovery、authorization redirect、PKCE、JWKS 和 RS256 ID Token，贯通桌面 loopback callback、Control Plane 登录、SQLite、Access/Refresh Token 轮换与撤销。
-- `make capacity-baseline` 验证全局/单用户物理 WSS、逻辑 stream 上限、容量释放，以及满载时 live/ready/metrics；三轮 32 KiB stream benchmark 记录吞吐和分配。`TestGatewayPodMultiUserCapacityRSSAndCleanup` 在单个真实 Gateway Pod 上以四名 Principal/四条物理 WSS/十六条逻辑 stream 验证限额、容量复用、集群内吞吐和 kubelet working-set 曲线；满载期间撤销 OAuth grant，确认 Preview Task、relay、TrafficBinding、Service、EndpointSlice 和 snapshot 在 5 秒预算内全部清理。
+- `e2e/ui/admin` 在全新真实 Control Plane 上完成一次性 IAM bootstrap、本地账号 Authorization Code + PKCE、管理会话、目录/Namespace/OAuth Client 写入、审计导出、退出登录以及 Password/Implicit/Hybrid 拒绝；`internal/client/auth` 与 `internal/controlplane/authn/oauthserver` 分层验证 Access/Refresh Token 轮换、重放拒绝与撤销。
+- `make capacity-baseline` 验证全局/单用户物理 WSS、逻辑 stream 上限、容量释放，以及满载时 live/ready/metrics；三轮 32 KiB stream benchmark 记录吞吐和分配。`TestGatewayPodMultiUserCapacityRSSAndCleanup` 在单个真实 Gateway Pod 上以四名 Identity/四条物理 WSS/十六条逻辑 stream 验证限额、容量复用、集群内吞吐和 kubelet working-set 曲线；满载期间撤销 OAuth grant，确认 Preview Task、relay、TrafficBinding、Service、EndpointSlice 和 snapshot 在 5 秒预算内全部清理。
 - Windows/macOS workflow 运行全量本地测试和真实 Helper 安装、升级、ACL、DNS 恢复、卸载；Linux 额外运行完整 Minikube TUN。`e2e/remotetun` 已接入三平台 workflow，使用实际 Helper、sing-box TUN、WSS/smux Gateway、RelayTicket/NetworkSpec 和精确目标路由，验证休眠间隔触发 transport 刷新后 SOCKS 地址、TUN core 与 Helper Session 保持不变，且停止后无特权资源残留。最终门禁已由 GitHub Actions push workflow [31454657118](https://github.com/fengqi-dev/kube-loop/actions/runs/31454657118) 完成：Windows、macOS、Linux、Helm、主 Go 与前端六个作业全部通过，V2-803 已关闭。
 
-## 管理后台浏览器回归
+## UI 自动化回归
 
-2026-08-13 至 2026-08-14 的真实 Minikube UI 回归通过 Local account/PKCE、
-Management Session、用户创建、重复用户名拒绝、密码重置、禁用、无角色最小权限和
-主要管理页面只读加载；同时发现策略 Draft 发布幂等键冲突、390px 导航覆盖、取消授权
-通用 400、认证失败无反馈以及 browserfixture 路由不完整。完整复现、环境最终状态和
-复验条件见 [`v2-admin-ui-regression-2026-08-14.zh-CN.md`](v2-admin-ui-regression-2026-08-14.zh-CN.md)。
-其中策略发布缺陷在修复前阻断管理权限写入的浏览器 E2E；修复部署后已完成
-Namespace Admin / `default` 的创建、发布、受限导航验证与撤销闭环。清理后测试用户已
-禁用且没有活动角色绑定。
+`e2e/ui/run-real-environment.sh` 是当前完整 UI 验收入口。它在隔离 Minikube 中部署当前
+工作树的 Control Plane、Gateway 与 Operator，从启动日志安全取得一次性 bootstrap
+token，先运行 Playwright 管理后台套件，再构建真实 `KubeLoop.app` 并运行 XCUITest。
+测试不使用 mock API，也不恢复已经删除的旧 OIDC/browserfixture 兼容层。
 
-2026-08-14 已完成上述代码修复：策略/Provider draft 与 publish 复用幂等键，认证取消
-和失败提示、401 会话失效、URL 前置校验、列表状态隔离、移动导航关闭及审计导出轮询
-均已落地；browserfixture 已补齐真实管理服务并通过运行态路由与导出 worker 冒烟。
-Admin 27 项、Auth 3 项 Vitest、管理/认证生产构建以及相关 Go 管理面测试通过。真实
-Minikube 的 Namespace Admin 与 Auditor 授予/撤销、只读控件、受限用户导航、移动
-视口、认证反馈和会话撤销均已复验；审计导出后端任务、轮询及 29,195 字节 NDJSON
-文件落盘成功。角色撤销后的 hash view 已自动收敛到 Overview；零权限 Overview 不再
-请求受保护的系统概览接口，并显示明确的受限状态。两项均已在 Revision 39/41 完成真实
-浏览器回归。
+浏览器套件覆盖 IAM 初始化、本地账号 PKCE 登录、所有管理页面、移动导航、用户组及
+Namespace 权限、本地用户、邀请、OAuth Client、Recovery、审计导出、退出登录和旧
+OAuth grant 拒绝。macOS 原生套件覆盖 Wails 主导航、系统浏览器登录、跨 Tab 登录状态、
+Host Aliases、可编辑 SOCKS 端口、SOCKS/TUN 连接与断开、TUN 连接时不误选 SOCKS，
+以及 MCP 启停和未携带 Bearer Token 的真实 HTTP 拒绝。
+
+`.github/workflows/ui-e2e.yml` 每日定时运行，并作为 release workflow 的发布门禁；普通
+CI 同时构建并测试 Admin/Auth 前端，运行 Linux Helper 平台 E2E 和独立 Operator E2E。
 
 ## 运行方式
 

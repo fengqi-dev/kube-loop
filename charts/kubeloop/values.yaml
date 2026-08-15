@@ -57,31 +57,25 @@ controlPlane:
     serverCertificateKey: tls.crt
     serverPrivateKeyKey: tls.key
     caKey: ca.crt
-  management:
+  admin:
     # The browser Management Plane has an isolated HTTP listener. The default
     # origin is intended for `kubectl port-forward`; set it to the exact HTTPS
     # origin when publishing this port through a separately managed route.
     publicURL: http://127.0.0.1:8081
     listenPort: 8081
     servicePort: 8081
-    initialAdmin:
-      # On first install Helm creates a Secret with a random password and MFA
-      # encryption key. MFA enrollment remains optional for every user. Set
-      # existingSecret to supply an externally managed Secret.
-      enabled: true
-      username: admin
-      existingSecret: ""
-      usernameKey: username
-      passwordKey: password
-      mfaEncryptionKeyKey: mfa-encryption-key
     bootstrap:
-      # Exact stable Control Plane Principal UUIDs or normalized groups only.
-      # Wildcards, upstream email addresses, and display names are rejected.
-      subjects: []
-      groups: []
-      # Disaster recovery must be explicitly enabled by a Helm change and
-      # Control Plane restart after the persistent bootstrap retirement marker is set.
-      recoveryEnabled: false
+      # On an empty database, create the first platform administrator,
+      # organization, Administrators group, and built-in role bindings. A random
+      # initial password is stored in a retained
+      # Kubernetes Secret and is immediately usable. Existing IAM
+      # data is never changed.
+      enabled: true
+      existingSecret: ""
+      passwordKey: initial-password
+      username: admin
+      displayName: KubeLoop Administrator
+      email: ""
   kubernetes:
     timeout: 15s
     qps: 20

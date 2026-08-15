@@ -24,9 +24,9 @@ func (repository *oauthAuthorizationRequestRepository) Create(ctx context.Contex
 		return errors.New("OAuth authorization request expiry is invalid")
 	}
 	_, err := repository.executor.ExecContext(ctx, repository.bind(`INSERT INTO oauth_authorization_requests(
-		challenge_hash, upstream_state_hash, request_id, request_json, csrf_hash, principal_id, provider_id, status, created_at, expires_at
+		challenge_hash, upstream_state_hash, request_id, request_json, csrf_hash, identity_id, provider_id, status, created_at, expires_at
 	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`), request.ChallengeHash, nullableBytes(request.UpstreamStateHash), request.RequestID, string(request.RequestJSON),
-		request.CSRFHash, nullableString(request.PrincipalID), request.ProviderID, request.Status,
+		request.CSRFHash, nullableString(request.IdentityID), request.ProviderID, request.Status,
 		formatTime(request.CreatedAt), formatTime(request.ExpiresAt))
 	return mapWriteError(err)
 }
@@ -74,14 +74,14 @@ func (repository *oauthAuthorizationRequestRepository) ConsumeUpstream(ctx conte
 	return repository.get(ctx, challengeHash, now, false)
 }
 
-func (repository *oauthAuthorizationRequestRepository) Continue(ctx context.Context, oldHash, nextHash, csrfHash []byte, principalID string, now time.Time) error {
-	if len(oldHash) != 32 || len(nextHash) != 32 || len(csrfHash) != 32 || principalID == "" || now.IsZero() {
+func (repository *oauthAuthorizationRequestRepository) Continue(ctx context.Context, oldHash, nextHash, csrfHash []byte, identityID string, now time.Time) error {
+	if len(oldHash) != 32 || len(nextHash) != 32 || len(csrfHash) != 32 || identityID == "" || now.IsZero() {
 		return errors.New("OAuth authorization continuation is invalid")
 	}
 	result, err := repository.executor.ExecContext(ctx, repository.bind(`UPDATE oauth_authorization_requests
-		SET challenge_hash = ?, csrf_hash = ?, principal_id = ?, upstream_state_hash = NULL
+		SET challenge_hash = ?, csrf_hash = ?, identity_id = ?, upstream_state_hash = NULL
 		WHERE challenge_hash = ? AND status = 'pending' AND expires_at > ?`),
-		nextHash, csrfHash, principalID, oldHash, formatTime(now))
+		nextHash, csrfHash, identityID, oldHash, formatTime(now))
 	if err != nil {
 		return mapWriteError(err)
 	}
@@ -119,11 +119,11 @@ func (repository *oauthAuthorizationRequestRepository) get(ctx context.Context, 
 	}
 	var value OAuthAuthorizationRequest
 	var raw, created, expires string
-	var principal sql.NullString
+	var identity sql.NullString
 	err := repository.executor.QueryRowContext(ctx, repository.bind(`SELECT challenge_hash, upstream_state_hash, request_id, request_json, csrf_hash,
-		principal_id, provider_id, status, created_at, expires_at FROM oauth_authorization_requests
+		identity_id, provider_id, status, created_at, expires_at FROM oauth_authorization_requests
 		WHERE challenge_hash = ? AND status = ? AND expires_at > ?`), hash, status, formatTime(now)).Scan(
-		&value.ChallengeHash, &value.UpstreamStateHash, &value.RequestID, &raw, &value.CSRFHash, &principal, &value.ProviderID,
+		&value.ChallengeHash, &value.UpstreamStateHash, &value.RequestID, &raw, &value.CSRFHash, &identity, &value.ProviderID,
 		&value.Status, &created, &expires)
 	if errors.Is(err, sql.ErrNoRows) {
 		return OAuthAuthorizationRequest{}, ErrNotFound
@@ -132,7 +132,7 @@ func (repository *oauthAuthorizationRequestRepository) get(ctx context.Context, 
 		return OAuthAuthorizationRequest{}, databaseError("read OAuth authorization request", err)
 	}
 	value.RequestJSON = json.RawMessage(raw)
-	value.PrincipalID = principal.String
+	value.IdentityID = identity.String
 	value.CreatedAt, err = parseTime(created, "OAuth authorization request creation time")
 	if err == nil {
 		value.ExpiresAt, err = parseTime(expires, "OAuth authorization request expiry")

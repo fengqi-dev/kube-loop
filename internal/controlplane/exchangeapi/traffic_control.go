@@ -31,11 +31,11 @@ func (handler *Service) Claim(
 	relayID string,
 	request trafficcontrol.ClaimRequest,
 ) (trafficcontrol.ClaimResponse, *controlplaneapi.Error) {
-	principal, session, apiError := handler.trafficSession(ctx, request.Identity)
+	identity, session, apiError := handler.trafficSession(ctx, request.Identity)
 	if apiError != nil {
 		return trafficcontrol.ClaimResponse{}, apiError
 	}
-	task, apiError := handler.ownedTask(ctx, principal, session, request.TaskID)
+	task, apiError := handler.ownedTask(ctx, identity, session, request.TaskID)
 	if apiError != nil {
 		return trafficcontrol.ClaimResponse{}, apiError
 	}
@@ -61,11 +61,11 @@ func (handler *Service) Prepare(
 	relayID string,
 	request trafficcontrol.PrepareRequest,
 ) (trafficcontrol.PrepareResponse, *controlplaneapi.Error) {
-	principal, session, apiError := handler.trafficSession(ctx, request.Identity)
+	identity, session, apiError := handler.trafficSession(ctx, request.Identity)
 	if apiError != nil {
 		return trafficcontrol.PrepareResponse{}, apiError
 	}
-	task, apiError := handler.ownedTask(ctx, principal, session, request.TaskID)
+	task, apiError := handler.ownedTask(ctx, identity, session, request.TaskID)
 	if apiError != nil {
 		return trafficcontrol.PrepareResponse{}, apiError
 	}
@@ -88,10 +88,10 @@ func (handler *Service) Prepare(
 	snapshot := servicebinding.ServiceInterceptSnapshot{
 		Namespace: session.Namespace, Service: spec.Service, GatewayIP: request.GatewayIP, Ports: ports,
 	}
-	if err := handler.resources.Capture(ctx, principal, &snapshot); err != nil {
+	if err := handler.resources.Capture(ctx, identity, &snapshot); err != nil {
 		return trafficcontrol.PrepareResponse{}, internalError(fmt.Errorf("capture Exchange Service: %w", err))
 	}
-	if err := handler.resources.Apply(ctx, principal, snapshot, task.ID); err != nil {
+	if err := handler.resources.Apply(ctx, identity, snapshot, task.ID); err != nil {
 		return trafficcontrol.PrepareResponse{}, internalError(fmt.Errorf("apply Exchange binding: %w", err))
 	}
 	if err := handler.storage.Tasks().UpdateState(ctx, task.ID, remotetask.Starting, remotetask.Running, claimJSON, handler.now().UTC()); err != nil {
@@ -169,19 +169,19 @@ func (handler *Service) Finish(
 
 func (handler *Service) trafficSession(
 	ctx context.Context,
-	identity trafficcontrol.Identity,
-) (controlplaneapi.Principal, sessionapi.ActiveSession, *controlplaneapi.Error) {
-	principal := controlplaneapi.Principal{
-		Subject: identity.PrincipalID, Groups: append([]string(nil), identity.Groups...), DeviceID: identity.DeviceID,
+	ticketIdentity trafficcontrol.Identity,
+) (controlplaneapi.Identity, sessionapi.ActiveSession, *controlplaneapi.Error) {
+	identity := controlplaneapi.Identity{
+		Subject: ticketIdentity.IdentityID, Groups: append([]string(nil), ticketIdentity.Groups...), DeviceID: ticketIdentity.DeviceID,
 	}
-	session, apiError := handler.sessions.RequireActive(ctx, principal, identity.Namespace, identity.SessionID)
+	session, apiError := handler.sessions.RequireActive(ctx, identity, ticketIdentity.Namespace, ticketIdentity.SessionID)
 	if apiError != nil {
-		return controlplaneapi.Principal{}, sessionapi.ActiveSession{}, apiError
+		return controlplaneapi.Identity{}, sessionapi.ActiveSession{}, apiError
 	}
-	if session.Generation != identity.SessionGeneration {
-		return controlplaneapi.Principal{}, sessionapi.ActiveSession{}, &controlplaneapi.Error{Code: controlplaneapi.CodeConflict, Message: "Session generation changed"}
+	if session.Generation != ticketIdentity.SessionGeneration {
+		return controlplaneapi.Identity{}, sessionapi.ActiveSession{}, &controlplaneapi.Error{Code: controlplaneapi.CodeConflict, Message: "Session generation changed"}
 	}
-	return principal, session, nil
+	return identity, session, nil
 }
 
 func trafficOwnedBy(task storage.Task, relayID string) bool {

@@ -60,8 +60,8 @@ func TestAuthenticatedVersionDiscoveryRunsBeforeNamespaceAuthorization(t *testin
 		APIPathPrefix:      "/kubeloop/api",
 		RequestTimeout:     time.Second,
 		MaxRequestBodySize: 1 << 20,
-		Authenticator: controlplaneapi.AuthenticatorFunc(func(*http.Request) (controlplaneapi.Principal, *controlplaneapi.Error) {
-			return controlplaneapi.Principal{Subject: "81a678af-e99c-4411-99dc-57fd59d83189", Provider: "local"}, nil
+		Authenticator: controlplaneapi.AuthenticatorFunc(func(*http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
+			return controlplaneapi.Identity{Subject: "81a678af-e99c-4411-99dc-57fd59d83189", Provider: "local"}, nil
 		}),
 		Authorizer: authorizer,
 	})

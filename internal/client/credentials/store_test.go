@@ -49,7 +49,7 @@ func TestSystemStoreUsesVersionedKeyringEntries(t *testing.T) {
 	credential := Credential{
 		TokenType: "Bearer", AccessToken: "access-one", RefreshToken: "refresh-one", DeviceID: "device-1",
 		AccessExpiresAt: time.Now().Add(time.Minute), RefreshExpiresAt: time.Now().Add(time.Hour),
-		PrincipalID: "principal-1", UserName: "Example User",
+		IdentityID: "identity-1", UserName: "Example User",
 	}
 	if err := store.Set("profile-1", credential); err != nil {
 		t.Fatal(err)
@@ -59,7 +59,7 @@ func TestSystemStoreUsesVersionedKeyringEntries(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got.AccessToken != credential.AccessToken || got.RefreshToken != credential.RefreshToken || got.DeviceID != credential.DeviceID ||
-		got.PrincipalID != credential.PrincipalID || got.UserName != credential.UserName {
+		got.IdentityID != credential.IdentityID || got.UserName != credential.UserName {
 		t.Fatalf("credential = %#v", got)
 	}
 	prefix, err := accountPrefix("profile-1")
