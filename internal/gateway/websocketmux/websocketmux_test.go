@@ -625,6 +625,7 @@ func TestWSSHandshakeBindsDeviceAndLimitsConnectionsPerIdentity(t *testing.T) {
 	if !errors.As(err, &deviceErr) || deviceErr.Code != wssprotocol.CodeDeviceMismatch {
 		t.Fatalf("device mismatch = %#v, %v", deviceErr, err)
 	}
+	waitForActiveSessions(t, handler, 0)
 
 	first, err := Start(context.Background(), ClientConfig{
 		URL: endpoint, Token: "first", DeviceID: testDeviceID, PoolSize: 2, MaxPhysical: 4,

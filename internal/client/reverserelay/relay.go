@@ -288,8 +288,8 @@ func (relay *Relay) closeAll() {
 	for _, stream := range relay.udp {
 		connections = append(connections, stream.connection)
 	}
-	relay.tcp = make(map[uint64]*localConnection)
-	relay.udp = make(map[uint64]*localConnection)
+	clear(relay.tcp)
+	clear(relay.udp)
 	relay.mu.Unlock()
 	for _, connection := range connections {
 		_ = connection.Close()
