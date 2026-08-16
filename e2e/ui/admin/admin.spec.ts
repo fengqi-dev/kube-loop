@@ -13,7 +13,11 @@ async function signInIfNeeded(page: Page) {
     throw new Error("admin E2E credentials are required");
   }
   await page.getByRole("button", { name: "Local account" }).click();
-  await page.getByLabel("Username").fill(username);
+  const usernameField = page.getByLabel("Username");
+  const overview = page.getByRole("heading", { name: "Overview" });
+  await expect(usernameField.or(overview)).toBeVisible();
+  if (await overview.isVisible()) return;
+  await usernameField.fill(username);
   await page.getByLabel("Password").fill(password);
   await page.getByRole("button", { name: /Continue|Allow/ }).click();
   await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
@@ -65,7 +69,7 @@ test("manages the IAM directory and OAuth clients through the real API", async (
     .getByLabel("Change reason (at least 8 characters)")
     .fill("Create group from UI end-to-end test");
   await page.getByRole("button", { name: "Save" }).click();
-  await expect(page.getByText(name, { exact: true })).toBeVisible();
+  await expect(page.getByRole("cell", { name, exact: true })).toBeVisible();
 
   await page.getByLabel("Select group").selectOption({ label: name });
   const namespaceForm = page
