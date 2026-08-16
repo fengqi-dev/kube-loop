@@ -28,6 +28,8 @@ export default async function globalSetup(config: FullConfig) {
       await page.getByLabel("Email").fill("ui-e2e-admin@example.test");
       await page.getByLabel("Initial password").fill(password);
       await page.getByRole("button", { name: "Create platform admin" }).click();
+    } else {
+      await page.getByRole("button", { name: "Local account" }).click();
     }
     await page.getByLabel("Username").fill(username);
     await page.getByLabel("Password").fill(password);
