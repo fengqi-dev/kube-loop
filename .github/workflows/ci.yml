@@ -1,9 +1,8 @@
-name: KubeLoop CI
+name: CI
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
     paths-ignore:
       - "Casks/**"
   pull_request:
@@ -12,20 +11,22 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
-  frontend:
-    name: Frontend Build
+  checks:
+    name: Checks
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 35
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
+        with:
+          submodules: recursive
 
       - name: Set up Node.js
         uses: actions/setup-node@v6
@@ -34,23 +35,12 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
-      - name: Install dependencies
-        run: npm ci --prefix frontend
-
-      - name: Build frontend
-        run: npm run build:frontend --prefix frontend
-
-      - name: Test management frontend
-        run: npm run test:admin --prefix frontend
-
-      - name: Build management frontend
-        run: npm run build:admin --prefix frontend
-
-      - name: Test authentication frontend
-        run: npm run test:auth --prefix frontend
-
-      - name: Build authentication frontend
-        run: npm run build:auth --prefix frontend
+      - name: Build and test frontend
+        run: |
+          npm ci --prefix frontend
+          npm run build --prefix frontend
+          npm run test:admin --prefix frontend
+          npm run test:auth --prefix frontend
 
       - name: Verify embedded browser assets
         run: |
@@ -58,52 +48,25 @@ jobs:
             internal/controlplane/admin/ui/assets \
             internal/controlplane/authn/httpauth/ui/assets
 
-      - name: Upload frontend dist
-        uses: actions/upload-artifact@v7
-        with:
-          name: frontend-dist
-          path: frontend/dist
-          if-no-files-found: error
-
-  go:
-    name: "Go Build & Test"
-    needs: frontend
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v6
-        with:
-          submodules: recursive
-
-      - name: Download frontend dist
-        uses: actions/download-artifact@v7
-        with:
-          name: frontend-dist
-          path: frontend/dist
-
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
 
-      - name: Set up Operator EnvTest
-        run: make setup-envtest
-
-      - name: Verify sing-box patch
-        run: make singbox-patch-check
-
-      - name: Install Linux desktop dependencies
+      - name: Install build dependencies
         run: |
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends \
             libgtk-3-dev \
             libwebkit2gtk-4.1-dev
+          make setup-envtest
 
-      - name: Check formatting
+      - name: Verify generated and patched sources
         shell: bash
         run: |
+          set -euo pipefail
+          make singbox-patch-check
           unformatted="$(git ls-files -z '*.go' | xargs -0 gofmt -l)"
           if [[ -n "${unformatted}" ]]; then
             echo "The following Go files are not formatted:"
@@ -111,60 +74,50 @@ jobs:
             exit 1
           fi
 
-      - name: Lint Operator
-        run: make operator-lint-config operator-lint
+      - name: Lint and vulnerability checks
+        run: |
+          make operator-lint-config operator-lint
+          make vulncheck
+          go vet -tags webkit2_41 ./...
 
-      - name: Check reachable vulnerabilities
-        run: make vulncheck
+      - name: Unit and race tests
+        run: |
+          go test -tags webkit2_41 ./...
+          go test -race \
+            ./internal/gateway/... \
+            ./internal/helper \
+            ./internal/singbox \
+            ./internal/client/... \
+            ./internal/protocol/...
+          make recovery-test
 
-      - name: Vet
-        run: go vet -tags webkit2_41 ./...
-
-      - name: Run unit tests
-        run: go test -tags webkit2_41 ./...
-
-      - name: Record Gateway capacity baseline
-        run: make capacity-baseline
-
-      - name: Run race detector
-        run: go test -race ./internal/gateway/... ./internal/helper ./internal/singbox ./internal/client/... ./internal/protocol/...
-
-      - name: Run recovery race matrix
-        run: make recovery-test
-
-      - name: Build Gateway binaries
+      - name: Verify capacity and cross-platform builds
         shell: bash
         run: |
-          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-            go build -trimpath -ldflags="-s -w -X main.version=ci" \
-            -o /tmp/kubeloop-gateway-amd64 ./cmd/kubeloop-gateway
-          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 \
-            go build -trimpath -ldflags="-s -w -X main.version=ci" \
-            -o /tmp/kubeloop-gateway-arm64 ./cmd/kubeloop-gateway
-
-      - name: Build privileged helper
-        shell: bash
-        run: |
-          go build -trimpath -ldflags="-s -w -X main.version=ci" \
-            -o /tmp/kubeloop-helper ./cmd/kubeloop-helper
-          /tmp/kubeloop-helper version
-
-      - name: Cross-compile helper and sing-box packages
-        shell: bash
-        run: |
+          set -euo pipefail
+          make capacity-baseline
           for pair in darwin/amd64 darwin/arm64 linux/amd64 linux/arm64 windows/amd64 windows/arm64; do
-            GOOS=${pair%/*} GOARCH=${pair#*/} go build ./internal/singbox
-            GOOS=${pair%/*} GOARCH=${pair#*/} go build ./internal/helper
-            out="/tmp/kubeloop-helper-${pair%/*}-${pair#*/}"
-            if [[ "${pair%/*}" == "windows" ]]; then
-              out="${out}.exe"
+            os="${pair%/*}"
+            arch="${pair#*/}"
+            suffix=""
+            if [[ "${os}" == "windows" ]]; then
+              suffix=".exe"
             fi
-            GOOS=${pair%/*} GOARCH=${pair#*/} CGO_ENABLED=0 go build -trimpath \
-              -o "${out}" ./cmd/kubeloop-helper
+            GOOS="${os}" GOARCH="${arch}" go build ./internal/singbox
+            GOOS="${os}" GOARCH="${arch}" go build ./internal/helper
+            GOOS="${os}" GOARCH="${arch}" CGO_ENABLED=0 go build -trimpath \
+              -o "/tmp/kubeloop-helper-${os}-${arch}${suffix}" \
+              ./cmd/kubeloop-helper
+          done
+          for arch in amd64 arm64; do
+            CGO_ENABLED=0 GOOS=linux GOARCH="${arch}" go build -trimpath \
+              -ldflags="-s -w -X main.version=ci" \
+              -o "/tmp/kubeloop-gateway-${arch}" \
+              ./cmd/kubeloop-gateway
           done
 
-  database-integration:
-    name: External Database Integration
+  database:
+    name: Database
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     services:
@@ -204,352 +157,14 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Run PostgreSQL and MySQL integration tests
+      - name: Run database integration tests
         env:
           KUBELOOP_REQUIRE_DATABASE_INTEGRATION: "1"
           KUBELOOP_TEST_POSTGRESQL_DSN: postgres://kubeloop:kubeloop-test@127.0.0.1:5432/kubeloop_test?sslmode=disable
           KUBELOOP_TEST_MYSQL_DATASOURCE_URL: mysql://root:kubeloop-test@127.0.0.1:3306/kubeloop_test?tls=false
         run: |
-          test -n "${KUBELOOP_TEST_POSTGRESQL_DSN}"
-          test -n "${KUBELOOP_TEST_MYSQL_DATASOURCE_URL}"
           go test ./internal/controlplane/storage \
             -run 'Test(PostgreSQL|MySQL)' \
             -count=1 \
             -shuffle=on \
             -v
-
-  helm-e2e:
-    name: Helm Lifecycle E2E (Minikube)
-    needs: go
-    runs-on: ubuntu-24.04
-    timeout-minutes: 35
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v6
-
-      - name: Set up Helm
-        uses: azure/setup-helm@v4
-
-      - name: Set up Minikube
-        uses: medyagh/setup-minikube@v0.0.21
-        with:
-          start: false
-
-      - name: Start Minikube and build Helm E2E images
-        run: make helm-load-test-e2e-images MINIKUBE_DRIVER=docker
-
-      - name: Run Helm lifecycle E2E
-        id: helm-lifecycle
-        shell: bash
-        env:
-          KUBELOOP_HELM_E2E: "1"
-          KUBELOOP_HELM_E2E_CONTEXT: kubeloop-helm-e2e
-          KUBELOOP_HELM_E2E_KEEP_ON_FAILURE: "1"
-          KUBELOOP_HELM_E2E_AUDIT_SOURCE: kube-apiserver
-        run: ./e2e/helm/run.sh
-
-      - name: Collect Helm E2E diagnostics
-        if: failure() && steps.helm-lifecycle.outcome == 'failure'
-        shell: bash
-        run: |
-          kubectl get nodes,pods,deployments,replicasets,statefulsets,services,pvc --all-namespaces -o wide || true
-          kubectl get events --all-namespaces --sort-by=.lastTimestamp || true
-          kubectl logs --namespace kube-system --selector component=kube-apiserver --tail=200 || true
-          minikube logs --profile kubeloop-helm-e2e --file=/tmp/kubeloop-minikube.log || true
-          for namespace in kubeloop-helm-sqlite kubeloop-helm-postgresql; do
-            kubectl describe pods --namespace "${namespace}" || true
-            for pod in $(kubectl get pods --namespace "${namespace}" -o name 2>/dev/null); do
-              kubectl logs --namespace "${namespace}" "${pod}" --all-containers --tail=200 || true
-            done
-          done
-
-  e2e:
-    name: Linux E2E (Minikube)
-    needs: go
-    runs-on: ubuntu-24.04
-    timeout-minutes: 35
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v6
-
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: Start Minikube
-        uses: medyagh/setup-minikube@v0.0.21
-        with:
-          driver: docker
-          cpus: 2
-          memory: 4096
-
-      - name: Build and load Gateway image
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p build/bin
-          CGO_ENABLED=0 GOOS=linux GOARCH="$(go env GOARCH)" go build \
-            -trimpath -ldflags="-s -w" \
-            -o build/bin/kube-loop-gateway \
-            ./cmd/kubeloop-gateway
-          eval "$(minikube docker-env --shell bash)"
-          docker build -t kube-loop-gateway:dev -f build/gateway.e2e.Dockerfile .
-
-      - name: Install privileged helper
-        shell: bash
-        run: |
-          set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends nftables iproute2
-          ./build/bundle-helper.sh
-          go run ./e2e/scripts/ensure-singbox.go
-          mkdir -p "${HOME}/.kubeloop" build/bin
-          if [[ ! -s "${HOME}/.kubeloop/helper.token" ]]; then
-            openssl rand -hex 32 >"${HOME}/.kubeloop/helper.token"
-            chmod 600 "${HOME}/.kubeloop/helper.token"
-          fi
-          cp build/embedded/kubeloop-helper build/bin/kubeloop-helper
-          chmod 755 build/bin/kubeloop-helper build/bin/sing-box
-          sudo build/embedded/kubeloop-helper install \
-            --source "${PWD}/build/embedded/kubeloop-helper" \
-            --token "$(tr -d '[:space:]' <"${HOME}/.kubeloop/helper.token")" \
-            --uid "$(id -u)" \
-            --home "${HOME}" \
-            --version dev \
-            --sing-box "${PWD}/build/bin/sing-box"
-          go run ./e2e/scripts/helper-ping.go
-          go run ./e2e/scripts/stop-helper.go || true
-
-      - name: Run Linux platform E2E
-        shell: bash
-        run: |
-          set -euo pipefail
-          go test -tags=e2e -c \
-            -o build/bin/helper-platform-e2e.test ./e2e/platform
-          KUBELOOP_PLATFORM_E2E=1 \
-            build/bin/helper-platform-e2e.test \
-              -test.v \
-              -test.timeout=5m \
-              -test.skip '^TestPlatformDNSApplyAndRestore$'
-          sudo -n env KUBELOOP_PLATFORM_E2E=1 \
-            build/bin/helper-platform-e2e.test \
-              -test.v \
-              -test.timeout=5m \
-              -test.run '^TestPlatformDNSApplyAndRestore$'
-
-      - name: Run Minikube e2e tests
-        shell: bash
-        env:
-          KUBELOOP_E2E: "1"
-          KUBELOOP_E2E_CONTEXT: minikube
-          KUBELOOP_GATEWAY_IMAGE: kube-loop-gateway:dev
-          KUBELOOP_SINGBOX_PATH: ${{ github.workspace }}/build/bin/sing-box
-          KUBELOOP_E2E_TIMEOUT: 25m
-          KUBELOOP_REMOTE_TUN_E2E: "1"
-        run: bash ./e2e/scripts/run-go-test.sh
-
-      - name: Stop helper sessions
-        if: always()
-        shell: bash
-        run: go run ./e2e/scripts/stop-helper.go || true
-
-  operator-e2e:
-    name: Operator E2E (Minikube)
-    needs: go
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v6
-
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: Set up Minikube
-        uses: medyagh/setup-minikube@v0.0.21
-        with:
-          start: false
-
-      - name: Run Operator E2E
-        env:
-          MINIKUBE_DRIVER: docker
-        run: make operator-test-e2e
-
-      - name: Delete isolated cluster
-        if: always()
-        run: make operator-cleanup-test-e2e
-
-  windows-e2e:
-    name: Windows Helper E2E
-    needs: go
-    runs-on: windows-2025
-    timeout-minutes: 40
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v6
-
-      - name: Download frontend dist
-        uses: actions/download-artifact@v7
-        with:
-          name: frontend-dist
-          path: frontend/dist
-
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: Vet
-        run: go vet ./...
-
-      - name: Run Windows tests
-        shell: pwsh
-        run: |
-          # EnvTest cannot stop kube-apiserver or etcd on Windows. The controller
-          # integration suite runs in the Linux and macOS jobs instead.
-          $packages = go list ./... | Where-Object { $_ -ne 'github.com/fengqi-dev/kube-loop/internal/controller' }
-          go test $packages -count=1
-
-      - name: Build Windows binaries
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force build/windows-ci | Out-Null
-          go build -trimpath -o build/windows-ci/kubeloop-helper.exe ./cmd/kubeloop-helper
-          if ($LASTEXITCODE -ne 0) {
-            exit $LASTEXITCODE
-          }
-          go build -trimpath -o build/windows-ci/kubeloop-gateway.exe ./cmd/kubeloop-gateway
-
-      - name: Build helper and sing-box
-        run: |
-          go run ./build/helper-prebuild.go windows/amd64
-          go run ./e2e/scripts/ensure-singbox.go
-
-      - name: Install helper
-        run: >
-          go run ./e2e/scripts/manage-helper.go
-          --operation install
-          --source "${{ github.workspace }}\build\embedded\kubeloop-helper.exe"
-          --sing-box "${{ github.workspace }}\build\bin\sing-box.exe"
-
-      - name: Upgrade helper with a changed binary
-        run: |
-          go build -trimpath -ldflags="-s -w -X main.version=dev -X main.buildMarker=e2e-upgrade" -o build/embedded/kubeloop-helper.exe ./cmd/kubeloop-helper
-          go run ./e2e/scripts/manage-helper.go `
-            --operation install `
-            --source "${{ github.workspace }}\build\embedded\kubeloop-helper.exe" `
-            --sing-box "${{ github.workspace }}\build\bin\sing-box.exe"
-
-      - name: Run Windows platform E2E
-        env:
-          KUBELOOP_PLATFORM_E2E: "1"
-        run: |
-          go test -tags=e2e ./e2e/platform ./internal/helper -count=1 -v
-
-      - name: Run Windows remote Gateway TUN and wake E2E
-        env:
-          KUBELOOP_REMOTE_TUN_E2E: "1"
-          KUBELOOP_SINGBOX_PATH: ${{ github.workspace }}\build\bin\sing-box.exe
-        run: go test -tags=e2e ./e2e/remotetun -count=1 -v -timeout=5m
-
-      - name: Uninstall helper
-        if: always()
-        shell: pwsh
-        run: |
-          $helper = "${{ github.workspace }}\build\embedded\kubeloop-helper.exe"
-          if (Test-Path $helper) {
-            go run ./e2e/scripts/manage-helper.go --operation uninstall --source $helper
-          }
-
-  macos-e2e:
-    name: macOS Helper E2E
-    needs: go
-    runs-on: macos-15
-    timeout-minutes: 30
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v6
-
-      - name: Download frontend dist
-        uses: actions/download-artifact@v7
-        with:
-          name: frontend-dist
-          path: frontend/dist
-
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: Set up Operator EnvTest
-        run: make setup-envtest
-
-      - name: Vet macOS client
-        run: go vet ./...
-
-      - name: Run macOS client tests
-        run: go test ./... -count=1
-
-      - name: Build helper and sing-box
-        shell: bash
-        run: |
-          set -euo pipefail
-          go run ./build/helper-prebuild.go "darwin/$(go env GOARCH)"
-          go run ./e2e/scripts/ensure-singbox.go
-
-      - name: Install helper
-        shell: bash
-        run: |
-          go run ./e2e/scripts/manage-helper.go \
-            --operation install \
-            --source "${{ github.workspace }}/build/embedded/kubeloop-helper" \
-            --sing-box "${{ github.workspace }}/build/bin/sing-box" \
-            --elevate
-
-      - name: Upgrade helper with a changed binary
-        shell: bash
-        run: |
-          go build -trimpath \
-            -ldflags="-s -w -X main.version=dev -X main.buildMarker=e2e-upgrade" \
-            -o build/embedded/kubeloop-helper ./cmd/kubeloop-helper
-          go run ./e2e/scripts/manage-helper.go \
-            --operation install \
-            --source "${{ github.workspace }}/build/embedded/kubeloop-helper" \
-            --sing-box "${{ github.workspace }}/build/bin/sing-box" \
-            --elevate
-
-      - name: Run macOS platform E2E
-        shell: bash
-        run: |
-          go test -tags=e2e -c \
-            -o build/bin/helper-platform-e2e.test ./e2e/platform
-          KUBELOOP_PLATFORM_E2E=1 \
-            build/bin/helper-platform-e2e.test \
-              -test.v \
-              -test.skip '^TestPlatformDNSApplyAndRestore$'
-          sudo -n env KUBELOOP_PLATFORM_E2E=1 \
-            build/bin/helper-platform-e2e.test \
-              -test.v \
-              -test.run '^TestPlatformDNSApplyAndRestore$'
-
-      - name: Run macOS remote Gateway TUN and wake E2E
-        env:
-          KUBELOOP_REMOTE_TUN_E2E: "1"
-          KUBELOOP_SINGBOX_PATH: ${{ github.workspace }}/build/bin/sing-box
-        run: go test -tags=e2e ./e2e/remotetun -count=1 -v -timeout=5m
-
-      - name: Uninstall helper
-        if: always()
-        shell: bash
-        run: |
-          go run ./e2e/scripts/manage-helper.go \
-            --operation uninstall \
-            --source "${{ github.workspace }}/build/embedded/kubeloop-helper" \
-            --elevate

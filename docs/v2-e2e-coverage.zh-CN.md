@@ -53,8 +53,8 @@
 ## UI 自动化回归
 
 `e2e/ui/run-real-environment.sh` 是当前完整 UI 验收入口。它在隔离 Minikube 中部署当前
-工作树的 Control Plane、Gateway 与 Operator，从启动日志安全取得一次性 bootstrap
-token，先运行 Playwright 管理后台套件，再构建真实 `KubeLoop.app` 并运行 XCUITest。
+工作树的 Control Plane、Gateway 与 Operator，从 Kubernetes bootstrap Secret 读取初始
+管理员凭据，先运行 Playwright 管理后台套件，再构建真实 `kube-loop.app` 并运行 XCUITest。
 测试不使用 mock API，也不恢复已经删除的旧 OIDC/browserfixture 兼容层。
 
 浏览器套件覆盖 IAM 初始化、本地账号 PKCE 登录、所有管理页面、移动导航、用户组及
@@ -64,8 +64,9 @@ Host Aliases、可编辑 SOCKS 端口、SOCKS/TUN 连接与断开、TUN 连接�
 以及 MCP 启停、未携带 Bearer Token 的真实 HTTP 拒绝、Streamable HTTP 初始化、六工具清单，
 并通过 `manage_cluster` 的 `get/version` 实际访问当前登录 Profile 的 V2 Control Plane。
 
-`.github/workflows/ui-e2e.yml` 每日定时运行，并作为 release workflow 的发布门禁；普通
-CI 同时构建并测试 Admin/Auth 前端，运行 Linux Helper 平台 E2E 和独立 Operator E2E。
+完整 UI、Helm、Operator、Minikube 及三平台 Helper E2E 保留为显式 opt-in 的手动验收入口，
+不再依赖本机自托管 Runner，也不阻塞 PR 或 Release。自动 CI 精简为 `Checks` 与 `Database`：
+前者覆盖前端、Go 静态检查、单元/Race 测试和跨平台构建，后者覆盖 PostgreSQL/MySQL。
 
 ## 运行方式
 

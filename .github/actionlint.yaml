@@ -1,5 +1,4 @@
 self-hosted-runner:
   labels:
-    - kubeloop-ui-e2e-macos
     - macos-15-intel
     - windows-11-arm
