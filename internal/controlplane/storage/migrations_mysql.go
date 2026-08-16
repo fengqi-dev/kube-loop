@@ -49,9 +49,7 @@ func mysqlMigrationStatement(statement string) string {
 	statement = strings.ReplaceAll(statement, "DEFAULT ''", "DEFAULT ('')")
 	statement = strings.ReplaceAll(statement, "DEFAULT '[]'", "DEFAULT ('[]')")
 	statement = strings.ReplaceAll(statement, "DEFAULT '{}'", "DEFAULT ('{}')")
-	for _, identifier := range []string{"key", "system"} {
-		statement = replaceMySQLIdentifier(statement, identifier)
-	}
+	statement = replaceMySQLIdentifier(statement, "key")
 	return statement
 }
 

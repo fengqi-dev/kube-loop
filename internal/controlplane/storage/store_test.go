@@ -358,7 +358,7 @@ func TestMySQLMigrationDialectConversion(t *testing.T) {
 		}
 	}
 	for _, required := range []string{
-		"primary_email VARCHAR(128)", "source_type VARCHAR(128)", "`key` VARCHAR(128)", "`system` INTEGER",
+		"primary_email VARCHAR(128)", "source_type VARCHAR(128)", "`key` VARCHAR(128)", "system_flag INTEGER",
 		"display_name LONGTEXT",
 	} {
 		if !strings.Contains(converted.String(), required) {
@@ -379,7 +379,7 @@ func TestMySQLMigrationDialectConversion(t *testing.T) {
 func TestPostgreSQLMigrationDialectConversion(t *testing.T) {
 	converted := strings.Join(migrations[0].postgresql, "\n")
 	for _, statement := range migrations[0].postgresql {
-		for _, required := range []string{"public BOOLEAN", "trusted BOOLEAN", "system BOOLEAN", "request_json JSONB"} {
+		for _, required := range []string{"public BOOLEAN", "trusted BOOLEAN", "system_flag BOOLEAN", "request_json JSONB"} {
 			if strings.Contains(statement, strings.Fields(required)[0]+" ") && !strings.Contains(statement, required) {
 				t.Fatalf("PostgreSQL migration did not convert %q: %s", required, statement)
 			}

@@ -204,7 +204,7 @@ func (repository *groupRepository) Create(ctx context.Context, group Group) erro
 		return err
 	}
 	_, err := repository.executor.ExecContext(ctx, repository.bind(`INSERT INTO iam_groups(
-		id, organization_id, name, description, system, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`),
+		id, organization_id, name, description, system_flag, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`),
 		group.ID, group.OrganizationID, group.Name, group.Description, group.System, formatTime(group.CreatedAt), formatTime(group.UpdatedAt))
 	return mapWriteError(err)
 }
@@ -212,7 +212,7 @@ func (repository *groupRepository) Create(ctx context.Context, group Group) erro
 func (repository *groupRepository) Get(ctx context.Context, id string) (Group, error) {
 	var group Group
 	var createdAt, updatedAt string
-	err := repository.executor.QueryRowContext(ctx, repository.bind(`SELECT id, organization_id, name, description, system,
+	err := repository.executor.QueryRowContext(ctx, repository.bind(`SELECT id, organization_id, name, description, system_flag,
 		created_at, updated_at FROM iam_groups WHERE id = ?`), id).Scan(&group.ID, &group.OrganizationID, &group.Name,
 		&group.Description, &group.System, &createdAt, &updatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -274,7 +274,7 @@ func (repository *groupRepository) Update(ctx context.Context, group Group) erro
 }
 
 func (repository *groupRepository) Delete(ctx context.Context, id string) error {
-	result, err := repository.executor.ExecContext(ctx, repository.bind(`DELETE FROM iam_groups WHERE id = ? AND system = ?`), id, false)
+	result, err := repository.executor.ExecContext(ctx, repository.bind(`DELETE FROM iam_groups WHERE id = ? AND system_flag = ?`), id, false)
 	if err != nil {
 		return mapWriteError(err)
 	}

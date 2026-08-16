@@ -28,7 +28,7 @@ CREATE INDEX organization_memberships_identity_idx ON organization_memberships(i
 
 CREATE TABLE iam_groups (
  id TEXT PRIMARY KEY, organization_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
- name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', system INTEGER NOT NULL DEFAULT 0 CHECK (system IN (0, 1)),
+ name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', system_flag INTEGER NOT NULL DEFAULT 0 CHECK (system_flag IN (0, 1)),
  created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
  UNIQUE (organization_id, name)
 );
