@@ -8,7 +8,7 @@ export default async function globalSetup(config: FullConfig) {
   const storageState = String(project.use.storageState);
   const username = required("KUBELOOP_UI_E2E_ADMIN_USERNAME");
   const password = required("KUBELOOP_UI_E2E_ADMIN_PASSWORD");
-  const bootstrapToken = required("KUBELOOP_UI_E2E_BOOTSTRAP_TOKEN");
+  const bootstrapToken = process.env.KUBELOOP_UI_E2E_BOOTSTRAP_TOKEN?.trim();
   await fs.mkdir(path.dirname(storageState), { recursive: true });
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({ ignoreHTTPSErrors: true });
@@ -20,13 +20,15 @@ export default async function globalSetup(config: FullConfig) {
     await page.goto(`${baseURL}/api/admin/ui/`, {
       waitUntil: "domcontentloaded",
     });
-    await page.getByRole("button", { name: "Initialize new IAM" }).click();
-    await page.getByLabel("One-time bootstrap token").fill(bootstrapToken);
-    await page.getByLabel("Admin username").fill(username);
-    await page.getByLabel("Display name").fill("UI E2E Administrator");
-    await page.getByLabel("Email").fill("ui-e2e-admin@example.test");
-    await page.getByLabel("Initial password").fill(password);
-    await page.getByRole("button", { name: "Create platform admin" }).click();
+    if (bootstrapToken) {
+      await page.getByRole("button", { name: "Initialize new IAM" }).click();
+      await page.getByLabel("One-time bootstrap token").fill(bootstrapToken);
+      await page.getByLabel("Admin username").fill(username);
+      await page.getByLabel("Display name").fill("UI E2E Administrator");
+      await page.getByLabel("Email").fill("ui-e2e-admin@example.test");
+      await page.getByLabel("Initial password").fill(password);
+      await page.getByRole("button", { name: "Create platform admin" }).click();
+    }
     await page.getByLabel("Username").fill(username);
     await page.getByLabel("Password").fill(password);
     await page.getByRole("button", { name: /Continue|Allow/ }).click();

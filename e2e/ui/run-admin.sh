@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SUITE="${ROOT}/e2e/ui/admin"
 
-for variable in KUBELOOP_UI_E2E_BASE_URL KUBELOOP_UI_E2E_BOOTSTRAP_TOKEN KUBELOOP_UI_E2E_ADMIN_USERNAME KUBELOOP_UI_E2E_ADMIN_PASSWORD; do
+for variable in KUBELOOP_UI_E2E_BASE_URL KUBELOOP_UI_E2E_ADMIN_USERNAME KUBELOOP_UI_E2E_ADMIN_PASSWORD; do
   if [[ -z "${!variable:-}" ]]; then
     echo "${variable} is required" >&2
     exit 2

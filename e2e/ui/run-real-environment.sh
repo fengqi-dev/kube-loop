@@ -95,26 +95,22 @@ for _ in {1..60}; do
 done
 curl --fail --silent --show-error --insecure "${BASE_URL}/.well-known/kubeloop" >/dev/null
 
-CONTROL_PLANE_LOGS="$(kubectl logs --namespace "${NAMESPACE}" \
-  --selector app.kubernetes.io/component=control-plane --all-containers --tail=-1)"
-BOOTSTRAP_TOKEN="$(printf '%s\n' "${CONTROL_PLANE_LOGS}" \
-  | sed -nE 's/.*"token"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' \
-  | tail -1)"
-unset CONTROL_PLANE_LOGS
-if [[ -z "${BOOTSTRAP_TOKEN}" ]]; then
-  echo "the one-time IAM bootstrap token was not found in Control Plane logs" >&2
+INITIAL_PASSWORD="$(kubectl get secret --namespace "${NAMESPACE}" \
+  kubeloop-dev-kubeloop-control-plane-iam-bootstrap \
+  -o jsonpath='{.data.initial-password}' | base64 --decode)"
+if [[ -z "${INITIAL_PASSWORD}" ]]; then
+  echo "the initial IAM administrator password was not found in its Kubernetes Secret" >&2
   exit 1
 fi
 
 export KUBELOOP_UI_E2E=1
 export KUBELOOP_UI_E2E_ROOT="${ROOT}"
 export KUBELOOP_UI_E2E_BASE_URL="${BASE_URL}"
-export KUBELOOP_UI_E2E_BOOTSTRAP_TOKEN="${BOOTSTRAP_TOKEN}"
-export KUBELOOP_UI_E2E_ADMIN_USERNAME="ui-e2e-admin"
-export KUBELOOP_UI_E2E_ADMIN_PASSWORD="UiE2e-$(openssl rand -hex 12)"
+export KUBELOOP_UI_E2E_ADMIN_USERNAME="admin"
+export KUBELOOP_UI_E2E_ADMIN_PASSWORD="${INITIAL_PASSWORD}"
+unset INITIAL_PASSWORD
 export KUBELOOP_UI_E2E_ARTIFACTS="${ARTIFACTS}/admin"
 "${ROOT}/e2e/ui/run-admin.sh"
-unset KUBELOOP_UI_E2E_BOOTSTRAP_TOKEN
 
 (
   cd "${ROOT}"
