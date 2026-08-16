@@ -9,7 +9,7 @@ Pod SSH is a compatibility endpoint for local SSH clients; it is not an SSH
 daemon running in the target Pod. V2 removes kubeconfig, Kubernetes clients and
 ServiceAccount credentials from the desktop while preserving local terminal,
 SSH identity and SFTP workflows. An endpoint must not become a way to bypass
-the authenticated Gateway Session or address another user's Pod.
+the authenticated Cluster Session or address another user's Pod.
 
 ## Decision
 

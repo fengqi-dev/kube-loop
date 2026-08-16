@@ -1,6 +1,17 @@
 name: Full UI E2E
 
 on:
+  pull_request:
+    paths:
+      - ".github/workflows/ui-e2e.yml"
+      - "app*.go"
+      - "build/gateway-dev.go"
+      - "e2e/ui/**"
+      - "frontend/**"
+      - "internal/client/**"
+      - "internal/controlplane/**"
+      - "internal/gateway/**"
+      - "wails.json"
   schedule:
     - cron: "17 18 * * *"
   workflow_dispatch:
@@ -16,6 +27,7 @@ permissions:
 jobs:
   full-ui-e2e:
     name: Admin browser and native macOS UI
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, macOS, kubeloop-ui-e2e-macos]
     timeout-minutes: 60
     steps:

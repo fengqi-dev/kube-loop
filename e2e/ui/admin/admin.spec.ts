@@ -166,6 +166,21 @@ test("keeps mobile navigation operable", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Audit" })).toBeVisible();
 });
 
+test("revokes a live OAuth grant through the management UI", async ({
+  page,
+}) => {
+  await page.getByRole("button", { name: "OAuth Grants" }).click();
+  const activeGrant = page.getByRole("row").filter({ hasText: "active" }).first();
+  await expect(activeGrant).toBeVisible();
+  await activeGrant.getByRole("button", { name: "Revoke" }).click();
+  await page
+    .getByLabel("Reason")
+    .fill("Revoke OAuth grant from UI end-to-end test");
+  await page.getByRole("button", { name: "Confirm" }).click();
+  await expect(activeGrant).toHaveCount(0);
+  await expect(page.getByRole("row").filter({ hasText: "revoked" }).first()).toBeVisible();
+});
+
 test("signs out and requires a real OAuth login", async ({ page }) => {
   await page.getByRole("button", { name: "Sign out" }).click();
   await expect(

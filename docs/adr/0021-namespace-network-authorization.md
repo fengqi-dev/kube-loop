@@ -53,7 +53,7 @@ The physical WSS connection receives the RelayTicket expiry as an immutable
 deadline. It cannot outlive the signed permission snapshot. Newer generations
 reject new streams on older physical connections; already-running streams are
 allowed to finish only within the old ticket's maximum two-minute lifetime.
-Session disconnect, token-family revocation and Relay revocation continue to
+Session disconnect, OAuth Grant revocation and Relay revocation continue to
 deny new tickets and connections.
 
 ### Policy semantics

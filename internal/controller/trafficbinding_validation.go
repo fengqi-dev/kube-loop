@@ -28,6 +28,7 @@ func isPermanent(err error) bool {
 	return errors.As(err, &target)
 }
 
+//nolint:gocyclo // Keeping the CRD's cross-field rules together makes their ordering and coverage auditable.
 func validateBinding(binding *trafficv1alpha1.TrafficBinding) error {
 	if binding == nil {
 		return permanentf("TrafficBinding is required")
@@ -79,7 +80,8 @@ func validateBinding(binding *trafficv1alpha1.TrafficBinding) error {
 	}
 	switch binding.Spec.Mode {
 	case trafficv1alpha1.TrafficBindingModePortForward:
-		if binding.Spec.Target == nil || binding.Spec.Relay != nil || binding.Spec.Preview != nil || len(binding.Spec.Ports) != 1 {
+		if binding.Spec.Target == nil || binding.Spec.Relay != nil ||
+			binding.Spec.Preview != nil || len(binding.Spec.Ports) != 1 {
 			return permanentf("PortForward requires spec.target and exactly one port")
 		}
 		if binding.Spec.Ports[0].RelayPort != nil {
@@ -93,7 +95,8 @@ func validateBinding(binding *trafficv1alpha1.TrafficBinding) error {
 			return permanentf("spec.preview.serviceName is invalid: %s", problems[0])
 		}
 	case trafficv1alpha1.TrafficBindingModeExchange, trafficv1alpha1.TrafficBindingModeMirror:
-		if binding.Spec.Target == nil || binding.Spec.Target.Kind != trafficv1alpha1.TargetKindService || binding.Spec.Relay == nil || binding.Spec.Preview != nil {
+		if binding.Spec.Target == nil || binding.Spec.Target.Kind != trafficv1alpha1.TargetKindService ||
+			binding.Spec.Relay == nil || binding.Spec.Preview != nil {
 			return permanentf("%s requires a Service target and spec.relay", binding.Spec.Mode)
 		}
 	default:
@@ -107,7 +110,8 @@ func validateBinding(binding *trafficv1alpha1.TrafficBinding) error {
 		}
 	}
 	if binding.Spec.Target != nil {
-		if binding.Spec.Target.Kind != trafficv1alpha1.TargetKindPod && binding.Spec.Target.Kind != trafficv1alpha1.TargetKindService {
+		if binding.Spec.Target.Kind != trafficv1alpha1.TargetKindPod &&
+			binding.Spec.Target.Kind != trafficv1alpha1.TargetKindService {
 			return permanentf("spec.target.kind %q is unsupported", binding.Spec.Target.Kind)
 		}
 		if problems := validation.IsDNS1123Subdomain(binding.Spec.Target.Name); len(problems) > 0 {

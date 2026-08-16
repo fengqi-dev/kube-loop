@@ -18,11 +18,11 @@ KubeLoop 是面向 Kubernetes 开发的桌面网络工具。它像一条只连�
 
 - **透明访问集群**——普通本地应用可以直接使用真实的集群地址。
 - **聚焦路由**——只有自动发现或手工配置的 Kubernetes 网段进入隧道。
-- **无需公网 Gateway**——通过 Kubernetes API Server port-forward 访问集群内无特权 Gateway。
+- **无需公网集群入口**——通过 RelayTicket 认证的 WebSocket 将流量送达分配的 Data Plane。
 - **本地迭代工具**——Port Forward、Exchange、Mirror 与 Preview 覆盖出站和入站流量。
 - **统一桌面工作流**——在一个 UI 中查看工作负载、使用 Pod SSH/SFTP、传输文件并诊断连接。
 - **跨平台**——支持 macOS、Windows、Linux，以及 amd64 和 arm64。
-- **运行时不依赖 `kubectl`**——桌面应用通过 client-go 和选中的 kubeconfig 直接工作。
+- **不依赖 kubeconfig 或 `kubectl`**——桌面应用登录 KubeLoop Server，不持有 Kubernetes 凭据。
 
 ## 安装
 
@@ -59,11 +59,10 @@ irm https://raw.githubusercontent.com/fengqi-dev/kube-loop/main/scripts/install.
 
 ## 连接集群
 
-1. 确保开发机可以访问 Kubernetes API Server，并准备好有效的 kubeconfig。
-2. 打开 KubeLoop，选择 Context 与默认 Namespace。
-3. 点击**连接**。
-4. 首次使用时批准安装本地网络 Helper。
-5. 权限允许时，KubeLoop 会在 `kubeloop-system` 中安装或升级无特权 Gateway。
+1. 打开 KubeLoop，添加 KubeLoop Server 的 HTTPS 地址并完成能力发现。
+2. 在系统浏览器中登录，然后选择已授权的 Namespace。
+3. 选择 **SOCKS5 proxy** 或 **TUN mode**，再点击**连接**。
+4. 仅 TUN 模式首次使用时需要批准安装本地网络 Helper。
 
 连接后，即可从任意本地应用使用 ClusterIP、Pod IP 或集群域名。
 
@@ -85,25 +84,23 @@ EndpointSlice。
 
 ```text
 本地应用
-  → 平台 TUN + split DNS
-  → 托管 sing-box
-  → 本地 SOCKS Bridge
-  → Kubernetes API Server port-forward
-  → 集群内无特权 Gateway
+  → TUN 或 SOCKS + 托管 sing-box / split DNS
+  → RelayTicket 认证的 WSS Relay
+  → 分配给当前 Session 的 Data Plane
   → Pods / Services / CoreDNS
 ```
 
-Gateway 负责最终的集群内连接，不包含 ServiceAccount token，也不使用
-`hostNetwork`、`privileged` 或 `NET_ADMIN`。本地 Helper 仅管理 KubeLoop 的
-sing-box 进程、TUN interface、route、split DNS 与恢复状态。
+Control Plane 负责身份认证、策略、Cluster Session、任务所有权与 Kubernetes 资源操作。
+Data Plane 仅承载已授权 Session 的流量，不持有 Kubernetes 凭据。本地 Helper 只在
+TUN 模式管理 sing-box 进程、interface、route、split DNS 与恢复状态；SOCKS 模式无需特权 Helper。
 
 完整控制面、数据面与恢复机制请参阅[系统设计](docs/design.zh-CN.md)和
 [统一流量数据面](docs/singbox-traffic-dataplane.zh-CN.md)。
 
 ## Pod SSH
 
-Pod SSH 在 TUN 模式下工作，不会在容器中安装 `sshd`。KubeLoop 验证本地 SSH 客户端，
-并将 channel 映射到 Kubernetes `pods/exec`。
+Pod SSH 使用 loopback、public-key-only endpoint，不会在容器中安装 `sshd`。KubeLoop
+验证本地 SSH 客户端，并将 channel 映射到当前 Cluster Session 的 Control Plane `pods/exec` Task。
 
 - SSH login name 用于选择容器，不改变容器内实际进程用户。
 - 交互式 Shell 和远程命令要求容器提供 `/bin/sh`。
@@ -118,16 +115,17 @@ KubeLoop 可以通过 Streamable HTTP 暴露本地
 Claude Code、Cursor 与 VS Code。
 
 MCP 默认关闭，仅监听 `127.0.0.1`，并默认使用自动生成的 Bearer token。集群操作使用
-当前已认证的 Gateway Session；MCP 不会加载本地 kubeconfig，也不能绕过 Gateway 策略
-或 Kubernetes 授权。
+当前已认证的 Server Profile 与 Cluster Session；MCP 不会加载本地 kubeconfig，也不能
+绕过 Control Plane 策略或 Kubernetes 授权。
 
 | 工具 | 范围 |
 | --- | --- |
 | `manage_cluster` | 读取集群能力；列出 Namespace、Service 与 Pod |
 | `manage_connection` | 读取、连接或显式断开当前 Session |
 | `manage_traffic` | 启动、停止和列出 Port Forward、Exchange、Mirror 与 Preview Task |
-| `exec_pod_command` | 通过已认证的 Gateway exec stream 执行精确 argv |
+| `exec_pod_command` | 通过已认证的 Control Plane exec stream 执行精确 argv；输出使用 base64 |
 | `manage_file_transfer` | 启动、列出或取消本地 ↔ Pod 文件传输 |
+| `manage_pod_files` | 列出、创建、重命名或删除 Pod 文件与目录 |
 
 配置方式参阅[官网 MCP 指南](https://fengqi-dev.github.io/kube-loop/#/mcp)。
 

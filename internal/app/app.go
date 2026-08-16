@@ -256,7 +256,7 @@ func newApp(version string, embeddedHelperFiles fs.FS, dependencies appDependenc
 		return application
 	}
 	mcpDependencies := mcp.RemoteDependencies{
-		Profiles: application.profiles, Gateway: application.remote,
+		Profiles: application.profiles, ControlPlane: application.remote,
 		Sessions: application.remoteSessions, DataPlanes: application.dataPlanes,
 		ExecClient: application.remote,
 	}

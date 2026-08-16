@@ -41,11 +41,40 @@ func testRepositoryConformance(t *testing.T, store *Store) {
 	t.Run("audit", func(t *testing.T) { testAuditRepository(t, store) })
 	t.Run("Relay desired states", func(t *testing.T) { testRelayDesiredStateRepository(t, store) })
 	t.Run("audit export jobs", func(t *testing.T) { testAuditExportJobRepository(t, store) })
+	t.Run("IAM boolean fields", func(t *testing.T) { testIAMBooleanFields(t, store) })
 	t.Run("management list pagination", func(t *testing.T) { testManagementListPagination(t, store) })
 	t.Run("management sessions", func(t *testing.T) { testAdminSessionRepositoryConformance(t, store) })
 	t.Run("transactions", func(t *testing.T) { testTransactions(t, store) })
 	t.Run("concurrent identity and idempotency", func(t *testing.T) { testConcurrentIdentityAndIdempotency(t, store) })
 	t.Run("stable errors", func(t *testing.T) { testStableRepositoryErrors(t, store) })
+}
+
+func testIAMBooleanFields(t *testing.T, store *Store) {
+	t.Helper()
+	ctx := context.Background()
+	now := time.Date(2026, 8, 16, 9, 0, 0, 0, time.UTC)
+	organizationID := uuid.NewString()
+	if err := store.Organizations().Create(ctx, Organization{
+		ID: organizationID, Name: "IAM Boolean Conformance", Slug: "iam-boolean-" + organizationID,
+		Status: "active", CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	group := Group{
+		ID: uuid.NewString(), OrganizationID: organizationID, Name: "System Administrators",
+		Description: "Verifies cross-dialect boolean persistence", System: true, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := store.Groups().Create(ctx, group); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := store.Groups().Get(ctx, group.ID)
+	if err != nil || !loaded.System {
+		t.Fatalf("loaded system group = %#v, %v", loaded, err)
+	}
+	groups, err := store.Groups().List(ctx, organizationID, 10)
+	if err != nil || len(groups) != 1 || groups[0].ID != group.ID || !groups[0].System {
+		t.Fatalf("listed system groups = %#v, %v", groups, err)
+	}
 }
 
 func testRelayDesiredStateRepository(t *testing.T, store *Store) {

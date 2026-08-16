@@ -111,10 +111,10 @@ final class KubeLoopUITests: XCTestCase {
         application.buttons["Save"].click()
         XCTAssertEqual(socksPort.value as? String, testPort, "SOCKS port did not persist")
         connectAndWait(status: "Remote cluster proxy is ready")
-        screen.open("Network")
+        startAndTestServicePortForward(screen)
+        runAdminRuntimeMutations()
+        XCTAssertTrue(application.staticTexts["Data Plane disconnected"].waitForExistence(timeout: 45), "management Session stop did not disconnect the desktop Data Plane")
         screen.open("Overview")
-        XCTAssertTrue(application.staticTexts["Remote cluster proxy is ready"].waitForExistence(timeout: 20), "SOCKS connection was lost across tabs")
-        disconnectAndWait()
 
         let tun = application.buttons["TUN mode"]
         XCTAssertTrue(tun.waitForExistence(timeout: 20), "TUN mode is unavailable")
@@ -140,8 +140,55 @@ final class KubeLoopUITests: XCTestCase {
         let endpoint = application.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'http://127.0.0.1:' AND label ENDSWITH '/mcp'")).firstMatch
         XCTAssertTrue(endpoint.waitForExistence(timeout: 10), "MCP endpoint is unavailable")
         assertMCPRequiresBearer(endpoint.label)
+        let disableToken = application.buttons["Disable token"]
+        XCTAssertTrue(disableToken.waitForExistence(timeout: 10), "MCP bearer authentication cannot be disabled for the authenticated probe")
+        disableToken.click()
+        XCTAssertTrue(application.buttons["Enable token"].waitForExistence(timeout: 20), "MCP bearer authentication did not disable")
+        try assertMCPV2ToolsReachControlPlane(endpoint.label)
         application.buttons["Disable MCP"].click()
         XCTAssertTrue(application.staticTexts["Off"].waitForExistence(timeout: 20), "MCP server did not stop")
+    }
+
+    private func startAndTestServicePortForward(_ screen: KubeLoopScreen) {
+        screen.open("Network")
+        let portForward = application.buttons["Port Forward"].firstMatch
+        XCTAssertTrue(portForward.waitForExistence(timeout: 30), "no Service exposes a Port Forward action")
+        XCTAssertTrue(portForward.isEnabled, "Service Port Forward is disabled while the Data Plane is connected")
+        portForward.click()
+
+        let start = application.buttons["Start"]
+        XCTAssertTrue(start.waitForExistence(timeout: 10), "Port Forward dialog did not open")
+        XCTAssertTrue(start.isEnabled, "Port Forward dialog has no usable Service port")
+        start.click()
+
+        let test = application.buttons["Test"].firstMatch
+        XCTAssertTrue(test.waitForExistence(timeout: 30), "Service Port Forward did not become active")
+        test.click()
+    }
+
+    private func runAdminRuntimeMutations() {
+        let environment = ProcessInfo.processInfo.environment
+        guard let root = environment["KUBELOOP_UI_E2E_ROOT"] else {
+            XCTFail("KUBELOOP_UI_E2E_ROOT is required")
+            return
+        }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/bash")
+        process.arguments = [root + "/e2e/ui/run-admin-runtime.sh"]
+        process.environment = environment
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = output
+        do {
+            try process.run()
+        } catch {
+            XCTFail("start admin runtime E2E: \(error)")
+            return
+        }
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        let message = String(data: data, encoding: .utf8) ?? ""
+        XCTAssertEqual(process.terminationStatus, 0, "admin runtime E2E failed:\n\(message)")
     }
 
     private func connectAndWait(status: String, timeout: TimeInterval = 45) {
@@ -175,6 +222,108 @@ final class KubeLoopUITests: XCTestCase {
             completed.fulfill()
         }.resume()
         wait(for: [completed], timeout: 15)
+    }
+
+    private func assertMCPV2ToolsReachControlPlane(_ endpoint: String) throws {
+        let profileID = try XCTUnwrap(ProcessInfo.processInfo.environment["KUBELOOP_UI_E2E_SERVICE_ID"])
+        let initialized = try sendMCPRequest(
+            endpoint: endpoint,
+            body: [
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": [
+                    "protocolVersion": "2025-06-18",
+                    "capabilities": [:],
+                    "clientInfo": ["name": "kubeloop-ui-e2e", "version": "1"],
+                ],
+            ]
+        )
+        XCTAssertEqual(initialized.status, 200, "MCP initialize failed: \(initialized.text)")
+        let sessionID = try XCTUnwrap(initialized.sessionID, "MCP initialize did not return a session ID")
+
+        let notification = try sendMCPRequest(
+            endpoint: endpoint,
+            sessionID: sessionID,
+            body: ["jsonrpc": "2.0", "method": "notifications/initialized"]
+        )
+        XCTAssertTrue([200, 202, 204].contains(notification.status), "MCP initialized notification failed: \(notification.text)")
+
+        let listed = try sendMCPRequest(
+            endpoint: endpoint,
+            sessionID: sessionID,
+            body: ["jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": [:]]
+        )
+        XCTAssertEqual(listed.status, 200, "MCP tools/list failed: \(listed.text)")
+        let toolNames = Set(
+            (((listed.json?["result"] as? [String: Any])?["tools"] as? [[String: Any]]) ?? [])
+                .compactMap { $0["name"] as? String }
+        )
+        XCTAssertEqual(toolNames, [
+            "manage_cluster", "manage_connection", "manage_traffic",
+            "exec_pod_command", "manage_file_transfer", "manage_pod_files",
+        ])
+
+        let called = try sendMCPRequest(
+            endpoint: endpoint,
+            sessionID: sessionID,
+            body: [
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "tools/call",
+                "params": [
+                    "name": "manage_cluster",
+                    "arguments": ["action": "get", "type": "version", "profileId": profileID],
+                ],
+            ]
+        )
+        XCTAssertEqual(called.status, 200, "MCP manage_cluster failed: \(called.text)")
+        let result = called.json?["result"] as? [String: Any]
+        XCTAssertNotEqual(result?["isError"] as? Bool, true, "MCP could not reach the authenticated V2 Control Plane: \(called.text)")
+    }
+
+    private func sendMCPRequest(
+        endpoint: String,
+        sessionID: String? = nil,
+        body: [String: Any]
+    ) throws -> (status: Int, sessionID: String?, json: [String: Any]?, text: String) {
+        let url = try XCTUnwrap(URL(string: endpoint))
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json, text/event-stream", forHTTPHeaderField: "Accept")
+        if let sessionID {
+            request.setValue(sessionID, forHTTPHeaderField: "Mcp-Session-Id")
+            request.setValue("2025-06-18", forHTTPHeaderField: "MCP-Protocol-Version")
+        }
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let completed = expectation(description: "MCP \(body["method"] as? String ?? "request")")
+        var capturedData = Data()
+        var capturedResponse: HTTPURLResponse?
+        var capturedError: Error?
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            capturedData = data ?? Data()
+            capturedResponse = response as? HTTPURLResponse
+            capturedError = error
+            completed.fulfill()
+        }.resume()
+        wait(for: [completed], timeout: 20)
+        if let capturedError { throw capturedError }
+        let response = try XCTUnwrap(capturedResponse)
+        let text = String(data: capturedData, encoding: .utf8) ?? ""
+        let payload = mcpJSONPayload(from: capturedData, contentType: response.value(forHTTPHeaderField: "Content-Type"))
+        return (response.statusCode, response.value(forHTTPHeaderField: "Mcp-Session-Id"), payload, text)
+    }
+
+    private func mcpJSONPayload(from data: Data, contentType: String?) -> [String: Any]? {
+        if contentType?.contains("text/event-stream") == true,
+           let text = String(data: data, encoding: .utf8),
+           let line = text.split(separator: "\n").first(where: { $0.hasPrefix("data:") }) {
+            let value = line.dropFirst("data:".count).trimmingCharacters(in: .whitespaces)
+            return (try? JSONSerialization.jsonObject(with: Data(value.utf8))) as? [String: Any]
+        }
+        return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
     }
 }
 

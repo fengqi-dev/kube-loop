@@ -82,7 +82,7 @@ same durable compensation.
   queue and at each desktop local-target actor.
 - Kubernetes credentials, backend discovery, listener allocation and rollback
   remain in Control Plane. The desktop retains only explicit local host/port
-  targets and a typed Gateway SDK.
+  targets and a typed Control Plane client.
 - Backends observe the Control Plane Pod as the connection source, and endpoint
   membership is a start-time snapshot rather than a live watch. These are
   explicit V2 limitations.

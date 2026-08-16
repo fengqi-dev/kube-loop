@@ -138,7 +138,10 @@ func (r *TrafficBindingReconciler) captureService(
 	}
 
 	slices := &discoveryv1.EndpointSliceList{}
-	if err := r.List(ctx, slices, client.InNamespace(binding.Namespace), client.MatchingLabels{serviceNameLabel: target.Name}); err != nil {
+	if err := r.List(
+		ctx, slices, client.InNamespace(binding.Namespace),
+		client.MatchingLabels{serviceNameLabel: target.Name},
+	); err != nil {
 		return nil, err
 	}
 	if len(slices.Items) > maximumSliceCount {
@@ -203,7 +206,10 @@ func (r *TrafficBindingReconciler) reconcileIntercept(
 	}
 
 	slices := &discoveryv1.EndpointSliceList{}
-	if err := r.List(ctx, slices, client.InNamespace(binding.Namespace), client.MatchingLabels{serviceNameLabel: service.Name}); err != nil {
+	if err := r.List(
+		ctx, slices, client.InNamespace(binding.Namespace),
+		client.MatchingLabels{serviceNameLabel: service.Name},
+	); err != nil {
 		return err
 	}
 	managedName := managedEndpointSliceName(binding)

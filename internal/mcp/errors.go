@@ -79,7 +79,7 @@ func stableError(err error) error {
 		}
 		message := strings.TrimSpace(apiError.Message)
 		if message == "" {
-			message = "Gateway request failed"
+			message = "Control Plane request failed"
 		}
 		return &ToolError{
 			Code: code, Message: message, Field: apiError.Field,
@@ -93,8 +93,9 @@ func stableError(err error) error {
 		return &ToolError{Code: ErrorUnavailable, Message: "operation was cancelled or timed out", cause: err}
 	}
 	var networkError net.Error
-	if errors.As(err, &networkError) || strings.Contains(err.Error(), "Gateway request") {
-		return &ToolError{Code: ErrorUnavailable, Message: "Gateway is unavailable", cause: err}
+	if errors.As(err, &networkError) || strings.Contains(err.Error(), "Gateway request") ||
+		strings.Contains(err.Error(), "Control Plane request") {
+		return &ToolError{Code: ErrorUnavailable, Message: "Control Plane is unavailable", cause: err}
 	}
 	return &ToolError{Code: ErrorInternal, Message: "operation failed", cause: err}
 }

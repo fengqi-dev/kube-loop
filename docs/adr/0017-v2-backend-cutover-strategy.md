@@ -47,18 +47,18 @@ the production V2 desktop has exactly one backend mode: `remote`.
 
 | Feature boundary | Local reference | Remote V2 interface/manager | Production selection |
 | --- | --- | --- | --- |
-| Cluster discovery/inventory | `cluster.Provider`, informer watcher | `clientv2/discovery`, `clientv2/remote.Client` | Remote only |
-| Cluster Session/network | `session.Manager` | `clientv2/remotesession.Manager`, `clientv2/dataplane.Manager` | Remote only |
-| exec/TTY | `cluster.Provider.Exec` | `clientv2/exec.Client` and Manager | Remote only |
-| file transfer/operations | `filemanager.Manager` | `clientv2/filetransfer.Client` and Manager | Remote only |
+| Cluster discovery/inventory | `cluster.Provider`, informer watcher | `client/discovery`, `client/remote.Client` | Remote only |
+| Cluster Session/network | `session.Manager` | `client/remotesession.Manager`, `client/dataplane.Manager` | Remote only |
+| exec/TTY | `cluster.Provider.Exec` | `client/exec.Client` and Manager | Remote only |
+| file transfer/operations | `filemanager.Manager` | `client/filetransfer.Client` and Manager | Remote only |
 | Port Forward | `client/portforward/listener.Manager` | `client/portforward` remote Client/Data Plane interfaces | Remote only |
-| Exchange/Mirror/Preview | `intercept.Manager` | feature-specific `clientv2` Client/Session interfaces | Remote only |
+| Exchange/Mirror/Preview | `intercept.Manager` | feature-specific `internal/client` Client/Session interfaces | Remote only |
 | Pod SSH | `client/podssh/sshserver.Executor` | `client/podssh` remote exec interface | Remote only |
-| MCP | V1 local managers | `mcp.RemoteBackend` using typed Gateway SDK | Remote only |
+| MCP | V1 local managers | `mcp.RemoteBackend` using the typed Control Plane client | Remote only |
 
 Manager unit tests validate behavior through these narrow interfaces using
 fakes, so retry, cancellation, ownership and state-machine tests do not require
-either a kubeconfig or a live Gateway. Real Minikube E2E then validates the
+either a kubeconfig or a live Control Plane. Real Minikube E2E then validates the
 remote implementation end to end. Local V1 tests remain useful as behavior
 references but are not a second production backend conformance target after
 cutover.
@@ -70,7 +70,7 @@ Architecture tests fail if:
 - the desktop composition root imports V1 Kubernetes/session/store packages;
 - the complete desktop dependency graph contains `k8s.io/*`,
   `internal/cluster` or `internal/session`;
-- `clientv2` imports a local Kubernetes or server runtime package;
+- `internal/client` imports a local Kubernetes or server runtime package;
 - MCP imports local cluster/session/intercept/file manager packages; or
 - Data Plane imports Control Plane, Kubernetes, OAuth or database packages.
 
@@ -80,7 +80,7 @@ remote backend mode and do not read `KUBECONFIG`.
 ## Consequences
 
 - The desktop remains service-address-only and cannot accidentally bypass
-  Gateway Policy, OAuth grant revocation, ClusterSession ownership or audit.
+Control Plane Policy, OAuth grant revocation, ClusterSession ownership or audit.
 - No active Session can change backend authority in place. Switching server or
   namespace first drains all remote tasks and disconnects the old Session.
 - Migration comparison remains available in isolated tests without carrying a

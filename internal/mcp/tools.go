@@ -78,7 +78,7 @@ type podCommandIn struct {
 	SessionID      string   `json:"sessionId" jsonschema:"Explicit active Session ID"`
 	Namespace      string   `json:"namespace" jsonschema:"Explicit active namespace"`
 	Pod            string   `json:"pod" jsonschema:"Explicit Pod name"`
-	Container      string   `json:"container,omitempty" jsonschema:"Explicit container name; omit only to use Gateway default selection"`
+	Container      string   `json:"container,omitempty" jsonschema:"Explicit container name; omit only to use Control Plane default selection"`
 	Command        []string `json:"command" jsonschema:"Exact argv; no implicit shell is added"`
 	TimeoutSeconds int      `json:"timeoutSeconds,omitempty" jsonschema:"1-300; defaults to 30"`
 }
@@ -105,10 +105,33 @@ type manageFileTransferOut struct {
 	Items  []clientfiletransfer.Task `json:"items,omitempty"`
 }
 
+type managePodFilesIn struct {
+	Action         string `json:"action" jsonschema:"list, create, rename, or delete"`
+	ProfileID      string `json:"profileId" jsonschema:"Explicit active Server Profile ID"`
+	SessionID      string `json:"sessionId" jsonschema:"Explicit active Session ID"`
+	Namespace      string `json:"namespace" jsonschema:"Explicit active namespace"`
+	Pod            string `json:"pod" jsonschema:"Explicit Pod name"`
+	Container      string `json:"container,omitempty" jsonschema:"Explicit container name when needed"`
+	Path           string `json:"path" jsonschema:"Explicit absolute container path"`
+	Destination    string `json:"destination,omitempty" jsonschema:"Explicit absolute destination path for rename"`
+	Kind           string `json:"kind,omitempty" jsonschema:"file or directory for create"`
+	Recursive      bool   `json:"recursive,omitempty" jsonschema:"Whether directory deletion is recursive"`
+	IdempotencyKey string `json:"idempotencyKey,omitempty" jsonschema:"Unique log-safe key required for create, rename, and delete"`
+}
+
+type managePodFilesOut struct {
+	Action    string                    `json:"action"`
+	ProfileID string                    `json:"profileId"`
+	SessionID string                    `json:"sessionId"`
+	Namespace string                    `json:"namespace"`
+	Listing   *clientremote.PodFileList `json:"listing,omitempty"`
+	Task      *clientremote.PodFileTask `json:"task,omitempty"`
+}
+
 func registerTools(server *mcpsdk.Server, backend Backend) {
 	mcpsdk.AddTool(server, &mcpsdk.Tool{
 		Name: "manage_cluster",
-		Description: "Read Kubernetes resources through the authenticated Gateway SDK. " +
+		Description: "Read Kubernetes resources through the authenticated Control Plane client. " +
 			"profileId is always explicit; namespace is required for capabilities, Services, and Pods.",
 	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, input manageClusterIn) (*mcpsdk.CallToolResult, manageClusterOut, error) {
 		output, err := manageCluster(ctx, backend, input)
@@ -117,7 +140,7 @@ func registerTools(server *mcpsdk.Server, backend Backend) {
 
 	mcpsdk.AddTool(server, &mcpsdk.Tool{
 		Name: "manage_connection",
-		Description: "Inspect, connect, or disconnect the active Gateway Session. " +
+		Description: "Inspect, connect, or disconnect the active Cluster Session. " +
 			"Disconnect requires the exact profileId, sessionId, and namespace returned by status/connect.",
 	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, input manageConnectionIn) (*mcpsdk.CallToolResult, manageConnectionOut, error) {
 		output, err := manageConnection(ctx, backend, input)
@@ -135,8 +158,8 @@ func registerTools(server *mcpsdk.Server, backend Backend) {
 
 	mcpsdk.AddTool(server, &mcpsdk.Tool{
 		Name: "exec_pod_command",
-		Description: "Execute an exact argv in a Pod through the authenticated Gateway exec stream. " +
-			"No shell is inferred; stdout and stderr are base64-encoded JSON byte fields and capped at 1 MiB each.",
+		Description: "Execute an exact argv in a Pod through the authenticated Control Plane exec stream. " +
+			"No shell is inferred; stdoutBase64 and stderrBase64 are capped at 1 MiB before encoding.",
 	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, input podCommandIn) (*mcpsdk.CallToolResult, PodCommandResult, error) {
 		output, err := execPodCommand(ctx, backend, input)
 		return nil, output, stableError(err)
@@ -148,6 +171,15 @@ func registerTools(server *mcpsdk.Server, backend Backend) {
 			"and explicit localPath, remotePath, direction, kind, Pod, container, and overwrite choice.",
 	}, func(_ context.Context, _ *mcpsdk.CallToolRequest, input manageFileTransferIn) (*mcpsdk.CallToolResult, manageFileTransferOut, error) {
 		output, err := manageFileTransfer(backend, input)
+		return nil, output, stableError(err)
+	})
+
+	mcpsdk.AddTool(server, &mcpsdk.Tool{
+		Name: "manage_pod_files",
+		Description: "List, create, rename, or delete files and directories in a Pod through the authenticated Control Plane. " +
+			"Every call requires the exact active Profile, Session, namespace, Pod, container path, and explicit mutation parameters.",
+	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, input managePodFilesIn) (*mcpsdk.CallToolResult, managePodFilesOut, error) {
+		output, err := managePodFiles(ctx, backend, input)
 		return nil, output, stableError(err)
 	})
 }
@@ -380,6 +412,57 @@ func manageFileTransfer(backend Backend, input manageFileTransferIn) (manageFile
 	default:
 		return manageFileTransferOut{}, invalid("action", "action must be start, list, or cancel")
 	}
+}
+
+func managePodFiles(ctx context.Context, backend Backend, input managePodFilesIn) (managePodFilesOut, error) {
+	input.Action = strings.ToLower(strings.TrimSpace(input.Action))
+	identity := TrafficIdentity{
+		ProfileID: strings.TrimSpace(input.ProfileID),
+		SessionID: strings.TrimSpace(input.SessionID),
+		Namespace: strings.TrimSpace(input.Namespace),
+	}
+	if err := validateMutationIdentity(identity.ProfileID, identity.SessionID, identity.Namespace); err != nil {
+		return managePodFilesOut{}, err
+	}
+	input.Pod = strings.TrimSpace(input.Pod)
+	input.Container = strings.TrimSpace(input.Container)
+	input.Path = strings.TrimSpace(input.Path)
+	if input.Pod == "" {
+		return managePodFilesOut{}, invalid("pod", "pod is required")
+	}
+	if input.Path == "" {
+		return managePodFilesOut{}, invalid("path", "path is required")
+	}
+	output := managePodFilesOut{
+		Action: input.Action, ProfileID: identity.ProfileID,
+		SessionID: identity.SessionID, Namespace: identity.Namespace,
+	}
+	spec := clientremote.PodFileSpec{
+		Pod: input.Pod, Container: input.Container, Path: input.Path,
+		Destination: strings.TrimSpace(input.Destination),
+		Kind:        strings.ToLower(strings.TrimSpace(input.Kind)), Recursive: input.Recursive,
+	}
+	if input.Action == "list" {
+		listing, err := backend.ListPodFiles(ctx, identity, spec)
+		output.Listing = &listing
+		return output, err
+	}
+	if input.Action != "create" && input.Action != "rename" && input.Action != "delete" {
+		return managePodFilesOut{}, invalid("action", "action must be list, create, rename, or delete")
+	}
+	input.IdempotencyKey = strings.TrimSpace(input.IdempotencyKey)
+	if input.IdempotencyKey == "" || len(input.IdempotencyKey) > 128 {
+		return managePodFilesOut{}, invalid("idempotencyKey", "idempotencyKey is required and must be at most 128 bytes")
+	}
+	if input.Action == "create" && spec.Kind != "file" && spec.Kind != "directory" {
+		return managePodFilesOut{}, invalid("kind", "kind must be file or directory for create")
+	}
+	if input.Action == "rename" && spec.Destination == "" {
+		return managePodFilesOut{}, invalid("destination", "destination is required for rename")
+	}
+	task, err := backend.CreatePodFileOperation(ctx, identity, input.Action, spec, input.IdempotencyKey)
+	output.Task = &task
+	return output, err
 }
 
 func validateMutationIdentity(profileID, sessionID, namespace string) error {

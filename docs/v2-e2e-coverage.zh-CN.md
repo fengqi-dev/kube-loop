@@ -61,7 +61,8 @@ token，先运行 Playwright 管理后台套件，再构建真实 `KubeLoop.app`
 Namespace 权限、本地用户、邀请、OAuth Client、Recovery、审计导出、退出登录和旧
 OAuth grant 拒绝。macOS 原生套件覆盖 Wails 主导航、系统浏览器登录、跨 Tab 登录状态、
 Host Aliases、可编辑 SOCKS 端口、SOCKS/TUN 连接与断开、TUN 连接时不误选 SOCKS，
-以及 MCP 启停和未携带 Bearer Token 的真实 HTTP 拒绝。
+以及 MCP 启停、未携带 Bearer Token 的真实 HTTP 拒绝、Streamable HTTP 初始化、六工具清单，
+并通过 `manage_cluster` 的 `get/version` 实际访问当前登录 Profile 的 V2 Control Plane。
 
 `.github/workflows/ui-e2e.yml` 每日定时运行，并作为 release workflow 的发布门禁；普通
 CI 同时构建并测试 Admin/Auth 前端，运行 Linux Helper 平台 E2E 和独立 Operator E2E。

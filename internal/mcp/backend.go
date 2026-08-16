@@ -67,8 +67,8 @@ type PodCommandResult struct {
 	Pod             string   `json:"pod"`
 	Container       string   `json:"container,omitempty"`
 	Command         []string `json:"command"`
-	Stdout          []byte   `json:"stdout"`
-	Stderr          []byte   `json:"stderr"`
+	StdoutBase64    string   `json:"stdoutBase64"`
+	StderrBase64    string   `json:"stderrBase64"`
 	ExitCode        uint32   `json:"exitCode"`
 	Cancelled       bool     `json:"cancelled,omitempty"`
 	Error           string   `json:"error,omitempty"`
@@ -96,4 +96,7 @@ type Backend interface {
 	StartFileTransfer(TrafficIdentity, clientfiletransfer.Request) (clientfiletransfer.Task, error)
 	ListFileTransfers(string) ([]clientfiletransfer.Task, error)
 	CancelFileTransfer(TrafficIdentity) error
+
+	ListPodFiles(context.Context, TrafficIdentity, clientremote.PodFileSpec) (clientremote.PodFileList, error)
+	CreatePodFileOperation(context.Context, TrafficIdentity, string, clientremote.PodFileSpec, string) (clientremote.PodFileTask, error)
 }

@@ -2,7 +2,7 @@
 
 本文档是 V2-010 的权威盘点。范围是 `cmd`、`internal` 与 `operator` 下所有非测试 Go 文件对 `k8s.io/*` 的直接依赖，以及这些依赖最终产生的 Kubernetes API、watch 或 SPDY 流。测试夹具和 `e2e` 不计入生产调用点。
 
-`internal/architecture.TestKubernetesDirectImportInventoryIsExhaustive` 会扫描生产源码；新增或删除任何直接 Kubernetes 依赖包时，必须同时评审并更新本文档。独立的依赖图测试继续保证桌面组合根、`clientv2`、MCP 和 Data Plane 不依赖 Kubernetes SDK。
+`internal/architecture.TestKubernetesDirectImportInventoryIsExhaustive` 会扫描生产源码；新增或删除任何直接 Kubernetes 依赖包时，必须同时评审并更新本文档。独立的依赖图测试继续保证桌面组合根、`internal/client`、MCP 和 Data Plane 不依赖 Kubernetes SDK。
 
 ## 边界结论
 

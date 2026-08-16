@@ -19,11 +19,11 @@ and SDKs can use Pod IPs, ClusterIP Services, and cluster DNS directly.
 
 - **Transparent cluster access** — use real cluster addresses from ordinary local applications.
 - **Focused routing** — only discovered or configured Kubernetes routes enter the tunnel.
-- **No public gateway** — traffic reaches an unprivileged Gateway through Kubernetes API Server port-forward.
+- **No public cluster ingress** — RelayTicket-authenticated WebSockets carry traffic to an assigned Data Plane.
 - **Local iteration tools** — Port Forward, Exchange, Mirror, and Preview cover outbound and inbound traffic.
 - **Desktop workflow** — inspect workloads, use Pod SSH/SFTP, transfer files, and diagnose connections in one UI.
 - **Cross-platform** — macOS, Windows, and Linux on amd64 and arm64.
-- **No `kubectl` runtime dependency** — the desktop app uses client-go and the selected kubeconfig directly.
+- **No kubeconfig or `kubectl` dependency** — the desktop app signs in to a KubeLoop Server and never embeds Kubernetes credentials.
 
 ## Install
 
@@ -61,11 +61,10 @@ Each release includes `SHA256SUMS`.
 
 ## Connect
 
-1. Ensure the workstation can reach the Kubernetes API Server and has a valid kubeconfig.
-2. Open KubeLoop and select a Context and default Namespace.
-3. Click **Connect**.
-4. Approve installation of the local network Helper on first use.
-5. When permitted, KubeLoop installs or upgrades its unprivileged Gateway in `kubeloop-system`.
+1. Open KubeLoop, add the HTTPS URL of a KubeLoop Server, and run discovery.
+2. Sign in through the system browser and choose an authorized Namespace.
+3. Choose **SOCKS5 proxy** or **TUN mode**, then click **Connect**.
+4. For TUN only, approve installation of the local network Helper on first use.
 
 Once connected, use a ClusterIP, Pod IP, or cluster DNS name from any local application.
 
@@ -87,18 +86,17 @@ when a workflow stops or the cluster connection closes.
 
 ```text
 Local applications
-  → platform TUN + split DNS
-  → managed sing-box
-  → local SOCKS Bridge
-  → Kubernetes API Server port-forward
-  → unprivileged in-cluster Gateway
+  → TUN or SOCKS + managed sing-box / split DNS
+  → RelayTicket-authenticated WSS Relay
+  → assigned, Session-scoped Data Plane
   → Pods / Services / CoreDNS
 ```
 
-The Gateway makes the final in-cluster connection. It has no ServiceAccount
-token and does not use `hostNetwork`, `privileged`, or `NET_ADMIN`. The local
-Helper manages only KubeLoop's sing-box process, TUN interface, routes, split
-DNS, and recovery state.
+The Control Plane owns authentication, policy, Cluster Session state, task
+ownership, and Kubernetes operations. The Data Plane carries only authorized
+Session traffic and has no Kubernetes credentials. The local Helper is used
+only by TUN mode to manage KubeLoop's sing-box process, interface, routes,
+split DNS, and recovery state; SOCKS mode requires no privileged Helper.
 
 Read [System design](docs/design.md) and
 [Unified traffic data plane](docs/singbox-traffic-dataplane.md) for the full
@@ -106,8 +104,9 @@ control-plane, data-plane, and recovery model.
 
 ## Pod SSH
 
-Pod SSH works in TUN mode without installing `sshd` in a container. KubeLoop
-authenticates the local SSH client and maps the channel to Kubernetes `pods/exec`.
+Pod SSH uses a loopback, public-key-only endpoint without installing `sshd` in a
+container. KubeLoop authenticates the local SSH client and maps the channel to
+the active Cluster Session's Control Plane `pods/exec` task.
 
 - The SSH login name selects the container; it does not change the process user.
 - Interactive shells and remote commands require `/bin/sh`.
@@ -123,16 +122,17 @@ Streamable HTTP for Codex, Claude Code, Cursor, and VS Code.
 
 MCP is disabled by default, listens only on `127.0.0.1`, and uses a generated
 Bearer token by default. Cluster operations use the active authenticated
-Gateway Session; MCP does not load a local kubeconfig or bypass Gateway policy
-and Kubernetes authorization.
+Server Profile and Cluster Session; MCP does not load a local kubeconfig or
+bypass Control Plane policy and Kubernetes authorization.
 
 | Tool | Scope |
 | --- | --- |
 | `manage_cluster` | Read cluster capabilities; list Namespaces, Services, and Pods |
 | `manage_connection` | Read, connect, or explicitly disconnect the active Session |
 | `manage_traffic` | Start, stop, and list Port Forward, Exchange, Mirror, and Preview Tasks |
-| `exec_pod_command` | Execute an exact argv through the authenticated Gateway exec stream |
+| `exec_pod_command` | Execute an exact argv through the authenticated Control Plane exec stream; output is base64 |
 | `manage_file_transfer` | Start, list, or cancel local ↔ Pod transfers |
+| `manage_pod_files` | List, create, rename, or delete Pod files and directories |
 
 See the [website MCP guide](https://fengqi-dev.github.io/kube-loop/#/mcp) for setup.
 

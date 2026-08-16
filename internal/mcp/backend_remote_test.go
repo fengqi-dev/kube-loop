@@ -16,27 +16,56 @@ type fakeProfiles struct{ state clientprofile.State }
 
 func (profiles fakeProfiles) Snapshot() clientprofile.State { return profiles.state }
 
-type fakeGateway struct {
+type fakeControlPlane struct {
 	versionCalls int
 	profileID    string
+	podFile      clientremote.PodFileSpec
+	podFileKey   string
 }
 
-func (gateway *fakeGateway) Version(_ context.Context, profile clientprofile.Profile) (clientremote.Version, error) {
+func (gateway *fakeControlPlane) Version(_ context.Context, profile clientprofile.Profile) (clientremote.Version, error) {
 	gateway.versionCalls++
 	gateway.profileID = profile.ID
 	return clientremote.Version{GitVersion: "v1.32.0"}, nil
 }
-func (*fakeGateway) Capabilities(_ context.Context, _ clientprofile.Profile, namespace string) (clientremote.Capabilities, error) {
+func (*fakeControlPlane) Capabilities(_ context.Context, _ clientprofile.Profile, namespace string) (clientremote.Capabilities, error) {
 	return clientremote.Capabilities{Namespace: namespace}, nil
 }
-func (*fakeGateway) Namespaces(context.Context, clientprofile.Profile) ([]clientremote.Namespace, error) {
+func (*fakeControlPlane) Namespaces(context.Context, clientprofile.Profile) ([]clientremote.Namespace, error) {
 	return []clientremote.Namespace{{Name: "default"}}, nil
 }
-func (*fakeGateway) Pods(context.Context, clientprofile.Profile, string) ([]clientremote.Pod, error) {
+func (*fakeControlPlane) Pods(context.Context, clientprofile.Profile, string) ([]clientremote.Pod, error) {
 	return nil, nil
 }
-func (*fakeGateway) Services(context.Context, clientprofile.Profile, string) ([]clientremote.Service, error) {
+func (*fakeControlPlane) Services(context.Context, clientprofile.Profile, string) ([]clientremote.Service, error) {
 	return nil, nil
+}
+func (gateway *fakeControlPlane) ListPodFiles(
+	_ context.Context,
+	_ clientprofile.Profile,
+	session clientremote.Session,
+	spec clientremote.PodFileSpec,
+) (clientremote.PodFileList, error) {
+	gateway.podFile = spec
+	return clientremote.PodFileList{
+		SessionID: session.ID, Namespace: session.Namespace, Pod: spec.Pod,
+		Container: spec.Container, Path: spec.Path, Items: []clientremote.PodFileEntry{},
+	}, nil
+}
+func (gateway *fakeControlPlane) CreatePodFileOperation(
+	_ context.Context,
+	_ clientprofile.Profile,
+	session clientremote.Session,
+	action string,
+	spec clientremote.PodFileSpec,
+	idempotencyKey string,
+) (clientremote.PodFileTask, error) {
+	gateway.podFile, gateway.podFileKey = spec, idempotencyKey
+	return clientremote.PodFileTask{
+		ID: "file-op-1", SessionID: session.ID, Namespace: session.Namespace,
+		State: "stopped", Action: action, Pod: spec.Pod, Path: spec.Path,
+		Result: clientremote.PodFileResult{Completed: true},
+	}, nil
 }
 
 type fakeSessions struct {
@@ -77,13 +106,13 @@ func (fakeExecClient) OpenExecStream(context.Context, clientprofile.Profile, cli
 	return nil, errors.New("not implemented")
 }
 
-func TestRemoteBackendRejectsNonActiveProfileBeforeGatewayCall(t *testing.T) {
-	gateway := &fakeGateway{}
+func TestRemoteBackendRejectsNonActiveProfileBeforeControlPlaneCall(t *testing.T) {
+	gateway := &fakeControlPlane{}
 	backend, err := NewRemoteBackend(RemoteDependencies{
 		Profiles: fakeProfiles{state: clientprofile.State{
 			ActiveProfileID: "active", Profiles: []clientprofile.Profile{{ID: "active"}, {ID: "other"}},
 		}},
-		Gateway: gateway, Sessions: &fakeSessions{}, DataPlanes: fakeDataPlanes{}, ExecClient: fakeExecClient{},
+		ControlPlane: gateway, Sessions: &fakeSessions{}, DataPlanes: fakeDataPlanes{}, ExecClient: fakeExecClient{},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -91,7 +120,7 @@ func TestRemoteBackendRejectsNonActiveProfileBeforeGatewayCall(t *testing.T) {
 	_, err = backend.Version(context.Background(), "other")
 	assertToolError(t, err, ErrorForbidden, "profileId")
 	if gateway.versionCalls != 0 {
-		t.Fatalf("non-active Profile reached Gateway: %d calls", gateway.versionCalls)
+		t.Fatalf("non-active Profile reached Control Plane: %d calls", gateway.versionCalls)
 	}
 	version, err := backend.Version(context.Background(), "active")
 	if err != nil || version.GitVersion != "v1.32.0" || gateway.profileID != "active" {
@@ -105,7 +134,7 @@ func TestRemoteBackendRequiresExactSessionBeforeDisconnect(t *testing.T) {
 		Profiles: fakeProfiles{state: clientprofile.State{
 			ActiveProfileID: "active", Profiles: []clientprofile.Profile{{ID: "active"}},
 		}},
-		Gateway: &fakeGateway{}, Sessions: sessions, DataPlanes: fakeDataPlanes{}, ExecClient: fakeExecClient{},
+		ControlPlane: &fakeControlPlane{}, Sessions: sessions, DataPlanes: fakeDataPlanes{}, ExecClient: fakeExecClient{},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -117,6 +146,33 @@ func TestRemoteBackendRequiresExactSessionBeforeDisconnect(t *testing.T) {
 	}
 	if sessions.disconnectCalls != 0 {
 		t.Fatal("mismatched Session was disconnected")
+	}
+}
+
+func TestRemoteBackendUsesActiveSessionForPodFileOperations(t *testing.T) {
+	gateway := &fakeControlPlane{}
+	sessions := &fakeSessions{current: clientremote.Session{ID: "session-a", Namespace: "default", State: "active"}}
+	backend, err := NewRemoteBackend(RemoteDependencies{
+		Profiles: fakeProfiles{state: clientprofile.State{
+			ActiveProfileID: "active", Profiles: []clientprofile.Profile{{ID: "active"}},
+		}},
+		ControlPlane: gateway, Sessions: sessions, DataPlanes: fakeDataPlanes{}, ExecClient: fakeExecClient{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity := TrafficIdentity{ProfileID: "active", SessionID: "session-a", Namespace: "default"}
+	listing, err := backend.ListPodFiles(context.Background(), identity, clientremote.PodFileSpec{
+		Pod: "api-0", Container: "api", Path: "/tmp",
+	})
+	if err != nil || listing.SessionID != "session-a" || gateway.podFile.Path != "/tmp" {
+		t.Fatalf("listing=%#v gateway=%#v error=%v", listing, gateway, err)
+	}
+	task, err := backend.CreatePodFileOperation(context.Background(), identity, "delete", clientremote.PodFileSpec{
+		Pod: "api-0", Container: "api", Path: "/tmp/old", Recursive: true,
+	}, "delete-old")
+	if err != nil || task.ID != "file-op-1" || gateway.podFileKey != "delete-old" || !gateway.podFile.Recursive {
+		t.Fatalf("task=%#v gateway=%#v error=%v", task, gateway, err)
 	}
 }
 

@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"net/url"
-	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -237,10 +236,7 @@ func TestPostgreSQLConcurrentMigrationsAndSerializableRetryIntegration(t *testin
 
 func newPostgreSQLIntegrationConfig(t *testing.T) (Config, func()) {
 	t.Helper()
-	rawDSN := strings.TrimSpace(os.Getenv("KUBELOOP_TEST_POSTGRESQL_DSN"))
-	if rawDSN == "" {
-		t.Skip("KUBELOOP_TEST_POSTGRESQL_DSN is not configured")
-	}
+	rawDSN := externalDatabaseTestURL(t, "KUBELOOP_TEST_POSTGRESQL_DSN")
 	adminConfig, err := pgx.ParseConfig(rawDSN)
 	if err != nil {
 		t.Fatal("invalid KUBELOOP_TEST_POSTGRESQL_DSN")

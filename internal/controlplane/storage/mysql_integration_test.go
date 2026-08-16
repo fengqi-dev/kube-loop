@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"net/url"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -36,10 +35,7 @@ func TestMySQLRestartRecovery(t *testing.T) {
 
 func newMySQLIntegrationConfig(t *testing.T) (Config, func()) {
 	t.Helper()
-	raw := strings.TrimSpace(os.Getenv("KUBELOOP_TEST_MYSQL_DATASOURCE_URL"))
-	if raw == "" {
-		t.Skip("KUBELOOP_TEST_MYSQL_DATASOURCE_URL is not configured")
-	}
+	raw := externalDatabaseTestURL(t, "KUBELOOP_TEST_MYSQL_DATASOURCE_URL")
 	parsedURL, err := url.Parse(raw)
 	if err != nil || parsedURL.Scheme != "mysql" {
 		t.Fatal("KUBELOOP_TEST_MYSQL_DATASOURCE_URL must be a mysql:// URL")

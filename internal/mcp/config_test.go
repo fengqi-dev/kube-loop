@@ -89,7 +89,7 @@ func TestSystemConfigStoreDefaultsWithoutTouchingKeyring(t *testing.T) {
 	}
 }
 
-func TestStableGatewayErrorMapping(t *testing.T) {
+func TestStableControlPlaneErrorMapping(t *testing.T) {
 	err := stableError(&clientAPIErrorForTest)
 	var toolError *ToolError
 	if !errors.As(err, &toolError) || toolError.Code != ErrorForbidden || toolError.RequestID != "request-1" {

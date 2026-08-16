@@ -10,7 +10,7 @@ if [[ "$(uname -s)" != "Darwin" || "${KUBELOOP_UI_E2E:-}" != "1" ]]; then
   echo "native UI E2E requires macOS and KUBELOOP_UI_E2E=1" >&2
   exit 2
 fi
-for variable in KUBELOOP_UI_E2E_BASE_URL KUBELOOP_UI_E2E_ADMIN_USERNAME KUBELOOP_UI_E2E_ADMIN_PASSWORD KUBELOOP_UI_E2E_PROFILE_PATH; do
+for variable in KUBELOOP_UI_E2E_BASE_URL KUBELOOP_UI_E2E_ADMIN_USERNAME KUBELOOP_UI_E2E_ADMIN_PASSWORD KUBELOOP_UI_E2E_PROFILE_PATH KUBELOOP_UI_E2E_SERVICE_ID; do
   if [[ -z "${!variable:-}" ]]; then
     echo "${variable} is required" >&2
     exit 2

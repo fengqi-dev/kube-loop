@@ -48,11 +48,14 @@ linters:
     rules:
       - linters:
           - lll
-        path: internal/operator/api/*
+        path: api/v1alpha1/*
       - linters:
-          - dupl
+          - goconst
           - lll
-        path: internal/operator/*
+        path: _test\.go
+      - linters:
+          - staticcheck
+        text: "SA1019: corev1.Endpoint"
     paths:
       - third_party$
       - builtin$

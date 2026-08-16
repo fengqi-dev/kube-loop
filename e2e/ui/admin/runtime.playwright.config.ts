@@ -3,31 +3,24 @@ import path from "node:path";
 
 const artifacts =
   process.env.KUBELOOP_UI_E2E_ARTIFACTS ||
-  path.resolve("../../../build/ui-e2e/admin");
+  path.resolve("../../../build/ui-e2e/admin-runtime");
 
 export default defineConfig({
   testDir: ".",
-  testMatch: /.*\.spec\.ts/,
-  testIgnore: /runtime\.spec\.ts/,
-  globalSetup: "./global.setup.ts",
-  timeout: 45_000,
-  expect: { timeout: 10_000 },
+  testMatch: /runtime\.spec\.ts/,
+  timeout: 60_000,
+  expect: { timeout: 20_000 },
   fullyParallel: false,
   forbidOnly: Boolean(process.env.CI),
   retries: 0,
   workers: 1,
   outputDir: path.join(artifacts, "results"),
-  reporter: [
-    ["line"],
-    ["html", { outputFolder: path.join(artifacts, "report"), open: "never" }],
-  ],
+  reporter: [["line"]],
   use: {
     baseURL: required("KUBELOOP_UI_E2E_BASE_URL"),
-    storageState: path.join(artifacts, "admin-storage.json"),
     ignoreHTTPSErrors: true,
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
-    video: "retain-on-failure",
   },
 });
 

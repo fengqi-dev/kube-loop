@@ -74,6 +74,7 @@ kubectl wait --namespace ingress-nginx \
   --for=condition=Available deployment/ingress-nginx-controller --timeout=180s
 
 export KUBELOOP_DEV_SERVICE_ID="kubeloop-ui-$(openssl rand -hex 8)"
+export KUBELOOP_UI_E2E_SERVICE_ID="${KUBELOOP_DEV_SERVICE_ID}"
 (
   cd "${ROOT}"
   go run ./build/gateway-dev.go
@@ -106,6 +107,7 @@ if [[ -z "${BOOTSTRAP_TOKEN}" ]]; then
 fi
 
 export KUBELOOP_UI_E2E=1
+export KUBELOOP_UI_E2E_ROOT="${ROOT}"
 export KUBELOOP_UI_E2E_BASE_URL="${BASE_URL}"
 export KUBELOOP_UI_E2E_BOOTSTRAP_TOKEN="${BOOTSTRAP_TOKEN}"
 export KUBELOOP_UI_E2E_ADMIN_USERNAME="ui-e2e-admin"

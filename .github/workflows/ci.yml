@@ -111,6 +111,12 @@ jobs:
             exit 1
           fi
 
+      - name: Lint Operator
+        run: make operator-lint-config operator-lint
+
+      - name: Check reachable vulnerabilities
+        run: make vulncheck
+
       - name: Vet
         run: go vet -tags webkit2_41 ./...
 
@@ -156,6 +162,61 @@ jobs:
             GOOS=${pair%/*} GOARCH=${pair#*/} CGO_ENABLED=0 go build -trimpath \
               -o "${out}" ./cmd/kubeloop-helper
           done
+
+  database-integration:
+    name: External Database Integration
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      postgresql:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: kubeloop_test
+          POSTGRES_USER: kubeloop
+          POSTGRES_PASSWORD: kubeloop-test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U kubeloop -d kubeloop_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_DATABASE: kubeloop_test
+          MYSQL_ROOT_PASSWORD: kubeloop-test
+          MYSQL_ROOT_HOST: "%"
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping --host=127.0.0.1 --user=root --password=kubeloop-test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run PostgreSQL and MySQL integration tests
+        env:
+          KUBELOOP_REQUIRE_DATABASE_INTEGRATION: "1"
+          KUBELOOP_TEST_POSTGRESQL_DSN: postgres://kubeloop:kubeloop-test@127.0.0.1:5432/kubeloop_test?sslmode=disable
+          KUBELOOP_TEST_MYSQL_DATASOURCE_URL: mysql://root:kubeloop-test@127.0.0.1:3306/kubeloop_test?tls=false
+        run: |
+          test -n "${KUBELOOP_TEST_POSTGRESQL_DSN}"
+          test -n "${KUBELOOP_TEST_MYSQL_DATASOURCE_URL}"
+          go test ./internal/controlplane/storage \
+            -run 'Test(PostgreSQL|MySQL)' \
+            -count=1 \
+            -shuffle=on \
+            -v
 
   helm-e2e:
     name: Helm Lifecycle E2E (Minikube)

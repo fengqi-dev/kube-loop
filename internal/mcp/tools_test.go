@@ -23,6 +23,10 @@ type fakeBackend struct {
 	transferIdentity   TrafficIdentity
 	transferRequest    clientfiletransfer.Request
 	cancelIdentity     TrafficIdentity
+	podFileIdentity    TrafficIdentity
+	podFileAction      string
+	podFileSpec        clientremote.PodFileSpec
+	podFileKey         string
 }
 
 func (backend *fakeBackend) Version(context.Context, string) (clientremote.Version, error) {
@@ -97,7 +101,7 @@ func (backend *fakeBackend) ExecPodCommand(_ context.Context, request PodCommand
 	return PodCommandResult{
 		ProfileID: request.ProfileID, SessionID: request.SessionID, Namespace: request.Namespace,
 		TaskID: "exec-1", Pod: request.Pod, Container: request.Container,
-		Command: append([]string(nil), request.Command...), Stdout: []byte("hello\n"),
+		Command: append([]string(nil), request.Command...), StdoutBase64: "aGVsbG8K",
 	}, nil
 }
 
@@ -117,6 +121,36 @@ func (backend *fakeBackend) ListFileTransfers(profileID string) ([]clientfiletra
 func (backend *fakeBackend) CancelFileTransfer(identity TrafficIdentity) error {
 	backend.cancelIdentity = identity
 	return nil
+}
+
+func (backend *fakeBackend) ListPodFiles(
+	_ context.Context,
+	identity TrafficIdentity,
+	spec clientremote.PodFileSpec,
+) (clientremote.PodFileList, error) {
+	backend.podFileIdentity, backend.podFileSpec = identity, spec
+	return clientremote.PodFileList{
+		SessionID: identity.SessionID, Namespace: identity.Namespace,
+		Pod: spec.Pod, Container: spec.Container, Path: spec.Path,
+		Items: []clientremote.PodFileEntry{{Name: "app.log", Path: spec.Path + "/app.log", Kind: "file"}},
+	}, nil
+}
+
+func (backend *fakeBackend) CreatePodFileOperation(
+	_ context.Context,
+	identity TrafficIdentity,
+	action string,
+	spec clientremote.PodFileSpec,
+	idempotencyKey string,
+) (clientremote.PodFileTask, error) {
+	backend.podFileIdentity, backend.podFileAction = identity, action
+	backend.podFileSpec, backend.podFileKey = spec, idempotencyKey
+	return clientremote.PodFileTask{
+		ID: "file-op-1", SessionID: identity.SessionID, Namespace: identity.Namespace,
+		State: "stopped", Action: action, Pod: spec.Pod, Container: spec.Container,
+		Path: spec.Path, Destination: spec.Destination, Kind: spec.Kind, Recursive: spec.Recursive,
+		Result: clientremote.PodFileResult{Completed: true},
+	}, nil
 }
 
 func TestManageClusterUsesExplicitProfile(t *testing.T) {
@@ -187,6 +221,52 @@ func TestExecUsesExactArgvWithoutShellExpansion(t *testing.T) {
 	if len(backend.commandRequest.Command) != 3 || backend.commandRequest.Command[2] != "$(id)" || result.TaskID != "exec-1" {
 		t.Fatalf("request=%#v result=%#v", backend.commandRequest, result)
 	}
+}
+
+func TestManagePodFilesCarriesExactSessionAndIdempotency(t *testing.T) {
+	backend := &fakeBackend{}
+	listed, err := managePodFiles(context.Background(), backend, managePodFilesIn{
+		Action: "list", ProfileID: "server-a", SessionID: "session-1", Namespace: "default",
+		Pod: "api-0", Container: "api", Path: "/var/log",
+	})
+	if err != nil || listed.Listing == nil || len(listed.Listing.Items) != 1 {
+		t.Fatalf("listed=%#v error=%v", listed, err)
+	}
+	created, err := managePodFiles(context.Background(), backend, managePodFilesIn{
+		Action: "create", ProfileID: "server-a", SessionID: "session-1", Namespace: "default",
+		Pod: "api-0", Container: "api", Path: "/tmp/work", Kind: "directory",
+		IdempotencyKey: "mcp-create-work",
+	})
+	if err != nil || created.Task == nil || created.Task.ID != "file-op-1" {
+		t.Fatalf("created=%#v error=%v", created, err)
+	}
+	if backend.podFileIdentity.SessionID != "session-1" || backend.podFileIdentity.Namespace != "default" ||
+		backend.podFileAction != "create" || backend.podFileSpec.Kind != "directory" || backend.podFileKey != "mcp-create-work" {
+		t.Fatalf("backend=%#v", backend)
+	}
+	renamed, err := managePodFiles(context.Background(), backend, managePodFilesIn{
+		Action: "rename", ProfileID: "server-a", SessionID: "session-1", Namespace: "default",
+		Pod: "api-0", Container: "api", Path: "/tmp/work", Destination: "/tmp/work-renamed",
+		IdempotencyKey: "mcp-rename-work",
+	})
+	if err != nil || renamed.Task == nil || backend.podFileAction != "rename" ||
+		backend.podFileSpec.Destination != "/tmp/work-renamed" || backend.podFileKey != "mcp-rename-work" {
+		t.Fatalf("renamed=%#v backend=%#v error=%v", renamed, backend, err)
+	}
+	deleted, err := managePodFiles(context.Background(), backend, managePodFilesIn{
+		Action: "delete", ProfileID: "server-a", SessionID: "session-1", Namespace: "default",
+		Pod: "api-0", Container: "api", Path: "/tmp/work-renamed", Recursive: true,
+		IdempotencyKey: "mcp-delete-work",
+	})
+	if err != nil || deleted.Task == nil || backend.podFileAction != "delete" ||
+		!backend.podFileSpec.Recursive || backend.podFileKey != "mcp-delete-work" {
+		t.Fatalf("deleted=%#v backend=%#v error=%v", deleted, backend, err)
+	}
+	_, err = managePodFiles(context.Background(), backend, managePodFilesIn{
+		Action: "delete", ProfileID: "server-a", SessionID: "session-1", Namespace: "default",
+		Pod: "api-0", Path: "/tmp/work",
+	})
+	assertToolError(t, err, ErrorInvalidArgument, "idempotencyKey")
 }
 
 func assertToolError(t *testing.T, err error, code ErrorCode, field string) {

@@ -17,7 +17,7 @@ type Controller struct {
 
 func NewController(backend Backend, configStore ConfigStore, version string, logger LogFunc) (*Controller, error) {
 	if backend == nil {
-		return nil, errors.New("MCP Gateway backend is required")
+		return nil, errors.New("MCP Control Plane backend is required")
 	}
 	if configStore == nil {
 		return nil, errors.New("MCP settings store is required")

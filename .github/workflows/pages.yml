@@ -4,7 +4,9 @@ on:
   push:
     branches: [main]
     paths:
-      - "site/**"
+      - "frontend/apps/site/**"
+      - "frontend/package.json"
+      - "frontend/package-lock.json"
       - ".github/workflows/pages.yml"
   # Do not trigger on release/tag: the github-pages environment only allows
   # deployments from main. Release workflow dispatches this workflow on main.

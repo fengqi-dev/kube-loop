@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"io"
 	"slices"
@@ -27,12 +28,14 @@ type ProfileSource interface {
 	Snapshot() clientprofile.State
 }
 
-type GatewayClient interface {
+type ControlPlaneClient interface {
 	Version(context.Context, clientprofile.Profile) (clientremote.Version, error)
 	Capabilities(context.Context, clientprofile.Profile, string) (clientremote.Capabilities, error)
 	Namespaces(context.Context, clientprofile.Profile) ([]clientremote.Namespace, error)
 	Pods(context.Context, clientprofile.Profile, string) ([]clientremote.Pod, error)
 	Services(context.Context, clientprofile.Profile, string) ([]clientremote.Service, error)
+	ListPodFiles(context.Context, clientprofile.Profile, clientremote.Session, clientremote.PodFileSpec) (clientremote.PodFileList, error)
+	CreatePodFileOperation(context.Context, clientprofile.Profile, clientremote.Session, string, clientremote.PodFileSpec, string) (clientremote.PodFileTask, error)
 }
 
 type SessionManager interface {
@@ -87,7 +90,7 @@ type PreviewManager interface {
 
 type RemoteDependencies struct {
 	Profiles      ProfileSource
-	Gateway       GatewayClient
+	ControlPlane  ControlPlaneClient
 	Sessions      SessionManager
 	DataPlanes    DataPlaneManager
 	ExecClient    clientexec.Client
@@ -107,9 +110,9 @@ type RemoteBackend struct {
 }
 
 func NewRemoteBackend(dependencies RemoteDependencies) (*RemoteBackend, error) {
-	if dependencies.Profiles == nil || dependencies.Gateway == nil || dependencies.Sessions == nil ||
+	if dependencies.Profiles == nil || dependencies.ControlPlane == nil || dependencies.Sessions == nil ||
 		dependencies.DataPlanes == nil || dependencies.ExecClient == nil {
-		return nil, errors.New("MCP Profile, Gateway, Session, Data Plane, and exec clients are required")
+		return nil, errors.New("MCP Profile, Control Plane, Session, Data Plane, and exec clients are required")
 	}
 	return &RemoteBackend{dependencies: dependencies}, nil
 }
@@ -119,7 +122,7 @@ func (backend *RemoteBackend) Version(ctx context.Context, profileID string) (cl
 	if err != nil {
 		return clientremote.Version{}, err
 	}
-	return backend.dependencies.Gateway.Version(ctx, serverProfile)
+	return backend.dependencies.ControlPlane.Version(ctx, serverProfile)
 }
 
 func (backend *RemoteBackend) Capabilities(ctx context.Context, profileID, namespace string) (clientremote.Capabilities, error) {
@@ -127,7 +130,7 @@ func (backend *RemoteBackend) Capabilities(ctx context.Context, profileID, names
 	if err != nil {
 		return clientremote.Capabilities{}, err
 	}
-	return backend.dependencies.Gateway.Capabilities(ctx, serverProfile, strings.TrimSpace(namespace))
+	return backend.dependencies.ControlPlane.Capabilities(ctx, serverProfile, strings.TrimSpace(namespace))
 }
 
 func (backend *RemoteBackend) Namespaces(ctx context.Context, profileID string) ([]clientremote.Namespace, error) {
@@ -135,7 +138,7 @@ func (backend *RemoteBackend) Namespaces(ctx context.Context, profileID string) 
 	if err != nil {
 		return nil, err
 	}
-	return backend.dependencies.Gateway.Namespaces(ctx, serverProfile)
+	return backend.dependencies.ControlPlane.Namespaces(ctx, serverProfile)
 }
 
 func (backend *RemoteBackend) Pods(ctx context.Context, profileID, namespace string) ([]clientremote.Pod, error) {
@@ -143,7 +146,7 @@ func (backend *RemoteBackend) Pods(ctx context.Context, profileID, namespace str
 	if err != nil {
 		return nil, err
 	}
-	return backend.dependencies.Gateway.Pods(ctx, serverProfile, strings.TrimSpace(namespace))
+	return backend.dependencies.ControlPlane.Pods(ctx, serverProfile, strings.TrimSpace(namespace))
 }
 
 func (backend *RemoteBackend) Services(ctx context.Context, profileID, namespace string) ([]clientremote.Service, error) {
@@ -151,7 +154,7 @@ func (backend *RemoteBackend) Services(ctx context.Context, profileID, namespace
 	if err != nil {
 		return nil, err
 	}
-	return backend.dependencies.Gateway.Services(ctx, serverProfile, strings.TrimSpace(namespace))
+	return backend.dependencies.ControlPlane.Services(ctx, serverProfile, strings.TrimSpace(namespace))
 }
 
 func (backend *RemoteBackend) CurrentSession(profileID string) (clientremote.Session, error) {
@@ -386,7 +389,8 @@ func (backend *RemoteBackend) ExecPodCommand(ctx context.Context, request PodCom
 			if err != nil {
 				return PodCommandResult{}, err
 			}
-			result.Stdout, result.Stderr = stdout.Bytes(), stderr.Bytes()
+			result.StdoutBase64 = base64.StdEncoding.EncodeToString(stdout.Bytes())
+			result.StderrBase64 = base64.StdEncoding.EncodeToString(stderr.Bytes())
 			result.StdoutTruncated, result.StderrTruncated = stdout.truncated, stderr.truncated
 			result.ExitCode, result.Cancelled, result.Error = status.Code, status.Cancelled, status.Error
 			return result, nil
@@ -433,6 +437,34 @@ func (backend *RemoteBackend) CancelFileTransfer(identity TrafficIdentity) error
 	return &ToolError{Code: ErrorNotFound, Message: "file transfer is not active"}
 }
 
+func (backend *RemoteBackend) ListPodFiles(
+	ctx context.Context,
+	identity TrafficIdentity,
+	spec clientremote.PodFileSpec,
+) (clientremote.PodFileList, error) {
+	serverProfile, session, err := backend.requireSession(identity.ProfileID, identity.SessionID, identity.Namespace)
+	if err != nil {
+		return clientremote.PodFileList{}, err
+	}
+	return backend.dependencies.ControlPlane.ListPodFiles(ctx, serverProfile, session, spec)
+}
+
+func (backend *RemoteBackend) CreatePodFileOperation(
+	ctx context.Context,
+	identity TrafficIdentity,
+	action string,
+	spec clientremote.PodFileSpec,
+	idempotencyKey string,
+) (clientremote.PodFileTask, error) {
+	serverProfile, session, err := backend.requireSession(identity.ProfileID, identity.SessionID, identity.Namespace)
+	if err != nil {
+		return clientremote.PodFileTask{}, err
+	}
+	return backend.dependencies.ControlPlane.CreatePodFileOperation(
+		ctx, serverProfile, session, action, spec, idempotencyKey,
+	)
+}
+
 func (backend *RemoteBackend) activeProfile(profileID string) (clientprofile.Profile, error) {
 	profileID = strings.TrimSpace(profileID)
 	if profileID == "" {
@@ -469,11 +501,11 @@ func (backend *RemoteBackend) requireSession(profileID, sessionID, namespace str
 	}
 	session, err := backend.dependencies.Sessions.Current(serverProfile.ID)
 	if err != nil {
-		return clientprofile.Profile{}, clientremote.Session{}, &ToolError{Code: ErrorConflict, Message: "active Gateway Session is required", cause: err}
+		return clientprofile.Profile{}, clientremote.Session{}, &ToolError{Code: ErrorConflict, Message: "active Cluster Session is required", cause: err}
 	}
 	if session.ID != sessionID || session.Namespace != namespace || session.State != "active" {
 		return clientprofile.Profile{}, clientremote.Session{}, &ToolError{
-			Code: ErrorConflict, Message: "profileId, sessionId, and namespace must match the active Gateway Session",
+			Code: ErrorConflict, Message: "profileId, sessionId, and namespace must match the active Cluster Session",
 		}
 	}
 	return serverProfile, session, nil

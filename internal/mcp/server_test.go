@@ -50,7 +50,7 @@ func TestServerRejectsMissingBearer(t *testing.T) {
 	}
 }
 
-func TestServerPublishesOnlyGatewayTools(t *testing.T) {
+func TestServerPublishesAndExecutesV2Tools(t *testing.T) {
 	backend := &fakeBackend{}
 	server := NewServer(backend, "test")
 	token := strings.Repeat("t", 64)
@@ -77,7 +77,7 @@ func TestServerPublishesOnlyGatewayTools(t *testing.T) {
 	}
 	want := map[string]bool{
 		"manage_cluster": false, "manage_connection": false, "manage_traffic": false,
-		"exec_pod_command": false, "manage_file_transfer": false,
+		"exec_pod_command": false, "manage_file_transfer": false, "manage_pod_files": false,
 	}
 	if len(listed.Tools) != len(want) {
 		t.Fatalf("tools=%#v", listed.Tools)
@@ -104,6 +104,45 @@ func TestServerPublishesOnlyGatewayTools(t *testing.T) {
 	if result.IsError || backend.connectedProfile != "server-a" || backend.connectedNamespace != "default" {
 		raw, _ := json.Marshal(result)
 		t.Fatalf("result=%s backend=%#v", raw, backend)
+	}
+
+	calls := []mcpsdk.CallToolParams{
+		{Name: "manage_cluster", Arguments: map[string]any{
+			"action": "list", "type": "pod", "profileId": "server-a", "namespace": "default",
+		}},
+		{Name: "manage_connection", Arguments: map[string]any{
+			"action": "status", "profileId": "server-a",
+		}},
+		{Name: "manage_traffic", Arguments: map[string]any{
+			"action": "start", "type": "port_forward", "profileId": "server-a",
+			"sessionId": "session-1", "namespace": "default", "targetKind": "pod",
+			"targetName": "api-0", "protocol": "tcp", "remotePort": 8080,
+		}},
+		{Name: "exec_pod_command", Arguments: map[string]any{
+			"profileId": "server-a", "sessionId": "session-1", "namespace": "default",
+			"pod": "api-0", "command": []string{"printf", "ok"},
+		}},
+		{Name: "manage_file_transfer", Arguments: map[string]any{
+			"action": "start", "profileId": "server-a", "sessionId": "session-1", "namespace": "default",
+			"direction": "upload", "kind": "file", "pod": "api-0",
+			"localPath": "/tmp/input", "remotePath": "/tmp/output", "overwrite": true,
+		}},
+		{Name: "manage_pod_files", Arguments: map[string]any{
+			"action": "list", "profileId": "server-a", "sessionId": "session-1", "namespace": "default",
+			"pod": "api-0", "container": "api", "path": "/tmp",
+		}},
+		{Name: "manage_pod_files", Arguments: map[string]any{
+			"action": "create", "profileId": "server-a", "sessionId": "session-1", "namespace": "default",
+			"pod": "api-0", "container": "api", "path": "/tmp/work", "kind": "directory",
+			"idempotencyKey": "server-http-create-work",
+		}},
+	}
+	for _, call := range calls {
+		called, callErr := session.CallTool(ctx, &call)
+		if callErr != nil || called.IsError {
+			raw, _ := json.Marshal(called)
+			t.Fatalf("call %s: result=%s error=%v", call.Name, raw, callErr)
+		}
 	}
 }
 

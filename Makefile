@@ -17,10 +17,13 @@ KUSTOMIZE ?= $(LOCALBIN)/kustomize
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
 ENVTEST ?= $(LOCALBIN)/setup-envtest
 GOLANGCI_LINT ?= $(LOCALBIN)/golangci-lint
+GOLANGCI_LINT_BUILDER ?= $(LOCALBIN)/golangci-lint-builder
+GOVULNCHECK ?= $(LOCALBIN)/govulncheck
 
 KUSTOMIZE_VERSION ?= v5.8.1
 CONTROLLER_TOOLS_VERSION ?= v0.21.0
 GOLANGCI_LINT_VERSION ?= v2.12.2
+GOVULNCHECK_VERSION ?= v1.7.0
 ENVTEST_VERSION ?= $(shell v='$(call gomodver,sigs.k8s.io/controller-runtime)'; \
 	[ -n "$$v" ] || { echo "Set ENVTEST_VERSION manually (controller-runtime replace has no tag)" >&2; exit 1; }; \
 	printf '%s\n' "$$v")
@@ -128,6 +131,10 @@ operator-lint-fix: golangci-lint ## Apply safe lint fixes to the Operator compon
 .PHONY: operator-lint-config
 operator-lint-config: golangci-lint ## Verify the repository lint configuration.
 	"$(GOLANGCI_LINT)" config verify
+
+.PHONY: vulncheck
+vulncheck: govulncheck ## Check all Go packages for reachable known vulnerabilities.
+	"$(GOVULNCHECK)" ./...
 
 ##@ Operator build
 
@@ -313,9 +320,25 @@ $(ENVTEST): $(LOCALBIN)
 	$(call go-install-tool,$(ENVTEST),sigs.k8s.io/controller-runtime/tools/setup-envtest,$(ENVTEST_VERSION))
 
 .PHONY: golangci-lint
-golangci-lint: $(GOLANGCI_LINT) ## Download golangci-lint locally if necessary.
-$(GOLANGCI_LINT): $(LOCALBIN)
-	$(call go-install-tool,$(GOLANGCI_LINT),github.com/golangci/golangci-lint/v2/cmd/golangci-lint,$(GOLANGCI_LINT_VERSION))
+golangci-lint: $(GOLANGCI_LINT) ## Build golangci-lint with the repository's custom linters.
+$(GOLANGCI_LINT): .custom-gcl.yml $(GOLANGCI_LINT_BUILDER)
+	"$(GOLANGCI_LINT_BUILDER)" custom
+
+$(GOLANGCI_LINT_BUILDER): $(LOCALBIN)
+	@[ -f "$@-$(GOLANGCI_LINT_VERSION)" ] && [ "$$(readlink -- "$@" 2>/dev/null)" = "$@-$(GOLANGCI_LINT_VERSION)" ] || { \
+		set -e; \
+		package=github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION); \
+		echo "Downloading $${package}"; \
+		rm -f "$@"; \
+		GOBIN="$(LOCALBIN)" go install "$${package}"; \
+		mv "$(LOCALBIN)/golangci-lint" "$@-$(GOLANGCI_LINT_VERSION)"; \
+	}; \
+	ln -sf "$$(realpath "$@-$(GOLANGCI_LINT_VERSION)")" "$@"
+
+.PHONY: govulncheck
+govulncheck: $(GOVULNCHECK) ## Download govulncheck locally if necessary.
+$(GOVULNCHECK): $(LOCALBIN)
+	$(call go-install-tool,$(GOVULNCHECK),golang.org/x/vuln/cmd/govulncheck,$(GOVULNCHECK_VERSION))
 
 define go-install-tool
 @[ -f "$(1)-$(3)" ] && [ "$$(readlink -- "$(1)" 2>/dev/null)" = "$(1)-$(3)" ] || { \
