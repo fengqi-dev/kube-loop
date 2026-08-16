@@ -49,8 +49,9 @@ func mysqlMigrationStatement(statement string) string {
 	statement = strings.ReplaceAll(statement, "DEFAULT ''", "DEFAULT ('')")
 	statement = strings.ReplaceAll(statement, "DEFAULT '[]'", "DEFAULT ('[]')")
 	statement = strings.ReplaceAll(statement, "DEFAULT '{}'", "DEFAULT ('{}')")
-	statement = strings.ReplaceAll(statement, " key VARCHAR(128)", " `key` VARCHAR(128)")
-	statement = strings.ReplaceAll(statement, "(scope, key)", "(scope, `key`)")
+	for _, identifier := range []string{"key", "system"} {
+		statement = replaceMySQLIdentifier(statement, identifier)
+	}
 	return statement
 }
 
@@ -73,6 +74,26 @@ func replaceMySQLTextColumn(statement, column, replacement string) string {
 }
 
 func isSQLIdentifierByte(value byte) bool {
-	return value == '_' || value >= 'a' && value <= 'z' || value >= 'A' && value <= 'Z' ||
+	return value == '_' || value == '`' || value >= 'a' && value <= 'z' || value >= 'A' && value <= 'Z' ||
 		value >= '0' && value <= '9'
+}
+
+func replaceMySQLIdentifier(statement, identifier string) string {
+	for offset := 0; offset < len(statement); {
+		relativeIndex := strings.Index(statement[offset:], identifier)
+		if relativeIndex < 0 {
+			return statement
+		}
+		index := offset + relativeIndex
+		end := index + len(identifier)
+		if (index > 0 && isSQLIdentifierByte(statement[index-1])) ||
+			(end < len(statement) && isSQLIdentifierByte(statement[end])) {
+			offset = end
+			continue
+		}
+		replacement := "`" + identifier + "`"
+		statement = statement[:index] + replacement + statement[end:]
+		offset = index + len(replacement)
+	}
+	return statement
 }

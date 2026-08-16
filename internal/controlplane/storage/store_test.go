@@ -358,7 +358,7 @@ func TestMySQLMigrationDialectConversion(t *testing.T) {
 		}
 	}
 	for _, required := range []string{
-		"primary_email VARCHAR(128)", "source_type VARCHAR(128)", "`key` VARCHAR(128)",
+		"primary_email VARCHAR(128)", "source_type VARCHAR(128)", "`key` VARCHAR(128)", "`system` INTEGER",
 		"display_name LONGTEXT",
 	} {
 		if !strings.Contains(converted.String(), required) {
