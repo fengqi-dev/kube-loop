@@ -10,6 +10,7 @@ var mysqlIndexedTextColumns = map[string]struct{}{
 	"organization_id": {}, "status": {}, "slug": {}, "domain": {}, "role_id": {},
 	"email": {}, "primary_email": {}, "scope_id": {},
 	"relay_id": {}, "desired_state": {}, "username": {}, "client_id": {}, "scope_type": {},
+	"source_type":         {},
 	"authentication_type": {}, "created_authentication_type": {}, "updated_authentication_type": {},
 	"requested_authentication_type": {}, "validation_state": {}, "provider_type": {},
 	"requested_by":     {},
@@ -36,39 +37,42 @@ func mysqlMigrationStatement(statement string) string {
 	statement = strings.ReplaceAll(statement, "INTEGER PRIMARY KEY AUTOINCREMENT", "BIGINT AUTO_INCREMENT PRIMARY KEY")
 	statement = strings.ReplaceAll(statement, "policy_revision INTEGER", "policy_revision BIGINT")
 	statement = strings.ReplaceAll(statement, "BLOB", "VARBINARY(1024)")
-	lines := strings.Split(statement, "\n")
-	for index, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		fields := strings.Fields(trimmed)
-		if len(fields) < 2 || !strings.Contains(line, "TEXT") {
-			continue
-		}
-		column := strings.Trim(fields[0], "`,")
-		for fieldIndex, field := range fields {
-			if strings.EqualFold(field, "COLUMN") && fieldIndex+1 < len(fields) {
-				column = strings.Trim(fields[fieldIndex+1], "`,")
-				break
-			}
-		}
-		replacement := "LONGTEXT"
-		if _, ok := mysqlIndexedTextColumns[column]; ok || strings.HasSuffix(column, "_id") {
-			replacement = "VARCHAR(128)"
-		} else if _, ok := mysqlTimeColumns[column]; ok {
-			replacement = "VARCHAR(64)"
-		} else if strings.HasSuffix(column, "_hash") {
-			replacement = "VARCHAR(128)"
-		}
-		lines[index] = strings.Replace(line, "TEXT", replacement, 1)
-		if column == "key" {
-			lines[index] = strings.Replace(lines[index], fields[0], "`key`", 1)
-		}
-		if replacement == "LONGTEXT" {
-			lines[index] = strings.ReplaceAll(lines[index], "DEFAULT ''", "DEFAULT ('')")
-			lines[index] = strings.ReplaceAll(lines[index], "DEFAULT '[]'", "DEFAULT ('[]')")
-			lines[index] = strings.ReplaceAll(lines[index], "DEFAULT '{}'", "DEFAULT ('{}')")
-		}
+	for column := range mysqlIndexedTextColumns {
+		statement = replaceMySQLTextColumn(statement, column, "VARCHAR(128)")
 	}
-	statement = strings.Join(lines, "\n")
+	for column := range mysqlTimeColumns {
+		statement = replaceMySQLTextColumn(statement, column, "VARCHAR(64)")
+	}
+	statement = strings.ReplaceAll(statement, "_hash TEXT", "_hash VARCHAR(128)")
+	statement = strings.ReplaceAll(statement, "_id TEXT", "_id VARCHAR(128)")
+	statement = strings.ReplaceAll(statement, "TEXT", "LONGTEXT")
+	statement = strings.ReplaceAll(statement, "DEFAULT ''", "DEFAULT ('')")
+	statement = strings.ReplaceAll(statement, "DEFAULT '[]'", "DEFAULT ('[]')")
+	statement = strings.ReplaceAll(statement, "DEFAULT '{}'", "DEFAULT ('{}')")
+	statement = strings.ReplaceAll(statement, " key VARCHAR(128)", " `key` VARCHAR(128)")
 	statement = strings.ReplaceAll(statement, "(scope, key)", "(scope, `key`)")
 	return statement
+}
+
+func replaceMySQLTextColumn(statement, column, replacement string) string {
+	needle := column + " TEXT"
+	for offset := 0; offset < len(statement); {
+		relativeIndex := strings.Index(statement[offset:], needle)
+		if relativeIndex < 0 {
+			return statement
+		}
+		index := offset + relativeIndex
+		if index > 0 && isSQLIdentifierByte(statement[index-1]) {
+			offset = index + len(column)
+			continue
+		}
+		statement = statement[:index] + column + " " + replacement + statement[index+len(needle):]
+		offset = index + len(column) + 1 + len(replacement)
+	}
+	return statement
+}
+
+func isSQLIdentifierByte(value byte) bool {
+	return value == '_' || value >= 'a' && value <= 'z' || value >= 'A' && value <= 'Z' ||
+		value >= '0' && value <= '9'
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"net/url"
 	"strings"
 	"sync"
@@ -97,7 +98,8 @@ func TestPostgreSQLMigrationFailureRollsBackVersion(t *testing.T) {
 	if err := database.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Open(context.Background(), config); err == nil || !strings.Contains(err.Error(), "migration 20") {
+	expectedMigration := fmt.Sprintf("migration %d", baselineSchemaVersion)
+	if _, err := Open(context.Background(), config); err == nil || !strings.Contains(err.Error(), expectedMigration) {
 		t.Fatalf("PostgreSQL migration error = %v", err)
 	}
 	database, err = sql.Open("pgx", config.DatasourceURL)

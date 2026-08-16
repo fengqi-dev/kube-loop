@@ -357,6 +357,23 @@ func TestMySQLMigrationDialectConversion(t *testing.T) {
 			t.Fatalf("MySQL authorization migration is missing %q", required)
 		}
 	}
+	for _, required := range []string{
+		"primary_email VARCHAR(128)", "source_type VARCHAR(128)", "`key` VARCHAR(128)",
+		"display_name LONGTEXT",
+	} {
+		if !strings.Contains(converted.String(), required) {
+			t.Fatalf("MySQL migration is missing indexed column conversion %q", required)
+		}
+	}
+	for column := range mysqlIndexedTextColumns {
+		for _, invalidType := range []string{" TEXT", " LONGTEXT"} {
+			if strings.Contains(converted.String(), " "+column+invalidType) ||
+				strings.Contains(converted.String(), "\n"+column+invalidType) ||
+				strings.Contains(converted.String(), "\t"+column+invalidType) {
+				t.Fatalf("MySQL indexed column %q uses an unindexable type", column)
+			}
+		}
+	}
 }
 
 func TestPostgreSQLMigrationDialectConversion(t *testing.T) {
