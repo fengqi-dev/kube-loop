@@ -34,7 +34,6 @@ export default async function globalSetup(config: FullConfig) {
     await page.getByLabel("Username").fill(username);
     await page.getByLabel("Password").fill(password);
     await page.getByRole("button", { name: /Continue|Allow/ }).click();
-    await page.waitForURL(/\/api\/admin\/ui\/(?:#\/overview)?$/);
     await page.getByRole("heading", { name: "Overview" }).waitFor();
     await context.storageState({ path: storageState });
   } catch (error) {
