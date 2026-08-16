@@ -46,27 +46,13 @@
 
 ## 身份、容量与平台证据
 
-- `e2e/ui/admin` 在全新真实 Control Plane 上完成一次性 IAM bootstrap、本地账号 Authorization Code + PKCE、管理会话、目录/Namespace/OAuth Client 写入、审计导出、退出登录以及 Password/Implicit/Hybrid 拒绝；`internal/client/auth` 与 `internal/controlplane/authn/oauthserver` 分层验证 Access/Refresh Token 轮换、重放拒绝与撤销。
+- `internal/client/auth` 与 `internal/controlplane/authn/oauthserver` 分层验证 Access/Refresh Token 轮换、重放拒绝与撤销；管理 API 的 IAM、OAuth Client、审计导出和授权边界由对应服务与 HTTP handler 测试覆盖。
 - `make capacity-baseline` 验证全局/单用户物理 WSS、逻辑 stream 上限、容量释放，以及满载时 live/ready/metrics；三轮 32 KiB stream benchmark 记录吞吐和分配。`TestGatewayPodMultiUserCapacityRSSAndCleanup` 在单个真实 Gateway Pod 上以四名 Identity/四条物理 WSS/十六条逻辑 stream 验证限额、容量复用、集群内吞吐和 kubelet working-set 曲线；满载期间撤销 OAuth grant，确认 Preview Task、relay、TrafficBinding、Service、EndpointSlice 和 snapshot 在 5 秒预算内全部清理。
 - Windows/macOS workflow 运行全量本地测试和真实 Helper 安装、升级、ACL、DNS 恢复、卸载；Linux 额外运行完整 Minikube TUN。`e2e/remotetun` 已接入三平台 workflow，使用实际 Helper、sing-box TUN、WSS/smux Gateway、RelayTicket/NetworkSpec 和精确目标路由，验证休眠间隔触发 transport 刷新后 SOCKS 地址、TUN core 与 Helper Session 保持不变，且停止后无特权资源残留。最终门禁已由 GitHub Actions push workflow [31454657118](https://github.com/fengqi-dev/kube-loop/actions/runs/31454657118) 完成：Windows、macOS、Linux、Helm、主 Go 与前端六个作业全部通过，V2-803 已关闭。
 
-## UI 自动化回归
-
-`e2e/ui/run-real-environment.sh` 是当前完整 UI 验收入口。它在隔离 Minikube 中部署当前
-工作树的 Control Plane、Gateway 与 Operator，从 Kubernetes bootstrap Secret 读取初始
-管理员凭据，先运行 Playwright 管理后台套件，再构建真实 `kube-loop.app` 并运行 XCUITest。
-测试不使用 mock API，也不恢复已经删除的旧 OIDC/browserfixture 兼容层。
-
-浏览器套件覆盖 IAM 初始化、本地账号 PKCE 登录、所有管理页面、移动导航、用户组及
-Namespace 权限、本地用户、邀请、OAuth Client、Recovery、审计导出、退出登录和旧
-OAuth grant 拒绝。macOS 原生套件覆盖 Wails 主导航、系统浏览器登录、跨 Tab 登录状态、
-Host Aliases、可编辑 SOCKS 端口、SOCKS/TUN 连接与断开、TUN 连接时不误选 SOCKS，
-以及 MCP 启停、未携带 Bearer Token 的真实 HTTP 拒绝、Streamable HTTP 初始化、六工具清单，
-并通过 `manage_cluster` 的 `get/version` 实际访问当前登录 Profile 的 V2 Control Plane。
-
-完整 UI、Helm、Operator、Minikube 及三平台 Helper E2E 保留为显式 opt-in 的手动验收入口，
-不再依赖本机自托管 Runner，也不阻塞 PR 或 Release。自动 CI 精简为 `Checks` 与 `Database`：
-前者覆盖前端、Go 静态检查、单元/Race 测试和跨平台构建，后者覆盖 PostgreSQL/MySQL。
+自动 CI 精简为 `Checks` 与 `Database`：前者覆盖前端、Go 静态检查、单元/Race 测试和
+跨平台构建，后者覆盖 PostgreSQL/MySQL。Helm、Operator、Minikube 及三平台 Helper E2E
+保留为显式 opt-in 的验收入口，不阻塞 PR 或 Release。
 
 ## 运行方式
 
