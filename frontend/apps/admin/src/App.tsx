@@ -445,7 +445,7 @@ function Shell({
         <button
           className="menu-scrim"
           aria-label={
-            locale === "zh-CN" ? "关闭导航菜单" : "Close navigation menu"
+            locale === "zh-CN" ? "收起导航菜单" : "Dismiss navigation menu"
           }
           onClick={() => setMenu(false)}
         />

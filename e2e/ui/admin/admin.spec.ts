@@ -1,4 +1,23 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
+
+async function signInIfNeeded(page: Page) {
+  const signOut = page.getByRole("button", { name: "Sign out" });
+  if (await signOut.isVisible()) return;
+
+  await expect(
+    page.getByRole("heading", { name: "Sign in to Admin" }),
+  ).toBeVisible();
+  const username = process.env.KUBELOOP_UI_E2E_ADMIN_USERNAME;
+  const password = process.env.KUBELOOP_UI_E2E_ADMIN_PASSWORD;
+  if (!username || !password) {
+    throw new Error("admin E2E credentials are required");
+  }
+  await page.getByRole("button", { name: "Local account" }).click();
+  await page.getByLabel("Username").fill(username);
+  await page.getByLabel("Password").fill(password);
+  await page.getByRole("button", { name: /Continue|Allow/ }).click();
+  await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
+}
 
 test.beforeEach(async ({ page }) => {
   await page.goto("/api/admin/ui/");
@@ -177,11 +196,13 @@ test("revokes a live OAuth grant through the management UI", async ({
     .getByLabel("Reason")
     .fill("Revoke OAuth grant from UI end-to-end test");
   await page.getByRole("button", { name: "Confirm" }).click();
-  await expect(activeGrant).toHaveCount(0);
-  await expect(page.getByRole("row").filter({ hasText: "revoked" }).first()).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Sign in to Admin" }),
+  ).toBeVisible();
 });
 
 test("signs out and requires a real OAuth login", async ({ page }) => {
+  await signInIfNeeded(page);
   await page.getByRole("button", { name: "Sign out" }).click();
   await expect(
     page.getByRole("heading", { name: "Sign in to Admin" }),

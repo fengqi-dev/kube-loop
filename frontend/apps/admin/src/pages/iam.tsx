@@ -216,7 +216,8 @@ function CreateButton({
 
 export function GroupsPage({ organizationId }: { organizationId: string }) {
   const zh = locale() === "zh-CN",
-    path = organizationId ? `/organizations/${organizationId}/groups` : null;
+    path = organizationId ? `/organizations/${organizationId}/groups` : null,
+    [accessVersion, setAccessVersion] = useState(0);
   return (
     <>
       <ResourcePage<Group>
@@ -237,7 +238,10 @@ export function GroupsPage({ organizationId }: { organizationId: string }) {
             ? (reload) => (
                 <CreateButton
                   title={zh ? "新建用户组" : "Create group"}
-                  reload={reload}
+                  reload={async () => {
+                    await reload();
+                    setAccessVersion((version) => version + 1);
+                  }}
                   fields={[
                     {
                       name: "name",
@@ -259,7 +263,12 @@ export function GroupsPage({ organizationId }: { organizationId: string }) {
             : undefined
         }
       />
-      {organizationId && <GroupAccessPanel organizationId={organizationId} />}
+      {organizationId && (
+        <GroupAccessPanel
+          key={accessVersion}
+          organizationId={organizationId}
+        />
+      )}
     </>
   );
 }
