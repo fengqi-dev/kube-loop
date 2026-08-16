@@ -2,9 +2,9 @@ FROM golang:1.26-alpine AS build
 ARG VERSION=dev
 ARG COMMIT=unknown
 WORKDIR /src
-RUN apk add --no-cache ca-certificates
 COPY go.mod go.sum ./
 RUN go mod download
+RUN apk add --no-cache ca-certificates
 COPY cmd/kubeloop-control-plane ./cmd/kubeloop-control-plane
 COPY api ./api
 COPY internal ./internal
@@ -14,8 +14,10 @@ RUN CGO_ENABLED=0 go build -trimpath \
 
 FROM scratch
 ARG VERSION=dev
+ARG COMMIT=unknown
 LABEL org.opencontainers.image.title="KubeLoop Control Plane" \
-      org.opencontainers.image.version="${VERSION}"
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.revision="${COMMIT}"
 COPY --from=build /out/kubeloop-control-plane /kubeloop-control-plane
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 USER 65532:65532

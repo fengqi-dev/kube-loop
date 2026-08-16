@@ -219,10 +219,23 @@ jobs:
           path: dist/*
           if-no-files-found: error
 
-  gateway-image:
-    name: Publish Gateway image
+  container-images:
+    name: Publish ${{ matrix.display-name }} image
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - display-name: Gateway
+            image-name: gateway
+            dockerfile: build/gateway.Dockerfile
+          - display-name: Control Plane
+            image-name: control-plane
+            dockerfile: build/control-plane.Dockerfile
+          - display-name: Operator
+            image-name: operator
+            dockerfile: build/operator.Dockerfile
 
     steps:
       - name: Check out repository
@@ -245,35 +258,39 @@ jobs:
         id: metadata
         uses: docker/metadata-action@v6
         with:
-          images: ghcr.io/${{ github.repository }}/gateway
+          images: ghcr.io/${{ github.repository }}/${{ matrix.image-name }}
           tags: |
             type=ref,event=tag
             type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
 
-      - name: Build and push Gateway image
+      - name: Build and push ${{ matrix.display-name }} image
         uses: docker/build-push-action@v7
         with:
           context: .
-          file: build/gateway.Dockerfile
+          file: ${{ matrix.dockerfile }}
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.metadata.outputs.tags }}
           labels: ${{ steps.metadata.outputs.labels }}
           build-args: |
             VERSION=${{ github.ref_name }}
+            COMMIT=${{ github.sha }}
 
   publish:
     name: Publish GitHub Release
     needs:
       - desktop
       - gateway
-      - gateway-image
+      - container-images
     runs-on: ubuntu-24.04
     timeout-minutes: 10
 
     steps:
       - name: Check out release source
         uses: actions/checkout@v6
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
 
       - name: Download desktop artifacts
         uses: actions/download-artifact@v7
@@ -288,6 +305,24 @@ jobs:
           pattern: gateway-*
           path: dist
           merge-multiple: true
+
+      - name: Package Helm chart
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_version="${GITHUB_REF_NAME#v}"
+          chart_version="$(helm show chart charts/kubeloop | awk '$1 == "version:" { print $2 }')"
+          app_version="$(helm show chart charts/kubeloop | awk '$1 == "appVersion:" { print $2 }')"
+          if [[ "${chart_version}" != "${release_version}" ]]; then
+            echo "Chart version ${chart_version} does not match release ${release_version}" >&2
+            exit 1
+          fi
+          if [[ "${app_version}" != "${GITHUB_REF_NAME}" ]]; then
+            echo "Chart appVersion ${app_version} does not match image tag ${GITHUB_REF_NAME}" >&2
+            exit 1
+          fi
+          helm lint charts/kubeloop
+          helm package charts/kubeloop --destination dist
 
       - name: Generate SHA-256 checksums
         shell: bash

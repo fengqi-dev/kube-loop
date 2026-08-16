@@ -591,6 +591,7 @@ helm upgrade --install kubeloop ./charts/kubeloop \
   --namespace kubeloop-system \
   --create-namespace \
   --set publicURL=https://kubeloop.example.com \
+  --set controlPlane.admin.publicURL=https://kubeloop.example.com \
   --set controlPlane.relay.existingSecret=kubeloop-relay-control-plane \
   --set ingress.enabled=true \
   --set ingress.host=kubeloop.example.com \
