@@ -306,8 +306,10 @@ jobs:
           path: dist
           merge-multiple: true
 
-      - name: Package Helm chart
+      - name: Publish Helm chart to GHCR
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           release_version="${GITHUB_REF_NAME#v}"
@@ -322,7 +324,13 @@ jobs:
             exit 1
           fi
           helm lint charts/kubeloop
-          helm package charts/kubeloop --destination dist
+          chart_dir="$(mktemp -d)"
+          helm package charts/kubeloop --destination "${chart_dir}"
+          printf '%s' "${GH_TOKEN}" | helm registry login ghcr.io \
+            --username "${GITHUB_ACTOR}" \
+            --password-stdin
+          helm push "${chart_dir}/kubeloop-${release_version}.tgz" \
+            "oci://ghcr.io/${GITHUB_REPOSITORY}/charts"
 
       - name: Generate SHA-256 checksums
         shell: bash

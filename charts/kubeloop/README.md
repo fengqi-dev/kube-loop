@@ -587,7 +587,9 @@ explicit opt-in flag and expected dedicated context both match.
 The public URL is the only address desktop clients will need. It must be the HTTPS origin that routes discovery/API requests to the Control Plane and `/tunnel` to the Data Plane.
 
 ```shell
-helm upgrade --install kubeloop ./charts/kubeloop \
+helm upgrade --install kubeloop \
+  oci://ghcr.io/fengqi-dev/kube-loop/charts/kubeloop \
+  --version 2.0.0-beta.6 \
   --namespace kubeloop-system \
   --create-namespace \
   --set publicURL=https://kubeloop.example.com \

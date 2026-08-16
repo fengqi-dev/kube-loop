@@ -57,7 +57,7 @@ jobs:
       - name: Set up Helm
         uses: azure/setup-helm@v4
 
-      - name: Validate Helm chart and documented Ingress install
+      - name: Validate Helm chart and Ingress values
         shell: bash
         run: |
           set -euo pipefail
