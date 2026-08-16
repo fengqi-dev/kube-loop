@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 PROJECT="${ROOT}/e2e/ui/macos/KubeLoopUITests.xcodeproj"
-APP_PATH="${KUBELOOP_UI_E2E_APP_PATH:-${ROOT}/build/bin/KubeLoop.app}"
+APP_PATH="${KUBELOOP_UI_E2E_APP_PATH:-${ROOT}/build/bin/kube-loop.app}"
 ARTIFACTS="${KUBELOOP_UI_E2E_ARTIFACTS:-${ROOT}/build/ui-e2e/macos}"
 
 if [[ "$(uname -s)" != "Darwin" || "${KUBELOOP_UI_E2E:-}" != "1" ]]; then

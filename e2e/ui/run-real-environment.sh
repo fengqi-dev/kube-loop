@@ -118,6 +118,6 @@ export KUBELOOP_UI_E2E_ARTIFACTS="${ARTIFACTS}/admin"
   wails build -clean
 )
 export KUBELOOP_UI_E2E_ARTIFACTS="${ARTIFACTS}/macos"
-export KUBELOOP_UI_E2E_APP_PATH="${ROOT}/build/bin/KubeLoop.app"
+export KUBELOOP_UI_E2E_APP_PATH="${ROOT}/build/bin/kube-loop.app"
 "${ROOT}/e2e/ui/run-macos.sh"
 unset KUBELOOP_UI_E2E_ADMIN_PASSWORD
