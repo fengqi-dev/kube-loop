@@ -3,7 +3,6 @@ package storage
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"path/filepath"
@@ -35,7 +34,7 @@ func testAdminSessionRepositoryConformance(t *testing.T, store *Store) {
 	}
 	got, err := store.AdminSessions().GetByHash(ctx, idHash[:])
 	if err != nil || got.IdentityID != identityID || got.AuthorizationID != authorizationID || got.AuthenticationType != "normal" ||
-		got.SchemaVersion != ObjectSchemaVersion || string(got.CSRFTokenHash) != string(csrfHash[:]) {
+		string(got.CSRFTokenHash) != string(csrfHash[:]) {
 		t.Fatalf("stored management session = %#v, error = %v", got, err)
 	}
 	nextSeen := now.Add(time.Minute)
@@ -62,40 +61,6 @@ func testAdminSessionRepositoryConformance(t *testing.T, store *Store) {
 	deleted, err := store.AdminSessions().DeleteExpired(ctx, revokedAt.Add(time.Minute), 10)
 	if err != nil || deleted != 1 {
 		t.Fatalf("deleted management sessions = %d, error = %v", deleted, err)
-	}
-}
-
-func TestBreakGlassAdminSessionRequiresGenerationAndNoIdentity(t *testing.T) {
-	store := openSQLiteTestStore(t, filepath.Join(t.TempDir(), "break-glass-session.db"))
-	now := time.Date(2026, 8, 10, 16, 30, 0, 0, time.UTC)
-	idHash := sha256.Sum256([]byte("break-glass-session"))
-	csrfHash := sha256.Sum256([]byte("break-glass-csrf"))
-	generationHash := sha256.Sum256([]byte("rotated-secret"))
-	session := AdminSession{
-		IDHash: idHash[:], AuthenticationType: "break-glass",
-		BreakGlassGeneration: base64.RawURLEncoding.EncodeToString(generationHash[:]), CSRFTokenHash: csrfHash[:],
-		CreatedAt: now, LastSeenAt: now, IdleExpiresAt: now.Add(10 * time.Minute), AbsoluteExpiresAt: now.Add(10 * time.Minute),
-	}
-	if err := store.AdminSessions().Create(context.Background(), session); err != nil {
-		t.Fatal(err)
-	}
-	stored, err := store.AdminSessions().GetByHash(context.Background(), idHash[:])
-	if err != nil || stored.IdentityID != "" || stored.AuthorizationID != "" || stored.BreakGlassGeneration != session.BreakGlassGeneration {
-		t.Fatalf("stored break-glass session = %#v, error = %v", stored, err)
-	}
-	invalid := session
-	invalid.IDHash = append([]byte(nil), idHash[:]...)
-	invalid.IDHash[0]++
-	invalid.IdentityID = uuid.NewString()
-	if err := store.AdminSessions().Create(context.Background(), invalid); err == nil {
-		t.Fatal("break-glass session with a Identity succeeded")
-	}
-	invalid = session
-	invalid.IDHash = append([]byte(nil), idHash[:]...)
-	invalid.IDHash[0] += 2
-	invalid.BreakGlassGeneration = "not-a-generation"
-	if err := store.AdminSessions().Create(context.Background(), invalid); err == nil {
-		t.Fatal("break-glass session with invalid generation succeeded")
 	}
 }
 

@@ -17,26 +17,25 @@ func (repository *resourceSnapshotRepository) Put(ctx context.Context, snapshot 
 		return err
 	}
 	query := repository.bind(`INSERT INTO resource_snapshots(
-		id, schema_version, task_id, kind, namespace, name, data_json, created_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		id, task_id, kind, namespace, name, data_json, created_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(task_id, kind, namespace, name) DO UPDATE SET
-		schema_version=excluded.schema_version, data_json=excluded.data_json, created_at=excluded.created_at`)
+		data_json=excluded.data_json, created_at=excluded.created_at`)
 	if repository.backend == BackendPostgreSQL {
 		query = `INSERT INTO resource_snapshots(
-			id, schema_version, task_id, kind, namespace, name, data_json, created_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)
+			id, task_id, kind, namespace, name, data_json, created_at
+		) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7)
 		ON CONFLICT(task_id, kind, namespace, name) DO UPDATE SET
-			schema_version=excluded.schema_version, data_json=excluded.data_json, created_at=excluded.created_at`
+			data_json=excluded.data_json, created_at=excluded.created_at`
 	}
 	if repository.backend == BackendMySQL {
 		query = `INSERT INTO resource_snapshots(
-			id, schema_version, task_id, kind, namespace, name, data_json, created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-		ON DUPLICATE KEY UPDATE schema_version=VALUES(schema_version),
-			data_json=VALUES(data_json), created_at=VALUES(created_at)`
+			id, task_id, kind, namespace, name, data_json, created_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON DUPLICATE KEY UPDATE data_json=VALUES(data_json), created_at=VALUES(created_at)`
 	}
 	_, err := repository.executor.ExecContext(ctx, query,
-		snapshot.ID, snapshot.SchemaVersion, snapshot.TaskID, snapshot.Kind,
+		snapshot.ID, snapshot.TaskID, snapshot.Kind,
 		snapshot.Namespace, snapshot.Name, string(snapshot.Data), formatTime(snapshot.CreatedAt),
 	)
 	return mapWriteError(err)
@@ -46,7 +45,7 @@ func (repository *resourceSnapshotRepository) ListByTask(ctx context.Context, ta
 	if err := validateUUID(taskID, "task ID"); err != nil {
 		return nil, err
 	}
-	query := repository.bind(`SELECT id, schema_version, task_id, kind, namespace, name, data_json, created_at
+	query := repository.bind(`SELECT id, task_id, kind, namespace, name, data_json, created_at
 		FROM resource_snapshots WHERE task_id = ? ORDER BY kind, namespace, name`)
 	rows, err := repository.executor.QueryContext(ctx, query, taskID)
 	if err != nil {
@@ -59,7 +58,7 @@ func (repository *resourceSnapshotRepository) ListByTask(ctx context.Context, ta
 		var data []byte
 		var createdAt string
 		if err := rows.Scan(
-			&snapshot.ID, &snapshot.SchemaVersion, &snapshot.TaskID, &snapshot.Kind,
+			&snapshot.ID, &snapshot.TaskID, &snapshot.Kind,
 			&snapshot.Namespace, &snapshot.Name, &data, &createdAt,
 		); err != nil {
 			return nil, errors.New("decode resource snapshot")
@@ -106,12 +105,6 @@ func normalizeResourceSnapshot(snapshot *ResourceSnapshot) error {
 	var err error
 	if snapshot.Data, err = normalizeJSON(snapshot.Data, true, "resource snapshot data"); err != nil {
 		return err
-	}
-	if snapshot.SchemaVersion == 0 {
-		snapshot.SchemaVersion = ObjectSchemaVersion
-	}
-	if snapshot.SchemaVersion != ObjectSchemaVersion {
-		return errors.New("unsupported resource snapshot schema version")
 	}
 	if snapshot.CreatedAt.IsZero() {
 		snapshot.CreatedAt = time.Now().UTC()

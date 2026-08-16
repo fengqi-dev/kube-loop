@@ -3,7 +3,6 @@ package maintenance_test
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -13,6 +12,7 @@ import (
 
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/maintenance"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/remotetask"
 	"github.com/google/uuid"
 )
@@ -38,6 +38,18 @@ func TestRunOnceDeletesExpiredSessionAndCascadesTask(t *testing.T) {
 		ID: uuid.NewString(), IdentityID: identity.ID, DeviceID: "crashed-client", ClusterID: "cluster-a",
 		Namespace: "development", State: "active", CreatedAt: now.Add(-time.Hour),
 		UpdatedAt: now.Add(-time.Minute), LastHeartbeatAt: now.Add(-time.Minute), ExpiresAt: now.Add(-time.Second),
+	}
+	network, err := networkspec.Normalize(networkspec.Spec{PodCIDRs: []string{"10.244.0.0/16"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	expiredSession.NetworkSpec, err = networkspec.CanonicalJSON(network)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expiredSession.NetworkSpecHash, err = networkspec.Hash(network)
+	if err != nil {
+		t.Fatal(err)
 	}
 	if err := store.Sessions().Create(ctx, expiredSession); err != nil {
 		t.Fatal(err)
@@ -68,9 +80,15 @@ func TestRunOnceDeletesExpiredSessionAndCascadesTask(t *testing.T) {
 	if err := store.Tasks().Create(ctx, activeTask); err != nil {
 		t.Fatal(err)
 	}
-	generation := base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{3}, 32))
+	authorizationID := uuid.NewString()
+	if err := store.OAuthSessions().Create(ctx, storage.OAuthSession{
+		Kind: "refresh_token", SignatureHash: bytes.Repeat([]byte{3}, 32), RequestID: authorizationID,
+		IdentityID: identity.ID, RequestJSON: []byte(`{}`), Status: "active", CreatedAt: now.Add(-time.Hour), ExpiresAt: now.Add(time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
 	expiredAdminSession := storage.AdminSession{
-		IDHash: bytes.Repeat([]byte{4}, 32), AuthenticationType: "break-glass", BreakGlassGeneration: generation,
+		IDHash: bytes.Repeat([]byte{4}, 32), IdentityID: identity.ID, AuthorizationID: authorizationID, AuthenticationType: "normal",
 		CSRFTokenHash: bytes.Repeat([]byte{5}, 32), CreatedAt: now.Add(-time.Hour), LastSeenAt: now.Add(-time.Hour),
 		IdleExpiresAt: now.Add(-time.Second), AbsoluteExpiresAt: now.Add(-time.Second),
 	}

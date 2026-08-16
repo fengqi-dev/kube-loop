@@ -695,11 +695,6 @@ func normalizeRequest(request Request, action string) (normalizedRequest, error)
 		if !validUUID(actorID) {
 			return normalizedRequest{}, ErrInvalidRequest
 		}
-	case adminauthorization.AuthenticationBreakGlass:
-		if actorID != "" {
-			return normalizedRequest{}, ErrInvalidRequest
-		}
-		actorID, identityID = storage.ManagementActorBreakGlass, ""
 	default:
 		return normalizedRequest{}, ErrInvalidRequest
 	}

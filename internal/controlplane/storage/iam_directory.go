@@ -298,22 +298,15 @@ func (repository *groupRepository) AddMember(ctx context.Context, member GroupMe
 	if member.CreatedAt.IsZero() {
 		member.CreatedAt = time.Now().UTC()
 	}
-	member.SourceType, member.SourceID = strings.TrimSpace(member.SourceType), strings.TrimSpace(member.SourceID)
-	if member.SourceType == "" {
-		member.SourceType = "manual"
-	}
-	if member.SourceType != "manual" || member.SourceID != "" {
-		return errors.New("group membership source is invalid")
-	}
 	_, err := repository.executor.ExecContext(ctx, repository.bind(`INSERT INTO group_memberships(
-		group_id, identity_id, source_type, source_id, created_at) VALUES (?, ?, ?, ?, ?)`), member.GroupID,
-		member.IdentityID, member.SourceType, member.SourceID, formatTime(member.CreatedAt))
+		group_id, identity_id, created_at) VALUES (?, ?, ?)`), member.GroupID,
+		member.IdentityID, formatTime(member.CreatedAt))
 	return mapWriteError(err)
 }
 
 func (repository *groupRepository) RemoveMember(ctx context.Context, groupID, identityID string) error {
 	result, err := repository.executor.ExecContext(ctx, repository.bind(`DELETE FROM group_memberships
-		WHERE group_id = ? AND identity_id = ? AND source_type = 'manual'`), groupID, identityID)
+		WHERE group_id = ? AND identity_id = ?`), groupID, identityID)
 	if err != nil {
 		return mapWriteError(err)
 	}
@@ -332,7 +325,7 @@ func (repository *groupRepository) ListMembers(ctx context.Context, groupID stri
 	if err != nil {
 		return nil, err
 	}
-	rows, err := repository.executor.QueryContext(ctx, repository.bind(`SELECT group_id, identity_id, source_type, source_id, created_at
+	rows, err := repository.executor.QueryContext(ctx, repository.bind(`SELECT group_id, identity_id, created_at
 		FROM group_memberships WHERE group_id = ? ORDER BY created_at, identity_id LIMIT ?`), groupID, limit)
 	if err != nil {
 		return nil, databaseError("list group members", err)
@@ -342,7 +335,7 @@ func (repository *groupRepository) ListMembers(ctx context.Context, groupID stri
 	for rows.Next() {
 		var member GroupMembership
 		var createdAt string
-		if err := rows.Scan(&member.GroupID, &member.IdentityID, &member.SourceType, &member.SourceID, &createdAt); err != nil {
+		if err := rows.Scan(&member.GroupID, &member.IdentityID, &createdAt); err != nil {
 			return nil, databaseError("decode group member", err)
 		}
 		member.CreatedAt, err = parseTime(createdAt, "group membership creation time")

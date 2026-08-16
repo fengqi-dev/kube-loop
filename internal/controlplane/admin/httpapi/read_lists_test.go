@@ -85,9 +85,11 @@ func TestManagementReadListsUseStableCursorAndRedactPayloads(t *testing.T) {
 	if err := store.Organizations().Create(ctx, storage.Organization{ID: organizationID, Name: "Payments", Slug: "payments", Status: "active", CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
+	networkSpec, networkSpecHash := testStorageNetworkSpec(t)
 	session := storage.Session{
 		ID: uuid.NewString(), IdentityID: owner.ID, DeviceID: "device", ClusterID: "cluster",
 		Namespace: "payments", State: "active", CreatedAt: now, ExpiresAt: now.Add(time.Hour),
+		NetworkSpec: networkSpec, NetworkSpecHash: networkSpecHash,
 	}
 	if err := store.Sessions().Create(ctx, session); err != nil {
 		t.Fatal(err)
@@ -180,10 +182,12 @@ func TestNamespaceAdminListsOnlyExplicitNamespaceBeforeObjectLookup(t *testing.T
 	ctx := context.Background()
 	now := time.Now().UTC().Add(-time.Minute)
 	for index, namespace := range []string{"payments", "other"} {
+		networkSpec, networkSpecHash := testStorageNetworkSpec(t)
 		session := storage.Session{
 			ID: uuid.NewString(), IdentityID: identity.ID, DeviceID: "device", ClusterID: "cluster",
 			Namespace: namespace, State: "active", CreatedAt: now.Add(time.Duration(index) * time.Second),
-			ExpiresAt: now.Add(time.Hour),
+			ExpiresAt:   now.Add(time.Hour),
+			NetworkSpec: networkSpec, NetworkSpecHash: networkSpecHash,
 		}
 		if err := store.Sessions().Create(ctx, session); err != nil {
 			t.Fatal(err)
@@ -334,7 +338,7 @@ func newNamespaceTokenHandler(t *testing.T, namespace string) (*Handler, *storag
 	if err := store.Groups().Create(context.Background(), storage.Group{ID: groupID, OrganizationID: organizationID, Name: "Namespace users", CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Groups().AddMember(context.Background(), storage.GroupMembership{GroupID: groupID, IdentityID: identity.ID, SourceType: "manual", CreatedAt: now}); err != nil {
+	if err := store.Groups().AddMember(context.Background(), storage.GroupMembership{GroupID: groupID, IdentityID: identity.ID, CreatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.Groups().PutNamespace(context.Background(), storage.GroupNamespace{GroupID: groupID, Namespace: namespace, CreatedAt: now}); err != nil {

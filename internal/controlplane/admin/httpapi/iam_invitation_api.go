@@ -114,7 +114,7 @@ func (api *readAPI) acceptInvitation(ctx *echo.Context) error {
 			return createErr
 		}
 		if createErr = repositories.Groups().AddMember(request.Context(), storage.GroupMembership{
-			GroupID: invitation.GroupID, IdentityID: identityID, SourceType: "manual", CreatedAt: now,
+			GroupID: invitation.GroupID, IdentityID: identityID, CreatedAt: now,
 		}); createErr != nil {
 			return createErr
 		}

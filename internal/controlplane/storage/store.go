@@ -215,9 +215,6 @@ func (store *Store) migrate(ctx context.Context) error {
 	if version > currentSchemaVersion() {
 		return fmt.Errorf("storage schema version %d is newer than supported version %d", version, currentSchemaVersion())
 	}
-	if version > 0 && version < baselineSchemaVersion {
-		return fmt.Errorf("storage schema version %d predates breaking baseline %d; rebuild the database", version, baselineSchemaVersion)
-	}
 	for _, migration := range migrations {
 		if migration.version <= version {
 			continue

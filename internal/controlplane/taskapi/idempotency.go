@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
-	"slices"
 	"strings"
 
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
@@ -39,8 +38,6 @@ func IdempotencyKey(request *http.Request) (string, *controlplaneapi.Error) {
 }
 
 // RequestHash binds a create request to its owning Session and namespace.
-// Its byte format matches the pre-unification Exchange, Mirror, Preview,
-// Pod exec and file-transfer APIs so persisted records remain replayable.
 func RequestHash(sessionID, namespace string, spec any) (string, error) {
 	encoded, err := json.Marshal(spec)
 	if err != nil {
@@ -62,10 +59,6 @@ func Hash(encoded []byte) string {
 
 func Scope(taskType, identityID string) string {
 	return "task:" + taskType + ":" + identityID
-}
-
-func Matches(stored string, candidates ...string) bool {
-	return slices.Contains(candidates, stored)
 }
 
 func invalidKey(message string) *controlplaneapi.Error {

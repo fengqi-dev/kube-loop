@@ -496,31 +496,6 @@ func waitForRealExchangeState(
 	}
 }
 
-func waitForNoLocalExchange(
-	t *testing.T,
-	ctx context.Context,
-	manager *clientexchange.Manager,
-	profileID string,
-) {
-	t.Helper()
-	deadline := time.NewTimer(20 * time.Second)
-	defer deadline.Stop()
-	ticker := time.NewTicker(25 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		if len(manager.List(profileID)) == 0 {
-			return
-		}
-		select {
-		case <-ctx.Done():
-			t.Fatal(ctx.Err())
-		case <-deadline.C:
-			t.Fatal("local Exchange relay did not stop after OAuth grant revocation")
-		case <-ticker.C:
-		}
-	}
-}
-
 func reachableHostIP(t *testing.T, ctx context.Context, client kubernetes.Interface) string {
 	t.Helper()
 	if configured := strings.TrimSpace(os.Getenv("KUBELOOP_E2E_HOST_IP")); configured != "" {

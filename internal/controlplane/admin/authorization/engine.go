@@ -2,7 +2,6 @@ package authorization
 
 import (
 	"context"
-	"crypto/subtle"
 	"errors"
 	"fmt"
 	"regexp"
@@ -15,16 +14,8 @@ import (
 
 var namespacePattern = regexp.MustCompile(`^[a-z0-9](?:[-a-z0-9]{0,61}[a-z0-9])?$`)
 
-type Option func(*engineOptions) error
-type engineOptions struct{ breakGlassState BreakGlassStateReader }
-
-func WithBreakGlass(state BreakGlassStateReader) Option {
-	return func(options *engineOptions) error { options.breakGlassState = state; return nil }
-}
-
 type Engine struct {
 	snapshot atomic.Pointer[compiledSnapshot]
-	options  engineOptions
 }
 
 type compiledSnapshot struct {
@@ -37,26 +28,18 @@ type compiledGroup struct {
 	namespaces    map[string]struct{}
 }
 
-func New(snapshot Snapshot, optionValues ...Option) (*Engine, error) {
+func New(snapshot Snapshot) (*Engine, error) {
 	compiled, err := compileSnapshot(snapshot)
 	if err != nil {
 		return nil, err
 	}
-	var options engineOptions
-	for _, option := range optionValues {
-		if option != nil {
-			if err := option(&options); err != nil {
-				return nil, err
-			}
-		}
-	}
-	engine := &Engine{options: options}
+	engine := &Engine{}
 	engine.snapshot.Store(compiled)
 	return engine, nil
 }
 
-func NewDenyAll(options ...Option) (*Engine, error) {
-	return New(Snapshot{Version: CurrentVersion, Groups: []GroupAccess{}}, options...)
+func NewDenyAll() (*Engine, error) {
+	return New(Snapshot{Version: CurrentVersion, Groups: []GroupAccess{}})
 }
 
 func (engine *Engine) Available() bool {
@@ -92,9 +75,6 @@ func (engine *Engine) Authorize(ctx context.Context, subject Subject, request Re
 	if !valid {
 		return Decision{Reason: ReasonInvalidRequest}
 	}
-	if subject.Authentication == AuthenticationBreakGlass {
-		return engine.authorizeBreakGlass(ctx, subject)
-	}
 	if subject.Authentication != AuthenticationNormal {
 		return Decision{Reason: ReasonInvalidRequest}
 	}
@@ -128,22 +108,8 @@ func evaluate(snapshot *compiledSnapshot, subject Subject, request Request) Deci
 }
 
 func (engine *Engine) DryRun(ctx context.Context, subject Subject, request Request) Decision {
-	subject.Authentication, subject.BreakGlassGeneration = AuthenticationNormal, ""
+	subject.Authentication = AuthenticationNormal
 	return engine.Authorize(ctx, subject, request)
-}
-
-func (engine *Engine) authorizeBreakGlass(ctx context.Context, subject Subject) Decision {
-	if engine == nil || engine.options.breakGlassState == nil {
-		return Decision{Reason: ReasonBreakGlassUnavailable}
-	}
-	state, err := engine.options.breakGlassState.CurrentBreakGlassState(ctx)
-	if err != nil || !state.Enabled || state.Generation == "" {
-		return Decision{Reason: ReasonBreakGlassUnavailable}
-	}
-	if subtle.ConstantTimeCompare([]byte(subject.BreakGlassGeneration), []byte(state.Generation)) != 1 {
-		return Decision{Reason: ReasonBreakGlassStale}
-	}
-	return Decision{Allowed: true, Reason: ReasonAllowed, Authentication: AuthenticationBreakGlass}
 }
 
 func (engine *Engine) AuthorizedNamespaces(subject Subject) []string {
@@ -197,11 +163,11 @@ func compileSnapshot(snapshot Snapshot) (*compiledSnapshot, error) {
 }
 
 func normalize(subject Subject, request Request) (Subject, Request, bool) {
-	subject.ID, subject.BreakGlassGeneration = strings.TrimSpace(subject.ID), strings.TrimSpace(subject.BreakGlassGeneration)
+	subject.ID = strings.TrimSpace(subject.ID)
 	if subject.Authentication == "" {
 		subject.Authentication = AuthenticationNormal
 	}
-	if subject.Authentication != AuthenticationBreakGlass && uuid.Validate(subject.ID) != nil {
+	if uuid.Validate(subject.ID) != nil {
 		return Subject{}, Request{}, false
 	}
 	groups, err := compileSubjects(subject.Groups, "groups")

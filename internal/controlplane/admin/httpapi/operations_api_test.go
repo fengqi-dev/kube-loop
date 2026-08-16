@@ -3,11 +3,9 @@ package httpapi
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"net/netip"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -38,13 +36,31 @@ func newPolicyTestHandler(t *testing.T) (*Handler, *storage.Store, *adminauthori
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	generation := base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{9}, 32))
-	verifier := &testVerifier{enabled: true, generation: generation}
-	sessions, err := adminsession.New(store, verifier)
+	sessions, err := adminsession.New(store)
 	if err != nil {
 		t.Fatal(err)
 	}
-	engine, err := adminauthorization.NewDenyAll(adminauthorization.WithBreakGlass(verifier))
+	now := time.Now().UTC()
+	organizationID, groupID := uuid.NewString(), uuid.NewString()
+	if _, err = store.Identities().Create(context.Background(), storage.Identity{ID: testManagementIdentityID, Type: "human", DisplayName: "Test administrator", Status: "active", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err = store.OAuthSessions().Create(context.Background(), storage.OAuthSession{Kind: "refresh_token", SignatureHash: bytes.Repeat([]byte{30}, 32), RequestID: testManagementAuthorizationID, IdentityID: testManagementIdentityID, RequestJSON: []byte(`{}`), Status: "active", CreatedAt: now, ExpiresAt: now.Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	if err = store.Organizations().Create(context.Background(), storage.Organization{ID: organizationID, Name: "Operations", Slug: "operations", Status: "active", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err = store.Organizations().AddMember(context.Background(), storage.OrganizationMembership{OrganizationID: organizationID, IdentityID: testManagementIdentityID, Status: "active", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err = store.Groups().Create(context.Background(), storage.Group{ID: groupID, OrganizationID: organizationID, Name: "Administrators", System: true, CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err = store.Groups().AddMember(context.Background(), storage.GroupMembership{GroupID: groupID, IdentityID: testManagementIdentityID, CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	engine, err := adminauthorization.New(adminauthorization.Snapshot{Version: adminauthorization.CurrentVersion, Groups: []adminauthorization.GroupAccess{{GroupID: groupID, Administrator: true}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,18 +80,9 @@ func newPolicyTestHandler(t *testing.T) (*Handler, *storage.Store, *adminauthori
 	return handler, store, engine
 }
 
-func exchangeBreakGlassSession(t *testing.T, handler *Handler) (*http.Cookie, string) {
-	t.Helper()
-	issued, err := handler.sessions.ExchangeBreakGlass(context.Background(), netip.MustParseAddr("192.0.2.20"), []byte("valid"), uuid.NewString())
-	if err != nil {
-		t.Fatal(err)
-	}
-	return &http.Cookie{Name: SessionCookieName, Value: issued.SessionToken}, issued.CSRFToken
-}
-
 func TestOperationsAPIEnforcesHeadersAndPersistsActions(t *testing.T) {
 	handler, store, _ := newPolicyTestHandler(t)
-	cookie, csrf := exchangeBreakGlassSession(t, handler)
+	cookie, csrf := issueTestSession(t, handler, store)
 	identity, session := seedOperationSession(t, store)
 
 	missingCSRF := operationWrite(t, handler, cookie, "", "/sessions/"+session.ID+"/stop", `"1"`,

@@ -310,11 +310,7 @@ func (api *readAPI) getAuditExport(ctx *echo.Context) error {
 }
 
 func operationActor(subject adminauthorization.Subject) adminoperations.Actor {
-	identityID := subject.ID
-	if subject.Authentication == adminauthorization.AuthenticationBreakGlass {
-		identityID = ""
-	}
-	return adminoperations.Actor{IdentityID: identityID, Authentication: subject.Authentication}
+	return adminoperations.Actor{IdentityID: subject.ID, Authentication: subject.Authentication}
 }
 
 func operationIdempotencyKey(writer http.ResponseWriter, request *http.Request) (string, bool) {

@@ -347,16 +347,12 @@ func (api *readAPI) audit(
 	subject adminauthorization.Subject,
 	action, outcome string,
 ) {
-	identityID := subject.ID
-	if subject.Authentication == adminauthorization.AuthenticationBreakGlass {
-		identityID = ""
-	}
 	metadata, err := json.Marshal(map[string]any{"authenticationType": subject.Authentication})
 	if err != nil {
 		return
 	}
 	_ = api.status.Audit().Append(request.Context(), storage.AuditEvent{
-		ID: uuid.NewString(), IdentityID: identityID, Action: action,
+		ID: uuid.NewString(), IdentityID: subject.ID, Action: action,
 		ResourceType: "management-api", Outcome: outcome, RequestID: requestID(request),
 		Metadata: metadata, CreatedAt: time.Now().UTC(),
 	})

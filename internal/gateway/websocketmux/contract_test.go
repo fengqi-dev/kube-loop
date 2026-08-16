@@ -16,35 +16,6 @@ import (
 	"github.com/xtaci/smux"
 )
 
-func TestContractOldClientAndNewGatewayReceiveVersionMismatch(t *testing.T) {
-	handler, err := NewHandler(ServerConfig{
-		Authenticator: testAuthenticator("token"),
-		Handle:        func(Identity, net.Conn) { t.Error("legacy peer opened a partial logical session") },
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	server := httptest.NewServer(handler)
-	defer server.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	connection := dialRawWebSocket(t, ctx, server.URL, "token")
-	defer connection.CloseNow()
-
-	// Complete smux v2 SYN header: version, command, little-endian length,
-	// little-endian stream ID. This is what pre-ClientHello clients sent first.
-	if err := connection.Write(ctx, websocket.MessageBinary, []byte{2, 0, 0, 0, 1, 0, 0, 0}); err != nil {
-		t.Fatal(err)
-	}
-	message, err := wssprotocol.Read(ctx, connection)
-	if err != nil || message.Reject == nil || message.Reject.Code != wssprotocol.CodeVersionMismatch ||
-		len(message.Reject.SupportedVersions) != 1 || message.Reject.SupportedVersions[0] != wssprotocol.Version {
-		t.Fatalf("legacy-client rejection = %#v, %v", message, err)
-	}
-	connection.CloseNow()
-	waitForActiveSessions(t, handler, 0)
-}
-
 func TestContractNewClientAndOldGatewayClassifiesVersionMismatch(t *testing.T) {
 	oldGateway := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		connection, err := websocket.Accept(writer, request, &websocket.AcceptOptions{Subprotocols: []string{Subprotocol}})

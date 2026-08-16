@@ -18,7 +18,7 @@ Kubernetes Secret 中；显式关闭自动 bootstrap 后，才使用日志中的
 bootstrap token 完成人工初始化。
 Helm 只配置首次启动的管理员资料，不配置用户组或 Namespace 授权。
 日常应急访问只能使用显式配置、短时、
-有来源限制且全量审计的 break-glass 通道，不能签发普通 OAuth grant。
+紧急管理继续使用受审计的本地管理员身份和专用管理 Session，不提供绕过统一身份与授权策略的旁路。
 
 所有管理写请求必须通过同源检查、CSRF、对象所有权与授权检查；支持更新的资源使用
 ETag，重试敏感创建使用 Idempotency-Key，高风险操作要求变更原因并写入审计。

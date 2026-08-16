@@ -73,11 +73,8 @@ func (api *readAPI) bootstrap(ctx *echo.Context) error {
 	}
 	identity, err := api.status.Identities().GetByID(request.Context(), subject.ID)
 	if err != nil {
-		if stored.AuthenticationType != "break-glass" || subject.ID != storage.ManagementActorBreakGlass {
-			writeError(writer, http.StatusUnauthorized, "unauthenticated", "management identity is unavailable", requestID(request))
-			return nil
-		}
-		identity = storage.Identity{ID: subject.ID, Type: "machine", DisplayName: "Emergency access", Status: "active"}
+		writeError(writer, http.StatusUnauthorized, "unauthenticated", "management identity is unavailable", requestID(request))
+		return nil
 	}
 	api.audit(request, subject, "admin.bootstrap/read", "success")
 	writeJSON(writer, http.StatusOK, bootstrapDocument{

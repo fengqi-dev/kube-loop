@@ -93,7 +93,7 @@ func TestSystemStoreUsesVersionedKeyringEntries(t *testing.T) {
 	}
 }
 
-func TestSystemStoreReadsLegacyMetadataAndRejectsFutureSchema(t *testing.T) {
+func TestSystemStoreRequiresCurrentMetadataSchema(t *testing.T) {
 	backend := newMemoryBackend()
 	store := NewStore(backend)
 	prefix, err := accountPrefix("profile-1")
@@ -107,14 +107,14 @@ func TestSystemStoreReadsLegacyMetadataAndRejectsFutureSchema(t *testing.T) {
 		backend.values[serviceName+"/"+prefix+":generation:metadata"] = metadataJSON
 	}
 	install(`{"deviceId":"device-1"}`)
-	if credential, err := store.Get("profile-1"); err != nil || credential.DeviceID != "device-1" {
-		t.Fatalf("legacy metadata credential = %#v err = %v", credential, err)
+	if _, err := store.Get("profile-1"); err == nil {
+		t.Fatal("unversioned credential metadata was accepted")
 	}
 	install(`{"schemaVersion":1,"deviceId":"device-1"}`)
 	if credential, err := store.Get("profile-1"); err != nil || credential.DeviceID != "device-1" {
 		t.Fatalf("version 1 metadata credential = %#v err = %v", credential, err)
 	}
-	install(`{"schemaVersion":3,"deviceId":"device-1"}`)
+	install(`{"schemaVersion":2,"deviceId":"device-1"}`)
 	if _, err := store.Get("profile-1"); err == nil {
 		t.Fatal("future credential metadata schema was accepted")
 	}

@@ -16,7 +16,7 @@ import (
 
 const (
 	serviceName                     = "KubeLoop"
-	credentialMetadataSchemaVersion = 2
+	credentialMetadataSchemaVersion = 1
 )
 
 var ErrNotFound = errors.New("credentials not found")
@@ -162,12 +162,7 @@ func (store *SystemStore) Get(profileID string) (Credential, error) {
 	if err := decoder.Decode(&details); err != nil || strings.TrimSpace(details.DeviceID) == "" {
 		return Credential{}, errors.New("system keyring credential metadata is invalid")
 	}
-	if details.SchemaVersion == 0 {
-		// Older metadata used the same field semantics but did not carry an
-		// object-level version.
-		details.SchemaVersion = 1
-	}
-	if details.SchemaVersion < 1 || details.SchemaVersion > credentialMetadataSchemaVersion {
+	if details.SchemaVersion != credentialMetadataSchemaVersion {
 		return Credential{}, errors.New("system keyring credential metadata version is unsupported")
 	}
 	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {

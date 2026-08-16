@@ -19,9 +19,8 @@ import (
 )
 
 const (
-	currentVersion       = 1
-	ProfileSchemaVersion = 1
-	maxStateBytes        = 1 << 20
+	currentVersion = 1
+	maxStateBytes  = 1 << 20
 )
 
 type State struct {
@@ -31,7 +30,6 @@ type State struct {
 }
 
 type Profile struct {
-	SchemaVersion  int         `json:"schemaVersion"`
 	ID             string      `json:"id"`
 	BaseURL        string      `json:"baseUrl"`
 	TunnelPath     string      `json:"tunnelPath"`
@@ -228,9 +226,6 @@ func decodeState(raw []byte) (State, error) {
 }
 
 func normalizeState(state State) (State, error) {
-	if state.Version == 0 {
-		state.Version = currentVersion
-	}
 	if state.Version != currentVersion {
 		return State{}, fmt.Errorf("unsupported Server Profile store version %d", state.Version)
 	}
@@ -258,12 +253,6 @@ func normalizeState(state State) (State, error) {
 }
 
 func normalizeProfile(profile Profile) (Profile, error) {
-	if profile.SchemaVersion == 0 {
-		profile.SchemaVersion = ProfileSchemaVersion
-	}
-	if profile.SchemaVersion != ProfileSchemaVersion {
-		return Profile{}, fmt.Errorf("unsupported Server Profile schema version %d", profile.SchemaVersion)
-	}
 	profile.ID = strings.TrimSpace(profile.ID)
 	profile.DisplayName = strings.TrimSpace(profile.DisplayName)
 	profile.LastIdentityID = strings.TrimSpace(profile.LastIdentityID)

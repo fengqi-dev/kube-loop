@@ -62,28 +62,6 @@ func (base repositoryBase) bind(query string) string {
 	return builder.String()
 }
 
-func (base repositoryBase) withMySQLTransaction(ctx context.Context, function func(sqlExecutor) error) error {
-	if transaction, ok := base.executor.(*sql.Tx); ok {
-		return function(transaction)
-	}
-	database, ok := base.executor.(*sql.DB)
-	if !ok {
-		return errors.New("MySQL transaction executor is unavailable")
-	}
-	transaction, err := database.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
-	if err != nil {
-		return databaseError("begin MySQL storage transaction", err)
-	}
-	defer transaction.Rollback()
-	if err := function(transaction); err != nil {
-		return err
-	}
-	if err := transaction.Commit(); err != nil {
-		return databaseError("commit MySQL storage transaction", err)
-	}
-	return nil
-}
-
 func nullableBytes(value []byte) any {
 	if len(value) == 0 {
 		return nil

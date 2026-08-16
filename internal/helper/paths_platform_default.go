@@ -24,10 +24,6 @@ func platformBinaryInstallPathForExecutable(string) string {
 	return platformBinaryInstallPath()
 }
 
-func platformLegacyBinaryInstallPath() string {
-	return ""
-}
-
 func platformBundledSingBoxPath() string {
 	switch runtime.GOOS {
 	case "darwin":

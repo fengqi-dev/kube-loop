@@ -178,13 +178,6 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	connection.SetReadLimit(wssprotocol.MaximumHandshakeBytes)
 	handshakeContext, cancelHandshake := context.WithTimeout(request.Context(), h.config.HandshakeTimeout)
 	message, handshakeErr := wssprotocol.Read(handshakeContext, connection)
-	if errors.Is(handshakeErr, wssprotocol.ErrLegacyProtocol) {
-		cancelHandshake()
-		h.reject(requestID, connection, wssprotocol.NewReject(
-			wssprotocol.CodeVersionMismatch, "ClientHello is required before smux", h.config.SupportedVersions...,
-		))
-		return
-	}
 	if handshakeErr != nil || message.ClientHello == nil {
 		cancelHandshake()
 		h.reject(requestID, connection, wssprotocol.NewReject(wssprotocol.CodeInvalidHandshake, "ClientHello is invalid"))

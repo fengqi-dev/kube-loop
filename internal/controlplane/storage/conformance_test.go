@@ -23,6 +23,23 @@ func TestSQLiteRepositoryConformance(t *testing.T) {
 	testRepositoryConformance(t, store)
 }
 
+func conformanceNetworkSpec(t *testing.T) (json.RawMessage, string) {
+	t.Helper()
+	spec, err := networkspec.Normalize(networkspec.Spec{PodCIDRs: []string{"10.244.0.0/16"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	contents, err := networkspec.CanonicalJSON(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash, err := networkspec.Hash(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return contents, hash
+}
+
 func TestPostgreSQLRepositoryConformance(t *testing.T) {
 	config, cleanup := newPostgreSQLIntegrationConfig(t)
 	defer cleanup()
@@ -82,19 +99,20 @@ func testRelayDesiredStateRepository(t *testing.T, store *Store) {
 	ctx := context.Background()
 	now := time.Date(2026, 8, 10, 12, 30, 0, 0, time.UTC)
 	relayID := "relay-conformance-a"
+	actorID := uuid.NewString()
 	created, err := store.RelayDesiredStates().CompareAndSwap(
-		ctx, relayID, "draining", 0, ManagementActorBreakGlass, "break-glass", "drain for maintenance", now,
+		ctx, relayID, "draining", 0, actorID, "normal", "drain for maintenance", now,
 	)
 	if err != nil || created.Version != 1 || created.DesiredState != "draining" {
 		t.Fatalf("create Relay desired state = %#v, %v", created, err)
 	}
 	if _, err := store.RelayDesiredStates().CompareAndSwap(
-		ctx, relayID, "ready", 0, ManagementActorBreakGlass, "break-glass", "stale recovery", now,
+		ctx, relayID, "ready", 0, actorID, "normal", "stale recovery", now,
 	); !errors.Is(err, ErrConflict) {
 		t.Fatalf("stale Relay desired state error = %v", err)
 	}
 	updated, err := store.RelayDesiredStates().CompareAndSwap(
-		ctx, relayID, "ready", 1, ManagementActorBreakGlass, "break-glass", "restore capacity", now.Add(time.Minute),
+		ctx, relayID, "ready", 1, actorID, "normal", "restore capacity", now.Add(time.Minute),
 	)
 	if err != nil || updated.Version != 2 || updated.DesiredState != "ready" {
 		t.Fatalf("update Relay desired state = %#v, %v", updated, err)
@@ -111,7 +129,7 @@ func testAuditExportJobRepository(t *testing.T, store *Store) {
 	now := time.Date(2026, 8, 10, 13, 0, 0, 0, time.UTC)
 	job := AuditExportJob{
 		ID: uuid.NewString(), State: "pending", Filter: json.RawMessage(`{"limit":10}`),
-		RequestedBy: ManagementActorBreakGlass, RequestedAuthenticationType: "break-glass", Reason: "export conformance audit",
+		RequestedBy: uuid.NewString(), RequestedAuthenticationType: "normal", Reason: "export conformance audit",
 		CreatedAt: now, UpdatedAt: now, ExpiresAt: now.Add(time.Hour),
 	}
 	if err := store.AuditExportJobs().Create(ctx, job); err != nil {
@@ -169,12 +187,14 @@ func testManagementListPagination(t *testing.T, store *Store) {
 		t.Fatalf("second identity page=%#v error=%v", secondIdentities, err)
 	}
 
+	networkSpec, networkSpecHash := conformanceNetworkSpec(t)
 	sessions := make([]Session, 0, 3)
 	for index := range 3 {
 		createdAt := now.Add(time.Duration(index) * time.Minute)
 		session := Session{
 			ID: uuid.NewString(), IdentityID: identities[0].ID, DeviceID: fmt.Sprintf("device-%d", index),
 			ClusterID: "cluster-pagination", Namespace: "pagination", State: "active",
+			NetworkSpec: networkSpec, NetworkSpecHash: networkSpecHash,
 			CreatedAt: createdAt, ExpiresAt: createdAt.Add(time.Hour),
 		}
 		if err := store.Sessions().Create(ctx, session); err != nil {
@@ -467,6 +487,7 @@ func testSessionTaskSnapshotRepositories(t *testing.T, store *Store) {
 	expiredSession := Session{
 		ID: uuid.NewString(), IdentityID: identity.ID, DeviceID: "expired", ClusterID: "cluster-a",
 		Namespace: "development", State: "stopped", CreatedAt: now.Add(-2 * time.Hour), ExpiresAt: now.Add(-time.Hour),
+		NetworkSpec: specJSON, NetworkSpecHash: specHash,
 	}
 	if err := store.Sessions().Create(ctx, expiredSession); err != nil {
 		t.Fatal(err)

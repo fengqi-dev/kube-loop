@@ -3,26 +3,24 @@ package storage
 import "strings"
 
 var mysqlIndexedTextColumns = map[string]struct{}{
-	"id": {}, "identity_id": {}, "provider_id": {}, "subject": {}, "device_id": {},
+	"id": {}, "identity_id": {}, "provider_id": {}, "device_id": {},
 	"cluster_id": {}, "state": {}, "type": {}, "idempotency_key": {}, "task_id": {},
 	"kind": {}, "namespace": {}, "name": {}, "scope": {}, "key": {},
 	"resource_type": {}, "resource_id": {}, "action": {}, "outcome": {}, "request_id": {},
-	"organization_id": {}, "status": {}, "slug": {}, "domain": {}, "role_id": {},
+	"organization_id": {}, "status": {}, "slug": {},
 	"email": {}, "primary_email": {}, "scope_id": {},
 	"relay_id": {}, "desired_state": {}, "username": {}, "client_id": {}, "scope_type": {},
-	"source_type":         {},
-	"authentication_type": {}, "created_authentication_type": {}, "updated_authentication_type": {},
-	"requested_authentication_type": {}, "validation_state": {}, "provider_type": {},
-	"requested_by":     {},
-	"authorization_id": {},
-	"subject_type":     {},
+	"authentication_type": {}, "updated_authentication_type": {},
+	"requested_authentication_type": {},
+	"requested_by":                  {},
+	"authorization_id":              {},
 }
 
 var mysqlTimeColumns = map[string]struct{}{
-	"created_at": {}, "updated_at": {}, "expires_at": {}, "revoked_at": {}, "used_at": {},
+	"created_at": {}, "updated_at": {}, "expires_at": {}, "revoked_at": {},
 	"last_heartbeat_at": {}, "idle_expires_at": {}, "absolute_expires_at": {},
-	"bootstrap_retired_at": {}, "verified_at": {}, "accepted_at": {}, "consumed_at": {},
-	"authenticated_at": {}, "last_used_at": {},
+	"accepted_at": {}, "consumed_at": {},
+	"authenticated_at": {}, "last_seen_at": {}, "auth_time": {},
 }
 
 func mysqlMigrationStatements(sqlite []string) []string {
@@ -35,7 +33,7 @@ func mysqlMigrationStatements(sqlite []string) []string {
 
 func mysqlMigrationStatement(statement string) string {
 	statement = strings.ReplaceAll(statement, "INTEGER PRIMARY KEY AUTOINCREMENT", "BIGINT AUTO_INCREMENT PRIMARY KEY")
-	statement = strings.ReplaceAll(statement, "policy_revision INTEGER", "policy_revision BIGINT")
+	statement = strings.ReplaceAll(statement, "revision INTEGER", "revision BIGINT")
 	statement = strings.ReplaceAll(statement, "BLOB", "VARBINARY(1024)")
 	for column := range mysqlIndexedTextColumns {
 		statement = replaceMySQLTextColumn(statement, column, "VARCHAR(128)")

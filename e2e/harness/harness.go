@@ -3,10 +3,8 @@
 package harness
 
 import (
-	"context"
 	"os"
 	"testing"
-	"time"
 )
 
 const (
@@ -36,9 +34,4 @@ func GatewayImage() string {
 		return value
 	}
 	return defaultImage
-}
-
-func TestContext(t *testing.T, timeout time.Duration) (context.Context, context.CancelFunc) {
-	t.Helper()
-	return context.WithTimeout(context.Background(), timeout)
 }

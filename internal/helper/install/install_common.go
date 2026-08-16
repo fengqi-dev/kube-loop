@@ -143,7 +143,6 @@ func InstallFromCLI(source, token string, uid int, version, homeDir, ownerSID, s
 	if err := waitForInstalledHelperReady(token, version); err != nil {
 		return err
 	}
-	cleanupDisplacedHelperBinaries(dest)
 	return nil
 }
 
@@ -330,10 +329,6 @@ func UninstallFromCLI() error {
 	}
 	current := helper.BinaryInstallPath()
 	removeInstalledBinary(current)
-	if legacy := helper.LegacyBinaryInstallPath(); legacy != "" {
-		_ = os.Remove(legacy)
-	}
-	cleanupDisplacedHelperBinaries(current)
 	_ = os.Remove(helper.SystemAuthPath())
 	_ = os.Remove(helper.SystemTokenPath())
 	_ = os.Remove(helper.SocketPath())

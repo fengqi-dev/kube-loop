@@ -11,7 +11,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"net/netip"
 	"slices"
 	"strings"
 	"time"
@@ -23,10 +22,8 @@ import (
 
 const (
 	tokenEntropyBytes        = 32
-	maximumBreakGlassTTL     = 15 * time.Minute
 	normalSessionIdleTTL     = 15 * time.Minute
 	normalSessionAbsoluteTTL = 8 * time.Hour
-	breakGlassExchangeAudit  = "admin.session.break-glass.exchange"
 	identityExchangeAudit    = "admin.session.identity.exchange"
 	sessionRevokeAudit       = "admin.session.revoke"
 )
@@ -42,12 +39,6 @@ type Store interface {
 	storage.TransactionManager
 }
 
-type BreakGlassVerifier interface {
-	Verify(context.Context, netip.Addr, []byte) (string, error)
-	SessionTTL() time.Duration
-	CurrentBreakGlassState(context.Context) (adminauthorization.BreakGlassState, error)
-}
-
 type Credentials struct {
 	SessionToken string
 	CSRFToken    string
@@ -55,102 +46,17 @@ type Credentials struct {
 }
 
 type Service struct {
-	store      Store
-	breakGlass BreakGlassVerifier
-	random     io.Reader
-	now        func() time.Time
-	newID      func() string
+	store  Store
+	random io.Reader
+	now    func() time.Time
+	newID  func() string
 }
 
-func New(store Store, breakGlassValues ...BreakGlassVerifier) (*Service, error) {
-	if store == nil || len(breakGlassValues) > 1 {
+func New(store Store) (*Service, error) {
+	if store == nil {
 		return nil, errors.New("management session storage is required")
 	}
-	var breakGlass BreakGlassVerifier
-	if len(breakGlassValues) == 1 {
-		breakGlass = breakGlassValues[0]
-	}
-	return &Service{store: store, breakGlass: breakGlass, random: rand.Reader, now: time.Now, newID: uuid.NewString}, nil
-}
-
-// ExchangeBreakGlass consumes the supplied emergency credential. The returned
-// bearer and CSRF values are the only plaintext copies; storage receives hashes.
-func (service *Service) ExchangeBreakGlass(
-	ctx context.Context,
-	source netip.Addr,
-	credential []byte,
-	requestID string,
-) (Credentials, error) {
-	requestID = strings.TrimSpace(requestID)
-	if requestID == "" {
-		clear(credential)
-		return Credentials{}, ErrAuthenticationFailed
-	}
-	succeeded := false
-	defer func() {
-		if !succeeded {
-			service.recordFailedExchange(ctx, requestID)
-		}
-	}()
-	generation, err := service.breakGlass.Verify(ctx, source, credential)
-	if err != nil {
-		return Credentials{}, ErrAuthenticationFailed
-	}
-	ttl := service.breakGlass.SessionTTL()
-	if ttl <= 0 || ttl > maximumBreakGlassTTL {
-		return Credentials{}, ErrAuthenticationFailed
-	}
-
-	sessionToken, err := randomToken(service.random)
-	if err != nil {
-		return Credentials{}, ErrAuthenticationFailed
-	}
-	defer clear(sessionToken)
-	csrfToken, err := randomToken(service.random)
-	if err != nil {
-		return Credentials{}, ErrAuthenticationFailed
-	}
-	defer clear(csrfToken)
-
-	now := service.now().UTC()
-	expiresAt := now.Add(ttl)
-	sessionHash := sha256.Sum256(sessionToken)
-	csrfHash := sha256.Sum256(csrfToken)
-	metadata, err := json.Marshal(map[string]any{
-		"authenticationType": string(adminauthorization.AuthenticationBreakGlass),
-		"expiresAt":          expiresAt.Format(time.RFC3339Nano),
-	})
-	if err != nil {
-		return Credentials{}, ErrAuthenticationFailed
-	}
-	eventID := service.newID()
-	err = service.store.WithinTransaction(ctx, func(repositories storage.Repositories) error {
-		if err := repositories.AdminSessions().Create(ctx, storage.AdminSession{
-			IDHash:               sessionHash[:],
-			AuthenticationType:   string(adminauthorization.AuthenticationBreakGlass),
-			BreakGlassGeneration: generation,
-			CSRFTokenHash:        csrfHash[:],
-			CreatedAt:            now,
-			LastSeenAt:           now,
-			IdleExpiresAt:        expiresAt,
-			AbsoluteExpiresAt:    expiresAt,
-		}); err != nil {
-			return err
-		}
-		return repositories.Audit().Append(ctx, storage.AuditEvent{
-			ID: eventID, Action: breakGlassExchangeAudit, ResourceType: "admin-session",
-			Outcome: "success", RequestID: requestID, Metadata: metadata, CreatedAt: now,
-		})
-	})
-	if err != nil {
-		return Credentials{}, ErrAuthenticationFailed
-	}
-	succeeded = true
-	return Credentials{
-		SessionToken: string(sessionToken),
-		CSRFToken:    string(csrfToken),
-		ExpiresAt:    expiresAt,
-	}, nil
+	return &Service{store: store, random: rand.Reader, now: time.Now, newID: uuid.NewString}, nil
 }
 
 // ExchangeIdentity creates a browser-only Management Session from an already
@@ -226,19 +132,6 @@ func (service *Service) ExchangeIdentity(
 	return Credentials{SessionToken: string(sessionToken), CSRFToken: string(csrfToken), ExpiresAt: expiresAt}, nil
 }
 
-func (service *Service) recordFailedExchange(ctx context.Context, requestID string) {
-	metadata, err := json.Marshal(map[string]string{
-		"authenticationType": string(adminauthorization.AuthenticationBreakGlass),
-	})
-	if err != nil {
-		return
-	}
-	_ = service.store.Audit().Append(ctx, storage.AuditEvent{
-		ID: service.newID(), Action: breakGlassExchangeAudit, ResourceType: "admin-session",
-		Outcome: "failure", RequestID: requestID, Metadata: metadata, CreatedAt: service.now().UTC(),
-	})
-}
-
 // Revoke atomically invalidates the current Management Session and records the
 // logout without persisting its Cookie or CSRF plaintext values.
 func (service *Service) Revoke(ctx context.Context, stored storage.AdminSession, requestID string) error {
@@ -248,9 +141,6 @@ func (service *Service) Revoke(ctx context.Context, stored storage.AdminSession,
 	}
 	now := service.now().UTC()
 	identityID := stored.IdentityID
-	if stored.AuthenticationType == string(adminauthorization.AuthenticationBreakGlass) {
-		identityID = ""
-	}
 	metadata, err := json.Marshal(map[string]string{"authenticationType": stored.AuthenticationType})
 	if err != nil {
 		return ErrSessionInvalid
@@ -271,8 +161,7 @@ func (service *Service) Revoke(ctx context.Context, stored storage.AdminSession,
 	return nil
 }
 
-// Authenticate validates an opaque Management Session token and rejects a
-// break-glass session immediately after its mounted Secret is rotated.
+// Authenticate validates an opaque Management Session token.
 func (service *Service) Authenticate(ctx context.Context, token string) (storage.AdminSession, error) {
 	if !validOpaqueToken(token) {
 		return storage.AdminSession{}, ErrSessionInvalid
@@ -286,15 +175,7 @@ func (service *Service) Authenticate(ctx context.Context, token string) (storage
 	if stored.RevokedAt != nil || !stored.IdleExpiresAt.After(now) || !stored.AbsoluteExpiresAt.After(now) {
 		return storage.AdminSession{}, ErrSessionInvalid
 	}
-	if stored.AuthenticationType == string(adminauthorization.AuthenticationBreakGlass) {
-		if service.breakGlass == nil {
-			return storage.AdminSession{}, ErrSessionInvalid
-		}
-		state, err := service.breakGlass.CurrentBreakGlassState(ctx)
-		if err != nil || !state.Enabled || !sameString(stored.BreakGlassGeneration, state.Generation) {
-			return storage.AdminSession{}, ErrSessionInvalid
-		}
-	} else if stored.AuthenticationType == string(adminauthorization.AuthenticationNormal) {
+	if stored.AuthenticationType == string(adminauthorization.AuthenticationNormal) {
 		active, err := service.store.OAuthSessions().RequestActive(ctx, stored.AuthorizationID, now)
 		if err != nil || !active {
 			return storage.AdminSession{}, ErrSessionInvalid
@@ -323,7 +204,6 @@ func (service *Service) Authenticate(ctx context.Context, token string) (storage
 
 // AuthenticateSubject resolves current Identity groups on every request, so
 // group removal takes effect without waiting for the browser session to expire.
-// Break-glass identity never consults or manufactures a Identity row.
 func (service *Service) AuthenticateSubject(
 	ctx context.Context,
 	token string,
@@ -333,11 +213,6 @@ func (service *Service) AuthenticateSubject(
 		return storage.AdminSession{}, adminauthorization.Subject{}, err
 	}
 	subject := adminauthorization.Subject{Authentication: adminauthorization.AuthenticationType(stored.AuthenticationType)}
-	if subject.Authentication == adminauthorization.AuthenticationBreakGlass {
-		subject.ID = storage.ManagementActorBreakGlass
-		subject.BreakGlassGeneration = stored.BreakGlassGeneration
-		return stored, subject, nil
-	}
 	if subject.Authentication != adminauthorization.AuthenticationNormal {
 		return storage.AdminSession{}, adminauthorization.Subject{}, ErrSessionInvalid
 	}
@@ -402,10 +277,6 @@ func validOpaqueToken(token string) bool {
 	decoded, err := base64.RawURLEncoding.DecodeString(token)
 	defer clear(decoded)
 	return err == nil && len(decoded) == tokenEntropyBytes
-}
-
-func sameString(left, right string) bool {
-	return len(left) == len(right) && subtle.ConstantTimeCompare([]byte(left), []byte(right)) == 1
 }
 
 func minTime(left, right time.Time) time.Time {

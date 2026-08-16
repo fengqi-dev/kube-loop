@@ -47,6 +47,55 @@ func TestSQLiteOpenMigratesAndConfiguresDatabase(t *testing.T) {
 	}
 }
 
+func TestSQLiteInitialSchemaOmitsLegacyFields(t *testing.T) {
+	store := openSQLiteTestStore(t, filepath.Join(t.TempDir(), "initial.db"))
+	if currentSchemaVersion() != 1 {
+		t.Fatalf("initial schema version = %d", currentSchemaVersion())
+	}
+	var legacyTableCount int
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'identity_emails'`).Scan(&legacyTableCount); err != nil {
+		t.Fatal(err)
+	}
+	if legacyTableCount != 0 {
+		t.Fatal("initial schema contains unused identity_emails table")
+	}
+	for table, omitted := range map[string][]string{
+		"admin_sessions":       {"schema_version"},
+		"audit_events":         {"schema_version"},
+		"audit_export_jobs":    {"schema_version"},
+		"group_memberships":    {"source_type", "source_id"},
+		"idempotency_records":  {"schema_version"},
+		"relay_desired_states": {"schema_version"},
+		"resource_snapshots":   {"schema_version"},
+		"sessions":             {"schema_version"},
+		"tasks":                {"schema_version"},
+	} {
+		rows, err := store.db.Query(`PRAGMA table_info(` + table + `)`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		columns := make(map[string]struct{})
+		for rows.Next() {
+			var position, notNull, primaryKey int
+			var name, dataType string
+			var defaultValue sql.NullString
+			if err := rows.Scan(&position, &name, &dataType, &notNull, &defaultValue, &primaryKey); err != nil {
+				_ = rows.Close()
+				t.Fatal(err)
+			}
+			columns[name] = struct{}{}
+		}
+		if err := rows.Close(); err != nil {
+			t.Fatal(err)
+		}
+		for _, column := range omitted {
+			if _, exists := columns[column]; exists {
+				t.Fatalf("initial %s table contains legacy %s column", table, column)
+			}
+		}
+	}
+}
+
 func TestSQLiteFileURLUsesPortableAbsoluteURI(t *testing.T) {
 	if got, want := sqliteFileURL(`/var/lib/kubeloop/state.db`, false), `file:///var/lib/kubeloop/state.db`; got != want {
 		t.Fatalf("Unix SQLite URL = %q, want %q", got, want)
@@ -141,7 +190,8 @@ func TestSQLiteMigrationFailureRollsBackVersion(t *testing.T) {
 	if err := database.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Open(context.Background(), Config{Backend: BackendSQLite, SQLitePath: path}); err == nil || !strings.Contains(err.Error(), "migration 24") {
+	expectedMigration := fmt.Sprintf("migration %d", baselineSchemaVersion)
+	if _, err := Open(context.Background(), Config{Backend: BackendSQLite, SQLitePath: path}); err == nil || !strings.Contains(err.Error(), expectedMigration) {
 		t.Fatalf("Open migration error = %v", err)
 	}
 	database, err = sql.Open("sqlite", path)
@@ -162,27 +212,6 @@ func TestSQLiteMigrationFailureRollsBackVersion(t *testing.T) {
 	}
 	if version != 0 {
 		t.Fatalf("failed migration recorded schema version %d", version)
-	}
-}
-
-func TestSQLiteRejectsPreviousBreakingBaseline(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "legacy.db")
-	database, err := sql.Open("sqlite", path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := database.Exec(`CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := database.Exec(`INSERT INTO schema_migrations(version, applied_at) VALUES (23, 'now')`); err != nil {
-		t.Fatal(err)
-	}
-	if err := database.Close(); err != nil {
-		t.Fatal(err)
-	}
-	_, err = Open(context.Background(), Config{Backend: BackendSQLite, SQLitePath: path})
-	if err == nil || !strings.Contains(err.Error(), "rebuild the database") {
-		t.Fatalf("Open legacy schema error = %v", err)
 	}
 }
 
@@ -352,13 +381,18 @@ func TestMySQLMigrationDialectConversion(t *testing.T) {
 			}
 		}
 	}
+	for _, omitted := range []string{"schema_version", "identity_emails"} {
+		if strings.Contains(converted.String(), omitted) {
+			t.Fatalf("MySQL migration contains legacy schema item %q", omitted)
+		}
+	}
 	for _, required := range []string{"CREATE TABLE identities", "CREATE TABLE organizations", "CREATE TABLE iam_groups", "CREATE TABLE group_namespaces"} {
 		if !strings.Contains(converted.String(), required) {
 			t.Fatalf("MySQL authorization migration is missing %q", required)
 		}
 	}
 	for _, required := range []string{
-		"primary_email VARCHAR(128)", "source_type VARCHAR(128)", "`key` VARCHAR(128)", "system_flag INTEGER",
+		"primary_email VARCHAR(128)", "`key` VARCHAR(128)", "system_flag INTEGER",
 		"display_name LONGTEXT",
 	} {
 		if !strings.Contains(converted.String(), required) {
@@ -378,6 +412,11 @@ func TestMySQLMigrationDialectConversion(t *testing.T) {
 
 func TestPostgreSQLMigrationDialectConversion(t *testing.T) {
 	converted := strings.Join(migrations[0].postgresql, "\n")
+	for _, omitted := range []string{"schema_version", "identity_emails"} {
+		if strings.Contains(converted, omitted) {
+			t.Fatalf("PostgreSQL migration contains legacy schema item %q", omitted)
+		}
+	}
 	for _, statement := range migrations[0].postgresql {
 		for _, required := range []string{"public BOOLEAN", "trusted BOOLEAN", "system_flag BOOLEAN", "request_json JSONB"} {
 			if strings.Contains(statement, strings.Fields(required)[0]+" ") && !strings.Contains(statement, required) {

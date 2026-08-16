@@ -2,7 +2,7 @@
 
 - 状态：Accepted
 - 日期：2026-08-15
-- 决策范围：IAM baseline 24
+- 决策范围：V2 初始数据库 baseline 1
 
 ## 决策
 

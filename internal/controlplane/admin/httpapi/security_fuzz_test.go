@@ -38,7 +38,7 @@ func FuzzManagementEntryBoundedRedactedAndFailClosed(f *testing.F) {
 			t.Skip()
 		}
 		const secret = "management-fuzz-secret-marker"
-		request := httptest.NewRequest(http.MethodPost, "/sessions/break-glass", strings.NewReader(body+secret))
+		request := httptest.NewRequest(http.MethodPost, "/sessions/token", strings.NewReader(body+secret))
 		request.RemoteAddr = "192.0.2.20:43210"
 		request.Header.Set("Content-Type", contentType)
 		request.Header.Set("Origin", origin)

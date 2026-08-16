@@ -17,10 +17,10 @@ func (repository *auditExportJobRepository) Create(ctx context.Context, job Audi
 	if err := normalizeAuditExportJob(&job); err != nil {
 		return err
 	}
-	query := repository.bind(`INSERT INTO audit_export_jobs(id, schema_version, state, filter_json, result_data,
+	query := repository.bind(`INSERT INTO audit_export_jobs(id, state, filter_json, result_data,
 		error_code, requested_by, requested_authentication_type, reason, created_at, updated_at, expires_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-	_, err := repository.executor.ExecContext(ctx, query, job.ID, job.SchemaVersion, job.State, string(job.Filter),
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+	_, err := repository.executor.ExecContext(ctx, query, job.ID, job.State, string(job.Filter),
 		job.Result, job.ErrorCode, job.RequestedBy, job.RequestedAuthenticationType, job.Reason,
 		formatTime(job.CreatedAt), formatTime(job.UpdatedAt), formatTime(job.ExpiresAt))
 	return mapWriteError(err)
@@ -30,7 +30,7 @@ func (repository *auditExportJobRepository) GetByID(ctx context.Context, id stri
 	if err := validateUUID(id, "audit export job ID"); err != nil {
 		return AuditExportJob{}, err
 	}
-	query := repository.bind(`SELECT id, schema_version, state, filter_json, result_data, error_code,
+	query := repository.bind(`SELECT id, state, filter_json, result_data, error_code,
 		requested_by, requested_authentication_type, reason, created_at, updated_at, expires_at
 		FROM audit_export_jobs WHERE id = ?`)
 	job, err := scanAuditExportJob(repository.executor.QueryRowContext(ctx, query, id))
@@ -51,7 +51,7 @@ func (repository *auditExportJobRepository) ListRunnable(ctx context.Context, st
 	if staleBefore.IsZero() {
 		return nil, errors.New("audit export stale boundary is required")
 	}
-	query := repository.bind(`SELECT id, schema_version, state, filter_json, result_data, error_code,
+	query := repository.bind(`SELECT id, state, filter_json, result_data, error_code,
 		requested_by, requested_authentication_type, reason, created_at, updated_at, expires_at
 		FROM audit_export_jobs WHERE state = 'pending' OR (state = 'running' AND updated_at < ?)
 		ORDER BY created_at, id LIMIT ?`)
@@ -127,12 +127,9 @@ func normalizeAuditExportJob(job *AuditExportJob) error {
 		return errors.New("audit export job is invalid")
 	}
 	switch job.RequestedAuthenticationType {
-	case "normal", "bootstrap", "break-glass":
+	case "normal", "bootstrap":
 	default:
 		return errors.New("audit export authentication type is invalid")
-	}
-	if job.SchemaVersion == 0 {
-		job.SchemaVersion = ObjectSchemaVersion
 	}
 	job.CreatedAt, job.UpdatedAt, job.ExpiresAt = job.CreatedAt.UTC(), job.UpdatedAt.UTC(), job.ExpiresAt.UTC()
 	return nil
@@ -142,7 +139,7 @@ func scanAuditExportJob(row rowScanner) (AuditExportJob, error) {
 	var job AuditExportJob
 	var filter []byte
 	var createdAt, updatedAt, expiresAt string
-	if err := row.Scan(&job.ID, &job.SchemaVersion, &job.State, &filter, &job.Result, &job.ErrorCode,
+	if err := row.Scan(&job.ID, &job.State, &filter, &job.Result, &job.ErrorCode,
 		&job.RequestedBy, &job.RequestedAuthenticationType, &job.Reason, &createdAt, &updatedAt, &expiresAt); err != nil {
 		return AuditExportJob{}, err
 	}

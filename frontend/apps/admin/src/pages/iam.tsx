@@ -8,7 +8,6 @@ import type {
   Invitation,
   ListResponse,
   OAuthClient,
-  ViewKey,
 } from "../types";
 import {
   Dialog,
@@ -891,23 +890,6 @@ function OAuthClientCreateButton({
           </form>
         </DialogContent>
       </Dialog>
-    </>
-  );
-}
-
-export function PlaceholderPage({ view }: { view: ViewKey }) {
-  const zh = locale() === "zh-CN";
-  return (
-    <>
-      <PageHeader
-        title={view}
-        description={
-          zh
-            ? "该资源只返回当前用户可见数据。"
-            : "This resource returns only data visible to the current user."
-        }
-      />
-      <Empty>{zh ? "暂无可见记录。" : "No visible records."}</Empty>
     </>
   );
 }

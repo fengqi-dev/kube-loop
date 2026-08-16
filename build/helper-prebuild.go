@@ -55,17 +55,6 @@ func main() {
 	if err := os.MkdirAll(embeddedDir, 0o755); err != nil {
 		fatalf("create embedded helper directory: %v", err)
 	}
-	if goos == "windows" {
-		for _, obsolete := range []string{
-			"kubeloop-helper-install.exe",
-			"kubeloop-helper-uninstall.exe",
-		} {
-			if err := os.Remove(filepath.Join(embeddedDir, obsolete)); err != nil && !os.IsNotExist(err) {
-				fatalf("remove obsolete %s: %v", obsolete, err)
-			}
-		}
-	}
-
 	for _, target := range targets {
 		name := target.name
 		if goos == "windows" {

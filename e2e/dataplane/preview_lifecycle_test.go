@@ -535,28 +535,3 @@ func waitForRealPreviewState(
 		}
 	}
 }
-
-func waitForNoLocalPreview(
-	t *testing.T,
-	ctx context.Context,
-	manager *clientpreview.Manager,
-	profileID string,
-) {
-	t.Helper()
-	deadline := time.NewTimer(20 * time.Second)
-	defer deadline.Stop()
-	ticker := time.NewTicker(25 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		if len(manager.List(profileID)) == 0 {
-			return
-		}
-		select {
-		case <-ctx.Done():
-			t.Fatal(ctx.Err())
-		case <-deadline.C:
-			t.Fatal("local Preview relay did not stop after OAuth grant revocation")
-		case <-ticker.C:
-		}
-	}
-}

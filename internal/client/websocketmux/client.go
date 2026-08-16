@@ -366,7 +366,7 @@ func (forwarder *Forwarder) dial() (*pooledSession, error) {
 	cancelHandshake()
 	if err != nil {
 		_ = connection.Close(websocket.StatusPolicyViolation, "HANDSHAKE_FAILED")
-		if errors.Is(err, wssprotocol.ErrInvalidHandshake) || errors.Is(err, wssprotocol.ErrLegacyProtocol) {
+		if errors.Is(err, wssprotocol.ErrInvalidHandshake) {
 			return nil, &HandshakeError{
 				Code: wssprotocol.CodeInvalidHandshake, Message: "Gateway returned an invalid WSS handshake",
 			}

@@ -20,9 +20,7 @@ import (
 	portforwardservice "github.com/fengqi-dev/kube-loop/internal/controlplane/portforwardapi/service"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/sessionapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
-	"github.com/fengqi-dev/kube-loop/internal/controlplane/taskapi"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/remotetask"
 	"github.com/google/uuid"
 )
 
@@ -132,36 +130,6 @@ func TestPortForwardTaskLifecycleIsOwnedIdempotentAndPolicyMapped(t *testing.T) 
 	}
 	path := "/api/sessions/" + sessionID + "/port-forwards?namespace=development"
 	body := []byte(`{"kind":"service","name":"api","protocol":"tcp","remotePort":8443}`)
-	legacySpec := portforwardservice.Spec{Kind: "service", Name: "api", Protocol: "tcp", RemotePort: 8443}
-	legacySpecJSON, _ := json.Marshal(legacySpec)
-	legacyTargetJSON, _ := json.Marshal(portforwardservice.Target{Host: "10.96.0.20", Port: 8443})
-	legacyEnvelope, _ := json.Marshal(struct {
-		SessionID string                  `json:"sessionId"`
-		Namespace string                  `json:"namespace"`
-		Spec      portforwardservice.Spec `json:"spec"`
-	}{SessionID: sessionID, Namespace: "development", Spec: legacySpec})
-	legacyTask := storage.Task{
-		ID: uuid.NewString(), IdentityID: identityID, SessionID: sessionID, Type: portforwardservice.TaskType,
-		State: remotetask.Running, Spec: legacySpecJSON, Result: legacyTargetJSON, IdempotencyKey: "legacy-pf",
-		CreatedAt: now, UpdatedAt: now, ExpiresAt: &expiresAt,
-	}
-	if err := stateStore.Tasks().Create(context.Background(), legacyTask); err != nil {
-		t.Fatal(err)
-	}
-	if _, created, err := stateStore.Idempotency().Reserve(context.Background(), storage.IdempotencyRecord{
-		Scope: taskapi.Scope(portforwardservice.TaskType, identityID), Key: "legacy-pf",
-		RequestHash: taskapi.Hash(legacyEnvelope), ResourceType: portforwardservice.TaskType, ResourceID: legacyTask.ID,
-		CreatedAt: now, ExpiresAt: expiresAt,
-	}); err != nil || !created {
-		t.Fatalf("seed legacy idempotency record: created=%t err=%v", created, err)
-	}
-	legacyReplay := taskRequest(t, server, http.MethodPost, path, identityID, "legacy-pf", body)
-	if legacyReplay.Code != http.StatusOK || legacyReplay.Header().Get("Idempotent-Replayed") != "true" || decodeTaskDocument(t, legacyReplay).ID != legacyTask.ID {
-		t.Fatalf("legacy replay status = %d body = %s", legacyReplay.Code, legacyReplay.Body.String())
-	}
-	if len(resolver.calls) != 0 {
-		t.Fatal("legacy replay resolved Kubernetes target")
-	}
 	created := taskRequest(t, server, http.MethodPost, path, identityID, "pf-1", body)
 	if created.Code != http.StatusCreated {
 		t.Fatalf("create status = %d body = %s", created.Code, created.Body.String())
@@ -187,7 +155,7 @@ func TestPortForwardTaskLifecycleIsOwnedIdempotentAndPolicyMapped(t *testing.T) 
 	var list struct {
 		Items []portforwardapi.Document `json:"items"`
 	}
-	if listed.Code != http.StatusOK || json.Unmarshal(listed.Body.Bytes(), &list) != nil || len(list.Items) != 2 {
+	if listed.Code != http.StatusOK || json.Unmarshal(listed.Body.Bytes(), &list) != nil || len(list.Items) != 1 {
 		t.Fatalf("list status = %d body = %s", listed.Code, listed.Body.String())
 	}
 	stopped := taskRequest(t, server, http.MethodDelete,

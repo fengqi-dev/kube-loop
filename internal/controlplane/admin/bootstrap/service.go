@@ -234,7 +234,7 @@ func (service *Service) createInitialGraph(
 		return Result{}, err
 	}
 	if err := repositories.Groups().AddMember(ctx, storage.GroupMembership{
-		GroupID: group.ID, IdentityID: identity.IdentityID, SourceType: "manual", CreatedAt: request.Now,
+		GroupID: group.ID, IdentityID: identity.IdentityID, CreatedAt: request.Now,
 	}); err != nil {
 		return Result{}, err
 	}
@@ -242,7 +242,7 @@ func (service *Service) createInitialGraph(
 	if err != nil {
 		return Result{}, errors.New("encode IAM bootstrap audit metadata")
 	}
-	if err := repositories.Audit().Append(ctx, storage.AuditEvent{ID: service.newID(), SchemaVersion: storage.ObjectSchemaVersion,
+	if err := repositories.Audit().Append(ctx, storage.AuditEvent{ID: service.newID(),
 		IdentityID: identity.IdentityID, Action: request.AuditAction, ResourceType: "organization",
 		ResourceID: organization.ID, Outcome: "success", RequestID: request.RequestID, Metadata: metadata,
 		CreatedAt: request.Now}); err != nil {

@@ -35,7 +35,6 @@ const (
 
 var (
 	ErrInvalidHandshake = errors.New("invalid WSS v2 handshake")
-	ErrLegacyProtocol   = errors.New("legacy WSS multiplexing protocol")
 )
 
 type ClientHello struct {
@@ -157,9 +156,6 @@ func Read(ctx context.Context, connection *websocket.Conn) (Message, error) {
 	}
 	if messageType != websocket.MessageBinary {
 		return Message{}, ErrInvalidHandshake
-	}
-	if looksLikeLegacySmux(raw) {
-		return Message{}, ErrLegacyProtocol
 	}
 	return Decode(raw)
 }
@@ -316,14 +312,4 @@ func safeIdentifier(value string, maximum int) bool {
 		return false
 	}
 	return true
-}
-
-// looksLikeLegacySmux recognizes the complete fixed header emitted by a
-// pre-ClientHello smux v1/v2 peer. It is deliberately narrow so arbitrary
-// malformed input remains INVALID_HANDSHAKE rather than VERSION_MISMATCH.
-func looksLikeLegacySmux(raw []byte) bool {
-	if len(raw) != 8 || (raw[0] != 1 && raw[0] != 2) || raw[1] > 4 {
-		return false
-	}
-	return raw[2] == 0 && raw[3] == 0
 }

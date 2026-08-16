@@ -37,10 +37,6 @@ type hostRoute struct {
 	Metric    uint32
 }
 
-func Inspect(podCIDRs, serviceCIDRs, serviceIPs []string) Result {
-	return inspect(podCIDRs, nil, serviceCIDRs, serviceIPs)
-}
-
 // InspectNetworkSpec checks only local host state. It never reads kubeconfig or
 // calls Kubernetes; the Spec is the signed remote Session snapshot.
 func InspectNetworkSpec(spec networkspec.Spec) Result {

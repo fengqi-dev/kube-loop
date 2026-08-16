@@ -29,7 +29,6 @@ func TestServerProfileStorePersistsOnlyNonSecretState(t *testing.T) {
 	}
 	state := reopened.Snapshot()
 	if state.ActiveProfileID != profile.ID || len(state.Profiles) != 1 ||
-		state.Profiles[0].SchemaVersion != ProfileSchemaVersion ||
 		state.Profiles[0].BaseURL != "https://gateway.example.test" || state.Profiles[0].TunnelPath != "/relay/tunnel" {
 		t.Fatalf("state = %#v", state)
 	}
@@ -48,16 +47,12 @@ func TestServerProfileStorePersistsOnlyNonSecretState(t *testing.T) {
 	}
 }
 
-func TestServerProfileObjectSchemaMigratesLegacyAndRejectsFutureVersion(t *testing.T) {
-	legacy, err := decodeState([]byte(`{"version":1,"activeProfileId":"one","profiles":[{"id":"one","baseUrl":"https://one.example.test","tunnelPath":"/tunnel"}]}`))
-	if err != nil {
-		t.Fatal(err)
+func TestServerProfileStoreRequiresCurrentVersionAndRejectsUnknownFields(t *testing.T) {
+	if _, err := decodeState([]byte(`{"activeProfileId":"one","profiles":[]}`)); err == nil {
+		t.Fatal("unversioned Server Profile store was accepted")
 	}
-	if legacy.Profiles[0].SchemaVersion != ProfileSchemaVersion {
-		t.Fatalf("legacy Profile schema version = %d", legacy.Profiles[0].SchemaVersion)
-	}
-	if _, err := decodeState([]byte(`{"version":1,"profiles":[{"schemaVersion":2,"id":"one","baseUrl":"https://one.example.test","tunnelPath":"/tunnel"}]}`)); err == nil {
-		t.Fatal("future Server Profile object schema was accepted")
+	if _, err := decodeState([]byte(`{"version":1,"profiles":[{"schemaVersion":1,"id":"one","baseUrl":"https://one.example.test","tunnelPath":"/tunnel"}]}`)); err == nil {
+		t.Fatal("unknown Server Profile field was accepted")
 	}
 }
 

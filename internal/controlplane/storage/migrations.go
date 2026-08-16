@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-const baselineSchemaVersion = 24
+const baselineSchemaVersion = 1
 
 //go:embed schema.sqlite.sql
 var sqliteBaselineSchema string

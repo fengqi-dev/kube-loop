@@ -412,9 +412,6 @@ func deployDevelopmentStack(
 	if err := restartDevelopmentStack(root); err != nil {
 		return "", err
 	}
-	if err := removeLegacyOperator(root); err != nil {
-		return "", err
-	}
 	return publicURL, nil
 }
 
@@ -880,17 +877,6 @@ func restartDevelopmentStack(root string) error {
 		)); err != nil {
 			return fmt.Errorf("wait for development %s: %w", component, err)
 		}
-	}
-	return nil
-}
-
-func removeLegacyOperator(root string) error {
-	command := exec.Command(
-		"kubectl", "delete", "deployment", "kubeloop-operator-controller-manager",
-		"--namespace", "kubeloop-operator-system", "--ignore-not-found", "--wait=true",
-	)
-	if err := run(root, command); err != nil {
-		return fmt.Errorf("remove legacy development Operator: %w", err)
 	}
 	return nil
 }

@@ -7,8 +7,6 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/protocol/remotetask"
 )
 
-const ObjectSchemaVersion = 1
-
 type Identity struct {
 	ID           string    `json:"id"`
 	Type         string    `json:"type"`
@@ -68,8 +66,6 @@ type GroupNamespace struct {
 type GroupMembership struct {
 	GroupID    string    `json:"groupId"`
 	IdentityID string    `json:"identityId"`
-	SourceType string    `json:"sourceType"`
-	SourceID   string    `json:"sourceId,omitempty"`
 	CreatedAt  time.Time `json:"createdAt"`
 }
 
@@ -132,7 +128,6 @@ type TaskListFilter struct {
 // ClusterSession owns one identity/device/cluster/namespace runtime scope.
 type ClusterSession struct {
 	ID              string
-	SchemaVersion   int
 	IdentityID      string
 	DeviceID        string
 	ClusterID       string
@@ -152,7 +147,6 @@ type Session = ClusterSession
 
 type Task struct {
 	ID             string
-	SchemaVersion  int
 	IdentityID     string
 	SessionID      string
 	Type           string
@@ -166,39 +160,36 @@ type Task struct {
 }
 
 type ResourceSnapshot struct {
-	ID            string
-	SchemaVersion int
-	TaskID        string
-	Kind          string
-	Namespace     string
-	Name          string
-	Data          json.RawMessage
-	CreatedAt     time.Time
+	ID        string
+	TaskID    string
+	Kind      string
+	Namespace string
+	Name      string
+	Data      json.RawMessage
+	CreatedAt time.Time
 }
 
 type IdempotencyRecord struct {
-	SchemaVersion int
-	Scope         string
-	Key           string
-	RequestHash   string
-	ResourceType  string
-	ResourceID    string
-	Response      json.RawMessage
-	CreatedAt     time.Time
-	ExpiresAt     time.Time
+	Scope        string
+	Key          string
+	RequestHash  string
+	ResourceType string
+	ResourceID   string
+	Response     json.RawMessage
+	CreatedAt    time.Time
+	ExpiresAt    time.Time
 }
 
 type AuditEvent struct {
-	ID            string
-	SchemaVersion int
-	IdentityID    string
-	Action        string
-	ResourceType  string
-	ResourceID    string
-	Outcome       string
-	RequestID     string
-	Metadata      json.RawMessage
-	CreatedAt     time.Time
+	ID           string
+	IdentityID   string
+	Action       string
+	ResourceType string
+	ResourceID   string
+	Outcome      string
+	RequestID    string
+	Metadata     json.RawMessage
+	CreatedAt    time.Time
 }
 
 type AuditFilter struct {
@@ -212,7 +203,6 @@ type AuditFilter struct {
 
 type RelayDesiredState struct {
 	RelayID                   string
-	SchemaVersion             int
 	DesiredState              string
 	Version                   uint64
 	UpdatedBy                 string
@@ -223,7 +213,6 @@ type RelayDesiredState struct {
 
 type AuditExportJob struct {
 	ID                          string
-	SchemaVersion               int
 	State                       string
 	Filter                      json.RawMessage
 	Result                      string
@@ -237,19 +226,17 @@ type AuditExportJob struct {
 }
 
 type AdminSession struct {
-	IDHash               []byte
-	SchemaVersion        int
-	IdentityID           string
-	AuthorizationID      string
-	AuthenticationType   string
-	BreakGlassGeneration string
-	CSRFTokenHash        []byte
-	AuthenticatedAt      time.Time
-	CreatedAt            time.Time
-	LastSeenAt           time.Time
-	IdleExpiresAt        time.Time
-	AbsoluteExpiresAt    time.Time
-	RevokedAt            *time.Time
+	IDHash             []byte
+	IdentityID         string
+	AuthorizationID    string
+	AuthenticationType string
+	CSRFTokenHash      []byte
+	AuthenticatedAt    time.Time
+	CreatedAt          time.Time
+	LastSeenAt         time.Time
+	IdleExpiresAt      time.Time
+	AbsoluteExpiresAt  time.Time
+	RevokedAt          *time.Time
 }
 
 // OAuthClient is the durable, administrator-managed OAuth 2.0 client record.

@@ -21,13 +21,13 @@ OAuth Grant, ClusterSession and, for mutations or streams, Task.
 
 | Aggregate | Canonical fields and identity | Owner and lifecycle | Persistence |
 | --- | --- | --- | --- |
-| `ServerProfile` | `schemaVersion`, server `id`, canonical `baseURL`, `tunnelPath`, display name and non-secret last-used UI fields | Owned by the local OS user. `id` is the server's stable discovery identity, not an authorization secret. | Versioned `servers.json`; no token, kubeconfig path or provider secret |
-| `Identity` | UUID v4 `id`, provider, immutable provider external key, mutable display name/email/groups | Created/upserted after OIDC authentication. It is the root server-side user identity. | Control Plane database row with object schema version |
+| `ServerProfile` | server `id`, canonical `baseURL`, `tunnelPath`, display name and non-secret last-used UI fields | Owned by the local OS user. `id` is the server's stable discovery identity, not an authorization secret. | Current-version `servers.json`; no token, kubeconfig path or provider secret |
+| `Identity` | UUID v4 `id`, provider, immutable provider external key, mutable display name/email/groups | Created/upserted after OIDC authentication. It is the root server-side user identity. | Control Plane database row governed by the database migration version |
 | `OAuth Grant` | Fosite request ID, Identity ID, Client ID, stable client-generated Device ID, hashed token signatures, expiry/revocation | One OAuth authorization. Refresh rotation and replay revoke the complete grant. | Control Plane `oauth_sessions` rows and versioned client keyring metadata |
-| `ClusterSession` | UUID v4 `id`, Identity ID, Device ID, cluster ID, namespace, state, generation, immutable NetworkSpec/hash, heartbeat and expiry | Owned jointly by the authenticated Identity and OAuth Grant for exactly one cluster/namespace. It cannot be reactivated after stop or expiry. | Control Plane `sessions` row with object schema version |
-| `Task` | UUID v4 `id`, Identity ID, ClusterSession ID, type, unified state, immutable spec, result, idempotency key and expiry | A durable operation intent. It cannot outlive its ClusterSession except while a rollback snapshot requires compensation. | Control Plane `tasks` row with object schema version; local histories are versioned projections, never authority |
+| `ClusterSession` | UUID v4 `id`, Identity ID, Device ID, cluster ID, namespace, state, generation, immutable NetworkSpec/hash, heartbeat and expiry | Owned jointly by the authenticated Identity and OAuth Grant for exactly one cluster/namespace. It cannot be reactivated after stop or expiry. | Control Plane `sessions` row governed by the database migration version |
+| `Task` | UUID v4 `id`, Identity ID, ClusterSession ID, type, unified state, immutable spec, result, idempotency key and expiry | A durable operation intent. It cannot outlive its ClusterSession except while a rollback snapshot requires compensation. | Control Plane `tasks` row; local histories are versioned projections, never authority |
 | `Stream` | Owning Task/ClusterSession UUID, authenticated connection identity, protocol kind and connection-local channel handle | Ephemeral child of one Task or ClusterSession. The Control Plane/Data Plane replica that accepted the authenticated claim owns its context, sockets and lease. | Never persisted; payload, command output and traffic bytes are not stored |
-| `AuditEvent` | UUID v4 `id`, optional Identity ID, action, resource type/ID, outcome, request ID, safe metadata and timestamp | Append-only evidence emitted after authentication/ownership resolution. | Control Plane `audit_events` row with object schema version |
+| `AuditEvent` | UUID v4 `id`, optional Identity ID, action, resource type/ID, outcome, request ID, safe metadata and timestamp | Append-only evidence emitted after authentication/ownership resolution. | Control Plane `audit_events` row governed by the database migration version |
 
 The concrete client type remains `profile.Profile`, with
 `profile.ServerProfile` as its canonical domain alias;
@@ -58,27 +58,21 @@ Task's durable snapshot.
 
 ### Schema version rules
 
-- Every independently persisted aggregate has an object-level positive schema
-  version. Container files also have an envelope version so their collection
-  layout can evolve independently.
-- A missing object version is accepted only by an explicit legacy migration
-  path and is normalized to version 1 before the next write. Unknown future
-  versions fail closed; they are never silently truncated.
-- Control Plane database migrations and object schema versions are separate.
-  A database migration changes physical storage; an object migration changes
-  the encoded domain contract. ORM auto-migration remains forbidden.
-- Refresh-token history, idempotency rows and resource snapshots are child
-  persistence records. They either carry their own schema version or inherit
-  an immutable parent aggregate contract where the row contains no independently
-  decoded domain payload.
+- The Control Plane database has one migration version for the complete schema.
+  V2 starts at baseline 1 and does not carry a constant version column on each
+  row. Physical schema changes must use an explicit reviewed migration; ORM
+  auto-migration remains forbidden.
+- Independently stored client files retain their own envelope/object versions so
+  they can be validated before decoding. Protocol messages retain protocol
+  versions because peers can run different application releases.
+- Refresh-token history, idempotency rows and resource snapshots inherit the
+  database schema contract; they do not duplicate a fixed row-level version.
 - Stream payloads are ephemeral and therefore have protocol versions and frame
   validators, not persistence schema versions.
 
 `ServerProfile`, keyring credential metadata and local file-transfer Task
-history now normalize legacy missing object versions and reject future
-versions. Identity, OAuth Grant, ClusterSession, server Task, resource
-snapshot, idempotency and AuditEvent repositories already apply the same
-fail-closed rule.
+history validate their file formats independently. Database rows are validated
+through constraints and repository decoding under the current migration.
 
 ### Identity rules
 

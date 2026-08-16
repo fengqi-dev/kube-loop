@@ -3,7 +3,6 @@ package storage
 import (
 	"context"
 	"database/sql"
-	"encoding/base64"
 	"errors"
 	"strings"
 	"time"
@@ -22,13 +21,13 @@ func (repository *adminSessionRepository) Create(ctx context.Context, session Ad
 		return err
 	}
 	query := repository.bind(`INSERT INTO admin_sessions (
-		id_hash, schema_version, identity_id, authorization_id, authentication_type,
-		break_glass_generation, csrf_token_hash, authenticated_at, created_at, last_seen_at,
+		id_hash, identity_id, authorization_id, authentication_type,
+		csrf_token_hash, authenticated_at, created_at, last_seen_at,
 		idle_expires_at, absolute_expires_at, revoked_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	_, err := repository.executor.ExecContext(ctx, query,
-		session.IDHash, session.SchemaVersion, nullableString(session.IdentityID), nullableString(session.AuthorizationID),
-		session.AuthenticationType, session.BreakGlassGeneration, session.CSRFTokenHash,
+		session.IDHash, nullableString(session.IdentityID), nullableString(session.AuthorizationID),
+		session.AuthenticationType, session.CSRFTokenHash,
 		formatTime(session.AuthenticatedAt), formatTime(session.CreatedAt), formatTime(session.LastSeenAt), formatTime(session.IdleExpiresAt),
 		formatTime(session.AbsoluteExpiresAt), nullableTime(session.RevokedAt),
 	)
@@ -40,8 +39,8 @@ func (repository *adminSessionRepository) GetByHash(ctx context.Context, idHash 
 		return AdminSession{}, errors.New("management session hash must be a SHA-256 value")
 	}
 	query := repository.bind(`SELECT
-		id_hash, schema_version, identity_id, authorization_id, authentication_type,
-		break_glass_generation, csrf_token_hash, authenticated_at, created_at, last_seen_at,
+		id_hash, identity_id, authorization_id, authentication_type,
+		csrf_token_hash, authenticated_at, created_at, last_seen_at,
 		idle_expires_at, absolute_expires_at, revoked_at
 		FROM admin_sessions WHERE id_hash = ?`)
 	session, err := scanAdminSession(repository.executor.QueryRowContext(ctx, query, idHash))
@@ -149,33 +148,22 @@ func normalizeAdminSession(session *AdminSession) error {
 	session.IdentityID = strings.TrimSpace(session.IdentityID)
 	session.AuthorizationID = strings.TrimSpace(session.AuthorizationID)
 	session.AuthenticationType = strings.TrimSpace(session.AuthenticationType)
-	session.BreakGlassGeneration = strings.TrimSpace(session.BreakGlassGeneration)
 	if len(session.IDHash) != sha256Size || len(session.CSRFTokenHash) != sha256Size {
 		return errors.New("management Session and CSRF hashes must be SHA-256 values")
 	}
 	switch session.AuthenticationType {
 	case "normal", "bootstrap":
 		if validateUUID(session.IdentityID, "management session identity ID") != nil ||
-			validateUUID(session.AuthorizationID, "management session authorization ID") != nil || session.BreakGlassGeneration != "" {
+			validateUUID(session.AuthorizationID, "management session authorization ID") != nil {
 			return errors.New("authenticated management session identity is invalid")
 		}
-	case "break-glass":
-		decoded, err := base64.RawURLEncoding.DecodeString(session.BreakGlassGeneration)
-		if session.IdentityID != "" || session.AuthorizationID != "" || err != nil || len(decoded) != sha256Size {
-			clear(decoded)
-			return errors.New("break-glass management session identity is invalid")
-		}
-		clear(decoded)
 	default:
 		return errors.New("management session authentication type is invalid")
-	}
-	if session.SchemaVersion == 0 {
-		session.SchemaVersion = ObjectSchemaVersion
 	}
 	if session.AuthenticatedAt.IsZero() {
 		session.AuthenticatedAt = session.CreatedAt
 	}
-	if session.SchemaVersion != ObjectSchemaVersion || session.CreatedAt.IsZero() || session.LastSeenAt.IsZero() ||
+	if session.CreatedAt.IsZero() || session.LastSeenAt.IsZero() ||
 		session.IdleExpiresAt.IsZero() || session.AbsoluteExpiresAt.IsZero() || session.LastSeenAt.Before(session.CreatedAt) ||
 		!session.IdleExpiresAt.After(session.LastSeenAt) || session.IdleExpiresAt.After(session.AbsoluteExpiresAt) {
 		return errors.New("management session schema or lifetime is invalid")
@@ -199,8 +187,8 @@ func scanAdminSession(row rowScanner) (AdminSession, error) {
 	var identityID, authorizationID, revokedAt sql.NullString
 	var authenticatedAt, createdAt, lastSeenAt, idleExpiresAt, absoluteExpiresAt string
 	if err := row.Scan(
-		&session.IDHash, &session.SchemaVersion, &identityID, &authorizationID, &session.AuthenticationType,
-		&session.BreakGlassGeneration, &session.CSRFTokenHash, &authenticatedAt, &createdAt, &lastSeenAt,
+		&session.IDHash, &identityID, &authorizationID, &session.AuthenticationType,
+		&session.CSRFTokenHash, &authenticatedAt, &createdAt, &lastSeenAt,
 		&idleExpiresAt, &absoluteExpiresAt, &revokedAt,
 	); err != nil {
 		return AdminSession{}, err

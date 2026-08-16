@@ -78,18 +78,6 @@ func (resources *recordingPreviewResources) Delete(
 	return resources.deleteErr
 }
 
-func (resources *recordingPreviewResources) deletes() int {
-	resources.mu.Lock()
-	defer resources.mu.Unlock()
-	return resources.deleteCalls
-}
-
-func (resources *recordingPreviewResources) state() (servicebinding.PreviewServiceSnapshot, string, string) {
-	resources.mu.Lock()
-	defer resources.mu.Unlock()
-	return resources.snapshot, resources.createdID, resources.deletedID
-}
-
 func TestPreviewTaskIsOwnedIdempotentAndDurablyStopped(t *testing.T) {
 	stateStore, identity, active := previewTestStore(t)
 	now := time.Now().UTC()

@@ -55,11 +55,6 @@ func BinaryInstallPathForExecutable(executable string) string {
 	return platformBinaryInstallPathForExecutable(executable)
 }
 
-// LegacyBinaryInstallPath returns the previous Windows helper location, if any.
-func LegacyBinaryInstallPath() string {
-	return platformLegacyBinaryInstallPath()
-}
-
 // BundledSingBoxPath returns the platform-package sing-box path when known.
 func BundledSingBoxPath() string {
 	return platformBundledSingBoxPath()

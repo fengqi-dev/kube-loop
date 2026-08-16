@@ -18,21 +18,21 @@ func (repository *auditRepository) Append(ctx context.Context, event AuditEvent)
 		return err
 	}
 	query := repository.bind(`INSERT INTO audit_events(
-		id, schema_version, identity_id, action, resource_type, resource_id,
+		id, identity_id, action, resource_type, resource_id,
 		outcome, request_id, metadata_json, created_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if repository.backend == BackendPostgreSQL {
 		query = `INSERT INTO audit_events(
-			id, schema_version, identity_id, action, resource_type, resource_id,
+			id, identity_id, action, resource_type, resource_id,
 			outcome, request_id, metadata_json, created_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10)`
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9)`
 	}
 	var identityID any
 	if event.IdentityID != "" {
 		identityID = event.IdentityID
 	}
 	_, err := repository.executor.ExecContext(ctx, query,
-		event.ID, event.SchemaVersion, identityID, event.Action, event.ResourceType,
+		event.ID, identityID, event.Action, event.ResourceType,
 		event.ResourceID, event.Outcome, event.RequestID, nullableJSON(event.Metadata), formatTime(event.CreatedAt),
 	)
 	return mapWriteError(err)
@@ -50,7 +50,7 @@ func (repository *auditRepository) List(ctx context.Context, filter AuditFilter)
 	if err != nil {
 		return nil, err
 	}
-	query := `SELECT id, schema_version, identity_id, action, resource_type, resource_id,
+	query := `SELECT id, identity_id, action, resource_type, resource_id,
 		outcome, request_id, metadata_json, created_at FROM audit_events WHERE 1=1`
 	var arguments []any
 	if filter.IdentityID != "" {
@@ -118,12 +118,6 @@ func normalizeAuditEvent(event *AuditEvent) error {
 	if event.Metadata, err = normalizeJSON(event.Metadata, false, "audit metadata"); err != nil {
 		return err
 	}
-	if event.SchemaVersion == 0 {
-		event.SchemaVersion = ObjectSchemaVersion
-	}
-	if event.SchemaVersion != ObjectSchemaVersion {
-		return errors.New("unsupported audit schema version")
-	}
 	if event.CreatedAt.IsZero() {
 		event.CreatedAt = time.Now().UTC()
 	}
@@ -139,7 +133,7 @@ func scanAuditEvent(row rowScanner) (AuditEvent, error) {
 		createdAt  string
 	)
 	if err := row.Scan(
-		&event.ID, &event.SchemaVersion, &identityID, &event.Action, &event.ResourceType,
+		&event.ID, &identityID, &event.Action, &event.ResourceType,
 		&event.ResourceID, &event.Outcome, &event.RequestID, &metadata, &createdAt,
 	); err != nil {
 		return AuditEvent{}, err

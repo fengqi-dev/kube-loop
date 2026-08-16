@@ -21,7 +21,6 @@ type sessionRow struct {
 	bun.BaseModel `bun:"table:sessions,alias:s"`
 
 	ID              string          `bun:"id,pk"`
-	SchemaVersion   int             `bun:"schema_version"`
 	IdentityID      string          `bun:"identity_id"`
 	DeviceID        string          `bun:"device_id"`
 	ClusterID       string          `bun:"cluster_id"`
@@ -77,7 +76,7 @@ func (repository *sessionRepository) List(ctx context.Context, filter SessionLis
 	if len(filter.State) > 64 || strings.ContainsAny(filter.State, "\x00\r\n") {
 		return nil, errors.New("session state filter is invalid")
 	}
-	query := `SELECT id, schema_version, identity_id, device_id, cluster_id, namespace, state, generation,
+	query := `SELECT id, identity_id, device_id, cluster_id, namespace, state, generation,
 		network_spec_json, network_spec_hash, created_at, updated_at, last_heartbeat_at, expires_at
 		FROM sessions WHERE 1=1`
 	arguments := make([]any, 0, 9)
@@ -119,7 +118,7 @@ func scanSession(row rowScanner) (Session, error) {
 	var value sessionRow
 	var networkSpec []byte
 	if err := row.Scan(
-		&value.ID, &value.SchemaVersion, &value.IdentityID, &value.DeviceID, &value.ClusterID,
+		&value.ID, &value.IdentityID, &value.DeviceID, &value.ClusterID,
 		&value.Namespace, &value.State, &value.Generation, &networkSpec, &value.NetworkSpecHash,
 		&value.CreatedAt, &value.UpdatedAt, &value.LastHeartbeatAt, &value.ExpiresAt,
 	); err != nil {
@@ -250,37 +249,25 @@ func normalizeSession(session *Session) error {
 	if session.DeviceID == "" || session.ClusterID == "" || session.Namespace == "" || session.State == "" {
 		return errors.New("session device, cluster, namespace and state are required")
 	}
-	if session.SchemaVersion == 0 {
-		session.SchemaVersion = ObjectSchemaVersion
-	}
-	if session.SchemaVersion != ObjectSchemaVersion {
-		return errors.New("unsupported session schema version")
-	}
 	if session.Generation == 0 {
 		session.Generation = 1
 	}
 	if session.Generation >= math.MaxInt64 {
 		return errors.New("session generation is too large")
 	}
-	if len(session.NetworkSpec) == 0 && session.NetworkSpecHash == "" {
-		// Schema migrations expire legacy Sessions without a NetworkSpec. Keeping
-		// them readable allows a clean lifecycle response, but they cannot issue a
-		// RelayTicket or be created through the API.
-	} else {
-		spec, err := networkspec.Decode(session.NetworkSpec)
-		if err != nil {
-			return err
-		}
-		contents, err := networkspec.CanonicalJSON(spec)
-		if err != nil {
-			return err
-		}
-		hash, err := networkspec.Hash(spec)
-		if err != nil || session.NetworkSpecHash != hash {
-			return errors.New("session NetworkSpec hash is invalid")
-		}
-		session.NetworkSpec = contents
+	spec, err := networkspec.Decode(session.NetworkSpec)
+	if err != nil {
+		return err
 	}
+	contents, err := networkspec.CanonicalJSON(spec)
+	if err != nil {
+		return err
+	}
+	hash, err := networkspec.Hash(spec)
+	if err != nil || session.NetworkSpecHash != hash {
+		return errors.New("session NetworkSpec hash is invalid")
+	}
+	session.NetworkSpec = contents
 	if session.CreatedAt.IsZero() || session.ExpiresAt.IsZero() || !session.ExpiresAt.After(session.CreatedAt) {
 		return errors.New("session expiry must be after creation")
 	}
@@ -299,7 +286,7 @@ func normalizeSession(session *Session) error {
 
 func rowFromSession(session Session) sessionRow {
 	return sessionRow{
-		ID: session.ID, SchemaVersion: session.SchemaVersion, IdentityID: session.IdentityID,
+		ID: session.ID, IdentityID: session.IdentityID,
 		DeviceID: session.DeviceID, ClusterID: session.ClusterID, Namespace: session.Namespace,
 		State: session.State, Generation: int64(session.Generation), NetworkSpec: session.NetworkSpec,
 		NetworkSpecHash: session.NetworkSpecHash, CreatedAt: formatTime(session.CreatedAt),
@@ -313,7 +300,7 @@ func sessionFromRow(row sessionRow) (Session, error) {
 		return Session{}, errors.New("decode session generation")
 	}
 	session := Session{
-		ID: row.ID, SchemaVersion: row.SchemaVersion, IdentityID: row.IdentityID, DeviceID: row.DeviceID,
+		ID: row.ID, IdentityID: row.IdentityID, DeviceID: row.DeviceID,
 		ClusterID: row.ClusterID, Namespace: row.Namespace, State: row.State, Generation: uint64(row.Generation),
 		NetworkSpec: append(json.RawMessage(nil), row.NetworkSpec...), NetworkSpecHash: row.NetworkSpecHash,
 	}
@@ -330,22 +317,18 @@ func sessionFromRow(row sessionRow) (Session, error) {
 	if session.ExpiresAt, err = parseTime(row.ExpiresAt, "session expiry"); err != nil {
 		return Session{}, err
 	}
-	if session.NetworkSpecHash != "" {
-		spec, decodeErr := networkspec.Decode(session.NetworkSpec)
-		if decodeErr != nil {
-			return Session{}, errors.New("decode session NetworkSpec")
-		}
-		canonical, canonicalErr := networkspec.CanonicalJSON(spec)
-		if canonicalErr != nil {
-			return Session{}, errors.New("canonicalize session NetworkSpec")
-		}
-		hash, hashErr := networkspec.Hash(spec)
-		if hashErr != nil || hash != session.NetworkSpecHash {
-			return Session{}, errors.New("decode session NetworkSpec hash")
-		}
-		session.NetworkSpec = canonical
-	} else {
-		session.NetworkSpec = nil
+	spec, decodeErr := networkspec.Decode(session.NetworkSpec)
+	if decodeErr != nil {
+		return Session{}, errors.New("decode session NetworkSpec")
 	}
+	canonical, canonicalErr := networkspec.CanonicalJSON(spec)
+	if canonicalErr != nil {
+		return Session{}, errors.New("canonicalize session NetworkSpec")
+	}
+	hash, hashErr := networkspec.Hash(spec)
+	if hashErr != nil || hash != session.NetworkSpecHash {
+		return Session{}, errors.New("decode session NetworkSpec hash")
+	}
+	session.NetworkSpec = canonical
 	return session, nil
 }

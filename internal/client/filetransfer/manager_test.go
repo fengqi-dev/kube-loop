@@ -264,29 +264,8 @@ func TestManagerRecoversActivePersistedTaskAsInterrupted(t *testing.T) {
 	}
 	defer manager.Shutdown()
 	items := manager.List("server")
-	if len(items) != 1 || items[0].SchemaVersion != taskSchemaVersion || items[0].Status != StatusInterrupted || items[0].CompletedAt == nil || items[0].Error == "" {
+	if len(items) != 1 || items[0].Status != StatusInterrupted || items[0].CompletedAt == nil || items[0].Error == "" {
 		t.Fatalf("recovered tasks = %#v", items)
-	}
-}
-
-func TestManagerRejectsFuturePersistedTaskSchema(t *testing.T) {
-	root := t.TempDir()
-	statePath := filepath.Join(root, "transfers.json")
-	now := time.Now().UTC()
-	contents, err := json.Marshal(persistedState{Version: stateVersion, Tasks: []Task{{
-		SchemaVersion: taskSchemaVersion + 1,
-		ID:            uuid.NewString(), ProfileID: "server", SessionID: "session", Namespace: "development",
-		Direction: "upload", Kind: "file", Pod: "api-0", LocalPath: filepath.Join(root, "source.bin"),
-		RemotePath: "/workspace/source.bin", Status: StatusRunning, CreatedAt: now, UpdatedAt: now,
-	}}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(statePath, contents, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := NewManager(testClient{}, Config{StatePath: statePath}); err == nil {
-		t.Fatal("future file transfer Task schema was accepted")
 	}
 }
 
@@ -295,14 +274,13 @@ func TestManagerDropsInvalidPersistedTaskAndKeepsValidHistory(t *testing.T) {
 	statePath := filepath.Join(root, "transfers.json")
 	now := time.Now().UTC()
 	valid := Task{
-		SchemaVersion: taskSchemaVersion,
-		ID:            uuid.NewString(), ProfileID: "server", SessionID: "session", Namespace: "development",
+		ID: uuid.NewString(), ProfileID: "server", SessionID: "session", Namespace: "development",
 		Direction: "upload", Kind: "file", Pod: "api-0", LocalPath: filepath.Join(root, "source.bin"),
 		RemotePath: "/workspace/source.bin", Status: StatusCompleted, CreatedAt: now, UpdatedAt: now,
 	}
 	valid.ResumeID = valid.ID
 	invalid := valid
-	invalid.ID = "legacy-invalid-task"
+	invalid.ID = "invalid-task"
 	invalid.ResumeID = invalid.ID
 	contents, err := json.Marshal(persistedState{Version: stateVersion, Tasks: []Task{invalid, valid}})
 	if err != nil {

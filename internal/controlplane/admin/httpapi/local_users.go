@@ -73,7 +73,7 @@ func (api *readAPI) createLocalUser(ctx *echo.Context) error {
 			return createErr
 		}
 		return repositories.Groups().AddMember(ctx.Request().Context(), storage.GroupMembership{
-			GroupID: group.ID, IdentityID: user.IdentityID, SourceType: "manual", CreatedAt: now,
+			GroupID: group.ID, IdentityID: user.IdentityID, CreatedAt: now,
 		})
 	})
 	clear(password)

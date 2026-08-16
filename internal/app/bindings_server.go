@@ -82,8 +82,7 @@ func (a *App) SaveServerProfile(request SaveServerProfileRequest) (ServerProfile
 		displayName = document.ServiceID
 	}
 	serverProfile := clientprofile.Profile{
-		SchemaVersion: clientprofile.ProfileSchemaVersion,
-		ID:            document.ServiceID, BaseURL: baseURL, TunnelPath: document.TunnelPath, DisplayName: displayName,
+		ID: document.ServiceID, BaseURL: baseURL, TunnelPath: document.TunnelPath, DisplayName: displayName,
 		LastIdentityID: previous.LastIdentityID, LastUserName: previous.LastUserName,
 		LastNamespace: previous.LastNamespace, DNSNamespace: previous.DNSNamespace,
 		SOCKSPort:   previous.SOCKSPort,

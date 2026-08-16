@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/fengqi-dev/kube-loop/internal/controlplane"
-	adminconfig "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/config"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/fileapi"
 	controlplanekubernetes "github.com/fengqi-dev/kube-loop/internal/controlplane/kubernetes"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/maintenance"
@@ -58,10 +57,9 @@ type oauthConfig struct {
 }
 
 type adminConfig struct {
-	Listen     string                       `json:"listen"`
-	PublicURL  string                       `json:"publicURL"`
-	Bootstrap  adminBootstrapConfig         `json:"bootstrap"`
-	BreakGlass adminconfig.BreakGlassConfig `json:"breakGlass"`
+	Listen    string               `json:"listen"`
+	PublicURL string               `json:"publicURL"`
+	Bootstrap adminBootstrapConfig `json:"bootstrap"`
 }
 
 type adminBootstrapConfig struct {
@@ -154,7 +152,6 @@ type kubeloopConfigDocument struct {
 
 type loadedControlPlaneConfig struct {
 	Document            controlPlaneConfigDocument
-	Admin               adminconfig.File
 	Kubernetes          controlplanekubernetes.Config
 	Storage             controlplanestorage.Config
 	Files               fileapi.Config
@@ -202,12 +199,6 @@ func normalizeControlPlaneConfig(document controlPlaneConfigDocument) (loadedCon
 	applyControlPlaneDefaults(&document)
 	result := loadedControlPlaneConfig{Document: document}
 	var err error
-	result.Admin, err = adminconfig.Normalize(adminconfig.File{
-		BreakGlass: document.Admin.BreakGlass,
-	})
-	if err != nil {
-		return loadedControlPlaneConfig{}, err
-	}
 	result.Kubernetes, err = normalizeKubernetesConfig(document.Kubernetes)
 	if err != nil {
 		return loadedControlPlaneConfig{}, err

@@ -21,25 +21,25 @@ func (repository *idempotencyRepository) Reserve(
 		return IdempotencyRecord{}, false, err
 	}
 	query := repository.bind(`INSERT INTO idempotency_records(
-		schema_version, scope, key, request_hash, resource_type, resource_id,
+		scope, key, request_hash, resource_type, resource_id,
 		response_json, created_at, expires_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(scope, key) DO NOTHING`)
 	if repository.backend == BackendPostgreSQL {
 		query = `INSERT INTO idempotency_records(
-			schema_version, scope, key, request_hash, resource_type, resource_id,
+			scope, key, request_hash, resource_type, resource_id,
 			response_json, created_at, expires_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9)
+		) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8)
 		ON CONFLICT(scope, key) DO NOTHING`
 	}
 	if repository.backend == BackendMySQL {
 		query = `INSERT IGNORE INTO idempotency_records(
-			schema_version, scope, ` + "`key`" + `, request_hash, resource_type, resource_id,
+			scope, ` + "`key`" + `, request_hash, resource_type, resource_id,
 			response_json, created_at, expires_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
 	}
 	result, err := repository.executor.ExecContext(ctx, query,
-		record.SchemaVersion, record.Scope, record.Key, record.RequestHash,
+		record.Scope, record.Key, record.RequestHash,
 		record.ResourceType, record.ResourceID, nullableJSON(record.Response),
 		formatTime(record.CreatedAt), formatTime(record.ExpiresAt),
 	)
@@ -69,11 +69,11 @@ func (repository *idempotencyRepository) Get(ctx context.Context, scope, key str
 	if scope == "" || key == "" {
 		return IdempotencyRecord{}, errors.New("idempotency scope and key are required")
 	}
-	query := repository.bind(`SELECT schema_version, scope, key, request_hash, resource_type,
+	query := repository.bind(`SELECT scope, key, request_hash, resource_type,
 		resource_id, response_json, created_at, expires_at
 		FROM idempotency_records WHERE scope = ? AND key = ?`)
 	if repository.backend == BackendMySQL {
-		query = "SELECT schema_version, scope, `key`, request_hash, resource_type, resource_id, response_json, " +
+		query = "SELECT scope, `key`, request_hash, resource_type, resource_id, response_json, " +
 			"created_at, expires_at FROM idempotency_records WHERE scope = ? AND `key` = ?"
 	}
 	record, err := scanIdempotencyRecord(repository.executor.QueryRowContext(ctx, query, scope, key))
@@ -123,12 +123,6 @@ func normalizeIdempotencyRecord(record *IdempotencyRecord) error {
 	if record.Response, err = normalizeJSON(record.Response, false, "idempotency response"); err != nil {
 		return err
 	}
-	if record.SchemaVersion == 0 {
-		record.SchemaVersion = ObjectSchemaVersion
-	}
-	if record.SchemaVersion != ObjectSchemaVersion {
-		return errors.New("unsupported idempotency schema version")
-	}
 	if record.CreatedAt.IsZero() || record.ExpiresAt.IsZero() || !record.ExpiresAt.After(record.CreatedAt) {
 		return errors.New("idempotency expiry must be after creation")
 	}
@@ -144,7 +138,7 @@ func scanIdempotencyRecord(row rowScanner) (IdempotencyRecord, error) {
 		createdAt, expiresAt string
 	)
 	if err := row.Scan(
-		&record.SchemaVersion, &record.Scope, &record.Key, &record.RequestHash,
+		&record.Scope, &record.Key, &record.RequestHash,
 		&record.ResourceType, &record.ResourceID, &response, &createdAt, &expiresAt,
 	); err != nil {
 		return IdempotencyRecord{}, err

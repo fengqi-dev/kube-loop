@@ -326,7 +326,6 @@ export namespace app {
 	}
 
 }
-
 export namespace capability {
 
 	export class Snapshot {
@@ -564,7 +563,6 @@ export namespace filetransfer {
 	    }
 	}
 	export class Task {
-	    schemaVersion: number;
 	    id: string;
 	    profileId: string;
 	    sessionId: string;
@@ -593,7 +591,6 @@ export namespace filetransfer {
 
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.schemaVersion = source["schemaVersion"];
 	        this.id = source["id"];
 	        this.profileId = source["profileId"];
 	        this.sessionId = source["sessionId"];
@@ -1086,7 +1083,6 @@ export namespace profile {
 	    }
 	}
 	export class Profile {
-	    schemaVersion: number;
 	    id: string;
 	    baseUrl: string;
 	    tunnelPath: string;
@@ -1104,7 +1100,6 @@ export namespace profile {
 
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.schemaVersion = source["schemaVersion"];
 	        this.id = source["id"];
 	        this.baseUrl = source["baseUrl"];
 	        this.tunnelPath = source["tunnelPath"];

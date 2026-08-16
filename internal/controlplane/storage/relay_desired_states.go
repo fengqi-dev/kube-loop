@@ -14,7 +14,7 @@ func (repository *relayDesiredStateRepository) Get(ctx context.Context, relayID 
 	if err := validateRelayDesiredStateID(relayID); err != nil {
 		return RelayDesiredState{}, err
 	}
-	query := repository.bind(`SELECT relay_id, schema_version, desired_state, version, updated_by,
+	query := repository.bind(`SELECT relay_id, desired_state, version, updated_by,
 		updated_authentication_type, reason, updated_at FROM relay_desired_states WHERE relay_id = ?`)
 	value, err := scanRelayDesiredState(repository.executor.QueryRowContext(ctx, query, relayID))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -27,7 +27,7 @@ func (repository *relayDesiredStateRepository) Get(ctx context.Context, relayID 
 }
 
 func (repository *relayDesiredStateRepository) List(ctx context.Context) ([]RelayDesiredState, error) {
-	rows, err := repository.executor.QueryContext(ctx, `SELECT relay_id, schema_version, desired_state, version, updated_by,
+	rows, err := repository.executor.QueryContext(ctx, `SELECT relay_id, desired_state, version, updated_by,
 		updated_authentication_type, reason, updated_at FROM relay_desired_states ORDER BY relay_id`)
 	if err != nil {
 		return nil, databaseError("list Relay desired states", err)
@@ -64,9 +64,9 @@ func (repository *relayDesiredStateRepository) CompareAndSwap(
 	var result sql.Result
 	var err error
 	if expectedVersion == 0 {
-		query := repository.bind(`INSERT INTO relay_desired_states(relay_id, schema_version, desired_state, version,
-			updated_by, updated_authentication_type, reason, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
-		result, err = repository.executor.ExecContext(ctx, query, value.RelayID, value.SchemaVersion, value.DesiredState,
+		query := repository.bind(`INSERT INTO relay_desired_states(relay_id, desired_state, version,
+			updated_by, updated_authentication_type, reason, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+		result, err = repository.executor.ExecContext(ctx, query, value.RelayID, value.DesiredState,
 			value.Version, value.UpdatedBy, value.UpdatedAuthenticationType, value.Reason, formatTime(value.UpdatedAt))
 	} else {
 		query := repository.bind(`UPDATE relay_desired_states SET desired_state = ?, version = ?, updated_by = ?,
@@ -100,15 +100,9 @@ func normalizeRelayDesiredState(value *RelayDesiredState) error {
 		return errors.New("Relay desired state is invalid")
 	}
 	switch value.UpdatedAuthenticationType {
-	case "normal", "bootstrap", "break-glass":
+	case "normal", "bootstrap":
 	default:
 		return errors.New("Relay desired state authentication type is invalid")
-	}
-	if value.SchemaVersion == 0 {
-		value.SchemaVersion = ObjectSchemaVersion
-	}
-	if value.SchemaVersion != ObjectSchemaVersion {
-		return errors.New("unsupported Relay desired state schema version")
 	}
 	value.UpdatedAt = value.UpdatedAt.UTC()
 	return nil
@@ -125,7 +119,7 @@ func validateRelayDesiredStateID(value string) error {
 func scanRelayDesiredState(row rowScanner) (RelayDesiredState, error) {
 	var value RelayDesiredState
 	var updatedAt string
-	if err := row.Scan(&value.RelayID, &value.SchemaVersion, &value.DesiredState, &value.Version,
+	if err := row.Scan(&value.RelayID, &value.DesiredState, &value.Version,
 		&value.UpdatedBy, &value.UpdatedAuthenticationType, &value.Reason, &updatedAt); err != nil {
 		return RelayDesiredState{}, err
 	}

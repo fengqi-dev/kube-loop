@@ -4,12 +4,10 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"net/netip"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -19,16 +17,26 @@ import (
 	adminsession "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/session"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/authn"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v5"
 )
 
-func TestBreakGlassSessionRouteIsNotRegistered(t *testing.T) {
-	handler, _ := newTestHandler(t, Config{PublicURL: "https://gateway.example"}, true)
-	response := performExchange(handler, `{"credential":"valid"}`)
-	if response.Code != http.StatusNotFound {
-		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+func testStorageNetworkSpec(t *testing.T) (json.RawMessage, string) {
+	t.Helper()
+	spec, err := networkspec.Normalize(networkspec.Spec{PodCIDRs: []string{"10.244.0.0/16"}})
+	if err != nil {
+		t.Fatal(err)
 	}
+	contents, err := networkspec.CanonicalJSON(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash, err := networkspec.Hash(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return contents, hash
 }
 
 func TestLimiterSeparatesSourcesAndBoundsBuckets(t *testing.T) {
@@ -69,7 +77,7 @@ func TestReadAPIRequiresCookieAndReturnsAuthorizationSummaryAndStatus(t *testing
 		t.Fatalf("unauthenticated status=%d body=%s", unauthenticated.Code, unauthenticated.Body.String())
 	}
 
-	cookie, _ := issueLegacySession(t, handler)
+	cookie, _ := issueTestSession(t, handler, store)
 	capabilityRequest := httptest.NewRequest(http.MethodGet, "/bootstrap", nil)
 	capabilityRequest.AddCookie(cookie)
 	capabilityRequest.Header.Set("Sec-Fetch-Site", "same-origin")
@@ -89,7 +97,7 @@ func TestReadAPIRequiresCookieAndReturnsAuthorizationSummaryAndStatus(t *testing
 	if err := json.Unmarshal(capabilities.Body.Bytes(), &capabilityDocument); err != nil {
 		t.Fatal(err)
 	}
-	if capabilityDocument.Session.AuthenticationType != "break-glass" || !capabilityDocument.Authorization.Administrator {
+	if capabilityDocument.Session.AuthenticationType != "normal" || !capabilityDocument.Authorization.Administrator {
 		t.Fatalf("capability document=%+v", capabilityDocument)
 	}
 
@@ -112,7 +120,7 @@ func TestReadAPIRequiresCookieAndReturnsAuthorizationSummaryAndStatus(t *testing
 	if err := json.Unmarshal(status.Body.Bytes(), &statusDocument); err != nil {
 		t.Fatal(err)
 	}
-	if statusDocument.ControlPlane.Version != "v2-test" || statusDocument.Storage.Backend != "sqlite" || statusDocument.Storage.SchemaVersion < 18 {
+	if statusDocument.ControlPlane.Version != "v2-test" || statusDocument.Storage.Backend != "sqlite" || statusDocument.Storage.SchemaVersion != 1 {
 		t.Fatalf("status document=%+v", statusDocument)
 	}
 	events, err := store.Audit().List(context.Background(), storage.AuditFilter{Limit: 100})
@@ -123,7 +131,7 @@ func TestReadAPIRequiresCookieAndReturnsAuthorizationSummaryAndStatus(t *testing
 
 func TestReadAPIRejectsCrossSiteDuplicateCookieAndUnauthorizedRole(t *testing.T) {
 	handler, _ := newReadTestHandler(t, false)
-	cookie, _ := issueLegacySession(t, handler)
+	cookie, _ := issueTestSession(t, handler, nil)
 
 	crossSite := httptest.NewRequest(http.MethodGet, "/status", nil)
 	crossSite.AddCookie(cookie)
@@ -153,7 +161,7 @@ func TestReadAPIRejectsCrossSiteDuplicateCookieAndUnauthorizedRole(t *testing.T)
 
 func TestAuthenticatedManagementWritesRequireSynchronousCSRFToken(t *testing.T) {
 	handler, _ := newReadTestHandler(t, true)
-	cookie, csrf := issueLegacySession(t, handler)
+	cookie, csrf := issueTestSession(t, handler, nil)
 	protected := echo.New()
 	protected.POST("/future-write", func(ctx *echo.Context) error {
 		return ctx.NoContent(http.StatusNoContent)
@@ -316,26 +324,7 @@ func TestGatewayTokenExchangeRejectsNonEmptyOrNullJSONAndAudits(t *testing.T) {
 	}
 }
 
-type testVerifier struct {
-	enabled    bool
-	generation string
-}
-
-func (verifier *testVerifier) Verify(_ context.Context, _ netip.Addr, supplied []byte) (string, error) {
-	defer clear(supplied)
-	if !verifier.enabled || !bytes.Equal(supplied, []byte("valid")) {
-		return "", adminsession.ErrAuthenticationFailed
-	}
-	return verifier.generation, nil
-}
-
-func (*testVerifier) SessionTTL() time.Duration { return 5 * time.Minute }
-
-func (verifier *testVerifier) CurrentBreakGlassState(context.Context) (adminauthorization.BreakGlassState, error) {
-	return adminauthorization.BreakGlassState{Enabled: verifier.enabled, Generation: verifier.generation}, nil
-}
-
-func newTestHandler(t *testing.T, config Config, enabled bool) (*Handler, *storage.Store) {
+func newReadTestHandler(t *testing.T, authorize bool) (*Handler, *storage.Store) {
 	t.Helper()
 	store, err := storage.Open(context.Background(), storage.Config{
 		Backend: storage.BackendSQLite, SQLitePath: filepath.Join(t.TempDir(), "management.db"),
@@ -344,40 +333,37 @@ func newTestHandler(t *testing.T, config Config, enabled bool) (*Handler, *stora
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	generation := base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{4}, 32))
-	verifier := &testVerifier{enabled: enabled, generation: generation}
-	sessions, err := adminsession.New(store, verifier)
+	sessions, err := adminsession.New(store)
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler, err := New(config, sessions)
-	if err != nil {
+	now := time.Now().UTC()
+	identityID, authorizationID := testManagementIdentityID, testManagementAuthorizationID
+	if _, err = store.Identities().Create(context.Background(), storage.Identity{ID: identityID, Type: "human", DisplayName: "Test administrator", Status: "active", CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
-	return handler, store
-}
-
-func newReadTestHandler(t *testing.T, authorizeBreakGlass bool) (*Handler, *storage.Store) {
-	t.Helper()
-	store, err := storage.Open(context.Background(), storage.Config{
-		Backend: storage.BackendSQLite, SQLitePath: filepath.Join(t.TempDir(), "management.db"),
-	})
-	if err != nil {
+	if err = store.OAuthSessions().Create(context.Background(), storage.OAuthSession{Kind: "refresh_token", SignatureHash: bytes.Repeat([]byte{31}, 32), RequestID: authorizationID, IdentityID: identityID, RequestJSON: []byte(`{}`), Status: "active", CreatedAt: now, ExpiresAt: now.Add(time.Hour)}); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = store.Close() })
-	generation := base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{4}, 32))
-	verifier := &testVerifier{enabled: true, generation: generation}
-	sessions, err := adminsession.New(store, verifier)
-	if err != nil {
-		t.Fatal(err)
+	groups := []adminauthorization.GroupAccess{}
+	if authorize {
+		groupID := "870dfd70-48e0-44f1-a0e4-3301b274d102"
+		organizationID := "18ca7281-29de-46c0-a648-d39853063924"
+		if err = store.Organizations().Create(context.Background(), storage.Organization{ID: organizationID, Name: "Test", Slug: "test", Status: "active", CreatedAt: now, UpdatedAt: now}); err != nil {
+			t.Fatal(err)
+		}
+		if err = store.Organizations().AddMember(context.Background(), storage.OrganizationMembership{OrganizationID: organizationID, IdentityID: identityID, Status: "active", CreatedAt: now, UpdatedAt: now}); err != nil {
+			t.Fatal(err)
+		}
+		if err = store.Groups().Create(context.Background(), storage.Group{ID: groupID, OrganizationID: organizationID, Name: "Administrators", System: true, CreatedAt: now, UpdatedAt: now}); err != nil {
+			t.Fatal(err)
+		}
+		if err = store.Groups().AddMember(context.Background(), storage.GroupMembership{GroupID: groupID, IdentityID: identityID, CreatedAt: now}); err != nil {
+			t.Fatal(err)
+		}
+		groups = append(groups, adminauthorization.GroupAccess{GroupID: groupID, Administrator: true})
 	}
-	var authorizer *adminauthorization.Engine
-	if authorizeBreakGlass {
-		authorizer, err = adminauthorization.NewDenyAll(adminauthorization.WithBreakGlass(verifier))
-	} else {
-		authorizer, err = adminauthorization.NewDenyAll()
-	}
+	authorizer, err := adminauthorization.New(adminauthorization.Snapshot{Version: adminauthorization.CurrentVersion, Groups: groups})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -442,7 +428,7 @@ func newIdentityTokenHandler(t *testing.T, bootstrap bool, extraOptions ...Optio
 	if err := store.Groups().Create(context.Background(), storage.Group{ID: administratorGroupID, OrganizationID: organizationID, Name: "Administrators", System: true, CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Groups().AddMember(context.Background(), storage.GroupMembership{GroupID: administratorGroupID, IdentityID: identity.ID, SourceType: "manual", CreatedAt: now}); err != nil {
+	if err := store.Groups().AddMember(context.Background(), storage.GroupMembership{GroupID: administratorGroupID, IdentityID: identity.ID, CreatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
 	authorizer, err := adminauthorization.New(adminauthorization.Snapshot{
@@ -468,41 +454,19 @@ func newIdentityTokenHandler(t *testing.T, bootstrap bool, extraOptions ...Optio
 	return handler, store
 }
 
-func exchangeRequest(body string) *http.Request {
-	request := httptest.NewRequest(http.MethodPost, "/sessions/break-glass", bytes.NewBufferString(body))
-	request.RemoteAddr = "192.0.2.20:43210"
-	request.Header.Set("Origin", "https://gateway.example")
-	request.Header.Set("Content-Type", "application/json")
-	return request
-}
+const (
+	testManagementIdentityID      = "9fb7f23a-4ce5-4aa0-bdc6-55551b4a1b89"
+	testManagementAuthorizationID = "e412bbde-546f-42c8-8221-47a744e18af8"
+)
 
-func performExchange(handler *Handler, body string) *httptest.ResponseRecorder {
-	recorder := httptest.NewRecorder()
-	serveHTTP(handler, recorder, exchangeRequest(body))
-	return recorder
-}
-
-func issueLegacySession(t *testing.T, handler *Handler) (*http.Cookie, string) {
+func issueTestSession(t *testing.T, handler *Handler, _ *storage.Store) (*http.Cookie, string) {
 	t.Helper()
-	issued, err := handler.sessions.ExchangeBreakGlass(
-		context.Background(), netip.MustParseAddr("192.0.2.20"), []byte("valid"), uuid.NewString(),
+	issued, err := handler.sessions.ExchangeIdentity(
+		context.Background(), testManagementIdentityID, testManagementAuthorizationID,
+		adminauthorization.AuthenticationNormal, uuid.NewString(),
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return &http.Cookie{Name: SessionCookieName, Value: issued.SessionToken}, issued.CSRFToken
-}
-
-func errorSignature(t *testing.T, recorder *httptest.ResponseRecorder) string {
-	t.Helper()
-	var document struct {
-		Error struct {
-			Code    string `json:"code"`
-			Message string `json:"message"`
-		} `json:"error"`
-	}
-	if err := json.Unmarshal(recorder.Body.Bytes(), &document); err != nil {
-		t.Fatal(err)
-	}
-	return document.Error.Code + "\x00" + document.Error.Message
 }

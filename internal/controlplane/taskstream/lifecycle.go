@@ -23,55 +23,6 @@ type TaskStore interface {
 	) error
 }
 
-type WatchConfig struct {
-	Tasks             TaskStore
-	TaskID            string
-	Owner             json.RawMessage
-	Interval          time.Duration
-	Now               func() time.Time
-	StopError         error
-	InvalidStateError error
-	Heartbeat         func(storage.Task, json.RawMessage) json.RawMessage
-}
-
-func Watch(ctx context.Context, cancel context.CancelCauseFunc, config WatchConfig) {
-	ticker := time.NewTicker(config.Interval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			checkContext, checkCancel := context.WithTimeout(ctx, config.Interval)
-			task, err := config.Tasks.GetByID(checkContext, config.TaskID)
-			if err == nil {
-				switch task.State {
-				case remotetask.Starting, remotetask.Running:
-					heartbeat := config.Owner
-					if config.Heartbeat != nil {
-						heartbeat = config.Heartbeat(task, heartbeat)
-					}
-					err = config.Tasks.UpdateState(
-						checkContext, config.TaskID, task.State, task.State, heartbeat, config.Now().UTC(),
-					)
-					if errors.Is(err, storage.ErrConflict) {
-						err = nil
-					}
-				case remotetask.Stopping, remotetask.Stopped, remotetask.Failed:
-					err = config.StopError
-				default:
-					err = config.InvalidStateError
-				}
-			}
-			checkCancel()
-			if err != nil {
-				cancel(err)
-				return
-			}
-		}
-	}
-}
-
 type FinishConfig struct {
 	Tasks           TaskStore
 	TaskID          string

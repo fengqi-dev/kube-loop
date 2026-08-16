@@ -1,10 +1,12 @@
 package filetransfer
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path"
 	"slices"
@@ -28,8 +30,7 @@ const (
 	StatusCancelled   = "cancelled"
 	StatusInterrupted = "interrupted"
 
-	stateVersion       = 2
-	taskSchemaVersion  = 1
+	stateVersion       = 1
 	defaultMaximumSize = uint64(1 << 30)
 )
 
@@ -45,7 +46,6 @@ type Request struct {
 }
 
 type Task struct {
-	SchemaVersion int        `json:"schemaVersion"`
 	ID            string     `json:"id"`
 	ProfileID     string     `json:"profileId"`
 	SessionID     string     `json:"sessionId"`
@@ -176,8 +176,7 @@ func (manager *Manager) Start(
 	request.LocalPath = localPath
 	now := manager.now().UTC()
 	task := Task{
-		SchemaVersion: taskSchemaVersion,
-		ID:            uuid.NewString(), ProfileID: serverProfile.ID, SessionID: session.ID, Namespace: session.Namespace,
+		ID: uuid.NewString(), ProfileID: serverProfile.ID, SessionID: session.ID, Namespace: session.Namespace,
 		Direction: request.Direction, Kind: request.Kind, Pod: request.Pod, Container: request.Container,
 		LocalPath: request.LocalPath, RemotePath: request.RemotePath, Overwrite: request.Overwrite,
 		Status: StatusQueued, CreatedAt: now, UpdatedAt: now,
@@ -448,19 +447,17 @@ func (manager *Manager) load() error {
 		return fmt.Errorf("read file transfer state: %w", err)
 	}
 	var state persistedState
-	if err := json.Unmarshal(contents, &state); err != nil || (state.Version != 1 && state.Version != stateVersion) {
+	decoder := json.NewDecoder(bytes.NewReader(contents))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&state); err != nil || state.Version != stateVersion {
+		return errors.New("file transfer state is invalid or unsupported")
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		return errors.New("file transfer state is invalid or unsupported")
 	}
 	now := manager.now().UTC()
 	for _, task := range state.Tasks {
 		if err := normalizePersistedTask(&task); err != nil {
-			// A newer application may understand fields and invariants this
-			// version does not. Keep rejecting future schemas instead of silently
-			// rewriting them. Malformed legacy history is non-critical and can be
-			// discarded so it never disables the whole transfer manager.
-			if task.SchemaVersion > taskSchemaVersion {
-				return errors.New("file transfer state contains an unsupported future Task")
-			}
 			continue
 		}
 		if task.Status == StatusQueued || task.Status == StatusPreparing || task.Status == StatusRunning {
@@ -477,13 +474,6 @@ func (manager *Manager) load() error {
 func normalizePersistedTask(task *Task) error {
 	if task == nil {
 		return errors.New("file transfer Task is nil")
-	}
-	if task.SchemaVersion == 0 {
-		// State v1/v2 records predate per-Task schema versioning.
-		task.SchemaVersion = taskSchemaVersion
-	}
-	if task.SchemaVersion != taskSchemaVersion {
-		return errors.New("file transfer Task schema version is unsupported")
 	}
 	if _, err := uuid.Parse(task.ID); err != nil || strings.TrimSpace(task.ProfileID) == "" || task.CreatedAt.IsZero() || task.UpdatedAt.IsZero() {
 		return errors.New("file transfer Task identity is invalid")

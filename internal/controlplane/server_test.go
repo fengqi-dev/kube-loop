@@ -137,7 +137,7 @@ func TestPublicServerDoesNotExposeManagementRoutes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	managementRequest := httptest.NewRequest(http.MethodPost, AdminAPIPathPrefix+"/sessions/break-glass", nil)
+	managementRequest := httptest.NewRequest(http.MethodGet, AdminAPIPathPrefix+"/status", nil)
 	managementResponse := httptest.NewRecorder()
 	server.Handler().ServeHTTP(managementResponse, managementRequest)
 	if managementResponse.Code != http.StatusNotFound || managementResponse.Header().Get("WWW-Authenticate") != "" {

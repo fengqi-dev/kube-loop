@@ -3,19 +3,18 @@ package storage
 import "strings"
 
 var postgresqlBooleanColumns = map[string]struct{}{
-	"enabled": {}, "bootstrap_complete": {}, "public": {}, "trusted": {}, "builtin": {}, "primary_email": {},
+	"enabled": {}, "public": {}, "trusted": {}, "builtin": {},
 	"system_flag": {},
 }
 
 var postgresqlJSONColumns = map[string]struct{}{
-	"claims_json": {}, "network_spec_json": {}, "spec_json": {}, "result_json": {}, "data_json": {},
+	"network_spec_json": {}, "spec_json": {}, "result_json": {}, "data_json": {},
 	"response_json": {}, "metadata_json": {}, "filter_json": {}, "redirect_uris_json": {},
-	"grant_types_json": {}, "scopes_json": {}, "request_json": {}, "permissions_json": {},
-	"transports_json": {}, "group_mappings_json": {},
+	"grant_types_json": {}, "scopes_json": {}, "request_json": {},
 }
 
 var postgresqlBigIntColumns = map[string]struct{}{
-	"id": {}, "generation": {}, "version": {},
+	"id": {}, "generation": {}, "version": {}, "revision": {},
 }
 
 func postgresqlMigrationStatements(sqlite []string) []string {

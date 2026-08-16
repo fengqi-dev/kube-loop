@@ -46,7 +46,7 @@ func TestBootstrapRequiresAuthenticationAndConsolidatesSessionAuthorization(t *t
 
 func TestBootstrapRemainsAvailableWithoutPrivilegesButOverviewRequiresStatusRead(t *testing.T) {
 	handler, _ := newReadTestHandler(t, false)
-	cookie, _ := issueLegacySession(t, handler)
+	cookie, _ := issueTestSession(t, handler, nil)
 	bootstrap := authenticatedGET(handler, cookie, "/bootstrap")
 	if bootstrap.Code != http.StatusOK {
 		t.Fatalf("bootstrap status=%d body=%s", bootstrap.Code, bootstrap.Body.String())
@@ -127,9 +127,11 @@ func TestOverviewReturnsBoundedRuntimeAndRelaySummary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	networkSpec, networkSpecHash := testStorageNetworkSpec(t)
 	session := storage.Session{
 		ID: uuid.NewString(), IdentityID: identity.ID, DeviceID: "device", ClusterID: "cluster",
 		Namespace: "overview", State: "active", CreatedAt: now, ExpiresAt: now.Add(time.Hour),
+		NetworkSpec: networkSpec, NetworkSpecHash: networkSpecHash,
 	}
 	if err := store.Sessions().Create(context.Background(), session); err != nil {
 		t.Fatal(err)

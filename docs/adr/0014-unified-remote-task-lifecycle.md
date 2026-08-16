@@ -67,16 +67,9 @@ false-ready `running` Task.
 
 Control Plane documents, storage models, and typed client Task DTOs all expose
 `remotetask.State`. The SDK validates the shared vocabulary rather than keeping
-feature-local lists. JSON remains a string value, so the wire representation
-and generated desktop TypeScript model stay compatible.
-
-SQLite and PostgreSQL schema migration 6 converts persisted legacy values:
-
-- `active` to `running`;
-- `preparing` to `starting`.
-
-The migration is idempotent and does not rewrite timestamps, results,
-idempotency ownership, or resource snapshots.
+feature-local lists. The initial SQLite, PostgreSQL, and MySQL schemas accept
+only the current state vocabulary; no historical Task-state migration is part
+of the V2 baseline.
 
 ### One idempotent create contract
 

@@ -70,19 +70,13 @@ func (service *Service) Create(
 	if apiError := normalizeSpec(&spec); apiError != nil {
 		return CreateResult{}, apiError
 	}
-	hashSource, _ := json.Marshal(struct {
-		SessionID string `json:"sessionId"`
-		Namespace string `json:"namespace"`
-		Spec      Spec   `json:"spec"`
-	}{SessionID: session.ID, Namespace: session.Namespace, Spec: spec})
-	legacyRequestHash := taskapi.Hash(hashSource)
 	requestHash, err := taskapi.RequestHash(session.ID, session.Namespace, spec)
 	if err != nil {
 		return CreateResult{}, internalError(err)
 	}
 	scope := taskapi.Scope(TaskType, identity.Subject)
 	if record, getErr := service.storage.Idempotency().Get(ctx, scope, idempotencyKey); getErr == nil {
-		if !taskapi.Matches(record.RequestHash, requestHash, legacyRequestHash) {
+		if record.RequestHash != requestHash {
 			return CreateResult{}, mapStorageError(storage.ErrIdempotencyMismatch)
 		}
 		if record.ResourceType != TaskType {

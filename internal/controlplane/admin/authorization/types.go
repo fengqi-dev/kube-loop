@@ -2,28 +2,20 @@
 // Management and Gateway requests are evaluated by the same immutable policy.
 package authorization
 
-import (
-	"context"
-	"errors"
-	"strings"
-)
-
 const CurrentVersion = 2
 
 type AuthenticationType string
 
 const (
-	AuthenticationNormal     AuthenticationType = "normal"
-	AuthenticationBreakGlass AuthenticationType = "break-glass"
+	AuthenticationNormal AuthenticationType = "normal"
 )
 
 type Capability string
 
 type Subject struct {
-	ID                   string
-	Groups               []string
-	Authentication       AuthenticationType
-	BreakGlassGeneration string
+	ID             string
+	Groups         []string
+	Authentication AuthenticationType
 }
 
 type GroupAccess struct {
@@ -98,13 +90,11 @@ func (request Request) Key() string {
 type Reason string
 
 const (
-	ReasonAllowed               Reason = "allowed"
-	ReasonInvalidRequest        Reason = "invalid_request"
-	ReasonNoMatchingAllow       Reason = "no_matching_allow"
-	ReasonExplicitDeny          Reason = "explicit_deny"
-	ReasonScopeUnavailable      Reason = "scope_unavailable"
-	ReasonBreakGlassUnavailable Reason = "break_glass_unavailable"
-	ReasonBreakGlassStale       Reason = "break_glass_stale"
+	ReasonAllowed          Reason = "allowed"
+	ReasonInvalidRequest   Reason = "invalid_request"
+	ReasonNoMatchingAllow  Reason = "no_matching_allow"
+	ReasonExplicitDeny     Reason = "explicit_deny"
+	ReasonScopeUnavailable Reason = "scope_unavailable"
 )
 
 type Match struct {
@@ -117,28 +107,4 @@ type Decision struct {
 	Reason         Reason             `json:"reason"`
 	MatchingAllow  []Match            `json:"matchingAllow,omitempty"`
 	Authentication AuthenticationType `json:"authenticationType,omitempty"`
-}
-
-type BreakGlassState struct {
-	Enabled    bool
-	Generation string
-}
-type BreakGlassStateReader interface {
-	CurrentBreakGlassState(context.Context) (BreakGlassState, error)
-}
-
-var ErrForbidden = errors.New("operation is not permitted")
-
-func LookupAuthorized[T any](ctx context.Context, engine *Engine, subject Subject, request Request,
-	lookup func(context.Context, string, string) (T, error)) (T, Decision, error) {
-	var zero T
-	decision := engine.Authorize(ctx, subject, request)
-	if !decision.Allowed {
-		return zero, decision, ErrForbidden
-	}
-	if lookup == nil {
-		return zero, decision, errors.New("authorized object lookup is unavailable")
-	}
-	value, err := lookup(ctx, strings.TrimSpace(request.Namespace), strings.TrimSpace(request.ResourceName))
-	return value, decision, err
 }

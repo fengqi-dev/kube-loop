@@ -354,31 +354,6 @@ func waitForMirrorState(
 	}
 }
 
-func waitForNoLocalMirror(
-	t *testing.T,
-	ctx context.Context,
-	manager *clientmirror.Manager,
-	profileID string,
-) {
-	t.Helper()
-	deadline := time.NewTimer(20 * time.Second)
-	defer deadline.Stop()
-	ticker := time.NewTicker(25 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		if len(manager.List(profileID)) == 0 {
-			return
-		}
-		select {
-		case <-ctx.Done():
-			t.Fatal(ctx.Err())
-		case <-deadline.C:
-			t.Fatal("local Mirror relay did not stop after OAuth grant revocation")
-		case <-ticker.C:
-		}
-	}
-}
-
 func startMirrorTCPTarget(t *testing.T) (net.Listener, *net.TCPAddr, <-chan string) {
 	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")

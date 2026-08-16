@@ -60,29 +60,6 @@ func (api *readAPI) getOrganization(ctx *echo.Context) error {
 	return ctx.JSON(http.StatusOK, item)
 }
 
-func (api *readAPI) authorizeIdentityManagement(ctx *echo.Context, identityID string, write bool) bool {
-	platformCapability := adminauthorization.Capability("platform.identity.users.read")
-	organizationCapability := adminauthorization.Capability("org.identities.read")
-	if write {
-		platformCapability = "platform.identity.users.manage"
-		organizationCapability = "org.identities.manage"
-	}
-	subject := subjectFromRequest(ctx.Request())
-	if api.authorizer.Authorize(ctx.Request().Context(), subject, adminauthorization.Request{Capability: platformCapability}).Allowed {
-		return true
-	}
-	organizations, err := api.status.Organizations().ListForIdentity(ctx.Request().Context(), identityID)
-	if err == nil && slices.ContainsFunc(organizations, func(organization storage.Organization) bool {
-		return api.authorizer.Authorize(ctx.Request().Context(), subject, adminauthorization.Request{
-			Capability: organizationCapability, OrganizationID: organization.ID,
-		}).Allowed
-	}) {
-		return true
-	}
-	writeError(ctx.Response(), http.StatusForbidden, "forbidden", "operation is not permitted", requestID(ctx.Request()))
-	return false
-}
-
 type groupInput struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`

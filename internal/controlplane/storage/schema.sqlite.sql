@@ -5,12 +5,6 @@ CREATE TABLE identities (
  created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
 CREATE INDEX identities_email_idx ON identities(primary_email);
-CREATE TABLE identity_emails (
- identity_id TEXT NOT NULL REFERENCES identities(id) ON DELETE CASCADE,
- email TEXT NOT NULL, verified_at TEXT, primary_email INTEGER NOT NULL DEFAULT 0 CHECK (primary_email IN (0, 1)),
- created_at TEXT NOT NULL, PRIMARY KEY (identity_id, email)
-);
-CREATE INDEX identity_emails_lookup_idx ON identity_emails(email);
 
 CREATE TABLE organizations (
  id TEXT PRIMARY KEY, name TEXT NOT NULL, slug TEXT NOT NULL UNIQUE,
@@ -35,8 +29,7 @@ CREATE TABLE iam_groups (
 CREATE TABLE group_memberships (
  group_id TEXT NOT NULL REFERENCES iam_groups(id) ON DELETE CASCADE,
  identity_id TEXT NOT NULL REFERENCES identities(id) ON DELETE CASCADE,
- source_type TEXT NOT NULL CHECK (source_type = 'manual'), source_id TEXT NOT NULL DEFAULT '' CHECK (source_id = ''),
- created_at TEXT NOT NULL, PRIMARY KEY (group_id, identity_id, source_type, source_id)
+ created_at TEXT NOT NULL, PRIMARY KEY (group_id, identity_id)
 );
 CREATE INDEX group_memberships_identity_idx ON group_memberships(identity_id, group_id);
 CREATE TABLE group_namespaces (
@@ -72,32 +65,32 @@ CREATE TABLE security_policies (
 );
 
 CREATE TABLE sessions (
- id TEXT PRIMARY KEY, schema_version INTEGER NOT NULL CHECK (schema_version >= 1),
+ id TEXT PRIMARY KEY,
  identity_id TEXT NOT NULL REFERENCES identities(id) ON DELETE CASCADE, device_id TEXT NOT NULL,
  cluster_id TEXT NOT NULL, namespace TEXT NOT NULL DEFAULT '', state TEXT NOT NULL,
- generation INTEGER NOT NULL DEFAULT 1 CHECK (generation >= 1), network_spec_json TEXT NOT NULL DEFAULT '{}',
- network_spec_hash TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+	 generation INTEGER NOT NULL DEFAULT 1 CHECK (generation >= 1), network_spec_json TEXT NOT NULL,
+	 network_spec_hash TEXT NOT NULL CHECK (length(network_spec_hash) = 64), created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
  last_heartbeat_at TEXT NOT NULL DEFAULT '', expires_at TEXT NOT NULL
 );
 CREATE TABLE tasks (
- id TEXT PRIMARY KEY, schema_version INTEGER NOT NULL CHECK (schema_version >= 1),
+ id TEXT PRIMARY KEY,
  identity_id TEXT NOT NULL REFERENCES identities(id) ON DELETE CASCADE,
  session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, type TEXT NOT NULL, state TEXT NOT NULL,
  spec_json TEXT NOT NULL, result_json TEXT, idempotency_key TEXT NOT NULL,
  created_at TEXT NOT NULL, updated_at TEXT NOT NULL, expires_at TEXT, UNIQUE (identity_id, idempotency_key)
 );
 CREATE TABLE resource_snapshots (
- id TEXT PRIMARY KEY, schema_version INTEGER NOT NULL CHECK (schema_version >= 1),
+ id TEXT PRIMARY KEY,
  task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, kind TEXT NOT NULL, namespace TEXT NOT NULL DEFAULT '',
  name TEXT NOT NULL, data_json TEXT NOT NULL, created_at TEXT NOT NULL, UNIQUE (task_id, kind, namespace, name)
 );
 CREATE TABLE idempotency_records (
- schema_version INTEGER NOT NULL CHECK (schema_version >= 1), scope TEXT NOT NULL, key TEXT NOT NULL,
+ scope TEXT NOT NULL, key TEXT NOT NULL,
  request_hash TEXT NOT NULL, resource_type TEXT NOT NULL, resource_id TEXT NOT NULL, response_json TEXT,
  created_at TEXT NOT NULL, expires_at TEXT NOT NULL, PRIMARY KEY (scope, key)
 );
 CREATE TABLE audit_events (
- id TEXT PRIMARY KEY, schema_version INTEGER NOT NULL CHECK (schema_version >= 1),
+ id TEXT PRIMARY KEY,
  identity_id TEXT REFERENCES identities(id) ON DELETE SET NULL, action TEXT NOT NULL,
  resource_type TEXT NOT NULL DEFAULT '', resource_id TEXT NOT NULL DEFAULT '', outcome TEXT NOT NULL,
  request_id TEXT NOT NULL, metadata_json TEXT, created_at TEXT NOT NULL
@@ -108,10 +101,10 @@ CREATE TABLE bootstrap_tokens (
  expires_at TEXT NOT NULL, consumed_at TEXT
 );
 CREATE TABLE admin_sessions (
- id_hash BLOB PRIMARY KEY CHECK (length(id_hash) = 32), schema_version INTEGER NOT NULL CHECK (schema_version >= 1),
+ id_hash BLOB PRIMARY KEY CHECK (length(id_hash) = 32),
  identity_id TEXT REFERENCES identities(id) ON DELETE CASCADE, authorization_id TEXT,
- authentication_type TEXT NOT NULL CHECK (authentication_type IN ('normal', 'break-glass')),
- break_glass_generation TEXT NOT NULL DEFAULT '', csrf_token_hash BLOB NOT NULL CHECK (length(csrf_token_hash) = 32),
+ authentication_type TEXT NOT NULL CHECK (authentication_type = 'normal'),
+ csrf_token_hash BLOB NOT NULL CHECK (length(csrf_token_hash) = 32),
  authenticated_at TEXT NOT NULL, created_at TEXT NOT NULL, last_seen_at TEXT NOT NULL,
  idle_expires_at TEXT NOT NULL, absolute_expires_at TEXT NOT NULL, revoked_at TEXT
 );
@@ -156,16 +149,16 @@ CREATE TABLE oauth_browser_sessions (
 );
 
 CREATE TABLE relay_desired_states (
- relay_id TEXT PRIMARY KEY, schema_version INTEGER NOT NULL CHECK (schema_version >= 1),
+ relay_id TEXT PRIMARY KEY,
  desired_state TEXT NOT NULL CHECK (desired_state IN ('ready', 'draining')), version INTEGER NOT NULL CHECK (version > 0),
- updated_by TEXT NOT NULL, updated_authentication_type TEXT NOT NULL CHECK (updated_authentication_type IN ('normal', 'bootstrap', 'break-glass')),
+ updated_by TEXT NOT NULL, updated_authentication_type TEXT NOT NULL CHECK (updated_authentication_type IN ('normal', 'bootstrap')),
  reason TEXT NOT NULL, updated_at TEXT NOT NULL
 );
 CREATE TABLE audit_export_jobs (
- id TEXT PRIMARY KEY, schema_version INTEGER NOT NULL CHECK (schema_version >= 1),
+ id TEXT PRIMARY KEY,
  state TEXT NOT NULL CHECK (state IN ('pending', 'running', 'succeeded', 'failed')), filter_json TEXT NOT NULL,
  result_data TEXT NOT NULL DEFAULT '', error_code TEXT NOT NULL DEFAULT '', requested_by TEXT NOT NULL,
- requested_authentication_type TEXT NOT NULL CHECK (requested_authentication_type IN ('normal', 'bootstrap', 'break-glass')),
+ requested_authentication_type TEXT NOT NULL CHECK (requested_authentication_type IN ('normal', 'bootstrap')),
  reason TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, expires_at TEXT NOT NULL
 );
 

@@ -109,8 +109,6 @@ Section
     # Unified privileged helper used for service, install, and uninstall operations.
     SetOutPath "$INSTDIR\resources"
     File "..\..\bin\resources\kubeloop-helper.exe"
-    Delete "$INSTDIR\resources\kubeloop-helper-install.exe"
-    Delete "$INSTDIR\resources\kubeloop-helper-uninstall.exe"
     SetOutPath $INSTDIR
 
     CreateShortcut "$SMPROGRAMS\${INFO_PRODUCTNAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}"
