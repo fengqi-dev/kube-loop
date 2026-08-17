@@ -339,8 +339,12 @@ func TestManagerResumesUploadAcrossProcessFromControllerNegotiatedOffset(t *test
 			result, _ := filestream.EncodeResult(filestream.TransferResult{
 				Status: filestream.ResultSucceeded, Transferred: uint64(len(contents)), Checksum: checksum, HasChecksum: true,
 			})
-			_ = connection.Write(request.Context(), websocket.MessageBinary, result)
+			if err := connection.Write(request.Context(), websocket.MessageBinary, result); err != nil {
+				t.Error(err)
+				return
+			}
 			receivedTail <- tail
+			waitForTransferClientClose(request.Context(), connection)
 			return
 		}
 	}))
@@ -409,7 +413,11 @@ func TestManagerResumesDownloadAcrossProcessUsingStablePartialFile(t *testing.T)
 		result, _ := filestream.EncodeResult(filestream.TransferResult{
 			Status: filestream.ResultSucceeded, Transferred: uint64(len(contents)), Checksum: checksum, HasChecksum: true,
 		})
-		_ = connection.Write(request.Context(), websocket.MessageBinary, result)
+		if err := connection.Write(request.Context(), websocket.MessageBinary, result); err != nil {
+			t.Error(err)
+			return
+		}
+		waitForTransferClientClose(request.Context(), connection)
 	}))
 	defer server.Close()
 	now := time.Now().UTC()
@@ -495,8 +503,12 @@ func uploadServer(t *testing.T, receive func([]byte)) *httptest.Server {
 			result, _ := filestream.EncodeResult(filestream.TransferResult{
 				Status: filestream.ResultSucceeded, Transferred: uint64(len(contents)), Checksum: checksum, HasChecksum: true,
 			})
-			_ = connection.Write(request.Context(), websocket.MessageBinary, result)
+			if err := connection.Write(request.Context(), websocket.MessageBinary, result); err != nil {
+				t.Error(err)
+				return
+			}
 			receive(contents)
+			waitForTransferClientClose(request.Context(), connection)
 			return
 		}
 	}))
@@ -523,8 +535,20 @@ func downloadServer(t *testing.T, contents []byte) *httptest.Server {
 		result, _ := filestream.EncodeResult(filestream.TransferResult{
 			Status: filestream.ResultSucceeded, Transferred: uint64(len(contents)), Checksum: checksum, HasChecksum: true,
 		})
-		_ = connection.Write(request.Context(), websocket.MessageBinary, result)
+		if err := connection.Write(request.Context(), websocket.MessageBinary, result); err != nil {
+			t.Error(err)
+			return
+		}
+		waitForTransferClientClose(request.Context(), connection)
 	}))
+}
+
+func waitForTransferClientClose(ctx context.Context, connection *websocket.Conn) {
+	for {
+		if _, _, err := connection.Read(ctx); err != nil {
+			return
+		}
+	}
 }
 
 func waitTransferTask(t *testing.T, events <-chan Task, taskID string) Task {
