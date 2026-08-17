@@ -181,7 +181,7 @@ func TestAPIRecoversPanicWithoutLeakingIt(t *testing.T) {
 	}
 }
 
-func TestAPIDefaultPolicyDeniesBeforeHandlerWithoutLeakingResourceExistence(t *testing.T) {
+func TestAPIDefaultAllowsAuthenticatedIdentity(t *testing.T) {
 	handled := false
 	server := newAPITestServer(t,
 		WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(*http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
@@ -194,23 +194,13 @@ func TestAPIDefaultPolicyDeniesBeforeHandlerWithoutLeakingResourceExistence(t *t
 	)
 	response := httptest.NewRecorder()
 	server.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, APIPathPrefix+"/namespaces/secret/pods/existing-pod", nil))
-	if handled || response.Code != http.StatusForbidden {
+	if !handled || response.Code != http.StatusOK {
 		t.Fatalf("handled = %t, status = %d", handled, response.Code)
-	}
-	document := decodeAPIError(t, response)
-	if document.Error.Code != controlplaneapi.CodeForbidden || document.Error.Message != "operation is not permitted" {
-		t.Fatalf("error = %#v", document.Error)
 	}
 }
 
-func TestAPIMapsRequestToPolicyAndStoresDecisionInContext(t *testing.T) {
-	engine, err := authorization.New(authorization.Policy{Rules: []authorization.Rule{{
-		ID: "payments-read", Groups: []string{"developers"}, Namespaces: []string{"payments"},
-		Operations: []string{"get"}, ResourceKinds: []string{"pods"},
-	}}})
-	if err != nil {
-		t.Fatal(err)
-	}
+func TestAPIMapsRequestAndStoresAuthenticationDecisionInContext(t *testing.T) {
+	engine := authorization.NewAuthenticated()
 	server := newAPITestServer(t,
 		WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(*http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
 			return controlplaneapi.Identity{Subject: "user-123", Groups: []string{"developers"}}, nil
@@ -219,7 +209,7 @@ func TestAPIMapsRequestToPolicyAndStoresDecisionInContext(t *testing.T) {
 		WithAPIRoutes(testEndpoint(func(writer http.ResponseWriter, request *http.Request, _ controlplaneapi.Identity) *controlplaneapi.Error {
 			authorizationRequest, decision, ok := controlplanemiddleware.AuthorizationFromContext(request.Context())
 			if !ok || authorizationRequest.Operation != "get" || authorizationRequest.Namespace != "payments" ||
-				authorizationRequest.ResourceKind != "pods" || authorizationRequest.ResourceName != "pod-1" || decision.RuleID != "payments-read" {
+				authorizationRequest.ResourceKind != "pods" || authorizationRequest.ResourceName != "pod-1" || !decision.Allowed {
 				t.Fatalf("authorization context = %#v, %#v, %t", authorizationRequest, decision, ok)
 			}
 			writeTestJSON(writer, http.StatusOK, map[string]string{"status": "ok"})
@@ -246,7 +236,7 @@ func TestUnifiedAuthorizerGatesTaskCreationAndControlPlaneStreams(t *testing.T) 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			handled := false
-			authorizer := &recordingAuthorizer{decision: authorization.Decision{Allowed: true, RuleID: "unified"}}
+			authorizer := &recordingAuthorizer{decision: authorization.Decision{Allowed: true}}
 			server := newAPITestServer(t,
 				WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(*http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
 					return controlplaneapi.Identity{Subject: "identity-1", Groups: []string{"developers"}}, nil
@@ -323,12 +313,5 @@ func decodeAPIError(t *testing.T, response *httptest.ResponseRecorder) errorEnve
 
 func allowAllAuthorizer(t *testing.T) authorization.Authorizer {
 	t.Helper()
-	engine, err := authorization.New(authorization.Policy{Rules: []authorization.Rule{{
-		ID: "test-allow-all", Subjects: []string{"*"}, Namespaces: []string{"*"},
-		Operations: []string{"*"}, ResourceKinds: []string{"*"},
-	}}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return engine
+	return authorization.NewAuthenticated()
 }

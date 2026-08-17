@@ -63,9 +63,6 @@ func (config Config) normalized() (Config, error) {
 	if !publicURL.IsAbs() || (publicURL.Scheme != "https" && publicURL.Scheme != "http") || publicURL.Host == "" {
 		return Config{}, errors.New("public URL must be an absolute HTTP or HTTPS URL")
 	}
-	if publicURL.Scheme == "http" && publicURL.Hostname() != "localhost" && publicURL.Hostname() != "127.0.0.1" && publicURL.Hostname() != "::1" {
-		return Config{}, errors.New("public URL must use HTTPS except for loopback development addresses")
-	}
 	if publicURL.User != nil || publicURL.RawQuery != "" || publicURL.Fragment != "" {
 		return Config{}, errors.New("public URL must not contain user info, query parameters or a fragment")
 	}

@@ -27,8 +27,9 @@ type Endpoints struct {
 type LocalAuthenticator func(context.Context, string, []byte, string) (controlstorage.Identity, error)
 
 const (
-	BrowserSessionCookie   = "__Host-kubeloop-sso"
-	browserSessionLifetime = 12 * time.Hour
+	BrowserSessionCookie     = "__Host-kubeloop-sso"
+	HTTPBrowserSessionCookie = "kubeloop-sso"
+	browserSessionLifetime   = 12 * time.Hour
 )
 
 func (endpoints *Endpoints) SetLocalAuthenticator(authenticator LocalAuthenticator) {
@@ -109,7 +110,7 @@ func (endpoints *Endpoints) Authenticate(ctx context.Context, token string) (aut
 	if err != nil {
 		return authn.AccessIdentity{}, err
 	}
-	return authn.AccessIdentity{Identity: identity, ProviderID: session.ProviderID, Groups: append([]string(nil), session.Groups...),
+	return authn.AccessIdentity{Identity: identity, ProviderID: session.ProviderID,
 		AuthorizationID: session.AuthorizationID, DeviceID: session.DeviceID,
 		TokenID: requester.GetID(), AccessExpiresAt: requester.GetSession().GetExpiresAt(fosite.AccessToken)}, nil
 }
@@ -166,31 +167,8 @@ func (endpoints *Endpoints) enrichIdentity(ctx context.Context, session *Session
 	session.IdentityID = identity.ID
 	session.DisplayName = identity.DisplayName
 	session.Email = identity.PrimaryEmail
-	session.Groups, err = endpoints.identityGroups(ctx, identity.ID)
-	if err != nil {
-		return err
-	}
 	session.SetSubject(identity.ID)
 	return nil
-}
-
-func (endpoints *Endpoints) identityGroups(ctx context.Context, identityID string) ([]string, error) {
-	organizations, err := endpoints.repositories.Organizations().ListForIdentity(ctx, identityID)
-	if err != nil {
-		return nil, err
-	}
-	groups := make([]string, 0)
-	for _, organization := range organizations {
-		memberships, err := endpoints.repositories.Groups().ListForIdentity(ctx, organization.ID, identityID)
-		if err != nil {
-			return nil, err
-		}
-		for _, group := range memberships {
-			groups = append(groups, group.ID)
-		}
-	}
-	slices.Sort(groups)
-	return slices.Compact(groups), nil
 }
 
 func containsIdentityScope(scopes fosite.Arguments) bool {

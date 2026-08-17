@@ -167,13 +167,7 @@ func TestCrashedClientTaskIsReclaimedAfterSessionExpiry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	policy, err := authorization.New(authorization.Policy{Rules: []authorization.Rule{{
-		ID: "port-forward", Subjects: []string{identityID}, Namespaces: []string{"development"},
-		Operations: []string{"create", "list", "delete"}, ResourceKinds: []string{"port-forwards"},
-	}}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	policy := authorization.NewAuthenticated()
 	apiServer, err := controlplane.NewServer(
 		controlplane.Config{PublicURL: "http://127.0.0.1"}, controlplane.BuildInfo{},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),

@@ -38,7 +38,7 @@ const (
 	operatorImageRepository     = "kube-loop-operator"
 	developmentNamespace        = "kubeloop-dev"
 	developmentRelease          = "kubeloop-dev"
-	developmentStorageBaseline  = "24"
+	developmentStorageBaseline  = "26"
 )
 
 func main() {

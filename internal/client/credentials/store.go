@@ -163,7 +163,7 @@ func (store *SystemStore) Get(profileID string) (Credential, error) {
 		return Credential{}, errors.New("system keyring credential metadata is invalid")
 	}
 	if details.SchemaVersion != credentialMetadataSchemaVersion {
-		return Credential{}, errors.New("system keyring credential metadata version is unsupported")
+		return Credential{}, ErrNotFound
 	}
 	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		return Credential{}, errors.New("system keyring credential metadata is invalid")

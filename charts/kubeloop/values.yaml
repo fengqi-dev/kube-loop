@@ -1,8 +1,7 @@
 nameOverride: ""
 fullnameOverride: ""
 
-# Externally reachable origin entered by desktop clients. HTTPS is required
-# except for loopback-only development installs.
+# Externally reachable HTTP or HTTPS origin entered by desktop clients.
 publicURL: ""
 serviceID: ""
 
@@ -199,7 +198,7 @@ dataPlane:
     name: ""
   relayRegistry:
     # Empty values are derived from the internal Control Plane Service and
-    # publicURL/tunnelPath. endpoint may instead be a per-Pod routable WSS URL.
+    # publicURL/tunnelPath. endpoint may instead be a per-Pod routable WS/WSS URL.
     controlPlaneURL: ""
     endpoint: ""
     serverName: ""
@@ -230,7 +229,7 @@ ingress:
   annotations: {}
   host: ""
   tls:
-    enabled: true
+    enabled: false
     secretName: ""
 
 # Gateway API v1.2+ alternative to ingress. The route uses one HTTPS Origin

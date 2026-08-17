@@ -30,13 +30,8 @@ func (provider inventoryProvider) ClientFor(authorization.Subject) (kubernetes.I
 
 func TestInventoryWatchHTTPStreamsAuthorizedResyncSnapshots(t *testing.T) {
 	client := fake.NewSimpleClientset(&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "api-0", Namespace: "development"}})
-	policy, err := authorization.New(authorization.Policy{Rules: []authorization.Rule{{
-		ID: "watch", Subjects: []string{"*"}, Namespaces: []string{"development"}, Operations: []string{"watch"}, ResourceKinds: []string{"pods"},
-	}}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	handler, err := kubeapi.New(inventoryProvider{client: client}, kubeapi.WithCapabilityAuthorizer(policy), kubeapi.WithInventoryResync(20*time.Millisecond))
+	policy := authorization.NewAuthenticated()
+	handler, err := kubeapi.New(inventoryProvider{client: client}, kubeapi.WithInventoryResync(20*time.Millisecond))
 	if err != nil {
 		t.Fatal(err)
 	}

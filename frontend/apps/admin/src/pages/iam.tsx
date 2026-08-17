@@ -1,12 +1,10 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { Plus, RefreshCw } from "lucide-react";
-import { Button, Empty, Loading, Notice, PageHeader } from "../components";
+import { Button, ConfirmDialog, Empty, Loading, Notice, PageHeader } from "../components";
 import { mutation, request } from "../api";
 import type {
-  Group,
-  Identity,
-  Invitation,
   ListResponse,
+  LocalUser,
   OAuthClient,
 } from "../types";
 import {
@@ -73,12 +71,14 @@ function ResourcePage<T extends object>({
   path,
   columns,
   create,
+  actions,
 }: {
   title: string;
   description: string;
   path: string | null;
   columns: Array<[string, keyof T | ((item: T) => string)]>;
   create?: (reload: () => Promise<void>) => React.ReactNode;
+  actions?: (item: T, reload: () => Promise<void>) => React.ReactNode;
 }) {
   const state = useList<T>(path),
     text = copy[locale()];
@@ -110,11 +110,12 @@ function ResourcePage<T extends object>({
                 {columns.map(([label]) => (
                   <th key={label}>{label}</th>
                 ))}
+                {actions && <th>{locale() === "zh-CN" ? "操作" : "Actions"}</th>}
               </tr>
             </thead>
             <tbody>
               {state.items.map((item, index) => (
-                <tr key={(item as { id?: string }).id || index}>
+                <tr key={(item as { id?: string; identityId?: string }).id || (item as { identityId?: string }).identityId || index}>
                   {columns.map(([label, value]) => (
                     <td key={label}>
                       {typeof value === "function"
@@ -122,6 +123,7 @@ function ResourcePage<T extends object>({
                         : String(item[value] ?? "—")}
                     </td>
                   ))}
+                  {actions && <td>{actions(item, state.reload)}</td>}
                 </tr>
               ))}
             </tbody>
@@ -132,348 +134,41 @@ function ResourcePage<T extends object>({
   );
 }
 
-function CreateButton({
-  title,
-  fields,
-  submit,
-  reload,
-}: {
-  title: string;
-  fields: Array<{
-    name: string;
-    label: string;
-    type?: string;
-    required?: boolean;
-    placeholder?: string;
-  }>;
-  submit: (values: Record<string, string>) => Promise<void>;
-  reload: () => Promise<void>;
-}) {
-  const [open, setOpen] = useState(false),
-    [values, setValues] = useState<Record<string, string>>({}),
-    [busy, setBusy] = useState(false),
-    [error, setError] = useState(""),
-    text = copy[locale()];
-  const save = async (event: FormEvent) => {
-    event.preventDefault();
-    setBusy(true);
-    setError("");
-    try {
-      await submit(values);
-      await reload();
-      setOpen(false);
-      setValues({});
-    } catch (cause) {
-      setError((cause as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <>
-      <Button kind="primary" onClick={() => setOpen(true)}>
-        <Plus size={14} />
-        {text.create}
-      </Button>
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent>
-          <form onSubmit={save}>
-            <DialogHeader>
-              <DialogTitle>{title}</DialogTitle>
-            </DialogHeader>
-            {error && <Notice>{error}</Notice>}
-            <div className="form-grid">
-              {fields.map((field) => (
-                <label className="full" key={field.name}>
-                  {field.label}
-                  <Input
-                    type={field.type}
-                    required={field.required}
-                    placeholder={field.placeholder}
-                    value={values[field.name] || ""}
-                    onChange={(event) =>
-                      setValues({ ...values, [field.name]: event.target.value })
-                    }
-                  />
-                </label>
-              ))}
-            </div>
-            <DialogFooter>
-              <Button type="button" onClick={() => setOpen(false)}>
-                {text.cancel}
-              </Button>
-              <Button type="submit" kind="primary" busy={busy}>
-                {text.save}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
-    </>
-  );
-}
-
-export function GroupsPage({ organizationId }: { organizationId: string }) {
-  const zh = locale() === "zh-CN",
-    path = organizationId ? `/organizations/${organizationId}/groups` : null,
-    [accessVersion, setAccessVersion] = useState(0);
-  return (
-    <>
-      <ResourcePage<Group>
-        title={zh ? "用户组" : "Groups"}
-        description={
-          zh
-            ? "用户从组继承 Namespace 访问权；系统管理员组可访问全部 Namespace。"
-            : "Users inherit namespace access from groups; the system administrator group can access all namespaces."
-        }
-        path={path}
-        columns={[
-          ["Name", "name"],
-          ["Description", "description"],
-          ["Updated", "updatedAt"],
-        ]}
-        create={
-          organizationId
-            ? (reload) => (
-                <CreateButton
-                  title={zh ? "新建用户组" : "Create group"}
-                  reload={async () => {
-                    await reload();
-                    setAccessVersion((version) => version + 1);
-                  }}
-                  fields={[
-                    {
-                      name: "name",
-                      label: zh ? "名称" : "Name",
-                      required: true,
-                    },
-                    { name: "description", label: zh ? "说明" : "Description" },
-                    {
-                      name: "reason",
-                      label: copy[locale()].reason,
-                      required: true,
-                    },
-                  ]}
-                  submit={(values) =>
-                    mutation(path!, "POST", values, { idempotent: true })
-                  }
-                />
-              )
-            : undefined
-        }
-      />
-      {organizationId && (
-        <GroupAccessPanel
-          key={accessVersion}
-          organizationId={organizationId}
-        />
-      )}
-    </>
-  );
-}
-
-function GroupAccessPanel({ organizationId }: { organizationId: string }) {
-  const zh = locale() === "zh-CN",
-    groups = useList<Group>(`/organizations/${organizationId}/groups`),
-    identities = useList<Identity>("/identities?limit=100"),
-    [groupId, setGroupId] = useState(""),
-    [error, setError] = useState("");
-  const members = useList<{ groupId: string; identityId: string }>(
-    groupId
-      ? `/organizations/${organizationId}/groups/${groupId}/memberships`
-      : null,
-  );
-  const namespaces = useList<{ groupId: string; namespace: string }>(
-    groupId
-      ? `/organizations/${organizationId}/groups/${groupId}/namespaces`
-      : null,
-  );
-  const selected = groups.items.find((group) => group.id === groupId);
-  const addMember = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const form = event.currentTarget,
-      data = new FormData(form);
-    setError("");
-    try {
-      await mutation(
-        `/organizations/${organizationId}/groups/${groupId}/memberships`,
-        "POST",
-        { identityId: data.get("identityId"), reason: data.get("reason") },
-        { idempotent: true },
-      );
-      await members.reload();
-      form.reset();
-    } catch (cause) {
-      setError((cause as Error).message);
-    }
-  };
-  const addNamespace = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const form = event.currentTarget,
-      data = new FormData(form);
-    setError("");
-    try {
-      await mutation(
-        `/organizations/${organizationId}/groups/${groupId}/namespaces`,
-        "POST",
-        { namespace: data.get("namespace"), reason: data.get("reason") },
-        { idempotent: true },
-      );
-      await namespaces.reload();
-      form.reset();
-    } catch (cause) {
-      setError((cause as Error).message);
-    }
-  };
-  return (
-    <section className="table-panel compact-panel">
-      <h2>
-        {zh ? "组成员与 Namespace 权限" : "Group members and namespace access"}
-      </h2>
-      {error && <Notice>{error}</Notice>}
-      <label>
-        {zh ? "选择用户组" : "Select group"}
-        <select
-          value={groupId}
-          onChange={(event) => setGroupId(event.target.value)}
-        >
-          <option value="" />
-          {groups.items.map((group) => (
-            <option key={group.id} value={group.id}>
-              {group.name}
-              {group.system
-                ? ` · ${zh ? "系统管理员" : "system administrators"}`
-                : ""}
-            </option>
-          ))}
-        </select>
-      </label>
-      {groupId && (
-        <div className="form-grid">
-          <div>
-            <h3>{zh ? "成员" : "Members"}</h3>
-            <ul>
-              {members.items.map((member) => (
-                <li key={member.identityId}>
-                  {identities.items.find(
-                    (identity) => identity.id === member.identityId,
-                  )?.displayName || member.identityId}
-                </li>
-              ))}
-            </ul>
-            <form className="inline-form" onSubmit={addMember}>
-              <label>
-                {zh ? "用户" : "User"}
-                <select name="identityId" required>
-                  <option value="" />
-                  {identities.items
-                    .filter(
-                      (identity) =>
-                        identity.type === "human" &&
-                        !members.items.some(
-                          (member) => member.identityId === identity.id,
-                        ),
-                    )
-                    .map((identity) => (
-                      <option key={identity.id} value={identity.id}>
-                        {identity.displayName}
-                      </option>
-                    ))}
-                </select>
-              </label>
-              <label>
-                {copy[locale()].reason}
-                <Input name="reason" minLength={8} required />
-              </label>
-              <Button type="submit" kind="primary">
-                {zh ? "添加成员" : "Add member"}
-              </Button>
-            </form>
-          </div>
-          <div>
-            <h3>Namespace</h3>
-            {selected?.system ? (
-              <Notice>
-                {zh
-                  ? "系统管理员组自动拥有全部 Namespace 权限。"
-                  : "The system administrator group automatically has access to every namespace."}
-              </Notice>
-            ) : (
-              <>
-                <ul>
-                  {namespaces.items.map((item) => (
-                    <li key={item.namespace}>
-                      <code>{item.namespace}</code>
-                    </li>
-                  ))}
-                </ul>
-                <form className="inline-form" onSubmit={addNamespace}>
-                  <label>
-                    Namespace
-                    <Input name="namespace" required />
-                  </label>
-                  <label>
-                    {copy[locale()].reason}
-                    <Input name="reason" minLength={8} required />
-                  </label>
-                  <Button type="submit" kind="primary">
-                    {zh ? "添加 Namespace" : "Add namespace"}
-                  </Button>
-                </form>
-              </>
-            )}
-          </div>
-        </div>
-      )}
-    </section>
-  );
-}
-
-export function UsersPage({ organizationId }: { organizationId: string }) {
+export function UsersPage() {
   const zh = locale() === "zh-CN";
   return (
-    <ResourcePage<Identity>
+    <ResourcePage<LocalUser>
       title={zh ? "用户" : "Users"}
       description={
         zh
-          ? "创建用户时必须选择所属用户组。"
-          : "Every user must be assigned to a group when created."
+          ? "登录用户可以管理所有用户。"
+          : "Signed-in users can manage every user."
       }
-      path="/identities?limit=100"
+      path="/users"
       columns={[
         ["Name", "displayName"],
-        ["Type", "type"],
-        ["Email", (item) => item.primaryEmail || "—"],
-        ["Status", "status"],
+        ["Username", "username"],
+        ["Email", (item) => item.email || "—"],
+        ["Status", (item) => (item.enabled ? "active" : "disabled")],
       ]}
-      create={
-        organizationId
-          ? (reload) => (
-              <UserCreateButton
-                organizationId={organizationId}
-                reload={reload}
-              />
-            )
-          : undefined
-      }
+      actions={(user, reload) => (
+        <StatusToggleButton
+          enabled={user.enabled}
+          path={`/users/${user.identityId}/status`}
+          reload={reload}
+          resource={zh ? `用户 ${user.displayName}` : `user ${user.displayName}`}
+        />
+      )}
+      create={(reload) => <UserCreateButton reload={reload} />}
     />
   );
 }
 
-function UserCreateButton({
-  organizationId,
-  reload,
-}: {
-  organizationId: string;
-  reload: () => Promise<void>;
-}) {
+function UserCreateButton({ reload }: { reload: () => Promise<void> }) {
   const zh = locale() === "zh-CN",
     [open, setOpen] = useState(false),
     [busy, setBusy] = useState(false),
-    [error, setError] = useState(""),
-    groups = useList<Group>(
-      open ? `/organizations/${organizationId}/groups` : null,
-    );
+    [error, setError] = useState("");
   const save = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setBusy(true);
@@ -488,7 +183,6 @@ function UserCreateButton({
           displayName: data.get("displayName"),
           email: data.get("email"),
           password: data.get("password"),
-          groupId: data.get("groupId"),
         },
         { idempotent: true },
       );
@@ -537,17 +231,6 @@ function UserCreateButton({
                   required
                 />
               </label>
-              <label className="full">
-                {zh ? "所属用户组" : "Group"}
-                <select name="groupId" required>
-                  <option value="" />
-                  {groups.items.map((group) => (
-                    <option key={group.id} value={group.id}>
-                      {group.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
             </div>
             <DialogFooter>
               <Button type="button" onClick={() => setOpen(false)}>
@@ -564,92 +247,26 @@ function UserCreateButton({
   );
 }
 
-export function InvitationsPage({
-  organizationId,
-}: {
-  organizationId: string;
-}) {
-  const zh = locale() === "zh-CN",
-    path = organizationId
-      ? `/organizations/${organizationId}/invitations`
-      : null,
-    [token, setToken] = useState("");
-  return (
-    <>
-      <ResourcePage<Invitation>
-        title={zh ? "邀请" : "Invitations"}
-        description={
-          zh
-            ? "邀请 24 小时有效；Token 只显示一次。"
-            : "Invitations expire after 24 hours; the token is shown once."
-        }
-        path={path}
-        columns={[
-          ["Email", "email"],
-          ["Group", "groupId"],
-          ["Status", "status"],
-          ["Expires", "expiresAt"],
-        ]}
-        create={
-          organizationId
-            ? (reload) => (
-                <InvitationCreateButton
-                  organizationId={organizationId}
-                  path={path!}
-                  reload={reload}
-                  onToken={setToken}
-                />
-              )
-            : undefined
-        }
-      />
-      {token && (
-        <Notice>
-          {zh
-            ? "请立即安全发送此一次性 Token："
-            : "Copy and deliver this one-time token now: "}
-          <code>{token}</code>
-        </Notice>
-      )}
-    </>
-  );
-}
-
-function InvitationCreateButton({
-  organizationId,
+function StatusToggleButton({
+  enabled,
   path,
   reload,
-  onToken,
+  resource,
 }: {
-  organizationId: string;
+  enabled: boolean;
   path: string;
   reload: () => Promise<void>;
-  onToken: (value: string) => void;
+  resource: string;
 }) {
   const zh = locale() === "zh-CN",
     [open, setOpen] = useState(false),
     [busy, setBusy] = useState(false),
-    [error, setError] = useState(""),
-    groups = useList<Group>(
-      open ? `/organizations/${organizationId}/groups` : null,
-    );
-  const save = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+    [error, setError] = useState("");
+  const update = async (reason: string) => {
     setBusy(true);
     setError("");
-    const data = new FormData(event.currentTarget);
     try {
-      const result = await mutation<{ invitationToken: string }>(
-        path,
-        "POST",
-        {
-          email: data.get("email"),
-          groupId: data.get("groupId"),
-          reason: data.get("reason"),
-        },
-        { idempotent: true },
-      );
-      onToken(result.invitationToken);
+      await mutation(path, "PATCH", { enabled: !enabled, reason });
       await reload();
       setOpen(false);
     } catch (cause) {
@@ -660,66 +277,48 @@ function InvitationCreateButton({
   };
   return (
     <>
-      <Button kind="primary" onClick={() => setOpen(true)}>
-        <Plus size={14} />
-        {copy[locale()].create}
+      <Button
+        kind={enabled ? "danger" : "secondary"}
+        onClick={() => setOpen(true)}
+      >
+        {enabled ? (zh ? "禁用" : "Disable") : zh ? "启用" : "Enable"}
       </Button>
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent>
-          <form onSubmit={save}>
-            <DialogHeader>
-              <DialogTitle>{zh ? "创建邀请" : "Create invitation"}</DialogTitle>
-            </DialogHeader>
-            {error && <Notice>{error}</Notice>}
-            <div className="form-grid">
-              <label>
-                {zh ? "邮箱" : "Email"}
-                <Input name="email" type="email" required />
-              </label>
-              <label>
-                {zh ? "所属用户组" : "Group"}
-                <select name="groupId" required>
-                  <option value="" />
-                  {groups.items
-                    .filter((group) => !group.system)
-                    .map((group) => (
-                      <option key={group.id} value={group.id}>
-                        {group.name}
-                      </option>
-                    ))}
-                </select>
-              </label>
-              <label className="full">
-                {copy[locale()].reason}
-                <Input name="reason" minLength={8} required />
-              </label>
-            </div>
-            <DialogFooter>
-              <Button type="button" onClick={() => setOpen(false)}>
-                {copy[locale()].cancel}
-              </Button>
-              <Button type="submit" kind="primary" busy={busy}>
-                {copy[locale()].save}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
+      {error && <Notice>{error}</Notice>}
+      <ConfirmDialog
+        open={open}
+        busy={busy}
+        title={
+          enabled
+            ? zh
+              ? `禁用${resource}？`
+              : `Disable ${resource}?`
+            : zh
+              ? `启用${resource}？`
+              : `Enable ${resource}?`
+        }
+        detail={
+          enabled
+            ? zh
+              ? "该用户将不能继续登录。"
+              : "This user will no longer be able to sign in."
+            : zh
+              ? "该对象将恢复访问能力。"
+              : "Access for this resource will be restored."
+        }
+        onClose={() => setOpen(false)}
+        onConfirm={(reason) => void update(reason)}
+      />
     </>
   );
 }
 
-export function OAuthClientsPage({
-  organizationId,
-}: {
-  organizationId: string;
-}) {
+export function OAuthClientsPage() {
   const zh = locale() === "zh-CN",
     [secret, setSecret] = useState("");
   return (
     <>
       <ResourcePage<OAuthClient>
-        title="OAuth Clients"
+        title="OIDC Clients"
         description={
           zh
             ? "仅支持 Authorization Code + PKCE、Refresh Token 和 Client Credentials。"
@@ -734,11 +333,7 @@ export function OAuthClientsPage({
           ["Status", (item) => (item.enabled ? "enabled" : "disabled")],
         ]}
         create={(reload) => (
-          <OAuthClientCreateButton
-            organizationId={organizationId}
-            reload={reload}
-            onSecret={setSecret}
-          />
+          <OAuthClientCreateButton reload={reload} onSecret={setSecret} />
         )}
       />
       {secret && (
@@ -752,11 +347,9 @@ export function OAuthClientsPage({
 }
 
 function OAuthClientCreateButton({
-  organizationId,
   reload,
   onSecret,
 }: {
-  organizationId: string;
   reload: () => Promise<void>;
   onSecret: (value: string) => void;
 }) {
@@ -783,7 +376,6 @@ function OAuthClientCreateButton({
         "POST",
         {
           id: data.get("id"),
-          organizationId: organizationId || undefined,
           name: data.get("name"),
           public: data.get("public") === "on",
           trusted: data.get("trusted") === "on",

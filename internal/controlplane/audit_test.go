@@ -45,7 +45,7 @@ func TestStorageAuditSinkPersistsOnlyStructuredMetadata(t *testing.T) {
 	err = sink.Record(context.Background(), AuditRecord{
 		RequestID: "request-1", IdentityID: "5d7e7980-33df-4f93-a91f-ff6a48725384",
 		SessionID: "session-1", Operation: "list", Namespace: "payments",
-		ResourceKind: "pods", Outcome: "success", PolicyRuleID: "payments-read",
+		ResourceKind: "pods", Outcome: "success",
 		HTTPStatus: http.StatusOK, Duration: 25 * time.Millisecond,
 	})
 	if err != nil {
@@ -62,7 +62,7 @@ func TestStorageAuditSinkPersistsOnlyStructuredMetadata(t *testing.T) {
 	if err := json.Unmarshal(event.Metadata, &metadata); err != nil {
 		t.Fatal(err)
 	}
-	if metadata["namespace"] != "payments" || metadata["policyRuleId"] != "payments-read" || metadata["sessionId"] != "session-1" {
+	if metadata["namespace"] != "payments" || metadata["sessionId"] != "session-1" {
 		t.Fatalf("metadata = %#v", metadata)
 	}
 	for _, forbidden := range []string{"token", "claims", "command", "content"} {
@@ -72,14 +72,8 @@ func TestStorageAuditSinkPersistsOnlyStructuredMetadata(t *testing.T) {
 	}
 }
 
-func TestAPIAuditCapturesAllowedAndDeniedOutcomes(t *testing.T) {
-	engine, err := authorization.New(authorization.Policy{Rules: []authorization.Rule{{
-		ID: "payments-read", Groups: []string{"developers"}, Namespaces: []string{"payments"},
-		Operations: []string{"list"}, ResourceKinds: []string{"pods"},
-	}}})
-	if err != nil {
-		t.Fatal(err)
-	}
+func TestAPIAuditCapturesAuthenticatedOutcomes(t *testing.T) {
+	engine := authorization.NewAuthenticated()
 	sink := &recordingAuditSink{}
 	server := newAPITestServer(t,
 		WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(*http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
@@ -93,15 +87,15 @@ func TestAPIAuditCapturesAllowedAndDeniedOutcomes(t *testing.T) {
 	)
 	allowed := httptest.NewRecorder()
 	server.Handler().ServeHTTP(allowed, httptest.NewRequest(http.MethodGet, APIPathPrefix+"/namespaces/payments/pods", nil))
-	denied := httptest.NewRecorder()
-	server.Handler().ServeHTTP(denied, httptest.NewRequest(http.MethodDelete, APIPathPrefix+"/namespaces/payments/pods/pod-1", nil))
+	second := httptest.NewRecorder()
+	server.Handler().ServeHTTP(second, httptest.NewRequest(http.MethodDelete, APIPathPrefix+"/namespaces/payments/pods/pod-1", nil))
 	if len(sink.records) != 2 {
 		t.Fatalf("audit records = %#v", sink.records)
 	}
-	if sink.records[0].Outcome != "success" || sink.records[0].PolicyRuleID != "payments-read" || sink.records[0].HTTPStatus != http.StatusOK {
+	if sink.records[0].Outcome != "success" || sink.records[0].HTTPStatus != http.StatusOK {
 		t.Fatalf("allowed audit = %#v", sink.records[0])
 	}
-	if sink.records[1].Outcome != "denied" || sink.records[1].HTTPStatus != http.StatusForbidden || sink.records[1].ResourceName != "pod-1" {
-		t.Fatalf("denied audit = %#v", sink.records[1])
+	if sink.records[1].Outcome != "success" || sink.records[1].HTTPStatus != http.StatusOK || sink.records[1].ResourceName != "pod-1" {
+		t.Fatalf("second audit = %#v", sink.records[1])
 	}
 }

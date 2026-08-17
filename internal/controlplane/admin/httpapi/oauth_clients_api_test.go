@@ -11,11 +11,11 @@ import (
 )
 
 func TestOAuthClientCRUDAndSecretRotation(t *testing.T) {
-	handler, store := newIdentityTokenHandler(t, false, WithOAuthClients(nilSafeRepositories(t), nilSafeTransactions(t)))
+	handler, store := newReadTestHandler(t, WithOAuthClients(nilSafeRepositories(t), nilSafeTransactions(t)))
 	// Replace the helpers' temporary stores with the handler's actual store.
 	handler.readAPI.oauthRepositories = store
 	handler.readAPI.oauthTransactions = store
-	cookie, csrf := exchangeIdentitySession(t, handler)
+	cookie, csrf := issueTestSession(t, handler)
 
 	created := oauthClientWrite(t, handler, cookie, csrf, http.MethodPost, "/oauth-clients", map[string]any{
 		"id": "automation", "name": "Automation", "public": false, "redirectUris": []string{"https://client.example/callback"},

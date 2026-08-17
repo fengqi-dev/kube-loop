@@ -26,7 +26,7 @@ func (shutdownAllowAuthorizer) Authorize(
 	authorization.Subject,
 	authorization.Request,
 ) authorization.Decision {
-	return authorization.Decision{Allowed: true, RuleID: "test"}
+	return authorization.Decision{Allowed: true}
 }
 
 func TestDiscoveryContract(t *testing.T) {
@@ -283,7 +283,6 @@ func TestConfigValidation(t *testing.T) {
 	tests := []Config{
 		{},
 		{PublicURL: "gateway.example.test"},
-		{PublicURL: "http://gateway.example.test"},
 		{PublicURL: "https://user@gateway.example.test"},
 		{PublicURL: "https://gateway.example.test?token=secret"},
 		{PublicURL: "https://gateway.example.test/team"},
@@ -297,5 +296,8 @@ func TestConfigValidation(t *testing.T) {
 		if _, err := NewServer(config, BuildInfo{}, nil); err == nil {
 			t.Fatalf("NewServer(%#v) succeeded", config)
 		}
+	}
+	if normalized, err := (Config{PublicURL: "http://gateway.example.test"}).normalized(); err != nil || normalized.PublicURL != "http://gateway.example.test" {
+		t.Fatalf("external HTTP public URL was rejected: %#v, %v", normalized, err)
 	}
 }

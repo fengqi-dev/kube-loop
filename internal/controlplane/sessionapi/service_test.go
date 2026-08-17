@@ -312,14 +312,7 @@ func newSessionTestServerWithCapabilities(
 		stateStore.Close()
 		t.Fatal(err)
 	}
-	policy, err := authorization.New(authorization.Policy{Rules: []authorization.Rule{{
-		ID: "sessions", Subjects: []string{"*"}, Namespaces: []string{"*"},
-		Operations: []string{"create", "get", "heartbeat", "delete"}, ResourceKinds: []string{"sessions"},
-	}}})
-	if err != nil {
-		stateStore.Close()
-		t.Fatal(err)
-	}
+	policy := authorization.NewAuthenticated()
 	capture := &auditCapture{}
 	server, err := controlplane.NewServer(
 		controlplane.Config{PublicURL: "https://gateway.example.test"}, controlplane.BuildInfo{},

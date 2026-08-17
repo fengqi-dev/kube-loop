@@ -37,13 +37,7 @@ func serveAPI(
 	identity controlplaneapi.Identity,
 ) *controlplaneapi.Error {
 	t.Helper()
-	policy, err := authorization.New(authorization.Policy{Rules: []authorization.Rule{{
-		ID: "file-operations-test", Subjects: []string{"*"}, Namespaces: []string{"*"},
-		Operations: []string{"list", "create", "update", "delete", "get"}, ResourceKinds: []string{"pod-files"},
-	}}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	policy := authorization.NewAuthenticated()
 	server, err := controlplane.NewServer(
 		controlplane.Config{PublicURL: "https://gateway.example.test"}, controlplane.BuildInfo{},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),

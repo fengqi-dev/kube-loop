@@ -1196,7 +1196,7 @@ export function ServerAccessView({
                     </div>
                     <div className="flex items-center gap-2">
                       <code className="rounded bg-background px-2 py-1 text-xs">{inventory.dataPlane.socksAddress}</code>
-                      <Button type="button" variant={inventory.dataPlane.state === "connected" ? "outline" : "default"} size="sm" disabled={Boolean(busy)} onClick={() => inventory.dataPlane?.state === "connected" ? void disconnectDataPlane() : void connectDataPlane("socks")}>
+                      <Button type="button" variant={inventory.dataPlane.state === "connected" ? "outline" : "default"} size="sm" disabled={Boolean(busy)} onClick={() => inventory.dataPlane?.state === "connected" ? void disconnectDataPlane() : void connectDataPlane("tun")}>
                         {busy === "tunnel" ? <Spinner data-icon="inline-start" /> : <Network size={14} />}
                         {inventory.dataPlane.state === "connected" ? "Disconnect" : "Connect"}
                       </Button>

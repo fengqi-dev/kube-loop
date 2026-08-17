@@ -18,8 +18,8 @@ import (
 
 func TestSQLiteChartRendersIndependentSecureWorkloads(t *testing.T) {
 	objects := renderChart(t,
-		"--set", "publicURL=https://kubeloop.example.test",
-		"--set", "controlPlane.admin.publicURL=https://kubeloop.example.test",
+		"--set", "publicURL=http://kubeloop.example.test",
+		"--set", "controlPlane.admin.publicURL=http://kubeloop.example.test",
 		"--set", "ingress.enabled=true",
 		"--set", "ingress.host=kubeloop.example.test",
 	)
@@ -77,8 +77,12 @@ func TestSQLiteChartRendersIndependentSecureWorkloads(t *testing.T) {
 		t.Fatalf("ControlPlane file limits = %#v", valueAt(t, controlPlaneDocument, "files"))
 	}
 	if valueAt(t, controlPlaneDocument, "admin", "listen") != ":8081" ||
-		valueAt(t, controlPlaneDocument, "admin", "publicURL") != "https://kubeloop.example.test" {
+		valueAt(t, controlPlaneDocument, "admin", "publicURL") != "http://kubeloop.example.test" {
 		t.Fatalf("Admin listener = %#v", valueAt(t, controlPlaneDocument, "admin"))
+	}
+	ingress := objectByName(t, objects, "Ingress", "test-kubeloop")
+	if _, configured := ingress["spec"].(map[string]any)["tls"]; configured {
+		t.Fatal("default Ingress must not configure TLS")
 	}
 	storageDocument := valueAt(t, controlPlaneDocument, "storage").(map[string]any)
 	if _, configured := storageDocument["datasourceURLFile"]; configured ||
@@ -149,11 +153,11 @@ func TestSQLiteChartRendersIndependentSecureWorkloads(t *testing.T) {
 	if countKind(objects, "Ingress") != 1 {
 		t.Fatal("expected one same-origin Ingress")
 	}
-	ingress := objectByName(t, objects, "Ingress", "test-kubeloop")
+	ingress = objectByName(t, objects, "Ingress", "test-kubeloop")
 	ingressYAML, _ := yaml.Marshal(ingress)
 	for _, want := range []string{
 		"host: kubeloop.example.test", "path: /.well-known", "path: /oauth2",
-		"path: /kubeloop/api", "path: /api/sessions", "path: /tunnel", "path: /traffic/v1", "pathType: Prefix", "tls:",
+		"path: /kubeloop/api", "path: /api/sessions", "path: /tunnel", "path: /traffic/v1", "pathType: Prefix",
 	} {
 		if !strings.Contains(string(ingressYAML), want) {
 			t.Fatalf("same-origin Ingress is missing %q: %s", want, ingressYAML)
@@ -175,6 +179,22 @@ func TestSQLiteChartRendersIndependentSecureWorkloads(t *testing.T) {
 	registryService := objectByName(t, objects, "Service", "test-kubeloop-control-plane-relay")
 	if valueAt(t, registryService, "spec", "type") != "ClusterIP" {
 		t.Fatal("Relay Registry must remain ClusterIP-only")
+	}
+}
+
+func TestIngressTLSCanBeEnabledExplicitly(t *testing.T) {
+	objects := renderChart(t,
+		"--set", "publicURL=https://kubeloop.example.test",
+		"--set", "controlPlane.admin.publicURL=https://kubeloop.example.test",
+		"--set", "ingress.enabled=true",
+		"--set", "ingress.host=kubeloop.example.test",
+		"--set", "ingress.tls.enabled=true",
+		"--set", "ingress.tls.secretName=kubeloop-tls",
+	)
+	ingress := objectByName(t, objects, "Ingress", "test-kubeloop")
+	tlsEntries, ok := valueAt(t, ingress, "spec", "tls").([]any)
+	if !ok || len(tlsEntries) != 1 || valueAt(t, tlsEntries[0], "secretName") != "kubeloop-tls" {
+		t.Fatalf("Ingress TLS = %#v", valueAt(t, ingress, "spec", "tls"))
 	}
 }
 
@@ -674,10 +694,10 @@ func TestChartRejectsUnsafeStorageConfigurations(t *testing.T) {
 	}{
 		{name: "missing public URL", want: "publicURL is required"},
 		{name: "development on external origin", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.development.enabled=true"}, want: "requires a local"},
-		{name: "public URL path", args: []string{"--set", "publicURL=https://kubeloop.example.test/base"}, want: "must be one HTTPS origin"},
+		{name: "public URL path", args: []string{"--set", "publicURL=https://kubeloop.example.test/base"}, want: "must be one HTTP or HTTPS origin"},
 		{name: "two external routes", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.admin.publicURL=https://kubeloop.example.test", "--set", "ingress.enabled=true", "--set", "ingress.host=kubeloop.example.test", "--set", "gatewayAPI.enabled=true", "--set", "gatewayAPI.host=kubeloop.example.test"}, want: "mutually exclusive"},
 		{name: "Ingress origin mismatch", args: []string{"--set", "publicURL=https://other.example.test", "--set", "controlPlane.admin.publicURL=https://other.example.test", "--set", "ingress.enabled=true", "--set", "ingress.host=kubeloop.example.test"}, want: "exactly equal"},
-		{name: "Ingress without TLS", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.admin.publicURL=https://kubeloop.example.test", "--set", "ingress.enabled=true", "--set", "ingress.host=kubeloop.example.test", "--set", "ingress.tls.enabled=false"}, want: "TLS"},
+		{name: "Ingress scheme mismatch", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.admin.publicURL=https://kubeloop.example.test", "--set", "ingress.enabled=true", "--set", "ingress.host=kubeloop.example.test"}, want: "http://<ingress.host>"},
 		{name: "Gateway origin mismatch", args: []string{"--set", "publicURL=https://other.example.test", "--set", "controlPlane.admin.publicURL=https://other.example.test", "--set", "gatewayAPI.enabled=true", "--set", "gatewayAPI.host=kubeloop.example.test"}, want: "exactly equal"},
 		{name: "Gateway parent", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.admin.publicURL=https://kubeloop.example.test", "--set", "gatewayAPI.enabled=true", "--set", "gatewayAPI.host=kubeloop.example.test"}, want: "parentRef.name is required"},
 		{name: "Gateway class", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.admin.publicURL=https://kubeloop.example.test", "--set", "gatewayAPI.enabled=true", "--set", "gatewayAPI.host=kubeloop.example.test", "--set", "gatewayAPI.gateway.create=true"}, want: "className is required"},

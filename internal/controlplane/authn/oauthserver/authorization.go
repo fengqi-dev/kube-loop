@@ -29,7 +29,6 @@ type AuthorizationChallenge struct {
 type BrowserIdentity struct {
 	Identity   controlstorage.Identity
 	ProviderID string
-	Groups     []string
 	AuthTime   time.Time
 }
 
@@ -90,11 +89,7 @@ func (endpoints *Endpoints) AuthenticateLocal(ctx context.Context, username stri
 	if err != nil {
 		return BrowserIdentity{}, err
 	}
-	groups, err := endpoints.identityGroups(ctx, identity.ID)
-	if err != nil {
-		return BrowserIdentity{}, err
-	}
-	return BrowserIdentity{Identity: identity, ProviderID: "local", Groups: groups, AuthTime: time.Now().UTC()}, nil
+	return BrowserIdentity{Identity: identity, ProviderID: "local", AuthTime: time.Now().UTC()}, nil
 }
 
 func (endpoints *Endpoints) CreateBrowserSession(ctx context.Context, identity BrowserIdentity, ttl time.Duration) (string, error) {
@@ -125,11 +120,7 @@ func (endpoints *Endpoints) BrowserIdentity(ctx context.Context, token string) (
 	if err != nil || identity.Status != "active" {
 		return BrowserIdentity{}, fosite.ErrNotFound
 	}
-	groups, err := endpoints.identityGroups(ctx, identity.ID)
-	if err != nil {
-		return BrowserIdentity{}, fosite.ErrNotFound
-	}
-	return BrowserIdentity{Identity: identity, ProviderID: "local", Groups: groups, AuthTime: stored.AuthTime}, nil
+	return BrowserIdentity{Identity: identity, ProviderID: "local", AuthTime: stored.AuthTime}, nil
 }
 
 func (endpoints *Endpoints) RevokeBrowserSession(ctx context.Context, token string) error {
@@ -171,7 +162,7 @@ func (endpoints *Endpoints) completeStoredAuthorization(rw http.ResponseWriter, 
 		return err
 	}
 	client, err := endpoints.repositories.OAuthClients().Get(request.Context(), authorizeRequest.GetClient().GetID())
-	if err != nil || !endpoints.identityAllowedForClient(request.Context(), identity.ID, client) {
+	if err != nil {
 		endpoints.provider.WriteAuthorizeError(request.Context(), rw, authorizeRequest, fosite.ErrAccessDenied)
 		return fosite.ErrAccessDenied
 	}
@@ -199,7 +190,6 @@ func (endpoints *Endpoints) completeStoredAuthorization(rw http.ResponseWriter, 
 	session := NewSession()
 	session.IdentityID, session.ProviderID = identity.ID, "local"
 	session.DisplayName, session.Email = identity.DisplayName, identity.PrimaryEmail
-	session.Groups = append([]string(nil), browserIdentity.Groups...)
 	session.AuthorizationID = authorizeRequest.GetID()
 	session.SetSubject(identity.ID)
 	session.IDTokenClaims().Subject = identity.ID
@@ -208,7 +198,6 @@ func (endpoints *Endpoints) completeStoredAuthorization(rw http.ResponseWriter, 
 	session.IDTokenClaims().AuthenticationMethodsReferences = []string{"pwd"}
 	session.IDTokenClaims().Add("name", identity.DisplayName)
 	session.IDTokenClaims().Add("email", identity.PrimaryEmail)
-	session.IDTokenClaims().Add("groups", browserIdentity.Groups)
 	response, err := endpoints.provider.NewAuthorizeResponse(request.Context(), authorizeRequest, session)
 	if err != nil {
 		endpoints.provider.WriteAuthorizeError(request.Context(), rw, authorizeRequest, err)
@@ -216,16 +205,6 @@ func (endpoints *Endpoints) completeStoredAuthorization(rw http.ResponseWriter, 
 	}
 	endpoints.provider.WriteAuthorizeResponse(request.Context(), rw, authorizeRequest, response)
 	return nil
-}
-
-func (endpoints *Endpoints) identityAllowedForClient(ctx context.Context, identityID string, client controlstorage.OAuthClient) bool {
-	if client.OrganizationID == "" {
-		return true
-	}
-	members, err := endpoints.repositories.Organizations().ListMembers(ctx, client.OrganizationID, controlstorage.MaximumManagementPageFetch)
-	return err == nil && slices.ContainsFunc(members, func(member controlstorage.OrganizationMembership) bool {
-		return member.IdentityID == identityID && member.Status == "active"
-	})
 }
 
 func (endpoints *Endpoints) CancelAuthorization(rw http.ResponseWriter, request *http.Request, transaction, csrf string) error {

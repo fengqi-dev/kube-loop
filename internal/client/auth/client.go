@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
+	_ "embed"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -32,7 +33,12 @@ const (
 	CodeUnsupportedGrantType   = "unsupported_grant_type"
 	CodeInvalidToken           = "invalid_token"
 	CodeTemporarilyUnavailable = "temporarily_unavailable"
+
+	loopbackCloseScript = "window.close();"
 )
+
+//go:embed ui/login_complete.html
+var loginCompletePage []byte
 
 type BrowserOpener func(string) error
 
@@ -376,13 +382,12 @@ func newLoopbackServer(expectedState string, result chan<- callbackResult) *http
 		}
 		select {
 		case result <- callbackResult{code: code}:
-			closeScript := "window.close();"
-			digest := sha256.Sum256([]byte(closeScript))
+			digest := sha256.Sum256([]byte(loopbackCloseScript))
 			writer.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'sha256-"+
 				base64.StdEncoding.EncodeToString(digest[:])+"'; frame-ancestors 'none'; base-uri 'none'")
 			writer.Header().Set("Content-Type", "text/html; charset=utf-8")
 			writer.WriteHeader(http.StatusOK)
-			_, _ = writer.Write([]byte("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><title>KubeLoop login complete</title></head><body><p>Login complete. Returning to KubeLoop…</p><script>" + closeScript + "</script></body></html>"))
+			_, _ = writer.Write(loginCompletePage)
 		default:
 			http.Error(writer, "login callback already consumed", http.StatusConflict)
 		}

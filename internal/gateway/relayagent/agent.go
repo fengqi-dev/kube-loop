@@ -74,9 +74,9 @@ func New(config Config) (*Agent, error) {
 		return nil, errors.New("Relay Registry ControlPlane URL must be an HTTPS origin")
 	}
 	endpoint, err := url.Parse(config.Endpoint)
-	if err != nil || endpoint.Scheme != "wss" || endpoint.Host == "" || endpoint.Path == "" ||
+	if err != nil || (endpoint.Scheme != "ws" && endpoint.Scheme != "wss") || endpoint.Host == "" || endpoint.Path == "" ||
 		endpoint.User != nil || endpoint.RawQuery != "" || endpoint.Fragment != "" {
-		return nil, errors.New("Data Plane advertised endpoint must be an absolute WSS URL")
+		return nil, errors.New("Data Plane advertised endpoint must be an absolute WS or WSS URL")
 	}
 	if config.HTTPClient == nil || config.Reporter == nil || config.Applier == nil {
 		return nil, errors.New("Relay Agent HTTP client, runtime reporter, and control applier are required")

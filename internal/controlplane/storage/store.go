@@ -109,7 +109,7 @@ func Open(ctx context.Context, rawConfig Config) (*Store, error) {
 	}
 	store.repositories = newRepositorySet(config.Backend, database, orm)
 	store.repositories.setTaskTransactionManager(store)
-	if err := store.migrate(connectContext); err != nil {
+	if err := store.initializeSchema(connectContext); err != nil {
 		_ = database.Close()
 		return nil, err
 	}
@@ -179,75 +179,114 @@ func sqliteFileURL(absolute string, windows bool) string {
 	return (&url.URL{Scheme: "file", Path: path}).String()
 }
 
-func (store *Store) migrate(ctx context.Context) error {
+func (store *Store) initializeSchema(ctx context.Context) error {
 	transaction, err := store.orm.BeginTx(ctx, nil)
 	if err != nil {
-		return errors.New("begin storage migration")
+		return errors.New("begin storage initialization")
 	}
 	defer transaction.Rollback()
-	mysqlMigrationLock := false
+	mysqlInitializationLock := false
 	defer func() {
-		if mysqlMigrationLock {
-			_, _ = transaction.ExecContext(context.WithoutCancel(ctx), `SELECT RELEASE_LOCK('kubeloop-storage-migration')`)
+		if mysqlInitializationLock {
+			_, _ = transaction.ExecContext(context.WithoutCancel(ctx), `SELECT RELEASE_LOCK('kubeloop-storage-initialization')`)
 		}
 	}()
 	if store.backend == BackendPostgreSQL {
 		if _, err := transaction.ExecContext(ctx, `SELECT pg_advisory_xact_lock(1263816527)`); err != nil {
-			return errors.New("acquire PostgreSQL migration lock")
+			return errors.New("acquire PostgreSQL storage initialization lock")
 		}
 	} else if store.backend == BackendMySQL {
 		var acquired int
-		if err := transaction.QueryRowContext(ctx, `SELECT GET_LOCK('kubeloop-storage-migration', 10)`).Scan(&acquired); err != nil || acquired != 1 {
-			return errors.New("acquire MySQL migration lock")
+		if err := transaction.QueryRowContext(ctx, `SELECT GET_LOCK('kubeloop-storage-initialization', 10)`).Scan(&acquired); err != nil || acquired != 1 {
+			return errors.New("acquire MySQL storage initialization lock")
 		}
-		mysqlMigrationLock = true
+		mysqlInitializationLock = true
 	}
-	if _, err := transaction.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (
-		version INTEGER PRIMARY KEY,
-		applied_at TEXT NOT NULL
+	initialized, err := store.readSchemaID(ctx, transaction)
+	if err != nil {
+		return err
+	}
+	if initialized != "" {
+		if initialized != currentSchemaID {
+			return fmt.Errorf("storage schema %q is unsupported; recreate the database", initialized)
+		}
+		return commitStorageInitialization(transaction, &mysqlInitializationLock, ctx)
+	}
+	empty, err := store.databaseIsEmpty(ctx, transaction)
+	if err != nil {
+		return err
+	}
+	if !empty {
+		return errors.New("storage database is not initialized with the current schema; recreate it")
+	}
+	for statementIndex, statement := range schemaStatements(store.backend) {
+		if _, err := transaction.ExecContext(ctx, statement); err != nil {
+			return fmt.Errorf("initialize storage schema statement %d: %w", statementIndex+1, err)
+		}
+	}
+	if _, err := transaction.ExecContext(ctx, `CREATE TABLE schema_metadata (
+		id INTEGER PRIMARY KEY,
+		schema_id TEXT NOT NULL,
+		initialized_at TEXT NOT NULL
 	)`); err != nil {
-		return errors.New("initialize storage migration table")
+		return errors.New("create storage schema metadata")
 	}
-	var version int
-	if err := transaction.QueryRowContext(ctx, `SELECT COALESCE(MAX(version), 0) FROM schema_migrations`).Scan(&version); err != nil {
-		return errors.New("read storage schema version")
+	if _, err := transaction.ExecContext(ctx, `INSERT INTO schema_metadata(id, schema_id, initialized_at) VALUES (?, ?, ?)`, 1, currentSchemaID, formatTime(time.Now())); err != nil {
+		return errors.New("record storage schema identity")
 	}
-	if version > currentSchemaVersion() {
-		return fmt.Errorf("storage schema version %d is newer than supported version %d", version, currentSchemaVersion())
+	return commitStorageInitialization(transaction, &mysqlInitializationLock, ctx)
+}
+
+func (store *Store) readSchemaID(ctx context.Context, transaction bun.Tx) (string, error) {
+	var exists int
+	var query string
+	switch store.backend {
+	case BackendPostgreSQL:
+		query = `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = current_schema() AND table_name = 'schema_metadata'`
+	case BackendMySQL:
+		query = `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'schema_metadata'`
+	default:
+		query = `SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'schema_metadata'`
 	}
-	for _, migration := range migrations {
-		if migration.version <= version {
-			continue
-		}
-		statements := migration.sqlite
-		switch store.backend {
-		case BackendPostgreSQL:
-			statements = migration.postgresql
-		case BackendMySQL:
-			if len(migration.mysql) > 0 {
-				statements = migration.mysql
-			} else {
-				statements = mysqlMigrationStatements(migration.sqlite)
-			}
-		}
-		for statementIndex, statement := range statements {
-			if _, err := transaction.ExecContext(ctx, statement); err != nil {
-				return fmt.Errorf("apply storage migration %d statement %d: %w", migration.version, statementIndex+1, err)
-			}
-		}
-		insert := `INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)`
-		if _, err := transaction.ExecContext(ctx, insert, migration.version, formatTime(time.Now())); err != nil {
-			return fmt.Errorf("record storage migration %d", migration.version)
-		}
+	if err := transaction.QueryRowContext(ctx, query).Scan(&exists); err != nil {
+		return "", errors.New("inspect storage schema metadata")
 	}
-	if mysqlMigrationLock {
-		if _, err := transaction.ExecContext(ctx, `SELECT RELEASE_LOCK('kubeloop-storage-migration')`); err != nil {
-			return errors.New("release MySQL migration lock")
+	if exists == 0 {
+		return "", nil
+	}
+	var schemaID string
+	if err := transaction.QueryRowContext(ctx, `SELECT schema_id FROM schema_metadata WHERE id = 1`).Scan(&schemaID); err != nil {
+		return "", errors.New("read storage schema identity")
+	}
+	return schemaID, nil
+}
+
+func (store *Store) databaseIsEmpty(ctx context.Context, transaction bun.Tx) (bool, error) {
+	var count int
+	var query string
+	switch store.backend {
+	case BackendPostgreSQL:
+		query = `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = current_schema() AND table_type = 'BASE TABLE'`
+	case BackendMySQL:
+		query = `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_type = 'BASE TABLE'`
+	default:
+		query = `SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'`
+	}
+	if err := transaction.QueryRowContext(ctx, query).Scan(&count); err != nil {
+		return false, errors.New("inspect storage database")
+	}
+	return count == 0, nil
+}
+
+func commitStorageInitialization(transaction bun.Tx, mysqlLock *bool, ctx context.Context) error {
+	if *mysqlLock {
+		if _, err := transaction.ExecContext(ctx, `SELECT RELEASE_LOCK('kubeloop-storage-initialization')`); err != nil {
+			return errors.New("release MySQL storage initialization lock")
 		}
-		mysqlMigrationLock = false
+		*mysqlLock = false
 	}
 	if err := transaction.Commit(); err != nil {
-		return errors.New("commit storage migration")
+		return errors.New("commit storage initialization")
 	}
 	return nil
 }
@@ -280,33 +319,15 @@ func (store *Store) Backend() Backend {
 	return store.backend
 }
 
-func (store *Store) SchemaVersion(ctx context.Context) (int, error) {
-	var version int
-	if err := store.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(version), 0) FROM schema_migrations`).Scan(&version); err != nil {
-		return 0, errors.New("read storage schema version")
-	}
-	return version, nil
-}
-
 func (store *Store) Identities() IdentityRepository {
 	return store.repositories.Identities()
 }
-
-func (store *Store) Organizations() OrganizationRepository { return store.repositories.Organizations() }
-
-func (store *Store) Groups() GroupRepository { return store.repositories.Groups() }
-
-func (store *Store) Invitations() InvitationRepository { return store.repositories.Invitations() }
 
 func (store *Store) BootstrapTokens() BootstrapTokenRepository {
 	return store.repositories.BootstrapTokens()
 }
 
 func (store *Store) Credentials() CredentialRepository { return store.repositories.Credentials() }
-
-func (store *Store) SecurityPolicies() SecurityPolicyRepository {
-	return store.repositories.SecurityPolicies()
-}
 
 func (store *Store) Sessions() SessionRepository {
 	return store.repositories.Sessions()
@@ -330,10 +351,6 @@ func (store *Store) Audit() AuditRepository {
 
 func (store *Store) RelayDesiredStates() RelayDesiredStateRepository {
 	return store.repositories.RelayDesiredStates()
-}
-
-func (store *Store) AuditExportJobs() AuditExportJobRepository {
-	return store.repositories.AuditExportJobs()
 }
 
 func (store *Store) AdminSessions() AdminSessionRepository {

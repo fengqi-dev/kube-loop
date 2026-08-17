@@ -247,6 +247,17 @@ func TestEndpointPolicyUsesAuthenticatedIdentity(t *testing.T) {
 	}
 }
 
+func TestRegistryAllowsHTTPTicketIssuer(t *testing.T) {
+	clock := &testClock{now: time.Now().UTC().Truncate(time.Second)}
+	_, err := New(Config{
+		Now: clock.Now, TicketIssuer: "http://control-plane.example.test",
+		VerificationKeys: verificationKeys(t, clock.Now(), 1),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func newTestRegistry(t *testing.T, clock *testClock, maximumStreams uint32) *Registry {
 	t.Helper()
 	registry, err := New(Config{

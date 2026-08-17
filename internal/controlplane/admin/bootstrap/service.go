@@ -17,11 +17,7 @@ import (
 )
 
 const (
-	TokenLifetime                 = 24 * time.Hour
-	DefaultOrganizationName       = "KubeLoop"
-	DefaultOrganizationSlug       = "kubeloop"
-	DefaultAdministratorsGroup    = "Administrators"
-	defaultAdministratorsGroupDoc = "Default organization administrators"
+	TokenLifetime = 24 * time.Hour
 )
 
 var (
@@ -53,9 +49,7 @@ type DefaultRequest struct {
 }
 
 type Result struct {
-	Identity     adminlocaluser.User
-	Organization storage.Organization
-	Group        storage.Group
+	Identity adminlocaluser.User
 }
 
 type Service struct {
@@ -215,38 +209,15 @@ func (service *Service) createInitialGraph(
 	if err != nil {
 		return Result{}, err
 	}
-	organization := storage.Organization{ID: service.newID(), Name: DefaultOrganizationName,
-		Slug: DefaultOrganizationSlug, Status: "active", CreatedAt: request.Now, UpdatedAt: request.Now}
-	if err := repositories.Organizations().Create(ctx, organization); err != nil {
-		return Result{}, err
-	}
-	if err := repositories.Organizations().AddMember(ctx, storage.OrganizationMembership{
-		OrganizationID: organization.ID, IdentityID: identity.IdentityID, Status: "active",
-		CreatedAt: request.Now, UpdatedAt: request.Now,
-	}); err != nil {
-		return Result{}, err
-	}
-	group := storage.Group{
-		ID: service.newID(), OrganizationID: organization.ID, Name: DefaultAdministratorsGroup,
-		Description: defaultAdministratorsGroupDoc, System: true, CreatedAt: request.Now, UpdatedAt: request.Now,
-	}
-	if err := repositories.Groups().Create(ctx, group); err != nil {
-		return Result{}, err
-	}
-	if err := repositories.Groups().AddMember(ctx, storage.GroupMembership{
-		GroupID: group.ID, IdentityID: identity.IdentityID, CreatedAt: request.Now,
-	}); err != nil {
-		return Result{}, err
-	}
-	metadata, err := json.Marshal(map[string]string{"organizationId": organization.ID})
+	metadata, err := json.Marshal(map[string]string{"authenticationType": "local"})
 	if err != nil {
 		return Result{}, errors.New("encode IAM bootstrap audit metadata")
 	}
 	if err := repositories.Audit().Append(ctx, storage.AuditEvent{ID: service.newID(),
-		IdentityID: identity.IdentityID, Action: request.AuditAction, ResourceType: "organization",
-		ResourceID: organization.ID, Outcome: "success", RequestID: request.RequestID, Metadata: metadata,
+		IdentityID: identity.IdentityID, Action: request.AuditAction, ResourceType: "identity",
+		ResourceID: identity.IdentityID, Outcome: "success", RequestID: request.RequestID, Metadata: metadata,
 		CreatedAt: request.Now}); err != nil {
 		return Result{}, err
 	}
-	return Result{Identity: identity, Organization: organization, Group: group}, nil
+	return Result{Identity: identity}, nil
 }

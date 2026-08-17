@@ -27,13 +27,12 @@ func NewStorageAuditSink(repository storage.AuditRepository) (AuditSink, error) 
 
 func (sink *storageAuditSink) Record(ctx context.Context, record AuditRecord) error {
 	metadata, err := json.Marshal(struct {
-		SessionID    string `json:"sessionId,omitempty"`
-		Namespace    string `json:"namespace,omitempty"`
-		PolicyRuleID string `json:"policyRuleId,omitempty"`
-		HTTPStatus   int    `json:"httpStatus"`
-		LatencyMS    int64  `json:"latencyMs"`
+		SessionID  string `json:"sessionId,omitempty"`
+		Namespace  string `json:"namespace,omitempty"`
+		HTTPStatus int    `json:"httpStatus"`
+		LatencyMS  int64  `json:"latencyMs"`
 	}{
-		SessionID: record.SessionID, Namespace: record.Namespace, PolicyRuleID: record.PolicyRuleID,
+		SessionID: record.SessionID, Namespace: record.Namespace,
 		HTTPStatus: record.HTTPStatus, LatencyMS: record.Duration.Milliseconds(),
 	})
 	if err != nil {

@@ -10,12 +10,12 @@ import (
 	"testing"
 	"time"
 
-	adminauthorization "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/authorization"
+	adminauthentication "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/authentication"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 	"github.com/google/uuid"
 )
 
-func TestAuthenticateSubjectUsesCurrentGroupsAndOAuthGrantRevocation(t *testing.T) {
+func TestAuthenticateSubjectUsesIdentityAndOAuthGrantRevocation(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
 	now := time.Date(2026, 8, 10, 11, 30, 0, 0, time.UTC)
@@ -37,29 +37,15 @@ func TestAuthenticateSubjectUsesCurrentGroupsAndOAuthGrantRevocation(t *testing.
 	tokenHash := sha256.Sum256([]byte(token))
 	if err := store.AdminSessions().Create(ctx, storage.AdminSession{
 		IDHash: tokenHash[:], IdentityID: identity.ID, AuthorizationID: authorizationID,
-		AuthenticationType: string(adminauthorization.AuthenticationNormal), CSRFTokenHash: bytes.Repeat([]byte{9}, 32),
+		AuthenticationType: string(adminauthentication.Normal), CSRFTokenHash: bytes.Repeat([]byte{9}, 32),
 		CreatedAt: now, LastSeenAt: now, IdleExpiresAt: now.Add(15 * time.Minute), AbsoluteExpiresAt: now.Add(time.Hour),
 	}); err != nil {
 		t.Fatal(err)
 	}
 	service, _ := New(store)
 	service.now = func() time.Time { return now }
-	organizationID := uuid.NewString()
-	if err := store.Organizations().Create(ctx, storage.Organization{ID: organizationID, Name: "Security", Slug: "security", Status: "active", CreatedAt: now, UpdatedAt: now}); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.Organizations().AddMember(ctx, storage.OrganizationMembership{OrganizationID: organizationID, IdentityID: identity.ID, Status: "active", CreatedAt: now, UpdatedAt: now}); err != nil {
-		t.Fatal(err)
-	}
-	groupID := uuid.NewString()
-	if err := store.Groups().Create(ctx, storage.Group{ID: groupID, OrganizationID: organizationID, Name: "security", CreatedAt: now, UpdatedAt: now}); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.Groups().AddMember(ctx, storage.GroupMembership{GroupID: groupID, IdentityID: identity.ID, CreatedAt: now}); err != nil {
-		t.Fatal(err)
-	}
 	_, subject, err := service.AuthenticateSubject(ctx, token)
-	if err != nil || subject.ID != identity.ID || len(subject.Groups) != 1 || subject.Groups[0] != groupID {
+	if err != nil || subject.ID != identity.ID {
 		t.Fatalf("subject=%#v error=%v", subject, err)
 	}
 	if err := store.OAuthSessions().RevokeRequest(ctx, authorizationID, now); err != nil {
@@ -92,7 +78,7 @@ func TestIdentityExchangePersistsDedicatedSessionAndAudit(t *testing.T) {
 	service.now = func() time.Time { return now }
 	service.random = bytes.NewReader(append(bytes.Repeat([]byte{13}, 32), bytes.Repeat([]byte{14}, 32)...))
 	issued, err := service.ExchangeIdentity(
-		ctx, identity.ID, authorizationID, adminauthorization.AuthenticationNormal, "request-identity-1",
+		ctx, identity.ID, authorizationID, adminauthentication.Normal, "request-identity-1",
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -129,7 +115,7 @@ func TestIdentityExchangePersistsDedicatedSessionAndAudit(t *testing.T) {
 	}
 	service.random = bytes.NewReader(append(bytes.Repeat([]byte{15}, 32), bytes.Repeat([]byte{16}, 32)...))
 	if _, err := service.ExchangeIdentity(
-		ctx, identity.ID, authorizationID, adminauthorization.AuthenticationNormal, "request-identity-2",
+		ctx, identity.ID, authorizationID, adminauthentication.Normal, "request-identity-2",
 	); !errors.Is(err, ErrAuthenticationFailed) {
 		t.Fatalf("revoked OAuth grant exchange error=%v", err)
 	}

@@ -7,13 +7,10 @@ var mysqlIndexedTextColumns = map[string]struct{}{
 	"cluster_id": {}, "state": {}, "type": {}, "idempotency_key": {}, "task_id": {},
 	"kind": {}, "namespace": {}, "name": {}, "scope": {}, "key": {},
 	"resource_type": {}, "resource_id": {}, "action": {}, "outcome": {}, "request_id": {},
-	"organization_id": {}, "status": {}, "slug": {},
-	"email": {}, "primary_email": {}, "scope_id": {},
+	"status": {}, "email": {}, "primary_email": {},
 	"relay_id": {}, "desired_state": {}, "username": {}, "client_id": {}, "scope_type": {},
 	"authentication_type": {}, "updated_authentication_type": {},
-	"requested_authentication_type": {},
-	"requested_by":                  {},
-	"authorization_id":              {},
+	"authorization_id": {},
 }
 
 var mysqlTimeColumns = map[string]struct{}{
@@ -23,15 +20,15 @@ var mysqlTimeColumns = map[string]struct{}{
 	"authenticated_at": {}, "last_seen_at": {}, "auth_time": {},
 }
 
-func mysqlMigrationStatements(sqlite []string) []string {
+func mysqlSchemaStatements(sqlite []string) []string {
 	statements := make([]string, len(sqlite))
 	for index, statement := range sqlite {
-		statements[index] = mysqlMigrationStatement(statement)
+		statements[index] = mysqlSchemaStatement(statement)
 	}
 	return statements
 }
 
-func mysqlMigrationStatement(statement string) string {
+func mysqlSchemaStatement(statement string) string {
 	statement = strings.ReplaceAll(statement, "INTEGER PRIMARY KEY AUTOINCREMENT", "BIGINT AUTO_INCREMENT PRIMARY KEY")
 	statement = strings.ReplaceAll(statement, "revision INTEGER", "revision BIGINT")
 	statement = strings.ReplaceAll(statement, "BLOB", "VARBINARY(1024)")

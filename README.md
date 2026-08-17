@@ -27,6 +27,59 @@ and SDKs can use Pod IPs, ClusterIP Services, and cluster DNS directly.
 
 ## Install
 
+### KubeLoop Server with Helm
+
+Requirements:
+
+- Kubernetes 1.25 or later and Helm 3
+- A hostname routed to a Kubernetes Ingress controller
+- The RelayTicket signing key and internal Relay Registry TLS Secret described in the
+  [Helm chart guide](charts/kubeloop/README.md#relay-registry-and-relayticket-keys)
+
+Install the released OCI chart after creating the `kubeloop-relay-control-plane`
+Secret in `kubeloop-system`:
+
+```bash
+helm upgrade --install kubeloop \
+  oci://ghcr.io/fengqi-dev/kube-loop/charts/kubeloop \
+  --version 2.0.0-beta.7 \
+  --namespace kubeloop-system \
+  --create-namespace \
+  --set publicURL=http://kubeloop.example.com \
+  --set controlPlane.admin.publicURL=http://kubeloop.example.com \
+  --set controlPlane.relay.existingSecret=kubeloop-relay-control-plane \
+  --set ingress.enabled=true \
+  --set ingress.host=kubeloop.example.com \
+  --set ingress.className=nginx \
+  --wait
+```
+
+Replace the version, hostname, Ingress class, and Secret names for your
+environment. Then inspect the generated initial-admin instructions and verify
+service discovery:
+
+```bash
+helm get notes kubeloop --namespace kubeloop-system
+curl http://kubeloop.example.com/.well-known/kubeloop
+```
+
+Ingress TLS is disabled by default. For HTTPS, set both public URLs to
+`https://...`, set `ingress.tls.enabled=true`, and provide
+`ingress.tls.secretName`.
+
+Uninstall the workloads with:
+
+```bash
+helm uninstall kubeloop --namespace kubeloop-system --wait
+```
+
+The chart removes its workloads and chart-created SQLite PVC, but intentionally
+retains its CRD and generated authentication/bootstrap Secrets. See the
+[full Helm guide](charts/kubeloop/README.md) for key generation, Gateway API,
+external PostgreSQL/MySQL, upgrades, and complete cleanup.
+
+### Desktop client
+
 ### macOS and Linux
 
 ```bash
@@ -61,7 +114,7 @@ Each release includes `SHA256SUMS`.
 
 ## Connect
 
-1. Open KubeLoop, add the HTTPS URL of a KubeLoop Server, and run discovery.
+1. Open KubeLoop, add the HTTP or HTTPS URL of a KubeLoop Server, and run discovery.
 2. Sign in through the system browser and choose an authorized Namespace.
 3. Choose **SOCKS5 proxy** or **TUN mode**, then click **Connect**.
 4. For TUN only, approve installation of the local network Helper on first use.

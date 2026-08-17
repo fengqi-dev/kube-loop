@@ -24,7 +24,6 @@ type AuditRecord struct {
 	ResourceKind string
 	ResourceName string
 	Outcome      string
-	PolicyRuleID string
 	HTTPStatus   int
 	Duration     time.Duration
 }
@@ -50,7 +49,7 @@ func New(config Config) echo.MiddlewareFunc {
 		})
 	}
 	if config.Authorizer == nil {
-		config.Authorizer = authorization.NewDenyAll()
+		config.Authorizer = authorization.NewAuthenticated()
 	}
 	if config.Logger == nil {
 		config.Logger = slog.Default()
@@ -110,9 +109,6 @@ func New(config Config) echo.MiddlewareFunc {
 					ResourceKind: authorizationRequest.ResourceKind, ResourceName: authorizationRequest.ResourceName,
 					Outcome: auditOutcome(status), HTTPStatus: status, Duration: time.Since(startedAt),
 				}
-				if _, decision, ok := AuthorizationFromContext(request.Context()); ok {
-					record.PolicyRuleID = decision.RuleID
-				}
 				if err := config.Audit.Record(request.Context(), record); err != nil {
 					config.Logger.ErrorContext(request.Context(), "append API audit event failed", "request_id", requestID)
 				}
@@ -132,18 +128,16 @@ func New(config Config) echo.MiddlewareFunc {
 				return nil
 			}
 			requestContext = request.Context()
-			if !isNamespaceCollectionList(authorizationRequest) && !isAuthenticatedMetadataRead(authorizationRequest) && !isSessionHeartbeat(authorizationRequest) {
-				decision := config.Authorizer.Authorize(request.Context(), authorization.Subject{
-					ID: identity.Subject, Provider: identity.Provider, Groups: append([]string(nil), identity.Groups...),
-				}, authorizationRequest)
-				if !decision.Allowed {
-					writeError(ctx, requestID, &controlplaneapi.Error{Code: controlplaneapi.CodeForbidden, Message: "operation is not permitted"})
-					return nil
-				}
-				requestContext = context.WithValue(requestContext, authorizationContextKey{}, authorizationContextValue{
-					request: authorizationRequest, decision: decision,
-				})
+			decision := config.Authorizer.Authorize(request.Context(), authorization.Subject{
+				ID: identity.Subject, Provider: identity.Provider, Groups: append([]string(nil), identity.Groups...),
+			}, authorizationRequest)
+			if !decision.Allowed {
+				writeError(ctx, requestID, &controlplaneapi.Error{Code: controlplaneapi.CodeForbidden, Message: "operation is not permitted"})
+				return nil
 			}
+			requestContext = context.WithValue(requestContext, authorizationContextKey{}, authorizationContextValue{
+				request: authorizationRequest, decision: decision,
+			})
 			requestContext = context.WithValue(requestContext, identityContextKey{}, identity)
 			request = request.WithContext(requestContext)
 			ctx.SetRequest(request)
@@ -164,31 +158,6 @@ func New(config Config) echo.MiddlewareFunc {
 			return nil
 		}
 	}
-}
-
-// The namespace collection is authorized per returned namespace by kubeapi.
-// A cluster-scoped pre-check here would reject identities that only have
-// namespace-scoped grants before the response can be filtered.
-func isNamespaceCollectionList(request authorization.Request) bool {
-	return request.Operation == "list" && request.Namespace == "" &&
-		request.ResourceKind == "namespaces" && request.ResourceName == ""
-}
-
-// Version discovery is required before the client has selected a Namespace.
-// Authentication still applies, while namespace authorization is enforced by
-// the subsequent capability and inventory requests.
-func isAuthenticatedMetadataRead(request authorization.Request) bool {
-	return request.Operation == "list" && request.Namespace == "" &&
-		request.ResourceKind == "version" && request.ResourceName == ""
-}
-
-// Session heartbeats re-evaluate the complete policy and Kubernetes capability
-// intersection inside sessionapi. Keeping this request out of the early gate
-// lets that service actively disconnect the runtime and settle its Tasks when
-// access has been revoked, instead of merely returning 403 while traffic lives on.
-func isSessionHeartbeat(request authorization.Request) bool {
-	return request.Operation == "heartbeat" && request.ResourceKind == "sessions" &&
-		request.Namespace != "" && request.ResourceName != ""
 }
 
 func isWebSocketUpgrade(request *http.Request) bool {

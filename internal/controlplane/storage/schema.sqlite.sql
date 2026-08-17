@@ -6,64 +6,12 @@ CREATE TABLE identities (
 );
 CREATE INDEX identities_email_idx ON identities(primary_email);
 
-CREATE TABLE organizations (
- id TEXT PRIMARY KEY, name TEXT NOT NULL, slug TEXT NOT NULL UNIQUE,
- status TEXT NOT NULL CHECK (status IN ('active', 'suspended')),
- created_at TEXT NOT NULL, updated_at TEXT NOT NULL
-);
-CREATE TABLE organization_memberships (
- organization_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
- identity_id TEXT NOT NULL REFERENCES identities(id) ON DELETE CASCADE,
- status TEXT NOT NULL CHECK (status IN ('active', 'suspended')),
- created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
- PRIMARY KEY (organization_id, identity_id)
-);
-CREATE INDEX organization_memberships_identity_idx ON organization_memberships(identity_id, organization_id);
-
-CREATE TABLE iam_groups (
- id TEXT PRIMARY KEY, organization_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
- name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', system_flag INTEGER NOT NULL DEFAULT 0 CHECK (system_flag IN (0, 1)),
- created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
- UNIQUE (organization_id, name)
-);
-CREATE TABLE group_memberships (
- group_id TEXT NOT NULL REFERENCES iam_groups(id) ON DELETE CASCADE,
- identity_id TEXT NOT NULL REFERENCES identities(id) ON DELETE CASCADE,
- created_at TEXT NOT NULL, PRIMARY KEY (group_id, identity_id)
-);
-CREATE INDEX group_memberships_identity_idx ON group_memberships(identity_id, group_id);
-CREATE TABLE group_namespaces (
- group_id TEXT NOT NULL REFERENCES iam_groups(id) ON DELETE CASCADE,
- namespace TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY (group_id, namespace)
-);
-CREATE INDEX group_namespaces_namespace_idx ON group_namespaces(namespace, group_id);
-
-CREATE TABLE invitations (
- id TEXT PRIMARY KEY, organization_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
- email TEXT NOT NULL, group_id TEXT NOT NULL REFERENCES iam_groups(id) ON DELETE CASCADE,
- token_hash BLOB NOT NULL UNIQUE CHECK (length(token_hash) = 32),
- status TEXT NOT NULL CHECK (status IN ('pending', 'accepted', 'revoked', 'expired')),
- invited_by TEXT NOT NULL REFERENCES identities(id) ON DELETE RESTRICT,
- created_at TEXT NOT NULL, expires_at TEXT NOT NULL, accepted_at TEXT
-);
-CREATE INDEX invitations_organization_idx ON invitations(organization_id, status, created_at);
-
 CREATE TABLE password_credentials (
  identity_id TEXT PRIMARY KEY REFERENCES identities(id) ON DELETE CASCADE,
  username TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL,
  enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
  created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
-CREATE TABLE security_policies (
-	 scope_type TEXT NOT NULL CHECK (scope_type IN ('platform', 'organization')),
-	 scope_id TEXT NOT NULL, organization_id TEXT REFERENCES organizations(id) ON DELETE CASCADE,
-	 spec_json TEXT NOT NULL, revision INTEGER NOT NULL CHECK (revision > 0),
-	 updated_by TEXT NOT NULL REFERENCES identities(id) ON DELETE RESTRICT, updated_at TEXT NOT NULL,
-	 PRIMARY KEY (scope_type, scope_id),
-	 CHECK ((scope_type = 'platform' AND scope_id = 'platform' AND organization_id IS NULL) OR
-	        (scope_type = 'organization' AND scope_id = organization_id AND organization_id IS NOT NULL))
-);
-
 CREATE TABLE sessions (
  id TEXT PRIMARY KEY,
  identity_id TEXT NOT NULL REFERENCES identities(id) ON DELETE CASCADE, device_id TEXT NOT NULL,
@@ -110,7 +58,7 @@ CREATE TABLE admin_sessions (
 );
 
 CREATE TABLE oauth_clients (
- id TEXT PRIMARY KEY, organization_id TEXT REFERENCES organizations(id) ON DELETE CASCADE,
+ id TEXT PRIMARY KEY,
  name TEXT NOT NULL, public INTEGER NOT NULL CHECK (public IN (0, 1)), redirect_uris_json TEXT NOT NULL,
  grant_types_json TEXT NOT NULL, scopes_json TEXT NOT NULL,
  trusted INTEGER NOT NULL DEFAULT 0 CHECK (trusted IN (0, 1)), enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
@@ -154,14 +102,6 @@ CREATE TABLE relay_desired_states (
  updated_by TEXT NOT NULL, updated_authentication_type TEXT NOT NULL CHECK (updated_authentication_type IN ('normal', 'bootstrap')),
  reason TEXT NOT NULL, updated_at TEXT NOT NULL
 );
-CREATE TABLE audit_export_jobs (
- id TEXT PRIMARY KEY,
- state TEXT NOT NULL CHECK (state IN ('pending', 'running', 'succeeded', 'failed')), filter_json TEXT NOT NULL,
- result_data TEXT NOT NULL DEFAULT '', error_code TEXT NOT NULL DEFAULT '', requested_by TEXT NOT NULL,
- requested_authentication_type TEXT NOT NULL CHECK (requested_authentication_type IN ('normal', 'bootstrap')),
- reason TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, expires_at TEXT NOT NULL
-);
-
 CREATE INDEX sessions_identity_idx ON sessions(identity_id, updated_at);
 CREATE INDEX sessions_expiry_idx ON sessions(expires_at);
 CREATE INDEX sessions_namespace_state_idx ON sessions(namespace, state, updated_at);
@@ -172,7 +112,6 @@ CREATE INDEX audit_events_identity_idx ON audit_events(identity_id, created_at);
 CREATE INDEX admin_sessions_identity_idx ON admin_sessions(identity_id, absolute_expires_at);
 CREATE INDEX admin_sessions_authorization_idx ON admin_sessions(authorization_id, revoked_at);
 CREATE INDEX admin_sessions_expiry_idx ON admin_sessions(idle_expires_at, absolute_expires_at);
-CREATE INDEX audit_export_jobs_pending_idx ON audit_export_jobs(state, created_at, id);
 CREATE INDEX oauth_authorization_requests_expiry_idx ON oauth_authorization_requests(status, expires_at);
 CREATE INDEX oauth_sessions_request_idx ON oauth_sessions(request_id, status);
 CREATE INDEX oauth_sessions_identity_idx ON oauth_sessions(identity_id, status);

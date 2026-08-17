@@ -30,58 +30,6 @@ type IdentityListFilter struct {
 	Limit  int
 }
 
-type Organization struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	Slug      string    `json:"slug"`
-	Status    string    `json:"status"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
-}
-
-type OrganizationMembership struct {
-	OrganizationID string    `json:"organizationId"`
-	IdentityID     string    `json:"identityId"`
-	Status         string    `json:"status"`
-	CreatedAt      time.Time `json:"createdAt"`
-	UpdatedAt      time.Time `json:"updatedAt"`
-}
-
-type Group struct {
-	ID             string    `json:"id"`
-	OrganizationID string    `json:"organizationId"`
-	Name           string    `json:"name"`
-	Description    string    `json:"description"`
-	System         bool      `json:"system"`
-	CreatedAt      time.Time `json:"createdAt"`
-	UpdatedAt      time.Time `json:"updatedAt"`
-}
-
-type GroupNamespace struct {
-	GroupID   string    `json:"groupId"`
-	Namespace string    `json:"namespace"`
-	CreatedAt time.Time `json:"createdAt"`
-}
-
-type GroupMembership struct {
-	GroupID    string    `json:"groupId"`
-	IdentityID string    `json:"identityId"`
-	CreatedAt  time.Time `json:"createdAt"`
-}
-
-type Invitation struct {
-	ID             string     `json:"id"`
-	OrganizationID string     `json:"organizationId"`
-	Email          string     `json:"email"`
-	GroupID        string     `json:"groupId"`
-	TokenHash      []byte     `json:"-"`
-	Status         string     `json:"status"`
-	InvitedBy      string     `json:"invitedBy"`
-	CreatedAt      time.Time  `json:"createdAt"`
-	ExpiresAt      time.Time  `json:"expiresAt"`
-	AcceptedAt     *time.Time `json:"acceptedAt,omitempty"`
-}
-
 type BootstrapToken struct {
 	TokenHash  []byte
 	CreatedAt  time.Time
@@ -96,15 +44,6 @@ type PasswordCredential struct {
 	Enabled      bool
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
-}
-
-type SecurityPolicy struct {
-	ScopeType      string
-	OrganizationID string
-	Spec           json.RawMessage
-	Revision       uint64
-	UpdatedBy      string
-	UpdatedAt      time.Time
 }
 
 type SessionListFilter struct {
@@ -211,20 +150,6 @@ type RelayDesiredState struct {
 	UpdatedAt                 time.Time
 }
 
-type AuditExportJob struct {
-	ID                          string
-	State                       string
-	Filter                      json.RawMessage
-	Result                      string
-	ErrorCode                   string
-	RequestedBy                 string
-	RequestedAuthenticationType string
-	Reason                      string
-	CreatedAt                   time.Time
-	UpdatedAt                   time.Time
-	ExpiresAt                   time.Time
-}
-
 type AdminSession struct {
 	IDHash             []byte
 	IdentityID         string
@@ -244,7 +169,6 @@ type AdminSession struct {
 // disclose even the password hash through ordinary client APIs.
 type OAuthClient struct {
 	ID                string
-	OrganizationID    string
 	Name              string
 	Public            bool
 	RedirectURIs      []string

@@ -22,41 +22,6 @@ type IdentityRepository interface {
 	List(context.Context, IdentityListFilter) ([]Identity, error)
 }
 
-type OrganizationRepository interface {
-	Create(context.Context, Organization) error
-	Get(context.Context, string) (Organization, error)
-	List(context.Context, int) ([]Organization, error)
-	AddMember(context.Context, OrganizationMembership) error
-	RemoveMember(context.Context, string, string) error
-	ListMembers(context.Context, string, int) ([]OrganizationMembership, error)
-	ListForIdentity(context.Context, string) ([]Organization, error)
-}
-
-type GroupRepository interface {
-	Create(context.Context, Group) error
-	Get(context.Context, string) (Group, error)
-	List(context.Context, string, int) ([]Group, error)
-	Update(context.Context, Group) error
-	Delete(context.Context, string) error
-	AddMember(context.Context, GroupMembership) error
-	RemoveMember(context.Context, string, string) error
-	ListMembers(context.Context, string, int) ([]GroupMembership, error)
-	ListForIdentity(context.Context, string, string) ([]Group, error)
-	PutNamespace(context.Context, GroupNamespace) error
-	DeleteNamespace(context.Context, string, string) error
-	ListNamespaces(context.Context, string) ([]GroupNamespace, error)
-	ListAuthorizedNamespaces(context.Context, string, []string) ([]string, error)
-	IsAdministrator(context.Context, string, []string) (bool, error)
-}
-
-type InvitationRepository interface {
-	Create(context.Context, Invitation) error
-	GetByTokenHash(context.Context, []byte, time.Time) (Invitation, error)
-	List(context.Context, string, int) ([]Invitation, error)
-	Accept(context.Context, string, string, time.Time) error
-	Revoke(context.Context, string, time.Time) error
-}
-
 type BootstrapTokenRepository interface {
 	Create(context.Context, BootstrapToken) error
 	Get(context.Context) (BootstrapToken, error)
@@ -69,12 +34,6 @@ type CredentialRepository interface {
 	GetPasswordByUsername(context.Context, string) (PasswordCredential, error)
 	UpdatePassword(context.Context, string, string, time.Time) error
 	SetPasswordEnabled(context.Context, string, bool, time.Time) error
-}
-
-type SecurityPolicyRepository interface {
-	Put(context.Context, SecurityPolicy, uint64) (SecurityPolicy, error)
-	GetPlatform(context.Context) (SecurityPolicy, error)
-	GetOrganization(context.Context, string) (SecurityPolicy, error)
 }
 
 type SessionRepository interface {
@@ -137,14 +96,6 @@ type RelayDesiredStateRepository interface {
 	CompareAndSwap(context.Context, string, string, uint64, string, string, string, time.Time) (RelayDesiredState, error)
 }
 
-type AuditExportJobRepository interface {
-	Create(context.Context, AuditExportJob) error
-	GetByID(context.Context, string) (AuditExportJob, error)
-	ListRunnable(context.Context, time.Time, int) ([]AuditExportJob, error)
-	Claim(context.Context, string, time.Time, time.Time, time.Time) error
-	Complete(context.Context, string, string, string, string, time.Time) error
-}
-
 type AdminSessionRepository interface {
 	Create(context.Context, AdminSession) error
 	GetByHash(context.Context, []byte) (AdminSession, error)
@@ -204,19 +155,14 @@ type OAuthBrowserSessionRepository interface {
 
 type Repositories interface {
 	Identities() IdentityRepository
-	Organizations() OrganizationRepository
-	Groups() GroupRepository
-	Invitations() InvitationRepository
 	BootstrapTokens() BootstrapTokenRepository
 	Credentials() CredentialRepository
-	SecurityPolicies() SecurityPolicyRepository
 	Sessions() SessionRepository
 	Tasks() TaskRepository
 	ResourceSnapshots() ResourceSnapshotRepository
 	Idempotency() IdempotencyRepository
 	Audit() AuditRepository
 	RelayDesiredStates() RelayDesiredStateRepository
-	AuditExportJobs() AuditExportJobRepository
 	AdminSessions() AdminSessionRepository
 	OAuthClients() OAuthClientRepository
 	OAuthSessions() OAuthSessionRepository

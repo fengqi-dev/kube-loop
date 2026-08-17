@@ -13,8 +13,6 @@ import (
 
 	"github.com/fengqi-dev/kube-loop/internal/controlplane"
 	adminhttpserver "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/httpserver"
-	adminiam "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/iam"
-	adminoperations "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/operations"
 	controlplanekubernetes "github.com/fengqi-dev/kube-loop/internal/controlplane/kubernetes"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/maintenance"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/sessionregistry"
@@ -23,21 +21,19 @@ import (
 )
 
 type serverRuntimeOptions struct {
-	Context              context.Context
-	Stop                 context.CancelFunc
-	Config               loadedControlPlaneConfig
-	Logger               *slog.Logger
-	Store                *controlplanestorage.Store
-	Server               *controlplane.Server
-	ManagementServer     *adminhttpserver.Server
-	RelayRegistry        *relayRegistryRuntime
-	KubernetesConfig     controlplanekubernetes.Config
-	IAMLoader            *adminiam.Loader
-	SessionRecovery      *sessionregistry.Reconciler
-	ManagementOperations *adminoperations.Service
-	MaintenanceWorker    *maintenance.Worker
-	BindingRecovery      *trafficbindingclient.Reconciler
-	SessionRuntime       *sessionregistry.Registry
+	Context           context.Context
+	Stop              context.CancelFunc
+	Config            loadedControlPlaneConfig
+	Logger            *slog.Logger
+	Store             *controlplanestorage.Store
+	Server            *controlplane.Server
+	ManagementServer  *adminhttpserver.Server
+	RelayRegistry     *relayRegistryRuntime
+	KubernetesConfig  controlplanekubernetes.Config
+	SessionRecovery   *sessionregistry.Reconciler
+	MaintenanceWorker *maintenance.Worker
+	BindingRecovery   *trafficbindingclient.Reconciler
+	SessionRuntime    *sessionregistry.Registry
 }
 
 func serveControlPlane(options serverRuntimeOptions) {
@@ -88,18 +84,10 @@ func serveControlPlane(options serverRuntimeOptions) {
 	}
 	errCh := make(chan error, serveCount)
 	var backgroundWorkers sync.WaitGroup
-	backgroundWorkers.Add(4)
-	go func() {
-		defer backgroundWorkers.Done()
-		options.IAMLoader.Run(options.Context)
-	}()
+	backgroundWorkers.Add(3)
 	go func() {
 		defer backgroundWorkers.Done()
 		options.SessionRecovery.Run(options.Context)
-	}()
-	go func() {
-		defer backgroundWorkers.Done()
-		options.ManagementOperations.Run(options.Context)
 	}()
 	go func() {
 		defer backgroundWorkers.Done()

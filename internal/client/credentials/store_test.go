@@ -115,8 +115,8 @@ func TestSystemStoreRequiresCurrentMetadataSchema(t *testing.T) {
 		t.Fatalf("version 1 metadata credential = %#v err = %v", credential, err)
 	}
 	install(`{"schemaVersion":2,"deviceId":"device-1"}`)
-	if _, err := store.Get("profile-1"); err == nil {
-		t.Fatal("future credential metadata schema was accepted")
+	if _, err := store.Get("profile-1"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("future credential metadata error = %v, want ErrNotFound", err)
 	}
 }
 

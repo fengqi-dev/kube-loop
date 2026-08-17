@@ -16,7 +16,7 @@ type recordingAuthorizer struct{ calls int }
 
 func (authorizer *recordingAuthorizer) Authorize(context.Context, authorization.Subject, authorization.Request) authorization.Decision {
 	authorizer.calls++
-	return authorization.Decision{}
+	return authorization.Decision{Allowed: true}
 }
 
 func TestErrorStatusMapping(t *testing.T) {
@@ -54,7 +54,7 @@ func TestWebSocketUpgradeDetectionIsStrict(t *testing.T) {
 	}
 }
 
-func TestAuthenticatedVersionDiscoveryRunsBeforeNamespaceAuthorization(t *testing.T) {
+func TestAuthenticatedVersionDiscoveryIsAllowed(t *testing.T) {
 	authorizer := &recordingAuthorizer{}
 	middleware := New(Config{
 		APIPathPrefix:      "/kubeloop/api",
@@ -75,7 +75,7 @@ func TestAuthenticatedVersionDiscoveryRunsBeforeNamespaceAuthorization(t *testin
 	if response.Code != http.StatusNoContent {
 		t.Fatalf("version status = %d", response.Code)
 	}
-	if authorizer.calls != 0 {
+	if authorizer.calls != 1 {
 		t.Fatalf("version authorization calls = %d", authorizer.calls)
 	}
 }

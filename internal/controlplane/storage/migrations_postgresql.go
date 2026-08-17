@@ -17,15 +17,15 @@ var postgresqlBigIntColumns = map[string]struct{}{
 	"id": {}, "generation": {}, "version": {}, "revision": {},
 }
 
-func postgresqlMigrationStatements(sqlite []string) []string {
+func postgresqlSchemaStatements(sqlite []string) []string {
 	statements := make([]string, len(sqlite))
 	for index, statement := range sqlite {
-		statements[index] = postgresqlMigrationStatement(statement)
+		statements[index] = postgresqlSchemaStatement(statement)
 	}
 	return statements
 }
 
-func postgresqlMigrationStatement(statement string) string {
+func postgresqlSchemaStatement(statement string) string {
 	statement = strings.ReplaceAll(statement, "INTEGER PRIMARY KEY AUTOINCREMENT", "BIGSERIAL PRIMARY KEY")
 	statement = strings.ReplaceAll(statement, "BLOB", "BYTEA")
 	for _, column := range []string{"id_hash", "csrf_token_hash", "code_hash", "token_hash", "challenge_hash", "upstream_state_hash", "signature_hash", "scope_hash"} {

@@ -43,7 +43,7 @@ func buildAPIRuntime(
 	environment controlPlaneEnvironment,
 	logger *slog.Logger,
 	store *controlplanestorage.Store,
-	policyEngine authorization.Authorizer,
+	authorizer authorization.Authorizer,
 	kubernetesProvider *controlplanekubernetes.Provider,
 ) *apiRuntime {
 	bindingRESTConfig, err := kubernetesProvider.SystemRESTConfig()
@@ -70,10 +70,6 @@ func buildAPIRuntime(
 	}
 	kubernetesAPI, err := kubeapi.New(
 		kubernetesProvider,
-		kubeapi.WithCapabilityAuthorizer(policyEngine),
-		kubeapi.WithAuthorizedNamespaces(func(ctx context.Context, identityID string, groupIDs []string) ([]string, error) {
-			return store.Groups().ListAuthorizedNamespaces(ctx, identityID, groupIDs)
-		}),
 		kubeapi.WithGatewayVersion(version),
 	)
 	if err != nil {
@@ -259,7 +255,7 @@ func buildAPIRuntime(
 		logger.Error("initialize Kubernetes Pod executor failed", "error", err)
 		os.Exit(2)
 	}
-	execAPI, err := execapi.New(store, sessionAPI, podExecutor, execapi.Config{Authorizer: policyEngine})
+	execAPI, err := execapi.New(store, sessionAPI, podExecutor, execapi.Config{Authorizer: authorizer})
 	if err != nil {
 		_ = store.Close()
 		logger.Error("initialize Pod exec Task API failed", "error", err)
@@ -272,7 +268,7 @@ func buildAPIRuntime(
 		os.Exit(2)
 	}
 	fileConfig := config.Files
-	fileConfig.Authorizer = policyEngine
+	fileConfig.Authorizer = authorizer
 	fileExecutor, err := fileapi.NewKubernetesTransferExecutor(podExecutor, fileConfig.MaximumBytes)
 	if err != nil {
 		_ = store.Close()

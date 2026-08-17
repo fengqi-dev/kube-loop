@@ -124,12 +124,11 @@ data:
         allowedRoots: {{ .Values.controlPlane.files.allowedRoots | toJson }}
       logging:
         level: {{ lower (toString .Values.controlPlane.logLevel) | quote }}
-  {{- if and (not .Values.dataPlane.relayRegistry.endpoint) (not (hasPrefix "https://" $publicURL)) }}
-  {{- fail "dataPlane.relayRegistry.endpoint is required when publicURL is not HTTPS" }}
-  {{- end }}
+  {{- $publicHost := trimPrefix "http://" (trimPrefix "https://" (trimSuffix "/" $publicURL)) }}
+  {{- $websocketScheme := ternary "wss" "ws" (hasPrefix "https://" $publicURL) }}
   {{- $gatewayRelay := dict
     "controlPlaneURL" (default (printf "https://%s.%s.svc:%v" (include "kubeloop.controlPlaneRegistryName" .) .Release.Namespace .Values.controlPlane.relayRegistry.servicePort) .Values.dataPlane.relayRegistry.controlPlaneURL)
-    "endpoint" (default (printf "wss://%s%s" (trimPrefix "https://" (trimSuffix "/" $publicURL)) .Values.dataPlane.tunnelPath) .Values.dataPlane.relayRegistry.endpoint)
+    "endpoint" (default (printf "%s://%s%s" $websocketScheme $publicHost .Values.dataPlane.tunnelPath) .Values.dataPlane.relayRegistry.endpoint)
     "serverCAFile" "/var/run/secrets/kubeloop/relay-registry/ca.crt"
     "serverName" (default (printf "%s.%s.svc" (include "kubeloop.controlPlaneRegistryName" .) .Release.Namespace) .Values.dataPlane.relayRegistry.serverName)
     "replayEntries" (int .Values.dataPlane.relayRegistry.replayEntries) }}

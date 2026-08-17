@@ -11,11 +11,10 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"slices"
 	"strings"
 	"time"
 
-	adminauthorization "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/authorization"
+	adminauthentication "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/authentication"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 	"github.com/google/uuid"
 )
@@ -65,7 +64,7 @@ func New(store Store) (*Service, error) {
 func (service *Service) ExchangeIdentity(
 	ctx context.Context,
 	identityID, authorizationID string,
-	authentication adminauthorization.AuthenticationType,
+	authentication adminauthentication.Type,
 	requestID string,
 ) (Credentials, error) {
 	identityID = strings.TrimSpace(identityID)
@@ -74,7 +73,7 @@ func (service *Service) ExchangeIdentity(
 	if _, err := uuid.Parse(identityID); err != nil {
 		return Credentials{}, ErrAuthenticationFailed
 	}
-	if _, err := uuid.Parse(authorizationID); err != nil || requestID == "" || authentication != adminauthorization.AuthenticationNormal {
+	if _, err := uuid.Parse(authorizationID); err != nil || requestID == "" || authentication != adminauthentication.Normal {
 		return Credentials{}, ErrAuthenticationFailed
 	}
 	sessionToken, err := randomToken(service.random)
@@ -175,7 +174,7 @@ func (service *Service) Authenticate(ctx context.Context, token string) (storage
 	if stored.RevokedAt != nil || !stored.IdleExpiresAt.After(now) || !stored.AbsoluteExpiresAt.After(now) {
 		return storage.AdminSession{}, ErrSessionInvalid
 	}
-	if stored.AuthenticationType == string(adminauthorization.AuthenticationNormal) {
+	if stored.AuthenticationType == string(adminauthentication.Normal) {
 		active, err := service.store.OAuthSessions().RequestActive(ctx, stored.AuthorizationID, now)
 		if err != nil || !active {
 			return storage.AdminSession{}, ErrSessionInvalid
@@ -207,44 +206,21 @@ func (service *Service) Authenticate(ctx context.Context, token string) (storage
 func (service *Service) AuthenticateSubject(
 	ctx context.Context,
 	token string,
-) (storage.AdminSession, adminauthorization.Subject, error) {
+) (storage.AdminSession, adminauthentication.Subject, error) {
 	stored, err := service.Authenticate(ctx, token)
 	if err != nil {
-		return storage.AdminSession{}, adminauthorization.Subject{}, err
+		return storage.AdminSession{}, adminauthentication.Subject{}, err
 	}
-	subject := adminauthorization.Subject{Authentication: adminauthorization.AuthenticationType(stored.AuthenticationType)}
-	if subject.Authentication != adminauthorization.AuthenticationNormal {
-		return storage.AdminSession{}, adminauthorization.Subject{}, ErrSessionInvalid
+	subject := adminauthentication.Subject{Authentication: adminauthentication.Type(stored.AuthenticationType)}
+	if subject.Authentication != adminauthentication.Normal {
+		return storage.AdminSession{}, adminauthentication.Subject{}, ErrSessionInvalid
 	}
 	identity, err := service.store.Identities().GetByID(ctx, stored.IdentityID)
 	if err != nil || identity.Status != "active" {
-		return storage.AdminSession{}, adminauthorization.Subject{}, ErrSessionInvalid
+		return storage.AdminSession{}, adminauthentication.Subject{}, ErrSessionInvalid
 	}
 	subject.ID = identity.ID
-	subject.Groups, err = service.identityGroups(ctx, identity.ID)
-	if err != nil {
-		return storage.AdminSession{}, adminauthorization.Subject{}, ErrSessionInvalid
-	}
 	return stored, subject, nil
-}
-
-func (service *Service) identityGroups(ctx context.Context, identityID string) ([]string, error) {
-	organizations, err := service.store.Organizations().ListForIdentity(ctx, identityID)
-	if err != nil {
-		return nil, err
-	}
-	groups := make([]string, 0)
-	for _, organization := range organizations {
-		items, listErr := service.store.Groups().ListForIdentity(ctx, organization.ID, identityID)
-		if listErr != nil {
-			return nil, listErr
-		}
-		for _, group := range items {
-			groups = append(groups, group.ID)
-		}
-	}
-	slices.Sort(groups)
-	return slices.Compact(groups), nil
 }
 
 func VerifyCSRF(stored storage.AdminSession, token string) error {

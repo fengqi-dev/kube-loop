@@ -32,7 +32,7 @@ func (externalAccessAuthorizer) Authorize(
 	authorization.Subject,
 	authorization.Request,
 ) authorization.Decision {
-	return authorization.Decision{Allowed: true, RuleID: "external-access-test"}
+	return authorization.Decision{Allowed: true}
 }
 
 func TestSameOriginTLSProxyPreservesControlPlaneLimitsAndLongLivedWebSocket(t *testing.T) {

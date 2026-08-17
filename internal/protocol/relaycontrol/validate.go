@@ -94,7 +94,7 @@ func (response HeartbeatResponse) Validate(now time.Time) error {
 
 func validTicketIssuer(value string) bool {
 	parsed, err := url.Parse(value)
-	return err == nil && parsed.Scheme == "https" && parsed.Host != "" && parsed.User == nil &&
+	return err == nil && (parsed.Scheme == "http" || parsed.Scheme == "https") && parsed.Host != "" && parsed.User == nil &&
 		parsed.RawQuery == "" && parsed.Fragment == ""
 }
 
@@ -218,10 +218,10 @@ func validateLeaseTiming(expiresAt time.Time, heartbeat time.Duration, now time.
 
 func validateEndpoint(value string) error {
 	parsed, err := url.Parse(strings.TrimSpace(value))
-	if err != nil || parsed.Scheme != "wss" || parsed.Host == "" || parsed.User != nil ||
+	if err != nil || (parsed.Scheme != "ws" && parsed.Scheme != "wss") || parsed.Host == "" || parsed.User != nil ||
 		parsed.RawQuery != "" || parsed.Fragment != "" || parsed.Path == "" ||
 		strings.TrimRight(parsed.Path, "/") != parsed.Path {
-		return errors.New("relay endpoint must be an absolute WSS URL with a fixed path")
+		return errors.New("relay endpoint must be an absolute WS or WSS URL with a fixed path")
 	}
 	return nil
 }

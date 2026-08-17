@@ -4,13 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"mime"
 	"net/http"
 	"strings"
 	"time"
 
-	adminauthorization "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/authorization"
+	adminauthentication "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/authentication"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/authn"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 	"github.com/google/uuid"
@@ -35,12 +34,11 @@ func WithTokenExchange(authenticator TokenAuthenticator) Option {
 }
 
 func (handler *Handler) exchangeToken(ctx *echo.Context) error {
-	writer, request := ctx.Response(), ctx.Request()
-	requestID := ensureRequestID(writer, request)
+	request := ctx.Request()
+	requestID := ensureRequestID(ctx)
 	_, sourceKey := sourceAddress(request.RemoteAddr)
 	if !handler.tokenLimit.allow(sourceKey) {
-		writeError(writer, http.StatusTooManyRequests, "rate_limited", "management authentication failed", requestID)
-		return nil
+		return writeError(ctx, http.StatusTooManyRequests, "rate_limited", "management authentication failed", requestID)
 	}
 	succeeded := false
 	defer func() {
@@ -49,49 +47,35 @@ func (handler *Handler) exchangeToken(ctx *echo.Context) error {
 		}
 	}()
 	if request.Header.Get("Origin") != handler.origin || request.Header.Get("Sec-Fetch-Site") == "cross-site" {
-		writeError(writer, http.StatusUnauthorized, "unauthenticated", "management authentication failed", requestID)
-		return nil
+		return writeError(ctx, http.StatusUnauthorized, "unauthenticated", "management authentication failed", requestID)
 	}
 	mediaType, _, err := mime.ParseMediaType(request.Header.Get("Content-Type"))
 	if err != nil || mediaType != "application/json" {
-		writeError(writer, http.StatusUnsupportedMediaType, "invalid_request", "application/json is required", requestID)
-		return nil
+		return writeError(ctx, http.StatusUnsupportedMediaType, "invalid_request", "application/json is required", requestID)
 	}
-	request.Body = http.MaxBytesReader(writer, request.Body, handler.maxBody)
-	decoder := json.NewDecoder(request.Body)
-	decoder.DisallowUnknownFields()
-	var input map[string]json.RawMessage
-	if err := decoder.Decode(&input); err != nil || input == nil || len(input) != 0 {
-		writeError(writer, http.StatusBadRequest, "invalid_request", "invalid request", requestID)
-		return nil
-	}
-	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-		writeError(writer, http.StatusBadRequest, "invalid_request", "invalid request", requestID)
-		return nil
+	var input map[string]any
+	if err := ctx.Bind(&input); err != nil || input == nil || len(input) != 0 {
+		return writeError(ctx, http.StatusBadRequest, "invalid_request", "invalid request", requestID)
 	}
 	accessToken, ok := bearerToken(request.Header.Values("Authorization"))
 	if !ok {
-		writeError(writer, http.StatusUnauthorized, "unauthenticated", "management authentication failed", requestID)
-		return nil
+		return writeError(ctx, http.StatusUnauthorized, "unauthenticated", "management authentication failed", requestID)
 	}
 	identity, err := handler.tokenAuth.Authenticate(request.Context(), accessToken)
 	if err != nil {
-		writeError(writer, http.StatusUnauthorized, "unauthenticated", "management authentication failed", requestID)
-		return nil
+		return writeError(ctx, http.StatusUnauthorized, "unauthenticated", "management authentication failed", requestID)
 	}
 	issued, err := handler.sessions.ExchangeIdentity(
-		request.Context(), identity.Identity.ID, identity.AuthorizationID, adminauthorization.AuthenticationNormal, requestID,
+		request.Context(), identity.Identity.ID, identity.AuthorizationID, adminauthentication.Normal, requestID,
 	)
 	if err != nil {
-		writeError(writer, http.StatusUnauthorized, "unauthenticated", "management authentication failed", requestID)
-		return nil
+		return writeError(ctx, http.StatusUnauthorized, "unauthenticated", "management authentication failed", requestID)
 	}
-	setSessionCookie(writer, issued)
+	handler.setSessionCookies(ctx, issued)
 	succeeded = true
-	writeJSON(writer, http.StatusCreated, map[string]any{
+	return ctx.JSON(http.StatusCreated, map[string]any{
 		"csrfToken": issued.CSRFToken, "expiresAt": issued.ExpiresAt.Format(time.RFC3339Nano), "requestId": requestID,
 	})
-	return nil
 }
 
 func bearerToken(values []string) (string, bool) {
@@ -110,7 +94,7 @@ func (handler *Handler) recordTokenExchangeFailure(request *http.Request, reques
 	if err != nil {
 		return
 	}
-	_ = handler.readAPI.status.Audit().Append(request.Context(), storage.AuditEvent{
+	_ = handler.readAPI.repositories.Audit().Append(request.Context(), storage.AuditEvent{
 		ID: uuid.NewString(), Action: "admin.session.identity.exchange", ResourceType: "admin-session",
 		Outcome: "failure", RequestID: requestID, Metadata: metadata, CreatedAt: time.Now().UTC(),
 	})

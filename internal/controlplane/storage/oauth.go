@@ -21,10 +21,10 @@ func (repository *oauthClientRepository) Create(ctx context.Context, client OAut
 	redirects, _ := json.Marshal(client.RedirectURIs)
 	grants, _ := json.Marshal(client.GrantTypes)
 	scopes, _ := json.Marshal(client.Scopes)
-	query := repository.bind(`INSERT INTO oauth_clients(id, organization_id, name, public, redirect_uris_json,
+	query := repository.bind(`INSERT INTO oauth_clients(id, name, public, redirect_uris_json,
 		grant_types_json, scopes_json, trusted, enabled, builtin, machine_identity_id,
-		created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-	_, err := repository.executor.ExecContext(ctx, query, client.ID, nullableString(client.OrganizationID), client.Name,
+		created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+	_, err := repository.executor.ExecContext(ctx, query, client.ID, client.Name,
 		client.Public, string(redirects), string(grants), string(scopes), client.Trusted,
 		client.Enabled, client.Builtin, nullableString(client.MachineIdentityID), formatTime(client.CreatedAt), formatTime(client.UpdatedAt))
 	return mapWriteError(err)
@@ -35,7 +35,7 @@ func (repository *oauthClientRepository) Get(ctx context.Context, id string) (OA
 	if id == "" {
 		return OAuthClient{}, errors.New("OAuth client ID is required")
 	}
-	query := repository.bind(`SELECT id, organization_id, name, public, redirect_uris_json, grant_types_json,
+	query := repository.bind(`SELECT id, name, public, redirect_uris_json, grant_types_json,
 		scopes_json, trusted, enabled, builtin, machine_identity_id, created_at, updated_at
 		FROM oauth_clients WHERE id = ?`)
 	client, err := scanOAuthClient(repository.executor.QueryRowContext(ctx, query, id))
@@ -49,7 +49,7 @@ func (repository *oauthClientRepository) Get(ctx context.Context, id string) (OA
 }
 
 func (repository *oauthClientRepository) List(ctx context.Context) ([]OAuthClient, error) {
-	rows, err := repository.executor.QueryContext(ctx, `SELECT id, organization_id, name, public, redirect_uris_json,
+	rows, err := repository.executor.QueryContext(ctx, `SELECT id, name, public, redirect_uris_json,
 		grant_types_json, scopes_json, trusted, enabled, builtin, machine_identity_id, created_at, updated_at
 		FROM oauth_clients ORDER BY builtin DESC, name, id`)
 	if err != nil {
@@ -88,10 +88,10 @@ func (repository *oauthClientRepository) Update(ctx context.Context, client OAut
 	redirects, _ := json.Marshal(client.RedirectURIs)
 	grants, _ := json.Marshal(client.GrantTypes)
 	scopes, _ := json.Marshal(client.Scopes)
-	query := repository.bind(`UPDATE oauth_clients SET organization_id = ?, name = ?, public = ?, redirect_uris_json = ?,
+	query := repository.bind(`UPDATE oauth_clients SET name = ?, public = ?, redirect_uris_json = ?,
 		grant_types_json = ?, scopes_json = ?, trusted = ?, enabled = ?,
 		machine_identity_id = ?, updated_at = ? WHERE id = ?`)
-	result, err := repository.executor.ExecContext(ctx, query, nullableString(client.OrganizationID), client.Name, client.Public,
+	result, err := repository.executor.ExecContext(ctx, query, client.Name, client.Public,
 		string(redirects), string(grants), string(scopes), client.Trusted, client.Enabled,
 		nullableString(client.MachineIdentityID), formatTime(client.UpdatedAt), client.ID)
 	if err != nil {
@@ -173,8 +173,8 @@ func (repository *oauthClientRepository) GetSecret(ctx context.Context, clientID
 func scanOAuthClient(row rowScanner) (OAuthClient, error) {
 	var c OAuthClient
 	var redirects, grants, scopes, created, updated string
-	var organization, machine sql.NullString
-	err := row.Scan(&c.ID, &organization, &c.Name, &c.Public, &redirects, &grants, &scopes,
+	var machine sql.NullString
+	err := row.Scan(&c.ID, &c.Name, &c.Public, &redirects, &grants, &scopes,
 		&c.Trusted, &c.Enabled, &c.Builtin, &machine, &created, &updated)
 	if err != nil {
 		return c, err
@@ -188,7 +188,6 @@ func scanOAuthClient(row rowScanner) (OAuthClient, error) {
 	if err = json.Unmarshal([]byte(scopes), &c.Scopes); err != nil {
 		return c, errors.New("decode OAuth client scopes")
 	}
-	c.OrganizationID = organization.String
 	c.MachineIdentityID = machine.String
 	c.CreatedAt, err = parseTime(created, "OAuth client creation time")
 	if err == nil {

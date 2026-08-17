@@ -5,27 +5,22 @@ import (
 	"strings"
 )
 
-const baselineSchemaVersion = 1
+const currentSchemaID = "kubeloop-v1"
 
 //go:embed schema.sqlite.sql
 var sqliteBaselineSchema string
 
-type migration struct {
-	version    int
-	sqlite     []string
-	postgresql []string
-	mysql      []string
-}
-
-var migrations = func() []migration {
+func schemaStatements(backend Backend) []string {
 	sqlite := splitSchema(sqliteBaselineSchema)
-	return []migration{{
-		version:    baselineSchemaVersion,
-		sqlite:     sqlite,
-		postgresql: postgresqlMigrationStatements(sqlite),
-		mysql:      mysqlMigrationStatements(sqlite),
-	}}
-}()
+	switch backend {
+	case BackendPostgreSQL:
+		return postgresqlSchemaStatements(sqlite)
+	case BackendMySQL:
+		return mysqlSchemaStatements(sqlite)
+	default:
+		return sqlite
+	}
+}
 
 func splitSchema(schema string) []string {
 	parts := strings.Split(schema, ";")
@@ -36,8 +31,4 @@ func splitSchema(schema string) []string {
 		}
 	}
 	return statements
-}
-
-func currentSchemaVersion() int {
-	return baselineSchemaVersion
 }

@@ -1,7 +1,6 @@
 package kubeapi_test
 
 import (
-	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -35,6 +34,8 @@ func TestReadOnlyKubernetesRoutesUseIdentityAndStableDocuments(t *testing.T) {
 		switch request.URL.Path {
 		case "/version":
 			_, _ = writer.Write([]byte(`{"gitVersion":"v1.31.4","platform":"linux/amd64"}`))
+		case "/api/v1/namespaces":
+			_, _ = writer.Write([]byte(`{"apiVersion":"v1","kind":"NamespaceList","metadata":{"resourceVersion":"42"},"items":[{"metadata":{"name":"development"},"status":{"phase":"Active"}}]}`))
 		case "/api/v1/namespaces/development":
 			_, _ = writer.Write([]byte(`{"apiVersion":"v1","kind":"Namespace","metadata":{"name":"development"},"status":{"phase":"Active"}}`))
 		case "/api/v1/namespaces/development/pods":
@@ -158,26 +159,21 @@ func TestInvalidRoutesAndPaginationDoNotReachKubernetes(t *testing.T) {
 	}
 }
 
-func TestNamespaceInventoryFiltersPolicyAndForwardsValidatedSelectors(t *testing.T) {
+func TestNamespaceInventoryForwardsValidatedSelectors(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Content-Type", "application/json")
 		switch request.URL.Path {
-		case "/api/v1/namespaces/development":
-			_, _ = writer.Write([]byte(`{"apiVersion":"v1","kind":"Namespace","metadata":{"name":"development","labels":{"team":"platform"}},"status":{"phase":"Active"}}`))
-		case "/api/v1/namespaces/secret":
-			_, _ = writer.Write([]byte(`{"apiVersion":"v1","kind":"Namespace","metadata":{"name":"secret"},"status":{"phase":"Active"}}`))
+		case "/api/v1/namespaces":
+			if request.URL.Query().Get("labelSelector") != "team=platform" || request.URL.Query().Get("fieldSelector") != "status.phase=Active" {
+				t.Fatalf("selectors = %s", request.URL.RawQuery)
+			}
+			_, _ = writer.Write([]byte(`{"apiVersion":"v1","kind":"NamespaceList","metadata":{"resourceVersion":"42"},"items":[{"metadata":{"name":"development","labels":{"team":"platform"}},"status":{"phase":"Active"}}]}`))
 		default:
 			http.NotFound(writer, request)
 		}
 	}))
 	defer upstream.Close()
-	policy, err := authorization.New(authorization.Policy{Rules: []authorization.Rule{
-		{ID: "development-inventory", Subjects: []string{"*"}, Namespaces: []string{"development"}, Operations: []string{"list"}, ResourceKinds: []string{"capabilities"}},
-	}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	server := newServerWithPolicy(t, upstream.URL, policy)
+	server := newServerWithPolicy(t, upstream.URL, authorization.NewAuthenticated())
 	response := httptest.NewRecorder()
 	server.Handler().ServeHTTP(response, httptest.NewRequest(
 		http.MethodGet,
@@ -190,7 +186,7 @@ func TestNamespaceInventoryFiltersPolicyAndForwardsValidatedSelectors(t *testing
 	}
 }
 
-func TestNamespaceInventoryReturnsEmptyListWithoutNamespaceAuthorization(t *testing.T) {
+func TestNamespaceInventoryDoesNotApplyIAMAuthorization(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Content-Type", "application/json")
 		if request.URL.Path != "/api/v1/namespaces" {
@@ -200,12 +196,11 @@ func TestNamespaceInventoryReturnsEmptyListWithoutNamespaceAuthorization(t *test
 		_, _ = writer.Write([]byte(`{"apiVersion":"v1","kind":"NamespaceList","metadata":{"resourceVersion":"42"},"items":[{"metadata":{"name":"secret"},"status":{"phase":"Active"}}]}`))
 	}))
 	defer upstream.Close()
-	server := newServerWithPolicy(t, upstream.URL, authorization.NewDenyAll())
+	server := newServerWithPolicy(t, upstream.URL, authorization.NewAuthenticated())
 	response := httptest.NewRecorder()
 	server.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/kubeloop/api/namespaces", nil))
-	if response.Code != http.StatusOK || strings.Contains(response.Body.String(), "secret") ||
-		!strings.Contains(response.Body.String(), `"items":[]`) {
-		t.Fatalf("unauthorized namespace list status = %d body = %s", response.Code, response.Body.String())
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"name":"secret"`) {
+		t.Fatalf("namespace list status = %d body = %s", response.Code, response.Body.String())
 	}
 }
 
@@ -227,91 +222,9 @@ func TestKubernetesErrorsAreSanitized(t *testing.T) {
 	}
 }
 
-func TestStreamCapabilitiesRequireBothCreateAndStreamPolicyOperations(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if request.URL.Path != "/apis/authorization.k8s.io/v1/selfsubjectaccessreviews" {
-			http.NotFound(writer, request)
-			return
-		}
-		_, _ = writer.Write([]byte(`{"apiVersion":"authorization.k8s.io/v1","kind":"SelfSubjectAccessReview","status":{"allowed":true}}`))
-	}))
-	defer upstream.Close()
-	policy, err := authorization.New(authorization.Policy{Rules: []authorization.Rule{
-		{ID: "capabilities", Subjects: []string{"*"}, Namespaces: []string{"development"}, Operations: []string{"list"}, ResourceKinds: []string{"capabilities"}},
-		{ID: "create-only", Subjects: []string{"*"}, Namespaces: []string{"development"}, Operations: []string{"create"}, ResourceKinds: []string{"pod-exec", "file-transfers"}},
-	}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	server := newServerWithPolicy(t, upstream.URL, policy)
-	response := httptest.NewRecorder()
-	server.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/kubeloop/api/capabilities?namespace=development", nil))
-	if response.Code != http.StatusOK || strings.Contains(response.Body.String(), "pods.exec") || strings.Contains(response.Body.String(), "pods.files") {
-		t.Fatalf("status = %d body = %s", response.Code, response.Body.String())
-	}
-}
-
-func TestFileManagementCapabilityRequiresEveryPolicyOperation(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if request.URL.Path != "/apis/authorization.k8s.io/v1/selfsubjectaccessreviews" {
-			http.NotFound(writer, request)
-			return
-		}
-		_, _ = writer.Write([]byte(`{"apiVersion":"authorization.k8s.io/v1","kind":"SelfSubjectAccessReview","status":{"allowed":true}}`))
-	}))
-	defer upstream.Close()
-	policy, err := authorization.New(authorization.Policy{Rules: []authorization.Rule{
-		{ID: "capabilities", Subjects: []string{"*"}, Namespaces: []string{"development"}, Operations: []string{"list"}, ResourceKinds: []string{"capabilities"}},
-		{ID: "incomplete-files", Subjects: []string{"*"}, Namespaces: []string{"development"}, Operations: []string{"list", "create", "update", "delete"}, ResourceKinds: []string{"pod-files"}},
-	}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	server := newServerWithPolicy(t, upstream.URL, policy)
-	response := httptest.NewRecorder()
-	server.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/kubeloop/api/capabilities?namespace=development", nil))
-	if response.Code != http.StatusOK || strings.Contains(response.Body.String(), "pods.files.manage") {
-		t.Fatalf("status = %d body = %s", response.Code, response.Body.String())
-	}
-}
-
-func TestTunnelAndPortForwardCapabilitiesRequireCompleteGatewayPolicy(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if request.URL.Path != "/apis/authorization.k8s.io/v1/selfsubjectaccessreviews" {
-			http.NotFound(writer, request)
-			return
-		}
-		_, _ = writer.Write([]byte(`{"apiVersion":"authorization.k8s.io/v1","kind":"SelfSubjectAccessReview","status":{"allowed":true}}`))
-	}))
-	defer upstream.Close()
-	policy, err := authorization.New(authorization.Policy{Rules: []authorization.Rule{
-		{ID: "capabilities", Subjects: []string{"*"}, Namespaces: []string{"development"}, Operations: []string{"list"}, ResourceKinds: []string{"capabilities"}},
-		{ID: "sessions", Subjects: []string{"*"}, Namespaces: []string{"development"}, Operations: []string{"create", "get", "heartbeat", "delete"}, ResourceKinds: []string{"sessions"}},
-		{ID: "incomplete-forward", Subjects: []string{"*"}, Namespaces: []string{"development"}, Operations: []string{"create", "list"}, ResourceKinds: []string{"port-forwards"}},
-	}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	server := newServerWithPolicy(t, upstream.URL, policy)
-	response := httptest.NewRecorder()
-	server.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/kubeloop/api/capabilities?namespace=development", nil))
-	if response.Code != http.StatusOK {
-		t.Fatalf("status = %d body = %s", response.Code, response.Body.String())
-	}
-	if strings.Contains(response.Body.String(), "cluster.tunnel") || strings.Contains(response.Body.String(), "ports.forward") {
-		t.Fatalf("incomplete workflow policy was advertised: %s", response.Body.String())
-	}
-}
-
 func newServer(t *testing.T, upstreamURL string) *controlplane.Server {
 	t.Helper()
-	policy, err := authorization.New(authorization.Policy{Rules: []authorization.Rule{{
-		ID: "test-all", Subjects: []string{"*"}, Namespaces: []string{"*"}, Operations: []string{"*"}, ResourceKinds: []string{"*"},
-	}}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return newServerWithPolicy(t, upstreamURL, policy)
+	return newServerWithPolicy(t, upstreamURL, authorization.NewAuthenticated())
 }
 
 func newServerWithPolicy(t *testing.T, upstreamURL string, policy authorization.Authorizer) *controlplane.Server {
@@ -327,18 +240,6 @@ func newServerWithPolicy(t *testing.T, upstreamURL string, policy authorization.
 	}
 	handler, err := kubeapi.New(
 		provider,
-		kubeapi.WithCapabilityAuthorizer(policy),
-		kubeapi.WithAuthorizedNamespaces(func(ctx context.Context, identityID string, groups []string) ([]string, error) {
-			subject := authorization.Subject{ID: identityID, Groups: groups}
-			result := make([]string, 0, 1)
-			for _, namespace := range []string{"development"} {
-				if policy.Authorize(ctx, subject, authorization.Request{Operation: "list", Namespace: namespace,
-					ResourceKind: "capabilities"}).Allowed {
-					result = append(result, namespace)
-				}
-			}
-			return result, nil
-		}),
 		kubeapi.WithGatewayVersion("v2-test"),
 	)
 	if err != nil {

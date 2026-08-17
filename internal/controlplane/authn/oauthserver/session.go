@@ -12,14 +12,13 @@ import (
 // introspected without a second identity lookup.
 type Session struct {
 	*openid.DefaultSession
-	IdentityID      string   `json:"identity_id"`
-	ProviderID      string   `json:"provider_id"`
-	Groups          []string `json:"groups,omitempty"`
-	DisplayName     string   `json:"display_name,omitempty"`
-	Email           string   `json:"email,omitempty"`
-	AuthorizationID string   `json:"authorization_id"`
-	Machine         bool     `json:"machine,omitempty"`
-	DeviceID        string   `json:"device_id,omitempty"`
+	IdentityID      string `json:"identity_id"`
+	ProviderID      string `json:"provider_id"`
+	DisplayName     string `json:"display_name,omitempty"`
+	Email           string `json:"email,omitempty"`
+	AuthorizationID string `json:"authorization_id"`
+	Machine         bool   `json:"machine,omitempty"`
+	DeviceID        string `json:"device_id,omitempty"`
 }
 
 func NewSession() *Session { return &Session{DefaultSession: openid.NewDefaultSession()} }

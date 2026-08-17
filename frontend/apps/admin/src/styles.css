@@ -135,9 +135,6 @@ select,
 textarea {
   font: inherit;
 }
-button {
-  color: inherit;
-}
 button:focus-visible,
 input:focus-visible,
 select:focus-visible,

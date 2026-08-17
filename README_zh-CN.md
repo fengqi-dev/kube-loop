@@ -26,6 +26,56 @@ KubeLoop 是面向 Kubernetes 开发的桌面网络工具。它像一条只连�
 
 ## 安装
 
+### 使用 Helm 安装 KubeLoop Server
+
+前置条件：
+
+- Kubernetes 1.25 或更高版本，以及 Helm 3
+- 已路由到 Kubernetes Ingress Controller 的域名
+- 按照 [Helm Chart 指南](charts/kubeloop/README.md#relay-registry-and-relayticket-keys)
+  创建 RelayTicket 签名密钥与内部 Relay Registry TLS Secret
+
+在 `kubeloop-system` 中创建 `kubeloop-relay-control-plane` Secret 后，
+安装已发布的 OCI Chart：
+
+```bash
+helm upgrade --install kubeloop \
+  oci://ghcr.io/fengqi-dev/kube-loop/charts/kubeloop \
+  --version 2.0.0-beta.7 \
+  --namespace kubeloop-system \
+  --create-namespace \
+  --set publicURL=http://kubeloop.example.com \
+  --set controlPlane.admin.publicURL=http://kubeloop.example.com \
+  --set controlPlane.relay.existingSecret=kubeloop-relay-control-plane \
+  --set ingress.enabled=true \
+  --set ingress.host=kubeloop.example.com \
+  --set ingress.className=nginx \
+  --wait
+```
+
+请根据实际环境替换版本、域名、Ingress Class 和 Secret 名称。安装后查看初始管理员说明，
+并验证服务发现接口：
+
+```bash
+helm get notes kubeloop --namespace kubeloop-system
+curl http://kubeloop.example.com/.well-known/kubeloop
+```
+
+Ingress 默认不启用 TLS。若需 HTTPS，请把两个 public URL 都改为 `https://...`，
+并设置 `ingress.tls.enabled=true` 和 `ingress.tls.secretName`。
+
+卸载工作负载：
+
+```bash
+helm uninstall kubeloop --namespace kubeloop-system --wait
+```
+
+Chart 会删除工作负载和由 Chart 创建的 SQLite PVC，但会有意保留 CRD，以及自动生成的
+认证和初始化 Secret。密钥生成、Gateway API、外部 PostgreSQL/MySQL、升级与彻底清理步骤
+请参阅[完整 Helm 指南](charts/kubeloop/README.md)。
+
+### 桌面客户端
+
 ### macOS 与 Linux
 
 ```bash
@@ -59,7 +109,7 @@ irm https://raw.githubusercontent.com/fengqi-dev/kube-loop/main/scripts/install.
 
 ## 连接集群
 
-1. 打开 KubeLoop，添加 KubeLoop Server 的 HTTPS 地址并完成能力发现。
+1. 打开 KubeLoop，添加 KubeLoop Server 的 HTTP 或 HTTPS 地址并完成能力发现。
 2. 在系统浏览器中登录，然后选择已授权的 Namespace。
 3. 选择 **SOCKS5 proxy** 或 **TUN mode**，再点击**连接**。
 4. 仅 TUN 模式首次使用时需要批准安装本地网络 Helper。

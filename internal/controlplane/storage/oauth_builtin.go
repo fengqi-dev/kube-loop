@@ -46,8 +46,8 @@ func EnsureBuiltinOAuthClients(ctx context.Context, repository OAuthClientReposi
 		if err != nil {
 			return err
 		}
-		// A pre-migration collision must be upgraded to protected first-party
-		// semantics and cannot retain risky grants.
+		// Built-in clients always retain protected first-party semantics and
+		// cannot retain risky grants.
 		client.CreatedAt = stored.CreatedAt
 		if err := repository.Update(ctx, client); err != nil {
 			return err

@@ -5,9 +5,7 @@ import (
 	"log/slog"
 	"os"
 
-	adminauthorization "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/authorization"
 	adminbootstrap "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/bootstrap"
-	adminiam "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/iam"
 	adminlocaluser "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/localuser"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/authorization"
 	controlplanekubernetes "github.com/fengqi-dev/kube-loop/internal/controlplane/kubernetes"
@@ -17,15 +15,13 @@ import (
 )
 
 type bootstrapRuntime struct {
-	Store                  *controlplanestorage.Store
-	MaintenanceWorker      *maintenance.Worker
-	LocalUsers             *adminlocaluser.Service
-	IAMBootstrap           *adminbootstrap.Service
-	ManagementPolicyEngine *adminauthorization.Engine
-	IAMLoader              *adminiam.Loader
-	PolicyEngine           authorization.Authorizer
-	KubernetesConfig       controlplanekubernetes.Config
-	KubernetesProvider     *controlplanekubernetes.Provider
+	Store              *controlplanestorage.Store
+	MaintenanceWorker  *maintenance.Worker
+	LocalUsers         *adminlocaluser.Service
+	IAMBootstrap       *adminbootstrap.Service
+	Authorizer         authorization.Authorizer
+	KubernetesConfig   controlplanekubernetes.Config
+	KubernetesProvider *controlplanekubernetes.Provider
 }
 
 func bootstrapControlPlane(
@@ -51,18 +47,6 @@ func bootstrapControlPlane(
 	if err != nil {
 		_ = stateStore.Close()
 		logger.Error("initialize Management Plane administrator failed", "error", err)
-		os.Exit(2)
-	}
-	managementPolicyEngine, err := adminauthorization.NewDenyAll()
-	if err != nil {
-		_ = stateStore.Close()
-		logger.Error("initialize Management Plane authorization failed", "error", err)
-		os.Exit(2)
-	}
-	iamLoader, err := adminiam.NewLoader(stateStore, managementPolicyEngine)
-	if err != nil {
-		_ = stateStore.Close()
-		logger.Error("initialize Management Plane policy loader failed", "error", err)
 		os.Exit(2)
 	}
 	iamBootstrap, err := adminbootstrap.New(stateStore, localUsers)
@@ -93,18 +77,16 @@ func bootstrapControlPlane(
 		)
 		if bootstrapErr != nil {
 			_ = stateStore.Close()
-			logger.Error("initialize default IAM identity and organization failed", "error", bootstrapErr)
+			logger.Error("initialize default IAM identity failed", "error", bootstrapErr)
 			os.Exit(2)
 		}
 		if created {
 			if bootstrapConfig.PasswordFile == "" {
-				logger.Warn("default IAM identity and organization created; the initial password will not be shown again",
-					"username", result.Identity.Username, "initial_password", initialPassword,
-					"organization", result.Organization.Name, "organization_slug", result.Organization.Slug)
+				logger.Warn("default IAM identity created; the initial password will not be shown again",
+					"username", result.Identity.Username, "initial_password", initialPassword)
 			} else {
-				logger.Warn("default IAM identity and organization created; retrieve the initial password from its configured Secret",
-					"username", result.Identity.Username, "organization", result.Organization.Name,
-					"organization_slug", result.Organization.Slug)
+				logger.Warn("default IAM identity created; retrieve the initial password from its configured Secret",
+					"username", result.Identity.Username)
 			}
 		}
 	} else {
@@ -119,11 +101,6 @@ func bootstrapControlPlane(
 				"token", bootstrapToken, "expires_at", bootstrapExpiresAt)
 		}
 	}
-	if err := iamLoader.Load(signalContext); err != nil {
-		_ = stateStore.Close()
-		logger.Error("load active Management Plane policy failed", "error", err)
-		os.Exit(1)
-	}
 	kubernetesConfig := config.Kubernetes
 	if kubernetesConfig.UserAgent == controlplanekubernetes.DefaultUserAgent {
 		kubernetesConfig.UserAgent = "kube-loop-control-plane/" + version
@@ -134,11 +111,9 @@ func bootstrapControlPlane(
 		logger.Error("initialize in-cluster Kubernetes Provider failed", "error", err)
 		os.Exit(1)
 	}
-	policyEngine := authorization.NewUnified(managementPolicyEngine, nil)
 	return &bootstrapRuntime{
 		Store: stateStore, MaintenanceWorker: maintenanceWorker, LocalUsers: localUsers, IAMBootstrap: iamBootstrap,
-		ManagementPolicyEngine: managementPolicyEngine, IAMLoader: iamLoader,
-		PolicyEngine:     policyEngine,
+		Authorizer:       authorization.NewAuthenticated(),
 		KubernetesConfig: kubernetesConfig, KubernetesProvider: kubernetesProvider,
 	}
 }

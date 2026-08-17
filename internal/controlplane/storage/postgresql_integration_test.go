@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
 	"net/url"
 	"strings"
 	"sync"
@@ -36,8 +35,9 @@ func TestPostgreSQLBackendIntegration(t *testing.T) {
 	if store.Backend() != BackendPostgreSQL {
 		t.Fatalf("backend = %q", store.Backend())
 	}
-	if version, err := store.SchemaVersion(context.Background()); err != nil || version != currentSchemaVersion() {
-		t.Fatalf("schema version = %d, error = %v", version, err)
+	var schemaID string
+	if err := store.db.QueryRow(`SELECT schema_id FROM schema_metadata WHERE id = 1`).Scan(&schemaID); err != nil || schemaID != currentSchemaID {
+		t.Fatalf("schema ID = %q, error = %v", schemaID, err)
 	}
 	if stats := store.db.Stats(); stats.MaxOpenConnections != 7 {
 		t.Fatalf("max open connections = %d", stats.MaxOpenConnections)
@@ -84,7 +84,7 @@ func TestPostgreSQLBackendIntegration(t *testing.T) {
 	}
 }
 
-func TestPostgreSQLMigrationFailureRollsBackVersion(t *testing.T) {
+func TestPostgreSQLRejectsNonemptyUninitializedDatabase(t *testing.T) {
 	config, cleanup := newPostgreSQLIntegrationConfig(t)
 	defer cleanup()
 	database, err := sql.Open("pgx", config.DatasourceURL)
@@ -98,44 +98,43 @@ func TestPostgreSQLMigrationFailureRollsBackVersion(t *testing.T) {
 	if err := database.Close(); err != nil {
 		t.Fatal(err)
 	}
-	expectedMigration := fmt.Sprintf("migration %d", baselineSchemaVersion)
-	if _, err := Open(context.Background(), config); err == nil || !strings.Contains(err.Error(), expectedMigration) {
-		t.Fatalf("PostgreSQL migration error = %v", err)
+	if _, err := Open(context.Background(), config); err == nil || !strings.Contains(err.Error(), "recreate") {
+		t.Fatalf("PostgreSQL uninitialized database error = %v", err)
 	}
 	database, err = sql.Open("pgx", config.DatasourceURL)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer database.Close()
-	var migrationTable sql.NullString
-	if err := database.QueryRow(`SELECT to_regclass('schema_migrations')`).Scan(&migrationTable); err != nil {
+	var metadataTable sql.NullString
+	if err := database.QueryRow(`SELECT to_regclass('schema_metadata')`).Scan(&metadataTable); err != nil {
 		t.Fatal(err)
 	}
-	if migrationTable.Valid {
-		t.Fatalf("failed PostgreSQL migration left table %q", migrationTable.String)
+	if metadataTable.Valid {
+		t.Fatalf("rejected PostgreSQL database gained table %q", metadataTable.String)
 	}
 }
 
-func TestPostgreSQLRejectsNewerSchema(t *testing.T) {
+func TestPostgreSQLRejectsUnsupportedSchema(t *testing.T) {
 	config, cleanup := newPostgreSQLIntegrationConfig(t)
 	defer cleanup()
 	store, err := Open(context.Background(), config)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.db.Exec(`INSERT INTO schema_migrations(version, applied_at) VALUES ($1, $2)`, 999, "now"); err != nil {
+	if _, err := store.db.Exec(`UPDATE schema_metadata SET schema_id = 'legacy' WHERE id = 1`); err != nil {
 		_ = store.Close()
 		t.Fatal(err)
 	}
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Open(context.Background(), config); err == nil || !strings.Contains(err.Error(), "newer") {
-		t.Fatalf("Open newer PostgreSQL schema error = %v", err)
+	if _, err := Open(context.Background(), config); err == nil || !strings.Contains(err.Error(), "recreate") {
+		t.Fatalf("Open unsupported PostgreSQL schema error = %v", err)
 	}
 }
 
-func TestPostgreSQLConcurrentMigrationsAndSerializableRetryIntegration(t *testing.T) {
+func TestPostgreSQLConcurrentInitializationAndSerializableRetryIntegration(t *testing.T) {
 	config, cleanup := newPostgreSQLIntegrationConfig(t)
 	defer cleanup()
 	config.QueryTimeout = 5 * time.Second
@@ -163,11 +162,12 @@ func TestPostgreSQLConcurrentMigrationsAndSerializableRetryIntegration(t *testin
 	}
 	for _, store := range stores {
 		if store == nil {
-			t.Fatal("concurrent migration did not return every Store")
+			t.Fatal("concurrent initialization did not return every Store")
 		}
 		defer store.Close()
-		if version, err := store.SchemaVersion(context.Background()); err != nil || version != currentSchemaVersion() {
-			t.Fatalf("concurrent schema version = %d, error = %v", version, err)
+		var schemaID string
+		if err := store.db.QueryRow(`SELECT schema_id FROM schema_metadata WHERE id = 1`).Scan(&schemaID); err != nil || schemaID != currentSchemaID {
+			t.Fatalf("concurrent schema ID = %q, error = %v", schemaID, err)
 		}
 	}
 

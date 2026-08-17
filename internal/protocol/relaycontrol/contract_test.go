@@ -81,6 +81,30 @@ func TestVersionedMessagesRoundTrip(t *testing.T) {
 	}
 }
 
+func TestRelayEndpointAllowsWSAndWSS(t *testing.T) {
+	for _, endpoint := range []string{"ws://relay.example.test/tunnel", "wss://relay.example.test/tunnel"} {
+		if err := validateEndpoint(endpoint); err != nil {
+			t.Fatalf("validateEndpoint(%q): %v", endpoint, err)
+		}
+	}
+	for _, endpoint := range []string{"http://relay.example.test/tunnel", "ws://relay.example.test"} {
+		if err := validateEndpoint(endpoint); err == nil {
+			t.Fatalf("validateEndpoint(%q) succeeded", endpoint)
+		}
+	}
+}
+
+func TestTicketIssuerAllowsHTTPAndHTTPS(t *testing.T) {
+	for _, issuer := range []string{"http://control-plane.example.test", "https://control-plane.example.test"} {
+		if !validTicketIssuer(issuer) {
+			t.Fatalf("validTicketIssuer(%q) = false", issuer)
+		}
+	}
+	if validTicketIssuer("ftp://control-plane.example.test") {
+		t.Fatal("FTP Ticket issuer was accepted")
+	}
+}
+
 func TestRegistrationCannotSubmitRelayIdentityAndUnknownVersionsFail(t *testing.T) {
 	now := time.Now().UTC()
 	request := RegistrationRequest{

@@ -751,7 +751,7 @@ func validRelayAssignment(relayID, endpoint string) bool {
 		}
 	}
 	parsed, err := url.Parse(endpoint)
-	return err == nil && parsed.Scheme == "wss" && parsed.Host != "" && parsed.User == nil &&
+	return err == nil && (parsed.Scheme == "ws" || parsed.Scheme == "wss") && parsed.Host != "" && parsed.User == nil &&
 		parsed.Path != "" && parsed.RawQuery == "" && parsed.Fragment == "" &&
 		strings.TrimRight(parsed.Path, "/") == parsed.Path
 }
@@ -1362,7 +1362,7 @@ func (client *Client) openTrafficWebSocket(
 		return nil, err
 	}
 	endpoint, err := url.Parse(ticket.Endpoint)
-	if err != nil || endpoint.Scheme != "wss" || endpoint.Host == "" {
+	if err != nil || (endpoint.Scheme != "ws" && endpoint.Scheme != "wss") || endpoint.Host == "" {
 		return nil, errors.New("RelayTicket endpoint is invalid")
 	}
 	endpoint.Path = trafficcontrol.PublicPathPrefix + "/" + url.PathEscape(string(mode)) + "/" + url.PathEscape(taskID)

@@ -20,10 +20,11 @@ dataPlane:
   logLevel: info
 ```
 
-## One public HTTPS origin
+## One public origin
 
-`publicURL` is the exact origin entered by desktop clients. It must be HTTPS,
-must not contain a path, query or fragment, and must match the route hostname.
+`publicURL` is the exact HTTP or HTTPS origin entered by desktop clients. It
+must not contain a path, query or fragment, and must match the route hostname
+and the Ingress TLS setting.
 The chart routes the same origin without rewriting paths:
 
 | Public path | Backend |
@@ -36,11 +37,11 @@ The chart routes the same origin without rewriting paths:
 | `/tunnel` | Data Plane WebSocket endpoint |
 
 The Control Plane publishes that exact value as its OAuth2/OIDC issuer. Helm
-fails rendering when a chart-managed route uses another hostname, when TLS is
-disabled, or when both Ingress and HTTPRoute are enabled.
+fails rendering when a chart-managed route uses another hostname or scheme, or
+when both Ingress and HTTPRoute are enabled.
 
 The browser Management Plane listens on a separate port. Chart-managed Ingress
-and Gateway API routes expose `/api/admin/*` on the same HTTPS origin while
+and Gateway API routes expose `/api/admin/*` on the same public origin while
 keeping the Service itself private. Set `controlPlane.admin.publicURL` to
 the same value as `publicURL` when either route is enabled.
 
@@ -56,29 +57,40 @@ ClusterIP even if the public Service is a LoadBalancer. For same-origin access:
 ```yaml
 controlPlane:
   admin:
-    publicURL: https://kubeloop.example.com
+    publicURL: http://kubeloop.example.com
     listenPort: 8081
     servicePort: 8081
 ```
 
 For a Kubernetes Ingress, the chart routes `/api/admin` to the isolated
-Management Service on the same HTTPS origin. Configure the timeout and
+Management Service on the same origin. Ingress TLS is disabled by default, so
+the default scheme is HTTP and no certificate Secret is required. Configure the timeout and
 request-size annotations required by the selected Ingress controller. For
 example, ingress-nginx can be configured as follows; `proxy-body-size` should
 not exceed the Control Plane's
 `maxRequestBodyBytes` unless the backend is intentionally the tighter limit:
 
 ```yaml
-publicURL: https://kubeloop.example.com
+publicURL: http://kubeloop.example.com
 ingress:
   enabled: true
   className: nginx
   host: kubeloop.example.com
   annotations:
-    nginx.ingress.kubernetes.io/ssl-redirect: "true"
     nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
     nginx.ingress.kubernetes.io/proxy-body-size: "1m"
+```
+
+To enable HTTPS, change both public URLs to `https://kubeloop.example.com` and
+configure an existing certificate Secret:
+
+```yaml
+publicURL: https://kubeloop.example.com
+controlPlane:
+  admin:
+    publicURL: https://kubeloop.example.com
+ingress:
   tls:
     enabled: true
     secretName: kubeloop-public-tls
@@ -584,7 +596,7 @@ explicit opt-in flag and expected dedicated context both match.
 
 ## Install
 
-The public URL is the only address desktop clients will need. It must be the HTTPS origin that routes discovery/API requests to the Control Plane and `/tunnel` to the Data Plane.
+The public URL is the only address desktop clients will need. It is the HTTP or HTTPS origin that routes discovery/API requests to the Control Plane and `/tunnel` to the Data Plane.
 
 ```shell
 helm upgrade --install kubeloop \
@@ -592,19 +604,18 @@ helm upgrade --install kubeloop \
   --version 2.0.0-beta.7 \
   --namespace kubeloop-system \
   --create-namespace \
-  --set publicURL=https://kubeloop.example.com \
-  --set controlPlane.admin.publicURL=https://kubeloop.example.com \
+  --set publicURL=http://kubeloop.example.com \
+  --set controlPlane.admin.publicURL=http://kubeloop.example.com \
   --set controlPlane.relay.existingSecret=kubeloop-relay-control-plane \
   --set ingress.enabled=true \
   --set ingress.host=kubeloop.example.com \
-  --set ingress.className=nginx \
-  --set ingress.tls.secretName=kubeloop-tls
+  --set ingress.className=nginx
 ```
 
 Verify discovery after the workloads are ready:
 
 ```shell
-curl https://kubeloop.example.com/.well-known/kubeloop
+curl http://kubeloop.example.com/.well-known/kubeloop
 ```
 
 ## Storage modes
@@ -645,4 +656,4 @@ kubectl -n kubeloop-system create secret generic kubeloop-datasource \
   --from-literal=datasource-url='postgresql://user:password@postgres.example:5432/kubeloop?sslmode=require'
 ```
 
-Use `mysql://user:password@mysql.example:3306/kubeloop?tls=true` for MySQL. The Control Plane detects the dialect from the URL, runs advisory-lock migrations before becoming ready, and reports database availability through readiness. External-database transactions use serializable isolation and bounded deadlock/serialization retries.
+Use `mysql://user:password@mysql.example:3306/kubeloop?tls=true` for MySQL. The Control Plane detects the dialect from the URL and initializes the complete current schema in an empty database under an advisory lock. Existing databases without the current schema identity are rejected and must be recreated; no schema migration path is provided. Database availability is reported through readiness. External-database transactions use serializable isolation and bounded deadlock/serialization retries.

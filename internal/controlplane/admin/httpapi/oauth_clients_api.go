@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	adminauthorization "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/authorization"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v5"
@@ -18,16 +17,15 @@ import (
 )
 
 type oauthClientInput struct {
-	ID             string   `json:"id"`
-	OrganizationID string   `json:"organizationId,omitempty"`
-	Name           string   `json:"name"`
-	Public         bool     `json:"public"`
-	RedirectURIs   []string `json:"redirectUris"`
-	GrantTypes     []string `json:"grantTypes"`
-	Scopes         []string `json:"scopes"`
-	Trusted        bool     `json:"trusted"`
-	Enabled        bool     `json:"enabled"`
-	Reason         string   `json:"reason"`
+	ID           string   `json:"id"`
+	Name         string   `json:"name"`
+	Public       bool     `json:"public"`
+	RedirectURIs []string `json:"redirectUris"`
+	GrantTypes   []string `json:"grantTypes"`
+	Scopes       []string `json:"scopes"`
+	Trusted      bool     `json:"trusted"`
+	Enabled      bool     `json:"enabled"`
+	Reason       string   `json:"reason"`
 }
 
 func (api *readAPI) listOAuthClients(ctx *echo.Context) error {
@@ -37,9 +35,6 @@ func (api *readAPI) listOAuthClients(ctx *echo.Context) error {
 	}
 	documents := make([]map[string]any, 0, len(items))
 	for _, item := range items {
-		if !api.authorizeOAuthClient(ctx, item, false) {
-			continue
-		}
 		documents = append(documents, oauthClientDocument(item))
 	}
 	return ctx.JSON(http.StatusOK, map[string]any{"items": documents})
@@ -47,15 +42,15 @@ func (api *readAPI) listOAuthClients(ctx *echo.Context) error {
 
 func (api *readAPI) createOAuthClient(ctx *echo.Context) error {
 	var input oauthClientInput
-	if !decodePolicyJSON(ctx.Response(), ctx.Request(), &input) || !validChangeReason(input.Reason) {
+	if responseErr := bindJSON(ctx, &input); responseErr != nil {
+		return responseErr.write(ctx)
+	}
+	if !validChangeReason(input.Reason) {
 		return api.invalidIAMMutation(ctx)
 	}
 	client, err := oauthClientFromInput(input)
 	if err != nil {
 		return api.oauthClientError(ctx, err)
-	}
-	if !api.authorizeOAuthClient(ctx, client, true) {
-		return nil
 	}
 	var plaintext string
 	err = api.oauthTransactions.WithinTransaction(ctx.Request().Context(), func(repositories storage.Repositories) error {
@@ -96,7 +91,10 @@ func (api *readAPI) createOAuthClient(ctx *echo.Context) error {
 
 func (api *readAPI) updateOAuthClient(ctx *echo.Context) error {
 	var input oauthClientInput
-	if !decodePolicyJSON(ctx.Response(), ctx.Request(), &input) || !validChangeReason(input.Reason) {
+	if responseErr := bindJSON(ctx, &input); responseErr != nil {
+		return responseErr.write(ctx)
+	}
+	if !validChangeReason(input.Reason) {
 		return api.invalidIAMMutation(ctx)
 	}
 	input.ID = ctx.Param("clientID")
@@ -104,9 +102,8 @@ func (api *readAPI) updateOAuthClient(ctx *echo.Context) error {
 	if err != nil {
 		return api.oauthClientError(ctx, err)
 	}
-	if !api.authorizeOAuthClient(ctx, existingForAuthorization, true) ||
-		input.OrganizationID != existingForAuthorization.OrganizationID || !requireIAMETag(ctx, existingForAuthorization.UpdatedAt) {
-		return nil
+	if responseErr := requireIAMETag(ctx, existingForAuthorization.UpdatedAt); responseErr != nil {
+		return responseErr.write(ctx)
 	}
 	client, err := oauthClientFromInput(input)
 	if err != nil {
@@ -145,13 +142,13 @@ func (api *readAPI) rotateOAuthClientSecret(ctx *echo.Context) error {
 	if err != nil {
 		return api.oauthClientError(ctx, err)
 	}
-	if !api.authorizeOAuthClient(ctx, client, true) {
-		return nil
-	}
 	var input struct {
 		Reason string `json:"reason"`
 	}
-	if !decodePolicyJSON(ctx.Response(), ctx.Request(), &input) || !validChangeReason(input.Reason) {
+	if responseErr := bindJSON(ctx, &input); responseErr != nil {
+		return responseErr.write(ctx)
+	}
+	if !validChangeReason(input.Reason) {
 		return api.invalidIAMMutation(ctx)
 	}
 	if client.Public {
@@ -179,15 +176,18 @@ func (api *readAPI) setOAuthClientEnabled(ctx *echo.Context) error {
 		Enabled bool   `json:"enabled"`
 		Reason  string `json:"reason"`
 	}
-	if !decodePolicyJSON(ctx.Response(), ctx.Request(), &input) || !validChangeReason(input.Reason) {
+	if responseErr := bindJSON(ctx, &input); responseErr != nil {
+		return responseErr.write(ctx)
+	}
+	if !validChangeReason(input.Reason) {
 		return api.invalidIAMMutation(ctx)
 	}
 	client, err := api.oauthRepositories.OAuthClients().Get(ctx.Request().Context(), ctx.Param("clientID"))
 	if err != nil {
 		return api.oauthClientError(ctx, err)
 	}
-	if !api.authorizeOAuthClient(ctx, client, true) || !requireIAMETag(ctx, client.UpdatedAt) {
-		return nil
+	if responseErr := requireIAMETag(ctx, client.UpdatedAt); responseErr != nil {
+		return responseErr.write(ctx)
 	}
 	client.Enabled = input.Enabled
 	client.UpdatedAt = time.Now().UTC()
@@ -205,7 +205,7 @@ func (api *readAPI) deleteOAuthClient(ctx *echo.Context) error {
 	if err != nil {
 		return api.oauthClientError(ctx, err)
 	}
-	if !api.authorizeOAuthClient(ctx, client, true) || !validChangeReason(ctx.Request().Header.Get("X-KubeLoop-Reason")) {
+	if !validChangeReason(ctx.Request().Header.Get("X-KubeLoop-Reason")) {
 		return api.invalidIAMMutation(ctx)
 	}
 	if err := api.oauthRepositories.OAuthClients().Delete(ctx.Request().Context(), client.ID); err != nil {
@@ -215,11 +215,11 @@ func (api *readAPI) deleteOAuthClient(ctx *echo.Context) error {
 	return ctx.NoContent(http.StatusNoContent)
 }
 func (api *readAPI) revokeOAuthConsent(ctx *echo.Context) error {
-	client, err := api.oauthRepositories.OAuthClients().Get(ctx.Request().Context(), ctx.Param("clientID"))
+	_, err := api.oauthRepositories.OAuthClients().Get(ctx.Request().Context(), ctx.Param("clientID"))
 	if err != nil {
 		return api.oauthClientError(ctx, err)
 	}
-	if !api.authorizeOAuthClient(ctx, client, true) || !validChangeReason(ctx.Request().Header.Get("X-KubeLoop-Reason")) {
+	if !validChangeReason(ctx.Request().Header.Get("X-KubeLoop-Reason")) {
 		return api.invalidIAMMutation(ctx)
 	}
 	if err := api.oauthRepositories.OAuthConsents().RevokeClient(ctx.Request().Context(), ctx.Param("identityID"), ctx.Param("clientID")); err != nil {
@@ -229,28 +229,9 @@ func (api *readAPI) revokeOAuthConsent(ctx *echo.Context) error {
 	return ctx.NoContent(http.StatusNoContent)
 }
 
-func (api *readAPI) authorizeOAuthClient(ctx *echo.Context, client storage.OAuthClient, write bool) bool {
-	platformCapability := adminauthorization.Capability("platform.oauth-clients.read")
-	organizationCapability := adminauthorization.Capability("org.oauth-clients.read")
-	if write {
-		platformCapability = "platform.oauth-clients.manage"
-		organizationCapability = "org.oauth-clients.manage"
-	}
-	subject := subjectFromRequest(ctx.Request())
-	if api.authorizer.Authorize(ctx.Request().Context(), subject, adminauthorization.Request{Capability: platformCapability}).Allowed {
-		return true
-	}
-	allowed := client.OrganizationID != "" && api.authorizer.Authorize(ctx.Request().Context(), subject,
-		adminauthorization.Request{Capability: organizationCapability, OrganizationID: client.OrganizationID}).Allowed
-	if !allowed && write {
-		writeError(ctx.Response(), http.StatusForbidden, "forbidden", "operation is not permitted", requestID(ctx.Request()))
-	}
-	return allowed
-}
-
 func oauthClientFromInput(input oauthClientInput) (storage.OAuthClient, error) {
 	now := time.Now().UTC()
-	client := storage.OAuthClient{ID: strings.TrimSpace(input.ID), OrganizationID: strings.TrimSpace(input.OrganizationID), Name: strings.TrimSpace(input.Name), Public: input.Public, RedirectURIs: input.RedirectURIs, GrantTypes: input.GrantTypes, Scopes: input.Scopes, Trusted: input.Trusted, Enabled: input.Enabled, CreatedAt: now, UpdatedAt: now}
+	client := storage.OAuthClient{ID: strings.TrimSpace(input.ID), Name: strings.TrimSpace(input.Name), Public: input.Public, RedirectURIs: input.RedirectURIs, GrantTypes: input.GrantTypes, Scopes: input.Scopes, Trusted: input.Trusted, Enabled: input.Enabled, CreatedAt: now, UpdatedAt: now}
 	allowedGrants := []string{"authorization_code", "refresh_token", "client_credentials"}
 	for _, grant := range client.GrantTypes {
 		if !slices.Contains(allowedGrants, grant) {
@@ -280,7 +261,7 @@ func oauthClientFromInput(input oauthClientInput) (storage.OAuthClient, error) {
 }
 
 func oauthClientDocument(client storage.OAuthClient) map[string]any {
-	return map[string]any{"id": client.ID, "organizationId": client.OrganizationID, "name": client.Name, "public": client.Public, "redirectUris": client.RedirectURIs, "grantTypes": client.GrantTypes, "scopes": client.Scopes, "trusted": client.Trusted, "enabled": client.Enabled, "builtin": client.Builtin, "machineIdentityId": client.MachineIdentityID, "createdAt": client.CreatedAt, "updatedAt": client.UpdatedAt}
+	return map[string]any{"id": client.ID, "name": client.Name, "public": client.Public, "redirectUris": client.RedirectURIs, "grantTypes": client.GrantTypes, "scopes": client.Scopes, "trusted": client.Trusted, "enabled": client.Enabled, "builtin": client.Builtin, "machineIdentityId": client.MachineIdentityID, "createdAt": client.CreatedAt, "updatedAt": client.UpdatedAt}
 }
 func generateOAuthClientSecret() (string, error) {
 	raw := make([]byte, 32)
@@ -296,6 +277,5 @@ func (api *readAPI) oauthClientError(ctx *echo.Context, err error) error {
 	} else if errors.Is(err, storage.ErrConflict) {
 		status, code, message = http.StatusConflict, "conflict", "OAuth client already exists"
 	}
-	writeError(ctx.Response(), status, code, message, requestID(ctx.Request()))
-	return nil
+	return writeError(ctx, status, code, message, requestID(ctx.Request()))
 }

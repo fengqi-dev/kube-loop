@@ -95,8 +95,8 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- define "kubeloop.validateExternalAccess" -}}
 {{- $publicURL := trimSuffix "/" (trim .Values.publicURL) -}}
 {{- $adminPublicURL := trimSuffix "/" (trim .Values.controlPlane.admin.publicURL) -}}
-{{- if not (regexMatch `^(https://[^/?#]+|http://(localhost|127\.0\.0\.1|\[::1\])(:[0-9]+)?)$` $publicURL) -}}
-{{- fail "publicURL must be one HTTPS origin without a path, query or fragment (HTTP is allowed only for loopback development)" -}}
+{{- if not (regexMatch `^https?://[^/?#]+$` $publicURL) -}}
+{{- fail "publicURL must be one HTTP or HTTPS origin without a path, query or fragment" -}}
 {{- end -}}
 {{- if and .Values.ingress.enabled .Values.gatewayAPI.enabled -}}
 {{- fail "ingress.enabled and gatewayAPI.enabled are mutually exclusive" -}}
@@ -106,11 +106,9 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- fail "controlPlane.admin.publicURL must equal publicURL when ingress is enabled" -}}
 {{- end -}}
 {{- $host := required "ingress.host is required when ingress.enabled=true" .Values.ingress.host -}}
-{{- if ne $publicURL (printf "https://%s" $host) -}}
-{{- fail "publicURL must exactly equal https://<ingress.host> when ingress is enabled" -}}
-{{- end -}}
-{{- if not .Values.ingress.tls.enabled -}}
-{{- fail "ingress.tls.enabled must be true because the public endpoint requires TLS" -}}
+{{- $scheme := ternary "https" "http" .Values.ingress.tls.enabled -}}
+{{- if ne $publicURL (printf "%s://%s" $scheme $host) -}}
+{{- fail (printf "publicURL must exactly equal %s://<ingress.host> when ingress is enabled" $scheme) -}}
 {{- end -}}
 {{- end -}}
 {{- if .Values.gatewayAPI.enabled -}}

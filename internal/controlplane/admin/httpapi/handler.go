@@ -4,7 +4,6 @@
 package httpapi
 
 import (
-	"encoding/json"
 	"errors"
 	"net"
 	"net/http"
@@ -18,12 +17,15 @@ import (
 	adminui "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/ui"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v5"
+	"github.com/labstack/echo/v5/middleware"
 )
 
 const (
 	SessionCookieName       = "__Host-kubeloop-admin"
 	CSRFCookieName          = "__Host-kubeloop-admin-csrf"
 	CSRFHeaderName          = "X-KubeLoop-CSRF"
+	httpSessionCookieName   = "kubeloop-admin"
+	httpCSRFCookieName      = "kubeloop-admin-csrf"
 	defaultMaxBodyBytes     = int64(1024)
 	defaultGlobalAttempts   = 30
 	defaultSourceAttempts   = 5
@@ -42,14 +44,17 @@ type Config struct {
 }
 
 type Handler struct {
-	sessions   *adminsession.Service
-	readAPI    *readAPI
-	tokenAuth  TokenAuthenticator
-	origin     string
-	pathPrefix string
-	maxBody    int64
-	limiter    *exchangeLimiter
-	tokenLimit *exchangeLimiter
+	sessions          *adminsession.Service
+	readAPI           *readAPI
+	tokenAuth         TokenAuthenticator
+	origin            string
+	secureCookies     bool
+	sessionCookieName string
+	csrfCookieName    string
+	pathPrefix        string
+	maxBody           int64
+	limiter           *exchangeLimiter
+	tokenLimit        *exchangeLimiter
 }
 
 func New(config Config, sessions *adminsession.Service, optionValues ...Option) (*Handler, error) {
@@ -60,8 +65,8 @@ func New(config Config, sessions *adminsession.Service, optionValues ...Option) 
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
 		return nil, errors.New("management public URL is invalid")
 	}
-	if parsed.Scheme != "https" && !loopbackDevelopmentHost(parsed.Hostname()) {
-		return nil, errors.New("management public URL must use HTTPS")
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return nil, errors.New("management public URL must use HTTP or HTTPS")
 	}
 	maxBody := config.MaxRequestBodyBytes
 	if maxBody == 0 {
@@ -97,25 +102,27 @@ func New(config Config, sessions *adminsession.Service, optionValues ...Option) 
 		maxBody:    maxBody, limiter: newExchangeLimiter(globalAttempts, sourceAttempts, window),
 		tokenLimit: newExchangeLimiter(defaultTokenGlobal, defaultTokenSource, window),
 	}
+	if parsed.Scheme == "https" {
+		handler.secureCookies = true
+		handler.sessionCookieName = SessionCookieName
+		handler.csrfCookieName = CSRFCookieName
+	} else {
+		handler.sessionCookieName = httpSessionCookieName
+		handler.csrfCookieName = httpCSRFCookieName
+	}
 	if options.readAPI != nil {
 		handler.readAPI = options.readAPI
 		handler.readAPI.handler = handler
-		handler.readAPI.relays = options.relayStatus
-		handler.readAPI.authorizationReloader = options.authorizationReloader
 		handler.readAPI.oauthRepositories = options.oauthRepositories
 		handler.readAPI.oauthTransactions = options.oauthTransactions
-		handler.readAPI.operations = options.operationService
 		handler.readAPI.localUsers = options.localUsers
 		handler.readAPI.bootstrapService = options.bootstrapService
-	} else if options.relayStatus != nil {
-		return nil, errors.New("management Relay status source requires the read API")
-	} else if options.authorizationReloader != nil ||
-		options.operationService != nil || options.localUsers != nil {
-		return nil, errors.New("management policy API requires the read API")
+	} else if options.localUsers != nil {
+		return nil, errors.New("management API services require the read API")
 	}
 	if options.tokenAuthenticator != nil {
 		if handler.readAPI == nil {
-			return nil, errors.New("management token exchange requires the read API authorizer")
+			return nil, errors.New("management token exchange requires the read API")
 		}
 		handler.tokenAuth = options.tokenAuthenticator
 	}
@@ -126,7 +133,7 @@ func (handler *Handler) RegisterRoutes(group *echo.Group) {
 	group.Use(handler.securityHeaders)
 	adminui.New(handler.pathPrefix).RegisterRoutes(group.Group("/ui"))
 	if handler.tokenAuth != nil {
-		group.POST("/sessions/token", handler.exchangeToken)
+		group.POST("/sessions/token", handler.exchangeToken, middleware.BodyLimit(handler.maxBody))
 	}
 	if handler.readAPI != nil {
 		handler.readAPI.routes(group)
@@ -135,43 +142,40 @@ func (handler *Handler) RegisterRoutes(group *echo.Group) {
 
 func (handler *Handler) securityHeaders(next echo.HandlerFunc) echo.HandlerFunc {
 	return func(ctx *echo.Context) error {
-		writer := ctx.Response()
-		request := ctx.Request()
-		for _, value := range ctx.PathValues() {
-			request.SetPathValue(value.Name, value.Value)
-		}
-		writer.Header().Set("Cache-Control", "no-store")
-		writer.Header().Set("Pragma", "no-cache")
-		writer.Header().Set("X-Content-Type-Options", "nosniff")
-		writer.Header().Set("Referrer-Policy", "no-referrer")
-		writer.Header().Set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'; base-uri 'none'")
-		writer.Header().Set("X-Frame-Options", "DENY")
-		writer.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=(), publickey-credentials-create=(), publickey-credentials-get=()")
+		header := ctx.Response().Header()
+		header.Set("Cache-Control", "no-store")
+		header.Set("Pragma", "no-cache")
+		header.Set("X-Content-Type-Options", "nosniff")
+		header.Set("Referrer-Policy", "no-referrer")
+		header.Set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'; base-uri 'none'")
+		header.Set("X-Frame-Options", "DENY")
+		header.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=(), publickey-credentials-create=(), publickey-credentials-get=()")
 		return next(ctx)
 	}
 }
 
-func setSessionCookie(writer http.ResponseWriter, issued adminsession.Credentials) {
-	http.SetCookie(writer, &http.Cookie{
-		Name: SessionCookieName, Value: issued.SessionToken, Path: "/", Secure: true, HttpOnly: true,
+func (handler *Handler) setSessionCookies(ctx *echo.Context, issued adminsession.Credentials) {
+	ctx.SetCookie(&http.Cookie{
+		Name: handler.sessionCookieName, Value: issued.SessionToken, Path: "/", Secure: handler.secureCookies, HttpOnly: true,
 		SameSite: http.SameSiteLaxMode, MaxAge: max(1, int(time.Until(issued.ExpiresAt).Seconds())),
 	})
-	http.SetCookie(writer, &http.Cookie{
-		Name: CSRFCookieName, Value: issued.CSRFToken, Path: "/", Secure: true,
+	ctx.SetCookie(&http.Cookie{
+		Name: handler.csrfCookieName, Value: issued.CSRFToken, Path: "/", Secure: handler.secureCookies,
 		SameSite: http.SameSiteStrictMode, MaxAge: max(1, int(time.Until(issued.ExpiresAt).Seconds())),
 	})
 }
 
-func ensureRequestID(writer http.ResponseWriter, request *http.Request) string {
-	requestID := strings.TrimSpace(writer.Header().Get(managementRequestHeader))
+func ensureRequestID(ctx *echo.Context) string {
+	header := ctx.Response().Header()
+	requestID := strings.TrimSpace(header.Get(managementRequestHeader))
 	if requestID == "" {
-		requestID = strings.TrimSpace(request.Header.Get(managementRequestHeader))
+		requestID = strings.TrimSpace(ctx.Request().Header.Get(managementRequestHeader))
 	}
 	parsed, err := uuid.Parse(requestID)
 	if err != nil || parsed.String() != requestID {
 		requestID = uuid.NewString()
 	}
-	writer.Header().Set(managementRequestHeader, requestID)
+	header.Set(managementRequestHeader, requestID)
 	return requestID
 }
 
@@ -188,22 +192,8 @@ func sourceAddress(remote string) (netip.Addr, string) {
 	return address, address.String()
 }
 
-func loopbackDevelopmentHost(host string) bool {
-	if strings.EqualFold(strings.TrimSpace(host), "localhost") {
-		return true
-	}
-	address, err := netip.ParseAddr(host)
-	return err == nil && address.IsLoopback()
-}
-
-func writeError(writer http.ResponseWriter, status int, code, message, requestID string) {
-	writeJSON(writer, status, map[string]any{"error": map[string]string{
+func writeError(ctx *echo.Context, status int, code, message, requestID string) error {
+	return ctx.JSON(status, map[string]any{"error": map[string]string{
 		"code": code, "message": message, "requestId": requestID,
 	}})
-}
-
-func writeJSON(writer http.ResponseWriter, status int, value any) {
-	writer.Header().Set("Content-Type", "application/json; charset=utf-8")
-	writer.WriteHeader(status)
-	_ = json.NewEncoder(writer).Encode(value)
 }

@@ -6,8 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"slices"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -38,19 +36,13 @@ type ClientProvider interface {
 }
 
 type Service struct {
-	provider             ClientProvider
-	authorizer           authorization.Authorizer
-	gatewayVersion       string
-	inventory            *inventoryWatchHub
-	inventoryResync      time.Duration
-	authorizedNamespaces func(context.Context, string, []string) ([]string, error)
+	provider        ClientProvider
+	gatewayVersion  string
+	inventory       *inventoryWatchHub
+	inventoryResync time.Duration
 }
 
 type Option func(*Service)
-
-func WithCapabilityAuthorizer(authorizer authorization.Authorizer) Option {
-	return func(handler *Service) { handler.authorizer = authorizer }
-}
 
 func WithGatewayVersion(version string) Option {
 	return func(handler *Service) { handler.gatewayVersion = strings.TrimSpace(version) }
@@ -60,25 +52,18 @@ func WithInventoryResync(interval time.Duration) Option {
 	return func(handler *Service) { handler.inventoryResync = interval }
 }
 
-func WithAuthorizedNamespaces(resolver func(context.Context, string, []string) ([]string, error)) Option {
-	return func(handler *Service) { handler.authorizedNamespaces = resolver }
-}
-
 func New(provider ClientProvider, options ...Option) (*Service, error) {
 	if provider == nil {
 		return nil, errors.New("Kubernetes client Provider is required")
 	}
 	handler := &Service{
-		provider: provider, authorizer: authorization.NewDenyAll(), gatewayVersion: "dev",
+		provider: provider, gatewayVersion: "dev",
 		inventoryResync: defaultInventoryResync,
 	}
 	for _, option := range options {
 		if option != nil {
 			option(handler)
 		}
-	}
-	if handler.authorizer == nil {
-		return nil, errors.New("capability Authorizer is required")
 	}
 	if handler.inventoryResync <= 0 {
 		handler.inventoryResync = defaultInventoryResync
@@ -102,8 +87,7 @@ func (handler *Service) capabilities(
 	return nil
 }
 
-// DiscoverCapabilities returns the same policy/Kubernetes intersection used by
-// GET /capabilities so Session creation cannot drift from the advertised API.
+// DiscoverCapabilities reports the Kubernetes capabilities of the signed-in identity.
 func (handler *Service) DiscoverCapabilities(
 	ctx context.Context,
 	identity controlplaneapi.Identity,
@@ -128,15 +112,7 @@ func (handler *Service) discoverCapabilities(
 ) (capability.Snapshot, *controlplaneapi.Error) {
 	type candidate struct {
 		capability string
-		policy     []authorization.Request
 		kubernetes []authorizationv1.ResourceAttributes
-	}
-	policyRequests := func(resource string, operations ...string) []authorization.Request {
-		result := make([]authorization.Request, 0, len(operations))
-		for _, operation := range operations {
-			result = append(result, authorization.Request{Operation: operation, Namespace: namespace, ResourceKind: resource})
-		}
-		return result
 	}
 	namespaced := func(attributes ...authorizationv1.ResourceAttributes) []authorizationv1.ResourceAttributes {
 		for index := range attributes {
@@ -145,54 +121,37 @@ func (handler *Service) discoverCapabilities(
 		return attributes
 	}
 	candidates := []candidate{
-		{capability: "pods.get", policy: policyRequests("pods", "get"), kubernetes: namespaced(authorizationv1.ResourceAttributes{Verb: "get", Resource: "pods"})},
-		{capability: "pods.list", policy: policyRequests("pods", "list"), kubernetes: namespaced(authorizationv1.ResourceAttributes{Verb: "list", Resource: "pods"})},
-		{capability: "pods.watch", policy: policyRequests("pods", "watch"), kubernetes: namespaced(authorizationv1.ResourceAttributes{Verb: "watch", Resource: "pods"})},
-		{capability: "services.get", policy: policyRequests("services", "get"), kubernetes: namespaced(authorizationv1.ResourceAttributes{Verb: "get", Resource: "services"})},
-		{capability: "services.list", policy: policyRequests("services", "list"), kubernetes: namespaced(authorizationv1.ResourceAttributes{Verb: "list", Resource: "services"})},
-		{capability: "services.watch", policy: policyRequests("services", "watch"), kubernetes: namespaced(authorizationv1.ResourceAttributes{Verb: "watch", Resource: "services"})},
-		{capability: "cluster.tunnel", policy: append(
-			policyRequests("sessions", "create", "get", "heartbeat", "delete"),
-			policyRequests("relay-tickets", "create")...,
-		), kubernetes: namespaced(
+		{capability: "pods.get", kubernetes: namespaced(authorizationv1.ResourceAttributes{Verb: "get", Resource: "pods"})},
+		{capability: "pods.list", kubernetes: namespaced(authorizationv1.ResourceAttributes{Verb: "list", Resource: "pods"})},
+		{capability: "pods.watch", kubernetes: namespaced(authorizationv1.ResourceAttributes{Verb: "watch", Resource: "pods"})},
+		{capability: "services.get", kubernetes: namespaced(authorizationv1.ResourceAttributes{Verb: "get", Resource: "services"})},
+		{capability: "services.list", kubernetes: namespaced(authorizationv1.ResourceAttributes{Verb: "list", Resource: "services"})},
+		{capability: "services.watch", kubernetes: namespaced(authorizationv1.ResourceAttributes{Verb: "watch", Resource: "services"})},
+		{capability: "cluster.tunnel", kubernetes: namespaced(
 			authorizationv1.ResourceAttributes{Verb: "list", Resource: "pods"},
 			authorizationv1.ResourceAttributes{Verb: "list", Resource: "services"},
 		)},
-		{capability: "ports.forward", policy: policyRequests("port-forwards", "create", "list", "delete"), kubernetes: namespaced(
+		{capability: "ports.forward", kubernetes: namespaced(
 			authorizationv1.ResourceAttributes{Verb: "get", Resource: "pods"},
 			authorizationv1.ResourceAttributes{Verb: "get", Resource: "services"},
 		)},
-		{capability: "pods.exec", policy: policyRequests("pod-exec", "create", "stream"), kubernetes: namespaced(authorizationv1.ResourceAttributes{Verb: "create", Resource: "pods", Subresource: "exec"})},
-		{capability: "pods.files", policy: policyRequests("file-transfers", "create", "stream"), kubernetes: namespaced(authorizationv1.ResourceAttributes{Verb: "create", Resource: "pods", Subresource: "exec"})},
-		{capability: "pods.files.manage", policy: policyRequests("pod-files", "list", "create", "update", "delete", "get"), kubernetes: namespaced(authorizationv1.ResourceAttributes{Verb: "create", Resource: "pods", Subresource: "exec"})},
-		{capability: "services.exchange", policy: policyRequests("exchanges", "create", "get", "delete", "stream"), kubernetes: namespaced(
+		{capability: "pods.exec", kubernetes: namespaced(authorizationv1.ResourceAttributes{Verb: "create", Resource: "pods", Subresource: "exec"})},
+		{capability: "pods.files", kubernetes: namespaced(authorizationv1.ResourceAttributes{Verb: "create", Resource: "pods", Subresource: "exec"})},
+		{capability: "pods.files.manage", kubernetes: namespaced(authorizationv1.ResourceAttributes{Verb: "create", Resource: "pods", Subresource: "exec"})},
+		{capability: "services.exchange", kubernetes: namespaced(
 			authorizationv1.ResourceAttributes{Verb: "get", Resource: "services"},
 			authorizationv1.ResourceAttributes{Verb: "get", Resource: "endpoints"},
 			authorizationv1.ResourceAttributes{Group: "discovery.k8s.io", Verb: "list", Resource: "endpointslices"},
 		)},
-		{capability: "services.mirror", policy: policyRequests("mirrors", "create", "get", "delete", "stream"), kubernetes: namespaced(
+		{capability: "services.mirror", kubernetes: namespaced(
 			authorizationv1.ResourceAttributes{Verb: "get", Resource: "services"},
 			authorizationv1.ResourceAttributes{Verb: "get", Resource: "endpoints"},
 			authorizationv1.ResourceAttributes{Group: "discovery.k8s.io", Verb: "list", Resource: "endpointslices"},
 		)},
-		// Preview Kubernetes objects are owned and mutated by the Operator. The
-		// Control Plane only creates the TrafficBinding after the Gateway policy check.
-		{capability: "services.preview", policy: policyRequests("previews", "create", "get", "delete", "stream")},
+		{capability: "services.preview"},
 	}
-	subject := authorization.Subject{ID: identity.Subject, Provider: identity.Provider, Groups: append([]string(nil), identity.Groups...)}
 	capabilities := make([]string, 0, len(candidates))
 	for _, candidate := range candidates {
-		policyAllowed := true
-		for _, policyRequest := range candidate.policy {
-			decision := handler.authorizer.Authorize(ctx, subject, policyRequest)
-			if !decision.Allowed {
-				policyAllowed = false
-				break
-			}
-		}
-		if !policyAllowed {
-			continue
-		}
 		kubernetesAllowed := true
 		for _, attributes := range candidate.kubernetes {
 			review, err := client.AuthorizationV1().SelfSubjectAccessReviews().Create(ctx, &authorizationv1.SelfSubjectAccessReview{
@@ -246,59 +205,15 @@ func (handler *Service) namespaces(
 	if apiError != nil {
 		return apiError
 	}
-	if handler.authorizedNamespaces == nil {
-		return &controlplaneapi.Error{Code: controlplaneapi.CodeUnavailable, Message: "Namespace authorization repository is unavailable"}
+	result, listErr := client.CoreV1().Namespaces().List(request.Context(), options)
+	if listErr != nil {
+		return mapKubernetesError(listErr)
 	}
-	names, err := handler.authorizedNamespaces(request.Context(), identity.Subject, identity.Groups)
-	if err != nil {
-		return &controlplaneapi.Error{Code: controlplaneapi.CodeUnavailable, Message: "Namespace authorization is unavailable", Cause: err}
+	items := make([]namespaceDocument, 0, len(result.Items))
+	for index := range result.Items {
+		items = append(items, namespaceDocument{Name: result.Items[index].Name, Status: string(result.Items[index].Status.Phase)})
 	}
-	if slices.Contains(names, "*") {
-		result, listErr := client.CoreV1().Namespaces().List(request.Context(), options)
-		if listErr != nil {
-			return mapKubernetesError(listErr)
-		}
-		items := make([]namespaceDocument, 0, len(result.Items))
-		for index := range result.Items {
-			items = append(items, namespaceDocument{Name: result.Items[index].Name, Status: string(result.Items[index].Status.Phase)})
-		}
-		writeJSON(ctx, listDocument[namespaceDocument]{Items: items, Continue: result.Continue, ResourceVersion: result.ResourceVersion})
-		return nil
-	}
-	sort.Strings(names)
-	start := 0
-	if options.Continue != "" {
-		start = sort.SearchStrings(names, options.Continue)
-		for start < len(names) && names[start] <= options.Continue {
-			start++
-		}
-	}
-	end := min(len(names), start+int(options.Limit))
-	items := make([]namespaceDocument, 0, end-start)
-	labelSelector, _ := labels.Parse(options.LabelSelector)
-	fieldSelector, _ := fields.ParseSelector(options.FieldSelector)
-	for _, name := range names[start:end] {
-		item, getErr := client.CoreV1().Namespaces().Get(request.Context(), name, metav1.GetOptions{})
-		if apierrors.IsNotFound(getErr) {
-			continue
-		}
-		if getErr != nil {
-			return mapKubernetesError(getErr)
-		}
-		if !labelSelector.Matches(labels.Set(item.Labels)) || !fieldSelector.Matches(fields.Set{
-			"metadata.name": item.Name, "status.phase": string(item.Status.Phase),
-		}) {
-			continue
-		}
-		items = append(items, namespaceDocument{Name: item.Name, Status: string(item.Status.Phase)})
-	}
-	continueToken := ""
-	if end < len(names) && end > start {
-		continueToken = names[end-1]
-	}
-	writeJSON(ctx, listDocument[namespaceDocument]{
-		Items: items, Continue: continueToken,
-	})
+	writeJSON(ctx, listDocument[namespaceDocument]{Items: items, Continue: result.Continue, ResourceVersion: result.ResourceVersion})
 	return nil
 }
 

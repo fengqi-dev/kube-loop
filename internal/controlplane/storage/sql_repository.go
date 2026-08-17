@@ -160,19 +160,14 @@ func isRetryableTransactionError(err error) bool {
 
 type repositorySet struct {
 	identities                 *identityRepository
-	organizations              *organizationRepository
-	groups                     *groupRepository
-	invitations                *invitationRepository
 	bootstrapTokens            *bootstrapTokenRepository
 	credentials                *credentialRepository
-	securityPolicies           *securityPolicyRepository
 	sessions                   *sessionRepository
 	tasks                      TaskRepository
 	resourceSnapshots          *resourceSnapshotRepository
 	idempotency                *idempotencyRepository
 	audit                      *auditRepository
 	relayDesiredStates         *relayDesiredStateRepository
-	auditExportJobs            *auditExportJobRepository
 	adminSessions              *adminSessionRepository
 	oauthClients               *oauthClientRepository
 	oauthSessions              *oauthSessionRepository
@@ -186,14 +181,10 @@ func newRepositorySet(backend Backend, executor sqlExecutor, orm bun.IDB) *repos
 	sessions := &sessionRepository{repositoryBase: base}
 	audit := &auditRepository{repositoryBase: base}
 	return &repositorySet{
-		identities:       &identityRepository{repositoryBase: base},
-		organizations:    &organizationRepository{repositoryBase: base},
-		groups:           &groupRepository{repositoryBase: base},
-		invitations:      &invitationRepository{repositoryBase: base},
-		bootstrapTokens:  &bootstrapTokenRepository{repositoryBase: base},
-		credentials:      &credentialRepository{repositoryBase: base},
-		securityPolicies: &securityPolicyRepository{repositoryBase: base},
-		sessions:         sessions,
+		identities:      &identityRepository{repositoryBase: base},
+		bootstrapTokens: &bootstrapTokenRepository{repositoryBase: base},
+		credentials:     &credentialRepository{repositoryBase: base},
+		sessions:        sessions,
 		tasks: &auditedTaskRepository{
 			delegate: &taskRepository{repositoryBase: base}, sessions: sessions, audit: audit,
 		},
@@ -201,7 +192,6 @@ func newRepositorySet(backend Backend, executor sqlExecutor, orm bun.IDB) *repos
 		idempotency:                &idempotencyRepository{repositoryBase: base},
 		audit:                      audit,
 		relayDesiredStates:         &relayDesiredStateRepository{repositoryBase: base},
-		auditExportJobs:            &auditExportJobRepository{repositoryBase: base},
 		adminSessions:              &adminSessionRepository{repositoryBase: base},
 		oauthClients:               &oauthClientRepository{repositoryBase: base},
 		oauthSessions:              &oauthSessionRepository{repositoryBase: base},
@@ -221,26 +211,12 @@ func (repositories *repositorySet) Identities() IdentityRepository {
 	return repositories.identities
 }
 
-func (repositories *repositorySet) Organizations() OrganizationRepository {
-	return repositories.organizations
-}
-
-func (repositories *repositorySet) Groups() GroupRepository { return repositories.groups }
-
-func (repositories *repositorySet) Invitations() InvitationRepository {
-	return repositories.invitations
-}
-
 func (repositories *repositorySet) BootstrapTokens() BootstrapTokenRepository {
 	return repositories.bootstrapTokens
 }
 
 func (repositories *repositorySet) Credentials() CredentialRepository {
 	return repositories.credentials
-}
-
-func (repositories *repositorySet) SecurityPolicies() SecurityPolicyRepository {
-	return repositories.securityPolicies
 }
 
 func (repositories *repositorySet) Sessions() SessionRepository {
@@ -265,10 +241,6 @@ func (repositories *repositorySet) Audit() AuditRepository {
 
 func (repositories *repositorySet) RelayDesiredStates() RelayDesiredStateRepository {
 	return repositories.relayDesiredStates
-}
-
-func (repositories *repositorySet) AuditExportJobs() AuditExportJobRepository {
-	return repositories.auditExportJobs
 }
 
 func (repositories *repositorySet) AdminSessions() AdminSessionRepository {

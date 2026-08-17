@@ -1,15 +1,15 @@
 export namespace app {
-
+	
 	export class AuthSession {
 	    authenticated: boolean;
 	    userName?: string;
 	    accessExpiresAt: string;
 	    refreshExpiresAt: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new AuthSession(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.authenticated = source["authenticated"];
@@ -22,18 +22,18 @@ export namespace app {
 	    update: update.Info;
 	    platform: string;
 	    serverProfiles: profile.State;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new BootstrapData(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.update = this.convertValues(source["update"], update.Info);
 	        this.platform = source["platform"];
 	        this.serverProfiles = this.convertValues(source["serverProfiles"], profile.State);
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -63,11 +63,11 @@ export namespace app {
 	    session?: remote.Session;
 	    network?: networkdiag.Result;
 	    dataPlane?: dataplane.Status;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new RemoteInventory(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.kubernetesVersion = source["kubernetesVersion"];
@@ -81,7 +81,7 @@ export namespace app {
 	        this.network = this.convertValues(source["network"], networkdiag.Result);
 	        this.dataPlane = this.convertValues(source["dataPlane"], dataplane.Status);
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -105,11 +105,11 @@ export namespace app {
 	    baseUrl: string;
 	    displayName?: string;
 	    activate: boolean;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new SaveServerProfileRequest(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
@@ -126,11 +126,11 @@ export namespace app {
 	    tty: boolean;
 	    width?: number;
 	    height?: number;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new ServerExecRequest(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.profileId = source["profileId"];
@@ -149,11 +149,11 @@ export namespace app {
 	    size: number;
 	    mode: number;
 	    modifiedAt: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new ServerLocalFileEntry(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.name = source["name"];
@@ -168,18 +168,18 @@ export namespace app {
 	    dnsNamespace?: string;
 	    socksPort: number;
 	    hostAliases?: profile.HostAlias[];
-
+	
 	    static createFrom(source: any = {}) {
 	        return new ServerNetworkSettings(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.dnsNamespace = source["dnsNamespace"];
 	        this.socksPort = source["socksPort"];
 	        this.hostAliases = this.convertValues(source["hostAliases"], profile.HostAlias);
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -204,11 +204,11 @@ export namespace app {
 	    container?: string;
 	    path: string;
 	    kind: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new ServerPodFileCreateRequest(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.profileId = source["profileId"];
@@ -224,11 +224,11 @@ export namespace app {
 	    container?: string;
 	    path: string;
 	    recursive?: boolean;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new ServerPodFileDeleteRequest(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.profileId = source["profileId"];
@@ -244,11 +244,11 @@ export namespace app {
 	    container?: string;
 	    path: string;
 	    destination: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new ServerPodFileRenameRequest(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.profileId = source["profileId"];
@@ -263,11 +263,11 @@ export namespace app {
 	    pod: string;
 	    container?: string;
 	    path: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new ServerPodFileTarget(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.profileId = source["profileId"];
@@ -280,11 +280,11 @@ export namespace app {
 	    profileId: string;
 	    pod: string;
 	    container?: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new ServerPodSSHRequest(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.profileId = source["profileId"];
@@ -295,17 +295,17 @@ export namespace app {
 	export class ServerProfileResult {
 	    profile: profile.Profile;
 	    discovery: discovery.Document;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new ServerProfileResult(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.profile = this.convertValues(source["profile"], profile.Profile);
 	        this.discovery = this.convertValues(source["discovery"], discovery.Document);
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -326,19 +326,20 @@ export namespace app {
 	}
 
 }
-export namespace capability {
 
+export namespace capability {
+	
 	export class Snapshot {
 	    schemaVersion: number;
 	    identityId: string;
 	    namespace: string;
 	    gatewayVersion: string;
 	    capabilities: string[];
-
+	
 	    static createFrom(source: any = {}) {
 	        return new Snapshot(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.schemaVersion = source["schemaVersion"];
@@ -352,7 +353,7 @@ export namespace capability {
 }
 
 export namespace dataplane {
-
+	
 	export class Status {
 	    state: string;
 	    mode: string;
@@ -360,11 +361,11 @@ export namespace dataplane {
 	    sessionGeneration: number;
 	    socksAddress: string;
 	    networkSpecHash: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new Status(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.state = source["state"];
@@ -379,17 +380,17 @@ export namespace dataplane {
 }
 
 export namespace discovery {
-
+	
 	export class AuthMethod {
 	    id: string;
 	    type: string;
 	    displayName?: string;
 	    interaction: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new AuthMethod(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
@@ -410,11 +411,11 @@ export namespace discovery {
 	    protocolMin: string;
 	    protocolMax: string;
 	    minClientVersion?: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new Document(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.serviceId = source["serviceId"];
@@ -429,7 +430,7 @@ export namespace discovery {
 	        this.protocolMax = source["protocolMax"];
 	        this.minClientVersion = source["minClientVersion"];
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -452,7 +453,7 @@ export namespace discovery {
 }
 
 export namespace exchange {
-
+	
 	export class Info {
 	    id: string;
 	    profileId: string;
@@ -462,11 +463,11 @@ export namespace exchange {
 	    clusterIp: string;
 	    state: string;
 	    targets: reverserelay.Target[];
-
+	
 	    static createFrom(source: any = {}) {
 	        return new Info(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
@@ -478,7 +479,7 @@ export namespace exchange {
 	        this.state = source["state"];
 	        this.targets = this.convertValues(source["targets"], reverserelay.Target);
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -501,18 +502,18 @@ export namespace exchange {
 	    profileId: string;
 	    service: string;
 	    targets: reverserelay.Target[];
-
+	
 	    static createFrom(source: any = {}) {
 	        return new Request(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.profileId = source["profileId"];
 	        this.service = source["service"];
 	        this.targets = this.convertValues(source["targets"], reverserelay.Target);
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -535,7 +536,7 @@ export namespace exchange {
 }
 
 export namespace filetransfer {
-
+	
 	export class Request {
 	    profileId: string;
 	    direction: string;
@@ -545,11 +546,11 @@ export namespace filetransfer {
 	    localPath: string;
 	    remotePath: string;
 	    overwrite?: boolean;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new Request(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.profileId = source["profileId"];
@@ -584,11 +585,11 @@ export namespace filetransfer {
 	    createdAt: string;
 	    updatedAt: string;
 	    completedAt?: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new Task(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
@@ -618,7 +619,7 @@ export namespace filetransfer {
 }
 
 export namespace helper {
-
+	
 	export class Status {
 	    installed: boolean;
 	    running: boolean;
@@ -628,11 +629,11 @@ export namespace helper {
 	    expected: string;
 	    socket: string;
 	    error?: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new Status(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.installed = source["installed"];
@@ -649,15 +650,15 @@ export namespace helper {
 }
 
 export namespace mcp {
-
+	
 	export class InstallResult {
 	    client: string;
 	    path: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new InstallResult(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.client = source["client"];
@@ -672,11 +673,11 @@ export namespace mcp {
 	    tokenEnabled: boolean;
 	    token?: string;
 	    error?: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new Status(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.enabled = source["enabled"];
@@ -692,17 +693,17 @@ export namespace mcp {
 }
 
 export namespace mirror {
-
+	
 	export class LocalTarget {
 	    servicePort: number;
 	    protocol: string;
 	    localHost: string;
 	    localPort: number;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new LocalTarget(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.servicePort = source["servicePort"];
@@ -720,11 +721,11 @@ export namespace mirror {
 	    clusterIp: string;
 	    state: string;
 	    targets: LocalTarget[];
-
+	
 	    static createFrom(source: any = {}) {
 	        return new Info(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
@@ -736,7 +737,7 @@ export namespace mirror {
 	        this.state = source["state"];
 	        this.targets = this.convertValues(source["targets"], LocalTarget);
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -755,23 +756,23 @@ export namespace mirror {
 		    return a;
 		}
 	}
-
+	
 	export class Request {
 	    profileId: string;
 	    service: string;
 	    targets: LocalTarget[];
-
+	
 	    static createFrom(source: any = {}) {
 	        return new Request(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.profileId = source["profileId"];
 	        this.service = source["service"];
 	        this.targets = this.convertValues(source["targets"], LocalTarget);
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -794,7 +795,7 @@ export namespace mirror {
 }
 
 export namespace networkdiag {
-
+	
 	export class Issue {
 	    code: string;
 	    severity: string;
@@ -802,11 +803,11 @@ export namespace networkdiag {
 	    target?: string;
 	    conflict?: string;
 	    interface?: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new Issue(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.code = source["code"];
@@ -821,18 +822,18 @@ export namespace networkdiag {
 	    routingMode: string;
 	    strictRoute: boolean;
 	    issues: Issue[];
-
+	
 	    static createFrom(source: any = {}) {
 	        return new Result(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.routingMode = source["routingMode"];
 	        this.strictRoute = source["strictRoute"];
 	        this.issues = this.convertValues(source["issues"], Issue);
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -855,7 +856,7 @@ export namespace networkdiag {
 }
 
 export namespace networkspec {
-
+	
 	export class Spec {
 	    version: number;
 	    podCIDRs: string[];
@@ -864,11 +865,11 @@ export namespace networkspec {
 	    serviceIPs: string[];
 	    dnsServer?: string;
 	    clusterDomains: string[];
-
+	
 	    static createFrom(source: any = {}) {
 	        return new Spec(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.version = source["version"];
@@ -884,7 +885,7 @@ export namespace networkspec {
 }
 
 export namespace podssh {
-
+	
 	export class Info {
 	    id: string;
 	    profileId: string;
@@ -898,11 +899,11 @@ export namespace podssh {
 	    port: number;
 	    command: string;
 	    state: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new Info(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
@@ -923,7 +924,7 @@ export namespace podssh {
 }
 
 export namespace portforward {
-
+	
 	export class Info {
 	    id: string;
 	    profileId: string;
@@ -937,11 +938,11 @@ export namespace portforward {
 	    address: string;
 	    dialAddress: string;
 	    state: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new Info(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
@@ -965,11 +966,11 @@ export namespace portforward {
 	    protocol?: string;
 	    remotePort: number;
 	    localPort: number;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new Request(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.profileId = source["profileId"];
@@ -984,7 +985,7 @@ export namespace portforward {
 }
 
 export namespace preview {
-
+	
 	export class Info {
 	    id: string;
 	    profileId: string;
@@ -994,11 +995,11 @@ export namespace preview {
 	    clusterIp: string;
 	    state: string;
 	    targets: reverserelay.Target[];
-
+	
 	    static createFrom(source: any = {}) {
 	        return new Info(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
@@ -1010,7 +1011,7 @@ export namespace preview {
 	        this.state = source["state"];
 	        this.targets = this.convertValues(source["targets"], reverserelay.Target);
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -1033,18 +1034,18 @@ export namespace preview {
 	    profileId: string;
 	    name: string;
 	    targets: reverserelay.Target[];
-
+	
 	    static createFrom(source: any = {}) {
 	        return new Request(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.profileId = source["profileId"];
 	        this.name = source["name"];
 	        this.targets = this.convertValues(source["targets"], reverserelay.Target);
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -1067,15 +1068,15 @@ export namespace preview {
 }
 
 export namespace profile {
-
+	
 	export class HostAlias {
 	    domain: string;
 	    ip: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new HostAlias(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.domain = source["domain"];
@@ -1093,11 +1094,11 @@ export namespace profile {
 	    dnsNamespace?: string;
 	    socksPort?: number;
 	    hostAliases?: HostAlias[];
-
+	
 	    static createFrom(source: any = {}) {
 	        return new Profile(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
@@ -1111,7 +1112,7 @@ export namespace profile {
 	        this.socksPort = source["socksPort"];
 	        this.hostAliases = this.convertValues(source["hostAliases"], HostAlias);
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -1134,18 +1135,18 @@ export namespace profile {
 	    version: number;
 	    activeProfileId?: string;
 	    profiles: Profile[];
-
+	
 	    static createFrom(source: any = {}) {
 	        return new State(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.version = source["version"];
 	        this.activeProfileId = source["activeProfileId"];
 	        this.profiles = this.convertValues(source["profiles"], Profile);
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -1168,7 +1169,7 @@ export namespace profile {
 }
 
 export namespace remote {
-
+	
 	export class ExecTask {
 	    id: string;
 	    sessionId: string;
@@ -1180,11 +1181,11 @@ export namespace remote {
 	    createdAt: string;
 	    updatedAt: string;
 	    expiresAt: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new ExecTask(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
@@ -1202,11 +1203,11 @@ export namespace remote {
 	export class Namespace {
 	    name: string;
 	    status?: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new Namespace(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.name = source["name"];
@@ -1217,11 +1218,11 @@ export namespace remote {
 	    name?: string;
 	    port: number;
 	    protocol: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new PodPort(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.name = source["name"];
@@ -1238,11 +1239,11 @@ export namespace remote {
 	    ready: boolean;
 	    containers: string[];
 	    ports: PodPort[];
-
+	
 	    static createFrom(source: any = {}) {
 	        return new Pod(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.name = source["name"];
@@ -1254,7 +1255,7 @@ export namespace remote {
 	        this.containers = source["containers"];
 	        this.ports = this.convertValues(source["ports"], PodPort);
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -1280,11 +1281,11 @@ export namespace remote {
 	    size: number;
 	    mode: string;
 	    modifiedAt: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new PodFileEntry(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.name = source["name"];
@@ -1302,11 +1303,11 @@ export namespace remote {
 	    container: string;
 	    path: string;
 	    items: PodFileEntry[];
-
+	
 	    static createFrom(source: any = {}) {
 	        return new PodFileList(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.sessionId = source["sessionId"];
@@ -1316,7 +1317,7 @@ export namespace remote {
 	        this.path = source["path"];
 	        this.items = this.convertValues(source["items"], PodFileEntry);
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -1338,11 +1339,11 @@ export namespace remote {
 	export class PodFileResult {
 	    completed: boolean;
 	    error?: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new PodFileResult(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.completed = source["completed"];
@@ -1365,11 +1366,11 @@ export namespace remote {
 	    createdAt: string;
 	    updatedAt: string;
 	    expiresAt: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new PodFileTask(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
@@ -1388,7 +1389,7 @@ export namespace remote {
 	        this.updatedAt = source["updatedAt"];
 	        this.expiresAt = source["expiresAt"];
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -1407,17 +1408,17 @@ export namespace remote {
 		    return a;
 		}
 	}
-
+	
 	export class ServicePort {
 	    name?: string;
 	    port: number;
 	    protocol: string;
 	    targetPort?: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new ServicePort(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.name = source["name"];
@@ -1433,11 +1434,11 @@ export namespace remote {
 	    clusterIp?: string;
 	    externalName?: string;
 	    ports: ServicePort[];
-
+	
 	    static createFrom(source: any = {}) {
 	        return new Service(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.name = source["name"];
@@ -1447,7 +1448,7 @@ export namespace remote {
 	        this.externalName = source["externalName"];
 	        this.ports = this.convertValues(source["ports"], ServicePort);
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -1466,7 +1467,7 @@ export namespace remote {
 		    return a;
 		}
 	}
-
+	
 	export class Session {
 	    id: string;
 	    namespace: string;
@@ -1479,11 +1480,11 @@ export namespace remote {
 	    networkSpec: networkspec.Spec;
 	    networkSpecHash: string;
 	    capabilities?: capability.Snapshot;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new Session(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
@@ -1498,7 +1499,7 @@ export namespace remote {
 	        this.networkSpecHash = source["networkSpecHash"];
 	        this.capabilities = this.convertValues(source["capabilities"], capability.Snapshot);
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -1521,17 +1522,17 @@ export namespace remote {
 }
 
 export namespace reverserelay {
-
+	
 	export class Target {
 	    servicePort: number;
 	    protocol: string;
 	    localHost: string;
 	    localPort: number;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new Target(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.servicePort = source["servicePort"];
@@ -1544,7 +1545,7 @@ export namespace reverserelay {
 }
 
 export namespace singbox {
-
+	
 	export class Connection {
 	    id: string;
 	    network: string;
@@ -1560,11 +1561,11 @@ export namespace singbox {
 	    feature?: string;
 	    outbound: string;
 	    rule: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new Connection(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
@@ -1589,11 +1590,11 @@ export namespace singbox {
 	    memory?: number;
 	    activeConnections: number;
 	    connections: Connection[];
-
+	
 	    static createFrom(source: any = {}) {
 	        return new Metrics(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.downloadTotal = source["downloadTotal"];
@@ -1602,7 +1603,7 @@ export namespace singbox {
 	        this.activeConnections = source["activeConnections"];
 	        this.connections = this.convertValues(source["connections"], Connection);
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -1625,7 +1626,7 @@ export namespace singbox {
 }
 
 export namespace update {
-
+	
 	export class Info {
 	    currentVersion: string;
 	    latestVersion?: string;
@@ -1634,11 +1635,11 @@ export namespace update {
 	    publishedAt: string;
 	    checkedAt: string;
 	    error?: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new Info(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.currentVersion = source["currentVersion"];
@@ -1652,3 +1653,4 @@ export namespace update {
 	}
 
 }
+

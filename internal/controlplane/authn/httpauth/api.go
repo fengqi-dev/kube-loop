@@ -18,7 +18,6 @@ const (
 	oauthPath               = "/oauth2"
 	openidConfigurationPath = "/.well-known/openid-configuration"
 	oauthMetadataPath       = "/.well-known/oauth-authorization-server"
-	browserSessionCookie    = oauthserver.BrowserSessionCookie
 	browserSessionTTL       = 12 * time.Hour
 )
 
@@ -41,6 +40,13 @@ func NewRoutes(endpoints *oauthserver.Endpoints, options ...RouteOption) *Routes
 		}
 	}
 	return routes
+}
+
+func (routes *Routes) browserSessionCookie() (string, bool) {
+	if strings.HasPrefix(routes.issuer, "https://") {
+		return oauthserver.BrowserSessionCookie, true
+	}
+	return oauthserver.HTTPBrowserSessionCookie, false
 }
 
 func (routes *Routes) RegisterRoutes(group *echo.Group) {
@@ -124,7 +130,8 @@ func (routes *Routes) authorize(ctx *echo.Context) error {
 }
 
 func (routes *Routes) existingIdentity(ctx *echo.Context) (oauthserver.BrowserIdentity, bool) {
-	cookie, err := ctx.Request().Cookie(browserSessionCookie)
+	cookieName, _ := routes.browserSessionCookie()
+	cookie, err := ctx.Request().Cookie(cookieName)
 	if err == nil && strings.TrimSpace(cookie.Value) != "" {
 		identity, identityErr := routes.fosite.BrowserIdentity(ctx.Request().Context(), cookie.Value)
 		if identityErr == nil {
@@ -188,7 +195,8 @@ func (routes *Routes) localLogin(ctx *echo.Context) error {
 		if sessionErr != nil {
 			return writeBrowserError(ctx)
 		}
-		ctx.SetCookie(&http.Cookie{Name: browserSessionCookie, Value: sessionToken, Path: "/", Secure: true,
+		cookieName, secure := routes.browserSessionCookie()
+		ctx.SetCookie(&http.Cookie{Name: cookieName, Value: sessionToken, Path: "/", Secure: secure,
 			HttpOnly: true, SameSite: http.SameSiteLaxMode, MaxAge: int(browserSessionTTL.Seconds())})
 	}
 	if err := routes.fosite.CompleteAuthorization(ctx.Response(), ctx.Request(), form.Get("transaction"), form.Get("csrf"), identity, form.Get("decision") == "allow"); err != nil {
@@ -213,13 +221,14 @@ func (routes *Routes) logout(ctx *echo.Context) error {
 		request.Header.Get("Sec-Fetch-Site") == "cross-site" {
 		return routes.oauthError(ctx, http.StatusUnauthorized, "invalid_request", "logout request was rejected")
 	}
-	cookie, err := request.Cookie(browserSessionCookie)
+	cookieName, secure := routes.browserSessionCookie()
+	cookie, err := request.Cookie(cookieName)
 	if err == nil {
 		if err := routes.fosite.RevokeBrowserSession(request.Context(), cookie.Value); err != nil {
 			return routes.oauthError(ctx, http.StatusServiceUnavailable, "temporarily_unavailable", "logout could not be completed")
 		}
 	}
-	http.SetCookie(writer, &http.Cookie{Name: browserSessionCookie, Value: "", Path: "/", Secure: true,
+	http.SetCookie(writer, &http.Cookie{Name: cookieName, Value: "", Path: "/", Secure: secure,
 		HttpOnly: true, SameSite: http.SameSiteLaxMode, MaxAge: -1, Expires: time.Unix(1, 0).UTC()})
 	return ctx.NoContent(http.StatusNoContent)
 }
@@ -235,7 +244,7 @@ func (routes *Routes) userInfo(ctx *echo.Context) error {
 		ctx.Response().Header().Set("WWW-Authenticate", `Bearer error="invalid_token"`)
 		return routes.oauthError(ctx, http.StatusUnauthorized, "invalid_token", "access token was rejected")
 	}
-	return ctx.JSON(http.StatusOK, map[string]any{"sub": session.IdentityID, "name": session.DisplayName, "email": session.Email, "groups": session.Groups})
+	return ctx.JSON(http.StatusOK, map[string]any{"sub": session.IdentityID, "name": session.DisplayName, "email": session.Email})
 }
 
 func (routes *Routes) bindForm(ctx *echo.Context) (url.Values, bool) {

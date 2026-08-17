@@ -5,23 +5,21 @@ KubeLoop has been installed as three independent workloads:
   Operator: {{ include "kubeloop.operatorName" . }}
 
 {{- if .Values.controlPlane.development.enabled }}
-Development mode is enabled. Authorization remains database-managed and deny-by-default.
+Development mode is enabled. Any authenticated user can access the service.
 {{- end }}
 
 Service discovery:
   {{ required "publicURL is required" .Values.publicURL }}/.well-known/kubeloop
 
 {{- if .Values.controlPlane.admin.bootstrap.enabled }}
-On a new database, the Control Plane creates the initial organization and
-platform administrator {{ .Values.controlPlane.admin.bootstrap.username | quote }}. The administrator
-is added to the organization Administrators group, which receives the built-in
-Organization Owner role. All seven built-in platform and organization roles are initialized.
+On a new database, the Control Plane creates the initial administrator
+{{ .Values.controlPlane.admin.bootstrap.username | quote }}.
 The random initial password is stored in a Kubernetes Secret:
   kubectl -n {{ .Release.Namespace }} get secret {{ include "kubeloop.iamBootstrapSecretName" . }} -o jsonpath='{.data.{{ .Values.controlPlane.admin.bootstrap.passwordKey }}}' | base64 -d; echo
 {{- else }}
 On a new database, the Control Plane logs one one-time IAM bootstrap token.
 It expires after 24 hours and is never stored in plaintext. Use it in the
-Management UI to create the first platform administrator and organization.
+Management UI to create the first administrator.
 {{- end }}
 {{- if and (not .Values.ingress.enabled) (not .Values.gatewayAPI.enabled) }}
 Start a local tunnel:
@@ -31,7 +29,7 @@ Then sign in at:
   {{ required "controlPlane.admin.publicURL is required" .Values.controlPlane.admin.publicURL }}/api/admin/ui
 
 {{- if and (not .Values.ingress.enabled) (not .Values.gatewayAPI.enabled) }}
-Chart-managed external routing is disabled. Route the same public HTTPS origin as follows:
+Chart-managed external routing is disabled. Route the same public origin as follows:
   /.well-known, /oauth2, /kubeloop/api and /api/sessions -> {{ include "kubeloop.controlPlaneName" . }}
   /api/admin -> {{ include "kubeloop.controlPlaneManagementName" . }}
   {{ .Values.dataPlane.tunnelPath }} -> {{ include "kubeloop.dataPlaneName" . }}

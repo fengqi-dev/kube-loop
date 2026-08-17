@@ -57,41 +57,11 @@ func testRepositoryConformance(t *testing.T, store *Store) {
 	t.Run("idempotency", func(t *testing.T) { testIdempotencyRepository(t, store) })
 	t.Run("audit", func(t *testing.T) { testAuditRepository(t, store) })
 	t.Run("Relay desired states", func(t *testing.T) { testRelayDesiredStateRepository(t, store) })
-	t.Run("audit export jobs", func(t *testing.T) { testAuditExportJobRepository(t, store) })
-	t.Run("IAM boolean fields", func(t *testing.T) { testIAMBooleanFields(t, store) })
 	t.Run("management list pagination", func(t *testing.T) { testManagementListPagination(t, store) })
 	t.Run("management sessions", func(t *testing.T) { testAdminSessionRepositoryConformance(t, store) })
 	t.Run("transactions", func(t *testing.T) { testTransactions(t, store) })
 	t.Run("concurrent identity and idempotency", func(t *testing.T) { testConcurrentIdentityAndIdempotency(t, store) })
 	t.Run("stable errors", func(t *testing.T) { testStableRepositoryErrors(t, store) })
-}
-
-func testIAMBooleanFields(t *testing.T, store *Store) {
-	t.Helper()
-	ctx := context.Background()
-	now := time.Date(2026, 8, 16, 9, 0, 0, 0, time.UTC)
-	organizationID := uuid.NewString()
-	if err := store.Organizations().Create(ctx, Organization{
-		ID: organizationID, Name: "IAM Boolean Conformance", Slug: "iam-boolean-" + organizationID,
-		Status: "active", CreatedAt: now, UpdatedAt: now,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	group := Group{
-		ID: uuid.NewString(), OrganizationID: organizationID, Name: "System Administrators",
-		Description: "Verifies cross-dialect boolean persistence", System: true, CreatedAt: now, UpdatedAt: now,
-	}
-	if err := store.Groups().Create(ctx, group); err != nil {
-		t.Fatal(err)
-	}
-	loaded, err := store.Groups().Get(ctx, group.ID)
-	if err != nil || !loaded.System {
-		t.Fatalf("loaded system group = %#v, %v", loaded, err)
-	}
-	groups, err := store.Groups().List(ctx, organizationID, 10)
-	if err != nil || len(groups) != 1 || groups[0].ID != group.ID || !groups[0].System {
-		t.Fatalf("listed system groups = %#v, %v", groups, err)
-	}
 }
 
 func testRelayDesiredStateRepository(t *testing.T, store *Store) {
@@ -120,38 +90,6 @@ func testRelayDesiredStateRepository(t *testing.T, store *Store) {
 	listed, err := store.RelayDesiredStates().List(ctx)
 	if err != nil || len(listed) != 1 || listed[0].Version != 2 {
 		t.Fatalf("list Relay desired states = %#v, %v", listed, err)
-	}
-}
-
-func testAuditExportJobRepository(t *testing.T, store *Store) {
-	t.Helper()
-	ctx := context.Background()
-	now := time.Date(2026, 8, 10, 13, 0, 0, 0, time.UTC)
-	job := AuditExportJob{
-		ID: uuid.NewString(), State: "pending", Filter: json.RawMessage(`{"limit":10}`),
-		RequestedBy: uuid.NewString(), RequestedAuthenticationType: "normal", Reason: "export conformance audit",
-		CreatedAt: now, UpdatedAt: now, ExpiresAt: now.Add(time.Hour),
-	}
-	if err := store.AuditExportJobs().Create(ctx, job); err != nil {
-		t.Fatal(err)
-	}
-	pending, err := store.AuditExportJobs().ListRunnable(ctx, now.Add(-time.Minute), 10)
-	if err != nil || len(pending) != 1 || pending[0].ID != job.ID {
-		t.Fatalf("pending audit export jobs = %#v, %v", pending, err)
-	}
-	claimedAt := now.Add(time.Minute)
-	if err := store.AuditExportJobs().Claim(ctx, job.ID, now, now.Add(-time.Minute), claimedAt); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.AuditExportJobs().Claim(ctx, job.ID, now, now.Add(-time.Minute), claimedAt); !errors.Is(err, ErrConflict) {
-		t.Fatalf("duplicate audit export claim error = %v", err)
-	}
-	if err := store.AuditExportJobs().Complete(ctx, job.ID, "succeeded", "{}\n", "", claimedAt.Add(time.Minute)); err != nil {
-		t.Fatal(err)
-	}
-	loaded, err := store.AuditExportJobs().GetByID(ctx, job.ID)
-	if err != nil || loaded.State != "succeeded" || loaded.Result != "{}\n" {
-		t.Fatalf("completed audit export job = %#v, %v", loaded, err)
 	}
 }
 

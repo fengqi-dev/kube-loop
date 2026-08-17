@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
@@ -123,6 +124,17 @@ func TestLoopbackCallbackRejectsTamperedStateWithoutConsumingLogin(t *testing.T)
 		!strings.Contains(response.Header.Get("Content-Security-Policy"), "script-src 'sha256-") ||
 		!strings.Contains(string(body), "window.close();") {
 		t.Fatalf("valid callback response status=%d headers=%v body=%s", response.StatusCode, response.Header, body)
+	}
+	scriptStart := bytes.Index(body, []byte("<script>"))
+	scriptEnd := bytes.Index(body, []byte("</script>"))
+	if scriptStart < 0 || scriptEnd <= scriptStart {
+		t.Fatalf("valid callback response has no inline script: %s", body)
+	}
+	script := body[scriptStart+len("<script>") : scriptEnd]
+	digest := sha256.Sum256(script)
+	wantSource := "'sha256-" + base64.StdEncoding.EncodeToString(digest[:]) + "'"
+	if !strings.Contains(response.Header.Get("Content-Security-Policy"), wantSource) {
+		t.Fatalf("callback CSP does not allow its embedded script: %s", response.Header.Get("Content-Security-Policy"))
 	}
 	if result := <-results; result.err != nil || result.code == "" {
 		t.Fatalf("valid callback result = %#v", result)

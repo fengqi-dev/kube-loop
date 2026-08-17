@@ -7,7 +7,6 @@ import {
   oidcCallbackError,
   request,
   resolveRequestPath,
-  waitForAuditExport,
 } from "./api";
 
 afterEach(() => {
@@ -17,7 +16,7 @@ afterEach(() => {
 
 describe("resolveRequestPath", () => {
   it("places admin resources under the configured management base", () => {
-    expect(resolveRequestPath("/overview")).toBe(`${managementBase}/overview`);
+    expect(resolveRequestPath("/users")).toBe(`${managementBase}/users`);
     expect(resolveRequestPath("providers")).toBe(`${managementBase}/providers`);
   });
 
@@ -40,13 +39,36 @@ describe("mutation", () => {
       }),
     );
 
-    await mutation("/groups", "POST", {});
+    await mutation("/users", "POST", {});
 
     expect(fetchMock).toHaveBeenCalledWith(
-      `${managementBase}/groups`,
+      `${managementBase}/users`,
       expect.objectContaining({
         headers: expect.objectContaining({
           "X-KubeLoop-CSRF": "cookie-token",
+        }),
+      }),
+    );
+  });
+
+  it("uses the HTTP CSRF cookie when TLS is disabled", async () => {
+    vi.spyOn(document, "cookie", "get").mockReturnValue(
+      "kubeloop-admin-csrf=http-cookie-token",
+    );
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    await mutation("/users", "POST", {});
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${managementBase}/users`,
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          "X-KubeLoop-CSRF": "http-cookie-token",
         }),
       }),
     );
@@ -60,11 +82,11 @@ describe("mutation", () => {
       })),
     );
 
-    await mutation("/authorization/drafts", "POST", {}, {
+    await mutation("/oauth-clients", "POST", {}, {
       etag: 1,
       idempotencyKey: "draft-and-publish-key",
     });
-    await mutation("/authorization/changes/change-1/publish", "POST", {}, {
+    await mutation("/oauth-clients/client-1/secret", "POST", {}, {
       etag: 1,
       idempotencyKey: "draft-and-publish-key",
     });
@@ -102,36 +124,9 @@ describe("authentication failure", () => {
     const listener = vi.fn();
     addEventListener(authenticationLostEvent, listener);
 
-    await expect(request("/overview")).rejects.toMatchObject({ status: 401 });
+    await expect(request("/users")).rejects.toMatchObject({ status: 401 });
 
     expect(listener).toHaveBeenCalledOnce();
     removeEventListener(authenticationLostEvent, listener);
-  });
-});
-
-describe("waitForAuditExport", () => {
-  it("polls a pending job and returns the NDJSON file", async () => {
-    const fetchMock = vi
-      .spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({ state: "running" }), {
-          status: 202,
-          headers: { "Content-Type": "application/json" },
-        }),
-      )
-      .mockResolvedValueOnce(
-        new Response('{"action":"admin.audit/list"}\n', {
-          status: 200,
-          headers: { "Content-Type": "application/x-ndjson" },
-        }),
-      );
-
-    const blob = await waitForAuditExport("job-1", {
-      attempts: 2,
-      delayMs: 0,
-    });
-
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(await blob.text()).toContain("admin.audit/list");
   });
 });

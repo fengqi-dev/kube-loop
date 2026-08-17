@@ -81,7 +81,9 @@ export function ServerOverviewView({
         ? "starting-tunnel"
         : "idle";
   const networkSpec = inventory.session?.networkSpec;
-  const [selectedMode, setSelectedMode] = useState<"socks" | "tun">(dataPlane?.mode || "socks");
+  const [selectedMode, setSelectedMode] = useState<"socks" | "tun">(
+    dataPlane?.state === "connected" && dataPlane.mode === "socks" ? "socks" : "tun",
+  );
   const [helper, setHelper] = useState<HelperStatus | null>(null);
   const [helperAction, setHelperAction] = useState<"install" | "uninstall" | null>(null);
   const [socksPort, setSocksPort] = useState(profile.socksPort || 1080);
@@ -112,9 +114,10 @@ export function ServerOverviewView({
     return () => { active = false; };
   }, [profile.id]);
   useEffect(() => {
-    if (!busy && !pendingMode && dataPlane?.state === "connected") {
-      setSelectedMode(dataPlane.mode || "socks");
-    }
+    if (busy || pendingMode) return;
+    setSelectedMode(
+      dataPlane?.state === "connected" && dataPlane.mode === "socks" ? "socks" : "tun",
+    );
   }, [profile.id, busy, pendingMode, dataPlane?.state, dataPlane?.mode]);
 
   async function connectSelectedMode() {

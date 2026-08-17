@@ -124,10 +124,7 @@ func TestPodExecTaskAndWebSocketStreamAreOwnedAndSingleUse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	policy, _ := authorization.New(authorization.Policy{Rules: []authorization.Rule{{
-		ID: "exec", Subjects: []string{"*"}, Namespaces: []string{"development"},
-		Operations: []string{"create", "stream"}, ResourceKinds: []string{"pod-exec"},
-	}}})
+	policy := authorization.NewAuthenticated()
 	server, err := controlplane.NewServer(controlplane.Config{PublicURL: "https://gateway.example.test"}, controlplane.BuildInfo{},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
 		controlplane.WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(request *http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
@@ -270,10 +267,7 @@ func TestPodExecStreamStopsWhenOAuthGrantIsRevoked(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	policy, _ := authorization.New(authorization.Policy{Rules: []authorization.Rule{{
-		ID: "exec", Subjects: []string{"*"}, Namespaces: []string{"development"},
-		Operations: []string{"create", "stream"}, ResourceKinds: []string{"pod-exec"},
-	}}})
+	policy := authorization.NewAuthenticated()
 	server, err := controlplane.NewServer(controlplane.Config{PublicURL: "https://gateway.example.test"}, controlplane.BuildInfo{},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
 		controlplane.WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(*http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {

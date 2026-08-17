@@ -775,6 +775,18 @@ func TestPreviewTaskLifecycleAndAuthenticatedReverseStream(t *testing.T) {
 	}
 }
 
+func TestRelayAssignmentAllowsWSAndWSS(t *testing.T) {
+	relayID := "relay-" + strings.Repeat("a", 64)
+	for _, endpoint := range []string{"ws://relay.example/tunnel", "wss://relay.example/tunnel"} {
+		if !validRelayAssignment(relayID, endpoint) {
+			t.Fatalf("validRelayAssignment(%q) = false", endpoint)
+		}
+	}
+	if validRelayAssignment(relayID, "http://relay.example/tunnel") {
+		t.Fatal("HTTP relay assignment was accepted")
+	}
+}
+
 func TestPreviewTaskRequiresClusterIPOnlyAfterItIsRunning(t *testing.T) {
 	now := time.Now().UTC()
 	session := Session{ID: uuid.NewString(), Namespace: "development"}

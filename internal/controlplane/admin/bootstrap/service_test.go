@@ -10,7 +10,7 @@ import (
 	"github.com/google/uuid"
 )
 
-func TestCompleteDefaultCreatesSingleOrganizationAdministratorGraph(t *testing.T) {
+func TestCompleteDefaultCreatesFirstUser(t *testing.T) {
 	store, err := storage.Open(context.Background(), storage.Config{
 		Backend: storage.BackendSQLite, SQLitePath: filepath.Join(t.TempDir(), "bootstrap.db"),
 	})
@@ -33,17 +33,8 @@ func TestCompleteDefaultCreatesSingleOrganizationAdministratorGraph(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !created || password != "" || result.Organization.Name != DefaultOrganizationName ||
-		result.Organization.Slug != DefaultOrganizationSlug || !result.Group.System {
+	if !created || password != "" || result.Identity.IdentityID == "" {
 		t.Fatalf("bootstrap result = %+v, password=%q, created=%t", result, password, created)
-	}
-	organizations, err := store.Organizations().List(context.Background(), 2)
-	if err != nil || len(organizations) != 1 {
-		t.Fatalf("organizations = %+v, %v", organizations, err)
-	}
-	members, err := store.Groups().ListMembers(context.Background(), result.Group.ID, 2)
-	if err != nil || len(members) != 1 || members[0].IdentityID != result.Identity.IdentityID {
-		t.Fatalf("administrator members = %+v, %v", members, err)
 	}
 	if _, err := localUsers.Authenticate(context.Background(), "admin", []byte("correct-horse-battery-staple")); err != nil {
 		t.Fatalf("authenticate default administrator: %v", err)

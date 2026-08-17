@@ -71,6 +71,19 @@ func (applier *testApplier) AppliedGenerations() (uint64, uint64) {
 	return applier.keyGeneration, applier.revocationGeneration
 }
 
+func TestAgentAllowsWSAndWSSAdvertisedEndpoints(t *testing.T) {
+	for _, endpoint := range []string{"ws://relay.example/tunnel", "wss://relay.example/tunnel"} {
+		_, err := New(Config{
+			ControlPlaneURL: "https://control-plane.example",
+			Endpoint:        endpoint, HTTPClient: http.DefaultClient,
+			Reporter: &testRuntimeReporter{}, Applier: &testApplier{},
+		})
+		if err != nil {
+			t.Fatalf("New endpoint %q: %v", endpoint, err)
+		}
+	}
+}
+
 func TestAgentRegistersAppliesControlStateAndAcknowledgesHeartbeat(t *testing.T) {
 	now := time.Now().UTC()
 	publicKey, _, err := ed25519.GenerateKey(rand.Reader)

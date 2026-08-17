@@ -16,12 +16,7 @@ import (
 )
 
 func FuzzGatewayHTTPEntryBoundedAndRedacted(f *testing.F) {
-	policy, err := authorization.New(authorization.Policy{Rules: []authorization.Rule{{
-		ID: "fuzz", Subjects: []string{"*"}, Namespaces: []string{"*"}, Operations: []string{"*"}, ResourceKinds: []string{"*"},
-	}}})
-	if err != nil {
-		f.Fatal(err)
-	}
+	policy := authorization.NewAuthenticated()
 	server, err := NewServer(
 		Config{PublicURL: "https://gateway.example.test", MaxRequestBodyBytes: 256}, BuildInfo{},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),

@@ -17,7 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
-func TestSQLiteOpenMigratesAndConfiguresDatabase(t *testing.T) {
+func TestSQLiteOpenInitializesAndConfiguresDatabase(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state", "kubeloop.db")
 	store, err := Open(context.Background(), Config{Backend: BackendSQLite, SQLitePath: path})
 	if err != nil {
@@ -27,9 +27,9 @@ func TestSQLiteOpenMigratesAndConfiguresDatabase(t *testing.T) {
 	if store.Backend() != BackendSQLite {
 		t.Fatalf("backend = %q", store.Backend())
 	}
-	version, err := store.SchemaVersion(context.Background())
-	if err != nil || version != currentSchemaVersion() {
-		t.Fatalf("schema version = %d, error = %v", version, err)
+	var schemaID string
+	if err := store.db.QueryRow(`SELECT schema_id FROM schema_metadata WHERE id = 1`).Scan(&schemaID); err != nil || schemaID != currentSchemaID {
+		t.Fatalf("schema ID = %q, error = %v", schemaID, err)
 	}
 	info, err := os.Stat(path)
 	if err != nil {
@@ -47,23 +47,20 @@ func TestSQLiteOpenMigratesAndConfiguresDatabase(t *testing.T) {
 	}
 }
 
-func TestSQLiteInitialSchemaOmitsLegacyFields(t *testing.T) {
+func TestSQLiteInitialSchemaOmitsRemovedResourcesAndLegacyFields(t *testing.T) {
 	store := openSQLiteTestStore(t, filepath.Join(t.TempDir(), "initial.db"))
-	if currentSchemaVersion() != 1 {
-		t.Fatalf("initial schema version = %d", currentSchemaVersion())
-	}
-	var legacyTableCount int
-	if err := store.db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'identity_emails'`).Scan(&legacyTableCount); err != nil {
-		t.Fatal(err)
-	}
-	if legacyTableCount != 0 {
-		t.Fatal("initial schema contains unused identity_emails table")
+	for _, table := range []string{"identity_emails", "invitations", "organizations", "organization_memberships", "iam_groups", "group_memberships", "group_namespaces", "security_policies"} {
+		var tableCount int
+		if err := store.db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&tableCount); err != nil {
+			t.Fatal(err)
+		}
+		if tableCount != 0 {
+			t.Fatalf("initial schema contains removed %s table", table)
+		}
 	}
 	for table, omitted := range map[string][]string{
 		"admin_sessions":       {"schema_version"},
 		"audit_events":         {"schema_version"},
-		"audit_export_jobs":    {"schema_version"},
-		"group_memberships":    {"source_type", "source_id"},
 		"idempotency_records":  {"schema_version"},
 		"relay_desired_states": {"schema_version"},
 		"resource_snapshots":   {"schema_version"},
@@ -136,18 +133,18 @@ func TestSQLiteIdentityRepositoryPersistsIdentity(t *testing.T) {
 	}
 }
 
-func TestSQLiteRejectsNewerSchemaAndUnsafePaths(t *testing.T) {
-	t.Run("newer schema", func(t *testing.T) {
+func TestSQLiteRejectsUnsupportedSchemaAndUnsafePaths(t *testing.T) {
+	t.Run("unsupported schema", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "kubeloop.db")
 		store := openSQLiteTestStore(t, path)
-		if _, err := store.db.Exec(`INSERT INTO schema_migrations(version, applied_at) VALUES (999, 'now')`); err != nil {
+		if _, err := store.db.Exec(`UPDATE schema_metadata SET schema_id = 'legacy' WHERE id = 1`); err != nil {
 			t.Fatal(err)
 		}
 		if err := store.Close(); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := Open(context.Background(), Config{Backend: BackendSQLite, SQLitePath: path}); err == nil || !strings.Contains(err.Error(), "newer") {
-			t.Fatalf("Open newer schema error = %v", err)
+		if _, err := Open(context.Background(), Config{Backend: BackendSQLite, SQLitePath: path}); err == nil || !strings.Contains(err.Error(), "recreate") {
+			t.Fatalf("Open unsupported schema error = %v", err)
 		}
 	})
 	t.Run("symbolic link", func(t *testing.T) {
@@ -178,7 +175,7 @@ func TestSQLiteRejectsNewerSchemaAndUnsafePaths(t *testing.T) {
 	})
 }
 
-func TestSQLiteMigrationFailureRollsBackVersion(t *testing.T) {
+func TestSQLiteRejectsNonemptyUninitializedDatabase(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "kubeloop.db")
 	database, err := sql.Open("sqlite", path)
 	if err != nil {
@@ -190,28 +187,20 @@ func TestSQLiteMigrationFailureRollsBackVersion(t *testing.T) {
 	if err := database.Close(); err != nil {
 		t.Fatal(err)
 	}
-	expectedMigration := fmt.Sprintf("migration %d", baselineSchemaVersion)
-	if _, err := Open(context.Background(), Config{Backend: BackendSQLite, SQLitePath: path}); err == nil || !strings.Contains(err.Error(), expectedMigration) {
-		t.Fatalf("Open migration error = %v", err)
+	if _, err := Open(context.Background(), Config{Backend: BackendSQLite, SQLitePath: path}); err == nil || !strings.Contains(err.Error(), "recreate") {
+		t.Fatalf("Open uninitialized database error = %v", err)
 	}
 	database, err = sql.Open("sqlite", path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer database.Close()
-	var migrationTableCount int
-	if err := database.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'`).Scan(&migrationTableCount); err != nil {
+	var metadataTableCount int
+	if err := database.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'schema_metadata'`).Scan(&metadataTableCount); err != nil {
 		t.Fatal(err)
 	}
-	if migrationTableCount == 0 {
-		return
-	}
-	var version int
-	if err := database.QueryRow(`SELECT COALESCE(MAX(version), 0) FROM schema_migrations`).Scan(&version); err != nil {
-		t.Fatal(err)
-	}
-	if version != 0 {
-		t.Fatalf("failed migration recorded schema version %d", version)
+	if metadataTableCount != 0 {
+		t.Fatal("rejected database gained schema metadata")
 	}
 }
 
@@ -365,38 +354,32 @@ func TestStorageConfigurationSecurity(t *testing.T) {
 	}
 }
 
-func TestMySQLMigrationDialectConversion(t *testing.T) {
+func TestMySQLSchemaDialectConversion(t *testing.T) {
 	converted := strings.Builder{}
-	for _, migration := range migrations {
-		statements := migration.mysql
-		if len(statements) == 0 {
-			statements = mysqlMigrationStatements(migration.sqlite)
-		}
-		for _, statement := range statements {
-			converted.WriteString(statement)
-			for _, forbidden := range []string{"AUTOINCREMENT", " BLOB", "idempotency_`key`"} {
-				if strings.Contains(statement, forbidden) {
-					t.Fatalf("MySQL migration %d contains %q: %s", migration.version, forbidden, statement)
-				}
+	for _, statement := range schemaStatements(BackendMySQL) {
+		converted.WriteString(statement)
+		for _, forbidden := range []string{"AUTOINCREMENT", " BLOB", "idempotency_`key`"} {
+			if strings.Contains(statement, forbidden) {
+				t.Fatalf("MySQL schema contains %q: %s", forbidden, statement)
 			}
 		}
 	}
 	for _, omitted := range []string{"schema_version", "identity_emails"} {
 		if strings.Contains(converted.String(), omitted) {
-			t.Fatalf("MySQL migration contains legacy schema item %q", omitted)
+			t.Fatalf("MySQL schema contains legacy schema item %q", omitted)
 		}
 	}
-	for _, required := range []string{"CREATE TABLE identities", "CREATE TABLE organizations", "CREATE TABLE iam_groups", "CREATE TABLE group_namespaces"} {
+	for _, required := range []string{"CREATE TABLE identities", "CREATE TABLE password_credentials", "CREATE TABLE oauth_clients"} {
 		if !strings.Contains(converted.String(), required) {
-			t.Fatalf("MySQL authorization migration is missing %q", required)
+			t.Fatalf("MySQL schema is missing %q", required)
 		}
 	}
 	for _, required := range []string{
-		"primary_email VARCHAR(128)", "`key` VARCHAR(128)", "system_flag INTEGER",
+		"primary_email VARCHAR(128)", "`key` VARCHAR(128)",
 		"display_name LONGTEXT",
 	} {
 		if !strings.Contains(converted.String(), required) {
-			t.Fatalf("MySQL migration is missing indexed column conversion %q", required)
+			t.Fatalf("MySQL schema is missing indexed column conversion %q", required)
 		}
 	}
 	for column := range mysqlIndexedTextColumns {
@@ -410,26 +393,27 @@ func TestMySQLMigrationDialectConversion(t *testing.T) {
 	}
 }
 
-func TestPostgreSQLMigrationDialectConversion(t *testing.T) {
-	converted := strings.Join(migrations[0].postgresql, "\n")
+func TestPostgreSQLSchemaDialectConversion(t *testing.T) {
+	statements := schemaStatements(BackendPostgreSQL)
+	converted := strings.Join(statements, "\n")
 	for _, omitted := range []string{"schema_version", "identity_emails"} {
 		if strings.Contains(converted, omitted) {
-			t.Fatalf("PostgreSQL migration contains legacy schema item %q", omitted)
+			t.Fatalf("PostgreSQL schema contains legacy schema item %q", omitted)
 		}
 	}
-	for _, statement := range migrations[0].postgresql {
-		for _, required := range []string{"public BOOLEAN", "trusted BOOLEAN", "system_flag BOOLEAN", "request_json JSONB"} {
+	for _, statement := range statements {
+		for _, required := range []string{"public BOOLEAN", "trusted BOOLEAN", "request_json JSONB"} {
 			if strings.Contains(statement, strings.Fields(required)[0]+" ") && !strings.Contains(statement, required) {
-				t.Fatalf("PostgreSQL migration did not convert %q: %s", required, statement)
+				t.Fatalf("PostgreSQL schema did not convert %q: %s", required, statement)
 			}
 		}
 		if strings.Contains(statement, "BLOB") || strings.Contains(statement, "AUTOINCREMENT") {
-			t.Fatalf("PostgreSQL migration contains SQLite syntax: %s", statement)
+			t.Fatalf("PostgreSQL schema contains SQLite syntax: %s", statement)
 		}
 	}
-	for _, required := range []string{"CREATE TABLE identities", "CREATE TABLE organizations", "CREATE TABLE iam_groups", "CREATE TABLE group_namespaces"} {
+	for _, required := range []string{"CREATE TABLE identities", "CREATE TABLE password_credentials", "CREATE TABLE oauth_clients"} {
 		if !strings.Contains(converted, required) {
-			t.Fatalf("PostgreSQL authorization migration is missing %q", required)
+			t.Fatalf("PostgreSQL schema is missing %q", required)
 		}
 	}
 }

@@ -1,4 +1,4 @@
-import React, { FormEvent, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { KeyRound, ShieldCheck } from "lucide-react";
 import { authenticationError } from "./auth-error";
@@ -20,14 +20,6 @@ function App() {
     consent = query.get("consent") === "true",
     scopes = (query.get("scope") || "").split(/\s+/).filter(Boolean),
     client = query.get("client") || "OAuth client";
-  if (query.has("invitation"))
-    return (
-      <InvitationActivation
-        locale={locale}
-        token={query.get("invitation") || ""}
-        onLocale={setLocale}
-      />
-    );
   const text =
     locale === "zh-CN"
       ? {
@@ -141,132 +133,6 @@ function App() {
   );
 }
 
-function InvitationActivation({
-  locale,
-  token,
-  onLocale,
-}: {
-  locale: Locale;
-  token: string;
-  onLocale: (value: Locale) => void;
-}) {
-  const zh = locale === "zh-CN",
-    [busy, setBusy] = useState(false),
-    [error, setError] = useState(""),
-    [complete, setComplete] = useState(false);
-  const submit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setBusy(true);
-    setError("");
-    const data = new FormData(event.currentTarget);
-    try {
-      const response = await fetch("/api/admin/invitations/accept", {
-        method: "POST",
-        credentials: "same-origin",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          token,
-          username: data.get("username"),
-          displayName: data.get("displayName"),
-          password: data.get("password"),
-        }),
-      });
-      if (!response.ok) {
-        const body = (await response.json().catch(() => null)) as {
-          error?: { message?: string };
-        } | null;
-        throw new Error(
-          body?.error?.message ||
-            `${zh ? "邀请激活失败" : "Invitation activation failed"} (${response.status})`,
-        );
-      }
-      setComplete(true);
-    } catch (cause) {
-      setError((cause as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <main>
-      <section className="card">
-        <header>
-          <div className="brand">
-            <span>KL</span>KubeLoop
-          </div>
-          <button
-            className="locale"
-            onClick={() => {
-              const next = locale === "zh-CN" ? "en-US" : "zh-CN";
-              localStorage.setItem("kubeloop.locale", next);
-              onLocale(next);
-            }}
-          >
-            {locale === "zh-CN" ? "EN" : "中"}
-          </button>
-        </header>
-        <div className="icon">
-          <KeyRound />
-        </div>
-        <h1>{zh ? "激活 KubeLoop 账号" : "Activate your KubeLoop account"}</h1>
-        {complete ? (
-          <>
-            <p>
-              {zh
-                ? "账号已创建，现在可以返回应用登录。"
-                : "Your account is ready. Return to the application to sign in."}
-            </p>
-            <a className="primary" href="/oauth2/ui/">
-              {zh ? "前往登录" : "Continue to sign in"}
-            </a>
-          </>
-        ) : (
-          <form onSubmit={submit}>
-            {error && (
-              <div className="error" role="alert">
-                {error}
-              </div>
-            )}
-            <label>
-              {zh ? "用户名" : "Username"}
-              <input
-                name="username"
-                autoComplete="username"
-                required
-                autoFocus
-              />
-            </label>
-            <label>
-              {zh ? "显示名称" : "Display name"}
-              <input name="displayName" autoComplete="name" required />
-            </label>
-            <label>
-              {zh ? "初始密码" : "Initial password"}
-              <input
-                name="password"
-                type="password"
-                autoComplete="new-password"
-                minLength={12}
-                required
-              />
-            </label>
-            <div className="actions">
-              <button className="primary" disabled={busy}>
-                {busy
-                  ? zh
-                    ? "正在激活…"
-                    : "Activating…"
-                  : zh
-                    ? "激活账号"
-                    : "Activate account"}
-              </button>
-            </div>
-          </form>
-        )}
-      </section>
-    </main>
-  );
-}
 createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <App />

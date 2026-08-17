@@ -8,7 +8,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/protocol/relaycontrol"
 )
 
-// EndpointHostPolicy restricts advertised WSS endpoints to exact hosts or
+// EndpointHostPolicy restricts advertised WebSocket endpoints to exact hosts or
 // explicitly configured DNS suffixes. A suffix begins with a dot and never
 // matches the bare parent domain.
 func EndpointHostPolicy(allowed ...string) (EndpointPolicy, error) {

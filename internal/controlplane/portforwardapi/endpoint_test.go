@@ -110,13 +110,7 @@ func TestPortForwardTaskLifecycleIsOwnedIdempotentAndPolicyMapped(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	policy, err := authorization.New(authorization.Policy{Rules: []authorization.Rule{{
-		ID: "port-forward", Subjects: []string{"*"}, Namespaces: []string{"development"},
-		Operations: []string{"create", "list", "delete"}, ResourceKinds: []string{"port-forwards"},
-	}}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	policy := authorization.NewAuthenticated()
 	server, err := controlplane.NewServer(
 		controlplane.Config{PublicURL: "https://gateway.example.test"}, controlplane.BuildInfo{},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),

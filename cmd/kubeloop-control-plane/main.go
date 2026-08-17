@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"flag"
 	"log/slog"
 	"os"
@@ -13,7 +12,6 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/controlplane"
 	adminhttpapi "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/httpapi"
 	adminhttpserver "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/httpserver"
-	adminoperations "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/operations"
 	adminsession "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/session"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/authn/httpauth"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/authn/oauthserver"
@@ -65,12 +63,10 @@ func main() {
 	maintenanceWorker := bootstrap.MaintenanceWorker
 	localUsers := bootstrap.LocalUsers
 	iamBootstrap := bootstrap.IAMBootstrap
-	managementPolicyEngine := bootstrap.ManagementPolicyEngine
-	iamLoader := bootstrap.IAMLoader
-	policyEngine := bootstrap.PolicyEngine
+	authorizer := bootstrap.Authorizer
 	kubernetesConfig := bootstrap.KubernetesConfig
 	kubernetesProvider := bootstrap.KubernetesProvider
-	apiRuntime := buildAPIRuntime(signalContext, config, environment, logger, stateStore, policyEngine, kubernetesProvider)
+	apiRuntime := buildAPIRuntime(signalContext, config, environment, logger, stateStore, authorizer, kubernetesProvider)
 	apiRoutes := apiRuntime.Routes
 	relayRegistry := apiRuntime.RelayRegistry
 	sessionRuntime := apiRuntime.SessionRuntime
@@ -87,16 +83,13 @@ func main() {
 		if err := stateStore.Check(ctx); err != nil {
 			return err
 		}
-		if err := iamLoader.Check(ctx); err != nil {
-			return err
-		}
 		return kubernetesProvider.Check(ctx)
 	})
 	authMethodSource := controlplane.AuthMethodSourceFunc(func() []controlplane.AuthMethod {
 		return append([]controlplane.AuthMethod(nil), methods...)
 	})
 	serverOptions := []controlplane.ServerOption{
-		controlplane.WithReadinessChecker(readiness), controlplane.WithAuthorizer(policyEngine),
+		controlplane.WithReadinessChecker(readiness), controlplane.WithAuthorizer(authorizer),
 		controlplane.WithAuditSink(auditSink), controlplane.WithAPIRoutes(apiRoutes),
 		controlplane.WithAuthMethodSource(authMethodSource),
 	}
@@ -104,34 +97,6 @@ func main() {
 	if err != nil {
 		_ = stateStore.Close()
 		logger.Error("initialize Management Session service failed", "error", err)
-		os.Exit(2)
-	}
-	var managementRelayRuntimes []adminoperations.RelayRuntime
-	if relayRegistry != nil {
-		managementRelayRuntimes = append(managementRelayRuntimes, relayRegistry.registry)
-	}
-	managementOperations, err := adminoperations.New(stateStore, sessionRuntime, managementRelayRuntimes...)
-	if err != nil {
-		_ = stateStore.Close()
-		logger.Error("initialize Management Operations service failed", "error", err)
-		os.Exit(2)
-	}
-	err = managementOperations.ConfigureRecovery(adminoperations.RecoveryRunnerFunc(func(ctx context.Context) (map[string]int, error) {
-		counts := make(map[string]int, 2)
-		var result error
-		for name, run := range map[string]func(context.Context) (int, error){
-			"session-runtime": sessionRecovery.RunOnce,
-			"traffic-binding": bindingRecovery.RunOnce,
-		} {
-			count, runErr := run(ctx)
-			counts[name] = count
-			result = errors.Join(result, runErr)
-		}
-		return counts, result
-	}))
-	if err != nil {
-		_ = stateStore.Close()
-		logger.Error("initialize Management recovery runner failed", "error", err)
 		os.Exit(2)
 	}
 	var authRoutes controlplane.RouteRegistrar
@@ -185,19 +150,11 @@ func main() {
 			controlplane.WithAuthenticator(authenticateWithFosite(fositeEndpoints)),
 		)
 	}
-	managementOptions := []adminhttpapi.Option{adminhttpapi.WithReadAPI(
-		managementPolicyEngine, stateStore, adminhttpapi.BuildInfo{
-			Version: version, Commit: commit, ProtocolMin: protocolMin, ProtocolMax: protocolMax,
-		},
-	), adminhttpapi.WithIAM(iamLoader),
+	managementOptions := []adminhttpapi.Option{adminhttpapi.WithReadAPI(stateStore),
 		adminhttpapi.WithBootstrap(iamBootstrap),
-		adminhttpapi.WithOAuthClients(stateStore, stateStore),
-		adminhttpapi.WithOperationsAPI(managementOperations)}
+		adminhttpapi.WithOAuthClients(stateStore, stateStore)}
 	if localUsers != nil {
 		managementOptions = append(managementOptions, adminhttpapi.WithLocalUsers(localUsers))
-	}
-	if relayRegistry != nil {
-		managementOptions = append(managementOptions, adminhttpapi.WithRelayStatusSource(relayRegistry.registry))
 	}
 	if authRoutes != nil {
 		managementOptions = append(managementOptions, adminhttpapi.WithTokenExchange(fositeEndpoints))
@@ -240,9 +197,9 @@ func main() {
 	serveControlPlane(serverRuntimeOptions{
 		Context: signalContext, Stop: stop, Config: config, Logger: logger, Store: stateStore,
 		Server: server, ManagementServer: managementServer, RelayRegistry: relayRegistry,
-		KubernetesConfig: kubernetesConfig,
-		IAMLoader:        iamLoader, SessionRecovery: sessionRecovery,
-		ManagementOperations: managementOperations, MaintenanceWorker: maintenanceWorker,
-		BindingRecovery: bindingRecovery, SessionRuntime: sessionRuntime,
+		KubernetesConfig:  kubernetesConfig,
+		SessionRecovery:   sessionRecovery,
+		MaintenanceWorker: maintenanceWorker,
+		BindingRecovery:   bindingRecovery, SessionRuntime: sessionRuntime,
 	})
 }

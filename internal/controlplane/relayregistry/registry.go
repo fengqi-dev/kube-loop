@@ -83,9 +83,9 @@ func New(config Config) (*Registry, error) {
 	}
 	config.TicketIssuer = strings.TrimRight(strings.TrimSpace(config.TicketIssuer), "/")
 	issuer, err := url.Parse(config.TicketIssuer)
-	if err != nil || issuer.Scheme != "https" || issuer.Host == "" || issuer.User != nil ||
+	if err != nil || (issuer.Scheme != "http" && issuer.Scheme != "https") || issuer.Host == "" || issuer.User != nil ||
 		issuer.RawQuery != "" || issuer.Fragment != "" {
-		return nil, errors.New("Relay Registry Ticket issuer must be an absolute HTTPS URL")
+		return nil, errors.New("Relay Registry Ticket issuer must be an absolute HTTP or HTTPS URL")
 	}
 	if config.LeaseDuration == 0 {
 		config.LeaseDuration = 45 * time.Second
