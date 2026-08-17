@@ -109,22 +109,7 @@ func startFileController(
 		FileTransfers:  fileapi.NewRoutes(handler).Endpoints(),
 		FileOperations: fileopsapi.NewRoutes(operations).Endpoints(),
 	}
-	policy, err := authorization.New(authorization.Policy{Rules: []authorization.Rule{
-		{
-			ID: "e2e-file-transfer", Subjects: []string{identity.identity.Subject},
-			Namespaces: []string{identity.session.Namespace}, Operations: []string{"create", "get", "stream"},
-			ResourceKinds: []string{"file-transfers"},
-		},
-		{
-			ID: "e2e-file-operations", Subjects: []string{identity.identity.Subject},
-			Namespaces: []string{identity.session.Namespace}, Operations: []string{"list", "create", "update", "delete", "get"},
-			ResourceKinds: []string{"pod-files"},
-		},
-	}})
-	if err != nil {
-		_ = listener.Close()
-		t.Fatal(err)
-	}
+	policy := authorization.NewAuthenticated()
 	server, err := controlplane.NewServer(
 		controlplane.Config{PublicURL: "http://" + listener.Addr().String()}, controlplane.BuildInfo{},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),

@@ -102,13 +102,7 @@ func TestRealPodExecStopsWhenOAuthGrantIsRevoked(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	policy, err := authorization.New(authorization.Policy{Rules: []authorization.Rule{{
-		ID: "e2e-exec", Subjects: []string{"*"}, Namespaces: []string{harness.EchoNamespace},
-		Operations: []string{"create", "stream"}, ResourceKinds: []string{"pod-exec"},
-	}}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	policy := authorization.NewAuthenticated()
 	identity := controlplaneapi.Identity{
 		Subject: identityID, DeviceID: "e2e-device", AuthorizationID: authorizationID, AccessExpiresAt: expiresAt,
 	}
