@@ -42,7 +42,7 @@ Secret in `kubeloop-system`:
 ```bash
 helm upgrade --install kubeloop \
   oci://ghcr.io/fengqi-dev/kube-loop/charts/kubeloop \
-  --version 2.0.0-beta.7 \
+  --version 2.0.0-beta.8 \
   --namespace kubeloop-system \
   --create-namespace \
   --set publicURL=http://kubeloop.example.com \
