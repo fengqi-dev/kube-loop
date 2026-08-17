@@ -16,11 +16,11 @@ func TestBinaryInstallPathForExecutable(t *testing.T) {
 		want       string
 	}{
 		{
-			executable: `D:\a\kube-loop\build\embedded\kubeloop-helper-install.exe`,
+			executable: `D:\a\kube-loop\build\embedded\kubeloop-helper.exe`,
 			want:       filepath.Join(`D:\a\kube-loop\build\embedded`, "resources", name),
 		},
 		{
-			executable: `D:\Apps\KubeLoop\resources\kubeloop-helper-install.exe`,
+			executable: `D:\Apps\KubeLoop\resources\kubeloop-helper.exe`,
 			want:       filepath.Join(`D:\Apps\KubeLoop`, "resources", name),
 		},
 	}

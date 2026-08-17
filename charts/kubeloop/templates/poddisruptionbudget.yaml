@@ -1,0 +1,18 @@
+{{- if and .Values.podDisruptionBudget.controlPlane.enabled .Values.controlPlane.storage.datasource.existingSecret (gt (int .Values.controlPlane.replicas) 1) }}
+{{- if or (lt (int .Values.podDisruptionBudget.controlPlane.minAvailable) 1) (ge (int .Values.podDisruptionBudget.controlPlane.minAvailable) (int .Values.controlPlane.replicas) ) }}
+{{- fail "podDisruptionBudget.controlPlane.minAvailable must be at least 1 and lower than controlPlane.replicas" }}
+{{- end }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "kubeloop.controlPlaneName" . }}
+  labels:
+    {{- include "kubeloop.labels" . | nindent 4 }}
+    app.kubernetes.io/component: control-plane
+spec:
+  minAvailable: {{ .Values.podDisruptionBudget.controlPlane.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "kubeloop.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: control-plane
+{{- end }}

@@ -8,6 +8,8 @@ import (
 	helperinstall "github.com/fengqi-dev/kube-loop/internal/helper/install"
 )
 
+const embeddedDevelopmentCA = "development-ca.pem"
+
 func registerEmbeddedHelpers(embeddedHelperFiles fs.FS) {
 	if embeddedHelperFiles == nil {
 		return
@@ -21,7 +23,7 @@ func registerEmbeddedHelpers(embeddedHelperFiles fs.FS) {
 			continue
 		}
 		name := entry.Name()
-		if name == "README.md" || strings.HasPrefix(name, ".") {
+		if name == "README.md" || name == embeddedDevelopmentCA || strings.HasPrefix(name, ".") {
 			continue
 		}
 		content, readErr := fs.ReadFile(embeddedHelperFiles, path.Join("build/embedded", name))

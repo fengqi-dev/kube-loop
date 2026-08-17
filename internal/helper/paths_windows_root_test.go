@@ -13,7 +13,6 @@ func TestInstallRootFromWindowsExe(t *testing.T) {
 	}{
 		{`D:\Apps\KubeLoop\KubeLoop.exe`, `D:\Apps\KubeLoop`},
 		{`D:\Apps\KubeLoop\resources\kubeloop-helper.exe`, `D:\Apps\KubeLoop`},
-		{`D:\Apps\KubeLoop\resources\kubeloop-helper-install.exe`, `D:\Apps\KubeLoop`},
 		{`C:\Program Files\KubeLoop\KubeLoop.exe`, `C:\Program Files\KubeLoop`},
 		{`C:\Program Files\KubeLoop\resources\kubeloop-helper.exe`, `C:\Program Files\KubeLoop`},
 		{`D:/Apps/KubeLoop/resources/kubeloop-helper.exe`, `D:\Apps\KubeLoop`},

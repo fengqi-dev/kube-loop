@@ -1,0 +1,13 @@
+**
+
+!go.mod
+!go.sum
+!api
+!api/**/*.go
+!internal
+!internal/controller
+!internal/controller/**/*.go
+internal/controller/**/*_test.go
+!cmd
+!cmd/kubeloop-operator
+!cmd/kubeloop-operator/**/*.go

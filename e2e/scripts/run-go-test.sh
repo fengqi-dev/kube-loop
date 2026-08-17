@@ -7,11 +7,66 @@ cd "${ROOT}"
 
 TIMEOUT="${KUBELOOP_E2E_TIMEOUT:-30m}"
 LOG="$(mktemp "${TMPDIR:-/tmp}/kubeloop-e2e.XXXXXX")"
-trap 'rm -f "${LOG}"' EXIT
+RUNTIME_DIR="$(mktemp -d "${TMPDIR:-/tmp}/kubeloop-e2e-runtime.XXXXXX")"
+OPERATOR_PID=""
+
+cleanup() {
+  if [[ -n "${OPERATOR_PID}" ]]; then
+    kill "${OPERATOR_PID}" >/dev/null 2>&1 || true
+    wait "${OPERATOR_PID}" >/dev/null 2>&1 || true
+  fi
+  rm -f "${LOG}"
+  rm -rf "${RUNTIME_DIR}"
+}
+trap cleanup EXIT
+
+start_operator() {
+  local context="${KUBELOOP_E2E_CONTEXT:-minikube}"
+  echo "==> Installing TrafficBinding CRD in context ${context}"
+  kubectl --context "${context}" apply \
+    -f config/crd/bases/traffic.kubeloop.io_trafficbindings.yaml
+  kubectl --context "${context}" wait \
+    --for=condition=Established \
+    crd/trafficbindings.traffic.kubeloop.io \
+    --timeout=60s
+
+  kubectl config view --raw --flatten --minify --context "${context}" \
+    >"${RUNTIME_DIR}/kubeconfig"
+  go build -trimpath -o "${RUNTIME_DIR}/kubeloop-operator" ./cmd/kubeloop-operator
+  KUBECONFIG="${RUNTIME_DIR}/kubeconfig" \
+    "${RUNTIME_DIR}/kubeloop-operator" \
+      --metrics-bind-address=0 \
+      --health-probe-bind-address=0 \
+      >"${RUNTIME_DIR}/operator.log" 2>&1 &
+  OPERATOR_PID=$!
+
+  # Cache startup is asynchronous. Verify the process survives initialization;
+  # reconciliation itself remains eventual and is asserted by the E2E cases.
+  for _ in {1..20}; do
+    if ! kill -0 "${OPERATOR_PID}" >/dev/null 2>&1; then
+      echo "Operator exited during startup" >&2
+      cat "${RUNTIME_DIR}/operator.log" >&2
+      return 1
+    fi
+    sleep 0.1
+  done
+  echo "==> TrafficBinding Operator ready (pid ${OPERATOR_PID})"
+}
+
+if [[ "${KUBELOOP_E2E:-}" == "1" ]]; then
+  start_operator
+fi
 
 echo "==> Running TUN e2e (log: ${LOG})"
+if [[ -n "${KUBELOOP_E2E_PACKAGES:-}" ]]; then
+  read -r -a E2E_PACKAGES <<<"${KUBELOOP_E2E_PACKAGES}"
+else
+  # Clients only know the Gateway address, so the acceptance gate exercises
+  # the authenticated Data Plane and remote TUN paths.
+  E2E_PACKAGES=(./e2e/dataplane ./e2e/remotetun)
+fi
 set +e
-go test -tags=e2e ./e2e/... -count=1 -timeout="${TIMEOUT}" -parallel=1 -p 1 -v "$@" 2>&1 | tee "${LOG}"
+go test -tags=e2e "${E2E_PACKAGES[@]}" -count=1 -timeout="${TIMEOUT}" -parallel=1 -p 1 -v "$@" 2>&1 | tee "${LOG}"
 EXIT_CODE=${PIPESTATUS[0]}
 set -e
 
@@ -23,6 +78,12 @@ PKG_FAIL="$(grep -E '^FAIL[[:space:]]' "${LOG}" || true)"
 if [[ -z "${FAILED}" && "${EXIT_CODE}" -eq 0 ]]; then
   echo "All e2e tests passed."
   exit 0
+fi
+
+if [[ -s "${RUNTIME_DIR}/operator.log" ]]; then
+  echo
+  echo "==> Operator log tail"
+  tail -80 "${RUNTIME_DIR}/operator.log"
 fi
 
 if [[ -n "${FAILED}" ]]; then

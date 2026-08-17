@@ -1,0 +1,19 @@
+apiVersion: traffic.kubeloop.io/v1alpha1
+kind: TrafficBinding
+metadata:
+  name: mirror-sample
+spec:
+  mode: Mirror
+  sessionID: d4c57b84-f1d9-4aef-86c4-35b217836457
+  taskID: 6da47b2a-75fa-4f30-a930-7d5e20c38fd9
+  sessionGeneration: 1
+  target:
+    kind: Service
+    name: sample-service
+  relay:
+    address: 10.96.0.20
+  ports:
+  - name: http
+    targetPort: 8080
+    relayPort: 18080
+    protocol: TCP

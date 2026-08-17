@@ -38,13 +38,22 @@ func main() {
 		fatalf("create output directory: %v", err)
 	}
 
-	if strings.EqualFold(strings.TrimSpace(os.Getenv("KUBELOOP_SINGBOX_SOURCE")), "debug") {
+	source := strings.ToLower(strings.TrimSpace(os.Getenv("KUBELOOP_SINGBOX_SOURCE")))
+	if source == "" {
+		source = "patched"
+	}
+	switch source {
+	case "debug", "patched":
 		name := "sing-box"
 		if goos == "windows" {
 			name += ".exe"
 		}
+		builder := "./build/singbox-patched.go"
+		if source == "debug" {
+			builder = "./build/singbox-debug.go"
+		}
 		args := []string{
-			"run", "./build/singbox-debug.go",
+			"run", builder,
 			"-target", target,
 			"-output", filepath.Join(binDir, name),
 		}
@@ -53,14 +62,16 @@ func main() {
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
-			fatalf("build sing-box from source: %v", err)
+			fatalf("build %s sing-box from source: %v", source, err)
 		}
-	} else {
+	case "upstream":
 		fmt.Printf("==> Fetching sing-box %s for %s/%s\n", singboxdist.Version, goos, goarch)
 		if err := singboxdist.BundleRelease(goos, goarch, binDir); err != nil {
 			fatalf("bundle sing-box: %v", err)
 		}
 		fmt.Printf("==> Staged sing-box into %s\n", binDir)
+	default:
+		fatalf("unsupported KUBELOOP_SINGBOX_SOURCE %q (want patched, upstream, or debug)", source)
 	}
 
 	if goos == "windows" {
@@ -76,11 +87,7 @@ func stageWindowsResources(root string) error {
 	if err := os.MkdirAll(resourcesDir, 0o755); err != nil {
 		return fmt.Errorf("create package resources directory: %w", err)
 	}
-	for _, name := range []string{
-		"kubeloop-helper.exe",
-		"kubeloop-helper-install.exe",
-		"kubeloop-helper-uninstall.exe",
-	} {
+	for _, name := range []string{"kubeloop-helper.exe"} {
 		src := filepath.Join(embeddedDir, name)
 		dst := filepath.Join(resourcesDir, name)
 		if err := copyFile(src, dst); err != nil {

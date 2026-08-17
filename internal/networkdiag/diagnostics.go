@@ -6,7 +6,7 @@ import (
 	"runtime"
 	"sort"
 
-	"github.com/fengqi-dev/kube-loop/internal/cluster"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
 )
 
 type Severity string
@@ -17,18 +17,18 @@ const (
 )
 
 type Issue struct {
-	Code      string
-	Severity  Severity
-	Message   string
-	Target    string
-	Conflict  string
-	Interface string
+	Code      string   `json:"code"`
+	Severity  Severity `json:"severity"`
+	Message   string   `json:"message"`
+	Target    string   `json:"target,omitempty"`
+	Conflict  string   `json:"conflict,omitempty"`
+	Interface string   `json:"interface,omitempty"`
 }
 
 type Result struct {
-	RoutingMode string
-	StrictRoute bool
-	Issues      []Issue
+	RoutingMode string  `json:"routingMode"`
+	StrictRoute bool    `json:"strictRoute"`
+	Issues      []Issue `json:"issues"`
 }
 
 type hostRoute struct {
@@ -37,7 +37,13 @@ type hostRoute struct {
 	Metric    uint32
 }
 
-func Inspect(discovery cluster.Discovery) Result {
+// InspectNetworkSpec checks only local host state. It never reads kubeconfig or
+// calls Kubernetes; the Spec is the signed remote Session snapshot.
+func InspectNetworkSpec(spec networkspec.Spec) Result {
+	return inspect(spec.PodCIDRs, spec.PodIPs, spec.ServiceCIDRs, spec.ServiceIPs)
+}
+
+func inspect(podCIDRs, podIPs, serviceCIDRs, serviceIPs []string) Result {
 	diagnostics := Result{
 		RoutingMode: "native",
 		StrictRoute: runtime.GOOS != "windows",
@@ -50,7 +56,7 @@ func Inspect(discovery cluster.Discovery) Result {
 			Message:  "Could not inspect existing host routes: " + err.Error(),
 		})
 	} else {
-		diagnostics.Issues = analyzeRouteConflicts(discoveryRoutes(discovery), routes)
+		diagnostics.Issues = analyzeRouteConflicts(discoveryRoutes(podCIDRs, podIPs, serviceCIDRs, serviceIPs), routes)
 	}
 	if issue := inspectDNSPort(); issue != nil {
 		diagnostics.Issues = append(diagnostics.Issues, *issue)
@@ -58,12 +64,17 @@ func Inspect(discovery cluster.Discovery) Result {
 	return diagnostics
 }
 
-func discoveryRoutes(discovery cluster.Discovery) []netip.Prefix {
-	values := append([]string{}, discovery.PodCIDRs...)
-	if len(discovery.ServiceCIDRs) > 0 {
-		values = append(values, discovery.ServiceCIDRs...)
+func discoveryRoutes(podCIDRs, podIPs, serviceCIDRs, serviceIPs []string) []netip.Prefix {
+	values := append([]string{}, podCIDRs...)
+	for _, ip := range podIPs {
+		if address, err := netip.ParseAddr(ip); err == nil {
+			values = append(values, netip.PrefixFrom(address, address.BitLen()).String())
+		}
+	}
+	if len(serviceCIDRs) > 0 {
+		values = append(values, serviceCIDRs...)
 	} else {
-		for _, ip := range discovery.ServiceIPs {
+		for _, ip := range serviceIPs {
 			if address, err := netip.ParseAddr(ip); err == nil {
 				values = append(values, netip.PrefixFrom(address, address.BitLen()).String())
 			}

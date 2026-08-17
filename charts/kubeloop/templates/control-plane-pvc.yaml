@@ -1,0 +1,18 @@
+{{- if and (not .Values.controlPlane.storage.datasource.existingSecret) .Values.controlPlane.storage.sqlite.persistence.enabled (not .Values.controlPlane.storage.sqlite.persistence.existingClaim) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "kubeloop.sqliteClaimName" . }}
+  labels:
+    {{- include "kubeloop.labels" . | nindent 4 }}
+    app.kubernetes.io/component: control-plane
+spec:
+  accessModes:
+    {{- toYaml .Values.controlPlane.storage.sqlite.persistence.accessModes | nindent 4 }}
+  {{- with .Values.controlPlane.storage.sqlite.persistence.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.controlPlane.storage.sqlite.persistence.size }}
+{{- end }}

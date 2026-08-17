@@ -48,11 +48,7 @@ func ElevateInstall(
 	if err != nil {
 		return fmt.Errorf("find current Windows user SID: %w", err)
 	}
-	installTool, err := LocateBundledInstallTool()
-	if err != nil {
-		return err
-	}
-	return runElevatedTool(ctx, installTool, elevatedRequest{
+	return runElevatedTool(ctx, source, "install", elevatedRequest{
 		ServiceSource: source,
 		ServiceSHA256: expectedSHA256,
 		SingBoxPath:   singBoxPath,
@@ -65,15 +61,10 @@ func ElevateInstall(
 }
 
 func ElevateUninstall(ctx context.Context, source string) error {
-	_ = source
-	uninstallTool, err := LocateBundledUninstallTool()
-	if err != nil {
-		return err
-	}
-	return runElevatedTool(ctx, uninstallTool, elevatedRequest{})
+	return runElevatedTool(ctx, source, "uninstall", elevatedRequest{})
 }
 
-func runElevatedTool(ctx context.Context, tool string, request elevatedRequest) error {
+func runElevatedTool(ctx context.Context, tool, operation string, request elevatedRequest) error {
 	lockedTool, toolHash, err := lockAndHashElevatedSource(tool)
 	if err != nil {
 		return err
@@ -114,6 +105,9 @@ func runElevatedTool(ctx context.Context, tool string, request elevatedRequest) 
 	}
 
 	args := strings.Join([]string{
+		syscall.EscapeArg("elevated"),
+		syscall.EscapeArg("--operation"),
+		syscall.EscapeArg(operation),
 		syscall.EscapeArg("--request"),
 		syscall.EscapeArg(requestPath),
 		syscall.EscapeArg("--result"),

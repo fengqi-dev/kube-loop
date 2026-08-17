@@ -1,0 +1,7 @@
+version: v2.12.2
+name: golangci-lint
+destination: ./build/tools
+plugins:
+  - module: sigs.k8s.io/logtools
+    import: sigs.k8s.io/logtools/logcheck/gclplugin
+    version: v0.10.1

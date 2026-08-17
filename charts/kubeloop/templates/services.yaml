@@ -1,0 +1,74 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "kubeloop.controlPlaneName" . }}
+  labels:
+    {{- include "kubeloop.labels" . | nindent 4 }}
+    app.kubernetes.io/component: control-plane
+spec:
+  type: {{ .Values.controlPlane.service.type }}
+  selector:
+    {{- include "kubeloop.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: control-plane
+  ports:
+    - name: http
+      port: {{ .Values.controlPlane.service.port }}
+      targetPort: http
+      protocol: TCP
+      appProtocol: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "kubeloop.controlPlaneManagementName" . }}
+  labels:
+    {{- include "kubeloop.labels" . | nindent 4 }}
+    app.kubernetes.io/component: control-plane-management
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "kubeloop.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: control-plane
+  ports:
+    - name: management
+      port: {{ .Values.controlPlane.admin.servicePort }}
+      targetPort: management
+      protocol: TCP
+      appProtocol: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "kubeloop.controlPlaneRegistryName" . }}
+  labels:
+    {{- include "kubeloop.labels" . | nindent 4 }}
+    app.kubernetes.io/component: control-plane-relay-registry
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "kubeloop.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: control-plane
+  ports:
+    - name: relay-mtls
+      port: {{ .Values.controlPlane.relayRegistry.servicePort }}
+      targetPort: relay-mtls
+      protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "kubeloop.dataPlaneName" . }}
+  labels:
+    {{- include "kubeloop.labels" . | nindent 4 }}
+    app.kubernetes.io/component: data-plane
+spec:
+  type: {{ .Values.dataPlane.service.type }}
+  selector:
+    {{- include "kubeloop.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: data-plane
+  ports:
+    - name: http
+      port: {{ .Values.dataPlane.service.port }}
+      targetPort: http
+      protocol: TCP
+      appProtocol: kubernetes.io/ws

@@ -1,0 +1,315 @@
+nameOverride: ""
+fullnameOverride: ""
+
+# Externally reachable HTTP or HTTPS origin entered by desktop clients.
+publicURL: ""
+serviceID: ""
+
+imagePullSecrets: []
+
+controlPlane:
+  replicas: 1
+  logLevel: info
+  development:
+    # Local-only runtime preset for Wails and disposable clusters. Authorization
+    # is still database-managed and deny-by-default.
+    enabled: false
+  image:
+    repository: ghcr.io/fengqi-dev/kube-loop/control-plane
+    tag: ""
+    pullPolicy: IfNotPresent
+  minClientVersion: ""
+  auth:
+    oauth:
+      # Independent authentication Secret. Helm creates and keeps the keys when omitted.
+      existingSecret: ""
+      oidcSigningKeyKey: oidc-signing-key.pem
+      hmacSecretKey: hmac-secret
+      keyID: primary
+      accessTTL: 5m
+      refreshTTL: 720h
+  relay:
+    # Required. This Secret is mounted only into Control Plane and must contain
+    # an Ed25519 PKCS#8 private key used to sign short-lived RelayTickets.
+    existingSecret: ""
+    signingKeyKey: signing-key.pem
+    keyID: primary
+    ticketTTL: 1m
+  relayRegistry:
+    # The internal listener is a separate ClusterIP-only HTTPS service. By
+    # default a short-lived, audience-bound projected ServiceAccount token is
+    # authenticated through Kubernetes TokenReview; it is not the general Pod
+    # API credential and automount remains disabled on Data Plane Pods.
+    authentication: tokenreview
+    listenPort: 9443
+    servicePort: 9443
+    tokenAudience: kubeloop-relay
+    trustDomain: cluster.local
+    endpointAllowedHosts: ""
+    leaseDuration: 45s
+    heartbeatAfter: 10s
+    keyGeneration: 1
+    keyValidity: 8760h
+    # Defaults to controlPlane.relay.existingSecret when empty. It must contain
+    # the internal HTTPS server certificate/private key and issuing CA.
+    existingSecret: ""
+    serverCertificateKey: tls.crt
+    serverPrivateKeyKey: tls.key
+    caKey: ca.crt
+  admin:
+    # The browser Management Plane has an isolated HTTP listener. The default
+    # origin is intended for `kubectl port-forward`; set it to the exact HTTPS
+    # origin when publishing this port through a separately managed route.
+    publicURL: http://127.0.0.1:8081
+    listenPort: 8081
+    servicePort: 8081
+    bootstrap:
+      # On an empty database, create the first platform administrator,
+      # organization, Administrators group, and built-in role bindings. A random
+      # initial password is stored in a retained
+      # Kubernetes Secret and is immediately usable. Existing IAM
+      # data is never changed.
+      enabled: true
+      existingSecret: ""
+      passwordKey: initial-password
+      username: admin
+      displayName: KubeLoop Administrator
+      email: ""
+  kubernetes:
+    timeout: 15s
+    qps: 20
+    burst: 40
+    userAgent: ""
+    impersonation:
+      # Disabled by default. Enabling this also requires the operator to grant
+      # the Control Plane ServiceAccount narrowly scoped impersonate RBAC.
+      enabled: false
+      usernamePrefix: "kubeloop:"
+      groupMappings: {}
+      # engineering: [k8s:developers]
+  files:
+    # Maximum bytes accepted by one upload or download Task. Directory
+    # transfers count the sanitized tar stream bytes.
+    maxBytes: 1073741824
+    # Absolute POSIX roots that file-transfer and pod-file management APIs may
+    # address. Use narrower application paths where possible; management may
+    # list a configured root but can never mutate the root itself.
+    allowedRoots:
+      - "/"
+  rbac:
+    # cluster grants enabled workflow groups across all namespaces. namespace
+    # confines those workload permissions to the explicit namespaces below.
+    # Both modes retain narrow cluster metadata and access-review permissions.
+    create: true
+    scope: cluster
+    namespaces: []
+    permissions:
+      inventory:
+        enabled: true
+      execFile:
+        enabled: true
+      traffic:
+        enabled: true
+  apiRequestTimeout: 30s
+  sessionTTL: 2m
+  sessionMaxLifetime: 8h
+  # Expired Sessions are deleted in bounded passes. Their owned Tasks and
+  # snapshots are removed by database foreign-key cascades, including after a
+  # desktop crash that cannot send an explicit disconnect.
+  maintenanceInterval: 1m
+  maintenanceBatchSize: 100
+  maxRequestBodyBytes: 1048576
+  shutdownTimeout: 10s
+  terminationGracePeriodSeconds: 15
+  service:
+    type: ClusterIP
+    port: 80
+  serviceAccount:
+    create: true
+    name: ""
+  storage:
+    # SQLite is used when datasource.existingSecret is empty. The Secret value
+    # must otherwise be a postgresql:// or mysql:// datasource URL.
+    sqlite:
+      path: /var/lib/kubeloop/kubeloop.db
+      persistence:
+        enabled: true
+        existingClaim: ""
+        storageClass: ""
+        accessModes:
+          - ReadWriteOnce
+        size: 1Gi
+    datasource:
+      existingSecret: ""
+      urlKey: datasource-url
+      allowInsecure: false
+    connectTimeout: 10s
+    queryTimeout: 5s
+    maxOpenConnections: 20
+    maxIdleConnections: 5
+    connectionMaxLifetime: 30m
+    transactionMaxRetries: 3
+    transactionRetryBackoff: 25ms
+  resources: {}
+  topologySpreadConstraints: []
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  podAnnotations: {}
+  podLabels: {}
+
+operator:
+  replicas: 1
+  image:
+    repository: ghcr.io/fengqi-dev/kube-loop/operator
+    tag: ""
+    pullPolicy: IfNotPresent
+  leaderElection: true
+  terminationGracePeriodSeconds: 10
+  serviceAccount:
+    create: true
+    name: ""
+  rbac:
+    create: true
+  resources: {}
+  topologySpreadConstraints: []
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  podAnnotations: {}
+  podLabels: {}
+
+dataPlane:
+  replicas: 1
+  logLevel: info
+  image:
+    repository: ghcr.io/fengqi-dev/kube-loop/gateway
+    tag: ""
+    pullPolicy: IfNotPresent
+  tunnelPath: /tunnel
+  drainTimeout: 30s
+  streamIdleTimeout: 30m
+  terminationGracePeriodSeconds: 35
+  service:
+    type: ClusterIP
+    port: 80
+  serviceAccount:
+    create: true
+    name: ""
+  relayRegistry:
+    # Empty values are derived from the internal Control Plane Service and
+    # publicURL/tunnelPath. endpoint may instead be a per-Pod routable WS/WSS URL.
+    controlPlaneURL: ""
+    endpoint: ""
+    serverName: ""
+    # Required only when controlPlane.relayRegistry.authentication=mtls. Each
+    # replica needs a distinct Pod-bound workload certificate; TokenReview is
+    # the scalable default.
+    existingSecret: ""
+    clientCertificateKey: tls.crt
+    clientPrivateKeyKey: tls.key
+    tokenExpirationSeconds: 600
+    replayEntries: 65536
+    maxWebSocketSessions: 256
+    maxWebSocketSessionsPerUser: 8
+    maxStreamsPerSession: 128
+    maxWebSocketFrameBytes: 1048576
+    handshakeTimeout: 10s
+  resources: {}
+  topologySpreadConstraints: []
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  podAnnotations: {}
+  podLabels: {}
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  host: ""
+  tls:
+    enabled: false
+    secretName: ""
+
+# Gateway API v1.2+ alternative to ingress. The route uses one HTTPS Origin
+# for discovery, authentication, API and the long-lived WebSocket tunnel.
+# Enable either ingress or gatewayAPI, never both.
+gatewayAPI:
+  enabled: false
+  annotations: {}
+  host: ""
+  parentRef:
+    # For an existing Gateway, name and sectionName are required. sectionName
+    # must identify an HTTPS listener that terminates TLS for gatewayAPI.host.
+    name: ""
+    namespace: ""
+    sectionName: ""
+  gateway:
+    # Optionally create the HTTPS Gateway alongside the HTTPRoute. Otherwise
+    # the platform team owns the referenced Gateway and certificate lifecycle.
+    create: false
+    className: ""
+    annotations: {}
+    tls:
+      secretName: ""
+  timeouts:
+    # Control Plane requests remain bounded. A zero tunnel timeout is required
+    # for WebSocket sessions; Gateway API defines 0s as disabling the timeout.
+    controlPlane: 30s
+    tunnel: 0s
+
+networkPolicy:
+  enabled: true
+  ingress:
+    # Gateway listeners use dynamic ports and receive Service traffic directly
+    # from workload Pods. Narrow these peers to the namespaces that may use
+    # Exchange, Preview, and Mirror in production.
+    dataPlane:
+      - from:
+          - namespaceSelector: {}
+  egress:
+    # Restricted egress needs installation-specific Kubernetes API, workload,
+    # OIDC and PostgreSQL CIDRs. Enabling it without explicit component
+    # allow rules fails rendering instead of silently breaking the workloads.
+    enabled: false
+    dns:
+      enabled: true
+      namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    controlPlane: []
+    dataPlane: []
+    operator: []
+
+monitoring:
+  serviceMonitor:
+    enabled: false
+    namespace: ""
+    labels: {}
+    interval: 30s
+    scrapeTimeout: 10s
+
+podDisruptionBudget:
+  # Rendered only for a multi-replica external-datasource Control Plane. SQLite never
+  # receives a PDB that could prevent voluntary maintenance.
+  controlPlane:
+    enabled: true
+    minAvailable: 1
+
+podSecurityContext:
+  runAsNonRoot: true
+  fsGroup: 65532
+  fsGroupChangePolicy: OnRootMismatch
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL

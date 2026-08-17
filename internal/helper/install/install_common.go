@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/fengqi-dev/kube-loop/internal/helper"
+	helperprotocol "github.com/fengqi-dev/kube-loop/internal/protocol/helper"
 )
 
 func copyFile(src, dst string, mode os.FileMode) error {
@@ -142,7 +143,6 @@ func InstallFromCLI(source, token string, uid int, version, homeDir, ownerSID, s
 	if err := waitForInstalledHelperReady(token, version); err != nil {
 		return err
 	}
-	cleanupDisplacedHelperBinaries(dest)
 	return nil
 }
 
@@ -152,7 +152,7 @@ func waitForInstalledHelperReady(token, version string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), installReadyTimeout)
 	defer cancel()
 	client := &helper.Client{Token: token}
-	return waitForHelperReady(ctx, installReadyTimeout, 100*time.Millisecond, func(pingCtx context.Context) (helper.Response, error) {
+	return waitForHelperReady(ctx, installReadyTimeout, 100*time.Millisecond, func(pingCtx context.Context) (helperprotocol.Response, error) {
 		requestCtx, requestCancel := context.WithTimeout(pingCtx, 2*time.Second)
 		defer requestCancel()
 		response, err := client.Ping(requestCtx)
@@ -328,15 +328,25 @@ func UninstallFromCLI() error {
 		return err
 	}
 	current := helper.BinaryInstallPath()
-	_ = os.Remove(current)
-	if legacy := helper.LegacyBinaryInstallPath(); legacy != "" {
-		_ = os.Remove(legacy)
-	}
-	cleanupDisplacedHelperBinaries(current)
+	removeInstalledBinary(current)
 	_ = os.Remove(helper.SystemAuthPath())
 	_ = os.Remove(helper.SystemTokenPath())
 	_ = os.Remove(helper.SocketPath())
 	return nil
+}
+
+func removeInstalledBinary(path string) {
+	// A unified Windows helper performs uninstall from the same executable used
+	// by the service. Windows cannot unlink that executable while this process is
+	// running; keep the packaged resource so the desktop can install it again.
+	// The application uninstaller removes the containing directory after this
+	// command exits.
+	if runtime.GOOS == "windows" {
+		if executable, err := os.Executable(); err == nil && sameInstallPath(path, executable) {
+			return
+		}
+	}
+	_ = os.Remove(path)
 }
 
 func sameInstallPath(a, b string) bool {

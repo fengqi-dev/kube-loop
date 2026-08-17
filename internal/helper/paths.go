@@ -31,14 +31,6 @@ func TokenPath() (string, error) {
 	return filepath.Join(dir, "helper.token"), nil
 }
 
-func SessionsRoot() (string, error) {
-	dir, err := UserDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(dir, "sessions"), nil
-}
-
 func SystemStateDir() string {
 	return platformSystemStateDir()
 }
@@ -61,11 +53,6 @@ func BinaryInstallPath() string {
 // from that tool rather than from their own executable.
 func BinaryInstallPathForExecutable(executable string) string {
 	return platformBinaryInstallPathForExecutable(executable)
-}
-
-// LegacyBinaryInstallPath returns the previous Windows helper location, if any.
-func LegacyBinaryInstallPath() string {
-	return platformLegacyBinaryInstallPath()
 }
 
 // BundledSingBoxPath returns the platform-package sing-box path when known.

@@ -1,0 +1,32 @@
+diff --git a/release/DEFAULT_BUILD_TAGS b/release/DEFAULT_BUILD_TAGS
+index e32b7be..5a17d13 100644
+--- a/release/DEFAULT_BUILD_TAGS
++++ b/release/DEFAULT_BUILD_TAGS
+@@ -1 +1 @@
+-with_gvisor,with_quic,with_dhcp,with_wireguard,with_utls,with_acme,with_clash_api,with_tailscale,with_ccm,with_ocm,with_naive_outbound,badlinkname,tfogo_checklinkname0
+\ No newline at end of file
++with_gvisor,with_clash_api
+diff --git a/release/DEFAULT_BUILD_TAGS_OTHERS b/release/DEFAULT_BUILD_TAGS_OTHERS
+index 83c7bdd..5a17d13 100644
+--- a/release/DEFAULT_BUILD_TAGS_OTHERS
++++ b/release/DEFAULT_BUILD_TAGS_OTHERS
+@@ -1 +1 @@
+-with_gvisor,with_quic,with_dhcp,with_wireguard,with_utls,with_acme,with_clash_api,with_tailscale,with_ccm,with_ocm,badlinkname,tfogo_checklinkname0
+\ No newline at end of file
++with_gvisor,with_clash_api
+diff --git a/release/DEFAULT_BUILD_TAGS_WINDOWS b/release/DEFAULT_BUILD_TAGS_WINDOWS
+index 09506c6..5a17d13 100644
+--- a/release/DEFAULT_BUILD_TAGS_WINDOWS
++++ b/release/DEFAULT_BUILD_TAGS_WINDOWS
+@@ -1 +1 @@
+-with_gvisor,with_quic,with_dhcp,with_wireguard,with_utls,with_acme,with_clash_api,with_tailscale,with_ccm,with_ocm,with_naive_outbound,with_purego,badlinkname,tfogo_checklinkname0
+\ No newline at end of file
++with_gvisor,with_clash_api
+diff --git a/release/LDFLAGS b/release/LDFLAGS
+index 517b66e..d7eed38 100644
+--- a/release/LDFLAGS
++++ b/release/LDFLAGS
+@@ -1 +1 @@
+--X internal/godebug.defaultGODEBUG=multipathtcp=0 -checklinkname=0
+\ No newline at end of file
++-X internal/godebug.defaultGODEBUG=multipathtcp=0

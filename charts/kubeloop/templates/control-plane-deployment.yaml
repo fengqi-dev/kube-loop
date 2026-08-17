@@ -1,0 +1,190 @@
+{{- $publicURL := required "publicURL is required (for example https://kubeloop.example.com)" .Values.publicURL -}}
+{{- $datasourceSecret := .Values.controlPlane.storage.datasource.existingSecret -}}
+{{- if and (not $datasourceSecret) (ne (int .Values.controlPlane.replicas) 1) -}}
+{{- fail "controlPlane.replicas must be 1 when using default SQLite storage" -}}
+{{- end }}
+{{- if and $datasourceSecret (le (int .Values.controlPlane.storage.maxOpenConnections) 0) -}}
+{{- fail "controlPlane.storage.maxOpenConnections must be positive" -}}
+{{- end }}
+{{- if and $datasourceSecret (lt (int .Values.controlPlane.storage.maxIdleConnections) 0) -}}
+{{- fail "controlPlane.storage.maxIdleConnections must not be negative" -}}
+{{- end }}
+{{- if and $datasourceSecret (gt (int .Values.controlPlane.storage.maxIdleConnections) (int .Values.controlPlane.storage.maxOpenConnections)) -}}
+{{- fail "controlPlane.storage.maxIdleConnections must not exceed maxOpenConnections" -}}
+{{- end }}
+{{- if and $datasourceSecret (or (lt (int .Values.controlPlane.storage.transactionMaxRetries) 0) (gt (int .Values.controlPlane.storage.transactionMaxRetries) 10)) -}}
+{{- fail "controlPlane.storage.transactionMaxRetries must be between 0 and 10" -}}
+{{- end }}
+{{- if ne (int .Values.controlPlane.replicas) 1 -}}
+{{- fail "controlPlane.replicas must be 1 while using the in-memory Relay Registry" -}}
+{{- end }}
+{{- $controlPlaneLogLevel := lower (toString .Values.controlPlane.logLevel) -}}
+{{- if not (has $controlPlaneLogLevel (list "debug" "info" "warn" "error")) -}}
+{{- fail "controlPlane.logLevel must be debug, info, warn, or error" -}}
+{{- end }}
+{{- $oauthSecretName := include "kubeloop.authSecretName" . -}}
+{{- $iamBootstrapSecretName := include "kubeloop.iamBootstrapSecretName" . -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "kubeloop.controlPlaneName" . }}
+  labels:
+    {{- include "kubeloop.labels" . | nindent 4 }}
+    app.kubernetes.io/component: control-plane
+spec:
+  replicas: {{ .Values.controlPlane.replicas }}
+  strategy:
+    type: {{ ternary "Recreate" "RollingUpdate" (not $datasourceSecret) }}
+  selector:
+    matchLabels:
+      {{- include "kubeloop.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: control-plane
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmaps.yaml") . | sha256sum }}
+        {{- with .Values.controlPlane.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "kubeloop.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: control-plane
+        {{- with .Values.controlPlane.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "kubeloop.controlPlaneServiceAccountName" . }}
+      automountServiceAccountToken: true
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      terminationGracePeriodSeconds: {{ .Values.controlPlane.terminationGracePeriodSeconds }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: control-plane
+          image: {{ include "kubeloop.controlPlaneImage" . | quote }}
+          imagePullPolicy: {{ .Values.controlPlane.image.pullPolicy }}
+          args:
+            - --config=/etc/kubeloop/kubeloop.yaml
+          env:
+            - name: KUBELOOP_POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+            - name: management
+              containerPort: {{ .Values.controlPlane.admin.listenPort }}
+              protocol: TCP
+            - name: relay-mtls
+              containerPort: {{ .Values.controlPlane.relayRegistry.listenPort }}
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: http
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: http
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          resources:
+            {{- toYaml .Values.controlPlane.resources | nindent 12 }}
+          volumeMounts:
+            - name: control-plane-config
+              mountPath: /etc/kubeloop
+              readOnly: true
+            - name: auth-secrets
+              mountPath: /var/run/secrets/kubeloop/auth
+              readOnly: true
+            - name: relay-registry-tls
+              mountPath: /var/run/secrets/kubeloop/relay-registry
+              readOnly: true
+            {{- if not $datasourceSecret }}
+            - name: data
+              mountPath: {{ dir .Values.controlPlane.storage.sqlite.path }}
+            {{- else }}
+            - name: storage-secret
+              mountPath: /var/run/secrets/kubeloop/storage
+              readOnly: true
+            {{- end }}
+      volumes:
+        - name: control-plane-config
+          configMap:
+            name: {{ include "kubeloop.configName" . }}
+            defaultMode: 0444
+            items:
+              - key: kubeloop.yaml
+                path: kubeloop.yaml
+        - name: auth-secrets
+          projected:
+            defaultMode: 0400
+            sources:
+              - secret:
+                  name: {{ required "controlPlane.relay.existingSecret is required" .Values.controlPlane.relay.existingSecret }}
+                  items:
+                    - key: {{ required "controlPlane.relay.signingKeyKey is required" .Values.controlPlane.relay.signingKeyKey }}
+                      path: relay/signing-key.pem
+              - secret:
+                  name: {{ $oauthSecretName }}
+                  items:
+                    - key: {{ required "controlPlane.auth.oauth.oidcSigningKeyKey is required" .Values.controlPlane.auth.oauth.oidcSigningKeyKey }}
+                      path: oauth/oidc-signing-key.pem
+                    - key: {{ required "controlPlane.auth.oauth.hmacSecretKey is required" .Values.controlPlane.auth.oauth.hmacSecretKey }}
+                      path: oauth/hmac-secret
+              {{- if .Values.controlPlane.admin.bootstrap.enabled }}
+              - secret:
+                  name: {{ $iamBootstrapSecretName }}
+                  items:
+                    - key: {{ required "controlPlane.admin.bootstrap.passwordKey is required" .Values.controlPlane.admin.bootstrap.passwordKey }}
+                      path: bootstrap/initial-password
+              {{- end }}
+        - name: relay-registry-tls
+          secret:
+            secretName: {{ default .Values.controlPlane.relay.existingSecret .Values.controlPlane.relayRegistry.existingSecret | required "controlPlane.relayRegistry.existingSecret or controlPlane.relay.existingSecret is required" }}
+            defaultMode: 0400
+            items:
+              - key: {{ required "controlPlane.relayRegistry.serverCertificateKey is required" .Values.controlPlane.relayRegistry.serverCertificateKey }}
+                path: tls.crt
+              - key: {{ required "controlPlane.relayRegistry.serverPrivateKeyKey is required" .Values.controlPlane.relayRegistry.serverPrivateKeyKey }}
+                path: tls.key
+              - key: {{ required "controlPlane.relayRegistry.caKey is required" .Values.controlPlane.relayRegistry.caKey }}
+                path: ca.crt
+        {{- if not $datasourceSecret }}
+        - name: data
+          {{- if .Values.controlPlane.storage.sqlite.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "kubeloop.sqliteClaimName" . }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        {{- else }}
+        - name: storage-secret
+          secret:
+            secretName: {{ .Values.controlPlane.storage.datasource.existingSecret }}
+            defaultMode: 0400
+            items:
+              - key: {{ .Values.controlPlane.storage.datasource.urlKey }}
+                path: datasource-url
+        {{- end }}
+      {{- with .Values.controlPlane.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.controlPlane.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.controlPlane.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.controlPlane.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

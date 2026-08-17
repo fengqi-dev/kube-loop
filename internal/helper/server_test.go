@@ -1,10 +1,14 @@
 package helper
 
-import "testing"
+import (
+	"testing"
+
+	helperprotocol "github.com/fengqi-dev/kube-loop/internal/protocol/helper"
+)
 
 func TestDispatchRejectsLegacyExecutableRequest(t *testing.T) {
 	server := NewServer(AuthFile{Token: "secret"})
-	response := server.dispatch(Request{Op: OpStart, Token: "secret"})
+	response := server.dispatch(helperprotocol.Request{Op: helperprotocol.OpStart, Token: "secret"})
 	if response.OK || response.Error != "session is required" {
 		t.Fatalf("dispatch() = %#v", response)
 	}
@@ -12,8 +16,8 @@ func TestDispatchRejectsLegacyExecutableRequest(t *testing.T) {
 
 func TestDispatchRequiresValidSessionIDForStop(t *testing.T) {
 	server := NewServer(AuthFile{Token: "secret"})
-	response := server.dispatch(Request{
-		Op: OpStop, Token: "secret", SessionID: "../../session",
+	response := server.dispatch(helperprotocol.Request{
+		Op: helperprotocol.OpStop, Token: "secret", SessionID: "../../session",
 	})
 	if response.OK {
 		t.Fatalf("dispatch() unexpectedly accepted an unsafe session ID")

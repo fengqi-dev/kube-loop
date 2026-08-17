@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"slices"
 	"strconv"
 	"strings"
@@ -120,13 +121,21 @@ func (r *Runtime) startOnce(
 		return nil, err
 	}
 	clusterDomains, _ := dnsname.NormalizeClusterDomains(network.ClusterDomains)
+	podRoutes := slices.Clone(network.PodCIDRs)
+	for _, raw := range network.PodIPs {
+		address, parseErr := netip.ParseAddr(raw)
+		if parseErr != nil {
+			return nil, fmt.Errorf("parse exact Pod route %q: %w", raw, parseErr)
+		}
+		podRoutes = append(podRoutes, netip.PrefixFrom(address, address.BitLen()).String())
+	}
 	dnsNamespace := namespace
 	if dnsNamespace == "" {
 		dnsNamespace = "default"
 	}
 	spec := singbox.SessionSpec{
 		ID:               "session-" + secret[:16],
-		PodCIDRs:         network.PodCIDRs,
+		PodCIDRs:         podRoutes,
 		ServiceCIDRs:     network.ServiceCIDRs,
 		ServiceIPs:       network.ServiceIPs,
 		ClusterDNSServer: network.DNSServer,

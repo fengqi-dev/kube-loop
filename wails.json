@@ -3,7 +3,7 @@
   "name": "kube-loop",
   "outputfilename": "KubeLoop",
   "frontend:install": "npm install",
-  "frontend:build": "npm run build",
+  "frontend:build": "npm run build:frontend",
   "frontend:dev:watcher": "npm run dev:wails",
   "frontend:dev:serverUrl": "auto",
   "viteServerTimeout": 180,
@@ -19,7 +19,7 @@
   "info": {
     "companyName": "KubeLoop",
     "productName": "KubeLoop",
-    "productVersion": "1.1.0",
+    "productVersion": "2.0.0",
     "copyright": "Copyright © KubeLoop",
     "comments": "Local development network for Kubernetes"
   },

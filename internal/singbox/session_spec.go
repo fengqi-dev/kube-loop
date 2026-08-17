@@ -9,7 +9,6 @@ import (
 	"slices"
 
 	"github.com/fengqi-dev/kube-loop/internal/dnsname"
-	"k8s.io/apimachinery/pkg/util/validation"
 )
 
 const maxSessionItems = 4096
@@ -96,14 +95,14 @@ func (s SessionSpec) Validate() error {
 		tun.Addr() == tun.Masked().Addr() {
 		return errors.New("TUN address must be a host in a 198.18.0.0/15 /30 subnet")
 	}
-	if s.Namespace != "" && len(validation.IsDNS1123Label(s.Namespace)) != 0 {
+	if s.Namespace != "" && !dnsname.ValidLabel(s.Namespace) {
 		return errors.New("invalid namespace")
 	}
-	if s.DNSNamespace != "" && len(validation.IsDNS1123Label(s.DNSNamespace)) != 0 {
+	if s.DNSNamespace != "" && !dnsname.ValidLabel(s.DNSNamespace) {
 		return errors.New("invalid DNS namespace")
 	}
 	for _, namespace := range s.Namespaces {
-		if len(validation.IsDNS1123Label(namespace)) != 0 {
+		if !dnsname.ValidLabel(namespace) {
 			return errors.New("invalid namespace in namespace list")
 		}
 	}
