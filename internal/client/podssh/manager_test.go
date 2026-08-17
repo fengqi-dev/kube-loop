@@ -123,8 +123,14 @@ func newFakeExecClient(t *testing.T) *fakeExecClient {
 			if err := connection.Write(ctx, websocket.MessageBinary, exit); err != nil {
 				return
 			}
-			_ = connection.Close(websocket.StatusNormalClosure, "exec complete")
-			return
+			// Let the client consume the terminal frame and initiate the close
+			// handshake. Closing the TCP socket here can surface as WSAECONNRESET
+			// before the buffered exit frame is observed on Windows.
+			for {
+				if _, _, err := connection.Read(ctx); err != nil {
+					return
+				}
+			}
 		}
 	}))
 	t.Cleanup(client.server.Close)
