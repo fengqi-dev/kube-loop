@@ -94,7 +94,6 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 
 {{- define "kubeloop.validateExternalAccess" -}}
 {{- $publicURL := trimSuffix "/" (trim .Values.publicURL) -}}
-{{- $adminPublicURL := trimSuffix "/" (trim .Values.controlPlane.admin.publicURL) -}}
 {{- if not (regexMatch `^https?://[^/?#]+$` $publicURL) -}}
 {{- fail "publicURL must be one HTTP or HTTPS origin without a path, query or fragment" -}}
 {{- end -}}
@@ -102,9 +101,6 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- fail "ingress.enabled and gatewayAPI.enabled are mutually exclusive" -}}
 {{- end -}}
 {{- if .Values.ingress.enabled -}}
-{{- if ne $adminPublicURL $publicURL -}}
-{{- fail "controlPlane.admin.publicURL must equal publicURL when ingress is enabled" -}}
-{{- end -}}
 {{- $host := required "ingress.host is required when ingress.enabled=true" .Values.ingress.host -}}
 {{- $scheme := ternary "https" "http" .Values.ingress.tls.enabled -}}
 {{- if ne $publicURL (printf "%s://%s" $scheme $host) -}}
@@ -112,9 +108,6 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 {{- end -}}
 {{- if .Values.gatewayAPI.enabled -}}
-{{- if ne $adminPublicURL $publicURL -}}
-{{- fail "controlPlane.admin.publicURL must equal publicURL when Gateway API is enabled" -}}
-{{- end -}}
 {{- $host := required "gatewayAPI.host is required when gatewayAPI.enabled=true" .Values.gatewayAPI.host -}}
 {{- if ne $publicURL (printf "https://%s" $host) -}}
 {{- fail "publicURL must exactly equal https://<gatewayAPI.host> when Gateway API is enabled" -}}
@@ -134,9 +127,9 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 
 {{- define "kubeloop.authSecretName" -}}
-{{- default (printf "%s-auth" (include "kubeloop.controlPlaneName" .)) .Values.controlPlane.auth.oauth.existingSecret | trunc 63 | trimSuffix "-" -}}
+{{- printf "%s-auth" (include "kubeloop.controlPlaneName" .) | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
-{{- define "kubeloop.iamBootstrapSecretName" -}}
-{{- default (printf "%s-iam-bootstrap" (include "kubeloop.controlPlaneName" .)) .Values.controlPlane.admin.bootstrap.existingSecret | trunc 63 | trimSuffix "-" -}}
+{{- define "kubeloop.relaySecretName" -}}
+{{- include "kubeloop.controlPlaneRegistryName" . -}}
 {{- end -}}

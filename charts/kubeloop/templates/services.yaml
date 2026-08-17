@@ -49,9 +49,9 @@ spec:
     {{- include "kubeloop.selectorLabels" . | nindent 4 }}
     app.kubernetes.io/component: control-plane
   ports:
-    - name: relay-mtls
+    - name: relay-tls
       port: {{ .Values.controlPlane.relayRegistry.servicePort }}
-      targetPort: relay-mtls
+      targetPort: relay-tls
       protocol: TCP
 ---
 apiVersion: v1

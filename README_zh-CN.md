@@ -32,28 +32,24 @@ KubeLoop 是面向 Kubernetes 开发的桌面网络工具。它像一条只连�
 
 - Kubernetes 1.25 或更高版本，以及 Helm 3
 - 已路由到 Kubernetes Ingress Controller 的域名
-- 按照 [Helm Chart 指南](charts/kubeloop/README.md#relay-registry-and-relayticket-keys)
-  创建 RelayTicket 签名密钥与内部 Relay Registry TLS Secret
 
-在 `kubeloop-system` 中创建 `kubeloop-relay-control-plane` Secret 后，
-安装已发布的 OCI Chart：
+安装已发布的 OCI Chart。默认情况下，Helm 会自动生成并保留 RelayTicket
+签名密钥与内部 Relay Registry TLS Secret：
 
 ```bash
 helm upgrade --install kubeloop \
   oci://ghcr.io/fengqi-dev/kube-loop/charts/kubeloop \
-  --version 2.0.0-beta.8 \
+  --version 2.0.0-beta.9 \
   --namespace kubeloop-system \
   --create-namespace \
   --set publicURL=http://kubeloop.example.com \
-  --set controlPlane.admin.publicURL=http://kubeloop.example.com \
-  --set controlPlane.relay.existingSecret=kubeloop-relay-control-plane \
   --set ingress.enabled=true \
   --set ingress.host=kubeloop.example.com \
   --set ingress.className=nginx \
   --wait
 ```
 
-请根据实际环境替换版本、域名、Ingress Class 和 Secret 名称。安装后查看初始管理员说明，
+请根据实际环境替换版本、域名和 Ingress Class。安装后查看初始管理员说明，
 并验证服务发现接口：
 
 ```bash
@@ -61,7 +57,7 @@ helm get notes kubeloop --namespace kubeloop-system
 curl http://kubeloop.example.com/.well-known/kubeloop
 ```
 
-Ingress 默认不启用 TLS。若需 HTTPS，请把两个 public URL 都改为 `https://...`，
+Ingress 默认不启用 TLS。若需 HTTPS，请把 `publicURL` 改为 `https://...`，
 并设置 `ingress.tls.enabled=true` 和 `ingress.tls.secretName`。
 
 卸载工作负载：

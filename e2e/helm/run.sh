@@ -75,41 +75,6 @@ fi
 # still cleaned up.
 CRD_OWNED=1
 
-create_relay_material() {
-  local namespace=$1
-  local release=$2
-  local directory="${WORK_DIR}/${release}"
-  mkdir -p "${directory}"
-
-  openssl genpkey -algorithm ED25519 -out "${directory}/signing-key.pem" >/dev/null 2>&1
-  local -a secret_args=(
-    create secret generic "${release}-relay"
-    --namespace "${namespace}"
-    --from-file="signing-key.pem=${directory}/signing-key.pem"
-  )
-  local registry_name="${release}-kubeloop-control-plane-relay.${namespace}.svc"
-  openssl req -x509 -newkey rsa:2048 -nodes -days 2 \
-    -keyout "${directory}/tls.key" -out "${directory}/tls.crt" \
-    -subj "/CN=kubeloop-relay-registry" \
-    -addext "subjectAltName=DNS:${registry_name}" >/dev/null 2>&1
-  cp "${directory}/tls.crt" "${directory}/ca.crt"
-  secret_args+=(
-    --from-file="tls.crt=${directory}/tls.crt"
-    --from-file="tls.key=${directory}/tls.key"
-    --from-file="ca.crt=${directory}/ca.crt"
-  )
-  kubectl "${secret_args[@]}" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
-
-  openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 \
-    -out "${directory}/oidc-signing-key.pem" >/dev/null 2>&1
-  openssl rand -hex 16 >"${directory}/hmac-secret"
-  kubectl create secret generic "${release}-auth" \
-    --namespace "${namespace}" \
-    --from-file="oidc-signing-key.pem=${directory}/oidc-signing-key.pem" \
-    --from-file="hmac-secret=${directory}/hmac-secret" \
-    --dry-run=client -o yaml | kubectl apply -f - >/dev/null
-}
-
 image_repository() {
   printf '%s\n' "${1%:*}"
 }
@@ -135,8 +100,6 @@ helm_apply() {
     --namespace "${namespace}"
     --wait --timeout 5m --history-max 10
     --set-string publicURL=https://kubeloop.e2e.invalid
-    --set-string "controlPlane.relay.existingSecret=${release}-relay"
-    --set-string "controlPlane.auth.oauth.existingSecret=${release}-auth"
     --set-string "controlPlane.image.repository=$(image_repository "${CONTROL_PLANE_IMAGE}")"
     --set-string "controlPlane.image.tag=$(image_tag "${CONTROL_PLANE_IMAGE}")"
     --set-string controlPlane.image.pullPolicy=IfNotPresent
@@ -371,8 +334,6 @@ postgres_exec() {
 log "Create isolated namespaces and runtime secrets"
 kubectl create namespace "${SQLITE_NAMESPACE}" >/dev/null
 kubectl create namespace "${POSTGRES_NAMESPACE}" >/dev/null
-create_relay_material "${SQLITE_NAMESPACE}" "${SQLITE_RELEASE}"
-create_relay_material "${POSTGRES_NAMESPACE}" "${POSTGRES_RELEASE}"
 install_postgresql
 
 log "Install SQLite release with dynamic Relay Registry"

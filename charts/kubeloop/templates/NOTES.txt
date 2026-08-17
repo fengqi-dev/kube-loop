@@ -11,11 +11,14 @@ Development mode is enabled. Any authenticated user can access the service.
 Service discovery:
   {{ required "publicURL is required" .Values.publicURL }}/.well-known/kubeloop
 
+Helm generated and retained the internal Relay signing and TLS Secret:
+  {{ include "kubeloop.relaySecretName" . }}
+
 {{- if .Values.controlPlane.admin.bootstrap.enabled }}
 On a new database, the Control Plane creates the initial administrator
 {{ .Values.controlPlane.admin.bootstrap.username | quote }}.
 The random initial password is stored in a Kubernetes Secret:
-  kubectl -n {{ .Release.Namespace }} get secret {{ include "kubeloop.iamBootstrapSecretName" . }} -o jsonpath='{.data.{{ .Values.controlPlane.admin.bootstrap.passwordKey }}}' | base64 -d; echo
+  kubectl -n {{ .Release.Namespace }} get secret {{ include "kubeloop.authSecretName" . }} -o jsonpath='{.data.{{ .Values.controlPlane.admin.bootstrap.passwordKey }}}' | base64 -d; echo
 {{- else }}
 On a new database, the Control Plane logs one one-time IAM bootstrap token.
 It expires after 24 hours and is never stored in plaintext. Use it in the
@@ -26,7 +29,7 @@ Start a local tunnel:
   kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "kubeloop.controlPlaneManagementName" . }} 8081:{{ .Values.controlPlane.admin.servicePort }}
 {{- end }}
 Then sign in at:
-  {{ required "controlPlane.admin.publicURL is required" .Values.controlPlane.admin.publicURL }}/api/admin/ui
+  {{ required "publicURL is required" .Values.publicURL }}/api/admin/ui
 
 {{- if and (not .Values.ingress.enabled) (not .Values.gatewayAPI.enabled) }}
 Chart-managed external routing is disabled. Route the same public origin as follows:
