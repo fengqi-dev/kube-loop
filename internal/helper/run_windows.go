@@ -44,13 +44,13 @@ func (s *windowsService) Execute(
 }
 
 // RunService starts the helper, using the Windows service manager when appropriate.
-func RunService(server *Server) error {
+func RunService(ctx context.Context, server *Server) error {
 	isService, err := svc.IsWindowsService()
 	if err != nil {
 		return err
 	}
 	if !isService {
-		return server.Serve(context.Background())
+		return server.Serve(ctx)
 	}
 	return svc.Run(ServiceNameWin(), &windowsService{server: server})
 }

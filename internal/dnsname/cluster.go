@@ -3,8 +3,6 @@ package dnsname
 import (
 	"fmt"
 	"strings"
-
-	"k8s.io/apimachinery/pkg/util/validation"
 )
 
 const DefaultClusterDomain = "cluster.local"
@@ -51,13 +49,32 @@ func NormalizeClusterDomains(domains []string) ([]string, error) {
 
 // ValidClusterDomain reports whether value is a normalized Kubernetes DNS domain.
 func ValidClusterDomain(value string) bool {
-	if len(validation.IsDNS1123Subdomain(value)) != 0 {
+	if value == "" || len(value) > 253 {
 		return false
 	}
 	for label := range strings.SplitSeq(value, ".") {
-		if len(validation.IsDNS1123Label(label)) != 0 {
+		if !ValidLabel(label) {
 			return false
 		}
 	}
 	return true
+}
+
+// ValidLabel implements the Kubernetes DNS-1123 label constraints without
+// importing client-go/apimachinery into the desktop dependency graph.
+func ValidLabel(value string) bool {
+	if value == "" || len(value) > 63 || !asciiLowerAlphaNumeric(value[0]) ||
+		!asciiLowerAlphaNumeric(value[len(value)-1]) {
+		return false
+	}
+	for index := 1; index < len(value)-1; index++ {
+		if value[index] != '-' && !asciiLowerAlphaNumeric(value[index]) {
+			return false
+		}
+	}
+	return true
+}
+
+func asciiLowerAlphaNumeric(value byte) bool {
+	return value >= 'a' && value <= 'z' || value >= '0' && value <= '9'
 }

@@ -10,6 +10,7 @@ import (
 func TestGenerateRoutesOnlyClusterTraffic(t *testing.T) {
 	content, err := Generate(NetworkSpec{
 		PodCIDRs:     []string{"10.244.0.0/16"},
+		PodIPs:       []string{"10.245.7.9"},
 		ServiceCIDRs: []string{"10.96.0.0/12"},
 		ServiceIPs:   []string{"10.96.0.10", "10.96.0.1", "10.105.153.132"},
 		DNSServer:    "10.96.0.10",
@@ -25,6 +26,7 @@ func TestGenerateRoutesOnlyClusterTraffic(t *testing.T) {
 		`"type": "tun"`,
 		`"auto_route": true`,
 		`"10.244.0.0/16"`,
+		`"10.245.7.9/32"`,
 		`"10.96.0.0/12"`,
 		`"cluster.local"`,
 		`"prefer_ipv4"`,

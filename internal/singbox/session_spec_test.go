@@ -9,7 +9,7 @@ import (
 func validSessionSpec() SessionSpec {
 	return SessionSpec{
 		ID:               "session-abc123",
-		PodCIDRs:         []string{"10.244.0.0/16"},
+		PodCIDRs:         []string{"10.244.0.0/16", "10.245.7.9/32"},
 		ServiceCIDRs:     []string{"10.96.0.0/12"},
 		ClusterDNSServer: "10.96.0.10",
 		BridgeHost:       "127.0.0.1",
@@ -39,6 +39,10 @@ func TestSessionSpecValidate(t *testing.T) {
 	}
 	if !strings.Contains(string(config), `"198.19.0.1/30"`) {
 		t.Fatalf("config does not contain the validated TUN address")
+	}
+	routes, err := spec.Routes()
+	if err != nil || !slices.Contains(routes, "10.245.7.9/32") {
+		t.Fatalf("exact Pod IP route missing: routes=%v err=%v", routes, err)
 	}
 	dns, err := spec.DNS()
 	if err != nil {

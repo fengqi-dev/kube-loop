@@ -3,8 +3,6 @@ package networkdiag
 import (
 	"net/netip"
 	"testing"
-
-	"github.com/fengqi-dev/kube-loop/internal/cluster"
 )
 
 func TestAnalyzeRouteConflictsIgnoresLessSpecificRoutes(t *testing.T) {
@@ -35,17 +33,14 @@ func TestAnalyzeRouteConflictsFindsEqualAndMoreSpecificRoutes(t *testing.T) {
 }
 
 func TestDiscoveryRoutesUsesServiceIPsOnlyAsFallback(t *testing.T) {
-	withCIDR := discoveryRoutes(cluster.Discovery{
-		PodCIDRs:     []string{"10.244.0.0/16"},
-		ServiceCIDRs: []string{"10.96.0.0/12"},
-		ServiceIPs:   []string{"10.96.0.10"},
-	})
-	if len(withCIDR) != 2 {
-		t.Fatalf("routes with Service CIDR = %v, want two aggregate routes", withCIDR)
+	withCIDR := discoveryRoutes(
+		[]string{"10.244.0.0/16"}, []string{"10.244.7.9"},
+		[]string{"10.96.0.0/12"}, []string{"10.96.0.10"},
+	)
+	if len(withCIDR) != 3 {
+		t.Fatalf("routes with exact Pod IP = %v, want two aggregate routes and one Pod /32", withCIDR)
 	}
-	withoutCIDR := discoveryRoutes(cluster.Discovery{
-		ServiceIPs: []string{"10.96.0.10", "10.96.0.10"},
-	})
+	withoutCIDR := discoveryRoutes(nil, nil, nil, []string{"10.96.0.10", "10.96.0.10"})
 	if len(withoutCIDR) != 1 || withoutCIDR[0].String() != "10.96.0.10/32" {
 		t.Fatalf("fallback routes = %v, want deduplicated Service /32", withoutCIDR)
 	}

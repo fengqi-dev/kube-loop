@@ -4,7 +4,9 @@ on:
   push:
     branches: [main]
     paths:
-      - "site/**"
+      - "frontend/apps/site/**"
+      - "frontend/package.json"
+      - "frontend/package-lock.json"
       - ".github/workflows/pages.yml"
   # Do not trigger on release/tag: the github-pages environment only allows
   # deployments from main. Release workflow dispatches this workflow on main.
@@ -31,6 +33,19 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build site
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build:site
 
       - name: Configure Pages
         uses: actions/configure-pages@v6

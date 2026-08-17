@@ -8,11 +8,11 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/fengqi-dev/kube-loop/internal/store"
 	"github.com/modelcontextprotocol/go-sdk/auth"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -55,7 +55,7 @@ func NewServer(backend Backend, version string) *Server {
 	return &Server{
 		backend: backend,
 		version: version,
-		port:    store.DefaultMCPPort,
+		port:    DefaultPort,
 	}
 }
 
@@ -68,23 +68,23 @@ func (s *Server) SetErrorHandler(handler func(error)) {
 
 // Configure updates persisted settings without starting or stopping.
 // Use Apply to reconcile the listener with Enabled.
-func (s *Server) Configure(cfg store.MCPConfig) {
+func (s *Server) Configure(cfg Config) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.enabled = cfg.Enabled
 	s.port = cfg.Port
 	if s.port <= 0 {
-		s.port = store.DefaultMCPPort
+		s.port = DefaultPort
 	}
 	s.tokenEnabled = cfg.TokenEnabled
 	s.token = cfg.Token
 }
 
 // Config returns the current configuration snapshot.
-func (s *Server) Config() store.MCPConfig {
+func (s *Server) Config() Config {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return store.MCPConfig{
+	return Config{
 		Enabled:      s.enabled,
 		Port:         s.port,
 		TokenEnabled: s.tokenEnabled,
@@ -336,8 +336,12 @@ func isLocalOrigin(origin string) bool {
 	if origin == "null" {
 		return true
 	}
-	return strings.HasPrefix(origin, "http://127.0.0.1") ||
-		strings.HasPrefix(origin, "http://localhost") ||
-		strings.HasPrefix(origin, "https://127.0.0.1") ||
-		strings.HasPrefix(origin, "https://localhost")
+	parsed, err := url.Parse(origin)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") ||
+		parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" ||
+		(parsed.Path != "" && parsed.Path != "/") {
+		return false
+	}
+	host := parsed.Hostname()
+	return strings.EqualFold(host, "localhost") || host == "127.0.0.1" || host == "::1"
 }

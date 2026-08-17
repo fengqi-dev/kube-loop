@@ -14,7 +14,120 @@ import (
 	"time"
 
 	"github.com/fengqi-dev/kube-loop/internal/helper"
+	helperprotocol "github.com/fengqi-dev/kube-loop/internal/protocol/helper"
 )
+
+func TestCanReuseInstalledHelper(t *testing.T) {
+	healthy := helper.Status{
+		Running:   true,
+		CoreReady: true,
+		Version:   "dev",
+		Protocol:  helperprotocol.Version,
+	}
+	tests := []struct {
+		name               string
+		status             helper.Status
+		enforceBinaryMatch bool
+		needsBinaryUpdate  bool
+		want               bool
+	}{
+		{
+			name:              "development automatic startup permits binary drift",
+			status:            healthy,
+			needsBinaryUpdate: true,
+			want:              true,
+		},
+		{
+			name:               "explicit install rejects binary drift",
+			status:             healthy,
+			enforceBinaryMatch: true,
+			needsBinaryUpdate:  true,
+		},
+		{
+			name:               "strict install reuses matching binary",
+			status:             healthy,
+			enforceBinaryMatch: true,
+			want:               true,
+		},
+		{
+			name: "stopped helper is not reusable",
+			status: helper.Status{
+				CoreReady: true,
+				Version:   "dev",
+				Protocol:  helperprotocol.Version,
+			},
+		},
+		{
+			name: "helper without core is not reusable",
+			status: helper.Status{
+				Running:  true,
+				Version:  "dev",
+				Protocol: helperprotocol.Version,
+			},
+		},
+		{
+			name: "version mismatch is not reusable",
+			status: helper.Status{
+				Running:   true,
+				CoreReady: true,
+				Version:   "old",
+				Protocol:  helperprotocol.Version,
+			},
+		},
+		{
+			name: "protocol mismatch is not reusable",
+			status: helper.Status{
+				Running:   true,
+				CoreReady: true,
+				Version:   "dev",
+				Protocol:  helperprotocol.Version + 1,
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := canReuseInstalledHelper(
+				test.status,
+				"dev",
+				helperprotocol.Version,
+				test.enforceBinaryMatch,
+				test.needsBinaryUpdate,
+			)
+			if got != test.want {
+				t.Fatalf("canReuseInstalledHelper() = %v, want %v", got, test.want)
+			}
+		})
+	}
+}
+
+func TestMustMatchBundledHelper(t *testing.T) {
+	tests := []struct {
+		name                 string
+		requireCurrentBinary bool
+		developmentBuild     bool
+		want                 bool
+	}{
+		{name: "automatic development startup permits drift", developmentBuild: true},
+		{
+			name:                 "explicit development install requires match",
+			requireCurrentBinary: true,
+			developmentBuild:     true,
+			want:                 true,
+		},
+		{name: "automatic release startup requires match", want: true},
+		{name: "explicit release install requires match", requireCurrentBinary: true, want: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := mustMatchBundledHelper(test.requireCurrentBinary, test.developmentBuild)
+			if got != test.want {
+				t.Fatalf("mustMatchBundledHelper() = %v, want %v", got, test.want)
+			}
+		})
+	}
+}
 
 func TestMaterializeBundledHelper(t *testing.T) {
 	home := t.TempDir()
@@ -164,10 +277,10 @@ func TestWaitForHelperReadyRetriesAtInterval(t *testing.T) {
 		context.Background(),
 		time.Second,
 		40*time.Millisecond,
-		func(context.Context) (helper.Response, error) {
+		func(context.Context) (helperprotocol.Response, error) {
 			calls++
-			return helper.Response{
-				Protocol:  helper.ProtocolVersion,
+			return helperprotocol.Response{
+				Protocol:  helperprotocol.Version,
 				CoreReady: calls >= 3,
 			}, nil
 		},
@@ -189,9 +302,9 @@ func TestWaitForHelperReadyCoreNotReadyTimesOut(t *testing.T) {
 		context.Background(),
 		180*time.Millisecond,
 		50*time.Millisecond,
-		func(context.Context) (helper.Response, error) {
+		func(context.Context) (helperprotocol.Response, error) {
 			calls++
-			return helper.Response{Protocol: helper.ProtocolVersion, CoreReady: false}, nil
+			return helperprotocol.Response{Protocol: helperprotocol.Version, CoreReady: false}, nil
 		},
 	)
 	if err == nil || !strings.Contains(err.Error(), "bundled sing-box is not configured") {
@@ -209,8 +322,8 @@ func TestWaitForHelperReadyReturnsParentCancellation(t *testing.T) {
 		ctx,
 		time.Second,
 		50*time.Millisecond,
-		func(context.Context) (helper.Response, error) {
-			return helper.Response{}, errors.New("not ready")
+		func(context.Context) (helperprotocol.Response, error) {
+			return helperprotocol.Response{}, errors.New("not ready")
 		},
 	)
 	if !errors.Is(err, context.Canceled) {

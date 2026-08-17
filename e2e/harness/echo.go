@@ -26,14 +26,6 @@ import (
 //go:embed manifests/echo.yaml
 var echoManifestYAML []byte
 
-func EnsureEchoNamespace(ctx context.Context, client kubernetes.Interface) error {
-	ns, _, _, err := decodeEchoManifest()
-	if err != nil {
-		return err
-	}
-	return waitAndCreateEchoNamespace(ctx, client, ns)
-}
-
 func waitAndCreateEchoNamespace(ctx context.Context, client kubernetes.Interface, ns *corev1.Namespace) error {
 	deadline := time.Now().Add(2 * time.Minute)
 	for {

@@ -123,13 +123,8 @@ export GOCACHE="${CACHE}"
 : >"${PLATFORM_LOG}"
 
 MAIN_PACKAGES=(
-  "./e2e/connect"
-  "./e2e/dns"
-  "./e2e/exchange"
-  "./e2e/harness"
-  "./e2e/mirror"
-  "./e2e/portfwd"
-  "./e2e/preview"
+  "./e2e/dataplane"
+  "./e2e/remotetun"
 )
 
 MAIN_EXIT=1
@@ -305,6 +300,7 @@ run_main_tests() {
   export KUBELOOP_E2E_CONTEXT="${CONTEXT}"
   export KUBELOOP_GATEWAY_IMAGE="${GATEWAY_IMAGE}"
   export KUBELOOP_SINGBOX_PATH="${SINGBOX}"
+  export KUBELOOP_REMOTE_TUN_E2E=1
 
   log "Running TUN/Kubernetes E2E"
   set +e

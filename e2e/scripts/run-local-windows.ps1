@@ -19,7 +19,7 @@ $mainLog = Join-Path $root "e2e-local.log"
 $platformLog = Join-Path $root "e2e-platform.log"
 $platformTest = Join-Path $root "build\bin\platform-e2e.test.exe"
 $singBox = Join-Path $root "build\bin\sing-box.exe"
-$helperUninstall = Join-Path $root "build\embedded\kubeloop-helper-uninstall.exe"
+$helper = Join-Path $root "build\embedded\kubeloop-helper.exe"
 $cache = Join-Path $root ".gocache-e2e"
 
 if ([string]::IsNullOrWhiteSpace($GatewayImage)) {
@@ -27,13 +27,8 @@ if ([string]::IsNullOrWhiteSpace($GatewayImage)) {
 }
 
 $mainPackages = @(
-    "./e2e/connect",
-    "./e2e/dns",
-    "./e2e/exchange",
-    "./e2e/harness",
-    "./e2e/mirror",
-    "./e2e/portfwd",
-    "./e2e/preview"
+    "./e2e/dataplane",
+    "./e2e/remotetun"
 )
 
 $mainExit = 1
@@ -128,16 +123,16 @@ function Get-TestResults {
 }
 
 function Uninstall-TemporaryHelper {
-    if ($helperExisted -or -not (Test-Path -LiteralPath $helperUninstall)) {
+    if ($helperExisted -or -not (Test-Path -LiteralPath $helper)) {
         return
     }
     if ($null -eq (Get-Service -Name "KubeLoopHelperDev" -ErrorAction SilentlyContinue)) {
         return
     }
     $process = Start-Process `
-        -FilePath $helperUninstall `
-        -ArgumentList "--quiet" `
-        -WorkingDirectory (Split-Path -Parent $helperUninstall) `
+        -FilePath $helper `
+        -ArgumentList "uninstall" `
+        -WorkingDirectory (Split-Path -Parent $helper) `
         -Verb RunAs `
         -WindowStyle Hidden `
         -Wait `
@@ -218,6 +213,7 @@ to record the expected DNS failures.
     $env:KUBELOOP_E2E_CONTEXT = $Context
     $env:KUBELOOP_GATEWAY_IMAGE = $GatewayImage
     $env:KUBELOOP_SINGBOX_PATH = $singBox
+    $env:KUBELOOP_REMOTE_TUN_E2E = "1"
 
     Write-Host "==> Running TUN/Kubernetes E2E" -ForegroundColor Cyan
     & go test `

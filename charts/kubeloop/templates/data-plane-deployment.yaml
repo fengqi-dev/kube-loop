@@ -1,0 +1,150 @@
+{{- if and (gt (int .Values.dataPlane.replicas) 1) (not (or (contains "{podName}" .Values.dataPlane.relayRegistry.endpoint) (contains "{podUID}" .Values.dataPlane.relayRegistry.endpoint))) -}}
+{{- fail "dataPlane.relayRegistry.endpoint must contain {podName} or {podUID} when dataPlane.replicas is greater than 1" -}}
+{{- end -}}
+{{- if or (le (int .Values.dataPlane.relayRegistry.maxWebSocketSessions) 0) (le (int .Values.dataPlane.relayRegistry.maxStreamsPerSession) 0) -}}
+{{- fail "dataPlane Relay capacity limits must be positive" -}}
+{{- end -}}
+{{- if and (eq .Values.controlPlane.relayRegistry.authentication "tokenreview") (lt (int .Values.dataPlane.relayRegistry.tokenExpirationSeconds) 600) -}}
+{{- fail "dataPlane.relayRegistry.tokenExpirationSeconds must be at least 600" -}}
+{{- end -}}
+{{- $dataPlaneLogLevel := lower (toString .Values.dataPlane.logLevel) -}}
+{{- if not (has $dataPlaneLogLevel (list "debug" "info" "warn" "error")) -}}
+{{- fail "dataPlane.logLevel must be debug, info, warn, or error" -}}
+{{- end -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "kubeloop.dataPlaneName" . }}
+  labels:
+    {{- include "kubeloop.labels" . | nindent 4 }}
+    app.kubernetes.io/component: data-plane
+spec:
+  replicas: {{ .Values.dataPlane.replicas }}
+  strategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      {{- include "kubeloop.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: data-plane
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmaps.yaml") . | sha256sum }}
+        {{- with .Values.dataPlane.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "kubeloop.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: data-plane
+        {{- with .Values.dataPlane.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "kubeloop.dataPlaneServiceAccountName" . }}
+      automountServiceAccountToken: false
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      terminationGracePeriodSeconds: {{ .Values.dataPlane.terminationGracePeriodSeconds }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: gateway
+          image: {{ include "kubeloop.dataPlaneImage" . | quote }}
+          imagePullPolicy: {{ .Values.dataPlane.image.pullPolicy }}
+          env:
+            - name: KUBELOOP_GATEWAY_CONFIG_FILE
+              value: /etc/kubeloop/gateway/kubeloop.yaml
+            - name: KUBELOOP_POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: KUBELOOP_POD_UID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
+            - name: KUBELOOP_POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: http
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: http
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          resources:
+            {{- toYaml .Values.dataPlane.resources | nindent 12 }}
+          volumeMounts:
+            - name: gateway-config
+              mountPath: /etc/kubeloop/gateway
+              readOnly: true
+            - name: relay-registry
+              mountPath: /var/run/secrets/kubeloop/relay-registry
+              readOnly: true
+            {{- if eq .Values.controlPlane.relayRegistry.authentication "tokenreview" }}
+            - name: relay-identity
+              mountPath: /var/run/secrets/kubeloop/relay-identity
+              readOnly: true
+            {{- end }}
+      volumes:
+        - name: gateway-config
+          configMap:
+            name: {{ include "kubeloop.configName" . }}
+            defaultMode: 0444
+            items:
+              - key: kubeloop.yaml
+                path: kubeloop.yaml
+        - name: relay-registry
+          projected:
+            defaultMode: 0400
+            sources:
+              - secret:
+                  name: {{ default .Values.controlPlane.relay.existingSecret .Values.controlPlane.relayRegistry.existingSecret | required "controlPlane.relayRegistry.existingSecret or controlPlane.relay.existingSecret is required" }}
+                  items:
+                    - key: {{ required "controlPlane.relayRegistry.caKey is required" .Values.controlPlane.relayRegistry.caKey }}
+                      path: ca.crt
+              {{- if eq .Values.controlPlane.relayRegistry.authentication "mtls" }}
+              - secret:
+                  name: {{ required "dataPlane.relayRegistry.existingSecret is required for mTLS" .Values.dataPlane.relayRegistry.existingSecret }}
+                  items:
+                    - key: {{ required "dataPlane.relayRegistry.clientCertificateKey is required" .Values.dataPlane.relayRegistry.clientCertificateKey }}
+                      path: tls.crt
+                    - key: {{ required "dataPlane.relayRegistry.clientPrivateKeyKey is required" .Values.dataPlane.relayRegistry.clientPrivateKeyKey }}
+                      path: tls.key
+              {{- end }}
+        {{- if eq .Values.controlPlane.relayRegistry.authentication "tokenreview" }}
+        - name: relay-identity
+          projected:
+            defaultMode: 0400
+            sources:
+              - serviceAccountToken:
+                  path: token
+                  audience: {{ .Values.controlPlane.relayRegistry.tokenAudience | quote }}
+                  expirationSeconds: {{ int .Values.dataPlane.relayRegistry.tokenExpirationSeconds }}
+        {{- end }}
+      {{- with .Values.dataPlane.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.dataPlane.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.dataPlane.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.dataPlane.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

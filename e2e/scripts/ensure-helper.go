@@ -26,11 +26,8 @@ func main() {
 		helperName += ".exe"
 	}
 	toolNames := []string{helperName}
-	if runtime.GOOS == "windows" {
-		toolNames = append(toolNames,
-			"kubeloop-helper-install.exe",
-			"kubeloop-helper-uninstall.exe",
-		)
+	if runtime.GOOS == "darwin" {
+		toolNames = append(toolNames, "kubeloop-supervisor")
 	}
 	toolDir := filepath.Join(root, "build", "bin")
 	if runtime.GOOS == "windows" {
@@ -52,7 +49,11 @@ func main() {
 		_ = os.Chmod(dest, 0o755)
 	}
 
-	singBox := filepath.Join(root, "build", "bin", "sing-box")
+	singBoxName := "sing-box"
+	if runtime.GOOS == "windows" {
+		singBoxName += ".exe"
+	}
+	singBox := filepath.Join(root, "build", "bin", singBoxName)
 	if _, err := os.Stat(singBox); err != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 		path, ensureErr := (&singboxdist.Installer{}).Ensure(ctx)
@@ -68,7 +69,7 @@ func main() {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	if err := helperinstall.EnsureInstall(ctx); err != nil {
+	if err := helperinstall.EnsureCurrentInstall(ctx); err != nil {
 		fatal(err)
 	}
 	fmt.Println("helper ready")

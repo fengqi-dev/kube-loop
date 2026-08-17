@@ -17,6 +17,15 @@ func clusterRoutes(network NetworkSpec) ([]string, error) {
 		}
 		routeSet[prefix.Masked().String()] = struct{}{}
 	}
+	// Exact observed Pod IPs are authorization targets and also act as routing
+	// fallbacks when the cluster advertises a stale or incomplete Pod CIDR.
+	for _, raw := range network.PodIPs {
+		ip, err := netip.ParseAddr(raw)
+		if err != nil {
+			return nil, fmt.Errorf("invalid pod IP %q: %w", raw, err)
+		}
+		routeSet[netip.PrefixFrom(ip, ip.BitLen()).String()] = struct{}{}
+	}
 	for _, raw := range network.ServiceCIDRs {
 		prefix, err := netip.ParsePrefix(raw)
 		if err != nil {

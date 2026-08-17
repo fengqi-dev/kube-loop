@@ -1,0 +1,19 @@
+apiVersion: traffic.kubeloop.io/v1alpha1
+kind: TrafficBinding
+metadata:
+  name: exchange-sample
+spec:
+  mode: Exchange
+  sessionID: 770aec0e-b985-45d1-aaaf-7f35c4e5ecb9
+  taskID: dbd5599b-3596-41c8-a0f5-d8cff618bc1c
+  sessionGeneration: 1
+  target:
+    kind: Service
+    name: sample-service
+  relay:
+    address: 10.96.0.20
+  ports:
+  - name: http
+    targetPort: 8080
+    relayPort: 18080
+    protocol: TCP

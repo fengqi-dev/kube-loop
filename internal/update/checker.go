@@ -24,8 +24,8 @@ type Info struct {
 	LatestVersion  string    `json:"latestVersion,omitempty"`
 	Available      bool      `json:"available"`
 	URL            string    `json:"url"`
-	PublishedAt    time.Time `json:"publishedAt,omitzero"`
-	CheckedAt      time.Time `json:"checkedAt"`
+	PublishedAt    time.Time `json:"publishedAt,omitzero" ts_type:"string"`
+	CheckedAt      time.Time `json:"checkedAt" ts_type:"string"`
 	Error          string    `json:"error,omitempty"`
 }
 

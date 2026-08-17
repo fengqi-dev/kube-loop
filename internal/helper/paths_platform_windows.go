@@ -5,7 +5,6 @@ package helper
 import (
 	"os"
 	"path/filepath"
-	"strings"
 
 	"golang.org/x/sys/windows"
 )
@@ -38,11 +37,6 @@ func platformBinaryInstallPathForExecutable(executable string) string {
 	)
 }
 
-// platformLegacyBinaryInstallPath is the pre-resources helper location under Program Files.
-func platformLegacyBinaryInstallPath() string {
-	return filepath.Join(windowsProgramFilesProductRoot(), HelperBinaryBaseName()+".exe")
-}
-
 func platformBundledSingBoxPath() string {
 	executable, err := os.Executable()
 	if err != nil {
@@ -67,28 +61,4 @@ func windowsProgramFilesProductRoot() string {
 		root = `C:\Program Files`
 	}
 	return filepath.Join(root, InstallProductDir())
-}
-
-// windowsDisplacedHelperPaths are older fixed Program Files locations to remove
-// after the helper moves with a custom install directory (e.g. D:\KubeLoop).
-func windowsDisplacedHelperPaths(current string) []string {
-	root := windowsProgramFilesProductRoot()
-	candidates := []string{
-		filepath.Join(root, HelperBinaryBaseName()+".exe"),
-		filepath.Join(root, "resources", HelperBinaryBaseName()+".exe"),
-	}
-	out := make([]string, 0, len(candidates))
-	for _, path := range candidates {
-		if current != "" && strings.EqualFold(filepath.Clean(path), filepath.Clean(current)) {
-			continue
-		}
-		out = append(out, path)
-	}
-	return out
-}
-
-// WindowsDisplacedHelperPaths returns legacy helper locations that may be
-// removed after installing into the current application root.
-func WindowsDisplacedHelperPaths(current string) []string {
-	return windowsDisplacedHelperPaths(current)
 }

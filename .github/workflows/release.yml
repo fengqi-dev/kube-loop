@@ -44,6 +44,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
+        with:
+          submodules: recursive
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -92,12 +94,22 @@ jobs:
           import json
           import os
           import pathlib
+          import re
 
-          version = os.environ["GITHUB_REF_NAME"].lstrip("v")
-          parts = [p for p in version.split(".") if p]
-          while len(parts) < 3:
-              parts.append("0")
-          product_version = ".".join(parts[:3])
+          ref_name = os.environ["GITHUB_REF_NAME"]
+          match = re.fullmatch(
+              r"v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:[-+].*)?",
+              ref_name,
+          )
+          if match is None:
+              raise SystemExit(f"release tag is not a supported SemVer: {ref_name}")
+          parts = [int(value) for value in match.groups()]
+          if any(value > 65535 for value in parts):
+              raise SystemExit(f"release version exceeds Windows version limits: {ref_name}")
+          # Wails and the NSIS template append the fourth numeric component.
+          # Keep prerelease/build metadata in the application version injected
+          # below, while package metadata receives a valid X.X.X.0 version.
+          product_version = ".".join(str(value) for value in parts)
 
           path = pathlib.Path("wails.json")
           data = json.loads(path.read_text())
@@ -207,10 +219,23 @@ jobs:
           path: dist/*
           if-no-files-found: error
 
-  gateway-image:
-    name: Publish Gateway image
+  container-images:
+    name: OCI / ${{ matrix.display-name }} image
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - display-name: Gateway
+            image-name: gateway
+            dockerfile: build/gateway.Dockerfile
+          - display-name: Control Plane
+            image-name: control-plane
+            dockerfile: build/control-plane.Dockerfile
+          - display-name: Operator
+            image-name: operator
+            dockerfile: build/operator.Dockerfile
 
     steps:
       - name: Check out repository
@@ -233,33 +258,76 @@ jobs:
         id: metadata
         uses: docker/metadata-action@v6
         with:
-          images: ghcr.io/${{ github.repository }}/gateway
+          images: ghcr.io/${{ github.repository }}/${{ matrix.image-name }}
           tags: |
             type=ref,event=tag
-            type=raw,value=latest
+            type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
 
-      - name: Build and push Gateway image
+      - name: Build and push ${{ matrix.display-name }} image
         uses: docker/build-push-action@v7
         with:
           context: .
-          file: build/gateway.Dockerfile
+          file: ${{ matrix.dockerfile }}
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.metadata.outputs.tags }}
           labels: ${{ steps.metadata.outputs.labels }}
           build-args: |
             VERSION=${{ github.ref_name }}
+            COMMIT=${{ github.sha }}
+
+  helm-chart:
+    name: OCI / Helm chart
+    needs: container-images
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+
+      - name: Publish Helm chart to GHCR
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          release_version="${GITHUB_REF_NAME#v}"
+          chart_version="$(helm show chart charts/kubeloop | awk '$1 == "version:" { print $2 }')"
+          app_version="$(helm show chart charts/kubeloop | awk '$1 == "appVersion:" { print $2 }')"
+          if [[ "${chart_version}" != "${release_version}" ]]; then
+            echo "Chart version ${chart_version} does not match release ${release_version}" >&2
+            exit 1
+          fi
+          if [[ "${app_version}" != "${GITHUB_REF_NAME}" ]]; then
+            echo "Chart appVersion ${app_version} does not match image tag ${GITHUB_REF_NAME}" >&2
+            exit 1
+          fi
+          helm lint charts/kubeloop
+          chart_dir="$(mktemp -d)"
+          helm package charts/kubeloop --destination "${chart_dir}"
+          printf '%s' "${GH_TOKEN}" | helm registry login ghcr.io \
+            --username "${GITHUB_ACTOR}" \
+            --password-stdin
+          helm push "${chart_dir}/kubeloop-${release_version}.tgz" \
+            "oci://ghcr.io/${GITHUB_REPOSITORY}/charts"
 
   publish:
     name: Publish GitHub Release
     needs:
       - desktop
       - gateway
-      - gateway-image
+      - helm-chart
     runs-on: ubuntu-24.04
     timeout-minutes: 10
 
     steps:
+      - name: Check out release source
+        uses: actions/checkout@v6
+
       - name: Download desktop artifacts
         uses: actions/download-artifact@v7
         with:
@@ -277,6 +345,9 @@ jobs:
       - name: Generate SHA-256 checksums
         shell: bash
         run: |
+          version="${GITHUB_REF_NAME#v}"
+          tar -C third_party/patches/sing-box -czf \
+            "dist/sing-box-kubeloop-${version}-patches.tar.gz" .
           cd dist
           # Prefer bare filenames (no "./" prefix) so consumers can match by asset name.
           sha256sum -- * > SHA256SUMS

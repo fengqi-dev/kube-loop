@@ -1,6 +1,7 @@
 //go:build ignore
 
-// Ensures sing-box is available at build/bin/sing-box for e2e helper install.
+// Ensures sing-box is available at the platform-native path under build/bin
+// for e2e helper install.
 package main
 
 import (
@@ -9,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"time"
 
 	singboxdist "github.com/fengqi-dev/kube-loop/internal/singbox/distribution"
@@ -19,7 +21,11 @@ func main() {
 	if err != nil {
 		fatal(err)
 	}
-	dest := filepath.Join(root, "build", "bin", "sing-box")
+	name := "sing-box"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	dest := filepath.Join(root, "build", "bin", name)
 	if info, err := os.Stat(dest); err == nil && !info.IsDir() && info.Mode().Perm()&0o111 != 0 {
 		fmt.Println(dest)
 		return

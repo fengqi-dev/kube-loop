@@ -1,0 +1,15 @@
+apiVersion: traffic.kubeloop.io/v1alpha1
+kind: TrafficBinding
+metadata:
+  name: portforward-sample
+spec:
+  mode: PortForward
+  sessionID: 8a5918f7-4587-4b0e-b9f0-98b21b7e3938
+  taskID: d701f9c0-4a64-43fb-b56b-0e410f06eefa
+  sessionGeneration: 1
+  target:
+    kind: Pod
+    name: sample-pod
+  ports:
+  - targetPort: 8080
+    protocol: TCP

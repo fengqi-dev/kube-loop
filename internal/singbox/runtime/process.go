@@ -13,6 +13,8 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/singbox"
 )
 
+const maxDataPlaneLogLines = 5_000
+
 type Process struct {
 	done              chan struct{}
 	stopCh            chan struct{}
@@ -36,6 +38,7 @@ type Process struct {
 	logMu             sync.Mutex
 	logOffset         int64
 	logPending        string
+	logHistory        []string
 }
 
 var _ singbox.RunningCore = (*Process)(nil)
@@ -78,6 +81,7 @@ func (p *Process) ReadLogs(ctx context.Context) ([]string, error) {
 	}
 	if nextOffset < p.logOffset {
 		p.logPending = ""
+		p.logHistory = nil
 	}
 	p.logOffset = nextOffset
 	data = p.logPending + data
@@ -89,7 +93,11 @@ func (p *Process) ReadLogs(ctx context.Context) ([]string, error) {
 		p.logPending = ""
 		parts = parts[:len(parts)-1]
 	}
-	return parts, nil
+	p.logHistory = append(p.logHistory, parts...)
+	if len(p.logHistory) > maxDataPlaneLogLines {
+		p.logHistory = slices.Clone(p.logHistory[len(p.logHistory)-maxDataPlaneLogLines:])
+	}
+	return slices.Clone(p.logHistory), nil
 }
 
 func (p *Process) UpdateDNSNamespace(ctx context.Context, namespace string) error {
