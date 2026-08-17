@@ -1,0 +1,318 @@
+diff --git a/cmd/sing-box/cmd_format.go b/cmd/sing-box/cmd_format.go
+--- a/cmd/sing-box/cmd_format.go
++++ b/cmd/sing-box/cmd_format.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_generate_ech.go b/cmd/sing-box/cmd_generate_ech.go
+--- a/cmd/sing-box/cmd_generate_ech.go
++++ b/cmd/sing-box/cmd_generate_ech.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_generate_tls.go b/cmd/sing-box/cmd_generate_tls.go
+--- a/cmd/sing-box/cmd_generate_tls.go
++++ b/cmd/sing-box/cmd_generate_tls.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_generate_vapid.go b/cmd/sing-box/cmd_generate_vapid.go
+--- a/cmd/sing-box/cmd_generate_vapid.go
++++ b/cmd/sing-box/cmd_generate_vapid.go
+@@ -1,4 +1,4 @@
+-//go:build go1.20
++//go:build go1.20 && !kubeloop_minimal
+ 
+ package main
+ 
+diff --git a/cmd/sing-box/cmd_generate_wireguard.go b/cmd/sing-box/cmd_generate_wireguard.go
+--- a/cmd/sing-box/cmd_generate_wireguard.go
++++ b/cmd/sing-box/cmd_generate_wireguard.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_generate.go b/cmd/sing-box/cmd_generate.go
+--- a/cmd/sing-box/cmd_generate.go
++++ b/cmd/sing-box/cmd_generate.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_geoip_export.go b/cmd/sing-box/cmd_geoip_export.go
+--- a/cmd/sing-box/cmd_geoip_export.go
++++ b/cmd/sing-box/cmd_geoip_export.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_geoip_list.go b/cmd/sing-box/cmd_geoip_list.go
+--- a/cmd/sing-box/cmd_geoip_list.go
++++ b/cmd/sing-box/cmd_geoip_list.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_geoip_lookup.go b/cmd/sing-box/cmd_geoip_lookup.go
+--- a/cmd/sing-box/cmd_geoip_lookup.go
++++ b/cmd/sing-box/cmd_geoip_lookup.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_geoip.go b/cmd/sing-box/cmd_geoip.go
+--- a/cmd/sing-box/cmd_geoip.go
++++ b/cmd/sing-box/cmd_geoip.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_geosite_export.go b/cmd/sing-box/cmd_geosite_export.go
+--- a/cmd/sing-box/cmd_geosite_export.go
++++ b/cmd/sing-box/cmd_geosite_export.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_geosite_list.go b/cmd/sing-box/cmd_geosite_list.go
+--- a/cmd/sing-box/cmd_geosite_list.go
++++ b/cmd/sing-box/cmd_geosite_list.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_geosite_lookup.go b/cmd/sing-box/cmd_geosite_lookup.go
+--- a/cmd/sing-box/cmd_geosite_lookup.go
++++ b/cmd/sing-box/cmd_geosite_lookup.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_geosite_matcher.go b/cmd/sing-box/cmd_geosite_matcher.go
+--- a/cmd/sing-box/cmd_geosite_matcher.go
++++ b/cmd/sing-box/cmd_geosite_matcher.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_geosite.go b/cmd/sing-box/cmd_geosite.go
+--- a/cmd/sing-box/cmd_geosite.go
++++ b/cmd/sing-box/cmd_geosite.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_merge.go b/cmd/sing-box/cmd_merge.go
+--- a/cmd/sing-box/cmd_merge.go
++++ b/cmd/sing-box/cmd_merge.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_rule_set_compile.go b/cmd/sing-box/cmd_rule_set_compile.go
+--- a/cmd/sing-box/cmd_rule_set_compile.go
++++ b/cmd/sing-box/cmd_rule_set_compile.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_rule_set_convert.go b/cmd/sing-box/cmd_rule_set_convert.go
+--- a/cmd/sing-box/cmd_rule_set_convert.go
++++ b/cmd/sing-box/cmd_rule_set_convert.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_rule_set_decompile.go b/cmd/sing-box/cmd_rule_set_decompile.go
+--- a/cmd/sing-box/cmd_rule_set_decompile.go
++++ b/cmd/sing-box/cmd_rule_set_decompile.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_rule_set_format.go b/cmd/sing-box/cmd_rule_set_format.go
+--- a/cmd/sing-box/cmd_rule_set_format.go
++++ b/cmd/sing-box/cmd_rule_set_format.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_rule_set_match.go b/cmd/sing-box/cmd_rule_set_match.go
+--- a/cmd/sing-box/cmd_rule_set_match.go
++++ b/cmd/sing-box/cmd_rule_set_match.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_rule_set_merge.go b/cmd/sing-box/cmd_rule_set_merge.go
+--- a/cmd/sing-box/cmd_rule_set_merge.go
++++ b/cmd/sing-box/cmd_rule_set_merge.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_rule_set_upgrade.go b/cmd/sing-box/cmd_rule_set_upgrade.go
+--- a/cmd/sing-box/cmd_rule_set_upgrade.go
++++ b/cmd/sing-box/cmd_rule_set_upgrade.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_rule_set.go b/cmd/sing-box/cmd_rule_set.go
+--- a/cmd/sing-box/cmd_rule_set.go
++++ b/cmd/sing-box/cmd_rule_set.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_tools_connect.go b/cmd/sing-box/cmd_tools_connect.go
+--- a/cmd/sing-box/cmd_tools_connect.go
++++ b/cmd/sing-box/cmd_tools_connect.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_tools_fetch_http3_stub.go b/cmd/sing-box/cmd_tools_fetch_http3_stub.go
+--- a/cmd/sing-box/cmd_tools_fetch_http3_stub.go
++++ b/cmd/sing-box/cmd_tools_fetch_http3_stub.go
+@@ -1,4 +1,4 @@
+-//go:build !with_quic
++//go:build !with_quic && !kubeloop_minimal
+ 
+ package main
+ 
+diff --git a/cmd/sing-box/cmd_tools_fetch_http3.go b/cmd/sing-box/cmd_tools_fetch_http3.go
+--- a/cmd/sing-box/cmd_tools_fetch_http3.go
++++ b/cmd/sing-box/cmd_tools_fetch_http3.go
+@@ -1,4 +1,4 @@
+-//go:build with_quic
++//go:build with_quic && !kubeloop_minimal
+ 
+ package main
+ 
+diff --git a/cmd/sing-box/cmd_tools_fetch.go b/cmd/sing-box/cmd_tools_fetch.go
+--- a/cmd/sing-box/cmd_tools_fetch.go
++++ b/cmd/sing-box/cmd_tools_fetch.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_tools_synctime.go b/cmd/sing-box/cmd_tools_synctime.go
+--- a/cmd/sing-box/cmd_tools_synctime.go
++++ b/cmd/sing-box/cmd_tools_synctime.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_tools.go b/cmd/sing-box/cmd_tools.go
+--- a/cmd/sing-box/cmd_tools.go
++++ b/cmd/sing-box/cmd_tools.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_kubeloop_minimal.go b/cmd/sing-box/cmd_kubeloop_minimal.go
+new file mode 100644
+--- /dev/null
++++ b/cmd/sing-box/cmd_kubeloop_minimal.go
+@@ -0,0 +1,9 @@
++//go:build kubeloop_minimal
++
++package main
++
++func init() {
++	// KubeLoop invokes only run, check, and version. Keep Cobra's generated
++	// completion command out of the runtime-only binary too.
++	mainCommand.CompletionOptions.DisableDefaultCmd = true
++}
+diff --git a/cmd/sing-box/cmd_kubeloop_minimal_test.go b/cmd/sing-box/cmd_kubeloop_minimal_test.go
+new file mode 100644
+--- /dev/null
++++ b/cmd/sing-box/cmd_kubeloop_minimal_test.go
+@@ -0,0 +1,29 @@
++//go:build kubeloop_minimal
++
++package main
++
++import (
++	"slices"
++	"testing"
++)
++
++func TestKubeLoopMinimalCommands(t *testing.T) {
++	mainCommand.InitDefaultHelpCmd()
++	mainCommand.InitDefaultCompletionCmd()
++
++	commands := mainCommand.Commands()
++	got := make([]string, 0, len(commands))
++	for _, command := range commands {
++		if command.IsAvailableCommand() {
++			got = append(got, command.Name())
++		}
++	}
++	slices.Sort(got)
++	want := []string{"check", "run", "version"}
++	if !slices.Equal(got, want) {
++		t.Fatalf("minimal commands = %v, want %v", got, want)
++	}
++	if !mainCommand.CompletionOptions.DisableDefaultCmd {
++		t.Fatal("default completion command is enabled")
++	}
++}

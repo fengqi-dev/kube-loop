@@ -5,8 +5,8 @@ upstream source, apply the patch files in this directory, and compile the
 result in an isolated temporary directory.
 
 - Upstream: `https://github.com/SagerNet/sing-box`
-- Tag: `v1.13.18`
-- Revision: `45ca32dcb966f07f97fc888fe8586e359dbe8405`
+- Tag: `v1.13.19`
+- Revision: `b5ebaa1fc0f2b94256180b95468e73ef53caa27d`
 - License: GPL-3.0
 - Retained build tags: `with_gvisor,with_clash_api,kubeloop_minimal`
 
@@ -21,8 +21,17 @@ outbounds; and UDP, hosts and local DNS transports. Optional protocol stubs,
 endpoints and services are excluded so their implementation packages remain
 unreachable to the Go linker.
 
-On macOS arm64 with Go 1.26.5, the patched binary is 16,725,074 bytes versus
-50,140,546 bytes for the upstream release binary (66.6% smaller). Exact sizes
+The same tag limits the command surface to `run`, `check`, and `version` (plus
+Cobra's built-in `help`). Configuration formatting, generation, GeoIP/GeoSite,
+rule-set, merge, completion, and experimental tools are excluded from the
+runtime binary.
+
+The security dependency patch updates `golang.org/x/net` to `v0.51.0` and the
+patched source's Go requirement to 1.25, fixing GO-2026-4559 in the HTTP/2 code
+reachable from the minimal command binary.
+
+On macOS arm64 with Go 1.26.6, the runtime-only command patch reduces the
+already-minimal binary from 16,760,338 to 16,236,642 bytes (3.1%). Exact sizes
 vary by toolchain and platform.
 
 ## Verify and package

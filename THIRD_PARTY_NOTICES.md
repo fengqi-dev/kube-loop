@@ -5,9 +5,9 @@
 KubeLoop distributes and runs sing-box as a separate managed process.
 
 - Project: https://github.com/SagerNet/sing-box
-- Pinned version: v1.13.18
+- Pinned version: v1.13.19
 - License: GNU General Public License v3.0
-- Source: https://github.com/SagerNet/sing-box/tree/v1.13.18
+- Source: https://github.com/SagerNet/sing-box/tree/v1.13.19
 - Full license text: https://www.gnu.org/licenses/gpl-3.0.txt
 
 Platform packages include a binary built from the pinned source revision and
