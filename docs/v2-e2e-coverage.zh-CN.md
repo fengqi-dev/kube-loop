@@ -50,9 +50,9 @@
 - `make capacity-baseline` 验证全局/单用户物理 WSS、逻辑 stream 上限、容量释放，以及满载时 live/ready/metrics；三轮 32 KiB stream benchmark 记录吞吐和分配。`TestGatewayPodMultiUserCapacityRSSAndCleanup` 在单个真实 Gateway Pod 上以四名 Identity/四条物理 WSS/十六条逻辑 stream 验证限额、容量复用、集群内吞吐和 kubelet working-set 曲线；满载期间撤销 OAuth grant，确认 Preview Task、relay、TrafficBinding、Service、EndpointSlice 和 snapshot 在 5 秒预算内全部清理。
 - Windows/macOS workflow 运行全量本地测试和真实 Helper 安装、升级、ACL、DNS 恢复、卸载；Linux 额外运行完整 Minikube TUN。`e2e/remotetun` 已接入三平台 workflow，使用实际 Helper、sing-box TUN、WSS/smux Gateway、RelayTicket/NetworkSpec 和精确目标路由，验证休眠间隔触发 transport 刷新后 SOCKS 地址、TUN core 与 Helper Session 保持不变，且停止后无特权资源残留。最终门禁已由 GitHub Actions push workflow [31454657118](https://github.com/fengqi-dev/kube-loop/actions/runs/31454657118) 完成：Windows、macOS、Linux、Helm、主 Go 与前端六个作业全部通过，V2-803 已关闭。
 
-自动 CI 精简为 `Checks` 与 `Database`：前者覆盖前端、Go 静态检查、单元/Race 测试和
-跨平台构建，后者覆盖 PostgreSQL/MySQL。Helm、Operator、Minikube 及三平台 Helper E2E
-保留为显式 opt-in 的验收入口，不阻塞 PR 或 Release。
+自动 CI 由 `Checks` 与 `Database` 提供前端、Go 静态检查、单元/Race、跨平台构建和
+PostgreSQL/MySQL 门禁；`Checks` 通过后并行运行 Helm 生命周期、Operator、Linux Minikube、
+Windows Helper 和 macOS Helper E2E。UI E2E 不纳入自动 CI 矩阵。
 
 ## 运行方式
 

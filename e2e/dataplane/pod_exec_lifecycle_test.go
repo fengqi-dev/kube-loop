@@ -63,14 +63,7 @@ func startExecController(
 		_ = listener.Close()
 		t.Fatal(err)
 	}
-	policy, err := authorization.New(authorization.Policy{Rules: []authorization.Rule{{
-		ID: "e2e-exec-lifecycle", Subjects: []string{identity.Subject}, Namespaces: []string{session.Namespace},
-		Operations: []string{"create", "stream"}, ResourceKinds: []string{"pod-exec"},
-	}}})
-	if err != nil {
-		_ = listener.Close()
-		t.Fatal(err)
-	}
+	policy := authorization.NewAuthenticated()
 	server, err := controlplane.NewServer(
 		controlplane.Config{PublicURL: "http://" + listener.Addr().String()}, controlplane.BuildInfo{},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),

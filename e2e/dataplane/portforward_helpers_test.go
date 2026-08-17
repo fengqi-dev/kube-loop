@@ -178,13 +178,7 @@ func startPortForwardControlPlane(
 	if err != nil {
 		t.Fatalf("create Port Forward API: %v", err)
 	}
-	policy, err := authorization.New(authorization.Policy{Rules: []authorization.Rule{{
-		ID: "e2e-port-forward", Subjects: []string{identityID}, Namespaces: []string{session.Namespace},
-		Operations: []string{"create", "list", "delete"}, ResourceKinds: []string{"port-forwards"},
-	}}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	policy := authorization.NewAuthenticated()
 	controllerServer, err := controlplane.NewServer(
 		controlplane.Config{PublicURL: "http://127.0.0.1"}, controlplane.BuildInfo{},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
