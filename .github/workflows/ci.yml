@@ -71,6 +71,7 @@ jobs:
             --set ingress.enabled=true \
             --set ingress.host=kubeloop.example.com \
             --set ingress.className=nginx \
+            --set ingress.tls.enabled=true \
             --set ingress.tls.secretName=kubeloop-tls \
             > "${rendered}"
           app_version="$(helm show chart charts/kubeloop | awk '$1 == "appVersion:" { print $2 }')"
