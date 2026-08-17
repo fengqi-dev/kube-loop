@@ -17,17 +17,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/coder/websocket"
 	"github.com/fengqi-dev/kube-loop/internal/client/credentials"
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/capability"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/exchangestream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/filestream"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/mirrorstream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/relayticket"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/remotetask"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficcontrol"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
 	"github.com/google/uuid"
 )
 
@@ -427,7 +424,7 @@ func New(credentialStore credentials.Store, refresher TokenRefresher, config Con
 
 func (client *Client) Version(ctx context.Context, serverProfile profile.Profile) (Version, error) {
 	var result Version
-	if err := client.getJSON(ctx, serverProfile, "/kubeloop/api/version", nil, &result); err != nil {
+	if err := client.getJSON(ctx, serverProfile, "/api/version", nil, &result); err != nil {
 		return Version{}, err
 	}
 	if strings.TrimSpace(result.GitVersion) == "" || strings.TrimSpace(result.GatewayVersion) == "" {
@@ -451,7 +448,7 @@ func (client *Client) Capabilities(ctx context.Context, serverProfile profile.Pr
 		return cached, nil
 	}
 	var result Capabilities
-	if err := client.getJSON(ctx, serverProfile, "/kubeloop/api/capabilities", url.Values{"namespace": {namespace}}, &result); err != nil {
+	if err := client.getJSON(ctx, serverProfile, "/api/capabilities", url.Values{"namespace": {namespace}}, &result); err != nil {
 		return Capabilities{}, err
 	}
 	result, err = capability.Normalize(result)
@@ -566,14 +563,14 @@ func cloneCapabilityPointer(value *Capabilities) *Capabilities {
 }
 
 func (client *Client) Namespaces(ctx context.Context, serverProfile profile.Profile) ([]Namespace, error) {
-	return collectPages[Namespace](ctx, client, serverProfile, "/kubeloop/api/namespaces")
+	return collectPages[Namespace](ctx, client, serverProfile, "/api/namespaces")
 }
 
 func (client *Client) Pods(ctx context.Context, serverProfile profile.Profile, namespace string) ([]Pod, error) {
 	if err := validateNamespace(namespace); err != nil {
 		return nil, err
 	}
-	pods, err := collectPages[Pod](ctx, client, serverProfile, "/kubeloop/api/namespaces/"+url.PathEscape(namespace)+"/pods")
+	pods, err := collectPages[Pod](ctx, client, serverProfile, "/api/namespaces/"+url.PathEscape(namespace)+"/pods")
 	if err != nil {
 		return nil, err
 	}
@@ -592,7 +589,7 @@ func (client *Client) Services(ctx context.Context, serverProfile profile.Profil
 	if err := validateNamespace(namespace); err != nil {
 		return nil, err
 	}
-	return collectPages[Service](ctx, client, serverProfile, "/kubeloop/api/namespaces/"+url.PathEscape(namespace)+"/services")
+	return collectPages[Service](ctx, client, serverProfile, "/api/namespaces/"+url.PathEscape(namespace)+"/services")
 }
 
 func (client *Client) CreateSession(
@@ -919,22 +916,6 @@ func (client *Client) StopExchange(
 	return validateExchangeTask(result, current)
 }
 
-func (client *Client) OpenExchangeStream(
-	ctx context.Context,
-	serverProfile profile.Profile,
-	current Session,
-	task ExchangeTask,
-) (*websocket.Conn, error) {
-	if _, err := validateExchangeTask(task, current); err != nil || task.State != "pending" {
-		return nil, errors.New("pending Exchange Task is required")
-	}
-	connection, err := client.openTrafficWebSocket(ctx, serverProfile, current, trafficcontrol.ModeExchange, task.ID)
-	if err == nil {
-		connection.SetReadLimit(exchangestream.MaximumData + 14)
-	}
-	return connection, err
-}
-
 func (client *Client) CreateMirror(
 	ctx context.Context,
 	serverProfile profile.Profile,
@@ -1011,22 +992,6 @@ func (client *Client) StopMirror(
 	return validateMirrorTask(result, current)
 }
 
-func (client *Client) OpenMirrorStream(
-	ctx context.Context,
-	serverProfile profile.Profile,
-	current Session,
-	task MirrorTask,
-) (*websocket.Conn, error) {
-	if _, err := validateMirrorTask(task, current); err != nil || task.State != "pending" {
-		return nil, errors.New("pending Mirror Task is required")
-	}
-	connection, err := client.openTrafficWebSocket(ctx, serverProfile, current, trafficcontrol.ModeMirror, task.ID)
-	if err == nil {
-		connection.SetReadLimit(mirrorstream.MaximumData + mirrorstream.HeaderSize)
-	}
-	return connection, err
-}
-
 func (client *Client) CreatePreview(
 	ctx context.Context,
 	serverProfile profile.Profile,
@@ -1101,22 +1066,6 @@ func (client *Client) StopPreview(
 		return PreviewTask{}, err
 	}
 	return validatePreviewTask(result, current)
-}
-
-func (client *Client) OpenPreviewStream(
-	ctx context.Context,
-	serverProfile profile.Profile,
-	current Session,
-	task PreviewTask,
-) (*websocket.Conn, error) {
-	if _, err := validatePreviewTask(task, current); err != nil || task.State != "pending" {
-		return nil, errors.New("pending Preview Task is required")
-	}
-	connection, err := client.openTrafficWebSocket(ctx, serverProfile, current, trafficcontrol.ModePreview, task.ID)
-	if err == nil {
-		connection.SetReadLimit(exchangestream.MaximumData + 14)
-	}
-	return connection, err
 }
 
 func (client *Client) CreateExecTask(
@@ -1347,29 +1296,6 @@ func (client *Client) openTaskWebSocket(
 		return nil, refreshErr
 	}
 	connection, _, err = client.dialWebSocket(ctx, endpoint.String(), credential.AccessToken)
-	return connection, err
-}
-
-func (client *Client) openTrafficWebSocket(
-	ctx context.Context,
-	serverProfile profile.Profile,
-	current Session,
-	mode trafficcontrol.Mode,
-	taskID string,
-) (*websocket.Conn, error) {
-	ticket, err := client.IssueRelayTicket(ctx, serverProfile, current)
-	if err != nil {
-		return nil, err
-	}
-	endpoint, err := url.Parse(ticket.Endpoint)
-	if err != nil || (endpoint.Scheme != "ws" && endpoint.Scheme != "wss") || endpoint.Host == "" {
-		return nil, errors.New("RelayTicket endpoint is invalid")
-	}
-	endpoint.Path = trafficcontrol.PublicPathPrefix + "/" + url.PathEscape(string(mode)) + "/" + url.PathEscape(taskID)
-	endpoint.RawPath = ""
-	endpoint.RawQuery = ""
-	endpoint.Fragment = ""
-	connection, _, err := client.dialWebSocket(ctx, endpoint.String(), ticket.Ticket)
 	return connection, err
 }
 

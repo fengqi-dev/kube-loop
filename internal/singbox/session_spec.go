@@ -168,17 +168,13 @@ func (s SessionSpec) DNS() (DNSMeta, error) {
 		Listen:  s.DNSHost,
 		Port:    s.PublicDNSPort,
 		Domains: ResolverDomains(ns, domains, hosts),
-		Search:  SearchDomainsForNamespaces(s.dnsNamespaces(), domains...),
-		Ndots:   5,
+		Search:  SearchDomains(ns, domains...),
+		Ndots:   1,
 	}, nil
 }
 
 func (s SessionSpec) dnsNamespace() string {
 	return cmp.Or(s.DNSNamespace, s.Namespace, "default")
-}
-
-func (s SessionSpec) dnsNamespaces() []string {
-	return append([]string{s.dnsNamespace()}, s.Namespaces...)
 }
 
 func (s SessionSpec) discovery() NetworkSpec {

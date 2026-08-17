@@ -2,52 +2,24 @@ package trafficapi_test
 
 import (
 	"context"
+	"errors"
 	"net"
-	"net/http"
-	"net/http/httptest"
-	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/coder/websocket"
 	"github.com/fengqi-dev/kube-loop/internal/gateway/trafficapi"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/exchangestream"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/relayticket"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficcontrol"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficmodel"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficstream"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
 	"github.com/google/uuid"
-	"github.com/labstack/echo/v5"
 )
 
 type fakeController struct {
-	taskID   string
 	prepared chan trafficcontrol.PrepareRequest
 	finished chan trafficcontrol.FinishRequest
-}
-
-type writeCountingListener struct {
-	net.Listener
-	written atomic.Int64
-}
-
-func (listener *writeCountingListener) Accept() (net.Conn, error) {
-	connection, err := listener.Listener.Accept()
-	if err != nil {
-		return nil, err
-	}
-	return &writeCountingConnection{Conn: connection, written: &listener.written}, nil
-}
-
-type writeCountingConnection struct {
-	net.Conn
-	written *atomic.Int64
-}
-
-func (connection *writeCountingConnection) Write(contents []byte) (int, error) {
-	count, err := connection.Conn.Write(contents)
-	connection.written.Add(int64(count))
-	return count, err
+	claimErr error
 }
 
 func (controlPlane *fakeController) RelayID() string { return "relay-test" }
@@ -60,6 +32,9 @@ func (controlPlane *fakeController) DoJSON(
 ) error {
 	switch path {
 	case trafficcontrol.InternalPathPrefix + "/claim":
+		if controlPlane.claimErr != nil {
+			return controlPlane.claimErr
+		}
 		request := input.(trafficcontrol.ClaimRequest)
 		*output.(*trafficcontrol.ClaimResponse) = trafficcontrol.ClaimResponse{
 			Mode: request.Mode, TaskID: request.TaskID, Service: "api",
@@ -75,43 +50,44 @@ func (controlPlane *fakeController) DoJSON(
 		request := input.(trafficcontrol.FinishRequest)
 		controlPlane.finished <- request
 		*output.(*trafficcontrol.FinishResponse) = trafficcontrol.FinishResponse{State: "stopped"}
+	default:
+		return errors.New("unexpected traffic control path")
 	}
 	return nil
 }
 
-func TestExchangeWebSocketRunsOnGatewayAndReportsLifecycle(t *testing.T) {
+func TestExchangeLogicalStreamRunsOnGatewayAndReportsLifecycle(t *testing.T) {
 	taskID := uuid.NewString()
 	controlPlane := &fakeController{
-		taskID: taskID, prepared: make(chan trafficcontrol.PrepareRequest, 1),
+		prepared: make(chan trafficcontrol.PrepareRequest, 1),
 		finished: make(chan trafficcontrol.FinishRequest, 1),
 	}
 	api, err := trafficapi.New(trafficapi.Config{
 		GatewayIP: "127.0.0.1", ControlPlane: controlPlane, HeartbeatEvery: 20 * time.Millisecond,
-		VerifyRequest: func(request *http.Request) (relayticket.Claims, error) {
-			return relayticket.Claims{
-				IdentityID: "user-1", Groups: []string{"developers"}, DeviceID: "device-1",
-				SessionID: uuid.NewString(), SessionGeneration: 1, Namespace: "development",
-			}, nil
-		},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	router := echo.New()
-	api.RegisterRoutes(router)
-	server := httptest.NewUnstartedServer(router)
-	listener := &writeCountingListener{Listener: server.Listener}
-	server.Listener = listener
-	server.Start()
-	defer server.Close()
-
-	endpoint := "ws" + strings.TrimPrefix(server.URL, "http") + trafficcontrol.PublicPathPrefix + "/exchange/" + taskID
-	connection, _, err := websocket.Dial(context.Background(), endpoint, nil)
+	gatewayConnection, clientConnection := net.Pipe()
+	t.Cleanup(func() { _ = clientConnection.Close() })
+	identity := trafficcontrol.Identity{
+		IdentityID: "user-1", Groups: []string{"developers"}, DeviceID: "device-1",
+		SessionID: uuid.NewString(), SessionGeneration: 1, Namespace: "development",
+	}
+	go api.ServeTraffic(
+		context.Background(),
+		gatewayConnection,
+		identity,
+		tunnel.TrafficOpenRequest{Mode: tunnel.TrafficModeExchange, TaskID: taskID},
+	)
+	if err := tunnel.ReadStatus(clientConnection); err != nil {
+		t.Fatal(err)
+	}
+	framed, err := trafficstream.Dial(context.Background(), clientConnection)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer connection.CloseNow()
-	_, encoded, err := connection.Read(context.Background())
+	encoded, err := framed.ReadFrame(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,23 +95,11 @@ func TestExchangeWebSocketRunsOnGatewayAndReportsLifecycle(t *testing.T) {
 	if err != nil || frame.Type != exchangestream.Ready {
 		t.Fatalf("ready frame = %#v, err = %v", frame, err)
 	}
-	writtenAfterReady := listener.written.Load()
-	readContext, cancelRead := context.WithCancel(context.Background())
-	defer cancelRead()
-	readDone := make(chan error, 1)
-	go func() {
-		_, _, readErr := connection.Read(readContext)
-		readDone <- readErr
-	}()
-	deadline := time.Now().Add(time.Second)
-	for listener.written.Load() == writtenAfterReady && time.Now().Before(deadline) {
-		time.Sleep(time.Millisecond)
+	stop, err := exchangestream.Encode(exchangestream.Frame{Type: exchangestream.Stop})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if listener.written.Load() == writtenAfterReady {
-		t.Fatal("traffic WebSocket heartbeat did not write a keepalive frame")
-	}
-	stop, _ := exchangestream.Encode(exchangestream.Frame{Type: exchangestream.Stop})
-	if err := connection.Write(context.Background(), websocket.MessageBinary, stop); err != nil {
+	if err := framed.WriteFrame(context.Background(), stop); err != nil {
 		t.Fatal(err)
 	}
 
@@ -156,3 +120,39 @@ func TestExchangeWebSocketRunsOnGatewayAndReportsLifecycle(t *testing.T) {
 		t.Fatal("ControlPlane finish was not called")
 	}
 }
+
+func TestClaimFailureWritesTunnelStatusErrorBeforeTrafficFrames(t *testing.T) {
+	controlPlane := &fakeController{
+		prepared: make(chan trafficcontrol.PrepareRequest, 1),
+		finished: make(chan trafficcontrol.FinishRequest, 1),
+		claimErr: errors.New("claim failed"),
+	}
+	api, err := trafficapi.New(trafficapi.Config{GatewayIP: "127.0.0.1", ControlPlane: controlPlane})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gatewayConnection, clientConnection := net.Pipe()
+	t.Cleanup(func() { _ = clientConnection.Close() })
+	go api.ServeTraffic(
+		context.Background(),
+		gatewayConnection,
+		trafficcontrol.Identity{
+			IdentityID: "user-1", DeviceID: "device-1", SessionID: uuid.NewString(),
+			SessionGeneration: 1, Namespace: "development",
+		},
+		tunnel.TrafficOpenRequest{Mode: tunnel.TrafficModeExchange, TaskID: uuid.NewString()},
+	)
+	if err := tunnel.ReadStatus(clientConnection); err == nil {
+		t.Fatal("claim failure unexpectedly returned a successful tunnel status")
+	}
+	_ = clientConnection.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+	var extra [1]byte
+	if _, err := clientConnection.Read(extra[:]); err == nil {
+		t.Fatal("claim failure wrote traffic data after the status error")
+	}
+}
+
+var _ interface {
+	RelayID() string
+	DoJSON(context.Context, string, string, any, any) error
+} = (*fakeController)(nil)

@@ -14,6 +14,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
 	"github.com/fengqi-dev/kube-loop/internal/client/socksbridge"
 	"github.com/fengqi-dev/kube-loop/internal/client/traffic"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficstream"
 	"github.com/fengqi-dev/kube-loop/internal/singbox"
 )
 
@@ -292,6 +293,46 @@ func (manager *Manager) activeRuntime(profileID string) (*Runtime, error) {
 		return nil, errors.New("Data Plane runtime is not connected")
 	}
 	return entry.runtime, nil
+}
+
+// OpenTrafficStream opens a task-scoped logical stream only when the Profile's
+// current Data Plane runtime and authoritative Session still match.
+func (manager *Manager) OpenTrafficStream(
+	ctx context.Context,
+	profileID string,
+	mode string,
+	taskID string,
+) (*trafficstream.FrameConn, error) {
+	if ctx == nil {
+		return nil, errors.New("Traffic stream context is required")
+	}
+	profileID = strings.TrimSpace(profileID)
+	manager.mu.Lock()
+	entry := manager.active[profileID]
+	if entry == nil || entry.runtime == nil || entry.recovering {
+		manager.mu.Unlock()
+		return nil, errors.New("Data Plane runtime is not connected")
+	}
+	runtime := entry.runtime
+	status := runtime.Status()
+	if status.State != "connected" || status.SessionID != entry.session.ID ||
+		status.SessionGeneration != entry.session.Generation {
+		manager.mu.Unlock()
+		return nil, errors.New("Data Plane runtime Session does not match")
+	}
+	manager.mu.Unlock()
+	stream, err := runtime.OpenTrafficStream(ctx, mode, taskID)
+	if err != nil {
+		return nil, err
+	}
+	manager.mu.Lock()
+	current := manager.active[profileID] == entry && entry.runtime == runtime && !entry.recovering
+	manager.mu.Unlock()
+	if !current {
+		_ = stream.Close()
+		return nil, errors.New("Data Plane runtime changed while opening Traffic Task stream")
+	}
+	return stream, nil
 }
 
 // Dialer returns a fixed SOCKS endpoint for local feature listeners. The

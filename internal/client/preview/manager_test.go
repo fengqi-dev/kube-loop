@@ -6,24 +6,23 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"net/http"
-	"net/http/httptest"
-	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/coder/websocket"
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/exchangestream"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficstream"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
 	"github.com/google/uuid"
 )
 
 type testPreviewClient struct {
-	endpoint string
-	created  remote.PreviewTask
-	running  remote.PreviewTask
+	connection *trafficstream.FrameConn
+	openErr    error
+	created    remote.PreviewTask
+	running    remote.PreviewTask
 
 	mu          sync.Mutex
 	createSpec  remote.PreviewSpec
@@ -51,14 +50,16 @@ func (client *testPreviewClient) GetPreview(
 	return client.running, nil
 }
 
-func (client *testPreviewClient) OpenPreviewStream(
-	ctx context.Context, _ profile.Profile, _ remote.Session, _ remote.PreviewTask,
-) (*websocket.Conn, error) {
+func (client *testPreviewClient) OpenTrafficStream(
+	_ context.Context, profileID, mode, taskID string,
+) (*trafficstream.FrameConn, error) {
 	client.mu.Lock()
 	client.openCalls++
 	client.mu.Unlock()
-	connection, _, err := websocket.Dial(ctx, client.endpoint, nil)
-	return connection, err
+	if profileID != "server" || mode != tunnel.TrafficModePreview || taskID != client.created.ID {
+		return nil, errors.New("Preview Traffic stream selector changed")
+	}
+	return client.connection, client.openErr
 }
 
 func (client *testPreviewClient) StopPreview(
@@ -122,68 +123,62 @@ func TestManagerRelaysPreviewTCPAndUDPToRetainedLocalTargets(t *testing.T) {
 		udpDone <- writeErr
 	}()
 
+	connection, gatewayConnection := mustTrafficConnections(t)
 	serverDone := make(chan error, 1)
 	relayVerified := make(chan struct{})
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		connection, acceptErr := websocket.Accept(writer, request, nil)
-		if acceptErr != nil {
-			serverDone <- acceptErr
-			return
-		}
-		defer connection.CloseNow()
-		ctx, cancel := context.WithTimeout(request.Context(), 10*time.Second)
+	go func() {
+		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 		defer cancel()
 		for _, frame := range []exchangestream.Frame{
 			{Type: exchangestream.Ready},
 			{Type: exchangestream.Open, StreamID: 1, ServicePort: 80, Protocol: exchangestream.ProtocolTCP},
 			{Type: exchangestream.Data, StreamID: 1, Payload: []byte("cluster-request")},
 		} {
-			if writeErr := writePreviewTestFrame(ctx, connection, frame); writeErr != nil {
+			if writeErr := writePreviewTestFrame(ctx, gatewayConnection, frame); writeErr != nil {
 				serverDone <- writeErr
 				return
 			}
 		}
-		data, readErr := readPreviewTestFrame(ctx, connection)
+		data, readErr := readPreviewTestFrame(ctx, gatewayConnection)
 		if readErr != nil || data.Type != exchangestream.Data || data.StreamID != 1 || string(data.Payload) != "local-response" {
 			serverDone <- errors.Join(readErr, errors.New("unexpected local Preview TCP response"))
 			return
 		}
-		halfClose, readErr := readPreviewTestFrame(ctx, connection)
+		halfClose, readErr := readPreviewTestFrame(ctx, gatewayConnection)
 		if readErr != nil || halfClose.Type != exchangestream.CloseWrite || halfClose.StreamID != 1 {
 			serverDone <- errors.Join(readErr, errors.New("missing local Preview TCP half-close"))
 			return
 		}
-		if writeErr := writePreviewTestFrame(ctx, connection, exchangestream.Frame{Type: exchangestream.Close, StreamID: 1}); writeErr != nil {
+		if writeErr := writePreviewTestFrame(ctx, gatewayConnection, exchangestream.Frame{Type: exchangestream.Close, StreamID: 1}); writeErr != nil {
 			serverDone <- writeErr
 			return
 		}
-		if writeErr := writePreviewTestFrame(ctx, connection, exchangestream.Frame{
+		if writeErr := writePreviewTestFrame(ctx, gatewayConnection, exchangestream.Frame{
 			Type: exchangestream.Datagram, StreamID: 2, ServicePort: 53,
 			Protocol: exchangestream.ProtocolUDP, Payload: []byte("udp-request"),
 		}); writeErr != nil {
 			serverDone <- writeErr
 			return
 		}
-		datagram, readErr := readPreviewTestFrame(ctx, connection)
+		datagram, readErr := readPreviewTestFrame(ctx, gatewayConnection)
 		if readErr != nil || datagram.Type != exchangestream.Datagram || datagram.StreamID != 2 ||
 			datagram.ServicePort != 53 || string(datagram.Payload) != "udp-response" {
 			serverDone <- errors.Join(readErr, fmt.Errorf("unexpected local Preview UDP response: %#v", datagram))
 			return
 		}
-		if writeErr := writePreviewTestFrame(ctx, connection, exchangestream.Frame{Type: exchangestream.Close, StreamID: 2}); writeErr != nil {
+		if writeErr := writePreviewTestFrame(ctx, gatewayConnection, exchangestream.Frame{Type: exchangestream.Close, StreamID: 2}); writeErr != nil {
 			serverDone <- writeErr
 			return
 		}
 		close(relayVerified)
-		stop, readErr := readPreviewTestFrame(ctx, connection)
+		stop, readErr := readPreviewTestFrame(ctx, gatewayConnection)
 		if readErr != nil || stop.Type != exchangestream.Stop {
 			serverDone <- errors.Join(readErr, errors.New("missing client Preview stop"))
 			return
 		}
-		_ = writePreviewTestFrame(ctx, connection, exchangestream.Frame{Type: exchangestream.Stop})
+		_ = writePreviewTestFrame(ctx, gatewayConnection, exchangestream.Frame{Type: exchangestream.Stop})
 		serverDone <- nil
-	}))
-	defer server.Close()
+	}()
 
 	now := time.Now().UTC()
 	session := remote.Session{ID: uuid.NewString(), Namespace: "development", State: "active", ExpiresAt: now.Add(time.Hour)}
@@ -195,10 +190,8 @@ func TestManagerRelaysPreviewTCPAndUDPToRetainedLocalTargets(t *testing.T) {
 	running := created
 	running.State = "running"
 	running.ClusterIP = "10.96.0.42"
-	client := &testPreviewClient{
-		endpoint: "ws" + strings.TrimPrefix(server.URL, "http"), created: created, running: running,
-	}
-	manager, err := NewManager(client, Config{})
+	client := &testPreviewClient{connection: connection, created: created, running: running}
+	manager, err := NewManager(client, Config{TrafficStreams: client})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -255,8 +248,8 @@ func TestManagerCompensatesWhenPreviewStreamCannotOpen(t *testing.T) {
 		ID: uuid.NewString(), SessionID: session.ID, Namespace: session.Namespace, State: "pending", Name: "local-api",
 		Ports: []remote.PreviewPort{{ServicePort: 80, Protocol: "tcp"}}, CreatedAt: now, UpdatedAt: now,
 	}
-	client := &testPreviewClient{endpoint: "://invalid", created: created, running: created}
-	manager, err := NewManager(client, Config{})
+	client := &testPreviewClient{openErr: errors.New("stream unavailable"), created: created, running: created}
+	manager, err := NewManager(client, Config{TrafficStreams: client})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -280,8 +273,8 @@ func TestManagerRejectsUnboundPreviewBeforeOpeningStream(t *testing.T) {
 		ID: uuid.NewString(), SessionID: session.ID, Namespace: session.Namespace, State: "pending", Name: "local-api",
 		Ports: []remote.PreviewPort{{ServicePort: 80, Protocol: "tcp"}}, CreatedAt: now, UpdatedAt: now,
 	}
-	client := &testPreviewClient{endpoint: "://invalid", created: created, running: created}
-	manager, err := NewManager(client, Config{})
+	client := &testPreviewClient{openErr: errors.New("stream unavailable"), created: created, running: created}
+	manager, err := NewManager(client, Config{TrafficStreams: client})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -334,7 +327,7 @@ func TestManagerRejectsGatewayPreviewPortSubstitutionBeforeOpeningStream(t *test
 		CreatedAt: now, UpdatedAt: now,
 	}
 	client := &testPreviewClient{created: created, running: created}
-	manager, err := NewManager(client, Config{})
+	manager, err := NewManager(client, Config{TrafficStreams: client})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -351,21 +344,47 @@ func TestManagerRejectsGatewayPreviewPortSubstitutionBeforeOpeningStream(t *test
 	}
 }
 
-func writePreviewTestFrame(ctx context.Context, connection *websocket.Conn, frame exchangestream.Frame) error {
+func writePreviewTestFrame(ctx context.Context, connection *trafficstream.FrameConn, frame exchangestream.Frame) error {
 	encoded, err := exchangestream.Encode(frame)
 	if err != nil {
 		return err
 	}
-	return connection.Write(ctx, websocket.MessageBinary, encoded)
+	return connection.WriteFrame(ctx, encoded)
 }
 
-func readPreviewTestFrame(ctx context.Context, connection *websocket.Conn) (exchangestream.Frame, error) {
-	messageType, encoded, err := connection.Read(ctx)
+func readPreviewTestFrame(ctx context.Context, connection *trafficstream.FrameConn) (exchangestream.Frame, error) {
+	encoded, err := connection.ReadFrame(ctx)
 	if err != nil {
 		return exchangestream.Frame{}, err
 	}
-	if messageType != websocket.MessageBinary {
-		return exchangestream.Frame{}, errors.New("expected binary Preview frame")
-	}
 	return exchangestream.Decode(encoded)
+}
+
+func mustTrafficConnections(t *testing.T) (*trafficstream.FrameConn, *trafficstream.FrameConn) {
+	t.Helper()
+	clientSide, gatewaySide := net.Pipe()
+	accepted := make(chan struct {
+		connection *trafficstream.FrameConn
+		err        error
+	}, 1)
+	go func() {
+		connection, err := trafficstream.Accept(t.Context(), gatewaySide)
+		accepted <- struct {
+			connection *trafficstream.FrameConn
+			err        error
+		}{connection: connection, err: err}
+	}()
+	client, err := trafficstream.Dial(t.Context(), clientSide)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := <-accepted
+	if server.err != nil {
+		t.Fatal(server.err)
+	}
+	t.Cleanup(func() {
+		_ = client.Close()
+		_ = server.connection.Close()
+	})
+	return client, server.connection
 }

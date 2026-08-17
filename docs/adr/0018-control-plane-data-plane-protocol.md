@@ -11,7 +11,7 @@ through Helm. This is sufficient for a single known Data Plane Service, but it
 does not define registration, liveness/capacity, Session assignment, key
 rotation, revocation propagation or drain coordination for multiple replicas.
 
-The internal protocol is a separate trust boundary from the public `/kubeloop/api`
+The internal protocol is a separate trust boundary from the public `/api`
 and `/tunnel` protocols. A desktop must never call it, and a JSON body must not
 be able to choose its own relay identity.
 

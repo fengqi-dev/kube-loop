@@ -119,7 +119,7 @@ func (p *dnsSearchProxy) Close() error {
 	p.closed = true
 	var first error
 	if p.publicUDP != nil {
-		if err := p.publicUDP.Shutdown(); err != nil && first == nil {
+		if err := p.publicUDP.Shutdown(); err != nil {
 			first = err
 		}
 	}
@@ -179,10 +179,6 @@ func (p *dnsSearchProxy) serveDNS(w dns.ResponseWriter, req *dns.Msg) {
 		if resp.Rcode != dns.RcodeSuccess {
 			continue
 		}
-		if len(resp.Answer) == 0 && !equalDNSName(candidate, original) {
-			// NODATA on an expanded name — keep trying other suffixes for A/AAAA.
-			continue
-		}
 		out := resp.Copy()
 		out.Id = req.Id
 		rewriteDNSNames(out, candidate, original)
@@ -231,6 +227,13 @@ func dnsSearchCandidates(qname string, search []string, clusterDomains ...string
 	}
 	if strings.HasSuffix(name, ".in-addr.arpa") || strings.HasSuffix(name, ".ip6.arpa") {
 		return []string{original}
+	}
+	if name == "svc" || strings.HasSuffix(name, ".svc") {
+		out := make([]string, 0, len(domains))
+		for _, domain := range domains {
+			out = append(out, name+"."+domain+".")
+		}
+		return out
 	}
 	out := make([]string, 0, len(search)+1)
 	seen := make(map[string]struct{}, len(search)+1)

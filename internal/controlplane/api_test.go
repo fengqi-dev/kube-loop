@@ -47,7 +47,10 @@ func (authorizer *recordingAuthorizer) Authorize(
 }
 
 func TestAPIDefaultsToAuthenticationRequired(t *testing.T) {
-	server := newAPITestServer(t)
+	server := newAPITestServer(t, WithAPIRoutes(testEndpoint(func(http.ResponseWriter, *http.Request, controlplaneapi.Identity) *controlplaneapi.Error {
+		t.Fatal("unauthenticated request reached API endpoint")
+		return nil
+	})))
 	response := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodGet, APIPathPrefix+"/clusters", nil)
 	request.Header.Set(echo.HeaderXRequestID, "33333333-3333-4333-8333-333333333333")
@@ -227,11 +230,11 @@ func TestUnifiedAuthorizerGatesTaskCreationAndControlPlaneStreams(t *testing.T) 
 	tests := []struct {
 		name, method, path, operation, resourceKind string
 	}{
-		{"relay ticket", http.MethodPost, SessionAPIPathPrefix + "/sessions/session-1/tickets?namespace=development", "create", "relay-tickets"},
-		{"port forward", http.MethodPost, SessionAPIPathPrefix + "/sessions/session-1/port-forwards?namespace=development", "create", "port-forwards"},
-		{"pod exec", http.MethodPost, SessionAPIPathPrefix + "/sessions/session-1/exec?namespace=development", "create", "pod-exec"},
-		{"pod exec stream", http.MethodGet, SessionAPIPathPrefix + "/sessions/session-1/exec/task-1/stream?namespace=development", "stream", "pod-exec"},
-		{"file stream", http.MethodGet, SessionAPIPathPrefix + "/sessions/session-1/file-transfers/task-1/stream?namespace=development", "stream", "file-transfers"},
+		{"relay ticket", http.MethodPost, APIPathPrefix + "/sessions/session-1/tickets?namespace=development", "create", "relay-tickets"},
+		{"port forward", http.MethodPost, APIPathPrefix + "/sessions/session-1/port-forwards?namespace=development", "create", "port-forwards"},
+		{"pod exec", http.MethodPost, APIPathPrefix + "/sessions/session-1/exec?namespace=development", "create", "pod-exec"},
+		{"pod exec stream", http.MethodGet, APIPathPrefix + "/sessions/session-1/exec/task-1/stream?namespace=development", "stream", "pod-exec"},
+		{"file stream", http.MethodGet, APIPathPrefix + "/sessions/session-1/file-transfers/task-1/stream?namespace=development", "stream", "file-transfers"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

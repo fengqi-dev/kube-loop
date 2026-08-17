@@ -12,12 +12,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/coder/websocket"
 	localpodssh "github.com/fengqi-dev/kube-loop/internal/client/podssh/sshserver"
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
 	"github.com/fengqi-dev/kube-loop/internal/client/socksbridge"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/execstream"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
 	"github.com/google/uuid"
 	"golang.org/x/crypto/ssh"
 )

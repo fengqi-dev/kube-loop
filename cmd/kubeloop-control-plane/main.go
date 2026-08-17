@@ -11,7 +11,6 @@ import (
 
 	"github.com/fengqi-dev/kube-loop/internal/controlplane"
 	adminhttpapi "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/httpapi"
-	adminhttpserver "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/httpserver"
 	adminsession "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/session"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/authn/httpauth"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/authn/oauthserver"
@@ -54,7 +53,7 @@ func main() {
 	if err := controlplanestorage.EnsureBuiltinOAuthClients(
 		signalContext,
 		stateStore.OAuthClients(),
-		strings.TrimRight(config.Document.Admin.PublicURL, "/")+controlplane.AdminAPIPathPrefix+"/ui/callback",
+		strings.TrimRight(config.Document.API.PublicURL, "/")+controlplane.AdminPathPrefix+"/ui/callback",
 	); err != nil {
 		_ = stateStore.Close()
 		logger.Error("initialize built-in OAuth clients failed", "error", err)
@@ -160,22 +159,14 @@ func main() {
 		managementOptions = append(managementOptions, adminhttpapi.WithTokenExchange(fositeEndpoints))
 	}
 	managementHandler, err := adminhttpapi.New(
-		adminhttpapi.Config{PublicURL: config.Document.Admin.PublicURL}, managementSessions, managementOptions...,
+		adminhttpapi.Config{PublicURL: config.Document.API.PublicURL}, managementSessions, managementOptions...,
 	)
 	if err != nil {
 		_ = stateStore.Close()
 		logger.Error("initialize Management Plane HTTP API failed", "error", err)
 		os.Exit(2)
 	}
-	managementServer, err := adminhttpserver.New(
-		adminhttpserver.Config{ListenAddress: config.Document.Admin.Listen}, managementHandler,
-		authRoutes, authMethodSource, logger,
-	)
-	if err != nil {
-		_ = stateStore.Close()
-		logger.Error("invalid Management Plane server configuration", "error", err)
-		os.Exit(2)
-	}
+	serverOptions = append(serverOptions, controlplane.WithAdminRoutes(managementHandler))
 	server, err := controlplane.NewServer(controlplane.Config{
 		ListenAddress:       config.Document.API.Listen,
 		PublicURL:           config.Document.API.PublicURL,
@@ -196,7 +187,7 @@ func main() {
 	}
 	serveControlPlane(serverRuntimeOptions{
 		Context: signalContext, Stop: stop, Config: config, Logger: logger, Store: stateStore,
-		Server: server, ManagementServer: managementServer, RelayRegistry: relayRegistry,
+		Server: server, RelayRegistry: relayRegistry,
 		KubernetesConfig:  kubernetesConfig,
 		SessionRecovery:   sessionRecovery,
 		MaintenanceWorker: maintenanceWorker,

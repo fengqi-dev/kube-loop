@@ -31,18 +31,7 @@ func ApplyDNS(workDir string, dns singbox.DNSMeta) error {
 			powershellLiteral(dns.Listen),
 		)
 	}
-	if len(dns.Search) > 0 {
-		items := make([]string, 0, len(dns.Search))
-		for _, domain := range dns.Search {
-			items = append(items, powershellLiteral(domain))
-		}
-		fmt.Fprintf(&b,
-			"$want=@(%s); $old=@((Get-DnsClientGlobalSetting).SuffixSearchList); "+
-				"$merged=@($want+($old|Where-Object { $_ -and ($want -notcontains $_) })); "+
-				"Set-DnsClientGlobalSetting -SuffixSearchList $merged; ",
-			strings.Join(items, ","),
-		)
-	}
+	b.WriteString(windowsSearchDomainMergeScript(dns.Search))
 	b.WriteString("Clear-DnsClientCache")
 	if _, err := runPowerShell(b.String()); err != nil {
 		return fmt.Errorf("configure Windows DNS: %w", err)
@@ -91,10 +80,6 @@ func runPowerShell(command string) ([]byte, error) {
 		return output, fmt.Errorf("%w: %s", err, detail)
 	}
 	return output, nil
-}
-
-func powershellLiteral(value string) string {
-	return "'" + strings.ReplaceAll(value, "'", "''") + "'"
 }
 
 func CleanupRoutes(routes []string) {

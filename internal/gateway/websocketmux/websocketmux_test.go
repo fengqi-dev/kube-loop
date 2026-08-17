@@ -17,8 +17,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/coder/websocket"
 	shared "github.com/fengqi-dev/kube-loop/internal/client/websocketmux"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
 	protocolmux "github.com/fengqi-dev/kube-loop/internal/protocol/websocketmux"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/wssprotocol"
 	"github.com/xtaci/smux"
@@ -29,7 +29,7 @@ const testDeviceID = "22222222-2222-4222-8222-222222222222"
 func TestForwarderMultiplexesConcurrentStreams(t *testing.T) {
 	handler, err := NewHandler(ServerConfig{
 		Authenticator: testAuthenticator("test-token"),
-		Handle: func(_ Identity, connection net.Conn) {
+		Handle: func(_ context.Context, _ Identity, connection net.Conn) {
 			defer connection.Close()
 			_, _ = io.Copy(connection, connection)
 		},
@@ -91,7 +91,7 @@ func TestForwarderPreservesTCPHalfClose(t *testing.T) {
 	result := make(chan error, 1)
 	handler, err := NewHandler(ServerConfig{
 		Authenticator: testAuthenticator("test-token"),
-		Handle: func(_ Identity, connection net.Conn) {
+		Handle: func(_ context.Context, _ Identity, connection net.Conn) {
 			defer connection.Close()
 			request, readErr := io.ReadAll(connection)
 			if readErr != nil {
@@ -154,7 +154,7 @@ func TestSlowConsumerDoesNotBlockSiblingStream(t *testing.T) {
 	defer release()
 	handler, err := NewHandler(ServerConfig{
 		Authenticator: testAuthenticator("test-token"),
-		Handle: func(_ Identity, connection net.Conn) {
+		Handle: func(_ context.Context, _ Identity, connection net.Conn) {
 			defer connection.Close()
 			var kind [1]byte
 			if _, err := io.ReadFull(connection, kind[:]); err != nil {
@@ -238,7 +238,7 @@ func TestMalformedStreamDoesNotClosePhysicalSession(t *testing.T) {
 	results := make(chan error, 4)
 	handler, err := NewHandler(ServerConfig{
 		Authenticator: testAuthenticator("test-token"),
-		Handle: func(_ Identity, connection net.Conn) {
+		Handle: func(_ context.Context, _ Identity, connection net.Conn) {
 			defer connection.Close()
 			buffer := make([]byte, 32)
 			for {
@@ -301,7 +301,7 @@ func TestIdleStreamTimesOutWithoutClosingPhysicalSession(t *testing.T) {
 	handler, err := NewHandler(ServerConfig{
 		Authenticator:     testAuthenticator("test-token"),
 		StreamIdleTimeout: 50 * time.Millisecond,
-		Handle: func(_ Identity, connection net.Conn) {
+		Handle: func(_ context.Context, _ Identity, connection net.Conn) {
 			defer connection.Close()
 			var request [1]byte
 			if _, err := io.ReadFull(connection, request[:]); err != nil {
@@ -386,7 +386,7 @@ func rawClientSession(t *testing.T, ctx context.Context, serverURL, token string
 func TestForwarderRejectsInvalidToken(t *testing.T) {
 	var logs bytes.Buffer
 	handler, err := NewHandler(ServerConfig{
-		Authenticator: testAuthenticator("correct"), Logger: slog.New(slog.NewJSONHandler(&logs, nil)), Handle: func(Identity, net.Conn) {},
+		Authenticator: testAuthenticator("correct"), Logger: slog.New(slog.NewJSONHandler(&logs, nil)), Handle: func(context.Context, Identity, net.Conn) {},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -412,7 +412,7 @@ func TestHandlerLogsRequestID(t *testing.T) {
 	handler, err := NewHandler(ServerConfig{
 		Authenticator: testAuthenticator("correct"),
 		Logger:        slog.New(slog.NewJSONHandler(&logs, nil)),
-		Handle:        func(Identity, net.Conn) {},
+		Handle:        func(context.Context, Identity, net.Conn) {},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -426,7 +426,7 @@ func TestHandlerLogsRequestID(t *testing.T) {
 }
 
 func TestHandlerRejectsNewSessionsWhileDraining(t *testing.T) {
-	handler, err := NewHandler(ServerConfig{Authenticator: testAuthenticator("token"), Handle: func(Identity, net.Conn) {}})
+	handler, err := NewHandler(ServerConfig{Authenticator: testAuthenticator("token"), Handle: func(context.Context, Identity, net.Conn) {}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -459,7 +459,7 @@ func TestNewGenerationLetsExistingStreamFinishAndRejectsOlderNewStreams(t *testi
 				return Identity{}, fmt.Errorf("authentication failed")
 			}
 		}),
-		Handle: func(_ Identity, connection net.Conn) {
+		Handle: func(_ context.Context, _ Identity, connection net.Conn) {
 			defer connection.Close()
 			var request [1]byte
 			if _, readErr := io.ReadFull(connection, request[:]); readErr != nil {
@@ -546,7 +546,7 @@ func TestNewGenerationLetsExistingStreamFinishAndRejectsOlderNewStreams(t *testi
 func TestWSSHandshakeReturnsTypedVersionAndClientVersionRejections(t *testing.T) {
 	handler, err := NewHandler(ServerConfig{
 		Authenticator: testAuthenticator("token"), MinClientVersion: "2.1.0",
-		Handle: func(Identity, net.Conn) { t.Error("rejected handshake opened a logical stream") },
+		Handle: func(context.Context, Identity, net.Conn) { t.Error("rejected handshake opened a logical stream") },
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -606,7 +606,7 @@ func TestWSSHandshakeBindsDeviceAndLimitsConnectionsPerIdentity(t *testing.T) {
 		}),
 		MaxSessions: 4, MaxSessionsPerUser: 1, MaxStreamsPerSession: 7,
 		MaxFrameBytes: 512 << 10, StreamIdleTimeout: 2 * time.Minute,
-		Handle: func(Identity, net.Conn) {},
+		Handle: func(context.Context, Identity, net.Conn) {},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -654,7 +654,7 @@ func TestWSSServerHelloPublishesExactLimitsBeforeSmux(t *testing.T) {
 	handler, err := NewHandler(ServerConfig{
 		Authenticator: testAuthenticator("token"), MaxSessions: 11, MaxSessionsPerUser: 3,
 		MaxStreamsPerSession: 17, MaxFrameBytes: 768 << 10, StreamIdleTimeout: 90 * time.Second,
-		ServerVersion: "2.5.0", Handle: func(Identity, net.Conn) {},
+		ServerVersion: "2.5.0", Handle: func(context.Context, Identity, net.Conn) {},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -728,7 +728,7 @@ func TestHandlerRejectsExpiredRelayTicketIdentity(t *testing.T) {
 				ExpiresAt: time.Now().Add(-time.Second),
 			}, nil
 		}),
-		Handle: func(Identity, net.Conn) {},
+		Handle: func(context.Context, Identity, net.Conn) {},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -737,6 +737,69 @@ func TestHandlerRejectsExpiredRelayTicketIdentity(t *testing.T) {
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/v2/tunnel", nil))
 	if response.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want %d", response.Code, http.StatusUnauthorized)
+	}
+}
+
+func TestEstablishedStreamSurvivesRelayTicketExpiry(t *testing.T) {
+	expiresAt := time.Now().Add(500 * time.Millisecond)
+	started := make(chan struct{})
+	release := make(chan struct{})
+	handler, err := NewHandler(ServerConfig{
+		Authenticator: AuthenticatorFunc(func(*http.Request) (Identity, error) {
+			return Identity{
+				IdentityID: "identity", DeviceID: testDeviceID,
+				SessionID: "33333333-3333-4333-8333-333333333333", SessionGeneration: 1,
+				ExpiresAt: expiresAt,
+			}, nil
+		}),
+		Handle: func(_ context.Context, _ Identity, connection net.Conn) {
+			defer connection.Close()
+			var request [1]byte
+			if _, readErr := io.ReadFull(connection, request[:]); readErr != nil {
+				return
+			}
+			close(started)
+			<-release
+			_, _ = connection.Write(request[:])
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(handler)
+	defer server.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	session, closeSession := rawClientSession(t, ctx, server.URL, "token")
+	defer closeSession()
+	rawStream, err := session.OpenStream()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stream := protocolmux.NewStreamConn(rawStream)
+	defer stream.Close()
+	if _, err := stream.Write([]byte{'E'}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-started:
+	case <-ctx.Done():
+		t.Fatal("Gateway stream did not start")
+	}
+	if delay := time.Until(expiresAt) + 100*time.Millisecond; delay > 0 {
+		timer := time.NewTimer(delay)
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			timer.Stop()
+			t.Fatal("RelayTicket expiry wait timed out")
+		}
+	}
+	close(release)
+	var response [1]byte
+	if _, err := io.ReadFull(stream, response[:]); err != nil || response[0] != 'E' {
+		t.Fatalf("stream response after RelayTicket expiry = %q, %v", response, err)
 	}
 }
 

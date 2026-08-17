@@ -20,7 +20,6 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/gateway/websocketmux"
 	"github.com/fengqi-dev/kube-loop/internal/httpmiddleware"
 	"github.com/fengqi-dev/kube-loop/internal/logging"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/relayticket"
 	"github.com/labstack/echo/v5"
 )
 
@@ -51,8 +50,6 @@ func main() {
 	var cancelHTTP context.CancelFunc
 	var controlAgent *relayagent.Agent
 	var runtimeReporter *relayRuntimeReporter
-	var verifyRequest func(*http.Request) (relayticket.Claims, error)
-
 	var dynamicAuthenticator *relayagent.TicketAuthenticator
 	var authenticatorErr error
 	dynamicAuthenticator, authenticatorErr = relayagent.NewTicketAuthenticator(relayagent.TicketAuthenticatorConfig{
@@ -61,10 +58,9 @@ func main() {
 	if authenticatorErr != nil {
 		errorLogger.Fatal(authenticatorErr)
 	}
-	verifyRequest = dynamicAuthenticator.Verify
 	handler, handlerErr := websocketmux.NewHandler(websocketmux.ServerConfig{
 		Authenticator: websocketmux.AuthenticatorFunc(func(request *http.Request) (websocketmux.Identity, error) {
-			claims, verifyErr := verifyRequest(request)
+			claims, verifyErr := dynamicAuthenticator.Verify(request)
 			if verifyErr != nil {
 				return websocketmux.Identity{}, verifyErr
 			}
@@ -72,7 +68,8 @@ func main() {
 				return websocketmux.Identity{}, errors.New("RelayTicket NetworkSpec binding is required")
 			}
 			return websocketmux.Identity{
-				IdentityID: claims.IdentityID, DeviceID: claims.DeviceID, SessionID: claims.SessionID,
+				IdentityID: claims.IdentityID, Groups: append([]string(nil), claims.Groups...),
+				DeviceID: claims.DeviceID, SessionID: claims.SessionID,
 				SessionGeneration: claims.SessionGeneration,
 				Namespace:         claims.Namespace, NetworkSpecHash: claims.NetworkSpecHash,
 				ExpiresAt: time.Unix(claims.ExpiresAt, 0).UTC(),
@@ -83,9 +80,11 @@ func main() {
 		ServerVersion:    version, MinClientVersion: config.MinClientVersion,
 		MaxSessions: config.WebSocket.MaxSessions, MaxSessionsPerUser: config.WebSocket.MaxSessionsPerUser,
 		MaxStreamsPerSession: config.WebSocket.MaxStreamsPerSession, MaxFrameBytes: config.WebSocket.MaxFrameBytes,
-		Handle: func(identity websocketmux.Identity, connection net.Conn) {
-			server.ServeConnForAuthorization(connection, gateway.SessionAuthorization{
-				RequestID: identity.RequestID, SessionID: identity.SessionID, Generation: identity.SessionGeneration,
+		Handle: func(ctx context.Context, identity websocketmux.Identity, connection net.Conn) {
+			server.ServeConnForAuthorizationContext(ctx, connection, gateway.SessionAuthorization{
+				RequestID: identity.RequestID, IdentityID: identity.IdentityID,
+				Groups: append([]string(nil), identity.Groups...), DeviceID: identity.DeviceID,
+				SessionID: identity.SessionID, Generation: identity.SessionGeneration,
 				Namespace:       identity.Namespace,
 				NetworkSpecHash: identity.NetworkSpecHash,
 			})
@@ -125,6 +124,13 @@ func main() {
 	}
 	operationsState.agent = controlAgent
 	logger.Printf("Data Plane registered as %s", controlAgent.RelayID())
+	trafficHandler, trafficErr := trafficapi.New(trafficapi.Config{
+		GatewayIP: environment.PodIP, ControlPlane: controlAgent,
+	})
+	if trafficErr != nil {
+		errorLogger.Fatal(trafficErr)
+	}
+	server.SetTrafficHandler(trafficHandler)
 	httpListener, listenErr := net.Listen("tcp", config.HTTP.Listen)
 	if listenErr != nil {
 		errorLogger.Fatal(listenErr)
@@ -134,15 +140,6 @@ func main() {
 	router.Use(httpmiddleware.RequestLogger(componentLogger))
 	operations.NewHandler(operationsState, handler).Register(router)
 	router.Any(config.HTTP.Path, echo.WrapHandler(handler))
-	trafficHandler, trafficErr := trafficapi.New(trafficapi.Config{
-		GatewayIP: environment.PodIP, VerifyRequest: verifyRequest, ControlPlane: controlAgent,
-		MaximumSessions: config.WebSocket.MaxSessions, OtherSessions: handler.ActiveSessions,
-	})
-	if trafficErr != nil {
-		errorLogger.Fatal(trafficErr)
-	}
-	trafficHandler.RegisterRoutes(router)
-	runtimeReporter.SetTraffic(trafficHandler)
 	defaultHTTPErrorHandler := echo.DefaultHTTPErrorHandler(false)
 	router.HTTPErrorHandler = func(ctx *echo.Context, err error) {
 		if !errors.Is(err, echo.ErrNotFound) {

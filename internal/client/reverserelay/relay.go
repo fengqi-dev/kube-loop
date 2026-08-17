@@ -9,8 +9,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/coder/websocket"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/exchangestream"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficstream"
 )
 
 // Target is a client-retained destination for one Service port. It is never
@@ -32,35 +32,31 @@ type localConnection struct {
 // Relay translates the authenticated Exchange wire protocol into connections
 // to the immutable local targets supplied by the desktop client.
 type Relay struct {
-	websocket *websocket.Conn
-	targets   map[string]Target
-	dial      DialContextFunc
+	stream  *trafficstream.FrameConn
+	targets map[string]Target
+	dial    DialContextFunc
 
-	writeMu sync.Mutex
-	mu      sync.Mutex
-	tcp     map[uint64]*localConnection
-	udp     map[uint64]*localConnection
-	wg      sync.WaitGroup
+	mu  sync.Mutex
+	tcp map[uint64]*localConnection
+	udp map[uint64]*localConnection
+	wg  sync.WaitGroup
 }
 
-func New(connection *websocket.Conn, targets []Target, dial DialContextFunc) *Relay {
+func New(connection *trafficstream.FrameConn, targets []Target, dial DialContextFunc) *Relay {
 	targetMap := make(map[string]Target, len(targets))
 	for _, target := range targets {
 		targetMap[targetKey(target.Protocol, target.ServicePort)] = target
 	}
 	return &Relay{
-		websocket: connection, targets: targetMap, dial: dial,
+		stream: connection, targets: targetMap, dial: dial,
 		tcp: make(map[uint64]*localConnection), udp: make(map[uint64]*localConnection),
 	}
 }
 
 func (relay *Relay) ReadReady(ctx context.Context) error {
-	messageType, encoded, err := relay.websocket.Read(ctx)
+	encoded, err := relay.stream.ReadFrame(ctx)
 	if err != nil {
 		return err
-	}
-	if messageType != websocket.MessageBinary {
-		return errors.New("Gateway returned a non-binary reverse readiness frame")
 	}
 	frame, err := exchangestream.Decode(encoded)
 	if err != nil || frame.Type != exchangestream.Ready {
@@ -75,15 +71,12 @@ func (relay *Relay) Run(ctx context.Context) error {
 		cancel()
 		relay.closeAll()
 		relay.wg.Wait()
-		_ = relay.websocket.CloseNow()
+		_ = relay.stream.Close()
 	}()
 	for {
-		messageType, encoded, err := relay.websocket.Read(ctx)
+		encoded, err := relay.stream.ReadFrame(ctx)
 		if err != nil {
 			return err
-		}
-		if messageType != websocket.MessageBinary {
-			return errors.New("Gateway sent a non-binary reverse frame")
 		}
 		frame, err := exchangestream.Decode(encoded)
 		if err != nil {
@@ -243,9 +236,7 @@ func (relay *Relay) write(ctx context.Context, frame exchangestream.Frame) error
 	if err != nil {
 		return err
 	}
-	relay.writeMu.Lock()
-	defer relay.writeMu.Unlock()
-	return relay.websocket.Write(ctx, websocket.MessageBinary, encoded)
+	return relay.stream.WriteFrame(ctx, encoded)
 }
 
 func (relay *Relay) connection(items map[uint64]*localConnection, id uint64) *localConnection {

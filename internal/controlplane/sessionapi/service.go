@@ -205,7 +205,7 @@ func (handler *Service) create(
 		return &controlplaneapi.Error{Code: controlplaneapi.CodeUnavailable, Message: "Session runtime is unavailable", Cause: err}
 	}
 	controlplanemiddleware.SetAuditSessionID(request.Context(), session.ID)
-	ctx.Response().Header().Set("Location", controlplane.SessionAPIPathPrefix+"/sessions/"+session.ID+"?namespace="+namespace)
+	ctx.Response().Header().Set("Location", controlplane.APIPathPrefix+"/sessions/"+session.ID+"?namespace="+namespace)
 	if !created {
 		ctx.Response().Header().Set("Idempotent-Replayed", "true")
 	}

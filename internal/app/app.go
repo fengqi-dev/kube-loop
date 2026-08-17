@@ -227,19 +227,19 @@ func newApp(version string, embeddedHelperFiles fs.FS, dependencies appDependenc
 	} else {
 		application.remoteForwards = remoteForwards
 	}
-	remoteExchanges, exchangeErr := clientexchange.NewManager(remoteClient, clientexchange.Config{})
+	remoteExchanges, exchangeErr := clientexchange.NewManager(remoteClient, clientexchange.Config{TrafficStreams: dataPlanes})
 	if exchangeErr != nil {
 		application.appendLog("ERROR", "Exchange Manager unavailable: "+exchangeErr.Error())
 	} else {
 		application.remoteExchanges = remoteExchanges
 	}
-	remoteMirrors, mirrorErr := clientmirror.NewManager(remoteClient, clientmirror.Config{})
+	remoteMirrors, mirrorErr := clientmirror.NewManager(remoteClient, clientmirror.Config{TrafficStreams: dataPlanes})
 	if mirrorErr != nil {
 		application.appendLog("ERROR", "Mirror Manager unavailable: "+mirrorErr.Error())
 	} else {
 		application.remoteMirrors = remoteMirrors
 	}
-	remotePreviews, previewErr := clientpreview.NewManager(remoteClient, clientpreview.Config{})
+	remotePreviews, previewErr := clientpreview.NewManager(remoteClient, clientpreview.Config{TrafficStreams: dataPlanes})
 	if previewErr != nil {
 		application.appendLog("ERROR", "Preview Manager unavailable: "+previewErr.Error())
 	} else {

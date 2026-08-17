@@ -43,8 +43,8 @@ func TestHandlerServesOnlyFixedManagementAssetsWithStrictCSP(t *testing.T) {
 	}
 	index := httptest.NewRecorder()
 	serveUI(handler, index, httptest.NewRequest(http.MethodGet, "/ui", nil))
-	if !strings.Contains(index.Body.String(), `src="/api/admin/ui/app.js"`) ||
-		!strings.Contains(index.Body.String(), `href="/api/admin/ui/app.css"`) {
+	if !strings.Contains(index.Body.String(), `src="/admin/ui/app.js"`) ||
+		!strings.Contains(index.Body.String(), `href="/admin/ui/app.css"`) {
 		t.Fatalf("management asset URLs are not absolute: %s", index.Body.String())
 	}
 	method := httptest.NewRecorder()

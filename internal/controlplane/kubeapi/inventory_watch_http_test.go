@@ -11,11 +11,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/coder/websocket"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/authorization"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/kubeapi"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -50,7 +50,7 @@ func TestInventoryWatchHTTPStreamsAuthorizedResyncSnapshots(t *testing.T) {
 	defer httpServer.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	connection, _, err := websocket.Dial(ctx, "wss"+strings.TrimPrefix(httpServer.URL, "https")+"/kubeloop/api/namespaces/development/pods?watch=true", &websocket.DialOptions{
+	connection, _, err := websocket.Dial(ctx, "wss"+strings.TrimPrefix(httpServer.URL, "https")+"/api/namespaces/development/pods?watch=true", &websocket.DialOptions{
 		HTTPClient: httpServer.Client(), CompressionMode: websocket.CompressionDisabled,
 	})
 	if err != nil {

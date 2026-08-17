@@ -73,7 +73,7 @@ func TestIssueRelayTicketIsBoundToActiveSession(t *testing.T) {
 	})
 	request := httptest.NewRequest(
 		http.MethodPost,
-		controlplane.SessionAPIPathPrefix+"/sessions/"+sessionID+"/tickets?namespace=development",
+		controlplane.APIPathPrefix+"/sessions/"+sessionID+"/tickets?namespace=development",
 		strings.NewReader(`{}`),
 	)
 	request.Header.Set("Content-Type", "application/json")
@@ -145,7 +145,7 @@ func TestIssueRelayTicketUsesRegistryAssignment(t *testing.T) {
 	})
 	request := httptest.NewRequest(
 		http.MethodPost,
-		controlplane.SessionAPIPathPrefix+"/sessions/"+sessionID+"/tickets?namespace=development",
+		controlplane.APIPathPrefix+"/sessions/"+sessionID+"/tickets?namespace=development",
 		strings.NewReader(`{}`),
 	)
 	request.Header.Set("Content-Type", "application/json")
@@ -199,9 +199,9 @@ func TestIssueRelayTicketRejectsInvalidInputBeforeSessionLookup(t *testing.T) {
 		body        string
 		contentType string
 	}{
-		{name: "bad session", url: controlplane.SessionAPIPathPrefix + "/sessions/not-a-uuid/tickets?namespace=development", body: `{}`, contentType: "application/json"},
-		{name: "bad namespace", url: controlplane.SessionAPIPathPrefix + "/sessions/33333333-3333-4333-8333-333333333333/tickets?namespace=Bad", body: `{}`, contentType: "application/json"},
-		{name: "wrong media type", url: controlplane.SessionAPIPathPrefix + "/sessions/33333333-3333-4333-8333-333333333333/tickets?namespace=development", body: `{}`, contentType: "text/plain"},
+		{name: "bad session", url: controlplane.APIPathPrefix + "/sessions/not-a-uuid/tickets?namespace=development", body: `{}`, contentType: "application/json"},
+		{name: "bad namespace", url: controlplane.APIPathPrefix + "/sessions/33333333-3333-4333-8333-333333333333/tickets?namespace=Bad", body: `{}`, contentType: "application/json"},
+		{name: "wrong media type", url: controlplane.APIPathPrefix + "/sessions/33333333-3333-4333-8333-333333333333/tickets?namespace=development", body: `{}`, contentType: "text/plain"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -235,7 +235,7 @@ func TestIssueRelayTicketDoesNotLeakSessionValidationDetails(t *testing.T) {
 	})
 	request := httptest.NewRequest(
 		http.MethodPost,
-		controlplane.SessionAPIPathPrefix+"/sessions/33333333-3333-4333-8333-333333333333/tickets?namespace=development",
+		controlplane.APIPathPrefix+"/sessions/33333333-3333-4333-8333-333333333333/tickets?namespace=development",
 		strings.NewReader(`{}`),
 	)
 	request.Header.Set("Content-Type", "application/json")

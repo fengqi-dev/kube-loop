@@ -77,10 +77,18 @@ func TestRegistrationHeartbeatGenerationGateAndNoSilentReassignment(t *testing.T
 		t.Fatalf("stale Session generation error = %v", err)
 	}
 	changedNetwork := newGeneration
-	changedNetwork.Generation = 3
 	changedNetwork.NetworkSpecHash = strings.Repeat("ab", 32)
 	if _, err := registry.Allocate(changedNetwork); !errors.Is(err, ErrConflict) {
-		t.Fatalf("changed Session NetworkSpec error = %v", err)
+		t.Fatalf("same-generation changed Session NetworkSpec error = %v", err)
+	}
+	changedNetwork.Generation = 3
+	refreshed, err := registry.Allocate(changedNetwork)
+	if err != nil || refreshed != assigned {
+		t.Fatalf("new-generation changed Session NetworkSpec assignment = %#v err = %v", refreshed, err)
+	}
+	statuses = registry.Snapshot()
+	if len(statuses) != 1 || statuses[0].Reservations != 1 {
+		t.Fatalf("NetworkSpec refresh duplicated reservation: %#v", statuses)
 	}
 
 	replacement := registrationRequest("a.example.test", 100, 1)
@@ -94,16 +102,15 @@ func TestRegistrationHeartbeatGenerationGateAndNoSilentReassignment(t *testing.T
 	if _, err := registry.Heartbeat(identity, heartbeat); !errors.Is(err, ErrConflict) {
 		t.Fatalf("old lease heartbeat error = %v", err)
 	}
-	newGeneration.Generation = 3
-	if _, err := registry.Allocate(newGeneration); !errors.Is(err, ErrAssignedRelayUnavailable) {
+	if _, err := registry.Allocate(changedNetwork); !errors.Is(err, ErrAssignedRelayUnavailable) {
 		t.Fatalf("Session was reassigned before the replacement Relay acknowledged control state: %v", err)
 	}
 	replacementHeartbeat := heartbeatRequest(reregistered.LeaseID, 100, 1)
 	if _, err := registry.Heartbeat(identity, replacementHeartbeat); err != nil {
 		t.Fatal(err)
 	}
-	newGeneration.Generation = 4
-	reassigned, err := registry.Allocate(newGeneration)
+	changedNetwork.Generation = 4
+	reassigned, err := registry.Allocate(changedNetwork)
 	if err != nil {
 		t.Fatalf("reassign newer Session generation: %v", err)
 	}

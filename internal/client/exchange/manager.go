@@ -9,17 +9,21 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/coder/websocket"
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
 	"github.com/fengqi-dev/kube-loop/internal/client/reverserelay"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficstream"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
 	"github.com/google/uuid"
 )
 
 type Client interface {
 	CreateExchange(context.Context, profile.Profile, remote.Session, remote.ExchangeSpec, string) (remote.ExchangeTask, error)
-	OpenExchangeStream(context.Context, profile.Profile, remote.Session, remote.ExchangeTask) (*websocket.Conn, error)
 	StopExchange(context.Context, profile.Profile, remote.Session, string) (remote.ExchangeTask, error)
+}
+
+type TrafficStreamOpener interface {
+	OpenTrafficStream(context.Context, string, string, string) (*trafficstream.FrameConn, error)
 }
 
 type LocalTarget = reverserelay.Target
@@ -44,7 +48,8 @@ type Info struct {
 type DialContextFunc = reverserelay.DialContextFunc
 
 type Config struct {
-	DialContext DialContextFunc
+	DialContext    DialContextFunc
+	TrafficStreams TrafficStreamOpener
 }
 
 type activeExchange struct {
@@ -58,22 +63,26 @@ type activeExchange struct {
 }
 
 type Manager struct {
-	client Client
-	dial   DialContextFunc
+	client  Client
+	streams TrafficStreamOpener
+	dial    DialContextFunc
 
 	mu     sync.Mutex
 	active map[string]*activeExchange
 }
 
 func NewManager(client Client, config Config) (*Manager, error) {
-	if client == nil {
-		return nil, errors.New("Exchange client is required")
+	if client == nil || config.TrafficStreams == nil {
+		return nil, errors.New("Exchange control client and Data Plane stream opener are required")
 	}
 	if config.DialContext == nil {
 		dialer := &net.Dialer{}
 		config.DialContext = dialer.DialContext
 	}
-	return &Manager{client: client, dial: config.DialContext, active: make(map[string]*activeExchange)}, nil
+	return &Manager{
+		client: client, streams: config.TrafficStreams, dial: config.DialContext,
+		active: make(map[string]*activeExchange),
+	}, nil
 }
 
 func (manager *Manager) Start(
@@ -99,14 +108,17 @@ func (manager *Manager) Start(
 		_, stopErr := manager.client.StopExchange(ctx, serverProfile, session, task.ID)
 		return Info{}, errors.Join(err, stopErr)
 	}
-	connection, err := manager.client.OpenExchangeStream(ctx, serverProfile, session, task)
-	if err != nil {
+	connection, err := manager.streams.OpenTrafficStream(ctx, serverProfile.ID, tunnel.TrafficModeExchange, task.ID)
+	if err != nil || connection == nil {
+		if err == nil {
+			err = errors.New("Data Plane returned an empty Exchange stream")
+		}
 		_, stopErr := manager.client.StopExchange(ctx, serverProfile, session, task.ID)
 		return Info{}, errors.Join(err, stopErr)
 	}
 	relay := reverserelay.New(connection, targets, manager.dial)
 	if err := relay.ReadReady(ctx); err != nil {
-		_ = connection.Close(websocket.StatusProtocolError, "invalid Exchange readiness")
+		_ = connection.Close()
 		_, stopErr := manager.client.StopExchange(ctx, serverProfile, session, task.ID)
 		return Info{}, errors.Join(err, stopErr)
 	}
@@ -122,7 +134,7 @@ func (manager *Manager) Start(
 	if _, exists := manager.active[task.ID]; exists {
 		manager.mu.Unlock()
 		cancel()
-		_ = connection.Close(websocket.StatusNormalClosure, "duplicate local Exchange")
+		_ = connection.Close()
 		_, stopErr := manager.client.StopExchange(ctx, serverProfile, session, task.ID)
 		return Info{}, errors.Join(errors.New("Exchange Task is already active locally"), stopErr)
 	}

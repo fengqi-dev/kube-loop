@@ -570,9 +570,9 @@ func developmentHost(contextName string) (string, error) {
 		if address == "" {
 			return "", fmt.Errorf("Minikube profile %q returned an empty IP", profile)
 		}
-		return "kubeloop." + address + ".sslip.io", nil
+		return "kubeloop-dev." + address + ".sslip.io", nil
 	}
-	return "kubeloop.local", nil
+	return "kubeloop-dev.local", nil
 }
 
 func writeEmbeddedDevelopmentCA(root, source string) error {

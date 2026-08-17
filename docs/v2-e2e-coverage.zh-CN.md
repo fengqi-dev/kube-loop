@@ -28,7 +28,7 @@
 | 场景 | 证据 | 预期结果 |
 | --- | --- | --- |
 | 正常停止 | Data Plane、Port Forward、Exchange、Mirror、Preview、Pod SSH、文件 Task | listener、Helper、DNS、Kubernetes 资源和 rollback snapshot 全部释放；Task 进入 `stopped`。 |
-| 客户端崩溃 | Data Plane core `Done/Err` 注入；Exchange/Mirror/Preview `CloseNow`；Pod exec 异常 WebSocket 关闭 | 异常 Task 进入 `failed` 或取消终态，但资源必须恢复且 snapshot 清零；本地 SOCKS/TUN/DNS 必须清理。 |
+| 客户端崩溃 | Data Plane core `Done/Err` 注入；Exchange/Mirror/Preview Tunnel logical stream 关闭；Pod exec 异常 WebSocket 关闭 | 异常 Task 进入 `failed` 或取消终态，但资源必须恢复且 snapshot 清零；本地 SOCKS/TUN/DNS 必须清理。 |
 | Gateway 崩溃 | 删除真实 Gateway Pod | 活跃流在 drain 窗口结束；稳定 SOCKS/TUN/Port Forward 地址不变；Session generation 和 RelayTicket 刷新后恢复。 |
 | Control Plane 崩溃/重启 | Pod exec、文件传输、Exchange/Mirror/Preview stale owner | 活跃工作终止或保留恢复意图；接替 Control Plane 可继续执行或补偿 Kubernetes 资源。 |
 | OAuth grant 撤销 | Exchange、Mirror、Preview、Pod exec、文件传输 | 无需客户端 DELETE，授权 lease 主动终止；所有资源与流被清理。 |

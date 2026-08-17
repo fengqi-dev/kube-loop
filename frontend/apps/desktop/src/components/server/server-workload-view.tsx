@@ -271,7 +271,7 @@ export function ServerWorkloadView({ profileId }: { profileId: string }) {
               <TableHead>Target</TableHead>
               <TableHead>Address / Target</TableHead>
               <TableHead>State</TableHead>
-              <TableHead />
+              <TableHead className="text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>

@@ -48,11 +48,17 @@ func TestSessionSpecValidate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DNS() error = %v", err)
 	}
-	if dns.Port != 53 || len(dns.Search) == 0 {
+	if dns.Port != 53 {
 		t.Fatalf("unexpected DNS metadata: %#v", dns)
 	}
-	if !slices.Contains(dns.Search, "payments.svc.cluster.local") {
-		t.Fatalf("DNS search domains do not include all namespaces: %#v", dns.Search)
+	if dns.Ndots != 1 {
+		t.Fatalf("DNS ndots = %d, want 1", dns.Ndots)
+	}
+	wantSearch := []string{
+		"default.svc.cluster.local", "svc.cluster.local", "cluster.local",
+	}
+	if !slices.Equal(dns.Search, wantSearch) {
+		t.Fatalf("DNS search domains = %#v, want %#v", dns.Search, wantSearch)
 	}
 }
 

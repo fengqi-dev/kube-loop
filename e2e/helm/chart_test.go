@@ -80,9 +80,12 @@ func TestSQLiteChartRendersIndependentSecureWorkloads(t *testing.T) {
 		len(valueAt(t, controlPlaneDocument, "files", "allowedRoots").([]any)) != 1 {
 		t.Fatalf("ControlPlane file limits = %#v", valueAt(t, controlPlaneDocument, "files"))
 	}
-	if valueAt(t, controlPlaneDocument, "admin", "listen") != ":8081" ||
-		valueAt(t, controlPlaneDocument, "admin", "publicURL") != "http://kubeloop.example.test" {
-		t.Fatalf("Admin listener = %#v", valueAt(t, controlPlaneDocument, "admin"))
+	adminDocument := valueAt(t, controlPlaneDocument, "admin").(map[string]any)
+	if _, configured := adminDocument["listen"]; configured {
+		t.Fatalf("Admin still configures an independent listener: %#v", adminDocument)
+	}
+	if _, configured := adminDocument["publicURL"]; configured {
+		t.Fatalf("Admin still configures a duplicate public URL: %#v", adminDocument)
 	}
 	ingress := objectByName(t, objects, "Ingress", "test-kubeloop")
 	if _, configured := ingress["spec"].(map[string]any)["tls"]; configured {
@@ -157,23 +160,31 @@ func TestSQLiteChartRendersIndependentSecureWorkloads(t *testing.T) {
 	ingress = objectByName(t, objects, "Ingress", "test-kubeloop")
 	ingressYAML, _ := yaml.Marshal(ingress)
 	for _, want := range []string{
-		"host: kubeloop.example.test", "path: /.well-known", "path: /oauth2",
-		"path: /kubeloop/api", "path: /api/sessions", "path: /tunnel", "path: /traffic/v1", "pathType: Prefix",
+		"host: kubeloop.example.test", "path: /", "path: /tunnel", "pathType: Prefix",
 	} {
 		if !strings.Contains(string(ingressYAML), want) {
 			t.Fatalf("same-origin Ingress is missing %q: %s", want, ingressYAML)
 		}
 	}
+	ingressRules, ok := valueAt(t, ingress, "spec", "rules").([]any)
+	if !ok || len(ingressRules) != 1 {
+		t.Fatalf("Ingress rules = %#v", valueAt(t, ingress, "spec", "rules"))
+	}
+	ingressPaths, ok := valueAt(t, ingressRules[0], "http", "paths").([]any)
+	if !ok || len(ingressPaths) != 2 {
+		t.Fatalf("Ingress paths = %#v, want 2 backend paths", valueAt(t, ingressRules[0], "http", "paths"))
+	}
+	if strings.Contains(string(ingressYAML), "/traffic/v1") {
+		t.Fatalf("Ingress still exposes the removed traffic WebSocket endpoint: %s", ingressYAML)
+	}
 	controlPlaneService := objectByName(t, objects, "Service", "test-kubeloop-control-plane")
-	managementService := objectByName(t, objects, "Service", "test-kubeloop-control-plane-management")
 	dataPlaneService := objectByName(t, objects, "Service", "test-kubeloop-gateway")
 	if serviceAppProtocol(t, controlPlaneService) != "http" || serviceAppProtocol(t, dataPlaneService) != "kubernetes.io/ws" {
 		t.Fatalf("backend appProtocols = controlPlane %q, data plane %q", serviceAppProtocol(t, controlPlaneService), serviceAppProtocol(t, dataPlaneService))
 	}
-	if valueAt(t, managementService, "spec", "type") != "ClusterIP" {
-		t.Fatal("Management Plane Service must remain ClusterIP-only")
+	if len(objectsByComponent(t, objects, "Service", "control-plane-management")) != 0 {
+		t.Fatal("Management Plane still has a separate Service")
 	}
-	assertServicePort(t, managementService, "management", 8081, "management")
 	if len(objectsByComponent(t, objects, "Service", "control-plane-relay-registry")) != 1 {
 		t.Fatal("expected one internal Relay Registry Service")
 	}
@@ -218,13 +229,20 @@ func TestGatewayAPIHTTPRouteUsesOneTLSOriginAndUnboundedWebSocketTimeout(t *test
 	for _, want := range []string{
 		"apiVersion: gateway.networking.k8s.io/v1", "name: shared-gateway",
 		"namespace: networking", "sectionName: https", "kubeloop.example.test",
-		"value: /.well-known", "value: /oauth2", "value: /kubeloop/api", "value: /api/sessions", "value: /tunnel", "value: /traffic/v1",
+		"value: /", "value: /tunnel",
 		"name: test-kubeloop-control-plane", "name: test-kubeloop-gateway",
 		"request: 30s", "backendRequest: 30s", "request: 0s", "backendRequest: 0s",
 	} {
 		if !strings.Contains(string(routeYAML), want) {
 			t.Fatalf("HTTPRoute is missing %q: %s", want, routeYAML)
 		}
+	}
+	rules, ok := valueAt(t, route, "spec", "rules").([]any)
+	if !ok || len(rules) != 2 {
+		t.Fatalf("HTTPRoute rules = %#v, want 2 backend groups", valueAt(t, route, "spec", "rules"))
+	}
+	if strings.Contains(string(routeYAML), "/traffic/v1") {
+		t.Fatalf("HTTPRoute still exposes the removed traffic WebSocket endpoint: %s", routeYAML)
 	}
 }
 
@@ -410,15 +428,26 @@ func TestAuthorizationIsDatabaseManaged(t *testing.T) {
 }
 
 func TestDevelopmentPresetDoesNotEnableAuthorizationBypass(t *testing.T) {
-	objects := renderChart(t,
-		"--set", "publicURL=https://kubeloop.192.168.64.70.sslip.io",
-		"--set", "controlPlane.development.enabled=true",
-	)
-	config := controlPlaneConfigRaw(t, objects)
-	for _, forbidden := range []string{"development-authenticated-full-access", "development-policy", `"initialAdmin"`} {
-		if strings.Contains(config, forbidden) {
-			t.Fatalf("development mode leaked removed authorization preset %q: %s", forbidden, config)
-		}
+	tests := []struct {
+		name      string
+		publicURL string
+	}{
+		{name: "Minikube sslip", publicURL: "https://kubeloop-dev.192.168.64.70.sslip.io"},
+		{name: "local cluster", publicURL: "https://kubeloop-dev.local"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			objects := renderChart(t,
+				"--set", "publicURL="+test.publicURL,
+				"--set", "controlPlane.development.enabled=true",
+			)
+			config := controlPlaneConfigRaw(t, objects)
+			for _, forbidden := range []string{"development-authenticated-full-access", "development-policy", `"initialAdmin"`} {
+				if strings.Contains(config, forbidden) {
+					t.Fatalf("development mode leaked removed authorization preset %q: %s", forbidden, config)
+				}
+			}
+		})
 	}
 }
 
@@ -770,7 +799,7 @@ func TestChartRejectsUnsafeStorageConfigurations(t *testing.T) {
 		want string
 	}{
 		{name: "missing public URL", want: "publicURL is required"},
-		{name: "development on external origin", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.development.enabled=true"}, want: "requires a local"},
+		{name: "development on external origin", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.development.enabled=true"}, want: "requires localhost"},
 		{name: "public URL path", args: []string{"--set", "publicURL=https://kubeloop.example.test/base"}, want: "must be one HTTP or HTTPS origin"},
 		{name: "two external routes", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "ingress.enabled=true", "--set", "ingress.host=kubeloop.example.test", "--set", "gatewayAPI.enabled=true", "--set", "gatewayAPI.host=kubeloop.example.test"}, want: "mutually exclusive"},
 		{name: "Ingress origin mismatch", args: []string{"--set", "publicURL=https://other.example.test", "--set", "ingress.enabled=true", "--set", "ingress.host=kubeloop.example.test"}, want: "exactly equal"},

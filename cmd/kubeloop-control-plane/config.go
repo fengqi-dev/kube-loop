@@ -57,8 +57,6 @@ type oauthConfig struct {
 }
 
 type adminConfig struct {
-	Listen    string               `json:"listen"`
-	PublicURL string               `json:"publicURL"`
 	Bootstrap adminBootstrapConfig `json:"bootstrap"`
 }
 
@@ -259,12 +257,6 @@ func applyControlPlaneDefaults(document *controlPlaneConfigDocument) {
 	}
 	if document.API.MaxRequestBodyBytes == 0 {
 		document.API.MaxRequestBodyBytes = controlplane.DefaultMaxRequestBodyBytes
-	}
-	if document.Admin.Listen == "" {
-		document.Admin.Listen = ":8081"
-	}
-	if document.Admin.PublicURL == "" {
-		document.Admin.PublicURL = "http://127.0.0.1:8081"
 	}
 	if document.Admin.Bootstrap.Username == "" {
 		document.Admin.Bootstrap.Username = "admin"

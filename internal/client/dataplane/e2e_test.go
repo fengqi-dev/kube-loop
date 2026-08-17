@@ -123,7 +123,7 @@ func TestAuthenticatedWSSDataPlaneCarriesAuthorizedSOCKSTCPAndUDP(t *testing.T) 
 				ExpiresAt: time.Now().Add(time.Minute),
 			}, nil
 		}),
-		Handle: func(identity servermux.Identity, connection net.Conn) {
+		Handle: func(_ context.Context, identity servermux.Identity, connection net.Conn) {
 			gatewayServer.ServeConnForAuthorization(connection, gateway.SessionAuthorization{
 				RequestID: identity.RequestID, SessionID: identity.SessionID, Generation: identity.SessionGeneration,
 				Namespace:       identity.Namespace,

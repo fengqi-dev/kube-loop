@@ -26,35 +26,7 @@ spec:
     - host: {{ $host }}
       http:
         paths:
-          - path: /.well-known
-            pathType: Prefix
-            backend:
-              service:
-                name: {{ include "kubeloop.controlPlaneName" . }}
-                port:
-                  name: http
-          - path: /kubeloop/api
-            pathType: Prefix
-            backend:
-              service:
-                name: {{ include "kubeloop.controlPlaneName" . }}
-                port:
-                  name: http
-          - path: /api/sessions
-            pathType: Prefix
-            backend:
-              service:
-                name: {{ include "kubeloop.controlPlaneName" . }}
-                port:
-                  name: http
-          - path: /api/admin
-            pathType: Prefix
-            backend:
-              service:
-                name: {{ include "kubeloop.controlPlaneManagementName" . }}
-                port:
-                  name: management
-          - path: /oauth2
+          - path: /
             pathType: Prefix
             backend:
               service:
@@ -63,13 +35,6 @@ spec:
                   name: http
           - path: {{ .Values.dataPlane.tunnelPath }}
             pathType: Exact
-            backend:
-              service:
-                name: {{ include "kubeloop.dataPlaneName" . }}
-                port:
-                  name: http
-          - path: /traffic/v1
-            pathType: Prefix
             backend:
               service:
                 name: {{ include "kubeloop.dataPlaneName" . }}

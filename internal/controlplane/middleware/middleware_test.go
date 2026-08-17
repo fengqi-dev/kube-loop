@@ -57,7 +57,7 @@ func TestWebSocketUpgradeDetectionIsStrict(t *testing.T) {
 func TestAuthenticatedVersionDiscoveryIsAllowed(t *testing.T) {
 	authorizer := &recordingAuthorizer{}
 	middleware := New(Config{
-		APIPathPrefix:      "/kubeloop/api",
+		APIPathPrefix:      "/api",
 		RequestTimeout:     time.Second,
 		MaxRequestBodySize: 1 << 20,
 		Authenticator: controlplaneapi.AuthenticatorFunc(func(*http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
@@ -65,7 +65,7 @@ func TestAuthenticatedVersionDiscoveryIsAllowed(t *testing.T) {
 		}),
 		Authorizer: authorizer,
 	})
-	request := httptest.NewRequest(http.MethodGet, "/kubeloop/api/version", nil)
+	request := httptest.NewRequest(http.MethodGet, "/api/version", nil)
 	response := httptest.NewRecorder()
 	ctx := echo.New().NewContext(request, response)
 	err := middleware(func(ctx *echo.Context) error { return ctx.NoContent(http.StatusNoContent) })(ctx)

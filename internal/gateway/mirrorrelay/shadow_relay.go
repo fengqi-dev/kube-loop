@@ -10,10 +10,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/coder/websocket"
 	"github.com/fengqi-dev/kube-loop/internal/gateway/trafficlistener"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/mirrorstream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficmodel"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficstream"
 )
 
 var errClientStopped = errors.New("Mirror stopped by client")
@@ -36,7 +36,7 @@ type udpPrimaryAssociation struct {
 // Shadow frames are offered to a bounded queue and are never awaited by a
 // primary socket read/write loop.
 type mirrorRelay struct {
-	connection *websocket.Conn
+	connection *trafficstream.FrameConn
 	listeners  *trafficlistener.Listeners
 	primaries  *primaryPool
 	config     Config
@@ -55,7 +55,7 @@ type mirrorRelay struct {
 }
 
 func newMirrorRelay(
-	connection *websocket.Conn,
+	connection *trafficstream.FrameConn,
 	listeners *trafficlistener.Listeners,
 	primaries *primaryPool,
 	config Config,
@@ -320,12 +320,9 @@ func (relay *mirrorRelay) reapUDP(ctx context.Context) error {
 
 func (relay *mirrorRelay) readClient(ctx context.Context) error {
 	for {
-		messageType, encoded, err := relay.connection.Read(ctx)
+		encoded, err := relay.connection.ReadFrame(ctx)
 		if err != nil {
 			return err
-		}
-		if messageType != websocket.MessageBinary {
-			return errors.New("Mirror stream requires binary frames")
 		}
 		frame, err := mirrorstream.Decode(encoded)
 		if err != nil {
@@ -390,7 +387,7 @@ func (relay *mirrorRelay) writeFrame(ctx context.Context, frame mirrorstream.Fra
 	if err != nil {
 		return err
 	}
-	return relay.connection.Write(ctx, websocket.MessageBinary, encoded)
+	return relay.connection.WriteFrame(ctx, encoded)
 }
 
 func (relay *mirrorRelay) clearDropped(id uint64) {

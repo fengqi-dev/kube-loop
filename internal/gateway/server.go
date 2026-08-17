@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net"
 	"net/netip"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -16,11 +17,15 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/dnsname"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/streamcopy"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficcontrol"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
 )
 
 type SessionAuthorization struct {
 	RequestID       string
+	IdentityID      string
+	Groups          []string
+	DeviceID        string
 	SessionID       string
 	Generation      uint64
 	Namespace       string
@@ -43,8 +48,13 @@ type Server struct {
 	tenants       map[tunnel.SessionToken]int
 	networks      map[tunnel.SessionToken]tenantNetwork
 	connections   map[net.Conn]struct{}
+	traffic       TrafficHandler
 	draining      bool
 	connectionsWG sync.WaitGroup
+}
+
+type TrafficHandler interface {
+	ServeTraffic(context.Context, net.Conn, trafficcontrol.Identity, tunnel.TrafficOpenRequest)
 }
 
 type ContextDialer interface {
@@ -68,6 +78,20 @@ func NewServer(logger *slog.Logger, dialTimeout time.Duration) *Server {
 // an authenticated WebSocket. The protocol key and registered NetworkSpec must
 // match the immutable Cluster Session claims in its RelayTicket.
 func (s *Server) ServeConnForAuthorization(connection net.Conn, authorization SessionAuthorization) {
+	s.ServeConnForAuthorizationContext(context.Background(), connection, authorization)
+}
+
+// ServeConnForAuthorizationContext is ServeConnForAuthorization with the
+// authenticated outer WebSocket request context propagated to the logical
+// stream lifecycle.
+func (s *Server) ServeConnForAuthorizationContext(
+	ctx context.Context,
+	connection net.Conn,
+	authorization SessionAuthorization,
+) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	token, err := tunnel.RelaySessionToken(authorization.SessionID, authorization.Generation)
 	if err != nil {
 		s.log(slog.LevelWarn, authorization.RequestID, "Gateway logical connection rejected", "reason", "invalid_session")
@@ -87,8 +111,12 @@ func (s *Server) ServeConnForAuthorization(connection net.Conn, authorization Se
 	required := requiredAuthorization{
 		requestID: authorization.RequestID, token: token,
 		namespace: authorization.Namespace, networkSpecHash: authorization.NetworkSpecHash,
+		identity: trafficcontrol.Identity{
+			IdentityID: authorization.IdentityID, Groups: slices.Clone(authorization.Groups), DeviceID: authorization.DeviceID,
+			SessionID: authorization.SessionID, SessionGeneration: authorization.Generation, Namespace: authorization.Namespace,
+		},
 	}
-	s.serveConn(connection, required)
+	s.serveConn(ctx, connection, required)
 }
 
 type requiredAuthorization struct {
@@ -96,16 +124,23 @@ type requiredAuthorization struct {
 	token           tunnel.SessionToken
 	namespace       string
 	networkSpecHash string
+	identity        trafficcontrol.Identity
 }
 
-func (s *Server) serveConn(connection net.Conn, required requiredAuthorization) {
+func (s *Server) serveConn(ctx context.Context, connection net.Conn, required requiredAuthorization) {
 	if !s.trackConnection(connection) {
 		s.log(slog.LevelWarn, required.requestID, "Gateway logical connection rejected", "reason", "draining")
 		_ = connection.Close()
 		return
 	}
 	defer s.untrackConnection(connection)
-	s.handle(connection, required)
+	s.handle(ctx, connection, required)
+}
+
+func (s *Server) SetTrafficHandler(handler TrafficHandler) {
+	s.mu.Lock()
+	s.traffic = handler
+	s.mu.Unlock()
 }
 
 func (s *Server) trackConnection(connection net.Conn) bool {
@@ -181,7 +216,7 @@ func (s *Server) closeActiveConnections() {
 	}
 }
 
-func (s *Server) handle(client net.Conn, required requiredAuthorization) {
+func (s *Server) handle(ctx context.Context, client net.Conn, required requiredAuthorization) {
 	_ = client.SetReadDeadline(time.Now().Add(15 * time.Second))
 	header, err := tunnel.ReadSessionHeader(client)
 	if err != nil {
@@ -201,7 +236,7 @@ func (s *Server) handle(client net.Conn, required requiredAuthorization) {
 
 	switch header.Command {
 	case tunnel.CommandTCP, tunnel.CommandUDP:
-		s.handleOutbound(client, header, &required)
+		s.handleOutbound(ctx, client, header, &required)
 	case tunnel.CommandControl:
 		spec, readErr := tunnel.ReadAuthorizedControlSpec(client)
 		if readErr != nil {
@@ -218,6 +253,41 @@ func (s *Server) handle(client net.Conn, required requiredAuthorization) {
 			return
 		}
 		s.handleControl(client, header.Token, spec, hash, required.namespace)
+	case tunnel.CommandTraffic:
+		request, readErr := tunnel.ReadTrafficOpenBody(client)
+		if readErr != nil {
+			s.log(slog.LevelWarn, required.requestID, "Gateway traffic stream rejected", "reason", "invalid_request", "error", readErr)
+			_ = tunnel.WriteStatus(client, errors.New("traffic request is invalid"))
+			_ = client.Close()
+			return
+		}
+		_, authorized, authorizationErr := s.authorizedNetwork(header.Token, &required)
+		if authorizationErr != nil || !authorized {
+			if authorizationErr == nil {
+				authorizationErr = errors.New("Gateway NetworkSpec authorization is not active")
+			}
+			s.log(slog.LevelWarn, required.requestID, "Gateway traffic stream rejected", "reason", "authorization", "error", authorizationErr)
+			_ = tunnel.WriteStatus(client, authorizationErr)
+			_ = client.Close()
+			return
+		}
+		identity := required.identity
+		identity.Groups = slices.Clone(required.identity.Groups)
+		if identity.Validate() != nil {
+			s.log(slog.LevelWarn, required.requestID, "Gateway traffic stream rejected", "reason", "invalid_identity")
+			_ = tunnel.WriteStatus(client, errors.New("traffic identity is invalid"))
+			_ = client.Close()
+			return
+		}
+		s.mu.Lock()
+		traffic := s.traffic
+		s.mu.Unlock()
+		if traffic == nil {
+			_ = tunnel.WriteStatus(client, errors.New("Gateway traffic handler is unavailable"))
+			_ = client.Close()
+			return
+		}
+		traffic.ServeTraffic(ctx, client, identity, request)
 	default:
 		s.log(slog.LevelWarn, required.requestID, "Gateway tunnel command rejected", "command", header.Command)
 		_ = tunnel.WriteStatus(client, fmt.Errorf("unsupported command %d", header.Command))
@@ -225,7 +295,12 @@ func (s *Server) handle(client net.Conn, required requiredAuthorization) {
 	}
 }
 
-func (s *Server) handleOutbound(client net.Conn, header tunnel.SessionHeader, required *requiredAuthorization) {
+func (s *Server) handleOutbound(
+	ctx context.Context,
+	client net.Conn,
+	header tunnel.SessionHeader,
+	required *requiredAuthorization,
+) {
 	defer client.Close()
 	spec, authorized, authorizationErr := s.authorizedNetwork(header.Token, required)
 	if authorizationErr != nil {
@@ -239,7 +314,7 @@ func (s *Server) handleOutbound(client net.Conn, header tunnel.SessionHeader, re
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), s.DialTimeout)
+	ctx, cancel := context.WithTimeout(ctx, s.DialTimeout)
 	defer cancel()
 	var targetAddress string
 	if authorized {

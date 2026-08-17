@@ -28,7 +28,6 @@ controlPlane:
       accessTTL: 7m
       refreshTTL: 48h
   admin:
-    publicURL: https://kubeloop.example.com
     bootstrap:
       enabled: true
       username: root-admin
@@ -91,13 +90,34 @@ gateway: {}
 }
 
 func TestLoadControlPlaneConfigRejectsUnknownFields(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "kubeloop.yaml")
-	if err := os.WriteFile(path, []byte("controlPlane:\n  api:\n    publicURL: https://example.com\n    typo: true\ngateway: {}\n"), 0o600); err != nil {
-		t.Fatal(err)
+	tests := map[string]struct {
+		raw   string
+		field string
+	}{
+		"api field": {
+			raw:   "controlPlane:\n  api:\n    publicURL: https://example.com\n    typo: true\ngateway: {}\n",
+			field: "typo",
+		},
+		"separate admin listener": {
+			raw:   "controlPlane:\n  admin:\n    listen: :8081\ngateway: {}\n",
+			field: "listen",
+		},
+		"separate admin public URL": {
+			raw:   "controlPlane:\n  admin:\n    publicURL: https://admin.example.com\ngateway: {}\n",
+			field: "publicURL",
+		},
 	}
-	_, err := loadControlPlaneConfig(path)
-	if err == nil || !strings.Contains(err.Error(), "typo") {
-		t.Fatalf("error=%v", err)
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "kubeloop.yaml")
+			if err := os.WriteFile(path, []byte(test.raw), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			_, err := loadControlPlaneConfig(path)
+			if err == nil || !strings.Contains(err.Error(), test.field) {
+				t.Fatalf("error=%v", err)
+			}
+		})
 	}
 }
 

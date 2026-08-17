@@ -10,16 +10,20 @@ import (
 	"sync"
 	"time"
 
-	"github.com/coder/websocket"
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficstream"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
 	"github.com/google/uuid"
 )
 
 type Client interface {
 	CreateMirror(context.Context, profile.Profile, remote.Session, remote.MirrorSpec, string) (remote.MirrorTask, error)
-	OpenMirrorStream(context.Context, profile.Profile, remote.Session, remote.MirrorTask) (*websocket.Conn, error)
 	StopMirror(context.Context, profile.Profile, remote.Session, string) (remote.MirrorTask, error)
+}
+
+type TrafficStreamOpener interface {
+	OpenTrafficStream(context.Context, string, string, string) (*trafficstream.FrameConn, error)
 }
 
 type LocalTarget struct {
@@ -54,6 +58,7 @@ type Config struct {
 	ShadowDialTimeout  time.Duration
 	ShadowWriteTimeout time.Duration
 	ShadowIdleTimeout  time.Duration
+	TrafficStreams     TrafficStreamOpener
 }
 
 const (
@@ -74,18 +79,21 @@ type activeMirror struct {
 }
 
 type Manager struct {
-	client Client
-	dial   DialContextFunc
-	config Config
+	client  Client
+	streams TrafficStreamOpener
+	dial    DialContextFunc
+	config  Config
 
 	mu     sync.Mutex
 	active map[string]*activeMirror
 }
 
 func NewManager(client Client, config Config) (*Manager, error) {
-	if client == nil {
-		return nil, errors.New("Mirror client is required")
+	if client == nil || config.TrafficStreams == nil {
+		return nil, errors.New("Mirror control client and Data Plane stream opener are required")
 	}
+	streams := config.TrafficStreams
+	config.TrafficStreams = nil
 	if config.DialContext == nil {
 		dialer := &net.Dialer{}
 		config.DialContext = dialer.DialContext
@@ -109,7 +117,8 @@ func NewManager(client Client, config Config) (*Manager, error) {
 		return nil, errors.New("Mirror shadow queue or timeout configuration is invalid")
 	}
 	return &Manager{
-		client: client, dial: config.DialContext, config: config, active: make(map[string]*activeMirror),
+		client: client, streams: streams, dial: config.DialContext,
+		config: config, active: make(map[string]*activeMirror),
 	}, nil
 }
 
@@ -136,14 +145,17 @@ func (manager *Manager) Start(
 		_, stopErr := manager.client.StopMirror(ctx, serverProfile, session, task.ID)
 		return Info{}, errors.Join(err, stopErr)
 	}
-	connection, err := manager.client.OpenMirrorStream(ctx, serverProfile, session, task)
-	if err != nil {
+	connection, err := manager.streams.OpenTrafficStream(ctx, serverProfile.ID, tunnel.TrafficModeMirror, task.ID)
+	if err != nil || connection == nil {
+		if err == nil {
+			err = errors.New("Data Plane returned an empty Mirror stream")
+		}
 		_, stopErr := manager.client.StopMirror(ctx, serverProfile, session, task.ID)
 		return Info{}, errors.Join(err, stopErr)
 	}
 	relay := newLocalRelay(connection, targets, manager.dial, manager.config)
 	if err := relay.readReady(ctx); err != nil {
-		_ = connection.Close(websocket.StatusProtocolError, "invalid Mirror readiness")
+		_ = connection.Close()
 		_, stopErr := manager.client.StopMirror(ctx, serverProfile, session, task.ID)
 		return Info{}, errors.Join(err, stopErr)
 	}
@@ -159,7 +171,7 @@ func (manager *Manager) Start(
 	if _, exists := manager.active[task.ID]; exists {
 		manager.mu.Unlock()
 		cancel()
-		_ = connection.Close(websocket.StatusNormalClosure, "duplicate local Mirror")
+		_ = connection.Close()
 		_, stopErr := manager.client.StopMirror(ctx, serverProfile, session, task.ID)
 		return Info{}, errors.Join(errors.New("Mirror Task is already active locally"), stopErr)
 	}

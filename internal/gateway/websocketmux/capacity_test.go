@@ -49,7 +49,7 @@ func TestCapacityLimitsSessionsAndStreamsWithoutBlockingHealth(t *testing.T) {
 			return identity, nil
 		}),
 		MaxSessions: 2, MaxSessionsPerUser: 1, MaxStreamsPerSession: 2,
-		Handle: func(_ Identity, connection net.Conn) {
+		Handle: func(_ context.Context, _ Identity, connection net.Conn) {
 			active := activeStreams.Add(1)
 			for {
 				current := maximumStreams.Load()
@@ -184,7 +184,7 @@ func BenchmarkGatewayLogicalStreamRoundTrip(b *testing.B) {
 	handler, err := NewHandler(ServerConfig{
 		Authenticator: AuthenticatorFunc(func(*http.Request) (Identity, error) { return identity, nil }),
 		MaxSessions:   4, MaxSessionsPerUser: 4, MaxStreamsPerSession: 128,
-		Handle: func(_ Identity, connection net.Conn) {
+		Handle: func(_ context.Context, _ Identity, connection net.Conn) {
 			defer connection.Close()
 			_, _ = io.Copy(connection, connection)
 		},

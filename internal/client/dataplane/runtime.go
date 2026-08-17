@@ -17,6 +17,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/client/socksbridge"
 	"github.com/fengqi-dev/kube-loop/internal/client/websocketmux"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficstream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
 	"github.com/fengqi-dev/kube-loop/internal/singbox"
 )
@@ -46,6 +47,7 @@ type Config struct {
 
 type streamForwarder interface {
 	Address() string
+	OpenStream(context.Context) (net.Conn, error)
 	Close() error
 }
 
@@ -73,6 +75,7 @@ type Runtime struct {
 	cancel       context.CancelFunc
 	forwarder    streamForwarder
 	control      net.Conn
+	token        tunnel.SessionToken
 	bridge       localBridge
 	status       Status
 	session      remote.Session
@@ -151,6 +154,7 @@ func Start(
 	}
 	runtime := &Runtime{
 		ctx: runtimeCtx, cancel: cancel, forwarder: transport.forwarder, control: transport.control,
+		token:  transport.token,
 		bridge: bridge, done: make(chan struct{}), transportDone: make(chan struct{}),
 		session: session, tunStarter: config.TUNStarter, config: config,
 		dnsNamespace: strings.TrimSpace(serverProfile.DNSNamespace),
@@ -166,6 +170,97 @@ func Start(
 	go runtime.watchControl(transport.control)
 	go runtime.watchContext(runtimeCtx)
 	return runtime, nil
+}
+
+// OpenTrafficStream opens one reverse-traffic Task as a logical stream on the
+// Runtime's current /tunnel WebSocket pool.
+func (runtime *Runtime) OpenTrafficStream(
+	ctx context.Context,
+	mode string,
+	taskID string,
+) (*trafficstream.FrameConn, error) {
+	if ctx == nil {
+		return nil, errors.New("Traffic stream context is required")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	runtime.transportMu.Lock()
+	if runtime.ctx.Err() != nil || runtime.forwarder == nil || runtime.token == (tunnel.SessionToken{}) ||
+		signalClosed(runtime.transportDone) {
+		runtime.transportMu.Unlock()
+		return nil, errors.New("Data Plane transport is not connected")
+	}
+	forwarder := runtime.forwarder
+	token := runtime.token
+	transportDone := runtime.transportDone
+	runtime.transportMu.Unlock()
+
+	connection, err := forwarder.OpenStream(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("open Data Plane logical stream: %w", err)
+	}
+	closeOnError := true
+	defer func() {
+		if closeOnError {
+			_ = connection.Close()
+		}
+	}()
+	clearDeadline, err := bindConnectionContext(ctx, connection)
+	if err != nil {
+		return nil, err
+	}
+	defer clearDeadline()
+	if err := tunnel.WriteTrafficOpen(connection, tunnel.TrafficOpenRequest{Mode: mode, TaskID: taskID}, token); err != nil {
+		return nil, fmt.Errorf("open Traffic Task stream: %w", contextConnectionError(ctx, err))
+	}
+	if err := tunnel.ReadStatus(connection); err != nil {
+		return nil, fmt.Errorf("start Traffic Task stream: %w", contextConnectionError(ctx, err))
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	runtime.transportMu.Lock()
+	current := runtime.ctx.Err() == nil && runtime.forwarder == forwarder && runtime.token == token &&
+		runtime.transportDone == transportDone && !signalClosed(transportDone)
+	runtime.transportMu.Unlock()
+	if !current {
+		return nil, errors.New("Data Plane transport changed while opening Traffic Task stream")
+	}
+	framed, err := trafficstream.Dial(ctx, connection)
+	if err != nil {
+		return nil, fmt.Errorf("upgrade Traffic Task stream to WebSocket: %w", err)
+	}
+	closeOnError = false
+	return framed, nil
+}
+
+func bindConnectionContext(ctx context.Context, connection net.Conn) (func(), error) {
+	deadline := time.Time{}
+	if value, ok := ctx.Deadline(); ok {
+		deadline = value
+	}
+	if err := connection.SetDeadline(deadline); err != nil {
+		return nil, fmt.Errorf("set Traffic stream startup deadline: %w", err)
+	}
+	finished := make(chan struct{})
+	stop := context.AfterFunc(ctx, func() {
+		_ = connection.SetDeadline(time.Now())
+		close(finished)
+	})
+	return func() {
+		if !stop() {
+			<-finished
+		}
+		_ = connection.SetDeadline(time.Time{})
+	}, nil
+}
+
+func contextConnectionError(ctx context.Context, err error) error {
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return ctxErr
+	}
+	return err
 }
 
 func isAddressAlreadyInUse(err error) bool {
@@ -591,6 +686,7 @@ func (runtime *Runtime) Close() error {
 		forwarder := runtime.forwarder
 		runtime.control = nil
 		runtime.forwarder = nil
+		runtime.token = tunnel.SessionToken{}
 		closeSignal(runtime.transportDone)
 		runtime.transportMu.Unlock()
 		result = errors.Join(
@@ -661,6 +757,7 @@ func (runtime *Runtime) Reconnect(
 	}
 	runtime.forwarder = transport.forwarder
 	runtime.control = transport.control
+	runtime.token = transport.token
 	runtime.transportDone = make(chan struct{})
 	runtime.transportErr = nil
 	runtime.bridge.SetGateway(transport.forwarder.Address(), transport.token)
@@ -771,6 +868,7 @@ func (runtime *Runtime) watchControl(control net.Conn) {
 	forwarder := runtime.forwarder
 	runtime.control = nil
 	runtime.forwarder = nil
+	runtime.token = tunnel.SessionToken{}
 	runtime.transportErr = err
 	runtime.bridge.SetGatewayAddress("127.0.0.1:0")
 	closeSignal(runtime.transportDone)
@@ -796,6 +894,7 @@ func (runtime *Runtime) interruptTransport(reason error) {
 	forwarder := runtime.forwarder
 	runtime.control = nil
 	runtime.forwarder = nil
+	runtime.token = tunnel.SessionToken{}
 	runtime.transportErr = reason
 	runtime.bridge.SetGatewayAddress("127.0.0.1:0")
 	closeSignal(runtime.transportDone)

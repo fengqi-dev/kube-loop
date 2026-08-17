@@ -29,41 +29,27 @@ The chart routes the same origin without rewriting paths:
 
 | Public path | Backend |
 | --- | --- |
-| `/.well-known/*` | Control Plane |
-| `/oauth2/*` | Control Plane OAuth 2.0 / OIDC Authorization Server |
-| `/kubeloop/api/*` | Control Plane public port |
-| `/api/sessions/*` | Control Plane Session API |
-| `/api/admin/*` | Isolated Management Service |
+| `/*` | Control Plane, including discovery, OAuth 2.0 / OIDC, `/api/*` and `/admin/*` |
 | `/tunnel` | Data Plane WebSocket endpoint |
 
 The Control Plane publishes that exact value as its OAuth2/OIDC issuer. Helm
 fails rendering when a chart-managed route uses another hostname or scheme, or
 when both Ingress and HTTPRoute are enabled.
 
-The browser Management Plane listens on a separate port. Chart-managed Ingress
-and Gateway API routes expose `/api/admin/*` on the same public origin while
-keeping the Service itself private. It automatically uses the top-level
-`publicURL`; there is no separate Management Plane public URL setting.
+The browser Management Plane is served by the Control Plane HTTP port under
+`/admin/*`. It uses the top-level `publicURL`; there is no separate listener,
+Service, public URL or Helm port setting.
 
 Without a chart-managed external route, open it through a local tunnel:
 
 ```shell
-kubectl -n kubeloop port-forward svc/kubeloop-control-plane-management 8081:8081
+kubectl -n kubeloop port-forward svc/kubeloop-control-plane 8080:8080
 ```
 
-Then visit `http://127.0.0.1:8081/api/admin/ui`. The management Service remains
-ClusterIP even if the public Service is a LoadBalancer. For same-origin access:
+Then visit `http://127.0.0.1:8080/admin/ui`.
 
-```yaml
-controlPlane:
-  admin:
-    listenPort: 8081
-    servicePort: 8081
-```
-
-For a Kubernetes Ingress, the chart routes `/api/admin` to the isolated
-Management Service on the same origin. Ingress TLS is disabled by default, so
-the default scheme is HTTP and no certificate Secret is required. Configure the timeout and
+Ingress TLS is disabled by default, so the default scheme is HTTP and no
+certificate Secret is required. Configure the timeout and
 request-size annotations required by the selected Ingress controller. For
 example, ingress-nginx can be configured as follows; `proxy-body-size` should
 not exceed the Control Plane's
@@ -334,7 +320,7 @@ events before enabling this mode.
 
 The repository's Minikube Helm lifecycle E2E enables API Server metadata auditing,
 grants a temporary exact-user/exact-group impersonation role outside this
-chart, calls `GET /kubeloop/api/version`, and asserts that the audit event contains
+chart, calls `GET /api/version`, and asserts that the audit event contains
 both the Control Plane ServiceAccount and the final prefixed Identity identity.
 It also proves that an unmapped identity group is not forwarded.
 
@@ -350,13 +336,13 @@ controlPlane:
 
 Authenticated, policy-authorized clients can use:
 
-- `GET /kubeloop/api/version`
-- `GET /kubeloop/api/capabilities?namespace=<name>`
-- `GET /kubeloop/api/namespaces[?limit=...&continue=...]`
-- `GET /kubeloop/api/namespaces/<namespace>`
-- `GET /kubeloop/api/namespaces/<namespace>/pods[/<name>]`
-- `GET /kubeloop/api/namespaces/<namespace>/services[/<name>]`
-- `GET /kubeloop/api/namespaces/<namespace>/{pods,services}?watch=true` as an
+- `GET /api/version`
+- `GET /api/capabilities?namespace=<name>`
+- `GET /api/namespaces[?limit=...&continue=...]`
+- `GET /api/namespaces/<namespace>`
+- `GET /api/namespaces/<namespace>/pods[/<name>]`
+- `GET /api/namespaces/<namespace>/services[/<name>]`
+- `GET /api/namespaces/<namespace>/{pods,services}?watch=true` as an
   authenticated WebSocket of versioned full snapshots
 - `POST /api/sessions?namespace=<name>` with `Idempotency-Key`
 - `GET /api/sessions/<id>?namespace=<name>`
@@ -389,13 +375,13 @@ Authenticated, policy-authorized clients can use:
   Preview declares a new temporary Service name and one or more ports
 - `GET /api/sessions/<id>/{exchanges,mirrors,previews}/<task-id>?namespace=<name>`
 - `DELETE /api/sessions/<id>/{exchanges,mirrors,previews}/<task-id>?namespace=<name>`
-- `GET /traffic/v1/{exchange,mirror,preview}/<task-id>` on the assigned Data Plane endpoint, authenticated by a fresh RelayTicket
-  as an authenticated reverse WebSocket stream. Preview resources carry the
+- Exchange, Mirror and Preview open an authenticated logical stream inside the
+  assigned Data Plane `/tunnel` WebSocket. Preview resources carry the
   Task UUID as exact owner metadata; name conflicts are never overwritten and
   cleanup only deletes objects whose owner metadata still matches.
 
 Capability results are the intersection of Gateway Policy and Kubernetes RBAC.
-`/kubeloop/api/version` returns both `gitVersion` (Kubernetes) and `gatewayVersion`.
+`/api/version` returns both `gitVersion` (Kubernetes) and `gatewayVersion`.
 The versioned capability document includes `schemaVersion`, `identityId`,
 `namespace`, `gatewayVersion`, and the authorized capability names. In addition
 to inventory and service workflow names, `cluster.tunnel` requires the complete

@@ -158,6 +158,37 @@ func TestRuntimeConfigUsesProfileSOCKSPort(t *testing.T) {
 	}
 }
 
+func TestManagerOpenTrafficStreamRequiresMatchingActiveRuntimeSession(t *testing.T) {
+	session := remote.Session{ID: "ec0b67a2-e84c-4fe7-a0c5-810f210157b5", State: "active", Generation: 1}
+	runtime := &Runtime{ctx: context.Background(), status: Status{
+		State: "connected", SessionID: session.ID, SessionGeneration: session.Generation,
+	}}
+	entry := &managedRuntime{session: session, runtime: runtime}
+	manager := &Manager{active: map[string]*managedRuntime{"server": entry}}
+
+	if _, err := manager.OpenTrafficStream(nil, "server", tunnel.TrafficModeExchange, "task"); err == nil {
+		t.Fatal("nil Traffic stream context was accepted")
+	}
+	if _, err := manager.OpenTrafficStream(t.Context(), "other", tunnel.TrafficModeExchange, "task"); err == nil {
+		t.Fatal("missing Data Plane runtime was accepted")
+	}
+	entry.recovering = true
+	if _, err := manager.OpenTrafficStream(t.Context(), "server", tunnel.TrafficModeExchange, "task"); err == nil {
+		t.Fatal("recovering Data Plane runtime was accepted")
+	}
+	entry.recovering = false
+	runtime.status.SessionGeneration++
+	if _, err := manager.OpenTrafficStream(t.Context(), "server", tunnel.TrafficModeExchange, "task"); err == nil ||
+		!strings.Contains(err.Error(), "does not match") {
+		t.Fatalf("mismatched Data Plane Session error = %v", err)
+	}
+	runtime.status.SessionGeneration = session.Generation
+	if _, err := manager.OpenTrafficStream(t.Context(), "server", tunnel.TrafficModeExchange, "task"); err == nil ||
+		!strings.Contains(err.Error(), "not connected") {
+		t.Fatalf("missing current transport error = %v", err)
+	}
+}
+
 func TestManagerReusesSessionAndReplacesChangedSession(t *testing.T) {
 	spec, err := networkspec.Normalize(networkspec.Spec{
 		PodCIDRs: []string{"10.42.0.0/16"}, PodIPs: []string{"10.43.7.9"},

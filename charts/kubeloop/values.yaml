@@ -46,10 +46,6 @@ controlPlane:
     keyGeneration: 1
     keyValidity: 8760h
   admin:
-    # The browser Management Plane has an isolated HTTP listener and uses the
-    # top-level publicURL as its externally reachable origin.
-    listenPort: 8081
-    servicePort: 8081
     bootstrap:
       # On an empty database, create the first platform administrator,
       # organization, Administrators group, and built-in role bindings. A random

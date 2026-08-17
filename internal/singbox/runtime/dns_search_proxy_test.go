@@ -4,7 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"slices"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -103,6 +105,52 @@ func TestDNSSearchProxyPrefersExpandedClusterName(t *testing.T) {
 	}
 }
 
+func TestDNSSearchProxyStopsAfterExpandedNameReturnsNoData(t *testing.T) {
+	var mu sync.Mutex
+	var queries []string
+	handler := dns.HandlerFunc(func(w dns.ResponseWriter, r *dns.Msg) {
+		mu.Lock()
+		queries = append(queries, r.Question[0].Name)
+		mu.Unlock()
+
+		msg := new(dns.Msg)
+		msg.SetReply(r)
+		msg.Ns = []dns.RR{&dns.SOA{
+			Hdr: dns.RR_Header{
+				Name: "cluster.local.", Rrtype: dns.TypeSOA,
+				Class: dns.ClassINET, Ttl: 30,
+			},
+			Ns: "ns.dns.cluster.local.", Mbox: "hostmaster.cluster.local.",
+		}}
+		_ = w.WriteMsg(msg)
+	})
+	upstreamAddr := startTestDNSUpstreamWithHandler(t, handler)
+
+	proxy, publicPort := startTestDNSSearchProxy(
+		t, "127.0.0.1", "127.0.0.1", upstreamAddr.Port,
+		singbox.SearchDomains("default"), "cluster.local",
+	)
+	defer func() { _ = proxy.Close() }()
+
+	req := new(dns.Msg)
+	req.SetQuestion("echo.", dns.TypeAAAA)
+	target := net.JoinHostPort("127.0.0.1", fmt.Sprintf("%d", publicPort))
+	resp, _, err := (&dns.Client{Net: "udp", Timeout: 2 * time.Second}).Exchange(req, target)
+	if err != nil {
+		t.Fatalf("AAAA query: %v", err)
+	}
+	if resp.Rcode != dns.RcodeSuccess || len(resp.Answer) != 0 {
+		t.Fatalf("AAAA response = %#v, want NODATA", resp)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	want := []string{"echo.default.svc.cluster.local."}
+	if !slices.Equal(queries, want) {
+		t.Fatalf("upstream queries = %v, want %v", queries, want)
+	}
+}
+
 func TestDNSSearchProxyUpdatesHostAliases(t *testing.T) {
 	upstreamAddr := startTestDNSUpstream(t)
 	proxy, publicPort := startTestDNSSearchProxy(
@@ -155,15 +203,9 @@ func TestDNSSearchCandidates(t *testing.T) {
 		"static-web.default.svc.",
 		singbox.SearchDomains("default"),
 	)
-	joined := strings.Join(got, ",")
-	if !strings.Contains(joined, "static-web.default.svc.cluster.local.") {
-		t.Fatalf("missing FQDN candidate: %v", got)
-	}
-	if got[0] != "static-web.default.svc.default.svc.cluster.local." {
-		t.Fatalf("Kubernetes search expansion should be first: %v", got)
-	}
-	if got[len(got)-1] != "static-web.default.svc." {
-		t.Fatalf("original name should be the final fallback: %v", got)
+	want := []string{"static-web.default.svc.cluster.local."}
+	if !slices.Equal(got, want) {
+		t.Fatalf("partial Service candidates = %v, want %v", got, want)
 	}
 	fqdn := dnsSearchCandidates(
 		"api.default.svc.cluster.local.",

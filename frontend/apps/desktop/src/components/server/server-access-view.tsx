@@ -1302,8 +1302,10 @@ export function ServerAccessView({
 							value={previewServicePort}
 							disabled={Boolean(busy)}
 							onChange={(event) => {
-							  setPreviewServicePort(event.target.value);
-							  if (!previewLocalPort) setPreviewLocalPort(event.target.value);
+							  const nextServicePort = event.target.value;
+							  const previousServicePort = previewServicePort;
+							  setPreviewServicePort(nextServicePort);
+							  setPreviewLocalPort((current) => current === "" || current === previousServicePort ? nextServicePort : current);
 							}}
 						  />
 						  <Input

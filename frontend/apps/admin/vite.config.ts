@@ -6,7 +6,7 @@ import tailwindcss from "@tailwindcss/vite";
 
 const rootDir = path.dirname(fileURLToPath(import.meta.url));
 const developmentBackend =
-  process.env.VITE_ADMIN_BACKEND || "http://127.0.0.1:8081";
+  process.env.VITE_ADMIN_BACKEND || "http://127.0.0.1:8080";
 
 export default defineConfig({
   plugins: [
@@ -14,7 +14,7 @@ export default defineConfig({
       name: "kubeloop-admin-development-path",
       apply: "serve",
       transformIndexHtml(html) {
-        return html.replaceAll("{{MANAGEMENT_PATH}}", "/api/admin");
+        return html.replaceAll("{{MANAGEMENT_PATH}}", "/admin");
       },
     },
     react(),
@@ -24,7 +24,7 @@ export default defineConfig({
   resolve: { alias: { "@": path.resolve(rootDir, "./src") } },
   server: {
     proxy: {
-      "/api": developmentBackend,
+      "/admin": developmentBackend,
       "/oauth2": developmentBackend,
       "/.well-known": developmentBackend,
     },

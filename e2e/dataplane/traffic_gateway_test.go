@@ -15,10 +15,15 @@ import (
 	"testing"
 	"time"
 
+	clientdataplane "github.com/fengqi-dev/kube-loop/internal/client/dataplane"
+	"github.com/fengqi-dev/kube-loop/internal/client/profile"
+	"github.com/fengqi-dev/kube-loop/internal/client/remote"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
 	ticketservice "github.com/fengqi-dev/kube-loop/internal/controlplane/ticketapi/service"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/trafficcontrolapi"
+	"github.com/fengqi-dev/kube-loop/internal/gateway"
 	"github.com/fengqi-dev/kube-loop/internal/gateway/trafficapi"
+	"github.com/fengqi-dev/kube-loop/internal/gateway/websocketmux"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/relaycontrol"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/relayticket"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficcontrol"
@@ -34,6 +39,63 @@ const (
 type e2eTrafficGateway struct {
 	tickets    *ticketservice.Service
 	httpClient *http.Client
+}
+
+type e2eTrafficSessionSource struct {
+	client  *remote.Client
+	profile profile.Profile
+	session remote.Session
+}
+
+func (source *e2eTrafficSessionSource) RelayTicketSource(profileID string) func(context.Context) (remote.RelayTicket, error) {
+	return func(ctx context.Context) (remote.RelayTicket, error) {
+		if profileID != source.profile.ID {
+			return remote.RelayTicket{}, errors.New("e2e Data Plane Profile does not match")
+		}
+		return source.client.IssueRelayTicket(ctx, source.profile, source.session)
+	}
+}
+
+func (source *e2eTrafficSessionSource) Current(profileID string) (remote.Session, error) {
+	if profileID != source.profile.ID {
+		return remote.Session{}, errors.New("e2e Data Plane Profile does not match")
+	}
+	return source.session, nil
+}
+
+func (source *e2eTrafficSessionSource) Refresh(context.Context, string) (remote.Session, error) {
+	return source.session, nil
+}
+
+func startE2EDataPlane(
+	t *testing.T,
+	ctx context.Context,
+	client *remote.Client,
+	gatewayClient *http.Client,
+	serverProfile profile.Profile,
+	session remote.Session,
+) *clientdataplane.Manager {
+	t.Helper()
+	transport, ok := gatewayClient.Transport.(*http.Transport)
+	if !ok || transport.TLSClientConfig == nil {
+		t.Fatal("e2e Gateway HTTP client does not expose its TLS configuration")
+	}
+	sessions := &e2eTrafficSessionSource{client: client, profile: serverProfile, session: session}
+	manager, err := clientdataplane.NewManager(sessions, clientdataplane.Config{
+		ListenAddress: "127.0.0.1:0", ClientVersion: "e2e", TLSConfig: transport.TLSClientConfig.Clone(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Connect(ctx, serverProfile, session); err != nil {
+		t.Fatalf("connect e2e Data Plane: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := manager.Shutdown(); err != nil {
+			t.Logf("shutdown e2e Data Plane: %v", err)
+		}
+	})
+	return manager
 }
 
 func startE2ETrafficGateway(
@@ -84,13 +146,48 @@ func startE2ETrafficGateway(
 	}
 	control := &e2eTrafficControlClient{t: t, relayID: relayID, coordinator: coordinator}
 	api, err := trafficapi.New(trafficapi.Config{
-		GatewayIP: gatewayIP, VerifyRequest: requestVerifier.Verify, ControlPlane: control,
+		GatewayIP: gatewayIP, ControlPlane: control,
 		MirrorPrimaryDialContext: mirrorDial,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	api.RegisterRoutes(router)
+	core := gateway.NewServer(nil, 10*time.Second)
+	core.SetTrafficHandler(api)
+	tunnelHandler, err := websocketmux.NewHandler(websocketmux.ServerConfig{
+		Authenticator: websocketmux.AuthenticatorFunc(func(request *http.Request) (websocketmux.Identity, error) {
+			claims, verifyErr := requestVerifier.Verify(request)
+			if verifyErr != nil {
+				return websocketmux.Identity{}, verifyErr
+			}
+			return websocketmux.Identity{
+				IdentityID: claims.IdentityID, Groups: append([]string(nil), claims.Groups...), DeviceID: claims.DeviceID,
+				SessionID: claims.SessionID, SessionGeneration: claims.SessionGeneration, Namespace: claims.Namespace,
+				NetworkSpecHash: claims.NetworkSpecHash, ExpiresAt: time.Unix(claims.ExpiresAt, 0).UTC(),
+			}, nil
+		}),
+		ServerVersion: "e2e",
+		Handle: func(ctx context.Context, identity websocketmux.Identity, connection net.Conn) {
+			core.ServeConnForAuthorizationContext(ctx, connection, gateway.SessionAuthorization{
+				RequestID: identity.RequestID, IdentityID: identity.IdentityID,
+				Groups: append([]string(nil), identity.Groups...), DeviceID: identity.DeviceID,
+				SessionID: identity.SessionID, Generation: identity.SessionGeneration,
+				Namespace: identity.Namespace, NetworkSpecHash: identity.NetworkSpecHash,
+			})
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	router.Any("/gateway", echo.WrapHandler(tunnelHandler))
+	response, err := server.Client().Get(server.URL + "/traffic/v1/exchange/" + strings.Repeat("a", 36))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = response.Body.Close()
+	if response.StatusCode != http.StatusNotFound {
+		t.Fatalf("legacy traffic route status = %d, want %d", response.StatusCode, http.StatusNotFound)
+	}
 	return e2eTrafficGateway{tickets: tickets, httpClient: server.Client()}
 }
 

@@ -55,6 +55,83 @@ func TestOpenRoundTrip(t *testing.T) {
 	}
 }
 
+func TestTrafficOpenRoundTrip(t *testing.T) {
+	tests := []struct {
+		name string
+		mode string
+	}{
+		{name: "exchange", mode: TrafficModeExchange},
+		{name: "mirror", mode: TrafficModeMirror},
+		{name: "preview", mode: TrafficModePreview},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var stream bytes.Buffer
+			want := TrafficOpenRequest{
+				Mode: test.mode, TaskID: "12345678-1234-4234-8234-123456789abc",
+			}
+			if err := WriteTrafficOpen(&stream, want, protocolTestToken); err != nil {
+				t.Fatal(err)
+			}
+			got, err := ReadTrafficOpen(&stream)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != want {
+				t.Fatalf("got %#v, want %#v", got, want)
+			}
+		})
+	}
+}
+
+func TestTrafficOpenRejectsInvalidModeTaskIDAndBody(t *testing.T) {
+	tests := []struct {
+		name    string
+		request TrafficOpenRequest
+	}{
+		{
+			name: "unknown mode",
+			request: TrafficOpenRequest{
+				Mode: "capture", TaskID: "12345678-1234-4234-8234-123456789abc",
+			},
+		},
+		{
+			name:    "malformed task ID",
+			request: TrafficOpenRequest{Mode: TrafficModeExchange, TaskID: "not-a-uuid"},
+		},
+		{
+			name: "noncanonical task ID",
+			request: TrafficOpenRequest{
+				Mode: TrafficModeExchange, TaskID: "12345678-1234-4234-8234-123456789ABC",
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if err := WriteTrafficOpen(io.Discard, test.request, protocolTestToken); err == nil {
+				t.Fatalf("invalid request was accepted: %#v", test.request)
+			}
+		})
+	}
+
+	validTaskID := []byte("12345678-1234-4234-8234-123456789abc")
+	if _, err := ReadTrafficOpenBody(bytes.NewReader(append([]byte{255}, validTaskID...))); err == nil {
+		t.Fatal("unknown traffic mode was accepted")
+	}
+	if _, err := ReadTrafficOpenBody(bytes.NewReader([]byte{trafficModeExchange})); err == nil {
+		t.Fatal("truncated traffic open body was accepted")
+	}
+	invalidTaskID := append([]byte{trafficModeExchange}, bytes.Repeat([]byte{'x'}, trafficTaskIDSize)...)
+	if _, err := ReadTrafficOpenBody(bytes.NewReader(invalidTaskID)); err == nil {
+		t.Fatal("malformed traffic Task ID was accepted")
+	}
+	wrongCommand := append(sessionHeaderBytes(CommandTCP), trafficModeExchange)
+	wrongCommand = append(wrongCommand, validTaskID...)
+	if _, err := ReadTrafficOpen(bytes.NewReader(wrongCommand)); err == nil {
+		t.Fatal("non-traffic command was accepted")
+	}
+}
+
 func TestStatusRoundTrip(t *testing.T) {
 	var stream bytes.Buffer
 	if err := WriteStatus(&stream, errors.New("target denied")); err != nil {
@@ -135,6 +212,18 @@ func TestProtocolGoldenEncoding(t *testing.T) {
 			want: append(
 				sessionHeaderBytes(CommandTCP),
 				0, 3, 'a', 'p', 'i', 0x1f, 0x90,
+			),
+		},
+		{
+			name: "traffic-open",
+			write: func(w io.Writer) error {
+				return WriteTrafficOpen(w, TrafficOpenRequest{
+					Mode: TrafficModeMirror, TaskID: "12345678-1234-4234-8234-123456789abc",
+				}, protocolTestToken)
+			},
+			want: append(
+				sessionHeaderBytes(CommandTraffic),
+				append([]byte{trafficModeMirror}, []byte("12345678-1234-4234-8234-123456789abc")...)...,
 			),
 		},
 		{

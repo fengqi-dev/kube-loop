@@ -6,7 +6,7 @@
 ## Context
 
 > Current implementation: Control Plane retains Task and TrafficBinding metadata;
-> the RelayTicket-selected Gateway owns the WebSocket, TCP/UDP listeners and
+> the RelayTicket-selected Gateway owns the `/tunnel` logical stream, TCP/UDP listeners and
 > byte forwarding, and calls Control Plane over authenticated internal Echo HTTP.
 
 Exchange replaces a Kubernetes Service's selected backends with a developer's
@@ -20,9 +20,9 @@ unowned rollback snapshot.
 
 Exchange is a Session- and Identity-owned Control Plane Task. Task creation only
 validates the requested Service-port-to-local-target mapping and persists a
-pending Task. The authenticated reverse WebSocket claim selects the owner: the
-Control Plane replica handling that upgraded request allocates ephemeral TCP/UDP
-listeners on its advertised Pod IP and remains responsible for every stream,
+pending Task. Opening an authenticated Exchange logical stream inside the
+assigned `/tunnel` selects the Gateway owner. That Gateway allocates ephemeral
+TCP/UDP listeners on its advertised Pod IP and remains responsible for every stream,
 the authorization lease and resource restoration.
 
 Before changing Kubernetes, the owner captures the authoritative Service plus
@@ -35,7 +35,8 @@ pointing to its ephemeral listeners. This prevents the mirroring controller
 from recreating the old Pod path beside the Gateway path. Restoration restores
 each representation that was captured. Partial mutations must compensate from
 the persisted snapshot. The WebSocket is declared ready only after the resource
-change and running Task state are durable.
+change and running Task state are durable. No second public WebSocket endpoint
+is involved.
 
 Cluster connections are multiplexed over one neutral binary reverse-stream
 protocol. TCP preserves data, half-close and close semantics. UDP associations
@@ -66,7 +67,7 @@ rollback snapshot.
 
 - Kubernetes credentials and rollback logic remain in Control Plane; the desktop
   owns only local sockets and target selection.
-- WebSocket claim, listener allocation and mutation ownership are colocated,
+- Tunnel-stream claim, listener allocation and mutation ownership are colocated,
   avoiding dependence on load-balancer stickiness.
 - Snapshot persistence and Kubernetes mutation form a compensating saga, not
   a cross-system ACID transaction.
@@ -74,7 +75,7 @@ rollback snapshot.
   Control Plane ServiceAccount. Two-worker race tests prove one restore claimant,
   and retry tests prove snapshots survive restore outages.
 - Real Minikube coverage sends TCP and UDP traffic from Pods through the
-  intercepted Service, Control Plane listeners and reverse WSS into loopback-only
+  intercepted Service, Gateway listeners and a `/tunnel` logical stream into loopback-only
   desktop targets. It rejects mixed Gateway/Pod endpoint convergence and
   verifies explicit stop, abrupt desktop loss, OAuth grant revocation and a
   replacement Control Plane restoring a stale owner before normal Service traffic

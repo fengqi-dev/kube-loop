@@ -10,9 +10,8 @@ import (
 )
 
 const (
-	APIPathPrefix        = "/kubeloop/api"
-	SessionAPIPathPrefix = "/api"
-	AdminAPIPathPrefix   = "/api/admin"
+	APIPathPrefix   = "/api"
+	AdminPathPrefix = "/admin"
 )
 
 // RouteRegistrar owns the HTTP routes for one API module.
@@ -113,7 +112,7 @@ func (routes APIRoutes) RegisterRoutes(group *echo.Group) {
 }
 
 // RegisterSessionRoutes registers Session lifecycle and task resources under
-// /api/sessions, independently from the general /kubeloop/api resource API.
+// /api/sessions, alongside the general /api resource API.
 func (routes APIRoutes) RegisterSessionRoutes(group *echo.Group) {
 	registerRoute(group, http.MethodPost, "/sessions/:sessionID/tickets", routes.Tickets.Issue)
 

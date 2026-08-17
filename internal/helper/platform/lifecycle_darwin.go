@@ -67,7 +67,7 @@ func ApplyDNS(workDir string, dns singbox.DNSMeta) error {
 		return err
 	}
 	for _, service := range services {
-		merged := appendUnique(append([]string{}, dns.Search...), backup[service]...)
+		merged := mergeSearchDomains(dns.Search, backup[service])
 		args := append([]string{"-setsearchdomains", service}, merged...)
 		if len(merged) == 0 {
 			args = append(args, "Empty")
@@ -154,6 +154,33 @@ func getSearchDomains(service string) []string {
 		return nil
 	}
 	return strings.Fields(string(output))
+}
+
+func mergeSearchDomains(desired, existing []string) []string {
+	rootValues := kubernetesSearchRoots(desired)
+	roots := make(map[string]struct{}, len(rootValues))
+	for _, root := range rootValues {
+		roots[root] = struct{}{}
+	}
+
+	preserved := make([]string, 0, len(existing))
+	for _, domain := range existing {
+		if isKubernetesSearchDomain(domain, roots) {
+			continue
+		}
+		preserved = append(preserved, domain)
+	}
+	return appendUnique(append([]string(nil), desired...), preserved...)
+}
+
+func isKubernetesSearchDomain(domain string, roots map[string]struct{}) bool {
+	domain = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(domain)), ".")
+	for root := range roots {
+		if domain == root || domain == "svc."+root || strings.HasSuffix(domain, ".svc."+root) {
+			return true
+		}
+	}
+	return false
 }
 
 func appendUnique(values []string, extra ...string) []string {
