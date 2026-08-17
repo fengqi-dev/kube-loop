@@ -76,7 +76,7 @@ func serveControlPlane(options serverRuntimeOptions) {
 	)
 	options.Logger.Info("Management Plane started", "listen_address", managementListener.Addr().String(), "public_url", options.Config.Document.Admin.PublicURL)
 	if relayListener != nil {
-		options.Logger.Info("Relay Registry started", "listen_address", relayListener.Addr().String(), "transport", "mTLS")
+		options.Logger.Info("Relay Registry started", "listen_address", relayListener.Addr().String(), "transport", "TLS")
 	}
 	serveCount := 2
 	if relayServer != nil {

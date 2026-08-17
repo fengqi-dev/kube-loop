@@ -23,7 +23,7 @@
 {{- fail "controlPlane.logLevel must be debug, info, warn, or error" -}}
 {{- end }}
 {{- $oauthSecretName := include "kubeloop.authSecretName" . -}}
-{{- $iamBootstrapSecretName := include "kubeloop.iamBootstrapSecretName" . -}}
+{{- $relaySecretName := include "kubeloop.relaySecretName" . -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -80,7 +80,7 @@ spec:
             - name: management
               containerPort: {{ .Values.controlPlane.admin.listenPort }}
               protocol: TCP
-            - name: relay-mtls
+            - name: relay-tls
               containerPort: {{ .Values.controlPlane.relayRegistry.listenPort }}
               protocol: TCP
           livenessProbe:
@@ -102,7 +102,7 @@ spec:
             - name: auth-secrets
               mountPath: /var/run/secrets/kubeloop/auth
               readOnly: true
-            - name: relay-registry-tls
+            - name: relay-registry
               mountPath: /var/run/secrets/kubeloop/relay-registry
               readOnly: true
             {{- if not $datasourceSecret }}
@@ -126,9 +126,9 @@ spec:
             defaultMode: 0400
             sources:
               - secret:
-                  name: {{ required "controlPlane.relay.existingSecret is required" .Values.controlPlane.relay.existingSecret }}
+                  name: {{ $relaySecretName }}
                   items:
-                    - key: {{ required "controlPlane.relay.signingKeyKey is required" .Values.controlPlane.relay.signingKeyKey }}
+                    - key: signing-key.pem
                       path: relay/signing-key.pem
               - secret:
                   name: {{ $oauthSecretName }}
@@ -139,21 +139,21 @@ spec:
                       path: oauth/hmac-secret
               {{- if .Values.controlPlane.admin.bootstrap.enabled }}
               - secret:
-                  name: {{ $iamBootstrapSecretName }}
+                  name: {{ $oauthSecretName }}
                   items:
                     - key: {{ required "controlPlane.admin.bootstrap.passwordKey is required" .Values.controlPlane.admin.bootstrap.passwordKey }}
                       path: bootstrap/initial-password
               {{- end }}
-        - name: relay-registry-tls
+        - name: relay-registry
           secret:
-            secretName: {{ default .Values.controlPlane.relay.existingSecret .Values.controlPlane.relayRegistry.existingSecret | required "controlPlane.relayRegistry.existingSecret or controlPlane.relay.existingSecret is required" }}
+            secretName: {{ $relaySecretName }}
             defaultMode: 0400
             items:
-              - key: {{ required "controlPlane.relayRegistry.serverCertificateKey is required" .Values.controlPlane.relayRegistry.serverCertificateKey }}
+              - key: tls.crt
                 path: tls.crt
-              - key: {{ required "controlPlane.relayRegistry.serverPrivateKeyKey is required" .Values.controlPlane.relayRegistry.serverPrivateKeyKey }}
+              - key: tls.key
                 path: tls.key
-              - key: {{ required "controlPlane.relayRegistry.caKey is required" .Values.controlPlane.relayRegistry.caKey }}
+              - key: ca.crt
                 path: ca.crt
         {{- if not $datasourceSecret }}
         - name: data

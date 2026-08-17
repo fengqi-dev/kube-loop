@@ -2,8 +2,13 @@ package helm
 
 import (
 	"bytes"
+	"crypto/ed25519"
 	"crypto/sha256"
+	"crypto/tls"
+	"crypto/x509"
+	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"io"
 	"os"
@@ -19,7 +24,6 @@ import (
 func TestSQLiteChartRendersIndependentSecureWorkloads(t *testing.T) {
 	objects := renderChart(t,
 		"--set", "publicURL=http://kubeloop.example.test",
-		"--set", "controlPlane.admin.publicURL=http://kubeloop.example.test",
 		"--set", "ingress.enabled=true",
 		"--set", "ingress.host=kubeloop.example.test",
 	)
@@ -132,9 +136,9 @@ func TestSQLiteChartRendersIndependentSecureWorkloads(t *testing.T) {
 		t.Fatal("RelayTicket private signing key is not isolated to ControlPlane")
 	}
 	authSecret := objectByName(t, objects, "Secret", "test-kubeloop-control-plane-auth")
-	for _, key := range []string{"oidc-signing-key.pem", "hmac-secret"} {
+	for _, key := range []string{"oidc-signing-key.pem", "hmac-secret", "initial-password"} {
 		if valueAt(t, authSecret, "data", key) == "" {
-			t.Fatalf("independent authentication Secret is missing %q", key)
+			t.Fatalf("combined authentication Secret is missing %q", key)
 		}
 	}
 	if strings.Contains(string(controlPlaneYAML), "oauth/signing-key.pem") ||
@@ -142,13 +146,10 @@ func TestSQLiteChartRendersIndependentSecureWorkloads(t *testing.T) {
 		!strings.Contains(string(controlPlaneYAML), "oauth/hmac-secret") {
 		t.Fatal("OAuth HMAC and OIDC signing key material are not mounted independently")
 	}
-	bootstrapSecret := objectByName(t, objects, "Secret", "test-kubeloop-control-plane-iam-bootstrap")
-	if valueAt(t, bootstrapSecret, "data", "initial-password") == "" {
-		t.Fatal("generated IAM bootstrap Secret is missing the initial password")
-	}
-	if !strings.Contains(string(controlPlaneYAML), "test-kubeloop-control-plane-iam-bootstrap") ||
+	if strings.Contains(string(controlPlaneYAML), "iam-bootstrap") ||
+		!strings.Contains(string(controlPlaneYAML), "test-kubeloop-control-plane-auth") ||
 		!strings.Contains(string(controlPlaneYAML), "bootstrap/initial-password") {
-		t.Fatal("Control Plane does not mount the IAM bootstrap Secret")
+		t.Fatal("Control Plane does not mount bootstrap material from the combined auth Secret")
 	}
 	if countKind(objects, "Ingress") != 1 {
 		t.Fatal("expected one same-origin Ingress")
@@ -185,7 +186,6 @@ func TestSQLiteChartRendersIndependentSecureWorkloads(t *testing.T) {
 func TestIngressTLSCanBeEnabledExplicitly(t *testing.T) {
 	objects := renderChart(t,
 		"--set", "publicURL=https://kubeloop.example.test",
-		"--set", "controlPlane.admin.publicURL=https://kubeloop.example.test",
 		"--set", "ingress.enabled=true",
 		"--set", "ingress.host=kubeloop.example.test",
 		"--set", "ingress.tls.enabled=true",
@@ -201,7 +201,6 @@ func TestIngressTLSCanBeEnabledExplicitly(t *testing.T) {
 func TestGatewayAPIHTTPRouteUsesOneTLSOriginAndUnboundedWebSocketTimeout(t *testing.T) {
 	objects := renderChart(t,
 		"--set", "publicURL=https://kubeloop.example.test",
-		"--set", "controlPlane.admin.publicURL=https://kubeloop.example.test",
 		"--set", "gatewayAPI.enabled=true",
 		"--set", "gatewayAPI.host=kubeloop.example.test",
 		"--set", "gatewayAPI.parentRef.name=shared-gateway",
@@ -232,7 +231,6 @@ func TestGatewayAPIHTTPRouteUsesOneTLSOriginAndUnboundedWebSocketTimeout(t *test
 func TestGatewayAPIChartCanOwnTheHTTPSGateway(t *testing.T) {
 	objects := renderChart(t,
 		"--set", "publicURL=https://kubeloop.example.test",
-		"--set", "controlPlane.admin.publicURL=https://kubeloop.example.test",
 		"--set", "gatewayAPI.enabled=true",
 		"--set", "gatewayAPI.host=kubeloop.example.test",
 		"--set", "gatewayAPI.gateway.create=true",
@@ -414,7 +412,6 @@ func TestAuthorizationIsDatabaseManaged(t *testing.T) {
 func TestDevelopmentPresetDoesNotEnableAuthorizationBypass(t *testing.T) {
 	objects := renderChart(t,
 		"--set", "publicURL=https://kubeloop.192.168.64.70.sslip.io",
-		"--set", "controlPlane.admin.publicURL=https://kubeloop.192.168.64.70.sslip.io",
 		"--set", "controlPlane.development.enabled=true",
 	)
 	config := controlPlaneConfigRaw(t, objects)
@@ -441,22 +438,94 @@ func TestIAMBootstrapDefaultsCreateInitialAdministratorAndOrganization(t *testin
 	}
 }
 
-func TestIAMBootstrapCanUseAnExistingSecret(t *testing.T) {
+func TestRelaySecretDefaultsAreGeneratedAndMountedConsistently(t *testing.T) {
 	objects := renderChart(t,
 		"--set", "publicURL=https://kubeloop.example.test",
-		"--set", "controlPlane.admin.bootstrap.existingSecret=operator-managed-bootstrap",
-		"--set", "controlPlane.admin.bootstrap.passwordKey=password",
 	)
-	for _, object := range objects {
-		if object["kind"] == "Secret" && valueAt(t, object, "metadata", "name") == "test-kubeloop-control-plane-iam-bootstrap" {
-			t.Fatal("chart generated an IAM bootstrap Secret while an existing Secret was configured")
+	secret := objectByName(t, objects, "Secret", "test-kubeloop-control-plane-relay")
+	data, ok := secret["data"].(map[string]any)
+	if !ok {
+		t.Fatalf("generated Relay Secret data = %#v", secret["data"])
+	}
+	if len(data) != 4 {
+		t.Fatalf("generated Relay Secret keys = %#v", data)
+	}
+	decode := func(name string) []byte {
+		t.Helper()
+		encoded, ok := data[name].(string)
+		if !ok || encoded == "" {
+			t.Fatalf("generated Relay Secret key %q is missing", name)
+		}
+		decoded, err := base64.StdEncoding.DecodeString(encoded)
+		if err != nil {
+			t.Fatalf("decode generated Relay Secret key %q: %v", name, err)
+		}
+		return decoded
+	}
+
+	signingBlock, rest := pem.Decode(decode("signing-key.pem"))
+	if signingBlock == nil || len(bytes.TrimSpace(rest)) != 0 || signingBlock.Type != "PRIVATE KEY" {
+		t.Fatal("generated RelayTicket signing key is not one PKCS#8 PEM block")
+	}
+	parsedSigningKey, err := x509.ParsePKCS8PrivateKey(signingBlock.Bytes)
+	if err != nil {
+		t.Fatalf("parse generated RelayTicket signing key: %v", err)
+	}
+	if _, ok := parsedSigningKey.(ed25519.PrivateKey); !ok {
+		t.Fatalf("generated RelayTicket signing key type = %T", parsedSigningKey)
+	}
+
+	certificateBlock, _ := pem.Decode(decode("tls.crt"))
+	caBlock, _ := pem.Decode(decode("ca.crt"))
+	if certificateBlock == nil || caBlock == nil {
+		t.Fatal("generated Relay Registry certificate or CA is not PEM")
+	}
+	certificate, err := x509.ParseCertificate(certificateBlock.Bytes)
+	if err != nil {
+		t.Fatalf("parse generated Relay Registry certificate: %v", err)
+	}
+	ca, err := x509.ParseCertificate(caBlock.Bytes)
+	if err != nil {
+		t.Fatalf("parse generated Relay Registry CA: %v", err)
+	}
+	wantDNS := "test-kubeloop-control-plane-relay.kubeloop-system.svc"
+	if err := certificate.VerifyHostname(wantDNS); err != nil {
+		t.Fatalf("generated Relay Registry certificate does not cover %q: %v", wantDNS, err)
+	}
+	if err := certificate.CheckSignatureFrom(ca); err != nil {
+		t.Fatalf("generated Relay Registry certificate is not signed by generated CA: %v", err)
+	}
+	if _, err := tls.X509KeyPair(decode("tls.crt"), decode("tls.key")); err != nil {
+		t.Fatalf("generated Relay Registry certificate and private key do not match: %v", err)
+	}
+	if valueAt(t, secret, "metadata", "annotations", "helm.sh/resource-policy") != "keep" {
+		t.Fatal("generated Relay Secret must be retained across uninstall and reinstall")
+	}
+
+	configMap := objectByName(t, objects, "ConfigMap", "test-kubeloop-config")
+	controlPlaneConfig := parseControlPlaneConfig(t, configMap)
+	registry := valueAt(t, controlPlaneConfig, "relay", "registry").(map[string]any)
+	if registry["authentication"] != "tokenreview" {
+		t.Fatalf("Relay Registry authentication = %#v", registry["authentication"])
+	}
+	if _, configured := registry["clientCAFile"]; configured {
+		t.Fatalf("Relay Registry still configures client certificate authentication: %#v", registry)
+	}
+	gatewayRelay := valueAt(t, parseUnifiedConfig(t, configMap), "gateway", "relay").(map[string]any)
+	if gatewayRelay["bearerTokenFile"] != "/var/run/secrets/kubeloop/relay-identity/token" {
+		t.Fatalf("Data Plane Relay identity = %#v", gatewayRelay)
+	}
+	for _, removed := range []string{"clientCertificateFile", "clientPrivateKeyFile"} {
+		if _, configured := gatewayRelay[removed]; configured {
+			t.Fatalf("Data Plane still configures %s: %#v", removed, gatewayRelay)
 		}
 	}
-	controlPlane := objectsByComponent(t, objects, "Deployment", "control-plane")[0]
-	controlPlaneYAML, _ := yaml.Marshal(controlPlane)
-	for _, want := range []string{"operator-managed-bootstrap", "key: password", "path: bootstrap/initial-password"} {
-		if !strings.Contains(string(controlPlaneYAML), want) {
-			t.Fatalf("existing IAM bootstrap Secret mount is missing %q: %s", want, controlPlaneYAML)
+
+	for _, component := range []string{"control-plane", "data-plane"} {
+		deployment := objectsByComponent(t, objects, "Deployment", component)[0]
+		encoded, _ := yaml.Marshal(deployment)
+		if !strings.Contains(string(encoded), "name: relay-registry") {
+			t.Fatalf("%s Deployment does not use the relay-registry volume name", component)
 		}
 	}
 }
@@ -474,6 +543,14 @@ func TestIAMBootstrapCanBeDisabled(t *testing.T) {
 	controlPlaneYAML, _ := yaml.Marshal(controlPlane)
 	if strings.Contains(string(controlPlaneYAML), "iam-bootstrap") || strings.Contains(string(controlPlaneYAML), "bootstrap/initial-password") {
 		t.Fatalf("disabled IAM bootstrap still mounts a Secret: %s", controlPlaneYAML)
+	}
+	authSecret := objectByName(t, objects, "Secret", "test-kubeloop-control-plane-auth")
+	authData, ok := authSecret["data"].(map[string]any)
+	if !ok {
+		t.Fatalf("combined auth Secret data = %#v", authSecret["data"])
+	}
+	if _, exists := authData["initial-password"]; exists {
+		t.Fatal("disabled IAM bootstrap still stores an initial password")
 	}
 }
 
@@ -695,21 +772,19 @@ func TestChartRejectsUnsafeStorageConfigurations(t *testing.T) {
 		{name: "missing public URL", want: "publicURL is required"},
 		{name: "development on external origin", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.development.enabled=true"}, want: "requires a local"},
 		{name: "public URL path", args: []string{"--set", "publicURL=https://kubeloop.example.test/base"}, want: "must be one HTTP or HTTPS origin"},
-		{name: "two external routes", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.admin.publicURL=https://kubeloop.example.test", "--set", "ingress.enabled=true", "--set", "ingress.host=kubeloop.example.test", "--set", "gatewayAPI.enabled=true", "--set", "gatewayAPI.host=kubeloop.example.test"}, want: "mutually exclusive"},
-		{name: "Ingress origin mismatch", args: []string{"--set", "publicURL=https://other.example.test", "--set", "controlPlane.admin.publicURL=https://other.example.test", "--set", "ingress.enabled=true", "--set", "ingress.host=kubeloop.example.test"}, want: "exactly equal"},
-		{name: "Ingress scheme mismatch", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.admin.publicURL=https://kubeloop.example.test", "--set", "ingress.enabled=true", "--set", "ingress.host=kubeloop.example.test"}, want: "http://<ingress.host>"},
-		{name: "Gateway origin mismatch", args: []string{"--set", "publicURL=https://other.example.test", "--set", "controlPlane.admin.publicURL=https://other.example.test", "--set", "gatewayAPI.enabled=true", "--set", "gatewayAPI.host=kubeloop.example.test"}, want: "exactly equal"},
-		{name: "Gateway parent", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.admin.publicURL=https://kubeloop.example.test", "--set", "gatewayAPI.enabled=true", "--set", "gatewayAPI.host=kubeloop.example.test"}, want: "parentRef.name is required"},
-		{name: "Gateway class", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.admin.publicURL=https://kubeloop.example.test", "--set", "gatewayAPI.enabled=true", "--set", "gatewayAPI.host=kubeloop.example.test", "--set", "gatewayAPI.gateway.create=true"}, want: "className is required"},
-		{name: "Gateway TLS certificate", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.admin.publicURL=https://kubeloop.example.test", "--set", "gatewayAPI.enabled=true", "--set", "gatewayAPI.host=kubeloop.example.test", "--set", "gatewayAPI.gateway.create=true", "--set", "gatewayAPI.gateway.className=example"}, want: "tls.secretName is required"},
-		{name: "Gateway tunnel timeout", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.admin.publicURL=https://kubeloop.example.test", "--set", "gatewayAPI.enabled=true", "--set", "gatewayAPI.host=kubeloop.example.test", "--set", "gatewayAPI.parentRef.name=shared", "--set", "gatewayAPI.parentRef.sectionName=https", "--set", "gatewayAPI.timeouts.tunnel=30m"}, want: "must be 0s"},
+		{name: "two external routes", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "ingress.enabled=true", "--set", "ingress.host=kubeloop.example.test", "--set", "gatewayAPI.enabled=true", "--set", "gatewayAPI.host=kubeloop.example.test"}, want: "mutually exclusive"},
+		{name: "Ingress origin mismatch", args: []string{"--set", "publicURL=https://other.example.test", "--set", "ingress.enabled=true", "--set", "ingress.host=kubeloop.example.test"}, want: "exactly equal"},
+		{name: "Ingress scheme mismatch", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "ingress.enabled=true", "--set", "ingress.host=kubeloop.example.test"}, want: "http://<ingress.host>"},
+		{name: "Gateway origin mismatch", args: []string{"--set", "publicURL=https://other.example.test", "--set", "gatewayAPI.enabled=true", "--set", "gatewayAPI.host=kubeloop.example.test"}, want: "exactly equal"},
+		{name: "Gateway parent", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "gatewayAPI.enabled=true", "--set", "gatewayAPI.host=kubeloop.example.test"}, want: "parentRef.name is required"},
+		{name: "Gateway class", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "gatewayAPI.enabled=true", "--set", "gatewayAPI.host=kubeloop.example.test", "--set", "gatewayAPI.gateway.create=true"}, want: "className is required"},
+		{name: "Gateway TLS certificate", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "gatewayAPI.enabled=true", "--set", "gatewayAPI.host=kubeloop.example.test", "--set", "gatewayAPI.gateway.create=true", "--set", "gatewayAPI.gateway.className=example"}, want: "tls.secretName is required"},
+		{name: "Gateway tunnel timeout", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "gatewayAPI.enabled=true", "--set", "gatewayAPI.host=kubeloop.example.test", "--set", "gatewayAPI.parentRef.name=shared", "--set", "gatewayAPI.parentRef.sectionName=https", "--set", "gatewayAPI.timeouts.tunnel=30m"}, want: "must be 0s"},
 		{name: "restricted egress without rules", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "networkPolicy.egress.enabled=true"}, want: "egress.controlPlane must contain"},
 		{name: "SQLite replicas", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.replicas=2"}, want: "controlPlane.replicas must be 1"},
 		{name: "datasource max open", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.storage.datasource.existingSecret=database", "--set", "controlPlane.storage.maxOpenConnections=0"}, want: "maxOpenConnections must be positive"},
 		{name: "datasource max idle", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.storage.datasource.existingSecret=database", "--set", "controlPlane.storage.maxOpenConnections=2", "--set", "controlPlane.storage.maxIdleConnections=3"}, want: "maxIdleConnections must not exceed"},
 		{name: "datasource retries", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.storage.datasource.existingSecret=database", "--set", "controlPlane.storage.transactionMaxRetries=11"}, want: "transactionMaxRetries must be between"},
-		{name: "ControlPlane relay secret", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set-string", "controlPlane.relay.existingSecret="}, want: "controlPlane.relay.existingSecret is required"},
-		{name: "invalid Registry auth", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.relayRegistry.authentication=password"}, want: "must be tokenreview or mtls"},
 		{name: "multi-replica endpoint", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "dataPlane.replicas=2"}, want: "must contain {podName} or {podUID}"},
 		{name: "in-memory Registry ControlPlane replicas", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.storage.datasource.existingSecret=database", "--set", "controlPlane.replicas=2"}, want: "in-memory Relay Registry"},
 		{name: "empty file roots", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set-json", "controlPlane.files.allowedRoots=[]"}, want: "allowedRoots must contain"},
@@ -777,7 +852,6 @@ func helmCommand(t *testing.T, extra ...string) *exec.Cmd {
 	chartFingerprint(t, chart)
 	args := []string{
 		"template", "test", chart, "--namespace", "kubeloop-system", "--include-crds",
-		"--set", "controlPlane.relay.existingSecret=test-relay-controlPlane",
 	}
 	args = append(args, extra...)
 	return exec.Command(helm, args...)

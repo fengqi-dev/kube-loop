@@ -4,7 +4,7 @@
 {{- if or (le (int .Values.dataPlane.relayRegistry.maxWebSocketSessions) 0) (le (int .Values.dataPlane.relayRegistry.maxStreamsPerSession) 0) -}}
 {{- fail "dataPlane Relay capacity limits must be positive" -}}
 {{- end -}}
-{{- if and (eq .Values.controlPlane.relayRegistry.authentication "tokenreview") (lt (int .Values.dataPlane.relayRegistry.tokenExpirationSeconds) 600) -}}
+{{- if lt (int .Values.dataPlane.relayRegistry.tokenExpirationSeconds) 600 -}}
 {{- fail "dataPlane.relayRegistry.tokenExpirationSeconds must be at least 600" -}}
 {{- end -}}
 {{- $dataPlaneLogLevel := lower (toString .Values.dataPlane.logLevel) -}}
@@ -91,11 +91,9 @@ spec:
             - name: relay-registry
               mountPath: /var/run/secrets/kubeloop/relay-registry
               readOnly: true
-            {{- if eq .Values.controlPlane.relayRegistry.authentication "tokenreview" }}
             - name: relay-identity
               mountPath: /var/run/secrets/kubeloop/relay-identity
               readOnly: true
-            {{- end }}
       volumes:
         - name: gateway-config
           configMap:
@@ -109,20 +107,10 @@ spec:
             defaultMode: 0400
             sources:
               - secret:
-                  name: {{ default .Values.controlPlane.relay.existingSecret .Values.controlPlane.relayRegistry.existingSecret | required "controlPlane.relayRegistry.existingSecret or controlPlane.relay.existingSecret is required" }}
+                  name: {{ include "kubeloop.relaySecretName" . }}
                   items:
-                    - key: {{ required "controlPlane.relayRegistry.caKey is required" .Values.controlPlane.relayRegistry.caKey }}
+                    - key: ca.crt
                       path: ca.crt
-              {{- if eq .Values.controlPlane.relayRegistry.authentication "mtls" }}
-              - secret:
-                  name: {{ required "dataPlane.relayRegistry.existingSecret is required for mTLS" .Values.dataPlane.relayRegistry.existingSecret }}
-                  items:
-                    - key: {{ required "dataPlane.relayRegistry.clientCertificateKey is required" .Values.dataPlane.relayRegistry.clientCertificateKey }}
-                      path: tls.crt
-                    - key: {{ required "dataPlane.relayRegistry.clientPrivateKeyKey is required" .Values.dataPlane.relayRegistry.clientPrivateKeyKey }}
-                      path: tls.key
-              {{- end }}
-        {{- if eq .Values.controlPlane.relayRegistry.authentication "tokenreview" }}
         - name: relay-identity
           projected:
             defaultMode: 0400
@@ -131,7 +119,6 @@ spec:
                   path: token
                   audience: {{ .Values.controlPlane.relayRegistry.tokenAudience | quote }}
                   expirationSeconds: {{ int .Values.dataPlane.relayRegistry.tokenExpirationSeconds }}
-        {{- end }}
       {{- with .Values.dataPlane.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

@@ -42,8 +42,8 @@ when both Ingress and HTTPRoute are enabled.
 
 The browser Management Plane listens on a separate port. Chart-managed Ingress
 and Gateway API routes expose `/api/admin/*` on the same public origin while
-keeping the Service itself private. Set `controlPlane.admin.publicURL` to
-the same value as `publicURL` when either route is enabled.
+keeping the Service itself private. It automatically uses the top-level
+`publicURL`; there is no separate Management Plane public URL setting.
 
 Without a chart-managed external route, open it through a local tunnel:
 
@@ -57,7 +57,6 @@ ClusterIP even if the public Service is a LoadBalancer. For same-origin access:
 ```yaml
 controlPlane:
   admin:
-    publicURL: http://kubeloop.example.com
     listenPort: 8081
     servicePort: 8081
 ```
@@ -82,14 +81,11 @@ ingress:
     nginx.ingress.kubernetes.io/proxy-body-size: "1m"
 ```
 
-To enable HTTPS, change both public URLs to `https://kubeloop.example.com` and
+To enable HTTPS, change `publicURL` to `https://kubeloop.example.com` and
 configure an existing certificate Secret:
 
 ```yaml
 publicURL: https://kubeloop.example.com
-controlPlane:
-  admin:
-    publicURL: https://kubeloop.example.com
 ingress:
   tls:
     enabled: true
@@ -147,13 +143,14 @@ printed by `helm install`, then delete the Secret after the password is changed.
 Set `controlPlane.admin.bootstrap.enabled=false` to retain the manual single-use
 bootstrap-token flow instead.
 
-The retained auth Secret contains two independent values:
+The retained auth Secret contains the authentication keys and, while bootstrap
+is enabled, the initial administrator password:
 
 - `oidc-signing-key.pem`: ECDSA P-256 PKCS#8 key for ES256 ID Tokens;
 - `hmac-secret`: exactly 32 bytes for Fosite opaque token signatures;
+- `initial-password`: the generated initial administrator password.
 
-Set `controlPlane.auth.oauth.existingSecret` to manage these keys externally.
-Never reuse RelayTicket keys or database credentials. Passwords use Argon2id;
+Never reuse authentication keys or database credentials. Passwords use Argon2id;
 KubeLoop authentication uses local username and password credentials only.
 
 ## Relay Registry and RelayTicket keys
@@ -165,38 +162,19 @@ summary, then acknowledges the applied generations by heartbeat. Control Plane
 derives the Relay ID from authenticated namespace, ServiceAccount and Pod UID;
 the registration body cannot choose it.
 
-Generate the RelayTicket signing key and a CA/server certificate for the
-internal Registry Service. The certificate SAN must cover its exact DNS name.
-For the installation example below that name is
-`kubeloop-kubeloop-control-plane-relay.kubeloop-system.svc`:
+By default, Helm generates an Ed25519 RelayTicket signing key, a private CA and
+a server certificate whose SAN covers the exact internal Registry Service DNS
+name. The retained Secret is reused with `lookup` on later upgrades, so an
+upgrade does not rotate the signing key, CA or server certificate.
 
-```shell
-openssl genpkey -algorithm ED25519 -out relay-signing-key.pem
+The generated Secret contains `signing-key.pem`, `tls.crt`, `tls.key` and
+`ca.crt`. Relay server key and certificate override parameters are intentionally
+not exposed; the internal trust boundary is fully managed by the chart.
 
-openssl req -x509 -newkey rsa:3072 -nodes -days 3650 \
-  -subj '/CN=KubeLoop Relay Registry CA' \
-  -keyout relay-registry-ca.key -out relay-registry-ca.crt
-openssl req -newkey rsa:3072 -nodes \
-  -subj '/CN=kubeloop-kubeloop-control-plane-relay.kubeloop-system.svc' \
-  -addext 'subjectAltName=DNS:kubeloop-kubeloop-control-plane-relay.kubeloop-system.svc' \
-  -keyout relay-registry.key -out relay-registry.csr
-openssl x509 -req -days 365 -sha256 \
-  -in relay-registry.csr -CA relay-registry-ca.crt -CAkey relay-registry-ca.key -CAcreateserial \
-  -copy_extensions copy -out relay-registry.crt
-
-kubectl -n kubeloop-system create secret generic kubeloop-relay-control-plane \
-  --from-file=signing-key.pem=relay-signing-key.pem \
-  --from-file=tls.crt=relay-registry.crt \
-  --from-file=tls.key=relay-registry.key \
-  --from-file=ca.crt=relay-registry-ca.crt
-```
-
-The scalable default authentication is `tokenreview`. Data Plane keeps
+Registry authentication is fixed to `tokenreview`. Data Plane keeps
 `automountServiceAccountToken: false`; Helm explicitly projects a ten-minute
 token whose only audience is `kubeloop-relay`. Control Plane verifies its Pod UID
 and ServiceAccount against Kubernetes before trusting topology or capacity.
-An mTLS/SPIFFE mode is also available, but each replica must receive a distinct
-Pod-bound client certificate.
 
 For one Data Plane replica, the advertised endpoint defaults to
 `publicURL + tunnelPath`. With multiple replicas, configure a routable endpoint
@@ -212,13 +190,9 @@ conformance milestone; the chart fails fast instead of creating split leases.
 ```yaml
 controlPlane:
   relay:
-    existingSecret: kubeloop-relay-control-plane
-    signingKeyKey: signing-key.pem
     keyID: primary
     ticketTTL: 1m
   relayRegistry:
-    enabled: true
-    authentication: tokenreview
     keyGeneration: 1
 dataPlane:
   streamIdleTimeout: 30m
@@ -601,12 +575,10 @@ The public URL is the only address desktop clients will need. It is the HTTP or 
 ```shell
 helm upgrade --install kubeloop \
   oci://ghcr.io/fengqi-dev/kube-loop/charts/kubeloop \
-  --version 2.0.0-beta.8 \
+  --version 2.0.0-beta.9 \
   --namespace kubeloop-system \
   --create-namespace \
   --set publicURL=http://kubeloop.example.com \
-  --set controlPlane.admin.publicURL=http://kubeloop.example.com \
-  --set controlPlane.relay.existingSecret=kubeloop-relay-control-plane \
   --set ingress.enabled=true \
   --set ingress.host=kubeloop.example.com \
   --set ingress.className=nginx

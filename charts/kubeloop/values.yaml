@@ -21,18 +21,14 @@ controlPlane:
   minClientVersion: ""
   auth:
     oauth:
-      # Independent authentication Secret. Helm creates and keeps the keys when omitted.
-      existingSecret: ""
+      # Helm creates and retains the authentication keys.
       oidcSigningKeyKey: oidc-signing-key.pem
       hmacSecretKey: hmac-secret
       keyID: primary
       accessTTL: 5m
       refreshTTL: 720h
   relay:
-    # Required. This Secret is mounted only into Control Plane and must contain
-    # an Ed25519 PKCS#8 private key used to sign short-lived RelayTickets.
-    existingSecret: ""
-    signingKeyKey: signing-key.pem
+    # Helm creates and retains the Ed25519 RelayTicket signing key.
     keyID: primary
     ticketTTL: 1m
   relayRegistry:
@@ -40,7 +36,6 @@ controlPlane:
     # default a short-lived, audience-bound projected ServiceAccount token is
     # authenticated through Kubernetes TokenReview; it is not the general Pod
     # API credential and automount remains disabled on Data Plane Pods.
-    authentication: tokenreview
     listenPort: 9443
     servicePort: 9443
     tokenAudience: kubeloop-relay
@@ -50,17 +45,9 @@ controlPlane:
     heartbeatAfter: 10s
     keyGeneration: 1
     keyValidity: 8760h
-    # Defaults to controlPlane.relay.existingSecret when empty. It must contain
-    # the internal HTTPS server certificate/private key and issuing CA.
-    existingSecret: ""
-    serverCertificateKey: tls.crt
-    serverPrivateKeyKey: tls.key
-    caKey: ca.crt
   admin:
-    # The browser Management Plane has an isolated HTTP listener. The default
-    # origin is intended for `kubectl port-forward`; set it to the exact HTTPS
-    # origin when publishing this port through a separately managed route.
-    publicURL: http://127.0.0.1:8081
+    # The browser Management Plane has an isolated HTTP listener and uses the
+    # top-level publicURL as its externally reachable origin.
     listenPort: 8081
     servicePort: 8081
     bootstrap:
@@ -70,7 +57,6 @@ controlPlane:
       # Kubernetes Secret and is immediately usable. Existing IAM
       # data is never changed.
       enabled: true
-      existingSecret: ""
       passwordKey: initial-password
       username: admin
       displayName: KubeLoop Administrator
@@ -202,12 +188,6 @@ dataPlane:
     controlPlaneURL: ""
     endpoint: ""
     serverName: ""
-    # Required only when controlPlane.relayRegistry.authentication=mtls. Each
-    # replica needs a distinct Pod-bound workload certificate; TokenReview is
-    # the scalable default.
-    existingSecret: ""
-    clientCertificateKey: tls.crt
-    clientPrivateKeyKey: tls.key
     tokenExpirationSeconds: 600
     replayEntries: 65536
     maxWebSocketSessions: 256

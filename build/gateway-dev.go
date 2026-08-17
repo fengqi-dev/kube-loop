@@ -7,29 +7,19 @@ package main
 
 import (
 	"bytes"
-	"crypto/ecdsa"
-	"crypto/ed25519"
-	"crypto/elliptic"
-	"crypto/rand"
-	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
-	"crypto/x509/pkix"
-	"encoding/hex"
 	"encoding/json"
-	"encoding/pem"
 	"errors"
 	"fmt"
 	"io/fs"
-	"math/big"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
-	"time"
 )
 
 const (
@@ -310,14 +300,7 @@ func deployDevelopmentStack(
 		return "", err
 	}
 	publicURL := "https://" + host
-	registryHost := developmentRelease + "-kubeloop-control-plane-relay." + developmentNamespace + ".svc"
 	materialDirectory := filepath.Join(root, "build", "development")
-	if err := ensureDevelopmentMaterial(materialDirectory, []string{host, registryHost}); err != nil {
-		return "", err
-	}
-	if err := ensureDevelopmentAuthMaterial(materialDirectory); err != nil {
-		return "", err
-	}
 	ingressCertificate, ingressKey, ingressCA, err := generateDevelopmentIngressCertificate(
 		root, materialDirectory, host,
 	)
@@ -336,22 +319,6 @@ func deployDevelopmentStack(
 		return "", err
 	}
 	if err := resetDevelopmentStorageForBaseline(root, contextName, materialDirectory); err != nil {
-		return "", err
-	}
-	relaySecret := developmentRelease + "-relay"
-	if err := applyGenericSecret(root, developmentNamespace, relaySecret, map[string]string{
-		"signing-key.pem": filepath.Join(materialDirectory, "signing-key.pem"),
-		"tls.crt":         filepath.Join(materialDirectory, "tls.crt"),
-		"tls.key":         filepath.Join(materialDirectory, "tls.key"),
-		"ca.crt":          filepath.Join(materialDirectory, "ca.crt"),
-	}); err != nil {
-		return "", err
-	}
-	authSecret := developmentRelease + "-auth"
-	if err := applyGenericSecret(root, developmentNamespace, authSecret, map[string]string{
-		"oidc-signing-key.pem": filepath.Join(materialDirectory, "oidc-signing-key.pem"),
-		"hmac-secret":          filepath.Join(materialDirectory, "hmac-secret"),
-	}); err != nil {
 		return "", err
 	}
 	ingressSecret := developmentRelease + "-ingress-tls"
@@ -379,7 +346,6 @@ func deployDevelopmentStack(
 		"--namespace", developmentNamespace,
 		"--reset-values", "--wait", "--rollback-on-failure", "--cleanup-on-fail", "--timeout", "5m", "--history-max", "5",
 		"--set-string", "publicURL=" + publicURL,
-		"--set-string", "controlPlane.admin.publicURL=" + publicURL,
 		"--set-string", "serviceID=" + serviceID,
 		"--set-string", "controlPlane.image.repository=" + controlPlaneRepository,
 		"--set-string", "controlPlane.image.tag=" + controlPlaneTag,
@@ -390,9 +356,6 @@ func deployDevelopmentStack(
 		"--set-string", "operator.image.repository=" + operatorRepository,
 		"--set-string", "operator.image.tag=" + operatorTag,
 		"--set-string", "operator.image.pullPolicy=IfNotPresent",
-		"--set-string", "controlPlane.relay.existingSecret=" + relaySecret,
-		"--set-string", "controlPlane.relayRegistry.existingSecret=" + relaySecret,
-		"--set-string", "controlPlane.auth.oauth.existingSecret=" + authSecret,
 		"--set-string", "controlPlane.relayRegistry.endpointAllowedHosts=" + host,
 		"--set-string", "dataPlane.relayRegistry.endpoint=wss://" + host + "/tunnel",
 		"--set", "controlPlane.development.enabled=true",
@@ -516,63 +479,6 @@ func resetDevelopmentStorageForBaseline(root, contextName, directory string) err
 	return nil
 }
 
-func ensureDevelopmentAuthMaterial(directory string) error {
-	signingKeyPath := filepath.Join(directory, "oidc-signing-key.pem")
-	hmacSecretPath := filepath.Join(directory, "hmac-secret")
-	if signingKey, err := os.ReadFile(signingKeyPath); err == nil {
-		block, rest := pem.Decode(signingKey)
-		parsed, parseErr := x509.ParsePKCS8PrivateKey(blockBytes(block))
-		key, validKey := parsed.(*ecdsa.PrivateKey)
-		hmacSecret, hmacErr := os.ReadFile(hmacSecretPath)
-		if block != nil && len(strings.TrimSpace(string(rest))) == 0 && parseErr == nil && validKey &&
-			key.Curve == elliptic.P256() && hmacErr == nil && len(strings.TrimSpace(string(hmacSecret))) == 32 {
-			return nil
-		}
-	}
-	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		return fmt.Errorf("generate development OIDC signing key: %w", err)
-	}
-	encoded, err := x509.MarshalPKCS8PrivateKey(key)
-	if err != nil {
-		return fmt.Errorf("encode development OIDC signing key: %w", err)
-	}
-	if err := os.WriteFile(signingKeyPath, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: encoded}), 0o600); err != nil {
-		return fmt.Errorf("write development OIDC signing key: %w", err)
-	}
-	random := make([]byte, 16)
-	if _, err := rand.Read(random); err != nil {
-		return fmt.Errorf("generate development HMAC secret: %w", err)
-	}
-	if err := os.WriteFile(hmacSecretPath, []byte(hex.EncodeToString(random)), 0o600); err != nil {
-		return fmt.Errorf("write development HMAC secret: %w", err)
-	}
-	return nil
-}
-
-func blockBytes(block *pem.Block) []byte {
-	if block == nil {
-		return nil
-	}
-	return block.Bytes
-}
-
-func ensureDevelopmentMaterial(directory string, dnsNames []string) error {
-	if developmentMaterialValid(directory, dnsNames) {
-		fmt.Printf("==> Reusing development TLS and Relay keys from %s\n", directory)
-		return nil
-	}
-	if importDevelopmentMaterial(directory) && developmentMaterialValid(directory, dnsNames) {
-		fmt.Printf("==> Imported existing development TLS and Relay keys into %s\n", directory)
-		return nil
-	}
-	if err := os.MkdirAll(directory, 0o700); err != nil {
-		return fmt.Errorf("create development material directory: %w", err)
-	}
-	fmt.Printf("==> Generating development TLS and Relay keys in %s\n", directory)
-	return writeDevelopmentMaterial(directory, dnsNames)
-}
-
 func generateDevelopmentIngressCertificate(root, directory, host string) (string, string, string, error) {
 	mkcert, err := exec.LookPath("mkcert")
 	if err != nil {
@@ -654,72 +560,6 @@ func validateDevelopmentIngressCertificate(certificateFile, privateKeyFile, caFi
 	return nil
 }
 
-func importDevelopmentMaterial(directory string) bool {
-	type secretFile struct {
-		secret string
-		key    string
-		mode   os.FileMode
-	}
-	files := []secretFile{
-		{secret: developmentRelease + "-relay", key: "signing-key.pem", mode: 0o600},
-		{secret: developmentRelease + "-relay", key: "tls.crt", mode: 0o644},
-		{secret: developmentRelease + "-relay", key: "tls.key", mode: 0o600},
-		{secret: developmentRelease + "-relay", key: "ca.crt", mode: 0o644},
-	}
-	contents := make(map[string][]byte, len(files))
-	for _, file := range files {
-		template := `{{ index .data "` + file.key + `" | base64decode }}`
-		output, err := exec.Command(
-			"kubectl", "get", "secret", file.secret,
-			"--namespace", developmentNamespace, "--output", "go-template="+template,
-		).Output()
-		if err != nil || len(output) == 0 {
-			return false
-		}
-		contents[file.key] = output
-	}
-	if err := os.MkdirAll(directory, 0o700); err != nil {
-		return false
-	}
-	for _, file := range files {
-		if err := os.WriteFile(filepath.Join(directory, file.key), contents[file.key], file.mode); err != nil {
-			return false
-		}
-	}
-	return true
-}
-
-func developmentMaterialValid(directory string, dnsNames []string) bool {
-	certificatePEM, err := os.ReadFile(filepath.Join(directory, "tls.crt"))
-	if err != nil {
-		return false
-	}
-	privateKeyPEM, err := os.ReadFile(filepath.Join(directory, "tls.key"))
-	if err != nil {
-		return false
-	}
-	pair, err := tls.X509KeyPair(certificatePEM, privateKeyPEM)
-	if err != nil || len(pair.Certificate) == 0 {
-		return false
-	}
-	certificate, err := x509.ParseCertificate(pair.Certificate[0])
-	if err != nil || time.Now().Add(24*time.Hour).After(certificate.NotAfter) {
-		return false
-	}
-	for _, dnsName := range dnsNames {
-		if certificate.VerifyHostname(dnsName) != nil {
-			return false
-		}
-	}
-	for _, name := range []string{"ca.crt", "signing-key.pem"} {
-		info, err := os.Stat(filepath.Join(directory, name))
-		if err != nil || info.IsDir() || info.Size() == 0 {
-			return false
-		}
-	}
-	return true
-}
-
 func developmentHost(contextName string) (string, error) {
 	if profile, ok := minikubeProfile(contextName); ok {
 		output, err := exec.Command("minikube", "-p", profile, "ip").Output()
@@ -733,60 +573,6 @@ func developmentHost(contextName string) (string, error) {
 		return "kubeloop." + address + ".sslip.io", nil
 	}
 	return "kubeloop.local", nil
-}
-
-func writeDevelopmentMaterial(directory string, dnsNames []string) error {
-	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		return fmt.Errorf("generate development signing key: %w", err)
-	}
-	privateDER, err := x509.MarshalPKCS8PrivateKey(privateKey)
-	if err != nil {
-		return fmt.Errorf("encode development signing key: %w", err)
-	}
-	privatePEM := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: privateDER})
-	tlsKey, err := rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil {
-		return fmt.Errorf("generate development TLS key: %w", err)
-	}
-	serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
-	if err != nil {
-		return fmt.Errorf("generate development TLS serial: %w", err)
-	}
-	now := time.Now().UTC()
-	template := &x509.Certificate{
-		SerialNumber:          serial,
-		Subject:               pkix.Name{CommonName: dnsNames[0], Organization: []string{"KubeLoop Development"}},
-		DNSNames:              dnsNames,
-		NotBefore:             now.Add(-time.Hour),
-		NotAfter:              now.Add(30 * 24 * time.Hour),
-		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment | x509.KeyUsageCertSign,
-		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-		IsCA:                  true,
-		BasicConstraintsValid: true,
-	}
-	certificateDER, err := x509.CreateCertificate(rand.Reader, template, template, &tlsKey.PublicKey, tlsKey)
-	if err != nil {
-		return fmt.Errorf("generate development TLS certificate: %w", err)
-	}
-	tlsCertificate := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certificateDER})
-	tlsPrivateKey := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(tlsKey)})
-	files := map[string][]byte{
-		"signing-key.pem": privatePEM,
-		"tls.crt":         tlsCertificate,
-		"tls.key":         tlsPrivateKey,
-		"ca.crt":          tlsCertificate,
-	}
-	for name, content := range files {
-		mode := os.FileMode(0o644)
-		if strings.HasSuffix(name, ".key") || name == "signing-key.pem" {
-			mode = 0o600
-		}
-		if err := os.WriteFile(filepath.Join(directory, name), content, mode); err != nil {
-			return fmt.Errorf("write development material %s: %w", name, err)
-		}
-	}
-	return nil
 }
 
 func writeEmbeddedDevelopmentCA(root, source string) error {
@@ -809,24 +595,6 @@ func applyNamespace(root, namespace string) error {
 	rendered, err := command.Output()
 	if err != nil {
 		return fmt.Errorf("render development namespace: %w", err)
-	}
-	return applyManifest(root, rendered)
-}
-
-func applyGenericSecret(root, namespace, name string, files map[string]string) error {
-	arguments := []string{"create", "secret", "generic", name, "--namespace", namespace}
-	keys := make([]string, 0, len(files))
-	for key := range files {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	for _, key := range keys {
-		arguments = append(arguments, "--from-file="+key+"="+files[key])
-	}
-	arguments = append(arguments, "--dry-run=client", "-o", "yaml")
-	rendered, err := exec.Command("kubectl", arguments...).Output()
-	if err != nil {
-		return fmt.Errorf("render development Secret %s: %w", name, err)
 	}
 	return applyManifest(root, rendered)
 }

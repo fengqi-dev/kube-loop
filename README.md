@@ -33,28 +33,24 @@ Requirements:
 
 - Kubernetes 1.25 or later and Helm 3
 - A hostname routed to a Kubernetes Ingress controller
-- The RelayTicket signing key and internal Relay Registry TLS Secret described in the
-  [Helm chart guide](charts/kubeloop/README.md#relay-registry-and-relayticket-keys)
 
-Install the released OCI chart after creating the `kubeloop-relay-control-plane`
-Secret in `kubeloop-system`:
+Install the released OCI chart. Helm generates and retains the RelayTicket
+signing key and internal Relay Registry TLS Secret by default:
 
 ```bash
 helm upgrade --install kubeloop \
   oci://ghcr.io/fengqi-dev/kube-loop/charts/kubeloop \
-  --version 2.0.0-beta.8 \
+  --version 2.0.0-beta.9 \
   --namespace kubeloop-system \
   --create-namespace \
   --set publicURL=http://kubeloop.example.com \
-  --set controlPlane.admin.publicURL=http://kubeloop.example.com \
-  --set controlPlane.relay.existingSecret=kubeloop-relay-control-plane \
   --set ingress.enabled=true \
   --set ingress.host=kubeloop.example.com \
   --set ingress.className=nginx \
   --wait
 ```
 
-Replace the version, hostname, Ingress class, and Secret names for your
+Replace the version, hostname, and Ingress class for your
 environment. Then inspect the generated initial-admin instructions and verify
 service discovery:
 
@@ -63,7 +59,7 @@ helm get notes kubeloop --namespace kubeloop-system
 curl http://kubeloop.example.com/.well-known/kubeloop
 ```
 
-Ingress TLS is disabled by default. For HTTPS, set both public URLs to
+Ingress TLS is disabled by default. For HTTPS, set `publicURL` to
 `https://...`, set `ingress.tls.enabled=true`, and provide
 `ingress.tls.secretName`.
 

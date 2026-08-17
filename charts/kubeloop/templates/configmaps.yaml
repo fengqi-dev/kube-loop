@@ -4,9 +4,6 @@
 {{- if and $development (not (regexMatch "^https://(localhost|127\\.[0-9]+\\.[0-9]+\\.[0-9]+|kubeloop\\.local|kubeloop\\.[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+\\.sslip\\.io)(:[0-9]+)?$" $publicURL)) -}}
 {{- fail "controlPlane.development.enabled requires a local, loopback, or kubeloop.<IPv4>.sslip.io publicURL" -}}
 {{- end -}}
-{{- if not (or (eq .Values.controlPlane.relayRegistry.authentication "tokenreview") (eq .Values.controlPlane.relayRegistry.authentication "mtls")) }}
-{{- fail "controlPlane.relayRegistry.authentication must be tokenreview or mtls" }}
-{{- end }}
 {{- if not .Values.controlPlane.files.allowedRoots }}
 {{- fail "controlPlane.files.allowedRoots must contain at least one absolute container path" }}
 {{- end }}
@@ -32,7 +29,6 @@
 {{- if eq (int $admin.listenPort) (int .Values.controlPlane.relayRegistry.listenPort) }}
 {{- fail "controlPlane.admin.listenPort must differ from controlPlane.relayRegistry.listenPort" }}
 {{- end }}
-{{- $adminPublicURL := required "controlPlane.admin.publicURL is required" $admin.publicURL }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -61,7 +57,7 @@ data:
           refreshTTL: {{ .Values.controlPlane.auth.oauth.refreshTTL | quote }}
       admin:
         listen: {{ printf ":%v" $admin.listenPort | quote }}
-        publicURL: {{ $adminPublicURL | quote }}
+        publicURL: {{ $publicURL | quote }}
         bootstrap:
           enabled: {{ $admin.bootstrap.enabled }}
           username: {{ $admin.bootstrap.username | quote }}
@@ -85,10 +81,7 @@ data:
           listen: {{ printf ":%v" .Values.controlPlane.relayRegistry.listenPort | quote }}
           certificateFile: "/var/run/secrets/kubeloop/relay-registry/tls.crt"
           privateKeyFile: "/var/run/secrets/kubeloop/relay-registry/tls.key"
-          {{- if eq .Values.controlPlane.relayRegistry.authentication "mtls" }}
-          clientCAFile: "/var/run/secrets/kubeloop/relay-registry/ca.crt"
-          {{- end }}
-          authentication: {{ .Values.controlPlane.relayRegistry.authentication | quote }}
+          authentication: "tokenreview"
           tokenAudience: {{ .Values.controlPlane.relayRegistry.tokenAudience | quote }}
           trustDomain: {{ .Values.controlPlane.relayRegistry.trustDomain | quote }}
           namespace: {{ .Release.Namespace | quote }}
@@ -132,12 +125,7 @@ data:
     "serverCAFile" "/var/run/secrets/kubeloop/relay-registry/ca.crt"
     "serverName" (default (printf "%s.%s.svc" (include "kubeloop.controlPlaneRegistryName" .) .Release.Namespace) .Values.dataPlane.relayRegistry.serverName)
     "replayEntries" (int .Values.dataPlane.relayRegistry.replayEntries) }}
-  {{- if eq .Values.controlPlane.relayRegistry.authentication "tokenreview" }}
   {{- $_ := set $gatewayRelay "bearerTokenFile" "/var/run/secrets/kubeloop/relay-identity/token" }}
-  {{- else }}
-  {{- $_ := set $gatewayRelay "clientCertificateFile" "/var/run/secrets/kubeloop/relay-registry/tls.crt" }}
-  {{- $_ := set $gatewayRelay "clientPrivateKeyFile" "/var/run/secrets/kubeloop/relay-registry/tls.key" }}
-  {{- end }}
     gateway:
     {{- dict
       "http" (dict "listen" ":8080" "path" .Values.dataPlane.tunnelPath)
