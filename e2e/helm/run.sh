@@ -251,6 +251,7 @@ EOF
 install_postgresql() {
   local directory="${WORK_DIR}/${POSTGRES_RELEASE}"
   local server_name="postgresql.${POSTGRES_NAMESPACE}.svc"
+  mkdir -p "${directory}"
   openssl req -x509 -newkey rsa:2048 -nodes -days 2 \
     -keyout "${directory}/postgresql-tls.key" -out "${directory}/postgresql-tls.crt" \
     -subj "/CN=${server_name}" \

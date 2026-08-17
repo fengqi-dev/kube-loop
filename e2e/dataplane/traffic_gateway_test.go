@@ -5,6 +5,8 @@ package dataplane
 import (
 	"context"
 	"crypto/ed25519"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -37,8 +39,55 @@ const (
 )
 
 type e2eTrafficGateway struct {
-	tickets    *ticketservice.Service
-	httpClient *http.Client
+	tickets     *ticketservice.Service
+	httpClient  *http.Client
+	certificate *x509.Certificate
+}
+
+func startE2EControlPlaneServer(
+	t *testing.T,
+	handler http.Handler,
+	gateway e2eTrafficGateway,
+) (*httptest.Server, *http.Client) {
+	t.Helper()
+	server := httptest.NewTLSServer(handler)
+	transport, ok := gateway.httpClient.Transport.(*http.Transport)
+	if !ok || gateway.certificate == nil {
+		server.Close()
+		t.Fatal("e2e Gateway does not expose its TLS certificate")
+	}
+	transport = transport.Clone()
+	trustedRoots := x509.NewCertPool()
+	trustedRoots.AddCert(gateway.certificate)
+	trustedRoots.AddCert(server.Certificate())
+	transport.TLSClientConfig = &tls.Config{
+		MinVersion: tls.VersionTLS12,
+		RootCAs:    trustedRoots,
+	}
+	client := *gateway.httpClient
+	client.Transport = transport
+	return server, &client
+}
+
+func TestE2EControlPlaneClientTrustsControlPlaneAndGateway(t *testing.T) {
+	gateway := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writer.WriteHeader(http.StatusNoContent)
+	}))
+	defer gateway.Close()
+	controlPlane, client := startE2EControlPlaneServer(t, http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writer.WriteHeader(http.StatusNoContent)
+	}), e2eTrafficGateway{httpClient: gateway.Client(), certificate: gateway.Certificate()})
+	defer controlPlane.Close()
+	for _, endpoint := range []string{gateway.URL, controlPlane.URL} {
+		response, err := client.Get(endpoint)
+		if err != nil {
+			t.Fatalf("GET %s: %v", endpoint, err)
+		}
+		_ = response.Body.Close()
+		if response.StatusCode != http.StatusNoContent {
+			t.Fatalf("GET %s status = %d, want %d", endpoint, response.StatusCode, http.StatusNoContent)
+		}
+	}
 }
 
 type e2eTrafficSessionSource struct {
@@ -188,7 +237,9 @@ func startE2ETrafficGateway(
 	if response.StatusCode != http.StatusNotFound {
 		t.Fatalf("legacy traffic route status = %d, want %d", response.StatusCode, http.StatusNotFound)
 	}
-	return e2eTrafficGateway{tickets: tickets, httpClient: server.Client()}
+	return e2eTrafficGateway{
+		tickets: tickets, httpClient: server.Client(), certificate: server.Certificate(),
+	}
 }
 
 type e2eTrafficAllocator struct {

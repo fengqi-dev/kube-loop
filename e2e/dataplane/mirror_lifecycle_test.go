@@ -299,7 +299,7 @@ func startMirrorLifecycleController(
 	if err != nil {
 		t.Fatal(err)
 	}
-	return httptest.NewServer(server.Handler()), gateway.httpClient
+	return startE2EControlPlaneServer(t, server.Handler(), gateway)
 }
 
 func startRealMirror(
