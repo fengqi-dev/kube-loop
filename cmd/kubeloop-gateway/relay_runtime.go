@@ -3,7 +3,6 @@ package main
 import (
 	"errors"
 	"strings"
-	"sync"
 
 	"github.com/fengqi-dev/kube-loop/internal/gateway"
 	"github.com/fengqi-dev/kube-loop/internal/gateway/relayagent"
@@ -39,8 +38,6 @@ type relayRuntimeReporter struct {
 	websocket       *websocketmux.Handler
 	maximumPhysical uint32
 	maximumLogical  uint32
-	mu              sync.RWMutex
-	traffic         trafficRuntime
 }
 
 func (reporter *relayRuntimeReporter) Snapshot() (relaycontrol.State, relaycontrol.Capacity) {
@@ -48,20 +45,10 @@ func (reporter *relayRuntimeReporter) Snapshot() (relaycontrol.State, relaycontr
 	if reporter.gateway.Draining() || reporter.websocket.Draining() {
 		state = relaycontrol.StateDraining
 	}
-	reporter.mu.RLock()
-	traffic := reporter.traffic
-	reporter.mu.RUnlock()
-	trafficSessions := 0
-	if traffic != nil {
-		trafficSessions = traffic.ActiveSessions()
-		if traffic.Draining() {
-			state = relaycontrol.StateDraining
-		}
-	}
 	return state, relaycontrol.Capacity{
 		MaximumPhysicalConnections: reporter.maximumPhysical,
 		MaximumLogicalStreams:      reporter.maximumLogical,
-		ActivePhysicalConnections:  uint32(reporter.websocket.ActiveSessions() + trafficSessions),
+		ActivePhysicalConnections:  uint32(reporter.websocket.ActiveSessions()),
 		ActiveLogicalStreams:       uint32(reporter.gateway.ActiveConnections()),
 	}
 }
@@ -69,24 +56,6 @@ func (reporter *relayRuntimeReporter) Snapshot() (relaycontrol.State, relaycontr
 func (reporter *relayRuntimeReporter) BeginDrain() {
 	reporter.gateway.BeginDrain()
 	reporter.websocket.BeginDrain()
-	reporter.mu.RLock()
-	traffic := reporter.traffic
-	reporter.mu.RUnlock()
-	if traffic != nil {
-		traffic.BeginDrain()
-	}
-}
-
-func (reporter *relayRuntimeReporter) SetTraffic(traffic trafficRuntime) {
-	reporter.mu.Lock()
-	reporter.traffic = traffic
-	reporter.mu.Unlock()
-}
-
-type trafficRuntime interface {
-	ActiveSessions() int
-	Draining() bool
-	BeginDrain()
 }
 
 type runtimeGateway interface {

@@ -9,18 +9,22 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/coder/websocket"
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
 	"github.com/fengqi-dev/kube-loop/internal/client/reverserelay"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficstream"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
 	"github.com/google/uuid"
 )
 
 type Client interface {
 	CreatePreview(context.Context, profile.Profile, remote.Session, remote.PreviewSpec, string) (remote.PreviewTask, error)
 	GetPreview(context.Context, profile.Profile, remote.Session, string) (remote.PreviewTask, error)
-	OpenPreviewStream(context.Context, profile.Profile, remote.Session, remote.PreviewTask) (*websocket.Conn, error)
 	StopPreview(context.Context, profile.Profile, remote.Session, string) (remote.PreviewTask, error)
+}
+
+type TrafficStreamOpener interface {
+	OpenTrafficStream(context.Context, string, string, string) (*trafficstream.FrameConn, error)
 }
 
 type LocalTarget = reverserelay.Target
@@ -44,7 +48,8 @@ type Info struct {
 }
 
 type Config struct {
-	DialContext DialContextFunc
+	DialContext    DialContextFunc
+	TrafficStreams TrafficStreamOpener
 }
 
 type activePreview struct {
@@ -58,22 +63,26 @@ type activePreview struct {
 }
 
 type Manager struct {
-	client Client
-	dial   DialContextFunc
+	client  Client
+	streams TrafficStreamOpener
+	dial    DialContextFunc
 
 	mu     sync.Mutex
 	active map[string]*activePreview
 }
 
 func NewManager(client Client, config Config) (*Manager, error) {
-	if client == nil {
-		return nil, errors.New("Preview client is required")
+	if client == nil || config.TrafficStreams == nil {
+		return nil, errors.New("Preview control client and Data Plane stream opener are required")
 	}
 	if config.DialContext == nil {
 		dialer := &net.Dialer{}
 		config.DialContext = dialer.DialContext
 	}
-	return &Manager{client: client, dial: config.DialContext, active: make(map[string]*activePreview)}, nil
+	return &Manager{
+		client: client, streams: config.TrafficStreams, dial: config.DialContext,
+		active: make(map[string]*activePreview),
+	}, nil
 }
 
 func (manager *Manager) Start(
@@ -100,14 +109,17 @@ func (manager *Manager) Start(
 		_, stopErr := manager.client.StopPreview(ctx, serverProfile, session, task.ID)
 		return Info{}, errors.Join(err, stopErr)
 	}
-	connection, err := manager.client.OpenPreviewStream(ctx, serverProfile, session, task)
-	if err != nil {
+	connection, err := manager.streams.OpenTrafficStream(ctx, serverProfile.ID, tunnel.TrafficModePreview, task.ID)
+	if err != nil || connection == nil {
+		if err == nil {
+			err = errors.New("Data Plane returned an empty Preview stream")
+		}
 		_, stopErr := manager.client.StopPreview(ctx, serverProfile, session, task.ID)
 		return Info{}, errors.Join(err, stopErr)
 	}
 	relay := reverserelay.New(connection, targets, manager.dial)
 	if err := relay.ReadReady(ctx); err != nil {
-		_ = connection.Close(websocket.StatusProtocolError, "invalid Preview readiness")
+		_ = connection.Close()
 		_, stopErr := manager.client.StopPreview(ctx, serverProfile, session, task.ID)
 		return Info{}, errors.Join(err, stopErr)
 	}
@@ -118,13 +130,13 @@ func (manager *Manager) Start(
 		}
 		_, stopErr := manager.client.StopPreview(ctx, serverProfile, session, task.ID)
 		streamErr := relay.Stop(ctx)
-		_ = connection.Close(websocket.StatusNormalClosure, "Preview startup failed")
+		_ = connection.Close()
 		return Info{}, errors.Join(err, stopErr, streamErr)
 	}
 	if err := matchTask(running, request.Name, targets); err != nil {
 		_, stopErr := manager.client.StopPreview(ctx, serverProfile, session, task.ID)
 		streamErr := relay.Stop(ctx)
-		_ = connection.Close(websocket.StatusNormalClosure, "Preview identity changed")
+		_ = connection.Close()
 		return Info{}, errors.Join(err, stopErr, streamErr)
 	}
 
@@ -142,7 +154,7 @@ func (manager *Manager) Start(
 		cancel()
 		_, stopErr := manager.client.StopPreview(ctx, serverProfile, session, running.ID)
 		streamErr := relay.Stop(ctx)
-		_ = connection.Close(websocket.StatusNormalClosure, "duplicate local Preview")
+		_ = connection.Close()
 		return Info{}, errors.Join(errors.New("Preview Task is already active locally"), stopErr, streamErr)
 	}
 	manager.active[running.ID] = entry

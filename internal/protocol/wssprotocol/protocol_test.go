@@ -32,6 +32,22 @@ func TestHandshakeDocumentsRoundTripStrictly(t *testing.T) {
 	}
 }
 
+func TestHandshakeAdvertisesTunnelTrafficStreams(t *testing.T) {
+	for name, capabilities := range map[string][]string{
+		"client": NewClientHello("2.4.0", "22222222-2222-4222-8222-222222222222").Capabilities,
+		"server": NewServerHello("2.4.0", Limits{}).Capabilities,
+	} {
+		t.Run(name, func(t *testing.T) {
+			for _, capability := range capabilities {
+				if capability == CapabilityTrafficWebSocket {
+					return
+				}
+			}
+			t.Fatal("traffic.websocket.v1 capability is missing")
+		})
+	}
+}
+
 func TestHandshakeRejectsUnknownMissingDuplicateAndOversizedValues(t *testing.T) {
 	tests := [][]byte{
 		[]byte(`{"type":"client_hello","protocolVersions":["2.0"],"clientVersion":"2.0.0","deviceId":"device","capabilities":["smux.v2"],"unknown":true}`),

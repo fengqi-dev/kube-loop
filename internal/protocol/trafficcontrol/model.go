@@ -12,7 +12,6 @@ import (
 
 const (
 	InternalPathPrefix = "/internal/v1/traffic"
-	PublicPathPrefix   = "/traffic/v1"
 	MaximumBodyBytes   = 256 << 10
 )
 

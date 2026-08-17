@@ -11,16 +11,17 @@ import (
 	"strings"
 	"time"
 
-	"github.com/coder/websocket"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
 	version "github.com/hashicorp/go-version"
 )
 
 const (
-	Version                 = "2.0"
-	Subprotocol             = "kubeloop-mux-v2"
-	VersionHeader           = "KubeLoop-WSS-Version"
-	MaximumHandshakeBytes   = 8 << 10
-	DefaultHandshakeTimeout = 10 * time.Second
+	Version                    = "2.0"
+	Subprotocol                = "kubeloop-mux-v2"
+	VersionHeader              = "KubeLoop-WSS-Version"
+	CapabilityTrafficWebSocket = "traffic.websocket.v1"
+	MaximumHandshakeBytes      = 8 << 10
+	DefaultHandshakeTimeout    = 10 * time.Second
 
 	KindClientHello = "client_hello"
 	KindServerHello = "server_hello"
@@ -82,7 +83,7 @@ func NewClientHello(clientVersion, deviceID string) ClientHello {
 	return ClientHello{
 		Type: KindClientHello, ProtocolVersions: []string{Version},
 		ClientVersion: clientVersion, DeviceID: deviceID,
-		Capabilities: []string{"cancel", "half-close", "ping-pong", "smux.v2", "tunnel.open.v2"},
+		Capabilities: []string{"cancel", "half-close", "ping-pong", "smux.v2", CapabilityTrafficWebSocket, "tunnel.open.v2"},
 	}
 }
 
@@ -92,7 +93,7 @@ func NewServerHello(serverVersion string, limits Limits) ServerHello {
 	}
 	return ServerHello{
 		Type: KindServerHello, ProtocolVersion: Version, ServerVersion: serverVersion,
-		Capabilities: []string{"cancel", "half-close", "ping-pong", "smux.v2", "tunnel.open.v2"},
+		Capabilities: []string{"cancel", "half-close", "ping-pong", "smux.v2", CapabilityTrafficWebSocket, "tunnel.open.v2"},
 		Limits:       limits,
 	}
 }

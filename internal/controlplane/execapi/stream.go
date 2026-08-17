@@ -7,8 +7,8 @@ import (
 	"io"
 	"sync"
 
-	"github.com/coder/websocket"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/execstream"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
 	"k8s.io/client-go/tools/remotecommand"
 )
 

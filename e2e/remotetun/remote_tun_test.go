@@ -221,15 +221,18 @@ func startGateway(
 				return gatewaymux.Identity{}, err
 			}
 			return gatewaymux.Identity{
-				IdentityID: claims.IdentityID, DeviceID: claims.DeviceID, SessionID: claims.SessionID,
+				IdentityID: claims.IdentityID, Groups: append([]string(nil), claims.Groups...),
+				DeviceID: claims.DeviceID, SessionID: claims.SessionID,
 				SessionGeneration: claims.SessionGeneration, Namespace: claims.Namespace,
 				NetworkSpecHash: claims.NetworkSpecHash, ExpiresAt: time.Unix(claims.ExpiresAt, 0).UTC(),
 			}, nil
 		}),
 		ServerVersion: "e2e", MaxSessions: 8, MaxSessionsPerUser: 2, MaxStreamsPerSession: 16,
-		Handle: func(identity gatewaymux.Identity, connection net.Conn) {
-			core.ServeConnForAuthorization(connection, gateway.SessionAuthorization{
-				RequestID: identity.RequestID, SessionID: identity.SessionID, Generation: identity.SessionGeneration,
+		Handle: func(ctx context.Context, identity gatewaymux.Identity, connection net.Conn) {
+			core.ServeConnForAuthorizationContext(ctx, connection, gateway.SessionAuthorization{
+				RequestID: identity.RequestID, IdentityID: identity.IdentityID,
+				Groups: append([]string(nil), identity.Groups...), DeviceID: identity.DeviceID,
+				SessionID: identity.SessionID, Generation: identity.SessionGeneration,
 				Namespace: identity.Namespace, NetworkSpecHash: identity.NetworkSpecHash,
 			})
 		},

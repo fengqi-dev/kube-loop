@@ -5,23 +5,22 @@ import (
 	"errors"
 	"io"
 	"net"
-	"net/http"
-	"net/http/httptest"
-	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/coder/websocket"
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/mirrorstream"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficstream"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
 	"github.com/google/uuid"
 )
 
 type testMirrorClient struct {
-	endpoint string
-	task     remote.MirrorTask
+	connection *trafficstream.FrameConn
+	openErr    error
+	task       remote.MirrorTask
 
 	mu        sync.Mutex
 	openCalls int
@@ -34,14 +33,16 @@ func (client *testMirrorClient) CreateMirror(
 	return client.task, nil
 }
 
-func (client *testMirrorClient) OpenMirrorStream(
-	ctx context.Context, _ profile.Profile, _ remote.Session, _ remote.MirrorTask,
-) (*websocket.Conn, error) {
+func (client *testMirrorClient) OpenTrafficStream(
+	_ context.Context, profileID, mode, taskID string,
+) (*trafficstream.FrameConn, error) {
 	client.mu.Lock()
 	client.openCalls++
 	client.mu.Unlock()
-	connection, _, err := websocket.Dial(ctx, client.endpoint, nil)
-	return connection, err
+	if profileID != "server" || mode != tunnel.TrafficModeMirror || taskID != client.task.ID {
+		return nil, errors.New("Mirror Traffic stream selector changed")
+	}
+	return client.connection, client.openErr
 }
 
 func (client *testMirrorClient) StopMirror(
@@ -104,15 +105,10 @@ func TestManagerCopiesTCPAndUDPRequestsAndDiscardsShadowResponses(t *testing.T) 
 		udpDone <- writeErr
 	}()
 
+	connection, gatewayConnection := mustTrafficConnections(t)
 	serverDone := make(chan error, 1)
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		connection, acceptErr := websocket.Accept(writer, request, nil)
-		if acceptErr != nil {
-			serverDone <- acceptErr
-			return
-		}
-		defer connection.CloseNow()
-		ctx, cancel := context.WithTimeout(request.Context(), 10*time.Second)
+	go func() {
+		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 		defer cancel()
 		for _, frame := range []mirrorstream.Frame{
 			{Type: mirrorstream.Ready},
@@ -123,20 +119,19 @@ func TestManagerCopiesTCPAndUDPRequestsAndDiscardsShadowResponses(t *testing.T) 
 			{Type: mirrorstream.Datagram, StreamID: 2, ServicePort: 53, Protocol: mirrorstream.ProtocolUDP, Payload: []byte("udp-request")},
 			{Type: mirrorstream.Close, StreamID: 2},
 		} {
-			if writeErr := writeMirrorTestFrame(ctx, connection, frame); writeErr != nil {
+			if writeErr := writeMirrorTestFrame(ctx, gatewayConnection, frame); writeErr != nil {
 				serverDone <- writeErr
 				return
 			}
 		}
-		stop, readErr := readMirrorTestFrame(ctx, connection)
+		stop, readErr := readMirrorTestFrame(ctx, gatewayConnection)
 		if readErr != nil || stop.Type != mirrorstream.Stop {
 			serverDone <- errors.Join(readErr, errors.New("client sent a shadow response or omitted Stop"))
 			return
 		}
-		_ = writeMirrorTestFrame(ctx, connection, mirrorstream.Frame{Type: mirrorstream.Stop})
+		_ = writeMirrorTestFrame(ctx, gatewayConnection, mirrorstream.Frame{Type: mirrorstream.Stop})
 		serverDone <- nil
-	}))
-	defer server.Close()
+	}()
 
 	now := time.Now().UTC()
 	session := remote.Session{
@@ -148,8 +143,8 @@ func TestManagerCopiesTCPAndUDPRequestsAndDiscardsShadowResponses(t *testing.T) 
 		Ports:     []remote.MirrorPort{{ServicePort: 53, Protocol: "udp"}, {ServicePort: 80, Protocol: "tcp"}},
 		CreatedAt: now, UpdatedAt: now, ExpiresAt: session.ExpiresAt,
 	}
-	client := &testMirrorClient{endpoint: "ws" + strings.TrimPrefix(server.URL, "http"), task: task}
-	manager, err := NewManager(client, Config{})
+	client := &testMirrorClient{connection: connection, task: task}
+	manager, err := NewManager(client, Config{TrafficStreams: client})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,12 +192,12 @@ func TestManagerCopiesTCPAndUDPRequestsAndDiscardsShadowResponses(t *testing.T) 
 func TestManagerCompensatesWhenMirrorStreamCannotOpen(t *testing.T) {
 	now := time.Now().UTC()
 	session := remote.Session{ID: uuid.NewString(), Namespace: "development", State: "active", ExpiresAt: now.Add(time.Hour)}
-	client := &testMirrorClient{endpoint: "://invalid", task: remote.MirrorTask{
+	client := &testMirrorClient{task: remote.MirrorTask{
 		ID: uuid.NewString(), SessionID: session.ID, Namespace: session.Namespace, State: "pending",
 		Service: "api", Ports: []remote.MirrorPort{{ServicePort: 80, Protocol: "tcp"}},
 		CreatedAt: now, UpdatedAt: now, ExpiresAt: session.ExpiresAt,
 	}}
-	manager, err := NewManager(client, Config{})
+	manager, err := NewManager(client, Config{TrafficStreams: client})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -222,12 +217,12 @@ func TestManagerCompensatesWhenMirrorStreamCannotOpen(t *testing.T) {
 func TestManagerRejectsUnboundMirrorBeforeOpeningStream(t *testing.T) {
 	now := time.Now().UTC()
 	session := remote.Session{ID: uuid.NewString(), Namespace: "development", State: "active", ExpiresAt: now.Add(time.Hour)}
-	client := &testMirrorClient{endpoint: "://invalid", task: remote.MirrorTask{
+	client := &testMirrorClient{openErr: errors.New("stream unavailable"), task: remote.MirrorTask{
 		ID: uuid.NewString(), SessionID: session.ID, Namespace: session.Namespace, State: "pending",
 		Service: "api", Ports: []remote.MirrorPort{{ServicePort: 80, Protocol: "tcp"}},
 		CreatedAt: now, UpdatedAt: now, ExpiresAt: session.ExpiresAt,
 	}}
-	manager, err := NewManager(client, Config{})
+	manager, err := NewManager(client, Config{TrafficStreams: client})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -300,7 +295,7 @@ func TestManagerRejectsGatewayPortSubstitutionBeforeOpeningStream(t *testing.T) 
 		Service: "api", ClusterIP: "10.96.0.20", Ports: []remote.MirrorPort{{ServicePort: 81, Protocol: "tcp"}},
 		CreatedAt: now, UpdatedAt: now, ExpiresAt: session.ExpiresAt,
 	}}
-	manager, err := NewManager(client, Config{})
+	manager, err := NewManager(client, Config{TrafficStreams: client})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -317,21 +312,47 @@ func TestManagerRejectsGatewayPortSubstitutionBeforeOpeningStream(t *testing.T) 
 	}
 }
 
-func writeMirrorTestFrame(ctx context.Context, connection *websocket.Conn, frame mirrorstream.Frame) error {
+func writeMirrorTestFrame(ctx context.Context, connection *trafficstream.FrameConn, frame mirrorstream.Frame) error {
 	encoded, err := mirrorstream.Encode(frame)
 	if err != nil {
 		return err
 	}
-	return connection.Write(ctx, websocket.MessageBinary, encoded)
+	return connection.WriteFrame(ctx, encoded)
 }
 
-func readMirrorTestFrame(ctx context.Context, connection *websocket.Conn) (mirrorstream.Frame, error) {
-	messageType, encoded, err := connection.Read(ctx)
+func readMirrorTestFrame(ctx context.Context, connection *trafficstream.FrameConn) (mirrorstream.Frame, error) {
+	encoded, err := connection.ReadFrame(ctx)
 	if err != nil {
 		return mirrorstream.Frame{}, err
 	}
-	if messageType != websocket.MessageBinary {
-		return mirrorstream.Frame{}, errors.New("expected binary Mirror frame")
-	}
 	return mirrorstream.Decode(encoded)
+}
+
+func mustTrafficConnections(t *testing.T) (*trafficstream.FrameConn, *trafficstream.FrameConn) {
+	t.Helper()
+	clientSide, gatewaySide := net.Pipe()
+	accepted := make(chan struct {
+		connection *trafficstream.FrameConn
+		err        error
+	}, 1)
+	go func() {
+		connection, err := trafficstream.Accept(t.Context(), gatewaySide)
+		accepted <- struct {
+			connection *trafficstream.FrameConn
+			err        error
+		}{connection: connection, err: err}
+	}()
+	client, err := trafficstream.Dial(t.Context(), clientSide)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := <-accepted
+	if server.err != nil {
+		t.Fatal(server.err)
+	}
+	t.Cleanup(func() {
+		_ = client.Close()
+		_ = server.connection.Close()
+	})
+	return client, server.connection
 }

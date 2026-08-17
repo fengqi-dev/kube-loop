@@ -11,7 +11,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/coder/websocket"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/authorization"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
@@ -22,6 +21,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/taskapi"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/execstream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/remotetask"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v5"
 	"k8s.io/apimachinery/pkg/util/validation"
@@ -156,7 +156,7 @@ func (handler *Service) create(
 	if err != nil {
 		return internalError(err)
 	}
-	ctx.Response().Header().Set("Location", fmt.Sprintf("%s/sessions/%s/exec/%s/stream?namespace=%s", controlplane.SessionAPIPathPrefix, session.ID, task.ID, session.Namespace))
+	ctx.Response().Header().Set("Location", fmt.Sprintf("%s/sessions/%s/exec/%s/stream?namespace=%s", controlplane.APIPathPrefix, session.ID, task.ID, session.Namespace))
 	if !created {
 		ctx.Response().Header().Set("Idempotent-Replayed", "true")
 	}

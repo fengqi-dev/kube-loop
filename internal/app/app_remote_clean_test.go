@@ -54,9 +54,9 @@ func TestCleanDirectoryWithOnlyServerURLBrowsesRemoteInventory(t *testing.T) {
 				"revocation_endpoint": server.URL + "/oauth2/revoke"})
 		case "/oauth2/token":
 			writeAppTokenResponse(writer, "clean-access", "clean-refresh")
-		case "/kubeloop/api/version":
+		case "/api/version":
 			_ = json.NewEncoder(writer).Encode(clientremote.Version{GitVersion: "v1.31.2", GatewayVersion: "v2-clean"})
-		case "/kubeloop/api/namespaces":
+		case "/api/namespaces":
 			_, _ = writer.Write([]byte(`{"items":[{"name":"development","status":"Active"}]}`))
 		case "/api/sessions":
 			now := time.Now().UTC()
@@ -69,7 +69,7 @@ func TestCleanDirectoryWithOnlyServerURLBrowsesRemoteInventory(t *testing.T) {
 				CreatedAt: now, UpdatedAt: now, LastHeartbeatAt: now, ExpiresAt: now.Add(2 * time.Minute),
 				NetworkSpec: network, NetworkSpecHash: networkHash, Capabilities: &snapshot,
 			})
-		case "/kubeloop/api/namespaces/development/pods":
+		case "/api/namespaces/development/pods":
 			_, _ = writer.Write([]byte(`{"items":[{"name":"api-0","namespace":"development","phase":"Running","ready":true,"containers":["api"]}]}`))
 		case "/api/sessions/" + sessionID:
 			now := time.Now().UTC()

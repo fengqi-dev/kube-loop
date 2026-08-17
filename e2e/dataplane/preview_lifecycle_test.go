@@ -29,6 +29,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/ticketapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/trafficbindingclient"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
 	"github.com/google/uuid"
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
@@ -103,7 +104,8 @@ func TestRealPreviewLifecycleOwnershipAndStaleRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	manager, err := clientpreview.NewManager(remoteClient, clientpreview.Config{})
+	dataPlane := startE2EDataPlane(t, ctx, remoteClient, gatewayClient, serverProfile, remoteSession)
+	manager, err := clientpreview.NewManager(remoteClient, clientpreview.Config{TrafficStreams: dataPlane})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,13 +180,13 @@ func TestRealPreviewLifecycleOwnershipAndStaleRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create Preview for client crash: %v", err)
 	}
-	crashedConnection, err := remoteClient.OpenPreviewStream(ctx, serverProfile, remoteSession, crashed)
+	crashedConnection, err := dataPlane.OpenTrafficStream(ctx, serverProfile.ID, tunnel.TrafficModePreview, crashed.ID)
 	if err != nil {
 		t.Fatalf("open Preview stream for client crash: %v", err)
 	}
 	waitForRealPreviewState(t, ctx, stateStore, crashed.ID, "running")
 	assertPreviewOwned(t, ctx, kubeClient, stateStore, crashedName, crashed.ID)
-	crashedConnection.CloseNow()
+	_ = crashedConnection.Close()
 	waitForRealPreviewState(t, ctx, stateStore, crashed.ID, "failed")
 	assertPreviewAbsent(t, ctx, kubeClient, bindingConfig, stateStore, crashedName, crashed.ID)
 

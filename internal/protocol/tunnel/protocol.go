@@ -20,6 +20,7 @@ const (
 	CommandTCP     byte = 1
 	CommandUDP     byte = 2
 	CommandControl byte = 3
+	CommandTraffic byte = 4
 
 	StatusOK    byte = 0
 	StatusError byte = 1
@@ -28,6 +29,18 @@ const (
 	maxHostSize     = 1024
 	maxErrorSize    = 4096
 	maxIDSize       = 256
+
+	trafficModeExchange byte = 1
+	trafficModeMirror   byte = 2
+	trafficModePreview  byte = 3
+	trafficTaskIDSize        = 36
+	trafficOpenBodySize      = 1 + trafficTaskIDSize
+)
+
+const (
+	TrafficModeExchange = "exchange"
+	TrafficModeMirror   = "mirror"
+	TrafficModePreview  = "preview"
 )
 
 var magic = [4]byte{'K', 'C', 'G', 2}
@@ -69,6 +82,13 @@ type OpenRequest struct {
 	Command byte
 	Host    string
 	Port    uint16
+}
+
+// TrafficOpenRequest identifies one reverse traffic Task carried by this
+// logical stream. TaskID is always the canonical, lowercase UUID form.
+type TrafficOpenRequest struct {
+	Mode   string
+	TaskID string
 }
 
 func (r OpenRequest) Address() string {
@@ -124,6 +144,54 @@ func ReadOpenBody(r io.Reader, command byte) (OpenRequest, error) {
 		return OpenRequest{}, errors.New("target port is required")
 	}
 	return OpenRequest{Command: command, Host: string(target[:hostSize]), Port: port}, nil
+}
+
+// WriteTrafficOpen opens an Exchange, Mirror, or Preview Task on an existing
+// tunnel multiplexer connection.
+func WriteTrafficOpen(w io.Writer, request TrafficOpenRequest, token SessionToken) error {
+	mode, err := encodeTrafficMode(request.Mode)
+	if err != nil {
+		return err
+	}
+	if err := validateCanonicalTaskID(request.TaskID); err != nil {
+		return err
+	}
+	value, err := appendSessionHeader(make([]byte, 0, 5+len(token)+trafficOpenBodySize), CommandTraffic, token)
+	if err != nil {
+		return err
+	}
+	value = append(value, mode)
+	value = append(value, request.TaskID...)
+	return writeAll(w, value)
+}
+
+func ReadTrafficOpen(r io.Reader) (TrafficOpenRequest, error) {
+	header, err := ReadSessionHeader(r)
+	if err != nil {
+		return TrafficOpenRequest{}, err
+	}
+	if header.Command != CommandTraffic {
+		return TrafficOpenRequest{}, fmt.Errorf("unsupported command %d", header.Command)
+	}
+	return ReadTrafficOpenBody(r)
+}
+
+// ReadTrafficOpenBody reads the fixed-size Task selector after the tunnel
+// session header was already consumed.
+func ReadTrafficOpenBody(r io.Reader) (TrafficOpenRequest, error) {
+	var body [trafficOpenBodySize]byte
+	if _, err := io.ReadFull(r, body[:]); err != nil {
+		return TrafficOpenRequest{}, err
+	}
+	mode, err := decodeTrafficMode(body[0])
+	if err != nil {
+		return TrafficOpenRequest{}, err
+	}
+	taskID := string(body[1:])
+	if err := validateCanonicalTaskID(taskID); err != nil {
+		return TrafficOpenRequest{}, err
+	}
+	return TrafficOpenRequest{Mode: mode, TaskID: taskID}, nil
 }
 
 // ReadSessionHeader reads the protocol marker, command, and tenant capability.
@@ -257,6 +325,40 @@ func appendSessionHeader(value []byte, command byte, token SessionToken) ([]byte
 func appendUint16String(value []byte, text string) []byte {
 	value = binary.BigEndian.AppendUint16(value, uint16(len(text)))
 	return append(value, text...)
+}
+
+func encodeTrafficMode(mode string) (byte, error) {
+	switch mode {
+	case TrafficModeExchange:
+		return trafficModeExchange, nil
+	case TrafficModeMirror:
+		return trafficModeMirror, nil
+	case TrafficModePreview:
+		return trafficModePreview, nil
+	default:
+		return 0, errors.New("traffic mode is invalid")
+	}
+}
+
+func decodeTrafficMode(mode byte) (string, error) {
+	switch mode {
+	case trafficModeExchange:
+		return TrafficModeExchange, nil
+	case trafficModeMirror:
+		return TrafficModeMirror, nil
+	case trafficModePreview:
+		return TrafficModePreview, nil
+	default:
+		return "", errors.New("traffic mode is invalid")
+	}
+}
+
+func validateCanonicalTaskID(taskID string) error {
+	parsed, err := uuid.Parse(taskID)
+	if err != nil || parsed.String() != taskID {
+		return errors.New("traffic Task ID must be a canonical UUID")
+	}
+	return nil
 }
 
 func writeAll(w io.Writer, value []byte) error {

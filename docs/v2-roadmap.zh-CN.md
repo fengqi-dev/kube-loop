@@ -140,7 +140,7 @@ SQLite 模式的部署约束：
 | --- | --- | --- | --- |
 | V2-001 | 编写客户端/Gateway 信任边界 ADR | `docs/adr/` 架构决策 | 明确凭证、Token、Kubernetes 权限和本地特权边界 |
 | V2-003 | 选择授权模型 | Authorization ADR | 明确 Gateway Policy、Kubernetes Impersonation 或两者的优先顺序 |
-| V2-004 | 定义协议版本策略 | API version ADR | 明确 `/kubeloop/api`、WSS protocol version、最低客户端版本和错误码 |
+| V2-004 | 定义协议版本策略 | API version ADR | 明确 `/api`、WSS protocol version、最低客户端版本和错误码 |
 | V2-005 | 定义 Session 所有权 | Session ADR | 明确用户、设备、Session、Task、Stream、Kubernetes 资源之间的归属 |
 | V2-006 | 定义 Gateway HA 边界 | HA ADR | 明确 v2.0 使用 sticky session，活动 Stream 不跨 Pod 迁移 |
 | V2-007 | 完成威胁建模 | Threat model | 覆盖 Token 盗用、callback 劫持、越权、SSRF、跨 Session 和资源残留 |
@@ -227,7 +227,7 @@ SQLite 模式的部署约束：
   - 增加缓存策略和 contract test。
   - 2026-08-09：已实现 discovery、`/health/live`、`/health/ready` 与 contract test；默认不声明尚未配置的认证方式和功能。
 
-- [x] **V2-102：建立 `/kubeloop/api` HTTP 框架。**
+- [x] **V2-102：建立 `/api` HTTP 框架。**
   - 统一 request ID、JSON 编解码、错误映射、超时、body 大小限制和 panic recovery。
   - 所有 handler 依赖窄接口，禁止直接访问全局 clientset。
   - 2026-08-09：已实现 request ID、严格 JSON 解码、类型化错误、请求 context 超时、body 限制和 panic recovery；API 默认拒绝未认证请求，并通过 `Authenticator`/`APIHandler` 窄接口注入后续实现。
@@ -241,7 +241,7 @@ SQLite 模式的部署约束：
 - [x] **V2-104：生成或维护类型化客户端 SDK。**
   - 客户端封装 discovery、Token、HTTP API、WSS 和错误类型。
   - UI/Wails binding 不直接拼接 endpoint 或解析裸 JSON。
-  - 2026-08-10（完成）：`internal/client` 已作为纯客户端 SDK 边界，分别封装同源 discovery、OIDC 登录与 Token 刷新/撤销、安全凭据存储、带并发单飞刷新和一次 401 重试的 `/kubeloop/api` HTTP 客户端、RelayTicket/WSS v2 连接池、Cluster Session/Data Plane 以及 Port Forward、exec、文件、Pod SSH、Exchange、Mirror、Preview 等类型化远程 Task；所有请求/响应都有有界 body、超时、目标/字段/分页/Session 绑定校验，SDK 依赖图禁止 Control Plane、Data Plane 服务端、本地 Kubernetes、V1 Session/Store 和 Wails runtime。HTTP `APIError` 暴露 status、稳定 code、field、request ID；认证端点新增类型化 `auth.APIError`，discovery 新增 `CompatibilityError` 和 `VERSION_MISMATCH`/`CLIENT_VERSION_UNSUPPORTED` 常量，WSS 提供带支持版本的 `HandshakeError`，UI 无需解析错误字符串。桌面组合根只注入 SDK/Manager，V2 Wails bindings 只接收/返回领域 struct；新增架构测试扫描生产 bindings 与 `components/server`，禁止 `net/http`、裸 WebSocket、`fetch`、`JSON.parse`、`/kubeloop/api` 和 `/auth/` 路径回流到 UI/Wails。Go 全量 test/vet 和前端 TypeScript/Vite production build 通过。
+  - 2026-08-10（完成）：`internal/client` 已作为纯客户端 SDK 边界，分别封装同源 discovery、OIDC 登录与 Token 刷新/撤销、安全凭据存储、带并发单飞刷新和一次 401 重试的 `/api` HTTP 客户端、RelayTicket/WSS v2 连接池、Cluster Session/Data Plane 以及 Port Forward、exec、文件、Pod SSH、Exchange、Mirror、Preview 等类型化远程 Task；所有请求/响应都有有界 body、超时、目标/字段/分页/Session 绑定校验，SDK 依赖图禁止 Control Plane、Data Plane 服务端、本地 Kubernetes、V1 Session/Store 和 Wails runtime。HTTP `APIError` 暴露 status、稳定 code、field、request ID；认证端点新增类型化 `auth.APIError`，discovery 新增 `CompatibilityError` 和 `VERSION_MISMATCH`/`CLIENT_VERSION_UNSUPPORTED` 常量，WSS 提供带支持版本的 `HandshakeError`，UI 无需解析错误字符串。桌面组合根只注入 SDK/Manager，V2 Wails bindings 只接收/返回领域 struct；新增架构测试扫描生产 bindings 与 `components/server`，禁止 `net/http`、裸 WebSocket、`fetch`、`JSON.parse`、`/api` 和 `/auth/` 路径回流到 UI/Wails。Go 全量 test/vet 和前端 TypeScript/Vite production build 通过。
 
 - [x] **V2-105：建立协议 Contract Test。**
   - 当前客户端和 Gateway 必须完成严格的 discovery、HTTP 与 WSS v2 握手；未知字段、缺失字段和版本不匹配均在创建数据流前拒绝。
@@ -367,12 +367,12 @@ Gateway 使用统一的 `AuthProvider` 抽象，支持 OIDC，并通过独立的
 - [x] **V2-307：实现统一授权中间层。**
   - HTTP handler、Task 创建和 WSS stream open 必须调用同一个 Authorizer。
   - 任何 feature manager 不允许绕过 Authorizer 直接创建流量。
-  - 2026-08-10（完成）：`/kubeloop/api` 在任何业务 handler 前只调用同一个 `authorization.Authorizer`，并将规范化授权请求与命中 Rule 作为授权证明写入 context；拒绝发生在资源查询前且统一返回 `FORBIDDEN`。`APIRouter` 对 exact route、feature prefix 与 fallback 统一要求该允许证明，因此直接调用 Router 也无法绕过 Policy 进入 Task manager 或 WSS upgrade。契约测试覆盖 RelayTicket、Port Forward、Pod exec 创建，以及 Pod exec/file/exchange/mirror/preview stream 均恰好经过一次共享 Authorizer，并验证缺少证明时 feature handler 不会执行。RelayTicket 创建映射为独立的 `relay-tickets/create` 资源；Data Plane 不复制 Gateway Policy，而是只接受该授权结果签发且含 `tunnel` operation 的短期 Ticket，并将每个协议流绑定到 Ticket Session 与 NetworkSpec。
+  - 2026-08-10（完成）：`/api` 在任何业务 handler 前只调用同一个 `authorization.Authorizer`，并将规范化授权请求与命中 Rule 作为授权证明写入 context；拒绝发生在资源查询前且统一返回 `FORBIDDEN`。`APIRouter` 对 exact route、feature prefix 与 fallback 统一要求该允许证明，因此直接调用 Router 也无法绕过 Policy 进入 Task manager 或 WSS upgrade。契约测试覆盖 RelayTicket、Port Forward、Pod exec 创建，以及 Pod exec/file/exchange/mirror/preview stream 均恰好经过一次共享 Authorizer，并验证缺少证明时 feature handler 不会执行。RelayTicket 创建映射为独立的 `relay-tickets/create` 资源；Data Plane 不复制 Gateway Policy，而是只接受该授权结果签发且含 `tunnel` operation 的短期 Ticket，并将每个协议流绑定到 Ticket Session 与 NetworkSpec。
 
 - [x] **V2-308：实现审计日志。**
   - 记录 request ID、identity ID、session ID、operation、namespace、resource、result 和 latency。
   - Token、命令输出、文件内容、OIDC claims 原文不进入审计日志。
-  - 2026-08-10（完成）：所有 `/kubeloop/api` 请求记录 request ID、identity ID、可信 session ID、operation、namespace、resource kind/name、授权 Rule、outcome、HTTP status 和 latency 到 append-only Audit Repository；拒绝也在资源查询前留下统一证据。真实 Task Repository 统一包装 `UpdateState/ClaimStale`，使 Port Forward、Pod exec、文件传输/管理、Exchange、Mirror、Preview 及其恢复 worker 的每次成功状态变化，都与 `task.transition` AuditEvent 在同一 SQLite/PostgreSQL 事务提交；audit append 失败会回滚状态 CAS。API transition 沿用框架 request ID，后台 transition 生成 `background-` correlation ID；事件只含 Identity/Task/Session ID、namespace、from/to state、source、outcome 与时间，不复制 Task spec/result、Token、OIDC claims、命令/输出、文件名/内容或网络 payload。SQLite/PostgreSQL 共用 conformance test 固定三个 lifecycle event 的字段与排序，Pod exec HTTP/WSS 测试固定 API/background correlation 及敏感字段白名单，故障注入测试证明 audit 表写失败时 Task 仍保持原状态。
+  - 2026-08-10（完成）：所有 `/api` 请求记录 request ID、identity ID、可信 session ID、operation、namespace、resource kind/name、授权 Rule、outcome、HTTP status 和 latency 到 append-only Audit Repository；拒绝也在资源查询前留下统一证据。真实 Task Repository 统一包装 `UpdateState/ClaimStale`，使 Port Forward、Pod exec、文件传输/管理、Exchange、Mirror、Preview 及其恢复 worker 的每次成功状态变化，都与 `task.transition` AuditEvent 在同一 SQLite/PostgreSQL 事务提交；audit append 失败会回滚状态 CAS。API transition 沿用框架 request ID，后台 transition 生成 `background-` correlation ID；事件只含 Identity/Task/Session ID、namespace、from/to state、source、outcome 与时间，不复制 Task spec/result、Token、OIDC claims、命令/输出、文件名/内容或网络 payload。SQLite/PostgreSQL 共用 conformance test 固定三个 lifecycle event 的字段与排序，Pod exec HTTP/WSS 测试固定 API/background correlation 及敏感字段白名单，故障注入测试证明 audit 表写失败时 Task 仍保持原状态。
 
 - [x] **V2-311：实现 RelayTicket。**
   - Control Plane 签发短期 Ticket，绑定 identity、device、session、relay、operation、NetworkSpec hash、expiry 和 jti。
@@ -391,7 +391,7 @@ Gateway 使用统一的 `AuthProvider` 抽象，支持 OIDC，并通过独立的
 - [x] **V2-401：迁移 ServerVersion 和 Capability Probe。**
   - Gateway 返回经过授权的能力集合，而不是让客户端推测 RBAC。
   - 能力结果与 identity、namespace 和 Gateway 版本绑定。
-  - 2026-08-10（完成）：`/kubeloop/api/version` 同时返回 Kubernetes 与 Gateway 版本；namespace 级 `/kubeloop/api/capabilities` 是带 schema version 的授权快照，显式绑定 identity、namespace 与 Gateway build。能力由完整 Gateway Policy 工作流与 Kubernetes `SelfSubjectAccessReview` 取交集，覆盖 inventory、Tunnel（Session + RelayTicket）、Port Forward、exec、file、exchange、mirror 与 preview。客户端仅保留默认 30 秒、128 项的有界内存缓存，键包含 Server Profile/地址、当前设备与 refresh credential 的单向摘要、identity、namespace 和 Gateway version；登录切换、Token 轮换、namespace 变化、Gateway 升级或 TTL 到期都会重新探测，且每个实际请求仍独立授权。单元测试覆盖缺失任一工作流策略即不发布能力、响应绑定校验、缓存副本隔离、TTL 失效、Gateway 版本变化、identity/credential 变化和 namespace 隔离。
+  - 2026-08-10（完成）：`/api/version` 同时返回 Kubernetes 与 Gateway 版本；namespace 级 `/api/capabilities` 是带 schema version 的授权快照，显式绑定 identity、namespace 与 Gateway build。能力由完整 Gateway Policy 工作流与 Kubernetes `SelfSubjectAccessReview` 取交集，覆盖 inventory、Tunnel（Session + RelayTicket）、Port Forward、exec、file、exchange、mirror 与 preview。客户端仅保留默认 30 秒、128 项的有界内存缓存，键包含 Server Profile/地址、当前设备与 refresh credential 的单向摘要、identity、namespace 和 Gateway version；登录切换、Token 轮换、namespace 变化、Gateway 升级或 TTL 到期都会重新探测，且每个实际请求仍独立授权。单元测试覆盖缺失任一工作流策略即不发布能力、响应绑定校验、缓存副本隔离、TTL 失效、Gateway 版本变化、identity/credential 变化和 namespace 隔离。
 
 - [x] **V2-402：迁移 Namespace/Pod/Service Inventory。**
   - 提供分页、过滤和 watch/resync 机制。
@@ -409,7 +409,7 @@ Gateway 使用统一的 `AuthProvider` 抽象，支持 OIDC，并通过独立的
   - `POST /api/sessions` 创建 Session，返回 `sessionID`、能力、NetworkSpec 和过期时间。
   - 支持 get、heartbeat、disconnect 和幂等 create。
   - Session 与 identity/device 绑定，其他用户不能查询或停止。
-  - 2026-08-10（完成）：已实现 namespace query 预授权后的 create/get/heartbeat/disconnect；创建使用 `Idempotency-Key`，状态更新使用 generation/`If-Match` 乐观锁。Session 绑定 identity、device、cluster 和 namespace，TTL heartbeat 续期受绝对最大生命周期限制，过期会话不可复活；所有权不匹配统一返回 404。创建时由服务端发现 NetworkSpec，canonical JSON/hash 经 migration v5 持久化并随全部生命周期响应返回；RelayTicket 只绑定该持久化摘要，客户端自报摘要会被拒绝。创建响应同时携带由 `/kubeloop/api/capabilities` 同一发现路径生成的完整 capability snapshot，使用共享 `internal/protocol/capability` 契约校验 schema、identity、namespace、Gateway version、条目边界与去重；客户端验证后直接填充按认证身份隔离的短期能力缓存，heartbeat/disconnect 只保留本地副本且每个实际操作仍重新授权。单元、客户端契约、关键 race、E2E build-only 编译和全量非 E2E 回归通过。
+  - 2026-08-10（完成）：已实现 namespace query 预授权后的 create/get/heartbeat/disconnect；创建使用 `Idempotency-Key`，状态更新使用 generation/`If-Match` 乐观锁。Session 绑定 identity、device、cluster 和 namespace，TTL heartbeat 续期受绝对最大生命周期限制，过期会话不可复活；所有权不匹配统一返回 404。创建时由服务端发现 NetworkSpec，canonical JSON/hash 经 migration v5 持久化并随全部生命周期响应返回；RelayTicket 只绑定该持久化摘要，客户端自报摘要会被拒绝。创建响应同时携带由 `/api/capabilities` 同一发现路径生成的完整 capability snapshot，使用共享 `internal/protocol/capability` 契约校验 schema、identity、namespace、Gateway version、条目边界与去重；客户端验证后直接填充按认证身份隔离的短期能力缓存，heartbeat/disconnect 只保留本地副本且每个实际操作仍重新授权。单元、客户端契约、关键 race、E2E build-only 编译和全量非 E2E 回归通过。
 
 - [x] **V2-405：实现服务端 Session Registry。**
   - 管理 Session、Task、Stream、反向监听和 Kubernetes 资源所有权。
@@ -622,9 +622,9 @@ Gateway 使用统一的 `AuthProvider` 抽象，支持 OIDC，并通过独立的
 - [x] **V2-902：配置对象 Repository。**
   - 2026-08-16（初始版本）：配置对象、active object pointer、幂等 change request、bootstrap 退役状态与 append-only 审计直接包含在初始 schema；不提供旧数据库升级或字段转换。
 - [x] **V2-903：只读管理 API。**
-  - 2026-08-15（完成）：管理路由提供 Cookie Session 鉴权、当前 Identity group 解析、OAuth grant 吊销/过期检查、同源与重复 Cookie 拒绝，以及同步 CSRF 中间件。`GET /api/admin/bootstrap` 直接返回管理员状态和已授权 Namespace；不再对外暴露细粒度 capability 列表。分页、对象查找前授权、脱敏和审计边界保持不变。
+  - 2026-08-15（完成）：管理路由提供 Cookie Session 鉴权、当前 Identity group 解析、OAuth grant 吊销/过期检查、同源与重复 Cookie 拒绝，以及同步 CSRF 中间件。`GET /admin/bootstrap` 直接返回管理员状态和已授权 Namespace；不再对外暴露细粒度 capability 列表。分页、对象查找前授权、脱敏和审计边界保持不变。
 - [x] **V2-904：只读管理 UI。**
-  - 2026-08-10（完成）：Control Plane 在 `/api/admin/ui` 内嵌无 CDN、无第三方运行时代码的响应式只读后台，覆盖运行状态、Identity、Cluster Session、Task、Relay 和 Audit；列表复用服务端 opaque cursor，namespace-admin 只显示当前身份 `namespaceScopes` 内的 namespace 与 Session/Task 导航，其他页面按 capability 完全裁剪。浏览器从 discovery 选择 OIDC；OIDC 管理回调必须由 Control Plane 以完整 URL 精确列入白名单，只允许 HTTPS 或 loopback HTTP，并继续使用 state、nonce 与两层 PKCE。Access/Refresh Token 仅在 JS 内存中用于一次管理 Session 交换，随后清空且不进入 localStorage/sessionStorage；管理 Cookie 保持 HttpOnly/SameSite=Strict，sessionStorage 只保存同步 CSRF 与短期 OIDC 事务材料。退出使用 CSRF 防护的 `DELETE /sessions/current`，在同一事务中撤销 Session 并审计。静态 handler 只允许 GET/HEAD 和三个固定资产，设置 `default-src 'none'`、self-only script/style/connect、frame/object/base 禁止及 COOP/CORP；自动测试检查固定路径、CSP、无远程代码/`eval`/Token 持久化，真实本地浏览器检查桌面和 390px 响应式布局、语义导航/表格及零控制台错误。Minikube/OIDC 真实 E2E 仍按约定统一留到 V2-908。
+  - 2026-08-10（完成）：Control Plane 在 `/admin/ui` 内嵌无 CDN、无第三方运行时代码的响应式只读后台，覆盖运行状态、Identity、Cluster Session、Task、Relay 和 Audit；列表复用服务端 opaque cursor，namespace-admin 只显示当前身份 `namespaceScopes` 内的 namespace 与 Session/Task 导航，其他页面按 capability 完全裁剪。浏览器从 discovery 选择 OIDC；OIDC 管理回调必须由 Control Plane 以完整 URL 精确列入白名单，只允许 HTTPS 或 loopback HTTP，并继续使用 state、nonce 与两层 PKCE。Access/Refresh Token 仅在 JS 内存中用于一次管理 Session 交换，随后清空且不进入 localStorage/sessionStorage；管理 Cookie 保持 HttpOnly/SameSite=Strict，sessionStorage 只保存同步 CSRF 与短期 OIDC 事务材料。退出使用 CSRF 防护的 `DELETE /sessions/current`，在同一事务中撤销 Session 并审计。静态 handler 只允许 GET/HEAD 和三个固定资产，设置 `default-src 'none'`、self-only script/style/connect、frame/object/base 禁止及 COOP/CORP；自动测试检查固定路径、CSP、无远程代码/`eval`/Token 持久化，真实本地浏览器检查桌面和 390px 响应式布局、语义导航/表格及零控制台错误。Minikube/OIDC 真实 E2E 仍按约定统一留到 V2-908。
 - [x] **V2-905：访问/网络策略管理。**
   - 2026-08-14（破坏性迁移）：管理策略 API 保留单例读取、draft、dry-run 和 publish；配置 POST 继续经过 Cookie Management Session、同源校验、同步 CSRF、有界 `Idempotency-Key` 与变更原因，但不再使用 `If-Match`，也不提供 rollback。draft 通过持久 change request 做请求哈希回放，publish 必须复用 draft 幂等键且按 change ID 可安全重试。发布在同一事务中提交 active object pointer、bootstrap 永久退役和审计，成功后原子刷新进程内 authorizer，失败立即 fail closed。内嵌控制台只展示读取、编辑、dry-run 和发布入口。
 - [x] **V2-906：本地用户与用户组管理。**
@@ -702,7 +702,7 @@ ADR / Threat Model
 7. V2-100：独立 Control Plane command。
 8. V2-111：独立 Data Plane command。
 9. V2-101：`/.well-known/kubeloop`。
-10. V2-102：`/kubeloop/api` 基础框架。
+10. V2-102：`/api` 基础框架。
 11. V2-200：Helm Chart 最小安装。
 12. V2-201：最小 RBAC。
 13. V2-205：Helm install/uninstall E2E。

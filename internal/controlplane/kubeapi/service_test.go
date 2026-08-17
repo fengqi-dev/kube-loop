@@ -80,17 +80,17 @@ func TestReadOnlyKubernetesRoutesUseIdentityAndStableDocuments(t *testing.T) {
 		path string
 		want []string
 	}{
-		{path: "/kubeloop/api/version", want: []string{`"gitVersion":"v1.31.4"`, `"gatewayVersion":"v2-test"`}},
-		{path: "/kubeloop/api/capabilities?namespace=development", want: []string{
+		{path: "/api/version", want: []string{`"gitVersion":"v1.31.4"`, `"gatewayVersion":"v2-test"`}},
+		{path: "/api/capabilities?namespace=development", want: []string{
 			`"schemaVersion":1`, `"identityId":"identity-123"`, `"namespace":"development"`, `"gatewayVersion":"v2-test"`,
 			`"capabilities":["pods.get","pods.list","pods.watch","services.get","services.list","cluster.tunnel","ports.forward","pods.exec","pods.files","pods.files.manage","services.exchange","services.mirror","services.preview"]`,
 		}},
-		{path: "/kubeloop/api/namespaces?limit=10", want: []string{`"name":"development"`}},
-		{path: "/kubeloop/api/namespaces/development", want: []string{`"status":"Active"`}},
-		{path: "/kubeloop/api/namespaces/development/pods", want: []string{`"name":"api-0"`, `"ready":true`, `"containers":["api","sidecar"]`, `"ports":[{"name":"http","port":8080,"protocol":"TCP"}]`}},
-		{path: "/kubeloop/api/namespaces/development/pods/api-0", want: []string{`"name":"api-0"`, `"phase":"Running"`}},
-		{path: "/kubeloop/api/namespaces/development/services", want: []string{`"clusterIp":"10.96.0.10"`, `"targetPort":"8080"`}},
-		{path: "/kubeloop/api/namespaces/development/services/api", want: []string{`"name":"api"`, `"port":80`}},
+		{path: "/api/namespaces?limit=10", want: []string{`"name":"development"`}},
+		{path: "/api/namespaces/development", want: []string{`"status":"Active"`}},
+		{path: "/api/namespaces/development/pods", want: []string{`"name":"api-0"`, `"ready":true`, `"containers":["api","sidecar"]`, `"ports":[{"name":"http","port":8080,"protocol":"TCP"}]`}},
+		{path: "/api/namespaces/development/pods/api-0", want: []string{`"name":"api-0"`, `"phase":"Running"`}},
+		{path: "/api/namespaces/development/services", want: []string{`"clusterIp":"10.96.0.10"`, `"targetPort":"8080"`}},
+		{path: "/api/namespaces/development/services/api", want: []string{`"name":"api"`, `"port":80`}},
 	}
 	for _, test := range tests {
 		t.Run(test.path, func(t *testing.T) {
@@ -127,15 +127,15 @@ func TestInvalidRoutesAndPaginationDoNotReachKubernetes(t *testing.T) {
 		status int
 		field  string
 	}{
-		{method: http.MethodGet, path: "/kubeloop/api/namespaces?limit=0", status: http.StatusBadRequest, field: "limit"},
-		{method: http.MethodGet, path: "/kubeloop/api/namespaces?limit=1&limit=2", status: http.StatusBadRequest, field: "limit"},
-		{method: http.MethodGet, path: "/kubeloop/api/namespaces?watch=true", status: http.StatusBadRequest, field: "watch"},
-		{method: http.MethodGet, path: "/kubeloop/api/namespaces?labelSelector=app%20in%20(", status: http.StatusBadRequest, field: "labelSelector"},
-		{method: http.MethodGet, path: "/kubeloop/api/namespaces?fieldSelector=metadata.name%3Ddevelopment%0A", status: http.StatusBadRequest, field: "fieldSelector"},
-		{method: http.MethodGet, path: "/kubeloop/api/capabilities", status: http.StatusBadRequest, field: "namespace"},
-		{method: http.MethodGet, path: "/kubeloop/api/namespaces/Bad_Name/pods", status: http.StatusBadRequest, field: "namespace"},
-		{method: http.MethodGet, path: "/kubeloop/api/namespaces/development/pods/", status: http.StatusNotFound},
-		{method: http.MethodPost, path: "/kubeloop/api/namespaces", status: http.StatusNotFound},
+		{method: http.MethodGet, path: "/api/namespaces?limit=0", status: http.StatusBadRequest, field: "limit"},
+		{method: http.MethodGet, path: "/api/namespaces?limit=1&limit=2", status: http.StatusBadRequest, field: "limit"},
+		{method: http.MethodGet, path: "/api/namespaces?watch=true", status: http.StatusBadRequest, field: "watch"},
+		{method: http.MethodGet, path: "/api/namespaces?labelSelector=app%20in%20(", status: http.StatusBadRequest, field: "labelSelector"},
+		{method: http.MethodGet, path: "/api/namespaces?fieldSelector=metadata.name%3Ddevelopment%0A", status: http.StatusBadRequest, field: "fieldSelector"},
+		{method: http.MethodGet, path: "/api/capabilities", status: http.StatusBadRequest, field: "namespace"},
+		{method: http.MethodGet, path: "/api/namespaces/Bad_Name/pods", status: http.StatusBadRequest, field: "namespace"},
+		{method: http.MethodGet, path: "/api/namespaces/development/pods/", status: http.StatusNotFound},
+		{method: http.MethodPost, path: "/api/namespaces", status: http.StatusNotFound},
 	}
 	for _, test := range tests {
 		response := httptest.NewRecorder()
@@ -177,7 +177,7 @@ func TestNamespaceInventoryForwardsValidatedSelectors(t *testing.T) {
 	response := httptest.NewRecorder()
 	server.Handler().ServeHTTP(response, httptest.NewRequest(
 		http.MethodGet,
-		"/kubeloop/api/namespaces?labelSelector=team%3Dplatform&fieldSelector=status.phase%3DActive",
+		"/api/namespaces?labelSelector=team%3Dplatform&fieldSelector=status.phase%3DActive",
 		nil,
 	))
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"name":"development"`) ||
@@ -198,7 +198,7 @@ func TestNamespaceInventoryDoesNotApplyIAMAuthorization(t *testing.T) {
 	defer upstream.Close()
 	server := newServerWithPolicy(t, upstream.URL, authorization.NewAuthenticated())
 	response := httptest.NewRecorder()
-	server.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/kubeloop/api/namespaces", nil))
+	server.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/namespaces", nil))
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"name":"secret"`) {
 		t.Fatalf("namespace list status = %d body = %s", response.Code, response.Body.String())
 	}
@@ -213,7 +213,7 @@ func TestKubernetesErrorsAreSanitized(t *testing.T) {
 	defer upstream.Close()
 	server := newServer(t, upstream.URL)
 	response := httptest.NewRecorder()
-	server.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/kubeloop/api/namespaces", nil))
+	server.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/namespaces", nil))
 	if response.Code != http.StatusForbidden || strings.Contains(response.Body.String(), "secret RBAC details") {
 		t.Fatalf("status = %d body = %s", response.Code, response.Body.String())
 	}

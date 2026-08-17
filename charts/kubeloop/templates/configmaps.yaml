@@ -1,8 +1,8 @@
 {{- $publicURL := required "publicURL is required (for example https://kubeloop.example.com)" .Values.publicURL }}
 {{- include "kubeloop.validateExternalAccess" . }}
 {{- $development := .Values.controlPlane.development.enabled -}}
-{{- if and $development (not (regexMatch "^https://(localhost|127\\.[0-9]+\\.[0-9]+\\.[0-9]+|kubeloop\\.local|kubeloop\\.[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+\\.sslip\\.io)(:[0-9]+)?$" $publicURL)) -}}
-{{- fail "controlPlane.development.enabled requires a local, loopback, or kubeloop.<IPv4>.sslip.io publicURL" -}}
+{{- if and $development (not (regexMatch "^https://(localhost|127\\.[0-9]+\\.[0-9]+\\.[0-9]+|kubeloop(-dev)?\\.local|kubeloop(-dev)?\\.[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+\\.sslip\\.io)(:[0-9]+)?$" $publicURL)) -}}
+{{- fail "controlPlane.development.enabled requires localhost, loopback, kubeloop[-dev].local, or kubeloop[-dev].<IPv4>.sslip.io publicURL" -}}
 {{- end -}}
 {{- if not .Values.controlPlane.files.allowedRoots }}
 {{- fail "controlPlane.files.allowedRoots must contain at least one absolute container path" }}
@@ -17,18 +17,6 @@
 {{- fail "dataPlane.relayRegistry.maxWebSocketFrameBytes must be between 8192 and 16777216" }}
 {{- end }}
 {{- $admin := .Values.controlPlane.admin }}
-{{- if or (lt (int $admin.listenPort) 1) (gt (int $admin.listenPort) 65535) }}
-{{- fail "controlPlane.admin.listenPort must be between 1 and 65535" }}
-{{- end }}
-{{- if or (lt (int $admin.servicePort) 1) (gt (int $admin.servicePort) 65535) }}
-{{- fail "controlPlane.admin.servicePort must be between 1 and 65535" }}
-{{- end }}
-{{- if eq (int $admin.listenPort) 8080 }}
-{{- fail "controlPlane.admin.listenPort must differ from the public Control Plane port 8080" }}
-{{- end }}
-{{- if eq (int $admin.listenPort) (int .Values.controlPlane.relayRegistry.listenPort) }}
-{{- fail "controlPlane.admin.listenPort must differ from controlPlane.relayRegistry.listenPort" }}
-{{- end }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -56,8 +44,6 @@ data:
           accessTTL: {{ .Values.controlPlane.auth.oauth.accessTTL | quote }}
           refreshTTL: {{ .Values.controlPlane.auth.oauth.refreshTTL | quote }}
       admin:
-        listen: {{ printf ":%v" $admin.listenPort | quote }}
-        publicURL: {{ $publicURL | quote }}
         bootstrap:
           enabled: {{ $admin.bootstrap.enabled }}
           username: {{ $admin.bootstrap.username | quote }}

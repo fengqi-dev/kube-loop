@@ -135,7 +135,7 @@ func (handler *Service) create(
 	}
 	ctx.Response().Header().Set("Location", fmt.Sprintf(
 		"%s/sessions/%s/previews/%s?namespace=%s",
-		controlplane.SessionAPIPathPrefix, session.ID, task.ID, session.Namespace,
+		controlplane.APIPathPrefix, session.ID, task.ID, session.Namespace,
 	))
 	if !created {
 		ctx.Response().Header().Set("Idempotent-Replayed", "true")

@@ -1,7 +1,7 @@
 export const managementBase =
   document
     .querySelector<HTMLMetaElement>('meta[name="kubeloop-management-path"]')
-    ?.content.replace(/\/$/, "") || "/api/admin";
+    ?.content.replace(/\/$/, "") || "/admin";
 const authBase = "/oauth2";
 export const csrfStorageKey = "kubeloop.admin.csrf";
 const csrfCookieNames = [

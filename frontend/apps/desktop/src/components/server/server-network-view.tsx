@@ -333,8 +333,10 @@ export function ServerNetworkView({ profileId }: { profileId: string }) {
                 placeholder="Service port"
                 disabled={busy}
                 onChange={(event) => {
-                  setServicePort(event.target.value);
-                  if (!localPort) setLocalPort(event.target.value);
+                  const nextServicePort = event.target.value;
+                  const previousServicePort = servicePort;
+                  setServicePort(nextServicePort);
+                  setLocalPort((current) => current === "" || current === previousServicePort ? nextServicePort : current);
                 }}
               />
             </div>

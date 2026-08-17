@@ -30,6 +30,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/ticketapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/trafficbindingclient"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
 	"github.com/google/uuid"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -151,7 +152,8 @@ func TestRealMirrorPreservesPrimaryPathAndRecoversStaleOwner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	manager, err := clientmirror.NewManager(remoteClient, clientmirror.Config{})
+	dataPlane := startE2EDataPlane(t, ctx, remoteClient, gatewayClient, serverProfile, remoteSession)
+	manager, err := clientmirror.NewManager(remoteClient, clientmirror.Config{TrafficStreams: dataPlane})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,13 +201,13 @@ func TestRealMirrorPreservesPrimaryPathAndRecoversStaleOwner(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create Mirror for client crash: %v", err)
 	}
-	crashedConnection, err := remoteClient.OpenMirrorStream(ctx, serverProfile, remoteSession, crashed)
+	crashedConnection, err := dataPlane.OpenTrafficStream(ctx, serverProfile.ID, tunnel.TrafficModeMirror, crashed.ID)
 	if err != nil {
 		t.Fatalf("open Mirror stream for client crash: %v", err)
 	}
 	waitForMirrorState(t, ctx, stateStore, crashed.ID, "running")
 	assertServiceIntercepted(t, ctx, kubeClient, stateStore, serviceName, gatewayIP, crashed.ID)
-	crashedConnection.CloseNow()
+	_ = crashedConnection.Close()
 	waitForMirrorState(t, ctx, stateStore, crashed.ID, "failed")
 	assertServiceRestored(t, ctx, kubeClient, stateStore, serviceName, crashed.ID, originalSelector)
 	harness.WaitClusterProbe(t, ctx, kubeClient, service.Spec.ClusterIP, 8080, "tcp", "after-client-crash", "cluster-tcp:")

@@ -8,10 +8,10 @@ import (
 	"io"
 	"time"
 
-	"github.com/coder/websocket"
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/filestream"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
 	"github.com/google/uuid"
 )
 

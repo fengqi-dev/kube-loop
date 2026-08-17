@@ -78,8 +78,6 @@ spec:
     - ports:
         - port: 8080
           protocol: TCP
-        - port: {{ .Values.controlPlane.admin.listenPort }}
-          protocol: TCP
     - from:
         - podSelector:
             matchLabels:

@@ -9,8 +9,8 @@ import (
 )
 
 // handleControl keeps the immutable NetworkSpec authorization active for the
-// lifetime of a Data Plane Session. Traffic listener registration uses the
-// dedicated traffic API and is intentionally not multiplexed onto this stream.
+// lifetime of a Data Plane Session. Reverse traffic Tasks use separate logical
+// streams on the same authenticated tunnel multiplexer session.
 func (s *Server) handleControl(
 	client net.Conn,
 	token tunnel.SessionToken,

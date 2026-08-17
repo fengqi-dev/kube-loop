@@ -118,24 +118,16 @@ func NewServer(config Config, build BuildInfo, logger *slog.Logger, serverOption
 	if options.authRoutes != nil {
 		options.authRoutes.RegisterRoutes(router.Group(""))
 	}
-	// The Management Plane is served by its own listener. Register explicit
-	// public-listener exclusions before the API group so its authentication
-	// middleware cannot turn these requests into a misleading 401 response.
-	router.Any(AdminAPIPathPrefix, func(ctx *echo.Context) error {
-		return echo.ErrNotFound
-	})
-	router.Any(AdminAPIPathPrefix+"/*", func(ctx *echo.Context) error {
-		return echo.ErrNotFound
-	})
-	apiGroup := router.Group(APIPathPrefix)
-	apiGroup.Use(apiMiddleware(APIPathPrefix, normalized, logger, options))
-	if options.apiRoutes != nil {
-		options.apiRoutes.RegisterRoutes(apiGroup)
+	if options.adminRoutes != nil {
+		options.adminRoutes.RegisterRoutes(router.Group(AdminPathPrefix))
 	}
-	if sessionRoutes, ok := options.apiRoutes.(SessionRouteRegistrar); ok {
-		sessionGroup := router.Group(SessionAPIPathPrefix)
-		sessionGroup.Use(apiMiddleware(SessionAPIPathPrefix, normalized, logger, options))
-		sessionRoutes.RegisterSessionRoutes(sessionGroup)
+	if options.apiRoutes != nil {
+		apiGroup := router.Group(APIPathPrefix)
+		apiGroup.Use(apiMiddleware(APIPathPrefix, normalized, logger, options))
+		options.apiRoutes.RegisterRoutes(apiGroup)
+		if sessionRoutes, ok := options.apiRoutes.(SessionRouteRegistrar); ok {
+			sessionRoutes.RegisterSessionRoutes(apiGroup)
+		}
 	}
 	serverContext, cancel := context.WithCancel(context.Background())
 	active := controlplanemiddleware.NewRequestTracker()

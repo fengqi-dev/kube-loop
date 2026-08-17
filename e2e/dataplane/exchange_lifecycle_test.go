@@ -34,6 +34,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/ticketapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/trafficbindingclient"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
 	"github.com/google/uuid"
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
@@ -181,7 +182,8 @@ func TestRealExchangeLifecycleAndStaleOwnerRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	manager, err := clientexchange.NewManager(remoteClient, clientexchange.Config{})
+	dataPlane := startE2EDataPlane(t, ctx, remoteClient, gatewayClient, serverProfile, remoteSession)
+	manager, err := clientexchange.NewManager(remoteClient, clientexchange.Config{TrafficStreams: dataPlane})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -229,13 +231,13 @@ func TestRealExchangeLifecycleAndStaleOwnerRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create Exchange for client crash: %v", err)
 	}
-	crashedConnection, err := remoteClient.OpenExchangeStream(ctx, serverProfile, remoteSession, crashed)
+	crashedConnection, err := dataPlane.OpenTrafficStream(ctx, serverProfile.ID, tunnel.TrafficModeExchange, crashed.ID)
 	if err != nil {
 		t.Fatalf("open Exchange stream for client crash: %v", err)
 	}
 	waitForRealExchangeState(t, ctx, stateStore, crashed.ID, "running")
 	assertServiceIntercepted(t, ctx, kubeClient, stateStore, serviceName, gatewayIP, crashed.ID)
-	crashedConnection.CloseNow()
+	_ = crashedConnection.Close()
 	waitForRealExchangeState(t, ctx, stateStore, crashed.ID, "failed")
 	assertServiceRestored(t, ctx, kubeClient, stateStore, serviceName, crashed.ID, originalSelector)
 	harness.WaitClusterProbe(t, ctx, kubeClient, service.Spec.ClusterIP, 8080, "tcp", "after-client-crash", "cluster-tcp:")

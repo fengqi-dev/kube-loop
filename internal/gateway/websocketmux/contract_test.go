@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/coder/websocket"
 	shared "github.com/fengqi-dev/kube-loop/internal/client/websocketmux"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/wssprotocol"
 	"github.com/xtaci/smux"
 )
@@ -84,7 +84,9 @@ func TestContractNewClientRejectsUnknownAndMissingServerHelloFields(t *testing.T
 func TestContractNewGatewayRejectsUnknownAndMissingClientHelloFields(t *testing.T) {
 	handler, err := NewHandler(ServerConfig{
 		Authenticator: testAuthenticator("token"),
-		Handle:        func(Identity, net.Conn) { t.Error("malformed ClientHello opened a partial logical session") },
+		Handle: func(context.Context, Identity, net.Conn) {
+			t.Error("malformed ClientHello opened a partial logical session")
+		},
 	})
 	if err != nil {
 		t.Fatal(err)

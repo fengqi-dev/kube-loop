@@ -194,7 +194,7 @@ func (handler *Service) trafficSession(
 	if apiError != nil {
 		return controlplaneapi.Identity{}, sessionapi.ActiveSession{}, apiError
 	}
-	if session.Generation != ticketIdentity.SessionGeneration {
+	if !sessionapi.AcceptsStreamGeneration(session.Generation, ticketIdentity.SessionGeneration) {
 		return controlplaneapi.Identity{}, sessionapi.ActiveSession{}, &controlplaneapi.Error{Code: controlplaneapi.CodeConflict, Message: "Session generation changed"}
 	}
 	return identity, session, nil

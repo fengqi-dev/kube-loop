@@ -15,7 +15,9 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
 	"github.com/fengqi-dev/kube-loop/internal/client/socksbridge"
 	"github.com/fengqi-dev/kube-loop/internal/client/websocketmux"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/exchangestream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficstream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
 	"github.com/fengqi-dev/kube-loop/internal/singbox"
 	"github.com/google/uuid"
@@ -23,11 +25,18 @@ import (
 
 type testForwarder struct {
 	net.Listener
+	open       func(context.Context) (net.Conn, error)
 	closeErr   error
 	closeCalls int
 }
 
 func (forwarder *testForwarder) Address() string { return forwarder.Listener.Addr().String() }
+func (forwarder *testForwarder) OpenStream(ctx context.Context) (net.Conn, error) {
+	if forwarder.open != nil {
+		return forwarder.open(ctx)
+	}
+	return (&net.Dialer{}).DialContext(ctx, "tcp", forwarder.Address())
+}
 func (forwarder *testForwarder) Close() error {
 	forwarder.closeCalls++
 	_ = forwarder.Listener.Close()
@@ -95,6 +104,116 @@ type testCloseConn struct {
 	net.Conn
 	closeErr   error
 	closeCalls int
+}
+
+func TestRuntimeOpenTrafficStreamUsesCurrentTunnelTransport(t *testing.T) {
+	token, err := tunnel.NewSessionToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	taskID := uuid.NewString()
+	client, gateway := net.Pipe()
+	forwarder := &testForwarder{open: func(context.Context) (net.Conn, error) { return client, nil }}
+	runtime := &Runtime{
+		ctx: context.Background(), forwarder: forwarder, token: token, transportDone: make(chan struct{}),
+	}
+	serverDone := make(chan error, 1)
+	go func() {
+		defer gateway.Close()
+		header, readErr := tunnel.ReadSessionHeader(gateway)
+		if readErr != nil {
+			serverDone <- readErr
+			return
+		}
+		request, readErr := tunnel.ReadTrafficOpenBody(gateway)
+		if readErr != nil || header.Command != tunnel.CommandTraffic || header.Token != token ||
+			request.Mode != tunnel.TrafficModePreview || request.TaskID != taskID {
+			serverDone <- errors.Join(readErr, errors.New("Traffic open request changed"))
+			return
+		}
+		if writeErr := tunnel.WriteStatus(gateway, nil); writeErr != nil {
+			serverDone <- writeErr
+			return
+		}
+		framed, frameErr := trafficstream.Accept(t.Context(), gateway)
+		if frameErr != nil {
+			serverDone <- frameErr
+			return
+		}
+		ready, frameErr := exchangestream.Encode(exchangestream.Frame{Type: exchangestream.Ready})
+		if frameErr == nil {
+			frameErr = framed.WriteFrame(t.Context(), ready)
+		}
+		serverDone <- frameErr
+	}()
+	framed, err := runtime.OpenTrafficStream(t.Context(), tunnel.TrafficModePreview, taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := framed.ReadFrame(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	frame, err := exchangestream.Decode(encoded)
+	if err != nil || frame.Type != exchangestream.Ready {
+		t.Fatalf("ready frame = %#v, err = %v", frame, err)
+	}
+	_ = framed.Close()
+	if err := <-serverDone; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRuntimeOpenTrafficStreamDoesNotHoldTransportLockAcrossStartup(t *testing.T) {
+	token, err := tunnel.NewSessionToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, gateway := net.Pipe()
+	tracked := &testCloseConn{Conn: client}
+	forwarder := &testForwarder{open: func(context.Context) (net.Conn, error) { return tracked, nil }}
+	transportDone := make(chan struct{})
+	runtime := &Runtime{
+		ctx: context.Background(), forwarder: forwarder, token: token, transportDone: transportDone,
+	}
+	opened := make(chan error, 1)
+	go func() {
+		_, openErr := runtime.OpenTrafficStream(t.Context(), tunnel.TrafficModeMirror, uuid.NewString())
+		opened <- openErr
+	}()
+	if _, err := tunnel.ReadTrafficOpen(gateway); err != nil {
+		t.Fatal(err)
+	}
+
+	lockAcquired := make(chan struct{})
+	go func() {
+		runtime.transportMu.Lock()
+		close(lockAcquired)
+	}()
+	select {
+	case <-lockAcquired:
+	case <-time.After(time.Second):
+		t.Fatal("Traffic startup held transportMu across status I/O")
+	}
+	runtime.forwarder = nil
+	runtime.token = tunnel.SessionToken{}
+	closeSignal(runtime.transportDone)
+	runtime.transportMu.Unlock()
+	if err := tunnel.WriteStatus(gateway, nil); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-opened:
+		if err == nil || !strings.Contains(err.Error(), "transport changed") {
+			t.Fatalf("OpenTrafficStream error = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Traffic startup did not observe transport replacement")
+	}
+	if tracked.closeCalls != 1 {
+		t.Fatalf("failed Traffic stream close calls = %d, want 1", tracked.closeCalls)
+	}
+	_ = gateway.Close()
 }
 
 func (connection *testCloseConn) Close() error {

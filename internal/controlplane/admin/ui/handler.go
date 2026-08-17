@@ -24,7 +24,7 @@ func New(managementPaths ...string) *Handler {
 	if err != nil {
 		panic(err)
 	}
-	managementPath := controlplane.AdminAPIPathPrefix
+	managementPath := controlplane.AdminPathPrefix
 	if len(managementPaths) > 0 && strings.HasPrefix(managementPaths[0], "/") {
 		managementPath = strings.TrimSuffix(managementPaths[0], "/")
 	}

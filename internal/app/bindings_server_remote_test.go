@@ -37,11 +37,11 @@ func TestLoadServerInventoryUsesCapabilitiesAndRemembersNamespace(t *testing.T) 
 			t.Fatalf("Authorization = %q", request.Header.Get("Authorization"))
 		}
 		switch request.URL.Path {
-		case "/kubeloop/api/version":
+		case "/api/version":
 			_, _ = writer.Write([]byte(`{"gitVersion":"v1.31.2","gatewayVersion":"v2-test"}`))
-		case "/kubeloop/api/namespaces":
+		case "/api/namespaces":
 			_, _ = writer.Write([]byte(`{"items":[{"name":"production","status":"Active"},{"name":"development","status":"Active"}]}`))
-		case "/kubeloop/api/capabilities":
+		case "/api/capabilities":
 			if request.URL.Query().Get("namespace") != "development" {
 				t.Fatalf("namespace query = %q", request.URL.Query().Get("namespace"))
 			}
@@ -57,9 +57,9 @@ func TestLoadServerInventoryUsesCapabilitiesAndRemembersNamespace(t *testing.T) 
 					GatewayVersion: "v2-test", Capabilities: []string{"pods.list"},
 				},
 			})
-		case "/kubeloop/api/namespaces/development/pods":
+		case "/api/namespaces/development/pods":
 			_, _ = writer.Write([]byte(`{"items":[{"name":"api-1","namespace":"development","phase":"Running","ready":true,"containers":["api"]},{"name":"api-0","namespace":"development","phase":"Pending","ready":false,"containers":["api"]}]}`))
-		case "/kubeloop/api/namespaces/development/services":
+		case "/api/namespaces/development/services":
 			serviceCalls++
 			_, _ = writer.Write([]byte(`{"items":[]}`))
 		default:

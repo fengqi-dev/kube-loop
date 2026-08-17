@@ -27,9 +27,9 @@
 | `internal/controlplane/execapi` | V2 Control Plane | Pod get、`pods/exec` SPDY、stdin/stdout/stderr/TTY resize | 流式 | Control Plane WSS 所有者持有 SPDY 流和授权 lease |
 | `internal/controlplane/fileapi` | V2 Control Plane | Pod get，复用固定生成命令的 exec executor | 流式 | Control Plane WSS 上的文件协议；Pod 侧通过受限 exec/tar |
 | `internal/controlplane/fileopsapi` | V2 Control Plane | Kubernetes 名称校验；复用 file executor 执行 list/create/rename/delete | 控制面加短流 | Task、Policy、SSAR 和路径边界均由 Control Plane 执行 |
-| `internal/controlplane/exchangeapi` | V2 Control Plane | 持久化 Task、只读捕获 Service/EndpointSlice 快照，并通过 `TrafficBinding` 请求接管/恢复 | 声明式控制面 | Gateway 通过内部 Echo HTTP 执行 claim/prepare/heartbeat/finish；listener 与反向 WSS 均在 Gateway |
+| `internal/controlplane/exchangeapi` | V2 Control Plane | 持久化 Task、只读捕获 Service/EndpointSlice 快照，并通过 `TrafficBinding` 请求接管/恢复 | 声明式控制面 | Gateway 通过内部 Echo HTTP 执行 claim/prepare/heartbeat/finish；listener 与反向流均在 Gateway，字节复用 `/tunnel` logical stream |
 | `internal/controlplane/mirrorapi` | V2 Control Plane | 持久化 Task、只读捕获 Service/EndpointSlice 和原 backend，并通过 `TrafficBinding` 请求接管/恢复 | 声明式控制面 | Control Plane 只向已认证 Gateway 返回权威 backend；Gateway 保持 primary/shadow 数据流 |
-| `internal/controlplane/previewapi` | V2 Control Plane | 持久化 Task/cleanup intent，通过 `TrafficBinding` 请求 Preview Service，并读取 CR status 中的 ClusterIP | 声明式控制面 | Gateway 绑定 listener 并承载反向 WSS；停止与失主恢复由 Control Plane 删除 CR |
+| `internal/controlplane/previewapi` | V2 Control Plane | 持久化 Task/cleanup intent，通过 `TrafficBinding` 请求 Preview Service，并读取 CR status 中的 ClusterIP | 声明式控制面 | Gateway 绑定 listener 并在 `/tunnel` logical stream 承载反向流；停止与失主恢复由 Control Plane 删除 CR |
 | `internal/controlplane/relayregistry` | V2 Control Plane | TokenReview、按 UID/ServiceAccount 查询 Pod、读取 Node region/zone/hostname | 工作负载认证与控制面 | 只信任短期专用 audience 的 Pod-bound token 或 mTLS/SPIFFE；Relay ID 与拓扑均由权威身份派生，不接受注册 body 自报 |
 | `internal/controlplane/servicebinding` | 共享类型与只读快照 | Service、Endpoint、EndpointSlice 快照类型与原 backend 解析 | 类型/控制面读 | Control Plane 只使用 Capture/解析和快照类型；Service/Endpoint 写入由 Operator 独占 |
 | `internal/controlplane/sessionapi` | V2 Control Plane | 仅 Kubernetes DNS 名称校验工具 | 类型/校验 | 不发起 API 请求；可在后续移除该轻量依赖 |
@@ -48,9 +48,9 @@
 | 网络发现 | `cluster/discovery.Discover` | `controlplane/networkapi` | 无 | 已迁移到 Session NetworkSpec |
 | Gateway 安装与发现 | `EnsureGateway`、`gatewayruntime.Ensure*` | Helm release | Data Plane 自身 | 已移出桌面；Helm 完整验收属于 V2-200～205 |
 | Service/Pod Port Forward | `StartPortForward`、`kubeportforward.Start` | `controlplane/portforwardapi` → `TrafficBinding` → Operator 校验 | Data Plane WSS | 已接入；Task 持久化后等待 CR Ready，停止/孤儿回收删除 CR |
-| Exchange/Intercept | V1 Service 直接写入与 Intercept Manager | `controlplane/exchangeapi` → `TrafficBinding` → Operator | Gateway reverse WSS | 客户端用 RelayTicket 直连分配的 Gateway；Operator 以 finalizer 恢复 |
+| Exchange/Intercept | V1 Service 直接写入与 Intercept Manager | `controlplane/exchangeapi` → `TrafficBinding` → Operator | Gateway `/tunnel` reverse logical stream | 客户端复用已认证的 Data Plane WSS；Operator 以 finalizer 恢复 |
 | Mirror/Intercept | Intercept Manager + mirror | `controlplane/mirrorapi` → `TrafficBinding` → Operator | Gateway primary/shadow relay | 原 backend 由 Control Plane 权威快照解析后经内部 HTTP 返回 Gateway |
-| Preview | V1 Preview Service 直接创建 | `controlplane/previewapi` → `TrafficBinding` → Operator | Gateway reverse WSS | ClusterIP 从 CR status 返回，删除等待 Operator 完成资源清理 |
+| Preview | V1 Preview Service 直接创建 | `controlplane/previewapi` → `TrafficBinding` → Operator | Gateway `/tunnel` reverse logical stream | ClusterIP 从 CR status 返回，删除等待 Operator 完成资源清理 |
 | Pod exec/TTY | `cluster.Provider.Exec`、`podexec.Exec` | `controlplane/execapi` | Control Plane WSS ↔ Kubernetes SPDY | 已迁移 |
 | 文件上传/下载 | V1 file manager + Pod exec/tar | `controlplane/fileapi` | Control Plane WSS ↔ Kubernetes SPDY | 已迁移 |
 | 文件 list/create/rename/delete | V1 file manager | `controlplane/fileopsapi` | Control Plane 短时 exec | 已迁移 |

@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/coder/websocket"
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
 )
 
 type InventoryResource string
@@ -67,7 +67,7 @@ func (client *Client) OpenInventoryWatch(
 	} else {
 		endpoint.Scheme = "ws"
 	}
-	endpoint.Path = "/kubeloop/api/namespaces/" + url.PathEscape(namespace) + "/" + string(resource)
+	endpoint.Path = "/api/namespaces/" + url.PathEscape(namespace) + "/" + string(resource)
 	endpoint.RawQuery = url.Values{"watch": {"true"}}.Encode()
 	credential, err := client.usableCredential(ctx, serverProfile, "")
 	if err != nil {

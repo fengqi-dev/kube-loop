@@ -7,7 +7,7 @@
 
 > Current implementation: Control Plane derives authoritative original backends
 > from the Kubernetes snapshot, while Gateway owns the primary/shadow sockets,
-> listener and WebSocket data path.
+> listener and `/tunnel` logical-stream data path.
 
 Mirror must copy requests from a Kubernetes Service to a developer's local
 process without replacing the Service's real response path. The desktop cannot
@@ -54,7 +54,7 @@ TCP half-close and UDP datagram boundaries are preserved independently.
 The neutral `mirrorstream` protocol is directional. Control Plane may send
 ready/open/data/close-write/close/datagram frames. The desktop may send only a
 Task stop frame. Desktop shadow responses are continuously read and discarded;
-they are never encoded onto the WebSocket. Any other client frame is a protocol
+they are never encoded onto the tunnel stream. Any other client frame is a protocol
 error.
 
 The desktop gives every local shadow actor its own bounded queue, dial timeout,
@@ -65,9 +65,9 @@ the Mirror Task. Terminal frames are themselves best-effort and local
 tombstones are bounded. Task, Profile, namespace and application shutdown still
 cancel all actors immediately.
 
-The Control Plane replica that owns the authenticated WebSocket also owns the
-Gateway listeners, primary sockets, authorization lease and restoration. Stop,
-OAuth grant or Session revocation, WebSocket loss and graceful shutdown close
+The Gateway that owns the authenticated `/tunnel` logical stream also owns the
+listeners and primary sockets, while Control Plane owns authorization and
+TrafficBinding restoration. Stop, OAuth grant or Session revocation, tunnel loss and graceful shutdown close
 listeners and active sockets, restore the snapshot through the Control Plane
 system Kubernetes client, and only then remove the snapshot. Restore failure
 keeps the Task in `recovering`; stale-owner reconciliation uses the observed
@@ -78,7 +78,7 @@ same durable compensation.
 
 - Cluster clients always observe original backend responses. A local process
   can inspect requests and may write responses, but those bytes are discarded.
-- Shadow latency and failure are isolated twice: at the Control Plane WebSocket
+- Shadow latency and failure are isolated twice: at the Gateway tunnel-stream
   queue and at each desktop local-target actor.
 - Kubernetes credentials, backend discovery, listener allocation and rollback
   remain in Control Plane. The desktop retains only explicit local host/port

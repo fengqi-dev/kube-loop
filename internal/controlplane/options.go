@@ -11,6 +11,7 @@ type serverOptions struct {
 	authorizer       authorization.Authorizer
 	audit            AuditSink
 	apiRoutes        RouteRegistrar
+	adminRoutes      RouteRegistrar
 	readiness        health.Checker
 	authRoutes       RouteRegistrar
 	authMethodSource AuthMethodSource
@@ -44,6 +45,10 @@ func WithAuditSink(sink AuditSink) ServerOption {
 
 func WithAPIRoutes(routes RouteRegistrar) ServerOption {
 	return func(options *serverOptions) { options.apiRoutes = routes }
+}
+
+func WithAdminRoutes(routes RouteRegistrar) ServerOption {
+	return func(options *serverOptions) { options.adminRoutes = routes }
 }
 
 func WithReadinessChecker(checker health.Checker) ServerOption {

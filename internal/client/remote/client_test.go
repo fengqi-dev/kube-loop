@@ -13,17 +13,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/coder/websocket"
 	"github.com/fengqi-dev/kube-loop/internal/client/credentials"
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/exchangestream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/execstream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/filestream"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/mirrorstream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/relayticket"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/remotetask"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficcontrol"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
 	"github.com/google/uuid"
 )
 
@@ -239,9 +235,9 @@ func TestCapabilitiesCacheIsBoundedByIdentityNamespaceCredentialAndGatewayVersio
 	identityID := "identity-a"
 	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		switch request.URL.Path {
-		case "/kubeloop/api/version":
+		case "/api/version":
 			_ = json.NewEncoder(writer).Encode(Version{GitVersion: "v1.31.0", GatewayVersion: gatewayVersion})
-		case "/kubeloop/api/capabilities":
+		case "/api/capabilities":
 			capabilityCalls.Add(1)
 			_ = json.NewEncoder(writer).Encode(Capabilities{
 				SchemaVersion: 1, IdentityID: identityID, Namespace: request.URL.Query().Get("namespace"),
@@ -302,7 +298,7 @@ func TestContractHTTPResponseAllowsAdditiveFieldsButRejectsMissingRequiredFields
 	store := &memoryStore{value: validCredential(now)}
 	var missing atomic.Bool
 	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if request.URL.Path != "/kubeloop/api/version" {
+		if request.URL.Path != "/api/version" {
 			http.NotFound(writer, request)
 			return
 		}
@@ -502,7 +498,7 @@ func TestPortForwardTaskLifecycleUsesSessionBoundGatewayAPI(t *testing.T) {
 	}
 }
 
-func TestExchangeTaskLifecycleAndAuthenticatedReverseStream(t *testing.T) {
+func TestExchangeTaskControlLifecycle(t *testing.T) {
 	now := time.Now().UTC()
 	store := &memoryStore{value: validCredential(now)}
 	session := Session{
@@ -512,25 +508,6 @@ func TestExchangeTaskLifecycleAndAuthenticatedReverseStream(t *testing.T) {
 	taskID := uuid.NewString()
 	state := remotetask.Pending
 	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if strings.HasSuffix(request.URL.Path, "/tickets") {
-			_ = json.NewEncoder(writer).Encode(RelayTicket{TokenType: relayticket.Type, Ticket: "relay-ticket", ExpiresAt: now.Add(time.Minute), DeviceID: "device-1", RelayID: "relay-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", Endpoint: "wss://" + request.Host + "/tunnel"})
-			return
-		}
-		if strings.HasPrefix(request.URL.Path, trafficcontrol.PublicPathPrefix+"/") {
-			if request.Header.Get("Authorization") != "Bearer relay-ticket" {
-				t.Errorf("traffic authorization=%q", request.Header.Get("Authorization"))
-			}
-			connection, err := websocket.Accept(writer, request, nil)
-			if err != nil {
-				t.Error(err)
-				return
-			}
-			defer connection.CloseNow()
-			ready, _ := exchangestream.Encode(exchangestream.Frame{Type: exchangestream.Ready})
-			_ = connection.Write(request.Context(), websocket.MessageBinary, ready)
-			_, _, _ = connection.Read(request.Context())
-			return
-		}
 		if request.Header.Get("Authorization") != "Bearer access-token" || request.URL.Query().Get("namespace") != "development" {
 			t.Errorf("headers=%#v query=%s", request.Header, request.URL.RawQuery)
 		}
@@ -569,28 +546,13 @@ func TestExchangeTaskLifecycleAndAuthenticatedReverseStream(t *testing.T) {
 	if err != nil || loaded.ClusterIP != "10.96.0.20" {
 		t.Fatalf("loaded Exchange=%#v err=%v", loaded, err)
 	}
-	connection, err := client.OpenExchangeStream(context.Background(), serverProfile, session, created)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, encoded, err := connection.Read(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	frame, err := exchangestream.Decode(encoded)
-	if err != nil || frame.Type != exchangestream.Ready {
-		t.Fatalf("Exchange stream frame=%#v err=%v", frame, err)
-	}
-	stop, _ := exchangestream.Encode(exchangestream.Frame{Type: exchangestream.Stop})
-	_ = connection.Write(context.Background(), websocket.MessageBinary, stop)
-	_ = connection.Close(websocket.StatusNormalClosure, "test complete")
 	stopped, err := client.StopExchange(context.Background(), serverProfile, session, taskID)
 	if err != nil || stopped.State != "stopped" {
 		t.Fatalf("stopped Exchange=%#v err=%v", stopped, err)
 	}
 }
 
-func TestMirrorTaskLifecycleAndAuthenticatedShadowStream(t *testing.T) {
+func TestMirrorTaskControlLifecycle(t *testing.T) {
 	now := time.Now().UTC()
 	store := &memoryStore{value: validCredential(now)}
 	session := Session{
@@ -600,25 +562,6 @@ func TestMirrorTaskLifecycleAndAuthenticatedShadowStream(t *testing.T) {
 	taskID := uuid.NewString()
 	state := remotetask.Pending
 	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if strings.HasSuffix(request.URL.Path, "/tickets") {
-			_ = json.NewEncoder(writer).Encode(RelayTicket{TokenType: relayticket.Type, Ticket: "relay-ticket", ExpiresAt: now.Add(time.Minute), DeviceID: "device-1", RelayID: "relay-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", Endpoint: "wss://" + request.Host + "/tunnel"})
-			return
-		}
-		if strings.HasPrefix(request.URL.Path, trafficcontrol.PublicPathPrefix+"/") {
-			if request.Header.Get("Authorization") != "Bearer relay-ticket" {
-				t.Errorf("traffic authorization=%q", request.Header.Get("Authorization"))
-			}
-			connection, err := websocket.Accept(writer, request, nil)
-			if err != nil {
-				t.Error(err)
-				return
-			}
-			defer connection.CloseNow()
-			ready, _ := mirrorstream.Encode(mirrorstream.Frame{Type: mirrorstream.Ready})
-			_ = connection.Write(request.Context(), websocket.MessageBinary, ready)
-			_, _, _ = connection.Read(request.Context())
-			return
-		}
 		if request.Header.Get("Authorization") != "Bearer access-token" || request.URL.Query().Get("namespace") != "development" {
 			t.Errorf("headers=%#v query=%s", request.Header, request.URL.RawQuery)
 		}
@@ -657,28 +600,13 @@ func TestMirrorTaskLifecycleAndAuthenticatedShadowStream(t *testing.T) {
 	if err != nil || loaded.ClusterIP != "10.96.0.20" {
 		t.Fatalf("loaded Mirror=%#v err=%v", loaded, err)
 	}
-	connection, err := client.OpenMirrorStream(context.Background(), serverProfile, session, created)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, encoded, err := connection.Read(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	frame, err := mirrorstream.Decode(encoded)
-	if err != nil || frame.Type != mirrorstream.Ready {
-		t.Fatalf("Mirror stream frame=%#v err=%v", frame, err)
-	}
-	stop, _ := mirrorstream.Encode(mirrorstream.Frame{Type: mirrorstream.Stop})
-	_ = connection.Write(context.Background(), websocket.MessageBinary, stop)
-	_ = connection.Close(websocket.StatusNormalClosure, "test complete")
 	stopped, err := client.StopMirror(context.Background(), serverProfile, session, taskID)
 	if err != nil || stopped.State != "stopped" {
 		t.Fatalf("stopped Mirror=%#v err=%v", stopped, err)
 	}
 }
 
-func TestPreviewTaskLifecycleAndAuthenticatedReverseStream(t *testing.T) {
+func TestPreviewTaskControlLifecycle(t *testing.T) {
 	now := time.Now().UTC()
 	store := &memoryStore{value: validCredential(now)}
 	session := Session{
@@ -688,26 +616,6 @@ func TestPreviewTaskLifecycleAndAuthenticatedReverseStream(t *testing.T) {
 	taskID := uuid.NewString()
 	var state atomic.Int32
 	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if strings.HasSuffix(request.URL.Path, "/tickets") {
-			_ = json.NewEncoder(writer).Encode(RelayTicket{TokenType: relayticket.Type, Ticket: "relay-ticket", ExpiresAt: now.Add(time.Minute), DeviceID: "device-1", RelayID: "relay-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", Endpoint: "wss://" + request.Host + "/tunnel"})
-			return
-		}
-		if strings.HasPrefix(request.URL.Path, trafficcontrol.PublicPathPrefix+"/") {
-			if request.Header.Get("Authorization") != "Bearer relay-ticket" {
-				t.Errorf("traffic authorization=%q", request.Header.Get("Authorization"))
-			}
-			connection, err := websocket.Accept(writer, request, nil)
-			if err != nil {
-				t.Error(err)
-				return
-			}
-			defer connection.CloseNow()
-			state.Store(1)
-			ready, _ := exchangestream.Encode(exchangestream.Frame{Type: exchangestream.Ready})
-			_ = connection.Write(request.Context(), websocket.MessageBinary, ready)
-			_, _, _ = connection.Read(request.Context())
-			return
-		}
 		if request.Header.Get("Authorization") != "Bearer access-token" || request.URL.Query().Get("namespace") != "development" {
 			t.Errorf("headers=%#v query=%s", request.Header, request.URL.RawQuery)
 		}
@@ -722,6 +630,9 @@ func TestPreviewTaskLifecycleAndAuthenticatedReverseStream(t *testing.T) {
 		}
 		if request.Method == http.MethodDelete {
 			state.Store(2)
+		}
+		if request.Method == http.MethodGet && state.Load() == 0 {
+			state.Store(1)
 		}
 		taskState := remotetask.Pending
 		clusterIP := ""
@@ -750,25 +661,10 @@ func TestPreviewTaskLifecycleAndAuthenticatedReverseStream(t *testing.T) {
 	if err != nil || created.ID != taskID || created.ClusterIP != "" {
 		t.Fatalf("created Preview=%#v err=%v", created, err)
 	}
-	connection, err := client.OpenPreviewStream(context.Background(), serverProfile, session, created)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, encoded, err := connection.Read(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	frame, err := exchangestream.Decode(encoded)
-	if err != nil || frame.Type != exchangestream.Ready {
-		t.Fatalf("Preview stream frame=%#v err=%v", frame, err)
-	}
 	loaded, err := client.GetPreview(context.Background(), serverProfile, session, taskID)
 	if err != nil || loaded.State != "running" || loaded.ClusterIP != "10.96.0.42" {
 		t.Fatalf("loaded Preview=%#v err=%v", loaded, err)
 	}
-	stop, _ := exchangestream.Encode(exchangestream.Frame{Type: exchangestream.Stop})
-	_ = connection.Write(context.Background(), websocket.MessageBinary, stop)
-	_ = connection.Close(websocket.StatusNormalClosure, "test complete")
 	stopped, err := client.StopPreview(context.Background(), serverProfile, session, taskID)
 	if err != nil || stopped.State != "stopped" {
 		t.Fatalf("stopped Preview=%#v err=%v", stopped, err)

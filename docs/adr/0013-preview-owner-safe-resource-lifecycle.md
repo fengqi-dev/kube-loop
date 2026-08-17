@@ -5,13 +5,14 @@
 Superseded in stream ownership by the Gateway traffic-control boundary in ADR 0020.
 
 Control Plane still owns Task and TrafficBinding metadata. Gateway now owns the
-Preview WebSocket, TCP/UDP listeners and byte forwarding.
+Preview `/tunnel` logical stream, TCP/UDP listeners and byte forwarding.
 
 ## Context
 
 Preview exposes a process running on the desktop as a temporary Kubernetes
 Service. The Control Plane creates a ClusterIP Service and an EndpointSlice that
-targets TCP/UDP listeners owned by the authenticated reverse WebSocket stream.
+targets TCP/UDP listeners owned by an authenticated logical stream inside the
+assigned Data Plane `/tunnel`.
 
 These resources share a user-controlled namespace and naming domain with
 ordinary application resources. A retry, stale Control Plane, delayed cleanup, or
@@ -58,7 +59,7 @@ Gateway IP, and allocated listener mappings. It then creates the resources and
 persists the Task as `running`. The `ready` frame is sent only after both the
 Kubernetes mutation and running state are durable.
 
-The WebSocket owner jointly owns:
+The tunnel-stream owner jointly owns:
 
 - TCP/UDP listeners;
 - authorization and Cluster Session leases;
@@ -95,7 +96,7 @@ deletes the snapshot.
 - A user can delete and recreate the same Service name while Preview is active;
   later cleanup preserves the replacement.
 - A stale Control Plane can safely retry cleanup without holding the original user
-  credential or WebSocket.
+  credential or logical stream.
 - A Service and its EndpointSlice may be cleaned independently after partial
   failures.
 - Preview readiness includes an extra durable Task update and resource read,

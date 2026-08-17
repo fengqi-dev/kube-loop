@@ -40,6 +40,12 @@ revocation. It then requires the `ClientHello.deviceId` to equal the signed
 ticket claim. A malformed, timed-out or rejected handshake closes the physical
 WebSocket and never creates a logical-stream session.
 
+RelayTicket expiry is an admission boundary only. Once the authenticated WSS
+handshake succeeds, the physical connection and its logical streams remain
+active until generation fencing, Session revocation, Gateway shutdown, network
+failure or an explicit close ends them; ticket expiry alone never stops a
+running Task.
+
 ### Handshake documents
 
 `ClientHello` contains an ordered `protocolVersions` list, desktop
@@ -48,6 +54,11 @@ selects exactly one offered version and returns the server version,
 capabilities and effective limits. V2 currently implements only protocol
 `2.0`; advertising another server version requires an implementation change,
 not only configuration.
+
+Both peers require `traffic.websocket.v1` in addition to `smux.v2` and
+`tunnel.open.v2`. This capability means Exchange, Mirror and Preview use a
+bounded KCG2 logical stream inside `/tunnel`; no secondary public WebSocket
+path is part of the negotiated protocol.
 
 `Reject` contains a stable machine-readable `code`, bounded human-readable
 `message`, and the server's supported versions for `VERSION_MISMATCH`.
@@ -88,16 +99,17 @@ binary and maps as follows:
 | Semantic operation | Wire representation |
 | --- | --- |
 | physical keepalive | WebSocket Ping/Pong plus smux NOP |
-| logical stream open | smux SYN, followed by a bounded KCG2 tunnel open/control/accept header |
+| logical stream open | smux SYN, followed by a bounded KCG2 TCP/UDP/control/traffic header |
 | target accept | KCG2 `StatusOK` |
 | target reject | KCG2 bounded `StatusError`, then stream close |
 | data | smux PSH carrying KubeLoop data frames of at most 64 KiB |
+| Exchange/Mirror/Preview | KCG2 traffic header selects mode and Task UUID, followed by a `kubeloop.traffic.v1` Gorilla WebSocket handshake and bounded binary messages on the same smux stream |
 | half-close | KubeLoop logical FIN frame; the peer may continue sending |
 | cancel/full close | close the smux stream; transport/context cancellation closes both directions |
 
 The KCG2 open header binds every logical stream to the RelayTicket's immutable
-Cluster Session ID/generation-derived tenant key and an authorized target or
-control operation. The server rechecks generation and target authorization
+Cluster Session ID/generation-derived tenant key and an authorized target,
+control operation or traffic Task. The server rechecks generation and authorization
 before handing a stream to the dialer. smux native FIN is not used as TCP
 half-close because crossed native FINs can discard unread response data; the
 explicit KubeLoop FIN preserves request-EOF/response-after-EOF behavior.

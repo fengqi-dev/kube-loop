@@ -12,7 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/coder/websocket"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
 	shared "github.com/fengqi-dev/kube-loop/internal/protocol/websocketmux"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/wssprotocol"
 	"github.com/xtaci/smux"
@@ -21,6 +21,7 @@ import (
 type Identity struct {
 	RequestID         string
 	IdentityID        string
+	Groups            []string
 	DeviceID          string
 	SessionID         string
 	SessionGeneration uint64
@@ -51,7 +52,7 @@ type ServerConfig struct {
 	MinClientVersion     string
 	SupportedVersions    []string
 	Logger               *slog.Logger
-	Handle               func(Identity, net.Conn)
+	Handle               func(context.Context, Identity, net.Conn)
 }
 
 type Handler struct {
@@ -149,6 +150,7 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 	identity.RequestID = requestID
+	identity.Groups = slices.Clone(identity.Groups)
 	defer h.releaseGeneration(identity)
 	select {
 	case h.limit <- struct{}{}:
@@ -204,7 +206,8 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		h.reject(requestID, connection, wssprotocol.NewReject(wssprotocol.CodeDeviceMismatch, "Device does not match RelayTicket"))
 		return
 	}
-	if !slices.Contains(hello.Capabilities, "smux.v2") || !slices.Contains(hello.Capabilities, "tunnel.open.v2") {
+	if !slices.Contains(hello.Capabilities, "smux.v2") || !slices.Contains(hello.Capabilities, "tunnel.open.v2") ||
+		!slices.Contains(hello.Capabilities, wssprotocol.CapabilityTrafficWebSocket) {
 		cancelHandshake()
 		h.reject(requestID, connection, wssprotocol.NewReject(wssprotocol.CodeInvalidHandshake, "Required capabilities are missing"))
 		return
@@ -231,11 +234,10 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	cancelHandshake()
 	connection.SetReadLimit(h.config.MaxFrameBytes)
 	h.log(requestID, "WebSocket session opened: remote=%s path=%s active_sessions=%d subprotocol=%s", request.RemoteAddr, request.URL.Path, len(h.limit), connection.Subprotocol())
+	// RelayTicket expiry is an admission boundary for the authenticated WSS
+	// handshake, not a lifetime limit for accepted logical streams. Established
+	// sessions remain governed by generation fencing, shutdown and explicit close.
 	streamConn := websocket.NetConn(request.Context(), connection, websocket.MessageBinary)
-	if err := streamConn.SetDeadline(identity.ExpiresAt); err != nil {
-		h.log(requestID, "WebSocket session deadline failed: remote=%s error=%v", request.RemoteAddr, err)
-		return
-	}
 	session, err := smux.Server(streamConn, smuxConfig())
 	if err != nil {
 		h.log(requestID, "WebSocket multiplexer setup failed: remote=%s error=%v", request.RemoteAddr, err)
@@ -257,9 +259,11 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 				_ = stream.Close()
 				continue
 			}
+			streamIdentity := identity
+			streamIdentity.Groups = slices.Clone(identity.Groups)
 			go func() {
 				defer func() { <-streams }()
-				h.config.Handle(identity, shared.NewStreamConnWithIdleTimeout(stream, h.config.StreamIdleTimeout))
+				h.config.Handle(request.Context(), streamIdentity, shared.NewStreamConnWithIdleTimeout(stream, h.config.StreamIdleTimeout))
 			}()
 		default:
 			h.log(requestID, "WebSocket stream rejected: remote=%s reason=stream_limit max_streams=%d", request.RemoteAddr, h.config.MaxStreamsPerSession)

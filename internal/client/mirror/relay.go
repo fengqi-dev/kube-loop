@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/coder/websocket"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/mirrorstream"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficstream"
 )
 
 type shadowMessage struct {
@@ -138,10 +138,10 @@ func (actor *shadowActor) run() {
 }
 
 type localRelay struct {
-	websocket *websocket.Conn
-	targets   map[string]LocalTarget
-	dial      DialContextFunc
-	config    Config
+	stream  *trafficstream.FrameConn
+	targets map[string]LocalTarget
+	dial    DialContextFunc
+	config  Config
 
 	mu      sync.Mutex
 	streams map[uint64]*shadowActor
@@ -150,7 +150,7 @@ type localRelay struct {
 }
 
 func newLocalRelay(
-	connection *websocket.Conn,
+	connection *trafficstream.FrameConn,
 	targets []LocalTarget,
 	dial DialContextFunc,
 	config Config,
@@ -160,18 +160,15 @@ func newLocalRelay(
 		targetMap[targetKey(target.Protocol, target.ServicePort)] = target
 	}
 	return &localRelay{
-		websocket: connection, targets: targetMap, dial: dial, config: config,
+		stream: connection, targets: targetMap, dial: dial, config: config,
 		streams: make(map[uint64]*shadowActor), dropped: make(map[uint64]struct{}),
 	}
 }
 
 func (relay *localRelay) readReady(ctx context.Context) error {
-	messageType, encoded, err := relay.websocket.Read(ctx)
+	encoded, err := relay.stream.ReadFrame(ctx)
 	if err != nil {
 		return err
-	}
-	if messageType != websocket.MessageBinary {
-		return errors.New("Gateway returned a non-binary Mirror readiness frame")
 	}
 	frame, err := mirrorstream.Decode(encoded)
 	if err != nil || frame.Type != mirrorstream.Ready {
@@ -186,15 +183,12 @@ func (relay *localRelay) run(ctx context.Context) error {
 		cancel()
 		relay.closeAll()
 		relay.wg.Wait()
-		_ = relay.websocket.CloseNow()
+		_ = relay.stream.Close()
 	}()
 	for {
-		messageType, encoded, err := relay.websocket.Read(ctx)
+		encoded, err := relay.stream.ReadFrame(ctx)
 		if err != nil {
 			return err
-		}
-		if messageType != websocket.MessageBinary {
-			return errors.New("Gateway sent a non-binary Mirror frame")
 		}
 		frame, err := mirrorstream.Decode(encoded)
 		if err != nil {
@@ -261,7 +255,7 @@ func (relay *localRelay) stop(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	return relay.websocket.Write(ctx, websocket.MessageBinary, encoded)
+	return relay.stream.WriteFrame(ctx, encoded)
 }
 
 func (relay *localRelay) createActor(

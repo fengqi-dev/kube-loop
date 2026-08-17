@@ -8,14 +8,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/coder/websocket"
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
 )
 
 func TestInventoryWatchAuthenticatesAndValidatesSnapshotBinding(t *testing.T) {
 	now := time.Now().UTC()
 	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if request.URL.Path != "/kubeloop/api/namespaces/development/pods" || request.URL.Query().Get("watch") != "true" ||
+		if request.URL.Path != "/api/namespaces/development/pods" || request.URL.Query().Get("watch") != "true" ||
 			request.Header.Get("Authorization") != "Bearer access-token" {
 			http.Error(writer, "invalid request", http.StatusBadRequest)
 			return

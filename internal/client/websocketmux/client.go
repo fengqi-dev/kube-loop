@@ -13,8 +13,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/coder/websocket"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/streamcopy"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
 	protocolmux "github.com/fengqi-dev/kube-loop/internal/protocol/websocketmux"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/wssprotocol"
 	"github.com/xtaci/smux"
@@ -84,9 +84,12 @@ type Forwarder struct {
 	sessions    []*pooledSession
 	maxPhysical int
 	locals      map[net.Conn]struct{}
+	streams     map[net.Conn]struct{}
 	closed      bool
 	dialMu      sync.Mutex
+	openGate    chan struct{}
 	closeOnce   sync.Once
+	closeErr    error
 	wg          sync.WaitGroup
 }
 
@@ -145,8 +148,10 @@ func Start(ctx context.Context, config ClientConfig) (*Forwarder, error) {
 	forwardCtx, cancel := context.WithCancel(ctx)
 	forwarder := &Forwarder{
 		ctx: forwardCtx, cancel: cancel, listener: listener, config: config,
-		locals: make(map[net.Conn]struct{}), maxPhysical: config.MaxPhysical,
+		locals: make(map[net.Conn]struct{}), streams: make(map[net.Conn]struct{}),
+		openGate: make(chan struct{}, 1), maxPhysical: config.MaxPhysical,
 	}
+	forwarder.openGate <- struct{}{}
 	for range config.PoolSize {
 		forwarder.mu.Lock()
 		atCapacity := len(forwarder.sessions) >= forwarder.maxPhysical
@@ -173,10 +178,9 @@ func Start(ctx context.Context, config ClientConfig) (*Forwarder, error) {
 func (forwarder *Forwarder) Address() string { return forwarder.listener.Addr().String() }
 
 func (forwarder *Forwarder) Close() error {
-	var closeErr error
 	forwarder.closeOnce.Do(func() {
 		forwarder.cancel()
-		closeErr = forwarder.listener.Close()
+		forwarder.closeErr = forwarder.listener.Close()
 		forwarder.mu.Lock()
 		forwarder.closed = true
 		sessions := append([]*pooledSession(nil), forwarder.sessions...)
@@ -186,8 +190,16 @@ func (forwarder *Forwarder) Close() error {
 			locals = append(locals, connection)
 		}
 		forwarder.locals = make(map[net.Conn]struct{})
+		streams := make([]net.Conn, 0, len(forwarder.streams))
+		for connection := range forwarder.streams {
+			streams = append(streams, connection)
+		}
+		forwarder.streams = make(map[net.Conn]struct{})
 		forwarder.mu.Unlock()
 		for _, connection := range locals {
+			_ = connection.Close()
+		}
+		for _, connection := range streams {
 			_ = connection.Close()
 		}
 		for _, item := range sessions {
@@ -196,7 +208,68 @@ func (forwarder *Forwarder) Close() error {
 		}
 		forwarder.wg.Wait()
 	})
-	return closeErr
+	return forwarder.closeErr
+}
+
+// OpenStream opens one tracked logical connection on the existing WebSocket
+// pool. Closing the Forwarder (including during Data Plane recovery) closes
+// every connection returned by this method.
+func (forwarder *Forwarder) OpenStream(ctx context.Context) (net.Conn, error) {
+	if ctx == nil {
+		return nil, errors.New("Gateway logical stream context is required")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-forwarder.ctx.Done():
+		return nil, net.ErrClosed
+	case <-forwarder.openGate:
+	}
+	defer func() { forwarder.openGate <- struct{}{} }()
+
+	stream, err := forwarder.openStream()
+	if err != nil {
+		return nil, err
+	}
+	connection := &trackedConn{Conn: protocolmux.NewStreamConn(stream)}
+	connection.onClose = func() {
+		forwarder.mu.Lock()
+		delete(forwarder.streams, connection)
+		forwarder.mu.Unlock()
+	}
+	forwarder.mu.Lock()
+	if forwarder.closed {
+		forwarder.mu.Unlock()
+		_ = connection.Close()
+		return nil, net.ErrClosed
+	}
+	forwarder.streams[connection] = struct{}{}
+	forwarder.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		_ = connection.Close()
+		return nil, err
+	}
+	return connection, nil
+}
+
+type trackedConn struct {
+	net.Conn
+	onClose func()
+	once    sync.Once
+	err     error
+}
+
+func (connection *trackedConn) Close() error {
+	connection.once.Do(func() {
+		connection.err = connection.Conn.Close()
+		if connection.onClose != nil {
+			connection.onClose()
+		}
+	})
+	return connection.err
 }
 
 func (forwarder *Forwarder) acceptLoop() {
@@ -384,7 +457,8 @@ func (forwarder *Forwarder) dial() (*pooledSession, error) {
 	serverHello := message.ServerHello
 	if serverHello == nil || !slices.Contains(hello.ProtocolVersions, serverHello.ProtocolVersion) ||
 		!slices.Contains(serverHello.Capabilities, "smux.v2") ||
-		!slices.Contains(serverHello.Capabilities, "tunnel.open.v2") {
+		!slices.Contains(serverHello.Capabilities, "tunnel.open.v2") ||
+		!slices.Contains(serverHello.Capabilities, wssprotocol.CapabilityTrafficWebSocket) {
 		_ = connection.Close(websocket.StatusPolicyViolation, "INVALID_HANDSHAKE")
 		return nil, errors.New("Gateway returned an incompatible WSS ServerHello")
 	}

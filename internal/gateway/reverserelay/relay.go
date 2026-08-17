@@ -10,10 +10,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/coder/websocket"
 	"github.com/fengqi-dev/kube-loop/internal/gateway/trafficlistener"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/exchangestream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficmodel"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficstream"
 )
 
 var errClientStopped = errors.New("Exchange stopped by client")
@@ -32,12 +32,11 @@ type udpRelayAssociation struct {
 }
 
 type relaySession struct {
-	connection *websocket.Conn
+	connection *trafficstream.FrameConn
 	listeners  *trafficlistener.Listeners
 	idle       time.Duration
 	now        func() time.Time
 
-	writeMu sync.Mutex
 	nextID  atomic.Uint64
 	mu      sync.Mutex
 	tcp     map[uint64]*tcpRelayStream
@@ -45,7 +44,12 @@ type relaySession struct {
 	udpKeys map[string]uint64
 }
 
-func newRelaySession(connection *websocket.Conn, listeners *trafficlistener.Listeners, idle time.Duration, now func() time.Time) *relaySession {
+func newRelaySession(
+	connection *trafficstream.FrameConn,
+	listeners *trafficlistener.Listeners,
+	idle time.Duration,
+	now func() time.Time,
+) *relaySession {
 	return &relaySession{
 		connection: connection, listeners: listeners, idle: idle, now: now,
 		tcp: make(map[uint64]*tcpRelayStream), udp: make(map[uint64]*udpRelayAssociation),
@@ -212,12 +216,9 @@ func (relay *relaySession) reapUDP(ctx context.Context) error {
 
 func (relay *relaySession) readClient(ctx context.Context) error {
 	for {
-		messageType, encoded, err := relay.connection.Read(ctx)
+		encoded, err := relay.connection.ReadFrame(ctx)
 		if err != nil {
 			return err
-		}
-		if messageType != websocket.MessageBinary {
-			return errors.New("Exchange stream requires binary frames")
 		}
 		frame, err := exchangestream.Decode(encoded)
 		if err != nil {
@@ -270,9 +271,7 @@ func (relay *relaySession) write(ctx context.Context, frame exchangestream.Frame
 	if err != nil {
 		return err
 	}
-	relay.writeMu.Lock()
-	defer relay.writeMu.Unlock()
-	return relay.connection.Write(ctx, websocket.MessageBinary, encoded)
+	return relay.connection.WriteFrame(ctx, encoded)
 }
 
 func (relay *relaySession) tcpStream(id uint64) *tcpRelayStream {

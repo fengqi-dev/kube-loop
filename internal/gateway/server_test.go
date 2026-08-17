@@ -13,8 +13,38 @@ import (
 	"time"
 
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficcontrol"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
 )
+
+type gatewayTestTrafficCall struct {
+	contextValue string
+	identity     trafficcontrol.Identity
+	request      tunnel.TrafficOpenRequest
+}
+
+type gatewayTestTrafficHandler struct {
+	calls chan gatewayTestTrafficCall
+}
+
+func (handler *gatewayTestTrafficHandler) ServeTraffic(
+	ctx context.Context,
+	connection net.Conn,
+	identity trafficcontrol.Identity,
+	request tunnel.TrafficOpenRequest,
+) {
+	value, _ := ctx.Value(gatewayTestContextKey{}).(string)
+	capturedIdentity := identity
+	capturedIdentity.Groups = append([]string(nil), identity.Groups...)
+	handler.calls <- gatewayTestTrafficCall{contextValue: value, identity: capturedIdentity, request: request}
+	if len(identity.Groups) > 0 {
+		identity.Groups[0] = "mutated-by-handler"
+	}
+	_ = tunnel.WriteStatus(connection, nil)
+	_ = connection.Close()
+}
+
+type gatewayTestContextKey struct{}
 
 func TestServeConnForAuthorizationLogsRequestID(t *testing.T) {
 	var logs bytes.Buffer
@@ -215,6 +245,91 @@ func TestAuthenticatedSessionDeniesTargetOutsideRegisteredNetworkSpec(t *testing
 		t.Fatalf("target status = %v", err)
 	}
 	_ = client.Close()
+}
+
+func TestAuthenticatedSessionDispatchesTrafficOnAuthorizedLogicalStream(t *testing.T) {
+	server := NewServer(nil, time.Second)
+	handler := &gatewayTestTrafficHandler{calls: make(chan gatewayTestTrafficCall, 1)}
+	server.SetTrafficHandler(handler)
+	const sessionID = "33333333-3333-4333-8333-333333333333"
+	spec, specHash := gatewayTestNetworkSpec(t)
+	authorization := SessionAuthorization{
+		IdentityID: "user-1", Groups: []string{"developers"}, DeviceID: "device-1",
+		SessionID: sessionID, Generation: 1, Namespace: "development", NetworkSpecHash: specHash,
+	}
+	token, err := tunnel.RelaySessionToken(sessionID, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	control, gatewayControl := net.Pipe()
+	go server.ServeConnForAuthorization(gatewayControl, authorization)
+	if err := tunnel.WriteAuthorizedControlSession(control, token, spec); err != nil {
+		t.Fatal(err)
+	}
+	if err := tunnel.ReadStatus(control); err != nil {
+		t.Fatal(err)
+	}
+	defer control.Close()
+
+	client, gatewayConnection := net.Pipe()
+	ctx := context.WithValue(context.Background(), gatewayTestContextKey{}, "outer-wss")
+	go server.ServeConnForAuthorizationContext(ctx, gatewayConnection, authorization)
+	request := tunnel.TrafficOpenRequest{Mode: tunnel.TrafficModeExchange, TaskID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"}
+	if err := tunnel.WriteTrafficOpen(client, request, token); err != nil {
+		t.Fatal(err)
+	}
+	if err := tunnel.ReadStatus(client); err != nil {
+		t.Fatal(err)
+	}
+	_ = client.Close()
+	select {
+	case call := <-handler.calls:
+		if call.contextValue != "outer-wss" || call.request != request {
+			t.Fatalf("traffic call = %#v", call)
+		}
+		if call.identity.IdentityID != authorization.IdentityID || call.identity.DeviceID != authorization.DeviceID ||
+			call.identity.SessionID != authorization.SessionID || call.identity.SessionGeneration != authorization.Generation ||
+			call.identity.Namespace != authorization.Namespace || len(call.identity.Groups) != 1 || call.identity.Groups[0] != "developers" {
+			t.Fatalf("traffic identity = %#v", call.identity)
+		}
+		if authorization.Groups[0] != "developers" {
+			t.Fatalf("authorization groups were aliased: %#v", authorization.Groups)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("traffic handler was not called")
+	}
+}
+
+func TestAuthenticatedSessionRejectsTrafficWithoutActiveControlAuthorization(t *testing.T) {
+	server := NewServer(nil, time.Second)
+	handler := &gatewayTestTrafficHandler{calls: make(chan gatewayTestTrafficCall, 1)}
+	server.SetTrafficHandler(handler)
+	const sessionID = "33333333-3333-4333-8333-333333333333"
+	_, specHash := gatewayTestNetworkSpec(t)
+	authorization := SessionAuthorization{
+		IdentityID: "user-1", DeviceID: "device-1", SessionID: sessionID,
+		Generation: 1, Namespace: "development", NetworkSpecHash: specHash,
+	}
+	token, err := tunnel.RelaySessionToken(sessionID, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, gatewayConnection := net.Pipe()
+	go server.ServeConnForAuthorization(gatewayConnection, authorization)
+	if err := tunnel.WriteTrafficOpen(client, tunnel.TrafficOpenRequest{
+		Mode: tunnel.TrafficModeExchange, TaskID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+	}, token); err != nil {
+		t.Fatal(err)
+	}
+	if err := tunnel.ReadStatus(client); err == nil {
+		t.Fatalf("traffic status = %v", err)
+	}
+	_ = client.Close()
+	select {
+	case call := <-handler.calls:
+		t.Fatalf("unauthorized traffic handler call = %#v", call)
+	default:
+	}
 }
 
 func TestAuthenticatedControlRejectsNetworkSpecHashMismatch(t *testing.T) {

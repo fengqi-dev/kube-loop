@@ -16,7 +16,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/coder/websocket"
 	"github.com/fengqi-dev/kube-loop/e2e/harness"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/authorization"
@@ -27,6 +26,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/execstream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
 	"github.com/google/uuid"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )

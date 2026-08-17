@@ -6,10 +6,10 @@ import (
 	"net"
 	"time"
 
-	"github.com/coder/websocket"
 	"github.com/fengqi-dev/kube-loop/internal/gateway/trafficlistener"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/mirrorstream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficcontrol"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficstream"
 )
 
 var ErrClientStopped = errClientStopped
@@ -49,7 +49,7 @@ func (config *Config) normalize() error {
 type Relay struct{ relay *mirrorRelay }
 
 func New(
-	connection *websocket.Conn,
+	connection *trafficstream.FrameConn,
 	listeners *trafficlistener.Listeners,
 	backends []trafficcontrol.BackendSet,
 	config Config,

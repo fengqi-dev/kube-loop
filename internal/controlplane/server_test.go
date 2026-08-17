@@ -13,10 +13,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/coder/websocket"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/authorization"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/health"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
+	"github.com/labstack/echo/v5"
 )
 
 type shutdownAllowAuthorizer struct{}
@@ -129,19 +130,38 @@ func TestDiscoveryReadsDynamicAuthenticationMethods(t *testing.T) {
 	}
 }
 
-func TestPublicServerDoesNotExposeManagementRoutes(t *testing.T) {
+func TestServerExposesAdminRoutesOutsideBearerAPI(t *testing.T) {
 	server, err := NewServer(
 		Config{PublicURL: "https://gateway.example.test"}, BuildInfo{},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		WithAdminRoutes(RouteRegistrarFunc(func(group *echo.Group) {
+			group.GET("/status", func(ctx *echo.Context) error { return ctx.NoContent(http.StatusNoContent) })
+		})),
+		WithAPIRoutes(RouteRegistrarFunc(func(group *echo.Group) {
+			group.GET("/status", func(ctx *echo.Context) error { return ctx.NoContent(http.StatusNoContent) })
+		})),
+		WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(*http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
+			return controlplaneapi.Identity{Subject: "test-user"}, nil
+		})),
+		WithAuthorizer(shutdownAllowAuthorizer{}),
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	managementRequest := httptest.NewRequest(http.MethodGet, AdminAPIPathPrefix+"/status", nil)
-	managementResponse := httptest.NewRecorder()
-	server.Handler().ServeHTTP(managementResponse, managementRequest)
-	if managementResponse.Code != http.StatusNotFound || managementResponse.Header().Get("WWW-Authenticate") != "" {
-		t.Fatalf("management status=%d headers=%v", managementResponse.Code, managementResponse.Header())
+	adminRequest := httptest.NewRequest(http.MethodGet, AdminPathPrefix+"/status", nil)
+	adminResponse := httptest.NewRecorder()
+	server.Handler().ServeHTTP(adminResponse, adminRequest)
+	if adminResponse.Code != http.StatusNoContent || adminResponse.Header().Get("WWW-Authenticate") != "" {
+		t.Fatalf("admin status=%d headers=%v", adminResponse.Code, adminResponse.Header())
+	}
+
+	legacyResponse := httptest.NewRecorder()
+	server.Handler().ServeHTTP(
+		legacyResponse,
+		httptest.NewRequest(http.MethodGet, APIPathPrefix+"/admin/status", nil),
+	)
+	if legacyResponse.Code != http.StatusNotFound {
+		t.Fatalf("legacy admin status=%d, want %d", legacyResponse.Code, http.StatusNotFound)
 	}
 }
 
@@ -177,7 +197,7 @@ func TestShutdownCancelsAndWaitsForWebSocketHandlers(t *testing.T) {
 	}
 	serveDone := make(chan error, 1)
 	go func() { serveDone <- server.Serve(listener) }()
-	connection, _, err := websocket.Dial(context.Background(), "ws://"+listener.Addr().String()+"/kubeloop/api/stream", nil)
+	connection, _, err := websocket.Dial(context.Background(), "ws://"+listener.Addr().String()+"/api/stream", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

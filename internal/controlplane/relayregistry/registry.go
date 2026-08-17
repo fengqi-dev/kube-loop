@@ -230,7 +230,8 @@ func (registry *Registry) Allocate(request relaycontrol.AllocationRequest) (rela
 	reservationReleased := false
 	reassigning := false
 	if existing, ok := registry.assignments[request.SessionID]; ok {
-		if request.NetworkSpecHash != existing.networkSpecHash || request.Generation < existing.generation {
+		if request.Generation < existing.generation ||
+			(request.Generation == existing.generation && request.NetworkSpecHash != existing.networkSpecHash) {
 			return relaycontrol.AllocationResponse{}, ErrConflict
 		}
 		relay := registry.relays[existing.response.RelayID]
@@ -251,6 +252,7 @@ func (registry *Registry) Allocate(request relaycontrol.AllocationRequest) (rela
 			}
 		} else {
 			existing.generation = request.Generation
+			existing.networkSpecHash = request.NetworkSpecHash
 			registry.assignments[request.SessionID] = existing
 			return existing.response, nil
 		}

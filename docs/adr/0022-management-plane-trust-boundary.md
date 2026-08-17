@@ -5,8 +5,8 @@
 
 ## 决策
 
-Admin IAM 与 Auth UI 嵌入 Control Plane，同源暴露 `/api/admin` 与 `/oauth2`，不增加
-部署组件。浏览器只保存语言；OAuth 临时状态和 Admin CSRF 存在 sessionStorage，
+Admin IAM 与 Auth UI 嵌入 Control Plane，通过同一个 HTTP listener 同源暴露
+`/admin` 与 `/oauth2`，不增加端口、Service 或部署组件。浏览器只保存语言；OAuth 临时状态和 Admin CSRF 存在 sessionStorage，
 认证 Session 使用 `HttpOnly; Secure; SameSite=Lax` Cookie。
 
 Admin 身份来自统一 Identity 目录。用户从 Group 继承 Namespace 访问范围，

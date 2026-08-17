@@ -98,7 +98,7 @@ func New(config Config, sessions *adminsession.Service, optionValues ...Option) 
 	}
 	handler := &Handler{
 		sessions: sessions, origin: parsed.Scheme + "://" + parsed.Host,
-		pathPrefix: controlplane.AdminAPIPathPrefix,
+		pathPrefix: controlplane.AdminPathPrefix,
 		maxBody:    maxBody, limiter: newExchangeLimiter(globalAttempts, sourceAttempts, window),
 		tokenLimit: newExchangeLimiter(defaultTokenGlobal, defaultTokenSource, window),
 	}
