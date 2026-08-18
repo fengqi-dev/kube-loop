@@ -34,7 +34,10 @@ func main() {
 	defer goruntime.UnlockOSThread()
 
 	app := desktopapp.NewApp(version, embeddedHelperFiles)
-	tray := newSystemTray(app)
+	var tray *systray.SystemTray
+	if systemTrayEnabled {
+		tray = newSystemTray(app)
+	}
 	if err := wails.Run(&options.App{
 		Title:             "KubeLoop",
 		Width:             900,
@@ -68,7 +71,9 @@ func main() {
 		Bind:             []any{app},
 		BackgroundColour: &options.RGBA{R: 15, G: 23, B: 42, A: 1},
 	}); err != nil {
-		tray.Remove()
+		if tray != nil {
+			tray.Remove()
+		}
 		log.Fatal(err)
 	}
 }
