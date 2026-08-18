@@ -500,7 +500,6 @@ func (manager *Manager) syncSession(update remote.SessionUpdate) {
 	status := runtime.Status()
 	status.State = "reconnecting"
 	manager.emit(profileID, status, errNetworkSpecChanged)
-	runtime.interruptTransport(errNetworkSpecChanged)
 	go manager.recover(profileID, entry, runtime, baseline)
 }
 
