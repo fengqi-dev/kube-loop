@@ -5,6 +5,8 @@ import (
 	"errors"
 	"io"
 	"net"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -105,6 +107,56 @@ type testCloseConn struct {
 	net.Conn
 	closeErr   error
 	closeCalls int
+}
+
+func TestNormalizedConfigTrafficInspectionSwitch(t *testing.T) {
+	tests := []struct {
+		name        string
+		enabled     bool
+		dynamic     bool
+		wantCreated bool
+	}{
+		{name: "disabled by default"},
+		{name: "enabled", enabled: true, wantCreated: true},
+		{name: "dynamic", dynamic: true, wantCreated: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			authorityPath := filepath.Join(t.TempDir(), "inspection-ca.pem")
+			config := normalizedConfig(Config{TrafficInspection: TrafficInspectionConfig{
+				Enabled:       test.enabled,
+				AuthorityPath: authorityPath,
+			}})
+			if test.dynamic {
+				config = normalizedConfig(Config{TrafficInspection: TrafficInspectionConfig{
+					AuthorityPath: authorityPath,
+					IsEnabled:     func() bool { return false },
+				}})
+			}
+			ctx, cancel := context.WithCancel(t.Context())
+			bridge, err := config.listenSOCKS(
+				ctx,
+				"127.0.0.1:1",
+				"127.0.0.1:0",
+				tunnel.SessionToken{1},
+			)
+			if err != nil {
+				cancel()
+				t.Fatal(err)
+			}
+			cancel()
+			if err := bridge.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
+				t.Fatal(err)
+			}
+			_, statErr := os.Stat(authorityPath)
+			if test.wantCreated && statErr != nil {
+				t.Fatalf("inspection authority was not created: %v", statErr)
+			}
+			if !test.wantCreated && !errors.Is(statErr, os.ErrNotExist) {
+				t.Fatalf("disabled inspection created authority: %v", statErr)
+			}
+		})
+	}
 }
 
 func TestRuntimeOpenTrafficStreamUsesCurrentTunnelTransport(t *testing.T) {

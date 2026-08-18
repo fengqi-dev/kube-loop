@@ -1,0 +1,533 @@
+//go:build e2e
+
+package dataplane
+
+import (
+	"bytes"
+	"context"
+	"crypto/tls"
+	"encoding/base64"
+	"encoding/binary"
+	"encoding/json"
+	"io"
+	"log/slog"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/fengqi-dev/kube-loop/e2e/harness"
+	"github.com/fengqi-dev/kube-loop/internal/client/credentials"
+	clientdataplane "github.com/fengqi-dev/kube-loop/internal/client/dataplane"
+	"github.com/fengqi-dev/kube-loop/internal/client/profile"
+	"github.com/fengqi-dev/kube-loop/internal/client/remote"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/authorization"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/sessionapi"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/ticketapi"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
+	"github.com/fengqi-dev/kube-loop/internal/trafficinspect"
+	"github.com/google/uuid"
+	"golang.org/x/net/http2"
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/utils/ptr"
+)
+
+const trafficInspectionAccessToken = "e2e-traffic-inspection"
+
+func TestRealTrafficInspectionThroughDataPlane(t *testing.T) {
+	harness.RequireE2E(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	kubeClient := kubeClient(t)
+	if err := harness.EnsureEchoWorkload(ctx, kubeClient); err != nil {
+		t.Fatalf("ensure traffic inspection namespace: %v", err)
+	}
+	backends := installTrafficInspectionBackends(t, ctx, kubeClient)
+	dialContext, output := startTrafficInspectionDataPlane(t, ctx, kubeClient, backends.nodeIP)
+
+	transport := &http.Transport{DialContext: dialContext}
+	t.Cleanup(transport.CloseIdleConnections)
+	response, err := (&http.Client{Transport: transport}).Get("http://" + backends.httpAddress + "/get?mode=dataplane-e2e")
+	if err != nil {
+		t.Fatalf("call go-httpbin through Data Plane: %v", err)
+	}
+	var payload struct {
+		Arguments map[string][]string `json:"args"`
+		Method    string              `json:"method"`
+	}
+	decodeErr := json.NewDecoder(response.Body).Decode(&payload)
+	closeErr := response.Body.Close()
+	if decodeErr != nil || closeErr != nil {
+		t.Fatal(decodeErr, closeErr)
+	}
+	if response.StatusCode != http.StatusOK || payload.Method != http.MethodGet ||
+		len(payload.Arguments["mode"]) != 1 || payload.Arguments["mode"][0] != "dataplane-e2e" {
+		t.Fatalf("unexpected go-httpbin response: status=%d payload=%#v", response.StatusCode, payload)
+	}
+
+	callGRPCBinThroughDataPlane(t, dialContext, backends.grpcH2CAddress, nil)
+	callGRPCBinThroughDataPlane(t, dialContext, backends.grpcTLSAddress, &tls.Config{
+		MinVersion: tls.VersionTLS12,
+		NextProtos: []string{"h2"},
+		// The NodePort CONNECT authority is an IP while grpcbin uses a logical
+		// SNI name. This client is scoped to verifying decryption and RAW GRPCS.
+		InsecureSkipVerify: true, //nolint:gosec
+	})
+	waitForTrafficInspectionEvents(t, output, map[string]bool{
+		"http:request":   true,
+		"grpc:request":   true,
+		"grpc:response":  true,
+		"grpcs:request":  true,
+		"grpcs:response": true,
+	})
+}
+
+func TestRealUnrecognizedTCPThroughDataPlane(t *testing.T) {
+	harness.RequireE2E(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	kubeClient := kubeClient(t)
+	if err := harness.EnsureEchoWorkload(ctx, kubeClient); err != nil {
+		t.Fatalf("ensure traffic inspection namespace: %v", err)
+	}
+	nodeIP := trafficInspectionNodeIP(t, ctx, kubeClient)
+	tcpEchoAddress := installTCPEchoBackend(t, ctx, kubeClient, nodeIP)
+	dialContext, output := startTrafficInspectionDataPlane(t, ctx, kubeClient, nodeIP)
+
+	callTCPEchoThroughDataPlane(t, dialContext, tcpEchoAddress, "in-cluster TCP echo")
+	if events := output.Snapshot(); len(events) != 0 {
+		t.Fatalf("unrecognized TCP traffic emitted inspection events: %#v", events)
+	}
+}
+
+func startTrafficInspectionDataPlane(
+	t *testing.T,
+	ctx context.Context,
+	kubeClient kubernetes.Interface,
+	nodeIP string,
+) (func(context.Context, string, string) (net.Conn, error), *trafficinspect.RingBufferSink) {
+	t.Helper()
+	_, identity, activeSession, remoteSession := trafficInspectionState(t, ctx, []string{nodeIP})
+	gatewayIP := reachableHostIP(t, ctx, kubeClient)
+	server, gatewayClient := startTrafficInspectionController(t, identity, activeSession, gatewayIP)
+	t.Cleanup(server.Close)
+	serverProfile := profile.Profile{ID: "traffic-inspection-e2e", BaseURL: server.URL}
+	credentialStore := &e2eCredentialStore{
+		profileID: serverProfile.ID,
+		credential: credentials.Credential{
+			TokenType: "Bearer", AccessToken: trafficInspectionAccessToken,
+			AccessExpiresAt: identity.AccessExpiresAt, RefreshToken: "unused",
+			RefreshExpiresAt: identity.AccessExpiresAt, DeviceID: identity.DeviceID,
+		},
+	}
+	remoteClient, err := remote.New(credentialStore, e2eTokenRefresher{}, remote.Config{HTTPClient: gatewayClient})
+	if err != nil {
+		t.Fatal(err)
+	}
+	output, err := trafficinspect.NewRingBufferSink(256)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dataPlane := startE2EDataPlaneWithInspection(
+		t, ctx, remoteClient, gatewayClient, serverProfile, remoteSession,
+		clientdataplane.TrafficInspectionConfig{
+			Enabled: true, AuthorityPath: filepath.Join(t.TempDir(), "traffic-inspection-ca.pem"),
+			TLSConfig: &tls.Config{ //nolint:gosec // grpcbin ships a legacy self-signed E2E certificate.
+				MinVersion: tls.VersionTLS12, InsecureSkipVerify: true,
+			},
+			Sink: output,
+			Policy: trafficinspect.CapturePolicy{
+				CaptureBodies: true,
+				MaxBodyBytes:  4 << 20,
+			},
+		},
+	)
+	dialer, err := dataPlane.Dialer(serverProfile.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return dialer.DialContext, output
+}
+
+func callTCPEchoThroughDataPlane(
+	t *testing.T,
+	dialContext func(context.Context, string, string) (net.Conn, error),
+	address string,
+	backend string,
+) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	defer cancel()
+	connection, err := dialContext(ctx, "tcp", address)
+	if err != nil {
+		t.Fatalf("connect %s through Data Plane: %v", backend, err)
+	}
+	defer connection.Close()
+	if err := connection.SetDeadline(time.Now().Add(20 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	payload := []byte("kubeloop-unknown-tcp-" + uuid.NewString() + "\n")
+	if _, err := connection.Write(payload); err != nil {
+		t.Fatalf("write %s payload: %v", backend, err)
+	}
+	echoed := make([]byte, len(payload))
+	if _, err := io.ReadFull(connection, echoed); err != nil {
+		t.Fatalf("read %s payload: %v", backend, err)
+	}
+	if !bytes.Equal(echoed, payload) {
+		t.Fatalf("%s echoed payload = %q, want %q", backend, echoed, payload)
+	}
+}
+
+func callGRPCBinThroughDataPlane(
+	t *testing.T,
+	dialContext func(context.Context, string, string) (net.Conn, error),
+	address string,
+	clientTLS *tls.Config,
+) {
+	t.Helper()
+	transport := &http2.Transport{
+		AllowHTTP: clientTLS == nil,
+		DialTLSContext: func(ctx context.Context, network, target string, _ *tls.Config) (net.Conn, error) {
+			connection, err := dialContext(ctx, network, target)
+			if err != nil || clientTLS == nil {
+				return connection, err
+			}
+			tlsConnection := tls.Client(connection, clientTLS.Clone())
+			if err := tlsConnection.HandshakeContext(ctx); err != nil {
+				_ = connection.Close()
+				return nil, err
+			}
+			return tlsConnection, nil
+		},
+	}
+	t.Cleanup(transport.CloseIdleConnections)
+	scheme := "http"
+	if clientTLS != nil {
+		scheme = "https"
+	}
+	request, err := http.NewRequestWithContext(
+		t.Context(), http.MethodPost, scheme+"://"+address+"/grpcbin.GRPCBin/DummyUnary",
+		bytes.NewReader([]byte{0, 0, 0, 0, 0}),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Content-Type", "application/grpc")
+	request.Header.Set("TE", "trailers")
+	response, err := (&http.Client{Transport: transport}).Do(request)
+	if err != nil {
+		t.Fatalf("call grpcbin %s through Data Plane: %v", address, err)
+	}
+	body, readErr := io.ReadAll(response.Body)
+	closeErr := response.Body.Close()
+	if readErr != nil || closeErr != nil {
+		t.Fatal(readErr, closeErr)
+	}
+	if response.StatusCode != http.StatusOK || len(body) < 5 {
+		t.Fatalf("grpcbin %s response: status=%d body=%x trailers=%v", address, response.StatusCode, body, response.Trailer)
+	}
+}
+
+func waitForTrafficInspectionEvents(t *testing.T, sink *trafficinspect.RingBufferSink, expected map[string]bool) {
+	t.Helper()
+	err := wait.PollUntilContextTimeout(t.Context(), 50*time.Millisecond, 10*time.Second, true, func(context.Context) (bool, error) {
+		seen := make(map[string]bool)
+		for _, event := range sink.Snapshot() {
+			if event.Raw == nil || event.Raw.Data == "" {
+				continue
+			}
+			raw, err := base64.StdEncoding.DecodeString(event.Raw.Data)
+			if err != nil {
+				return false, err
+			}
+			key := string(event.Protocol) + ":" + event.Raw.Direction
+			if event.Raw.Format == "grpc" && (len(raw) < 5 || int(binary.BigEndian.Uint32(raw[1:5])) > len(raw)-5) {
+				t.Fatalf("invalid RAW gRPC frame for %s: %x", key, raw)
+			}
+			seen[key] = true
+		}
+		for key := range expected {
+			if !seen[key] {
+				return false, nil
+			}
+		}
+		return true, nil
+	})
+	if err != nil {
+		t.Fatalf("traffic inspection events incomplete: %v events=%#v", err, sink.Snapshot())
+	}
+}
+
+func trafficInspectionState(
+	t *testing.T,
+	ctx context.Context,
+	serviceIPs []string,
+) (*storage.Store, controlplaneapi.Identity, sessionapi.ActiveSession, remote.Session) {
+	t.Helper()
+	stateStore, err := storage.Open(ctx, storage.Config{
+		Backend: storage.BackendSQLite, SQLitePath: filepath.Join(t.TempDir(), "traffic-inspection.db"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = stateStore.Close() })
+	now := time.Now().UTC()
+	identityID, authorizationID, sessionID := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	deviceID := "traffic-inspection-e2e-device"
+	if _, err := stateStore.Identities().Create(ctx, storage.Identity{
+		ID: identityID, Type: "human", DisplayName: "Traffic Inspection E2E", Status: "active",
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	expiresAt := now.Add(10 * time.Minute)
+	createOAuthGrant(t, ctx, stateStore, authorizationID, identityID, deviceID, 9, now, expiresAt)
+	network, err := networkspec.Normalize(networkspec.Spec{ServiceIPs: serviceIPs})
+	if err != nil {
+		t.Fatal(err)
+	}
+	networkJSON, _ := networkspec.CanonicalJSON(network)
+	networkHash, _ := networkspec.Hash(network)
+	if err := stateStore.Sessions().Create(ctx, storage.Session{
+		ID: sessionID, IdentityID: identityID, DeviceID: deviceID, ClusterID: "minikube",
+		Namespace: harness.EchoNamespace, State: "active", Generation: 1,
+		NetworkSpec: networkJSON, NetworkSpecHash: networkHash,
+		CreatedAt: now, UpdatedAt: now, LastHeartbeatAt: now, ExpiresAt: expiresAt,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	identity := controlplaneapi.Identity{
+		Subject: identityID, DeviceID: deviceID, AuthorizationID: authorizationID, AccessExpiresAt: expiresAt,
+	}
+	active := sessionapi.ActiveSession{
+		ID: sessionID, Namespace: harness.EchoNamespace, Generation: 1,
+		ExpiresAt: expiresAt, NetworkSpecHash: networkHash,
+	}
+	clientSession := remote.Session{
+		ID: sessionID, Namespace: harness.EchoNamespace, State: "active", Generation: 1,
+		CreatedAt: now, UpdatedAt: now, LastHeartbeatAt: now, ExpiresAt: expiresAt,
+		NetworkSpec: network, NetworkSpecHash: networkHash,
+	}
+	return stateStore, identity, active, clientSession
+}
+
+func startTrafficInspectionController(
+	t *testing.T,
+	identity controlplaneapi.Identity,
+	session sessionapi.ActiveSession,
+	gatewayIP string,
+) (*httptest.Server, *http.Client) {
+	t.Helper()
+	gateway := startE2ETrafficGateway(t, gatewayIP, nil, nil)
+	server, err := controlplane.NewServer(
+		controlplane.Config{PublicURL: "http://127.0.0.1"}, controlplane.BuildInfo{},
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		controlplane.WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(request *http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
+			if request.Header.Get("Authorization") != "Bearer "+trafficInspectionAccessToken {
+				return controlplaneapi.Identity{}, &controlplaneapi.Error{Code: controlplaneapi.CodeUnauthenticated, Message: "invalid e2e access token"}
+			}
+			return identity, nil
+		})),
+		controlplane.WithAuthorizer(authorization.NewAuthenticated()),
+		controlplane.WithAPIRoutes(controlplane.APIRoutes{
+			Tickets: ticketapi.NewRoutes(gateway.tickets, e2eExecSessionValidator{
+				identityID: identity.Subject, session: session,
+			}).Endpoints(),
+		}),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return startE2EControlPlaneServer(t, server.Handler(), gateway)
+}
+
+type trafficInspectionBackends struct {
+	nodeIP         string
+	httpAddress    string
+	grpcH2CAddress string
+	grpcTLSAddress string
+}
+
+func installTrafficInspectionBackends(
+	t *testing.T,
+	ctx context.Context,
+	client kubernetes.Interface,
+) trafficInspectionBackends {
+	t.Helper()
+	suffix := strings.ToLower(uuid.NewString()[:8])
+	httpName := "traffic-httpbin-" + suffix
+	grpcName := "traffic-grpcbin-" + suffix
+	httpImage := strings.TrimSpace(os.Getenv("KUBELOOP_HTTPBIN_IMAGE"))
+	if httpImage == "" {
+		httpImage = "ghcr.io/mccutchen/go-httpbin:latest"
+	}
+	grpcImage := strings.TrimSpace(os.Getenv("KUBELOOP_GRPCBIN_IMAGE"))
+	if grpcImage == "" {
+		grpcImage = "docker.io/moul/grpcbin:latest"
+	}
+	httpService := installTrafficInspectionBackend(t, ctx, client, httpName, httpImage, nil, []corev1.ContainerPort{
+		{Name: "http", ContainerPort: 8080},
+	}, []corev1.ServicePort{
+		{Name: "http", Port: 8080, TargetPort: intstr.FromString("http")},
+	}, &corev1.Probe{ProbeHandler: corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{
+		Path: "/get", Port: intstr.FromString("http"),
+	}}, PeriodSeconds: 1, FailureThreshold: 60})
+	grpcService := installTrafficInspectionBackend(t, ctx, client, grpcName, grpcImage, nil, []corev1.ContainerPort{
+		{Name: "grpc-h2c", ContainerPort: 9000},
+		{Name: "grpc-tls", ContainerPort: 9001},
+	}, []corev1.ServicePort{
+		{Name: "grpc-h2c", Port: 9000, TargetPort: intstr.FromString("grpc-h2c")},
+		{Name: "grpc-tls", Port: 9001, TargetPort: intstr.FromString("grpc-tls")},
+	}, &corev1.Probe{ProbeHandler: corev1.ProbeHandler{TCPSocket: &corev1.TCPSocketAction{
+		Port: intstr.FromString("grpc-h2c"),
+	}}, PeriodSeconds: 1, FailureThreshold: 60})
+	nodeIP := trafficInspectionNodeIP(t, ctx, client)
+	return trafficInspectionBackends{
+		nodeIP:         nodeIP,
+		httpAddress:    net.JoinHostPort(nodeIP, serviceNodePort(t, httpService, "http")),
+		grpcH2CAddress: net.JoinHostPort(nodeIP, serviceNodePort(t, grpcService, "grpc-h2c")),
+		grpcTLSAddress: net.JoinHostPort(nodeIP, serviceNodePort(t, grpcService, "grpc-tls")),
+	}
+}
+
+func trafficInspectionNodeIP(t *testing.T, ctx context.Context, client kubernetes.Interface) string {
+	t.Helper()
+	nodes, err := client.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	if err != nil || len(nodes.Items) == 0 {
+		t.Fatalf("list traffic inspection E2E nodes: %v", err)
+	}
+	nodeIP := ""
+	for _, address := range nodes.Items[0].Status.Addresses {
+		if address.Type == corev1.NodeInternalIP {
+			nodeIP = address.Address
+			break
+		}
+	}
+	if net.ParseIP(nodeIP) == nil {
+		t.Fatalf("traffic inspection E2E node IP is invalid: %q", nodeIP)
+	}
+	return nodeIP
+}
+
+func installTCPEchoBackend(
+	t *testing.T,
+	ctx context.Context,
+	client kubernetes.Interface,
+	nodeIP string,
+) string {
+	t.Helper()
+	image := strings.TrimSpace(os.Getenv("KUBELOOP_TCP_ECHO_IMAGE"))
+	if image == "" {
+		image = "docker.io/library/python:3.12-alpine"
+	}
+	const server = "" +
+		"import socket\n" +
+		"s=socket.socket()\n" +
+		"s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)\n" +
+		"s.bind(('0.0.0.0',30000))\n" +
+		"s.listen()\n" +
+		"while True:\n" +
+		" c,_=s.accept()\n" +
+		" while data:=c.recv(65536): c.sendall(data)\n" +
+		" c.close()\n"
+	return installTCPEchoService(t, ctx, client, nodeIP, image, []string{"python", "-c", server})
+}
+
+func installTCPEchoService(
+	t *testing.T,
+	ctx context.Context,
+	client kubernetes.Interface,
+	nodeIP, image string,
+	args []string,
+) string {
+	t.Helper()
+	name := "traffic-tcp-echo-" + strings.ToLower(uuid.NewString()[:8])
+	service := installTrafficInspectionBackend(
+		t, ctx, client, name, image,
+		args,
+		[]corev1.ContainerPort{{Name: "tcp-echo", ContainerPort: 30000}},
+		[]corev1.ServicePort{{Name: "tcp-echo", Port: 30000, TargetPort: intstr.FromString("tcp-echo")}},
+		&corev1.Probe{ProbeHandler: corev1.ProbeHandler{TCPSocket: &corev1.TCPSocketAction{
+			Port: intstr.FromString("tcp-echo"),
+		}}, PeriodSeconds: 1, FailureThreshold: 60},
+	)
+	return net.JoinHostPort(nodeIP, serviceNodePort(t, service, "tcp-echo"))
+}
+
+func serviceNodePort(t *testing.T, service *corev1.Service, name string) string {
+	t.Helper()
+	for _, port := range service.Spec.Ports {
+		if port.Name == name && port.NodePort > 0 {
+			return strconv.Itoa(int(port.NodePort))
+		}
+	}
+	t.Fatalf("Service %s has no NodePort named %s", service.Name, name)
+	return ""
+}
+
+func installTrafficInspectionBackend(
+	t *testing.T,
+	ctx context.Context,
+	client kubernetes.Interface,
+	name, image string,
+	args []string,
+	containerPorts []corev1.ContainerPort,
+	servicePorts []corev1.ServicePort,
+	readiness *corev1.Probe,
+) *corev1.Service {
+	t.Helper()
+	labels := map[string]string{"app.kubernetes.io/name": name, "app.kubernetes.io/component": "traffic-inspection-e2e"}
+	_, err := client.AppsV1().Deployments(harness.EchoNamespace).Create(ctx, &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Labels: labels},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: ptr.To[int32](1), Selector: &metav1.LabelSelector{MatchLabels: labels},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{Labels: labels},
+				Spec: corev1.PodSpec{
+					AutomountServiceAccountToken: ptr.To(false),
+					Containers: []corev1.Container{{
+						Name: name, Image: image, ImagePullPolicy: corev1.PullIfNotPresent,
+						Args: args, Ports: containerPorts, ReadinessProbe: readiness,
+					}},
+				},
+			},
+		},
+	}, metav1.CreateOptions{})
+	if err != nil {
+		t.Fatalf("create %s Deployment: %v", name, err)
+	}
+	service, err := client.CoreV1().Services(harness.EchoNamespace).Create(ctx, &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Labels: labels},
+		Spec:       corev1.ServiceSpec{Type: corev1.ServiceTypeNodePort, Selector: labels, Ports: servicePorts},
+	}, metav1.CreateOptions{})
+	if err != nil {
+		t.Fatalf("create %s Service: %v", name, err)
+	}
+	t.Cleanup(func() {
+		cleanupContext, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		_ = client.AppsV1().Deployments(harness.EchoNamespace).Delete(cleanupContext, name, metav1.DeleteOptions{})
+		_ = client.CoreV1().Services(harness.EchoNamespace).Delete(cleanupContext, name, metav1.DeleteOptions{})
+	})
+	if err := wait.PollUntilContextTimeout(ctx, time.Second, 2*time.Minute, true, func(ctx context.Context) (bool, error) {
+		deployment, err := client.AppsV1().Deployments(harness.EchoNamespace).Get(ctx, name, metav1.GetOptions{})
+		return err == nil && deployment.Status.AvailableReplicas > 0, err
+	}); err != nil {
+		t.Fatalf("wait for %s Deployment: %v", name, err)
+	}
+	return service
+}

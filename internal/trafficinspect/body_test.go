@@ -1,0 +1,95 @@
+package trafficinspect
+
+import (
+	"bytes"
+	"encoding/base64"
+	"io"
+	"net/http"
+	"net/url"
+	"strings"
+	"testing"
+)
+
+func TestObservedBodyCapturesWithoutChangingReads(t *testing.T) {
+	var captured capturedBody
+	body := observeBody(io.NopCloser(strings.NewReader("abcdefgh")), 5, func(result capturedBody) {
+		captured = result
+	})
+	read, err := io.ReadAll(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := body.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if string(read) != "abcdefgh" {
+		t.Fatalf("read body = %q", read)
+	}
+	if string(captured.data) != "abcde" || captured.size != 8 || !captured.truncated {
+		t.Fatalf("captured body = %#v", captured)
+	}
+}
+
+func TestRawHTTPMessageIsUnredacted(t *testing.T) {
+	request := &http.Request{
+		Method: http.MethodPost,
+		URL:    &url.URL{Scheme: "http", Host: "raw.test", Path: "/submit"},
+		Host:   "raw.test",
+		Proto:  "HTTP/1.1",
+		Header: http.Header{
+			"Authorization": []string{"Bearer unredacted-secret"},
+			"Content-Type":  []string{"application/octet-stream"},
+		},
+		Body: io.NopCloser(bytes.NewReader(nil)),
+	}
+	raw := rawHTTPMessage(
+		request,
+		nil,
+		directionRequest,
+		"application/octet-stream",
+		capturedBody{data: []byte{0, 1, 2}, size: 3},
+	)
+	decoded, err := base64.StdEncoding.DecodeString(raw.Data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(decoded, []byte("Authorization: Bearer unredacted-secret\r\n")) {
+		t.Fatalf("raw HTTP headers = %q", decoded)
+	}
+	if !bytes.HasSuffix(decoded, []byte{0, 1, 2}) {
+		t.Fatalf("raw HTTP body = %x", decoded)
+	}
+}
+
+func TestEmitCapturedBodyKeepsRawGRPCFrames(t *testing.T) {
+	sink, err := NewChannelSink(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := &http.Request{
+		Method:     http.MethodPost,
+		URL:        &url.URL{Scheme: "https", Path: "/grpcbin.GRPCBin/DummyUnary"},
+		Host:       "grpcbin:9001",
+		Proto:      "HTTP/2.0",
+		ProtoMajor: 2,
+		Header:     http.Header{"Content-Type": []string{"application/grpc"}},
+	}
+	frame := []byte{0, 0, 0, 0, 3, 1, 2, 3}
+	emitCapturedBody(
+		t.Context(),
+		Config{Sink: sink},
+		requestTrace{flowID: "flow", protocol: ProtocolGRPCS, destination: "grpcbin:9001"},
+		request,
+		nil,
+		directionRequest,
+		"application/grpc",
+		capturedBody{data: frame, size: int64(len(frame))},
+	)
+	event := <-sink.Events()
+	if event.Raw == nil || event.Raw.Format != "grpc" || event.Raw.Data != base64.StdEncoding.EncodeToString(frame) {
+		t.Fatalf("raw gRPC event = %#v", event)
+	}
+	if event.GRPC == nil || event.GRPC.Service != "grpcbin.GRPCBin" || event.GRPC.Method != "DummyUnary" {
+		t.Fatalf("gRPC metadata = %#v", event.GRPC)
+	}
+}
