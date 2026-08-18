@@ -97,7 +97,7 @@ function ServerInstallBlock({ locale }: { locale: Locale }) {
   const [copied, setCopied] = useState(false);
   const command = `helm upgrade --install kubeloop \\
   oci://ghcr.io/fengqi-dev/kube-loop/charts/kubeloop \\
-  --version 2.0.0-beta.9 \\
+  --version 2.0.0-rc.1 \\
   --namespace kubeloop-system \\
   --create-namespace \\
   --set publicURL=http://kubeloop.example.com \\
