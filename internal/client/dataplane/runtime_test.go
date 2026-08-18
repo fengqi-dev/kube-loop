@@ -973,9 +973,10 @@ func TestReconnectCannotPublishGenerationOlderThanRuntime(t *testing.T) {
 	}
 	newest := session
 	newest.Generation = 3
-	if err := runtime.AdvanceSession(newest); err != nil {
-		t.Fatal(err)
-	}
+	runtime.stateMu.Lock()
+	runtime.session = newest
+	runtime.status.SessionGeneration = newest.Generation
+	runtime.stateMu.Unlock()
 	stale := session
 	stale.Generation = 2
 	if err := runtime.Reconnect(context.Background(), serverProfile, stale, func(context.Context) (remote.RelayTicket, error) {

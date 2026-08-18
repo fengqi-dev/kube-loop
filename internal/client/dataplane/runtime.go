@@ -513,24 +513,6 @@ func (runtime *Runtime) Status() Status {
 	return runtime.status
 }
 
-// AdvanceSession records a newer authoritative generation without replacing
-// the transport. It prevents an in-flight recovery from publishing an older
-// generation after a concurrent heartbeat or reconnect decision.
-func (runtime *Runtime) AdvanceSession(session remote.Session) error {
-	runtime.stateMu.Lock()
-	defer runtime.stateMu.Unlock()
-	if session.State != "active" || session.ID != runtime.session.ID ||
-		session.NetworkSpecHash != runtime.session.NetworkSpecHash {
-		return errors.New("active Session identity changed")
-	}
-	if session.Generation < runtime.session.Generation {
-		return errors.New("stale Session generation")
-	}
-	runtime.session = session
-	runtime.status.SessionGeneration = session.Generation
-	return nil
-}
-
 func (runtime *Runtime) StartTUN(ctx context.Context) (Status, error) {
 	runtime.stateMu.Lock()
 	defer runtime.stateMu.Unlock()
@@ -799,9 +781,10 @@ func (runtime *Runtime) Reconnect(
 		return errors.New("stale or changed Session generation during Data Plane recovery")
 	}
 	networkChanged := session.NetworkSpecHash != runtime.session.NetworkSpecHash
+	generationChanged := session.Generation > runtime.session.Generation
 	runtime.transportMu.Lock()
 	transportStopped := signalClosed(runtime.transportDone)
-	if runtime.ctx.Err() != nil || (!transportStopped && !networkChanged) {
+	if runtime.ctx.Err() != nil || (!transportStopped && !networkChanged && !generationChanged) {
 		runtime.transportMu.Unlock()
 		runtime.stateMu.Unlock()
 		_ = transport.control.Close()

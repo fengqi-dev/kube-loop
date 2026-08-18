@@ -50,6 +50,7 @@ const (
 var (
 	errSystemResumed      = errors.New("system resumed")
 	errNetworkSpecChanged = errors.New("Session NetworkSpec changed")
+	errSessionChanged     = errors.New("Session generation changed")
 )
 
 type Manager struct {
@@ -109,11 +110,15 @@ func (manager *Manager) Connect(ctx context.Context, serverProfile profile.Profi
 			return Status{}, ctx.Err()
 		default:
 			if status.SessionID == session.ID && status.NetworkSpecHash == session.NetworkSpecHash {
-				if session.Generation >= current.session.Generation {
-					if err := current.runtime.AdvanceSession(session); err != nil {
-						return Status{}, err
-					}
-					current.session = session
+				if session.Generation < current.session.Generation {
+					return Status{}, errors.New("stale Session generation")
+				}
+				if session.Generation > current.session.Generation && !current.recovering {
+					current.recovering = true
+					baseline := current.session
+					status.State = "reconnecting"
+					manager.emit(serverProfile.ID, status, errSessionChanged)
+					go manager.recover(serverProfile.ID, current, current.runtime, baseline)
 				}
 				status = current.runtime.Status()
 				if current.recovering {
@@ -467,9 +472,10 @@ func (manager *Manager) watch(
 }
 
 // syncSession applies authoritative heartbeat updates while the transport is
-// healthy. Generation-only changes are advanced in place. A changed
-// NetworkSpec requires a fresh RelayTicket-bound transport; recover performs
-// that replacement and reinstalls TUN without changing the local SOCKS address.
+// healthy. Every generation owns a matching RelayTicket, control token and WSS
+// pool, so advancing a generation requires one atomic transport replacement.
+// A changed NetworkSpec additionally reinstalls TUN after the replacement is
+// ready; both paths preserve the stable local SOCKS address.
 func (manager *Manager) syncSession(update remote.SessionUpdate) {
 	profileID := strings.TrimSpace(update.ProfileID)
 	session := update.Session
@@ -484,22 +490,20 @@ func (manager *Manager) syncSession(update remote.SessionUpdate) {
 		manager.mu.Unlock()
 		return
 	}
-	if session.NetworkSpecHash == entry.session.NetworkSpecHash {
-		if session.Generation > entry.session.Generation {
-			if err := runtime.AdvanceSession(session); err == nil {
-				entry.session = session
-				entry.lastError = nil
-			}
-		}
+	if session.Generation == entry.session.Generation && session.NetworkSpecHash == entry.session.NetworkSpecHash {
 		manager.mu.Unlock()
 		return
 	}
 	entry.recovering = true
 	baseline := entry.session
+	reason := errSessionChanged
+	if session.NetworkSpecHash != entry.session.NetworkSpecHash {
+		reason = errNetworkSpecChanged
+	}
 	manager.mu.Unlock()
 	status := runtime.Status()
 	status.State = "reconnecting"
-	manager.emit(profileID, status, errNetworkSpecChanged)
+	manager.emit(profileID, status, reason)
 	go manager.recover(profileID, entry, runtime, baseline)
 }
 
@@ -598,6 +602,9 @@ func (manager *Manager) emit(profileID string, status Status, err error) {
 			event.Retryable = true
 		} else if errors.Is(err, errNetworkSpecChanged) {
 			event.Reason = reasonNetworkSpecChanged
+			event.Retryable = true
+		} else if errors.Is(err, errSessionChanged) {
+			event.Reason = reasonSessionChanged
 			event.Retryable = true
 		}
 		switch status.State {
