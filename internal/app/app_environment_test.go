@@ -15,6 +15,7 @@ func TestNewAppUsesExplicitProfilePath(t *testing.T) {
 	t.Setenv("KUBELOOP_PROFILE_PATH", "  "+profilePath+"  ")
 
 	application := NewApp("dev", nil)
+	t.Cleanup(func() { application.shutdown(context.Background()) })
 	if application.profiles == nil {
 		t.Fatal("profile store is nil")
 	}
