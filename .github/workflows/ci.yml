@@ -175,6 +175,8 @@ jobs:
         run: |
           make operator-lint-config operator-lint
           make vulncheck
+          mkdir -p frontend/dist
+          printf '%s\n' '<!doctype html>' > frontend/dist/index.html
           go vet -tags webkit2_41 ./...
 
   checks:
