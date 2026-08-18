@@ -55,17 +55,25 @@ func SetBundledFile(name string, content []byte) {
 // builds reuse a healthy, protocol-compatible helper so wails dev does not
 // request administrator authorization after every helper rebuild.
 func EnsureInstall(ctx context.Context) error {
-	return ensureInstall(ctx, false)
+	return ensureInstall(ctx, false, nil)
 }
 
 // EnsureCurrentInstall installs or upgrades to the exact bundled helper. Use it
 // for explicit user-driven installs and E2E setup where binary drift must not be
 // accepted, including in development builds.
 func EnsureCurrentInstall(ctx context.Context) error {
-	return ensureInstall(ctx, true)
+	return ensureInstall(ctx, true, nil)
 }
 
-func ensureInstall(ctx context.Context, requireCurrentBinary bool) error {
+// EnsureCurrentInstallWithCertificate installs the exact bundled helper and,
+// when a full macOS privileged install is required, trusts certificatePEM in
+// the same administrator authorization. Other update paths leave certificate
+// installation to the caller.
+func EnsureCurrentInstallWithCertificate(ctx context.Context, certificatePEM []byte) error {
+	return ensureInstall(ctx, true, certificatePEM)
+}
+
+func ensureInstall(ctx context.Context, requireCurrentBinary bool, certificatePEM []byte) error {
 	ensureInstallMu.Lock()
 	defer ensureInstallMu.Unlock()
 
@@ -109,7 +117,9 @@ func ensureInstall(ctx context.Context, requireCurrentBinary bool) error {
 	if err != nil {
 		return err
 	}
-	if err := installCurrentHelper(ctx, source, sourceSHA256, token, currentUID(), home, singBoxPath); err != nil {
+	if err := installCurrentHelper(
+		ctx, source, sourceSHA256, token, currentUID(), home, singBoxPath, certificatePEM,
+	); err != nil {
 		return err
 	}
 	client := &helper.Client{Token: token}
@@ -202,6 +212,16 @@ func Uninstall(ctx context.Context) error {
 		return err
 	}
 	return ElevateUninstall(ctx, source)
+}
+
+// UninstallWithCertificate removes the macOS helper and an optional system
+// trust certificate in one elevated operation. Other platforms use Uninstall.
+func UninstallWithCertificate(ctx context.Context, fingerprint string) error {
+	source, err := LocateBundledHelper()
+	if err != nil {
+		return err
+	}
+	return ElevateUninstallWithCertificate(ctx, source, fingerprint)
 }
 
 func LocateBundledHelper() (string, error) {

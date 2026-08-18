@@ -549,6 +549,113 @@ func TestManagerSystemResumeRefreshesTransportWithoutReinstallingTUN(t *testing.
 	}
 }
 
+func TestManagerReplacesTransportWhenHeartbeatAdvancesGeneration(t *testing.T) {
+	spec, err := networkspec.Normalize(networkspec.Spec{ServiceIPs: []string{"10.96.0.10"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash, _ := networkspec.Hash(spec)
+	session := remote.Session{
+		ID: "ec0b67a2-e84c-4fe7-a0c5-810f210157b5", Namespace: "payments", State: "active",
+		Generation: 4, NetworkSpec: spec, NetworkSpecHash: hash,
+	}
+	controls := make(chan net.Conn, 4)
+	statusEvents := make(chan StatusEvent, 8)
+	var starts atomic.Int32
+	tunStarter := &testTUNStarter{}
+	bridge := &testBridge{address: testAddress("127.0.0.1:48002")}
+	tickets := &testTickets{session: session, updates: make(chan remote.SessionUpdate, 1)}
+	manager, err := NewManager(tickets, Config{
+		RecoveryAttempts: 2, RecoveryBackoff: 10 * time.Millisecond,
+		TUNStarter: tunStarter, OnStatus: func(event StatusEvent) { statusEvents <- event },
+		startForwarder: func(ctx context.Context, clientConfig websocketmux.ClientConfig) (streamForwarder, error) {
+			if _, err := clientConfig.TokenSource(ctx); err != nil {
+				return nil, err
+			}
+			listener, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				return nil, err
+			}
+			starts.Add(1)
+			go acceptTestControlWithSignal(listener, controls)
+			return &testForwarder{Listener: listener}, nil
+		},
+		listenSOCKS: func(context.Context, string, string, tunnel.SessionToken) (localBridge, error) {
+			return bridge, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = manager.Shutdown() })
+	serverProfile := profile.Profile{ID: "service", BaseURL: "https://gateway.example.test", TunnelPath: "/tunnel"}
+	initial, err := manager.Connect(context.Background(), serverProfile, session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.StartTUN(context.Background(), serverProfile.ID); err != nil {
+		t.Fatal(err)
+	}
+	_, _, _, _, initialCore := tunStarter.snapshot()
+	firstControl := receiveControl(t, controls)
+	defer firstControl.Close()
+	manager.mu.Lock()
+	initialTransportDone := manager.active[serverProfile.ID].runtime.TransportDone()
+	manager.mu.Unlock()
+
+	tickets.mu.Lock()
+	tickets.session.Generation++
+	updated := tickets.session
+	tickets.mu.Unlock()
+	tickets.updates <- remote.SessionUpdate{ProfileID: serverProfile.ID, Session: updated}
+	secondControl := receiveControl(t, controls)
+	defer secondControl.Close()
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		status, statusErr := manager.Status(serverProfile.ID)
+		if statusErr == nil && status.State == "connected" && status.Mode == "tun" &&
+			status.SessionGeneration == updated.Generation && status.SOCKSAddress == initial.SOCKSAddress {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("generation refresh did not replace transport: status=%#v err=%v", status, statusErr)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if starts.Load() != 2 {
+		t.Fatalf("transport starts = %d, want 2", starts.Load())
+	}
+	tunStarts, _, _, _, currentCore := tunStarter.snapshot()
+	if tunStarts != 1 || currentCore != initialCore {
+		t.Fatalf("generation refresh reinstalled TUN: starts=%d corePreserved=%t", tunStarts, currentCore == initialCore)
+	}
+	select {
+	case <-initialTransportDone:
+	default:
+		t.Fatal("generation refresh did not retire the old transport")
+	}
+	wantToken, err := tunnel.RelaySessionToken(updated.ID, updated.Generation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, token := bridge.transport(); token != wantToken {
+		t.Fatalf("bridge token = %x, want generation token %x", token, wantToken)
+	}
+	var refreshEvent StatusEvent
+	eventDeadline := time.After(time.Second)
+	for refreshEvent.Reason != reasonSessionChanged {
+		select {
+		case refreshEvent = <-statusEvents:
+		case <-eventDeadline:
+			t.Fatal("Session generation refresh event was not published")
+		}
+	}
+	if refreshEvent.Status.State != "reconnecting" || !refreshEvent.Retryable {
+		t.Fatalf("Session generation refresh event = %#v", refreshEvent)
+	}
+}
+
 func TestManagerReconfiguresTUNWhenHeartbeatRefreshesNetworkSpec(t *testing.T) {
 	initialSpec, err := networkspec.Normalize(networkspec.Spec{
 		PodCIDRs: []string{"10.42.0.0/16"}, ServiceIPs: []string{"10.96.0.10"},

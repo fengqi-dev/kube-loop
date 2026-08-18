@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"net/url"
 	"slices"
 	"strings"
@@ -20,6 +21,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficstream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
 	"github.com/fengqi-dev/kube-loop/internal/singbox"
+	"github.com/fengqi-dev/kube-loop/internal/trafficinspect"
 )
 
 const (
@@ -31,18 +33,35 @@ const (
 )
 
 type Config struct {
-	ListenAddress    string
-	StartTimeout     time.Duration
-	ClientVersion    string
-	TLSConfig        *tls.Config
-	TUNStarter       TUNStarter
-	RecoveryAttempts int
-	RecoveryBackoff  time.Duration
-	OnStatus         func(StatusEvent)
+	ListenAddress     string
+	StartTimeout      time.Duration
+	ClientVersion     string
+	TLSConfig         *tls.Config
+	TUNStarter        TUNStarter
+	RecoveryAttempts  int
+	RecoveryBackoff   time.Duration
+	OnStatus          func(StatusEvent)
+	TrafficInspection TrafficInspectionConfig
 
 	startForwarder func(context.Context, websocketmux.ClientConfig) (streamForwarder, error)
 	listenSOCKS    func(context.Context, string, string, tunnel.SessionToken) (localBridge, error)
 	dialContext    func(context.Context, string, string) (net.Conn, error)
+}
+
+// TrafficInspectionConfig controls the optional in-process HTTP and gRPC
+// inspection path. The zero value is disabled and preserves the existing
+// SOCKS-to-Relay forwarding behavior.
+type TrafficInspectionConfig struct {
+	Enabled       bool
+	IsEnabled     func() bool
+	AuthorityPath string
+	TLSConfig     *tls.Config
+	OnRequest     func(*http.Request)
+	OnResponse    func(*http.Response)
+	Sink          trafficinspect.Sink
+	Policy        trafficinspect.CapturePolicy
+	Protobuf      *trafficinspect.ProtobufDecoder
+	OnSinkError   func(error)
 }
 
 type streamForwarder interface {
@@ -491,14 +510,57 @@ func normalizedConfig(config Config) Config {
 	if config.TLSConfig != nil {
 		config.TLSConfig = config.TLSConfig.Clone()
 	}
+	if config.TrafficInspection.TLSConfig != nil {
+		config.TrafficInspection.TLSConfig = config.TrafficInspection.TLSConfig.Clone()
+	}
 	if config.startForwarder == nil {
 		config.startForwarder = func(ctx context.Context, clientConfig websocketmux.ClientConfig) (streamForwarder, error) {
 			return websocketmux.Start(ctx, clientConfig)
 		}
 	}
 	if config.listenSOCKS == nil {
-		config.listenSOCKS = func(ctx context.Context, gatewayAddress, listenAddress string, token tunnel.SessionToken) (localBridge, error) {
-			return socksbridge.Listen(ctx, gatewayAddress, listenAddress, token)
+		inspection := config.TrafficInspection
+		config.listenSOCKS = func(
+			ctx context.Context,
+			gatewayAddress, listenAddress string,
+			token tunnel.SessionToken,
+		) (localBridge, error) {
+			if !inspection.Enabled && inspection.IsEnabled == nil {
+				return socksbridge.Listen(ctx, gatewayAddress, listenAddress, token)
+			}
+			return socksbridge.Listen(
+				ctx,
+				gatewayAddress,
+				listenAddress,
+				token,
+				socksbridge.WithTCPInspector(func(dialContext socksbridge.DialContextFunc) (socksbridge.TCPInspector, error) {
+					authorityPath := strings.TrimSpace(inspection.AuthorityPath)
+					if authorityPath == "" {
+						var err error
+						authorityPath, err = trafficinspect.DefaultAuthorityPath()
+						if err != nil {
+							return nil, err
+						}
+					}
+					authority, err := trafficinspect.LoadOrCreateAuthority(authorityPath)
+					if err != nil {
+						return nil, err
+					}
+					return trafficinspect.New(trafficinspect.Config{
+						CA:          authority.TLSCertificate(),
+						DialContext: trafficinspect.DialContextFunc(dialContext),
+						Enabled:     inspection.IsEnabled,
+						OnRequest:   inspection.OnRequest,
+						OnResponse:  inspection.OnResponse,
+						Sink:        inspection.Sink,
+						Policy:      inspection.Policy,
+						Protobuf:    inspection.Protobuf,
+						OnSinkError: inspection.OnSinkError,
+						TLSConfig:   inspection.TLSConfig,
+						AllowHTTP2:  true,
+					})
+				}),
+			)
 		}
 	}
 	if config.dialContext == nil {
@@ -511,24 +573,6 @@ func (runtime *Runtime) Status() Status {
 	runtime.stateMu.Lock()
 	defer runtime.stateMu.Unlock()
 	return runtime.status
-}
-
-// AdvanceSession records a newer authoritative generation without replacing
-// the transport. It prevents an in-flight recovery from publishing an older
-// generation after a concurrent heartbeat or reconnect decision.
-func (runtime *Runtime) AdvanceSession(session remote.Session) error {
-	runtime.stateMu.Lock()
-	defer runtime.stateMu.Unlock()
-	if session.State != "active" || session.ID != runtime.session.ID ||
-		session.NetworkSpecHash != runtime.session.NetworkSpecHash {
-		return errors.New("active Session identity changed")
-	}
-	if session.Generation < runtime.session.Generation {
-		return errors.New("stale Session generation")
-	}
-	runtime.session = session
-	runtime.status.SessionGeneration = session.Generation
-	return nil
 }
 
 func (runtime *Runtime) StartTUN(ctx context.Context) (Status, error) {
@@ -799,9 +843,10 @@ func (runtime *Runtime) Reconnect(
 		return errors.New("stale or changed Session generation during Data Plane recovery")
 	}
 	networkChanged := session.NetworkSpecHash != runtime.session.NetworkSpecHash
+	generationChanged := session.Generation > runtime.session.Generation
 	runtime.transportMu.Lock()
 	transportStopped := signalClosed(runtime.transportDone)
-	if runtime.ctx.Err() != nil || (!transportStopped && !networkChanged) {
+	if runtime.ctx.Err() != nil || (!transportStopped && !networkChanged && !generationChanged) {
 		runtime.transportMu.Unlock()
 		runtime.stateMu.Unlock()
 		_ = transport.control.Close()

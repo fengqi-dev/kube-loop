@@ -187,8 +187,15 @@ func sourceHash(root string, paths, directories []string) (string, error) {
 }
 
 func buildLinuxBinary(root, output, packagePath string) error {
-	if err := os.MkdirAll(filepath.Dir(output), 0o755); err != nil {
+	outputDirectory := filepath.Dir(output)
+	if err := os.MkdirAll(outputDirectory, 0o755); err != nil {
 		return fmt.Errorf("create build directory: %w", err)
+	}
+	// Wails may recreate build/bin with owner-only permissions. Minikube copies
+	// the Docker build context through a separate process, which must be able to
+	// traverse this directory to read the prebuilt Linux binaries.
+	if err := os.Chmod(outputDirectory, 0o755); err != nil {
+		return fmt.Errorf("make build directory readable: %w", err)
 	}
 	command := exec.Command(
 		"go", "build", "-trimpath", "-ldflags=-s -w",

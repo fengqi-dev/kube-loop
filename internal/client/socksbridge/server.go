@@ -28,6 +28,38 @@ type HostUDPHandler func(host string, port uint16) (dial func(context.Context) (
 
 type LogHandler func(message string)
 
+// TCPInspector handles one SOCKS CONNECT stream after the success reply has
+// been sent. Implementations open their upstream through the supplied bridge
+// dialer, so inspection does not require another local proxy listener.
+type TCPInspector interface {
+	ServeConn(context.Context, net.Conn, string) error
+	Close() error
+}
+
+// DialContextFunc opens an upstream connection through the current Gateway.
+type DialContextFunc func(context.Context, string, string) (net.Conn, error)
+
+// TCPInspectorFactory creates an inspector bound to the bridge dialer.
+type TCPInspectorFactory func(DialContextFunc) (TCPInspector, error)
+
+type listenConfig struct {
+	inspectorFactory TCPInspectorFactory
+}
+
+// ListenOption configures the local SOCKS bridge.
+type ListenOption func(*listenConfig) error
+
+// WithTCPInspector enables in-process TCP inspection without adding a listener.
+func WithTCPInspector(factory TCPInspectorFactory) ListenOption {
+	return func(config *listenConfig) error {
+		if factory == nil {
+			return errors.New("TCP inspector factory is required")
+		}
+		config.inspectorFactory = factory
+		return nil
+	}
+}
+
 type Server struct {
 	GatewayAddress string
 	SessionToken   tunnel.SessionToken
@@ -35,6 +67,7 @@ type Server struct {
 	HostTCP        HostTCPHandler
 	HostUDP        HostUDPHandler
 	LogHandler     LogHandler
+	inspector      TCPInspector
 
 	gatewayMu sync.RWMutex
 	hostMu    sync.RWMutex
@@ -44,7 +77,24 @@ type Server struct {
 // Bridge is the local SOCKS listener used by sing-box's kubernetes outbound.
 type Bridge struct {
 	net.Listener
-	server *Server
+	server    *Server
+	closeOnce sync.Once
+	closeErr  error
+}
+
+// Close stops the SOCKS listener and releases inspector transports.
+func (b *Bridge) Close() error {
+	b.closeOnce.Do(func() {
+		listenerErr := b.Listener.Close()
+		if errors.Is(listenerErr, net.ErrClosed) {
+			listenerErr = nil
+		}
+		b.closeErr = listenerErr
+		if b.server.inspector != nil {
+			b.closeErr = errors.Join(b.closeErr, b.server.inspector.Close())
+		}
+	})
+	return b.closeErr
 }
 
 func (b *Bridge) SetHostTCPHandler(handler HostTCPHandler) {
@@ -131,6 +181,25 @@ func (s *Server) handleConnect(
 			serve(&bufferedConn{Conn: client, reader: request.Reader})
 			return nil
 		}
+	}
+	if s.inspector != nil {
+		client, ok := writer.(net.Conn)
+		if !ok {
+			_ = socks5.SendReply(writer, statute.RepServerFailure, nil)
+			return errors.New("SOCKS client is not a network connection")
+		}
+		if err := socks5.SendReply(writer, statute.RepSuccess, client.LocalAddr()); err != nil {
+			return err
+		}
+		target := net.JoinHostPort(host, strconv.Itoa(int(port)))
+		if err := s.inspector.ServeConn(ctx, &bufferedConn{Conn: client, reader: request.Reader}, target); err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, net.ErrClosed) {
+				return nil
+			}
+			s.logf("TCP inspect %s failed: %v", target, err)
+			return fmt.Errorf("inspect TCP %s: %w", target, err)
+		}
+		return nil
 	}
 
 	target, err := s.openGateway(ctx, tunnel.CommandTCP, host, port)
@@ -256,12 +325,29 @@ func Listen(
 	ctx context.Context,
 	gatewayAddress, listenAddress string,
 	token tunnel.SessionToken,
+	options ...ListenOption,
 ) (*Bridge, error) {
+	config := listenConfig{}
+	for _, option := range options {
+		if option == nil {
+			return nil, errors.New("nil SOCKS bridge option")
+		}
+		if err := option(&config); err != nil {
+			return nil, err
+		}
+	}
 	listener, err := net.Listen("tcp", listenAddress)
 	if err != nil {
 		return nil, err
 	}
 	server := &Server{GatewayAddress: gatewayAddress, SessionToken: token}
+	if config.inspectorFactory != nil {
+		server.inspector, err = config.inspectorFactory(server.dial)
+		if err != nil {
+			_ = listener.Close()
+			return nil, fmt.Errorf("create SOCKS TCP inspector: %w", err)
+		}
+	}
 	go func() {
 		<-ctx.Done()
 		listener.Close()

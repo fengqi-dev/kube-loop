@@ -49,7 +49,7 @@ func NewProvider(storage *Storage, raw Config) (fosite.OAuth2Provider, error) {
 		SendDebugMessagesToClients: false, MinParameterEntropy: 32, TokenEntropy: 32,
 		SanitationWhiteList: []string{"device_id"},
 	}
-	keyGetter := func(context.Context) (interface{}, error) { return raw.SigningKey, nil }
+	keyGetter := func(context.Context) (any, error) { return raw.SigningKey, nil }
 	strategy := &compose.CommonStrategy{
 		CoreStrategy:               compose.NewOAuth2HMACStrategy(config),
 		OpenIDConnectTokenStrategy: compose.NewOpenIDConnectStrategy(keyGetter, config),

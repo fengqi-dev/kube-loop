@@ -14,7 +14,10 @@ import (
 // NewSingboxRuntime connects the Data Plane to the narrowly scoped local
 // privileged helper. This is local network plumbing only; it never loads a
 // kubeconfig or talks to Kubernetes.
-func NewSingboxRuntime(appendLog func(string, string)) *singboxruntime.Runtime {
+func NewSingboxRuntime(
+	appendLog func(string, string),
+	installTrust ...func(context.Context) error,
+) *singboxruntime.Runtime {
 	logEvent := func(level, message string) {
 		if appendLog != nil {
 			appendLog(level, message)
@@ -27,6 +30,12 @@ func NewSingboxRuntime(appendLog func(string, string)) *singboxruntime.Runtime {
 		logEvent("INFO", "ensuring privileged helper is ready")
 		if err := helperinstall.EnsureInstall(ctx); err != nil {
 			return nil, fmt.Errorf("ensure privileged helper: %w", err)
+		}
+		if len(installTrust) > 0 && installTrust[0] != nil {
+			logEvent("INFO", "ensuring traffic inspection certificate is trusted")
+			if err := installTrust[0](ctx); err != nil {
+				return nil, fmt.Errorf("ensure traffic inspection certificate trust: %w", err)
+			}
 		}
 		client, err := helper.NewClient()
 		if err != nil {

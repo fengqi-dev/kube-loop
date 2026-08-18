@@ -10,6 +10,7 @@ import (
 
 	clientdiscovery "github.com/fengqi-dev/kube-loop/internal/client/discovery"
 	clientprofile "github.com/fengqi-dev/kube-loop/internal/client/profile"
+	"github.com/fengqi-dev/kube-loop/internal/singbox/distribution"
 )
 
 func TestSaveSelectAndDeleteServerProfile(t *testing.T) {
@@ -61,6 +62,9 @@ func TestBootstrapWithActiveProfileDoesNotReadKubeconfig(t *testing.T) {
 	}
 	if data.ServerProfiles.ActiveProfileID != "service-1" {
 		t.Fatalf("bootstrap = %#v", data)
+	}
+	if data.CoreVersion != distribution.Version {
+		t.Fatalf("core version = %q, want %q", data.CoreVersion, distribution.Version)
 	}
 }
 
