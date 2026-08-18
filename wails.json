@@ -21,7 +21,14 @@
     "productName": "KubeLoop",
     "productVersion": "2.0.0",
     "copyright": "Copyright © KubeLoop",
-    "comments": "Local development network for Kubernetes"
+    "comments": "Local development network for Kubernetes",
+    "protocols": [
+      {
+        "scheme": "kubeloop",
+        "description": "KubeLoop login callback",
+        "role": "Viewer"
+      }
+    ]
   },
   "nsisType": "multiple"
 }

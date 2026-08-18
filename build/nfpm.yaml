@@ -15,6 +15,10 @@ vendor: KubeLoop
 homepage: https://github.com/fengqi-dev/kube-loop
 license: MIT
 
+scripts:
+  postinstall: ./build/linux/update-desktop-database.sh
+  postremove: ./build/linux/update-desktop-database.sh
+
 depends:
   - libgtk-3-0
   - libwebkit2gtk-4.1-0

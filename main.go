@@ -8,6 +8,7 @@ import (
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
+	macoptions "github.com/wailsapp/wails/v2/pkg/options/mac"
 )
 
 //go:embed all:frontend/dist
@@ -36,8 +37,18 @@ func main() {
 		Frameless:     true,
 		SingleInstanceLock: &options.SingleInstanceLock{
 			UniqueId: "dev.fengqi.kube-loop",
-			OnSecondInstanceLaunch: func(options.SecondInstanceData) {
+			OnSecondInstanceLaunch: func(instance options.SecondInstanceData) {
+				for _, argument := range instance.Args {
+					if app.HandleAuthCallbackURL(argument) == nil {
+						break
+					}
+				}
 				desktopapp.ShowWindow(app)
+			},
+		},
+		Mac: &macoptions.Options{
+			OnUrlOpen: func(rawURL string) {
+				_ = app.HandleAuthCallbackURL(rawURL)
 			},
 		},
 		AssetServer:      &assetserver.Options{Assets: assets},

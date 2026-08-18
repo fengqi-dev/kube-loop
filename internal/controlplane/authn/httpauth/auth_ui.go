@@ -45,8 +45,8 @@ func (routes *Routes) authUI(ctx *echo.Context) error {
 	header.Set("Cross-Origin-Opener-Policy", "same-origin")
 	header.Set("X-Frame-Options", "DENY")
 	// Chrome applies form-action to redirects after a form submission. The
-	// native OAuth flow returns a 303 to the desktop client's random loopback
-	// listener, so that exact address family must be allowed here as well.
-	header.Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; form-action 'self' http://127.0.0.1:*; frame-ancestors 'none'; base-uri 'none'")
+	// desktop flow uses the registered protocol; separately registered native
+	// OAuth clients may still use the restricted loopback redirect family.
+	header.Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; form-action 'self' kubeloop: http://127.0.0.1:*; frame-ancestors 'none'; base-uri 'none'")
 	return ctx.Blob(http.StatusOK, contentType, content)
 }

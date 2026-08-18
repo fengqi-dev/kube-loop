@@ -48,14 +48,14 @@ func TestClientCredentialsIssuesOpaqueMachineToken(t *testing.T) {
 	}
 }
 
-func TestAuthorizationCodeRequiresPKCES256RotatesRefreshAndRejectsReplay(t *testing.T) {
+func TestDesktopAuthorizationCodeRequiresPKCES256RotatesRefreshAndRejectsReplay(t *testing.T) {
 	endpoints, store, identity := newTestEndpoints(t)
-	createTestClient(t, store, controlstorage.OAuthClient{ID: "public-client", Name: "Public", Public: true,
-		RedirectURIs: []string{"https://client.example/callback"}, GrantTypes: []string{"authorization_code", "refresh_token"},
+	createTestClient(t, store, controlstorage.OAuthClient{ID: controlstorage.DesktopOAuthClientID, Name: "Desktop", Public: true,
+		RedirectURIs: []string{controlstorage.DesktopOAuthRedirectURI}, GrantTypes: []string{"authorization_code", "refresh_token"},
 		Scopes: []string{"openid", "offline_access", "kubeloop.api"}, Trusted: true, Enabled: true}, "")
 	verifier := strings.Repeat("v", 64)
 	challengeSum := sha256.Sum256([]byte(verifier))
-	query := url.Values{"response_type": {"code"}, "client_id": {"public-client"}, "redirect_uri": {"https://client.example/callback"},
+	query := url.Values{"response_type": {"code"}, "client_id": {controlstorage.DesktopOAuthClientID}, "redirect_uri": {controlstorage.DesktopOAuthRedirectURI},
 		"scope": {"openid offline_access kubeloop.api"}, "state": {strings.Repeat("s", 32)}, "nonce": {strings.Repeat("n", 32)},
 		"code_challenge": {base64.RawURLEncoding.EncodeToString(challengeSum[:])}, "code_challenge_method": {"S256"}}
 	authorize := httptest.NewRequest(http.MethodGet, "https://issuer.example/oauth2/authorize?"+query.Encode(), nil)
@@ -69,12 +69,12 @@ func TestAuthorizationCodeRequiresPKCES256RotatesRefreshAndRejectsReplay(t *test
 		t.Fatal(err)
 	}
 	redirect, err := url.Parse(recorder.Header().Get("Location"))
-	if err != nil || redirect.Query().Get("code") == "" {
+	if err != nil || redirect.Scheme != "kubeloop" || redirect.Host != "auth" || redirect.Path != "/callback" || redirect.Query().Get("code") == "" {
 		t.Fatalf("authorize response status=%d location=%q", recorder.Code, recorder.Header().Get("Location"))
 	}
 	code := redirect.Query().Get("code")
-	first := requestToken(endpoints, url.Values{"grant_type": {"authorization_code"}, "client_id": {"public-client"},
-		"redirect_uri": {"https://client.example/callback"}, "code": {code}, "code_verifier": {verifier}})
+	first := requestToken(endpoints, url.Values{"grant_type": {"authorization_code"}, "client_id": {controlstorage.DesktopOAuthClientID},
+		"redirect_uri": {controlstorage.DesktopOAuthRedirectURI}, "code": {code}, "code_verifier": {verifier}})
 	if first.Code != http.StatusOK {
 		t.Fatalf("exchange status=%d body=%s", first.Code, first.Body.String())
 	}
@@ -84,7 +84,7 @@ func TestAuthorizationCodeRequiresPKCES256RotatesRefreshAndRejectsReplay(t *test
 	if oldRefresh == "" || issued["access_token"] == nil || issued["id_token"] == nil {
 		t.Fatalf("tokens=%#v", issued)
 	}
-	rotated := requestToken(endpoints, url.Values{"grant_type": {"refresh_token"}, "client_id": {"public-client"}, "refresh_token": {oldRefresh}})
+	rotated := requestToken(endpoints, url.Values{"grant_type": {"refresh_token"}, "client_id": {controlstorage.DesktopOAuthClientID}, "refresh_token": {oldRefresh}})
 	if rotated.Code != http.StatusOK {
 		t.Fatalf("refresh status=%d body=%s", rotated.Code, rotated.Body.String())
 	}
@@ -93,14 +93,14 @@ func TestAuthorizationCodeRequiresPKCES256RotatesRefreshAndRejectsReplay(t *test
 	if refreshed["refresh_token"] == nil {
 		t.Fatalf("rotated token=%#v", refreshed)
 	}
-	if replay := requestToken(endpoints, url.Values{"grant_type": {"refresh_token"}, "client_id": {"public-client"}, "refresh_token": {oldRefresh}}); replay.Code == http.StatusOK {
+	if replay := requestToken(endpoints, url.Values{"grant_type": {"refresh_token"}, "client_id": {controlstorage.DesktopOAuthClientID}, "refresh_token": {oldRefresh}}); replay.Code == http.StatusOK {
 		t.Fatal("replayed refresh token was accepted")
 	}
-	if replay := requestToken(endpoints, url.Values{"grant_type": {"refresh_token"}, "client_id": {"public-client"}, "refresh_token": {refreshed["refresh_token"].(string)}}); replay.Code == http.StatusOK {
+	if replay := requestToken(endpoints, url.Values{"grant_type": {"refresh_token"}, "client_id": {controlstorage.DesktopOAuthClientID}, "refresh_token": {refreshed["refresh_token"].(string)}}); replay.Code == http.StatusOK {
 		t.Fatal("rotated grant remained active after refresh token replay")
 	}
-	if replay := requestToken(endpoints, url.Values{"grant_type": {"authorization_code"}, "client_id": {"public-client"},
-		"redirect_uri": {"https://client.example/callback"}, "code": {code}, "code_verifier": {verifier}}); replay.Code == http.StatusOK {
+	if replay := requestToken(endpoints, url.Values{"grant_type": {"authorization_code"}, "client_id": {controlstorage.DesktopOAuthClientID},
+		"redirect_uri": {controlstorage.DesktopOAuthRedirectURI}, "code": {code}, "code_verifier": {verifier}}); replay.Code == http.StatusOK {
 		t.Fatal("replayed authorization code was accepted")
 	}
 	missing := url.Values{}

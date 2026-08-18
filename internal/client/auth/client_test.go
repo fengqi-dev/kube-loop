@@ -1,13 +1,11 @@
 package auth
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -18,8 +16,9 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/client/credentials"
 )
 
-func TestOIDCLoopbackLoginUsesStatePKCEAndExchange(t *testing.T) {
+func TestOIDCProtocolLoginUsesStatePKCEAndExchange(t *testing.T) {
 	var server *httptest.Server
+	var client *Client
 	var challenge string
 	browserCallbacks := 0
 	exchangeCode := strings.Repeat("c", 43)
@@ -33,7 +32,8 @@ func TestOIDCLoopbackLoginUsesStatePKCEAndExchange(t *testing.T) {
 			}
 			hash := sha256.Sum256([]byte(request.Form.Get("code_verifier")))
 			if request.Form.Get("code") != exchangeCode || base64.RawURLEncoding.EncodeToString(hash[:]) != challenge ||
-				request.Form.Get("device_id") != "device-1" || request.Form.Get("client_id") != DefaultClientID {
+				request.Form.Get("device_id") != "device-1" || request.Form.Get("client_id") != DefaultClientID ||
+				request.Form.Get("redirect_uri") != DefaultRedirectURI {
 				t.Fatalf("exchange form = %#v", request.Form)
 			}
 			writeTokenResponse(t, writer)
@@ -42,7 +42,7 @@ func TestOIDCLoopbackLoginUsesStatePKCEAndExchange(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	client := New(Config{
+	client = New(Config{
 		HTTPClient:      server.Client(),
 		BrowserCallback: func() { browserCallbacks++ },
 		OpenBrowser: func(target string) error {
@@ -54,10 +54,11 @@ func TestOIDCLoopbackLoginUsesStatePKCEAndExchange(t *testing.T) {
 			challenge = query.Get("code_challenge")
 			if authorize.Path != "/oauth2/authorize" || query.Get("provider") != "company" ||
 				query.Get("client_id") != DefaultClientID || len(query.Get("state")) < 32 ||
-				len(query.Get("nonce")) < 32 || len(challenge) != 43 || query.Get("code_challenge_method") != "S256" {
+				query.Get("redirect_uri") != DefaultRedirectURI || len(query.Get("nonce")) < 32 ||
+				len(challenge) != 43 || query.Get("code_challenge_method") != "S256" {
 				t.Fatalf("authorization URL = %q", target)
 			}
-			callback, err := url.Parse(query.Get("redirect_uri"))
+			callback, err := url.Parse(DefaultRedirectURI)
 			if err != nil {
 				return err
 			}
@@ -65,16 +66,7 @@ func TestOIDCLoopbackLoginUsesStatePKCEAndExchange(t *testing.T) {
 			callbackQuery.Set("state", authorize.Query().Get("state"))
 			callbackQuery.Set("code", exchangeCode)
 			callback.RawQuery = callbackQuery.Encode()
-			response, err := http.Get(callback.String())
-			if err != nil {
-				return err
-			}
-			defer response.Body.Close()
-			if response.StatusCode != http.StatusOK {
-				raw, _ := io.ReadAll(response.Body)
-				t.Fatalf("callback status = %d: %s", response.StatusCode, raw)
-			}
-			return nil
+			return client.HandleCallbackURL(callback.String())
 		},
 	})
 	credential, err := client.LoginOIDC(context.Background(), server.URL, "company", "device-1")
@@ -93,51 +85,60 @@ func TestOIDCLoopbackLoginUsesStatePKCEAndExchange(t *testing.T) {
 	}
 }
 
-func TestLoopbackCallbackRejectsTamperedStateWithoutConsumingLogin(t *testing.T) {
-	results := make(chan callbackResult, 1)
-	server := httptest.NewServer(newLoopbackServer(strings.Repeat("s", 43), results).Handler)
-	defer server.Close()
-	response, err := http.Get(server.URL + "/callback?state=" + strings.Repeat("x", 43) + "&code=" + strings.Repeat("c", 43))
+func TestProtocolCallbackRejectsTamperedStateWithoutConsumingLogin(t *testing.T) {
+	client := New(Config{})
+	pending, err := client.beginCallback(strings.Repeat("s", 43))
 	if err != nil {
 		t.Fatal(err)
 	}
-	response.Body.Close()
-	if response.StatusCode != http.StatusBadRequest {
-		t.Fatalf("tampered status = %d", response.StatusCode)
+	defer client.endCallback(pending)
+	if err := client.HandleCallbackURL(DefaultRedirectURI + "?state=" + strings.Repeat("x", 43) + "&code=" + strings.Repeat("c", 43)); err == nil {
+		t.Fatal("tampered callback succeeded")
 	}
 	select {
-	case result := <-results:
+	case result := <-pending.result:
 		t.Fatalf("tampered callback produced result: %#v", result)
 	default:
 	}
-	response, err = http.Get(server.URL + "/callback?state=" + strings.Repeat("s", 43) + "&code=" + strings.Repeat("c", 43))
+	if err := client.HandleCallbackURL(DefaultRedirectURI + "?state=" + strings.Repeat("s", 43) + "&code=" + strings.Repeat("c", 43)); err != nil {
+		t.Fatal(err)
+	}
+	if result := <-pending.result; result.err != nil || result.code == "" {
+		t.Fatalf("valid callback result = %#v", result)
+	}
+	if err := client.HandleCallbackURL(DefaultRedirectURI + "?state=" + strings.Repeat("s", 43) + "&code=" + strings.Repeat("d", 43)); err == nil {
+		t.Fatal("duplicate callback succeeded")
+	}
+}
+
+func TestProtocolCallbackValidatesTargetAndParameters(t *testing.T) {
+	client := New(Config{})
+	pending, err := client.beginCallback(strings.Repeat("s", 43))
 	if err != nil {
 		t.Fatal(err)
 	}
-	body, readErr := io.ReadAll(response.Body)
-	response.Body.Close()
-	if readErr != nil {
-		t.Fatal(readErr)
+	defer client.endCallback(pending)
+
+	for _, test := range []struct {
+		name string
+		url  string
+	}{
+		{name: "wrong scheme", url: "https://auth/callback?state=" + strings.Repeat("s", 43) + "&code=" + strings.Repeat("c", 43)},
+		{name: "wrong host", url: "kubeloop://other/callback?state=" + strings.Repeat("s", 43) + "&code=" + strings.Repeat("c", 43)},
+		{name: "wrong path", url: "kubeloop://auth/other?state=" + strings.Repeat("s", 43) + "&code=" + strings.Repeat("c", 43)},
+		{name: "duplicate state", url: DefaultRedirectURI + "?state=a&state=b&code=" + strings.Repeat("c", 43)},
+		{name: "short code", url: DefaultRedirectURI + "?state=" + strings.Repeat("s", 43) + "&code=short"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if err := client.HandleCallbackURL(test.url); err == nil {
+				t.Fatal("invalid callback succeeded")
+			}
+		})
 	}
-	if response.StatusCode != http.StatusOK ||
-		!strings.HasPrefix(response.Header.Get("Content-Type"), "text/html") ||
-		!strings.Contains(response.Header.Get("Content-Security-Policy"), "script-src 'sha256-") ||
-		!strings.Contains(string(body), "window.close();") {
-		t.Fatalf("valid callback response status=%d headers=%v body=%s", response.StatusCode, response.Header, body)
-	}
-	scriptStart := bytes.Index(body, []byte("<script>"))
-	scriptEnd := bytes.Index(body, []byte("</script>"))
-	if scriptStart < 0 || scriptEnd <= scriptStart {
-		t.Fatalf("valid callback response has no inline script: %s", body)
-	}
-	script := body[scriptStart+len("<script>") : scriptEnd]
-	digest := sha256.Sum256(script)
-	wantSource := "'sha256-" + base64.StdEncoding.EncodeToString(digest[:]) + "'"
-	if !strings.Contains(response.Header.Get("Content-Security-Policy"), wantSource) {
-		t.Fatalf("callback CSP does not allow its embedded script: %s", response.Header.Get("Content-Security-Policy"))
-	}
-	if result := <-results; result.err != nil || result.code == "" {
-		t.Fatalf("valid callback result = %#v", result)
+	select {
+	case result := <-pending.result:
+		t.Fatalf("invalid callback produced result: %#v", result)
+	default:
 	}
 }
 

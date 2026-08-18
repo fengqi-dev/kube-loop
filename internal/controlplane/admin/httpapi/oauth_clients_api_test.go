@@ -53,19 +53,23 @@ func TestOAuthClientRedirectURIValidation(t *testing.T) {
 
 	for _, test := range []struct {
 		name     string
+		clientID string
 		redirect string
 		valid    bool
 	}{
-		{name: "https", redirect: "https://client.example/callback", valid: true},
-		{name: "IPv4 loopback", redirect: "http://127.0.0.1:8080/callback", valid: true},
-		{name: "IPv6 loopback", redirect: "http://[::1]:8080/callback", valid: true},
-		{name: "non-loopback HTTP", redirect: "http://client.example/callback"},
-		{name: "userinfo", redirect: "https://user@client.example/callback"},
-		{name: "fragment", redirect: "https://client.example/callback#token"},
+		{name: "https", clientID: "client", redirect: "https://client.example/callback", valid: true},
+		{name: "IPv4 loopback", clientID: "client", redirect: "http://127.0.0.1:8080/callback", valid: true},
+		{name: "IPv6 loopback", clientID: "client", redirect: "http://[::1]:8080/callback", valid: true},
+		{name: "desktop protocol", clientID: storage.DesktopOAuthClientID, redirect: storage.DesktopOAuthRedirectURI, valid: true},
+		{name: "desktop protocol on another client", clientID: "client", redirect: storage.DesktopOAuthRedirectURI},
+		{name: "other custom protocol", clientID: "client", redirect: "other://auth/callback"},
+		{name: "non-loopback HTTP", clientID: "client", redirect: "http://client.example/callback"},
+		{name: "userinfo", clientID: "client", redirect: "https://user@client.example/callback"},
+		{name: "fragment", clientID: "client", redirect: "https://client.example/callback#token"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			_, err := oauthClientFromInput(oauthClientInput{
-				ID: "client", Name: "Client", Public: true,
+				ID: test.clientID, Name: "Client", Public: true,
 				RedirectURIs: []string{test.redirect}, GrantTypes: []string{"authorization_code"},
 				Scopes: []string{"openid"}, Enabled: true,
 			})

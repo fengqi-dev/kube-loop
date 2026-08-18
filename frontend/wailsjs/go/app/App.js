@@ -62,6 +62,10 @@ export function GetServerSingBoxConfig(arg1) {
   return window['go']['app']['App']['GetServerSingBoxConfig'](arg1);
 }
 
+export function HandleAuthCallbackURL(arg1) {
+  return window['go']['app']['App']['HandleAuthCallbackURL'](arg1);
+}
+
 export function HelperStatus() {
   return window['go']['app']['App']['HelperStatus']();
 }

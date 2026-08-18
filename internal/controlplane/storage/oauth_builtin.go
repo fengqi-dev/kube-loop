@@ -4,11 +4,14 @@ import (
 	"context"
 	"errors"
 	"time"
+
+	"github.com/fengqi-dev/kube-loop/internal/authconfig"
 )
 
 const (
-	DesktopOAuthClientID    = "kubeloop-desktop"
+	DesktopOAuthClientID    = authconfig.DesktopClientID
 	ManagementOAuthClientID = "kubeloop-management"
+	DesktopOAuthRedirectURI = authconfig.DesktopRedirectURI
 )
 
 // EnsureBuiltinOAuthClients creates the two first-party public clients without
@@ -22,7 +25,7 @@ func EnsureBuiltinOAuthClients(ctx context.Context, repository OAuthClientReposi
 	clients := []OAuthClient{
 		{
 			ID: DesktopOAuthClientID, Name: "KubeLoop Desktop", Public: true,
-			RedirectURIs: []string{"http://127.0.0.1/callback"},
+			RedirectURIs: []string{DesktopOAuthRedirectURI},
 			GrantTypes:   []string{"authorization_code", "refresh_token"},
 			Scopes:       []string{"openid", "profile", "email", "offline_access", "kubeloop.api"},
 			Trusted:      true, Enabled: true, Builtin: true, CreatedAt: now, UpdatedAt: now,
