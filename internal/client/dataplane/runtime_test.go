@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -27,7 +28,7 @@ type testForwarder struct {
 	net.Listener
 	open       func(context.Context) (net.Conn, error)
 	closeErr   error
-	closeCalls int
+	closeCalls atomic.Int32
 }
 
 func (forwarder *testForwarder) Address() string { return forwarder.Listener.Addr().String() }
@@ -38,7 +39,7 @@ func (forwarder *testForwarder) OpenStream(ctx context.Context) (net.Conn, error
 	return (&net.Dialer{}).DialContext(ctx, "tcp", forwarder.Address())
 }
 func (forwarder *testForwarder) Close() error {
-	forwarder.closeCalls++
+	forwarder.closeCalls.Add(1)
 	_ = forwarder.Listener.Close()
 	return forwarder.closeErr
 }
@@ -282,8 +283,8 @@ func TestReconnectDrainsTransportUntilTrafficStreamCloses(t *testing.T) {
 	secondForwarder := <-forwarders
 	secondControl := receiveControl(t, controls)
 	defer secondControl.Close()
-	if firstForwarder.closeCalls != 0 {
-		t.Fatalf("old transport closed with active Preview stream: closes=%d", firstForwarder.closeCalls)
+	if closeCalls := firstForwarder.closeCalls.Load(); closeCalls != 0 {
+		t.Fatalf("old transport closed with active Preview stream: closes=%d", closeCalls)
 	}
 	close(continueTraffic)
 	data, err := stream.ReadFrame(t.Context())
@@ -300,11 +301,11 @@ func TestReconnectDrainsTransportUntilTrafficStreamCloses(t *testing.T) {
 	if err := stream.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if firstForwarder.closeCalls != 1 {
-		t.Fatalf("drained transport closes=%d, want 1", firstForwarder.closeCalls)
+	if closeCalls := firstForwarder.closeCalls.Load(); closeCalls != 1 {
+		t.Fatalf("drained transport closes=%d, want 1", closeCalls)
 	}
-	if secondForwarder.closeCalls != 0 {
-		t.Fatalf("current transport closed while draining old transport: closes=%d", secondForwarder.closeCalls)
+	if closeCalls := secondForwarder.closeCalls.Load(); closeCalls != 0 {
+		t.Fatalf("current transport closed while draining old transport: closes=%d", closeCalls)
 	}
 }
 
@@ -562,8 +563,8 @@ func TestStartClosesTransportWhenAuthorizationIsRejected(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "authorization denied") {
 		t.Fatalf("start error = %v", err)
 	}
-	if bridgeStarted || forwarder.closeCalls != 1 {
-		t.Fatalf("bridge started=%t forwarder closes=%d", bridgeStarted, forwarder.closeCalls)
+	if closeCalls := forwarder.closeCalls.Load(); bridgeStarted || closeCalls != 1 {
+		t.Fatalf("bridge started=%t forwarder closes=%d", bridgeStarted, closeCalls)
 	}
 	if err := <-serverDone; err != nil {
 		t.Fatal(err)
@@ -618,8 +619,8 @@ func TestStartClosesAuthorizedTransportWhenSOCKSBridgeFails(t *testing.T) {
 			return nil, bridgeFailure
 		},
 	})
-	if !errors.Is(err, bridgeFailure) || forwarder.closeCalls != 1 {
-		t.Fatalf("start error=%v forwarder closes=%d", err, forwarder.closeCalls)
+	if closeCalls := forwarder.closeCalls.Load(); !errors.Is(err, bridgeFailure) || closeCalls != 1 {
+		t.Fatalf("start error=%v forwarder closes=%d", err, closeCalls)
 	}
 	if err := <-serverDone; err != nil {
 		t.Fatal(err)
@@ -833,8 +834,8 @@ func TestRuntimeCloseReportsAllErrorsAndClosesResourcesOnce(t *testing.T) {
 	if err := runtime.Close(); err != nil {
 		t.Fatalf("second close = %v", err)
 	}
-	if core.closeCalls != 1 || bridge.closeCalls != 1 || control.closeCalls != 1 || forwarder.closeCalls != 1 {
-		t.Fatalf("close calls: core=%d bridge=%d control=%d forwarder=%d", core.closeCalls, bridge.closeCalls, control.closeCalls, forwarder.closeCalls)
+	if forwarderCloseCalls := forwarder.closeCalls.Load(); core.closeCalls != 1 || bridge.closeCalls != 1 || control.closeCalls != 1 || forwarderCloseCalls != 1 {
+		t.Fatalf("close calls: core=%d bridge=%d control=%d forwarder=%d", core.closeCalls, bridge.closeCalls, control.closeCalls, forwarderCloseCalls)
 	}
 	select {
 	case <-runtime.Done():
