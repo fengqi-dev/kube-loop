@@ -4,7 +4,7 @@
 
 | 攻击面 | 主要控制 | 回归测试 |
 | --- | --- | --- |
-| OAuth/OIDC callback 篡改与重放 | loopback callback 白名单、state/nonce/PKCE、一次性交换码、Provider 绑定 | `internal/controlplane/authn/oauthserver/provider_test.go`、`internal/controlplane/authn/oidc/provider_test.go` |
+| OAuth/OIDC callback 篡改与重放 | 固定桌面协议 callback、state/nonce/PKCE、一次性交换码、Provider 绑定 | `internal/controlplane/authn/oauthserver/provider_test.go`、`internal/controlplane/authn/oidc/provider_test.go` |
 | Refresh Token replay | Fosite 单次旋转、事务消费、OAuth grant 整体撤销、重启后保留撤销状态 | `internal/controlplane/authn/oauthserver/provider_test.go`、`internal/controlplane/storage/oauth_test.go` |
 | Token confusion | Access Token 使用 opaque token 并通过 Fosite 内部 introspection 校验；ID Token 仅接受 ES256 | `internal/controlplane/authn/oauthserver/provider_test.go` |
 | 跨用户 IDOR 与 stream 越权 | 统一 Authorizer 前置；Session、Task、Stream 同时绑定 identity/session/namespace；无权访问统一返回 403/404 | `internal/controlplane/api_test.go`、各 `*api/handler_test.go` 与 `*api/stream_test.go` |

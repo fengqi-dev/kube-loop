@@ -48,6 +48,15 @@ func (a *App) LoginServerOIDC(profileID, providerID string) (AuthSession, error)
 	return a.persistCredential(serverProfile, credential)
 }
 
+// HandleAuthCallbackURL delivers a custom-protocol OAuth callback to the
+// browser login currently waiting in the desktop process.
+func (a *App) HandleAuthCallbackURL(rawURL string) error {
+	if a.auth == nil {
+		return errors.New("authentication is unavailable")
+	}
+	return a.auth.HandleCallbackURL(rawURL)
+}
+
 // CancelServerLogin stops the active browser-based login, if any. It is
 // intentionally idempotent so UI cleanup can call it safely while unmounting.
 func (a *App) CancelServerLogin() {

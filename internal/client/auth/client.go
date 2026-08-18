@@ -6,18 +6,18 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
-	_ "embed"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/fengqi-dev/kube-loop/internal/authconfig"
 	"github.com/fengqi-dev/kube-loop/internal/client/credentials"
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 )
@@ -33,12 +33,7 @@ const (
 	CodeUnsupportedGrantType   = "unsupported_grant_type"
 	CodeInvalidToken           = "invalid_token"
 	CodeTemporarilyUnavailable = "temporarily_unavailable"
-
-	loopbackCloseScript = "window.close();"
 )
-
-//go:embed ui/login_complete.html
-var loginCompletePage []byte
 
 type BrowserOpener func(string) error
 
@@ -56,6 +51,8 @@ type Client struct {
 	loginTimeout    time.Duration
 	openBrowser     BrowserOpener
 	browserCallback func()
+	callbackMu      sync.Mutex
+	pendingCallback *pendingCallback
 }
 
 type tokenResponse struct {
@@ -102,6 +99,12 @@ type callbackResult struct {
 	err  error
 }
 
+type pendingCallback struct {
+	state     string
+	result    chan callbackResult
+	delivered bool
+}
+
 func New(config Config) *Client {
 	requestTimeout := config.RequestTimeout
 	if requestTimeout <= 0 {
@@ -137,12 +140,6 @@ func (client *Client) LoginOIDC(
 	if client.openBrowser == nil {
 		return credentials.Credential{}, errors.New("browser integration is unavailable")
 	}
-	listener, err := net.Listen("tcp4", "127.0.0.1:0")
-	if err != nil {
-		return credentials.Credential{}, errors.New("start loopback login callback")
-	}
-	defer listener.Close()
-	callbackURL := "http://" + listener.Addr().String() + "/callback"
 	state, err := randomValue(32)
 	if err != nil {
 		return credentials.Credential{}, err
@@ -168,7 +165,7 @@ func (client *Client) LoginOIDC(
 	query := authorizationURL.Query()
 	query.Set("response_type", "code")
 	query.Set("client_id", DefaultClientID)
-	query.Set("redirect_uri", callbackURL)
+	query.Set("redirect_uri", DefaultRedirectURI)
 	query.Set("scope", "openid profile email offline_access kubeloop.api")
 	query.Set("state", state)
 	query.Set("nonce", nonce)
@@ -179,43 +176,33 @@ func (client *Client) LoginOIDC(
 	loginDeadline := time.Now().Add(client.loginTimeout)
 	loginContext, cancel := context.WithDeadline(ctx, loginDeadline)
 	defer cancel()
-	callback := make(chan callbackResult, 1)
-	server := newLoopbackServer(state, callback)
-	serveDone := make(chan struct{})
-	go func() {
-		_ = server.Serve(listener)
-		close(serveDone)
-	}()
+	callback, err := client.beginCallback(state)
+	if err != nil {
+		return credentials.Credential{}, err
+	}
+	defer client.endCallback(callback)
 	if err := client.openBrowser(authorizationURL.String()); err != nil {
-		_ = server.Close()
-		<-serveDone
 		return credentials.Credential{}, errors.New("open system browser")
 	}
 	var result callbackResult
 	select {
-	case result = <-callback:
+	case result = <-callback.result:
 		if client.browserCallback != nil {
 			client.browserCallback()
 		}
 	case <-loginContext.Done():
-		_ = server.Close()
-		<-serveDone
 		if errors.Is(loginContext.Err(), context.DeadlineExceeded) {
 			return credentials.Credential{}, errors.New("browser login timed out")
 		}
 		return credentials.Credential{}, errors.New("browser login was cancelled")
 	}
-	shutdownContext, shutdownCancel := context.WithTimeout(context.Background(), time.Second)
-	_ = server.Shutdown(shutdownContext)
-	shutdownCancel()
-	<-serveDone
 	if result.err != nil {
 		return credentials.Credential{}, result.err
 	}
 	var response tokenResponse
 	if err := client.postForm(ctx, metadata.TokenEndpoint, url.Values{
 		"grant_type": {"authorization_code"}, "code": {result.code}, "code_verifier": {verifier},
-		"client_id": {DefaultClientID}, "redirect_uri": {callbackURL}, "device_id": {deviceID},
+		"client_id": {DefaultClientID}, "redirect_uri": {DefaultRedirectURI}, "device_id": {deviceID},
 	}, &response); err != nil {
 		return credentials.Credential{}, err
 	}
@@ -265,7 +252,10 @@ func (client *Client) Revoke(ctx context.Context, baseURL, refreshToken string) 
 	}, nil)
 }
 
-const DefaultClientID = "kubeloop-desktop"
+const (
+	DefaultClientID    = authconfig.DesktopClientID
+	DefaultRedirectURI = authconfig.DesktopRedirectURI
+)
 
 func (client *Client) discoverProvider(ctx context.Context, baseURL string) (providerMetadata, error) {
 	var metadata providerMetadata
@@ -350,52 +340,70 @@ func decodeAPIError(status int, requestID string, raw []byte) error {
 	return &APIError{Status: status, RequestID: strings.TrimSpace(requestID)}
 }
 
-func newLoopbackServer(expectedState string, result chan<- callbackResult) *http.Server {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/callback", func(writer http.ResponseWriter, request *http.Request) {
-		writer.Header().Set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
-		writer.Header().Set("Referrer-Policy", "no-referrer")
-		writer.Header().Set("X-Content-Type-Options", "nosniff")
-		writer.Header().Set("Cache-Control", "no-store")
-		if request.Method != http.MethodGet {
-			writer.Header().Set("Allow", http.MethodGet)
-			http.Error(writer, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		state := request.URL.Query().Get("state")
-		if len(state) != len(expectedState) || subtle.ConstantTimeCompare([]byte(state), []byte(expectedState)) != 1 {
-			http.Error(writer, "invalid login state", http.StatusBadRequest)
-			return
-		}
-		if request.URL.Query().Get("error") != "" {
-			select {
-			case result <- callbackResult{err: errors.New("identity provider rejected the login request")}:
-			default:
-			}
-			http.Error(writer, "KubeLoop login failed. Return to the application.", http.StatusBadRequest)
-			return
-		}
-		code := request.URL.Query().Get("code")
-		if len(code) < 32 || len(code) > 512 {
-			http.Error(writer, "invalid login code", http.StatusBadRequest)
-			return
-		}
-		select {
-		case result <- callbackResult{code: code}:
-			digest := sha256.Sum256([]byte(loopbackCloseScript))
-			writer.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'sha256-"+
-				base64.StdEncoding.EncodeToString(digest[:])+"'; frame-ancestors 'none'; base-uri 'none'")
-			writer.Header().Set("Content-Type", "text/html; charset=utf-8")
-			writer.WriteHeader(http.StatusOK)
-			_, _ = writer.Write(loginCompletePage)
-		default:
-			http.Error(writer, "login callback already consumed", http.StatusConflict)
-		}
-	})
-	return &http.Server{
-		Handler: mux, ReadHeaderTimeout: 3 * time.Second, ReadTimeout: 5 * time.Second,
-		WriteTimeout: 5 * time.Second, IdleTimeout: 5 * time.Second, MaxHeaderBytes: 8 << 10,
+func (client *Client) beginCallback(state string) (*pendingCallback, error) {
+	client.callbackMu.Lock()
+	defer client.callbackMu.Unlock()
+	if client.pendingCallback != nil {
+		return nil, errors.New("browser login is already in progress")
 	}
+	pending := &pendingCallback{state: state, result: make(chan callbackResult, 1)}
+	client.pendingCallback = pending
+	return pending, nil
+}
+
+func (client *Client) endCallback(pending *pendingCallback) {
+	client.callbackMu.Lock()
+	defer client.callbackMu.Unlock()
+	if client.pendingCallback == pending {
+		client.pendingCallback = nil
+	}
+}
+
+// HandleCallbackURL completes the active browser login from the desktop URL
+// protocol handler. Invalid or stale URLs never consume the pending login.
+func (client *Client) HandleCallbackURL(rawURL string) error {
+	callbackURL, err := url.Parse(rawURL)
+	if err != nil || callbackURL.Scheme != "kubeloop" || callbackURL.Host != "auth" ||
+		callbackURL.Path != "/callback" || callbackURL.User != nil || callbackURL.Fragment != "" {
+		return errors.New("login callback URL is invalid")
+	}
+	query := callbackURL.Query()
+	states := query["state"]
+	if len(states) != 1 {
+		return errors.New("login callback state is invalid")
+	}
+
+	client.callbackMu.Lock()
+	defer client.callbackMu.Unlock()
+	pending := client.pendingCallback
+	if pending == nil {
+		return errors.New("no browser login is in progress")
+	}
+	state := states[0]
+	if len(state) != len(pending.state) || subtle.ConstantTimeCompare([]byte(state), []byte(pending.state)) != 1 {
+		return errors.New("login callback state is invalid")
+	}
+	if pending.delivered {
+		return errors.New("login callback was already consumed")
+	}
+
+	var result callbackResult
+	callbackErrors := query["error"]
+	if len(callbackErrors) > 1 {
+		return errors.New("login callback error is invalid")
+	}
+	if len(callbackErrors) == 1 && callbackErrors[0] != "" {
+		result.err = errors.New("identity provider rejected the login request")
+	} else {
+		codes := query["code"]
+		if len(codes) != 1 || len(codes[0]) < 32 || len(codes[0]) > 512 {
+			return errors.New("login callback code is invalid")
+		}
+		result.code = codes[0]
+	}
+	pending.result <- result
+	pending.delivered = true
+	return nil
 }
 
 func credentialFromResponse(response tokenResponse, deviceID string) (credentials.Credential, error) {

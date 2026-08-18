@@ -10,7 +10,7 @@ import (
 	"github.com/labstack/echo/v5"
 )
 
-func TestAuthorizationUIAllowsDesktopLoopbackFormRedirect(t *testing.T) {
+func TestAuthorizationUIAllowsDesktopProtocolFormRedirect(t *testing.T) {
 	t.Parallel()
 
 	router := echo.New()
@@ -21,11 +21,14 @@ func TestAuthorizationUIAllowsDesktopLoopbackFormRedirect(t *testing.T) {
 		t.Fatalf("authorization UI status = %d", response.Code)
 	}
 	policy := response.Header().Get("Content-Security-Policy")
-	if !strings.Contains(policy, "form-action 'self' http://127.0.0.1:*") {
+	if !strings.Contains(policy, "form-action 'self' kubeloop:") {
 		t.Fatalf("authorization UI CSP does not allow the desktop callback: %q", policy)
 	}
+	if !strings.Contains(policy, "http://127.0.0.1:*") {
+		t.Fatalf("authorization UI CSP no longer allows other native loopback clients: %q", policy)
+	}
 	if strings.Contains(policy, "http://*:*") || strings.Contains(policy, "https://*:*") {
-		t.Fatalf("authorization UI CSP allows a non-loopback wildcard: %q", policy)
+		t.Fatalf("authorization UI CSP allows an unrestricted callback: %q", policy)
 	}
 }
 

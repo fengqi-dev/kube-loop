@@ -46,6 +46,8 @@ export function GetServerNetworkSettings(arg1:string):Promise<app.ServerNetworkS
 
 export function GetServerSingBoxConfig(arg1:string):Promise<string>;
 
+export function HandleAuthCallbackURL(arg1:string):Promise<void>;
+
 export function HelperStatus():Promise<helper.Status>;
 
 export function InstallHelper():Promise<void>;
