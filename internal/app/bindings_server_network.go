@@ -151,8 +151,17 @@ func (a *App) HelperStatus() helper.Status {
 
 func (a *App) InstallHelper() error {
 	a.appendLog("INFO", "installing privileged helper")
-	if err := helperinstall.EnsureCurrentInstall(a.context()); err != nil {
+	certificatePEM, err := a.pendingTrafficInspectionCertificate(a.context())
+	if err != nil {
+		a.appendLog("ERROR", fmt.Sprintf("prepare traffic inspection certificate: %v", err))
+		return err
+	}
+	if err := helperinstall.EnsureCurrentInstallWithCertificate(a.context(), certificatePEM); err != nil {
 		a.appendLog("ERROR", fmt.Sprintf("install privileged helper: %v", err))
+		return err
+	}
+	if err := a.installTrafficInspectionTrust(a.context()); err != nil {
+		a.appendLog("ERROR", fmt.Sprintf("install traffic inspection certificate: %v", err))
 		return err
 	}
 	return nil
@@ -160,7 +169,7 @@ func (a *App) InstallHelper() error {
 
 func (a *App) UninstallHelper() error {
 	a.appendLog("INFO", "uninstalling privileged helper")
-	if err := helperinstall.Uninstall(a.context()); err != nil {
+	if err := a.uninstallHelperAndTrust(a.context()); err != nil {
 		a.appendLog("ERROR", fmt.Sprintf("uninstall privileged helper: %v", err))
 		return err
 	}

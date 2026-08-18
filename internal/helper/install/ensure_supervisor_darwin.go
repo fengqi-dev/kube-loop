@@ -3,7 +3,9 @@
 package install
 
 import (
+	"bytes"
 	"context"
+	"encoding/pem"
 	"fmt"
 	"os"
 	"time"
@@ -17,7 +19,13 @@ import (
 
 func requiresSupervisorCheck(enforceBinaryMatch bool) bool { return enforceBinaryMatch }
 
-func installCurrentHelper(ctx context.Context, source, sourceSHA256, token string, uid int, home, singBox string) error {
+func installCurrentHelper(
+	ctx context.Context,
+	source, sourceSHA256, token string,
+	uid int,
+	home, singBox string,
+	certificatePEM []byte,
+) error {
 	config := supervisor.CurrentConfig()
 	supervisorSource, err := LocateBundledSupervisor()
 	if err != nil {
@@ -32,7 +40,7 @@ func installCurrentHelper(ctx context.Context, source, sourceSHA256, token strin
 	statusCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	status, statusErr := client.Status(statusCtx)
 	cancel()
-	if statusErr == nil && status.Protocol == supervisorprotocol.Version && status.Channel == config.Channel && installedSupervisorSHA == supervisorSHA {
+	if canUpdateWorkerThroughSupervisor(status, statusErr, config.Channel, installedSupervisorSHA, supervisorSHA) {
 		if status.Worker.SHA256 == sourceSHA256 && status.Worker.Version == helper.Version &&
 			status.Worker.Protocol == helperspec.Version && status.Worker.CoreReady {
 			return nil
@@ -52,5 +60,60 @@ func installCurrentHelper(ctx context.Context, source, sourceSHA256, token strin
 		return err
 	}
 
-	return ElevateSupervisorInstall(ctx, supervisorSource, supervisorSHA, source, sourceSHA256, token, uid, home, singBox)
+	certificatePath, cleanup, err := writeTemporaryTrustedCertificate(certificatePEM)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	return ElevateSupervisorInstall(
+		ctx, supervisorSource, supervisorSHA, source, sourceSHA256,
+		token, uid, home, singBox, certificatePath,
+	)
+}
+
+func writeTemporaryTrustedCertificate(content []byte) (string, func(), error) {
+	if len(content) == 0 {
+		return "", func() {}, nil
+	}
+	block, trailing := pem.Decode(content)
+	if block == nil || block.Type != "CERTIFICATE" || len(bytes.TrimSpace(trailing)) != 0 {
+		return "", func() {}, fmt.Errorf("traffic inspection certificate PEM is invalid")
+	}
+	file, err := os.CreateTemp("", "kubeloop-inspection-ca-*.pem")
+	if err != nil {
+		return "", func() {}, fmt.Errorf("create temporary traffic inspection certificate: %w", err)
+	}
+	path := file.Name()
+	cleanup := func() {
+		_ = file.Close()
+		_ = os.Remove(path)
+	}
+	if err := file.Chmod(0o600); err != nil {
+		cleanup()
+		return "", func() {}, fmt.Errorf("secure temporary traffic inspection certificate: %w", err)
+	}
+	if _, err := file.Write(content); err != nil {
+		cleanup()
+		return "", func() {}, fmt.Errorf("write temporary traffic inspection certificate: %w", err)
+	}
+	if err := file.Close(); err != nil {
+		cleanup()
+		return "", func() {}, fmt.Errorf("close temporary traffic inspection certificate: %w", err)
+	}
+	return path, cleanup, nil
+}
+
+func canUpdateWorkerThroughSupervisor(
+	status supervisorprotocol.Response,
+	statusErr error,
+	channel string,
+	installedSupervisorSHA string,
+	bundledSupervisorSHA string,
+) bool {
+	return statusErr == nil &&
+		status.Protocol == supervisorprotocol.Version &&
+		status.Channel == channel &&
+		installedSupervisorSHA == bundledSupervisorSHA &&
+		status.Worker.Installed &&
+		status.Worker.Running
 }

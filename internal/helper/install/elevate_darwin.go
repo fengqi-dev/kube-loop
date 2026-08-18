@@ -42,7 +42,12 @@ fi
 }
 
 func ElevateUninstall(ctx context.Context, source string) error {
-	script := "do shell script " + strconv.Quote(shellquote.Join(source)+" uninstall") +
+	return ElevateUninstallWithCertificate(ctx, source, "")
+}
+
+func ElevateUninstallWithCertificate(ctx context.Context, source, fingerprint string) error {
+	command := darwinUninstallCommand(source, fingerprint)
+	script := "do shell script " + strconv.Quote(command) +
 		" with administrator privileges"
 	cmd := exec.CommandContext(ctx, "osascript", "-e", script)
 	output, err := cmd.CombinedOutput()
@@ -50,4 +55,16 @@ func ElevateUninstall(ctx context.Context, source string) error {
 		return fmt.Errorf("uninstall helper: %w: %s", err, strings.TrimSpace(string(output)))
 	}
 	return nil
+}
+
+func darwinUninstallCommand(source, fingerprint string) string {
+	commands := make([]string, 0, 2)
+	if fingerprint = strings.TrimSpace(fingerprint); fingerprint != "" {
+		commands = append(commands, shellquote.Join(
+			"/usr/bin/security", "delete-certificate", "-Z", fingerprint,
+			"-t", "/Library/Keychains/System.keychain",
+		))
+	}
+	commands = append(commands, shellquote.Join(source, "uninstall"))
+	return strings.Join(commands, "\n")
 }
