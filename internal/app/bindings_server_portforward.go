@@ -33,17 +33,6 @@ func (a *App) StopServerPortForward(profileID, taskID string) error {
 	return a.remoteForwards.Stop(a.context(), serverProfile.ID, taskID)
 }
 
-func (a *App) TestServerPortForward(profileID, taskID string) error {
-	if a.remoteForwards == nil {
-		return errors.New("Port Forward is unavailable")
-	}
-	serverProfile, err := a.serverProfile(profileID)
-	if err != nil {
-		return err
-	}
-	return a.remoteForwards.Test(a.context(), serverProfile.ID, taskID)
-}
-
 func (a *App) ListServerPortForwards(profileID string) ([]clientportforward.Info, error) {
 	if a.remoteForwards == nil {
 		return nil, errors.New("Port Forward is unavailable")

@@ -51,10 +51,8 @@ func (fakeDataPlane) Dialer(string) (traffic.Dialer, error) { return traffic.Dia
 
 type fakeLocals struct {
 	startErr error
-	testErr  error
 	started  []listener.Request
 	stopped  []string
-	tested   []string
 }
 
 func (locals *fakeLocals) StartResolved(request listener.Request, _ string, _ listener.TrafficDialer) (listener.Info, error) {
@@ -68,11 +66,6 @@ func (locals *fakeLocals) StartResolved(request listener.Request, _ string, _ li
 func (locals *fakeLocals) Stop(id string) error {
 	locals.stopped = append(locals.stopped, id)
 	return nil
-}
-
-func (locals *fakeLocals) Test(_ context.Context, id string) error {
-	locals.tested = append(locals.tested, id)
-	return locals.testErr
 }
 
 func TestManagerBindsGatewayTaskToLocalOnlyListener(t *testing.T) {
@@ -102,15 +95,6 @@ func TestManagerBindsGatewayTaskToLocalOnlyListener(t *testing.T) {
 	}
 	if items := manager.List(serverProfile.ID); len(items) != 1 || items[0].LocalPort != 49152 {
 		t.Fatalf("active = %#v", items)
-	}
-	if err := manager.Test(context.Background(), serverProfile.ID, task.ID); err != nil {
-		t.Fatal(err)
-	}
-	if len(locals.tested) != 1 || locals.tested[0] != "local-1" {
-		t.Fatalf("local tests = %#v", locals.tested)
-	}
-	if err := manager.Test(context.Background(), "other-server", task.ID); err == nil {
-		t.Fatal("another profile tested the active forward")
 	}
 	if err := manager.Stop(context.Background(), serverProfile.ID, task.ID); err != nil {
 		t.Fatal(err)

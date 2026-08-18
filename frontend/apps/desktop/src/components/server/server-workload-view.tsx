@@ -283,7 +283,6 @@ export function ServerWorkloadView({ profileId }: { profileId: string }) {
                 <TableCell>{item.state}</TableCell>
                 <TableCell>
                   <div className="flex justify-end gap-1">
-                    <Button type="button" size="xs" variant="outline" disabled={busy} onClick={() => void backend.testServerPortForward(profileId, item.id).catch((reason: unknown) => setError(messageOf(reason)))}>Test</Button>
                     <Button type="button" size="xs" variant="outline" disabled={busy} onClick={() => void stopForward(item.id)}><Square size={11} />Stop</Button>
                   </div>
                 </TableCell>

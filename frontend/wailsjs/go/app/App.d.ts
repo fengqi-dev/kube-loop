@@ -156,8 +156,6 @@ export function TestServerAddress(arg1:string):Promise<discovery.Document>;
 
 export function TestServerDataPlane(arg1:string):Promise<void>;
 
-export function TestServerPortForward(arg1:string,arg2:string):Promise<void>;
-
 export function UninstallHelper():Promise<void>;
 
 export function WriteServerExecInput(arg1:string,arg2:string,arg3:string):Promise<void>;

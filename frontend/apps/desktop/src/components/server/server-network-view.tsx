@@ -147,7 +147,7 @@ export function ServerNetworkView({ profileId }: { profileId: string }) {
         </div>
 
         <div className="rounded-lg border bg-card"><div className="border-b px-4 py-3 font-medium">Active Sessions</div><Table><TableHeader><TableRow><TableHead>Type</TableHead><TableHead>Target</TableHead><TableHead>Address / Target</TableHead><TableHead>State</TableHead><TableHead className="text-right">Actions</TableHead></TableRow></TableHeader><TableBody>
-          {forwards.map((item) => <OperationRow key={item.id} kind="port-forward" id={item.id} target={`${item.kind}/${item.name}:${item.remotePort}`} detail={item.address} state={item.state} busy={busy} onStop={stop} onTest={() => void backend.testServerPortForward(profileId, item.id).catch((reason: unknown) => setError(messageOf(reason)))} />)}
+          {forwards.map((item) => <OperationRow key={item.id} kind="port-forward" id={item.id} target={`${item.kind}/${item.name}:${item.remotePort}`} detail={item.address} state={item.state} busy={busy} onStop={stop} />)}
           {exchanges.map((item) => <OperationRow key={item.id} kind="exchange" id={item.id} target={item.service} detail={item.clusterIp} state={item.state} busy={busy} onStop={stop} />)}
           {mirrors.map((item) => <OperationRow key={item.id} kind="mirror" id={item.id} target={item.service} detail={item.clusterIp} state={item.state} busy={busy} onStop={stop} />)}
           {previews.map((item) => <OperationRow key={item.id} kind="preview" id={item.id} target={item.name} detail={item.clusterIp} state={item.state} busy={busy} onStop={stop} />)}
@@ -378,8 +378,8 @@ export function ServerNetworkView({ profileId }: { profileId: string }) {
   );
 }
 
-function OperationRow({ kind, id, target, detail, state, busy, onStop, onTest }: { kind: Action; id: string; target: string; detail?: string; state: string; busy: boolean; onStop(kind: Action, id: string): void; onTest?(): void }) {
-  return <TableRow><TableCell><Badge variant="outline">{labelFor(kind)}</Badge></TableCell><TableCell>{target}</TableCell><TableCell className="font-mono text-xs">{detail || "—"}</TableCell><TableCell>{state}</TableCell><TableCell><div className="flex justify-end gap-1">{onTest ? <Button type="button" size="xs" variant="outline" disabled={busy} onClick={onTest}>Test</Button> : null}<Button type="button" size="xs" variant="outline" disabled={busy} onClick={() => onStop(kind, id)}><Square size={11} />Stop</Button></div></TableCell></TableRow>;
+function OperationRow({ kind, id, target, detail, state, busy, onStop }: { kind: Action; id: string; target: string; detail?: string; state: string; busy: boolean; onStop(kind: Action, id: string): void }) {
+  return <TableRow><TableCell><Badge variant="outline">{labelFor(kind)}</Badge></TableCell><TableCell>{target}</TableCell><TableCell className="font-mono text-xs">{detail || "—"}</TableCell><TableCell>{state}</TableCell><TableCell><div className="flex justify-end gap-1"><Button type="button" size="xs" variant="outline" disabled={busy} onClick={() => onStop(kind, id)}><Square size={11} />Stop</Button></div></TableCell></TableRow>;
 }
 function protocolFor(service: RemoteService, port: number): "tcp" | "udp" { return service.ports.find((item) => item.port === port)?.protocol.toLowerCase() === "udp" ? "udp" : "tcp"; }
 function labelFor(action: Action) { return action === "port-forward" ? "Port Forward" : action[0]!.toUpperCase() + action.slice(1); }

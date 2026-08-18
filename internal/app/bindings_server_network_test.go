@@ -97,13 +97,6 @@ func TestServerDataPlaneDiagnosticsReportUnavailableManager(t *testing.T) {
 	}
 }
 
-func TestServerPortForwardTestRequiresManager(t *testing.T) {
-	application := &App{}
-	if err := application.TestServerPortForward("service-1", "task-1"); err == nil {
-		t.Fatal("Port Forward test succeeded without manager")
-	}
-}
-
 func TestServerNetworkSettingsRejectUnknownProfile(t *testing.T) {
 	profileStore, err := clientprofile.Open(filepath.Join(t.TempDir(), "servers.json"))
 	if err != nil {
