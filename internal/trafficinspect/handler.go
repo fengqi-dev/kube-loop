@@ -53,6 +53,7 @@ type Config struct {
 	OnResponse  func(*http.Response)
 	Sink        Sink
 	Policy      CapturePolicy
+	Protobuf    *ProtobufDecoder
 	OnSinkError func(error)
 	TLSConfig   *tls.Config
 	AllowHTTP2  bool

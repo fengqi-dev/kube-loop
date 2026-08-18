@@ -92,6 +92,40 @@ func TestEmitCapturedBodyKeepsRawGRPCFrames(t *testing.T) {
 	if event.GRPC == nil || event.GRPC.Service != "grpcbin.GRPCBin" || event.GRPC.Method != "DummyUnary" {
 		t.Fatalf("gRPC metadata = %#v", event.GRPC)
 	}
+	if event.Protobuf != nil {
+		t.Fatalf("nil decoder unexpectedly emitted protobuf = %#v", event.Protobuf)
+	}
+}
+
+func TestEmitCapturedBodyAddsProtobufAlongsideRawGRPC(t *testing.T) {
+	sink, err := NewChannelSink(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := &http.Request{
+		Method:     http.MethodPost,
+		URL:        &url.URL{Scheme: "http", Path: "/unknown.Service/Call"},
+		Host:       "grpc.test",
+		Proto:      "HTTP/2.0",
+		ProtoMajor: 2,
+		Header:     http.Header{"Content-Type": []string{"application/grpc"}},
+	}
+	payload := []byte{0x08, 0x2a}
+	frame := grpcFrame(false, payload)
+	emitCapturedBody(
+		t.Context(),
+		Config{Sink: sink, Protobuf: NewProtobufDecoder()},
+		requestTrace{flowID: "flow", protocol: ProtocolGRPC, destination: "grpc.test"},
+		request,
+		nil,
+		directionRequest,
+		"application/grpc",
+		capturedBody{data: frame, size: int64(len(frame))},
+	)
+	event := <-sink.Events()
+	if event.Raw == nil || event.Protobuf == nil || event.Protobuf.Schema != "wire" {
+		t.Fatalf("gRPC event = %#v", event)
+	}
 }
 
 func TestWrapResponseBodyPreservesUpgradedConnection(t *testing.T) {

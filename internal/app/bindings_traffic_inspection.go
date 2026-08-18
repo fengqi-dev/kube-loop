@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/fengqi-dev/kube-loop/internal/trafficinspect"
+	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 const (
@@ -25,11 +26,40 @@ type TrafficInspectionResult struct {
 }
 
 type TrafficInspectionSettings struct {
-	Enabled bool `json:"enabled"`
+	Enabled       bool     `json:"enabled"`
+	ProtobufFiles []string `json:"protobufFiles"`
 }
 
 func (a *App) GetTrafficInspectionSettings() TrafficInspectionSettings {
-	return TrafficInspectionSettings{Enabled: a != nil && a.trafficInspectionSwitch != nil && a.trafficInspectionSwitch.Enabled()}
+	settings := TrafficInspectionSettings{
+		Enabled:       a != nil && a.trafficInspectionSwitch != nil && a.trafficInspectionSwitch.Enabled(),
+		ProtobufFiles: make([]string, 0),
+	}
+	if a != nil && a.trafficInspectionProtobuf != nil {
+		settings.ProtobufFiles = a.trafficInspectionProtobuf.Files()
+	}
+	return settings
+}
+
+func (a *App) ImportTrafficInspectionProtoDirectory() (TrafficInspectionSettings, error) {
+	current := a.GetTrafficInspectionSettings()
+	if a == nil || a.ctx == nil {
+		return current, errors.New("application is not ready")
+	}
+	if a.trafficInspectionProtobuf == nil {
+		return current, errors.New("protobuf schema store is unavailable")
+	}
+	directory, err := runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{Title: "Select protobuf source directory"})
+	if err != nil {
+		return current, fmt.Errorf("select protobuf source directory: %w", err)
+	}
+	if directory == "" {
+		return current, nil
+	}
+	if err := a.trafficInspectionProtobuf.ReplaceDirectory(a.context(), directory); err != nil {
+		return current, fmt.Errorf("import protobuf schemas: %w", err)
+	}
+	return a.GetTrafficInspectionSettings(), nil
 }
 
 func (a *App) SetTrafficInspectionEnabled(enabled bool) (TrafficInspectionSettings, error) {
@@ -40,24 +70,24 @@ func (a *App) SetTrafficInspectionEnabled(enabled bool) (TrafficInspectionSettin
 	defer a.trafficInspectionMu.Unlock()
 	current := a.trafficInspectionSwitch.Enabled()
 	if current == enabled {
-		return TrafficInspectionSettings{Enabled: current}, nil
+		return a.GetTrafficInspectionSettings(), nil
 	}
 	if a.trafficInspectionReady == nil || !a.trafficInspectionReady() {
-		return TrafficInspectionSettings{Enabled: current}, errors.New("virtual network service must be running to change traffic inspection")
+		return a.GetTrafficInspectionSettings(), errors.New("virtual network service must be running to change traffic inspection")
 	}
 	if enabled {
 		if err := a.ensureTrafficInspectionTrust(a.context()); err != nil {
-			return TrafficInspectionSettings{Enabled: current}, fmt.Errorf("enable traffic inspection: %w", err)
+			return a.GetTrafficInspectionSettings(), fmt.Errorf("enable traffic inspection: %w", err)
 		}
 	}
 	if a.trafficInspectionSettings == nil {
-		return TrafficInspectionSettings{Enabled: current}, errors.New("traffic inspection settings store is unavailable")
+		return a.GetTrafficInspectionSettings(), errors.New("traffic inspection settings store is unavailable")
 	}
 	if err := a.trafficInspectionSettings.Save(trafficinspect.Settings{Enabled: enabled}); err != nil {
-		return TrafficInspectionSettings{Enabled: current}, err
+		return a.GetTrafficInspectionSettings(), err
 	}
 	a.trafficInspectionSwitch.SetEnabled(enabled)
-	return TrafficInspectionSettings{Enabled: enabled}, nil
+	return a.GetTrafficInspectionSettings(), nil
 }
 
 // TrafficInspectionEvents returns the newest decoded application events.

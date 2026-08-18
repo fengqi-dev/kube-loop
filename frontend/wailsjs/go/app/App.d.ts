@@ -52,6 +52,8 @@ export function HandleAuthCallbackURL(arg1:string):Promise<void>;
 
 export function HelperStatus():Promise<helper.Status>;
 
+export function ImportTrafficInspectionProtoDirectory():Promise<app.TrafficInspectionSettings>;
+
 export function InstallHelper():Promise<void>;
 
 export function InstallMCPClient(arg1:string):Promise<mcp.InstallResult>;

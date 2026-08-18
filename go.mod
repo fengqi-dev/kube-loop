@@ -4,6 +4,7 @@ go 1.26.6
 
 require (
 	github.com/Netflix/go-env v0.1.2
+	github.com/bufbuild/protocompile v0.14.1
 	github.com/elazarl/goproxy v1.9.0
 	github.com/go-jose/go-jose/v4 v4.1.4
 	github.com/go-sql-driver/mysql v1.9.3

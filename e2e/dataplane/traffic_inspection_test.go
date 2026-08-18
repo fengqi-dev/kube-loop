@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -38,6 +39,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/trafficinspect"
 	"github.com/google/uuid"
 	"golang.org/x/net/http2"
+	"google.golang.org/protobuf/encoding/protowire"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -56,6 +58,51 @@ const (
 	trafficInspectionGRPCUnaryPath  = "/grpcbin.GRPCBin/DummyUnary"
 	trafficInspectionGRPCStreamPath = "/grpcbin.GRPCBin/DummyServerStream"
 )
+
+const trafficInspectionGRPCBinTypesProto = `syntax = "proto3";
+package grpcbin;
+
+import "google/protobuf/timestamp.proto";
+
+message DummyMessage {
+  message Sub { string f_string = 1; }
+  enum Enum { ENUM_0 = 0; ENUM_1 = 1; ENUM_2 = 2; }
+
+  string f_string = 1;
+  repeated string f_strings = 2;
+  int32 f_int32 = 3;
+  repeated int32 f_int32s = 4;
+  Enum f_enum = 5;
+  repeated Enum f_enums = 6;
+  Sub f_sub = 7;
+  repeated Sub f_subs = 8;
+  bool f_bool = 9;
+  repeated bool f_bools = 10;
+  int64 f_int64 = 11;
+  repeated int64 f_int64s = 12;
+  bytes f_bytes = 13;
+  repeated bytes f_bytess = 14;
+  float f_float = 15;
+  repeated float f_floats = 16;
+  map<string, int32> f_map = 17;
+  oneof choice {
+    string f_choice_text = 18;
+    int64 f_choice_number = 20;
+  }
+  google.protobuf.Timestamp f_timestamp = 19;
+}
+`
+
+const trafficInspectionGRPCBinServiceProto = `syntax = "proto3";
+package grpcbin;
+
+import "grpcbin/types.proto";
+
+service GRPCBin {
+  rpc DummyUnary(DummyMessage) returns (DummyMessage);
+  rpc DummyServerStream(DummyMessage) returns (stream DummyMessage);
+}
+`
 
 func TestRealTrafficInspectionThroughDataPlane(t *testing.T) {
 	harness.RequireE2E(t)
@@ -221,6 +268,13 @@ func startTrafficInspectionDataPlane(
 	if err != nil {
 		t.Fatal(err)
 	}
+	protobufDecoder := trafficinspect.NewProtobufDecoder()
+	if err := protobufDecoder.ReplaceSources(ctx, map[string]string{
+		"grpcbin/types.proto":   trafficInspectionGRPCBinTypesProto,
+		"grpcbin/service.proto": trafficInspectionGRPCBinServiceProto,
+	}); err != nil {
+		t.Fatalf("compile imported grpcbin protobuf schemas: %v", err)
+	}
 	dataPlane := startE2EDataPlaneWithInspection(
 		t, ctx, remoteClient, gatewayClient, serverProfile, remoteSession,
 		clientdataplane.TrafficInspectionConfig{
@@ -228,7 +282,8 @@ func startTrafficInspectionDataPlane(
 			TLSConfig: &tls.Config{ //nolint:gosec // grpcbin ships a legacy self-signed E2E certificate.
 				MinVersion: tls.VersionTLS12, InsecureSkipVerify: true,
 			},
-			Sink: output,
+			Sink:     output,
+			Protobuf: protobufDecoder,
 			Policy: trafficinspect.CapturePolicy{
 				CaptureBodies: true,
 				MaxBodyBytes:  4 << 20,
@@ -303,7 +358,7 @@ func callGRPCBinThroughDataPlane(
 	}
 	request, err := http.NewRequestWithContext(
 		t.Context(), http.MethodPost, scheme+"://"+address+path,
-		bytes.NewReader([]byte{0, 0, 0, 0, 0}),
+		bytes.NewReader(complexGRPCBinFrame()),
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -325,6 +380,55 @@ func callGRPCBinThroughDataPlane(
 		t.Fatalf("grpcbin %s%s response: status=%d frames=%d/%d frameErr=%v body=%x trailers=%v",
 			address, path, response.StatusCode, frames, wantFrames, frameErr, body, response.Trailer)
 	}
+}
+
+func complexGRPCBinFrame() []byte {
+	payload := protowire.AppendTag(nil, 1, protowire.BytesType)
+	payload = protowire.AppendString(payload, "kubeloop-complex")
+	payload = protowire.AppendTag(payload, 2, protowire.BytesType)
+	payload = protowire.AppendString(payload, "alpha")
+	payload = protowire.AppendTag(payload, 2, protowire.BytesType)
+	payload = protowire.AppendString(payload, "beta")
+	payload = protowire.AppendTag(payload, 3, protowire.VarintType)
+	payload = protowire.AppendVarint(payload, 42)
+	packedInt32 := protowire.AppendVarint(nil, 7)
+	packedInt32 = protowire.AppendVarint(packedInt32, 8)
+	payload = protowire.AppendTag(payload, 4, protowire.BytesType)
+	payload = protowire.AppendBytes(payload, packedInt32)
+	payload = protowire.AppendTag(payload, 5, protowire.VarintType)
+	payload = protowire.AppendVarint(payload, 2)
+	packedEnums := protowire.AppendVarint(nil, 1)
+	packedEnums = protowire.AppendVarint(packedEnums, 2)
+	payload = protowire.AppendTag(payload, 6, protowire.BytesType)
+	payload = protowire.AppendBytes(payload, packedEnums)
+	nested := protowire.AppendTag(nil, 1, protowire.BytesType)
+	nested = protowire.AppendString(nested, "nested")
+	payload = protowire.AppendTag(payload, 7, protowire.BytesType)
+	payload = protowire.AppendBytes(payload, nested)
+	payload = protowire.AppendTag(payload, 9, protowire.VarintType)
+	payload = protowire.AppendVarint(payload, 1)
+	payload = protowire.AppendTag(payload, 11, protowire.VarintType)
+	payload = protowire.AppendVarint(payload, 9_007_199_254_740_993)
+	payload = protowire.AppendTag(payload, 13, protowire.BytesType)
+	payload = protowire.AppendBytes(payload, []byte{0, 1, 2, 255})
+	payload = protowire.AppendTag(payload, 15, protowire.Fixed32Type)
+	payload = protowire.AppendFixed32(payload, math.Float32bits(3.5))
+	mapEntry := protowire.AppendTag(nil, 1, protowire.BytesType)
+	mapEntry = protowire.AppendString(mapEntry, "region")
+	mapEntry = protowire.AppendTag(mapEntry, 2, protowire.VarintType)
+	mapEntry = protowire.AppendVarint(mapEntry, 7)
+	payload = protowire.AppendTag(payload, 17, protowire.BytesType)
+	payload = protowire.AppendBytes(payload, mapEntry)
+	payload = protowire.AppendTag(payload, 18, protowire.BytesType)
+	payload = protowire.AppendString(payload, "selected")
+	timestamp := protowire.AppendTag(nil, 1, protowire.VarintType)
+	timestamp = protowire.AppendVarint(timestamp, 1_700_000_000)
+	payload = protowire.AppendTag(payload, 19, protowire.BytesType)
+	payload = protowire.AppendBytes(payload, timestamp)
+
+	frame := make([]byte, 5, len(payload)+5)
+	binary.BigEndian.PutUint32(frame[1:], uint32(len(payload)))
+	return append(frame, payload...)
 }
 
 func countGRPCFrames(payload []byte) (int, error) {
@@ -375,6 +479,7 @@ func waitForTrafficInspectionEvents(t *testing.T, sink *trafficinspect.RingBuffe
 				if frames != wantFrames {
 					t.Fatalf("RAW gRPC frame count for %s = %d, want %d", key, frames, wantFrames)
 				}
+				assertDecodedGRPCBinProtobuf(t, event, wantFrames)
 			}
 			seen[key] = true
 		}
@@ -387,6 +492,43 @@ func waitForTrafficInspectionEvents(t *testing.T, sink *trafficinspect.RingBuffe
 	})
 	if err != nil {
 		t.Fatalf("traffic inspection events incomplete: %v events=%#v", err, sink.Snapshot())
+	}
+}
+
+func assertDecodedGRPCBinProtobuf(t *testing.T, event trafficinspect.Event, wantMessages int) {
+	t.Helper()
+	if event.Protobuf == nil {
+		t.Fatalf("protobuf decode is missing for %s %s", event.Raw.Direction, event.GRPC.Path)
+	}
+	if event.Protobuf.Error != "" || event.Protobuf.Schema != "proto" ||
+		event.Protobuf.MessageType != "grpcbin.DummyMessage" {
+		t.Fatalf("protobuf decode metadata = %#v", event.Protobuf)
+	}
+	var messages []map[string]any
+	if err := json.Unmarshal([]byte(event.Protobuf.Data), &messages); err != nil {
+		t.Fatalf("decode protobuf JSON: %v data=%s", err, event.Protobuf.Data)
+	}
+	if len(messages) != wantMessages {
+		t.Fatalf("decoded protobuf messages = %d, want %d", len(messages), wantMessages)
+	}
+	for index, message := range messages {
+		if message["f_string"] != "kubeloop-complex" || message["f_enum"] != "ENUM_2" {
+			t.Fatalf("decoded protobuf message %d lacks grpcbin fields: %#v", index, message)
+		}
+	}
+	if event.Raw.Direction != "request" {
+		return
+	}
+	message := messages[0]
+	if message["f_choice_text"] != "selected" {
+		t.Fatalf("decoded protobuf oneof = %#v", message["f_choice_text"])
+	}
+	decodedMap, ok := message["f_map"].(map[string]any)
+	if !ok || decodedMap["region"] != float64(7) {
+		t.Fatalf("decoded protobuf map = %#v", message["f_map"])
+	}
+	if message["f_timestamp"] != "2023-11-14T22:13:20Z" {
+		t.Fatalf("decoded protobuf timestamp = %#v", message["f_timestamp"])
 	}
 }
 

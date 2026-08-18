@@ -91,6 +91,7 @@ declare global {
 		  TrafficInspectionEvents(query: TrafficInspectionQuery): Promise<TrafficInspectionResult>;
 		  GetTrafficInspectionSettings(): Promise<TrafficInspectionSettings>;
 		  SetTrafficInspectionEnabled(enabled: boolean): Promise<TrafficInspectionSettings>;
+		  ImportTrafficInspectionProtoDirectory(): Promise<TrafficInspectionSettings>;
 		  StartServerPortForward(request: ServerPortForwardRequest): Promise<ServerPortForwardInfo>;
 		  StopServerPortForward(profileId: string, taskId: string): Promise<void>;
 		  ListServerPortForwards(profileId: string): Promise<ServerPortForwardInfo[]>;
@@ -291,6 +292,8 @@ export const backend = {
 		Promise.resolve().then(() => api().GetTrafficInspectionSettings()),
 	setTrafficInspectionEnabled: (enabled: boolean) =>
 		Promise.resolve().then(() => api().SetTrafficInspectionEnabled(enabled)),
+	importTrafficInspectionProtoDirectory: () =>
+		Promise.resolve().then(() => api().ImportTrafficInspectionProtoDirectory()),
 	startServerPortForward: (request: ServerPortForwardRequest) =>
 		Promise.resolve().then(() => api().StartServerPortForward(request)),
 	stopServerPortForward: (profileId: string, taskId: string) =>

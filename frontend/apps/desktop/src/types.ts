@@ -608,6 +608,14 @@ export interface TrafficInspectionGRPC {
   status?: string;
 }
 
+export interface TrafficInspectionProtobuf {
+  format: "json";
+  schema: "proto" | "wire";
+  message_type?: string;
+  data?: string;
+  error?: string;
+}
+
 export interface TrafficInspectionEvent {
   schema_version: number;
   event_id: string;
@@ -620,6 +628,7 @@ export interface TrafficInspectionEvent {
   duration_ms?: number;
   http?: TrafficInspectionHTTP;
   grpc?: TrafficInspectionGRPC;
+  protobuf?: TrafficInspectionProtobuf;
   raw?: TrafficInspectionRaw;
 }
 
@@ -636,6 +645,7 @@ export interface TrafficInspectionResult {
 
 export interface TrafficInspectionSettings {
   enabled: boolean;
+  protobufFiles: string[];
 }
 
 export interface HelperStatus {

@@ -72,6 +72,7 @@ type App struct {
 	trafficInspectionEvents   *trafficinspect.RingBufferSink
 	trafficInspectionSwitch   *trafficinspect.SwitchableSink
 	trafficInspectionSettings *trafficinspect.SettingsStore
+	trafficInspectionProtobuf *trafficinspect.ProtobufSchemaStore
 	trafficInspectionMu       sync.Mutex
 	trafficInspectionReady    func() bool
 	trafficInspectionCAPath   string
@@ -125,6 +126,7 @@ func newTrafficInspection(profilePath string) (
 		return config, nil, nil
 	}
 	config.Policy = trafficinspect.CapturePolicy{CaptureBodies: true, MaxBodyBytes: 4 << 20}
+	config.Protobuf = trafficinspect.NewProtobufDecoder()
 	var sink trafficinspect.Sink = events
 	profilePath = strings.TrimSpace(profilePath)
 	if profilePath == "" {
@@ -207,6 +209,17 @@ func newApp(version string, embeddedHelperFiles fs.FS, dependencies appDependenc
 			dependencies.trafficInspectionSwitch.SetEnabled(settings.Enabled)
 		}
 	}
+	trafficInspectionProtobufPath := ""
+	if profilePath != "" {
+		trafficInspectionProtobufPath = filepath.Join(filepath.Dir(profilePath), "traffic-inspection-protobuf.json")
+	}
+	trafficInspectionProtobuf, trafficInspectionProtobufErr := trafficinspect.NewProtobufSchemaStore(
+		trafficInspectionProtobufPath,
+		dependencies.trafficInspection.Protobuf,
+	)
+	if trafficInspectionProtobufErr == nil {
+		trafficInspectionProtobufErr = trafficInspectionProtobuf.Load(context.Background())
+	}
 
 	credentialStore := dependencies.credentialStore
 	if credentialStore == nil {
@@ -220,6 +233,7 @@ func newApp(version string, embeddedHelperFiles fs.FS, dependencies appDependenc
 		trafficInspectionEvents:   dependencies.trafficInspectionEvents,
 		trafficInspectionSwitch:   dependencies.trafficInspectionSwitch,
 		trafficInspectionSettings: trafficInspectionSettings,
+		trafficInspectionProtobuf: trafficInspectionProtobuf,
 		trafficInspectionCAPath:   dependencies.trafficInspection.AuthorityPath,
 		trafficInspectionTrust:    trafficinspect.NewSystemTrustStore(),
 		updateState: update.Info{
@@ -229,6 +243,9 @@ func newApp(version string, embeddedHelperFiles fs.FS, dependencies appDependenc
 	}
 	if trafficInspectionSettingsErr != nil {
 		application.appendLog("ERROR", "Traffic inspection settings unavailable: "+trafficInspectionSettingsErr.Error())
+	}
+	if trafficInspectionProtobufErr != nil {
+		application.appendLog("ERROR", "Traffic inspection protobuf schemas unavailable: "+trafficInspectionProtobufErr.Error())
 	}
 	application.trafficInspectionReady = func() bool {
 		return helper.GetStatus(application.context()).Running

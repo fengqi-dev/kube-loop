@@ -330,11 +330,11 @@ export namespace app {
 	    host: string;
 	    path: string;
 	    limit: number;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new TrafficInspectionQuery(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.host = source["host"];
@@ -345,17 +345,17 @@ export namespace app {
 	export class TrafficInspectionResult {
 	    enabled: boolean;
 	    events: trafficinspect.Event[];
-
+	
 	    static createFrom(source: any = {}) {
 	        return new TrafficInspectionResult(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.enabled = source["enabled"];
 	        this.events = this.convertValues(source["events"], trafficinspect.Event);
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -376,14 +376,16 @@ export namespace app {
 	}
 	export class TrafficInspectionSettings {
 	    enabled: boolean;
-
+	    protobufFiles: string[];
+	
 	    static createFrom(source: any = {}) {
 	        return new TrafficInspectionSettings(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.enabled = source["enabled"];
+	        this.protobufFiles = source["protobufFiles"];
 	    }
 	}
 
@@ -1690,7 +1692,7 @@ export namespace singbox {
 }
 
 export namespace trafficinspect {
-
+	
 	export class RawEvent {
 	    format: string;
 	    direction: string;
@@ -1698,11 +1700,11 @@ export namespace trafficinspect {
 	    data: string;
 	    size: number;
 	    truncated: boolean;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new RawEvent(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.format = source["format"];
@@ -1713,16 +1715,36 @@ export namespace trafficinspect {
 	        this.truncated = source["truncated"];
 	    }
 	}
+	export class ProtobufEvent {
+	    format: string;
+	    schema: string;
+	    message_type?: string;
+	    data?: string;
+	    error?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ProtobufEvent(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.format = source["format"];
+	        this.schema = source["schema"];
+	        this.message_type = source["message_type"];
+	        this.data = source["data"];
+	        this.error = source["error"];
+	    }
+	}
 	export class GRPCEvent {
 	    service?: string;
 	    method?: string;
 	    path?: string;
 	    status?: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new GRPCEvent(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.service = source["service"];
@@ -1739,11 +1761,11 @@ export namespace trafficinspect {
 	    status?: number;
 	    request_headers?: Record<string, Array<string>>;
 	    response_headers?: Record<string, Array<string>>;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new HTTPEvent(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.version = source["version"];
@@ -1768,12 +1790,13 @@ export namespace trafficinspect {
 	    duration_ms?: number;
 	    http?: HTTPEvent;
 	    grpc?: GRPCEvent;
+	    protobuf?: ProtobufEvent;
 	    raw?: RawEvent;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new Event(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.schema_version = source["schema_version"];
@@ -1787,9 +1810,10 @@ export namespace trafficinspect {
 	        this.duration_ms = source["duration_ms"];
 	        this.http = this.convertValues(source["http"], HTTPEvent);
 	        this.grpc = this.convertValues(source["grpc"], GRPCEvent);
+	        this.protobuf = this.convertValues(source["protobuf"], ProtobufEvent);
 	        this.raw = this.convertValues(source["raw"], RawEvent);
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -1808,8 +1832,9 @@ export namespace trafficinspect {
 		    return a;
 		}
 	}
-
-
+	
+	
+	
 
 }
 

@@ -158,6 +158,12 @@ function ExchangeSide({
   return (
     <section className="min-w-0 bg-card">
       <h3 className="border-b px-3 py-2 text-xs font-semibold">{title}</h3>
+      {body?.protobuf ? (
+        <LogBlock
+          title={`PROTOBUF · ${body.protobuf.schema}${body.protobuf.message_type ? ` · ${body.protobuf.message_type}` : ""}`}
+          value={body.protobuf.error || body.protobuf.data || "{}"}
+        />
+      ) : null}
       <LogBlock
         title={`${t("inspection.raw")}${raw?.truncated ? ` · ${t("inspection.truncated")}` : ""}`}
         value={raw ? formatRaw(raw) : t("inspection.noRaw")}

@@ -74,6 +74,10 @@ export function HelperStatus() {
   return window['go']['app']['App']['HelperStatus']();
 }
 
+export function ImportTrafficInspectionProtoDirectory() {
+  return window['go']['app']['App']['ImportTrafficInspectionProtoDirectory']();
+}
+
 export function InstallHelper() {
   return window['go']['app']['App']['InstallHelper']();
 }

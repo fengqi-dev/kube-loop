@@ -73,6 +73,24 @@ export function SettingsView({
   const [trafficInspection, setTrafficInspection] = useState<TrafficInspectionSettings | null>(null);
   const [trafficInspectionBusy, setTrafficInspectionBusy] = useState(false);
 
+  async function importTrafficInspectionProtoDirectory() {
+    setTrafficInspectionBusy(true);
+    try {
+      const previousFiles = trafficInspection?.protobufFiles.join("\n") ?? "";
+      const settings = await backend.importTrafficInspectionProtoDirectory();
+      setTrafficInspection(settings);
+      if (settings.protobufFiles.join("\n") !== previousFiles) {
+        toast.success(t("settings.protobufImported"));
+      }
+    } catch (error) {
+      toast.error(t("settings.protobufImportFailed"), {
+        description: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setTrafficInspectionBusy(false);
+    }
+  }
+
   async function refreshHelper(showError = true) {
     try {
       setHelper(await backend.helperStatus());
@@ -277,12 +295,25 @@ export function SettingsView({
               {t("settings.trafficInspectionDescription")}
             </p>
           </div>
-          <Switch
-            checked={trafficInspection?.enabled ?? false}
-            disabled={trafficInspection === null || trafficInspectionBusy || !helper?.running}
-            onCheckedChange={(enabled) => void onTrafficInspectionChange(enabled)}
-            aria-label={t("settings.trafficInspection")}
-          />
+          <div className="flex shrink-0 items-center gap-3">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={trafficInspectionBusy}
+              onClick={() => void importTrafficInspectionProtoDirectory()}
+            >
+              {t("settings.protobufImport")}
+              {trafficInspection?.protobufFiles.length
+                ? ` (${trafficInspection.protobufFiles.length})`
+                : ""}
+            </Button>
+            <Switch
+              checked={trafficInspection?.enabled ?? false}
+              disabled={trafficInspection === null || trafficInspectionBusy || !helper?.running}
+              onCheckedChange={(enabled) => void onTrafficInspectionChange(enabled)}
+              aria-label={t("settings.trafficInspection")}
+            />
+          </div>
         </CardContent>
       </Card>
 

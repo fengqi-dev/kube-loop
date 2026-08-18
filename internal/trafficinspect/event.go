@@ -32,18 +32,19 @@ const (
 
 // Event is the stable JSON-serializable traffic inspection output contract.
 type Event struct {
-	SchemaVersion int        `json:"schema_version"`
-	ID            string     `json:"event_id"`
-	FlowID        string     `json:"flow_id"`
-	Timestamp     time.Time  `json:"timestamp"`
-	Type          EventType  `json:"type"`
-	Protocol      Protocol   `json:"protocol"`
-	TLS           bool       `json:"tls"`
-	Destination   string     `json:"destination"`
-	Duration      int64      `json:"duration_ms,omitempty"`
-	HTTP          *HTTPEvent `json:"http,omitempty"`
-	GRPC          *GRPCEvent `json:"grpc,omitempty"`
-	Raw           *RawEvent  `json:"raw,omitempty"`
+	SchemaVersion int            `json:"schema_version"`
+	ID            string         `json:"event_id"`
+	FlowID        string         `json:"flow_id"`
+	Timestamp     time.Time      `json:"timestamp"`
+	Type          EventType      `json:"type"`
+	Protocol      Protocol       `json:"protocol"`
+	TLS           bool           `json:"tls"`
+	Destination   string         `json:"destination"`
+	Duration      int64          `json:"duration_ms,omitempty"`
+	HTTP          *HTTPEvent     `json:"http,omitempty"`
+	GRPC          *GRPCEvent     `json:"grpc,omitempty"`
+	Protobuf      *ProtobufEvent `json:"protobuf,omitempty"`
+	Raw           *RawEvent      `json:"raw,omitempty"`
 }
 
 type HTTPEvent struct {
@@ -61,6 +62,16 @@ type GRPCEvent struct {
 	Method  string `json:"method,omitempty"`
 	Path    string `json:"path,omitempty"`
 	Status  string `json:"status,omitempty"`
+}
+
+// ProtobufEvent is the decoded view of one or more gRPC messages. Raw always
+// remains available on the same event so decoding can never hide source bytes.
+type ProtobufEvent struct {
+	Format      string `json:"format"`
+	Schema      string `json:"schema"`
+	MessageType string `json:"message_type,omitempty"`
+	Data        string `json:"data,omitempty"`
+	Error       string `json:"error,omitempty"`
 }
 
 // RawEvent contains binary-safe, unredacted application data. HTTP is a

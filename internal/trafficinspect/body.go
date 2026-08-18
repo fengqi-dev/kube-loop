@@ -122,6 +122,10 @@ func emitCapturedBody(
 	body capturedBody,
 ) {
 	if trace.protocol == ProtocolGRPC || trace.protocol == ProtocolGRPCS {
+		encoding := request.Header.Get("Grpc-Encoding")
+		if response != nil && response.Header.Get("Grpc-Encoding") != "" {
+			encoding = response.Header.Get("Grpc-Encoding")
+		}
 		emitEvent(ctx, config, Event{
 			SchemaVersion: EventSchemaVersion,
 			ID:            newEventID(),
@@ -133,6 +137,7 @@ func emitCapturedBody(
 			Destination:   trace.destination,
 			HTTP:          requestHTTPEvent(request, response),
 			GRPC:          requestGRPCEvent(request),
+			Protobuf:      config.Protobuf.Decode(request.URL.Path, direction, encoding, body.data),
 			Raw: &RawEvent{
 				Format:    "grpc",
 				Direction: direction,

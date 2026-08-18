@@ -60,6 +60,7 @@ type TrafficInspectionConfig struct {
 	OnResponse    func(*http.Response)
 	Sink          trafficinspect.Sink
 	Policy        trafficinspect.CapturePolicy
+	Protobuf      *trafficinspect.ProtobufDecoder
 	OnSinkError   func(error)
 }
 
@@ -553,6 +554,7 @@ func normalizedConfig(config Config) Config {
 						OnResponse:  inspection.OnResponse,
 						Sink:        inspection.Sink,
 						Policy:      inspection.Policy,
+						Protobuf:    inspection.Protobuf,
 						OnSinkError: inspection.OnSinkError,
 						TLSConfig:   inspection.TLSConfig,
 						AllowHTTP2:  true,
