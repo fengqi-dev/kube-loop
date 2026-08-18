@@ -29,22 +29,6 @@ type rowScanner interface {
 	Scan(...any) error
 }
 
-func collectStringColumn(rows *sql.Rows, operation string) ([]string, error) {
-	defer rows.Close()
-	values := make([]string, 0)
-	for rows.Next() {
-		var value string
-		if err := rows.Scan(&value); err != nil {
-			return nil, databaseError("decode "+operation, err)
-		}
-		values = append(values, value)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, databaseError("iterate "+operation, err)
-	}
-	return values, nil
-}
-
 func (base repositoryBase) bind(query string) string {
 	if base.backend != BackendPostgreSQL {
 		return query

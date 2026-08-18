@@ -24,9 +24,6 @@ import type {
 	ServerExchangeInfo,
 	ServerMirrorInfo,
 	ServerPreviewInfo,
-  ServerExecTask,
-  ServerFileTransferTask,
-  ServerPodSSHInfo,
   ServerPortForwardInfo,
   ServerInventoryEvent,
   ServerProfile,
@@ -64,8 +61,6 @@ export function ServerAccessView({
   const [discovery, setDiscovery] = useState<ServerDiscovery>();
   const [auth, setAuth] = useState<AuthSession>({ authenticated: false });
   const [inventory, setInventory] = useState<RemoteInventory>();
-	const [execTask, setExecTask] = useState<ServerExecTask>();
-	const [fileTasks, setFileTasks] = useState<ServerFileTransferTask[]>([]);
 	const [forwards, setForwards] = useState<ServerPortForwardInfo[]>([]);
 	const [exchanges, setExchanges] = useState<ServerExchangeInfo[]>([]);
 	const [exchangeService, setExchangeService] = useState("");
@@ -83,7 +78,6 @@ export function ServerAccessView({
 	const [previewServicePort, setPreviewServicePort] = useState("");
 	const [previewLocalHost, setPreviewLocalHost] = useState("127.0.0.1");
 	const [previewLocalPort, setPreviewLocalPort] = useState("");
-	const [sshEndpoints, setSSHEndpoints] = useState<ServerPodSSHInfo[]>([]);
 	const [sshPod, setSSHPod] = useState("");
 	const [sshContainer, setSSHContainer] = useState("");
 	const [forwardKind, setForwardKind] = useState<"pod" | "service">("service");
@@ -126,9 +120,6 @@ export function ServerAccessView({
     setExchanges([]);
     setMirrors([]);
     setPreviews([]);
-    setSSHEndpoints([]);
-    setExecTask(undefined);
-    setFileTasks([]);
   }, [authSession]);
 
   useEffect(() => {
@@ -160,15 +151,13 @@ export function ServerAccessView({
             backend.listServerExchanges(initialProfile.id),
             backend.listServerMirrors(initialProfile.id),
             backend.listServerPreviews(initialProfile.id),
-            backend.listServerPodSSH(initialProfile.id),
           ]);
           if (!active) return;
-          const [remoteForwards, remoteExchanges, remoteMirrors, remotePreviews, remoteSSH] = sessionResources;
+          const [remoteForwards, remoteExchanges, remoteMirrors, remotePreviews] = sessionResources;
           if (remoteForwards.status === "fulfilled") setForwards(remoteForwards.value);
           if (remoteExchanges.status === "fulfilled") setExchanges(remoteExchanges.value);
           if (remoteMirrors.status === "fulfilled") setMirrors(remoteMirrors.value);
           if (remotePreviews.status === "fulfilled") setPreviews(remotePreviews.value);
-          if (remoteSSH.status === "fulfilled") setSSHEndpoints(remoteSSH.value);
         }
       })
       .catch((reason: unknown) => {
@@ -259,24 +248,21 @@ export function ServerAccessView({
         ? await backend.loadServerInventory(result.profile.id, result.profile.lastNamespace ?? "")
         : undefined);
 	  if (session.authenticated) {
-		const [remoteForwards, remoteExchanges, remoteMirrors, remotePreviews, remoteSSH] = await Promise.all([
+		const [remoteForwards, remoteExchanges, remoteMirrors, remotePreviews] = await Promise.all([
 		  backend.listServerPortForwards(result.profile.id),
 		  backend.listServerExchanges(result.profile.id),
 		  backend.listServerMirrors(result.profile.id),
 		  backend.listServerPreviews(result.profile.id),
-		  backend.listServerPodSSH(result.profile.id),
 		]);
 		setForwards(remoteForwards);
 		setExchanges(remoteExchanges);
 		setMirrors(remoteMirrors);
 		setPreviews(remotePreviews);
-		setSSHEndpoints(remoteSSH);
 	  } else {
 		setForwards([]);
 		setExchanges([]);
 		setMirrors([]);
 		setPreviews([]);
-		setSSHEndpoints([]);
 	  }
     } catch (reason) {
       setError(messageOf(reason));
@@ -306,18 +292,16 @@ export function ServerAccessView({
 	  setProfileState(nextProfileState);
 	  setProfile(nextProfile);
       setInventory(await backend.loadServerInventory(profile.id, nextProfile.lastNamespace ?? ""));
-	  const [remoteForwards, remoteExchanges, remoteMirrors, remotePreviews, remoteSSH] = await Promise.all([
+	  const [remoteForwards, remoteExchanges, remoteMirrors, remotePreviews] = await Promise.all([
 		backend.listServerPortForwards(profile.id),
 		backend.listServerExchanges(profile.id),
 		backend.listServerMirrors(profile.id),
 		backend.listServerPreviews(profile.id),
-		backend.listServerPodSSH(profile.id),
 	  ]);
 	  setForwards(remoteForwards);
 	  setExchanges(remoteExchanges);
 	  setMirrors(remoteMirrors);
 	  setPreviews(remotePreviews);
-	  setSSHEndpoints(remoteSSH);
 	  onNavigate?.("overview");
     } catch (reason) {
       if (!loginCancelled.current) setError(messageOf(reason));
@@ -417,9 +401,6 @@ export function ServerAccessView({
     setExchanges([]);
     setMirrors([]);
     setPreviews([]);
-    setSSHEndpoints([]);
-    setExecTask(undefined);
-    setFileTasks([]);
   }
 
   async function removeProfile() {
@@ -463,18 +444,16 @@ export function ServerAccessView({
     try {
 	  const remoteInventory = await backend.loadServerInventory(profile.id, namespace);
 	  setInventory(remoteInventory);
-	  const [remoteForwards, remoteExchanges, remoteMirrors, remotePreviews, remoteSSH] = await Promise.all([
+	  const [remoteForwards, remoteExchanges, remoteMirrors, remotePreviews] = await Promise.all([
 		backend.listServerPortForwards(profile.id),
 		backend.listServerExchanges(profile.id),
 		backend.listServerMirrors(profile.id),
 		backend.listServerPreviews(profile.id),
-		backend.listServerPodSSH(profile.id),
 	  ]);
 	  setForwards(remoteForwards);
 	  setExchanges(remoteExchanges);
 	  setMirrors(remoteMirrors);
 	  setPreviews(remotePreviews);
-	  setSSHEndpoints(remoteSSH);
 	  setForwardName("");
 	  setForwardRemotePort("");
 	  setExchangeService("");
@@ -554,20 +533,6 @@ export function ServerAccessView({
 		}
 	}
 
-	async function stopPortForward(taskId: string) {
-		if (!profile || busy) return;
-		setBusy("port-forward");
-		setError("");
-		try {
-			await backend.stopServerPortForward(profile.id, taskId);
-			setForwards((current) => current.filter((item) => item.id !== taskId));
-		} catch (reason) {
-			setError(messageOf(reason));
-		} finally {
-			setBusy(undefined);
-		}
-	}
-
 	async function startExchange() {
 		if (!profile || !inventory?.session || !selectedExchangeService || !selectedExchangePort || busy) return;
 		if (mirrors.some((item) => item.namespace === inventory.namespace && item.service === selectedExchangeService.name)) {
@@ -600,20 +565,6 @@ export function ServerAccessView({
 		}
 	}
 
-	async function stopExchange(taskId: string) {
-		if (!profile || busy) return;
-		setBusy("exchange");
-		setError("");
-		try {
-			await backend.stopServerExchange(profile.id, taskId);
-			setExchanges((current) => current.filter((item) => item.id !== taskId));
-		} catch (reason) {
-			setError(messageOf(reason));
-		} finally {
-			setBusy(undefined);
-		}
-	}
-
 	async function startMirror() {
 		if (!profile || !inventory?.session || !selectedMirrorService || !selectedMirrorPort || busy) return;
 		if (exchanges.some((item) => item.namespace === inventory.namespace && item.service === selectedMirrorService.name)) {
@@ -639,20 +590,6 @@ export function ServerAccessView({
 				}],
 			});
 			setMirrors((current) => [...current.filter((item) => item.id !== info.id), info]);
-		} catch (reason) {
-			setError(messageOf(reason));
-		} finally {
-			setBusy(undefined);
-		}
-	}
-
-	async function stopMirror(taskId: string) {
-		if (!profile || busy) return;
-		setBusy("mirror");
-		setError("");
-		try {
-			await backend.stopServerMirror(profile.id, taskId);
-			setMirrors((current) => current.filter((item) => item.id !== taskId));
 		} catch (reason) {
 			setError(messageOf(reason));
 		} finally {
@@ -695,58 +632,16 @@ export function ServerAccessView({
 		}
 	}
 
-	async function stopPreview(taskId: string) {
-		if (!profile || busy) return;
-		setBusy("preview");
-		setError("");
-		try {
-			await backend.stopServerPreview(profile.id, taskId);
-			setPreviews((current) => current.filter((item) => item.id !== taskId));
-		} catch (reason) {
-			setError(messageOf(reason));
-		} finally {
-			setBusy(undefined);
-		}
-	}
-
 	async function startPodSSH() {
 		if (!profile || !inventory?.session || !selectedSSHPod || busy) return;
 		setBusy("pod-ssh");
 		setError("");
 		try {
-			const info = await backend.startServerPodSSH({
+			await backend.startServerPodSSH({
 				profileId: profile.id,
 				pod: selectedSSHPod.name,
 				container: sshContainer,
 			});
-			setSSHEndpoints((current) => [...current.filter((item) => item.id !== info.id), info]);
-		} catch (reason) {
-			setError(messageOf(reason));
-		} finally {
-			setBusy(undefined);
-		}
-	}
-
-	async function stopPodSSH(endpointId: string) {
-		if (!profile || busy) return;
-		setBusy("pod-ssh");
-		setError("");
-		try {
-			await backend.stopServerPodSSH(profile.id, endpointId);
-			setSSHEndpoints((current) => current.filter((item) => item.id !== endpointId));
-		} catch (reason) {
-			setError(messageOf(reason));
-		} finally {
-			setBusy(undefined);
-		}
-	}
-
-	async function openPodSSH(endpointId: string) {
-		if (!profile || busy) return;
-		setBusy("pod-ssh");
-		setError("");
-		try {
-			await backend.openServerPodSSH(profile.id, endpointId);
 		} catch (reason) {
 			setError(messageOf(reason));
 		} finally {
@@ -1544,7 +1439,6 @@ export function ServerAccessView({
                       pods={inventory.pods}
                       allowed={inventory.capabilities.includes("pods.exec")}
                       onError={setError}
-					  onTaskChange={setExecTask}
                     />
                   </Suspense>
                 ) : null}
@@ -1557,7 +1451,6 @@ export function ServerAccessView({
                     allowed={inventory.capabilities.includes("pods.files")}
                     manageAllowed={inventory.capabilities.includes("pods.files.manage")}
                     onError={setError}
-					onTasksChange={setFileTasks}
                   />
                 ) : null}
 				{inventory.namespaces.length === 0 ? (

@@ -85,7 +85,6 @@ declare global {
 		  SetServerHostAliases(profileId: string, aliases: HostAlias[]): Promise<ServerNetworkSettings>;
 		  ServerDataPlaneMetrics(profileId: string): Promise<Metrics>;
 		  ServerDataPlaneLogs(profileId: string): Promise<string[]>;
-		  TestServerDataPlane(profileId: string): Promise<void>;
 		  StartServerPortForward(request: ServerPortForwardRequest): Promise<ServerPortForwardInfo>;
 		  StopServerPortForward(profileId: string, taskId: string): Promise<void>;
 		  ListServerPortForwards(profileId: string): Promise<ServerPortForwardInfo[]>;
@@ -280,8 +279,6 @@ export const backend = {
 		Promise.resolve().then(() => api().ServerDataPlaneMetrics(profileId)),
 	serverDataPlaneLogs: (profileId: string) =>
 		Promise.resolve().then(() => api().ServerDataPlaneLogs(profileId)),
-	testServerDataPlane: (profileId: string) =>
-		Promise.resolve().then(() => api().TestServerDataPlane(profileId)),
 	startServerPortForward: (request: ServerPortForwardRequest) =>
 		Promise.resolve().then(() => api().StartServerPortForward(request)),
 	stopServerPortForward: (profileId: string, taskId: string) =>

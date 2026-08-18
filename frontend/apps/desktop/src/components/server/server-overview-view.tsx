@@ -5,7 +5,6 @@ import {
   Copy,
   CopyPlus,
   Eye,
-  Globe2,
   Network,
   RefreshCw,
   Server,

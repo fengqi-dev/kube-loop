@@ -111,25 +111,3 @@ func oauthClientWrite(t *testing.T, handler *Handler, cookie *http.Cookie, csrf,
 	serveHTTP(handler, recorder, request)
 	return recorder
 }
-
-func exchangeIdentitySession(t *testing.T, handler *Handler) (*http.Cookie, string) {
-	t.Helper()
-	request := httptest.NewRequest(http.MethodPost, "/sessions/token", bytes.NewBufferString(`{}`))
-	request.RemoteAddr = "192.0.2.30:5000"
-	request.Header.Set("Origin", "https://gateway.example")
-	request.Header.Set("Sec-Fetch-Site", "same-origin")
-	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("Authorization", "Bearer valid-access-token")
-	recorder := httptest.NewRecorder()
-	serveHTTP(handler, recorder, request)
-	if recorder.Code != http.StatusCreated {
-		t.Fatalf("exchange status=%d body=%s", recorder.Code, recorder.Body.String())
-	}
-	var response struct {
-		CSRFToken string `json:"csrfToken"`
-	}
-	if json.Unmarshal(recorder.Body.Bytes(), &response) != nil {
-		t.Fatal("decode exchange")
-	}
-	return recorder.Result().Cookies()[0], response.CSRFToken
-}

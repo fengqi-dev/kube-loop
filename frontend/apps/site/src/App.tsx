@@ -1,5 +1,5 @@
-import { useEffect, useState, type ReactNode } from "react";
-import { ArrowRight, Blocks, Bot, Check, ChevronRight, Code2, Copy, Download, ExternalLink, FileCode2, Github, Globe2, Menu, Network, PackageOpen, Route, Server, ShieldCheck, Terminal, X, Zap } from "lucide-react";
+import { useEffect, useState } from "react";
+import { ArrowRight, Blocks, Bot, Check, ChevronRight, Copy, Download, ExternalLink, Github, Globe2, Menu, Network, PackageOpen, Route, Server, ShieldCheck, Terminal, X, Zap } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";

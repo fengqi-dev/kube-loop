@@ -14,13 +14,11 @@ export function ServerExecTerminal({
   pods,
   allowed,
   onError,
-  onTaskChange,
 }: {
   profileId: string;
   pods: RemotePod[];
   allowed: boolean;
   onError: (message: string) => void;
-  onTaskChange?: (task?: ServerExecTask) => void;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal>();
@@ -72,13 +70,12 @@ export function ServerExecTerminal({
       resizeSubscription.dispose();
       const current = activeTaskRef.current;
       activeTaskRef.current = undefined;
-      onTaskChange?.(undefined);
       if (current) void backend.stopServerExec(profileId, current.id).catch(() => undefined);
       terminal.dispose();
       terminalRef.current = undefined;
       fitRef.current = undefined;
     };
-  }, [onError, onTaskChange, profileId]);
+  }, [onError, profileId]);
 
   useEffect(() => backend.onServerExec((event) => {
     if (event.profileId !== profileId) return;
@@ -104,7 +101,6 @@ export function ServerExecTerminal({
     }
     activeTaskRef.current = undefined;
     setTask(undefined);
-    onTaskChange?.(undefined);
   }
 
   async function start() {
@@ -124,7 +120,6 @@ export function ServerExecTerminal({
       });
       activeTaskRef.current = created;
       setTask(created);
-      onTaskChange?.(created);
       const pending = pendingEventsRef.current.filter((event) => event.taskId === created.id);
       pendingEventsRef.current = pendingEventsRef.current.filter((event) => event.taskId !== created.id);
       pending.forEach(handleEvent);
@@ -146,7 +141,6 @@ export function ServerExecTerminal({
       terminalRef.current?.writeln("\r\n[terminal stopped locally]");
       activeTaskRef.current = undefined;
       setTask(undefined);
-      onTaskChange?.(undefined);
     } catch (reason) {
       onError(messageOf(reason));
     } finally {
