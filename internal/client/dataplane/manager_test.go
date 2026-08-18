@@ -23,6 +23,7 @@ type testTickets struct {
 	calls   int
 	session remote.Session
 	refresh func(remote.Session) (remote.Session, error)
+	updates chan remote.SessionUpdate
 }
 
 type testTUNStarter struct {
@@ -133,6 +134,10 @@ func (tickets *testTickets) Current(string) (remote.Session, error) {
 	tickets.mu.Lock()
 	defer tickets.mu.Unlock()
 	return tickets.session, nil
+}
+
+func (tickets *testTickets) SessionUpdates() <-chan remote.SessionUpdate {
+	return tickets.updates
 }
 
 func (tickets *testTickets) Refresh(context.Context, string) (remote.Session, error) {
@@ -544,7 +549,7 @@ func TestManagerSystemResumeRefreshesTransportWithoutReinstallingTUN(t *testing.
 	}
 }
 
-func TestManagerReconfiguresTUNForRefreshedNetworkSpec(t *testing.T) {
+func TestManagerReconfiguresTUNWhenHeartbeatRefreshesNetworkSpec(t *testing.T) {
 	initialSpec, err := networkspec.Normalize(networkspec.Spec{
 		PodCIDRs: []string{"10.42.0.0/16"}, ServiceIPs: []string{"10.96.0.10"},
 	})
@@ -564,18 +569,13 @@ func TestManagerReconfiguresTUNForRefreshedNetworkSpec(t *testing.T) {
 		Generation: 4, NetworkSpec: initialSpec, NetworkSpecHash: initialHash,
 	}
 	controls := make(chan net.Conn, 4)
+	statusEvents := make(chan StatusEvent, 8)
 	var starts atomic.Int32
 	tunStarter := &testTUNStarter{}
-	tickets := &testTickets{session: session}
-	tickets.refresh = func(current remote.Session) (remote.Session, error) {
-		current.Generation++
-		current.NetworkSpec = refreshedSpec
-		current.NetworkSpecHash = refreshedHash
-		return current, nil
-	}
+	tickets := &testTickets{session: session, updates: make(chan remote.SessionUpdate, 1)}
 	manager, err := NewManager(tickets, Config{
 		RecoveryAttempts: 2, RecoveryBackoff: 10 * time.Millisecond,
-		TUNStarter: tunStarter,
+		TUNStarter: tunStarter, OnStatus: func(event StatusEvent) { statusEvents <- event },
 		startForwarder: func(ctx context.Context, clientConfig websocketmux.ClientConfig) (streamForwarder, error) {
 			if _, err := clientConfig.TokenSource(ctx); err != nil {
 				return nil, err
@@ -605,7 +605,27 @@ func TestManagerReconfiguresTUNForRefreshedNetworkSpec(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, _, _, _, firstCore := tunStarter.snapshot()
-	_ = receiveControl(t, controls).Close()
+	firstControl := receiveControl(t, controls)
+	defer firstControl.Close()
+	tickets.mu.Lock()
+	tickets.session.Generation++
+	tickets.session.NetworkSpec = refreshedSpec
+	tickets.session.NetworkSpecHash = refreshedHash
+	updatedSession := tickets.session
+	tickets.mu.Unlock()
+	tickets.updates <- remote.SessionUpdate{ProfileID: serverProfile.ID, Session: updatedSession}
+	var refreshEvent StatusEvent
+	eventDeadline := time.After(time.Second)
+	for refreshEvent.Reason != reasonNetworkSpecChanged {
+		select {
+		case refreshEvent = <-statusEvents:
+		case <-eventDeadline:
+			t.Fatal("NetworkSpec refresh event was not published")
+		}
+	}
+	if refreshEvent.Status.State != "reconnecting" || !refreshEvent.Retryable {
+		t.Fatalf("NetworkSpec refresh event = %#v", refreshEvent)
+	}
 	secondControl := receiveControl(t, controls)
 	defer secondControl.Close()
 

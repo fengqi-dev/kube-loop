@@ -251,7 +251,7 @@ func (backend *RemoteBackend) StartTraffic(ctx context.Context, request TrafficS
 			targets[index] = clientpreview.LocalTarget(target)
 		}
 		info, err := backend.dependencies.Previews.Start(ctx, serverProfile, session, clientpreview.Request{
-			ProfileID: serverProfile.ID, Name: request.Name, Targets: targets,
+			ProfileID: serverProfile.ID, Namespace: session.Namespace, Name: request.Name, Targets: targets,
 		})
 		return TrafficItem{Type: request.Type, Preview: &info}, err
 	case "port_forward":

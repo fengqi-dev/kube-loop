@@ -11,7 +11,10 @@ import (
 	"github.com/google/uuid"
 )
 
-const DefaultHeartbeatInterval = 30 * time.Second
+const (
+	DefaultHeartbeatInterval = 30 * time.Second
+	sessionUpdateBuffer      = 32
+)
 
 type Gateway interface {
 	CreateSession(context.Context, profile.Profile, string, string) (remote.Session, error)
@@ -32,6 +35,7 @@ type Manager struct {
 	mu          sync.Mutex
 	active      map[string]entry
 	pendingKeys map[string]string
+	updates     chan remote.SessionUpdate
 	done        chan struct{}
 }
 
@@ -54,7 +58,8 @@ func New(gateway Gateway, config Config) (*Manager, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	manager := &Manager{
 		gateway: gateway, interval: config.HeartbeatInterval, ctx: ctx, cancel: cancel,
-		active: make(map[string]entry), pendingKeys: make(map[string]string), done: make(chan struct{}),
+		active: make(map[string]entry), pendingKeys: make(map[string]string),
+		updates: make(chan remote.SessionUpdate, sessionUpdateBuffer), done: make(chan struct{}),
 	}
 	go manager.heartbeatLoop()
 	return manager, nil
@@ -126,6 +131,10 @@ func (manager *Manager) Current(profileID string) (remote.Session, error) {
 	return current.session, nil
 }
 
+func (manager *Manager) SessionUpdates() <-chan remote.SessionUpdate {
+	return manager.updates
+}
+
 // Refresh performs an immediate heartbeat for Data Plane recovery. It returns
 // the authoritative generation and prevents a stale reconnect from replacing a
 // newer Session selected by the desktop.
@@ -145,6 +154,7 @@ func (manager *Manager) Refresh(ctx context.Context, profileID string) (remote.S
 	current.session = next
 	current.lastError = nil
 	manager.active[profileID] = current
+	manager.publishSessionUpdateLocked(profileID, next)
 	return next, nil
 }
 
@@ -219,6 +229,24 @@ func (manager *Manager) heartbeat() {
 		current.session = next
 		current.lastError = nil
 		manager.active[profileID] = current
+		manager.publishSessionUpdateLocked(profileID, next)
+	}
+}
+
+func (manager *Manager) publishSessionUpdateLocked(profileID string, session remote.Session) {
+	update := remote.SessionUpdate{ProfileID: profileID, Session: session}
+	select {
+	case manager.updates <- update:
+		return
+	default:
+	}
+	select {
+	case <-manager.updates:
+	default:
+	}
+	select {
+	case manager.updates <- update:
+	default:
 	}
 }
 

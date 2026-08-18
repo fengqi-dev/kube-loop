@@ -118,6 +118,14 @@ func TestManagerReusesPendingIdempotencyAndMaintainsHeartbeat(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+	select {
+	case update := <-manager.SessionUpdates():
+		if update.ProfileID != serverProfile.ID || update.Session.Generation <= session.Generation {
+			t.Fatalf("heartbeat Session update = %#v", update)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("heartbeat did not publish a Session update")
+	}
 	production, err := manager.Connect(context.Background(), serverProfile, "production")
 	if err != nil || production.Namespace != "production" {
 		t.Fatalf("namespace switch = %#v, %v", production, err)

@@ -197,7 +197,7 @@ func TestManagerRelaysPreviewTCPAndUDPToRetainedLocalTargets(t *testing.T) {
 	}
 	serverProfile := profile.Profile{ID: "server", BaseURL: "https://gateway.example.test"}
 	info, err := manager.Start(context.Background(), serverProfile, session, Request{
-		ProfileID: serverProfile.ID, Name: "local-api",
+		ProfileID: serverProfile.ID, Namespace: session.Namespace, Name: "local-api",
 		Targets: []LocalTarget{
 			{ServicePort: 53, Protocol: "udp", LocalHost: "127.0.0.1", LocalPort: udpPort},
 			{ServicePort: 80, Protocol: "tcp", LocalHost: "127.0.0.1", LocalPort: tcpPort},
@@ -254,7 +254,7 @@ func TestManagerCompensatesWhenPreviewStreamCannotOpen(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = manager.Start(context.Background(), profile.Profile{ID: "server"}, session, Request{
-		ProfileID: "server", Name: "local-api",
+		ProfileID: "server", Namespace: session.Namespace, Name: "local-api",
 		Targets: []LocalTarget{{ServicePort: 80, Protocol: "tcp", LocalHost: "127.0.0.1", LocalPort: 8080}},
 	})
 	if err == nil {
@@ -278,7 +278,7 @@ func TestManagerRejectsUnboundPreviewBeforeOpeningStream(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := Request{ProfileID: "server", Name: "local-api", Targets: []LocalTarget{{ServicePort: 80, Protocol: "tcp", LocalHost: "127.0.0.1", LocalPort: 8080}}}
+	request := Request{ProfileID: "server", Namespace: session.Namespace, Name: "local-api", Targets: []LocalTarget{{ServicePort: 80, Protocol: "tcp", LocalHost: "127.0.0.1", LocalPort: 8080}}}
 	if _, err := manager.Start(nil, profile.Profile{ID: "server"}, session, request); err == nil {
 		t.Fatal("nil context was accepted")
 	}
@@ -287,6 +287,15 @@ func TestManagerRejectsUnboundPreviewBeforeOpeningStream(t *testing.T) {
 		t.Fatal("wrong profile was accepted")
 	}
 	request.ProfileID = "server"
+	request.Namespace = ""
+	if _, err := manager.Start(context.Background(), profile.Profile{ID: "server"}, session, request); err == nil {
+		t.Fatal("missing Preview namespace was accepted")
+	}
+	request.Namespace = "other"
+	if _, err := manager.Start(context.Background(), profile.Profile{ID: "server"}, session, request); err == nil {
+		t.Fatal("Preview namespace outside the active Session was accepted")
+	}
+	request.Namespace = session.Namespace
 	session.State = "stopped"
 	if _, err := manager.Start(context.Background(), profile.Profile{ID: "server"}, session, request); err == nil {
 		t.Fatal("inactive Session was accepted")
@@ -332,7 +341,7 @@ func TestManagerRejectsGatewayPreviewPortSubstitutionBeforeOpeningStream(t *test
 		t.Fatal(err)
 	}
 	_, err = manager.Start(context.Background(), profile.Profile{ID: "server"}, session, Request{
-		ProfileID: "server", Name: "local-api",
+		ProfileID: "server", Namespace: session.Namespace, Name: "local-api",
 		Targets: []LocalTarget{{ServicePort: 80, Protocol: "tcp", LocalHost: "127.0.0.1", LocalPort: 8080}},
 	})
 	if err == nil {

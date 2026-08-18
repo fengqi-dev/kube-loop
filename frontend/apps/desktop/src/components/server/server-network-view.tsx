@@ -95,7 +95,7 @@ export function ServerNetworkView({ profileId }: { profileId: string }) {
       } else if (action === "mirror" && service) {
         await backend.startServerMirror({ profileId, service: service.name, targets: [{ servicePort: remote, protocol: protocolFor(service, remote), localHost, localPort: local }] });
       } else if (action === "preview" && previewName.trim()) {
-        await backend.startServerPreview({ profileId, name: previewName.trim(), targets: [{ servicePort: remote, protocol: previewProtocol, localHost, localPort: local }] });
+        await backend.startServerPreview({ profileId, namespace: inventory.namespace ?? "", name: previewName.trim(), targets: [{ servicePort: remote, protocol: previewProtocol, localHost, localPort: local }] });
       } else {
         throw new Error("Choose a Service or enter a Preview name.");
       }
@@ -150,7 +150,7 @@ export function ServerNetworkView({ profileId }: { profileId: string }) {
           {forwards.map((item) => <OperationRow key={item.id} kind="port-forward" id={item.id} target={`${item.kind}/${item.name}:${item.remotePort}`} detail={item.address} state={item.state} busy={busy} onStop={stop} />)}
           {exchanges.map((item) => <OperationRow key={item.id} kind="exchange" id={item.id} target={item.service} detail={item.clusterIp} state={item.state} busy={busy} onStop={stop} />)}
           {mirrors.map((item) => <OperationRow key={item.id} kind="mirror" id={item.id} target={item.service} detail={item.clusterIp} state={item.state} busy={busy} onStop={stop} />)}
-          {previews.map((item) => <OperationRow key={item.id} kind="preview" id={item.id} target={item.name} detail={item.clusterIp} state={item.state} busy={busy} onStop={stop} />)}
+          {previews.map((item) => <OperationRow key={item.id} kind="preview" id={item.id} target={`${item.namespace}/${item.name}`} detail={item.clusterIp} state={item.state} busy={busy} onStop={stop} />)}
         </TableBody></Table>{forwards.length + exchanges.length + mirrors.length + previews.length === 0 ? <div className="p-8 text-center text-sm text-muted-foreground">No active sessions.</div> : null}</div>
       </div>}
 
@@ -299,6 +299,10 @@ export function ServerNetworkView({ profileId }: { profileId: string }) {
             <DialogDescription>Expose a local target through a temporary Service preview.</DialogDescription>
           </DialogHeader>
           <div className="grid gap-3 sm:grid-cols-2">
+            <div className="grid gap-2 sm:col-span-2">
+              <label htmlFor="preview-namespace" className="text-sm font-medium">Namespace</label>
+              <Input id="preview-namespace" value={inventory?.namespace ?? ""} readOnly disabled />
+            </div>
             <div className="grid gap-2 sm:col-span-2">
               <label htmlFor="preview-name" className="text-sm font-medium">Name</label>
               <Input

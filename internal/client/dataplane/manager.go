@@ -20,8 +20,11 @@ import (
 
 type SessionSource interface {
 	RelayTicketSource(string) func(context.Context) (remote.RelayTicket, error)
-	Current(string) (remote.Session, error)
 	Refresh(context.Context, string) (remote.Session, error)
+}
+
+type sessionUpdateSource interface {
+	SessionUpdates() <-chan remote.SessionUpdate
 }
 
 type managedRuntime struct {
@@ -35,6 +38,7 @@ type managedRuntime struct {
 
 const (
 	reasonTransportInterrupted   = "transport_interrupted"
+	reasonNetworkSpecChanged     = "network_spec_changed"
 	reasonAuthenticationRequired = "authentication_required"
 	reasonAccessDenied           = "access_denied"
 	reasonSessionExpired         = "session_expired"
@@ -43,7 +47,10 @@ const (
 	reasonSystemResumed          = "system_resumed"
 )
 
-var errSystemResumed = errors.New("system resumed")
+var (
+	errSystemResumed      = errors.New("system resumed")
+	errNetworkSpecChanged = errors.New("Session NetworkSpec changed")
+)
 
 type Manager struct {
 	sessions SessionSource
@@ -80,6 +87,11 @@ func NewManager(sessions SessionSource, config Config) (*Manager, error) {
 	}
 	if config.OnStatus != nil {
 		go manager.eventLoop(config.OnStatus)
+	}
+	if source, ok := sessions.(sessionUpdateSource); ok {
+		if updates := source.SessionUpdates(); updates != nil {
+			go manager.sessionUpdateLoop(updates)
+		}
 	}
 	return manager, nil
 }
@@ -454,6 +466,58 @@ func (manager *Manager) watch(
 	manager.recover(profileID, entry, runtime, baseline)
 }
 
+// syncSession applies authoritative heartbeat updates while the transport is
+// healthy. Generation-only changes are advanced in place. A changed
+// NetworkSpec requires a fresh RelayTicket-bound transport; recover performs
+// that replacement and reinstalls TUN without changing the local SOCKS address.
+func (manager *Manager) syncSession(update remote.SessionUpdate) {
+	profileID := strings.TrimSpace(update.ProfileID)
+	session := update.Session
+	manager.mu.Lock()
+	entry := manager.active[profileID]
+	if profileID == "" || entry == nil || entry.runtime == nil || entry.recovering || manager.ctx.Err() != nil {
+		manager.mu.Unlock()
+		return
+	}
+	runtime := entry.runtime
+	if err := validateRecoverySession(entry.session, session); err != nil {
+		manager.mu.Unlock()
+		return
+	}
+	if session.NetworkSpecHash == entry.session.NetworkSpecHash {
+		if session.Generation > entry.session.Generation {
+			if err := runtime.AdvanceSession(session); err == nil {
+				entry.session = session
+				entry.lastError = nil
+			}
+		}
+		manager.mu.Unlock()
+		return
+	}
+	entry.recovering = true
+	baseline := entry.session
+	manager.mu.Unlock()
+	status := runtime.Status()
+	status.State = "reconnecting"
+	manager.emit(profileID, status, errNetworkSpecChanged)
+	runtime.interruptTransport(errNetworkSpecChanged)
+	go manager.recover(profileID, entry, runtime, baseline)
+}
+
+func (manager *Manager) sessionUpdateLoop(updates <-chan remote.SessionUpdate) {
+	for {
+		select {
+		case update, ok := <-updates:
+			if !ok {
+				return
+			}
+			manager.syncSession(update)
+		case <-manager.ctx.Done():
+			return
+		}
+	}
+}
+
 func (manager *Manager) recover(profileID string, entry *managedRuntime, failed *Runtime, baseline remote.Session) {
 	var lastError error
 	for attempt := 0; attempt < manager.config.RecoveryAttempts; attempt++ {
@@ -532,6 +596,9 @@ func (manager *Manager) emit(profileID string, status Status, err error) {
 		event.Error = err.Error()
 		if errors.Is(err, errSystemResumed) {
 			event.Reason = reasonSystemResumed
+			event.Retryable = true
+		} else if errors.Is(err, errNetworkSpecChanged) {
+			event.Reason = reasonNetworkSpecChanged
 			event.Retryable = true
 		}
 		switch status.State {
