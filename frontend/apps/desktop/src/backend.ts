@@ -88,7 +88,6 @@ declare global {
 		  TestServerDataPlane(profileId: string): Promise<void>;
 		  StartServerPortForward(request: ServerPortForwardRequest): Promise<ServerPortForwardInfo>;
 		  StopServerPortForward(profileId: string, taskId: string): Promise<void>;
-		  TestServerPortForward(profileId: string, taskId: string): Promise<void>;
 		  ListServerPortForwards(profileId: string): Promise<ServerPortForwardInfo[]>;
 			  StartServerExchange(request: ServerExchangeRequest): Promise<ServerExchangeInfo>;
 			  StopServerExchange(profileId: string, taskId: string): Promise<void>;
@@ -287,8 +286,6 @@ export const backend = {
 		Promise.resolve().then(() => api().StartServerPortForward(request)),
 	stopServerPortForward: (profileId: string, taskId: string) =>
 		Promise.resolve().then(() => api().StopServerPortForward(profileId, taskId)),
-	testServerPortForward: (profileId: string, taskId: string) =>
-		Promise.resolve().then(() => api().TestServerPortForward(profileId, taskId)),
 	listServerPortForwards: (profileId: string) =>
 		Promise.resolve().then(() => api().ListServerPortForwards(profileId)),
 	startServerExchange: (request: ServerExchangeRequest) =>

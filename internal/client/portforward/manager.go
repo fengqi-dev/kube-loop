@@ -27,7 +27,6 @@ type DataPlane interface {
 type localForwards interface {
 	StartResolved(listener.Request, string, listener.TrafficDialer) (listener.Info, error)
 	Stop(string) error
-	Test(context.Context, string) error
 }
 
 type Request struct {
@@ -143,19 +142,6 @@ func (manager *Manager) Stop(ctx context.Context, profileID, taskID string) erro
 	localErr := manager.locals.Stop(entry.localID)
 	_, remoteErr := manager.client.StopPortForward(ctx, entry.profile, entry.session, entry.task.ID)
 	return errors.Join(localErr, remoteErr)
-}
-
-func (manager *Manager) Test(ctx context.Context, profileID, taskID string) error {
-	manager.mu.Lock()
-	entry := manager.active[taskID]
-	if entry == nil || entry.profile.ID != profileID {
-		entry = nil
-	}
-	manager.mu.Unlock()
-	if entry == nil {
-		return errors.New("Port Forward is not active locally")
-	}
-	return manager.locals.Test(ctx, entry.localID)
 }
 
 func (manager *Manager) List(profileID string) []Info {

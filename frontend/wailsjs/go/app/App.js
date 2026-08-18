@@ -282,10 +282,6 @@ export function TestServerDataPlane(arg1) {
   return window['go']['app']['App']['TestServerDataPlane'](arg1);
 }
 
-export function TestServerPortForward(arg1, arg2) {
-  return window['go']['app']['App']['TestServerPortForward'](arg1, arg2);
-}
-
 export function UninstallHelper() {
   return window['go']['app']['App']['UninstallHelper']();
 }
