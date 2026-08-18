@@ -1046,24 +1046,6 @@ func serviceAppProtocol(t *testing.T, service map[string]any) string {
 	return ""
 }
 
-func assertServicePort(t *testing.T, service map[string]any, name string, portNumber int, targetPort string) {
-	t.Helper()
-	ports, ok := valueAt(t, service, "spec", "ports").([]any)
-	if !ok {
-		t.Fatalf("Service ports = %#v", valueAt(t, service, "spec", "ports"))
-	}
-	for _, value := range ports {
-		port, ok := value.(map[string]any)
-		if ok && port["name"] == name {
-			if port["port"] != portNumber || port["targetPort"] != targetPort {
-				t.Fatalf("Service port %s = %#v", name, port)
-			}
-			return
-		}
-	}
-	t.Fatalf("Service has no %s port: %#v", name, ports)
-}
-
 func assertRestrictedPodAndContainerSecurity(t *testing.T, deployment map[string]any) {
 	t.Helper()
 	podSpec := valueAt(t, deployment, "spec", "template", "spec")

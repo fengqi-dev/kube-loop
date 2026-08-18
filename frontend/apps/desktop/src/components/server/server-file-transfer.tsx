@@ -4,7 +4,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
 import { ServerPodFileBrowser } from "@/components/server/server-pod-file-browser";
-import type { RemotePod, ServerFileTransferTask } from "@/types";
+import type { RemotePod } from "@/types";
 import { FileArchive, FolderOpen, UploadCloud } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
@@ -14,14 +14,12 @@ export function ServerFileTransfer({
   allowed,
   manageAllowed,
   onError,
-  onTasksChange,
 }: {
   profileId: string;
   pods: RemotePod[];
   allowed: boolean;
   manageAllowed: boolean;
   onError: (message: string) => void;
-  onTasksChange?: (tasks: ServerFileTransferTask[]) => void;
 }) {
   const [direction, setDirection] = useState<"upload" | "download">("upload");
   const [kind, setKind] = useState<"file" | "directory">("file");
@@ -30,31 +28,9 @@ export function ServerFileTransfer({
   const [localPath, setLocalPath] = useState("");
   const [remotePath, setRemotePath] = useState("");
   const [overwrite, setOverwrite] = useState(false);
-  const [tasks, setTasks] = useState<ServerFileTransferTask[]>([]);
   const [busy, setBusy] = useState(false);
 
   const selectedPod = useMemo(() => pods.find((item) => item.name === pod), [pod, pods]);
-
-  useEffect(() => onTasksChange?.(tasks), [onTasksChange, tasks]);
-
-  useEffect(() => {
-    let active = true;
-    void backend.listServerFileTransfers(profileId)
-      .then((items) => { if (active) setTasks(items); })
-      .catch((reason: unknown) => { if (active) onError(messageOf(reason)); });
-    const unsubscribe = backend.onServerFileTransfer((task) => {
-      if (task.profileId !== profileId) return;
-      setTasks((current) => {
-        const next = current.filter((item) => item.id !== task.id);
-        next.unshift(task);
-        return next;
-      });
-    });
-    return () => {
-      active = false;
-      unsubscribe();
-    };
-  }, [onError, profileId]);
 
   useEffect(() => {
     if (!selectedPod) {
@@ -84,11 +60,10 @@ export function ServerFileTransfer({
     }
     setBusy(true);
     try {
-      const task = await backend.startServerFileTransfer({
+      await backend.startServerFileTransfer({
         profileId, direction, kind, pod, container, localPath,
         remotePath: remotePath.trim(), overwrite,
       });
-      setTasks((current) => [task, ...current.filter((item) => item.id !== task.id)]);
     } catch (reason) {
       onError(messageOf(reason));
     } finally {

@@ -278,10 +278,6 @@ export function TestServerAddress(arg1) {
   return window['go']['app']['App']['TestServerAddress'](arg1);
 }
 
-export function TestServerDataPlane(arg1) {
-  return window['go']['app']['App']['TestServerDataPlane'](arg1);
-}
-
 export function UninstallHelper() {
   return window['go']['app']['App']['UninstallHelper']();
 }

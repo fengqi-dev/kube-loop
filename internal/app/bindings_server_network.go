@@ -125,17 +125,6 @@ func (a *App) ServerDataPlaneLogs(profileID string) ([]string, error) {
 	return a.dataPlanes.Logs(a.context(), serverProfile.ID)
 }
 
-func (a *App) TestServerDataPlane(profileID string) error {
-	if a.dataPlanes == nil {
-		return errors.New("data plane is unavailable")
-	}
-	serverProfile, err := a.serverProfile(profileID)
-	if err != nil {
-		return err
-	}
-	return a.dataPlanes.TestConnectivity(a.context(), serverProfile.ID)
-}
-
 // GetServerSingBoxConfig returns the generated configuration for a server data plane.
 func (a *App) GetServerSingBoxConfig(profileID string) (string, error) {
 	if a.dataPlanes == nil || a.profiles == nil {
