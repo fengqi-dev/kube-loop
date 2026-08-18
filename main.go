@@ -3,8 +3,10 @@ package main
 import (
 	"embed"
 	"log"
+	goruntime "runtime"
 
 	desktopapp "github.com/fengqi-dev/kube-loop/internal/app"
+	"github.com/gogpu/systray"
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
@@ -13,6 +15,9 @@ import (
 
 //go:embed all:frontend/dist
 var assets embed.FS
+
+//go:embed build/appicon.png
+var trayIcon []byte
 
 // The README keeps the pattern valid for ordinary source builds. Release and
 // IDE builds generate the platform helper in this directory before compiling
@@ -24,17 +29,23 @@ var embeddedHelperFiles embed.FS
 var version = "dev"
 
 func main() {
+	// The tray and Wails windows must be created on the same native UI thread.
+	goruntime.LockOSThread()
+	defer goruntime.UnlockOSThread()
+
 	app := desktopapp.NewApp(version, embeddedHelperFiles)
+	tray := newSystemTray(app)
 	if err := wails.Run(&options.App{
-		Title:         "KubeLoop",
-		Width:         900,
-		Height:        580,
-		MinWidth:      900,
-		MinHeight:     580,
-		MaxWidth:      900,
-		MaxHeight:     580,
-		DisableResize: true,
-		Frameless:     true,
+		Title:             "KubeLoop",
+		Width:             900,
+		Height:            580,
+		MinWidth:          900,
+		MinHeight:         580,
+		MaxWidth:          900,
+		MaxHeight:         580,
+		DisableResize:     true,
+		Frameless:         true,
+		HideWindowOnClose: true,
 		SingleInstanceLock: &options.SingleInstanceLock{
 			UniqueId: "dev.fengqi.kube-loop",
 			OnSecondInstanceLaunch: func(instance options.SecondInstanceData) {
@@ -57,6 +68,26 @@ func main() {
 		Bind:             []any{app},
 		BackgroundColour: &options.RGBA{R: 15, G: 23, B: 42, A: 1},
 	}); err != nil {
+		tray.Remove()
 		log.Fatal(err)
 	}
+}
+
+func newSystemTray(app *desktopapp.App) *systray.SystemTray {
+	tray := systray.New()
+	menu := systray.NewMenu()
+	menu.Add("Open KubeLoop", func() {
+		desktopapp.ShowWindow(app)
+	})
+	menu.AddSeparator()
+	menu.Add("Quit KubeLoop", func() {
+		tray.Remove()
+		desktopapp.Quit(app)
+	})
+	tray.SetIcon(trayIcon).
+		SetTooltip("KubeLoop").
+		SetMenu(menu).
+		OnClick(func() { desktopapp.ShowWindow(app) }).
+		Show()
+	return tray
 }

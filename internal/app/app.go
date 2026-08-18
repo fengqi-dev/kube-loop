@@ -304,6 +304,13 @@ func ShowWindow(a *App) {
 	runtime.WindowShow(a.ctx)
 }
 
+func Quit(a *App) {
+	if a.ctx == nil {
+		return
+	}
+	runtime.Quit(a.ctx)
+}
+
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	a.once.Do(func() {
