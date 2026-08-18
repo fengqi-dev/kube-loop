@@ -570,9 +570,22 @@ func TestManagerReconfiguresTUNWhenHeartbeatRefreshesNetworkSpec(t *testing.T) {
 	}
 	controls := make(chan net.Conn, 4)
 	statusEvents := make(chan StatusEvent, 8)
+	refreshStarted := make(chan struct{}, 1)
+	allowRefresh := make(chan struct{})
+	var allowRefreshOnce sync.Once
+	releaseRefresh := func() { allowRefreshOnce.Do(func() { close(allowRefresh) }) }
+	t.Cleanup(releaseRefresh)
 	var starts atomic.Int32
 	tunStarter := &testTUNStarter{}
 	tickets := &testTickets{session: session, updates: make(chan remote.SessionUpdate, 1)}
+	tickets.refresh = func(current remote.Session) (remote.Session, error) {
+		select {
+		case refreshStarted <- struct{}{}:
+		default:
+		}
+		<-allowRefresh
+		return current, nil
+	}
 	manager, err := NewManager(tickets, Config{
 		RecoveryAttempts: 2, RecoveryBackoff: 10 * time.Millisecond,
 		TUNStarter: tunStarter, OnStatus: func(event StatusEvent) { statusEvents <- event },
@@ -607,6 +620,9 @@ func TestManagerReconfiguresTUNWhenHeartbeatRefreshesNetworkSpec(t *testing.T) {
 	_, _, _, _, firstCore := tunStarter.snapshot()
 	firstControl := receiveControl(t, controls)
 	defer firstControl.Close()
+	manager.mu.Lock()
+	initialTransportDone := manager.active[serverProfile.ID].runtime.TransportDone()
+	manager.mu.Unlock()
 	tickets.mu.Lock()
 	tickets.session.Generation++
 	tickets.session.NetworkSpec = refreshedSpec
@@ -626,6 +642,17 @@ func TestManagerReconfiguresTUNWhenHeartbeatRefreshesNetworkSpec(t *testing.T) {
 	if refreshEvent.Status.State != "reconnecting" || !refreshEvent.Retryable {
 		t.Fatalf("NetworkSpec refresh event = %#v", refreshEvent)
 	}
+	select {
+	case <-refreshStarted:
+	case <-time.After(time.Second):
+		t.Fatal("NetworkSpec refresh did not start")
+	}
+	select {
+	case <-initialTransportDone:
+		t.Fatal("NetworkSpec refresh interrupted the active transport before its replacement was ready")
+	default:
+	}
+	releaseRefresh()
 	secondControl := receiveControl(t, controls)
 	defer secondControl.Close()
 

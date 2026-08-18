@@ -66,6 +66,25 @@ type openedTransport struct {
 	token     tunnel.SessionToken
 }
 
+type transportStreams struct {
+	forwarder streamForwarder
+	control   net.Conn
+	count     int
+	draining  bool
+}
+
+type trackedTrafficConn struct {
+	net.Conn
+	once    sync.Once
+	release func()
+}
+
+func (connection *trackedTrafficConn) Close() error {
+	err := connection.Conn.Close()
+	connection.once.Do(connection.release)
+	return err
+}
+
 func (runtime *Runtime) SetHostTCPHandler(handler socksbridge.HostTCPHandler) {
 	runtime.bridge.SetHostTCPHandler(handler)
 }
@@ -92,6 +111,7 @@ type Runtime struct {
 	transportMu   sync.Mutex
 	transportDone chan struct{}
 	transportErr  error
+	streams       map[chan struct{}]*transportStreams
 	errMu         sync.Mutex
 	err           error
 	logMu         sync.Mutex
@@ -167,7 +187,7 @@ func Start(
 	}
 	bridge.SetLogHandler(runtime.appendSOCKSLog)
 	runtime.appendSOCKSLog("listening on " + bridge.Addr().String())
-	go runtime.watchControl(transport.control)
+	go runtime.watchControl(transport.control, runtime.transportDone)
 	go runtime.watchContext(runtimeCtx)
 	return runtime, nil
 }
@@ -192,6 +212,7 @@ func (runtime *Runtime) OpenTrafficStream(
 		return nil, errors.New("Data Plane transport is not connected")
 	}
 	forwarder := runtime.forwarder
+	control := runtime.control
 	token := runtime.token
 	transportDone := runtime.transportDone
 	runtime.transportMu.Unlock()
@@ -221,8 +242,25 @@ func (runtime *Runtime) OpenTrafficStream(
 		return nil, err
 	}
 	runtime.transportMu.Lock()
-	current := runtime.ctx.Err() == nil && runtime.forwarder == forwarder && runtime.token == token &&
+	current := runtime.ctx.Err() == nil && runtime.forwarder == forwarder && runtime.control == control && runtime.token == token &&
 		runtime.transportDone == transportDone && !signalClosed(transportDone)
+	if current {
+		if runtime.streams == nil {
+			runtime.streams = make(map[chan struct{}]*transportStreams)
+		}
+		streams := runtime.streams[transportDone]
+		if streams == nil {
+			streams = &transportStreams{forwarder: forwarder, control: control}
+			runtime.streams[transportDone] = streams
+		}
+		streams.count++
+		connection = &trackedTrafficConn{
+			Conn: connection,
+			release: func() {
+				runtime.releaseTrafficStream(transportDone)
+			},
+		}
+	}
 	runtime.transportMu.Unlock()
 	if !current {
 		return nil, errors.New("Data Plane transport changed while opening Traffic Task stream")
@@ -233,6 +271,28 @@ func (runtime *Runtime) OpenTrafficStream(
 	}
 	closeOnError = false
 	return framed, nil
+}
+
+func (runtime *Runtime) releaseTrafficStream(transportDone chan struct{}) {
+	var draining *transportStreams
+	runtime.transportMu.Lock()
+	streams := runtime.streams[transportDone]
+	if streams != nil {
+		if streams.count > 0 {
+			streams.count--
+		}
+		if streams.count == 0 {
+			delete(runtime.streams, transportDone)
+			if streams.draining {
+				draining = streams
+			}
+		}
+	}
+	runtime.transportMu.Unlock()
+	if draining != nil {
+		_ = closeConnection(draining.control)
+		_ = closeForwarder(draining.forwarder)
+	}
 }
 
 func bindConnectionContext(ctx context.Context, connection net.Conn) (func(), error) {
@@ -684,9 +744,16 @@ func (runtime *Runtime) Close() error {
 		runtime.transportMu.Lock()
 		control := runtime.control
 		forwarder := runtime.forwarder
+		draining := make([]*transportStreams, 0, len(runtime.streams))
+		for _, streams := range runtime.streams {
+			if streams.draining {
+				draining = append(draining, streams)
+			}
+		}
 		runtime.control = nil
 		runtime.forwarder = nil
 		runtime.token = tunnel.SessionToken{}
+		runtime.streams = nil
 		closeSignal(runtime.transportDone)
 		runtime.transportMu.Unlock()
 		result = errors.Join(
@@ -695,6 +762,9 @@ func (runtime *Runtime) Close() error {
 			closeConnection(control),
 			closeForwarder(forwarder),
 		)
+		for _, streams := range draining {
+			result = errors.Join(result, closeConnection(streams.control), closeForwarder(streams.forwarder))
+		}
 		close(runtime.done)
 	})
 	return result
@@ -728,15 +798,16 @@ func (runtime *Runtime) Reconnect(
 		_ = transport.forwarder.Close()
 		return errors.New("stale or changed Session generation during Data Plane recovery")
 	}
+	networkChanged := session.NetworkSpecHash != runtime.session.NetworkSpecHash
 	runtime.transportMu.Lock()
-	if runtime.ctx.Err() != nil || !signalClosed(runtime.transportDone) {
+	transportStopped := signalClosed(runtime.transportDone)
+	if runtime.ctx.Err() != nil || (!transportStopped && !networkChanged) {
 		runtime.transportMu.Unlock()
 		runtime.stateMu.Unlock()
 		_ = transport.control.Close()
 		_ = transport.forwarder.Close()
 		return errors.New("Data Plane runtime is not awaiting recovery")
 	}
-	networkChanged := session.NetworkSpecHash != runtime.session.NetworkSpecHash
 	restoreTUN := networkChanged && runtime.tun != nil
 	if restoreTUN {
 		core := runtime.tun
@@ -755,10 +826,25 @@ func (runtime *Runtime) Reconnect(
 			return fmt.Errorf("stop TUN for refreshed NetworkSpec: %w", err)
 		}
 	}
+	var closeAfterSwap *transportStreams
+	if !transportStopped {
+		closeAfterSwap = runtime.drainTransportLocked(
+			runtime.transportDone,
+			runtime.control,
+			runtime.forwarder,
+		)
+	}
+	defer func() {
+		if closeAfterSwap != nil {
+			_ = closeConnection(closeAfterSwap.control)
+			_ = closeForwarder(closeAfterSwap.forwarder)
+		}
+	}()
 	runtime.forwarder = transport.forwarder
 	runtime.control = transport.control
 	runtime.token = transport.token
-	runtime.transportDone = make(chan struct{})
+	transportDone := make(chan struct{})
+	runtime.transportDone = transportDone
 	runtime.transportErr = nil
 	runtime.bridge.SetGateway(transport.forwarder.Address(), transport.token)
 	runtime.session = session
@@ -777,8 +863,31 @@ func (runtime *Runtime) Reconnect(
 	}
 	runtime.transportMu.Unlock()
 	runtime.stateMu.Unlock()
-	go runtime.watchControl(transport.control)
+	go runtime.watchControl(transport.control, transportDone)
 	return nil
+}
+
+// drainTransportLocked removes a transport from new traffic while preserving
+// task-scoped streams already running on it. The final tracked stream closes
+// the old control connection and forwarder. Callers must hold transportMu.
+func (runtime *Runtime) drainTransportLocked(
+	transportDone chan struct{},
+	control net.Conn,
+	forwarder streamForwarder,
+) *transportStreams {
+	closeSignal(transportDone)
+	streams := runtime.streams[transportDone]
+	if streams != nil && streams.count > 0 {
+		streams.control = control
+		streams.forwarder = forwarder
+		streams.draining = true
+		return nil
+	}
+	delete(runtime.streams, transportDone)
+	if control == nil && forwarder == nil {
+		return nil
+	}
+	return &transportStreams{control: control, forwarder: forwarder, draining: true}
 }
 
 func ignoreClosed(err error) error {
@@ -849,7 +958,7 @@ func (runtime *Runtime) watchTUN(core singbox.RunningCore) {
 	_ = runtime.Close()
 }
 
-func (runtime *Runtime) watchControl(control net.Conn) {
+func (runtime *Runtime) watchControl(control net.Conn, transportDone chan struct{}) {
 	var buffer [1]byte
 	_, err := control.Read(buffer[:])
 	if runtime.ctx.Err() != nil {
@@ -861,11 +970,22 @@ func (runtime *Runtime) watchControl(control net.Conn) {
 		err = fmt.Errorf("Data Plane control stream closed: %w", err)
 	}
 	runtime.transportMu.Lock()
-	if runtime.control != control || runtime.ctx.Err() != nil {
+	if runtime.control != control || runtime.transportDone != transportDone || runtime.ctx.Err() != nil {
+		streams := runtime.streams[transportDone]
+		if streams != nil && streams.draining && streams.control == control {
+			delete(runtime.streams, transportDone)
+		} else {
+			streams = nil
+		}
 		runtime.transportMu.Unlock()
+		if streams != nil {
+			_ = closeConnection(streams.control)
+			_ = closeForwarder(streams.forwarder)
+		}
 		return
 	}
 	forwarder := runtime.forwarder
+	delete(runtime.streams, transportDone)
 	runtime.control = nil
 	runtime.forwarder = nil
 	runtime.token = tunnel.SessionToken{}
@@ -892,6 +1012,7 @@ func (runtime *Runtime) interruptTransport(reason error) {
 	}
 	control := runtime.control
 	forwarder := runtime.forwarder
+	delete(runtime.streams, runtime.transportDone)
 	runtime.control = nil
 	runtime.forwarder = nil
 	runtime.token = tunnel.SessionToken{}

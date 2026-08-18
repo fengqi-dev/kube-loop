@@ -164,6 +164,150 @@ func TestRuntimeOpenTrafficStreamUsesCurrentTunnelTransport(t *testing.T) {
 	}
 }
 
+func TestReconnectDrainsTransportUntilTrafficStreamCloses(t *testing.T) {
+	initialSpec, err := networkspec.Normalize(networkspec.Spec{ServiceIPs: []string{"10.96.0.10"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	initialHash, err := networkspec.Hash(initialSpec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	refreshedSpec, err := networkspec.Normalize(networkspec.Spec{
+		ServiceIPs: []string{"10.96.0.10", "10.110.108.72"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	refreshedHash, err := networkspec.Hash(refreshedSpec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session := remote.Session{
+		ID: uuid.NewString(), Namespace: "default", State: "active", Generation: 1,
+		NetworkSpec: initialSpec, NetworkSpecHash: initialHash,
+	}
+	serverProfile := profile.Profile{ID: "service", BaseURL: "https://gateway.example.test", TunnelPath: "/tunnel"}
+	controls := make(chan net.Conn, 2)
+	forwarders := make(chan *testForwarder, 2)
+	trafficClient, trafficGateway := net.Pipe()
+	trafficServerDone := make(chan error, 1)
+	continueTraffic := make(chan struct{})
+	go func() {
+		defer trafficGateway.Close()
+		if _, readErr := tunnel.ReadTrafficOpen(trafficGateway); readErr != nil {
+			trafficServerDone <- readErr
+			return
+		}
+		if writeErr := tunnel.WriteStatus(trafficGateway, nil); writeErr != nil {
+			trafficServerDone <- writeErr
+			return
+		}
+		framed, acceptErr := trafficstream.Accept(t.Context(), trafficGateway)
+		if acceptErr != nil {
+			trafficServerDone <- acceptErr
+			return
+		}
+		defer framed.Close()
+		ready, encodeErr := exchangestream.Encode(exchangestream.Frame{Type: exchangestream.Ready})
+		if encodeErr == nil {
+			encodeErr = framed.WriteFrame(t.Context(), ready)
+		}
+		if encodeErr != nil {
+			trafficServerDone <- encodeErr
+			return
+		}
+		<-continueTraffic
+		data, encodeErr := exchangestream.Encode(exchangestream.Frame{
+			Type: exchangestream.Data, StreamID: 1, Payload: []byte("still-open"),
+		})
+		if encodeErr == nil {
+			encodeErr = framed.WriteFrame(t.Context(), data)
+		}
+		trafficServerDone <- encodeErr
+	}()
+	starts := 0
+	runtime, err := Start(context.Background(), serverProfile, session, func(context.Context) (remote.RelayTicket, error) {
+		return remote.RelayTicket{Ticket: "relay-ticket"}, nil
+	}, Config{
+		startForwarder: func(ctx context.Context, config websocketmux.ClientConfig) (streamForwarder, error) {
+			if _, tokenErr := config.TokenSource(ctx); tokenErr != nil {
+				return nil, tokenErr
+			}
+			listener, listenErr := net.Listen("tcp", "127.0.0.1:0")
+			if listenErr != nil {
+				return nil, listenErr
+			}
+			forwarder := &testForwarder{Listener: listener}
+			if starts == 0 {
+				forwarder.open = func(context.Context) (net.Conn, error) { return trafficClient, nil }
+			}
+			starts++
+			forwarders <- forwarder
+			go acceptTestControlWithSignal(listener, controls)
+			return forwarder, nil
+		},
+		listenSOCKS: func(context.Context, string, string, tunnel.SessionToken) (localBridge, error) {
+			return &testBridge{address: testAddress("127.0.0.1:45020")}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = runtime.Close() })
+	firstForwarder := <-forwarders
+	firstControl := receiveControl(t, controls)
+	defer firstControl.Close()
+	stream, err := runtime.OpenTrafficStream(t.Context(), tunnel.TrafficModePreview, uuid.NewString())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ready, err := stream.ReadFrame(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if frame, decodeErr := exchangestream.Decode(ready); decodeErr != nil || frame.Type != exchangestream.Ready {
+		t.Fatalf("Preview ready = %#v, %v", frame, decodeErr)
+	}
+
+	refreshed := session
+	refreshed.Generation++
+	refreshed.NetworkSpec = refreshedSpec
+	refreshed.NetworkSpecHash = refreshedHash
+	if err := runtime.Reconnect(context.Background(), serverProfile, refreshed, func(context.Context) (remote.RelayTicket, error) {
+		return remote.RelayTicket{Ticket: "refreshed-relay-ticket"}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	secondForwarder := <-forwarders
+	secondControl := receiveControl(t, controls)
+	defer secondControl.Close()
+	if firstForwarder.closeCalls != 0 {
+		t.Fatalf("old transport closed with active Preview stream: closes=%d", firstForwarder.closeCalls)
+	}
+	close(continueTraffic)
+	data, err := stream.ReadFrame(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	frame, err := exchangestream.Decode(data)
+	if err != nil || frame.Type != exchangestream.Data || string(frame.Payload) != "still-open" {
+		t.Fatalf("Preview frame after transport swap = %#v, %v", frame, err)
+	}
+	if err := <-trafficServerDone; err != nil {
+		t.Fatal(err)
+	}
+	if err := stream.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if firstForwarder.closeCalls != 1 {
+		t.Fatalf("drained transport closes=%d, want 1", firstForwarder.closeCalls)
+	}
+	if secondForwarder.closeCalls != 0 {
+		t.Fatalf("current transport closed while draining old transport: closes=%d", secondForwarder.closeCalls)
+	}
+}
+
 func TestRuntimeOpenTrafficStreamDoesNotHoldTransportLockAcrossStartup(t *testing.T) {
 	token, err := tunnel.NewSessionToken()
 	if err != nil {

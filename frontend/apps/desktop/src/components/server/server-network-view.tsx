@@ -147,10 +147,10 @@ export function ServerNetworkView({ profileId }: { profileId: string }) {
         </div>
 
         <div className="rounded-lg border bg-card"><div className="border-b px-4 py-3 font-medium">Active Sessions</div><Table><TableHeader><TableRow><TableHead>Type</TableHead><TableHead>Target</TableHead><TableHead>Address / Target</TableHead><TableHead>State</TableHead><TableHead className="text-right">Actions</TableHead></TableRow></TableHeader><TableBody>
-          {forwards.map((item) => <OperationRow key={item.id} kind="port-forward" id={item.id} target={`${item.kind}/${item.name}:${item.remotePort}`} detail={item.address} state={item.state} busy={busy} onStop={stop} />)}
-          {exchanges.map((item) => <OperationRow key={item.id} kind="exchange" id={item.id} target={item.service} detail={item.clusterIp} state={item.state} busy={busy} onStop={stop} />)}
-          {mirrors.map((item) => <OperationRow key={item.id} kind="mirror" id={item.id} target={item.service} detail={item.clusterIp} state={item.state} busy={busy} onStop={stop} />)}
-          {previews.map((item) => <OperationRow key={item.id} kind="preview" id={item.id} target={`${item.namespace}/${item.name}`} detail={item.clusterIp} state={item.state} busy={busy} onStop={stop} />)}
+          {forwards.map((item) => <OperationRow key={item.id} kind="port-forward" id={item.id} target={`${item.kind}/${item.name}:${item.remotePort}`} detail={portForwardDetail(item)} state={item.state} busy={busy} onStop={stop} />)}
+          {exchanges.map((item) => <OperationRow key={item.id} kind="exchange" id={item.id} target={item.service} detail={trafficTargetDetail(item)} state={item.state} busy={busy} onStop={stop} />)}
+          {mirrors.map((item) => <OperationRow key={item.id} kind="mirror" id={item.id} target={item.service} detail={trafficTargetDetail(item)} state={item.state} busy={busy} onStop={stop} />)}
+          {previews.map((item) => <OperationRow key={item.id} kind="preview" id={item.id} target={`${item.namespace}/${item.name}`} detail={trafficTargetDetail(item)} state={item.state} busy={busy} onStop={stop} />)}
         </TableBody></Table>{forwards.length + exchanges.length + mirrors.length + previews.length === 0 ? <div className="p-8 text-center text-sm text-muted-foreground">No active sessions.</div> : null}</div>
       </div>}
 
@@ -386,5 +386,16 @@ function OperationRow({ kind, id, target, detail, state, busy, onStop }: { kind:
   return <TableRow><TableCell><Badge variant="outline">{labelFor(kind)}</Badge></TableCell><TableCell>{target}</TableCell><TableCell className="font-mono text-xs">{detail || "—"}</TableCell><TableCell>{state}</TableCell><TableCell><div className="flex justify-end gap-1"><Button type="button" size="xs" variant="outline" disabled={busy} onClick={() => onStop(kind, id)}><Square size={11} />Stop</Button></div></TableCell></TableRow>;
 }
 function protocolFor(service: RemoteService, port: number): "tcp" | "udp" { return service.ports.find((item) => item.port === port)?.protocol.toLowerCase() === "udp" ? "udp" : "tcp"; }
+function portForwardDetail(item: ServerPortForwardInfo) {
+  const protocol = item.protocol ? ` (${item.protocol.toUpperCase()})` : "";
+  return item.dialAddress ? `${item.address} → ${item.dialAddress}${protocol}` : `${item.address}${protocol}`;
+}
+function trafficTargetDetail(item: ServerExchangeInfo | ServerMirrorInfo | ServerPreviewInfo) {
+  if (item.targets.length === 0) return item.clusterIp;
+  return item.targets.map((target) => {
+    const serviceAddress = item.clusterIp ? `${item.clusterIp}:${target.servicePort}` : String(target.servicePort);
+    return `${serviceAddress} → ${target.localHost}:${target.localPort} (${target.protocol.toUpperCase()})`;
+  }).join(", ");
+}
 function labelFor(action: Action) { return action === "port-forward" ? "Port Forward" : action[0]!.toUpperCase() + action.slice(1); }
 function messageOf(reason: unknown) { return reason instanceof Error ? reason.message : String(reason); }
