@@ -84,21 +84,25 @@ jobs:
             grep -F "ghcr.io/fengqi-dev/kube-loop/${repository}:${app_version}" "${rendered}" >/dev/null
           done
 
-      - name: Install build dependencies
+      - name: Install desktop dependencies
+        shell: bash
         run: |
-          sudo apt-get \
+          set -euo pipefail
+          sudo env DEBIAN_FRONTEND=noninteractive timeout --signal=TERM 10m apt-get \
             -o Acquire::Retries=3 \
             -o Acquire::http::Timeout=30 \
             -o Acquire::https::Timeout=30 \
             update
-          sudo apt-get \
+          sudo env DEBIAN_FRONTEND=noninteractive timeout --signal=TERM 10m apt-get \
             -o Acquire::Retries=3 \
             -o Acquire::http::Timeout=30 \
             -o Acquire::https::Timeout=30 \
             install --yes --no-install-recommends \
             libgtk-3-dev \
             libwebkit2gtk-4.1-dev
-          make setup-envtest
+
+      - name: Set up Operator EnvTest
+        run: timeout --signal=TERM 10m make setup-envtest
 
       - name: Unit and race tests
         run: |
