@@ -143,7 +143,7 @@ func TestRealPreviewLifecycleOwnershipAndStaleRecovery(t *testing.T) {
 	t.Cleanup(func() { deletePreviewFixture(context.Background(), kubeClient, collisionName) })
 	startContext, startCancel := context.WithTimeout(ctx, 30*time.Second)
 	_, startErr := manager.Start(startContext, serverProfile, remoteSession, clientpreview.Request{
-		ProfileID: serverProfile.ID, Name: collisionName, Targets: targets[:1],
+		ProfileID: serverProfile.ID, Namespace: remoteSession.Namespace, Name: collisionName, Targets: targets[:1],
 	})
 	startCancel()
 	if startErr == nil {
@@ -348,7 +348,7 @@ func startRealPreview(
 	startContext, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	info, err := manager.Start(startContext, serverProfile, session, clientpreview.Request{
-		ProfileID: serverProfile.ID, Name: name, Targets: targets,
+		ProfileID: serverProfile.ID, Namespace: session.Namespace, Name: name, Targets: targets,
 	})
 	if err != nil {
 		t.Fatalf("start real Preview: %v", err)
