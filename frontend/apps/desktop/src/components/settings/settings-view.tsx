@@ -21,6 +21,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter } from "@/components/ui/card";
 import { Spinner } from "@/components/ui/spinner";
+import { Switch } from "@/components/ui/switch";
 import {
   Dialog,
   DialogContent,
@@ -38,7 +39,7 @@ import {
 import { useTheme, type ThemePreference } from "@/hooks/use-theme";
 import { useI18n, type Language } from "@/i18n";
 import { cn } from "@/lib/utils";
-import type { HelperStatus, UpdateInfo } from "@/types";
+import type { HelperStatus, TrafficInspectionSettings, UpdateInfo } from "@/types";
 import { appVersion } from "@/version";
 
 export function SettingsView({
@@ -69,12 +70,14 @@ export function SettingsView({
   const [configBusy, setConfigBusy] = useState<"full" | "dns" | null>(null);
   const [configView, setConfigView] = useState<"full" | "dns">("full");
   const [configText, setConfigText] = useState("");
+  const [trafficInspection, setTrafficInspection] = useState<TrafficInspectionSettings | null>(null);
+  const [trafficInspectionBusy, setTrafficInspectionBusy] = useState(false);
 
-  async function refreshHelper() {
+  async function refreshHelper(showError = true) {
     try {
       setHelper(await backend.helperStatus());
     } catch (error) {
-      toast.error(t("settings.helperLoadFailed"), {
+      if (showError) toast.error(t("settings.helperLoadFailed"), {
         description: error instanceof Error ? error.message : String(error),
       });
     }
@@ -82,7 +85,31 @@ export function SettingsView({
 
   useEffect(() => {
     void refreshHelper();
+    const helperTimer = window.setInterval(() => void refreshHelper(false), 2_000);
+    void backend.getTrafficInspectionSettings()
+      .then(setTrafficInspection)
+      .catch((error) => toast.error(t("settings.trafficInspectionLoadFailed"), {
+        description: error instanceof Error ? error.message : String(error),
+      }));
+    return () => window.clearInterval(helperTimer);
   }, []);
+
+  async function onTrafficInspectionChange(enabled: boolean) {
+    setTrafficInspectionBusy(true);
+    try {
+      const settings = await backend.setTrafficInspectionEnabled(enabled);
+      setTrafficInspection(settings);
+      toast.success(t(enabled
+        ? "settings.trafficInspectionEnabled"
+        : "settings.trafficInspectionDisabled"));
+    } catch (error) {
+      toast.error(t("settings.trafficInspectionFailed"), {
+        description: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setTrafficInspectionBusy(false);
+    }
+  }
 
   async function onInstallHelper() {
     setHelperBusy(true);
@@ -239,6 +266,23 @@ export function SettingsView({
               </SelectContent>
             </Select>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card className="mb-5 gap-0 py-0 shadow-none">
+        <CardContent className="flex items-center justify-between gap-6 p-5">
+          <div>
+            <h3 className="text-[13px] font-semibold">{t("settings.trafficInspection")}</h3>
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              {t("settings.trafficInspectionDescription")}
+            </p>
+          </div>
+          <Switch
+            checked={trafficInspection?.enabled ?? false}
+            disabled={trafficInspection === null || trafficInspectionBusy || !helper?.running}
+            onCheckedChange={(enabled) => void onTrafficInspectionChange(enabled)}
+            aria-label={t("settings.trafficInspection")}
+          />
         </CardContent>
       </Card>
 

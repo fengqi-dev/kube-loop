@@ -576,7 +576,66 @@ export interface ServerInventoryEvent {
 export interface BootstrapData {
   update: UpdateInfo;
   platform: string;
+  coreVersion: string;
   serverProfiles: ServerProfileState;
+}
+
+export type TrafficInspectionProtocol = "http" | "https" | "grpc" | "grpcs";
+
+export interface TrafficInspectionRaw {
+  format: "http" | "grpc";
+  direction: string;
+  encoding: string;
+  data: string;
+  size: number;
+  truncated: boolean;
+}
+
+export interface TrafficInspectionHTTP {
+  version: string;
+  method?: string;
+  host?: string;
+  path?: string;
+  status?: number;
+  request_headers?: Record<string, string[]>;
+  response_headers?: Record<string, string[]>;
+}
+
+export interface TrafficInspectionGRPC {
+  service?: string;
+  method?: string;
+  path?: string;
+  status?: string;
+}
+
+export interface TrafficInspectionEvent {
+  schema_version: number;
+  event_id: string;
+  flow_id: string;
+  timestamp: string;
+  type: "request" | "response" | "body";
+  protocol: TrafficInspectionProtocol;
+  tls: boolean;
+  destination: string;
+  duration_ms?: number;
+  http?: TrafficInspectionHTTP;
+  grpc?: TrafficInspectionGRPC;
+  raw?: TrafficInspectionRaw;
+}
+
+export interface TrafficInspectionQuery {
+  host: string;
+  path: string;
+  limit: number;
+}
+
+export interface TrafficInspectionResult {
+  enabled: boolean;
+  events: TrafficInspectionEvent[];
+}
+
+export interface TrafficInspectionSettings {
+  enabled: boolean;
 }
 
 export interface HelperStatus {

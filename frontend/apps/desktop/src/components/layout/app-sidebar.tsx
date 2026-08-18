@@ -9,6 +9,7 @@ import {
   Network,
   Server,
   Settings2,
+  ScrollText,
   Waypoints,
   type LucideIcon,
 } from "lucide-react";
@@ -37,6 +38,7 @@ const navigation: Array<{ id: Exclude<AppView, "settings">; icon: LucideIcon }> 
   { id: "workload", icon: Boxes },
   { id: "network", icon: Network },
   { id: "host-aliases", icon: Globe },
+  { id: "traffic-inspection", icon: ScrollText },
   { id: "mcp", icon: Bot },
 ];
 

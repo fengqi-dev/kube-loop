@@ -55,6 +55,9 @@ import type {
   SessionIntentCounts,
   SessionState,
   UpdateInfo,
+	TrafficInspectionQuery,
+	TrafficInspectionResult,
+	TrafficInspectionSettings,
 } from "./types";
 
 declare global {
@@ -85,6 +88,9 @@ declare global {
 		  SetServerHostAliases(profileId: string, aliases: HostAlias[]): Promise<ServerNetworkSettings>;
 		  ServerDataPlaneMetrics(profileId: string): Promise<Metrics>;
 		  ServerDataPlaneLogs(profileId: string): Promise<string[]>;
+		  TrafficInspectionEvents(query: TrafficInspectionQuery): Promise<TrafficInspectionResult>;
+		  GetTrafficInspectionSettings(): Promise<TrafficInspectionSettings>;
+		  SetTrafficInspectionEnabled(enabled: boolean): Promise<TrafficInspectionSettings>;
 		  StartServerPortForward(request: ServerPortForwardRequest): Promise<ServerPortForwardInfo>;
 		  StopServerPortForward(profileId: string, taskId: string): Promise<void>;
 		  ListServerPortForwards(profileId: string): Promise<ServerPortForwardInfo[]>;
@@ -279,6 +285,12 @@ export const backend = {
 		Promise.resolve().then(() => api().ServerDataPlaneMetrics(profileId)),
 	serverDataPlaneLogs: (profileId: string) =>
 		Promise.resolve().then(() => api().ServerDataPlaneLogs(profileId)),
+	trafficInspectionEvents: (query: TrafficInspectionQuery) =>
+		Promise.resolve().then(() => api().TrafficInspectionEvents(query)),
+	getTrafficInspectionSettings: () =>
+		Promise.resolve().then(() => api().GetTrafficInspectionSettings()),
+	setTrafficInspectionEnabled: (enabled: boolean) =>
+		Promise.resolve().then(() => api().SetTrafficInspectionEnabled(enabled)),
 	startServerPortForward: (request: ServerPortForwardRequest) =>
 		Promise.resolve().then(() => api().StartServerPortForward(request)),
 	stopServerPortForward: (profileId: string, taskId: string) =>

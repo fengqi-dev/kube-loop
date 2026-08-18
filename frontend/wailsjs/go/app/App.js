@@ -62,6 +62,10 @@ export function GetServerSingBoxConfig(arg1) {
   return window['go']['app']['App']['GetServerSingBoxConfig'](arg1);
 }
 
+export function GetTrafficInspectionSettings() {
+  return window['go']['app']['App']['GetTrafficInspectionSettings']();
+}
+
 export function HandleAuthCallbackURL(arg1) {
   return window['go']['app']['App']['HandleAuthCallbackURL'](arg1);
 }
@@ -214,6 +218,10 @@ export function SetServerSOCKSPort(arg1, arg2) {
   return window['go']['app']['App']['SetServerSOCKSPort'](arg1, arg2);
 }
 
+export function SetTrafficInspectionEnabled(arg1) {
+  return window['go']['app']['App']['SetTrafficInspectionEnabled'](arg1);
+}
+
 export function StartServerExchange(arg1) {
   return window['go']['app']['App']['StartServerExchange'](arg1);
 }
@@ -276,6 +284,10 @@ export function StopServerTunnel(arg1) {
 
 export function TestServerAddress(arg1) {
   return window['go']['app']['App']['TestServerAddress'](arg1);
+}
+
+export function TrafficInspectionEvents(arg1) {
+  return window['go']['app']['App']['TrafficInspectionEvents'](arg1);
 }
 
 export function UninstallHelper() {

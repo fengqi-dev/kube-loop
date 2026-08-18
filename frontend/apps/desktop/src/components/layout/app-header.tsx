@@ -12,6 +12,7 @@ const headerKeys: Record<AppView, TranslationKey> = {
   workload: "header.workload",
   network: "header.network",
   "host-aliases": "header.hostAliases",
+  "traffic-inspection": "header.trafficInspection",
   mcp: "header.mcp",
   settings: "header.settings",
 };

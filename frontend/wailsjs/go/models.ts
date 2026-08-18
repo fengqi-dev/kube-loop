@@ -21,6 +21,7 @@ export namespace app {
 	export class BootstrapData {
 	    update: update.Info;
 	    platform: string;
+	    coreVersion: string;
 	    serverProfiles: profile.State;
 	
 	    static createFrom(source: any = {}) {
@@ -31,6 +32,7 @@ export namespace app {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.update = this.convertValues(source["update"], update.Info);
 	        this.platform = source["platform"];
+	        this.coreVersion = source["coreVersion"];
 	        this.serverProfiles = this.convertValues(source["serverProfiles"], profile.State);
 	    }
 	
@@ -323,6 +325,66 @@ export namespace app {
 		    }
 		    return a;
 		}
+	}
+	export class TrafficInspectionQuery {
+	    host: string;
+	    path: string;
+	    limit: number;
+
+	    static createFrom(source: any = {}) {
+	        return new TrafficInspectionQuery(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.host = source["host"];
+	        this.path = source["path"];
+	        this.limit = source["limit"];
+	    }
+	}
+	export class TrafficInspectionResult {
+	    enabled: boolean;
+	    events: trafficinspect.Event[];
+
+	    static createFrom(source: any = {}) {
+	        return new TrafficInspectionResult(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.enabled = source["enabled"];
+	        this.events = this.convertValues(source["events"], trafficinspect.Event);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class TrafficInspectionSettings {
+	    enabled: boolean;
+
+	    static createFrom(source: any = {}) {
+	        return new TrafficInspectionSettings(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.enabled = source["enabled"];
+	    }
 	}
 
 }
@@ -1624,6 +1686,130 @@ export namespace singbox {
 		    return a;
 		}
 	}
+
+}
+
+export namespace trafficinspect {
+
+	export class RawEvent {
+	    format: string;
+	    direction: string;
+	    encoding: string;
+	    data: string;
+	    size: number;
+	    truncated: boolean;
+
+	    static createFrom(source: any = {}) {
+	        return new RawEvent(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.format = source["format"];
+	        this.direction = source["direction"];
+	        this.encoding = source["encoding"];
+	        this.data = source["data"];
+	        this.size = source["size"];
+	        this.truncated = source["truncated"];
+	    }
+	}
+	export class GRPCEvent {
+	    service?: string;
+	    method?: string;
+	    path?: string;
+	    status?: string;
+
+	    static createFrom(source: any = {}) {
+	        return new GRPCEvent(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.service = source["service"];
+	        this.method = source["method"];
+	        this.path = source["path"];
+	        this.status = source["status"];
+	    }
+	}
+	export class HTTPEvent {
+	    version: string;
+	    method?: string;
+	    host?: string;
+	    path?: string;
+	    status?: number;
+	    request_headers?: Record<string, Array<string>>;
+	    response_headers?: Record<string, Array<string>>;
+
+	    static createFrom(source: any = {}) {
+	        return new HTTPEvent(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.version = source["version"];
+	        this.method = source["method"];
+	        this.host = source["host"];
+	        this.path = source["path"];
+	        this.status = source["status"];
+	        this.request_headers = source["request_headers"];
+	        this.response_headers = source["response_headers"];
+	    }
+	}
+	export class Event {
+	    schema_version: number;
+	    event_id: string;
+	    flow_id: string;
+	    // Go type: time
+	    timestamp: any;
+	    type: string;
+	    protocol: string;
+	    tls: boolean;
+	    destination: string;
+	    duration_ms?: number;
+	    http?: HTTPEvent;
+	    grpc?: GRPCEvent;
+	    raw?: RawEvent;
+
+	    static createFrom(source: any = {}) {
+	        return new Event(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.schema_version = source["schema_version"];
+	        this.event_id = source["event_id"];
+	        this.flow_id = source["flow_id"];
+	        this.timestamp = this.convertValues(source["timestamp"], null);
+	        this.type = source["type"];
+	        this.protocol = source["protocol"];
+	        this.tls = source["tls"];
+	        this.destination = source["destination"];
+	        this.duration_ms = source["duration_ms"];
+	        this.http = this.convertValues(source["http"], HTTPEvent);
+	        this.grpc = this.convertValues(source["grpc"], GRPCEvent);
+	        this.raw = this.convertValues(source["raw"], RawEvent);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+
+
 
 }
 

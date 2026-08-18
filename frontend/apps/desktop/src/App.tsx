@@ -10,6 +10,7 @@ import { ServerAccessView } from "@/components/server/server-access-view";
 import { ServerNetworkView } from "@/components/server/server-network-view";
 import { ServerWorkloadView } from "@/components/server/server-workload-view";
 import { SettingsView } from "@/components/settings/settings-view";
+import { TrafficInspectionView } from "@/components/traffic-inspection/traffic-inspection-view";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { Spinner } from "@/components/ui/spinner";
 import type { AuthSession, BootstrapData, Metrics, ServerProfileState } from "@/types";
@@ -206,10 +207,13 @@ function App() {
             <ServerNetworkView profileId={activeProfile?.id ?? ""} />
           ) : view === "mcp" ? (
             <MCPView />
+          ) : view === "traffic-inspection" ? (
+            <TrafficInspectionView />
           ) : view === "settings" ? (
             <SettingsView
               profileId={activeProfile?.id ?? ""}
               ready={Boolean(metrics)}
+              coreVersion={data.coreVersion}
               update={data.update}
               checking={updateBusy}
               onCheck={() => void checkForUpdates()}
