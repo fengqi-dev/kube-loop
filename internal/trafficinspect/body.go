@@ -96,6 +96,12 @@ func wrapResponseBody(response *http.Response, trace requestTrace, config Config
 	if !config.Policy.CaptureBodies || response.Body == nil || response.Body == http.NoBody {
 		return
 	}
+	// net/http exposes an upgraded connection through a response body that also
+	// implements io.Writer. Wrapping it as a plain io.ReadCloser would prevent
+	// goproxy from relaying WebSocket (and other HTTP Upgrade) traffic.
+	if response.StatusCode == http.StatusSwitchingProtocols {
+		return
+	}
 	contentType := response.Header.Get("Content-Type")
 	response.Body = observeBody(response.Body, bodyLimit(config.Policy), func(body capturedBody) {
 		emitCapturedBody(

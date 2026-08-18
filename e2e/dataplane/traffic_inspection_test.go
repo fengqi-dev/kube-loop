@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -33,6 +34,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/ticketapi"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
 	"github.com/fengqi-dev/kube-loop/internal/trafficinspect"
 	"github.com/google/uuid"
 	"golang.org/x/net/http2"
@@ -47,6 +49,14 @@ import (
 
 const trafficInspectionAccessToken = "e2e-traffic-inspection"
 
+const (
+	trafficInspectionHTTPPath       = "/get?mode=dataplane-e2e"
+	trafficInspectionSSEPath        = "/sse?count=2&duration=100ms&delay=0s"
+	trafficInspectionWebSocketPath  = "/websocket/echo"
+	trafficInspectionGRPCUnaryPath  = "/grpcbin.GRPCBin/DummyUnary"
+	trafficInspectionGRPCStreamPath = "/grpcbin.GRPCBin/DummyServerStream"
+)
+
 func TestRealTrafficInspectionThroughDataPlane(t *testing.T) {
 	harness.RequireE2E(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
@@ -60,7 +70,7 @@ func TestRealTrafficInspectionThroughDataPlane(t *testing.T) {
 
 	transport := &http.Transport{DialContext: dialContext}
 	t.Cleanup(transport.CloseIdleConnections)
-	response, err := (&http.Client{Transport: transport}).Get("http://" + backends.httpAddress + "/get?mode=dataplane-e2e")
+	response, err := (&http.Client{Transport: transport}).Get("http://" + backends.httpAddress + trafficInspectionHTTPPath)
 	if err != nil {
 		t.Fatalf("call go-httpbin through Data Plane: %v", err)
 	}
@@ -77,22 +87,92 @@ func TestRealTrafficInspectionThroughDataPlane(t *testing.T) {
 		len(payload.Arguments["mode"]) != 1 || payload.Arguments["mode"][0] != "dataplane-e2e" {
 		t.Fatalf("unexpected go-httpbin response: status=%d payload=%#v", response.StatusCode, payload)
 	}
+	callSSEThroughDataPlane(t, transport, backends.httpAddress)
+	callWebSocketThroughDataPlane(t, transport, backends.httpAddress)
 
-	callGRPCBinThroughDataPlane(t, dialContext, backends.grpcH2CAddress, nil)
-	callGRPCBinThroughDataPlane(t, dialContext, backends.grpcTLSAddress, &tls.Config{
+	callGRPCBinThroughDataPlane(t, dialContext, backends.grpcH2CAddress, nil, trafficInspectionGRPCUnaryPath, 1)
+	callGRPCBinThroughDataPlane(t, dialContext, backends.grpcH2CAddress, nil, trafficInspectionGRPCStreamPath, 10)
+	grpcTLS := &tls.Config{
 		MinVersion: tls.VersionTLS12,
 		NextProtos: []string{"h2"},
 		// The NodePort CONNECT authority is an IP while grpcbin uses a logical
 		// SNI name. This client is scoped to verifying decryption and RAW GRPCS.
 		InsecureSkipVerify: true, //nolint:gosec
-	})
+	}
+	callGRPCBinThroughDataPlane(t, dialContext, backends.grpcTLSAddress, grpcTLS, trafficInspectionGRPCUnaryPath, 1)
+	callGRPCBinThroughDataPlane(t, dialContext, backends.grpcTLSAddress, grpcTLS, trafficInspectionGRPCStreamPath, 10)
 	waitForTrafficInspectionEvents(t, output, map[string]bool{
-		"http:request":   true,
-		"grpc:request":   true,
-		"grpc:response":  true,
-		"grpcs:request":  true,
-		"grpcs:response": true,
+		"http:request:request:" + trafficInspectionHTTPPath:        true,
+		"http:body:response:" + trafficInspectionSSEPath:           true,
+		"http:request:request:" + trafficInspectionWebSocketPath:   true,
+		"http:response:response:" + trafficInspectionWebSocketPath: true,
+		"grpc:body:request:" + trafficInspectionGRPCUnaryPath:      true,
+		"grpc:body:response:" + trafficInspectionGRPCUnaryPath:     true,
+		"grpc:body:request:" + trafficInspectionGRPCStreamPath:     true,
+		"grpc:body:response:" + trafficInspectionGRPCStreamPath:    true,
+		"grpcs:body:request:" + trafficInspectionGRPCUnaryPath:     true,
+		"grpcs:body:response:" + trafficInspectionGRPCUnaryPath:    true,
+		"grpcs:body:request:" + trafficInspectionGRPCStreamPath:    true,
+		"grpcs:body:response:" + trafficInspectionGRPCStreamPath:   true,
 	})
+}
+
+func callSSEThroughDataPlane(t *testing.T, transport *http.Transport, address string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	defer cancel()
+	request, err := http.NewRequestWithContext(
+		ctx, http.MethodGet, "http://"+address+trafficInspectionSSEPath, nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := (&http.Client{Transport: transport}).Do(request)
+	if err != nil {
+		t.Fatalf("call go-httpbin SSE through Data Plane: %v", err)
+	}
+	body, readErr := io.ReadAll(response.Body)
+	closeErr := response.Body.Close()
+	if readErr != nil || closeErr != nil {
+		t.Fatal(readErr, closeErr)
+	}
+	if response.StatusCode != http.StatusOK ||
+		!strings.HasPrefix(response.Header.Get("Content-Type"), "text/event-stream") ||
+		bytes.Count(body, []byte("event: ping\n")) != 2 ||
+		bytes.Count(body, []byte("data: ")) != 2 {
+		t.Fatalf("unexpected go-httpbin SSE response: status=%d content-type=%q body=%q",
+			response.StatusCode, response.Header.Get("Content-Type"), body)
+	}
+}
+
+func callWebSocketThroughDataPlane(t *testing.T, transport *http.Transport, address string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	defer cancel()
+	connection, response, err := websocket.Dial(
+		ctx,
+		"ws://"+address+trafficInspectionWebSocketPath,
+		&websocket.DialOptions{HTTPClient: &http.Client{Transport: transport}},
+	)
+	if err != nil {
+		t.Fatalf("connect go-httpbin WebSocket through Data Plane: %v", err)
+	}
+	defer connection.CloseNow()
+	if response == nil || response.StatusCode != http.StatusSwitchingProtocols {
+		t.Fatalf("unexpected go-httpbin WebSocket upgrade response: %#v", response)
+	}
+	payload := []byte("kubeloop-websocket-" + uuid.NewString())
+	if err := connection.Write(ctx, websocket.MessageText, payload); err != nil {
+		t.Fatalf("write go-httpbin WebSocket payload: %v", err)
+	}
+	messageType, echoed, err := connection.Read(ctx)
+	if err != nil {
+		t.Fatalf("read go-httpbin WebSocket payload: %v", err)
+	}
+	if messageType != websocket.MessageText || !bytes.Equal(echoed, payload) {
+		t.Fatalf("go-httpbin WebSocket echoed type=%v payload=%q, want type=%v payload=%q",
+			messageType, echoed, websocket.MessageText, payload)
+	}
 }
 
 func TestRealUnrecognizedTCPThroughDataPlane(t *testing.T) {
@@ -197,6 +277,8 @@ func callGRPCBinThroughDataPlane(
 	dialContext func(context.Context, string, string) (net.Conn, error),
 	address string,
 	clientTLS *tls.Config,
+	path string,
+	wantFrames int,
 ) {
 	t.Helper()
 	transport := &http2.Transport{
@@ -220,7 +302,7 @@ func callGRPCBinThroughDataPlane(
 		scheme = "https"
 	}
 	request, err := http.NewRequestWithContext(
-		t.Context(), http.MethodPost, scheme+"://"+address+"/grpcbin.GRPCBin/DummyUnary",
+		t.Context(), http.MethodPost, scheme+"://"+address+path,
 		bytes.NewReader([]byte{0, 0, 0, 0, 0}),
 	)
 	if err != nil {
@@ -237,9 +319,31 @@ func callGRPCBinThroughDataPlane(
 	if readErr != nil || closeErr != nil {
 		t.Fatal(readErr, closeErr)
 	}
-	if response.StatusCode != http.StatusOK || len(body) < 5 {
-		t.Fatalf("grpcbin %s response: status=%d body=%x trailers=%v", address, response.StatusCode, body, response.Trailer)
+	frames, frameErr := countGRPCFrames(body)
+	if response.StatusCode != http.StatusOK || response.Trailer.Get("Grpc-Status") != "0" ||
+		frameErr != nil || frames != wantFrames {
+		t.Fatalf("grpcbin %s%s response: status=%d frames=%d/%d frameErr=%v body=%x trailers=%v",
+			address, path, response.StatusCode, frames, wantFrames, frameErr, body, response.Trailer)
 	}
+}
+
+func countGRPCFrames(payload []byte) (int, error) {
+	frames := 0
+	for len(payload) > 0 {
+		if len(payload) < 5 {
+			return frames, io.ErrUnexpectedEOF
+		}
+		if payload[0] > 1 {
+			return frames, fmt.Errorf("invalid gRPC compressed flag %d", payload[0])
+		}
+		frameSize := int(binary.BigEndian.Uint32(payload[1:5]))
+		if frameSize > len(payload)-5 {
+			return frames, io.ErrUnexpectedEOF
+		}
+		payload = payload[5+frameSize:]
+		frames++
+	}
+	return frames, nil
 }
 
 func waitForTrafficInspectionEvents(t *testing.T, sink *trafficinspect.RingBufferSink, expected map[string]bool) {
@@ -254,9 +358,23 @@ func waitForTrafficInspectionEvents(t *testing.T, sink *trafficinspect.RingBuffe
 			if err != nil {
 				return false, err
 			}
-			key := string(event.Protocol) + ":" + event.Raw.Direction
-			if event.Raw.Format == "grpc" && (len(raw) < 5 || int(binary.BigEndian.Uint32(raw[1:5])) > len(raw)-5) {
-				t.Fatalf("invalid RAW gRPC frame for %s: %x", key, raw)
+			path := ""
+			if event.HTTP != nil {
+				path = event.HTTP.Path
+			}
+			key := string(event.Protocol) + ":" + string(event.Type) + ":" + event.Raw.Direction + ":" + path
+			if event.Raw.Format == "grpc" {
+				frames, err := countGRPCFrames(raw)
+				if err != nil {
+					t.Fatalf("invalid RAW gRPC frames for %s: %v payload=%x", key, err, raw)
+				}
+				wantFrames := 1
+				if path == trafficInspectionGRPCStreamPath && event.Raw.Direction == "response" {
+					wantFrames = 10
+				}
+				if frames != wantFrames {
+					t.Fatalf("RAW gRPC frame count for %s = %d, want %d", key, frames, wantFrames)
+				}
 			}
 			seen[key] = true
 		}
@@ -377,7 +495,7 @@ func installTrafficInspectionBackends(
 	}
 	grpcImage := strings.TrimSpace(os.Getenv("KUBELOOP_GRPCBIN_IMAGE"))
 	if grpcImage == "" {
-		grpcImage = "docker.io/moul/grpcbin:latest"
+		grpcImage = "docker.io/kong/grpcbin:latest"
 	}
 	httpService := installTrafficInspectionBackend(t, ctx, client, httpName, httpImage, nil, []corev1.ContainerPort{
 		{Name: "http", ContainerPort: 8080},

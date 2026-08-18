@@ -93,3 +93,24 @@ func TestEmitCapturedBodyKeepsRawGRPCFrames(t *testing.T) {
 		t.Fatalf("gRPC metadata = %#v", event.GRPC)
 	}
 }
+
+func TestWrapResponseBodyPreservesUpgradedConnection(t *testing.T) {
+	body := &testReadWriteCloser{}
+	response := &http.Response{
+		StatusCode: http.StatusSwitchingProtocols,
+		Body:       body,
+	}
+	wrapResponseBody(response, requestTrace{}, Config{Policy: CapturePolicy{CaptureBodies: true}})
+	if response.Body != body {
+		t.Fatalf("upgraded response body was wrapped as %T", response.Body)
+	}
+	if _, ok := response.Body.(io.Writer); !ok {
+		t.Fatalf("upgraded response body no longer implements io.Writer: %T", response.Body)
+	}
+}
+
+type testReadWriteCloser struct {
+	bytes.Buffer
+}
+
+func (*testReadWriteCloser) Close() error { return nil }
