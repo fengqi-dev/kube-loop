@@ -177,6 +177,11 @@ type Session struct {
 	Capabilities    *Capabilities    `json:"capabilities,omitempty"`
 }
 
+type SessionUpdate struct {
+	ProfileID string
+	Session   Session
+}
+
 type RelayTicket struct {
 	TokenType string    `json:"tokenType"`
 	Ticket    string    `json:"ticket"`

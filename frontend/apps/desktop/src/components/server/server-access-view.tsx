@@ -678,6 +678,7 @@ export function ServerAccessView({
 		try {
 			const info = await backend.startServerPreview({
 				profileId: profile.id,
+				namespace: inventory.namespace ?? "",
 				name: previewName.trim(),
 				targets: [{
 					servicePort,
@@ -1278,7 +1279,13 @@ export function ServerAccessView({
 					</div>
 					{inventory.capabilities.includes("services.preview") ? (
 					  <>
-						<div className="grid gap-2 md:grid-cols-[1fr_100px_110px_150px_110px_auto]">
+						<div className="grid gap-2 md:grid-cols-[140px_1fr_100px_110px_150px_110px_auto]">
+						  <Input
+							aria-label="Namespace"
+							value={inventory.namespace}
+							readOnly
+							disabled
+						  />
 						  <Input
 							placeholder="Service name"
 							value={previewName}

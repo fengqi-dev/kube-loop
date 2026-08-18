@@ -1032,6 +1032,7 @@ export namespace preview {
 	}
 	export class Request {
 	    profileId: string;
+	    namespace: string;
 	    name: string;
 	    targets: reverserelay.Target[];
 	
@@ -1042,6 +1043,7 @@ export namespace preview {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.profileId = source["profileId"];
+	        this.namespace = source["namespace"];
 	        this.name = source["name"];
 	        this.targets = this.convertValues(source["targets"], reverserelay.Target);
 	    }

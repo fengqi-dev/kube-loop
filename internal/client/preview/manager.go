@@ -32,6 +32,7 @@ type DialContextFunc = reverserelay.DialContextFunc
 
 type Request struct {
 	ProfileID string        `json:"profileId"`
+	Namespace string        `json:"namespace"`
 	Name      string        `json:"name"`
 	Targets   []LocalTarget `json:"targets"`
 }
@@ -93,6 +94,10 @@ func (manager *Manager) Start(
 ) (Info, error) {
 	if ctx == nil || strings.TrimSpace(request.ProfileID) != serverProfile.ID || session.State != "active" {
 		return Info{}, errors.New("active Server Profile Session is required")
+	}
+	request.Namespace = strings.TrimSpace(request.Namespace)
+	if request.Namespace == "" || request.Namespace != session.Namespace {
+		return Info{}, errors.New("Preview namespace must match the active Session namespace")
 	}
 	request.Name = strings.TrimSpace(request.Name)
 	targets, ports, err := normalizeTargets(request.Targets)

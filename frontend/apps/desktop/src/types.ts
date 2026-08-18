@@ -306,7 +306,7 @@ export interface DataPlaneStatusEvent {
   profileId: string;
   status: DataPlaneStatus;
   error?: string;
-  reason?: "transport_interrupted" | "authentication_required" | "access_denied" | "session_expired" | "session_changed" | "network_unavailable";
+  reason?: "transport_interrupted" | "network_spec_changed" | "authentication_required" | "access_denied" | "session_expired" | "session_changed" | "network_unavailable" | "system_resumed";
   retryable?: boolean;
 }
 
@@ -391,6 +391,7 @@ export interface ServerPreviewTarget {
 
 export interface ServerPreviewRequest {
   profileId: string;
+  namespace: string;
   name: string;
   targets: ServerPreviewTarget[];
 }
