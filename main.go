@@ -4,6 +4,7 @@ import (
 	"embed"
 	"log"
 	goruntime "runtime"
+	"strings"
 
 	desktopapp "github.com/fengqi-dev/kube-loop/internal/app"
 	"github.com/gogpu/systray"
@@ -53,7 +54,10 @@ func main() {
 			UniqueId: "dev.fengqi.kube-loop",
 			OnSecondInstanceLaunch: func(instance options.SecondInstanceData) {
 				for _, argument := range instance.Args {
-					if app.HandleAuthCallbackURL(argument) == nil {
+					if !strings.HasPrefix(strings.ToLower(argument), "kubeloop://") {
+						continue
+					}
+					if deliverAuthCallback(app, argument) {
 						break
 					}
 				}
@@ -62,7 +66,7 @@ func main() {
 		},
 		Mac: &macoptions.Options{
 			OnUrlOpen: func(rawURL string) {
-				_ = app.HandleAuthCallbackURL(rawURL)
+				deliverAuthCallback(app, rawURL)
 			},
 		},
 		AssetServer:      &assetserver.Options{Assets: assets},
@@ -76,6 +80,22 @@ func main() {
 		}
 		log.Fatal(err)
 	}
+}
+
+type authCallbackHandler interface {
+	HandleAuthCallbackURL(string) error
+}
+
+func deliverAuthCallback(handler authCallbackHandler, rawURL string) bool {
+	if handler == nil {
+		log.Print("OAuth callback rejected: callback handler is unavailable")
+		return false
+	}
+	if err := handler.HandleAuthCallbackURL(rawURL); err != nil {
+		log.Printf("OAuth callback rejected: %v", err)
+		return false
+	}
+	return true
 }
 
 func newSystemTray(app *desktopapp.App) *systray.SystemTray {
