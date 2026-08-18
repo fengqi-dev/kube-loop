@@ -124,22 +124,25 @@ export function ServerOverviewView({
     const mode = selectedMode;
     setPendingMode(mode);
     try {
+      if (mode === "tun" && !helperCurrent && !await installHelper()) return;
       await onConnect(mode);
     } finally {
       setPendingMode(undefined);
     }
   }
 
-  async function installHelper() {
+  async function installHelper(): Promise<boolean> {
     setHelperAction("install");
     try {
       await backend.installHelper();
       await refreshHelper();
       toast.success(t("settings.helperInstallOk"));
+      return true;
     } catch (reason) {
       toast.error(t("settings.helperInstallFailed"), {
         description: reason instanceof Error ? reason.message : String(reason),
       });
+      return false;
     } finally {
       setHelperAction(null);
     }
@@ -232,7 +235,7 @@ export function ServerOverviewView({
                 phase={phase}
                 busy={busy}
                 variant="toggle"
-                disabled={busy || Boolean(pendingMode) || !inventory.capabilities.includes("cluster.tunnel") || (!ready && selectedMode === "tun" && !helperCurrent)}
+                disabled={busy || Boolean(pendingMode) || helperAction !== null || !inventory.capabilities.includes("cluster.tunnel")}
                 ariaLabel={ready ? "Disconnect" : "Connect"}
                 onClick={() => ready ? onDisconnect() : void connectSelectedMode()}
               />

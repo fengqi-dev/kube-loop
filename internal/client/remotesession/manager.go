@@ -175,8 +175,24 @@ func (manager *Manager) IssueRelayTicket(
 }
 
 func (manager *Manager) RelayTicketSource(profileID string) func(context.Context) (remote.RelayTicket, error) {
+	manager.mu.Lock()
+	bound, ok := manager.active[profileID]
+	manager.mu.Unlock()
 	return func(ctx context.Context) (remote.RelayTicket, error) {
-		return manager.IssueRelayTicket(ctx, profileID)
+		manager.mu.Lock()
+		current, active := manager.active[profileID]
+		if !ok || !active || current.session.ID != bound.session.ID ||
+			current.session.Generation != bound.session.Generation {
+			manager.mu.Unlock()
+			return remote.RelayTicket{}, errors.New("remote Session generation changed")
+		}
+		if current.lastError != nil {
+			err := current.lastError
+			manager.mu.Unlock()
+			return remote.RelayTicket{}, err
+		}
+		manager.mu.Unlock()
+		return manager.gateway.IssueRelayTicket(ctx, current.profile, current.session)
 	}
 }
 

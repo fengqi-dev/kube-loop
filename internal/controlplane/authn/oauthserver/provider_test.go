@@ -8,10 +8,12 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"html"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -68,9 +70,18 @@ func TestDesktopAuthorizationCodeRequiresPKCES256RotatesRefreshAndRejectsReplay(
 	if err := endpoints.CompleteAuthorization(recorder, authorize, challenge.Transaction, challenge.CSRF, browserIdentity, true); err != nil {
 		t.Fatal(err)
 	}
-	redirect, err := url.Parse(recorder.Header().Get("Location"))
-	if err != nil || redirect.Scheme != "kubeloop" || redirect.Host != "auth" || redirect.Path != "/callback" || redirect.Query().Get("code") == "" {
-		t.Fatalf("authorize response status=%d location=%q", recorder.Code, recorder.Header().Get("Location"))
+	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), "Login complete / 登录完成") ||
+		recorder.Header().Get("Content-Security-Policy") == "" || recorder.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("authorize response status=%d headers=%v body=%q", recorder.Code, recorder.Header(), recorder.Body.String())
+	}
+	match := regexp.MustCompile(`href="(kubeloop:[^"]+)"`).FindStringSubmatch(recorder.Body.String())
+	if len(match) != 2 {
+		t.Fatalf("desktop callback link is missing: %q", recorder.Body.String())
+	}
+	redirect, err := url.Parse(html.UnescapeString(match[1]))
+	if err != nil || redirect.Scheme != "kubeloop" || redirect.Host != "auth" || redirect.Path != "/callback" ||
+		redirect.Query().Get("code") == "" || redirect.Query().Get("state") != strings.Repeat("s", 32) {
+		t.Fatalf("authorize callback = %q: %v", html.UnescapeString(match[1]), err)
 	}
 	code := redirect.Query().Get("code")
 	first := requestToken(endpoints, url.Values{"grant_type": {"authorization_code"}, "client_id": {controlstorage.DesktopOAuthClientID},

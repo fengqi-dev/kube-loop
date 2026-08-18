@@ -67,21 +67,36 @@ func (c *Client) roundTrip(ctx context.Context, request supervisorprotocol.Reque
 	}
 	if body != nil {
 		if _, err := io.Copy(connection, body); err != nil {
+			if response, responseErr := readSupervisorResponse(connection); responseErr == nil && !response.OK {
+				return response, supervisorResponseError(response)
+			}
 			return supervisorprotocol.Response{}, fmt.Errorf("write worker payload: %w", err)
 		}
 	}
 	if err := connection.CloseWrite(); err != nil {
 		return supervisorprotocol.Response{}, fmt.Errorf("finish supervisor request: %w", err)
 	}
-	var response supervisorprotocol.Response
-	if err := supervisorprotocol.ReadFrame(connection, &response, supervisorprotocol.MaxResponseBytes); err != nil {
+	response, err := readSupervisorResponse(connection)
+	if err != nil {
 		return supervisorprotocol.Response{}, fmt.Errorf("read supervisor response: %w", err)
 	}
+	return response, supervisorResponseError(response)
+}
+
+func readSupervisorResponse(connection io.Reader) (supervisorprotocol.Response, error) {
+	var response supervisorprotocol.Response
+	if err := supervisorprotocol.ReadFrame(connection, &response, supervisorprotocol.MaxResponseBytes); err != nil {
+		return supervisorprotocol.Response{}, err
+	}
+	return response, nil
+}
+
+func supervisorResponseError(response supervisorprotocol.Response) error {
 	if !response.OK {
 		if response.Error == "" {
 			response.Error = "supervisor request failed"
 		}
-		return response, fmt.Errorf("%s", response.Error)
+		return fmt.Errorf("%s", response.Error)
 	}
-	return response, nil
+	return nil
 }

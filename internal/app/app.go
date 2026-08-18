@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"log"
 	"net/http"
@@ -32,39 +33,50 @@ import (
 	clientremotesession "github.com/fengqi-dev/kube-loop/internal/client/remotesession"
 	"github.com/fengqi-dev/kube-loop/internal/helper"
 	"github.com/fengqi-dev/kube-loop/internal/mcp"
+	"github.com/fengqi-dev/kube-loop/internal/singbox/distribution"
 	"github.com/fengqi-dev/kube-loop/internal/supervisor"
+	"github.com/fengqi-dev/kube-loop/internal/trafficinspect"
 	"github.com/fengqi-dev/kube-loop/internal/update"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 type App struct {
-	ctx                   context.Context
-	profiles              *clientprofile.Store
-	discovery             *clientdiscovery.Client
-	auth                  *clientauth.Client
-	remote                *clientremote.Client
-	remoteSessions        *clientremotesession.Manager
-	dataPlanes            *clientdataplane.Manager
-	remoteExecs           *clientexec.Manager
-	remoteFiles           *clientfiletransfer.Manager
-	remoteSSH             *clientpodssh.Manager
-	remoteForwards        *clientportforward.Manager
-	remoteExchanges       *clientexchange.Manager
-	remoteMirrors         *clientmirror.Manager
-	remotePreviews        *clientpreview.Manager
-	credentials           credentials.Store
-	mcp                   *mcp.Controller
-	updater               *update.Checker
-	once                  sync.Once
-	updateMu              sync.RWMutex
-	updateCheck           sync.Mutex
-	updateState           update.Info
-	inventoryWatchMu      sync.Mutex
-	inventoryWatchProfile string
-	inventoryWatchCancel  context.CancelFunc
-	powerWatchCancel      context.CancelFunc
-	serverLoginMu         sync.Mutex
-	serverLogin           *serverLoginAttempt
+	ctx                       context.Context
+	profiles                  *clientprofile.Store
+	discovery                 *clientdiscovery.Client
+	auth                      *clientauth.Client
+	remote                    *clientremote.Client
+	remoteSessions            *clientremotesession.Manager
+	dataPlanes                *clientdataplane.Manager
+	remoteExecs               *clientexec.Manager
+	remoteFiles               *clientfiletransfer.Manager
+	remoteSSH                 *clientpodssh.Manager
+	remoteForwards            *clientportforward.Manager
+	remoteExchanges           *clientexchange.Manager
+	remoteMirrors             *clientmirror.Manager
+	remotePreviews            *clientpreview.Manager
+	credentials               credentials.Store
+	mcp                       *mcp.Controller
+	updater                   *update.Checker
+	once                      sync.Once
+	updateMu                  sync.RWMutex
+	updateCheck               sync.Mutex
+	updateState               update.Info
+	inventoryWatchMu          sync.Mutex
+	inventoryWatchProfile     string
+	inventoryWatchCancel      context.CancelFunc
+	powerWatchCancel          context.CancelFunc
+	serverLoginMu             sync.Mutex
+	serverLogin               *serverLoginAttempt
+	trafficInspectionOutput   io.Closer
+	trafficInspectionEvents   *trafficinspect.RingBufferSink
+	trafficInspectionSwitch   *trafficinspect.SwitchableSink
+	trafficInspectionSettings *trafficinspect.SettingsStore
+	trafficInspectionProtobuf *trafficinspect.ProtobufSchemaStore
+	trafficInspectionMu       sync.Mutex
+	trafficInspectionReady    func() bool
+	trafficInspectionCAPath   string
+	trafficInspectionTrust    trafficinspect.TrustStore
 }
 
 type serverLoginAttempt struct {
@@ -74,22 +86,88 @@ type serverLoginAttempt struct {
 type BootstrapData struct {
 	Update         update.Info         `json:"update"`
 	Platform       string              `json:"platform"`
+	CoreVersion    string              `json:"coreVersion"`
 	ServerProfiles clientprofile.State `json:"serverProfiles"`
 }
 
 type appDependencies struct {
-	profilePath     string
-	credentialStore credentials.Store
-	httpClient      *http.Client
+	profilePath             string
+	credentialStore         credentials.Store
+	httpClient              *http.Client
+	trafficInspection       clientdataplane.TrafficInspectionConfig
+	trafficInspectionEvents *trafficinspect.RingBufferSink
+	trafficInspectionSwitch *trafficinspect.SwitchableSink
 }
 
 // NewApp is the desktop composition root. It deliberately constructs no
 // kubeconfig or Kubernetes client: all cluster operations
 // are performed remotely through the configured Gateway service.
 func NewApp(version string, embeddedHelperFiles fs.FS) *App {
+	profilePath := strings.TrimSpace(os.Getenv("KUBELOOP_PROFILE_PATH"))
+	trafficInspection, trafficInspectionEvents, trafficInspectionSwitch := newTrafficInspection(profilePath)
 	return newApp(version, embeddedHelperFiles, appDependencies{
-		profilePath: strings.TrimSpace(os.Getenv("KUBELOOP_PROFILE_PATH")),
+		profilePath:             profilePath,
+		trafficInspection:       trafficInspection,
+		trafficInspectionEvents: trafficInspectionEvents,
+		trafficInspectionSwitch: trafficInspectionSwitch,
 	})
+}
+
+func newTrafficInspection(profilePath string) (
+	clientdataplane.TrafficInspectionConfig,
+	*trafficinspect.RingBufferSink,
+	*trafficinspect.SwitchableSink,
+) {
+	const enabled = true
+	config := clientdataplane.TrafficInspectionConfig{Enabled: enabled}
+	events, err := trafficinspect.NewRingBufferSink(2_000)
+	if err != nil {
+		log.Printf("traffic inspection events: %v", err)
+		return config, nil, nil
+	}
+	config.Policy = trafficinspect.CapturePolicy{CaptureBodies: true, MaxBodyBytes: 4 << 20}
+	config.Protobuf = trafficinspect.NewProtobufDecoder()
+	var sink trafficinspect.Sink = events
+	profilePath = strings.TrimSpace(profilePath)
+	if profilePath == "" {
+		profilePath, err = clientprofile.DefaultPath()
+		if err != nil {
+			log.Printf("traffic inspection output: resolve default file: %v", err)
+			return switchableTrafficInspection(config, events, sink, enabled)
+		}
+	}
+	path := filepath.Join(filepath.Dir(profilePath), "traffic-inspection.jsonl")
+	fileSink, err := trafficinspect.NewDailyJSONLFileSink(path)
+	if err != nil {
+		log.Printf("traffic inspection output: %v", err)
+		return switchableTrafficInspection(config, events, sink, enabled)
+	}
+	combined, err := trafficinspect.NewMultiSink(events, fileSink)
+	if err != nil {
+		log.Printf("traffic inspection output: %v", err)
+		return switchableTrafficInspection(config, events, events, enabled)
+	}
+	sink = combined
+	config.OnSinkError = func(err error) {
+		log.Printf("traffic inspection output: %v", err)
+	}
+	return switchableTrafficInspection(config, events, sink, enabled)
+}
+
+func switchableTrafficInspection(
+	config clientdataplane.TrafficInspectionConfig,
+	events *trafficinspect.RingBufferSink,
+	sink trafficinspect.Sink,
+	enabled bool,
+) (clientdataplane.TrafficInspectionConfig, *trafficinspect.RingBufferSink, *trafficinspect.SwitchableSink) {
+	switchable, err := trafficinspect.NewSwitchableSink(sink, enabled)
+	if err != nil {
+		log.Printf("traffic inspection switch: %v", err)
+		return config, events, nil
+	}
+	config.Sink = switchable
+	config.IsEnabled = switchable.Enabled
+	return config, events, switchable
 }
 
 func newApp(version string, embeddedHelperFiles fs.FS, dependencies appDependencies) *App {
@@ -115,20 +193,65 @@ func newApp(version string, embeddedHelperFiles fs.FS, dependencies appDependenc
 	if profilePath != "" {
 		transferStatePath = filepath.Join(filepath.Dir(profilePath), "transfers.json")
 	}
+	trafficInspectionSettingsPath := ""
+	if profilePath != "" {
+		trafficInspectionSettingsPath = filepath.Join(filepath.Dir(profilePath), "traffic-inspection.json")
+	}
+	trafficInspectionSettings, trafficInspectionSettingsErr := trafficinspect.NewSettingsStore(trafficInspectionSettingsPath)
+	if trafficInspectionSettingsErr == nil && dependencies.trafficInspectionSwitch != nil {
+		settings, loadErr := trafficInspectionSettings.Load(trafficinspect.Settings{
+			Enabled: dependencies.trafficInspection.Enabled,
+		})
+		if loadErr != nil {
+			trafficInspectionSettingsErr = loadErr
+		} else {
+			dependencies.trafficInspection.Enabled = settings.Enabled
+			dependencies.trafficInspectionSwitch.SetEnabled(settings.Enabled)
+		}
+	}
+	trafficInspectionProtobufPath := ""
+	if profilePath != "" {
+		trafficInspectionProtobufPath = filepath.Join(filepath.Dir(profilePath), "traffic-inspection-protobuf.json")
+	}
+	trafficInspectionProtobuf, trafficInspectionProtobufErr := trafficinspect.NewProtobufSchemaStore(
+		trafficInspectionProtobufPath,
+		dependencies.trafficInspection.Protobuf,
+	)
+	if trafficInspectionProtobufErr == nil {
+		trafficInspectionProtobufErr = trafficInspectionProtobuf.Load(context.Background())
+	}
 
 	credentialStore := dependencies.credentialStore
 	if credentialStore == nil {
 		credentialStore = credentials.NewSystemStore()
 	}
 	application := &App{
-		profiles:    profileStore,
-		discovery:   clientdiscovery.New(clientdiscovery.Config{ClientVersion: version, HTTPClient: dependencies.httpClient}),
-		credentials: credentialStore,
-		updater:     &update.Checker{CurrentVersion: version},
+		profiles:                  profileStore,
+		discovery:                 clientdiscovery.New(clientdiscovery.Config{ClientVersion: version, HTTPClient: dependencies.httpClient}),
+		credentials:               credentialStore,
+		updater:                   &update.Checker{CurrentVersion: version},
+		trafficInspectionEvents:   dependencies.trafficInspectionEvents,
+		trafficInspectionSwitch:   dependencies.trafficInspectionSwitch,
+		trafficInspectionSettings: trafficInspectionSettings,
+		trafficInspectionProtobuf: trafficInspectionProtobuf,
+		trafficInspectionCAPath:   dependencies.trafficInspection.AuthorityPath,
+		trafficInspectionTrust:    trafficinspect.NewSystemTrustStore(),
 		updateState: update.Info{
 			CurrentVersion: version,
 			URL:            "https://github.com/fengqi-dev/kube-loop/releases",
 		},
+	}
+	if trafficInspectionSettingsErr != nil {
+		application.appendLog("ERROR", "Traffic inspection settings unavailable: "+trafficInspectionSettingsErr.Error())
+	}
+	if trafficInspectionProtobufErr != nil {
+		application.appendLog("ERROR", "Traffic inspection protobuf schemas unavailable: "+trafficInspectionProtobufErr.Error())
+	}
+	application.trafficInspectionReady = func() bool {
+		return helper.GetStatus(application.context()).Running
+	}
+	if closer, ok := dependencies.trafficInspection.Sink.(io.Closer); ok {
+		application.trafficInspectionOutput = closer
 	}
 	if profileErr != nil {
 		application.appendLog("ERROR", "Server Profile store unavailable: "+profileErr.Error())
@@ -201,7 +324,11 @@ func newApp(version string, embeddedHelperFiles fs.FS, dependencies appDependenc
 	application.remoteSessions = remoteSessions
 	dataPlanes, dataPlaneErr := clientdataplane.NewManager(remoteSessions, clientdataplane.Config{
 		ClientVersion: version, TLSConfig: developmentTLSConfig,
-		TUNStarter: NewSingboxRuntime(application.appendLog),
+		TUNStarter: NewSingboxRuntime(
+			application.appendLog,
+			application.installTrafficInspectionTrust,
+		),
+		TrafficInspection: dependencies.trafficInspection,
 		OnStatus: func(event clientdataplane.StatusEvent) {
 			if application.ctx != nil {
 				runtime.EventsEmit(application.ctx, "dataplane:status", event)
@@ -398,6 +525,11 @@ func (a *App) shutdown(context.Context) {
 			log.Printf("remote session shutdown: %v", err)
 		}
 	}
+	if a.trafficInspectionOutput != nil {
+		if err := a.trafficInspectionOutput.Close(); err != nil {
+			log.Printf("traffic inspection output shutdown: %v", err)
+		}
+	}
 }
 
 func (a *App) context() context.Context {
@@ -417,6 +549,7 @@ func (a *App) Bootstrap() (BootstrapData, error) {
 	updateState := a.updateState
 	a.updateMu.RUnlock()
 	return BootstrapData{
-		Update: updateState, Platform: goruntime.GOOS, ServerProfiles: profiles,
+		Update: updateState, Platform: goruntime.GOOS,
+		CoreVersion: distribution.Version, ServerProfiles: profiles,
 	}, nil
 }

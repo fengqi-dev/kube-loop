@@ -2,6 +2,7 @@ package wssprotocol
 
 import (
 	"bytes"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -38,10 +39,8 @@ func TestHandshakeAdvertisesTunnelTrafficStreams(t *testing.T) {
 		"server": NewServerHello("2.4.0", Limits{}).Capabilities,
 	} {
 		t.Run(name, func(t *testing.T) {
-			for _, capability := range capabilities {
-				if capability == CapabilityTrafficWebSocket {
-					return
-				}
+			if slices.Contains(capabilities, CapabilityTrafficWebSocket) {
+				return
 			}
 			t.Fatal("traffic.websocket.v1 capability is missing")
 		})

@@ -56,3 +56,7 @@ func ElevateUninstall(ctx context.Context, source string) error {
 	}
 	return nil
 }
+
+func ElevateUninstallWithCertificate(ctx context.Context, source, _ string) error {
+	return ElevateUninstall(ctx, source)
+}

@@ -64,6 +64,10 @@ func ElevateUninstall(ctx context.Context, source string) error {
 	return runElevatedTool(ctx, source, "uninstall", elevatedRequest{})
 }
 
+func ElevateUninstallWithCertificate(ctx context.Context, source, _ string) error {
+	return ElevateUninstall(ctx, source)
+}
+
 func runElevatedTool(ctx context.Context, tool, operation string, request elevatedRequest) error {
 	lockedTool, toolHash, err := lockAndHashElevatedSource(tool)
 	if err != nil {

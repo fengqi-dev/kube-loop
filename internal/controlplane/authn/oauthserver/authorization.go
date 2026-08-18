@@ -8,7 +8,9 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"html"
 	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 	"time"
@@ -203,8 +205,82 @@ func (endpoints *Endpoints) completeStoredAuthorization(rw http.ResponseWriter, 
 		endpoints.provider.WriteAuthorizeError(request.Context(), rw, authorizeRequest, err)
 		return err
 	}
+	if writeDesktopAuthorizationComplete(rw, authorizeRequest, response) {
+		return nil
+	}
 	endpoints.provider.WriteAuthorizeResponse(request.Context(), rw, authorizeRequest, response)
 	return nil
+}
+
+// writeDesktopAuthorizationComplete keeps the browser on a useful completion
+// page while handing the authorization response to the registered desktop
+// protocol. A direct 303 to a custom protocol launches the app, but browsers
+// retain the preceding authorization form in the tab.
+func writeDesktopAuthorizationComplete(
+	rw http.ResponseWriter,
+	request fosite.AuthorizeRequester,
+	response fosite.AuthorizeResponder,
+) bool {
+	if request.GetClient().GetID() != controlstorage.DesktopOAuthClientID ||
+		request.GetResponseMode() != fosite.ResponseModeDefault && request.GetResponseMode() != fosite.ResponseModeQuery {
+		return false
+	}
+	redirect := request.GetRedirectURI()
+	if redirect == nil || redirect.String() != controlstorage.DesktopOAuthRedirectURI {
+		return false
+	}
+	callback := *redirect
+	query := cloneValues(callback.Query())
+	for key, values := range response.GetParameters() {
+		query[key] = append([]string(nil), values...)
+	}
+	callback.RawQuery = query.Encode()
+
+	header := rw.Header()
+	for key, values := range response.GetHeader() {
+		header[key] = append([]string(nil), values...)
+	}
+	header.Set("Cache-Control", "no-store")
+	header.Set("Pragma", "no-cache")
+	header.Set("Referrer-Policy", "no-referrer")
+	header.Set("X-Content-Type-Options", "nosniff")
+	header.Set("X-Frame-Options", "DENY")
+	header.Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; frame-ancestors 'none'; base-uri 'none'")
+	header.Set("Content-Type", "text/html; charset=utf-8")
+	rw.WriteHeader(http.StatusOK)
+
+	target := html.EscapeString(callback.String())
+	_, _ = rw.Write([]byte(`<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="refresh" content="0;url=` + target + `">
+  <title>Login complete · KubeLoop</title>
+  <link rel="stylesheet" href="/oauth2/ui/app.css">
+</head>
+<body>
+  <main>
+    <section class="card">
+      <header><div class="brand"><span>KL</span>KubeLoop</div></header>
+      <div class="icon">✓</div>
+      <h1>Login complete / 登录完成</h1>
+      <p>KubeLoop Desktop has received the authorization result. You may close this tab.</p>
+      <p>桌面应用已收到授权结果，现在可以关闭此页面。</p>
+      <a href="` + target + `">Return to KubeLoop / 返回 KubeLoop</a>
+    </section>
+  </main>
+</body>
+</html>`))
+	return true
+}
+
+func cloneValues(values url.Values) url.Values {
+	cloned := make(url.Values, len(values))
+	for key, items := range values {
+		cloned[key] = append([]string(nil), items...)
+	}
+	return cloned
 }
 
 func (endpoints *Endpoints) CancelAuthorization(rw http.ResponseWriter, request *http.Request, transaction, csrf string) error {
