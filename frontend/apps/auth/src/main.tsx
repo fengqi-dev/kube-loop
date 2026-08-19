@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { KeyRound, ShieldCheck } from "lucide-react";
 import { authenticationError } from "./auth-error";
@@ -16,6 +16,11 @@ function App() {
         ? "zh-CN"
         : "en-US",
   );
+  useEffect(() => {
+    localStorage.setItem("kubeloop.locale", locale);
+    document.documentElement.lang = locale;
+    document.cookie = `kubeloop.locale=${locale}; Path=/; Max-Age=31536000; SameSite=Lax`;
+  }, [locale]);
   const session = query.get("session") === "true",
     consent = query.get("consent") === "true",
     scopes = (query.get("scope") || "").split(/\s+/).filter(Boolean),
@@ -42,10 +47,7 @@ function App() {
           scope: "Requested permissions",
           risk: "Continue only if you trust this application.",
         };
-  const choose = (next: Locale) => {
-    localStorage.setItem("kubeloop.locale", next);
-    setLocale(next);
-  };
+  const choose = (next: Locale) => setLocale(next);
   const transaction = query.get("transaction") || "",
     csrf = query.get("csrf") || "";
   const errorMessage = authenticationError(locale, query.get("error"));
@@ -77,6 +79,7 @@ function App() {
           <input type="hidden" name="transaction" value={transaction} />
           <input type="hidden" name="csrf" value={csrf} />
           <input type="hidden" name="session" value={String(session)} />
+          <input type="hidden" name="locale" value={locale} />
           <input type="hidden" name="return_to" value={location.search} />
           {!session && (
             <>

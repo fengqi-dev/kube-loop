@@ -70,11 +70,16 @@ func TestDesktopAuthorizationCodeRequiresPKCES256RotatesRefreshAndRejectsReplay(
 	if err := endpoints.CompleteAuthorization(recorder, authorize, challenge.Transaction, challenge.CSRF, browserIdentity, true); err != nil {
 		t.Fatal(err)
 	}
-	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), "Login complete / 登录完成") ||
-		recorder.Header().Get("Content-Security-Policy") == "" || recorder.Header().Get("Cache-Control") != "no-store" {
+	body := recorder.Body.String()
+	policy := recorder.Header().Get("Content-Security-Policy")
+	if recorder.Code != http.StatusOK || !strings.Contains(body, ">Login complete</h1>") ||
+		strings.Contains(body, "登录完成") ||
+		!strings.Contains(body, `method="post" action="/oauth2/logout"`) ||
+		!strings.Contains(body, ">Log out</span>") || strings.Contains(body, "退出登录") ||
+		!strings.Contains(policy, "form-action 'self'") || recorder.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("authorize response status=%d headers=%v body=%q", recorder.Code, recorder.Header(), recorder.Body.String())
 	}
-	match := regexp.MustCompile(`href="(kubeloop:[^"]+)"`).FindStringSubmatch(recorder.Body.String())
+	match := regexp.MustCompile(`href="(kubeloop:[^"]+)"`).FindStringSubmatch(body)
 	if len(match) != 2 {
 		t.Fatalf("desktop callback link is missing: %q", recorder.Body.String())
 	}
