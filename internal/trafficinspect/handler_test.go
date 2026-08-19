@@ -337,51 +337,103 @@ func TestHandler_UnrecognizedProtocolsAreRelayedWithoutInspection(t *testing.T) 
 	}
 }
 
-func TestHandler_RejectsAuthorityChange(t *testing.T) {
-	ca := newTestCertificate(t, "KubeLoop POC CA", true)
-	routes := newRoutingDialer()
-	origin := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
-		response.WriteHeader(http.StatusNoContent)
-	}))
-	t.Cleanup(origin.Close)
-	routes.add("allowed.test:80", origin.Listener.Addr().String())
+func TestHandler_PinsAuthorityChangesToOriginalDestination(t *testing.T) {
+	tests := []struct {
+		name        string
+		target      string
+		requestURL  string
+		requestHost string
+		blockedDial string
+	}{
+		{
+			name:        "Kubernetes Service DNS",
+			target:      "10.96.12.34:80",
+			requestURL:  "http://my-service.default.svc/",
+			requestHost: "my-service.default.svc",
+			blockedDial: "my-service.default.svc:80",
+		},
+		{
+			name:        "local Port Forward",
+			target:      "gateway.internal:49000",
+			requestURL:  "http://127.0.0.1:60413/",
+			requestHost: "127.0.0.1:60413",
+			blockedDial: "127.0.0.1:60413",
+		},
+		{
+			name:        "untrusted Host change",
+			target:      "allowed.test:80",
+			requestURL:  "http://blocked.test/resource",
+			requestHost: "blocked.test",
+			blockedDial: "blocked.test:80",
+		},
+	}
 
-	handler := newTestHandler(t, ca, routes, nil)
-	client := newHTTPClient(t, handler, ca, "allowed.test:80", false)
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://blocked.test/resource", nil)
-	if err != nil {
-		t.Fatalf("create request: %v", err)
-	}
-	response, err := client.Do(request)
-	if err != nil {
-		t.Fatalf("perform request: %v", err)
-	}
-	if closeErr := response.Body.Close(); closeErr != nil {
-		t.Fatalf("close rejected response body: %v", closeErr)
-	}
-	if response.StatusCode != http.StatusMisdirectedRequest {
-		t.Fatalf("status = %d, want %d", response.StatusCode, http.StatusMisdirectedRequest)
-	}
-	if routes.count("blocked.test:80") != 0 {
-		t.Fatal("authority-changing request reached the injected dialer")
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ca := newTestCertificate(t, "KubeLoop POC CA", true)
+			routes := newRoutingDialer()
+			originRequests := make(chan *http.Request, 1)
+			origin := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+				originRequests <- request.Clone(request.Context())
+				response.WriteHeader(http.StatusNoContent)
+			}))
+			t.Cleanup(origin.Close)
+			routes.add(test.target, origin.Listener.Addr().String())
+
+			handler := newTestHandler(t, ca, routes, nil)
+			client := newHTTPClient(t, handler, ca, test.target, false)
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			request, err := http.NewRequestWithContext(ctx, http.MethodGet, test.requestURL, nil)
+			if err != nil {
+				t.Fatalf("create request: %v", err)
+			}
+			response, err := client.Do(request)
+			if err != nil {
+				t.Fatalf("perform request: %v", err)
+			}
+			if closeErr := response.Body.Close(); closeErr != nil {
+				t.Fatalf("close response body: %v", closeErr)
+			}
+			if response.StatusCode != http.StatusNoContent {
+				t.Fatalf("status = %d, want %d", response.StatusCode, http.StatusNoContent)
+			}
+			if routes.count(test.target) == 0 {
+				t.Fatalf("original destination %q was not dialed", test.target)
+			}
+			if routes.count(test.blockedDial) != 0 {
+				t.Fatalf("request authority %q reached the injected dialer", test.blockedDial)
+			}
+			select {
+			case originRequest := <-originRequests:
+				if originRequest.Host != test.requestHost {
+					t.Fatalf("upstream Host = %q, want %q", originRequest.Host, test.requestHost)
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatal("timed out waiting for upstream request")
+			}
+		})
 	}
 }
 
-func TestHandler_RewritesImplicitAuthorityToOriginalPort(t *testing.T) {
+func TestHandler_PreservesTLSAuthorityWhileDialingOriginalDestination(t *testing.T) {
 	ca := newTestCertificate(t, "KubeLoop POC CA", true)
 	routes := newRoutingDialer()
 	originRequests := make(chan *http.Request, 1)
+	serverNames := make(chan string, 1)
 	origin := httptest.NewTLSServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		originRequests <- request.Clone(request.Context())
 		response.WriteHeader(http.StatusNoContent)
 	}))
 	t.Cleanup(origin.Close)
-	routes.add("allowed.test:9001", origin.Listener.Addr().String())
+	origin.TLS.GetConfigForClient = func(hello *tls.ClientHelloInfo) (*tls.Config, error) {
+		serverNames <- hello.ServerName
+		return nil, nil
+	}
+	routes.add("10.96.12.34:9001", origin.Listener.Addr().String())
 
 	handler := newTestHandler(t, ca, routes, nil)
-	client := newHTTPClient(t, handler, ca, "allowed.test:9001", false)
+	client := newHTTPClient(t, handler, ca, "10.96.12.34:9001", false)
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://allowed.test/resource", nil)
@@ -398,16 +450,24 @@ func TestHandler_RewritesImplicitAuthorityToOriginalPort(t *testing.T) {
 	if response.StatusCode != http.StatusNoContent {
 		t.Fatalf("status = %d, want %d", response.StatusCode, http.StatusNoContent)
 	}
-	if routes.count("allowed.test:9001") == 0 {
-		t.Fatal("rewritten request did not use original port")
+	if routes.count("10.96.12.34:9001") == 0 {
+		t.Fatal("request did not use the original destination")
 	}
 	select {
 	case originRequest := <-originRequests:
-		if originRequest.Host != "allowed.test:9001" {
-			t.Fatalf("upstream authority = %q, want allowed.test:9001", originRequest.Host)
+		if originRequest.Host != "allowed.test" {
+			t.Fatalf("upstream authority = %q, want allowed.test", originRequest.Host)
 		}
 	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for rewritten upstream request")
+		t.Fatal("timed out waiting for upstream request")
+	}
+	select {
+	case serverName := <-serverNames:
+		if serverName != "allowed.test" {
+			t.Fatalf("upstream TLS ServerName = %q, want allowed.test", serverName)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for upstream TLS handshake")
 	}
 }
 
