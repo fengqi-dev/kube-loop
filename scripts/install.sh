@@ -106,24 +106,38 @@ install_deb() {
   out="${DEST}/${asset}"
   download_asset "${asset}" "${out}"
   echo "Installing ${out}..."
+  if ! command -v apt-get >/dev/null 2>&1; then
+    echo "apt-get is required to install ${asset} and resolve its dependencies" >&2
+    exit 1
+  fi
   if command -v sudo >/dev/null 2>&1 && [[ "$(id -u)" -ne 0 ]]; then
-    sudo dpkg -i "${out}"
+    sudo env DEBIAN_FRONTEND=noninteractive apt-get \
+      install --yes --no-install-recommends "${out}"
   else
-    dpkg -i "${out}"
+    env DEBIAN_FRONTEND=noninteractive apt-get \
+      install --yes --no-install-recommends "${out}"
   fi
   echo "Installed kubeloop from ${asset}"
 }
 
 install_rpm() {
-  local asset out
+  local asset out package_manager
   asset="$(require_asset "kubeloop-${ver}-linux-${arch}.rpm")"
   out="${DEST}/${asset}"
   download_asset "${asset}" "${out}"
   echo "Installing ${out}..."
-  if command -v sudo >/dev/null 2>&1 && [[ "$(id -u)" -ne 0 ]]; then
-    sudo rpm -Uvh "${out}"
+  if command -v dnf >/dev/null 2>&1; then
+    package_manager="dnf"
+  elif command -v yum >/dev/null 2>&1; then
+    package_manager="yum"
   else
-    rpm -Uvh "${out}"
+    echo "dnf or yum is required to install ${asset} and resolve its dependencies" >&2
+    exit 1
+  fi
+  if command -v sudo >/dev/null 2>&1 && [[ "$(id -u)" -ne 0 ]]; then
+    sudo "${package_manager}" install --assumeyes "${out}"
+  else
+    "${package_manager}" install --assumeyes "${out}"
   fi
   echo "Installed kubeloop from ${asset}"
 }
