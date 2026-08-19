@@ -1,9 +1,11 @@
 import { Fragment, useEffect, useState } from "react";
-import { ChevronDown, ChevronRight, FileSearch2 } from "lucide-react";
+import { ChevronDown, ChevronRight, Copy, FileSearch2 } from "lucide-react";
+import { toast } from "sonner";
 import { backend } from "@/backend";
 import { EmptyState } from "@/components/shared/empty-state";
 import { PageShell } from "@/components/shared/page-shell";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   Table,
@@ -15,7 +17,7 @@ import {
 } from "@/components/ui/table";
 import { useI18n } from "@/i18n";
 import type { TrafficInspectionEvent, TrafficInspectionRaw } from "@/types";
-import { groupTrafficInspectionEvents } from "./traffic-inspection-model";
+import { buildTrafficInspectionCommand, groupTrafficInspectionEvents } from "./traffic-inspection-model";
 
 const queryLimit = 200;
 
@@ -115,6 +117,7 @@ export function TrafficInspectionView() {
                     {isExpanded ? (
                       <TableRow className="hover:bg-transparent">
                         <TableCell colSpan={7} className="bg-muted/20 p-0">
+                          <CommandBlock events={exchange.events} />
                           <div className="grid gap-px bg-border lg:grid-cols-2">
                             <ExchangeSide
                               title={t("inspection.request")}
@@ -138,6 +141,35 @@ export function TrafficInspectionView() {
         </div>
       )}
     </PageShell>
+  );
+}
+
+function CommandBlock({ events }: { events: TrafficInspectionEvent[] }) {
+  const { t } = useI18n();
+  const command = buildTrafficInspectionCommand(events);
+  if (!command) return null;
+  const tool = command.startsWith("grpcurl ") ? "grpcurl" : "curl";
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(command!);
+      toast.success(t("inspection.commandCopied"));
+    } catch {
+      toast.error(t("inspection.commandCopyFailed"));
+    }
+  }
+
+  return (
+    <section className="border-b bg-card p-3">
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <h3 className="text-[10px] font-semibold tracking-wide text-muted-foreground uppercase">{tool}</h3>
+        <Button type="button" variant="outline" size="xs" onClick={() => void copy()}>
+          <Copy data-icon="inline-start" />
+          {t("inspection.copyCommand")}
+        </Button>
+      </div>
+      <pre className="max-h-[180px] overflow-auto whitespace-pre-wrap break-all font-mono text-[11px] leading-5">{command}</pre>
+    </section>
   );
 }
 
