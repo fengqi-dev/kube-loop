@@ -146,7 +146,7 @@ function App() {
   if (error) return (
     <div className="grid min-h-screen place-items-center bg-background px-8 text-center text-sm text-destructive">
       {error}
-      <div className="window-drag fixed inset-x-0 top-0 z-50 flex h-14 items-center justify-end px-3">
+      <div className="window-drag fixed inset-x-0 top-0 z-50 flex h-16 items-center justify-end px-3">
         <WindowControls />
       </div>
     </div>
@@ -154,7 +154,7 @@ function App() {
   if (!data || !profiles) return (
     <div className="grid min-h-screen place-items-center bg-background text-foreground">
       <Spinner />
-      <div className="window-drag fixed inset-x-0 top-0 z-50 flex h-14 items-center justify-end px-3">
+      <div className="window-drag fixed inset-x-0 top-0 z-50 flex h-16 items-center justify-end px-3">
         <WindowControls />
       </div>
     </div>
@@ -165,7 +165,7 @@ function App() {
       open={sidebarOpen}
       onOpenChange={setSidebarOpen}
       className="h-screen min-h-[580px] overflow-hidden bg-background text-foreground"
-      style={{ "--sidebar-width": "176px", "--sidebar-width-icon": "60px" } as CSSProperties}
+      style={{ "--sidebar-width": "180px", "--sidebar-width-icon": "56px" } as CSSProperties}
     >
       <AppSidebar
         view={view}

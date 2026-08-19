@@ -30,16 +30,16 @@ export function AppHeader({
     state === "collapsed" ? t("nav.expandSidebar") : t("nav.collapseSidebar");
 
   return (
-    <header className="window-drag flex h-14 shrink-0 items-center justify-between border-b border-border bg-background px-6">
-      <div className="flex min-w-0 items-center gap-3">
+    <header className="window-drag flex h-16 shrink-0 items-center justify-between border-b border-border/60 bg-background/80 px-6 backdrop-blur-md">
+      <div className="flex min-w-0 items-center gap-4">
         <SidebarTrigger
-          className="window-no-drag shrink-0 border border-border bg-background shadow-xs hover:bg-accent"
+          className="window-no-drag shrink-0 rounded-lg border border-border/60 bg-card/60 shadow-xs hover:bg-accent hover:border-border"
           aria-label={sidebarLabel}
           title={sidebarLabel}
         />
         <div className="min-w-0">
-          <h1 className="truncate text-sm font-semibold tracking-tight">{t(navKeys[view])}</h1>
-          <p className="mt-0.5 truncate text-[12px] text-muted-foreground">
+          <h1 className="truncate text-base font-semibold tracking-tight">{t(navKeys[view])}</h1>
+          <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
             {t(headerKeys[view])}
           </p>
         </div>
@@ -47,8 +47,9 @@ export function AppHeader({
       <div className="window-no-drag flex items-center gap-2">
         <Button
           type="button"
-          variant="outline"
+          variant="ghost"
           size="icon"
+          className="rounded-lg hover:bg-accent"
           aria-label={t("nav.settings")}
           onClick={onOpenSettings}
         >
