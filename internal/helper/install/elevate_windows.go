@@ -32,6 +32,7 @@ type elevatedRequest struct {
 	Version        string `json:"version,omitempty"`
 	HomeDir        string `json:"homeDir,omitempty"`
 	OwnerSID       string `json:"ownerSid,omitempty"`
+	CertificatePEM []byte `json:"certificatePem,omitempty"`
 }
 
 type elevatedResult struct {
@@ -44,19 +45,30 @@ func ElevateInstall(
 	uid int,
 	homeDir, singBoxPath string,
 ) error {
+	return elevateWindowsInstall(ctx, source, expectedSHA256, token, uid, homeDir, singBoxPath, nil)
+}
+
+func elevateWindowsInstall(
+	ctx context.Context,
+	source, expectedSHA256, token string,
+	uid int,
+	homeDir, singBoxPath string,
+	certificatePEM []byte,
+) error {
 	ownerSID, err := currentUserSID()
 	if err != nil {
 		return fmt.Errorf("find current Windows user SID: %w", err)
 	}
 	return runElevatedTool(ctx, source, "install", elevatedRequest{
-		ServiceSource: source,
-		ServiceSHA256: expectedSHA256,
-		SingBoxPath:   singBoxPath,
-		Token:         token,
-		UID:           uid,
-		Version:       helper.Version,
-		HomeDir:       homeDir,
-		OwnerSID:      ownerSID,
+		ServiceSource:  source,
+		ServiceSHA256:  expectedSHA256,
+		SingBoxPath:    singBoxPath,
+		Token:          token,
+		UID:            uid,
+		Version:        helper.Version,
+		HomeDir:        homeDir,
+		OwnerSID:       ownerSID,
+		CertificatePEM: certificatePEM,
 	})
 }
 
@@ -66,6 +78,16 @@ func ElevateUninstall(ctx context.Context, source string) error {
 
 func ElevateUninstallWithCertificate(ctx context.Context, source, _ string) error {
 	return ElevateUninstall(ctx, source)
+}
+
+// UninstallWindowsWithCertificate removes the service and optional system CA
+// through one elevated request, so Windows displays at most one UAC prompt.
+func UninstallWindowsWithCertificate(ctx context.Context, certificatePEM []byte) error {
+	source, err := LocateBundledHelper()
+	if err != nil {
+		return err
+	}
+	return runElevatedTool(ctx, source, "uninstall", elevatedRequest{CertificatePEM: certificatePEM})
 }
 
 func runElevatedTool(ctx context.Context, tool, operation string, request elevatedRequest) error {
