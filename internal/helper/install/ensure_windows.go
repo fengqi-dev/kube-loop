@@ -1,4 +1,4 @@
-//go:build !darwin && !linux && !windows
+//go:build windows
 
 package install
 
@@ -11,7 +11,9 @@ func installCurrentHelper(
 	source, sourceSHA256, token string,
 	uid int,
 	home, singBox string,
-	_ []byte,
+	certificatePEM []byte,
 ) error {
-	return ElevateInstall(ctx, source, sourceSHA256, token, uid, home, singBox)
+	return elevateWindowsInstall(
+		ctx, source, sourceSHA256, token, uid, home, singBox, certificatePEM,
+	)
 }
