@@ -189,47 +189,6 @@ jobs:
           path: dist/*
           if-no-files-found: error
 
-  gateway:
-    name: Gateway (linux/${{ matrix.arch }})
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        arch:
-          - amd64
-          - arm64
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v6
-
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: Build Gateway
-        shell: bash
-        env:
-          GOARCH: ${{ matrix.arch }}
-        run: |
-          mkdir -p dist
-          version="${GITHUB_REF_NAME#v}"
-          CGO_ENABLED=0 GOOS=linux go build \
-            -trimpath \
-            -ldflags="-s -w -X main.version=${GITHUB_REF_NAME}" \
-            -o "dist/kubeloop-gateway-${version}-linux-${GOARCH}" \
-            ./cmd/kubeloop-gateway
-
-      - name: Upload Gateway artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: gateway-linux-${{ matrix.arch }}
-          path: dist/*
-          if-no-files-found: error
-
   container-images:
     name: OCI / ${{ matrix.display-name }} image
     runs-on: ubuntu-24.04
@@ -330,7 +289,6 @@ jobs:
     name: Publish GitHub Release
     needs:
       - desktop
-      - gateway
       - helm-chart
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -346,19 +304,9 @@ jobs:
           path: dist
           merge-multiple: true
 
-      - name: Download gateway artifacts
-        uses: actions/download-artifact@v7
-        with:
-          pattern: gateway-*
-          path: dist
-          merge-multiple: true
-
       - name: Generate SHA-256 checksums
         shell: bash
         run: |
-          version="${GITHUB_REF_NAME#v}"
-          tar -C third_party/patches/sing-box -czf \
-            "dist/sing-box-kubeloop-${version}-patches.tar.gz" .
           cd dist
           # Prefer bare filenames (no "./" prefix) so consumers can match by asset name.
           sha256sum -- * > SHA256SUMS
