@@ -66,9 +66,9 @@ func EnsureCurrentInstall(ctx context.Context) error {
 }
 
 // EnsureCurrentInstallWithCertificate installs the exact bundled helper and,
-// when a full macOS privileged install is required, trusts certificatePEM in
-// the same administrator authorization. Other update paths leave certificate
-// installation to the caller.
+// when the platform needs a privileged install, trusts certificatePEM in the
+// same administrator authorization on macOS and Linux. Other update paths
+// leave certificate installation to the caller.
 func EnsureCurrentInstallWithCertificate(ctx context.Context, certificatePEM []byte) error {
 	return ensureInstall(ctx, true, certificatePEM)
 }
