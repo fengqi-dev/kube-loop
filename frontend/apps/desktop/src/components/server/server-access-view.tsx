@@ -767,16 +767,16 @@ export function ServerAccessView({
     const loadingEnvironment = Boolean(profile) && (Boolean(busy) || !error);
     return (
       <div className="mx-auto max-w-[1360px]">
-        <Card className="gap-0 border-dashed py-0 shadow-none">
-          <CardContent className="grid min-h-[360px] place-items-center p-6 text-center">
+        <Card className="gap-0 overflow-hidden border-border/60 py-0 shadow-sm">
+          <CardContent className="grid min-h-[360px] place-items-center p-8 text-center">
             <div className="max-w-sm">
-              <div className="mx-auto grid size-12 place-items-center rounded-md border bg-muted/40 text-muted-foreground">
-                {loadingEnvironment ? <Spinner className="size-5" /> : <Server size={20} strokeWidth={1.6} />}
+              <div className="mx-auto grid size-14 place-items-center rounded-2xl border border-border/40 bg-primary/5 text-primary ring-1 ring-primary/10">
+                {loadingEnvironment ? <Spinner className="size-6" /> : <Server size={22} strokeWidth={1.6} />}
               </div>
-              <h2 className="mt-4 text-sm font-medium">
+              <h2 className="mt-5 text-[15px] font-semibold tracking-tight">
                 {loadingEnvironment ? "Loading server environment" : "Server environment unavailable"}
               </h2>
-              <p className="mt-1.5 text-xs leading-5 text-muted-foreground">
+              <p className="mt-2 text-[13px] leading-5 text-muted-foreground">
                 {error || (profile
                   ? "Your sign-in is complete. KubeLoop is loading namespaces and the active Gateway session."
                   : "Your sign-in is complete, but no active Server is selected.")}
@@ -786,7 +786,7 @@ export function ServerAccessView({
                   type="button"
                   variant="outline"
                   size="sm"
-                  className="mt-4"
+                  className="mt-5 rounded-lg"
                   onClick={() => profile ? void loadInventory(profile.lastNamespace ?? "") : onNavigate?.("clusters")}
                 >
                   {profile ? <RefreshCw size={13} data-icon="inline-start" /> : <Server size={13} data-icon="inline-start" />}
@@ -803,17 +803,17 @@ export function ServerAccessView({
   if (!management && authenticated && inventory && profile && !inventory.namespace) {
     return (
       <div className="mx-auto max-w-[1360px]">
-        <Card className="gap-0 border-dashed py-0 shadow-none">
-          <CardContent className="grid min-h-[360px] place-items-center p-6 text-center">
+        <Card className="gap-0 overflow-hidden border-border/60 py-0 shadow-sm">
+          <CardContent className="grid min-h-[360px] place-items-center p-8 text-center">
             <div className="max-w-sm">
-              <div className="mx-auto grid size-12 place-items-center rounded-md border bg-muted/40 text-muted-foreground">
-                <Boxes size={20} strokeWidth={1.6} />
+              <div className="mx-auto grid size-14 place-items-center rounded-2xl border border-border/40 bg-primary/5 text-primary ring-1 ring-primary/10">
+                <Boxes size={22} strokeWidth={1.6} />
               </div>
-              <h2 className="mt-4 text-sm font-medium">Namespace unavailable</h2>
-              <p className="mt-1.5 text-xs leading-5 text-muted-foreground">
+              <h2 className="mt-5 text-[15px] font-semibold tracking-tight">Namespace unavailable</h2>
+              <p className="mt-2 text-[13px] leading-5 text-muted-foreground">
                 No namespace is available under the current Gateway policy. Refresh after access is granted or the namespace list finishes loading.
               </p>
-              <Button type="button" variant="outline" size="sm" className="mt-4" disabled={Boolean(busy)} onClick={() => void loadInventory()}>
+              <Button type="button" variant="outline" size="sm" className="mt-5 rounded-lg" disabled={Boolean(busy)} onClick={() => void loadInventory()}>
                 {busy ? <Spinner data-icon="inline-start" /> : <RefreshCw size={13} data-icon="inline-start" />}
                 Refresh namespaces
               </Button>
@@ -852,22 +852,22 @@ export function ServerAccessView({
   return (
     <main className="grid min-h-full content-start justify-items-center bg-background text-foreground">
       <div className={`w-full space-y-5 transition-[max-width] ${authenticated ? "max-w-5xl" : "max-w-xl"}`}>
-        <Card className="shadow-lg">
-          <CardHeader>
-            <CardTitle>{management ? "Servers" : authenticated ? "Server environment" : profile ? "Sign in to your Gateway" : "Connect to a Gateway"}</CardTitle>
-            <CardDescription>
+        <Card className="overflow-hidden border-border/60 shadow-lg">
+          <CardHeader className="gap-1.5 border-b border-border/40 bg-muted/20 px-6 py-5">
+            <CardTitle className="text-[16px] font-bold tracking-tight">{management ? "Servers" : authenticated ? "Server environment" : profile ? "Sign in to your Gateway" : "Connect to a Gateway"}</CardTitle>
+            <CardDescription className="text-[13px] leading-5">
               Enter the service address provided by your administrator. Kubernetes access and
               identity configuration stay in the Gateway.
             </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-5">
+          <CardContent className="space-y-5 p-6">
             {profileState.profiles.length > 0 ? (
               <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
                 <div className="space-y-2">
-                  <Label htmlFor="server-profile">Server</Label>
+                  <Label htmlFor="server-profile" className="text-[12px] font-medium">Server</Label>
                   <select
                     id="server-profile"
-                    className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
+                    className="h-9 w-full rounded-lg border border-input bg-transparent px-3 text-sm outline-none transition-colors focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
                     value={profile?.id ?? ""}
                     disabled={Boolean(busy)}
                     onChange={(event) => void selectProfile(event.target.value)}
@@ -878,14 +878,14 @@ export function ServerAccessView({
                     ))}
                   </select>
                 </div>
-                <Button type="button" variant="outline" className="self-end" disabled={Boolean(busy)} onClick={addServer}>
+                <Button type="button" variant="outline" className="self-end rounded-lg" disabled={Boolean(busy)} onClick={addServer}>
                   <Server size={15} /> Add server
                 </Button>
               </div>
             ) : null}
 
             <div className="space-y-2">
-              <Label htmlFor="gateway-address">Service address</Label>
+              <Label htmlFor="gateway-address" className="text-[12px] font-medium">Service address</Label>
               <div className="flex gap-2">
                 <Input
                   id="gateway-address"
@@ -904,6 +904,7 @@ export function ServerAccessView({
                 <Button
                   type="button"
                   variant={profile ? "outline" : "default"}
+                  className="rounded-lg"
                   disabled={Boolean(busy) || !address.trim()}
                   onClick={() => void discoverAndSave()}
                 >
@@ -911,33 +912,33 @@ export function ServerAccessView({
                   {profile ? "Retest" : "Connect"}
                 </Button>
               </div>
-              <p className="text-xs text-muted-foreground">
+              <p className="text-[12px] leading-5 text-muted-foreground">
                 Use http:// for an unencrypted connection or https:// to enable TLS certificate verification.
               </p>
             </div>
 
             {discovery ? (
-              <div className="rounded-lg border bg-muted/30 p-3 text-sm">
+              <div className="rounded-xl border border-border/60 bg-muted/20 p-4 text-sm">
                 <div className="flex items-center justify-between gap-3">
                   <div className="min-w-0">
-                    <div className="truncate font-medium">{profile?.displayName || discovery.serviceId}</div>
-                    <div className="truncate font-mono text-xs text-muted-foreground">
+                    <div className="truncate font-semibold">{profile?.displayName || discovery.serviceId}</div>
+                    <div className="truncate font-mono text-[11px] text-muted-foreground">
                       {discovery.publicUrl}
                     </div>
                   </div>
-                  <Badge variant="outline">v{discovery.serverVersion}</Badge>
+                  <Badge variant="outline" className="shrink-0">v{discovery.serverVersion}</Badge>
                 </div>
               </div>
             ) : null}
 
             {discovery && !authenticated ? (
-              <div className="space-y-4 border-t pt-5">
+              <div className="space-y-4 border-t border-border/40 pt-5">
                 {authMethods.length > 1 ? (
                   <div className="space-y-2">
-                    <Label htmlFor="auth-provider">Sign-in method</Label>
+                    <Label htmlFor="auth-provider" className="text-[12px] font-medium">Sign-in method</Label>
                     <select
                       id="auth-provider"
-                      className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
+                      className="h-9 w-full rounded-lg border border-input bg-transparent px-3 text-sm outline-none transition-colors focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
                       value={providerId}
                       disabled={Boolean(busy)}
                       onChange={(event) => setProviderId(event.target.value)}
@@ -952,7 +953,7 @@ export function ServerAccessView({
                 ) : null}
 
                 {authMethods.length === 0 ? (
-                  <p className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+                  <p className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
                     This Gateway has no login method configured.
                   </p>
                 ) : (
@@ -960,7 +961,7 @@ export function ServerAccessView({
                     <Button
                       type="button"
                       variant="outline"
-                      className="w-full"
+                      className="w-full rounded-lg"
                       disabled={loginCancelBusy}
                       onClick={() => void cancelLogin()}
                     >
@@ -970,7 +971,7 @@ export function ServerAccessView({
                   ) : (
                     <Button
                       type="button"
-                      className="w-full"
+                      className="w-full rounded-lg"
                       disabled={Boolean(busy) || !selectedProvider}
                       onClick={() => void login()}
                     >
@@ -987,11 +988,11 @@ export function ServerAccessView({
             ) : null}
 
             {authenticated ? (
-              <div className="flex items-start gap-3 rounded-lg border border-success/30 bg-success/5 p-4">
+              <div className="flex items-start gap-3 rounded-xl border border-success/30 bg-success/5 p-4">
                 <ShieldCheck className="mt-0.5 text-success" size={20} />
                 <div>
-                  <div className="font-medium text-success">Signed in securely</div>
-                  <div className="mt-1 text-xs text-muted-foreground">
+                  <div className="font-semibold text-success">Signed in securely</div>
+                  <div className="mt-1 text-[12px] leading-5 text-muted-foreground">
                     Tokens are stored in the operating system credential vault. Kubernetes data is
                     read through the Gateway; this device does not use kubeconfig.
                   </div>
@@ -1000,13 +1001,13 @@ export function ServerAccessView({
             ) : null}
 
             {!management && authenticated && inventory ? (
-              <div className="space-y-4 border-t pt-5">
+              <div className="space-y-4 border-t border-border/40 pt-5">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
                   <div className="grid flex-1 gap-2 sm:max-w-xs">
-                    <Label htmlFor="remote-namespace">Namespace</Label>
+                    <Label htmlFor="remote-namespace" className="text-[12px] font-medium">Namespace</Label>
                     <select
                       id="remote-namespace"
-                      className="h-9 rounded-md border border-input bg-transparent px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
+                      className="h-9 rounded-lg border border-input bg-transparent px-3 text-sm outline-none transition-colors focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
                       value={inventory.namespace ?? ""}
                       disabled={Boolean(busy)}
                       onChange={(event) => void loadInventory(event.target.value)}
@@ -1017,8 +1018,8 @@ export function ServerAccessView({
                     </select>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
-                    <Badge variant="outline"><Server size={12} />{profile?.displayName || discovery?.serviceId}</Badge>
-                    <Badge variant="outline"><UserRound size={12} />{auth.userName || "Authenticated user"}</Badge>
+                    <Badge variant="outline" className="gap-1"><Server size={12} />{profile?.displayName || discovery?.serviceId}</Badge>
+                    <Badge variant="outline" className="gap-1"><UserRound size={12} />{auth.userName || "Authenticated user"}</Badge>
                     <Badge variant="outline">Kubernetes {inventory.kubernetesVersion}</Badge>
                     {inventory.gatewayVersion ? <Badge variant="outline">Gateway {inventory.gatewayVersion}</Badge> : null}
                     {inventory.session ? <Badge variant="outline">Session {inventory.session.state}</Badge> : null}
@@ -1029,7 +1030,7 @@ export function ServerAccessView({
                           : inventory.dataPlane.state}
                       </Badge>
                     ) : null}
-                    <Button type="button" variant="outline" size="sm" disabled={Boolean(busy)} onClick={() => void loadInventory()}>
+                    <Button type="button" variant="outline" size="sm" className="rounded-lg" disabled={Boolean(busy)} onClick={() => void loadInventory()}>
                       {busy === "inventory" ? <Spinner data-icon="inline-start" /> : <RefreshCw size={14} />}
                       Refresh
                     </Button>
@@ -1037,9 +1038,9 @@ export function ServerAccessView({
                 </div>
 
                 {inventory.network?.issues?.some((issue) => issue.severity === "warning") ? (
-                  <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm">
+                  <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm">
                     <div className="font-medium text-destructive">Local network conflict detected</div>
-                    <div className="mt-1 text-xs text-muted-foreground">
+                    <div className="mt-1 text-[12px] text-muted-foreground">
                       {inventory.network.issues
                         .filter((issue) => issue.severity === "warning")
                         .map((issue) => issue.message)
@@ -1049,50 +1050,50 @@ export function ServerAccessView({
                 ) : null}
 
                 {inventory.dataPlane?.state === "reconnecting" ? (
-                  <div className="flex items-start gap-3 rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-sm">
+                  <div className="flex items-start gap-3 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-sm">
                     <RefreshCw className="mt-0.5 animate-spin text-amber-600" size={17} />
                     <div>
                       <div className="font-medium">Data Plane connection interrupted</div>
-                      <div className="mt-1 text-xs text-muted-foreground">
+                      <div className="mt-1 text-[12px] text-muted-foreground">
                         Cluster traffic is paused while KubeLoop obtains a fresh Session generation and RelayTicket.
                       </div>
                     </div>
                   </div>
                 ) : inventory.dataPlane?.state === "error" ? (
-                  <div role="alert" className="space-y-3 rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm">
+                  <div role="alert" className="space-y-3 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm">
                     <div>
                       <div className="font-medium text-destructive">{dataPlaneFailureTitle(dataPlaneReason)}</div>
-                      <div className="mt-1 break-words text-xs text-muted-foreground">
+                      <div className="mt-1 break-words text-[12px] text-muted-foreground">
                         {dataPlaneError || "The connection could not be restored after bounded retries."}
                       </div>
                     </div>
                     <div className="flex flex-wrap gap-2">
                       {dataPlaneRetryable ? (
-                        <Button type="button" size="sm" disabled={Boolean(busy)} onClick={() => void loadInventory()}>
+                        <Button type="button" size="sm" className="rounded-lg" disabled={Boolean(busy)} onClick={() => void loadInventory()}>
                           {busy === "inventory" ? <Spinner data-icon="inline-start" /> : <RefreshCw size={14} />}
                           {dataPlaneRetryLabel(dataPlaneReason)}
                         </Button>
                       ) : null}
                       {dataPlaneReason === "authentication_required" || dataPlaneReason === "access_denied" ? (
-                        <Button type="button" variant={dataPlaneRetryable ? "outline" : "default"} size="sm" disabled={Boolean(busy)} onClick={() => void logout()}>
+                        <Button type="button" variant={dataPlaneRetryable ? "outline" : "default"} size="sm" className="rounded-lg" disabled={Boolean(busy)} onClick={() => void logout()}>
                           {dataPlaneReason === "access_denied" ? "Use another account" : "Sign in again"}
                         </Button>
                       ) : null}
                     </div>
                   </div>
                 ) : inventory.dataPlane ? (
-                  <div className="flex items-center justify-between gap-3 rounded-md border bg-muted/30 p-3 text-sm">
+                  <div className="flex items-center justify-between gap-3 rounded-lg border border-border/60 bg-muted/20 p-3 text-sm">
                     <div>
                       <div className="font-medium">
                         {inventory.dataPlane.mode === "tun" ? "System TUN is connected" : "Remote cluster proxy is ready"}
                       </div>
-                      <div className="mt-1 text-xs text-muted-foreground">
+                      <div className="mt-1 text-[12px] text-muted-foreground">
                         RelayTicket-bound WSS transport · local SOCKS5 endpoint
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
-                      <code className="rounded bg-background px-2 py-1 text-xs">{inventory.dataPlane.socksAddress}</code>
-                      <Button type="button" variant={inventory.dataPlane.state === "connected" ? "outline" : "default"} size="sm" disabled={Boolean(busy)} onClick={() => inventory.dataPlane?.state === "connected" ? void disconnectDataPlane() : void connectDataPlane("tun")}>
+                      <code className="rounded bg-background px-2 py-1 text-[11px]">{inventory.dataPlane.socksAddress}</code>
+                      <Button type="button" variant={inventory.dataPlane.state === "connected" ? "outline" : "default"} size="sm" className="rounded-lg" disabled={Boolean(busy)} onClick={() => inventory.dataPlane?.state === "connected" ? void disconnectDataPlane() : void connectDataPlane("tun")}>
                         {busy === "tunnel" ? <Spinner data-icon="inline-start" /> : <Network size={14} />}
                         {inventory.dataPlane.state === "connected" ? "Disconnect" : "Connect"}
                       </Button>
@@ -1101,31 +1102,31 @@ export function ServerAccessView({
                 ) : null}
 
 				{inventory.dataPlane?.state === "connected" && inventory.capabilities.includes("ports.forward") ? (
-				  <div className="space-y-3 rounded-md border bg-muted/20 p-4">
-					<div>
-					  <div className="font-medium">Port Forward</div>
-					  <div className="mt-1 text-xs text-muted-foreground">
-						The Gateway resolves the Kubernetes resource; this device opens only a loopback listener.
-					  </div>
-					</div>
-					<div className="grid gap-2 md:grid-cols-[120px_1fr_110px_110px_auto]">
-					  <select
-						className="h-9 rounded-md border border-input bg-background px-3 text-sm"
-						value={forwardKind}
-						disabled={Boolean(busy)}
-						onChange={(event) => {
-						  setForwardKind(event.target.value as "pod" | "service");
-						  setForwardName("");
-						  setForwardRemotePort("");
-						}}
-					  >
+					  <div className="space-y-3 rounded-xl border border-border/60 bg-muted/20 p-4">
+						<div>
+						  <div className="font-medium">Port Forward</div>
+						  <div className="mt-1 text-[12px] text-muted-foreground">
+							The Gateway resolves the Kubernetes resource; this device opens only a loopback listener.
+						  </div>
+						</div>
+						<div className="grid gap-2 md:grid-cols-[120px_1fr_110px_110px_auto]">
+						  <select
+							className="h-9 rounded-lg border border-input bg-background px-3 text-sm"
+							value={forwardKind}
+							disabled={Boolean(busy)}
+							onChange={(event) => {
+							  setForwardKind(event.target.value as "pod" | "service");
+							  setForwardName("");
+							  setForwardRemotePort("");
+							}}
+						  >
 						<option value="service">Service</option>
 						<option value="pod">Pod</option>
 					  </select>
 					  <select
-						className="h-9 min-w-0 rounded-md border border-input bg-background px-3 text-sm"
-						value={forwardName}
-						disabled={Boolean(busy)}
+							className="h-9 min-w-0 rounded-lg border border-input bg-background px-3 text-sm"
+							value={forwardName}
+							disabled={Boolean(busy)}
 						onChange={(event) => {
 						  const name = event.target.value;
 						  setForwardName(name);
@@ -1156,25 +1157,25 @@ export function ServerAccessView({
 						disabled={Boolean(busy)}
 						onChange={(event) => setForwardLocalPort(event.target.value)}
 					  />
-					  <Button type="button" size="sm" disabled={Boolean(busy) || !forwardName || !forwardRemotePort} onClick={() => void startPortForward()}>
-						{busy === "port-forward" ? <Spinner data-icon="inline-start" /> : <Network size={14} />}
-						Forward
-					  </Button>
+					  <Button type="button" size="sm" className="rounded-lg" disabled={Boolean(busy) || !forwardName || !forwardRemotePort} onClick={() => void startPortForward()}>
+							{busy === "port-forward" ? <Spinner data-icon="inline-start" /> : <Network size={14} />}
+							Forward
+						  </Button>
 					</div>
 				  </div>
 				) : null}
 
 				{profile && inventory.session ? (
-				  <div className="space-y-3 rounded-md border bg-muted/20 p-4">
-					<div>
-					  <div className="font-medium">Preview</div>
-					  <div className="mt-1 text-xs text-muted-foreground">
-						The Gateway creates a temporary owner-bound Service and routes it through the authenticated reverse stream to this device.
-					  </div>
-					</div>
-					{inventory.capabilities.includes("services.preview") ? (
-					  <>
-						<div className="grid gap-2 md:grid-cols-[140px_1fr_100px_110px_150px_110px_auto]">
+					  <div className="space-y-3 rounded-xl border border-border/60 bg-muted/20 p-4">
+						<div>
+						  <div className="font-medium">Preview</div>
+						  <div className="mt-1 text-[12px] text-muted-foreground">
+							The Gateway creates a temporary owner-bound Service and routes it through the authenticated reverse stream to this device.
+						  </div>
+						</div>
+						{inventory.capabilities.includes("services.preview") ? (
+						  <>
+							<div className="grid gap-2 md:grid-cols-[140px_1fr_100px_110px_150px_110px_auto]">
 						  <Input
 							aria-label="Namespace"
 							value={inventory.namespace}
@@ -1188,11 +1189,11 @@ export function ServerAccessView({
 							onChange={(event) => setPreviewName(event.target.value)}
 						  />
 						  <select
-							className="h-9 rounded-md border border-input bg-background px-3 text-sm"
-							value={previewProtocol}
-							disabled={Boolean(busy)}
-							onChange={(event) => setPreviewProtocol(event.target.value === "udp" ? "udp" : "tcp")}
-						  >
+								className="h-9 rounded-lg border border-input bg-background px-3 text-sm"
+								value={previewProtocol}
+								disabled={Boolean(busy)}
+								onChange={(event) => setPreviewProtocol(event.target.value === "udp" ? "udp" : "tcp")}
+							  >
 							<option value="tcp">TCP</option>
 							<option value="udp">UDP</option>
 						  </select>
@@ -1225,10 +1226,10 @@ export function ServerAccessView({
 							disabled={Boolean(busy)}
 							onChange={(event) => setPreviewLocalPort(event.target.value)}
 						  />
-						  <Button type="button" size="sm" disabled={Boolean(busy) || !previewName || !previewServicePort || !previewLocalPort} onClick={() => void startPreview()}>
-							{busy === "preview" ? <Spinner data-icon="inline-start" /> : <Globe2 size={14} />}
-							Preview
-						  </Button>
+						  <Button type="button" size="sm" className="rounded-lg" disabled={Boolean(busy) || !previewName || !previewServicePort || !previewLocalPort} onClick={() => void startPreview()}>
+								{busy === "preview" ? <Spinner data-icon="inline-start" /> : <Globe2 size={14} />}
+								Preview
+							  </Button>
 						</div>
 					  </>
 					) : (
@@ -1238,19 +1239,19 @@ export function ServerAccessView({
 				) : null}
 
 				{profile && inventory.session ? (
-				  <div className="space-y-3 rounded-md border bg-muted/20 p-4">
-					<div>
-					  <div className="font-medium">Exchange</div>
-					  <div className="mt-1 text-xs text-muted-foreground">
-						The Gateway redirects the selected Service port through a Session-bound reverse stream to the local target retained on this device.
-					  </div>
-					</div>
-					{inventory.capabilities.includes("services.exchange") ? (
-					  <>
-						<div className="grid gap-2 md:grid-cols-[1fr_150px_150px_110px_auto]">
-						  <select
-							className="h-9 min-w-0 rounded-md border border-input bg-background px-3 text-sm"
-							value={exchangeService}
+					  <div className="space-y-3 rounded-xl border border-border/60 bg-muted/20 p-4">
+						<div>
+						  <div className="font-medium">Exchange</div>
+						  <div className="mt-1 text-[12px] text-muted-foreground">
+							The Gateway redirects the selected Service port through a Session-bound reverse stream to the local target retained on this device.
+						  </div>
+						</div>
+						{inventory.capabilities.includes("services.exchange") ? (
+						  <>
+							<div className="grid gap-2 md:grid-cols-[1fr_150px_150px_110px_auto]">
+							  <select
+								className="h-9 min-w-0 rounded-lg border border-input bg-background px-3 text-sm"
+								value={exchangeService}
 							disabled={Boolean(busy)}
 							onChange={(event) => {
 							  const name = event.target.value;
@@ -1267,9 +1268,9 @@ export function ServerAccessView({
 							  .map((service) => <option key={service.name} value={service.name}>{service.name}</option>)}
 						  </select>
 						  <select
-							className="h-9 rounded-md border border-input bg-background px-3 text-sm"
-							value={exchangePort}
-							disabled={Boolean(busy) || !selectedExchangeService}
+								className="h-9 rounded-lg border border-input bg-background px-3 text-sm"
+								value={exchangePort}
+								disabled={Boolean(busy) || !selectedExchangeService}
 							onChange={(event) => {
 							  setExchangePort(event.target.value);
 							  setExchangeLocalPort(event.target.value.split("/")[1] ?? "");
@@ -1297,10 +1298,10 @@ export function ServerAccessView({
 							disabled={Boolean(busy)}
 							onChange={(event) => setExchangeLocalPort(event.target.value)}
 						  />
-						  <Button type="button" size="sm" disabled={Boolean(busy) || !selectedExchangePort || !exchangeLocalPort} onClick={() => void startExchange()}>
-							{busy === "exchange" ? <Spinner data-icon="inline-start" /> : <ArrowRightLeft size={14} />}
-							Exchange
-						  </Button>
+						  <Button type="button" size="sm" className="rounded-lg" disabled={Boolean(busy) || !selectedExchangePort || !exchangeLocalPort} onClick={() => void startExchange()}>
+								{busy === "exchange" ? <Spinner data-icon="inline-start" /> : <ArrowRightLeft size={14} />}
+								Exchange
+							  </Button>
 						</div>
 					  </>
 					) : (
@@ -1310,19 +1311,19 @@ export function ServerAccessView({
 				) : null}
 
 				{profile && inventory.session ? (
-				  <div className="space-y-3 rounded-md border bg-muted/20 p-4">
-					<div>
-					  <div className="font-medium">Mirror</div>
-					  <div className="mt-1 text-xs text-muted-foreground">
-						The Gateway keeps the original Service response path active and sends best-effort request copies to the local target. Local responses are discarded.
-					  </div>
-					</div>
-					{inventory.capabilities.includes("services.mirror") ? (
-					  <>
-						<div className="grid gap-2 md:grid-cols-[1fr_150px_150px_110px_auto]">
-						  <select
-							className="h-9 min-w-0 rounded-md border border-input bg-background px-3 text-sm"
-							value={mirrorService}
+					  <div className="space-y-3 rounded-xl border border-border/60 bg-muted/20 p-4">
+						<div>
+						  <div className="font-medium">Mirror</div>
+						  <div className="mt-1 text-[12px] text-muted-foreground">
+							The Gateway keeps the original Service response path active and sends best-effort request copies to the local target. Local responses are discarded.
+						  </div>
+						</div>
+						{inventory.capabilities.includes("services.mirror") ? (
+						  <>
+							<div className="grid gap-2 md:grid-cols-[1fr_150px_150px_110px_auto]">
+							  <select
+								className="h-9 min-w-0 rounded-lg border border-input bg-background px-3 text-sm"
+								value={mirrorService}
 							disabled={Boolean(busy)}
 							onChange={(event) => {
 							  const name = event.target.value;
@@ -1339,9 +1340,9 @@ export function ServerAccessView({
 							  .map((service) => <option key={service.name} value={service.name}>{service.name}</option>)}
 						  </select>
 						  <select
-							className="h-9 rounded-md border border-input bg-background px-3 text-sm"
-							value={mirrorPort}
-							disabled={Boolean(busy) || !selectedMirrorService}
+								className="h-9 rounded-lg border border-input bg-background px-3 text-sm"
+								value={mirrorPort}
+								disabled={Boolean(busy) || !selectedMirrorService}
 							onChange={(event) => {
 							  setMirrorPort(event.target.value);
 							  setMirrorLocalPort(event.target.value.split("/")[1] ?? "");
@@ -1369,10 +1370,10 @@ export function ServerAccessView({
 							disabled={Boolean(busy)}
 							onChange={(event) => setMirrorLocalPort(event.target.value)}
 						  />
-						  <Button type="button" size="sm" disabled={Boolean(busy) || !selectedMirrorPort || !mirrorLocalPort} onClick={() => void startMirror()}>
-							{busy === "mirror" ? <Spinner data-icon="inline-start" /> : <Copy size={14} />}
-							Mirror
-						  </Button>
+						  <Button type="button" size="sm" className="rounded-lg" disabled={Boolean(busy) || !selectedMirrorPort || !mirrorLocalPort} onClick={() => void startMirror()}>
+								{busy === "mirror" ? <Spinner data-icon="inline-start" /> : <Copy size={14} />}
+								Mirror
+							  </Button>
 						</div>
 					  </>
 					) : (
@@ -1382,19 +1383,19 @@ export function ServerAccessView({
 				) : null}
 
 				{profile && inventory.session ? (
-				  <div className="space-y-3 rounded-md border bg-muted/20 p-4">
-					<div>
-					  <div className="font-medium">Pod SSH</div>
-					  <div className="mt-1 text-xs text-muted-foreground">
-						A public-key-only SSH endpoint listens on this device. Every command is executed through the authenticated Gateway Session.
-					  </div>
-					</div>
-					{inventory.capabilities.includes("pods.exec") ? (
-					  <>
-						<div className="grid gap-2 md:grid-cols-[1fr_1fr_auto]">
-						  <select
-							className="h-9 min-w-0 rounded-md border border-input bg-background px-3 text-sm"
-							value={sshPod}
+					  <div className="space-y-3 rounded-xl border border-border/60 bg-muted/20 p-4">
+						<div>
+						  <div className="font-medium">Pod SSH</div>
+						  <div className="mt-1 text-[12px] text-muted-foreground">
+							A public-key-only SSH endpoint listens on this device. Every command is executed through the authenticated Gateway Session.
+						  </div>
+						</div>
+						{inventory.capabilities.includes("pods.exec") ? (
+						  <>
+							<div className="grid gap-2 md:grid-cols-[1fr_1fr_auto]">
+							  <select
+								className="h-9 min-w-0 rounded-lg border border-input bg-background px-3 text-sm"
+								value={sshPod}
 							disabled={Boolean(busy)}
 							onChange={(event) => {
 							  const podName = event.target.value;
@@ -1409,9 +1410,9 @@ export function ServerAccessView({
 							  .map((pod) => <option key={pod.name} value={pod.name}>{pod.name}</option>)}
 						  </select>
 						  <select
-							className="h-9 min-w-0 rounded-md border border-input bg-background px-3 text-sm"
-							value={sshContainer}
-							disabled={Boolean(busy) || !selectedSSHPod}
+								className="h-9 min-w-0 rounded-lg border border-input bg-background px-3 text-sm"
+								value={sshContainer}
+								disabled={Boolean(busy) || !selectedSSHPod}
 							onChange={(event) => setSSHContainer(event.target.value)}
 						  >
 							<option value="">Select container</option>
@@ -1419,10 +1420,10 @@ export function ServerAccessView({
 							  <option key={container} value={container}>{container}</option>
 							))}
 						  </select>
-						  <Button type="button" size="sm" disabled={Boolean(busy) || !selectedSSHPod || !sshContainer} onClick={() => void startPodSSH()}>
-							{busy === "pod-ssh" ? <Spinner data-icon="inline-start" /> : <SquareTerminal size={14} />}
-							Enable SSH
-						  </Button>
+						  <Button type="button" size="sm" className="rounded-lg" disabled={Boolean(busy) || !selectedSSHPod || !sshContainer} onClick={() => void startPodSSH()}>
+								{busy === "pod-ssh" ? <Spinner data-icon="inline-start" /> : <SquareTerminal size={14} />}
+								Enable SSH
+							  </Button>
 						</div>
 					  </>
 					) : (
@@ -1432,7 +1433,7 @@ export function ServerAccessView({
 				) : null}
 
                 {profile && inventory.session ? (
-                  <Suspense fallback={<div className="grid h-32 place-items-center rounded-md border"><Spinner /></div>}>
+                  <Suspense fallback={<div className="grid h-32 place-items-center rounded-xl border border-border/60"><Spinner /></div>}>
                     <ServerExecTerminal
                       key={`${profile.id}:${inventory.session.id}`}
                       profileId={profile.id}
@@ -1454,7 +1455,7 @@ export function ServerAccessView({
                   />
                 ) : null}
 				{inventory.namespaces.length === 0 ? (
-                  <p className="rounded-md border bg-muted/30 p-4 text-sm text-muted-foreground">
+                  <p className="rounded-xl border border-border/60 bg-muted/20 p-4 text-sm text-muted-foreground">
                     No namespaces are available under the current Gateway Policy.
                   </p>
                 ) : (
@@ -1466,10 +1467,10 @@ export function ServerAccessView({
                       empty="No Pods in this namespace."
                     >
                       {inventory.pods.map((pod) => (
-                        <div key={pod.name} className="flex items-center justify-between gap-3 border-b py-2.5 last:border-0">
+                        <div key={pod.name} className="flex items-center justify-between gap-3 border-b border-border/40 py-2.5 last:border-0">
                           <div className="min-w-0">
                             <div className="truncate text-sm font-medium">{pod.name}</div>
-                            <div className="truncate text-xs text-muted-foreground">
+                            <div className="truncate text-[12px] text-muted-foreground">
                               {pod.containers.join(", ") || "No containers"}{pod.nodeName ? ` · ${pod.nodeName}` : ""}
                             </div>
                           </div>
@@ -1485,14 +1486,14 @@ export function ServerAccessView({
                       empty="No Services in this namespace."
                     >
                       {inventory.services.map((service) => (
-                        <div key={service.name} className="flex items-center justify-between gap-3 border-b py-2.5 last:border-0">
+                        <div key={service.name} className="flex items-center justify-between gap-3 border-b border-border/40 py-2.5 last:border-0">
                           <div className="min-w-0">
                             <div className="truncate text-sm font-medium">{service.name}</div>
-                            <div className="truncate font-mono text-xs text-muted-foreground">
+                            <div className="truncate font-mono text-[12px] text-muted-foreground">
                               {service.clusterIp || service.externalName || service.type}
                             </div>
                           </div>
-                          <div className="text-right text-xs text-muted-foreground">
+                          <div className="text-right text-[12px] text-muted-foreground">
                             {service.ports.map((port) => `${port.port}/${port.protocol}`).join(", ") || "No ports"}
                           </div>
                         </div>
@@ -1504,25 +1505,25 @@ export function ServerAccessView({
             ) : null}
 
             {error ? (
-              <p role="alert" className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+              <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
                 {error}
               </p>
             ) : null}
           </CardContent>
 
           {profile ? (
-            <CardFooter className="justify-between">
-              <Button type="button" variant="ghost" size="sm" disabled={Boolean(busy)} onClick={() => void removeProfile()}>
+            <CardFooter className="justify-between border-t border-border/40 bg-muted/20 px-6 py-4">
+              <Button type="button" variant="ghost" size="sm" className="rounded-lg" disabled={Boolean(busy)} onClick={() => void removeProfile()}>
                 {busy === "delete" ? <Spinner data-icon="inline-start" /> : <Trash2 size={14} />}
                 Remove server
               </Button>
               {authenticated ? (
                 <div className="flex items-center gap-2">
-                  <Button type="button" variant="ghost" size="sm" disabled={Boolean(busy)} onClick={() => void refreshLogin()}>
+                  <Button type="button" variant="ghost" size="sm" className="rounded-lg" disabled={Boolean(busy)} onClick={() => void refreshLogin()}>
                     {busy === "refresh-login" ? <Spinner data-icon="inline-start" /> : <RefreshCw size={14} />}
                     Refresh login
                   </Button>
-                  <Button type="button" variant="outline" size="sm" disabled={Boolean(busy)} onClick={() => void logout()}>
+                  <Button type="button" variant="outline" size="sm" className="rounded-lg" disabled={Boolean(busy)} onClick={() => void logout()}>
                     {busy === "logout" ? <Spinner data-icon="inline-start" /> : <LogOut size={14} />}
                     Sign out / sign in again
                   </Button>
@@ -1559,8 +1560,8 @@ function InventoryPanel({
 }) {
   const hasChildren = Array.isArray(children) ? children.length > 0 : Boolean(children);
   return (
-    <div className="min-w-0 rounded-lg border bg-card p-4">
-      <div className="mb-2 flex items-center gap-2 font-medium">{icon}{title}</div>
+    <div className="min-w-0 rounded-xl border border-border/60 bg-card p-4 shadow-sm">
+      <div className="mb-3 flex items-center gap-2 text-[14px] font-semibold tracking-tight">{icon}{title}</div>
       {!allowed ? (
         <p className="py-5 text-center text-sm text-muted-foreground">Not allowed by Gateway Policy or Kubernetes RBAC.</p>
       ) : hasChildren ? children : (

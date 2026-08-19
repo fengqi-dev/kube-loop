@@ -123,17 +123,17 @@ export function ConnectionsView({
           >
             <NetworkTrafficChart ready={ready} metrics={metrics} />
           </Suspense>
-          <div className="overflow-auto rounded-lg border bg-card">
+          <div className="overflow-auto rounded-xl border border-border/60 bg-card shadow-sm">
             <Table>
               <TableHeader>
-                <TableRow className="bg-muted/50 hover:bg-muted/50">
+                <TableRow className="bg-muted/40 hover:bg-muted/40 border-b border-border/60">
                   {columns.map((column) => (
                     <TableHead
                       key={column.key}
                       className={
                         column.align === "right"
-                          ? "text-right text-[10px] tracking-wide uppercase"
-                          : "text-[10px] tracking-wide uppercase"
+                          ? "text-right text-[10px] font-semibold tracking-wide uppercase"
+                          : "text-[10px] font-semibold tracking-wide uppercase"
                       }
                     >
                       {t(`connections.${column.key}`)}
@@ -148,8 +148,8 @@ export function ConnectionsView({
                       colSpan={columns.length}
                       className="h-40 text-center text-muted-foreground"
                     >
-                      <div className="mx-auto max-w-sm space-y-1">
-                        <p className="text-sm font-medium text-foreground">
+                      <div className="mx-auto max-w-sm space-y-1.5">
+                        <p className="text-sm font-semibold text-foreground">
                           {t("connections.emptyTitle")}
                         </p>
                         <p className="text-xs">{t("connections.emptyDetail")}</p>

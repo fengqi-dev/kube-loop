@@ -24,7 +24,7 @@ export function ServerWorkloadView({ profileId }: { profileId: string }) {
   const [namespace, setNamespace] = useState("");
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [selected, setSelected] = useState<RemotePod | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -39,6 +39,7 @@ export function ServerWorkloadView({ profileId }: { profileId: string }) {
   const reload = useCallback(async (nextNamespace = namespace) => {
     if (!profileId) {
       setInventory(undefined);
+      setLoading(false);
       return;
     }
     setLoading(true);
@@ -188,6 +189,7 @@ export function ServerWorkloadView({ profileId }: { profileId: string }) {
         disabled={!profileId}
         onRefresh={() => void reload(namespace)}
         allowAllNamespaces={false}
+        namespacePlaceholder={loading ? t("overview.loadingKubeconfig") : undefined}
       />
 
       {!profileId ? (

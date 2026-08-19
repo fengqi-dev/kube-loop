@@ -42,95 +42,96 @@
   --color-background: var(--background);
   --color-success: var(--success);
   --color-success-foreground: var(--success-foreground);
-  --radius-sm: calc(var(--radius) * 0.6);
-  --radius-md: calc(var(--radius) * 0.8);
+  --radius-sm: calc(var(--radius) * 0.5);
+  --radius-md: calc(var(--radius) * 0.75);
   --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) * 1.4);
-  --radius-2xl: calc(var(--radius) * 1.8);
-  --radius-3xl: calc(var(--radius) * 2.2);
-  --radius-4xl: calc(var(--radius) * 2.6);
+  --radius-xl: calc(var(--radius) * 1.25);
+  --radius-2xl: calc(var(--radius) * 1.5);
+  --radius-3xl: calc(var(--radius) * 2);
+  --radius-4xl: calc(var(--radius) * 2.5);
 }
 
 :root {
-  /* GitHub Primer Light semantic palette. */
+  /* VS Code Light Modern inspired palette. */
   color-scheme: light;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   --background: #ffffff;
-  --foreground: #1f2328;
+  --foreground: #3c3c3c;
   --card: #ffffff;
-  --card-foreground: #1f2328;
+  --card-foreground: #3c3c3c;
   --popover: #ffffff;
-  --popover-foreground: #1f2328;
-  --primary: #0969da;
+  --popover-foreground: #3c3c3c;
+  --primary: #0078d4;
   --primary-foreground: #ffffff;
-  --secondary: #f6f8fa;
-  --secondary-foreground: #1f2328;
-  --muted: #f6f8fa;
-  --muted-foreground: #656d76;
-  --accent: #eaeef2;
-  --accent-foreground: #1f2328;
-  --destructive: #cf222e;
-  --border: #d0d7de;
-  --input: #d0d7de;
-  --ring: #0969da;
-  --success: #1a7f37;
+  --secondary: #f3f3f3;
+  --secondary-foreground: #3c3c3c;
+  --muted: #f3f3f3;
+  --muted-foreground: #616161;
+  --accent: #e5f3ff;
+  --accent-foreground: #001f3f;
+  --destructive: #e51400;
+  --border: #e5e5e5;
+  --input: #e5e5e5;
+  --ring: #0078d4;
+  --success: #16825d;
   --success-foreground: #ffffff;
-  --chart-1: #1a7f37;
-  --chart-2: #0969da;
-  --chart-3: #8250df;
-  --chart-4: #bf3989;
-  --chart-5: #bc4c00;
-  --radius: 0.5rem;
-  --sidebar: #f6f8fa;
-  --sidebar-foreground: #1f2328;
-  --sidebar-primary: #0969da;
+  --chart-1: #16825d;
+  --chart-2: #0078d4;
+  --chart-3: #795e26;
+  --chart-4: #bc4c9c;
+  --chart-5: #c27000;
+  --radius: 0.375rem;
+  --sidebar: #f3f3f3;
+  --sidebar-foreground: #3c3c3c;
+  --sidebar-primary: #0078d4;
   --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #eaeef2;
-  --sidebar-accent-foreground: #1f2328;
-  --sidebar-border: #d8dee4;
-  --sidebar-ring: #0969da;
-  --console: #f6f8fa;
-  --scrollbar: rgb(0 0 0 / 0.22);
+  --sidebar-accent: #e5f3ff;
+  --sidebar-accent-foreground: #001f3f;
+  --sidebar-border: #e5e5e5;
+  --sidebar-ring: #0078d4;
+  --console: #1e1e1e;
+  --scrollbar: rgb(0 0 0 / 0.18);
 }
 
 .dark {
+  /* VS Code Dark Modern inspired palette. */
   color-scheme: dark;
-  --background: #0d1117;
-  --foreground: #e6edf3;
-  --card: #161b22;
-  --card-foreground: #e6edf3;
-  --popover: #161b22;
-  --popover-foreground: #e6edf3;
-  --primary: #2f81f7;
+  --background: #181818;
+  --foreground: #cccccc;
+  --card: #1f1f1f;
+  --card-foreground: #cccccc;
+  --popover: #1f1f1f;
+  --popover-foreground: #cccccc;
+  --primary: #0078d4;
   --primary-foreground: #ffffff;
-  --secondary: #21262d;
-  --secondary-foreground: #e6edf3;
-  --muted: #21262d;
-  --muted-foreground: #8b949e;
-  --accent: #30363d;
-  --accent-foreground: #e6edf3;
-  --destructive: #f85149;
-  --border: #30363d;
-  --input: #30363d;
-  --ring: #2f81f7;
-  --success: #3fb950;
-  --success-foreground: #0d1117;
-  --chart-1: #3fb950;
-  --chart-2: #58a6ff;
-  --chart-3: #a371f7;
-  --chart-4: #db61a2;
-  --chart-5: #d29922;
-  --sidebar: #010409;
-  --sidebar-foreground: #e6edf3;
-  --sidebar-primary: #2f81f7;
+  --secondary: #252526;
+  --secondary-foreground: #cccccc;
+  --muted: #252526;
+  --muted-foreground: #858585;
+  --accent: #04395e;
+  --accent-foreground: #cccccc;
+  --destructive: #f48771;
+  --border: #3c3c3c;
+  --input: #3c3c3c;
+  --ring: #0078d4;
+  --success: #369432;
+  --success-foreground: #181818;
+  --chart-1: #4ec9b0;
+  --chart-2: #569cd6;
+  --chart-3: #dcdcaa;
+  --chart-4: #da70b0;
+  --chart-5: #ce9178;
+  --sidebar: #181818;
+  --sidebar-foreground: #cccccc;
+  --sidebar-primary: #0078d4;
   --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #161b22;
-  --sidebar-accent-foreground: #e6edf3;
-  --sidebar-border: #21262d;
-  --sidebar-ring: #2f81f7;
-  --console: #010409;
-  --scrollbar: rgb(255 255 255 / 0.22);
+  --sidebar-accent: #04395e;
+  --sidebar-accent-foreground: #cccccc;
+  --sidebar-border: #3c3c3c;
+  --sidebar-ring: #0078d4;
+  --console: #0c0c0c;
+  --scrollbar: rgb(255 255 255 / 0.18);
 }
 
 @layer base {
@@ -196,7 +197,7 @@
 
 ::selection {
   color: var(--foreground);
-  background: color-mix(in srgb, var(--foreground) 16%, transparent);
+  background: color-mix(in srgb, var(--primary) 22%, transparent);
 }
 
 @keyframes connection-breathe {

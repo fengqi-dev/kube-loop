@@ -27,6 +27,7 @@ export function ResourceToolbar({
   onRefresh,
   actions,
   allowAllNamespaces = true,
+  namespacePlaceholder,
 }: {
   namespaces: string[];
   namespace: string;
@@ -40,14 +41,15 @@ export function ResourceToolbar({
   onRefresh(): void;
   actions?: ReactNode;
   allowAllNamespaces?: boolean;
+  namespacePlaceholder?: string;
 }) {
   const { t } = useI18n();
 
   return (
     <div className="mb-3 flex flex-wrap items-center gap-2">
-      <Select value={namespace} onValueChange={onNamespaceChange} disabled={disabled}>
+      <Select value={namespace || undefined} onValueChange={onNamespaceChange} disabled={disabled || loading}>
         <SelectTrigger className="h-8 w-[180px]">
-          <SelectValue />
+          <SelectValue placeholder={namespacePlaceholder ?? (loading ? t("overview.loadingKubeconfig") : undefined)} />
         </SelectTrigger>
         <SelectContent>
           {allowAllNamespaces ? (

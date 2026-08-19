@@ -97,7 +97,7 @@ export function ConnectionOrb({
           </span>
           <span
             className={cn(
-              "absolute top-1/2 left-1 size-[40px] -translate-y-1/2 rounded-full border border-border/70 bg-gradient-to-br from-white to-slate-100 shadow-[0_4px_10px_rgba(58,82,101,0.22)] transition-transform duration-500 ease-[cubic-bezier(0.2,0.9,0.25,1.15)]",
+              "absolute top-1/2 left-1 size-[40px] -translate-y-1/2 rounded-full border border-border/70 bg-gradient-to-br from-white to-slate-100 shadow-[0_4px_10px_rgba(58,82,101,0.22)] transition-transform duration-500 ease-[cubic-bezier(0.2,0.9,0.25,1.15)] dark:from-zinc-700 dark:to-zinc-800 dark:border-zinc-600 dark:shadow-[0_4px_10px_rgba(0,0,0,0.4)]",
               ready && "translate-x-[80px]",
               transitioning && "translate-x-[40px]",
             )}

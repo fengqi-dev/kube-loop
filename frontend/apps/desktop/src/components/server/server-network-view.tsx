@@ -5,6 +5,7 @@ import { ActionIconButton, exchangeIcon, mirrorIcon, portForwardIcon } from "@/c
 import { CopyableText } from "@/components/shared/copyable-text";
 import { EmptyState } from "@/components/shared/empty-state";
 import { PageShell } from "@/components/shared/page-shell";
+import { ResourcePagination, RESOURCE_PAGE_SIZE } from "@/components/shared/resource-pagination";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -29,6 +30,7 @@ export function ServerNetworkView({ profileId }: { profileId: string }) {
   const [mirrors, setMirrors] = useState<ServerMirrorInfo[]>([]);
   const [previews, setPreviews] = useState<ServerPreviewInfo[]>([]);
   const [query, setQuery] = useState("");
+  const [page, setPage] = useState(1);
   const [action, setAction] = useState<Action>();
   const [service, setService] = useState<RemoteService>();
   const [servicePort, setServicePort] = useState("");
@@ -36,13 +38,14 @@ export function ServerNetworkView({ profileId }: { profileId: string }) {
   const [localPort, setLocalPort] = useState("");
   const [previewName, setPreviewName] = useState("");
   const [previewProtocol, setPreviewProtocol] = useState<"tcp" | "udp">("tcp");
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
   const load = useCallback(async (namespace = "") => {
     if (!profileId) {
       setInventory(undefined);
+      setLoading(false);
       return;
     }
     setLoading(true);
@@ -69,6 +72,12 @@ export function ServerNetworkView({ profileId }: { profileId: string }) {
       item.name, item.namespace, item.type, item.clusterIp, item.externalName,
     ].some((value) => value?.toLocaleLowerCase().includes(normalized)));
   }, [inventory?.services, query]);
+
+  const pageCount = Math.max(1, Math.ceil(services.length / RESOURCE_PAGE_SIZE));
+  const visibleServices = services.slice((page - 1) * RESOURCE_PAGE_SIZE, page * RESOURCE_PAGE_SIZE);
+
+  useEffect(() => setPage(1), [query, inventory?.namespace]);
+  useEffect(() => setPage((current) => Math.min(current, pageCount)), [pageCount]);
 
   function selectAction(next: Action, target?: RemoteService) {
     setAction(next); setService(target); setLocalHost("127.0.0.1");
@@ -125,7 +134,8 @@ export function ServerNetworkView({ profileId }: { profileId: string }) {
   return (
     <PageShell title="Network" description="Manage Services and Session-bound traffic operations through the Gateway.">
       <div className="mb-4 flex flex-nowrap items-center gap-2">
-        <select className="h-9 shrink-0 rounded-md border border-input bg-background px-3 text-sm" value={inventory?.namespace ?? ""} disabled={!inventory || loading} onChange={(event) => void load(event.target.value)}>
+        <select className="h-9 w-[180px] shrink-0 rounded-md border border-input bg-background px-3 text-sm" value={inventory?.namespace ?? ""} disabled={!inventory || loading} onChange={(event) => void load(event.target.value)}>
+          {!inventory ? <option value="" disabled>Loading…</option> : null}
           {(inventory?.namespaces ?? []).map((item) => <option key={item.name} value={item.name}>{item.name}</option>)}
         </select>
         <Input className="min-w-0 flex-1" value={query} placeholder="Search Services" onChange={(event) => setQuery(event.target.value)} />
@@ -136,14 +146,30 @@ export function ServerNetworkView({ profileId }: { profileId: string }) {
         {error ? <p className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">{error}</p> : null}
         <div className="overflow-hidden rounded-lg border bg-card">
           <Table><TableHeader><TableRow><TableHead className="w-40 min-w-40 max-w-40">Name</TableHead><TableHead>Namespace</TableHead><TableHead>Type</TableHead><TableHead>Cluster IP</TableHead><TableHead>Ports</TableHead><TableHead>Actions</TableHead></TableRow></TableHeader>
-          <TableBody>{services.map((item) => {
+          <TableBody>
+            {loading ? (
+              <TableRow className="hover:bg-transparent">
+                <TableCell colSpan={6} className="h-32 text-center text-[12px] text-muted-foreground">
+                  <Spinner className="mx-auto" />
+                </TableCell>
+              </TableRow>
+            ) : services.length === 0 ? (
+              <TableRow className="hover:bg-transparent">
+                <TableCell colSpan={6} className="h-32 text-center text-[12px] text-muted-foreground">
+                  No Services found.
+                </TableCell>
+              </TableRow>
+            ) : (
+              visibleServices.map((item) => {
             const exchange = exchanges.some((entry) => entry.service === item.name && entry.namespace === item.namespace);
             const mirror = mirrors.some((entry) => entry.service === item.name && entry.namespace === item.namespace);
             const preview = previews.some((entry) => entry.name === item.name && entry.namespace === item.namespace);
             return <TableRow key={`${item.namespace}/${item.name}`}><TableCell className="w-40 min-w-40 max-w-40 font-medium"><span className="block truncate" title={item.name}>{item.name}</span></TableCell><TableCell>{item.namespace}</TableCell><TableCell>{item.type}</TableCell><TableCell className="font-mono text-xs"><CopyableText value={item.clusterIp || item.externalName} /></TableCell><TableCell className="font-mono text-xs text-muted-foreground">{item.ports.length > 0 ? <div className="flex flex-col items-start gap-0.5">{item.ports.map((port) => <CopyableText key={`${port.protocol}-${port.port}-${port.name || ""}`} value={item.clusterIp ? `${item.clusterIp}:${port.port}` : null} label={`${port.protocol}/${port.port}`} titleKey="network.copyAddress" successKey="network.addressCopied" failKey="network.addressCopyFailed" empty={`${port.protocol}/${port.port}`} />)}</div> : "—"}</TableCell>
               <TableCell><div className="flex items-center gap-1"><ActionIconButton label="Port Forward" icon={portForwardIcon} disabled={preview || !ready || !canForward} onClick={() => selectAction("port-forward", item)} /><ActionIconButton label="Exchange" icon={exchangeIcon} disabled={preview || !ready || !canExchange || exchange || mirror} onClick={() => selectAction("exchange", item)} /><ActionIconButton label="Mirror" icon={mirrorIcon} disabled={preview || !ready || !canMirror || exchange || mirror} onClick={() => selectAction("mirror", item)} /></div></TableCell></TableRow>;
-          })}</TableBody></Table>
-          {!loading && services.length === 0 ? <div className="p-8 text-center text-sm text-muted-foreground">No Services found.</div> : null}
+              })
+            )}
+          </TableBody></Table>
+          <ResourcePagination page={page} total={services.length} showWhenEmpty onPageChange={setPage} />
         </div>
 
         <div className="rounded-lg border bg-card"><div className="border-b px-4 py-3 font-medium">Active Sessions</div><Table><TableHeader><TableRow><TableHead>Type</TableHead><TableHead>Target</TableHead><TableHead>Address / Target</TableHead><TableHead>State</TableHead><TableHead className="text-right">Actions</TableHead></TableRow></TableHeader><TableBody>
