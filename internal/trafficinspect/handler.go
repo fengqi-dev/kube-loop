@@ -63,9 +63,9 @@ type Config struct {
 // transparent connection whose original destination is known by sing-box.
 type Handler struct {
 	proxy       *goproxy.ProxyHttpServer
-	transport   *http.Transport
-	h2c         *http2.Transport
 	dialContext DialContextFunc
+	tlsConfig   *tls.Config
+	allowHTTP2  bool
 	enabled     func() bool
 }
 
@@ -73,6 +73,13 @@ type upstreamRoundTripper struct {
 	http *http.Transport
 	h2c  *http2.Transport
 }
+
+type inspectionConnection struct {
+	destination  string
+	roundTripper *upstreamRoundTripper
+}
+
+type inspectionConnectionKey struct{}
 
 func (t upstreamRoundTripper) RoundTrip(
 	request *http.Request,
@@ -82,6 +89,11 @@ func (t upstreamRoundTripper) RoundTrip(
 		return t.h2c.RoundTrip(request)
 	}
 	return t.http.RoundTrip(request)
+}
+
+func (t upstreamRoundTripper) Close() {
+	t.http.CloseIdleConnections()
+	t.h2c.CloseIdleConnections()
 }
 
 // New constructs a transparent inspection handler.
@@ -100,53 +112,76 @@ func New(config Config) (*Handler, error) {
 	if config.TLSConfig != nil {
 		tlsConfig = config.TLSConfig.Clone()
 	}
-	transport := &http.Transport{
-		DialContext:       config.DialContext,
-		ForceAttemptHTTP2: config.AllowHTTP2,
-		TLSClientConfig:   tlsConfig,
-	}
-	h2cTransport := &http2.Transport{
-		AllowHTTP: true,
-		DialTLSContext: func(ctx context.Context, network, address string, _ *tls.Config) (net.Conn, error) {
-			return config.DialContext(ctx, network, address)
-		},
-	}
-	roundTripper := upstreamRoundTripper{http: transport, h2c: h2cTransport}
-
 	proxy := goproxy.NewProxyHttpServer()
 	proxy.AllowHTTP2 = config.AllowHTTP2
-	proxy.Tr = transport
-	proxy.ConnectDialWithReq = func(request *http.Request, network, address string) (net.Conn, error) {
-		return config.DialContext(request.Context(), network, address)
+	proxy.ConnectDialWithReq = func(request *http.Request, network, _ string) (net.Conn, error) {
+		connection, _ := request.Context().Value(inspectionConnectionKey{}).(*inspectionConnection)
+		if connection == nil || connection.destination == "" {
+			return nil, errors.New("traffic inspection original destination is unavailable")
+		}
+		return config.DialContext(request.Context(), network, connection.destination)
 	}
 
+	mitmTLSConfig := goproxy.TLSConfigFromCA(config.CA)
 	mitm := &goproxy.ConnectAction{
-		Action:    goproxy.ConnectMitm,
-		TLSConfig: goproxy.TLSConfigFromCA(config.CA),
+		Action: goproxy.ConnectMitm,
+		TLSConfig: func(host string, proxyContext *goproxy.ProxyCtx) (*tls.Config, error) {
+			fallback, err := mitmTLSConfig(host, proxyContext)
+			if err != nil {
+				return nil, err
+			}
+			if len(fallback.Certificates) == 0 {
+				return nil, errors.New("traffic inspection generated no fallback certificate")
+			}
+			fallbackCertificate := fallback.Certificates[0]
+			fallback.Certificates = nil
+			fallback.GetCertificate = func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
+				serverName := strings.TrimSpace(hello.ServerName)
+				if serverName == "" {
+					return &fallbackCertificate, nil
+				}
+				dynamic, dynamicErr := mitmTLSConfig(serverName, proxyContext)
+				if dynamicErr != nil {
+					return nil, dynamicErr
+				}
+				if len(dynamic.Certificates) == 0 {
+					return nil, errors.New("traffic inspection generated no certificate")
+				}
+				return &dynamic.Certificates[0], nil
+			}
+			return fallback, nil
+		},
 	}
 	proxy.OnRequest().HandleConnectFunc(
 		func(host string, proxyContext *goproxy.ProxyCtx) (*goproxy.ConnectAction, string) {
-			proxyContext.UserData = canonicalAuthority(host, "https")
+			connection, _ := proxyContext.Req.Context().Value(inspectionConnectionKey{}).(*inspectionConnection)
+			proxyContext.UserData = connection
 			return mitm, host
 		},
 	)
 	proxy.OnRequest().DoFunc(func(request *http.Request, proxyContext *goproxy.ProxyCtx) (*http.Request, *http.Response) {
-		proxyContext.RoundTripper = roundTripper
-		originalAuthority, _ := proxyContext.UserData.(string)
-		if originalAuthority != "" {
-			if response := enforceOriginalAuthority(request, originalAuthority); response != nil {
-				return request, response
-			}
+		connection, _ := proxyContext.UserData.(*inspectionConnection)
+		if connection == nil || connection.roundTripper == nil || connection.destination == "" {
+			return request, goproxy.NewResponse(
+				request,
+				"text/plain",
+				http.StatusBadGateway,
+				"traffic inspection original destination is unavailable",
+			)
+		}
+		proxyContext.RoundTripper = connection.roundTripper
+		if request.URL != nil && request.Host != "" {
+			// The dialer is pinned to the trusted original destination. Preserve
+			// the HTTP authority here so TLS uses the client's SNI and virtual
+			// hosts continue to work without letting Host select a dial target.
+			request.URL.Host = request.Host
 		}
 		protocol := classifyProtocol(request)
 		trace := requestTrace{
 			flowID:      newEventID(),
 			started:     time.Now(),
 			protocol:    protocol,
-			destination: originalAuthority,
-		}
-		if trace.destination == "" {
-			trace.destination = canonicalAuthority(request.Host, request.URL.Scheme)
+			destination: connection.destination,
 		}
 		request = request.WithContext(context.WithValue(request.Context(), requestTraceKey{}, trace))
 		wrapRequestBody(request, trace, config)
@@ -169,8 +204,8 @@ func New(config Config) (*Handler, error) {
 	})
 
 	return &Handler{
-		proxy: proxy, transport: transport, h2c: h2cTransport,
-		dialContext: config.DialContext, enabled: config.Enabled,
+		proxy: proxy, dialContext: config.DialContext, tlsConfig: tlsConfig,
+		allowHTTP2: config.AllowHTTP2, enabled: config.Enabled,
 	}, nil
 }
 
@@ -261,11 +296,27 @@ func emitEvent(ctx context.Context, config Config, event Event) {
 	}
 }
 
-// Close releases idle upstream connections.
+// Close implements the handler lifecycle. ServeConn owns and closes each
+// connection-scoped upstream transport.
 func (h *Handler) Close() error {
-	h.transport.CloseIdleConnections()
-	h.h2c.CloseIdleConnections()
 	return nil
+}
+
+func (h *Handler) newRoundTripper(target string) *upstreamRoundTripper {
+	transport := &http.Transport{
+		DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
+			return h.dialContext(ctx, network, target)
+		},
+		ForceAttemptHTTP2: h.allowHTTP2,
+		TLSClientConfig:   h.tlsConfig.Clone(),
+	}
+	h2cTransport := &http2.Transport{
+		AllowHTTP: true,
+		DialTLSContext: func(ctx context.Context, network, _ string, _ *tls.Config) (net.Conn, error) {
+			return h.dialContext(ctx, network, target)
+		},
+	}
+	return &upstreamRoundTripper{http: transport, h2c: h2cTransport}
 }
 
 // ServeConn takes ownership of connection and transparently inspects traffic
@@ -286,6 +337,13 @@ func (h *Handler) ServeConn(ctx context.Context, connection net.Conn, target str
 	if !sniffInspectableProtocol(connection, reader) {
 		return h.relayUninspected(ctx, &bufferedConn{Conn: connection, reader: reader}, target)
 	}
+	roundTripper := h.newRoundTripper(target)
+	defer roundTripper.Close()
+	inspection := &inspectionConnection{
+		destination:  canonicalAuthority(target, "https"),
+		roundTripper: roundTripper,
+	}
+	ctx = context.WithValue(ctx, inspectionConnectionKey{}, inspection)
 
 	tracked := newTransparentConn(&bufferedConn{Conn: connection, reader: reader})
 	request := (&http.Request{
@@ -427,36 +485,6 @@ func (c *bufferedConn) CloseWrite() error {
 		return writer.CloseWrite()
 	}
 	return c.Conn.Close()
-}
-
-func enforceOriginalAuthority(request *http.Request, originalAuthority string) *http.Response {
-	if canonicalAuthority(request.Host, request.URL.Scheme) == originalAuthority {
-		return nil
-	}
-	if !hasExplicitPort(request.Host) && authorityHost(request.Host) == authorityHost(originalAuthority) {
-		request.Host = originalAuthority
-		request.URL.Host = originalAuthority
-		return nil
-	}
-	return goproxy.NewResponse(
-		request,
-		"text/plain",
-		http.StatusMisdirectedRequest,
-		"request authority does not match the original destination",
-	)
-}
-
-func hasExplicitPort(authority string) bool {
-	_, _, err := net.SplitHostPort(authority)
-	return err == nil
-}
-
-func authorityHost(authority string) string {
-	host, _, err := net.SplitHostPort(authority)
-	if err != nil {
-		host = strings.Trim(authority, "[]")
-	}
-	return strings.ToLower(strings.TrimSuffix(host, "."))
 }
 
 func canonicalAuthority(authority, scheme string) string {
