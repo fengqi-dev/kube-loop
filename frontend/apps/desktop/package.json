@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "dev:wails": "node ../../scripts/wails-dev.mjs",
-    "build": "tsc && vite build"
+    "build": "tsc && vite build",
+    "test": "node --experimental-strip-types --test src/components/traffic-inspection/*.test.mjs"
   },
   "dependencies": {
     "@fontsource-variable/geist": "^5.3.0",

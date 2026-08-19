@@ -39,6 +39,7 @@ jobs:
         run: |
           npm ci --prefix frontend
           npm run build --prefix frontend
+          npm run test:frontend --prefix frontend
           npm run test:admin --prefix frontend
           npm run test:auth --prefix frontend
 
