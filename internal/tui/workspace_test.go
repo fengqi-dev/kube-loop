@@ -186,6 +186,7 @@ func TestWorkspaceConfigValidation(t *testing.T) {
 func TestWorkspaceConfigLoadsFromHome(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	directory := filepath.Join(home, ".kubeloop")
 	if err := os.MkdirAll(directory, 0o700); err != nil {
 		t.Fatal(err)
