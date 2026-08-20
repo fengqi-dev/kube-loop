@@ -14,6 +14,138 @@ permissions:
   packages: write
 
 jobs:
+  tui:
+    name: TUI (${{ matrix.name }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS arm64
+            runner: macos-latest
+            goos: darwin
+            goarch: arm64
+            artifact: tui-darwin-arm64
+            e2e: false
+          - name: macOS amd64
+            runner: macos-15-intel
+            goos: darwin
+            goarch: amd64
+            artifact: tui-darwin-amd64
+            e2e: false
+          - name: Windows amd64
+            runner: windows-latest
+            goos: windows
+            goarch: amd64
+            artifact: tui-windows-amd64
+            e2e: false
+          - name: Windows arm64
+            runner: windows-11-arm
+            goos: windows
+            goarch: arm64
+            artifact: tui-windows-arm64
+            e2e: false
+          - name: Linux amd64
+            runner: ubuntu-24.04
+            goos: linux
+            goarch: amd64
+            artifact: tui-linux-amd64
+            e2e: true
+          - name: Linux arm64
+            runner: ubuntu-24.04-arm
+            goos: linux
+            goarch: arm64
+            artifact: tui-linux-arm64
+            e2e: false
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install PTY E2E dependency
+        if: matrix.e2e
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo env DEBIAN_FRONTEND=noninteractive timeout --signal=TERM 10m \
+            bash -euo pipefail -c '
+              apt-get \
+                -o Acquire::Retries=3 \
+                -o Acquire::http::Timeout=30 \
+                -o Acquire::https::Timeout=30 \
+                update
+              apt-get \
+                -o Acquire::Retries=3 \
+                -o Acquire::http::Timeout=30 \
+                -o Acquire::https::Timeout=30 \
+                install --yes --no-install-recommends expect
+            '
+
+      - name: Run TUI PTY E2E release gate
+        if: matrix.e2e
+        run: make tui-test-e2e
+
+      - name: Build and package TUI
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          stage="dist/stage-${{ matrix.goos }}-${{ matrix.goarch }}"
+          mkdir -p "${stage}"
+          make tui \
+            VERSION="${GITHUB_REF_NAME}" \
+            TUI_GOOS="${{ matrix.goos }}" \
+            TUI_GOARCH="${{ matrix.goarch }}" \
+            TUI_BINARY="${stage}/kubeloop"
+          tar -C "${stage}" -czf \
+            "dist/kubeloop-${version}-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz" \
+            kubeloop
+          rm -rf "${stage}"
+
+      - name: Build and package TUI
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $version = ("${{ github.ref_name }}" -replace '^v', '')
+          $stage = "dist/stage-windows-${{ matrix.goarch }}"
+          $env:VITE_APP_VERSION = "${{ github.ref_name }}"
+          Remove-Item -Recurse -Force build/bin/resources -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path build/bin/resources | Out-Null
+          go run ./build/helper-prebuild.go "windows/${{ matrix.goarch }}"
+          go run ./build/stage-package-assets.go "windows/${{ matrix.goarch }}"
+          Copy-Item build/embedded/kubeloop-helper.exe build/bin/resources/
+          Copy-Item build/bin/sing-box.exe build/bin/resources/
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          $embedDir = "cmd/kubeloop-tui/embedded"
+          Remove-Item -Recurse -Force $embedDir -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path $embedDir | Out-Null
+          Copy-Item build/bin/resources/* $embedDir/
+          go build -trimpath `
+            -tags kubeloop_embed `
+            -ldflags "-s -w -X main.version=${{ github.ref_name }}" `
+            -o "$stage/kubeloop.exe" `
+            ./cmd/kubeloop-tui
+          Remove-Item -Recurse -Force $embedDir
+          tar.exe -C $stage -czf "dist/kubeloop-$version-windows-${{ matrix.goarch }}.tar.gz" kubeloop.exe
+          Remove-Item -Recurse -Force $stage
+
+      - name: Upload TUI artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/kubeloop-*.tar.gz
+          if-no-files-found: error
+
   desktop:
     name: Desktop (${{ matrix.name }})
     runs-on: ${{ matrix.runner }}
@@ -288,6 +420,7 @@ jobs:
   publish:
     name: Publish GitHub Release
     needs:
+      - tui
       - desktop
       - helm-chart
     runs-on: ubuntu-24.04
@@ -301,6 +434,13 @@ jobs:
         uses: actions/download-artifact@v7
         with:
           pattern: desktop-*
+          path: dist
+          merge-multiple: true
+
+      - name: Download TUI artifacts
+        uses: actions/download-artifact@v7
+        with:
+          pattern: tui-*
           path: dist
           merge-multiple: true
 
@@ -338,8 +478,8 @@ jobs:
               "${prerelease_args[@]}"
           fi
 
-  homebrew-cask:
-    name: Update Homebrew Cask
+  homebrew:
+    name: Update Homebrew Cask and Formula
     needs: publish
     # Skip hyphenated pre-release tags (v1.1.0-rc.1).
     if: ${{ !contains(github.ref_name, '-') }}
@@ -361,19 +501,26 @@ jobs:
           REPO: ${{ github.repository }}
         run: ./build/update-homebrew-cask.sh
 
-      - name: Commit and push cask bump
+      - name: Bump Formula/kubeloop.rb
+        env:
+          VERSION: ${{ github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: bash ./build/update-homebrew-formula.sh
+
+      - name: Commit and push Homebrew bump
         shell: bash
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add Casks/kubeloop.rb
+          git add Casks/kubeloop.rb Formula/kubeloop.rb
           if git diff --staged --quiet; then
-            echo "Homebrew cask already up to date"
+            echo "Homebrew cask and formula already up to date"
             exit 0
           fi
           # [skip ci] prevents the bump commit from re-running CI/Pages.
-          git commit -m "chore(homebrew): bump kubeloop cask to ${GITHUB_REF_NAME} [skip ci]"
+          git commit -m "chore(homebrew): bump packages to ${GITHUB_REF_NAME} [skip ci]"
           git push
 
   pages:

@@ -28,7 +28,7 @@ package_linux() {
     exit 1
   fi
 
-  tar -C "${BIN_DIR}" -czf "${DIST_DIR}/kubeloop-${version}-linux-${ARCH}.tar.gz" .
+  tar -C "${BIN_DIR}" -czf "${DIST_DIR}/kubeloop-desktop-${version}-linux-${ARCH}.tar.gz" .
 
   if ! command -v nfpm >/dev/null 2>&1; then
     echo "nfpm is required to build deb/rpm packages" >&2
