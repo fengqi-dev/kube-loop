@@ -10,11 +10,13 @@ import (
 
 const (
 	DesktopOAuthClientID    = authconfig.DesktopClientID
+	TUIOAuthClientID        = authconfig.TUIClientID
 	ManagementOAuthClientID = "kubeloop-management"
 	DesktopOAuthRedirectURI = authconfig.DesktopRedirectURI
+	TUIOAuthRedirectURI     = authconfig.TUIRedirectURI
 )
 
-// EnsureBuiltinOAuthClients creates the two first-party public clients without
+// EnsureBuiltinOAuthClients creates the first-party public clients without
 // overwriting an existing administrator-visible record. Built-in constraints
 // are also enforced by OAuthClientRepository.Update and Delete.
 func EnsureBuiltinOAuthClients(ctx context.Context, repository OAuthClientRepository, managementRedirectURI string) error {
@@ -26,6 +28,13 @@ func EnsureBuiltinOAuthClients(ctx context.Context, repository OAuthClientReposi
 		{
 			ID: DesktopOAuthClientID, Name: "KubeLoop Desktop", Public: true,
 			RedirectURIs: []string{DesktopOAuthRedirectURI},
+			GrantTypes:   []string{"authorization_code", "refresh_token"},
+			Scopes:       []string{"openid", "profile", "email", "offline_access", "kubeloop.api"},
+			Trusted:      true, Enabled: true, Builtin: true, CreatedAt: now, UpdatedAt: now,
+		},
+		{
+			ID: TUIOAuthClientID, Name: "KubeLoop TUI", Public: true,
+			RedirectURIs: []string{TUIOAuthRedirectURI},
 			GrantTypes:   []string{"authorization_code", "refresh_token"},
 			Scopes:       []string{"openid", "profile", "email", "offline_access", "kubeloop.api"},
 			Trusted:      true, Enabled: true, Builtin: true, CreatedAt: now, UpdatedAt: now,
