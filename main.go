@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	desktopapp "github.com/fengqi-dev/kube-loop/internal/app"
-	"github.com/gogpu/systray"
+	"github.com/fengqi-dev/kube-loop/internal/desktoptray"
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
@@ -35,10 +35,7 @@ func main() {
 	defer goruntime.UnlockOSThread()
 
 	app := desktopapp.NewApp(version, embeddedHelperFiles)
-	var tray *systray.SystemTray
-	if systemTrayEnabled {
-		tray = newSystemTray(app)
-	}
+	tray := desktoptray.New(app, trayIcon)
 	if err := wails.Run(&options.App{
 		Title:             "KubeLoop",
 		Width:             900,
@@ -96,23 +93,4 @@ func deliverAuthCallback(handler authCallbackHandler, rawURL string) bool {
 		return false
 	}
 	return true
-}
-
-func newSystemTray(app *desktopapp.App) *systray.SystemTray {
-	tray := systray.New()
-	menu := systray.NewMenu()
-	menu.Add("Open KubeLoop", func() {
-		desktopapp.ShowWindow(app)
-	})
-	menu.AddSeparator()
-	menu.Add("Quit KubeLoop", func() {
-		tray.Remove()
-		desktopapp.Quit(app)
-	})
-	tray.SetIcon(trayIcon).
-		SetTooltip("KubeLoop").
-		SetMenu(menu).
-		OnClick(func() { desktopapp.ShowWindow(app) }).
-		Show()
-	return tray
 }
