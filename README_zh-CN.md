@@ -11,18 +11,20 @@
 **[下载](https://github.com/fengqi-dev/kube-loop/releases/latest)** ·
 **[设计文档](docs/design.zh-CN.md)**
 
-KubeLoop 是面向 Kubernetes 开发的桌面网络工具。它像一条只连接集群的 VPN，
-让本地浏览器、IDE、CLI 和 SDK 可以直接使用 Pod IP、ClusterIP Service 与集群 DNS。
+KubeLoop 是面向 Kubernetes 开发的桌面网络工具。它将本地工作站接入集群网络，
+让浏览器、IDE、CLI 和 SDK 可以直接使用 Pod IP、ClusterIP Service 与集群 DNS
+——无需 VPN，无需公网入口。
 
 ## 为什么使用 KubeLoop
 
 - **透明访问集群**——普通本地应用可以直接使用真实的集群地址。
-- **聚焦路由**——只有自动发现或手工配置的 Kubernetes 网段进入隧道。
+- **不依赖 kubeconfig 或 `kubectl`**——桌面应用登录 KubeLoop Server，不持有 Kubernetes 凭据。
 - **无需公网集群入口**——通过 RelayTicket 认证的 WebSocket 将流量送达分配的 Data Plane。
+- **聚焦路由**——只有自动发现或手工配置的 Kubernetes 网段进入隧道。
 - **本地迭代工具**——Port Forward、Exchange、Mirror 与 Preview 覆盖出站和入站流量。
+- **流量检查**——通过代理拦截并解析实时 HTTP 与 gRPC 流量，自动生成 `curl`/`grpcurl` 复现命令，支持导入 `.proto` Schema 解码。
 - **统一桌面工作流**——在一个 UI 中查看工作负载、使用 Pod SSH/SFTP、传输文件并诊断连接。
 - **跨平台**——支持 macOS、Windows、Linux，以及 amd64 和 arm64。
-- **不依赖 kubeconfig 或 `kubectl`**——桌面应用登录 KubeLoop Server，不持有 Kubernetes 凭据。
 
 ## 安装
 
@@ -57,7 +59,7 @@ helm get notes kubeloop --namespace kubeloop-system
 curl http://kubeloop.example.com/.well-known/kubeloop
 ```
 
-Ingress 默认不启用 TLS。若需 HTTPS，请把 `publicURL` 改为 `https://...`，
+Ingress 默认不启用 TLS。若需 HTTPS，请把 `publicURL` 改为 `https://…`，
 并设置 `ingress.tls.enabled=true` 和 `ingress.tls.secretName`。
 
 卸载工作负载：
@@ -72,7 +74,7 @@ Chart 会删除工作负载和由 Chart 创建的 SQLite PVC，但会有意保�
 
 ### 桌面客户端
 
-### macOS 与 Linux
+#### macOS 与 Linux
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/fengqi-dev/kube-loop/main/scripts/install.sh | bash
@@ -81,7 +83,7 @@ curl -fsSL https://raw.githubusercontent.com/fengqi-dev/kube-loop/main/scripts/i
 指定版本或 Linux 包格式：
 
 ```bash
-VERSION=v1.5.0 PACKAGE=deb \
+VERSION=v2.0.3 PACKAGE=deb \
   bash -c "$(curl -fsSL https://raw.githubusercontent.com/fengqi-dev/kube-loop/main/scripts/install.sh)"
 ```
 
@@ -94,7 +96,7 @@ brew tap kube-loop/kubeloop https://github.com/fengqi-dev/kube-loop
 brew install --cask kubeloop
 ```
 
-### Windows
+#### Windows
 
 ```powershell
 irm https://raw.githubusercontent.com/fengqi-dev/kube-loop/main/scripts/install.ps1 | iex
@@ -102,6 +104,27 @@ irm https://raw.githubusercontent.com/fengqi-dev/kube-loop/main/scripts/install.
 
 [GitHub Releases](https://github.com/fengqi-dev/kube-loop/releases/latest)
 提供 DMG、NSIS、portable zip、deb、rpm 与 tar.gz；每个版本均包含 `SHA256SUMS`。
+
+### 终端客户端
+
+K9s 风格的终端客户端提供核心连接与 Kubernetes 资源工作流，无需启动桌面 UI。
+从 GitHub Releases 下载匹配平台的
+`kubeloop-<version>-<os>-<arch>.tar.gz` 压缩包，解压后运行 `kubeloop`
+（Windows 为 `kubeloop.exe`）。
+
+Release 同时提供 macOS、Windows、Linux 的 amd64 与 arm64 产物。TUI 与桌面客户端
+共用 KubeLoop Server Profile 和 Control Plane API，不读取 kubeconfig，也不直接调用
+Kubernetes。资源、命令、配置及测试边界参见 [TUI 使用指南](docs/tui.zh-CN.md)。
+
+Homebrew 中的 TUI 与桌面 Cask 独立安装：
+
+```bash
+brew tap kube-loop/kubeloop https://github.com/fengqi-dev/kube-loop
+brew install kubeloop
+```
+
+在首个包含 TUI 压缩包的稳定版本发布前，请使用
+`brew install --HEAD kubeloop`。
 
 ## 连接集群
 
@@ -122,6 +145,7 @@ irm https://raw.githubusercontent.com/fengqi-dev/kube-loop/main/scripts/install.
 | Mirror | 现有 Service → Pods + 本地 Shadow | 复制请求用于观察，不让本地应用进入主路径 |
 | Preview | 新建临时 Service → 本地应用 | 让集群内调用方访问本地应用 |
 | Pod SSH/SFTP | 本地 SSH 客户端 → `pods/exec` | 无需容器运行 `sshd` 即可使用 Shell 或传输文件 |
+| 流量检查 | 本地应用 → 集群（经代理） | 拦截并解析 HTTP/gRPC 请求，支持复现命令与 `.proto` 解码 |
 
 工作流停止或集群连接关闭时，KubeLoop 会恢复或删除受影响的 Service、Endpoints 与
 EndpointSlice。
@@ -130,23 +154,25 @@ EndpointSlice。
 
 ```text
 本地应用
-  → TUN 或 SOCKS + 托管 sing-box / split DNS
+  → TUN 或 SOCKS5 + 托管 sing-box / split DNS
   → RelayTicket 认证的 WSS Relay
   → 分配给当前 Session 的 Data Plane
   → Pods / Services / CoreDNS
 ```
 
-Control Plane 负责身份认证、策略、Cluster Session、任务所有权与 Kubernetes 资源操作。
-Data Plane 仅承载已授权 Session 的流量，不持有 Kubernetes 凭据。本地 Helper 只在
-TUN 模式管理 sing-box 进程、interface、route、split DNS 与恢复状态；SOCKS 模式无需特权 Helper。
+**Control Plane** 负责身份认证、策略、Cluster Session、任务所有权与 Kubernetes
+资源操作。**Data Plane** 仅承载已授权 Session 的流量，不持有 Kubernetes 凭据。
+本地 **Helper** 只在 TUN 模式管理 sing-box 进程、interface、route、split DNS
+与恢复状态；SOCKS 模式无需特权 Helper。
 
 完整控制面、数据面与恢复机制请参阅[系统设计](docs/design.zh-CN.md)和
 [统一流量数据面](docs/singbox-traffic-dataplane.zh-CN.md)。
 
 ## Pod SSH
 
-Pod SSH 使用 loopback、public-key-only endpoint，不会在容器中安装 `sshd`。KubeLoop
-验证本地 SSH 客户端，并将 channel 映射到当前 Cluster Session 的 Control Plane `pods/exec` Task。
+Pod SSH 使用 loopback、public-key-only endpoint，不会在容器中安装 `sshd`。
+KubeLoop 验证本地 SSH 客户端，并将 channel 映射到当前 Cluster Session 的
+Control Plane `pods/exec` Task。
 
 - SSH login name 用于选择容器，不改变容器内实际进程用户。
 - 交互式 Shell 和远程命令要求容器提供 `/bin/sh`。
@@ -184,7 +210,9 @@ MCP 默认关闭，仅监听 `127.0.0.1`，并默认使用自动生成的 Bearer
 - 当前平台的 [Wails 前置依赖](https://wails.io/docs/gettingstarted/installation)
 
 ```bash
-make build
+make build          # 构建桌面应用
+make test-local     # 运行非 E2E 测试与 vet
+make vulncheck      # 检查 Go 依赖的已知漏洞
 ```
 
 常用前端命令：
@@ -194,18 +222,23 @@ cd frontend
 npm ci
 npm run dev          # 桌面端前端
 npm run dev:admin    # 管理控制台
+npm run dev:auth     # 认证页面
 npm run dev:site     # 公开站点
 npm run build:site   # 将生产站点写入 ../site
 ```
 
-Admin Console 与公开站点均使用 React、Vite、Tailwind CSS 4 和 shadcn 规范。
-GitHub Pages 会在发布前重新构建站点。
+管理控制台、认证页面与公开站点均使用 React、Vite、Tailwind CSS 4 和
+shadcn 规范。GitHub Pages 会在发布前重新构建站点。
 
 ## 文档
 
 - [系统设计](docs/design.zh-CN.md)
 - [Operator 指南](docs/operator.zh-CN.md)
 - [统一流量数据面](docs/singbox-traffic-dataplane.zh-CN.md)
+- [V2 路线图](docs/v2-roadmap.zh-CN.md)
+- [E2E 覆盖范围](docs/v2-e2e-coverage.zh-CN.md)
+- [Kubernetes 调用点](docs/v2-kubernetes-call-sites.zh-CN.md)
+- [DNS 延迟报告](docs/dns-latency-report.zh-CN.md)
 - [安全测试矩阵](docs/v2-security-test-matrix.zh-CN.md)
 - [架构决策记录](docs/adr/)
 
