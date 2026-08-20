@@ -54,10 +54,10 @@ hash_for() {
   awk '{print $1}' <<<"${line}"
 }
 
-darwin_arm64_sha="$(hash_for "kubeloop-${version}-darwin-arm64.tar.gz")"
-darwin_amd64_sha="$(hash_for "kubeloop-${version}-darwin-amd64.tar.gz")"
-linux_arm64_sha="$(hash_for "kubeloop-${version}-linux-arm64.tar.gz")"
-linux_amd64_sha="$(hash_for "kubeloop-${version}-linux-amd64.tar.gz")"
+darwin_arm64_sha="$(hash_for "kubeloop-tui-${version}-darwin-arm64.tar.gz")"
+darwin_amd64_sha="$(hash_for "kubeloop-tui-${version}-darwin-amd64.tar.gz")"
+linux_arm64_sha="$(hash_for "kubeloop-tui-${version}-linux-arm64.tar.gz")"
+linux_amd64_sha="$(hash_for "kubeloop-tui-${version}-linux-amd64.tar.gz")"
 
 mkdir -p "$(dirname "${FORMULA}")"
 cat >"${FORMULA}" <<EOF
@@ -69,20 +69,20 @@ class Kubeloop < Formula
 
   on_macos do
     if Hardware::CPU.arm?
-      url "https://github.com/${REPO}/releases/download/${tag}/kubeloop-${version}-darwin-arm64.tar.gz"
+      url "https://github.com/${REPO}/releases/download/${tag}/kubeloop-tui-${version}-darwin-arm64.tar.gz"
       sha256 "${darwin_arm64_sha}"
     else
-      url "https://github.com/${REPO}/releases/download/${tag}/kubeloop-${version}-darwin-amd64.tar.gz"
+      url "https://github.com/${REPO}/releases/download/${tag}/kubeloop-tui-${version}-darwin-amd64.tar.gz"
       sha256 "${darwin_amd64_sha}"
     end
   end
 
   on_linux do
     if Hardware::CPU.arm?
-      url "https://github.com/${REPO}/releases/download/${tag}/kubeloop-${version}-linux-arm64.tar.gz"
+      url "https://github.com/${REPO}/releases/download/${tag}/kubeloop-tui-${version}-linux-arm64.tar.gz"
       sha256 "${linux_arm64_sha}"
     else
-      url "https://github.com/${REPO}/releases/download/${tag}/kubeloop-${version}-linux-amd64.tar.gz"
+      url "https://github.com/${REPO}/releases/download/${tag}/kubeloop-tui-${version}-linux-amd64.tar.gz"
       sha256 "${linux_amd64_sha}"
     end
   end

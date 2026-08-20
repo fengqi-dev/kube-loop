@@ -306,13 +306,13 @@ jobs:
             if (Test-Path $path) { Copy-Item $path $stage.FullName }
           }
           Copy-Item -Recurse "build/bin/resources" $stage.FullName
-          Compress-Archive -Path "$($stage.FullName)\*" -DestinationPath "dist/kubeloop-$version-windows-$arch.zip"
+          Compress-Archive -Path "$($stage.FullName)\*" -DestinationPath "dist/kubeloop-desktop-$version-windows-$arch.zip"
           Remove-Item -Recurse -Force $stage.FullName
           $installer = Get-ChildItem "build/bin/*-installer.exe" | Select-Object -First 1
           if (-not $installer) {
             throw "NSIS installer not found in build/bin"
           }
-          Copy-Item $installer.FullName "dist/kubeloop-$version-windows-$arch-installer.exe"
+          Copy-Item $installer.FullName "dist/kubeloop-desktop-$version-windows-$arch-installer.exe"
 
       - name: Upload desktop artifact
         uses: actions/upload-artifact@v7

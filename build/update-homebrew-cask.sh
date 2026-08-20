@@ -61,8 +61,8 @@ hash_for() {
   awk '{print $1}' <<<"${line}"
 }
 
-arm_sha="$(hash_for "kubeloop-${version}-darwin-arm64.dmg")"
-intel_sha="$(hash_for "kubeloop-${version}-darwin-amd64.dmg")"
+arm_sha="$(hash_for "kubeloop-desktop-${version}-darwin-arm64.dmg")"
+intel_sha="$(hash_for "kubeloop-desktop-${version}-darwin-amd64.dmg")"
 
 python3 - "${CASK}" "${version}" "${arm_sha}" "${intel_sha}" <<'PY'
 from pathlib import Path
@@ -82,6 +82,15 @@ text, n = re.subn(
 )
 if n != 1:
     raise SystemExit("failed to update version line in cask")
+
+text, n = re.subn(
+    r'kubeloop(?:-desktop)?-#\{version\}-darwin-#\{arch\}\.dmg',
+    'kubeloop-desktop-#{version}-darwin-#{arch}.dmg',
+    text,
+    count=1,
+)
+if n != 1:
+    raise SystemExit("failed to update desktop asset URL in cask")
 
 sha_block = (
     "  sha256 arm:   "

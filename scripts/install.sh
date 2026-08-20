@@ -62,6 +62,16 @@ require_asset() {
   printf '%s' "${name}"
 }
 
+prefer_asset() {
+  local preferred="$1"
+  local legacy="$2"
+  if asset_exists "${preferred}"; then
+    printf '%s' "${preferred}"
+    return
+  fi
+  require_asset "${legacy}"
+}
+
 download_asset() {
   local asset="$1"
   local out="$2"
@@ -73,7 +83,7 @@ download_asset() {
 mkdir -p "${DEST}"
 
 if [[ "${os}" == "darwin" ]]; then
-  asset="$(require_asset "kubeloop-${ver}-darwin-${arch}.dmg")"
+  asset="$(prefer_asset "kubeloop-desktop-${ver}-darwin-${arch}.dmg" "kubeloop-${ver}-darwin-${arch}.dmg")"
   out="${DEST}/${asset}"
   download_asset "${asset}" "${out}"
   echo "Saved ${out}"
@@ -102,7 +112,7 @@ detect_linux_package() {
 
 install_deb() {
   local asset out
-  asset="$(require_asset "kubeloop-${ver}-linux-${arch}.deb")"
+  asset="$(prefer_asset "kubeloop-desktop-${ver}-linux-${arch}.deb" "kubeloop-${ver}-linux-${arch}.deb")"
   out="${DEST}/${asset}"
   download_asset "${asset}" "${out}"
   echo "Installing ${out}..."
@@ -122,7 +132,7 @@ install_deb() {
 
 install_rpm() {
   local asset out package_manager
-  asset="$(require_asset "kubeloop-${ver}-linux-${arch}.rpm")"
+  asset="$(prefer_asset "kubeloop-desktop-${ver}-linux-${arch}.rpm" "kubeloop-${ver}-linux-${arch}.rpm")"
   out="${DEST}/${asset}"
   download_asset "${asset}" "${out}"
   echo "Installing ${out}..."
