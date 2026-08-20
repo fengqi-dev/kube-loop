@@ -60,6 +60,12 @@ func BundledSingBoxPath() string {
 	return platformBundledSingBoxPath()
 }
 
+// CoreInstallPath is the protected system location used by the privileged
+// helper. User-writable component caches must never be returned here.
+func CoreInstallPath() string {
+	return platformCoreInstallPath()
+}
+
 func SocketPath() string {
 	switch runtime.GOOS {
 	case "windows":

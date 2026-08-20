@@ -98,12 +98,18 @@ func InstallFromCLI(source, token string, uid int, version, homeDir, ownerSID, s
 		singBoxPath = abs
 	}
 	dest := helper.BinaryInstallPath()
+	coreDest := helper.CoreInstallPath()
 	needsBinaryUpdate, err := helperNeedsBinaryUpdate(source, dest)
+	if err != nil {
+		return err
+	}
+	needsCoreUpdate, err := helperNeedsBinaryUpdate(singBoxPath, coreDest)
 	if err != nil {
 		return err
 	}
 	rollback, err := beginInstallRollback(
 		dest,
+		coreDest,
 		helper.SystemAuthPath(),
 		helper.SystemTokenPath(),
 	)
@@ -127,13 +133,18 @@ func InstallFromCLI(source, token string, uid int, version, homeDir, ownerSID, s
 			return fmt.Errorf("install helper binary: %w", err)
 		}
 	}
+	if needsCoreUpdate && !sameInstallPath(singBoxPath, coreDest) {
+		if err := copyFile(singBoxPath, coreDest, 0o755); err != nil {
+			return fmt.Errorf("install sing-box core: %w", err)
+		}
+	}
 	if err := helper.WriteSystemAuth(helper.AuthFile{
 		Token:       token,
 		UID:         uid,
 		Version:     version,
 		HomeDir:     homeDir,
 		OwnerSID:    ownerSID,
-		SingBoxPath: singBoxPath,
+		SingBoxPath: coreDest,
 	}); err != nil {
 		return err
 	}
@@ -169,6 +180,7 @@ func waitForInstalledHelperReady(token, version string) error {
 
 type installRollback struct {
 	binary fileRollback
+	core   fileRollback
 	auth   fileRollback
 	token  fileRollback
 }
@@ -180,23 +192,30 @@ type fileRollback struct {
 	mode       os.FileMode
 }
 
-func beginInstallRollback(binaryPath, authPath, tokenPath string) (*installRollback, error) {
+func beginInstallRollback(binaryPath, corePath, authPath, tokenPath string) (*installRollback, error) {
 	binary, err := snapshotFileForRollback(binaryPath)
 	if err != nil {
+		return nil, err
+	}
+	core, err := snapshotFileForRollback(corePath)
+	if err != nil {
+		binary.discard()
 		return nil, err
 	}
 	auth, err := snapshotFileForRollback(authPath)
 	if err != nil {
 		binary.discard()
+		core.discard()
 		return nil, err
 	}
 	token, err := snapshotFileForRollback(tokenPath)
 	if err != nil {
 		binary.discard()
+		core.discard()
 		auth.discard()
 		return nil, err
 	}
-	return &installRollback{binary: binary, auth: auth, token: token}, nil
+	return &installRollback{binary: binary, core: core, auth: auth, token: token}, nil
 }
 
 func snapshotFileForRollback(path string) (fileRollback, error) {
@@ -225,6 +244,7 @@ func snapshotFileForRollback(path string) (fileRollback, error) {
 
 func (r *installRollback) commit() {
 	r.binary.discard()
+	r.core.discard()
 	r.auth.discard()
 	r.token.discard()
 }
@@ -236,6 +256,9 @@ func (r *installRollback) restore() error {
 	}
 	if err := r.binary.restore(); err != nil {
 		rollbackErrs = append(rollbackErrs, fmt.Errorf("restore helper binary: %w", err))
+	}
+	if err := r.core.restore(); err != nil {
+		rollbackErrs = append(rollbackErrs, fmt.Errorf("restore sing-box core: %w", err))
 	}
 	if err := r.auth.restore(); err != nil {
 		rollbackErrs = append(rollbackErrs, fmt.Errorf("restore helper auth: %w", err))

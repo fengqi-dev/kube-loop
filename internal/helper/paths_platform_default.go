@@ -37,3 +37,17 @@ func platformBundledSingBoxPath() string {
 		return ""
 	}
 }
+
+func platformCoreInstallPath() string {
+	if runtime.GOOS == "darwin" {
+		root := "/Library/Application Support/KubeLoop"
+		if IsDevBuild() {
+			root += "-dev"
+		}
+		return root + "/sing-box"
+	}
+	if IsDevBuild() {
+		return "/usr/lib/kubeloop-dev/sing-box"
+	}
+	return "/usr/lib/kubeloop/sing-box"
+}

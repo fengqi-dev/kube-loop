@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/fengqi-dev/kube-loop/internal/componentstore"
 	"github.com/fengqi-dev/kube-loop/internal/helper"
 	helperprotocol "github.com/fengqi-dev/kube-loop/internal/protocol/helper"
 )
@@ -30,13 +31,13 @@ var (
 	ensureInstallMu      sync.Mutex
 )
 
-// SetBundledBinary supplies the platform helper service embedded by the desktop
-// application. The standalone helper binary never calls it.
+// SetBundledBinary supplies the platform helper service embedded by a client.
+// The standalone helper binary never calls it.
 func SetBundledBinary(content []byte) {
 	SetBundledFile(helperBinaryName(helperServiceName), content)
 }
 
-// SetBundledFile supplies a named helper-related binary embedded by the desktop app.
+// SetBundledFile supplies a named runtime binary embedded by a client.
 func SetBundledFile(name string, content []byte) {
 	bundledFilesMu.Lock()
 	defer bundledFilesMu.Unlock()
@@ -101,13 +102,27 @@ func ensureInstall(ctx context.Context, requireCurrentBinary bool, certificatePE
 	if locateErr != nil {
 		return locateErr
 	}
+	source, err := componentstore.Cache(helper.Version, helperBinaryName(helperServiceName), source)
+	if err != nil {
+		return fmt.Errorf("cache bundled helper: %w", err)
+	}
 	sourceSHA256, err := bundledHelperSHA256(source)
 	if err != nil {
 		return err
 	}
-	singBoxPath, err := helper.LocateBundledSingBox()
+	singBoxPath, bundled, err := materializeBundledFile(singBoxBinaryName())
 	if err != nil {
 		return err
+	}
+	if !bundled {
+		singBoxPath, err = helper.LocateBundledSingBox()
+		if err != nil {
+			return err
+		}
+	}
+	singBoxPath, err = componentstore.Cache(helper.Version, filepath.Base(singBoxPath), singBoxPath)
+	if err != nil {
+		return fmt.Errorf("cache bundled sing-box: %w", err)
 	}
 	token, err := helper.EnsureUserToken()
 	if err != nil {
@@ -234,6 +249,9 @@ func LocateBundledSupervisor() (string, error) {
 
 func locateBundledTool(baseName string) (string, error) {
 	name := helperBinaryName(baseName)
+	if path, err := componentstore.Find(helper.Version, name); err == nil {
+		return path, nil
+	}
 	// Unix helpers are installed outside the application bundle. Always
 	// materialize the exact bytes embedded in this desktop build first so stale
 	// development/package artifacts cannot be selected as the privileged source.
@@ -401,4 +419,8 @@ func helperBinaryName(base string) string {
 		return base + ".exe"
 	}
 	return base
+}
+
+func singBoxBinaryName() string {
+	return helperBinaryName("sing-box")
 }

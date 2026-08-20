@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"runtime"
 
+	"github.com/fengqi-dev/kube-loop/internal/componentstore"
 	singboxdist "github.com/fengqi-dev/kube-loop/internal/singbox/distribution"
 )
 
@@ -18,6 +19,9 @@ func LocateBundledSingBox() (string, error) {
 		name = "sing-box.exe"
 	}
 	var candidates []string
+	if path, err := componentstore.Find(Version, name); err == nil {
+		candidates = append(candidates, path)
+	}
 	if path := BundledSingBoxPath(); path != "" {
 		candidates = append(candidates, path)
 	}
