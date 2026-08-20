@@ -12,18 +12,20 @@
 **[Design](docs/design.md)**
 
 KubeLoop is a desktop network tool for Kubernetes development. It connects a
-workstation to cluster networking like a focused VPN, so browsers, IDEs, CLIs,
-and SDKs can use Pod IPs, ClusterIP Services, and cluster DNS directly.
+workstation to cluster networking so browsers, IDEs, CLIs, and SDKs can reach
+Pod IPs, ClusterIP Services, and cluster DNS directly — no VPN, no public
+ingress.
 
 ## Why KubeLoop
 
 - **Transparent cluster access** — use real cluster addresses from ordinary local applications.
-- **Focused routing** — only discovered or configured Kubernetes routes enter the tunnel.
+- **No kubeconfig or `kubectl` dependency** — the desktop app signs in to a KubeLoop Server and never embeds Kubernetes credentials.
 - **No public cluster ingress** — RelayTicket-authenticated WebSockets carry traffic to an assigned Data Plane.
+- **Focused routing** — only discovered or configured Kubernetes routes enter the tunnel.
 - **Local iteration tools** — Port Forward, Exchange, Mirror, and Preview cover outbound and inbound traffic.
+- **Traffic inspection** — intercept and decode live HTTP and gRPC traffic through the proxy, with auto-generated `curl`/`grpcurl` replay commands and optional `.proto` schema import.
 - **Desktop workflow** — inspect workloads, use Pod SSH/SFTP, transfer files, and diagnose connections in one UI.
 - **Cross-platform** — macOS, Windows, and Linux on amd64 and arm64.
-- **No kubeconfig or `kubectl` dependency** — the desktop app signs in to a KubeLoop Server and never embeds Kubernetes credentials.
 
 ## Install
 
@@ -50,18 +52,16 @@ helm upgrade --install kubeloop \
   --wait
 ```
 
-Replace the version, hostname, and Ingress class for your
-environment. Then inspect the generated initial-admin instructions and verify
-service discovery:
+Replace the version, hostname, and Ingress class for your environment. Then
+inspect the generated initial-admin instructions and verify service discovery:
 
 ```bash
 helm get notes kubeloop --namespace kubeloop-system
 curl http://kubeloop.example.com/.well-known/kubeloop
 ```
 
-Ingress TLS is disabled by default. For HTTPS, set `publicURL` to
-`https://...`, set `ingress.tls.enabled=true`, and provide
-`ingress.tls.secretName`.
+Ingress TLS is disabled by default. For HTTPS, set `publicURL` to `https://…`,
+set `ingress.tls.enabled=true`, and provide `ingress.tls.secretName`.
 
 Uninstall the workloads with:
 
@@ -76,7 +76,7 @@ external PostgreSQL/MySQL, upgrades, and complete cleanup.
 
 ### Desktop client
 
-### macOS and Linux
+#### macOS and Linux
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/fengqi-dev/kube-loop/main/scripts/install.sh | bash
@@ -85,7 +85,7 @@ curl -fsSL https://raw.githubusercontent.com/fengqi-dev/kube-loop/main/scripts/i
 To select a version or Linux package format:
 
 ```bash
-VERSION=v1.5.0 PACKAGE=deb \
+VERSION=v2.0.3 PACKAGE=deb \
   bash -c "$(curl -fsSL https://raw.githubusercontent.com/fengqi-dev/kube-loop/main/scripts/install.sh)"
 ```
 
@@ -98,7 +98,7 @@ brew tap kube-loop/kubeloop https://github.com/fengqi-dev/kube-loop
 brew install --cask kubeloop
 ```
 
-### Windows
+#### Windows
 
 ```powershell
 irm https://raw.githubusercontent.com/fengqi-dev/kube-loop/main/scripts/install.ps1 | iex
@@ -107,6 +107,29 @@ irm https://raw.githubusercontent.com/fengqi-dev/kube-loop/main/scripts/install.
 DMG, NSIS, portable zip, deb, rpm, and tar.gz artifacts are available from
 [GitHub Releases](https://github.com/fengqi-dev/kube-loop/releases/latest).
 Each release includes `SHA256SUMS`.
+
+### Terminal client
+
+The K9s-style terminal client implements the core connection and Kubernetes
+resource workflows without requiring the desktop UI. Download the matching
+`kubeloop-<version>-<os>-<arch>.tar.gz` archive from GitHub Releases, extract it,
+and run `kubeloop` (`kubeloop.exe` on Windows).
+
+Release archives are available for macOS, Windows, and Linux on amd64 and
+arm64. The TUI uses the same KubeLoop Server profiles and Control Plane APIs as
+the desktop client; it does not read kubeconfig or call Kubernetes directly.
+See the [TUI guide](docs/tui.md) for resources, commands, configuration, and
+testing boundaries.
+
+Homebrew installs the TUI separately from the desktop Cask:
+
+```bash
+brew tap kube-loop/kubeloop https://github.com/fengqi-dev/kube-loop
+brew install kubeloop
+```
+
+Before the first stable release containing TUI archives, use
+`brew install --HEAD kubeloop`.
 
 ## Connect
 
@@ -127,6 +150,7 @@ Once connected, use a ClusterIP, Pod IP, or cluster DNS name from any local appl
 | Mirror | Existing Service → Pods + local shadow | Observe a copy without putting the local app on the primary path |
 | Preview | New temporary Service → local app | Make a local application reachable from the cluster |
 | Pod SSH/SFTP | Local SSH client → `pods/exec` | Use a shell or transfer files without running `sshd` in the container |
+| Traffic Inspection | Local app → cluster (via proxy) | Intercept decoded HTTP/gRPC requests with replayable commands and `.proto` decoding |
 
 KubeLoop restores or removes affected Services, Endpoints, and EndpointSlices
 when a workflow stops or the cluster connection closes.
@@ -135,17 +159,18 @@ when a workflow stops or the cluster connection closes.
 
 ```text
 Local applications
-  → TUN or SOCKS + managed sing-box / split DNS
+  → TUN or SOCKS5 + managed sing-box / split DNS
   → RelayTicket-authenticated WSS Relay
   → assigned, Session-scoped Data Plane
   → Pods / Services / CoreDNS
 ```
 
-The Control Plane owns authentication, policy, Cluster Session state, task
-ownership, and Kubernetes operations. The Data Plane carries only authorized
-Session traffic and has no Kubernetes credentials. The local Helper is used
-only by TUN mode to manage KubeLoop's sing-box process, interface, routes,
-split DNS, and recovery state; SOCKS mode requires no privileged Helper.
+The **Control Plane** owns authentication, policy, Cluster Session state, task
+ownership, and Kubernetes operations. The **Data Plane** carries only
+authorized Session traffic and holds no Kubernetes credentials. The local
+**Helper** is used only by TUN mode to manage KubeLoop's sing-box process,
+interface, routes, split DNS, and recovery state; SOCKS mode requires no
+privileged Helper.
 
 Read [System design](docs/design.md) and
 [Unified traffic data plane](docs/singbox-traffic-dataplane.md) for the full
@@ -153,9 +178,9 @@ control-plane, data-plane, and recovery model.
 
 ## Pod SSH
 
-Pod SSH uses a loopback, public-key-only endpoint without installing `sshd` in a
-container. KubeLoop authenticates the local SSH client and maps the channel to
-the active Cluster Session's Control Plane `pods/exec` task.
+Pod SSH uses a loopback, public-key-only endpoint without installing `sshd` in
+a container. KubeLoop authenticates the local SSH client and maps the channel
+to the active Cluster Session's Control Plane `pods/exec` task.
 
 - The SSH login name selects the container; it does not change the process user.
 - Interactive shells and remote commands require `/bin/sh`.
@@ -170,9 +195,9 @@ KubeLoop can expose a local
 Streamable HTTP for Codex, Claude Code, Cursor, and VS Code.
 
 MCP is disabled by default, listens only on `127.0.0.1`, and uses a generated
-Bearer token by default. Cluster operations use the active authenticated
-Server Profile and Cluster Session; MCP does not load a local kubeconfig or
-bypass Control Plane policy and Kubernetes authorization.
+Bearer token. Cluster operations use the active authenticated Server Profile and
+Cluster Session; MCP does not load a local kubeconfig or bypass Control Plane
+policy and Kubernetes authorization.
 
 | Tool | Scope |
 | --- | --- |
@@ -194,7 +219,9 @@ Requirements:
 - Platform prerequisites for [Wails](https://wails.io/docs/gettingstarted/installation)
 
 ```bash
-make build
+make build          # build the desktop app
+make test-local     # run non-E2E tests and vet
+make vulncheck      # check Go dependencies for known vulnerabilities
 ```
 
 Useful frontend commands:
@@ -204,18 +231,24 @@ cd frontend
 npm ci
 npm run dev          # desktop frontend
 npm run dev:admin    # admin console
+npm run dev:auth     # auth page
 npm run dev:site     # public website
 npm run build:site   # writes the production site to ../site
 ```
 
-The Admin Console and public website both use React, Vite, Tailwind CSS 4, and
-shadcn conventions. GitHub Pages rebuilds the website before deployment.
+The Admin Console, auth page, and public website all use React, Vite,
+Tailwind CSS 4, and shadcn conventions. GitHub Pages rebuilds the website
+before deployment.
 
 ## Documentation
 
 - [System design](docs/design.md)
 - [Operator guide](docs/operator.zh-CN.md)
 - [Traffic data plane](docs/singbox-traffic-dataplane.md)
+- [V2 roadmap](docs/v2-roadmap.zh-CN.md)
+- [E2E coverage](docs/v2-e2e-coverage.zh-CN.md)
+- [Kubernetes call sites](docs/v2-kubernetes-call-sites.zh-CN.md)
+- [DNS latency report](docs/dns-latency-report.zh-CN.md)
 - [Security test matrix](docs/v2-security-test-matrix.zh-CN.md)
 - [Architecture decisions](docs/adr/)
 
