@@ -1303,6 +1303,10 @@ export namespace remote {
 	    podIp?: string;
 	    nodeName?: string;
 	    ready: boolean;
+	    readyContainers: number;
+	    totalContainers: number;
+	    restarts: number;
+	    ageSeconds: number;
 	    containers: string[];
 	    ports: PodPort[];
 	
@@ -1318,6 +1322,10 @@ export namespace remote {
 	        this.podIp = source["podIp"];
 	        this.nodeName = source["nodeName"];
 	        this.ready = source["ready"];
+	        this.readyContainers = source["readyContainers"];
+	        this.totalContainers = source["totalContainers"];
+	        this.restarts = source["restarts"];
+	        this.ageSeconds = source["ageSeconds"];
 	        this.containers = source["containers"];
 	        this.ports = this.convertValues(source["ports"], PodPort);
 	    }
@@ -1499,6 +1507,8 @@ export namespace remote {
 	    type: string;
 	    clusterIp?: string;
 	    externalName?: string;
+	    externalIps: string[];
+	    ageSeconds: number;
 	    ports: ServicePort[];
 	
 	    static createFrom(source: any = {}) {
@@ -1512,6 +1522,8 @@ export namespace remote {
 	        this.type = source["type"];
 	        this.clusterIp = source["clusterIp"];
 	        this.externalName = source["externalName"];
+	        this.externalIps = source["externalIps"];
+	        this.ageSeconds = source["ageSeconds"];
 	        this.ports = this.convertValues(source["ports"], ServicePort);
 	    }
 	

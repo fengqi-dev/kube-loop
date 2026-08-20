@@ -120,9 +120,20 @@ func (manager *Manager) Start(
 	}
 	reservation := serverProfile.ID + "\x00" + request.Namespace + "\x00" + request.Pod
 	manager.mu.Lock()
-	if _, exists := manager.starting[reservation]; exists || manager.findLocked(serverProfile.ID, request.Namespace, request.Pod) != nil {
+	if _, exists := manager.starting[reservation]; exists {
 		manager.mu.Unlock()
 		return Info{}, errors.New("Pod SSH endpoint is already active")
+	}
+	if existing := manager.findLocked(serverProfile.ID, request.Namespace, request.Pod); existing != nil {
+		info := existing.info
+		manager.mu.Unlock()
+		command, err := manager.server.Command(info.ID, request.Container)
+		if err != nil {
+			return Info{}, err
+		}
+		info.Container = request.Container
+		info.Command = command
+		return info, nil
 	}
 	manager.starting[reservation] = struct{}{}
 	manager.mu.Unlock()
