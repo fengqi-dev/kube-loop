@@ -66,8 +66,9 @@ proc handshake {description pattern} {
 spawn env HOME=$home TERM=xterm-256color KUBELOOP_TUI_E2E_FIXTURE=1 $binary -test.v -test.run {^TestTUIFixture$}
 exec stty rows 32 columns 120 < $spawn_out(slave,name)
 exec kill -WINCH [exp_pid]
-handshake "launch k9s workspace" {KUBELOOP}
-expect_text "global status header" {Cluster:.*KubeLoop Rev:.*K8s Rev:}
+handshake "launch k9s workspace" {Cluster:}
+expect_text "global revision header" {KubeLoop Rev:}
+expect_text "global Kubernetes header" {K8s Rev:}
 expect_text "connection resource" {<connection>}
 
 send -- "n"
@@ -148,9 +149,9 @@ type_text "connection"
 send -- "\r"
 expect_text "connection command" {<connection>}
 send -- "m"
-expect_text "SOCKS mode" {MODE SOCKS}
+expect_text "SOCKS mode" {Mode: SOCKS}
 send -- "\r"
-expect_text "fixture connect" {CONNECTED}
+expect_text "fixture connect" {Data plane connected}
 send -- "\r"
 expect_text "disconnect confirmation" {DISCONNECT\?}
 send -- "y"
@@ -161,7 +162,7 @@ exec kill -WINCH [exp_pid]
 expect_text "minimum size guard" {Current: 55x16  Required: 60x18}
 exec stty rows 24 columns 90 < $spawn_out(slave,name)
 exec kill -WINCH [exp_pid]
-expect_text "resize recovery" {Connection}
+expect_text "resize recovery" {connection}
 
 send -- ":"
 type_text "q"

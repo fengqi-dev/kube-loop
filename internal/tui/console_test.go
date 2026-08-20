@@ -260,6 +260,7 @@ func TestUpdateConsoleTaskFilterAndProfileOverlay(t *testing.T) {
 	}
 	model.updateConsole(consoleKey("t"))
 	model.updateConsole(consoleKey("t"))
+	model.updateConsole(consoleKey("t"))
 	if model.console.taskFilter != taskFilterExec || model.consoleItemCount() != 1 {
 		t.Fatalf("task filter=%d count=%d, want exec/1", model.console.taskFilter, model.consoleItemCount())
 	}
@@ -280,8 +281,13 @@ func TestUpdateConsoleDetailFocusAndCopyOutput(t *testing.T) {
 	if model.console.views[tabTasks].focus != focusDetail {
 		t.Fatal("detail click did not focus the details panel")
 	}
-	model.updateConsole(consoleKey("y"))
-	if model.status != "Session output copied" {
+	cmd, handled := model.updateConsole(consoleKey("y"))
+	if !handled || cmd == nil || model.status != "Copying EXEC session..." {
+		t.Fatalf("handled=%v cmd=%v status=%q, want async copy", handled, cmd != nil, model.status)
+	}
+	updated, _ := model.Update(clipboardCopiedMsg{kind: "EXEC"})
+	model = updated.(Model)
+	if model.status != "EXEC session copied to clipboard" {
 		t.Fatalf("status = %q, want copied status", model.status)
 	}
 }
@@ -460,15 +466,15 @@ func TestUpdateConsoleCommandMode(t *testing.T) {
 		}
 	})
 
-	t.Run("namespace command blocked while connected", func(t *testing.T) {
+	t.Run("namespace command supports connected switching", func(t *testing.T) {
 		model := newConsoleTestModel(tabConnection, 100, 28)
 		model.namespaces = []clientremote.Namespace{{Name: "default"}}
 		model.updateConsole(consoleKey(":"))
 		model.updateConsole(consoleKey("n"))
 		model.updateConsole(consoleKey("s"))
 		model.updateConsole(tea.KeyMsg{Type: tea.KeyEnter})
-		if model.console.overlay != overlayNone || model.err == "" {
-			t.Fatalf("overlay=%d err=%q, want blocked with error", model.console.overlay, model.err)
+		if model.console.overlay != overlayNamespace || model.err != "" {
+			t.Fatalf("overlay=%d err=%q, want namespace selection", model.console.overlay, model.err)
 		}
 	})
 

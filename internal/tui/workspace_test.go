@@ -38,12 +38,12 @@ func newWorkspaceTestModel(resource workspaceResource) Model {
 func TestWorkspaceLayoutUsesSingleResourceTable(t *testing.T) {
 	model := newWorkspaceTestModel(resourcePods)
 	view := model.View()
-	for _, expected := range []string{"Cluster:", "Namespace:", "default", "Mode:", "TUN", "pods(default)[2]", "api-0", "POD IP", "<pods>"} {
+	for _, expected := range []string{"Cluster:", "Namespace:", "default", "Mode:", "TUN", "Pods(default)[2]", "api-0", "POD IP", "<pods>"} {
 		if !strings.Contains(view, expected) {
 			t.Fatalf("workspace view missing %q", expected)
 		}
 	}
-	if !strings.Contains(view, "<p>") || !strings.Contains(view, "<n>") || strings.Contains(view, "RESOURCE WORKSPACE") {
+	if !strings.Contains(view, "<0>") || !strings.Contains(view, "<n>") || strings.Contains(view, "RESOURCE WORKSPACE") {
 		t.Fatal("K9s-style workspace header is not rendered")
 	}
 }
@@ -101,7 +101,7 @@ func TestWorkspaceConnectionResourceShortcuts(t *testing.T) {
 	}
 
 	view := newWorkspaceTestModel(resourceConnection).View()
-	for _, expected := range []string{"p  Pods", "v  Services", "n  Namespaces", "s  Sessions"} {
+	for _, expected := range []string{"<p> Pods", "<v> Services", "<n> Namespaces", "<s> Sessions"} {
 		if !strings.Contains(view, expected) {
 			t.Fatalf("connection view missing %q", expected)
 		}
@@ -212,6 +212,8 @@ func TestWorkspaceLogoutRequiresDisconnectedSession(t *testing.T) {
 		t.Fatalf("connected logout: handled=%v cmd=%v err=%q", handled, cmd, model.err)
 	}
 
+	model = newWorkspaceTestModel(resourceConnection)
+	model.authSession.Authenticated = true
 	model.dataPlaneStatus.State = "disconnected"
 	cmd, handled = model.updateWorkspace(workspaceKey("L"))
 	if !handled || cmd == nil || !model.loading || model.status != "Logging out..." {
@@ -230,7 +232,7 @@ func TestWorkspaceConnectCommandIsIdempotent(t *testing.T) {
 	model.authSession.Authenticated = true
 	model.dataPlaneStatus.State = "disconnected"
 	cmd := model.runWorkspaceCommand("connect")
-	if cmd == nil || !model.loading || model.status != "Connecting..." {
+	if cmd == nil || !model.loading || model.status != "[1/3] Creating Cluster Session..." {
 		t.Fatalf("connect command: cmd=%v loading=%v status=%q err=%q", cmd, model.loading, model.status, model.err)
 	}
 
@@ -263,7 +265,8 @@ func TestWorkspaceNamespaceShortcutReconnectsConnectedDataPlane(t *testing.T) {
 		t.Fatalf("namespace shortcut: handled=%v cmd=%v overlay=%v", handled, cmd, model.console.overlay)
 	}
 
-	model.console.overlayPos = 1
+	model.console.query = "prod"
+	model.console.overlayPos = 0
 	cmd = model.updateConsoleOverlay(tea.KeyMsg{Type: tea.KeyEnter})
 	if cmd == nil || model.pendingNamespace != "production" || !model.loading {
 		t.Fatalf("namespace switch: cmd=%v pending=%q loading=%v", cmd, model.pendingNamespace, model.loading)
