@@ -99,6 +99,7 @@ jobs:
             -o Acquire::http::Timeout=30 \
             -o Acquire::https::Timeout=30 \
             install --yes --no-install-recommends \
+            expect \
             libgtk-3-dev \
             libwebkit2gtk-4.1-dev
 
@@ -115,6 +116,7 @@ jobs:
             ./internal/singbox \
             ./internal/client/... \
             ./internal/protocol/...
+          make tui-test-e2e
           make recovery-test
 
       - name: Verify capacity and release cross-builds
