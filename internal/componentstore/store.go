@@ -238,7 +238,7 @@ func writeManifest(directory string, value manifest) error {
 
 func acquireReleaseLock(directory string) (func(), error) {
 	lockPath := filepath.Join(directory, ".lock")
-	for attempt := 0; attempt < 100; attempt++ {
+	for range 100 {
 		if err := os.Mkdir(lockPath, 0o700); err == nil {
 			return func() { _ = os.Remove(lockPath) }, nil
 		} else if !os.IsExist(err) {
