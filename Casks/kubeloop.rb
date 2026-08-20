@@ -1,11 +1,11 @@
 cask "kubeloop" do
   arch arm: "arm64", intel: "amd64"
 
-  version "2.0.3"
-  sha256 arm:   "6e0b6661185d58a4d2f210a13d16b2d3364a61e05d1359975c527764984040d7",
-         intel: "1bc92fcac64979f3c3f6c07166377ec0984bd11728b1e8aafec1f308bb987f55"
+  version "2.1.0"
+  sha256 arm:   "cd1b017d8b57fea272fe862a2477d4c4580ee7423dcfbcb7b6be7fa5c31bcdd1",
+         intel: "5bfa29aaecddce90c5d6afd9b72983403976cd3e8ed9deb45fd165a8c40fa7d3"
 
-  url "https://github.com/fengqi-dev/kube-loop/releases/download/v#{version}/kubeloop-#{version}-darwin-#{arch}.dmg"
+  url "https://github.com/fengqi-dev/kube-loop/releases/download/v#{version}/kubeloop-desktop-#{version}-darwin-#{arch}.dmg"
   name "KubeLoop"
   desc "Connect your laptop to Kubernetes like a VPN"
   homepage "https://fengqi-dev.github.io/kube-loop/"
