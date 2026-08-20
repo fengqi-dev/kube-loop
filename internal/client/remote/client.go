@@ -131,14 +131,18 @@ type Namespace struct {
 }
 
 type Pod struct {
-	Name       string    `json:"name"`
-	Namespace  string    `json:"namespace"`
-	Phase      string    `json:"phase,omitempty"`
-	PodIP      string    `json:"podIp,omitempty"`
-	NodeName   string    `json:"nodeName,omitempty"`
-	Ready      bool      `json:"ready"`
-	Containers []string  `json:"containers"`
-	Ports      []PodPort `json:"ports"`
+	Name            string    `json:"name"`
+	Namespace       string    `json:"namespace"`
+	Phase           string    `json:"phase,omitempty"`
+	PodIP           string    `json:"podIp,omitempty"`
+	NodeName        string    `json:"nodeName,omitempty"`
+	Ready           bool      `json:"ready"`
+	ReadyContainers int32     `json:"readyContainers"`
+	TotalContainers int32     `json:"totalContainers"`
+	Restarts        int32     `json:"restarts"`
+	AgeSeconds      int64     `json:"ageSeconds"`
+	Containers      []string  `json:"containers"`
+	Ports           []PodPort `json:"ports"`
 }
 
 type PodPort struct {
@@ -153,6 +157,8 @@ type Service struct {
 	Type         string        `json:"type"`
 	ClusterIP    string        `json:"clusterIp,omitempty"`
 	ExternalName string        `json:"externalName,omitempty"`
+	ExternalIPs  []string      `json:"externalIps"`
+	AgeSeconds   int64         `json:"ageSeconds"`
 	Ports        []ServicePort `json:"ports"`
 }
 

@@ -64,6 +64,21 @@ type Manager struct {
 	events   chan StatusEvent
 }
 
+// Mode identifies how local applications enter the connected data plane.
+type Mode string
+
+const (
+	ModeSOCKS Mode = "socks"
+	ModeTUN   Mode = "tun"
+)
+
+func (mode Mode) Validate() error {
+	if mode != ModeSOCKS && mode != ModeTUN {
+		return errors.New("Data Plane mode must be socks or tun")
+	}
+	return nil
+}
+
 func NewManager(sessions SessionSource, config Config) (*Manager, error) {
 	if sessions == nil {
 		return nil, errors.New("Data Plane Session source is required")
@@ -153,6 +168,37 @@ func (manager *Manager) Connect(ctx context.Context, serverProfile profile.Profi
 	go manager.watch(serverProfile.ID, entry, runtime, runtime.TransportDone())
 	manager.emit(serverProfile.ID, runtime.Status(), nil)
 	return runtime.Status(), nil
+}
+
+// ConnectMode connects the stable SOCKS runtime and atomically applies mode.
+func (manager *Manager) ConnectMode(
+	ctx context.Context,
+	serverProfile profile.Profile,
+	session remote.Session,
+	mode Mode,
+) (Status, error) {
+	if err := mode.Validate(); err != nil {
+		return Status{}, err
+	}
+	if _, err := manager.Connect(ctx, serverProfile, session); err != nil {
+		return Status{}, err
+	}
+	status, err := manager.SwitchMode(ctx, serverProfile.ID, mode)
+	if err != nil {
+		return Status{}, errors.Join(err, manager.Disconnect(serverProfile.ID))
+	}
+	return status, nil
+}
+
+// SwitchMode changes local presentation without replacing the remote Session.
+func (manager *Manager) SwitchMode(ctx context.Context, profileID string, mode Mode) (Status, error) {
+	if err := mode.Validate(); err != nil {
+		return Status{}, err
+	}
+	if mode == ModeTUN {
+		return manager.StartTUN(ctx, profileID)
+	}
+	return manager.StopTUN(profileID)
 }
 
 func runtimeConfig(config Config, serverProfile profile.Profile) Config {

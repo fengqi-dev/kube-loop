@@ -415,9 +415,18 @@ func podFromKubernetes(pod *corev1.Pod) podDocument {
 			break
 		}
 	}
+	var readyContainers, restarts int32
+	for _, status := range pod.Status.ContainerStatuses {
+		if status.Ready {
+			readyContainers++
+		}
+		restarts += status.RestartCount
+	}
 	return podDocument{
 		Name: pod.Name, Namespace: pod.Namespace, Phase: string(pod.Status.Phase),
-		PodIP: pod.Status.PodIP, NodeName: pod.Spec.NodeName, Ready: ready, Containers: containers, Ports: ports,
+		PodIP: pod.Status.PodIP, NodeName: pod.Spec.NodeName, Ready: ready,
+		ReadyContainers: readyContainers, TotalContainers: int32(len(pod.Spec.Containers)), Restarts: restarts,
+		AgeSeconds: resourceAgeSeconds(pod.CreationTimestamp), Containers: containers, Ports: ports,
 	}
 }
 
@@ -428,10 +437,33 @@ func serviceFromKubernetes(service *corev1.Service) serviceDocument {
 			Name: port.Name, Port: port.Port, Protocol: string(port.Protocol), TargetPort: port.TargetPort.String(),
 		})
 	}
+	externalIPs := append([]string(nil), service.Spec.ExternalIPs...)
+	for _, ingress := range service.Status.LoadBalancer.Ingress {
+		if ingress.IP != "" {
+			externalIPs = append(externalIPs, ingress.IP)
+		} else if ingress.Hostname != "" {
+			externalIPs = append(externalIPs, ingress.Hostname)
+		}
+	}
+	if service.Spec.ExternalName != "" {
+		externalIPs = append(externalIPs, service.Spec.ExternalName)
+	}
 	return serviceDocument{
 		Name: service.Name, Namespace: service.Namespace, Type: string(service.Spec.Type),
-		ClusterIP: service.Spec.ClusterIP, ExternalName: service.Spec.ExternalName, Ports: ports,
+		ClusterIP: service.Spec.ClusterIP, ExternalName: service.Spec.ExternalName,
+		ExternalIPs: externalIPs, AgeSeconds: resourceAgeSeconds(service.CreationTimestamp), Ports: ports,
 	}
+}
+
+func resourceAgeSeconds(created metav1.Time) int64 {
+	if created.Time.IsZero() {
+		return 0
+	}
+	age := int64(time.Since(created.Time).Seconds())
+	if age < 0 {
+		return 0
+	}
+	return age
 }
 
 func mapKubernetesError(err error) *controlplaneapi.Error {
