@@ -10,6 +10,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/fengqi-dev/kube-loop/internal/componentstore"
 	"github.com/fengqi-dev/kube-loop/internal/helper"
 	helperspec "github.com/fengqi-dev/kube-loop/internal/protocol/helper"
 	supervisorprotocol "github.com/fengqi-dev/kube-loop/internal/protocol/supervisor"
@@ -31,6 +32,10 @@ func installCurrentHelper(
 	if err != nil {
 		return fmt.Errorf("locate bundled supervisor: %w", err)
 	}
+	supervisorSource, err = componentstore.Cache(helper.Version, helperBinaryName(supervisorServiceName), supervisorSource)
+	if err != nil {
+		return fmt.Errorf("cache bundled supervisor: %w", err)
+	}
 	supervisorSHA, err := bundledToolSHA256(helperBinaryName(supervisorServiceName), supervisorSource)
 	if err != nil {
 		return fmt.Errorf("hash bundled supervisor: %w", err)
@@ -40,7 +45,8 @@ func installCurrentHelper(
 	statusCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	status, statusErr := client.Status(statusCtx)
 	cancel()
-	if canUpdateWorkerThroughSupervisor(status, statusErr, config.Channel, installedSupervisorSHA, supervisorSHA) {
+	if sameInstallPath(singBox, helper.CoreInstallPath()) &&
+		canUpdateWorkerThroughSupervisor(status, statusErr, config.Channel, installedSupervisorSHA, supervisorSHA) {
 		if status.Worker.SHA256 == sourceSHA256 && status.Worker.Version == helper.Version &&
 			status.Worker.Protocol == helperspec.Version && status.Worker.CoreReady {
 			return nil

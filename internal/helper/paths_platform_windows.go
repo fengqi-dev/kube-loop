@@ -45,6 +45,10 @@ func platformBundledSingBoxPath() string {
 	return filepath.Join(platformInstallRootForExecutable(executable), "sing-box.exe")
 }
 
+func platformCoreInstallPath() string {
+	return filepath.Join(windowsProgramFilesProductRoot(), "sing-box.exe")
+}
+
 func platformInstallRootForExecutable(executable string) string {
 	if resolved, err := filepath.EvalSymlinks(executable); err == nil {
 		executable = resolved
