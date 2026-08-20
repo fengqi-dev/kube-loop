@@ -144,7 +144,7 @@ install_rpm() {
 
 install_tarball() {
   local asset tmp
-  asset="$(require_asset "kubeloop-${ver}-linux-${arch}.tar.gz")"
+  asset="$(require_asset "kubeloop-desktop-${ver}-linux-${arch}.tar.gz")"
   tmp="$(mktemp "${TMPDIR:-/tmp}/kubeloop.XXXXXX")"
   cleanup() { rm -f "${tmp}"; }
   trap cleanup EXIT

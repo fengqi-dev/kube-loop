@@ -8,6 +8,7 @@ SHELL = /usr/bin/env bash -o pipefail
 OPERATOR_IMG ?= ghcr.io/fengqi-dev/kube-loop/operator:latest
 CONTAINER_TOOL ?= docker
 YEAR ?= $(shell date +%Y)
+VERSION ?= dev
 
 LOCALBIN ?= $(CURDIR)/build/tools
 KUBECTL ?= kubectl
@@ -45,6 +46,11 @@ SINGBOX_GOARCH = $(word 2,$(subst /, ,$(SINGBOX_TARGET)))
 SINGBOX_VERSION ?= v1.13.19
 SINGBOX_BINARY = build/bin/sing-box$(if $(filter windows,$(SINGBOX_GOOS)),.exe,)
 
+TUI_GOOS ?= $(shell go env GOOS)
+TUI_GOARCH ?= $(shell go env GOARCH)
+TUI_BINARY ?= build/bin/kubeloop$(if $(filter windows,$(TUI_GOOS)),.exe,)
+TUI_LDFLAGS ?= -s -w -X main.version=$(VERSION)
+
 .PHONY: help
 help: ## Display this help.
 	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-28s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
@@ -66,6 +72,39 @@ admin-frontend-test: ## Run browser Management Plane frontend unit tests.
 .PHONY: admin-frontend-check
 admin-frontend-check: admin-frontend-test admin-frontend-build ## Test and verify the committed embedded Management Plane assets are current.
 	git diff --exit-code -- internal/controlplane/admin/ui/assets
+
+##@ TUI
+
+.PHONY: tui tui-components
+tui-components: ## Build the platform-matched privileged runtime sidecars.
+	rm -rf build/bin/resources
+	mkdir -p build/bin/resources
+	VITE_APP_VERSION="$(VERSION)" go run ./build/helper-prebuild.go "$(TUI_GOOS)/$(TUI_GOARCH)"
+	VITE_APP_VERSION="$(VERSION)" go run ./build/stage-package-assets.go "$(TUI_GOOS)/$(TUI_GOARCH)"
+	cp "build/embedded/kubeloop-helper$(if $(filter windows,$(TUI_GOOS)),.exe,)" build/bin/resources/
+	$(if $(filter darwin,$(TUI_GOOS)),cp build/embedded/kubeloop-supervisor build/bin/resources/,true)
+	cp "build/bin/sing-box$(if $(filter windows,$(TUI_GOOS)),.exe,)" build/bin/resources/
+
+tui: tui-components ## Build the KubeLoop TUI and its runtime components.
+	@set -eu; \
+		embed_dir="cmd/kubeloop-tui/embedded"; \
+		rm -rf "$$embed_dir"; \
+		mkdir -p "$$embed_dir" "$(dir $(TUI_BINARY))"; \
+		cp build/bin/resources/* "$$embed_dir/"; \
+		trap 'rm -rf "$$embed_dir"' EXIT; \
+		GOOS="$(TUI_GOOS)" GOARCH="$(TUI_GOARCH)" go build -trimpath \
+			-tags kubeloop_embed \
+			-ldflags "$(TUI_LDFLAGS)" \
+			-o "$(TUI_BINARY)" \
+			./cmd/kubeloop-tui
+
+.PHONY: tui-test-e2e
+tui-test-e2e: ## Run isolated keyboard, mouse and resize automation in a real PTY.
+	sh e2e/tui/run.sh
+
+.PHONY: tui-test-live-e2e
+tui-test-live-e2e: ## Run the explicitly configured live TUI PTY gate.
+	sh e2e/tui/live.sh
 
 ##@ Patched sing-box
 

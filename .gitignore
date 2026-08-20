@@ -9,6 +9,7 @@ build/embedded/gateway-image
 build/embedded/control-plane-image
 build/embedded/operator-image
 build/embedded/development-ca.pem
+cmd/kubeloop-tui/embedded/
 build/development/
 build/windows/installer/tmp/
 build/windows/installer/wails_tools.nsh
