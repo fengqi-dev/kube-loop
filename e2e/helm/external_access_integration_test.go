@@ -23,7 +23,10 @@ import (
 	"github.com/labstack/echo/v5"
 )
 
-const externalProxyWriteTimeout = 50 * time.Millisecond
+// The server also applies WriteTimeout to the TLS handshake. Keep enough room
+// for a loaded Windows CI runner while still testing that upgraded WebSockets
+// outlive the HTTP response deadline.
+const externalProxyWriteTimeout = time.Second
 
 type externalAccessAuthorizer struct{}
 
@@ -163,7 +166,7 @@ func TestSameOriginTLSProxyPreservesControlPlaneLimitsAndLongLivedWebSocket(t *t
 		t.Fatalf("WSS upgrade response = %#v", upgradeResponse)
 	}
 
-	time.Sleep(4 * externalProxyWriteTimeout)
+	time.Sleep(externalProxyWriteTimeout + 250*time.Millisecond)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	payload := []byte("long-lived-wss")
