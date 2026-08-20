@@ -30,6 +30,10 @@ The security dependency patch updates `golang.org/x/net` to `v0.51.0` and the
 patched source's Go requirement to 1.25, fixing GO-2026-4559 in the HTTP/2 code
 reachable from the minimal command binary.
 
+The Go fix patch makes import aliases explicit when a dependency's declared
+package name differs from the final element of its import path. It records the
+Go 1.26 `go fix` result without changing runtime behavior.
+
 On macOS arm64 with Go 1.26.6, the runtime-only command patch reduces the
 already-minimal binary from 16,760,338 to 16,236,642 bytes (3.1%). Exact sizes
 vary by toolchain and platform.

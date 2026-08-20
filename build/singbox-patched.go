@@ -211,7 +211,7 @@ func applyPatch(dir, path string) error {
 	// preserves the upstream blobs' LF line endings. Feed git apply a canonical
 	// patch stream so the same repository revision builds on every runner.
 	patch = bytes.ReplaceAll(patch, []byte("\r\n"), []byte("\n"))
-	command := exec.Command("git", "apply", "--whitespace=nowarn", "-")
+	command := exec.Command("git", "apply", "--whitespace=nowarn", "--unidiff-zero", "-")
 	command.Dir = dir
 	command.Stdin = bytes.NewReader(patch)
 	command.Stdout = os.Stdout
