@@ -63,22 +63,22 @@ func availablePort() (int, error) {
 func availableTCPUDPPort() (int, error) {
 	var lastErr error
 	for range 100 {
-		tcpListener, err := net.Listen("tcp", "127.0.0.1:0")
+		udpListener, err := net.ListenPacket("udp", "127.0.0.1:0")
 		if err != nil {
 			return 0, err
 		}
-		port := tcpListener.Addr().(*net.TCPAddr).Port
-		udpListener, udpErr := net.ListenPacket(
-			"udp",
+		port := udpListener.LocalAddr().(*net.UDPAddr).Port
+		tcpListener, tcpErr := net.Listen(
+			"tcp",
 			net.JoinHostPort("127.0.0.1", strconv.Itoa(port)),
 		)
-		if udpErr == nil {
-			_ = udpListener.Close()
+		if tcpErr == nil {
 			_ = tcpListener.Close()
+			_ = udpListener.Close()
 			return port, nil
 		}
-		lastErr = udpErr
-		_ = tcpListener.Close()
+		lastErr = tcpErr
+		_ = udpListener.Close()
 	}
 	return 0, fmt.Errorf("find TCP/UDP port: %w", lastErr)
 }
