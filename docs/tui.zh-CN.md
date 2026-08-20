@@ -12,7 +12,7 @@ GitHub Releases 提供以下原生产物：
 - `windows-amd64` 与 `windows-arm64`
 - `linux-amd64` 与 `linux-arm64`
 
-压缩包命名为 `kubeloop-<version>-<os>-<arch>.tar.gz`，其中只包含一个自包含的
+压缩包命名为 `kubeloop-tui-<version>-<os>-<arch>.tar.gz`，其中只包含一个自包含的
 `kubeloop` 可执行文件（Windows 为 `kubeloop.exe`）。使用 Release 中的
 `SHA256SUMS` 校验后运行，终端最小尺寸为 60x18。
 

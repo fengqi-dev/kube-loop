@@ -112,7 +112,7 @@ Each release includes `SHA256SUMS`.
 
 The K9s-style terminal client implements the core connection and Kubernetes
 resource workflows without requiring the desktop UI. Download the matching
-`kubeloop-<version>-<os>-<arch>.tar.gz` archive from GitHub Releases, extract it,
+`kubeloop-tui-<version>-<os>-<arch>.tar.gz` archive from GitHub Releases, extract it,
 and run `kubeloop` (`kubeloop.exe` on Windows).
 
 Release archives are available for macOS, Windows, and Linux on amd64 and

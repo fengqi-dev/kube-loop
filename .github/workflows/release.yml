@@ -108,7 +108,7 @@ jobs:
             TUI_GOARCH="${{ matrix.goarch }}" \
             TUI_BINARY="${stage}/kubeloop"
           tar -C "${stage}" -czf \
-            "dist/kubeloop-${version}-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz" \
+            "dist/kubeloop-tui-${version}-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz" \
             kubeloop
           rm -rf "${stage}"
 
@@ -136,14 +136,14 @@ jobs:
             -o "$stage/kubeloop.exe" `
             ./cmd/kubeloop-tui
           Remove-Item -Recurse -Force $embedDir
-          tar.exe -C $stage -czf "dist/kubeloop-$version-windows-${{ matrix.goarch }}.tar.gz" kubeloop.exe
+          tar.exe -C $stage -czf "dist/kubeloop-tui-$version-windows-${{ matrix.goarch }}.tar.gz" kubeloop.exe
           Remove-Item -Recurse -Force $stage
 
       - name: Upload TUI artifact
         uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact }}
-          path: dist/kubeloop-*.tar.gz
+          path: dist/kubeloop-tui-*.tar.gz
           if-no-files-found: error
 
   desktop:
