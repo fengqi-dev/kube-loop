@@ -22,15 +22,19 @@ if ($Version) {
 
 $tag = $rel.tag_name
 $ver = $tag.TrimStart("v")
-$name = if ($Package -eq "installer") {
-  "kubeloop-$ver-windows-$arch-installer.exe"
+$names = if ($Package -eq "installer") {
+  @("kubeloop-desktop-$ver-windows-$arch-installer.exe", "kubeloop-$ver-windows-$arch-installer.exe")
 } else {
-  "kubeloop-$ver-windows-$arch.zip"
+  @("kubeloop-desktop-$ver-windows-$arch.zip", "kubeloop-$ver-windows-$arch.zip")
 }
 
-$asset = $rel.assets | Where-Object { $_.name -eq $name } | Select-Object -First 1
+$asset = $null
+foreach ($name in $names) {
+  $asset = $rel.assets | Where-Object { $_.name -eq $name } | Select-Object -First 1
+  if ($asset) { break }
+}
 if (-not $asset) {
-  throw "missing $name in $tag"
+  throw "missing one of $($names -join ', ') in $tag"
 }
 
 New-Item -ItemType Directory -Force -Path $Dest | Out-Null

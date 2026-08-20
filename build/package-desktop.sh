@@ -41,12 +41,12 @@ package_linux() {
   nfpm package \
     --config "${ROOT}/build/nfpm.yaml" \
     --packager deb \
-    --target "${DIST_DIR}/kubeloop-${version}-linux-${ARCH}.deb"
+    --target "${DIST_DIR}/kubeloop-desktop-${version}-linux-${ARCH}.deb"
 
   nfpm package \
     --config "${ROOT}/build/nfpm.yaml" \
     --packager rpm \
-    --target "${DIST_DIR}/kubeloop-${version}-linux-${ARCH}.rpm"
+    --target "${DIST_DIR}/kubeloop-desktop-${version}-linux-${ARCH}.rpm"
 }
 
 package_darwin() {
@@ -81,14 +81,14 @@ package_darwin() {
   # and Gatekeeper refuses to open the DMG/cask install ("damaged" / won't launch).
   codesign --force --deep -s - "${app_stage}"
 
-  tar -C "${BIN_DIR}" -czf "${DIST_DIR}/kubeloop-${version}-darwin-${ARCH}.tar.gz" KubeLoop.app
+  tar -C "${BIN_DIR}" -czf "${DIST_DIR}/kubeloop-desktop-${version}-darwin-${ARCH}.tar.gz" KubeLoop.app
 
   stage="$(mktemp -d "${TMPDIR:-/tmp}/kubeloop-dmg.XXXXXX")"
   trap 'rm -rf "${stage}"' RETURN
   cp -R "${app_stage}" "${stage}/KubeLoop.app"
   ln -s /Applications "${stage}/Applications"
 
-  dmg="${DIST_DIR}/kubeloop-${version}-darwin-${ARCH}.dmg"
+  dmg="${DIST_DIR}/kubeloop-desktop-${version}-darwin-${ARCH}.dmg"
   rm -f "${dmg}"
   hdiutil create \
     -volname "KubeLoop" \
