@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -38,21 +39,27 @@ const (
 type BrowserOpener func(string) error
 
 type Config struct {
-	HTTPClient      *http.Client
-	RequestTimeout  time.Duration
-	LoginTimeout    time.Duration
-	OpenBrowser     BrowserOpener
-	BrowserCallback func()
+	HTTPClient       *http.Client
+	RequestTimeout   time.Duration
+	LoginTimeout     time.Duration
+	OpenBrowser      BrowserOpener
+	BrowserCallback  func()
+	ClientID         string
+	RedirectURI      string
+	LoopbackCallback bool
 }
 
 type Client struct {
-	httpClient      *http.Client
-	requestTimeout  time.Duration
-	loginTimeout    time.Duration
-	openBrowser     BrowserOpener
-	browserCallback func()
-	callbackMu      sync.Mutex
-	pendingCallback *pendingCallback
+	httpClient       *http.Client
+	requestTimeout   time.Duration
+	loginTimeout     time.Duration
+	openBrowser      BrowserOpener
+	browserCallback  func()
+	clientID         string
+	redirectURI      string
+	loopbackCallback bool
+	callbackMu       sync.Mutex
+	pendingCallback  *pendingCallback
 }
 
 type tokenResponse struct {
@@ -120,9 +127,18 @@ func New(config Config) *Client {
 	}
 	clone := *httpClient
 	clone.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	clientID := strings.TrimSpace(config.ClientID)
+	if clientID == "" {
+		clientID = DefaultClientID
+	}
+	redirectURI := strings.TrimSpace(config.RedirectURI)
+	if redirectURI == "" {
+		redirectURI = DefaultRedirectURI
+	}
 	return &Client{
 		httpClient: &clone, requestTimeout: requestTimeout, loginTimeout: loginTimeout,
 		openBrowser: config.OpenBrowser, browserCallback: config.BrowserCallback,
+		clientID: clientID, redirectURI: redirectURI, loopbackCallback: config.LoopbackCallback,
 	}
 }
 
@@ -162,17 +178,6 @@ func (client *Client) LoginOIDC(
 	if err != nil {
 		return credentials.Credential{}, errors.New("create authorization URL")
 	}
-	query := authorizationURL.Query()
-	query.Set("response_type", "code")
-	query.Set("client_id", DefaultClientID)
-	query.Set("redirect_uri", DefaultRedirectURI)
-	query.Set("scope", "openid profile email offline_access kubeloop.api")
-	query.Set("state", state)
-	query.Set("nonce", nonce)
-	query.Set("code_challenge", challenge)
-	query.Set("code_challenge_method", "S256")
-	query.Set("provider", providerID)
-	authorizationURL.RawQuery = query.Encode()
 	loginDeadline := time.Now().Add(client.loginTimeout)
 	loginContext, cancel := context.WithDeadline(ctx, loginDeadline)
 	defer cancel()
@@ -181,6 +186,26 @@ func (client *Client) LoginOIDC(
 		return credentials.Credential{}, err
 	}
 	defer client.endCallback(callback)
+	redirectURI := client.redirectURI
+	if client.loopbackCallback {
+		actualRedirectURI, closeCallback, callbackErr := client.startLoopbackCallback()
+		if callbackErr != nil {
+			return credentials.Credential{}, callbackErr
+		}
+		redirectURI = actualRedirectURI
+		defer closeCallback()
+	}
+	query := authorizationURL.Query()
+	query.Set("response_type", "code")
+	query.Set("client_id", client.clientID)
+	query.Set("redirect_uri", redirectURI)
+	query.Set("scope", "openid profile email offline_access kubeloop.api")
+	query.Set("state", state)
+	query.Set("nonce", nonce)
+	query.Set("code_challenge", challenge)
+	query.Set("code_challenge_method", "S256")
+	query.Set("provider", providerID)
+	authorizationURL.RawQuery = query.Encode()
 	if err := client.openBrowser(authorizationURL.String()); err != nil {
 		return credentials.Credential{}, errors.New("open system browser")
 	}
@@ -200,9 +225,9 @@ func (client *Client) LoginOIDC(
 		return credentials.Credential{}, result.err
 	}
 	var response tokenResponse
-	if err := client.postForm(ctx, metadata.TokenEndpoint, url.Values{
+	if err := client.postForm(loginContext, metadata.TokenEndpoint, url.Values{
 		"grant_type": {"authorization_code"}, "code": {result.code}, "code_verifier": {verifier},
-		"client_id": {DefaultClientID}, "redirect_uri": {DefaultRedirectURI}, "device_id": {deviceID},
+		"client_id": {client.clientID}, "redirect_uri": {redirectURI}, "device_id": {deviceID},
 	}, &response); err != nil {
 		return credentials.Credential{}, err
 	}
@@ -221,7 +246,7 @@ func (client *Client) Refresh(ctx context.Context, baseURL string, current crede
 	}
 	if err := client.postForm(ctx, metadata.TokenEndpoint, url.Values{
 		"grant_type": {"refresh_token"}, "refresh_token": {current.RefreshToken},
-		"client_id": {DefaultClientID}, "device_id": {current.DeviceID},
+		"client_id": {client.clientID}, "device_id": {current.DeviceID},
 	}, &response); err != nil {
 		return credentials.Credential{}, err
 	}
@@ -248,7 +273,7 @@ func (client *Client) Revoke(ctx context.Context, baseURL, refreshToken string) 
 		return err
 	}
 	return client.postForm(ctx, metadata.RevocationEndpoint, url.Values{
-		"token": {refreshToken}, "token_type_hint": {"refresh_token"}, "client_id": {DefaultClientID},
+		"token": {refreshToken}, "token_type_hint": {"refresh_token"}, "client_id": {client.clientID},
 	}, nil)
 }
 
@@ -359,12 +384,56 @@ func (client *Client) endCallback(pending *pendingCallback) {
 	}
 }
 
+func (client *Client) startLoopbackCallback() (string, func(), error) {
+	redirect, err := url.Parse(client.redirectURI)
+	if err != nil || redirect.Scheme != "http" || redirect.Hostname() != "127.0.0.1" ||
+		redirect.Port() != "" || redirect.Path != "/callback" || redirect.User != nil ||
+		redirect.RawQuery != "" || redirect.Fragment != "" {
+		return "", nil, errors.New("loopback login redirect URI is invalid")
+	}
+	listener, err := net.Listen("tcp", net.JoinHostPort(redirect.Hostname(), "0"))
+	if err != nil {
+		return "", nil, fmt.Errorf("listen for browser login callback: %w", err)
+	}
+	actualRedirect := *redirect
+	actualRedirect.Host = listener.Addr().String()
+	mux := http.NewServeMux()
+	mux.HandleFunc(redirect.Path, func(rw http.ResponseWriter, request *http.Request) {
+		rw.Header().Set("Cache-Control", "no-store")
+		rw.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'")
+		rw.Header().Set("Content-Type", "text/html; charset=utf-8")
+		if request.Method != http.MethodGet || request.Host != actualRedirect.Host {
+			http.Error(rw, "Invalid login callback.", http.StatusBadRequest)
+			return
+		}
+		callbackURL := actualRedirect
+		callbackURL.RawQuery = request.URL.RawQuery
+		if err := client.HandleCallbackURL(callbackURL.String()); err != nil {
+			http.Error(rw, "Login callback was rejected. Return to the terminal and try again.", http.StatusBadRequest)
+			return
+		}
+		_, _ = io.WriteString(rw, "<!doctype html><title>KubeLoop login complete</title><style>body{font-family:sans-serif;max-width:40rem;margin:15vh auto;padding:2rem}h1{color:#087f5b}</style><h1>Login complete</h1><p>You can close this window and return to KubeLoop TUI.</p>")
+	})
+	server := &http.Server{
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+		IdleTimeout:       5 * time.Second,
+	}
+	go func() {
+		_ = server.Serve(listener)
+	}()
+	return actualRedirect.String(), func() {
+		_ = server.Close()
+	}, nil
+}
+
 // HandleCallbackURL completes the active browser login from the desktop URL
-// protocol handler. Invalid or stale URLs never consume the pending login.
+// protocol handler or the TUI loopback listener. Invalid or stale URLs never
+// consume the pending login.
 func (client *Client) HandleCallbackURL(rawURL string) error {
 	callbackURL, err := url.Parse(rawURL)
-	if err != nil || callbackURL.Scheme != "kubeloop" || callbackURL.Host != "auth" ||
-		callbackURL.Path != "/callback" || callbackURL.User != nil || callbackURL.Fragment != "" {
+	redirectURL, redirectErr := url.Parse(client.redirectURI)
+	if err != nil || redirectErr != nil || !client.matchesCallbackTarget(callbackURL, redirectURL) {
 		return errors.New("login callback URL is invalid")
 	}
 	query := callbackURL.Query()
@@ -404,6 +473,19 @@ func (client *Client) HandleCallbackURL(rawURL string) error {
 	pending.result <- result
 	pending.delivered = true
 	return nil
+}
+
+func (client *Client) matchesCallbackTarget(callbackURL, redirectURL *url.URL) bool {
+	if callbackURL == nil || redirectURL == nil || callbackURL.User != nil || callbackURL.Fragment != "" ||
+		callbackURL.Scheme != redirectURL.Scheme || callbackURL.Path != redirectURL.Path {
+		return false
+	}
+	if callbackURL.Host == redirectURL.Host {
+		return true
+	}
+	return client.loopbackCallback && callbackURL.Scheme == "http" && callbackURL.Port() != "" &&
+		callbackURL.Hostname() == "127.0.0.1" && redirectURL.Hostname() == callbackURL.Hostname() &&
+		redirectURL.Port() == ""
 }
 
 func credentialFromResponse(response tokenResponse, deviceID string) (credentials.Credential, error) {
