@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"runtime/debug"
+	"slices"
 	"sort"
 	"strings"
 	"unicode/utf8"
@@ -98,10 +99,8 @@ func builtinWorkspaceResource(value string) (workspaceResource, bool) {
 		if value == string(descriptor.id) {
 			return descriptor.id, true
 		}
-		for _, alias := range descriptor.aliases {
-			if value == alias {
-				return descriptor.id, true
-			}
+		if slices.Contains(descriptor.aliases, value) {
+			return descriptor.id, true
 		}
 	}
 	return "", false
@@ -220,7 +219,7 @@ func (m *Model) updateWorkspace(message tea.Msg) (tea.Cmd, bool) {
 		m.err, m.status = "", ""
 		return nil, true
 	case "n":
-		if m.mode == viewMain && len(m.namespaces) > 0 {
+		if m.mode == viewMain && (m.workspace.resource == resourcePods || m.workspace.resource == resourceServices) && len(m.namespaces) > 0 {
 			m.console.overlay = overlayNamespace
 			m.console.query, m.console.overlayPos = "", 0
 			m.err, m.status = "", ""
@@ -562,6 +561,8 @@ func (m *Model) updateWorkspaceResource(key tea.KeyMsg) (tea.Cmd, bool) {
 			return m.workspaceNavigate(resourcePods, true), true
 		case "v":
 			return m.workspaceNavigate(resourceServices, true), true
+		case "n":
+			return m.workspaceNavigate(resourceNamespaces, true), true
 		case "s":
 			return m.workspaceNavigate(resourceTasks, true), true
 		case "L":
@@ -725,8 +726,8 @@ func compileWorkspaceFilter(raw string) (compiledWorkspaceFilter, error) {
 		compiled.inverse = true
 		filter = strings.TrimSpace(strings.TrimPrefix(filter, "!"))
 	}
-	if strings.HasPrefix(filter, "-f") {
-		compiled.fuzzy = strings.ToLower(strings.TrimSpace(strings.TrimPrefix(filter, "-f")))
+	if after, ok := strings.CutPrefix(filter, "-f"); ok {
+		compiled.fuzzy = strings.ToLower(strings.TrimSpace(after))
 		return compiled, nil
 	}
 	if filter == "" {
@@ -754,7 +755,7 @@ func (m Model) workspaceFilteredRows() []consoleRow {
 		value := strings.ToLower(row.title + " " + row.meta + " " + row.status)
 		matched := filter.regex != nil && filter.regex.MatchString(value)
 		if filter.fuzzy != "" {
-			matched = workspaceFuzzyMatch(value, filter.fuzzy)
+			matched = workspaceFuzzyMatch(row.title, filter.fuzzy)
 		}
 		if filter.inverse {
 			matched = !matched
@@ -936,6 +937,8 @@ func (m Model) viewWorkspaceHeader() string {
 	left := strings.Join([]string{
 		field("Cluster", server),
 		field("User", user),
+		field("Namespace", namespace),
+		field("Mode", strings.ToUpper(string(m.selectedMode))),
 		field("KubeLoop Rev", workspaceBuildRevision()),
 		field("K8s Rev", "n/a"),
 	}, "\n")
@@ -973,8 +976,9 @@ func (m Model) viewWorkspaceHeader() string {
 		shortcuts = strings.Join([]string{
 			shortcutRow(shortcut("a", "Add Server"), shortcut("?", "Help"), shortcut("r", "Refresh")),
 			shortcutRow(shortcut("c", connectionAction), shortcut("q", "Quit"), shortcut("-", "Back")),
+			shortcutRow(shortcut("p", "Pods"), shortcut("v", "Services"), shortcut("n", "Namespaces")),
+			shortcutRow(shortcut("s", "Sessions"), shortcut(":", "Command"), shortcut("m", "Mode")),
 			shortcutRow(shortcut("enter", "Toggle"), shortcut("]", "Forward"), shortcut("esc", "Cancel")),
-			shortcutRow(shortcut("m", "Mode"), shortcut(":", "Command"), ""),
 			shortcutRow(shortcut("L", "Logout"), shortcut("u", "Uninstall Service"), ""),
 		}, "\n")
 	} else {
@@ -1122,7 +1126,7 @@ func (m Model) viewWorkspaceBody(height int) string {
 	}
 	rows := m.workspaceFilteredRows()
 	filter := view.filter
-	heading := string(m.workspace.resource)
+	heading := workspaceDescriptor(m.workspace.resource).title
 	if m.workspace.resource == resourcePods || m.workspace.resource == resourceServices {
 		heading += "(" + firstNonEmpty(m.namespace, "all") + ")"
 	}
@@ -1201,7 +1205,7 @@ func (m Model) workspaceTableHeader() string {
 	case resourcePods:
 		if wide {
 			namespace, name, pf, ready, status, restarts, address, node, age := m.workspacePodColumnWidths()
-			return fmt.Sprintf("%-*s %-*s %-*s %-*s %-*s %-*s %-*s %-*s %-*s", namespace, "NAMESPACE", name, "NAME", pf, "PF", ready, "READY", status, "STATUS", restarts, "RESTARTS", address, "IP", node, "NODE", age, "AGE")
+			return fmt.Sprintf("%-*s %-*s %-*s %-*s %-*s %-*s %-*s %-*s %-*s", namespace, "NAMESPACE", name, "NAME", pf, "PF", ready, "READY", status, "STATUS", restarts, "RESTARTS", address, "POD IP", node, "NODE", age, "AGE")
 		}
 		return fmt.Sprintf("%-16s %-24s %-7s %s", "NAMESPACE", "NAME", "READY", "STATUS")
 	case resourceServices:
@@ -1316,9 +1320,9 @@ func workspaceMetaValue(meta, key string) string {
 
 func workspaceDetailValue(detail, key string) string {
 	prefix := key + ":"
-	for _, line := range strings.Split(detail, "\n") {
-		if strings.HasPrefix(line, prefix) {
-			return strings.TrimSpace(strings.TrimPrefix(line, prefix))
+	for line := range strings.SplitSeq(detail, "\n") {
+		if after, ok := strings.CutPrefix(line, prefix); ok {
+			return strings.TrimSpace(after)
 		}
 	}
 	return "-"

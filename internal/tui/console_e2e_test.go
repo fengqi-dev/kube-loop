@@ -142,6 +142,9 @@ func (m tuiFixtureModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
+		if isKey && previousResource == resourceTasks && previousOverlay == overlayNone && key.String() == "y" {
+			m.model.status = "Session output copied"
+		}
 		m.model.loading = false
 		if isConsoleQuitCommand(cmd) {
 			return m, tea.Quit

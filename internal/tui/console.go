@@ -213,6 +213,12 @@ func (m *Model) updateConsole(message tea.Msg) (tea.Cmd, bool) {
 			m.clearCompletedExecTasks()
 			return nil, true
 		}
+	case "t":
+		if m.mode == viewMain && m.activeTab == tabTasks {
+			m.console.taskFilter = (m.console.taskFilter + 1) % taskFilterCount
+			m.setConsoleCursor(0)
+			return nil, true
+		}
 	case "e":
 		if m.mode == viewMain && m.activeTab == tabTasks {
 			if row, ok := m.selectedConsoleTask(); ok && row.kind == "exec" {
@@ -641,7 +647,7 @@ func (m *Model) runConsoleCommand(command string) tea.Cmd {
 		return m.gotoConsoleTab(tabWorkloads)
 	case "v", "svc", "service", "services":
 		return m.gotoConsoleTab(tabServices)
-	case "s", "session", "fw", "forward", "forwards":
+	case "s", "session", "sessions", "fw", "forward", "forwards":
 		return m.gotoConsoleTab(tabTasks)
 	}
 	m.err = "unknown command: " + command
@@ -1098,7 +1104,7 @@ func (m Model) consoleWorkloadRows() []consoleRow {
 		ready := fmt.Sprintf("%d/%d", readyContainers, totalContainers)
 		containers := firstNonEmpty(strings.Join(pod.Containers, ", "), "-")
 		ports := formatPodPorts(pod.Ports)
-		row := consoleRow{title: name, status: phase, meta: fmt.Sprintf("node %s   ready %s   restarts %d   age %s", node, ready, pod.Restarts, formatResourceAge(pod.AgeSeconds)), index: index, detail: "Namespace: " + firstNonEmpty(pod.Namespace, m.namespace) + "\nPhase: " + phase + "\nPod IP: " + firstNonEmpty(pod.PodIP, "-") + "\nNode: " + node + "\nReady: " + ready + fmt.Sprintf("\nRestarts: %d\nAge: %s", pod.Restarts, formatResourceAge(pod.AgeSeconds)) + "\nContainers: " + containers + "\nPorts: " + ports + "\n\nEnter/f port forward   s SSH"}
+		row := consoleRow{title: name, status: phase, meta: fmt.Sprintf("node %s   ready %s   restarts %d   age %s", node, ready, pod.Restarts, formatResourceAge(pod.AgeSeconds)), index: index, detail: "Namespace: " + firstNonEmpty(pod.Namespace, m.namespace) + "\nPhase: " + phase + "\nPod IP: " + firstNonEmpty(pod.PodIP, "-") + "\nNode: " + node + "\nReady: " + ready + fmt.Sprintf("\nRestarts: %d\nAge: %s", pod.Restarts, formatResourceAge(pod.AgeSeconds)) + "\nContainers: " + containers + "\nPorts: " + ports + "\n\nEnter/f port forward   s SSH   e exec"}
 		if consoleRowMatchesFilter(row, filter) {
 			rows = append(rows, row)
 		}
@@ -1115,7 +1121,7 @@ func (m Model) consoleServiceRows() []consoleRow {
 		ports := firstNonEmpty(formatServicePorts(service.Ports), "-")
 		ip := firstNonEmpty(service.ClusterIP, "-")
 		externalIP := firstNonEmpty(strings.Join(service.ExternalIPs, ","), "<none>")
-		row := consoleRow{title: name, status: typeName, meta: "ports " + ports, index: index, detail: "Namespace: " + firstNonEmpty(service.Namespace, m.namespace) + "\nType: " + typeName + "\nCluster IP: " + ip + "\nExternal IP: " + externalIP + "\nAge: " + formatResourceAge(service.AgeSeconds) + "\nPorts: " + ports}
+		row := consoleRow{title: name, status: typeName, meta: "ports " + ports, index: index, detail: "Namespace: " + firstNonEmpty(service.Namespace, m.namespace) + "\nType: " + typeName + "\nCluster IP: " + ip + "\nExternal IP: " + externalIP + "\nAge: " + formatResourceAge(service.AgeSeconds) + "\nPorts: " + ports + "\n\nEnter/f start port forward"}
 		if consoleRowMatchesFilter(row, filter) {
 			rows = append(rows, row)
 		}
