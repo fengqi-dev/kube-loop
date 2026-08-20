@@ -13,7 +13,7 @@ GitHub Releases provide native archives for:
 - `windows-amd64` and `windows-arm64`
 - `linux-amd64` and `linux-arm64`
 
-Archive names follow `kubeloop-<version>-<os>-<arch>.tar.gz` and contain one
+Archive names follow `kubeloop-tui-<version>-<os>-<arch>.tar.gz` and contain one
 self-contained `kubeloop` executable (`kubeloop.exe` on Windows). Verify the
 archive against the release `SHA256SUMS`, then run the binary in a terminal of
 at least 60x18.

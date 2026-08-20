@@ -109,7 +109,7 @@ irm https://raw.githubusercontent.com/fengqi-dev/kube-loop/main/scripts/install.
 
 K9s 风格的终端客户端提供核心连接与 Kubernetes 资源工作流，无需启动桌面 UI。
 从 GitHub Releases 下载匹配平台的
-`kubeloop-<version>-<os>-<arch>.tar.gz` 压缩包，解压后运行 `kubeloop`
+`kubeloop-tui-<version>-<os>-<arch>.tar.gz` 压缩包，解压后运行 `kubeloop`
 （Windows 为 `kubeloop.exe`）。
 
 Release 同时提供 macOS、Windows、Linux 的 amd64 与 arm64 产物。TUI 与桌面客户端
