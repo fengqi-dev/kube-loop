@@ -137,6 +137,10 @@ func configureDialerTransport(dialer *gorilla.Dialer, roundTripper http.RoundTri
 	dialer.NetDialTLSContext = transport.DialTLSContext
 	if transport.TLSClientConfig != nil {
 		dialer.TLSClientConfig = transport.TLSClientConfig.Clone()
+		// Gorilla implements the HTTP/1.1 Upgrade handshake, not RFC 8441
+		// extended CONNECT. Do not inherit h2 ALPN preferences from the HTTP
+		// transport or TLS may negotiate a protocol this dialer cannot speak.
+		dialer.TLSClientConfig.NextProtos = []string{"http/1.1"}
 	}
 	return nil
 }
