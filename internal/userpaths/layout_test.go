@@ -1,7 +1,9 @@
 package userpaths
 
 import (
+	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -44,5 +46,27 @@ func TestNewRequiresRoot(t *testing.T) {
 	t.Parallel()
 	if _, err := New(" "); err == nil {
 		t.Fatal("New() accepted an empty root")
+	}
+}
+
+func TestEnsureCreatesPrivateDirectoryTree(t *testing.T) {
+	t.Parallel()
+	layout, err := New(filepath.Join(t.TempDir(), "kubeloop"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := layout.Ensure(); err != nil {
+		t.Fatal(err)
+	}
+	for _, directory := range []string{
+		layout.Root(), layout.ConfigDir(), layout.DataDir(), layout.StateDir(), layout.SecretsDir(), layout.CacheDir(),
+	} {
+		info, err := os.Stat(directory)
+		if err != nil || !info.IsDir() {
+			t.Fatalf("directory %q was not created: %v", directory, err)
+		}
+		if runtime.GOOS != "windows" && info.Mode().Perm() != 0o700 {
+			t.Fatalf("directory %q mode = %o, want 700", directory, info.Mode().Perm())
+		}
 	}
 }

@@ -103,14 +103,24 @@ type appDependencies struct {
 
 func appUserLayout(version, profilePath string) (userpaths.Layout, error) {
 	profilePath = strings.TrimSpace(profilePath)
+	var layout userpaths.Layout
+	var err error
 	if profilePath == "" {
-		return userpaths.ForVersion(version)
+		layout, err = userpaths.ForVersion(version)
+	} else {
+		root := filepath.Dir(profilePath)
+		if filepath.Base(root) == "config" {
+			root = filepath.Dir(root)
+		}
+		layout, err = userpaths.New(root)
 	}
-	root := filepath.Dir(profilePath)
-	if filepath.Base(root) == "config" {
-		root = filepath.Dir(root)
+	if err != nil {
+		return userpaths.Layout{}, err
 	}
-	return userpaths.New(root)
+	if err := layout.Ensure(); err != nil {
+		return userpaths.Layout{}, fmt.Errorf("initialize KubeLoop user directories: %w", err)
+	}
+	return layout, nil
 }
 
 func firstNonEmpty(values ...string) string {

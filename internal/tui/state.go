@@ -61,6 +61,9 @@ func NewState(version string) (*State, error) {
 	if err != nil {
 		return nil, fmt.Errorf("resolve user layout: %w", err)
 	}
+	if err := layout.Ensure(); err != nil {
+		return nil, fmt.Errorf("initialize user layout: %w", err)
+	}
 	profileStore, err := clientprofile.Open(filepath.Join(layout.ConfigDir(), "servers.json"))
 	if err != nil {
 		return nil, fmt.Errorf("open profile store: %w", err)
