@@ -8,20 +8,19 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficcontrol"
 )
 
-type ModeCoordinator interface {
-	Claim(context.Context, string, trafficcontrol.ClaimRequest) (trafficcontrol.ClaimResponse, *controlplaneapi.Error)
-	Prepare(context.Context, string, trafficcontrol.PrepareRequest) (trafficcontrol.PrepareResponse, *controlplaneapi.Error)
-	Heartbeat(context.Context, string, trafficcontrol.HeartbeatRequest) (trafficcontrol.HeartbeatResponse, *controlplaneapi.Error)
-	Finish(context.Context, string, trafficcontrol.FinishRequest) (trafficcontrol.FinishResponse, *controlplaneapi.Error)
-}
+type ModeCoordinator = Coordinator
 
 type Dispatcher struct {
 	modes map[trafficcontrol.Mode]ModeCoordinator
 }
 
-func NewDispatcher(exchange, mirror, preview ModeCoordinator) (*Dispatcher, error) {
+func NewDispatcher(
+	exchange, mirror, preview ModeCoordinator,
+) (*Dispatcher, error) {
 	if exchange == nil || mirror == nil || preview == nil {
-		return nil, errors.New("Exchange, Mirror and Preview traffic coordinators are required")
+		return nil, errors.New(
+			"exchange, Mirror and Preview traffic coordinators are required",
+		)
 	}
 	return &Dispatcher{modes: map[trafficcontrol.Mode]ModeCoordinator{
 		trafficcontrol.ModeExchange: exchange,
@@ -37,7 +36,9 @@ func (dispatcher *Dispatcher) Claim(
 ) (trafficcontrol.ClaimResponse, *controlplaneapi.Error) {
 	coordinator := dispatcher.modes[request.Mode]
 	if coordinator == nil {
-		return trafficcontrol.ClaimResponse{}, invalid("traffic mode is unsupported")
+		return trafficcontrol.ClaimResponse{}, invalid(
+			"traffic mode is unsupported",
+		)
 	}
 	return coordinator.Claim(ctx, relayID, request)
 }
@@ -49,7 +50,9 @@ func (dispatcher *Dispatcher) Prepare(
 ) (trafficcontrol.PrepareResponse, *controlplaneapi.Error) {
 	coordinator := dispatcher.modes[request.Mode]
 	if coordinator == nil {
-		return trafficcontrol.PrepareResponse{}, invalid("traffic mode is unsupported")
+		return trafficcontrol.PrepareResponse{}, invalid(
+			"traffic mode is unsupported",
+		)
 	}
 	return coordinator.Prepare(ctx, relayID, request)
 }
@@ -61,7 +64,9 @@ func (dispatcher *Dispatcher) Heartbeat(
 ) (trafficcontrol.HeartbeatResponse, *controlplaneapi.Error) {
 	coordinator := dispatcher.modes[request.Mode]
 	if coordinator == nil {
-		return trafficcontrol.HeartbeatResponse{}, invalid("traffic mode is unsupported")
+		return trafficcontrol.HeartbeatResponse{}, invalid(
+			"traffic mode is unsupported",
+		)
 	}
 	return coordinator.Heartbeat(ctx, relayID, request)
 }
@@ -73,7 +78,9 @@ func (dispatcher *Dispatcher) Finish(
 ) (trafficcontrol.FinishResponse, *controlplaneapi.Error) {
 	coordinator := dispatcher.modes[request.Mode]
 	if coordinator == nil {
-		return trafficcontrol.FinishResponse{}, invalid("traffic mode is unsupported")
+		return trafficcontrol.FinishResponse{}, invalid(
+			"traffic mode is unsupported",
+		)
 	}
 	return coordinator.Finish(ctx, relayID, request)
 }

@@ -37,7 +37,10 @@ func TestResizeAndExitRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	exitFrame, _ := Decode(exit)
-	if status, err := DecodeExit(exitFrame); err != nil || status.Code != 137 || !status.Cancelled || status.Error != "cancelled" {
+	if status, err := DecodeExit(
+		exitFrame,
+	); err != nil || status.Code != 137 || !status.Cancelled ||
+		status.Error != "cancelled" {
 		t.Fatalf("status = %#v err = %v", status, err)
 	}
 }

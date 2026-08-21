@@ -64,6 +64,7 @@ type RevokedSession struct {
 // derives it from the authenticated transport identity, never from this body.
 type RegistrationRequest struct {
 	Envelope
+
 	SupportedVersions           []string `json:"supportedVersions"`
 	Endpoint                    string   `json:"endpoint"`
 	State                       State    `json:"state"`
@@ -74,6 +75,7 @@ type RegistrationRequest struct {
 
 type RegistrationResponse struct {
 	Envelope
+
 	SelectedVersion string             `json:"selectedVersion"`
 	TicketIssuer    string             `json:"ticketIssuer"`
 	RelayID         string             `json:"relayId"`
@@ -87,6 +89,7 @@ type RegistrationResponse struct {
 
 type HeartbeatRequest struct {
 	Envelope
+
 	LeaseID                     string   `json:"leaseId"`
 	State                       State    `json:"state"`
 	Capacity                    Capacity `json:"capacity"`
@@ -96,6 +99,7 @@ type HeartbeatRequest struct {
 
 type HeartbeatResponse struct {
 	Envelope
+
 	LeaseExpiresAt time.Time          `json:"leaseExpiresAt"`
 	HeartbeatAfter time.Duration      `json:"heartbeatAfter"`
 	DesiredState   State              `json:"desiredState"`
@@ -105,6 +109,7 @@ type HeartbeatResponse struct {
 
 type AllocationRequest struct {
 	Envelope
+
 	SessionID       string            `json:"sessionId"`
 	Generation      uint64            `json:"generation"`
 	NetworkSpecHash string            `json:"networkSpecHash"`
@@ -113,6 +118,7 @@ type AllocationRequest struct {
 
 type AllocationResponse struct {
 	Envelope
+
 	RelayID    string    `json:"relayId"`
 	LeaseID    string    `json:"leaseId"`
 	Endpoint   string    `json:"endpoint"`

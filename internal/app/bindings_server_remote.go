@@ -25,7 +25,7 @@ type RemoteInventory struct {
 
 func (a *App) LoadServerInventory(profileID, namespace string) (RemoteInventory, error) {
 	if a.remote == nil || a.remoteSessions == nil {
-		return RemoteInventory{}, errors.New("Remote Cluster Backend is unavailable")
+		return RemoteInventory{}, errors.New("remote cluster backend is unavailable")
 	}
 	serverProfile, err := a.serverProfile(profileID)
 	if err != nil {
@@ -58,91 +58,15 @@ func (a *App) LoadServerInventory(profileID, namespace string) (RemoteInventory,
 		Capabilities: []string{}, Pods: []clientremote.Pod{}, Services: []clientremote.Service{},
 	}
 	if selected == "" {
-		if a.remoteFiles != nil {
-			if err := a.remoteFiles.StopProfile(serverProfile.ID); err != nil {
-				return RemoteInventory{}, err
-			}
-		}
-		if a.remoteExecs != nil {
-			if err := a.remoteExecs.StopProfile(serverProfile.ID); err != nil {
-				return RemoteInventory{}, err
-			}
-		}
-		if a.remoteSSH != nil {
-			if err := a.remoteSSH.StopProfile(serverProfile.ID); err != nil {
-				return RemoteInventory{}, err
-			}
-		}
-		if a.remoteForwards != nil {
-			if err := a.remoteForwards.StopProfile(a.context(), serverProfile.ID); err != nil {
-				return RemoteInventory{}, err
-			}
-		}
-		if a.remoteExchanges != nil {
-			if err := a.remoteExchanges.StopProfile(a.context(), serverProfile.ID); err != nil {
-				return RemoteInventory{}, err
-			}
-		}
-		if a.remoteMirrors != nil {
-			if err := a.remoteMirrors.StopProfile(a.context(), serverProfile.ID); err != nil {
-				return RemoteInventory{}, err
-			}
-		}
-		if a.remotePreviews != nil {
-			if err := a.remotePreviews.StopProfile(a.context(), serverProfile.ID); err != nil {
-				return RemoteInventory{}, err
-			}
-		}
-		if a.dataPlanes != nil {
-			if err := a.dataPlanes.Disconnect(serverProfile.ID); err != nil {
-				return RemoteInventory{}, err
-			}
-		}
-		if err := a.remoteSessions.Disconnect(a.context(), serverProfile.ID); err != nil {
+		if err := a.stopServerRuntime(serverProfile.ID, true); err != nil {
 			return RemoteInventory{}, err
 		}
 		return result, nil
 	}
-	if current, currentErr := a.remoteSessions.Current(serverProfile.ID); currentErr == nil && current.Namespace != selected {
-		if a.remoteFiles != nil {
-			if err := a.remoteFiles.StopProfile(serverProfile.ID); err != nil {
-				return RemoteInventory{}, err
-			}
-		}
-		if a.remoteExecs != nil {
-			if err := a.remoteExecs.StopProfile(serverProfile.ID); err != nil {
-				return RemoteInventory{}, err
-			}
-		}
-		if a.remoteSSH != nil {
-			if err := a.remoteSSH.StopProfile(serverProfile.ID); err != nil {
-				return RemoteInventory{}, err
-			}
-		}
-		if a.remoteForwards != nil {
-			if err := a.remoteForwards.StopProfile(a.context(), serverProfile.ID); err != nil {
-				return RemoteInventory{}, err
-			}
-		}
-		if a.remoteExchanges != nil {
-			if err := a.remoteExchanges.StopProfile(a.context(), serverProfile.ID); err != nil {
-				return RemoteInventory{}, err
-			}
-		}
-		if a.remoteMirrors != nil {
-			if err := a.remoteMirrors.StopProfile(a.context(), serverProfile.ID); err != nil {
-				return RemoteInventory{}, err
-			}
-		}
-		if a.remotePreviews != nil {
-			if err := a.remotePreviews.StopProfile(a.context(), serverProfile.ID); err != nil {
-				return RemoteInventory{}, err
-			}
-		}
-		if a.dataPlanes != nil {
-			if err := a.dataPlanes.Disconnect(serverProfile.ID); err != nil {
-				return RemoteInventory{}, err
-			}
+	current, currentErr := a.remoteSessions.Current(serverProfile.ID)
+	if currentErr == nil && current.Namespace != selected {
+		if err := a.stopServerRuntime(serverProfile.ID, false); err != nil {
+			return RemoteInventory{}, err
 		}
 	}
 	session, err := a.remoteSessions.Connect(a.context(), serverProfile, selected)
@@ -186,7 +110,7 @@ func (a *App) LoadServerInventory(profileID, namespace string) (RemoteInventory,
 		if slices.Contains(result.Capabilities, "cluster.tunnel") {
 			dataPlane, statusErr := a.dataPlanes.Status(serverProfile.ID)
 			if statusErr != nil {
-				dataPlane = clientdataplane.Status{State: "disconnected", Mode: "socks"}
+				dataPlane = clientdataplane.Status{State: remoteStateDisconnected, Mode: tunnelModeSOCKS}
 			}
 			result.DataPlane = &dataPlane
 		} else if err := a.dataPlanes.Disconnect(serverProfile.ID); err != nil {
@@ -195,6 +119,53 @@ func (a *App) LoadServerInventory(profileID, namespace string) (RemoteInventory,
 	}
 	a.startServerInventoryWatch(serverProfile, selected, result.Capabilities)
 	return result, nil
+}
+
+func (a *App) stopServerRuntime(profileID string, disconnectSession bool) error {
+	if a.remoteFiles != nil {
+		if err := a.remoteFiles.StopProfile(profileID); err != nil {
+			return err
+		}
+	}
+	if a.remoteExecs != nil {
+		if err := a.remoteExecs.StopProfile(profileID); err != nil {
+			return err
+		}
+	}
+	if a.remoteSSH != nil {
+		if err := a.remoteSSH.StopProfile(profileID); err != nil {
+			return err
+		}
+	}
+	if a.remoteForwards != nil {
+		if err := a.remoteForwards.StopProfile(a.context(), profileID); err != nil {
+			return err
+		}
+	}
+	if a.remoteExchanges != nil {
+		if err := a.remoteExchanges.StopProfile(a.context(), profileID); err != nil {
+			return err
+		}
+	}
+	if a.remoteMirrors != nil {
+		if err := a.remoteMirrors.StopProfile(a.context(), profileID); err != nil {
+			return err
+		}
+	}
+	if a.remotePreviews != nil {
+		if err := a.remotePreviews.StopProfile(a.context(), profileID); err != nil {
+			return err
+		}
+	}
+	if a.dataPlanes != nil {
+		if err := a.dataPlanes.Disconnect(profileID); err != nil {
+			return err
+		}
+	}
+	if disconnectSession {
+		return a.remoteSessions.Disconnect(a.context(), profileID)
+	}
+	return nil
 }
 
 func containsRemoteNamespace(namespaces []clientremote.Namespace, selected string) bool {

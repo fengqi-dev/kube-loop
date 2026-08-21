@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 
+	corev1 "k8s.io/api/core/v1"
+
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/servicebinding"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/sessionapi"
@@ -15,7 +17,6 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/protocol/remotetask"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficcontrol"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficmodel"
-	corev1 "k8s.io/api/core/v1"
 )
 
 type ownerResult struct {
@@ -40,14 +41,22 @@ func (handler *Service) Claim(
 		return trafficcontrol.ClaimResponse{}, apiError
 	}
 	if task.State != remotetask.Pending {
-		return trafficcontrol.ClaimResponse{}, &controlplaneapi.Error{Code: controlplaneapi.CodeConflict, Message: "Exchange Task was already claimed"}
+		return trafficcontrol.ClaimResponse{}, &controlplaneapi.Error{
+			Code:    controlplaneapi.CodeConflict,
+			Message: "Exchange Task was already claimed",
+		}
 	}
 	var spec storedSpec
-	if json.Unmarshal(task.Spec, &spec) != nil || spec.Service == "" || len(spec.Ports) == 0 {
-		return trafficcontrol.ClaimResponse{}, internalError(errors.New("stored Exchange Task is invalid"))
+	if json.Unmarshal(task.Spec, &spec) != nil || spec.Service == "" ||
+		len(spec.Ports) == 0 {
+		return trafficcontrol.ClaimResponse{}, internalError(
+			errors.New("stored Exchange Task is invalid"),
+		)
 	}
 	result, _ := json.Marshal(ownerResult{OwnerID: relayID})
-	if err := handler.storage.Tasks().UpdateState(ctx, task.ID, remotetask.Pending, remotetask.Starting, result, handler.now().UTC()); err != nil {
+	if err := handler.updateTrafficTask(
+		ctx, task.ID, remotetask.Pending, remotetask.Starting, result,
+	); err != nil {
 		return trafficcontrol.ClaimResponse{}, storageError(err)
 	}
 	return trafficcontrol.ClaimResponse{
@@ -70,31 +79,48 @@ func (handler *Service) Prepare(
 		return trafficcontrol.PrepareResponse{}, apiError
 	}
 	if task.State != remotetask.Starting || !trafficOwnedBy(task, relayID) {
-		return trafficcontrol.PrepareResponse{}, &controlplaneapi.Error{Code: controlplaneapi.CodeConflict, Message: "Exchange Task is not owned by this Gateway"}
+		return trafficcontrol.PrepareResponse{}, &controlplaneapi.Error{
+			Code:    controlplaneapi.CodeConflict,
+			Message: exchangeTaskOwnershipMessage,
+		}
 	}
 	var spec storedSpec
 	if json.Unmarshal(task.Spec, &spec) != nil {
-		return trafficcontrol.PrepareResponse{}, internalError(errors.New("stored Exchange Task is invalid"))
+		return trafficcontrol.PrepareResponse{}, internalError(
+			errors.New("stored Exchange Task is invalid"),
+		)
 	}
 	ports, err := interceptPorts(spec.Ports, request.Ports)
 	if err != nil {
-		return trafficcontrol.PrepareResponse{}, &controlplaneapi.Error{Code: controlplaneapi.CodeInvalidArgument, Message: err.Error(), Cause: err}
+		return trafficcontrol.PrepareResponse{}, &controlplaneapi.Error{
+			Code:    controlplaneapi.CodeInvalidArgument,
+			Message: err.Error(),
+			Cause:   err,
+		}
 	}
 	claim := ownerResult{OwnerID: relayID, GatewayIP: request.GatewayIP}
 	claimJSON, _ := json.Marshal(claim)
-	if err := handler.storage.Tasks().UpdateState(ctx, task.ID, remotetask.Starting, remotetask.Starting, claimJSON, handler.now().UTC()); err != nil {
+	if err := handler.updateTrafficTask(
+		ctx, task.ID, remotetask.Starting, remotetask.Starting, claimJSON,
+	); err != nil {
 		return trafficcontrol.PrepareResponse{}, storageError(err)
 	}
 	snapshot := servicebinding.ServiceInterceptSnapshot{
 		Namespace: session.Namespace, Service: spec.Service, GatewayIP: request.GatewayIP, Ports: ports,
 	}
 	if err := handler.resources.Capture(ctx, identity, &snapshot); err != nil {
-		return trafficcontrol.PrepareResponse{}, internalError(fmt.Errorf("capture Exchange Service: %w", err))
+		return trafficcontrol.PrepareResponse{}, internalError(
+			fmt.Errorf("capture Exchange Service: %w", err),
+		)
 	}
 	if err := handler.resources.Apply(ctx, identity, snapshot, task.ID); err != nil {
-		return trafficcontrol.PrepareResponse{}, internalError(fmt.Errorf("apply Exchange binding: %w", err))
+		return trafficcontrol.PrepareResponse{}, internalError(
+			fmt.Errorf("apply Exchange binding: %w", err),
+		)
 	}
-	if err := handler.storage.Tasks().UpdateState(ctx, task.ID, remotetask.Starting, remotetask.Running, claimJSON, handler.now().UTC()); err != nil {
+	if err := handler.updateTrafficTask(
+		ctx, task.ID, remotetask.Starting, remotetask.Running, claimJSON,
+	); err != nil {
 		return trafficcontrol.PrepareResponse{}, storageError(err)
 	}
 	return trafficcontrol.PrepareResponse{}, nil
@@ -110,18 +136,33 @@ func (handler *Service) Heartbeat(
 		return trafficcontrol.HeartbeatResponse{}, notFound()
 	}
 	if !trafficOwnedBy(task, relayID) {
-		return trafficcontrol.HeartbeatResponse{}, &controlplaneapi.Error{Code: controlplaneapi.CodeConflict, Message: "Exchange Task is not owned by this Gateway"}
+		return trafficcontrol.HeartbeatResponse{}, &controlplaneapi.Error{
+			Code:    controlplaneapi.CodeConflict,
+			Message: exchangeTaskOwnershipMessage,
+		}
 	}
 	switch task.State {
 	case remotetask.Starting, remotetask.Running:
-		if err := handler.storage.Tasks().UpdateState(ctx, task.ID, task.State, task.State, task.Result, handler.now().UTC()); err != nil && !errors.Is(err, storage.ErrConflict) {
+		if err := handler.updateTrafficTask(
+			ctx, task.ID, task.State, task.State, task.Result,
+		); err != nil &&
+			!errors.Is(err, storage.ErrConflict) {
 			return trafficcontrol.HeartbeatResponse{}, storageError(err)
 		}
 		return trafficcontrol.HeartbeatResponse{}, nil
-	case remotetask.Stopping, remotetask.Stopped, remotetask.Failed, remotetask.Recovering:
+	case remotetask.Stopping,
+		remotetask.Stopped,
+		remotetask.Failed,
+		remotetask.Recovering:
 		return trafficcontrol.HeartbeatResponse{Stop: true}, nil
+	case remotetask.Pending:
+		return trafficcontrol.HeartbeatResponse{}, internalError(
+			fmt.Errorf("stored Exchange Task has invalid state %q", task.State),
+		)
 	default:
-		return trafficcontrol.HeartbeatResponse{}, internalError(fmt.Errorf("stored Exchange Task has invalid state %q", task.State))
+		return trafficcontrol.HeartbeatResponse{}, internalError(
+			fmt.Errorf("stored Exchange Task has invalid state %q", task.State),
+		)
 	}
 }
 
@@ -135,7 +176,10 @@ func (handler *Service) Finish(
 		return trafficcontrol.FinishResponse{}, notFound()
 	}
 	if !trafficOwnedBy(task, relayID) {
-		return trafficcontrol.FinishResponse{}, &controlplaneapi.Error{Code: controlplaneapi.CodeConflict, Message: "Exchange Task is not owned by this Gateway"}
+		return trafficcontrol.FinishResponse{}, &controlplaneapi.Error{
+			Code:    controlplaneapi.CodeConflict,
+			Message: exchangeTaskOwnershipMessage,
+		}
 	}
 	session, err := handler.storage.Sessions().GetByID(ctx, task.SessionID)
 	if err != nil {
@@ -147,8 +191,17 @@ func (handler *Service) Finish(
 	restored := !cleanupRequired
 	var restoreErr error
 	if cleanupRequired {
-		restoreContext, cancel := context.WithTimeout(context.Background(), handler.config.RestoreTimeout)
-		restoreErr = handler.resources.Restore(restoreContext, servicebinding.ServiceInterceptSnapshot{Namespace: session.Namespace}, task.ID)
+		restoreContext, cancel := context.WithTimeout(
+			context.Background(),
+			handler.config.RestoreTimeout,
+		)
+		restoreErr = handler.resources.Restore(
+			restoreContext,
+			servicebinding.ServiceInterceptSnapshot{
+				Namespace: session.Namespace,
+			},
+			task.ID,
+		)
 		cancel()
 		restored = restoreErr == nil
 	}
@@ -156,10 +209,15 @@ func (handler *Service) Finish(
 	if request.Failed {
 		cause = errors.New(strings.TrimSpace(request.Reason))
 		if cause.Error() == "" {
-			cause = errors.New("Exchange relay failed")
+			cause = errors.New("exchange relay failed")
 		}
 	}
-	handler.finishExchange(task.ID, cleanupRequired, restored, errors.Join(cause, restoreErr))
+	handler.finishExchange(
+		task.ID,
+		cleanupRequired,
+		restored,
+		errors.Join(cause, restoreErr),
+	)
 	current, err := handler.storage.Tasks().GetByID(ctx, task.ID)
 	if err != nil {
 		return trafficcontrol.FinishResponse{}, storageError(err)
@@ -172,26 +230,55 @@ func (handler *Service) trafficSession(
 	ticketIdentity trafficcontrol.Identity,
 ) (controlplaneapi.Identity, sessionapi.ActiveSession, *controlplaneapi.Error) {
 	identity := controlplaneapi.Identity{
-		Subject: ticketIdentity.IdentityID, Groups: append([]string(nil), ticketIdentity.Groups...), DeviceID: ticketIdentity.DeviceID,
+		Subject:  ticketIdentity.IdentityID,
+		Groups:   append([]string(nil), ticketIdentity.Groups...),
+		DeviceID: ticketIdentity.DeviceID,
 	}
-	session, apiError := handler.sessions.RequireActive(ctx, identity, ticketIdentity.Namespace, ticketIdentity.SessionID)
+	session, apiError := handler.sessions.RequireActive(
+		ctx,
+		identity,
+		ticketIdentity.Namespace,
+		ticketIdentity.SessionID,
+	)
 	if apiError != nil {
 		return controlplaneapi.Identity{}, sessionapi.ActiveSession{}, apiError
 	}
-	if !sessionapi.AcceptsStreamGeneration(session.Generation, ticketIdentity.SessionGeneration) {
-		return controlplaneapi.Identity{}, sessionapi.ActiveSession{}, &controlplaneapi.Error{Code: controlplaneapi.CodeConflict, Message: "Session generation changed"}
+	if !sessionapi.AcceptsStreamGeneration(
+		session.Generation,
+		ticketIdentity.SessionGeneration,
+	) {
+		return controlplaneapi.Identity{}, sessionapi.ActiveSession{}, &controlplaneapi.Error{
+			Code:    controlplaneapi.CodeConflict,
+			Message: "Session generation changed",
+		}
 	}
 	return identity, session, nil
 }
 
-func trafficOwnedBy(task storage.Task, relayID string) bool {
-	var owner ownerResult
-	return json.Unmarshal(task.Result, &owner) == nil && owner.OwnerID == relayID
+func (handler *Service) updateTrafficTask(
+	ctx context.Context,
+	taskID string,
+	from remotetask.State,
+	to remotetask.State,
+	result json.RawMessage,
+) error {
+	return handler.storage.Tasks().UpdateState(ctx, taskID, from, to, result, handler.now().UTC())
 }
 
-func interceptPorts(expected []trafficmodel.Port, listeners []trafficcontrol.ListenerPort) ([]servicebinding.InterceptPort, error) {
+func trafficOwnedBy(task storage.Task, relayID string) bool {
+	var owner ownerResult
+	return json.Unmarshal(task.Result, &owner) == nil &&
+		owner.OwnerID == relayID
+}
+
+func interceptPorts(
+	expected []trafficmodel.Port,
+	listeners []trafficcontrol.ListenerPort,
+) ([]servicebinding.InterceptPort, error) {
 	if len(expected) != len(listeners) {
-		return nil, errors.New("Gateway listener ports do not match the Exchange Task")
+		return nil, errors.New(
+			"gateway listener ports do not match the Exchange Task",
+		)
 	}
 	byKey := make(map[string]trafficcontrol.ListenerPort, len(listeners))
 	for _, port := range listeners {
@@ -201,7 +288,9 @@ func interceptPorts(expected []trafficmodel.Port, listeners []trafficcontrol.Lis
 	for _, port := range expected {
 		listener, ok := byKey[strings.ToLower(port.Protocol)+fmt.Sprintf("/%d", port.ServicePort)]
 		if !ok || listener.Name != port.Name {
-			return nil, errors.New("Gateway listener ports do not match the Exchange Task")
+			return nil, errors.New(
+				"gateway listener ports do not match the Exchange Task",
+			)
 		}
 		result = append(result, servicebinding.InterceptPort{
 			Name: port.Name, Protocol: corev1.Protocol(strings.ToUpper(port.Protocol)),
@@ -211,7 +300,11 @@ func interceptPorts(expected []trafficmodel.Port, listeners []trafficcontrol.Lis
 	return result, nil
 }
 
-func (handler *Service) finishExchange(taskID string, cleanupRequired, restored bool, cause error) bool {
+func (handler *Service) finishExchange(
+	taskID string,
+	cleanupRequired, restored bool,
+	cause error,
+) bool {
 	return taskstream.Finish(taskstream.FinishConfig{
 		Tasks: handler.storage.Tasks(), TaskID: taskID, Now: handler.now, Cause: cause,
 		CleanupRequired: cleanupRequired, CleanupComplete: restored,

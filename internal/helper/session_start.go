@@ -157,6 +157,10 @@ func (s *Server) startSession(spec singbox.SessionSpec) error {
 		close(current.done)
 		current.lifecycleMu.Unlock()
 	}()
+	return waitForSessionStartup(current, spec, dns)
+}
+
+func waitForSessionStartup(current *session, spec singbox.SessionSpec, dns singbox.DNSMeta) error {
 	controller := net.JoinHostPort("127.0.0.1", strconv.Itoa(spec.ControllerPort))
 	deadline := time.Now().Add(2 * time.Second)
 	ticker := time.NewTicker(50 * time.Millisecond)

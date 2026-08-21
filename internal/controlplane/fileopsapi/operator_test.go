@@ -13,7 +13,13 @@ import (
 
 type localPodExecutor struct{}
 
-func (localPodExecutor) Exec(ctx context.Context, _ controlplaneapi.Identity, _ string, spec execapi.Spec, streams execapi.Streams) error {
+func (localPodExecutor) Exec(
+	ctx context.Context,
+	_ controlplaneapi.Identity,
+	_ string,
+	spec execapi.Spec,
+	streams execapi.Streams,
+) error {
 	command := exec.CommandContext(ctx, spec.Command[0], spec.Command[1:]...)
 	command.Stdin, command.Stdout, command.Stderr = streams.Stdin, streams.Stdout, streams.Stderr
 	return command.Run()
@@ -28,7 +34,10 @@ func TestEntryParserHandlesUnusualNamesWithoutRecordConfusion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(entries) != 2 || entries[0].Name != "directory" || entries[0].Kind != KindDirectory || entries[1].Name != unusual || entries[1].Size != 7 {
+	if len(entries) != 2 || entries[0].Name != "directory" ||
+		entries[0].Kind != KindDirectory ||
+		entries[1].Name != unusual ||
+		entries[1].Size != 7 {
 		t.Fatalf("entries = %#v", entries)
 	}
 }
@@ -57,14 +66,21 @@ func TestKubernetesOperatorRejectsParentAndTargetSymlinkEscape(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, target := range []string{filepath.Join(root, "escaped", "created"), filepath.Join(root, "target-link")} {
-		err := operator.Mutate(context.Background(), controlplaneapi.Identity{Subject: "user"}, "development", Spec{
-			Action: ActionCreate, Kind: KindFile, Pod: "api-0", Container: "api", Path: target, AllowedRoot: root,
-		})
+		err := operator.Mutate(
+			context.Background(),
+			controlplaneapi.Identity{Subject: "user"},
+			"development",
+			Spec{
+				Action: ActionCreate, Kind: KindFile, Pod: "api-0", Container: "api", Path: target, AllowedRoot: root,
+			},
+		)
 		if err == nil {
 			t.Fatalf("symlink target %q was accepted", target)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(outside, "created")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(outside, "created")); !os.IsNotExist(
+		err,
+	) {
 		t.Fatalf("outside file was created: %v", err)
 	}
 	content, err := os.ReadFile(outsideFile)

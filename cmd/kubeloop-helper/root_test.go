@@ -11,7 +11,7 @@ import (
 func TestRootCommandVersion(t *testing.T) {
 	t.Parallel()
 
-	for _, args := range [][]string{{"version"}, {"--version"}} {
+	for _, args := range [][]string{{versionCommandName}, {"--version"}} {
 		t.Run(strings.Join(args, "_"), func(t *testing.T) {
 			t.Parallel()
 			stdout, stderr, exitCode := executeForTest(t, args, commandDependencies{}, "1.2.3")
@@ -51,7 +51,7 @@ func TestInstallCommand(t *testing.T) {
 		},
 	}
 	stdout, stderr, exitCode := executeForTest(t, []string{
-		"install",
+		installCommandName,
 		"--source", "/tmp/helper",
 		"--token", "secret",
 		"--uid", "1000",
@@ -81,10 +81,23 @@ func TestCommandValidationUsesUsageExitCode(t *testing.T) {
 		name string
 		args []string
 	}{
-		{name: "missing install flags", args: []string{"install"}},
-		{name: "negative uid", args: []string{"install", "--source", "helper", "--token", "secret", "--home", "/tmp", "--uid", "-1"}},
-		{name: "extra run argument", args: []string{"run", "extra"}},
-		{name: "unknown flag", args: []string{"version", "--unknown"}},
+		{name: "missing install flags", args: []string{installCommandName}},
+		{
+			name: "negative uid",
+			args: []string{
+				installCommandName,
+				"--source",
+				"helper",
+				"--token",
+				"secret",
+				"--home",
+				"/tmp",
+				"--uid",
+				"-1",
+			},
+		},
+		{name: "extra run argument", args: []string{runCommandName, "extra"}},
+		{name: "unknown flag", args: []string{versionCommandName, "--unknown"}},
 		{name: "unknown command", args: []string{"unknown"}},
 	}
 	for _, test := range tests {
@@ -117,7 +130,7 @@ func TestRunCommandPropagatesContext(t *testing.T) {
 		},
 	}
 	var stdout, stderr bytes.Buffer
-	if exitCode := execute(ctx, []string{"run"}, &stdout, &stderr, dependencies, "dev"); exitCode != 0 {
+	if exitCode := execute(ctx, []string{runCommandName}, &stdout, &stderr, dependencies, "dev"); exitCode != 0 {
 		t.Fatalf("exit code = %d, stderr = %q", exitCode, stderr.String())
 	}
 	if !called {

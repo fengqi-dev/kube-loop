@@ -9,16 +9,23 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/google/uuid"
+
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
 	"github.com/fengqi-dev/kube-loop/internal/client/reverserelay"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficstream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
-	"github.com/google/uuid"
 )
 
 type Client interface {
-	CreatePreview(context.Context, profile.Profile, remote.Session, remote.PreviewSpec, string) (remote.PreviewTask, error)
+	CreatePreview(
+		context.Context,
+		profile.Profile,
+		remote.Session,
+		remote.PreviewSpec,
+		string,
+	) (remote.PreviewTask, error)
 	GetPreview(context.Context, profile.Profile, remote.Session, string) (remote.PreviewTask, error)
 	StopPreview(context.Context, profile.Profile, remote.Session, string) (remote.PreviewTask, error)
 }
@@ -74,7 +81,7 @@ type Manager struct {
 
 func NewManager(client Client, config Config) (*Manager, error) {
 	if client == nil || config.TrafficStreams == nil {
-		return nil, errors.New("Preview control client and Data Plane stream opener are required")
+		return nil, errors.New("preview control client and Data Plane stream opener are required")
 	}
 	if config.DialContext == nil {
 		dialer := &net.Dialer{}
@@ -92,12 +99,12 @@ func (manager *Manager) Start(
 	session remote.Session,
 	request Request,
 ) (Info, error) {
-	if ctx == nil || strings.TrimSpace(request.ProfileID) != serverProfile.ID || session.State != "active" {
+	if ctx == nil || strings.TrimSpace(request.ProfileID) != serverProfile.ID || session.State != previewSessionActive {
 		return Info{}, errors.New("active Server Profile Session is required")
 	}
 	request.Namespace = strings.TrimSpace(request.Namespace)
 	if request.Namespace == "" || request.Namespace != session.Namespace {
-		return Info{}, errors.New("Preview namespace must match the active Session namespace")
+		return Info{}, errors.New("preview namespace must match the active Session namespace")
 	}
 	request.Name = strings.TrimSpace(request.Name)
 	targets, ports, err := normalizeTargets(request.Targets)
@@ -117,7 +124,7 @@ func (manager *Manager) Start(
 	connection, err := manager.streams.OpenTrafficStream(ctx, serverProfile.ID, tunnel.TrafficModePreview, task.ID)
 	if err != nil || connection == nil {
 		if err == nil {
-			err = errors.New("Data Plane returned an empty Preview stream")
+			err = errors.New("data Plane returned an empty Preview stream")
 		}
 		_, stopErr := manager.client.StopPreview(ctx, serverProfile, session, task.ID)
 		return Info{}, errors.Join(err, stopErr)
@@ -129,9 +136,9 @@ func (manager *Manager) Start(
 		return Info{}, errors.Join(err, stopErr)
 	}
 	running, err := manager.client.GetPreview(ctx, serverProfile, session, task.ID)
-	if err != nil || running.State != "running" || net.ParseIP(running.ClusterIP) == nil {
+	if err != nil || running.State != previewTaskRunning || net.ParseIP(running.ClusterIP) == nil {
 		if err == nil {
-			err = errors.New("Gateway returned an incomplete running Preview")
+			err = errors.New("gateway returned an incomplete running Preview")
 		}
 		_, stopErr := manager.client.StopPreview(ctx, serverProfile, session, task.ID)
 		streamErr := relay.Stop(ctx)
@@ -147,10 +154,21 @@ func (manager *Manager) Start(
 
 	runContext, cancel := context.WithCancel(context.Background())
 	entry := &activePreview{
-		profile: serverProfile, session: session, task: running, relay: relay, cancel: cancel, done: make(chan struct{}),
+		profile: serverProfile,
+		session: session,
+		task:    running,
+		relay:   relay,
+		cancel:  cancel,
+		done:    make(chan struct{}),
 		info: Info{
-			ID: running.ID, ProfileID: serverProfile.ID, SessionID: session.ID, Namespace: session.Namespace,
-			Name: running.Name, ClusterIP: running.ClusterIP, State: "running", Targets: append([]LocalTarget(nil), targets...),
+			ID:        running.ID,
+			ProfileID: serverProfile.ID,
+			SessionID: session.ID,
+			Namespace: session.Namespace,
+			Name:      running.Name,
+			ClusterIP: running.ClusterIP,
+			State:     previewTaskRunning,
+			Targets:   append([]LocalTarget(nil), targets...),
 		},
 	}
 	manager.mu.Lock()
@@ -160,7 +178,7 @@ func (manager *Manager) Start(
 		_, stopErr := manager.client.StopPreview(ctx, serverProfile, session, running.ID)
 		streamErr := relay.Stop(ctx)
 		_ = connection.Close()
-		return Info{}, errors.Join(errors.New("Preview Task is already active locally"), stopErr, streamErr)
+		return Info{}, errors.Join(errors.New("preview Task is already active locally"), stopErr, streamErr)
 	}
 	manager.active[running.ID] = entry
 	manager.mu.Unlock()
@@ -170,7 +188,7 @@ func (manager *Manager) Start(
 
 func (manager *Manager) Stop(ctx context.Context, profileID, taskID string) error {
 	if ctx == nil {
-		return errors.New("Preview stop context is required")
+		return errors.New("preview stop context is required")
 	}
 	manager.mu.Lock()
 	entry := manager.active[taskID]
@@ -181,7 +199,7 @@ func (manager *Manager) Stop(ctx context.Context, profileID, taskID string) erro
 	}
 	manager.mu.Unlock()
 	if entry == nil {
-		return errors.New("Preview is not active locally")
+		return errors.New("preview is not active locally")
 	}
 	// The durable stop request wins the race with the stream owner's cleanup.
 	_, remoteErr := manager.client.StopPreview(ctx, entry.profile, entry.session, entry.task.ID)
@@ -229,7 +247,7 @@ func (manager *Manager) StopProfile(ctx context.Context, profileID string) error
 
 func (manager *Manager) Shutdown(ctx context.Context) error {
 	if ctx == nil {
-		return errors.New("Preview shutdown context is required")
+		return errors.New("preview shutdown context is required")
 	}
 	manager.mu.Lock()
 	ids := make([]string, 0, len(manager.active))
@@ -260,7 +278,7 @@ func (manager *Manager) run(ctx context.Context, entry *activePreview) {
 
 func normalizeTargets(input []LocalTarget) ([]LocalTarget, []remote.PreviewPort, error) {
 	if len(input) == 0 || len(input) > 64 {
-		return nil, nil, errors.New("Preview requires one to 64 local targets")
+		return nil, nil, errors.New("preview requires one to 64 local targets")
 	}
 	targets := make([]LocalTarget, len(input))
 	ports := make([]remote.PreviewPort, len(input))
@@ -268,22 +286,23 @@ func normalizeTargets(input []LocalTarget) ([]LocalTarget, []remote.PreviewPort,
 	for index, target := range input {
 		target.Protocol = strings.ToLower(strings.TrimSpace(target.Protocol))
 		if target.Protocol == "" {
-			target.Protocol = "tcp"
+			target.Protocol = previewProtocolTCP
 		}
 		target.LocalHost = strings.TrimSpace(target.LocalHost)
 		if target.LocalHost == "" {
-			target.LocalHost = "127.0.0.1"
+			target.LocalHost = previewLoopbackHost
 		}
 		if target.LocalPort == 0 && target.ServicePort > 0 && target.ServicePort <= 65535 {
 			target.LocalPort = uint16(target.ServicePort)
 		}
-		if target.ServicePort < 1 || target.ServicePort > 65535 || target.LocalPort == 0 ||
-			(target.Protocol != "tcp" && target.Protocol != "udp") || !validLocalHost(target.LocalHost) {
-			return nil, nil, errors.New("Preview local target is invalid")
+		invalidPort := target.ServicePort < 1 || target.ServicePort > 65535 || target.LocalPort == 0
+		invalidProtocol := target.Protocol != previewProtocolTCP && target.Protocol != previewProtocolUDP
+		if invalidPort || invalidProtocol || !validLocalHost(target.LocalHost) {
+			return nil, nil, errors.New("preview local target is invalid")
 		}
 		key := targetKey(target.Protocol, target.ServicePort)
 		if _, exists := seen[key]; exists {
-			return nil, nil, errors.New("Preview Service ports must be unique")
+			return nil, nil, errors.New("preview Service ports must be unique")
 		}
 		seen[key] = struct{}{}
 		targets[index] = target
@@ -316,7 +335,7 @@ func validLocalHost(host string) bool {
 
 func matchTask(task remote.PreviewTask, name string, targets []LocalTarget) error {
 	if task.Name != name || len(task.Ports) != len(targets) {
-		return errors.New("Gateway changed the requested Preview identity")
+		return errors.New("gateway changed the requested Preview identity")
 	}
 	want := make(map[string]struct{}, len(targets))
 	for _, target := range targets {
@@ -324,7 +343,7 @@ func matchTask(task remote.PreviewTask, name string, targets []LocalTarget) erro
 	}
 	for _, port := range task.Ports {
 		if _, exists := want[targetKey(port.Protocol, port.ServicePort)]; !exists {
-			return errors.New("Gateway changed the requested Preview ports")
+			return errors.New("gateway changed the requested Preview ports")
 		}
 	}
 	return nil

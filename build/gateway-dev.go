@@ -105,7 +105,13 @@ func main() {
 	} else if !localClusterContext(contextName) {
 		fatalf("refusing to deploy the local development stack to non-local Kubernetes context %q", contextName)
 	} else {
-		publicURL, deployErr := deployDevelopmentStack(root, contextName, controlPlaneImage, gatewayImage, operatorImage)
+		publicURL, deployErr := deployDevelopmentStack(
+			root,
+			contextName,
+			controlPlaneImage,
+			gatewayImage,
+			operatorImage,
+		)
 		if deployErr != nil {
 			fatalf("deploy development stack: %v", deployErr)
 		}
@@ -131,10 +137,14 @@ func buildDevelopmentSingBox(root string) error {
 }
 
 func controlPlaneSourceHash(root string) (string, error) {
-	return sourceHash(root, []string{"go.mod", "go.sum", ".dockerignore", "build/control-plane.e2e.Dockerfile"}, []string{
-		"cmd/kubeloop-control-plane",
-		"internal",
-	})
+	return sourceHash(
+		root,
+		[]string{"go.mod", "go.sum", ".dockerignore", "build/control-plane.e2e.Dockerfile"},
+		[]string{
+			"cmd/kubeloop-control-plane",
+			"internal",
+		},
+	)
 }
 
 func gatewaySourceHash(root string) (string, error) {
@@ -349,29 +359,60 @@ func deployDevelopmentStack(
 	}
 	chart := filepath.Join(root, "charts", "kubeloop")
 	arguments := []string{
-		"upgrade", "--install", developmentRelease, chart,
-		"--namespace", developmentNamespace,
-		"--reset-values", "--wait", "--rollback-on-failure", "--cleanup-on-fail", "--timeout", "5m", "--history-max", "5",
-		"--set-string", "publicURL=" + publicURL,
-		"--set-string", "serviceID=" + serviceID,
-		"--set-string", "controlPlane.image.repository=" + controlPlaneRepository,
-		"--set-string", "controlPlane.image.tag=" + controlPlaneTag,
-		"--set-string", "controlPlane.image.pullPolicy=IfNotPresent",
-		"--set-string", "dataPlane.image.repository=" + gatewayRepository,
-		"--set-string", "dataPlane.image.tag=" + gatewayTag,
-		"--set-string", "dataPlane.image.pullPolicy=IfNotPresent",
-		"--set-string", "operator.image.repository=" + operatorRepository,
-		"--set-string", "operator.image.tag=" + operatorTag,
-		"--set-string", "operator.image.pullPolicy=IfNotPresent",
-		"--set-string", "controlPlane.relayRegistry.endpointAllowedHosts=" + host,
-		"--set-string", "dataPlane.relayRegistry.endpoint=wss://" + host + "/tunnel",
-		"--set", "controlPlane.development.enabled=true",
-		"--set", "ingress.enabled=true",
-		"--set-string", "ingress.className=nginx",
-		"--set-string", "ingress.annotations.nginx\\.ingress\\.kubernetes\\.io/ssl-redirect=true",
-		"--set-string", "ingress.host=" + host,
-		"--set", "ingress.tls.enabled=true",
-		"--set-string", "ingress.tls.secretName=" + ingressSecret,
+		"upgrade",
+		"--install",
+		developmentRelease,
+		chart,
+		"--namespace",
+		developmentNamespace,
+		"--reset-values",
+		"--wait",
+		"--rollback-on-failure",
+		"--cleanup-on-fail",
+		"--timeout",
+		"5m",
+		"--history-max",
+		"5",
+		"--set-string",
+		"publicURL=" + publicURL,
+		"--set-string",
+		"serviceID=" + serviceID,
+		"--set-string",
+		"controlPlane.image.repository=" + controlPlaneRepository,
+		"--set-string",
+		"controlPlane.image.tag=" + controlPlaneTag,
+		"--set-string",
+		"controlPlane.image.pullPolicy=IfNotPresent",
+		"--set-string",
+		"dataPlane.image.repository=" + gatewayRepository,
+		"--set-string",
+		"dataPlane.image.tag=" + gatewayTag,
+		"--set-string",
+		"dataPlane.image.pullPolicy=IfNotPresent",
+		"--set-string",
+		"operator.image.repository=" + operatorRepository,
+		"--set-string",
+		"operator.image.tag=" + operatorTag,
+		"--set-string",
+		"operator.image.pullPolicy=IfNotPresent",
+		"--set-string",
+		"controlPlane.relayRegistry.endpointAllowedHosts=" + host,
+		"--set-string",
+		"dataPlane.relayRegistry.endpoint=wss://" + host + "/tunnel",
+		"--set",
+		"controlPlane.development.enabled=true",
+		"--set",
+		"ingress.enabled=true",
+		"--set-string",
+		"ingress.className=nginx",
+		"--set-string",
+		"ingress.annotations.nginx\\.ingress\\.kubernetes\\.io/ssl-redirect=true",
+		"--set-string",
+		"ingress.host=" + host,
+		"--set",
+		"ingress.tls.enabled=true",
+		"--set-string",
+		"ingress.tls.secretName=" + ingressSecret,
 	}
 	fmt.Printf("==> Deploying KubeLoop development stack to namespace %s\n", developmentNamespace)
 	if err := run(root, exec.Command("helm", arguments...)); err != nil {
@@ -489,7 +530,9 @@ func resetDevelopmentStorageForBaseline(root, contextName, directory string) err
 func generateDevelopmentIngressCertificate(root, directory, host string) (string, string, string, error) {
 	mkcert, err := exec.LookPath("mkcert")
 	if err != nil {
-		return "", "", "", errors.New("mkcert is required for development TLS; install it and ensure it is available in PATH")
+		return "", "", "", errors.New(
+			"mkcert is required for development TLS; install it and ensure it is available in PATH",
+		)
 	}
 	if err := os.MkdirAll(directory, 0o700); err != nil {
 		return "", "", "", fmt.Errorf("create development material directory: %w", err)

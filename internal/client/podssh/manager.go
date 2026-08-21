@@ -76,7 +76,7 @@ type Manager struct {
 
 func New(client clientexec.Client, sessions SessionSource, config Config) (*Manager, error) {
 	if client == nil || sessions == nil {
-		return nil, errors.New("Pod SSH remote exec client and Session source are required")
+		return nil, errors.New("pod SSH remote exec client and Session source are required")
 	}
 	manager := &Manager{
 		client: client, sessions: sessions, hostTCP: config.HostTCPRegistrar,
@@ -93,9 +93,9 @@ func (manager *Manager) Start(
 	request Request,
 ) (Info, error) {
 	if ctx == nil {
-		return Info{}, errors.New("Pod SSH context is required")
+		return Info{}, errors.New("pod SSH context is required")
 	}
-	if strings.TrimSpace(request.ProfileID) != serverProfile.ID || session.State != "active" {
+	if strings.TrimSpace(request.ProfileID) != serverProfile.ID || session.State != podSSHSessionActive {
 		return Info{}, errors.New("active Server Profile Session is required")
 	}
 	request.Namespace = strings.TrimSpace(request.Namespace)
@@ -103,26 +103,31 @@ func (manager *Manager) Start(
 	request.PodIP = strings.TrimSpace(request.PodIP)
 	request.Container = strings.TrimSpace(request.Container)
 	if request.Namespace == "" || request.Pod == "" || request.PodIP == "" || session.Namespace != request.Namespace {
-		return Info{}, errors.New("Pod SSH target must belong to the active Session namespace")
+		return Info{}, errors.New("pod SSH target must belong to the active Session namespace")
 	}
 	if !request.Ready {
-		return Info{}, errors.New("Pod SSH target must be ready")
+		return Info{}, errors.New("pod SSH target must be ready")
 	}
 	containers := normalizeContainers(request.Containers)
 	if len(containers) == 0 {
-		return Info{}, errors.New("Pod SSH target has no containers")
+		return Info{}, errors.New("pod SSH target has no containers")
 	}
 	if request.Container == "" {
 		request.Container = containers[0]
 	}
 	if !slices.Contains(containers, request.Container) {
-		return Info{}, fmt.Errorf("container %q is not available in Pod %s/%s", request.Container, request.Namespace, request.Pod)
+		return Info{}, fmt.Errorf(
+			"container %q is not available in Pod %s/%s",
+			request.Container,
+			request.Namespace,
+			request.Pod,
+		)
 	}
 	reservation := serverProfile.ID + "\x00" + request.Namespace + "\x00" + request.Pod
 	manager.mu.Lock()
 	if _, exists := manager.starting[reservation]; exists {
 		manager.mu.Unlock()
-		return Info{}, errors.New("Pod SSH endpoint is already active")
+		return Info{}, errors.New("pod SSH endpoint is already active")
 	}
 	if existing := manager.findLocked(serverProfile.ID, request.Namespace, request.Pod); existing != nil {
 		info := existing.info
@@ -159,9 +164,12 @@ func (manager *Manager) Start(
 	if manager.hostTCP == nil {
 		return Info{}, errors.New("native PodIP SSH interception is unavailable")
 	}
-	if err := manager.hostTCP.SetHostTCPHandler(serverProfile.ID, func(host string, port uint16) (func(net.Conn), bool) {
-		return manager.server.HostTCPForContext(serverProfile.ID, host, port)
-	}); err != nil {
+	if err := manager.hostTCP.SetHostTCPHandler(
+		serverProfile.ID,
+		func(host string, port uint16) (func(net.Conn), bool) {
+			return manager.server.HostTCPForContext(serverProfile.ID, host, port)
+		},
+	); err != nil {
 		return Info{}, err
 	}
 	entry := &activeEndpoint{
@@ -170,7 +178,7 @@ func (manager *Manager) Start(
 			ID: baseInfo.ID, ProfileID: serverProfile.ID, SessionID: session.ID,
 			Namespace: request.Namespace, Pod: request.Pod, Container: request.Container,
 			Containers: containers, PodIP: request.PodIP, Address: net.JoinHostPort(request.PodIP, "22"),
-			Port: baseInfo.Port, Command: baseInfo.Command, State: "active",
+			Port: baseInfo.Port, Command: baseInfo.Command, State: podSSHSessionActive,
 		},
 	}
 	manager.mu.Lock()
@@ -191,7 +199,7 @@ func (manager *Manager) Stop(profileID, endpointID string) error {
 	}
 	manager.mu.Unlock()
 	if entry == nil {
-		return errors.New("Pod SSH endpoint is not active")
+		return errors.New("pod SSH endpoint is not active")
 	}
 	serverErr := manager.server.Disable(endpointID)
 	return serverErr
@@ -254,7 +262,7 @@ func (manager *Manager) lookup(target localpodssh.Target) (profile.Profile, remo
 	entry := manager.findLocked(target.Context, target.Namespace, target.Pod)
 	if entry == nil || !slices.Contains(entry.target.Containers, target.Container) {
 		manager.mu.Unlock()
-		return profile.Profile{}, remote.Session{}, errors.New("Pod SSH endpoint is no longer active")
+		return profile.Profile{}, remote.Session{}, errors.New("pod SSH endpoint is no longer active")
 	}
 	serverProfile := entry.profile
 	expectedSession := entry.session
@@ -264,8 +272,9 @@ func (manager *Manager) lookup(target localpodssh.Target) (profile.Profile, remo
 	if err != nil {
 		return profile.Profile{}, remote.Session{}, err
 	}
-	if current.ID != expectedSession.ID || current.Namespace != target.Namespace || current.State != "active" {
-		return profile.Profile{}, remote.Session{}, errors.New("Pod SSH Session changed")
+	if current.ID != expectedSession.ID || current.Namespace != target.Namespace ||
+		current.State != podSSHSessionActive {
+		return profile.Profile{}, remote.Session{}, errors.New("pod SSH Session changed")
 	}
 	return serverProfile, current, nil
 }
@@ -305,7 +314,7 @@ func (executor remoteExecutor) Exec(
 	target localpodssh.Target,
 	command []string,
 	streams localpodssh.Streams,
-) error {
+) (resultErr error) {
 	serverProfile, session, err := executor.manager.lookup(target)
 	if err != nil {
 		return err
@@ -318,7 +327,11 @@ func (executor remoteExecutor) Exec(
 	if err != nil {
 		return err
 	}
-	defer stream.Close()
+	defer func() {
+		if err := stream.Close(); err != nil {
+			resultErr = errors.Join(resultErr, fmt.Errorf("close Pod exec stream: %w", err))
+		}
+	}()
 	if streams.Stdin != nil {
 		go pumpInput(execContext, cancel, stream, streams.Stdin)
 	}

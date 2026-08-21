@@ -20,23 +20,41 @@ type Client struct {
 }
 
 func (c *Client) Status(ctx context.Context) (supervisorprotocol.Response, error) {
-	return c.roundTrip(ctx, supervisorprotocol.Request{Protocol: supervisorprotocol.Version, Op: supervisorprotocol.OpStatus}, nil)
+	return c.roundTrip(ctx, supervisorprotocol.Request{
+		Protocol: supervisorprotocol.Version,
+		Op:       supervisorprotocol.OpStatus,
+	}, nil)
 }
 
 func (c *Client) RestartWorker(ctx context.Context) (supervisorprotocol.Response, error) {
-	return c.roundTrip(ctx, supervisorprotocol.Request{Protocol: supervisorprotocol.Version, Op: supervisorprotocol.OpRestartWorker}, nil)
+	return c.roundTrip(ctx, supervisorprotocol.Request{
+		Protocol: supervisorprotocol.Version,
+		Op:       supervisorprotocol.OpRestartWorker,
+	}, nil)
 }
 
-func (c *Client) UpdateWorker(ctx context.Context, manifest supervisorprotocol.UpdateManifest, source string) (supervisorprotocol.Response, error) {
+func (c *Client) UpdateWorker(
+	ctx context.Context,
+	manifest supervisorprotocol.UpdateManifest,
+	source string,
+) (supervisorprotocol.Response, error) {
 	file, err := os.Open(source)
 	if err != nil {
 		return supervisorprotocol.Response{}, fmt.Errorf("open worker update: %w", err)
 	}
-	defer file.Close()
-	return c.roundTrip(ctx, supervisorprotocol.Request{Protocol: supervisorprotocol.Version, Op: supervisorprotocol.OpUpdateWorker, Manifest: &manifest}, file)
+	defer func() { _ = file.Close() }()
+	return c.roundTrip(ctx, supervisorprotocol.Request{
+		Protocol: supervisorprotocol.Version,
+		Op:       supervisorprotocol.OpUpdateWorker,
+		Manifest: &manifest,
+	}, file)
 }
 
-func (c *Client) roundTrip(ctx context.Context, request supervisorprotocol.Request, body io.Reader) (supervisorprotocol.Response, error) {
+func (c *Client) roundTrip(
+	ctx context.Context,
+	request supervisorprotocol.Request,
+	body io.Reader,
+) (supervisorprotocol.Response, error) {
 	if c.Token == "" {
 		return supervisorprotocol.Response{}, fmt.Errorf("supervisor token is required")
 	}
@@ -49,14 +67,19 @@ func (c *Client) roundTrip(ctx context.Context, request supervisorprotocol.Reque
 			if err != nil {
 				return nil, err
 			}
-			return connection.(*net.UnixConn), nil
+			unixConnection, ok := connection.(*net.UnixConn)
+			if !ok {
+				_ = connection.Close()
+				return nil, fmt.Errorf("unexpected supervisor connection type %T", connection)
+			}
+			return unixConnection, nil
 		}
 	}
 	connection, err := dial(ctx, c.Config.SocketPath)
 	if err != nil {
 		return supervisorprotocol.Response{}, fmt.Errorf("connect supervisor: %w", err)
 	}
-	defer connection.Close()
+	defer func() { _ = connection.Close() }()
 	deadline := time.Now().Add(3 * time.Minute)
 	if value, ok := ctx.Deadline(); ok {
 		deadline = value

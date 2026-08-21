@@ -15,7 +15,7 @@ import (
 // app or under the platform install root. It never copies the binary.
 func LocateBundledSingBox() (string, error) {
 	name := "sing-box"
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == goosWindows {
 		name = "sing-box.exe"
 	}
 	var candidates []string
@@ -49,6 +49,7 @@ func LocateBundledSingBox() (string, error) {
 		if err == nil && !info.IsDir() {
 			abs, absErr := filepath.Abs(candidate)
 			if absErr != nil {
+				//nolint:nilerr // A clean relative path remains usable when Abs fails.
 				return filepath.Clean(candidate), nil
 			}
 			return abs, nil

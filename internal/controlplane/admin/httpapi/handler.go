@@ -12,18 +12,19 @@ import (
 	"strings"
 	"time"
 
-	"github.com/fengqi-dev/kube-loop/internal/controlplane"
-	adminsession "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/session"
-	adminui "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/ui"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v5"
 	"github.com/labstack/echo/v5/middleware"
+
+	"github.com/fengqi-dev/kube-loop/internal/controlplane"
+	adminsession "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/session"
+	adminui "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/ui"
 )
 
 const (
 	SessionCookieName       = "__Host-kubeloop-admin"
 	CSRFCookieName          = "__Host-kubeloop-admin-csrf"
-	CSRFHeaderName          = "X-KubeLoop-CSRF"
+	CSRFHeaderName          = "X-Kubeloop-Csrf"
 	httpSessionCookieName   = "kubeloop-admin"
 	httpCSRFCookieName      = "kubeloop-admin-csrf"
 	defaultMaxBodyBytes     = int64(1024)
@@ -57,15 +58,22 @@ type Handler struct {
 	tokenLimit        *exchangeLimiter
 }
 
-func New(config Config, sessions *adminsession.Service, optionValues ...Option) (*Handler, error) {
+func New(
+	config Config,
+	sessions *adminsession.Service,
+	optionValues ...Option,
+) (*Handler, error) {
 	if sessions == nil {
 		return nil, errors.New("management session service is required")
 	}
 	parsed, err := url.Parse(strings.TrimSpace(config.PublicURL))
-	if err != nil || parsed.Scheme == "" || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" ||
+		parsed.User != nil ||
+		parsed.RawQuery != "" ||
+		parsed.Fragment != "" {
 		return nil, errors.New("management public URL is invalid")
 	}
-	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+	if parsed.Scheme != "http" && parsed.Scheme != schemeHTTPS {
 		return nil, errors.New("management public URL must use HTTP or HTTPS")
 	}
 	maxBody := config.MaxRequestBodyBytes
@@ -85,7 +93,9 @@ func New(config Config, sessions *adminsession.Service, optionValues ...Option) 
 		window = defaultRateLimitWindow
 	}
 	if maxBody < 128 || maxBody > 64<<10 || globalAttempts < 1 || sourceAttempts < 1 ||
-		sourceAttempts > globalAttempts || window < time.Second || window > time.Hour {
+		sourceAttempts > globalAttempts ||
+		window < time.Second ||
+		window > time.Hour {
 		return nil, errors.New("management HTTP limits are invalid")
 	}
 	var options handlerOptions
@@ -100,9 +110,13 @@ func New(config Config, sessions *adminsession.Service, optionValues ...Option) 
 		sessions: sessions, origin: parsed.Scheme + "://" + parsed.Host,
 		pathPrefix: controlplane.AdminPathPrefix,
 		maxBody:    maxBody, limiter: newExchangeLimiter(globalAttempts, sourceAttempts, window),
-		tokenLimit: newExchangeLimiter(defaultTokenGlobal, defaultTokenSource, window),
+		tokenLimit: newExchangeLimiter(
+			defaultTokenGlobal,
+			defaultTokenSource,
+			window,
+		),
 	}
-	if parsed.Scheme == "https" {
+	if parsed.Scheme == schemeHTTPS {
 		handler.secureCookies = true
 		handler.sessionCookieName = SessionCookieName
 		handler.csrfCookieName = CSRFCookieName
@@ -122,7 +136,9 @@ func New(config Config, sessions *adminsession.Service, optionValues ...Option) 
 	}
 	if options.tokenAuthenticator != nil {
 		if handler.readAPI == nil {
-			return nil, errors.New("management token exchange requires the read API")
+			return nil, errors.New(
+				"management token exchange requires the read API",
+			)
 		}
 		handler.tokenAuth = options.tokenAuthenticator
 	}
@@ -133,32 +149,54 @@ func (handler *Handler) RegisterRoutes(group *echo.Group) {
 	group.Use(handler.securityHeaders)
 	adminui.New(handler.pathPrefix).RegisterRoutes(group.Group("/ui"))
 	if handler.tokenAuth != nil {
-		group.POST("/sessions/token", handler.exchangeToken, middleware.BodyLimit(handler.maxBody))
+		group.POST(
+			"/sessions/token",
+			handler.exchangeToken,
+			middleware.BodyLimit(handler.maxBody),
+		)
 	}
 	if handler.readAPI != nil {
 		handler.readAPI.routes(group)
 	}
 }
 
-func (handler *Handler) securityHeaders(next echo.HandlerFunc) echo.HandlerFunc {
+func (handler *Handler) securityHeaders(
+	next echo.HandlerFunc,
+) echo.HandlerFunc {
 	return func(ctx *echo.Context) error {
 		header := ctx.Response().Header()
 		header.Set("Cache-Control", "no-store")
 		header.Set("Pragma", "no-cache")
 		header.Set("X-Content-Type-Options", "nosniff")
 		header.Set("Referrer-Policy", "no-referrer")
-		header.Set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'; base-uri 'none'")
+		header.Set(
+			"Content-Security-Policy",
+			"default-src 'none'; frame-ancestors 'none'; base-uri 'none'",
+		)
 		header.Set("X-Frame-Options", "DENY")
-		header.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=(), publickey-credentials-create=(), publickey-credentials-get=()")
+		header.Set(
+			"Permissions-Policy",
+			"camera=(), microphone=(), geolocation=(), publickey-credentials-create=(), publickey-credentials-get=()",
+		)
 		return next(ctx)
 	}
 }
 
-func (handler *Handler) setSessionCookies(ctx *echo.Context, issued adminsession.Credentials) {
+func (handler *Handler) setSessionCookies(
+	ctx *echo.Context,
+	issued adminsession.Credentials,
+) {
+	//nolint:gosec // Secure follows the validated public URL; local HTTP development intentionally disables it.
 	ctx.SetCookie(&http.Cookie{
-		Name: handler.sessionCookieName, Value: issued.SessionToken, Path: "/", Secure: handler.secureCookies, HttpOnly: true,
-		SameSite: http.SameSiteLaxMode, MaxAge: max(1, int(time.Until(issued.ExpiresAt).Seconds())),
+		Name:     handler.sessionCookieName,
+		Value:    issued.SessionToken,
+		Path:     "/",
+		Secure:   handler.secureCookies,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   max(1, int(time.Until(issued.ExpiresAt).Seconds())),
 	})
+	//nolint:gosec // This double-submit CSRF cookie must remain script-readable; Secure follows the public URL.
 	ctx.SetCookie(&http.Cookie{
 		Name: handler.csrfCookieName, Value: issued.CSRFToken, Path: "/", Secure: handler.secureCookies,
 		SameSite: http.SameSiteStrictMode, MaxAge: max(1, int(time.Until(issued.ExpiresAt).Seconds())),
@@ -169,7 +207,9 @@ func ensureRequestID(ctx *echo.Context) string {
 	header := ctx.Response().Header()
 	requestID := strings.TrimSpace(header.Get(managementRequestHeader))
 	if requestID == "" {
-		requestID = strings.TrimSpace(ctx.Request().Header.Get(managementRequestHeader))
+		requestID = strings.TrimSpace(
+			ctx.Request().Header.Get(managementRequestHeader),
+		)
 	}
 	parsed, err := uuid.Parse(requestID)
 	if err != nil || parsed.String() != requestID {
@@ -192,7 +232,11 @@ func sourceAddress(remote string) (netip.Addr, string) {
 	return address, address.String()
 }
 
-func writeError(ctx *echo.Context, status int, code, message, requestID string) error {
+func writeError(
+	ctx *echo.Context,
+	status int,
+	code, message, requestID string,
+) error {
 	return ctx.JSON(status, map[string]any{"error": map[string]string{
 		"code": code, "message": message, "requestId": requestID,
 	}})

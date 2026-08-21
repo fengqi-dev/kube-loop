@@ -11,6 +11,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/labstack/echo/v5"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/util/validation"
+
 	"github.com/fengqi-dev/kube-loop/internal/controlplane"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/authorization"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
@@ -20,10 +25,6 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/taskapi"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/filestream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/remotetask"
-	"github.com/google/uuid"
-	"github.com/labstack/echo/v5"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/util/validation"
 )
 
 const (
@@ -41,11 +42,22 @@ type Storage interface {
 }
 
 type SessionValidator interface {
-	RequireActive(context.Context, controlplaneapi.Identity, string, string) (sessionapi.ActiveSession, *controlplaneapi.Error)
+	RequireActive(
+		context.Context,
+		controlplaneapi.Identity,
+		string,
+		string,
+	) (sessionapi.ActiveSession, *controlplaneapi.Error)
 }
 
 type TargetResolver interface {
-	ResolveContainer(context.Context, controlplaneapi.Identity, string, string, string) (string, error)
+	ResolveContainer(
+		context.Context,
+		controlplaneapi.Identity,
+		string,
+		string,
+		string,
+	) (string, error)
 }
 
 type Config struct {
@@ -75,8 +87,11 @@ func New(
 	executor TransferExecutor,
 	config Config,
 ) (*Service, error) {
-	if storageBackend == nil || sessions == nil || targets == nil || executor == nil {
-		return nil, errors.New("file transfer storage, Session validator, target resolver and executor are required")
+	if storageBackend == nil || sessions == nil || targets == nil ||
+		executor == nil {
+		return nil, errors.New(
+			"file transfer storage, Session validator, target resolver and executor are required",
+		)
 	}
 	if config.Now == nil {
 		config.Now = time.Now
@@ -84,14 +99,20 @@ func New(
 	if config.MaximumBytes == 0 {
 		config.MaximumBytes = defaultMaxBytes
 	}
-	if config.MaximumBytes < filestream.MaximumData || config.MaximumBytes > 1<<40 {
-		return nil, errors.New("file transfer maximum size must be between 256 KiB and 1 TiB")
+	if config.MaximumBytes < filestream.MaximumData ||
+		config.MaximumBytes > 1<<40 {
+		return nil, errors.New(
+			"file transfer maximum size must be between 256 KiB and 1 TiB",
+		)
 	}
 	if config.CredentialCheckInterval == 0 {
 		config.CredentialCheckInterval = 500 * time.Millisecond
 	}
-	if config.CredentialCheckInterval < 10*time.Millisecond || config.CredentialCheckInterval > 30*time.Second {
-		return nil, errors.New("file transfer credential check interval must be between 10ms and 30s")
+	if config.CredentialCheckInterval < 10*time.Millisecond ||
+		config.CredentialCheckInterval > 30*time.Second {
+		return nil, errors.New(
+			"file transfer credential check interval must be between 10ms and 30s",
+		)
 	}
 	roots, err := normalizeRoots(config.AllowedPathRoots)
 	if err != nil {
@@ -130,7 +151,8 @@ func (handler *Service) create(
 		if record.RequestHash != requestHash {
 			return storageError(storage.ErrIdempotencyMismatch)
 		}
-		task, err := handler.storage.Tasks().GetByID(request.Context(), record.ResourceID)
+		task, err := handler.storage.Tasks().
+			GetByID(request.Context(), record.ResourceID)
 		if err != nil || !owned(task, identity, session) {
 			return notFound()
 		}
@@ -145,19 +167,31 @@ func (handler *Service) create(
 		return storageError(err)
 	}
 	container, err := handler.targets.ResolveContainer(
-		request.Context(), identity, session.Namespace, spec.Pod, spec.Container,
+		request.Context(),
+		identity,
+		session.Namespace,
+		spec.Pod,
+		spec.Container,
 	)
 	if err != nil {
 		return targetError(err)
 	}
 	spec.Container = container
 	if spec.ResumeID != "" {
-		spec.Offset, err = handler.executor.UploadOffset(request.Context(), identity, session.Namespace, spec)
+		spec.Offset, err = handler.executor.UploadOffset(
+			request.Context(),
+			identity,
+			session.Namespace,
+			spec,
+		)
 		if err != nil {
 			return targetError(err)
 		}
 		if spec.Offset > spec.Size {
-			return invalid("resumeId", "remote partial upload exceeds the declared size")
+			return invalid(
+				"resumeId",
+				"remote partial upload exceeds the declared size",
+			)
 		}
 	}
 	specJSON, _ := json.Marshal(spec)
@@ -171,28 +205,33 @@ func (handler *Service) create(
 	document := handler.documentFromTask(task, session.Namespace)
 	response, _ := json.Marshal(document)
 	created := false
-	err = handler.storage.WithinTransaction(request.Context(), func(repositories storage.Repositories) error {
-		record, reserved, err := repositories.Idempotency().Reserve(request.Context(), storage.IdempotencyRecord{
-			Scope: scope, Key: key, RequestHash: requestHash, ResourceType: TaskType,
-			ResourceID: task.ID, Response: response, CreatedAt: now, ExpiresAt: expiresAt,
-		})
-		if err != nil {
-			return err
-		}
-		if !reserved {
-			existing, err := repositories.Tasks().GetByID(request.Context(), record.ResourceID)
-			if err != nil || !owned(existing, identity, session) {
-				return storage.ErrNotFound
+	err = handler.storage.WithinTransaction(
+		request.Context(),
+		func(repositories storage.Repositories) error {
+			record, reserved, err := repositories.Idempotency().
+				Reserve(request.Context(), storage.IdempotencyRecord{
+					Scope: scope, Key: key, RequestHash: requestHash, ResourceType: TaskType,
+					ResourceID: task.ID, Response: response, CreatedAt: now, ExpiresAt: expiresAt,
+				})
+			if err != nil {
+				return err
 			}
-			task = existing
+			if !reserved {
+				existing, err := repositories.Tasks().
+					GetByID(request.Context(), record.ResourceID)
+				if err != nil || !owned(existing, identity, session) {
+					return storage.ErrNotFound
+				}
+				task = existing
+				return nil
+			}
+			if err := repositories.Tasks().Create(request.Context(), task); err != nil {
+				return err
+			}
+			created = true
 			return nil
-		}
-		if err := repositories.Tasks().Create(request.Context(), task); err != nil {
-			return err
-		}
-		created = true
-		return nil
-	})
+		},
+	)
 	if err != nil {
 		return storageError(err)
 	}
@@ -200,11 +239,19 @@ func (handler *Service) create(
 	if err != nil {
 		return internalError(err)
 	}
-	ctx.Response().Header().Set("Location", fmt.Sprintf("%s/sessions/%s/file-transfers/%s/stream?namespace=%s", controlplane.APIPathPrefix, session.ID, task.ID, session.Namespace))
+	location := fmt.Sprintf(
+		"%s/sessions/%s/file-transfers/%s/stream?namespace=%s",
+		controlplane.APIPathPrefix, session.ID, task.ID, session.Namespace,
+	)
+	ctx.Response().Header().Set("Location", location)
 	if !created {
 		ctx.Response().Header().Set("Idempotent-Replayed", "true")
 	}
-	writeJSON(ctx, map[bool]int{true: http.StatusCreated, false: http.StatusOK}[created], document)
+	writeJSON(
+		ctx,
+		map[bool]int{true: http.StatusCreated, false: http.StatusOK}[created],
+		document,
+	)
 	return nil
 }
 
@@ -237,7 +284,8 @@ func (handler *Service) normalizeSpec(spec *Spec) *controlplaneapi.Error {
 	spec.Container = strings.TrimSpace(spec.Container)
 	spec.Checksum = strings.TrimSpace(strings.ToLower(spec.Checksum))
 	spec.ResumeID = strings.TrimSpace(strings.ToLower(spec.ResumeID))
-	if spec.Direction != DirectionUpload && spec.Direction != DirectionDownload {
+	if spec.Direction != DirectionUpload &&
+		spec.Direction != DirectionDownload {
 		return invalid("direction", "direction must be upload or download")
 	}
 	if spec.Kind != KindFile && spec.Kind != KindDirectory {
@@ -246,44 +294,59 @@ func (handler *Service) normalizeSpec(spec *Spec) *controlplaneapi.Error {
 	if len(validation.IsDNS1123Subdomain(spec.Pod)) != 0 {
 		return invalid("pod", "Pod name is invalid")
 	}
-	if spec.Container != "" && len(validation.IsDNS1123Label(spec.Container)) != 0 {
+	if spec.Container != "" &&
+		len(validation.IsDNS1123Label(spec.Container)) != 0 {
 		return invalid("container", "container name is invalid")
 	}
-	remotePath, err := normalizeRemotePath(spec.RemotePath, handler.allowedRoots)
+	remotePath, err := normalizeRemotePath(
+		spec.RemotePath,
+		handler.allowedRoots,
+	)
 	if err != nil {
 		return invalid("remotePath", err.Error())
 	}
 	spec.RemotePath = remotePath
 	spec.AllowedRoot = matchingAllowedRoot(remotePath, handler.allowedRoots)
 	if spec.AllowedRoot == "" {
-		return invalid("remotePath", "container path is outside the configured allowed roots")
+		return invalid(
+			"remotePath",
+			"container path is outside the configured allowed roots",
+		)
 	}
 	if spec.Offset > handler.maximumBytes {
 		return invalid("offset", "offset exceeds the configured transfer limit")
 	}
-	if spec.Direction == DirectionUpload {
-		if spec.Size == 0 || spec.Size > handler.maximumBytes || spec.Offset > spec.Size {
+	switch {
+	case spec.Direction == DirectionUpload:
+		if spec.Size == 0 || spec.Size > handler.maximumBytes ||
+			spec.Offset > spec.Size {
 			return invalid("size", "upload size or offset is invalid")
 		}
 		if _, err := filestream.ParseChecksum(spec.Checksum); err != nil {
 			return invalid("checksum", err.Error())
 		}
 		if spec.Kind == KindDirectory && spec.Offset != 0 {
-			return invalid("offset", "directory upload cannot resume from a byte offset")
+			return invalid(
+				"offset",
+				"directory upload cannot resume from a byte offset",
+			)
 		}
 		if spec.ResumeID != "" {
 			if spec.Kind != KindFile {
-				return invalid("resumeId", "only file uploads support a Resume ID")
+				return invalid(
+					"resumeId",
+					"only file uploads support a Resume ID",
+				)
 			}
 			if _, err := uuid.Parse(spec.ResumeID); err != nil {
 				return invalid("resumeId", "upload Resume ID is invalid")
 			}
 		}
-	} else if spec.Size != 0 || spec.Checksum != "" || spec.Overwrite {
+	case spec.Size != 0 || spec.Checksum != "" || spec.Overwrite:
 		return invalid("direction", "download metadata is determined by the Gateway")
-	} else if spec.Kind == KindDirectory && spec.Offset != 0 {
+	case spec.Kind == KindDirectory && spec.Offset != 0:
 		return invalid("offset", "directory download cannot resume from a byte offset")
-	} else if spec.ResumeID != "" {
+	case spec.ResumeID != "":
 		return invalid("resumeId", "downloads do not accept a Resume ID")
 	}
 	return nil
@@ -294,18 +357,25 @@ func (handler *Service) specFromTask(task storage.Task) (Spec, error) {
 	if err := json.Unmarshal(task.Spec, &spec); err != nil {
 		return Spec{}, errors.New("decode file transfer Task")
 	}
-	if apiError := handler.normalizeSpec(&spec); apiError != nil || spec.Container == "" {
+	if apiError := handler.normalizeSpec(&spec); apiError != nil ||
+		spec.Container == "" {
 		return Spec{}, errors.New("stored file transfer Task is invalid")
 	}
 	return spec, nil
 }
 
-func (handler *Service) documentFromTask(task storage.Task, namespace string) Document {
+func (handler *Service) documentFromTask(
+	task storage.Task,
+	namespace string,
+) Document {
 	document, _ := handler.decodeTask(task, namespace)
 	return document
 }
 
-func (handler *Service) decodeTask(task storage.Task, namespace string) (Document, error) {
+func (handler *Service) decodeTask(
+	task storage.Task,
+	namespace string,
+) (Document, error) {
 	spec, err := handler.specFromTask(task)
 	if err != nil {
 		return Document{}, err
@@ -318,12 +388,18 @@ func (handler *Service) decodeTask(task storage.Task, namespace string) (Documen
 		ID: task.ID, SessionID: task.SessionID, Namespace: namespace, State: task.State,
 		Direction: spec.Direction, Kind: spec.Kind, Pod: spec.Pod, Container: spec.Container,
 		RemotePath: spec.RemotePath, Size: spec.Size, Offset: spec.Offset, Checksum: spec.Checksum,
-		Overwrite: spec.Overwrite, ResumeID: spec.ResumeID, CreatedAt: task.CreatedAt, UpdatedAt: task.UpdatedAt, ExpiresAt: expiresAt,
+		Overwrite: spec.Overwrite, ResumeID: spec.ResumeID,
+		CreatedAt: task.CreatedAt, UpdatedAt: task.UpdatedAt, ExpiresAt: expiresAt,
 	}, nil
 }
 
-func owned(task storage.Task, identity controlplaneapi.Identity, session sessionapi.ActiveSession) bool {
-	return task.Type == TaskType && task.IdentityID == identity.Subject && task.SessionID == session.ID
+func owned(
+	task storage.Task,
+	identity controlplaneapi.Identity,
+	session sessionapi.ActiveSession,
+) bool {
+	return task.Type == TaskType && task.IdentityID == identity.Subject &&
+		task.SessionID == session.ID
 }
 
 func normalizeRoots(values []string) ([]string, error) {
@@ -339,7 +415,10 @@ func normalizeRoots(values []string) ([]string, error) {
 		}
 		root, err := normalizeRemotePath(value, []string{"/"})
 		if err != nil {
-			return nil, fmt.Errorf("file transfer allowed root is invalid: %w", err)
+			return nil, fmt.Errorf(
+				"file transfer allowed root is invalid: %w",
+				err,
+			)
 		}
 		roots = append(roots, root)
 	}
@@ -350,7 +429,9 @@ func normalizeRoots(values []string) ([]string, error) {
 func normalizeRemotePath(value string, allowedRoots []string) (string, error) {
 	value = strings.TrimSpace(strings.ReplaceAll(value, "\\", "/"))
 	if value == "" || len(value) > 4096 || !path.IsAbs(value) {
-		return "", errors.New("container path must be an absolute path of at most 4096 bytes")
+		return "", errors.New(
+			"container path must be an absolute path of at most 4096 bytes",
+		)
 	}
 	for _, character := range value {
 		if character < 0x20 || character == 0x7f {
@@ -369,13 +450,16 @@ func normalizeRemotePath(value string, allowedRoots []string) (string, error) {
 	if matchingAllowedRoot(cleaned, allowedRoots) != "" {
 		return cleaned, nil
 	}
-	return "", errors.New("container path is outside the configured allowed roots")
+	return "", errors.New(
+		"container path is outside the configured allowed roots",
+	)
 }
 
 func matchingAllowedRoot(value string, allowedRoots []string) string {
 	matched := ""
 	for _, root := range allowedRoots {
-		if (root == "/" || value == root || strings.HasPrefix(value, root+"/")) && len(root) > len(matched) {
+		if (root == "/" || value == root || strings.HasPrefix(value, root+"/")) &&
+			len(root) > len(matched) {
 			matched = root
 		}
 	}
@@ -384,12 +468,20 @@ func matchingAllowedRoot(value string, allowedRoots []string) string {
 
 // NormalizeAllowedRoots validates and canonicalizes the container roots shared
 // by transfer and directory-management APIs.
-func NormalizeAllowedRoots(values []string) ([]string, error) { return normalizeRoots(values) }
+func NormalizeAllowedRoots(
+	values []string,
+) ([]string, error) {
+	return normalizeRoots(values)
+}
 
 // NormalizeContainerPath applies the common lexical path policy and returns
 // the most-specific configured root that contains the path.
-func NormalizeContainerPath(value string, allowedRoots []string) (string, string, error) {
-	if strings.TrimSpace(strings.ReplaceAll(value, "\\", "/")) == "/" && slices.Contains(allowedRoots, "/") {
+func NormalizeContainerPath(
+	value string,
+	allowedRoots []string,
+) (string, string, error) {
+	if strings.TrimSpace(strings.ReplaceAll(value, "\\", "/")) == "/" &&
+		slices.Contains(allowedRoots, "/") {
 		return "/", "/", nil
 	}
 	normalized, err := normalizeRemotePath(value, allowedRoots)
@@ -398,15 +490,23 @@ func NormalizeContainerPath(value string, allowedRoots []string) (string, string
 	}
 	root := matchingAllowedRoot(normalized, allowedRoots)
 	if root == "" {
-		return "", "", errors.New("container path is outside the configured allowed roots")
+		return "", "", errors.New(
+			"container path is outside the configured allowed roots",
+		)
 	}
 	return normalized, root, nil
 }
 
-func namespaceFromQuery(request *http.Request) (string, *controlplaneapi.Error) {
+func namespaceFromQuery(
+	request *http.Request,
+) (string, *controlplaneapi.Error) {
 	query := request.URL.Query()
-	if len(query) != 1 || len(query["namespace"]) != 1 || len(validation.IsDNS1123Label(query.Get("namespace"))) != 0 {
-		return "", invalid("namespace", "one valid namespace query parameter is required")
+	if len(query) != 1 || len(query["namespace"]) != 1 ||
+		len(validation.IsDNS1123Label(query.Get("namespace"))) != 0 {
+		return "", invalid(
+			"namespace",
+			"one valid namespace query parameter is required",
+		)
 	}
 	return query.Get("namespace"), nil
 }
@@ -414,11 +514,19 @@ func namespaceFromQuery(request *http.Request) (string, *controlplaneapi.Error) 
 func targetError(err error) *controlplaneapi.Error {
 	switch {
 	case apierrors.IsForbidden(err):
-		return &controlplaneapi.Error{Code: controlplaneapi.CodeForbidden, Message: "Kubernetes file access is not permitted", Cause: err}
+		return &controlplaneapi.Error{
+			Code:    controlplaneapi.CodeForbidden,
+			Message: "Kubernetes file access is not permitted",
+			Cause:   err,
+		}
 	case apierrors.IsNotFound(err):
 		return notFound()
 	default:
-		return &controlplaneapi.Error{Code: controlplaneapi.CodeInvalidArgument, Message: "file transfer target is unavailable", Cause: err}
+		return &controlplaneapi.Error{
+			Code:    controlplaneapi.CodeInvalidArgument,
+			Message: "file transfer target is unavailable",
+			Cause:   err,
+		}
 	}
 }
 
@@ -426,23 +534,39 @@ func storageError(err error) *controlplaneapi.Error {
 	switch {
 	case errors.Is(err, storage.ErrNotFound):
 		return notFound()
-	case errors.Is(err, storage.ErrConflict), errors.Is(err, storage.ErrIdempotencyMismatch):
-		return &controlplaneapi.Error{Code: controlplaneapi.CodeConflict, Message: "file transfer Task conflicts with an existing request", Cause: err}
+	case errors.Is(err, storage.ErrConflict),
+		errors.Is(err, storage.ErrIdempotencyMismatch):
+		return &controlplaneapi.Error{
+			Code:    controlplaneapi.CodeConflict,
+			Message: "file transfer Task conflicts with an existing request",
+			Cause:   err,
+		}
 	default:
 		return internalError(err)
 	}
 }
 
 func invalid(field, message string) *controlplaneapi.Error {
-	return &controlplaneapi.Error{Code: controlplaneapi.CodeInvalidArgument, Field: field, Message: message}
+	return &controlplaneapi.Error{
+		Code:    controlplaneapi.CodeInvalidArgument,
+		Field:   field,
+		Message: message,
+	}
 }
 
 func internalError(err error) *controlplaneapi.Error {
-	return &controlplaneapi.Error{Code: controlplaneapi.CodeInternal, Message: "file transfer operation failed", Cause: err}
+	return &controlplaneapi.Error{
+		Code:    controlplaneapi.CodeInternal,
+		Message: "file transfer operation failed",
+		Cause:   err,
+	}
 }
 
 func notFound() *controlplaneapi.Error {
-	return &controlplaneapi.Error{Code: controlplaneapi.CodeNotFound, Message: "resource not found"}
+	return &controlplaneapi.Error{
+		Code:    controlplaneapi.CodeNotFound,
+		Message: "resource not found",
+	}
 }
 
 func writeJSON(ctx *echo.Context, status int, value any) {

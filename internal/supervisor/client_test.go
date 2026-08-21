@@ -41,9 +41,13 @@ func TestClientReturnsEarlySupervisorRejection(t *testing.T) {
 			serverDone <- acceptErr
 			return
 		}
-		defer connection.Close()
+		defer func() { _ = connection.Close() }()
 		var request supervisorprotocol.Request
-		if readErr := supervisorprotocol.ReadFrame(connection, &request, supervisorprotocol.MaxRequestBytes); readErr != nil {
+		if readErr := supervisorprotocol.ReadFrame(
+			connection,
+			&request,
+			supervisorprotocol.MaxRequestBytes,
+		); readErr != nil {
 			serverDone <- readErr
 			return
 		}

@@ -17,11 +17,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/xtaci/smux"
+
 	shared "github.com/fengqi-dev/kube-loop/internal/client/websocketmux"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
 	protocolmux "github.com/fengqi-dev/kube-loop/internal/protocol/websocketmux"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/wssprotocol"
-	"github.com/xtaci/smux"
 )
 
 const testDeviceID = "22222222-2222-4222-8222-222222222222"
@@ -30,7 +31,7 @@ func TestForwarderMultiplexesConcurrentStreams(t *testing.T) {
 	handler, err := NewHandler(ServerConfig{
 		Authenticator: testAuthenticator("test-token"),
 		Handle: func(_ context.Context, _ Identity, connection net.Conn) {
-			defer connection.Close()
+			defer func() { _ = connection.Close() }()
 			_, _ = io.Copy(connection, connection)
 		},
 	})
@@ -52,7 +53,7 @@ func TestForwarderMultiplexesConcurrentStreams(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer forwarder.Close()
+	defer func() { _ = forwarder.Close() }()
 
 	const streamCount = 24
 	var wait sync.WaitGroup
@@ -64,7 +65,7 @@ func TestForwarderMultiplexesConcurrentStreams(t *testing.T) {
 				errorsCh <- dialErr
 				return
 			}
-			defer connection.Close()
+			defer func() { _ = connection.Close() }()
 			message := fmt.Sprintf("stream-%d\n", index)
 			if _, writeErr := io.WriteString(connection, message); writeErr != nil {
 				errorsCh <- writeErr
@@ -92,7 +93,7 @@ func TestForwarderPreservesTCPHalfClose(t *testing.T) {
 	handler, err := NewHandler(ServerConfig{
 		Authenticator: testAuthenticator("test-token"),
 		Handle: func(_ context.Context, _ Identity, connection net.Conn) {
-			defer connection.Close()
+			defer func() { _ = connection.Close() }()
 			request, readErr := io.ReadAll(connection)
 			if readErr != nil {
 				result <- readErr
@@ -120,13 +121,13 @@ func TestForwarderPreservesTCPHalfClose(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer forwarder.Close()
+	defer func() { _ = forwarder.Close() }()
 
 	connection, err := net.Dial("tcp", forwarder.Address())
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer connection.Close()
+	defer func() { _ = connection.Close() }()
 	_ = connection.SetDeadline(time.Now().Add(5 * time.Second))
 	if _, err := io.WriteString(connection, "request body"); err != nil {
 		t.Fatal(err)
@@ -155,7 +156,7 @@ func TestSlowConsumerDoesNotBlockSiblingStream(t *testing.T) {
 	handler, err := NewHandler(ServerConfig{
 		Authenticator: testAuthenticator("test-token"),
 		Handle: func(_ context.Context, _ Identity, connection net.Conn) {
-			defer connection.Close()
+			defer func() { _ = connection.Close() }()
 			var kind [1]byte
 			if _, err := io.ReadFull(connection, kind[:]); err != nil {
 				return
@@ -185,13 +186,13 @@ func TestSlowConsumerDoesNotBlockSiblingStream(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer forwarder.Close()
+	defer func() { _ = forwarder.Close() }()
 
 	slow, err := net.Dial("tcp", forwarder.Address())
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer slow.Close()
+	defer func() { _ = slow.Close() }()
 	slowWrite := make(chan error, 1)
 	go func() {
 		if _, err := slow.Write(append([]byte{'S'}, bytes.Repeat([]byte{'x'}, 16<<20)...)); err != nil {
@@ -209,7 +210,7 @@ func TestSlowConsumerDoesNotBlockSiblingStream(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer fast.Close()
+	defer func() { _ = fast.Close() }()
 	_ = fast.SetDeadline(time.Now().Add(time.Second))
 	started := time.Now()
 	if _, err := fast.Write([]byte{'F'}); err != nil {
@@ -239,7 +240,7 @@ func TestMalformedStreamDoesNotClosePhysicalSession(t *testing.T) {
 	handler, err := NewHandler(ServerConfig{
 		Authenticator: testAuthenticator("test-token"),
 		Handle: func(_ context.Context, _ Identity, connection net.Conn) {
-			defer connection.Close()
+			defer func() { _ = connection.Close() }()
 			buffer := make([]byte, 32)
 			for {
 				read, err := connection.Read(buffer)
@@ -283,7 +284,7 @@ func TestMalformedStreamDoesNotClosePhysicalSession(t *testing.T) {
 		t.Fatalf("physical session closed with malformed sibling: %v", err)
 	}
 	good := protocolmux.NewStreamConn(goodRaw)
-	defer good.Close()
+	defer func() { _ = good.Close() }()
 	if _, err := good.Write([]byte("healthy")); err != nil {
 		t.Fatal(err)
 	}
@@ -302,7 +303,7 @@ func TestIdleStreamTimesOutWithoutClosingPhysicalSession(t *testing.T) {
 		Authenticator:     testAuthenticator("test-token"),
 		StreamIdleTimeout: 50 * time.Millisecond,
 		Handle: func(_ context.Context, _ Identity, connection net.Conn) {
-			defer connection.Close()
+			defer func() { _ = connection.Close() }()
 			var request [1]byte
 			if _, err := io.ReadFull(connection, request[:]); err != nil {
 				results <- err
@@ -336,7 +337,7 @@ func TestIdleStreamTimesOutWithoutClosingPhysicalSession(t *testing.T) {
 		t.Fatalf("physical session closed with idle sibling: %v", err)
 	}
 	good := protocolmux.NewStreamConn(goodRaw)
-	defer good.Close()
+	defer func() { _ = good.Close() }()
 	if _, err := good.Write([]byte{'G'}); err != nil {
 		t.Fatal(err)
 	}
@@ -352,6 +353,7 @@ func TestIdleStreamTimesOutWithoutClosingPhysicalSession(t *testing.T) {
 	}
 }
 
+//nolint:revive // Test helpers conventionally keep testing.T first for immediate failure reporting.
 func rawClientSession(t *testing.T, ctx context.Context, serverURL, token string) (*smux.Session, func()) {
 	t.Helper()
 	header := make(http.Header)
@@ -363,30 +365,34 @@ func rawClientSession(t *testing.T, ctx context.Context, serverURL, token string
 		t.Fatal(err)
 	}
 	if err := wssprotocol.Write(ctx, connection, wssprotocol.NewClientHello("test", testDeviceID)); err != nil {
-		connection.CloseNow()
+		_ = connection.CloseNow()
 		t.Fatal(err)
 	}
 	message, err := wssprotocol.Read(ctx, connection)
 	if err != nil || message.ServerHello == nil {
-		connection.CloseNow()
+		_ = connection.CloseNow()
 		t.Fatalf("WSS handshake = %#v, %v", message, err)
 	}
 	streamConnection := websocket.NetConn(ctx, connection, websocket.MessageBinary)
 	session, err := smux.Client(streamConnection, smuxConfig())
 	if err != nil {
-		connection.CloseNow()
+		_ = connection.CloseNow()
 		t.Fatal(err)
 	}
 	return session, func() {
 		_ = session.Close()
-		connection.CloseNow()
+		_ = connection.CloseNow()
 	}
 }
 
 func TestForwarderRejectsInvalidToken(t *testing.T) {
 	var logs bytes.Buffer
 	handler, err := NewHandler(ServerConfig{
-		Authenticator: testAuthenticator("correct"), Logger: slog.New(slog.NewJSONHandler(&logs, nil)), Handle: func(context.Context, Identity, net.Conn) {},
+		Authenticator: testAuthenticator(
+			"correct",
+		),
+		Logger: slog.New(slog.NewJSONHandler(&logs, nil)),
+		Handle: func(context.Context, Identity, net.Conn) {},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -426,7 +432,9 @@ func TestHandlerLogsRequestID(t *testing.T) {
 }
 
 func TestHandlerRejectsNewSessionsWhileDraining(t *testing.T) {
-	handler, err := NewHandler(ServerConfig{Authenticator: testAuthenticator("token"), Handle: func(context.Context, Identity, net.Conn) {}})
+	handler, err := NewHandler(
+		ServerConfig{Authenticator: testAuthenticator("token"), Handle: func(context.Context, Identity, net.Conn) {}},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -452,15 +460,27 @@ func TestNewGenerationLetsExistingStreamFinishAndRejectsOlderNewStreams(t *testi
 		Authenticator: AuthenticatorFunc(func(request *http.Request) (Identity, error) {
 			switch request.Header.Get("Authorization") {
 			case "Bearer generation-1":
-				return Identity{IdentityID: "identity", DeviceID: testDeviceID, SessionID: sessionID, SessionGeneration: 1, ExpiresAt: testTicketExpiry()}, nil
+				return Identity{
+					IdentityID:        "identity",
+					DeviceID:          testDeviceID,
+					SessionID:         sessionID,
+					SessionGeneration: 1,
+					ExpiresAt:         testTicketExpiry(),
+				}, nil
 			case "Bearer generation-2":
-				return Identity{IdentityID: "identity", DeviceID: testDeviceID, SessionID: sessionID, SessionGeneration: 2, ExpiresAt: testTicketExpiry()}, nil
+				return Identity{
+					IdentityID:        "identity",
+					DeviceID:          testDeviceID,
+					SessionID:         sessionID,
+					SessionGeneration: 2,
+					ExpiresAt:         testTicketExpiry(),
+				}, nil
 			default:
 				return Identity{}, fmt.Errorf("authentication failed")
 			}
 		}),
 		Handle: func(_ context.Context, _ Identity, connection net.Conn) {
-			defer connection.Close()
+			defer func() { _ = connection.Close() }()
 			var request [1]byte
 			if _, readErr := io.ReadFull(connection, request[:]); readErr != nil {
 				return
@@ -487,7 +507,7 @@ func TestNewGenerationLetsExistingStreamFinishAndRejectsOlderNewStreams(t *testi
 		t.Fatal(err)
 	}
 	oldStream := protocolmux.NewStreamConn(oldRaw)
-	defer oldStream.Close()
+	defer func() { _ = oldStream.Close() }()
 	if _, err := oldStream.Write([]byte{'H'}); err != nil {
 		t.Fatal(err)
 	}
@@ -504,7 +524,7 @@ func TestNewGenerationLetsExistingStreamFinishAndRejectsOlderNewStreams(t *testi
 		t.Fatal(err)
 	}
 	newStream := protocolmux.NewStreamConn(newRaw)
-	defer newStream.Close()
+	defer func() { _ = newStream.Close() }()
 	if _, err := newStream.Write([]byte{'N'}); err != nil {
 		t.Fatal(err)
 	}
@@ -523,7 +543,7 @@ func TestNewGenerationLetsExistingStreamFinishAndRejectsOlderNewStreams(t *testi
 		t.Fatal(err)
 	}
 	stale := protocolmux.NewStreamConn(staleRaw)
-	defer stale.Close()
+	defer func() { _ = stale.Close() }()
 	_ = stale.SetDeadline(time.Now().Add(time.Second))
 	_, _ = stale.Write([]byte{'S'})
 	if _, err := stale.Read(response[:]); err == nil {
@@ -532,11 +552,15 @@ func TestNewGenerationLetsExistingStreamFinishAndRejectsOlderNewStreams(t *testi
 
 	header := make(http.Header)
 	header.Set("Authorization", "Bearer generation-1")
-	connection, responseHTTP, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), &websocket.DialOptions{
-		HTTPHeader: header, Subprotocols: []string{Subprotocol},
-	})
+	connection, responseHTTP, err := websocket.Dial(
+		ctx,
+		"ws"+strings.TrimPrefix(server.URL, "http"),
+		&websocket.DialOptions{
+			HTTPHeader: header, Subprotocols: []string{Subprotocol},
+		},
+	)
 	if connection != nil {
-		connection.CloseNow()
+		_ = connection.CloseNow()
 	}
 	if err == nil || responseHTTP == nil || responseHTTP.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("older generation WebSocket handshake = response %#v, error %v", responseHTTP, err)
@@ -597,9 +621,21 @@ func TestWSSHandshakeBindsDeviceAndLimitsConnectionsPerIdentity(t *testing.T) {
 		Authenticator: AuthenticatorFunc(func(request *http.Request) (Identity, error) {
 			switch request.Header.Get("Authorization") {
 			case "Bearer first":
-				return Identity{IdentityID: "identity", DeviceID: testDeviceID, SessionID: "33333333-3333-4333-8333-333333333333", SessionGeneration: 1, ExpiresAt: testTicketExpiry()}, nil
+				return Identity{
+					IdentityID:        "identity",
+					DeviceID:          testDeviceID,
+					SessionID:         "33333333-3333-4333-8333-333333333333",
+					SessionGeneration: 1,
+					ExpiresAt:         testTicketExpiry(),
+				}, nil
 			case "Bearer second":
-				return Identity{IdentityID: "identity", DeviceID: secondDeviceID, SessionID: "55555555-5555-4555-8555-555555555555", SessionGeneration: 1, ExpiresAt: testTicketExpiry()}, nil
+				return Identity{
+					IdentityID:        "identity",
+					DeviceID:          secondDeviceID,
+					SessionID:         "55555555-5555-4555-8555-555555555555",
+					SessionGeneration: 1,
+					ExpiresAt:         testTicketExpiry(),
+				}, nil
 			default:
 				return Identity{}, errors.New("authentication failed")
 			}
@@ -633,7 +669,7 @@ func TestWSSHandshakeBindsDeviceAndLimitsConnectionsPerIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer first.Close()
+	defer func() { _ = first.Close() }()
 	if handler.ActiveSessions() != 1 {
 		t.Fatalf("active physical sessions = %d, want negotiated per-user limit 1", handler.ActiveSessions())
 	}
@@ -664,7 +700,7 @@ func TestWSSServerHelloPublishesExactLimitsBeforeSmux(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	connection := dialRawWebSocket(t, ctx, server.URL, "token")
-	defer connection.CloseNow()
+	defer func() { _ = connection.CloseNow() }()
 	if err := wssprotocol.Write(ctx, connection, wssprotocol.NewClientHello("2.5.0", testDeviceID)); err != nil {
 		t.Fatal(err)
 	}
@@ -682,6 +718,7 @@ func TestWSSServerHelloPublishesExactLimitsBeforeSmux(t *testing.T) {
 	}
 }
 
+//nolint:revive // Test helpers conventionally keep testing.T first for immediate failure reporting.
 func dialRawWebSocket(t *testing.T, ctx context.Context, serverURL, token string) *websocket.Conn {
 	t.Helper()
 	header := make(http.Header)
@@ -711,7 +748,13 @@ func testAuthenticator(expected string) AuthenticatorFunc {
 		if request.Header.Get("Authorization") != "Bearer "+expected {
 			return Identity{}, fmt.Errorf("authentication failed")
 		}
-		return Identity{IdentityID: "identity", DeviceID: testDeviceID, SessionID: "33333333-3333-4333-8333-333333333333", SessionGeneration: 1, ExpiresAt: testTicketExpiry()}, nil
+		return Identity{
+			IdentityID:        "identity",
+			DeviceID:          testDeviceID,
+			SessionID:         "33333333-3333-4333-8333-333333333333",
+			SessionGeneration: 1,
+			ExpiresAt:         testTicketExpiry(),
+		}, nil
 	}
 }
 
@@ -753,7 +796,7 @@ func TestEstablishedStreamSurvivesRelayTicketExpiry(t *testing.T) {
 			}, nil
 		}),
 		Handle: func(_ context.Context, _ Identity, connection net.Conn) {
-			defer connection.Close()
+			defer func() { _ = connection.Close() }()
 			var request [1]byte
 			if _, readErr := io.ReadFull(connection, request[:]); readErr != nil {
 				return
@@ -778,7 +821,7 @@ func TestEstablishedStreamSurvivesRelayTicketExpiry(t *testing.T) {
 		t.Fatal(err)
 	}
 	stream := protocolmux.NewStreamConn(rawStream)
-	defer stream.Close()
+	defer func() { _ = stream.Close() }()
 	if _, err := stream.Write([]byte{'E'}); err != nil {
 		t.Fatal(err)
 	}

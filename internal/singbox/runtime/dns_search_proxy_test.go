@@ -2,32 +2,33 @@ package runtime
 
 import (
 	"errors"
-	"fmt"
 	"net"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
 	"testing"
 	"time"
 
-	"github.com/fengqi-dev/kube-loop/internal/singbox"
 	"github.com/miekg/dns"
+
+	"github.com/fengqi-dev/kube-loop/internal/singbox"
 )
 
 func TestDNSSearchProxyUDPAndTCP(t *testing.T) {
 	upstreamAddr := startTestDNSUpstream(t)
 
-	host, upstreamHost, upstreamPort := "127.0.0.1", "127.0.0.1", upstreamAddr.Port
+	upstreamPort := upstreamAddr.Port
 	proxy, publicPort := startTestDNSSearchProxy(
-		t, host, upstreamHost, upstreamPort,
+		t, upstreamPort,
 		singbox.SearchDomains("default"), "cluster.local",
 	)
 	defer func() { _ = proxy.Close() }()
 
 	req := new(dns.Msg)
 	req.SetQuestion("kubernetes.default.svc.cluster.local.", dns.TypeA)
-	target := net.JoinHostPort("127.0.0.1", fmt.Sprintf("%d", publicPort))
+	target := net.JoinHostPort("127.0.0.1", strconv.Itoa(publicPort))
 
 	udpClient := &dns.Client{Net: "udp", Timeout: 2 * time.Second}
 	resp, _, err := udpClient.Exchange(req, target)
@@ -81,14 +82,14 @@ func TestDNSSearchProxyPrefersExpandedClusterName(t *testing.T) {
 	upstreamAddr := startTestDNSUpstreamWithHandler(t, handler)
 
 	proxy, publicPort := startTestDNSSearchProxy(
-		t, "127.0.0.1", "127.0.0.1", upstreamAddr.Port,
+		t, upstreamAddr.Port,
 		singbox.SearchDomains("default"), "cluster.local",
 	)
 	defer func() { _ = proxy.Close() }()
 
 	req := new(dns.Msg)
 	req.SetQuestion("echo.", dns.TypeA)
-	target := net.JoinHostPort("127.0.0.1", fmt.Sprintf("%d", publicPort))
+	target := net.JoinHostPort("127.0.0.1", strconv.Itoa(publicPort))
 	resp, _, err := (&dns.Client{Net: "udp", Timeout: 2 * time.Second}).Exchange(req, target)
 	if err != nil {
 		t.Fatalf("short-name query: %v", err)
@@ -127,14 +128,14 @@ func TestDNSSearchProxyStopsAfterExpandedNameReturnsNoData(t *testing.T) {
 	upstreamAddr := startTestDNSUpstreamWithHandler(t, handler)
 
 	proxy, publicPort := startTestDNSSearchProxy(
-		t, "127.0.0.1", "127.0.0.1", upstreamAddr.Port,
+		t, upstreamAddr.Port,
 		singbox.SearchDomains("default"), "cluster.local",
 	)
 	defer func() { _ = proxy.Close() }()
 
 	req := new(dns.Msg)
 	req.SetQuestion("echo.", dns.TypeAAAA)
-	target := net.JoinHostPort("127.0.0.1", fmt.Sprintf("%d", publicPort))
+	target := net.JoinHostPort("127.0.0.1", strconv.Itoa(publicPort))
 	resp, _, err := (&dns.Client{Net: "udp", Timeout: 2 * time.Second}).Exchange(req, target)
 	if err != nil {
 		t.Fatalf("AAAA query: %v", err)
@@ -154,12 +155,12 @@ func TestDNSSearchProxyStopsAfterExpandedNameReturnsNoData(t *testing.T) {
 func TestDNSSearchProxyUpdatesHostAliases(t *testing.T) {
 	upstreamAddr := startTestDNSUpstream(t)
 	proxy, publicPort := startTestDNSSearchProxy(
-		t, "127.0.0.1", "127.0.0.1", upstreamAddr.Port,
+		t, upstreamAddr.Port,
 		singbox.SearchDomains("default"), "cluster.local",
 	)
 	defer func() { _ = proxy.Close() }()
 
-	target := net.JoinHostPort("127.0.0.1", fmt.Sprintf("%d", publicPort))
+	target := net.JoinHostPort("127.0.0.1", strconv.Itoa(publicPort))
 	query := func() *dns.Msg {
 		t.Helper()
 		req := new(dns.Msg)
@@ -237,21 +238,25 @@ func startTestDNSUpstream(t *testing.T) *net.UDPAddr {
 
 func startTestDNSSearchProxy(
 	t *testing.T,
-	publicHost, upstreamHost string,
 	upstreamPort int,
 	search []string,
 	clusterDomains ...string,
 ) (*dnsSearchProxy, int) {
 	t.Helper()
 	for range 20 {
-		reservation, err := net.Listen("tcp", net.JoinHostPort(publicHost, "0"))
+		reservation, err := net.Listen("tcp", net.JoinHostPort(singbox.DefaultDNSListen, "0"))
 		if err != nil {
 			t.Fatal(err)
 		}
 		publicPort := reservation.Addr().(*net.TCPAddr).Port
 		_ = reservation.Close()
 		proxy, err := startDNSSearchProxy(
-			publicHost, publicPort, upstreamHost, upstreamPort, search, clusterDomains...,
+			singbox.DefaultDNSListen,
+			publicPort,
+			singbox.DefaultDNSListen,
+			upstreamPort,
+			search,
+			clusterDomains...,
 		)
 		if err == nil {
 			return proxy, publicPort

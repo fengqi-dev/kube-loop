@@ -9,10 +9,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/fengqi-dev/kube-loop/internal/helper"
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/svc"
 	"golang.org/x/sys/windows/svc/mgr"
+
+	"github.com/fengqi-dev/kube-loop/internal/helper"
 )
 
 func enableService(binaryPath string) error {

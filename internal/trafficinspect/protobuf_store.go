@@ -11,7 +11,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 
@@ -99,7 +99,7 @@ func (s *ProtobufSchemaStore) Files() []string {
 		files = append(files, path)
 	}
 	s.mu.RUnlock()
-	sort.Strings(files)
+	slices.Sort(files)
 	return files
 }
 
@@ -109,7 +109,11 @@ func (s *ProtobufSchemaStore) replace(ctx context.Context, sources map[string]st
 		return err
 	}
 	if persist {
-		raw, err := json.MarshalIndent(persistedProtobufSources{Version: protobufStoreVersion, Sources: sources}, "", "  ")
+		raw, err := json.MarshalIndent(
+			persistedProtobufSources{Version: protobufStoreVersion, Sources: sources},
+			"",
+			"  ",
+		)
 		if err != nil {
 			return errors.New("encode protobuf schemas")
 		}
@@ -136,6 +140,11 @@ func readProtoDirectory(root string) (map[string]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("resolve protobuf source directory: %w", err)
 	}
+	directory, err := os.OpenRoot(absolute)
+	if err != nil {
+		return nil, fmt.Errorf("open protobuf source directory: %w", err)
+	}
+	defer func() { _ = directory.Close() }()
 	sources := make(map[string]string)
 	total := 0
 	err = filepath.WalkDir(absolute, func(path string, entry fs.DirEntry, walkErr error) error {
@@ -158,17 +167,17 @@ func readProtoDirectory(root string) (map[string]string, error) {
 		if info.Size() > protobufMaxSourceSize {
 			return fmt.Errorf("protobuf source %s exceeds 2 MiB", entry.Name())
 		}
-		raw, err := os.ReadFile(path)
+		relative, err := filepath.Rel(absolute, path)
+		if err != nil {
+			return fmt.Errorf("resolve protobuf import path: %w", err)
+		}
+		raw, err := directory.ReadFile(relative)
 		if err != nil {
 			return fmt.Errorf("read protobuf source %s: %w", entry.Name(), err)
 		}
 		total += len(raw)
 		if total > protobufMaxSourceAll {
 			return errors.New("protobuf sources exceed 16 MiB")
-		}
-		relative, err := filepath.Rel(absolute, path)
-		if err != nil {
-			return fmt.Errorf("resolve protobuf import path: %w", err)
 		}
 		sources[filepath.ToSlash(relative)] = string(raw)
 		return nil

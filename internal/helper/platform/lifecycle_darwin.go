@@ -30,6 +30,7 @@ func ApplyDNS(workDir string, dns singbox.DNSMeta) error {
 	if err := sweepResolvers(); err != nil {
 		return err
 	}
+	//nolint:gosec // macOS requires /etc/resolver to be traversable by the system resolver.
 	if err := os.MkdirAll(resolverDir, 0o755); err != nil {
 		return err
 	}
@@ -47,6 +48,7 @@ func ApplyDNS(workDir string, dns singbox.DNSMeta) error {
 			!strings.Contains(string(existing), dnsMarker) {
 			return fmt.Errorf("resolver file %s is not owned by KubeLoop", path)
 		}
+		//nolint:gosec // Resolver files are intentionally public system configuration without secrets.
 		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 			return err
 		}
@@ -217,8 +219,10 @@ func CleanupRoutes(routes []string) {
 		}
 		prefix = prefix.Masked()
 		if prefix.Bits() == prefix.Addr().BitLen() {
+			//nolint:gosec // prefix was parsed as netip.Prefix and is passed as a single argument.
 			_ = exec.Command("/sbin/route", "-n", "delete", "-host", prefix.Addr().String()).Run()
 		} else {
+			//nolint:gosec // prefix was parsed as netip.Prefix and is passed as a single argument.
 			_ = exec.Command("/sbin/route", "-n", "delete", "-net", prefix.String()).Run()
 		}
 	}

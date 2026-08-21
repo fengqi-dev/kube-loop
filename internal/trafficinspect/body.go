@@ -139,7 +139,7 @@ func emitCapturedBody(
 			GRPC:          requestGRPCEvent(request),
 			Protobuf:      config.Protobuf.Decode(request.URL.Path, direction, encoding, body.data),
 			Raw: &RawEvent{
-				Format:    "grpc",
+				Format:    string(ProtocolGRPC),
 				Direction: direction,
 				Encoding:  "base64",
 				Data:      base64.StdEncoding.EncodeToString(body.data),
@@ -219,7 +219,7 @@ func rawHTTPMessage(
 		return nil
 	}
 	return &RawEvent{
-		Format:    "http",
+		Format:    string(ProtocolHTTP),
 		Direction: direction,
 		Encoding:  "base64",
 		Data:      base64.StdEncoding.EncodeToString(dump),

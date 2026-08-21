@@ -17,8 +17,9 @@ import (
 	"time"
 
 	"github.com/elazarl/goproxy"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/streamcopy"
 	"golang.org/x/net/http2"
+
+	"github.com/fengqi-dev/kube-loop/internal/protocol/streamcopy"
 )
 
 const (
@@ -85,7 +86,7 @@ func (t upstreamRoundTripper) RoundTrip(
 	request *http.Request,
 	_ *goproxy.ProxyCtx,
 ) (*http.Response, error) {
-	if request.URL.Scheme == "http" && request.ProtoMajor == 2 {
+	if request.URL.Scheme == string(ProtocolHTTP) && request.ProtoMajor == 2 {
 		return t.h2c.RoundTrip(request)
 	}
 	return t.http.RoundTrip(request)
@@ -105,7 +106,7 @@ func New(config Config) (*Handler, error) {
 		return nil, errors.New("traffic inspection dialer is required")
 	}
 
-	tlsConfig := &tls.Config{ //nolint:gosec // Verification policy is supplied by the caller.
+	tlsConfig := &tls.Config{
 		MinVersion: tls.VersionTLS12,
 		NextProtos: []string{"h2", alpnHTTP1},
 	}
@@ -159,38 +160,39 @@ func New(config Config) (*Handler, error) {
 			return mitm, host
 		},
 	)
-	proxy.OnRequest().DoFunc(func(request *http.Request, proxyContext *goproxy.ProxyCtx) (*http.Request, *http.Response) {
-		connection, _ := proxyContext.UserData.(*inspectionConnection)
-		if connection == nil || connection.roundTripper == nil || connection.destination == "" {
-			return request, goproxy.NewResponse(
-				request,
-				"text/plain",
-				http.StatusBadGateway,
-				"traffic inspection original destination is unavailable",
-			)
-		}
-		proxyContext.RoundTripper = connection.roundTripper
-		if request.URL != nil && request.Host != "" {
-			// The dialer is pinned to the trusted original destination. Preserve
-			// the HTTP authority here so TLS uses the client's SNI and virtual
-			// hosts continue to work without letting Host select a dial target.
-			request.URL.Host = request.Host
-		}
-		protocol := classifyProtocol(request)
-		trace := requestTrace{
-			flowID:      newEventID(),
-			started:     time.Now(),
-			protocol:    protocol,
-			destination: connection.destination,
-		}
-		request = request.WithContext(context.WithValue(request.Context(), requestTraceKey{}, trace))
-		wrapRequestBody(request, trace, config)
-		emitEvent(request.Context(), config, buildRequestEvent(request, trace))
-		if config.OnRequest != nil {
-			config.OnRequest(request)
-		}
-		return request, nil
-	})
+	proxy.OnRequest().
+		DoFunc(func(request *http.Request, proxyContext *goproxy.ProxyCtx) (*http.Request, *http.Response) {
+			connection, _ := proxyContext.UserData.(*inspectionConnection)
+			if connection == nil || connection.roundTripper == nil || connection.destination == "" {
+				return request, goproxy.NewResponse(
+					request,
+					"text/plain",
+					http.StatusBadGateway,
+					"traffic inspection original destination is unavailable",
+				)
+			}
+			proxyContext.RoundTripper = connection.roundTripper
+			if request.URL != nil && request.Host != "" {
+				// The dialer is pinned to the trusted original destination. Preserve
+				// the HTTP authority here so TLS uses the client's SNI and virtual
+				// hosts continue to work without letting Host select a dial target.
+				request.URL.Host = request.Host
+			}
+			protocol := classifyProtocol(request)
+			trace := requestTrace{
+				flowID:      newEventID(),
+				started:     time.Now(),
+				protocol:    protocol,
+				destination: connection.destination,
+			}
+			request = request.WithContext(context.WithValue(request.Context(), requestTraceKey{}, trace))
+			wrapRequestBody(request, trace, config)
+			emitEvent(request.Context(), config, buildRequestEvent(request, trace))
+			if config.OnRequest != nil {
+				config.OnRequest(request)
+			}
+			return request, nil
+		})
 	proxy.OnResponse().DoFunc(func(response *http.Response, _ *goproxy.ProxyCtx) *http.Response {
 		if response != nil && response.Request != nil {
 			trace := responseTrace(response)
@@ -473,6 +475,7 @@ func (h *Handler) relayUninspected(ctx context.Context, client net.Conn, target 
 
 type bufferedConn struct {
 	net.Conn
+
 	reader *bufio.Reader
 }
 
@@ -484,7 +487,7 @@ func (c *bufferedConn) CloseWrite() error {
 	if writer, ok := c.Conn.(interface{ CloseWrite() error }); ok {
 		return writer.CloseWrite()
 	}
-	return c.Conn.Close()
+	return c.Close()
 }
 
 func canonicalAuthority(authority, scheme string) string {
@@ -503,6 +506,7 @@ func canonicalAuthority(authority, scheme string) string {
 
 type transparentConn struct {
 	net.Conn
+
 	done          chan struct{}
 	closeOnce     sync.Once
 	writeAccess   sync.Mutex
@@ -551,7 +555,12 @@ func (w *connectionResponseWriter) Write(payload []byte) (int, error) {
 }
 
 func (w *connectionResponseWriter) WriteHeader(statusCode int) {
-	if _, err := fmt.Fprintf(w.connection, "HTTP/1.1 %d %s\r\n\r\n", statusCode, http.StatusText(statusCode)); err != nil {
+	if _, err := fmt.Fprintf(
+		w.connection,
+		"HTTP/1.1 %d %s\r\n\r\n",
+		statusCode,
+		http.StatusText(statusCode),
+	); err != nil {
 		_ = w.connection.Close()
 	}
 }

@@ -9,8 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
 	"github.com/uptrace/bun"
+
+	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
 )
 
 type sessionRepository struct {
@@ -35,7 +36,10 @@ type sessionRow struct {
 	ExpiresAt       string          `bun:"expires_at"`
 }
 
-func (repository *sessionRepository) Create(ctx context.Context, session Session) error {
+func (repository *sessionRepository) Create(
+	ctx context.Context,
+	session Session,
+) error {
 	if err := normalizeSession(&session); err != nil {
 		return err
 	}
@@ -44,12 +48,18 @@ func (repository *sessionRepository) Create(ctx context.Context, session Session
 	return mapWriteError(err)
 }
 
-func (repository *sessionRepository) GetByID(ctx context.Context, id string) (Session, error) {
+func (repository *sessionRepository) GetByID(
+	ctx context.Context,
+	id string,
+) (Session, error) {
 	if err := validateUUID(id, "session ID"); err != nil {
 		return Session{}, err
 	}
 	row := sessionRow{}
-	err := repository.orm.NewSelect().Model(&row).Where("s.id = ?", id).Scan(ctx)
+	err := repository.orm.NewSelect().
+		Model(&row).
+		Where("s.id = ?", id).
+		Scan(ctx)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Session{}, ErrNotFound
 	}
@@ -59,7 +69,10 @@ func (repository *sessionRepository) GetByID(ctx context.Context, id string) (Se
 	return sessionFromRow(row)
 }
 
-func (repository *sessionRepository) List(ctx context.Context, filter SessionListFilter) ([]Session, error) {
+func (repository *sessionRepository) List(
+	ctx context.Context,
+	filter SessionListFilter,
+) ([]Session, error) {
 	limit, cursor, err := normalizePage(filter.Limit, filter.Cursor)
 	if err != nil {
 		return nil, err
@@ -67,7 +80,8 @@ func (repository *sessionRepository) List(ctx context.Context, filter SessionLis
 	filter.IdentityID = strings.TrimSpace(filter.IdentityID)
 	filter.Namespace = strings.TrimSpace(filter.Namespace)
 	filter.State = strings.TrimSpace(filter.State)
-	if filter.IdentityID != "" && validateUUID(filter.IdentityID, "session identity ID") != nil {
+	if filter.IdentityID != "" &&
+		validateUUID(filter.IdentityID, "session identity ID") != nil {
 		return nil, errors.New("session identity filter is invalid")
 	}
 	if filter.Namespace != "" && !dns1123Label.MatchString(filter.Namespace) {
@@ -81,7 +95,7 @@ func (repository *sessionRepository) List(ctx context.Context, filter SessionLis
 		FROM sessions WHERE 1=1`
 	arguments := make([]any, 0, 9)
 	if filter.IdentityID != "" {
-		query += ` AND identity_id = ?`
+		query += identityFilterSQL
 		arguments = append(arguments, filter.IdentityID)
 	}
 	if filter.Namespace != "" {
@@ -93,13 +107,16 @@ func (repository *sessionRepository) List(ctx context.Context, filter SessionLis
 		arguments = append(arguments, filter.State)
 	}
 	query, arguments = appendPageBoundary(query, arguments, "", cursor)
-	query += ` ORDER BY created_at DESC, id DESC LIMIT ?`
+	query += descendingPageSQL
 	arguments = append(arguments, limit)
-	rows, err := repository.executor.QueryContext(ctx, repository.bind(query), arguments...)
+	rows, err := repository.executor.QueryContext(
+		ctx,
+		repository.bind(query),
+		arguments...)
 	if err != nil {
 		return nil, databaseError("list sessions", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	sessions := make([]Session, 0)
 	for rows.Next() {
 		session, err := scanSession(rows)
@@ -139,8 +156,11 @@ func (repository *sessionRepository) Heartbeat(
 	if err := validateUUID(id, "session ID"); err != nil {
 		return err
 	}
-	if generation == 0 || generation >= math.MaxInt64 || updatedAt.IsZero() || !expiresAt.After(updatedAt) {
-		return errors.New("session generation, heartbeat time and future expiry are required")
+	if generation == 0 || generation >= math.MaxInt64 || updatedAt.IsZero() ||
+		!expiresAt.After(updatedAt) {
+		return errors.New(
+			"session generation, heartbeat time and future expiry are required",
+		)
 	}
 	normalizedSpec, err := networkspec.Decode(networkSpec)
 	if err != nil {
@@ -155,10 +175,15 @@ func (repository *sessionRepository) Heartbeat(
 		return errors.New("session heartbeat NetworkSpec hash is invalid")
 	}
 	result, err := repository.orm.NewUpdate().Model((*sessionRow)(nil)).
-		Set("generation = generation + 1").Set("updated_at = ?", formatTime(updatedAt)).
-		Set("last_heartbeat_at = ?", formatTime(updatedAt)).Set("expires_at = ?", formatTime(expiresAt)).
-		Set("network_spec_json = ?", string(canonicalSpec)).Set("network_spec_hash = ?", canonicalHash).
-		Where("id = ?", id).Where("generation = ?", int64(generation)).Where("state = ?", "active").Exec(ctx)
+		Set("generation = generation + 1").
+		Set("updated_at = ?", formatTime(updatedAt)).
+		Set("last_heartbeat_at = ?", formatTime(updatedAt)).
+		Set("expires_at = ?", formatTime(expiresAt)).
+		Set("network_spec_json = ?", string(canonicalSpec)).
+		Set("network_spec_hash = ?", canonicalHash).
+		Where("id = ?", id).
+		Where("generation = ?", int64(generation)).
+		Where("state = ?", statusActive).Exec(ctx)
 	if err != nil {
 		return mapWriteError(err)
 	}
@@ -175,16 +200,27 @@ func (repository *sessionRepository) Heartbeat(
 	return ErrConflict
 }
 
-func (repository *sessionRepository) UpdateState(ctx context.Context, id string, generation uint64, state string, updatedAt time.Time) error {
+func (repository *sessionRepository) UpdateState(
+	ctx context.Context,
+	id string,
+	generation uint64,
+	state string,
+	updatedAt time.Time,
+) error {
 	if err := validateUUID(id, "session ID"); err != nil {
 		return err
 	}
 	state = strings.TrimSpace(state)
-	if state == "" || generation == 0 || generation >= math.MaxInt64 || updatedAt.IsZero() {
-		return errors.New("session state, current generation and update time are required")
+	if state == "" || generation == 0 || generation >= math.MaxInt64 ||
+		updatedAt.IsZero() {
+		return errors.New(
+			"session state, current generation and update time are required",
+		)
 	}
 	result, err := repository.orm.NewUpdate().Model((*sessionRow)(nil)).
-		Set("state = ?", state).Set("generation = generation + 1").Set("updated_at = ?", formatTime(updatedAt)).
+		Set("state = ?", state).
+		Set("generation = generation + 1").
+		Set("updated_at = ?", formatTime(updatedAt)).
 		Where("id = ?", id).Where("generation = ?", int64(generation)).Exec(ctx)
 	if err != nil {
 		return mapWriteError(err)
@@ -202,7 +238,11 @@ func (repository *sessionRepository) UpdateState(ctx context.Context, id string,
 	return ErrConflict
 }
 
-func (repository *sessionRepository) DeleteExpired(ctx context.Context, before time.Time, limit int) (int64, error) {
+func (repository *sessionRepository) DeleteExpired(
+	ctx context.Context,
+	before time.Time,
+	limit int,
+) (int64, error) {
 	limit, err := boundedLimit(limit)
 	if err != nil {
 		return 0, err
@@ -213,22 +253,28 @@ func (repository *sessionRepository) DeleteExpired(ctx context.Context, before t
 			WHERE t.session_id = s.id
 		) ORDER BY s.expires_at LIMIT ?
 	)`
-	if repository.backend == BackendPostgreSQL {
+	switch repository.backend {
+	case BackendSQLite:
+		query = repository.bind(query)
+	case BackendPostgreSQL:
 		query = `DELETE FROM sessions WHERE ctid IN (
 			SELECT s.ctid FROM sessions AS s WHERE s.expires_at < $1 AND NOT EXISTS (
 				SELECT 1 FROM tasks AS t INNER JOIN resource_snapshots AS r ON r.task_id = t.id
 				WHERE t.session_id = s.id
 			) ORDER BY s.expires_at LIMIT $2
 		)`
-	} else if repository.backend == BackendMySQL {
+	case BackendMySQL:
 		query = `DELETE FROM sessions WHERE expires_at < ? AND NOT EXISTS (
 			SELECT 1 FROM tasks AS t INNER JOIN resource_snapshots AS r ON r.task_id = t.id
 			WHERE t.session_id = sessions.id
 		) ORDER BY expires_at LIMIT ?`
-	} else {
-		query = repository.bind(query)
 	}
-	result, err := repository.executor.ExecContext(ctx, query, formatTime(before), limit)
+	result, err := repository.executor.ExecContext(
+		ctx,
+		query,
+		formatTime(before),
+		limit,
+	)
 	if err != nil {
 		return 0, databaseError("delete expired sessions", err)
 	}
@@ -246,8 +292,12 @@ func normalizeSession(session *Session) error {
 	session.ClusterID = strings.TrimSpace(session.ClusterID)
 	session.Namespace = strings.TrimSpace(session.Namespace)
 	session.State = strings.TrimSpace(session.State)
-	if session.DeviceID == "" || session.ClusterID == "" || session.Namespace == "" || session.State == "" {
-		return errors.New("session device, cluster, namespace and state are required")
+	if session.DeviceID == "" || session.ClusterID == "" ||
+		session.Namespace == "" ||
+		session.State == "" {
+		return errors.New(
+			"session device, cluster, namespace and state are required",
+		)
 	}
 	if session.Generation == 0 {
 		session.Generation = 1
@@ -268,7 +318,8 @@ func normalizeSession(session *Session) error {
 		return errors.New("session NetworkSpec hash is invalid")
 	}
 	session.NetworkSpec = contents
-	if session.CreatedAt.IsZero() || session.ExpiresAt.IsZero() || !session.ExpiresAt.After(session.CreatedAt) {
+	if session.CreatedAt.IsZero() || session.ExpiresAt.IsZero() ||
+		!session.ExpiresAt.After(session.CreatedAt) {
 		return errors.New("session expiry must be after creation")
 	}
 	if session.UpdatedAt.IsZero() {
@@ -288,9 +339,12 @@ func rowFromSession(session Session) sessionRow {
 	return sessionRow{
 		ID: session.ID, IdentityID: session.IdentityID,
 		DeviceID: session.DeviceID, ClusterID: session.ClusterID, Namespace: session.Namespace,
+		//nolint:gosec // normalizeSession rejects generations that do not fit in the signed database column.
 		State: session.State, Generation: int64(session.Generation), NetworkSpec: session.NetworkSpec,
 		NetworkSpecHash: session.NetworkSpecHash, CreatedAt: formatTime(session.CreatedAt),
-		UpdatedAt: formatTime(session.UpdatedAt), LastHeartbeatAt: formatTime(session.LastHeartbeatAt),
+		UpdatedAt: formatTime(
+			session.UpdatedAt,
+		), LastHeartbeatAt: formatTime(session.LastHeartbeatAt),
 		ExpiresAt: formatTime(session.ExpiresAt),
 	}
 }
@@ -302,7 +356,9 @@ func sessionFromRow(row sessionRow) (Session, error) {
 	session := Session{
 		ID: row.ID, IdentityID: row.IdentityID, DeviceID: row.DeviceID,
 		ClusterID: row.ClusterID, Namespace: row.Namespace, State: row.State, Generation: uint64(row.Generation),
-		NetworkSpec: append(json.RawMessage(nil), row.NetworkSpec...), NetworkSpecHash: row.NetworkSpecHash,
+		NetworkSpec: append(
+			json.RawMessage(nil),
+			row.NetworkSpec...), NetworkSpecHash: row.NetworkSpecHash,
 	}
 	var err error
 	if session.CreatedAt, err = parseTime(row.CreatedAt, "session creation time"); err != nil {

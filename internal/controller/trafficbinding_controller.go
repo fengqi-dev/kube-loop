@@ -39,6 +39,7 @@ const (
 // TrafficBindingReconciler reconciles a TrafficBinding object.
 type TrafficBindingReconciler struct {
 	client.Client
+
 	Scheme   *runtime.Scheme
 	Recorder record.EventRecorder
 }

@@ -31,12 +31,13 @@ func TestPostgreSQLBackendIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	if store.Backend() != BackendPostgreSQL {
 		t.Fatalf("backend = %q", store.Backend())
 	}
 	var schemaID string
-	if err := store.db.QueryRow(`SELECT schema_id FROM schema_metadata WHERE id = 1`).Scan(&schemaID); err != nil || schemaID != currentSchemaID {
+	if err := store.db.QueryRow(`SELECT schema_id FROM schema_metadata WHERE id = 1`).Scan(&schemaID); err != nil ||
+		schemaID != currentSchemaID {
 		t.Fatalf("schema ID = %q, error = %v", schemaID, err)
 	}
 	if stats := store.db.Stats(); stats.MaxOpenConnections != 7 {
@@ -60,7 +61,11 @@ func TestPostgreSQLBackendIntegration(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 8, 10, 9, 0, 0, 0, time.UTC)
 	_, err = store.Identities().Create(ctx, Identity{
-		ID: uuid.NewString(), Type: "human", DisplayName: "PostgreSQL User", Status: "active", CreatedAt: now,
+		ID:          uuid.NewString(),
+		Type:        identityTypeHuman,
+		DisplayName: "PostgreSQL User",
+		Status:      statusActive,
+		CreatedAt:   now,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -69,7 +74,7 @@ func TestPostgreSQLBackendIntegration(t *testing.T) {
 	sentinel := errors.New("rollback")
 	err = store.WithinTransaction(ctx, func(repositories Repositories) error {
 		_, err := repositories.Identities().Create(ctx, Identity{
-			ID: rollbackID, Type: "human", DisplayName: "Rolled Back", Status: "active", CreatedAt: now,
+			ID: rollbackID, Type: identityTypeHuman, DisplayName: "Rolled Back", Status: statusActive, CreatedAt: now,
 		})
 		if err != nil {
 			return err
@@ -79,7 +84,10 @@ func TestPostgreSQLBackendIntegration(t *testing.T) {
 	if !errors.Is(err, sentinel) {
 		t.Fatalf("rollback error = %v", err)
 	}
-	if _, err := store.Identities().GetByID(ctx, rollbackID); !errors.Is(err, ErrNotFound) {
+	if _, err := store.Identities().GetByID(ctx, rollbackID); !errors.Is(
+		err,
+		ErrNotFound,
+	) {
 		t.Fatalf("rolled-back identity lookup = %v", err)
 	}
 }
@@ -98,20 +106,24 @@ func TestPostgreSQLRejectsNonemptyUninitializedDatabase(t *testing.T) {
 	if err := database.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Open(context.Background(), config); err == nil || !strings.Contains(err.Error(), "recreate") {
+	if _, err := Open(context.Background(), config); err == nil ||
+		!strings.Contains(err.Error(), "recreate") {
 		t.Fatalf("PostgreSQL uninitialized database error = %v", err)
 	}
 	database, err = sql.Open("pgx", config.DatasourceURL)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	defer func() { _ = database.Close() }()
 	var metadataTable sql.NullString
 	if err := database.QueryRow(`SELECT to_regclass('schema_metadata')`).Scan(&metadataTable); err != nil {
 		t.Fatal(err)
 	}
 	if metadataTable.Valid {
-		t.Fatalf("rejected PostgreSQL database gained table %q", metadataTable.String)
+		t.Fatalf(
+			"rejected PostgreSQL database gained table %q",
+			metadataTable.String,
+		)
 	}
 }
 
@@ -129,12 +141,15 @@ func TestPostgreSQLRejectsUnsupportedSchema(t *testing.T) {
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Open(context.Background(), config); err == nil || !strings.Contains(err.Error(), "recreate") {
+	if _, err := Open(context.Background(), config); err == nil ||
+		!strings.Contains(err.Error(), "recreate") {
 		t.Fatalf("Open unsupported PostgreSQL schema error = %v", err)
 	}
 }
 
-func TestPostgreSQLConcurrentInitializationAndSerializableRetryIntegration(t *testing.T) {
+func TestPostgreSQLConcurrentInitializationAndSerializableRetryIntegration(
+	t *testing.T,
+) {
 	config, cleanup := newPostgreSQLIntegrationConfig(t)
 	defer cleanup()
 	config.QueryTimeout = 5 * time.Second
@@ -164,15 +179,18 @@ func TestPostgreSQLConcurrentInitializationAndSerializableRetryIntegration(t *te
 		if store == nil {
 			t.Fatal("concurrent initialization did not return every Store")
 		}
-		defer store.Close()
+		defer func() { _ = store.Close() }()
 		var schemaID string
-		if err := store.db.QueryRow(`SELECT schema_id FROM schema_metadata WHERE id = 1`).Scan(&schemaID); err != nil || schemaID != currentSchemaID {
+		if err := store.db.QueryRow(`SELECT schema_id FROM schema_metadata WHERE id = 1`).Scan(&schemaID); err != nil ||
+			schemaID != currentSchemaID {
 			t.Fatalf("concurrent schema ID = %q, error = %v", schemaID, err)
 		}
 	}
 
 	store := stores[0]
-	if _, err := store.db.Exec(`CREATE TABLE retry_counter (id INTEGER PRIMARY KEY, value INTEGER NOT NULL)`); err != nil {
+	if _, err := store.db.Exec(
+		`CREATE TABLE retry_counter (id INTEGER PRIMARY KEY, value INTEGER NOT NULL)`,
+	); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.db.Exec(`INSERT INTO retry_counter(id, value) VALUES (1, 0)`); err != nil {
@@ -198,7 +216,7 @@ func TestPostgreSQLConcurrentInitializationAndSerializableRetryIntegration(t *te
 					return databaseError("read transaction isolation", err)
 				}
 				if isolation != "serializable" {
-					return errors.New("PostgreSQL transaction is not serializable")
+					return errors.New("postgreSQL transaction is not serializable")
 				}
 				var value int
 				if err := set.identities.executor.QueryRowContext(ctx, `SELECT value FROM retry_counter WHERE id = 1`).Scan(&value); err != nil {
@@ -232,7 +250,11 @@ func TestPostgreSQLConcurrentInitializationAndSerializableRetryIntegration(t *te
 		t.Fatal(err)
 	}
 	if value != 2 || callbackCalls.Load() < 3 {
-		t.Fatalf("retry counter = %d, callback calls = %d", value, callbackCalls.Load())
+		t.Fatalf(
+			"retry counter = %d, callback calls = %d",
+			value,
+			callbackCalls.Load(),
+		)
 	}
 }
 
@@ -257,18 +279,27 @@ func newPostgreSQLIntegrationConfig(t *testing.T) (Config, func()) {
 	}
 	testConfig := adminConfig.Copy()
 	testURL, err := url.Parse(rawDSN)
-	if err != nil || (testURL.Scheme != "postgres" && testURL.Scheme != "postgresql") {
+	if err != nil ||
+		(testURL.Scheme != "postgres" && testURL.Scheme != "postgresql") {
 		_, _ = admin.ExecContext(ctx, `DROP SCHEMA "`+schema+`" CASCADE`)
 		_ = admin.Close()
-		t.Fatal("KUBELOOP_TEST_POSTGRESQL_DSN must be a postgres:// or postgresql:// URL")
+		t.Fatal(
+			"KUBELOOP_TEST_POSTGRESQL_DSN must be a postgres:// or postgresql:// URL",
+		)
 	}
 	query := testURL.Query()
 	query.Set("search_path", schema)
 	testURL.RawQuery = query.Encode()
 	cleanup := func() {
-		cleanupContext, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		cleanupContext, cleanupCancel := context.WithTimeout(
+			context.Background(),
+			10*time.Second,
+		)
 		defer cleanupCancel()
-		_, _ = admin.ExecContext(cleanupContext, `DROP SCHEMA "`+schema+`" CASCADE`)
+		_, _ = admin.ExecContext(
+			cleanupContext,
+			`DROP SCHEMA "`+schema+`" CASCADE`,
+		)
 		_ = admin.Close()
 	}
 	return Config{

@@ -14,6 +14,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/labstack/echo/v5"
+	"k8s.io/apimachinery/pkg/util/validation"
+
 	"github.com/fengqi-dev/kube-loop/internal/controlplane"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
 	controlplanemiddleware "github.com/fengqi-dev/kube-loop/internal/controlplane/middleware"
@@ -22,9 +26,6 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/protocol/capability"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/remotetask"
-	"github.com/google/uuid"
-	"github.com/labstack/echo/v5"
-	"k8s.io/apimachinery/pkg/util/validation"
 )
 
 const (
@@ -43,7 +44,11 @@ type NetworkDiscoverer interface {
 }
 
 type CapabilityDiscoverer interface {
-	DiscoverCapabilities(context.Context, controlplaneapi.Identity, string) (capability.Snapshot, *controlplaneapi.Error)
+	DiscoverCapabilities(
+		context.Context,
+		controlplaneapi.Identity,
+		string,
+	) (capability.Snapshot, *controlplaneapi.Error)
 }
 
 type Config struct {
@@ -69,23 +74,25 @@ type Service struct {
 
 func New(storageBackend Storage, config Config) (*Service, error) {
 	if storageBackend == nil || config.Networks == nil || config.Capabilities == nil {
-		return nil, errors.New("Session storage, NetworkSpec and capability discoverers are required")
+		return nil, errors.New(
+			"session storage, NetworkSpec and capability discoverers are required",
+		)
 	}
 	config.ClusterID = strings.TrimSpace(config.ClusterID)
 	if config.ClusterID == "" || len(config.ClusterID) > 256 {
-		return nil, errors.New("Session cluster ID is required")
+		return nil, errors.New("session cluster ID is required")
 	}
 	if config.SessionTTL <= 0 {
 		config.SessionTTL = DefaultSessionTTL
 	}
 	if config.SessionTTL < 30*time.Second || config.SessionTTL > 30*time.Minute {
-		return nil, errors.New("Session TTL must be between 30 seconds and 30 minutes")
+		return nil, errors.New("session TTL must be between 30 seconds and 30 minutes")
 	}
 	if config.MaxLifetime <= 0 {
 		config.MaxLifetime = DefaultMaxLifetime
 	}
 	if config.MaxLifetime < config.SessionTTL || config.MaxLifetime > 24*time.Hour {
-		return nil, errors.New("Session maximum lifetime must be between the TTL and 24 hours")
+		return nil, errors.New("session maximum lifetime must be between the TTL and 24 hours")
 	}
 	if config.Now == nil {
 		config.Now = time.Now
@@ -109,14 +116,24 @@ func (handler *Service) RequireActive(
 	if apiError != nil {
 		return ActiveSession{}, apiError
 	}
-	if session.State != "active" || !session.ExpiresAt.After(handler.now().UTC()) {
-		return ActiveSession{}, &controlplaneapi.Error{Code: controlplaneapi.CodeConflict, Message: "Session is not active"}
+	if session.State != sessionStateActive || !session.ExpiresAt.After(handler.now().UTC()) {
+		return ActiveSession{}, &controlplaneapi.Error{
+			Code:    controlplaneapi.CodeConflict,
+			Message: "Session is not active",
+		}
 	}
 	if session.NetworkSpecHash == "" {
-		return ActiveSession{}, &controlplaneapi.Error{Code: controlplaneapi.CodeConflict, Message: "Session has no NetworkSpec"}
+		return ActiveSession{}, &controlplaneapi.Error{
+			Code:    controlplaneapi.CodeConflict,
+			Message: "Session has no NetworkSpec",
+		}
 	}
 	if err := handler.registry.Ensure(session.ID); err != nil {
-		return ActiveSession{}, &controlplaneapi.Error{Code: controlplaneapi.CodeUnavailable, Message: "Session runtime is unavailable", Cause: err}
+		return ActiveSession{}, &controlplaneapi.Error{
+			Code:    controlplaneapi.CodeUnavailable,
+			Message: "Session runtime is unavailable",
+			Cause:   err,
+		}
 	}
 	return ActiveSession{
 		ID: session.ID, Namespace: session.Namespace, Generation: session.Generation, ExpiresAt: session.ExpiresAt,
@@ -131,32 +148,51 @@ func (handler *Service) create(
 ) *controlplaneapi.Error {
 	request := ctx.Request()
 	if strings.TrimSpace(identity.Subject) == "" || strings.TrimSpace(identity.DeviceID) == "" {
-		return &controlplaneapi.Error{Code: controlplaneapi.CodeUnauthenticated, Message: "authenticated device identity is required"}
+		return &controlplaneapi.Error{
+			Code:    controlplaneapi.CodeUnauthenticated,
+			Message: "authenticated device identity is required",
+		}
 	}
 	idempotencyKey, apiError := idempotencyKey(request)
 	if apiError != nil {
 		return apiError
 	}
 	now := handler.now().UTC()
-	capabilitySnapshot, apiError := handler.capabilities.DiscoverCapabilities(request.Context(), identity, namespace)
+	capabilitySnapshot, apiError := handler.capabilities.DiscoverCapabilities(
+		request.Context(),
+		identity,
+		namespace,
+	)
 	if apiError != nil {
 		return apiError
 	}
 	spec, err := handler.networks.Discover(request.Context(), identity, namespace)
 	if err != nil {
-		return &controlplaneapi.Error{Code: controlplaneapi.CodeUnavailable, Message: "Kubernetes NetworkSpec discovery failed", Cause: err}
+		return &controlplaneapi.Error{
+			Code:    controlplaneapi.CodeUnavailable,
+			Message: "Kubernetes NetworkSpec discovery failed",
+			Cause:   err,
+		}
 	}
 	specJSON, err := networkspec.CanonicalJSON(spec)
 	if err != nil {
-		return &controlplaneapi.Error{Code: controlplaneapi.CodeInternal, Message: "NetworkSpec validation failed", Cause: err}
+		return &controlplaneapi.Error{
+			Code:    controlplaneapi.CodeInternal,
+			Message: networkSpecValidationFailedMessage,
+			Cause:   err,
+		}
 	}
 	specHash, err := networkspec.Hash(spec)
 	if err != nil {
-		return &controlplaneapi.Error{Code: controlplaneapi.CodeInternal, Message: "NetworkSpec validation failed", Cause: err}
+		return &controlplaneapi.Error{
+			Code:    controlplaneapi.CodeInternal,
+			Message: networkSpecValidationFailedMessage,
+			Cause:   err,
+		}
 	}
 	session := storage.Session{
 		ID: uuid.NewString(), IdentityID: identity.Subject, DeviceID: identity.DeviceID,
-		ClusterID: handler.clusterID, Namespace: namespace, State: "active",
+		ClusterID: handler.clusterID, Namespace: namespace, State: sessionStateActive,
 		Generation:  1,
 		NetworkSpec: specJSON, NetworkSpecHash: specHash,
 		CreatedAt: now, UpdatedAt: now, LastHeartbeatAt: now, ExpiresAt: now.Add(handler.sessionTTL),
@@ -169,47 +205,62 @@ func (handler *Service) create(
 	requestHashRaw := sha256.Sum256([]byte("session-create-v1\n" + namespace))
 	requestHash := hex.EncodeToString(requestHashRaw[:])
 	created := false
-	err = handler.storage.WithinTransaction(request.Context(), func(repositories storage.Repositories) error {
-		record, reserved, reserveErr := repositories.Idempotency().Reserve(request.Context(), storage.IdempotencyRecord{
-			Scope: "session:create:" + identity.Subject, Key: idempotencyKey, RequestHash: requestHash,
-			ResourceType: "session", ResourceID: session.ID, Response: responseJSON,
-			CreatedAt: now, ExpiresAt: now.Add(handler.maxLifetime),
-		})
-		if reserveErr != nil {
-			return reserveErr
-		}
-		if !reserved {
-			if record.ResourceType != "session" {
-				return storage.ErrConflict
+	err = handler.storage.WithinTransaction(
+		request.Context(),
+		func(repositories storage.Repositories) error {
+			record, reserved, reserveErr := repositories.Idempotency().
+				Reserve(request.Context(), storage.IdempotencyRecord{
+					Scope: "session:create:" + identity.Subject, Key: idempotencyKey, RequestHash: requestHash,
+					ResourceType: "session", ResourceID: session.ID, Response: responseJSON,
+					CreatedAt: now, ExpiresAt: now.Add(handler.maxLifetime),
+				})
+			if reserveErr != nil {
+				return reserveErr
 			}
-			existing, getErr := repositories.Sessions().GetByID(request.Context(), record.ResourceID)
-			if getErr != nil {
-				return getErr
+			if !reserved {
+				if record.ResourceType != "session" {
+					return storage.ErrConflict
+				}
+				existing, getErr := repositories.Sessions().
+					GetByID(request.Context(), record.ResourceID)
+				if getErr != nil {
+					return getErr
+				}
+				if !ownedBy(existing, identity, namespace) {
+					return storage.ErrNotFound
+				}
+				session = existing
+				return nil
 			}
-			if !ownedBy(existing, identity, namespace) {
-				return storage.ErrNotFound
+			if createErr := repositories.Sessions().Create(request.Context(), session); createErr != nil {
+				return createErr
 			}
-			session = existing
+			created = true
 			return nil
-		}
-		if createErr := repositories.Sessions().Create(request.Context(), session); createErr != nil {
-			return createErr
-		}
-		created = true
-		return nil
-	})
+		},
+	)
 	if err != nil {
 		return mapStorageError(err)
 	}
 	if err := handler.registry.Ensure(session.ID); err != nil {
-		return &controlplaneapi.Error{Code: controlplaneapi.CodeUnavailable, Message: "Session runtime is unavailable", Cause: err}
+		return &controlplaneapi.Error{
+			Code:    controlplaneapi.CodeUnavailable,
+			Message: "Session runtime is unavailable",
+			Cause:   err,
+		}
 	}
 	controlplanemiddleware.SetAuditSessionID(request.Context(), session.ID)
-	ctx.Response().Header().Set("Location", controlplane.APIPathPrefix+"/sessions/"+session.ID+"?namespace="+namespace)
+	ctx.Response().
+		Header().
+		Set("Location", controlplane.APIPathPrefix+"/sessions/"+session.ID+"?namespace="+namespace)
 	if !created {
 		ctx.Response().Header().Set("Idempotent-Replayed", "true")
 	}
-	writeDocument(ctx, map[bool]int{true: http.StatusCreated, false: http.StatusOK}[created], documentWithCapabilities(session, capabilitySnapshot))
+	writeDocument(
+		ctx,
+		map[bool]int{true: http.StatusCreated, false: http.StatusOK}[created],
+		documentWithCapabilities(session, capabilitySnapshot),
+	)
 	return nil
 }
 
@@ -244,21 +295,37 @@ func (handler *Service) heartbeat(
 	}
 	controlplanemiddleware.SetAuditSessionID(request.Context(), session.ID)
 	now := handler.now().UTC()
-	if session.State != "active" || !session.ExpiresAt.After(now) {
-		return &controlplaneapi.Error{Code: controlplaneapi.CodeConflict, Message: "Session is not active"}
+	if session.State != sessionStateActive || !session.ExpiresAt.After(now) {
+		return &controlplaneapi.Error{
+			Code:    controlplaneapi.CodeConflict,
+			Message: "Session is not active",
+		}
 	}
-	currentCapabilities, capabilityError := handler.capabilities.DiscoverCapabilities(request.Context(), identity, namespace)
+	currentCapabilities, capabilityError := handler.capabilities.DiscoverCapabilities(
+		request.Context(),
+		identity,
+		namespace,
+	)
 	if capabilityError != nil {
 		return capabilityError
 	}
 	if !slices.Contains(currentCapabilities.Capabilities, "cluster.tunnel") {
-		if err := handler.storage.Sessions().UpdateState(request.Context(), session.ID, generation, "disconnected", now); err != nil {
+		if err := handler.storage.Sessions().UpdateState(
+			request.Context(),
+			session.ID,
+			generation,
+			"disconnected",
+			now,
+		); err != nil {
 			return mapStorageError(err)
 		}
 		if apiError := handler.disconnectRuntime(request.Context(), session.ID); apiError != nil {
 			return apiError
 		}
-		return &controlplaneapi.Error{Code: controlplaneapi.CodeForbidden, Message: "Session access was revoked"}
+		return &controlplaneapi.Error{
+			Code:    controlplaneapi.CodeForbidden,
+			Message: "Session access was revoked",
+		}
 	}
 	maximumExpiry := session.CreatedAt.Add(handler.maxLifetime)
 	nextExpiry := now.Add(handler.sessionTTL)
@@ -266,19 +333,34 @@ func (handler *Service) heartbeat(
 		nextExpiry = maximumExpiry
 	}
 	if !nextExpiry.After(now) {
-		return &controlplaneapi.Error{Code: controlplaneapi.CodeConflict, Message: "Session maximum lifetime has elapsed"}
+		return &controlplaneapi.Error{
+			Code:    controlplaneapi.CodeConflict,
+			Message: "Session maximum lifetime has elapsed",
+		}
 	}
 	spec, err := handler.networks.Discover(request.Context(), identity, namespace)
 	if err != nil {
-		return &controlplaneapi.Error{Code: controlplaneapi.CodeUnavailable, Message: "Kubernetes NetworkSpec refresh failed", Cause: err}
+		return &controlplaneapi.Error{
+			Code:    controlplaneapi.CodeUnavailable,
+			Message: "Kubernetes NetworkSpec refresh failed",
+			Cause:   err,
+		}
 	}
 	specJSON, err := networkspec.CanonicalJSON(spec)
 	if err != nil {
-		return &controlplaneapi.Error{Code: controlplaneapi.CodeInternal, Message: "NetworkSpec validation failed", Cause: err}
+		return &controlplaneapi.Error{
+			Code:    controlplaneapi.CodeInternal,
+			Message: networkSpecValidationFailedMessage,
+			Cause:   err,
+		}
 	}
 	specHash, err := networkspec.Hash(spec)
 	if err != nil {
-		return &controlplaneapi.Error{Code: controlplaneapi.CodeInternal, Message: "NetworkSpec validation failed", Cause: err}
+		return &controlplaneapi.Error{
+			Code:    controlplaneapi.CodeInternal,
+			Message: networkSpecValidationFailedMessage,
+			Cause:   err,
+		}
 	}
 	if err := handler.storage.Sessions().Heartbeat(
 		request.Context(), session.ID, generation, specJSON, specHash, now, nextExpiry,
@@ -315,7 +397,13 @@ func (handler *Service) disconnect(
 		writeDocument(ctx, http.StatusOK, documentFromSession(session))
 		return nil
 	}
-	if err := handler.storage.Sessions().UpdateState(request.Context(), session.ID, generation, "disconnected", handler.now().UTC()); err != nil {
+	if err := handler.storage.Sessions().UpdateState(
+		request.Context(),
+		session.ID,
+		generation,
+		"disconnected",
+		handler.now().UTC(),
+	); err != nil {
 		return mapStorageError(err)
 	}
 	if apiError := handler.disconnectRuntime(request.Context(), session.ID); apiError != nil {
@@ -338,14 +426,25 @@ func (handler *Service) AttachRuntime(
 	return handler.registry.Attach(parent, sessionID, taskID)
 }
 
-func (handler *Service) disconnectRuntime(parent context.Context, sessionID string) *controlplaneapi.Error {
+func (handler *Service) disconnectRuntime(
+	parent context.Context,
+	sessionID string,
+) *controlplaneapi.Error {
 	ctx, cancel := context.WithTimeout(parent, 5*time.Second)
 	defer cancel()
 	if err := handler.registry.Disconnect(ctx, sessionID); err != nil {
-		return &controlplaneapi.Error{Code: controlplaneapi.CodeUnavailable, Message: "Session runtime cleanup is pending", Cause: err}
+		return &controlplaneapi.Error{
+			Code:    controlplaneapi.CodeUnavailable,
+			Message: "Session runtime cleanup is pending",
+			Cause:   err,
+		}
 	}
 	if err := handler.settleOwnedTasks(ctx, sessionID); err != nil {
-		return &controlplaneapi.Error{Code: controlplaneapi.CodeUnavailable, Message: "Session Task cleanup is pending", Cause: err}
+		return &controlplaneapi.Error{
+			Code:    controlplaneapi.CodeUnavailable,
+			Message: "Session Task cleanup is pending",
+			Cause:   err,
+		}
 	}
 	return nil
 }
@@ -400,22 +499,23 @@ func (handler *Service) loadOwned(
 		return storage.Session{}, notFound()
 	}
 	now := handler.now().UTC()
-	if session.State == "active" && !session.ExpiresAt.After(now) {
-		if updateErr := handler.storage.Sessions().UpdateState(ctx, session.ID, session.Generation, "expired", now); updateErr == nil {
-			session, err = handler.storage.Sessions().GetByID(ctx, session.ID)
-			if err != nil {
-				return storage.Session{}, mapStorageError(err)
-			}
-		} else if errors.Is(updateErr, storage.ErrConflict) {
-			session, err = handler.storage.Sessions().GetByID(ctx, session.ID)
-			if err != nil {
-				return storage.Session{}, mapStorageError(err)
-			}
-		} else {
+	if session.State == sessionStateActive && !session.ExpiresAt.After(now) {
+		updateErr := handler.storage.Sessions().UpdateState(
+			ctx,
+			session.ID,
+			session.Generation,
+			"expired",
+			now,
+		)
+		if updateErr != nil && !errors.Is(updateErr, storage.ErrConflict) {
 			return storage.Session{}, mapStorageError(updateErr)
 		}
+		session, err = handler.storage.Sessions().GetByID(ctx, session.ID)
+		if err != nil {
+			return storage.Session{}, mapStorageError(err)
+		}
 	}
-	if session.State != "active" {
+	if session.State != sessionStateActive {
 		if apiError := handler.disconnectRuntime(ctx, session.ID); apiError != nil {
 			return storage.Session{}, apiError
 		}
@@ -424,7 +524,8 @@ func (handler *Service) loadOwned(
 }
 
 func ownedBy(session storage.Session, identity controlplaneapi.Identity, namespace string) bool {
-	return session.IdentityID == identity.Subject && session.DeviceID == identity.DeviceID && session.Namespace == namespace
+	return session.IdentityID == identity.Subject && session.DeviceID == identity.DeviceID &&
+		session.Namespace == namespace
 }
 
 func documentFromSession(session storage.Session) Document {
@@ -452,15 +553,27 @@ func namespaceFromQuery(request *http.Request) (string, *controlplaneapi.Error) 
 	query := request.URL.Query()
 	for key, values := range query {
 		if key != "namespace" {
-			return "", &controlplaneapi.Error{Code: controlplaneapi.CodeInvalidArgument, Field: key, Message: "query parameter is not supported"}
+			return "", &controlplaneapi.Error{
+				Code:    controlplaneapi.CodeInvalidArgument,
+				Field:   key,
+				Message: "query parameter is not supported",
+			}
 		}
 		if len(values) != 1 {
-			return "", &controlplaneapi.Error{Code: controlplaneapi.CodeInvalidArgument, Field: key, Message: "query parameter must be provided once"}
+			return "", &controlplaneapi.Error{
+				Code:    controlplaneapi.CodeInvalidArgument,
+				Field:   key,
+				Message: "query parameter must be provided once",
+			}
 		}
 	}
 	namespace := query.Get("namespace")
 	if len(validation.IsDNS1123Label(namespace)) != 0 {
-		return "", &controlplaneapi.Error{Code: controlplaneapi.CodeInvalidArgument, Field: "namespace", Message: "namespace is invalid"}
+		return "", &controlplaneapi.Error{
+			Code:    controlplaneapi.CodeInvalidArgument,
+			Field:   "namespace",
+			Message: "namespace is invalid",
+		}
 	}
 	return namespace, nil
 }
@@ -468,34 +581,58 @@ func namespaceFromQuery(request *http.Request) (string, *controlplaneapi.Error) 
 func idempotencyKey(request *http.Request) (string, *controlplaneapi.Error) {
 	values := request.Header.Values(IdempotencyHeader)
 	if len(values) != 1 {
-		return "", &controlplaneapi.Error{Code: controlplaneapi.CodeInvalidArgument, Field: IdempotencyHeader, Message: "Idempotency-Key must be provided once"}
+		return "", &controlplaneapi.Error{
+			Code:    controlplaneapi.CodeInvalidArgument,
+			Field:   IdempotencyHeader,
+			Message: "Idempotency-Key must be provided once",
+		}
 	}
 	key := strings.TrimSpace(values[0])
 	if key == "" || len(key) > 128 {
-		return "", &controlplaneapi.Error{Code: controlplaneapi.CodeInvalidArgument, Field: IdempotencyHeader, Message: "Idempotency-Key is invalid"}
+		return "", &controlplaneapi.Error{
+			Code:    controlplaneapi.CodeInvalidArgument,
+			Field:   IdempotencyHeader,
+			Message: "Idempotency-Key is invalid",
+		}
 	}
 	for _, character := range key {
 		if (character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') ||
 			(character >= '0' && character <= '9') || strings.ContainsRune("-._:", character) {
 			continue
 		}
-		return "", &controlplaneapi.Error{Code: controlplaneapi.CodeInvalidArgument, Field: IdempotencyHeader, Message: "Idempotency-Key is invalid"}
+		return "", &controlplaneapi.Error{
+			Code:    controlplaneapi.CodeInvalidArgument,
+			Field:   IdempotencyHeader,
+			Message: "Idempotency-Key is invalid",
+		}
 	}
 	return key, nil
 }
 
 func expectedGeneration(request *http.Request) (uint64, *controlplaneapi.Error) {
-	values := request.Header.Values("If-Match")
+	values := request.Header.Values(ifMatchHeader)
 	if len(values) != 1 {
-		return 0, &controlplaneapi.Error{Code: controlplaneapi.CodeInvalidArgument, Field: "If-Match", Message: "If-Match generation is required"}
+		return 0, &controlplaneapi.Error{
+			Code:    controlplaneapi.CodeInvalidArgument,
+			Field:   ifMatchHeader,
+			Message: "If-Match generation is required",
+		}
 	}
 	raw := strings.TrimSpace(values[0])
 	if len(raw) < 3 || raw[0] != '"' || raw[len(raw)-1] != '"' {
-		return 0, &controlplaneapi.Error{Code: controlplaneapi.CodeInvalidArgument, Field: "If-Match", Message: "If-Match generation is invalid"}
+		return 0, &controlplaneapi.Error{
+			Code:    controlplaneapi.CodeInvalidArgument,
+			Field:   ifMatchHeader,
+			Message: "If-Match generation is invalid",
+		}
 	}
 	generation, err := strconv.ParseUint(raw[1:len(raw)-1], 10, 64)
 	if err != nil || generation == 0 {
-		return 0, &controlplaneapi.Error{Code: controlplaneapi.CodeInvalidArgument, Field: "If-Match", Message: "If-Match generation is invalid"}
+		return 0, &controlplaneapi.Error{
+			Code:    controlplaneapi.CodeInvalidArgument,
+			Field:   ifMatchHeader,
+			Message: "If-Match generation is invalid",
+		}
 	}
 	return generation, nil
 }
@@ -503,10 +640,16 @@ func expectedGeneration(request *http.Request) (uint64, *controlplaneapi.Error) 
 func requireEmptyBody(request *http.Request) *controlplaneapi.Error {
 	contents, err := io.ReadAll(io.LimitReader(request.Body, 1))
 	if err != nil {
-		return &controlplaneapi.Error{Code: controlplaneapi.CodeInvalidArgument, Message: "request body is invalid"}
+		return &controlplaneapi.Error{
+			Code:    controlplaneapi.CodeInvalidArgument,
+			Message: "request body is invalid",
+		}
 	}
 	if len(contents) != 0 {
-		return &controlplaneapi.Error{Code: controlplaneapi.CodeInvalidArgument, Message: "request body must be empty"}
+		return &controlplaneapi.Error{
+			Code:    controlplaneapi.CodeInvalidArgument,
+			Message: "request body must be empty",
+		}
 	}
 	return nil
 }
@@ -516,16 +659,28 @@ func mapStorageError(err error) *controlplaneapi.Error {
 	case errors.Is(err, storage.ErrNotFound):
 		return notFound()
 	case errors.Is(err, storage.ErrConflict):
-		return &controlplaneapi.Error{Code: controlplaneapi.CodeConflict, Message: "Session state changed; reload and retry", Cause: err}
+		return &controlplaneapi.Error{
+			Code:    controlplaneapi.CodeConflict,
+			Message: "Session state changed; reload and retry",
+			Cause:   err,
+		}
 	case errors.Is(err, storage.ErrIdempotencyMismatch):
-		return &controlplaneapi.Error{Code: controlplaneapi.CodeConflict, Message: "Idempotency-Key was already used for a different request", Cause: err}
+		return &controlplaneapi.Error{
+			Code:    controlplaneapi.CodeConflict,
+			Message: "Idempotency-Key was already used for a different request",
+			Cause:   err,
+		}
 	default:
 		return internalError(err)
 	}
 }
 
 func internalError(err error) *controlplaneapi.Error {
-	return &controlplaneapi.Error{Code: controlplaneapi.CodeInternal, Message: "Session operation failed", Cause: err}
+	return &controlplaneapi.Error{
+		Code:    controlplaneapi.CodeInternal,
+		Message: "Session operation failed",
+		Cause:   err,
+	}
 }
 
 func notFound() *controlplaneapi.Error {

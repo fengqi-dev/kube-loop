@@ -10,12 +10,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/exchangestream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficstream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
-	"github.com/google/uuid"
 )
 
 type testPreviewClient struct {
@@ -57,7 +58,7 @@ func (client *testPreviewClient) OpenTrafficStream(
 	client.openCalls++
 	client.mu.Unlock()
 	if profileID != "server" || mode != tunnel.TrafficModePreview || taskID != client.created.ID {
-		return nil, errors.New("Preview Traffic stream selector changed")
+		return nil, errors.New("preview Traffic stream selector changed")
 	}
 	return client.connection, client.openErr
 }
@@ -80,12 +81,13 @@ func (client *testPreviewClient) calls() (remote.PreviewSpec, int, int, int) {
 	return client.createSpec, client.openCalls, client.getCalls, client.stopCalls
 }
 
+//nolint:gocyclo // TCP and UDP must be exercised together to verify one Preview reconciliation contract.
 func TestManagerRelaysPreviewTCPAndUDPToRetainedLocalTargets(t *testing.T) {
-	tcpListener, err := net.Listen("tcp", "127.0.0.1:0")
+	tcpListener, err := net.Listen(previewProtocolTCP, "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer tcpListener.Close()
+	defer checkTestClose(t, tcpListener.Close)
 	tcpPort := uint16(tcpListener.Addr().(*net.TCPAddr).Port)
 	tcpDone := make(chan error, 1)
 	go func() {
@@ -94,7 +96,7 @@ func TestManagerRelaysPreviewTCPAndUDPToRetainedLocalTargets(t *testing.T) {
 			tcpDone <- acceptErr
 			return
 		}
-		defer connection.Close()
+		defer checkTestClose(t, connection.Close)
 		request := make([]byte, len("cluster-request"))
 		if _, readErr := io.ReadFull(connection, request); readErr != nil || string(request) != "cluster-request" {
 			tcpDone <- errors.Join(readErr, errors.New("unexpected Preview TCP request"))
@@ -104,11 +106,11 @@ func TestManagerRelaysPreviewTCPAndUDPToRetainedLocalTargets(t *testing.T) {
 		tcpDone <- writeErr
 	}()
 
-	udpListener, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1")})
+	udpListener, err := net.ListenUDP(previewProtocolUDP, &net.UDPAddr{IP: net.ParseIP(previewLoopbackHost)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer udpListener.Close()
+	defer checkTestClose(t, udpListener.Close)
 	udpPort := uint16(udpListener.LocalAddr().(*net.UDPAddr).Port)
 	udpDone := make(chan error, 1)
 	go func() {
@@ -140,7 +142,8 @@ func TestManagerRelaysPreviewTCPAndUDPToRetainedLocalTargets(t *testing.T) {
 			}
 		}
 		data, readErr := readPreviewTestFrame(ctx, gatewayConnection)
-		if readErr != nil || data.Type != exchangestream.Data || data.StreamID != 1 || string(data.Payload) != "local-response" {
+		if readErr != nil || data.Type != exchangestream.Data || data.StreamID != 1 ||
+			string(data.Payload) != "local-response" {
 			serverDone <- errors.Join(readErr, errors.New("unexpected local Preview TCP response"))
 			return
 		}
@@ -149,7 +152,11 @@ func TestManagerRelaysPreviewTCPAndUDPToRetainedLocalTargets(t *testing.T) {
 			serverDone <- errors.Join(readErr, errors.New("missing local Preview TCP half-close"))
 			return
 		}
-		if writeErr := writePreviewTestFrame(ctx, gatewayConnection, exchangestream.Frame{Type: exchangestream.Close, StreamID: 1}); writeErr != nil {
+		if writeErr := writePreviewTestFrame(
+			ctx,
+			gatewayConnection,
+			exchangestream.Frame{Type: exchangestream.Close, StreamID: 1},
+		); writeErr != nil {
 			serverDone <- writeErr
 			return
 		}
@@ -166,7 +173,11 @@ func TestManagerRelaysPreviewTCPAndUDPToRetainedLocalTargets(t *testing.T) {
 			serverDone <- errors.Join(readErr, fmt.Errorf("unexpected local Preview UDP response: %#v", datagram))
 			return
 		}
-		if writeErr := writePreviewTestFrame(ctx, gatewayConnection, exchangestream.Frame{Type: exchangestream.Close, StreamID: 2}); writeErr != nil {
+		if writeErr := writePreviewTestFrame(
+			ctx,
+			gatewayConnection,
+			exchangestream.Frame{Type: exchangestream.Close, StreamID: 2},
+		); writeErr != nil {
 			serverDone <- writeErr
 			return
 		}
@@ -181,14 +192,27 @@ func TestManagerRelaysPreviewTCPAndUDPToRetainedLocalTargets(t *testing.T) {
 	}()
 
 	now := time.Now().UTC()
-	session := remote.Session{ID: uuid.NewString(), Namespace: "development", State: "active", ExpiresAt: now.Add(time.Hour)}
+	session := remote.Session{
+		ID:        uuid.NewString(),
+		Namespace: "development",
+		State:     previewSessionActive,
+		ExpiresAt: now.Add(time.Hour),
+	}
 	created := remote.PreviewTask{
-		ID: uuid.NewString(), SessionID: session.ID, Namespace: session.Namespace, State: "pending", Name: "local-api",
-		Ports:     []remote.PreviewPort{{ServicePort: 53, Protocol: "udp"}, {ServicePort: 80, Protocol: "tcp"}},
-		CreatedAt: now, UpdatedAt: now,
+		ID:        uuid.NewString(),
+		SessionID: session.ID,
+		Namespace: session.Namespace,
+		State:     "pending",
+		Name:      "local-api",
+		Ports: []remote.PreviewPort{
+			{ServicePort: 53, Protocol: previewProtocolUDP},
+			{ServicePort: 80, Protocol: previewProtocolTCP},
+		},
+		CreatedAt: now,
+		UpdatedAt: now,
 	}
 	running := created
-	running.State = "running"
+	running.State = previewTaskRunning
 	running.ClusterIP = "10.96.0.42"
 	client := &testPreviewClient{connection: connection, created: created, running: running}
 	manager, err := NewManager(client, Config{TrafficStreams: client})
@@ -199,11 +223,12 @@ func TestManagerRelaysPreviewTCPAndUDPToRetainedLocalTargets(t *testing.T) {
 	info, err := manager.Start(context.Background(), serverProfile, session, Request{
 		ProfileID: serverProfile.ID, Namespace: session.Namespace, Name: "local-api",
 		Targets: []LocalTarget{
-			{ServicePort: 53, Protocol: "udp", LocalHost: "127.0.0.1", LocalPort: udpPort},
-			{ServicePort: 80, Protocol: "tcp", LocalHost: "127.0.0.1", LocalPort: tcpPort},
+			{ServicePort: 53, Protocol: previewProtocolUDP, LocalHost: previewLoopbackHost, LocalPort: udpPort},
+			{ServicePort: 80, Protocol: previewProtocolTCP, LocalHost: previewLoopbackHost, LocalPort: tcpPort},
 		},
 	})
-	if err != nil || info.State != "running" || info.ClusterIP != running.ClusterIP || len(manager.List(serverProfile.ID)) != 1 {
+	if err != nil || info.State != previewTaskRunning || info.ClusterIP != running.ClusterIP ||
+		len(manager.List(serverProfile.ID)) != 1 {
 		t.Fatalf("started Preview=%#v list=%#v err=%v", info, manager.List(serverProfile.ID), err)
 	}
 	for _, done := range []chan error{tcpDone, udpDone} {
@@ -236,17 +261,30 @@ func TestManagerRelaysPreviewTCPAndUDPToRetainedLocalTargets(t *testing.T) {
 		t.Fatal(err)
 	}
 	spec, openCalls, getCalls, stopCalls := client.calls()
-	if spec.Name != "local-api" || len(spec.Ports) != 2 || openCalls != 1 || getCalls != 1 || stopCalls != 1 || len(manager.List("")) != 0 {
-		t.Fatalf("spec=%#v calls open=%d get=%d stop=%d active=%#v", spec, openCalls, getCalls, stopCalls, manager.List(""))
+	if spec.Name != "local-api" || len(spec.Ports) != 2 || openCalls != 1 || getCalls != 1 || stopCalls != 1 ||
+		len(manager.List("")) != 0 {
+		t.Fatalf(
+			"spec=%#v calls open=%d get=%d stop=%d active=%#v",
+			spec,
+			openCalls,
+			getCalls,
+			stopCalls,
+			manager.List(""),
+		)
 	}
 }
 
 func TestManagerCompensatesWhenPreviewStreamCannotOpen(t *testing.T) {
 	now := time.Now().UTC()
-	session := remote.Session{ID: uuid.NewString(), Namespace: "development", State: "active", ExpiresAt: now.Add(time.Hour)}
+	session := remote.Session{
+		ID:        uuid.NewString(),
+		Namespace: "development",
+		State:     previewSessionActive,
+		ExpiresAt: now.Add(time.Hour),
+	}
 	created := remote.PreviewTask{
 		ID: uuid.NewString(), SessionID: session.ID, Namespace: session.Namespace, State: "pending", Name: "local-api",
-		Ports: []remote.PreviewPort{{ServicePort: 80, Protocol: "tcp"}}, CreatedAt: now, UpdatedAt: now,
+		Ports: []remote.PreviewPort{{ServicePort: 80, Protocol: previewProtocolTCP}}, CreatedAt: now, UpdatedAt: now,
 	}
 	client := &testPreviewClient{openErr: errors.New("stream unavailable"), created: created, running: created}
 	manager, err := NewManager(client, Config{TrafficStreams: client})
@@ -254,8 +292,12 @@ func TestManagerCompensatesWhenPreviewStreamCannotOpen(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = manager.Start(context.Background(), profile.Profile{ID: "server"}, session, Request{
-		ProfileID: "server", Namespace: session.Namespace, Name: "local-api",
-		Targets: []LocalTarget{{ServicePort: 80, Protocol: "tcp", LocalHost: "127.0.0.1", LocalPort: 8080}},
+		ProfileID: "server",
+		Namespace: session.Namespace,
+		Name:      "local-api",
+		Targets: []LocalTarget{
+			{ServicePort: 80, Protocol: previewProtocolTCP, LocalHost: previewLoopbackHost, LocalPort: 8080},
+		},
 	})
 	if err == nil {
 		t.Fatal("Preview started without a local stream")
@@ -268,17 +310,30 @@ func TestManagerCompensatesWhenPreviewStreamCannotOpen(t *testing.T) {
 
 func TestManagerRejectsUnboundPreviewBeforeOpeningStream(t *testing.T) {
 	now := time.Now().UTC()
-	session := remote.Session{ID: uuid.NewString(), Namespace: "development", State: "active", ExpiresAt: now.Add(time.Hour)}
+	session := remote.Session{
+		ID:        uuid.NewString(),
+		Namespace: "development",
+		State:     previewSessionActive,
+		ExpiresAt: now.Add(time.Hour),
+	}
 	created := remote.PreviewTask{
 		ID: uuid.NewString(), SessionID: session.ID, Namespace: session.Namespace, State: "pending", Name: "local-api",
-		Ports: []remote.PreviewPort{{ServicePort: 80, Protocol: "tcp"}}, CreatedAt: now, UpdatedAt: now,
+		Ports: []remote.PreviewPort{{ServicePort: 80, Protocol: previewProtocolTCP}}, CreatedAt: now, UpdatedAt: now,
 	}
 	client := &testPreviewClient{openErr: errors.New("stream unavailable"), created: created, running: created}
 	manager, err := NewManager(client, Config{TrafficStreams: client})
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := Request{ProfileID: "server", Namespace: session.Namespace, Name: "local-api", Targets: []LocalTarget{{ServicePort: 80, Protocol: "tcp", LocalHost: "127.0.0.1", LocalPort: 8080}}}
+	request := Request{
+		ProfileID: "server",
+		Namespace: session.Namespace,
+		Name:      "local-api",
+		Targets: []LocalTarget{
+			{ServicePort: 80, Protocol: previewProtocolTCP, LocalHost: previewLoopbackHost, LocalPort: 8080},
+		},
+	}
+	//nolint:staticcheck // This test intentionally verifies defensive rejection of a nil context.
 	if _, err := manager.Start(nil, profile.Profile{ID: "server"}, session, request); err == nil {
 		t.Fatal("nil context was accepted")
 	}
@@ -308,8 +363,8 @@ func TestManagerRejectsUnboundPreviewBeforeOpeningStream(t *testing.T) {
 
 func TestNormalizeTargetsDefaultsAndRejectsUnsafePreviewTargets(t *testing.T) {
 	targets, ports, err := normalizeTargets([]LocalTarget{{ServicePort: 8080}})
-	if err != nil || len(targets) != 1 || targets[0].Protocol != "tcp" ||
-		targets[0].LocalHost != "127.0.0.1" || targets[0].LocalPort != 8080 || len(ports) != 1 {
+	if err != nil || len(targets) != 1 || targets[0].Protocol != previewProtocolTCP ||
+		targets[0].LocalHost != previewLoopbackHost || targets[0].LocalPort != 8080 || len(ports) != 1 {
 		t.Fatalf("normalized targets=%#v ports=%#v err=%v", targets, ports, err)
 	}
 	invalid := [][]LocalTarget{
@@ -329,10 +384,15 @@ func TestNormalizeTargetsDefaultsAndRejectsUnsafePreviewTargets(t *testing.T) {
 
 func TestManagerRejectsGatewayPreviewPortSubstitutionBeforeOpeningStream(t *testing.T) {
 	now := time.Now().UTC()
-	session := remote.Session{ID: uuid.NewString(), Namespace: "development", State: "active", ExpiresAt: now.Add(time.Hour)}
+	session := remote.Session{
+		ID:        uuid.NewString(),
+		Namespace: "development",
+		State:     previewSessionActive,
+		ExpiresAt: now.Add(time.Hour),
+	}
 	created := remote.PreviewTask{
 		ID: uuid.NewString(), SessionID: session.ID, Namespace: session.Namespace, State: "pending", Name: "local-api",
-		Ports:     []remote.PreviewPort{{ServicePort: 81, Protocol: "tcp"}},
+		Ports:     []remote.PreviewPort{{ServicePort: 81, Protocol: previewProtocolTCP}},
 		CreatedAt: now, UpdatedAt: now,
 	}
 	client := &testPreviewClient{created: created, running: created}
@@ -341,8 +401,12 @@ func TestManagerRejectsGatewayPreviewPortSubstitutionBeforeOpeningStream(t *test
 		t.Fatal(err)
 	}
 	_, err = manager.Start(context.Background(), profile.Profile{ID: "server"}, session, Request{
-		ProfileID: "server", Namespace: session.Namespace, Name: "local-api",
-		Targets: []LocalTarget{{ServicePort: 80, Protocol: "tcp", LocalHost: "127.0.0.1", LocalPort: 8080}},
+		ProfileID: "server",
+		Namespace: session.Namespace,
+		Name:      "local-api",
+		Targets: []LocalTarget{
+			{ServicePort: 80, Protocol: previewProtocolTCP, LocalHost: previewLoopbackHost, LocalPort: 8080},
+		},
 	})
 	if err == nil {
 		t.Fatal("Gateway Preview port substitution was accepted")

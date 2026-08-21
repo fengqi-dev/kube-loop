@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/fengqi-dev/kube-loop/internal/controlplane"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/authorization"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
@@ -21,7 +23,6 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/sessionapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
-	"github.com/google/uuid"
 )
 
 type testSessions struct {
@@ -39,12 +40,24 @@ func serveAPI(
 	t.Helper()
 	policy := authorization.NewAuthenticated()
 	server, err := controlplane.NewServer(
-		controlplane.Config{PublicURL: "https://gateway.example.test"}, controlplane.BuildInfo{},
+		controlplane.Config{PublicURL: "https://gateway.example.test"},
+		controlplane.BuildInfo{},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
-		controlplane.WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(*http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
-			return identity, nil
-		})),
-		controlplane.WithAuthorizer(policy), controlplane.WithAPIRoutes(controlplane.APIRoutes{FileOperations: fileopsapi.NewRoutes(handler).Endpoints()}),
+		controlplane.WithAuthenticator(
+			controlplaneapi.AuthenticatorFunc(
+				func(*http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
+					return identity, nil
+				},
+			),
+		),
+		controlplane.WithAuthorizer(
+			policy,
+		),
+		controlplane.WithAPIRoutes(
+			controlplane.APIRoutes{
+				FileOperations: fileopsapi.NewRoutes(handler).Endpoints(),
+			},
+		),
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -60,9 +73,18 @@ func serveAPI(
 	return &controlplaneapi.Error{Code: code, Message: response.Body.String()}
 }
 
-func (sessions testSessions) RequireActive(_ context.Context, identity controlplaneapi.Identity, namespace, sessionID string) (sessionapi.ActiveSession, *controlplaneapi.Error) {
-	if identity.Subject != sessions.identityID || namespace != sessions.session.Namespace || sessionID != sessions.session.ID {
-		return sessionapi.ActiveSession{}, &controlplaneapi.Error{Code: controlplaneapi.CodeNotFound, Message: "resource not found"}
+func (sessions testSessions) RequireActive(
+	_ context.Context,
+	identity controlplaneapi.Identity,
+	namespace, sessionID string,
+) (sessionapi.ActiveSession, *controlplaneapi.Error) {
+	if identity.Subject != sessions.identityID ||
+		namespace != sessions.session.Namespace ||
+		sessionID != sessions.session.ID {
+		return sessionapi.ActiveSession{}, &controlplaneapi.Error{
+			Code:    controlplaneapi.CodeNotFound,
+			Message: "resource not found",
+		}
 	}
 	return sessions.session, nil
 }
@@ -72,7 +94,11 @@ type testTargets struct {
 	calls int
 }
 
-func (targets *testTargets) ResolveContainer(_ context.Context, _ controlplaneapi.Identity, namespace, pod, container string) (string, error) {
+func (targets *testTargets) ResolveContainer(
+	_ context.Context,
+	_ controlplaneapi.Identity,
+	namespace, pod, container string,
+) (string, error) {
 	targets.mu.Lock()
 	targets.calls++
 	targets.mu.Unlock()
@@ -92,14 +118,30 @@ type testOperator struct {
 	fail        bool
 }
 
-func (operator *testOperator) List(_ context.Context, _ controlplaneapi.Identity, _ string, spec fileopsapi.Spec) ([]fileopsapi.Entry, error) {
+func (operator *testOperator) List(
+	_ context.Context,
+	_ controlplaneapi.Identity,
+	_ string,
+	spec fileopsapi.Spec,
+) ([]fileopsapi.Entry, error) {
 	operator.mu.Lock()
 	operator.listCalls++
 	operator.mu.Unlock()
-	return []fileopsapi.Entry{{Name: "logs", Path: spec.Path + "/logs", Kind: fileopsapi.KindDirectory}}, nil
+	return []fileopsapi.Entry{
+		{
+			Name: "logs",
+			Path: spec.Path + "/logs",
+			Kind: fileopsapi.KindDirectory,
+		},
+	}, nil
 }
 
-func (operator *testOperator) Mutate(context.Context, controlplaneapi.Identity, string, fileopsapi.Spec) error {
+func (operator *testOperator) Mutate(
+	context.Context,
+	controlplaneapi.Identity,
+	string,
+	fileopsapi.Spec,
+) error {
 	operator.mu.Lock()
 	defer operator.mu.Unlock()
 	operator.mutateCalls++
@@ -112,34 +154,76 @@ func (operator *testOperator) Mutate(context.Context, controlplaneapi.Identity, 
 func TestListAndMutationTaskAreValidatedOwnedAndIdempotent(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	stateStore, identityID, sessionID, expiresAt := createStore(t, now)
-	defer stateStore.Close()
+	defer func() { _ = stateStore.Close() }()
 	targets, operator := &testTargets{}, &testOperator{}
-	handler, err := fileopsapi.New(stateStore, testSessions{identityID: identityID, session: sessionapi.ActiveSession{
-		ID: sessionID, Namespace: "development", ExpiresAt: expiresAt,
-	}}, targets, operator, fileopsapi.Config{Now: func() time.Time { return now }, AllowedPathRoots: []string{"/workspace"}})
+	handler, err := fileopsapi.New(
+		stateStore,
+		testSessions{identityID: identityID, session: sessionapi.ActiveSession{
+			ID: sessionID, Namespace: "development", ExpiresAt: expiresAt,
+		}},
+		targets,
+		operator,
+		fileopsapi.Config{
+			Now:              func() time.Time { return now },
+			AllowedPathRoots: []string{"/workspace"},
+		},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	listRequest := request(t, http.MethodPost, sessionID, "list", `{"pod":"api-0","path":"/workspace"}`, "")
+	listRequest := request(
+		t,
+		http.MethodPost,
+		sessionID,
+		"list",
+		`{"pod":"api-0","path":"/workspace"}`,
+		"",
+	)
 	listResponse := httptest.NewRecorder()
-	if apiError := serveAPI(t, handler, listResponse, listRequest, controlplaneapi.Identity{Subject: identityID}); apiError != nil {
+	if apiError := serveAPI(
+		t,
+		handler,
+		listResponse,
+		listRequest,
+		controlplaneapi.Identity{Subject: identityID},
+	); apiError != nil {
 		t.Fatal(apiError)
 	}
 	var listing fileopsapi.ListDocument
 	if err := json.NewDecoder(listResponse.Body).Decode(&listing); err != nil {
 		t.Fatal(err)
 	}
-	if listResponse.Code != http.StatusOK || listing.Container != "api" || len(listing.Items) != 1 {
+	if listResponse.Code != http.StatusOK || listing.Container != "api" ||
+		len(listing.Items) != 1 {
 		t.Fatalf("listing = %#v status = %d", listing, listResponse.Code)
 	}
 
 	createBody := `{"pod":"api-0","path":"/workspace/new","kind":"directory"}`
-	created := mutate(t, handler, identityID, sessionID, "create", createBody, "operation-1", http.StatusCreated)
-	if created.State != "stopped" || !created.Result.Completed || created.Container != "api" {
+	created := mutate(
+		t,
+		handler,
+		identityID,
+		sessionID,
+		"create",
+		createBody,
+		"operation-1",
+		http.StatusCreated,
+	)
+	if created.State != "stopped" || !created.Result.Completed ||
+		created.Container != "api" {
 		t.Fatalf("created task = %#v", created)
 	}
-	replayed := mutate(t, handler, identityID, sessionID, "create", createBody, "operation-1", http.StatusOK)
+	replayed := mutate(
+		t,
+		handler,
+		identityID,
+		sessionID,
+		"create",
+		createBody,
+		"operation-1",
+		http.StatusOK,
+	)
 	if replayed.ID != created.ID {
 		t.Fatalf("replayed task ID = %q, want %q", replayed.ID, created.ID)
 	}
@@ -154,9 +238,22 @@ func TestListAndMutationTaskAreValidatedOwnedAndIdempotent(t *testing.T) {
 	}
 	targets.mu.Unlock()
 
-	getRequest := request(t, http.MethodGet, sessionID, "operations/"+created.ID, "", "")
+	getRequest := request(
+		t,
+		http.MethodGet,
+		sessionID,
+		"operations/"+created.ID,
+		"",
+		"",
+	)
 	getResponse := httptest.NewRecorder()
-	if apiError := serveAPI(t, handler, getResponse, getRequest, controlplaneapi.Identity{Subject: identityID}); apiError != nil {
+	if apiError := serveAPI(
+		t,
+		handler,
+		getResponse,
+		getRequest,
+		controlplaneapi.Identity{Subject: identityID},
+	); apiError != nil {
 		t.Fatal(apiError)
 	}
 	if getResponse.Code != http.StatusOK {
@@ -167,16 +264,33 @@ func TestListAndMutationTaskAreValidatedOwnedAndIdempotent(t *testing.T) {
 func TestMutationFailureIsPersistedWithoutLeakingExecutorDetail(t *testing.T) {
 	now := time.Now().UTC()
 	stateStore, identityID, sessionID, expiresAt := createStore(t, now)
-	defer stateStore.Close()
+	defer func() { _ = stateStore.Close() }()
 	operator := &testOperator{fail: true}
-	handler, err := fileopsapi.New(stateStore, testSessions{identityID: identityID, session: sessionapi.ActiveSession{
-		ID: sessionID, Namespace: "development", ExpiresAt: expiresAt,
-	}}, &testTargets{}, operator, fileopsapi.Config{AllowedPathRoots: []string{"/workspace"}})
+	handler, err := fileopsapi.New(
+		stateStore,
+		testSessions{identityID: identityID, session: sessionapi.ActiveSession{
+			ID: sessionID, Namespace: "development", ExpiresAt: expiresAt,
+		}},
+		&testTargets{},
+		operator,
+		fileopsapi.Config{AllowedPathRoots: []string{"/workspace"}},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	document := mutate(t, handler, identityID, sessionID, "delete", `{"pod":"api-0","path":"/workspace/cache","recursive":true}`, "failure-1", http.StatusCreated)
-	if document.State != "failed" || document.Result.Error != "remote file operation failed" || document.Result.Completed {
+	document := mutate(
+		t,
+		handler,
+		identityID,
+		sessionID,
+		"delete",
+		`{"pod":"api-0","path":"/workspace/cache","recursive":true}`,
+		"failure-1",
+		http.StatusCreated,
+	)
+	if document.State != "failed" ||
+		document.Result.Error != "remote file operation failed" ||
+		document.Result.Completed {
 		t.Fatalf("failed task = %#v", document)
 	}
 	encoded, _ := json.Marshal(document)
@@ -188,11 +302,17 @@ func TestMutationFailureIsPersistedWithoutLeakingExecutorDetail(t *testing.T) {
 func TestInvalidAndRootMutationNeverReachKubernetes(t *testing.T) {
 	now := time.Now().UTC()
 	stateStore, identityID, sessionID, expiresAt := createStore(t, now)
-	defer stateStore.Close()
+	defer func() { _ = stateStore.Close() }()
 	targets := &testTargets{}
-	handler, err := fileopsapi.New(stateStore, testSessions{identityID: identityID, session: sessionapi.ActiveSession{
-		ID: sessionID, Namespace: "development", ExpiresAt: expiresAt,
-	}}, targets, &testOperator{}, fileopsapi.Config{AllowedPathRoots: []string{"/workspace"}})
+	handler, err := fileopsapi.New(
+		stateStore,
+		testSessions{identityID: identityID, session: sessionapi.ActiveSession{
+			ID: sessionID, Namespace: "development", ExpiresAt: expiresAt,
+		}},
+		targets,
+		&testOperator{},
+		fileopsapi.Config{AllowedPathRoots: []string{"/workspace"}},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -202,8 +322,22 @@ func TestInvalidAndRootMutationNeverReachKubernetes(t *testing.T) {
 		{"delete", `{"pod":"api-0","path":"/workspace/../etc","recursive":true}`},
 	} {
 		response := httptest.NewRecorder()
-		apiError := serveAPI(t, handler, response, request(t, http.MethodPost, sessionID, test.action, test.body, uuid.NewString()), controlplaneapi.Identity{Subject: identityID})
-		if apiError == nil || apiError.Code != controlplaneapi.CodeInvalidArgument {
+		apiError := serveAPI(
+			t,
+			handler,
+			response,
+			request(
+				t,
+				http.MethodPost,
+				sessionID,
+				test.action,
+				test.body,
+				uuid.NewString(),
+			),
+			controlplaneapi.Identity{Subject: identityID},
+		)
+		if apiError == nil ||
+			apiError.Code != controlplaneapi.CodeInvalidArgument {
 			t.Fatalf("%s error = %#v", test.action, apiError)
 		}
 	}
@@ -214,15 +348,31 @@ func TestInvalidAndRootMutationNeverReachKubernetes(t *testing.T) {
 	}
 }
 
-func mutate(t *testing.T, handler *fileopsapi.Service, identityID, sessionID, action, body, key string, status int) fileopsapi.Document {
+func mutate(
+	t *testing.T,
+	handler *fileopsapi.Service,
+	identityID, sessionID, action, body, key string,
+	status int,
+) fileopsapi.Document {
 	t.Helper()
 	response := httptest.NewRecorder()
-	apiError := serveAPI(t, handler, response, request(t, http.MethodPost, sessionID, action, body, key), controlplaneapi.Identity{Subject: identityID})
+	apiError := serveAPI(
+		t,
+		handler,
+		response,
+		request(t, http.MethodPost, sessionID, action, body, key),
+		controlplaneapi.Identity{Subject: identityID},
+	)
 	if apiError != nil {
 		t.Fatal(apiError)
 	}
 	if response.Code != status {
-		t.Fatalf("status = %d, want %d: %s", response.Code, status, response.Body.String())
+		t.Fatalf(
+			"status = %d, want %d: %s",
+			response.Code,
+			status,
+			response.Body.String(),
+		)
 	}
 	var document fileopsapi.Document
 	if err := json.NewDecoder(response.Body).Decode(&document); err != nil {
@@ -231,7 +381,10 @@ func mutate(t *testing.T, handler *fileopsapi.Service, identityID, sessionID, ac
 	return document
 }
 
-func request(t *testing.T, method, sessionID, suffix, body, key string) *http.Request {
+func request(
+	t *testing.T,
+	method, sessionID, suffix, body, key string,
+) *http.Request {
 	t.Helper()
 	var content *bytes.Reader
 	if body != "" {
@@ -239,7 +392,11 @@ func request(t *testing.T, method, sessionID, suffix, body, key string) *http.Re
 	} else {
 		content = bytes.NewReader(nil)
 	}
-	request := httptest.NewRequest(method, "/api/sessions/"+sessionID+"/pod-files/"+suffix+"?namespace=development", content)
+	request := httptest.NewRequest(
+		method,
+		"/api/sessions/"+sessionID+"/pod-files/"+suffix+"?namespace=development",
+		content,
+	)
 	if body != "" {
 		request.Header.Set("Content-Type", "application/json")
 	}
@@ -249,10 +406,15 @@ func request(t *testing.T, method, sessionID, suffix, body, key string) *http.Re
 	return request
 }
 
-func createStore(t *testing.T, now time.Time) (*storage.Store, string, string, time.Time) {
+func createStore(
+	t *testing.T,
+	now time.Time,
+) (*storage.Store, string, string, time.Time) {
 	t.Helper()
 	stateStore, err := storage.Open(context.Background(), storage.Config{
-		Backend: storage.BackendSQLite, SQLitePath: filepath.Join(t.TempDir(), "file-operations.db"), ControlPlaneReplicas: 1,
+		Backend:              storage.BackendSQLite,
+		SQLitePath:           filepath.Join(t.TempDir(), "file-operations.db"),
+		ControlPlaneReplicas: 1,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -263,7 +425,9 @@ func createStore(t *testing.T, now time.Time) (*storage.Store, string, string, t
 	}); err != nil {
 		t.Fatal(err)
 	}
-	network, _ := networkspec.Normalize(networkspec.Spec{PodCIDRs: []string{"10.244.0.0/16"}})
+	network, _ := networkspec.Normalize(
+		networkspec.Spec{PodCIDRs: []string{"10.244.0.0/16"}},
+	)
 	networkJSON, _ := networkspec.CanonicalJSON(network)
 	networkHash, _ := networkspec.Hash(network)
 	expiresAt := now.Add(time.Hour)

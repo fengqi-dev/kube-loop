@@ -33,7 +33,7 @@ func TestControllerPortChangeRestartsListener(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer controller.Stop()
+	defer func() { _ = controller.Stop() }()
 	if err := controller.SetEnabled(true); err != nil {
 		t.Fatal(err)
 	}

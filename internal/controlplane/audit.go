@@ -6,9 +6,10 @@ import (
 	"errors"
 	"time"
 
+	"github.com/google/uuid"
+
 	controlplanemiddleware "github.com/fengqi-dev/kube-loop/internal/controlplane/middleware"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
-	"github.com/google/uuid"
 )
 
 type AuditRecord = controlplanemiddleware.AuditRecord

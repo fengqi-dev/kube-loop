@@ -160,15 +160,20 @@ func (s *Server) Start() error {
 	var mcpHandler http.Handler = streamHandler
 	if s.tokenEnabled {
 		token := s.token
-		mcpHandler = auth.RequireBearerToken(func(_ context.Context, got string, _ *http.Request) (*auth.TokenInfo, error) {
-			if subtle.ConstantTimeCompare([]byte(got), []byte(token)) != 1 {
-				return nil, auth.ErrInvalidToken
-			}
-			return &auth.TokenInfo{
-				Scopes:     []string{"mcp"},
-				Expiration: time.Date(9999, 1, 1, 0, 0, 0, 0, time.UTC),
-			}, nil
-		}, nil)(streamHandler)
+		mcpHandler = auth.RequireBearerToken(
+			func(_ context.Context, got string, _ *http.Request) (*auth.TokenInfo, error) {
+				if subtle.ConstantTimeCompare([]byte(got), []byte(token)) != 1 {
+					return nil, auth.ErrInvalidToken
+				}
+				return &auth.TokenInfo{
+					Scopes:     []string{"mcp"},
+					Expiration: time.Date(9999, 1, 1, 0, 0, 0, 0, time.UTC),
+				}, nil
+			},
+			nil,
+		)(
+			streamHandler,
+		)
 	}
 
 	mux := http.NewServeMux()
@@ -337,7 +342,7 @@ func isLocalOrigin(origin string) bool {
 		return true
 	}
 	parsed, err := url.Parse(origin)
-	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") ||
+	if err != nil || (parsed.Scheme != transportHTTP && parsed.Scheme != "https") ||
 		parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" ||
 		(parsed.Path != "" && parsed.Path != "/") {
 		return false

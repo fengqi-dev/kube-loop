@@ -55,11 +55,13 @@ func nullableBytes(value []byte) any {
 
 func isConstraintError(err error) bool {
 	var postgresError *pgconn.PgError
-	if errors.As(err, &postgresError) && strings.HasPrefix(postgresError.Code, "23") {
+	if errors.As(err, &postgresError) &&
+		strings.HasPrefix(postgresError.Code, "23") {
 		return true
 	}
 	var mysqlError *mysqldriver.MySQLError
-	if errors.As(err, &mysqlError) && (mysqlError.Number == 1062 || mysqlError.Number == 1451 || mysqlError.Number == 1452 || mysqlError.Number == 3819) {
+	if errors.As(err, &mysqlError) &&
+		(mysqlError.Number == 1062 || mysqlError.Number == 1451 || mysqlError.Number == 1452 || mysqlError.Number == 3819) {
 		return true
 	}
 	message := strings.ToLower(err.Error())
@@ -139,7 +141,8 @@ func isRetryableTransactionError(err error) bool {
 		return postgresError.Code == "40001" || postgresError.Code == "40P01"
 	}
 	var mysqlError *mysqldriver.MySQLError
-	return errors.As(err, &mysqlError) && (mysqlError.Number == 1205 || mysqlError.Number == 1213)
+	return errors.As(err, &mysqlError) &&
+		(mysqlError.Number == 1205 || mysqlError.Number == 1213)
 }
 
 type repositorySet struct {
@@ -160,7 +163,11 @@ type repositorySet struct {
 	oauthBrowserSessions       *oauthBrowserSessionRepository
 }
 
-func newRepositorySet(backend Backend, executor sqlExecutor, orm bun.IDB) *repositorySet {
+func newRepositorySet(
+	backend Backend,
+	executor sqlExecutor,
+	orm bun.IDB,
+) *repositorySet {
 	base := repositoryBase{backend: backend, executor: executor, orm: orm}
 	sessions := &sessionRepository{repositoryBase: base}
 	audit := &auditRepository{repositoryBase: base}
@@ -170,22 +177,44 @@ func newRepositorySet(backend Backend, executor sqlExecutor, orm bun.IDB) *repos
 		credentials:     &credentialRepository{repositoryBase: base},
 		sessions:        sessions,
 		tasks: &auditedTaskRepository{
-			delegate: &taskRepository{repositoryBase: base}, sessions: sessions, audit: audit,
+			delegate: &taskRepository{
+				repositoryBase: base,
+			}, sessions: sessions, audit: audit,
 		},
-		resourceSnapshots:          &resourceSnapshotRepository{repositoryBase: base},
-		idempotency:                &idempotencyRepository{repositoryBase: base},
-		audit:                      audit,
-		relayDesiredStates:         &relayDesiredStateRepository{repositoryBase: base},
-		adminSessions:              &adminSessionRepository{repositoryBase: base},
-		oauthClients:               &oauthClientRepository{repositoryBase: base},
-		oauthSessions:              &oauthSessionRepository{repositoryBase: base},
-		oauthConsents:              &oauthConsentRepository{repositoryBase: base},
-		oauthAuthorizationRequests: &oauthAuthorizationRequestRepository{repositoryBase: base},
-		oauthBrowserSessions:       &oauthBrowserSessionRepository{repositoryBase: base},
+		resourceSnapshots: &resourceSnapshotRepository{
+			repositoryBase: base,
+		},
+		idempotency: &idempotencyRepository{
+			repositoryBase: base,
+		},
+		audit: audit,
+		relayDesiredStates: &relayDesiredStateRepository{
+			repositoryBase: base,
+		},
+		adminSessions: &adminSessionRepository{
+			repositoryBase: base,
+		},
+		oauthClients: &oauthClientRepository{
+			repositoryBase: base,
+		},
+		oauthSessions: &oauthSessionRepository{
+			repositoryBase: base,
+		},
+		oauthConsents: &oauthConsentRepository{
+			repositoryBase: base,
+		},
+		oauthAuthorizationRequests: &oauthAuthorizationRequestRepository{
+			repositoryBase: base,
+		},
+		oauthBrowserSessions: &oauthBrowserSessionRepository{
+			repositoryBase: base,
+		},
 	}
 }
 
-func (repositories *repositorySet) setTaskTransactionManager(manager TransactionManager) {
+func (repositories *repositorySet) setTaskTransactionManager(
+	manager TransactionManager,
+) {
 	if tasks, ok := repositories.tasks.(*auditedTaskRepository); ok {
 		tasks.transactions = manager
 	}
@@ -240,9 +269,11 @@ func (repositories *repositorySet) OAuthSessions() OAuthSessionRepository {
 func (repositories *repositorySet) OAuthConsents() OAuthConsentRepository {
 	return repositories.oauthConsents
 }
+
 func (repositories *repositorySet) OAuthAuthorizationRequests() OAuthAuthorizationRequestRepository {
 	return repositories.oauthAuthorizationRequests
 }
+
 func (repositories *repositorySet) OAuthBrowserSessions() OAuthBrowserSessionRepository {
 	return repositories.oauthBrowserSessions
 }

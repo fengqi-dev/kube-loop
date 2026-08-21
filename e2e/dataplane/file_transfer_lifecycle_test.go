@@ -17,6 +17,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/kballard/go-shellquote"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	"github.com/fengqi-dev/kube-loop/e2e/harness"
 	"github.com/fengqi-dev/kube-loop/internal/client/credentials"
 	clientfiletransfer "github.com/fengqi-dev/kube-loop/internal/client/filetransfer"
@@ -33,9 +37,6 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/filestream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
-	"github.com/google/uuid"
-	"github.com/kballard/go-shellquote"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 type fileE2EIdentity struct {
@@ -111,15 +112,24 @@ func startFileController(
 	}
 	policy := authorization.NewAuthenticated()
 	server, err := controlplane.NewServer(
-		controlplane.Config{PublicURL: "http://" + listener.Addr().String()}, controlplane.BuildInfo{},
+		controlplane.Config{PublicURL: "http://" + listener.Addr().String()},
+		controlplane.BuildInfo{},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
-		controlplane.WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(request *http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
-			if request.Header.Get("Authorization") != "Bearer "+identity.token {
-				return controlplaneapi.Identity{}, &controlplaneapi.Error{Code: controlplaneapi.CodeUnauthenticated, Message: "invalid file E2E token"}
-			}
-			return identity.identity, nil
-		})),
-		controlplane.WithAuthorizer(policy), controlplane.WithAPIRoutes(routes),
+		controlplane.WithAuthenticator(
+			controlplaneapi.AuthenticatorFunc(
+				func(request *http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
+					if request.Header.Get("Authorization") != "Bearer "+identity.token {
+						return controlplaneapi.Identity{}, &controlplaneapi.Error{
+							Code:    controlplaneapi.CodeUnauthenticated,
+							Message: "invalid file E2E token",
+						}
+					}
+					return identity.identity, nil
+				},
+			),
+		),
+		controlplane.WithAuthorizer(policy),
+		controlplane.WithAPIRoutes(routes),
 	)
 	if err != nil {
 		_ = listener.Close()
@@ -182,7 +192,9 @@ func TestRealFileTransferRevocationControllerRestartAndResume(t *testing.T) {
 	if err := harness.EnsureEchoWorkload(ctx, kubeClient); err != nil {
 		t.Fatalf("ensure real file transfer fixture: %v", err)
 	}
-	pods, err := kubeClient.CoreV1().Pods(harness.EchoNamespace).List(ctx, metav1.ListOptions{LabelSelector: "app=kubeloop-e2e-echo"})
+	pods, err := kubeClient.CoreV1().
+		Pods(harness.EchoNamespace).
+		List(ctx, metav1.ListOptions{LabelSelector: "app=kubeloop-e2e-echo"})
 	if err != nil || len(pods.Items) != 1 {
 		t.Fatalf("find real file transfer fixture: pods=%d err=%v", len(pods.Items), err)
 	}
@@ -275,12 +287,19 @@ func TestRealFileTransferRevocationControllerRestartAndResume(t *testing.T) {
 	}()
 	waitForFileProgress(t, ctx, firstProgress, firstUpload)
 	revokedAt := time.Now()
-	if err := stateStore.OAuthSessions().RevokeRequest(ctx, firstIdentity.authorizationID, revokedAt.UTC()); err != nil {
+	if err := stateStore.OAuthSessions().
+		RevokeRequest(ctx, firstIdentity.authorizationID, revokedAt.UTC()); err != nil {
 		t.Fatal(err)
 	}
 	firstResult := waitForFileUpload(t, ctx, firstUpload)
 	if firstResult.err == nil || firstResult.task.ID == "" || time.Since(revokedAt) > 2*time.Second {
-		t.Fatalf("revoked real upload did not stop promptly: task=%#v result=%#v err=%v elapsed=%s", firstResult.task, firstResult.result, firstResult.err, time.Since(revokedAt))
+		t.Fatalf(
+			"revoked real upload did not stop promptly: task=%#v result=%#v err=%v elapsed=%s",
+			firstResult.task,
+			firstResult.result,
+			firstResult.err,
+			time.Since(revokedAt),
+		)
 	}
 	assertCancelledFileTask(t, waitForExecTaskState(t, ctx, stateStore, firstResult.task.ID, "stopped"))
 
@@ -310,7 +329,12 @@ func TestRealFileTransferRevocationControllerRestartAndResume(t *testing.T) {
 	controllerStopped = true
 	restartResult := waitForFileUpload(t, ctx, restartUpload)
 	if restartResult.err == nil || restartResult.task.ID == "" {
-		t.Fatalf("upload unexpectedly survived Control Plane restart: task=%#v result=%#v err=%v", restartResult.task, restartResult.result, restartResult.err)
+		t.Fatalf(
+			"upload unexpectedly survived Control Plane restart: task=%#v result=%#v err=%v",
+			restartResult.task,
+			restartResult.result,
+			restartResult.err,
+		)
 	}
 	assertCancelledFileTask(t, waitForExecTaskState(t, ctx, stateStore, restartResult.task.ID, "stopped"))
 
@@ -323,7 +347,12 @@ func TestRealFileTransferRevocationControllerRestartAndResume(t *testing.T) {
 	)
 	if err != nil || completedResult.Status != filestream.ResultSucceeded ||
 		completedTask.Offset == 0 || completedTask.Offset >= uint64(len(payload)) {
-		t.Fatalf("resume real upload after Control Plane restart: task=%#v result=%#v err=%v", completedTask, completedResult, err)
+		t.Fatalf(
+			"resume real upload after Control Plane restart: task=%#v result=%#v err=%v",
+			completedTask,
+			completedResult,
+			err,
+		)
 	}
 	var downloaded bytes.Buffer
 	_, downloadResult, err := clientfiletransfer.Download(
@@ -391,7 +420,11 @@ func TestRealFileTransferRevocationControllerRestartAndResume(t *testing.T) {
 		t.Fatal(err)
 	}
 	directoryContents := []byte("KubeLoop directory transfer\n")
-	if err := os.WriteFile(filepath.Join(localDirectory, "nested ' $;", "payload.txt"), directoryContents, 0o640); err != nil {
+	if err := os.WriteFile(
+		filepath.Join(localDirectory, "nested ' $;", "payload.txt"),
+		directoryContents,
+		0o640,
+	); err != nil {
 		t.Fatal(err)
 	}
 	managerRoot := t.TempDir()
@@ -536,7 +569,12 @@ func waitForFileProgress(
 				return
 			}
 		case value := <-result:
-			t.Fatalf("real file upload ended before reporting progress: task=%#v result=%#v err=%v", value.task, value.result, value.err)
+			t.Fatalf(
+				"real file upload ended before reporting progress: task=%#v result=%#v err=%v",
+				value.task,
+				value.result,
+				value.err,
+			)
 		case <-ctx.Done():
 			t.Fatal(ctx.Err())
 		case <-time.After(30 * time.Second):

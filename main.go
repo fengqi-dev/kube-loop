@@ -6,12 +6,13 @@ import (
 	goruntime "runtime"
 	"strings"
 
-	desktopapp "github.com/fengqi-dev/kube-loop/internal/app"
-	"github.com/fengqi-dev/kube-loop/internal/desktoptray"
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 	macoptions "github.com/wailsapp/wails/v2/pkg/options/mac"
+
+	desktopapp "github.com/fengqi-dev/kube-loop/internal/app"
+	"github.com/fengqi-dev/kube-loop/internal/desktoptray"
 )
 
 //go:embed all:frontend/dist
@@ -32,11 +33,10 @@ var version = "dev"
 func main() {
 	// The tray and Wails windows must be created on the same native UI thread.
 	goruntime.LockOSThread()
-	defer goruntime.UnlockOSThread()
 
 	app := desktopapp.NewApp(version, embeddedHelperFiles)
 	tray := desktoptray.New(app, trayIcon)
-	if err := wails.Run(&options.App{
+	err := wails.Run(&options.App{
 		Title:             "KubeLoop",
 		Width:             900,
 		Height:            580,
@@ -71,10 +71,10 @@ func main() {
 		OnShutdown:       desktopapp.ShutdownHandler(app),
 		Bind:             []any{app},
 		BackgroundColour: &options.RGBA{R: 15, G: 23, B: 42, A: 1},
-	}); err != nil {
-		if tray != nil {
-			tray.Remove()
-		}
+	})
+	goruntime.UnlockOSThread()
+	if err != nil {
+		desktoptray.Remove(tray)
 		log.Fatal(err)
 	}
 }

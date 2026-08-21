@@ -37,12 +37,13 @@ func (a *App) ListServerLocalFiles(value string) ([]ServerLocalFileEntry, error)
 		if err != nil {
 			continue
 		}
-		kind := "file"
-		if entry.IsDir() {
-			kind = "directory"
-		} else if info.Mode()&os.ModeSymlink != 0 {
+		kind := serverFileKindFile
+		switch {
+		case entry.IsDir():
+			kind = serverFileKindDirectory
+		case info.Mode()&os.ModeSymlink != 0:
 			kind = "symlink"
-		} else if !info.Mode().IsRegular() {
+		case !info.Mode().IsRegular():
 			kind = "other"
 		}
 		result = append(result, ServerLocalFileEntry{
@@ -51,8 +52,8 @@ func (a *App) ListServerLocalFiles(value string) ([]ServerLocalFileEntry, error)
 		})
 	}
 	slices.SortFunc(result, func(left, right ServerLocalFileEntry) int {
-		if (left.Kind == "directory") != (right.Kind == "directory") {
-			if left.Kind == "directory" {
+		if (left.Kind == serverFileKindDirectory) != (right.Kind == serverFileKindDirectory) {
+			if left.Kind == serverFileKindDirectory {
 				return -1
 			}
 			return 1
@@ -68,13 +69,13 @@ func (a *App) CreateServerLocalFile(parent, name, kind string) error {
 		return err
 	}
 	switch strings.ToLower(strings.TrimSpace(kind)) {
-	case "file":
+	case serverFileKindFile:
 		file, err := os.OpenFile(destination, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 		if err != nil {
 			return errors.New("create local file")
 		}
 		return file.Close()
-	case "directory":
+	case serverFileKindDirectory:
 		if err := os.Mkdir(destination, 0o700); err != nil {
 			return errors.New("create local directory")
 		}

@@ -15,11 +15,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/filestream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
-	"github.com/google/uuid"
 )
 
 func TestManagerUploadsLocalFilePersistsProgressAndHistory(t *testing.T) {
@@ -41,8 +42,13 @@ func TestManagerUploadsLocalFilePersistsProgressAndHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 	request := Request{
-		ProfileID: "server", Direction: "upload", Kind: "file", Pod: "api-0", Container: "api",
-		LocalPath: source, RemotePath: "/workspace/source.bin",
+		ProfileID:  "server",
+		Direction:  fileTransferDirectionUpload,
+		Kind:       fileTransferKindFile,
+		Pod:        "api-0",
+		Container:  "api",
+		LocalPath:  source,
+		RemotePath: "/workspace/source.bin",
 	}
 	task, err := manager.Start(profile.Profile{ID: "server"}, activeFileSession(), request)
 	if err != nil {
@@ -69,7 +75,7 @@ func TestManagerUploadsLocalFilePersistsProgressAndHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer reloaded.Shutdown()
+	defer checkTestClose(t, reloaded.Shutdown)
 	history := reloaded.List("server")
 	if len(history) != 1 || history[0].ID != task.ID || history[0].Status != StatusCompleted {
 		t.Fatalf("reloaded history = %#v", history)
@@ -89,9 +95,9 @@ func TestManagerDownloadsThroughSameDirectoryTemporaryAndPublishes(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer manager.Shutdown()
+	defer checkTestClose(t, manager.Shutdown)
 	task, err := manager.Start(profile.Profile{ID: "server"}, activeFileSession(), Request{
-		ProfileID: "server", Direction: "download", Kind: "file", Pod: "api-0",
+		ProfileID: "server", Direction: fileTransferDirectionDownload, Kind: fileTransferKindFile, Pod: "api-0",
 		LocalPath: destination, RemotePath: "/workspace/destination.bin",
 	})
 	if err != nil {
@@ -112,11 +118,15 @@ func TestManagerDownloadsThroughSameDirectoryTemporaryAndPublishes(t *testing.T)
 }
 
 func TestManagerRejectsUnsafeDownloadedDirectoryWithoutPublishing(t *testing.T) {
-	archive := tarBytes(t, tar.Header{Name: "safe/../escape", Typeflag: tar.TypeReg, Mode: 0o600, Size: 4}, []byte("evil"))
+	archive := tarBytes(
+		t,
+		tar.Header{Name: "safe/../escape", Typeflag: tar.TypeReg, Mode: 0o600, Size: 4},
+		[]byte("evil"),
+	)
 	server := downloadServer(t, archive)
 	defer server.Close()
 	root := t.TempDir()
-	destination := filepath.Join(root, "directory")
+	destination := filepath.Join(root, fileTransferKindDirectory)
 	events := make(chan Task, 32)
 	manager, err := NewManager(testClient{endpoint: websocketURL(server.URL)}, Config{
 		MaximumBytes: 1 << 20, OnEvent: func(task Task) { events <- task },
@@ -124,9 +134,9 @@ func TestManagerRejectsUnsafeDownloadedDirectoryWithoutPublishing(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer manager.Shutdown()
+	defer checkTestClose(t, manager.Shutdown)
 	task, err := manager.Start(profile.Profile{ID: "server"}, activeFileSession(), Request{
-		ProfileID: "server", Direction: "download", Kind: "directory", Pod: "api-0",
+		ProfileID: "server", Direction: fileTransferDirectionDownload, Kind: fileTransferKindDirectory, Pod: "api-0",
 		LocalPath: destination, RemotePath: "/workspace/directory",
 	})
 	if err != nil {
@@ -152,7 +162,7 @@ func TestManagerStopProfileWaitsForStreamAndMarksTaskCancelled(t *testing.T) {
 			t.Error(err)
 			return
 		}
-		defer connection.CloseNow()
+		defer checkTestClose(t, connection.CloseNow)
 		connection.SetReadLimit(filestream.MaximumData + 1)
 		close(accepted)
 		for {
@@ -174,9 +184,9 @@ func TestManagerStopProfileWaitsForStreamAndMarksTaskCancelled(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer manager.Shutdown()
+	defer checkTestClose(t, manager.Shutdown)
 	task, err := manager.Start(profile.Profile{ID: "server"}, activeFileSession(), Request{
-		ProfileID: "server", Direction: "upload", Kind: "file", Pod: "api-0",
+		ProfileID: "server", Direction: fileTransferDirectionUpload, Kind: fileTransferKindFile, Pod: "api-0",
 		LocalPath: source, RemotePath: "/workspace/source.bin",
 	})
 	if err != nil {
@@ -215,7 +225,7 @@ func TestDirectorySnapshotAndExtractionPreserveSafeContents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer archive.Close()
+	defer checkTestClose(t, archive.Close)
 	checksum, size, err := createArchive(context.Background(), source, archive, 1<<20)
 	if err != nil || size == 0 || checksum == ([32]byte{}) {
 		t.Fatalf("snapshot size = %d checksum = %x err = %v", size, checksum, err)
@@ -247,11 +257,22 @@ func TestManagerRecoversActivePersistedTaskAsInterrupted(t *testing.T) {
 	root := t.TempDir()
 	statePath := filepath.Join(root, "transfers.json")
 	now := time.Now().UTC()
-	contents, err := json.Marshal(persistedState{Version: stateVersion, Tasks: []Task{{
-		ID: uuid.NewString(), ProfileID: "server", SessionID: "session", Namespace: "development",
-		Direction: "upload", Kind: "file", Pod: "api-0", LocalPath: filepath.Join(root, "source.bin"),
-		RemotePath: "/workspace/source.bin", Status: StatusRunning, CreatedAt: now, UpdatedAt: now,
-	}}})
+	contents, err := json.Marshal(persistedState{Version: stateVersion, Tasks: []Task{
+		{
+			ID:         uuid.NewString(),
+			ProfileID:  "server",
+			SessionID:  "session",
+			Namespace:  "development",
+			Direction:  fileTransferDirectionUpload,
+			Kind:       fileTransferKindFile,
+			Pod:        "api-0",
+			LocalPath:  filepath.Join(root, "source.bin"),
+			RemotePath: "/workspace/source.bin",
+			Status:     StatusRunning,
+			CreatedAt:  now,
+			UpdatedAt:  now,
+		},
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -262,7 +283,7 @@ func TestManagerRecoversActivePersistedTaskAsInterrupted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer manager.Shutdown()
+	defer checkTestClose(t, manager.Shutdown)
 	items := manager.List("server")
 	if len(items) != 1 || items[0].Status != StatusInterrupted || items[0].CompletedAt == nil || items[0].Error == "" {
 		t.Fatalf("recovered tasks = %#v", items)
@@ -274,9 +295,18 @@ func TestManagerDropsInvalidPersistedTaskAndKeepsValidHistory(t *testing.T) {
 	statePath := filepath.Join(root, "transfers.json")
 	now := time.Now().UTC()
 	valid := Task{
-		ID: uuid.NewString(), ProfileID: "server", SessionID: "session", Namespace: "development",
-		Direction: "upload", Kind: "file", Pod: "api-0", LocalPath: filepath.Join(root, "source.bin"),
-		RemotePath: "/workspace/source.bin", Status: StatusCompleted, CreatedAt: now, UpdatedAt: now,
+		ID:         uuid.NewString(),
+		ProfileID:  "server",
+		SessionID:  "session",
+		Namespace:  "development",
+		Direction:  fileTransferDirectionUpload,
+		Kind:       fileTransferKindFile,
+		Pod:        "api-0",
+		LocalPath:  filepath.Join(root, "source.bin"),
+		RemotePath: "/workspace/source.bin",
+		Status:     StatusCompleted,
+		CreatedAt:  now,
+		UpdatedAt:  now,
 	}
 	valid.ResumeID = valid.ID
 	invalid := valid
@@ -293,7 +323,7 @@ func TestManagerDropsInvalidPersistedTaskAndKeepsValidHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer manager.Shutdown()
+	defer checkTestClose(t, manager.Shutdown)
 	items := manager.List("server")
 	if len(items) != 1 || items[0].ID != valid.ID {
 		t.Fatalf("recovered tasks = %#v", items)
@@ -314,7 +344,7 @@ func TestManagerResumesUploadAcrossProcessFromControllerNegotiatedOffset(t *test
 			t.Error(err)
 			return
 		}
-		defer connection.CloseNow()
+		defer checkTestClose(t, connection.CloseNow)
 		connection.SetReadLimit(filestream.MaximumData + 1)
 		transferred := offset
 		var tail []byte
@@ -332,12 +362,17 @@ func TestManagerResumesUploadAcrossProcessFromControllerNegotiatedOffset(t *test
 			if frame.Type == filestream.Data {
 				tail = append(tail, frame.Payload...)
 				transferred += uint64(len(frame.Payload))
-				progress, _ := filestream.EncodeProgress(filestream.ProgressStatus{Transferred: transferred, Total: uint64(len(contents))})
+				progress, _ := filestream.EncodeProgress(
+					filestream.ProgressStatus{Transferred: transferred, Total: uint64(len(contents))},
+				)
 				_ = connection.Write(request.Context(), websocket.MessageBinary, progress)
 				continue
 			}
 			result, _ := filestream.EncodeResult(filestream.TransferResult{
-				Status: filestream.ResultSucceeded, Transferred: uint64(len(contents)), Checksum: checksum, HasChecksum: true,
+				Status:      filestream.ResultSucceeded,
+				Transferred: uint64(len(contents)),
+				Checksum:    checksum,
+				HasChecksum: true,
 			})
 			if err := connection.Write(request.Context(), websocket.MessageBinary, result); err != nil {
 				t.Error(err)
@@ -356,19 +391,38 @@ func TestManagerResumesUploadAcrossProcessFromControllerNegotiatedOffset(t *test
 	now := time.Now().UTC()
 	statePath := filepath.Join(root, "transfers.json")
 	writeTransferState(t, statePath, Task{
-		ID: taskID, ProfileID: "server", SessionID: "old-session", Namespace: "development", Direction: "upload", Kind: "file",
-		Pod: "api-0", Container: "api", LocalPath: source, RemotePath: "/workspace/source.bin", Status: StatusInterrupted,
-		TotalBytes: uint64(len(contents)), DoneBytes: offset, Checksum: filestream.FormatChecksum(checksum), ResumeID: resumeID,
-		CreatedAt: now, UpdatedAt: now, CompletedAt: &now,
+		ID:         taskID,
+		ProfileID:  "server",
+		SessionID:  "old-session",
+		Namespace:  "development",
+		Direction:  fileTransferDirectionUpload,
+		Kind:       fileTransferKindFile,
+		Pod:        "api-0",
+		Container:  "api",
+		LocalPath:  source,
+		RemotePath: "/workspace/source.bin",
+		Status:     StatusInterrupted,
+		TotalBytes: uint64(
+			len(contents),
+		),
+		DoneBytes:   offset,
+		Checksum:    filestream.FormatChecksum(checksum),
+		ResumeID:    resumeID,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+		CompletedAt: &now,
 	})
 	events := make(chan Task, 32)
-	manager, err := NewManager(resumeClient{testClient: testClient{endpoint: websocketURL(server.URL)}, uploadOffset: offset}, Config{
-		StatePath: statePath, MaximumBytes: 1 << 20, OnEvent: func(task Task) { events <- task },
-	})
+	manager, err := NewManager(
+		resumeClient{testClient: testClient{endpoint: websocketURL(server.URL)}, uploadOffset: offset},
+		Config{
+			StatePath: statePath, MaximumBytes: 1 << 20, OnEvent: func(task Task) { events <- task },
+		},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer manager.Shutdown()
+	defer checkTestClose(t, manager.Shutdown)
 	resumed, err := manager.Resume(profile.Profile{ID: "server"}, activeFileSession(), "server", taskID)
 	if err != nil || resumed.SessionID != "session" || resumed.Status != StatusQueued {
 		t.Fatalf("resumed = %#v err = %v", resumed, err)
@@ -404,14 +458,17 @@ func TestManagerResumesDownloadAcrossProcessUsingStablePartialFile(t *testing.T)
 			t.Error(err)
 			return
 		}
-		defer connection.CloseNow()
+		defer checkTestClose(t, connection.CloseNow)
 		for position := offset; position < len(contents); position += filestream.MaximumData {
 			end := min(position+filestream.MaximumData, len(contents))
 			data, _ := filestream.Encode(filestream.Frame{Type: filestream.Data, Payload: contents[position:end]})
 			_ = connection.Write(request.Context(), websocket.MessageBinary, data)
 		}
 		result, _ := filestream.EncodeResult(filestream.TransferResult{
-			Status: filestream.ResultSucceeded, Transferred: uint64(len(contents)), Checksum: checksum, HasChecksum: true,
+			Status:      filestream.ResultSucceeded,
+			Transferred: uint64(len(contents)),
+			Checksum:    checksum,
+			HasChecksum: true,
 		})
 		if err := connection.Write(request.Context(), websocket.MessageBinary, result); err != nil {
 			t.Error(err)
@@ -423,9 +480,22 @@ func TestManagerResumesDownloadAcrossProcessUsingStablePartialFile(t *testing.T)
 	now := time.Now().UTC()
 	statePath := filepath.Join(root, "transfers.json")
 	writeTransferState(t, statePath, Task{
-		ID: taskID, ProfileID: "server", SessionID: "old-session", Namespace: "development", Direction: "download", Kind: "file",
-		Pod: "api-0", LocalPath: destination, RemotePath: "/workspace/destination.bin", TemporaryPath: temporary,
-		Status: StatusInterrupted, TotalBytes: uint64(len(contents)), DoneBytes: uint64(offset), CreatedAt: now, UpdatedAt: now, CompletedAt: &now,
+		ID:            taskID,
+		ProfileID:     "server",
+		SessionID:     "old-session",
+		Namespace:     "development",
+		Direction:     fileTransferDirectionDownload,
+		Kind:          fileTransferKindFile,
+		Pod:           "api-0",
+		LocalPath:     destination,
+		RemotePath:    "/workspace/destination.bin",
+		TemporaryPath: temporary,
+		Status:        StatusInterrupted,
+		TotalBytes:    uint64(len(contents)),
+		DoneBytes:     uint64(offset),
+		CreatedAt:     now,
+		UpdatedAt:     now,
+		CompletedAt:   &now,
 	})
 	events := make(chan Task, 32)
 	manager, err := NewManager(testClient{endpoint: websocketURL(server.URL)}, Config{
@@ -434,7 +504,7 @@ func TestManagerResumesDownloadAcrossProcessUsingStablePartialFile(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer manager.Shutdown()
+	defer checkTestClose(t, manager.Shutdown)
 	if _, err := manager.Resume(profile.Profile{ID: "server"}, activeFileSession(), "server", taskID); err != nil {
 		t.Fatal(err)
 	}
@@ -456,10 +526,10 @@ func TestManagerRejectsRelativeLocalAndUnsafeRemotePathsBeforeQueueing(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer manager.Shutdown()
+	defer checkTestClose(t, manager.Shutdown)
 	for _, request := range []Request{
-		{ProfileID: "server", Direction: "upload", Kind: "file", Pod: "api-0", LocalPath: "relative", RemotePath: "/workspace/data"},
-		{ProfileID: "server", Direction: "upload", Kind: "file", Pod: "api-0", LocalPath: filepath.Join(t.TempDir(), "data"), RemotePath: "/workspace/../data"},
+		{ProfileID: "server", Direction: fileTransferDirectionUpload, Kind: fileTransferKindFile, Pod: "api-0", LocalPath: "relative", RemotePath: "/workspace/data"},
+		{ProfileID: "server", Direction: fileTransferDirectionUpload, Kind: fileTransferKindFile, Pod: "api-0", LocalPath: filepath.Join(t.TempDir(), "data"), RemotePath: "/workspace/../data"},
 	} {
 		if _, err := manager.Start(profile.Profile{ID: "server"}, activeFileSession(), request); err == nil {
 			t.Fatalf("unsafe request was queued: %#v", request)
@@ -475,7 +545,7 @@ func uploadServer(t *testing.T, receive func([]byte)) *httptest.Server {
 			t.Error(err)
 			return
 		}
-		defer connection.CloseNow()
+		defer checkTestClose(t, connection.CloseNow)
 		connection.SetReadLimit(filestream.MaximumData + 1)
 		var contents []byte
 		for {
@@ -501,7 +571,10 @@ func uploadServer(t *testing.T, receive func([]byte)) *httptest.Server {
 			}
 			checksum := sha256.Sum256(contents)
 			result, _ := filestream.EncodeResult(filestream.TransferResult{
-				Status: filestream.ResultSucceeded, Transferred: uint64(len(contents)), Checksum: checksum, HasChecksum: true,
+				Status:      filestream.ResultSucceeded,
+				Transferred: uint64(len(contents)),
+				Checksum:    checksum,
+				HasChecksum: true,
 			})
 			if err := connection.Write(request.Context(), websocket.MessageBinary, result); err != nil {
 				t.Error(err)
@@ -522,7 +595,7 @@ func downloadServer(t *testing.T, contents []byte) *httptest.Server {
 			t.Error(err)
 			return
 		}
-		defer connection.CloseNow()
+		defer checkTestClose(t, connection.CloseNow)
 		for offset := 0; offset < len(contents); offset += filestream.MaximumData {
 			end := min(offset+filestream.MaximumData, len(contents))
 			data, _ := filestream.Encode(filestream.Frame{Type: filestream.Data, Payload: contents[offset:end]})
@@ -533,7 +606,10 @@ func downloadServer(t *testing.T, contents []byte) *httptest.Server {
 		}
 		checksum := sha256.Sum256(contents)
 		result, _ := filestream.EncodeResult(filestream.TransferResult{
-			Status: filestream.ResultSucceeded, Transferred: uint64(len(contents)), Checksum: checksum, HasChecksum: true,
+			Status:      filestream.ResultSucceeded,
+			Transferred: uint64(len(contents)),
+			Checksum:    checksum,
+			HasChecksum: true,
 		})
 		if err := connection.Write(request.Context(), websocket.MessageBinary, result); err != nil {
 			t.Error(err)
@@ -557,7 +633,8 @@ func waitTransferTask(t *testing.T, events <-chan Task, taskID string) Task {
 	for {
 		select {
 		case task := <-events:
-			if task.ID == taskID && (task.Status == StatusCompleted || task.Status == StatusFailed || task.Status == StatusCancelled) {
+			if task.ID == taskID &&
+				(task.Status == StatusCompleted || task.Status == StatusFailed || task.Status == StatusCancelled) {
 				return task
 			}
 		case <-deadline:
@@ -568,11 +645,12 @@ func waitTransferTask(t *testing.T, events <-chan Task, taskID string) Task {
 }
 
 func activeFileSession() remote.Session {
-	return remote.Session{ID: "session", Namespace: "development", State: "active"}
+	return remote.Session{ID: "session", Namespace: "development", State: fileTransferSessionActive}
 }
 
 type resumeClient struct {
 	testClient
+
 	uploadOffset uint64
 }
 
@@ -584,7 +662,7 @@ func (client resumeClient) CreateFileTransferTask(
 	key string,
 ) (remote.FileTransferTask, error) {
 	task, err := client.testClient.CreateFileTransferTask(ctx, serverProfile, session, spec, key)
-	if err == nil && spec.Direction == "upload" {
+	if err == nil && spec.Direction == fileTransferDirectionUpload {
 		task.Offset = client.uploadOffset
 	}
 	return task, err

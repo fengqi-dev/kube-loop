@@ -67,6 +67,7 @@ func (layout Layout) Ensure() error {
 			return err
 		}
 		if runtime.GOOS != "windows" {
+			//nolint:gosec // Private application directories need owner execute permission for traversal.
 			if err := os.Chmod(directory, 0o700); err != nil {
 				return err
 			}

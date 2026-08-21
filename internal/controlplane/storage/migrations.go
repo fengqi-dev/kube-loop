@@ -13,13 +13,14 @@ var sqliteBaselineSchema string
 func schemaStatements(backend Backend) []string {
 	sqlite := splitSchema(sqliteBaselineSchema)
 	switch backend {
+	case BackendSQLite:
+		return sqlite
 	case BackendPostgreSQL:
 		return postgresqlSchemaStatements(sqlite)
 	case BackendMySQL:
 		return mysqlSchemaStatements(sqlite)
-	default:
-		return sqlite
 	}
+	return sqlite
 }
 
 func splitSchema(schema string) []string {

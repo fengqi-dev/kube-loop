@@ -2,11 +2,12 @@ package sshserver
 
 import (
 	"bytes"
+	"cmp"
 	"errors"
 	"fmt"
 	"net"
 	"net/netip"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 
@@ -65,7 +66,7 @@ func NewServer(executor Executor, options ...Option) *Server {
 // Enable claims target.IP:22 on the host TUN path.
 func (s *Server) Enable(target Target) (Info, error) {
 	if s == nil || s.executor == nil {
-		return Info{}, errors.New("Pod SSH is unavailable")
+		return Info{}, errors.New("pod SSH is unavailable")
 	}
 	if target.Context == "" || target.Namespace == "" || target.Pod == "" || target.Container == "" {
 		return Info{}, errors.New("context, namespace, pod, and container are required")
@@ -105,7 +106,7 @@ func (s *Server) Disable(id string) error {
 	}
 	if !found {
 		s.mu.Unlock()
-		return fmt.Errorf("Pod SSH endpoint %q not found", id)
+		return fmt.Errorf("pod SSH endpoint %q not found", id)
 	}
 	connections := make([]net.Conn, 0)
 	for connection, target := range s.connections {
@@ -130,11 +131,11 @@ func (s *Server) List() []Info {
 		items = append(items, s.info(target))
 	}
 	s.mu.RUnlock()
-	sort.Slice(items, func(i, j int) bool {
-		if items[i].Namespace != items[j].Namespace {
-			return items[i].Namespace < items[j].Namespace
+	slices.SortFunc(items, func(a, b Info) int {
+		if order := cmp.Compare(a.Namespace, b.Namespace); order != 0 {
+			return order
 		}
-		return items[i].Pod < items[j].Pod
+		return cmp.Compare(a.Pod, b.Pod)
 	})
 	return items
 }
@@ -143,7 +144,7 @@ func (s *Server) List() []Info {
 // requested container against the Pod's current container inventory.
 func (s *Server) Command(id, container string) (string, error) {
 	if s == nil {
-		return "", errors.New("Pod SSH is unavailable")
+		return "", errors.New("pod SSH is unavailable")
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -159,7 +160,7 @@ func (s *Server) Command(id, container string) (string, error) {
 		}
 		return s.info(selected).Command, nil
 	}
-	return "", fmt.Errorf("Pod SSH endpoint %q not found", id)
+	return "", fmt.Errorf("pod SSH endpoint %q not found", id)
 }
 
 // Reconcile exposes every supplied Pod by default, follows replacement IPs,
@@ -314,7 +315,9 @@ func (s *Server) serveConnection(raw net.Conn, target Target) {
 	if err != nil {
 		return
 	}
-	defer connection.Close()
+	defer func() {
+		_ = connection.Close() // The SSH handler owns the accepted connection and has no result channel.
+	}()
 	selectedTarget, ok := targetForLogin(target, connection.User())
 	if !ok {
 		return

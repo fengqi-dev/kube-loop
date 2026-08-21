@@ -13,8 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fengqi-dev/kube-loop/internal/protocol/relaycontrol"
 	"github.com/google/uuid"
+
+	"github.com/fengqi-dev/kube-loop/internal/protocol/relaycontrol"
 )
 
 type testClock struct {
@@ -34,7 +35,9 @@ func (clock *testClock) Advance(duration time.Duration) {
 	clock.mu.Unlock()
 }
 
-func TestRegistrationHeartbeatGenerationGateAndNoSilentReassignment(t *testing.T) {
+func TestRegistrationHeartbeatGenerationGateAndNoSilentReassignment(
+	t *testing.T,
+) {
 	clock := &testClock{now: time.Now().UTC().Truncate(time.Second)}
 	registry := newTestRegistry(t, clock, 100)
 	identity := peer("zone-a", "pod-a")
@@ -49,7 +52,10 @@ func TestRegistrationHeartbeatGenerationGateAndNoSilentReassignment(t *testing.T
 		t.Fatalf("registration = %#v", registered)
 	}
 	allocation := allocationRequest("zone-a")
-	if _, err := registry.Allocate(allocation); !errors.Is(err, ErrUnavailable) {
+	if _, err := registry.Allocate(allocation); !errors.Is(
+		err,
+		ErrUnavailable,
+	) {
 		t.Fatalf("allocation before key acknowledgement error = %v", err)
 	}
 	heartbeat := heartbeatRequest(registered.LeaseID, 100, 1)
@@ -60,7 +66,8 @@ func TestRegistrationHeartbeatGenerationGateAndNoSilentReassignment(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if assigned.RelayID != registered.RelayID || assigned.LeaseID != registered.LeaseID {
+	if assigned.RelayID != registered.RelayID ||
+		assigned.LeaseID != registered.LeaseID {
 		t.Fatalf("assignment = %#v", assigned)
 	}
 	newGeneration := allocation
@@ -78,13 +85,20 @@ func TestRegistrationHeartbeatGenerationGateAndNoSilentReassignment(t *testing.T
 	}
 	changedNetwork := newGeneration
 	changedNetwork.NetworkSpecHash = strings.Repeat("ab", 32)
-	if _, err := registry.Allocate(changedNetwork); !errors.Is(err, ErrConflict) {
+	if _, err := registry.Allocate(changedNetwork); !errors.Is(
+		err,
+		ErrConflict,
+	) {
 		t.Fatalf("same-generation changed Session NetworkSpec error = %v", err)
 	}
 	changedNetwork.Generation = 3
 	refreshed, err := registry.Allocate(changedNetwork)
 	if err != nil || refreshed != assigned {
-		t.Fatalf("new-generation changed Session NetworkSpec assignment = %#v err = %v", refreshed, err)
+		t.Fatalf(
+			"new-generation changed Session NetworkSpec assignment = %#v err = %v",
+			refreshed,
+			err,
+		)
 	}
 	statuses = registry.Snapshot()
 	if len(statuses) != 1 || statuses[0].Reservations != 1 {
@@ -99,11 +113,20 @@ func TestRegistrationHeartbeatGenerationGateAndNoSilentReassignment(t *testing.T
 	if reregistered.LeaseID == registered.LeaseID {
 		t.Fatal("re-registration reused a lease")
 	}
-	if _, err := registry.Heartbeat(identity, heartbeat); !errors.Is(err, ErrConflict) {
+	if _, err := registry.Heartbeat(identity, heartbeat); !errors.Is(
+		err,
+		ErrConflict,
+	) {
 		t.Fatalf("old lease heartbeat error = %v", err)
 	}
-	if _, err := registry.Allocate(changedNetwork); !errors.Is(err, ErrAssignedRelayUnavailable) {
-		t.Fatalf("Session was reassigned before the replacement Relay acknowledged control state: %v", err)
+	if _, err := registry.Allocate(changedNetwork); !errors.Is(
+		err,
+		ErrAssignedRelayUnavailable,
+	) {
+		t.Fatalf(
+			"Session was reassigned before the replacement Relay acknowledged control state: %v",
+			err,
+		)
 	}
 	replacementHeartbeat := heartbeatRequest(reregistered.LeaseID, 100, 1)
 	if _, err := registry.Heartbeat(identity, replacementHeartbeat); err != nil {
@@ -114,12 +137,15 @@ func TestRegistrationHeartbeatGenerationGateAndNoSilentReassignment(t *testing.T
 	if err != nil {
 		t.Fatalf("reassign newer Session generation: %v", err)
 	}
-	if reassigned.RelayID != reregistered.RelayID || reassigned.LeaseID != reregistered.LeaseID {
+	if reassigned.RelayID != reregistered.RelayID ||
+		reassigned.LeaseID != reregistered.LeaseID {
 		t.Fatalf("replacement assignment = %#v", reassigned)
 	}
 }
 
-func TestAllocationPrefersTrustedTopologyThenLowerLoadAndHonorsDrain(t *testing.T) {
+func TestAllocationPrefersTrustedTopologyThenLowerLoadAndHonorsDrain(
+	t *testing.T,
+) {
 	clock := &testClock{now: time.Now().UTC().Truncate(time.Second)}
 	registry := newTestRegistry(t, clock, 100)
 	zoneA, zoneB := peer("zone-a", "pod-a"), peer("zone-b", "pod-b")
@@ -131,7 +157,11 @@ func TestAllocationPrefersTrustedTopologyThenLowerLoadAndHonorsDrain(t *testing.
 		t.Fatal(err)
 	}
 	if topologyAssignment.RelayID != b.RelayID {
-		t.Fatalf("topology assignment Relay = %q, want %q", topologyAssignment.RelayID, b.RelayID)
+		t.Fatalf(
+			"topology assignment Relay = %q, want %q",
+			topologyAssignment.RelayID,
+			b.RelayID,
+		)
 	}
 	loadAssignmentRequest := allocationRequest("")
 	loadAssignment, err := registry.Allocate(loadAssignmentRequest)
@@ -139,7 +169,11 @@ func TestAllocationPrefersTrustedTopologyThenLowerLoadAndHonorsDrain(t *testing.
 		t.Fatal(err)
 	}
 	if loadAssignment.RelayID != a.RelayID {
-		t.Fatalf("load assignment Relay = %q, want %q", loadAssignment.RelayID, a.RelayID)
+		t.Fatalf(
+			"load assignment Relay = %q, want %q",
+			loadAssignment.RelayID,
+			a.RelayID,
+		)
 	}
 	if err := registry.SetDesiredState(a.RelayID, relaycontrol.StateDraining); err != nil {
 		t.Fatal(err)
@@ -156,7 +190,10 @@ func TestAllocationPrefersTrustedTopologyThenLowerLoadAndHonorsDrain(t *testing.
 	if newAssignment.RelayID != b.RelayID {
 		t.Fatalf("draining Relay received new assignment: %#v", newAssignment)
 	}
-	if _, err := registry.Allocate(loadAssignmentRequest); !errors.Is(err, ErrAssignedRelayUnavailable) {
+	if _, err := registry.Allocate(loadAssignmentRequest); !errors.Is(
+		err,
+		ErrAssignedRelayUnavailable,
+	) {
 		t.Fatalf("existing assignment was reported as migrated: %v", err)
 	}
 }
@@ -165,12 +202,25 @@ func TestLeaseExpiryAndControlGenerationStopNewAllocations(t *testing.T) {
 	clock := &testClock{now: time.Now().UTC().Truncate(time.Second)}
 	registry := newTestRegistry(t, clock, 100)
 	identity := peer("zone-a", "pod-a")
-	registered := registerAndAcknowledge(t, registry, identity, "a.example.test", 10, 1)
+	registered := registerAndAcknowledge(
+		t,
+		registry,
+		identity,
+		"a.example.test",
+		10,
+		1,
+	)
 	clock.Advance(46 * time.Second)
-	if _, err := registry.Allocate(allocationRequest("")); !errors.Is(err, ErrUnavailable) {
+	if _, err := registry.Allocate(allocationRequest("")); !errors.Is(
+		err,
+		ErrUnavailable,
+	) {
 		t.Fatalf("expired Relay allocation error = %v", err)
 	}
-	if _, err := registry.Heartbeat(identity, heartbeatRequest(registered.LeaseID, 10, 1)); !errors.Is(err, ErrNotFound) {
+	if _, err := registry.Heartbeat(identity, heartbeatRequest(registered.LeaseID, 10, 1)); !errors.Is(
+		err,
+		ErrNotFound,
+	) {
 		t.Fatalf("expired Relay heartbeat error = %v", err)
 	}
 	statuses := registry.Snapshot()
@@ -180,12 +230,22 @@ func TestLeaseExpiryAndControlGenerationStopNewAllocations(t *testing.T) {
 
 	clock = &testClock{now: time.Now().UTC().Truncate(time.Second)}
 	registry = newTestRegistry(t, clock, 100)
-	registered = registerAndAcknowledge(t, registry, identity, "a.example.test", 10, 1)
+	registered = registerAndAcknowledge(
+		t,
+		registry,
+		identity,
+		"a.example.test",
+		10,
+		1,
+	)
 	keys := verificationKeys(t, clock.Now(), 2)
 	if err := registry.UpdateControlPlaneState(keys, relaycontrol.RevocationSummary{}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := registry.Allocate(allocationRequest("")); !errors.Is(err, ErrUnavailable) {
+	if _, err := registry.Allocate(allocationRequest("")); !errors.Is(
+		err,
+		ErrUnavailable,
+	) {
 		t.Fatalf("stale key generation allocation error = %v", err)
 	}
 	heartbeat := heartbeatRequest(registered.LeaseID, 10, 2)
@@ -195,7 +255,10 @@ func TestLeaseExpiryAndControlGenerationStopNewAllocations(t *testing.T) {
 	if _, err := registry.Allocate(allocationRequest("")); err != nil {
 		t.Fatal(err)
 	}
-	if err := registry.UpdateControlPlaneState(verificationKeys(t, clock.Now(), 1), relaycontrol.RevocationSummary{}); err == nil {
+	if err := registry.UpdateControlPlaneState(
+		verificationKeys(t, clock.Now(), 1),
+		relaycontrol.RevocationSummary{},
+	); err == nil {
 		t.Fatal("control-plane key generation moved backwards")
 	}
 }
@@ -203,7 +266,14 @@ func TestLeaseExpiryAndControlGenerationStopNewAllocations(t *testing.T) {
 func TestConcurrentAllocationNeverExceedsCapacity(t *testing.T) {
 	clock := &testClock{now: time.Now().UTC().Truncate(time.Second)}
 	registry := newTestRegistry(t, clock, 5)
-	registerAndAcknowledge(t, registry, peer("zone-a", "pod-a"), "a.example.test", 5, 0)
+	registerAndAcknowledge(
+		t,
+		registry,
+		peer("zone-a", "pod-a"),
+		"a.example.test",
+		5,
+		0,
+	)
 
 	var wait sync.WaitGroup
 	var mu sync.Mutex
@@ -235,8 +305,11 @@ func TestEndpointPolicyUsesAuthenticatedIdentity(t *testing.T) {
 	registry, err := New(Config{
 		Now: clock.Now, TicketIssuer: "https://control-plane.example.test", VerificationKeys: keys,
 		EndpointPolicy: func(identity relaycontrol.PeerIdentity, endpoint string) error {
-			if identity.Namespace != "kubeloop-system" || !strings.Contains(endpoint, identity.PodUID) {
-				return errors.New("endpoint does not belong to authenticated Pod")
+			if identity.Namespace != "kubeloop-system" ||
+				!strings.Contains(endpoint, identity.PodUID) {
+				return errors.New(
+					"endpoint does not belong to authenticated Pod",
+				)
 			}
 			return nil
 		},
@@ -265,7 +338,11 @@ func TestRegistryAllowsHTTPTicketIssuer(t *testing.T) {
 	}
 }
 
-func newTestRegistry(t *testing.T, clock *testClock, maximumStreams uint32) *Registry {
+func newTestRegistry(
+	t *testing.T,
+	clock *testClock,
+	maximumStreams uint32,
+) *Registry {
 	t.Helper()
 	registry, err := New(Config{
 		Now: clock.Now, LeaseDuration: 45 * time.Second, HeartbeatAfter: 10 * time.Second,
@@ -293,7 +370,10 @@ func peer(zone, pod string) relaycontrol.PeerIdentity {
 	}
 }
 
-func registrationRequest(host string, maximumStreams, activeStreams uint32) relaycontrol.RegistrationRequest {
+func registrationRequest(
+	host string,
+	maximumStreams, activeStreams uint32,
+) relaycontrol.RegistrationRequest {
 	request := relaycontrol.NewRegistrationRequest()
 	request.Endpoint = "wss://" + host + "/tunnel"
 	request.State = relaycontrol.StateReady
@@ -305,7 +385,10 @@ func registrationRequest(host string, maximumStreams, activeStreams uint32) rela
 	return request
 }
 
-func heartbeatRequest(leaseID string, maximumStreams, keyGeneration uint32) relaycontrol.HeartbeatRequest {
+func heartbeatRequest(
+	leaseID string,
+	maximumStreams, keyGeneration uint32,
+) relaycontrol.HeartbeatRequest {
 	request := relaycontrol.NewHeartbeatRequest()
 	request.LeaseID = leaseID
 	request.State = relaycontrol.StateReady
@@ -323,7 +406,9 @@ func allocationRequest(zone string) relaycontrol.AllocationRequest {
 	request.Generation = 1
 	request.NetworkSpecHash = hex.EncodeToString(make([]byte, 32))
 	if zone != "" {
-		request.Topology = map[string]string{"topology.kubernetes.io/zone": zone}
+		request.Topology = map[string]string{
+			"topology.kubernetes.io/zone": zone,
+		}
 	}
 	return request
 }
@@ -349,7 +434,11 @@ func registerAndAcknowledge(
 	return registered
 }
 
-func verificationKeys(t *testing.T, now time.Time, generation uint64) relaycontrol.VerificationKeySet {
+func verificationKeys(
+	t *testing.T,
+	now time.Time,
+	generation uint64,
+) relaycontrol.VerificationKeySet {
 	t.Helper()
 	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -359,9 +448,16 @@ func verificationKeys(t *testing.T, now time.Time, generation uint64) relaycontr
 	if err != nil {
 		t.Fatal(err)
 	}
-	return relaycontrol.VerificationKeySet{Generation: generation, Keys: []relaycontrol.VerificationKey{{
-		ID: fmt.Sprintf("key-%d", generation), Algorithm: "EdDSA",
-		PublicKey: string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: encoded})),
-		NotBefore: now.Add(-time.Minute), NotAfter: now.Add(time.Hour),
-	}}}
+	return relaycontrol.VerificationKeySet{
+		Generation: generation,
+		Keys: []relaycontrol.VerificationKey{{
+			ID: fmt.Sprintf("key-%d", generation), Algorithm: "EdDSA",
+			PublicKey: string(
+				pem.EncodeToMemory(
+					&pem.Block{Type: "PUBLIC KEY", Bytes: encoded},
+				),
+			),
+			NotBefore: now.Add(-time.Minute), NotAfter: now.Add(time.Hour),
+		}},
+	}
 }

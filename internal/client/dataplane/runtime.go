@@ -94,6 +94,7 @@ type transportStreams struct {
 
 type trackedTrafficConn struct {
 	net.Conn
+
 	once    sync.Once
 	release func()
 }
@@ -166,7 +167,7 @@ func Start(
 	config Config,
 ) (*Runtime, error) {
 	if ctx == nil {
-		return nil, errors.New("Data Plane context is required")
+		return nil, errors.New("data Plane context is required")
 	}
 	useDefaultListenAddress := strings.TrimSpace(config.ListenAddress) == ""
 	config = normalizedConfig(config)
@@ -199,7 +200,7 @@ func Start(
 		dnsNamespace: strings.TrimSpace(serverProfile.DNSNamespace),
 		hostAliases:  profileHostAliases(serverProfile.HostAliases),
 		status: Status{
-			State: "connected", Mode: "socks", SessionID: session.ID, SessionGeneration: session.Generation,
+			State: dataplaneConnected, Mode: ModeSOCKS, SessionID: session.ID, SessionGeneration: session.Generation,
 			SOCKSAddress:    bridge.Addr().String(),
 			NetworkSpecHash: session.NetworkSpecHash,
 		},
@@ -219,7 +220,7 @@ func (runtime *Runtime) OpenTrafficStream(
 	taskID string,
 ) (*trafficstream.FrameConn, error) {
 	if ctx == nil {
-		return nil, errors.New("Traffic stream context is required")
+		return nil, errors.New("traffic stream context is required")
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -228,7 +229,7 @@ func (runtime *Runtime) OpenTrafficStream(
 	if runtime.ctx.Err() != nil || runtime.forwarder == nil || runtime.token == (tunnel.SessionToken{}) ||
 		signalClosed(runtime.transportDone) {
 		runtime.transportMu.Unlock()
-		return nil, errors.New("Data Plane transport is not connected")
+		return nil, errors.New("data Plane transport is not connected")
 	}
 	forwarder := runtime.forwarder
 	control := runtime.control
@@ -251,7 +252,11 @@ func (runtime *Runtime) OpenTrafficStream(
 		return nil, err
 	}
 	defer clearDeadline()
-	if err := tunnel.WriteTrafficOpen(connection, tunnel.TrafficOpenRequest{Mode: mode, TaskID: taskID}, token); err != nil {
+	if err := tunnel.WriteTrafficOpen(
+		connection,
+		tunnel.TrafficOpenRequest{Mode: mode, TaskID: taskID},
+		token,
+	); err != nil {
 		return nil, fmt.Errorf("open Traffic Task stream: %w", contextConnectionError(ctx, err))
 	}
 	if err := tunnel.ReadStatus(connection); err != nil {
@@ -261,8 +266,10 @@ func (runtime *Runtime) OpenTrafficStream(
 		return nil, err
 	}
 	runtime.transportMu.Lock()
-	current := runtime.ctx.Err() == nil && runtime.forwarder == forwarder && runtime.control == control && runtime.token == token &&
-		runtime.transportDone == transportDone && !signalClosed(transportDone)
+	runtimeActive := runtime.ctx.Err() == nil
+	transportMatches := runtime.forwarder == forwarder && runtime.control == control && runtime.token == token
+	current := runtimeActive && transportMatches && runtime.transportDone == transportDone &&
+		!signalClosed(transportDone)
 	if current {
 		if runtime.streams == nil {
 			runtime.streams = make(map[chan struct{}]*transportStreams)
@@ -282,7 +289,7 @@ func (runtime *Runtime) OpenTrafficStream(
 	}
 	runtime.transportMu.Unlock()
 	if !current {
-		return nil, errors.New("Data Plane transport changed while opening Traffic Task stream")
+		return nil, errors.New("data Plane transport changed while opening Traffic Task stream")
 	}
 	framed, err := trafficstream.Dial(ctx, connection)
 	if err != nil {
@@ -359,9 +366,9 @@ func openTransport(
 	config Config,
 ) (openedTransport, error) {
 	if ticketSource == nil {
-		return openedTransport{}, errors.New("RelayTicket source is required")
+		return openedTransport{}, errors.New("relayTicket source is required")
 	}
-	if strings.TrimSpace(serverProfile.ID) == "" || session.State != "active" {
+	if strings.TrimSpace(serverProfile.ID) == "" || session.State != dataplaneSessionActive {
 		return openedTransport{}, errors.New("active Server Profile Session is required")
 	}
 	token, err := tunnel.RelaySessionToken(session.ID, session.Generation)
@@ -373,7 +380,7 @@ func openTransport(
 		return openedTransport{}, fmt.Errorf("validate Data Plane NetworkSpec: %w", err)
 	}
 	if specHash != session.NetworkSpecHash {
-		return openedTransport{}, errors.New("Data Plane NetworkSpec hash does not match the Session")
+		return openedTransport{}, errors.New("data Plane NetworkSpec hash does not match the Session")
 	}
 	ticket, err := ticketSource(ctx)
 	if err != nil {
@@ -421,16 +428,16 @@ func transportURL(serverProfile profile.Profile, assignedEndpoint string) (strin
 	}
 	base, err := url.Parse(baseURL)
 	if err != nil {
-		return "", errors.New("Server Profile URL is invalid")
+		return "", errors.New("server Profile URL is invalid")
 	}
 	endpoint, err := url.Parse(assignedEndpoint)
-	if err != nil || (endpoint.Scheme != "ws" && endpoint.Scheme != "wss") || endpoint.Host == "" {
-		return "", errors.New("Relay assignment endpoint is invalid")
+	if err != nil || (endpoint.Scheme != "ws" && endpoint.Scheme != dataplaneWSSScheme) || endpoint.Host == "" {
+		return "", errors.New("relay assignment endpoint is invalid")
 	}
 	if base.Scheme == "http" {
 		endpoint.Scheme = "ws"
 	} else {
-		endpoint.Scheme = "wss"
+		endpoint.Scheme = dataplaneWSSScheme
 	}
 	return endpoint.String(), nil
 }
@@ -453,12 +460,13 @@ func newAssignmentTokenSource(
 			if err != nil {
 				return "", err
 			}
-			if ticket.Endpoint != initial.Endpoint || ticket.RelayID != initial.RelayID || ticket.DeviceID != initial.DeviceID {
-				return "", errors.New("Relay assignment changed while opening a WebSocket pool")
+			if ticket.Endpoint != initial.Endpoint || ticket.RelayID != initial.RelayID ||
+				ticket.DeviceID != initial.DeviceID {
+				return "", errors.New("relay assignment changed while opening a WebSocket pool")
 			}
 		}
 		if ticket.Ticket == "" || strings.TrimSpace(ticket.Ticket) != ticket.Ticket {
-			return "", errors.New("RelayTicket source returned an invalid ticket")
+			return "", errors.New("relayTicket source returned an invalid ticket")
 		}
 		return ticket.Ticket, nil
 	}
@@ -471,26 +479,29 @@ func URL(serverProfile profile.Profile) (string, error) {
 	}
 	tunnelPath := strings.TrimSpace(serverProfile.TunnelPath)
 	if tunnelPath == "" {
-		tunnelPath = "/tunnel"
+		tunnelPath = defaultTunnelPath
 	}
 	parsedPath, err := url.ParseRequestURI(tunnelPath)
 	if err != nil || !strings.HasPrefix(tunnelPath, "/") || parsedPath.IsAbs() || parsedPath.Host != "" ||
 		parsedPath.RawQuery != "" || parsedPath.Fragment != "" || parsedPath.EscapedPath() != tunnelPath ||
-		strings.Contains(tunnelPath, "//") || strings.Contains(tunnelPath, "/./") || strings.Contains(tunnelPath, "/../") ||
+		strings.Contains(
+			tunnelPath,
+			"//",
+		) || strings.Contains(tunnelPath, "/./") || strings.Contains(tunnelPath, "/../") ||
 		strings.HasSuffix(tunnelPath, "/.") || strings.HasSuffix(tunnelPath, "/..") {
-		return "", errors.New("Server Profile tunnel path is invalid")
+		return "", errors.New("server Profile tunnel path is invalid")
 	}
 	endpoint, err := url.Parse(baseURL)
 	if err != nil {
-		return "", errors.New("Server Profile URL is invalid")
+		return "", errors.New("server Profile URL is invalid")
 	}
 	switch endpoint.Scheme {
 	case "https":
-		endpoint.Scheme = "wss"
+		endpoint.Scheme = dataplaneWSSScheme
 	case "http":
 		endpoint.Scheme = "ws"
 	default:
-		return "", errors.New("Server Profile URL must use HTTP or HTTPS")
+		return "", errors.New("server Profile URL must use HTTP or HTTPS")
 	}
 	endpoint.Path = parsedPath.Path
 	endpoint.RawPath = parsedPath.RawPath
@@ -533,33 +544,35 @@ func normalizedConfig(config Config) Config {
 				gatewayAddress,
 				listenAddress,
 				token,
-				socksbridge.WithTCPInspector(func(dialContext socksbridge.DialContextFunc) (socksbridge.TCPInspector, error) {
-					authorityPath := strings.TrimSpace(inspection.AuthorityPath)
-					if authorityPath == "" {
-						var err error
-						authorityPath, err = trafficinspect.DefaultAuthorityPath()
+				socksbridge.WithTCPInspector(
+					func(dialContext socksbridge.DialContextFunc) (socksbridge.TCPInspector, error) {
+						authorityPath := strings.TrimSpace(inspection.AuthorityPath)
+						if authorityPath == "" {
+							var err error
+							authorityPath, err = trafficinspect.DefaultAuthorityPath()
+							if err != nil {
+								return nil, err
+							}
+						}
+						authority, err := trafficinspect.LoadOrCreateAuthority(authorityPath)
 						if err != nil {
 							return nil, err
 						}
-					}
-					authority, err := trafficinspect.LoadOrCreateAuthority(authorityPath)
-					if err != nil {
-						return nil, err
-					}
-					return trafficinspect.New(trafficinspect.Config{
-						CA:          authority.TLSCertificate(),
-						DialContext: trafficinspect.DialContextFunc(dialContext),
-						Enabled:     inspection.IsEnabled,
-						OnRequest:   inspection.OnRequest,
-						OnResponse:  inspection.OnResponse,
-						Sink:        inspection.Sink,
-						Policy:      inspection.Policy,
-						Protobuf:    inspection.Protobuf,
-						OnSinkError: inspection.OnSinkError,
-						TLSConfig:   inspection.TLSConfig,
-						AllowHTTP2:  true,
-					})
-				}),
+						return trafficinspect.New(trafficinspect.Config{
+							CA:          authority.TLSCertificate(),
+							DialContext: trafficinspect.DialContextFunc(dialContext),
+							Enabled:     inspection.IsEnabled,
+							OnRequest:   inspection.OnRequest,
+							OnResponse:  inspection.OnResponse,
+							Sink:        inspection.Sink,
+							Policy:      inspection.Policy,
+							Protobuf:    inspection.Protobuf,
+							OnSinkError: inspection.OnSinkError,
+							TLSConfig:   inspection.TLSConfig,
+							AllowHTTP2:  true,
+						})
+					},
+				),
 			)
 		}
 	}
@@ -586,11 +599,11 @@ func (runtime *Runtime) startTUNLocked(ctx context.Context) (Status, error) {
 		return runtime.status, nil
 	}
 	if runtime.tunStarter == nil {
-		return Status{}, errors.New("TUN runtime is unavailable")
+		return Status{}, errors.New("tUN runtime is unavailable")
 	}
 	select {
 	case <-runtime.done:
-		return Status{}, errors.New("Data Plane runtime is closed")
+		return Status{}, errors.New("data Plane runtime is closed")
 	default:
 	}
 	spec := runtime.session.NetworkSpec
@@ -621,7 +634,7 @@ func (runtime *Runtime) startTUNLocked(ctx context.Context) (Status, error) {
 	}
 	runtime.tun = core
 	runtime.tunCancel = tunCancel
-	runtime.status.Mode = "tun"
+	runtime.status.Mode = ModeTUN
 	go runtime.watchTUN(core)
 	return runtime.status, nil
 }
@@ -632,7 +645,7 @@ func (runtime *Runtime) StopTUN() (Status, error) {
 	cancel := runtime.tunCancel
 	runtime.tun = nil
 	runtime.tunCancel = nil
-	runtime.status.Mode = "socks"
+	runtime.status.Mode = ModeSOCKS
 	status := runtime.status
 	runtime.stateMu.Unlock()
 	if core == nil {
@@ -652,7 +665,7 @@ func (runtime *Runtime) Metrics(ctx context.Context) (singbox.Metrics, error) {
 	core := runtime.tun
 	runtime.stateMu.Unlock()
 	if core == nil {
-		return singbox.Metrics{}, errors.New("TUN runtime is not running")
+		return singbox.Metrics{}, errors.New("tUN runtime is not running")
 	}
 	return core.Snapshot(ctx)
 }
@@ -691,7 +704,7 @@ func (runtime *Runtime) ConfigJSON() ([]byte, error) {
 	runtime.stateMu.Lock()
 	defer runtime.stateMu.Unlock()
 	if runtime.tun == nil {
-		return nil, errors.New("TUN runtime is not running")
+		return nil, errors.New("tUN runtime is not running")
 	}
 	return append([]byte{}, runtime.tun.Config()...), nil
 }
@@ -836,7 +849,8 @@ func (runtime *Runtime) Reconnect(
 		return err
 	}
 	runtime.stateMu.Lock()
-	if session.State != "active" || session.ID != runtime.session.ID || session.Generation < runtime.session.Generation {
+	staleGeneration := session.Generation < runtime.session.Generation
+	if session.State != dataplaneSessionActive || session.ID != runtime.session.ID || staleGeneration {
 		runtime.stateMu.Unlock()
 		_ = transport.control.Close()
 		_ = transport.forwarder.Close()
@@ -851,7 +865,7 @@ func (runtime *Runtime) Reconnect(
 		runtime.stateMu.Unlock()
 		_ = transport.control.Close()
 		_ = transport.forwarder.Close()
-		return errors.New("Data Plane runtime is not awaiting recovery")
+		return errors.New("data Plane runtime is not awaiting recovery")
 	}
 	restoreTUN := networkChanged && runtime.tun != nil
 	if restoreTUN {
@@ -859,7 +873,7 @@ func (runtime *Runtime) Reconnect(
 		cancelTUN := runtime.tunCancel
 		runtime.tun = nil
 		runtime.tunCancel = nil
-		runtime.status.Mode = "socks"
+		runtime.status.Mode = ModeSOCKS
 		if cancelTUN != nil {
 			cancelTUN()
 		}
@@ -896,7 +910,7 @@ func (runtime *Runtime) Reconnect(
 	runtime.status.SessionID = session.ID
 	runtime.status.SessionGeneration = session.Generation
 	runtime.status.NetworkSpecHash = session.NetworkSpecHash
-	runtime.status.State = "connected"
+	runtime.status.State = dataplaneConnected
 	if restoreTUN {
 		if _, err := runtime.startTUNLocked(ctx); err != nil {
 			runtime.transportMu.Unlock()
@@ -984,7 +998,7 @@ func (runtime *Runtime) watchTUN(core singbox.RunningCore) {
 		runtime.tun = nil
 		cancel = runtime.tunCancel
 		runtime.tunCancel = nil
-		runtime.status.Mode = "socks"
+		runtime.status.Mode = ModeSOCKS
 	}
 	runtime.stateMu.Unlock()
 	if !active {
@@ -995,7 +1009,7 @@ func (runtime *Runtime) watchTUN(core singbox.RunningCore) {
 	}
 	err := core.Err()
 	if err == nil {
-		err = errors.New("TUN stopped unexpectedly")
+		err = errors.New("tUN stopped unexpectedly")
 	}
 	runtime.errMu.Lock()
 	runtime.err = err
@@ -1010,9 +1024,9 @@ func (runtime *Runtime) watchControl(control net.Conn, transportDone chan struct
 		return
 	}
 	if err == nil {
-		err = errors.New("Data Plane control stream returned unexpected data")
+		err = errors.New("data Plane control stream returned unexpected data")
 	} else {
-		err = fmt.Errorf("Data Plane control stream closed: %w", err)
+		err = fmt.Errorf("data Plane control stream closed: %w", err)
 	}
 	runtime.transportMu.Lock()
 	if runtime.control != control || runtime.transportDone != transportDone || runtime.ctx.Err() != nil {
@@ -1048,7 +1062,7 @@ func (runtime *Runtime) watchControl(control net.Conn, transportDone chan struct
 // serialized recovery at the Manager layer.
 func (runtime *Runtime) interruptTransport(reason error) {
 	if reason == nil {
-		reason = errors.New("Data Plane transport refresh requested")
+		reason = errors.New("data Plane transport refresh requested")
 	}
 	runtime.transportMu.Lock()
 	if runtime.ctx.Err() != nil || signalClosed(runtime.transportDone) {

@@ -8,11 +8,15 @@ import (
 	"errors"
 	"io"
 	"os"
-	"sort"
+	"slices"
 	"strings"
 )
 
-const maximumKeyFileBytes = 256 << 10
+const (
+	maximumKeyFileBytes = 256 << 10
+	privateKeyPEMType   = "PRIVATE KEY"
+	publicKeyPEMType    = "PUBLIC KEY"
+)
 
 type publicKeysFile struct {
 	Keys []publicKeyEntry `json:"keys"`
@@ -29,7 +33,7 @@ func LoadSigningKey(path string) (ed25519.PrivateKey, error) {
 		return nil, errors.New("read relay ticket signing key file")
 	}
 	block, rest := pem.Decode(data)
-	if block == nil || block.Type != "PRIVATE KEY" || len(strings.TrimSpace(string(rest))) != 0 {
+	if block == nil || block.Type != privateKeyPEMType || len(strings.TrimSpace(string(rest))) != 0 {
 		return nil, errors.New("relay ticket signing key must be one PKCS#8 PEM private key")
 	}
 	parsed, err := x509.ParsePKCS8PrivateKey(block.Bytes)
@@ -61,7 +65,7 @@ func LoadVerificationKeys(path string) (map[string]ed25519.PublicKey, error) {
 			return nil, errors.New("relay ticket verification key ID is duplicated")
 		}
 		block, rest := pem.Decode([]byte(entry.PublicKey))
-		if block == nil || block.Type != "PUBLIC KEY" || len(strings.TrimSpace(string(rest))) != 0 {
+		if block == nil || block.Type != publicKeyPEMType || len(strings.TrimSpace(string(rest))) != 0 {
 			return nil, errors.New("relay ticket verification key must be one PKIX PEM public key")
 		}
 		parsed, parseErr := x509.ParsePKIXPublicKey(block.Bytes)
@@ -86,9 +90,9 @@ func readKeyFile(path string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
 	data, err := io.ReadAll(io.LimitReader(file, maximumKeyFileBytes+1))
-	if err != nil || len(data) == 0 || len(data) > maximumKeyFileBytes {
+	closeErr := file.Close()
+	if err != nil || closeErr != nil || len(data) == 0 || len(data) > maximumKeyFileBytes {
 		return nil, errors.New("key file is invalid")
 	}
 	return data, nil
@@ -105,7 +109,7 @@ func MarshalVerificationKeys(keys map[string]ed25519.PublicKey) ([]byte, error) 
 	for keyID := range keys {
 		keyIDs = append(keyIDs, keyID)
 	}
-	sort.Strings(keyIDs)
+	slices.Sort(keyIDs)
 	for _, keyID := range keyIDs {
 		key := keys[keyID]
 		if !validIdentifier(keyID, 128) || len(key) != ed25519.PublicKeySize {
@@ -116,7 +120,8 @@ func MarshalVerificationKeys(keys map[string]ed25519.PublicKey) ([]byte, error) 
 			return nil, errors.New("encode relay ticket verification key")
 		}
 		document.Keys = append(document.Keys, publicKeyEntry{
-			KeyID: keyID, PublicKey: string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: encoded})),
+			KeyID:     keyID,
+			PublicKey: string(pem.EncodeToMemory(&pem.Block{Type: publicKeyPEMType, Bytes: encoded})),
 		})
 	}
 	return json.Marshal(document)

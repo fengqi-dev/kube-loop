@@ -45,7 +45,9 @@ func TestCancelServerLoginCancelsActiveAttemptAndAllowsRetry(t *testing.T) {
 }
 
 func TestTokenUserNamePrefersDisplayName(t *testing.T) {
-	payload := base64.RawURLEncoding.EncodeToString([]byte(`{"sub":"subject-1","email":"user@example.test","name":"Example User","preferred_username":"fengqi"}`))
+	payload := base64.RawURLEncoding.EncodeToString(
+		[]byte(`{"sub":"subject-1","email":"user@example.test","name":"Example User","preferred_username":"fengqi"}`),
+	)
 	if got := tokenUserName("header." + payload + ".signature"); got != "Example User" {
 		t.Fatalf("token username = %q", got)
 	}
@@ -98,7 +100,11 @@ func TestLogoutClearsLocalCredentialsWhenRemoteRevokeFails(t *testing.T) {
 	credentialStore := &memoryCredentialStore{values: map[string]credentials.Credential{"service-1": {
 		AccessToken: "access", RefreshToken: "refresh", DeviceID: "device",
 	}}}
-	application := &App{profiles: profileStore, credentials: credentialStore, auth: clientauth.New(clientauth.Config{RequestTimeout: 20 * time.Millisecond})}
+	application := &App{
+		profiles:    profileStore,
+		credentials: credentialStore,
+		auth:        clientauth.New(clientauth.Config{RequestTimeout: 20 * time.Millisecond}),
+	}
 	err = application.LogoutServer("service-1")
 	if err == nil {
 		t.Fatal("failed remote revoke was not reported")
@@ -119,7 +125,11 @@ func TestDeleteServerProfileClearsLocalStateWhenRemoteRevokeFails(t *testing.T) 
 	credentialStore := &memoryCredentialStore{values: map[string]credentials.Credential{"service-1": {
 		AccessToken: "access", RefreshToken: "refresh", DeviceID: "device",
 	}}}
-	application := &App{profiles: profileStore, credentials: credentialStore, auth: clientauth.New(clientauth.Config{RequestTimeout: 20 * time.Millisecond})}
+	application := &App{
+		profiles:    profileStore,
+		credentials: credentialStore,
+		auth:        clientauth.New(clientauth.Config{RequestTimeout: 20 * time.Millisecond}),
+	}
 	state, err := application.DeleteServerProfile("service-1")
 	if err == nil {
 		t.Fatal("failed remote revoke was not reported")

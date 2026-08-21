@@ -10,7 +10,7 @@ import (
 
 func (m Model) updateOverview(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "enter", "c", "x":
+	case keyEnter, "c", "x":
 		if m.activeProfile.ID == "" || !m.authSession.Authenticated {
 			m.err = "not authenticated"
 			return m, nil
@@ -40,14 +40,14 @@ func (m Model) updateOverview(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.cycleNamespace()
 	case "p":
 		if m.connected() {
-			m.err = "disconnect before changing server"
+			m.err = errDisconnectBeforeChangingServer
 			return m, nil
 		}
 		m.mode, m.err = viewLogin, ""
 		return m, loadProfiles(m.state)
 	case "L":
 		if m.connected() {
-			m.err = "disconnect before logging out"
+			m.err = errDisconnectBeforeLogout
 			return m, nil
 		}
 		m.loading, m.mode = true, viewLogin

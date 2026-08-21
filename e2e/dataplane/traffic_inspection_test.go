@@ -23,6 +23,17 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+	"golang.org/x/net/http2"
+	"google.golang.org/protobuf/encoding/protowire"
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/utils/ptr"
+
 	"github.com/fengqi-dev/kube-loop/e2e/harness"
 	"github.com/fengqi-dev/kube-loop/internal/client/credentials"
 	clientdataplane "github.com/fengqi-dev/kube-loop/internal/client/dataplane"
@@ -37,16 +48,6 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
 	"github.com/fengqi-dev/kube-loop/internal/trafficinspect"
-	"github.com/google/uuid"
-	"golang.org/x/net/http2"
-	"google.golang.org/protobuf/encoding/protowire"
-	appsv1 "k8s.io/api/apps/v1"
-	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/intstr"
-	"k8s.io/apimachinery/pkg/util/wait"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/utils/ptr"
 )
 
 const trafficInspectionAccessToken = "e2e-traffic-inspection"
@@ -117,7 +118,9 @@ func TestRealTrafficInspectionThroughDataPlane(t *testing.T) {
 
 	transport := &http.Transport{DialContext: dialContext}
 	t.Cleanup(transport.CloseIdleConnections)
-	response, err := (&http.Client{Transport: transport}).Get("http://" + backends.httpAddress + trafficInspectionHTTPPath)
+	response, err := (&http.Client{Transport: transport}).Get(
+		"http://" + backends.httpAddress + trafficInspectionHTTPPath,
+	)
 	if err != nil {
 		t.Fatalf("call go-httpbin through Data Plane: %v", err)
 	}
@@ -452,44 +455,50 @@ func countGRPCFrames(payload []byte) (int, error) {
 
 func waitForTrafficInspectionEvents(t *testing.T, sink *trafficinspect.RingBufferSink, expected map[string]bool) {
 	t.Helper()
-	err := wait.PollUntilContextTimeout(t.Context(), 50*time.Millisecond, 10*time.Second, true, func(context.Context) (bool, error) {
-		seen := make(map[string]bool)
-		for _, event := range sink.Snapshot() {
-			if event.Raw == nil || event.Raw.Data == "" {
-				continue
-			}
-			raw, err := base64.StdEncoding.DecodeString(event.Raw.Data)
-			if err != nil {
-				return false, err
-			}
-			path := ""
-			if event.HTTP != nil {
-				path = event.HTTP.Path
-			}
-			key := string(event.Protocol) + ":" + string(event.Type) + ":" + event.Raw.Direction + ":" + path
-			if event.Raw.Format == "grpc" {
-				frames, err := countGRPCFrames(raw)
+	err := wait.PollUntilContextTimeout(
+		t.Context(),
+		50*time.Millisecond,
+		10*time.Second,
+		true,
+		func(context.Context) (bool, error) {
+			seen := make(map[string]bool)
+			for _, event := range sink.Snapshot() {
+				if event.Raw == nil || event.Raw.Data == "" {
+					continue
+				}
+				raw, err := base64.StdEncoding.DecodeString(event.Raw.Data)
 				if err != nil {
-					t.Fatalf("invalid RAW gRPC frames for %s: %v payload=%x", key, err, raw)
+					return false, err
 				}
-				wantFrames := 1
-				if path == trafficInspectionGRPCStreamPath && event.Raw.Direction == "response" {
-					wantFrames = 10
+				path := ""
+				if event.HTTP != nil {
+					path = event.HTTP.Path
 				}
-				if frames != wantFrames {
-					t.Fatalf("RAW gRPC frame count for %s = %d, want %d", key, frames, wantFrames)
+				key := string(event.Protocol) + ":" + string(event.Type) + ":" + event.Raw.Direction + ":" + path
+				if event.Raw.Format == "grpc" {
+					frames, err := countGRPCFrames(raw)
+					if err != nil {
+						t.Fatalf("invalid RAW gRPC frames for %s: %v payload=%x", key, err, raw)
+					}
+					wantFrames := 1
+					if path == trafficInspectionGRPCStreamPath && event.Raw.Direction == "response" {
+						wantFrames = 10
+					}
+					if frames != wantFrames {
+						t.Fatalf("RAW gRPC frame count for %s = %d, want %d", key, frames, wantFrames)
+					}
+					assertDecodedGRPCBinProtobuf(t, event, wantFrames)
 				}
-				assertDecodedGRPCBinProtobuf(t, event, wantFrames)
+				seen[key] = true
 			}
-			seen[key] = true
-		}
-		for key := range expected {
-			if !seen[key] {
-				return false, nil
+			for key := range expected {
+				if !seen[key] {
+					return false, nil
+				}
 			}
-		}
-		return true, nil
-	})
+			return true, nil
+		},
+	)
 	if err != nil {
 		t.Fatalf("traffic inspection events incomplete: %v events=%#v", err, sink.Snapshot())
 	}
@@ -594,14 +603,22 @@ func startTrafficInspectionController(
 	t.Helper()
 	gateway := startE2ETrafficGateway(t, gatewayIP, nil, nil)
 	server, err := controlplane.NewServer(
-		controlplane.Config{PublicURL: "http://127.0.0.1"}, controlplane.BuildInfo{},
+		controlplane.Config{PublicURL: "http://127.0.0.1"},
+		controlplane.BuildInfo{},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
-		controlplane.WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(request *http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
-			if request.Header.Get("Authorization") != "Bearer "+trafficInspectionAccessToken {
-				return controlplaneapi.Identity{}, &controlplaneapi.Error{Code: controlplaneapi.CodeUnauthenticated, Message: "invalid e2e access token"}
-			}
-			return identity, nil
-		})),
+		controlplane.WithAuthenticator(
+			controlplaneapi.AuthenticatorFunc(
+				func(request *http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
+					if request.Header.Get("Authorization") != "Bearer "+trafficInspectionAccessToken {
+						return controlplaneapi.Identity{}, &controlplaneapi.Error{
+							Code:    controlplaneapi.CodeUnauthenticated,
+							Message: "invalid e2e access token",
+						}
+					}
+					return identity, nil
+				},
+			),
+		),
 		controlplane.WithAuthorizer(authorization.NewAuthenticated()),
 		controlplane.WithAPIRoutes(controlplane.APIRoutes{
 			Tickets: ticketapi.NewRoutes(gateway.tickets, e2eExecSessionValidator{
@@ -783,10 +800,16 @@ func installTrafficInspectionBackend(
 		_ = client.AppsV1().Deployments(harness.EchoNamespace).Delete(cleanupContext, name, metav1.DeleteOptions{})
 		_ = client.CoreV1().Services(harness.EchoNamespace).Delete(cleanupContext, name, metav1.DeleteOptions{})
 	})
-	if err := wait.PollUntilContextTimeout(ctx, time.Second, 2*time.Minute, true, func(ctx context.Context) (bool, error) {
-		deployment, err := client.AppsV1().Deployments(harness.EchoNamespace).Get(ctx, name, metav1.GetOptions{})
-		return err == nil && deployment.Status.AvailableReplicas > 0, err
-	}); err != nil {
+	if err := wait.PollUntilContextTimeout(
+		ctx,
+		time.Second,
+		2*time.Minute,
+		true,
+		func(ctx context.Context) (bool, error) {
+			deployment, err := client.AppsV1().Deployments(harness.EchoNamespace).Get(ctx, name, metav1.GetOptions{})
+			return err == nil && deployment.Status.AvailableReplicas > 0, err
+		},
+	); err != nil {
 		t.Fatalf("wait for %s Deployment: %v", name, err)
 	}
 	return service

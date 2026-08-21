@@ -84,13 +84,13 @@ func (authenticator *TicketAuthenticator) Apply(
 	authenticator.mu.Lock()
 	defer authenticator.mu.Unlock()
 	if authenticator.relayID != "" && authenticator.relayID != relayID {
-		return errors.New("Relay identity changed within one Data Plane process")
+		return errors.New("relay identity changed within one Data Plane process")
 	}
 	if authenticator.issuer != "" && authenticator.issuer != issuer {
 		return errors.New("RelayTicket issuer changed within one Data Plane process")
 	}
 	if keys.Generation < authenticator.keyGeneration || revocations.Generation < authenticator.revocationGeneration {
-		return errors.New("Relay control generation moved backwards")
+		return errors.New("relay control generation moved backwards")
 	}
 	if authenticator.requestVerifier == nil {
 		replay, err := relayticket.NewReplayGuard(authenticator.config.ReplayEntries, authenticator.config.Now)

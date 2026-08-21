@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"sync"
 
@@ -63,7 +64,7 @@ func (s *Server) serveSession(
 			state.startOnce.Do(func() {
 				started = true
 				_ = request.Reply(true, nil)
-				go state.runExec([]string{"/bin/sh"})
+				go state.runExec([]string{defaultShellPath})
 			})
 			if !started {
 				_ = request.Reply(false, nil)
@@ -78,7 +79,7 @@ func (s *Server) serveSession(
 			state.startOnce.Do(func() {
 				started = true
 				_ = request.Reply(true, nil)
-				go state.runExec([]string{"/bin/sh", "-c", payload.Command})
+				go state.runExec([]string{defaultShellPath, "-c", payload.Command})
 			})
 			if !started {
 				_ = request.Reply(false, nil)
@@ -183,6 +184,9 @@ func newTerminalSizeQueue() *terminalSizeQueue {
 }
 
 func (q *terminalSizeQueue) Push(width, height uint32) {
+	width = min(width, math.MaxUint16)
+	height = min(height, math.MaxUint16)
+	//nolint:gosec // Values are clamped to the uint16 terminal dimension range above.
 	size := TerminalSize{Width: uint16(width), Height: uint16(height)}
 	select {
 	case <-q.done:

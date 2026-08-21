@@ -9,17 +9,22 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/labstack/echo/v5"
+
 	adminauthentication "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/authentication"
 	adminsession "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/session"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
-	"github.com/google/uuid"
-	"github.com/labstack/echo/v5"
 )
 
 func TestAuthenticatedIdentityCanReadManagementAPI(t *testing.T) {
 	handler, _ := newReadTestHandler(t)
 	unauthenticated := httptest.NewRecorder()
-	serveHTTP(handler, unauthenticated, httptest.NewRequest(http.MethodGet, "/bootstrap", nil))
+	serveHTTP(
+		handler,
+		unauthenticated,
+		httptest.NewRequest(http.MethodGet, "/bootstrap", nil),
+	)
 	if unauthenticated.Code != http.StatusUnauthorized {
 		t.Fatalf("unauthenticated status = %d", unauthenticated.Code)
 	}
@@ -29,7 +34,11 @@ func TestAuthenticatedIdentityCanReadManagementAPI(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	serveHTTP(handler, recorder, request)
 	if recorder.Code != http.StatusOK {
-		t.Fatalf("authenticated status = %d body=%s", recorder.Code, recorder.Body.String())
+		t.Fatalf(
+			"authenticated status = %d body=%s",
+			recorder.Code,
+			recorder.Body.String(),
+		)
 	}
 }
 
@@ -37,7 +46,11 @@ func TestAuthenticatedWritesRequireCSRF(t *testing.T) {
 	handler, _ := newReadTestHandler(t)
 	cookie, csrf := issueTestSession(t, handler)
 	server := echo.New()
-	server.POST("/write", func(ctx *echo.Context) error { return ctx.NoContent(http.StatusNoContent) }, handler.readAPI.authenticate)
+	server.POST(
+		"/write",
+		func(ctx *echo.Context) error { return ctx.NoContent(http.StatusNoContent) },
+		handler.readAPI.authenticate,
+	)
 
 	missing := httptest.NewRequest(http.MethodPost, "/write", nil)
 	missing.AddCookie(cookie)
@@ -53,17 +66,28 @@ func TestAuthenticatedWritesRequireCSRF(t *testing.T) {
 	validRecorder := httptest.NewRecorder()
 	server.ServeHTTP(validRecorder, valid)
 	if validRecorder.Code != http.StatusNoContent {
-		t.Fatalf("valid CSRF status = %d body=%s", validRecorder.Code, validRecorder.Body.String())
+		t.Fatalf(
+			"valid CSRF status = %d body=%s",
+			validRecorder.Code,
+			validRecorder.Body.String(),
+		)
 	}
 }
 
 func TestManagementCookieSecurityMatchesPublicURL(t *testing.T) {
 	httpsHandler, _ := newReadTestHandler(t)
-	httpHandler, err := New(Config{PublicURL: "http://gateway.example"}, httpsHandler.sessions)
+	httpHandler, err := New(
+		Config{PublicURL: "http://gateway.example"},
+		httpsHandler.sessions,
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	issued := adminsession.Credentials{SessionToken: "session", CSRFToken: "csrf", ExpiresAt: time.Now().Add(time.Hour)}
+	issued := adminsession.Credentials{
+		SessionToken: "session",
+		CSRFToken:    "csrf",
+		ExpiresAt:    time.Now().Add(time.Hour),
+	}
 
 	tests := []struct {
 		name        string
@@ -71,20 +95,33 @@ func TestManagementCookieSecurityMatchesPublicURL(t *testing.T) {
 		cookieNames []string
 		secure      bool
 	}{
-		{name: "HTTPS", handler: httpsHandler, cookieNames: []string{SessionCookieName, CSRFCookieName}, secure: true},
-		{name: "HTTP", handler: httpHandler, cookieNames: []string{httpSessionCookieName, httpCSRFCookieName}},
+		{
+			name:        "HTTPS",
+			handler:     httpsHandler,
+			cookieNames: []string{SessionCookieName, CSRFCookieName},
+			secure:      true,
+		},
+		{
+			name:        "HTTP",
+			handler:     httpHandler,
+			cookieNames: []string{httpSessionCookieName, httpCSRFCookieName},
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			recorder := httptest.NewRecorder()
-			ctx := echo.NewContext(httptest.NewRequest(http.MethodGet, "/", nil), recorder)
+			ctx := echo.NewContext(
+				httptest.NewRequest(http.MethodGet, "/", nil),
+				recorder,
+			)
 			test.handler.setSessionCookies(ctx, issued)
 			cookies := recorder.Result().Cookies()
 			if len(cookies) != 2 {
 				t.Fatalf("cookie count = %d", len(cookies))
 			}
 			for index, cookie := range cookies {
-				if cookie.Name != test.cookieNames[index] || cookie.Secure != test.secure {
+				if cookie.Name != test.cookieNames[index] ||
+					cookie.Secure != test.secure {
 					t.Fatalf("cookie[%d] = %#v", index, cookie)
 				}
 			}
@@ -92,27 +129,42 @@ func TestManagementCookieSecurityMatchesPublicURL(t *testing.T) {
 	}
 }
 
-func newReadTestHandler(t *testing.T, extraOptions ...Option) (*Handler, *storage.Store) {
+func newReadTestHandler(
+	t *testing.T,
+	extraOptions ...Option,
+) (*Handler, *storage.Store) {
 	t.Helper()
-	store, err := storage.Open(context.Background(), storage.Config{Backend: storage.BackendSQLite, SQLitePath: filepath.Join(t.TempDir(), "management.db")})
+	store, err := storage.Open(
+		context.Background(),
+		storage.Config{
+			Backend:    storage.BackendSQLite,
+			SQLitePath: filepath.Join(t.TempDir(), "management.db"),
+		},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
 	now := time.Now().UTC()
-	if _, err := store.Identities().Create(context.Background(), storage.Identity{ID: testManagementIdentityID, Type: "human", DisplayName: "Test user", Status: "active", CreatedAt: now, UpdatedAt: now}); err != nil {
+	if _, err := store.Identities().
+		Create(context.Background(), storage.Identity{ID: testManagementIdentityID, Type: "human", DisplayName: "Test user", Status: statusActive, CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.OAuthSessions().Create(context.Background(), storage.OAuthSession{Kind: "refresh_token", SignatureHash: bytes.Repeat([]byte{31}, 32), RequestID: testManagementAuthorizationID, IdentityID: testManagementIdentityID, RequestJSON: []byte(`{}`), Status: "active", CreatedAt: now, ExpiresAt: now.Add(time.Hour)}); err != nil {
+	if err := store.OAuthSessions().
+		Create(context.Background(), storage.OAuthSession{Kind: "refresh_token", SignatureHash: bytes.Repeat([]byte{31}, 32), RequestID: testManagementAuthorizationID, IdentityID: testManagementIdentityID, RequestJSON: []byte(`{}`), Status: statusActive, CreatedAt: now, ExpiresAt: now.Add(time.Hour)}); err != nil {
 		t.Fatal(err)
 	}
 	sessions, err := adminsession.New(store)
 	if err != nil {
 		t.Fatal(err)
 	}
-	options := []Option{WithReadAPI(store)}
+	options := make([]Option, 1, 1+len(extraOptions))
+	options[0] = WithReadAPI(store)
 	options = append(options, extraOptions...)
-	handler, err := New(Config{PublicURL: "https://gateway.example"}, sessions, options...)
+	handler, err := New(
+		Config{PublicURL: "https://gateway.example"},
+		sessions,
+		options...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,11 +173,20 @@ func newReadTestHandler(t *testing.T, extraOptions ...Option) (*Handler, *storag
 
 func issueTestSession(t *testing.T, handler *Handler) (*http.Cookie, string) {
 	t.Helper()
-	issued, err := handler.sessions.ExchangeIdentity(context.Background(), testManagementIdentityID, testManagementAuthorizationID, adminauthentication.Normal, uuid.NewString())
+	issued, err := handler.sessions.ExchangeIdentity(
+		context.Background(),
+		testManagementIdentityID,
+		testManagementAuthorizationID,
+		adminauthentication.Normal,
+		uuid.NewString(),
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &http.Cookie{Name: SessionCookieName, Value: issued.SessionToken}, issued.CSRFToken
+	return &http.Cookie{
+		Name:  SessionCookieName,
+		Value: issued.SessionToken,
+	}, issued.CSRFToken
 }
 
 const (

@@ -37,12 +37,15 @@ func enableService(binaryPath string) error {
 </dict>
 </plist>
 `, label, binaryPath, logPath, logPath)
+	//nolint:gosec // launchd requires its system configuration directory to be traversable.
 	if err := os.MkdirAll(filepath.Dir(plistPath), 0o755); err != nil {
 		return err
 	}
+	//nolint:gosec // launchd property lists are intentionally system-readable and contain no secrets.
 	if err := os.WriteFile(plistPath, []byte(plist), 0o644); err != nil {
 		return err
 	}
+	//nolint:gosec // label is selected from fixed helper service identifiers.
 	_ = exec.Command("launchctl", "bootout", "system/"+label).Run()
 	cmd := exec.Command("launchctl", "bootstrap", "system", plistPath)
 	if _, err := cmd.CombinedOutput(); err != nil {
@@ -53,7 +56,9 @@ func enableService(binaryPath string) error {
 			return fmt.Errorf("launchctl load helper: %w: %s", err, strings.TrimSpace(string(output)))
 		}
 	}
+	//nolint:gosec // label is selected from fixed helper service identifiers.
 	_ = exec.Command("launchctl", "enable", "system/"+label).Run()
+	//nolint:gosec // label is selected from fixed helper service identifiers.
 	_ = exec.Command("launchctl", "kickstart", "-k", "system/"+label).Run()
 	return nil
 }
@@ -61,6 +66,7 @@ func enableService(binaryPath string) error {
 func disableService() error {
 	label := helper.ServiceLabel()
 	plistPath := launchdPlistPath()
+	//nolint:gosec // label is selected from fixed helper service identifiers.
 	_ = exec.Command("launchctl", "bootout", "system/"+label).Run()
 	_ = exec.Command("launchctl", "unload", "-w", plistPath).Run()
 	_ = os.Remove(plistPath)

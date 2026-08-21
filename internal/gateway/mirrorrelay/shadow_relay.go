@@ -16,7 +16,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficstream"
 )
 
-var errClientStopped = errors.New("Mirror stopped by client")
+var errClientStopped = errors.New("mirror stopped by client")
 
 type tcpPrimaryStream struct {
 	client  net.Conn
@@ -111,7 +111,7 @@ func (relay *mirrorRelay) acceptTCP(ctx context.Context, binding trafficlistener
 		client, err := binding.Listener.Accept()
 		if err != nil {
 			if ctx.Err() != nil || errors.Is(err, net.ErrClosed) {
-				return nil
+				return nil //nolint:nilerr // A closed listener is the normal relay shutdown signal.
 			}
 			return err
 		}
@@ -134,7 +134,11 @@ func (relay *mirrorRelay) serveTCP(ctx context.Context, port trafficmodel.Port, 
 	relay.tcp[id] = &tcpPrimaryStream{client: client, primary: primary}
 	relay.mu.Unlock()
 	shadow := relay.emit(mirrorstream.Frame{
-		Type: mirrorstream.Open, StreamID: id, ServicePort: uint32(port.ServicePort), Protocol: mirrorstream.ProtocolTCP,
+		Type:     mirrorstream.Open,
+		StreamID: id,
+		// BindListeners validates ServicePort as a positive 16-bit port.
+		ServicePort: uint32(port.ServicePort), //nolint:gosec // Validated as a positive 16-bit port.
+		Protocol:    mirrorstream.ProtocolTCP,
 	})
 
 	requestDone := make(chan struct{})
@@ -198,7 +202,7 @@ func (relay *mirrorRelay) readUDP(ctx context.Context, index int, binding traffi
 		count, remote, err := binding.Connection.ReadFromUDP(buffer)
 		if err != nil {
 			if ctx.Err() != nil || errors.Is(err, net.ErrClosed) {
-				return nil
+				return nil //nolint:nilerr // A closed UDP socket is the normal relay shutdown signal.
 			}
 			return err
 		}
@@ -217,7 +221,9 @@ func (relay *mirrorRelay) readUDP(ctx context.Context, index int, binding traffi
 		}
 		relay.emit(mirrorstream.Frame{
 			Type: mirrorstream.Datagram, StreamID: id,
-			ServicePort: uint32(binding.Port.ServicePort), Protocol: mirrorstream.ProtocolUDP, Payload: payload,
+			// BindListeners validates ServicePort as a positive 16-bit port.
+			ServicePort: uint32(binding.Port.ServicePort), //nolint:gosec // Validated as a positive 16-bit port.
+			Protocol:    mirrorstream.ProtocolUDP, Payload: payload,
 		})
 	}
 }
@@ -319,20 +325,18 @@ func (relay *mirrorRelay) reapUDP(ctx context.Context) error {
 }
 
 func (relay *mirrorRelay) readClient(ctx context.Context) error {
-	for {
-		encoded, err := relay.connection.ReadFrame(ctx)
-		if err != nil {
-			return err
-		}
-		frame, err := mirrorstream.Decode(encoded)
-		if err != nil {
-			return err
-		}
-		if frame.Type == mirrorstream.Stop {
-			return errClientStopped
-		}
-		return errors.New("client sent a server-only Mirror frame")
+	encoded, err := relay.connection.ReadFrame(ctx)
+	if err != nil {
+		return err
 	}
+	frame, err := mirrorstream.Decode(encoded)
+	if err != nil {
+		return err
+	}
+	if frame.Type == mirrorstream.Stop {
+		return errClientStopped
+	}
+	return errors.New("client sent a server-only Mirror frame")
 }
 
 func (relay *mirrorRelay) writeShadow(ctx context.Context) error {

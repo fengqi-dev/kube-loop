@@ -79,9 +79,14 @@ func (m *Manager) List() []Info {
 // StartResolved starts only the loopback listener. The target must already be
 // resolved by a trusted Gateway, so this path never reads kubeconfig or calls a
 // Kubernetes API from the desktop.
-func (m *Manager) StartResolved(request Request, target string, dialer TrafficDialer) (Info, error) {
+func (m *Manager) StartResolved(
+	ctx context.Context,
+	request Request,
+	target string,
+	dialer TrafficDialer,
+) (Info, error) {
 	if dialer == nil {
-		return Info{}, fmt.Errorf("Port Forward traffic dialer is required")
+		return Info{}, fmt.Errorf("port Forward traffic dialer is required")
 	}
 	if request.Context == "" {
 		return Info{}, fmt.Errorf("context is required")
@@ -110,11 +115,14 @@ func (m *Manager) StartResolved(request Request, target string, dialer TrafficDi
 	if err != nil || host == "" || rawPort == "" {
 		return Info{}, fmt.Errorf("resolved Port Forward target is invalid")
 	}
-	return m.startRouted(request, target, dialer)
+	return m.startRouted(ctx, request, target, dialer)
 }
 
 func (m *Manager) startRouted(
-	request Request, target string, dialer TrafficDialer,
+	ctx context.Context,
+	request Request,
+	target string,
+	dialer TrafficDialer,
 ) (Info, error) {
 	listenAddress := net.JoinHostPort("127.0.0.1", strconv.Itoa(int(request.LocalPort)))
 	var forwarder Forwarder
@@ -129,7 +137,7 @@ func (m *Manager) startRouted(
 		}
 		forwarder = newRoutedUDPForwarder(socket, target, dialer)
 	} else {
-		listener, err := net.Listen("tcp", listenAddress)
+		listener, err := (&net.ListenConfig{}).Listen(ctx, "tcp", listenAddress)
 		if err != nil {
 			return Info{}, fmt.Errorf("listen for port-forward: %w", err)
 		}

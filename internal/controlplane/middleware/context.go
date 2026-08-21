@@ -22,7 +22,9 @@ type authorizationContextValue struct {
 	decision authorization.Decision
 }
 
-func AuthorizationFromContext(ctx context.Context) (authorization.Request, authorization.Decision, bool) {
+func AuthorizationFromContext(
+	ctx context.Context,
+) (authorization.Request, authorization.Decision, bool) {
 	value, ok := ctx.Value(authorizationContextKey{}).(authorizationContextValue)
 	return value.request, value.decision, ok
 }
@@ -41,7 +43,8 @@ type auditContextState struct {
 }
 
 func SetAuditSessionID(ctx context.Context, sessionID string) {
-	if state, ok := ctx.Value(auditContextKey{}).(*auditContextState); ok && state != nil {
+	if state, ok := ctx.Value(auditContextKey{}).(*auditContextState); ok &&
+		state != nil {
 		state.sessionID = strings.TrimSpace(sessionID)
 	}
 }

@@ -18,7 +18,13 @@ func TestContractClientAndGatewayVersionMatrix(t *testing.T) {
 		wantMismatch bool
 	}{
 		{name: "old client new Gateway overlap", client: "2.0", gatewayMin: "2.0", gatewayMax: "2.1"},
-		{name: "new client old Gateway no overlap", client: "2.1", gatewayMin: "2.0", gatewayMax: "2.0", wantMismatch: true},
+		{
+			name:         "new client old Gateway no overlap",
+			client:       "2.1",
+			gatewayMin:   "2.0",
+			gatewayMax:   "2.0",
+			wantMismatch: true,
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -31,7 +37,9 @@ func TestContractClientAndGatewayVersionMatrix(t *testing.T) {
 				})
 			}))
 			defer server.Close()
-			_, err := New(Config{HTTPClient: server.Client(), ProtocolVersion: test.client}).Discover(context.Background(), server.URL)
+			_, err := New(
+				Config{HTTPClient: server.Client(), ProtocolVersion: test.client},
+			).Discover(context.Background(), server.URL)
 			if !test.wantMismatch {
 				if err != nil {
 					t.Fatal(err)

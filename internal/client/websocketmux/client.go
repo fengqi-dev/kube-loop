@@ -13,11 +13,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/xtaci/smux"
+
 	"github.com/fengqi-dev/kube-loop/internal/protocol/streamcopy"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
 	protocolmux "github.com/fengqi-dev/kube-loop/internal/protocol/websocketmux"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/wssprotocol"
-	"github.com/xtaci/smux"
 )
 
 const Subprotocol = wssprotocol.Subprotocol
@@ -99,7 +100,7 @@ func Start(ctx context.Context, config ClientConfig) (*Forwarder, error) {
 		return nil, fmt.Errorf("invalid Gateway WebSocket URL: %w", err)
 	}
 	if (parsed.Scheme != "ws" && parsed.Scheme != "wss") || parsed.Host == "" {
-		return nil, errors.New("Gateway WebSocket URL must use ws:// or wss://")
+		return nil, errors.New("gateway WebSocket URL must use ws:// or wss://")
 	}
 	if (config.Token == "") == (config.TokenSource == nil) {
 		return nil, errors.New("exactly one Gateway WebSocket token source is required")
@@ -120,10 +121,10 @@ func Start(ctx context.Context, config ClientConfig) (*Forwarder, error) {
 	hello := wssprotocol.NewClientHello(config.ClientVersion, config.DeviceID)
 	hello.ProtocolVersions = config.SupportedVersions
 	if _, err := wssprotocol.Encode(hello); err != nil {
-		return nil, errors.New("Gateway WSS client identity or protocol configuration is invalid")
+		return nil, errors.New("gateway WSS client identity or protocol configuration is invalid")
 	}
 	if config.HandshakeTimeout > time.Minute {
-		return nil, errors.New("Gateway WSS handshake timeout must not exceed one minute")
+		return nil, errors.New("gateway WSS handshake timeout must not exceed one minute")
 	}
 	if config.PoolSize <= 0 {
 		config.PoolSize = defaultPoolSize
@@ -139,9 +140,9 @@ func Start(ctx context.Context, config ClientConfig) (*Forwarder, error) {
 	}
 	if config.PoolSize > maxPoolSize || config.MaxPhysical > maxPhysicalConnections ||
 		config.MaxStreamsPerConn > maxStreamsPerConnection {
-		return nil, errors.New("Gateway multiplexing limits are too large")
+		return nil, errors.New("gateway multiplexing limits are too large")
 	}
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	listener, err := (&net.ListenConfig{}).Listen(ctx, "tcp", "127.0.0.1:0")
 	if err != nil {
 		return nil, fmt.Errorf("listen for local Gateway streams: %w", err)
 	}
@@ -216,7 +217,7 @@ func (forwarder *Forwarder) Close() error {
 // every connection returned by this method.
 func (forwarder *Forwarder) OpenStream(ctx context.Context) (net.Conn, error) {
 	if ctx == nil {
-		return nil, errors.New("Gateway logical stream context is required")
+		return nil, errors.New("gateway logical stream context is required")
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -257,6 +258,7 @@ func (forwarder *Forwarder) OpenStream(ctx context.Context) (net.Conn, error) {
 
 type trackedConn struct {
 	net.Conn
+
 	onClose func()
 	once    sync.Once
 	err     error
@@ -306,8 +308,12 @@ func (forwarder *Forwarder) forward(local net.Conn) {
 		_ = local.Close()
 		return
 	}
-	defer stream.Close()
-	defer local.Close()
+	defer func() {
+		_ = stream.Close() // Closing only terminates the failed forwarding path; no caller can act on the result.
+	}()
+	defer func() {
+		_ = local.Close() // Closing only terminates the failed forwarding path; no caller can act on the result.
+	}()
 	streamcopy.Bidirectional(local, protocolmux.NewStreamConn(stream))
 }
 
@@ -382,7 +388,11 @@ func (forwarder *Forwarder) discard(target *pooledSession) {
 }
 
 func (forwarder *Forwarder) dial() (*pooledSession, error) {
-	transport := http.DefaultTransport.(*http.Transport).Clone()
+	defaultTransport, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		return nil, fmt.Errorf("default HTTP transport %T is unsupported", http.DefaultTransport)
+	}
+	transport := defaultTransport.Clone()
 	if forwarder.config.TLSConfig != nil {
 		transport.TLSClientConfig = forwarder.config.TLSConfig.Clone()
 	}
@@ -398,7 +408,7 @@ func (forwarder *Forwarder) dial() (*pooledSession, error) {
 		}
 	}
 	if token == "" || strings.TrimSpace(token) != token || strings.ContainsAny(token, "\r\n") {
-		return nil, errors.New("Gateway WebSocket token source returned an invalid token")
+		return nil, errors.New("gateway WebSocket token source returned an invalid token")
 	}
 	header := make(http.Header)
 	header.Set("Authorization", "Bearer "+token)
@@ -407,14 +417,17 @@ func (forwarder *Forwarder) dial() (*pooledSession, error) {
 	})
 	if err != nil {
 		if response != nil {
-			return nil, fmt.Errorf("dial Gateway WebSocket: HTTP %s: %w", response.Status, err)
+			return nil, errors.Join(
+				fmt.Errorf("dial Gateway WebSocket: HTTP %s: %w", response.Status, err),
+				response.Body.Close(),
+			)
 		}
 		return nil, fmt.Errorf("dial Gateway WebSocket: %w", err)
 	}
 	if connection.Subprotocol() != Subprotocol {
 		_ = connection.Close(websocket.StatusPolicyViolation, "subprotocol required")
 		return nil, fmt.Errorf(
-			"Gateway did not negotiate multiplexing subprotocol %q (got %q)",
+			"gateway did not negotiate multiplexing subprotocol %q (got %q)",
 			Subprotocol, connection.Subprotocol(),
 		)
 	}
@@ -460,7 +473,7 @@ func (forwarder *Forwarder) dial() (*pooledSession, error) {
 		!slices.Contains(serverHello.Capabilities, "tunnel.open.v2") ||
 		!slices.Contains(serverHello.Capabilities, wssprotocol.CapabilityTrafficWebSocket) {
 		_ = connection.Close(websocket.StatusPolicyViolation, "INVALID_HANDSHAKE")
-		return nil, errors.New("Gateway returned an incompatible WSS ServerHello")
+		return nil, errors.New("gateway returned an incompatible WSS ServerHello")
 	}
 	maximumStreams := min(forwarder.config.MaxStreamsPerConn, serverHello.Limits.MaximumStreamsPerConnection)
 	forwarder.mu.Lock()

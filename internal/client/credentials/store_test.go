@@ -58,8 +58,9 @@ func TestSystemStoreUsesVersionedKeyringEntries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.AccessToken != credential.AccessToken || got.RefreshToken != credential.RefreshToken || got.DeviceID != credential.DeviceID ||
-		got.IdentityID != credential.IdentityID || got.UserName != credential.UserName {
+	tokenMismatch := got.AccessToken != credential.AccessToken || got.RefreshToken != credential.RefreshToken
+	identityMismatch := got.IdentityID != credential.IdentityID || got.UserName != credential.UserName
+	if tokenMismatch || identityMismatch || got.DeviceID != credential.DeviceID {
 		t.Fatalf("credential = %#v", got)
 	}
 	prefix, err := accountPrefix("profile-1")
@@ -68,7 +69,10 @@ func TestSystemStoreUsesVersionedKeyringEntries(t *testing.T) {
 	}
 	generation := backend.values[serviceName+"/"+prefix+":current"]
 	var details metadata
-	if err := json.Unmarshal([]byte(backend.values[serviceName+"/"+prefix+":"+generation+":metadata"]), &details); err != nil {
+	if err := json.Unmarshal(
+		[]byte(backend.values[serviceName+"/"+prefix+":"+generation+":metadata"]),
+		&details,
+	); err != nil {
 		t.Fatal(err)
 	}
 	if details.SchemaVersion != credentialMetadataSchemaVersion {

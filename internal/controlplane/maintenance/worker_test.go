@@ -4,17 +4,19 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/maintenance"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/remotetask"
-	"github.com/google/uuid"
 )
 
 func TestRunOnceDeletesExpiredSessionAndCascadesTask(t *testing.T) {
@@ -28,7 +30,11 @@ func TestRunOnceDeletesExpiredSessionAndCascadesTask(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = store.Close() })
 	identity, err := store.Identities().Create(ctx, storage.Identity{
-		ID: uuid.NewString(), Type: "human", DisplayName: "Test Identity", Status: "active", CreatedAt: now.Add(-time.Hour),
+		ID:          uuid.NewString(),
+		Type:        "human",
+		DisplayName: "Test Identity",
+		Status:      "active",
+		CreatedAt:   now.Add(-time.Hour),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -37,9 +43,13 @@ func TestRunOnceDeletesExpiredSessionAndCascadesTask(t *testing.T) {
 	expiredSession := storage.Session{
 		ID: uuid.NewString(), IdentityID: identity.ID, DeviceID: "crashed-client", ClusterID: "cluster-a",
 		Namespace: "development", State: "active", CreatedAt: now.Add(-time.Hour),
-		UpdatedAt: now.Add(-time.Minute), LastHeartbeatAt: now.Add(-time.Minute), ExpiresAt: now.Add(-time.Second),
+		UpdatedAt: now.Add(
+			-time.Minute,
+		), LastHeartbeatAt: now.Add(-time.Minute), ExpiresAt: now.Add(-time.Second),
 	}
-	network, err := networkspec.Normalize(networkspec.Spec{PodCIDRs: []string{"10.244.0.0/16"}})
+	network, err := networkspec.Normalize(
+		networkspec.Spec{PodCIDRs: []string{"10.244.0.0/16"}},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,15 +92,29 @@ func TestRunOnceDeletesExpiredSessionAndCascadesTask(t *testing.T) {
 	}
 	authorizationID := uuid.NewString()
 	if err := store.OAuthSessions().Create(ctx, storage.OAuthSession{
-		Kind: "refresh_token", SignatureHash: bytes.Repeat([]byte{3}, 32), RequestID: authorizationID,
-		IdentityID: identity.ID, RequestJSON: []byte(`{}`), Status: "active", CreatedAt: now.Add(-time.Hour), ExpiresAt: now.Add(time.Hour),
+		Kind:          "refresh_token",
+		SignatureHash: bytes.Repeat([]byte{3}, 32),
+		RequestID:     authorizationID,
+		IdentityID:    identity.ID,
+		RequestJSON:   []byte(`{}`),
+		Status:        "active",
+		CreatedAt:     now.Add(-time.Hour),
+		ExpiresAt:     now.Add(time.Hour),
 	}); err != nil {
 		t.Fatal(err)
 	}
 	expiredAdminSession := storage.AdminSession{
-		IDHash: bytes.Repeat([]byte{4}, 32), IdentityID: identity.ID, AuthorizationID: authorizationID, AuthenticationType: "normal",
-		CSRFTokenHash: bytes.Repeat([]byte{5}, 32), CreatedAt: now.Add(-time.Hour), LastSeenAt: now.Add(-time.Hour),
-		IdleExpiresAt: now.Add(-time.Second), AbsoluteExpiresAt: now.Add(-time.Second),
+		IDHash: bytes.Repeat(
+			[]byte{4},
+			32,
+		), IdentityID: identity.ID, AuthorizationID: authorizationID, AuthenticationType: "normal",
+		CSRFTokenHash: bytes.Repeat(
+			[]byte{5},
+			32,
+		), CreatedAt: now.Add(-time.Hour), LastSeenAt: now.Add(-time.Hour),
+		IdleExpiresAt: now.Add(
+			-time.Second,
+		), AbsoluteExpiresAt: now.Add(-time.Second),
 	}
 	if err := store.AdminSessions().Create(ctx, expiredAdminSession); err != nil {
 		t.Fatal(err)
@@ -104,9 +128,13 @@ func TestRunOnceDeletesExpiredSessionAndCascadesTask(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	worker, err := maintenance.New(store, slog.New(slog.NewTextHandler(io.Discard, nil)), maintenance.Config{
-		Now: func() time.Time { return now },
-	})
+	worker, err := maintenance.New(
+		store,
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		maintenance.Config{
+			Now: func() time.Time { return now },
+		},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,13 +142,14 @@ func TestRunOnceDeletesExpiredSessionAndCascadesTask(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report.Sessions != 1 || report.AdminSessions != 1 || report.Total() != 2 {
+	if report.Sessions != 1 || report.AdminSessions != 1 ||
+		report.Total() != 2 {
 		t.Fatalf("maintenance report = %#v", report)
 	}
-	if _, err := store.Sessions().GetByID(ctx, expiredSession.ID); err != storage.ErrNotFound {
+	if _, err := store.Sessions().GetByID(ctx, expiredSession.ID); !errors.Is(err, storage.ErrNotFound) {
 		t.Fatalf("expired Session lookup = %v", err)
 	}
-	if _, err := store.Tasks().GetByID(ctx, expiredTask.ID); err != storage.ErrNotFound {
+	if _, err := store.Tasks().GetByID(ctx, expiredTask.ID); !errors.Is(err, storage.ErrNotFound) {
 		t.Fatalf("crashed client's Port Forward Task lookup = %v", err)
 	}
 	if _, err := store.Sessions().GetByID(ctx, activeSession.ID); err != nil {
@@ -129,7 +158,11 @@ func TestRunOnceDeletesExpiredSessionAndCascadesTask(t *testing.T) {
 	if _, err := store.Tasks().GetByID(ctx, activeTask.ID); err != nil {
 		t.Fatalf("active Port Forward Task lookup = %v", err)
 	}
-	if _, err := store.AdminSessions().GetByHash(ctx, expiredAdminSession.IDHash); err != storage.ErrNotFound {
+	if _, err := store.AdminSessions().
+		GetByHash(ctx, expiredAdminSession.IDHash); !errors.Is(
+		err,
+		storage.ErrNotFound,
+	) {
 		t.Fatalf("expired Management Session lookup = %v", err)
 	}
 	if _, err := store.AdminSessions().GetByHash(ctx, activeAdminSession.IDHash); err != nil {

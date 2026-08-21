@@ -20,7 +20,9 @@ func (state fakeRelayReadiness) Ready() bool { return state.ready }
 
 func TestLoadGatewayConfigAppliesDefaults(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "kubeloop.yaml")
-	raw := []byte("controlPlane: {}\ngateway:\n  relay:\n    controlPlaneURL: https://registry.example.test\n    endpoint: wss://relay.example.test/tunnel\n")
+	raw := []byte(
+		"controlPlane: {}\ngateway:\n  relay:\n    controlPlaneURL: https://registry.example.test\n    endpoint: wss://relay.example.test/tunnel\n",
+	)
 	if err := os.WriteFile(path, raw, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -35,7 +37,9 @@ func TestLoadGatewayConfigAppliesDefaults(t *testing.T) {
 
 func TestLoadGatewayConfigRejectsLegacyRelayFields(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "kubeloop.yaml")
-	raw := []byte("controlPlane: {}\ngateway:\n  relay:\n    controlPlaneURL: https://registry.example.test\n    endpoint: wss://relay.example.test/tunnel\n    id: legacy\n")
+	raw := []byte(
+		"controlPlane: {}\ngateway:\n  relay:\n    controlPlaneURL: https://registry.example.test\n    endpoint: wss://relay.example.test/tunnel\n    id: legacy\n",
+	)
 	if err := os.WriteFile(path, raw, 0o600); err != nil {
 		t.Fatal(err)
 	}

@@ -164,13 +164,14 @@ func TestRuntimeConfigUsesProfileSOCKSPort(t *testing.T) {
 }
 
 func TestManagerOpenTrafficStreamRequiresMatchingActiveRuntimeSession(t *testing.T) {
-	session := remote.Session{ID: "ec0b67a2-e84c-4fe7-a0c5-810f210157b5", State: "active", Generation: 1}
+	session := remote.Session{ID: "ec0b67a2-e84c-4fe7-a0c5-810f210157b5", State: dataplaneSessionActive, Generation: 1}
 	runtime := &Runtime{ctx: context.Background(), status: Status{
-		State: "connected", SessionID: session.ID, SessionGeneration: session.Generation,
+		State: dataplaneConnected, SessionID: session.ID, SessionGeneration: session.Generation,
 	}}
 	entry := &managedRuntime{session: session, runtime: runtime}
 	manager := &Manager{active: map[string]*managedRuntime{"server": entry}}
 
+	//nolint:staticcheck // This test intentionally verifies defensive rejection of a nil context.
 	if _, err := manager.OpenTrafficStream(nil, "server", tunnel.TrafficModeExchange, "task"); err == nil {
 		t.Fatal("nil Traffic stream context was accepted")
 	}
@@ -194,6 +195,7 @@ func TestManagerOpenTrafficStreamRequiresMatchingActiveRuntimeSession(t *testing
 	}
 }
 
+//nolint:gocyclo // The lifecycle assertions intentionally stay in one scenario to verify ordering and reuse.
 func TestManagerReusesSessionAndReplacesChangedSession(t *testing.T) {
 	spec, err := networkspec.Normalize(networkspec.Spec{
 		PodCIDRs: []string{"10.42.0.0/16"}, PodIPs: []string{"10.43.7.9"},
@@ -228,10 +230,17 @@ func TestManagerReusesSessionAndReplacesChangedSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	serverProfile := profile.Profile{
-		ID: "service", BaseURL: "https://gateway.example.test", TunnelPath: "/tunnel",
+		ID: "service", BaseURL: "https://gateway.example.test", TunnelPath: defaultTunnelPath,
 		DNSNamespace: "dns-scope", HostAliases: []profile.HostAlias{{Domain: "api.example.test", IP: "10.0.0.8"}},
 	}
-	first := remote.Session{ID: "ec0b67a2-e84c-4fe7-a0c5-810f210157b5", Namespace: "payments", State: "active", Generation: 1, NetworkSpec: spec, NetworkSpecHash: hash}
+	first := remote.Session{
+		ID:              "ec0b67a2-e84c-4fe7-a0c5-810f210157b5",
+		Namespace:       "payments",
+		State:           dataplaneSessionActive,
+		Generation:      1,
+		NetworkSpec:     spec,
+		NetworkSpecHash: hash,
+	}
 	tickets.session = first
 	firstStatus, err := manager.Connect(context.Background(), serverProfile, first)
 	if err != nil {
@@ -249,7 +258,7 @@ func TestManagerReusesSessionAndReplacesChangedSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	tunStarts, tunNetwork, tunBridge, tunNamespace, core := tunStarter.snapshot()
-	if tunStatus.Mode != "tun" || tunStarts != 1 || tunBridge != firstStatus.SOCKSAddress ||
+	if tunStatus.Mode != ModeTUN || tunStarts != 1 || tunBridge != firstStatus.SOCKSAddress ||
 		tunNamespace != "dns-scope" || len(tunStarter.hosts) != 1 || tunStarter.hosts[0].Domain != "api.example.test" ||
 		len(tunNetwork.PodCIDRs) != 1 ||
 		len(tunNetwork.PodIPs) != 1 || tunNetwork.PodIPs[0] != "10.43.7.9" {
@@ -266,7 +275,11 @@ func TestManagerReusesSessionAndReplacesChangedSession(t *testing.T) {
 	if err := manager.UpdateDNSNamespace(context.Background(), serverProfile.ID, "observability"); err != nil {
 		t.Fatal(err)
 	}
-	if err := manager.UpdateHostAliases(context.Background(), serverProfile.ID, []singbox.HostAlias{{Domain: "db.example.test", IP: "10.0.0.9"}}); err != nil {
+	if err := manager.UpdateHostAliases(
+		context.Background(),
+		serverProfile.ID,
+		[]singbox.HostAlias{{Domain: "db.example.test", IP: "10.0.0.9"}},
+	); err != nil {
 		t.Fatal(err)
 	}
 	core.mu.Lock()
@@ -282,7 +295,7 @@ func TestManagerReusesSessionAndReplacesChangedSession(t *testing.T) {
 		t.Fatalf("TUN was not reused: starts=%d", tunStarts)
 	}
 	socksStatus, err := manager.StopTUN(serverProfile.ID)
-	if err != nil || socksStatus.Mode != "socks" {
+	if err != nil || socksStatus.Mode != ModeSOCKS {
 		t.Fatalf("stop TUN = %#v, %v", socksStatus, err)
 	}
 	second := first
@@ -333,9 +346,13 @@ func TestManagerDisconnectClosesRuntimeAndRemovesProfile(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = manager.Shutdown() })
-	serverProfile := profile.Profile{ID: "service", BaseURL: "https://gateway.example.test", TunnelPath: "/tunnel"}
+	serverProfile := profile.Profile{
+		ID:         "service",
+		BaseURL:    "https://gateway.example.test",
+		TunnelPath: defaultTunnelPath,
+	}
 	session := remote.Session{
-		ID: "ec0b67a2-e84c-4fe7-a0c5-810f210157b5", Namespace: "payments", State: "active",
+		ID: "ec0b67a2-e84c-4fe7-a0c5-810f210157b5", Namespace: "payments", State: dataplaneSessionActive,
 		Generation: 1, NetworkSpec: spec, NetworkSpecHash: hash,
 	}
 	tickets.session = session
@@ -381,7 +398,7 @@ func TestManagerRecoversControlStreamWithFreshSessionGeneration(t *testing.T) {
 	}
 	hash, _ := networkspec.Hash(spec)
 	session := remote.Session{
-		ID: "ec0b67a2-e84c-4fe7-a0c5-810f210157b5", Namespace: "payments", State: "active",
+		ID: "ec0b67a2-e84c-4fe7-a0c5-810f210157b5", Namespace: "payments", State: dataplaneSessionActive,
 		Generation: 4, NetworkSpec: spec, NetworkSpecHash: hash,
 	}
 	controls := make(chan net.Conn, 4)
@@ -414,7 +431,11 @@ func TestManagerRecoversControlStreamWithFreshSessionGeneration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	serverProfile := profile.Profile{ID: "service", BaseURL: "https://gateway.example.test", TunnelPath: "/tunnel"}
+	serverProfile := profile.Profile{
+		ID:         "service",
+		BaseURL:    "https://gateway.example.test",
+		TunnelPath: defaultTunnelPath,
+	}
 	first, err := manager.Connect(context.Background(), serverProfile, session)
 	if err != nil {
 		t.Fatal(err)
@@ -426,14 +447,14 @@ func TestManagerRecoversControlStreamWithFreshSessionGeneration(t *testing.T) {
 	firstControl := receiveControl(t, controls)
 	_ = firstControl.Close()
 	secondControl := receiveControl(t, controls)
-	defer secondControl.Close()
+	defer checkTestClose(t, secondControl.Close)
 
 	deadline := time.Now().Add(time.Second)
 	for {
 		manager.mu.Lock()
 		entry := manager.active[serverProfile.ID]
 		ready := entry != nil && !entry.recovering && entry.session.Generation == session.Generation+1 &&
-			entry.runtime.Status().SOCKSAddress == first.SOCKSAddress && entry.runtime.Status().Mode == "tun"
+			entry.runtime.Status().SOCKSAddress == first.SOCKSAddress && entry.runtime.Status().Mode == ModeTUN
 		manager.mu.Unlock()
 		if ready {
 			break
@@ -467,7 +488,7 @@ func TestManagerSystemResumeRefreshesTransportWithoutReinstallingTUN(t *testing.
 	}
 	hash, _ := networkspec.Hash(spec)
 	session := remote.Session{
-		ID: "ec0b67a2-e84c-4fe7-a0c5-810f210157b5", Namespace: "payments", State: "active",
+		ID: "ec0b67a2-e84c-4fe7-a0c5-810f210157b5", Namespace: "payments", State: dataplaneSessionActive,
 		Generation: 4, NetworkSpec: spec, NetworkSpecHash: hash,
 	}
 	controls := make(chan net.Conn, 4)
@@ -498,7 +519,11 @@ func TestManagerSystemResumeRefreshesTransportWithoutReinstallingTUN(t *testing.
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = manager.Shutdown() })
-	serverProfile := profile.Profile{ID: "service", BaseURL: "https://gateway.example.test", TunnelPath: "/tunnel"}
+	serverProfile := profile.Profile{
+		ID:         "service",
+		BaseURL:    "https://gateway.example.test",
+		TunnelPath: defaultTunnelPath,
+	}
 	initial, err := manager.Connect(context.Background(), serverProfile, session)
 	if err != nil {
 		t.Fatal(err)
@@ -508,18 +533,18 @@ func TestManagerSystemResumeRefreshesTransportWithoutReinstallingTUN(t *testing.
 	}
 	_, _, _, _, initialCore := tunStarter.snapshot()
 	firstControl := receiveControl(t, controls)
-	defer firstControl.Close()
+	defer checkTestClose(t, firstControl.Close)
 
 	if resumed := manager.ResumeAll(); resumed != 1 {
 		t.Fatalf("resumed Profiles = %d, want 1", resumed)
 	}
 	secondControl := receiveControl(t, controls)
-	defer secondControl.Close()
+	defer checkTestClose(t, secondControl.Close)
 
 	deadline := time.Now().Add(time.Second)
 	for {
 		status, statusErr := manager.Status(serverProfile.ID)
-		if statusErr == nil && status.State == "connected" && status.Mode == "tun" &&
+		if statusErr == nil && status.State == dataplaneConnected && status.Mode == ModeTUN &&
 			status.SOCKSAddress == initial.SOCKSAddress {
 			break
 		}
@@ -544,7 +569,7 @@ func TestManagerSystemResumeRefreshesTransportWithoutReinstallingTUN(t *testing.
 			t.Fatal("system resume status event was not published")
 		}
 	}
-	if wake.Status.State != "reconnecting" || !wake.Retryable {
+	if wake.Status.State != dataplaneReconnecting || !wake.Retryable {
 		t.Fatalf("system resume status event = %#v", wake)
 	}
 }
@@ -556,7 +581,7 @@ func TestManagerReplacesTransportWhenHeartbeatAdvancesGeneration(t *testing.T) {
 	}
 	hash, _ := networkspec.Hash(spec)
 	session := remote.Session{
-		ID: "ec0b67a2-e84c-4fe7-a0c5-810f210157b5", Namespace: "payments", State: "active",
+		ID: "ec0b67a2-e84c-4fe7-a0c5-810f210157b5", Namespace: "payments", State: dataplaneSessionActive,
 		Generation: 4, NetworkSpec: spec, NetworkSpecHash: hash,
 	}
 	controls := make(chan net.Conn, 4)
@@ -588,7 +613,11 @@ func TestManagerReplacesTransportWhenHeartbeatAdvancesGeneration(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = manager.Shutdown() })
-	serverProfile := profile.Profile{ID: "service", BaseURL: "https://gateway.example.test", TunnelPath: "/tunnel"}
+	serverProfile := profile.Profile{
+		ID:         "service",
+		BaseURL:    "https://gateway.example.test",
+		TunnelPath: defaultTunnelPath,
+	}
 	initial, err := manager.Connect(context.Background(), serverProfile, session)
 	if err != nil {
 		t.Fatal(err)
@@ -598,7 +627,7 @@ func TestManagerReplacesTransportWhenHeartbeatAdvancesGeneration(t *testing.T) {
 	}
 	_, _, _, _, initialCore := tunStarter.snapshot()
 	firstControl := receiveControl(t, controls)
-	defer firstControl.Close()
+	defer checkTestClose(t, firstControl.Close)
 	manager.mu.Lock()
 	initialTransportDone := manager.active[serverProfile.ID].runtime.TransportDone()
 	manager.mu.Unlock()
@@ -609,12 +638,12 @@ func TestManagerReplacesTransportWhenHeartbeatAdvancesGeneration(t *testing.T) {
 	tickets.mu.Unlock()
 	tickets.updates <- remote.SessionUpdate{ProfileID: serverProfile.ID, Session: updated}
 	secondControl := receiveControl(t, controls)
-	defer secondControl.Close()
+	defer checkTestClose(t, secondControl.Close)
 
 	deadline := time.Now().Add(time.Second)
 	for {
 		status, statusErr := manager.Status(serverProfile.ID)
-		if statusErr == nil && status.State == "connected" && status.Mode == "tun" &&
+		if statusErr == nil && status.State == dataplaneConnected && status.Mode == ModeTUN &&
 			status.SessionGeneration == updated.Generation && status.SOCKSAddress == initial.SOCKSAddress {
 			break
 		}
@@ -628,7 +657,11 @@ func TestManagerReplacesTransportWhenHeartbeatAdvancesGeneration(t *testing.T) {
 	}
 	tunStarts, _, _, _, currentCore := tunStarter.snapshot()
 	if tunStarts != 1 || currentCore != initialCore {
-		t.Fatalf("generation refresh reinstalled TUN: starts=%d corePreserved=%t", tunStarts, currentCore == initialCore)
+		t.Fatalf(
+			"generation refresh reinstalled TUN: starts=%d corePreserved=%t",
+			tunStarts,
+			currentCore == initialCore,
+		)
 	}
 	select {
 	case <-initialTransportDone:
@@ -651,11 +684,12 @@ func TestManagerReplacesTransportWhenHeartbeatAdvancesGeneration(t *testing.T) {
 			t.Fatal("Session generation refresh event was not published")
 		}
 	}
-	if refreshEvent.Status.State != "reconnecting" || !refreshEvent.Retryable {
+	if refreshEvent.Status.State != dataplaneReconnecting || !refreshEvent.Retryable {
 		t.Fatalf("Session generation refresh event = %#v", refreshEvent)
 	}
 }
 
+//nolint:gocyclo // The heartbeat and TUN transitions form one ordered state-machine scenario.
 func TestManagerReconfiguresTUNWhenHeartbeatRefreshesNetworkSpec(t *testing.T) {
 	initialSpec, err := networkspec.Normalize(networkspec.Spec{
 		PodCIDRs: []string{"10.42.0.0/16"}, ServiceIPs: []string{"10.96.0.10"},
@@ -672,7 +706,7 @@ func TestManagerReconfiguresTUNWhenHeartbeatRefreshesNetworkSpec(t *testing.T) {
 	}
 	refreshedHash, _ := networkspec.Hash(refreshedSpec)
 	session := remote.Session{
-		ID: "ec0b67a2-e84c-4fe7-a0c5-810f210157b5", Namespace: "payments", State: "active",
+		ID: "ec0b67a2-e84c-4fe7-a0c5-810f210157b5", Namespace: "payments", State: dataplaneSessionActive,
 		Generation: 4, NetworkSpec: initialSpec, NetworkSpecHash: initialHash,
 	}
 	controls := make(chan net.Conn, 4)
@@ -716,7 +750,11 @@ func TestManagerReconfiguresTUNWhenHeartbeatRefreshesNetworkSpec(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = manager.Shutdown() })
-	serverProfile := profile.Profile{ID: "service", BaseURL: "https://gateway.example.test", TunnelPath: "/tunnel"}
+	serverProfile := profile.Profile{
+		ID:         "service",
+		BaseURL:    "https://gateway.example.test",
+		TunnelPath: defaultTunnelPath,
+	}
 	firstStatus, err := manager.Connect(context.Background(), serverProfile, session)
 	if err != nil {
 		t.Fatal(err)
@@ -726,7 +764,7 @@ func TestManagerReconfiguresTUNWhenHeartbeatRefreshesNetworkSpec(t *testing.T) {
 	}
 	_, _, _, _, firstCore := tunStarter.snapshot()
 	firstControl := receiveControl(t, controls)
-	defer firstControl.Close()
+	defer checkTestClose(t, firstControl.Close)
 	manager.mu.Lock()
 	initialTransportDone := manager.active[serverProfile.ID].runtime.TransportDone()
 	manager.mu.Unlock()
@@ -746,7 +784,7 @@ func TestManagerReconfiguresTUNWhenHeartbeatRefreshesNetworkSpec(t *testing.T) {
 			t.Fatal("NetworkSpec refresh event was not published")
 		}
 	}
-	if refreshEvent.Status.State != "reconnecting" || !refreshEvent.Retryable {
+	if refreshEvent.Status.State != dataplaneReconnecting || !refreshEvent.Retryable {
 		t.Fatalf("NetworkSpec refresh event = %#v", refreshEvent)
 	}
 	select {
@@ -761,7 +799,7 @@ func TestManagerReconfiguresTUNWhenHeartbeatRefreshesNetworkSpec(t *testing.T) {
 	}
 	releaseRefresh()
 	secondControl := receiveControl(t, controls)
-	defer secondControl.Close()
+	defer checkTestClose(t, secondControl.Close)
 
 	deadline := time.Now().Add(time.Second)
 	var recovered Status
@@ -769,7 +807,7 @@ func TestManagerReconfiguresTUNWhenHeartbeatRefreshesNetworkSpec(t *testing.T) {
 		manager.mu.Lock()
 		entry := manager.active[serverProfile.ID]
 		ready := entry != nil && !entry.recovering && entry.session.Generation == session.Generation+1 &&
-			entry.session.NetworkSpecHash == refreshedHash && entry.runtime.Status().Mode == "tun"
+			entry.session.NetworkSpecHash == refreshedHash && entry.runtime.Status().Mode == ModeTUN
 		if entry != nil {
 			recovered = entry.runtime.Status()
 		}
@@ -783,7 +821,11 @@ func TestManagerReconfiguresTUNWhenHeartbeatRefreshesNetworkSpec(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	if recovered.SOCKSAddress != firstStatus.SOCKSAddress {
-		t.Fatalf("refreshed NetworkSpec changed stable SOCKS endpoint from %q to %q", firstStatus.SOCKSAddress, recovered.SOCKSAddress)
+		t.Fatalf(
+			"refreshed NetworkSpec changed stable SOCKS endpoint from %q to %q",
+			firstStatus.SOCKSAddress,
+			recovered.SOCKSAddress,
+		)
 	}
 	if starts.Load() != 2 {
 		t.Fatalf("transport starts = %d", starts.Load())
@@ -791,7 +833,13 @@ func TestManagerReconfiguresTUNWhenHeartbeatRefreshesNetworkSpec(t *testing.T) {
 	tunStarts, tunNetwork, tunBridge, _, recoveredCore := tunStarter.snapshot()
 	if tunStarts != 2 || recoveredCore == firstCore || tunBridge != recovered.SOCKSAddress ||
 		len(tunNetwork.PodIPs) != 1 || tunNetwork.PodIPs[0] != "10.42.7.9" || len(tunNetwork.ServiceIPs) != 0 {
-		t.Fatalf("refreshed TUN = starts %d network %#v bridge %q core-reused %t", tunStarts, tunNetwork, tunBridge, recoveredCore == firstCore)
+		t.Fatalf(
+			"refreshed TUN = starts %d network %#v bridge %q core-reused %t",
+			tunStarts,
+			tunNetwork,
+			tunBridge,
+			recoveredCore == firstCore,
+		)
 	}
 	select {
 	case <-firstCore.Done():
@@ -807,7 +855,7 @@ func TestManagerRejectsStaleRecoveryGeneration(t *testing.T) {
 	}
 	hash, _ := networkspec.Hash(spec)
 	session := remote.Session{
-		ID: "ec0b67a2-e84c-4fe7-a0c5-810f210157b5", Namespace: "payments", State: "active",
+		ID: "ec0b67a2-e84c-4fe7-a0c5-810f210157b5", Namespace: "payments", State: dataplaneSessionActive,
 		Generation: 5, NetworkSpec: spec, NetworkSpecHash: hash,
 	}
 	controls := make(chan net.Conn, 2)
@@ -844,7 +892,11 @@ func TestManagerRejectsStaleRecoveryGeneration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	serverProfile := profile.Profile{ID: "service", BaseURL: "https://gateway.example.test", TunnelPath: "/tunnel"}
+	serverProfile := profile.Profile{
+		ID:         "service",
+		BaseURL:    "https://gateway.example.test",
+		TunnelPath: defaultTunnelPath,
+	}
 	if _, err := manager.Connect(context.Background(), serverProfile, session); err != nil {
 		t.Fatal(err)
 	}
@@ -891,7 +943,7 @@ func TestManagerRejectsStaleRecoveryGeneration(t *testing.T) {
 	}
 	var terminal StatusEvent
 	eventDeadline := time.After(time.Second)
-	for terminal.Status.State != "error" {
+	for terminal.Status.State != dataplaneError {
 		select {
 		case terminal = <-statusEvents:
 		case <-eventDeadline:
@@ -950,7 +1002,7 @@ func TestManagerStatusCallbackCannotBlockLifecycleEvents(t *testing.T) {
 		close(releaseCallback)
 		_ = manager.Shutdown()
 	}()
-	manager.emit("service", Status{State: "connected"}, nil)
+	manager.emit("service", Status{State: dataplaneConnected}, nil)
 	select {
 	case <-callbackEntered:
 	case <-time.After(time.Second):
@@ -960,7 +1012,7 @@ func TestManagerStatusCallbackCannotBlockLifecycleEvents(t *testing.T) {
 	go func() {
 		defer close(done)
 		for generation := uint64(1); generation <= 100; generation++ {
-			manager.emit("service", Status{State: "connected", SessionGeneration: generation}, nil)
+			manager.emit("service", Status{State: dataplaneConnected, SessionGeneration: generation}, nil)
 		}
 	}()
 	select {
@@ -975,7 +1027,9 @@ func acceptTestControl(listener net.Listener) {
 	if err != nil {
 		return
 	}
-	defer connection.Close()
+	defer func() {
+		_ = connection.Close() // The background accept helper closes only to release the test connection.
+	}()
 	header, err := tunnel.ReadSessionHeader(connection)
 	if err != nil || header.Command != tunnel.CommandControl {
 		return

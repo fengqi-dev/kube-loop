@@ -41,7 +41,7 @@ func (config *Config) normalize() error {
 	}
 	if config.UDPIdleTimeout < 100*time.Millisecond || config.PrimaryDialTimeout < 100*time.Millisecond ||
 		config.ShadowWriteTimeout < 100*time.Millisecond || config.ShadowQueueSize < 1 || config.ShadowQueueSize > 1024 {
-		return errors.New("Mirror relay configuration is invalid")
+		return errors.New("mirror relay configuration is invalid")
 	}
 	return nil
 }
@@ -55,7 +55,7 @@ func New(
 	config Config,
 ) (*Relay, error) {
 	if connection == nil || listeners == nil {
-		return nil, errors.New("Mirror connection and listeners are required")
+		return nil, errors.New("mirror connection and listeners are required")
 	}
 	if err := config.normalize(); err != nil {
 		return nil, err

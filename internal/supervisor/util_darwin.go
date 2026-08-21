@@ -18,8 +18,11 @@ func syncDir(path string) error {
 	if err != nil {
 		return err
 	}
-	defer dir.Close()
-	return dir.Sync()
+	if err := dir.Sync(); err != nil {
+		_ = dir.Close()
+		return err
+	}
+	return dir.Close()
 }
 
 func fileSHA256(path string) (string, error) {
@@ -27,10 +30,14 @@ func fileSHA256(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer file.Close()
 	hash := sha256.New()
-	if _, err := io.Copy(hash, file); err != nil {
-		return "", fmt.Errorf("hash %s: %w", path, err)
+	if _, copyErr := io.Copy(hash, file); copyErr != nil {
+		_ = file.Close()
+		return "", fmt.Errorf("hash %s: %w", path, copyErr)
 	}
-	return hex.EncodeToString(hash.Sum(nil)), nil
+	digest := hex.EncodeToString(hash.Sum(nil))
+	if err := file.Close(); err != nil {
+		return "", fmt.Errorf("close %s after hashing: %w", path, err)
+	}
+	return digest, nil
 }

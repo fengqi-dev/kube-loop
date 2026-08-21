@@ -17,10 +17,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/things-go/go-socks5/statute"
+
 	clienttraffic "github.com/fengqi-dev/kube-loop/internal/client/traffic"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
 	"github.com/fengqi-dev/kube-loop/internal/trafficinspect"
-	"github.com/things-go/go-socks5/statute"
 )
 
 func TestBridgeSetLogHandler(t *testing.T) {
@@ -115,8 +116,8 @@ func TestSOCKSUDPDomainRoundTrip(t *testing.T) {
 
 func TestFramedConnAdaptsGatewayDatagrams(t *testing.T) {
 	local, remote := net.Pipe()
-	defer local.Close()
-	defer remote.Close()
+	defer checkTestClose(t, local.Close)
+	defer checkTestClose(t, remote.Close)
 	connection := newFramedConn(local)
 	result := make(chan error, 1)
 	go func() {
@@ -152,7 +153,7 @@ func TestDialGatewayTCPPreservesDomain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer gateway.Close()
+	defer checkTestClose(t, gateway.Close)
 	result := make(chan error, 1)
 	go func() {
 		connection, err := gateway.Accept()
@@ -160,7 +161,7 @@ func TestDialGatewayTCPPreservesDomain(t *testing.T) {
 			result <- err
 			return
 		}
-		defer connection.Close()
+		defer checkTestClose(t, connection.Close)
 		request, err := tunnel.ReadOpen(connection)
 		if err != nil {
 			result <- err
@@ -200,7 +201,7 @@ func TestDialGatewayTCPPreservesDomain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer connection.Close()
+	defer checkTestClose(t, connection.Close)
 	_ = connection.SetDeadline(time.Now().Add(3 * time.Second))
 	if _, err := connection.Write([]byte("ping")); err != nil {
 		t.Fatal(err)
@@ -407,7 +408,8 @@ func TestBridgeInProcessHTTPInspectionThroughGateway(t *testing.T) {
 	if readErr != nil || closeErr != nil {
 		t.Fatal(errors.Join(readErr, closeErr))
 	}
-	if response.StatusCode != http.StatusOK || string(body) != "through-relay" || response.Header.Get("X-Origin-Path") != "/poc" {
+	if response.StatusCode != http.StatusOK || string(body) != "through-relay" ||
+		response.Header.Get("X-Origin-Path") != "/poc" {
 		t.Fatalf("response status=%d body=%q path=%q", response.StatusCode, body, response.Header.Get("X-Origin-Path"))
 	}
 	if event := <-inspected; event != "GET http.test/poc" {
@@ -423,7 +425,7 @@ func TestDialGatewayUDPAdaptsDatagrams(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer gateway.Close()
+	defer checkTestClose(t, gateway.Close)
 	result := make(chan error, 1)
 	go func() {
 		connection, err := gateway.Accept()
@@ -431,7 +433,7 @@ func TestDialGatewayUDPAdaptsDatagrams(t *testing.T) {
 			result <- err
 			return
 		}
-		defer connection.Close()
+		defer checkTestClose(t, connection.Close)
 		request, err := tunnel.ReadOpen(connection)
 		if err != nil {
 			result <- err
@@ -466,7 +468,7 @@ func TestDialGatewayUDPAdaptsDatagrams(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer connection.Close()
+	defer checkTestClose(t, connection.Close)
 	_ = connection.SetDeadline(time.Now().Add(3 * time.Second))
 	if _, err := connection.Write([]byte("query")); err != nil {
 		t.Fatal(err)
@@ -489,13 +491,13 @@ func TestDialGatewayReturnsStatusError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer gateway.Close()
+	defer checkTestClose(t, gateway.Close)
 	go func() {
 		connection, acceptErr := gateway.Accept()
 		if acceptErr != nil {
 			return
 		}
-		defer connection.Close()
+		defer checkTestClose(t, connection.Close)
 		if _, readErr := tunnel.ReadOpen(connection); readErr == nil {
 			_ = tunnel.WriteStatus(connection, errors.New("target denied"))
 		}
@@ -513,11 +515,11 @@ func TestDialGatewayReturnsStatusError(t *testing.T) {
 
 func TestRelayPreservesTCPHalfCloseResponse(t *testing.T) {
 	clientSide, relayClient := tcpConnectionPair(t)
-	defer clientSide.Close()
-	defer relayClient.Close()
+	defer checkTestClose(t, clientSide.Close)
+	defer checkTestClose(t, relayClient.Close)
 	relayTarget, targetSide := tcpConnectionPair(t)
-	defer relayTarget.Close()
-	defer targetSide.Close()
+	defer checkTestClose(t, relayTarget.Close)
+	defer checkTestClose(t, targetSide.Close)
 
 	relayDone := make(chan struct{})
 	go func() {
@@ -568,7 +570,7 @@ func tcpConnectionPair(t *testing.T) (net.Conn, net.Conn) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer listener.Close()
+	defer checkTestClose(t, listener.Close)
 	accepted := make(chan net.Conn, 1)
 	acceptErr := make(chan error, 1)
 	go func() {
@@ -587,7 +589,7 @@ func tcpConnectionPair(t *testing.T) (net.Conn, net.Conn) {
 	case server := <-accepted:
 		return client, server
 	case err := <-acceptErr:
-		client.Close()
+		checkTestClose(t, client.Close)
 		t.Fatal(err)
 		return nil, nil
 	}
@@ -598,13 +600,13 @@ func TestHostTCPHandlerBypassesGateway(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer local.Close()
+	defer checkTestClose(t, local.Close)
 	go func() {
 		conn, err := local.Accept()
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer checkTestClose(t, conn.Close)
 		buf := make([]byte, 64)
 		n, _ := conn.Read(buf)
 		_, _ = conn.Write(append([]byte("local:"), buf[:n]...))
@@ -617,12 +619,12 @@ func TestHostTCPHandlerBypassesGateway(t *testing.T) {
 				return nil, false
 			}
 			return func(client net.Conn) {
-				defer client.Close()
+				defer checkTestClose(t, client.Close)
 				upstream, err := net.Dial("tcp", local.Addr().String())
 				if err != nil {
 					return
 				}
-				defer upstream.Close()
+				defer checkTestClose(t, upstream.Close)
 				relay(client, client, upstream)
 			}, true
 		},
@@ -631,14 +633,14 @@ func TestHostTCPHandlerBypassesGateway(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer listener.Close()
+	defer checkTestClose(t, listener.Close)
 	go func() { _ = server.Serve(listener) }()
 
 	conn, err := net.Dial("tcp", listener.Addr().String())
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close()
+	defer checkTestClose(t, conn.Close)
 	_ = conn.SetDeadline(time.Now().Add(3 * time.Second))
 
 	// SOCKS greeting + connect to intercepted ClusterIP.
@@ -683,7 +685,7 @@ func TestHostUDPHandlerBypassesGateway(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer local.Close()
+	defer checkTestClose(t, local.Close)
 	go func() {
 		buf := make([]byte, 64)
 		for {
@@ -714,14 +716,14 @@ func TestHostUDPHandlerBypassesGateway(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer listener.Close()
+	defer checkTestClose(t, listener.Close)
 	go func() { _ = server.Serve(listener) }()
 
 	control, err := net.Dial("tcp", listener.Addr().String())
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer control.Close()
+	defer checkTestClose(t, control.Close)
 	_ = control.SetDeadline(time.Now().Add(3 * time.Second))
 
 	if _, err := control.Write([]byte{5, 1, 0}); err != nil {
@@ -759,7 +761,7 @@ func TestHostUDPHandlerBypassesGateway(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer client.Close()
+	defer checkTestClose(t, client.Close)
 	_ = client.SetDeadline(time.Now().Add(3 * time.Second))
 
 	packet, err := encodeTestDatagram("10.105.153.132", 9090, []byte("ping"))

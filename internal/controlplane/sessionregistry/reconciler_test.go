@@ -9,41 +9,51 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/remotetask"
-	"github.com/google/uuid"
 )
 
 func TestReconcilerTerminatesOnlyStaleStreamOwners(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 8, 10, 16, 0, 0, 0, time.UTC)
 	store, err := storage.Open(ctx, storage.Config{
-		Backend: storage.BackendSQLite, SQLitePath: filepath.Join(t.TempDir(), "runtime-recovery.db"), ControlPlaneReplicas: 1,
+		Backend:              storage.BackendSQLite,
+		SQLitePath:           filepath.Join(t.TempDir(), "runtime-recovery.db"),
+		ControlPlaneReplicas: 1,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	identityID, sessionID := uuid.NewString(), uuid.NewString()
 	if _, err := store.Identities().Create(ctx, storage.Identity{
-		ID: identityID, Type: "human", DisplayName: "Test Identity", Status: "active", CreatedAt: now, UpdatedAt: now,
+		ID:          identityID,
+		Type:        "human",
+		DisplayName: "Test Identity",
+		Status:      statusActive,
+		CreatedAt:   now,
+		UpdatedAt:   now,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	network, _ := networkspec.Normalize(networkspec.Spec{PodCIDRs: []string{"10.244.0.0/16"}})
+	network, _ := networkspec.Normalize(
+		networkspec.Spec{PodCIDRs: []string{"10.244.0.0/16"}},
+	)
 	networkJSON, _ := networkspec.CanonicalJSON(network)
 	networkHash, _ := networkspec.Hash(network)
 	if err := store.Sessions().Create(ctx, storage.Session{
 		ID: sessionID, IdentityID: identityID, DeviceID: "device", ClusterID: "cluster",
-		Namespace: "development", State: "active", NetworkSpec: networkJSON, NetworkSpecHash: networkHash,
+		Namespace: "development", State: statusActive, NetworkSpec: networkJSON, NetworkSpecHash: networkHash,
 		CreatedAt: now.Add(-time.Hour), UpdatedAt: now, LastHeartbeatAt: now, ExpiresAt: now.Add(time.Hour),
 	}); err != nil {
 		t.Fatal(err)
 	}
 	tasks := map[string]storage.Task{
 		"stale-exec": {
-			ID: uuid.NewString(), IdentityID: identityID, SessionID: sessionID, Type: "pod-exec",
+			ID: uuid.NewString(), IdentityID: identityID, SessionID: sessionID, Type: taskTypePodExec,
 			State: remotetask.Running, Spec: json.RawMessage(`{}`), Result: json.RawMessage(`{"exitCode":0}`),
 			IdempotencyKey: "stale-exec", CreatedAt: now.Add(-time.Minute), UpdatedAt: now.Add(-time.Minute),
 		},
@@ -53,7 +63,7 @@ func TestReconcilerTerminatesOnlyStaleStreamOwners(t *testing.T) {
 			IdempotencyKey: "stopping-file", CreatedAt: now.Add(-time.Minute), UpdatedAt: now.Add(-time.Minute),
 		},
 		"live-exec": {
-			ID: uuid.NewString(), IdentityID: identityID, SessionID: sessionID, Type: "pod-exec",
+			ID: uuid.NewString(), IdentityID: identityID, SessionID: sessionID, Type: taskTypePodExec,
 			State: remotetask.Running, Spec: json.RawMessage(`{}`), Result: json.RawMessage(`{}`),
 			IdempotencyKey: "live-exec", CreatedAt: now.Add(-time.Minute), UpdatedAt: now.Add(-time.Second),
 		},
@@ -69,8 +79,13 @@ func TestReconcilerTerminatesOnlyStaleStreamOwners(t *testing.T) {
 		}
 	}
 	reconciler, err := NewReconciler(
-		store, slog.New(slog.NewTextHandler(io.Discard, nil)),
-		RecoveryConfig{Interval: time.Second, StaleAfter: 10 * time.Second, Now: func() time.Time { return now }},
+		store,
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		RecoveryConfig{
+			Interval:   time.Second,
+			StaleAfter: 10 * time.Second,
+			Now:        func() time.Time { return now },
+		},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -94,7 +109,8 @@ func TestReconcilerTerminatesOnlyStaleStreamOwners(t *testing.T) {
 	if count, err := reconciler.RunOnce(ctx); err != nil || count != 1 {
 		t.Fatalf("disconnected RunOnce() = %d, %v", count, err)
 	}
-	portForward, err := store.Tasks().GetByID(ctx, tasks["live-port-forward"].ID)
+	portForward, err := store.Tasks().
+		GetByID(ctx, tasks["live-port-forward"].ID)
 	if err != nil || portForward.State != remotetask.Stopped {
 		t.Fatalf("disconnected Port Forward = %#v, %v", portForward, err)
 	}

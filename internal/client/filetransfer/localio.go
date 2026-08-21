@@ -11,12 +11,14 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/filestream"
-	"github.com/google/uuid"
 )
 
 const maximumLocalArchiveEntries = 100_000
@@ -33,7 +35,9 @@ func (manager *Manager) runUpload(
 	defer cleanup()
 	previous := manager.task(taskID)
 	formattedChecksum := filestream.FormatChecksum(checksum)
-	if (previous.TotalBytes != 0 && previous.TotalBytes != size) || (previous.Checksum != "" && previous.Checksum != formattedChecksum) {
+	sizeChanged := previous.TotalBytes != 0 && previous.TotalBytes != size
+	checksumChanged := previous.Checksum != "" && previous.Checksum != formattedChecksum
+	if sizeChanged || checksumChanged {
 		return filestream.TransferResult{}, errors.New("local upload source changed since the transfer started")
 	}
 	manager.update(taskID, func(task *Task) {
@@ -41,9 +45,15 @@ func (manager *Manager) runUpload(
 		task.Checksum = formattedChecksum
 	})
 	_, result, err := Upload(ctx, manager.client, entry.profile, entry.session, remote.FileTransferSpec{
-		Direction: "upload", Kind: entry.request.Kind, Pod: entry.request.Pod, Container: entry.request.Container,
-		RemotePath: entry.request.RemotePath, Size: size, Checksum: filestream.FormatChecksum(checksum),
-		Overwrite: entry.request.Overwrite, ResumeID: entry.resumeID,
+		Direction:  fileTransferDirectionUpload,
+		Kind:       entry.request.Kind,
+		Pod:        entry.request.Pod,
+		Container:  entry.request.Container,
+		RemotePath: entry.request.RemotePath,
+		Size:       size,
+		Checksum:   filestream.FormatChecksum(checksum),
+		Overwrite:  entry.request.Overwrite,
+		ResumeID:   entry.resumeID,
 	}, source, func(progress filestream.ProgressStatus) { manager.progress(taskID, progress) })
 	return result, err
 }
@@ -52,16 +62,16 @@ func (manager *Manager) runDownload(
 	ctx context.Context,
 	taskID string,
 	entry *activeTransfer,
-) (filestream.TransferResult, error) {
+) (_ filestream.TransferResult, resultErr error) {
 	destination := entry.request.LocalPath
 	parent := filepath.Dir(destination)
-	if err := os.MkdirAll(parent, 0o755); err != nil {
+	if err := os.MkdirAll(parent, 0o750); err != nil {
 		return filestream.TransferResult{}, fmt.Errorf("create local destination directory: %w", err)
 	}
 	if err := validateDestination(destination, entry.request.Overwrite); err != nil {
 		return filestream.TransferResult{}, err
 	}
-	if entry.request.Kind == "file" {
+	if entry.request.Kind == fileTransferKindFile {
 		return manager.runFileDownload(ctx, taskID, entry)
 	}
 	temporary, err := os.CreateTemp(parent, ".kubeloop-download-*.part")
@@ -69,10 +79,17 @@ func (manager *Manager) runDownload(
 		return filestream.TransferResult{}, fmt.Errorf("create local download temporary file: %w", err)
 	}
 	temporaryPath := temporary.Name()
-	defer os.Remove(temporaryPath)
+	defer func() {
+		if err := os.Remove(temporaryPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			resultErr = errors.Join(resultErr, fmt.Errorf("remove local download temporary file: %w", err))
+		}
+	}()
 	bounded := &boundedWriter{writer: temporary, maximum: manager.maximumBytes}
 	_, result, transferErr := Download(ctx, manager.client, entry.profile, entry.session, remote.FileTransferSpec{
-		Direction: "download", Kind: entry.request.Kind, Pod: entry.request.Pod, Container: entry.request.Container,
+		Direction:  fileTransferDirectionDownload,
+		Kind:       entry.request.Kind,
+		Pod:        entry.request.Pod,
+		Container:  entry.request.Container,
 		RemotePath: entry.request.RemotePath,
 	}, bounded, func(progress filestream.ProgressStatus) { manager.progress(taskID, progress) })
 	if transferErr != nil {
@@ -90,7 +107,11 @@ func (manager *Manager) runDownload(
 	if err != nil {
 		return result, fmt.Errorf("create local extraction directory: %w", err)
 	}
-	defer os.RemoveAll(temporaryDirectory)
+	defer func() {
+		if err := os.RemoveAll(temporaryDirectory); err != nil {
+			resultErr = errors.Join(resultErr, fmt.Errorf("remove local extraction directory: %w", err))
+		}
+	}()
 	archive, err := os.Open(temporaryPath)
 	if err != nil {
 		return result, fmt.Errorf("open downloaded directory archive: %w", err)
@@ -126,8 +147,12 @@ func (manager *Manager) runFileDownload(
 	})
 	bounded := &boundedWriter{writer: temporary, maximum: manager.maximumBytes, written: offset}
 	_, result, transferErr := Download(ctx, manager.client, entry.profile, entry.session, remote.FileTransferSpec{
-		Direction: "download", Kind: "file", Pod: entry.request.Pod, Container: entry.request.Container,
-		RemotePath: entry.request.RemotePath, Offset: offset,
+		Direction:  fileTransferDirectionDownload,
+		Kind:       fileTransferKindFile,
+		Pod:        entry.request.Pod,
+		Container:  entry.request.Container,
+		RemotePath: entry.request.RemotePath,
+		Offset:     offset,
 	}, bounded, func(progress filestream.ProgressStatus) { manager.progress(taskID, progress) })
 	if transferErr != nil {
 		_ = temporary.Close()
@@ -154,16 +179,21 @@ func (manager *Manager) runFileDownload(
 	return result, nil
 }
 
-func hashLocalFile(ctx context.Context, filename string, maximum uint64) (uint64, [32]byte, error) {
+func hashLocalFile(ctx context.Context, filename string, maximum uint64) (_ uint64, _ [32]byte, resultErr error) {
 	info, err := os.Lstat(filename)
-	if err != nil || !info.Mode().IsRegular() || info.Size() < 0 || uint64(info.Size()) > maximum {
+	size, validSize := nonNegativeUint64(infoSize(info, err))
+	if err != nil || !info.Mode().IsRegular() || !validSize || size > maximum {
 		return 0, [32]byte{}, errors.New("downloaded temporary file is invalid")
 	}
 	file, err := os.Open(filename)
 	if err != nil {
 		return 0, [32]byte{}, err
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			resultErr = errors.Join(resultErr, fmt.Errorf("close downloaded temporary file: %w", err))
+		}
+	}()
 	opened, err := file.Stat()
 	if err != nil || !opened.Mode().IsRegular() || !os.SameFile(info, opened) {
 		return 0, [32]byte{}, errors.New("downloaded temporary file changed while opening")
@@ -174,7 +204,11 @@ func hashLocalFile(ctx context.Context, filename string, maximum uint64) (uint64
 	}
 	var checksum [32]byte
 	copy(checksum[:], hash.Sum(nil))
-	return uint64(opened.Size()), checksum, nil
+	openedSize, validSize := nonNegativeUint64(opened.Size())
+	if !validSize {
+		return 0, [32]byte{}, errors.New("downloaded temporary file has an invalid size")
+	}
+	return openedSize, checksum, nil
 }
 
 func downloadTemporaryPath(destination, taskID string) string {
@@ -205,7 +239,11 @@ func openPartialDownload(filename string, maximum uint64) (*os.File, uint64, err
 		_ = file.Close()
 		return nil, 0, errors.New("resumable download temporary file changed while opening")
 	}
-	offset := uint64(opened.Size())
+	offset, validSize := nonNegativeUint64(opened.Size())
+	if !validSize {
+		_ = file.Close()
+		return nil, 0, errors.New("resumable download temporary file has an invalid size")
+	}
 	if offset > maximum {
 		if err := file.Truncate(0); err != nil {
 			_ = file.Close()
@@ -224,7 +262,7 @@ func (manager *Manager) prepareUpload(
 	ctx context.Context,
 	request Request,
 ) (*os.File, uint64, [32]byte, func(), error) {
-	if request.Kind == "file" {
+	if request.Kind == fileTransferKindFile {
 		file, size, checksum, err := openUploadFile(ctx, request.LocalPath, manager.maximumBytes)
 		if err != nil {
 			return nil, 0, [32]byte{}, func() {}, err
@@ -287,7 +325,8 @@ func openUploadFile(ctx context.Context, filename string, maximum uint64) (*os.F
 		_ = file.Close()
 		return nil, 0, [32]byte{}, errors.New("local upload file changed while opening")
 	}
-	if openedInfo.Size() <= 0 || uint64(openedInfo.Size()) > maximum {
+	openedSize, validSize := nonNegativeUint64(openedInfo.Size())
+	if !validSize || openedSize == 0 || openedSize > maximum {
 		_ = file.Close()
 		return nil, 0, [32]byte{}, errors.New("local upload file exceeds the configured size limit")
 	}
@@ -302,7 +341,7 @@ func openUploadFile(ctx context.Context, filename string, maximum uint64) (*os.F
 	}
 	var checksum [32]byte
 	copy(checksum[:], hash.Sum(nil))
-	return file, uint64(openedInfo.Size()), checksum, nil
+	return file, openedSize, checksum, nil
 }
 
 func createArchive(ctx context.Context, root string, destination *os.File, maximum uint64) ([32]byte, uint64, error) {
@@ -313,6 +352,10 @@ func createArchive(ctx context.Context, root string, destination *os.File, maxim
 	hash := sha256.New()
 	bounded := &boundedWriter{writer: io.MultiWriter(destination, hash), maximum: maximum}
 	archive := tar.NewWriter(bounded)
+	sourceRoot, err := os.OpenRoot(root)
+	if err != nil {
+		return [32]byte{}, 0, fmt.Errorf("open local directory upload root: %w", err)
+	}
 	entries := 0
 	walkErr := filepath.WalkDir(root, func(filename string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -357,7 +400,7 @@ func createArchive(ctx context.Context, root string, destination *os.File, maxim
 		if info.IsDir() {
 			return nil
 		}
-		file, err := os.Open(filename)
+		file, err := sourceRoot.Open(relative)
 		if err != nil {
 			return err
 		}
@@ -370,9 +413,10 @@ func createArchive(ctx context.Context, root string, destination *os.File, maxim
 		closeErr := file.Close()
 		return errors.Join(copyErr, closeErr)
 	})
+	rootCloseErr := sourceRoot.Close()
 	closeErr := archive.Close()
-	if walkErr != nil || closeErr != nil {
-		return [32]byte{}, 0, errors.Join(walkErr, closeErr)
+	if walkErr != nil || rootCloseErr != nil || closeErr != nil {
+		return [32]byte{}, 0, errors.Join(walkErr, rootCloseErr, closeErr)
 	}
 	if bounded.written == 0 {
 		return [32]byte{}, 0, errors.New("local directory archive is empty")
@@ -400,8 +444,8 @@ func extractArchive(ctx context.Context, input io.Reader, root string, maximum u
 		}
 		header, err := archive.Next()
 		if errors.Is(err, io.EOF) {
-			for index := len(directories) - 1; index >= 0; index-- {
-				if err := os.Chmod(directories[index].path, directories[index].mode); err != nil {
+			for _, v := range slices.Backward(directories) {
+				if err := os.Chmod(v.path, v.mode); err != nil {
 					return err
 				}
 			}
@@ -419,7 +463,7 @@ func extractArchive(ctx context.Context, input io.Reader, root string, maximum u
 		cleaned := path.Clean(name)
 		if name == "" || path.IsAbs(name) || cleaned == ".." || strings.HasPrefix(cleaned, "../") ||
 			containsParentPathComponent(name) ||
-			(header.Typeflag != tar.TypeDir && header.Typeflag != tar.TypeReg && header.Typeflag != tar.TypeRegA) ||
+			(header.Typeflag != tar.TypeDir && header.Typeflag != tar.TypeReg) ||
 			header.Size < 0 || total > maximum || uint64(header.Size) > maximum-total {
 			return errors.New("downloaded directory archive contains an unsafe entry")
 		}
@@ -428,7 +472,7 @@ func extractArchive(ctx context.Context, input io.Reader, root string, maximum u
 			return errors.New("downloaded directory archive contains a duplicate entry")
 		}
 		seen[cleaned] = struct{}{}
-		mode := os.FileMode(header.Mode) & 0o777
+		mode := os.FileMode(header.Mode & 0o777)
 		if cleaned == "." {
 			if header.Typeflag != tar.TypeDir {
 				return errors.New("downloaded directory root entry is invalid")
@@ -448,7 +492,7 @@ func extractArchive(ctx context.Context, input io.Reader, root string, maximum u
 			directories = append(directories, directoryPermission{path: target, mode: mode})
 			continue
 		}
-		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(target), 0o750); err != nil {
 			return err
 		}
 		file, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, mode)
@@ -504,7 +548,10 @@ func publishLocalPath(temporary, destination string, overwrite bool) error {
 	}
 	if err := os.Rename(temporary, destination); err != nil {
 		if rollbackErr := os.Rename(backup, destination); rollbackErr != nil {
-			return errors.Join(fmt.Errorf("publish local download: %w", err), fmt.Errorf("restore previous destination: %w", rollbackErr))
+			return errors.Join(
+				fmt.Errorf("publish local download: %w", err),
+				fmt.Errorf("restore previous destination: %w", rollbackErr),
+			)
 		}
 		return fmt.Errorf("publish local download: %w", err)
 	}
@@ -525,8 +572,33 @@ func (writer *boundedWriter) Write(value []byte) (int, error) {
 		return 0, errors.New("file transfer exceeds the configured local size limit")
 	}
 	n, err := writer.writer.Write(value)
-	writer.written += uint64(n)
+	written, validCount := nonNegativeIntUint64(n)
+	if !validCount {
+		return 0, io.ErrShortWrite
+	}
+	writer.written += written
 	return n, err
+}
+
+func infoSize(info os.FileInfo, err error) int64 {
+	if err != nil || info == nil {
+		return -1
+	}
+	return info.Size()
+}
+
+func nonNegativeUint64(value int64) (uint64, bool) {
+	if value < 0 {
+		return 0, false
+	}
+	return uint64(value), true
+}
+
+func nonNegativeIntUint64(value int) (uint64, bool) {
+	if value < 0 {
+		return 0, false
+	}
+	return uint64(value), true
 }
 
 type contextReader struct {

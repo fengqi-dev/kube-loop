@@ -11,8 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
 	version "github.com/hashicorp/go-version"
+
+	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
 )
 
 const (
@@ -76,25 +77,45 @@ type Message struct {
 	Reject      *Reject
 }
 
+const developmentVersion = "dev"
+
 func NewClientHello(clientVersion, deviceID string) ClientHello {
 	if strings.TrimSpace(clientVersion) == "" {
-		clientVersion = "dev"
+		clientVersion = developmentVersion
 	}
 	return ClientHello{
-		Type: KindClientHello, ProtocolVersions: []string{Version},
-		ClientVersion: clientVersion, DeviceID: deviceID,
-		Capabilities: []string{"cancel", "half-close", "ping-pong", "smux.v2", CapabilityTrafficWebSocket, "tunnel.open.v2"},
+		Type:             KindClientHello,
+		ProtocolVersions: []string{Version},
+		ClientVersion:    clientVersion,
+		DeviceID:         deviceID,
+		Capabilities: []string{
+			"cancel",
+			"half-close",
+			"ping-pong",
+			"smux.v2",
+			CapabilityTrafficWebSocket,
+			"tunnel.open.v2",
+		},
 	}
 }
 
 func NewServerHello(serverVersion string, limits Limits) ServerHello {
 	if strings.TrimSpace(serverVersion) == "" {
-		serverVersion = "dev"
+		serverVersion = developmentVersion
 	}
 	return ServerHello{
-		Type: KindServerHello, ProtocolVersion: Version, ServerVersion: serverVersion,
-		Capabilities: []string{"cancel", "half-close", "ping-pong", "smux.v2", CapabilityTrafficWebSocket, "tunnel.open.v2"},
-		Limits:       limits,
+		Type:            KindServerHello,
+		ProtocolVersion: Version,
+		ServerVersion:   serverVersion,
+		Capabilities: []string{
+			"cancel",
+			"half-close",
+			"ping-pong",
+			"smux.v2",
+			CapabilityTrafficWebSocket,
+			"tunnel.open.v2",
+		},
+		Limits: limits,
 	}
 }
 
@@ -185,13 +206,15 @@ func (hello ClientHello) Validate() error {
 }
 
 func (hello ServerHello) Validate() error {
+	validConnectionLimits := hello.Limits.MaximumConnectionsPerUser >= 1 &&
+		hello.Limits.MaximumConnectionsPerUser <= hello.Limits.MaximumPhysicalConnections
 	if hello.Type != KindServerHello || !safeIdentifier(hello.ProtocolVersion, 16) ||
 		!safeText(hello.ServerVersion, 64) || !validUniqueIdentifiers(hello.Capabilities, 32, 64) ||
 		hello.Limits.MaximumFrameBytes < MaximumHandshakeBytes || hello.Limits.MaximumFrameBytes > 16<<20 ||
 		hello.Limits.MaximumStreamFrameBytes < 1 || hello.Limits.MaximumStreamFrameBytes > 1<<20 ||
 		hello.Limits.MaximumStreamsPerConnection < 1 || hello.Limits.MaximumStreamsPerConnection > 1<<20 ||
 		hello.Limits.MaximumPhysicalConnections < 1 || hello.Limits.MaximumPhysicalConnections > 1<<20 ||
-		hello.Limits.MaximumConnectionsPerUser < 1 || hello.Limits.MaximumConnectionsPerUser > hello.Limits.MaximumPhysicalConnections ||
+		!validConnectionLimits ||
 		hello.Limits.StreamIdleTimeoutMillis <= 0 || hello.Limits.StreamIdleTimeoutMillis > (24*time.Hour).Milliseconds() {
 		return ErrInvalidHandshake
 	}

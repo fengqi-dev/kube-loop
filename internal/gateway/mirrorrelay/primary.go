@@ -25,7 +25,7 @@ func newPrimaryPool(
 	dial func(context.Context, string, string) (net.Conn, error),
 ) (*primaryPool, error) {
 	if len(sets) == 0 {
-		return nil, errors.New("Mirror requires original Service backends")
+		return nil, errors.New("mirror requires original Service backends")
 	}
 	if dial == nil {
 		dialer := &net.Dialer{}
@@ -36,9 +36,9 @@ func newPrimaryPool(
 		next: make(map[string]int, len(sets)),
 	}
 	for _, set := range sets {
-		key := primaryKey(strings.ToLower(string(set.Protocol)), set.ServicePort)
+		key := primaryKey(strings.ToLower(set.Protocol), set.ServicePort)
 		if _, exists := pool.targets[key]; exists || len(set.Targets) == 0 {
-			return nil, errors.New("Mirror backend sets are invalid")
+			return nil, errors.New("mirror backend sets are invalid")
 		}
 		pool.targets[key] = append([]trafficcontrol.BackendTarget(nil), set.Targets...)
 	}
@@ -55,7 +55,7 @@ func (pool *primaryPool) Dial(ctx context.Context, protocol string, servicePort 
 	}
 	pool.mu.Unlock()
 	if len(targets) == 0 {
-		return nil, errors.New("Mirror primary Service port is unavailable")
+		return nil, errors.New("mirror primary Service port is unavailable")
 	}
 	var result error
 	for offset := range targets {

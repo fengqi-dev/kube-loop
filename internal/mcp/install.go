@@ -10,12 +10,18 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/fengqi-dev/kube-loop/internal/fsatomic"
 	toml "github.com/pelletier/go-toml/v2"
 	"github.com/pelletier/go-toml/v2/unstable"
+
+	"github.com/fengqi-dev/kube-loop/internal/fsatomic"
 )
 
-const clientServerName = "kubeloop"
+const (
+	clientServerName    = "kubeloop"
+	authorizationHeader = "Authorization"
+	configTypeKey       = "type"
+	transportHTTP       = "http"
+)
 
 // Supported MCP client identifiers for InstallClientConfig.
 const (
@@ -104,23 +110,23 @@ func installJSONMCPServers(path, url, token string, requireType bool) error {
 	server := map[string]any{"url": url}
 	if token != "" {
 		server["headers"] = map[string]string{
-			"Authorization": "Bearer " + token,
+			authorizationHeader: "Bearer " + token,
 		}
 	}
 	if requireType {
-		server["type"] = "http"
+		server[configTypeKey] = transportHTTP
 	}
 	return upsertJSONMap(path, "mcpServers", clientServerName, server)
 }
 
 func installVSCodeMCP(path, url, token string) error {
 	server := map[string]any{
-		"type": "http",
-		"url":  url,
+		configTypeKey: transportHTTP,
+		"url":         url,
 	}
 	if token != "" {
 		server["headers"] = map[string]string{
-			"Authorization": "Bearer " + token,
+			authorizationHeader: "Bearer " + token,
 		}
 	}
 	return upsertJSONMap(path, "servers", clientServerName, server)

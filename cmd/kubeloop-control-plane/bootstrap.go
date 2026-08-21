@@ -5,13 +5,14 @@ import (
 	"log/slog"
 	"os"
 
+	"github.com/google/uuid"
+
 	adminbootstrap "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/bootstrap"
 	adminlocaluser "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/localuser"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/authorization"
 	controlplanekubernetes "github.com/fengqi-dev/kube-loop/internal/controlplane/kubernetes"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/maintenance"
 	controlplanestorage "github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
-	"github.com/google/uuid"
 )
 
 type bootstrapRuntime struct {
@@ -65,7 +66,6 @@ func bootstrapControlPlane(
 				logger.Error("load default IAM identity password failed", "error", err)
 				os.Exit(2)
 			}
-			defer clear(configuredPassword)
 		}
 		result, initialPassword, created, bootstrapErr := iamBootstrap.CompleteDefault(
 			signalContext,
@@ -75,6 +75,7 @@ func bootstrapControlPlane(
 				RequestID: uuid.NewString(),
 			},
 		)
+		clear(configuredPassword)
 		if bootstrapErr != nil {
 			_ = stateStore.Close()
 			logger.Error("initialize default IAM identity failed", "error", bootstrapErr)

@@ -5,9 +5,10 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/google/uuid"
+
 	adminlocaluser "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/localuser"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
-	"github.com/google/uuid"
 )
 
 func TestCompleteDefaultCreatesFirstUser(t *testing.T) {
@@ -26,17 +27,29 @@ func TestCompleteDefaultCreatesFirstUser(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, password, created, err := service.CompleteDefault(context.Background(), DefaultRequest{
-		Username: "admin", Password: []byte("correct-horse-battery-staple"),
-		DisplayName: "Administrator", RequestID: uuid.NewString(),
-	})
+	result, password, created, err := service.CompleteDefault(
+		context.Background(),
+		DefaultRequest{
+			Username: "admin", Password: []byte("correct-horse-battery-staple"),
+			DisplayName: "Administrator", RequestID: uuid.NewString(),
+		},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !created || password != "" || result.Identity.IdentityID == "" {
-		t.Fatalf("bootstrap result = %+v, password=%q, created=%t", result, password, created)
+		t.Fatalf(
+			"bootstrap result = %+v, password=%q, created=%t",
+			result,
+			password,
+			created,
+		)
 	}
-	if _, err := localUsers.Authenticate(context.Background(), "admin", []byte("correct-horse-battery-staple")); err != nil {
+	if _, err := localUsers.Authenticate(
+		context.Background(),
+		"admin",
+		[]byte("correct-horse-battery-staple"),
+	); err != nil {
 		t.Fatalf("authenticate default administrator: %v", err)
 	}
 }

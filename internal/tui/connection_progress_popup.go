@@ -29,17 +29,17 @@ func (m Model) connectionProgress() (int, int, string, bool) {
 	return step, total, label, true
 }
 
-func (m *Model) updateConnectionProgressPopup(message tea.Msg) (tea.Cmd, bool) {
+func (m *Model) updateConnectionProgressPopup(message tea.Msg) bool {
 	switch msg := message.(type) {
 	case tea.KeyMsg:
-		if msg.String() == "ctrl+c" {
-			return nil, false
+		if msg.String() == keyCtrlC {
+			return false
 		}
-		return nil, true
+		return true
 	case tea.MouseMsg:
-		return nil, true
+		return true
 	default:
-		return nil, false
+		return false
 	}
 }
 
@@ -50,10 +50,10 @@ func (m Model) viewConnectionProgressPopup(height int) string {
 	bar := consoleOK.Render(strings.Repeat("=", completed)) +
 		consoleSubtle.Render(strings.Repeat("-", barWidth-completed))
 	content := consoleSection.Render("CONNECTING") + "\n\n" +
-		m.spinner.View() + " " + consoleValue.Copy().Bold(true).Render(label) + "\n\n" +
+		m.spinner.View() + " " + consoleValue.Bold(true).Render(label) + "\n\n" +
 		bar + "  " + consoleOK.Render(fmt.Sprintf("%d/%d", step, total)) + "\n\n" +
 		consoleSubtle.Render("Please wait. The dialog closes automatically.")
 	width := minInt(68, max(44, m.width-8))
-	box := consoleOverlayBox.Copy().Width(width).Render(content)
+	box := consoleOverlayBox.Width(width).Render(content)
 	return lipgloss.Place(m.width, height, lipgloss.Center, lipgloss.Center, box)
 }

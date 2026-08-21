@@ -210,7 +210,11 @@ func (store *SystemStore) Delete(profileID string) error {
 			return fmt.Errorf("delete credentials from system keyring: %w", err)
 		}
 	}
-	if err := store.backend.Delete(store.service, prefix+":current"); err != nil && !errors.Is(err, keyring.ErrNotFound) {
+	if err := store.backend.Delete(
+		store.service,
+		prefix+":current",
+	); err != nil &&
+		!errors.Is(err, keyring.ErrNotFound) {
 		return fmt.Errorf("delete credentials from system keyring: %w", err)
 	}
 	return nil
@@ -229,12 +233,16 @@ func (store *SystemStore) deleteAccounts(accounts []string) error {
 func accountPrefix(profileID string) (string, error) {
 	profileID = strings.TrimSpace(profileID)
 	if profileID == "" {
-		return "", errors.New("Server Profile ID is required")
+		return "", errors.New("server Profile ID is required")
 	}
 	hash := sha256.Sum256([]byte(profileID))
 	return hex.EncodeToString(hash[:]), nil
 }
 
 func credentialAccounts(prefix, generation string) []string {
-	return []string{prefix + ":" + generation + ":access", prefix + ":" + generation + ":refresh", prefix + ":" + generation + ":metadata"}
+	return []string{
+		prefix + ":" + generation + ":access",
+		prefix + ":" + generation + ":refresh",
+		prefix + ":" + generation + ":metadata",
+	}
 }

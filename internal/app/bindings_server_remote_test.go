@@ -10,15 +10,17 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	clientauth "github.com/fengqi-dev/kube-loop/internal/client/auth"
 	"github.com/fengqi-dev/kube-loop/internal/client/credentials"
 	clientprofile "github.com/fengqi-dev/kube-loop/internal/client/profile"
 	clientremote "github.com/fengqi-dev/kube-loop/internal/client/remote"
 	clientremotesession "github.com/fengqi-dev/kube-loop/internal/client/remotesession"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
-	"github.com/google/uuid"
 )
 
+//nolint:gocyclo // The integration flow intentionally asserts one inventory load across all advertised capabilities.
 func TestLoadServerInventoryUsesCapabilitiesAndRemembersNamespace(t *testing.T) {
 	spec, err := networkspec.Normalize(networkspec.Spec{
 		PodCIDRs: []string{"10.2.0.0/16"}, ServiceCIDRs: []string{"10.96.0.0/12"},
@@ -40,12 +42,18 @@ func TestLoadServerInventoryUsesCapabilitiesAndRemembersNamespace(t *testing.T) 
 		case "/api/version":
 			_, _ = writer.Write([]byte(`{"gitVersion":"v1.31.2","gatewayVersion":"v2-test"}`))
 		case "/api/namespaces":
-			_, _ = writer.Write([]byte(`{"items":[{"name":"production","status":"Active"},{"name":"development","status":"Active"}]}`))
+			_, _ = writer.Write(
+				[]byte(`{"items":[{"name":"production","status":"Active"},{"name":"development","status":"Active"}]}`),
+			)
 		case "/api/capabilities":
 			if request.URL.Query().Get("namespace") != "development" {
 				t.Fatalf("namespace query = %q", request.URL.Query().Get("namespace"))
 			}
-			_, _ = writer.Write([]byte(`{"schemaVersion":1,"identityId":"identity-1","namespace":"development","gatewayVersion":"v2-test","capabilities":["pods.list"]}`))
+			_, _ = writer.Write(
+				[]byte(
+					`{"schemaVersion":1,"identityId":"identity-1","namespace":"development","gatewayVersion":"v2-test","capabilities":["pods.list"]}`,
+				),
+			)
 		case "/api/sessions":
 			now := time.Now().UTC()
 			_ = json.NewEncoder(writer).Encode(clientremote.Session{
@@ -58,7 +66,11 @@ func TestLoadServerInventoryUsesCapabilitiesAndRemembersNamespace(t *testing.T) 
 				},
 			})
 		case "/api/namespaces/development/pods":
-			_, _ = writer.Write([]byte(`{"items":[{"name":"api-1","namespace":"development","phase":"Running","ready":true,"containers":["api"]},{"name":"api-0","namespace":"development","phase":"Pending","ready":false,"containers":["api"]}]}`))
+			_, _ = writer.Write(
+				[]byte(
+					`{"items":[{"name":"api-1","namespace":"development","phase":"Running","ready":true,"containers":["api"]},{"name":"api-0","namespace":"development","phase":"Pending","ready":false,"containers":["api"]}]}`,
+				),
+			)
 		case "/api/namespaces/development/services":
 			serviceCalls++
 			_, _ = writer.Write([]byte(`{"items":[]}`))
@@ -100,13 +112,15 @@ func TestLoadServerInventoryUsesCapabilitiesAndRemembersNamespace(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.KubernetesVersion != "v1.31.2" || result.GatewayVersion != "v2-test" || result.Namespace != "development" {
+	if result.KubernetesVersion != "v1.31.2" || result.GatewayVersion != "v2-test" ||
+		result.Namespace != "development" {
 		t.Fatalf("inventory = %#v", result)
 	}
 	if result.Session == nil || result.Session.State != "active" || result.Network == nil {
 		t.Fatalf("remote Session = %#v", result.Session)
 	}
-	if len(result.Namespaces) != 2 || result.Namespaces[0].Name != "development" || len(result.Pods) != 2 || result.Pods[0].Name != "api-0" {
+	if len(result.Namespaces) != 2 || result.Namespaces[0].Name != "development" || len(result.Pods) != 2 ||
+		result.Pods[0].Name != "api-0" {
 		t.Fatalf("inventory sorting = %#v", result)
 	}
 	if len(result.Services) != 0 || serviceCalls != 0 {

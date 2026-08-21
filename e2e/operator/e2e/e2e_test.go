@@ -310,8 +310,14 @@ spec:
 			By("waiting for the Operator to publish authoritative Ready status")
 			Eventually(func(g Gomega) {
 				status := exec.Command(
-					"kubectl", "get", "trafficbinding", bindingName, "-n", namespace,
-					"-o", "jsonpath={.status.phase}{'|'}{.status.conditions[?(@.type=='Ready')].status}{'|'}{.status.observedGeneration}{'|'}{.status.serviceName}",
+					"kubectl",
+					"get",
+					"trafficbinding",
+					bindingName,
+					"-n",
+					namespace,
+					"-o",
+					"jsonpath={.status.phase}{'|'}{.status.conditions[?(@.type=='Ready')].status}{'|'}{.status.observedGeneration}{'|'}{.status.serviceName}",
 				)
 				output, statusErr := utils.Run(status)
 				g.Expect(statusErr).NotTo(HaveOccurred())
@@ -320,17 +326,29 @@ spec:
 
 			By("verifying the owned Service and EndpointSlice relay mapping")
 			service := exec.Command(
-				"kubectl", "get", "service", serviceName, "-n", namespace,
-				"-o", "jsonpath={.spec.selector}{'|'}{.spec.ports[0].port}{'|'}{.spec.ports[0].targetPort}{'|'}{.spec.ports[1].port}{'|'}{.spec.ports[1].targetPort}",
+				"kubectl",
+				"get",
+				"service",
+				serviceName,
+				"-n",
+				namespace,
+				"-o",
+				"jsonpath={.spec.selector}{'|'}{.spec.ports[0].port}{'|'}{.spec.ports[0].targetPort}{'|'}{.spec.ports[1].port}{'|'}{.spec.ports[1].targetPort}",
 			)
 			serviceOutput, err := utils.Run(service)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(serviceOutput).To(Equal("|8080|32080|5353|32053"))
 
 			slice := exec.Command(
-				"kubectl", "get", "endpointslice", "-n", namespace,
-				"-l", "kubernetes.io/service-name="+serviceName,
-				"-o", "jsonpath={.items[0].endpoints[0].addresses[0]}{'|'}{.items[0].endpoints[0].conditions.ready}{'|'}{.items[0].ports[0].port}{'|'}{.items[0].ports[1].port}",
+				"kubectl",
+				"get",
+				"endpointslice",
+				"-n",
+				namespace,
+				"-l",
+				"kubernetes.io/service-name="+serviceName,
+				"-o",
+				"jsonpath={.items[0].endpoints[0].addresses[0]}{'|'}{.items[0].endpoints[0].conditions.ready}{'|'}{.items[0].ports[0].port}{'|'}{.items[0].ports[1].port}",
 			)
 			sliceOutput, err := utils.Run(slice)
 			Expect(err).NotTo(HaveOccurred())

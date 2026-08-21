@@ -13,8 +13,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	version "github.com/hashicorp/go-version"
+
+	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 )
 
 const (
@@ -103,7 +104,7 @@ func New(config Config) *Client {
 	}
 }
 
-func (client *Client) Discover(ctx context.Context, serviceAddress string) (Document, error) {
+func (client *Client) Discover(ctx context.Context, serviceAddress string) (_ Document, resultErr error) {
 	baseURL, err := profile.NormalizeBaseURL(serviceAddress)
 	if err != nil {
 		return Document{}, err
@@ -122,7 +123,11 @@ func (client *Client) Discover(ctx context.Context, serviceAddress string) (Docu
 		}
 		return Document{}, fmt.Errorf("service discovery failed: %w", err)
 	}
-	defer response.Body.Close()
+	defer func() {
+		if err := response.Body.Close(); err != nil {
+			resultErr = errors.Join(resultErr, fmt.Errorf("close service discovery response: %w", err))
+		}
+	}()
 	if response.StatusCode >= 300 && response.StatusCode < 400 {
 		return Document{}, errors.New("service discovery redirects are not allowed")
 	}
@@ -189,8 +194,8 @@ func (client *Client) validate(baseURL string, document Document) error {
 		}
 		seen[method.ID] = struct{}{}
 		switch {
-		case method.Type == "oidc" && method.Interaction == "browser":
-		case method.Type == "local" && method.Interaction == "browser":
+		case method.Type == discoveryAuthOIDC && method.Interaction == discoveryAuthBrowser:
+		case method.Type == discoveryCallbackLocal && method.Interaction == discoveryAuthBrowser:
 		default:
 			return fmt.Errorf("service discovery returned unsupported authentication method %q", method.ID)
 		}
@@ -221,7 +226,12 @@ func validateProtocol(current, minimum, maximum string) error {
 		return errors.New("service discovery returned an invalid protocol range")
 	}
 	if currentVersion.LessThan(minimumVersion) || currentVersion.GreaterThan(maximumVersion) {
-		message := fmt.Sprintf("service protocol range %s-%s is incompatible with client protocol %s", minimum, maximum, current)
+		message := fmt.Sprintf(
+			"service protocol range %s-%s is incompatible with client protocol %s",
+			minimum,
+			maximum,
+			current,
+		)
 		return &CompatibilityError{
 			Code: CodeVersionMismatch, Message: message, ProtocolVersion: current,
 			Minimum: minimum, Maximum: maximum,

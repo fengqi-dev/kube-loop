@@ -15,15 +15,21 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/supervisor"
 )
 
-var version = "dev"
+const (
+	channelDev     = "dev"
+	channelRelease = "release"
+)
+
+var version = channelDev
 
 func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer cancel()
 	if err := run(ctx, os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, err)
+		cancel()
 		os.Exit(1)
 	}
+	cancel()
 }
 
 func run(ctx context.Context, args []string) error {
@@ -34,7 +40,7 @@ func run(ctx context.Context, args []string) error {
 	case "run":
 		flags := flag.NewFlagSet("run", flag.ContinueOnError)
 		flags.SetOutput(os.Stderr)
-		channel := flags.String("channel", "release", "installation channel")
+		channel := flags.String("channel", channelRelease, "installation channel")
 		if err := flags.Parse(args[1:]); err != nil {
 			return err
 		}
@@ -79,8 +85,13 @@ func runInstall(args []string) error {
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	if flags.NArg() != 0 || *source == "" || *sha == "" || *worker == "" || *workerSHA == "" || *workerVersion == "" || *channel == "" || *token == "" || *uid < 0 || *home == "" || *singBox == "" {
-		return fmt.Errorf("install requires source, sha256, worker, worker-sha256, worker-version, channel, token, uid, home, and sing-box")
+	missingValue := *source == "" || *sha == "" || *worker == "" || *workerSHA == "" ||
+		*workerVersion == "" || *channel == "" || *token == "" || *uid < 0 || *home == "" || *singBox == ""
+	if flags.NArg() != 0 || missingValue {
+		return fmt.Errorf(
+			"install requires source, sha256, worker, worker-sha256, worker-version, " +
+				"channel, token, uid, home, and sing-box",
+		)
 	}
 	if err := configureChannel(*channel, *workerVersion); err != nil {
 		return err
@@ -92,7 +103,15 @@ func runInstall(args []string) error {
 	if actualWorkerSHA != *workerSHA {
 		return fmt.Errorf("worker SHA-256 mismatch")
 	}
-	if err := helperinstall.InstallFromCLI(*worker, *token, *uid, *workerVersion, *home, "", *singBox); err != nil {
+	if err := helperinstall.InstallFromCLI(
+		*worker,
+		*token,
+		*uid,
+		*workerVersion,
+		*home,
+		"",
+		*singBox,
+	); err != nil {
 		return err
 	}
 	return supervisor.Install(*source, *sha, *token, *uid)
@@ -100,21 +119,21 @@ func runInstall(args []string) error {
 
 func configureChannel(channel, workerVersion string) error {
 	switch channel {
-	case "dev":
-		if workerVersion != "" && workerVersion != "dev" {
+	case channelDev:
+		if workerVersion != "" && workerVersion != channelDev {
 			return fmt.Errorf("dev channel requires a dev worker, got %q", workerVersion)
 		}
-		helper.Version = "dev"
-		supervisor.Version = "dev"
-	case "release":
-		if workerVersion == "dev" {
+		helper.Version = channelDev
+		supervisor.Version = channelDev
+	case channelRelease:
+		if workerVersion == channelDev {
 			return fmt.Errorf("release channel cannot install a dev worker")
 		}
 		helper.Version = workerVersion
 		if helper.Version == "" {
-			helper.Version = "release"
+			helper.Version = channelRelease
 		}
-		supervisor.Version = "release"
+		supervisor.Version = channelRelease
 	default:
 		return fmt.Errorf("unsupported supervisor channel %q", channel)
 	}

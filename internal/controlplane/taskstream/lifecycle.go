@@ -57,10 +57,17 @@ func Finish(config FinishConfig) bool {
 		next = remotetask.Recovering
 	}
 	result := config.Result(task, next, cleanupPending)
-	return config.Tasks.UpdateState(ctx, config.TaskID, task.State, next, result, config.Now().UTC()) == nil
+	return config.Tasks.UpdateState(
+		ctx,
+		config.TaskID,
+		task.State,
+		next,
+		result,
+		config.Now().UTC(),
+	) == nil
 }
 
-func Failed(err error, runContext context.Context, stopErrors ...error) bool {
+func Failed(runContext context.Context, err error, stopErrors ...error) bool {
 	return runContext.Err() == nil && isFailure(err, stopErrors...)
 }
 

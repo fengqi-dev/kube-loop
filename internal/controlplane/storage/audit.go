@@ -13,7 +13,10 @@ type auditRepository struct {
 	repositoryBase
 }
 
-func (repository *auditRepository) Append(ctx context.Context, event AuditEvent) error {
+func (repository *auditRepository) Append(
+	ctx context.Context,
+	event AuditEvent,
+) error {
 	if err := normalizeAuditEvent(&event); err != nil {
 		return err
 	}
@@ -31,14 +34,26 @@ func (repository *auditRepository) Append(ctx context.Context, event AuditEvent)
 	if event.IdentityID != "" {
 		identityID = event.IdentityID
 	}
-	_, err := repository.executor.ExecContext(ctx, query,
-		event.ID, identityID, event.Action, event.ResourceType,
-		event.ResourceID, event.Outcome, event.RequestID, nullableJSON(event.Metadata), formatTime(event.CreatedAt),
+	_, err := repository.executor.ExecContext(
+		ctx,
+		query,
+		event.ID,
+		identityID,
+		event.Action,
+		event.ResourceType,
+		event.ResourceID,
+		event.Outcome,
+		event.RequestID,
+		nullableJSON(event.Metadata),
+		formatTime(event.CreatedAt),
 	)
 	return mapWriteError(err)
 }
 
-func (repository *auditRepository) List(ctx context.Context, filter AuditFilter) ([]AuditEvent, error) {
+func (repository *auditRepository) List(
+	ctx context.Context,
+	filter AuditFilter,
+) ([]AuditEvent, error) {
 	limit := filter.Limit
 	if limit == 0 {
 		limit = 100
@@ -57,7 +72,7 @@ func (repository *auditRepository) List(ctx context.Context, filter AuditFilter)
 		if err := validateUUID(filter.IdentityID, "identity ID"); err != nil {
 			return nil, err
 		}
-		query += ` AND identity_id = ?`
+		query += identityFilterSQL
 		arguments = append(arguments, filter.IdentityID)
 	}
 	if filter.Action != "" {
@@ -73,13 +88,16 @@ func (repository *auditRepository) List(ctx context.Context, filter AuditFilter)
 		arguments = append(arguments, formatTime(filter.Before))
 	}
 	query, arguments = appendPageBoundary(query, arguments, "", cursor)
-	query += ` ORDER BY created_at DESC, id DESC LIMIT ?`
+	query += descendingPageSQL
 	arguments = append(arguments, limit)
-	rows, err := repository.executor.QueryContext(ctx, repository.bind(query), arguments...)
+	rows, err := repository.executor.QueryContext(
+		ctx,
+		repository.bind(query),
+		arguments...)
 	if err != nil {
 		return nil, databaseError("list audit events", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var events []AuditEvent
 	for rows.Next() {
 		event, err := scanAuditEvent(rows)

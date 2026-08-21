@@ -7,10 +7,11 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/fengqi-dev/kube-loop/internal/controlplane/authorization"
 	kruntime "k8s.io/apimachinery/pkg/runtime"
 	kubernetesclient "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/authorization"
 )
 
 type Provider struct {
@@ -29,7 +30,7 @@ func NewInCluster(config Config) (*Provider, error) {
 
 func NewForRESTConfig(base *rest.Config, config Config) (*Provider, error) {
 	if base == nil {
-		return nil, errors.New("Kubernetes REST configuration is required")
+		return nil, errors.New("kubernetes REST configuration is required")
 	}
 	normalized, err := config.normalized()
 	if err != nil {
@@ -47,7 +48,7 @@ func NewForRESTConfig(base *rest.Config, config Config) (*Provider, error) {
 
 func (provider *Provider) RESTConfigFor(subject authorization.Subject) (*rest.Config, error) {
 	if provider == nil || provider.base == nil {
-		return nil, errors.New("Kubernetes Provider is unavailable")
+		return nil, errors.New("kubernetes provider is unavailable")
 	}
 	config := rest.CopyConfig(provider.base)
 	config.Impersonate = rest.ImpersonationConfig{}
@@ -74,9 +75,11 @@ func (provider *Provider) RESTConfigFor(subject authorization.Subject) (*rest.Co
 	return config, nil
 }
 
-func (provider *Provider) ClientFor(subject authorization.Subject) (kubernetesclient.Interface, error) {
+func (provider *Provider) ClientFor(
+	subject authorization.Subject,
+) (kubernetesclient.Interface, error) {
 	if provider == nil {
-		return nil, errors.New("Kubernetes Provider is unavailable")
+		return nil, errors.New("kubernetes provider is unavailable")
 	}
 	if !provider.config.Impersonation.Enabled {
 		return provider.client, nil
@@ -97,7 +100,7 @@ func (provider *Provider) ClientFor(subject authorization.Subject) (kubernetescl
 // lease has expired or been revoked.
 func (provider *Provider) SystemClient() (kubernetesclient.Interface, error) {
 	if provider == nil || provider.client == nil {
-		return nil, errors.New("Kubernetes Provider is unavailable")
+		return nil, errors.New("kubernetes provider is unavailable")
 	}
 	return provider.client, nil
 }
@@ -107,7 +110,7 @@ func (provider *Provider) SystemClient() (kubernetesclient.Interface, error) {
 // never exposed as user-selected Kubernetes resources.
 func (provider *Provider) SystemRESTConfig() (*rest.Config, error) {
 	if provider == nil || provider.base == nil {
-		return nil, errors.New("Kubernetes Provider is unavailable")
+		return nil, errors.New("kubernetes provider is unavailable")
 	}
 	config := rest.CopyConfig(provider.base)
 	config.Impersonate = rest.ImpersonationConfig{}
@@ -116,7 +119,7 @@ func (provider *Provider) SystemRESTConfig() (*rest.Config, error) {
 
 func (provider *Provider) Check(ctx context.Context) error {
 	if provider == nil || provider.client == nil {
-		return errors.New("Kubernetes Provider is unavailable")
+		return errors.New("kubernetes provider is unavailable")
 	}
 	if _, err := provider.client.Discovery().RESTClient().Get().AbsPath("/version").Do(ctx).Raw(); err != nil {
 		return fmt.Errorf("check Kubernetes API Server: %w", err)

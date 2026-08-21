@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/netip"
 	"slices"
+	"strconv"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
@@ -32,7 +33,7 @@ type BackendSet struct {
 // port must have at least one ready backend before the Service may be mutated.
 func ResolveSnapshotBackends(snapshot ServiceInterceptSnapshot) ([]BackendSet, error) {
 	if len(snapshot.Ports) == 0 {
-		return nil, errors.New("Service snapshot contains no selected ports")
+		return nil, errors.New("service snapshot contains no selected ports")
 	}
 	sets := make([]BackendSet, 0, len(snapshot.Ports))
 	for _, selected := range snapshot.Ports {
@@ -69,7 +70,7 @@ func ResolveSnapshotBackends(snapshot ServiceInterceptSnapshot) ([]BackendSet, e
 		}
 		if len(set.Targets) == 0 {
 			return nil, fmt.Errorf(
-				"Service port %s/%d/%s has no ready original backend",
+				"service port %s/%d/%s has no ready original backend",
 				selected.Name, selected.ServicePort, strings.ToLower(string(protocol)),
 			)
 		}
@@ -173,7 +174,7 @@ func appendBackend(targets *[]BackendTarget, seen map[string]struct{}, raw strin
 	if !address.IsValid() || address.IsUnspecified() || address.IsMulticast() {
 		return
 	}
-	key := address.String() + "/" + fmt.Sprint(port)
+	key := address.String() + "/" + strconv.Itoa(int(port))
 	if _, exists := seen[key]; exists {
 		return
 	}

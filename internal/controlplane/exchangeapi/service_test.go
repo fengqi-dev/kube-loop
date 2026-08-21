@@ -11,14 +11,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/labstack/echo/v5"
+
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/servicebinding"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/sessionapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficmodel"
-	"github.com/google/uuid"
-	"github.com/labstack/echo/v5"
 )
 
 type exchangeTestSessions struct{ session sessionapi.ActiveSession }
@@ -28,7 +29,8 @@ func (sessions exchangeTestSessions) RequireActive(
 	_ controlplaneapi.Identity,
 	namespace, sessionID string,
 ) (sessionapi.ActiveSession, *controlplaneapi.Error) {
-	if namespace != sessions.session.Namespace || sessionID != sessions.session.ID {
+	if namespace != sessions.session.Namespace ||
+		sessionID != sessions.session.ID {
 		return sessionapi.ActiveSession{}, notFound()
 	}
 	return sessions.session, nil
@@ -38,15 +40,28 @@ type exchangeTestServices struct{ calls int }
 
 type exchangeTestResources struct{}
 
-func (exchangeTestResources) Capture(context.Context, controlplaneapi.Identity, *servicebinding.ServiceInterceptSnapshot) error {
+func (exchangeTestResources) Capture(
+	context.Context,
+	controlplaneapi.Identity,
+	*servicebinding.ServiceInterceptSnapshot,
+) error {
 	return nil
 }
 
-func (exchangeTestResources) Apply(context.Context, controlplaneapi.Identity, servicebinding.ServiceInterceptSnapshot, string) error {
+func (exchangeTestResources) Apply(
+	context.Context,
+	controlplaneapi.Identity,
+	servicebinding.ServiceInterceptSnapshot,
+	string,
+) error {
 	return nil
 }
 
-func (exchangeTestResources) Restore(context.Context, servicebinding.ServiceInterceptSnapshot, string) error {
+func (exchangeTestResources) Restore(
+	context.Context,
+	servicebinding.ServiceInterceptSnapshot,
+	string,
+) error {
 	return nil
 }
 
@@ -57,9 +72,14 @@ func (services *exchangeTestServices) ResolveService(
 	ports []trafficmodel.Port,
 ) (trafficmodel.ResolvedService, error) {
 	services.calls++
-	return trafficmodel.ResolvedService{Name: name, ClusterIP: "10.96.0.20", Ports: append([]trafficmodel.Port(nil), ports...)}, nil
+	return trafficmodel.ResolvedService{
+		Name:      name,
+		ClusterIP: "10.96.0.20",
+		Ports:     append([]trafficmodel.Port(nil), ports...),
+	}, nil
 }
 
+//nolint:gocyclo // The lifecycle test intentionally verifies every state transition in one scenario.
 func TestExchangeTaskIsOwnedIdempotentAndDurablyStopped(t *testing.T) {
 	ctx := context.Background()
 	stateStore, err := storage.Open(ctx, storage.Config{
@@ -76,7 +96,9 @@ func TestExchangeTaskIsOwnedIdempotentAndDurablyStopped(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	network, err := networkspec.Normalize(networkspec.Spec{ServiceIPs: []string{"10.96.0.10"}})
+	network, err := networkspec.Normalize(
+		networkspec.Spec{ServiceIPs: []string{"10.96.0.10"}},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,63 +118,157 @@ func TestExchangeTaskIsOwnedIdempotentAndDurablyStopped(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	active := sessionapi.ActiveSession{ID: sessionID, Namespace: "development", Generation: 1, ExpiresAt: now.Add(time.Hour)}
+	active := sessionapi.ActiveSession{
+		ID:         sessionID,
+		Namespace:  "development",
+		Generation: 1,
+		ExpiresAt:  now.Add(time.Hour),
+	}
 	services := &exchangeTestServices{}
 	handler, err := New(
-		stateStore, exchangeTestSessions{session: active}, services, exchangeTestResources{},
+		stateStore,
+		exchangeTestSessions{session: active},
+		services,
+		exchangeTestResources{},
 		Config{Now: func() time.Time { return now }},
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	identity := controlplaneapi.Identity{Subject: identityID, DeviceID: "device"}
+	identity := controlplaneapi.Identity{
+		Subject:  identityID,
+		DeviceID: "device",
+	}
 	path := "/api/sessions/" + sessionID + "/exchanges?namespace=development"
-	body := []byte(`{"service":"api","ports":[{"servicePort":53,"protocol":"udp"},{"servicePort":80,"protocol":"tcp"}]}`)
-	created, apiError := exchangeRequest(handler, identity, http.MethodPost, path, body, "exchange-1")
+	body := []byte(
+		`{"service":"api","ports":[{"servicePort":53,"protocol":"udp"},{"servicePort":80,"protocol":"tcp"}]}`,
+	)
+	created, apiError := exchangeRequest(
+		handler,
+		identity,
+		http.MethodPost,
+		path,
+		body,
+		"exchange-1",
+	)
 	if apiError != nil || created.Code != http.StatusCreated {
-		t.Fatalf("create Exchange: status=%d error=%#v body=%s", created.Code, apiError, created.Body.String())
+		t.Fatalf(
+			"create Exchange: status=%d error=%#v body=%s",
+			created.Code,
+			apiError,
+			created.Body.String(),
+		)
 	}
 	var document Document
-	if err := json.Unmarshal(created.Body.Bytes(), &document); err != nil || document.ID == "" || document.State != "pending" || len(document.Ports) != 2 || document.Ports[0].ServicePort != 53 {
+	if err := json.Unmarshal(created.Body.Bytes(), &document); err != nil ||
+		document.ID == "" ||
+		document.State != "pending" ||
+		len(document.Ports) != 2 ||
+		document.Ports[0].ServicePort != 53 {
 		t.Fatalf("created Exchange document=%#v err=%v", document, err)
 	}
-	replayed, apiError := exchangeRequest(handler, identity, http.MethodPost, path, body, "exchange-1")
-	if apiError != nil || replayed.Code != http.StatusOK || replayed.Header().Get("Idempotent-Replayed") != "true" || services.calls != 1 {
-		t.Fatalf("replay: status=%d error=%#v calls=%d", replayed.Code, apiError, services.calls)
+	replayed, apiError := exchangeRequest(
+		handler,
+		identity,
+		http.MethodPost,
+		path,
+		body,
+		"exchange-1",
+	)
+	if apiError != nil || replayed.Code != http.StatusOK ||
+		replayed.Header().Get("Idempotent-Replayed") != "true" ||
+		services.calls != 1 {
+		t.Fatalf(
+			"replay: status=%d error=%#v calls=%d",
+			replayed.Code,
+			apiError,
+			services.calls,
+		)
 	}
-	mismatchBody := []byte(`{"service":"other","ports":[{"servicePort":80,"protocol":"tcp"}]}`)
-	_, apiError = exchangeRequest(handler, identity, http.MethodPost, path, mismatchBody, "exchange-1")
-	if apiError == nil || apiError.Code != controlplaneapi.CodeConflict || services.calls != 1 {
-		t.Fatalf("idempotency mismatch error=%#v calls=%d", apiError, services.calls)
+	mismatchBody := []byte(
+		`{"service":"other","ports":[{"servicePort":80,"protocol":"tcp"}]}`,
+	)
+	_, apiError = exchangeRequest(
+		handler,
+		identity,
+		http.MethodPost,
+		path,
+		mismatchBody,
+		"exchange-1",
+	)
+	if apiError == nil || apiError.Code != controlplaneapi.CodeConflict ||
+		services.calls != 1 {
+		t.Fatalf(
+			"idempotency mismatch error=%#v calls=%d",
+			apiError,
+			services.calls,
+		)
 	}
 	taskPath := "/api/sessions/" + sessionID + "/exchanges/" + document.ID + "?namespace=development"
-	_, apiError = exchangeRequest(handler, controlplaneapi.Identity{Subject: uuid.NewString(), DeviceID: "other"}, http.MethodGet, taskPath, nil, "")
+	_, apiError = exchangeRequest(
+		handler,
+		controlplaneapi.Identity{Subject: uuid.NewString(), DeviceID: "other"},
+		http.MethodGet,
+		taskPath,
+		nil,
+		"",
+	)
 	if apiError == nil || apiError.Code != controlplaneapi.CodeNotFound {
 		t.Fatalf("cross-identity get error=%#v", apiError)
 	}
-	stopped, apiError := exchangeRequest(handler, identity, http.MethodDelete, taskPath, nil, "")
+	stopped, apiError := exchangeRequest(
+		handler,
+		identity,
+		http.MethodDelete,
+		taskPath,
+		nil,
+		"",
+	)
 	if apiError != nil || stopped.Code != http.StatusOK {
-		t.Fatalf("stop pending Exchange: status=%d error=%#v", stopped.Code, apiError)
+		t.Fatalf(
+			"stop pending Exchange: status=%d error=%#v",
+			stopped.Code,
+			apiError,
+		)
 	}
 	stored, err := stateStore.Tasks().GetByID(ctx, document.ID)
 	if err != nil || stored.State != "stopped" {
 		t.Fatalf("stored stopped Exchange=%#v err=%v", stored, err)
 	}
 
-	second, apiError := exchangeRequest(handler, identity, http.MethodPost, path, body, "exchange-2")
+	second, apiError := exchangeRequest(
+		handler,
+		identity,
+		http.MethodPost,
+		path,
+		body,
+		"exchange-2",
+	)
 	if apiError != nil {
 		t.Fatal(apiError)
 	}
 	if err := json.Unmarshal(second.Body.Bytes(), &document); err != nil {
 		t.Fatal(err)
 	}
-	if err := stateStore.Tasks().UpdateState(ctx, document.ID, "pending", "running", json.RawMessage(`{}`), now); err != nil {
+	if err := stateStore.Tasks().
+		UpdateState(ctx, document.ID, "pending", "running", json.RawMessage(`{}`), now); err != nil {
 		t.Fatal(err)
 	}
 	taskPath = "/api/sessions/" + sessionID + "/exchanges/" + document.ID + "?namespace=development"
-	stopping, apiError := exchangeRequest(handler, identity, http.MethodDelete, taskPath, nil, "")
+	stopping, apiError := exchangeRequest(
+		handler,
+		identity,
+		http.MethodDelete,
+		taskPath,
+		nil,
+		"",
+	)
 	if apiError != nil || stopping.Code != http.StatusAccepted {
-		t.Fatalf("request running Exchange stop: status=%d error=%#v", stopping.Code, apiError)
+		t.Fatalf(
+			"request running Exchange stop: status=%d error=%#v",
+			stopping.Code,
+			apiError,
+		)
 	}
 	stored, err = stateStore.Tasks().GetByID(ctx, document.ID)
 	if err != nil || stored.State != "stopping" {
@@ -178,19 +294,39 @@ func exchangeRequest(
 	return response, serveAPI(handler, response, request, identity)
 }
 
-func serveAPI(handler *Service, writer http.ResponseWriter, request *http.Request, identity controlplaneapi.Identity) *controlplaneapi.Error {
+func serveAPI(
+	handler *Service,
+	writer http.ResponseWriter,
+	request *http.Request,
+	identity controlplaneapi.Identity,
+) *controlplaneapi.Error {
 	routes := NewRoutes(handler)
 	parts := strings.Split(strings.Trim(request.URL.Path, "/"), "/")
 	request.SetPathValue("sessionID", parts[2])
 	if len(parts) > 4 {
 		request.SetPathValue("taskID", parts[4])
 	}
-	switch {
-	case request.Method == http.MethodPost:
-		return routes.withSession(handler.create)(echo.New().NewContext(request, writer), identity)
-	case request.Method == http.MethodDelete:
-		return routes.withTask(handler.stop)(echo.New().NewContext(request, writer), identity)
+	switch request.Method {
+	case http.MethodPost:
+		return routes.withSession(
+			handler.create,
+		)(
+			echo.New().NewContext(request, writer),
+			identity,
+		)
+	case http.MethodDelete:
+		return routes.withTask(
+			handler.stop,
+		)(
+			echo.New().NewContext(request, writer),
+			identity,
+		)
 	default:
-		return routes.withTask(handler.get)(echo.New().NewContext(request, writer), identity)
+		return routes.withTask(
+			handler.get,
+		)(
+			echo.New().NewContext(request, writer),
+			identity,
+		)
 	}
 }

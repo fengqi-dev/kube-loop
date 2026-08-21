@@ -16,6 +16,7 @@ func dialHelper(ctx context.Context) (net.Conn, error) {
 
 func listenHelper(ownerSID string) (net.Listener, error) {
 	path := SocketPath()
+	//nolint:gosec // The system socket directory must be traversable; socket access is authenticated separately.
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, err
 	}

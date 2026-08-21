@@ -74,7 +74,7 @@ func CoreInstallPath() string {
 
 func SocketPath() string {
 	switch runtime.GOOS {
-	case "windows":
+	case goosWindows:
 		return filepath.Join(SystemStateDir(), "helper.sock")
 	default:
 		if IsDevBuild() {

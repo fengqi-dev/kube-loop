@@ -50,7 +50,11 @@ func TestNormalizeRejectsUnsafeOrAmbiguousNetworks(t *testing.T) {
 }
 
 func TestDecodeIsStrict(t *testing.T) {
-	if _, err := Decode([]byte(`{"version":2,"podCIDRs":["10.2.0.0/16"],"podIPs":[],"serviceCIDRs":[],"serviceIPs":[],"clusterDomains":[],"unknown":true}`)); err == nil {
+	if _, err := Decode(
+		[]byte(
+			`{"version":2,"podCIDRs":["10.2.0.0/16"],"podIPs":[],"serviceCIDRs":[],"serviceIPs":[],"clusterDomains":[],"unknown":true}`,
+		),
+	); err == nil {
 		t.Fatal("unknown field accepted")
 	}
 	if _, err := Decode([]byte(strings.Repeat("x", MaximumJSONSize+1))); err == nil {

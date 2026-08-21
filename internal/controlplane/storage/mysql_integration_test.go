@@ -20,7 +20,7 @@ func TestMySQLBackendIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	if store.Backend() != BackendMySQL {
 		t.Fatalf("backend = %q", store.Backend())
 	}
@@ -37,30 +37,43 @@ func newMySQLIntegrationConfig(t *testing.T) (Config, func()) {
 	t.Helper()
 	raw := externalDatabaseTestURL(t, "KUBELOOP_TEST_MYSQL_DATASOURCE_URL")
 	parsedURL, err := url.Parse(raw)
-	if err != nil || parsedURL.Scheme != "mysql" {
+	if err != nil || parsedURL.Scheme != string(BackendMySQL) {
 		t.Fatal("KUBELOOP_TEST_MYSQL_DATASOURCE_URL must be a mysql:// URL")
 	}
 	adminConfig, err := parseMySQLURL(raw)
 	if err != nil {
 		t.Fatal(err)
 	}
-	admin, err := sql.Open("mysql", adminConfig.FormatDSN())
+	admin, err := sql.Open(string(BackendMySQL), adminConfig.FormatDSN())
 	if err != nil {
 		t.Fatal(err)
 	}
-	databaseName := "kubeloop_test_" + strings.ReplaceAll(uuid.NewString(), "-", "")
+	databaseName := "kubeloop_test_" + strings.ReplaceAll(
+		uuid.NewString(),
+		"-",
+		"",
+	)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if _, err := admin.ExecContext(ctx, "CREATE DATABASE `"+databaseName+"` CHARACTER SET utf8mb4 COLLATE utf8mb4_bin"); err != nil {
+	if _, err := admin.ExecContext(
+		ctx,
+		"CREATE DATABASE `"+databaseName+"` CHARACTER SET utf8mb4 COLLATE utf8mb4_bin",
+	); err != nil {
 		_ = admin.Close()
 		t.Fatal("create MySQL integration database")
 	}
 	testURL := *parsedURL
 	testURL.Path = "/" + databaseName
 	cleanup := func() {
-		cleanupContext, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		cleanupContext, cleanupCancel := context.WithTimeout(
+			context.Background(),
+			10*time.Second,
+		)
 		defer cleanupCancel()
-		_, _ = admin.ExecContext(cleanupContext, "DROP DATABASE `"+databaseName+"`")
+		_, _ = admin.ExecContext(
+			cleanupContext,
+			"DROP DATABASE `"+databaseName+"`",
+		)
 		_ = admin.Close()
 	}
 	return Config{

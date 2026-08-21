@@ -1,10 +1,11 @@
 package networkdiag
 
 import (
+	"cmp"
 	"fmt"
 	"net/netip"
 	"runtime"
-	"sort"
+	"slices"
 
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
 )
@@ -94,8 +95,8 @@ func discoveryRoutes(podCIDRs, podIPs, serviceCIDRs, serviceIPs []string) []neti
 		seen[prefix] = struct{}{}
 		result = append(result, prefix)
 	}
-	sort.Slice(result, func(i, j int) bool {
-		return result[i].String() < result[j].String()
+	slices.SortFunc(result, func(left, right netip.Prefix) int {
+		return cmp.Compare(left.String(), right.String())
 	})
 	return result
 }
@@ -135,14 +136,14 @@ func analyzeRouteConflicts(targets []netip.Prefix, existing []hostRoute) []Issue
 			})
 		}
 	}
-	sort.Slice(issues, func(i, j int) bool {
-		if issues[i].Target != issues[j].Target {
-			return issues[i].Target < issues[j].Target
+	slices.SortFunc(issues, func(left, right Issue) int {
+		if order := cmp.Compare(left.Target, right.Target); order != 0 {
+			return order
 		}
-		if issues[i].Conflict != issues[j].Conflict {
-			return issues[i].Conflict < issues[j].Conflict
+		if order := cmp.Compare(left.Conflict, right.Conflict); order != 0 {
+			return order
 		}
-		return issues[i].Interface < issues[j].Interface
+		return cmp.Compare(left.Interface, right.Interface)
 	})
 	return issues
 }

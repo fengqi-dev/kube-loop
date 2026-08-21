@@ -1,72 +1,198 @@
+# Based on https://github.com/maratori/golangci-lint-config
+# Adapted for KubeLoop's custom logcheck plugin and repository layout.
+
 version: "2"
+
 run:
   allow-parallel-runners: true
+  relative-path-mode: gomod
+
+issues:
+  max-same-issues: 50
+
+formatters:
+  enable:
+    - goimports
+    - golines
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/fengqi-dev/kube-loop
+    golines:
+      max-len: 120
+  exclusions:
+    generated: lax
+    paths:
+      - ^third_party/
+
 linters:
   default: none
   enable:
+    - asasalint
+    - asciicheck
+    - bidichk
+    - bodyclose
+    - canonicalheader
     - copyloopvar
     - depguard
     - dupl
+    - durationcheck
+    - embeddedstructfieldcheck
     - errcheck
-    - ginkgolinter
+    - errname
+    - errorlint
+    - exhaustive
+    - exptostd
+    - fatcontext
+    - gocheckcompilerdirectives
+    - gochecksumtype
     - goconst
+    - gocritic
     - gocyclo
+    - gomoddirectives
+    - goprintffuncname
+    - gosec
     - govet
+    - iface
     - ineffassign
-    - lll
+    - intrange
+    - iotamixing
+    - loggercheck
+    - logcheck
+    - makezero
+    - mirror
     - modernize
-    - misspell
     - nakedret
-    - prealloc
+    - nilerr
+    - nilnesserr
+    - nilnil
+    - noctx
+    - nolintlint
+    - nosprintfhostport
+    - perfsprint
+    - predeclared
+    - recvcheck
     - revive
+    - rowserrcheck
+    - spancheck
+    - sqlclosecheck
     - staticcheck
+    - testableexamples
+    - testifylint
+    - tparallel
     - unconvert
     - unparam
+    - unqueryvet
     - unused
-    - logcheck
+    - usestdlibvars
+    - usetesting
+    - wastedassign
+    - whitespace
   settings:
     custom:
       logcheck:
-        type: "module"
+        type: module
         description: Checks Go logging calls for Kubernetes logging conventions.
     depguard:
       rules:
+        deprecated:
+          files:
+            - $all
+          deny:
+            - pkg: github.com/golang/protobuf
+              desc: Use google.golang.org/protobuf instead.
+            - pkg: github.com/satori/go.uuid
+              desc: Use github.com/google/uuid instead.
+            - pkg: github.com/gofrs/uuid$
+              desc: Use github.com/gofrs/uuid/v5 or later.
+        non-test-files:
+          files:
+            - !$test
+          deny:
+            - pkg: math/rand$
+              desc: Use math/rand/v2 instead.
         forbid-sort-pkg:
+          files:
+            - $all
           deny:
             - pkg: sort
-              desc: Should be replaced with slices package
-    revive:
-      rules:
-        - name: comment-spacings
-        - name: import-shadowing
-    modernize:
+              desc: Use the slices package instead.
+    embeddedstructfieldcheck:
+      forbid-mutex: true
+    errcheck:
+      check-type-assertions: true
+    exhaustive:
+      check:
+        - switch
+        - map
+    gocritic:
+      settings:
+        captLocal:
+          paramsOnly: false
+        underef:
+          skipRecvDeref: false
+    govet:
+      enable-all: true
       disable:
-        - omitzero
-        - newexpr
+        - fieldalignment
+        - shadow
+    nakedret:
+      max-func-lines: 0
+    nolintlint:
+      allow-no-explanation:
+        - gocyclo
+        - golines
+      require-explanation: true
+      require-specific: true
+    perfsprint:
+      strconcat: false
+      error-format: false
+    staticcheck:
+      checks:
+        - all
+        - -ST1000
+        - -ST1016
+        - -QF1008
+    usetesting:
+      os-temp-dir: true
   exclusions:
     generated: lax
+    # Scoped package lint runs are part of the repository workflow, so an
+    # exclusion may be unused in one invocation while still needed globally.
+    warn-unused: false
+    presets:
+      - std-error-handling
+      - common-false-positives
     rules:
       - linters:
-          - lll
-        path: api/v1alpha1/*
+          - revive
+        text: should have a package comment
+      - linters:
+          - revive
+        text: exported .+ should have comment
+      - linters:
+          - revive
+          - staticcheck
+        source: // ?(nolint|TODO)
+        text: comment on exported .+ should be of the form
       - linters:
           - goconst
-          - lll
-        path: _test\.go
+        path: _test\.go$
+      - linters:
+          - bodyclose
+          - dupl
+          - errcheck
+          - gosec
+          - noctx
+        path: _test\.go$
+      # These packages execute bounded local OS lifecycle operations whose
+      # public contracts do not carry a request context. noctx remains enabled
+      # for application HTTP, RPC, and ordinary subprocess code.
+      - linters:
+          - noctx
+        path: ^(e2e/operator/utils/|internal/helper/(install|platform)/|internal/helper/(listen|session_start)\.go$|internal/mcp/server\.go$|internal/singbox/runtime/ports\.go$|internal/supervisor/(install|updater)_darwin\.go$|internal/terminal/open_darwin\.go$)
       - linters:
           - staticcheck
         text: "SA1019: corev1.Endpoint"
     paths:
-      - third_party$
-      - builtin$
-      - examples$
-formatters:
-  enable:
-    - gofmt
-    - goimports
-  exclusions:
-    generated: lax
-    paths:
-      - third_party$
-      - builtin$
-      - examples$
+      - ^third_party/

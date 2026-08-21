@@ -21,7 +21,14 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/userpaths"
 )
 
-const downloadBaseURL = ProjectURL + "/releases/download/" + Version
+const (
+	downloadBaseURL  = ProjectURL + "/releases/download/" + Version
+	singBoxBinary    = "sing-box"
+	singBoxBinaryWin = "sing-box.exe"
+	windowsGOOS      = "windows"
+	cronetDLL        = "libcronet.dll"
+	wintunDLL        = "wintun.dll"
+)
 
 type releaseAsset struct {
 	Name   string
@@ -117,13 +124,14 @@ func (i *Installer) downloadToCores(ctx context.Context) (string, error) {
 		return "", err
 	}
 	binaryName := "sing-box-" + Version
-	if goos == "windows" {
+	if goos == windowsGOOS {
 		binaryName += ".exe"
 	}
 	binaryPath := filepath.Join(baseDir, "cores", binaryName)
 	if path, validateErr := validateBinary(binaryPath); validateErr == nil {
 		return path, nil
 	}
+	//nolint:gosec // The core executable directory must be traversable by the helper service.
 	if err := os.MkdirAll(filepath.Dir(binaryPath), 0o755); err != nil {
 		return "", fmt.Errorf("create sing-box core directory: %w", err)
 	}
@@ -145,7 +153,7 @@ func (i *Installer) downloadToCores(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("download sing-box: %w", err)
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("download sing-box: unexpected HTTP status %s", response.Status)
 	}
@@ -160,18 +168,19 @@ func (i *Installer) downloadToCores(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	executable, ok := files["sing-box"]
+	executable, ok := files[singBoxBinary]
 	if !ok {
-		if executable, ok = files["sing-box.exe"]; !ok {
+		if executable, ok = files[singBoxBinaryWin]; !ok {
 			return "", errors.New("sing-box archive does not contain sing-box binary")
 		}
 	}
 	if err := writeExecutable(binaryPath, executable); err != nil {
 		return "", err
 	}
-	if goos == "windows" {
-		for _, sidecar := range []string{"wintun.dll", "libcronet.dll"} {
+	if goos == windowsGOOS {
+		for _, sidecar := range []string{wintunDLL, cronetDLL} {
 			if payload, ok := files[sidecar]; ok {
+				//nolint:gosec // Windows runtime sidecars are public binaries and contain no secrets.
 				if err := os.WriteFile(filepath.Join(filepath.Dir(binaryPath), sidecar), payload, 0o644); err != nil {
 					return "", fmt.Errorf("install %s: %w", sidecar, err)
 				}
@@ -187,20 +196,17 @@ func writeExecutable(binaryPath string, executable []byte) error {
 		return fmt.Errorf("create temporary sing-box binary: %w", err)
 	}
 	tempPath := temp.Name()
-	defer os.Remove(tempPath)
-	if runtime.GOOS != "windows" {
+	defer func() { _ = os.Remove(tempPath) }()
+	if runtime.GOOS != windowsGOOS {
 		if err := temp.Chmod(0o755); err != nil {
-			temp.Close()
-			return fmt.Errorf("set sing-box permissions: %w", err)
+			return fmt.Errorf("set sing-box permissions: %w", errors.Join(err, temp.Close()))
 		}
 	}
 	if _, err := temp.Write(executable); err != nil {
-		temp.Close()
-		return fmt.Errorf("write sing-box binary: %w", err)
+		return fmt.Errorf("write sing-box binary: %w", errors.Join(err, temp.Close()))
 	}
 	if err := temp.Sync(); err != nil {
-		temp.Close()
-		return fmt.Errorf("sync sing-box binary: %w", err)
+		return fmt.Errorf("sync sing-box binary: %w", errors.Join(err, temp.Close()))
 	}
 	if err := temp.Close(); err != nil {
 		return fmt.Errorf("close sing-box binary: %w", err)
@@ -239,9 +245,9 @@ func (i *Installer) bundledCandidates() []string {
 		candidates = append(candidates, i.BundledPath)
 	}
 	goos, _ := i.platform()
-	name := "sing-box"
-	if goos == "windows" {
-		name = "sing-box.exe"
+	name := singBoxBinary
+	if goos == windowsGOOS {
+		name = singBoxBinaryWin
 	}
 	if exe, err := os.Executable(); err == nil {
 		if resolved, evalErr := filepath.EvalSymlinks(exe); evalErr == nil {
@@ -266,7 +272,7 @@ func validateBinary(path string) (string, error) {
 	if !info.Mode().IsRegular() {
 		return "", errors.New("sing-box binary is not a regular file")
 	}
-	if runtime.GOOS != "windows" && info.Mode().Perm()&0o111 == 0 {
+	if runtime.GOOS != windowsGOOS && info.Mode().Perm()&0o111 == 0 {
 		return "", errors.New("sing-box binary is not executable")
 	}
 	return filepath.Clean(path), nil
@@ -304,7 +310,7 @@ func extractFromZip(content []byte) (map[string][]byte, error) {
 		}
 		base := filepath.Base(file.Name)
 		switch strings.ToLower(base) {
-		case "sing-box.exe", "wintun.dll", "libcronet.dll", "license":
+		case singBoxBinaryWin, wintunDLL, cronetDLL, "license":
 		default:
 			continue
 		}
@@ -313,13 +319,12 @@ func extractFromZip(content []byte) (map[string][]byte, error) {
 			return nil, fmt.Errorf("open %s: %w", base, openErr)
 		}
 		value, readErr := io.ReadAll(io.LimitReader(opened, 128<<20))
-		opened.Close()
-		if readErr != nil {
-			return nil, fmt.Errorf("extract %s: %w", base, readErr)
+		if closeErr := opened.Close(); readErr != nil || closeErr != nil {
+			return nil, fmt.Errorf("extract %s: %w", base, errors.Join(readErr, closeErr))
 		}
 		files[strings.ToLower(base)] = value
 	}
-	if _, ok := files["sing-box.exe"]; !ok {
+	if _, ok := files[singBoxBinaryWin]; !ok {
 		return nil, errors.New("sing-box zip archive does not contain an executable")
 	}
 	return files, nil
@@ -330,7 +335,7 @@ func extractFromTarGz(content []byte) (map[string][]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open sing-box gzip archive: %w", err)
 	}
-	defer gzipReader.Close()
+	defer func() { _ = gzipReader.Close() }()
 	tarReader := tar.NewReader(gzipReader)
 	files := make(map[string][]byte)
 	for {
@@ -344,14 +349,14 @@ func extractFromTarGz(content []byte) (map[string][]byte, error) {
 		if header.Typeflag != tar.TypeReg {
 			continue
 		}
-		if filepath.Base(header.Name) != "sing-box" {
+		if filepath.Base(header.Name) != singBoxBinary {
 			continue
 		}
 		value, readErr := io.ReadAll(io.LimitReader(tarReader, 128<<20))
 		if readErr != nil {
 			return nil, fmt.Errorf("extract sing-box binary: %w", readErr)
 		}
-		files["sing-box"] = value
+		files[singBoxBinary] = value
 		return files, nil
 	}
 	return nil, errors.New("sing-box tar archive does not contain sing-box binary")

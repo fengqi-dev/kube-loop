@@ -7,7 +7,7 @@ var mysqlIndexedTextColumns = map[string]struct{}{
 	"cluster_id": {}, "state": {}, "type": {}, "idempotency_key": {}, "task_id": {},
 	"kind": {}, "namespace": {}, "name": {}, "scope": {}, "key": {},
 	"resource_type": {}, "resource_id": {}, "action": {}, "outcome": {}, "request_id": {},
-	"status": {}, "email": {}, "primary_email": {},
+	"status": {}, emailField: {}, "primary_email": {},
 	"relay_id": {}, "desired_state": {}, "username": {}, "client_id": {}, "scope_type": {},
 	"authentication_type": {}, "updated_authentication_type": {},
 	"authorization_id": {},
@@ -29,8 +29,16 @@ func mysqlSchemaStatements(sqlite []string) []string {
 }
 
 func mysqlSchemaStatement(statement string) string {
-	statement = strings.ReplaceAll(statement, "INTEGER PRIMARY KEY AUTOINCREMENT", "BIGINT AUTO_INCREMENT PRIMARY KEY")
-	statement = strings.ReplaceAll(statement, "revision INTEGER", "revision BIGINT")
+	statement = strings.ReplaceAll(
+		statement,
+		"INTEGER PRIMARY KEY AUTOINCREMENT",
+		"BIGINT AUTO_INCREMENT PRIMARY KEY",
+	)
+	statement = strings.ReplaceAll(
+		statement,
+		"revision INTEGER",
+		"revision BIGINT",
+	)
 	statement = strings.ReplaceAll(statement, "BLOB", "VARBINARY(1024)")
 	for column := range mysqlIndexedTextColumns {
 		statement = replaceMySQLTextColumn(statement, column, "VARCHAR(128)")
@@ -38,7 +46,11 @@ func mysqlSchemaStatement(statement string) string {
 	for column := range mysqlTimeColumns {
 		statement = replaceMySQLTextColumn(statement, column, "VARCHAR(64)")
 	}
-	statement = strings.ReplaceAll(statement, "_hash TEXT", "_hash VARCHAR(128)")
+	statement = strings.ReplaceAll(
+		statement,
+		"_hash TEXT",
+		"_hash VARCHAR(128)",
+	)
 	statement = strings.ReplaceAll(statement, "_id TEXT", "_id VARCHAR(128)")
 	statement = strings.ReplaceAll(statement, "TEXT", "LONGTEXT")
 	statement = strings.ReplaceAll(statement, "DEFAULT ''", "DEFAULT ('')")
@@ -67,7 +79,8 @@ func replaceMySQLTextColumn(statement, column, replacement string) string {
 }
 
 func isSQLIdentifierByte(value byte) bool {
-	return value == '_' || value == '`' || value >= 'a' && value <= 'z' || value >= 'A' && value <= 'Z' ||
+	return value == '_' || value == '`' || value >= 'a' && value <= 'z' ||
+		value >= 'A' && value <= 'Z' ||
 		value >= '0' && value <= '9'
 }
 

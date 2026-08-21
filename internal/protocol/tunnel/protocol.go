@@ -12,8 +12,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
 	"github.com/google/uuid"
+
+	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
 )
 
 const (
@@ -69,12 +70,13 @@ func RelaySessionToken(sessionID string, generation uint64) (SessionToken, error
 	sessionID = strings.TrimSpace(sessionID)
 	parsed, err := uuid.Parse(sessionID)
 	if err != nil || parsed.String() != sessionID {
-		return SessionToken{}, errors.New("Relay session ID must be a canonical UUID")
+		return SessionToken{}, errors.New("relay session ID must be a canonical UUID")
 	}
 	if generation == 0 {
-		return SessionToken{}, errors.New("Relay session generation is required")
+		return SessionToken{}, errors.New("relay session generation is required")
 	}
-	digest := sha256.Sum256([]byte("kubeloop-relay-session-v2\x00" + sessionID + "\x00" + strconv.FormatUint(generation, 10)))
+	contents := "kubeloop-relay-session-v2\x00" + sessionID + "\x00" + strconv.FormatUint(generation, 10)
+	digest := sha256.Sum256([]byte(contents))
 	return SessionToken(digest), nil
 }
 
@@ -205,7 +207,7 @@ func ReadSessionHeader(r io.Reader) (SessionHeader, error) {
 	}
 	token := SessionToken(header[5:])
 	if token == (SessionToken{}) {
-		return SessionHeader{}, errors.New("Gateway session token is required")
+		return SessionHeader{}, errors.New("gateway session token is required")
 	}
 	return SessionHeader{Command: header[4], Token: token}, nil
 }
@@ -221,7 +223,8 @@ func WriteAuthorizedControlSession(w io.Writer, token SessionToken, spec network
 	if err != nil {
 		return err
 	}
-	value = binary.BigEndian.AppendUint32(value, uint32(len(contents)))
+	// Canonical NetworkSpec JSON is bounded by networkspec.MaximumJSONSize.
+	value = binary.BigEndian.AppendUint32(value, uint32(len(contents))) //nolint:gosec // NetworkSpec JSON is bounded.
 	value = append(value, contents...)
 	return writeAll(w, value)
 }
@@ -250,7 +253,9 @@ func WriteStatus(w io.Writer, err error) error {
 	if len(message) > maxErrorSize {
 		message = message[:maxErrorSize]
 	}
-	value := binary.BigEndian.AppendUint16([]byte{StatusError}, uint16(len(message)))
+	// message is truncated to the uint16-sized maxErrorSize above.
+	messageLength := uint16(len(message)) //nolint:gosec // Message is truncated to a uint16-sized limit.
+	value := binary.BigEndian.AppendUint16([]byte{StatusError}, messageLength)
 	value = append(value, message...)
 	return writeAll(w, value)
 }
@@ -287,7 +292,8 @@ func WriteDatagram(w io.Writer, payload []byte) error {
 		return fmt.Errorf("invalid datagram size %d", len(payload))
 	}
 	var size [2]byte
-	binary.BigEndian.PutUint16(size[:], uint16(len(payload)))
+	// payload is bounded by the uint16-sized MaxDatagramSize above.
+	binary.BigEndian.PutUint16(size[:], uint16(len(payload))) //nolint:gosec // Datagram size is bounded.
 	if err := writeAll(w, size[:]); err != nil {
 		return err
 	}
@@ -315,7 +321,7 @@ func ReadDatagram(r *bufio.Reader, buffer []byte) ([]byte, error) {
 
 func appendSessionHeader(value []byte, command byte, token SessionToken) ([]byte, error) {
 	if token == (SessionToken{}) {
-		return nil, errors.New("Gateway session token is required")
+		return nil, errors.New("gateway session token is required")
 	}
 	value = append(value, magic[:]...)
 	value = append(value, command)
@@ -323,7 +329,8 @@ func appendSessionHeader(value []byte, command byte, token SessionToken) ([]byte
 }
 
 func appendUint16String(value []byte, text string) []byte {
-	value = binary.BigEndian.AppendUint16(value, uint16(len(text)))
+	// Callers validate protocol strings against their uint16 wire limit.
+	value = binary.BigEndian.AppendUint16(value, uint16(len(text))) //nolint:gosec // Wire strings are bounded.
 	return append(value, text...)
 }
 

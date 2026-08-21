@@ -18,6 +18,8 @@ import (
 	"testing"
 	"time"
 
+	"k8s.io/client-go/rest"
+
 	"github.com/fengqi-dev/kube-loop/internal/client/credentials"
 	clientportforward "github.com/fengqi-dev/kube-loop/internal/client/portforward"
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
@@ -32,7 +34,6 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/capability"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
-	"k8s.io/client-go/rest"
 )
 
 const portForwardAccessToken = "e2e-port-forward-access"
@@ -53,7 +54,12 @@ func (staticCapabilityDiscoverer) DiscoverCapabilities(
 
 type e2eBindingManager struct{}
 
-func (e2eBindingManager) Activate(context.Context, sessionapi.ActiveSession, string, portforwardservice.Spec) (bool, error) {
+func (e2eBindingManager) Activate(
+	context.Context,
+	sessionapi.ActiveSession,
+	string,
+	portforwardservice.Spec,
+) (bool, error) {
 	return true, nil
 }
 
@@ -180,15 +186,28 @@ func startPortForwardControlPlane(
 	}
 	policy := authorization.NewAuthenticated()
 	controllerServer, err := controlplane.NewServer(
-		controlplane.Config{PublicURL: "http://127.0.0.1"}, controlplane.BuildInfo{},
+		controlplane.Config{PublicURL: "http://127.0.0.1"},
+		controlplane.BuildInfo{},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
-		controlplane.WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(request *http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
-			if request.Header.Get("Authorization") != "Bearer "+portForwardAccessToken {
-				return controlplaneapi.Identity{}, &controlplaneapi.Error{Code: controlplaneapi.CodeUnauthenticated, Message: "invalid e2e access token"}
-			}
-			return controlplaneapi.Identity{Subject: identityID, DeviceID: deviceID}, nil
-		})),
-		controlplane.WithAuthorizer(policy), controlplane.WithAPIRoutes(controlplane.APIRoutes{PortForwards: portforwardapi.NewRoutes(portForwards, sessions).Endpoints()}),
+		controlplane.WithAuthenticator(
+			controlplaneapi.AuthenticatorFunc(
+				func(request *http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
+					if request.Header.Get("Authorization") != "Bearer "+portForwardAccessToken {
+						return controlplaneapi.Identity{}, &controlplaneapi.Error{
+							Code:    controlplaneapi.CodeUnauthenticated,
+							Message: "invalid e2e access token",
+						}
+					}
+					return controlplaneapi.Identity{Subject: identityID, DeviceID: deviceID}, nil
+				},
+			),
+		),
+		controlplane.WithAuthorizer(
+			policy,
+		),
+		controlplane.WithAPIRoutes(
+			controlplane.APIRoutes{PortForwards: portforwardapi.NewRoutes(portForwards, sessions).Endpoints()},
+		),
 	)
 	if err != nil {
 		t.Fatalf("create Port Forward Control Plane: %v", err)

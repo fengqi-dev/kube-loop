@@ -4,8 +4,9 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
 	"github.com/labstack/echo/v5"
+
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
 )
 
 func testEndpoint(function any) RouteRegistrar {

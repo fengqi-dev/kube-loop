@@ -12,12 +12,17 @@ import (
 
 type identityRepository struct{ repositoryBase }
 
-func (repository *identityRepository) Create(ctx context.Context, identity Identity) (Identity, error) {
+func (repository *identityRepository) Create(
+	ctx context.Context,
+	identity Identity,
+) (Identity, error) {
 	if err := normalizeIdentity(&identity); err != nil {
 		return Identity{}, err
 	}
-	query := repository.bind(`INSERT INTO identities(id, type, display_name, primary_email, status, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`)
+	query := repository.bind(
+		`INSERT INTO identities(id, type, display_name, primary_email, status, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`,
+	)
 	_, err := repository.executor.ExecContext(
 		ctx,
 		query,
@@ -35,13 +40,18 @@ func (repository *identityRepository) Create(ctx context.Context, identity Ident
 	return identity, nil
 }
 
-func (repository *identityRepository) Update(ctx context.Context, identity Identity) error {
+func (repository *identityRepository) Update(
+	ctx context.Context,
+	identity Identity,
+) error {
 	if err := normalizeIdentity(&identity); err != nil {
 		return err
 	}
 	result, err := repository.executor.ExecContext(
 		ctx,
-		repository.bind(`UPDATE identities SET type = ?, display_name = ?, primary_email = ?, status = ?, updated_at = ? WHERE id = ?`),
+		repository.bind(
+			`UPDATE identities SET type = ?, display_name = ?, primary_email = ?, status = ?, updated_at = ? WHERE id = ?`,
+		),
 		identity.Type,
 		identity.DisplayName,
 		identity.PrimaryEmail,
@@ -62,13 +72,18 @@ func (repository *identityRepository) Update(ctx context.Context, identity Ident
 	return nil
 }
 
-func (repository *identityRepository) GetByID(ctx context.Context, id string) (Identity, error) {
+func (repository *identityRepository) GetByID(
+	ctx context.Context,
+	id string,
+) (Identity, error) {
 	if err := validateUUID(id, "identity ID"); err != nil {
 		return Identity{}, err
 	}
 	identity, err := scanIdentity(repository.executor.QueryRowContext(
 		ctx,
-		repository.bind(`SELECT id, type, display_name, primary_email, status, created_at, updated_at FROM identities WHERE id = ?`),
+		repository.bind(
+			`SELECT id, type, display_name, primary_email, status, created_at, updated_at FROM identities WHERE id = ?`,
+		),
 		id,
 	))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -80,7 +95,10 @@ func (repository *identityRepository) GetByID(ctx context.Context, id string) (I
 	return identity, nil
 }
 
-func (repository *identityRepository) List(ctx context.Context, filter IdentityListFilter) ([]Identity, error) {
+func (repository *identityRepository) List(
+	ctx context.Context,
+	filter IdentityListFilter,
+) ([]Identity, error) {
 	limit, cursor, err := normalizePage(filter.Limit, filter.Cursor)
 	if err != nil {
 		return nil, err
@@ -88,13 +106,15 @@ func (repository *identityRepository) List(ctx context.Context, filter IdentityL
 	filter.Type = strings.TrimSpace(filter.Type)
 	filter.Status = strings.TrimSpace(filter.Status)
 	filter.Search = strings.TrimSpace(filter.Search)
-	if filter.Type != "" && filter.Type != "human" && filter.Type != "machine" {
+	if filter.Type != "" && filter.Type != identityTypeHuman &&
+		filter.Type != "machine" {
 		return nil, errors.New("identity type filter is invalid")
 	}
 	if filter.Status != "" && !validIdentityStatus(filter.Status) {
 		return nil, errors.New("identity status filter is invalid")
 	}
-	if len(filter.Search) > 256 || strings.ContainsAny(filter.Search, "\x00\r\n") {
+	if len(filter.Search) > 256 ||
+		strings.ContainsAny(filter.Search, "\x00\r\n") {
 		return nil, errors.New("identity search filter is invalid")
 	}
 	query := `SELECT id, type, display_name, primary_email, status, created_at, updated_at FROM identities WHERE 1=1`
@@ -113,13 +133,16 @@ func (repository *identityRepository) List(ctx context.Context, filter IdentityL
 		arguments = append(arguments, search, search)
 	}
 	query, arguments = appendPageBoundary(query, arguments, "", cursor)
-	query += ` ORDER BY created_at DESC, id DESC LIMIT ?`
+	query += descendingPageSQL
 	arguments = append(arguments, limit)
-	rows, err := repository.executor.QueryContext(ctx, repository.bind(query), arguments...)
+	rows, err := repository.executor.QueryContext(
+		ctx,
+		repository.bind(query),
+		arguments...)
 	if err != nil {
 		return nil, databaseError("list identities", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	identities := make([]Identity, 0)
 	for rows.Next() {
 		identity, scanErr := scanIdentity(rows)
@@ -140,12 +163,15 @@ func normalizeIdentity(identity *Identity) error {
 	}
 	identity.Type = strings.TrimSpace(identity.Type)
 	identity.DisplayName = strings.TrimSpace(identity.DisplayName)
-	identity.PrimaryEmail = strings.ToLower(strings.TrimSpace(identity.PrimaryEmail))
+	identity.PrimaryEmail = strings.ToLower(
+		strings.TrimSpace(identity.PrimaryEmail),
+	)
 	identity.Status = strings.TrimSpace(identity.Status)
-	if identity.Type != "human" && identity.Type != "machine" {
+	if identity.Type != identityTypeHuman && identity.Type != "machine" {
 		return errors.New("identity type is invalid")
 	}
-	if identity.DisplayName == "" || len(identity.DisplayName) > 256 || len(identity.PrimaryEmail) > 320 {
+	if identity.DisplayName == "" || len(identity.DisplayName) > 256 ||
+		len(identity.PrimaryEmail) > 320 {
 		return errors.New("identity profile is invalid")
 	}
 	if !validIdentityStatus(identity.Status) {
@@ -167,7 +193,8 @@ func normalizeIdentity(identity *Identity) error {
 }
 
 func validIdentityStatus(status string) bool {
-	return status == "active" || status == "suspended" || status == "disabled"
+	return status == statusActive || status == "suspended" ||
+		status == "disabled"
 }
 
 func scanIdentity(row rowScanner) (Identity, error) {

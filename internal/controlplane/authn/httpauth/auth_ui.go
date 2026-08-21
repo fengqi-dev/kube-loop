@@ -9,6 +9,9 @@ import (
 	"github.com/labstack/echo/v5"
 )
 
+const browserContentSecurityPolicy = "default-src 'none'; script-src 'self'; style-src 'self'; " +
+	"form-action 'self' kubeloop: http://127.0.0.1:*; frame-ancestors 'none'; base-uri 'none'"
+
 //go:embed ui/assets/index.html ui/assets/app.css ui/assets/app.js
 var authUIAssets embed.FS
 
@@ -18,9 +21,9 @@ func (routes *Routes) authUI(ctx *echo.Context) error {
 	}
 	path := strings.TrimPrefix(ctx.Param("*"), "/")
 	if path == "" {
-		path = "index.html"
+		path = indexFileName
 	}
-	if path != "index.html" && path != "app.css" && path != "app.js" {
+	if path != indexFileName && path != "app.css" && path != "app.js" {
 		return ctx.NoContent(http.StatusNotFound)
 	}
 	content, err := fs.ReadFile(authUIAssets, "ui/assets/"+path)
@@ -34,9 +37,17 @@ func (routes *Routes) authUI(ctx *echo.Context) error {
 	if path == "app.js" {
 		contentType = "text/javascript; charset=utf-8"
 	}
-	if path == "index.html" {
-		document := strings.ReplaceAll(string(content), `src="./app.js"`, `src="/oauth2/ui/app.js"`)
-		document = strings.ReplaceAll(document, `href="./app.css"`, `href="/oauth2/ui/app.css"`)
+	if path == indexFileName {
+		document := strings.ReplaceAll(
+			string(content),
+			`src="./app.js"`,
+			`src="/oauth2/ui/app.js"`,
+		)
+		document = strings.ReplaceAll(
+			document,
+			`href="./app.css"`,
+			`href="/oauth2/ui/app.css"`,
+		)
 		content = []byte(document)
 	}
 	header := ctx.Response().Header()
@@ -47,6 +58,9 @@ func (routes *Routes) authUI(ctx *echo.Context) error {
 	// Chrome applies form-action to redirects after a form submission. The
 	// desktop flow uses the registered protocol; separately registered native
 	// OAuth clients may still use the restricted loopback redirect family.
-	header.Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; form-action 'self' kubeloop: http://127.0.0.1:*; frame-ancestors 'none'; base-uri 'none'")
+	header.Set(
+		"Content-Security-Policy",
+		browserContentSecurityPolicy,
+	)
 	return ctx.Blob(http.StatusOK, contentType, content)
 }

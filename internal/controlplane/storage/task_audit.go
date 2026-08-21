@@ -7,8 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/fengqi-dev/kube-loop/internal/protocol/remotetask"
 	"github.com/google/uuid"
+
+	"github.com/fengqi-dev/kube-loop/internal/protocol/remotetask"
 )
 
 const TaskTransitionAuditAction = "task.transition"
@@ -32,19 +33,32 @@ type auditedTaskRepository struct {
 	transactions TransactionManager
 }
 
-func (repository *auditedTaskRepository) Create(ctx context.Context, task Task) error {
+func (repository *auditedTaskRepository) Create(
+	ctx context.Context,
+	task Task,
+) error {
 	return repository.delegate.Create(ctx, task)
 }
 
-func (repository *auditedTaskRepository) GetByID(ctx context.Context, id string) (Task, error) {
+func (repository *auditedTaskRepository) GetByID(
+	ctx context.Context,
+	id string,
+) (Task, error) {
 	return repository.delegate.GetByID(ctx, id)
 }
 
-func (repository *auditedTaskRepository) List(ctx context.Context, filter TaskListFilter) ([]Task, error) {
+func (repository *auditedTaskRepository) List(
+	ctx context.Context,
+	filter TaskListFilter,
+) ([]Task, error) {
 	return repository.delegate.List(ctx, filter)
 }
 
-func (repository *auditedTaskRepository) ListBySession(ctx context.Context, sessionID string, limit int) ([]Task, error) {
+func (repository *auditedTaskRepository) ListBySession(
+	ctx context.Context,
+	sessionID string,
+	limit int,
+) ([]Task, error) {
 	return repository.delegate.ListBySession(ctx, sessionID, limit)
 }
 
@@ -55,7 +69,13 @@ func (repository *auditedTaskRepository) ListStaleByTypeStates(
 	before time.Time,
 	limit int,
 ) ([]Task, error) {
-	return repository.delegate.ListStaleByTypeStates(ctx, taskType, states, before, limit)
+	return repository.delegate.ListStaleByTypeStates(
+		ctx,
+		taskType,
+		states,
+		before,
+		limit,
+	)
 }
 
 func (repository *auditedTaskRepository) UpdateState(
@@ -66,14 +86,24 @@ func (repository *auditedTaskRepository) UpdateState(
 	updatedAt time.Time,
 ) error {
 	if repository.transactions != nil {
-		return repository.transactions.WithinTransaction(ctx, func(repositories Repositories) error {
-			return repositories.Tasks().UpdateState(ctx, id, expectedState, nextState, result, updatedAt)
-		})
+		return repository.transactions.WithinTransaction(
+			ctx,
+			func(repositories Repositories) error {
+				return repositories.Tasks().
+					UpdateState(ctx, id, expectedState, nextState, result, updatedAt)
+			},
+		)
 	}
 	if err := repository.delegate.UpdateState(ctx, id, expectedState, nextState, result, updatedAt); err != nil {
 		return err
 	}
-	return repository.appendTransition(ctx, id, expectedState, nextState, updatedAt)
+	return repository.appendTransition(
+		ctx,
+		id,
+		expectedState,
+		nextState,
+		updatedAt,
+	)
 }
 
 func (repository *auditedTaskRepository) ClaimStale(
@@ -86,18 +116,27 @@ func (repository *auditedTaskRepository) ClaimStale(
 	updatedAt time.Time,
 ) error {
 	if repository.transactions != nil {
-		return repository.transactions.WithinTransaction(ctx, func(repositories Repositories) error {
-			return repositories.Tasks().ClaimStale(
-				ctx, id, expectedState, observedUpdatedAt, nextState, result, updatedAt,
-			)
-		})
+		return repository.transactions.WithinTransaction(
+			ctx,
+			func(repositories Repositories) error {
+				return repositories.Tasks().ClaimStale(
+					ctx, id, expectedState, observedUpdatedAt, nextState, result, updatedAt,
+				)
+			},
+		)
 	}
 	if err := repository.delegate.ClaimStale(
 		ctx, id, expectedState, observedUpdatedAt, nextState, result, updatedAt,
 	); err != nil {
 		return err
 	}
-	return repository.appendTransition(ctx, id, expectedState, nextState, updatedAt)
+	return repository.appendTransition(
+		ctx,
+		id,
+		expectedState,
+		nextState,
+		updatedAt,
+	)
 }
 
 func (repository *auditedTaskRepository) appendTransition(
@@ -107,7 +146,7 @@ func (repository *auditedTaskRepository) appendTransition(
 	createdAt time.Time,
 ) error {
 	if repository.audit == nil || repository.sessions == nil {
-		return errors.New("Task transition audit dependencies are required")
+		return errors.New("task transition audit dependencies are required")
 	}
 	task, err := repository.delegate.GetByID(ctx, taskID)
 	if err != nil {
@@ -118,7 +157,7 @@ func (repository *auditedTaskRepository) appendTransition(
 		return err
 	}
 	requestID, _ := ctx.Value(auditRequestIDContextKey{}).(string)
-	source := "api"
+	source := auditSourceAPI
 	if requestID = strings.TrimSpace(requestID); requestID == "" {
 		requestID = "background-" + uuid.NewString()
 		source = "background"
@@ -138,7 +177,7 @@ func (repository *auditedTaskRepository) appendTransition(
 	}
 	return repository.audit.Append(ctx, AuditEvent{
 		ID: uuid.NewString(), IdentityID: task.IdentityID, Action: TaskTransitionAuditAction,
-		ResourceType: task.Type, ResourceID: task.ID, Outcome: "success",
+		ResourceType: task.Type, ResourceID: task.ID, Outcome: outcomeSuccess,
 		RequestID: requestID, Metadata: metadata, CreatedAt: createdAt.UTC(),
 	})
 }

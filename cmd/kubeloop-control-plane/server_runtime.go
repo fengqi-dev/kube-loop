@@ -35,7 +35,7 @@ type serverRuntimeOptions struct {
 }
 
 func serveControlPlane(options serverRuntimeOptions) {
-	listener, err := net.Listen("tcp", options.Server.ListenAddress())
+	listener, err := (&net.ListenConfig{}).Listen(options.Context, "tcp", options.Server.ListenAddress())
 	if err != nil {
 		_ = options.Store.Close()
 		options.Logger.Error("listen failed", "address", options.Server.ListenAddress(), "error", err)
@@ -44,11 +44,21 @@ func serveControlPlane(options serverRuntimeOptions) {
 	var relayServer *http.Server
 	var relayListener net.Listener
 	if options.RelayRegistry != nil {
-		rawRelayListener, listenErr := net.Listen("tcp", options.RelayRegistry.listenAddress)
+		rawRelayListener, listenErr := (&net.ListenConfig{}).Listen(
+			options.Context,
+			"tcp",
+			options.RelayRegistry.listenAddress,
+		)
 		if listenErr != nil {
 			_ = listener.Close()
 			_ = options.Store.Close()
-			options.Logger.Error("Relay Registry listen failed", "address", options.RelayRegistry.listenAddress, "error", listenErr)
+			options.Logger.Error(
+				"Relay Registry listen failed",
+				"address",
+				options.RelayRegistry.listenAddress,
+				"error",
+				listenErr,
+			)
 			os.Exit(1)
 		}
 		relayListener = tls.NewListener(rawRelayListener, options.RelayRegistry.tlsConfig)
@@ -65,7 +75,13 @@ func serveControlPlane(options serverRuntimeOptions) {
 		"kubernetes_impersonation", options.KubernetesConfig.Impersonation.Enabled,
 	)
 	if relayListener != nil {
-		options.Logger.Info("Relay Registry started", "listen_address", relayListener.Addr().String(), "transport", "TLS")
+		options.Logger.Info(
+			"Relay Registry started",
+			"listen_address",
+			relayListener.Addr().String(),
+			"transport",
+			"TLS",
+		)
 	}
 	serveCount := 1
 	if relayServer != nil {
@@ -104,14 +120,13 @@ func serveControlPlane(options serverRuntimeOptions) {
 		serveResults++
 		firstServeError = err
 		if firstServeError == nil {
-			firstServeError = errors.New("Control Plane listener stopped unexpectedly")
+			firstServeError = errors.New("control plane listener stopped unexpectedly")
 		}
 		options.Stop()
 	case <-options.Context.Done():
 	}
 	options.Logger.Info("kubeloop control plane shutting down")
 	shutdownContext, cancel := context.WithTimeout(context.Background(), options.Config.ShutdownTimeout)
-	defer cancel()
 	shutdownError := options.Server.Shutdown(shutdownContext)
 	shutdownError = errors.Join(shutdownError, options.SessionRuntime.Shutdown(shutdownContext))
 	if relayServer != nil {
@@ -125,11 +140,16 @@ func serveControlPlane(options serverRuntimeOptions) {
 				firstServeError = serveError
 			}
 		case <-time.After(time.Second):
-			options.Logger.Warn("Control Plane serve loop did not report shutdown", "remaining", serveCount-serveResults)
+			options.Logger.Warn(
+				"Control Plane serve loop did not report shutdown",
+				"remaining",
+				serveCount-serveResults,
+			)
 			serveResults = serveCount
 		}
 	}
 	backgroundWorkers.Wait()
+	cancel()
 	closeError := options.Store.Close()
 	if finalError := errors.Join(firstServeError, shutdownError, closeError); finalError != nil {
 		options.Logger.Error("Control Plane stopped with an error", "error", finalError)

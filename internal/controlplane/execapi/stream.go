@@ -7,9 +7,10 @@ import (
 	"io"
 	"sync"
 
+	"k8s.io/client-go/tools/remotecommand"
+
 	"github.com/fengqi-dev/kube-loop/internal/protocol/execstream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
-	"k8s.io/client-go/tools/remotecommand"
 )
 
 type frameWriter struct {
@@ -43,7 +44,10 @@ type terminalSizeQueue struct {
 }
 
 func newTerminalSizeQueue() *terminalSizeQueue {
-	return &terminalSizeQueue{sizes: make(chan remotecommand.TerminalSize, 1), done: make(chan struct{})}
+	return &terminalSizeQueue{
+		sizes: make(chan remotecommand.TerminalSize, 1),
+		done:  make(chan struct{}),
+	}
 }
 
 func (queue *terminalSizeQueue) Push(size execstream.TerminalSize) {
@@ -84,7 +88,7 @@ func readInput(
 	stdin *io.PipeWriter,
 	sizes *terminalSizeQueue,
 ) error {
-	defer stdin.Close()
+	defer func() { _ = stdin.Close() }()
 	for {
 		messageType, encoded, err := connection.Read(ctx)
 		if err != nil {

@@ -7,17 +7,23 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/remotetask"
-	"github.com/google/uuid"
 )
 
 func TestTaskTransitionRollsBackWhenAuditAppendFails(t *testing.T) {
-	store := openSQLiteTestStore(t, filepath.Join(t.TempDir(), "task-audit-rollback.db"))
+	store := openSQLiteTestStore(
+		t,
+		filepath.Join(t.TempDir(), "task-audit-rollback.db"),
+	)
 	ctx := context.Background()
 	identity := createTestIdentity(t, store.Identities(), "task-audit-rollback")
 	now := time.Date(2026, 8, 10, 13, 0, 0, 0, time.UTC)
-	spec, err := networkspec.Normalize(networkspec.Spec{ServiceIPs: []string{"10.96.0.10"}})
+	spec, err := networkspec.Normalize(
+		networkspec.Spec{ServiceIPs: []string{"10.96.0.10"}},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -25,7 +31,7 @@ func TestTaskTransitionRollsBackWhenAuditAppendFails(t *testing.T) {
 	specHash, _ := networkspec.Hash(spec)
 	session := Session{
 		ID: uuid.NewString(), IdentityID: identity.ID, DeviceID: "audit-device", ClusterID: "cluster-a",
-		Namespace: "development", State: "active", NetworkSpec: specJSON, NetworkSpecHash: specHash,
+		Namespace: "development", State: statusActive, NetworkSpec: specJSON, NetworkSpecHash: specHash,
 		CreatedAt: now, UpdatedAt: now, LastHeartbeatAt: now, ExpiresAt: now.Add(time.Hour),
 	}
 	if err := store.Sessions().Create(ctx, session); err != nil {

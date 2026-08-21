@@ -20,7 +20,12 @@ func TestInstalledCoreMatches(t *testing.T) {
 		createInstalled  bool
 		want             bool
 	}{
-		{name: "same content at different path", installedContent: []byte("same-core"), createInstalled: true, want: true},
+		{
+			name:             "same content at different path",
+			installedContent: []byte("same-core"),
+			createInstalled:  true,
+			want:             true,
+		},
 		{name: "different content", installedContent: []byte("old-core"), createInstalled: true},
 		{name: "installed core missing"},
 	}

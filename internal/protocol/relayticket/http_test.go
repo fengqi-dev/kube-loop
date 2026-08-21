@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"errors"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
@@ -47,7 +48,7 @@ func TestRequestVerifierConsumesRelayTicketOnce(t *testing.T) {
 	var wait sync.WaitGroup
 	for range attempts {
 		wait.Go(func() {
-			request := httptest.NewRequest("GET", "/tunnel", nil)
+			request := httptest.NewRequest(http.MethodGet, "/tunnel", nil)
 			request.Header.Set("Authorization", "Bearer "+ticket)
 			if _, verifyErr := requestVerifier.Verify(request); verifyErr == nil {
 				accepted.Add(1)
@@ -96,7 +97,7 @@ func TestRequestVerifierRejectsOlderSessionGeneration(t *testing.T) {
 		return ticket
 	}
 	verify := func(ticket string) error {
-		request := httptest.NewRequest("GET", "/tunnel", nil)
+		request := httptest.NewRequest(http.MethodGet, "/tunnel", nil)
 		request.Header.Set("Authorization", "Bearer "+ticket)
 		_, verifyErr := requestVerifier.Verify(request)
 		return verifyErr

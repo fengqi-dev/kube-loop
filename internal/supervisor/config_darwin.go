@@ -8,6 +8,11 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/helper"
 )
 
+const (
+	developmentVersion = "dev"
+	releaseChannel     = "release"
+)
+
 type Config struct {
 	Channel          string
 	ServiceLabel     string
@@ -21,14 +26,14 @@ type Config struct {
 }
 
 func CurrentConfig() Config {
-	dev := Version == "" || Version == "dev"
-	channel := "release"
+	dev := Version == "" || Version == developmentVersion
+	channel := releaseChannel
 	label := "dev.fengqi.kubeloop.supervisor"
 	stateDir := "/var/lib/kubeloop/supervisor"
 	socket := "/var/run/kubeloop/supervisor.sock"
 	logPath := "/var/log/kubeloop-supervisor.log"
 	if dev {
-		channel = "dev"
+		channel = developmentVersion
 		label = "dev.fengqi.kubeloop.supervisor.dev"
 		stateDir = "/var/lib/kubeloop-dev/supervisor"
 		socket = "/var/run/kubeloop-dev/supervisor.sock"

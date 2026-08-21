@@ -88,7 +88,9 @@ func (actor *shadowActor) run() {
 		actor.cancel()
 		return
 	}
-	defer connection.Close()
+	defer func() {
+		_ = connection.Close() // The shadow actor has no result channel; closing only releases its private connection.
+	}()
 	responseDone := make(chan struct{})
 	go func() {
 		_, _ = io.Copy(io.Discard, connection)
@@ -124,7 +126,7 @@ func (actor *shadowActor) run() {
 			if err := connection.SetWriteDeadline(time.Now().Add(actor.config.ShadowWriteTimeout)); err != nil {
 				return
 			}
-			if actor.target.Protocol == "udp" {
+			if actor.target.Protocol == mirrorProtocolUDP {
 				count, writeErr := connection.Write(message.payload)
 				if writeErr != nil || count != len(message.payload) {
 					return
@@ -172,7 +174,7 @@ func (relay *localRelay) readReady(ctx context.Context) error {
 	}
 	frame, err := mirrorstream.Decode(encoded)
 	if err != nil || frame.Type != mirrorstream.Ready {
-		return errors.New("Gateway returned an invalid Mirror readiness frame")
+		return errors.New("gateway returned an invalid Mirror readiness frame")
 	}
 	return nil
 }
@@ -196,7 +198,16 @@ func (relay *localRelay) run(ctx context.Context) error {
 		}
 		switch frame.Type {
 		case mirrorstream.Open:
-			if _, err := relay.createActor(ctx, frame.StreamID, "tcp", int32(frame.ServicePort)); err != nil {
+			servicePort, err := mirrorServicePort(frame.ServicePort)
+			if err != nil {
+				return err
+			}
+			if _, err := relay.createActor(
+				ctx,
+				frame.StreamID,
+				mirrorProtocolTCP,
+				servicePort,
+			); err != nil {
 				return err
 			}
 		case mirrorstream.Data:
@@ -204,8 +215,8 @@ func (relay *localRelay) run(ctx context.Context) error {
 			if dropped {
 				continue
 			}
-			if actor == nil || actor.target.Protocol != "tcp" {
-				return errors.New("Gateway referenced an unknown local Mirror TCP stream")
+			if actor == nil || actor.target.Protocol != mirrorProtocolTCP {
+				return errors.New("gateway referenced an unknown local Mirror TCP stream")
 			}
 			if !actor.enqueue(shadowMessage{payload: frame.Payload}) {
 				relay.drop(frame.StreamID, actor)
@@ -215,25 +226,29 @@ func (relay *localRelay) run(ctx context.Context) error {
 			if dropped {
 				continue
 			}
-			if actor == nil || actor.target.Protocol != "tcp" {
-				return errors.New("Gateway referenced an unknown local Mirror TCP stream")
+			if actor == nil || actor.target.Protocol != mirrorProtocolTCP {
+				return errors.New("gateway referenced an unknown local Mirror TCP stream")
 			}
 			if !actor.enqueue(shadowMessage{closeWrite: true}) {
 				relay.drop(frame.StreamID, actor)
 			}
 		case mirrorstream.Datagram:
+			servicePort, err := mirrorServicePort(frame.ServicePort)
+			if err != nil {
+				return err
+			}
 			actor, dropped := relay.actorState(frame.StreamID)
 			if dropped {
 				continue
 			}
 			if actor == nil {
-				actor, err = relay.createActor(ctx, frame.StreamID, "udp", int32(frame.ServicePort))
+				actor, err = relay.createActor(ctx, frame.StreamID, mirrorProtocolUDP, servicePort)
 				if err != nil {
 					return err
 				}
 			}
-			if actor.target.Protocol != "udp" || actor.target.ServicePort != int32(frame.ServicePort) {
-				return errors.New("Gateway changed a local Mirror UDP target")
+			if actor.target.Protocol != mirrorProtocolUDP || actor.target.ServicePort != servicePort {
+				return errors.New("gateway changed a local Mirror UDP target")
 			}
 			if !actor.enqueue(shadowMessage{payload: frame.Payload}) {
 				relay.drop(frame.StreamID, actor)
@@ -243,11 +258,18 @@ func (relay *localRelay) run(ctx context.Context) error {
 		case mirrorstream.Stop:
 			return nil
 		case mirrorstream.Ready:
-			return errors.New("Gateway sent duplicate Mirror readiness")
+			return errors.New("gateway sent duplicate Mirror readiness")
 		default:
-			return errors.New("Gateway sent a client-only Mirror frame")
+			return errors.New("gateway sent a client-only Mirror frame")
 		}
 	}
+}
+
+func mirrorServicePort(value uint32) (int32, error) {
+	if value == 0 || value > 65535 {
+		return 0, errors.New("gateway supplied an invalid Mirror service port")
+	}
+	return int32(value), nil
 }
 
 func (relay *localRelay) stop(ctx context.Context) error {
@@ -266,16 +288,16 @@ func (relay *localRelay) createActor(
 ) (*shadowActor, error) {
 	target, exists := relay.targets[targetKey(protocol, servicePort)]
 	if !exists {
-		return nil, errors.New("Gateway requested an unconfigured local Mirror target")
+		return nil, errors.New("gateway requested an unconfigured local Mirror target")
 	}
 	relay.mu.Lock()
 	if relay.streams[id] != nil {
 		relay.mu.Unlock()
-		return nil, errors.New("Gateway reused an active Mirror stream ID")
+		return nil, errors.New("gateway reused an active Mirror stream ID")
 	}
 	if _, wasDropped := relay.dropped[id]; wasDropped {
 		relay.mu.Unlock()
-		return nil, errors.New("Gateway reused an active Mirror stream ID")
+		return nil, errors.New("gateway reused an active Mirror stream ID")
 	}
 	actor := newShadowActor(ctx, target, relay.dial, relay.config)
 	relay.streams[id] = actor

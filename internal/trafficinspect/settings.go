@@ -55,7 +55,7 @@ func (s *SettingsStore) Load(fallback Settings) (Settings, error) {
 	if err != nil {
 		return Settings{}, fmt.Errorf("open traffic inspection settings: %w", err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	raw, err := io.ReadAll(io.LimitReader(file, maximumSettingsBytes+1))
 	if err != nil {
 		return Settings{}, errors.New("read traffic inspection settings")

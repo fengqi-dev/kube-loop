@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"path/filepath"
@@ -72,7 +73,7 @@ func NewState(version string) (*State, error) {
 	credentialStore := credentials.NewSystemStoreForVersion(version)
 	discoveryClient := clientdiscovery.New(clientdiscovery.Config{ClientVersion: version})
 	authClient := clientauth.New(clientauth.Config{
-		OpenBrowser: openBrowser, BrowserCallback: func() {},
+		OpenBrowser: func(target string) error { return openBrowser(ctx, target) }, BrowserCallback: func() {},
 		ClientID: authconfig.TUIClientID, RedirectURI: authconfig.TUIRedirectURI,
 		LoopbackCallback: true,
 	})
@@ -172,8 +173,11 @@ func (s *State) ActiveProfile() (clientprofile.Profile, bool) {
 
 func (s *State) AuthStatus(profileID string) (AuthSession, error) {
 	credential, err := s.credentials.Get(profileID)
-	if err != nil {
+	if errors.Is(err, credentials.ErrNotFound) {
 		return AuthSession{}, nil
+	}
+	if err != nil {
+		return AuthSession{}, err
 	}
 	return AuthSession{
 		Authenticated:    credential.AccessToken != "" && credential.RefreshToken != "",
@@ -183,14 +187,14 @@ func (s *State) AuthStatus(profileID string) (AuthSession, error) {
 	}, nil
 }
 
-func openBrowser(url string) error {
+func openBrowser(ctx context.Context, url string) error {
 	switch runtime.GOOS {
 	case "darwin":
-		return exec.Command("open", url).Start()
+		return exec.CommandContext(ctx, "open", url).Start()
 	case "linux":
-		return exec.Command("xdg-open", url).Start()
+		return exec.CommandContext(ctx, "xdg-open", url).Start()
 	case "windows":
-		return exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
+		return exec.CommandContext(ctx, "rundll32", "url.dll,FileProtocolHandler", url).Start()
 	default:
 		return fmt.Errorf("unsupported platform: %s", runtime.GOOS)
 	}

@@ -16,7 +16,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficstream"
 )
 
-var errClientStopped = errors.New("Exchange stopped by client")
+var errClientStopped = errors.New("exchange stopped by client")
 
 type tcpRelayStream struct {
 	connection net.Conn
@@ -95,12 +95,16 @@ func (relay *relaySession) run(ctx context.Context) error {
 	return result
 }
 
-func (relay *relaySession) acceptTCP(ctx context.Context, binding trafficlistener.TCPBinding, streamWG *sync.WaitGroup) error {
+func (relay *relaySession) acceptTCP(
+	ctx context.Context,
+	binding trafficlistener.TCPBinding,
+	streamWG *sync.WaitGroup,
+) error {
 	for {
 		connection, err := binding.Listener.Accept()
 		if err != nil {
 			if ctx.Err() != nil || errors.Is(err, net.ErrClosed) {
-				return nil
+				return nil //nolint:nilerr // A closed listener is the normal relay shutdown signal.
 			}
 			return err
 		}
@@ -109,7 +113,10 @@ func (relay *relaySession) acceptTCP(ctx context.Context, binding trafficlistene
 		relay.tcp[id] = &tcpRelayStream{connection: connection, port: binding.Port}
 		relay.mu.Unlock()
 		if err := relay.write(ctx, exchangestream.Frame{
-			Type: exchangestream.Open, StreamID: id, ServicePort: uint32(binding.Port.ServicePort), Protocol: exchangestream.ProtocolTCP,
+			Type: exchangestream.Open, StreamID: id,
+			// BindListeners validates ServicePort as a positive 16-bit port.
+			ServicePort: uint32(binding.Port.ServicePort), //nolint:gosec // Validated as a positive 16-bit port.
+			Protocol:    exchangestream.ProtocolTCP,
 		}); err != nil {
 			relay.removeTCP(id)
 			return err
@@ -126,7 +133,8 @@ func (relay *relaySession) readTCP(ctx context.Context, id uint64, connection ne
 		count, err := connection.Read(buffer)
 		if count > 0 {
 			payload := append([]byte(nil), buffer[:count]...)
-			if writeErr := relay.write(ctx, exchangestream.Frame{Type: exchangestream.Data, StreamID: id, Payload: payload}); writeErr != nil {
+			frame := exchangestream.Frame{Type: exchangestream.Data, StreamID: id, Payload: payload}
+			if writeErr := relay.write(ctx, frame); writeErr != nil {
 				relay.removeTCP(id)
 				return
 			}
@@ -150,7 +158,7 @@ func (relay *relaySession) readUDP(ctx context.Context, index int, binding traff
 		count, remote, err := binding.Connection.ReadFromUDP(buffer)
 		if err != nil {
 			if ctx.Err() != nil || errors.Is(err, net.ErrClosed) {
-				return nil
+				return nil //nolint:nilerr // A closed UDP socket is the normal relay shutdown signal.
 			}
 			return err
 		}
@@ -161,8 +169,10 @@ func (relay *relaySession) readUDP(ctx context.Context, index int, binding traff
 		id := relay.udpAssociation(binding, remote, key)
 		payload := append([]byte(nil), buffer[:count]...)
 		if err := relay.write(ctx, exchangestream.Frame{
-			Type: exchangestream.Datagram, StreamID: id, ServicePort: uint32(binding.Port.ServicePort),
-			Protocol: exchangestream.ProtocolUDP, Payload: payload,
+			Type: exchangestream.Datagram, StreamID: id,
+			// BindListeners validates ServicePort as a positive 16-bit port.
+			ServicePort: uint32(binding.Port.ServicePort), //nolint:gosec // Validated as a positive 16-bit port.
+			Protocol:    exchangestream.ProtocolUDP, Payload: payload,
 		}); err != nil {
 			return err
 		}
@@ -228,7 +238,7 @@ func (relay *relaySession) readClient(ctx context.Context) error {
 		case exchangestream.Data:
 			stream := relay.tcpStream(frame.StreamID)
 			if stream == nil {
-				return errors.New("Exchange data references an unknown TCP stream")
+				return errors.New("exchange data references an unknown TCP stream")
 			}
 			if err := writeAll(stream.connection, frame.Payload); err != nil {
 				relay.removeTCP(frame.StreamID)
@@ -237,7 +247,7 @@ func (relay *relaySession) readClient(ctx context.Context) error {
 		case exchangestream.CloseWrite:
 			stream := relay.tcpStream(frame.StreamID)
 			if stream == nil {
-				return errors.New("Exchange half-close references an unknown TCP stream")
+				return errors.New("exchange half-close references an unknown TCP stream")
 			}
 			if connection, ok := stream.connection.(interface{ CloseWrite() error }); ok {
 				_ = connection.CloseWrite()
@@ -246,12 +256,17 @@ func (relay *relaySession) readClient(ctx context.Context) error {
 			}
 		case exchangestream.Close:
 			if !relay.removeStream(frame.StreamID) {
-				return errors.New("Exchange close references an unknown stream")
+				return errors.New("exchange close references an unknown stream")
 			}
 		case exchangestream.Datagram:
 			association := relay.udpAssociationByID(frame.StreamID)
-			if association == nil || frame.ServicePort != uint32(association.port.ServicePort) {
-				return errors.New("Exchange datagram references an unknown UDP association")
+			if association == nil {
+				return errors.New("exchange datagram references an unknown UDP association")
+			}
+			// BindListeners validates ServicePort as a positive 16-bit port.
+			servicePort := uint32(association.port.ServicePort) //nolint:gosec // Validated as a 16-bit port.
+			if frame.ServicePort != servicePort {
+				return errors.New("exchange datagram references an unknown UDP association")
 			}
 			if _, err := association.connection.WriteToUDP(frame.Payload, association.remote); err != nil {
 				return err

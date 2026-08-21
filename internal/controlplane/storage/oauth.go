@@ -14,31 +14,56 @@ type oauthClientRepository struct{ repositoryBase }
 type oauthSessionRepository struct{ repositoryBase }
 type oauthConsentRepository struct{ repositoryBase }
 
-func (repository *oauthClientRepository) Create(ctx context.Context, client OAuthClient) error {
+func (repository *oauthClientRepository) Create(
+	ctx context.Context,
+	client OAuthClient,
+) error {
 	if err := normalizeOAuthClient(&client, true); err != nil {
 		return err
 	}
 	redirects, _ := json.Marshal(client.RedirectURIs)
 	grants, _ := json.Marshal(client.GrantTypes)
 	scopes, _ := json.Marshal(client.Scopes)
-	query := repository.bind(`INSERT INTO oauth_clients(id, name, public, redirect_uris_json,
+	query := repository.bind(
+		`INSERT INTO oauth_clients(id, name, public, redirect_uris_json,
 		grant_types_json, scopes_json, trusted, enabled, builtin, machine_identity_id,
-		created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-	_, err := repository.executor.ExecContext(ctx, query, client.ID, client.Name,
-		client.Public, string(redirects), string(grants), string(scopes), client.Trusted,
-		client.Enabled, client.Builtin, nullableString(client.MachineIdentityID), formatTime(client.CreatedAt), formatTime(client.UpdatedAt))
+		created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	)
+	_, err := repository.executor.ExecContext(
+		ctx,
+		query,
+		client.ID,
+		client.Name,
+		client.Public,
+		string(redirects),
+		string(grants),
+		string(scopes),
+		client.Trusted,
+		client.Enabled,
+		client.Builtin,
+		nullableString(client.MachineIdentityID),
+		formatTime(client.CreatedAt),
+		formatTime(client.UpdatedAt),
+	)
 	return mapWriteError(err)
 }
 
-func (repository *oauthClientRepository) Get(ctx context.Context, id string) (OAuthClient, error) {
+func (repository *oauthClientRepository) Get(
+	ctx context.Context,
+	id string,
+) (OAuthClient, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
-		return OAuthClient{}, errors.New("OAuth client ID is required")
+		return OAuthClient{}, errors.New("oAuth client ID is required")
 	}
-	query := repository.bind(`SELECT id, name, public, redirect_uris_json, grant_types_json,
+	query := repository.bind(
+		`SELECT id, name, public, redirect_uris_json, grant_types_json,
 		scopes_json, trusted, enabled, builtin, machine_identity_id, created_at, updated_at
-		FROM oauth_clients WHERE id = ?`)
-	client, err := scanOAuthClient(repository.executor.QueryRowContext(ctx, query, id))
+		FROM oauth_clients WHERE id = ?`,
+	)
+	client, err := scanOAuthClient(
+		repository.executor.QueryRowContext(ctx, query, id),
+	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return OAuthClient{}, ErrNotFound
 	}
@@ -48,14 +73,19 @@ func (repository *oauthClientRepository) Get(ctx context.Context, id string) (OA
 	return client, nil
 }
 
-func (repository *oauthClientRepository) List(ctx context.Context) ([]OAuthClient, error) {
-	rows, err := repository.executor.QueryContext(ctx, `SELECT id, name, public, redirect_uris_json,
+func (repository *oauthClientRepository) List(
+	ctx context.Context,
+) ([]OAuthClient, error) {
+	rows, err := repository.executor.QueryContext(
+		ctx,
+		`SELECT id, name, public, redirect_uris_json,
 		grant_types_json, scopes_json, trusted, enabled, builtin, machine_identity_id, created_at, updated_at
-		FROM oauth_clients ORDER BY builtin DESC, name, id`)
+		FROM oauth_clients ORDER BY builtin DESC, name, id`,
+	)
 	if err != nil {
 		return nil, databaseError("list OAuth clients", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	clients := make([]OAuthClient, 0)
 	for rows.Next() {
 		client, scanErr := scanOAuthClient(rows)
@@ -70,7 +100,10 @@ func (repository *oauthClientRepository) List(ctx context.Context) ([]OAuthClien
 	return clients, nil
 }
 
-func (repository *oauthClientRepository) Update(ctx context.Context, client OAuthClient) error {
+func (repository *oauthClientRepository) Update(
+	ctx context.Context,
+	client OAuthClient,
+) error {
 	if err := normalizeOAuthClient(&client, false); err != nil {
 		return err
 	}
@@ -83,17 +116,34 @@ func (repository *oauthClientRepository) Update(ctx context.Context, client OAut
 		client.Public = true
 		client.Trusted = true
 		client.Enabled = true
-		client.GrantTypes = []string{"authorization_code", "refresh_token"}
+		client.GrantTypes = []string{grantAuthorizationCode, grantRefreshToken}
 	}
 	redirects, _ := json.Marshal(client.RedirectURIs)
 	grants, _ := json.Marshal(client.GrantTypes)
 	scopes, _ := json.Marshal(client.Scopes)
-	query := repository.bind(`UPDATE oauth_clients SET name = ?, public = ?, redirect_uris_json = ?,
+	query := repository.bind(
+		`UPDATE oauth_clients SET name = ?, public = ?, redirect_uris_json = ?,
 		grant_types_json = ?, scopes_json = ?, trusted = ?, enabled = ?,
-		machine_identity_id = ?, updated_at = ? WHERE id = ?`)
-	result, err := repository.executor.ExecContext(ctx, query, client.Name, client.Public,
-		string(redirects), string(grants), string(scopes), client.Trusted, client.Enabled,
-		nullableString(client.MachineIdentityID), formatTime(client.UpdatedAt), client.ID)
+		machine_identity_id = ?, updated_at = ? WHERE id = ?`,
+	)
+	result, err := repository.executor.ExecContext(
+		ctx,
+		query,
+		client.Name,
+		client.Public,
+		string(
+			redirects,
+		),
+		string(grants),
+		string(scopes),
+		client.Trusted,
+		client.Enabled,
+		nullableString(
+			client.MachineIdentityID,
+		),
+		formatTime(client.UpdatedAt),
+		client.ID,
+	)
 	if err != nil {
 		return mapWriteError(err)
 	}
@@ -107,7 +157,10 @@ func (repository *oauthClientRepository) Update(ctx context.Context, client OAut
 	return nil
 }
 
-func (repository *oauthClientRepository) Delete(ctx context.Context, id string) error {
+func (repository *oauthClientRepository) Delete(
+	ctx context.Context,
+	id string,
+) error {
 	client, err := repository.Get(ctx, id)
 	if err != nil {
 		return err
@@ -115,7 +168,11 @@ func (repository *oauthClientRepository) Delete(ctx context.Context, id string) 
 	if client.Builtin {
 		return errors.New("built-in OAuth clients cannot be deleted")
 	}
-	result, err := repository.executor.ExecContext(ctx, repository.bind(`DELETE FROM oauth_clients WHERE id = ?`), id)
+	result, err := repository.executor.ExecContext(
+		ctx,
+		repository.bind(`DELETE FROM oauth_clients WHERE id = ?`),
+		id,
+	)
 	if err != nil {
 		return mapWriteError(err)
 	}
@@ -129,9 +186,12 @@ func (repository *oauthClientRepository) Delete(ctx context.Context, id string) 
 	return nil
 }
 
-func (repository *oauthClientRepository) SetSecret(ctx context.Context, secret OAuthClientSecret) error {
+func (repository *oauthClientRepository) SetSecret(
+	ctx context.Context,
+	secret OAuthClientSecret,
+) error {
 	if strings.TrimSpace(secret.ClientID) == "" || len(secret.SecretHash) < 32 {
-		return errors.New("OAuth client secret hash is invalid")
+		return errors.New("oAuth client secret hash is invalid")
 	}
 	if secret.CreatedAt.IsZero() {
 		secret.CreatedAt = time.Now()
@@ -140,32 +200,57 @@ func (repository *oauthClientRepository) SetSecret(ctx context.Context, secret O
 		secret.UpdatedAt = secret.CreatedAt
 	}
 	query := `INSERT INTO oauth_client_secrets(client_id, secret_hash, created_at, updated_at)
-		VALUES (?, ?, ?, ?) ON CONFLICT(client_id) DO UPDATE SET secret_hash=excluded.secret_hash, updated_at=excluded.updated_at`
+		VALUES (?, ?, ?, ?)` +
+		` ON CONFLICT(client_id) DO UPDATE SET secret_hash=excluded.secret_hash, updated_at=excluded.updated_at`
 	if repository.backend == BackendPostgreSQL {
 		query = `INSERT INTO oauth_client_secrets(client_id, secret_hash, created_at, updated_at)
-		VALUES ($1, $2, $3, $4) ON CONFLICT(client_id) DO UPDATE SET secret_hash=excluded.secret_hash, updated_at=excluded.updated_at`
+		VALUES ($1, $2, $3, $4)` +
+			` ON CONFLICT(client_id) DO UPDATE SET secret_hash=excluded.secret_hash, updated_at=excluded.updated_at`
 	}
 	if repository.backend == BackendMySQL {
 		query = `INSERT INTO oauth_client_secrets(client_id, secret_hash, created_at, updated_at)
 		VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE secret_hash=VALUES(secret_hash), updated_at=VALUES(updated_at)`
 	}
-	_, err := repository.executor.ExecContext(ctx, query, secret.ClientID, secret.SecretHash, formatTime(secret.CreatedAt), formatTime(secret.UpdatedAt))
+	_, err := repository.executor.ExecContext(
+		ctx,
+		query,
+		secret.ClientID,
+		secret.SecretHash,
+		formatTime(secret.CreatedAt),
+		formatTime(secret.UpdatedAt),
+	)
 	return mapWriteError(err)
 }
 
-func (repository *oauthClientRepository) GetSecret(ctx context.Context, clientID string) (OAuthClientSecret, error) {
+func (repository *oauthClientRepository) GetSecret(
+	ctx context.Context,
+	clientID string,
+) (OAuthClientSecret, error) {
 	var value OAuthClientSecret
 	var created, updated string
-	err := repository.executor.QueryRowContext(ctx, repository.bind(`SELECT client_id, secret_hash, created_at, updated_at FROM oauth_client_secrets WHERE client_id = ?`), clientID).Scan(&value.ClientID, &value.SecretHash, &created, &updated)
+	query := repository.bind(
+		`SELECT client_id, secret_hash, created_at, updated_at FROM oauth_client_secrets WHERE client_id = ?`,
+	)
+	err := repository.executor.QueryRowContext(ctx, query, clientID).
+		Scan(&value.ClientID, &value.SecretHash, &created, &updated)
 	if errors.Is(err, sql.ErrNoRows) {
 		return OAuthClientSecret{}, ErrNotFound
 	}
 	if err != nil {
-		return OAuthClientSecret{}, databaseError("read OAuth client secret", err)
+		return OAuthClientSecret{}, databaseError(
+			"read OAuth client secret",
+			err,
+		)
 	}
-	value.CreatedAt, err = parseTime(created, "OAuth client secret creation time")
+	value.CreatedAt, err = parseTime(
+		created,
+		"OAuth client secret creation time",
+	)
 	if err == nil {
-		value.UpdatedAt, err = parseTime(updated, "OAuth client secret update time")
+		value.UpdatedAt, err = parseTime(
+			updated,
+			"OAuth client secret update time",
+		)
 	}
 	return value, err
 }
@@ -199,16 +284,17 @@ func scanOAuthClient(row rowScanner) (OAuthClient, error) {
 func normalizeOAuthClient(client *OAuthClient, create bool) error {
 	client.ID = strings.TrimSpace(client.ID)
 	client.Name = strings.TrimSpace(client.Name)
-	if client.ID == "" || len(client.ID) > 128 || client.Name == "" || len(client.Name) > 128 {
-		return errors.New("OAuth client identity is invalid")
+	if client.ID == "" || len(client.ID) > 128 || client.Name == "" ||
+		len(client.Name) > 128 {
+		return errors.New("oAuth client identity is invalid")
 	}
 	for _, values := range [][]string{client.GrantTypes, client.Scopes} {
 		if len(values) == 0 {
-			return errors.New("OAuth client capabilities must not be empty")
+			return errors.New("oAuth client capabilities must not be empty")
 		}
 		for _, value := range values {
 			if strings.TrimSpace(value) == "" {
-				return errors.New("OAuth client capability is invalid")
+				return errors.New("oAuth client capability is invalid")
 			}
 		}
 	}
@@ -217,20 +303,27 @@ func normalizeOAuthClient(client *OAuthClient, create bool) error {
 	slices.Sort(client.GrantTypes)
 	client.GrantTypes = slices.Compact(client.GrantTypes)
 	for _, grant := range client.GrantTypes {
-		if grant != "authorization_code" && grant != "refresh_token" && grant != "client_credentials" {
-			return errors.New("OAuth client grant type is not supported")
+		if grant != grantAuthorizationCode && grant != grantRefreshToken &&
+			grant != "client_credentials" {
+			return errors.New("oAuth client grant type is not supported")
 		}
 	}
-	if client.Public && slices.Contains(client.GrantTypes, "client_credentials") {
+	if client.Public &&
+		slices.Contains(client.GrantTypes, "client_credentials") {
 		return errors.New("public OAuth clients cannot use client credentials")
 	}
-	if slices.Contains(client.GrantTypes, "authorization_code") && len(client.RedirectURIs) == 0 {
-		return errors.New("authorization code OAuth clients require a redirect URI")
+	if slices.Contains(client.GrantTypes, grantAuthorizationCode) &&
+		len(client.RedirectURIs) == 0 {
+		return errors.New(
+			"authorization code OAuth clients require a redirect URI",
+		)
 	}
 	if slices.Contains(client.GrantTypes, "client_credentials") {
-		for _, scope := range []string{"openid", "profile", "email", "offline_access"} {
+		for _, scope := range []string{scopeOpenID, scopeProfile, emailField, scopeOfflineAccess} {
 			if slices.Contains(client.Scopes, scope) {
-				return errors.New("client credentials OAuth clients cannot use identity scopes")
+				return errors.New(
+					"client credentials OAuth clients cannot use identity scopes",
+				)
 			}
 		}
 	}
@@ -249,28 +342,53 @@ func normalizeOAuthClient(client *OAuthClient, create bool) error {
 	return nil
 }
 
-func (repository *oauthSessionRepository) Create(ctx context.Context, session OAuthSession) error {
-	if len(session.SignatureHash) != 32 || strings.TrimSpace(session.Kind) == "" || strings.TrimSpace(session.RequestID) == "" || !json.Valid(session.RequestJSON) {
-		return errors.New("OAuth session is invalid")
+func (repository *oauthSessionRepository) Create(
+	ctx context.Context,
+	session OAuthSession,
+) error {
+	if len(session.SignatureHash) != 32 ||
+		strings.TrimSpace(session.Kind) == "" ||
+		strings.TrimSpace(session.RequestID) == "" ||
+		!json.Valid(session.RequestJSON) {
+		return errors.New("oAuth session is invalid")
 	}
 	if session.Status == "" {
-		session.Status = "active"
+		session.Status = statusActive
 	}
 	if session.CreatedAt.IsZero() {
 		session.CreatedAt = time.Now()
 	}
 	if !session.ExpiresAt.After(session.CreatedAt) {
-		return errors.New("OAuth session expiry is invalid")
+		return errors.New("oAuth session expiry is invalid")
 	}
-	_, err := repository.executor.ExecContext(ctx, repository.bind(`INSERT INTO oauth_sessions(kind, signature_hash, request_id,
+	_, err := repository.executor.ExecContext(
+		ctx,
+		repository.bind(
+			`INSERT INTO oauth_sessions(kind, signature_hash, request_id,
 		identity_id, client_id, device_id, request_json, status, created_at, expires_at, revoked_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`), session.Kind, session.SignatureHash, session.RequestID,
-		nullableString(session.IdentityID), session.ClientID, session.DeviceID, string(session.RequestJSON), session.Status,
-		formatTime(session.CreatedAt), formatTime(session.ExpiresAt), nullableTime(session.RevokedAt))
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		),
+		session.Kind,
+		session.SignatureHash,
+		session.RequestID,
+		nullableString(
+			session.IdentityID,
+		),
+		session.ClientID,
+		session.DeviceID,
+		string(session.RequestJSON),
+		session.Status,
+		formatTime(session.CreatedAt),
+		formatTime(session.ExpiresAt),
+		nullableTime(session.RevokedAt),
+	)
 	return mapWriteError(err)
 }
 
-func (repository *oauthSessionRepository) ListGrants(ctx context.Context, filter OAuthGrantListFilter) ([]OAuthGrant, error) {
+func (repository *oauthSessionRepository) ListGrants(
+	ctx context.Context,
+	filter OAuthGrantListFilter,
+) ([]OAuthGrant, error) {
 	limit, cursor, err := normalizePage(filter.Limit, filter.Cursor)
 	if err != nil {
 		return nil, err
@@ -278,14 +396,18 @@ func (repository *oauthSessionRepository) ListGrants(ctx context.Context, filter
 	filter.IdentityID = strings.TrimSpace(filter.IdentityID)
 	filter.ClientID = strings.TrimSpace(filter.ClientID)
 	filter.Status = strings.TrimSpace(filter.Status)
-	if filter.IdentityID != "" && validateUUID(filter.IdentityID, "OAuth grant identity ID") != nil {
-		return nil, errors.New("OAuth grant identity filter is invalid")
+	if filter.IdentityID != "" &&
+		validateUUID(filter.IdentityID, "OAuth grant identity ID") != nil {
+		return nil, errors.New("oAuth grant identity filter is invalid")
 	}
-	if len(filter.ClientID) > 128 || strings.ContainsAny(filter.ClientID, "\x00\r\n") {
-		return nil, errors.New("OAuth grant client filter is invalid")
+	if len(filter.ClientID) > 128 ||
+		strings.ContainsAny(filter.ClientID, "\x00\r\n") {
+		return nil, errors.New("oAuth grant client filter is invalid")
 	}
-	if filter.Status != "" && filter.Status != "active" && filter.Status != "revoked" && filter.Status != "expired" {
-		return nil, errors.New("OAuth grant status filter is invalid")
+	if filter.Status != "" && filter.Status != statusActive &&
+		filter.Status != "revoked" &&
+		filter.Status != statusExpired {
+		return nil, errors.New("oAuth grant status filter is invalid")
 	}
 	if filter.Now.IsZero() {
 		filter.Now = time.Now().UTC()
@@ -310,7 +432,7 @@ func (repository *oauthSessionRepository) ListGrants(ctx context.Context, filter
 	FROM grants WHERE 1=1`
 	arguments := []any{formatTime(filter.Now)}
 	if filter.IdentityID != "" {
-		query += ` AND identity_id = ?`
+		query += identityFilterSQL
 		arguments = append(arguments, filter.IdentityID)
 	}
 	if filter.ClientID != "" {
@@ -322,13 +444,16 @@ func (repository *oauthSessionRepository) ListGrants(ctx context.Context, filter
 		arguments = append(arguments, filter.Status)
 	}
 	query, arguments = appendPageBoundary(query, arguments, "", cursor)
-	query += ` ORDER BY created_at DESC, id DESC LIMIT ?`
+	query += descendingPageSQL
 	arguments = append(arguments, limit)
-	rows, err := repository.executor.QueryContext(ctx, repository.bind(query), arguments...)
+	rows, err := repository.executor.QueryContext(
+		ctx,
+		repository.bind(query),
+		arguments...)
 	if err != nil {
 		return nil, databaseError("list OAuth grants", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	grants := make([]OAuthGrant, 0)
 	for rows.Next() {
 		var grant OAuthGrant
@@ -344,7 +469,10 @@ func (repository *oauthSessionRepository) ListGrants(ctx context.Context, filter
 			grant.ExpiresAt, err = parseTime(expires, "OAuth grant expiry")
 		}
 		if err == nil {
-			grant.RevokedAt, err = parseNullableTime(revoked, "OAuth grant revocation time")
+			grant.RevokedAt, err = parseNullableTime(
+				revoked,
+				"OAuth grant revocation time",
+			)
 		}
 		if err == nil {
 			grant.Scopes, err = oauthGrantScopes([]byte(raw))
@@ -377,18 +505,28 @@ func oauthGrantScopes(raw []byte) ([]string, error) {
 	return slices.Compact(result), nil
 }
 
-func (repository *oauthSessionRepository) Get(ctx context.Context, kind string, hash []byte) (OAuthSession, error) {
+func (repository *oauthSessionRepository) Get(
+	ctx context.Context,
+	kind string,
+	hash []byte,
+) (OAuthSession, error) {
 	return repository.get(ctx, kind, hash)
 }
-func (repository *oauthSessionRepository) get(ctx context.Context, kind string, hash []byte) (OAuthSession, error) {
+
+func (repository *oauthSessionRepository) get(
+	ctx context.Context,
+	kind string,
+	hash []byte,
+) (OAuthSession, error) {
 	var value OAuthSession
 	var raw, created, expires string
 	var revoked sql.NullString
 	var identity sql.NullString
 	err := repository.executor.QueryRowContext(ctx, repository.bind(`SELECT kind, signature_hash, request_id, identity_id,
 		client_id, device_id, request_json, status, created_at, expires_at, revoked_at FROM oauth_sessions
-		WHERE kind = ? AND signature_hash = ?`), kind, hash).Scan(&value.Kind, &value.SignatureHash, &value.RequestID,
-		&identity, &value.ClientID, &value.DeviceID, &raw, &value.Status, &created, &expires, &revoked)
+		WHERE kind = ? AND signature_hash = ?`), kind, hash).
+		Scan(&value.Kind, &value.SignatureHash, &value.RequestID,
+			&identity, &value.ClientID, &value.DeviceID, &raw, &value.Status, &created, &expires, &revoked)
 	if errors.Is(err, sql.ErrNoRows) {
 		return OAuthSession{}, ErrNotFound
 	}
@@ -402,13 +540,30 @@ func (repository *oauthSessionRepository) get(ctx context.Context, kind string, 
 		value.ExpiresAt, err = parseTime(expires, "OAuth session expiry")
 	}
 	if err == nil {
-		value.RevokedAt, err = parseNullableTime(revoked, "OAuth session revocation time")
+		value.RevokedAt, err = parseNullableTime(
+			revoked,
+			"OAuth session revocation time",
+		)
 	}
 	return value, err
 }
 
-func (repository *oauthSessionRepository) Consume(ctx context.Context, kind string, hash []byte, now time.Time) (OAuthSession, error) {
-	result, err := repository.executor.ExecContext(ctx, repository.bind(`UPDATE oauth_sessions SET status = 'consumed' WHERE kind = ? AND signature_hash = ? AND status = 'active' AND expires_at > ?`), kind, hash, formatTime(now))
+func (repository *oauthSessionRepository) Consume(
+	ctx context.Context,
+	kind string,
+	hash []byte,
+	now time.Time,
+) (OAuthSession, error) {
+	result, err := repository.executor.ExecContext(
+		ctx,
+		repository.bind(
+			`UPDATE oauth_sessions SET status = 'consumed' WHERE kind = ? AND signature_hash = ?`+
+				` AND status = 'active' AND expires_at > ?`,
+		),
+		kind,
+		hash,
+		formatTime(now),
+	)
 	if err != nil {
 		return OAuthSession{}, mapWriteError(err)
 	}
@@ -422,36 +577,82 @@ func (repository *oauthSessionRepository) Consume(ctx context.Context, kind stri
 	return repository.get(ctx, kind, hash)
 }
 
-func (repository *oauthSessionRepository) Delete(ctx context.Context, kind string, hash []byte) error {
-	_, err := repository.executor.ExecContext(ctx, repository.bind(`DELETE FROM oauth_sessions WHERE kind = ? AND signature_hash = ?`), kind, hash)
+func (repository *oauthSessionRepository) Delete(
+	ctx context.Context,
+	kind string,
+	hash []byte,
+) error {
+	_, err := repository.executor.ExecContext(
+		ctx,
+		repository.bind(
+			`DELETE FROM oauth_sessions WHERE kind = ? AND signature_hash = ?`,
+		),
+		kind,
+		hash,
+	)
 	return mapWriteError(err)
 }
 
-func (repository *oauthSessionRepository) RevokeRequest(ctx context.Context, requestID string, now time.Time) error {
-	_, err := repository.executor.ExecContext(ctx, repository.bind(`UPDATE oauth_sessions SET status = 'revoked', revoked_at = ? WHERE request_id = ? AND status = 'active'`), formatTime(now), requestID)
+func (repository *oauthSessionRepository) RevokeRequest(
+	ctx context.Context,
+	requestID string,
+	now time.Time,
+) error {
+	_, err := repository.executor.ExecContext(
+		ctx,
+		repository.bind(
+			`UPDATE oauth_sessions SET status = 'revoked', revoked_at = ? WHERE request_id = ? AND status = 'active'`,
+		),
+		formatTime(now),
+		requestID,
+	)
 	if err != nil {
 		return mapWriteError(err)
 	}
-	_, err = repository.executor.ExecContext(ctx, repository.bind(`UPDATE admin_sessions SET revoked_at = COALESCE(revoked_at, ?) WHERE authorization_id = ?`), formatTime(now), requestID)
+	_, err = repository.executor.ExecContext(
+		ctx,
+		repository.bind(
+			`UPDATE admin_sessions SET revoked_at = COALESCE(revoked_at, ?) WHERE authorization_id = ?`,
+		),
+		formatTime(now),
+		requestID,
+	)
 	return mapWriteError(err)
 }
 
-func (repository *oauthSessionRepository) RevokeIdentity(ctx context.Context, identityID string, now time.Time) (int64, error) {
+func (repository *oauthSessionRepository) RevokeIdentity(
+	ctx context.Context,
+	identityID string,
+	now time.Time,
+) (int64, error) {
 	if strings.TrimSpace(identityID) == "" || now.IsZero() {
-		return 0, errors.New("OAuth identity revocation is invalid")
+		return 0, errors.New("oAuth identity revocation is invalid")
 	}
-	result, err := repository.executor.ExecContext(ctx, repository.bind(`UPDATE oauth_sessions SET status = 'revoked', revoked_at = ?
-		WHERE identity_id = ? AND status = 'active'`), formatTime(now), identityID)
+	result, err := repository.executor.ExecContext(
+		ctx,
+		repository.bind(
+			`UPDATE oauth_sessions SET status = 'revoked', revoked_at = ?
+		WHERE identity_id = ? AND status = 'active'`,
+		),
+		formatTime(now),
+		identityID,
+	)
 	if err != nil {
 		return 0, mapWriteError(err)
 	}
 	return rowsAffected(result)
 }
 
-func (repository *oauthSessionRepository) RequestOwner(ctx context.Context, requestID string) (string, string, error) {
+func (repository *oauthSessionRepository) RequestOwner(
+	ctx context.Context,
+	requestID string,
+) (string, string, error) {
 	var identityID, deviceID string
-	err := repository.executor.QueryRowContext(ctx, repository.bind(`SELECT identity_id, device_id FROM oauth_sessions
-		WHERE request_id = ? AND identity_id IS NOT NULL ORDER BY CASE WHEN kind = 'refresh_token' THEN 0 ELSE 1 END LIMIT 1`), requestID).Scan(&identityID, &deviceID)
+	query := repository.bind(`SELECT identity_id, device_id FROM oauth_sessions
+		WHERE request_id = ? AND identity_id IS NOT NULL` +
+		` ORDER BY CASE WHEN kind = 'refresh_token' THEN 0 ELSE 1 END LIMIT 1`)
+	err := repository.executor.QueryRowContext(ctx, query, requestID).
+		Scan(&identityID, &deviceID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", "", ErrNotFound
 	}
@@ -461,28 +662,51 @@ func (repository *oauthSessionRepository) RequestOwner(ctx context.Context, requ
 	return identityID, deviceID, nil
 }
 
-func (repository *oauthSessionRepository) RequestActive(ctx context.Context, requestID string, now time.Time) (bool, error) {
+func (repository *oauthSessionRepository) RequestActive(
+	ctx context.Context,
+	requestID string,
+	now time.Time,
+) (bool, error) {
 	var count int
-	err := repository.executor.QueryRowContext(ctx, repository.bind(`SELECT COUNT(*) FROM oauth_sessions WHERE request_id = ? AND status = 'active' AND expires_at > ? AND kind IN ('access_token', 'refresh_token')`), requestID, formatTime(now)).Scan(&count)
+	query := repository.bind(
+		`SELECT COUNT(*) FROM oauth_sessions WHERE request_id = ? AND status = 'active'` +
+			` AND expires_at > ? AND kind IN ('access_token', 'refresh_token')`,
+	)
+	err := repository.executor.QueryRowContext(ctx, query, requestID, formatTime(now)).
+		Scan(&count)
 	if err != nil {
 		return false, databaseError("read OAuth grant state", err)
 	}
 	return count > 0, nil
 }
-func (repository *oauthSessionRepository) DeleteExpired(ctx context.Context, now time.Time, limit int) (int64, error) {
+
+func (repository *oauthSessionRepository) DeleteExpired(
+	ctx context.Context,
+	now time.Time,
+	limit int,
+) (int64, error) {
 	if _, err := boundedLimit(limit); err != nil {
 		return 0, err
 	}
-	result, err := repository.executor.ExecContext(ctx, repository.bind(`DELETE FROM oauth_sessions WHERE expires_at <= ?`), formatTime(now))
+	result, err := repository.executor.ExecContext(
+		ctx,
+		repository.bind(`DELETE FROM oauth_sessions WHERE expires_at <= ?`),
+		formatTime(now),
+	)
 	if err != nil {
 		return 0, mapWriteError(err)
 	}
 	return rowsAffected(result)
 }
 
-func (repository *oauthConsentRepository) Grant(ctx context.Context, consent OAuthConsent) error {
-	if len(consent.ScopeHash) != 32 || strings.TrimSpace(consent.IdentityID) == "" || strings.TrimSpace(consent.ClientID) == "" {
-		return errors.New("OAuth consent is invalid")
+func (repository *oauthConsentRepository) Grant(
+	ctx context.Context,
+	consent OAuthConsent,
+) error {
+	if len(consent.ScopeHash) != 32 ||
+		strings.TrimSpace(consent.IdentityID) == "" ||
+		strings.TrimSpace(consent.ClientID) == "" {
+		return errors.New("oAuth consent is invalid")
 	}
 	raw, err := json.Marshal(consent.Scopes)
 	if err != nil {
@@ -494,19 +718,43 @@ func (repository *oauthConsentRepository) Grant(ctx context.Context, consent OAu
 	if consent.UpdatedAt.IsZero() {
 		consent.UpdatedAt = consent.CreatedAt
 	}
-	query := `INSERT INTO oauth_consents(identity_id, client_id, scope_hash, scopes_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(identity_id, client_id, scope_hash) DO UPDATE SET scopes_json=excluded.scopes_json, updated_at=excluded.updated_at`
+	query := `INSERT INTO oauth_consents(identity_id, client_id, scope_hash, scopes_json, created_at, updated_at)` +
+		` VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(identity_id, client_id, scope_hash)` +
+		` DO UPDATE SET scopes_json=excluded.scopes_json, updated_at=excluded.updated_at`
 	if repository.backend == BackendPostgreSQL {
-		query = `INSERT INTO oauth_consents(identity_id, client_id, scope_hash, scopes_json, created_at, updated_at) VALUES ($1, $2, $3, $4::jsonb, $5, $6) ON CONFLICT(identity_id, client_id, scope_hash) DO UPDATE SET scopes_json=excluded.scopes_json, updated_at=excluded.updated_at`
+		query = `INSERT INTO oauth_consents(identity_id, client_id, scope_hash, scopes_json, created_at, updated_at)` +
+			` VALUES ($1, $2, $3, $4::jsonb, $5, $6) ON CONFLICT(identity_id, client_id, scope_hash)` +
+			` DO UPDATE SET scopes_json=excluded.scopes_json, updated_at=excluded.updated_at`
 	}
 	if repository.backend == BackendMySQL {
-		query = `INSERT INTO oauth_consents(identity_id, client_id, scope_hash, scopes_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE scopes_json=VALUES(scopes_json), updated_at=VALUES(updated_at)`
+		query = `INSERT INTO oauth_consents(identity_id, client_id, scope_hash, scopes_json, created_at, updated_at)` +
+			` VALUES (?, ?, ?, ?, ?, ?)` +
+			` ON DUPLICATE KEY UPDATE scopes_json=VALUES(scopes_json), updated_at=VALUES(updated_at)`
 	}
-	_, err = repository.executor.ExecContext(ctx, query, consent.IdentityID, consent.ClientID, consent.ScopeHash, string(raw), formatTime(consent.CreatedAt), formatTime(consent.UpdatedAt))
+	_, err = repository.executor.ExecContext(
+		ctx,
+		query,
+		consent.IdentityID,
+		consent.ClientID,
+		consent.ScopeHash,
+		string(raw),
+		formatTime(consent.CreatedAt),
+		formatTime(consent.UpdatedAt),
+	)
 	return mapWriteError(err)
 }
-func (repository *oauthConsentRepository) Has(ctx context.Context, identityID, clientID string, scopeHash []byte) (bool, error) {
+
+func (repository *oauthConsentRepository) Has(
+	ctx context.Context,
+	identityID, clientID string,
+	scopeHash []byte,
+) (bool, error) {
 	var one int
-	err := repository.executor.QueryRowContext(ctx, repository.bind(`SELECT 1 FROM oauth_consents WHERE identity_id = ? AND client_id = ? AND scope_hash = ?`), identityID, clientID, scopeHash).Scan(&one)
+	query := repository.bind(
+		`SELECT 1 FROM oauth_consents WHERE identity_id = ? AND client_id = ? AND scope_hash = ?`,
+	)
+	err := repository.executor.QueryRowContext(ctx, query, identityID, clientID, scopeHash).
+		Scan(&one)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
@@ -515,7 +763,18 @@ func (repository *oauthConsentRepository) Has(ctx context.Context, identityID, c
 	}
 	return true, nil
 }
-func (repository *oauthConsentRepository) RevokeClient(ctx context.Context, identityID, clientID string) error {
-	_, err := repository.executor.ExecContext(ctx, repository.bind(`DELETE FROM oauth_consents WHERE identity_id = ? AND client_id = ?`), identityID, clientID)
+
+func (repository *oauthConsentRepository) RevokeClient(
+	ctx context.Context,
+	identityID, clientID string,
+) error {
+	_, err := repository.executor.ExecContext(
+		ctx,
+		repository.bind(
+			`DELETE FROM oauth_consents WHERE identity_id = ? AND client_id = ?`,
+		),
+		identityID,
+		clientID,
+	)
 	return mapWriteError(err)
 }

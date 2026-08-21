@@ -6,18 +6,24 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/labstack/echo/v5"
+	"k8s.io/apimachinery/pkg/util/validation"
+
 	"github.com/fengqi-dev/kube-loop/internal/controlplane"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
 	controlplanemiddleware "github.com/fengqi-dev/kube-loop/internal/controlplane/middleware"
 	portforwardservice "github.com/fengqi-dev/kube-loop/internal/controlplane/portforwardapi/service"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/sessionapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/taskapi"
-	"github.com/labstack/echo/v5"
-	"k8s.io/apimachinery/pkg/util/validation"
 )
 
 type SessionValidator interface {
-	RequireActive(context.Context, controlplaneapi.Identity, string, string) (sessionapi.ActiveSession, *controlplaneapi.Error)
+	RequireActive(
+		context.Context,
+		controlplaneapi.Identity,
+		string,
+		string,
+	) (sessionapi.ActiveSession, *controlplaneapi.Error)
 }
 
 type Routes struct {
@@ -25,7 +31,10 @@ type Routes struct {
 	sessions SessionValidator
 }
 
-func NewRoutes(service *portforwardservice.Service, sessions SessionValidator) *Routes {
+func NewRoutes(
+	service *portforwardservice.Service,
+	sessions SessionValidator,
+) *Routes {
 	return &Routes{service: service, sessions: sessions}
 }
 
@@ -38,9 +47,12 @@ func (routes *Routes) Endpoints() controlplane.PortForwardEndpoints {
 }
 
 type sessionHandler func(*echo.Context, controlplaneapi.Identity, sessionapi.ActiveSession) *controlplaneapi.Error
+
 type taskHandler func(*echo.Context, controlplaneapi.Identity, sessionapi.ActiveSession, string) *controlplaneapi.Error
 
-func (routes *Routes) withSession(next sessionHandler) controlplane.EndpointFunc {
+func (routes *Routes) withSession(
+	next sessionHandler,
+) controlplane.EndpointFunc {
 	return func(ctx *echo.Context, identity controlplaneapi.Identity) *controlplaneapi.Error {
 		active, apiError := routes.activeSession(ctx.Request(), identity)
 		if apiError != nil {
@@ -51,17 +63,32 @@ func (routes *Routes) withSession(next sessionHandler) controlplane.EndpointFunc
 }
 
 func (routes *Routes) withTask(next taskHandler) controlplane.EndpointFunc {
-	return routes.withSession(func(ctx *echo.Context, identity controlplaneapi.Identity, active sessionapi.ActiveSession) *controlplaneapi.Error {
-		return next(ctx, identity, active, ctx.Request().PathValue("taskID"))
-	})
+	return routes.withSession(
+		func(ctx *echo.Context, identity controlplaneapi.Identity, active sessionapi.ActiveSession) *controlplaneapi.Error {
+			return next(
+				ctx,
+				identity,
+				active,
+				ctx.Request().PathValue("taskID"),
+			)
+		},
+	)
 }
 
-func (routes *Routes) activeSession(request *http.Request, identity controlplaneapi.Identity) (sessionapi.ActiveSession, *controlplaneapi.Error) {
+func (routes *Routes) activeSession(
+	request *http.Request,
+	identity controlplaneapi.Identity,
+) (sessionapi.ActiveSession, *controlplaneapi.Error) {
 	namespace, apiError := namespaceFromQuery(request)
 	if apiError != nil {
 		return sessionapi.ActiveSession{}, apiError
 	}
-	active, apiError := routes.sessions.RequireActive(request.Context(), identity, namespace, request.PathValue("sessionID"))
+	active, apiError := routes.sessions.RequireActive(
+		request.Context(),
+		identity,
+		namespace,
+		request.PathValue("sessionID"),
+	)
 	if apiError != nil {
 		return sessionapi.ActiveSession{}, apiError
 	}
@@ -90,7 +117,10 @@ func (routes *Routes) create(
 	}
 	ctx.Response().Header().Set("Location", fmt.Sprintf(
 		"%s/sessions/%s/port-forwards/%s?namespace=%s",
-		controlplane.APIPathPrefix, session.ID, result.PortForward.ID, session.Namespace,
+		controlplane.APIPathPrefix,
+		session.ID,
+		result.PortForward.ID,
+		session.Namespace,
 	))
 	if result.Replayed {
 		ctx.Response().Header().Set("Idempotent-Replayed", "true")
@@ -111,7 +141,11 @@ func (routes *Routes) list(
 	if apiError := requireEmptyBody(ctx.Request()); apiError != nil {
 		return apiError
 	}
-	portForwards, apiError := routes.service.List(ctx.Request().Context(), identity, session)
+	portForwards, apiError := routes.service.List(
+		ctx.Request().Context(),
+		identity,
+		session,
+	)
 	if apiError != nil {
 		return apiError
 	}
@@ -132,7 +166,12 @@ func (routes *Routes) stop(
 	if apiError := requireEmptyBody(ctx.Request()); apiError != nil {
 		return apiError
 	}
-	portForward, apiError := routes.service.Stop(ctx.Request().Context(), identity, session, taskID)
+	portForward, apiError := routes.service.Stop(
+		ctx.Request().Context(),
+		identity,
+		session,
+		taskID,
+	)
 	if apiError != nil {
 		return apiError
 	}
@@ -150,16 +189,26 @@ func documentFromEntity(portForward portforwardservice.PortForward) Document {
 	}
 }
 
-func namespaceFromQuery(request *http.Request) (string, *controlplaneapi.Error) {
+func namespaceFromQuery(
+	request *http.Request,
+) (string, *controlplaneapi.Error) {
 	query := request.URL.Query()
 	for key, values := range query {
 		if key != "namespace" || len(values) != 1 {
-			return "", &controlplaneapi.Error{Code: controlplaneapi.CodeInvalidArgument, Field: key, Message: "only one namespace query parameter is supported"}
+			return "", &controlplaneapi.Error{
+				Code:    controlplaneapi.CodeInvalidArgument,
+				Field:   key,
+				Message: "only one namespace query parameter is supported",
+			}
 		}
 	}
 	namespace := query.Get("namespace")
 	if len(validation.IsDNS1123Label(namespace)) != 0 {
-		return "", &controlplaneapi.Error{Code: controlplaneapi.CodeInvalidArgument, Field: "namespace", Message: "namespace is invalid"}
+		return "", &controlplaneapi.Error{
+			Code:    controlplaneapi.CodeInvalidArgument,
+			Field:   "namespace",
+			Message: "namespace is invalid",
+		}
 	}
 	return namespace, nil
 }
@@ -167,10 +216,16 @@ func namespaceFromQuery(request *http.Request) (string, *controlplaneapi.Error) 
 func requireEmptyBody(request *http.Request) *controlplaneapi.Error {
 	contents, err := io.ReadAll(io.LimitReader(request.Body, 1))
 	if err != nil {
-		return &controlplaneapi.Error{Code: controlplaneapi.CodeInvalidArgument, Message: "request body is invalid"}
+		return &controlplaneapi.Error{
+			Code:    controlplaneapi.CodeInvalidArgument,
+			Message: "request body is invalid",
+		}
 	}
 	if len(contents) != 0 {
-		return &controlplaneapi.Error{Code: controlplaneapi.CodeInvalidArgument, Message: "request body must be empty"}
+		return &controlplaneapi.Error{
+			Code:    controlplaneapi.CodeInvalidArgument,
+			Message: "request body must be empty",
+		}
 	}
 	return nil
 }

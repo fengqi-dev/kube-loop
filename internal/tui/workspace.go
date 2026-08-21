@@ -4,9 +4,8 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
-	"sort"
+	"strconv"
 	"strings"
-	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -38,12 +37,38 @@ type workspaceResourceDescriptor struct {
 }
 
 var workspaceResourceRegistry = []workspaceResourceDescriptor{
-	{id: resourceConnection, title: "Connection", aliases: []string{"c", "conn"}, legacyTab: tabConnection, hasTab: true, actions: "a add server  c connect  enter toggle  m mode  u uninstall service  L logout"},
-	{id: resourcePods, title: "Pods", aliases: []string{"w", "workload", "workloads", "po", "pod"}, legacyTab: tabWorkloads, hasTab: true, actions: "enter inspect  n namespace  f forward  s ssh"},
-	{id: resourceServices, title: "Services", aliases: []string{"v", "svc", "service"}, legacyTab: tabServices, hasTab: true, actions: "enter inspect  n namespace  f forward  x exchange  m mirror  p preview"},
-	{id: resourceTasks, title: "Sessions", aliases: []string{"s", "session", "fw", "forward", "forwards"}, legacyTab: tabTasks, hasTab: true, actions: "enter inspect  d stop  e rerun  y copy  C clear"},
-	{id: resourceProfiles, title: "Servers", aliases: []string{"server"}, actions: "enter select  a add  l login  L logout  d delete"},
-	{id: resourceNamespaces, title: "Namespaces", aliases: []string{"n", "ns", "namespace"}, actions: "enter select"},
+	{
+		id: resourceConnection, title: tabNameConnection,
+		aliases: []string{"c", commandConnection}, legacyTab: tabConnection, hasTab: true,
+		actions: "a add server  c connect  enter toggle  m mode  u uninstall service  L logout",
+	},
+	{
+		id: resourcePods, title: "Pods",
+		aliases:   []string{"w", "workload", "workloads", "po", resourceKindPod},
+		legacyTab: tabWorkloads, hasTab: true,
+		actions: "enter inspect  n namespace  f forward  s ssh",
+	},
+	{
+		id: resourceServices, title: "Services",
+		aliases: []string{"v", commandService, resourceKindService}, legacyTab: tabServices, hasTab: true,
+		actions: "enter inspect  n namespace  f forward  x exchange  m mirror  p preview",
+	},
+	{
+		id: resourceTasks, title: "Sessions",
+		aliases:   []string{"s", "session", "fw", taskKindForward, "forwards"},
+		legacyTab: tabTasks, hasTab: true,
+		actions: "enter inspect  d stop  e rerun  y copy  C clear",
+	},
+	{
+		id: resourceProfiles, title: "Servers", aliases: []string{"server"},
+		actions: "enter select  a add  l login  L logout  d delete",
+	},
+	{
+		id:      resourceNamespaces,
+		title:   "Namespaces",
+		aliases: []string{"n", "ns", commandNamespace},
+		actions: "enter select",
+	},
 }
 
 type workspaceInput int
@@ -135,10 +160,8 @@ func (m *Model) ensureWorkspace() {
 
 func (m *Model) updateWorkspace(message tea.Msg) (tea.Cmd, bool) {
 	m.ensureWorkspace()
-	if m.connectionProgressActive() {
-		if cmd, handled := m.updateConnectionProgressPopup(message); handled {
-			return cmd, true
-		}
+	if m.connectionProgressActive() && m.updateConnectionProgressPopup(message) {
+		return nil, true
 	}
 	if m.err != "" && m.workspace.input == workspaceInputNone {
 		if cmd, handled := m.updateErrorPopup(message); handled {
@@ -151,7 +174,7 @@ func (m *Model) updateWorkspace(message tea.Msg) (tea.Cmd, bool) {
 	if m.loginAdding {
 		if key, ok := message.(tea.KeyMsg); ok {
 			next, cmd := m.updateAddProfile(key)
-			*m = next.(Model)
+			*m = requireModel(next)
 			return cmd, true
 		}
 		if _, ok := message.(tea.MouseMsg); ok {
@@ -173,11 +196,11 @@ func (m *Model) updateWorkspace(message tea.Msg) (tea.Cmd, bool) {
 	if !ok {
 		return nil, false
 	}
-	if key.String() == "ctrl+c" {
+	if key.String() == keyCtrlC {
 		return nil, false
 	}
 	if m.workspace.help {
-		if key.String() == "?" || key.String() == "esc" || key.String() == "enter" || key.String() == "q" {
+		if key.String() == "?" || key.String() == keyEsc || key.String() == keyEnter || key.String() == "q" {
 			m.workspace.help = false
 		}
 		return nil, true
@@ -188,6 +211,13 @@ func (m *Model) updateWorkspace(message tea.Msg) (tea.Cmd, bool) {
 	if command, ok := m.workspace.config.Hotkeys[strings.ToLower(key.String())]; ok {
 		return m.runWorkspaceCommand(command), true
 	}
+	if cmd, handled := m.updateWorkspaceModeKey(key); handled {
+		return cmd, true
+	}
+	return m.updateWorkspaceNavigationKey(key)
+}
+
+func (m *Model) updateWorkspaceModeKey(key tea.KeyMsg) (tea.Cmd, bool) {
 	view := m.workspaceView()
 	switch key.String() {
 	case "0":
@@ -219,7 +249,9 @@ func (m *Model) updateWorkspace(message tea.Msg) (tea.Cmd, bool) {
 		m.err, m.status = "", ""
 		return nil, true
 	case "n":
-		if m.mode == viewMain && (m.workspace.resource == resourcePods || m.workspace.resource == resourceServices) && len(m.namespaces) > 0 {
+		resourceSupportsNamespaces := m.workspace.resource == resourcePods ||
+			m.workspace.resource == resourceServices
+		if m.mode == viewMain && resourceSupportsNamespaces && len(m.namespaces) > 0 {
 			m.console.overlay = overlayNamespace
 			m.console.query, m.console.overlayPos = "", 0
 			m.err, m.status = "", ""
@@ -228,7 +260,14 @@ func (m *Model) updateWorkspace(message tea.Msg) (tea.Cmd, bool) {
 	case "?":
 		m.workspace.help = true
 		return nil, true
-	case "esc":
+	}
+	return nil, false
+}
+
+func (m *Model) updateWorkspaceNavigationKey(key tea.KeyMsg) (tea.Cmd, bool) {
+	view := m.workspaceView()
+	switch key.String() {
+	case keyEsc:
 		if view.detail {
 			view.detail = false
 			m.setWorkspaceView(view)
@@ -257,7 +296,7 @@ func (m *Model) updateWorkspace(message tea.Msg) (tea.Cmd, bool) {
 	case "r":
 		m.loading = true
 		return tea.Batch(m.spinner.Tick, m.loadWorkspaceData()), true
-	case "j", "down":
+	case "j", keyDown:
 		m.moveWorkspaceCursor(1)
 		return nil, true
 	case "k", "up":
@@ -275,8 +314,11 @@ func (m *Model) updateWorkspace(message tea.Msg) (tea.Cmd, bool) {
 	case "G", "end":
 		m.setWorkspaceCursor(len(m.workspaceFilteredRows()) - 1)
 		return nil, true
-	case "enter":
-		if m.workspace.resource == resourcePods || m.workspace.resource == resourceServices || m.workspace.resource == resourceTasks {
+	case keyEnter:
+		resourceHasDetails := m.workspace.resource == resourcePods ||
+			m.workspace.resource == resourceServices ||
+			m.workspace.resource == resourceTasks
+		if resourceHasDetails {
 			if len(m.workspaceFilteredRows()) > 0 {
 				view.detail = true
 				m.setWorkspaceView(view)
@@ -289,7 +331,7 @@ func (m *Model) updateWorkspace(message tea.Msg) (tea.Cmd, bool) {
 
 func (m *Model) updateWorkspaceInput(key tea.KeyMsg) tea.Cmd {
 	switch key.String() {
-	case "esc":
+	case keyEsc:
 		if m.workspace.input == workspaceInputFilter {
 			view := m.workspaceView()
 			view.filter, view.cursor, view.offset = m.workspace.inputBefore, 0, 0
@@ -299,7 +341,7 @@ func (m *Model) updateWorkspaceInput(key tea.KeyMsg) tea.Cmd {
 		m.workspace.inputBefore = ""
 		m.workspace.commandPos = -1
 		return nil
-	case "enter":
+	case keyEnter:
 		text, mode := m.workspace.inputText, m.workspace.input
 		m.workspace.input, m.workspace.inputText = workspaceInputNone, ""
 		m.workspace.inputBefore = ""
@@ -308,9 +350,9 @@ func (m *Model) updateWorkspaceInput(key tea.KeyMsg) tea.Cmd {
 			return m.runWorkspaceCommand(text)
 		}
 		return nil
-	case "backspace":
+	case keyBackspace:
 		m.workspace.inputText = trimLastRune(m.workspace.inputText)
-	case "tab", "shift+tab":
+	case keyTab, keyShiftTab:
 		if m.workspace.input == workspaceInputCommand {
 			candidates := m.workspaceCommandCandidates()
 			if len(candidates) > 0 {
@@ -323,7 +365,7 @@ func (m *Model) updateWorkspaceInput(key tea.KeyMsg) tea.Cmd {
 			}
 		}
 		return nil
-	case "up", "down":
+	case "up", keyDown:
 		if m.workspace.input == workspaceInputCommand && len(m.workspace.commands) > 0 {
 			if m.workspace.commandPos < 0 {
 				m.workspace.commandPos = len(m.workspace.commands)
@@ -378,7 +420,7 @@ func (m *Model) runWorkspaceCommand(command string) tea.Cmd {
 	switch name {
 	case "q", "quit", "exit":
 		return tea.Quit
-	case "h", "help", "?":
+	case "h", commandHelp, "?":
 		m.workspace.help = true
 		return nil
 	}
@@ -413,7 +455,7 @@ func (m *Model) beginConnect() tea.Cmd {
 		return nil
 	}
 	next, cmd := m.updateOverview(tea.KeyMsg{Type: tea.KeyEnter})
-	*m = next.(Model)
+	*m = requireModel(next)
 	return cmd
 }
 
@@ -427,7 +469,7 @@ func (m *Model) beginDisconnect() tea.Cmd {
 		return nil
 	}
 	next, cmd := m.updateOverview(tea.KeyMsg{Type: tea.KeyEnter})
-	*m = next.(Model)
+	*m = requireModel(next)
 	return cmd
 }
 
@@ -449,7 +491,7 @@ func (m *Model) workspaceNavigate(resource workspaceResource, record bool) tea.C
 	}
 	if resource == resourceProfiles {
 		if m.connected() {
-			m.err = "disconnect before changing server"
+			m.err = errDisconnectBeforeChangingServer
 			return nil
 		}
 		if !m.authSession.Authenticated {
@@ -496,9 +538,10 @@ func (m Model) loadWorkspaceData() tea.Cmd {
 		return loadProfiles(m.state)
 	case resourceNamespaces:
 		return loadNamespaces(m)
-	default:
+	case resourceConnection, resourcePods, resourceServices, resourceTasks:
 		return m.loadTabData()
 	}
+	return nil
 }
 
 type workspaceLoadedMsg struct {
@@ -527,13 +570,17 @@ func (m *Model) beginWorkspaceLoad() tea.Cmd {
 	case resourceConnection:
 		commands = []tea.Cmd{wrap(loadAuthStatus(*m)), wrap(loadDataPlaneStatus(*m)), wrap(loadNamespaces(*m))}
 	case resourcePods:
-		commands = []tea.Cmd{wrap(loadNamespaces(*m))}
-		commands = append(commands, wrap(loadPods(*m)))
+		commands = make([]tea.Cmd, 0, 2)
+		commands = append(commands, wrap(loadNamespaces(*m)), wrap(loadPods(*m)))
 	case resourceServices:
-		commands = []tea.Cmd{wrap(loadNamespaces(*m))}
-		commands = append(commands, wrap(loadServices(*m)))
+		commands = make([]tea.Cmd, 0, 2)
+		commands = append(commands, wrap(loadNamespaces(*m)), wrap(loadServices(*m)))
 	case resourceTasks:
-		commands = []tea.Cmd{wrap(loadPortForwards(m.state, m.activeProfile.ID)), wrap(loadTrafficOperations(m.state, m.activeProfile.ID)), wrap(loadPodSSH(m.state, m.activeProfile.ID))}
+		commands = []tea.Cmd{
+			wrap(loadPortForwards(m.state, m.activeProfile.ID)),
+			wrap(loadTrafficOperations(m.state, m.activeProfile.ID)),
+			wrap(loadPodSSH(m.state, m.activeProfile.ID)),
+		}
 	}
 	return tea.Batch(commands...)
 }
@@ -569,14 +616,14 @@ func (m *Model) updateWorkspaceResource(key tea.KeyMsg) (tea.Cmd, bool) {
 			return m.beginLogout(), true
 		case "u":
 			return m.beginServiceUninstall(), true
-		case "enter", "c", "x":
+		case keyEnter, "c", "x":
 			if m.connected() && m.consoleTaskCount() > 0 {
 				m.console.overlay = overlayConfirmDisconnect
 				return nil, true
 			}
 		}
 		next, cmd := m.updateOverview(key)
-		*m = next.(Model)
+		*m = requireModel(next)
 		return cmd, true
 	case resourcePods:
 		if len(rows) == 0 {
@@ -586,12 +633,12 @@ func (m *Model) updateWorkspaceResource(key tea.KeyMsg) (tea.Cmd, bool) {
 		m.cursor = selected.index
 		m.console.filters[tabWorkloads] = ""
 		next, cmd := m.updatePods(key)
-		*m = next.(Model)
+		*m = requireModel(next)
 		return cmd, true
 	case resourceServices:
 		if key.String() == "p" {
 			next, cmd := m.updateServices(key)
-			*m = next.(Model)
+			*m = requireModel(next)
 			return cmd, true
 		}
 		if len(rows) == 0 {
@@ -601,7 +648,7 @@ func (m *Model) updateWorkspaceResource(key tea.KeyMsg) (tea.Cmd, bool) {
 		m.cursor = selected.index
 		m.console.filters[tabServices] = ""
 		next, cmd := m.updateServices(key)
-		*m = next.(Model)
+		*m = requireModel(next)
 		return cmd, true
 	case resourceTasks:
 		m.activeTab = tabTasks
@@ -623,12 +670,12 @@ func (m *Model) updateWorkspaceResource(key tea.KeyMsg) (tea.Cmd, bool) {
 		}
 		m.loginCursor = view.cursor
 		next, cmd := m.updateLogin(key)
-		*m = next.(Model)
+		*m = requireModel(next)
 		view.cursor = m.loginCursor
 		m.setWorkspaceView(view)
 		return cmd, true
 	case resourceNamespaces:
-		if key.String() == "enter" && selected.title != "" {
+		if key.String() == keyEnter && selected.title != "" {
 			m.namespaceReturnResource = resourcePods
 			return m.beginNamespaceSwitch(selected.title), true
 		}
@@ -637,9 +684,9 @@ func (m *Model) updateWorkspaceResource(key tea.KeyMsg) (tea.Cmd, bool) {
 }
 
 func (m Model) workspaceLegacyTaskPosition(selected consoleRow) int {
-	copy := m
-	copy.console.filters[tabTasks] = ""
-	for position, row := range copy.consoleTaskRows() {
+	clone := m
+	clone.console.filters[tabTasks] = ""
+	for position, row := range clone.consoleTaskRows() {
 		if row.kind == selected.kind && row.index == selected.index {
 			return position
 		}
@@ -678,17 +725,17 @@ func (m *Model) updateWorkspaceMouse(event tea.MouseEvent) (tea.Cmd, bool) {
 }
 
 func (m Model) workspaceRawRows() []consoleRow {
-	copy := m
-	for i := range copy.console.filters {
-		copy.console.filters[i] = ""
+	clone := m
+	for i := range clone.console.filters {
+		clone.console.filters[i] = ""
 	}
 	switch m.workspace.resource {
 	case resourcePods:
-		return copy.consoleWorkloadRows()
+		return clone.consoleWorkloadRows()
 	case resourceServices:
-		return copy.consoleServiceRows()
+		return clone.consoleServiceRows()
 	case resourceTasks:
-		return copy.consoleTaskRows()
+		return clone.consoleTaskRows()
 	case resourceProfiles:
 		rows := make([]consoleRow, 0, len(m.profiles.Profiles))
 		for index, profile := range m.profiles.Profiles {
@@ -696,7 +743,13 @@ func (m Model) workspaceRawRows() []consoleRow {
 			if profile.ID == m.profiles.ActiveProfileID {
 				status = "Active"
 			}
-			rows = append(rows, consoleRow{title: firstNonEmpty(profile.DisplayName, profile.ID), meta: profile.BaseURL, status: status, kind: "profile", index: index, detail: "Endpoint: " + profile.BaseURL + "\nTunnel path: " + profile.TunnelPath + "\nLast namespace: " + firstNonEmpty(profile.LastNamespace, "-")})
+			detail := "Endpoint: " + profile.BaseURL +
+				"\nTunnel path: " + profile.TunnelPath +
+				"\nLast namespace: " + firstNonEmpty(profile.LastNamespace, "-")
+			rows = append(rows, consoleRow{
+				title: firstNonEmpty(profile.DisplayName, profile.ID),
+				meta:  profile.BaseURL, status: status, kind: "profile", index: index, detail: detail,
+			})
 		}
 		return rows
 	case resourceNamespaces:
@@ -706,9 +759,14 @@ func (m Model) workspaceRawRows() []consoleRow {
 			if namespace.Name == m.namespace {
 				status = "Active"
 			}
-			rows = append(rows, consoleRow{title: namespace.Name, status: status, kind: "namespace", index: index, detail: "Namespace: " + namespace.Name})
+			rows = append(rows, consoleRow{
+				title: namespace.Name, status: status, kind: commandNamespace, index: index,
+				detail: "Namespace: " + namespace.Name,
+			})
 		}
 		return rows
+	case resourceConnection:
+		return nil
 	}
 	return nil
 }
@@ -773,7 +831,7 @@ func workspaceFuzzyMatch(value, query string) bool {
 		return true
 	}
 	position := 0
-	for _, valueRune := range []rune(strings.ToLower(value)) {
+	for _, valueRune := range strings.ToLower(value) {
 		if valueRune == queryRunes[position] {
 			position++
 			if position == len(queryRunes) {
@@ -796,11 +854,11 @@ func (m Model) workspaceView() workspaceViewState {
 }
 
 func (m Model) workspaceFilteredRowsWithoutViewRecursion(filterText string) []consoleRow {
-	copy := m
-	view := copy.workspace.views[copy.workspace.resource]
+	clone := m
+	view := clone.workspace.views[clone.workspace.resource]
 	view.filter = filterText
-	copy.workspace.views[copy.workspace.resource] = view
-	rows := copy.workspaceRawRows()
+	clone.workspace.views[clone.workspace.resource] = view
+	rows := clone.workspaceRawRows()
 	filter, err := compileWorkspaceFilter(filterText)
 	if err != nil || (filter.regex == nil && filter.fuzzy == "") {
 		return rows
@@ -856,7 +914,14 @@ func (m Model) workspacePageSize() int { return max(3, m.height-10) }
 
 func (m Model) workspaceCommandCandidates() []string {
 	prefix := strings.ToLower(strings.TrimSpace(m.workspace.inputText))
-	set := map[string]struct{}{"connect": {}, "disconnect": {}, "help": {}, "logout": {}, "q": {}, "uninstall-service": {}}
+	set := map[string]struct{}{
+		"connect":           {},
+		"disconnect":        {},
+		"help":              {},
+		"logout":            {},
+		"q":                 {},
+		"uninstall-service": {},
+	}
 	for _, descriptor := range workspaceResourceRegistry {
 		set[string(descriptor.id)] = struct{}{}
 		for _, alias := range descriptor.aliases {
@@ -872,7 +937,7 @@ func (m Model) workspaceCommandCandidates() []string {
 			candidates = append(candidates, candidate)
 		}
 	}
-	sort.Strings(candidates)
+	slices.Sort(candidates)
 	return candidates
 }
 
@@ -911,7 +976,13 @@ func (m Model) viewWorkspace() string {
 			consoleSubtle.Render("Enter the complete HTTP or HTTPS Gateway service address.") + "\n\n" +
 			"Service address\n> " + m.loginURL + "_\n\n" +
 			"Enter add server   Esc cancel" + progress
-		body := lipgloss.Place(m.width, bodyHeight, lipgloss.Center, lipgloss.Center, consoleOverlayBox.Copy().Width(minInt(72, m.width-8)).Render(form))
+		body := lipgloss.Place(
+			m.width,
+			bodyHeight,
+			lipgloss.Center,
+			lipgloss.Center,
+			consoleOverlayBox.Width(minInt(72, m.width-8)).Render(form),
+		)
 		return lipgloss.JoinVertical(lipgloss.Left, top, body, footer)
 	}
 	if m.actionMode != actionNone {
@@ -927,8 +998,18 @@ func (m Model) viewWorkspace() string {
 }
 
 func (m Model) viewWorkspaceTooSmall() string {
-	body := consoleSection.Render("KUBELOOP") + "\n\nTerminal is too small.\n" + fmt.Sprintf("Current: %dx%d  Required: %dx%d", m.width, m.height, workspaceMinWidth, workspaceMinHeight) + "\n\nResize the terminal or press q to quit."
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, consoleOverlayBox.Copy().Width(max(40, m.width-8)).Render(body))
+	size := fmt.Sprintf(
+		"Current: %dx%d  Required: %dx%d",
+		m.width,
+		m.height,
+		workspaceMinWidth,
+		workspaceMinHeight,
+	)
+	body := consoleSection.Render("KUBELOOP") +
+		"\n\nTerminal is too small.\n" + size +
+		"\n\nResize the terminal or press q to quit."
+	box := consoleOverlayBox.Width(max(40, m.width-8)).Render(body)
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
 }
 
 func (m Model) viewWorkspaceHeader() string {
@@ -936,7 +1017,7 @@ func (m Model) viewWorkspaceHeader() string {
 	user := truncateConsole(firstNonEmpty(m.authSession.UserName, "-"), 25)
 	namespace := truncateConsole(firstNonEmpty(m.namespace, "all"), 25)
 	field := func(name, text string) string {
-		return consoleSection.Render(name+":") + " " + consoleValue.Copy().Bold(true).Render(text)
+		return consoleSection.Render(name+":") + " " + consoleValue.Bold(true).Render(text)
 	}
 	left := strings.Join([]string{
 		field("Cluster", server),
@@ -988,9 +1069,14 @@ func (m Model) viewWorkspaceHeader() string {
 	} else {
 		rows := [][3]string{}
 		namespaceRows := func() {
-			rows = append(rows,
+			rows = append(
+				rows,
 				[3]string{shortcut("0", "all"), shortcut("enter", "Describe"), ""},
-				[3]string{shortcut("1", firstNonEmpty(m.activeProfile.LastNamespace, "default")), shortcut("n", "Namespace"), ""},
+				[3]string{
+					shortcut("1", firstNonEmpty(m.activeProfile.LastNamespace, "default")),
+					shortcut("n", "Namespace"),
+					"",
+				},
 			)
 		}
 		switch m.workspace.resource {
@@ -1017,6 +1103,8 @@ func (m Model) viewWorkspaceHeader() string {
 			)
 		case resourceNamespaces:
 			rows = append(rows, [3]string{shortcut("enter", "Select"), shortcut("/", "Filter"), ""})
+		case resourceConnection:
+			// Connection shortcuts are added before the resource-specific switch.
 		}
 		if m.workspace.resource != resourceNamespaces {
 			rows = append(rows, [3]string{shortcut(":", "Command"), shortcut("/", "Filter"), shortcut("r", "Refresh")})
@@ -1125,10 +1213,18 @@ func (m Model) viewWorkspaceBody(height int) string {
 	rightRule := max(0, innerWidth-titleWidth-leftRule-2)
 	border := lipgloss.NewStyle().Foreground(consoleTeal).Background(lipgloss.Color("#000000"))
 	rowStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#8BD5FF")).Background(lipgloss.Color("#000000"))
-	headerStyle := rowStyle.Copy().Bold(true)
-	selectedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#071018")).Background(lipgloss.Color("#7CC9F2")).Bold(true)
-	top := border.Render("┌"+strings.Repeat("─", leftRule)+" ") + consoleOK.Render(heading) + border.Render(" "+strings.Repeat("─", rightRule)+"┐")
-	lines := []string{top, border.Render("│") + headerStyle.Render(workspacePadLine(m.workspaceTableHeader(), innerWidth)) + border.Render("│")}
+	headerStyle := rowStyle.Bold(true)
+	selectedStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#071018")).
+		Background(lipgloss.Color("#7CC9F2")).
+		Bold(true)
+	top := border.Render("┌"+strings.Repeat("─", leftRule)+" ") +
+		consoleOK.Render(heading) +
+		border.Render(" "+strings.Repeat("─", rightRule)+"┐")
+	header := border.Render("│") +
+		headerStyle.Render(workspacePadLine(m.workspaceTableHeader(), innerWidth)) +
+		border.Render("│")
+	lines := []string{top, header}
 	page := max(1, height-3)
 	if view.cursor < view.offset {
 		view.offset = view.cursor
@@ -1151,7 +1247,10 @@ func (m Model) viewWorkspaceBody(height int) string {
 		if filter != "" {
 			message = "No matches for /" + filter
 		}
-		lines = append(lines, border.Render("│")+rowStyle.Render(workspacePadLine(" "+message, innerWidth))+border.Render("│"))
+		emptyRow := border.Render("│") +
+			rowStyle.Render(workspacePadLine(" "+message, innerWidth)) +
+			border.Render("│")
+		lines = append(lines, emptyRow)
 	}
 	for len(lines) < height-1 {
 		lines = append(lines, border.Render("│")+rowStyle.Render(strings.Repeat(" ", innerWidth))+border.Render("│"))
@@ -1168,42 +1267,51 @@ func workspacePadLine(value string, width int) string {
 	return value + strings.Repeat(" ", max(0, width-lipgloss.Width(value)))
 }
 
-func (m Model) workspaceSelectionSummary(rows []consoleRow, view workspaceViewState) string {
-	if len(rows) == 0 || view.cursor < 0 || view.cursor >= len(rows) {
-		return consoleSubtle.Render("No resource selected")
-	}
-	row := rows[view.cursor]
-	parts := []string{consoleValue.Render(row.title)}
-	if row.status != "" {
-		parts = append(parts, row.status)
-	}
-	if row.meta != "" {
-		parts = append(parts, row.meta)
-	}
-	return truncateConsole(strings.Join(parts, "  "), max(20, m.width-8))
-}
-
 func (m Model) workspaceTableHeader() string {
 	wide := m.width >= 100
 	switch m.workspace.resource {
 	case resourcePods:
 		if wide {
-			namespace, name, pf, ready, status, restarts, address, node, age := m.workspacePodColumnWidths()
-			return fmt.Sprintf("%-*s %-*s %-*s %-*s %-*s %-*s %-*s %-*s %-*s", namespace, "NAMESPACE", name, "NAME", pf, "PF", ready, "READY", status, "STATUS", restarts, "RESTARTS", address, "POD IP", node, "NODE", age, "AGE")
+			nsW, nameW, pfW, readyW, statusW, restartW, addrW, nodeW, ageW := m.workspacePodColumnWidths()
+			return fmt.Sprintf(
+				"%-*s %-*s %-*s %-*s %-*s %-*s %-*s %-*s %-*s",
+				nsW, "NAMESPACE",
+				nameW, "NAME",
+				pfW, "PF",
+				readyW, "READY",
+				statusW, "STATUS",
+				restartW, "RESTARTS",
+				addrW, "POD IP",
+				nodeW, "NODE",
+				ageW, "AGE",
+			)
 		}
 		return fmt.Sprintf("%-16s %-24s %-7s %s", "NAMESPACE", "NAME", "READY", "STATUS")
 	case resourceServices:
 		if wide {
-			namespace, name, kind, clusterIP, externalIP, ports, age := m.workspaceServiceColumnWidths()
-			return fmt.Sprintf("%-*s %-*s %-*s %-*s %-*s %-*s %-*s", namespace, "NAMESPACE", name, "NAME", kind, "TYPE", clusterIP, "CLUSTER-IP", externalIP, "EXTERNAL-IP", ports, "PORTS", age, "AGE")
+			nsW, nameW, kindW, clusterW, externalW, portsW, ageW := m.workspaceServiceColumnWidths()
+			return fmt.Sprintf(
+				"%-*s %-*s %-*s %-*s %-*s %-*s %-*s",
+				nsW, "NAMESPACE",
+				nameW, "NAME",
+				kindW, "TYPE",
+				clusterW, "CLUSTER-IP",
+				externalW, "EXTERNAL-IP",
+				portsW, "PORTS",
+				ageW, "AGE",
+			)
 		}
 		return fmt.Sprintf("%-16s %-24s %-14s %s", "NAMESPACE", "NAME", "TYPE", "PORTS")
 	case resourceTasks:
-		return consoleSubtle.Render(fmt.Sprintf("  %-10s %-30s %-36s %s", "TYPE", "TARGET", "COMMAND / ADDRESS", "STATE"))
+		return consoleSubtle.Render(
+			fmt.Sprintf("  %-10s %-30s %-36s %s", "TYPE", "TARGET", "COMMAND / ADDRESS", "STATE"),
+		)
 	case resourceProfiles:
 		return consoleSubtle.Render(fmt.Sprintf("  %-24s %-52s %s", "NAME", "ENDPOINT", "STATUS"))
 	case resourceNamespaces:
 		return consoleSubtle.Render(fmt.Sprintf("  %-48s %s", "NAME", "STATUS"))
+	case resourceConnection:
+		return ""
 	}
 	return ""
 }
@@ -1217,25 +1325,64 @@ func (m Model) workspaceTableRow(row consoleRow) string {
 		namespace := workspaceDetailValue(row.detail, "Namespace")
 		ip := workspaceDetailValue(row.detail, "Pod IP")
 		if wide {
-			namespaceWidth, nameWidth, pfWidth, readyWidth, statusWidth, restartsWidth, addressWidth, nodeWidth, ageWidth := m.workspacePodColumnWidths()
-			pf := m.workspacePodForwardMark(namespace, row.title)
-			return fmt.Sprintf("%-*s %-*s %-*s %-*s %-*s %-*s %-*s %-*s %-*s", namespaceWidth, truncateConsole(namespace, namespaceWidth), nameWidth, truncateConsole(row.title, nameWidth), pfWidth, pf, readyWidth, truncateConsole(ready, readyWidth), statusWidth, truncateConsole(row.status, statusWidth), restartsWidth, workspaceMetaValue(row.meta, "restarts"), addressWidth, truncateConsole(ip, addressWidth), nodeWidth, truncateConsole(node, nodeWidth), ageWidth, workspaceMetaValue(row.meta, "age"))
+			nsW, nameW, pfW, readyW, statusW, restartW, addrW, nodeW, ageW := m.workspacePodColumnWidths()
+			return fmt.Sprintf(
+				"%-*s %-*s %-*s %-*s %-*s %-*s %-*s %-*s %-*s",
+				nsW, truncateConsole(namespace, nsW),
+				nameW, truncateConsole(row.title, nameW),
+				pfW, m.workspacePodForwardMark(namespace, row.title),
+				readyW, truncateConsole(ready, readyW),
+				statusW, truncateConsole(row.status, statusW),
+				restartW, workspaceMetaValue(row.meta, "restarts"),
+				addrW, truncateConsole(ip, addrW),
+				nodeW, truncateConsole(node, nodeW),
+				ageW, workspaceMetaValue(row.meta, "age"),
+			)
 		}
-		return fmt.Sprintf("%-16s %-24s %-7s %s", truncateConsole(namespace, 16), truncateConsole(row.title, 24), ready, truncateConsole(row.status, 12))
+		return fmt.Sprintf(
+			"%-16s %-24s %-7s %s",
+			truncateConsole(namespace, 16),
+			truncateConsole(row.title, 24),
+			ready,
+			truncateConsole(row.status, 12),
+		)
 	case resourceServices:
 		namespace := workspaceDetailValue(row.detail, "Namespace")
 		ports := strings.TrimPrefix(row.meta, "ports ")
 		if wide {
-			namespaceWidth, nameWidth, kindWidth, clusterWidth, externalWidth, portsWidth, ageWidth := m.workspaceServiceColumnWidths()
-			return fmt.Sprintf("%-*s %-*s %-*s %-*s %-*s %-*s %-*s", namespaceWidth, truncateConsole(namespace, namespaceWidth), nameWidth, truncateConsole(row.title, nameWidth), kindWidth, truncateConsole(row.status, kindWidth), clusterWidth, truncateConsole(workspaceDetailValue(row.detail, "Cluster IP"), clusterWidth), externalWidth, truncateConsole(workspaceDetailValue(row.detail, "External IP"), externalWidth), portsWidth, truncateConsole(ports, portsWidth), ageWidth, workspaceDetailValue(row.detail, "Age"))
+			nsW, nameW, kindW, clusterW, externalW, portsW, ageW := m.workspaceServiceColumnWidths()
+			return fmt.Sprintf(
+				"%-*s %-*s %-*s %-*s %-*s %-*s %-*s",
+				nsW, truncateConsole(namespace, nsW),
+				nameW, truncateConsole(row.title, nameW),
+				kindW, truncateConsole(row.status, kindW),
+				clusterW, truncateConsole(workspaceDetailValue(row.detail, "Cluster IP"), clusterW),
+				externalW, truncateConsole(workspaceDetailValue(row.detail, "External IP"), externalW),
+				portsW, truncateConsole(ports, portsW),
+				ageW, workspaceDetailValue(row.detail, "Age"),
+			)
 		}
-		return fmt.Sprintf("%-16s %-24s %-14s %s", truncateConsole(namespace, 16), truncateConsole(row.title, 24), truncateConsole(row.status, 14), ports)
+		return fmt.Sprintf(
+			"%-16s %-24s %-14s %s",
+			truncateConsole(namespace, 16),
+			truncateConsole(row.title, 24),
+			truncateConsole(row.status, 14),
+			ports,
+		)
 	case resourceTasks:
-		return fmt.Sprintf("%-10s %-30s %-36s %s", row.status, truncateConsole(row.title, 30), truncateConsole(row.meta, 36), workspaceDetailValue(row.detail, "State"))
+		return fmt.Sprintf(
+			"%-10s %-30s %-36s %s",
+			row.status,
+			truncateConsole(row.title, 30),
+			truncateConsole(row.meta, 36),
+			workspaceDetailValue(row.detail, "State"),
+		)
 	case resourceProfiles:
 		return fmt.Sprintf("%-24s %-52s %s", truncateConsole(row.title, 24), truncateConsole(row.meta, 52), row.status)
 	case resourceNamespaces:
 		return fmt.Sprintf("%-48s %s", truncateConsole(row.title, 48), row.status)
+	case resourceConnection:
+		return row.title
 	}
 	return row.title
 }
@@ -1245,7 +1392,7 @@ func (m Model) workspacePodColumnWidths() (namespace, name, pf, ready, status, r
 	namespace = m.workspaceNamespaceColumnWidth()
 	pf, ready, status, restarts, address, node, age = 2, 5, 10, 8, 14, 12, 5
 	name = max(12, width-namespace-pf-ready-status-restarts-address-node-age-8)
-	return
+	return namespace, name, pf, ready, status, restarts, address, node, age
 }
 
 func (m Model) workspaceServiceColumnWidths() (namespace, name, kind, clusterIP, externalIP, ports, age int) {
@@ -1255,7 +1402,7 @@ func (m Model) workspaceServiceColumnWidths() (namespace, name, kind, clusterIP,
 	remaining := max(26, width-namespace-kind-clusterIP-externalIP-age-6)
 	name = max(18, remaining*55/100)
 	ports = max(8, remaining-name)
-	return
+	return namespace, name, kind, clusterIP, externalIP, ports, age
 }
 
 func (m Model) workspaceNamespaceColumnWidth() int {
@@ -1269,11 +1416,13 @@ func (m Model) workspaceNamespaceColumnWidth() int {
 		for _, service := range m.services {
 			width = max(width, lipgloss.Width(service.Namespace))
 		}
+	case resourceConnection, resourceTasks, resourceProfiles, resourceNamespaces:
+		// These resources do not render a namespace column.
 	}
 	return minInt(22, max(14, width+1))
 }
 
-func (m Model) workspacePodForwardMark(namespace, name string) string {
+func (m Model) workspacePodForwardMark(_ string, _ string) string {
 	return "●"
 }
 
@@ -1324,14 +1473,14 @@ func (m Model) viewWorkspaceDetail(height int) string {
 	innerWidth := max(30, m.width-8)
 	bodyHeight := max(5, height-8)
 	body := cropConsoleText(firstNonEmpty(row.detail, "No additional details."), 0, bodyHeight-2)
-	details := consoleCard.Copy().Width(innerWidth).Height(bodyHeight).Render(
+	details := consoleCard.Width(innerWidth).Height(bodyHeight).Render(
 		consoleSection.Render("DETAILS") + "\n\n" + consoleValue.Render(body),
 	)
 	actionText := descriptor.actions
 	if m.workspace.resource == resourceServices {
 		actionText = strings.ReplaceAll(actionText, "  p preview", "")
 	}
-	actions := consoleDetail.Copy().Width(innerWidth).Render(
+	actions := consoleDetail.Width(innerWidth).Render(
 		consoleSection.Render("AVAILABLE ACTIONS") + "\n" + actionText,
 	)
 	title := consoleSection.Render(descriptor.title+" / "+row.title) + "\n" + consoleSubtle.Render(row.meta)
@@ -1345,7 +1494,7 @@ func (m Model) viewWorkspaceConnection(height int) string {
 		state = "Connecting"
 	}
 	if m.connected() {
-		state = "Connected"
+		state = consoleStateConnected
 	}
 	server := firstNonEmpty(m.activeProfile.DisplayName, m.activeProfile.BaseURL, "Not selected")
 	endpoint := firstNonEmpty(m.activeProfile.BaseURL, "-")
@@ -1364,9 +1513,9 @@ func (m Model) viewWorkspaceConnection(height int) string {
 	leftBody := field("SERVER", server) +
 		field("ENDPOINT", endpoint) +
 		field("USER", firstNonEmpty(m.authSession.UserName, "-"))
-	rightBody := labelStyle.Render("STATE") + stateStyle.Copy().Bold(true).Render(state) + "\n\n" +
+	rightBody := labelStyle.Render("STATE") + stateStyle.Bold(true).Render(state) + "\n\n" +
 		field("MODE", strings.ToUpper(string(m.selectedMode))) +
-		field("SESSIONS", fmt.Sprint(m.consoleTaskCount()))
+		field("SESSIONS", strconv.Itoa(m.consoleTaskCount()))
 	panelHeight := max(8, height-3)
 	panel := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#8BD5FF")).
@@ -1401,19 +1550,23 @@ func (m Model) viewWorkspaceFooter() string {
 	if m.workspace.warning != "" {
 		lines = append(lines, consoleError.Render("Config: "+truncateConsole(m.workspace.warning, m.width-10)))
 	}
-	if m.loading {
+	switch {
+	case m.loading:
 		left = m.spinner.View() + " Working"
-	} else if m.err != "" && m.workspace.input != workspaceInputNone {
+	case m.err != "" && m.workspace.input != workspaceInputNone:
 		left = consoleError.Render(truncateConsole(m.err, max(20, m.width-20)))
-	} else if m.status != "" {
+	case m.status != "":
 		left = consoleOK.Render(truncateConsole(m.status, max(20, m.width-20)))
 	}
-	if m.workspace.input == workspaceInputCommand {
+	switch m.workspace.input {
+	case workspaceInputCommand:
 		left = consoleSection.Render("COMMAND")
 		right = "Tab complete   ↑/↓ history   Enter run   Esc cancel"
-	} else if m.workspace.input == workspaceInputFilter {
+	case workspaceInputFilter:
 		left = consoleSection.Render("FILTER")
 		right = "RE2   ! inverse   -f fuzzy   Enter keep   Esc cancel"
+	case workspaceInputNone:
+		// Default footer content is already set above.
 	}
 	if m.width < 86 {
 		shortcuts := "  : ?"
@@ -1426,7 +1579,13 @@ func (m Model) viewWorkspaceFooter() string {
 		}
 	}
 	gap := strings.Repeat(" ", max(1, m.width-lipgloss.Width(left)-lipgloss.Width(right)-2))
-	lines = append(lines, lipgloss.NewStyle().Width(m.width).Foreground(consoleDim).Background(consolePanel).Padding(0, 1).Render(left+gap+right))
+	footer := lipgloss.NewStyle().
+		Width(m.width).
+		Foreground(consoleDim).
+		Background(consolePanel).
+		Padding(0, 1).
+		Render(left + gap + right)
+	lines = append(lines, footer)
 	return strings.Join(lines, "\n")
 }
 
@@ -1439,14 +1598,6 @@ func (m Model) viewWorkspaceHelp() string {
 		"ACTIONS\n  :connect  :disconnect  :logout  :uninstall-service\n\n" +
 		"FILTERS\n  /pattern RE2   /!pattern inverse   /-f text fuzzy\n\n" +
 		"CURRENT ACTIONS\n  " + workspaceDescriptor(m.workspace.resource).actions
-	box := consoleOverlayBox.Copy().Width(minInt(82, m.width-8)).Render(content)
+	box := consoleOverlayBox.Width(minInt(82, m.width-8)).Render(content)
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
-}
-
-func trimWorkspaceLastRune(value string) string {
-	if value == "" {
-		return ""
-	}
-	_, size := utf8.DecodeLastRuneInString(value)
-	return value[:len(value)-size]
 }

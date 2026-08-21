@@ -33,8 +33,16 @@ func (backend *fakeBackend) Version(context.Context, string) (clientremote.Versi
 	return clientremote.Version{GitVersion: "v1.32.0"}, nil
 }
 
-func (backend *fakeBackend) Capabilities(_ context.Context, _ string, namespace string) (clientremote.Capabilities, error) {
-	return clientremote.Capabilities{Namespace: namespace, GatewayVersion: "v2", Capabilities: []string{"pods.list"}}, nil
+func (backend *fakeBackend) Capabilities(
+	_ context.Context,
+	_ string,
+	namespace string,
+) (clientremote.Capabilities, error) {
+	return clientremote.Capabilities{
+		Namespace:      namespace,
+		GatewayVersion: "v2",
+		Capabilities:   []string{"pods.list"},
+	}, nil
 }
 
 func (backend *fakeBackend) Namespaces(context.Context, string) ([]clientremote.Namespace, error) {
@@ -105,7 +113,10 @@ func (backend *fakeBackend) ExecPodCommand(_ context.Context, request PodCommand
 	}, nil
 }
 
-func (backend *fakeBackend) StartFileTransfer(identity TrafficIdentity, request clientfiletransfer.Request) (clientfiletransfer.Task, error) {
+func (backend *fakeBackend) StartFileTransfer(
+	identity TrafficIdentity,
+	request clientfiletransfer.Request,
+) (clientfiletransfer.Task, error) {
 	backend.transferIdentity, backend.transferRequest = identity, request
 	return clientfiletransfer.Task{
 		ID: "transfer-1", ProfileID: identity.ProfileID, SessionID: identity.SessionID,
@@ -115,7 +126,9 @@ func (backend *fakeBackend) StartFileTransfer(identity TrafficIdentity, request 
 }
 
 func (backend *fakeBackend) ListFileTransfers(profileID string) ([]clientfiletransfer.Task, error) {
-	return []clientfiletransfer.Task{{ID: "transfer-1", ProfileID: profileID, SessionID: "session-1", Namespace: "default"}}, nil
+	return []clientfiletransfer.Task{
+		{ID: "transfer-1", ProfileID: profileID, SessionID: "session-1", Namespace: "default"},
+	}, nil
 }
 
 func (backend *fakeBackend) CancelFileTransfer(identity TrafficIdentity) error {
@@ -164,7 +177,11 @@ func TestManageClusterUsesExplicitProfile(t *testing.T) {
 	if len(output.Pods) != 1 || output.Pods[0].Name != "api-0" || output.ProfileID != "server-a" {
 		t.Fatalf("output=%#v", output)
 	}
-	_, err = manageCluster(context.Background(), backend, manageClusterIn{Action: "list", Type: "pod", ProfileID: "server-a"})
+	_, err = manageCluster(
+		context.Background(),
+		backend,
+		manageClusterIn{Action: "list", Type: "pod", ProfileID: "server-a"},
+	)
 	assertToolError(t, err, ErrorInvalidArgument, "namespace")
 }
 
@@ -218,7 +235,8 @@ func TestExecUsesExactArgvWithoutShellExpansion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(backend.commandRequest.Command) != 3 || backend.commandRequest.Command[2] != "$(id)" || result.TaskID != "exec-1" {
+	if len(backend.commandRequest.Command) != 3 || backend.commandRequest.Command[2] != "$(id)" ||
+		result.TaskID != "exec-1" {
 		t.Fatalf("request=%#v result=%#v", backend.commandRequest, result)
 	}
 }

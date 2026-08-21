@@ -7,22 +7,27 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/ticketapi/entity"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/relaycontrol"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/relayticket"
-	"github.com/google/uuid"
 )
 
 const OperationTunnel = "tunnel"
 
 var (
-	ErrSessionExpiresSoon = errors.New("Session expires too soon to issue a RelayTicket")
-	ErrNoReadyDataPlane   = errors.New("no ready Data Plane is available")
-	ErrSigning            = errors.New("RelayTicket issuance failed")
+	ErrSessionExpiresSoon = errors.New(
+		"session expires too soon to issue a RelayTicket",
+	)
+	ErrNoReadyDataPlane = errors.New("no ready Data Plane is available")
+	ErrSigning          = errors.New("relay ticket issuance failed")
 )
 
 type RelayAllocator interface {
-	Allocate(relaycontrol.AllocationRequest) (relaycontrol.AllocationResponse, error)
+	Allocate(
+		relaycontrol.AllocationRequest,
+	) (relaycontrol.AllocationResponse, error)
 }
 
 type Config struct {
@@ -56,14 +61,17 @@ type Service struct {
 
 func New(config Config) (*Service, error) {
 	config.Issuer = strings.TrimSpace(config.Issuer)
-	if config.Signer == nil || config.Allocator == nil || config.Issuer == "" || len(config.Issuer) > 512 {
-		return nil, errors.New("RelayTicket service configuration is invalid")
+	if config.Signer == nil || config.Allocator == nil || config.Issuer == "" ||
+		len(config.Issuer) > 512 {
+		return nil, errors.New("relay ticket service configuration is invalid")
 	}
 	if config.TTL == 0 {
 		config.TTL = relayticket.DefaultLifetime
 	}
 	if config.TTL < 15*time.Second || config.TTL > relayticket.MaximumLifetime {
-		return nil, errors.New("RelayTicket TTL must be between 15 seconds and 2 minutes")
+		return nil, errors.New(
+			"relay ticket TTL must be between 15 seconds and 2 minutes",
+		)
 	}
 	if config.Now == nil {
 		config.Now = time.Now
@@ -74,7 +82,10 @@ func New(config Config) (*Service, error) {
 	}, nil
 }
 
-func (service *Service) Issue(_ context.Context, input IssueInput) (entity.Ticket, error) {
+func (service *Service) Issue(
+	_ context.Context,
+	input IssueInput,
+) (entity.Ticket, error) {
 	now := service.now().UTC().Truncate(time.Second)
 	expiresAt := now.Add(service.ttl)
 	if input.SessionExpiresAt.Before(expiresAt) {

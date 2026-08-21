@@ -14,6 +14,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/labstack/echo/v5"
+
 	"github.com/fengqi-dev/kube-loop/internal/controlplane"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/authorization"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
@@ -23,8 +26,6 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/protocol/execstream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
-	"github.com/google/uuid"
-	"github.com/labstack/echo/v5"
 )
 
 type sessionValidator struct {
@@ -37,8 +38,12 @@ func (validator sessionValidator) RequireActive(
 	identity controlplaneapi.Identity,
 	namespace, id string,
 ) (sessionapi.ActiveSession, *controlplaneapi.Error) {
-	if identity.Subject != validator.identity || namespace != validator.session.Namespace || id != validator.session.ID {
-		return sessionapi.ActiveSession{}, &controlplaneapi.Error{Code: controlplaneapi.CodeNotFound, Message: "resource not found"}
+	if identity.Subject != validator.identity || namespace != validator.session.Namespace ||
+		id != validator.session.ID {
+		return sessionapi.ActiveSession{}, &controlplaneapi.Error{
+			Code:    controlplaneapi.CodeNotFound,
+			Message: "resource not found",
+		}
 	}
 	return validator.session, nil
 }
@@ -51,7 +56,12 @@ type fakeExecutor struct {
 
 type blockingExecutor struct{ started chan struct{} }
 
-func (executor *blockingExecutor) Validate(context.Context, controlplaneapi.Identity, string, execapi.Spec) error {
+func (executor *blockingExecutor) Validate(
+	context.Context,
+	controlplaneapi.Identity,
+	string,
+	execapi.Spec,
+) error {
 	return nil
 }
 
@@ -67,7 +77,12 @@ func (executor *blockingExecutor) Exec(
 	return ctx.Err()
 }
 
-func (executor *fakeExecutor) Validate(context.Context, controlplaneapi.Identity, string, execapi.Spec) error {
+func (executor *fakeExecutor) Validate(
+	context.Context,
+	controlplaneapi.Identity,
+	string,
+	execapi.Spec,
+) error {
 	executor.mu.Lock()
 	executor.validated++
 	executor.mu.Unlock()
@@ -89,6 +104,7 @@ func (executor *fakeExecutor) Exec(
 	return nil
 }
 
+//nolint:gocyclo // The test intentionally covers the complete owned single-use WebSocket lifecycle.
 func TestPodExecTaskAndWebSocketStreamAreOwnedAndSingleUse(t *testing.T) {
 	now := time.Now().UTC()
 	stateStore, err := storage.Open(context.Background(), storage.Config{
@@ -97,7 +113,7 @@ func TestPodExecTaskAndWebSocketStreamAreOwnedAndSingleUse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer stateStore.Close()
+	defer func() { _ = stateStore.Close() }()
 	identityID := uuid.NewString()
 	sessionID := uuid.NewString()
 	if _, err := stateStore.Identities().Create(context.Background(), storage.Identity{
@@ -105,7 +121,13 @@ func TestPodExecTaskAndWebSocketStreamAreOwnedAndSingleUse(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	network, _ := networkspec.Normalize(networkspec.Spec{PodCIDRs: []string{"10.244.0.0/16"}, ServiceIPs: []string{"10.96.0.10"}, DNSServer: "10.96.0.10"})
+	network, _ := networkspec.Normalize(
+		networkspec.Spec{
+			PodCIDRs:   []string{"10.244.0.0/16"},
+			ServiceIPs: []string{"10.96.0.10"},
+			DNSServer:  "10.96.0.10",
+		},
+	)
 	networkJSON, _ := networkspec.CanonicalJSON(network)
 	networkHash, _ := networkspec.Hash(network)
 	expiresAt := now.Add(time.Hour)
@@ -118,25 +140,49 @@ func TestPodExecTaskAndWebSocketStreamAreOwnedAndSingleUse(t *testing.T) {
 		t.Fatal(err)
 	}
 	executor := &fakeExecutor{}
-	handler, err := execapi.New(stateStore, sessionValidator{identity: identityID, session: sessionapi.ActiveSession{
-		ID: sessionID, Namespace: "development", ExpiresAt: expiresAt, NetworkSpecHash: networkHash,
-	}}, executor, execapi.Config{Now: func() time.Time { return now }})
+	handler, err := execapi.New(
+		stateStore,
+		sessionValidator{identity: identityID, session: sessionapi.ActiveSession{
+			ID: sessionID, Namespace: "development", ExpiresAt: expiresAt, NetworkSpecHash: networkHash,
+		}},
+		executor,
+		execapi.Config{Now: func() time.Time { return now }},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
 	policy := authorization.NewAuthenticated()
-	server, err := controlplane.NewServer(controlplane.Config{PublicURL: "https://gateway.example.test"}, controlplane.BuildInfo{},
+	server, err := controlplane.NewServer(
+		controlplane.Config{PublicURL: "https://gateway.example.test"},
+		controlplane.BuildInfo{},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
-		controlplane.WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(request *http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
-			return controlplaneapi.Identity{Subject: request.Header.Get("X-Identity"), DeviceID: "device"}, nil
-		})), controlplane.WithAuthorizer(policy), controlplane.WithAPIRoutes(controlplane.APIRoutes{Exec: execapi.NewRoutes(handler).Endpoints()}))
+		controlplane.WithAuthenticator(
+			controlplaneapi.AuthenticatorFunc(
+				func(request *http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
+					return controlplaneapi.Identity{
+						Subject:  request.Header.Get("X-Identity"),
+						DeviceID: "device",
+					}, nil
+				},
+			),
+		),
+		controlplane.WithAuthorizer(policy),
+		controlplane.WithAPIRoutes(
+			controlplane.APIRoutes{Exec: execapi.NewRoutes(handler).Endpoints()},
+		),
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
 	httpServer := httptest.NewServer(server.Handler())
 	defer httpServer.Close()
-	createRequest, _ := http.NewRequest(http.MethodPost, httpServer.URL+"/api/sessions/"+sessionID+"/exec?namespace=development",
-		bytes.NewBufferString(`{"pod":"api-0","container":"api","command":["/bin/sh"],"tty":false}`))
+	createRequest, _ := http.NewRequest(
+		http.MethodPost,
+		httpServer.URL+"/api/sessions/"+sessionID+"/exec?namespace=development",
+		bytes.NewBufferString(
+			`{"pod":"api-0","container":"api","command":["/bin/sh"],"tty":false}`,
+		),
+	)
 	createRequest.Header.Set("X-Identity", identityID)
 	createRequest.Header.Set("Content-Type", "application/json")
 	createRequest.Header.Set("Idempotency-Key", "exec-1")
@@ -144,20 +190,29 @@ func TestPodExecTaskAndWebSocketStreamAreOwnedAndSingleUse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer createResponse.Body.Close()
+	defer func() { _ = createResponse.Body.Close() }()
 	var document execapi.Document
-	if createResponse.StatusCode != http.StatusCreated || json.NewDecoder(createResponse.Body).Decode(&document) != nil || document.State != "pending" {
+	if createResponse.StatusCode != http.StatusCreated ||
+		json.NewDecoder(createResponse.Body).Decode(&document) != nil ||
+		document.State != "pending" {
 		t.Fatalf("create status = %d task = %#v", createResponse.StatusCode, document)
 	}
-	streamURL := "ws" + strings.TrimPrefix(httpServer.URL, "http") + "/api/sessions/" + sessionID + "/exec/" + document.ID + "/stream?namespace=development"
-	connection, response, err := websocket.Dial(context.Background(), streamURL, &websocket.DialOptions{HTTPHeader: http.Header{"X-Identity": {identityID}}})
+	streamURL := "ws" + strings.TrimPrefix(
+		httpServer.URL,
+		"http",
+	) + "/api/sessions/" + sessionID + "/exec/" + document.ID + "/stream?namespace=development"
+	connection, response, err := websocket.Dial(
+		context.Background(),
+		streamURL,
+		&websocket.DialOptions{HTTPHeader: http.Header{"X-Identity": {identityID}}},
+	)
 	if err != nil {
 		if response != nil {
 			t.Fatalf("dial status = %d err = %v", response.StatusCode, err)
 		}
 		t.Fatal(err)
 	}
-	defer connection.CloseNow()
+	defer func() { _ = connection.CloseNow() }()
 	frames := make(map[byte]execstream.Frame)
 	for len(frames) < 3 {
 		messageType, encoded, err := connection.Read(context.Background())
@@ -173,7 +228,8 @@ func TestPodExecTaskAndWebSocketStreamAreOwnedAndSingleUse(t *testing.T) {
 		}
 		frames[frame.Type] = frame
 	}
-	if string(frames[execstream.Stdout].Payload) != "hello\n" || string(frames[execstream.Stderr].Payload) != "warning\n" {
+	if string(frames[execstream.Stdout].Payload) != "hello\n" ||
+		string(frames[execstream.Stderr].Payload) != "warning\n" {
 		t.Fatalf("frames = %#v", frames)
 	}
 	status, err := execstream.DecodeExit(frames[execstream.Exit])
@@ -196,17 +252,23 @@ func TestPodExecTaskAndWebSocketStreamAreOwnedAndSingleUse(t *testing.T) {
 	}
 	apiEvents, backgroundEvents := 0, 0
 	for _, event := range transitionEvents {
-		if event.IdentityID != identityID || event.ResourceType != execapi.TaskType || event.ResourceID != document.ID {
+		if event.IdentityID != identityID || event.ResourceType != execapi.TaskType ||
+			event.ResourceID != document.ID {
 			t.Fatalf("Task transition audit event = %#v", event)
 		}
 		metadata := string(event.Metadata)
-		if strings.Contains(metadata, "/bin/sh") || strings.Contains(metadata, "hello") || strings.Contains(metadata, "warning") {
+		if strings.Contains(metadata, "/bin/sh") || strings.Contains(metadata, "hello") ||
+			strings.Contains(metadata, "warning") {
 			t.Fatalf("Pod exec command or output leaked into audit metadata: %s", metadata)
 		}
 		if strings.Contains(metadata, `"source":"api"`) {
 			apiEvents++
 			if streamRequestID == "" || event.RequestID != streamRequestID {
-				t.Fatalf("API transition request ID = %q, WebSocket request ID = %q", event.RequestID, streamRequestID)
+				t.Fatalf(
+					"API transition request ID = %q, WebSocket request ID = %q",
+					event.RequestID,
+					streamRequestID,
+				)
 			}
 		} else if strings.Contains(metadata, `"source":"background"`) {
 			backgroundEvents++
@@ -215,8 +277,13 @@ func TestPodExecTaskAndWebSocketStreamAreOwnedAndSingleUse(t *testing.T) {
 	if apiEvents != 2 || backgroundEvents != 1 {
 		t.Fatalf("Task transition audit sources: api=%d background=%d", apiEvents, backgroundEvents)
 	}
-	_, replayResponse, replayErr := websocket.Dial(context.Background(), streamURL, &websocket.DialOptions{HTTPHeader: http.Header{"X-Identity": {identityID}}})
-	if replayErr == nil || replayResponse == nil || replayResponse.StatusCode != http.StatusConflict {
+	_, replayResponse, replayErr := websocket.Dial(
+		context.Background(),
+		streamURL,
+		&websocket.DialOptions{HTTPHeader: http.Header{"X-Identity": {identityID}}},
+	)
+	if replayErr == nil || replayResponse == nil ||
+		replayResponse.StatusCode != http.StatusConflict {
 		t.Fatalf("replay response = %#v err = %v", replayResponse, replayErr)
 	}
 	executor.mu.Lock()
@@ -229,12 +296,14 @@ func TestPodExecTaskAndWebSocketStreamAreOwnedAndSingleUse(t *testing.T) {
 func TestPodExecStreamStopsWhenOAuthGrantIsRevoked(t *testing.T) {
 	now := time.Now().UTC()
 	stateStore, err := storage.Open(context.Background(), storage.Config{
-		Backend: storage.BackendSQLite, SQLitePath: filepath.Join(t.TempDir(), "exec-revoke.db"), ControlPlaneReplicas: 1,
+		Backend:              storage.BackendSQLite,
+		SQLitePath:           filepath.Join(t.TempDir(), "exec-revoke.db"),
+		ControlPlaneReplicas: 1,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer stateStore.Close()
+	defer func() { _ = stateStore.Close() }()
 	identityID, authorizationID, sessionID := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	if _, err := stateStore.Identities().Create(context.Background(), storage.Identity{
 		ID: identityID, Type: "human", DisplayName: "Test Identity", Status: "active", CreatedAt: now, UpdatedAt: now,
@@ -248,7 +317,13 @@ func TestPodExecStreamStopsWhenOAuthGrantIsRevoked(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	network, _ := networkspec.Normalize(networkspec.Spec{PodCIDRs: []string{"10.244.0.0/16"}, ServiceIPs: []string{"10.96.0.10"}, DNSServer: "10.96.0.10"})
+	network, _ := networkspec.Normalize(
+		networkspec.Spec{
+			PodCIDRs:   []string{"10.244.0.0/16"},
+			ServiceIPs: []string{"10.96.0.10"},
+			DNSServer:  "10.96.0.10",
+		},
+	)
 	networkJSON, _ := networkspec.CanonicalJSON(network)
 	networkHash, _ := networkspec.Hash(network)
 	expiresAt := now.Add(time.Hour)
@@ -261,39 +336,65 @@ func TestPodExecStreamStopsWhenOAuthGrantIsRevoked(t *testing.T) {
 		t.Fatal(err)
 	}
 	executor := &blockingExecutor{started: make(chan struct{})}
-	handler, err := execapi.New(stateStore, sessionValidator{identity: identityID, session: sessionapi.ActiveSession{
-		ID: sessionID, Namespace: "development", ExpiresAt: expiresAt, NetworkSpecHash: networkHash,
-	}}, executor, execapi.Config{CredentialCheckInterval: 10 * time.Millisecond})
+	handler, err := execapi.New(
+		stateStore,
+		sessionValidator{identity: identityID, session: sessionapi.ActiveSession{
+			ID: sessionID, Namespace: "development", ExpiresAt: expiresAt, NetworkSpecHash: networkHash,
+		}},
+		executor,
+		execapi.Config{CredentialCheckInterval: 10 * time.Millisecond},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
 	policy := authorization.NewAuthenticated()
-	server, err := controlplane.NewServer(controlplane.Config{PublicURL: "https://gateway.example.test"}, controlplane.BuildInfo{},
+	server, err := controlplane.NewServer(
+		controlplane.Config{PublicURL: "https://gateway.example.test"},
+		controlplane.BuildInfo{},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
-		controlplane.WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(*http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
-			return controlplaneapi.Identity{
-				Subject: identityID, DeviceID: "device", AuthorizationID: authorizationID, AccessExpiresAt: expiresAt,
-			}, nil
-		})), controlplane.WithAuthorizer(policy), controlplane.WithAPIRoutes(controlplane.APIRoutes{Exec: execapi.NewRoutes(handler).Endpoints()}))
+		controlplane.WithAuthenticator(
+			controlplaneapi.AuthenticatorFunc(
+				func(*http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
+					return controlplaneapi.Identity{
+						Subject:         identityID,
+						DeviceID:        "device",
+						AuthorizationID: authorizationID,
+						AccessExpiresAt: expiresAt,
+					}, nil
+				},
+			),
+		),
+		controlplane.WithAuthorizer(policy),
+		controlplane.WithAPIRoutes(
+			controlplane.APIRoutes{Exec: execapi.NewRoutes(handler).Endpoints()},
+		),
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
 	httpServer := httptest.NewServer(server.Handler())
 	defer httpServer.Close()
-	createRequest, _ := http.NewRequest(http.MethodPost, httpServer.URL+"/api/sessions/"+sessionID+"/exec?namespace=development",
-		bytes.NewBufferString(`{"pod":"api-0","container":"api","command":["/bin/sh"],"tty":true}`))
+	createRequest, _ := http.NewRequest(
+		http.MethodPost,
+		httpServer.URL+"/api/sessions/"+sessionID+"/exec?namespace=development",
+		bytes.NewBufferString(`{"pod":"api-0","container":"api","command":["/bin/sh"],"tty":true}`),
+	)
 	createRequest.Header.Set("Content-Type", "application/json")
 	createRequest.Header.Set("Idempotency-Key", "exec-revoke")
 	createResponse, err := http.DefaultClient.Do(createRequest)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer createResponse.Body.Close()
+	defer func() { _ = createResponse.Body.Close() }()
 	var document execapi.Document
-	if createResponse.StatusCode != http.StatusCreated || json.NewDecoder(createResponse.Body).Decode(&document) != nil {
+	if createResponse.StatusCode != http.StatusCreated ||
+		json.NewDecoder(createResponse.Body).Decode(&document) != nil {
 		t.Fatalf("create status = %d task = %#v", createResponse.StatusCode, document)
 	}
-	streamURL := "ws" + strings.TrimPrefix(httpServer.URL, "http") + "/api/sessions/" + sessionID + "/exec/" + document.ID + "/stream?namespace=development"
+	streamURL := "ws" + strings.TrimPrefix(
+		httpServer.URL,
+		"http",
+	) + "/api/sessions/" + sessionID + "/exec/" + document.ID + "/stream?namespace=development"
 	connection, response, err := websocket.Dial(context.Background(), streamURL, nil)
 	if err != nil {
 		if response != nil {
@@ -301,13 +402,14 @@ func TestPodExecStreamStopsWhenOAuthGrantIsRevoked(t *testing.T) {
 		}
 		t.Fatal(err)
 	}
-	defer connection.CloseNow()
+	defer func() { _ = connection.CloseNow() }()
 	select {
 	case <-executor.started:
 	case <-time.After(time.Second):
 		t.Fatal("Kubernetes exec did not start")
 	}
-	if err := stateStore.OAuthSessions().RevokeRequest(context.Background(), authorizationID, time.Now().UTC()); err != nil {
+	if err := stateStore.OAuthSessions().
+		RevokeRequest(context.Background(), authorizationID, time.Now().UTC()); err != nil {
 		t.Fatal(err)
 	}
 	readContext, readCancel := context.WithTimeout(context.Background(), time.Second)

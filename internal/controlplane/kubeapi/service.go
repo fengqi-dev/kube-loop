@@ -5,14 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/fengqi-dev/kube-loop/internal/controlplane/authorization"
-	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/capability"
 	"github.com/labstack/echo/v5"
 	authorizationv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -23,6 +21,10 @@ import (
 	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/apimachinery/pkg/version"
 	kubernetesclient "k8s.io/client-go/kubernetes"
+
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/authorization"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/capability"
 )
 
 const (
@@ -44,8 +46,8 @@ type Service struct {
 
 type Option func(*Service)
 
-func WithGatewayVersion(version string) Option {
-	return func(handler *Service) { handler.gatewayVersion = strings.TrimSpace(version) }
+func WithGatewayVersion(gatewayVersion string) Option {
+	return func(handler *Service) { handler.gatewayVersion = strings.TrimSpace(gatewayVersion) }
 }
 
 func WithInventoryResync(interval time.Duration) Option {
@@ -54,7 +56,7 @@ func WithInventoryResync(interval time.Duration) Option {
 
 func New(provider ClientProvider, options ...Option) (*Service, error) {
 	if provider == nil {
-		return nil, errors.New("Kubernetes client Provider is required")
+		return nil, errors.New("kubernetes client Provider is required")
 	}
 	handler := &Service{
 		provider: provider, gatewayVersion: "dev",
@@ -79,7 +81,12 @@ func (handler *Service) capabilities(
 	namespace string,
 ) *controlplaneapi.Error {
 	request := ctx.Request()
-	snapshot, apiError := handler.discoverCapabilities(request.Context(), client, identity, namespace)
+	snapshot, apiError := handler.discoverCapabilities(
+		request.Context(),
+		client,
+		identity,
+		namespace,
+	)
 	if apiError != nil {
 		return apiError
 	}
@@ -98,7 +105,7 @@ func (handler *Service) DiscoverCapabilities(
 	})
 	if err != nil {
 		return capability.Snapshot{}, &controlplaneapi.Error{
-			Code: controlplaneapi.CodeUnavailable, Message: "Kubernetes API is unavailable", Cause: err,
+			Code: controlplaneapi.CodeUnavailable, Message: kubernetesAPIUnavailableMessage, Cause: err,
 		}
 	}
 	return handler.discoverCapabilities(ctx, client, identity, namespace)
@@ -121,32 +128,139 @@ func (handler *Service) discoverCapabilities(
 		return attributes
 	}
 	candidates := []candidate{
-		{capability: "pods.get", kubernetes: namespaced(authorizationv1.ResourceAttributes{Verb: "get", Resource: "pods"})},
-		{capability: "pods.list", kubernetes: namespaced(authorizationv1.ResourceAttributes{Verb: "list", Resource: "pods"})},
-		{capability: "pods.watch", kubernetes: namespaced(authorizationv1.ResourceAttributes{Verb: "watch", Resource: "pods"})},
-		{capability: "services.get", kubernetes: namespaced(authorizationv1.ResourceAttributes{Verb: "get", Resource: "services"})},
-		{capability: "services.list", kubernetes: namespaced(authorizationv1.ResourceAttributes{Verb: "list", Resource: "services"})},
-		{capability: "services.watch", kubernetes: namespaced(authorizationv1.ResourceAttributes{Verb: "watch", Resource: "services"})},
+		{
+			capability: "pods.get",
+			kubernetes: namespaced(
+				authorizationv1.ResourceAttributes{
+					Verb:     operationGet,
+					Resource: string(inventoryPods),
+				},
+			),
+		},
+		{
+			capability: "pods.list",
+			kubernetes: namespaced(
+				authorizationv1.ResourceAttributes{
+					Verb:     operationList,
+					Resource: string(inventoryPods),
+				},
+			),
+		},
+		{
+			capability: "pods.watch",
+			kubernetes: namespaced(
+				authorizationv1.ResourceAttributes{
+					Verb:     operationWatch,
+					Resource: string(inventoryPods),
+				},
+			),
+		},
+		{
+			capability: "services.get",
+			kubernetes: namespaced(
+				authorizationv1.ResourceAttributes{
+					Verb:     operationGet,
+					Resource: string(inventoryServices),
+				},
+			),
+		},
+		{
+			capability: "services.list",
+			kubernetes: namespaced(
+				authorizationv1.ResourceAttributes{
+					Verb:     operationList,
+					Resource: string(inventoryServices),
+				},
+			),
+		},
+		{
+			capability: "services.watch",
+			kubernetes: namespaced(
+				authorizationv1.ResourceAttributes{
+					Verb:     operationWatch,
+					Resource: string(inventoryServices),
+				},
+			),
+		},
 		{capability: "cluster.tunnel", kubernetes: namespaced(
-			authorizationv1.ResourceAttributes{Verb: "list", Resource: "pods"},
-			authorizationv1.ResourceAttributes{Verb: "list", Resource: "services"},
+			authorizationv1.ResourceAttributes{
+				Verb:     operationList,
+				Resource: string(inventoryPods),
+			},
+			authorizationv1.ResourceAttributes{
+				Verb:     operationList,
+				Resource: string(inventoryServices),
+			},
 		)},
 		{capability: "ports.forward", kubernetes: namespaced(
-			authorizationv1.ResourceAttributes{Verb: "get", Resource: "pods"},
-			authorizationv1.ResourceAttributes{Verb: "get", Resource: "services"},
+			authorizationv1.ResourceAttributes{
+				Verb:     operationGet,
+				Resource: string(inventoryPods),
+			},
+			authorizationv1.ResourceAttributes{
+				Verb:     operationGet,
+				Resource: string(inventoryServices),
+			},
 		)},
-		{capability: "pods.exec", kubernetes: namespaced(authorizationv1.ResourceAttributes{Verb: "create", Resource: "pods", Subresource: "exec"})},
-		{capability: "pods.files", kubernetes: namespaced(authorizationv1.ResourceAttributes{Verb: "create", Resource: "pods", Subresource: "exec"})},
-		{capability: "pods.files.manage", kubernetes: namespaced(authorizationv1.ResourceAttributes{Verb: "create", Resource: "pods", Subresource: "exec"})},
+		{
+			capability: "pods.exec",
+			kubernetes: namespaced(
+				authorizationv1.ResourceAttributes{
+					Verb:        operationCreate,
+					Resource:    string(inventoryPods),
+					Subresource: subresourceExec,
+				},
+			),
+		},
+		{
+			capability: "pods.files",
+			kubernetes: namespaced(
+				authorizationv1.ResourceAttributes{
+					Verb:        operationCreate,
+					Resource:    string(inventoryPods),
+					Subresource: subresourceExec,
+				},
+			),
+		},
+		{
+			capability: "pods.files.manage",
+			kubernetes: namespaced(
+				authorizationv1.ResourceAttributes{
+					Verb:        operationCreate,
+					Resource:    string(inventoryPods),
+					Subresource: subresourceExec,
+				},
+			),
+		},
 		{capability: "services.exchange", kubernetes: namespaced(
-			authorizationv1.ResourceAttributes{Verb: "get", Resource: "services"},
-			authorizationv1.ResourceAttributes{Verb: "get", Resource: "endpoints"},
-			authorizationv1.ResourceAttributes{Group: "discovery.k8s.io", Verb: "list", Resource: "endpointslices"},
+			authorizationv1.ResourceAttributes{
+				Verb:     operationGet,
+				Resource: string(inventoryServices),
+			},
+			authorizationv1.ResourceAttributes{
+				Verb:     operationGet,
+				Resource: "endpoints",
+			},
+			authorizationv1.ResourceAttributes{
+				Group:    "discovery.k8s.io",
+				Verb:     operationList,
+				Resource: "endpointslices",
+			},
 		)},
 		{capability: "services.mirror", kubernetes: namespaced(
-			authorizationv1.ResourceAttributes{Verb: "get", Resource: "services"},
-			authorizationv1.ResourceAttributes{Verb: "get", Resource: "endpoints"},
-			authorizationv1.ResourceAttributes{Group: "discovery.k8s.io", Verb: "list", Resource: "endpointslices"},
+			authorizationv1.ResourceAttributes{
+				Verb:     operationGet,
+				Resource: string(inventoryServices),
+			},
+			authorizationv1.ResourceAttributes{
+				Verb:     operationGet,
+				Resource: "endpoints",
+			},
+			authorizationv1.ResourceAttributes{
+				Group:    "discovery.k8s.io",
+				Verb:     operationList,
+				Resource: "endpointslices",
+			},
 		)},
 		{capability: "services.preview"},
 	}
@@ -154,9 +268,13 @@ func (handler *Service) discoverCapabilities(
 	for _, candidate := range candidates {
 		kubernetesAllowed := true
 		for _, attributes := range candidate.kubernetes {
-			review, err := client.AuthorizationV1().SelfSubjectAccessReviews().Create(ctx, &authorizationv1.SelfSubjectAccessReview{
-				Spec: authorizationv1.SelfSubjectAccessReviewSpec{ResourceAttributes: &attributes},
-			}, metav1.CreateOptions{})
+			review, err := client.AuthorizationV1().
+				SelfSubjectAccessReviews().
+				Create(ctx, &authorizationv1.SelfSubjectAccessReview{
+					Spec: authorizationv1.SelfSubjectAccessReviewSpec{
+						ResourceAttributes: &attributes,
+					},
+				}, metav1.CreateOptions{})
 			if err != nil {
 				return capability.Snapshot{}, mapKubernetesError(err)
 			}
@@ -181,59 +299,109 @@ func (handler *Service) discoverCapabilities(
 	return snapshot, nil
 }
 
-func (handler *Service) version(ctx *echo.Context, client kubernetesclient.Interface) *controlplaneapi.Error {
+func (handler *Service) version(
+	ctx *echo.Context,
+	client kubernetesclient.Interface,
+) *controlplaneapi.Error {
 	request := ctx.Request()
 	var result version.Info
-	contents, err := client.Discovery().RESTClient().Get().AbsPath("/version").Do(request.Context()).Raw()
+	contents, err := client.Discovery().
+		RESTClient().
+		Get().
+		AbsPath("/version").
+		Do(request.Context()).
+		Raw()
 	if err != nil {
 		return mapKubernetesError(err)
 	}
 	if err := json.Unmarshal(contents, &result); err != nil {
-		return &controlplaneapi.Error{Code: controlplaneapi.CodeInternal, Message: "Kubernetes operation failed", Cause: err}
+		return &controlplaneapi.Error{
+			Code:    controlplaneapi.CodeInternal,
+			Message: "Kubernetes operation failed",
+			Cause:   err,
+		}
 	}
-	writeJSON(ctx, versionDocument{GitVersion: result.GitVersion, GatewayVersion: handler.gatewayVersion})
+	writeJSON(
+		ctx,
+		versionDocument{
+			GitVersion:     result.GitVersion,
+			GatewayVersion: handler.gatewayVersion,
+		},
+	)
 	return nil
 }
 
 func (handler *Service) namespaces(
 	ctx *echo.Context,
 	client kubernetesclient.Interface,
-	identity controlplaneapi.Identity,
 ) *controlplaneapi.Error {
 	request := ctx.Request()
 	options, apiError := listOptions(request)
 	if apiError != nil {
 		return apiError
 	}
-	result, listErr := client.CoreV1().Namespaces().List(request.Context(), options)
+	result, listErr := client.CoreV1().
+		Namespaces().
+		List(request.Context(), options)
 	if listErr != nil {
 		return mapKubernetesError(listErr)
 	}
 	items := make([]namespaceDocument, 0, len(result.Items))
 	for index := range result.Items {
-		items = append(items, namespaceDocument{Name: result.Items[index].Name, Status: string(result.Items[index].Status.Phase)})
+		items = append(
+			items,
+			namespaceDocument{
+				Name:   result.Items[index].Name,
+				Status: string(result.Items[index].Status.Phase),
+			},
+		)
 	}
-	writeJSON(ctx, listDocument[namespaceDocument]{Items: items, Continue: result.Continue, ResourceVersion: result.ResourceVersion})
+	writeJSON(
+		ctx,
+		listDocument[namespaceDocument]{
+			Items:           items,
+			Continue:        result.Continue,
+			ResourceVersion: result.ResourceVersion,
+		},
+	)
 	return nil
 }
 
-func (handler *Service) namespace(ctx *echo.Context, client kubernetesclient.Interface, name string) *controlplaneapi.Error {
+func (handler *Service) namespace(
+	ctx *echo.Context,
+	client kubernetesclient.Interface,
+	name string,
+) *controlplaneapi.Error {
 	request := ctx.Request()
-	result, err := client.CoreV1().Namespaces().Get(request.Context(), name, metav1.GetOptions{})
+	result, err := client.CoreV1().
+		Namespaces().
+		Get(request.Context(), name, metav1.GetOptions{})
 	if err != nil {
 		return mapKubernetesError(err)
 	}
-	writeJSON(ctx, namespaceDocument{Name: result.Name, Status: string(result.Status.Phase)})
+	writeJSON(
+		ctx,
+		namespaceDocument{
+			Name:   result.Name,
+			Status: string(result.Status.Phase),
+		},
+	)
 	return nil
 }
 
-func (handler *Service) pods(ctx *echo.Context, client kubernetesclient.Interface, namespace string) *controlplaneapi.Error {
+func (handler *Service) pods(
+	ctx *echo.Context,
+	client kubernetesclient.Interface,
+	namespace string,
+) *controlplaneapi.Error {
 	request := ctx.Request()
 	options, apiError := listOptions(request)
 	if apiError != nil {
 		return apiError
 	}
-	result, err := client.CoreV1().Pods(namespace).List(request.Context(), options)
+	result, err := client.CoreV1().
+		Pods(namespace).
+		List(request.Context(), options)
 	if err != nil {
 		return mapKubernetesError(err)
 	}
@@ -241,13 +409,26 @@ func (handler *Service) pods(ctx *echo.Context, client kubernetesclient.Interfac
 	for index := range result.Items {
 		items = append(items, podFromKubernetes(&result.Items[index]))
 	}
-	writeJSON(ctx, listDocument[podDocument]{Items: items, Continue: result.Continue, ResourceVersion: result.ResourceVersion})
+	writeJSON(
+		ctx,
+		listDocument[podDocument]{
+			Items:           items,
+			Continue:        result.Continue,
+			ResourceVersion: result.ResourceVersion,
+		},
+	)
 	return nil
 }
 
-func (handler *Service) pod(ctx *echo.Context, client kubernetesclient.Interface, namespace, name string) *controlplaneapi.Error {
+func (handler *Service) pod(
+	ctx *echo.Context,
+	client kubernetesclient.Interface,
+	namespace, name string,
+) *controlplaneapi.Error {
 	request := ctx.Request()
-	result, err := client.CoreV1().Pods(namespace).Get(request.Context(), name, metav1.GetOptions{})
+	result, err := client.CoreV1().
+		Pods(namespace).
+		Get(request.Context(), name, metav1.GetOptions{})
 	if err != nil {
 		return mapKubernetesError(err)
 	}
@@ -255,13 +436,19 @@ func (handler *Service) pod(ctx *echo.Context, client kubernetesclient.Interface
 	return nil
 }
 
-func (handler *Service) services(ctx *echo.Context, client kubernetesclient.Interface, namespace string) *controlplaneapi.Error {
+func (handler *Service) services(
+	ctx *echo.Context,
+	client kubernetesclient.Interface,
+	namespace string,
+) *controlplaneapi.Error {
 	request := ctx.Request()
 	options, apiError := listOptions(request)
 	if apiError != nil {
 		return apiError
 	}
-	result, err := client.CoreV1().Services(namespace).List(request.Context(), options)
+	result, err := client.CoreV1().
+		Services(namespace).
+		List(request.Context(), options)
 	if err != nil {
 		return mapKubernetesError(err)
 	}
@@ -269,13 +456,26 @@ func (handler *Service) services(ctx *echo.Context, client kubernetesclient.Inte
 	for index := range result.Items {
 		items = append(items, serviceFromKubernetes(&result.Items[index]))
 	}
-	writeJSON(ctx, listDocument[serviceDocument]{Items: items, Continue: result.Continue, ResourceVersion: result.ResourceVersion})
+	writeJSON(
+		ctx,
+		listDocument[serviceDocument]{
+			Items:           items,
+			Continue:        result.Continue,
+			ResourceVersion: result.ResourceVersion,
+		},
+	)
 	return nil
 }
 
-func (handler *Service) service(ctx *echo.Context, client kubernetesclient.Interface, namespace, name string) *controlplaneapi.Error {
+func (handler *Service) service(
+	ctx *echo.Context,
+	client kubernetesclient.Interface,
+	namespace, name string,
+) *controlplaneapi.Error {
 	request := ctx.Request()
-	result, err := client.CoreV1().Services(namespace).Get(request.Context(), name, metav1.GetOptions{})
+	result, err := client.CoreV1().
+		Services(namespace).
+		Get(request.Context(), name, metav1.GetOptions{})
 	if err != nil {
 		return mapKubernetesError(err)
 	}
@@ -283,9 +483,13 @@ func (handler *Service) service(ctx *echo.Context, client kubernetesclient.Inter
 	return nil
 }
 
-func listOptions(request *http.Request) (metav1.ListOptions, *controlplaneapi.Error) {
+func listOptions(
+	request *http.Request,
+) (metav1.ListOptions, *controlplaneapi.Error) {
 	for key, values := range request.URL.Query() {
-		if key != "limit" && key != "continue" && key != "labelSelector" && key != "fieldSelector" {
+		if key != "limit" && key != "continue" &&
+			key != labelSelectorQueryParameter &&
+			key != fieldSelectorQueryParameter {
 			return metav1.ListOptions{}, invalidQuery(key)
 		}
 		if len(values) != 1 {
@@ -300,7 +504,10 @@ func listOptions(request *http.Request) (metav1.ListOptions, *controlplaneapi.Er
 		if err != nil || parsed < 1 || parsed > maximumListLimit {
 			return metav1.ListOptions{}, &controlplaneapi.Error{
 				Code: controlplaneapi.CodeInvalidArgument, Field: "limit",
-				Message: fmt.Sprintf("limit must be between 1 and %d", maximumListLimit),
+				Message: fmt.Sprintf(
+					"limit must be between 1 and %d",
+					maximumListLimit,
+				),
 			}
 		}
 		limit = parsed
@@ -311,29 +518,37 @@ func listOptions(request *http.Request) (metav1.ListOptions, *controlplaneapi.Er
 			Code: controlplaneapi.CodeInvalidArgument, Field: "continue", Message: "continue token is invalid",
 		}
 	}
-	labelSelector := request.URL.Query().Get("labelSelector")
+	labelSelector := request.URL.Query().Get(labelSelectorQueryParameter)
 	if len(labelSelector) > 1024 || containsControl(labelSelector) {
 		return metav1.ListOptions{}, &controlplaneapi.Error{
-			Code: controlplaneapi.CodeInvalidArgument, Field: "labelSelector", Message: "label selector is invalid",
+			Code:    controlplaneapi.CodeInvalidArgument,
+			Field:   labelSelectorQueryParameter,
+			Message: "label selector is invalid",
 		}
 	}
 	if labelSelector != "" {
 		if _, err := labels.Parse(labelSelector); err != nil {
 			return metav1.ListOptions{}, &controlplaneapi.Error{
-				Code: controlplaneapi.CodeInvalidArgument, Field: "labelSelector", Message: "label selector is invalid",
+				Code:    controlplaneapi.CodeInvalidArgument,
+				Field:   labelSelectorQueryParameter,
+				Message: "label selector is invalid",
 			}
 		}
 	}
-	fieldSelector := request.URL.Query().Get("fieldSelector")
+	fieldSelector := request.URL.Query().Get(fieldSelectorQueryParameter)
 	if len(fieldSelector) > 1024 || containsControl(fieldSelector) {
 		return metav1.ListOptions{}, &controlplaneapi.Error{
-			Code: controlplaneapi.CodeInvalidArgument, Field: "fieldSelector", Message: "field selector is invalid",
+			Code:    controlplaneapi.CodeInvalidArgument,
+			Field:   fieldSelectorQueryParameter,
+			Message: "field selector is invalid",
 		}
 	}
 	if fieldSelector != "" {
 		if _, err := fields.ParseSelector(fieldSelector); err != nil {
 			return metav1.ListOptions{}, &controlplaneapi.Error{
-				Code: controlplaneapi.CodeInvalidArgument, Field: "fieldSelector", Message: "field selector is invalid",
+				Code:    controlplaneapi.CodeInvalidArgument,
+				Field:   fieldSelectorQueryParameter,
+				Message: "field selector is invalid",
 			}
 		}
 	}
@@ -342,7 +557,9 @@ func listOptions(request *http.Request) (metav1.ListOptions, *controlplaneapi.Er
 	}, nil
 }
 
-func capabilityNamespace(request *http.Request) (string, *controlplaneapi.Error) {
+func capabilityNamespace(
+	request *http.Request,
+) (string, *controlplaneapi.Error) {
 	query := request.URL.Query()
 	for key, values := range query {
 		if key != "namespace" {
@@ -374,7 +591,11 @@ func rejectQuery(request *http.Request) *controlplaneapi.Error {
 }
 
 func invalidQuery(field string) *controlplaneapi.Error {
-	return &controlplaneapi.Error{Code: controlplaneapi.CodeInvalidArgument, Field: field, Message: "query parameter is not supported"}
+	return &controlplaneapi.Error{
+		Code:    controlplaneapi.CodeInvalidArgument,
+		Field:   field,
+		Message: "query parameter is not supported",
+	}
 }
 
 func validateNames(namespace, name string) *controlplaneapi.Error {
@@ -392,7 +613,11 @@ func validateName(field, value string, namespace bool) *controlplaneapi.Error {
 		problems = validation.IsDNS1123Subdomain(value)
 	}
 	if len(problems) != 0 {
-		return &controlplaneapi.Error{Code: controlplaneapi.CodeInvalidArgument, Field: field, Message: field + " is invalid"}
+		return &controlplaneapi.Error{
+			Code:    controlplaneapi.CodeInvalidArgument,
+			Field:   field,
+			Message: field + " is invalid",
+		}
 	}
 	return nil
 }
@@ -410,7 +635,8 @@ func podFromKubernetes(pod *corev1.Pod) podDocument {
 	}
 	ready := false
 	for _, condition := range pod.Status.Conditions {
-		if condition.Type == corev1.PodReady && condition.Status == corev1.ConditionTrue {
+		if condition.Type == corev1.PodReady &&
+			condition.Status == corev1.ConditionTrue {
 			ready = true
 			break
 		}
@@ -422,11 +648,16 @@ func podFromKubernetes(pod *corev1.Pod) podDocument {
 		}
 		restarts += status.RestartCount
 	}
+	totalContainers := min(len(pod.Spec.Containers), math.MaxInt32)
 	return podDocument{
 		Name: pod.Name, Namespace: pod.Namespace, Phase: string(pod.Status.Phase),
 		PodIP: pod.Status.PodIP, NodeName: pod.Spec.NodeName, Ready: ready,
-		ReadyContainers: readyContainers, TotalContainers: int32(len(pod.Spec.Containers)), Restarts: restarts,
-		AgeSeconds: resourceAgeSeconds(pod.CreationTimestamp), Containers: containers, Ports: ports,
+		ReadyContainers: readyContainers,
+		//nolint:gosec // totalContainers is explicitly bounded by math.MaxInt32 above.
+		TotalContainers: int32(totalContainers), Restarts: restarts,
+		AgeSeconds: resourceAgeSeconds(
+			pod.CreationTimestamp,
+		), Containers: containers, Ports: ports,
 	}
 }
 
@@ -469,17 +700,42 @@ func resourceAgeSeconds(created metav1.Time) int64 {
 func mapKubernetesError(err error) *controlplaneapi.Error {
 	switch {
 	case apierrors.IsNotFound(err):
-		return &controlplaneapi.Error{Code: controlplaneapi.CodeNotFound, Message: "resource not found", Cause: err}
+		return &controlplaneapi.Error{
+			Code:    controlplaneapi.CodeNotFound,
+			Message: "resource not found",
+			Cause:   err,
+		}
 	case apierrors.IsForbidden(err):
-		return &controlplaneapi.Error{Code: controlplaneapi.CodeForbidden, Message: "Kubernetes operation is not permitted", Cause: err}
+		return &controlplaneapi.Error{
+			Code:    controlplaneapi.CodeForbidden,
+			Message: "Kubernetes operation is not permitted",
+			Cause:   err,
+		}
 	case apierrors.IsTooManyRequests(err):
-		return &controlplaneapi.Error{Code: controlplaneapi.CodeRateLimited, Message: "Kubernetes API rate limit exceeded", Cause: err}
-	case apierrors.IsUnauthorized(err) || apierrors.IsTimeout(err) || apierrors.IsServerTimeout(err) || apierrors.IsServiceUnavailable(err) ||
-		errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded):
-		return &controlplaneapi.Error{Code: controlplaneapi.CodeUnavailable, Message: "Kubernetes API is unavailable", Cause: err}
+		return &controlplaneapi.Error{
+			Code:    controlplaneapi.CodeRateLimited,
+			Message: "Kubernetes API rate limit exceeded",
+			Cause:   err,
+		}
+	case isUnavailableKubernetesError(err):
+		return &controlplaneapi.Error{
+			Code:    controlplaneapi.CodeUnavailable,
+			Message: kubernetesAPIUnavailableMessage,
+			Cause:   err,
+		}
 	default:
-		return &controlplaneapi.Error{Code: controlplaneapi.CodeInternal, Message: "Kubernetes operation failed", Cause: err}
+		return &controlplaneapi.Error{
+			Code:    controlplaneapi.CodeInternal,
+			Message: "Kubernetes operation failed",
+			Cause:   err,
+		}
 	}
+}
+
+func isUnavailableKubernetesError(err error) bool {
+	return apierrors.IsUnauthorized(err) || apierrors.IsTimeout(err) ||
+		apierrors.IsServerTimeout(err) || apierrors.IsServiceUnavailable(err) ||
+		errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }
 
 func writeJSON(ctx *echo.Context, value any) {

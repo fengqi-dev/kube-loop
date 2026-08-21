@@ -1,6 +1,7 @@
 package trafficlistener
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -37,10 +38,15 @@ func Bind(gatewayIP string, ports []trafficmodel.Port) (*Listeners, error) {
 		return nil, err
 	}
 	for _, port := range ports {
-		listenPort := 0
+		var listenPort int
 		switch port.Protocol {
 		case "tcp":
-			listener, err := net.Listen("tcp", net.JoinHostPort(gatewayIP, "0"))
+			var listenConfig net.ListenConfig
+			listener, err := listenConfig.Listen(
+				context.Background(),
+				"tcp",
+				net.JoinHostPort(gatewayIP, "0"),
+			)
 			if err != nil {
 				return fail(fmt.Errorf("listen for Service TCP port %d: %w", port.ServicePort, err))
 			}
@@ -57,7 +63,12 @@ func Bind(gatewayIP string, ports []trafficmodel.Port) (*Listeners, error) {
 			if err != nil {
 				return fail(fmt.Errorf("listen for Service UDP port %d: %w", port.ServicePort, err))
 			}
-			listenPort = connection.LocalAddr().(*net.UDPAddr).Port
+			udpAddress, ok := connection.LocalAddr().(*net.UDPAddr)
+			if !ok || udpAddress.Port == 0 {
+				_ = connection.Close()
+				return fail(errors.New("traffic UDP listener returned an invalid address"))
+			}
+			listenPort = udpAddress.Port
 			bound.UDP = append(bound.UDP, UDPBinding{Port: port, Connection: connection})
 		default:
 			return fail(fmt.Errorf("unsupported traffic listener protocol %q", port.Protocol))

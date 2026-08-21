@@ -42,7 +42,7 @@ type API struct {
 func New(config Config) (*API, error) {
 	config.GatewayIP = strings.TrimSpace(config.GatewayIP)
 	if config.GatewayIP == "" || config.ControlPlane == nil || config.ControlPlane.RelayID() == "" {
-		return nil, errors.New("Gateway traffic API configuration is invalid")
+		return nil, errors.New("gateway traffic API configuration is invalid")
 	}
 	if config.HeartbeatEvery == 0 {
 		config.HeartbeatEvery = 5 * time.Second
@@ -65,7 +65,7 @@ func (api *API) ServeTraffic(
 	if connection == nil {
 		return
 	}
-	defer connection.Close()
+	defer func() { _ = connection.Close() }()
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -92,12 +92,12 @@ func (api *API) ServeTraffic(
 
 	listeners, err := reverserelay.BindListeners(api.config.GatewayIP, claim.Ports)
 	if err != nil {
-		startupErr := fmt.Errorf("Gateway listener allocation failed: %w", err)
+		startupErr := fmt.Errorf("gateway listener allocation failed: %w", err)
 		api.finish(context.WithoutCancel(ctx), mode, claim.TaskID, true, startupErr)
-		api.reject(connection, errors.New("Gateway listener allocation failed"))
+		api.reject(connection, errors.New("gateway listener allocation failed"))
 		return
 	}
-	defer listeners.Close()
+	defer func() { _ = listeners.Close() }()
 
 	prepareRequest := trafficcontrol.PrepareRequest{
 		Mode: mode, TaskID: claim.TaskID, Identity: cloneIdentity(identity), RelayID: api.config.ControlPlane.RelayID(),
@@ -122,7 +122,7 @@ func (api *API) ServeTraffic(
 		api.finish(context.WithoutCancel(ctx), mode, claim.TaskID, true, err)
 		return
 	}
-	defer frameConnection.Close()
+	defer func() { _ = frameConnection.Close() }()
 	var mirror *mirrorrelay.Relay
 	if mode == trafficcontrol.ModeMirror {
 		mirror, err = mirrorrelay.New(frameConnection, listeners, prepared.Backends, mirrorrelay.Config{

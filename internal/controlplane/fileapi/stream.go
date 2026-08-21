@@ -8,6 +8,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/labstack/echo/v5"
+
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/authorization"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/sessionapi"
@@ -15,8 +18,6 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/protocol/filestream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/remotetask"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
-	"github.com/google/uuid"
-	"github.com/labstack/echo/v5"
 )
 
 func (handler *Service) stream(
@@ -35,37 +36,76 @@ func (handler *Service) stream(
 		return notFound()
 	}
 	if task.State != remotetask.Pending {
-		return &controlplaneapi.Error{Code: controlplaneapi.CodeConflict, Message: "file transfer Task was already claimed"}
+		return &controlplaneapi.Error{
+			Code:    controlplaneapi.CodeConflict,
+			Message: "file transfer Task was already claimed",
+		}
 	}
 	spec, err := handler.specFromTask(task)
 	if err != nil {
 		return internalError(err)
 	}
-	if err := handler.storage.Tasks().UpdateState(request.Context(), task.ID, remotetask.Pending, remotetask.Starting, json.RawMessage(`{}`), handler.now().UTC()); err != nil {
+	if err := handler.storage.Tasks().UpdateState(
+		request.Context(), task.ID, remotetask.Pending, remotetask.Starting,
+		json.RawMessage(`{}`), handler.now().UTC(),
+	); err != nil {
 		return storageError(err)
 	}
-	connection, err := websocket.Accept(writer, request, &websocket.AcceptOptions{CompressionMode: websocket.CompressionDisabled})
+	connection, err := websocket.Accept(
+		writer,
+		request,
+		&websocket.AcceptOptions{
+			CompressionMode: websocket.CompressionDisabled,
+		},
+	)
 	if err != nil {
-		handler.persistState(task.ID, remotetask.Starting, remotetask.Failed, streamResult{Error: "WebSocket upgrade failed"})
+		_ = handler.persistState(
+			task.ID,
+			remotetask.Starting,
+			remotetask.Failed,
+			streamResult{Error: "WebSocket upgrade failed"},
+		)
 		return nil
 	}
-	defer connection.CloseNow()
+	defer func() { _ = connection.CloseNow() }()
 	connection.SetReadLimit(filestream.MaximumData + 1)
-	leaseContext, cancel, err := streamlease.Start(request.Context(), handler.storage, identity, session, streamlease.Config{
-		Now: handler.now, CheckInterval: handler.credentialCheckInterval,
-		Runtime: streamlease.RuntimeFrom(handler.sessions), TaskID: task.ID, HeartbeatTask: true,
-		Authorizer: handler.authorizer, Authorization: authorization.Request{
-			Operation: "stream", Namespace: session.Namespace, ResourceKind: "file-transfers", ResourceName: task.ID,
+	leaseContext, cancel, err := streamlease.Start(
+		request.Context(),
+		handler.storage,
+		identity,
+		session,
+		streamlease.Config{
+			Now: handler.now, CheckInterval: handler.credentialCheckInterval,
+			Runtime: streamlease.RuntimeFrom(
+				handler.sessions,
+			), TaskID: task.ID, HeartbeatTask: true,
+			Authorizer: handler.authorizer, Authorization: authorization.Request{
+				Operation:    "stream",
+				Namespace:    session.Namespace,
+				ResourceKind: "file-transfers",
+				ResourceName: task.ID,
+			},
 		},
-	})
+	)
 	if err != nil {
-		handler.persistState(task.ID, remotetask.Starting, remotetask.Failed, streamResult{Error: "authorization lease expired"})
-		_ = connection.Close(websocket.StatusPolicyViolation, "authorization lease expired")
+		_ = handler.persistState(
+			task.ID,
+			remotetask.Starting,
+			remotetask.Failed,
+			streamResult{Error: "authorization lease expired"},
+		)
+		_ = connection.Close(
+			websocket.StatusPolicyViolation,
+			"authorization lease expired",
+		)
 		return nil
 	}
 	defer cancel()
 	if err := handler.persistState(task.ID, remotetask.Starting, remotetask.Running, streamResult{}); err != nil {
-		_ = connection.Close(websocket.StatusInternalError, "file transfer state persistence failed")
+		_ = connection.Close(
+			websocket.StatusInternalError,
+			"file transfer state persistence failed",
+		)
 		return nil
 	}
 	var writeMu sync.Mutex
@@ -73,28 +113,42 @@ func (handler *Service) stream(
 	var transferErr error
 	if spec.Direction == DirectionUpload {
 		outcome, transferErr = handler.upload(
-			leaseContext, cancel, connection, &writeMu, identity, session.Namespace, task.ID, spec,
+			leaseContext,
+			cancel,
+			connection,
+			&writeMu,
+			identity,
+			session.Namespace,
+			task.ID,
+			spec,
 		)
 	} else {
 		outcome, transferErr = handler.download(
 			leaseContext, request.Context(), cancel, connection, &writeMu, identity, session.Namespace, task.ID, spec,
 		)
 	}
-	cancelled := leaseContext.Err() != nil || errors.Is(transferErr, context.Canceled)
+	cancelled := leaseContext.Err() != nil ||
+		errors.Is(transferErr, context.Canceled)
 	result := resultFromOutcome(outcome, transferErr, cancelled)
 	nextState := remotetask.Stopped
 	if transferErr != nil && !cancelled {
 		nextState = remotetask.Failed
 	}
 	if err := handler.persistState(task.ID, remotetask.Running, nextState, result); err != nil {
-		_ = connection.Close(websocket.StatusInternalError, "file transfer state persistence failed")
+		_ = connection.Close(
+			websocket.StatusInternalError,
+			"file transfer state persistence failed",
+		)
 		return nil
 	}
 	encoded, _ := filestream.EncodeResult(result.protocol())
 	writeMu.Lock()
 	_ = connection.Write(context.Background(), websocket.MessageBinary, encoded)
 	writeMu.Unlock()
-	_ = connection.Close(websocket.StatusNormalClosure, "file transfer complete")
+	_ = connection.Close(
+		websocket.StatusNormalClosure,
+		"file transfer complete",
+	)
 	return nil
 }
 
@@ -116,7 +170,14 @@ func (handler *Service) upload(
 		}
 		inputResult <- err
 	}()
-	outcome, transferErr := handler.executor.Upload(leaseContext, identity, namespace, taskID, spec, reader)
+	outcome, transferErr := handler.executor.Upload(
+		leaseContext,
+		identity,
+		namespace,
+		taskID,
+		spec,
+		reader,
+	)
 	_ = reader.CloseWithError(transferErr)
 	inputErr := <-inputResult
 	if transferErr != nil {
@@ -151,7 +212,9 @@ func (handler *Service) download(
 		return outcome, err
 	}
 	if outcome.Transferred != output.transferred {
-		return outcome, errors.New("file transfer byte count does not match the streamed output")
+		return outcome, errors.New(
+			"file transfer byte count does not match the streamed output",
+		)
 	}
 	return outcome, nil
 }
@@ -163,7 +226,7 @@ func readUpload(
 	writeMu *sync.Mutex,
 	spec Spec,
 ) error {
-	defer pipe.Close()
+	defer func() { _ = pipe.Close() }()
 	transferred := spec.Offset
 	for {
 		messageType, encoded, err := connection.Read(ctx)
@@ -183,7 +246,8 @@ func readUpload(
 		}
 		switch frame.Type {
 		case filestream.Data:
-			if transferred > spec.Size || uint64(len(frame.Payload)) > spec.Size-transferred {
+			if transferred > spec.Size ||
+				uint64(len(frame.Payload)) > spec.Size-transferred {
 				err := errors.New("upload exceeds declared size")
 				_ = pipe.CloseWithError(err)
 				return err
@@ -213,25 +277,22 @@ func readUpload(
 	}
 }
 
-func readDownloadControl(ctx context.Context, connection *websocket.Conn, cancel context.CancelFunc) {
-	for {
-		messageType, encoded, err := connection.Read(ctx)
-		if err != nil {
-			cancel()
-			return
-		}
-		if messageType != websocket.MessageBinary {
-			cancel()
-			return
-		}
-		frame, err := filestream.Decode(encoded)
-		if err != nil || frame.Type != filestream.Cancel {
-			cancel()
-			return
-		}
+func readDownloadControl(
+	ctx context.Context,
+	connection *websocket.Conn,
+	cancel context.CancelFunc,
+) {
+	messageType, encoded, err := connection.Read(ctx)
+	if err != nil || messageType != websocket.MessageBinary {
 		cancel()
 		return
 	}
+	frame, err := filestream.Decode(encoded)
+	if err != nil || frame.Type != filestream.Cancel {
+		cancel()
+		return
+	}
+	cancel()
 }
 
 type downloadWriter struct {
@@ -248,12 +309,19 @@ func (writer *downloadWriter) Write(value []byte) (int, error) {
 	for len(value) > 0 {
 		length := min(len(value), filestream.MaximumData)
 		chunk := value[:length]
-		if writer.transferred > writer.maximum || uint64(length) > writer.maximum-writer.transferred {
+		if writer.transferred > writer.maximum ||
+			uint64(length) > writer.maximum-writer.transferred {
 			return written, errors.New("download exceeds configured size limit")
 		}
-		encoded, _ := filestream.Encode(filestream.Frame{Type: filestream.Data, Payload: chunk})
+		encoded, _ := filestream.Encode(
+			filestream.Frame{Type: filestream.Data, Payload: chunk},
+		)
 		writer.mu.Lock()
-		err := writer.connection.Write(writer.ctx, websocket.MessageBinary, encoded)
+		err := writer.connection.Write(
+			writer.ctx,
+			websocket.MessageBinary,
+			encoded,
+		)
 		writer.mu.Unlock()
 		if err != nil {
 			return written, err
@@ -269,7 +337,13 @@ func (writer *downloadWriter) Write(value []byte) (int, error) {
 }
 
 func (writer *downloadWriter) progress() error {
-	return writeProgress(writer.ctx, writer.connection, writer.mu, writer.transferred, writer.total)
+	return writeProgress(
+		writer.ctx,
+		writer.connection,
+		writer.mu,
+		writer.transferred,
+		writer.total,
+	)
 }
 
 func writeProgress(
@@ -278,7 +352,9 @@ func writeProgress(
 	writeMu *sync.Mutex,
 	transferred, total uint64,
 ) error {
-	encoded, err := filestream.EncodeProgress(filestream.ProgressStatus{Transferred: transferred, Total: total})
+	encoded, err := filestream.EncodeProgress(
+		filestream.ProgressStatus{Transferred: transferred, Total: total},
+	)
 	if err != nil {
 		return err
 	}
@@ -295,8 +371,15 @@ type streamResult struct {
 	Error       string `json:"error,omitempty"`
 }
 
-func resultFromOutcome(outcome Outcome, err error, cancelled bool) streamResult {
-	result := streamResult{Transferred: outcome.Transferred, Cancelled: cancelled}
+func resultFromOutcome(
+	outcome Outcome,
+	err error,
+	cancelled bool,
+) streamResult {
+	result := streamResult{
+		Transferred: outcome.Transferred,
+		Cancelled:   cancelled,
+	}
 	if outcome.HasChecksum {
 		result.Checksum = filestream.FormatChecksum(outcome.Checksum)
 	}
@@ -322,9 +405,14 @@ func (result streamResult) protocol() filestream.TransferResult {
 	return protocol
 }
 
-func (handler *Service) persistState(taskID string, expected, next remotetask.State, result streamResult) error {
+func (handler *Service) persistState(
+	taskID string,
+	expected, next remotetask.State,
+	result streamResult,
+) error {
 	encoded, _ := json.Marshal(result)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	return handler.storage.Tasks().UpdateState(ctx, taskID, expected, next, encoded, handler.now().UTC())
+	return handler.storage.Tasks().
+		UpdateState(ctx, taskID, expected, next, encoded, handler.now().UTC())
 }

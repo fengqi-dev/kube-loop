@@ -20,6 +20,7 @@ func BundleRelease(goos, goarch, outDir string) error {
 	if !ok {
 		return fmt.Errorf("sing-box %s is not available for %s/%s", Version, goos, goarch)
 	}
+	//nolint:gosec // Distribution output contains public executables and notices.
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return fmt.Errorf("create sing-box output directory: %w", err)
 	}
@@ -37,7 +38,7 @@ func BundleRelease(goos, goarch, outDir string) error {
 	if err != nil {
 		return fmt.Errorf("download sing-box: %w", err)
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != http.StatusOK {
 		return fmt.Errorf("download sing-box: unexpected HTTP status %s", response.Status)
 	}
@@ -53,11 +54,11 @@ func BundleRelease(goos, goarch, outDir string) error {
 		return err
 	}
 
-	binaryName := "sing-box"
-	executable, ok := files["sing-box"]
+	binaryName := singBoxBinary
+	executable, ok := files[singBoxBinary]
 	if !ok {
-		executable, ok = files["sing-box.exe"]
-		binaryName = "sing-box.exe"
+		executable, ok = files[singBoxBinaryWin]
+		binaryName = singBoxBinaryWin
 	}
 	if !ok {
 		return fmt.Errorf("sing-box archive does not contain sing-box binary")
@@ -66,8 +67,8 @@ func BundleRelease(goos, goarch, outDir string) error {
 	if err := writeFileIfChanged(binaryPath, executable, 0o755); err != nil {
 		return fmt.Errorf("write bundled sing-box: %w", err)
 	}
-	if goos == "windows" {
-		for _, sidecar := range []string{"wintun.dll", "libcronet.dll"} {
+	if goos == windowsGOOS {
+		for _, sidecar := range []string{wintunDLL, cronetDLL} {
 			if payload, ok := files[sidecar]; ok {
 				if err := writeFileIfChanged(
 					filepath.Join(outDir, sidecar),

@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"sigs.k8s.io/yaml"
+
 	"github.com/fengqi-dev/kube-loop/internal/controlplane"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/fileapi"
 	controlplanekubernetes "github.com/fengqi-dev/kube-loop/internal/controlplane/kubernetes"
@@ -15,7 +17,6 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/sessionapi"
 	controlplanestorage "github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/relayticket"
-	"sigs.k8s.io/yaml"
 )
 
 const maximumControlPlaneConfigBytes = 4 << 20
@@ -175,13 +176,13 @@ func loadControlPlaneConfig(path string) (loadedControlPlaneConfig, error) {
 	if err != nil {
 		return loadedControlPlaneConfig{}, fmt.Errorf("open Control Plane config: %w", err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	raw, err := io.ReadAll(io.LimitReader(file, maximumControlPlaneConfigBytes+1))
 	if err != nil {
 		return loadedControlPlaneConfig{}, errors.New("read Control Plane config")
 	}
 	if len(raw) > maximumControlPlaneConfigBytes {
-		return loadedControlPlaneConfig{}, errors.New("Control Plane config exceeds 4 MiB")
+		return loadedControlPlaneConfig{}, errors.New("control plane config exceeds 4 MiB")
 	}
 	var root kubeloopConfigDocument
 	if err := yaml.UnmarshalStrict(raw, &root); err != nil {
@@ -205,7 +206,10 @@ func normalizeControlPlaneConfig(document controlPlaneConfigDocument) (loadedCon
 	if err != nil {
 		return loadedControlPlaneConfig{}, err
 	}
-	result.Files = fileapi.Config{MaximumBytes: document.Files.MaxBytes, AllowedPathRoots: append([]string(nil), document.Files.AllowedRoots...)}
+	result.Files = fileapi.Config{
+		MaximumBytes:     document.Files.MaxBytes,
+		AllowedPathRoots: append([]string(nil), document.Files.AllowedRoots...),
+	}
 	for label, input := range map[string]struct {
 		raw    string
 		target *time.Duration
@@ -360,7 +364,9 @@ func normalizeStorageConfig(document storageConfig) (controlplanestorage.Config,
 	}
 	if file := strings.TrimSpace(document.DatasourceURLFile); file != "" {
 		if config.DatasourceURL != "" {
-			return controlplanestorage.Config{}, errors.New("storage datasourceURL and datasourceURLFile are mutually exclusive")
+			return controlplanestorage.Config{}, errors.New(
+				"storage datasourceURL and datasourceURLFile are mutually exclusive",
+			)
 		}
 		raw, readErr := os.ReadFile(file)
 		if readErr != nil {

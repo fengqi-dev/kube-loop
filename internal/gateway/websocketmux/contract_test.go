@@ -10,25 +10,30 @@ import (
 	"testing"
 	"time"
 
+	"github.com/xtaci/smux"
+
 	shared "github.com/fengqi-dev/kube-loop/internal/client/websocketmux"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/wssprotocol"
-	"github.com/xtaci/smux"
 )
 
 func TestContractNewClientAndOldGatewayClassifiesVersionMismatch(t *testing.T) {
 	oldGateway := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		connection, err := websocket.Accept(writer, request, &websocket.AcceptOptions{Subprotocols: []string{Subprotocol}})
+		connection, err := websocket.Accept(
+			writer,
+			request,
+			&websocket.AcceptOptions{Subprotocols: []string{Subprotocol}},
+		)
 		if err != nil {
 			return
 		}
-		defer connection.CloseNow()
+		defer func() { _ = connection.CloseNow() }()
 		streamConnection := websocket.NetConn(request.Context(), connection, websocket.MessageBinary)
 		session, err := smux.Server(streamConnection, smuxConfig())
 		if err != nil {
 			return
 		}
-		defer session.Close()
+		defer func() { _ = session.Close() }()
 		_, _ = session.AcceptStream()
 	}))
 	defer oldGateway.Close()
@@ -112,11 +117,11 @@ func TestContractNewGatewayRejectsUnknownAndMissingClientHelloFields(t *testing.
 			defer cancel()
 			connection := dialRawWebSocket(t, ctx, server.URL, "token")
 			if err := connection.Write(ctx, websocket.MessageBinary, []byte(test.raw)); err != nil {
-				connection.CloseNow()
+				_ = connection.CloseNow()
 				t.Fatal(err)
 			}
 			message, err := wssprotocol.Read(ctx, connection)
-			connection.CloseNow()
+			_ = connection.CloseNow()
 			if err != nil || message.Reject == nil || message.Reject.Code != wssprotocol.CodeInvalidHandshake {
 				t.Fatalf("malformed ClientHello rejection = %#v, %v", message, err)
 			}
@@ -129,11 +134,15 @@ func malformedHandshakeGateway(t *testing.T, response []byte) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set(wssprotocol.VersionHeader, wssprotocol.Version)
-		connection, err := websocket.Accept(writer, request, &websocket.AcceptOptions{Subprotocols: []string{Subprotocol}})
+		connection, err := websocket.Accept(
+			writer,
+			request,
+			&websocket.AcceptOptions{Subprotocols: []string{Subprotocol}},
+		)
 		if err != nil {
 			return
 		}
-		defer connection.CloseNow()
+		defer func() { _ = connection.CloseNow() }()
 		ctx, cancel := context.WithTimeout(request.Context(), time.Second)
 		defer cancel()
 		message, err := wssprotocol.Read(ctx, connection)

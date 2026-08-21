@@ -14,6 +14,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	"github.com/fengqi-dev/kube-loop/e2e/harness"
 	"github.com/fengqi-dev/kube-loop/internal/client/credentials"
 	clientexec "github.com/fengqi-dev/kube-loop/internal/client/exec"
@@ -28,8 +31,6 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/execstream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
-	"github.com/google/uuid"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 const execLifecycleAccessToken = "e2e-exec-lifecycle"
@@ -65,15 +66,26 @@ func startExecController(
 	}
 	policy := authorization.NewAuthenticated()
 	server, err := controlplane.NewServer(
-		controlplane.Config{PublicURL: "http://" + listener.Addr().String()}, controlplane.BuildInfo{},
+		controlplane.Config{PublicURL: "http://" + listener.Addr().String()},
+		controlplane.BuildInfo{},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
-		controlplane.WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(request *http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
-			if request.Header.Get("Authorization") != "Bearer "+execLifecycleAccessToken {
-				return controlplaneapi.Identity{}, &controlplaneapi.Error{Code: controlplaneapi.CodeUnauthenticated, Message: "invalid e2e access token"}
-			}
-			return identity, nil
-		})),
-		controlplane.WithAuthorizer(policy), controlplane.WithAPIRoutes(controlplane.APIRoutes{Exec: execapi.NewRoutes(handler).Endpoints()}),
+		controlplane.WithAuthenticator(
+			controlplaneapi.AuthenticatorFunc(
+				func(request *http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
+					if request.Header.Get("Authorization") != "Bearer "+execLifecycleAccessToken {
+						return controlplaneapi.Identity{}, &controlplaneapi.Error{
+							Code:    controlplaneapi.CodeUnauthenticated,
+							Message: "invalid e2e access token",
+						}
+					}
+					return identity, nil
+				},
+			),
+		),
+		controlplane.WithAuthorizer(
+			policy,
+		),
+		controlplane.WithAPIRoutes(controlplane.APIRoutes{Exec: execapi.NewRoutes(handler).Endpoints()}),
 	)
 	if err != nil {
 		_ = listener.Close()
@@ -111,7 +123,9 @@ func TestRealPodExecTTYDisconnectAndControllerRestart(t *testing.T) {
 	if err := harness.EnsureEchoWorkload(ctx, kubeClient); err != nil {
 		t.Fatalf("ensure real Pod exec fixture: %v", err)
 	}
-	pods, err := kubeClient.CoreV1().Pods(harness.EchoNamespace).List(ctx, metav1.ListOptions{LabelSelector: "app=kubeloop-e2e-echo"})
+	pods, err := kubeClient.CoreV1().
+		Pods(harness.EchoNamespace).
+		List(ctx, metav1.ListOptions{LabelSelector: "app=kubeloop-e2e-echo"})
 	if err != nil || len(pods.Items) != 1 {
 		t.Fatalf("find real Pod exec fixture: pods=%d err=%v", len(pods.Items), err)
 	}
@@ -190,8 +204,15 @@ func TestRealPodExecTTYDisconnectAndControllerRestart(t *testing.T) {
 	}
 
 	ttyStream, err := clientexec.Start(ctx, remoteClient, serverProfile, remoteSession, remote.ExecSpec{
-		Pod: podName, Container: "echo", TTY: true,
-		Command: []string{"python", "-u", "-c", "import os,sys; value=sys.stdin.readline().strip(); size=os.get_terminal_size(0); print(f'{size.lines} {size.columns}'); print(value)"},
+		Pod:       podName,
+		Container: "echo",
+		TTY:       true,
+		Command: []string{
+			"python",
+			"-u",
+			"-c",
+			"import os,sys; value=sys.stdin.readline().strip(); size=os.get_terminal_size(0); print(f'{size.lines} {size.columns}'); print(value)",
+		},
 	})
 	if err != nil {
 		t.Fatalf("start real TTY exec: %v", err)
@@ -203,13 +224,20 @@ func TestRealPodExecTTYDisconnectAndControllerRestart(t *testing.T) {
 		t.Fatalf("write real TTY exec stdin: %v", err)
 	}
 	output, exit := readExecToExit(t, ctx, ttyStream)
-	if exit.Code != 0 || exit.Cancelled || !strings.Contains(output, "40 120") || !strings.Contains(output, "resize-ok") {
+	if exit.Code != 0 || exit.Cancelled || !strings.Contains(output, "40 120") ||
+		!strings.Contains(output, "resize-ok") {
 		t.Fatalf("real TTY output=%q exit=%#v", output, exit)
 	}
 
 	abruptTask, err := remoteClient.CreateExecTask(ctx, serverProfile, remoteSession, remote.ExecSpec{
-		Pod: podName, Container: "echo",
-		Command: []string{"python", "-u", "-c", "import time; print('disconnect-started', flush=True); time.sleep(300)"},
+		Pod:       podName,
+		Container: "echo",
+		Command: []string{
+			"python",
+			"-u",
+			"-c",
+			"import time; print('disconnect-started', flush=True); time.sleep(300)",
+		},
 	}, "pod-exec:"+uuid.NewString())
 	if err != nil {
 		t.Fatal(err)

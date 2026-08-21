@@ -17,6 +17,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/labstack/echo/v5"
+
 	clientdataplane "github.com/fengqi-dev/kube-loop/internal/client/dataplane"
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
@@ -29,7 +31,6 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/protocol/relaycontrol"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/relayticket"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficcontrol"
-	"github.com/labstack/echo/v5"
 )
 
 const (
@@ -74,9 +75,13 @@ func TestE2EControlPlaneClientTrustsControlPlaneAndGateway(t *testing.T) {
 		writer.WriteHeader(http.StatusNoContent)
 	}))
 	defer gateway.Close()
-	controlPlane, client := startE2EControlPlaneServer(t, http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
-		writer.WriteHeader(http.StatusNoContent)
-	}), e2eTrafficGateway{httpClient: gateway.Client(), certificate: gateway.Certificate()})
+	controlPlane, client := startE2EControlPlaneServer(
+		t,
+		http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+			writer.WriteHeader(http.StatusNoContent)
+		}),
+		e2eTrafficGateway{httpClient: gateway.Client(), certificate: gateway.Certificate()},
+	)
 	defer controlPlane.Close()
 	for _, endpoint := range []string{gateway.URL, controlPlane.URL} {
 		response, err := client.Get(endpoint)
@@ -96,7 +101,9 @@ type e2eTrafficSessionSource struct {
 	session remote.Session
 }
 
-func (source *e2eTrafficSessionSource) RelayTicketSource(profileID string) func(context.Context) (remote.RelayTicket, error) {
+func (source *e2eTrafficSessionSource) RelayTicketSource(
+	profileID string,
+) func(context.Context) (remote.RelayTicket, error) {
 	return func(ctx context.Context) (remote.RelayTicket, error) {
 		if profileID != source.profile.ID {
 			return remote.RelayTicket{}, errors.New("e2e Data Plane Profile does not match")
@@ -225,9 +232,14 @@ func startE2ETrafficGateway(
 				return websocketmux.Identity{}, verifyErr
 			}
 			return websocketmux.Identity{
-				IdentityID: claims.IdentityID, Groups: append([]string(nil), claims.Groups...), DeviceID: claims.DeviceID,
-				SessionID: claims.SessionID, SessionGeneration: claims.SessionGeneration, Namespace: claims.Namespace,
-				NetworkSpecHash: claims.NetworkSpecHash, ExpiresAt: time.Unix(claims.ExpiresAt, 0).UTC(),
+				IdentityID:        claims.IdentityID,
+				Groups:            append([]string(nil), claims.Groups...),
+				DeviceID:          claims.DeviceID,
+				SessionID:         claims.SessionID,
+				SessionGeneration: claims.SessionGeneration,
+				Namespace:         claims.Namespace,
+				NetworkSpecHash:   claims.NetworkSpecHash,
+				ExpiresAt:         time.Unix(claims.ExpiresAt, 0).UTC(),
 			}, nil
 		}),
 		ServerVersion: "e2e",
@@ -308,7 +320,13 @@ func (client *e2eTrafficControlClient) DoJSON(
 		if !ok {
 			return errors.New("traffic finish request type is invalid")
 		}
-		client.t.Logf("traffic stream finished: mode=%s task=%s failed=%t reason=%q", request.Mode, request.TaskID, request.Failed, request.Reason)
+		client.t.Logf(
+			"traffic stream finished: mode=%s task=%s failed=%t reason=%q",
+			request.Mode,
+			request.TaskID,
+			request.Failed,
+			request.Reason,
+		)
 		response, apiError = client.coordinator.Finish(ctx, client.relayID, request)
 	default:
 		return fmt.Errorf("unsupported traffic control request %s %s", method, path)

@@ -10,29 +10,46 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fengqi-dev/kube-loop/internal/controlplane/authorization"
 	kruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/rest"
+
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/authorization"
 )
 
 func TestServiceAccountModeDoesNotImpersonateOrMutateBase(t *testing.T) {
-	base := &rest.Config{Host: "https://kubernetes.example.test", UserAgent: "original", QPS: 1, Burst: 2}
-	provider, err := NewForRESTConfig(base, Config{Timeout: 3 * time.Second, QPS: 7, Burst: 9, UserAgent: "kubeloop/test"})
+	base := &rest.Config{
+		Host:      "https://kubernetes.example.test",
+		UserAgent: "original",
+		QPS:       1,
+		Burst:     2,
+	}
+	provider, err := NewForRESTConfig(
+		base,
+		Config{Timeout: 3 * time.Second, QPS: 7, Burst: 9, UserAgent: "kubeloop/test"},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	config, err := provider.RESTConfigFor(authorization.Subject{ID: "alice", Groups: []string{"admins"}})
+	config, err := provider.RESTConfigFor(
+		authorization.Subject{ID: "alice", Groups: []string{"admins"}},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if config.Impersonate.UserName != "" || len(config.Impersonate.Groups) != 0 {
 		t.Fatalf("ServiceAccount mode unexpectedly impersonates: %+v", config.Impersonate)
 	}
-	if config.Timeout != 3*time.Second || config.QPS != 7 || config.Burst != 9 || config.UserAgent != "kubeloop/test" {
+	if config.Timeout != 3*time.Second || config.QPS != 7 || config.Burst != 9 ||
+		config.UserAgent != "kubeloop/test" {
 		t.Fatalf("unexpected REST defaults: %+v", config)
 	}
-	if config.ContentType != kruntime.ContentTypeJSON || config.AcceptContentTypes != kruntime.ContentTypeJSON {
-		t.Fatalf("unexpected Kubernetes media types: %q %q", config.ContentType, config.AcceptContentTypes)
+	if config.ContentType != kruntime.ContentTypeJSON ||
+		config.AcceptContentTypes != kruntime.ContentTypeJSON {
+		t.Fatalf(
+			"unexpected Kubernetes media types: %q %q",
+			config.ContentType,
+			config.AcceptContentTypes,
+		)
 	}
 	if base.UserAgent != "original" || base.QPS != 1 || base.Burst != 2 || base.Timeout != 0 {
 		t.Fatalf("base configuration was mutated: %+v", base)
@@ -68,24 +85,27 @@ func TestImpersonationUsesOnlyExplicitGroupMappings(t *testing.T) {
 }
 
 func TestImpersonatingClientPreservesGatewayCredentialAndSendsMappedIdentity(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if request.URL.Path != "/version" {
-			http.NotFound(writer, request)
-			return
-		}
-		if request.Header.Get("Authorization") != "Bearer gateway-service-account-token" {
-			t.Fatalf("Gateway credential = %q", request.Header.Get("Authorization"))
-		}
-		if request.Header.Get("Impersonate-User") != "kubeloop:identity-123" {
-			t.Fatalf("Impersonate-User = %q", request.Header.Get("Impersonate-User"))
-		}
-		groups := request.Header.Values("Impersonate-Group")
-		if !slices.Equal(groups, []string{"kubeloop:developers"}) || slices.Contains(groups, "unmapped-claim") {
-			t.Fatalf("Impersonate-Group = %v", groups)
-		}
-		writer.Header().Set("Content-Type", "application/json")
-		_, _ = writer.Write([]byte(`{"gitVersion":"v1.35.0"}`))
-	}))
+	server := httptest.NewServer(
+		http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+			if request.URL.Path != "/version" {
+				http.NotFound(writer, request)
+				return
+			}
+			if request.Header.Get("Authorization") != "Bearer gateway-service-account-token" {
+				t.Fatalf("Gateway credential = %q", request.Header.Get("Authorization"))
+			}
+			if request.Header.Get("Impersonate-User") != "kubeloop:identity-123" {
+				t.Fatalf("Impersonate-User = %q", request.Header.Get("Impersonate-User"))
+			}
+			groups := request.Header.Values("Impersonate-Group")
+			if !slices.Equal(groups, []string{"kubeloop:developers"}) ||
+				slices.Contains(groups, "unmapped-claim") {
+				t.Fatalf("Impersonate-Group = %v", groups)
+			}
+			writer.Header().Set("Content-Type", "application/json")
+			_, _ = writer.Write([]byte(`{"gitVersion":"v1.35.0"}`))
+		}),
+	)
 	defer server.Close()
 	provider, err := NewForRESTConfig(&rest.Config{
 		Host: server.URL, BearerToken: "gateway-service-account-token",
@@ -130,10 +150,12 @@ func TestImpersonationRejectsUnsafeConfigurationAndIdentity(t *testing.T) {
 
 func TestCheckUsesRequestContext(t *testing.T) {
 	requestStarted := make(chan struct{})
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		close(requestStarted)
-		<-request.Context().Done()
-	}))
+	server := httptest.NewServer(
+		http.HandlerFunc(func(_ http.ResponseWriter, request *http.Request) {
+			close(requestStarted)
+			<-request.Context().Done()
+		}),
+	)
 	defer server.Close()
 	provider, err := NewForRESTConfig(&rest.Config{Host: server.URL}, Config{})
 	if err != nil {
@@ -155,14 +177,16 @@ func TestCheckUsesRequestContext(t *testing.T) {
 }
 
 func TestCheckVersionEndpoint(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if request.URL.Path != "/version" {
-			http.NotFound(writer, request)
-			return
-		}
-		writer.Header().Set("Content-Type", "application/json")
-		_, _ = writer.Write([]byte(`{"gitVersion":"v1.30.0"}`))
-	}))
+	server := httptest.NewServer(
+		http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+			if request.URL.Path != "/version" {
+				http.NotFound(writer, request)
+				return
+			}
+			writer.Header().Set("Content-Type", "application/json")
+			_, _ = writer.Write([]byte(`{"gitVersion":"v1.30.0"}`))
+		}),
+	)
 	defer server.Close()
 	provider, err := NewForRESTConfig(&rest.Config{Host: server.URL}, Config{})
 	if err != nil {
@@ -184,7 +208,8 @@ func TestLoadStrictConfiguration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if config.Timeout != 4*time.Second || config.QPS != 12 || config.Burst != 18 || !config.Impersonation.Enabled {
+	if config.Timeout != 4*time.Second || config.QPS != 12 || config.Burst != 18 ||
+		!config.Impersonation.Enabled {
 		t.Fatalf("unexpected configuration: %+v", config)
 	}
 	if err := os.WriteFile(path, []byte(`{"unknown":true}`), 0o600); err != nil {

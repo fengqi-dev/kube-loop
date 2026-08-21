@@ -60,7 +60,7 @@ func (relay *Relay) ReadReady(ctx context.Context) error {
 	}
 	frame, err := exchangestream.Decode(encoded)
 	if err != nil || frame.Type != exchangestream.Ready {
-		return errors.New("Gateway returned an invalid reverse readiness frame")
+		return errors.New("gateway returned an invalid reverse readiness frame")
 	}
 	return nil
 }
@@ -90,7 +90,7 @@ func (relay *Relay) Run(ctx context.Context) error {
 		case exchangestream.Data:
 			stream := relay.connection(relay.tcp, frame.StreamID)
 			if stream == nil {
-				return errors.New("Gateway referenced an unknown local TCP stream")
+				return errors.New("gateway referenced an unknown local TCP stream")
 			}
 			if err := writeLocal(stream.connection, frame.Payload); err != nil {
 				relay.remove(relay.tcp, frame.StreamID)
@@ -99,7 +99,7 @@ func (relay *Relay) Run(ctx context.Context) error {
 		case exchangestream.CloseWrite:
 			stream := relay.connection(relay.tcp, frame.StreamID)
 			if stream == nil {
-				return errors.New("Gateway referenced an unknown local TCP stream")
+				return errors.New("gateway referenced an unknown local TCP stream")
 			}
 			if connection, ok := stream.connection.(interface{ CloseWrite() error }); ok {
 				_ = connection.CloseWrite()
@@ -108,7 +108,7 @@ func (relay *Relay) Run(ctx context.Context) error {
 			}
 		case exchangestream.Close:
 			if !relay.removeAny(frame.StreamID) {
-				return errors.New("Gateway referenced an unknown local reverse stream")
+				return errors.New("gateway referenced an unknown local reverse stream")
 			}
 		case exchangestream.Datagram:
 			if err := relay.datagram(ctx, frame); err != nil {
@@ -117,9 +117,9 @@ func (relay *Relay) Run(ctx context.Context) error {
 		case exchangestream.Stop:
 			return nil
 		case exchangestream.Ready:
-			return errors.New("Gateway sent duplicate reverse readiness")
+			return errors.New("gateway sent duplicate reverse readiness")
 		default:
-			return errors.New("Gateway sent a client-only reverse frame")
+			return errors.New("gateway sent a client-only reverse frame")
 		}
 	}
 }
@@ -129,12 +129,16 @@ func (relay *Relay) Stop(ctx context.Context) error {
 }
 
 func (relay *Relay) openTCP(ctx context.Context, frame exchangestream.Frame) error {
-	target, exists := relay.targets[targetKey("tcp", int32(frame.ServicePort))]
+	servicePort, err := reverseServicePort(frame.ServicePort)
+	if err != nil {
+		return err
+	}
+	target, exists := relay.targets[targetKey("tcp", servicePort)]
 	if !exists {
-		return errors.New("Gateway requested an unconfigured local TCP target")
+		return errors.New("gateway requested an unconfigured local TCP target")
 	}
 	if relay.hasStream(frame.StreamID) {
-		return errors.New("Gateway reused an active reverse stream ID")
+		return errors.New("gateway reused an active reverse stream ID")
 	}
 	connection, err := relay.dial(ctx, "tcp", localAddress(target))
 	if err != nil {
@@ -175,14 +179,18 @@ func (relay *Relay) readTCP(ctx context.Context, id uint64, connection net.Conn)
 }
 
 func (relay *Relay) datagram(ctx context.Context, frame exchangestream.Frame) error {
-	target, exists := relay.targets[targetKey("udp", int32(frame.ServicePort))]
+	servicePort, err := reverseServicePort(frame.ServicePort)
+	if err != nil {
+		return err
+	}
+	target, exists := relay.targets[targetKey("udp", servicePort)]
 	if !exists {
-		return errors.New("Gateway requested an unconfigured local UDP target")
+		return errors.New("gateway requested an unconfigured local UDP target")
 	}
 	association := relay.connection(relay.udp, frame.StreamID)
 	if association == nil {
 		if relay.hasStream(frame.StreamID) {
-			return errors.New("Gateway reused an active reverse stream ID")
+			return errors.New("gateway reused an active reverse stream ID")
 		}
 		connection, err := relay.dial(ctx, "udp", localAddress(target))
 		if err != nil {
@@ -196,8 +204,8 @@ func (relay *Relay) datagram(ctx context.Context, frame exchangestream.Frame) er
 			relay.readUDP(ctx, frame.StreamID, association)
 		})
 	}
-	if association.target.ServicePort != int32(frame.ServicePort) {
-		return errors.New("Gateway changed a reverse UDP association port")
+	if association.target.ServicePort != servicePort {
+		return errors.New("gateway changed a reverse UDP association port")
 	}
 	count, err := association.connection.Write(frame.Payload)
 	if err != nil {
@@ -210,6 +218,11 @@ func (relay *Relay) datagram(ctx context.Context, frame exchangestream.Frame) er
 }
 
 func (relay *Relay) readUDP(ctx context.Context, id uint64, association *localConnection) {
+	servicePort, err := encodedReverseServicePort(association.target.ServicePort)
+	if err != nil {
+		relay.remove(relay.udp, id)
+		return
+	}
 	buffer := make([]byte, 65507)
 	for {
 		count, err := association.connection.Read(buffer)
@@ -222,13 +235,27 @@ func (relay *Relay) readUDP(ctx context.Context, id uint64, association *localCo
 		}
 		if err := relay.write(ctx, exchangestream.Frame{
 			Type: exchangestream.Datagram, StreamID: id,
-			ServicePort: uint32(association.target.ServicePort), Protocol: exchangestream.ProtocolUDP,
+			ServicePort: servicePort, Protocol: exchangestream.ProtocolUDP,
 			Payload: append([]byte(nil), buffer[:count]...),
 		}); err != nil {
 			relay.remove(relay.udp, id)
 			return
 		}
 	}
+}
+
+func reverseServicePort(value uint32) (int32, error) {
+	if value == 0 || value > 65535 {
+		return 0, errors.New("gateway supplied an invalid reverse service port")
+	}
+	return int32(value), nil
+}
+
+func encodedReverseServicePort(value int32) (uint32, error) {
+	if value < 1 || value > 65535 {
+		return 0, errors.New("reverse target has an invalid service port")
+	}
+	return uint32(value), nil
 }
 
 func (relay *Relay) write(ctx context.Context, frame exchangestream.Frame) error {

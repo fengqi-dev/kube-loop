@@ -16,7 +16,7 @@ func (m Model) updateLogin(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.loginAdding {
 		return m.updateAddProfile(msg)
 	}
-	if msg.String() == "esc" && m.loginCancel != nil {
+	if msg.String() == keyEsc && m.loginCancel != nil {
 		m.loginCancel()
 		m.loginCancel = nil
 		m.loading = false
@@ -29,11 +29,11 @@ func (m Model) updateLogin(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.loginCursor > 0 {
 			m.loginCursor--
 		}
-	case "down", "j":
+	case keyDown, "j":
 		if m.loginCursor < len(m.profiles.Profiles)-1 {
 			m.loginCursor++
 		}
-	case "enter":
+	case keyEnter:
 		if len(m.profiles.Profiles) == 0 || m.loginCursor >= len(m.profiles.Profiles) {
 			return m, nil
 		}
@@ -84,7 +84,7 @@ func (m Model) updateLogin(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m *Model) beginLogout() tea.Cmd {
 	if m.connected() {
-		m.err, m.status = "disconnect before logging out", ""
+		m.err, m.status = errDisconnectBeforeLogout, ""
 		return nil
 	}
 	if m.activeProfile.ID == "" || !m.authSession.Authenticated {
@@ -98,11 +98,11 @@ func (m *Model) beginLogout() tea.Cmd {
 
 // updateAddProfile handles key presses in the add profile form.
 func (m Model) updateAddProfile(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if m.loading && msg.String() != "esc" {
+	if m.loading && msg.String() != keyEsc {
 		return m, nil
 	}
 	switch msg.String() {
-	case "enter":
+	case keyEnter:
 		m.loginURL = strings.TrimSpace(m.loginURL)
 		if m.loginURL == "" {
 			m.err = "Service address is required"
@@ -112,13 +112,13 @@ func (m Model) updateAddProfile(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.err, m.status = "", "Discovering server..."
 		return m, tea.Batch(m.spinner.Tick, m.saveProfile())
 
-	case "esc":
+	case keyEsc:
 		m.loginAdding = false
 		m.loginURL = ""
 		m.err = ""
 		return m, nil
 
-	case "backspace":
+	case keyBackspace:
 		m.loginURL = trimLastRune(m.loginURL)
 		return m, nil
 
@@ -143,7 +143,10 @@ func (m Model) startLogin(ctx context.Context) tea.Cmd {
 	return func() tea.Msg {
 		document, err := m.state.discovery.Discover(ctx, m.activeProfile.BaseURL)
 		if err != nil {
-			return loginResultMsg{err: fmt.Errorf("discover authentication providers: %w", err), cancelled: errors.Is(ctx.Err(), context.Canceled)}
+			return loginResultMsg{
+				err:       fmt.Errorf("discover authentication providers: %w", err),
+				cancelled: errors.Is(ctx.Err(), context.Canceled),
+			}
 		}
 		if len(document.AuthMethods) == 0 {
 			return loginResultMsg{err: errors.New("this server has no login method configured")}
@@ -180,7 +183,7 @@ func (m Model) saveProfile() tea.Cmd {
 		if err != nil {
 			return profileSavedMsg{err: fmt.Errorf("discover server: %w", err)}
 		}
-		baseURL, err := requestedServerBaseURL(m.loginURL, document.PublicURL)
+		baseURL, err := requestedServerBaseURL(m.loginURL)
 		if err != nil {
 			return profileSavedMsg{err: err}
 		}
@@ -198,9 +201,8 @@ func (m Model) saveProfile() tea.Cmd {
 	}
 }
 
-// requestedServerBaseURL validates that the advertised public URL host matches
-// the requested URL host, and returns the requested URL.
-func requestedServerBaseURL(requestedValue, advertisedValue string) (string, error) {
+// requestedServerBaseURL validates and returns the requested server URL.
+func requestedServerBaseURL(requestedValue string) (string, error) {
 	return clientprofile.NormalizeBaseURL(requestedValue)
 }
 

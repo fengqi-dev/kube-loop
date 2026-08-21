@@ -11,7 +11,10 @@ import (
 )
 
 func TestSQLiteRestartRecoveryConformance(t *testing.T) {
-	config := Config{Backend: BackendSQLite, SQLitePath: filepath.Join(t.TempDir(), "restart.db")}
+	config := Config{
+		Backend:    BackendSQLite,
+		SQLitePath: filepath.Join(t.TempDir(), "restart.db"),
+	}
 	testRestartRecovery(t, config)
 }
 
@@ -31,7 +34,7 @@ func testRestartRecovery(t *testing.T, config Config) {
 	now := time.Date(2026, 8, 10, 11, 0, 0, 0, time.UTC)
 	persistedID := uuid.NewString()
 	if _, err := store.Identities().Create(ctx, Identity{
-		ID: persistedID, Type: "human", DisplayName: "Persisted User", Status: "active",
+		ID: persistedID, Type: identityTypeHuman, DisplayName: "Persisted User", Status: statusActive,
 		CreatedAt: now,
 	}); err != nil {
 		_ = store.Close()
@@ -41,13 +44,20 @@ func testRestartRecovery(t *testing.T, config Config) {
 	sentinel := errors.New("force rollback before restart")
 	if err := store.WithinTransaction(ctx, func(repositories Repositories) error {
 		_, err := repositories.Identities().Create(ctx, Identity{
-			ID: rolledBackID, Type: "human", DisplayName: "Rolled Back User", Status: "active", CreatedAt: now,
+			ID:          rolledBackID,
+			Type:        identityTypeHuman,
+			DisplayName: "Rolled Back User",
+			Status:      statusActive,
+			CreatedAt:   now,
 		})
 		if err != nil {
 			return err
 		}
 		return sentinel
-	}); !errors.Is(err, sentinel) {
+	}); !errors.Is(
+		err,
+		sentinel,
+	) {
 		_ = store.Close()
 		t.Fatalf("pre-restart rollback error = %v", err)
 	}
@@ -59,7 +69,7 @@ func testRestartRecovery(t *testing.T, config Config) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	if err := store.Check(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +77,10 @@ func testRestartRecovery(t *testing.T, config Config) {
 	if err != nil || persisted.DisplayName != "Persisted User" {
 		t.Fatalf("persisted identity after restart = %#v, %v", persisted, err)
 	}
-	if _, err := store.Identities().GetByID(ctx, rolledBackID); !errors.Is(err, ErrNotFound) {
+	if _, err := store.Identities().GetByID(ctx, rolledBackID); !errors.Is(
+		err,
+		ErrNotFound,
+	) {
 		t.Fatalf("rolled-back identity recovered after restart: %v", err)
 	}
 }

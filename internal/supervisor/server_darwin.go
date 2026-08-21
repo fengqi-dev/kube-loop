@@ -13,8 +13,9 @@ import (
 	"sync"
 	"time"
 
-	supervisorprotocol "github.com/fengqi-dev/kube-loop/internal/protocol/supervisor"
 	"golang.org/x/sys/unix"
+
+	supervisorprotocol "github.com/fengqi-dev/kube-loop/internal/protocol/supervisor"
 )
 
 type Server struct {
@@ -28,13 +29,19 @@ func NewServer(config Config, auth Auth, logger *log.Logger) *Server {
 	if logger == nil {
 		logger = log.Default()
 	}
-	return &Server{config: config, auth: auth, updater: NewUpdater(config, launchdWorker{config: config}, auth.UID), log: logger}
+	return &Server{
+		config:  config,
+		auth:    auth,
+		updater: NewUpdater(config, launchdWorker{config: config}, auth.UID),
+		log:     logger,
+	}
 }
 
 func (s *Server) Serve(ctx context.Context) error {
 	if err := s.updater.Recover(ctx); err != nil {
 		return fmt.Errorf("recover interrupted worker update: %w", err)
 	}
+	//nolint:gosec // The socket directory must be traversable; the socket itself is mode 0600.
 	if err := os.MkdirAll(filepath.Dir(s.config.SocketPath), 0o755); err != nil {
 		return fmt.Errorf("create supervisor socket directory: %w", err)
 	}
@@ -43,8 +50,8 @@ func (s *Server) Serve(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("listen supervisor socket: %w", err)
 	}
-	defer listener.Close()
-	defer os.Remove(s.config.SocketPath)
+	defer func() { _ = listener.Close() }()
+	defer func() { _ = os.Remove(s.config.SocketPath) }()
 	if err := os.Chown(s.config.SocketPath, s.auth.UID, 0); err != nil {
 		return fmt.Errorf("set supervisor socket owner: %w", err)
 	}
@@ -77,7 +84,7 @@ func (s *Server) Serve(ctx context.Context) error {
 }
 
 func (s *Server) handle(serverCtx context.Context, connection *net.UnixConn) {
-	defer connection.Close()
+	defer func() { _ = connection.Close() }()
 	stopClose := context.AfterFunc(serverCtx, func() { _ = connection.Close() })
 	defer stopClose()
 	_ = connection.SetDeadline(time.Now().Add(3 * time.Minute))
@@ -109,7 +116,7 @@ func (s *Server) handle(serverCtx context.Context, connection *net.UnixConn) {
 			response.Error = "status does not accept a manifest"
 			break
 		}
-		response.Worker, err = s.updater.Status(ctx)
+		response.Worker, _ = s.updater.Status(ctx)
 		response.PreviousAvailable = fileExists(s.config.PreviousPath())
 		// A reachable supervisor remains healthy even when its worker is down;
 		// callers must still be able to submit a recovery update.

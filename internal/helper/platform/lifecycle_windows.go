@@ -22,8 +22,14 @@ func ApplyDNS(workDir string, dns singbox.DNSMeta) error {
 	var b strings.Builder
 	b.WriteString("$ErrorActionPreference='Stop'; ")
 	b.WriteString("$backup = @((Get-DnsClientGlobalSetting).SuffixSearchList) | ConvertTo-Json -Compress; ")
-	b.WriteString("Set-Content -LiteralPath " + powershellLiteral(filepath.Join(workDir, windowsSearchBackup)) + " -Value $backup -Encoding utf8; ")
-	b.WriteString(`Get-DnsClientNrptRule -ErrorAction SilentlyContinue | Where-Object { $_.Comment -eq 'KubeLoop' } | ForEach-Object { Remove-DnsClientNrptRule -Name $_.Name -Force -ErrorAction SilentlyContinue }; `)
+	b.WriteString(
+		"Set-Content -LiteralPath " + powershellLiteral(
+			filepath.Join(workDir, windowsSearchBackup),
+		) + " -Value $backup -Encoding utf8; ",
+	)
+	b.WriteString(
+		`Get-DnsClientNrptRule -ErrorAction SilentlyContinue | Where-Object { $_.Comment -eq 'KubeLoop' } | ForEach-Object { Remove-DnsClientNrptRule -Name $_.Name -Force -ErrorAction SilentlyContinue }; `,
+	)
 	for _, domain := range dns.Domains {
 		fmt.Fprintf(&b,
 			"Add-DnsClientNrptRule -Namespace %s -NameServers %s -Comment 'KubeLoop'; ",
@@ -42,7 +48,9 @@ func ApplyDNS(workDir string, dns singbox.DNSMeta) error {
 func RestoreDNS(workDir string, _ singbox.DNSMeta) error {
 	var b strings.Builder
 	b.WriteString("$ErrorActionPreference='Continue'; ")
-	b.WriteString(`Get-DnsClientNrptRule -ErrorAction SilentlyContinue | Where-Object { $_.Comment -eq 'KubeLoop' } | ForEach-Object { Remove-DnsClientNrptRule -Name $_.Name -Force -ErrorAction SilentlyContinue }; `)
+	b.WriteString(
+		`Get-DnsClientNrptRule -ErrorAction SilentlyContinue | Where-Object { $_.Comment -eq 'KubeLoop' } | ForEach-Object { Remove-DnsClientNrptRule -Name $_.Name -Force -ErrorAction SilentlyContinue }; `,
+	)
 	backupPath := filepath.Join(workDir, windowsSearchBackup)
 	backup, readErr := os.ReadFile(backupPath)
 	if readErr == nil {

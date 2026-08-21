@@ -13,7 +13,10 @@ import (
 )
 
 func TestAdminSessionRepositoryLifecycleAndOptimisticTouch(t *testing.T) {
-	store := openSQLiteTestStore(t, filepath.Join(t.TempDir(), "admin-sessions.db"))
+	store := openSQLiteTestStore(
+		t,
+		filepath.Join(t.TempDir(), "admin-sessions.db"),
+	)
 	testAdminSessionRepositoryConformance(t, store)
 }
 
@@ -25,23 +28,38 @@ func testAdminSessionRepositoryConformance(t *testing.T, store *Store) {
 	idHash := sha256.Sum256([]byte("management-session-id"))
 	csrfHash := sha256.Sum256([]byte("management-csrf-token"))
 	session := AdminSession{
-		IDHash: idHash[:], IdentityID: identityID, AuthorizationID: authorizationID, AuthenticationType: "normal",
-		CSRFTokenHash: csrfHash[:], CreatedAt: now, LastSeenAt: now,
-		IdleExpiresAt: now.Add(15 * time.Minute), AbsoluteExpiresAt: now.Add(8 * time.Hour),
+		IDHash:             idHash[:],
+		IdentityID:         identityID,
+		AuthorizationID:    authorizationID,
+		AuthenticationType: sessionKindNormal,
+		CSRFTokenHash:      csrfHash[:],
+		CreatedAt:          now,
+		LastSeenAt:         now,
+		IdleExpiresAt: now.Add(
+			15 * time.Minute,
+		),
+		AbsoluteExpiresAt: now.Add(8 * time.Hour),
 	}
 	if err := store.AdminSessions().Create(ctx, session); err != nil {
 		t.Fatal(err)
 	}
 	got, err := store.AdminSessions().GetByHash(ctx, idHash[:])
-	if err != nil || got.IdentityID != identityID || got.AuthorizationID != authorizationID || got.AuthenticationType != "normal" ||
+	if err != nil || got.IdentityID != identityID ||
+		got.AuthorizationID != authorizationID ||
+		got.AuthenticationType != sessionKindNormal ||
 		string(got.CSRFTokenHash) != string(csrfHash[:]) {
 		t.Fatalf("stored management session = %#v, error = %v", got, err)
 	}
 	nextSeen := now.Add(time.Minute)
-	if err := store.AdminSessions().Touch(ctx, idHash[:], now, nextSeen, nextSeen, nextSeen.Add(15*time.Minute)); err != nil {
+	if err := store.AdminSessions().
+		Touch(ctx, idHash[:], now, nextSeen, nextSeen, nextSeen.Add(15*time.Minute)); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.AdminSessions().Touch(ctx, idHash[:], now, nextSeen, nextSeen, nextSeen.Add(15*time.Minute)); !errors.Is(err, ErrConflict) {
+	if err := store.AdminSessions().
+		Touch(ctx, idHash[:], now, nextSeen, nextSeen, nextSeen.Add(15*time.Minute)); !errors.Is(
+		err,
+		ErrConflict,
+	) {
 		t.Fatalf("stale touch error = %v", err)
 	}
 	revokedAt := nextSeen.Add(time.Minute)
@@ -55,26 +73,82 @@ func testAdminSessionRepositoryConformance(t *testing.T, store *Store) {
 	if err != nil || got.RevokedAt == nil || !got.RevokedAt.Equal(revokedAt) {
 		t.Fatalf("revoked management session = %#v, error = %v", got, err)
 	}
-	if err := store.AdminSessions().Touch(ctx, idHash[:], nextSeen, revokedAt, revokedAt, revokedAt.Add(15*time.Minute)); !errors.Is(err, ErrConflict) {
+	if err := store.AdminSessions().
+		Touch(ctx, idHash[:], nextSeen, revokedAt, revokedAt, revokedAt.Add(15*time.Minute)); !errors.Is(
+		err,
+		ErrConflict,
+	) {
 		t.Fatalf("revoked touch error = %v", err)
 	}
-	deleted, err := store.AdminSessions().DeleteExpired(ctx, revokedAt.Add(time.Minute), 10)
+	deleted, err := store.AdminSessions().
+		DeleteExpired(ctx, revokedAt.Add(time.Minute), 10)
 	if err != nil || deleted != 1 {
 		t.Fatalf("deleted management sessions = %d, error = %v", deleted, err)
 	}
 }
 
 func TestAdminSessionRepositoryRejectsInvalidHashesAndLifetime(t *testing.T) {
-	store := openSQLiteTestStore(t, filepath.Join(t.TempDir(), "invalid-admin-session.db"))
+	store := openSQLiteTestStore(
+		t,
+		filepath.Join(t.TempDir(), "invalid-admin-session.db"),
+	)
 	now := time.Now().UTC()
 	identityID, authorizationID := seedAdminSessionIdentity(t, store, now)
 	validHash := make([]byte, sha256Size)
 	tests := []AdminSession{
-		{IDHash: []byte("short"), CSRFTokenHash: validHash, IdentityID: identityID, AuthorizationID: authorizationID, AuthenticationType: "normal", CreatedAt: now, LastSeenAt: now, IdleExpiresAt: now.Add(time.Minute), AbsoluteExpiresAt: now.Add(time.Hour)},
-		{IDHash: validHash, CSRFTokenHash: []byte("short"), IdentityID: identityID, AuthorizationID: authorizationID, AuthenticationType: "normal", CreatedAt: now, LastSeenAt: now, IdleExpiresAt: now.Add(time.Minute), AbsoluteExpiresAt: now.Add(time.Hour)},
-		{IDHash: validHash, CSRFTokenHash: validHash, AuthenticationType: "normal", CreatedAt: now, LastSeenAt: now, IdleExpiresAt: now.Add(time.Minute), AbsoluteExpiresAt: now.Add(time.Hour)},
-		{IDHash: validHash, CSRFTokenHash: validHash, IdentityID: identityID, AuthorizationID: authorizationID, AuthenticationType: "unknown", CreatedAt: now, LastSeenAt: now, IdleExpiresAt: now.Add(time.Minute), AbsoluteExpiresAt: now.Add(time.Hour)},
-		{IDHash: validHash, CSRFTokenHash: validHash, IdentityID: identityID, AuthorizationID: authorizationID, AuthenticationType: "normal", CreatedAt: now, LastSeenAt: now, IdleExpiresAt: now.Add(2 * time.Hour), AbsoluteExpiresAt: now.Add(time.Hour)},
+		{
+			IDHash:             []byte("short"),
+			CSRFTokenHash:      validHash,
+			IdentityID:         identityID,
+			AuthorizationID:    authorizationID,
+			AuthenticationType: sessionKindNormal,
+			CreatedAt:          now,
+			LastSeenAt:         now,
+			IdleExpiresAt:      now.Add(time.Minute),
+			AbsoluteExpiresAt:  now.Add(time.Hour),
+		},
+		{
+			IDHash:             validHash,
+			CSRFTokenHash:      []byte("short"),
+			IdentityID:         identityID,
+			AuthorizationID:    authorizationID,
+			AuthenticationType: sessionKindNormal,
+			CreatedAt:          now,
+			LastSeenAt:         now,
+			IdleExpiresAt:      now.Add(time.Minute),
+			AbsoluteExpiresAt:  now.Add(time.Hour),
+		},
+		{
+			IDHash:             validHash,
+			CSRFTokenHash:      validHash,
+			AuthenticationType: sessionKindNormal,
+			CreatedAt:          now,
+			LastSeenAt:         now,
+			IdleExpiresAt:      now.Add(time.Minute),
+			AbsoluteExpiresAt:  now.Add(time.Hour),
+		},
+		{
+			IDHash:             validHash,
+			CSRFTokenHash:      validHash,
+			IdentityID:         identityID,
+			AuthorizationID:    authorizationID,
+			AuthenticationType: "unknown",
+			CreatedAt:          now,
+			LastSeenAt:         now,
+			IdleExpiresAt:      now.Add(time.Minute),
+			AbsoluteExpiresAt:  now.Add(time.Hour),
+		},
+		{
+			IDHash:             validHash,
+			CSRFTokenHash:      validHash,
+			IdentityID:         identityID,
+			AuthorizationID:    authorizationID,
+			AuthenticationType: sessionKindNormal,
+			CreatedAt:          now,
+			LastSeenAt:         now,
+			IdleExpiresAt:      now.Add(2 * time.Hour),
+			AbsoluteExpiresAt:  now.Add(time.Hour),
+		},
 	}
 	for index, session := range tests {
 		session.IDHash = append([]byte(nil), session.IDHash...)
@@ -87,11 +161,20 @@ func TestAdminSessionRepositoryRejectsInvalidHashesAndLifetime(t *testing.T) {
 	}
 }
 
-func seedAdminSessionIdentity(t *testing.T, store *Store, now time.Time) (string, string) {
+func seedAdminSessionIdentity(
+	t *testing.T,
+	store *Store,
+	now time.Time,
+) (string, string) {
 	t.Helper()
 	identityID := uuid.NewString()
 	if _, err := store.Identities().Create(context.Background(), Identity{
-		ID: identityID, Type: "human", DisplayName: "Test User", Status: "active", CreatedAt: now, UpdatedAt: now,
+		ID:          identityID,
+		Type:        identityTypeHuman,
+		DisplayName: "Test User",
+		Status:      statusActive,
+		CreatedAt:   now,
+		UpdatedAt:   now,
 	}); err != nil {
 		t.Fatal(err)
 	}

@@ -149,7 +149,15 @@ func TestMaterializeBundledHelper(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		name += ".exe"
 	}
-	wantPath := filepath.Join(home, ".kubeloop-dev", "cache", "components", "dev", runtime.GOOS+"-"+runtime.GOARCH, name)
+	wantPath := filepath.Join(
+		home,
+		".kubeloop-dev",
+		"cache",
+		"components",
+		"dev",
+		runtime.GOOS+"-"+runtime.GOARCH,
+		name,
+	)
 	if path != wantPath {
 		t.Fatalf("materialized path = %q, want %q", path, wantPath)
 	}
@@ -170,22 +178,22 @@ func TestMaterializeBundledHelper(t *testing.T) {
 
 	SetBundledBinary([]byte("concurrent helper"))
 	var wait sync.WaitGroup
-	errors := make(chan error, 16)
-	for i := 0; i < cap(errors); i++ {
+	errCh := make(chan error, 16)
+	for range cap(errCh) {
 		wait.Go(func() {
 			concurrentPath, concurrentOK, concurrentErr := materializeBundledHelper()
 			if concurrentErr != nil {
-				errors <- concurrentErr
+				errCh <- concurrentErr
 				return
 			}
 			if !concurrentOK || concurrentPath != path {
-				errors <- fmt.Errorf("materialized helper = (%q, %v), want (%q, true)", concurrentPath, concurrentOK, path)
+				errCh <- fmt.Errorf("materialized helper = (%q, %v), want (%q, true)", concurrentPath, concurrentOK, path)
 			}
 		})
 	}
 	wait.Wait()
-	close(errors)
-	for concurrentErr := range errors {
+	close(errCh)
+	for concurrentErr := range errCh {
 		t.Error(concurrentErr)
 	}
 	assertFileContent(t, path, "concurrent helper")

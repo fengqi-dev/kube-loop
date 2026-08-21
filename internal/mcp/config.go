@@ -10,9 +10,10 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/zalando/go-keyring"
+
 	"github.com/fengqi-dev/kube-loop/internal/fsatomic"
 	"github.com/fengqi-dev/kube-loop/internal/userpaths"
-	"github.com/zalando/go-keyring"
 )
 
 const (
@@ -21,7 +22,7 @@ const (
 	maximumConfigBytes  = 64 << 10
 	keyringService      = "KubeLoop"
 	devKeyringService   = "KubeLoop Dev"
-	keyringTokenAccount = "mcp:bearer-token"
+	keyringTokenAccount = "mcp:bearer-token" //nolint:gosec // Keyring account label, not credential material.
 )
 
 // Config is the runtime MCP configuration. Token is never serialized into the
@@ -178,7 +179,7 @@ func readPersistedConfig(path string) (persistedConfig, error) {
 	if err != nil {
 		return persistedConfig{}, err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	raw, err := io.ReadAll(io.LimitReader(file, maximumConfigBytes+1))
 	if err != nil {
 		return persistedConfig{}, errors.New("read MCP settings")

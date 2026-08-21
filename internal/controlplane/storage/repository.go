@@ -12,7 +12,9 @@ import (
 var (
 	ErrNotFound            = errors.New("storage object not found")
 	ErrConflict            = errors.New("storage object conflict")
-	ErrIdempotencyMismatch = errors.New("idempotency key was used for a different request")
+	ErrIdempotencyMismatch = errors.New(
+		"idempotency key was used for a different request",
+	)
 )
 
 type IdentityRepository interface {
@@ -45,7 +47,15 @@ type SessionRepository interface {
 	UpdateState(context.Context, string, uint64, string, time.Time) error
 	// Heartbeat atomically refreshes the namespace NetworkSpec and extends an
 	// active session only when generation still matches.
-	Heartbeat(context.Context, string, uint64, json.RawMessage, string, time.Time, time.Time) error
+	Heartbeat(
+		context.Context,
+		string,
+		uint64,
+		json.RawMessage,
+		string,
+		time.Time,
+		time.Time,
+	) error
 	DeleteExpired(context.Context, time.Time, int) (int64, error)
 }
 
@@ -56,14 +66,35 @@ type TaskRepository interface {
 	List(context.Context, TaskListFilter) ([]Task, error)
 	// UpdateState only changes the expected current state, preventing competing
 	// workers from publishing two terminal outcomes.
-	UpdateState(context.Context, string, remotetask.State, remotetask.State, json.RawMessage, time.Time) error
+	UpdateState(
+		context.Context,
+		string,
+		remotetask.State,
+		remotetask.State,
+		json.RawMessage,
+		time.Time,
+	) error
 	ListBySession(context.Context, string, int) ([]Task, error)
 	// ListStaleByTypeStates returns oldest Tasks whose owner heartbeat has not
 	// advanced before the supplied time.
-	ListStaleByTypeStates(context.Context, string, []remotetask.State, time.Time, int) ([]Task, error)
+	ListStaleByTypeStates(
+		context.Context,
+		string,
+		[]remotetask.State,
+		time.Time,
+		int,
+	) ([]Task, error)
 	// ClaimStale atomically changes a Task only when both its state and observed
 	// update time still match, so at most one recovery worker owns the attempt.
-	ClaimStale(context.Context, string, remotetask.State, time.Time, remotetask.State, json.RawMessage, time.Time) error
+	ClaimStale(
+		context.Context,
+		string,
+		remotetask.State,
+		time.Time,
+		remotetask.State,
+		json.RawMessage,
+		time.Time,
+	) error
 }
 
 type ResourceSnapshotRepository interface {
@@ -93,7 +124,16 @@ type RelayDesiredStateRepository interface {
 	List(context.Context) ([]RelayDesiredState, error)
 	// CompareAndSwap creates with expectedVersion=0 or advances an existing
 	// monotonic version. A stale expected version returns ErrConflict.
-	CompareAndSwap(context.Context, string, string, uint64, string, string, string, time.Time) (RelayDesiredState, error)
+	CompareAndSwap(
+		context.Context,
+		string,
+		string,
+		uint64,
+		string,
+		string,
+		string,
+		time.Time,
+	) (RelayDesiredState, error)
 }
 
 type AdminSessionRepository interface {
@@ -101,7 +141,14 @@ type AdminSessionRepository interface {
 	GetByHash(context.Context, []byte) (AdminSession, error)
 	// Touch uses the observed last-seen timestamp as an optimistic guard and
 	// refuses revoked or already expired sessions.
-	Touch(context.Context, []byte, time.Time, time.Time, time.Time, time.Time) error
+	Touch(
+		context.Context,
+		[]byte,
+		time.Time,
+		time.Time,
+		time.Time,
+		time.Time,
+	) error
 	Revoke(context.Context, []byte, time.Time) error
 	RevokeAuthorization(context.Context, string, time.Time) error
 	DeleteExpired(context.Context, time.Time, int) (int64, error)
@@ -133,9 +180,24 @@ type OAuthSessionRepository interface {
 type OAuthAuthorizationRequestRepository interface {
 	Create(context.Context, OAuthAuthorizationRequest) error
 	Get(context.Context, []byte, time.Time) (OAuthAuthorizationRequest, error)
-	Consume(context.Context, []byte, time.Time) (OAuthAuthorizationRequest, error)
-	SetUpstream(context.Context, []byte, []byte, json.RawMessage, string, time.Time) error
-	ConsumeUpstream(context.Context, []byte, time.Time) (OAuthAuthorizationRequest, error)
+	Consume(
+		context.Context,
+		[]byte,
+		time.Time,
+	) (OAuthAuthorizationRequest, error)
+	SetUpstream(
+		context.Context,
+		[]byte,
+		[]byte,
+		json.RawMessage,
+		string,
+		time.Time,
+	) error
+	ConsumeUpstream(
+		context.Context,
+		[]byte,
+		time.Time,
+	) (OAuthAuthorizationRequest, error)
 	Continue(context.Context, []byte, []byte, []byte, string, time.Time) error
 	DeleteExpired(context.Context, time.Time, int) (int64, error)
 }

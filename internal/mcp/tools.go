@@ -4,15 +4,47 @@ import (
 	"context"
 	"strings"
 
+	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
+
 	clientfiletransfer "github.com/fengqi-dev/kube-loop/internal/client/filetransfer"
 	clientremote "github.com/fengqi-dev/kube-loop/internal/client/remote"
-	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
+)
+
+const (
+	actionConnect    = "connect"
+	actionCreate     = "create"
+	actionDelete     = "delete"
+	actionDisconnect = "disconnect"
+	actionList       = "list"
+	actionRename     = "rename"
+	actionStart      = "start"
+
+	fileKindDirectory       = "directory"
+	fileKindFile            = "file"
+	fileTransferUnavailable = "file transfer is unavailable"
+	fieldProfileID          = "profileId"
+	resourceNamespace       = "namespace"
+	resourcePod             = "pod"
+	sessionStateActive      = "active"
+	sessionStateStopped     = "stopped"
+
+	trafficTypeExchange    = "exchange"
+	trafficTypeMirror      = "mirror"
+	trafficTypePortForward = "port_forward"
+	trafficTypePreview     = "preview"
+
+	toolExecPodCommand     = "exec_pod_command"
+	toolManageCluster      = "manage_cluster"
+	toolManageConnection   = "manage_connection"
+	toolManageFileTransfer = "manage_file_transfer"
+	toolManagePodFiles     = "manage_pod_files"
+	toolManageTraffic      = "manage_traffic"
 )
 
 type manageClusterIn struct {
-	Action    string `json:"action" jsonschema:"get or list"`
-	Type      string `json:"type" jsonschema:"version, capabilities, namespace, service, or pod"`
-	ProfileID string `json:"profileId" jsonschema:"Explicit active Server Profile ID"`
+	Action    string `json:"action"              jsonschema:"get or list"`
+	Type      string `json:"type"                jsonschema:"version, capabilities, namespace, service, or pod"`
+	ProfileID string `json:"profileId"           jsonschema:"Explicit active Server Profile ID"`
 	Namespace string `json:"namespace,omitempty" jsonschema:"Explicit namespace for capabilities, Services, or Pods"`
 }
 
@@ -29,8 +61,8 @@ type manageClusterOut struct {
 }
 
 type manageConnectionIn struct {
-	Action    string `json:"action" jsonschema:"status, connect, or disconnect"`
-	ProfileID string `json:"profileId" jsonschema:"Explicit active Server Profile ID"`
+	Action    string `json:"action"              jsonschema:"status, connect, or disconnect"`
+	ProfileID string `json:"profileId"           jsonschema:"Explicit active Server Profile ID"`
 	SessionID string `json:"sessionId,omitempty" jsonschema:"Explicit active Session ID required for disconnect"`
 	Namespace string `json:"namespace,omitempty" jsonschema:"Explicit namespace required for connect and disconnect"`
 }
@@ -43,26 +75,26 @@ type manageConnectionOut struct {
 
 type portMappingIn struct {
 	ServicePort int32  `json:"servicePort" jsonschema:"Service port number"`
-	Protocol    string `json:"protocol" jsonschema:"tcp or udp"`
-	LocalHost   string `json:"localHost" jsonschema:"Explicit local target host"`
-	LocalPort   uint16 `json:"localPort" jsonschema:"Explicit local target port"`
+	Protocol    string `json:"protocol"    jsonschema:"tcp or udp"`
+	LocalHost   string `json:"localHost"   jsonschema:"Explicit local target host"`
+	LocalPort   uint16 `json:"localPort"   jsonschema:"Explicit local target port"`
 }
 
 type manageTrafficIn struct {
-	Action     string          `json:"action" jsonschema:"start, stop, or list"`
-	Type       string          `json:"type,omitempty" jsonschema:"exchange, mirror, preview, or port_forward; optional only for list"`
-	ProfileID  string          `json:"profileId" jsonschema:"Explicit active Server Profile ID"`
-	SessionID  string          `json:"sessionId,omitempty" jsonschema:"Explicit active Session ID required for start and stop"`
-	Namespace  string          `json:"namespace,omitempty" jsonschema:"Explicit active namespace required for start and stop"`
-	TaskID     string          `json:"taskId,omitempty" jsonschema:"Explicit Task ID required for stop"`
-	Service    string          `json:"service,omitempty" jsonschema:"Service name for exchange or mirror"`
-	Name       string          `json:"name,omitempty" jsonschema:"Preview Service name"`
-	Targets    []portMappingIn `json:"targets,omitempty" jsonschema:"Explicit local targets for exchange, mirror, or preview"`
+	Action     string          `json:"action"               jsonschema:"start, stop, or list"`
+	Type       string          `json:"type,omitempty"       jsonschema:"Traffic type; optional only for list"`
+	ProfileID  string          `json:"profileId"            jsonschema:"Explicit active Server Profile ID"`
+	SessionID  string          `json:"sessionId,omitempty"  jsonschema:"Active Session ID for start and stop"`
+	Namespace  string          `json:"namespace,omitempty"  jsonschema:"Active namespace for start and stop"`
+	TaskID     string          `json:"taskId,omitempty"     jsonschema:"Explicit Task ID required for stop"`
+	Service    string          `json:"service,omitempty"    jsonschema:"Service name for exchange or mirror"`
+	Name       string          `json:"name,omitempty"       jsonschema:"Preview Service name"`
+	Targets    []portMappingIn `json:"targets,omitempty"    jsonschema:"Local targets for exchange, mirror, or preview"`
 	TargetKind string          `json:"targetKind,omitempty" jsonschema:"pod or service for port_forward"`
 	TargetName string          `json:"targetName,omitempty" jsonschema:"Explicit Pod or Service name for port_forward"`
-	Protocol   string          `json:"protocol,omitempty" jsonschema:"tcp or udp for port_forward"`
+	Protocol   string          `json:"protocol,omitempty"   jsonschema:"tcp or udp for port_forward"`
 	RemotePort uint16          `json:"remotePort,omitempty" jsonschema:"Explicit remote port for port_forward"`
-	LocalPort  uint16          `json:"localPort,omitempty" jsonschema:"Local listen port; 0 allocates an ephemeral port"`
+	LocalPort  uint16          `json:"localPort,omitempty"  jsonschema:"Local listen port; 0 allocates an ephemeral port"`
 }
 
 type manageTrafficOut struct {
@@ -74,28 +106,28 @@ type manageTrafficOut struct {
 }
 
 type podCommandIn struct {
-	ProfileID      string   `json:"profileId" jsonschema:"Explicit active Server Profile ID"`
-	SessionID      string   `json:"sessionId" jsonschema:"Explicit active Session ID"`
-	Namespace      string   `json:"namespace" jsonschema:"Explicit active namespace"`
-	Pod            string   `json:"pod" jsonschema:"Explicit Pod name"`
-	Container      string   `json:"container,omitempty" jsonschema:"Explicit container name; omit only to use Control Plane default selection"`
-	Command        []string `json:"command" jsonschema:"Exact argv; no implicit shell is added"`
+	ProfileID      string   `json:"profileId"                jsonschema:"Explicit active Server Profile ID"`
+	SessionID      string   `json:"sessionId"                jsonschema:"Explicit active Session ID"`
+	Namespace      string   `json:"namespace"                jsonschema:"Explicit active namespace"`
+	Pod            string   `json:"pod"                      jsonschema:"Explicit Pod name"`
+	Container      string   `json:"container,omitempty"      jsonschema:"Container name; omit for server default"`
+	Command        []string `json:"command"                  jsonschema:"Exact argv; no implicit shell is added"`
 	TimeoutSeconds int      `json:"timeoutSeconds,omitempty" jsonschema:"1-300; defaults to 30"`
 }
 
 type manageFileTransferIn struct {
-	Action     string `json:"action" jsonschema:"start, list, or cancel"`
-	ProfileID  string `json:"profileId" jsonschema:"Explicit active Server Profile ID"`
-	SessionID  string `json:"sessionId,omitempty" jsonschema:"Explicit active Session ID required for start and cancel"`
-	Namespace  string `json:"namespace,omitempty" jsonschema:"Explicit active namespace required for start and cancel"`
-	TaskID     string `json:"taskId,omitempty" jsonschema:"Explicit transfer Task ID required for cancel"`
-	Direction  string `json:"direction,omitempty" jsonschema:"upload or download"`
-	Kind       string `json:"kind,omitempty" jsonschema:"file or directory"`
-	Pod        string `json:"pod,omitempty" jsonschema:"Explicit Pod name"`
-	Container  string `json:"container,omitempty" jsonschema:"Explicit container name when needed"`
-	LocalPath  string `json:"localPath,omitempty" jsonschema:"Explicit absolute local path"`
+	Action     string `json:"action"               jsonschema:"start, list, or cancel"`
+	ProfileID  string `json:"profileId"            jsonschema:"Explicit active Server Profile ID"`
+	SessionID  string `json:"sessionId,omitempty"  jsonschema:"Explicit active Session ID required for start and cancel"`
+	Namespace  string `json:"namespace,omitempty"  jsonschema:"Explicit active namespace required for start and cancel"`
+	TaskID     string `json:"taskId,omitempty"     jsonschema:"Explicit transfer Task ID required for cancel"`
+	Direction  string `json:"direction,omitempty"  jsonschema:"upload or download"`
+	Kind       string `json:"kind,omitempty"       jsonschema:"file or directory"`
+	Pod        string `json:"pod,omitempty"        jsonschema:"Explicit Pod name"`
+	Container  string `json:"container,omitempty"  jsonschema:"Explicit container name when needed"`
+	LocalPath  string `json:"localPath,omitempty"  jsonschema:"Explicit absolute local path"`
 	RemotePath string `json:"remotePath,omitempty" jsonschema:"Explicit absolute container path"`
-	Overwrite  bool   `json:"overwrite,omitempty" jsonschema:"Whether an existing destination may be replaced"`
+	Overwrite  bool   `json:"overwrite,omitempty"  jsonschema:"Whether an existing destination may be replaced"`
 }
 
 type manageFileTransferOut struct {
@@ -106,17 +138,17 @@ type manageFileTransferOut struct {
 }
 
 type managePodFilesIn struct {
-	Action         string `json:"action" jsonschema:"list, create, rename, or delete"`
-	ProfileID      string `json:"profileId" jsonschema:"Explicit active Server Profile ID"`
-	SessionID      string `json:"sessionId" jsonschema:"Explicit active Session ID"`
-	Namespace      string `json:"namespace" jsonschema:"Explicit active namespace"`
-	Pod            string `json:"pod" jsonschema:"Explicit Pod name"`
-	Container      string `json:"container,omitempty" jsonschema:"Explicit container name when needed"`
-	Path           string `json:"path" jsonschema:"Explicit absolute container path"`
-	Destination    string `json:"destination,omitempty" jsonschema:"Explicit absolute destination path for rename"`
-	Kind           string `json:"kind,omitempty" jsonschema:"file or directory for create"`
-	Recursive      bool   `json:"recursive,omitempty" jsonschema:"Whether directory deletion is recursive"`
-	IdempotencyKey string `json:"idempotencyKey,omitempty" jsonschema:"Unique log-safe key required for create, rename, and delete"`
+	Action         string `json:"action"                   jsonschema:"list, create, rename, or delete"`
+	ProfileID      string `json:"profileId"                jsonschema:"Explicit active Server Profile ID"`
+	SessionID      string `json:"sessionId"                jsonschema:"Explicit active Session ID"`
+	Namespace      string `json:"namespace"                jsonschema:"Explicit active namespace"`
+	Pod            string `json:"pod"                      jsonschema:"Explicit Pod name"`
+	Container      string `json:"container,omitempty"      jsonschema:"Explicit container name when needed"`
+	Path           string `json:"path"                     jsonschema:"Explicit absolute container path"`
+	Destination    string `json:"destination,omitempty"    jsonschema:"Explicit absolute destination path for rename"`
+	Kind           string `json:"kind,omitempty"           jsonschema:"file or directory for create"`
+	Recursive      bool   `json:"recursive,omitempty"      jsonschema:"Whether directory deletion is recursive"`
+	IdempotencyKey string `json:"idempotencyKey,omitempty" jsonschema:"Unique key for create, rename, and delete"`
 }
 
 type managePodFilesOut struct {
@@ -130,55 +162,80 @@ type managePodFilesOut struct {
 
 func registerTools(server *mcpsdk.Server, backend Backend) {
 	mcpsdk.AddTool(server, &mcpsdk.Tool{
-		Name: "manage_cluster",
+		Name: toolManageCluster,
 		Description: "Read Kubernetes resources through the authenticated Control Plane client. " +
 			"profileId is always explicit; namespace is required for capabilities, Services, and Pods.",
-	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, input manageClusterIn) (*mcpsdk.CallToolResult, manageClusterOut, error) {
+	}, func(
+		ctx context.Context,
+		_ *mcpsdk.CallToolRequest,
+		input manageClusterIn,
+	) (*mcpsdk.CallToolResult, manageClusterOut, error) {
 		output, err := manageCluster(ctx, backend, input)
 		return nil, output, stableError(err)
 	})
 
 	mcpsdk.AddTool(server, &mcpsdk.Tool{
-		Name: "manage_connection",
+		Name: toolManageConnection,
 		Description: "Inspect, connect, or disconnect the active Cluster Session. " +
 			"Disconnect requires the exact profileId, sessionId, and namespace returned by status/connect.",
-	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, input manageConnectionIn) (*mcpsdk.CallToolResult, manageConnectionOut, error) {
+	}, func(
+		ctx context.Context,
+		_ *mcpsdk.CallToolRequest,
+		input manageConnectionIn,
+	) (*mcpsdk.CallToolResult, manageConnectionOut, error) {
 		output, err := manageConnection(ctx, backend, input)
 		return nil, output, stableError(err)
 	})
 
 	mcpsdk.AddTool(server, &mcpsdk.Tool{
-		Name: "manage_traffic",
+		Name: toolManageTraffic,
 		Description: "Start, stop, or list Exchange, Mirror, Preview, and Port Forward Tasks. " +
 			"Every mutation requires exact Profile, Session, namespace, target, and local endpoint parameters.",
-	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, input manageTrafficIn) (*mcpsdk.CallToolResult, manageTrafficOut, error) {
+	}, func(
+		ctx context.Context,
+		_ *mcpsdk.CallToolRequest,
+		input manageTrafficIn,
+	) (*mcpsdk.CallToolResult, manageTrafficOut, error) {
 		output, err := manageTraffic(ctx, backend, input)
 		return nil, output, stableError(err)
 	})
 
 	mcpsdk.AddTool(server, &mcpsdk.Tool{
-		Name: "exec_pod_command",
+		Name: toolExecPodCommand,
 		Description: "Execute an exact argv in a Pod through the authenticated Control Plane exec stream. " +
 			"No shell is inferred; stdoutBase64 and stderrBase64 are capped at 1 MiB before encoding.",
-	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, input podCommandIn) (*mcpsdk.CallToolResult, PodCommandResult, error) {
+	}, func(
+		ctx context.Context,
+		_ *mcpsdk.CallToolRequest,
+		input podCommandIn,
+	) (*mcpsdk.CallToolResult, PodCommandResult, error) {
 		output, err := execPodCommand(ctx, backend, input)
 		return nil, output, stableError(err)
 	})
 
 	mcpsdk.AddTool(server, &mcpsdk.Tool{
-		Name: "manage_file_transfer",
+		Name: toolManageFileTransfer,
 		Description: "Start, list, or cancel file transfers. Mutations require the exact active Session " +
 			"and explicit localPath, remotePath, direction, kind, Pod, container, and overwrite choice.",
-	}, func(_ context.Context, _ *mcpsdk.CallToolRequest, input manageFileTransferIn) (*mcpsdk.CallToolResult, manageFileTransferOut, error) {
+	}, func(
+		_ context.Context,
+		_ *mcpsdk.CallToolRequest,
+		input manageFileTransferIn,
+	) (*mcpsdk.CallToolResult, manageFileTransferOut, error) {
 		output, err := manageFileTransfer(backend, input)
 		return nil, output, stableError(err)
 	})
 
 	mcpsdk.AddTool(server, &mcpsdk.Tool{
-		Name: "manage_pod_files",
-		Description: "List, create, rename, or delete files and directories in a Pod through the authenticated Control Plane. " +
-			"Every call requires the exact active Profile, Session, namespace, Pod, container path, and explicit mutation parameters.",
-	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, input managePodFilesIn) (*mcpsdk.CallToolResult, managePodFilesOut, error) {
+		Name: toolManagePodFiles,
+		Description: "List, create, rename, or delete files and directories in a Pod through the " +
+			"authenticated Control Plane. Every call requires the exact active Profile, Session, namespace, " +
+			"Pod, container path, and explicit mutation parameters.",
+	}, func(
+		ctx context.Context,
+		_ *mcpsdk.CallToolRequest,
+		input managePodFilesIn,
+	) (*mcpsdk.CallToolResult, managePodFilesOut, error) {
 		output, err := managePodFiles(ctx, backend, input)
 		return nil, output, stableError(err)
 	})
@@ -191,7 +248,7 @@ func manageCluster(ctx context.Context, backend Backend, input manageClusterIn) 
 		Namespace: strings.TrimSpace(input.Namespace),
 	}
 	if output.ProfileID == "" {
-		return manageClusterOut{}, invalid("profileId", "profileId is required")
+		return manageClusterOut{}, invalid(fieldProfileID, "profileId is required")
 	}
 	switch {
 	case input.Action == "get" && input.Type == "version":
@@ -200,31 +257,34 @@ func manageCluster(ctx context.Context, backend Backend, input manageClusterIn) 
 		return output, err
 	case input.Action == "get" && input.Type == "capabilities":
 		if output.Namespace == "" {
-			return manageClusterOut{}, invalid("namespace", "namespace is required for capabilities")
+			return manageClusterOut{}, invalid(resourceNamespace, "namespace is required for capabilities")
 		}
 		value, err := backend.Capabilities(ctx, output.ProfileID, output.Namespace)
 		output.Capabilities = &value
 		return output, err
-	case input.Action == "list" && input.Type == "namespace":
+	case input.Action == actionList && input.Type == resourceNamespace:
 		items, err := backend.Namespaces(ctx, output.ProfileID)
 		output.Namespaces = items
 		return output, err
-	case input.Action == "list" && input.Type == "service":
+	case input.Action == actionList && input.Type == "service":
 		if output.Namespace == "" {
-			return manageClusterOut{}, invalid("namespace", "namespace is required for Services")
+			return manageClusterOut{}, invalid(resourceNamespace, "namespace is required for Services")
 		}
 		items, err := backend.Services(ctx, output.ProfileID, output.Namespace)
 		output.Services = items
 		return output, err
-	case input.Action == "list" && input.Type == "pod":
+	case input.Action == actionList && input.Type == resourcePod:
 		if output.Namespace == "" {
-			return manageClusterOut{}, invalid("namespace", "namespace is required for Pods")
+			return manageClusterOut{}, invalid(resourceNamespace, "namespace is required for Pods")
 		}
 		items, err := backend.Pods(ctx, output.ProfileID, output.Namespace)
 		output.Pods = items
 		return output, err
 	default:
-		return manageClusterOut{}, invalid("action", "supported combinations are get/version, get/capabilities, and list/namespace|service|pod")
+		return manageClusterOut{}, invalid(
+			"action",
+			"supported combinations are get/version, get/capabilities, and list/namespace|service|pod",
+		)
 	}
 }
 
@@ -241,17 +301,17 @@ func manageConnection(ctx context.Context, backend Backend, input manageConnecti
 	switch input.Action {
 	case "status":
 		session, err = backend.CurrentSession(input.ProfileID)
-	case "connect":
+	case actionConnect:
 		if strings.TrimSpace(input.Namespace) == "" {
-			return manageConnectionOut{}, invalid("namespace", "namespace is required for connect")
+			return manageConnectionOut{}, invalid(resourceNamespace, "namespace is required for connect")
 		}
 		session, err = backend.Connect(ctx, input.ProfileID, input.Namespace)
-	case "disconnect":
+	case actionDisconnect:
 		if strings.TrimSpace(input.SessionID) == "" {
 			return manageConnectionOut{}, invalid("sessionId", "sessionId is required for disconnect")
 		}
 		if strings.TrimSpace(input.Namespace) == "" {
-			return manageConnectionOut{}, invalid("namespace", "namespace is required for disconnect")
+			return manageConnectionOut{}, invalid(resourceNamespace, "namespace is required for disconnect")
 		}
 		current, currentErr := backend.CurrentSession(input.ProfileID)
 		if currentErr != nil {
@@ -260,7 +320,7 @@ func manageConnection(ctx context.Context, backend Backend, input manageConnecti
 		err = backend.Disconnect(ctx, input.ProfileID, input.SessionID, input.Namespace)
 		session = current
 		if err == nil {
-			session.State = "stopped"
+			session.State = sessionStateStopped
 		}
 	default:
 		return manageConnectionOut{}, invalid("action", "action must be status, connect, or disconnect")
@@ -276,35 +336,36 @@ func manageTraffic(ctx context.Context, backend Backend, input manageTrafficIn) 
 		return manageTrafficOut{}, invalid("profileId", "profileId is required")
 	}
 	switch input.Action {
-	case "list":
+	case actionList:
 		if input.Type != "" && !validTrafficType(input.Type) {
 			return manageTrafficOut{}, invalid("type", "type must be exchange, mirror, preview, or port_forward")
 		}
 		items, err := backend.ListTraffic(input.ProfileID, input.Type)
 		return manageTrafficOut{Action: input.Action, Type: input.Type, Items: items}, err
-	case "start":
+	case actionStart:
 		if err := validateMutationIdentity(input.ProfileID, input.SessionID, input.Namespace); err != nil {
 			return manageTrafficOut{}, err
 		}
 		if !validTrafficType(input.Type) {
 			return manageTrafficOut{}, invalid("type", "type must be exchange, mirror, preview, or port_forward")
 		}
-		if input.Type == "exchange" || input.Type == "mirror" {
+		switch input.Type {
+		case trafficTypeExchange, trafficTypeMirror:
 			if strings.TrimSpace(input.Service) == "" {
 				return manageTrafficOut{}, invalid("service", "service is required")
 			}
 			if len(input.Targets) == 0 {
 				return manageTrafficOut{}, invalid("targets", "at least one explicit local target is required")
 			}
-		} else if input.Type == "preview" {
+		case trafficTypePreview:
 			if strings.TrimSpace(input.Name) == "" {
 				return manageTrafficOut{}, invalid("name", "name is required")
 			}
 			if len(input.Targets) == 0 {
 				return manageTrafficOut{}, invalid("targets", "at least one explicit local target is required")
 			}
-		} else {
-			if input.TargetKind != "pod" && input.TargetKind != "service" {
+		default:
+			if input.TargetKind != resourcePod && input.TargetKind != "service" {
 				return manageTrafficOut{}, invalid("targetKind", "targetKind must be pod or service")
 			}
 			if strings.TrimSpace(input.TargetName) == "" {
@@ -319,9 +380,18 @@ func manageTraffic(ctx context.Context, backend Backend, input manageTrafficIn) 
 			targets[index] = LocalTarget(target)
 		}
 		item, err := backend.StartTraffic(ctx, TrafficStartRequest{
-			Type: input.Type, ProfileID: input.ProfileID, SessionID: input.SessionID, Namespace: input.Namespace,
-			Service: input.Service, Name: input.Name, Targets: targets, TargetKind: input.TargetKind,
-			TargetName: input.TargetName, Protocol: input.Protocol, RemotePort: input.RemotePort, LocalPort: input.LocalPort,
+			Type:       input.Type,
+			ProfileID:  input.ProfileID,
+			SessionID:  input.SessionID,
+			Namespace:  input.Namespace,
+			Service:    input.Service,
+			Name:       input.Name,
+			Targets:    targets,
+			TargetKind: input.TargetKind,
+			TargetName: input.TargetName,
+			Protocol:   input.Protocol,
+			RemotePort: input.RemotePort,
+			LocalPort:  input.LocalPort,
 		})
 		return manageTrafficOut{Action: input.Action, Type: input.Type, TaskID: trafficItemID(item), Item: &item}, err
 	case "stop":
@@ -349,7 +419,7 @@ func execPodCommand(ctx context.Context, backend Backend, input podCommandIn) (P
 		return PodCommandResult{}, err
 	}
 	if strings.TrimSpace(input.Pod) == "" {
-		return PodCommandResult{}, invalid("pod", "pod is required")
+		return PodCommandResult{}, invalid(resourcePod, "pod is required")
 	}
 	if len(input.Command) == 0 {
 		return PodCommandResult{}, invalid("command", "command must contain explicit argv")
@@ -367,21 +437,21 @@ func manageFileTransfer(backend Backend, input manageFileTransferIn) (manageFile
 		return manageFileTransferOut{}, invalid("profileId", "profileId is required")
 	}
 	switch input.Action {
-	case "list":
+	case actionList:
 		items, err := backend.ListFileTransfers(input.ProfileID)
 		return manageFileTransferOut{Action: input.Action, Items: items}, err
-	case "start":
+	case actionStart:
 		if err := validateMutationIdentity(input.ProfileID, input.SessionID, input.Namespace); err != nil {
 			return manageFileTransferOut{}, err
 		}
 		if input.Direction != "upload" && input.Direction != "download" {
 			return manageFileTransferOut{}, invalid("direction", "direction must be upload or download")
 		}
-		if input.Kind != "file" && input.Kind != "directory" {
+		if input.Kind != fileKindFile && input.Kind != fileKindDirectory {
 			return manageFileTransferOut{}, invalid("kind", "kind must be file or directory")
 		}
 		if strings.TrimSpace(input.Pod) == "" {
-			return manageFileTransferOut{}, invalid("pod", "pod is required")
+			return manageFileTransferOut{}, invalid(resourcePod, "pod is required")
 		}
 		if strings.TrimSpace(input.LocalPath) == "" {
 			return manageFileTransferOut{}, invalid("localPath", "localPath is required")
@@ -428,7 +498,7 @@ func managePodFiles(ctx context.Context, backend Backend, input managePodFilesIn
 	input.Container = strings.TrimSpace(input.Container)
 	input.Path = strings.TrimSpace(input.Path)
 	if input.Pod == "" {
-		return managePodFilesOut{}, invalid("pod", "pod is required")
+		return managePodFilesOut{}, invalid(resourcePod, "pod is required")
 	}
 	if input.Path == "" {
 		return managePodFilesOut{}, invalid("path", "path is required")
@@ -442,22 +512,25 @@ func managePodFiles(ctx context.Context, backend Backend, input managePodFilesIn
 		Destination: strings.TrimSpace(input.Destination),
 		Kind:        strings.ToLower(strings.TrimSpace(input.Kind)), Recursive: input.Recursive,
 	}
-	if input.Action == "list" {
+	if input.Action == actionList {
 		listing, err := backend.ListPodFiles(ctx, identity, spec)
 		output.Listing = &listing
 		return output, err
 	}
-	if input.Action != "create" && input.Action != "rename" && input.Action != "delete" {
+	if input.Action != actionCreate && input.Action != actionRename && input.Action != actionDelete {
 		return managePodFilesOut{}, invalid("action", "action must be list, create, rename, or delete")
 	}
 	input.IdempotencyKey = strings.TrimSpace(input.IdempotencyKey)
 	if input.IdempotencyKey == "" || len(input.IdempotencyKey) > 128 {
-		return managePodFilesOut{}, invalid("idempotencyKey", "idempotencyKey is required and must be at most 128 bytes")
+		return managePodFilesOut{}, invalid(
+			"idempotencyKey",
+			"idempotencyKey is required and must be at most 128 bytes",
+		)
 	}
-	if input.Action == "create" && spec.Kind != "file" && spec.Kind != "directory" {
+	if input.Action == actionCreate && spec.Kind != fileKindFile && spec.Kind != fileKindDirectory {
 		return managePodFilesOut{}, invalid("kind", "kind must be file or directory for create")
 	}
-	if input.Action == "rename" && spec.Destination == "" {
+	if input.Action == actionRename && spec.Destination == "" {
 		return managePodFilesOut{}, invalid("destination", "destination is required for rename")
 	}
 	task, err := backend.CreatePodFileOperation(ctx, identity, input.Action, spec, input.IdempotencyKey)
@@ -473,11 +546,12 @@ func validateMutationIdentity(profileID, sessionID, namespace string) error {
 		return invalid("sessionId", "sessionId is required")
 	}
 	if strings.TrimSpace(namespace) == "" {
-		return invalid("namespace", "namespace is required")
+		return invalid(resourceNamespace, "namespace is required")
 	}
 	return nil
 }
 
 func validTrafficType(value string) bool {
-	return value == "exchange" || value == "mirror" || value == "preview" || value == "port_forward"
+	return value == trafficTypeExchange || value == trafficTypeMirror ||
+		value == trafficTypePreview || value == trafficTypePortForward
 }

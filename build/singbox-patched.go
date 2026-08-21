@@ -59,7 +59,12 @@ func main() {
 		}
 	}
 	if checkOnly {
-		fmt.Printf("==> %d sing-box patches apply cleanly to %s (%s)\n", len(patchPaths), singboxdist.Version, singboxdist.SourceRevision)
+		fmt.Printf(
+			"==> %d sing-box patches apply cleanly to %s (%s)\n",
+			len(patchPaths),
+			singboxdist.Version,
+			singboxdist.SourceRevision,
+		)
 		return
 	}
 
@@ -86,7 +91,9 @@ func main() {
 		fatalf("read sing-box linker flags: %v", err)
 	}
 	version := strings.TrimPrefix(singboxdist.Version, "v")
-	ldflags := strings.TrimSpace("-s -w -X github.com/sagernet/sing-box/constant.Version=" + version + " " + sharedLDFlags)
+	ldflags := strings.TrimSpace(
+		"-s -w -X github.com/sagernet/sing-box/constant.Version=" + version + " " + sharedLDFlags,
+	)
 	args := []string{
 		"build", "-buildvcs=false", "-trimpath", "-tags", tags, "-ldflags", ldflags,
 		"-o", output, "./cmd/sing-box",
@@ -146,7 +153,11 @@ func verifyPinnedSource(sourceDir string) error {
 	command.Dir = sourceDir
 	output, err = command.Output()
 	if err != nil || strings.TrimSpace(string(output)) != singboxdist.SourceRevision {
-		return fmt.Errorf("sing-box tag %s must resolve to revision %s", singboxdist.Version, singboxdist.SourceRevision)
+		return fmt.Errorf(
+			"sing-box tag %s must resolve to revision %s",
+			singboxdist.Version,
+			singboxdist.SourceRevision,
+		)
 	}
 	return nil
 }
@@ -168,7 +179,8 @@ func exportSource(sourceDir, destination string) error {
 			return err
 		}
 		clean := filepath.Clean(filepath.FromSlash(header.Name))
-		if clean == "." || filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		if clean == "." || filepath.IsAbs(clean) || clean == ".." ||
+			strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
 			return errors.New("sing-box archive contains an unsafe path")
 		}
 		path := filepath.Join(destination, clean)

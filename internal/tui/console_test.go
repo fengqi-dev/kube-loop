@@ -205,7 +205,9 @@ func TestUpdateConsoleMouseNavigation(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			model := newConsoleTestModel(tabConnection, test.width, 28)
-			event := tea.MouseMsg(tea.MouseEvent{X: test.x, Y: test.y, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
+			event := tea.MouseMsg(
+				tea.MouseEvent{X: test.x, Y: test.y, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft},
+			)
 			if _, handled := model.updateConsole(event); !handled {
 				t.Fatal("mouse event was not handled")
 			}
@@ -241,11 +243,15 @@ func TestUpdateAddProfileAcceptsPasteAndUnicode(t *testing.T) {
 func TestUpdateConsoleListMouseAndWheel(t *testing.T) {
 	model := newConsoleTestModel(tabWorkloads, 120, 32)
 	model.pods = []clientremote.Pod{{Name: "one"}, {Name: "two"}, {Name: "three"}}
-	model.updateConsole(tea.MouseMsg(tea.MouseEvent{X: 30, Y: 9, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft}))
+	model.updateConsole(
+		tea.MouseMsg(tea.MouseEvent{X: 30, Y: 9, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft}),
+	)
 	if model.cursor != 1 {
 		t.Fatalf("cursor after row click = %d, want 1", model.cursor)
 	}
-	model.updateConsole(tea.MouseMsg(tea.MouseEvent{X: 30, Y: 9, Action: tea.MouseActionPress, Button: tea.MouseButtonWheelDown}))
+	model.updateConsole(
+		tea.MouseMsg(tea.MouseEvent{X: 30, Y: 9, Action: tea.MouseActionPress, Button: tea.MouseButtonWheelDown}),
+	)
 	if model.cursor != 2 {
 		t.Fatalf("cursor after wheel = %d, want 2", model.cursor)
 	}
@@ -277,7 +283,9 @@ func TestUpdateConsoleTaskFilterAndProfileOverlay(t *testing.T) {
 func TestUpdateConsoleDetailFocusAndCopyOutput(t *testing.T) {
 	model := newConsoleTestModel(tabTasks, 120, 32)
 	model.execTasks = []execTaskView{{Pod: "api-0", State: "running", Output: "READY=true"}}
-	model.updateConsole(tea.MouseMsg(tea.MouseEvent{X: 100, Y: 9, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft}))
+	model.updateConsole(
+		tea.MouseMsg(tea.MouseEvent{X: 100, Y: 9, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft}),
+	)
 	if model.console.views[tabTasks].focus != focusDetail {
 		t.Fatal("detail click did not focus the details panel")
 	}
@@ -324,7 +332,9 @@ func TestUpdateConsolePagingAndTaskActions(t *testing.T) {
 func TestUpdateConsoleMouseButtons(t *testing.T) {
 	t.Run("connection button", func(t *testing.T) {
 		model := newConsoleTestModel(tabConnection, 120, 32)
-		cmd, handled := model.updateConsole(tea.MouseMsg(tea.MouseEvent{X: 90, Y: 7, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft}))
+		cmd, handled := model.updateConsole(
+			tea.MouseMsg(tea.MouseEvent{X: 90, Y: 7, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft}),
+		)
 		if !handled || cmd == nil || !model.loading {
 			t.Fatalf("handled=%v cmd=%v loading=%v", handled, cmd != nil, model.loading)
 		}
@@ -334,7 +344,9 @@ func TestUpdateConsoleMouseButtons(t *testing.T) {
 		model := newConsoleTestModel(tabTasks, 120, 32)
 		model.execTasks = []execTaskView{{ID: "exec", Pod: "api-0", State: "running"}}
 		model.updateConsole(consoleKey("d"))
-		cmd, handled := model.updateConsole(tea.MouseMsg(tea.MouseEvent{X: 30, Y: 19, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft}))
+		cmd, handled := model.updateConsole(
+			tea.MouseMsg(tea.MouseEvent{X: 30, Y: 19, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft}),
+		)
 		if !handled || cmd == nil || model.console.overlay != overlayNone {
 			t.Fatalf("handled=%v cmd=%v overlay=%d", handled, cmd != nil, model.console.overlay)
 		}
@@ -343,7 +355,9 @@ func TestUpdateConsoleMouseButtons(t *testing.T) {
 	t.Run("action cancel button", func(t *testing.T) {
 		model := newConsoleTestModel(tabTasks, 120, 32)
 		model.actionMode, model.actionPod = actionExec, "api-0"
-		_, handled := model.updateConsole(tea.MouseMsg(tea.MouseEvent{X: 90, Y: 19, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft}))
+		_, handled := model.updateConsole(
+			tea.MouseMsg(tea.MouseEvent{X: 90, Y: 19, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft}),
+		)
 		if !handled || model.actionMode != actionNone {
 			t.Fatalf("handled=%v actionMode=%d", handled, model.actionMode)
 		}
@@ -519,7 +533,11 @@ func TestUpdateConsoleFilterMode(t *testing.T) {
 		assertConsoleContains(t, model.View(), "/web", "web-0")
 		model.updateConsole(tea.KeyMsg{Type: tea.KeyEnter})
 		if model.console.inputMode != inputNone || model.consoleItemCount() != 1 {
-			t.Fatalf("inputMode=%d count=%d after enter, filter should persist", model.console.inputMode, model.consoleItemCount())
+			t.Fatalf(
+				"inputMode=%d count=%d after enter, filter should persist",
+				model.console.inputMode,
+				model.consoleItemCount(),
+			)
 		}
 	})
 

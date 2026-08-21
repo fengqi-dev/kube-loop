@@ -71,7 +71,7 @@ func TestDialTCPWithPasswordAuthentication(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer listener.Close()
+	defer checkTestClose(t, listener.Close)
 	serverErr := make(chan error, 1)
 	go func() {
 		conn, acceptErr := listener.Accept()
@@ -79,7 +79,7 @@ func TestDialTCPWithPasswordAuthentication(t *testing.T) {
 			serverErr <- acceptErr
 			return
 		}
-		defer conn.Close()
+		defer checkTestClose(t, conn.Close)
 		reader := bufio.NewReader(conn)
 		greeting := make([]byte, 3)
 		if _, readErr := io.ReadFull(reader, greeting); readErr != nil {
@@ -158,7 +158,7 @@ func TestDialTCPWithPasswordAuthentication(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close()
+	defer checkTestClose(t, conn.Close)
 	_ = conn.SetDeadline(time.Now().Add(time.Second))
 	ready := make([]byte, 5)
 	if _, err := io.ReadFull(conn, ready); err != nil {
@@ -187,7 +187,7 @@ func TestDialUDPHidesSOCKSDatagramFraming(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer listener.Close()
+	defer checkTestClose(t, listener.Close)
 	serverErr := make(chan error, 1)
 	go func() {
 		control, acceptErr := listener.Accept()
@@ -195,7 +195,7 @@ func TestDialUDPHidesSOCKSDatagramFraming(t *testing.T) {
 			serverErr <- acceptErr
 			return
 		}
-		defer control.Close()
+		defer checkTestClose(t, control.Close)
 		reader := bufio.NewReader(control)
 		greeting := make([]byte, 3)
 		if _, readErr := io.ReadFull(reader, greeting); readErr != nil {
@@ -226,7 +226,7 @@ func TestDialUDPHidesSOCKSDatagramFraming(t *testing.T) {
 			serverErr <- listenErr
 			return
 		}
-		defer relay.Close()
+		defer checkTestClose(t, relay.Close)
 		bound, _ := encodeAddress("127.0.0.1", uint16(relay.LocalAddr().(*net.UDPAddr).Port))
 		if err := writeAll(control, append([]byte{socksVersion, 0, 0}, bound...)); err != nil {
 			serverErr <- err
@@ -261,7 +261,7 @@ func TestDialUDPHidesSOCKSDatagramFraming(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close()
+	defer checkTestClose(t, conn.Close)
 	_ = conn.SetDeadline(time.Now().Add(time.Second))
 	if _, err := conn.Write([]byte("query")); err != nil {
 		t.Fatal(err)

@@ -37,7 +37,11 @@ func TestLoadOrCreateAuthority_ReusesDeviceIdentity(t *testing.T) {
 		t.Fatalf("parse public certificate: %v", err)
 	}
 	if !certificate.IsCA || certificate.Subject.CommonName != AuthorityCommonName {
-		t.Fatalf("unexpected authority certificate: is_ca=%t common_name=%q", certificate.IsCA, certificate.Subject.CommonName)
+		t.Fatalf(
+			"unexpected authority certificate: is_ca=%t common_name=%q",
+			certificate.IsCA,
+			certificate.Subject.CommonName,
+		)
 	}
 	fingerprint := sha256.Sum256(certificate.Raw)
 	if got := strings.ToUpper(hex.EncodeToString(fingerprint[:])); got != first.FingerprintSHA256() {

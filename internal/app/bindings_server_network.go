@@ -44,7 +44,11 @@ func (a *App) SetServerDNSNamespace(profileID, namespace string) (ServerNetworkS
 	}
 	if a.dataPlanes != nil {
 		if _, statusErr := a.dataPlanes.Status(profileID); statusErr == nil {
-			if updateErr := a.dataPlanes.UpdateDNSNamespace(a.context(), profileID, stored.DNSNamespace); updateErr != nil {
+			if updateErr := a.dataPlanes.UpdateDNSNamespace(
+				a.context(),
+				profileID,
+				stored.DNSNamespace,
+			); updateErr != nil {
 				_ = a.profiles.Upsert(previous)
 				return ServerNetworkSettings{}, updateErr
 			}
@@ -140,6 +144,7 @@ func (a *App) GetServerSingBoxConfig(profileID string) (string, error) {
 	}
 	var pretty bytes.Buffer
 	if err := json.Indent(&pretty, raw, "", "  "); err != nil {
+		//nolint:nilerr // Raw generated config remains useful when optional pretty printing fails.
 		return string(raw), nil
 	}
 	return pretty.String(), nil

@@ -64,7 +64,11 @@ func TestServerProfileStoreRequiresCurrentVersionAndRejectsUnknownFields(t *test
 	if _, err := decodeState([]byte(`{"activeProfileId":"one","profiles":[]}`)); err == nil {
 		t.Fatal("unversioned Server Profile store was accepted")
 	}
-	if _, err := decodeState([]byte(`{"version":1,"profiles":[{"schemaVersion":1,"id":"one","baseUrl":"https://one.example.test","tunnelPath":"/tunnel"}]}`)); err == nil {
+	if _, err := decodeState(
+		[]byte(
+			`{"version":1,"profiles":[{"schemaVersion":1,"id":"one","baseUrl":"https://one.example.test","tunnelPath":"/tunnel"}]}`,
+		),
+	); err == nil {
 		t.Fatal("unknown Server Profile field was accepted")
 	}
 }
@@ -99,7 +103,9 @@ func TestServerProfileStorePersistsAndValidatesSOCKSPort(t *testing.T) {
 		t.Fatalf("SOCKS port = %d", got)
 	}
 	for _, port := range []int{-1, 65536} {
-		if err := store.Upsert(Profile{ID: "invalid", BaseURL: "https://invalid.example.test", SOCKSPort: port}); err == nil {
+		if err := store.Upsert(
+			Profile{ID: "invalid", BaseURL: "https://invalid.example.test", SOCKSPort: port},
+		); err == nil {
 			t.Fatalf("invalid SOCKS port accepted: %d", port)
 		}
 	}
@@ -124,7 +130,8 @@ func TestServerProfileStoreRecoversFromValidBackup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !recovered.RecoveredFromBackup() || len(recovered.Snapshot().Profiles) != 1 || recovered.Snapshot().Profiles[0].ID != "one" {
+	if !recovered.RecoveredFromBackup() || len(recovered.Snapshot().Profiles) != 1 ||
+		recovered.Snapshot().Profiles[0].ID != "one" {
 		t.Fatalf("recovered state = %#v", recovered.Snapshot())
 	}
 }

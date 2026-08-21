@@ -16,8 +16,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/fengqi-dev/kube-loop/internal/helper"
 	"golang.org/x/sys/windows"
+
+	"github.com/fengqi-dev/kube-loop/internal/helper"
 )
 
 const elevatedResultPollInterval = 100 * time.Millisecond

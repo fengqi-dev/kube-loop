@@ -16,6 +16,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/wailsapp/wails/v2/pkg/runtime"
+
 	clientauth "github.com/fengqi-dev/kube-loop/internal/client/auth"
 	"github.com/fengqi-dev/kube-loop/internal/client/credentials"
 	clientdataplane "github.com/fengqi-dev/kube-loop/internal/client/dataplane"
@@ -39,7 +41,6 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/trafficinspect"
 	"github.com/fengqi-dev/kube-loop/internal/update"
 	"github.com/fengqi-dev/kube-loop/internal/userpaths"
-	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 type App struct {
@@ -164,33 +165,32 @@ func newTrafficInspection(version, profilePath string) (
 	layout, err := appUserLayout(version, profilePath)
 	if err != nil {
 		log.Printf("traffic inspection output: resolve user layout: %v", err)
-		return switchableTrafficInspection(config, events, sink, enabled)
+		return switchableTrafficInspection(config, events, sink)
 	}
 	path := filepath.Join(layout.DataDir(), "traffic-inspection", "events.jsonl")
 	fileSink, err := trafficinspect.NewDailyJSONLFileSink(path)
 	if err != nil {
 		log.Printf("traffic inspection output: %v", err)
-		return switchableTrafficInspection(config, events, sink, enabled)
+		return switchableTrafficInspection(config, events, sink)
 	}
 	combined, err := trafficinspect.NewMultiSink(events, fileSink)
 	if err != nil {
 		log.Printf("traffic inspection output: %v", err)
-		return switchableTrafficInspection(config, events, events, enabled)
+		return switchableTrafficInspection(config, events, events)
 	}
 	sink = combined
 	config.OnSinkError = func(err error) {
 		log.Printf("traffic inspection output: %v", err)
 	}
-	return switchableTrafficInspection(config, events, sink, enabled)
+	return switchableTrafficInspection(config, events, sink)
 }
 
 func switchableTrafficInspection(
 	config clientdataplane.TrafficInspectionConfig,
 	events *trafficinspect.RingBufferSink,
 	sink trafficinspect.Sink,
-	enabled bool,
 ) (clientdataplane.TrafficInspectionConfig, *trafficinspect.RingBufferSink, *trafficinspect.SwitchableSink) {
-	switchable, err := trafficinspect.NewSwitchableSink(sink, enabled)
+	switchable, err := trafficinspect.NewSwitchableSink(sink, true)
 	if err != nil {
 		log.Printf("traffic inspection switch: %v", err)
 		return config, events, nil
@@ -209,7 +209,9 @@ func newApp(version string, embeddedHelperFiles fs.FS, dependencies appDependenc
 	var developmentTLSConfig *tls.Config
 	var developmentTLSErr error
 	if dependencies.httpClient == nil && helper.IsDevBuild() {
-		dependencies.httpClient, developmentTLSConfig, developmentTLSErr = developmentGatewayHTTPClient(embeddedHelperFiles)
+		dependencies.httpClient, developmentTLSConfig, developmentTLSErr = developmentGatewayHTTPClient(
+			embeddedHelperFiles,
+		)
 	}
 
 	layout, layoutErr := appUserLayout(version, dependencies.profilePath)
@@ -220,7 +222,7 @@ func newApp(version string, embeddedHelperFiles fs.FS, dependencies appDependenc
 			trafficInspectionSwitch: dependencies.trafficInspectionSwitch,
 			updateState: update.Info{
 				CurrentVersion: version,
-				URL:            "https://github.com/fengqi-dev/kube-loop/releases",
+				URL:            releaseURL,
 			},
 		}
 		application.appendLog("ERROR", "KubeLoop user layout unavailable: "+layoutErr.Error())
@@ -233,7 +235,9 @@ func newApp(version string, embeddedHelperFiles fs.FS, dependencies appDependenc
 	profileStore, profileErr := clientprofile.Open(profilePath)
 	transferStatePath := filepath.Join(layout.StateDir(), "transfers.json")
 	trafficInspectionSettingsPath := filepath.Join(layout.ConfigDir(), "traffic-inspection.json")
-	trafficInspectionSettings, trafficInspectionSettingsErr := trafficinspect.NewSettingsStore(trafficInspectionSettingsPath)
+	trafficInspectionSettings, trafficInspectionSettingsErr := trafficinspect.NewSettingsStore(
+		trafficInspectionSettingsPath,
+	)
 	if trafficInspectionSettingsErr == nil && dependencies.trafficInspectionSwitch != nil {
 		settings, loadErr := trafficInspectionSettings.Load(trafficinspect.Settings{
 			Enabled: dependencies.trafficInspection.Enabled,
@@ -259,26 +263,35 @@ func newApp(version string, embeddedHelperFiles fs.FS, dependencies appDependenc
 		credentialStore = credentials.NewSystemStoreForVersion(version)
 	}
 	application := &App{
-		profiles:                  profileStore,
-		discovery:                 clientdiscovery.New(clientdiscovery.Config{ClientVersion: version, HTTPClient: dependencies.httpClient}),
+		profiles: profileStore,
+		discovery: clientdiscovery.New(clientdiscovery.Config{
+			ClientVersion: version,
+			HTTPClient:    dependencies.httpClient,
+		}),
 		credentials:               credentialStore,
 		updater:                   &update.Checker{CurrentVersion: version},
 		trafficInspectionEvents:   dependencies.trafficInspectionEvents,
 		trafficInspectionSwitch:   dependencies.trafficInspectionSwitch,
 		trafficInspectionSettings: trafficInspectionSettings,
 		trafficInspectionProtobuf: trafficInspectionProtobuf,
-		trafficInspectionCAPath:   firstNonEmpty(dependencies.trafficInspection.AuthorityPath, filepath.Join(layout.SecretsDir(), "inspection-ca.pem")),
-		trafficInspectionTrust:    trafficinspect.NewSystemTrustStore(),
+		trafficInspectionCAPath: firstNonEmpty(
+			dependencies.trafficInspection.AuthorityPath,
+			filepath.Join(layout.SecretsDir(), "inspection-ca.pem"),
+		),
+		trafficInspectionTrust: trafficinspect.NewSystemTrustStore(),
 		updateState: update.Info{
 			CurrentVersion: version,
-			URL:            "https://github.com/fengqi-dev/kube-loop/releases",
+			URL:            releaseURL,
 		},
 	}
 	if trafficInspectionSettingsErr != nil {
 		application.appendLog("ERROR", "Traffic inspection settings unavailable: "+trafficInspectionSettingsErr.Error())
 	}
 	if trafficInspectionProtobufErr != nil {
-		application.appendLog("ERROR", "Traffic inspection protobuf schemas unavailable: "+trafficInspectionProtobufErr.Error())
+		application.appendLog(
+			"ERROR",
+			"Traffic inspection protobuf schemas unavailable: "+trafficInspectionProtobufErr.Error(),
+		)
 	}
 	application.trafficInspectionReady = func() bool {
 		return helper.GetStatus(application.context()).Running
@@ -286,11 +299,12 @@ func newApp(version string, embeddedHelperFiles fs.FS, dependencies appDependenc
 	if closer, ok := dependencies.trafficInspection.Sink.(io.Closer); ok {
 		application.trafficInspectionOutput = closer
 	}
-	if profileErr != nil {
+	switch {
+	case profileErr != nil:
 		application.appendLog("ERROR", "Server Profile store unavailable: "+profileErr.Error())
-	} else if profileStore.RecoveredFromBackup() {
+	case profileStore.RecoveredFromBackup():
 		application.appendLog("WARN", "Server Profile store recovered from backup")
-	} else {
+	default:
 		application.appendLog("INFO", "Server Profile store loaded")
 	}
 	if developmentTLSErr != nil {
@@ -373,6 +387,19 @@ func newApp(version string, embeddedHelperFiles fs.FS, dependencies appDependenc
 		return application
 	}
 	application.dataPlanes = dataPlanes
+	configureRemoteTaskManagers(application, layout, remoteClient, remoteSessions, dataPlanes)
+
+	configureMCP(application, layout, version)
+	return application
+}
+
+func configureRemoteTaskManagers(
+	application *App,
+	layout userpaths.Layout,
+	remoteClient *clientremote.Client,
+	remoteSessions *clientremotesession.Manager,
+	dataPlanes *clientdataplane.Manager,
+) {
 	remoteSSH, sshErr := clientpodssh.New(remoteClient, remoteSessions, clientpodssh.Config{
 		HostTCPRegistrar: dataPlanes,
 		ServerOptions: []localpodssh.Option{
@@ -390,7 +417,10 @@ func newApp(version string, embeddedHelperFiles fs.FS, dependencies appDependenc
 	} else {
 		application.remoteForwards = remoteForwards
 	}
-	remoteExchanges, exchangeErr := clientexchange.NewManager(remoteClient, clientexchange.Config{TrafficStreams: dataPlanes})
+	remoteExchanges, exchangeErr := clientexchange.NewManager(
+		remoteClient,
+		clientexchange.Config{TrafficStreams: dataPlanes},
+	)
 	if exchangeErr != nil {
 		application.appendLog("ERROR", "Exchange Manager unavailable: "+exchangeErr.Error())
 	} else {
@@ -402,18 +432,23 @@ func newApp(version string, embeddedHelperFiles fs.FS, dependencies appDependenc
 	} else {
 		application.remoteMirrors = remoteMirrors
 	}
-	remotePreviews, previewErr := clientpreview.NewManager(remoteClient, clientpreview.Config{TrafficStreams: dataPlanes})
+	remotePreviews, previewErr := clientpreview.NewManager(
+		remoteClient,
+		clientpreview.Config{TrafficStreams: dataPlanes},
+	)
 	if previewErr != nil {
 		application.appendLog("ERROR", "Preview Manager unavailable: "+previewErr.Error())
 	} else {
 		application.remotePreviews = remotePreviews
 	}
+}
 
+func configureMCP(application *App, layout userpaths.Layout, version string) {
 	mcpSettingsPath := filepath.Join(layout.ConfigDir(), "mcp.json")
-	mcpStore, mcpStoreErr := mcp.NewSystemConfigStoreForVersion(mcpSettingsPath, version)
-	if mcpStoreErr != nil {
-		application.appendLog("ERROR", "MCP settings store unavailable: "+mcpStoreErr.Error())
-		return application
+	mcpStore, err := mcp.NewSystemConfigStoreForVersion(mcpSettingsPath, version)
+	if err != nil {
+		application.appendLog("ERROR", "MCP settings store unavailable: "+err.Error())
+		return
 	}
 	mcpDependencies := mcp.RemoteDependencies{
 		Profiles: application.profiles, ControlPlane: application.remote,
@@ -438,18 +473,17 @@ func newApp(version string, embeddedHelperFiles fs.FS, dependencies appDependenc
 	if application.remotePreviews != nil {
 		mcpDependencies.Previews = application.remotePreviews
 	}
-	mcpBackend, mcpBackendErr := mcp.NewRemoteBackend(mcpDependencies)
-	if mcpBackendErr != nil {
-		application.appendLog("ERROR", "MCP Gateway backend unavailable: "+mcpBackendErr.Error())
-		return application
+	mcpBackend, err := mcp.NewRemoteBackend(mcpDependencies)
+	if err != nil {
+		application.appendLog("ERROR", "MCP Gateway backend unavailable: "+err.Error())
+		return
 	}
-	mcpController, mcpErr := mcp.NewController(mcpBackend, mcpStore, version, application.appendLog)
-	if mcpErr != nil {
-		application.appendLog("ERROR", "MCP controller unavailable: "+mcpErr.Error())
-		return application
+	mcpController, err := mcp.NewController(mcpBackend, mcpStore, version, application.appendLog)
+	if err != nil {
+		application.appendLog("ERROR", "MCP controller unavailable: "+err.Error())
+		return
 	}
 	application.mcp = mcpController
-	return application
 }
 
 func StartupHandler(a *App) func(context.Context) { return a.startup }

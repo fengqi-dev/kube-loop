@@ -10,17 +10,18 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/fengqi-dev/kube-loop/internal/client/credentials"
 	clientdiscovery "github.com/fengqi-dev/kube-loop/internal/client/discovery"
 	clientprofile "github.com/fengqi-dev/kube-loop/internal/client/profile"
-	"github.com/google/uuid"
 )
 
 type AuthSession struct {
 	Authenticated    bool      `json:"authenticated"`
 	UserName         string    `json:"userName,omitempty"`
-	AccessExpiresAt  time.Time `json:"accessExpiresAt" ts_type:"string"`
-	RefreshExpiresAt time.Time `json:"refreshExpiresAt" ts_type:"string"`
+	AccessExpiresAt  time.Time `json:"accessExpiresAt"    ts_type:"string"`
+	RefreshExpiresAt time.Time `json:"refreshExpiresAt"   ts_type:"string"`
 }
 
 func (a *App) LoginServerOIDC(profileID, providerID string) (AuthSession, error) {
@@ -34,7 +35,7 @@ func (a *App) LoginServerOIDC(profileID, providerID string) (AuthSession, error)
 	if err != nil {
 		return AuthSession{}, err
 	}
-	if method.Interaction != "browser" {
+	if method.Interaction != authenticationProviderBrowser {
 		return AuthSession{}, errors.New("selected provider does not support browser login")
 	}
 	deviceID, err := a.deviceID(serverProfile.ID)
@@ -174,7 +175,11 @@ func (a *App) LogoutServer(profileID string) error {
 	return errors.Join(disconnectErr, revokeErr, deleteErr)
 }
 
-func (a *App) authenticationTarget(profileID, providerID string, providerTypes ...string) (clientprofile.Profile, clientdiscovery.AuthMethod, error) {
+func (a *App) authenticationTarget(
+	profileID,
+	providerID string,
+	providerTypes ...string,
+) (clientprofile.Profile, clientdiscovery.AuthMethod, error) {
 	if a.auth == nil || a.credentials == nil {
 		return clientprofile.Profile{}, clientdiscovery.AuthMethod{}, errors.New("authentication is unavailable")
 	}
@@ -193,12 +198,14 @@ func (a *App) authenticationTarget(profileID, providerID string, providerTypes .
 			}
 		}
 	}
-	return clientprofile.Profile{}, clientdiscovery.AuthMethod{}, errors.New("selected authentication provider is not advertised by this server")
+	return clientprofile.Profile{}, clientdiscovery.AuthMethod{}, errors.New(
+		"selected authentication provider is not advertised by this server",
+	)
 }
 
 func (a *App) serverProfile(profileID string) (clientprofile.Profile, error) {
 	if a.profiles == nil {
-		return clientprofile.Profile{}, errors.New("Server Profile store is unavailable")
+		return clientprofile.Profile{}, errors.New("server profile store is unavailable")
 	}
 	state := a.profiles.Snapshot()
 	profileID = strings.TrimSpace(profileID)
@@ -210,7 +217,7 @@ func (a *App) serverProfile(profileID string) (clientprofile.Profile, error) {
 			return serverProfile, nil
 		}
 	}
-	return clientprofile.Profile{}, errors.New("Server Profile not found")
+	return clientprofile.Profile{}, errors.New("server profile not found")
 }
 
 func (a *App) deviceID(profileID string) (string, error) {
@@ -224,7 +231,10 @@ func (a *App) deviceID(profileID string) (string, error) {
 	return uuid.NewString(), nil
 }
 
-func (a *App) persistCredential(serverProfile clientprofile.Profile, credential credentials.Credential) (AuthSession, error) {
+func (a *App) persistCredential(
+	serverProfile clientprofile.Profile,
+	credential credentials.Credential,
+) (AuthSession, error) {
 	if err := a.credentials.Set(serverProfile.ID, credential); err != nil {
 		_ = a.auth.Revoke(a.context(), serverProfile.BaseURL, credential.RefreshToken)
 		return AuthSession{}, err

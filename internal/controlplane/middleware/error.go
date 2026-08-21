@@ -4,15 +4,24 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
 	"github.com/labstack/echo/v5"
+
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
 )
 
 func BindingError(err error) *controlplaneapi.Error {
 	if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
-		return &controlplaneapi.Error{Code: controlplaneapi.CodeInvalidArgument, Message: "request body exceeds the size limit", Cause: err}
+		return &controlplaneapi.Error{
+			Code:    controlplaneapi.CodeInvalidArgument,
+			Message: "request body exceeds the size limit",
+			Cause:   err,
+		}
 	}
-	return &controlplaneapi.Error{Code: controlplaneapi.CodeInvalidArgument, Message: "request binding failed", Cause: err}
+	return &controlplaneapi.Error{
+		Code:    controlplaneapi.CodeInvalidArgument,
+		Message: "request binding failed",
+		Cause:   err,
+	}
 }
 
 type errorEnvelope struct {
@@ -26,9 +35,16 @@ type errorDocument struct {
 	RequestID string                    `json:"requestId"`
 }
 
-func writeError(ctx *echo.Context, requestID string, apiError *controlplaneapi.Error) {
+func writeError(
+	ctx *echo.Context,
+	requestID string,
+	apiError *controlplaneapi.Error,
+) {
 	if apiError == nil {
-		apiError = &controlplaneapi.Error{Code: controlplaneapi.CodeInternal, Message: "internal server error"}
+		apiError = &controlplaneapi.Error{
+			Code:    controlplaneapi.CodeInternal,
+			Message: internalServerErrorMessage,
+		}
 	}
 	if apiError.Code == "" {
 		apiError.Code = controlplaneapi.CodeInternal
@@ -36,15 +52,18 @@ func writeError(ctx *echo.Context, requestID string, apiError *controlplaneapi.E
 	if apiError.Message == "" {
 		apiError.Message = defaultErrorMessage(apiError.Code)
 	}
-	_ = ctx.JSON(statusForError(apiError.Code), errorEnvelope{Error: errorDocument{
-		Code: apiError.Code, Message: apiError.Message, Field: apiError.Field, RequestID: requestID,
-	}})
+	_ = ctx.JSON(
+		statusForError(apiError.Code),
+		errorEnvelope{Error: errorDocument{
+			Code: apiError.Code, Message: apiError.Message, Field: apiError.Field, RequestID: requestID,
+		}},
+	)
 }
 
 func defaultErrorMessage(code controlplaneapi.ErrorCode) string {
 	switch code {
 	case controlplaneapi.CodeUnauthenticated:
-		return "authentication required"
+		return authenticationRequiredMessage
 	case controlplaneapi.CodeForbidden:
 		return "operation forbidden"
 	case controlplaneapi.CodeNotFound:
@@ -59,8 +78,10 @@ func defaultErrorMessage(code controlplaneapi.ErrorCode) string {
 		return "client version is not supported"
 	case controlplaneapi.CodeRateLimited:
 		return "rate limit exceeded"
+	case controlplaneapi.CodeInternal:
+		return internalServerErrorMessage
 	default:
-		return "internal server error"
+		return internalServerErrorMessage
 	}
 }
 
@@ -82,6 +103,8 @@ func statusForError(code controlplaneapi.ErrorCode) int {
 		return http.StatusUpgradeRequired
 	case controlplaneapi.CodeRateLimited:
 		return http.StatusTooManyRequests
+	case controlplaneapi.CodeInternal:
+		return http.StatusInternalServerError
 	default:
 		return http.StatusInternalServerError
 	}

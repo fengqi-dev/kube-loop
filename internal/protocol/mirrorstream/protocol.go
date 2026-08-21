@@ -52,7 +52,7 @@ func Encode(frame Frame) ([]byte, error) {
 
 func Decode(encoded []byte) (Frame, error) {
 	if len(encoded) < HeaderSize {
-		return Frame{}, errors.New("Mirror frame is truncated")
+		return Frame{}, errors.New("mirror frame is truncated")
 	}
 	frame := Frame{
 		Type: encoded[0], StreamID: binary.BigEndian.Uint64(encoded[1:9]),
@@ -66,37 +66,45 @@ func Decode(encoded []byte) (Frame, error) {
 }
 
 func validate(frame Frame) error {
+	var valid bool
+	var name string
 	switch frame.Type {
 	case Ready:
-		if frame.StreamID != 0 || frame.ServicePort != 0 || frame.Protocol != 0 || len(frame.Payload) != 0 {
-			return errors.New("Mirror ready frame is invalid")
-		}
+		valid, name = validControlFrame(frame, false), "ready"
 	case Open:
-		if frame.StreamID == 0 || frame.ServicePort == 0 || frame.Protocol != ProtocolTCP || len(frame.Payload) != 0 {
-			return errors.New("Mirror open frame is invalid")
-		}
+		valid, name = frame.StreamID != 0 && frame.ServicePort != 0 &&
+			frame.Protocol == ProtocolTCP && len(frame.Payload) == 0, "open"
 	case Data:
-		if frame.StreamID == 0 || frame.ServicePort != 0 || frame.Protocol != 0 || len(frame.Payload) == 0 || len(frame.Payload) > MaximumData {
-			return errors.New("Mirror data frame is invalid")
-		}
+		valid, name = validPayloadFrame(frame, MaximumData), "data"
 	case CloseWrite:
-		if frame.StreamID == 0 || frame.ServicePort != 0 || frame.Protocol != 0 || len(frame.Payload) != 0 {
-			return errors.New("Mirror half-close frame is invalid")
-		}
+		valid, name = validControlFrame(frame, true), "half-close"
 	case Close:
-		if frame.StreamID == 0 || frame.ServicePort != 0 || frame.Protocol != 0 || len(frame.Payload) > MaximumError {
-			return errors.New("Mirror close frame is invalid")
-		}
+		valid, name = validTerminalFrame(frame, true), "close"
 	case Datagram:
-		if frame.StreamID == 0 || frame.ServicePort == 0 || frame.Protocol != ProtocolUDP || len(frame.Payload) == 0 || len(frame.Payload) > 65507 {
-			return errors.New("Mirror datagram frame is invalid")
-		}
+		valid, name = frame.StreamID != 0 && frame.ServicePort != 0 &&
+			frame.Protocol == ProtocolUDP && len(frame.Payload) > 0 && len(frame.Payload) <= 65507, "datagram"
 	case Stop:
-		if frame.StreamID != 0 || frame.ServicePort != 0 || frame.Protocol != 0 || len(frame.Payload) > MaximumError {
-			return errors.New("Mirror stop frame is invalid")
-		}
+		valid, name = validTerminalFrame(frame, false), "stop"
 	default:
-		return fmt.Errorf("unsupported Mirror frame type %d", frame.Type)
+		return fmt.Errorf("unsupported mirror frame type %d", frame.Type)
+	}
+	if !valid {
+		return fmt.Errorf("mirror %s frame is invalid", name)
 	}
 	return nil
+}
+
+func validControlFrame(frame Frame, streamRequired bool) bool {
+	return (frame.StreamID != 0) == streamRequired && frame.ServicePort == 0 &&
+		frame.Protocol == 0 && len(frame.Payload) == 0
+}
+
+func validPayloadFrame(frame Frame, maximum int) bool {
+	return frame.StreamID != 0 && frame.ServicePort == 0 && frame.Protocol == 0 &&
+		len(frame.Payload) > 0 && len(frame.Payload) <= maximum
+}
+
+func validTerminalFrame(frame Frame, streamRequired bool) bool {
+	return (frame.StreamID != 0) == streamRequired && frame.ServicePort == 0 &&
+		frame.Protocol == 0 && len(frame.Payload) <= MaximumError
 }

@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"maps"
 	"net"
@@ -39,7 +40,11 @@ func (r *TrafficBindingReconciler) validateTarget(
 		return r.Get(ctx, types.NamespacedName{Namespace: binding.Namespace, Name: target.Name}, pod)
 	case trafficv1alpha1.TargetKindService:
 		service := &corev1.Service{}
-		if err := r.Get(ctx, types.NamespacedName{Namespace: binding.Namespace, Name: target.Name}, service); err != nil {
+		if err := r.Get(
+			ctx,
+			types.NamespacedName{Namespace: binding.Namespace, Name: target.Name},
+			service,
+		); err != nil {
 			return err
 		}
 		_, err := servicePort(service, port.TargetPort, normalizedProtocol(port.Protocol))
@@ -56,7 +61,8 @@ func (r *TrafficBindingReconciler) reconcilePreview(
 	key := types.NamespacedName{Namespace: binding.Namespace, Name: binding.Spec.Preview.ServiceName}
 	service := &corev1.Service{}
 	err := r.Get(ctx, key, service)
-	if apierrors.IsNotFound(err) {
+	switch {
+	case apierrors.IsNotFound(err):
 		service = desiredPreviewService(binding)
 		if err := controllerutil.SetControllerReference(binding, service, r.Scheme); err != nil {
 			return nil, err
@@ -67,9 +73,9 @@ func (r *TrafficBindingReconciler) reconcilePreview(
 			}
 			return nil, err
 		}
-	} else if err != nil {
+	case err != nil:
 		return nil, err
-	} else {
+	default:
 		if !metav1.IsControlledBy(service, binding) {
 			return nil, permanentf("Service %s/%s is not owned by this TrafficBinding", key.Namespace, key.Name)
 		}
@@ -145,7 +151,12 @@ func (r *TrafficBindingReconciler) captureService(
 		return nil, err
 	}
 	if len(slices.Items) > maximumSliceCount {
-		return nil, permanentf("Service %s/%s has more than %d EndpointSlices", key.Namespace, key.Name, maximumSliceCount)
+		return nil, permanentf(
+			"Service %s/%s has more than %d EndpointSlices",
+			key.Namespace,
+			key.Name,
+			maximumSliceCount,
+		)
 	}
 	snapshot := &trafficv1alpha1.ServiceSnapshot{
 		ServiceName: target.Name, ServiceUID: service.UID,
@@ -156,7 +167,12 @@ func (r *TrafficBindingReconciler) captureService(
 		item := &slices.Items[index]
 		endpointCount += len(item.Endpoints)
 		if endpointCount > maximumEndpointCount {
-			return nil, permanentf("Service %s/%s has more than %d endpoints", key.Namespace, key.Name, maximumEndpointCount)
+			return nil, permanentf(
+				"Service %s/%s has more than %d endpoints",
+				key.Namespace,
+				key.Name,
+				maximumEndpointCount,
+			)
 		}
 		snapshot.EndpointSlices = append(snapshot.EndpointSlices, trafficv1alpha1.EndpointSliceSnapshot{
 			Name: item.Name, AddressType: item.AddressType,
@@ -538,7 +554,7 @@ func ownedByBinding(object metav1.Object, binding *trafficv1alpha1.TrafficBindin
 
 func bindingLabelValue(uid types.UID) string {
 	digest := sha256.Sum256([]byte(uid))
-	return fmt.Sprintf("%x", digest[:16])
+	return hex.EncodeToString(digest[:16])
 }
 
 func managedEndpointSliceName(binding *trafficv1alpha1.TrafficBinding) string {
@@ -582,5 +598,5 @@ func errorsJoin(left, right error) error {
 	if left == nil {
 		return right
 	}
-	return fmt.Errorf("%v; %w", left, right)
+	return fmt.Errorf("%w; %w", left, right)
 }

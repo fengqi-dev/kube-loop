@@ -12,8 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fengqi-dev/kube-loop/internal/gateway/operations"
 	"github.com/labstack/echo/v5"
+
+	"github.com/fengqi-dev/kube-loop/internal/gateway/operations"
 )
 
 type capacityGatewayState struct{}
@@ -25,16 +26,25 @@ func (capacityGatewayState) ActiveConnections() int { return 0 }
 func TestCapacityLimitsSessionsAndStreamsWithoutBlockingHealth(t *testing.T) {
 	identities := map[string]Identity{
 		"one": {
-			IdentityID: "identity-one", DeviceID: "11111111-1111-4111-8111-111111111111",
-			SessionID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", SessionGeneration: 1, ExpiresAt: time.Now().Add(time.Minute),
+			IdentityID:        "identity-one",
+			DeviceID:          "11111111-1111-4111-8111-111111111111",
+			SessionID:         "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+			SessionGeneration: 1,
+			ExpiresAt:         time.Now().Add(time.Minute),
 		},
 		"two": {
-			IdentityID: "identity-two", DeviceID: "22222222-2222-4222-8222-222222222222",
-			SessionID: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", SessionGeneration: 1, ExpiresAt: time.Now().Add(time.Minute),
+			IdentityID:        "identity-two",
+			DeviceID:          "22222222-2222-4222-8222-222222222222",
+			SessionID:         "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+			SessionGeneration: 1,
+			ExpiresAt:         time.Now().Add(time.Minute),
 		},
 		"three": {
-			IdentityID: "identity-three", DeviceID: "33333333-3333-4333-8333-333333333333",
-			SessionID: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", SessionGeneration: 1, ExpiresAt: time.Now().Add(time.Minute),
+			IdentityID:        "identity-three",
+			DeviceID:          "33333333-3333-4333-8333-333333333333",
+			SessionID:         "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+			SessionGeneration: 1,
+			ExpiresAt:         time.Now().Add(time.Minute),
 		},
 	}
 	var activeStreams atomic.Int32
@@ -73,7 +83,7 @@ func TestCapacityLimitsSessionsAndStreamsWithoutBlockingHealth(t *testing.T) {
 	endpoint := "ws" + strings.TrimPrefix(server.URL, "http") + "/tunnel"
 
 	first := startCapacityClient(t, endpoint, "one", identities["one"].DeviceID)
-	defer first.Close()
+	defer func() { _ = first.Close() }()
 	duplicate, duplicateErr := Start(context.Background(), ClientConfig{
 		URL: endpoint, Token: "one", DeviceID: identities["one"].DeviceID, PoolSize: 1, MaxPhysical: 1,
 	})
@@ -85,7 +95,7 @@ func TestCapacityLimitsSessionsAndStreamsWithoutBlockingHealth(t *testing.T) {
 	}
 	waitCapacitySessions(t, handler, 1)
 	second := startCapacityClient(t, endpoint, "two", identities["two"].DeviceID)
-	defer second.Close()
+	defer func() { _ = second.Close() }()
 	waitCapacitySessions(t, handler, 2)
 
 	third, err := Start(context.Background(), ClientConfig{
@@ -132,7 +142,7 @@ func TestCapacityLimitsSessionsAndStreamsWithoutBlockingHealth(t *testing.T) {
 	}
 	waitCapacitySessions(t, handler, 1)
 	replacement := startCapacityClient(t, endpoint, "three", identities["three"].DeviceID)
-	defer replacement.Close()
+	defer func() { _ = replacement.Close() }()
 	waitCapacitySessions(t, handler, 2)
 	assertCapacityHealth(t, server.URL)
 }
@@ -185,7 +195,7 @@ func BenchmarkGatewayLogicalStreamRoundTrip(b *testing.B) {
 		Authenticator: AuthenticatorFunc(func(*http.Request) (Identity, error) { return identity, nil }),
 		MaxSessions:   4, MaxSessionsPerUser: 4, MaxStreamsPerSession: 128,
 		Handle: func(_ context.Context, _ Identity, connection net.Conn) {
-			defer connection.Close()
+			defer func() { _ = connection.Close() }()
 			_, _ = io.Copy(connection, connection)
 		},
 	})
@@ -201,7 +211,7 @@ func BenchmarkGatewayLogicalStreamRoundTrip(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	defer forwarder.Close()
+	defer func() { _ = forwarder.Close() }()
 	payload := make([]byte, 32<<10)
 	response := make([]byte, len(payload))
 	b.SetBytes(int64(len(payload)))

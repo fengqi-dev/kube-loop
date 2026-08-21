@@ -56,13 +56,13 @@ func Load(path string) (Config, error) {
 	if err != nil {
 		return Config{}, fmt.Errorf("open Kubernetes configuration: %w", err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	contents, err := io.ReadAll(io.LimitReader(file, maxConfigBytes+1))
 	if err != nil {
 		return Config{}, fmt.Errorf("read Kubernetes configuration: %w", err)
 	}
 	if len(contents) > maxConfigBytes {
-		return Config{}, errors.New("Kubernetes configuration exceeds 1 MiB")
+		return Config{}, errors.New("kubernetes configuration exceeds 1 MiB")
 	}
 	var document configFile
 	decoder := json.NewDecoder(bytes.NewReader(contents))
@@ -96,26 +96,26 @@ func Normalize(config Config) (Config, error) {
 		config.Timeout = DefaultTimeout
 	}
 	if config.Timeout < time.Second || config.Timeout > 5*time.Minute {
-		return Config{}, errors.New("Kubernetes timeout must be between 1 second and 5 minutes")
+		return Config{}, errors.New("kubernetes timeout must be between 1 second and 5 minutes")
 	}
 	if config.QPS == 0 {
 		config.QPS = DefaultQPS
 	}
 	if config.QPS < 0.1 || config.QPS > 1000 {
-		return Config{}, errors.New("Kubernetes QPS must be between 0.1 and 1000")
+		return Config{}, errors.New("kubernetes QPS must be between 0.1 and 1000")
 	}
 	if config.Burst == 0 {
 		config.Burst = DefaultBurst
 	}
 	if config.Burst < 1 || config.Burst > 10000 {
-		return Config{}, errors.New("Kubernetes burst must be between 1 and 10000")
+		return Config{}, errors.New("kubernetes burst must be between 1 and 10000")
 	}
 	config.UserAgent = strings.TrimSpace(config.UserAgent)
 	if config.UserAgent == "" {
 		config.UserAgent = DefaultUserAgent
 	}
 	if !safeValue(config.UserAgent, 256) {
-		return Config{}, errors.New("Kubernetes user agent is invalid")
+		return Config{}, errors.New("kubernetes user agent is invalid")
 	}
 	impersonation := config.Impersonation
 	impersonation.UsernamePrefix = strings.TrimSpace(impersonation.UsernamePrefix)
@@ -123,21 +123,30 @@ func Normalize(config Config) (Config, error) {
 		if impersonation.UsernamePrefix == "" {
 			impersonation.UsernamePrefix = "kubeloop:"
 		}
-		if !safeValue(impersonation.UsernamePrefix, 128) || strings.HasPrefix(strings.ToLower(impersonation.UsernamePrefix), "system:") {
-			return Config{}, errors.New("Kubernetes impersonation username prefix is invalid")
+		if !safeValue(impersonation.UsernamePrefix, 128) ||
+			strings.HasPrefix(strings.ToLower(impersonation.UsernamePrefix), "system:") {
+			return Config{}, errors.New("kubernetes impersonation username prefix is invalid")
 		}
 	}
 	impersonation.GroupMappings = cloneGroupMappings(impersonation.GroupMappings)
 	for identityGroup, kubernetesGroups := range impersonation.GroupMappings {
 		if !safeValue(identityGroup, 256) {
-			return Config{}, errors.New("Kubernetes impersonation contains an invalid identity group")
+			return Config{}, errors.New(
+				"kubernetes impersonation contains an invalid identity group",
+			)
 		}
 		if len(kubernetesGroups) == 0 {
-			return Config{}, fmt.Errorf("Kubernetes impersonation group %q has no mapped groups", identityGroup)
+			return Config{}, fmt.Errorf(
+				"kubernetes impersonation group %q has no mapped groups",
+				identityGroup,
+			)
 		}
 		for _, group := range kubernetesGroups {
 			if !safeValue(strings.TrimSpace(group), 256) {
-				return Config{}, fmt.Errorf("Kubernetes impersonation group %q has an invalid mapping", identityGroup)
+				return Config{}, fmt.Errorf(
+					"kubernetes impersonation group %q has an invalid mapping",
+					identityGroup,
+				)
 			}
 		}
 	}
@@ -153,7 +162,7 @@ func ensureJSONEOF(decoder *json.Decoder) error {
 	var extra any
 	if err := decoder.Decode(&extra); err != io.EOF {
 		if err == nil {
-			return errors.New("Kubernetes configuration contains trailing JSON")
+			return errors.New("kubernetes configuration contains trailing JSON")
 		}
 		return fmt.Errorf("decode Kubernetes configuration: %w", err)
 	}

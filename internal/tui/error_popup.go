@@ -11,13 +11,13 @@ func (m *Model) updateErrorPopup(message tea.Msg) (tea.Cmd, bool) {
 	switch msg := message.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
-		case "ctrl+c":
+		case keyCtrlC:
 			return nil, false
 		case "y", "c":
 			value := m.err
 			m.status = "Copying error..."
-			return copySessionToClipboard("error", value), true
-		case "enter", "esc", "q":
+			return copySessionToClipboard(m.context(), "error", value), true
+		case keyEnter, keyEsc, "q":
 			m.err = ""
 			return nil, true
 		default:
@@ -37,9 +37,9 @@ func (m Model) viewErrorPopup(height int) string {
 		Width(messageWidth).
 		Foreground(lipgloss.Color("#FF5F68")).
 		Render(strings.TrimSpace(m.err))
-	content := consoleError.Copy().Bold(true).Render("ERROR") + "\n\n" +
+	content := consoleError.Bold(true).Render("ERROR") + "\n\n" +
 		message + "\n\n" +
 		consoleSubtle.Render("y/c copy error   Enter/Esc close")
-	box := consoleOverlayBox.Copy().Width(width).Render(content)
+	box := consoleOverlayBox.Width(width).Render(content)
 	return lipgloss.Place(m.width, height, lipgloss.Center, lipgloss.Center, box)
 }

@@ -22,8 +22,11 @@ type jsonStringSlice []string
 
 func (value *jsonStringSlice) UnmarshalEnvironmentValue(raw string) error {
 	var decoded []string
-	if err := json.Unmarshal([]byte(strings.TrimSpace(raw)), &decoded); err != nil || len(decoded) == 0 {
-		return errors.New("KUBELOOP_FILE_ALLOWED_ROOTS_JSON must be a non-empty JSON string array")
+	if err := json.Unmarshal([]byte(strings.TrimSpace(raw)), &decoded); err != nil ||
+		len(decoded) == 0 {
+		return errors.New(
+			"kUBELOOP_FILE_ALLOWED_ROOTS_JSON must be a non-empty JSON string array",
+		)
 	}
 	*value = decoded
 	return nil
@@ -34,5 +37,8 @@ func ConfigFromEnv() (Config, error) {
 	if _, err := env.UnmarshalFromEnviron(&environment); err != nil {
 		return Config{}, err
 	}
-	return Config{MaximumBytes: environment.MaximumBytes, AllowedPathRoots: []string(environment.AllowedRoots)}, nil
+	return Config{
+		MaximumBytes:     environment.MaximumBytes,
+		AllowedPathRoots: []string(environment.AllowedRoots),
+	}, nil
 }

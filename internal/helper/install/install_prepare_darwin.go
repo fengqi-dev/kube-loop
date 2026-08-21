@@ -16,6 +16,7 @@ func prepareBinaryInstall() error {
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		if err := exec.Command("launchctl", "print", target).Run(); err != nil {
+			//nolint:nilerr // launchctl failure here means the service is no longer registered.
 			return nil
 		}
 		time.Sleep(50 * time.Millisecond)

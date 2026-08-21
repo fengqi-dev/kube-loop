@@ -98,5 +98,11 @@ type Backend interface {
 	CancelFileTransfer(TrafficIdentity) error
 
 	ListPodFiles(context.Context, TrafficIdentity, clientremote.PodFileSpec) (clientremote.PodFileList, error)
-	CreatePodFileOperation(context.Context, TrafficIdentity, string, clientremote.PodFileSpec, string) (clientremote.PodFileTask, error)
+	CreatePodFileOperation(
+		context.Context,
+		TrafficIdentity,
+		string,
+		clientremote.PodFileSpec,
+		string,
+	) (clientremote.PodFileTask, error)
 }

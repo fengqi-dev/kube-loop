@@ -16,7 +16,7 @@ type ServerPodSSHRequest struct {
 
 func (a *App) StartServerPodSSH(request ServerPodSSHRequest) (clientpodssh.Info, error) {
 	if a.remoteSSH == nil || a.remoteSessions == nil || a.remote == nil {
-		return clientpodssh.Info{}, errors.New("Pod SSH is unavailable")
+		return clientpodssh.Info{}, errors.New("pod SSH is unavailable")
 	}
 	serverProfile, err := a.serverProfile(request.ProfileID)
 	if err != nil {
@@ -41,12 +41,12 @@ func (a *App) StartServerPodSSH(request ServerPodSSHRequest) (clientpodssh.Info,
 			Ready: pod.Ready, Containers: append([]string(nil), pod.Containers...),
 		})
 	}
-	return clientpodssh.Info{}, errors.New("Pod SSH target was not found in the active namespace")
+	return clientpodssh.Info{}, errors.New("pod SSH target was not found in the active namespace")
 }
 
 func (a *App) StopServerPodSSH(profileID, endpointID string) error {
 	if a.remoteSSH == nil {
-		return errors.New("Pod SSH is unavailable")
+		return errors.New("pod SSH is unavailable")
 	}
 	serverProfile, err := a.serverProfile(profileID)
 	if err != nil {
@@ -57,7 +57,7 @@ func (a *App) StopServerPodSSH(profileID, endpointID string) error {
 
 func (a *App) ListServerPodSSH(profileID string) ([]clientpodssh.Info, error) {
 	if a.remoteSSH == nil {
-		return nil, errors.New("Pod SSH is unavailable")
+		return nil, errors.New("pod SSH is unavailable")
 	}
 	serverProfile, err := a.serverProfile(profileID)
 	if err != nil {
@@ -76,5 +76,5 @@ func (a *App) OpenServerPodSSH(profileID, endpointID string) error {
 			return terminal.Open(item.Command)
 		}
 	}
-	return errors.New("Pod SSH endpoint is not active")
+	return errors.New("pod SSH endpoint is not active")
 }

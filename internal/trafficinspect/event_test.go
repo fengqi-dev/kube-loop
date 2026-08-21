@@ -19,7 +19,14 @@ func TestClassifyProtocol(t *testing.T) {
 		{name: "http", scheme: "http", protoMajor: 1, expected: ProtocolHTTP},
 		{name: "https", scheme: "https", protoMajor: 2, isTLS: true, expected: ProtocolHTTPS},
 		{name: "grpc", scheme: "http", protoMajor: 2, contentType: "application/grpc", expected: ProtocolGRPC},
-		{name: "grpcs", scheme: "https", protoMajor: 2, contentType: "application/grpc+proto", isTLS: true, expected: ProtocolGRPCS},
+		{
+			name:        "grpcs",
+			scheme:      "https",
+			protoMajor:  2,
+			contentType: "application/grpc+proto",
+			isTLS:       true,
+			expected:    ProtocolGRPCS,
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

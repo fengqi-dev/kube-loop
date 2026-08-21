@@ -15,15 +15,21 @@ func NewInterceptBinding(
 	owner Owner,
 	snapshot servicebinding.ServiceInterceptSnapshot,
 ) (*trafficv1alpha1.TrafficBinding, error) {
-	if mode != trafficv1alpha1.TrafficBindingModeExchange && mode != trafficv1alpha1.TrafficBindingModeMirror {
-		return nil, fmt.Errorf("unsupported intercept TrafficBinding mode %q", mode)
+	if mode != trafficv1alpha1.TrafficBindingModeExchange &&
+		mode != trafficv1alpha1.TrafficBindingModeMirror {
+		return nil, fmt.Errorf(
+			"unsupported intercept TrafficBinding mode %q",
+			mode,
+		)
 	}
 	ports := make([]trafficv1alpha1.TrafficPort, 0, len(snapshot.Ports))
 	for _, port := range snapshot.Ports {
 		relayPort := port.ListenPort
 		ports = append(ports, trafficv1alpha1.TrafficPort{
 			Name: port.Name, TargetPort: port.ServicePort, RelayPort: &relayPort,
-			Protocol: trafficv1alpha1.TransportProtocol(strings.ToUpper(string(port.Protocol))),
+			Protocol: trafficv1alpha1.TransportProtocol(
+				strings.ToUpper(string(port.Protocol)),
+			),
 		})
 	}
 	return &trafficv1alpha1.TrafficBinding{
@@ -31,9 +37,12 @@ func NewInterceptBinding(
 		Spec: trafficv1alpha1.TrafficBindingSpec{
 			Mode: mode, SessionID: owner.SessionID, TaskID: owner.TaskID,
 			SessionGeneration: owner.SessionGeneration,
-			Target:            &trafficv1alpha1.TrafficTarget{Kind: trafficv1alpha1.TargetKindService, Name: snapshot.Service},
-			Relay:             &trafficv1alpha1.RelayEndpoint{Address: snapshot.GatewayIP},
-			Ports:             ports,
+			Target: &trafficv1alpha1.TrafficTarget{
+				Kind: trafficv1alpha1.TargetKindService,
+				Name: snapshot.Service,
+			},
+			Relay: &trafficv1alpha1.RelayEndpoint{Address: snapshot.GatewayIP},
+			Ports: ports,
 		},
 	}, nil
 }
@@ -47,7 +56,9 @@ func NewPreviewBinding(
 		relayPort := port.ListenPort
 		ports = append(ports, trafficv1alpha1.TrafficPort{
 			Name: port.Name, TargetPort: port.ServicePort, RelayPort: &relayPort,
-			Protocol: trafficv1alpha1.TransportProtocol(strings.ToUpper(string(port.Protocol))),
+			Protocol: trafficv1alpha1.TransportProtocol(
+				strings.ToUpper(string(port.Protocol)),
+			),
 		})
 	}
 	return &trafficv1alpha1.TrafficBinding{
@@ -55,9 +66,13 @@ func NewPreviewBinding(
 		Spec: trafficv1alpha1.TrafficBindingSpec{
 			Mode:      trafficv1alpha1.TrafficBindingModePreview,
 			SessionID: owner.SessionID, TaskID: owner.TaskID, SessionGeneration: owner.SessionGeneration,
-			Relay:   &trafficv1alpha1.RelayEndpoint{Address: snapshot.GatewayIP},
-			Preview: &trafficv1alpha1.PreviewExposure{ServiceName: snapshot.Service},
-			Ports:   ports,
+			Relay: &trafficv1alpha1.RelayEndpoint{
+				Address: snapshot.GatewayIP,
+			},
+			Preview: &trafficv1alpha1.PreviewExposure{
+				ServiceName: snapshot.Service,
+			},
+			Ports: ports,
 		},
 	}
 }
@@ -82,7 +97,9 @@ func NewPortForwardBinding(
 			},
 			Ports: []trafficv1alpha1.TrafficPort{{
 				TargetPort: port,
-				Protocol:   trafficv1alpha1.TransportProtocol(strings.ToUpper(protocol)),
+				Protocol: trafficv1alpha1.TransportProtocol(
+					strings.ToUpper(protocol),
+				),
 			}},
 		},
 	}

@@ -10,6 +10,12 @@ import (
 	"github.com/spf13/cobra"
 )
 
+const (
+	installCommandName = "install"
+	runCommandName     = "run"
+	versionCommandName = "version"
+)
+
 type commandDependencies struct {
 	install   func(installOptions) error
 	uninstall func() error

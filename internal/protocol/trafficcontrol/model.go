@@ -6,8 +6,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficmodel"
 	"github.com/google/uuid"
+
+	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficmodel"
 )
 
 const (

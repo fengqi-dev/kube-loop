@@ -46,7 +46,11 @@ func TestFinishSelectsTerminalAndRecoveryStates(t *testing.T) {
 		expected        remotetask.State
 	}{
 		{name: "clean stop", expected: remotetask.Stopped},
-		{name: "unexpected failure", cause: errors.New("relay failed"), expected: remotetask.Failed},
+		{
+			name:     "unexpected failure",
+			cause:    errors.New("relay failed"),
+			expected: remotetask.Failed,
+		},
 		{
 			name: "cleanup pending", cause: errors.New("relay failed"),
 			cleanupRequired: true, expected: remotetask.Recovering,
@@ -67,7 +71,12 @@ func TestFinishSelectsTerminalAndRecoveryStates(t *testing.T) {
 				},
 			})
 			if !completed || store.task.State != test.expected {
-				t.Fatalf("completed=%t state=%q, want %q", completed, store.task.State, test.expected)
+				t.Fatalf(
+					"completed=%t state=%q, want %q",
+					completed,
+					store.task.State,
+					test.expected,
+				)
 			}
 		})
 	}
@@ -75,15 +84,15 @@ func TestFinishSelectsTerminalAndRecoveryStates(t *testing.T) {
 
 func TestFailedIgnoresCancellationAndExpectedStop(t *testing.T) {
 	stopErr := errors.New("stop requested")
-	if taskstream.Failed(stopErr, context.Background(), stopErr) {
+	if taskstream.Failed(context.Background(), stopErr, stopErr) {
 		t.Fatal("expected stop was classified as a failure")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if taskstream.Failed(errors.New("relay failed"), ctx) {
+	if taskstream.Failed(ctx, errors.New("relay failed")) {
 		t.Fatal("canceled stream was classified as a failure")
 	}
-	if !taskstream.Failed(errors.New("relay failed"), context.Background()) {
+	if !taskstream.Failed(context.Background(), errors.New("relay failed")) {
 		t.Fatal("unexpected relay error was not classified as a failure")
 	}
 }

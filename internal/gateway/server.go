@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/netip"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -94,17 +95,17 @@ func (s *Server) ServeConnForAuthorizationContext(
 	}
 	token, err := tunnel.RelaySessionToken(authorization.SessionID, authorization.Generation)
 	if err != nil {
-		s.log(slog.LevelWarn, authorization.RequestID, "Gateway logical connection rejected", "reason", "invalid_session")
+		s.log(authorization.RequestID, "Gateway logical connection rejected", "reason", "invalid_session")
 		_ = connection.Close()
 		return
 	}
 	if !validNetworkSpecHash(authorization.NetworkSpecHash) {
-		s.log(slog.LevelWarn, authorization.RequestID, "Gateway logical connection rejected", "reason", "invalid_network_spec")
+		s.log(authorization.RequestID, "Gateway logical connection rejected", "reason", "invalid_network_spec")
 		_ = connection.Close()
 		return
 	}
 	if !dnsname.ValidLabel(authorization.Namespace) {
-		s.log(slog.LevelWarn, authorization.RequestID, "Gateway logical connection rejected", "reason", "invalid_namespace")
+		s.log(authorization.RequestID, "Gateway logical connection rejected", "reason", "invalid_namespace")
 		_ = connection.Close()
 		return
 	}
@@ -112,8 +113,12 @@ func (s *Server) ServeConnForAuthorizationContext(
 		requestID: authorization.RequestID, token: token,
 		namespace: authorization.Namespace, networkSpecHash: authorization.NetworkSpecHash,
 		identity: trafficcontrol.Identity{
-			IdentityID: authorization.IdentityID, Groups: slices.Clone(authorization.Groups), DeviceID: authorization.DeviceID,
-			SessionID: authorization.SessionID, SessionGeneration: authorization.Generation, Namespace: authorization.Namespace,
+			IdentityID:        authorization.IdentityID,
+			Groups:            slices.Clone(authorization.Groups),
+			DeviceID:          authorization.DeviceID,
+			SessionID:         authorization.SessionID,
+			SessionGeneration: authorization.Generation,
+			Namespace:         authorization.Namespace,
 		},
 	}
 	s.serveConn(ctx, connection, required)
@@ -129,7 +134,7 @@ type requiredAuthorization struct {
 
 func (s *Server) serveConn(ctx context.Context, connection net.Conn, required requiredAuthorization) {
 	if !s.trackConnection(connection) {
-		s.log(slog.LevelWarn, required.requestID, "Gateway logical connection rejected", "reason", "draining")
+		s.log(required.requestID, "Gateway logical connection rejected", "reason", "draining")
 		_ = connection.Close()
 		return
 	}
@@ -222,14 +227,14 @@ func (s *Server) handle(ctx context.Context, client net.Conn, required requiredA
 	if err != nil {
 		_ = client.Close()
 		if !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
-			s.log(slog.LevelWarn, required.requestID, "Gateway tunnel handshake rejected", "remote", client.RemoteAddr(), "error", err)
+			s.log(required.requestID, "Gateway tunnel handshake rejected", "remote", client.RemoteAddr(), "error", err)
 		}
 		return
 	}
 	_ = client.SetReadDeadline(time.Time{})
 	if header.Token != required.token {
-		s.log(slog.LevelWarn, required.requestID, "Gateway tunnel handshake rejected", "reason", "ticket_mismatch")
-		_ = tunnel.WriteStatus(client, errors.New("Gateway session does not match RelayTicket"))
+		s.log(required.requestID, "Gateway tunnel handshake rejected", "reason", "ticket_mismatch")
+		_ = tunnel.WriteStatus(client, errors.New("gateway session does not match RelayTicket"))
 		_ = client.Close()
 		return
 	}
@@ -240,14 +245,28 @@ func (s *Server) handle(ctx context.Context, client net.Conn, required requiredA
 	case tunnel.CommandControl:
 		spec, readErr := tunnel.ReadAuthorizedControlSpec(client)
 		if readErr != nil {
-			s.log(slog.LevelWarn, required.requestID, "Gateway control stream rejected", "reason", "invalid_network_spec", "error", readErr)
+			s.log(
+				required.requestID,
+				"Gateway control stream rejected",
+				"reason",
+				"invalid_network_spec",
+				"error",
+				readErr,
+			)
 			_ = tunnel.WriteStatus(client, errors.New("authorized NetworkSpec is invalid"))
 			_ = client.Close()
 			return
 		}
 		hash, hashErr := networkspec.Hash(spec)
 		if hashErr != nil || hash != required.networkSpecHash {
-			s.log(slog.LevelWarn, required.requestID, "Gateway control stream rejected", "reason", "network_spec_mismatch", "error", hashErr)
+			s.log(
+				required.requestID,
+				"Gateway control stream rejected",
+				"reason",
+				"network_spec_mismatch",
+				"error",
+				hashErr,
+			)
 			_ = tunnel.WriteStatus(client, errors.New("NetworkSpec does not match RelayTicket"))
 			_ = client.Close()
 			return
@@ -256,7 +275,7 @@ func (s *Server) handle(ctx context.Context, client net.Conn, required requiredA
 	case tunnel.CommandTraffic:
 		request, readErr := tunnel.ReadTrafficOpenBody(client)
 		if readErr != nil {
-			s.log(slog.LevelWarn, required.requestID, "Gateway traffic stream rejected", "reason", "invalid_request", "error", readErr)
+			s.log(required.requestID, "Gateway traffic stream rejected", "reason", "invalid_request", "error", readErr)
 			_ = tunnel.WriteStatus(client, errors.New("traffic request is invalid"))
 			_ = client.Close()
 			return
@@ -264,9 +283,16 @@ func (s *Server) handle(ctx context.Context, client net.Conn, required requiredA
 		_, authorized, authorizationErr := s.authorizedNetwork(header.Token, &required)
 		if authorizationErr != nil || !authorized {
 			if authorizationErr == nil {
-				authorizationErr = errors.New("Gateway NetworkSpec authorization is not active")
+				authorizationErr = errors.New("gateway NetworkSpec authorization is not active")
 			}
-			s.log(slog.LevelWarn, required.requestID, "Gateway traffic stream rejected", "reason", "authorization", "error", authorizationErr)
+			s.log(
+				required.requestID,
+				"Gateway traffic stream rejected",
+				"reason",
+				"authorization",
+				"error",
+				authorizationErr,
+			)
 			_ = tunnel.WriteStatus(client, authorizationErr)
 			_ = client.Close()
 			return
@@ -274,7 +300,7 @@ func (s *Server) handle(ctx context.Context, client net.Conn, required requiredA
 		identity := required.identity
 		identity.Groups = slices.Clone(required.identity.Groups)
 		if identity.Validate() != nil {
-			s.log(slog.LevelWarn, required.requestID, "Gateway traffic stream rejected", "reason", "invalid_identity")
+			s.log(required.requestID, "Gateway traffic stream rejected", "reason", "invalid_identity")
 			_ = tunnel.WriteStatus(client, errors.New("traffic identity is invalid"))
 			_ = client.Close()
 			return
@@ -283,13 +309,13 @@ func (s *Server) handle(ctx context.Context, client net.Conn, required requiredA
 		traffic := s.traffic
 		s.mu.Unlock()
 		if traffic == nil {
-			_ = tunnel.WriteStatus(client, errors.New("Gateway traffic handler is unavailable"))
+			_ = tunnel.WriteStatus(client, errors.New("gateway traffic handler is unavailable"))
 			_ = client.Close()
 			return
 		}
 		traffic.ServeTraffic(ctx, client, identity, request)
 	default:
-		s.log(slog.LevelWarn, required.requestID, "Gateway tunnel command rejected", "command", header.Command)
+		s.log(required.requestID, "Gateway tunnel command rejected", "command", header.Command)
 		_ = tunnel.WriteStatus(client, fmt.Errorf("unsupported command %d", header.Command))
 		_ = client.Close()
 	}
@@ -301,16 +327,16 @@ func (s *Server) handleOutbound(
 	header tunnel.SessionHeader,
 	required *requiredAuthorization,
 ) {
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 	spec, authorized, authorizationErr := s.authorizedNetwork(header.Token, required)
 	if authorizationErr != nil {
 		_ = tunnel.WriteStatus(client, authorizationErr)
-		s.log(slog.LevelWarn, required.requestID, "Gateway tunnel open rejected", "reason", "authorization", "error", authorizationErr)
+		s.log(required.requestID, "Gateway tunnel open rejected", "reason", "authorization", "error", authorizationErr)
 		return
 	}
 	request, err := tunnel.ReadOpenBody(client, header.Command)
 	if err != nil {
-		s.log(slog.LevelWarn, required.requestID, "Gateway tunnel open rejected", "remote", client.RemoteAddr(), "error", err)
+		s.log(required.requestID, "Gateway tunnel open rejected", "remote", client.RemoteAddr(), "error", err)
 		return
 	}
 
@@ -324,7 +350,7 @@ func (s *Server) handleOutbound(
 	}
 	if err != nil {
 		_ = tunnel.WriteStatus(client, err)
-		s.log(slog.LevelWarn, required.requestID, "Gateway target denied", "target", request.Address(), "error", err)
+		s.log(required.requestID, "Gateway target denied", "target", request.Address(), "error", err)
 		return
 	}
 	network := "tcp"
@@ -338,10 +364,13 @@ func (s *Server) handleOutbound(
 	target, err := dialer.DialContext(ctx, network, targetAddress)
 	if err != nil {
 		_ = tunnel.WriteStatus(client, fmt.Errorf("dial target: %w", err))
-		s.log(slog.LevelWarn, required.requestID, "Gateway target connection failed", "network", network, "target", targetAddress, "error", err)
+		s.log(
+			required.requestID, "Gateway target connection failed",
+			"network", network, "target", targetAddress, "error", err,
+		)
 		return
 	}
-	defer target.Close()
+	defer func() { _ = target.Close() }()
 	if err := tunnel.WriteStatus(client, nil); err != nil {
 		return
 	}
@@ -360,14 +389,14 @@ func (s *Server) authorizedNetwork(
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.tenants[token] <= 0 {
-		return networkspec.Spec{}, false, errors.New("Gateway session is not active")
+		return networkspec.Spec{}, false, errors.New("gateway session is not active")
 	}
 	if required == nil {
 		return networkspec.Spec{}, false, nil
 	}
 	network, ok := s.networks[token]
 	if !ok || network.hash != required.networkSpecHash || network.namespace != required.namespace {
-		return networkspec.Spec{}, false, errors.New("Gateway NetworkSpec authorization is not active")
+		return networkspec.Spec{}, false, errors.New("gateway NetworkSpec authorization is not active")
 	}
 	return network.spec, true, nil
 }
@@ -445,7 +474,7 @@ func resolvePrivate(ctx context.Context, host string, port uint16) (string, erro
 		}
 		ip = ip.Unmap()
 		if isClusterAddress(ip) {
-			return net.JoinHostPort(ip.String(), fmt.Sprintf("%d", port)), nil
+			return net.JoinHostPort(ip.String(), strconv.FormatUint(uint64(port), 10)), nil
 		}
 	}
 	return "", fmt.Errorf("target %q does not resolve to a private cluster address", host)
@@ -455,11 +484,11 @@ func isClusterAddress(ip netip.Addr) bool {
 	return ip.IsPrivate() && !ip.IsLoopback() && !ip.IsLinkLocalUnicast() && !ip.IsMulticast()
 }
 
-func (s *Server) log(level slog.Level, requestID, message string, attributes ...any) {
+func (s *Server) log(requestID, message string, attributes ...any) {
 	if s.Logger != nil {
 		arguments := make([]any, 0, len(attributes)+2)
 		arguments = append(arguments, "request_id", requestID)
 		arguments = append(arguments, attributes...)
-		s.Logger.Log(context.Background(), level, message, arguments...)
+		s.Logger.WarnContext(context.Background(), message, arguments...)
 	}
 }

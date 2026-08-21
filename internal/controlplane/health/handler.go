@@ -33,12 +33,18 @@ func (h *Handler) Live(ctx *echo.Context) error {
 func (h *Handler) Ready(ctx *echo.Context) error {
 	ctx.Response().Header().Set(echo.HeaderCacheControl, "no-store")
 	if h.checker == nil {
-		return ctx.JSON(http.StatusOK, document{Status: "ready"})
+		return ctx.JSON(http.StatusOK, document{Status: statusReady})
 	}
-	checkContext, cancel := context.WithTimeout(ctx.Request().Context(), h.timeout)
+	checkContext, cancel := context.WithTimeout(
+		ctx.Request().Context(),
+		h.timeout,
+	)
 	defer cancel()
 	if err := h.checker.Check(checkContext); err != nil {
-		return ctx.JSON(http.StatusServiceUnavailable, document{Status: "unavailable"})
+		return ctx.JSON(
+			http.StatusServiceUnavailable,
+			document{Status: statusUnavailable},
+		)
 	}
-	return ctx.JSON(http.StatusOK, document{Status: "ready"})
+	return ctx.JSON(http.StatusOK, document{Status: statusReady})
 }

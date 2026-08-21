@@ -34,8 +34,20 @@ type ControlPlaneClient interface {
 	Namespaces(context.Context, clientprofile.Profile) ([]clientremote.Namespace, error)
 	Pods(context.Context, clientprofile.Profile, string) ([]clientremote.Pod, error)
 	Services(context.Context, clientprofile.Profile, string) ([]clientremote.Service, error)
-	ListPodFiles(context.Context, clientprofile.Profile, clientremote.Session, clientremote.PodFileSpec) (clientremote.PodFileList, error)
-	CreatePodFileOperation(context.Context, clientprofile.Profile, clientremote.Session, string, clientremote.PodFileSpec, string) (clientremote.PodFileTask, error)
+	ListPodFiles(
+		context.Context,
+		clientprofile.Profile,
+		clientremote.Session,
+		clientremote.PodFileSpec,
+	) (clientremote.PodFileList, error)
+	CreatePodFileOperation(
+		context.Context,
+		clientprofile.Profile,
+		clientremote.Session,
+		string,
+		clientremote.PodFileSpec,
+		string,
+	) (clientremote.PodFileTask, error)
 }
 
 type SessionManager interface {
@@ -61,14 +73,24 @@ type FileTransferManager interface {
 }
 
 type PortForwardManager interface {
-	Start(context.Context, clientprofile.Profile, clientremote.Session, clientportforward.Request) (clientportforward.Info, error)
+	Start(
+		context.Context,
+		clientprofile.Profile,
+		clientremote.Session,
+		clientportforward.Request,
+	) (clientportforward.Info, error)
 	Stop(context.Context, string, string) error
 	List(string) []clientportforward.Info
 	StopProfile(context.Context, string) error
 }
 
 type ExchangeManager interface {
-	Start(context.Context, clientprofile.Profile, clientremote.Session, clientexchange.Request) (clientexchange.Info, error)
+	Start(
+		context.Context,
+		clientprofile.Profile,
+		clientremote.Session,
+		clientexchange.Request,
+	) (clientexchange.Info, error)
 	Stop(context.Context, string, string) error
 	List(string) []clientexchange.Info
 	StopProfile(context.Context, string) error
@@ -82,7 +104,12 @@ type MirrorManager interface {
 }
 
 type PreviewManager interface {
-	Start(context.Context, clientprofile.Profile, clientremote.Session, clientpreview.Request) (clientpreview.Info, error)
+	Start(
+		context.Context,
+		clientprofile.Profile,
+		clientremote.Session,
+		clientpreview.Request,
+	) (clientpreview.Info, error)
 	Stop(context.Context, string, string) error
 	List(string) []clientpreview.Info
 	StopProfile(context.Context, string) error
@@ -125,7 +152,10 @@ func (backend *RemoteBackend) Version(ctx context.Context, profileID string) (cl
 	return backend.dependencies.ControlPlane.Version(ctx, serverProfile)
 }
 
-func (backend *RemoteBackend) Capabilities(ctx context.Context, profileID, namespace string) (clientremote.Capabilities, error) {
+func (backend *RemoteBackend) Capabilities(
+	ctx context.Context,
+	profileID, namespace string,
+) (clientremote.Capabilities, error) {
 	serverProfile, err := backend.activeProfile(profileID)
 	if err != nil {
 		return clientremote.Capabilities{}, err
@@ -149,7 +179,10 @@ func (backend *RemoteBackend) Pods(ctx context.Context, profileID, namespace str
 	return backend.dependencies.ControlPlane.Pods(ctx, serverProfile, strings.TrimSpace(namespace))
 }
 
-func (backend *RemoteBackend) Services(ctx context.Context, profileID, namespace string) ([]clientremote.Service, error) {
+func (backend *RemoteBackend) Services(
+	ctx context.Context,
+	profileID, namespace string,
+) ([]clientremote.Service, error) {
 	serverProfile, err := backend.activeProfile(profileID)
 	if err != nil {
 		return nil, err
@@ -176,7 +209,8 @@ func (backend *RemoteBackend) Connect(ctx context.Context, profileID, namespace 
 	if namespace == "" {
 		return clientremote.Session{}, invalid("namespace", "namespace is required")
 	}
-	if current, currentErr := backend.dependencies.Sessions.Current(serverProfile.ID); currentErr == nil && current.Namespace != namespace {
+	current, currentErr := backend.dependencies.Sessions.Current(serverProfile.ID)
+	if currentErr == nil && current.Namespace != namespace {
 		if err := backend.stopLocalFeatures(ctx, serverProfile.ID); err != nil {
 			return clientremote.Session{}, err
 		}
@@ -218,7 +252,7 @@ func (backend *RemoteBackend) StartTraffic(ctx context.Context, request TrafficS
 		return TrafficItem{}, err
 	}
 	switch request.Type {
-	case "exchange":
+	case trafficTypeExchange:
 		if backend.dependencies.Exchanges == nil {
 			return TrafficItem{}, &ToolError{Code: ErrorUnavailable, Message: "Exchange is unavailable"}
 		}
@@ -230,7 +264,7 @@ func (backend *RemoteBackend) StartTraffic(ctx context.Context, request TrafficS
 			ProfileID: serverProfile.ID, Service: request.Service, Targets: targets,
 		})
 		return TrafficItem{Type: request.Type, Exchange: &info}, err
-	case "mirror":
+	case trafficTypeMirror:
 		if backend.dependencies.Mirrors == nil {
 			return TrafficItem{}, &ToolError{Code: ErrorUnavailable, Message: "Mirror is unavailable"}
 		}
@@ -242,7 +276,7 @@ func (backend *RemoteBackend) StartTraffic(ctx context.Context, request TrafficS
 			ProfileID: serverProfile.ID, Service: request.Service, Targets: targets,
 		})
 		return TrafficItem{Type: request.Type, Mirror: &info}, err
-	case "preview":
+	case trafficTypePreview:
 		if backend.dependencies.Previews == nil {
 			return TrafficItem{}, &ToolError{Code: ErrorUnavailable, Message: "Preview is unavailable"}
 		}
@@ -254,7 +288,7 @@ func (backend *RemoteBackend) StartTraffic(ctx context.Context, request TrafficS
 			ProfileID: serverProfile.ID, Namespace: session.Namespace, Name: request.Name, Targets: targets,
 		})
 		return TrafficItem{Type: request.Type, Preview: &info}, err
-	case "port_forward":
+	case trafficTypePortForward:
 		if backend.dependencies.Forwards == nil {
 			return TrafficItem{}, &ToolError{Code: ErrorUnavailable, Message: "Port Forward is unavailable"}
 		}
@@ -277,23 +311,27 @@ func (backend *RemoteBackend) StopTraffic(ctx context.Context, identity TrafficI
 		return invalid("taskId", "taskId is required")
 	}
 	switch identity.Type {
-	case "exchange":
-		if backend.dependencies.Exchanges == nil || !matchesExchange(backend.dependencies.Exchanges.List(serverProfile.ID), identity) {
+	case trafficTypeExchange:
+		items := backend.dependencies.Exchanges
+		if items == nil || !matchesExchange(items.List(serverProfile.ID), identity) {
 			return &ToolError{Code: ErrorNotFound, Message: "Exchange is not active"}
 		}
 		return backend.dependencies.Exchanges.Stop(ctx, serverProfile.ID, identity.TaskID)
-	case "mirror":
-		if backend.dependencies.Mirrors == nil || !matchesMirror(backend.dependencies.Mirrors.List(serverProfile.ID), identity) {
+	case trafficTypeMirror:
+		items := backend.dependencies.Mirrors
+		if items == nil || !matchesMirror(items.List(serverProfile.ID), identity) {
 			return &ToolError{Code: ErrorNotFound, Message: "Mirror is not active"}
 		}
 		return backend.dependencies.Mirrors.Stop(ctx, serverProfile.ID, identity.TaskID)
-	case "preview":
-		if backend.dependencies.Previews == nil || !matchesPreview(backend.dependencies.Previews.List(serverProfile.ID), identity) {
+	case trafficTypePreview:
+		items := backend.dependencies.Previews
+		if items == nil || !matchesPreview(items.List(serverProfile.ID), identity) {
 			return &ToolError{Code: ErrorNotFound, Message: "Preview is not active"}
 		}
 		return backend.dependencies.Previews.Stop(ctx, serverProfile.ID, identity.TaskID)
-	case "port_forward":
-		if backend.dependencies.Forwards == nil || !matchesForward(backend.dependencies.Forwards.List(serverProfile.ID), identity) {
+	case trafficTypePortForward:
+		items := backend.dependencies.Forwards
+		if items == nil || !matchesForward(items.List(serverProfile.ID), identity) {
 			return &ToolError{Code: ErrorNotFound, Message: "Port Forward is not active"}
 		}
 		return backend.dependencies.Forwards.Stop(ctx, serverProfile.ID, identity.TaskID)
@@ -308,35 +346,35 @@ func (backend *RemoteBackend) ListTraffic(profileID, trafficType string) ([]Traf
 		return nil, err
 	}
 	items := make([]TrafficItem, 0)
-	if trafficType == "" || trafficType == "exchange" {
+	if trafficType == "" || trafficType == trafficTypeExchange {
 		if backend.dependencies.Exchanges != nil {
 			for _, info := range backend.dependencies.Exchanges.List(serverProfile.ID) {
-				copy := info
-				items = append(items, TrafficItem{Type: "exchange", Exchange: &copy})
+				item := info
+				items = append(items, TrafficItem{Type: trafficTypeExchange, Exchange: &item})
 			}
 		}
 	}
-	if trafficType == "" || trafficType == "mirror" {
+	if trafficType == "" || trafficType == trafficTypeMirror {
 		if backend.dependencies.Mirrors != nil {
 			for _, info := range backend.dependencies.Mirrors.List(serverProfile.ID) {
-				copy := info
-				items = append(items, TrafficItem{Type: "mirror", Mirror: &copy})
+				item := info
+				items = append(items, TrafficItem{Type: trafficTypeMirror, Mirror: &item})
 			}
 		}
 	}
-	if trafficType == "" || trafficType == "preview" {
+	if trafficType == "" || trafficType == trafficTypePreview {
 		if backend.dependencies.Previews != nil {
 			for _, info := range backend.dependencies.Previews.List(serverProfile.ID) {
-				copy := info
-				items = append(items, TrafficItem{Type: "preview", Preview: &copy})
+				item := info
+				items = append(items, TrafficItem{Type: trafficTypePreview, Preview: &item})
 			}
 		}
 	}
-	if trafficType == "" || trafficType == "port_forward" {
+	if trafficType == "" || trafficType == trafficTypePortForward {
 		if backend.dependencies.Forwards != nil {
 			for _, info := range backend.dependencies.Forwards.List(serverProfile.ID) {
-				copy := info
-				items = append(items, TrafficItem{Type: "port_forward", PortForward: &copy})
+				item := info
+				items = append(items, TrafficItem{Type: trafficTypePortForward, PortForward: &item})
 			}
 		}
 	}
@@ -360,14 +398,20 @@ func (backend *RemoteBackend) ExecPodCommand(ctx context.Context, request PodCom
 	}
 	commandContext, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
 	defer cancel()
-	stream, err := clientexec.Start(commandContext, backend.dependencies.ExecClient, serverProfile, session, clientremote.ExecSpec{
-		Pod: strings.TrimSpace(request.Pod), Container: strings.TrimSpace(request.Container),
-		Command: append([]string(nil), request.Command...), TTY: false,
-	})
+	stream, err := clientexec.Start(
+		commandContext,
+		backend.dependencies.ExecClient,
+		serverProfile,
+		session,
+		clientremote.ExecSpec{
+			Pod: strings.TrimSpace(request.Pod), Container: strings.TrimSpace(request.Container),
+			Command: append([]string(nil), request.Command...), TTY: false,
+		},
+	)
 	if err != nil {
 		return PodCommandResult{}, err
 	}
-	defer stream.Close()
+	defer func() { _ = stream.Close() }()
 	stdout, stderr := newCappedBuffer(maximumCommandOutput), newCappedBuffer(maximumCommandOutput)
 	result := PodCommandResult{
 		ProfileID: serverProfile.ID, SessionID: session.ID, Namespace: session.Namespace,
@@ -398,9 +442,12 @@ func (backend *RemoteBackend) ExecPodCommand(ctx context.Context, request PodCom
 	}
 }
 
-func (backend *RemoteBackend) StartFileTransfer(identity TrafficIdentity, request clientfiletransfer.Request) (clientfiletransfer.Task, error) {
+func (backend *RemoteBackend) StartFileTransfer(
+	identity TrafficIdentity,
+	request clientfiletransfer.Request,
+) (clientfiletransfer.Task, error) {
 	if backend.dependencies.Files == nil {
-		return clientfiletransfer.Task{}, &ToolError{Code: ErrorUnavailable, Message: "file transfer is unavailable"}
+		return clientfiletransfer.Task{}, &ToolError{Code: ErrorUnavailable, Message: fileTransferUnavailable}
 	}
 	serverProfile, session, err := backend.requireSession(identity.ProfileID, identity.SessionID, identity.Namespace)
 	if err != nil {
@@ -416,7 +463,7 @@ func (backend *RemoteBackend) ListFileTransfers(profileID string) ([]clientfilet
 		return nil, err
 	}
 	if backend.dependencies.Files == nil {
-		return nil, &ToolError{Code: ErrorUnavailable, Message: "file transfer is unavailable"}
+		return nil, &ToolError{Code: ErrorUnavailable, Message: fileTransferUnavailable}
 	}
 	return backend.dependencies.Files.List(serverProfile.ID), nil
 }
@@ -427,7 +474,7 @@ func (backend *RemoteBackend) CancelFileTransfer(identity TrafficIdentity) error
 		return err
 	}
 	if backend.dependencies.Files == nil {
-		return &ToolError{Code: ErrorUnavailable, Message: "file transfer is unavailable"}
+		return &ToolError{Code: ErrorUnavailable, Message: fileTransferUnavailable}
 	}
 	for _, task := range backend.dependencies.Files.List(serverProfile.ID) {
 		if task.ID == identity.TaskID && task.SessionID == identity.SessionID && task.Namespace == identity.Namespace {
@@ -468,15 +515,17 @@ func (backend *RemoteBackend) CreatePodFileOperation(
 func (backend *RemoteBackend) activeProfile(profileID string) (clientprofile.Profile, error) {
 	profileID = strings.TrimSpace(profileID)
 	if profileID == "" {
-		return clientprofile.Profile{}, invalid("profileId", "profileId is required")
+		return clientprofile.Profile{}, invalid(fieldProfileID, "profileId is required")
 	}
 	state := backend.dependencies.Profiles.Snapshot()
 	if state.ActiveProfileID == "" {
-		return clientprofile.Profile{}, &ToolError{Code: ErrorUnauthenticated, Message: "select and sign in to a Server Profile"}
+		return clientprofile.Profile{}, &ToolError{
+			Code: ErrorUnauthenticated, Message: "select and sign in to a Server Profile",
+		}
 	}
 	if profileID != state.ActiveProfileID {
 		return clientprofile.Profile{}, &ToolError{
-			Code: ErrorForbidden, Message: "MCP can access only the active Server Profile", Field: "profileId",
+			Code: ErrorForbidden, Message: "MCP can access only the active Server Profile", Field: fieldProfileID,
 		}
 	}
 	for _, serverProfile := range state.Profiles {
@@ -487,7 +536,9 @@ func (backend *RemoteBackend) activeProfile(profileID string) (clientprofile.Pro
 	return clientprofile.Profile{}, &ToolError{Code: ErrorNotFound, Message: "active Server Profile was not found"}
 }
 
-func (backend *RemoteBackend) requireSession(profileID, sessionID, namespace string) (clientprofile.Profile, clientremote.Session, error) {
+func (backend *RemoteBackend) requireSession(
+	profileID, sessionID, namespace string,
+) (clientprofile.Profile, clientremote.Session, error) {
 	serverProfile, err := backend.activeProfile(profileID)
 	if err != nil {
 		return clientprofile.Profile{}, clientremote.Session{}, err
@@ -501,9 +552,11 @@ func (backend *RemoteBackend) requireSession(profileID, sessionID, namespace str
 	}
 	session, err := backend.dependencies.Sessions.Current(serverProfile.ID)
 	if err != nil {
-		return clientprofile.Profile{}, clientremote.Session{}, &ToolError{Code: ErrorConflict, Message: "active Cluster Session is required", cause: err}
+		return clientprofile.Profile{}, clientremote.Session{}, &ToolError{
+			Code: ErrorConflict, Message: "active Cluster Session is required", cause: err,
+		}
 	}
-	if session.ID != sessionID || session.Namespace != namespace || session.State != "active" {
+	if session.ID != sessionID || session.Namespace != namespace || session.State != sessionStateActive {
 		return clientprofile.Profile{}, clientremote.Session{}, &ToolError{
 			Code: ErrorConflict, Message: "profileId, sessionId, and namespace must match the active Cluster Session",
 		}

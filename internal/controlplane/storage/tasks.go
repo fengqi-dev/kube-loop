@@ -30,20 +30,37 @@ func (repository *taskRepository) Create(ctx context.Context, task Task) error {
 			idempotency_key, created_at, updated_at, expires_at
 		) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8, $9, $10, $11)`
 	}
-	_, err := repository.executor.ExecContext(ctx, query,
-		task.ID, task.IdentityID, task.SessionID, task.Type, task.State,
-		string(task.Spec), nullableJSON(task.Result), task.IdempotencyKey,
-		formatTime(task.CreatedAt), formatTime(task.UpdatedAt), nullableTime(task.ExpiresAt),
+	_, err := repository.executor.ExecContext(
+		ctx,
+		query,
+		task.ID,
+		task.IdentityID,
+		task.SessionID,
+		task.Type,
+		task.State,
+		string(task.Spec),
+		nullableJSON(task.Result),
+		task.IdempotencyKey,
+		formatTime(
+			task.CreatedAt,
+		),
+		formatTime(task.UpdatedAt),
+		nullableTime(task.ExpiresAt),
 	)
 	return mapWriteError(err)
 }
 
-func (repository *taskRepository) GetByID(ctx context.Context, id string) (Task, error) {
+func (repository *taskRepository) GetByID(
+	ctx context.Context,
+	id string,
+) (Task, error) {
 	if err := validateUUID(id, "task ID"); err != nil {
 		return Task{}, err
 	}
-	query := repository.bind(`SELECT id, identity_id, session_id, type, state, spec_json,
-		result_json, idempotency_key, created_at, updated_at, expires_at FROM tasks WHERE id = ?`)
+	query := repository.bind(
+		`SELECT id, identity_id, session_id, type, state, spec_json,
+		result_json, idempotency_key, created_at, updated_at, expires_at FROM tasks WHERE id = ?`,
+	)
 	task, err := scanTask(repository.executor.QueryRowContext(ctx, query, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return Task{}, ErrNotFound
@@ -54,7 +71,10 @@ func (repository *taskRepository) GetByID(ctx context.Context, id string) (Task,
 	return task, nil
 }
 
-func (repository *taskRepository) List(ctx context.Context, filter TaskListFilter) ([]Task, error) {
+func (repository *taskRepository) List(
+	ctx context.Context,
+	filter TaskListFilter,
+) ([]Task, error) {
 	limit, cursor, err := normalizePage(filter.Limit, filter.Cursor)
 	if err != nil {
 		return nil, err
@@ -63,10 +83,12 @@ func (repository *taskRepository) List(ctx context.Context, filter TaskListFilte
 	filter.SessionID = strings.TrimSpace(filter.SessionID)
 	filter.Namespace = strings.TrimSpace(filter.Namespace)
 	filter.Type = strings.TrimSpace(filter.Type)
-	if filter.IdentityID != "" && validateUUID(filter.IdentityID, "task identity ID") != nil {
+	if filter.IdentityID != "" &&
+		validateUUID(filter.IdentityID, "task identity ID") != nil {
 		return nil, errors.New("task identity filter is invalid")
 	}
-	if filter.SessionID != "" && validateUUID(filter.SessionID, "task session ID") != nil {
+	if filter.SessionID != "" &&
+		validateUUID(filter.SessionID, "task session ID") != nil {
 		return nil, errors.New("task session filter is invalid")
 	}
 	if filter.Namespace != "" && !dns1123Label.MatchString(filter.Namespace) {
@@ -105,11 +127,14 @@ func (repository *taskRepository) List(ctx context.Context, filter TaskListFilte
 	query, arguments = appendPageBoundary(query, arguments, "t", cursor)
 	query += ` ORDER BY t.created_at DESC, t.id DESC LIMIT ?`
 	arguments = append(arguments, limit)
-	rows, err := repository.executor.QueryContext(ctx, repository.bind(query), arguments...)
+	rows, err := repository.executor.QueryContext(
+		ctx,
+		repository.bind(query),
+		arguments...)
 	if err != nil {
 		return nil, databaseError("list tasks", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	tasks := make([]Task, 0)
 	for rows.Next() {
 		task, err := scanTask(rows)
@@ -138,17 +163,29 @@ func (repository *taskRepository) UpdateState(
 		return err
 	}
 	if updatedAt.IsZero() {
-		return errors.New("expected state, next state and update time are required")
+		return errors.New(
+			"expected state, next state and update time are required",
+		)
 	}
 	var err error
 	if result, err = normalizeJSON(result, false, "task result"); err != nil {
 		return err
 	}
-	query := repository.bind(`UPDATE tasks SET state = ?, result_json = ?, updated_at = ? WHERE id = ? AND state = ?`)
+	query := repository.bind(
+		`UPDATE tasks SET state = ?, result_json = ?, updated_at = ? WHERE id = ? AND state = ?`,
+	)
 	if repository.backend == BackendPostgreSQL {
 		query = `UPDATE tasks SET state = $1, result_json = $2::jsonb, updated_at = $3 WHERE id = $4 AND state = $5`
 	}
-	writeResult, err := repository.executor.ExecContext(ctx, query, nextState, nullableJSON(result), formatTime(updatedAt), id, expectedState)
+	writeResult, err := repository.executor.ExecContext(
+		ctx,
+		query,
+		nextState,
+		nullableJSON(result),
+		formatTime(updatedAt),
+		id,
+		expectedState,
+	)
 	if err != nil {
 		return mapWriteError(err)
 	}
@@ -165,21 +202,27 @@ func (repository *taskRepository) UpdateState(
 	return ErrConflict
 }
 
-func (repository *taskRepository) ListBySession(ctx context.Context, sessionID string, limit int) ([]Task, error) {
+func (repository *taskRepository) ListBySession(
+	ctx context.Context,
+	sessionID string,
+	limit int,
+) ([]Task, error) {
 	if err := validateUUID(sessionID, "session ID"); err != nil {
 		return nil, err
 	}
 	if limit <= 0 || limit > 1000 {
 		return nil, errors.New("task list limit must be between 1 and 1000")
 	}
-	query := repository.bind(`SELECT id, identity_id, session_id, type, state, spec_json,
+	query := repository.bind(
+		`SELECT id, identity_id, session_id, type, state, spec_json,
 		result_json, idempotency_key, created_at, updated_at, expires_at
-		FROM tasks WHERE session_id = ? ORDER BY updated_at DESC, id ASC LIMIT ?`)
+		FROM tasks WHERE session_id = ? ORDER BY updated_at DESC, id ASC LIMIT ?`,
+	)
 	rows, err := repository.executor.QueryContext(ctx, query, sessionID, limit)
 	if err != nil {
 		return nil, databaseError("list session tasks", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var tasks []Task
 	for rows.Next() {
 		task, err := scanTask(rows)
@@ -205,8 +248,11 @@ func (repository *taskRepository) ListStaleByTypeStates(
 	limit int,
 ) ([]Task, error) {
 	taskType = strings.TrimSpace(taskType)
-	if taskType == "" || len(states) == 0 || len(states) > 16 || before.IsZero() {
-		return nil, errors.New("task type, states and stale boundary are required")
+	if taskType == "" || len(states) == 0 || len(states) > 16 ||
+		before.IsZero() {
+		return nil, errors.New(
+			"task type, states and stale boundary are required",
+		)
 	}
 	if limit <= 0 || limit > 1000 {
 		return nil, errors.New("task list limit must be between 1 and 1000")
@@ -222,16 +268,19 @@ func (repository *taskRepository) ListStaleByTypeStates(
 		arguments = append(arguments, state)
 	}
 	arguments = append(arguments, formatTime(before), limit)
-	query := fmt.Sprintf(`SELECT id, identity_id, session_id, type, state, spec_json,
+	query := fmt.Sprintf(
+		`SELECT id, identity_id, session_id, type, state, spec_json,
 		result_json, idempotency_key, created_at, updated_at, expires_at
 		FROM tasks WHERE type = ? AND state IN (%s) AND updated_at < ?
-		ORDER BY updated_at ASC, id ASC LIMIT ?`, strings.Join(placeholders, ","))
+		ORDER BY updated_at ASC, id ASC LIMIT ?`,
+		strings.Join(placeholders, ","),
+	)
 	query = repository.bind(query)
 	rows, err := repository.executor.QueryContext(ctx, query, arguments...)
 	if err != nil {
 		return nil, databaseError("list stale tasks", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var tasks []Task
 	for rows.Next() {
 		task, scanErr := scanTask(rows)
@@ -265,20 +314,31 @@ func (repository *taskRepository) ClaimStale(
 		return err
 	}
 	if observedUpdatedAt.IsZero() || updatedAt.IsZero() {
-		return errors.New("expected state, observed time, next state and update time are required")
+		return errors.New(
+			"expected state, observed time, next state and update time are required",
+		)
 	}
 	var err error
 	if result, err = normalizeJSON(result, false, "task result"); err != nil {
 		return err
 	}
-	query := repository.bind(`UPDATE tasks SET state = ?, result_json = ?, updated_at = ?
-		WHERE id = ? AND state = ? AND updated_at = ?`)
+	query := repository.bind(
+		`UPDATE tasks SET state = ?, result_json = ?, updated_at = ?
+		WHERE id = ? AND state = ? AND updated_at = ?`,
+	)
 	if repository.backend == BackendPostgreSQL {
 		query = `UPDATE tasks SET state = $1, result_json = $2::jsonb, updated_at = $3
 			WHERE id = $4 AND state = $5 AND updated_at = $6`
 	}
 	writeResult, err := repository.executor.ExecContext(
-		ctx, query, nextState, nullableJSON(result), formatTime(updatedAt), id, expectedState, formatTime(observedUpdatedAt),
+		ctx,
+		query,
+		nextState,
+		nullableJSON(result),
+		formatTime(updatedAt),
+		id,
+		expectedState,
+		formatTime(observedUpdatedAt),
 	)
 	if err != nil {
 		return mapWriteError(err)

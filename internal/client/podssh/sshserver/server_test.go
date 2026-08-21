@@ -159,7 +159,7 @@ func TestServerExecOverPodIP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer listener.Close()
+	defer checkTestClose(t, listener.Close)
 	go func() {
 		connection, acceptErr := listener.Accept()
 		if acceptErr == nil {
@@ -174,7 +174,7 @@ func TestServerExecOverPodIP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer client.Close()
+	defer checkTestClose(t, client.Close)
 	session, err := client.NewSession()
 	if err != nil {
 		t.Fatal(err)
@@ -410,7 +410,7 @@ func TestLoadOrCreateSignerMigratesPKCS8ForOpenSSH(t *testing.T) {
 	if block == nil {
 		t.Fatal("migrated private key is not PEM encoded")
 	}
-	if block.Type != "OPENSSH PRIVATE KEY" {
+	if block.Type != openSSHPrivateKeyPEMType {
 		t.Fatalf("private key type=%q", block.Type)
 	}
 	expected, err := ssh.NewSignerFromKey(privateKey)
@@ -437,7 +437,7 @@ func TestLoadOrCreateSignerCreatesOpenSSHPrivateKey(t *testing.T) {
 	if block == nil {
 		t.Fatal("generated private key is not PEM encoded")
 	}
-	if block.Type != "OPENSSH PRIVATE KEY" {
+	if block.Type != openSSHPrivateKeyPEMType {
 		t.Fatalf("private key type=%q", block.Type)
 	}
 	info, err := os.Stat(path)
@@ -514,7 +514,7 @@ func TestLoadOrCreateUserSSHKeysGeneratesDefaultIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	block, _ := pem.Decode(content)
-	if block == nil || block.Type != "OPENSSH PRIVATE KEY" {
+	if block == nil || block.Type != openSSHPrivateKeyPEMType {
 		t.Fatal("generated default identity is not an OpenSSH private key")
 	}
 	publicContent, err := os.ReadFile(privatePath + ".pub")

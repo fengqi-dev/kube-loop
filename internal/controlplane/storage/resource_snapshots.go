@@ -12,7 +12,10 @@ type resourceSnapshotRepository struct {
 	repositoryBase
 }
 
-func (repository *resourceSnapshotRepository) Put(ctx context.Context, snapshot ResourceSnapshot) error {
+func (repository *resourceSnapshotRepository) Put(
+	ctx context.Context,
+	snapshot ResourceSnapshot,
+) error {
 	if err := normalizeResourceSnapshot(&snapshot); err != nil {
 		return err
 	}
@@ -34,24 +37,36 @@ func (repository *resourceSnapshotRepository) Put(ctx context.Context, snapshot 
 		) VALUES (?, ?, ?, ?, ?, ?, ?)
 		ON DUPLICATE KEY UPDATE data_json=VALUES(data_json), created_at=VALUES(created_at)`
 	}
-	_, err := repository.executor.ExecContext(ctx, query,
-		snapshot.ID, snapshot.TaskID, snapshot.Kind,
-		snapshot.Namespace, snapshot.Name, string(snapshot.Data), formatTime(snapshot.CreatedAt),
+	_, err := repository.executor.ExecContext(
+		ctx,
+		query,
+		snapshot.ID,
+		snapshot.TaskID,
+		snapshot.Kind,
+		snapshot.Namespace,
+		snapshot.Name,
+		string(snapshot.Data),
+		formatTime(snapshot.CreatedAt),
 	)
 	return mapWriteError(err)
 }
 
-func (repository *resourceSnapshotRepository) ListByTask(ctx context.Context, taskID string) ([]ResourceSnapshot, error) {
+func (repository *resourceSnapshotRepository) ListByTask(
+	ctx context.Context,
+	taskID string,
+) ([]ResourceSnapshot, error) {
 	if err := validateUUID(taskID, "task ID"); err != nil {
 		return nil, err
 	}
-	query := repository.bind(`SELECT id, task_id, kind, namespace, name, data_json, created_at
-		FROM resource_snapshots WHERE task_id = ? ORDER BY kind, namespace, name`)
+	query := repository.bind(
+		`SELECT id, task_id, kind, namespace, name, data_json, created_at
+		FROM resource_snapshots WHERE task_id = ? ORDER BY kind, namespace, name`,
+	)
 	rows, err := repository.executor.QueryContext(ctx, query, taskID)
 	if err != nil {
 		return nil, databaseError("list resource snapshots", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var snapshots []ResourceSnapshot
 	for rows.Next() {
 		var snapshot ResourceSnapshot
@@ -78,11 +93,18 @@ func (repository *resourceSnapshotRepository) ListByTask(ctx context.Context, ta
 	return snapshots, nil
 }
 
-func (repository *resourceSnapshotRepository) DeleteByTask(ctx context.Context, taskID string) (int64, error) {
+func (repository *resourceSnapshotRepository) DeleteByTask(
+	ctx context.Context,
+	taskID string,
+) (int64, error) {
 	if err := validateUUID(taskID, "task ID"); err != nil {
 		return 0, err
 	}
-	result, err := repository.executor.ExecContext(ctx, repository.bind(`DELETE FROM resource_snapshots WHERE task_id = ?`), taskID)
+	result, err := repository.executor.ExecContext(
+		ctx,
+		repository.bind(`DELETE FROM resource_snapshots WHERE task_id = ?`),
+		taskID,
+	)
 	if err != nil {
 		return 0, databaseError("delete resource snapshots", err)
 	}

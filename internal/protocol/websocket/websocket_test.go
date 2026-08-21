@@ -23,7 +23,7 @@ func TestDialAcceptRoundTrip(t *testing.T) {
 			t.Errorf("accept: %v", err)
 			return
 		}
-		defer connection.CloseNow()
+		defer func() { _ = connection.CloseNow() }()
 		messageType, payload, err := connection.Read(request.Context())
 		if err != nil {
 			t.Errorf("read: %v", err)
@@ -45,7 +45,7 @@ func TestDialAcceptRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
-	defer connection.CloseNow()
+	defer func() { _ = connection.CloseNow() }()
 	if response == nil || response.StatusCode != http.StatusSwitchingProtocols {
 		t.Fatalf("unexpected upgrade response: %#v", response)
 	}
@@ -79,7 +79,7 @@ func TestReadCancellationClosesConnection(t *testing.T) {
 			t.Errorf("accept: %v", err)
 			return
 		}
-		defer connection.CloseNow()
+		defer func() { _ = connection.CloseNow() }()
 		close(accepted)
 		_, _, _ = connection.Read(request.Context())
 	}))
@@ -89,7 +89,7 @@ func TestReadCancellationClosesConnection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
-	defer connection.CloseNow()
+	defer func() { _ = connection.CloseNow() }()
 	<-accepted
 	ctx, cancel := context.WithCancel(context.Background())
 	result := make(chan error, 1)
@@ -117,7 +117,7 @@ func TestNetConnRoundTrip(t *testing.T) {
 			return
 		}
 		stream := NetConn(request.Context(), connection, MessageBinary)
-		defer stream.Close()
+		defer func() { _ = stream.Close() }()
 		payload := make([]byte, 5)
 		if _, err := io.ReadFull(stream, payload); err != nil {
 			t.Errorf("read stream: %v", err)
@@ -140,7 +140,7 @@ func TestNetConnRoundTrip(t *testing.T) {
 		t.Fatalf("dial: %v", err)
 	}
 	stream := NetConn(ctx, connection, MessageBinary)
-	defer stream.Close()
+	defer func() { _ = stream.Close() }()
 	if _, err := stream.Write([]byte("hello")); err != nil {
 		t.Fatalf("write stream: %v", err)
 	}
@@ -162,7 +162,7 @@ func TestNetConnCancellation(t *testing.T) {
 			t.Errorf("accept: %v", err)
 			return
 		}
-		defer connection.CloseNow()
+		defer func() { _ = connection.CloseNow() }()
 		close(accepted)
 		_, _, _ = connection.Read(request.Context())
 	}))
@@ -174,7 +174,7 @@ func TestNetConnCancellation(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	stream := NetConn(ctx, connection, MessageBinary)
-	defer stream.Close()
+	defer func() { _ = stream.Close() }()
 	<-accepted
 	result := make(chan error, 1)
 	go func() {
@@ -200,7 +200,7 @@ func TestPingRejectsCanceledContext(t *testing.T) {
 			t.Errorf("accept: %v", err)
 			return
 		}
-		defer connection.CloseNow()
+		defer func() { _ = connection.CloseNow() }()
 		_, _, _ = connection.Read(request.Context())
 	}))
 	defer server.Close()
@@ -209,7 +209,7 @@ func TestPingRejectsCanceledContext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
-	defer connection.CloseNow()
+	defer func() { _ = connection.CloseNow() }()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	if err := connection.Ping(ctx); !errors.Is(err, context.Canceled) {
@@ -233,7 +233,7 @@ func TestCloseStatus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
-	defer connection.CloseNow()
+	defer func() { _ = connection.CloseNow() }()
 	_, _, err = connection.Read(context.Background())
 	if code := CloseStatus(err); code != StatusPolicyViolation {
 		t.Fatalf("close status = %d, want %d (error: %v)", code, StatusPolicyViolation, err)

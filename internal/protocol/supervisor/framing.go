@@ -17,7 +17,8 @@ func WriteFrame(w io.Writer, value any, maximum uint32) error {
 		return fmt.Errorf("frame size %d is outside 1..%d", len(raw), maximum)
 	}
 	var header [4]byte
-	binary.BigEndian.PutUint32(header[:], uint32(len(raw)))
+	// The maximum uint32 frame size check above makes this conversion safe.
+	binary.BigEndian.PutUint32(header[:], uint32(len(raw))) //nolint:gosec // Checked against uint32 maximum.
 	if _, err := w.Write(header[:]); err != nil {
 		return fmt.Errorf("write frame header: %w", err)
 	}

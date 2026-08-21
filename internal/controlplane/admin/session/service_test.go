@@ -10,9 +10,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	adminauthentication "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/authentication"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
-	"github.com/google/uuid"
 )
 
 func TestAuthenticateSubjectUsesIdentityAndOAuthGrantRevocation(t *testing.T) {
@@ -20,7 +21,7 @@ func TestAuthenticateSubjectUsesIdentityAndOAuthGrantRevocation(t *testing.T) {
 	store := openTestStore(t)
 	now := time.Date(2026, 8, 10, 11, 30, 0, 0, time.UTC)
 	identity, err := store.Identities().Create(ctx, storage.Identity{
-		ID: uuid.NewString(), Type: "human", DisplayName: "Test Identity", Status: "active",
+		ID: uuid.NewString(), Type: "human", DisplayName: "Test Identity", Status: statusActive,
 		CreatedAt: now, UpdatedAt: now,
 	})
 	if err != nil {
@@ -29,16 +30,22 @@ func TestAuthenticateSubjectUsesIdentityAndOAuthGrantRevocation(t *testing.T) {
 	authorizationID := uuid.NewString()
 	if err := store.OAuthSessions().Create(ctx, storage.OAuthSession{
 		Kind: "access_token", SignatureHash: bytes.Repeat([]byte{8}, 32), RequestID: authorizationID,
-		RequestJSON: []byte(`{}`), Status: "active", CreatedAt: now, ExpiresAt: now.Add(time.Hour),
+		RequestJSON: []byte(`{}`), Status: statusActive, CreatedAt: now, ExpiresAt: now.Add(time.Hour),
 	}); err != nil {
 		t.Fatal(err)
 	}
 	token := opaqueToken(10)
 	tokenHash := sha256.Sum256([]byte(token))
 	if err := store.AdminSessions().Create(ctx, storage.AdminSession{
-		IDHash: tokenHash[:], IdentityID: identity.ID, AuthorizationID: authorizationID,
-		AuthenticationType: string(adminauthentication.Normal), CSRFTokenHash: bytes.Repeat([]byte{9}, 32),
-		CreatedAt: now, LastSeenAt: now, IdleExpiresAt: now.Add(15 * time.Minute), AbsoluteExpiresAt: now.Add(time.Hour),
+		IDHash:             tokenHash[:],
+		IdentityID:         identity.ID,
+		AuthorizationID:    authorizationID,
+		AuthenticationType: string(adminauthentication.Normal),
+		CSRFTokenHash:      bytes.Repeat([]byte{9}, 32),
+		CreatedAt:          now,
+		LastSeenAt:         now,
+		IdleExpiresAt:      now.Add(15 * time.Minute),
+		AbsoluteExpiresAt:  now.Add(time.Hour),
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +58,10 @@ func TestAuthenticateSubjectUsesIdentityAndOAuthGrantRevocation(t *testing.T) {
 	if err := store.OAuthSessions().RevokeRequest(ctx, authorizationID, now); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := service.AuthenticateSubject(ctx, token); !errors.Is(err, ErrSessionInvalid) {
+	if _, _, err := service.AuthenticateSubject(ctx, token); !errors.Is(
+		err,
+		ErrSessionInvalid,
+	) {
 		t.Fatalf("revoked OAuth grant authentication error = %v", err)
 	}
 }
@@ -61,7 +71,7 @@ func TestIdentityExchangePersistsDedicatedSessionAndAudit(t *testing.T) {
 	store := openTestStore(t)
 	now := time.Date(2026, 8, 10, 11, 45, 0, 0, time.UTC)
 	identity, err := store.Identities().Create(ctx, storage.Identity{
-		ID: uuid.NewString(), Type: "human", DisplayName: "Test Identity", Status: "active",
+		ID: uuid.NewString(), Type: "human", DisplayName: "Test Identity", Status: statusActive,
 		CreatedAt: now, UpdatedAt: now,
 	})
 	if err != nil {
@@ -70,15 +80,21 @@ func TestIdentityExchangePersistsDedicatedSessionAndAudit(t *testing.T) {
 	authorizationID := uuid.NewString()
 	if err := store.OAuthSessions().Create(ctx, storage.OAuthSession{
 		Kind: "refresh_token", SignatureHash: bytes.Repeat([]byte{12}, 32), RequestID: authorizationID,
-		RequestJSON: []byte(`{}`), Status: "active", CreatedAt: now, ExpiresAt: now.Add(24 * time.Hour),
+		RequestJSON: []byte(`{}`), Status: statusActive, CreatedAt: now, ExpiresAt: now.Add(24 * time.Hour),
 	}); err != nil {
 		t.Fatal(err)
 	}
 	service, _ := New(store)
 	service.now = func() time.Time { return now }
-	service.random = bytes.NewReader(append(bytes.Repeat([]byte{13}, 32), bytes.Repeat([]byte{14}, 32)...))
+	service.random = bytes.NewReader(
+		append(bytes.Repeat([]byte{13}, 32), bytes.Repeat([]byte{14}, 32)...),
+	)
 	issued, err := service.ExchangeIdentity(
-		ctx, identity.ID, authorizationID, adminauthentication.Normal, "request-identity-1",
+		ctx,
+		identity.ID,
+		authorizationID,
+		adminauthentication.Normal,
+		"request-identity-1",
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -92,7 +108,8 @@ func TestIdentityExchangePersistsDedicatedSessionAndAudit(t *testing.T) {
 		t.Fatal(err)
 	}
 	if stored.IdentityID != identity.ID || stored.AuthorizationID != authorizationID ||
-		stored.AuthenticationType != "normal" || stored.IdleExpiresAt != now.Add(normalSessionIdleTTL) {
+		stored.AuthenticationType != "normal" ||
+		stored.IdleExpiresAt != now.Add(normalSessionIdleTTL) {
 		t.Fatalf("stored identity session=%+v", stored)
 	}
 	if err := VerifyCSRF(stored, issued.CSRFToken); err != nil {
@@ -103,17 +120,22 @@ func TestIdentityExchangePersistsDedicatedSessionAndAudit(t *testing.T) {
 		t.Fatal(err)
 	}
 	stored, err = store.AdminSessions().GetByHash(ctx, digest[:])
-	if err != nil || stored.IdleExpiresAt != now.Add(2*time.Minute+normalSessionIdleTTL) {
+	if err != nil ||
+		stored.IdleExpiresAt != now.Add(2*time.Minute+normalSessionIdleTTL) {
 		t.Fatalf("sliding idle session=%+v error=%v", stored, err)
 	}
-	events, err := store.Audit().List(ctx, storage.AuditFilter{Action: identityExchangeAudit})
-	if err != nil || len(events) != 1 || events[0].IdentityID != identity.ID || events[0].RequestID != "request-identity-1" {
+	events, err := store.Audit().
+		List(ctx, storage.AuditFilter{Action: identityExchangeAudit})
+	if err != nil || len(events) != 1 || events[0].IdentityID != identity.ID ||
+		events[0].RequestID != "request-identity-1" {
 		t.Fatalf("identity exchange audit=%+v error=%v", events, err)
 	}
 	if err := store.OAuthSessions().RevokeRequest(ctx, authorizationID, now); err != nil {
 		t.Fatal(err)
 	}
-	service.random = bytes.NewReader(append(bytes.Repeat([]byte{15}, 32), bytes.Repeat([]byte{16}, 32)...))
+	service.random = bytes.NewReader(
+		append(bytes.Repeat([]byte{15}, 32), bytes.Repeat([]byte{16}, 32)...),
+	)
 	if _, err := service.ExchangeIdentity(
 		ctx, identity.ID, authorizationID, adminauthentication.Normal, "request-identity-2",
 	); !errors.Is(err, ErrAuthenticationFailed) {

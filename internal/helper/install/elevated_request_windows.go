@@ -127,7 +127,10 @@ func installWindowsCertificate(content []byte, run windowsCommandRunner) (return
 	path := file.Name()
 	defer func() {
 		if cleanupErr := os.Remove(path); cleanupErr != nil && !os.IsNotExist(cleanupErr) {
-			returnErr = errors.Join(returnErr, fmt.Errorf("remove temporary traffic inspection certificate: %w", cleanupErr))
+			returnErr = errors.Join(
+				returnErr,
+				fmt.Errorf("remove temporary traffic inspection certificate: %w", cleanupErr),
+			)
 		}
 	}()
 	if _, err := file.Write(content); err != nil {
@@ -142,7 +145,11 @@ func installWindowsCertificate(content []byte, run windowsCommandRunner) (return
 	}
 	output, err := run("certutil.exe", "-addstore", "-f", "Root", path)
 	if err != nil {
-		return fmt.Errorf("install Windows traffic inspection certificate: %w: %s", err, strings.TrimSpace(string(output)))
+		return fmt.Errorf(
+			"install Windows traffic inspection certificate: %w: %s",
+			err,
+			strings.TrimSpace(string(output)),
+		)
 	}
 	return nil
 }
@@ -162,7 +169,11 @@ func uninstallWindowsCertificate(content []byte, run windowsCommandRunner) error
 	thumbprint := strings.ToUpper(hex.EncodeToString(identifier[:]))
 	output, err := run("certutil.exe", "-delstore", "Root", thumbprint)
 	if err != nil {
-		return fmt.Errorf("uninstall Windows traffic inspection certificate: %w: %s", err, strings.TrimSpace(string(output)))
+		return fmt.Errorf(
+			"uninstall Windows traffic inspection certificate: %w: %s",
+			err,
+			strings.TrimSpace(string(output)),
+		)
 	}
 	return nil
 }

@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/fengqi-dev/kube-loop/internal/client/credentials"
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
@@ -26,7 +28,6 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/capability"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
-	"github.com/google/uuid"
 )
 
 type crashCredentialStore struct {
@@ -100,7 +101,12 @@ type crashTargetResolver struct{}
 
 type crashBindingManager struct{}
 
-func (crashBindingManager) Activate(context.Context, sessionapi.ActiveSession, string, portforwardservice.Spec) (bool, error) {
+func (crashBindingManager) Activate(
+	context.Context,
+	sessionapi.ActiveSession,
+	string,
+	portforwardservice.Spec,
+) (bool, error) {
 	return true, nil
 }
 
@@ -130,7 +136,12 @@ func TestCrashedClientTaskIsReclaimedAfterSessionExpiry(t *testing.T) {
 	sessionID := uuid.NewString()
 	deviceID := "crashed-desktop"
 	if _, err := stateStore.Identities().Create(ctx, storage.Identity{
-		ID: identityID, Type: "human", DisplayName: "Test Identity", Status: "active", CreatedAt: now, UpdatedAt: now,
+		ID:          identityID,
+		Type:        "human",
+		DisplayName: "Test Identity",
+		Status:      portForwardSessionActive,
+		CreatedAt:   now,
+		UpdatedAt:   now,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +159,7 @@ func TestCrashedClientTaskIsReclaimedAfterSessionExpiry(t *testing.T) {
 	}
 	if err := stateStore.Sessions().Create(ctx, storage.Session{
 		ID: sessionID, IdentityID: identityID, DeviceID: deviceID, ClusterID: "cluster-a",
-		Namespace: "development", State: "active", Generation: 1,
+		Namespace: "development", State: portForwardSessionActive, Generation: 1,
 		NetworkSpec: networkJSON, NetworkSpecHash: networkHash,
 		CreatedAt: now, UpdatedAt: now, LastHeartbeatAt: now, ExpiresAt: expiresAt,
 	}); err != nil {
@@ -161,23 +172,41 @@ func TestCrashedClientTaskIsReclaimedAfterSessionExpiry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	portForwardService, err := portforwardservice.New(stateStore, crashTargetResolver{}, crashBindingManager{}, portforwardservice.Config{
-		Now: func() time.Time { return now },
-	})
+	portForwardService, err := portforwardservice.New(
+		stateStore,
+		crashTargetResolver{},
+		crashBindingManager{},
+		portforwardservice.Config{
+			Now: func() time.Time { return now },
+		},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
 	policy := authorization.NewAuthenticated()
 	apiServer, err := controlplane.NewServer(
-		controlplane.Config{PublicURL: "http://127.0.0.1"}, controlplane.BuildInfo{},
+		controlplane.Config{PublicURL: "http://127.0.0.1"},
+		controlplane.BuildInfo{},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
-		controlplane.WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(request *http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
-			if request.Header.Get("Authorization") != "Bearer crash-access" {
-				return controlplaneapi.Identity{}, &controlplaneapi.Error{Code: controlplaneapi.CodeUnauthenticated, Message: "invalid token"}
-			}
-			return controlplaneapi.Identity{Subject: identityID, DeviceID: deviceID}, nil
-		})),
-		controlplane.WithAuthorizer(policy), controlplane.WithAPIRoutes(controlplane.APIRoutes{PortForwards: portforwardapi.NewRoutes(portForwardService, sessions).Endpoints()}),
+		controlplane.WithAuthenticator(
+			controlplaneapi.AuthenticatorFunc(
+				func(request *http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
+					if request.Header.Get("Authorization") != "Bearer crash-access" {
+						return controlplaneapi.Identity{}, &controlplaneapi.Error{
+							Code:    controlplaneapi.CodeUnauthenticated,
+							Message: "invalid token",
+						}
+					}
+					return controlplaneapi.Identity{Subject: identityID, DeviceID: deviceID}, nil
+				},
+			),
+		),
+		controlplane.WithAuthorizer(
+			policy,
+		),
+		controlplane.WithAPIRoutes(
+			controlplane.APIRoutes{PortForwards: portforwardapi.NewRoutes(portForwardService, sessions).Endpoints()},
+		),
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -192,7 +221,11 @@ func TestCrashedClientTaskIsReclaimedAfterSessionExpiry(t *testing.T) {
 			RefreshToken: "unused", RefreshExpiresAt: now.Add(time.Hour), DeviceID: deviceID,
 		},
 	}
-	remoteClient, err := remote.New(credentialStore, crashTokenRefresher{}, remote.Config{Now: func() time.Time { return now }})
+	remoteClient, err := remote.New(
+		credentialStore,
+		crashTokenRefresher{},
+		remote.Config{Now: func() time.Time { return now }},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,7 +234,7 @@ func TestCrashedClientTaskIsReclaimedAfterSessionExpiry(t *testing.T) {
 		t.Fatal(err)
 	}
 	session := remote.Session{
-		ID: sessionID, Namespace: "development", State: "active", Generation: 1,
+		ID: sessionID, Namespace: "development", State: portForwardSessionActive, Generation: 1,
 		CreatedAt: now, UpdatedAt: now, LastHeartbeatAt: now, ExpiresAt: expiresAt,
 		NetworkSpec: network, NetworkSpecHash: networkHash,
 	}

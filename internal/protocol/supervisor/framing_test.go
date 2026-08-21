@@ -25,7 +25,11 @@ func TestFrameRoundTrip(t *testing.T) {
 func TestReadFrameRejectsUnknownFields(t *testing.T) {
 	t.Parallel()
 	var buffer bytes.Buffer
-	if err := WriteFrame(&buffer, map[string]any{"protocol": Version, "op": OpStatus, "token": "x", "path": "/tmp/x"}, MaxRequestBytes); err != nil {
+	if err := WriteFrame(
+		&buffer,
+		map[string]any{"protocol": Version, "op": OpStatus, "token": "x", "path": "/tmp/x"},
+		MaxRequestBytes,
+	); err != nil {
 		t.Fatalf("WriteFrame: %v", err)
 	}
 	var request Request

@@ -37,7 +37,12 @@ func TestSetTrafficInspectionEnabledPersistsAndAppliesImmediately(t *testing.T) 
 		t.Fatal(err)
 	}
 	if !settings.Enabled || !switchable.Enabled() || trustStore.installCalls != 1 {
-		t.Fatalf("enabled settings = %#v, switch = %t, installs = %d", settings, switchable.Enabled(), trustStore.installCalls)
+		t.Fatalf(
+			"enabled settings = %#v, switch = %t, installs = %d",
+			settings,
+			switchable.Enabled(),
+			trustStore.installCalls,
+		)
 	}
 	settings, err = application.SetTrafficInspectionEnabled(false)
 	if err != nil {
@@ -82,9 +87,24 @@ func TestTrafficInspectionEventsFiltersAndReturnsNewestFirst(t *testing.T) {
 		t.Fatal(err)
 	}
 	events := []trafficinspect.Event{
-		{ID: "one", Timestamp: time.Unix(1, 0), Destination: "api.example.test:443", HTTP: &trafficinspect.HTTPEvent{Host: "api.example.test", Path: "/v1/users"}},
-		{ID: "two", Timestamp: time.Unix(2, 0), Destination: "grpc.example.test:443", GRPC: &trafficinspect.GRPCEvent{Path: "/demo.Echo/Say"}},
-		{ID: "three", Timestamp: time.Unix(3, 0), Destination: "api.example.test:443", HTTP: &trafficinspect.HTTPEvent{Host: "api.example.test", Path: "/v1/users/3"}},
+		{
+			ID:          "one",
+			Timestamp:   time.Unix(1, 0),
+			Destination: "api.example.test:443",
+			HTTP:        &trafficinspect.HTTPEvent{Host: "api.example.test", Path: "/v1/users"},
+		},
+		{
+			ID:          "two",
+			Timestamp:   time.Unix(2, 0),
+			Destination: "grpc.example.test:443",
+			GRPC:        &trafficinspect.GRPCEvent{Path: "/demo.Echo/Say"},
+		},
+		{
+			ID:          "three",
+			Timestamp:   time.Unix(3, 0),
+			Destination: "api.example.test:443",
+			HTTP:        &trafficinspect.HTTPEvent{Host: "api.example.test", Path: "/v1/users/3"},
+		},
 	}
 	for _, event := range events {
 		if err := sink.Emit(context.Background(), event); err != nil {
@@ -96,7 +116,9 @@ func TestTrafficInspectionEventsFiltersAndReturnsNewestFirst(t *testing.T) {
 		trafficInspectionSwitch: testTrafficInspectionSwitch(t, true),
 	}
 
-	result := application.TrafficInspectionEvents(TrafficInspectionQuery{Host: "API.EXAMPLE", Path: "/v1/users", Limit: 1})
+	result := application.TrafficInspectionEvents(
+		TrafficInspectionQuery{Host: "API.EXAMPLE", Path: "/v1/users", Limit: 1},
+	)
 	if !result.Enabled || len(result.Events) != 1 || result.Events[0].ID != "three" {
 		t.Fatalf("filtered result = %#v", result)
 	}

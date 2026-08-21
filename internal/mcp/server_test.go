@@ -31,9 +31,13 @@ func TestServerRejectsMissingBearer(t *testing.T) {
 	if err := server.Start(); err != nil {
 		t.Fatal(err)
 	}
-	defer server.Stop()
+	defer func() { _ = server.Stop() }()
 
-	request, err := http.NewRequest(http.MethodPost, server.Status().URL, strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`))
+	request, err := http.NewRequest(
+		http.MethodPost,
+		server.Status().URL,
+		strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`),
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,7 +47,7 @@ func TestServerRejectsMissingBearer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != http.StatusUnauthorized {
 		body, _ := io.ReadAll(response.Body)
 		t.Fatalf("status=%d body=%s", response.StatusCode, body)
@@ -58,7 +62,7 @@ func TestServerPublishesAndExecutesV2Tools(t *testing.T) {
 	if err := server.Start(); err != nil {
 		t.Fatal(err)
 	}
-	defer server.Stop()
+	defer func() { _ = server.Stop() }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -70,7 +74,7 @@ func TestServerPublishesAndExecutesV2Tools(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer session.Close()
+	defer func() { _ = session.Close() }()
 	listed, err := session.ListTools(ctx, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -152,7 +156,7 @@ func TestServerToolErrorsAreStableJSON(t *testing.T) {
 	if err := server.Start(); err != nil {
 		t.Fatal(err)
 	}
-	defer server.Stop()
+	defer func() { _ = server.Stop() }()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	client := mcpsdk.NewClient(&mcpsdk.Implementation{Name: "test", Version: "v1"}, nil)
@@ -160,7 +164,7 @@ func TestServerToolErrorsAreStableJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer session.Close()
+	defer func() { _ = session.Close() }()
 	result, err := session.CallTool(ctx, &mcpsdk.CallToolParams{
 		Name: "manage_connection", Arguments: map[string]any{"action": "disconnect", "profileId": "server-a"},
 	})
@@ -174,7 +178,8 @@ func TestServerToolErrorsAreStableJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(raw), `\"code\":\"invalid_argument\"`) || !strings.Contains(string(raw), `\"field\":\"sessionId\"`) {
+	if !strings.Contains(string(raw), `\"code\":\"invalid_argument\"`) ||
+		!strings.Contains(string(raw), `\"field\":\"sessionId\"`) {
 		t.Fatalf("error content=%s", raw)
 	}
 }
@@ -202,7 +207,7 @@ func TestServerRejectsNonLocalOrigin(t *testing.T) {
 	if err := server.Start(); err != nil {
 		t.Fatal(err)
 	}
-	defer server.Stop()
+	defer func() { _ = server.Stop() }()
 	request, err := http.NewRequest(http.MethodPost, server.Status().URL, strings.NewReader(`{}`))
 	if err != nil {
 		t.Fatal(err)
@@ -212,7 +217,7 @@ func TestServerRejectsNonLocalOrigin(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != http.StatusForbidden {
 		t.Fatalf("status=%d", response.StatusCode)
 	}
@@ -231,7 +236,7 @@ func TestServerStopWithStreamableHTTPSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer session.Close()
+	defer func() { _ = session.Close() }()
 	done := make(chan error, 1)
 	go func() { done <- server.Stop() }()
 	select {
@@ -261,6 +266,6 @@ func freePort(t *testing.T) int {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer listener.Close()
+	defer func() { _ = listener.Close() }()
 	return listener.Addr().(*net.TCPAddr).Port
 }

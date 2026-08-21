@@ -7,14 +7,15 @@ import (
 	"io"
 	"slices"
 
-	"github.com/fengqi-dev/kube-loop/internal/controlplane/authorization"
-	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/remotecommand"
+
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/authorization"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
 )
 
 type Streams struct {
@@ -39,7 +40,7 @@ type KubernetesExecutor struct{ provider Provider }
 
 func NewKubernetesExecutor(provider Provider) (*KubernetesExecutor, error) {
 	if provider == nil {
-		return nil, errors.New("Kubernetes Provider is required")
+		return nil, errors.New("kubernetes Provider is required")
 	}
 	return &KubernetesExecutor{provider: provider}, nil
 }
@@ -50,7 +51,10 @@ func (executor *KubernetesExecutor) Validate(
 	namespace string,
 	spec Spec,
 ) error {
-	subject := authorization.Subject{ID: identity.Subject, Groups: append([]string(nil), identity.Groups...)}
+	subject := authorization.Subject{
+		ID:     identity.Subject,
+		Groups: append([]string(nil), identity.Groups...),
+	}
 	client, err := executor.provider.ClientFor(subject)
 	if err != nil {
 		return err
@@ -59,10 +63,15 @@ func (executor *KubernetesExecutor) Validate(
 	if err != nil {
 		return err
 	}
-	if pod.DeletionTimestamp != nil || pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed {
-		return fmt.Errorf("Pod %s/%s is not running", namespace, spec.Pod)
+	if pod.DeletionTimestamp != nil || pod.Status.Phase == corev1.PodSucceeded ||
+		pod.Status.Phase == corev1.PodFailed {
+		return fmt.Errorf("pod %s/%s is not running", namespace, spec.Pod)
 	}
-	containers := make([]string, 0, len(pod.Spec.InitContainers)+len(pod.Spec.Containers)+len(pod.Spec.EphemeralContainers))
+	containers := make(
+		[]string,
+		0,
+		len(pod.Spec.InitContainers)+len(pod.Spec.Containers)+len(pod.Spec.EphemeralContainers),
+	)
 	for _, container := range pod.Spec.InitContainers {
 		containers = append(containers, container.Name)
 	}
@@ -79,7 +88,12 @@ func (executor *KubernetesExecutor) Validate(
 		return nil
 	}
 	if !slices.Contains(containers, spec.Container) {
-		return fmt.Errorf("container %q does not exist in Pod %s/%s", spec.Container, namespace, spec.Pod)
+		return fmt.Errorf(
+			"container %q does not exist in Pod %s/%s",
+			spec.Container,
+			namespace,
+			spec.Pod,
+		)
 	}
 	return nil
 }
@@ -91,7 +105,10 @@ func (executor *KubernetesExecutor) Exec(
 	spec Spec,
 	streams Streams,
 ) error {
-	subject := authorization.Subject{ID: identity.Subject, Groups: append([]string(nil), identity.Groups...)}
+	subject := authorization.Subject{
+		ID:     identity.Subject,
+		Groups: append([]string(nil), identity.Groups...),
+	}
 	config, err := executor.provider.RESTConfigFor(subject)
 	if err != nil {
 		return err

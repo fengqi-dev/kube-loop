@@ -68,16 +68,21 @@ func ConfigFromEnv() (Config, error) {
 		return Config{}, fmt.Errorf("decode storage environment: %w", err)
 	}
 	config := Config{
-		SQLitePath: strings.TrimSpace(environment.SQLitePath), DatasourceURL: strings.TrimSpace(environment.DatasourceURL),
+		SQLitePath: strings.TrimSpace(
+			environment.SQLitePath,
+		), DatasourceURL: strings.TrimSpace(environment.DatasourceURL),
 		ControlPlaneReplicas: environment.ControlPlaneReplicas, ConnectTimeout: environment.ConnectTimeout,
 		QueryTimeout: environment.QueryTimeout, MaxOpenConnections: environment.MaxOpenConnections,
 		MaxIdleConnections: environment.MaxIdleConnections, ConnectionMaxLifetime: environment.ConnectionMaxLifetime,
-		TransactionMaxRetries: environment.TransactionMaxRetries, TransactionRetryBackoff: environment.TransactionRetryBackoff,
+		TransactionMaxRetries:   environment.TransactionMaxRetries,
+		TransactionRetryBackoff: environment.TransactionRetryBackoff,
 		AllowInsecureDatasource: environment.AllowInsecureDatasource,
 	}
 	if file := strings.TrimSpace(environment.DatasourceURLFile); file != "" {
 		if config.DatasourceURL != "" {
-			return Config{}, errors.New("configure only one of KUBELOOP_DATASOURCE_URL and KUBELOOP_DATASOURCE_URL_FILE")
+			return Config{}, errors.New(
+				"configure only one of KUBELOOP_DATASOURCE_URL and KUBELOOP_DATASOURCE_URL_FILE",
+			)
 		}
 		content, err := os.ReadFile(filepath.Clean(file))
 		if err != nil {
@@ -96,17 +101,25 @@ func Normalize(config Config) (Config, error) {
 		return Config{}, err
 	}
 	if config.Backend != "" && config.Backend != backend {
-		return Config{}, errors.New("storage backend conflicts with datasource URL")
+		return Config{}, errors.New(
+			"storage backend conflicts with datasource URL",
+		)
 	}
 	config.Backend = backend
 	if config.ControlPlaneReplicas < 0 {
-		return Config{}, errors.New("Control Plane replicas must not be negative")
+		return Config{}, errors.New(
+			"control Plane replicas must not be negative",
+		)
 	}
 	if config.ControlPlaneReplicas == 0 {
 		config.ControlPlaneReplicas = 1
 	}
-	if config.BusyTimeout < 0 || config.ConnectTimeout < 0 || config.QueryTimeout < 0 || config.ConnectionMaxLifetime < 0 {
-		return Config{}, errors.New("storage timeouts and connection lifetime must not be negative")
+	if config.BusyTimeout < 0 || config.ConnectTimeout < 0 ||
+		config.QueryTimeout < 0 ||
+		config.ConnectionMaxLifetime < 0 {
+		return Config{}, errors.New(
+			"storage timeouts and connection lifetime must not be negative",
+		)
 	}
 	if config.BusyTimeout == 0 {
 		config.BusyTimeout = DefaultBusyTimeout
@@ -122,7 +135,9 @@ func Normalize(config Config) (Config, error) {
 	}
 	if config.Backend == BackendSQLite {
 		if config.ControlPlaneReplicas != 1 {
-			return Config{}, errors.New("SQLite storage requires exactly one Control Plane replica")
+			return Config{}, errors.New(
+				"sQLite storage requires exactly one Control Plane replica",
+			)
 		}
 		if strings.TrimSpace(config.SQLitePath) == "" {
 			config.SQLitePath = DefaultSQLitePath
@@ -136,28 +151,42 @@ func Normalize(config Config) (Config, error) {
 		return Config{}, err
 	}
 	if config.MaxOpenConnections < 0 {
-		return Config{}, errors.New("datasource max open connections must not be negative")
+		return Config{}, errors.New(
+			"datasource max open connections must not be negative",
+		)
 	}
 	if config.MaxOpenConnections == 0 {
 		config.MaxOpenConnections = DefaultMaxOpen
 	}
 	if config.MaxIdleConnections < 0 {
-		return Config{}, errors.New("datasource max idle connections must not be negative")
+		return Config{}, errors.New(
+			"datasource max idle connections must not be negative",
+		)
 	}
 	if config.MaxIdleConnections == 0 {
-		config.MaxIdleConnections = min(DefaultMaxIdle, config.MaxOpenConnections)
+		config.MaxIdleConnections = min(
+			DefaultMaxIdle,
+			config.MaxOpenConnections,
+		)
 	}
 	if config.MaxIdleConnections > config.MaxOpenConnections {
-		return Config{}, errors.New("datasource max idle connections must not exceed max open connections")
+		return Config{}, errors.New(
+			"datasource max idle connections must not exceed max open connections",
+		)
 	}
 	if config.TransactionMaxRetries < 0 || config.TransactionMaxRetries > 10 {
-		return Config{}, errors.New("datasource transaction max retries must be between 0 and 10")
+		return Config{}, errors.New(
+			"datasource transaction max retries must be between 0 and 10",
+		)
 	}
 	if config.TransactionMaxRetries == 0 {
 		config.TransactionMaxRetries = DefaultTransactionMaxRetries
 	}
-	if config.TransactionRetryBackoff < 0 || config.TransactionRetryBackoff > time.Second {
-		return Config{}, errors.New("datasource transaction retry backoff must be between 0 and 1s")
+	if config.TransactionRetryBackoff < 0 ||
+		config.TransactionRetryBackoff > time.Second {
+		return Config{}, errors.New(
+			"datasource transaction retry backoff must be between 0 and 1s",
+		)
 	}
 	if config.TransactionRetryBackoff == 0 {
 		config.TransactionRetryBackoff = DefaultTransactionRetryBackoff
@@ -176,7 +205,7 @@ func datasourceBackend(raw string) (Backend, error) {
 	switch strings.ToLower(parsed.Scheme) {
 	case "postgres", "postgresql":
 		return BackendPostgreSQL, nil
-	case "mysql":
+	case string(BackendMySQL):
 		return BackendMySQL, nil
 	default:
 		return "", errors.New("datasource URL must use postgresql or mysql")
@@ -185,21 +214,26 @@ func datasourceBackend(raw string) (Backend, error) {
 
 func validateDatasource(config Config) error {
 	switch config.Backend {
+	case BackendSQLite:
+		return nil
 	case BackendPostgreSQL:
 		parsed, err := pgx.ParseConfig(config.DatasourceURL)
 		if err != nil {
-			return errors.New("PostgreSQL datasource URL is invalid")
+			return errors.New("postgreSQL datasource URL is invalid")
 		}
 		if !postgreSQLTLSRequired(parsed) && !config.AllowInsecureDatasource {
-			return errors.New("PostgreSQL datasource TLS is required; set sslmode=require or stronger")
+			return errors.New(
+				"postgreSQL datasource TLS is required; set sslmode=require or stronger",
+			)
 		}
 	case BackendMySQL:
 		parsed, err := parseMySQLURL(config.DatasourceURL)
 		if err != nil {
 			return err
 		}
-		if !mysqlTLSRequired(parsed.TLSConfig) && !config.AllowInsecureDatasource {
-			return errors.New("MySQL datasource TLS is required; set tls=true")
+		if !mysqlTLSRequired(parsed.TLSConfig) &&
+			!config.AllowInsecureDatasource {
+			return errors.New("mySQL datasource TLS is required; set tls=true")
 		}
 	}
 	return nil
@@ -221,13 +255,16 @@ func postgreSQLTLSRequired(config *pgx.ConnConfig) bool {
 
 func mysqlTLSRequired(value string) bool {
 	value = strings.ToLower(strings.TrimSpace(value))
-	return value != "" && value != "false" && value != "preferred" && value != "skip-verify"
+	return value != "" && value != "false" && value != "preferred" &&
+		value != "skip-verify"
 }
 
 func parseMySQLURL(raw string) (*mysql.Config, error) {
 	parsed, err := url.Parse(raw)
-	if err != nil || parsed.Scheme != "mysql" || parsed.Host == "" || strings.TrimPrefix(parsed.Path, "/") == "" {
-		return nil, errors.New("MySQL datasource URL is invalid")
+	if err != nil || parsed.Scheme != string(BackendMySQL) ||
+		parsed.Host == "" ||
+		strings.TrimPrefix(parsed.Path, "/") == "" {
+		return nil, errors.New("mySQL datasource URL is invalid")
 	}
 	config := mysql.NewConfig()
 	config.Net = "tcp"
@@ -241,7 +278,9 @@ func parseMySQLURL(raw string) (*mysql.Config, error) {
 	config.Params = make(map[string]string)
 	for key, values := range parsed.Query() {
 		if len(values) != 1 {
-			return nil, errors.New("MySQL datasource URL contains duplicate parameters")
+			return nil, errors.New(
+				"mySQL datasource URL contains duplicate parameters",
+			)
 		}
 		switch key {
 		case "tls":
@@ -249,7 +288,10 @@ func parseMySQLURL(raw string) (*mysql.Config, error) {
 		case "charset", "collation", "time_zone":
 			config.Params[key] = values[0]
 		default:
-			return nil, fmt.Errorf("MySQL datasource URL parameter %q is not supported", key)
+			return nil, fmt.Errorf(
+				"mySQL datasource URL parameter %q is not supported",
+				key,
+			)
 		}
 	}
 	return config, nil

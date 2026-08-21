@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
 	"github.com/fengqi-dev/kube-loop/internal/client/socksbridge"
@@ -23,11 +25,11 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficstream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
 	"github.com/fengqi-dev/kube-loop/internal/singbox"
-	"github.com/google/uuid"
 )
 
 type testForwarder struct {
 	net.Listener
+
 	open       func(context.Context) (net.Conn, error)
 	closeErr   error
 	closeCalls atomic.Int32
@@ -105,6 +107,7 @@ func (address testAddress) String() string  { return string(address) }
 
 type testCloseConn struct {
 	net.Conn
+
 	closeErr   error
 	closeCalls int
 }
@@ -172,7 +175,7 @@ func TestRuntimeOpenTrafficStreamUsesCurrentTunnelTransport(t *testing.T) {
 	}
 	serverDone := make(chan error, 1)
 	go func() {
-		defer gateway.Close()
+		defer checkTestClose(t, gateway.Close)
 		header, readErr := tunnel.ReadSessionHeader(gateway)
 		if readErr != nil {
 			serverDone <- readErr
@@ -181,7 +184,7 @@ func TestRuntimeOpenTrafficStreamUsesCurrentTunnelTransport(t *testing.T) {
 		request, readErr := tunnel.ReadTrafficOpenBody(gateway)
 		if readErr != nil || header.Command != tunnel.CommandTraffic || header.Token != token ||
 			request.Mode != tunnel.TrafficModePreview || request.TaskID != taskID {
-			serverDone <- errors.Join(readErr, errors.New("Traffic open request changed"))
+			serverDone <- errors.Join(readErr, errors.New("traffic open request changed"))
 			return
 		}
 		if writeErr := tunnel.WriteStatus(gateway, nil); writeErr != nil {
@@ -237,17 +240,21 @@ func TestReconnectDrainsTransportUntilTrafficStreamCloses(t *testing.T) {
 		t.Fatal(err)
 	}
 	session := remote.Session{
-		ID: uuid.NewString(), Namespace: "default", State: "active", Generation: 1,
+		ID: uuid.NewString(), Namespace: "default", State: dataplaneSessionActive, Generation: 1,
 		NetworkSpec: initialSpec, NetworkSpecHash: initialHash,
 	}
-	serverProfile := profile.Profile{ID: "service", BaseURL: "https://gateway.example.test", TunnelPath: "/tunnel"}
+	serverProfile := profile.Profile{
+		ID:         "service",
+		BaseURL:    "https://gateway.example.test",
+		TunnelPath: defaultTunnelPath,
+	}
 	controls := make(chan net.Conn, 2)
 	forwarders := make(chan *testForwarder, 2)
 	trafficClient, trafficGateway := net.Pipe()
 	trafficServerDone := make(chan error, 1)
 	continueTraffic := make(chan struct{})
 	go func() {
-		defer trafficGateway.Close()
+		defer checkTestClose(t, trafficGateway.Close)
 		if _, readErr := tunnel.ReadTrafficOpen(trafficGateway); readErr != nil {
 			trafficServerDone <- readErr
 			return
@@ -261,7 +268,7 @@ func TestReconnectDrainsTransportUntilTrafficStreamCloses(t *testing.T) {
 			trafficServerDone <- acceptErr
 			return
 		}
-		defer framed.Close()
+		defer checkTestClose(t, framed.Close)
 		ready, encodeErr := exchangestream.Encode(exchangestream.Frame{Type: exchangestream.Ready})
 		if encodeErr == nil {
 			encodeErr = framed.WriteFrame(t.Context(), ready)
@@ -280,37 +287,43 @@ func TestReconnectDrainsTransportUntilTrafficStreamCloses(t *testing.T) {
 		trafficServerDone <- encodeErr
 	}()
 	starts := 0
-	runtime, err := Start(context.Background(), serverProfile, session, func(context.Context) (remote.RelayTicket, error) {
-		return remote.RelayTicket{Ticket: "relay-ticket"}, nil
-	}, Config{
-		startForwarder: func(ctx context.Context, config websocketmux.ClientConfig) (streamForwarder, error) {
-			if _, tokenErr := config.TokenSource(ctx); tokenErr != nil {
-				return nil, tokenErr
-			}
-			listener, listenErr := net.Listen("tcp", "127.0.0.1:0")
-			if listenErr != nil {
-				return nil, listenErr
-			}
-			forwarder := &testForwarder{Listener: listener}
-			if starts == 0 {
-				forwarder.open = func(context.Context) (net.Conn, error) { return trafficClient, nil }
-			}
-			starts++
-			forwarders <- forwarder
-			go acceptTestControlWithSignal(listener, controls)
-			return forwarder, nil
+	runtime, err := Start(
+		context.Background(),
+		serverProfile,
+		session,
+		func(context.Context) (remote.RelayTicket, error) {
+			return remote.RelayTicket{Ticket: "relay-ticket"}, nil
 		},
-		listenSOCKS: func(context.Context, string, string, tunnel.SessionToken) (localBridge, error) {
-			return &testBridge{address: testAddress("127.0.0.1:45020")}, nil
+		Config{
+			startForwarder: func(ctx context.Context, config websocketmux.ClientConfig) (streamForwarder, error) {
+				if _, tokenErr := config.TokenSource(ctx); tokenErr != nil {
+					return nil, tokenErr
+				}
+				listener, listenErr := net.Listen("tcp", "127.0.0.1:0")
+				if listenErr != nil {
+					return nil, listenErr
+				}
+				forwarder := &testForwarder{Listener: listener}
+				if starts == 0 {
+					forwarder.open = func(context.Context) (net.Conn, error) { return trafficClient, nil }
+				}
+				starts++
+				forwarders <- forwarder
+				go acceptTestControlWithSignal(listener, controls)
+				return forwarder, nil
+			},
+			listenSOCKS: func(context.Context, string, string, tunnel.SessionToken) (localBridge, error) {
+				return &testBridge{address: testAddress("127.0.0.1:45020")}, nil
+			},
 		},
-	})
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = runtime.Close() })
 	firstForwarder := <-forwarders
 	firstControl := receiveControl(t, controls)
-	defer firstControl.Close()
+	defer checkTestClose(t, firstControl.Close)
 	stream, err := runtime.OpenTrafficStream(t.Context(), tunnel.TrafficModePreview, uuid.NewString())
 	if err != nil {
 		t.Fatal(err)
@@ -327,14 +340,19 @@ func TestReconnectDrainsTransportUntilTrafficStreamCloses(t *testing.T) {
 	refreshed.Generation++
 	refreshed.NetworkSpec = refreshedSpec
 	refreshed.NetworkSpecHash = refreshedHash
-	if err := runtime.Reconnect(context.Background(), serverProfile, refreshed, func(context.Context) (remote.RelayTicket, error) {
-		return remote.RelayTicket{Ticket: "refreshed-relay-ticket"}, nil
-	}); err != nil {
+	if err := runtime.Reconnect(
+		context.Background(),
+		serverProfile,
+		refreshed,
+		func(context.Context) (remote.RelayTicket, error) {
+			return remote.RelayTicket{Ticket: "refreshed-relay-ticket"}, nil
+		},
+	); err != nil {
 		t.Fatal(err)
 	}
 	secondForwarder := <-forwarders
 	secondControl := receiveControl(t, controls)
-	defer secondControl.Close()
+	defer checkTestClose(t, secondControl.Close)
 	if closeCalls := firstForwarder.closeCalls.Load(); closeCalls != 0 {
 		t.Fatalf("old transport closed with active Preview stream: closes=%d", closeCalls)
 	}
@@ -421,6 +439,7 @@ func (connection *testCloseConn) Close() error {
 
 type readSignalConn struct {
 	net.Conn
+
 	once sync.Once
 	read chan struct{}
 }
@@ -455,7 +474,7 @@ func TestStartRegistersAuthorizedControlBeforeOpeningSOCKS(t *testing.T) {
 		if acceptErr != nil {
 			return
 		}
-		defer connection.Close()
+		defer checkTestClose(t, connection.Close)
 		header, readErr := tunnel.ReadSessionHeader(connection)
 		if readErr != nil || header.Command != tunnel.CommandControl {
 			return
@@ -477,7 +496,7 @@ func TestStartRegistersAuthorizedControlBeforeOpeningSOCKS(t *testing.T) {
 	runtime, err := Start(context.Background(), profile.Profile{
 		ID: "service", BaseURL: "https://gateway.example.test", TunnelPath: "/relay/tunnel",
 	}, remote.Session{
-		ID: "ec0b67a2-e84c-4fe7-a0c5-810f210157b5", State: "active", Generation: 1,
+		ID: "ec0b67a2-e84c-4fe7-a0c5-810f210157b5", State: dataplaneSessionActive, Generation: 1,
 		NetworkSpec: spec, NetworkSpecHash: hash,
 	}, func(context.Context) (remote.RelayTicket, error) {
 		ticketCalls++
@@ -559,15 +578,21 @@ func TestAssignmentTokenSourceRejectsDeviceDriftWithinPool(t *testing.T) {
 
 func TestStartRejectsNetworkSpecHashBeforeTransport(t *testing.T) {
 	started := false
-	_, err := Start(context.Background(), profile.Profile{ID: "service", BaseURL: "https://gateway.example.test"}, remote.Session{
-		ID: "ec0b67a2-e84c-4fe7-a0c5-810f210157b5", State: "active", Generation: 1,
-		NetworkSpec: networkspec.Spec{PodCIDRs: []string{"10.42.0.0/16"}}, NetworkSpecHash: "bad",
-	}, func(context.Context) (remote.RelayTicket, error) { return remote.RelayTicket{Ticket: "ticket"}, nil }, Config{
-		startForwarder: func(context.Context, websocketmux.ClientConfig) (streamForwarder, error) {
-			started = true
-			return nil, errors.New("unexpected")
+	_, err := Start(
+		context.Background(),
+		profile.Profile{ID: "service", BaseURL: "https://gateway.example.test"},
+		remote.Session{
+			ID: "ec0b67a2-e84c-4fe7-a0c5-810f210157b5", State: dataplaneSessionActive, Generation: 1,
+			NetworkSpec: networkspec.Spec{PodCIDRs: []string{"10.42.0.0/16"}}, NetworkSpecHash: "bad",
 		},
-	})
+		func(context.Context) (remote.RelayTicket, error) { return remote.RelayTicket{Ticket: "ticket"}, nil },
+		Config{
+			startForwarder: func(context.Context, websocketmux.ClientConfig) (streamForwarder, error) {
+				started = true
+				return nil, errors.New("unexpected")
+			},
+		},
+	)
 	if err == nil || started {
 		t.Fatalf("error = %v, transport started = %t", err, started)
 	}
@@ -582,7 +607,7 @@ func TestStartClosesTransportWhenAuthorizationIsRejected(t *testing.T) {
 	client, gateway := net.Pipe()
 	serverDone := make(chan error, 1)
 	go func() {
-		defer gateway.Close()
+		defer checkTestClose(t, gateway.Close)
 		if _, readErr := tunnel.ReadSessionHeader(gateway); readErr != nil {
 			serverDone <- readErr
 			return
@@ -599,19 +624,25 @@ func TestStartClosesTransportWhenAuthorizationIsRejected(t *testing.T) {
 	}
 	forwarder := &testForwarder{Listener: listener}
 	bridgeStarted := false
-	_, err = Start(context.Background(), profile.Profile{ID: "service", BaseURL: "https://gateway.example.test"}, remote.Session{
-		ID: uuid.NewString(), Namespace: "development", State: "active", Generation: 1,
-		NetworkSpec: spec, NetworkSpecHash: hash,
-	}, func(context.Context) (remote.RelayTicket, error) {
-		return remote.RelayTicket{Ticket: "ticket"}, nil
-	}, Config{
-		startForwarder: func(context.Context, websocketmux.ClientConfig) (streamForwarder, error) { return forwarder, nil },
-		dialContext:    func(context.Context, string, string) (net.Conn, error) { return client, nil },
-		listenSOCKS: func(context.Context, string, string, tunnel.SessionToken) (localBridge, error) {
-			bridgeStarted = true
-			return nil, errors.New("unexpected")
+	_, err = Start(
+		context.Background(),
+		profile.Profile{ID: "service", BaseURL: "https://gateway.example.test"},
+		remote.Session{
+			ID: uuid.NewString(), Namespace: "development", State: dataplaneSessionActive, Generation: 1,
+			NetworkSpec: spec, NetworkSpecHash: hash,
 		},
-	})
+		func(context.Context) (remote.RelayTicket, error) {
+			return remote.RelayTicket{Ticket: "ticket"}, nil
+		},
+		Config{
+			startForwarder: func(context.Context, websocketmux.ClientConfig) (streamForwarder, error) { return forwarder, nil },
+			dialContext:    func(context.Context, string, string) (net.Conn, error) { return client, nil },
+			listenSOCKS: func(context.Context, string, string, tunnel.SessionToken) (localBridge, error) {
+				bridgeStarted = true
+				return nil, errors.New("unexpected")
+			},
+		},
+	)
 	if err == nil || !strings.Contains(err.Error(), "authorization denied") {
 		t.Fatalf("start error = %v", err)
 	}
@@ -632,7 +663,7 @@ func TestStartClosesAuthorizedTransportWhenSOCKSBridgeFails(t *testing.T) {
 	client, gateway := net.Pipe()
 	serverDone := make(chan error, 1)
 	go func() {
-		defer gateway.Close()
+		defer checkTestClose(t, gateway.Close)
 		if _, readErr := tunnel.ReadSessionHeader(gateway); readErr != nil {
 			serverDone <- readErr
 			return
@@ -658,19 +689,25 @@ func TestStartClosesAuthorizedTransportWhenSOCKSBridgeFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	forwarder := &testForwarder{Listener: listener}
-	bridgeFailure := errors.New("SOCKS bind failed")
-	_, err = Start(context.Background(), profile.Profile{ID: "service", BaseURL: "https://gateway.example.test"}, remote.Session{
-		ID: uuid.NewString(), Namespace: "development", State: "active", Generation: 1,
-		NetworkSpec: spec, NetworkSpecHash: hash,
-	}, func(context.Context) (remote.RelayTicket, error) {
-		return remote.RelayTicket{Ticket: "ticket"}, nil
-	}, Config{
-		startForwarder: func(context.Context, websocketmux.ClientConfig) (streamForwarder, error) { return forwarder, nil },
-		dialContext:    func(context.Context, string, string) (net.Conn, error) { return client, nil },
-		listenSOCKS: func(context.Context, string, string, tunnel.SessionToken) (localBridge, error) {
-			return nil, bridgeFailure
+	bridgeFailure := errors.New("sOCKS bind failed")
+	_, err = Start(
+		context.Background(),
+		profile.Profile{ID: "service", BaseURL: "https://gateway.example.test"},
+		remote.Session{
+			ID: uuid.NewString(), Namespace: "development", State: dataplaneSessionActive, Generation: 1,
+			NetworkSpec: spec, NetworkSpecHash: hash,
 		},
-	})
+		func(context.Context) (remote.RelayTicket, error) {
+			return remote.RelayTicket{Ticket: "ticket"}, nil
+		},
+		Config{
+			startForwarder: func(context.Context, websocketmux.ClientConfig) (streamForwarder, error) { return forwarder, nil },
+			dialContext:    func(context.Context, string, string) (net.Conn, error) { return client, nil },
+			listenSOCKS: func(context.Context, string, string, tunnel.SessionToken) (localBridge, error) {
+				return nil, bridgeFailure
+			},
+		},
+	)
 	if closeCalls := forwarder.closeCalls.Load(); !errors.Is(err, bridgeFailure) || closeCalls != 1 {
 		t.Fatalf("start error=%v forwarder closes=%d", err, closeCalls)
 	}
@@ -689,7 +726,7 @@ func TestStartUsesAutomaticPortWhenDefaultSOCKSAddressIsBusy(t *testing.T) {
 	serverDone := make(chan struct{})
 	go func() {
 		defer close(serverDone)
-		defer gateway.Close()
+		defer checkTestClose(t, gateway.Close)
 		_, _ = tunnel.ReadSessionHeader(gateway)
 		_, _ = tunnel.ReadAuthorizedControlSpec(gateway)
 		_ = tunnel.WriteStatus(gateway, nil)
@@ -706,7 +743,7 @@ func TestStartUsesAutomaticPortWhenDefaultSOCKSAddressIsBusy(t *testing.T) {
 	runtime, err := Start(context.Background(), profile.Profile{
 		ID: "service", BaseURL: "https://gateway.example.test",
 	}, remote.Session{
-		ID: uuid.NewString(), Namespace: "development", State: "active", Generation: 1,
+		ID: uuid.NewString(), Namespace: "development", State: dataplaneSessionActive, Generation: 1,
 		NetworkSpec: spec, NetworkSpecHash: hash,
 	}, func(context.Context) (remote.RelayTicket, error) {
 		return remote.RelayTicket{Ticket: "ticket"}, nil
@@ -743,8 +780,14 @@ func TestURLUsesSameOriginAndDiscoveredPath(t *testing.T) {
 		profile profile.Profile
 		want    string
 	}{
-		{profile: profile.Profile{BaseURL: "https://gateway.example.test", TunnelPath: "/tunnel"}, want: "wss://gateway.example.test/tunnel"},
-		{profile: profile.Profile{BaseURL: "http://gateway.example.test:8080", TunnelPath: "/relay"}, want: "ws://gateway.example.test:8080/relay"},
+		{
+			profile: profile.Profile{BaseURL: "https://gateway.example.test", TunnelPath: defaultTunnelPath},
+			want:    "wss://gateway.example.test/tunnel",
+		},
+		{
+			profile: profile.Profile{BaseURL: "http://gateway.example.test:8080", TunnelPath: "/relay"},
+			want:    "ws://gateway.example.test:8080/relay",
+		},
 	}
 	for _, test := range tests {
 		got, err := URL(test.profile)
@@ -752,10 +795,14 @@ func TestURLUsesSameOriginAndDiscoveredPath(t *testing.T) {
 			t.Fatalf("URL(%#v) = %q, %v; want %q", test.profile, got, err, test.want)
 		}
 	}
-	if _, err := URL(profile.Profile{BaseURL: "https://gateway.example.test", TunnelPath: "https://evil.test/tunnel"}); err == nil {
+	if _, err := URL(
+		profile.Profile{BaseURL: "https://gateway.example.test", TunnelPath: "https://evil.test/tunnel"},
+	); err == nil {
 		t.Fatal("cross-origin tunnel URL accepted")
 	}
-	if _, err := URL(profile.Profile{BaseURL: "https://gateway.example.test/base", TunnelPath: "/tunnel"}); err == nil {
+	if _, err := URL(
+		profile.Profile{BaseURL: "https://gateway.example.test/base", TunnelPath: defaultTunnelPath},
+	); err == nil {
 		t.Fatal("service address with a path was accepted")
 	}
 }
@@ -779,7 +826,7 @@ func TestTransportURLUsesProfileSchemeForAssignedRelay(t *testing.T) {
 }
 
 func TestRuntimeNetworkSettingsCommitOnlyAfterCoreUpdate(t *testing.T) {
-	dnsFailure := errors.New("DNS update failed")
+	dnsFailure := errors.New("dNS update failed")
 	hostsFailure := errors.New("host alias update failed")
 	core := &testCore{
 		done: make(chan struct{}), dnsErr: dnsFailure, hostsErr: hostsFailure,
@@ -799,7 +846,11 @@ func TestRuntimeNetworkSettingsCommitOnlyAfterCoreUpdate(t *testing.T) {
 	}
 	if runtime.dnsNamespace != "development" || len(runtime.hostAliases) != 1 ||
 		runtime.hostAliases[0].Domain != "old.example.test" {
-		t.Fatalf("failed updates changed cached settings: namespace=%q aliases=%#v", runtime.dnsNamespace, runtime.hostAliases)
+		t.Fatalf(
+			"failed updates changed cached settings: namespace=%q aliases=%#v",
+			runtime.dnsNamespace,
+			runtime.hostAliases,
+		)
 	}
 }
 
@@ -867,7 +918,7 @@ func TestRuntimeCloseReportsAllErrorsAndClosesResourcesOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	client, peer := net.Pipe()
-	defer peer.Close()
+	defer checkTestClose(t, peer.Close)
 	ctx, cancel := context.WithCancel(context.Background())
 	core := &testCore{done: make(chan struct{}), closeErr: coreFailure}
 	bridge := &testBridge{address: testAddress("127.0.0.1:45010"), closeErr: bridgeFailure}
@@ -886,8 +937,16 @@ func TestRuntimeCloseReportsAllErrorsAndClosesResourcesOnce(t *testing.T) {
 	if err := runtime.Close(); err != nil {
 		t.Fatalf("second close = %v", err)
 	}
-	if forwarderCloseCalls := forwarder.closeCalls.Load(); core.closeCalls != 1 || bridge.closeCalls != 1 || control.closeCalls != 1 || forwarderCloseCalls != 1 {
-		t.Fatalf("close calls: core=%d bridge=%d control=%d forwarder=%d", core.closeCalls, bridge.closeCalls, control.closeCalls, forwarderCloseCalls)
+	if forwarderCloseCalls := forwarder.closeCalls.Load(); core.closeCalls != 1 || bridge.closeCalls != 1 ||
+		control.closeCalls != 1 ||
+		forwarderCloseCalls != 1 {
+		t.Fatalf(
+			"close calls: core=%d bridge=%d control=%d forwarder=%d",
+			core.closeCalls,
+			bridge.closeCalls,
+			control.closeCalls,
+			forwarderCloseCalls,
+		)
 	}
 	select {
 	case <-runtime.Done():
@@ -905,35 +964,45 @@ func TestReconnectKeepsSuccessfulTransportContextAlive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	serverProfile := profile.Profile{ID: "service", BaseURL: "https://gateway.example.test", TunnelPath: "/tunnel"}
+	serverProfile := profile.Profile{
+		ID:         "service",
+		BaseURL:    "https://gateway.example.test",
+		TunnelPath: defaultTunnelPath,
+	}
 	session := remote.Session{
-		ID: "ec0b67a2-e84c-4fe7-a0c5-810f210157b5", State: "active",
+		ID: "ec0b67a2-e84c-4fe7-a0c5-810f210157b5", State: dataplaneSessionActive,
 		Generation: 1, NetworkSpec: spec, NetworkSpecHash: hash,
 	}
 	controls := make(chan net.Conn, 2)
 	var contextsMu sync.Mutex
 	contexts := make([]<-chan struct{}, 0, 2)
-	runtime, err := Start(context.Background(), serverProfile, session, func(context.Context) (remote.RelayTicket, error) {
-		return remote.RelayTicket{Ticket: "relay-ticket"}, nil
-	}, Config{
-		startForwarder: func(ctx context.Context, config websocketmux.ClientConfig) (streamForwarder, error) {
-			if _, err := config.TokenSource(ctx); err != nil {
-				return nil, err
-			}
-			listener, err := net.Listen("tcp", "127.0.0.1:0")
-			if err != nil {
-				return nil, err
-			}
-			contextsMu.Lock()
-			contexts = append(contexts, ctx.Done())
-			contextsMu.Unlock()
-			go acceptTestControlWithSignal(listener, controls)
-			return &testForwarder{Listener: listener}, nil
+	runtime, err := Start(
+		context.Background(),
+		serverProfile,
+		session,
+		func(context.Context) (remote.RelayTicket, error) {
+			return remote.RelayTicket{Ticket: "relay-ticket"}, nil
 		},
-		listenSOCKS: func(context.Context, string, string, tunnel.SessionToken) (localBridge, error) {
-			return &testBridge{address: testAddress("127.0.0.1:45002")}, nil
+		Config{
+			startForwarder: func(ctx context.Context, config websocketmux.ClientConfig) (streamForwarder, error) {
+				if _, err := config.TokenSource(ctx); err != nil {
+					return nil, err
+				}
+				listener, err := net.Listen("tcp", "127.0.0.1:0")
+				if err != nil {
+					return nil, err
+				}
+				contextsMu.Lock()
+				contexts = append(contexts, ctx.Done())
+				contextsMu.Unlock()
+				go acceptTestControlWithSignal(listener, controls)
+				return &testForwarder{Listener: listener}, nil
+			},
+			listenSOCKS: func(context.Context, string, string, tunnel.SessionToken) (localBridge, error) {
+				return &testBridge{address: testAddress("127.0.0.1:45002")}, nil
+			},
 		},
-	})
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -947,13 +1016,18 @@ func TestReconnectKeepsSuccessfulTransportContextAlive(t *testing.T) {
 		t.Fatal("initial transport did not stop")
 	}
 	session.Generation++
-	if err := runtime.Reconnect(context.Background(), serverProfile, session, func(context.Context) (remote.RelayTicket, error) {
-		return remote.RelayTicket{Ticket: "fresh-relay-ticket"}, nil
-	}); err != nil {
+	if err := runtime.Reconnect(
+		context.Background(),
+		serverProfile,
+		session,
+		func(context.Context) (remote.RelayTicket, error) {
+			return remote.RelayTicket{Ticket: "fresh-relay-ticket"}, nil
+		},
+	); err != nil {
 		t.Fatal(err)
 	}
 	secondControl := receiveControl(t, controls)
-	defer secondControl.Close()
+	defer checkTestClose(t, secondControl.Close)
 	contextsMu.Lock()
 	if len(contexts) != 2 {
 		contextsMu.Unlock()
@@ -985,35 +1059,45 @@ func TestReconnectCannotPublishGenerationOlderThanRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	serverProfile := profile.Profile{ID: "service", BaseURL: "https://gateway.example.test", TunnelPath: "/tunnel"}
+	serverProfile := profile.Profile{
+		ID:         "service",
+		BaseURL:    "https://gateway.example.test",
+		TunnelPath: defaultTunnelPath,
+	}
 	session := remote.Session{
-		ID: "ec0b67a2-e84c-4fe7-a0c5-810f210157b5", State: "active", Generation: 1,
+		ID: "ec0b67a2-e84c-4fe7-a0c5-810f210157b5", State: dataplaneSessionActive, Generation: 1,
 		NetworkSpec: spec, NetworkSpecHash: hash,
 	}
 	controls := make(chan net.Conn, 4)
 	bridge := &testBridge{address: testAddress("127.0.0.1:45003")}
-	runtime, err := Start(context.Background(), serverProfile, session, func(context.Context) (remote.RelayTicket, error) {
-		return remote.RelayTicket{Ticket: "relay-ticket"}, nil
-	}, Config{
-		startForwarder: func(ctx context.Context, config websocketmux.ClientConfig) (streamForwarder, error) {
-			if _, err := config.TokenSource(ctx); err != nil {
-				return nil, err
-			}
-			listener, err := net.Listen("tcp", "127.0.0.1:0")
-			if err != nil {
-				return nil, err
-			}
-			go acceptTestControlWithSignal(listener, controls)
-			return &testForwarder{Listener: listener}, nil
+	runtime, err := Start(
+		context.Background(),
+		serverProfile,
+		session,
+		func(context.Context) (remote.RelayTicket, error) {
+			return remote.RelayTicket{Ticket: "relay-ticket"}, nil
 		},
-		listenSOCKS: func(context.Context, string, string, tunnel.SessionToken) (localBridge, error) {
-			return bridge, nil
+		Config{
+			startForwarder: func(ctx context.Context, config websocketmux.ClientConfig) (streamForwarder, error) {
+				if _, err := config.TokenSource(ctx); err != nil {
+					return nil, err
+				}
+				listener, err := net.Listen("tcp", "127.0.0.1:0")
+				if err != nil {
+					return nil, err
+				}
+				go acceptTestControlWithSignal(listener, controls)
+				return &testForwarder{Listener: listener}, nil
+			},
+			listenSOCKS: func(context.Context, string, string, tunnel.SessionToken) (localBridge, error) {
+				return bridge, nil
+			},
 		},
-	})
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer runtime.Close()
+	defer checkTestClose(t, runtime.Close)
 	failedDone := runtime.TransportDone()
 	if err := receiveControl(t, controls).Close(); err != nil {
 		t.Fatal(err)
@@ -1031,9 +1115,15 @@ func TestReconnectCannotPublishGenerationOlderThanRuntime(t *testing.T) {
 	runtime.stateMu.Unlock()
 	stale := session
 	stale.Generation = 2
-	if err := runtime.Reconnect(context.Background(), serverProfile, stale, func(context.Context) (remote.RelayTicket, error) {
-		return remote.RelayTicket{Ticket: "stale-relay-ticket"}, nil
-	}); err == nil || !strings.Contains(err.Error(), "stale or changed Session generation") {
+	if err := runtime.Reconnect(
+		context.Background(),
+		serverProfile,
+		stale,
+		func(context.Context) (remote.RelayTicket, error) {
+			return remote.RelayTicket{Ticket: "stale-relay-ticket"}, nil
+		},
+	); err == nil ||
+		!strings.Contains(err.Error(), "stale or changed Session generation") {
 		t.Fatalf("stale reconnect error = %v", err)
 	}
 	_ = receiveControl(t, controls).Close()
@@ -1043,13 +1133,19 @@ func TestReconnectCannotPublishGenerationOlderThanRuntime(t *testing.T) {
 	if gatewayAddress, _ := bridge.snapshot(); gatewayAddress != "127.0.0.1:0" {
 		t.Fatalf("stale reconnect restored bridge target %q", gatewayAddress)
 	}
-	if err := runtime.Reconnect(context.Background(), serverProfile, newest, func(context.Context) (remote.RelayTicket, error) {
-		return remote.RelayTicket{Ticket: "fresh-relay-ticket"}, nil
-	}); err != nil {
+	if err := runtime.Reconnect(
+		context.Background(),
+		serverProfile,
+		newest,
+		func(context.Context) (remote.RelayTicket, error) {
+			return remote.RelayTicket{Ticket: "fresh-relay-ticket"}, nil
+		},
+	); err != nil {
 		t.Fatal(err)
 	}
-	defer receiveControl(t, controls).Close()
-	if status := runtime.Status(); status.SessionGeneration != 3 || status.State != "connected" {
+	freshControl := receiveControl(t, controls)
+	defer checkTestClose(t, freshControl.Close)
+	if status := runtime.Status(); status.SessionGeneration != 3 || status.State != dataplaneConnected {
 		t.Fatalf("fresh reconnect status = %#v", status)
 	}
 	wantToken, err := tunnel.RelaySessionToken(newest.ID, newest.Generation)

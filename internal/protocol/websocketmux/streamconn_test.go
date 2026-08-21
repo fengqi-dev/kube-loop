@@ -1,6 +1,7 @@
 package websocketmux
 
 import (
+	"errors"
 	"io"
 	"net"
 	"testing"
@@ -11,8 +12,8 @@ func TestStreamConnPreservesBidirectionalHalfClose(t *testing.T) {
 	left, right := net.Pipe()
 	client := NewStreamConn(left)
 	server := NewStreamConn(right)
-	defer client.Close()
-	defer server.Close()
+	defer func() { _ = client.Close() }()
+	defer func() { _ = server.Close() }()
 	result := make(chan error, 1)
 	go func() {
 		request, err := io.ReadAll(server)
@@ -48,15 +49,15 @@ func TestStreamConnPreservesBidirectionalHalfClose(t *testing.T) {
 	if err := <-result; err != nil {
 		t.Fatal(err)
 	}
-	if _, err := client.Write([]byte("after FIN")); err != io.ErrClosedPipe {
+	if _, err := client.Write([]byte("after FIN")); !errors.Is(err, io.ErrClosedPipe) {
 		t.Fatalf("write after FIN error = %v", err)
 	}
 }
 
 func TestStreamConnRejectsOversizedFrame(t *testing.T) {
 	left, right := net.Pipe()
-	defer left.Close()
-	defer right.Close()
+	defer func() { _ = left.Close() }()
+	defer func() { _ = right.Close() }()
 	go func() {
 		_, _ = right.Write([]byte{streamFrameData, 0, 2, 0, 1})
 	}()

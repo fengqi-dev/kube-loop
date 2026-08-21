@@ -3,6 +3,7 @@ package install
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -13,10 +14,13 @@ func fileSHA256(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer file.Close()
 	hash := sha256.New()
-	if _, err := io.Copy(hash, file); err != nil {
-		return "", fmt.Errorf("hash %s: %w", path, err)
+	if _, copyErr := io.Copy(hash, file); copyErr != nil {
+		return "", fmt.Errorf("hash %s: %w", path, errors.Join(copyErr, file.Close()))
 	}
-	return hex.EncodeToString(hash.Sum(nil)), nil
+	digest := hex.EncodeToString(hash.Sum(nil))
+	if err := file.Close(); err != nil {
+		return "", fmt.Errorf("close %s after hashing: %w", path, err)
+	}
+	return digest, nil
 }

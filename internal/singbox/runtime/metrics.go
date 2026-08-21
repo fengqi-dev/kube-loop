@@ -18,7 +18,7 @@ func (p *Process) Snapshot(ctx context.Context) (singbox.Metrics, error) {
 	if err != nil {
 		return singbox.Metrics{}, err
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != http.StatusOK {
 		return singbox.Metrics{}, fmt.Errorf("sing-box connections API returned %s", response.Status)
 	}

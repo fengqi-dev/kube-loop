@@ -9,15 +9,18 @@ import (
 	"sync"
 	"time"
 
-	"github.com/fengqi-dev/kube-loop/internal/protocol/relaycontrol"
 	"github.com/google/uuid"
+
+	"github.com/fengqi-dev/kube-loop/internal/protocol/relaycontrol"
 )
 
 var (
-	ErrNotFound                 = errors.New("Relay lease not found")
-	ErrConflict                 = errors.New("Relay lease conflict")
+	ErrNotFound                 = errors.New("relay lease not found")
+	ErrConflict                 = errors.New("relay lease conflict")
 	ErrUnavailable              = errors.New("no ready Data Plane is available")
-	ErrAssignedRelayUnavailable = errors.New("assigned Data Plane is unavailable")
+	ErrAssignedRelayUnavailable = errors.New(
+		"assigned Data Plane is unavailable",
+	)
 )
 
 type EndpointPolicy func(relaycontrol.PeerIdentity, string) error
@@ -81,11 +84,19 @@ func New(config Config) (*Registry, error) {
 	if config.Now == nil {
 		config.Now = time.Now
 	}
-	config.TicketIssuer = strings.TrimRight(strings.TrimSpace(config.TicketIssuer), "/")
+	config.TicketIssuer = strings.TrimRight(
+		strings.TrimSpace(config.TicketIssuer),
+		"/",
+	)
 	issuer, err := url.Parse(config.TicketIssuer)
-	if err != nil || (issuer.Scheme != "http" && issuer.Scheme != "https") || issuer.Host == "" || issuer.User != nil ||
-		issuer.RawQuery != "" || issuer.Fragment != "" {
-		return nil, errors.New("Relay Registry Ticket issuer must be an absolute HTTP or HTTPS URL")
+	if err != nil || (issuer.Scheme != "http" && issuer.Scheme != "https") ||
+		issuer.Host == "" ||
+		issuer.User != nil ||
+		issuer.RawQuery != "" ||
+		issuer.Fragment != "" {
+		return nil, errors.New(
+			"relay registry Ticket issuer must be an absolute HTTP or HTTPS URL",
+		)
 	}
 	if config.LeaseDuration == 0 {
 		config.LeaseDuration = 45 * time.Second
@@ -93,15 +104,20 @@ func New(config Config) (*Registry, error) {
 	if config.HeartbeatAfter == 0 {
 		config.HeartbeatAfter = 10 * time.Second
 	}
-	if config.LeaseDuration < 5*time.Second || config.LeaseDuration > 5*time.Minute ||
-		config.HeartbeatAfter < time.Second || config.HeartbeatAfter > time.Minute ||
+	if config.LeaseDuration < 5*time.Second ||
+		config.LeaseDuration > 5*time.Minute ||
+		config.HeartbeatAfter < time.Second ||
+		config.HeartbeatAfter > time.Minute ||
 		config.HeartbeatAfter >= config.LeaseDuration {
-		return nil, errors.New("Relay Registry lease configuration is invalid")
+		return nil, errors.New("relay registry lease configuration is invalid")
 	}
 	if len(config.SupportedVersions) == 0 {
 		config.SupportedVersions = []string{relaycontrol.APIVersion}
 	}
-	if _, err := relaycontrol.NegotiateVersion(config.SupportedVersions, []string{relaycontrol.APIVersion}); err != nil {
+	if _, err := relaycontrol.NegotiateVersion(
+		config.SupportedVersions,
+		[]string{relaycontrol.APIVersion},
+	); err != nil {
 		return nil, err
 	}
 	now := config.Now().UTC()
@@ -111,12 +127,16 @@ func New(config Config) (*Registry, error) {
 	if err := config.Revocations.Validate(now); err != nil {
 		return nil, err
 	}
-	config.SupportedVersions = append([]string(nil), config.SupportedVersions...)
+	config.SupportedVersions = append(
+		[]string(nil),
+		config.SupportedVersions...)
 	config.VerificationKeys = cloneKeys(config.VerificationKeys)
 	config.Revocations = cloneRevocations(config.Revocations)
 	return &Registry{
 		config: config, relays: make(map[string]*relayRecord),
-		assignments: make(map[string]assignmentRecord), restoredDesired: make(map[string]relaycontrol.State),
+		assignments: make(
+			map[string]assignmentRecord,
+		), restoredDesired: make(map[string]relaycontrol.State),
 	}, nil
 }
 
@@ -133,12 +153,17 @@ func (registry *Registry) Register(
 	if err := request.Validate(now); err != nil {
 		return relaycontrol.RegistrationResponse{}, err
 	}
-	selectedVersion, err := relaycontrol.NegotiateVersion(registry.config.SupportedVersions, request.SupportedVersions)
+	selectedVersion, err := relaycontrol.NegotiateVersion(
+		registry.config.SupportedVersions,
+		request.SupportedVersions,
+	)
 	if err != nil {
 		return relaycontrol.RegistrationResponse{}, err
 	}
 	if selectedVersion != relaycontrol.APIVersion {
-		return relaycontrol.RegistrationResponse{}, errors.New("negotiated Relay protocol is not implemented")
+		return relaycontrol.RegistrationResponse{}, errors.New(
+			"negotiated Relay protocol is not implemented",
+		)
 	}
 	if registry.config.EndpointPolicy != nil {
 		if err := registry.config.EndpointPolicy(identity, request.Endpoint); err != nil {
@@ -147,7 +172,9 @@ func (registry *Registry) Register(
 	}
 	if request.AppliedKeyGeneration > registry.config.VerificationKeys.Generation ||
 		request.AppliedRevocationGeneration > registry.config.Revocations.Generation {
-		return relaycontrol.RegistrationResponse{}, errors.New("Relay reports an unknown control-plane generation")
+		return relaycontrol.RegistrationResponse{}, errors.New(
+			"relay reports an unknown control-plane generation",
+		)
 	}
 	relayID, err := identity.RelayID()
 	if err != nil {
@@ -167,7 +194,9 @@ func (registry *Registry) Register(
 		endpoint: request.Endpoint, state: request.State, desiredState: desired,
 		capacity: request.Capacity, appliedKeyGeneration: request.AppliedKeyGeneration,
 		appliedRevocationGeneration: request.AppliedRevocationGeneration,
-		leaseExpiresAt:              now.Add(registry.config.LeaseDuration), lastHeartbeatAt: now,
+		leaseExpiresAt: now.Add(
+			registry.config.LeaseDuration,
+		), lastHeartbeatAt: now,
 		reservations: reservations,
 	}
 	return registry.registrationResponseLocked(relayID, selectedVersion), nil
@@ -202,7 +231,9 @@ func (registry *Registry) Heartbeat(
 	}
 	if request.AppliedKeyGeneration > registry.config.VerificationKeys.Generation ||
 		request.AppliedRevocationGeneration > registry.config.Revocations.Generation {
-		return relaycontrol.HeartbeatResponse{}, errors.New("Relay reports an unknown control-plane generation")
+		return relaycontrol.HeartbeatResponse{}, errors.New(
+			"relay reports an unknown control-plane generation",
+		)
 	}
 	relay.state = request.State
 	relay.capacity = request.Capacity
@@ -218,7 +249,9 @@ func (registry *Registry) Heartbeat(
 	}, nil
 }
 
-func (registry *Registry) Allocate(request relaycontrol.AllocationRequest) (relaycontrol.AllocationResponse, error) {
+func (registry *Registry) Allocate(
+	request relaycontrol.AllocationRequest,
+) (relaycontrol.AllocationResponse, error) {
 	registry.mu.Lock()
 	defer registry.mu.Unlock()
 	now := registry.config.Now().UTC()
@@ -235,7 +268,8 @@ func (registry *Registry) Allocate(request relaycontrol.AllocationRequest) (rela
 			return relaycontrol.AllocationResponse{}, ErrConflict
 		}
 		relay := registry.relays[existing.response.RelayID]
-		if relay == nil || relay.leaseID != existing.response.LeaseID || !registry.availableLocked(relay, now) {
+		if relay == nil || relay.leaseID != existing.response.LeaseID ||
+			!registry.availableLocked(relay, now) {
 			// A newer authoritative Session generation is the fencing boundary that
 			// permits failover. Reusing the same generation would allow two Relays
 			// to accept tickets for one Session concurrently during a partition.
@@ -274,7 +308,11 @@ func (registry *Registry) Allocate(request relaycontrol.AllocationRequest) (rela
 		return relaycontrol.AllocationResponse{}, ErrUnavailable
 	}
 	slices.SortFunc(candidates, func(left, right *relayRecord) int {
-		if comparison := compareTopology(left.identity.Topology, right.identity.Topology, request.Topology); comparison != 0 {
+		if comparison := compareTopology(
+			left.identity.Topology,
+			right.identity.Topology,
+			request.Topology,
+		); comparison != 0 {
 			return comparison
 		}
 		if comparison := compareRatio(
@@ -318,15 +356,19 @@ func (registry *Registry) Release(sessionID string, generation uint64) bool {
 		return false
 	}
 	delete(registry.assignments, sessionID)
-	if relay := registry.relays[assignment.response.RelayID]; relay != nil && relay.reservations > 0 {
+	if relay := registry.relays[assignment.response.RelayID]; relay != nil &&
+		relay.reservations > 0 {
 		relay.reservations--
 	}
 	return true
 }
 
-func (registry *Registry) SetDesiredState(relayID string, state relaycontrol.State) error {
+func (registry *Registry) SetDesiredState(
+	relayID string,
+	state relaycontrol.State,
+) error {
 	if state != relaycontrol.StateReady && state != relaycontrol.StateDraining {
-		return errors.New("Relay desired state is invalid")
+		return errors.New("relay desired state is invalid")
 	}
 	registry.mu.Lock()
 	defer registry.mu.Unlock()
@@ -341,10 +383,13 @@ func (registry *Registry) SetDesiredState(relayID string, state relaycontrol.Sta
 
 // RestoreDesiredState installs durable control-plane intent even while a Relay
 // is offline. The next registration observes it before becoming allocatable.
-func (registry *Registry) RestoreDesiredState(relayID string, state relaycontrol.State) error {
+func (registry *Registry) RestoreDesiredState(
+	relayID string,
+	state relaycontrol.State,
+) error {
 	if strings.TrimSpace(relayID) == "" || len(relayID) > 256 ||
 		(state != relaycontrol.StateReady && state != relaycontrol.StateDraining) {
-		return errors.New("Relay durable desired state is invalid")
+		return errors.New("relay durable desired state is invalid")
 	}
 	registry.mu.Lock()
 	defer registry.mu.Unlock()
@@ -370,7 +415,9 @@ func (registry *Registry) UpdateControlPlaneState(
 	}
 	if keys.Generation < registry.config.VerificationKeys.Generation ||
 		revocations.Generation < registry.config.Revocations.Generation {
-		return errors.New("Relay control-plane generation cannot move backwards")
+		return errors.New(
+			"relay control-plane generation cannot move backwards",
+		)
 	}
 	registry.config.VerificationKeys = cloneKeys(keys)
 	registry.config.Revocations = cloneRevocations(revocations)
@@ -405,7 +452,9 @@ func (registry *Registry) Snapshot() []RelayStatus {
 	return result
 }
 
-func (registry *Registry) registrationResponseLocked(relayID, selectedVersion string) relaycontrol.RegistrationResponse {
+func (registry *Registry) registrationResponseLocked(
+	relayID, selectedVersion string,
+) relaycontrol.RegistrationResponse {
 	relay := registry.relays[relayID]
 	return relaycontrol.RegistrationResponse{
 		Envelope: relaycontrol.NewRegistrationResponse().Envelope, SelectedVersion: selectedVersion,
@@ -417,14 +466,22 @@ func (registry *Registry) registrationResponseLocked(relayID, selectedVersion st
 	}
 }
 
-func (registry *Registry) availableLocked(relay *relayRecord, now time.Time) bool {
-	if relay.state != relaycontrol.StateReady || relay.desiredState != relaycontrol.StateReady ||
+func (registry *Registry) availableLocked(
+	relay *relayRecord,
+	now time.Time,
+) bool {
+	if relay.state != relaycontrol.StateReady ||
+		relay.desiredState != relaycontrol.StateReady ||
 		!relay.leaseExpiresAt.After(now) ||
 		relay.appliedKeyGeneration < registry.config.VerificationKeys.Generation ||
 		relay.appliedRevocationGeneration < registry.config.Revocations.Generation {
 		return false
 	}
-	logical := uint64(relay.capacity.ActiveLogicalStreams) + uint64(relay.reservations)
+	logical := uint64(
+		relay.capacity.ActiveLogicalStreams,
+	) + uint64(
+		relay.reservations,
+	)
 	return logical < uint64(relay.capacity.MaximumLogicalStreams) &&
 		relay.capacity.ActivePhysicalConnections < relay.capacity.MaximumPhysicalConnections
 }
@@ -470,20 +527,28 @@ func compareRatio(leftValue, leftMaximum, rightValue, rightMaximum uint32) int {
 	return 0
 }
 
-func cloneIdentity(identity relaycontrol.PeerIdentity) relaycontrol.PeerIdentity {
+func cloneIdentity(
+	identity relaycontrol.PeerIdentity,
+) relaycontrol.PeerIdentity {
 	identity.Topology = cloneMap(identity.Topology)
 	return identity
 }
 
-func cloneKeys(keys relaycontrol.VerificationKeySet) relaycontrol.VerificationKeySet {
+func cloneKeys(
+	keys relaycontrol.VerificationKeySet,
+) relaycontrol.VerificationKeySet {
 	copyKeys := keys
 	copyKeys.Keys = append([]relaycontrol.VerificationKey(nil), keys.Keys...)
 	return copyKeys
 }
 
-func cloneRevocations(summary relaycontrol.RevocationSummary) relaycontrol.RevocationSummary {
+func cloneRevocations(
+	summary relaycontrol.RevocationSummary,
+) relaycontrol.RevocationSummary {
 	copySummary := summary
-	copySummary.Sessions = append([]relaycontrol.RevokedSession(nil), summary.Sessions...)
+	copySummary.Sessions = append(
+		[]relaycontrol.RevokedSession(nil),
+		summary.Sessions...)
 	return copySummary
 }
 

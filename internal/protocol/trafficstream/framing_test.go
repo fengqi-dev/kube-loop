@@ -10,9 +10,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gorilla/websocket"
+
 	"github.com/fengqi-dev/kube-loop/internal/protocol/exchangestream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/mirrorstream"
-	"github.com/gorilla/websocket"
 )
 
 func TestFrameConnRoundTripsExchangeAndMirrorFrames(t *testing.T) {
@@ -136,7 +137,6 @@ func TestFrameConnSerializesConcurrentWrites(t *testing.T) {
 	writeErrs := make(chan error, frameCount)
 	var writers sync.WaitGroup
 	for id := 1; id <= frameCount; id++ {
-		id := id
 		writers.Go(func() {
 			frame, err := exchangestream.Encode(exchangestream.Frame{
 				Type: exchangestream.Data, StreamID: uint64(id),
@@ -181,27 +181,32 @@ func TestFrameConnRequiresConnectionAndContext(t *testing.T) {
 		t.Fatal("nil Accept connection was accepted")
 	}
 	client, server := net.Pipe()
-	defer client.Close()
-	defer server.Close()
-	if _, err := Dial(nil, client); err == nil {
+	defer func() { _ = client.Close() }()
+	defer func() { _ = server.Close() }()
+	if _, err := Dial(nil, client); err == nil { //nolint:staticcheck // Intentionally verifies nil context rejection.
 		t.Fatal("nil Dial context was accepted")
 	}
-	if _, err := Accept(nil, server); err == nil {
+	if _, err := Accept(nil, server); err == nil { //nolint:staticcheck // Intentionally verifies nil context rejection.
 		t.Fatal("nil Accept context was accepted")
 	}
 	framed, _ := mustTrafficPair(t)
-	if _, err := framed.ReadFrame(nil); err == nil {
+	if _, err := framed.ReadFrame(
+		nil, //nolint:staticcheck // Intentionally verifies nil context rejection.
+	); err == nil {
 		t.Fatal("nil read context was accepted")
 	}
-	if err := framed.WriteFrame(nil, []byte{1}); err == nil {
+	if err := framed.WriteFrame(
+		nil, //nolint:staticcheck // Intentionally verifies nil context rejection.
+		[]byte{1},
+	); err == nil {
 		t.Fatal("nil write context was accepted")
 	}
 }
 
 func TestAcceptPropagatesHandshakeCancellation(t *testing.T) {
 	client, server := net.Pipe()
-	defer client.Close()
-	defer server.Close()
+	defer func() { _ = client.Close() }()
+	defer func() { _ = server.Close() }()
 	ctx, cancel := context.WithCancel(t.Context())
 	accepted := make(chan error, 1)
 	go func() {

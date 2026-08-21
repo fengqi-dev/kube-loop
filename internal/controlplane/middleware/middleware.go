@@ -9,10 +9,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/labstack/echo/v5"
+
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/authorization"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
-	"github.com/labstack/echo/v5"
 )
 
 type AuditRecord struct {
@@ -44,9 +45,14 @@ type Config struct {
 
 func New(config Config) echo.MiddlewareFunc {
 	if config.Authenticator == nil {
-		config.Authenticator = controlplaneapi.AuthenticatorFunc(func(*http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
-			return controlplaneapi.Identity{}, &controlplaneapi.Error{Code: controlplaneapi.CodeUnauthenticated, Message: "authentication required"}
-		})
+		config.Authenticator = controlplaneapi.AuthenticatorFunc(
+			func(*http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
+				return controlplaneapi.Identity{}, &controlplaneapi.Error{
+					Code:    controlplaneapi.CodeUnauthenticated,
+					Message: authenticationRequiredMessage,
+				}
+			},
+		)
 	}
 	if config.Authorizer == nil {
 		config.Authorizer = authorization.NewAuthenticated()
@@ -63,23 +69,46 @@ func New(config Config) echo.MiddlewareFunc {
 				return err
 			}
 			request := ctx.Request()
-			requestID := strings.TrimSpace(response.Header().Get(echo.HeaderXRequestID))
-			requestContext := storage.WithAuditRequestID(request.Context(), requestID)
-			requestContext = context.WithValue(requestContext, requestIDContextKey{}, requestID)
+			requestID := strings.TrimSpace(
+				response.Header().Get(echo.HeaderXRequestID),
+			)
+			requestContext := storage.WithAuditRequestID(
+				request.Context(),
+				requestID,
+			)
+			requestContext = context.WithValue(
+				requestContext,
+				requestIDContextKey{},
+				requestID,
+			)
 			request = request.WithContext(requestContext)
 			ctx.SetRequest(request)
-			authorizationRequest := authorizationRequestForHTTP(request, config.APIPathPrefix)
+			authorizationRequest := authorizationRequestForHTTP(
+				request,
+				config.APIPathPrefix,
+			)
 			var identity controlplaneapi.Identity
 			response.Header().Set("Cache-Control", "no-store")
 			cancel := func() {}
 			if !isWebSocketUpgrade(request) {
-				requestContext, cancel = context.WithTimeout(requestContext, config.RequestTimeout)
+				requestContext, cancel = context.WithTimeout(
+					requestContext,
+					config.RequestTimeout,
+				)
 			}
 			defer cancel()
 			auditState := &auditContextState{}
-			requestContext = context.WithValue(requestContext, auditContextKey{}, auditState)
+			requestContext = context.WithValue(
+				requestContext,
+				auditContextKey{},
+				auditState,
+			)
 			request = request.WithContext(requestContext)
-			request.Body = http.MaxBytesReader(response, request.Body, config.MaxRequestBodySize)
+			request.Body = http.MaxBytesReader(
+				response,
+				request.Body,
+				config.MaxRequestBodySize,
+			)
 			ctx.SetRequest(request)
 
 			defer func() {
@@ -92,7 +121,14 @@ func New(config Config) echo.MiddlewareFunc {
 						"stack", string(debug.Stack()),
 					)
 					if !responseState.Committed {
-						writeError(ctx, requestID, &controlplaneapi.Error{Code: controlplaneapi.CodeInternal, Message: "internal server error"})
+						writeError(
+							ctx,
+							requestID,
+							&controlplaneapi.Error{
+								Code:    controlplaneapi.CodeInternal,
+								Message: internalServerErrorMessage,
+							},
+						)
 					}
 					returnedError = nil
 				}
@@ -107,15 +143,24 @@ func New(config Config) echo.MiddlewareFunc {
 					RequestID: requestID, IdentityID: identity.Subject, SessionID: auditState.sessionID,
 					Operation: authorizationRequest.Operation, Namespace: authorizationRequest.Namespace,
 					ResourceKind: authorizationRequest.ResourceKind, ResourceName: authorizationRequest.ResourceName,
-					Outcome: auditOutcome(status), HTTPStatus: status, Duration: time.Since(startedAt),
+					Outcome: auditOutcome(
+						status,
+					), HTTPStatus: status, Duration: time.Since(startedAt),
 				}
 				if err := config.Audit.Record(request.Context(), record); err != nil {
-					config.Logger.ErrorContext(request.Context(), "append API audit event failed", "request_id", requestID)
+					config.Logger.ErrorContext(
+						request.Context(),
+						"append API audit event failed",
+						"request_id",
+						requestID,
+					)
 				}
 			}()
 
 			var authenticationError *controlplaneapi.Error
-			identity, authenticationError = config.Authenticator.Authenticate(request)
+			identity, authenticationError = config.Authenticator.Authenticate(
+				request,
+			)
 			if authenticationError != nil {
 				if authenticationError.Code == controlplaneapi.CodeUnauthenticated {
 					response.Header().Set("WWW-Authenticate", "Bearer")
@@ -124,21 +169,49 @@ func New(config Config) echo.MiddlewareFunc {
 				return nil
 			}
 			if identity.Subject == "" {
-				writeError(ctx, requestID, &controlplaneapi.Error{Code: controlplaneapi.CodeUnauthenticated, Message: "authentication required"})
+				writeError(
+					ctx,
+					requestID,
+					&controlplaneapi.Error{
+						Code:    controlplaneapi.CodeUnauthenticated,
+						Message: authenticationRequiredMessage,
+					},
+				)
 				return nil
 			}
 			requestContext = request.Context()
-			decision := config.Authorizer.Authorize(request.Context(), authorization.Subject{
-				ID: identity.Subject, Provider: identity.Provider, Groups: append([]string(nil), identity.Groups...),
-			}, authorizationRequest)
+			decision := config.Authorizer.Authorize(
+				request.Context(),
+				authorization.Subject{
+					ID:       identity.Subject,
+					Provider: identity.Provider,
+					Groups:   append([]string(nil), identity.Groups...),
+				},
+				authorizationRequest,
+			)
 			if !decision.Allowed {
-				writeError(ctx, requestID, &controlplaneapi.Error{Code: controlplaneapi.CodeForbidden, Message: "operation is not permitted"})
+				writeError(
+					ctx,
+					requestID,
+					&controlplaneapi.Error{
+						Code:    controlplaneapi.CodeForbidden,
+						Message: "operation is not permitted",
+					},
+				)
 				return nil
 			}
-			requestContext = context.WithValue(requestContext, authorizationContextKey{}, authorizationContextValue{
-				request: authorizationRequest, decision: decision,
-			})
-			requestContext = context.WithValue(requestContext, identityContextKey{}, identity)
+			requestContext = context.WithValue(
+				requestContext,
+				authorizationContextKey{},
+				authorizationContextValue{
+					request: authorizationRequest, decision: decision,
+				},
+			)
+			requestContext = context.WithValue(
+				requestContext,
+				identityContextKey{},
+				identity,
+			)
 			request = request.WithContext(requestContext)
 			ctx.SetRequest(request)
 
@@ -149,10 +222,18 @@ func New(config Config) echo.MiddlewareFunc {
 			var apiError *controlplaneapi.Error
 			switch {
 			case errors.As(returnedError, &apiError):
-			case errors.Is(returnedError, echo.ErrNotFound), errors.Is(returnedError, echo.ErrMethodNotAllowed):
-				apiError = &controlplaneapi.Error{Code: controlplaneapi.CodeNotFound, Message: "resource not found"}
+			case errors.Is(returnedError, echo.ErrNotFound),
+				errors.Is(returnedError, echo.ErrMethodNotAllowed):
+				apiError = &controlplaneapi.Error{
+					Code:    controlplaneapi.CodeNotFound,
+					Message: "resource not found",
+				}
 			default:
-				apiError = &controlplaneapi.Error{Code: controlplaneapi.CodeInternal, Message: "internal server error", Cause: returnedError}
+				apiError = &controlplaneapi.Error{
+					Code:    controlplaneapi.CodeInternal,
+					Message: internalServerErrorMessage,
+					Cause:   returnedError,
+				}
 			}
 			writeError(ctx, requestID, apiError)
 			return nil
@@ -161,7 +242,11 @@ func New(config Config) echo.MiddlewareFunc {
 }
 
 func isWebSocketUpgrade(request *http.Request) bool {
-	if request.Method != http.MethodGet || !strings.EqualFold(strings.TrimSpace(request.Header.Get("Upgrade")), "websocket") {
+	if request.Method != http.MethodGet ||
+		!strings.EqualFold(
+			strings.TrimSpace(request.Header.Get("Upgrade")),
+			"websocket",
+		) {
 		return false
 	}
 	for value := range strings.SplitSeq(request.Header.Get("Connection"), ",") {

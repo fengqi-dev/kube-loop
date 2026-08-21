@@ -61,6 +61,7 @@ func (w launchdWorker) Stop(ctx context.Context) error {
 			return err
 		}
 		if err := exec.CommandContext(ctx, "/bin/launchctl", "print", target).Run(); err != nil {
+			//nolint:nilerr // launchctl failure here confirms the worker is no longer registered.
 			return nil
 		}
 		timer := time.NewTimer(50 * time.Millisecond)
@@ -75,12 +76,21 @@ func (w launchdWorker) Stop(ctx context.Context) error {
 }
 
 func (w launchdWorker) Start(ctx context.Context) error {
-	if output, err := exec.CommandContext(ctx, "/bin/launchctl", "bootstrap", "system", w.config.WorkerPlistPath).CombinedOutput(); err != nil &&
+	//nolint:gosec // WorkerPlistPath is derived from the fixed supervisor configuration.
+	bootstrap := exec.CommandContext(
+		ctx,
+		"/bin/launchctl",
+		"bootstrap",
+		"system",
+		w.config.WorkerPlistPath,
+	)
+	if output, err := bootstrap.CombinedOutput(); err != nil &&
 		!strings.Contains(string(output), "service already loaded") {
 		return fmt.Errorf("bootstrap worker: %w: %s", err, strings.TrimSpace(string(output)))
 	}
 	target := "system/" + w.config.WorkerLabel
-	if output, err := exec.CommandContext(ctx, "/bin/launchctl", "kickstart", "-k", target).CombinedOutput(); err != nil {
+	if output, err := exec.CommandContext(ctx, "/bin/launchctl", "kickstart", "-k", target).
+		CombinedOutput(); err != nil {
 		return fmt.Errorf("kickstart worker: %w: %s", err, strings.TrimSpace(string(output)))
 	}
 	return nil

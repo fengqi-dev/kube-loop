@@ -52,7 +52,7 @@ func (client *Client) OpenInventoryWatch(
 		return nil, err
 	}
 	if resource != InventoryPods && resource != InventoryServices {
-		return nil, errors.New("Inventory Watch resource is invalid")
+		return nil, errors.New("inventory Watch resource is invalid")
 	}
 	baseURL, err := profile.NormalizeBaseURL(serverProfile.BaseURL)
 	if err != nil {
@@ -60,10 +60,10 @@ func (client *Client) OpenInventoryWatch(
 	}
 	endpoint, err := url.Parse(baseURL)
 	if err != nil {
-		return nil, errors.New("Server Profile URL is invalid")
+		return nil, errors.New("server Profile URL is invalid")
 	}
 	if endpoint.Scheme == "https" {
-		endpoint.Scheme = "wss"
+		endpoint.Scheme = remoteWSSScheme
 	} else {
 		endpoint.Scheme = "ws"
 	}
@@ -73,8 +73,8 @@ func (client *Client) OpenInventoryWatch(
 	if err != nil {
 		return nil, err
 	}
-	connection, response, err := client.dialWebSocket(ctx, endpoint.String(), credential.AccessToken)
-	if err != nil && response != nil && response.StatusCode == http.StatusUnauthorized {
+	connection, status, err := client.dialWebSocket(ctx, endpoint.String(), credential.AccessToken)
+	if err != nil && status == http.StatusUnauthorized {
 		credential, refreshErr := client.usableCredential(ctx, serverProfile, credential.AccessToken)
 		if refreshErr != nil {
 			return nil, refreshErr
@@ -90,7 +90,7 @@ func (client *Client) OpenInventoryWatch(
 
 func (watch *InventoryWatch) Next(ctx context.Context) (InventorySnapshot, error) {
 	if watch == nil || watch.connection == nil {
-		return InventorySnapshot{}, errors.New("Inventory Watch is unavailable")
+		return InventorySnapshot{}, errors.New("inventory Watch is unavailable")
 	}
 	watch.mu.Lock()
 	defer watch.mu.Unlock()
@@ -99,24 +99,24 @@ func (watch *InventoryWatch) Next(ctx context.Context) (InventorySnapshot, error
 		return InventorySnapshot{}, err
 	}
 	if messageType != websocket.MessageText {
-		return InventorySnapshot{}, errors.New("Gateway returned a non-text Inventory snapshot")
+		return InventorySnapshot{}, errors.New("gateway returned a non-text Inventory snapshot")
 	}
 	var snapshot InventorySnapshot
 	if err := json.Unmarshal(encoded, &snapshot); err != nil {
-		return InventorySnapshot{}, errors.New("Gateway returned an invalid Inventory snapshot")
+		return InventorySnapshot{}, errors.New("gateway returned an invalid Inventory snapshot")
 	}
 	if snapshot.SchemaVersion != 1 || snapshot.Type != "snapshot" || snapshot.Resource != watch.resource ||
 		snapshot.Namespace != watch.namespace || snapshot.Sequence <= watch.sequence || snapshot.GeneratedAt.IsZero() {
-		return InventorySnapshot{}, errors.New("Gateway returned an invalid Inventory snapshot binding")
+		return InventorySnapshot{}, errors.New("gateway returned an invalid Inventory snapshot binding")
 	}
 	for _, pod := range snapshot.Pods {
 		if pod.Namespace != watch.namespace || strings.TrimSpace(pod.Name) == "" {
-			return InventorySnapshot{}, errors.New("Gateway returned a cross-namespace Pod snapshot")
+			return InventorySnapshot{}, errors.New("gateway returned a cross-namespace Pod snapshot")
 		}
 	}
 	for _, service := range snapshot.Services {
 		if service.Namespace != watch.namespace || strings.TrimSpace(service.Name) == "" {
-			return InventorySnapshot{}, errors.New("Gateway returned a cross-namespace Service snapshot")
+			return InventorySnapshot{}, errors.New("gateway returned a cross-namespace Service snapshot")
 		}
 	}
 	if snapshot.Pods == nil {

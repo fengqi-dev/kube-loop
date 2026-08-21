@@ -49,8 +49,8 @@ const (
 
 var (
 	errSystemResumed      = errors.New("system resumed")
-	errNetworkSpecChanged = errors.New("Session NetworkSpec changed")
-	errSessionChanged     = errors.New("Session generation changed")
+	errNetworkSpecChanged = errors.New("session NetworkSpec changed")
+	errSessionChanged     = errors.New("session generation changed")
 )
 
 type Manager struct {
@@ -68,32 +68,32 @@ type Manager struct {
 type Mode string
 
 const (
-	ModeSOCKS Mode = "socks"
-	ModeTUN   Mode = "tun"
+	ModeSOCKS = "socks"
+	ModeTUN   = "tun"
 )
 
 func (mode Mode) Validate() error {
 	if mode != ModeSOCKS && mode != ModeTUN {
-		return errors.New("Data Plane mode must be socks or tun")
+		return errors.New("data Plane mode must be socks or tun")
 	}
 	return nil
 }
 
 func NewManager(sessions SessionSource, config Config) (*Manager, error) {
 	if sessions == nil {
-		return nil, errors.New("Data Plane Session source is required")
+		return nil, errors.New("data Plane Session source is required")
 	}
 	if config.RecoveryAttempts <= 0 {
 		config.RecoveryAttempts = DefaultRecoveryAttempts
 	}
 	if config.RecoveryAttempts > 10 {
-		return nil, errors.New("Data Plane recovery attempts must not exceed 10")
+		return nil, errors.New("data Plane recovery attempts must not exceed 10")
 	}
 	if config.RecoveryBackoff <= 0 {
 		config.RecoveryBackoff = DefaultRecoveryBackoff
 	}
 	if config.RecoveryBackoff > 30*time.Second {
-		return nil, errors.New("Data Plane recovery backoff must not exceed 30 seconds")
+		return nil, errors.New("data Plane recovery backoff must not exceed 30 seconds")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	manager := &Manager{
@@ -112,10 +112,14 @@ func NewManager(sessions SessionSource, config Config) (*Manager, error) {
 	return manager, nil
 }
 
-func (manager *Manager) Connect(ctx context.Context, serverProfile profile.Profile, session remote.Session) (Status, error) {
+func (manager *Manager) Connect(
+	ctx context.Context,
+	serverProfile profile.Profile,
+	session remote.Session,
+) (Status, error) {
 	manager.mu.Lock()
 	defer manager.mu.Unlock()
-	desiredMode := "socks"
+	desiredMode := ModeSOCKS
 	if current := manager.active[serverProfile.ID]; current != nil {
 		status := current.runtime.Status()
 		select {
@@ -131,13 +135,13 @@ func (manager *Manager) Connect(ctx context.Context, serverProfile profile.Profi
 				if session.Generation > current.session.Generation && !current.recovering {
 					current.recovering = true
 					baseline := current.session
-					status.State = "reconnecting"
+					status.State = dataplaneReconnecting
 					manager.emit(serverProfile.ID, status, errSessionChanged)
 					go manager.recover(serverProfile.ID, current, current.runtime, baseline)
 				}
 				status = current.runtime.Status()
 				if current.recovering {
-					status.State = "reconnecting"
+					status.State = dataplaneReconnecting
 				}
 				return status, nil
 			}
@@ -148,11 +152,17 @@ func (manager *Manager) Connect(ctx context.Context, serverProfile profile.Profi
 			}
 		}
 	}
-	runtime, err := Start(ctx, serverProfile, session, manager.sessions.RelayTicketSource(serverProfile.ID), runtimeConfig(manager.config, serverProfile))
+	runtime, err := Start(
+		ctx,
+		serverProfile,
+		session,
+		manager.sessions.RelayTicketSource(serverProfile.ID),
+		runtimeConfig(manager.config, serverProfile),
+	)
 	if err != nil {
 		return Status{}, err
 	}
-	if desiredMode == "tun" {
+	if desiredMode == ModeTUN {
 		if _, err := runtime.StartTUN(ctx); err != nil {
 			_ = runtime.Close()
 			return Status{}, fmt.Errorf("restore TUN after Session change: %w", err)
@@ -217,10 +227,10 @@ func (manager *Manager) SetHostTCPHandler(profileID string, handler socksbridge.
 	profileID = strings.TrimSpace(profileID)
 	entry := manager.active[profileID]
 	if profileID == "" || entry == nil {
-		return errors.New("Data Plane runtime is not connected")
+		return errors.New("data Plane runtime is not connected")
 	}
-	if entry.runtime.Status().Mode != "tun" {
-		return errors.New("TUN must be active for native PodIP SSH")
+	if entry.runtime.Status().Mode != ModeTUN {
+		return errors.New("tUN must be active for native PodIP SSH")
 	}
 	manager.hostTCP[profileID] = handler
 	entry.runtime.SetHostTCPHandler(handler)
@@ -238,7 +248,7 @@ func (manager *Manager) Disconnect(profileID string) error {
 		return nil
 	}
 	err := current.runtime.Close()
-	manager.emit(profileID, Status{State: "disconnected", Mode: "socks"}, err)
+	manager.emit(profileID, Status{State: "disconnected", Mode: ModeSOCKS}, err)
 	return err
 }
 
@@ -247,15 +257,15 @@ func (manager *Manager) StartTUN(ctx context.Context, profileID string) (Status,
 	defer manager.mu.Unlock()
 	entry := manager.active[profileID]
 	if entry == nil {
-		return Status{}, errors.New("Data Plane runtime is not connected")
+		return Status{}, errors.New("data Plane runtime is not connected")
 	}
 	if entry.recovering {
-		entry.desiredMode = "tun"
-		return Status{}, errors.New("Data Plane runtime is reconnecting")
+		entry.desiredMode = ModeTUN
+		return Status{}, errors.New("data Plane runtime is reconnecting")
 	}
 	status, err := entry.runtime.StartTUN(ctx)
 	if err == nil {
-		entry.desiredMode = "tun"
+		entry.desiredMode = ModeTUN
 		manager.emit(profileID, status, nil)
 	}
 	return status, err
@@ -266,13 +276,13 @@ func (manager *Manager) StopTUN(profileID string) (Status, error) {
 	defer manager.mu.Unlock()
 	entry := manager.active[profileID]
 	if entry == nil {
-		return Status{}, errors.New("Data Plane runtime is not connected")
+		return Status{}, errors.New("data Plane runtime is not connected")
 	}
-	entry.desiredMode = "socks"
+	entry.desiredMode = ModeSOCKS
 	if entry.recovering {
 		status := entry.runtime.Status()
-		status.State = "reconnecting"
-		status.Mode = "socks"
+		status.State = dataplaneReconnecting
+		status.Mode = ModeSOCKS
 		manager.emit(profileID, status, nil)
 		return status, nil
 	}
@@ -289,11 +299,11 @@ func (manager *Manager) Status(profileID string) (Status, error) {
 	defer manager.mu.Unlock()
 	entry := manager.active[profileID]
 	if entry == nil {
-		return Status{}, errors.New("Data Plane runtime is not connected")
+		return Status{}, errors.New("data Plane runtime is not connected")
 	}
 	status := entry.runtime.Status()
 	if entry.recovering {
-		status.State = "reconnecting"
+		status.State = dataplaneReconnecting
 	}
 	return status, nil
 }
@@ -353,7 +363,7 @@ func (manager *Manager) activeRuntime(profileID string) (*Runtime, error) {
 	defer manager.mu.Unlock()
 	entry := manager.active[strings.TrimSpace(profileID)]
 	if entry == nil || entry.runtime == nil {
-		return nil, errors.New("Data Plane runtime is not connected")
+		return nil, errors.New("data Plane runtime is not connected")
 	}
 	return entry.runtime, nil
 }
@@ -367,21 +377,21 @@ func (manager *Manager) OpenTrafficStream(
 	taskID string,
 ) (*trafficstream.FrameConn, error) {
 	if ctx == nil {
-		return nil, errors.New("Traffic stream context is required")
+		return nil, errors.New("traffic stream context is required")
 	}
 	profileID = strings.TrimSpace(profileID)
 	manager.mu.Lock()
 	entry := manager.active[profileID]
 	if entry == nil || entry.runtime == nil || entry.recovering {
 		manager.mu.Unlock()
-		return nil, errors.New("Data Plane runtime is not connected")
+		return nil, errors.New("data Plane runtime is not connected")
 	}
 	runtime := entry.runtime
 	status := runtime.Status()
-	if status.State != "connected" || status.SessionID != entry.session.ID ||
+	if status.State != dataplaneConnected || status.SessionID != entry.session.ID ||
 		status.SessionGeneration != entry.session.Generation {
 		manager.mu.Unlock()
-		return nil, errors.New("Data Plane runtime Session does not match")
+		return nil, errors.New("data Plane runtime Session does not match")
 	}
 	manager.mu.Unlock()
 	stream, err := runtime.OpenTrafficStream(ctx, mode, taskID)
@@ -393,7 +403,7 @@ func (manager *Manager) OpenTrafficStream(
 	manager.mu.Unlock()
 	if !current {
 		_ = stream.Close()
-		return nil, errors.New("Data Plane runtime changed while opening Traffic Task stream")
+		return nil, errors.New("data Plane runtime changed while opening Traffic Task stream")
 	}
 	return stream, nil
 }
@@ -405,11 +415,11 @@ func (manager *Manager) Dialer(profileID string) (traffic.Dialer, error) {
 	defer manager.mu.Unlock()
 	entry := manager.active[profileID]
 	if entry == nil {
-		return traffic.Dialer{}, errors.New("Data Plane runtime is not connected")
+		return traffic.Dialer{}, errors.New("data Plane runtime is not connected")
 	}
 	status := entry.runtime.Status()
-	if status.SOCKSAddress == "" || status.State == "error" || status.State == "disconnected" {
-		return traffic.Dialer{}, errors.New("Data Plane SOCKS endpoint is unavailable")
+	if status.SOCKSAddress == "" || status.State == dataplaneError || status.State == "disconnected" {
+		return traffic.Dialer{}, errors.New("data Plane SOCKS endpoint is unavailable")
 	}
 	return traffic.Dialer{Endpoint: traffic.Endpoint{Address: status.SOCKSAddress}}, nil
 }
@@ -424,7 +434,7 @@ func (manager *Manager) Resume(profileID string) error {
 	entry := manager.active[profileID]
 	if entry == nil {
 		manager.mu.Unlock()
-		return errors.New("Data Plane runtime is not connected")
+		return errors.New("data Plane runtime is not connected")
 	}
 	if entry.recovering {
 		manager.mu.Unlock()
@@ -435,7 +445,7 @@ func (manager *Manager) Resume(profileID string) error {
 	baseline := entry.session
 	manager.mu.Unlock()
 	status := runtime.Status()
-	status.State = "reconnecting"
+	status.State = dataplaneReconnecting
 	manager.emit(profileID, status, errSystemResumed)
 	runtime.interruptTransport(errSystemResumed)
 	go manager.recover(profileID, entry, runtime, baseline)
@@ -512,7 +522,7 @@ func (manager *Manager) watch(
 	baseline := entry.session
 	manager.mu.Unlock()
 	status := runtime.Status()
-	status.State = "reconnecting"
+	status.State = dataplaneReconnecting
 	manager.emit(profileID, status, entry.lastError)
 	manager.recover(profileID, entry, runtime, baseline)
 }
@@ -548,7 +558,7 @@ func (manager *Manager) syncSession(update remote.SessionUpdate) {
 	}
 	manager.mu.Unlock()
 	status := runtime.Status()
-	status.State = "reconnecting"
+	status.State = dataplaneReconnecting
 	manager.emit(profileID, status, reason)
 	go manager.recover(profileID, entry, runtime, baseline)
 }
@@ -569,7 +579,7 @@ func (manager *Manager) sessionUpdateLoop(updates <-chan remote.SessionUpdate) {
 
 func (manager *Manager) recover(profileID string, entry *managedRuntime, failed *Runtime, baseline remote.Session) {
 	var lastError error
-	for attempt := 0; attempt < manager.config.RecoveryAttempts; attempt++ {
+	for attempt := range manager.config.RecoveryAttempts {
 		if attempt > 0 && !manager.waitRecovery(attempt) {
 			return
 		}
@@ -610,7 +620,7 @@ func (manager *Manager) recover(profileID string, entry *managedRuntime, failed 
 		return
 	}
 	if lastError == nil {
-		lastError = errors.New("Data Plane recovery attempts exhausted")
+		lastError = errors.New("data Plane recovery attempts exhausted")
 	}
 	manager.mu.Lock()
 	shouldClose := manager.active[profileID] == entry && entry.runtime == failed
@@ -632,7 +642,7 @@ func (manager *Manager) recover(profileID string, entry *managedRuntime, failed 
 			return
 		}
 		status := failed.Status()
-		status.State = "error"
+		status.State = dataplaneError
 		manager.emit(profileID, status, terminalError)
 	}
 }
@@ -643,23 +653,24 @@ func (manager *Manager) emit(profileID string, status Status, err error) {
 	event := StatusEvent{ProfileID: profileID, Status: status}
 	if err != nil {
 		event.Error = err.Error()
-		if errors.Is(err, errSystemResumed) {
+		switch {
+		case errors.Is(err, errSystemResumed):
 			event.Reason = reasonSystemResumed
 			event.Retryable = true
-		} else if errors.Is(err, errNetworkSpecChanged) {
+		case errors.Is(err, errNetworkSpecChanged):
 			event.Reason = reasonNetworkSpecChanged
 			event.Retryable = true
-		} else if errors.Is(err, errSessionChanged) {
+		case errors.Is(err, errSessionChanged):
 			event.Reason = reasonSessionChanged
 			event.Retryable = true
 		}
 		switch status.State {
-		case "reconnecting":
+		case dataplaneReconnecting:
 			if event.Reason == "" {
 				event.Reason = reasonTransportInterrupted
 				event.Retryable = true
 			}
-		case "error":
+		case dataplaneError:
 			event.Reason, event.Retryable = recoveryFailureAction(err)
 		}
 	}
@@ -733,7 +744,7 @@ func (manager *Manager) waitRecovery(attempt int) bool {
 }
 
 func validateRecoverySession(previous, current remote.Session) error {
-	if current.State != "active" || current.ID != previous.ID {
+	if current.State != dataplaneSessionActive || current.ID != previous.ID {
 		return errors.New("active Session identity changed during Data Plane recovery")
 	}
 	if current.Generation < previous.Generation {

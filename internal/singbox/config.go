@@ -19,6 +19,18 @@ const (
 	DefaultDNSListen   = "127.0.0.1"
 	DefaultDNSPort     = 1053
 	defaultTUNAddress  = "198.19.0.1/30"
+	defaultNamespace   = "default"
+
+	configActionKey   = "action"
+	configAuthUserKey = "auth_user"
+	configIPCIDRKey   = "ip_cidr"
+	configInboundKey  = "inbound"
+	configOutboundKey = "outbound"
+	configServerKey   = "server"
+	configTagKey      = "tag"
+	configTypeKey     = "type"
+	hostsDNSServer    = "hosts"
+	rejectRouteAction = "reject"
 
 	// TrafficInbound is the single loopback SOCKS inbound for all feature adapters.
 	// Feature identity is carried as SOCKS auth_user (see TrafficUser*).
@@ -92,10 +104,10 @@ type Options struct {
 
 func Generate(network NetworkSpec, options Options) ([]byte, error) {
 	if options.BridgeHost == "" {
-		options.BridgeHost = "127.0.0.1"
+		options.BridgeHost = DefaultDNSListen
 	}
 	if options.ControllerHost == "" {
-		options.ControllerHost = "127.0.0.1"
+		options.ControllerHost = DefaultDNSListen
 	}
 	if options.DNSHost == "" {
 		options.DNSHost = DefaultDNSListen
@@ -137,7 +149,8 @@ func Generate(network NetworkSpec, options Options) ([]byte, error) {
 		return nil, err
 	}
 	if len(network.ClusterDomains) > 0 {
-		merged, mergeErr := dnsname.NormalizeClusterDomains(append(append([]string{}, clusterDomains...), network.ClusterDomains...))
+		allDomains := append(append([]string{}, clusterDomains...), network.ClusterDomains...)
+		merged, mergeErr := dnsname.NormalizeClusterDomains(allDomains)
 		if mergeErr != nil {
 			return nil, mergeErr
 		}
@@ -153,13 +166,13 @@ func Generate(network NetworkSpec, options Options) ([]byte, error) {
 			domains = append(domains, item.Domain)
 		}
 		dnsServers = append(dnsServers, map[string]any{
-			"type":       "hosts",
-			"tag":        "hosts",
-			"predefined": predefined,
+			configTypeKey: "hosts",
+			configTagKey:  hostsDNSServer,
+			"predefined":  predefined,
 		})
 		dnsRules = append(dnsRules, map[string]any{
-			"domain": domains,
-			"server": "hosts",
+			"domain":        domains,
+			configServerKey: hostsDNSServer,
 		})
 	}
 	if network.DNSServer != "" {
@@ -168,85 +181,88 @@ func Generate(network NetworkSpec, options Options) ([]byte, error) {
 			return nil, fmt.Errorf("invalid cluster DNS address %q: %w", network.DNSServer, parseErr)
 		}
 		dnsServers = append(dnsServers, map[string]any{
-			"type":   "udp",
-			"tag":    "cluster",
-			"server": dnsIP.String(),
-			"detour": KubernetesOutbound,
+			configTypeKey:   "udp",
+			configTagKey:    "cluster",
+			configServerKey: dnsIP.String(),
+			"detour":        KubernetesOutbound,
 		})
 		dnsRules = append(dnsRules, map[string]any{
 			"domain_suffix": clusterDomains,
-			"server":        "cluster",
+			configServerKey: "cluster",
 		})
 	}
-	dnsServers = append(dnsServers, map[string]any{"type": "local", "tag": "local"})
+	dnsServers = append(dnsServers, map[string]any{
+		configTypeKey: LocalOutbound,
+		configTagKey:  LocalOutbound,
+	})
 
 	trafficIn := []string{TrafficInbound}
 	clusterUsers := clusterTrafficUsers()
 	localUsers := localTrafficUsers()
 	routeRules := []map[string]any{
-		{"inbound": []string{"dns-in"}, "action": "hijack-dns"},
+		{configInboundKey: []string{"dns-in"}, configActionKey: "hijack-dns"},
 		{
-			"inbound":   trafficIn,
-			"auth_user": clusterUsers,
-			"outbound":  KubernetesOutbound,
+			configInboundKey:  trafficIn,
+			configAuthUserKey: clusterUsers,
+			configOutboundKey: KubernetesOutbound,
 		},
 	}
 	for _, route := range routes {
 		routeRules = append(routeRules, map[string]any{
-			"inbound":   trafficIn,
-			"auth_user": localUsers,
-			"ip_cidr":   []string{route},
-			"action":    "reject",
+			configInboundKey:  trafficIn,
+			configAuthUserKey: localUsers,
+			configIPCIDRKey:   []string{route},
+			configActionKey:   rejectRouteAction,
 		})
 	}
 	routeRules = append(routeRules,
 		map[string]any{
-			"inbound":   trafficIn,
-			"auth_user": localUsers,
-			"ip_cidr":   []string{"127.0.0.0/8", "::1/128"},
-			"outbound":  LocalOutbound,
+			configInboundKey:  trafficIn,
+			configAuthUserKey: localUsers,
+			configIPCIDRKey:   []string{"127.0.0.0/8", "::1/128"},
+			configOutboundKey: LocalOutbound,
 		},
 		map[string]any{
-			"inbound":   trafficIn,
-			"auth_user": localUsers,
-			"domain":    []string{"localhost"},
-			"outbound":  LocalOutbound,
+			configInboundKey:  trafficIn,
+			configAuthUserKey: localUsers,
+			"domain":          []string{"localhost"},
+			configOutboundKey: LocalOutbound,
 		},
 		map[string]any{
-			"inbound":       trafficIn,
-			"auth_user":     localUsers,
-			"ip_is_private": true,
-			"outbound":      LocalOutbound,
+			configInboundKey:  trafficIn,
+			configAuthUserKey: localUsers,
+			"ip_is_private":   true,
+			configOutboundKey: LocalOutbound,
 		},
 		map[string]any{
-			"inbound":   trafficIn,
-			"auth_user": localUsers,
-			"action":    "reject",
+			configInboundKey:  trafficIn,
+			configAuthUserKey: localUsers,
+			configActionKey:   rejectRouteAction,
 		},
 		// Unknown or missing auth_user on traffic-in must not fall through to
 		// TUN/cluster rules (UDP ASSOCIATE dye loss would otherwise misroute).
-		map[string]any{"inbound": trafficIn, "action": "reject"},
-		map[string]any{"action": "sniff"},
-		map[string]any{"protocol": "dns", "action": "hijack-dns"},
+		map[string]any{configInboundKey: trafficIn, configActionKey: rejectRouteAction},
+		map[string]any{configActionKey: "sniff"},
+		map[string]any{"protocol": "dns", configActionKey: "hijack-dns"},
 		map[string]any{
-			"domain_suffix": clusterDomains, "outbound": KubernetesOutbound,
+			"domain_suffix": clusterDomains, configOutboundKey: KubernetesOutbound,
 		},
 	)
 	for _, route := range routes {
 		routeRules = append(routeRules, map[string]any{
-			"ip_cidr":  []string{route},
-			"outbound": KubernetesOutbound,
+			configIPCIDRKey:   []string{route},
+			configOutboundKey: KubernetesOutbound,
 		})
 	}
 
 	tunInbound := map[string]any{
 		// dns_mode is sing-box 1.14+; we pin 1.13 and use /etc/resolver
 		// (or platform split DNS) + dns-in instead of TUN DNS hijack.
-		"type":       "tun",
-		"tag":        "tun-in",
-		"address":    []string{options.TUNAddress},
-		"mtu":        9000,
-		"auto_route": true,
+		configTypeKey: "tun",
+		configTagKey:  "tun-in",
+		"address":     []string{options.TUNAddress},
+		"mtu":         9000,
+		"auto_route":  true,
 		// Windows WFP strict_route blocks DNS on other interfaces
 		"strict_route": runtime.GOOS != "windows",
 		// Linux: auto_redirect uses nftables and avoids TUN vs Docker/Minikube
@@ -259,8 +275,8 @@ func Generate(network NetworkSpec, options Options) ([]byte, error) {
 	inbounds := []map[string]any{
 		tunInbound,
 		{
-			"type":        "direct",
-			"tag":         "dns-in",
+			configTypeKey: DirectOutbound,
+			configTagKey:  "dns-in",
 			"listen":      options.DNSHost,
 			"listen_port": options.DNSPort,
 		},
@@ -280,9 +296,9 @@ func Generate(network NetworkSpec, options Options) ([]byte, error) {
 			})
 		}
 		inbounds = append(inbounds, map[string]any{
-			"type":        "socks",
-			"tag":         TrafficInbound,
-			"listen":      "127.0.0.1",
+			configTypeKey: "socks",
+			configTagKey:  TrafficInbound,
+			"listen":      DefaultDNSListen,
 			"listen_port": options.TrafficPorts.Listen,
 			"users":       users,
 		})
@@ -293,27 +309,27 @@ func Generate(network NetworkSpec, options Options) ([]byte, error) {
 		"dns": map[string]any{
 			"servers":  dnsServers,
 			"rules":    dnsRules,
-			"final":    "local",
+			"final":    LocalOutbound,
 			"strategy": "prefer_ipv4",
 		},
 		"inbounds": inbounds,
 		"outbounds": []map[string]any{
 			{
-				"type":        "socks",
-				"tag":         KubernetesOutbound,
-				"server":      options.BridgeHost,
-				"server_port": options.BridgePort,
-				"version":     "5",
+				configTypeKey:   "socks",
+				configTagKey:    KubernetesOutbound,
+				configServerKey: options.BridgeHost,
+				"server_port":   options.BridgePort,
+				"version":       "5",
 			},
-			{"type": "direct", "tag": LocalOutbound},
-			{"type": "direct", "tag": DirectOutbound},
+			{configTypeKey: DirectOutbound, configTagKey: LocalOutbound},
+			{configTypeKey: DirectOutbound, configTagKey: DirectOutbound},
 		},
 		"route": map[string]any{
 			"rules":                   routeRules,
 			"final":                   DirectOutbound,
 			"auto_detect_interface":   true,
 			"find_process":            true,
-			"default_domain_resolver": "local",
+			"default_domain_resolver": LocalOutbound,
 		},
 		"experimental": map[string]any{
 			"clash_api": map[string]any{

@@ -63,11 +63,16 @@ func (repository *idempotencyRepository) Reserve(
 	return existing, false, nil
 }
 
-func (repository *idempotencyRepository) Get(ctx context.Context, scope, key string) (IdempotencyRecord, error) {
+func (repository *idempotencyRepository) Get(
+	ctx context.Context,
+	scope, key string,
+) (IdempotencyRecord, error) {
 	scope = strings.TrimSpace(scope)
 	key = strings.TrimSpace(key)
 	if scope == "" || key == "" {
-		return IdempotencyRecord{}, errors.New("idempotency scope and key are required")
+		return IdempotencyRecord{}, errors.New(
+			"idempotency scope and key are required",
+		)
 	}
 	query := repository.bind(`SELECT scope, key, request_hash, resource_type,
 		resource_id, response_json, created_at, expires_at
@@ -76,17 +81,26 @@ func (repository *idempotencyRepository) Get(ctx context.Context, scope, key str
 		query = "SELECT scope, `key`, request_hash, resource_type, resource_id, response_json, " +
 			"created_at, expires_at FROM idempotency_records WHERE scope = ? AND `key` = ?"
 	}
-	record, err := scanIdempotencyRecord(repository.executor.QueryRowContext(ctx, query, scope, key))
+	record, err := scanIdempotencyRecord(
+		repository.executor.QueryRowContext(ctx, query, scope, key),
+	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return IdempotencyRecord{}, ErrNotFound
 	}
 	if err != nil {
-		return IdempotencyRecord{}, databaseError("read idempotency record", err)
+		return IdempotencyRecord{}, databaseError(
+			"read idempotency record",
+			err,
+		)
 	}
 	return record, nil
 }
 
-func (repository *idempotencyRepository) DeleteExpired(ctx context.Context, before time.Time, limit int) (int64, error) {
+func (repository *idempotencyRepository) DeleteExpired(
+	ctx context.Context,
+	before time.Time,
+	limit int,
+) (int64, error) {
 	limit, err := boundedLimit(limit)
 	if err != nil {
 		return 0, err
@@ -102,7 +116,12 @@ func (repository *idempotencyRepository) DeleteExpired(ctx context.Context, befo
 	if repository.backend == BackendMySQL {
 		query = `DELETE FROM idempotency_records WHERE expires_at < ? ORDER BY expires_at LIMIT ?`
 	}
-	result, err := repository.executor.ExecContext(ctx, query, formatTime(before), limit)
+	result, err := repository.executor.ExecContext(
+		ctx,
+		query,
+		formatTime(before),
+		limit,
+	)
 	if err != nil {
 		return 0, databaseError("delete expired idempotency records", err)
 	}
@@ -117,13 +136,16 @@ func normalizeIdempotencyRecord(record *IdempotencyRecord) error {
 	record.ResourceID = strings.TrimSpace(record.ResourceID)
 	if record.Scope == "" || record.Key == "" || record.RequestHash == "" ||
 		record.ResourceType == "" || record.ResourceID == "" {
-		return errors.New("idempotency scope, key, request hash and resource identity are required")
+		return errors.New(
+			"idempotency scope, key, request hash and resource identity are required",
+		)
 	}
 	var err error
 	if record.Response, err = normalizeJSON(record.Response, false, "idempotency response"); err != nil {
 		return err
 	}
-	if record.CreatedAt.IsZero() || record.ExpiresAt.IsZero() || !record.ExpiresAt.After(record.CreatedAt) {
+	if record.CreatedAt.IsZero() || record.ExpiresAt.IsZero() ||
+		!record.ExpiresAt.After(record.CreatedAt) {
 		return errors.New("idempotency expiry must be after creation")
 	}
 	record.CreatedAt = record.CreatedAt.UTC()

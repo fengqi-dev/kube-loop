@@ -3,8 +3,9 @@
 package desktoptray
 
 import (
-	desktopapp "github.com/fengqi-dev/kube-loop/internal/app"
 	"github.com/gogpu/systray"
+
+	desktopapp "github.com/fengqi-dev/kube-loop/internal/app"
 )
 
 // New creates and shows the desktop system tray.

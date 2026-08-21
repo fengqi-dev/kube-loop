@@ -3,10 +3,11 @@ package controlplane
 import (
 	"net/http"
 
+	"github.com/labstack/echo/v5"
+
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/health"
 	controlplanemiddleware "github.com/fengqi-dev/kube-loop/internal/controlplane/middleware"
-	"github.com/labstack/echo/v5"
 )
 
 const (
@@ -107,8 +108,18 @@ func (routes APIRoutes) RegisterRoutes(group *echo.Group) {
 	registerRoute(group, http.MethodGet, "/namespaces/:namespace", routes.Kubernetes.Namespace)
 	registerRoute(group, http.MethodGet, "/namespaces/:namespace/pods", routes.Kubernetes.Pods)
 	registerRoute(group, http.MethodGet, "/namespaces/:namespace/pods/:name", routes.Kubernetes.Pod)
-	registerRoute(group, http.MethodGet, "/namespaces/:namespace/services", routes.Kubernetes.Services)
-	registerRoute(group, http.MethodGet, "/namespaces/:namespace/services/:name", routes.Kubernetes.Service)
+	registerRoute(
+		group,
+		http.MethodGet,
+		"/namespaces/:namespace/services",
+		routes.Kubernetes.Services,
+	)
+	registerRoute(
+		group,
+		http.MethodGet,
+		"/namespaces/:namespace/services/:name",
+		routes.Kubernetes.Service,
+	)
 }
 
 // RegisterSessionRoutes registers Session lifecycle and task resources under
@@ -116,38 +127,128 @@ func (routes APIRoutes) RegisterRoutes(group *echo.Group) {
 func (routes APIRoutes) RegisterSessionRoutes(group *echo.Group) {
 	registerRoute(group, http.MethodPost, "/sessions/:sessionID/tickets", routes.Tickets.Issue)
 
-	registerRoute(group, http.MethodPost, "/sessions/:sessionID/port-forwards", routes.PortForwards.Create)
-	registerRoute(group, http.MethodGet, "/sessions/:sessionID/port-forwards", routes.PortForwards.List)
-	registerRoute(group, http.MethodDelete, "/sessions/:sessionID/port-forwards/:taskID", routes.PortForwards.Stop)
+	registerRoute(
+		group,
+		http.MethodPost,
+		"/sessions/:sessionID/port-forwards",
+		routes.PortForwards.Create,
+	)
+	registerRoute(
+		group,
+		http.MethodGet,
+		"/sessions/:sessionID/port-forwards",
+		routes.PortForwards.List,
+	)
+	registerRoute(
+		group,
+		http.MethodDelete,
+		"/sessions/:sessionID/port-forwards/:taskID",
+		routes.PortForwards.Stop,
+	)
 
 	registerRoute(group, http.MethodPost, "/sessions/:sessionID/exchanges", routes.Exchanges.Create)
-	registerRoute(group, http.MethodGet, "/sessions/:sessionID/exchanges/:taskID", routes.Exchanges.Get)
-	registerRoute(group, http.MethodDelete, "/sessions/:sessionID/exchanges/:taskID", routes.Exchanges.Stop)
+	registerRoute(
+		group,
+		http.MethodGet,
+		"/sessions/:sessionID/exchanges/:taskID",
+		routes.Exchanges.Get,
+	)
+	registerRoute(
+		group,
+		http.MethodDelete,
+		"/sessions/:sessionID/exchanges/:taskID",
+		routes.Exchanges.Stop,
+	)
 
 	registerRoute(group, http.MethodPost, "/sessions/:sessionID/mirrors", routes.Mirrors.Create)
 	registerRoute(group, http.MethodGet, "/sessions/:sessionID/mirrors/:taskID", routes.Mirrors.Get)
-	registerRoute(group, http.MethodDelete, "/sessions/:sessionID/mirrors/:taskID", routes.Mirrors.Stop)
+	registerRoute(
+		group,
+		http.MethodDelete,
+		"/sessions/:sessionID/mirrors/:taskID",
+		routes.Mirrors.Stop,
+	)
 
 	registerRoute(group, http.MethodPost, "/sessions/:sessionID/previews", routes.Previews.Create)
-	registerRoute(group, http.MethodGet, "/sessions/:sessionID/previews/:taskID", routes.Previews.Get)
-	registerRoute(group, http.MethodDelete, "/sessions/:sessionID/previews/:taskID", routes.Previews.Stop)
+	registerRoute(
+		group,
+		http.MethodGet,
+		"/sessions/:sessionID/previews/:taskID",
+		routes.Previews.Get,
+	)
+	registerRoute(
+		group,
+		http.MethodDelete,
+		"/sessions/:sessionID/previews/:taskID",
+		routes.Previews.Stop,
+	)
 
-	registerRoute(group, http.MethodPost, "/sessions/:sessionID/pod-files/list", routes.FileOperations.List)
-	registerRoute(group, http.MethodPost, "/sessions/:sessionID/pod-files/create", routes.FileOperations.Create)
-	registerRoute(group, http.MethodPost, "/sessions/:sessionID/pod-files/rename", routes.FileOperations.Rename)
-	registerRoute(group, http.MethodPost, "/sessions/:sessionID/pod-files/delete", routes.FileOperations.Delete)
-	registerRoute(group, http.MethodGet, "/sessions/:sessionID/pod-files/operations/:taskID", routes.FileOperations.Operation)
+	registerRoute(
+		group,
+		http.MethodPost,
+		"/sessions/:sessionID/pod-files/list",
+		routes.FileOperations.List,
+	)
+	registerRoute(
+		group,
+		http.MethodPost,
+		"/sessions/:sessionID/pod-files/create",
+		routes.FileOperations.Create,
+	)
+	registerRoute(
+		group,
+		http.MethodPost,
+		"/sessions/:sessionID/pod-files/rename",
+		routes.FileOperations.Rename,
+	)
+	registerRoute(
+		group,
+		http.MethodPost,
+		"/sessions/:sessionID/pod-files/delete",
+		routes.FileOperations.Delete,
+	)
+	registerRoute(
+		group,
+		http.MethodGet,
+		"/sessions/:sessionID/pod-files/operations/:taskID",
+		routes.FileOperations.Operation,
+	)
 
-	registerRoute(group, http.MethodPost, "/sessions/:sessionID/file-transfers", routes.FileTransfers.Create)
-	registerRoute(group, http.MethodGet, "/sessions/:sessionID/file-transfers/:taskID", routes.FileTransfers.Get)
-	registerRoute(group, http.MethodGet, "/sessions/:sessionID/file-transfers/:taskID/stream", routes.FileTransfers.Stream)
+	registerRoute(
+		group,
+		http.MethodPost,
+		"/sessions/:sessionID/file-transfers",
+		routes.FileTransfers.Create,
+	)
+	registerRoute(
+		group,
+		http.MethodGet,
+		"/sessions/:sessionID/file-transfers/:taskID",
+		routes.FileTransfers.Get,
+	)
+	registerRoute(
+		group,
+		http.MethodGet,
+		"/sessions/:sessionID/file-transfers/:taskID/stream",
+		routes.FileTransfers.Stream,
+	)
 
 	registerRoute(group, http.MethodPost, "/sessions/:sessionID/exec", routes.Exec.Create)
-	registerRoute(group, http.MethodGet, "/sessions/:sessionID/exec/:taskID/stream", routes.Exec.Stream)
+	registerRoute(
+		group,
+		http.MethodGet,
+		"/sessions/:sessionID/exec/:taskID/stream",
+		routes.Exec.Stream,
+	)
 
 	registerRoute(group, http.MethodPost, "/sessions", routes.Sessions.Create)
 	registerRoute(group, http.MethodGet, "/sessions/:sessionID", routes.Sessions.Get)
-	registerRoute(group, http.MethodPost, "/sessions/:sessionID/heartbeat", routes.Sessions.Heartbeat)
+	registerRoute(
+		group,
+		http.MethodPost,
+		"/sessions/:sessionID/heartbeat",
+		routes.Sessions.Heartbeat,
+	)
 	registerRoute(group, http.MethodDelete, "/sessions/:sessionID", routes.Sessions.Disconnect)
 }
 
@@ -169,7 +270,10 @@ func Endpoint(function EndpointFunc) echo.HandlerFunc {
 		}
 		identity, ok := controlplanemiddleware.IdentityFromContext(request.Context())
 		if !ok {
-			return &controlplaneapi.Error{Code: controlplaneapi.CodeUnauthenticated, Message: "authentication required"}
+			return &controlplaneapi.Error{
+				Code:    controlplaneapi.CodeUnauthenticated,
+				Message: "authentication required",
+			}
 		}
 		if apiError := function(ctx, identity); apiError != nil {
 			return apiError

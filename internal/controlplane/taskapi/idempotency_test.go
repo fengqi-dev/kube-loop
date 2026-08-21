@@ -40,8 +40,15 @@ func TestRequestHashBindsSessionNamespaceAndCanonicalJSON(t *testing.T) {
 	otherSession, _ := RequestHash("session-b", "development", spec)
 	otherNamespace, _ := RequestHash("session-a", "production", spec)
 	const stableHash = "3f43b1b0ec02f2513edd0839d05865e1691b9cb93c5ce4aec9ed41bb9d919a8f"
-	if first != stableHash || first != second || first == otherSession || first == otherNamespace || len(first) != 64 {
-		t.Fatalf("hashes first=%q second=%q session=%q namespace=%q", first, second, otherSession, otherNamespace)
+	if first != stableHash || first != second || first == otherSession || first == otherNamespace ||
+		len(first) != 64 {
+		t.Fatalf(
+			"hashes first=%q second=%q session=%q namespace=%q",
+			first,
+			second,
+			otherSession,
+			otherNamespace,
+		)
 	}
 	if Scope("pod-exec", "identity") != "task:pod-exec:identity" {
 		t.Fatal("Task scope is unstable")

@@ -10,13 +10,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/fengqi-dev/kube-loop/internal/client/credentials"
 	clientdiscovery "github.com/fengqi-dev/kube-loop/internal/client/discovery"
 	clientremote "github.com/fengqi-dev/kube-loop/internal/client/remote"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
-	"github.com/google/uuid"
 )
 
+//nolint:gocyclo // The integration flow intentionally validates one complete clean-directory startup lifecycle.
 func TestCleanDirectoryWithOnlyServerURLBrowsesRemoteInventory(t *testing.T) {
 	cleanDirectory := t.TempDir()
 	profilePath := filepath.Join(cleanDirectory, "servers.json")
@@ -37,21 +39,32 @@ func TestCleanDirectoryWithOnlyServerURLBrowsesRemoteInventory(t *testing.T) {
 	sessionID := uuid.NewString()
 	var server *httptest.Server
 	server = httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if request.URL.Path != clientdiscovery.Path && request.URL.Path != "/.well-known/openid-configuration" && request.URL.Path != "/oauth2/token" &&
+		if request.URL.Path != clientdiscovery.Path && request.URL.Path != "/.well-known/openid-configuration" &&
+			request.URL.Path != "/oauth2/token" &&
 			request.Header.Get("Authorization") != "Bearer clean-access" {
 			t.Errorf("%s Authorization = %q", request.URL.Path, request.Header.Get("Authorization"))
 		}
 		switch request.URL.Path {
 		case clientdiscovery.Path:
 			_ = json.NewEncoder(writer).Encode(clientdiscovery.Document{
-				ServiceID: "clean-service", PublicURL: server.URL, TunnelPath: "/tunnel",
-				APIVersions: []string{"v2"}, ProtocolMin: "2.0", ProtocolMax: "2.0", ServerVersion: "2.0.0",
-				AuthMethods: []clientdiscovery.AuthMethod{{ID: "local", Type: "local", Interaction: "browser"}},
+				ServiceID:     "clean-service",
+				PublicURL:     server.URL,
+				TunnelPath:    "/tunnel",
+				APIVersions:   []string{"v2"},
+				ProtocolMin:   "2.0",
+				ProtocolMax:   "2.0",
+				ServerVersion: "2.0.0",
+				AuthMethods: []clientdiscovery.AuthMethod{
+					{ID: "local", Type: "local", Interaction: authenticationProviderBrowser},
+				},
 			})
 		case "/.well-known/openid-configuration":
-			_ = json.NewEncoder(writer).Encode(map[string]any{"issuer": server.URL,
-				"authorization_endpoint": server.URL + "/oauth2/authorize", "token_endpoint": server.URL + "/oauth2/token",
-				"revocation_endpoint": server.URL + "/oauth2/revoke"})
+			_ = json.NewEncoder(writer).Encode(map[string]any{
+				"issuer":                 server.URL,
+				"authorization_endpoint": server.URL + "/oauth2/authorize",
+				"token_endpoint":         server.URL + "/oauth2/token",
+				"revocation_endpoint":    server.URL + "/oauth2/revoke",
+			})
 		case "/oauth2/token":
 			writeAppTokenResponse(writer, "clean-access", "clean-refresh")
 		case "/api/version":
@@ -70,13 +83,26 @@ func TestCleanDirectoryWithOnlyServerURLBrowsesRemoteInventory(t *testing.T) {
 				NetworkSpec: network, NetworkSpecHash: networkHash, Capabilities: &snapshot,
 			})
 		case "/api/namespaces/development/pods":
-			_, _ = writer.Write([]byte(`{"items":[{"name":"api-0","namespace":"development","phase":"Running","ready":true,"containers":["api"]}]}`))
+			_, _ = writer.Write(
+				[]byte(
+					`{"items":[{"name":"api-0","namespace":"development","phase":"Running","ready":true,"containers":["api"]}]}`,
+				),
+			)
 		case "/api/sessions/" + sessionID:
 			now := time.Now().UTC()
 			_ = json.NewEncoder(writer).Encode(clientremote.Session{
-				ID: sessionID, Namespace: "development", State: "disconnected", Generation: 2,
-				CreatedAt: now.Add(-time.Minute), UpdatedAt: now, LastHeartbeatAt: now.Add(-time.Minute), ExpiresAt: now.Add(time.Minute),
-				NetworkSpec: network, NetworkSpecHash: networkHash,
+				ID:         sessionID,
+				Namespace:  "development",
+				State:      remoteStateDisconnected,
+				Generation: 2,
+				CreatedAt: now.Add(
+					-time.Minute,
+				),
+				UpdatedAt:       now,
+				LastHeartbeatAt: now.Add(-time.Minute),
+				ExpiresAt:       now.Add(time.Minute),
+				NetworkSpec:     network,
+				NetworkSpecHash: networkHash,
 			})
 		default:
 			http.NotFound(writer, request)

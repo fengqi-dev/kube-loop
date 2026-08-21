@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -15,13 +16,13 @@ func (m Model) updateServices(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.cursor > 0 {
 			m.cursor--
 		}
-	case "down", "j":
+	case keyDown, "j":
 		if m.cursor < len(m.services)-1 {
 			m.cursor++
 		}
 	case "n":
 		return m, m.cycleNamespace()
-	case "f", "enter":
+	case "f", keyEnter:
 		row, ok := m.selectedConsoleRow()
 		if !ok || row.index >= len(m.services) {
 			return m, nil
@@ -34,7 +35,10 @@ func (m Model) updateServices(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.actionMode, m.actionService, m.actionPod = actionPortForward, service.Name, ""
 		m.actionPorts = make([]actionPortOption, 0, len(service.Ports))
 		for _, port := range service.Ports {
-			m.actionPorts = append(m.actionPorts, actionPortOption{Name: port.Name, Port: port.Port, Protocol: port.Protocol})
+			m.actionPorts = append(
+				m.actionPorts,
+				actionPortOption{Name: port.Name, Port: port.Port, Protocol: port.Protocol},
+			)
 		}
 		m.actionPortIndex, m.actionLocalPort, m.actionField = 0, "0", 0
 		m.selectActionPort()
@@ -57,12 +61,15 @@ func (m Model) updateServices(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.actionService, m.actionPod = service.Name, ""
 		m.actionPorts = make([]actionPortOption, 0, len(service.Ports))
 		for _, port := range service.Ports {
-			m.actionPorts = append(m.actionPorts, actionPortOption{Name: port.Name, Port: port.Port, Protocol: port.Protocol})
+			m.actionPorts = append(
+				m.actionPorts,
+				actionPortOption{Name: port.Name, Port: port.Port, Protocol: port.Protocol},
+			)
 		}
 		m.actionPortIndex, m.actionField = 0, 0
 		m.actionLocalHost = "127.0.0.1"
 		m.selectActionPort()
-		m.actionLocalPort = fmt.Sprint(m.actionPort)
+		m.actionLocalPort = strconv.Itoa(int(m.actionPort))
 		m.err, m.status = "", ""
 	case "p":
 		m.actionMode, m.actionService, m.actionPod = actionPreview, "", ""

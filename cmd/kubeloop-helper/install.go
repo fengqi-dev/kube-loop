@@ -19,7 +19,7 @@ type installOptions struct {
 func newInstallCommand(dependencies commandDependencies, commandVersion string) *cobra.Command {
 	options := installOptions{}
 	command := &cobra.Command{
-		Use:   "install",
+		Use:   installCommandName,
 		Short: "Install or upgrade the privileged helper service",
 		Args:  usageArgs(cobra.NoArgs),
 		PreRunE: func(_ *cobra.Command, _ []string) error {
@@ -37,7 +37,7 @@ func newInstallCommand(dependencies commandDependencies, commandVersion string) 
 		},
 		RunE: func(_ *cobra.Command, _ []string) error {
 			if dependencies.install == nil {
-				return unavailable("install")
+				return unavailable(installCommandName)
 			}
 			return dependencies.install(options)
 		},
