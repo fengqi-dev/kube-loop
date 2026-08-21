@@ -111,9 +111,23 @@ Each release includes `SHA256SUMS`.
 ### Terminal client
 
 The K9s-style terminal client implements the core connection and Kubernetes
-resource workflows without requiring the desktop UI. Download the matching
-`kubeloop-tui-<version>-<os>-<arch>.tar.gz` archive from GitHub Releases, extract it,
-and run `kubeloop` (`kubeloop.exe` on Windows).
+resource workflows without requiring the desktop UI.
+
+On macOS or Linux:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/fengqi-dev/kube-loop/main/scripts/install-tui.sh | bash
+```
+
+On Windows:
+
+```powershell
+irm https://raw.githubusercontent.com/fengqi-dev/kube-loop/main/scripts/install-tui.ps1 | iex
+```
+
+Set `VERSION=v2.1.2` to install a specific release. The installers select the
+matching `kubeloop-tui-<version>-<os>-<arch>.tar.gz` archive and verify it using
+the release `SHA256SUMS` before installing `kubeloop` (`kubeloop.exe` on Windows).
 
 Release archives are available for macOS, Windows, and Linux on amd64 and
 arm64. The TUI uses the same KubeLoop Server profiles and Control Plane APIs as

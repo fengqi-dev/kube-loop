@@ -16,6 +16,22 @@ GitHub Releases 提供以下原生产物：
 `kubeloop` 可执行文件（Windows 为 `kubeloop.exe`）。使用 Release 中的
 `SHA256SUMS` 校验后运行，终端最小尺寸为 60x18。
 
+macOS 或 Linux 安装最新版：
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/fengqi-dev/kube-loop/main/scripts/install-tui.sh | bash
+```
+
+Windows 安装：
+
+```powershell
+irm https://raw.githubusercontent.com/fengqi-dev/kube-loop/main/scripts/install-tui.ps1 | iex
+```
+
+设置 `VERSION=v2.1.2` 可选择指定版本，设置 `DEST` 可覆盖安装目录。macOS/Linux
+默认安装到 `~/.local/bin`；Windows 默认安装到当前用户的 KubeLoop 程序目录并加入
+用户 `PATH`。
+
 开发环境可执行：
 
 ```sh

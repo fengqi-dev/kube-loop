@@ -28,6 +28,9 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Test TUI installer
+        run: ./scripts/install-tui_test.sh
+
       - name: Set up Node.js
         uses: actions/setup-node@v6
         with:
@@ -431,6 +434,12 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
+
+      - name: Validate PowerShell installers
+        shell: pwsh
+        run: |
+          $null = [scriptblock]::Create((Get-Content -Raw scripts/install.ps1))
+          $null = [scriptblock]::Create((Get-Content -Raw scripts/install-tui.ps1))
 
       - name: Download frontend dist
         uses: actions/download-artifact@v7

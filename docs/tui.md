@@ -18,6 +18,22 @@ self-contained `kubeloop` executable (`kubeloop.exe` on Windows). Verify the
 archive against the release `SHA256SUMS`, then run the binary in a terminal of
 at least 60x18.
 
+Install the latest release on macOS or Linux:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/fengqi-dev/kube-loop/main/scripts/install-tui.sh | bash
+```
+
+Install on Windows:
+
+```powershell
+irm https://raw.githubusercontent.com/fengqi-dev/kube-loop/main/scripts/install-tui.ps1 | iex
+```
+
+Set `VERSION=v2.1.2` to select a release and `DEST` to override the install
+directory. The macOS/Linux default is `~/.local/bin`; Windows defaults to the
+user-local KubeLoop program directory and adds it to the user `PATH`.
+
 For development builds:
 
 ```sh
