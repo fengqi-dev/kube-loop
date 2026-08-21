@@ -18,6 +18,7 @@ import (
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
+	"github.com/fengqi-dev/kube-loop/internal/authconfig"
 	clientauth "github.com/fengqi-dev/kube-loop/internal/client/auth"
 	"github.com/fengqi-dev/kube-loop/internal/client/credentials"
 	clientdataplane "github.com/fengqi-dev/kube-loop/internal/client/dataplane"
@@ -260,7 +261,7 @@ func newApp(version string, embeddedHelperFiles fs.FS, dependencies appDependenc
 
 	credentialStore := dependencies.credentialStore
 	if credentialStore == nil {
-		credentialStore = credentials.NewSystemStoreForVersion(version)
+		credentialStore = credentials.NewSystemStoreForClient(version, authconfig.DesktopClientID)
 	}
 	application := &App{
 		profiles: profileStore,

@@ -36,6 +36,8 @@ const (
 	CodeTemporarilyUnavailable = "temporarily_unavailable"
 )
 
+var ErrLoginExpired = errors.New("gateway login expired; sign in again")
+
 type BrowserOpener func(string) error
 
 type Config struct {
@@ -99,6 +101,14 @@ func (apiError *APIError) Error() string {
 		return fmt.Sprintf("authentication failed (%s): %s", apiError.Code, apiError.Message)
 	}
 	return fmt.Sprintf("authentication request returned HTTP %d", apiError.Status)
+}
+
+// IsInvalidGrant reports an unrecoverable OAuth grant rejection. Callers must
+// discard the local credential and require a new browser login rather than
+// retrying a refresh token that the server has expired or revoked.
+func IsInvalidGrant(err error) bool {
+	var apiError *APIError
+	return errors.As(err, &apiError) && apiError.Code == CodeInvalidGrant
 }
 
 type callbackResult struct {

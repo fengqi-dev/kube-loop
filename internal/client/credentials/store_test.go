@@ -3,6 +3,7 @@ package credentials
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -106,6 +107,47 @@ func TestKeyringServiceSeparatesReleaseAndDevelopment(t *testing.T) {
 		if got := keyringServiceForVersion(version); got != developmentServiceName {
 			t.Fatalf("development service for %q = %q, want %q", version, got, developmentServiceName)
 		}
+	}
+}
+
+func TestSystemStoreSeparatesOAuthClients(t *testing.T) {
+	backend := newMemoryBackend()
+	desktop := newStoreForClient(backend, "v2.1.2", "kubeloop-desktop")
+	tui := newStoreForClient(backend, "v2.1.2", "kubeloop-tui")
+	desktopCredential := Credential{
+		AccessToken: "desktop-access", RefreshToken: "desktop-refresh", DeviceID: "desktop-device",
+	}
+	tuiCredential := Credential{
+		AccessToken: "tui-access", RefreshToken: "tui-refresh", DeviceID: "tui-device",
+	}
+	if err := desktop.Set("profile-1", desktopCredential); err != nil {
+		t.Fatal(err)
+	}
+	if err := tui.Set("profile-1", tuiCredential); err != nil {
+		t.Fatal(err)
+	}
+	gotDesktop, err := desktop.Get("profile-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotTUI, err := tui.Get("profile-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotDesktop.RefreshToken != desktopCredential.RefreshToken || gotTUI.RefreshToken != tuiCredential.RefreshToken {
+		t.Fatalf("client credentials collided: desktop=%#v tui=%#v", gotDesktop, gotTUI)
+	}
+	if desktop.service == tui.service || desktop.service == serviceName || tui.service == serviceName {
+		t.Fatalf("client keyring services are not isolated: desktop=%q tui=%q", desktop.service, tui.service)
+	}
+}
+
+func TestClientKeyringServiceSeparatesDevelopmentChannel(t *testing.T) {
+	release := keyringServiceForClient("v2.1.2", "kubeloop-tui")
+	development := keyringServiceForClient("dev", "kubeloop-tui")
+	if release == development || !strings.Contains(release, "kubeloop-tui") ||
+		!strings.Contains(development, "kubeloop-tui") {
+		t.Fatalf("client services release=%q development=%q", release, development)
 	}
 }
 

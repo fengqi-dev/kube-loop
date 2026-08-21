@@ -19,6 +19,7 @@ import (
 
 	"github.com/google/uuid"
 
+	clientauth "github.com/fengqi-dev/kube-loop/internal/client/auth"
 	"github.com/fengqi-dev/kube-loop/internal/client/credentials"
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/capability"
@@ -1447,16 +1448,30 @@ func (client *Client) usableCredential(
 		return current, nil
 	}
 	if !current.RefreshExpiresAt.IsZero() && !current.RefreshExpiresAt.After(client.now()) {
-		return credentials.Credential{}, errors.New("gateway login has expired; sign in again")
+		return credentials.Credential{}, client.expiredLogin(serverProfile.ID)
 	}
 	refreshed, err := client.refresher.Refresh(ctx, serverProfile.BaseURL, current)
 	if err != nil {
+		if clientauth.IsInvalidGrant(err) {
+			return credentials.Credential{}, client.expiredLogin(serverProfile.ID)
+		}
 		return credentials.Credential{}, fmt.Errorf("refresh Gateway login: %w", err)
 	}
 	if err := client.credentials.Set(serverProfile.ID, refreshed); err != nil {
 		return credentials.Credential{}, fmt.Errorf("store refreshed Gateway login: %w", err)
 	}
 	return refreshed, nil
+}
+
+func (client *Client) expiredLogin(profileID string) error {
+	deleteErr := client.credentials.Delete(profileID)
+	if deleteErr != nil && !errors.Is(deleteErr, credentials.ErrNotFound) {
+		return errors.Join(
+			clientauth.ErrLoginExpired,
+			fmt.Errorf("clear expired Gateway login: %w", deleteErr),
+		)
+	}
+	return clientauth.ErrLoginExpired
 }
 
 func (client *Client) request(

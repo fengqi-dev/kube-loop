@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 
+	clientauth "github.com/fengqi-dev/kube-loop/internal/client/auth"
 	clientdataplane "github.com/fengqi-dev/kube-loop/internal/client/dataplane"
 	clientexchange "github.com/fengqi-dev/kube-loop/internal/client/exchange"
 	clientexec "github.com/fengqi-dev/kube-loop/internal/client/exec"
@@ -158,6 +159,9 @@ func (m Model) context() context.Context {
 }
 
 func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
+	if errors.Is(tuiMessageError(message), clientauth.ErrLoginExpired) {
+		return m.returnToLoginAfterExpiry()
+	}
 	if m.workspace.initialized {
 		if cmd, handled := m.updateWorkspace(message); handled {
 			return m, cmd
@@ -178,6 +182,61 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		return next, cmd
 	}
 	return m, nil
+}
+
+func (m Model) returnToLoginAfterExpiry() (tea.Model, tea.Cmd) {
+	m.loading, m.autoConnect = false, false
+	m.authSession, m.mode = AuthSession{}, viewLogin
+	m.err, m.status = "", clientauth.ErrLoginExpired.Error()
+	m.dataPlaneStatus = clientdataplane.Status{State: dataPlaneStateDisconnected, Mode: "socks"}
+	m.workspace.resource = resourceProfiles
+	m.workspace.history, m.workspace.historyPos = []workspaceResource{resourceProfiles}, 0
+	return m, loadProfiles(m.state)
+}
+
+func tuiMessageError(message tea.Msg) error {
+	switch msg := message.(type) {
+	case workspaceLoadedMsg:
+		return tuiMessageError(msg.message)
+	case authStatusMsg:
+		return msg.err
+	case loginResultMsg:
+		return msg.err
+	case logoutResultMsg:
+		return msg.err
+	case namespacesLoadedMsg:
+		return msg.err
+	case podsLoadedMsg:
+		return msg.err
+	case servicesLoadedMsg:
+		return msg.err
+	case dataPlaneConnectedMsg:
+		return msg.err
+	case dataPlaneDisconnectedMsg:
+		return msg.err
+	case dataPlaneModeMsg:
+		return msg.err
+	case profileSavedMsg:
+		return msg.err
+	case profileDeletedMsg:
+		return msg.err
+	case portForwardStartedMsg:
+		return msg.err
+	case trafficOperationStartedMsg:
+		return msg.err
+	case podSSHStartedMsg:
+		return msg.err
+	case podSSHExitedMsg:
+		return msg.err
+	case helperServiceUninstalledMsg:
+		return msg.err
+	case execStartedMsg:
+		return msg.err
+	case taskStoppedMsg:
+		return msg.err
+	default:
+		return nil
+	}
 }
 
 func (m Model) updateInterfaceMessage(message tea.Msg) (tea.Model, tea.Cmd, bool) {
