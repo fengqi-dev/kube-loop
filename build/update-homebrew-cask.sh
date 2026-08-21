@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Update Casks/kubeloop.rb version + sha256 from a GitHub Release (or local dist/).
+# Update Casks/kubeloop-desktop.rb version + sha256 from a GitHub Release (or local dist/).
 #
 # Usage:
 #   VERSION=v1.1.0 ./build/update-homebrew-cask.sh
@@ -8,7 +8,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-CASK="${CASK:-${ROOT}/Casks/kubeloop.rb}"
+CASK="${CASK:-${ROOT}/Casks/kubeloop-desktop.rb}"
 REPO="${REPO:-${GITHUB_REPOSITORY:-fengqi-dev/kube-loop}}"
 
 if [[ ! -f "${CASK}" ]]; then

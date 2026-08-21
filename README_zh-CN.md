@@ -93,7 +93,7 @@ VERSION=v2.1.0 PACKAGE=deb \
 
 ```bash
 brew tap kube-loop/kubeloop https://github.com/fengqi-dev/kube-loop
-brew install --cask kubeloop
+brew install --cask kube-loop/kubeloop/kubeloop-desktop
 ```
 
 #### Windows
@@ -116,15 +116,13 @@ Release 同时提供 macOS、Windows、Linux 的 amd64 与 arm64 产物。TUI �
 共用 KubeLoop Server Profile 和 Control Plane API，不读取 kubeconfig，也不直接调用
 Kubernetes。资源、命令、配置及测试边界参见 [TUI 使用指南](docs/tui.zh-CN.md)。
 
-Homebrew 中的 TUI 与桌面 Cask 独立安装：
+Homebrew 中的 `kubeloop-tui` Formula 与 `kubeloop-desktop` Cask 独立安装；
+Formula 安装后的命令仍为 `kubeloop`：
 
 ```bash
 brew tap kube-loop/kubeloop https://github.com/fengqi-dev/kube-loop
-brew install kubeloop
+brew install --formula kube-loop/kubeloop/kubeloop-tui
 ```
-
-在首个包含 TUI 压缩包的稳定版本发布前，请使用
-`brew install --HEAD kubeloop`。
 
 ## 连接集群
 

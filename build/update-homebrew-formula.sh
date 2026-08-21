@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Generate Formula/kubeloop.rb from native TUI assets in a GitHub Release.
+# Generate Formula/kubeloop-tui.rb from native TUI assets in a GitHub Release.
 #
 # Usage:
 #   VERSION=v2.1.0 ./build/update-homebrew-formula.sh
@@ -7,7 +7,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-FORMULA="${FORMULA:-${ROOT}/Formula/kubeloop.rb}"
+FORMULA="${FORMULA:-${ROOT}/Formula/kubeloop-tui.rb}"
 REPO="${REPO:-${GITHUB_REPOSITORY:-fengqi-dev/kube-loop}}"
 
 version_raw="${1:-${VERSION:-${GITHUB_REF_NAME:-}}}"
@@ -61,10 +61,9 @@ linux_amd64_sha="$(hash_for "kubeloop-tui-${version}-linux-amd64.tar.gz")"
 
 mkdir -p "$(dirname "${FORMULA}")"
 cat >"${FORMULA}" <<EOF
-class Kubeloop < Formula
+class KubeloopTui < Formula
   desc "K9s-style terminal client for KubeLoop"
   homepage "https://fengqi-dev.github.io/kube-loop/"
-  version "${version}"
   license "MIT"
 
   on_macos do
@@ -88,8 +87,7 @@ class Kubeloop < Formula
   end
 
   def install
-    libexec.install "kubeloop"
-    bin.write_exec_script libexec/"kubeloop"
+    bin.install "kubeloop"
   end
 
   test do

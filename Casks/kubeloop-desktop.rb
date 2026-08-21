@@ -1,4 +1,4 @@
-cask "kubeloop" do
+cask "kubeloop-desktop" do
   arch arm: "arm64", intel: "amd64"
 
   version "2.1.0"

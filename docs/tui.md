@@ -33,16 +33,16 @@ flags. The defaults use `-trimpath`, strip debug tables with `-s -w`, and inject
 `VERSION` into `main.version`. The target builds and embeds the matching Helper,
 Supervisor (macOS), and sing-box components into the TUI executable.
 
-Homebrew users can install the independent Formula:
+Homebrew users can install the independent `kubeloop-tui` Formula, which
+provides the `kubeloop` command:
 
 ```sh
 brew tap kube-loop/kubeloop https://github.com/fengqi-dev/kube-loop
-brew install kubeloop
+brew install --formula kube-loop/kubeloop/kubeloop-tui
 ```
 
-Use `brew install --HEAD kubeloop` before the first stable release that
-contains TUI archives. Stable releases automatically update the Formula with
-the native macOS and Linux archive checksums.
+Stable releases automatically update the Formula with the native macOS and
+Linux archive checksums.
 
 Server profiles and optional TUI configuration live under `~/.kubeloop`. The
 first launch opens Servers so a KubeLoop Server URL can be added and

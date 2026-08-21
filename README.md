@@ -95,7 +95,7 @@ Homebrew is also supported:
 
 ```bash
 brew tap kube-loop/kubeloop https://github.com/fengqi-dev/kube-loop
-brew install --cask kubeloop
+brew install --cask kube-loop/kubeloop/kubeloop-desktop
 ```
 
 #### Windows
@@ -121,15 +121,13 @@ the desktop client; it does not read kubeconfig or call Kubernetes directly.
 See the [TUI guide](docs/tui.md) for resources, commands, configuration, and
 testing boundaries.
 
-Homebrew installs the TUI separately from the desktop Cask:
+Homebrew installs the `kubeloop-tui` Formula separately from the
+`kubeloop-desktop` Cask. The Formula still provides the `kubeloop` command:
 
 ```bash
 brew tap kube-loop/kubeloop https://github.com/fengqi-dev/kube-loop
-brew install kubeloop
+brew install --formula kube-loop/kubeloop/kubeloop-tui
 ```
-
-Before the first stable release containing TUI archives, use
-`brew install --HEAD kubeloop`.
 
 ## Connect
 
