@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/fengqi-dev/kube-loop/internal/fsatomic"
+	"github.com/fengqi-dev/kube-loop/internal/userpaths"
 )
 
 const (
@@ -33,11 +34,11 @@ type SettingsStore struct {
 
 func NewSettingsStore(path string) (*SettingsStore, error) {
 	if strings.TrimSpace(path) == "" {
-		home, err := os.UserHomeDir()
+		layout, err := userpaths.Default()
 		if err != nil {
-			return nil, errors.New("find user home directory")
+			return nil, err
 		}
-		path = filepath.Join(home, ".kubeloop", "traffic-inspection.json")
+		path = filepath.Join(layout.ConfigDir(), "traffic-inspection.json")
 	}
 	absolute, err := filepath.Abs(path)
 	if err != nil {

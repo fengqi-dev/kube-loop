@@ -27,7 +27,7 @@ func TestNewAppUsesExplicitProfilePath(t *testing.T) {
 func TestNewAppLoadsPersistedTrafficInspectionSetting(t *testing.T) {
 	directory := t.TempDir()
 	profilePath := filepath.Join(directory, "servers.json")
-	store, err := trafficinspect.NewSettingsStore(filepath.Join(directory, "traffic-inspection.json"))
+	store, err := trafficinspect.NewSettingsStore(filepath.Join(directory, "config", "traffic-inspection.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +44,7 @@ func TestNewAppLoadsPersistedTrafficInspectionSetting(t *testing.T) {
 
 func TestTrafficInspectionDefaultsEnabledWithoutEnvironmentConfiguration(t *testing.T) {
 	profilePath := filepath.Join(t.TempDir(), "traffic", "servers.json")
-	config, events, switchable := newTrafficInspection(profilePath)
+	config, events, switchable := newTrafficInspection("dev", profilePath)
 	if !config.Enabled || switchable == nil || !switchable.Enabled() {
 		t.Fatalf("traffic inspection default = %#v, switch = %#v", config, switchable)
 	}
@@ -62,8 +62,8 @@ func TestTrafficInspectionDefaultsEnabledWithoutEnvironmentConfiguration(t *test
 func TestTrafficInspectionWritesToProfileDirectoryWhenEnabled(t *testing.T) {
 	directory := filepath.Join(t.TempDir(), "traffic")
 	profilePath := filepath.Join(directory, "servers.json")
-	path := filepath.Join(directory, "traffic-inspection.jsonl")
-	config, events, switchable := newTrafficInspection(profilePath)
+	path := filepath.Join(directory, "data", "traffic-inspection", "events.jsonl")
+	config, events, switchable := newTrafficInspection("dev", profilePath)
 	if config.Sink == nil {
 		t.Fatal("traffic inspection sink is nil")
 	}

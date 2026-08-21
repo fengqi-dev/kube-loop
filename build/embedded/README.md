@@ -5,9 +5,9 @@ building the desktop application:
 - `kubeloop-supervisor` — stable macOS privileged worker updater
 - Windows uses the same `kubeloop-helper.exe` for service, install, and uninstall operations.
 
-The desktop binary embeds them and materializes copies under
-`~/.kubeloop/helper/resources/` when a packaged `resources\` directory is not
-available (for example during `wails dev`).
+The desktop and TUI binaries embed them and materialize verified copies under
+`~/.kubeloop/cache/components/<version>/<os>-<arch>/` (or the isolated
+`~/.kubeloop-dev` tree for development builds).
 
 The first macOS install authorizes both services. Later exact worker updates are
 streamed to the stable supervisor and do not display another administrator

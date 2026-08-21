@@ -8,6 +8,19 @@ import (
 	"testing"
 )
 
+func TestDefaultPathUsesConfigDirectory(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	path, err := DefaultPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(home, ".kubeloop", "config", "servers.json"); path != want {
+		t.Fatalf("DefaultPath() = %q, want %q", path, want)
+	}
+}
+
 func TestServerProfileStorePersistsOnlyNonSecretState(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "servers.json")
 	store, err := Open(path)

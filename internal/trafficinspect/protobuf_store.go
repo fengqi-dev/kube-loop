@@ -16,6 +16,7 @@ import (
 	"sync"
 
 	"github.com/fengqi-dev/kube-loop/internal/fsatomic"
+	"github.com/fengqi-dev/kube-loop/internal/userpaths"
 )
 
 const (
@@ -44,11 +45,11 @@ func NewProtobufSchemaStore(path string, decoder *ProtobufDecoder) (*ProtobufSch
 		return nil, errors.New("protobuf decoder is unavailable")
 	}
 	if strings.TrimSpace(path) == "" {
-		home, err := os.UserHomeDir()
+		layout, err := userpaths.Default()
 		if err != nil {
-			return nil, errors.New("find user home directory")
+			return nil, err
 		}
-		path = filepath.Join(home, ".kubeloop", "traffic-inspection-protobuf.json")
+		path = filepath.Join(layout.DataDir(), "traffic-inspection", "protobuf.json")
 	}
 	absolute, err := filepath.Abs(path)
 	if err != nil {

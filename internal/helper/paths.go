@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+
+	"github.com/fengqi-dev/kube-loop/internal/userpaths"
 )
 
 func UserHomeDir() (string, error) {
@@ -16,11 +18,11 @@ func UserHomeDir() (string, error) {
 }
 
 func UserDir() (string, error) {
-	home, err := UserHomeDir()
+	layout, err := userpaths.ForVersion(Version)
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, ".kubeloop"), nil
+	return layout.Root(), nil
 }
 
 func TokenPath() (string, error) {
@@ -28,7 +30,11 @@ func TokenPath() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(dir, "helper.token"), nil
+	layout, err := userpaths.New(dir)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(layout.SecretsDir(), "helper.token"), nil
 }
 
 func SystemStateDir() string {

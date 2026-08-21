@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/fengqi-dev/kube-loop/internal/fsatomic"
+	"github.com/fengqi-dev/kube-loop/internal/userpaths"
 	"github.com/zalando/go-keyring"
 )
 
@@ -19,6 +20,7 @@ const (
 	configVersion       = 1
 	maximumConfigBytes  = 64 << 10
 	keyringService      = "KubeLoop"
+	devKeyringService   = "KubeLoop Dev"
 	keyringTokenAccount = "mcp:bearer-token"
 )
 
@@ -71,21 +73,38 @@ type persistedConfig struct {
 type SystemConfigStore struct {
 	path    string
 	secrets SecretBackend
+	service string
 }
 
 func DefaultConfigPath() (string, error) {
-	home, err := os.UserHomeDir()
+	layout, err := userpaths.Default()
 	if err != nil {
-		return "", errors.New("find user home directory")
+		return "", err
 	}
-	return filepath.Join(home, ".kubeloop", "mcp.json"), nil
+	return filepath.Join(layout.ConfigDir(), "mcp.json"), nil
 }
 
 func NewSystemConfigStore(path string) (*SystemConfigStore, error) {
-	return newSystemConfigStore(path, keyringBackend{})
+	return newSystemConfigStoreWithService(path, keyringBackend{}, keyringService)
+}
+
+func NewSystemConfigStoreForVersion(path, version string) (*SystemConfigStore, error) {
+	return newSystemConfigStoreWithService(path, keyringBackend{}, keyringServiceForVersion(version))
+}
+
+func keyringServiceForVersion(version string) string {
+	version = strings.TrimSpace(version)
+	if version == "" || version == "dev" {
+		return devKeyringService
+	}
+	return keyringService
 }
 
 func newSystemConfigStore(path string, secrets SecretBackend) (*SystemConfigStore, error) {
+	return newSystemConfigStoreWithService(path, secrets, keyringService)
+}
+
+func newSystemConfigStoreWithService(path string, secrets SecretBackend, service string) (*SystemConfigStore, error) {
 	if strings.TrimSpace(path) == "" {
 		var err error
 		path, err = DefaultConfigPath()
@@ -100,7 +119,7 @@ func newSystemConfigStore(path string, secrets SecretBackend) (*SystemConfigStor
 	if secrets == nil {
 		return nil, errors.New("MCP secret store is required")
 	}
-	return &SystemConfigStore{path: absolute, secrets: secrets}, nil
+	return &SystemConfigStore{path: absolute, secrets: secrets, service: service}, nil
 }
 
 func (store *SystemConfigStore) Path() string { return store.path }
@@ -119,7 +138,7 @@ func (store *SystemConfigStore) Load() (Config, error) {
 	if !config.TokenEnabled {
 		return config, nil
 	}
-	token, err := store.secrets.Get(keyringService, keyringTokenAccount)
+	token, err := store.secrets.Get(store.service, keyringTokenAccount)
 	if err != nil {
 		if errors.Is(err, keyring.ErrNotFound) {
 			return config, nil
@@ -136,7 +155,7 @@ func (store *SystemConfigStore) Save(config Config) error {
 		return err
 	}
 	if config.Token != "" {
-		if err := store.secrets.Set(keyringService, keyringTokenAccount, config.Token); err != nil {
+		if err := store.secrets.Set(store.service, keyringTokenAccount, config.Token); err != nil {
 			return fmt.Errorf("store MCP token in system keyring: %w", err)
 		}
 	}

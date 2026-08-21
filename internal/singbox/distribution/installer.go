@@ -17,6 +17,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/fengqi-dev/kube-loop/internal/userpaths"
 )
 
 const downloadBaseURL = ProjectURL + "/releases/download/" + Version
@@ -224,11 +226,11 @@ func (i *Installer) baseDir() (string, error) {
 	if i.BaseDir != "" {
 		return i.BaseDir, nil
 	}
-	home, err := os.UserHomeDir()
+	layout, err := userpaths.Default()
 	if err != nil {
-		return "", fmt.Errorf("find user home directory: %w", err)
+		return "", err
 	}
-	return filepath.Join(home, ".kubeloop"), nil
+	return layout.CacheDir(), nil
 }
 
 func (i *Installer) bundledCandidates() []string {

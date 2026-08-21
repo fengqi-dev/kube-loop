@@ -125,7 +125,7 @@ func New(state *State) Model {
 	sp.Spinner = spinner.Dot
 	profiles := state.Snapshot()
 	activeProfile, _ := state.ActiveProfile()
-	workspace := newWorkspaceState()
+	workspace := newWorkspaceState(state.configPath)
 	workspace.resource = resourceProfiles
 	workspace.history = []workspaceResource{resourceProfiles}
 	return Model{
