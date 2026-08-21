@@ -329,10 +329,10 @@ jobs:
           mkdir -p build/bin
           CGO_ENABLED=0 GOOS=linux GOARCH="$(go env GOARCH)" go build \
             -trimpath -ldflags="-s -w" \
-            -o build/bin/kube-loop-gateway \
+            -o build/bin/kubeloop-gateway \
             ./cmd/kubeloop-gateway
           eval "$(minikube docker-env --shell bash)"
-          docker build -t kube-loop-gateway:dev -f build/gateway.e2e.Dockerfile .
+          docker build -t kubeloop-gateway:dev -f build/gateway.e2e.Dockerfile .
 
       - name: Install privileged helper
         shell: bash
@@ -383,7 +383,7 @@ jobs:
         env:
           KUBELOOP_E2E: "1"
           KUBELOOP_E2E_CONTEXT: minikube
-          KUBELOOP_GATEWAY_IMAGE: kube-loop-gateway:dev
+          KUBELOOP_GATEWAY_IMAGE: kubeloop-gateway:dev
           KUBELOOP_SINGBOX_PATH: ${{ github.workspace }}/build/bin/sing-box
           KUBELOOP_E2E_TIMEOUT: 25m
           KUBELOOP_REMOTE_TUN_E2E: "1"

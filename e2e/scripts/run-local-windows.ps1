@@ -23,7 +23,7 @@ $helper = Join-Path $root "build\embedded\kubeloop-helper.exe"
 $cache = Join-Path $root ".gocache-e2e"
 
 if ([string]::IsNullOrWhiteSpace($GatewayImage)) {
-    $GatewayImage = "kube-loop-gateway:e2e-local-$PID"
+    $GatewayImage = "kubeloop-gateway:e2e-local-$PID"
 }
 
 $mainPackages = @(
@@ -188,7 +188,7 @@ to record the expected DNS failures.
                 "-trimpath",
                 "-ldflags=-s -w",
                 "-o",
-                "build/bin/kube-loop-gateway",
+                "build/bin/kubeloop-gateway",
                 "./cmd/kubeloop-gateway"
             )
         }
