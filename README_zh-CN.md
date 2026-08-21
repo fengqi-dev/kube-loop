@@ -41,7 +41,7 @@ KubeLoop 是面向 Kubernetes 开发的桌面网络工具。它将本地工作�
 ```bash
 helm upgrade --install kubeloop \
   oci://ghcr.io/fengqi-dev/kube-loop/charts/kubeloop \
-  --version 2.1.2 \
+  --version 2.1.3 \
   --namespace kubeloop-system \
   --create-namespace \
   --set publicURL=http://kubeloop.example.com \
@@ -83,7 +83,7 @@ curl -fsSL https://raw.githubusercontent.com/fengqi-dev/kube-loop/main/scripts/i
 指定版本或 Linux 包格式：
 
 ```bash
-VERSION=v2.1.2 PACKAGE=deb \
+VERSION=v2.1.3 PACKAGE=deb \
   bash -c "$(curl -fsSL https://raw.githubusercontent.com/fengqi-dev/kube-loop/main/scripts/install.sh)"
 ```
 
@@ -123,7 +123,7 @@ Windows：
 irm https://raw.githubusercontent.com/fengqi-dev/kube-loop/main/scripts/install-tui.ps1 | iex
 ```
 
-设置 `VERSION=v2.1.2` 可安装指定版本。安装脚本会选择匹配平台的
+设置 `VERSION=v2.1.3` 可安装指定版本。安装脚本会选择匹配平台的
 `kubeloop-tui-<version>-<os>-<arch>.tar.gz`，使用 Release 中的 `SHA256SUMS`
 完成校验后再安装 `kubeloop`（Windows 为 `kubeloop.exe`）。
 
