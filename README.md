@@ -90,6 +90,9 @@ VERSION=v2.1.2 PACKAGE=deb \
 ```
 
 `PACKAGE` may be `deb`, `rpm`, or `tarball`.
+On Debian/Ubuntu, the installer waits up to 300 seconds for unattended upgrades
+or another package manager to release the dpkg lock. Override this with
+`APT_LOCK_TIMEOUT` when needed; do not remove dpkg lock files manually.
 
 Homebrew is also supported:
 
