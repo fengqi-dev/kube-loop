@@ -45,7 +45,7 @@ func installCurrentHelper(
 	statusCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	status, statusErr := client.Status(statusCtx)
 	cancel()
-	if sameInstallPath(singBox, helper.CoreInstallPath()) &&
+	if installedCoreMatches(singBox, helper.CoreInstallPath()) &&
 		canUpdateWorkerThroughSupervisor(status, statusErr, config.Channel, installedSupervisorSHA, supervisorSHA) {
 		if status.Worker.SHA256 == sourceSHA256 && status.Worker.Version == helper.Version &&
 			status.Worker.Protocol == helperspec.Version && status.Worker.CoreReady {
@@ -72,9 +72,16 @@ func installCurrentHelper(
 	}
 	defer cleanup()
 	return ElevateSupervisorInstall(
-		ctx, supervisorSource, supervisorSHA, source, sourceSHA256,
+		ctx, supervisorSource, supervisorSHA, source, sourceSHA256, helper.Version,
 		token, uid, home, singBox, certificatePath,
 	)
+}
+
+func installedCoreMatches(source, installed string) bool {
+	// The component cache is only a distribution source, so its path must differ
+	// from the protected system copy even when both contain the same core.
+	needsUpdate, err := helperNeedsBinaryUpdate(source, installed)
+	return err == nil && !needsUpdate
 }
 
 func writeTemporaryTrustedCertificate(content []byte) (string, func(), error) {

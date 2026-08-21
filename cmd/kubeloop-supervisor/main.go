@@ -65,6 +65,7 @@ func runInstall(args []string) error {
 	sha := flags.String("sha256", "", "supervisor SHA-256")
 	worker := flags.String("worker", "", "worker source")
 	workerSHA := flags.String("worker-sha256", "", "worker SHA-256")
+	workerVersion := flags.String("worker-version", "", "worker version")
 	token := flags.String("token", "", "IPC token")
 	uid := flags.Int("uid", -1, "authorized UID")
 	home := flags.String("home", "", "authorized home")
@@ -72,8 +73,8 @@ func runInstall(args []string) error {
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	if flags.NArg() != 0 || *source == "" || *sha == "" || *worker == "" || *workerSHA == "" || *token == "" || *uid < 0 || *home == "" || *singBox == "" {
-		return fmt.Errorf("install requires source, sha256, worker, worker-sha256, token, uid, home, and sing-box")
+	if flags.NArg() != 0 || *source == "" || *sha == "" || *worker == "" || *workerSHA == "" || *workerVersion == "" || *token == "" || *uid < 0 || *home == "" || *singBox == "" {
+		return fmt.Errorf("install requires source, sha256, worker, worker-sha256, worker-version, token, uid, home, and sing-box")
 	}
 	actualWorkerSHA, err := hashFile(*worker)
 	if err != nil {
@@ -82,7 +83,7 @@ func runInstall(args []string) error {
 	if actualWorkerSHA != *workerSHA {
 		return fmt.Errorf("worker SHA-256 mismatch")
 	}
-	if err := helperinstall.InstallFromCLI(*worker, *token, *uid, helper.Version, *home, "", *singBox); err != nil {
+	if err := helperinstall.InstallFromCLI(*worker, *token, *uid, *workerVersion, *home, "", *singBox); err != nil {
 		return err
 	}
 	return supervisor.Install(*source, *sha, *token, *uid)
