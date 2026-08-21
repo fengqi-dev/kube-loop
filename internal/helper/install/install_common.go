@@ -157,13 +157,14 @@ func InstallFromCLI(source, token string, uid int, version, homeDir, ownerSID, s
 	return nil
 }
 
-const installReadyTimeout = 20 * time.Second
+// launchd can throttle a replaced service for longer than its ordinary startup
+// time. Keep the first-install wait bounded but allow the service to outlive a
+// transient launchd delay instead of reporting a false installation failure.
+const installReadyTimeout = 90 * time.Second
 
 func waitForInstalledHelperReady(token, version string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), installReadyTimeout)
-	defer cancel()
 	client := &helper.Client{Token: token}
-	return waitForHelperReady(ctx, installReadyTimeout, 100*time.Millisecond, func(pingCtx context.Context) (helperprotocol.Response, error) {
+	return waitForHelperReady(context.Background(), installReadyTimeout, 100*time.Millisecond, func(pingCtx context.Context) (helperprotocol.Response, error) {
 		requestCtx, requestCancel := context.WithTimeout(pingCtx, 2*time.Second)
 		defer requestCancel()
 		response, err := client.Ping(requestCtx)

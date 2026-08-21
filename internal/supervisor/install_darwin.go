@@ -36,12 +36,12 @@ func Install(source, expectedSHA256, token string, uid int) error {
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
 <key>Label</key><string>%s</string>
-<key>ProgramArguments</key><array><string>%s</string><string>run</string></array>
+<key>ProgramArguments</key><array><string>%s</string><string>run</string><string>--channel</string><string>%s</string></array>
 <key>RunAtLoad</key><true/><key>KeepAlive</key><true/>
 <key>StandardOutPath</key><string>%s</string>
 <key>StandardErrorPath</key><string>%s</string>
 </dict></plist>
-`, config.ServiceLabel, config.BinaryPath, config.LogPath, config.LogPath)
+`, config.ServiceLabel, config.BinaryPath, config.Channel, config.LogPath, config.LogPath)
 	if err := os.WriteFile(config.PlistPath(), []byte(plist), 0o644); err != nil {
 		return fmt.Errorf("write supervisor launchd plist: %w", err)
 	}

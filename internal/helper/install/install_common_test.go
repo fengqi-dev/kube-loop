@@ -5,7 +5,15 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+	"time"
 )
+
+func TestInstallReadyTimeoutAllowsLaunchdThrottle(t *testing.T) {
+	t.Parallel()
+	if installReadyTimeout < time.Minute || installReadyTimeout > 2*time.Minute {
+		t.Fatalf("installReadyTimeout = %s, want bounded launchd startup allowance", installReadyTimeout)
+	}
+}
 
 func TestFileRollbackRestoresExistingFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "helper")

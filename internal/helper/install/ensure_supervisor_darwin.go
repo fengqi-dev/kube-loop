@@ -72,7 +72,7 @@ func installCurrentHelper(
 	}
 	defer cleanup()
 	return ElevateSupervisorInstall(
-		ctx, supervisorSource, supervisorSHA, source, sourceSHA256, helper.Version,
+		ctx, supervisorSource, supervisorSHA, source, sourceSHA256, helper.Version, config.Channel,
 		token, uid, home, singBox, certificatePath,
 	)
 }

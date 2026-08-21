@@ -73,6 +73,7 @@ func main() {
 		output := filepath.Join(embeddedDir, name)
 		args := []string{
 			"build",
+			"-buildvcs=false",
 			"-trimpath",
 			"-ldflags", "-s -w -X main.version=" + target.version,
 			"-o", output,

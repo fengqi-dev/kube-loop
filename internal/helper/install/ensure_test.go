@@ -239,7 +239,7 @@ func TestBundledToolCandidatesExcludeInstalledHelperOnUnix(t *testing.T) {
 	}
 }
 
-func TestLocateBundledToolPrefersEmbeddedHelperOnUnix(t *testing.T) {
+func TestLocateBundledToolReplacesStaleSupervisorCacheOnUnix(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Windows packages intentionally use on-disk application resources")
 	}
@@ -247,19 +247,24 @@ func TestLocateBundledToolPrefersEmbeddedHelperOnUnix(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
-	name := helperBinaryName(helperServiceName)
-	SetBundledFile(name, []byte("current embedded helper"))
+	name := helperBinaryName(supervisorServiceName)
+	SetBundledFile(name, []byte("stale embedded supervisor"))
+	stalePath, ok, err := materializeBundledFile(name)
+	if err != nil || !ok {
+		t.Fatalf("materialize stale bundled supervisor: path=%q ok=%v err=%v", stalePath, ok, err)
+	}
+	SetBundledFile(name, []byte("current embedded supervisor"))
 	t.Cleanup(func() { SetBundledFile(name, nil) })
 
-	path, err := locateBundledTool(helperServiceName)
+	path, err := locateBundledTool(supervisorServiceName)
 	if err != nil {
-		t.Fatalf("locate bundled helper: %v", err)
+		t.Fatalf("locate bundled supervisor: %v", err)
 	}
 	want := filepath.Join(home, ".kubeloop-dev", "cache", "components", "dev", runtime.GOOS+"-"+runtime.GOARCH, name)
 	if path != want {
-		t.Fatalf("bundled helper path = %q, want materialized path %q", path, want)
+		t.Fatalf("bundled supervisor path = %q, want materialized path %q", path, want)
 	}
-	assertFileContent(t, path, "current embedded helper")
+	assertFileContent(t, path, "current embedded supervisor")
 }
 
 func assertFileContent(t *testing.T, path, want string) {
