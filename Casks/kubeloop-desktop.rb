@@ -1,9 +1,9 @@
 cask "kubeloop-desktop" do
   arch arm: "arm64", intel: "amd64"
 
-  version "2.1.2"
-  sha256 arm:   "5fa86c06286457f98c57250682ed6fe238c2772995dc117ca014b586dc1359bf",
-         intel: "4157dab2b12fec6536177577952b4deb913106fbcdbfbf82f5e20d5f56adda20"
+  version "2.1.3"
+  sha256 arm:   "d2c04743af08e3dbf321dd047472c7d7214e236c3490c3ecefdf21df39726c4b",
+         intel: "bd8a2669345884fc6732b9e4145cce27d3e5844acd9186e66d0d934cd5aac1d2"
 
   url "https://github.com/fengqi-dev/kube-loop/releases/download/v#{version}/kubeloop-desktop-#{version}-darwin-#{arch}.dmg"
   name "KubeLoop"
