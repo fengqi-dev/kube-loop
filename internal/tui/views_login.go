@@ -39,9 +39,13 @@ func (m Model) updateLogin(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		profile := m.profiles.Profiles[m.loginCursor]
 		m.activeProfile = profile
-		_ = m.state.profiles.SetActive(profile.ID)
+		if err := m.state.profiles.SetActive(profile.ID); err != nil {
+			m.err, m.status = err.Error(), ""
+			return m, nil
+		}
 		m.profiles = m.state.Snapshot()
-		m.status = fmt.Sprintf("Selected: %s — press 'l' to login", profile.DisplayName)
+		m.loading, m.profileSelectionPending = true, true
+		m.status = fmt.Sprintf("Opening: %s", firstNonEmpty(profile.DisplayName, profile.ID))
 		return m, loadAuthStatus(m)
 
 	case "a", "n":
@@ -94,6 +98,9 @@ func (m *Model) beginLogout() tea.Cmd {
 
 // updateAddProfile handles key presses in the add profile form.
 func (m Model) updateAddProfile(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.loading && msg.String() != "esc" {
+		return m, nil
+	}
 	switch msg.String() {
 	case "enter":
 		m.loginURL = strings.TrimSpace(m.loginURL)
@@ -102,6 +109,7 @@ func (m Model) updateAddProfile(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.loading = true
+		m.err, m.status = "", "Discovering server..."
 		return m, tea.Batch(m.spinner.Tick, m.saveProfile())
 
 	case "esc":
