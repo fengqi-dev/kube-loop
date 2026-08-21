@@ -28,7 +28,7 @@ func TestInventoryWatchAuthenticatesAndValidatesSnapshotBinding(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer checkTestClose(t, connection.CloseNow)
+		defer func() { _ = connection.CloseNow() }()
 		encoded, _ := json.Marshal(InventorySnapshot{
 			SchemaVersion: 1, Type: "snapshot", Resource: InventoryPods, Namespace: "development",
 			Sequence: 1, GeneratedAt: now, Pods: []Pod{{Name: "api-0", Namespace: "development"}},

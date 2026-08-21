@@ -696,8 +696,7 @@ func (manager *Manager) emit(profileID string, status Status, err error) {
 }
 
 func recoveryFailureAction(err error) (string, bool) {
-	var apiError *remote.APIError
-	if errors.As(err, &apiError) {
+	if apiError, ok := errors.AsType[*remote.APIError](err); ok {
 		switch apiError.Status {
 		case 401:
 			return reasonAuthenticationRequired, false
@@ -754,8 +753,7 @@ func validateRecoverySession(previous, current remote.Session) error {
 }
 
 func unrecoverableSessionError(err error) bool {
-	var apiError *remote.APIError
-	if errors.As(err, &apiError) {
+	if apiError, ok := errors.AsType[*remote.APIError](err); ok {
 		return apiError.Status == 401 || apiError.Status == 403 || apiError.Status == 404
 	}
 	return false

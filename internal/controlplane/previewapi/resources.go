@@ -6,7 +6,6 @@ import (
 	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/servicebinding"
@@ -81,11 +80,9 @@ func (manager *TrafficBindingResourceManager) Create(
 		)
 	}
 	return &corev1.Service{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      active.Status.ServiceName,
-			Namespace: snapshot.Namespace,
-		},
-		Spec: corev1.ServiceSpec{ClusterIP: active.Status.ServiceClusterIP},
+		Name:      active.Status.ServiceName,
+		Namespace: snapshot.Namespace,
+		Spec:      corev1.ServiceSpec{ClusterIP: active.Status.ServiceClusterIP},
 	}, nil
 }
 

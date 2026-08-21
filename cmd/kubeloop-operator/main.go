@@ -176,10 +176,9 @@ func main() {
 	}
 
 	if err := (&controller.TrafficBindingReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-		// The reconciler still accepts record.EventRecorder, not the newer events.EventRecorder.
-		Recorder: mgr.GetEventRecorderFor("trafficbinding-controller"),
+		Client:   mgr.GetClient(),
+		Scheme:   mgr.GetScheme(),
+		Recorder: mgr.GetEventRecorder("trafficbinding-controller"),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "trafficbinding")
 		os.Exit(1)

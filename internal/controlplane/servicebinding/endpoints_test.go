@@ -14,7 +14,7 @@ import (
 func TestCaptureServiceIntercept(t *testing.T) {
 	client := fake.NewSimpleClientset(
 		&corev1.Service{
-			ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "default"},
+			Name: "api", Namespace: "default",
 			Spec: corev1.ServiceSpec{
 				ClusterIP: "10.96.10.20",
 				Selector:  map[string]string{"app": "api"},
@@ -24,10 +24,8 @@ func TestCaptureServiceIntercept(t *testing.T) {
 			},
 		},
 		&discoveryv1.EndpointSlice{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "api-xyz", Namespace: "default",
-				Labels: map[string]string{interceptServiceNameLabel: "api"},
-			},
+			Name: "api-xyz", Namespace: "default",
+			Labels:      map[string]string{interceptServiceNameLabel: "api"},
 			AddressType: discoveryv1.AddressTypeIPv4,
 			Endpoints:   []discoveryv1.Endpoint{{Addresses: []string{"10.244.0.5"}}},
 			Ports: []discoveryv1.EndpointPort{{
@@ -35,7 +33,7 @@ func TestCaptureServiceIntercept(t *testing.T) {
 			}},
 		},
 		&corev1.Endpoints{
-			ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "default"},
+			Name: "api", Namespace: "default",
 			Subsets: []corev1.EndpointSubset{{
 				Addresses: []corev1.EndpointAddress{{IP: "10.244.0.5"}},
 				Ports: []corev1.EndpointPort{{
@@ -89,14 +87,14 @@ func TestCaptureServiceIntercept(t *testing.T) {
 func TestCaptureServiceInterceptSupportsLegacyEndpoints(t *testing.T) {
 	client := fake.NewSimpleClientset(
 		&corev1.Service{
-			ObjectMeta: metav1.ObjectMeta{Name: "legacy", Namespace: "default"},
+			Name: "legacy", Namespace: "default",
 			Spec: corev1.ServiceSpec{
 				ClusterIP: "10.96.10.30", Selector: map[string]string{"app": "legacy"},
 				Ports: []corev1.ServicePort{{Name: "http", Port: 80, Protocol: corev1.ProtocolTCP}},
 			},
 		},
 		&corev1.Endpoints{
-			ObjectMeta: metav1.ObjectMeta{Name: "legacy", Namespace: "default"},
+			Name: "legacy", Namespace: "default",
 			Subsets: []corev1.EndpointSubset{{
 				Addresses: []corev1.EndpointAddress{{IP: "10.244.0.8"}},
 			}},

@@ -136,8 +136,7 @@ func mapWriteError(err error) error {
 }
 
 func isRetryableTransactionError(err error) bool {
-	var postgresError *pgconn.PgError
-	if errors.As(err, &postgresError) {
+	if postgresError, ok := errors.AsType[*pgconn.PgError](err); ok {
 		return postgresError.Code == "40001" || postgresError.Code == "40P01"
 	}
 	var mysqlError *mysqldriver.MySQLError

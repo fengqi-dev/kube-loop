@@ -11,10 +11,9 @@ import (
 	discoveryv1 "k8s.io/api/discovery/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apiMeta "k8s.io/apimachinery/pkg/api/meta"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
-	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/tools/events"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -29,7 +28,7 @@ var _ = Describe("TrafficBinding Controller", func() {
 
 	BeforeEach(func() {
 		reconciler = &TrafficBindingReconciler{
-			Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: record.NewFakeRecorder(64),
+			Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: events.NewFakeRecorder(64),
 		}
 	})
 
@@ -72,7 +71,7 @@ var _ = Describe("TrafficBinding Controller", func() {
 			serviceName := "backend-" + suffix
 			bindingName := "binding-" + suffix
 			service := &corev1.Service{
-				ObjectMeta: metav1.ObjectMeta{Name: serviceName, Namespace: testNamespace},
+				Name: serviceName, Namespace: testNamespace,
 				Spec: corev1.ServiceSpec{
 					Selector: map[string]string{"app": suffix},
 					Ports:    []corev1.ServicePort{{Name: "http", Port: 8080, Protocol: corev1.ProtocolTCP}},
@@ -81,10 +80,8 @@ var _ = Describe("TrafficBinding Controller", func() {
 			Expect(k8sClient.Create(ctx, service)).To(Succeed())
 			DeferCleanup(func() { _ = k8sClient.Delete(context.Background(), service) })
 			originalSlice := &discoveryv1.EndpointSlice{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "original-" + suffix, Namespace: testNamespace,
-					Labels: map[string]string{serviceNameLabel: serviceName},
-				},
+				Name: "original-" + suffix, Namespace: testNamespace,
+				Labels:      map[string]string{serviceNameLabel: serviceName},
 				AddressType: discoveryv1.AddressTypeIPv4,
 				Endpoints:   []discoveryv1.Endpoint{{Addresses: []string{"10.244.0.9"}}},
 				Ports: []discoveryv1.EndpointPort{
@@ -93,7 +90,7 @@ var _ = Describe("TrafficBinding Controller", func() {
 			}
 			Expect(k8sClient.Create(ctx, originalSlice)).To(Succeed())
 			legacy := &corev1.Endpoints{
-				ObjectMeta: metav1.ObjectMeta{Name: serviceName, Namespace: testNamespace},
+				Name: serviceName, Namespace: testNamespace,
 				Subsets: []corev1.EndpointSubset{{
 					Addresses: []corev1.EndpointAddress{{IP: "10.244.0.9"}},
 					Ports:     []corev1.EndpointPort{{Name: "http", Port: 8080, Protocol: corev1.ProtocolTCP}},
@@ -148,7 +145,7 @@ var _ = Describe("TrafficBinding Controller", func() {
 
 	It("validates a PortForward target without creating Kubernetes resources", func(ctx SpecContext) {
 		pod := &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{Name: "forward-target", Namespace: testNamespace},
+			Name: "forward-target", Namespace: testNamespace,
 			Spec: corev1.PodSpec{
 				Containers: []corev1.Container{{Name: "app", Image: "example.invalid/app:test"}},
 			},
@@ -169,7 +166,7 @@ var _ = Describe("TrafficBinding Controller", func() {
 
 	It("completes the Controller TrafficBinding activation and deletion contract", func(ctx SpecContext) {
 		pod := &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{Name: "controller-contract-target", Namespace: testNamespace},
+			Name: "controller-contract-target", Namespace: testNamespace,
 			Spec: corev1.PodSpec{
 				Containers: []corev1.Container{{Name: "app", Image: "example.invalid/app:test"}},
 			},
@@ -238,7 +235,7 @@ var _ = Describe("TrafficBinding Controller", func() {
 
 func previewBinding(name, service string) *trafficv1alpha1.TrafficBinding {
 	return &trafficv1alpha1.TrafficBinding{
-		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testNamespace},
+		Name: name, Namespace: testNamespace,
 		Spec: trafficv1alpha1.TrafficBindingSpec{
 			Mode:      trafficv1alpha1.TrafficBindingModePreview,
 			SessionID: "11111111-1111-4111-8111-111111111111",
@@ -265,7 +262,7 @@ func previewBinding(name, service string) *trafficv1alpha1.TrafficBinding {
 
 func interceptBinding(name, service string, mode trafficv1alpha1.TrafficBindingMode) *trafficv1alpha1.TrafficBinding {
 	return &trafficv1alpha1.TrafficBinding{
-		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testNamespace},
+		Name: name, Namespace: testNamespace,
 		Spec: trafficv1alpha1.TrafficBindingSpec{
 			Mode:      mode,
 			SessionID: "33333333-3333-4333-8333-333333333333",
@@ -286,7 +283,7 @@ func interceptBinding(name, service string, mode trafficv1alpha1.TrafficBindingM
 
 func portForwardBinding(name, pod string) *trafficv1alpha1.TrafficBinding {
 	return &trafficv1alpha1.TrafficBinding{
-		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testNamespace},
+		Name: name, Namespace: testNamespace,
 		Spec: trafficv1alpha1.TrafficBindingSpec{
 			Mode:      trafficv1alpha1.TrafficBindingModePortForward,
 			SessionID: "55555555-5555-4555-8555-555555555555",

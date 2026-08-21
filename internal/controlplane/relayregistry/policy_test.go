@@ -42,18 +42,15 @@ func TestEndpointHostPolicyAcceptsExactAndSubdomainOnly(t *testing.T) {
 
 func TestKubernetesTopologyResolverBindsUIDServiceAccountAndNode(t *testing.T) {
 	client := fake.NewSimpleClientset([]runtime.Object{
-		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+		&corev1.Pod{
 			Name: "gateway-1", Namespace: "kubeloop", UID: types.UID("pod-uid"),
 			Labels: map[string]string{
 				"app.kubernetes.io/component": "data-plane",
-			},
-		}, Spec: corev1.PodSpec{ServiceAccountName: "gateway", NodeName: "node-a"}},
+			}, Spec: corev1.PodSpec{ServiceAccountName: "gateway", NodeName: "node-a"}},
 		&corev1.Node{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "node-a",
-				Labels: map[string]string{
-					TopologyRegion: "cn", TopologyZone: "cn-a", TopologyHostname: "node-a",
-				},
+			Name: "node-a",
+			Labels: map[string]string{
+				TopologyRegion: "cn", TopologyZone: "cn-a", TopologyHostname: "node-a",
 			},
 		},
 	}...)
@@ -80,11 +77,9 @@ func TestKubernetesTopologyResolverBindsUIDServiceAccountAndNode(t *testing.T) {
 		t.Fatal("mismatched ServiceAccount accepted")
 	}
 	controlPlanePod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "controlPlane",
-			Namespace: "kubeloop",
-		},
-		Spec: corev1.PodSpec{NodeName: "node-a"},
+		Name:      "controlPlane",
+		Namespace: "kubeloop",
+		Spec:      corev1.PodSpec{NodeName: "node-a"},
 	}
 	if _, err := client.CoreV1().
 		Pods("kubeloop").

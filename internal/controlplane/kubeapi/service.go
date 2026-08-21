@@ -653,7 +653,6 @@ func podFromKubernetes(pod *corev1.Pod) podDocument {
 		Name: pod.Name, Namespace: pod.Namespace, Phase: string(pod.Status.Phase),
 		PodIP: pod.Status.PodIP, NodeName: pod.Spec.NodeName, Ready: ready,
 		ReadyContainers: readyContainers,
-		//nolint:gosec // totalContainers is explicitly bounded by math.MaxInt32 above.
 		TotalContainers: int32(totalContainers), Restarts: restarts,
 		AgeSeconds: resourceAgeSeconds(
 			pod.CreationTimestamp,

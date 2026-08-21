@@ -12,7 +12,6 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
 
@@ -34,10 +33,8 @@ func (provider inventoryProvider) ClientFor(
 func TestInventoryWatchHTTPStreamsAuthorizedResyncSnapshots(t *testing.T) {
 	client := fake.NewSimpleClientset(
 		&corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "api-0",
-				Namespace: "development",
-			},
+			Name:      "api-0",
+			Namespace: "development",
 		},
 	)
 	policy := authorization.NewAuthenticated()

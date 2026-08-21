@@ -113,7 +113,7 @@ func desiredPreviewService(binding *trafficv1alpha1.TrafficBinding) *corev1.Serv
 		})
 	}
 	service := &corev1.Service{
-		ObjectMeta: metav1.ObjectMeta{Name: binding.Spec.Preview.ServiceName, Namespace: binding.Namespace},
+		Name: binding.Spec.Preview.ServiceName, Namespace: binding.Namespace,
 		Spec: corev1.ServiceSpec{
 			Type:  corev1.ServiceTypeClusterIP,
 			Ports: ports,
@@ -238,7 +238,7 @@ func (r *TrafficBindingReconciler) reconcileIntercept(
 			return err
 		}
 	}
-	legacy := &corev1.Endpoints{ObjectMeta: metav1.ObjectMeta{Name: service.Name, Namespace: binding.Namespace}}
+	legacy := &corev1.Endpoints{Name: service.Name, Namespace: binding.Namespace}
 	if err := r.Delete(ctx, legacy); err != nil && !apierrors.IsNotFound(err) {
 		return err
 	}
@@ -315,10 +315,8 @@ func desiredRelaySlice(
 		addressType = discoveryv1.AddressTypeIPv6
 	}
 	slice := &discoveryv1.EndpointSlice{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: managedEndpointSliceName(binding), Namespace: binding.Namespace,
-			Labels: map[string]string{serviceNameLabel: serviceName},
-		},
+		Name: managedEndpointSliceName(binding), Namespace: binding.Namespace,
+		Labels:      map[string]string{serviceNameLabel: serviceName},
 		AddressType: addressType,
 		Endpoints: []discoveryv1.Endpoint{{
 			Addresses:  []string{binding.Spec.Relay.Address},
@@ -425,13 +423,11 @@ func (r *TrafficBindingReconciler) restoreEndpointSlice(
 	snapshot *trafficv1alpha1.EndpointSliceSnapshot,
 ) error {
 	desired := &discoveryv1.EndpointSlice{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: snapshot.Name, Namespace: namespace,
-			Labels: maps.Clone(snapshot.Labels), Annotations: maps.Clone(snapshot.Annotations),
-			OwnerReferences: append([]metav1.OwnerReference(nil), snapshot.OwnerReferences...),
-		},
-		AddressType: snapshot.AddressType,
-		Endpoints:   cloneDiscoveryEndpoints(snapshot.Endpoints), Ports: cloneDiscoveryPorts(snapshot.Ports),
+		Name: snapshot.Name, Namespace: namespace,
+		Labels: maps.Clone(snapshot.Labels), Annotations: maps.Clone(snapshot.Annotations),
+		OwnerReferences: append([]metav1.OwnerReference(nil), snapshot.OwnerReferences...),
+		AddressType:     snapshot.AddressType,
+		Endpoints:       cloneDiscoveryEndpoints(snapshot.Endpoints), Ports: cloneDiscoveryPorts(snapshot.Ports),
 	}
 	current := &discoveryv1.EndpointSlice{}
 	key := types.NamespacedName{Namespace: namespace, Name: snapshot.Name}
@@ -455,8 +451,8 @@ func (r *TrafficBindingReconciler) restoreEndpoints(
 	snapshot *trafficv1alpha1.ServiceSnapshot,
 ) error {
 	desired := &corev1.Endpoints{
-		ObjectMeta: metav1.ObjectMeta{Name: snapshot.ServiceName, Namespace: binding.Namespace},
-		Subsets:    cloneEndpointSubsets(snapshot.EndpointSubsets),
+		Name: snapshot.ServiceName, Namespace: binding.Namespace,
+		Subsets: cloneEndpointSubsets(snapshot.EndpointSubsets),
 	}
 	current := &corev1.Endpoints{}
 	key := types.NamespacedName{Namespace: binding.Namespace, Name: snapshot.ServiceName}

@@ -127,30 +127,30 @@ type AllocationResponse struct {
 
 func NewRegistrationRequest() RegistrationRequest {
 	return RegistrationRequest{
-		Envelope:          Envelope{APIVersion: APIVersion, Kind: KindRegistrationRequest},
+		APIVersion: APIVersion, Kind: KindRegistrationRequest,
 		SupportedVersions: []string{APIVersion},
 	}
 }
 
 func NewRegistrationResponse() RegistrationResponse {
 	return RegistrationResponse{
-		Envelope:        Envelope{APIVersion: APIVersion, Kind: KindRegistrationResponse},
+		APIVersion: APIVersion, Kind: KindRegistrationResponse,
 		SelectedVersion: APIVersion,
 	}
 }
 
 func NewHeartbeatRequest() HeartbeatRequest {
-	return HeartbeatRequest{Envelope: Envelope{APIVersion: APIVersion, Kind: KindHeartbeatRequest}}
+	return HeartbeatRequest{APIVersion: APIVersion, Kind: KindHeartbeatRequest}
 }
 
 func NewHeartbeatResponse() HeartbeatResponse {
-	return HeartbeatResponse{Envelope: Envelope{APIVersion: APIVersion, Kind: KindHeartbeatResponse}}
+	return HeartbeatResponse{APIVersion: APIVersion, Kind: KindHeartbeatResponse}
 }
 
 func NewAllocationRequest() AllocationRequest {
-	return AllocationRequest{Envelope: Envelope{APIVersion: APIVersion, Kind: KindAllocationRequest}}
+	return AllocationRequest{APIVersion: APIVersion, Kind: KindAllocationRequest}
 }
 
 func NewAllocationResponse() AllocationResponse {
-	return AllocationResponse{Envelope: Envelope{APIVersion: APIVersion, Kind: KindAllocationResponse}}
+	return AllocationResponse{APIVersion: APIVersion, Kind: KindAllocationResponse}
 }
