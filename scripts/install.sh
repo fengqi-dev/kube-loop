@@ -5,6 +5,7 @@
 #   curl -fsSL https://raw.githubusercontent.com/fengqi-dev/kube-loop/main/scripts/install.sh | bash
 #   VERSION=v1.1.0 ./scripts/install.sh
 #   PACKAGE=deb|rpm|tarball ./scripts/install.sh   # Linux only
+#   APT_LOCK_TIMEOUT=600 ./scripts/install.sh      # Debian/Ubuntu only
 #
 # macOS: downloads the .dmg into DEST (default: $PWD)
 # Linux: prefers .deb/.rpm when available, otherwise extracts the .tar.gz
@@ -14,6 +15,7 @@ REPO="${REPO:-fengqi-dev/kube-loop}"
 DEST="${DEST:-$PWD}"
 TAG="${VERSION:-${TAG:-}}"
 PACKAGE="${PACKAGE:-auto}"
+APT_LOCK_TIMEOUT="${APT_LOCK_TIMEOUT:-300}"
 
 os="$(uname -s | tr '[:upper:]' '[:lower:]')"
 case "${os}" in
@@ -120,11 +122,18 @@ install_deb() {
     echo "apt-get is required to install ${asset} and resolve its dependencies" >&2
     exit 1
   fi
+  if [[ ! "${APT_LOCK_TIMEOUT}" =~ ^[0-9]+$ ]]; then
+    echo "APT_LOCK_TIMEOUT must be a non-negative number of seconds (got ${APT_LOCK_TIMEOUT})" >&2
+    exit 1
+  fi
+  echo "Waiting up to ${APT_LOCK_TIMEOUT}s for other apt/dpkg operations to finish..."
   if command -v sudo >/dev/null 2>&1 && [[ "$(id -u)" -ne 0 ]]; then
     sudo env DEBIAN_FRONTEND=noninteractive apt-get \
+      -o "DPkg::Lock::Timeout=${APT_LOCK_TIMEOUT}" \
       install --yes --no-install-recommends "${out}"
   else
     env DEBIAN_FRONTEND=noninteractive apt-get \
+      -o "DPkg::Lock::Timeout=${APT_LOCK_TIMEOUT}" \
       install --yes --no-install-recommends "${out}"
   fi
   echo "Installed kubeloop from ${asset}"

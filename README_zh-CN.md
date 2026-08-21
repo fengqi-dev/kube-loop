@@ -88,6 +88,8 @@ VERSION=v2.1.2 PACKAGE=deb \
 ```
 
 `PACKAGE` 可选 `deb`、`rpm` 或 `tarball`。
+在 Debian/Ubuntu 上，安装脚本默认等待 unattended upgrades 或其他包管理器最多
+300 秒以释放 dpkg 锁；可通过 `APT_LOCK_TIMEOUT` 调整。不要手动删除 dpkg lock 文件。
 
 也可以通过 Homebrew 安装：
 
