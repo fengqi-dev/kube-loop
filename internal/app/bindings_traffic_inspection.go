@@ -5,8 +5,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/fengqi-dev/kube-loop/internal/trafficinspect"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
+
+	"github.com/fengqi-dev/kube-loop/internal/trafficinspect"
 )
 
 const (
@@ -49,7 +50,9 @@ func (a *App) ImportTrafficInspectionProtoDirectory() (TrafficInspectionSettings
 	if a.trafficInspectionProtobuf == nil {
 		return current, errors.New("protobuf schema store is unavailable")
 	}
-	directory, err := runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{Title: "Select protobuf source directory"})
+	directory, err := runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{
+		Title: "Select protobuf source directory",
+	})
 	if err != nil {
 		return current, fmt.Errorf("select protobuf source directory: %w", err)
 	}
@@ -73,7 +76,9 @@ func (a *App) SetTrafficInspectionEnabled(enabled bool) (TrafficInspectionSettin
 		return a.GetTrafficInspectionSettings(), nil
 	}
 	if a.trafficInspectionReady == nil || !a.trafficInspectionReady() {
-		return a.GetTrafficInspectionSettings(), errors.New("virtual network service must be running to change traffic inspection")
+		return a.GetTrafficInspectionSettings(), errors.New(
+			"virtual network service must be running to change traffic inspection",
+		)
 	}
 	if enabled {
 		if err := a.ensureTrafficInspectionTrust(a.context()); err != nil {

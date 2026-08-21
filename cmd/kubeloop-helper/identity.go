@@ -3,8 +3,9 @@ package main
 import (
 	"encoding/json"
 
-	helperprotocol "github.com/fengqi-dev/kube-loop/internal/protocol/helper"
 	"github.com/spf13/cobra"
+
+	helperprotocol "github.com/fengqi-dev/kube-loop/internal/protocol/helper"
 )
 
 type helperIdentity struct {

@@ -68,7 +68,9 @@ func (f *routedForwarder) serve() {
 }
 
 func (f *routedForwarder) forward(client net.Conn) {
-	defer client.Close()
+	defer func() {
+		_ = client.Close() // Closing only releases the accepted connection; no caller can act on the result.
+	}()
 	target, err := f.dialer.DialContext(f.ctx, "tcp", f.target)
 	if err != nil {
 		return
@@ -77,7 +79,9 @@ func (f *routedForwarder) forward(client net.Conn) {
 		return
 	}
 	defer f.untrack(target)
-	defer target.Close()
+	defer func() {
+		_ = target.Close() // Closing only releases the routed connection; no caller can act on the result.
+	}()
 	streamcopy.Bidirectional(client, target)
 }
 

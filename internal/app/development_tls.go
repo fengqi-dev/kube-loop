@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
+	"fmt"
 	"io/fs"
 	"net/http"
 	"path"
@@ -28,7 +29,11 @@ func developmentGatewayHTTPClient(embeddedFiles fs.FS) (*http.Client, *tls.Confi
 		return nil, nil, errors.New("parse embedded development CA")
 	}
 	tlsConfig := &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12}
-	transport := http.DefaultTransport.(*http.Transport).Clone()
+	defaultTransport, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		return nil, nil, fmt.Errorf("default HTTP transport %T is unsupported", http.DefaultTransport)
+	}
+	transport := defaultTransport.Clone()
 	transport.TLSClientConfig = tlsConfig.Clone()
 	return &http.Client{Transport: transport}, tlsConfig, nil
 }

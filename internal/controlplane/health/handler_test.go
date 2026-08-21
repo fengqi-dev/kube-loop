@@ -25,15 +25,28 @@ func TestReady(t *testing.T) {
 		status  int
 		body    string
 	}{
-		{name: "no checker", status: http.StatusOK, body: "ready"},
-		{name: "ready", checker: CheckFunc(func(context.Context) error { return nil }), status: http.StatusOK, body: "ready"},
-		{name: "unavailable", checker: CheckFunc(func(context.Context) error { return errors.New("secret") }), status: http.StatusServiceUnavailable, body: "unavailable"},
+		{name: "no checker", status: http.StatusOK, body: statusReady},
+		{
+			name:    statusReady,
+			checker: CheckFunc(func(context.Context) error { return nil }),
+			status:  http.StatusOK,
+			body:    statusReady,
+		},
+		{
+			name: statusUnavailable,
+			checker: CheckFunc(
+				func(context.Context) error { return errors.New("secret") },
+			),
+			status: http.StatusServiceUnavailable,
+			body:   statusUnavailable,
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			response := serve(t, New(test.checker, time.Second).Ready)
 			assertHealthResponse(t, response, test.status, test.body)
-			if test.status != http.StatusOK && strings.Contains(response.Body.String(), "secret") {
+			if test.status != http.StatusOK &&
+				strings.Contains(response.Body.String(), "secret") {
 				t.Fatal("readiness response leaked checker error")
 			}
 		})
@@ -46,20 +59,31 @@ func TestReadyAppliesTimeout(t *testing.T) {
 		return ctx.Err()
 	}), time.Millisecond)
 	response := serve(t, handler.Ready)
-	assertHealthResponse(t, response, http.StatusServiceUnavailable, "unavailable")
+	assertHealthResponse(
+		t,
+		response,
+		http.StatusServiceUnavailable,
+		statusUnavailable,
+	)
 }
 
 func serve(t *testing.T, handler echo.HandlerFunc) *httptest.ResponseRecorder {
 	t.Helper()
 	response := httptest.NewRecorder()
-	ctx := echo.New().NewContext(httptest.NewRequest(http.MethodGet, "/", nil), response)
+	ctx := echo.New().
+		NewContext(httptest.NewRequest(http.MethodGet, "/", nil), response)
 	if err := handler(ctx); err != nil {
 		t.Fatal(err)
 	}
 	return response
 }
 
-func assertHealthResponse(t *testing.T, response *httptest.ResponseRecorder, status int, expected string) {
+func assertHealthResponse(
+	t *testing.T,
+	response *httptest.ResponseRecorder,
+	status int,
+	expected string,
+) {
 	t.Helper()
 	if response.Code != status {
 		t.Fatalf("status = %d, want %d", response.Code, status)

@@ -6,9 +6,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
-	"github.com/google/uuid"
 )
 
 const (
@@ -73,7 +74,7 @@ func (manager *Manager) Connect(
 	manager.mu.Lock()
 	defer manager.mu.Unlock()
 	if current, ok := manager.active[serverProfile.ID]; ok {
-		if current.session.Namespace == namespace && current.session.State == "active" {
+		if current.session.Namespace == namespace && current.session.State == remoteSessionActive {
 			if current.lastError == nil {
 				return current.session, nil
 			}
@@ -82,7 +83,12 @@ func (manager *Manager) Connect(
 			}
 			delete(manager.active, serverProfile.ID)
 		} else {
-			if _, err := manager.gateway.DisconnectSession(ctx, current.profile, current.session); err != nil && !isGone(err) {
+			if _, err := manager.gateway.DisconnectSession(
+				ctx,
+				current.profile,
+				current.session,
+			); err != nil &&
+				!isGone(err) {
 				return remote.Session{}, err
 			}
 			delete(manager.active, serverProfile.ID)
@@ -207,7 +213,12 @@ func (manager *Manager) Shutdown(ctx context.Context) error {
 	defer manager.mu.Unlock()
 	var result error
 	for profileID, current := range manager.active {
-		if _, err := manager.gateway.DisconnectSession(ctx, current.profile, current.session); err != nil && !isGone(err) {
+		if _, err := manager.gateway.DisconnectSession(
+			ctx,
+			current.profile,
+			current.session,
+		); err != nil &&
+			!isGone(err) {
 			result = errors.Join(result, err)
 			continue
 		}

@@ -55,7 +55,7 @@ func (s *Server) Serve(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	defer listener.Close()
+	defer func() { _ = listener.Close() }()
 	go func() {
 		<-ctx.Done()
 		_ = listener.Close()
@@ -78,7 +78,7 @@ func (s *Server) Serve(ctx context.Context) error {
 }
 
 func (s *Server) handle(conn net.Conn) {
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	decoder := json.NewDecoder(bufio.NewReader(conn))
 	decoder.DisallowUnknownFields()
 	var request helperprotocol.Request

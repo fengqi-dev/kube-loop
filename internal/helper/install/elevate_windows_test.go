@@ -70,19 +70,22 @@ func TestInstallWindowsCertificateUsesCurrentElevatedProcessAndCleansUp(t *testi
 	}
 	var certificatePath string
 	var installed []byte
-	err = installWindowsCertificate(authority.PublicCertificatePEM(), func(name string, arguments ...string) ([]byte, error) {
-		if name != "certutil.exe" || len(arguments) != 4 ||
-			arguments[0] != "-addstore" || arguments[1] != "-f" || arguments[2] != "Root" {
-			t.Fatalf("certificate command = %q %#v", name, arguments)
-		}
-		certificatePath = arguments[3]
-		content, readErr := os.ReadFile(certificatePath)
-		if readErr != nil {
-			return nil, readErr
-		}
-		installed = content
-		return nil, nil
-	})
+	err = installWindowsCertificate(
+		authority.PublicCertificatePEM(),
+		func(name string, arguments ...string) ([]byte, error) {
+			if name != "certutil.exe" || len(arguments) != 4 ||
+				arguments[0] != "-addstore" || arguments[1] != "-f" || arguments[2] != "Root" {
+				t.Fatalf("certificate command = %q %#v", name, arguments)
+			}
+			certificatePath = arguments[3]
+			content, readErr := os.ReadFile(certificatePath)
+			if readErr != nil {
+				return nil, readErr
+			}
+			installed = content
+			return nil, nil
+		},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,14 +103,17 @@ func TestUninstallWindowsCertificateUsesStoreThumbprint(t *testing.T) {
 		t.Fatal(err)
 	}
 	var thumbprint string
-	err = uninstallWindowsCertificate(authority.PublicCertificatePEM(), func(name string, arguments ...string) ([]byte, error) {
-		if name != "certutil.exe" || len(arguments) != 3 ||
-			arguments[0] != "-delstore" || arguments[1] != "Root" {
-			t.Fatalf("certificate command = %q %#v", name, arguments)
-		}
-		thumbprint = arguments[2]
-		return nil, nil
-	})
+	err = uninstallWindowsCertificate(
+		authority.PublicCertificatePEM(),
+		func(name string, arguments ...string) ([]byte, error) {
+			if name != "certutil.exe" || len(arguments) != 3 ||
+				arguments[0] != "-delstore" || arguments[1] != "Root" {
+				t.Fatalf("certificate command = %q %#v", name, arguments)
+			}
+			thumbprint = arguments[2]
+			return nil, nil
+		},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}

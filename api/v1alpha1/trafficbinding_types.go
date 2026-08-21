@@ -238,7 +238,8 @@ type TrafficBinding struct {
 type TrafficBindingList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitzero"`
-	Items           []TrafficBinding `json:"items"`
+
+	Items []TrafficBinding `json:"items"`
 }
 
 func init() {

@@ -1,6 +1,6 @@
 module github.com/fengqi-dev/kube-loop
 
-go 1.26.6
+go 1.27.0
 
 require (
 	github.com/Netflix/go-env v0.1.2

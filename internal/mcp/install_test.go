@@ -72,7 +72,11 @@ func TestInstallClientConfigCursorAndClaude(t *testing.T) {
 
 	// Preserve existing Claude keys while updating mcpServers.
 	claudePath := filepath.Join(home, ".claude.json")
-	if err := os.WriteFile(claudePath, []byte(`{"userID":"u1","mcpServers":{"other":{"type":"http","url":"https://example.com"}}}`+"\n"), 0o600); err != nil {
+	if err := os.WriteFile(
+		claudePath,
+		[]byte(`{"userID":"u1","mcpServers":{"other":{"type":"http","url":"https://example.com"}}}`+"\n"),
+		0o600,
+	); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := InstallClientConfig(ClientClaude, url, token); err != nil {

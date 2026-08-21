@@ -76,7 +76,11 @@ func TestDarwinTrustStore_PropagatesAuthorizationFailure(t *testing.T) {
 		privilegedErr: errors.New("authorization canceled"),
 	}
 	store := &darwinTrustStore{runner: runner}
-	if err := store.Install(t.Context(), authority); err == nil || !strings.Contains(err.Error(), "authorization canceled") {
+	if err := store.Install(
+		t.Context(),
+		authority,
+	); err == nil ||
+		!strings.Contains(err.Error(), "authorization canceled") {
 		t.Fatalf("Install() error = %v, want authorization failure", err)
 	}
 }

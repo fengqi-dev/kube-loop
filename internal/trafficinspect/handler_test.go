@@ -50,13 +50,15 @@ func TestHandler_HTTPProtocolsUseInjectedDialer(t *testing.T) {
 	t.Cleanup(plainOrigin.Close)
 	routes.add("http.test:80", plainOrigin.Listener.Addr().String())
 
-	tlsOrigin := httptest.NewUnstartedServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
-		response.Header().Set("X-Upstream-Protocol", request.Proto)
-		_, err := response.Write([]byte("tls"))
-		if err != nil {
-			t.Errorf("write TLS response: %v", err)
-		}
-	}))
+	tlsOrigin := httptest.NewUnstartedServer(
+		http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+			response.Header().Set("X-Upstream-Protocol", request.Proto)
+			_, err := response.Write([]byte("tls"))
+			if err != nil {
+				t.Errorf("write TLS response: %v", err)
+			}
+		}),
+	)
 	tlsOrigin.EnableHTTP2 = true
 	tlsOrigin.StartTLS()
 	t.Cleanup(tlsOrigin.Close)
@@ -125,7 +127,7 @@ func TestHandler_HTTPProtocolsUseInjectedDialer(t *testing.T) {
 	}
 
 	seen := make(map[string]requestEvent)
-	for range len(tests) {
+	for range tests {
 		select {
 		case event := <-requestEvents:
 			seen[event.host+event.protocol] = event
@@ -306,7 +308,7 @@ func TestHandler_UnrecognizedProtocolsAreRelayedWithoutInspection(t *testing.T) 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			connection := dialThroughInspector(t, t.Context(), handler, "unknown.test:30000")
-			defer connection.Close()
+			defer func() { _ = connection.Close() }()
 			if err := connection.SetDeadline(time.Now().Add(2 * time.Second)); err != nil {
 				t.Fatal(err)
 			}
@@ -428,7 +430,7 @@ func TestHandler_PreservesTLSAuthorityWhileDialingOriginalDestination(t *testing
 	t.Cleanup(origin.Close)
 	origin.TLS.GetConfigForClient = func(hello *tls.ClientHelloInfo) (*tls.Config, error) {
 		serverNames <- hello.ServerName
-		return nil, nil
+		return nil, nil //nolint:nilnil // Nil selects the server's existing TLS configuration in this test hook.
 	}
 	routes.add("10.96.12.34:9001", origin.Listener.Addr().String())
 
@@ -561,7 +563,7 @@ func TestHandler_GRPCStreamingModes(t *testing.T) {
 				t.Fatalf("server stream payload size = %d, want %d", len(response.GetPayload().GetBody()), size)
 			}
 		}
-		if _, recvErr := stream.Recv(); recvErr != io.EOF {
+		if _, recvErr := stream.Recv(); !errors.Is(recvErr, io.EOF) {
 			t.Fatalf("server stream terminal error = %v, want EOF", recvErr)
 		}
 	})
@@ -613,7 +615,7 @@ func TestHandler_GRPCStreamingModes(t *testing.T) {
 		if closeErr := stream.CloseSend(); closeErr != nil {
 			t.Fatalf("close bidirectional send: %v", closeErr)
 		}
-		if _, recvErr := stream.Recv(); recvErr != io.EOF {
+		if _, recvErr := stream.Recv(); !errors.Is(recvErr, io.EOF) {
 			t.Fatalf("bidirectional terminal error = %v, want EOF", recvErr)
 		}
 	})
@@ -687,7 +689,7 @@ func newTestHandler(
 		CA:          ca,
 		DialContext: routes.DialContext,
 		AllowHTTP2:  true,
-		TLSConfig: &tls.Config{ //nolint:gosec // Test origins use ephemeral self-signed certificates.
+		TLSConfig: &tls.Config{
 			InsecureSkipVerify: true,
 			MinVersion:         tls.VersionTLS12,
 			NextProtos:         []string{"h2", alpnHTTP1},
@@ -739,6 +741,7 @@ func newHTTPClient(t *testing.T, handler *Handler, ca *tls.Certificate, target s
 	return &http.Client{Transport: transport}
 }
 
+//nolint:revive // Test helpers conventionally keep testing.T first for immediate failure reporting.
 func dialThroughInspector(t *testing.T, ctx context.Context, handler *Handler, target string) net.Conn {
 	t.Helper()
 	client, inspector := net.Pipe()
@@ -767,7 +770,7 @@ func startTCPEchoServer(t *testing.T) string {
 				return
 			}
 			go func() {
-				defer connection.Close()
+				defer func() { _ = connection.Close() }()
 				_, _ = io.Copy(connection, connection)
 			}()
 		}
@@ -816,7 +819,10 @@ type grpcPOCServer struct {
 	grpc_testing.UnimplementedTestServiceServer
 }
 
-func (grpcPOCServer) UnaryCall(_ context.Context, request *grpc_testing.SimpleRequest) (*grpc_testing.SimpleResponse, error) {
+func (grpcPOCServer) UnaryCall(
+	_ context.Context,
+	request *grpc_testing.SimpleRequest,
+) (*grpc_testing.SimpleResponse, error) {
 	return &grpc_testing.SimpleResponse{Payload: request.GetPayload()}, nil
 }
 
@@ -841,7 +847,7 @@ func (grpcPOCServer) StreamingInputCall(
 	var size int32
 	for {
 		request, err := stream.Recv()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			return stream.SendAndClose(&grpc_testing.StreamingInputCallResponse{AggregatedPayloadSize: size})
 		}
 		if err != nil {
@@ -856,7 +862,7 @@ func (grpcPOCServer) FullDuplexCall(
 ) error {
 	for {
 		request, err := stream.Recv()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			return nil
 		}
 		if err != nil {

@@ -48,7 +48,7 @@ type Manager struct {
 
 func NewManager(client Client, config ManagerConfig) (*Manager, error) {
 	if client == nil {
-		return nil, errors.New("Pod exec client is required")
+		return nil, errors.New("pod exec client is required")
 	}
 	if config.OnEvent == nil {
 		config.OnEvent = func(Event) {}
@@ -63,7 +63,7 @@ func (manager *Manager) Start(
 	spec remote.ExecSpec,
 ) (remote.ExecTask, error) {
 	if ctx == nil {
-		return remote.ExecTask{}, errors.New("Pod exec context is required")
+		return remote.ExecTask{}, errors.New("pod exec context is required")
 	}
 	stream, err := Start(ctx, manager.client, serverProfile, session, spec)
 	if err != nil {
@@ -76,7 +76,7 @@ func (manager *Manager) Start(
 		manager.mu.Unlock()
 		cancel()
 		_ = stream.Close()
-		return remote.ExecTask{}, errors.New("Pod exec Task is already active")
+		return remote.ExecTask{}, errors.New("pod exec Task is already active")
 	}
 	manager.active[stream.Task().ID] = entry
 	manager.mu.Unlock()
@@ -149,7 +149,12 @@ func (manager *Manager) read(ctx context.Context, taskID string, entry *managedS
 		frame, err := entry.stream.Read(ctx)
 		if err != nil {
 			if ctx.Err() == nil {
-				manager.onEvent(Event{ProfileID: entry.profileID, TaskID: taskID, Type: EventError, Error: "Pod exec stream ended unexpectedly"})
+				manager.onEvent(Event{
+					ProfileID: entry.profileID,
+					TaskID:    taskID,
+					Type:      EventError,
+					Error:     "Pod exec stream ended unexpectedly",
+				})
 			}
 			return
 		}
@@ -161,7 +166,12 @@ func (manager *Manager) read(ctx context.Context, taskID string, entry *managedS
 		case execstream.Exit:
 			status, decodeErr := execstream.DecodeExit(frame)
 			if decodeErr != nil {
-				manager.onEvent(Event{ProfileID: entry.profileID, TaskID: taskID, Type: EventError, Error: "Gateway returned an invalid Pod exec exit status"})
+				manager.onEvent(Event{
+					ProfileID: entry.profileID,
+					TaskID:    taskID,
+					Type:      EventError,
+					Error:     "Gateway returned an invalid Pod exec exit status",
+				})
 				return
 			}
 			manager.cleanup(taskID, entry)
@@ -186,7 +196,7 @@ func (manager *Manager) get(profileID, taskID string) (*managedStream, error) {
 	defer manager.mu.Unlock()
 	entry := manager.active[taskID]
 	if entry == nil || entry.profileID != profileID {
-		return nil, errors.New("Pod exec stream is not active")
+		return nil, errors.New("pod exec stream is not active")
 	}
 	return entry, nil
 }
@@ -196,7 +206,7 @@ func (manager *Manager) remove(profileID, taskID string) (*managedStream, error)
 	defer manager.mu.Unlock()
 	entry := manager.active[taskID]
 	if entry == nil || entry.profileID != profileID {
-		return nil, errors.New("Pod exec stream is not active")
+		return nil, errors.New("pod exec stream is not active")
 	}
 	delete(manager.active, taskID)
 	return entry, nil

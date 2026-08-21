@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 
+	corev1 "k8s.io/api/core/v1"
+
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/servicebinding"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/sessionapi"
@@ -15,7 +17,6 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/protocol/remotetask"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficcontrol"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficmodel"
-	corev1 "k8s.io/api/core/v1"
 )
 
 func (handler *Service) Claim(
@@ -32,14 +33,22 @@ func (handler *Service) Claim(
 		return trafficcontrol.ClaimResponse{}, apiError
 	}
 	if task.State != remotetask.Pending {
-		return trafficcontrol.ClaimResponse{}, &controlplaneapi.Error{Code: controlplaneapi.CodeConflict, Message: "Preview Task was already claimed"}
+		return trafficcontrol.ClaimResponse{}, &controlplaneapi.Error{
+			Code:    controlplaneapi.CodeConflict,
+			Message: "Preview Task was already claimed",
+		}
 	}
 	var spec storedSpec
-	if json.Unmarshal(task.Spec, &spec) != nil || spec.Name == "" || len(spec.Ports) == 0 {
-		return trafficcontrol.ClaimResponse{}, internalError(errors.New("stored Preview Task is invalid"))
+	if json.Unmarshal(task.Spec, &spec) != nil || spec.Name == "" ||
+		len(spec.Ports) == 0 {
+		return trafficcontrol.ClaimResponse{}, internalError(
+			errors.New("stored Preview Task is invalid"),
+		)
 	}
 	result, _ := json.Marshal(ownerResult{OwnerID: relayID})
-	if err := handler.storage.Tasks().UpdateState(ctx, task.ID, remotetask.Pending, remotetask.Starting, result, handler.now().UTC()); err != nil {
+	if err := handler.updateTrafficTask(
+		ctx, task.ID, remotetask.Pending, remotetask.Starting, result,
+	); err != nil {
 		return trafficcontrol.ClaimResponse{}, storageError(err)
 	}
 	return trafficcontrol.ClaimResponse{
@@ -62,19 +71,30 @@ func (handler *Service) Prepare(
 		return trafficcontrol.PrepareResponse{}, apiError
 	}
 	if task.State != remotetask.Starting || !trafficOwnedBy(task, relayID) {
-		return trafficcontrol.PrepareResponse{}, &controlplaneapi.Error{Code: controlplaneapi.CodeConflict, Message: "Preview Task is not owned by this Gateway"}
+		return trafficcontrol.PrepareResponse{}, &controlplaneapi.Error{
+			Code:    controlplaneapi.CodeConflict,
+			Message: previewTaskOwnershipMessage,
+		}
 	}
 	var spec storedSpec
 	if json.Unmarshal(task.Spec, &spec) != nil {
-		return trafficcontrol.PrepareResponse{}, internalError(errors.New("stored Preview Task is invalid"))
+		return trafficcontrol.PrepareResponse{}, internalError(
+			errors.New("stored Preview Task is invalid"),
+		)
 	}
 	ports, err := interceptPorts(spec.Ports, request.Ports)
 	if err != nil {
-		return trafficcontrol.PrepareResponse{}, &controlplaneapi.Error{Code: controlplaneapi.CodeInvalidArgument, Message: err.Error(), Cause: err}
+		return trafficcontrol.PrepareResponse{}, &controlplaneapi.Error{
+			Code:    controlplaneapi.CodeInvalidArgument,
+			Message: err.Error(),
+			Cause:   err,
+		}
 	}
 	claim := ownerResult{OwnerID: relayID, GatewayIP: request.GatewayIP}
 	claimJSON, _ := json.Marshal(claim)
-	if err := handler.storage.Tasks().UpdateState(ctx, task.ID, remotetask.Starting, remotetask.Starting, claimJSON, handler.now().UTC()); err != nil {
+	if err := handler.updateTrafficTask(
+		ctx, task.ID, remotetask.Starting, remotetask.Starting, claimJSON,
+	); err != nil {
 		return trafficcontrol.PrepareResponse{}, storageError(err)
 	}
 	snapshot := servicebinding.PreviewServiceSnapshot{
@@ -82,17 +102,25 @@ func (handler *Service) Prepare(
 	}
 	service, err := handler.resources.Create(ctx, identity, snapshot, task.ID)
 	if err != nil {
-		return trafficcontrol.PrepareResponse{}, internalError(fmt.Errorf("create Preview binding: %w", err))
+		return trafficcontrol.PrepareResponse{}, internalError(
+			fmt.Errorf("create Preview binding: %w", err),
+		)
 	}
 	if service == nil || service.Spec.ClusterIP == "" {
-		return trafficcontrol.PrepareResponse{}, internalError(errors.New("created Preview Service has no ClusterIP"))
+		return trafficcontrol.PrepareResponse{}, internalError(
+			errors.New("created Preview Service has no ClusterIP"),
+		)
 	}
 	claim.ClusterIP = service.Spec.ClusterIP
 	claimJSON, _ = json.Marshal(claim)
-	if err := handler.storage.Tasks().UpdateState(ctx, task.ID, remotetask.Starting, remotetask.Running, claimJSON, handler.now().UTC()); err != nil {
+	if err := handler.updateTrafficTask(
+		ctx, task.ID, remotetask.Starting, remotetask.Running, claimJSON,
+	); err != nil {
 		return trafficcontrol.PrepareResponse{}, storageError(err)
 	}
-	return trafficcontrol.PrepareResponse{ClusterIP: service.Spec.ClusterIP}, nil
+	return trafficcontrol.PrepareResponse{
+		ClusterIP: service.Spec.ClusterIP,
+	}, nil
 }
 
 func (handler *Service) Heartbeat(
@@ -105,18 +133,33 @@ func (handler *Service) Heartbeat(
 		return trafficcontrol.HeartbeatResponse{}, notFound()
 	}
 	if !trafficOwnedBy(task, relayID) {
-		return trafficcontrol.HeartbeatResponse{}, &controlplaneapi.Error{Code: controlplaneapi.CodeConflict, Message: "Preview Task is not owned by this Gateway"}
+		return trafficcontrol.HeartbeatResponse{}, &controlplaneapi.Error{
+			Code:    controlplaneapi.CodeConflict,
+			Message: previewTaskOwnershipMessage,
+		}
 	}
 	switch task.State {
 	case remotetask.Starting, remotetask.Running:
-		if err := handler.storage.Tasks().UpdateState(ctx, task.ID, task.State, task.State, task.Result, handler.now().UTC()); err != nil && !errors.Is(err, storage.ErrConflict) {
+		if err := handler.updateTrafficTask(
+			ctx, task.ID, task.State, task.State, task.Result,
+		); err != nil &&
+			!errors.Is(err, storage.ErrConflict) {
 			return trafficcontrol.HeartbeatResponse{}, storageError(err)
 		}
 		return trafficcontrol.HeartbeatResponse{}, nil
-	case remotetask.Stopping, remotetask.Stopped, remotetask.Failed, remotetask.Recovering:
+	case remotetask.Stopping,
+		remotetask.Stopped,
+		remotetask.Failed,
+		remotetask.Recovering:
 		return trafficcontrol.HeartbeatResponse{Stop: true}, nil
+	case remotetask.Pending:
+		return trafficcontrol.HeartbeatResponse{}, internalError(
+			fmt.Errorf("stored Preview Task has invalid state %q", task.State),
+		)
 	default:
-		return trafficcontrol.HeartbeatResponse{}, internalError(fmt.Errorf("stored Preview Task has invalid state %q", task.State))
+		return trafficcontrol.HeartbeatResponse{}, internalError(
+			fmt.Errorf("stored Preview Task has invalid state %q", task.State),
+		)
 	}
 }
 
@@ -130,7 +173,10 @@ func (handler *Service) Finish(
 		return trafficcontrol.FinishResponse{}, notFound()
 	}
 	if !trafficOwnedBy(task, relayID) {
-		return trafficcontrol.FinishResponse{}, &controlplaneapi.Error{Code: controlplaneapi.CodeConflict, Message: "Preview Task is not owned by this Gateway"}
+		return trafficcontrol.FinishResponse{}, &controlplaneapi.Error{
+			Code:    controlplaneapi.CodeConflict,
+			Message: previewTaskOwnershipMessage,
+		}
 	}
 	session, err := handler.storage.Sessions().GetByID(ctx, task.SessionID)
 	if err != nil {
@@ -142,8 +188,15 @@ func (handler *Service) Finish(
 	deleted := !cleanupRequired
 	var deleteErr error
 	if cleanupRequired {
-		deleteContext, cancel := context.WithTimeout(context.Background(), handler.config.DeleteTimeout)
-		deleteErr = handler.resources.Delete(deleteContext, servicebinding.PreviewServiceSnapshot{Namespace: session.Namespace}, task.ID)
+		deleteContext, cancel := context.WithTimeout(
+			context.Background(),
+			handler.config.DeleteTimeout,
+		)
+		deleteErr = handler.resources.Delete(
+			deleteContext,
+			servicebinding.PreviewServiceSnapshot{Namespace: session.Namespace},
+			task.ID,
+		)
 		cancel()
 		deleted = deleteErr == nil
 	}
@@ -151,10 +204,15 @@ func (handler *Service) Finish(
 	if request.Failed {
 		cause = errors.New(strings.TrimSpace(request.Reason))
 		if cause.Error() == "" {
-			cause = errors.New("Preview relay failed")
+			cause = errors.New("preview relay failed")
 		}
 	}
-	handler.finishPreview(task.ID, cleanupRequired, deleted, errors.Join(cause, deleteErr))
+	handler.finishPreview(
+		task.ID,
+		cleanupRequired,
+		deleted,
+		errors.Join(cause, deleteErr),
+	)
 	current, err := handler.storage.Tasks().GetByID(ctx, task.ID)
 	if err != nil {
 		return trafficcontrol.FinishResponse{}, storageError(err)
@@ -167,26 +225,55 @@ func (handler *Service) trafficSession(
 	ticketIdentity trafficcontrol.Identity,
 ) (controlplaneapi.Identity, sessionapi.ActiveSession, *controlplaneapi.Error) {
 	identity := controlplaneapi.Identity{
-		Subject: ticketIdentity.IdentityID, Groups: append([]string(nil), ticketIdentity.Groups...), DeviceID: ticketIdentity.DeviceID,
+		Subject:  ticketIdentity.IdentityID,
+		Groups:   append([]string(nil), ticketIdentity.Groups...),
+		DeviceID: ticketIdentity.DeviceID,
 	}
-	session, apiError := handler.sessions.RequireActive(ctx, identity, ticketIdentity.Namespace, ticketIdentity.SessionID)
+	session, apiError := handler.sessions.RequireActive(
+		ctx,
+		identity,
+		ticketIdentity.Namespace,
+		ticketIdentity.SessionID,
+	)
 	if apiError != nil {
 		return controlplaneapi.Identity{}, sessionapi.ActiveSession{}, apiError
 	}
-	if !sessionapi.AcceptsStreamGeneration(session.Generation, ticketIdentity.SessionGeneration) {
-		return controlplaneapi.Identity{}, sessionapi.ActiveSession{}, &controlplaneapi.Error{Code: controlplaneapi.CodeConflict, Message: "Session generation changed"}
+	if !sessionapi.AcceptsStreamGeneration(
+		session.Generation,
+		ticketIdentity.SessionGeneration,
+	) {
+		return controlplaneapi.Identity{}, sessionapi.ActiveSession{}, &controlplaneapi.Error{
+			Code:    controlplaneapi.CodeConflict,
+			Message: "Session generation changed",
+		}
 	}
 	return identity, session, nil
 }
 
-func trafficOwnedBy(task storage.Task, relayID string) bool {
-	var owner ownerResult
-	return json.Unmarshal(task.Result, &owner) == nil && owner.OwnerID == relayID
+func (handler *Service) updateTrafficTask(
+	ctx context.Context,
+	taskID string,
+	from remotetask.State,
+	to remotetask.State,
+	result json.RawMessage,
+) error {
+	return handler.storage.Tasks().UpdateState(ctx, taskID, from, to, result, handler.now().UTC())
 }
 
-func interceptPorts(expected []trafficmodel.Port, listeners []trafficcontrol.ListenerPort) ([]servicebinding.InterceptPort, error) {
+func trafficOwnedBy(task storage.Task, relayID string) bool {
+	var owner ownerResult
+	return json.Unmarshal(task.Result, &owner) == nil &&
+		owner.OwnerID == relayID
+}
+
+func interceptPorts(
+	expected []trafficmodel.Port,
+	listeners []trafficcontrol.ListenerPort,
+) ([]servicebinding.InterceptPort, error) {
 	if len(expected) != len(listeners) {
-		return nil, errors.New("Gateway listener ports do not match the Preview Task")
+		return nil, errors.New(
+			"gateway listener ports do not match the Preview Task",
+		)
 	}
 	byKey := make(map[string]trafficcontrol.ListenerPort, len(listeners))
 	for _, port := range listeners {
@@ -196,7 +283,9 @@ func interceptPorts(expected []trafficmodel.Port, listeners []trafficcontrol.Lis
 	for _, port := range expected {
 		listener, ok := byKey[strings.ToLower(port.Protocol)+fmt.Sprintf("/%d", port.ServicePort)]
 		if !ok || listener.Name != port.Name {
-			return nil, errors.New("Gateway listener ports do not match the Preview Task")
+			return nil, errors.New(
+				"gateway listener ports do not match the Preview Task",
+			)
 		}
 		result = append(result, servicebinding.InterceptPort{
 			Name: port.Name, Protocol: corev1.Protocol(strings.ToUpper(port.Protocol)),
@@ -206,7 +295,11 @@ func interceptPorts(expected []trafficmodel.Port, listeners []trafficcontrol.Lis
 	return result, nil
 }
 
-func (handler *Service) finishPreview(taskID string, cleanupRequired, deleted bool, cause error) bool {
+func (handler *Service) finishPreview(
+	taskID string,
+	cleanupRequired, deleted bool,
+	cause error,
+) bool {
 	return taskstream.Finish(taskstream.FinishConfig{
 		Tasks: handler.storage.Tasks(), TaskID: taskID, Now: handler.now, Cause: cause,
 		CleanupRequired: cleanupRequired, CleanupComplete: deleted,

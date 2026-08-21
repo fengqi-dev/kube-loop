@@ -12,14 +12,15 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/fengqi-dev/kube-loop/internal/controlplane/authorization"
-	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
 	corev1 "k8s.io/api/core/v1"
 	apiMeta "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
+
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/authorization"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
 )
 
 const defaultInventoryResync = 30 * time.Second
@@ -71,7 +72,10 @@ type inventoryFeed struct {
 }
 
 func newInventoryWatchHub(resync time.Duration) *inventoryWatchHub {
-	return &inventoryWatchHub{resync: resync, feeds: make(map[inventoryWatchKey]*inventoryFeed)}
+	return &inventoryWatchHub{
+		resync: resync,
+		feeds:  make(map[inventoryWatchKey]*inventoryFeed),
+	}
 }
 
 func (hub *inventoryWatchHub) subscribe(
@@ -82,9 +86,13 @@ func (hub *inventoryWatchHub) subscribe(
 	resource inventoryResource,
 ) (<-chan inventorySnapshot, func(), error) {
 	if hub == nil || client == nil {
-		return nil, nil, errors.New("Inventory Watch is unavailable")
+		return nil, nil, errors.New("inventory Watch is unavailable")
 	}
-	key := inventoryWatchKey{Subject: inventorySubjectKey(subject), Namespace: namespace, Resource: resource}
+	key := inventoryWatchKey{
+		Subject:   inventorySubjectKey(subject),
+		Namespace: namespace,
+		Resource:  resource,
+	}
 	id := hub.nextID.Add(1)
 	updates := make(chan inventorySnapshot, 1)
 	hub.mu.Lock()
@@ -111,8 +119,15 @@ func (hub *inventoryWatchHub) subscribe(
 	return updates, unsubscribe, nil
 }
 
-func (hub *inventoryWatchHub) newFeed(key inventoryWatchKey, client kubernetes.Interface) *inventoryFeed {
-	factory := informers.NewSharedInformerFactoryWithOptions(client, hub.resync, informers.WithNamespace(key.Namespace))
+func (hub *inventoryWatchHub) newFeed(
+	key inventoryWatchKey,
+	client kubernetes.Interface,
+) *inventoryFeed {
+	factory := informers.NewSharedInformerFactoryWithOptions(
+		client,
+		hub.resync,
+		informers.WithNamespace(key.Namespace),
+	)
 	var informer cache.SharedIndexInformer
 	if key.Resource == inventoryPods {
 		informer = factory.Core().V1().Pods().Informer()
@@ -121,7 +136,10 @@ func (hub *inventoryWatchHub) newFeed(key inventoryWatchKey, client kubernetes.I
 	}
 	feed := &inventoryFeed{
 		hub: hub, key: key, factory: factory, informer: informer, stop: make(chan struct{}), ready: make(chan struct{}),
-		dirty: make(chan struct{}, 1), subscribers: make(map[uint64]chan inventorySnapshot),
+		dirty: make(
+			chan struct{},
+			1,
+		), subscribers: make(map[uint64]chan inventorySnapshot),
 	}
 	_, err := informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc:    func(object any) { feed.changed(object) },
@@ -138,7 +156,9 @@ func (feed *inventoryFeed) run() {
 	if feed.readyErr == nil {
 		feed.factory.Start(feed.stop)
 		if !cache.WaitForCacheSync(feed.stop, feed.informer.HasSynced) {
-			feed.readyErr = errors.New("Inventory Watch cache synchronization failed")
+			feed.readyErr = errors.New(
+				"inventory Watch cache synchronization failed",
+			)
 		}
 	}
 	close(feed.ready)
@@ -186,7 +206,10 @@ func (feed *inventoryFeed) publish() {
 				snapshot.Pods = append(snapshot.Pods, podFromKubernetes(pod))
 			}
 		}
-		slices.SortFunc(snapshot.Pods, func(left, right podDocument) int { return strings.Compare(left.Name, right.Name) })
+		slices.SortFunc(
+			snapshot.Pods,
+			func(left, right podDocument) int { return strings.Compare(left.Name, right.Name) },
+		)
 	} else {
 		snapshot.Services = make([]serviceDocument, 0, len(objects))
 		for _, object := range objects {
@@ -194,7 +217,9 @@ func (feed *inventoryFeed) publish() {
 				snapshot.Services = append(snapshot.Services, serviceFromKubernetes(service))
 			}
 		}
-		slices.SortFunc(snapshot.Services, func(left, right serviceDocument) int { return strings.Compare(left.Name, right.Name) })
+		slices.SortFunc(snapshot.Services, func(left, right serviceDocument) int {
+			return strings.Compare(left.Name, right.Name)
+		})
 	}
 	feed.hub.mu.Lock()
 	feed.sequence++
@@ -234,7 +259,9 @@ func (hub *inventoryWatchHub) unsubscribe(key inventoryWatchKey, id uint64) {
 func inventorySubjectKey(subject authorization.Subject) [sha256.Size]byte {
 	groups := append([]string(nil), subject.Groups...)
 	slices.Sort(groups)
-	return sha256.Sum256([]byte(subject.ID + "\x00" + strings.Join(groups, "\x00")))
+	return sha256.Sum256(
+		[]byte(subject.ID + "\x00" + strings.Join(groups, "\x00")),
+	)
 }
 
 func (handler *Service) watchInventory(
@@ -245,36 +272,67 @@ func (handler *Service) watchInventory(
 	namespace string,
 	resource inventoryResource,
 ) *controlplaneapi.Error {
-	if len(request.URL.Query()) != 1 || len(request.URL.Query()["watch"]) != 1 || request.URL.Query().Get("watch") != "true" {
-		return &controlplaneapi.Error{Code: controlplaneapi.CodeInvalidArgument, Field: "watch", Message: "watch=true is required"}
+	if len(request.URL.Query()) != 1 ||
+		len(request.URL.Query()[operationWatch]) != 1 ||
+		request.URL.Query().Get(operationWatch) != "true" {
+		return &controlplaneapi.Error{
+			Code:    controlplaneapi.CodeInvalidArgument,
+			Field:   operationWatch,
+			Message: "watch=true is required",
+		}
 	}
 	watchContext := request.Context()
 	cancel := func() {}
 	if !identity.AccessExpiresAt.IsZero() {
-		watchContext, cancel = context.WithDeadline(watchContext, identity.AccessExpiresAt)
+		watchContext, cancel = context.WithDeadline(
+			watchContext,
+			identity.AccessExpiresAt,
+		)
 	}
 	defer cancel()
-	updates, unsubscribe, err := handler.inventory.subscribe(watchContext, authorization.Subject{
-		ID: identity.Subject, Groups: append([]string(nil), identity.Groups...),
-	}, client, namespace, resource)
+	updates, unsubscribe, err := handler.inventory.subscribe(
+		watchContext,
+		authorization.Subject{
+			ID: identity.Subject, Groups: append([]string(nil), identity.Groups...),
+		},
+		client,
+		namespace,
+		resource,
+	)
 	if err != nil {
-		return &controlplaneapi.Error{Code: controlplaneapi.CodeUnavailable, Message: "Inventory Watch is unavailable", Cause: err}
+		return &controlplaneapi.Error{
+			Code:    controlplaneapi.CodeUnavailable,
+			Message: "Inventory Watch is unavailable",
+			Cause:   err,
+		}
 	}
 	defer unsubscribe()
-	connection, err := websocket.Accept(writer, request, &websocket.AcceptOptions{CompressionMode: websocket.CompressionDisabled})
+	connection, err := websocket.Accept(
+		writer,
+		request,
+		&websocket.AcceptOptions{
+			CompressionMode: websocket.CompressionDisabled,
+		},
+	)
 	if err != nil {
 		return nil
 	}
-	defer connection.CloseNow()
+	defer func() { _ = connection.CloseNow() }()
 	for {
 		select {
 		case <-watchContext.Done():
-			_ = connection.Close(websocket.StatusNormalClosure, "Inventory Watch closed")
+			_ = connection.Close(
+				websocket.StatusNormalClosure,
+				"Inventory Watch closed",
+			)
 			return nil
 		case snapshot := <-updates:
 			encoded, encodeErr := json.Marshal(snapshot)
 			if encodeErr != nil {
-				_ = connection.Close(websocket.StatusInternalError, "Inventory Watch encoding failed")
+				_ = connection.Close(
+					websocket.StatusInternalError,
+					"Inventory Watch encoding failed",
+				)
 				return nil
 			}
 			if writeErr := connection.Write(watchContext, websocket.MessageText, encoded); writeErr != nil {

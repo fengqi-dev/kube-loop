@@ -13,13 +13,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/miekg/dns"
+	"github.com/things-go/go-socks5/statute"
+
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
 	"github.com/fengqi-dev/kube-loop/internal/gateway"
 	servermux "github.com/fengqi-dev/kube-loop/internal/gateway/websocketmux"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
-	"github.com/miekg/dns"
-	"github.com/things-go/go-socks5/statute"
 )
 
 type echoDialer struct {
@@ -42,7 +43,9 @@ func (dialer *echoDialer) DialContext(_ context.Context, network, address string
 	}
 	client, target := net.Pipe()
 	go func() {
-		defer target.Close()
+		defer func() {
+			_ = target.Close() // The mock peer has no test handle and closes only to release the pipe.
+		}()
 		buffer := make([]byte, 64<<10)
 		for {
 			read, err := target.Read(buffer)
@@ -53,8 +56,13 @@ func (dialer *echoDialer) DialContext(_ context.Context, network, address string
 						response := new(dns.Msg)
 						response.SetReply(&query)
 						response.Answer = []dns.RR{&dns.A{
-							Hdr: dns.RR_Header{Name: query.Question[0].Name, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 30},
-							A:   net.IPv4(10, 42, 0, 5),
+							Hdr: dns.RR_Header{
+								Name:   query.Question[0].Name,
+								Rrtype: dns.TypeA,
+								Class:  dns.ClassINET,
+								Ttl:    30,
+							},
+							A: net.IPv4(10, 42, 0, 5),
 						}}
 						packed, _ := response.Pack()
 						_, _ = target.Write(packed)
@@ -71,6 +79,7 @@ func (dialer *echoDialer) DialContext(_ context.Context, network, address string
 	return client, nil
 }
 
+//nolint:gocyclo // One scenario must verify the shared authenticated TCP and UDP transport contract end to end.
 func TestAuthenticatedWSSDataPlaneCarriesAuthorizedSOCKSTCPAndUDP(t *testing.T) {
 	spec, err := networkspec.Normalize(networkspec.Spec{
 		PodCIDRs: []string{"10.42.0.0/16"}, ServiceCIDRs: []string{"10.96.0.0/12"},
@@ -86,7 +95,7 @@ func TestAuthenticatedWSSDataPlaneCarriesAuthorizedSOCKSTCPAndUDP(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer halfCloseListener.Close()
+	defer checkTestClose(t, halfCloseListener.Close)
 	halfCloseResult := make(chan error, 1)
 	go func() {
 		connection, acceptErr := halfCloseListener.Accept()
@@ -94,7 +103,7 @@ func TestAuthenticatedWSSDataPlaneCarriesAuthorizedSOCKSTCPAndUDP(t *testing.T) 
 			halfCloseResult <- acceptErr
 			return
 		}
-		defer connection.Close()
+		defer checkTestClose(t, connection.Close)
 		request, readErr := io.ReadAll(connection)
 		if readErr != nil {
 			halfCloseResult <- readErr
@@ -137,9 +146,9 @@ func TestAuthenticatedWSSDataPlaneCarriesAuthorizedSOCKSTCPAndUDP(t *testing.T) 
 	httpServer := httptest.NewServer(handler)
 	defer httpServer.Close()
 	runtime, err := Start(context.Background(), profile.Profile{
-		ID: "service", BaseURL: httpServer.URL, TunnelPath: "/tunnel",
+		ID: "service", BaseURL: httpServer.URL, TunnelPath: defaultTunnelPath,
 	}, remote.Session{
-		ID: sessionID, Namespace: "default", State: "active", Generation: 1,
+		ID: sessionID, Namespace: "default", State: dataplaneSessionActive, Generation: 1,
 		NetworkSpec: spec, NetworkSpecHash: hash,
 	}, func(context.Context) (remote.RelayTicket, error) {
 		ticketCalls++
@@ -154,7 +163,7 @@ func TestAuthenticatedWSSDataPlaneCarriesAuthorizedSOCKSTCPAndUDP(t *testing.T) 
 
 	t.Run("tcp", func(t *testing.T) {
 		connection := openSOCKSTCP(t, runtime.Status().SOCKSAddress, net.IPv4(10, 42, 0, 5), 8080)
-		defer connection.Close()
+		defer checkTestClose(t, connection.Close)
 		_ = connection.SetDeadline(time.Now().Add(3 * time.Second))
 		if _, err := connection.Write([]byte("hello")); err != nil {
 			t.Fatal(err)
@@ -171,12 +180,12 @@ func TestAuthenticatedWSSDataPlaneCarriesAuthorizedSOCKSTCPAndUDP(t *testing.T) 
 
 	t.Run("udp", func(t *testing.T) {
 		control, relayAddress := openSOCKSUDP(t, runtime.Status().SOCKSAddress)
-		defer control.Close()
+		defer checkTestClose(t, control.Close)
 		client, err := net.DialUDP("udp", nil, relayAddress)
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer client.Close()
+		defer checkTestClose(t, client.Close)
 		_ = client.SetDeadline(time.Now().Add(3 * time.Second))
 		packet, err := statute.NewDatagram("10.42.0.5:8080", []byte("hello"))
 		if err != nil {
@@ -201,7 +210,7 @@ func TestAuthenticatedWSSDataPlaneCarriesAuthorizedSOCKSTCPAndUDP(t *testing.T) 
 
 	t.Run("backpressure", func(t *testing.T) {
 		connection := openSOCKSTCP(t, runtime.Status().SOCKSAddress, net.IPv4(10, 42, 0, 5), 8080)
-		defer connection.Close()
+		defer checkTestClose(t, connection.Close)
 		_ = connection.SetDeadline(time.Now().Add(10 * time.Second))
 		payload := bytes.Repeat([]byte("kubeloop-data-plane-"), 64<<10)
 		writeResult := make(chan error, 1)
@@ -223,7 +232,7 @@ func TestAuthenticatedWSSDataPlaneCarriesAuthorizedSOCKSTCPAndUDP(t *testing.T) 
 
 	t.Run("half-close", func(t *testing.T) {
 		connection := openSOCKSTCP(t, runtime.Status().SOCKSAddress, net.IPv4(10, 42, 0, 6), 8081)
-		defer connection.Close()
+		defer checkTestClose(t, connection.Close)
 		_ = connection.SetDeadline(time.Now().Add(5 * time.Second))
 		if _, err := io.WriteString(connection, "complete request"); err != nil {
 			t.Fatal(err)
@@ -245,12 +254,12 @@ func TestAuthenticatedWSSDataPlaneCarriesAuthorizedSOCKSTCPAndUDP(t *testing.T) 
 
 	t.Run("dns", func(t *testing.T) {
 		control, relayAddress := openSOCKSUDP(t, runtime.Status().SOCKSAddress)
-		defer control.Close()
+		defer checkTestClose(t, control.Close)
 		client, err := net.DialUDP("udp", nil, relayAddress)
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer client.Close()
+		defer checkTestClose(t, client.Close)
 		_ = client.SetDeadline(time.Now().Add(3 * time.Second))
 		query := new(dns.Msg)
 		query.SetQuestion("api.default.svc.cluster.local.", dns.TypeA)
@@ -278,7 +287,8 @@ func TestAuthenticatedWSSDataPlaneCarriesAuthorizedSOCKSTCPAndUDP(t *testing.T) 
 		if err := reply.Unpack(replyDatagram.Data); err != nil {
 			t.Fatal(err)
 		}
-		if len(reply.Answer) != 1 || reply.Answer[0].String() != "api.default.svc.cluster.local.\t30\tIN\tA\t10.42.0.5" {
+		if len(reply.Answer) != 1 ||
+			reply.Answer[0].String() != "api.default.svc.cluster.local.\t30\tIN\tA\t10.42.0.5" {
 			t.Fatalf("DNS answer = %#v", reply.Answer)
 		}
 	})
@@ -310,16 +320,16 @@ func openSOCKSTCP(t *testing.T, address string, ip net.IP, port uint16) net.Conn
 	}
 	_ = connection.SetDeadline(time.Now().Add(3 * time.Second))
 	if _, err := connection.Write([]byte{5, 1, 0}); err != nil {
-		connection.Close()
+		checkTestClose(t, connection.Close)
 		t.Fatal(err)
 	}
 	if reply := readFull(t, connection, 2); reply[0] != 5 || reply[1] != 0 {
-		connection.Close()
+		checkTestClose(t, connection.Close)
 		t.Fatalf("SOCKS greeting = %#v", reply)
 	}
 	request := []byte{5, 1, 0, 1, ip[12], ip[13], ip[14], ip[15], byte(port >> 8), byte(port)}
 	if _, err := connection.Write(request); err != nil {
-		connection.Close()
+		checkTestClose(t, connection.Close)
 		t.Fatal(err)
 	}
 	readSOCKSReply(t, connection)
@@ -335,15 +345,15 @@ func openSOCKSUDP(t *testing.T, address string) (net.Conn, *net.UDPAddr) {
 	}
 	_ = control.SetDeadline(time.Now().Add(3 * time.Second))
 	if _, err := control.Write([]byte{5, 1, 0}); err != nil {
-		control.Close()
+		checkTestClose(t, control.Close)
 		t.Fatal(err)
 	}
 	if reply := readFull(t, control, 2); reply[1] != 0 {
-		control.Close()
+		checkTestClose(t, control.Close)
 		t.Fatalf("SOCKS greeting = %#v", reply)
 	}
 	if _, err := control.Write([]byte{5, 3, 0, 1, 127, 0, 0, 1, 0, 0}); err != nil {
-		control.Close()
+		checkTestClose(t, control.Close)
 		t.Fatal(err)
 	}
 	reply := readSOCKSReply(t, control)

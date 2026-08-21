@@ -7,14 +7,19 @@ import (
 	"testing"
 	"time"
 
+	"github.com/labstack/echo/v5"
+
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/authorization"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
-	"github.com/labstack/echo/v5"
 )
 
 type recordingAuthorizer struct{ calls int }
 
-func (authorizer *recordingAuthorizer) Authorize(context.Context, authorization.Subject, authorization.Request) authorization.Decision {
+func (authorizer *recordingAuthorizer) Authorize(
+	context.Context,
+	authorization.Subject,
+	authorization.Request,
+) authorization.Decision {
 	authorizer.calls++
 	return authorization.Decision{Allowed: true}
 }
@@ -33,16 +38,26 @@ func TestErrorStatusMapping(t *testing.T) {
 	}
 	for code, expectedStatus := range tests {
 		response := httptest.NewRecorder()
-		ctx := echo.New().NewContext(httptest.NewRequest(http.MethodGet, "/", nil), response)
+		ctx := echo.New().
+			NewContext(httptest.NewRequest(http.MethodGet, "/", nil), response)
 		writeError(ctx, "request-id", &controlplaneapi.Error{Code: code})
 		if response.Code != expectedStatus {
-			t.Errorf("%s status = %d, want %d", code, response.Code, expectedStatus)
+			t.Errorf(
+				"%s status = %d, want %d",
+				code,
+				response.Code,
+				expectedStatus,
+			)
 		}
 	}
 }
 
 func TestWebSocketUpgradeDetectionIsStrict(t *testing.T) {
-	request := httptest.NewRequest(http.MethodGet, "/api/sessions/id/exec/id/stream", nil)
+	request := httptest.NewRequest(
+		http.MethodGet,
+		"/api/sessions/id/exec/id/stream",
+		nil,
+	)
 	request.Header.Set("Connection", "keep-alive, Upgrade")
 	request.Header.Set("Upgrade", "websocket")
 	if !isWebSocketUpgrade(request) {
@@ -60,15 +75,24 @@ func TestAuthenticatedVersionDiscoveryIsAllowed(t *testing.T) {
 		APIPathPrefix:      "/api",
 		RequestTimeout:     time.Second,
 		MaxRequestBodySize: 1 << 20,
-		Authenticator: controlplaneapi.AuthenticatorFunc(func(*http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
-			return controlplaneapi.Identity{Subject: "81a678af-e99c-4411-99dc-57fd59d83189", Provider: "local"}, nil
-		}),
+		Authenticator: controlplaneapi.AuthenticatorFunc(
+			func(*http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
+				return controlplaneapi.Identity{
+					Subject:  "81a678af-e99c-4411-99dc-57fd59d83189",
+					Provider: "local",
+				}, nil
+			},
+		),
 		Authorizer: authorizer,
 	})
 	request := httptest.NewRequest(http.MethodGet, "/api/version", nil)
 	response := httptest.NewRecorder()
 	ctx := echo.New().NewContext(request, response)
-	err := middleware(func(ctx *echo.Context) error { return ctx.NoContent(http.StatusNoContent) })(ctx)
+	err := middleware(
+		func(ctx *echo.Context) error { return ctx.NoContent(http.StatusNoContent) },
+	)(
+		ctx,
+	)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -14,7 +14,7 @@ func platformSystemStateDir() string {
 }
 
 func platformBinaryInstallPath() string {
-	if runtime.GOOS == "darwin" {
+	if runtime.GOOS == goosDarwin {
 		return "/Library/PrivilegedHelperTools/" + ServiceLabel()
 	}
 	return "/usr/local/libexec/" + HelperBinaryBaseName()
@@ -26,7 +26,7 @@ func platformBinaryInstallPathForExecutable(string) string {
 
 func platformBundledSingBoxPath() string {
 	switch runtime.GOOS {
-	case "darwin":
+	case goosDarwin:
 		return ""
 	case "linux":
 		if IsDevBuild() {
@@ -39,7 +39,7 @@ func platformBundledSingBoxPath() string {
 }
 
 func platformCoreInstallPath() string {
-	if runtime.GOOS == "darwin" {
+	if runtime.GOOS == goosDarwin {
 		root := "/Library/Application Support/KubeLoop"
 		if IsDevBuild() {
 			root += "-dev"

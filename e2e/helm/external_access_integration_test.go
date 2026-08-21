@@ -16,11 +16,12 @@ import (
 
 	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
 
+	"github.com/labstack/echo/v5"
+
 	"github.com/fengqi-dev/kube-loop/internal/controlplane"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/authorization"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
 	controlplanemiddleware "github.com/fengqi-dev/kube-loop/internal/controlplane/middleware"
-	"github.com/labstack/echo/v5"
 )
 
 // The server also applies WriteTimeout to the TLS handshake. Keep enough room
@@ -38,6 +39,7 @@ func (externalAccessAuthorizer) Authorize(
 	return authorization.Decision{Allowed: true}
 }
 
+//nolint:gocyclo // This integration test intentionally validates the complete proxy lifecycle in one scenario.
 func TestSameOriginTLSProxyPreservesControlPlaneLimitsAndLongLivedWebSocket(t *testing.T) {
 	var externalHandler http.Handler
 	external := httptest.NewUnstartedServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
@@ -55,20 +57,25 @@ func TestSameOriginTLSProxyPreservesControlPlaneLimitsAndLongLivedWebSocket(t *t
 		controlplane.Config{PublicURL: publicURL, MaxRequestBodyBytes: 16},
 		controlplane.BuildInfo{Version: "2.0.0-external-test"},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
-		controlplane.WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(*http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
-			return controlplaneapi.Identity{Subject: "external-test-user"}, nil
-		})),
+		controlplane.WithAuthenticator(
+			controlplaneapi.AuthenticatorFunc(func(*http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
+				return controlplaneapi.Identity{Subject: "external-test-user"}, nil
+			}),
+		),
 		controlplane.WithAuthorizer(externalAccessAuthorizer{}),
 		controlplane.WithAPIRoutes(controlplane.RouteRegistrarFunc(func(group *echo.Group) {
-			group.POST("/body-limit", controlplane.Endpoint(func(ctx *echo.Context, _ controlplaneapi.Identity) *controlplaneapi.Error {
-				var body struct {
-					Name string `json:"name"`
-				}
-				if err := ctx.Bind(&body); err != nil {
-					return controlplanemiddleware.BindingError(err)
-				}
-				return nil
-			}))
+			group.POST(
+				"/body-limit",
+				controlplane.Endpoint(func(ctx *echo.Context, _ controlplaneapi.Identity) *controlplaneapi.Error {
+					var body struct {
+						Name string `json:"name"`
+					}
+					if err := ctx.Bind(&body); err != nil {
+						return controlplanemiddleware.BindingError(err)
+					}
+					return nil
+				}),
+			)
 		})),
 	)
 	if err != nil {
@@ -77,18 +84,20 @@ func TestSameOriginTLSProxyPreservesControlPlaneLimitsAndLongLivedWebSocket(t *t
 	controlPlaneBackend := httptest.NewServer(markBackend("control-plane", controlPlaneServer.Handler()))
 	t.Cleanup(controlPlaneBackend.Close)
 
-	webSocketBackend := httptest.NewServer(markBackend("data-plane", http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		connection, acceptErr := websocket.Accept(writer, request, nil)
-		if acceptErr != nil {
-			return
-		}
-		defer connection.CloseNow()
-		messageType, payload, readErr := connection.Read(request.Context())
-		if readErr != nil {
-			return
-		}
-		_ = connection.Write(request.Context(), messageType, payload)
-	})))
+	webSocketBackend := httptest.NewServer(
+		markBackend("data-plane", http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+			connection, acceptErr := websocket.Accept(writer, request, nil)
+			if acceptErr != nil {
+				return
+			}
+			defer func() { _ = connection.CloseNow() }()
+			messageType, payload, readErr := connection.Read(request.Context())
+			if readErr != nil {
+				return
+			}
+			_ = connection.Write(request.Context(), messageType, payload)
+		})),
+	)
 	t.Cleanup(webSocketBackend.Close)
 
 	controlPlaneTarget, err := url.Parse(controlPlaneBackend.URL)
@@ -120,12 +129,12 @@ func TestSameOriginTLSProxyPreservesControlPlaneLimitsAndLongLivedWebSocket(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != http.StatusOK || response.TLS == nil || response.TLS.Version != tls.VersionTLS13 {
 		t.Fatalf("TLS discovery status=%d TLS=%#v", response.StatusCode, response.TLS)
 	}
-	if response.Header.Get("X-KubeLoop-Test-Backend") != "control-plane" {
-		t.Fatalf("discovery backend = %q", response.Header.Get("X-KubeLoop-Test-Backend"))
+	if response.Header.Get("X-Kubeloop-Test-Backend") != "control-plane" {
+		t.Fatalf("discovery backend = %q", response.Header.Get("X-Kubeloop-Test-Backend"))
 	}
 	var discovery controlplane.DiscoveryDocument
 	if err := json.NewDecoder(response.Body).Decode(&discovery); err != nil {
@@ -135,7 +144,11 @@ func TestSameOriginTLSProxyPreservesControlPlaneLimitsAndLongLivedWebSocket(t *t
 		t.Fatalf("discovery external identity = %#v, proxy URL = %q", discovery, external.URL)
 	}
 
-	request, err := http.NewRequest(http.MethodPost, external.URL+controlplane.APIPathPrefix+"/body-limit", strings.NewReader(`{"name":"0123456789"}`))
+	request, err := http.NewRequest(
+		http.MethodPost,
+		external.URL+controlplane.APIPathPrefix+"/body-limit",
+		strings.NewReader(`{"name":"0123456789"}`),
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,11 +158,12 @@ func TestSameOriginTLSProxyPreservesControlPlaneLimitsAndLongLivedWebSocket(t *t
 		t.Fatal(err)
 	}
 	limitedBody, readErr := io.ReadAll(response.Body)
-	response.Body.Close()
+	_ = response.Body.Close()
 	if readErr != nil {
 		t.Fatal(readErr)
 	}
-	if response.StatusCode != http.StatusBadRequest || !strings.Contains(string(limitedBody), "request body exceeds the size limit") {
+	if response.StatusCode != http.StatusBadRequest ||
+		!strings.Contains(string(limitedBody), "request body exceeds the size limit") {
 		t.Fatalf("oversized body status=%d body=%s", response.StatusCode, limitedBody)
 	}
 
@@ -160,9 +174,9 @@ func TestSameOriginTLSProxyPreservesControlPlaneLimitsAndLongLivedWebSocket(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer connection.CloseNow()
+	defer func() { _ = connection.CloseNow() }()
 	if upgradeResponse == nil || upgradeResponse.TLS == nil || upgradeResponse.TLS.Version != tls.VersionTLS13 ||
-		upgradeResponse.Header.Get("X-KubeLoop-Test-Backend") != "data-plane" {
+		upgradeResponse.Header.Get("X-Kubeloop-Test-Backend") != "data-plane" {
 		t.Fatalf("WSS upgrade response = %#v", upgradeResponse)
 	}
 
@@ -184,7 +198,7 @@ func TestSameOriginTLSProxyPreservesControlPlaneLimitsAndLongLivedWebSocket(t *t
 
 func markBackend(name string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		writer.Header().Set("X-KubeLoop-Test-Backend", name)
+		writer.Header().Set("X-Kubeloop-Test-Backend", name)
 		next.ServeHTTP(writer, request)
 	})
 }

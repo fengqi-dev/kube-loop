@@ -13,6 +13,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
+
 	"github.com/fengqi-dev/kube-loop/e2e/harness"
 	"github.com/fengqi-dev/kube-loop/internal/client/credentials"
 	clientpreview "github.com/fengqi-dev/kube-loop/internal/client/preview"
@@ -30,15 +40,6 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/trafficbindingclient"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
-	"github.com/google/uuid"
-	corev1 "k8s.io/api/core/v1"
-	discoveryv1 "k8s.io/api/discovery/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/client-go/dynamic"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
 )
 
 const previewLifecycleAccessToken = "e2e-preview-lifecycle"
@@ -314,15 +315,24 @@ func startPreviewLifecycleController(
 	gateway := startE2ETrafficGateway(t, gatewayIP, handler, nil)
 	policy := authorization.NewAuthenticated()
 	server, err := controlplane.NewServer(
-		controlplane.Config{PublicURL: "http://127.0.0.1"}, controlplane.BuildInfo{},
+		controlplane.Config{PublicURL: "http://127.0.0.1"},
+		controlplane.BuildInfo{},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
-		controlplane.WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(request *http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
-			if request.Header.Get("Authorization") != "Bearer "+previewLifecycleAccessToken {
-				return controlplaneapi.Identity{}, &controlplaneapi.Error{Code: controlplaneapi.CodeUnauthenticated, Message: "invalid e2e access token"}
-			}
-			return identity, nil
-		})),
-		controlplane.WithAuthorizer(policy), controlplane.WithAPIRoutes(controlplane.APIRoutes{
+		controlplane.WithAuthenticator(
+			controlplaneapi.AuthenticatorFunc(
+				func(request *http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
+					if request.Header.Get("Authorization") != "Bearer "+previewLifecycleAccessToken {
+						return controlplaneapi.Identity{}, &controlplaneapi.Error{
+							Code:    controlplaneapi.CodeUnauthenticated,
+							Message: "invalid e2e access token",
+						}
+					}
+					return identity, nil
+				},
+			),
+		),
+		controlplane.WithAuthorizer(policy),
+		controlplane.WithAPIRoutes(controlplane.APIRoutes{
 			Tickets: ticketapi.NewRoutes(gateway.tickets, e2eExecSessionValidator{
 				identityID: identity.Subject, session: session,
 			}).Endpoints(),
@@ -388,14 +398,22 @@ func assertPreviewOwned(
 		service.Annotations["traffic.kubeloop.io/binding-uid"] == "" ||
 		service.Annotations["traffic.kubeloop.io/mode"] != "Preview" ||
 		service.Labels["app.kubernetes.io/managed-by"] != "kubeloop-operator" ||
-		!previewOwnedByBinding(service.OwnerReferences, bindingName, service.Annotations["traffic.kubeloop.io/binding-uid"]) {
+		!previewOwnedByBinding(
+			service.OwnerReferences,
+			bindingName,
+			service.Annotations["traffic.kubeloop.io/binding-uid"],
+		) {
 		t.Fatalf("owned Preview Service=%#v err=%v", service, err)
 	}
 	slices, err := previewSlices(ctx, client, name)
 	if err != nil || len(slices) != 1 ||
 		slices[0].Annotations["traffic.kubeloop.io/binding-name"] != bindingName ||
 		slices[0].Annotations["traffic.kubeloop.io/binding-uid"] != service.Annotations["traffic.kubeloop.io/binding-uid"] ||
-		!previewOwnedByBinding(slices[0].OwnerReferences, bindingName, service.Annotations["traffic.kubeloop.io/binding-uid"]) {
+		!previewOwnedByBinding(
+			slices[0].OwnerReferences,
+			bindingName,
+			service.Annotations["traffic.kubeloop.io/binding-uid"],
+		) {
 		t.Fatalf("owned Preview EndpointSlices=%#v err=%v", slices, err)
 	}
 	assertSnapshotCount(t, stateStore, taskID, 0)
@@ -444,7 +462,13 @@ func assertPreviewAbsent(
 		case <-ctx.Done():
 			t.Fatal(ctx.Err())
 		case <-deadline.C:
-			t.Fatalf("Preview resources %s were not deleted: service=%v slices=%#v error=%v", name, serviceErr, slices, sliceErr)
+			t.Fatalf(
+				"Preview resources %s were not deleted: service=%v slices=%#v error=%v",
+				name,
+				serviceErr,
+				slices,
+				sliceErr,
+			)
 		case <-ticker.C:
 		}
 	}

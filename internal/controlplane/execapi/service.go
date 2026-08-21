@@ -6,10 +6,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/google/uuid"
+	"github.com/labstack/echo/v5"
+	"k8s.io/apimachinery/pkg/util/validation"
 
 	"github.com/fengqi-dev/kube-loop/internal/controlplane"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/authorization"
@@ -22,9 +27,6 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/protocol/execstream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/remotetask"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
-	"github.com/google/uuid"
-	"github.com/labstack/echo/v5"
-	"k8s.io/apimachinery/pkg/util/validation"
 )
 
 const TaskType = "pod-exec"
@@ -35,7 +37,12 @@ type Storage interface {
 }
 
 type SessionValidator interface {
-	RequireActive(context.Context, controlplaneapi.Identity, string, string) (sessionapi.ActiveSession, *controlplaneapi.Error)
+	RequireActive(
+		context.Context,
+		controlplaneapi.Identity,
+		string,
+		string,
+	) (sessionapi.ActiveSession, *controlplaneapi.Error)
 }
 
 type Config struct {
@@ -53,9 +60,16 @@ type Service struct {
 	authorizer              authorization.Authorizer
 }
 
-func New(storageBackend Storage, sessions SessionValidator, executor Executor, config Config) (*Service, error) {
+func New(
+	storageBackend Storage,
+	sessions SessionValidator,
+	executor Executor,
+	config Config,
+) (*Service, error) {
 	if storageBackend == nil || sessions == nil || executor == nil {
-		return nil, errors.New("Pod exec storage, Session validator and Kubernetes executor are required")
+		return nil, errors.New(
+			"pod exec storage, Session validator and Kubernetes executor are required",
+		)
 	}
 	if config.Now == nil {
 		config.Now = time.Now
@@ -63,8 +77,9 @@ func New(storageBackend Storage, sessions SessionValidator, executor Executor, c
 	if config.CredentialCheckInterval == 0 {
 		config.CredentialCheckInterval = 500 * time.Millisecond
 	}
-	if config.CredentialCheckInterval < 10*time.Millisecond || config.CredentialCheckInterval > 30*time.Second {
-		return nil, errors.New("Pod exec credential check interval must be between 10ms and 30s")
+	if config.CredentialCheckInterval < 10*time.Millisecond ||
+		config.CredentialCheckInterval > 30*time.Second {
+		return nil, errors.New("pod exec credential check interval must be between 10ms and 30s")
 	}
 	return &Service{
 		storage: storageBackend, sessions: sessions, executor: executor, now: config.Now,
@@ -115,7 +130,11 @@ func (handler *Service) create(
 		return storageError(err)
 	}
 	if err := handler.executor.Validate(request.Context(), identity, session.Namespace, spec); err != nil {
-		return &controlplaneapi.Error{Code: controlplaneapi.CodeInvalidArgument, Message: "Pod exec target is unavailable", Cause: err}
+		return &controlplaneapi.Error{
+			Code:    controlplaneapi.CodeInvalidArgument,
+			Message: "Pod exec target is unavailable",
+			Cause:   err,
+		}
 	}
 	now := handler.now().UTC()
 	expiresAt := session.ExpiresAt.UTC()
@@ -127,28 +146,32 @@ func (handler *Service) create(
 	document := documentFromTask(task, session.Namespace)
 	response, _ := json.Marshal(document)
 	created := false
-	err = handler.storage.WithinTransaction(request.Context(), func(repositories storage.Repositories) error {
-		record, reserved, err := repositories.Idempotency().Reserve(request.Context(), storage.IdempotencyRecord{
-			Scope: scope, Key: key, RequestHash: requestHash, ResourceType: TaskType,
-			ResourceID: task.ID, Response: response, CreatedAt: now, ExpiresAt: expiresAt,
-		})
-		if err != nil {
-			return err
-		}
-		if !reserved {
-			existing, err := repositories.Tasks().GetByID(request.Context(), record.ResourceID)
+	err = handler.storage.WithinTransaction(
+		request.Context(),
+		func(repositories storage.Repositories) error {
+			record, reserved, err := repositories.Idempotency().
+				Reserve(request.Context(), storage.IdempotencyRecord{
+					Scope: scope, Key: key, RequestHash: requestHash, ResourceType: TaskType,
+					ResourceID: task.ID, Response: response, CreatedAt: now, ExpiresAt: expiresAt,
+				})
 			if err != nil {
 				return err
 			}
-			task = existing
+			if !reserved {
+				existing, err := repositories.Tasks().GetByID(request.Context(), record.ResourceID)
+				if err != nil {
+					return err
+				}
+				task = existing
+				return nil
+			}
+			if err := repositories.Tasks().Create(request.Context(), task); err != nil {
+				return err
+			}
+			created = true
 			return nil
-		}
-		if err := repositories.Tasks().Create(request.Context(), task); err != nil {
-			return err
-		}
-		created = true
-		return nil
-	})
+		},
+	)
 	if err != nil {
 		return storageError(err)
 	}
@@ -156,7 +179,15 @@ func (handler *Service) create(
 	if err != nil {
 		return internalError(err)
 	}
-	ctx.Response().Header().Set("Location", fmt.Sprintf("%s/sessions/%s/exec/%s/stream?namespace=%s", controlplane.APIPathPrefix, session.ID, task.ID, session.Namespace))
+	ctx.Response().
+		Header().
+		Set("Location", fmt.Sprintf(
+			"%s/sessions/%s/exec/%s/stream?namespace=%s",
+			controlplane.APIPathPrefix,
+			session.ID,
+			task.ID,
+			session.Namespace,
+		))
 	if !created {
 		ctx.Response().Header().Set("Idempotent-Replayed", "true")
 	}
@@ -180,41 +211,84 @@ func (handler *Service) stream(
 		return notFound()
 	}
 	if task.State != remotetask.Pending {
-		return &controlplaneapi.Error{Code: controlplaneapi.CodeConflict, Message: "Pod exec Task was already claimed"}
+		return &controlplaneapi.Error{
+			Code:    controlplaneapi.CodeConflict,
+			Message: "Pod exec Task was already claimed",
+		}
 	}
 	spec, err := specFromTask(task)
 	if err != nil {
 		return internalError(err)
 	}
-	if err := handler.storage.Tasks().UpdateState(request.Context(), task.ID, remotetask.Pending, remotetask.Starting, json.RawMessage(`{}`), handler.now().UTC()); err != nil {
+	if err := handler.storage.Tasks().UpdateState(
+		request.Context(),
+		task.ID,
+		remotetask.Pending,
+		remotetask.Starting,
+		json.RawMessage(`{}`),
+		handler.now().UTC(),
+	); err != nil {
 		return storageError(err)
 	}
-	connection, err := websocket.Accept(writer, request, &websocket.AcceptOptions{CompressionMode: websocket.CompressionDisabled})
+	connection, err := websocket.Accept(
+		writer,
+		request,
+		&websocket.AcceptOptions{CompressionMode: websocket.CompressionDisabled},
+	)
 	if err != nil {
-		_ = handler.storage.Tasks().UpdateState(request.Context(), task.ID, remotetask.Starting, remotetask.Failed, json.RawMessage(`{"error":"WebSocket upgrade failed"}`), handler.now().UTC())
+		_ = handler.storage.Tasks().UpdateState(
+			request.Context(),
+			task.ID,
+			remotetask.Starting,
+			remotetask.Failed,
+			json.RawMessage(`{"error":"WebSocket upgrade failed"}`),
+			handler.now().UTC(),
+		)
 		return nil
 	}
-	defer connection.CloseNow()
+	defer func() { _ = connection.CloseNow() }()
 	connection.SetReadLimit(execstream.MaximumPayload + 1)
-	streamContext, cancel, contextErr := streamlease.Start(request.Context(), handler.storage, identity, session, streamlease.Config{
-		Now: handler.now, CheckInterval: handler.credentialCheckInterval,
-		Runtime: streamlease.RuntimeFrom(handler.sessions), TaskID: task.ID, HeartbeatTask: true,
-		Authorizer: handler.authorizer, Authorization: authorization.Request{
-			Operation: "stream", Namespace: session.Namespace, ResourceKind: "pod-exec", ResourceName: task.ID,
+	streamContext, cancel, contextErr := streamlease.Start(
+		request.Context(),
+		handler.storage,
+		identity,
+		session,
+		streamlease.Config{
+			Now: handler.now, CheckInterval: handler.credentialCheckInterval,
+			Runtime: streamlease.RuntimeFrom(
+				handler.sessions,
+			), TaskID: task.ID, HeartbeatTask: true,
+			Authorizer: handler.authorizer, Authorization: authorization.Request{
+				Operation: "stream", Namespace: session.Namespace, ResourceKind: "pod-exec", ResourceName: task.ID,
+			},
 		},
-	})
+	)
 	if contextErr != nil {
-		_ = handler.storage.Tasks().UpdateState(context.Background(), task.ID, remotetask.Starting, remotetask.Failed, json.RawMessage(`{"error":"authorization lease expired"}`), handler.now().UTC())
+		_ = handler.storage.Tasks().UpdateState(
+			context.Background(),
+			task.ID,
+			remotetask.Starting,
+			remotetask.Failed,
+			json.RawMessage(`{"error":"authorization lease expired"}`),
+			handler.now().UTC(),
+		)
 		_ = connection.Close(websocket.StatusPolicyViolation, "authorization lease expired")
 		return nil
 	}
 	defer cancel()
-	if err := handler.storage.Tasks().UpdateState(request.Context(), task.ID, remotetask.Starting, remotetask.Running, json.RawMessage(`{}`), handler.now().UTC()); err != nil {
+	if err := handler.storage.Tasks().UpdateState(
+		request.Context(),
+		task.ID,
+		remotetask.Starting,
+		remotetask.Running,
+		json.RawMessage(`{}`),
+		handler.now().UTC(),
+	); err != nil {
 		_ = connection.Close(websocket.StatusInternalError, "exec state persistence failed")
 		return nil
 	}
 	stdinReader, stdinWriter := io.Pipe()
-	defer stdinReader.Close()
+	defer func() { _ = stdinReader.Close() }()
 	sizes := newTerminalSizeQueue()
 	defer sizes.Close()
 	go func() {
@@ -224,12 +298,20 @@ func (handler *Service) stream(
 		}
 	}()
 	var writeMu sync.Mutex
+	stdout := frameWriter{
+		ctx: streamContext, connection: connection, frameType: execstream.Stdout, mu: &writeMu,
+	}
 	streams := Streams{
-		Stdin: stdinReader, Stdout: frameWriter{ctx: streamContext, connection: connection, frameType: execstream.Stdout, mu: &writeMu},
+		Stdin: stdinReader, Stdout: stdout,
 		TTY: spec.TTY, TerminalSizeQueue: sizes,
 	}
 	if !spec.TTY {
-		streams.Stderr = frameWriter{ctx: streamContext, connection: connection, frameType: execstream.Stderr, mu: &writeMu}
+		streams.Stderr = frameWriter{
+			ctx:        streamContext,
+			connection: connection,
+			frameType:  execstream.Stderr,
+			mu:         &writeMu,
+		}
 	}
 	execErr := handler.executor.Exec(streamContext, identity, session.Namespace, spec, streams)
 	cancelled := streamContext.Err() != nil
@@ -240,7 +322,8 @@ func (handler *Service) stream(
 		nextState = remotetask.Failed
 	}
 	persistContext, persistCancel := context.WithTimeout(context.Background(), 5*time.Second)
-	persistErr := handler.storage.Tasks().UpdateState(persistContext, task.ID, remotetask.Running, nextState, taskResult(exitStatus), handler.now().UTC())
+	persistErr := handler.storage.Tasks().
+		UpdateState(persistContext, task.ID, remotetask.Running, nextState, taskResult(exitStatus), handler.now().UTC())
 	persistCancel()
 	if persistErr != nil {
 		cancel()
@@ -263,8 +346,11 @@ func statusFromError(err error, cancelled bool) execstream.ExitStatus {
 	}
 	status.Code = 1
 	var exitError interface{ ExitStatus() int }
-	if errors.As(err, &exitError) && exitError.ExitStatus() >= 0 {
-		status.Code = uint32(exitError.ExitStatus())
+	if errors.As(err, &exitError) {
+		exitStatus := exitError.ExitStatus()
+		if exitStatus >= 0 && uint64(exitStatus) <= math.MaxUint32 {
+			status.Code = uint32(exitStatus)
+		}
 	}
 	if !cancelled {
 		status.Error = "command exited unsuccessfully"
@@ -276,29 +362,54 @@ func normalizeSpec(spec *Spec) *controlplaneapi.Error {
 	spec.Pod = strings.TrimSpace(spec.Pod)
 	spec.Container = strings.TrimSpace(spec.Container)
 	if len(validation.IsDNS1123Subdomain(spec.Pod)) != 0 {
-		return &controlplaneapi.Error{Code: controlplaneapi.CodeInvalidArgument, Field: "pod", Message: "Pod name is invalid"}
+		return &controlplaneapi.Error{
+			Code:    controlplaneapi.CodeInvalidArgument,
+			Field:   "pod",
+			Message: "Pod name is invalid",
+		}
 	}
 	if spec.Container != "" && len(validation.IsDNS1123Label(spec.Container)) != 0 {
-		return &controlplaneapi.Error{Code: controlplaneapi.CodeInvalidArgument, Field: "container", Message: "container name is invalid"}
+		return &controlplaneapi.Error{
+			Code:    controlplaneapi.CodeInvalidArgument,
+			Field:   "container",
+			Message: "container name is invalid",
+		}
 	}
 	if len(spec.Command) == 0 || len(spec.Command) > 64 {
-		return &controlplaneapi.Error{Code: controlplaneapi.CodeInvalidArgument, Field: "command", Message: "command must contain 1 to 64 arguments"}
+		return &controlplaneapi.Error{
+			Code:    controlplaneapi.CodeInvalidArgument,
+			Field:   "command",
+			Message: "command must contain 1 to 64 arguments",
+		}
 	}
 	total := 0
 	for index, argument := range spec.Command {
 		if argument == "" || len(argument) > 4096 || strings.IndexByte(argument, 0) >= 0 {
-			return &controlplaneapi.Error{Code: controlplaneapi.CodeInvalidArgument, Field: fmt.Sprintf("command[%d]", index), Message: "command argument is invalid"}
+			return &controlplaneapi.Error{
+				Code:    controlplaneapi.CodeInvalidArgument,
+				Field:   fmt.Sprintf("command[%d]", index),
+				Message: "command argument is invalid",
+			}
 		}
 		total += len(argument)
 	}
 	if total > 16<<10 {
-		return &controlplaneapi.Error{Code: controlplaneapi.CodeInvalidArgument, Field: "command", Message: "command exceeds 16 KiB"}
+		return &controlplaneapi.Error{
+			Code:    controlplaneapi.CodeInvalidArgument,
+			Field:   "command",
+			Message: "command exceeds 16 KiB",
+		}
 	}
 	return nil
 }
 
-func owned(task storage.Task, identity controlplaneapi.Identity, session sessionapi.ActiveSession) bool {
-	return task.Type == TaskType && task.IdentityID == identity.Subject && task.SessionID == session.ID
+func owned(
+	task storage.Task,
+	identity controlplaneapi.Identity,
+	session sessionapi.ActiveSession,
+) bool {
+	return task.Type == TaskType && task.IdentityID == identity.Subject &&
+		task.SessionID == session.ID
 }
 
 func specFromTask(task storage.Task) (Spec, error) {
@@ -326,13 +437,29 @@ func decodeTask(task storage.Task, namespace string) (Document, error) {
 	if task.ExpiresAt != nil {
 		expiresAt = *task.ExpiresAt
 	}
-	return Document{ID: task.ID, SessionID: task.SessionID, Namespace: namespace, State: task.State, Pod: spec.Pod, Container: spec.Container, TTY: spec.TTY, CreatedAt: task.CreatedAt, UpdatedAt: task.UpdatedAt, ExpiresAt: expiresAt}, nil
+	return Document{
+		ID:        task.ID,
+		SessionID: task.SessionID,
+		Namespace: namespace,
+		State:     task.State,
+		Pod:       spec.Pod,
+		Container: spec.Container,
+		TTY:       spec.TTY,
+		CreatedAt: task.CreatedAt,
+		UpdatedAt: task.UpdatedAt,
+		ExpiresAt: expiresAt,
+	}, nil
 }
 
 func namespaceFromQuery(request *http.Request) (string, *controlplaneapi.Error) {
 	query := request.URL.Query()
-	if len(query) != 1 || len(query["namespace"]) != 1 || len(validation.IsDNS1123Label(query.Get("namespace"))) != 0 {
-		return "", &controlplaneapi.Error{Code: controlplaneapi.CodeInvalidArgument, Field: "namespace", Message: "one valid namespace query parameter is required"}
+	if len(query) != 1 || len(query["namespace"]) != 1 ||
+		len(validation.IsDNS1123Label(query.Get("namespace"))) != 0 {
+		return "", &controlplaneapi.Error{
+			Code:    controlplaneapi.CodeInvalidArgument,
+			Field:   "namespace",
+			Message: "one valid namespace query parameter is required",
+		}
 	}
 	return query.Get("namespace"), nil
 }
@@ -342,7 +469,11 @@ func storageError(err error) *controlplaneapi.Error {
 	case errors.Is(err, storage.ErrNotFound):
 		return notFound()
 	case errors.Is(err, storage.ErrConflict), errors.Is(err, storage.ErrIdempotencyMismatch):
-		return &controlplaneapi.Error{Code: controlplaneapi.CodeConflict, Message: "Pod exec Task state changed; reload and retry", Cause: err}
+		return &controlplaneapi.Error{
+			Code:    controlplaneapi.CodeConflict,
+			Message: "Pod exec Task state changed; reload and retry",
+			Cause:   err,
+		}
 	default:
 		return internalError(err)
 	}
@@ -353,7 +484,11 @@ func writeJSON(ctx *echo.Context, status int, value any) {
 }
 
 func internalError(err error) *controlplaneapi.Error {
-	return &controlplaneapi.Error{Code: controlplaneapi.CodeInternal, Message: "Pod exec operation failed", Cause: err}
+	return &controlplaneapi.Error{
+		Code:    controlplaneapi.CodeInternal,
+		Message: "Pod exec operation failed",
+		Cause:   err,
+	}
 }
 
 func notFound() *controlplaneapi.Error {

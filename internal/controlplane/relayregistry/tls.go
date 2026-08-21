@@ -21,9 +21,14 @@ func LoadServerTLS(config ServerTLSConfig) (*tls.Config, error) {
 	config.ClientCAFile = strings.TrimSpace(config.ClientCAFile)
 	if config.CertificateFile == "" || config.PrivateKeyFile == "" ||
 		(config.RequireClientCertificate && config.ClientCAFile == "") {
-		return nil, errors.New("Relay Registry server certificate configuration is incomplete")
+		return nil, errors.New(
+			"relay registry server certificate configuration is incomplete",
+		)
 	}
-	certificate, err := tls.LoadX509KeyPair(config.CertificateFile, config.PrivateKeyFile)
+	certificate, err := tls.LoadX509KeyPair(
+		config.CertificateFile,
+		config.PrivateKeyFile,
+	)
 	if err != nil {
 		return nil, errors.New("load Relay Registry server certificate")
 	}

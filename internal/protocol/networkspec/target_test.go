@@ -42,7 +42,11 @@ func TestAuthorizeAddressUsesExactNamespacePodAndServiceIPs(t *testing.T) {
 
 func TestAuthorizeDomainRequiresClusterSuffixAndBlocksAPIServer(t *testing.T) {
 	spec := targetTestSpec(t)
-	if host, err := AuthorizeDomain(spec, "api.development.svc.cluster.local."); err != nil || host != "api.development.svc.cluster.local" {
+	if host, err := AuthorizeDomain(
+		spec,
+		"api.development.svc.cluster.local.",
+	); err != nil ||
+		host != "api.development.svc.cluster.local" {
 		t.Fatalf("cluster domain = %q, %v", host, err)
 	}
 	for _, host := range []string{"example.com", "cluster.local", "kubernetes.default.svc.cluster.local"} {

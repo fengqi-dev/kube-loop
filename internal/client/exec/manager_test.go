@@ -23,7 +23,7 @@ func TestManagerRoutesOutputInputResizeAndExitByProfileAndTask(t *testing.T) {
 			t.Error(err)
 			return
 		}
-		defer connection.CloseNow()
+		defer checkTestClose(t, connection.CloseNow)
 		for range 2 {
 			_, encoded, readErr := connection.Read(request.Context())
 			if readErr != nil {
@@ -45,12 +45,20 @@ func TestManagerRoutesOutputInputResizeAndExitByProfileAndTask(t *testing.T) {
 	defer server.Close()
 
 	events := make(chan Event, 2)
-	manager, err := NewManager(streamClient{endpoint: "ws" + strings.TrimPrefix(server.URL, "http")}, ManagerConfig{OnEvent: func(event Event) { events <- event }})
+	manager, err := NewManager(
+		streamClient{endpoint: "ws" + strings.TrimPrefix(server.URL, "http")},
+		ManagerConfig{OnEvent: func(event Event) { events <- event }},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
 	serverProfile := profile.Profile{ID: "server"}
-	task, err := manager.Start(context.Background(), serverProfile, remote.Session{ID: "session", Namespace: "development", State: "active"}, remote.ExecSpec{Pod: "api-0", Command: []string{"/bin/sh"}, TTY: true})
+	task, err := manager.Start(
+		context.Background(),
+		serverProfile,
+		remote.Session{ID: "session", Namespace: "development", State: "active"},
+		remote.ExecSpec{Pod: "api-0", Command: []string{"/bin/sh"}, TTY: true},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +72,8 @@ func TestManagerRoutesOutputInputResizeAndExitByProfileAndTask(t *testing.T) {
 		t.Fatal(err)
 	}
 	firstInput, secondInput := <-input, <-input
-	if firstInput.Type != execstream.Stdin || string(firstInput.Payload) != "id\r" || secondInput.Type != execstream.Resize {
+	if firstInput.Type != execstream.Stdin || string(firstInput.Payload) != "id\r" ||
+		secondInput.Type != execstream.Resize {
 		t.Fatalf("input frames = %#v %#v", firstInput, secondInput)
 	}
 	firstEvent, secondEvent := receiveEvent(t, events), receiveEvent(t, events)

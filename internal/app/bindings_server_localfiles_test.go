@@ -12,10 +12,10 @@ func TestServerLocalFilesLifecycle(t *testing.T) {
 	root := t.TempDir()
 	application := &App{}
 
-	if err := application.CreateServerLocalFile(root, "folder", "directory"); err != nil {
+	if err := application.CreateServerLocalFile(root, "folder", serverFileKindDirectory); err != nil {
 		t.Fatalf("create directory: %v", err)
 	}
-	if err := application.CreateServerLocalFile(root, "file.txt", "file"); err != nil {
+	if err := application.CreateServerLocalFile(root, "file.txt", serverFileKindFile); err != nil {
 		t.Fatalf("create file: %v", err)
 	}
 
@@ -26,10 +26,10 @@ func TestServerLocalFilesLifecycle(t *testing.T) {
 	if len(entries) != 2 {
 		t.Fatalf("entry count = %d, want 2", len(entries))
 	}
-	if entries[0].Name != "folder" || entries[0].Kind != "directory" {
+	if entries[0].Name != "folder" || entries[0].Kind != serverFileKindDirectory {
 		t.Fatalf("first entry = %#v, want directory first", entries[0])
 	}
-	if entries[1].Name != "file.txt" || entries[1].Kind != "file" {
+	if entries[1].Name != "file.txt" || entries[1].Kind != serverFileKindFile {
 		t.Fatalf("second entry = %#v, want file", entries[1])
 	}
 
@@ -55,7 +55,7 @@ func TestServerLocalFilesRejectInvalidTargets(t *testing.T) {
 	root := t.TempDir()
 	application := &App{}
 	for _, name := range []string{"", ".", "..", "nested/file"} {
-		if err := application.CreateServerLocalFile(root, name, "file"); err == nil {
+		if err := application.CreateServerLocalFile(root, name, serverFileKindFile); err == nil {
 			t.Errorf("CreateServerLocalFile(%q) succeeded, want error", name)
 		}
 	}

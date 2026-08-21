@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	. "github.com/onsi/ginkgo/v2" // nolint:revive,staticcheck
+	. "github.com/onsi/ginkgo/v2" //nolint:revive,staticcheck // Ginkgo's DSL intentionally uses a dot import.
 )
 
 const (
@@ -144,7 +144,7 @@ func BuildImageInMinikube(name string) error {
 			return nil
 		}
 	}
-	return fmt.Errorf("Minikube image build did not produce %q", name)
+	return fmt.Errorf("minikube image build did not produce %q", name)
 }
 
 // GetNonEmptyLines converts given command output string into individual objects

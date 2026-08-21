@@ -7,15 +7,16 @@ import (
 	"fmt"
 	"io"
 	"path"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/kballard/go-shellquote"
+
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/execapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/fileapi"
-	"github.com/kballard/go-shellquote"
 )
 
 const (
@@ -24,7 +25,12 @@ const (
 )
 
 type Operator interface {
-	List(context.Context, controlplaneapi.Identity, string, Spec) ([]Entry, error)
+	List(
+		context.Context,
+		controlplaneapi.Identity,
+		string,
+		Spec,
+	) ([]Entry, error)
 	Mutate(context.Context, controlplaneapi.Identity, string, Spec) error
 }
 
@@ -34,11 +40,17 @@ type KubernetesOperator struct {
 	maximumEntries int
 }
 
-func NewKubernetesOperator(pods fileapi.PodExecutor) (*KubernetesOperator, error) {
+func NewKubernetesOperator(
+	pods fileapi.PodExecutor,
+) (*KubernetesOperator, error) {
 	if pods == nil {
-		return nil, errors.New("Pod executor is required")
+		return nil, errors.New("pod executor is required")
 	}
-	return &KubernetesOperator{pods: pods, maximumOutput: defaultMaximumOutput, maximumEntries: defaultMaximumEntries}, nil
+	return &KubernetesOperator{
+		pods:           pods,
+		maximumOutput:  defaultMaximumOutput,
+		maximumEntries: defaultMaximumEntries,
+	}, nil
 }
 
 func (operator *KubernetesOperator) List(
@@ -47,7 +59,10 @@ func (operator *KubernetesOperator) List(
 	namespace string,
 	spec Spec,
 ) ([]Entry, error) {
-	inner := `for item do mode=$(stat -c %f -- "$item") || exit; size=$(stat -c %s -- "$item") || exit; modified=$(stat -c %Y -- "$item") || exit; printf '%s\t%s\t%s\t%s\000' "$mode" "$size" "$modified" "$item"; done`
+	inner := `for item do mode=$(stat -c %f -- "$item") || exit; ` +
+		`size=$(stat -c %s -- "$item") || exit; ` +
+		`modified=$(stat -c %Y -- "$item") || exit; ` +
+		`printf '%s\t%s\t%s\t%s\000' "$mode" "$size" "$modified" "$item"; done`
 	script := fileapi.PhysicalPathGuard(spec.AllowedRoot, spec.Path) +
 		"test ! -L " + shellquote.Join(spec.Path) + "; test -d " + shellquote.Join(spec.Path) + "; " +
 		"find " + shellquote.Join(spec.Path) + " -mindepth 1 -maxdepth 1 -exec sh -c " + shellquote.Join(inner) + " sh {} +"
@@ -59,11 +74,19 @@ func (operator *KubernetesOperator) List(
 	if err != nil {
 		return nil, err
 	}
-	sort.Slice(entries, func(left, right int) bool {
-		if (entries[left].Kind == KindDirectory) != (entries[right].Kind == KindDirectory) {
-			return entries[left].Kind == KindDirectory
+	slices.SortFunc(entries, func(left, right Entry) int {
+		leftDirectory := left.Kind == KindDirectory
+		rightDirectory := right.Kind == KindDirectory
+		if leftDirectory != rightDirectory {
+			if leftDirectory {
+				return -1
+			}
+			return 1
 		}
-		return strings.ToLower(entries[left].Name) < strings.ToLower(entries[right].Name)
+		return strings.Compare(
+			strings.ToLower(left.Name),
+			strings.ToLower(right.Name),
+		)
 	})
 	return entries, nil
 }
@@ -77,26 +100,50 @@ func (operator *KubernetesOperator) Mutate(
 	var script string
 	switch spec.Action {
 	case ActionCreate:
-		guard := fileapi.PhysicalPathGuard(spec.AllowedRoot, path.Dir(spec.Path))
+		guard := fileapi.PhysicalPathGuard(
+			spec.AllowedRoot,
+			path.Dir(spec.Path),
+		)
 		quoted := shellquote.Join(spec.Path)
 		if spec.Kind == KindDirectory {
-			script = guard + "if [ -e " + quoted + " ] || [ -L " + quoted + " ]; then test ! -L " + quoted + " && test -d " + quoted + "; else mkdir -- " + quoted + "; fi"
+			script = guard + "if [ -e " + quoted + " ] || [ -L " + quoted + "]; then " +
+				"test ! -L " + quoted + " && test -d " + quoted + "; " +
+				"else mkdir -- " + quoted + "; fi"
 		} else {
-			script = guard + "if [ -e " + quoted + " ] || [ -L " + quoted + " ]; then test ! -L " + quoted + " && test -f " + quoted + "; else : > " + quoted + "; fi"
+			script = guard + "if [ -e " + quoted + " ] || [ -L " + quoted + "]; then " +
+				"test ! -L " + quoted + " && test -f " + quoted + "; " +
+				"else : > " + quoted + "; fi"
 		}
 	case ActionRename:
-		guard := fileapi.PhysicalPathGuard(spec.AllowedRoot, path.Dir(spec.Path)) +
-			fileapi.PhysicalPathGuard(spec.DestinationRoot, path.Dir(spec.Destination))
-		source, destination := shellquote.Join(spec.Path), shellquote.Join(spec.Destination)
-		script = guard + "if [ -e " + source + " ] || [ -L " + source + " ]; then test ! -L " + source + "; test ! -e " + destination + " && test ! -L " + destination + "; mv -- " + source + " " + destination + "; else test -e " + destination + " && test ! -L " + destination + "; fi"
+		guard := fileapi.PhysicalPathGuard(
+			spec.AllowedRoot,
+			path.Dir(spec.Path),
+		) +
+			fileapi.PhysicalPathGuard(
+				spec.DestinationRoot,
+				path.Dir(spec.Destination),
+			)
+		source, destination := shellquote.Join(
+			spec.Path,
+		), shellquote.Join(
+			spec.Destination,
+		)
+		script = guard + "if [ -e " + source + " ] || [ -L " + source + " ]; then " +
+			"test ! -L " + source + "; test ! -e " + destination +
+			" && test ! -L " + destination + "; mv -- " + source + " " + destination +
+			"; else test -e " + destination + " && test ! -L " + destination + "; fi"
 	case ActionDelete:
-		guard := fileapi.PhysicalPathGuard(spec.AllowedRoot, path.Dir(spec.Path))
+		guard := fileapi.PhysicalPathGuard(
+			spec.AllowedRoot,
+			path.Dir(spec.Path),
+		)
 		quoted := shellquote.Join(spec.Path)
 		remove := "if [ -d " + quoted + " ]; then rmdir -- " + quoted + "; else rm -- " + quoted + "; fi"
 		if spec.Recursive {
 			remove = "rm -rf -- " + quoted
 		}
-		script = guard + "if [ -e " + quoted + " ] || [ -L " + quoted + " ]; then test ! -L " + quoted + "; " + remove + "; fi"
+		script = guard + "if [ -e " + quoted + " ] || [ -L " + quoted + "]; then " +
+			"test ! -L " + quoted + "; " + remove + "; fi"
 	default:
 		return errors.New("unsupported remote file action")
 	}
@@ -123,6 +170,7 @@ func (operator *KubernetesOperator) shell(
 
 type boundedBuffer struct {
 	bytes.Buffer
+
 	maximum int
 }
 
@@ -157,15 +205,22 @@ func parseEntries(raw []byte, maximum int) ([]Entry, error) {
 		}
 		seconds, err := strconv.ParseInt(string(fields[2]), 10, 64)
 		if err != nil {
-			return nil, errors.New("remote directory entry timestamp is invalid")
+			return nil, errors.New(
+				"remote directory entry timestamp is invalid",
+			)
 		}
 		entryPath := string(fields[3])
 		if entryPath == "" || strings.IndexByte(entryPath, 0) >= 0 {
 			return nil, errors.New("remote directory entry path is invalid")
 		}
 		entries = append(entries, Entry{
-			Name: path.Base(entryPath), Path: entryPath, Kind: kindFromMode(mode), Size: size,
-			Mode: fmt.Sprintf("%04o", mode&0o7777), ModifiedAt: time.Unix(seconds, 0).UTC(),
+			Name: path.Base(
+				entryPath,
+			), Path: entryPath, Kind: kindFromMode(mode), Size: size,
+			Mode: fmt.Sprintf(
+				"%04o",
+				mode&0o7777,
+			), ModifiedAt: time.Unix(seconds, 0).UTC(),
 		})
 	}
 	return entries, nil

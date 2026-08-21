@@ -4,9 +4,10 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/google/uuid"
+
 	clientprofile "github.com/fengqi-dev/kube-loop/internal/client/profile"
 	clientremote "github.com/fengqi-dev/kube-loop/internal/client/remote"
-	"github.com/google/uuid"
 )
 
 type ServerPodFileTarget struct {
@@ -18,16 +19,19 @@ type ServerPodFileTarget struct {
 
 type ServerPodFileCreateRequest struct {
 	ServerPodFileTarget
+
 	Kind string `json:"kind"`
 }
 
 type ServerPodFileRenameRequest struct {
 	ServerPodFileTarget
+
 	Destination string `json:"destination"`
 }
 
 type ServerPodFileDeleteRequest struct {
 	ServerPodFileTarget
+
 	Recursive bool `json:"recursive,omitempty"`
 }
 
@@ -57,7 +61,10 @@ func (a *App) RenameServerPodFile(request ServerPodFileRenameRequest) (clientrem
 		return clientremote.PodFileTask{}, err
 	}
 	return a.remote.CreatePodFileOperation(a.context(), serverProfile, session, "rename", clientremote.PodFileSpec{
-		Pod: request.Pod, Container: request.Container, Path: strings.TrimSpace(request.Path), Destination: strings.TrimSpace(request.Destination),
+		Pod:         request.Pod,
+		Container:   request.Container,
+		Path:        strings.TrimSpace(request.Path),
+		Destination: strings.TrimSpace(request.Destination),
 	}, uuid.NewString())
 }
 
@@ -67,7 +74,10 @@ func (a *App) DeleteServerPodFile(request ServerPodFileDeleteRequest) (clientrem
 		return clientremote.PodFileTask{}, err
 	}
 	return a.remote.CreatePodFileOperation(a.context(), serverProfile, session, "delete", clientremote.PodFileSpec{
-		Pod: request.Pod, Container: request.Container, Path: strings.TrimSpace(request.Path), Recursive: request.Recursive,
+		Pod:       request.Pod,
+		Container: request.Container,
+		Path:      strings.TrimSpace(request.Path),
+		Recursive: request.Recursive,
 	}, uuid.NewString())
 }
 

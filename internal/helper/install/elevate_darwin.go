@@ -9,11 +9,17 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/fengqi-dev/kube-loop/internal/helper"
 	"github.com/kballard/go-shellquote"
+
+	"github.com/fengqi-dev/kube-loop/internal/helper"
 )
 
-func ElevateInstall(ctx context.Context, source, expectedSHA256, token string, uid int, homeDir, singBoxPath string) error {
+func ElevateInstall(
+	ctx context.Context,
+	source, expectedSHA256, token string,
+	uid int,
+	homeDir, singBoxPath string,
+) error {
 	command := `set -eu
 workdir="$(mktemp -d "${TMPDIR:-/private/tmp}/kubeloop-helper.XXXXXX")"
 trap 'rm -rf "$workdir"' EXIT HUP INT TERM

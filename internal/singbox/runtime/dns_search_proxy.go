@@ -4,13 +4,21 @@ import (
 	"fmt"
 	"net"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/miekg/dns"
+
 	"github.com/fengqi-dev/kube-loop/internal/dnsname"
 	"github.com/fengqi-dev/kube-loop/internal/singbox"
-	"github.com/miekg/dns"
+)
+
+const (
+	defaultNamespace = "default"
+	networkTCP       = "tcp"
+	networkUDP       = "udp"
 )
 
 // dnsSearchProxy accepts OS DNS queries on the public split-DNS port, appends
@@ -49,17 +57,17 @@ func startDNSSearchProxy(
 		domains = []string{dnsname.DefaultClusterDomain}
 	}
 	proxy := &dnsSearchProxy{
-		upstream:  net.JoinHostPort(upstreamHost, fmt.Sprintf("%d", upstreamPort)),
+		upstream:  net.JoinHostPort(upstreamHost, strconv.Itoa(upstreamPort)),
 		search:    slices.Clone(search),
 		domains:   domains,
 		hosts:     make(map[string]net.IP),
-		clientUDP: &dns.Client{Net: "udp", Timeout: 3 * time.Second, UDPSize: 1232},
-		clientTCP: &dns.Client{Net: "tcp", Timeout: 5 * time.Second},
+		clientUDP: &dns.Client{Net: networkUDP, Timeout: 3 * time.Second, UDPSize: 1232},
+		clientTCP: &dns.Client{Net: networkTCP, Timeout: 5 * time.Second},
 	}
-	addr := net.JoinHostPort(publicHost, fmt.Sprintf("%d", publicPort))
+	addr := net.JoinHostPort(publicHost, strconv.Itoa(publicPort))
 	handler := dns.HandlerFunc(proxy.serveDNS)
-	proxy.publicUDP = &dns.Server{Addr: addr, Net: "udp", Handler: handler, UDPSize: 1232}
-	proxy.publicTCP = &dns.Server{Addr: addr, Net: "tcp", Handler: handler}
+	proxy.publicUDP = &dns.Server{Addr: addr, Net: networkUDP, Handler: handler, UDPSize: 1232}
+	proxy.publicTCP = &dns.Server{Addr: addr, Net: networkTCP, Handler: handler}
 
 	errCh := make(chan error, 2)
 	go func() { errCh <- proxy.publicUDP.ListenAndServe() }()
@@ -162,9 +170,9 @@ func (p *dnsSearchProxy) serveDNS(w dns.ResponseWriter, req *dns.Msg) {
 		return
 	}
 	candidates := dnsSearchCandidates(original, search, domains...)
-	network := "udp"
+	network := networkUDP
 	if _, ok := w.RemoteAddr().(*net.TCPAddr); ok {
-		network = "tcp"
+		network = networkTCP
 	}
 	var last *dns.Msg
 	for _, candidate := range candidates {
@@ -200,11 +208,11 @@ func (p *dnsSearchProxy) serveDNS(w dns.ResponseWriter, req *dns.Msg) {
 
 func (p *dnsSearchProxy) exchange(network string, req *dns.Msg) (*dns.Msg, error) {
 	client := p.clientUDP
-	if network == "tcp" {
+	if network == networkTCP {
 		client = p.clientTCP
 	}
 	resp, _, err := client.Exchange(req, p.upstream)
-	if err == nil && resp != nil && resp.Truncated && network == "udp" {
+	if err == nil && resp != nil && resp.Truncated && network == networkUDP {
 		resp, _, err = p.clientTCP.Exchange(req, p.upstream)
 	}
 	return resp, err

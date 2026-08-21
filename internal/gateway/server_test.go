@@ -50,7 +50,7 @@ func TestServeConnForAuthorizationLogsRequestID(t *testing.T) {
 	var logs bytes.Buffer
 	server := NewServer(slog.New(slog.NewJSONHandler(&logs, nil)), time.Second)
 	client, gatewayConnection := net.Pipe()
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 	server.ServeConnForAuthorization(gatewayConnection, SessionAuthorization{
 		RequestID: "33333333-3333-4333-8333-333333333333", SessionID: "invalid", Generation: 1,
 	})
@@ -82,7 +82,7 @@ func TestClusterAddressPolicy(t *testing.T) {
 func TestDrainWaitsForActiveConnection(t *testing.T) {
 	server := NewServer(nil, time.Second)
 	client, gatewayConnection := net.Pipe()
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 	go server.ServeConnForAuthorization(gatewayConnection, gatewayTestAuthorization(t))
 	waitForActiveConnections(t, server, 1)
 
@@ -107,7 +107,7 @@ func TestDrainWaitsForActiveConnection(t *testing.T) {
 func TestDrainDeadlineClosesActiveConnections(t *testing.T) {
 	server := NewServer(nil, time.Second)
 	client, gatewayConnection := net.Pipe()
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 	go server.ServeConnForAuthorization(gatewayConnection, gatewayTestAuthorization(t))
 	waitForActiveConnections(t, server, 1)
 
@@ -232,7 +232,7 @@ func TestAuthenticatedSessionDeniesTargetOutsideRegisteredNetworkSpec(t *testing
 	if err := tunnel.ReadStatus(control); err != nil {
 		t.Fatal(err)
 	}
-	defer control.Close()
+	defer func() { _ = control.Close() }()
 
 	client, gatewayConnection := net.Pipe()
 	go server.ServeConnForAuthorization(gatewayConnection, authorization)
@@ -269,12 +269,15 @@ func TestAuthenticatedSessionDispatchesTrafficOnAuthorizedLogicalStream(t *testi
 	if err := tunnel.ReadStatus(control); err != nil {
 		t.Fatal(err)
 	}
-	defer control.Close()
+	defer func() { _ = control.Close() }()
 
 	client, gatewayConnection := net.Pipe()
 	ctx := context.WithValue(context.Background(), gatewayTestContextKey{}, "outer-wss")
 	go server.ServeConnForAuthorizationContext(ctx, gatewayConnection, authorization)
-	request := tunnel.TrafficOpenRequest{Mode: tunnel.TrafficModeExchange, TaskID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"}
+	request := tunnel.TrafficOpenRequest{
+		Mode:   tunnel.TrafficModeExchange,
+		TaskID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+	}
 	if err := tunnel.WriteTrafficOpen(client, request, token); err != nil {
 		t.Fatal(err)
 	}

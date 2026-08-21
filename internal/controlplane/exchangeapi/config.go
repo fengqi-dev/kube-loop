@@ -19,8 +19,9 @@ func (config *Config) normalize() error {
 	if config.RestoreTimeout == 0 {
 		config.RestoreTimeout = defaultRestoreTimeout
 	}
-	if config.RestoreTimeout < time.Second || config.RestoreTimeout > 5*time.Minute {
-		return errors.New("Exchange restore timeout must be between 1s and 5m")
+	if config.RestoreTimeout < time.Second ||
+		config.RestoreTimeout > 5*time.Minute {
+		return errors.New("exchange restore timeout must be between 1s and 5m")
 	}
 	return nil
 }

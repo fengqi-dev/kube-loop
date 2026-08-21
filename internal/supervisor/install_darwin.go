@@ -36,20 +36,28 @@ func Install(source, expectedSHA256, token string, uid int) error {
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
 <key>Label</key><string>%s</string>
-<key>ProgramArguments</key><array><string>%s</string><string>run</string><string>--channel</string><string>%s</string></array>
+<key>ProgramArguments</key><array>
+<string>%s</string><string>run</string><string>--channel</string><string>%s</string>
+</array>
 <key>RunAtLoad</key><true/><key>KeepAlive</key><true/>
 <key>StandardOutPath</key><string>%s</string>
 <key>StandardErrorPath</key><string>%s</string>
 </dict></plist>
 `, config.ServiceLabel, config.BinaryPath, config.Channel, config.LogPath, config.LogPath)
+	//nolint:gosec // launchd property lists are intentionally system-readable and contain no secrets.
 	if err := os.WriteFile(config.PlistPath(), []byte(plist), 0o644); err != nil {
 		return fmt.Errorf("write supervisor launchd plist: %w", err)
 	}
-	if output, err := exec.Command("/bin/launchctl", "bootstrap", "system", config.PlistPath()).CombinedOutput(); err != nil {
+	//nolint:gosec // The plist path is derived from the fixed supervisor configuration.
+	bootstrap := exec.Command("/bin/launchctl", "bootstrap", "system", config.PlistPath())
+	if output, err := bootstrap.CombinedOutput(); err != nil {
 		return fmt.Errorf("bootstrap supervisor: %w: %s", err, strings.TrimSpace(string(output)))
 	}
+	//nolint:gosec // ServiceLabel is selected from fixed supervisor identifiers.
 	_ = exec.Command("/bin/launchctl", "enable", "system/"+config.ServiceLabel).Run()
-	if output, err := exec.Command("/bin/launchctl", "kickstart", "-k", "system/"+config.ServiceLabel).CombinedOutput(); err != nil {
+	//nolint:gosec // ServiceLabel is selected from fixed supervisor identifiers.
+	kickstart := exec.Command("/bin/launchctl", "kickstart", "-k", "system/"+config.ServiceLabel)
+	if output, err := kickstart.CombinedOutput(); err != nil {
 		return fmt.Errorf("start supervisor: %w: %s", err, strings.TrimSpace(string(output)))
 	}
 	return nil
@@ -60,7 +68,8 @@ func copyVerified(source, destination, expectedSHA256 string, mode os.FileMode) 
 	if err != nil {
 		return err
 	}
-	defer input.Close()
+	defer func() { _ = input.Close() }()
+	//nolint:gosec // The system executable directory must be traversable by launchd.
 	if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
 		return err
 	}
@@ -69,7 +78,7 @@ func copyVerified(source, destination, expectedSHA256 string, mode os.FileMode) 
 		return err
 	}
 	tempPath := temp.Name()
-	defer os.Remove(tempPath)
+	defer func() { _ = os.Remove(tempPath) }()
 	hash := sha256.New()
 	if _, err := io.Copy(io.MultiWriter(temp, hash), input); err != nil {
 		_ = temp.Close()
@@ -101,6 +110,7 @@ func stopLaunchdService(label string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		if err := exec.Command("/bin/launchctl", "print", target).Run(); err != nil {
+			//nolint:nilerr // launchctl failure here confirms the service is no longer registered.
 			return nil
 		}
 		time.Sleep(50 * time.Millisecond)

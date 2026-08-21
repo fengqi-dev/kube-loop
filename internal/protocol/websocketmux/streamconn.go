@@ -131,7 +131,8 @@ func (connection *StreamConn) Close() error {
 func (connection *StreamConn) writeFrame(kind byte, payload []byte) error {
 	var header [5]byte
 	header[0] = kind
-	binary.BigEndian.PutUint32(header[1:], uint32(len(payload)))
+	// Stream payloads are bounded by the negotiated uint32 frame limit.
+	binary.BigEndian.PutUint32(header[1:], uint32(len(payload))) //nolint:gosec // Frame payload is bounded.
 	if err := writeAll(connection.Conn, header[:]); err != nil {
 		return err
 	}
@@ -159,6 +160,6 @@ func writeAll(writer io.Writer, payload []byte) error {
 
 func (connection *StreamConn) touch() {
 	if connection.idle > 0 {
-		_ = connection.Conn.SetDeadline(time.Now().Add(connection.idle))
+		_ = connection.SetDeadline(time.Now().Add(connection.idle))
 	}
 }

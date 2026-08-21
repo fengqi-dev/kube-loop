@@ -60,7 +60,11 @@ func TestProtobufSchemaStoreRejectsInvalidReplacementWithoutChangingActiveSet(t 
 	if err := store.ReplaceDirectory(context.Background(), root); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "broken.proto"), []byte(`syntax = "proto3"; this is invalid`), 0o600); err != nil {
+	if err := os.WriteFile(
+		filepath.Join(root, "broken.proto"),
+		[]byte(`syntax = "proto3"; this is invalid`),
+		0o600,
+	); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.ReplaceDirectory(context.Background(), root); err == nil {

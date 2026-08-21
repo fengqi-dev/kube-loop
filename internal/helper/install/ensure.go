@@ -139,19 +139,24 @@ func ensureInstall(ctx context.Context, requireCurrentBinary bool, certificatePE
 		return err
 	}
 	client := &helper.Client{Token: token}
-	return waitForHelperReady(ctx, 20*time.Second, 100*time.Millisecond, func(pingCtx context.Context) (helperprotocol.Response, error) {
-		requestCtx, cancel := context.WithTimeout(pingCtx, 2*time.Second)
-		defer cancel()
-		response, pingErr := client.Ping(requestCtx)
-		if pingErr == nil && response.Version != helper.Version {
-			return response, fmt.Errorf(
-				"helper version %q does not match expected version %q",
-				response.Version,
-				helper.Version,
-			)
-		}
-		return response, pingErr
-	})
+	return waitForHelperReady(
+		ctx,
+		20*time.Second,
+		100*time.Millisecond,
+		func(pingCtx context.Context) (helperprotocol.Response, error) {
+			requestCtx, cancel := context.WithTimeout(pingCtx, 2*time.Second)
+			defer cancel()
+			response, pingErr := client.Ping(requestCtx)
+			if pingErr == nil && response.Version != helper.Version {
+				return response, fmt.Errorf(
+					"helper version %q does not match expected version %q",
+					response.Version,
+					helper.Version,
+				)
+			}
+			return response, pingErr
+		},
+	)
 }
 
 func mustMatchBundledHelper(requireCurrentBinary, developmentBuild bool) bool {
@@ -253,7 +258,7 @@ func locateBundledTool(baseName string) (string, error) {
 	// Unix helpers are installed outside the application bundle. Always
 	// materialize the exact bytes embedded in this desktop build first so stale
 	// development/package artifacts cannot be selected as the privileged source.
-	if runtime.GOOS != "windows" {
+	if runtime.GOOS != goosWindows {
 		if path, ok, err := materializeBundledFile(name); ok || err != nil {
 			return path, err
 		}
@@ -317,7 +322,7 @@ func bundledToolCandidates(exe, cwd, name string) []string {
 	// the application's resources directory. On macOS and Linux, however,
 	// BinaryInstallPath points to the already-installed privileged helper. It
 	// must never be treated as the bundled upgrade source.
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == goosWindows {
 		installRoot := filepath.Dir(helper.BinaryInstallPath())
 		candidates = append([]string{
 			filepath.Join(installRoot, name),
@@ -362,8 +367,8 @@ func materializeBundledFile(name string) (string, bool, error) {
 		return "", true, fmt.Errorf("create bundled helper: %w", err)
 	}
 	tempPath := temp.Name()
-	defer os.Remove(tempPath)
-	if err := temp.Chmod(0o700); err != nil && runtime.GOOS != "windows" {
+	defer func() { _ = os.Remove(tempPath) }()
+	if err := temp.Chmod(0o700); err != nil && runtime.GOOS != goosWindows {
 		_ = temp.Close()
 		return "", true, fmt.Errorf("make temporary helper executable: %w", err)
 	}
@@ -402,7 +407,7 @@ func bundledToolSHA256(name, source string) (string, error) {
 }
 
 func helperBinaryName(base string) string {
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == goosWindows {
 		return base + ".exe"
 	}
 	return base

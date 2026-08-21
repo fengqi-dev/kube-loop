@@ -39,7 +39,10 @@ func TestPasswordCredentialsAuthenticate(t *testing.T) {
 	if err := service.SetEnabled(ctx, users[0].IdentityID, false); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.Authenticate(ctx, "ui-test", password); !errors.Is(err, ErrDisabled) {
+	if _, err := service.Authenticate(ctx, "ui-test", password); !errors.Is(
+		err,
+		ErrDisabled,
+	) {
 		t.Fatalf("disabled authentication error = %v", err)
 	}
 	users, err = service.List(ctx)

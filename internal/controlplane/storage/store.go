@@ -19,7 +19,7 @@ import (
 	"github.com/uptrace/bun/dialect/mysqldialect"
 	"github.com/uptrace/bun/dialect/pgdialect"
 	"github.com/uptrace/bun/dialect/sqlitedialect"
-	_ "modernc.org/sqlite"
+	_ "modernc.org/sqlite" // Register the pure-Go SQLite database/sql driver used by this backend.
 )
 
 type Store struct {
@@ -44,7 +44,9 @@ type repositoryTransaction struct {
 func (transaction *repositoryTransaction) Repositories() Repositories {
 	return transaction.repositories
 }
-func (transaction *repositoryTransaction) Commit() error   { return transaction.transaction.Commit() }
+
+func (transaction *repositoryTransaction) Commit() error { return transaction.transaction.Commit() }
+
 func (transaction *repositoryTransaction) Rollback() error { return transaction.transaction.Rollback() }
 
 func Open(ctx context.Context, rawConfig Config) (*Store, error) {
@@ -63,14 +65,21 @@ func Open(ctx context.Context, rawConfig Config) (*Store, error) {
 	case BackendPostgreSQL:
 		postgresConfig, parseErr := pgx.ParseConfig(config.DatasourceURL)
 		if parseErr != nil {
-			return nil, errors.New("initialize PostgreSQL storage configuration")
+			return nil, errors.New(
+				"initialize PostgreSQL storage configuration",
+			)
 		}
 		postgresConfig.ConnectTimeout = config.ConnectTimeout
 		if postgresConfig.RuntimeParams == nil {
 			postgresConfig.RuntimeParams = make(map[string]string)
 		}
-		queryTimeoutMilliseconds := (config.QueryTimeout + time.Millisecond - 1) / time.Millisecond
-		postgresConfig.RuntimeParams["statement_timeout"] = strconv.FormatInt(int64(queryTimeoutMilliseconds), 10)
+		queryTimeoutMillis := int64(
+			(config.QueryTimeout + time.Millisecond - 1) / time.Millisecond,
+		)
+		postgresConfig.RuntimeParams["statement_timeout"] = strconv.FormatInt(
+			queryTimeoutMillis,
+			10,
+		)
 		database = stdlib.OpenDB(*postgresConfig)
 	case BackendMySQL:
 		mysqlConfig, parseErr := parseMySQLURL(config.DatasourceURL)
@@ -81,7 +90,7 @@ func Open(ctx context.Context, rawConfig Config) (*Store, error) {
 		mysqlConfig.ReadTimeout = config.QueryTimeout
 		mysqlConfig.WriteTimeout = config.QueryTimeout
 		mysqlConfig.RejectReadOnly = true
-		database, err = sql.Open("mysql", mysqlConfig.FormatDSN())
+		database, err = sql.Open(string(BackendMySQL), mysqlConfig.FormatDSN())
 	}
 	if err != nil {
 		return nil, fmt.Errorf("initialize %s storage driver", config.Backend)
@@ -95,10 +104,12 @@ func Open(ctx context.Context, rawConfig Config) (*Store, error) {
 		_ = database.Close()
 		return nil, fmt.Errorf("connect to %s storage: %w", config.Backend, err)
 	}
-	orm := bun.NewDB(database, pgdialect.New())
+	var orm *bun.DB
 	switch config.Backend {
 	case BackendSQLite:
 		orm = bun.NewDB(database, sqlitedialect.New())
+	case BackendPostgreSQL:
+		orm = bun.NewDB(database, pgdialect.New())
 	case BackendMySQL:
 		orm = bun.NewDB(database, mysqldialect.New())
 	}
@@ -133,18 +144,19 @@ func prepareSQLite(config Config) (string, error) {
 	}
 	config.SQLitePath = absolute
 	directory := filepath.Dir(absolute)
-	if info, err := os.Lstat(directory); err == nil && info.Mode()&os.ModeSymlink != 0 {
-		return "", errors.New("SQLite directory must not be a symbolic link")
+	if info, err := os.Lstat(directory); err == nil &&
+		info.Mode()&os.ModeSymlink != 0 {
+		return "", errors.New("sQLite directory must not be a symbolic link")
 	}
 	if err := os.MkdirAll(directory, 0o700); err != nil {
 		return "", fmt.Errorf("create SQLite directory: %w", err)
 	}
 	if info, err := os.Lstat(absolute); err == nil {
 		if info.Mode()&os.ModeSymlink != 0 {
-			return "", errors.New("SQLite database must not be a symbolic link")
+			return "", errors.New("sQLite database must not be a symbolic link")
 		}
 		if !info.Mode().IsRegular() {
-			return "", errors.New("SQLite database path must be a regular file")
+			return "", errors.New("sQLite database path must be a regular file")
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return "", fmt.Errorf("inspect SQLite database: %w", err)
@@ -156,9 +168,15 @@ func prepareSQLite(config Config) (string, error) {
 	if err := file.Close(); err != nil {
 		return "", fmt.Errorf("close SQLite database: %w", err)
 	}
-	dsn := sqliteFileURL(absolute, runtime.GOOS == "windows")
+	dsn := sqliteFileURL(absolute, runtime.GOOS == operatingSystemWindows)
 	query := url.Values{}
-	query.Add("_pragma", "busy_timeout("+strconv.FormatInt(config.BusyTimeout.Milliseconds(), 10)+")")
+	query.Add(
+		"_pragma",
+		"busy_timeout("+strconv.FormatInt(
+			config.BusyTimeout.Milliseconds(),
+			10,
+		)+")",
+	)
 	query.Add("_pragma", "foreign_keys(1)")
 	query.Add("_pragma", "journal_mode(WAL)")
 	query.Add("_pragma", "synchronous(NORMAL)")
@@ -184,20 +202,27 @@ func (store *Store) initializeSchema(ctx context.Context) error {
 	if err != nil {
 		return errors.New("begin storage initialization")
 	}
-	defer transaction.Rollback()
+	defer func() { _ = transaction.Rollback() }()
 	mysqlInitializationLock := false
 	defer func() {
 		if mysqlInitializationLock {
-			_, _ = transaction.ExecContext(context.WithoutCancel(ctx), `SELECT RELEASE_LOCK('kubeloop-storage-initialization')`)
+			_, _ = transaction.ExecContext(
+				context.WithoutCancel(ctx),
+				`SELECT RELEASE_LOCK('kubeloop-storage-initialization')`,
+			)
 		}
 	}()
-	if store.backend == BackendPostgreSQL {
+	switch store.backend {
+	case BackendSQLite:
+	case BackendPostgreSQL:
 		if _, err := transaction.ExecContext(ctx, `SELECT pg_advisory_xact_lock(1263816527)`); err != nil {
 			return errors.New("acquire PostgreSQL storage initialization lock")
 		}
-	} else if store.backend == BackendMySQL {
+	case BackendMySQL:
 		var acquired int
-		if err := transaction.QueryRowContext(ctx, `SELECT GET_LOCK('kubeloop-storage-initialization', 10)`).Scan(&acquired); err != nil || acquired != 1 {
+		lockQuery := `SELECT GET_LOCK('kubeloop-storage-initialization', 10)`
+		if err := transaction.QueryRowContext(ctx, lockQuery).Scan(&acquired); err != nil ||
+			acquired != 1 {
 			return errors.New("acquire MySQL storage initialization lock")
 		}
 		mysqlInitializationLock = true
@@ -208,20 +233,33 @@ func (store *Store) initializeSchema(ctx context.Context) error {
 	}
 	if initialized != "" {
 		if initialized != currentSchemaID {
-			return fmt.Errorf("storage schema %q is unsupported; recreate the database", initialized)
+			return fmt.Errorf(
+				"storage schema %q is unsupported; recreate the database",
+				initialized,
+			)
 		}
-		return commitStorageInitialization(transaction, &mysqlInitializationLock, ctx)
+		return commitStorageInitialization(
+			ctx,
+			transaction,
+			&mysqlInitializationLock,
+		)
 	}
 	empty, err := store.databaseIsEmpty(ctx, transaction)
 	if err != nil {
 		return err
 	}
 	if !empty {
-		return errors.New("storage database is not initialized with the current schema; recreate it")
+		return errors.New(
+			"storage database is not initialized with the current schema; recreate it",
+		)
 	}
 	for statementIndex, statement := range schemaStatements(store.backend) {
 		if _, err := transaction.ExecContext(ctx, statement); err != nil {
-			return fmt.Errorf("initialize storage schema statement %d: %w", statementIndex+1, err)
+			return fmt.Errorf(
+				"initialize storage schema statement %d: %w",
+				statementIndex+1,
+				err,
+			)
 		}
 	}
 	if _, err := transaction.ExecContext(ctx, `CREATE TABLE schema_metadata (
@@ -231,22 +269,38 @@ func (store *Store) initializeSchema(ctx context.Context) error {
 	)`); err != nil {
 		return errors.New("create storage schema metadata")
 	}
-	if _, err := transaction.ExecContext(ctx, `INSERT INTO schema_metadata(id, schema_id, initialized_at) VALUES (?, ?, ?)`, 1, currentSchemaID, formatTime(time.Now())); err != nil {
+	insertMetadata := `INSERT INTO schema_metadata(id, schema_id, initialized_at) VALUES (?, ?, ?)`
+	if _, err := transaction.ExecContext(
+		ctx,
+		insertMetadata,
+		1,
+		currentSchemaID,
+		formatTime(time.Now()),
+	); err != nil {
 		return errors.New("record storage schema identity")
 	}
-	return commitStorageInitialization(transaction, &mysqlInitializationLock, ctx)
+	return commitStorageInitialization(
+		ctx,
+		transaction,
+		&mysqlInitializationLock,
+	)
 }
 
-func (store *Store) readSchemaID(ctx context.Context, transaction bun.Tx) (string, error) {
+func (store *Store) readSchemaID(
+	ctx context.Context,
+	transaction bun.Tx,
+) (string, error) {
 	var exists int
 	var query string
 	switch store.backend {
-	case BackendPostgreSQL:
-		query = `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = current_schema() AND table_name = 'schema_metadata'`
-	case BackendMySQL:
-		query = `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'schema_metadata'`
-	default:
+	case BackendSQLite:
 		query = `SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'schema_metadata'`
+	case BackendPostgreSQL:
+		query = `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = current_schema()` +
+			` AND table_name = 'schema_metadata'`
+	case BackendMySQL:
+		query = `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE()` +
+			` AND table_name = 'schema_metadata'`
 	}
 	if err := transaction.QueryRowContext(ctx, query).Scan(&exists); err != nil {
 		return "", errors.New("inspect storage schema metadata")
@@ -255,22 +309,28 @@ func (store *Store) readSchemaID(ctx context.Context, transaction bun.Tx) (strin
 		return "", nil
 	}
 	var schemaID string
-	if err := transaction.QueryRowContext(ctx, `SELECT schema_id FROM schema_metadata WHERE id = 1`).Scan(&schemaID); err != nil {
+	schemaIDQuery := `SELECT schema_id FROM schema_metadata WHERE id = 1`
+	if err := transaction.QueryRowContext(ctx, schemaIDQuery).Scan(&schemaID); err != nil {
 		return "", errors.New("read storage schema identity")
 	}
 	return schemaID, nil
 }
 
-func (store *Store) databaseIsEmpty(ctx context.Context, transaction bun.Tx) (bool, error) {
+func (store *Store) databaseIsEmpty(
+	ctx context.Context,
+	transaction bun.Tx,
+) (bool, error) {
 	var count int
 	var query string
 	switch store.backend {
-	case BackendPostgreSQL:
-		query = `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = current_schema() AND table_type = 'BASE TABLE'`
-	case BackendMySQL:
-		query = `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_type = 'BASE TABLE'`
-	default:
+	case BackendSQLite:
 		query = `SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'`
+	case BackendPostgreSQL:
+		query = `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = current_schema()` +
+			` AND table_type = 'BASE TABLE'`
+	case BackendMySQL:
+		query = `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE()` +
+			` AND table_type = 'BASE TABLE'`
 	}
 	if err := transaction.QueryRowContext(ctx, query).Scan(&count); err != nil {
 		return false, errors.New("inspect storage database")
@@ -278,9 +338,16 @@ func (store *Store) databaseIsEmpty(ctx context.Context, transaction bun.Tx) (bo
 	return count == 0, nil
 }
 
-func commitStorageInitialization(transaction bun.Tx, mysqlLock *bool, ctx context.Context) error {
+func commitStorageInitialization(
+	ctx context.Context,
+	transaction bun.Tx,
+	mysqlLock *bool,
+) error {
 	if *mysqlLock {
-		if _, err := transaction.ExecContext(ctx, `SELECT RELEASE_LOCK('kubeloop-storage-initialization')`); err != nil {
+		if _, err := transaction.ExecContext(
+			ctx,
+			`SELECT RELEASE_LOCK('kubeloop-storage-initialization')`,
+		); err != nil {
 			return errors.New("release MySQL storage initialization lock")
 		}
 		*mysqlLock = false
@@ -297,7 +364,7 @@ func (store *Store) checkSQLiteIntegrity(ctx context.Context) error {
 		return errors.New("run SQLite integrity check")
 	}
 	if !strings.EqualFold(result, "ok") {
-		return errors.New("SQLite integrity check failed")
+		return errors.New("sQLite integrity check failed")
 	}
 	return nil
 }
@@ -357,9 +424,12 @@ func (store *Store) AdminSessions() AdminSessionRepository {
 	return store.repositories.AdminSessions()
 }
 
-func (store *Store) OAuthClients() OAuthClientRepository   { return store.repositories.OAuthClients() }
+func (store *Store) OAuthClients() OAuthClientRepository { return store.repositories.OAuthClients() }
+
 func (store *Store) OAuthSessions() OAuthSessionRepository { return store.repositories.OAuthSessions() }
+
 func (store *Store) OAuthConsents() OAuthConsentRepository { return store.repositories.OAuthConsents() }
+
 func (store *Store) OAuthAuthorizationRequests() OAuthAuthorizationRequestRepository {
 	return store.repositories.OAuthAuthorizationRequests()
 }
@@ -367,14 +437,19 @@ func (store *Store) OAuthBrowserSessions() OAuthBrowserSessionRepository {
 	return store.repositories.OAuthBrowserSessions()
 }
 
-func (store *Store) WithinTransaction(ctx context.Context, function func(Repositories) error) error {
+func (store *Store) WithinTransaction(
+	ctx context.Context,
+	function func(Repositories) error,
+) error {
 	if function == nil {
 		return errors.New("transaction callback is required")
 	}
 	for attempt := 0; ; attempt++ {
 		err := store.withinTransactionAttempt(ctx, function)
 		if err == nil || store.backend == BackendSQLite ||
-			!isRetryableTransactionError(err) || attempt >= store.transactionMaxRetries {
+			!isRetryableTransactionError(
+				err,
+			) || attempt >= store.transactionMaxRetries {
 			return err
 		}
 		if err := waitForTransactionRetry(ctx, store.transactionRetryBackoff, attempt); err != nil {
@@ -383,7 +458,9 @@ func (store *Store) WithinTransaction(ctx context.Context, function func(Reposit
 	}
 }
 
-func (store *Store) BeginTransaction(ctx context.Context) (RepositoryTransaction, error) {
+func (store *Store) BeginTransaction(
+	ctx context.Context,
+) (RepositoryTransaction, error) {
 	var options *sql.TxOptions
 	if store.backend != BackendSQLite {
 		options = &sql.TxOptions{Isolation: sql.LevelSerializable}
@@ -393,10 +470,17 @@ func (store *Store) BeginTransaction(ctx context.Context) (RepositoryTransaction
 		return nil, databaseError("begin storage transaction", err)
 	}
 	return &repositoryTransaction{transaction: transaction,
-		repositories: newRepositorySet(store.backend, transaction.Tx, transaction)}, nil
+		repositories: newRepositorySet(
+			store.backend,
+			transaction.Tx,
+			transaction,
+		)}, nil
 }
 
-func (store *Store) withinTransactionAttempt(ctx context.Context, function func(Repositories) error) error {
+func (store *Store) withinTransactionAttempt(
+	ctx context.Context,
+	function func(Repositories) error,
+) error {
 	var options *sql.TxOptions
 	if store.backend != BackendSQLite {
 		options = &sql.TxOptions{Isolation: sql.LevelSerializable}
@@ -405,7 +489,7 @@ func (store *Store) withinTransactionAttempt(ctx context.Context, function func(
 	if err != nil {
 		return databaseError("begin storage transaction", err)
 	}
-	defer transaction.Rollback()
+	defer func() { _ = transaction.Rollback() }()
 	if err := function(newRepositorySet(store.backend, transaction.Tx, transaction)); err != nil {
 		return err
 	}
@@ -415,7 +499,11 @@ func (store *Store) withinTransactionAttempt(ctx context.Context, function func(
 	return nil
 }
 
-func waitForTransactionRetry(ctx context.Context, base time.Duration, attempt int) error {
+func waitForTransactionRetry(
+	ctx context.Context,
+	base time.Duration,
+	attempt int,
+) error {
 	delay := min(base*time.Duration(1<<attempt), time.Second)
 	timer := time.NewTimer(delay)
 	defer timer.Stop()

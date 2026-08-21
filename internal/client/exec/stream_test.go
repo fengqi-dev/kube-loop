@@ -8,11 +8,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/execstream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
-	"github.com/google/uuid"
 )
 
 type streamClient struct{ endpoint string }
@@ -21,7 +22,16 @@ func (client streamClient) CreateExecTask(
 	context.Context, profile.Profile, remote.Session, remote.ExecSpec, string,
 ) (remote.ExecTask, error) {
 	now := time.Now().UTC()
-	return remote.ExecTask{ID: uuid.NewString(), SessionID: "session", Namespace: "development", State: "pending", Pod: "api-0", CreatedAt: now, UpdatedAt: now, ExpiresAt: now.Add(time.Minute)}, nil
+	return remote.ExecTask{
+		ID:        uuid.NewString(),
+		SessionID: "session",
+		Namespace: "development",
+		State:     "pending",
+		Pod:       "api-0",
+		CreatedAt: now,
+		UpdatedAt: now,
+		ExpiresAt: now.Add(time.Minute),
+	}, nil
 }
 
 func (client streamClient) OpenExecStream(
@@ -39,7 +49,7 @@ func TestTypedStreamSeparatesInputResizeOutputAndExit(t *testing.T) {
 			t.Error(err)
 			return
 		}
-		defer connection.CloseNow()
+		defer checkTestClose(t, connection.CloseNow)
 		for range 2 {
 			_, encoded, err := connection.Read(request.Context())
 			if err != nil {
@@ -57,11 +67,17 @@ func TestTypedStreamSeparatesInputResizeOutputAndExit(t *testing.T) {
 		_ = connection.Write(request.Context(), websocket.MessageBinary, stdout)
 	}))
 	defer server.Close()
-	stream, err := Start(context.Background(), streamClient{endpoint: "ws" + strings.TrimPrefix(server.URL, "http")}, profile.Profile{ID: "server"}, remote.Session{ID: "session", Namespace: "development", State: "active"}, remote.ExecSpec{Pod: "api-0", Command: []string{"/bin/sh"}})
+	stream, err := Start(
+		context.Background(),
+		streamClient{endpoint: "ws" + strings.TrimPrefix(server.URL, "http")},
+		profile.Profile{ID: "server"},
+		remote.Session{ID: "session", Namespace: "development", State: "active"},
+		remote.ExecSpec{Pod: "api-0", Command: []string{"/bin/sh"}},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer stream.Close()
+	defer checkTestClose(t, stream.Close)
 	if err := stream.WriteStdin(context.Background(), []byte("echo\n")); err != nil {
 		t.Fatal(err)
 	}

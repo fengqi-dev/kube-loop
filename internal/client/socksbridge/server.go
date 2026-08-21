@@ -10,11 +10,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/fengqi-dev/kube-loop/internal/protocol/streamcopy"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
 	"github.com/things-go/go-socks5"
 	"github.com/things-go/go-socks5/bufferpool"
 	"github.com/things-go/go-socks5/statute"
+
+	"github.com/fengqi-dev/kube-loop/internal/protocol/streamcopy"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
 )
 
 // HostTCPHandler claims intercepted Service destinations on the host TUN path.
@@ -53,7 +54,7 @@ type ListenOption func(*listenConfig) error
 func WithTCPInspector(factory TCPInspectorFactory) ListenOption {
 	return func(config *listenConfig) error {
 		if factory == nil {
-			return errors.New("TCP inspector factory is required")
+			return errors.New("tCP inspector factory is required")
 		}
 		config.inspectorFactory = factory
 		return nil
@@ -77,6 +78,7 @@ type Server struct {
 // Bridge is the local SOCKS listener used by sing-box's kubernetes outbound.
 type Bridge struct {
 	net.Listener
+
 	server    *Server
 	closeOnce sync.Once
 	closeErr  error
@@ -159,7 +161,7 @@ func (s *Server) handleConnect(
 	ctx context.Context,
 	writer io.Writer,
 	request *socks5.Request,
-) error {
+) (resultErr error) {
 	host, port, err := destination(request.DestAddr)
 	if err != nil {
 		_ = socks5.SendReply(writer, statute.RepAddrTypeNotSupported, nil)
@@ -173,7 +175,7 @@ func (s *Server) handleConnect(
 			client, ok := writer.(net.Conn)
 			if !ok {
 				_ = socks5.SendReply(writer, statute.RepServerFailure, nil)
-				return errors.New("SOCKS client is not a network connection")
+				return errors.New("sOCKS client is not a network connection")
 			}
 			if err := socks5.SendReply(writer, statute.RepSuccess, client.LocalAddr()); err != nil {
 				return err
@@ -186,7 +188,7 @@ func (s *Server) handleConnect(
 		client, ok := writer.(net.Conn)
 		if !ok {
 			_ = socks5.SendReply(writer, statute.RepServerFailure, nil)
-			return errors.New("SOCKS client is not a network connection")
+			return errors.New("sOCKS client is not a network connection")
 		}
 		if err := socks5.SendReply(writer, statute.RepSuccess, client.LocalAddr()); err != nil {
 			return err
@@ -207,7 +209,11 @@ func (s *Server) handleConnect(
 		_ = socks5.SendReply(writer, statute.RepConnectionRefused, nil)
 		return err
 	}
-	defer target.Close()
+	defer func() {
+		if err := target.Close(); err != nil {
+			resultErr = errors.Join(resultErr, fmt.Errorf("close SOCKS target: %w", err))
+		}
+	}()
 	if err := socks5.SendReply(writer, statute.RepSuccess, request.LocalAddr); err != nil {
 		return err
 	}
@@ -269,14 +275,14 @@ func (s *Server) openGateway(
 		Command: command, Host: host, Port: port,
 	}
 	if err := tunnel.WriteOpen(connection, request, sessionToken); err != nil {
-		connection.Close()
+		closeErr := connection.Close()
 		s.logf("%s connect %s failed: %v", protocol, destination, err)
-		return nil, err
+		return nil, errors.Join(err, closeErr)
 	}
 	if err := tunnel.ReadStatus(connection); err != nil {
-		connection.Close()
+		closeErr := connection.Close()
 		s.logf("%s connect %s failed: %v", protocol, destination, err)
-		return nil, err
+		return nil, errors.Join(err, closeErr)
 	}
 	s.logf("%s connected %s", protocol, destination)
 	return connection, nil
@@ -336,7 +342,7 @@ func Listen(
 			return nil, err
 		}
 	}
-	listener, err := net.Listen("tcp", listenAddress)
+	listener, err := (&net.ListenConfig{}).Listen(ctx, "tcp", listenAddress)
 	if err != nil {
 		return nil, err
 	}
@@ -350,7 +356,7 @@ func Listen(
 	}
 	go func() {
 		<-ctx.Done()
-		listener.Close()
+		_ = listener.Close() // Closing only wakes Serve after cancellation; no caller can act on the result.
 	}()
 	go func() { _ = server.Serve(listener) }()
 	return &Bridge{Listener: listener, server: server}, nil

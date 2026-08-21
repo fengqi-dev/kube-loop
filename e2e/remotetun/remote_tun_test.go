@@ -17,6 +17,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/fengqi-dev/kube-loop/e2e/harness"
 	clientapp "github.com/fengqi-dev/kube-loop/internal/app"
 	clientdataplane "github.com/fengqi-dev/kube-loop/internal/client/dataplane"
@@ -28,7 +30,6 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/helper"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/relayticket"
-	"github.com/google/uuid"
 )
 
 const (

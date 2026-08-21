@@ -19,8 +19,9 @@ func (config *Config) normalize() error {
 	if config.DeleteTimeout == 0 {
 		config.DeleteTimeout = defaultDeleteTimeout
 	}
-	if config.DeleteTimeout < time.Second || config.DeleteTimeout > 5*time.Minute {
-		return errors.New("Preview delete timeout must be between 1s and 5m")
+	if config.DeleteTimeout < time.Second ||
+		config.DeleteTimeout > 5*time.Minute {
+		return errors.New("preview delete timeout must be between 1s and 5m")
 	}
 	return nil
 }

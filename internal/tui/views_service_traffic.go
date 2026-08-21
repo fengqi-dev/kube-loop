@@ -20,40 +20,40 @@ func (m Model) updateServiceTrafficAction(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		fields = 5
 	}
 	switch msg.String() {
-	case "tab":
+	case keyTab:
 		m.actionField = (m.actionField + 1) % fields
 		return m, nil
-	case "shift+tab":
+	case keyShiftTab:
 		m.actionField = (m.actionField - 1 + fields) % fields
 		return m, nil
 	case "up":
 		m.actionField = (m.actionField - 1 + fields) % fields
 		return m, nil
-	case "down":
+	case keyDown:
 		m.actionField = (m.actionField + 1) % fields
 		return m, nil
-	case "left":
+	case keyLeft:
 		if m.actionMode == actionPreview && m.actionField == 1 {
 			m.toggleActionProtocol()
 		} else if m.actionMode != actionPreview && m.actionField == 0 && len(m.actionPorts) > 1 {
 			m.actionPortIndex = (m.actionPortIndex - 1 + len(m.actionPorts)) % len(m.actionPorts)
 			m.selectActionPort()
-			m.actionLocalPort = fmt.Sprint(m.actionPort)
+			m.actionLocalPort = strconv.Itoa(int(m.actionPort))
 		}
 		return m, nil
-	case "right", " ":
+	case keyRight, " ":
 		if m.actionMode == actionPreview && m.actionField == 1 {
 			m.toggleActionProtocol()
 		} else if m.actionMode != actionPreview && m.actionField == 0 && len(m.actionPorts) > 1 {
 			m.actionPortIndex = (m.actionPortIndex + 1) % len(m.actionPorts)
 			m.selectActionPort()
-			m.actionLocalPort = fmt.Sprint(m.actionPort)
+			m.actionLocalPort = strconv.Itoa(int(m.actionPort))
 		}
 		return m, nil
-	case "backspace":
+	case keyBackspace:
 		m.backspaceServiceTrafficField()
 		return m, nil
-	case "enter":
+	case keyEnter:
 		if err := m.validateServiceTrafficAction(); err != nil {
 			m.err = err.Error()
 			return m, nil
@@ -90,9 +90,10 @@ func (m *Model) backspaceServiceTrafficField() {
 		}
 		return
 	}
-	if m.actionField == 1 {
+	switch m.actionField {
+	case 1:
 		m.actionLocalHost = trimLastRune(m.actionLocalHost)
-	} else if m.actionField == 2 {
+	case 2:
 		m.actionLocalPort = trimLastRune(m.actionLocalPort)
 	}
 }
@@ -118,9 +119,10 @@ func (m *Model) appendServiceTrafficInput(runes []rune) {
 		}
 		return
 	}
-	if m.actionField == 1 {
+	switch m.actionField {
+	case 1:
 		m.actionLocalHost += string(runes)
-	} else if m.actionField == 2 {
+	case 2:
 		appendPort(&m.actionLocalPort)
 	}
 }
@@ -168,16 +170,49 @@ func (m Model) startServiceTraffic() tea.Cmd {
 		localHost := strings.TrimSpace(m.actionLocalHost)
 		switch m.actionMode {
 		case actionExchange:
-			_, err = m.state.exchanges.Start(m.state.ctx, profile, session, clientexchange.Request{ProfileID: profile.ID, Service: m.actionService, Targets: []clientexchange.LocalTarget{{ServicePort: m.actionPort, Protocol: m.actionProtocol, LocalHost: localHost, LocalPort: localPort}}})
+			request := clientexchange.Request{
+				ProfileID: profile.ID,
+				Service:   m.actionService,
+				Targets: []clientexchange.LocalTarget{{
+					ServicePort: m.actionPort,
+					Protocol:    m.actionProtocol,
+					LocalHost:   localHost,
+					LocalPort:   localPort,
+				}},
+			}
+			_, err = m.state.exchanges.Start(m.state.ctx, profile, session, request)
 			return trafficOperationStartedMsg{kind: "Exchange", target: m.actionService, err: err}
 		case actionMirror:
-			_, err = m.state.mirrors.Start(m.state.ctx, profile, session, clientmirror.Request{ProfileID: profile.ID, Service: m.actionService, Targets: []clientmirror.LocalTarget{{ServicePort: m.actionPort, Protocol: m.actionProtocol, LocalHost: localHost, LocalPort: localPort}}})
+			request := clientmirror.Request{
+				ProfileID: profile.ID,
+				Service:   m.actionService,
+				Targets: []clientmirror.LocalTarget{{
+					ServicePort: m.actionPort,
+					Protocol:    m.actionProtocol,
+					LocalHost:   localHost,
+					LocalPort:   localPort,
+				}},
+			}
+			_, err = m.state.mirrors.Start(m.state.ctx, profile, session, request)
 			return trafficOperationStartedMsg{kind: "Mirror", target: m.actionService, err: err}
 		case actionPreview:
 			servicePort, _ := parseActionPort(m.actionServicePort, false)
 			name := strings.TrimSpace(m.actionPreviewName)
-			_, err = m.state.previews.Start(m.state.ctx, profile, session, clientpreview.Request{ProfileID: profile.ID, Namespace: session.Namespace, Name: name, Targets: []clientpreview.LocalTarget{{ServicePort: int32(servicePort), Protocol: m.actionProtocol, LocalHost: localHost, LocalPort: localPort}}})
+			request := clientpreview.Request{
+				ProfileID: profile.ID,
+				Namespace: session.Namespace,
+				Name:      name,
+				Targets: []clientpreview.LocalTarget{{
+					ServicePort: int32(servicePort),
+					Protocol:    m.actionProtocol,
+					LocalHost:   localHost,
+					LocalPort:   localPort,
+				}},
+			}
+			_, err = m.state.previews.Start(m.state.ctx, profile, session, request)
 			return trafficOperationStartedMsg{kind: "Preview", target: name, err: err}
+		case actionNone, actionPortForward, actionExec:
+			return trafficOperationStartedMsg{err: fmt.Errorf("traffic operation is invalid")}
 		}
 		return trafficOperationStartedMsg{err: fmt.Errorf("traffic operation is invalid")}
 	}
@@ -185,7 +220,11 @@ func (m Model) startServiceTraffic() tea.Cmd {
 
 func loadTrafficOperations(state *State, profileID string) tea.Cmd {
 	return func() tea.Msg {
-		return trafficOperationsLoadedMsg{exchanges: state.exchanges.List(profileID), mirrors: state.mirrors.List(profileID), previews: state.previews.List(profileID)}
+		return trafficOperationsLoadedMsg{
+			exchanges: state.exchanges.List(profileID),
+			mirrors:   state.mirrors.List(profileID),
+			previews:  state.previews.List(profileID),
+		}
 	}
 }
 
@@ -208,17 +247,41 @@ func (m Model) viewServiceTrafficAction(width, height int) string {
 	}
 	var values string
 	if m.actionMode == actionPreview {
-		values = "Target: Preview Service\n\n" + line(0, "Name        ", m.actionPreviewName) + "\n" + line(1, "Protocol    ", strings.ToUpper(m.actionProtocol)) + "\n" + line(2, "Service port", m.actionServicePort) + "\n" + line(3, "Local host  ", m.actionLocalHost) + "\n" + line(4, "Local port  ", firstNonEmpty(m.actionLocalPort, "0 (auto)"))
+		values = strings.Join([]string{
+			"Target: Preview Service",
+			"",
+			line(0, "Name        ", m.actionPreviewName),
+			line(1, "Protocol    ", strings.ToUpper(m.actionProtocol)),
+			line(2, "Service port", m.actionServicePort),
+			line(3, "Local host  ", m.actionLocalHost),
+			line(4, "Local port  ", firstNonEmpty(m.actionLocalPort, "0 (auto)")),
+		}, "\n")
 	} else {
 		port := fmt.Sprintf("%d/%s", m.actionPort, strings.ToUpper(m.actionProtocol))
-		values = "Target: " + m.actionService + "\n\n" + line(0, "Service port", port) + "\n" + line(1, "Local host  ", m.actionLocalHost) + "\n" + line(2, "Local port  ", firstNonEmpty(m.actionLocalPort, "0 (auto)"))
+		values = strings.Join([]string{
+			"Target: " + m.actionService,
+			"",
+			line(0, "Service port", port),
+			line(1, "Local host  ", m.actionLocalHost),
+			line(2, "Local port  ", firstNonEmpty(m.actionLocalPort, "0 (auto)")),
+		}, "\n")
 	}
 	controls := consoleSubtle.Render("↑/↓ field   ←/→ select   Tab next")
-	box := consoleOverlayBox.Copy().Width(minInt(68, width-8)).Render(consoleSection.Render(title) + "\n\n" + description + "\n\n" + consoleValue.Render(values) + "\n\n" + controls + "\n\n" + consoleButton.Render(" Enter  Start ") + "  Esc cancel")
+	content := consoleSection.Render(title) + "\n\n" +
+		description + "\n\n" +
+		consoleValue.Render(values) + "\n\n" +
+		controls + "\n\n" +
+		consoleButton.Render(" Enter  Start ") + "  Esc cancel"
+	box := consoleOverlayBox.Width(minInt(68, width-8)).Render(content)
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, box)
 }
 
-func trafficConsoleRow(label, kind string, index int, name, namespace, clusterIP, state string, targets []clientreverserelay.Target) consoleRow {
+func trafficConsoleRow(
+	label, kind string,
+	index int,
+	name, namespace, clusterIP, state string,
+	targets []clientreverserelay.Target,
+) consoleRow {
 	detail := fmt.Sprintf("State: %s\nNamespace: %s\nCluster IP: %s", state, namespace, clusterIP)
 	meta := clusterIP
 	copyValue := clusterIP
@@ -226,7 +289,13 @@ func trafficConsoleRow(label, kind string, index int, name, namespace, clusterIP
 		target := targets[0]
 		meta = fmt.Sprintf("%s:%d -> %s:%d", clusterIP, target.ServicePort, target.LocalHost, target.LocalPort)
 		copyValue = fmt.Sprintf("%s:%d", clusterIP, target.ServicePort)
-		detail += fmt.Sprintf("\nProtocol: %s\nService port: %d\nLocal target: %s:%d", target.Protocol, target.ServicePort, target.LocalHost, target.LocalPort)
+		detail += fmt.Sprintf(
+			"\nProtocol: %s\nService port: %d\nLocal target: %s:%d",
+			target.Protocol,
+			target.ServicePort,
+			target.LocalHost,
+			target.LocalPort,
+		)
 	}
 	return consoleRow{title: name, status: label, kind: kind, index: index, meta: meta, copy: copyValue, detail: detail}
 }
@@ -234,7 +303,21 @@ func trafficConsoleRow(label, kind string, index int, name, namespace, clusterIP
 func mirrorConsoleRow(index int, task clientmirror.Info) consoleRow {
 	targets := make([]clientreverserelay.Target, 0, len(task.Targets))
 	for _, target := range task.Targets {
-		targets = append(targets, clientreverserelay.Target{ServicePort: target.ServicePort, Protocol: target.Protocol, LocalHost: target.LocalHost, LocalPort: target.LocalPort})
+		targets = append(targets, clientreverserelay.Target{
+			ServicePort: target.ServicePort,
+			Protocol:    target.Protocol,
+			LocalHost:   target.LocalHost,
+			LocalPort:   target.LocalPort,
+		})
 	}
-	return trafficConsoleRow("MIRROR", "mirror", index, task.Service, task.Namespace, task.ClusterIP, task.State, targets)
+	return trafficConsoleRow(
+		"MIRROR",
+		"mirror",
+		index,
+		task.Service,
+		task.Namespace,
+		task.ClusterIP,
+		task.State,
+		targets,
+	)
 }

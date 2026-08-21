@@ -15,6 +15,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/fengqi-dev/kube-loop/internal/controlplane"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/authorization"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
@@ -24,7 +26,6 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/protocol/filestream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
-	"github.com/google/uuid"
 )
 
 type sessionValidator struct {
@@ -42,12 +43,24 @@ func serveAPI(
 	t.Helper()
 	policy := authorization.NewAuthenticated()
 	server, err := controlplane.NewServer(
-		controlplane.Config{PublicURL: "https://gateway.example.test"}, controlplane.BuildInfo{},
+		controlplane.Config{PublicURL: "https://gateway.example.test"},
+		controlplane.BuildInfo{},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
-		controlplane.WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(*http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
-			return identity, nil
-		})),
-		controlplane.WithAuthorizer(policy), controlplane.WithAPIRoutes(controlplane.APIRoutes{FileTransfers: fileapi.NewRoutes(handler).Endpoints()}),
+		controlplane.WithAuthenticator(
+			controlplaneapi.AuthenticatorFunc(
+				func(*http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
+					return identity, nil
+				},
+			),
+		),
+		controlplane.WithAuthorizer(
+			policy,
+		),
+		controlplane.WithAPIRoutes(
+			controlplane.APIRoutes{
+				FileTransfers: fileapi.NewRoutes(handler).Endpoints(),
+			},
+		),
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -56,7 +69,10 @@ func serveAPI(
 	if response.Code < http.StatusBadRequest {
 		return nil
 	}
-	return &controlplaneapi.Error{Code: mapStatus(response.Code), Message: response.Body.String()}
+	return &controlplaneapi.Error{
+		Code:    mapStatus(response.Code),
+		Message: response.Body.String(),
+	}
 }
 
 func mapStatus(status int) controlplaneapi.ErrorCode {
@@ -77,8 +93,13 @@ func (validator sessionValidator) RequireActive(
 	identity controlplaneapi.Identity,
 	namespace, sessionID string,
 ) (sessionapi.ActiveSession, *controlplaneapi.Error) {
-	if identity.Subject != validator.identityID || namespace != validator.session.Namespace || sessionID != validator.session.ID {
-		return sessionapi.ActiveSession{}, &controlplaneapi.Error{Code: controlplaneapi.CodeNotFound, Message: "resource not found"}
+	if identity.Subject != validator.identityID ||
+		namespace != validator.session.Namespace ||
+		sessionID != validator.session.ID {
+		return sessionapi.ActiveSession{}, &controlplaneapi.Error{
+			Code:    controlplaneapi.CodeNotFound,
+			Message: "resource not found",
+		}
 	}
 	return validator.session, nil
 }
@@ -90,23 +111,39 @@ type targetResolver struct {
 
 type transferExecutor struct{}
 
-func (transferExecutor) UploadOffset(context.Context, controlplaneapi.Identity, string, fileapi.Spec) (uint64, error) {
+func (transferExecutor) UploadOffset(
+	context.Context,
+	controlplaneapi.Identity,
+	string,
+	fileapi.Spec,
+) (uint64, error) {
 	return 0, nil
 }
 
 type offsetExecutor struct {
 	transferExecutor
+
 	offset uint64
 	calls  int
 }
 
-func (executor *offsetExecutor) UploadOffset(context.Context, controlplaneapi.Identity, string, fileapi.Spec) (uint64, error) {
+func (executor *offsetExecutor) UploadOffset(
+	context.Context,
+	controlplaneapi.Identity,
+	string,
+	fileapi.Spec,
+) (uint64, error) {
 	executor.calls++
 	return executor.offset, nil
 }
 
 func (transferExecutor) Upload(
-	context.Context, controlplaneapi.Identity, string, string, fileapi.Spec, io.Reader,
+	context.Context,
+	controlplaneapi.Identity,
+	string,
+	string,
+	fileapi.Spec,
+	io.Reader,
 ) (fileapi.Outcome, error) {
 	return fileapi.Outcome{}, nil
 }
@@ -119,7 +156,12 @@ type streamExecutor struct {
 	downloadCalls int
 }
 
-func (*streamExecutor) UploadOffset(context.Context, controlplaneapi.Identity, string, fileapi.Spec) (uint64, error) {
+func (*streamExecutor) UploadOffset(
+	context.Context,
+	controlplaneapi.Identity,
+	string,
+	fileapi.Spec,
+) (uint64, error) {
 	return 0, nil
 }
 
@@ -139,7 +181,11 @@ func (executor *streamExecutor) Upload(
 	executor.uploaded = append([]byte(nil), contents...)
 	executor.uploadCalls++
 	executor.mu.Unlock()
-	return fileapi.Outcome{Transferred: uint64(len(contents)), Checksum: checksum, HasChecksum: true}, nil
+	return fileapi.Outcome{
+		Transferred: uint64(len(contents)),
+		Checksum:    checksum,
+		HasChecksum: true,
+	}, nil
 }
 
 func (executor *streamExecutor) Download(
@@ -161,7 +207,11 @@ func (executor *streamExecutor) Download(
 		return fileapi.Outcome{}, err
 	}
 	checksum := sha256.Sum256(contents)
-	return fileapi.Outcome{Transferred: uint64(len(contents)), Checksum: checksum, HasChecksum: true}, nil
+	return fileapi.Outcome{
+		Transferred: uint64(len(contents)),
+		Checksum:    checksum,
+		HasChecksum: true,
+	}, nil
 }
 
 func (transferExecutor) Download(
@@ -191,31 +241,80 @@ func (resolver *targetResolver) ResolveContainer(
 func TestFileTransferTaskIsValidatedOwnedAndIdempotent(t *testing.T) {
 	now := time.Now().UTC()
 	stateStore, identityID, sessionID, expiresAt := createStore(t, now)
-	defer stateStore.Close()
+	defer func() { _ = stateStore.Close() }()
 	resolver := &targetResolver{}
-	handler, err := fileapi.New(stateStore, sessionValidator{identityID: identityID, session: sessionapi.ActiveSession{
-		ID: sessionID, Namespace: "development", ExpiresAt: expiresAt,
-	}}, resolver, transferExecutor{}, fileapi.Config{Now: func() time.Time { return now }, AllowedPathRoots: []string{"/workspace"}})
+	handler, err := fileapi.New(
+		stateStore,
+		sessionValidator{
+			identityID: identityID,
+			session: sessionapi.ActiveSession{
+				ID: sessionID, Namespace: "development", ExpiresAt: expiresAt,
+			},
+		},
+		resolver,
+		transferExecutor{},
+		fileapi.Config{
+			Now:              func() time.Time { return now },
+			AllowedPathRoots: []string{"/workspace"},
+		},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
 	policy := authorization.NewAuthenticated()
-	server, err := controlplane.NewServer(controlplane.Config{PublicURL: "https://gateway.example.test"}, controlplane.BuildInfo{},
+	server, err := controlplane.NewServer(
+		controlplane.Config{PublicURL: "https://gateway.example.test"},
+		controlplane.BuildInfo{},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
-		controlplane.WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(request *http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
-			return controlplaneapi.Identity{Subject: request.Header.Get("X-Identity"), DeviceID: "device"}, nil
-		})), controlplane.WithAuthorizer(policy), controlplane.WithAPIRoutes(controlplane.APIRoutes{FileTransfers: fileapi.NewRoutes(handler).Endpoints()}))
+		controlplane.WithAuthenticator(
+			controlplaneapi.AuthenticatorFunc(
+				func(request *http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
+					return controlplaneapi.Identity{
+						Subject:  request.Header.Get("X-Identity"),
+						DeviceID: "device",
+					}, nil
+				},
+			),
+		),
+		controlplane.WithAuthorizer(policy),
+		controlplane.WithAPIRoutes(
+			controlplane.APIRoutes{
+				FileTransfers: fileapi.NewRoutes(handler).Endpoints(),
+			},
+		),
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
 	httpServer := httptest.NewServer(server.Handler())
 	defer httpServer.Close()
-	body := `{"direction":"upload","kind":"file","pod":"api-0","remotePath":"/workspace/data.bin","size":7,"checksum":"` + strings.Repeat("ab", 32) + `","overwrite":true}`
-	document := createTask(t, httpServer.URL, identityID, sessionID, "file-1", body, http.StatusCreated)
-	if document.State != "pending" || document.Container != "api" || document.RemotePath != "/workspace/data.bin" || document.Size != 7 {
+	body := `{"direction":"upload","kind":"file","pod":"api-0","remotePath":"/workspace/data.bin","size":7,"checksum":"` + strings.Repeat(
+		"ab",
+		32,
+	) + `","overwrite":true}`
+	document := createTask(
+		t,
+		httpServer.URL,
+		identityID,
+		sessionID,
+		"file-1",
+		body,
+		http.StatusCreated,
+	)
+	if document.State != "pending" || document.Container != "api" ||
+		document.RemotePath != "/workspace/data.bin" ||
+		document.Size != 7 {
 		t.Fatalf("created document = %#v", document)
 	}
-	replayed := createTask(t, httpServer.URL, identityID, sessionID, "file-1", body, http.StatusOK)
+	replayed := createTask(
+		t,
+		httpServer.URL,
+		identityID,
+		sessionID,
+		"file-1",
+		body,
+		http.StatusOK,
+	)
 	if replayed.ID != document.ID {
 		t.Fatalf("replayed task = %#v, want %s", replayed, document.ID)
 	}
@@ -224,30 +323,56 @@ func TestFileTransferTaskIsValidatedOwnedAndIdempotent(t *testing.T) {
 		t.Fatalf("target resolver calls = %d", resolver.calls)
 	}
 	resolver.mu.Unlock()
-	getRequest, _ := http.NewRequest(http.MethodGet, httpServer.URL+"/api/sessions/"+sessionID+"/file-transfers/"+document.ID+"?namespace=development", nil)
+	getRequest, _ := http.NewRequest(
+		http.MethodGet,
+		httpServer.URL+"/api/sessions/"+sessionID+"/file-transfers/"+document.ID+"?namespace=development",
+		nil,
+	)
 	getRequest.Header.Set("X-Identity", identityID)
 	getResponse, err := http.DefaultClient.Do(getRequest)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer getResponse.Body.Close()
+	defer func() { _ = getResponse.Body.Close() }()
 	if getResponse.StatusCode != http.StatusOK {
 		t.Fatalf("get status = %d", getResponse.StatusCode)
 	}
-	conflict := createTask(t, httpServer.URL, identityID, sessionID, "file-1", strings.Replace(body, `"size":7`, `"size":8`, 1), http.StatusConflict)
+	conflict := createTask(
+		t,
+		httpServer.URL,
+		identityID,
+		sessionID,
+		"file-1",
+		strings.Replace(body, `"size":7`, `"size":8`, 1),
+		http.StatusConflict,
+	)
 	if conflict.ID != "" {
 		t.Fatalf("conflicting task was returned: %#v", conflict)
 	}
 }
 
-func TestFileTransferRejectsTraversalRootAndUntrustedDownloadMetadata(t *testing.T) {
+func TestFileTransferRejectsTraversalRootAndUntrustedDownloadMetadata(
+	t *testing.T,
+) {
 	now := time.Now().UTC()
 	stateStore, identityID, sessionID, expiresAt := createStore(t, now)
-	defer stateStore.Close()
+	defer func() { _ = stateStore.Close() }()
 	resolver := &targetResolver{}
-	handler, err := fileapi.New(stateStore, sessionValidator{identityID: identityID, session: sessionapi.ActiveSession{
-		ID: sessionID, Namespace: "development", ExpiresAt: expiresAt,
-	}}, resolver, transferExecutor{}, fileapi.Config{AllowedPathRoots: []string{"/workspace"}, MaximumBytes: 1 << 20})
+	handler, err := fileapi.New(
+		stateStore,
+		sessionValidator{
+			identityID: identityID,
+			session: sessionapi.ActiveSession{
+				ID: sessionID, Namespace: "development", ExpiresAt: expiresAt,
+			},
+		},
+		resolver,
+		transferExecutor{},
+		fileapi.Config{
+			AllowedPathRoots: []string{"/workspace"},
+			MaximumBytes:     1 << 20,
+		},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -258,47 +383,90 @@ func TestFileTransferRejectsTraversalRootAndUntrustedDownloadMetadata(t *testing
 		{Direction: "download", Kind: "file", Pod: "api-0", RemotePath: "/workspace/data", Size: 1, Checksum: strings.Repeat("00", 32)},
 	} {
 		raw, _ := json.Marshal(spec)
-		request := httptest.NewRequest(http.MethodPost, "/api/sessions/"+sessionID+"/file-transfers?namespace=development", bytes.NewReader(raw))
+		request := httptest.NewRequest(
+			http.MethodPost,
+			"/api/sessions/"+sessionID+"/file-transfers?namespace=development",
+			bytes.NewReader(raw),
+		)
 		request.Header.Set("Content-Type", "application/json")
 		request.Header.Set("Idempotency-Key", uuid.NewString())
 		response := httptest.NewRecorder()
-		apiError := serveAPI(t, handler, response, request, controlplaneapi.Identity{Subject: identityID, DeviceID: "device"})
-		if apiError == nil || apiError.Code != controlplaneapi.CodeInvalidArgument {
+		apiError := serveAPI(
+			t,
+			handler,
+			response,
+			request,
+			controlplaneapi.Identity{Subject: identityID, DeviceID: "device"},
+		)
+		if apiError == nil ||
+			apiError.Code != controlplaneapi.CodeInvalidArgument {
 			t.Fatalf("spec %#v error = %#v", spec, apiError)
 		}
 	}
 	resolver.mu.Lock()
 	defer resolver.mu.Unlock()
 	if resolver.calls != 0 {
-		t.Fatalf("invalid requests reached Kubernetes resolver: %d", resolver.calls)
+		t.Fatalf(
+			"invalid requests reached Kubernetes resolver: %d",
+			resolver.calls,
+		)
 	}
 }
 
-func TestFileTransferTaskUsesControlPlaneAuthoritativeResumeOffset(t *testing.T) {
+func TestFileTransferTaskUsesControlPlaneAuthoritativeResumeOffset(
+	t *testing.T,
+) {
 	now := time.Now().UTC()
 	stateStore, identityID, sessionID, expiresAt := createStore(t, now)
-	defer stateStore.Close()
+	defer func() { _ = stateStore.Close() }()
 	executor := &offsetExecutor{offset: 7}
-	handler, err := fileapi.New(stateStore, sessionValidator{identityID: identityID, session: sessionapi.ActiveSession{
-		ID: sessionID, Namespace: "development", ExpiresAt: expiresAt,
-	}}, &targetResolver{}, executor, fileapi.Config{AllowedPathRoots: []string{"/workspace"}, MaximumBytes: 1 << 20})
+	handler, err := fileapi.New(
+		stateStore,
+		sessionValidator{
+			identityID: identityID,
+			session: sessionapi.ActiveSession{
+				ID: sessionID, Namespace: "development", ExpiresAt: expiresAt,
+			},
+		},
+		&targetResolver{},
+		executor,
+		fileapi.Config{
+			AllowedPathRoots: []string{"/workspace"},
+			MaximumBytes:     1 << 20,
+		},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
 	resumeID := uuid.NewString()
-	body := `{"direction":"upload","kind":"file","pod":"api-0","remotePath":"/workspace/data.bin","size":20,"checksum":"` + strings.Repeat("ab", 32) + `","resumeId":"` + resumeID + `"}`
-	request := httptest.NewRequest(http.MethodPost, "/api/sessions/"+sessionID+"/file-transfers?namespace=development", strings.NewReader(body))
+	body := `{"direction":"upload","kind":"file","pod":"api-0","remotePath":"/workspace/data.bin","size":20,"checksum":"` + strings.Repeat(
+		"ab",
+		32,
+	) + `","resumeId":"` + resumeID + `"}`
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/sessions/"+sessionID+"/file-transfers?namespace=development",
+		strings.NewReader(body),
+	)
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Idempotency-Key", "resume-offset")
 	response := httptest.NewRecorder()
-	if apiError := serveAPI(t, handler, response, request, controlplaneapi.Identity{Subject: identityID}); apiError != nil {
+	if apiError := serveAPI(
+		t,
+		handler,
+		response,
+		request,
+		controlplaneapi.Identity{Subject: identityID},
+	); apiError != nil {
 		t.Fatal(apiError)
 	}
 	var document fileapi.Document
 	if err := json.NewDecoder(response.Body).Decode(&document); err != nil {
 		t.Fatal(err)
 	}
-	if response.Code != http.StatusCreated || document.Offset != 7 || document.ResumeID != resumeID || executor.calls != 1 {
+	if response.Code != http.StatusCreated || document.Offset != 7 ||
+		document.ResumeID != resumeID ||
+		executor.calls != 1 {
 		t.Fatalf("document = %#v resume calls = %d", document, executor.calls)
 	}
 }
@@ -306,22 +474,47 @@ func TestFileTransferTaskUsesControlPlaneAuthoritativeResumeOffset(t *testing.T)
 func TestFileTransferWebSocketUploadDownloadAndSingleClaim(t *testing.T) {
 	now := time.Now().UTC()
 	stateStore, identityID, sessionID, expiresAt := createStore(t, now)
-	defer stateStore.Close()
+	defer func() { _ = stateStore.Close() }()
 	executor := &streamExecutor{download: []byte("gateway download")}
-	handler, err := fileapi.New(stateStore, sessionValidator{identityID: identityID, session: sessionapi.ActiveSession{
-		ID: sessionID, Namespace: "development", ExpiresAt: expiresAt,
-	}}, &targetResolver{}, executor, fileapi.Config{
-		Now: func() time.Time { return now }, AllowedPathRoots: []string{"/workspace"}, MaximumBytes: 1 << 20,
-	})
+	handler, err := fileapi.New(
+		stateStore,
+		sessionValidator{
+			identityID: identityID,
+			session: sessionapi.ActiveSession{
+				ID: sessionID, Namespace: "development", ExpiresAt: expiresAt,
+			},
+		},
+		&targetResolver{},
+		executor,
+		fileapi.Config{
+			Now: func() time.Time { return now }, AllowedPathRoots: []string{"/workspace"}, MaximumBytes: 1 << 20,
+		},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
 	policy := authorization.NewAuthenticated()
-	server, err := controlplane.NewServer(controlplane.Config{PublicURL: "https://gateway.example.test"}, controlplane.BuildInfo{},
+	server, err := controlplane.NewServer(
+		controlplane.Config{PublicURL: "https://gateway.example.test"},
+		controlplane.BuildInfo{},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
-		controlplane.WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(request *http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
-			return controlplaneapi.Identity{Subject: request.Header.Get("X-Identity"), DeviceID: "device"}, nil
-		})), controlplane.WithAuthorizer(policy), controlplane.WithAPIRoutes(controlplane.APIRoutes{FileTransfers: fileapi.NewRoutes(handler).Endpoints()}))
+		controlplane.WithAuthenticator(
+			controlplaneapi.AuthenticatorFunc(
+				func(request *http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
+					return controlplaneapi.Identity{
+						Subject:  request.Header.Get("X-Identity"),
+						DeviceID: "device",
+					}, nil
+				},
+			),
+		),
+		controlplane.WithAuthorizer(policy),
+		controlplane.WithAPIRoutes(
+			controlplane.APIRoutes{
+				FileTransfers: fileapi.NewRoutes(handler).Endpoints(),
+			},
+		),
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -335,58 +528,126 @@ func TestFileTransferWebSocketUploadDownloadAndSingleClaim(t *testing.T) {
 		RemotePath: "/workspace/upload.bin", Size: uint64(len(upload)),
 		Checksum: filestream.FormatChecksum(uploadChecksum), Overwrite: true,
 	})
-	uploadTask := createTask(t, httpServer.URL, identityID, sessionID, "upload-stream", string(uploadBody), http.StatusCreated)
+	uploadTask := createTask(
+		t,
+		httpServer.URL,
+		identityID,
+		sessionID,
+		"upload-stream",
+		string(uploadBody),
+		http.StatusCreated,
+	)
 	uploadURL := fileStreamURL(httpServer.URL, sessionID, uploadTask.ID)
 	uploadConnection := dialFileStream(t, uploadURL, identityID)
-	dataFrame, _ := filestream.Encode(filestream.Frame{Type: filestream.Data, Payload: upload})
+	dataFrame, _ := filestream.Encode(
+		filestream.Frame{Type: filestream.Data, Payload: upload},
+	)
 	if err := uploadConnection.Write(context.Background(), websocket.MessageBinary, dataFrame); err != nil {
 		t.Fatal(err)
 	}
-	completeFrame, _ := filestream.Encode(filestream.Frame{Type: filestream.Complete})
+	completeFrame, _ := filestream.Encode(
+		filestream.Frame{Type: filestream.Complete},
+	)
 	if err := uploadConnection.Write(context.Background(), websocket.MessageBinary, completeFrame); err != nil {
 		t.Fatal(err)
 	}
 	uploadResult, uploadProgress, _ := readFileStream(t, uploadConnection)
-	if uploadResult.Status != filestream.ResultSucceeded || uploadResult.Transferred != uint64(len(upload)) ||
-		!uploadResult.HasChecksum || uploadResult.Checksum != uploadChecksum || uploadProgress.Transferred != uint64(len(upload)) {
-		t.Fatalf("upload result = %#v progress = %#v", uploadResult, uploadProgress)
+	if uploadResult.Status != filestream.ResultSucceeded ||
+		uploadResult.Transferred != uint64(len(upload)) ||
+		!uploadResult.HasChecksum ||
+		uploadResult.Checksum != uploadChecksum ||
+		uploadProgress.Transferred != uint64(len(upload)) {
+		t.Fatalf(
+			"upload result = %#v progress = %#v",
+			uploadResult,
+			uploadProgress,
+		)
 	}
-	uploadConnection.CloseNow()
-	storedUpload, err := stateStore.Tasks().GetByID(context.Background(), uploadTask.ID)
+	_ = uploadConnection.CloseNow()
+	storedUpload, err := stateStore.Tasks().
+		GetByID(context.Background(), uploadTask.ID)
 	if err != nil || storedUpload.State != "stopped" {
 		t.Fatalf("stored upload = %#v err = %v", storedUpload, err)
 	}
-	_, replayResponse, replayErr := websocket.Dial(context.Background(), uploadURL, &websocket.DialOptions{
-		HTTPHeader: http.Header{"X-Identity": {identityID}},
-	})
-	if replayErr == nil || replayResponse == nil || replayResponse.StatusCode != http.StatusConflict {
-		t.Fatalf("upload replay response = %#v err = %v", replayResponse, replayErr)
+	_, replayResponse, replayErr := websocket.Dial(
+		context.Background(),
+		uploadURL,
+		&websocket.DialOptions{
+			HTTPHeader: http.Header{"X-Identity": {identityID}},
+		},
+	)
+	if replayErr == nil || replayResponse == nil ||
+		replayResponse.StatusCode != http.StatusConflict {
+		t.Fatalf(
+			"upload replay response = %#v err = %v",
+			replayResponse,
+			replayErr,
+		)
 	}
 
 	downloadBody, _ := json.Marshal(fileapi.Spec{
-		Direction: fileapi.DirectionDownload, Kind: fileapi.KindFile, Pod: "api-0", RemotePath: "/workspace/download.bin",
+		Direction:  fileapi.DirectionDownload,
+		Kind:       fileapi.KindFile,
+		Pod:        "api-0",
+		RemotePath: "/workspace/download.bin",
 	})
-	downloadTask := createTask(t, httpServer.URL, identityID, sessionID, "download-stream", string(downloadBody), http.StatusCreated)
-	downloadConnection := dialFileStream(t, fileStreamURL(httpServer.URL, sessionID, downloadTask.ID), identityID)
-	downloadResult, downloadProgress, downloaded := readFileStream(t, downloadConnection)
+	downloadTask := createTask(
+		t,
+		httpServer.URL,
+		identityID,
+		sessionID,
+		"download-stream",
+		string(downloadBody),
+		http.StatusCreated,
+	)
+	downloadConnection := dialFileStream(
+		t,
+		fileStreamURL(httpServer.URL, sessionID, downloadTask.ID),
+		identityID,
+	)
+	downloadResult, downloadProgress, downloaded := readFileStream(
+		t,
+		downloadConnection,
+	)
 	downloadChecksum := sha256.Sum256(executor.download)
-	if string(downloaded) != string(executor.download) || downloadResult.Status != filestream.ResultSucceeded ||
-		downloadResult.Checksum != downloadChecksum || downloadProgress.Total != uint64(len(executor.download)) {
-		t.Fatalf("download bytes = %q result = %#v progress = %#v", downloaded, downloadResult, downloadProgress)
+	if string(downloaded) != string(executor.download) ||
+		downloadResult.Status != filestream.ResultSucceeded ||
+		downloadResult.Checksum != downloadChecksum ||
+		downloadProgress.Total != uint64(len(executor.download)) {
+		t.Fatalf(
+			"download bytes = %q result = %#v progress = %#v",
+			downloaded,
+			downloadResult,
+			downloadProgress,
+		)
 	}
-	downloadConnection.CloseNow()
+	_ = downloadConnection.CloseNow()
 	executor.mu.Lock()
 	defer executor.mu.Unlock()
-	if string(executor.uploaded) != string(upload) || executor.uploadCalls != 1 || executor.downloadCalls != 1 {
-		t.Fatalf("executor upload = %q upload calls = %d download calls = %d", executor.uploaded, executor.uploadCalls, executor.downloadCalls)
+	if string(executor.uploaded) != string(upload) ||
+		executor.uploadCalls != 1 ||
+		executor.downloadCalls != 1 {
+		t.Fatalf(
+			"executor upload = %q upload calls = %d download calls = %d",
+			executor.uploaded,
+			executor.uploadCalls,
+			executor.downloadCalls,
+		)
 	}
 }
 
-func dialFileStream(t *testing.T, streamURL, identityID string) *websocket.Conn {
+func dialFileStream(
+	t *testing.T,
+	streamURL, identityID string,
+) *websocket.Conn {
 	t.Helper()
-	connection, response, err := websocket.Dial(context.Background(), streamURL, &websocket.DialOptions{
-		HTTPHeader: http.Header{"X-Identity": {identityID}},
-	})
+	connection, response, err := websocket.Dial(
+		context.Background(),
+		streamURL,
+		&websocket.DialOptions{
+			HTTPHeader: http.Header{"X-Identity": {identityID}},
+		},
+	)
 	if err != nil {
 		if response != nil {
 			t.Fatalf("dial status = %d err = %v", response.StatusCode, err)
@@ -397,11 +658,17 @@ func dialFileStream(t *testing.T, streamURL, identityID string) *websocket.Conn 
 }
 
 func fileStreamURL(baseURL, sessionID, taskID string) string {
-	return "ws" + strings.TrimPrefix(baseURL, "http") + "/api/sessions/" + sessionID +
+	return "ws" + strings.TrimPrefix(
+		baseURL,
+		"http",
+	) + "/api/sessions/" + sessionID +
 		"/file-transfers/" + taskID + "/stream?namespace=development"
 }
 
-func readFileStream(t *testing.T, connection *websocket.Conn) (filestream.TransferResult, filestream.ProgressStatus, []byte) {
+func readFileStream(
+	t *testing.T,
+	connection *websocket.Conn,
+) (filestream.TransferResult, filestream.ProgressStatus, []byte) {
 	t.Helper()
 	var result filestream.TransferResult
 	var progress filestream.ProgressStatus
@@ -438,7 +705,10 @@ func readFileStream(t *testing.T, connection *websocket.Conn) (filestream.Transf
 	}
 }
 
-func createStore(t *testing.T, now time.Time) (*storage.Store, string, string, time.Time) {
+func createStore(
+	t *testing.T,
+	now time.Time,
+) (*storage.Store, string, string, time.Time) {
 	t.Helper()
 	stateStore, err := storage.Open(context.Background(), storage.Config{
 		Backend: storage.BackendSQLite, SQLitePath: filepath.Join(t.TempDir(), "files.db"), ControlPlaneReplicas: 1,
@@ -452,7 +722,9 @@ func createStore(t *testing.T, now time.Time) (*storage.Store, string, string, t
 	}); err != nil {
 		t.Fatal(err)
 	}
-	network, _ := networkspec.Normalize(networkspec.Spec{PodCIDRs: []string{"10.244.0.0/16"}})
+	network, _ := networkspec.Normalize(
+		networkspec.Spec{PodCIDRs: []string{"10.244.0.0/16"}},
+	)
 	networkJSON, _ := networkspec.CanonicalJSON(network)
 	networkHash, _ := networkspec.Hash(network)
 	expiresAt := now.Add(time.Hour)
@@ -473,7 +745,11 @@ func createTask(
 	wantStatus int,
 ) fileapi.Document {
 	t.Helper()
-	request, _ := http.NewRequest(http.MethodPost, baseURL+"/api/sessions/"+sessionID+"/file-transfers?namespace=development", strings.NewReader(body))
+	request, _ := http.NewRequest(
+		http.MethodPost,
+		baseURL+"/api/sessions/"+sessionID+"/file-transfers?namespace=development",
+		strings.NewReader(body),
+	)
 	request.Header.Set("X-Identity", identityID)
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Idempotency-Key", key)
@@ -481,13 +757,19 @@ func createTask(
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != wantStatus {
 		contents, _ := io.ReadAll(response.Body)
-		t.Fatalf("create status = %d, want %d: %s", response.StatusCode, wantStatus, contents)
+		t.Fatalf(
+			"create status = %d, want %d: %s",
+			response.StatusCode,
+			wantStatus,
+			contents,
+		)
 	}
 	var document fileapi.Document
-	if response.StatusCode == http.StatusCreated || response.StatusCode == http.StatusOK {
+	if response.StatusCode == http.StatusCreated ||
+		response.StatusCode == http.StatusOK {
 		if err := json.NewDecoder(response.Body).Decode(&document); err != nil {
 			t.Fatal(err)
 		}

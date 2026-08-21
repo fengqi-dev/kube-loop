@@ -18,6 +18,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/kubernetes"
+
 	"github.com/fengqi-dev/kube-loop/e2e/harness"
 	"github.com/fengqi-dev/kube-loop/internal/client/credentials"
 	clientexchange "github.com/fengqi-dev/kube-loop/internal/client/exchange"
@@ -35,12 +42,6 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/trafficbindingclient"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
-	"github.com/google/uuid"
-	corev1 "k8s.io/api/core/v1"
-	discoveryv1 "k8s.io/api/discovery/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/wait"
-	"k8s.io/client-go/kubernetes"
 )
 
 const exchangeLifecycleAccessToken = "e2e-exchange-lifecycle"
@@ -240,7 +241,16 @@ func TestRealExchangeLifecycleAndStaleOwnerRecovery(t *testing.T) {
 	_ = crashedConnection.Close()
 	waitForRealExchangeState(t, ctx, stateStore, crashed.ID, "failed")
 	assertServiceRestored(t, ctx, kubeClient, stateStore, serviceName, crashed.ID, originalSelector)
-	harness.WaitClusterProbe(t, ctx, kubeClient, service.Spec.ClusterIP, 8080, "tcp", "after-client-crash", "cluster-tcp:")
+	harness.WaitClusterProbe(
+		t,
+		ctx,
+		kubeClient,
+		service.Spec.ClusterIP,
+		8080,
+		"tcp",
+		"after-client-crash",
+		"cluster-tcp:",
+	)
 
 	// Simulate the old Control Plane dying after listeners are gone but before it
 	// can restore the Service. The replacement worker must claim the durable
@@ -340,15 +350,24 @@ func startExchangeLifecycleController(
 	gateway := startE2ETrafficGateway(t, gatewayIP, handler, nil)
 	policy := authorization.NewAuthenticated()
 	server, err := controlplane.NewServer(
-		controlplane.Config{PublicURL: "http://127.0.0.1"}, controlplane.BuildInfo{},
+		controlplane.Config{PublicURL: "http://127.0.0.1"},
+		controlplane.BuildInfo{},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
-		controlplane.WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(request *http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
-			if request.Header.Get("Authorization") != "Bearer "+exchangeLifecycleAccessToken {
-				return controlplaneapi.Identity{}, &controlplaneapi.Error{Code: controlplaneapi.CodeUnauthenticated, Message: "invalid e2e access token"}
-			}
-			return identity, nil
-		})),
-		controlplane.WithAuthorizer(policy), controlplane.WithAPIRoutes(controlplane.APIRoutes{
+		controlplane.WithAuthenticator(
+			controlplaneapi.AuthenticatorFunc(
+				func(request *http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
+					if request.Header.Get("Authorization") != "Bearer "+exchangeLifecycleAccessToken {
+						return controlplaneapi.Identity{}, &controlplaneapi.Error{
+							Code:    controlplaneapi.CodeUnauthenticated,
+							Message: "invalid e2e access token",
+						}
+					}
+					return identity, nil
+				},
+			),
+		),
+		controlplane.WithAuthorizer(policy),
+		controlplane.WithAPIRoutes(controlplane.APIRoutes{
 			Tickets: ticketapi.NewRoutes(gateway.tickets, e2eExecSessionValidator{
 				identityID: identity.Subject, session: session,
 			}).Endpoints(),
@@ -392,33 +411,41 @@ func assertServiceIntercepted(
 	t.Helper()
 	var lastService *corev1.Service
 	var lastSlices []discoveryv1.EndpointSlice
-	err := wait.PollUntilContextTimeout(ctx, 100*time.Millisecond, 20*time.Second, true, func(pollCtx context.Context) (bool, error) {
-		service, err := client.CoreV1().Services(harness.EchoNamespace).Get(pollCtx, serviceName, metav1.GetOptions{})
-		if err != nil {
-			return false, nil
-		}
-		lastService = service
-		if len(service.Spec.Selector) != 0 {
-			return false, nil
-		}
-		slices, err := client.DiscoveryV1().EndpointSlices(harness.EchoNamespace).List(pollCtx, metav1.ListOptions{
-			LabelSelector: servicebinding.ServiceNameLabel + "=" + serviceName,
-		})
-		if err != nil {
-			return false, nil
-		}
-		lastSlices = slices.Items
-		foundGateway := false
-		for _, slice := range slices.Items {
-			for _, endpoint := range slice.Endpoints {
-				if len(endpoint.Addresses) != 1 || endpoint.Addresses[0] != gatewayIP {
-					return false, nil
-				}
-				foundGateway = true
+	err := wait.PollUntilContextTimeout(
+		ctx,
+		100*time.Millisecond,
+		20*time.Second,
+		true,
+		func(pollCtx context.Context) (bool, error) {
+			service, err := client.CoreV1().
+				Services(harness.EchoNamespace).
+				Get(pollCtx, serviceName, metav1.GetOptions{})
+			if err != nil {
+				return false, nil
 			}
-		}
-		return foundGateway, nil
-	})
+			lastService = service
+			if len(service.Spec.Selector) != 0 {
+				return false, nil
+			}
+			slices, err := client.DiscoveryV1().EndpointSlices(harness.EchoNamespace).List(pollCtx, metav1.ListOptions{
+				LabelSelector: servicebinding.ServiceNameLabel + "=" + serviceName,
+			})
+			if err != nil {
+				return false, nil
+			}
+			lastSlices = slices.Items
+			foundGateway := false
+			for _, slice := range slices.Items {
+				for _, endpoint := range slice.Endpoints {
+					if len(endpoint.Addresses) != 1 || endpoint.Addresses[0] != gatewayIP {
+						return false, nil
+					}
+					foundGateway = true
+				}
+			}
+			return foundGateway, nil
+		},
+	)
 	if err != nil {
 		t.Fatalf(
 			"Service intercept did not converge exclusively to Gateway %s: service=%#v slices=%#v err=%v",

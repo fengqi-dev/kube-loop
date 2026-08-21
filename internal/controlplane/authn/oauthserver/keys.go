@@ -19,7 +19,7 @@ func LoadSigningKey(path string) (*ecdsa.PrivateKey, error) {
 	}
 	block, rest := pem.Decode(raw)
 	if block == nil || len(strings.TrimSpace(string(rest))) != 0 {
-		return nil, errors.New("OIDC signing key must be one PEM private key")
+		return nil, errors.New("oidc signing key must be one PEM private key")
 	}
 	var parsed any
 	switch block.Type {
@@ -28,14 +28,16 @@ func LoadSigningKey(path string) (*ecdsa.PrivateKey, error) {
 	case "EC PRIVATE KEY":
 		parsed, err = x509.ParseECPrivateKey(block.Bytes)
 	default:
-		return nil, errors.New("OIDC signing key must be PKCS#8 or SEC1 ECDSA PEM")
+		return nil, errors.New(
+			"oidc signing key must be PKCS#8 or SEC1 ECDSA PEM",
+		)
 	}
 	if err != nil {
 		return nil, errors.New("parse OIDC signing key")
 	}
 	key, ok := parsed.(*ecdsa.PrivateKey)
 	if !ok || key.Curve.Params().Name != "P-256" {
-		return nil, errors.New("OIDC signing key must use ECDSA P-256")
+		return nil, errors.New("oidc signing key must use ECDSA P-256")
 	}
 	return key, nil
 }
@@ -47,7 +49,9 @@ func LoadHMACSecret(path string) ([]byte, error) {
 	}
 	raw = []byte(strings.TrimSpace(string(raw)))
 	if len(raw) != 32 {
-		return nil, errors.New("Fosite HMAC secret must contain exactly 32 bytes")
+		return nil, errors.New(
+			"fosite HMAC secret must contain exactly 32 bytes",
+		)
 	}
 	return append([]byte(nil), raw...), nil
 }
@@ -60,7 +64,7 @@ func readSecretFile(path string) ([]byte, error) {
 	if err != nil {
 		return nil, errors.New("open authentication secret file")
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	raw, err := io.ReadAll(io.LimitReader(file, maxKeyBytes+1))
 	if err != nil || len(raw) > maxKeyBytes {
 		return nil, errors.New("read authentication secret file")

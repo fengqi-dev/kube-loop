@@ -26,7 +26,7 @@ func (s *Server) readSessionLogs(sessionID string, offset int64) (string, int64,
 	if err != nil {
 		return "", offset, fmt.Errorf("open sing-box log: %w", err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	info, err := file.Stat()
 	if err != nil {
 		return "", offset, fmt.Errorf("stat sing-box log: %w", err)

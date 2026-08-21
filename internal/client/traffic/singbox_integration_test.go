@@ -23,20 +23,20 @@ func TestDialerInteroperatesWithSingBox(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer target.Close()
+	defer checkTestClose(t, target.Close)
 	go func() {
 		conn, acceptErr := target.Accept()
 		if acceptErr != nil {
 			return
 		}
-		defer conn.Close()
+		defer checkTestClose(t, conn.Close)
 		_, _ = io.Copy(conn, conn)
 	}()
 	udpTarget, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1")})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer udpTarget.Close()
+	defer checkTestClose(t, udpTarget.Close)
 	go func() {
 		buffer := make([]byte, 64)
 		n, source, readErr := udpTarget.ReadFromUDP(buffer)
@@ -111,7 +111,7 @@ func TestDialerInteroperatesWithSingBox(t *testing.T) {
 	if err != nil {
 		t.Fatalf("connect through sing-box: %v\n%s", err, output.String())
 	}
-	defer connection.Close()
+	defer checkTestClose(t, connection.Close)
 	_ = connection.SetDeadline(time.Now().Add(time.Second))
 	if _, err := connection.Write([]byte("ping")); err != nil {
 		t.Fatal(err)
@@ -130,7 +130,7 @@ func TestDialerInteroperatesWithSingBox(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer udpConnection.Close()
+	defer checkTestClose(t, udpConnection.Close)
 	_ = udpConnection.SetDeadline(time.Now().Add(time.Second))
 	if _, err := udpConnection.Write([]byte("dns")); err != nil {
 		t.Fatal(err)

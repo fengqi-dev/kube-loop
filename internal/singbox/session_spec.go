@@ -174,7 +174,7 @@ func (s SessionSpec) DNS() (DNSMeta, error) {
 }
 
 func (s SessionSpec) dnsNamespace() string {
-	return cmp.Or(s.DNSNamespace, s.Namespace, "default")
+	return cmp.Or(s.DNSNamespace, s.Namespace, defaultNamespace)
 }
 
 func (s SessionSpec) discovery() NetworkSpec {

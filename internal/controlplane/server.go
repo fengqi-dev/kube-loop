@@ -9,10 +9,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/labstack/echo/v5"
+
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/health"
 	controlplanemiddleware "github.com/fengqi-dev/kube-loop/internal/controlplane/middleware"
 	"github.com/fengqi-dev/kube-loop/internal/httpmiddleware"
-	"github.com/labstack/echo/v5"
 )
 
 const (
@@ -55,7 +56,12 @@ type Server struct {
 	active *controlplanemiddleware.RequestTracker
 }
 
-func NewServer(config Config, build BuildInfo, logger *slog.Logger, serverOptionValues ...ServerOption) (*Server, error) {
+func NewServer(
+	config Config,
+	build BuildInfo,
+	logger *slog.Logger,
+	serverOptionValues ...ServerOption,
+) (*Server, error) {
 	normalized, err := config.normalized()
 	if err != nil {
 		return nil, err
@@ -95,7 +101,11 @@ func NewServer(config Config, build BuildInfo, logger *slog.Logger, serverOption
 	defaultHTTPErrorHandler := echo.DefaultHTTPErrorHandler(false)
 	router.HTTPErrorHandler = func(ctx *echo.Context, err error) {
 		if errors.Is(err, echo.ErrMethodNotAllowed) {
-			allow := strings.ReplaceAll(ctx.Response().Header().Get(echo.HeaderAllow), http.MethodOptions+", ", "")
+			allow := strings.ReplaceAll(
+				ctx.Response().Header().Get(echo.HeaderAllow),
+				http.MethodOptions+", ",
+				"",
+			)
 			ctx.Response().Header().Set(echo.HeaderAllow, allow)
 		}
 		defaultHTTPErrorHandler(ctx, err)
@@ -107,7 +117,9 @@ func NewServer(config Config, build BuildInfo, logger *slog.Logger, serverOption
 		document := discovery
 		document.AuthMethods = append([]AuthMethod(nil), discovery.AuthMethods...)
 		if options.authMethodSource != nil {
-			document.AuthMethods = append([]AuthMethod(nil), options.authMethodSource.AuthMethods()...)
+			document.AuthMethods = append(
+				[]AuthMethod(nil),
+				options.authMethodSource.AuthMethods()...)
 			writer.Header().Set("Cache-Control", "public, max-age=5")
 		} else {
 			writer.Header().Set("Cache-Control", "public, max-age=60")
@@ -147,7 +159,12 @@ func NewServer(config Config, build BuildInfo, logger *slog.Logger, serverOption
 	}, nil
 }
 
-func apiMiddleware(prefix string, config Config, logger *slog.Logger, options serverOptions) echo.MiddlewareFunc {
+func apiMiddleware(
+	prefix string,
+	config Config,
+	logger *slog.Logger,
+	options serverOptions,
+) echo.MiddlewareFunc {
 	return controlplanemiddleware.New(controlplanemiddleware.Config{
 		APIPathPrefix:      prefix,
 		RequestTimeout:     config.APIRequestTimeout,

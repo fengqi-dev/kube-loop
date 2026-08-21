@@ -7,13 +7,14 @@ import (
 	"slices"
 	"strings"
 
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	kubernetesclient "k8s.io/client-go/kubernetes"
+
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/authorization"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
 	"github.com/fengqi-dev/kube-loop/internal/dnsname"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
-	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	kubernetesclient "k8s.io/client-go/kubernetes"
 )
 
 type Provider interface {
@@ -34,7 +35,7 @@ type Discoverer struct {
 
 func NewDiscoverer(provider Provider) (*Discoverer, error) {
 	if provider == nil {
-		return nil, errors.New("NetworkSpec Kubernetes Provider is required")
+		return nil, errors.New("network spec Kubernetes Provider is required")
 	}
 	return &Discoverer{provider: provider}, nil
 }
@@ -48,11 +49,15 @@ func (discoverer *Discoverer) Discover(
 		ID: identity.Subject, Groups: identity.Groups,
 	})
 	if err != nil {
-		return networkspec.Spec{}, errors.New("create Kubernetes client for NetworkSpec discovery")
+		return networkspec.Spec{}, errors.New(
+			"create Kubernetes client for NetworkSpec discovery",
+		)
 	}
 	systemClient, err := discoverer.provider.SystemClient()
 	if err != nil {
-		return networkspec.Spec{}, errors.New("create system Kubernetes client for NetworkSpec discovery")
+		return networkspec.Spec{}, errors.New(
+			"create system Kubernetes client for NetworkSpec discovery",
+		)
 	}
 	return discover(ctx, identityClient, systemClient, namespace)
 }
@@ -71,10 +76,16 @@ func discover(
 			}
 		}
 	}
-	pods, podErr := identityClient.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{})
-	services, serviceErr := identityClient.CoreV1().Services(namespace).List(ctx, metav1.ListOptions{})
+	pods, podErr := identityClient.CoreV1().
+		Pods(namespace).
+		List(ctx, metav1.ListOptions{})
+	services, serviceErr := identityClient.CoreV1().
+		Services(namespace).
+		List(ctx, metav1.ListOptions{})
 	if podErr != nil && serviceErr != nil {
-		return networkspec.Spec{}, errors.New("read namespace network resources")
+		return networkspec.Spec{}, errors.New(
+			"read namespace network resources",
+		)
 	}
 	if pods == nil {
 		pods = &corev1.PodList{}
@@ -122,8 +133,10 @@ func discover(
 		addServiceAddresses(serviceIPs, service)
 	}
 	dnsServer := ""
-	for _, name := range []string{"kube-dns", "coredns"} {
-		service, err := systemClient.CoreV1().Services("kube-system").Get(ctx, name, metav1.GetOptions{})
+	for _, name := range []string{kubeDNSServiceName, coreDNSServiceName} {
+		service, err := systemClient.CoreV1().
+			Services("kube-system").
+			Get(ctx, name, metav1.GetOptions{})
 		if err != nil {
 			continue
 		}
@@ -149,11 +162,16 @@ func discover(
 // discoverClusterDomains reads only the fixed CoreDNS ConfigMap names through
 // the Control Plane ServiceAccount. Corefile contents never leave the Control Plane;
 // only bounded DNS-1123 domains are copied into NetworkSpec.
-func discoverClusterDomains(ctx context.Context, client kubernetesclient.Interface) []string {
+func discoverClusterDomains(
+	ctx context.Context,
+	client kubernetesclient.Interface,
+) []string {
 	domains := make([]string, 0, 2)
 	seen := make(map[string]struct{})
-	for _, name := range []string{"coredns", "kube-dns"} {
-		configMap, err := client.CoreV1().ConfigMaps("kube-system").Get(ctx, name, metav1.GetOptions{})
+	for _, name := range []string{coreDNSServiceName, kubeDNSServiceName} {
+		configMap, err := client.CoreV1().
+			ConfigMaps("kube-system").
+			Get(ctx, name, metav1.GetOptions{})
 		if err != nil {
 			continue
 		}
@@ -189,8 +207,12 @@ func parseCoreDNSClusterDomains(corefile string) []string {
 			if raw == "{" {
 				break
 			}
-			domain := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(raw)), ".")
-			if domain == "in-addr.arpa" || domain == "ip6.arpa" || !dnsname.ValidClusterDomain(domain) {
+			domain := strings.TrimSuffix(
+				strings.ToLower(strings.TrimSpace(raw)),
+				".",
+			)
+			if domain == "in-addr.arpa" || domain == "ip6.arpa" ||
+				!dnsname.ValidClusterDomain(domain) {
 				continue
 			}
 			if _, exists := seen[domain]; exists {

@@ -16,6 +16,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
+
 	"github.com/fengqi-dev/kube-loop/e2e/harness"
 	"github.com/fengqi-dev/kube-loop/internal/client/credentials"
 	clientmirror "github.com/fengqi-dev/kube-loop/internal/client/mirror"
@@ -31,10 +36,6 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/ticketapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/trafficbindingclient"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
-	"github.com/google/uuid"
-	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
 )
 
 const mirrorLifecycleAccessToken = "e2e-mirror-lifecycle"
@@ -176,8 +177,28 @@ func TestRealMirrorPreservesPrimaryPathAndRecoversStaleOwner(t *testing.T) {
 	// deliberately different prefix and must never appear on the cluster path.
 	first := startRealMirror(t, ctx, manager, serverProfile, remoteSession, serviceName, targets)
 	assertServiceIntercepted(t, ctx, kubeClient, stateStore, serviceName, gatewayIP, first.ID)
-	waitForMirroredClusterProbe(t, ctx, kubeClient, tcpCopies, service.Spec.ClusterIP, 8080, "tcp", "normal-tcp", "cluster-tcp:")
-	waitForMirroredClusterProbe(t, ctx, kubeClient, udpCopies, service.Spec.ClusterIP, 9090, "udp", "normal-udp", "cluster-udp:")
+	waitForMirroredClusterProbe(
+		t,
+		ctx,
+		kubeClient,
+		tcpCopies,
+		service.Spec.ClusterIP,
+		8080,
+		"tcp",
+		"normal-tcp",
+		"cluster-tcp:",
+	)
+	waitForMirroredClusterProbe(
+		t,
+		ctx,
+		kubeClient,
+		udpCopies,
+		service.Spec.ClusterIP,
+		9090,
+		"udp",
+		"normal-udp",
+		"cluster-udp:",
+	)
 	stopContext, stopCancel := context.WithTimeout(ctx, 20*time.Second)
 	if err := manager.Stop(stopContext, serverProfile.ID, first.ID); err != nil {
 		stopCancel()
@@ -210,13 +231,32 @@ func TestRealMirrorPreservesPrimaryPathAndRecoversStaleOwner(t *testing.T) {
 	_ = crashedConnection.Close()
 	waitForMirrorState(t, ctx, stateStore, crashed.ID, "failed")
 	assertServiceRestored(t, ctx, kubeClient, stateStore, serviceName, crashed.ID, originalSelector)
-	harness.WaitClusterProbe(t, ctx, kubeClient, service.Spec.ClusterIP, 8080, "tcp", "after-client-crash", "cluster-tcp:")
+	harness.WaitClusterProbe(
+		t,
+		ctx,
+		kubeClient,
+		service.Spec.ClusterIP,
+		8080,
+		"tcp",
+		"after-client-crash",
+		"cluster-tcp:",
+	)
 
 	// A replacement Control Plane must compensate a stale Mirror from the durable
 	// Service snapshot when the original owner fails during restoration.
 	second := startRealMirror(t, ctx, manager, serverProfile, remoteSession, serviceName, targets)
 	assertServiceIntercepted(t, ctx, kubeClient, stateStore, serviceName, gatewayIP, second.ID)
-	waitForMirroredClusterProbe(t, ctx, kubeClient, tcpCopies, service.Spec.ClusterIP, 8080, "tcp", "before-crash", "cluster-tcp:")
+	waitForMirroredClusterProbe(
+		t,
+		ctx,
+		kubeClient,
+		tcpCopies,
+		service.Spec.ClusterIP,
+		8080,
+		"tcp",
+		"before-crash",
+		"cluster-tcp:",
+	)
 	mutator.failOneRestore()
 	stopContext, stopCancel = context.WithTimeout(ctx, 20*time.Second)
 	if err := manager.Stop(stopContext, serverProfile.ID, second.ID); err != nil {
@@ -281,15 +321,24 @@ func startMirrorLifecycleController(
 	gateway := startE2ETrafficGateway(t, gatewayIP, handler, primaryDial)
 	policy := authorization.NewAuthenticated()
 	server, err := controlplane.NewServer(
-		controlplane.Config{PublicURL: "http://127.0.0.1"}, controlplane.BuildInfo{},
+		controlplane.Config{PublicURL: "http://127.0.0.1"},
+		controlplane.BuildInfo{},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
-		controlplane.WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(request *http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
-			if request.Header.Get("Authorization") != "Bearer "+mirrorLifecycleAccessToken {
-				return controlplaneapi.Identity{}, &controlplaneapi.Error{Code: controlplaneapi.CodeUnauthenticated, Message: "invalid e2e access token"}
-			}
-			return identity, nil
-		})),
-		controlplane.WithAuthorizer(policy), controlplane.WithAPIRoutes(controlplane.APIRoutes{
+		controlplane.WithAuthenticator(
+			controlplaneapi.AuthenticatorFunc(
+				func(request *http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
+					if request.Header.Get("Authorization") != "Bearer "+mirrorLifecycleAccessToken {
+						return controlplaneapi.Identity{}, &controlplaneapi.Error{
+							Code:    controlplaneapi.CodeUnauthenticated,
+							Message: "invalid e2e access token",
+						}
+					}
+					return identity, nil
+				},
+			),
+		),
+		controlplane.WithAuthorizer(policy),
+		controlplane.WithAPIRoutes(controlplane.APIRoutes{
 			Tickets: ticketapi.NewRoutes(gateway.tickets, e2eExecSessionValidator{
 				identityID: identity.Subject, session: session,
 			}).Endpoints(),

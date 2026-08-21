@@ -20,6 +20,7 @@ func (remoteResolver) Resolve(ctx context.Context, _ string) (context.Context, n
 
 type bufferedConn struct {
 	net.Conn
+
 	reader io.Reader
 }
 
@@ -31,13 +32,14 @@ func (c *bufferedConn) CloseWrite() error {
 	if writer, ok := c.Conn.(interface{ CloseWrite() error }); ok {
 		return writer.CloseWrite()
 	}
-	return c.Conn.Close()
+	return c.Close()
 }
 
 // framedConn adapts the Gateway's length-prefixed UDP tunnel to the datagram
 // semantics expected by the SOCKS server.
 type framedConn struct {
 	net.Conn
+
 	reader  *bufio.Reader
 	buffer  []byte
 	writeMu sync.Mutex

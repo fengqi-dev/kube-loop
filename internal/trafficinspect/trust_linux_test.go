@@ -17,8 +17,16 @@ func TestDetectLinuxTrustBackend(t *testing.T) {
 		bins map[string]string
 		want string
 	}{
-		{name: "Debian", bins: map[string]string{"update-ca-certificates": "/usr/sbin/update-ca-certificates"}, want: "/usr/local/share/ca-certificates/kubeloop-traffic-inspection.crt"},
-		{name: "RHEL", bins: map[string]string{"update-ca-trust": "/usr/bin/update-ca-trust"}, want: "/etc/pki/ca-trust/source/anchors/kubeloop-traffic-inspection.pem"},
+		{
+			name: "Debian",
+			bins: map[string]string{"update-ca-certificates": "/usr/sbin/update-ca-certificates"},
+			want: "/usr/local/share/ca-certificates/kubeloop-traffic-inspection.crt",
+		},
+		{
+			name: "RHEL",
+			bins: map[string]string{"update-ca-trust": "/usr/bin/update-ca-trust"},
+			want: "/etc/pki/ca-trust/source/anchors/kubeloop-traffic-inspection.pem",
+		},
 		{name: "unsupported", bins: map[string]string{}},
 	}
 	for _, test := range tests {

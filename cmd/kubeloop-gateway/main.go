@@ -13,6 +13,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/labstack/echo/v5"
+
 	"github.com/fengqi-dev/kube-loop/internal/gateway"
 	"github.com/fengqi-dev/kube-loop/internal/gateway/operations"
 	"github.com/fengqi-dev/kube-loop/internal/gateway/relayagent"
@@ -20,7 +22,6 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/gateway/websocketmux"
 	"github.com/fengqi-dev/kube-loop/internal/httpmiddleware"
 	"github.com/fengqi-dev/kube-loop/internal/logging"
-	"github.com/labstack/echo/v5"
 )
 
 var version = "dev"
@@ -107,8 +108,13 @@ func main() {
 		errorLogger.Fatal(clientErr)
 	}
 	runtimeReporter = &relayRuntimeReporter{
-		gateway: server, websocket: handler, maximumPhysical: uint32(config.WebSocket.MaxSessions),
-		maximumLogical: uint32(uint64(config.WebSocket.MaxSessions) * uint64(config.WebSocket.MaxStreamsPerSession)),
+		gateway: server, websocket: handler,
+		//nolint:gosec // Gateway configuration bounds physical sessions to 1<<20.
+		maximumPhysical: uint32(config.WebSocket.MaxSessions),
+		//nolint:gosec // Gateway configuration bounds the validated product to 1<<24.
+		maximumLogical: uint32(
+			uint64(config.WebSocket.MaxSessions) * uint64(config.WebSocket.MaxStreamsPerSession),
+		),
 	}
 	var agentErr error
 	controlAgent, agentErr = relayagent.New(relayagent.Config{
@@ -131,7 +137,7 @@ func main() {
 		errorLogger.Fatal(trafficErr)
 	}
 	server.SetTrafficHandler(trafficHandler)
-	httpListener, listenErr := net.Listen("tcp", config.HTTP.Listen)
+	httpListener, listenErr := (&net.ListenConfig{}).Listen(signalContext, "tcp", config.HTTP.Listen)
 	if listenErr != nil {
 		errorLogger.Fatal(listenErr)
 	}

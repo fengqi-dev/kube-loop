@@ -5,7 +5,7 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"errors"
-	"sort"
+	"slices"
 	"time"
 )
 
@@ -18,7 +18,7 @@ func NewVerificationKeySet(
 	for keyID := range keys {
 		keyIDs = append(keyIDs, keyID)
 	}
-	sort.Strings(keyIDs)
+	slices.Sort(keyIDs)
 	result := VerificationKeySet{Generation: generation, Keys: make([]VerificationKey, 0, len(keys))}
 	for _, keyID := range keyIDs {
 		key := keys[keyID]
@@ -30,8 +30,8 @@ func NewVerificationKeySet(
 			return VerificationKeySet{}, errors.New("encode RelayTicket verification key")
 		}
 		result.Keys = append(result.Keys, VerificationKey{
-			ID: keyID, Algorithm: "EdDSA",
-			PublicKey: string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: encoded})),
+			ID: keyID, Algorithm: verificationKeyAlgorithm,
+			PublicKey: string(pem.EncodeToMemory(&pem.Block{Type: publicKeyPEMType, Bytes: encoded})),
 			NotBefore: notBefore.UTC(), NotAfter: notAfter.UTC(),
 		})
 	}

@@ -23,12 +23,20 @@ type fakeControlPlane struct {
 	podFileKey   string
 }
 
-func (gateway *fakeControlPlane) Version(_ context.Context, profile clientprofile.Profile) (clientremote.Version, error) {
+func (gateway *fakeControlPlane) Version(
+	_ context.Context,
+	profile clientprofile.Profile,
+) (clientremote.Version, error) {
 	gateway.versionCalls++
 	gateway.profileID = profile.ID
 	return clientremote.Version{GitVersion: "v1.32.0"}, nil
 }
-func (*fakeControlPlane) Capabilities(_ context.Context, _ clientprofile.Profile, namespace string) (clientremote.Capabilities, error) {
+
+func (*fakeControlPlane) Capabilities(
+	_ context.Context,
+	_ clientprofile.Profile,
+	namespace string,
+) (clientremote.Capabilities, error) {
 	return clientremote.Capabilities{Namespace: namespace}, nil
 }
 func (*fakeControlPlane) Namespaces(context.Context, clientprofile.Profile) ([]clientremote.Namespace, error) {
@@ -73,7 +81,11 @@ type fakeSessions struct {
 	disconnectCalls int
 }
 
-func (sessions *fakeSessions) Connect(_ context.Context, _ clientprofile.Profile, namespace string) (clientremote.Session, error) {
+func (sessions *fakeSessions) Connect(
+	_ context.Context,
+	_ clientprofile.Profile,
+	namespace string,
+) (clientremote.Session, error) {
 	sessions.current.Namespace, sessions.current.State = namespace, "active"
 	return sessions.current, nil
 }
@@ -90,7 +102,11 @@ func (sessions *fakeSessions) Disconnect(context.Context, string) error {
 
 type fakeDataPlanes struct{}
 
-func (fakeDataPlanes) Connect(context.Context, clientprofile.Profile, clientremote.Session) (clientdataplane.Status, error) {
+func (fakeDataPlanes) Connect(
+	context.Context,
+	clientprofile.Profile,
+	clientremote.Session,
+) (clientdataplane.Status, error) {
 	return clientdataplane.Status{}, nil
 }
 func (fakeDataPlanes) Disconnect(string) error { return nil }
@@ -99,10 +115,22 @@ type fakeExecClient struct{}
 
 var _ clientexec.Client = fakeExecClient{}
 
-func (fakeExecClient) CreateExecTask(context.Context, clientprofile.Profile, clientremote.Session, clientremote.ExecSpec, string) (clientremote.ExecTask, error) {
+func (fakeExecClient) CreateExecTask(
+	context.Context,
+	clientprofile.Profile,
+	clientremote.Session,
+	clientremote.ExecSpec,
+	string,
+) (clientremote.ExecTask, error) {
 	return clientremote.ExecTask{}, errors.New("not implemented")
 }
-func (fakeExecClient) OpenExecStream(context.Context, clientprofile.Profile, clientremote.Session, clientremote.ExecTask) (*websocket.Conn, error) {
+
+func (fakeExecClient) OpenExecStream(
+	context.Context,
+	clientprofile.Profile,
+	clientremote.Session,
+	clientremote.ExecTask,
+) (*websocket.Conn, error) {
 	return nil, errors.New("not implemented")
 }
 
@@ -134,7 +162,10 @@ func TestRemoteBackendRequiresExactSessionBeforeDisconnect(t *testing.T) {
 		Profiles: fakeProfiles{state: clientprofile.State{
 			ActiveProfileID: "active", Profiles: []clientprofile.Profile{{ID: "active"}},
 		}},
-		ControlPlane: &fakeControlPlane{}, Sessions: sessions, DataPlanes: fakeDataPlanes{}, ExecClient: fakeExecClient{},
+		ControlPlane: &fakeControlPlane{},
+		Sessions:     sessions,
+		DataPlanes:   fakeDataPlanes{},
+		ExecClient:   fakeExecClient{},
 	})
 	if err != nil {
 		t.Fatal(err)

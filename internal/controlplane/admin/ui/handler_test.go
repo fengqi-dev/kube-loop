@@ -24,19 +24,34 @@ func TestHandlerServesOnlyFixedManagementAssetsWithStrictCSP(t *testing.T) {
 		request := httptest.NewRequest(http.MethodGet, test.path, nil)
 		recorder := httptest.NewRecorder()
 		serveUI(handler, recorder, request)
-		if recorder.Code != http.StatusOK || !strings.HasPrefix(recorder.Header().Get("Content-Type"), test.contentType) ||
+		if recorder.Code != http.StatusOK ||
+			!strings.HasPrefix(
+				recorder.Header().Get("Content-Type"),
+				test.contentType,
+			) ||
 			!strings.Contains(recorder.Body.String(), test.contains) {
-			t.Fatalf("path=%s status=%d type=%q body=%q", test.path, recorder.Code, recorder.Header().Get("Content-Type"), recorder.Body.String())
+			t.Fatalf(
+				"path=%s status=%d type=%q body=%q",
+				test.path,
+				recorder.Code,
+				recorder.Header().Get("Content-Type"),
+				recorder.Body.String(),
+			)
 		}
 		csp := recorder.Header().Get("Content-Security-Policy")
-		if !strings.Contains(csp, "script-src 'self'") || !strings.Contains(csp, "frame-ancestors 'none'") {
+		if !strings.Contains(csp, "script-src 'self'") ||
+			!strings.Contains(csp, "frame-ancestors 'none'") {
 			t.Fatalf("path=%s CSP=%q", test.path, csp)
 		}
 	}
 
 	for _, path := range []string{"/ui/unknown", "/ui/../handler.go"} {
 		recorder := httptest.NewRecorder()
-		serveUI(handler, recorder, httptest.NewRequest(http.MethodGet, path, nil))
+		serveUI(
+			handler,
+			recorder,
+			httptest.NewRequest(http.MethodGet, path, nil),
+		)
 		if recorder.Code != http.StatusNotFound {
 			t.Fatalf("path=%s status=%d", path, recorder.Code)
 		}
@@ -45,38 +60,60 @@ func TestHandlerServesOnlyFixedManagementAssetsWithStrictCSP(t *testing.T) {
 	serveUI(handler, index, httptest.NewRequest(http.MethodGet, "/ui", nil))
 	if !strings.Contains(index.Body.String(), `src="/admin/ui/app.js"`) ||
 		!strings.Contains(index.Body.String(), `href="/admin/ui/app.css"`) {
-		t.Fatalf("management asset URLs are not absolute: %s", index.Body.String())
+		t.Fatalf(
+			"management asset URLs are not absolute: %s",
+			index.Body.String(),
+		)
 	}
 	method := httptest.NewRecorder()
 	serveUI(handler, method, httptest.NewRequest(http.MethodPost, "/ui", nil))
-	if method.Code != http.StatusMethodNotAllowed || method.Header().Get("Allow") != "OPTIONS, GET, HEAD" {
-		t.Fatalf("method status=%d allow=%q", method.Code, method.Header().Get("Allow"))
+	if method.Code != http.StatusMethodNotAllowed ||
+		method.Header().Get("Allow") != "OPTIONS, GET, HEAD" {
+		t.Fatalf(
+			"method status=%d allow=%q",
+			method.Code,
+			method.Header().Get("Allow"),
+		)
 	}
 }
 
 func TestBrowserAssetsDoNotPersistGatewayTokensOrLoadRemoteCode(t *testing.T) {
 	handler := New()
 	recorder := httptest.NewRecorder()
-	serveUI(handler, recorder, httptest.NewRequest(http.MethodGet, "/ui/app.js", nil))
+	serveUI(
+		handler,
+		recorder,
+		httptest.NewRequest(http.MethodGet, "/ui/app.js", nil),
+	)
 	body := recorder.Body.String()
 	for _, forbidden := range []string{"eval(", "new Function("} {
 		if strings.Contains(body, forbidden) {
 			t.Fatalf("browser asset contains forbidden construct %q", forbidden)
 		}
 	}
-	if strings.Count(body, "localStorage") != 2 || !strings.Contains(body, "kubeloop.admin.locale") {
-		t.Fatal("browser asset may only use local storage for the locale preference")
+	if strings.Count(body, "localStorage") != 2 ||
+		!strings.Contains(body, "kubeloop.admin.locale") {
+		t.Fatal(
+			"browser asset may only use local storage for the locale preference",
+		)
 	}
-	if !strings.Contains(body, `access_token=""`) || !strings.Contains(body, `refresh_token=""`) ||
+	if !strings.Contains(body, `access_token=""`) ||
+		!strings.Contains(body, `refresh_token=""`) ||
 		!strings.Contains(body, "kubeloop.admin.csrf") {
-		t.Fatal("browser asset does not clear transient Gateway tokens or retain the synchronizer CSRF value")
+		t.Fatal(
+			"browser asset does not clear transient Gateway tokens or retain the synchronizer CSRF value",
+		)
 	}
 	if strings.Contains(body, "hasCapability(") {
 		t.Fatal("browser asset references the removed capability helper")
 	}
 }
 
-func serveUI(handler *Handler, writer http.ResponseWriter, request *http.Request) {
+func serveUI(
+	handler *Handler,
+	writer http.ResponseWriter,
+	request *http.Request,
+) {
 	router := echo.New()
 	handler.RegisterRoutes(router.Group("/ui"))
 	router.ServeHTTP(writer, request)

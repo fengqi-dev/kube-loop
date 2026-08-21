@@ -6,19 +6,38 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fengqi-dev/kube-loop/internal/controlplane/authorization"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
+
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/authorization"
 )
 
-func TestInventoryWatchSharesInformerAndSlowSubscriberKeepsLatestSnapshot(t *testing.T) {
-	client := fake.NewSimpleClientset(&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod-0", Namespace: "development"}})
+func TestInventoryWatchSharesInformerAndSlowSubscriberKeepsLatestSnapshot(
+	t *testing.T,
+) {
+	client := fake.NewSimpleClientset(
+		&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "pod-0",
+				Namespace: "development",
+			},
+		},
+	)
 	hub := newInventoryWatchHub(20 * time.Millisecond)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	subject := authorization.Subject{ID: "identity-1", Groups: []string{"developers"}}
-	slow, stopSlow, err := hub.subscribe(ctx, subject, client, "development", inventoryPods)
+	subject := authorization.Subject{
+		ID:     "identity-1",
+		Groups: []string{"developers"},
+	}
+	slow, stopSlow, err := hub.subscribe(
+		ctx,
+		subject,
+		client,
+		"development",
+		inventoryPods,
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,7 +54,13 @@ func TestInventoryWatchSharesInformerAndSlowSubscriberKeepsLatestSnapshot(t *tes
 		t.Fatal(err)
 	}
 	time.Sleep(50 * time.Millisecond)
-	fast, stopFast, err := hub.subscribe(ctx, subject, client, "development", inventoryPods)
+	fast, stopFast, err := hub.subscribe(
+		ctx,
+		subject,
+		client,
+		"development",
+		inventoryPods,
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +81,8 @@ func TestInventoryWatchSharesInformerAndSlowSubscriberKeepsLatestSnapshot(t *tes
 		select {
 		case snapshot := <-fast:
 			if len(snapshot.Pods) == 32 {
-				if snapshot.SchemaVersion != 1 || snapshot.Type != "snapshot" || snapshot.Namespace != "development" {
+				if snapshot.SchemaVersion != 1 || snapshot.Type != "snapshot" ||
+					snapshot.Namespace != "development" {
 					t.Fatalf("snapshot binding = %#v", snapshot)
 				}
 				return

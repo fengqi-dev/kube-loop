@@ -47,7 +47,6 @@ func main() {
 	}
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: parsedLogLevel}))
 	signalContext, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 	bootstrap := bootstrapControlPlane(signalContext, config, logger)
 	stateStore := bootstrap.Store
 	if err := controlplanestorage.EnsureBuiltinOAuthClients(
@@ -65,7 +64,15 @@ func main() {
 	authorizer := bootstrap.Authorizer
 	kubernetesConfig := bootstrap.KubernetesConfig
 	kubernetesProvider := bootstrap.KubernetesProvider
-	apiRuntime := buildAPIRuntime(signalContext, config, environment, logger, stateStore, authorizer, kubernetesProvider)
+	apiRuntime := buildAPIRuntime(
+		signalContext,
+		config,
+		environment,
+		logger,
+		stateStore,
+		authorizer,
+		kubernetesProvider,
+	)
 	apiRoutes := apiRuntime.Routes
 	relayRegistry := apiRuntime.RelayRegistry
 	sessionRuntime := apiRuntime.SessionRuntime
@@ -77,7 +84,9 @@ func main() {
 		logger.Error("initialize API audit sink failed", "error", err)
 		os.Exit(2)
 	}
-	methods := []controlplane.AuthMethod{{ID: "local", Type: "local", DisplayName: "Local account", Interaction: "browser"}}
+	methods := []controlplane.AuthMethod{{
+		ID: "local", Type: "local", DisplayName: "Local account", Interaction: "browser",
+	}}
 	readiness := health.CheckFunc(func(ctx context.Context) error {
 		if err := stateStore.Check(ctx); err != nil {
 			return err
@@ -128,14 +137,24 @@ func main() {
 			logger.Error("initialize Fosite provider failed", "error", err)
 			os.Exit(2)
 		}
-		fositeEndpoints, err = oauthserver.NewEndpoints(fositeProvider, stateStore, config.Document.Authentication.OAuth.KeyID, oidcSigningKey)
+		fositeEndpoints, err = oauthserver.NewEndpoints(
+			fositeProvider,
+			stateStore,
+			config.Document.Authentication.OAuth.KeyID,
+			oidcSigningKey,
+		)
 		if err != nil {
 			_ = stateStore.Close()
 			logger.Error("initialize Fosite endpoints failed", "error", err)
 			os.Exit(2)
 		}
 		if localUsers != nil {
-			fositeEndpoints.SetLocalAuthenticator(func(ctx context.Context, username string, password []byte, requestID string) (controlplanestorage.Identity, error) {
+			fositeEndpoints.SetLocalAuthenticator(func(
+				ctx context.Context,
+				username string,
+				password []byte,
+				requestID string,
+			) (controlplanestorage.Identity, error) {
 				user, authErr := localUsers.Authenticate(ctx, username, password, requestID)
 				if authErr != nil {
 					return controlplanestorage.Identity{}, authErr
@@ -193,4 +212,5 @@ func main() {
 		MaintenanceWorker: maintenanceWorker,
 		BindingRecovery:   bindingRecovery, SessionRuntime: sessionRuntime,
 	})
+	stop()
 }

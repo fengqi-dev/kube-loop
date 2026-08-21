@@ -25,6 +25,17 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/utils/ptr"
+
 	"github.com/fengqi-dev/kube-loop/e2e/harness"
 	clientapp "github.com/fengqi-dev/kube-loop/internal/app"
 	clientdataplane "github.com/fengqi-dev/kube-loop/internal/client/dataplane"
@@ -40,16 +51,6 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/protocol/relayticket"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
 	"github.com/fengqi-dev/kube-loop/internal/singbox"
-	"github.com/google/uuid"
-	appsv1 "k8s.io/api/apps/v1"
-	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/intstr"
-	"k8s.io/apimachinery/pkg/util/wait"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/clientcmd"
-	"k8s.io/utils/ptr"
 )
 
 const (
@@ -234,9 +235,15 @@ func TestGatewayPodRestartRecoversDataPlane(t *testing.T) {
 		t.Fatalf("initial same-namespace ServiceIP TCP/UDP request: %v", err)
 	}
 	revocableTarget := net.JoinHostPort(revocableService.Spec.ClusterIP, "19090")
-	if err := wait.PollUntilContextTimeout(ctx, 250*time.Millisecond, 30*time.Second, true, func(pollCtx context.Context) (bool, error) {
-		return assertEchoThroughSOCKS(pollCtx, status.SOCKSAddress, revocableTarget) == nil, nil
-	}); err != nil {
+	if err := wait.PollUntilContextTimeout(
+		ctx,
+		250*time.Millisecond,
+		30*time.Second,
+		true,
+		func(pollCtx context.Context) (bool, error) {
+			return assertEchoThroughSOCKS(pollCtx, status.SOCKSAddress, revocableTarget) == nil, nil
+		},
+	); err != nil {
 		t.Fatalf("initial revocable ServiceIP TCP/UDP request did not become ready: %v", err)
 	}
 	assertGatewayTargetRejected(
@@ -310,9 +317,15 @@ func TestGatewayPodRestartRecoversDataPlane(t *testing.T) {
 	if err := waitForDirectRequest(ctx, net.JoinHostPort(gatewayDNSName, "80"), 15*time.Second); err != nil {
 		t.Fatalf("cluster DNS request through real TUN: %v", err)
 	}
-	if err := wait.PollUntilContextTimeout(ctx, 250*time.Millisecond, 20*time.Second, true, func(pollCtx context.Context) (bool, error) {
-		return assertDirectTCPEcho(pollCtx, podTarget) == nil, nil
-	}); err != nil {
+	if err := wait.PollUntilContextTimeout(
+		ctx,
+		250*time.Millisecond,
+		20*time.Second,
+		true,
+		func(pollCtx context.Context) (bool, error) {
+			return assertDirectTCPEcho(pollCtx, podTarget) == nil, nil
+		},
+	); err != nil {
 		t.Fatalf("PodIP request through real TUN did not become ready: %v", err)
 	}
 	assertSlowConsumerIsolation(
@@ -344,29 +357,40 @@ func TestGatewayPodRestartRecoversDataPlane(t *testing.T) {
 	previousNetworkSpecHash := status.NetworkSpecHash
 	var recoveryStatus clientdataplane.Status
 	var recoveryChecks [4]error
-	err = wait.PollUntilContextTimeout(ctx, 200*time.Millisecond, 30*time.Second, true, func(pollCtx context.Context) (bool, error) {
-		generation, tickets := source.snapshot()
-		if generation <= networkGeneration || tickets <= networkTickets {
-			return false, nil
-		}
-		refreshedStatus, statusErr := manager.Status(serverProfile.ID)
-		if statusErr != nil || refreshedStatus.State != "connected" || refreshedStatus.Mode != "tun" ||
-			refreshedStatus.NetworkSpecHash == previousNetworkSpecHash {
-			return false, nil
-		}
-		status = refreshedStatus
-		recoveryStatus = refreshedStatus
-		recoveryChecks[0] = requestThroughSOCKS(pollCtx, status.SOCKSAddress, target)
-		recoveryChecks[1] = requestDirect(pollCtx, target)
-		recoveryChecks[2] = assertPortForwardEcho(pollCtx, tcpForward.Address, udpForward.Address)
-		recoveryChecks[3] = assertPortForwardEcho(pollCtx, podTCPForward.Address, podUDPForward.Address)
-		return recoveryChecks[0] == nil && recoveryChecks[1] == nil && recoveryChecks[2] == nil && recoveryChecks[3] == nil, nil
-	})
+	err = wait.PollUntilContextTimeout(
+		ctx,
+		200*time.Millisecond,
+		30*time.Second,
+		true,
+		func(pollCtx context.Context) (bool, error) {
+			generation, tickets := source.snapshot()
+			if generation <= networkGeneration || tickets <= networkTickets {
+				return false, nil
+			}
+			refreshedStatus, statusErr := manager.Status(serverProfile.ID)
+			if statusErr != nil || refreshedStatus.State != "connected" || refreshedStatus.Mode != "tun" ||
+				refreshedStatus.NetworkSpecHash == previousNetworkSpecHash {
+				return false, nil
+			}
+			status = refreshedStatus
+			recoveryStatus = refreshedStatus
+			recoveryChecks[0] = requestThroughSOCKS(pollCtx, status.SOCKSAddress, target)
+			recoveryChecks[1] = requestDirect(pollCtx, target)
+			recoveryChecks[2] = assertPortForwardEcho(pollCtx, tcpForward.Address, udpForward.Address)
+			recoveryChecks[3] = assertPortForwardEcho(pollCtx, podTCPForward.Address, podUDPForward.Address)
+			return recoveryChecks[0] == nil && recoveryChecks[1] == nil && recoveryChecks[2] == nil &&
+				recoveryChecks[3] == nil, nil
+		},
+	)
 	if err != nil {
 		generation, tickets := source.snapshot()
 		t.Fatalf(
 			"Data Plane did not recover after switching network path: generation=%d tickets=%d status=%#v checks=%v: %v",
-			generation, tickets, recoveryStatus, recoveryChecks, err,
+			generation,
+			tickets,
+			recoveryStatus,
+			recoveryChecks,
+			err,
 		)
 	}
 	refreshedTunSessionID := activeHelperSession(t, ctx, helperClient)
@@ -427,28 +451,42 @@ func TestGatewayPodRestartRecoversDataPlane(t *testing.T) {
 		t.Fatalf("Gateway Pod UID did not change: %s", oldPod.UID)
 	}
 
-	err = wait.PollUntilContextTimeout(ctx, 200*time.Millisecond, 2*time.Minute, true, func(pollCtx context.Context) (bool, error) {
-		generation, tickets := source.snapshot()
-		if generation <= initialGeneration || tickets <= initialTickets {
-			return false, nil
-		}
-		return requestThroughSOCKS(pollCtx, status.SOCKSAddress, target) == nil &&
-			requestDirect(pollCtx, target) == nil &&
-			requestThroughSOCKS(pollCtx, status.SOCKSAddress, net.JoinHostPort(gatewayDNSName, "80")) == nil &&
-			assertEchoThroughSOCKS(pollCtx, status.SOCKSAddress, podTarget) == nil &&
-			assertPortForwardEcho(pollCtx, tcpForward.Address, udpForward.Address) == nil &&
-			assertPortForwardEcho(pollCtx, podTCPForward.Address, podUDPForward.Address) == nil, nil
-	})
+	err = wait.PollUntilContextTimeout(
+		ctx,
+		200*time.Millisecond,
+		2*time.Minute,
+		true,
+		func(pollCtx context.Context) (bool, error) {
+			generation, tickets := source.snapshot()
+			if generation <= initialGeneration || tickets <= initialTickets {
+				return false, nil
+			}
+			return requestThroughSOCKS(pollCtx, status.SOCKSAddress, target) == nil &&
+				requestDirect(pollCtx, target) == nil &&
+				requestThroughSOCKS(pollCtx, status.SOCKSAddress, net.JoinHostPort(gatewayDNSName, "80")) == nil &&
+				assertEchoThroughSOCKS(pollCtx, status.SOCKSAddress, podTarget) == nil &&
+				assertPortForwardEcho(pollCtx, tcpForward.Address, udpForward.Address) == nil &&
+				assertPortForwardEcho(pollCtx, podTCPForward.Address, podUDPForward.Address) == nil, nil
+		},
+	)
 	if err != nil {
 		generation, tickets := source.snapshot()
 		t.Fatalf(
 			"Data Plane did not recover through the stable SOCKS endpoint after Gateway restart: generation=%d tickets=%d: %v",
-			generation, tickets, err,
+			generation,
+			tickets,
+			err,
 		)
 	}
 	generation, tickets := source.snapshot()
 	if generation <= initialGeneration || tickets <= initialTickets {
-		t.Fatalf("recovery did not refresh Session/Ticket: generation %d->%d tickets %d->%d", initialGeneration, generation, initialTickets, tickets)
+		t.Fatalf(
+			"recovery did not refresh Session/Ticket: generation %d->%d tickets %d->%d",
+			initialGeneration,
+			generation,
+			initialTickets,
+			tickets,
+		)
 	}
 	if activeHelperSession(t, ctx, helperClient) != refreshedTunSessionID {
 		t.Fatal("real TUN was reinstalled after Gateway Pod recovery")
@@ -500,13 +538,19 @@ func TestGatewayPodRestartRecoversDataPlane(t *testing.T) {
 	}
 	harness.WaitDNSProxyGone(t, dnsPort, gatewayDNSName)
 	harness.AssertClusterDNSGone(t, gatewayDNSName, service.Spec.ClusterIP)
-	err = wait.PollUntilContextTimeout(ctx, 100*time.Millisecond, 15*time.Second, true, func(pollCtx context.Context) (bool, error) {
-		connection, dialErr := (&net.Dialer{}).DialContext(pollCtx, "tcp", status.SOCKSAddress)
-		if connection != nil {
-			_ = connection.Close()
-		}
-		return dialErr != nil, nil
-	})
+	err = wait.PollUntilContextTimeout(
+		ctx,
+		100*time.Millisecond,
+		15*time.Second,
+		true,
+		func(pollCtx context.Context) (bool, error) {
+			connection, dialErr := (&net.Dialer{}).DialContext(pollCtx, "tcp", status.SOCKSAddress)
+			if connection != nil {
+				_ = connection.Close()
+			}
+			return dialErr != nil, nil
+		},
+	)
 	if err != nil {
 		t.Fatalf("SOCKS endpoint survived local core crash: %v", err)
 	}
@@ -721,12 +765,20 @@ func (source *e2eSessionSource) RelayTicketSource(string) func(context.Context) 
 		defer source.mu.Unlock()
 		now := time.Now().UTC().Truncate(time.Second)
 		ticket, err := source.signer.Sign(relayticket.Claims{
-			Version: relayticket.Version, Issuer: testIssuer, Audience: testRelay,
-			IdentityID: source.identityID, DeviceID: source.deviceID,
-			SessionID: source.session.ID, SessionGeneration: source.session.Generation,
-			Namespace:  source.session.Namespace,
-			Operations: []string{"tunnel"}, NetworkSpecHash: source.session.NetworkSpecHash,
-			TicketID: uuid.NewString(), IssuedAt: now.Unix(), NotBefore: now.Unix(), ExpiresAt: now.Add(time.Minute).Unix(),
+			Version:           relayticket.Version,
+			Issuer:            testIssuer,
+			Audience:          testRelay,
+			IdentityID:        source.identityID,
+			DeviceID:          source.deviceID,
+			SessionID:         source.session.ID,
+			SessionGeneration: source.session.Generation,
+			Namespace:         source.session.Namespace,
+			Operations:        []string{"tunnel"},
+			NetworkSpecHash:   source.session.NetworkSpecHash,
+			TicketID:          uuid.NewString(),
+			IssuedAt:          now.Unix(),
+			NotBefore:         now.Unix(),
+			ExpiresAt:         now.Add(time.Minute).Unix(),
 		})
 		if err == nil {
 			source.tickets++
@@ -771,7 +823,10 @@ func assertCrossSessionRejected(
 	if err := tunnel.WriteAuthorizedControlSession(connection, otherToken, spec); err != nil {
 		t.Fatal(err)
 	}
-	if err := tunnel.ReadStatus(connection); err == nil || !strings.Contains(err.Error(), "does not match RelayTicket") {
+	if err := tunnel.ReadStatus(
+		connection,
+	); err == nil ||
+		!strings.Contains(err.Error(), "does not match RelayTicket") {
 		t.Fatalf("cross-Session protocol token was not rejected: %v", err)
 	}
 }
@@ -866,7 +921,9 @@ func kubeRESTConfig(t *testing.T) *rest.Config {
 
 func createNamespace(t *testing.T, ctx context.Context, client kubernetes.Interface, namespace string) {
 	t.Helper()
-	_, err := client.CoreV1().Namespaces().Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespace}}, metav1.CreateOptions{})
+	_, err := client.CoreV1().
+		Namespaces().
+		Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespace}}, metav1.CreateOptions{})
 	if err != nil {
 		t.Fatalf("create Data Plane e2e namespace: %v", err)
 	}
@@ -955,7 +1012,9 @@ func relayFixtureCertificate(t *testing.T) (tls.Certificate, []byte) {
 		t.Fatal(err)
 	}
 	certificatePEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
-	privateKeyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(privateKey)})
+	privateKeyPEM := pem.EncodeToMemory(
+		&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(privateKey)},
+	)
 	certificate, err := tls.X509KeyPair(certificatePEM, privateKeyPEM)
 	if err != nil {
 		t.Fatal(err)
@@ -963,7 +1022,13 @@ func relayFixtureCertificate(t *testing.T) (tls.Certificate, []byte) {
 	return certificate, certificatePEM
 }
 
-func installGateway(t *testing.T, ctx context.Context, client kubernetes.Interface, namespace string, publicKey ed25519.PublicKey) {
+func installGateway(
+	t *testing.T,
+	ctx context.Context,
+	client kubernetes.Interface,
+	namespace string,
+	publicKey ed25519.PublicKey,
+) {
 	installGatewayWithLimits(t, ctx, client, namespace, publicKey, nil)
 }
 
@@ -1022,7 +1087,9 @@ func installGatewayWithLimits(
 					AutomountServiceAccountToken: ptr.To(false), TerminationGracePeriodSeconds: ptr.To[int64](8),
 					Containers: []corev1.Container{
 						{
-							Name: name, Image: harness.GatewayImage(), ImagePullPolicy: corev1.PullIfNotPresent,
+							Name:            name,
+							Image:           harness.GatewayImage(),
+							ImagePullPolicy: corev1.PullIfNotPresent,
 							Env: []corev1.EnvVar{
 								{Name: "KUBELOOP_GATEWAY_CONFIG_FILE", Value: "/etc/kubeloop/gateway/kubeloop.yaml"},
 								{Name: "KUBELOOP_POD_IP", ValueFrom: &corev1.EnvVarSource{
@@ -1030,9 +1097,13 @@ func installGatewayWithLimits(
 								}},
 							},
 							Ports: []corev1.ContainerPort{{Name: "http", ContainerPort: 8080}},
-							ReadinessProbe: &corev1.Probe{ProbeHandler: corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{
-								Path: "/health/ready", Port: intstr.FromString("http"),
-							}}, PeriodSeconds: 1, FailureThreshold: 30},
+							ReadinessProbe: &corev1.Probe{
+								ProbeHandler: corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{
+									Path: "/health/ready", Port: intstr.FromString("http"),
+								}},
+								PeriodSeconds:    1,
+								FailureThreshold: 30,
+							},
 							VolumeMounts: []corev1.VolumeMount{
 								{Name: "config", MountPath: "/etc/kubeloop/gateway", ReadOnly: true},
 								{Name: "relay", MountPath: "/var/run/kubeloop/relay", ReadOnly: true},
@@ -1104,14 +1175,18 @@ func installGatewayWithLimits(
 				ObjectMeta: metav1.ObjectMeta{Labels: echoLabels},
 				Spec: corev1.PodSpec{
 					AutomountServiceAccountToken: ptr.To(false),
-					Containers: []corev1.Container{{
-						Name: "port-forward-echo", Image: "python:3.12-alpine", ImagePullPolicy: corev1.PullIfNotPresent,
-						Command: []string{"python", "-u", "-c", portForwardEchoScript},
-						Ports: []corev1.ContainerPort{
-							{Name: "tcp", ContainerPort: 19090, Protocol: corev1.ProtocolTCP},
-							{Name: "udp", ContainerPort: 19090, Protocol: corev1.ProtocolUDP},
+					Containers: []corev1.Container{
+						{
+							Name:            "port-forward-echo",
+							Image:           "python:3.12-alpine",
+							ImagePullPolicy: corev1.PullIfNotPresent,
+							Command:         []string{"python", "-u", "-c", portForwardEchoScript},
+							Ports: []corev1.ContainerPort{
+								{Name: "tcp", ContainerPort: 19090, Protocol: corev1.ProtocolTCP},
+								{Name: "udp", ContainerPort: 19090, Protocol: corev1.ProtocolUDP},
+							},
 						},
-					}},
+					},
 				},
 			},
 		},
@@ -1154,8 +1229,11 @@ func installIsolatedEcho(
 						Name: name, Image: "python:3.12-alpine", ImagePullPolicy: corev1.PullIfNotPresent,
 						Command: []string{"python", "-u", "-c", portForwardEchoScript},
 						ReadinessProbe: &corev1.Probe{
-							ProbeHandler:  corev1.ProbeHandler{TCPSocket: &corev1.TCPSocketAction{Port: intstr.FromString("tcp")}},
-							PeriodSeconds: 1, FailureThreshold: 30,
+							ProbeHandler: corev1.ProbeHandler{
+								TCPSocket: &corev1.TCPSocketAction{Port: intstr.FromString("tcp")},
+							},
+							PeriodSeconds:    1,
+							FailureThreshold: 30,
 						},
 						Ports: []corev1.ContainerPort{
 							{Name: "tcp", ContainerPort: 19090, Protocol: corev1.ProtocolTCP},
@@ -1188,18 +1266,24 @@ func installIsolatedEcho(
 
 func waitForGateway(t *testing.T, ctx context.Context, client kubernetes.Interface, namespace string) *corev1.Service {
 	t.Helper()
-	err := wait.PollUntilContextTimeout(ctx, 500*time.Millisecond, 2*time.Minute, true, func(pollCtx context.Context) (bool, error) {
-		gateway, err := client.AppsV1().Deployments(namespace).Get(pollCtx, "kubeloop-gateway", metav1.GetOptions{})
-		if err != nil || gateway.Status.AvailableReplicas != 1 {
-			return false, nil
-		}
-		slow, err := client.AppsV1().Deployments(namespace).Get(pollCtx, "slow-consumer", metav1.GetOptions{})
-		if err != nil || slow.Status.AvailableReplicas != 1 {
-			return false, nil
-		}
-		echo, err := client.AppsV1().Deployments(namespace).Get(pollCtx, "port-forward-echo", metav1.GetOptions{})
-		return err == nil && echo.Status.AvailableReplicas == 1, nil
-	})
+	err := wait.PollUntilContextTimeout(
+		ctx,
+		500*time.Millisecond,
+		2*time.Minute,
+		true,
+		func(pollCtx context.Context) (bool, error) {
+			gateway, err := client.AppsV1().Deployments(namespace).Get(pollCtx, "kubeloop-gateway", metav1.GetOptions{})
+			if err != nil || gateway.Status.AvailableReplicas != 1 {
+				return false, nil
+			}
+			slow, err := client.AppsV1().Deployments(namespace).Get(pollCtx, "slow-consumer", metav1.GetOptions{})
+			if err != nil || slow.Status.AvailableReplicas != 1 {
+				return false, nil
+			}
+			echo, err := client.AppsV1().Deployments(namespace).Get(pollCtx, "port-forward-echo", metav1.GetOptions{})
+			return err == nil && echo.Status.AvailableReplicas == 1, nil
+		},
+	)
 	if err != nil {
 		t.Fatalf("wait for Gateway Deployment: %v", err)
 	}
@@ -1210,23 +1294,36 @@ func waitForGateway(t *testing.T, ctx context.Context, client kubernetes.Interfa
 	return service
 }
 
-func gatewayPod(t *testing.T, ctx context.Context, client kubernetes.Interface, namespace, previousUID string) corev1.Pod {
+func gatewayPod(
+	t *testing.T,
+	ctx context.Context,
+	client kubernetes.Interface,
+	namespace, previousUID string,
+) corev1.Pod {
 	t.Helper()
 	var found corev1.Pod
-	err := wait.PollUntilContextTimeout(ctx, 500*time.Millisecond, 2*time.Minute, true, func(pollCtx context.Context) (bool, error) {
-		pods, err := client.CoreV1().Pods(namespace).List(pollCtx, metav1.ListOptions{LabelSelector: "app.kubernetes.io/name=kubeloop-gateway"})
-		if err != nil {
-			return false, nil
-		}
-		for _, pod := range pods.Items {
-			if string(pod.UID) == previousUID || pod.DeletionTimestamp != nil || !podReady(pod) {
-				continue
+	err := wait.PollUntilContextTimeout(
+		ctx,
+		500*time.Millisecond,
+		2*time.Minute,
+		true,
+		func(pollCtx context.Context) (bool, error) {
+			pods, err := client.CoreV1().
+				Pods(namespace).
+				List(pollCtx, metav1.ListOptions{LabelSelector: "app.kubernetes.io/name=kubeloop-gateway"})
+			if err != nil {
+				return false, nil
 			}
-			found = pod
-			return true, nil
-		}
-		return false, nil
-	})
+			for _, pod := range pods.Items {
+				if string(pod.UID) == previousUID || pod.DeletionTimestamp != nil || !podReady(pod) {
+					continue
+				}
+				found = pod
+				return true, nil
+			}
+			return false, nil
+		},
+	)
 	if err != nil {
 		t.Fatalf("wait for replacement Gateway Pod: %v", err)
 	}
@@ -1250,19 +1347,25 @@ func readyPodByLabel(
 ) corev1.Pod {
 	t.Helper()
 	var found corev1.Pod
-	err := wait.PollUntilContextTimeout(ctx, 250*time.Millisecond, time.Minute, true, func(pollCtx context.Context) (bool, error) {
-		pods, err := client.CoreV1().Pods(namespace).List(pollCtx, metav1.ListOptions{LabelSelector: selector})
-		if err != nil {
-			return false, nil
-		}
-		for _, pod := range pods.Items {
-			if pod.DeletionTimestamp == nil && pod.Status.PodIP != "" && podReady(pod) {
-				found = pod
-				return true, nil
+	err := wait.PollUntilContextTimeout(
+		ctx,
+		250*time.Millisecond,
+		time.Minute,
+		true,
+		func(pollCtx context.Context) (bool, error) {
+			pods, err := client.CoreV1().Pods(namespace).List(pollCtx, metav1.ListOptions{LabelSelector: selector})
+			if err != nil {
+				return false, nil
 			}
-		}
-		return false, nil
-	})
+			for _, pod := range pods.Items {
+				if pod.DeletionTimestamp == nil && pod.Status.PodIP != "" && podReady(pod) {
+					found = pod
+					return true, nil
+				}
+			}
+			return false, nil
+		},
+	)
 	if err != nil {
 		t.Fatalf("wait for ready Pod matching %q: %v", selector, err)
 	}
@@ -1318,15 +1421,21 @@ func reachableNodeAddress(t *testing.T, ctx context.Context, client kubernetes.I
 func waitForHTTP(t *testing.T, ctx context.Context, target string) {
 	t.Helper()
 	client := &http.Client{Timeout: 2 * time.Second, Transport: &http.Transport{Proxy: nil}}
-	err := wait.PollUntilContextTimeout(ctx, 500*time.Millisecond, time.Minute, true, func(context.Context) (bool, error) {
-		response, err := client.Get(target)
-		if err != nil {
-			return false, nil
-		}
-		_, _ = io.Copy(io.Discard, response.Body)
-		_ = response.Body.Close()
-		return response.StatusCode == http.StatusOK, nil
-	})
+	err := wait.PollUntilContextTimeout(
+		ctx,
+		500*time.Millisecond,
+		time.Minute,
+		true,
+		func(context.Context) (bool, error) {
+			response, err := client.Get(target)
+			if err != nil {
+				return false, nil
+			}
+			_, _ = io.Copy(io.Discard, response.Body)
+			_ = response.Body.Close()
+			return response.StatusCode == http.StatusOK, nil
+		},
+	)
 	if err != nil {
 		t.Fatalf("wait for Gateway endpoint %s: %v", target, err)
 	}
@@ -1335,13 +1444,20 @@ func waitForHTTP(t *testing.T, ctx context.Context, target string) {
 func requestThroughSOCKS(ctx context.Context, socksAddress, target string) error {
 	requestCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
-	connection, err := (traffic.Dialer{Endpoint: traffic.Endpoint{Address: socksAddress}}).DialContext(requestCtx, "tcp", target)
+	connection, err := (traffic.Dialer{Endpoint: traffic.Endpoint{Address: socksAddress}}).DialContext(
+		requestCtx,
+		"tcp",
+		target,
+	)
 	if err != nil {
 		return err
 	}
 	defer connection.Close()
 	_ = connection.SetDeadline(time.Now().Add(3 * time.Second))
-	if _, err := fmt.Fprintf(connection, "GET /health/live HTTP/1.1\r\nHost: kubeloop-gateway\r\nConnection: close\r\n\r\n"); err != nil {
+	if _, err := fmt.Fprintf(
+		connection,
+		"GET /health/live HTTP/1.1\r\nHost: kubeloop-gateway\r\nConnection: close\r\n\r\n",
+	); err != nil {
 		return err
 	}
 	writeCloser, ok := connection.(interface{ CloseWrite() error })
@@ -1466,9 +1582,15 @@ func requestDirect(ctx context.Context, target string) error {
 }
 
 func waitForDirectRequest(ctx context.Context, target string, timeout time.Duration) error {
-	return wait.PollUntilContextTimeout(ctx, 200*time.Millisecond, timeout, true, func(pollCtx context.Context) (bool, error) {
-		return requestDirect(pollCtx, target) == nil, nil
-	})
+	return wait.PollUntilContextTimeout(
+		ctx,
+		200*time.Millisecond,
+		timeout,
+		true,
+		func(pollCtx context.Context) (bool, error) {
+			return requestDirect(pollCtx, target) == nil, nil
+		},
+	)
 }
 
 func waitForDataPlaneState(
@@ -1509,19 +1631,29 @@ func activeHelperSession(t *testing.T, ctx context.Context, client *helper.Clien
 }
 
 func waitForHelperIdle(ctx context.Context, client *helper.Client, timeout time.Duration) error {
-	return wait.PollUntilContextTimeout(ctx, 100*time.Millisecond, timeout, true, func(pollCtx context.Context) (bool, error) {
-		response, err := client.Ping(pollCtx)
-		if err != nil {
-			return false, nil
-		}
-		return len(response.ActiveSessions) == 0, nil
-	})
+	return wait.PollUntilContextTimeout(
+		ctx,
+		100*time.Millisecond,
+		timeout,
+		true,
+		func(pollCtx context.Context) (bool, error) {
+			response, err := client.Ping(pollCtx)
+			if err != nil {
+				return false, nil
+			}
+			return len(response.ActiveSessions) == 0, nil
+		},
+	)
 }
 
 func startSlowConsumerRequest(t *testing.T, ctx context.Context, socksAddress, target string) <-chan error {
 	t.Helper()
 	requestCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-	connection, err := (traffic.Dialer{Endpoint: traffic.Endpoint{Address: socksAddress}}).DialContext(requestCtx, "tcp", target)
+	connection, err := (traffic.Dialer{Endpoint: traffic.Endpoint{Address: socksAddress}}).DialContext(
+		requestCtx,
+		"tcp",
+		target,
+	)
 	if err != nil {
 		cancel()
 		t.Fatalf("connect drain-window consumer: %v", err)
@@ -1564,7 +1696,11 @@ func assertSlowConsumerIsolation(t *testing.T, ctx context.Context, socksAddress
 	t.Helper()
 	testCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	connection, err := (traffic.Dialer{Endpoint: traffic.Endpoint{Address: socksAddress}}).DialContext(testCtx, "tcp", slowTarget)
+	connection, err := (traffic.Dialer{Endpoint: traffic.Endpoint{Address: socksAddress}}).DialContext(
+		testCtx,
+		"tcp",
+		slowTarget,
+	)
 	if err != nil {
 		t.Fatalf("connect slow cluster consumer: %v", err)
 	}

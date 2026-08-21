@@ -9,8 +9,8 @@ import (
 
 func TestSOCKSConnectCompletesGatewayPath(t *testing.T) {
 	client, server := net.Pipe()
-	defer client.Close()
-	defer server.Close()
+	defer checkTestClose(t, client.Close)
+	defer checkTestClose(t, server.Close)
 	done := make(chan error, 1)
 	go func() {
 		greeting := make([]byte, 3)
@@ -40,8 +40,8 @@ func TestSOCKSConnectCompletesGatewayPath(t *testing.T) {
 
 func TestSOCKSConnectReportsRejectedTarget(t *testing.T) {
 	client, server := net.Pipe()
-	defer client.Close()
-	defer server.Close()
+	defer checkTestClose(t, client.Close)
+	defer checkTestClose(t, server.Close)
 	go func() {
 		_, _ = io.CopyN(io.Discard, server, 3)
 		_, _ = server.Write([]byte{5, 0})

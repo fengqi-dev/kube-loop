@@ -73,7 +73,11 @@ func TestHandler_HTTPBingoLive(t *testing.T) {
 		})
 	}
 	if dialer.count(httpBingoHTTPAddress) == 0 || dialer.count(httpBingoHTTPSAddress) == 0 {
-		t.Fatalf("HTTPBingo dial counts: http=%d https=%d", dialer.count(httpBingoHTTPAddress), dialer.count(httpBingoHTTPSAddress))
+		t.Fatalf(
+			"HTTPBingo dial counts: http=%d https=%d",
+			dialer.count(httpBingoHTTPAddress),
+			dialer.count(httpBingoHTTPSAddress),
+		)
 	}
 	assertLiveEvents(t, events, len(tests), map[string]bool{
 		"httpbingo.org/get": true,

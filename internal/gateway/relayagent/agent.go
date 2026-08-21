@@ -71,15 +71,20 @@ func New(config Config) (*Agent, error) {
 	if err != nil || controlPlaneURL.Scheme != "https" || controlPlaneURL.Host == "" ||
 		controlPlaneURL.User != nil || controlPlaneURL.RawQuery != "" || controlPlaneURL.Fragment != "" ||
 		(controlPlaneURL.Path != "" && controlPlaneURL.Path != "/") {
-		return nil, errors.New("Relay Registry ControlPlane URL must be an HTTPS origin")
+		return nil, errors.New("relay registry ControlPlane URL must be an HTTPS origin")
 	}
 	endpoint, err := url.Parse(config.Endpoint)
-	if err != nil || (endpoint.Scheme != "ws" && endpoint.Scheme != "wss") || endpoint.Host == "" || endpoint.Path == "" ||
-		endpoint.User != nil || endpoint.RawQuery != "" || endpoint.Fragment != "" {
-		return nil, errors.New("Data Plane advertised endpoint must be an absolute WS or WSS URL")
+	if err != nil {
+		return nil, errors.New("data plane advertised endpoint must be an absolute WS or WSS URL")
+	}
+	invalidEndpoint := (endpoint.Scheme != "ws" && endpoint.Scheme != "wss") ||
+		endpoint.Host == "" || endpoint.Path == "" || endpoint.User != nil ||
+		endpoint.RawQuery != "" || endpoint.Fragment != ""
+	if invalidEndpoint {
+		return nil, errors.New("data plane advertised endpoint must be an absolute WS or WSS URL")
 	}
 	if config.HTTPClient == nil || config.Reporter == nil || config.Applier == nil {
-		return nil, errors.New("Relay Agent HTTP client, runtime reporter, and control applier are required")
+		return nil, errors.New("relay agent HTTP client, runtime reporter, and control applier are required")
 	}
 	config.BearerTokenFile = strings.TrimSpace(config.BearerTokenFile)
 	if config.Now == nil {
@@ -93,19 +98,19 @@ func New(config Config) (*Agent, error) {
 	}
 	if config.RegistrationAttempts < 1 || config.RegistrationAttempts > 100 ||
 		config.RegistrationRetryDelay < 10*time.Millisecond || config.RegistrationRetryDelay > 30*time.Second {
-		return nil, errors.New("Relay Agent registration retry policy is invalid")
+		return nil, errors.New("relay agent registration retry policy is invalid")
 	}
 	return &Agent{config: config, done: make(chan struct{})}, nil
 }
 
 func (agent *Agent) Start(ctx context.Context) error {
 	if agent == nil || ctx == nil {
-		return errors.New("Relay Agent context is required")
+		return errors.New("relay agent context is required")
 	}
 	agent.mu.Lock()
 	if agent.started {
 		agent.mu.Unlock()
-		return errors.New("Relay Agent is already started")
+		return errors.New("relay agent is already started")
 	}
 	agent.mu.Unlock()
 	var err error
@@ -117,7 +122,7 @@ func (agent *Agent) Start(ctx context.Context) error {
 		if !retryableRegistrationError(err) || attempt == agent.config.RegistrationAttempts {
 			return err
 		}
-		agent.log(
+		agent.logf(
 			"Relay registration failed (attempt %d/%d); retrying in %s: %v",
 			attempt, agent.config.RegistrationAttempts, agent.config.RegistrationRetryDelay, err,
 		)
@@ -162,14 +167,14 @@ func (agent *Agent) run(ctx context.Context) {
 		}
 		if err := agent.heartbeat(ctx); err != nil {
 			agent.setError(err)
-			agent.log("Relay heartbeat failed: %v", err)
+			agent.logf("Relay heartbeat failed: %v", err)
 			if isLeaseError(err) {
-				if registerErr := agent.register(ctx); registerErr == nil {
+				registerErr := agent.register(ctx)
+				if registerErr == nil {
 					continue
-				} else {
-					agent.setError(registerErr)
-					agent.log("Relay re-registration failed: %v", registerErr)
 				}
+				agent.setError(registerErr)
+				agent.logf("Relay re-registration failed: %v", registerErr)
 			}
 			select {
 			case <-ctx.Done():
@@ -190,10 +195,15 @@ func (agent *Agent) register(ctx context.Context) error {
 	request.AppliedKeyGeneration = keyGeneration
 	request.AppliedRevocationGeneration = revocationGeneration
 	var response relaycontrol.RegistrationResponse
-	if err := call(agent, ctx, http.MethodPost, "/internal/v1/relays/register", request, relaycontrol.DecodeRegistrationResponse, &response); err != nil {
+	if err := call(
+		ctx, agent, http.MethodPost, "/internal/v1/relays/register",
+		request, relaycontrol.DecodeRegistrationResponse, &response,
+	); err != nil {
 		return err
 	}
-	if err := agent.config.Applier.Apply(response.TicketIssuer, response.RelayID, response.Keys, response.Revocations); err != nil {
+	if err := agent.config.Applier.Apply(
+		response.TicketIssuer, response.RelayID, response.Keys, response.Revocations,
+	); err != nil {
 		return fmt.Errorf("apply Relay registration control state: %w", err)
 	}
 	if response.DesiredState == relaycontrol.StateDraining {
@@ -217,7 +227,7 @@ func (agent *Agent) heartbeat(ctx context.Context) error {
 	leaseID := agent.leaseID
 	agent.mu.RUnlock()
 	if leaseID == "" {
-		return errors.New("Relay Agent has no lease")
+		return errors.New("relay agent has no lease")
 	}
 	state, capacity := agent.config.Reporter.Snapshot()
 	keyGeneration, revocationGeneration := agent.config.Applier.AppliedGenerations()
@@ -228,7 +238,10 @@ func (agent *Agent) heartbeat(ctx context.Context) error {
 	request.AppliedKeyGeneration = keyGeneration
 	request.AppliedRevocationGeneration = revocationGeneration
 	var response relaycontrol.HeartbeatResponse
-	if err := call(agent, ctx, http.MethodPut, "/internal/v1/relays/heartbeat", request, relaycontrol.DecodeHeartbeatResponse, &response); err != nil {
+	if err := call(
+		ctx, agent, http.MethodPut, "/internal/v1/relays/heartbeat",
+		request, relaycontrol.DecodeHeartbeatResponse, &response,
+	); err != nil {
 		return err
 	}
 	agent.mu.RLock()
@@ -252,8 +265,8 @@ func (agent *Agent) heartbeat(ctx context.Context) error {
 type decodeResponse[T any] func([]byte, time.Time) (T, error)
 
 func call[T interface{ Validate(time.Time) error }, R any](
-	agent *Agent,
 	ctx context.Context,
+	agent *Agent,
 	method, path string,
 	request T,
 	decode decodeResponse[R],
@@ -281,7 +294,7 @@ func call[T interface{ Validate(time.Time) error }, R any](
 	if err != nil {
 		return fmt.Errorf("send Relay control request: %w", err)
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	responseRaw, readErr := io.ReadAll(io.LimitReader(response.Body, relaycontrol.MaximumBodyBytes+1))
 	if readErr != nil || len(responseRaw) > relaycontrol.MaximumBodyBytes {
 		return errors.New("read Relay control response")
@@ -316,7 +329,8 @@ func (err *HTTPError) HTTPStatus() int { return err.Status }
 
 func isLeaseError(err error) bool {
 	var httpError *HTTPError
-	return errors.As(err, &httpError) && (httpError.Status == http.StatusNotFound || httpError.Status == http.StatusConflict)
+	return errors.As(err, &httpError) &&
+		(httpError.Status == http.StatusNotFound || httpError.Status == http.StatusConflict)
 }
 
 func (agent *Agent) Ready() bool {
@@ -339,7 +353,7 @@ func (agent *Agent) RelayID() string {
 // transport used by Relay registration.
 func (agent *Agent) DoJSON(ctx context.Context, method, path string, input, output any) error {
 	if agent == nil || ctx == nil || !strings.HasPrefix(path, "/internal/") {
-		return errors.New("Relay internal request is invalid")
+		return errors.New("relay internal request is invalid")
 	}
 	raw, err := json.Marshal(input)
 	if err != nil || len(raw) == 0 || len(raw) > trafficcontrol.MaximumBodyBytes {
@@ -362,7 +376,7 @@ func (agent *Agent) DoJSON(ctx context.Context, method, path string, input, outp
 	if err != nil {
 		return fmt.Errorf("send Relay internal request: %w", err)
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	responseRaw, readErr := io.ReadAll(io.LimitReader(response.Body, trafficcontrol.MaximumBodyBytes+1))
 	if readErr != nil || len(responseRaw) > trafficcontrol.MaximumBodyBytes {
 		return errors.New("read Relay internal response")
@@ -415,7 +429,7 @@ func (agent *Agent) setError(err error) {
 	agent.mu.Unlock()
 }
 
-func (agent *Agent) log(format string, values ...any) {
+func (agent *Agent) logf(format string, values ...any) {
 	if agent.config.Logger != nil {
 		agent.config.Logger.Printf(format, values...)
 	}
@@ -432,7 +446,7 @@ func NewHTTPClient(config ClientTLSConfig) (*http.Client, error) {
 	certificateFile := strings.TrimSpace(config.CertificateFile)
 	privateKeyFile := strings.TrimSpace(config.PrivateKeyFile)
 	if (certificateFile == "") != (privateKeyFile == "") {
-		return nil, errors.New("Relay Agent client certificate and private key must be configured together")
+		return nil, errors.New("relay agent client certificate and private key must be configured together")
 	}
 	var certificates []tls.Certificate
 	if certificateFile != "" {
@@ -450,7 +464,11 @@ func NewHTTPClient(config ClientTLSConfig) (*http.Client, error) {
 	if !roots.AppendCertsFromPEM(caPEM) {
 		return nil, errors.New("parse Relay Agent server CA")
 	}
-	transport := http.DefaultTransport.(*http.Transport).Clone()
+	defaultTransport, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		return nil, errors.New("default HTTP transport is not configurable")
+	}
+	transport := defaultTransport.Clone()
 	transport.TLSClientConfig = &tls.Config{
 		MinVersion: tls.VersionTLS13, Certificates: certificates,
 		RootCAs: roots, ServerName: strings.TrimSpace(config.ServerName),
@@ -463,11 +481,12 @@ func readBearerToken(path string) (string, error) {
 	if err != nil {
 		return "", errors.New("read Relay Agent bearer token")
 	}
-	defer file.Close()
 	raw, err := io.ReadAll(io.LimitReader(file, (16<<10)+1))
+	closeErr := file.Close()
 	token := strings.TrimSpace(string(raw))
-	if err != nil || len(raw) == 0 || len(raw) > 16<<10 || token == "" || strings.ContainsAny(token, "\r\n \t") {
-		return "", errors.New("Relay Agent bearer token is invalid")
+	if err != nil || closeErr != nil || len(raw) == 0 || len(raw) > 16<<10 ||
+		token == "" || strings.ContainsAny(token, "\r\n \t") {
+		return "", errors.New("relay agent bearer token is invalid")
 	}
 	return token, nil
 }

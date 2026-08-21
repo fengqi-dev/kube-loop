@@ -63,7 +63,7 @@ func (d Dialer) dialTCP(ctx context.Context, address string) (net.Conn, error) {
 	}
 	if _, err := readReply(reader); err != nil {
 		_ = conn.Close()
-		return nil, fmt.Errorf("SOCKS connect %s: %w", address, err)
+		return nil, fmt.Errorf("sOCKS connect %s: %w", address, err)
 	}
 	return &bufferedConn{Conn: conn, reader: reader}, nil
 }
@@ -80,7 +80,7 @@ func (d Dialer) dialUDP(ctx context.Context, network, target string) (net.Conn, 
 	relayAddress, err := readReply(reader)
 	if err != nil {
 		_ = control.Close()
-		return nil, fmt.Errorf("SOCKS UDP associate: %w", err)
+		return nil, fmt.Errorf("sOCKS UDP associate: %w", err)
 	}
 	relayHost, relayPort, err := net.SplitHostPort(relayAddress)
 	if err != nil {
@@ -121,7 +121,7 @@ func (d Dialer) dialUDP(ctx context.Context, network, target string) (net.Conn, 
 
 func (d Dialer) openControl(ctx context.Context) (net.Conn, *bufio.Reader, error) {
 	if d.Endpoint.Address == "" {
-		return nil, nil, errors.New("SOCKS endpoint address is required")
+		return nil, nil, errors.New("sOCKS endpoint address is required")
 	}
 	var dialer net.Dialer
 	conn, err := dialer.DialContext(ctx, "tcp", d.Endpoint.Address)
@@ -133,7 +133,7 @@ func (d Dialer) openControl(ctx context.Context) (net.Conn, *bufio.Reader, error
 	if d.Endpoint.Username != "" || d.Endpoint.Password != "" {
 		methods = []byte{socksMethodPassword}
 	}
-	if err := writeAll(conn, append([]byte{socksVersion, byte(len(methods))}, methods...)); err != nil {
+	if err := writeAll(conn, append([]byte{socksVersion, 1}, methods...)); err != nil {
 		_ = conn.Close()
 		return nil, nil, err
 	}
@@ -150,7 +150,7 @@ func (d Dialer) openControl(ctx context.Context) (net.Conn, *bufio.Reader, error
 	case socksMethodNone:
 		if d.Endpoint.Username != "" || d.Endpoint.Password != "" {
 			_ = conn.Close()
-			return nil, nil, errors.New("SOCKS endpoint skipped required authentication")
+			return nil, nil, errors.New("sOCKS endpoint skipped required authentication")
 		}
 	case socksMethodPassword:
 		if err := authenticate(conn, reader, d.Endpoint.Username, d.Endpoint.Password); err != nil {
@@ -159,7 +159,7 @@ func (d Dialer) openControl(ctx context.Context) (net.Conn, *bufio.Reader, error
 		}
 	default:
 		_ = conn.Close()
-		return nil, nil, fmt.Errorf("SOCKS authentication method %d rejected", response[1])
+		return nil, nil, fmt.Errorf("sOCKS authentication method %d rejected", response[1])
 	}
 	return conn, reader, nil
 }
@@ -169,8 +169,10 @@ func authenticate(conn net.Conn, reader *bufio.Reader, username, password string
 		return errors.New("invalid SOCKS username or password length")
 	}
 	request := make([]byte, 0, len(username)+len(password)+3)
+	//nolint:gosec // The length validation above bounds both values to one-byte SOCKS fields.
 	request = append(request, 1, byte(len(username)))
 	request = append(request, username...)
+	//nolint:gosec // The length validation above bounds both values to one-byte SOCKS fields.
 	request = append(request, byte(len(password)))
 	request = append(request, password...)
 	if err := writeAll(conn, request); err != nil {
@@ -181,7 +183,7 @@ func authenticate(conn net.Conn, reader *bufio.Reader, username, password string
 		return err
 	}
 	if response[0] != 1 || response[1] != 0 {
-		return errors.New("SOCKS authentication failed")
+		return errors.New("sOCKS authentication failed")
 	}
 	return nil
 }
@@ -229,7 +231,7 @@ func readReply(reader io.Reader) (string, error) {
 		return "", fmt.Errorf("unexpected SOCKS version %d", header[0])
 	}
 	if header[1] != 0 {
-		return "", fmt.Errorf("SOCKS reply status %d", header[1])
+		return "", fmt.Errorf("sOCKS reply status %d", header[1])
 	}
 	host, port, err := readAddress(reader)
 	if err != nil {
@@ -262,6 +264,7 @@ func encodeAddress(host string, port uint16) ([]byte, error) {
 	case ip != nil:
 		encoded = append([]byte{socksAddressIPv6}, ip.To16()...)
 	case len(host) > 0 && len(host) <= 255:
+		//nolint:gosec // This case explicitly bounds the domain length to one byte.
 		encoded = append([]byte{socksAddressDomain, byte(len(host))}, host...)
 	default:
 		return nil, fmt.Errorf("invalid SOCKS target host %q", host)
@@ -320,6 +323,7 @@ type udpConn struct {
 
 type bufferedConn struct {
 	net.Conn
+
 	reader *bufio.Reader
 }
 
@@ -329,7 +333,7 @@ func (c *bufferedConn) CloseWrite() error {
 	if writer, ok := c.Conn.(interface{ CloseWrite() error }); ok {
 		return writer.CloseWrite()
 	}
-	return c.Conn.Close()
+	return c.Close()
 }
 
 func (c *udpConn) Read(buffer []byte) (int, error) {

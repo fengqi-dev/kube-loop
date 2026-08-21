@@ -11,13 +11,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/labstack/echo/v5"
+
 	"github.com/fengqi-dev/kube-loop/internal/controlplane"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/sessionapi"
 	ticketservice "github.com/fengqi-dev/kube-loop/internal/controlplane/ticketapi/service"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/relaycontrol"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/relayticket"
-	"github.com/labstack/echo/v5"
 )
 
 type fakeAllocator struct {
@@ -26,7 +27,9 @@ type fakeAllocator struct {
 	err      error
 }
 
-func (allocator *fakeAllocator) Allocate(request relaycontrol.AllocationRequest) (relaycontrol.AllocationResponse, error) {
+func (allocator *fakeAllocator) Allocate(
+	request relaycontrol.AllocationRequest,
+) (relaycontrol.AllocationResponse, error) {
 	allocator.request = request
 	return allocator.response, allocator.err
 }
@@ -87,19 +90,29 @@ func TestIssueRelayTicketIsBoundToActiveSession(t *testing.T) {
 		t.Fatalf("issue error = %v", apiError)
 	}
 	if response.Code != http.StatusCreated {
-		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+		t.Fatalf(
+			"status = %d, body = %s",
+			response.Code,
+			response.Body.String(),
+		)
 	}
 	var document issueResponse
 	if err := json.NewDecoder(response.Body).Decode(&document); err != nil {
 		t.Fatal(err)
 	}
-	if document.TokenType != relayticket.Type || document.DeviceID != identity.DeviceID ||
+	if document.TokenType != relayticket.Type ||
+		document.DeviceID != identity.DeviceID ||
 		!document.ExpiresAt.Equal(now.Add(45*time.Second)) {
 		t.Fatalf("response = %#v", document)
 	}
 	verifier, err := relayticket.NewVerifier(relayticket.VerifierConfig{
-		Keys: map[string]ed25519.PublicKey{"primary": publicKey}, Issuer: "https://controlplane.example",
-		Audience: "relay-a", RequiredOperation: ticketservice.OperationTunnel, Now: func() time.Time { return now.Add(time.Second) },
+		Keys: map[string]ed25519.PublicKey{
+			"primary": publicKey,
+		},
+		Issuer:            "https://controlplane.example",
+		Audience:          "relay-a",
+		RequiredOperation: ticketservice.OperationTunnel,
+		Now:               func() time.Time { return now.Add(time.Second) },
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -110,11 +123,16 @@ func TestIssueRelayTicketIsBoundToActiveSession(t *testing.T) {
 	}
 	if claims.IdentityID != identity.Subject || claims.DeviceID != identity.DeviceID ||
 		claims.SessionID != sessionID || claims.SessionGeneration != 7 || claims.Namespace != "development" ||
-		claims.NetworkSpecHash != strings.Repeat("a", 64) || len(claims.Groups) != 1 || claims.Groups[0] != "developers" {
+		claims.NetworkSpecHash != strings.Repeat(
+			"a",
+			64,
+		) || len(claims.Groups) != 1 ||
+		claims.Groups[0] != "developers" {
 		t.Fatalf("claims = %#v", claims)
 	}
 	if sessions.validateCall != 1 || sessions.identity.Subject != identity.Subject ||
-		sessions.namespace != "development" || sessions.sessionID != sessionID {
+		sessions.namespace != "development" ||
+		sessions.sessionID != sessionID {
 		t.Fatalf("session validation = %#v", sessions)
 	}
 }
@@ -136,13 +154,17 @@ func TestIssueRelayTicketUsesRegistryAssignment(t *testing.T) {
 		RelayID:  relayID, LeaseID: "44444444-4444-4444-8444-444444444444",
 		Endpoint: "wss://relay.example/tunnel", AssignedAt: now,
 	}}
-	handler := newTicketRoutes(t, &fakeSessions{binding: sessionapi.ActiveSession{
-		ID: sessionID, Namespace: "development", Generation: 7, ExpiresAt: now.Add(time.Minute),
-		NetworkSpecHash: strings.Repeat("b", 64),
-	}}, ticketservice.Config{
-		Issuer: "https://controlplane.example", TTL: time.Minute, Now: func() time.Time { return now },
-		Signer: signer, Allocator: allocator, Topology: map[string]string{"topology.kubernetes.io/zone": "cn-a"},
-	})
+	handler := newTicketRoutes(
+		t,
+		&fakeSessions{binding: sessionapi.ActiveSession{
+			ID: sessionID, Namespace: "development", Generation: 7, ExpiresAt: now.Add(time.Minute),
+			NetworkSpecHash: strings.Repeat("b", 64),
+		}},
+		ticketservice.Config{
+			Issuer: "https://controlplane.example", TTL: time.Minute, Now: func() time.Time { return now },
+			Signer: signer, Allocator: allocator, Topology: map[string]string{"topology.kubernetes.io/zone": "cn-a"},
+		},
+	)
 	request := httptest.NewRequest(
 		http.MethodPost,
 		controlplane.APIPathPrefix+"/sessions/"+sessionID+"/tickets?namespace=development",
@@ -163,14 +185,20 @@ func TestIssueRelayTicketUsesRegistryAssignment(t *testing.T) {
 		document.RelayID != relayID || document.Endpoint != "wss://relay.example/tunnel" {
 		t.Fatalf("response = %#v", document)
 	}
-	if allocator.request.SessionID != sessionID || allocator.request.Generation != 7 ||
+	if allocator.request.SessionID != sessionID ||
+		allocator.request.Generation != 7 ||
 		allocator.request.NetworkSpecHash != strings.Repeat("b", 64) ||
 		allocator.request.Topology["topology.kubernetes.io/zone"] != "cn-a" {
 		t.Fatalf("allocation = %#v", allocator.request)
 	}
 	verifier, err := relayticket.NewVerifier(relayticket.VerifierConfig{
-		Keys: map[string]ed25519.PublicKey{"primary": publicKey}, Issuer: "https://controlplane.example",
-		Audience: relayID, RequiredOperation: ticketservice.OperationTunnel, Now: func() time.Time { return now.Add(time.Second) },
+		Keys: map[string]ed25519.PublicKey{
+			"primary": publicKey,
+		},
+		Issuer:            "https://controlplane.example",
+		Audience:          relayID,
+		RequiredOperation: ticketservice.OperationTunnel,
+		Now:               func() time.Time { return now.Add(time.Second) },
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -199,18 +227,43 @@ func TestIssueRelayTicketRejectsInvalidInputBeforeSessionLookup(t *testing.T) {
 		body        string
 		contentType string
 	}{
-		{name: "bad session", url: controlplane.APIPathPrefix + "/sessions/not-a-uuid/tickets?namespace=development", body: `{}`, contentType: "application/json"},
-		{name: "bad namespace", url: controlplane.APIPathPrefix + "/sessions/33333333-3333-4333-8333-333333333333/tickets?namespace=Bad", body: `{}`, contentType: "application/json"},
-		{name: "wrong media type", url: controlplane.APIPathPrefix + "/sessions/33333333-3333-4333-8333-333333333333/tickets?namespace=development", body: `{}`, contentType: "text/plain"},
+		{
+			name:        "bad session",
+			url:         controlplane.APIPathPrefix + "/sessions/not-a-uuid/tickets?namespace=development",
+			body:        `{}`,
+			contentType: "application/json",
+		},
+		{
+			name:        "bad namespace",
+			url:         controlplane.APIPathPrefix + "/sessions/33333333-3333-4333-8333-333333333333/tickets?namespace=Bad",
+			body:        `{}`,
+			contentType: "application/json",
+		},
+		{
+			name:        "wrong media type",
+			url:         controlplane.APIPathPrefix + "/sessions/33333333-3333-4333-8333-333333333333/tickets?namespace=development",
+			body:        `{}`,
+			contentType: "text/plain",
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			request := httptest.NewRequest(http.MethodPost, test.url, strings.NewReader(test.body))
+			request := httptest.NewRequest(
+				http.MethodPost,
+				test.url,
+				strings.NewReader(test.body),
+			)
 			request.Header.Set("Content-Type", test.contentType)
-			apiError := serveTicketHandler(handler, httptest.NewRecorder(), request, controlplaneapi.Identity{
-				Subject: "11111111-1111-4111-8111-111111111111", DeviceID: "22222222-2222-4222-8222-222222222222",
-			})
-			if apiError == nil || (apiError.Code != controlplaneapi.CodeInvalidArgument && apiError.Code != controlplaneapi.CodeNotFound) {
+			apiError := serveTicketHandler(
+				handler,
+				httptest.NewRecorder(),
+				request,
+				controlplaneapi.Identity{
+					Subject: "11111111-1111-4111-8111-111111111111", DeviceID: "22222222-2222-4222-8222-222222222222",
+				},
+			)
+			if apiError == nil ||
+				(apiError.Code != controlplaneapi.CodeInvalidArgument && apiError.Code != controlplaneapi.CodeNotFound) {
 				t.Fatalf("issue error = %#v", apiError)
 			}
 		})
@@ -229,7 +282,12 @@ func TestIssueRelayTicketDoesNotLeakSessionValidationDetails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sessions := &fakeSessions{apiError: &controlplaneapi.Error{Code: controlplaneapi.CodeNotFound, Message: "resource not found"}}
+	sessions := &fakeSessions{
+		apiError: &controlplaneapi.Error{
+			Code:    controlplaneapi.CodeNotFound,
+			Message: resourceNotFoundMessage,
+		},
+	}
 	handler := newTicketRoutes(t, sessions, ticketservice.Config{
 		Issuer: "https://controlplane.example", Signer: signer,
 	})
@@ -239,10 +297,16 @@ func TestIssueRelayTicketDoesNotLeakSessionValidationDetails(t *testing.T) {
 		strings.NewReader(`{}`),
 	)
 	request.Header.Set("Content-Type", "application/json")
-	apiError := serveTicketHandler(handler, httptest.NewRecorder(), request, controlplaneapi.Identity{
-		Subject: "foreign", DeviceID: "foreign-device",
-	})
-	if apiError == nil || apiError.Code != controlplaneapi.CodeNotFound || apiError.Message != "resource not found" {
+	apiError := serveTicketHandler(
+		handler,
+		httptest.NewRecorder(),
+		request,
+		controlplaneapi.Identity{
+			Subject: "foreign", DeviceID: "foreign-device",
+		},
+	)
+	if apiError == nil || apiError.Code != controlplaneapi.CodeNotFound ||
+		apiError.Message != resourceNotFoundMessage {
 		t.Fatalf("issue error = %#v", apiError)
 	}
 }
@@ -260,10 +324,16 @@ func serveTicketHandler(
 	return handler.issue(echo.New().NewContext(request, writer), identity)
 }
 
-func newTicketRoutes(t *testing.T, sessions SessionValidator, config ticketservice.Config) *Routes {
+func newTicketRoutes(
+	t *testing.T,
+	sessions SessionValidator,
+	config ticketservice.Config,
+) *Routes {
 	t.Helper()
 	if config.Allocator == nil {
-		config.Allocator = &fakeAllocator{response: relaycontrol.AllocationResponse{RelayID: "relay-a"}}
+		config.Allocator = &fakeAllocator{
+			response: relaycontrol.AllocationResponse{RelayID: "relay-a"},
+		}
 	}
 	service, err := ticketservice.New(config)
 	if err != nil {

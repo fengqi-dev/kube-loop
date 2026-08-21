@@ -7,10 +7,11 @@ import (
 	"net"
 	"strings"
 
-	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
-	portforwardservice "github.com/fengqi-dev/kube-loop/internal/controlplane/portforwardapi/service"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
+	portforwardservice "github.com/fengqi-dev/kube-loop/internal/controlplane/portforwardapi/service"
 )
 
 type PortForwardResolver struct {
@@ -19,7 +20,7 @@ type PortForwardResolver struct {
 
 func NewPortForwardResolver(provider ClientProvider) (*PortForwardResolver, error) {
 	if provider == nil {
-		return nil, errors.New("Kubernetes client Provider is required")
+		return nil, errors.New("kubernetes client Provider is required")
 	}
 	return &PortForwardResolver{provider: provider}, nil
 }
@@ -40,11 +41,20 @@ func (r *PortForwardResolver) Resolve(
 		if err != nil {
 			return portforwardservice.Target{}, err
 		}
-		if pod.DeletionTimestamp != nil || pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed {
-			return portforwardservice.Target{}, fmt.Errorf("Pod %s/%s is not running", namespace, spec.Name)
+		if pod.DeletionTimestamp != nil || pod.Status.Phase == corev1.PodSucceeded ||
+			pod.Status.Phase == corev1.PodFailed {
+			return portforwardservice.Target{}, fmt.Errorf(
+				"pod %s/%s is not running",
+				namespace,
+				spec.Name,
+			)
 		}
 		if net.ParseIP(strings.TrimSpace(pod.Status.PodIP)) == nil {
-			return portforwardservice.Target{}, fmt.Errorf("Pod %s/%s has no routable IP", namespace, spec.Name)
+			return portforwardservice.Target{}, fmt.Errorf(
+				"pod %s/%s has no routable IP",
+				namespace,
+				spec.Name,
+			)
 		}
 		return portforwardservice.Target{Host: pod.Status.PodIP, Port: spec.RemotePort}, nil
 	case "service":
@@ -54,18 +64,32 @@ func (r *PortForwardResolver) Resolve(
 		}
 		if service.Spec.Type == corev1.ServiceTypeExternalName || service.Spec.ClusterIP == "" ||
 			service.Spec.ClusterIP == corev1.ClusterIPNone || net.ParseIP(service.Spec.ClusterIP) == nil {
-			return portforwardservice.Target{}, fmt.Errorf("Service %s/%s has no routable ClusterIP", namespace, spec.Name)
+			return portforwardservice.Target{}, fmt.Errorf(
+				"service %s/%s has no routable ClusterIP",
+				namespace,
+				spec.Name,
+			)
 		}
 		protocol := corev1.Protocol(strings.ToUpper(spec.Protocol))
 		for _, servicePort := range service.Spec.Ports {
 			if servicePort.Port == int32(spec.RemotePort) && servicePort.Protocol == protocol {
-				return portforwardservice.Target{Host: service.Spec.ClusterIP, Port: spec.RemotePort}, nil
+				return portforwardservice.Target{
+					Host: service.Spec.ClusterIP,
+					Port: spec.RemotePort,
+				}, nil
 			}
 		}
 		return portforwardservice.Target{}, fmt.Errorf(
-			"Service %s/%s does not expose %s/%d", namespace, spec.Name, spec.Protocol, spec.RemotePort,
+			"service %s/%s does not expose %s/%d",
+			namespace,
+			spec.Name,
+			spec.Protocol,
+			spec.RemotePort,
 		)
 	default:
-		return portforwardservice.Target{}, fmt.Errorf("unsupported Port Forward target kind %q", spec.Kind)
+		return portforwardservice.Target{}, fmt.Errorf(
+			"unsupported Port Forward target kind %q",
+			spec.Kind,
+		)
 	}
 }

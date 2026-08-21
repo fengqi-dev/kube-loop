@@ -1,9 +1,13 @@
 package helper
 
 // Version is the helper protocol/binary version. Overridden at link time.
-var Version = "dev"
+var Version = developmentVersion
 
 const (
+	developmentVersion = "dev"
+	goosDarwin         = "darwin"
+	goosWindows        = "windows"
+
 	// ServiceLabelRelease is the launchd label / privileged helper tool name for release builds.
 	ServiceLabelRelease = "dev.fengqi.kubeloop.helper"
 	// ServiceLabelDev is used by wails/local "dev" builds so they never collide with release.
@@ -18,7 +22,7 @@ const (
 // IsDevBuild reports whether this binary is a development (non-release) build.
 // Release CI injects a version tag via -X main.version=...; local/wails defaults stay "dev".
 func IsDevBuild() bool {
-	return Version == "" || Version == "dev"
+	return Version == "" || Version == developmentVersion
 }
 
 // ServiceLabel is the macOS launchd label and PrivilegedHelperTools basename.
@@ -54,6 +58,8 @@ func InstallProductDir() string {
 }
 
 // HelperBinaryBaseName is the on-disk helper executable basename without extension.
+//
+//nolint:revive // HelperBinaryBaseName preserves the established public helper API.
 func HelperBinaryBaseName() string {
 	if IsDevBuild() {
 		return "kubeloop-helper-dev"
@@ -67,6 +73,8 @@ func SystemdUnitName() string {
 }
 
 // HelperLogPath is the launchd stdout/stderr log path on macOS.
+//
+//nolint:revive // HelperLogPath preserves the established public helper API.
 func HelperLogPath() string {
 	if IsDevBuild() {
 		return "/var/log/kubeloop-helper-dev.log"

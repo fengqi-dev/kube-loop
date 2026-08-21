@@ -10,6 +10,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/labstack/echo/v5"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/util/validation"
+
 	"github.com/fengqi-dev/kube-loop/internal/controlplane"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
 	controlplanemiddleware "github.com/fengqi-dev/kube-loop/internal/controlplane/middleware"
@@ -18,10 +23,6 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/taskapi"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/remotetask"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficmodel"
-	"github.com/google/uuid"
-	"github.com/labstack/echo/v5"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/util/validation"
 )
 
 const TaskType = "mirror"
@@ -32,11 +33,22 @@ type Storage interface {
 }
 
 type SessionValidator interface {
-	RequireActive(context.Context, controlplaneapi.Identity, string, string) (sessionapi.ActiveSession, *controlplaneapi.Error)
+	RequireActive(
+		context.Context,
+		controlplaneapi.Identity,
+		string,
+		string,
+	) (sessionapi.ActiveSession, *controlplaneapi.Error)
 }
 
 type ServiceResolver interface {
-	ResolveService(context.Context, controlplaneapi.Identity, string, string, []trafficmodel.Port) (trafficmodel.ResolvedService, error)
+	ResolveService(
+		context.Context,
+		controlplaneapi.Identity,
+		string,
+		string,
+		[]trafficmodel.Port,
+	) (trafficmodel.ResolvedService, error)
 }
 
 type Service struct {
@@ -48,9 +60,18 @@ type Service struct {
 	config    Config
 }
 
-func New(storageBackend Storage, sessions SessionValidator, services ServiceResolver, resources ResourceMutator, config Config) (*Service, error) {
-	if storageBackend == nil || sessions == nil || services == nil || resources == nil {
-		return nil, errors.New("Mirror storage, Session validator, Service resolver and resource mutator are required")
+func New(
+	storageBackend Storage,
+	sessions SessionValidator,
+	services ServiceResolver,
+	resources ResourceMutator,
+	config Config,
+) (*Service, error) {
+	if storageBackend == nil || sessions == nil || services == nil ||
+		resources == nil {
+		return nil, errors.New(
+			"mirror storage, Session validator, Service resolver and resource mutator are required",
+		)
 	}
 	if err := config.normalize(); err != nil {
 		return nil, err
@@ -61,7 +82,11 @@ func New(storageBackend Storage, sessions SessionValidator, services ServiceReso
 	}, nil
 }
 
-func (handler *Service) create(ctx *echo.Context, identity controlplaneapi.Identity, session sessionapi.ActiveSession) *controlplaneapi.Error {
+func (handler *Service) create(
+	ctx *echo.Context,
+	identity controlplaneapi.Identity,
+	session sessionapi.ActiveSession,
+) *controlplaneapi.Error {
 	request := ctx.Request()
 	var spec Spec
 	if err := ctx.Bind(&spec); err != nil {
@@ -83,7 +108,8 @@ func (handler *Service) create(ctx *echo.Context, identity controlplaneapi.Ident
 		if record.RequestHash != requestHash {
 			return storageError(storage.ErrIdempotencyMismatch)
 		}
-		task, err := handler.storage.Tasks().GetByID(request.Context(), record.ResourceID)
+		task, err := handler.storage.Tasks().
+			GetByID(request.Context(), record.ResourceID)
 		if err != nil || !owned(task, identity, session) {
 			return notFound()
 		}
@@ -97,11 +123,21 @@ func (handler *Service) create(ctx *echo.Context, identity controlplaneapi.Ident
 	} else if !errors.Is(err, storage.ErrNotFound) {
 		return storageError(err)
 	}
-	service, err := handler.services.ResolveService(request.Context(), identity, session.Namespace, spec.Service, spec.Ports)
+	service, err := handler.services.ResolveService(
+		request.Context(),
+		identity,
+		session.Namespace,
+		spec.Service,
+		spec.Ports,
+	)
 	if err != nil {
 		return targetError(err)
 	}
-	canonical := storedSpec{Service: service.Name, ClusterIP: service.ClusterIP, Ports: append([]trafficmodel.Port(nil), service.Ports...)}
+	canonical := storedSpec{
+		Service:   service.Name,
+		ClusterIP: service.ClusterIP,
+		Ports:     append([]trafficmodel.Port(nil), service.Ports...),
+	}
 	specJSON, _ := json.Marshal(canonical)
 	now := handler.now().UTC()
 	expiresAt := session.ExpiresAt.UTC()
@@ -113,28 +149,33 @@ func (handler *Service) create(ctx *echo.Context, identity controlplaneapi.Ident
 	document := documentFrom(task, session.Namespace, canonical)
 	response, _ := json.Marshal(document)
 	created := false
-	err = handler.storage.WithinTransaction(request.Context(), func(repositories storage.Repositories) error {
-		record, reserved, err := repositories.Idempotency().Reserve(request.Context(), storage.IdempotencyRecord{
-			Scope: scope, Key: key, RequestHash: requestHash, ResourceType: TaskType,
-			ResourceID: task.ID, Response: response, CreatedAt: now, ExpiresAt: expiresAt,
-		})
-		if err != nil {
-			return err
-		}
-		if !reserved {
-			existing, err := repositories.Tasks().GetByID(request.Context(), record.ResourceID)
-			if err != nil || !owned(existing, identity, session) {
-				return storage.ErrNotFound
+	err = handler.storage.WithinTransaction(
+		request.Context(),
+		func(repositories storage.Repositories) error {
+			record, reserved, err := repositories.Idempotency().
+				Reserve(request.Context(), storage.IdempotencyRecord{
+					Scope: scope, Key: key, RequestHash: requestHash, ResourceType: TaskType,
+					ResourceID: task.ID, Response: response, CreatedAt: now, ExpiresAt: expiresAt,
+				})
+			if err != nil {
+				return err
 			}
-			task = existing
+			if !reserved {
+				existing, err := repositories.Tasks().
+					GetByID(request.Context(), record.ResourceID)
+				if err != nil || !owned(existing, identity, session) {
+					return storage.ErrNotFound
+				}
+				task = existing
+				return nil
+			}
+			if err := repositories.Tasks().Create(request.Context(), task); err != nil {
+				return err
+			}
+			created = true
 			return nil
-		}
-		if err := repositories.Tasks().Create(request.Context(), task); err != nil {
-			return err
-		}
-		created = true
-		return nil
-	})
+		},
+	)
 	if err != nil {
 		return storageError(err)
 	}
@@ -142,17 +183,35 @@ func (handler *Service) create(ctx *echo.Context, identity controlplaneapi.Ident
 	if err != nil {
 		return internalError(err)
 	}
-	ctx.Response().Header().Set("Location", fmt.Sprintf("%s/sessions/%s/mirrors/%s?namespace=%s", controlplane.APIPathPrefix, session.ID, task.ID, session.Namespace))
+	location := fmt.Sprintf(
+		"%s/sessions/%s/mirrors/%s?namespace=%s",
+		controlplane.APIPathPrefix, session.ID, task.ID, session.Namespace,
+	)
+	ctx.Response().Header().Set("Location", location)
 	if !created {
 		ctx.Response().Header().Set("Idempotent-Replayed", "true")
 	}
-	writeJSON(ctx, map[bool]int{true: http.StatusCreated, false: http.StatusOK}[created], document)
+	writeJSON(
+		ctx,
+		map[bool]int{true: http.StatusCreated, false: http.StatusOK}[created],
+		document,
+	)
 	return nil
 }
 
-func (handler *Service) get(ctx *echo.Context, identity controlplaneapi.Identity, session sessionapi.ActiveSession, taskID string) *controlplaneapi.Error {
+func (handler *Service) get(
+	ctx *echo.Context,
+	identity controlplaneapi.Identity,
+	session sessionapi.ActiveSession,
+	taskID string,
+) *controlplaneapi.Error {
 	request := ctx.Request()
-	task, apiError := handler.ownedTask(request.Context(), identity, session, taskID)
+	task, apiError := handler.ownedTask(
+		request.Context(),
+		identity,
+		session,
+		taskID,
+	)
 	if apiError != nil {
 		return apiError
 	}
@@ -164,9 +223,19 @@ func (handler *Service) get(ctx *echo.Context, identity controlplaneapi.Identity
 	return nil
 }
 
-func (handler *Service) stop(ctx *echo.Context, identity controlplaneapi.Identity, session sessionapi.ActiveSession, taskID string) *controlplaneapi.Error {
+func (handler *Service) stop(
+	ctx *echo.Context,
+	identity controlplaneapi.Identity,
+	session sessionapi.ActiveSession,
+	taskID string,
+) *controlplaneapi.Error {
 	request := ctx.Request()
-	task, apiError := handler.ownedTask(request.Context(), identity, session, taskID)
+	task, apiError := handler.ownedTask(
+		request.Context(),
+		identity,
+		session,
+		taskID,
+	)
 	if apiError != nil {
 		return apiError
 	}
@@ -178,7 +247,9 @@ func (handler *Service) stop(ctx *echo.Context, identity controlplaneapi.Identit
 		next = remotetask.Stopping
 	case remotetask.Stopping, remotetask.Stopped, remotetask.Failed:
 	default:
-		return internalError(fmt.Errorf("stored Mirror Task has invalid state %q", task.State))
+		return internalError(
+			fmt.Errorf("stored Mirror Task has invalid state %q", task.State),
+		)
 	}
 	if next != task.State {
 		var owner ownerResult
@@ -186,7 +257,8 @@ func (handler *Service) stop(ctx *echo.Context, identity controlplaneapi.Identit
 		owner.StopRequested = true
 		result, _ := json.Marshal(owner)
 		now := handler.now().UTC()
-		if err := handler.storage.Tasks().UpdateState(request.Context(), task.ID, task.State, next, result, now); err != nil {
+		if err := handler.storage.Tasks().
+			UpdateState(request.Context(), task.ID, task.State, next, result, now); err != nil {
 			return storageError(err)
 		}
 		task.State, task.Result, task.UpdatedAt = next, result, now
@@ -195,11 +267,20 @@ func (handler *Service) stop(ctx *echo.Context, identity controlplaneapi.Identit
 	if err != nil {
 		return internalError(err)
 	}
-	writeJSON(ctx, map[bool]int{true: http.StatusAccepted, false: http.StatusOK}[next == remotetask.Stopping], document)
+	writeJSON(
+		ctx,
+		map[bool]int{true: http.StatusAccepted, false: http.StatusOK}[next == remotetask.Stopping],
+		document,
+	)
 	return nil
 }
 
-func (handler *Service) ownedTask(ctx context.Context, identity controlplaneapi.Identity, session sessionapi.ActiveSession, taskID string) (storage.Task, *controlplaneapi.Error) {
+func (handler *Service) ownedTask(
+	ctx context.Context,
+	identity controlplaneapi.Identity,
+	session sessionapi.ActiveSession,
+	taskID string,
+) (storage.Task, *controlplaneapi.Error) {
 	if _, err := uuid.Parse(taskID); err != nil {
 		return storage.Task{}, notFound()
 	}
@@ -223,7 +304,8 @@ func normalizeRequest(spec *Spec) *controlplaneapi.Error {
 		port := &spec.Ports[index]
 		port.Name = strings.TrimSpace(port.Name)
 		port.Protocol = strings.ToLower(strings.TrimSpace(port.Protocol))
-		if port.ServicePort < 1 || port.ServicePort > 65535 || (port.Protocol != "tcp" && port.Protocol != "udp") {
+		if port.ServicePort < 1 || port.ServicePort > 65535 ||
+			(port.Protocol != "tcp" && port.Protocol != "udp") {
 			return invalid("ports", "Service port and protocol are invalid")
 		}
 		key := fmt.Sprintf("%s/%d", port.Protocol, port.ServicePort)
@@ -245,13 +327,20 @@ func comparePorts(left, right trafficmodel.Port) int {
 
 func decodeTask(task storage.Task, namespace string) (Document, error) {
 	var spec storedSpec
-	if task.Type != TaskType || json.Unmarshal(task.Spec, &spec) != nil || spec.Service == "" || spec.ClusterIP == "" || len(spec.Ports) == 0 {
+	if task.Type != TaskType || json.Unmarshal(task.Spec, &spec) != nil ||
+		spec.Service == "" ||
+		spec.ClusterIP == "" ||
+		len(spec.Ports) == 0 {
 		return Document{}, errors.New("stored Mirror Task is invalid")
 	}
 	return documentFrom(task, namespace, spec), nil
 }
 
-func documentFrom(task storage.Task, namespace string, spec storedSpec) Document {
+func documentFrom(
+	task storage.Task,
+	namespace string,
+	spec storedSpec,
+) Document {
 	expiresAt := time.Time{}
 	if task.ExpiresAt != nil {
 		expiresAt = task.ExpiresAt.UTC()
@@ -263,14 +352,25 @@ func documentFrom(task storage.Task, namespace string, spec storedSpec) Document
 	}
 }
 
-func owned(task storage.Task, identity controlplaneapi.Identity, session sessionapi.ActiveSession) bool {
-	return task.Type == TaskType && task.IdentityID == identity.Subject && task.SessionID == session.ID
+func owned(
+	task storage.Task,
+	identity controlplaneapi.Identity,
+	session sessionapi.ActiveSession,
+) bool {
+	return task.Type == TaskType && task.IdentityID == identity.Subject &&
+		task.SessionID == session.ID
 }
 
-func namespaceFromQuery(request *http.Request) (string, *controlplaneapi.Error) {
+func namespaceFromQuery(
+	request *http.Request,
+) (string, *controlplaneapi.Error) {
 	query := request.URL.Query()
-	if len(query) != 1 || len(query["namespace"]) != 1 || len(validation.IsDNS1123Label(query.Get("namespace"))) != 0 {
-		return "", invalid("namespace", "one valid namespace query parameter is required")
+	if len(query) != 1 || len(query["namespace"]) != 1 ||
+		len(validation.IsDNS1123Label(query.Get("namespace"))) != 0 {
+		return "", invalid(
+			"namespace",
+			"one valid namespace query parameter is required",
+		)
 	}
 	return query.Get("namespace"), nil
 }
@@ -278,7 +378,11 @@ func namespaceFromQuery(request *http.Request) (string, *controlplaneapi.Error) 
 func targetError(err error) *controlplaneapi.Error {
 	switch {
 	case apierrors.IsForbidden(err):
-		return &controlplaneapi.Error{Code: controlplaneapi.CodeForbidden, Message: "Kubernetes Mirror access is not permitted", Cause: err}
+		return &controlplaneapi.Error{
+			Code:    controlplaneapi.CodeForbidden,
+			Message: "Kubernetes Mirror access is not permitted",
+			Cause:   err,
+		}
 	case apierrors.IsNotFound(err):
 		return notFound()
 	default:
@@ -290,23 +394,39 @@ func storageError(err error) *controlplaneapi.Error {
 	switch {
 	case errors.Is(err, storage.ErrNotFound):
 		return notFound()
-	case errors.Is(err, storage.ErrConflict), errors.Is(err, storage.ErrIdempotencyMismatch):
-		return &controlplaneapi.Error{Code: controlplaneapi.CodeConflict, Message: "Mirror Task conflicts with existing state", Cause: err}
+	case errors.Is(err, storage.ErrConflict),
+		errors.Is(err, storage.ErrIdempotencyMismatch):
+		return &controlplaneapi.Error{
+			Code:    controlplaneapi.CodeConflict,
+			Message: "Mirror Task conflicts with existing state",
+			Cause:   err,
+		}
 	default:
 		return internalError(err)
 	}
 }
 
 func invalid(field, message string) *controlplaneapi.Error {
-	return &controlplaneapi.Error{Code: controlplaneapi.CodeInvalidArgument, Field: field, Message: message}
+	return &controlplaneapi.Error{
+		Code:    controlplaneapi.CodeInvalidArgument,
+		Field:   field,
+		Message: message,
+	}
 }
 
 func notFound() *controlplaneapi.Error {
-	return &controlplaneapi.Error{Code: controlplaneapi.CodeNotFound, Message: "resource not found"}
+	return &controlplaneapi.Error{
+		Code:    controlplaneapi.CodeNotFound,
+		Message: "resource not found",
+	}
 }
 
 func internalError(err error) *controlplaneapi.Error {
-	return &controlplaneapi.Error{Code: controlplaneapi.CodeInternal, Message: "Mirror operation failed", Cause: err}
+	return &controlplaneapi.Error{
+		Code:    controlplaneapi.CodeInternal,
+		Message: "Mirror operation failed",
+		Cause:   err,
+	}
 }
 
 func writeJSON(ctx *echo.Context, status int, value any) {

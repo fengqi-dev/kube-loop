@@ -24,7 +24,7 @@ func nullableTime(value *time.Time) any {
 
 func parseNullableTime(raw sql.NullString, field string) (*time.Time, error) {
 	if !raw.Valid {
-		return nil, nil
+		return nil, nil //nolint:nilnil // SQL NULL is represented by a nil optional timestamp.
 	}
 	value, err := parseTime(raw.String, field)
 	if err != nil {
@@ -33,7 +33,11 @@ func parseNullableTime(raw sql.NullString, field string) (*time.Time, error) {
 	return &value, nil
 }
 
-func normalizeJSON(value json.RawMessage, required bool, field string) (json.RawMessage, error) {
+func normalizeJSON(
+	value json.RawMessage,
+	required bool,
+	field string,
+) (json.RawMessage, error) {
 	if len(value) == 0 {
 		if required {
 			return nil, errors.New(field + " is required")

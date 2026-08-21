@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
@@ -16,10 +17,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
-	"github.com/fengqi-dev/kube-loop/internal/controlplane/execapi"
 	"github.com/google/uuid"
 	"github.com/kballard/go-shellquote"
+
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/execapi"
 )
 
 type recordingPodExecutor struct {
@@ -49,23 +51,37 @@ func (executor *recordingPodExecutor) Exec(
 	spec execapi.Spec,
 	streams execapi.Streams,
 ) error {
-	executor.commands = append(executor.commands, append([]string(nil), spec.Command...))
+	executor.commands = append(
+		executor.commands,
+		append([]string(nil), spec.Command...),
+	)
 	if streams.Stdin != nil {
 		if _, err := io.Copy(io.Discard, streams.Stdin); err != nil {
 			return err
 		}
 	}
-	if len(spec.Command) == 3 && strings.Contains(spec.Command[2], "sha256sum --") {
-		_, err := fmt.Fprintf(streams.Stdout, "%d\n%x  file\n", executor.size, executor.checksum)
+	if len(spec.Command) == 3 &&
+		strings.Contains(spec.Command[2], "sha256sum --") {
+		_, err := fmt.Fprintf(
+			streams.Stdout,
+			"%d\n%x  file\n",
+			executor.size,
+			executor.checksum,
+		)
 		return err
 	}
 	return nil
 }
 
-func TestKubernetesTransferExecutorUsesOnlyGeneratedQuotedCommands(t *testing.T) {
+func TestKubernetesTransferExecutorUsesOnlyGeneratedQuotedCommands(
+	t *testing.T,
+) {
 	contents := []byte("payload")
 	checksum := sha256.Sum256(contents)
-	pods := &recordingPodExecutor{size: uint64(len(contents)), checksum: checksum}
+	pods := &recordingPodExecutor{
+		size:     uint64(len(contents)),
+		checksum: checksum,
+	}
 	executor, err := NewKubernetesTransferExecutor(pods, 1<<20)
 	if err != nil {
 		t.Fatal(err)
@@ -74,29 +90,61 @@ func TestKubernetesTransferExecutorUsesOnlyGeneratedQuotedCommands(t *testing.T)
 	taskID := "task-id"
 	spec := Spec{
 		Direction: DirectionUpload, Kind: KindFile, Pod: "api-0", Container: "api",
-		RemotePath: remote, Size: uint64(len(contents)), Checksum: fmt.Sprintf("%x", checksum),
+		RemotePath: remote, Size: uint64(len(contents)), Checksum: hex.EncodeToString(checksum[:]),
 		AllowedRoot: "/workspace",
 	}
-	outcome, err := executor.Upload(context.Background(), controlplaneapi.Identity{Subject: "user"}, "development", taskID, spec, bytes.NewReader(contents))
+	outcome, err := executor.Upload(
+		context.Background(),
+		controlplaneapi.Identity{Subject: "user"},
+		"development",
+		taskID,
+		spec,
+		bytes.NewReader(contents),
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !outcome.HasChecksum || outcome.Checksum != checksum || outcome.Transferred != uint64(len(contents)) {
+	if !outcome.HasChecksum || outcome.Checksum != checksum ||
+		outcome.Transferred != uint64(len(contents)) {
 		t.Fatalf("outcome = %#v", outcome)
 	}
 	temporary := remote + ".kubeloop-" + taskID + ".part"
 	guard := physicalPathGuard(spec.AllowedRoot, path.Dir(spec.RemotePath))
 	wantScripts := []string{
-		guard + "set -eu; mkdir -p -- " + shellquote.Join(path.Dir(temporary)) + "; cat > " + shellquote.Join(temporary),
-		guard + "test ! -L " + shellquote.Join(temporary) + "; test -f " + shellquote.Join(temporary) + "; wc -c < " + shellquote.Join(temporary) + "; sha256sum -- " + shellquote.Join(temporary),
-		guard + "set -eu; test ! -e " + shellquote.Join(remote) + "; mv -- " + shellquote.Join(temporary) + " " + shellquote.Join(remote),
+		guard + "set -eu; mkdir -p -- " + shellquote.Join(
+			path.Dir(temporary),
+		) + "; cat > " + shellquote.Join(
+			temporary,
+		),
+		guard + "test ! -L " + shellquote.Join(
+			temporary,
+		) + "; test -f " + shellquote.Join(
+			temporary,
+		) + "; wc -c < " + shellquote.Join(
+			temporary,
+		) + "; sha256sum -- " + shellquote.Join(
+			temporary,
+		),
+		guard + "set -eu; test ! -e " + shellquote.Join(
+			remote,
+		) + "; mv -- " + shellquote.Join(
+			temporary,
+		) + " " + shellquote.Join(
+			remote,
+		),
 	}
 	if len(pods.commands) != len(wantScripts) {
 		t.Fatalf("commands = %#v", pods.commands)
 	}
 	for index, command := range pods.commands {
-		if len(command) != 3 || command[0] != "/bin/sh" || command[1] != "-c" || command[2] != wantScripts[index] {
-			t.Fatalf("command[%d] = %#v, want generated script %q", index, command, wantScripts[index])
+		if len(command) != 3 || command[0] != "/bin/sh" || command[1] != "-c" ||
+			command[2] != wantScripts[index] {
+			t.Fatalf(
+				"command[%d] = %#v, want generated script %q",
+				index,
+				command,
+				wantScripts[index],
+			)
 		}
 	}
 }
@@ -125,7 +173,9 @@ func TestArchiveValidationRejectsTraversalLinksAndOverflow(t *testing.T) {
 	}
 }
 
-func TestKubernetesTransferExecutorRejectsParentSymlinkOutsideAllowedRoot(t *testing.T) {
+func TestKubernetesTransferExecutorRejectsParentSymlinkOutsideAllowedRoot(
+	t *testing.T,
+) {
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX container shell guard test")
 	}
@@ -143,24 +193,42 @@ func TestKubernetesTransferExecutorRejectsParentSymlinkOutsideAllowedRoot(t *tes
 	}
 	contents := []byte("must remain inside the allowed root")
 	checksum := sha256.Sum256(contents)
-	executor, err := NewKubernetesTransferExecutor(localShellPodExecutor{}, 1<<20)
+	executor, err := NewKubernetesTransferExecutor(
+		localShellPodExecutor{},
+		1<<20,
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
 	spec := Spec{
 		Direction: DirectionUpload, Kind: KindFile, Pod: "pod", Container: "container",
-		RemotePath: filepath.ToSlash(filepath.Join(allowed, "escape", "data.bin")),
-		Size:       uint64(len(contents)), Checksum: fmt.Sprintf("%x", checksum), AllowedRoot: filepath.ToSlash(allowed),
+		RemotePath: filepath.ToSlash(
+			filepath.Join(allowed, "escape", "data.bin"),
+		),
+		Size: uint64(
+			len(contents),
+		), Checksum: hex.EncodeToString(checksum[:]), AllowedRoot: filepath.ToSlash(allowed),
 	}
-	if _, err := executor.Upload(context.Background(), controlplaneapi.Identity{Subject: "user"}, "development", "task", spec, bytes.NewReader(contents)); err == nil {
+	if _, err := executor.Upload(
+		context.Background(),
+		controlplaneapi.Identity{Subject: "user"},
+		"development",
+		"task",
+		spec,
+		bytes.NewReader(contents),
+	); err == nil {
 		t.Fatal("parent symlink outside allowed root was accepted")
 	}
-	if _, err := os.Lstat(filepath.Join(outside, "data.bin.kubeloop-task.part")); !os.IsNotExist(err) {
+	if _, err := os.Lstat(filepath.Join(outside, "data.bin.kubeloop-task.part")); !os.IsNotExist(
+		err,
+	) {
 		t.Fatalf("upload escaped allowed root: %v", err)
 	}
 }
 
-func TestKubernetesTransferExecutorNegotiatesAndResumesStablePartialUpload(t *testing.T) {
+func TestKubernetesTransferExecutorNegotiatesAndResumesStablePartialUpload(
+	t *testing.T,
+) {
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX container shell resume test")
 	}
@@ -171,23 +239,41 @@ func TestKubernetesTransferExecutorNegotiatesAndResumesStablePartialUpload(t *te
 	remote := filepath.ToSlash(filepath.Join(root, "result.bin"))
 	spec := Spec{
 		Direction: DirectionUpload, Kind: KindFile, Pod: "pod", Container: "container", RemotePath: remote,
-		Size: uint64(len(contents)), Checksum: fmt.Sprintf("%x", checksum), ResumeID: resumeID, AllowedRoot: filepath.ToSlash(root),
+		Size: uint64(
+			len(contents),
+		), Checksum: hex.EncodeToString(checksum[:]), ResumeID: resumeID, AllowedRoot: filepath.ToSlash(root),
 	}
 	temporary := uploadTemporaryPath(spec, "ignored-task")
 	if err := os.WriteFile(temporary, contents[:7], 0o600); err != nil {
 		t.Fatal(err)
 	}
-	executor, err := NewKubernetesTransferExecutor(localShellPodExecutor{}, 1<<20)
+	executor, err := NewKubernetesTransferExecutor(
+		localShellPodExecutor{},
+		1<<20,
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	offset, err := executor.UploadOffset(context.Background(), controlplaneapi.Identity{Subject: "user"}, "development", spec)
+	offset, err := executor.UploadOffset(
+		context.Background(),
+		controlplaneapi.Identity{Subject: "user"},
+		"development",
+		spec,
+	)
 	if err != nil || offset != 7 {
 		t.Fatalf("offset = %d err = %v", offset, err)
 	}
 	spec.Offset = offset
-	outcome, err := executor.Upload(context.Background(), controlplaneapi.Identity{Subject: "user"}, "development", "new-task", spec, bytes.NewReader(contents[offset:]))
-	if err != nil || outcome.Transferred != uint64(len(contents)) || outcome.Checksum != checksum {
+	outcome, err := executor.Upload(
+		context.Background(),
+		controlplaneapi.Identity{Subject: "user"},
+		"development",
+		"new-task",
+		spec,
+		bytes.NewReader(contents[offset:]),
+	)
+	if err != nil || outcome.Transferred != uint64(len(contents)) ||
+		outcome.Checksum != checksum {
 		t.Fatalf("outcome = %#v err = %v", outcome, err)
 	}
 	downloaded, err := os.ReadFile(remote)
@@ -216,7 +302,10 @@ func TestSanitizeArchiveReencodesOnlySafeMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 	if header.Name != "safe/file.txt" || header.Mode != 0o777 || header.Uname != "" || header.Gname != "" ||
-		header.Linkname != "" || len(header.PAXRecords) != 0 || !header.ModTime.Equal(modTime.UTC().Truncate(time.Second)) || string(contents) != "safe" {
+		header.Linkname != "" ||
+		len(header.PAXRecords) != 0 ||
+		!header.ModTime.Equal(modTime.UTC().Truncate(time.Second)) ||
+		string(contents) != "safe" {
 		t.Fatalf("sanitized header = %#v contents = %q", header, contents)
 	}
 	if _, err := reader.Next(); err != io.EOF {

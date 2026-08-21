@@ -3,8 +3,9 @@ package websocketmux
 import (
 	"time"
 
-	"github.com/fengqi-dev/kube-loop/internal/protocol/wssprotocol"
 	"github.com/xtaci/smux"
+
+	"github.com/fengqi-dev/kube-loop/internal/protocol/wssprotocol"
 )
 
 const (

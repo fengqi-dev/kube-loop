@@ -58,7 +58,7 @@ func Dial(ctx context.Context, connection net.Conn) (*FrameConn, error) {
 	}
 	if webSocket.Subprotocol() != Subprotocol {
 		_ = webSocket.Close()
-		return nil, errors.New("Traffic WebSocket subprotocol was not negotiated")
+		return nil, errors.New("traffic WebSocket subprotocol was not negotiated")
 	}
 	return newFrameConn(webSocket), nil
 }
@@ -83,7 +83,7 @@ func Accept(ctx context.Context, connection net.Conn) (*FrameConn, error) {
 		Handler: http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 			if request.Method != http.MethodGet || request.URL.Path != "/v1" {
 				http.NotFound(writer, request)
-				result <- acceptResult{err: errors.New("Traffic WebSocket request is invalid")}
+				result <- acceptResult{err: errors.New("traffic WebSocket request is invalid")}
 				return
 			}
 			upgrader := websocket.Upgrader{
@@ -93,12 +93,13 @@ func Accept(ctx context.Context, connection net.Conn) (*FrameConn, error) {
 			webSocket, acceptErr := upgrader.Upgrade(writer, request, nil)
 			if acceptErr == nil && webSocket.Subprotocol() != Subprotocol {
 				_ = webSocket.Close()
-				acceptErr = errors.New("Traffic WebSocket subprotocol was not negotiated")
+				acceptErr = errors.New("traffic WebSocket subprotocol was not negotiated")
 			}
 			result <- acceptResult{connection: webSocket, err: acceptErr}
 		}),
-		BaseContext:    func(net.Listener) context.Context { return handshakeContext },
-		MaxHeaderBytes: 8 << 10,
+		BaseContext:       func(net.Listener) context.Context { return handshakeContext },
+		ReadHeaderTimeout: handshakeTimeout,
+		MaxHeaderBytes:    8 << 10,
 	}
 	serveDone := make(chan error, 1)
 	go func() {
@@ -134,7 +135,7 @@ func newFrameConn(connection *websocket.Conn) *FrameConn {
 // ReadFrame reads exactly one binary WebSocket message.
 func (connection *FrameConn) ReadFrame(ctx context.Context) ([]byte, error) {
 	if connection == nil || connection.conn == nil {
-		return nil, errors.New("Traffic WebSocket connection is required")
+		return nil, errors.New("traffic WebSocket connection is required")
 	}
 	release, err := acquireOperation(ctx, connection.readGate)
 	if err != nil {
@@ -153,7 +154,7 @@ func (connection *FrameConn) ReadFrame(ctx context.Context) ([]byte, error) {
 	}
 	if messageType != websocket.BinaryMessage {
 		_ = connection.conn.Close()
-		return nil, errors.New("Traffic WebSocket message must be binary")
+		return nil, errors.New("traffic WebSocket message must be binary")
 	}
 	if len(frame) == 0 || len(frame) > MaximumFrameBytes {
 		_ = connection.conn.Close()
@@ -166,7 +167,7 @@ func (connection *FrameConn) ReadFrame(ctx context.Context) ([]byte, error) {
 // serialized and waiting for the writer is context-aware.
 func (connection *FrameConn) WriteFrame(ctx context.Context, frame []byte) error {
 	if connection == nil || connection.conn == nil {
-		return errors.New("Traffic WebSocket connection is required")
+		return errors.New("traffic WebSocket connection is required")
 	}
 	if len(frame) == 0 || len(frame) > MaximumFrameBytes {
 		return fmt.Errorf("traffic frame size %d is outside 1..%d", len(frame), MaximumFrameBytes)
@@ -189,7 +190,7 @@ func (connection *FrameConn) WriteFrame(ctx context.Context, frame []byte) error
 
 func (connection *FrameConn) Close() error {
 	if connection == nil || connection.conn == nil {
-		return errors.New("Traffic WebSocket connection is required")
+		return errors.New("traffic WebSocket connection is required")
 	}
 	return connection.conn.Close()
 }
@@ -275,7 +276,7 @@ func (dialer *singleConnectionDialer) DialContext(ctx context.Context, _, _ stri
 	dialer.mu.Lock()
 	defer dialer.mu.Unlock()
 	if dialer.connection == nil {
-		return nil, errors.New("Traffic WebSocket connection was already consumed")
+		return nil, errors.New("traffic WebSocket connection was already consumed")
 	}
 	connection := dialer.connection
 	dialer.connection = nil

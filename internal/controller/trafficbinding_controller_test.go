@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
+	. "github.com/onsi/ginkgo/v2" //nolint:revive // Ginkgo's test DSL intentionally uses dot imports.
+	. "github.com/onsi/gomega"    //nolint:revive // Gomega matchers are the companion Ginkgo DSL.
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -87,7 +87,9 @@ var _ = Describe("TrafficBinding Controller", func() {
 				},
 				AddressType: discoveryv1.AddressTypeIPv4,
 				Endpoints:   []discoveryv1.Endpoint{{Addresses: []string{"10.244.0.9"}}},
-				Ports:       []discoveryv1.EndpointPort{{Name: new("http"), Protocol: new(corev1.ProtocolTCP), Port: new(int32(8080))}},
+				Ports: []discoveryv1.EndpointPort{
+					{Name: new("http"), Protocol: new(corev1.ProtocolTCP), Port: new(int32(8080))},
+				},
 			}
 			Expect(k8sClient.Create(ctx, originalSlice)).To(Succeed())
 			legacy := &corev1.Endpoints{
@@ -110,7 +112,14 @@ var _ = Describe("TrafficBinding Controller", func() {
 			Expect(currentService.Annotations[bindingNameAnnotation]).To(Equal(bindingName))
 			Expect(k8sClient.Get(ctx, objectKey(legacy.Name), &corev1.Endpoints{})).To(Satisfy(apierrors.IsNotFound))
 			slices := &discoveryv1.EndpointSliceList{}
-			Expect(k8sClient.List(ctx, slices, client.InNamespace(testNamespace), client.MatchingLabels{serviceNameLabel: serviceName})).To(Succeed())
+			Expect(
+				k8sClient.List(
+					ctx,
+					slices,
+					client.InNamespace(testNamespace),
+					client.MatchingLabels{serviceNameLabel: serviceName},
+				),
+			).To(Succeed())
 			Expect(slices.Items).To(HaveLen(1))
 			Expect(slices.Items[0].Name).NotTo(Equal(originalSlice.Name))
 			Expect(slices.Items[0].Endpoints[0].Addresses).To(Equal([]string{"10.0.0.8"}))
@@ -140,7 +149,9 @@ var _ = Describe("TrafficBinding Controller", func() {
 	It("validates a PortForward target without creating Kubernetes resources", func(ctx SpecContext) {
 		pod := &corev1.Pod{
 			ObjectMeta: metav1.ObjectMeta{Name: "forward-target", Namespace: testNamespace},
-			Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "app", Image: "example.invalid/app:test"}}},
+			Spec: corev1.PodSpec{
+				Containers: []corev1.Container{{Name: "app", Image: "example.invalid/app:test"}},
+			},
 		}
 		Expect(k8sClient.Create(ctx, pod)).To(Succeed())
 		DeferCleanup(func() { _ = k8sClient.Delete(context.Background(), pod) })
@@ -159,12 +170,17 @@ var _ = Describe("TrafficBinding Controller", func() {
 	It("completes the Controller TrafficBinding activation and deletion contract", func(ctx SpecContext) {
 		pod := &corev1.Pod{
 			ObjectMeta: metav1.ObjectMeta{Name: "controller-contract-target", Namespace: testNamespace},
-			Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "app", Image: "example.invalid/app:test"}}},
+			Spec: corev1.PodSpec{
+				Containers: []corev1.Container{{Name: "app", Image: "example.invalid/app:test"}},
+			},
 		}
 		Expect(k8sClient.Create(ctx, pod)).To(Succeed())
 		DeferCleanup(func() { _ = k8sClient.Delete(context.Background(), pod) })
 
-		manager, err := trafficbindingclient.New(k8sClient, trafficbindingclient.Config{PollInterval: 10 * time.Millisecond})
+		manager, err := trafficbindingclient.New(
+			k8sClient,
+			trafficbindingclient.Config{PollInterval: 10 * time.Millisecond},
+		)
 		Expect(err).NotTo(HaveOccurred())
 		desired := portForwardBinding("", pod.Name)
 		desired.Spec.SessionID = "77777777-7777-4777-8777-777777777777"
@@ -200,7 +216,9 @@ var _ = Describe("TrafficBinding Controller", func() {
 		}).Should(BeTrue())
 		reconcileSuccessfully(ctx, reconciler, bindingName, 1)
 		Eventually(deleted).Should(Receive(Succeed()))
-		Expect(k8sClient.Get(ctx, objectKey(bindingName), &trafficv1alpha1.TrafficBinding{})).To(Satisfy(apierrors.IsNotFound))
+		Expect(
+			k8sClient.Get(ctx, objectKey(bindingName), &trafficv1alpha1.TrafficBinding{}),
+		).To(Satisfy(apierrors.IsNotFound))
 	})
 
 	It("enforces mode shape and immutable spec in the CRD", func(ctx SpecContext) {
@@ -228,8 +246,18 @@ func previewBinding(name, service string) *trafficv1alpha1.TrafficBinding {
 			Relay:   &trafficv1alpha1.RelayEndpoint{Address: "10.0.0.8"},
 			Preview: &trafficv1alpha1.PreviewExposure{ServiceName: service},
 			Ports: []trafficv1alpha1.TrafficPort{
-				{Name: "http", TargetPort: 8080, RelayPort: new(int32(32001)), Protocol: trafficv1alpha1.TransportProtocolTCP},
-				{Name: "dns", TargetPort: 5353, RelayPort: new(int32(32002)), Protocol: trafficv1alpha1.TransportProtocolUDP},
+				{
+					Name:       "http",
+					TargetPort: 8080,
+					RelayPort:  new(int32(32001)),
+					Protocol:   trafficv1alpha1.TransportProtocolTCP,
+				},
+				{
+					Name:       "dns",
+					TargetPort: 5353,
+					RelayPort:  new(int32(32002)),
+					Protocol:   trafficv1alpha1.TransportProtocolUDP,
+				},
 			},
 		},
 	}
@@ -244,9 +272,14 @@ func interceptBinding(name, service string, mode trafficv1alpha1.TrafficBindingM
 			TaskID:    "44444444-4444-4444-8444-444444444444", SessionGeneration: 1,
 			Target: &trafficv1alpha1.TrafficTarget{Kind: trafficv1alpha1.TargetKindService, Name: service},
 			Relay:  &trafficv1alpha1.RelayEndpoint{Address: "10.0.0.8"},
-			Ports: []trafficv1alpha1.TrafficPort{{
-				Name: "http", TargetPort: 8080, RelayPort: new(int32(32002)), Protocol: trafficv1alpha1.TransportProtocolTCP,
-			}},
+			Ports: []trafficv1alpha1.TrafficPort{
+				{
+					Name:       "http",
+					TargetPort: 8080,
+					RelayPort:  new(int32(32002)),
+					Protocol:   trafficv1alpha1.TransportProtocolTCP,
+				},
+			},
 		},
 	}
 }

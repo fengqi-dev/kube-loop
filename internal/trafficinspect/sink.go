@@ -68,6 +68,8 @@ type JSONLSink struct {
 type DailyJSONLFileSink struct {
 	access  sync.Mutex
 	path    string
+	root    *os.Root
+	name    string
 	day     string
 	encoder *json.Encoder
 	file    *os.File
@@ -90,8 +92,13 @@ func newDailyJSONLFileSink(path string, now func() time.Time) (*DailyJSONLFileSi
 	if err := os.MkdirAll(filepath.Dir(absolute), 0o700); err != nil {
 		return nil, fmt.Errorf("trafficinspect: create jsonl file directory: %w", err)
 	}
-	sink := &DailyJSONLFileSink{path: absolute, now: now}
+	root, err := os.OpenRoot(filepath.Dir(absolute))
+	if err != nil {
+		return nil, fmt.Errorf("trafficinspect: open jsonl file directory: %w", err)
+	}
+	sink := &DailyJSONLFileSink{path: absolute, root: root, name: filepath.Base(absolute), now: now}
 	if err := sink.open(now()); err != nil {
+		_ = root.Close()
 		return nil, err
 	}
 	return sink, nil
@@ -112,23 +119,28 @@ func (s *DailyJSONLFileSink) Emit(_ context.Context, event Event) error {
 func (s *DailyJSONLFileSink) Close() error {
 	s.access.Lock()
 	defer s.access.Unlock()
-	if s.file == nil {
-		return nil
+	var fileErr error
+	if s.file != nil {
+		fileErr = s.file.Close()
+		s.file = nil
+		s.encoder = nil
 	}
-	err := s.file.Close()
-	s.file = nil
-	s.encoder = nil
-	return err
+	var rootErr error
+	if s.root != nil {
+		rootErr = s.root.Close()
+		s.root = nil
+	}
+	return errors.Join(fileErr, rootErr)
 }
 
 func (s *DailyJSONLFileSink) open(now time.Time) error {
 	flags := os.O_CREATE | os.O_WRONLY | os.O_APPEND
-	if info, err := os.Stat(s.path); err == nil && dayKey(info.ModTime()) != dayKey(now) {
+	if info, err := s.root.Stat(s.name); err == nil && dayKey(info.ModTime()) != dayKey(now) {
 		flags = os.O_CREATE | os.O_WRONLY | os.O_TRUNC
 	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("trafficinspect: stat daily jsonl file: %w", err)
 	}
-	file, err := os.OpenFile(s.path, flags, 0o600)
+	file, err := s.root.OpenFile(s.name, flags, 0o600)
 	if err != nil {
 		return fmt.Errorf("trafficinspect: open daily jsonl file: %w", err)
 	}
@@ -146,7 +158,7 @@ func (s *DailyJSONLFileSink) rotate(now time.Time) error {
 		s.file = nil
 		s.encoder = nil
 	}
-	file, err := os.OpenFile(s.path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	file, err := s.root.OpenFile(s.name, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
 		return fmt.Errorf("trafficinspect: rotate daily jsonl file: %w", err)
 	}

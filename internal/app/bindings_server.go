@@ -36,7 +36,7 @@ func (a *App) TestServerAddress(serviceAddress string) (clientdiscovery.Document
 
 func (a *App) SaveServerProfile(request SaveServerProfileRequest) (ServerProfileResult, error) {
 	if a.profiles == nil {
-		return ServerProfileResult{}, errors.New("Server Profile store is unavailable")
+		return ServerProfileResult{}, errors.New("server Profile store is unavailable")
 	}
 	document, err := a.TestServerAddress(request.BaseURL)
 	if err != nil {
@@ -58,10 +58,10 @@ func (a *App) SaveServerProfile(request SaveServerProfileRequest) (ServerProfile
 			}
 		}
 		if previous.ID == "" {
-			return ServerProfileResult{}, errors.New("Server Profile not found")
+			return ServerProfileResult{}, errors.New("server Profile not found")
 		}
 		if document.ServiceID != previous.ID {
-			return ServerProfileResult{}, errors.New("the edited address belongs to a different Server")
+			return ServerProfileResult{}, errors.New("the edited address belongs to a different server")
 		}
 	} else {
 		for _, existing := range state.Profiles {
@@ -69,7 +69,9 @@ func (a *App) SaveServerProfile(request SaveServerProfileRequest) (ServerProfile
 				continue
 			}
 			if existing.BaseURL != baseURL {
-				return ServerProfileResult{}, errors.New("the service ID is already registered with a different address")
+				return ServerProfileResult{}, errors.New(
+					"the service ID is already registered with a different address",
+				)
 			}
 			previous = existing
 			break
@@ -120,7 +122,7 @@ func requestedServerBaseURL(requestedValue, advertisedValue string) (string, err
 
 func (a *App) SelectServerProfile(id string) (clientprofile.State, error) {
 	if a.profiles == nil {
-		return clientprofile.State{}, errors.New("Server Profile store is unavailable")
+		return clientprofile.State{}, errors.New("server Profile store is unavailable")
 	}
 	if err := a.profiles.SetActive(id); err != nil {
 		return clientprofile.State{}, err
@@ -130,7 +132,7 @@ func (a *App) SelectServerProfile(id string) (clientprofile.State, error) {
 
 func (a *App) DeleteServerProfile(id string) (clientprofile.State, error) {
 	if a.profiles == nil {
-		return clientprofile.State{}, errors.New("Server Profile store is unavailable")
+		return clientprofile.State{}, errors.New("server Profile store is unavailable")
 	}
 	serverProfile, err := a.serverProfile(id)
 	if err != nil {
@@ -140,22 +142,34 @@ func (a *App) DeleteServerProfile(id string) (clientprofile.State, error) {
 	var cleanupErr error
 	if a.remoteFiles != nil {
 		if err := a.remoteFiles.StopProfile(serverProfile.ID); err != nil {
-			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("stop Server Profile file transfers before deletion: %w", err))
+			cleanupErr = errors.Join(
+				cleanupErr,
+				fmt.Errorf("stop Server Profile file transfers before deletion: %w", err),
+			)
 		}
 	}
 	if a.remoteExecs != nil {
 		if err := a.remoteExecs.StopProfile(serverProfile.ID); err != nil {
-			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("stop Server Profile Pod exec streams before deletion: %w", err))
+			cleanupErr = errors.Join(
+				cleanupErr,
+				fmt.Errorf("stop Server Profile Pod exec streams before deletion: %w", err),
+			)
 		}
 	}
 	if a.remoteSSH != nil {
 		if err := a.remoteSSH.StopProfile(serverProfile.ID); err != nil {
-			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("stop Server Profile Pod SSH endpoints before deletion: %w", err))
+			cleanupErr = errors.Join(
+				cleanupErr,
+				fmt.Errorf("stop Server Profile Pod SSH endpoints before deletion: %w", err),
+			)
 		}
 	}
 	if a.remoteForwards != nil {
 		if err := a.remoteForwards.StopProfile(a.context(), serverProfile.ID); err != nil {
-			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("stop Server Profile Port Forwards before deletion: %w", err))
+			cleanupErr = errors.Join(
+				cleanupErr,
+				fmt.Errorf("stop Server Profile Port Forwards before deletion: %w", err),
+			)
 		}
 	}
 	if a.remoteExchanges != nil {
@@ -175,12 +189,18 @@ func (a *App) DeleteServerProfile(id string) (clientprofile.State, error) {
 	}
 	if a.dataPlanes != nil {
 		if err := a.dataPlanes.Disconnect(serverProfile.ID); err != nil {
-			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("disconnect Server Profile Data Plane before deletion: %w", err))
+			cleanupErr = errors.Join(
+				cleanupErr,
+				fmt.Errorf("disconnect Server Profile Data Plane before deletion: %w", err),
+			)
 		}
 	}
 	if a.remoteSessions != nil {
 		if err := a.remoteSessions.Disconnect(a.context(), serverProfile.ID); err != nil {
-			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("disconnect Server Profile session before deletion: %w", err))
+			cleanupErr = errors.Join(
+				cleanupErr,
+				fmt.Errorf("disconnect Server Profile session before deletion: %w", err),
+			)
 		}
 	}
 	if a.credentials != nil {

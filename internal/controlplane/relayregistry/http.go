@@ -11,9 +11,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/labstack/echo/v5"
+
 	"github.com/fengqi-dev/kube-loop/internal/httpmiddleware"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/relaycontrol"
-	"github.com/labstack/echo/v5"
 )
 
 const InternalPathPrefix = "/internal/v1/relays"
@@ -39,23 +40,35 @@ func NewMTLSAuthenticator(config MTLSConfig) (*MTLSAuthenticator, error) {
 		ServiceAccount: config.ServiceAccount, PodUID: "probe",
 	}
 	if err := probe.Validate(); err != nil {
-		return nil, errors.New("Relay mTLS identity configuration is invalid")
+		return nil, errors.New("relay mTLS identity configuration is invalid")
 	}
 	return &MTLSAuthenticator{config: config}, nil
 }
 
-func (authenticator *MTLSAuthenticator) Authenticate(request *http.Request) (relaycontrol.PeerIdentity, error) {
-	if authenticator == nil || request == nil || request.TLS == nil || len(request.TLS.VerifiedChains) == 0 {
-		return relaycontrol.PeerIdentity{}, errors.New("verified Relay client certificate is required")
+func (authenticator *MTLSAuthenticator) Authenticate(
+	request *http.Request,
+) (relaycontrol.PeerIdentity, error) {
+	if authenticator == nil || request == nil || request.TLS == nil ||
+		len(request.TLS.VerifiedChains) == 0 {
+		return relaycontrol.PeerIdentity{}, errors.New(
+			"verified Relay client certificate is required",
+		)
 	}
-	identity, err := authenticator.identityFromChains(request.TLS.VerifiedChains)
+	identity, err := authenticator.identityFromChains(
+		request.TLS.VerifiedChains,
+	)
 	if err != nil {
 		return relaycontrol.PeerIdentity{}, err
 	}
 	if authenticator.config.TopologyResolver != nil {
-		topology, err := authenticator.config.TopologyResolver(request.Context(), identity)
+		topology, err := authenticator.config.TopologyResolver(
+			request.Context(),
+			identity,
+		)
 		if err != nil {
-			return relaycontrol.PeerIdentity{}, errors.New("resolve authenticated Relay topology")
+			return relaycontrol.PeerIdentity{}, errors.New(
+				"resolve authenticated Relay topology",
+			)
 		}
 		identity.Topology = topology
 	}
@@ -65,18 +78,28 @@ func (authenticator *MTLSAuthenticator) Authenticate(request *http.Request) (rel
 	return identity, nil
 }
 
-func (authenticator *MTLSAuthenticator) identityFromChains(chains [][]*x509.Certificate) (relaycontrol.PeerIdentity, error) {
+func (authenticator *MTLSAuthenticator) identityFromChains(
+	chains [][]*x509.Certificate,
+) (relaycontrol.PeerIdentity, error) {
 	for _, chain := range chains {
 		if len(chain) == 0 || chain[0] == nil {
 			continue
 		}
 		for _, identityURI := range chain[0].URIs {
 			if identityURI == nil || identityURI.Scheme != "spiffe" ||
-				!strings.EqualFold(identityURI.Host, authenticator.config.TrustDomain) {
+				!strings.EqualFold(
+					identityURI.Host,
+					authenticator.config.TrustDomain,
+				) {
 				continue
 			}
-			segments := strings.Split(strings.Trim(identityURI.EscapedPath(), "/"), "/")
-			if len(segments) != 6 || segments[0] != "ns" || segments[2] != "sa" || segments[4] != "pod" {
+			segments := strings.Split(
+				strings.Trim(identityURI.EscapedPath(), "/"),
+				"/",
+			)
+			if len(segments) != 6 || segments[0] != "ns" ||
+				segments[2] != "sa" ||
+				segments[4] != "pod" {
 				continue
 			}
 			identity := relaycontrol.PeerIdentity{
@@ -92,7 +115,9 @@ func (authenticator *MTLSAuthenticator) identityFromChains(chains [][]*x509.Cert
 			}
 		}
 	}
-	return relaycontrol.PeerIdentity{}, errors.New("Relay client certificate has no allowed workload identity")
+	return relaycontrol.PeerIdentity{}, errors.New(
+		"relay client certificate has no allowed workload identity",
+	)
 }
 
 type HTTPHandler struct {
@@ -101,9 +126,13 @@ type HTTPHandler struct {
 	router        *echo.Echo
 }
 
-func NewHTTPHandler(registry *Registry, authenticator Authenticator, logger *slog.Logger) (*HTTPHandler, error) {
+func NewHTTPHandler(
+	registry *Registry,
+	authenticator Authenticator,
+	logger *slog.Logger,
+) (*HTTPHandler, error) {
 	if registry == nil || authenticator == nil {
-		return nil, errors.New("Relay Registry and authenticator are required")
+		return nil, errors.New("relay registry and authenticator are required")
 	}
 	handler := &HTTPHandler{registry: registry, authenticator: authenticator}
 	router := echo.New()
@@ -116,13 +145,18 @@ func NewHTTPHandler(registry *Registry, authenticator Authenticator, logger *slo
 	return handler, nil
 }
 
-func (handler *HTTPHandler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
+func (handler *HTTPHandler) ServeHTTP(
+	writer http.ResponseWriter,
+	request *http.Request,
+) {
 	handler.router.ServeHTTP(writer, request)
 }
 
 // Mount adds authenticated internal APIs to the Relay control server. It must
 // be called during startup, before ServeHTTP is used.
-func (handler *HTTPHandler) Mount(routes interface{ RegisterRoutes(*echo.Echo) }) error {
+func (handler *HTTPHandler) Mount(
+	routes interface{ RegisterRoutes(*echo.Echo) },
+) error {
 	if handler == nil || handler.router == nil || routes == nil {
 		return errors.New("internal API routes are required")
 	}
@@ -131,56 +165,76 @@ func (handler *HTTPHandler) Mount(routes interface{ RegisterRoutes(*echo.Echo) }
 }
 
 func (handler *HTTPHandler) register(ctx *echo.Context) error {
-	writer, request := ctx.Response(), ctx.Request()
-	identity, err := handler.authenticator.Authenticate(request)
-	if err != nil {
-		writeInternalError(writer, http.StatusUnauthorized, "unauthenticated", "Relay workload identity is invalid")
-		return nil
-	}
-	raw, err := readInternalBody(request)
-	if err != nil {
-		writeInternalError(writer, http.StatusBadRequest, "invalid_argument", "Relay registration body is invalid")
-		return nil
-	}
-	now := handler.registry.config.Now().UTC()
-	document, err := relaycontrol.DecodeRegistrationRequest(raw, now)
-	if err != nil {
-		writeInternalError(writer, http.StatusBadRequest, "invalid_argument", "Relay registration is invalid")
-		return nil
-	}
-	response, err := handler.registry.Register(identity, document)
-	if err != nil {
-		writeRegistryError(writer, err)
-		return nil
-	}
-	writeInternalDocument(writer, http.StatusCreated, response, now)
-	return nil
+	return handleInternalRequest(
+		handler,
+		ctx,
+		"Relay registration body is invalid",
+		"Relay registration is invalid",
+		http.StatusCreated,
+		relaycontrol.DecodeRegistrationRequest,
+		handler.registry.Register,
+	)
 }
 
 func (handler *HTTPHandler) heartbeat(ctx *echo.Context) error {
+	return handleInternalRequest(
+		handler,
+		ctx,
+		"Relay heartbeat body is invalid",
+		"Relay heartbeat is invalid",
+		http.StatusOK,
+		relaycontrol.DecodeHeartbeatRequest,
+		handler.registry.Heartbeat,
+	)
+}
+
+func handleInternalRequest[Request any, Response interface{ Validate(time.Time) error }](
+	handler *HTTPHandler,
+	ctx *echo.Context,
+	invalidBodyMessage string,
+	invalidDocumentMessage string,
+	status int,
+	decode func([]byte, time.Time) (Request, error),
+	mutate func(relaycontrol.PeerIdentity, Request) (Response, error),
+) error {
 	writer, request := ctx.Response(), ctx.Request()
 	identity, err := handler.authenticator.Authenticate(request)
 	if err != nil {
-		writeInternalError(writer, http.StatusUnauthorized, "unauthenticated", "Relay workload identity is invalid")
-		return nil
+		writeInternalError(
+			writer,
+			http.StatusUnauthorized,
+			"unauthenticated",
+			"Relay workload identity is invalid",
+		)
+		return nil //nolint:nilerr // The authenticated internal API writes its protocol error response directly.
 	}
 	raw, err := readInternalBody(request)
 	if err != nil {
-		writeInternalError(writer, http.StatusBadRequest, "invalid_argument", "Relay heartbeat body is invalid")
-		return nil
+		writeInternalError(
+			writer,
+			http.StatusBadRequest,
+			"invalid_argument",
+			invalidBodyMessage,
+		)
+		return nil //nolint:nilerr // The authenticated internal API writes its protocol error response directly.
 	}
 	now := handler.registry.config.Now().UTC()
-	document, err := relaycontrol.DecodeHeartbeatRequest(raw, now)
+	document, err := decode(raw, now)
 	if err != nil {
-		writeInternalError(writer, http.StatusBadRequest, "invalid_argument", "Relay heartbeat is invalid")
-		return nil
+		writeInternalError(
+			writer,
+			http.StatusBadRequest,
+			"invalid_argument",
+			invalidDocumentMessage,
+		)
+		return nil //nolint:nilerr // The authenticated internal API writes its protocol error response directly.
 	}
-	response, err := handler.registry.Heartbeat(identity, document)
+	response, err := mutate(identity, document)
 	if err != nil {
 		writeRegistryError(writer, err)
 		return nil
 	}
-	writeInternalDocument(writer, http.StatusOK, response, now)
+	writeInternalDocument(writer, status, response, now)
 	return nil
 }
 
@@ -188,10 +242,12 @@ func readInternalBody(request *http.Request) ([]byte, error) {
 	if request.Header.Get("Content-Type") != "application/json" {
 		return nil, errors.New("content type must be application/json")
 	}
-	defer request.Body.Close()
-	raw, err := io.ReadAll(io.LimitReader(request.Body, relaycontrol.MaximumBodyBytes+1))
+	defer func() { _ = request.Body.Close() }()
+	raw, err := io.ReadAll(
+		io.LimitReader(request.Body, relaycontrol.MaximumBodyBytes+1),
+	)
 	if err != nil || len(raw) == 0 || len(raw) > relaycontrol.MaximumBodyBytes {
-		return nil, errors.New("Relay control body size is invalid")
+		return nil, errors.New("relay control body size is invalid")
 	}
 	return raw, nil
 }
@@ -201,7 +257,12 @@ func writeInternalDocument[T interface {
 }](writer http.ResponseWriter, status int, document T, now time.Time) {
 	raw, err := relaycontrol.Encode(document, now)
 	if err != nil {
-		writeInternalError(writer, http.StatusInternalServerError, "internal", "Relay control response failed")
+		writeInternalError(
+			writer,
+			http.StatusInternalServerError,
+			"internal",
+			"Relay control response failed",
+		)
 		return
 	}
 	writer.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -213,17 +274,42 @@ func writeInternalDocument[T interface {
 func writeRegistryError(writer http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, ErrNotFound):
-		writeInternalError(writer, http.StatusNotFound, "not_found", "Relay lease was not found")
+		writeInternalError(
+			writer,
+			http.StatusNotFound,
+			"not_found",
+			"Relay lease was not found",
+		)
 	case errors.Is(err, ErrConflict):
-		writeInternalError(writer, http.StatusConflict, "conflict", "Relay lease does not match")
-	case errors.Is(err, ErrUnavailable), errors.Is(err, ErrAssignedRelayUnavailable):
-		writeInternalError(writer, http.StatusServiceUnavailable, "unavailable", "Relay is unavailable")
+		writeInternalError(
+			writer,
+			http.StatusConflict,
+			"conflict",
+			"Relay lease does not match",
+		)
+	case errors.Is(err, ErrUnavailable),
+		errors.Is(err, ErrAssignedRelayUnavailable):
+		writeInternalError(
+			writer,
+			http.StatusServiceUnavailable,
+			"unavailable",
+			"Relay is unavailable",
+		)
 	default:
-		writeInternalError(writer, http.StatusBadRequest, "invalid_argument", "Relay control request is invalid")
+		writeInternalError(
+			writer,
+			http.StatusBadRequest,
+			"invalid_argument",
+			"Relay control request is invalid",
+		)
 	}
 }
 
-func writeInternalError(writer http.ResponseWriter, status int, code, message string) {
+func writeInternalError(
+	writer http.ResponseWriter,
+	status int,
+	code, message string,
+) {
 	writer.Header().Set("Content-Type", "application/json; charset=utf-8")
 	writer.Header().Set("Cache-Control", "no-store")
 	writer.WriteHeader(status)

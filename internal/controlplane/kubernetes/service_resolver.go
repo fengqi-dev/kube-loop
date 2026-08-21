@@ -7,12 +7,13 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/fengqi-dev/kube-loop/internal/controlplane/authorization"
-	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficmodel"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	clientset "k8s.io/client-go/kubernetes"
+
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/authorization"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficmodel"
 )
 
 type ClientProvider interface {
@@ -25,7 +26,7 @@ type ServiceResolver struct {
 
 func NewServiceResolver(provider ClientProvider) (*ServiceResolver, error) {
 	if provider == nil {
-		return nil, errors.New("Kubernetes client Provider is required")
+		return nil, errors.New("kubernetes client Provider is required")
 	}
 	return &ServiceResolver{provider: provider}, nil
 }
@@ -47,7 +48,11 @@ func (r *ServiceResolver) ResolveService(
 	}
 	if service.Spec.Type == corev1.ServiceTypeExternalName ||
 		service.Spec.ClusterIP == "" || service.Spec.ClusterIP == corev1.ClusterIPNone {
-		return trafficmodel.ResolvedService{}, fmt.Errorf("Service %s/%s cannot be resolved", namespace, serviceName)
+		return trafficmodel.ResolvedService{}, fmt.Errorf(
+			"service %s/%s cannot be resolved",
+			namespace,
+			serviceName,
+		)
 	}
 
 	ports := make([]trafficmodel.Port, 0, len(requested))
@@ -58,7 +63,8 @@ func (r *ServiceResolver) ResolveService(
 			if protocol == "" {
 				protocol = corev1.ProtocolTCP
 			}
-			if servicePort.Port == requestedPort.ServicePort && strings.EqualFold(string(protocol), requestedPort.Protocol) {
+			if servicePort.Port == requestedPort.ServicePort &&
+				strings.EqualFold(string(protocol), requestedPort.Protocol) {
 				ports = append(ports, trafficmodel.Port{
 					Name: servicePort.Name, ServicePort: servicePort.Port, Protocol: strings.ToLower(string(protocol)),
 				})
@@ -67,7 +73,9 @@ func (r *ServiceResolver) ResolveService(
 			}
 		}
 		if !matched {
-			return trafficmodel.ResolvedService{}, errors.New("requested port does not match the authoritative Service")
+			return trafficmodel.ResolvedService{}, errors.New(
+				"requested port does not match the authoritative Service",
+			)
 		}
 	}
 	slices.SortFunc(ports, compareTrafficPorts)

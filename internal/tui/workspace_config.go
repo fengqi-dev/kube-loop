@@ -4,7 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"sort"
+	"slices"
 	"strings"
 
 	yaml "go.yaml.in/yaml/v3"
@@ -19,7 +19,7 @@ type workspaceConfig struct {
 }
 
 func loadWorkspaceConfig(path string) (workspaceConfig, string) {
-	config := workspaceConfig{Version: workspaceConfigVersion, Aliases: map[string]string{}, Hotkeys: map[string]string{}}
+	config := defaultWorkspaceConfig()
 	if strings.TrimSpace(path) == "" {
 		return config, "TUI config path is unavailable"
 	}
@@ -33,10 +33,10 @@ func loadWorkspaceConfig(path string) (workspaceConfig, string) {
 	decoder := yaml.NewDecoder(strings.NewReader(string(contents)))
 	decoder.KnownFields(true)
 	if err := decoder.Decode(&config); err != nil {
-		return workspaceConfig{Version: workspaceConfigVersion, Aliases: map[string]string{}, Hotkeys: map[string]string{}}, fmt.Sprintf("decode TUI config: %v", err)
+		return defaultWorkspaceConfig(), fmt.Sprintf("decode TUI config: %v", err)
 	}
 	if config.Version != workspaceConfigVersion {
-		return workspaceConfig{Version: workspaceConfigVersion, Aliases: map[string]string{}, Hotkeys: map[string]string{}}, fmt.Sprintf("unsupported TUI config version %d", config.Version)
+		return defaultWorkspaceConfig(), fmt.Sprintf("unsupported TUI config version %d", config.Version)
 	}
 	if config.Aliases == nil {
 		config.Aliases = map[string]string{}
@@ -48,9 +48,17 @@ func loadWorkspaceConfig(path string) (workspaceConfig, string) {
 	return config, strings.Join(warnings, "; ")
 }
 
+func defaultWorkspaceConfig() workspaceConfig {
+	return workspaceConfig{
+		Version: workspaceConfigVersion,
+		Aliases: map[string]string{},
+		Hotkeys: map[string]string{},
+	}
+}
+
 func validateWorkspaceConfig(config *workspaceConfig) []string {
 	warnings := []string{}
-	reserved := map[string]struct{}{":": {}, "/": {}, "?": {}, "q": {}, "esc": {}, "ctrl+c": {}}
+	reserved := map[string]struct{}{":": {}, "/": {}, "?": {}, "q": {}, keyEsc: {}, keyCtrlC: {}}
 	for _, descriptor := range workspaceResourceRegistry {
 		reserved[string(descriptor.id)] = struct{}{}
 		for _, alias := range descriptor.aliases {
@@ -61,7 +69,7 @@ func validateWorkspaceConfig(config *workspaceConfig) []string {
 	for alias := range config.Aliases {
 		aliasNames = append(aliasNames, alias)
 	}
-	sort.Strings(aliasNames)
+	slices.Sort(aliasNames)
 	for _, rawAlias := range aliasNames {
 		alias := strings.ToLower(strings.TrimSpace(rawAlias))
 		target := strings.ToLower(strings.TrimSpace(config.Aliases[rawAlias]))

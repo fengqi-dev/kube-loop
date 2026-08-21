@@ -8,7 +8,7 @@ import (
 
 func newVersionCommand(commandVersion string) *cobra.Command {
 	return &cobra.Command{
-		Use:   "version",
+		Use:   versionCommandName,
 		Short: "Print the helper version",
 		Args:  usageArgs(cobra.NoArgs),
 		RunE: func(command *cobra.Command, _ []string) error {

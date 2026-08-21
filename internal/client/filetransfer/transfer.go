@@ -6,18 +6,31 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/filestream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
-	"github.com/google/uuid"
 )
 
 type Client interface {
-	CreateFileTransferTask(context.Context, profile.Profile, remote.Session, remote.FileTransferSpec, string) (remote.FileTransferTask, error)
-	OpenFileTransferStream(context.Context, profile.Profile, remote.Session, remote.FileTransferTask) (*websocket.Conn, error)
+	CreateFileTransferTask(
+		context.Context,
+		profile.Profile,
+		remote.Session,
+		remote.FileTransferSpec,
+		string,
+	) (remote.FileTransferTask, error)
+	OpenFileTransferStream(
+		context.Context,
+		profile.Profile,
+		remote.Session,
+		remote.FileTransferTask,
+	) (*websocket.Conn, error)
 }
 
 type ProgressFunc func(filestream.ProgressStatus)
@@ -35,26 +48,34 @@ func Upload(
 	spec remote.FileTransferSpec,
 	input io.Reader,
 	onProgress ProgressFunc,
-) (remote.FileTransferTask, filestream.TransferResult, error) {
+) (_ remote.FileTransferTask, _ filestream.TransferResult, resultErr error) {
 	if client == nil || input == nil {
-		return remote.FileTransferTask{}, filestream.TransferResult{}, errors.New("file upload client and input are required")
+		return remote.FileTransferTask{}, filestream.TransferResult{}, errors.New(
+			"file upload client and input are required",
+		)
 	}
-	if spec.Direction != "upload" || spec.Size == 0 || spec.Offset > spec.Size {
-		return remote.FileTransferTask{}, filestream.TransferResult{}, errors.New("valid file upload specification is required")
+	if spec.Direction != fileTransferDirectionUpload || spec.Size == 0 || spec.Offset > spec.Size {
+		return remote.FileTransferTask{}, filestream.TransferResult{}, errors.New(
+			"valid file upload specification is required",
+		)
 	}
 	task, err := client.CreateFileTransferTask(ctx, serverProfile, session, spec, "file-upload:"+uuid.NewString())
 	if err != nil {
 		return remote.FileTransferTask{}, filestream.TransferResult{}, err
 	}
 	if task.Offset > spec.Size || task.ResumeID != spec.ResumeID {
-		return task, filestream.TransferResult{}, errors.New("Gateway returned an invalid resumable upload offset")
+		return task, filestream.TransferResult{}, errors.New("gateway returned an invalid resumable upload offset")
 	}
 	if task.Offset > 0 {
 		seeker, ok := input.(io.Seeker)
 		if !ok {
 			return task, filestream.TransferResult{}, errors.New("resumable upload input is not seekable")
 		}
-		if _, err := seeker.Seek(int64(task.Offset), io.SeekStart); err != nil {
+		if task.Offset > math.MaxInt64 {
+			return task, filestream.TransferResult{}, errors.New("resumable upload offset exceeds local seek range")
+		}
+		offset := int64(task.Offset)
+		if _, err := seeker.Seek(offset, io.SeekStart); err != nil {
 			return task, filestream.TransferResult{}, fmt.Errorf("seek resumable upload input: %w", err)
 		}
 	}
@@ -63,7 +84,9 @@ func Upload(
 	if err != nil {
 		return task, filestream.TransferResult{}, err
 	}
-	defer connection.CloseNow()
+	defer func() {
+		resultErr = errors.Join(resultErr, connection.CloseNow())
+	}()
 	connection.SetReadLimit(filestream.MaximumData + 1)
 	responses := make(chan streamResponse, 1)
 	go func() { responses <- readUploadResponses(ctx, connection, onProgress) }()
@@ -92,7 +115,7 @@ func Upload(
 	expected, _ := filestream.ParseChecksum(spec.Checksum)
 	if response.result.Status == filestream.ResultSucceeded &&
 		(response.result.Transferred != spec.Size || !response.result.HasChecksum || response.result.Checksum != expected) {
-		return task, response.result, errors.New("Gateway returned a mismatched file upload result")
+		return task, response.result, errors.New("gateway returned a mismatched file upload result")
 	}
 	return task, response.result, resultError(response.result)
 }
@@ -105,25 +128,31 @@ func Download(
 	spec remote.FileTransferSpec,
 	output io.Writer,
 	onProgress ProgressFunc,
-) (remote.FileTransferTask, filestream.TransferResult, error) {
+) (_ remote.FileTransferTask, _ filestream.TransferResult, resultErr error) {
 	if client == nil || output == nil {
-		return remote.FileTransferTask{}, filestream.TransferResult{}, errors.New("file download client and output are required")
+		return remote.FileTransferTask{}, filestream.TransferResult{}, errors.New(
+			"file download client and output are required",
+		)
 	}
-	if spec.Direction != "download" {
-		return remote.FileTransferTask{}, filestream.TransferResult{}, errors.New("valid file download specification is required")
+	if spec.Direction != fileTransferDirectionDownload {
+		return remote.FileTransferTask{}, filestream.TransferResult{}, errors.New(
+			"valid file download specification is required",
+		)
 	}
 	task, err := client.CreateFileTransferTask(ctx, serverProfile, session, spec, "file-download:"+uuid.NewString())
 	if err != nil {
 		return remote.FileTransferTask{}, filestream.TransferResult{}, err
 	}
 	if task.Offset != spec.Offset {
-		return task, filestream.TransferResult{}, errors.New("Gateway returned a mismatched file download offset")
+		return task, filestream.TransferResult{}, errors.New("gateway returned a mismatched file download offset")
 	}
 	connection, err := client.OpenFileTransferStream(ctx, serverProfile, session, task)
 	if err != nil {
 		return task, filestream.TransferResult{}, err
 	}
-	defer connection.CloseNow()
+	defer func() {
+		resultErr = errors.Join(resultErr, connection.CloseNow())
+	}()
 	connection.SetReadLimit(filestream.MaximumData + 1)
 	hash := sha256.New()
 	destination := output
@@ -138,7 +167,9 @@ func Download(
 		}
 		if messageType != websocket.MessageBinary {
 			cancel(connection)
-			return task, filestream.TransferResult{}, errors.New("Gateway file download stream returned a non-binary message")
+			return task, filestream.TransferResult{}, errors.New(
+				"gateway file download stream returned a non-binary message",
+			)
 		}
 		frame, err := filestream.Decode(encoded)
 		if err != nil {
@@ -148,6 +179,10 @@ func Download(
 		switch frame.Type {
 		case filestream.Data:
 			written, writeErr := destination.Write(frame.Payload)
+			if written < 0 {
+				cancel(connection)
+				return task, filestream.TransferResult{}, io.ErrShortWrite
+			}
 			transferred += uint64(written)
 			if writeErr != nil || written != len(frame.Payload) {
 				cancel(connection)
@@ -168,16 +203,16 @@ func Download(
 				return task, filestream.TransferResult{}, decodeErr
 			}
 			if result.Transferred != transferred {
-				return task, result, errors.New("Gateway returned a mismatched file download byte count")
+				return task, result, errors.New("gateway returned a mismatched file download byte count")
 			}
 			if result.Status == filestream.ResultSucceeded && spec.Offset == 0 &&
 				(!result.HasChecksum || !equalDigest(result.Checksum, hash.Sum(nil))) {
-				return task, result, errors.New("Gateway returned a mismatched file download checksum")
+				return task, result, errors.New("gateway returned a mismatched file download checksum")
 			}
 			return task, result, resultError(result)
 		default:
 			cancel(connection)
-			return task, filestream.TransferResult{}, errors.New("Gateway sent a client-only file download frame")
+			return task, filestream.TransferResult{}, errors.New("gateway sent a client-only file download frame")
 		}
 	}
 }
@@ -189,7 +224,7 @@ func readUploadResponses(ctx context.Context, connection *websocket.Conn, onProg
 			return streamResponse{err: fmt.Errorf("read Gateway file upload stream: %w", err)}
 		}
 		if messageType != websocket.MessageBinary {
-			return streamResponse{err: errors.New("Gateway file upload stream returned a non-binary message")}
+			return streamResponse{err: errors.New("gateway file upload stream returned a non-binary message")}
 		}
 		frame, err := filestream.Decode(encoded)
 		if err != nil {
@@ -208,12 +243,16 @@ func readUploadResponses(ctx context.Context, connection *websocket.Conn, onProg
 			result, err := filestream.DecodeResult(frame)
 			return streamResponse{result: result, err: err}
 		default:
-			return streamResponse{err: errors.New("Gateway sent a client-only file upload frame")}
+			return streamResponse{err: errors.New("gateway sent a client-only file upload frame")}
 		}
 	}
 }
 
-func uploadWriteResult(task remote.FileTransferTask, responses <-chan streamResponse, writeErr error) (remote.FileTransferTask, filestream.TransferResult, error) {
+func uploadWriteResult(
+	task remote.FileTransferTask,
+	responses <-chan streamResponse,
+	writeErr error,
+) (remote.FileTransferTask, filestream.TransferResult, error) {
 	select {
 	case response := <-responses:
 		if response.err != nil {
@@ -240,7 +279,7 @@ func resultError(result filestream.TransferResult) error {
 		return context.Canceled
 	default:
 		if result.Error == "" {
-			return errors.New("Gateway file transfer failed")
+			return errors.New("gateway file transfer failed")
 		}
 		return errors.New(result.Error)
 	}

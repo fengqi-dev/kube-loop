@@ -8,9 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fengqi-dev/kube-loop/internal/helper"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
+
+	"github.com/fengqi-dev/kube-loop/internal/helper"
 )
 
 func StopAllHelperSessions() {

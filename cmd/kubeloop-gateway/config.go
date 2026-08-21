@@ -8,9 +8,10 @@ import (
 	"strings"
 	"time"
 
+	"sigs.k8s.io/yaml"
+
 	"github.com/fengqi-dev/kube-loop/internal/gateway/websocketmux"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/relayticket"
-	"sigs.k8s.io/yaml"
 )
 
 const (
@@ -99,7 +100,7 @@ func loadGatewayConfig(path string) (gatewayConfig, error) {
 		return gatewayConfig{}, fmt.Errorf("read Gateway configuration: %w", err)
 	}
 	if len(raw) == 0 || len(raw) > maximumGatewayConfigBytes {
-		return gatewayConfig{}, errors.New("Gateway configuration size is invalid")
+		return gatewayConfig{}, errors.New("gateway configuration size is invalid")
 	}
 	var fields map[string]any
 	if err := yaml.Unmarshal(raw, &fields); err != nil {
@@ -136,10 +137,10 @@ func (config *gatewayConfig) normalizeAndValidate() error {
 	config.LogLevel = strings.ToLower(strings.TrimSpace(config.LogLevel))
 
 	if config.HTTP.Listen == "" || !strings.HasPrefix(config.HTTP.Path, "/") {
-		return errors.New("Gateway HTTP listen address and absolute path are required")
+		return errors.New("gateway HTTP listen address and absolute path are required")
 	}
 	if config.Relay.ControlPlaneURL == "" || config.Relay.Endpoint == "" || config.Relay.ReplayEntries < 1 {
-		return errors.New("Gateway Relay configuration is invalid")
+		return errors.New("gateway Relay configuration is invalid")
 	}
 	websocket := config.WebSocket
 	if websocket.MaxSessions < 1 || websocket.MaxSessions > 1<<20 ||
@@ -147,13 +148,15 @@ func (config *gatewayConfig) normalizeAndValidate() error {
 		websocket.MaxStreamsPerSession < 1 || websocket.MaxStreamsPerSession > 1<<20 ||
 		websocket.MaxFrameBytes < 8<<10 || websocket.MaxFrameBytes > 16<<20 ||
 		uint64(websocket.MaxSessions)*uint64(websocket.MaxStreamsPerSession) > 1<<24 ||
-		websocket.HandshakeTimeout.Duration <= 0 || websocket.StreamIdleTimeout.Duration <= 0 || config.DrainTimeout.Duration <= 0 {
-		return errors.New("Gateway WebSocket capacity or timeout configuration is invalid")
+		websocket.HandshakeTimeout.Duration <= 0 ||
+		websocket.StreamIdleTimeout.Duration <= 0 ||
+		config.DrainTimeout.Duration <= 0 {
+		return errors.New("gateway WebSocket capacity or timeout configuration is invalid")
 	}
 	switch config.LogLevel {
 	case "debug", "info", "warn", "error":
 	default:
-		return errors.New("Gateway log level must be debug, info, warn, or error")
+		return errors.New("gateway log level must be debug, info, warn, or error")
 	}
 	return nil
 }

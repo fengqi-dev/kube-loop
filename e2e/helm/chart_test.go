@@ -21,6 +21,7 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
+//nolint:gocyclo // The chart contract is clearer as one end-to-end manifest assertion sequence.
 func TestSQLiteChartRendersIndependentSecureWorkloads(t *testing.T) {
 	objects := renderChart(t,
 		"--set", "publicURL=http://kubeloop.example.test",
@@ -31,7 +32,12 @@ func TestSQLiteChartRendersIndependentSecureWorkloads(t *testing.T) {
 	dataPlanes := objectsByComponent(t, objects, "Deployment", "data-plane")
 	operators := objectsByComponent(t, objects, "Deployment", "operator")
 	if len(controlPlanes) != 1 || len(dataPlanes) != 1 || len(operators) != 1 {
-		t.Fatalf("controlPlane deployments = %d, data-plane deployments = %d, operator deployments = %d", len(controlPlanes), len(dataPlanes), len(operators))
+		t.Fatalf(
+			"controlPlane deployments = %d, data-plane deployments = %d, operator deployments = %d",
+			len(controlPlanes),
+			len(dataPlanes),
+			len(operators),
+		)
 	}
 	controlPlane := controlPlanes[0]
 	dataPlane := dataPlanes[0]
@@ -98,12 +104,16 @@ func TestSQLiteChartRendersIndependentSecureWorkloads(t *testing.T) {
 	}
 	controlPlaneYAML, _ := yaml.Marshal(controlPlane)
 	if !strings.Contains(string(controlPlaneYAML), "--config=/etc/kubeloop/kubeloop.yaml") ||
-		strings.Contains(string(controlPlaneYAML), "--session-ttl") || strings.Contains(string(controlPlaneYAML), "envFrom:") {
+		strings.Contains(
+			string(controlPlaneYAML),
+			"--session-ttl",
+		) || strings.Contains(string(controlPlaneYAML), "envFrom:") {
 		t.Fatal("ControlPlane must start from only its mounted YAML configuration")
 	}
 	dataPlaneYAML, _ := yaml.Marshal(dataPlane)
 	for component, document := range map[string]string{"control-plane": string(controlPlaneYAML), "data-plane": string(dataPlaneYAML)} {
-		if !strings.Contains(document, "name: test-kubeloop-config") || !strings.Contains(document, "checksum/config:") {
+		if !strings.Contains(document, "name: test-kubeloop-config") ||
+			!strings.Contains(document, "checksum/config:") {
 			t.Fatalf("%s does not use the rollout-aware shared ConfigMap", component)
 		}
 	}
@@ -117,10 +127,12 @@ func TestSQLiteChartRendersIndependentSecureWorkloads(t *testing.T) {
 		!strings.Contains(string(dataPlaneYAML), "KUBELOOP_GATEWAY_CONFIG_FILE") {
 		t.Fatal("Data Plane must use only its mounted Gateway configuration file")
 	}
-	if containerHasEnvironment(t, dataPlane, "KUBELOOP_SQLITE_PATH") || containerHasEnvironment(t, dataPlane, "KUBELOOP_DATASOURCE_URL") {
+	if containerHasEnvironment(t, dataPlane, "KUBELOOP_SQLITE_PATH") ||
+		containerHasEnvironment(t, dataPlane, "KUBELOOP_DATASOURCE_URL") {
 		t.Fatal("Data Plane received ControlPlane database configuration")
 	}
-	if strings.Contains(string(dataPlaneYAML), "KUBELOOP_GATEWAY_TOKEN") || strings.Contains(string(dataPlaneYAML), "legacy-tcp") {
+	if strings.Contains(string(dataPlaneYAML), "KUBELOOP_GATEWAY_TOKEN") ||
+		strings.Contains(string(dataPlaneYAML), "legacy-tcp") {
 		t.Fatal("Data Plane still exposes legacy token or raw TCP compatibility paths")
 	}
 	if !strings.Contains(string(dataPlaneYAML), "relay-identity") ||
@@ -179,8 +191,13 @@ func TestSQLiteChartRendersIndependentSecureWorkloads(t *testing.T) {
 	}
 	controlPlaneService := objectByName(t, objects, "Service", "test-kubeloop-control-plane")
 	dataPlaneService := objectByName(t, objects, "Service", "test-kubeloop-gateway")
-	if serviceAppProtocol(t, controlPlaneService) != "http" || serviceAppProtocol(t, dataPlaneService) != "kubernetes.io/ws" {
-		t.Fatalf("backend appProtocols = controlPlane %q, data plane %q", serviceAppProtocol(t, controlPlaneService), serviceAppProtocol(t, dataPlaneService))
+	if serviceAppProtocol(t, controlPlaneService) != "http" ||
+		serviceAppProtocol(t, dataPlaneService) != "kubernetes.io/ws" {
+		t.Fatalf(
+			"backend appProtocols = controlPlane %q, data plane %q",
+			serviceAppProtocol(t, controlPlaneService),
+			serviceAppProtocol(t, dataPlaneService),
+		)
 	}
 	if len(objectsByComponent(t, objects, "Service", "control-plane-management")) != 0 {
 		t.Fatal("Management Plane still has a separate Service")
@@ -218,8 +235,14 @@ func TestGatewayAPIHTTPRouteUsesOneTLSOriginAndUnboundedWebSocketTimeout(t *test
 		"--set", "gatewayAPI.parentRef.namespace=networking",
 		"--set", "gatewayAPI.parentRef.sectionName=https",
 	)
-	if countKind(objects, "Ingress") != 0 || countKind(objects, "Gateway") != 0 || countKind(objects, "HTTPRoute") != 1 {
-		t.Fatalf("external Gateway route kinds: Ingress=%d Gateway=%d HTTPRoute=%d", countKind(objects, "Ingress"), countKind(objects, "Gateway"), countKind(objects, "HTTPRoute"))
+	if countKind(objects, "Ingress") != 0 || countKind(objects, "Gateway") != 0 ||
+		countKind(objects, "HTTPRoute") != 1 {
+		t.Fatalf(
+			"external Gateway route kinds: Ingress=%d Gateway=%d HTTPRoute=%d",
+			countKind(objects, "Ingress"),
+			countKind(objects, "Gateway"),
+			countKind(objects, "HTTPRoute"),
+		)
 	}
 	route := objectByName(t, objects, "HTTPRoute", "test-kubeloop")
 	routeYAML, err := yaml.Marshal(route)
@@ -255,8 +278,14 @@ func TestGatewayAPIChartCanOwnTheHTTPSGateway(t *testing.T) {
 		"--set", "gatewayAPI.gateway.className=example-gateway",
 		"--set", "gatewayAPI.gateway.tls.secretName=kubeloop-public-tls",
 	)
-	if countKind(objects, "Gateway") != 1 || countKind(objects, "HTTPRoute") != 1 || countKind(objects, "Ingress") != 0 {
-		t.Fatalf("owned Gateway route kinds: Gateway=%d HTTPRoute=%d Ingress=%d", countKind(objects, "Gateway"), countKind(objects, "HTTPRoute"), countKind(objects, "Ingress"))
+	if countKind(objects, "Gateway") != 1 || countKind(objects, "HTTPRoute") != 1 ||
+		countKind(objects, "Ingress") != 0 {
+		t.Fatalf(
+			"owned Gateway route kinds: Gateway=%d HTTPRoute=%d Ingress=%d",
+			countKind(objects, "Gateway"),
+			countKind(objects, "HTTPRoute"),
+			countKind(objects, "Ingress"),
+		)
 	}
 	gateway := objectByName(t, objects, "Gateway", "test-kubeloop")
 	gatewayYAML, err := yaml.Marshal(gateway)
@@ -301,7 +330,12 @@ func TestEveryWorkloadUsesItsDocumentedHealthContract(t *testing.T) {
 		readinessPath  string
 		operationsPort string
 	}{
-		{component: "control-plane", livenessPath: "/health/live", readinessPath: "/health/ready", operationsPort: "http"},
+		{
+			component:      "control-plane",
+			livenessPath:   "/health/live",
+			readinessPath:  "/health/ready",
+			operationsPort: "http",
+		},
 		{component: "data-plane", livenessPath: "/health/live", readinessPath: "/health/ready", operationsPort: "http"},
 		{component: "operator", livenessPath: "/healthz", readinessPath: "/readyz", operationsPort: "health"},
 	}
@@ -318,12 +352,18 @@ func TestEveryWorkloadUsesItsDocumentedHealthContract(t *testing.T) {
 }
 
 func TestRestrictedEgressRequiresExplicitPerComponentAllowRules(t *testing.T) {
-	objects := renderChart(t,
-		"--set", "publicURL=https://kubeloop.example.test",
-		"--set", "networkPolicy.egress.enabled=true",
-		"--set-json", `networkPolicy.egress.controlPlane=[{"to":[{"ipBlock":{"cidr":"10.96.0.1/32"}}],"ports":[{"protocol":"TCP","port":443}]}]`,
-		"--set-json", `networkPolicy.egress.dataPlane=[{"to":[{"ipBlock":{"cidr":"10.244.0.0/16","except":["10.244.0.10/32"]}}]}]`,
-		"--set-json", `networkPolicy.egress.operator=[{"to":[{"ipBlock":{"cidr":"10.96.0.1/32"}}],"ports":[{"protocol":"TCP","port":443}]}]`,
+	objects := renderChart(
+		t,
+		"--set",
+		"publicURL=https://kubeloop.example.test",
+		"--set",
+		"networkPolicy.egress.enabled=true",
+		"--set-json",
+		`networkPolicy.egress.controlPlane=[{"to":[{"ipBlock":{"cidr":"10.96.0.1/32"}}],"ports":[{"protocol":"TCP","port":443}]}]`,
+		"--set-json",
+		`networkPolicy.egress.dataPlane=[{"to":[{"ipBlock":{"cidr":"10.244.0.0/16","except":["10.244.0.10/32"]}}]}]`,
+		"--set-json",
+		`networkPolicy.egress.operator=[{"to":[{"ipBlock":{"cidr":"10.96.0.1/32"}}],"ports":[{"protocol":"TCP","port":443}]}]`,
 	)
 	if countKind(objects, "NetworkPolicy") != 3 {
 		t.Fatalf("restricted NetworkPolicy count = %d", countKind(objects, "NetworkPolicy"))
@@ -344,7 +384,9 @@ func TestRestrictedEgressRequiresExplicitPerComponentAllowRules(t *testing.T) {
 			t.Fatalf("Data Plane egress policy is missing %q: %s", want, dataPlanePolicy)
 		}
 	}
-	if strings.Contains(string(dataPlanePolicy), "10.96.0.1/32") || strings.Contains(string(dataPlanePolicy), "database") || strings.Contains(string(dataPlanePolicy), "secret") {
+	if strings.Contains(string(dataPlanePolicy), "10.96.0.1/32") ||
+		strings.Contains(string(dataPlanePolicy), "database") ||
+		strings.Contains(string(dataPlanePolicy), "secret") {
 		t.Fatalf("Data Plane egress policy received Kubernetes API/database/Secret access: %s", dataPlanePolicy)
 	}
 }
@@ -361,7 +403,11 @@ func TestMonitoringAndTopologySpreadAreOptInAndScoped(t *testing.T) {
 		"--set-json", "operator.topologySpreadConstraints="+spread,
 	)
 	if countKind(objects, "PodDisruptionBudget") != 0 || countKind(objects, "ServiceMonitor") != 1 {
-		t.Fatalf("runtime objects: PDB=%d ServiceMonitor=%d", countKind(objects, "PodDisruptionBudget"), countKind(objects, "ServiceMonitor"))
+		t.Fatalf(
+			"runtime objects: PDB=%d ServiceMonitor=%d",
+			countKind(objects, "PodDisruptionBudget"),
+			countKind(objects, "ServiceMonitor"),
+		)
 	}
 	monitor := objectByName(t, objects, "ServiceMonitor", "test-kubeloop-gateway")
 	monitorYAML, err := yaml.Marshal(monitor)
@@ -375,7 +421,8 @@ func TestMonitoringAndTopologySpreadAreOptInAndScoped(t *testing.T) {
 	}
 	for _, component := range []string{"control-plane", "data-plane", "operator"} {
 		deployment := objectsByComponent(t, objects, "Deployment", component)[0]
-		if !strings.Contains(mustYAML(t, deployment), "topologySpreadConstraints:") || !strings.Contains(mustYAML(t, deployment), "topology.kubernetes.io/zone") {
+		if !strings.Contains(mustYAML(t, deployment), "topologySpreadConstraints:") ||
+			!strings.Contains(mustYAML(t, deployment), "topology.kubernetes.io/zone") {
 			t.Fatalf("%s Deployment is missing topology spread constraints", component)
 		}
 	}
@@ -387,16 +434,22 @@ func TestTrafficBindingCRDMatchesGeneratedManifest(t *testing.T) {
 		t.Fatal("resolve chart test path")
 	}
 	root := filepath.Join(filepath.Dir(filename), "..", "..")
-	generated, err := os.ReadFile(filepath.Join(root, "config", "crd", "bases", "traffic.kubeloop.io_trafficbindings.yaml"))
+	generated, err := os.ReadFile(
+		filepath.Join(root, "config", "crd", "bases", "traffic.kubeloop.io_trafficbindings.yaml"),
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	packaged, err := os.ReadFile(filepath.Join(root, "charts", "kubeloop", "crds", "traffic.kubeloop.io_trafficbindings.yaml"))
+	packaged, err := os.ReadFile(
+		filepath.Join(root, "charts", "kubeloop", "crds", "traffic.kubeloop.io_trafficbindings.yaml"),
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !bytes.Equal(generated, packaged) {
-		t.Fatal("Helm TrafficBinding CRD is stale; run make operator-manifests and copy the generated CRD into charts/kubeloop/crds")
+		t.Fatal(
+			"Helm TrafficBinding CRD is stale; run make operator-manifests and copy the generated CRD into charts/kubeloop/crds",
+		)
 	}
 }
 
@@ -570,7 +623,8 @@ func TestIAMBootstrapCanBeDisabled(t *testing.T) {
 	}
 	controlPlane := objectsByComponent(t, objects, "Deployment", "control-plane")[0]
 	controlPlaneYAML, _ := yaml.Marshal(controlPlane)
-	if strings.Contains(string(controlPlaneYAML), "iam-bootstrap") || strings.Contains(string(controlPlaneYAML), "bootstrap/initial-password") {
+	if strings.Contains(string(controlPlaneYAML), "iam-bootstrap") ||
+		strings.Contains(string(controlPlaneYAML), "bootstrap/initial-password") {
 		t.Fatalf("disabled IAM bootstrap still mounts a Secret: %s", controlPlaneYAML)
 	}
 	authSecret := objectByName(t, objects, "Secret", "test-kubeloop-control-plane-auth")
@@ -608,7 +662,17 @@ func TestKubernetesProviderUsesControlPlaneServiceAccountWithoutDefaultImpersona
 	assertRuleVerbs(t, trafficRole, "", "services", "get", "list")
 	assertRuleVerbs(t, trafficRole, "", "endpoints", "get", "list")
 	assertRuleVerbs(t, trafficRole, "discovery.k8s.io", "endpointslices", "get", "list")
-	assertRuleVerbs(t, trafficRole, "traffic.kubeloop.io", "trafficbindings", "get", "list", "watch", "create", "delete")
+	assertRuleVerbs(
+		t,
+		trafficRole,
+		"traffic.kubeloop.io",
+		"trafficbindings",
+		"get",
+		"list",
+		"watch",
+		"create",
+		"delete",
+	)
 	operatorRole := objectByName(t, objects, "ClusterRole", "test-kubeloop-operator")
 	assertRuleVerbs(t, operatorRole, "", "services", "get", "list", "watch", "create", "update", "patch", "delete")
 	assertRuleVerbs(t, operatorRole, "traffic.kubeloop.io", "trafficbindings/status", "get", "update", "patch")
@@ -628,7 +692,8 @@ func TestKubernetesProviderUsesControlPlaneServiceAccountWithoutDefaultImpersona
 			t.Fatalf("Data Plane traffic listener identity environment missing %q: %s", want, dataPlaneYAML)
 		}
 	}
-	if strings.Contains(string(dataPlaneYAML), "kubernetes.json") || strings.Contains(string(dataPlaneYAML), "KUBELOOP_KUBERNETES_CONFIG_FILE") {
+	if strings.Contains(string(dataPlaneYAML), "kubernetes.json") ||
+		strings.Contains(string(dataPlaneYAML), "KUBELOOP_KUBERNETES_CONFIG_FILE") {
 		t.Fatal("Data Plane received ControlPlane Kubernetes Provider configuration")
 	}
 }
@@ -636,10 +701,18 @@ func TestKubernetesProviderUsesControlPlaneServiceAccountWithoutDefaultImpersona
 func TestDefaultRBACIsSplitAndExcludesDangerousPermissions(t *testing.T) {
 	objects := renderChart(t, "--set", "publicURL=https://kubeloop.example.test")
 	if countKind(objects, "ClusterRole") != 5 || countKind(objects, "ClusterRoleBinding") != 5 {
-		t.Fatalf("cluster RBAC counts = roles %d, bindings %d", countKind(objects, "ClusterRole"), countKind(objects, "ClusterRoleBinding"))
+		t.Fatalf(
+			"cluster RBAC counts = roles %d, bindings %d",
+			countKind(objects, "ClusterRole"),
+			countKind(objects, "ClusterRoleBinding"),
+		)
 	}
 	if countKind(objects, "Role") != 2 || countKind(objects, "RoleBinding") != 2 {
-		t.Fatalf("release namespace RBAC counts = roles %d, bindings %d", countKind(objects, "Role"), countKind(objects, "RoleBinding"))
+		t.Fatalf(
+			"release namespace RBAC counts = roles %d, bindings %d",
+			countKind(objects, "Role"),
+			countKind(objects, "RoleBinding"),
+		)
 	}
 
 	groups := map[string]string{
@@ -656,7 +729,10 @@ func TestDefaultRBACIsSplitAndExcludesDangerousPermissions(t *testing.T) {
 		binding := objectByName(t, objects, "ClusterRoleBinding", name)
 		assertControlPlaneOnlyBinding(t, binding)
 	}
-	assertControlPlaneOnlyBinding(t, objectByName(t, objects, "RoleBinding", "test-kubeloop-control-plane-relay-registry"))
+	assertControlPlaneOnlyBinding(
+		t,
+		objectByName(t, objects, "RoleBinding", "test-kubeloop-control-plane-relay-registry"),
+	)
 	dnsRole := objectByNameNamespace(t, objects, "Role", "kube-system", "test-kubeloop-control-plane-dns-discovery")
 	assertRuleVerbs(t, dnsRole, "", "services", "get")
 	assertRuleVerbs(t, dnsRole, "", "configmaps", "get")
@@ -666,8 +742,15 @@ func TestDefaultRBACIsSplitAndExcludesDangerousPermissions(t *testing.T) {
 			t.Fatalf("DNS discovery Role missing %q: %s", want, dnsRoleYAML)
 		}
 	}
-	assertControlPlaneOnlyBinding(t, objectByNameNamespace(t, objects, "RoleBinding", "kube-system", "test-kubeloop-control-plane-dns-discovery"))
-	assertBindingSubject(t, objectByName(t, objects, "ClusterRoleBinding", "test-kubeloop-operator"), "test-kubeloop-operator")
+	assertControlPlaneOnlyBinding(
+		t,
+		objectByNameNamespace(t, objects, "RoleBinding", "kube-system", "test-kubeloop-control-plane-dns-discovery"),
+	)
+	assertBindingSubject(
+		t,
+		objectByName(t, objects, "ClusterRoleBinding", "test-kubeloop-operator"),
+		"test-kubeloop-operator",
+	)
 
 	for _, object := range objects {
 		kind, _ := object["kind"].(string)
@@ -680,7 +763,12 @@ func TestDefaultRBACIsSplitAndExcludesDangerousPermissions(t *testing.T) {
 		}
 		for _, forbidden := range []string{"secrets", "nodes/proxy", "impersonate", `"*"`, "'*'"} {
 			if strings.Contains(string(encoded), forbidden) {
-				t.Fatalf("%s contains forbidden RBAC token %q: %s", valueAt(t, object, "metadata", "name"), forbidden, encoded)
+				t.Fatalf(
+					"%s contains forbidden RBAC token %q: %s",
+					valueAt(t, object, "metadata", "name"),
+					forbidden,
+					encoded,
+				)
 			}
 		}
 	}
@@ -694,10 +782,18 @@ func TestNamespaceScopedRBACConfinesWorkflowPermissions(t *testing.T) {
 		"--set", "controlPlane.rbac.namespaces[1]=team-b",
 	)
 	if countKind(objects, "ClusterRole") != 2 || countKind(objects, "ClusterRoleBinding") != 2 {
-		t.Fatalf("namespace mode cluster RBAC counts = roles %d, bindings %d", countKind(objects, "ClusterRole"), countKind(objects, "ClusterRoleBinding"))
+		t.Fatalf(
+			"namespace mode cluster RBAC counts = roles %d, bindings %d",
+			countKind(objects, "ClusterRole"),
+			countKind(objects, "ClusterRoleBinding"),
+		)
 	}
 	if countKind(objects, "Role") != 8 || countKind(objects, "RoleBinding") != 8 {
-		t.Fatalf("namespace mode Role counts = roles %d, bindings %d", countKind(objects, "Role"), countKind(objects, "RoleBinding"))
+		t.Fatalf(
+			"namespace mode Role counts = roles %d, bindings %d",
+			countKind(objects, "Role"),
+			countKind(objects, "RoleBinding"),
+		)
 	}
 	platformYAML, _ := yaml.Marshal(objectByName(t, objects, "ClusterRole", "test-kubeloop-control-plane"))
 	for _, forbidden := range []string{"pods", "services", "endpoints", "pods/exec"} {
@@ -729,10 +825,18 @@ func TestRBACPermissionGroupsCanBeDisabled(t *testing.T) {
 		"--set", "controlPlane.rbac.permissions.traffic.enabled=false",
 	)
 	if countKind(objects, "ClusterRole") != 2 || countKind(objects, "ClusterRoleBinding") != 2 {
-		t.Fatalf("disabled workflow RBAC counts = roles %d, bindings %d", countKind(objects, "ClusterRole"), countKind(objects, "ClusterRoleBinding"))
+		t.Fatalf(
+			"disabled workflow RBAC counts = roles %d, bindings %d",
+			countKind(objects, "ClusterRole"),
+			countKind(objects, "ClusterRoleBinding"),
+		)
 	}
 	if countKind(objects, "Role") != 2 || countKind(objects, "RoleBinding") != 2 {
-		t.Fatalf("disabled workflow release RBAC counts = roles %d, bindings %d", countKind(objects, "Role"), countKind(objects, "RoleBinding"))
+		t.Fatalf(
+			"disabled workflow release RBAC counts = roles %d, bindings %d",
+			countKind(objects, "Role"),
+			countKind(objects, "RoleBinding"),
+		)
 	}
 }
 
@@ -787,7 +891,8 @@ func TestExternalDatasourceChartUsesNoSQLitePVC(t *testing.T) {
 		}
 	}
 	dataPlaneYAML, _ := yaml.Marshal(objectsByComponent(t, objects, "Deployment", "data-plane")[0])
-	if strings.Contains(string(dataPlaneYAML), "KUBELOOP_DATASOURCE") || strings.Contains(string(dataPlaneYAML), "database") {
+	if strings.Contains(string(dataPlaneYAML), "KUBELOOP_DATASOURCE") ||
+		strings.Contains(string(dataPlaneYAML), "database") {
 		t.Fatal("Data Plane received datasource configuration or Secret reference")
 	}
 }
@@ -799,35 +904,321 @@ func TestChartRejectsUnsafeStorageConfigurations(t *testing.T) {
 		want string
 	}{
 		{name: "missing public URL", want: "publicURL is required"},
-		{name: "development on external origin", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.development.enabled=true"}, want: "requires localhost"},
-		{name: "public URL path", args: []string{"--set", "publicURL=https://kubeloop.example.test/base"}, want: "must be one HTTP or HTTPS origin"},
-		{name: "two external routes", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "ingress.enabled=true", "--set", "ingress.host=kubeloop.example.test", "--set", "gatewayAPI.enabled=true", "--set", "gatewayAPI.host=kubeloop.example.test"}, want: "mutually exclusive"},
-		{name: "Ingress origin mismatch", args: []string{"--set", "publicURL=https://other.example.test", "--set", "ingress.enabled=true", "--set", "ingress.host=kubeloop.example.test"}, want: "exactly equal"},
-		{name: "Ingress scheme mismatch", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "ingress.enabled=true", "--set", "ingress.host=kubeloop.example.test"}, want: "http://<ingress.host>"},
-		{name: "Gateway origin mismatch", args: []string{"--set", "publicURL=https://other.example.test", "--set", "gatewayAPI.enabled=true", "--set", "gatewayAPI.host=kubeloop.example.test"}, want: "exactly equal"},
-		{name: "Gateway parent", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "gatewayAPI.enabled=true", "--set", "gatewayAPI.host=kubeloop.example.test"}, want: "parentRef.name is required"},
-		{name: "Gateway class", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "gatewayAPI.enabled=true", "--set", "gatewayAPI.host=kubeloop.example.test", "--set", "gatewayAPI.gateway.create=true"}, want: "className is required"},
-		{name: "Gateway TLS certificate", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "gatewayAPI.enabled=true", "--set", "gatewayAPI.host=kubeloop.example.test", "--set", "gatewayAPI.gateway.create=true", "--set", "gatewayAPI.gateway.className=example"}, want: "tls.secretName is required"},
-		{name: "Gateway tunnel timeout", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "gatewayAPI.enabled=true", "--set", "gatewayAPI.host=kubeloop.example.test", "--set", "gatewayAPI.parentRef.name=shared", "--set", "gatewayAPI.parentRef.sectionName=https", "--set", "gatewayAPI.timeouts.tunnel=30m"}, want: "must be 0s"},
-		{name: "restricted egress without rules", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "networkPolicy.egress.enabled=true"}, want: "egress.controlPlane must contain"},
-		{name: "SQLite replicas", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.replicas=2"}, want: "controlPlane.replicas must be 1"},
-		{name: "datasource max open", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.storage.datasource.existingSecret=database", "--set", "controlPlane.storage.maxOpenConnections=0"}, want: "maxOpenConnections must be positive"},
-		{name: "datasource max idle", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.storage.datasource.existingSecret=database", "--set", "controlPlane.storage.maxOpenConnections=2", "--set", "controlPlane.storage.maxIdleConnections=3"}, want: "maxIdleConnections must not exceed"},
-		{name: "datasource retries", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.storage.datasource.existingSecret=database", "--set", "controlPlane.storage.transactionMaxRetries=11"}, want: "transactionMaxRetries must be between"},
-		{name: "multi-replica endpoint", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "dataPlane.replicas=2"}, want: "must contain {podName} or {podUID}"},
-		{name: "in-memory Registry ControlPlane replicas", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.storage.datasource.existingSecret=database", "--set", "controlPlane.replicas=2"}, want: "in-memory Relay Registry"},
-		{name: "empty file roots", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set-json", "controlPlane.files.allowedRoots=[]"}, want: "allowedRoots must contain"},
-		{name: "invalid file size", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.files.maxBytes=0"}, want: "maxBytes must be positive"},
-		{name: "per-user WSS capacity", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "dataPlane.relayRegistry.maxWebSocketSessions=2", "--set", "dataPlane.relayRegistry.maxWebSocketSessionsPerUser=3"}, want: "maxWebSocketSessionsPerUser"},
-		{name: "WSS frame size", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "dataPlane.relayRegistry.maxWebSocketFrameBytes=1024"}, want: "maxWebSocketFrameBytes"},
-		{name: "ControlPlane log level", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.logLevel=trace"}, want: "controlPlane.logLevel must be"},
-		{name: "Data Plane log level", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "dataPlane.logLevel=verbose"}, want: "dataPlane.logLevel must be"},
-		{name: "invalid RBAC scope", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.rbac.scope=tenant"}, want: "controlPlane.rbac.scope must be cluster or namespace"},
-		{name: "missing RBAC namespaces", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.rbac.scope=namespace"}, want: "controlPlane.rbac.namespaces must contain"},
-		{name: "invalid RBAC namespace", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.rbac.scope=namespace", "--set", "controlPlane.rbac.namespaces[0]=Team_A"}, want: "contains invalid namespace"},
-		{name: "duplicate RBAC namespace", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.rbac.scope=namespace", "--set", "controlPlane.rbac.namespaces[0]=team-a", "--set", "controlPlane.rbac.namespaces[1]=team-a"}, want: "contains duplicate namespace"},
-		{name: "empty OIDC signing key", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set-string", "controlPlane.auth.oauth.oidcSigningKeyKey="}, want: "oidcSigningKeyKey is required"},
-		{name: "empty HMAC key", args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set-string", "controlPlane.auth.oauth.hmacSecretKey="}, want: "hmacSecretKey is required"},
+		{
+			name: "development on external origin",
+			args: []string{
+				"--set",
+				"publicURL=https://kubeloop.example.test",
+				"--set",
+				"controlPlane.development.enabled=true",
+			},
+			want: "requires localhost",
+		},
+		{
+			name: "public URL path",
+			args: []string{"--set", "publicURL=https://kubeloop.example.test/base"},
+			want: "must be one HTTP or HTTPS origin",
+		},
+		{
+			name: "two external routes",
+			args: []string{
+				"--set",
+				"publicURL=https://kubeloop.example.test",
+				"--set",
+				"ingress.enabled=true",
+				"--set",
+				"ingress.host=kubeloop.example.test",
+				"--set",
+				"gatewayAPI.enabled=true",
+				"--set",
+				"gatewayAPI.host=kubeloop.example.test",
+			},
+			want: "mutually exclusive",
+		},
+		{
+			name: "Ingress origin mismatch",
+			args: []string{
+				"--set",
+				"publicURL=https://other.example.test",
+				"--set",
+				"ingress.enabled=true",
+				"--set",
+				"ingress.host=kubeloop.example.test",
+			},
+			want: "exactly equal",
+		},
+		{
+			name: "Ingress scheme mismatch",
+			args: []string{
+				"--set",
+				"publicURL=https://kubeloop.example.test",
+				"--set",
+				"ingress.enabled=true",
+				"--set",
+				"ingress.host=kubeloop.example.test",
+			},
+			want: "http://<ingress.host>",
+		},
+		{
+			name: "Gateway origin mismatch",
+			args: []string{
+				"--set",
+				"publicURL=https://other.example.test",
+				"--set",
+				"gatewayAPI.enabled=true",
+				"--set",
+				"gatewayAPI.host=kubeloop.example.test",
+			},
+			want: "exactly equal",
+		},
+		{
+			name: "Gateway parent",
+			args: []string{
+				"--set",
+				"publicURL=https://kubeloop.example.test",
+				"--set",
+				"gatewayAPI.enabled=true",
+				"--set",
+				"gatewayAPI.host=kubeloop.example.test",
+			},
+			want: "parentRef.name is required",
+		},
+		{
+			name: "Gateway class",
+			args: []string{
+				"--set",
+				"publicURL=https://kubeloop.example.test",
+				"--set",
+				"gatewayAPI.enabled=true",
+				"--set",
+				"gatewayAPI.host=kubeloop.example.test",
+				"--set",
+				"gatewayAPI.gateway.create=true",
+			},
+			want: "className is required",
+		},
+		{
+			name: "Gateway TLS certificate",
+			args: []string{
+				"--set",
+				"publicURL=https://kubeloop.example.test",
+				"--set",
+				"gatewayAPI.enabled=true",
+				"--set",
+				"gatewayAPI.host=kubeloop.example.test",
+				"--set",
+				"gatewayAPI.gateway.create=true",
+				"--set",
+				"gatewayAPI.gateway.className=example",
+			},
+			want: "tls.secretName is required",
+		},
+		{
+			name: "Gateway tunnel timeout",
+			args: []string{
+				"--set",
+				"publicURL=https://kubeloop.example.test",
+				"--set",
+				"gatewayAPI.enabled=true",
+				"--set",
+				"gatewayAPI.host=kubeloop.example.test",
+				"--set",
+				"gatewayAPI.parentRef.name=shared",
+				"--set",
+				"gatewayAPI.parentRef.sectionName=https",
+				"--set",
+				"gatewayAPI.timeouts.tunnel=30m",
+			},
+			want: "must be 0s",
+		},
+		{
+			name: "restricted egress without rules",
+			args: []string{
+				"--set",
+				"publicURL=https://kubeloop.example.test",
+				"--set",
+				"networkPolicy.egress.enabled=true",
+			},
+			want: "egress.controlPlane must contain",
+		},
+		{
+			name: "SQLite replicas",
+			args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.replicas=2"},
+			want: "controlPlane.replicas must be 1",
+		},
+		{
+			name: "datasource max open",
+			args: []string{
+				"--set",
+				"publicURL=https://kubeloop.example.test",
+				"--set",
+				"controlPlane.storage.datasource.existingSecret=database",
+				"--set",
+				"controlPlane.storage.maxOpenConnections=0",
+			},
+			want: "maxOpenConnections must be positive",
+		},
+		{
+			name: "datasource max idle",
+			args: []string{
+				"--set",
+				"publicURL=https://kubeloop.example.test",
+				"--set",
+				"controlPlane.storage.datasource.existingSecret=database",
+				"--set",
+				"controlPlane.storage.maxOpenConnections=2",
+				"--set",
+				"controlPlane.storage.maxIdleConnections=3",
+			},
+			want: "maxIdleConnections must not exceed",
+		},
+		{
+			name: "datasource retries",
+			args: []string{
+				"--set",
+				"publicURL=https://kubeloop.example.test",
+				"--set",
+				"controlPlane.storage.datasource.existingSecret=database",
+				"--set",
+				"controlPlane.storage.transactionMaxRetries=11",
+			},
+			want: "transactionMaxRetries must be between",
+		},
+		{
+			name: "multi-replica endpoint",
+			args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "dataPlane.replicas=2"},
+			want: "must contain {podName} or {podUID}",
+		},
+		{
+			name: "in-memory Registry ControlPlane replicas",
+			args: []string{
+				"--set",
+				"publicURL=https://kubeloop.example.test",
+				"--set",
+				"controlPlane.storage.datasource.existingSecret=database",
+				"--set",
+				"controlPlane.replicas=2",
+			},
+			want: "in-memory Relay Registry",
+		},
+		{
+			name: "empty file roots",
+			args: []string{
+				"--set",
+				"publicURL=https://kubeloop.example.test",
+				"--set-json",
+				"controlPlane.files.allowedRoots=[]",
+			},
+			want: "allowedRoots must contain",
+		},
+		{
+			name: "invalid file size",
+			args: []string{
+				"--set",
+				"publicURL=https://kubeloop.example.test",
+				"--set",
+				"controlPlane.files.maxBytes=0",
+			},
+			want: "maxBytes must be positive",
+		},
+		{
+			name: "per-user WSS capacity",
+			args: []string{
+				"--set",
+				"publicURL=https://kubeloop.example.test",
+				"--set",
+				"dataPlane.relayRegistry.maxWebSocketSessions=2",
+				"--set",
+				"dataPlane.relayRegistry.maxWebSocketSessionsPerUser=3",
+			},
+			want: "maxWebSocketSessionsPerUser",
+		},
+		{
+			name: "WSS frame size",
+			args: []string{
+				"--set",
+				"publicURL=https://kubeloop.example.test",
+				"--set",
+				"dataPlane.relayRegistry.maxWebSocketFrameBytes=1024",
+			},
+			want: "maxWebSocketFrameBytes",
+		},
+		{
+			name: "ControlPlane log level",
+			args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "controlPlane.logLevel=trace"},
+			want: "controlPlane.logLevel must be",
+		},
+		{
+			name: "Data Plane log level",
+			args: []string{"--set", "publicURL=https://kubeloop.example.test", "--set", "dataPlane.logLevel=verbose"},
+			want: "dataPlane.logLevel must be",
+		},
+		{
+			name: "invalid RBAC scope",
+			args: []string{
+				"--set",
+				"publicURL=https://kubeloop.example.test",
+				"--set",
+				"controlPlane.rbac.scope=tenant",
+			},
+			want: "controlPlane.rbac.scope must be cluster or namespace",
+		},
+		{
+			name: "missing RBAC namespaces",
+			args: []string{
+				"--set",
+				"publicURL=https://kubeloop.example.test",
+				"--set",
+				"controlPlane.rbac.scope=namespace",
+			},
+			want: "controlPlane.rbac.namespaces must contain",
+		},
+		{
+			name: "invalid RBAC namespace",
+			args: []string{
+				"--set",
+				"publicURL=https://kubeloop.example.test",
+				"--set",
+				"controlPlane.rbac.scope=namespace",
+				"--set",
+				"controlPlane.rbac.namespaces[0]=Team_A",
+			},
+			want: "contains invalid namespace",
+		},
+		{
+			name: "duplicate RBAC namespace",
+			args: []string{
+				"--set",
+				"publicURL=https://kubeloop.example.test",
+				"--set",
+				"controlPlane.rbac.scope=namespace",
+				"--set",
+				"controlPlane.rbac.namespaces[0]=team-a",
+				"--set",
+				"controlPlane.rbac.namespaces[1]=team-a",
+			},
+			want: "contains duplicate namespace",
+		},
+		{
+			name: "empty OIDC signing key",
+			args: []string{
+				"--set",
+				"publicURL=https://kubeloop.example.test",
+				"--set-string",
+				"controlPlane.auth.oauth.oidcSigningKeyKey=",
+			},
+			want: "oidcSigningKeyKey is required",
+		},
+		{
+			name: "empty HMAC key",
+			args: []string{
+				"--set",
+				"publicURL=https://kubeloop.example.test",
+				"--set-string",
+				"controlPlane.auth.oauth.hmacSecretKey=",
+			},
+			want: "hmacSecretKey is required",
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -845,7 +1236,8 @@ func renderChart(t *testing.T, args ...string) []map[string]any {
 	command := helmCommand(t, args...)
 	output, err := command.Output()
 	if err != nil {
-		if exitError, ok := err.(*exec.ExitError); ok {
+		exitError := &exec.ExitError{}
+		if errors.As(err, &exitError) {
 			t.Fatalf("helm template: %v: %s", err, exitError.Stderr)
 		}
 		t.Fatal(err)
@@ -879,9 +1271,10 @@ func helmCommand(t *testing.T, extra ...string) *exec.Cmd {
 	}
 	chart := filepath.Join(filepath.Dir(filename), "..", "..", "charts", "kubeloop")
 	chartFingerprint(t, chart)
-	args := []string{
+	args := make([]string, 0, 6+len(extra))
+	args = append(args,
 		"template", "test", chart, "--namespace", "kubeloop-system", "--include-crds",
-	}
+	)
 	args = append(args, extra...)
 	return exec.Command(helm, args...)
 }
@@ -950,7 +1343,8 @@ func objectByName(t *testing.T, objects []map[string]any, kind, name string) map
 func objectByNameNamespace(t *testing.T, objects []map[string]any, kind, namespace, name string) map[string]any {
 	t.Helper()
 	for _, object := range objects {
-		if object["kind"] == kind && valueAt(t, object, "metadata", "name") == name && valueAt(t, object, "metadata", "namespace") == namespace {
+		if object["kind"] == kind && valueAt(t, object, "metadata", "name") == name &&
+			valueAt(t, object, "metadata", "namespace") == namespace {
 			return object
 		}
 	}
@@ -969,7 +1363,8 @@ func assertBindingSubject(t *testing.T, binding map[string]any, serviceAccount s
 		t.Fatalf("binding subjects = %#v", valueAt(t, binding, "subjects"))
 	}
 	subject, ok := subjects[0].(map[string]any)
-	if !ok || subject["kind"] != "ServiceAccount" || subject["name"] != serviceAccount || subject["namespace"] != "kubeloop-system" {
+	if !ok || subject["kind"] != "ServiceAccount" || subject["name"] != serviceAccount ||
+		subject["namespace"] != "kubeloop-system" {
 		t.Fatalf("binding subject = %#v", subjects[0])
 	}
 }
@@ -1062,7 +1457,8 @@ func assertRestrictedPodAndContainerSecurity(t *testing.T, deployment map[string
 		t.Fatalf("container = %#v", containers[0])
 	}
 	security := valueAt(t, container, "securityContext")
-	if valueAt(t, security, "allowPrivilegeEscalation") != false || valueAt(t, security, "readOnlyRootFilesystem") != true {
+	if valueAt(t, security, "allowPrivilegeEscalation") != false ||
+		valueAt(t, security, "readOnlyRootFilesystem") != true {
 		t.Fatalf("container security context = %#v", security)
 	}
 	dropped, ok := valueAt(t, security, "capabilities", "drop").([]any)

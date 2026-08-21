@@ -21,6 +21,7 @@ func TestStartWithPortCollisionRetry(t *testing.T) {
 						"listen tcp 127.0.0.1:37199: bind: address already in use",
 				)
 			}
+			//nolint:nilnil // A nil core models a successful no-op start for this retry unit test.
 			return nil, nil
 		},
 	)

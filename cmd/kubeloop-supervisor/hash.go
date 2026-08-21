@@ -5,6 +5,7 @@ package main
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"io"
 	"os"
 )
@@ -14,10 +15,13 @@ func hashFile(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer file.Close()
 	hash := sha256.New()
-	if _, err := io.Copy(hash, file); err != nil {
+	if _, copyErr := io.Copy(hash, file); copyErr != nil {
+		return "", errors.Join(copyErr, file.Close())
+	}
+	digest := hex.EncodeToString(hash.Sum(nil))
+	if err := file.Close(); err != nil {
 		return "", err
 	}
-	return hex.EncodeToString(hash.Sum(nil)), nil
+	return digest, nil
 }

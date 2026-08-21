@@ -10,12 +10,13 @@ import (
 	"os"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/fengqi-dev/kube-loop/internal/componentstore"
 	"github.com/fengqi-dev/kube-loop/internal/helper"
 	helperspec "github.com/fengqi-dev/kube-loop/internal/protocol/helper"
 	supervisorprotocol "github.com/fengqi-dev/kube-loop/internal/protocol/supervisor"
 	"github.com/fengqi-dev/kube-loop/internal/supervisor"
-	"github.com/google/uuid"
 )
 
 func requiresSupervisorCheck(enforceBinaryMatch bool) bool { return enforceBinaryMatch }
@@ -32,7 +33,11 @@ func installCurrentHelper(
 	if err != nil {
 		return fmt.Errorf("locate bundled supervisor: %w", err)
 	}
-	supervisorSource, err = componentstore.Cache(helper.Version, helperBinaryName(supervisorServiceName), supervisorSource)
+	supervisorSource, err = componentstore.Cache(
+		helper.Version,
+		helperBinaryName(supervisorServiceName),
+		supervisorSource,
+	)
 	if err != nil {
 		return fmt.Errorf("cache bundled supervisor: %w", err)
 	}

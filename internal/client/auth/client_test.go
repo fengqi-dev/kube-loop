@@ -32,7 +32,7 @@ func TestOIDCProtocolLoginUsesStatePKCEAndExchange(t *testing.T) {
 			}
 			hash := sha256.Sum256([]byte(request.Form.Get("code_verifier")))
 			if request.Form.Get("code") != exchangeCode || base64.RawURLEncoding.EncodeToString(hash[:]) != challenge ||
-				request.Form.Get("device_id") != "device-1" || request.Form.Get("client_id") != DefaultClientID ||
+				request.Form.Get("device_id") != "device-1" || request.Form.Get(authParamClientID) != DefaultClientID ||
 				request.Form.Get("redirect_uri") != DefaultRedirectURI {
 				t.Fatalf("exchange form = %#v", request.Form)
 			}
@@ -53,7 +53,7 @@ func TestOIDCProtocolLoginUsesStatePKCEAndExchange(t *testing.T) {
 			query := authorize.Query()
 			challenge = query.Get("code_challenge")
 			if authorize.Path != "/oauth2/authorize" || query.Get("provider") != "company" ||
-				query.Get("client_id") != DefaultClientID || len(query.Get("state")) < 32 ||
+				query.Get(authParamClientID) != DefaultClientID || len(query.Get("state")) < 32 ||
 				query.Get("redirect_uri") != DefaultRedirectURI || len(query.Get("nonce")) < 32 ||
 				len(challenge) != 43 || query.Get("code_challenge_method") != "S256" {
 				t.Fatalf("authorization URL = %q", target)
@@ -73,8 +73,9 @@ func TestOIDCProtocolLoginUsesStatePKCEAndExchange(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if credential.AccessToken != "access-token" || credential.RefreshToken != "refresh-token" || credential.DeviceID != "device-1" ||
-		credential.IdentityID != "identity-1" || credential.UserName != "Example User" {
+	tokenMismatch := credential.AccessToken != "access-token" || credential.RefreshToken != "refresh-token"
+	identityMismatch := credential.IdentityID != "identity-1" || credential.UserName != "Example User"
+	if tokenMismatch || identityMismatch || credential.DeviceID != "device-1" {
 		t.Fatalf("credential = %#v", credential)
 	}
 	if !credential.RefreshExpiresAt.IsZero() {
@@ -92,7 +93,9 @@ func TestProtocolCallbackRejectsTamperedStateWithoutConsumingLogin(t *testing.T)
 		t.Fatal(err)
 	}
 	defer client.endCallback(pending)
-	if err := client.HandleCallbackURL(DefaultRedirectURI + "?state=" + strings.Repeat("x", 43) + "&code=" + strings.Repeat("c", 43)); err == nil {
+	if err := client.HandleCallbackURL(
+		DefaultRedirectURI + "?state=" + strings.Repeat("x", 43) + "&code=" + strings.Repeat("c", 43),
+	); err == nil {
 		t.Fatal("tampered callback succeeded")
 	}
 	select {
@@ -100,13 +103,17 @@ func TestProtocolCallbackRejectsTamperedStateWithoutConsumingLogin(t *testing.T)
 		t.Fatalf("tampered callback produced result: %#v", result)
 	default:
 	}
-	if err := client.HandleCallbackURL(DefaultRedirectURI + "?state=" + strings.Repeat("s", 43) + "&code=" + strings.Repeat("c", 43)); err != nil {
+	if err := client.HandleCallbackURL(
+		DefaultRedirectURI + "?state=" + strings.Repeat("s", 43) + "&code=" + strings.Repeat("c", 43),
+	); err != nil {
 		t.Fatal(err)
 	}
 	if result := <-pending.result; result.err != nil || result.code == "" {
 		t.Fatalf("valid callback result = %#v", result)
 	}
-	if err := client.HandleCallbackURL(DefaultRedirectURI + "?state=" + strings.Repeat("s", 43) + "&code=" + strings.Repeat("d", 43)); err == nil {
+	if err := client.HandleCallbackURL(
+		DefaultRedirectURI + "?state=" + strings.Repeat("s", 43) + "&code=" + strings.Repeat("d", 43),
+	); err == nil {
 		t.Fatal("duplicate callback succeeded")
 	}
 }
@@ -152,8 +159,10 @@ func TestRefreshRevokeAndUnsafeTargets(t *testing.T) {
 			writeProviderMetadata(t, writer, server.URL)
 		case "/oauth2/token":
 			_ = json.NewEncoder(writer).Encode(map[string]any{
-				"token_type": "Bearer", "access_token": "access-token", "refresh_token": "refresh-token",
-				"expires_in": 60,
+				"token_type":          authorizationTypeBearer,
+				"access_token":        "access-token",
+				authParamRefreshToken: "refresh-token",
+				"expires_in":          60,
 			})
 		case "/oauth2/revoke":
 			writer.WriteHeader(http.StatusOK)
@@ -204,7 +213,7 @@ func TestAuthenticationRejectionReturnsTypedAPIError(t *testing.T) {
 func writeTokenResponse(t *testing.T, writer http.ResponseWriter) {
 	t.Helper()
 	_ = json.NewEncoder(writer).Encode(map[string]any{
-		"token_type": "Bearer", "access_token": "access-token", "refresh_token": "refresh-token",
+		"token_type": authorizationTypeBearer, "access_token": "access-token", authParamRefreshToken: "refresh-token",
 		"expires_in": 60, "id_token": testIDToken(),
 	})
 }
@@ -219,13 +228,20 @@ func writeProviderMetadata(t *testing.T, writer http.ResponseWriter, issuer stri
 
 func credentialForTest() credentials.Credential {
 	return credentials.Credential{
-		TokenType: "Bearer", AccessToken: "old-access", RefreshToken: "old-refresh", DeviceID: "device-1",
-		AccessExpiresAt: time.Now().Add(time.Minute), RefreshExpiresAt: time.Now().Add(time.Hour),
-		IdentityID: "identity-1", UserName: "Example User",
+		TokenType:        authorizationTypeBearer,
+		AccessToken:      "old-access",
+		RefreshToken:     "old-refresh",
+		DeviceID:         "device-1",
+		AccessExpiresAt:  time.Now().Add(time.Minute),
+		RefreshExpiresAt: time.Now().Add(time.Hour),
+		IdentityID:       "identity-1",
+		UserName:         "Example User",
 	}
 }
 
 func testIDToken() string {
-	payload := base64.RawURLEncoding.EncodeToString([]byte(`{"sub":"identity-1","name":"Example User","email":"user@example.test"}`))
+	payload := base64.RawURLEncoding.EncodeToString(
+		[]byte(`{"sub":"identity-1","name":"Example User","email":"user@example.test"}`),
+	)
 	return "header." + payload + ".signature"
 }

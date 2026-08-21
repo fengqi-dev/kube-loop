@@ -6,7 +6,8 @@ func TestConfigFromEnv(t *testing.T) {
 	t.Setenv(maximumBytesEnv, "1048576")
 	t.Setenv(allowedRootsEnv, `["/workspace","/tmp"]`)
 	config, err := ConfigFromEnv()
-	if err != nil || config.MaximumBytes != 1048576 || len(config.AllowedPathRoots) != 2 {
+	if err != nil || config.MaximumBytes != 1048576 ||
+		len(config.AllowedPathRoots) != 2 {
 		t.Fatalf("config = %#v err = %v", config, err)
 	}
 	t.Setenv(allowedRootsEnv, `[]`)

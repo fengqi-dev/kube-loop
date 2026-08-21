@@ -10,12 +10,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/exchangestream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficstream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
-	"github.com/google/uuid"
 )
 
 type testExchangeClient struct {
@@ -45,7 +46,7 @@ func (client *testExchangeClient) OpenTrafficStream(
 	client.openCalls++
 	client.mu.Unlock()
 	if profileID != "server" || mode != tunnel.TrafficModeExchange || taskID != client.task.ID {
-		return nil, errors.New("Exchange Traffic stream selector changed")
+		return nil, errors.New("exchange Traffic stream selector changed")
 	}
 	return client.connection, client.openErr
 }
@@ -70,12 +71,13 @@ func (client *testExchangeClient) calls() (int, int) {
 	return client.openCalls, client.stopCalls
 }
 
+//nolint:gocyclo // TCP and UDP must be exercised together to verify one retained-target reconciliation contract.
 func TestManagerRelaysTCPAndUDPOnlyToRetainedLocalTargets(t *testing.T) {
-	tcpListener, err := net.Listen("tcp", "127.0.0.1:0")
+	tcpListener, err := net.Listen(exchangeProtocolTCP, "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer tcpListener.Close()
+	defer checkTestClose(t, tcpListener.Close)
 	tcpPort := uint16(tcpListener.Addr().(*net.TCPAddr).Port)
 	tcpDone := make(chan error, 1)
 	go func() {
@@ -84,7 +86,7 @@ func TestManagerRelaysTCPAndUDPOnlyToRetainedLocalTargets(t *testing.T) {
 			tcpDone <- acceptErr
 			return
 		}
-		defer connection.Close()
+		defer checkTestClose(t, connection.Close)
 		request := make([]byte, len("cluster-request"))
 		if _, readErr := io.ReadFull(connection, request); readErr != nil || string(request) != "cluster-request" {
 			tcpDone <- errors.Join(readErr, errors.New("unexpected TCP request"))
@@ -108,11 +110,11 @@ func TestManagerRelaysTCPAndUDPOnlyToRetainedLocalTargets(t *testing.T) {
 		tcpDone <- nil
 	}()
 
-	udpListener, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1")})
+	udpListener, err := net.ListenUDP(exchangeProtocolUDP, &net.UDPAddr{IP: net.ParseIP(exchangeLoopbackHost)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer udpListener.Close()
+	defer checkTestClose(t, udpListener.Close)
 	udpPort := uint16(udpListener.LocalAddr().(*net.UDPAddr).Port)
 	udpDone := make(chan error, 1)
 	go func() {
@@ -133,7 +135,11 @@ func TestManagerRelaysTCPAndUDPOnlyToRetainedLocalTargets(t *testing.T) {
 	go func() {
 		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 		defer cancel()
-		if writeErr := writeTestFrame(ctx, gatewayConnection, exchangestream.Frame{Type: exchangestream.Ready}); writeErr != nil {
+		if writeErr := writeTestFrame(
+			ctx,
+			gatewayConnection,
+			exchangestream.Frame{Type: exchangestream.Ready},
+		); writeErr != nil {
 			serverDone <- writeErr
 			return
 		}
@@ -150,7 +156,8 @@ func TestManagerRelaysTCPAndUDPOnlyToRetainedLocalTargets(t *testing.T) {
 			return
 		}
 		data, readErr := readTestFrame(ctx, gatewayConnection)
-		if readErr != nil || data.Type != exchangestream.Data || data.StreamID != 1 || string(data.Payload) != "local-response" {
+		if readErr != nil || data.Type != exchangestream.Data || data.StreamID != 1 ||
+			string(data.Payload) != "local-response" {
 			serverDone <- errors.Join(readErr, errors.New("unexpected local TCP response"))
 			return
 		}
@@ -159,11 +166,19 @@ func TestManagerRelaysTCPAndUDPOnlyToRetainedLocalTargets(t *testing.T) {
 			serverDone <- errors.Join(readErr, errors.New("missing local TCP half-close"))
 			return
 		}
-		if writeErr := writeTestFrame(ctx, gatewayConnection, exchangestream.Frame{Type: exchangestream.CloseWrite, StreamID: 1}); writeErr != nil {
+		if writeErr := writeTestFrame(
+			ctx,
+			gatewayConnection,
+			exchangestream.Frame{Type: exchangestream.CloseWrite, StreamID: 1},
+		); writeErr != nil {
 			serverDone <- writeErr
 			return
 		}
-		if writeErr := writeTestFrame(ctx, gatewayConnection, exchangestream.Frame{Type: exchangestream.Close, StreamID: 1}); writeErr != nil {
+		if writeErr := writeTestFrame(
+			ctx,
+			gatewayConnection,
+			exchangestream.Frame{Type: exchangestream.Close, StreamID: 1},
+		); writeErr != nil {
 			serverDone <- writeErr
 			return
 		}
@@ -180,7 +195,11 @@ func TestManagerRelaysTCPAndUDPOnlyToRetainedLocalTargets(t *testing.T) {
 			serverDone <- errors.Join(readErr, fmt.Errorf("unexpected local UDP response: %#v", datagram))
 			return
 		}
-		if writeErr := writeTestFrame(ctx, gatewayConnection, exchangestream.Frame{Type: exchangestream.Close, StreamID: 2}); writeErr != nil {
+		if writeErr := writeTestFrame(
+			ctx,
+			gatewayConnection,
+			exchangestream.Frame{Type: exchangestream.Close, StreamID: 2},
+		); writeErr != nil {
 			serverDone <- writeErr
 			return
 		}
@@ -196,12 +215,26 @@ func TestManagerRelaysTCPAndUDPOnlyToRetainedLocalTargets(t *testing.T) {
 	}()
 
 	now := time.Now().UTC()
-	session := remote.Session{ID: uuid.NewString(), Namespace: "development", State: "active", ExpiresAt: now.Add(time.Hour)}
+	session := remote.Session{
+		ID:        uuid.NewString(),
+		Namespace: "development",
+		State:     exchangeSessionActive,
+		ExpiresAt: now.Add(time.Hour),
+	}
 	task := remote.ExchangeTask{
-		ID: uuid.NewString(), SessionID: session.ID, Namespace: session.Namespace, State: "pending",
-		Service: "api", ClusterIP: "10.96.0.20",
-		Ports:     []remote.ExchangePort{{ServicePort: 53, Protocol: "udp"}, {ServicePort: 80, Protocol: "tcp"}},
-		CreatedAt: now, UpdatedAt: now, ExpiresAt: session.ExpiresAt,
+		ID:        uuid.NewString(),
+		SessionID: session.ID,
+		Namespace: session.Namespace,
+		State:     "pending",
+		Service:   "api",
+		ClusterIP: "10.96.0.20",
+		Ports: []remote.ExchangePort{
+			{ServicePort: 53, Protocol: exchangeProtocolUDP},
+			{ServicePort: 80, Protocol: exchangeProtocolTCP},
+		},
+		CreatedAt: now,
+		UpdatedAt: now,
+		ExpiresAt: session.ExpiresAt,
 	}
 	client := &testExchangeClient{connection: connection, task: task}
 	manager, err := NewManager(client, Config{TrafficStreams: client})
@@ -212,8 +245,8 @@ func TestManagerRelaysTCPAndUDPOnlyToRetainedLocalTargets(t *testing.T) {
 	info, err := manager.Start(context.Background(), serverProfile, session, Request{
 		ProfileID: serverProfile.ID, Service: "api",
 		Targets: []LocalTarget{
-			{ServicePort: 53, Protocol: "udp", LocalHost: "127.0.0.1", LocalPort: udpPort},
-			{ServicePort: 80, Protocol: "tcp", LocalHost: "127.0.0.1", LocalPort: tcpPort},
+			{ServicePort: 53, Protocol: exchangeProtocolUDP, LocalHost: exchangeLoopbackHost, LocalPort: udpPort},
+			{ServicePort: 80, Protocol: exchangeProtocolTCP, LocalHost: exchangeLoopbackHost, LocalPort: tcpPort},
 		},
 	})
 	if err != nil || info.State != "running" || len(manager.List(serverProfile.ID)) != 1 {
@@ -265,10 +298,15 @@ func TestManagerRelaysTCPAndUDPOnlyToRetainedLocalTargets(t *testing.T) {
 
 func TestManagerCompensatesWhenExchangeStreamCannotOpen(t *testing.T) {
 	now := time.Now().UTC()
-	session := remote.Session{ID: uuid.NewString(), Namespace: "development", State: "active", ExpiresAt: now.Add(time.Hour)}
+	session := remote.Session{
+		ID:        uuid.NewString(),
+		Namespace: "development",
+		State:     exchangeSessionActive,
+		ExpiresAt: now.Add(time.Hour),
+	}
 	client := &testExchangeClient{openErr: errors.New("stream unavailable"), task: remote.ExchangeTask{
 		ID: uuid.NewString(), SessionID: session.ID, Namespace: session.Namespace, State: "pending",
-		Service: "api", Ports: []remote.ExchangePort{{ServicePort: 80, Protocol: "tcp"}},
+		Service: "api", Ports: []remote.ExchangePort{{ServicePort: 80, Protocol: exchangeProtocolTCP}},
 		CreatedAt: now, UpdatedAt: now, ExpiresAt: session.ExpiresAt,
 	}}
 	manager, err := NewManager(client, Config{TrafficStreams: client})
@@ -276,8 +314,11 @@ func TestManagerCompensatesWhenExchangeStreamCannotOpen(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = manager.Start(context.Background(), profile.Profile{ID: "server"}, session, Request{
-		ProfileID: "server", Service: "api",
-		Targets: []LocalTarget{{ServicePort: 80, Protocol: "tcp", LocalHost: "127.0.0.1", LocalPort: 8080}},
+		ProfileID: "server",
+		Service:   "api",
+		Targets: []LocalTarget{
+			{ServicePort: 80, Protocol: exchangeProtocolTCP, LocalHost: exchangeLoopbackHost, LocalPort: 8080},
+		},
 	})
 	if err == nil {
 		t.Fatal("Exchange started without a local stream")
@@ -290,17 +331,29 @@ func TestManagerCompensatesWhenExchangeStreamCannotOpen(t *testing.T) {
 
 func TestManagerRejectsUnboundExchangeBeforeOpeningStream(t *testing.T) {
 	now := time.Now().UTC()
-	session := remote.Session{ID: uuid.NewString(), Namespace: "development", State: "active", ExpiresAt: now.Add(time.Hour)}
+	session := remote.Session{
+		ID:        uuid.NewString(),
+		Namespace: "development",
+		State:     exchangeSessionActive,
+		ExpiresAt: now.Add(time.Hour),
+	}
 	client := &testExchangeClient{openErr: errors.New("stream unavailable"), task: remote.ExchangeTask{
 		ID: uuid.NewString(), SessionID: session.ID, Namespace: session.Namespace, State: "pending",
-		Service: "api", Ports: []remote.ExchangePort{{ServicePort: 80, Protocol: "tcp"}},
+		Service: "api", Ports: []remote.ExchangePort{{ServicePort: 80, Protocol: exchangeProtocolTCP}},
 		CreatedAt: now, UpdatedAt: now, ExpiresAt: session.ExpiresAt,
 	}}
 	manager, err := NewManager(client, Config{TrafficStreams: client})
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := Request{ProfileID: "server", Service: "api", Targets: []LocalTarget{{ServicePort: 80, Protocol: "tcp", LocalHost: "127.0.0.1", LocalPort: 8080}}}
+	request := Request{
+		ProfileID: "server",
+		Service:   "api",
+		Targets: []LocalTarget{
+			{ServicePort: 80, Protocol: exchangeProtocolTCP, LocalHost: exchangeLoopbackHost, LocalPort: 8080},
+		},
+	}
+	//nolint:staticcheck // This test intentionally verifies defensive rejection of a nil context.
 	if _, err := manager.Start(nil, profile.Profile{ID: "server"}, session, request); err == nil {
 		t.Fatal("nil context was accepted")
 	}
@@ -321,8 +374,8 @@ func TestManagerRejectsUnboundExchangeBeforeOpeningStream(t *testing.T) {
 
 func TestNormalizeTargetsDefaultsAndRejectsUnsafeExchangeTargets(t *testing.T) {
 	targets, ports, err := normalizeTargets([]LocalTarget{{ServicePort: 8080}})
-	if err != nil || len(targets) != 1 || targets[0].Protocol != "tcp" ||
-		targets[0].LocalHost != "127.0.0.1" || targets[0].LocalPort != 8080 || len(ports) != 1 {
+	if err != nil || len(targets) != 1 || targets[0].Protocol != exchangeProtocolTCP ||
+		targets[0].LocalHost != exchangeLoopbackHost || targets[0].LocalPort != 8080 || len(ports) != 1 {
 		t.Fatalf("normalized targets=%#v ports=%#v err=%v", targets, ports, err)
 	}
 	invalid := [][]LocalTarget{
@@ -342,19 +395,34 @@ func TestNormalizeTargetsDefaultsAndRejectsUnsafeExchangeTargets(t *testing.T) {
 
 func TestManagerRejectsGatewayPortSubstitutionBeforeOpeningStream(t *testing.T) {
 	now := time.Now().UTC()
-	session := remote.Session{ID: uuid.NewString(), Namespace: "development", State: "active", ExpiresAt: now.Add(time.Hour)}
+	session := remote.Session{
+		ID:        uuid.NewString(),
+		Namespace: "development",
+		State:     exchangeSessionActive,
+		ExpiresAt: now.Add(time.Hour),
+	}
 	client := &testExchangeClient{task: remote.ExchangeTask{
-		ID: uuid.NewString(), SessionID: session.ID, Namespace: session.Namespace, State: "pending",
-		Service: "api", ClusterIP: "10.96.0.20", Ports: []remote.ExchangePort{{ServicePort: 81, Protocol: "tcp"}},
-		CreatedAt: now, UpdatedAt: now, ExpiresAt: session.ExpiresAt,
+		ID:        uuid.NewString(),
+		SessionID: session.ID,
+		Namespace: session.Namespace,
+		State:     "pending",
+		Service:   "api",
+		ClusterIP: "10.96.0.20",
+		Ports:     []remote.ExchangePort{{ServicePort: 81, Protocol: exchangeProtocolTCP}},
+		CreatedAt: now,
+		UpdatedAt: now,
+		ExpiresAt: session.ExpiresAt,
 	}}
 	manager, err := NewManager(client, Config{TrafficStreams: client})
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, err = manager.Start(context.Background(), profile.Profile{ID: "server"}, session, Request{
-		ProfileID: "server", Service: "api",
-		Targets: []LocalTarget{{ServicePort: 80, Protocol: "tcp", LocalHost: "127.0.0.1", LocalPort: 8080}},
+		ProfileID: "server",
+		Service:   "api",
+		Targets: []LocalTarget{
+			{ServicePort: 80, Protocol: exchangeProtocolTCP, LocalHost: exchangeLoopbackHost, LocalPort: 8080},
+		},
 	})
 	if err == nil {
 		t.Fatal("Gateway port substitution was accepted")

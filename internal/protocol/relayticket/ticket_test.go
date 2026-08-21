@@ -43,8 +43,10 @@ func TestRelayTicketRoundTripAndBindings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if verified.SessionID != claims.SessionID || verified.DeviceID != claims.DeviceID || verified.Namespace != claims.Namespace ||
-		len(verified.Groups) != 1 || verified.Groups[0] != "developers" {
+	identityMismatch := verified.SessionID != claims.SessionID || verified.DeviceID != claims.DeviceID
+	namespaceMismatch := verified.Namespace != claims.Namespace
+	groupsMismatch := len(verified.Groups) != 1 || verified.Groups[0] != "developers"
+	if identityMismatch || namespaceMismatch || groupsMismatch {
 		t.Fatalf("verified claims = %#v", verified)
 	}
 
@@ -153,7 +155,11 @@ func TestRelayTicketStrictEncodingAndSizeLimit(t *testing.T) {
 		t.Fatal(err)
 	}
 	headerJSON := []byte(`{"alg":"EdDSA","typ":"KubeLoop-RelayTicket","kid":"primary","extra":true}`)
-	unsigned := base64.RawURLEncoding.EncodeToString(headerJSON) + "." + base64.RawURLEncoding.EncodeToString(claimsJSON)
+	unsigned := base64.RawURLEncoding.EncodeToString(
+		headerJSON,
+	) + "." + base64.RawURLEncoding.EncodeToString(
+		claimsJSON,
+	)
 	signature := ed25519.Sign(privateKey, []byte(unsigned))
 	unknownHeader := unsigned + "." + base64.RawURLEncoding.EncodeToString(signature)
 	if _, err := verifier.Verify(unknownHeader); !errors.Is(err, ErrInvalid) {
@@ -183,7 +189,11 @@ func TestRelayTicketKeyFilesAndRotation(t *testing.T) {
 		t.Fatal(err)
 	}
 	privatePath := filepath.Join(directory, "signing-key.pem")
-	if err := os.WriteFile(privatePath, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: encodedPrivate}), 0o400); err != nil {
+	if err := os.WriteFile(
+		privatePath,
+		pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: encodedPrivate}),
+		0o400,
+	); err != nil {
 		t.Fatal(err)
 	}
 	loadedPrivate, err := LoadSigningKey(privatePath)
@@ -199,7 +209,8 @@ func TestRelayTicketKeyFilesAndRotation(t *testing.T) {
 		t.Fatal(err)
 	}
 	loadedKeys, err := LoadVerificationKeys(publicPath)
-	if err != nil || len(loadedKeys) != 2 || !loadedKeys["new"].Equal(keys["new"]) || !loadedKeys["old"].Equal(keys["old"]) {
+	if err != nil || len(loadedKeys) != 2 || !loadedKeys["new"].Equal(keys["new"]) ||
+		!loadedKeys["old"].Equal(keys["old"]) {
 		t.Fatalf("LoadVerificationKeys = %#v, error = %v", loadedKeys, err)
 	}
 
@@ -212,7 +223,11 @@ func TestRelayTicketKeyFilesAndRotation(t *testing.T) {
 		t.Fatal(err)
 	}
 	rsaPath := filepath.Join(directory, "rsa.pem")
-	if err := os.WriteFile(rsaPath, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: rsaEncoded}), 0o400); err != nil {
+	if err := os.WriteFile(
+		rsaPath,
+		pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: rsaEncoded}),
+		0o400,
+	); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := LoadSigningKey(rsaPath); err == nil {

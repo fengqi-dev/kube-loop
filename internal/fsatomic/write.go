@@ -19,7 +19,7 @@ func WriteFile(path string, data []byte, dirMode, fileMode os.FileMode) error {
 		return fmt.Errorf("create temporary file: %w", err)
 	}
 	tempPath := temp.Name()
-	defer os.Remove(tempPath)
+	defer func() { _ = os.Remove(tempPath) }()
 
 	if err := temp.Chmod(fileMode); err != nil {
 		_ = temp.Close()

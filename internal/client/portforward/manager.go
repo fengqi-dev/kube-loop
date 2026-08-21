@@ -8,15 +8,22 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/google/uuid"
+
 	"github.com/fengqi-dev/kube-loop/internal/client/portforward/listener"
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
 	"github.com/fengqi-dev/kube-loop/internal/client/traffic"
-	"github.com/google/uuid"
 )
 
 type TaskClient interface {
-	CreatePortForward(context.Context, profile.Profile, remote.Session, remote.PortForwardSpec, string) (remote.PortForwardTask, error)
+	CreatePortForward(
+		context.Context,
+		profile.Profile,
+		remote.Session,
+		remote.PortForwardSpec,
+		string,
+	) (remote.PortForwardTask, error)
 	StopPortForward(context.Context, profile.Profile, remote.Session, string) (remote.PortForwardTask, error)
 }
 
@@ -25,7 +32,7 @@ type DataPlane interface {
 }
 
 type localForwards interface {
-	StartResolved(listener.Request, string, listener.TrafficDialer) (listener.Info, error)
+	StartResolved(context.Context, listener.Request, string, listener.TrafficDialer) (listener.Info, error)
 	Stop(string) error
 }
 
@@ -72,7 +79,7 @@ type Manager struct {
 
 func New(client TaskClient, dataPlanes DataPlane) (*Manager, error) {
 	if client == nil || dataPlanes == nil {
-		return nil, errors.New("Port Forward Task client and Data Plane are required")
+		return nil, errors.New("port Forward Task client and Data Plane are required")
 	}
 	return &Manager{
 		client: client, dataPlanes: dataPlanes, locals: listener.NewManager(),
@@ -86,7 +93,8 @@ func (manager *Manager) Start(
 	session remote.Session,
 	request Request,
 ) (Info, error) {
-	if ctx == nil || strings.TrimSpace(request.ProfileID) != serverProfile.ID || session.State != "active" {
+	validProfile := strings.TrimSpace(request.ProfileID) == serverProfile.ID
+	if ctx == nil || !validProfile || session.State != portForwardSessionActive {
 		return Info{}, errors.New("active Server Profile Session is required")
 	}
 	dialer, err := manager.dataPlanes.Dialer(serverProfile.ID)
@@ -100,7 +108,7 @@ func (manager *Manager) Start(
 	if err != nil {
 		return Info{}, err
 	}
-	local, err := manager.locals.StartResolved(listener.Request{
+	local, err := manager.locals.StartResolved(ctx, listener.Request{
 		Context: serverProfile.ID, Namespace: session.Namespace, Kind: task.Kind, Name: task.Name,
 		Protocol: task.Protocol, RemotePort: task.RemotePort, LocalPort: request.LocalPort,
 	}, task.DialAddress, dialer)
@@ -109,16 +117,25 @@ func (manager *Manager) Start(
 		return Info{}, errors.Join(fmt.Errorf("start local Port Forward listener: %w", err), stopErr)
 	}
 	info := Info{
-		ID: task.ID, ProfileID: serverProfile.ID, SessionID: session.ID, Namespace: session.Namespace,
-		Kind: task.Kind, Name: task.Name, Protocol: task.Protocol, RemotePort: task.RemotePort,
-		LocalPort: local.LocalPort, Address: local.Address, DialAddress: task.DialAddress, State: "active",
+		ID:          task.ID,
+		ProfileID:   serverProfile.ID,
+		SessionID:   session.ID,
+		Namespace:   session.Namespace,
+		Kind:        task.Kind,
+		Name:        task.Name,
+		Protocol:    task.Protocol,
+		RemotePort:  task.RemotePort,
+		LocalPort:   local.LocalPort,
+		Address:     local.Address,
+		DialAddress: task.DialAddress,
+		State:       portForwardSessionActive,
 	}
 	manager.mu.Lock()
 	if _, exists := manager.active[task.ID]; exists {
 		manager.mu.Unlock()
 		_ = manager.locals.Stop(local.ID)
 		_, stopErr := manager.client.StopPortForward(ctx, serverProfile, session, task.ID)
-		return Info{}, errors.Join(errors.New("Port Forward Task is already active locally"), stopErr)
+		return Info{}, errors.Join(errors.New("port Forward Task is already active locally"), stopErr)
 	}
 	manager.active[task.ID] = &activeForward{
 		profile: serverProfile, session: session, task: task, localID: local.ID, info: info,
@@ -137,7 +154,7 @@ func (manager *Manager) Stop(ctx context.Context, profileID, taskID string) erro
 	}
 	manager.mu.Unlock()
 	if entry == nil {
-		return errors.New("Port Forward is not active locally")
+		return errors.New("port Forward is not active locally")
 	}
 	localErr := manager.locals.Stop(entry.localID)
 	_, remoteErr := manager.client.StopPortForward(ctx, entry.profile, entry.session, entry.task.ID)
@@ -175,7 +192,7 @@ func (manager *Manager) StopProfile(ctx context.Context, profileID string) error
 
 func (manager *Manager) Shutdown(ctx context.Context) error {
 	if ctx == nil {
-		return errors.New("Port Forward shutdown context is required")
+		return errors.New("port Forward shutdown context is required")
 	}
 	manager.mu.Lock()
 	ids := make([]string, 0, len(manager.active))

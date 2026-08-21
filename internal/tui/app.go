@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -31,7 +32,7 @@ const (
 	tabCount
 )
 
-var tabNames = []string{"Connection", "Workloads", "Services", "Sessions"}
+var tabNames = []string{tabNameConnection, "Workloads", "Services", "Sessions"}
 
 type viewMode int
 
@@ -65,6 +66,7 @@ type execTaskView struct {
 	Output  string
 }
 
+//nolint:recvcheck // Bubble Tea requires value-receiver Init, Update, and View; internal mutators use pointers.
 type Model struct {
 	state   *State
 	version string
@@ -122,6 +124,14 @@ type Model struct {
 	actionCommand     string
 }
 
+func requireModel(next tea.Model) Model {
+	model, ok := next.(Model)
+	if !ok {
+		panic(fmt.Sprintf("unexpected Bubble Tea model type %T", next))
+	}
+	return model
+}
+
 func New(state *State) Model {
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
@@ -140,6 +150,13 @@ func (m Model) Init() tea.Cmd {
 	return tea.Batch(m.spinner.Tick, loadAuthStatus(m), tickCmd(), waitExecEvent(m.state))
 }
 
+func (m Model) context() context.Context {
+	if m.state != nil && m.state.ctx != nil {
+		return m.state.ctx
+	}
+	return context.Background()
+}
+
 func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	if m.workspace.initialized {
 		if cmd, handled := m.updateWorkspace(message); handled {
@@ -148,73 +165,108 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	} else if cmd, handled := m.updateConsole(message); handled {
 		return m, cmd
 	}
+	if next, cmd, handled := m.updateInterfaceMessage(message); handled {
+		return next, cmd
+	}
+	if next, cmd, handled := m.updateSessionMessage(message); handled {
+		return next, cmd
+	}
+	if next, cmd, handled := m.updateDataPlaneMessage(message); handled {
+		return next, cmd
+	}
+	if next, cmd, handled := m.updateTaskMessage(message); handled {
+		return next, cmd
+	}
+	return m, nil
+}
 
+func (m Model) updateInterfaceMessage(message tea.Msg) (tea.Model, tea.Cmd, bool) {
 	switch msg := message.(type) {
 	case clipboardCopiedMsg:
-		if msg.err != nil {
-			m.status = ""
-			if msg.kind == "ERROR" {
-				m.err = "copy error: " + msg.err.Error()
-			} else {
-				m.err = "copy session: " + msg.err.Error()
-			}
-			return m, nil
-		}
-		m.err = ""
-		if msg.kind == "ERROR" {
-			m.status = "Error copied to clipboard"
-		} else {
-			m.status = fmt.Sprintf("%s session copied to clipboard", msg.kind)
-		}
-		return m, nil
+		return m.updateClipboardCopied(msg), nil, true
 	case workspaceLoadedMsg:
 		if msg.resource != m.workspace.resource || msg.generation != m.workspace.loadGeneration {
-			return m, nil
+			return m, nil, true
 		}
-		return m.Update(msg.message)
+		next, cmd := m.Update(msg.message)
+		return next, cmd, true
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
-		return m, nil
+		return m, nil, true
 	case tea.KeyMsg:
-		if msg.String() == "ctrl+c" || (msg.String() == "q" && !m.loginAdding && m.actionMode == actionNone) {
-			return m, tea.Quit
-		}
-		if m.mode == viewLogin {
-			return m.updateLogin(msg)
-		}
-		if m.actionMode != actionNone {
-			return m.updateAction(msg)
-		}
-		switch msg.String() {
-		case "tab":
-			m.activeTab = (m.activeTab + 1) % tabCount
-			m.cursor, m.err, m.status, m.loading = 0, "", "", true
-			return m, tea.Batch(m.spinner.Tick, m.loadTabData())
-		case "shift+tab":
-			m.activeTab = (m.activeTab - 1 + tabCount) % tabCount
-			m.cursor, m.err, m.status, m.loading = 0, "", "", true
-			return m, tea.Batch(m.spinner.Tick, m.loadTabData())
-		case "r":
-			m.loading = true
-			return m, tea.Batch(m.spinner.Tick, m.loadTabData())
-		case "esc":
-			m.err, m.status = "", ""
-			return m, nil
-		}
-		switch m.activeTab {
-		case tabConnection:
-			return m.updateOverview(msg)
-		case tabWorkloads:
-			return m.updatePods(msg)
-		case tabServices:
-			return m.updateServices(msg)
-		case tabTasks:
-			return m.updateTasks(msg)
-		}
+		next, cmd := m.updateKeyMessage(msg)
+		return next, cmd, true
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
-		return m, cmd
+		return m, cmd, true
+	default:
+		return m, nil, false
+	}
+}
+
+func (m Model) updateClipboardCopied(msg clipboardCopiedMsg) Model {
+	if msg.err != nil {
+		m.status = ""
+		if msg.kind == "ERROR" {
+			m.err = "copy error: " + msg.err.Error()
+		} else {
+			m.err = "copy session: " + msg.err.Error()
+		}
+		return m
+	}
+	m.err = ""
+	if msg.kind == "ERROR" {
+		m.status = "Error copied to clipboard"
+	} else {
+		m.status = fmt.Sprintf("%s session copied to clipboard", msg.kind)
+	}
+	return m
+}
+
+func (m Model) updateKeyMessage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if msg.String() == keyCtrlC || (msg.String() == "q" && !m.loginAdding && m.actionMode == actionNone) {
+		return m, tea.Quit
+	}
+	if m.mode == viewLogin {
+		return m.updateLogin(msg)
+	}
+	if m.actionMode != actionNone {
+		return m.updateAction(msg)
+	}
+	switch msg.String() {
+	case keyTab:
+		m.activeTab = (m.activeTab + 1) % tabCount
+		m.cursor, m.err, m.status, m.loading = 0, "", "", true
+		return m, tea.Batch(m.spinner.Tick, m.loadTabData())
+	case keyShiftTab:
+		m.activeTab = (m.activeTab - 1 + tabCount) % tabCount
+		m.cursor, m.err, m.status, m.loading = 0, "", "", true
+		return m, tea.Batch(m.spinner.Tick, m.loadTabData())
+	case "r":
+		m.loading = true
+		return m, tea.Batch(m.spinner.Tick, m.loadTabData())
+	case keyEsc:
+		m.err, m.status = "", ""
+		return m, nil
+	}
+	switch m.activeTab {
+	case tabConnection:
+		return m.updateOverview(msg)
+	case tabWorkloads:
+		return m.updatePods(msg)
+	case tabServices:
+		return m.updateServices(msg)
+	case tabTasks:
+		return m.updateTasks(msg)
+	case tabCount:
+		return m, nil
+	}
+	return m, nil
+}
+
+func (m Model) updateSessionMessage(message tea.Msg) (tea.Model, tea.Cmd, bool) {
+	switch msg := message.(type) {
 	case profilesLoadedMsg:
 		m.profiles = msg.state
 		if m.loginCursor >= len(msg.state.Profiles) {
@@ -223,61 +275,61 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		for _, profile := range msg.state.Profiles {
 			if profile.ID == msg.state.ActiveProfileID {
 				m.activeProfile = profile
-				return m, loadAuthStatus(m)
+				return m, loadAuthStatus(m), true
 			}
 		}
 		m.activeProfile = clientprofile.Profile{}
-		return m, nil
+		return m, nil, true
 	case authStatusMsg:
 		m.loading = false
 		if msg.err != nil {
 			m.profileSelectionPending = false
 			m.authSession, m.err = AuthSession{}, msg.err.Error()
-			return m, nil
+			return m, nil, true
 		}
 		m.authSession = msg.session
 		if m.profileSelectionPending {
 			m.profileSelectionPending = false
 			if msg.session.Authenticated {
 				m.mode = viewMain
-				return m, m.workspaceNavigate(resourceConnection, true)
+				return m, m.workspaceNavigate(resourceConnection, true), true
 			}
 			m.status = "Server selected — press 'l' to login"
-			return m, nil
+			return m, nil, true
 		}
 		if msg.session.Authenticated && m.mode == viewLogin {
 			m.mode, m.loading, m.autoConnect = viewMain, true, true
-			return m, m.workspaceNavigate(resourceConnection, true)
+			return m, m.workspaceNavigate(resourceConnection, true), true
 		}
-		return m, nil
+		return m, nil, true
 	case loginResultMsg:
 		m.loading, m.loginCancel = false, nil
 		if msg.cancelled {
 			m.err, m.status = "", "Login cancelled"
-			return m, nil
+			return m, nil, true
 		}
 		if msg.err != nil {
 			m.err = msg.err.Error()
-			return m, nil
+			return m, nil, true
 		}
 		m.authSession, m.mode, m.err, m.loading, m.autoConnect = msg.session, viewMain, "", true, true
-		return m, m.workspaceNavigate(resourceConnection, true)
+		return m, m.workspaceNavigate(resourceConnection, true), true
 	case logoutResultMsg:
 		m.loading = false
 		if msg.err != nil {
 			m.err = msg.err.Error()
-			return m, nil
+			return m, nil, true
 		}
 		m.authSession, m.mode, m.err = AuthSession{}, viewLogin, ""
 		m.workspace.resource = resourceProfiles
 		m.workspace.history, m.workspace.historyPos = []workspaceResource{resourceProfiles}, 0
-		return m, loadProfiles(m.state)
+		return m, loadProfiles(m.state), true
 	case namespacesLoadedMsg:
 		m.loading = false
 		if msg.err != nil {
 			m.autoConnect = false
 			m.err = msg.err.Error()
-			return m, nil
+			return m, nil, true
 		}
 		m.namespaces = msg.namespaces
 		if m.namespace != "" && !containsNamespace(msg.namespaces, m.namespace) {
@@ -288,10 +340,10 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			if !m.connected() {
 				m.loading, m.err = true, ""
 				m.beginConnectionProgress()
-				return m, tea.Batch(m.spinner.Tick, m.connectDataPlane())
+				return m, tea.Batch(m.spinner.Tick, m.connectDataPlane()), true
 			}
 		}
-		return m, nil
+		return m, nil, true
 	case namespaceChangedMsg:
 		m.namespace, m.cursor, m.err, m.status, m.loading = msg.namespace, 0, "", "", true
 		resource := msg.resource
@@ -299,7 +351,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			resource = resourcePods
 		}
 		m.namespaceReturnResource = ""
-		return m, m.workspaceNavigate(resource, true)
+		return m, m.workspaceNavigate(resource, true), true
 	case podsLoadedMsg:
 		m.loading = false
 		if msg.err != nil {
@@ -307,7 +359,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.pods = msg.pods
 		}
-		return m, nil
+		return m, nil, true
 	case servicesLoadedMsg:
 		m.loading = false
 		if msg.err != nil {
@@ -315,21 +367,28 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.services = msg.services
 		}
-		return m, nil
+		return m, nil, true
+	default:
+		return m, nil, false
+	}
+}
+
+func (m Model) updateDataPlaneMessage(message tea.Msg) (tea.Model, tea.Cmd, bool) {
+	switch msg := message.(type) {
 	case dataPlaneStatusMsg:
 		m.loading = false
 		m.dataPlaneStatus = msg.status
-		if msg.status.Mode != "" && msg.status.State != "disconnected" {
+		if msg.status.Mode != "" && msg.status.State != dataPlaneStateDisconnected {
 			m.selectedMode = clientdataplane.Mode(msg.status.Mode)
 		}
-		return m, nil
+		return m, nil, true
 	case dataPlaneSessionConnectedMsg:
 		total := connectionProgressSteps(msg.mode)
 		m.setConnectionProgress(2, total, "Starting SOCKS Data Plane")
-		return m, tea.Batch(m.spinner.Tick, m.connectSOCKSDataPlane(msg))
+		return m, tea.Batch(m.spinner.Tick, m.connectSOCKSDataPlane(msg)), true
 	case dataPlaneSOCKSConnectedMsg:
 		m.setConnectionProgress(3, 3, "Installing and starting Helper Service")
-		return m, tea.Batch(m.spinner.Tick, m.connectTUNDataPlane(msg.profileID))
+		return m, tea.Batch(m.spinner.Tick, m.connectTUNDataPlane(msg.profileID)), true
 	case dataPlaneConnectedMsg:
 		m.loading = false
 		if msg.err != nil {
@@ -338,7 +397,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.stage != "" {
 				m.err = msg.stage + ": " + m.err
 			}
-			return m, nil
+			return m, nil, true
 		}
 		m.dataPlaneStatus, m.selectedMode = msg.status, clientdataplane.Mode(msg.status.Mode)
 		resource := m.namespaceReturnResource
@@ -347,14 +406,14 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.namespaceReturnResource = ""
 		cmd := m.workspaceNavigate(resource, true)
-		m.status = "Data plane connected"
-		return m, cmd
+		m.status = statusDataPlaneConnected
+		return m, cmd, true
 	case dataPlaneDisconnectedMsg:
 		m.loading = false
 		if msg.err != nil {
 			m.pendingNamespace, m.pendingNamespaceSet, m.namespaceReturnResource = "", false, ""
 			m.err = msg.err.Error()
-			return m, nil
+			return m, nil, true
 		}
 		m.dataPlaneStatus = msg.status
 		if m.pendingNamespaceSet {
@@ -371,106 +430,129 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				label = "all namespaces"
 			}
 			m.loading, m.status = true, "Switching to "+label+"..."
-			return m, tea.Batch(m.spinner.Tick, m.connectDataPlane())
+			return m, tea.Batch(m.spinner.Tick, m.connectDataPlane()), true
 		}
 		m.status = "Data plane disconnected"
-		return m, nil
+		return m, nil, true
 	case dataPlaneModeMsg:
 		m.loading = false
 		if msg.err != nil {
 			m.selectedMode, m.err = msg.previous, msg.err.Error()
-			return m, nil
+			return m, nil, true
 		}
 		m.dataPlaneStatus = msg.status
 		m.status = fmt.Sprintf("Mode switched to %s", msg.status.Mode)
-		return m, nil
+		return m, nil, true
+	default:
+		return m, nil, false
+	}
+}
+
+func (m Model) updateTaskMessage(message tea.Msg) (tea.Model, tea.Cmd, bool) {
+	if next, cmd, handled := m.updateTaskListMessage(message); handled {
+		return next, cmd, true
+	}
+	return m.updateTaskOperationMessage(message)
+}
+
+func (m Model) updateTaskListMessage(message tea.Msg) (tea.Model, tea.Cmd, bool) {
+	switch msg := message.(type) {
 	case portForwardsLoadedMsg:
 		m.portForwards = msg.forwards
-		return m, nil
+		return m, nil, true
 	case podSSHLoadedMsg:
 		m.podSSHEndpoints = msg.endpoints
-		return m, nil
+		return m, nil, true
 	case trafficOperationsLoadedMsg:
 		m.exchanges, m.mirrors, m.previews = msg.exchanges, msg.mirrors, msg.previews
-		return m, nil
+		return m, nil, true
 	case profileSavedMsg:
 		m.loading = false
 		if msg.err != nil {
 			m.err = msg.err.Error()
-			return m, nil
+			return m, nil, true
 		}
 		m.loginAdding, m.loginURL, m.status = false, "", "Server saved"
 		if m.console.overlay == overlayProfileAdd {
 			m.console.overlay = overlayProfiles
 		}
-		return m, loadProfiles(m.state)
+		return m, loadProfiles(m.state), true
 	case profileDeletedMsg:
 		m.loading = false
 		if msg.err != nil {
 			m.err = msg.err.Error()
-			return m, nil
+			return m, nil, true
 		}
 		m.status = "Server deleted"
-		return m, loadProfiles(m.state)
+		return m, loadProfiles(m.state), true
+	default:
+		return m, nil, false
+	}
+}
+
+func (m Model) updateTaskOperationMessage(message tea.Msg) (tea.Model, tea.Cmd, bool) {
+	switch msg := message.(type) {
 	case portForwardStartedMsg:
 		m.loading, m.actionMode = false, actionNone
 		if msg.err != nil {
 			m.err = msg.err.Error()
-			return m, nil
+			return m, nil, true
 		}
 		m.status = fmt.Sprintf("Port forward started on %s", msg.info.Address)
-		return m, m.workspaceNavigate(resourceTasks, true)
+		return m, m.workspaceNavigate(resourceTasks, true), true
 	case trafficOperationStartedMsg:
 		m.loading, m.actionMode = false, actionNone
 		if msg.err != nil {
 			m.err = msg.err.Error()
-			return m, nil
+			return m, nil, true
 		}
 		m.status = fmt.Sprintf("%s started for %s", msg.kind, msg.target)
-		return m, m.workspaceNavigate(resourceTasks, true)
+		return m, m.workspaceNavigate(resourceTasks, true), true
 	case podSSHStartedMsg:
 		m.loading = false
 		if msg.err != nil {
 			m.err = msg.err.Error()
-			return m, nil
+			return m, nil, true
 		}
 		m.status = "Opening Pod SSH: " + msg.info.Pod
-		return m, openPodSSH(msg.info.Command)
+		return m, openPodSSH(m.state.ctx, msg.info.Command), true
 	case podSSHExitedMsg:
 		if msg.err != nil {
 			m.err = "Pod SSH: " + msg.err.Error()
 		} else {
 			m.status = "Pod SSH closed"
 		}
-		return m, loadPodSSH(m.state, m.activeProfile.ID)
+		return m, loadPodSSH(m.state, m.activeProfile.ID), true
 	case helperServiceUninstalledMsg:
 		m.loading = false
 		if msg.err != nil {
 			m.err = "Uninstall Helper Service: " + msg.err.Error()
-			return m, nil
+			return m, nil, true
 		}
 		m.err, m.status = "", "Helper Service uninstalled"
-		return m, nil
+		return m, nil, true
 	case execStartedMsg:
 		m.loading, m.actionMode = false, actionNone
 		if msg.err != nil {
 			m.err = msg.err.Error()
-			return m, nil
+			return m, nil, true
 		}
-		m.execTasks = upsertExecTask(m.execTasks, execTaskView{ID: msg.task.ID, Pod: msg.task.Pod, Command: msg.command, State: "running"})
+		m.execTasks = upsertExecTask(m.execTasks, execTaskView{
+			ID: msg.task.ID, Pod: msg.task.Pod, Command: msg.command, State: taskStateRunning,
+		})
 		cmd := m.workspaceNavigate(resourceTasks, true)
 		m.status = "Pod exec started"
-		return m, cmd
+		return m, cmd, true
 	case execEventMsg:
 		m.applyExecEvent(msg.event)
-		return m, waitExecEvent(m.state)
+		return m, waitExecEvent(m.state), true
 	case taskStoppedMsg:
 		m.loading = false
 		if msg.err != nil {
 			m.err = msg.err.Error()
-			return m, nil
+			return m, nil, true
 		}
-		if msg.kind == "exec" {
+		if msg.kind == taskKindExec {
 			for i := range m.execTasks {
 				if m.execTasks[i].ID == msg.id {
 					m.execTasks[i].State = "stopped"
@@ -478,15 +560,19 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		m.status = "Session stopped"
-		return m, tea.Batch(loadPortForwards(m.state, m.activeProfile.ID), loadPodSSH(m.state, m.activeProfile.ID))
+		return m, tea.Batch(
+			loadPortForwards(m.state, m.activeProfile.ID),
+			loadPodSSH(m.state, m.activeProfile.ID),
+		), true
 	case tickMsg:
 		cmds := []tea.Cmd{tickCmd()}
 		if m.mode == viewMain && !m.loading && m.activeProfile.ID != "" && m.authSession.Authenticated {
 			cmds = append(cmds, m.beginWorkspaceLoad())
 		}
-		return m, tea.Batch(cmds...)
+		return m, tea.Batch(cmds...), true
+	default:
+		return m, nil, false
 	}
-	return m, nil
 }
 
 func (m Model) View() string {
@@ -512,14 +598,15 @@ func (m Model) hintText() string {
 		return HintStyle.Render(": cmd  / filter  f forward  x exchange  m mirror  p preview")
 	case tabTasks:
 		return HintStyle.Render(": cmd  / filter  enter/d stop  y copy")
-	default:
+	case tabCount:
 		return HintStyle.Render("r refresh")
 	}
+	return HintStyle.Render("r refresh")
 }
 
 func (m Model) connected() bool {
 	state := m.dataPlaneStatus.State
-	return state == "connected" || state == "active" || state == "reconnecting"
+	return state == dataPlaneStateConnected || state == "active" || state == "reconnecting"
 }
 
 func (m Model) loadTabData() tea.Cmd {
@@ -531,7 +618,13 @@ func (m Model) loadTabData() tea.Cmd {
 	case tabServices:
 		return tea.Batch(loadServices(m), loadNamespaces(m))
 	case tabTasks:
-		return tea.Batch(loadPortForwards(m.state, m.activeProfile.ID), loadTrafficOperations(m.state, m.activeProfile.ID), loadPodSSH(m.state, m.activeProfile.ID))
+		return tea.Batch(
+			loadPortForwards(m.state, m.activeProfile.ID),
+			loadTrafficOperations(m.state, m.activeProfile.ID),
+			loadPodSSH(m.state, m.activeProfile.ID),
+		)
+	case tabCount:
+		return nil
 	}
 	return nil
 }
@@ -555,7 +648,7 @@ func loadDataPlaneStatus(m Model) tea.Cmd {
 		}
 		status, err := m.state.dataPlanes.Status(m.activeProfile.ID)
 		if err != nil {
-			status = clientdataplane.Status{State: "disconnected", Mode: "socks"}
+			status = clientdataplane.Status{State: dataPlaneStateDisconnected, Mode: "socks"}
 		}
 		return dataPlaneStatusMsg{status: status}
 	}
@@ -571,59 +664,50 @@ func loadNamespaces(m Model) tea.Cmd {
 }
 func loadPods(m Model) tea.Cmd {
 	return func() tea.Msg {
-		if m.namespace == "" {
-			namespaces, err := m.state.remote.Namespaces(m.state.ctx, m.activeProfile)
-			if err != nil {
-				return podsLoadedMsg{err: err}
-			}
-			items := make([]clientremote.Pod, 0)
-			var firstErr error
-			for _, namespace := range namespaces {
-				pods, listErr := m.state.remote.Pods(m.state.ctx, m.activeProfile, namespace.Name)
-				if listErr != nil {
-					if firstErr == nil {
-						firstErr = listErr
-					}
-					continue
-				}
-				items = append(items, pods...)
-			}
-			if len(items) == 0 && firstErr != nil {
-				return podsLoadedMsg{err: firstErr}
-			}
-			return podsLoadedMsg{pods: items}
+		if m.namespace != "" {
+			items, err := m.state.remote.Pods(m.state.ctx, m.activeProfile, m.namespace)
+			return podsLoadedMsg{pods: items, err: err}
 		}
-		items, err := m.state.remote.Pods(m.state.ctx, m.activeProfile, m.namespace)
+		items, err := loadAcrossNamespaces(m, func(namespace string) ([]clientremote.Pod, error) {
+			return m.state.remote.Pods(m.state.ctx, m.activeProfile, namespace)
+		})
 		return podsLoadedMsg{pods: items, err: err}
 	}
 }
 func loadServices(m Model) tea.Cmd {
 	return func() tea.Msg {
-		if m.namespace == "" {
-			namespaces, err := m.state.remote.Namespaces(m.state.ctx, m.activeProfile)
-			if err != nil {
-				return servicesLoadedMsg{err: err}
-			}
-			items := make([]clientremote.Service, 0)
-			var firstErr error
-			for _, namespace := range namespaces {
-				services, listErr := m.state.remote.Services(m.state.ctx, m.activeProfile, namespace.Name)
-				if listErr != nil {
-					if firstErr == nil {
-						firstErr = listErr
-					}
-					continue
-				}
-				items = append(items, services...)
-			}
-			if len(items) == 0 && firstErr != nil {
-				return servicesLoadedMsg{err: firstErr}
-			}
-			return servicesLoadedMsg{services: items}
+		if m.namespace != "" {
+			items, err := m.state.remote.Services(m.state.ctx, m.activeProfile, m.namespace)
+			return servicesLoadedMsg{services: items, err: err}
 		}
-		items, err := m.state.remote.Services(m.state.ctx, m.activeProfile, m.namespace)
+		items, err := loadAcrossNamespaces(m, func(namespace string) ([]clientremote.Service, error) {
+			return m.state.remote.Services(m.state.ctx, m.activeProfile, namespace)
+		})
 		return servicesLoadedMsg{services: items, err: err}
 	}
+}
+
+func loadAcrossNamespaces[T any](m Model, load func(string) ([]T, error)) ([]T, error) {
+	namespaces, err := m.state.remote.Namespaces(m.state.ctx, m.activeProfile)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]T, 0)
+	var firstErr error
+	for _, namespace := range namespaces {
+		loaded, loadErr := load(namespace.Name)
+		if loadErr != nil {
+			if firstErr == nil {
+				firstErr = loadErr
+			}
+			continue
+		}
+		items = append(items, loaded...)
+	}
+	if len(items) == 0 {
+		return items, firstErr
+	}
+	return items, nil
 }
 func loadPortForwards(state *State, profileID string) tea.Cmd {
 	return func() tea.Msg { return portForwardsLoadedMsg{forwards: state.forwards.List(profileID)} }
@@ -636,7 +720,7 @@ func (m Model) connectDataPlane() tea.Cmd {
 	return func() tea.Msg {
 		profile, ok := m.state.ActiveProfile()
 		if !ok {
-			return dataPlaneConnectedMsg{stage: "Create Cluster Session", err: fmt.Errorf("no active server")}
+			return dataPlaneConnectedMsg{stage: stageCreateClusterSession, err: fmt.Errorf("no active server")}
 		}
 		namespace := m.namespace
 		if namespace == "" {
@@ -646,16 +730,19 @@ func (m Model) connectDataPlane() tea.Cmd {
 			namespace = m.namespaces[0].Name
 		}
 		if namespace == "" {
-			return dataPlaneConnectedMsg{stage: "Create Cluster Session", err: fmt.Errorf("no namespace selected")}
+			return dataPlaneConnectedMsg{stage: stageCreateClusterSession, err: fmt.Errorf("no namespace selected")}
 		}
 		session, err := m.state.sessions.Connect(m.state.ctx, profile, namespace)
 		if err != nil {
-			return dataPlaneConnectedMsg{stage: "Create Cluster Session", err: err}
+			return dataPlaneConnectedMsg{stage: stageCreateClusterSession, err: err}
 		}
 		if m.selectedMode == clientdataplane.ModeTUN {
 			for _, issue := range networkdiag.InspectNetworkSpec(session.NetworkSpec).Issues {
 				if issue.Severity == networkdiag.SeverityWarning {
-					return dataPlaneConnectedMsg{stage: "Validate TUN network", err: fmt.Errorf("cannot install TUN: %s", issue.Message)}
+					return dataPlaneConnectedMsg{
+						stage: "Validate TUN network",
+						err:   fmt.Errorf("cannot install TUN: %s", issue.Message),
+					}
 				}
 			}
 		}
@@ -703,7 +790,10 @@ func connectionProgressSteps(mode clientdataplane.Mode) int {
 func (m Model) disconnectDataPlane() tea.Cmd {
 	return func() tea.Msg {
 		err := m.state.dataPlanes.Disconnect(m.activeProfile.ID)
-		return dataPlaneDisconnectedMsg{status: clientdataplane.Status{State: "disconnected", Mode: "socks"}, err: err}
+		return dataPlaneDisconnectedMsg{
+			status: clientdataplane.Status{State: dataPlaneStateDisconnected, Mode: "socks"},
+			err:    err,
+		}
 	}
 }
 func (m Model) switchDataPlaneMode(previous clientdataplane.Mode) tea.Cmd {
@@ -715,7 +805,10 @@ func (m Model) switchDataPlaneMode(previous clientdataplane.Mode) tea.Cmd {
 			}
 			for _, issue := range networkdiag.InspectNetworkSpec(session.NetworkSpec).Issues {
 				if issue.Severity == networkdiag.SeverityWarning {
-					return dataPlaneModeMsg{previous: previous, err: fmt.Errorf("cannot install TUN: %s", issue.Message)}
+					return dataPlaneModeMsg{
+						previous: previous,
+						err:      fmt.Errorf("cannot install TUN: %s", issue.Message),
+					}
 				}
 			}
 		}
@@ -743,7 +836,7 @@ func (m *Model) applyExecEvent(event clientexec.Event) {
 		}
 	}
 	if index < 0 {
-		m.execTasks = append(m.execTasks, execTaskView{ID: event.TaskID, State: "running"})
+		m.execTasks = append(m.execTasks, execTaskView{ID: event.TaskID, State: taskStateRunning})
 		index = len(m.execTasks) - 1
 	}
 	switch event.Type {

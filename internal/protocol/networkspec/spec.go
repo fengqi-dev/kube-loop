@@ -40,7 +40,9 @@ func Normalize(input Spec) (Spec, error) {
 	if input.Version != Version {
 		return Spec{}, fmt.Errorf("unsupported NetworkSpec version %d", input.Version)
 	}
-	if len(input.PodCIDRs)+len(input.PodIPs)+len(input.ServiceCIDRs)+len(input.ServiceIPs)+len(input.ClusterDomains) > MaximumItems {
+	itemCount := len(input.PodCIDRs) + len(input.PodIPs) + len(input.ServiceCIDRs) +
+		len(input.ServiceIPs) + len(input.ClusterDomains)
+	if itemCount > MaximumItems {
 		return Spec{}, errors.New("NetworkSpec contains too many items")
 	}
 	podCIDRs, err := normalizeCIDRs(input.PodCIDRs, "Pod")
@@ -207,7 +209,11 @@ func allowedPrefix(prefix netip.Prefix) bool {
 	if !allowedAddress(prefix.Addr()) {
 		return false
 	}
-	for _, raw := range []string{"0.0.0.0/8", "127.0.0.0/8", "169.254.0.0/16", "224.0.0.0/4", "::/128", "::1/128", "fe80::/10", "ff00::/8"} {
+	unsafePrefixes := []string{
+		"0.0.0.0/8", "127.0.0.0/8", "169.254.0.0/16", "224.0.0.0/4",
+		"::/128", "::1/128", "fe80::/10", "ff00::/8",
+	}
+	for _, raw := range unsafePrefixes {
 		if prefixesOverlap(prefix, netip.MustParsePrefix(raw)) {
 			return false
 		}

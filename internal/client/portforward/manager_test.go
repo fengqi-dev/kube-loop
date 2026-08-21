@@ -7,11 +7,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/fengqi-dev/kube-loop/internal/client/portforward/listener"
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
 	"github.com/fengqi-dev/kube-loop/internal/client/traffic"
-	"github.com/google/uuid"
 )
 
 type fakeTaskClient struct {
@@ -55,7 +56,12 @@ type fakeLocals struct {
 	stopped  []string
 }
 
-func (locals *fakeLocals) StartResolved(request listener.Request, _ string, _ listener.TrafficDialer) (listener.Info, error) {
+func (locals *fakeLocals) StartResolved(
+	_ context.Context,
+	request listener.Request,
+	_ string,
+	_ listener.TrafficDialer,
+) (listener.Info, error) {
 	locals.started = append(locals.started, request)
 	if locals.startErr != nil {
 		return listener.Info{}, locals.startErr
@@ -83,14 +89,15 @@ func TestManagerBindsGatewayTaskToLocalOnlyListener(t *testing.T) {
 	locals := &fakeLocals{}
 	manager.locals = locals
 	serverProfile := profile.Profile{ID: "server-1", BaseURL: "https://gateway.example.test"}
-	session := remote.Session{ID: task.SessionID, Namespace: task.Namespace, State: "active"}
+	session := remote.Session{ID: task.SessionID, Namespace: task.Namespace, State: portForwardSessionActive}
 	info, err := manager.Start(context.Background(), serverProfile, session, Request{
 		ProfileID: serverProfile.ID, Kind: "service", Name: "api", Protocol: "tcp", RemotePort: 8443,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.ID != task.ID || info.Address != "127.0.0.1:49152" || len(locals.started) != 1 || locals.started[0].Context != serverProfile.ID {
+	if info.ID != task.ID || info.Address != "127.0.0.1:49152" || len(locals.started) != 1 ||
+		locals.started[0].Context != serverProfile.ID {
 		t.Fatalf("info = %#v local requests = %#v", info, locals.started)
 	}
 	if items := manager.List(serverProfile.ID); len(items) != 1 || items[0].LocalPort != 49152 {
@@ -102,7 +109,8 @@ func TestManagerBindsGatewayTaskToLocalOnlyListener(t *testing.T) {
 	if err := manager.Stop(context.Background(), serverProfile.ID, task.ID); err == nil {
 		t.Fatal("repeated stop succeeded")
 	}
-	if len(locals.stopped) != 1 || locals.stopped[0] != "local-1" || len(client.stopped) != 1 || client.stopped[0] != task.ID {
+	if len(locals.stopped) != 1 || locals.stopped[0] != "local-1" || len(client.stopped) != 1 ||
+		client.stopped[0] != task.ID {
 		t.Fatalf("local stops = %#v remote stops = %#v", locals.stopped, client.stopped)
 	}
 }
@@ -121,7 +129,7 @@ func TestManagerRollsBackGatewayTaskWhenLocalPortIsOccupied(t *testing.T) {
 	}
 	manager.locals = &fakeLocals{startErr: errors.New("address already in use")}
 	_, err = manager.Start(context.Background(), profile.Profile{ID: "server-1"}, remote.Session{
-		ID: task.SessionID, Namespace: task.Namespace, State: "active",
+		ID: task.SessionID, Namespace: task.Namespace, State: portForwardSessionActive,
 	}, Request{ProfileID: "server-1", Kind: "pod", Name: "api-0", RemotePort: 8080, LocalPort: 8080})
 	if err == nil || len(client.stopped) != 1 || client.stopped[0] != task.ID || len(manager.List("server-1")) != 0 {
 		t.Fatalf("error = %v remote stops = %#v active = %#v", err, client.stopped, manager.List("server-1"))
@@ -143,7 +151,7 @@ func TestManagerRejectsUnboundSessionBeforeCreatingForward(t *testing.T) {
 	locals := &fakeLocals{}
 	manager.locals = locals
 	serverProfile := profile.Profile{ID: "server-1"}
-	active := remote.Session{ID: task.SessionID, Namespace: task.Namespace, State: "active"}
+	active := remote.Session{ID: task.SessionID, Namespace: task.Namespace, State: portForwardSessionActive}
 	request := Request{ProfileID: serverProfile.ID, Kind: "service", Name: "api", RemotePort: 8443}
 	tests := []struct {
 		name    string
@@ -152,8 +160,18 @@ func TestManagerRejectsUnboundSessionBeforeCreatingForward(t *testing.T) {
 		request Request
 	}{
 		{name: "nil context", session: active, request: request},
-		{name: "inactive session", ctx: context.Background(), session: remote.Session{State: "stopped"}, request: request},
-		{name: "wrong profile", ctx: context.Background(), session: active, request: Request{ProfileID: "server-2", Kind: "service", Name: "api", RemotePort: 8443}},
+		{
+			name:    "inactive session",
+			ctx:     context.Background(),
+			session: remote.Session{State: "stopped"},
+			request: request,
+		},
+		{
+			name:    "wrong profile",
+			ctx:     context.Background(),
+			session: active,
+			request: Request{ProfileID: "server-2", Kind: "service", Name: "api", RemotePort: 8443},
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -182,7 +200,7 @@ func TestManagerShutdownStopsLocalAndRemoteTasks(t *testing.T) {
 	locals := &fakeLocals{}
 	manager.locals = locals
 	serverProfile := profile.Profile{ID: "server-1", BaseURL: "https://gateway.example.test"}
-	session := remote.Session{ID: task.SessionID, Namespace: task.Namespace, State: "active"}
+	session := remote.Session{ID: task.SessionID, Namespace: task.Namespace, State: portForwardSessionActive}
 	if _, err := manager.Start(context.Background(), serverProfile, session, Request{
 		ProfileID: serverProfile.ID, Kind: "service", Name: "api", Protocol: "tcp", RemotePort: 8443,
 	}); err != nil {
@@ -191,7 +209,8 @@ func TestManagerShutdownStopsLocalAndRemoteTasks(t *testing.T) {
 	if err := manager.Shutdown(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if len(manager.List("")) != 0 || len(locals.stopped) != 1 || len(client.stopped) != 1 || client.stopped[0] != task.ID {
+	if len(manager.List("")) != 0 || len(locals.stopped) != 1 || len(client.stopped) != 1 ||
+		client.stopped[0] != task.ID {
 		t.Fatalf("active = %#v local stops = %#v remote stops = %#v", manager.List(""), locals.stopped, client.stopped)
 	}
 }

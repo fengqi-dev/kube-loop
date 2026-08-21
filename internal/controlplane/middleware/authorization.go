@@ -7,13 +7,36 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/authorization"
 )
 
-func authorizationRequestForHTTP(request *http.Request, apiPathPrefix string) authorization.Request {
+func authorizationRequestForHTTP(
+	request *http.Request,
+	apiPathPrefix string,
+) authorization.Request {
 	path := strings.TrimPrefix(request.URL.Path, apiPathPrefix)
-	parts := strings.FieldsFunc(path, func(character rune) bool { return character == '/' })
-	result := authorization.Request{Namespace: strings.TrimSpace(request.URL.Query().Get("namespace"))}
-	if len(parts) == 0 {
+	parts := strings.FieldsFunc(
+		path,
+		func(character rune) bool { return character == '/' },
+	)
+	result := authorizationResource(
+		parts,
+		strings.TrimSpace(request.URL.Query().Get("namespace")),
+	)
+	result.Operation = authorizationOperation(
+		request,
+		result.ResourceName != "",
+	)
+	applySessionAuthorization(&result, request, parts)
+	return result
+}
+
+func authorizationResource(
+	parts []string,
+	namespace string,
+) authorization.Request {
+	result := authorization.Request{Namespace: namespace}
+	switch {
+	case len(parts) == 0:
 		result.ResourceKind = "api"
-	} else if parts[0] == "namespaces" {
+	case parts[0] == "namespaces":
 		result.ResourceKind = "namespaces"
 		if len(parts) == 2 {
 			result.ResourceName = parts[1]
@@ -24,56 +47,89 @@ func authorizationRequestForHTTP(request *http.Request, apiPathPrefix string) au
 				result.ResourceName = parts[3]
 			}
 		}
-	} else {
+	default:
 		result.ResourceKind = strings.ToLower(parts[0])
 		if len(parts) >= 2 {
 			result.ResourceName = parts[1]
 		}
 	}
+	return result
+}
+
+func authorizationOperation(request *http.Request, namedResource bool) string {
 	switch request.Method {
 	case http.MethodGet:
 		if request.URL.Query().Get("watch") == "true" {
-			result.Operation = "watch"
-		} else if result.ResourceName != "" {
-			result.Operation = "get"
-		} else {
-			result.Operation = "list"
+			return "watch"
 		}
+		if namedResource {
+			return "get"
+		}
+		return operationList
 	case http.MethodPost:
-		result.Operation = "create"
+		return operationCreate
 	case http.MethodPut:
-		result.Operation = "update"
+		return "update"
 	case http.MethodPatch:
-		result.Operation = "patch"
+		return "patch"
 	case http.MethodDelete:
-		result.Operation = "delete"
+		return operationDelete
 	default:
-		result.Operation = strings.ToLower(request.Method)
+		return strings.ToLower(request.Method)
 	}
-	if len(parts) >= 3 && parts[0] == "sessions" && parts[2] == "heartbeat" {
+}
+
+func applySessionAuthorization(
+	result *authorization.Request,
+	request *http.Request,
+	parts []string,
+) {
+	applySessionCoreAuthorization(result, request, parts)
+	applySessionTaskAuthorization(result, request, parts)
+	applyPodFilesAuthorization(result, parts)
+}
+
+func applySessionCoreAuthorization(
+	result *authorization.Request,
+	request *http.Request,
+	parts []string,
+) {
+	if len(parts) >= 3 && parts[0] == resourceSessions &&
+		parts[2] == "heartbeat" {
 		result.Operation = "heartbeat"
 	}
-	if len(parts) == 3 && parts[0] == "sessions" && parts[2] == "tickets" {
+	if len(parts) == 3 && parts[0] == resourceSessions &&
+		parts[2] == "tickets" {
 		result.ResourceKind = "relay-tickets"
 		result.ResourceName = parts[1]
 	}
-	if len(parts) >= 3 && parts[0] == "sessions" && parts[2] == "port-forwards" {
+	if len(parts) >= 3 && parts[0] == resourceSessions &&
+		parts[2] == "port-forwards" {
 		result.ResourceKind = "port-forwards"
 		result.ResourceName = parts[1]
 		if len(parts) == 3 && request.Method == http.MethodGet {
-			result.Operation = "list"
+			result.Operation = operationList
 		}
 	}
-	if len(parts) >= 3 && parts[0] == "sessions" && parts[2] == "exec" {
+	if len(parts) >= 3 && parts[0] == resourceSessions && parts[2] == "exec" {
 		result.ResourceKind = "pod-exec"
 		result.ResourceName = parts[1]
-		if len(parts) == 5 && parts[4] == "stream" && request.Method == http.MethodGet {
-			result.Operation = "stream"
+		if len(parts) == 5 && parts[4] == operationStream &&
+			request.Method == http.MethodGet {
+			result.Operation = operationStream
 			result.ResourceName = parts[3]
 		}
 	}
+}
+
+func applySessionTaskAuthorization(
+	result *authorization.Request,
+	request *http.Request,
+	parts []string,
+) {
 	for _, resourceKind := range []string{"file-transfers", "exchanges", "mirrors", "previews"} {
-		if len(parts) < 3 || parts[0] != "sessions" || parts[2] != resourceKind {
+		if len(parts) < 3 || parts[0] != resourceSessions ||
+			parts[2] != resourceKind {
 			continue
 		}
 		result.ResourceKind = resourceKind
@@ -81,22 +137,28 @@ func authorizationRequestForHTTP(request *http.Request, apiPathPrefix string) au
 		if len(parts) >= 4 {
 			result.ResourceName = parts[3]
 		}
-		if resourceKind == "file-transfers" && len(parts) == 5 && parts[4] == "stream" && request.Method == http.MethodGet {
-			result.Operation = "stream"
+		if resourceKind == "file-transfers" && len(parts) == 5 &&
+			parts[4] == operationStream &&
+			request.Method == http.MethodGet {
+			result.Operation = operationStream
 		}
 	}
-	if len(parts) >= 4 && parts[0] == "sessions" && parts[2] == "pod-files" {
+}
+
+func applyPodFilesAuthorization(result *authorization.Request, parts []string) {
+	if len(parts) >= 4 && parts[0] == resourceSessions &&
+		parts[2] == "pod-files" {
 		result.ResourceKind = "pod-files"
 		result.ResourceName = parts[1]
 		switch parts[3] {
-		case "list":
-			result.Operation = "list"
-		case "create":
-			result.Operation = "create"
+		case operationList:
+			result.Operation = operationList
+		case operationCreate:
+			result.Operation = operationCreate
 		case "rename":
 			result.Operation = "update"
-		case "delete":
-			result.Operation = "delete"
+		case operationDelete:
+			result.Operation = operationDelete
 		case "operations":
 			result.Operation = "get"
 			if len(parts) >= 5 {
@@ -104,5 +166,4 @@ func authorizationRequestForHTTP(request *http.Request, apiPathPrefix string) au
 			}
 		}
 	}
-	return result
 }

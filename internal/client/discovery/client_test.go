@@ -18,14 +18,21 @@ func TestDiscoverValidatesAndReturnsDocument(t *testing.T) {
 			t.Fatalf("request = %s, Accept = %q", request.URL.Path, request.Header.Get("Accept"))
 		}
 		_ = json.NewEncoder(writer).Encode(Document{
-			ServiceID: "production", PublicURL: server.URL + "/",
+			ServiceID:   "production",
+			PublicURL:   server.URL + "/",
 			TunnelPath:  "/tunnel",
 			APIVersions: []string{"v1", "v2"},
 			AuthMethods: []AuthMethod{
-				{ID: "company", Type: "oidc", Interaction: "browser"},
-				{ID: "local", Type: "local", Interaction: "browser"},
+				{ID: "company", Type: discoveryAuthOIDC, Interaction: discoveryAuthBrowser},
+				{ID: discoveryCallbackLocal, Type: discoveryCallbackLocal, Interaction: discoveryAuthBrowser},
 			},
-			Features: []string{"sessions"}, ServerVersion: "2.1.0", ProtocolMin: "2.0", ProtocolMax: "2.1", MinClientVersion: "2.0.0",
+			Features: []string{
+				"sessions",
+			},
+			ServerVersion:    "2.1.0",
+			ProtocolMin:      "2.0",
+			ProtocolMax:      "2.1",
+			MinClientVersion: "2.0.0",
 		})
 	}))
 	defer server.Close()
@@ -34,7 +41,8 @@ func TestDiscoverValidatesAndReturnsDocument(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if document.ServiceID != "production" || document.PublicURL != server.URL || document.TunnelPath != "/tunnel" || len(document.AuthMethods) != 2 {
+	if document.ServiceID != "production" || document.PublicURL != server.URL || document.TunnelPath != "/tunnel" ||
+		len(document.AuthMethods) != 2 {
 		t.Fatalf("document = %#v", document)
 	}
 }
@@ -43,10 +51,15 @@ func TestDiscoverPreservesExplicitConfiguredScheme(t *testing.T) {
 	var server *httptest.Server
 	server = httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(writer).Encode(Document{
-			ServiceID: "development", PublicURL: strings.Replace(server.URL, "http://", "https://", 1),
-			TunnelPath: "/tunnel", APIVersions: []string{"v2"},
-			AuthMethods: []AuthMethod{{ID: "local", Type: "local", Interaction: "browser"}},
-			ProtocolMin: "2.0", ProtocolMax: "2.0",
+			ServiceID:   "development",
+			PublicURL:   strings.Replace(server.URL, "http://", "https://", 1),
+			TunnelPath:  "/tunnel",
+			APIVersions: []string{"v2"},
+			AuthMethods: []AuthMethod{
+				{ID: discoveryCallbackLocal, Type: discoveryCallbackLocal, Interaction: discoveryAuthBrowser},
+			},
+			ProtocolMin: "2.0",
+			ProtocolMax: "2.0",
 		})
 	}))
 	defer server.Close()
@@ -92,31 +105,71 @@ func TestDiscoverRejectsMalformedOrIncompatibleDocuments(t *testing.T) {
 		want   string
 	}{
 		{name: "service ID", mutate: func(document *Document) { document.ServiceID = "" }, want: "service ID"},
-		{name: "unsafe service ID", mutate: func(document *Document) { document.ServiceID = "../service" }, want: "service ID"},
-		{name: "origin", mutate: func(document *Document) { document.PublicURL = "https://other.example.test" }, want: "origin"},
-		{name: "tunnel URL", mutate: func(document *Document) { document.TunnelPath = "https://other.example.test/tunnel" }, want: "tunnel path"},
-		{name: "tunnel traversal", mutate: func(document *Document) { document.TunnelPath = "/relay/../tunnel" }, want: "tunnel path"},
+		{
+			name:   "unsafe service ID",
+			mutate: func(document *Document) { document.ServiceID = "../service" },
+			want:   "service ID",
+		},
+		{
+			name:   "origin",
+			mutate: func(document *Document) { document.PublicURL = "https://other.example.test" },
+			want:   "origin",
+		},
+		{
+			name:   "tunnel URL",
+			mutate: func(document *Document) { document.TunnelPath = "https://other.example.test/tunnel" },
+			want:   "tunnel path",
+		},
+		{
+			name:   "tunnel traversal",
+			mutate: func(document *Document) { document.TunnelPath = "/relay/../tunnel" },
+			want:   "tunnel path",
+		},
 		{name: "API", mutate: func(document *Document) { document.APIVersions = []string{"v1"} }, want: "API v2"},
-		{name: "protocol", mutate: func(document *Document) { document.ProtocolMin = "3.0"; document.ProtocolMax = "3.1" }, want: "incompatible"},
-		{name: "minimum client", mutate: func(document *Document) { document.MinClientVersion = "3.0.0" }, want: "requires client"},
-		{name: "auth", mutate: func(document *Document) { document.AuthMethods[0].Interaction = "password" }, want: "unsupported authentication"},
-		{name: "unsafe auth ID", mutate: func(document *Document) { document.AuthMethods[0].ID = "../oidc" }, want: "method ID"},
+		{
+			name:   "protocol",
+			mutate: func(document *Document) { document.ProtocolMin = "3.0"; document.ProtocolMax = "3.1" },
+			want:   "incompatible",
+		},
+		{
+			name:   "minimum client",
+			mutate: func(document *Document) { document.MinClientVersion = "3.0.0" },
+			want:   "requires client",
+		},
+		{
+			name:   "auth",
+			mutate: func(document *Document) { document.AuthMethods[0].Interaction = "password" },
+			want:   "unsupported authentication",
+		},
+		{
+			name:   "unsafe auth ID",
+			mutate: func(document *Document) { document.AuthMethods[0].ID = "../oidc" },
+			want:   "method ID",
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			var server *httptest.Server
 			server = httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 				document := Document{
-					ServiceID: "service", PublicURL: server.URL, APIVersions: []string{"v2"},
+					ServiceID:   "service",
+					PublicURL:   server.URL,
+					APIVersions: []string{"v2"},
 					TunnelPath:  "/tunnel",
-					AuthMethods: []AuthMethod{{ID: "oidc", Type: "oidc", Interaction: "browser"}},
-					ProtocolMin: "2.0", ProtocolMax: "2.0", MinClientVersion: "2.0.0",
+					AuthMethods: []AuthMethod{
+						{ID: discoveryAuthOIDC, Type: discoveryAuthOIDC, Interaction: discoveryAuthBrowser},
+					},
+					ProtocolMin:      "2.0",
+					ProtocolMax:      "2.0",
+					MinClientVersion: "2.0.0",
 				}
 				test.mutate(&document)
 				_ = json.NewEncoder(writer).Encode(document)
 			}))
 			defer server.Close()
-			_, err := New(Config{HTTPClient: server.Client(), ClientVersion: "2.0.0"}).Discover(context.Background(), server.URL)
+			_, err := New(
+				Config{HTTPClient: server.Client(), ClientVersion: "2.0.0"},
+			).Discover(context.Background(), server.URL)
 			if err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("error = %v, want %q", err, test.want)
 			}
@@ -127,7 +180,11 @@ func TestDiscoverRejectsMalformedOrIncompatibleDocuments(t *testing.T) {
 func TestDiscoverAllowsUnknownFieldsButRejectsTrailingJSON(t *testing.T) {
 	var server *httptest.Server
 	server = httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
-		_, _ = writer.Write([]byte(`{"serviceId":"service","publicUrl":"` + server.URL + `","tunnelPath":"/tunnel","apiVersions":["v2"],"authMethods":[],"features":[],"serverVersion":"dev","protocolMin":"2.0","protocolMax":"2.0","future":true}`))
+		_, _ = writer.Write(
+			[]byte(
+				`{"serviceId":"service","publicUrl":"` + server.URL + `","tunnelPath":"/tunnel","apiVersions":["v2"],"authMethods":[],"features":[],"serverVersion":"dev","protocolMin":"2.0","protocolMax":"2.0","future":true}`,
+			),
+		)
 	}))
 	defer server.Close()
 	if _, err := New(Config{HTTPClient: server.Client()}).Discover(context.Background(), server.URL); err != nil {
@@ -137,7 +194,10 @@ func TestDiscoverAllowsUnknownFieldsButRejectsTrailingJSON(t *testing.T) {
 	server.Config.Handler = http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 		_, _ = writer.Write([]byte(`{} {}`))
 	})
-	if _, err := New(Config{HTTPClient: server.Client()}).Discover(context.Background(), server.URL); err == nil || !strings.Contains(err.Error(), "one JSON") {
+	if _, err := New(
+		Config{HTTPClient: server.Client()},
+	).Discover(context.Background(), server.URL); err == nil ||
+		!strings.Contains(err.Error(), "one JSON") {
 		t.Fatalf("trailing JSON error = %v", err)
 	}
 }
@@ -162,11 +222,13 @@ func TestCompatibilityFailuresReturnStableTypedErrors(t *testing.T) {
 }
 
 func TestDiscoverHonorsTimeout(t *testing.T) {
-	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(_ http.ResponseWriter, request *http.Request) {
 		<-request.Context().Done()
 	}))
 	defer server.Close()
-	_, err := New(Config{HTTPClient: server.Client(), Timeout: 20 * time.Millisecond}).Discover(context.Background(), server.URL)
+	_, err := New(
+		Config{HTTPClient: server.Client(), Timeout: 20 * time.Millisecond},
+	).Discover(context.Background(), server.URL)
 	if err == nil || !strings.Contains(err.Error(), "timed out") {
 		t.Fatalf("timeout error = %v", err)
 	}

@@ -131,7 +131,7 @@ func (r *Runtime) startOnce(
 	}
 	dnsNamespace := namespace
 	if dnsNamespace == "" {
-		dnsNamespace = "default"
+		dnsNamespace = defaultNamespace
 	}
 	spec := singbox.SessionSpec{
 		ID:               "session-" + secret[:16],
@@ -226,7 +226,7 @@ func (r *Runtime) waitReady(ctx context.Context, process *Process) error {
 		response, requestErr := process.request(ctx, "/")
 		if requestErr == nil {
 			_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 1<<20))
-			response.Body.Close()
+			_ = response.Body.Close()
 			if response.StatusCode == http.StatusOK || response.StatusCode == http.StatusNotFound {
 				return nil
 			}

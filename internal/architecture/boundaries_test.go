@@ -119,7 +119,10 @@ func TestKubernetesDirectImportInventoryIsExhaustive(t *testing.T) {
 			if err != nil {
 				return err
 			}
-			if slices.ContainsFunc(imports, func(importPath string) bool { return strings.HasPrefix(importPath, "k8s.io/") }) {
+			if slices.ContainsFunc(
+				imports,
+				func(importPath string) bool { return strings.HasPrefix(importPath, "k8s.io/") },
+			) {
 				directory, err := filepath.Rel(root, filepath.Dir(path))
 				if err != nil {
 					return err

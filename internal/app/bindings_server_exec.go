@@ -19,7 +19,7 @@ type ServerExecRequest struct {
 
 func (a *App) StartServerExec(request ServerExecRequest) (clientremote.ExecTask, error) {
 	if a.remoteExecs == nil || a.remoteSessions == nil {
-		return clientremote.ExecTask{}, errors.New("Pod exec is unavailable")
+		return clientremote.ExecTask{}, errors.New("pod exec is unavailable")
 	}
 	serverProfile, err := a.serverProfile(request.ProfileID)
 	if err != nil {
@@ -39,9 +39,15 @@ func (a *App) StartServerExec(request ServerExecRequest) (clientremote.ExecTask,
 	if request.Width != 0 || request.Height != 0 {
 		if request.Width == 0 || request.Height == 0 {
 			_ = a.remoteExecs.Stop(serverProfile.ID, task.ID)
-			return clientremote.ExecTask{}, errors.New("Pod exec terminal size is incomplete")
+			return clientremote.ExecTask{}, errors.New("pod exec terminal size is incomplete")
 		}
-		if err := a.remoteExecs.Resize(a.context(), serverProfile.ID, task.ID, request.Width, request.Height); err != nil {
+		if err := a.remoteExecs.Resize(
+			a.context(),
+			serverProfile.ID,
+			task.ID,
+			request.Width,
+			request.Height,
+		); err != nil {
 			_ = a.remoteExecs.Stop(serverProfile.ID, task.ID)
 			return clientremote.ExecTask{}, err
 		}
@@ -51,21 +57,21 @@ func (a *App) StartServerExec(request ServerExecRequest) (clientremote.ExecTask,
 
 func (a *App) WriteServerExecInput(profileID, taskID, input string) error {
 	if a.remoteExecs == nil {
-		return errors.New("Pod exec is unavailable")
+		return errors.New("pod exec is unavailable")
 	}
 	serverProfile, err := a.serverProfile(profileID)
 	if err != nil {
 		return err
 	}
 	if len(input) > 64<<10 {
-		return errors.New("Pod exec input exceeds 64 KiB")
+		return errors.New("pod exec input exceeds 64 KiB")
 	}
 	return a.remoteExecs.Write(a.context(), serverProfile.ID, taskID, []byte(input))
 }
 
 func (a *App) ResizeServerExec(profileID, taskID string, width, height uint16) error {
 	if a.remoteExecs == nil {
-		return errors.New("Pod exec is unavailable")
+		return errors.New("pod exec is unavailable")
 	}
 	serverProfile, err := a.serverProfile(profileID)
 	if err != nil {
@@ -76,7 +82,7 @@ func (a *App) ResizeServerExec(profileID, taskID string, width, height uint16) e
 
 func (a *App) StopServerExec(profileID, taskID string) error {
 	if a.remoteExecs == nil {
-		return errors.New("Pod exec is unavailable")
+		return errors.New("pod exec is unavailable")
 	}
 	serverProfile, err := a.serverProfile(profileID)
 	if err != nil {

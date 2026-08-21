@@ -118,14 +118,14 @@ func (store *Store) Upsert(profile Profile) error {
 func (store *Store) Remove(id string) error {
 	id = strings.TrimSpace(id)
 	if id == "" {
-		return errors.New("Server Profile ID is required")
+		return errors.New("server Profile ID is required")
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	next := cloneState(store.state)
 	index := slices.IndexFunc(next.Profiles, func(item Profile) bool { return item.ID == id })
 	if index < 0 {
-		return errors.New("Server Profile not found")
+		return errors.New("server Profile not found")
 	}
 	next.Profiles = append(next.Profiles[:index], next.Profiles[index+1:]...)
 	if next.ActiveProfileID == id {
@@ -142,7 +142,7 @@ func (store *Store) SetActive(id string) error {
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	if !slices.ContainsFunc(store.state.Profiles, func(item Profile) bool { return item.ID == id }) {
-		return errors.New("Server Profile not found")
+		return errors.New("server Profile not found")
 	}
 	next := cloneState(store.state)
 	next.ActiveProfileID = id
@@ -196,18 +196,22 @@ func (store *Store) saveLocked(next State) error {
 	return nil
 }
 
-func readState(path string) (State, error) {
+func readState(path string) (_ State, resultErr error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return State{}, err
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			resultErr = errors.Join(resultErr, fmt.Errorf("close Server Profile store: %w", err))
+		}
+	}()
 	raw, err := io.ReadAll(io.LimitReader(file, maxStateBytes+1))
 	if err != nil {
 		return State{}, errors.New("read Server Profile store")
 	}
 	if len(raw) > maxStateBytes {
-		return State{}, errors.New("Server Profile store exceeds 1 MiB")
+		return State{}, errors.New("server Profile store exceeds 1 MiB")
 	}
 	return decodeState(raw)
 }
@@ -221,7 +225,7 @@ func decodeState(raw []byte) (State, error) {
 	}
 	var extra any
 	if err := decoder.Decode(&extra); err != io.EOF {
-		return State{}, errors.New("Server Profile store must contain one JSON document")
+		return State{}, errors.New("server Profile store must contain one JSON document")
 	}
 	return normalizeState(state)
 }
@@ -234,7 +238,7 @@ func normalizeState(state State) (State, error) {
 	for index, item := range state.Profiles {
 		normalized, err := normalizeProfile(item)
 		if err != nil {
-			return State{}, fmt.Errorf("Server Profile %d: %w", index, err)
+			return State{}, fmt.Errorf("server Profile %d: %w", index, err)
 		}
 		if _, exists := seen[normalized.ID]; exists {
 			return State{}, fmt.Errorf("duplicate Server Profile ID %q", normalized.ID)
@@ -261,10 +265,10 @@ func normalizeProfile(profile Profile) (Profile, error) {
 	profile.LastNamespace = strings.TrimSpace(profile.LastNamespace)
 	profile.DNSNamespace = strings.TrimSpace(profile.DNSNamespace)
 	if profile.SOCKSPort < 0 || profile.SOCKSPort > 65535 {
-		return Profile{}, errors.New("Server Profile SOCKS port must be between 1 and 65535")
+		return Profile{}, errors.New("server Profile SOCKS port must be between 1 and 65535")
 	}
 	if profile.DNSNamespace != "" && !dnsname.ValidLabel(profile.DNSNamespace) {
-		return Profile{}, errors.New("Server Profile DNS namespace is invalid")
+		return Profile{}, errors.New("server Profile DNS namespace is invalid")
 	}
 	aliases, err := normalizeHostAliases(profile.HostAliases)
 	if err != nil {
@@ -272,7 +276,7 @@ func normalizeProfile(profile Profile) (Profile, error) {
 	}
 	profile.HostAliases = aliases
 	if profile.ID == "" || len(profile.ID) > 128 {
-		return Profile{}, errors.New("Server Profile ID must contain 1-128 characters")
+		return Profile{}, errors.New("server Profile ID must contain 1-128 characters")
 	}
 	baseURL, err := NormalizeBaseURL(profile.BaseURL)
 	if err != nil {
@@ -284,11 +288,16 @@ func normalizeProfile(profile Profile) (Profile, error) {
 		profile.TunnelPath = "/tunnel"
 	}
 	parsedTunnelPath, err := url.ParseRequestURI(profile.TunnelPath)
-	if err != nil || !strings.HasPrefix(profile.TunnelPath, "/") || parsedTunnelPath.IsAbs() || parsedTunnelPath.Host != "" ||
-		parsedTunnelPath.RawQuery != "" || parsedTunnelPath.Fragment != "" || parsedTunnelPath.EscapedPath() != profile.TunnelPath ||
-		strings.Contains(profile.TunnelPath, "//") || strings.Contains(profile.TunnelPath, "/./") || strings.Contains(profile.TunnelPath, "/../") ||
-		strings.HasSuffix(profile.TunnelPath, "/.") || strings.HasSuffix(profile.TunnelPath, "/..") {
-		return Profile{}, errors.New("Server Profile tunnel path is invalid")
+	if err != nil {
+		return Profile{}, errors.New("server Profile tunnel path is invalid")
+	}
+	invalidLocation := !strings.HasPrefix(profile.TunnelPath, "/") || parsedTunnelPath.IsAbs()
+	invalidMetadata := parsedTunnelPath.Host != "" || parsedTunnelPath.RawQuery != "" || parsedTunnelPath.Fragment != ""
+	nonCanonical := parsedTunnelPath.EscapedPath() != profile.TunnelPath || strings.Contains(profile.TunnelPath, "//")
+	containsDotPath := strings.Contains(profile.TunnelPath, "/./") || strings.Contains(profile.TunnelPath, "/../")
+	endsWithDotPath := strings.HasSuffix(profile.TunnelPath, "/.") || strings.HasSuffix(profile.TunnelPath, "/..")
+	if invalidLocation || invalidMetadata || nonCanonical || containsDotPath || endsWithDotPath {
+		return Profile{}, errors.New("server Profile tunnel path is invalid")
 	}
 	return profile, nil
 }
@@ -327,7 +336,7 @@ func normalizeHostAliases(items []HostAlias) ([]HostAlias, error) {
 		return nil, nil
 	}
 	if len(items) > 4096 {
-		return nil, errors.New("Server Profile has too many host aliases")
+		return nil, errors.New("server Profile has too many host aliases")
 	}
 	normalized := make([]HostAlias, 0, len(items))
 	seen := make(map[string]struct{}, len(items))

@@ -103,7 +103,7 @@ func (p *Process) ReadLogs(ctx context.Context) ([]string, error) {
 func (p *Process) UpdateDNSNamespace(ctx context.Context, namespace string) error {
 	namespace = strings.TrimSpace(namespace)
 	if namespace == "" {
-		namespace = "default"
+		namespace = defaultNamespace
 	}
 	p.specMu.Lock()
 	nextSpec := p.spec

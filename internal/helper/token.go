@@ -29,7 +29,8 @@ func EnsureUserToken() (string, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return "", err
 	}
-	if err := os.Chmod(filepath.Dir(path), 0o700); err != nil && runtime.GOOS != "windows" {
+	//nolint:gosec // Token directories need owner execute permission for traversal.
+	if err := os.Chmod(filepath.Dir(path), 0o700); err != nil && runtime.GOOS != goosWindows {
 		return "", err
 	}
 	if err := os.WriteFile(path, []byte(token+"\n"), 0o600); err != nil {
@@ -55,6 +56,7 @@ func ReadUserToken() (string, error) {
 }
 
 func WriteSystemAuth(auth AuthFile) error {
+	//nolint:gosec // The system state directory is traversable; token and auth files remain mode 0600.
 	if err := os.MkdirAll(SystemStateDir(), 0o755); err != nil {
 		return err
 	}

@@ -64,7 +64,12 @@ if [ -n "$8" ]; then
 fi
 `
 
-func ElevateInstall(ctx context.Context, source, expectedSHA256, token string, uid int, homeDir, singBoxPath string) error {
+func ElevateInstall(
+	ctx context.Context,
+	source, expectedSHA256, token string,
+	uid int,
+	homeDir, singBoxPath string,
+) error {
 	return elevateLinuxInstall(ctx, source, expectedSHA256, token, uid, homeDir, singBoxPath, "")
 }
 

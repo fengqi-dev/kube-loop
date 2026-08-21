@@ -9,8 +9,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/fengqi-dev/kube-loop/internal/userpaths"
 	"golang.org/x/crypto/ssh"
+
+	"github.com/fengqi-dev/kube-loop/internal/userpaths"
 )
 
 func (s *Server) signer() (ssh.Signer, error) {
@@ -48,7 +49,7 @@ func (s *Server) authorizedClientKeys() ([]ssh.PublicKey, error) {
 		return nil, s.authErr
 	}
 	if len(s.clientKeys) == 0 {
-		return nil, errors.New("Pod SSH client identity is unavailable")
+		return nil, errors.New("pod SSH client identity is unavailable")
 	}
 	return append([]ssh.PublicKey{}, s.clientKeys...), nil
 }
@@ -152,7 +153,7 @@ func loadOrCreateSigner(path string) (ssh.Signer, error) {
 			return nil, fmt.Errorf("create Pod SSH signer: %w", parseErr)
 		}
 		block, _ := pem.Decode(content)
-		if block == nil || block.Type != "OPENSSH PRIVATE KEY" {
+		if block == nil || block.Type != openSSHPrivateKeyPEMType {
 			if err := writeOpenSSHPrivateKey(path, privateKey); err != nil {
 				return nil, fmt.Errorf("migrate Pod SSH key to OpenSSH format: %w", err)
 			}
@@ -206,7 +207,7 @@ func writeNewFile(path string, content []byte, mode os.FileMode) error {
 	return nil
 }
 
-func writeOpenSSHPrivateKey(path string, privateKey any) error {
+func writeOpenSSHPrivateKey(path string, privateKey any) (resultErr error) {
 	block, err := ssh.MarshalPrivateKey(privateKey, "KubeLoop Pod SSH")
 	if err != nil {
 		return fmt.Errorf("encode OpenSSH private key: %w", err)
@@ -217,7 +218,11 @@ func writeOpenSSHPrivateKey(path string, privateKey any) error {
 		return fmt.Errorf("create temporary key: %w", err)
 	}
 	tempName := temp.Name()
-	defer os.Remove(tempName)
+	defer func() {
+		if err := os.Remove(tempName); err != nil && !errors.Is(err, os.ErrNotExist) {
+			resultErr = errors.Join(resultErr, fmt.Errorf("remove temporary key: %w", err))
+		}
+	}()
 	if err := temp.Chmod(0o600); err != nil {
 		_ = temp.Close()
 		return err

@@ -15,9 +15,10 @@ import (
 	"strings"
 	"time"
 
-	controlstorage "github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 	"github.com/google/uuid"
 	"github.com/ory/fosite"
+
+	controlstorage "github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 )
 
 type AuthorizationChallenge struct {
@@ -38,24 +39,38 @@ type authorizationRequestDTO struct {
 	URL string `json:"url"`
 }
 
-func (endpoints *Endpoints) ConsentRequired(ctx context.Context, challenge AuthorizationChallenge, identityID string) (bool, error) {
+func (endpoints *Endpoints) ConsentRequired(
+	ctx context.Context,
+	challenge AuthorizationChallenge,
+	identityID string,
+) (bool, error) {
 	if challenge.Trusted {
 		return false, nil
 	}
-	has, err := endpoints.repositories.OAuthConsents().Has(ctx, identityID, challenge.Client.ID, exactScopeHash(challenge.Scopes))
+	has, err := endpoints.repositories.OAuthConsents().
+		Has(ctx, identityID, challenge.Client.ID, exactScopeHash(challenge.Scopes))
 	return !has, err
 }
 
-func (endpoints *Endpoints) BeginAuthorization(ctx context.Context, request *http.Request) (AuthorizationChallenge, error) {
-	authorizeRequest, err := endpoints.provider.NewAuthorizeRequest(ctx, request)
+func (endpoints *Endpoints) BeginAuthorization(
+	ctx context.Context,
+	request *http.Request,
+) (AuthorizationChallenge, error) {
+	authorizeRequest, err := endpoints.provider.NewAuthorizeRequest(
+		ctx,
+		request,
+	)
 	if err != nil {
 		return AuthorizationChallenge{}, err
 	}
-	if authorizeRequest.GetResponseTypes().Has("code") &&
+	if authorizeRequest.GetResponseTypes().Has(responseTypeCode) &&
 		(request.URL.Query().Get("code_challenge_method") != "S256" || request.URL.Query().Get("code_challenge") == "") {
-		return AuthorizationChallenge{}, fosite.ErrInvalidRequest.WithHint("Authorization code requests require PKCE S256.")
+		return AuthorizationChallenge{}, fosite.ErrInvalidRequest.WithHint(
+			"Authorization code requests require PKCE S256.",
+		)
 	}
-	client, err := endpoints.repositories.OAuthClients().Get(ctx, authorizeRequest.GetClient().GetID())
+	client, err := endpoints.repositories.OAuthClients().
+		Get(ctx, authorizeRequest.GetClient().GetID())
 	if err != nil {
 		return AuthorizationChallenge{}, fosite.ErrInvalidClient
 	}
@@ -69,33 +84,57 @@ func (endpoints *Endpoints) BeginAuthorization(ctx context.Context, request *htt
 	}
 	raw, err := json.Marshal(authorizationRequestDTO{URL: request.URL.String()})
 	if err != nil {
-		return AuthorizationChallenge{}, errors.New("encode OAuth authorization request")
+		return AuthorizationChallenge{}, errors.New(
+			"encode OAuth authorization request",
+		)
 	}
 	now := time.Now().UTC()
 	if err := endpoints.repositories.OAuthAuthorizationRequests().Create(ctx, controlstorage.OAuthAuthorizationRequest{
 		ChallengeHash: signatureHash(transaction), RequestID: uuid.NewString(), RequestJSON: raw,
-		CSRFHash: signatureHash(csrf), ProviderID: "local", Status: "pending",
+		CSRFHash: signatureHash(csrf), ProviderID: providerLocal, Status: "pending",
 		CreatedAt: now, ExpiresAt: now.Add(10 * time.Minute),
 	}); err != nil {
 		return AuthorizationChallenge{}, err
 	}
-	return AuthorizationChallenge{Transaction: transaction, CSRF: csrf, Client: client,
-		Scopes: append([]string(nil), authorizeRequest.GetRequestedScopes()...), Trusted: client.Builtin || client.Trusted}, nil
+	return AuthorizationChallenge{
+		Transaction: transaction,
+		CSRF:        csrf,
+		Client:      client,
+		Scopes: append(
+			[]string(nil),
+			authorizeRequest.GetRequestedScopes()...),
+		Trusted: client.Builtin || client.Trusted,
+	}, nil
 }
 
-func (endpoints *Endpoints) AuthenticateLocal(ctx context.Context, username string, password []byte, requestID string) (BrowserIdentity, error) {
-	if endpoints == nil || endpoints.repositories == nil || endpoints.localAuth == nil {
+func (endpoints *Endpoints) AuthenticateLocal(
+	ctx context.Context,
+	username string,
+	password []byte,
+	requestID string,
+) (BrowserIdentity, error) {
+	if endpoints == nil || endpoints.repositories == nil ||
+		endpoints.localAuth == nil {
 		return BrowserIdentity{}, fosite.ErrServerError
 	}
 	identity, err := endpoints.localAuth(ctx, username, password, requestID)
 	if err != nil {
 		return BrowserIdentity{}, err
 	}
-	return BrowserIdentity{Identity: identity, ProviderID: "local", AuthTime: time.Now().UTC()}, nil
+	return BrowserIdentity{
+		Identity:   identity,
+		ProviderID: providerLocal,
+		AuthTime:   time.Now().UTC(),
+	}, nil
 }
 
-func (endpoints *Endpoints) CreateBrowserSession(ctx context.Context, identity BrowserIdentity, ttl time.Duration) (string, error) {
-	if identity.Identity.ID == "" || identity.ProviderID != "local" || ttl <= 0 {
+func (endpoints *Endpoints) CreateBrowserSession(
+	ctx context.Context,
+	identity BrowserIdentity,
+	ttl time.Duration,
+) (string, error) {
+	if identity.Identity.ID == "" || identity.ProviderID != providerLocal ||
+		ttl <= 0 {
 		return "", fosite.ErrServerError
 	}
 	token, err := randomAuthorizationValue()
@@ -103,48 +142,84 @@ func (endpoints *Endpoints) CreateBrowserSession(ctx context.Context, identity B
 		return "", err
 	}
 	now := time.Now().UTC()
-	err = endpoints.repositories.OAuthBrowserSessions().Create(ctx, controlstorage.OAuthBrowserSession{
-		IDHash: signatureHash(token), IdentityID: identity.Identity.ID, ProviderID: "local",
-		AuthTime: now, CreatedAt: now, ExpiresAt: now.Add(ttl),
-	})
+	err = endpoints.repositories.OAuthBrowserSessions().
+		Create(ctx, controlstorage.OAuthBrowserSession{
+			IDHash: signatureHash(
+				token,
+			), IdentityID: identity.Identity.ID, ProviderID: providerLocal,
+			AuthTime: now, CreatedAt: now, ExpiresAt: now.Add(ttl),
+		})
 	return token, err
 }
 
-func (endpoints *Endpoints) BrowserIdentity(ctx context.Context, token string) (BrowserIdentity, error) {
-	stored, err := endpoints.repositories.OAuthBrowserSessions().Get(ctx, signatureHash(token), time.Now().UTC())
+func (endpoints *Endpoints) BrowserIdentity(
+	ctx context.Context,
+	token string,
+) (BrowserIdentity, error) {
+	stored, err := endpoints.repositories.OAuthBrowserSessions().
+		Get(ctx, signatureHash(token), time.Now().UTC())
 	if err != nil {
 		return BrowserIdentity{}, err
 	}
-	if stored.ProviderID != "local" {
+	if stored.ProviderID != providerLocal {
 		return BrowserIdentity{}, fosite.ErrNotFound
 	}
-	identity, err := endpoints.repositories.Identities().GetByID(ctx, stored.IdentityID)
-	if err != nil || identity.Status != "active" {
+	identity, err := endpoints.repositories.Identities().
+		GetByID(ctx, stored.IdentityID)
+	if err != nil || identity.Status != statusActive {
 		return BrowserIdentity{}, fosite.ErrNotFound
 	}
-	return BrowserIdentity{Identity: identity, ProviderID: "local", AuthTime: stored.AuthTime}, nil
+	return BrowserIdentity{
+		Identity:   identity,
+		ProviderID: providerLocal,
+		AuthTime:   stored.AuthTime,
+	}, nil
 }
 
-func (endpoints *Endpoints) RevokeBrowserSession(ctx context.Context, token string) error {
+func (endpoints *Endpoints) RevokeBrowserSession(
+	ctx context.Context,
+	token string,
+) error {
 	if strings.TrimSpace(token) == "" {
 		return nil
 	}
-	err := endpoints.repositories.OAuthBrowserSessions().Revoke(ctx, signatureHash(token), time.Now().UTC())
+	err := endpoints.repositories.OAuthBrowserSessions().
+		Revoke(ctx, signatureHash(token), time.Now().UTC())
 	if errors.Is(err, controlstorage.ErrNotFound) {
 		return nil
 	}
 	return err
 }
 
-func (endpoints *Endpoints) CompleteAuthorization(rw http.ResponseWriter, request *http.Request, transaction, csrf string, identity BrowserIdentity, allow bool) error {
-	stored, err := endpoints.repositories.OAuthAuthorizationRequests().Consume(request.Context(), signatureHash(transaction), time.Now().UTC())
-	if err != nil || subtle.ConstantTimeCompare(stored.CSRFHash, signatureHash(csrf)) != 1 {
+func (endpoints *Endpoints) CompleteAuthorization(
+	rw http.ResponseWriter,
+	request *http.Request,
+	transaction, csrf string,
+	identity BrowserIdentity,
+	allow bool,
+) error {
+	stored, err := endpoints.repositories.OAuthAuthorizationRequests().
+		Consume(request.Context(), signatureHash(transaction), time.Now().UTC())
+	if err != nil ||
+		subtle.ConstantTimeCompare(stored.CSRFHash, signatureHash(csrf)) != 1 {
 		return fosite.ErrInvalidRequest
 	}
-	return endpoints.completeStoredAuthorization(rw, request, stored, identity, allow)
+	return endpoints.completeStoredAuthorization(
+		rw,
+		request,
+		stored,
+		identity,
+		allow,
+	)
 }
 
-func (endpoints *Endpoints) completeStoredAuthorization(rw http.ResponseWriter, request *http.Request, stored controlstorage.OAuthAuthorizationRequest, browserIdentity BrowserIdentity, allow bool) error {
+func (endpoints *Endpoints) completeStoredAuthorization(
+	rw http.ResponseWriter,
+	request *http.Request,
+	stored controlstorage.OAuthAuthorizationRequest,
+	browserIdentity BrowserIdentity,
+	allow bool,
+) error {
 	now := time.Now().UTC()
 	if browserIdentity.AuthTime.IsZero() {
 		browserIdentity.AuthTime = now
@@ -154,28 +229,53 @@ func (endpoints *Endpoints) completeStoredAuthorization(rw http.ResponseWriter, 
 	if json.Unmarshal(stored.RequestJSON, &dto) != nil {
 		return fosite.ErrServerError
 	}
-	original, err := http.NewRequestWithContext(request.Context(), http.MethodGet, dto.URL, nil)
+	original, err := http.NewRequestWithContext(
+		request.Context(),
+		http.MethodGet,
+		dto.URL,
+		nil,
+	)
 	if err != nil {
 		return fosite.ErrServerError
 	}
-	authorizeRequest, err := endpoints.provider.NewAuthorizeRequest(request.Context(), original)
+	authorizeRequest, err := endpoints.provider.NewAuthorizeRequest(
+		request.Context(),
+		original,
+	)
 	if err != nil {
-		endpoints.provider.WriteAuthorizeError(request.Context(), rw, authorizeRequest, err)
+		endpoints.provider.WriteAuthorizeError(
+			request.Context(),
+			rw,
+			authorizeRequest,
+			err,
+		)
 		return err
 	}
-	client, err := endpoints.repositories.OAuthClients().Get(request.Context(), authorizeRequest.GetClient().GetID())
+	client, err := endpoints.repositories.OAuthClients().
+		Get(request.Context(), authorizeRequest.GetClient().GetID())
 	if err != nil {
-		endpoints.provider.WriteAuthorizeError(request.Context(), rw, authorizeRequest, fosite.ErrAccessDenied)
+		endpoints.provider.WriteAuthorizeError(
+			request.Context(),
+			rw,
+			authorizeRequest,
+			fosite.ErrAccessDenied,
+		)
 		return fosite.ErrAccessDenied
 	}
 	scopes := append([]string(nil), authorizeRequest.GetRequestedScopes()...)
 	scopeHash := exactScopeHash(scopes)
-	consented, err := endpoints.repositories.OAuthConsents().Has(request.Context(), identity.ID, client.ID, scopeHash)
+	consented, err := endpoints.repositories.OAuthConsents().
+		Has(request.Context(), identity.ID, client.ID, scopeHash)
 	if err != nil {
 		return err
 	}
 	if !client.Builtin && !client.Trusted && !consented && !allow {
-		endpoints.provider.WriteAuthorizeError(request.Context(), rw, authorizeRequest, fosite.ErrAccessDenied)
+		endpoints.provider.WriteAuthorizeError(
+			request.Context(),
+			rw,
+			authorizeRequest,
+			fosite.ErrAccessDenied,
+		)
 		return fosite.ErrAccessDenied
 	}
 	if allow && !client.Builtin && !client.Trusted && !consented {
@@ -190,7 +290,7 @@ func (endpoints *Endpoints) completeStoredAuthorization(rw http.ResponseWriter, 
 		authorizeRequest.GrantScope(scope)
 	}
 	session := NewSession()
-	session.IdentityID, session.ProviderID = identity.ID, "local"
+	session.IdentityID, session.ProviderID = identity.ID, providerLocal
 	session.DisplayName, session.Email = identity.DisplayName, identity.PrimaryEmail
 	session.AuthorizationID = authorizeRequest.GetID()
 	session.SetSubject(identity.ID)
@@ -200,15 +300,34 @@ func (endpoints *Endpoints) completeStoredAuthorization(rw http.ResponseWriter, 
 	session.IDTokenClaims().AuthenticationMethodsReferences = []string{"pwd"}
 	session.IDTokenClaims().Add("name", identity.DisplayName)
 	session.IDTokenClaims().Add("email", identity.PrimaryEmail)
-	response, err := endpoints.provider.NewAuthorizeResponse(request.Context(), authorizeRequest, session)
+	response, err := endpoints.provider.NewAuthorizeResponse(
+		request.Context(),
+		authorizeRequest,
+		session,
+	)
 	if err != nil {
-		endpoints.provider.WriteAuthorizeError(request.Context(), rw, authorizeRequest, err)
+		endpoints.provider.WriteAuthorizeError(
+			request.Context(),
+			rw,
+			authorizeRequest,
+			err,
+		)
 		return err
 	}
-	if writeDesktopAuthorizationComplete(rw, request, authorizeRequest, response) {
+	if writeDesktopAuthorizationComplete(
+		rw,
+		request,
+		authorizeRequest,
+		response,
+	) {
 		return nil
 	}
-	endpoints.provider.WriteAuthorizeResponse(request.Context(), rw, authorizeRequest, response)
+	endpoints.provider.WriteAuthorizeResponse(
+		request.Context(),
+		rw,
+		authorizeRequest,
+		response,
+	)
 	return nil
 }
 
@@ -222,12 +341,16 @@ func writeDesktopAuthorizationComplete(
 	authorizeRequest fosite.AuthorizeRequester,
 	response fosite.AuthorizeResponder,
 ) bool {
-	if authorizeRequest.GetClient().GetID() != controlstorage.DesktopOAuthClientID ||
-		authorizeRequest.GetResponseMode() != fosite.ResponseModeDefault && authorizeRequest.GetResponseMode() != fosite.ResponseModeQuery {
+	if authorizeRequest.GetClient().
+		GetID() !=
+		controlstorage.DesktopOAuthClientID ||
+		authorizeRequest.GetResponseMode() != fosite.ResponseModeDefault &&
+			authorizeRequest.GetResponseMode() != fosite.ResponseModeQuery {
 		return false
 	}
 	redirect := authorizeRequest.GetRedirectURI()
-	if redirect == nil || redirect.String() != controlstorage.DesktopOAuthRedirectURI {
+	if redirect == nil ||
+		redirect.String() != controlstorage.DesktopOAuthRedirectURI {
 		return false
 	}
 	callback := *redirect
@@ -246,12 +369,17 @@ func writeDesktopAuthorizationComplete(
 	header.Set("Referrer-Policy", "no-referrer")
 	header.Set("X-Content-Type-Options", "nosniff")
 	header.Set("X-Frame-Options", "DENY")
-	header.Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
+	header.Set(
+		"Content-Security-Policy",
+		"default-src 'none'; style-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
+	)
 	header.Set("Content-Type", "text/html; charset=utf-8")
 	rw.WriteHeader(http.StatusOK)
 
 	target := html.EscapeString(callback.String())
-	messages := desktopAuthorizationMessagesFor(desktopAuthorizationLocale(httpRequest))
+	messages := desktopAuthorizationMessagesFor(
+		desktopAuthorizationLocale(httpRequest),
+	)
 	_, _ = rw.Write([]byte(`<!doctype html>
 <html lang="` + messages.lang + `">
 <head>
@@ -269,7 +397,8 @@ func writeDesktopAuthorizationComplete(
         <span class="completion-badge">` + messages.badge + `</span>
       </header>
       <div class="completion-status" aria-hidden="true">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+		<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+		  stroke-linecap="round" stroke-linejoin="round">
           <path d="m5 12 4 4L19 6"></path>
         </svg>
       </div>
@@ -280,14 +409,18 @@ func writeDesktopAuthorizationComplete(
       <div class="completion-actions">
         <a class="completion-button primary" href="` + target + `">
           <span>` + messages.returnToApp + `</span>
-          <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+		  <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+		    stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M5 12h14"></path><path d="m13 6 6 6-6 6"></path>
           </svg>
         </a>
         <form class="completion-logout" method="post" action="/oauth2/logout">
           <button type="submit" class="secondary">
-            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M10 17l5-5-5-5"></path><path d="M15 12H3"></path><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path>
+			<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+			  stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+			  <path d="M10 17l5-5-5-5"></path>
+			  <path d="M15 12H3"></path>
+			  <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path>
             </svg>
             <span>` + messages.logout + `</span>
           </button>
@@ -312,16 +445,23 @@ type desktopAuthorizationMessages struct {
 	logoutNote  string
 }
 
-func desktopAuthorizationMessagesFor(locale string) desktopAuthorizationMessages {
-	if locale == "zh-CN" {
+func desktopAuthorizationMessagesFor(
+	locale string,
+) desktopAuthorizationMessages {
+	if locale == localeChineseSimplified {
 		return desktopAuthorizationMessages{
-			lang: "zh-CN", title: "登录完成", badge: "安全登录", heading: "登录完成",
+			lang:        localeChineseSimplified,
+			title:       loginCompleteTitleChinese,
+			badge:       "安全登录",
+			heading:     loginCompleteTitleChinese,
 			description: "KubeLoop 桌面应用已收到授权结果，现在可以安全地关闭此页面。",
-			returnToApp: "返回 KubeLoop", logout: "退出登录", logoutNote: "仅退出当前浏览器会话",
+			returnToApp: "返回 KubeLoop",
+			logout:      "退出登录",
+			logoutNote:  "仅退出当前浏览器会话",
 		}
 	}
 	return desktopAuthorizationMessages{
-		lang: "en", title: "Login complete", badge: "Secure sign-in", heading: "Login complete",
+		lang: "en", title: loginCompleteTitle, badge: "Secure sign-in", heading: loginCompleteTitle,
 		description: "KubeLoop Desktop has received the authorization result. You can safely close this tab.",
 		returnToApp: "Return to KubeLoop", logout: "Log out", logoutNote: "Logs out this browser session only",
 	}
@@ -329,20 +469,25 @@ func desktopAuthorizationMessagesFor(locale string) desktopAuthorizationMessages
 
 func desktopAuthorizationLocale(request *http.Request) string {
 	if request == nil {
-		return "en-US"
+		return localeEnglishUS
 	}
-	if locale := request.FormValue("locale"); locale == "zh-CN" || locale == "en-US" {
+	if locale := request.FormValue("locale"); locale == localeChineseSimplified ||
+		locale == localeEnglishUS {
 		return locale
 	}
 	if cookie, err := request.Cookie("kubeloop.locale"); err == nil &&
-		(cookie.Value == "zh-CN" || cookie.Value == "en-US") {
+		(cookie.Value == localeChineseSimplified || cookie.Value == localeEnglishUS) {
 		return cookie.Value
 	}
-	preferred := strings.ToLower(strings.TrimSpace(strings.Split(request.Header.Get("Accept-Language"), ",")[0]))
+	preferred := strings.ToLower(
+		strings.TrimSpace(
+			strings.Split(request.Header.Get("Accept-Language"), ",")[0],
+		),
+	)
 	if strings.HasPrefix(preferred, "zh") {
-		return "zh-CN"
+		return localeChineseSimplified
 	}
-	return "en-US"
+	return localeEnglishUS
 }
 
 func cloneValues(values url.Values) url.Values {
@@ -353,34 +498,64 @@ func cloneValues(values url.Values) url.Values {
 	return cloned
 }
 
-func (endpoints *Endpoints) CancelAuthorization(rw http.ResponseWriter, request *http.Request, transaction, csrf string) error {
-	return endpoints.DenyAuthorization(rw, request, transaction, csrf, "access_denied")
+func (endpoints *Endpoints) CancelAuthorization(
+	rw http.ResponseWriter,
+	request *http.Request,
+	transaction, csrf string,
+) error {
+	return endpoints.DenyAuthorization(
+		rw,
+		request,
+		transaction,
+		csrf,
+		"access_denied",
+	)
 }
 
-func (endpoints *Endpoints) DenyAuthorization(rw http.ResponseWriter, request *http.Request, transaction, csrf, code string) error {
-	stored, err := endpoints.repositories.OAuthAuthorizationRequests().Consume(request.Context(), signatureHash(transaction), time.Now().UTC())
-	if err != nil || subtle.ConstantTimeCompare(stored.CSRFHash, signatureHash(csrf)) != 1 {
+func (endpoints *Endpoints) DenyAuthorization(
+	rw http.ResponseWriter,
+	request *http.Request,
+	transaction, csrf, code string,
+) error {
+	stored, err := endpoints.repositories.OAuthAuthorizationRequests().
+		Consume(request.Context(), signatureHash(transaction), time.Now().UTC())
+	if err != nil ||
+		subtle.ConstantTimeCompare(stored.CSRFHash, signatureHash(csrf)) != 1 {
 		return fosite.ErrInvalidRequest
 	}
 	var dto authorizationRequestDTO
 	if json.Unmarshal(stored.RequestJSON, &dto) != nil {
 		return fosite.ErrInvalidRequest
 	}
-	original, err := http.NewRequestWithContext(request.Context(), http.MethodGet, dto.URL, nil)
+	original, err := http.NewRequestWithContext(
+		request.Context(),
+		http.MethodGet,
+		dto.URL,
+		nil,
+	)
 	if err != nil {
 		return err
 	}
-	authorizeRequest, err := endpoints.provider.NewAuthorizeRequest(request.Context(), original)
+	authorizeRequest, err := endpoints.provider.NewAuthorizeRequest(
+		request.Context(),
+		original,
+	)
 	if err != nil {
 		return err
 	}
 	denial := fosite.ErrAccessDenied
-	if code == "login_required" {
+	switch code {
+	case "login_required":
 		denial = fosite.ErrLoginRequired
-	} else if code == "consent_required" {
+	case "consent_required":
 		denial = fosite.ErrConsentRequired
 	}
-	endpoints.provider.WriteAuthorizeError(request.Context(), rw, authorizeRequest, denial)
+	endpoints.provider.WriteAuthorizeError(
+		request.Context(),
+		rw,
+		authorizeRequest,
+		denial,
+	)
 	return nil
 }
 

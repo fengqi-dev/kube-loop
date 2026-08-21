@@ -27,7 +27,7 @@ func (dialer *echoTrafficDialer) DialContext(
 func TestStartResolvedTCPPortForward(t *testing.T) {
 	dialer := &echoTrafficDialer{targets: make(chan string, 1)}
 	manager := NewManager()
-	info, err := manager.StartResolved(Request{
+	info, err := manager.StartResolved(t.Context(), Request{
 		Context: "server", Namespace: "default", Kind: KindPod,
 		Name: "api-0", RemotePort: 8080,
 	}, "10.244.1.9:8080", dialer)
@@ -40,7 +40,7 @@ func TestStartResolvedTCPPortForward(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer connection.Close()
+	defer checkTestClose(t, connection.Close)
 	if _, err := connection.Write([]byte("ping")); err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +65,7 @@ func TestStartResolvedTCPPortForward(t *testing.T) {
 func TestStartResolvedUDPPortForward(t *testing.T) {
 	dialer := &echoTrafficDialer{targets: make(chan string, 1)}
 	manager := NewManager()
-	info, err := manager.StartResolved(Request{
+	info, err := manager.StartResolved(t.Context(), Request{
 		Context: "server", Namespace: "default", Kind: KindService,
 		Name: "dns", Protocol: "UDP", RemotePort: 53,
 	}, "10.96.0.10:53", dialer)
@@ -82,7 +82,7 @@ func TestStartResolvedUDPPortForward(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer connection.Close()
+	defer checkTestClose(t, connection.Close)
 	_ = connection.SetDeadline(time.Now().Add(time.Second))
 	if _, err := connection.Write([]byte("dns")); err != nil {
 		t.Fatal(err)

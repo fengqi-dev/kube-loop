@@ -69,14 +69,18 @@ func TestCaptureServiceIntercept(t *testing.T) {
 		t.Fatalf("snapshot is not persistable: %v", err)
 	}
 
-	service, err := client.CoreV1().Services("default").Get(context.Background(), "api", metav1.GetOptions{})
+	service, err := client.CoreV1().
+		Services("default").
+		Get(context.Background(), "api", metav1.GetOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if service.Spec.Selector["app"] != "api" {
 		t.Fatalf("capture mutated Service selector: %#v", service.Spec.Selector)
 	}
-	slices, err := client.DiscoveryV1().EndpointSlices("default").List(context.Background(), metav1.ListOptions{})
+	slices, err := client.DiscoveryV1().
+		EndpointSlices("default").
+		List(context.Background(), metav1.ListOptions{})
 	if err != nil || len(slices.Items) != 1 || slices.Items[0].Name != "api-xyz" {
 		t.Fatalf("capture mutated EndpointSlices: %#v, err=%v", slices.Items, err)
 	}
@@ -105,7 +109,8 @@ func TestCaptureServiceInterceptSupportsLegacyEndpoints(t *testing.T) {
 	if err := CaptureServiceIntercept(context.Background(), client, snapshot); err != nil {
 		t.Fatal(err)
 	}
-	if snapshot.HasEndpointSlices || !snapshot.HasEndpoints || len(snapshot.EndpointsSubsets) != 1 ||
+	if snapshot.HasEndpointSlices || !snapshot.HasEndpoints ||
+		len(snapshot.EndpointsSubsets) != 1 ||
 		snapshot.EndpointsSubsets[0].Addresses[0].IP != "10.244.0.8" {
 		t.Fatalf("legacy Endpoints snapshot = %#v", snapshot)
 	}

@@ -5,11 +5,12 @@ import (
 	"errors"
 	"sync"
 
+	"github.com/google/uuid"
+
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/execstream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
-	"github.com/google/uuid"
 )
 
 type Client interface {
@@ -32,7 +33,7 @@ func Start(
 	spec remote.ExecSpec,
 ) (*Stream, error) {
 	if client == nil {
-		return nil, errors.New("Pod exec client is required")
+		return nil, errors.New("pod exec client is required")
 	}
 	task, err := client.CreateExecTask(ctx, serverProfile, session, spec, "pod-exec:"+uuid.NewString())
 	if err != nil {
@@ -53,14 +54,14 @@ func (stream *Stream) Read(ctx context.Context) (execstream.Frame, error) {
 		return execstream.Frame{}, err
 	}
 	if messageType != websocket.MessageBinary {
-		return execstream.Frame{}, errors.New("Pod exec stream returned a non-binary message")
+		return execstream.Frame{}, errors.New("pod exec stream returned a non-binary message")
 	}
 	frame, err := execstream.Decode(encoded)
 	if err != nil {
 		return execstream.Frame{}, err
 	}
 	if frame.Type != execstream.Stdout && frame.Type != execstream.Stderr && frame.Type != execstream.Exit {
-		return execstream.Frame{}, errors.New("Gateway sent a client-only Pod exec frame")
+		return execstream.Frame{}, errors.New("gateway sent a client-only Pod exec frame")
 	}
 	return frame, nil
 }

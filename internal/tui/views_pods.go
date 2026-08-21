@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"strconv"
@@ -21,13 +22,13 @@ func (m Model) updatePods(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.cursor > 0 {
 			m.cursor--
 		}
-	case "down", "j":
+	case keyDown, "j":
 		if m.cursor < len(m.pods)-1 {
 			m.cursor++
 		}
 	case "n":
 		return m, m.cycleNamespace()
-	case "f", "enter":
+	case "f", keyEnter:
 		row, ok := m.selectedConsoleRow()
 		if !ok || row.index >= len(m.pods) {
 			return m, nil
@@ -40,7 +41,10 @@ func (m Model) updatePods(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.actionMode, m.actionPod, m.actionService = actionPortForward, pod.Name, ""
 		m.actionPorts = make([]actionPortOption, 0, len(pod.Ports))
 		for _, port := range pod.Ports {
-			m.actionPorts = append(m.actionPorts, actionPortOption{Name: port.Name, Port: port.Port, Protocol: port.Protocol})
+			m.actionPorts = append(
+				m.actionPorts,
+				actionPortOption{Name: port.Name, Port: port.Port, Protocol: port.Protocol},
+			)
 		}
 		m.actionPortIndex, m.actionLocalPort, m.actionField = 0, "0", 0
 		m.selectActionPort()
@@ -62,60 +66,69 @@ func (m Model) updatePods(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) updateAction(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if msg.String() == "esc" {
+	if msg.String() == keyEsc {
 		m.actionMode, m.actionCommand, m.actionPorts = actionNone, "", nil
 		return m, nil
 	}
-	if m.actionMode == actionExec {
-		switch msg.String() {
-		case "enter":
-			if strings.TrimSpace(m.actionCommand) == "" {
-				m.err = "command is required"
-				return m, nil
-			}
-			m.loading = true
-			return m, tea.Batch(m.spinner.Tick, m.startExec())
-		case "backspace":
-			m.actionCommand = trimLastRune(m.actionCommand)
-			return m, nil
-		default:
-			if len(msg.Runes) > 0 {
-				m.actionCommand += string(msg.Runes)
-			}
+	switch m.actionMode {
+	case actionExec:
+		return m.updateExecAction(msg)
+	case actionExchange, actionMirror, actionPreview:
+		return m.updateServiceTrafficAction(msg)
+	case actionNone, actionPortForward:
+		return m.updatePortForwardAction(msg)
+	}
+	return m, nil
+}
+
+func (m Model) updateExecAction(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case keyEnter:
+		if strings.TrimSpace(m.actionCommand) == "" {
+			m.err = "command is required"
 			return m, nil
 		}
+		m.loading = true
+		return m, tea.Batch(m.spinner.Tick, m.startExec())
+	case keyBackspace:
+		m.actionCommand = trimLastRune(m.actionCommand)
+	default:
+		if len(msg.Runes) > 0 {
+			m.actionCommand += string(msg.Runes)
+		}
 	}
-	if m.actionMode == actionExchange || m.actionMode == actionMirror || m.actionMode == actionPreview {
-		return m.updateServiceTrafficAction(msg)
-	}
+	return m, nil
+}
+
+func (m Model) updatePortForwardAction(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "tab", "shift+tab":
+	case keyTab, keyShiftTab:
 		m.actionField = 1 - m.actionField
 		return m, nil
 	case "up", "k":
 		m.actionField = (m.actionField - 1 + 2) % 2
 		return m, nil
-	case "down", "j":
+	case keyDown, "j":
 		m.actionField = (m.actionField + 1) % 2
 		return m, nil
-	case "left", "h":
+	case keyLeft, "h":
 		if m.actionField == 0 && len(m.actionPorts) > 1 {
 			m.actionPortIndex = (m.actionPortIndex - 1 + len(m.actionPorts)) % len(m.actionPorts)
 			m.selectActionPort()
 		}
 		return m, nil
-	case "right", "l":
+	case keyRight, "l":
 		if m.actionField == 0 && len(m.actionPorts) > 1 {
 			m.actionPortIndex = (m.actionPortIndex + 1) % len(m.actionPorts)
 			m.selectActionPort()
 		}
 		return m, nil
-	case "backspace":
+	case keyBackspace:
 		if m.actionField == 1 {
 			m.actionLocalPort = trimLastRune(m.actionLocalPort)
 		}
 		return m, nil
-	case "enter":
+	case keyEnter:
 		localPort := strings.TrimSpace(m.actionLocalPort)
 		if localPort == "" {
 			localPort = "0"
@@ -159,15 +172,23 @@ func (m Model) startPortForward() tea.Cmd {
 		if err != nil {
 			return portForwardStartedMsg{err: err}
 		}
-		kind, name := "pod", m.actionPod
+		kind, name := resourceKindPod, m.actionPod
 		if m.actionService != "" {
-			kind, name = "service", m.actionService
+			kind, name = resourceKindService, m.actionService
 		}
 		localPort, err := strconv.ParseUint(firstNonEmpty(strings.TrimSpace(m.actionLocalPort), "0"), 10, 16)
 		if err != nil {
 			return portForwardStartedMsg{err: fmt.Errorf("local port is invalid")}
 		}
-		info, err := m.state.forwards.Start(m.state.ctx, profile, session, clientportforward.Request{ProfileID: profile.ID, Kind: kind, Name: name, Protocol: m.actionProtocol, RemotePort: uint16(m.actionPort), LocalPort: uint16(localPort)})
+		request := clientportforward.Request{
+			ProfileID:  profile.ID,
+			Kind:       kind,
+			Name:       name,
+			Protocol:   m.actionProtocol,
+			RemotePort: uint16(m.actionPort), //nolint:gosec // Selected Kubernetes ports are validated as uint16.
+			LocalPort:  uint16(localPort),
+		}
+		info, err := m.state.forwards.Start(m.state.ctx, profile, session, request)
 		return portForwardStartedMsg{info: info, err: err}
 	}
 }
@@ -186,22 +207,36 @@ func (m Model) startPodSSH(pod clientremote.Pod) tea.Cmd {
 		if len(pod.Containers) > 0 {
 			container = pod.Containers[0]
 		}
-		info, err := m.state.podSSH.Start(m.state.ctx, profile, session, clientpodssh.Request{ProfileID: profile.ID, Namespace: pod.Namespace, Pod: pod.Name, Container: container, PodIP: pod.PodIP, Ready: pod.Ready, Containers: pod.Containers})
+		request := clientpodssh.Request{
+			ProfileID:  profile.ID,
+			Namespace:  pod.Namespace,
+			Pod:        pod.Name,
+			Container:  container,
+			PodIP:      pod.PodIP,
+			Ready:      pod.Ready,
+			Containers: pod.Containers,
+		}
+		info, err := m.state.podSSH.Start(m.state.ctx, profile, session, request)
 		return podSSHStartedMsg{info: info, err: err}
 	}
 }
 
-func openPodSSH(command string) tea.Cmd {
+func openPodSSH(ctx context.Context, command string) tea.Cmd {
 	args, err := shellquote.Split(command)
-	if err != nil || len(args) == 0 {
+	if err != nil || len(args) == 0 || args[0] != taskKindSSH {
 		return func() tea.Msg {
 			if err == nil {
-				err = fmt.Errorf("Pod SSH command is empty")
+				err = fmt.Errorf("pod SSH command is empty or unsupported")
 			}
 			return podSSHExitedMsg{err: err}
 		}
 	}
-	return tea.ExecProcess(exec.Command(args[0], args[1:]...), func(err error) tea.Msg {
+	process := exec.CommandContext( //nolint:gosec // Executable is fixed; arguments come from the Pod SSH manager.
+		ctx,
+		taskKindSSH,
+		args[1:]...,
+	)
+	return tea.ExecProcess(process, func(err error) tea.Msg {
 		return podSSHExitedMsg{err: err}
 	})
 }
@@ -219,7 +254,13 @@ func (m Model) startExec() tea.Cmd {
 			return execStartedMsg{err: err}
 		}
 		command := strings.TrimSpace(m.actionCommand)
-		task, err := m.state.execs.Start(m.state.ctx, profile, session, clientremote.ExecSpec{Pod: m.actionPod, Container: m.actionContainer, Command: []string{"/bin/sh", "-lc", command}, TTY: false})
+		spec := clientremote.ExecSpec{
+			Pod:       m.actionPod,
+			Container: m.actionContainer,
+			Command:   []string{"/bin/sh", "-lc", command},
+			TTY:       false,
+		}
+		task, err := m.state.execs.Start(m.state.ctx, profile, session, spec)
 		return execStartedMsg{task: task, command: command, err: err}
 	}
 }

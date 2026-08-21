@@ -1,10 +1,11 @@
 package singbox
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"net/netip"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/fengqi-dev/kube-loop/internal/dnsname"
@@ -74,7 +75,9 @@ func NormalizeHostAliases(items []HostAlias) ([]HostAlias, error) {
 		seen[domain] = struct{}{}
 		out = append(out, HostAlias{Domain: domain, IP: ip.String()})
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Domain < out[j].Domain })
+	slices.SortFunc(out, func(left, right HostAlias) int {
+		return cmp.Compare(left.Domain, right.Domain)
+	})
 	return out, nil
 }
 
@@ -82,7 +85,7 @@ func NormalizeHostAliases(items []HostAlias) ([]HostAlias, error) {
 // such as mysql, mysql.default, and mysql.default.svc.
 func SearchDomains(namespace string, clusterDomains ...string) []string {
 	if namespace == "" {
-		namespace = "default"
+		namespace = defaultNamespace
 	}
 	return SearchDomainsForNamespaces([]string{namespace}, clusterDomains...)
 }
@@ -91,7 +94,7 @@ func SearchDomains(namespace string, clusterDomains ...string) []string {
 // every visible namespace. Namespace order is preserved and duplicates are removed.
 func SearchDomainsForNamespaces(namespaces []string, clusterDomains ...string) []string {
 	if len(namespaces) == 0 {
-		namespaces = []string{"default"}
+		namespaces = []string{defaultNamespace}
 	}
 	domains, err := dnsname.NormalizeClusterDomains(clusterDomains)
 	if err != nil || len(domains) == 0 {

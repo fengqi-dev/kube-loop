@@ -188,7 +188,7 @@ func (client *Client) LoginOIDC(
 	defer client.endCallback(callback)
 	redirectURI := client.redirectURI
 	if client.loopbackCallback {
-		actualRedirectURI, closeCallback, callbackErr := client.startLoopbackCallback()
+		actualRedirectURI, closeCallback, callbackErr := client.startLoopbackCallback(loginContext)
 		if callbackErr != nil {
 			return credentials.Credential{}, callbackErr
 		}
@@ -197,7 +197,7 @@ func (client *Client) LoginOIDC(
 	}
 	query := authorizationURL.Query()
 	query.Set("response_type", "code")
-	query.Set("client_id", client.clientID)
+	query.Set(authParamClientID, client.clientID)
 	query.Set("redirect_uri", redirectURI)
 	query.Set("scope", "openid profile email offline_access kubeloop.api")
 	query.Set("state", state)
@@ -227,14 +227,18 @@ func (client *Client) LoginOIDC(
 	var response tokenResponse
 	if err := client.postForm(loginContext, metadata.TokenEndpoint, url.Values{
 		"grant_type": {"authorization_code"}, "code": {result.code}, "code_verifier": {verifier},
-		"client_id": {client.clientID}, "redirect_uri": {redirectURI}, "device_id": {deviceID},
+		authParamClientID: {client.clientID}, "redirect_uri": {redirectURI}, "device_id": {deviceID},
 	}, &response); err != nil {
 		return credentials.Credential{}, err
 	}
 	return credentialFromResponse(response, deviceID)
 }
 
-func (client *Client) Refresh(ctx context.Context, baseURL string, current credentials.Credential) (credentials.Credential, error) {
+func (client *Client) Refresh(
+	ctx context.Context,
+	baseURL string,
+	current credentials.Credential,
+) (credentials.Credential, error) {
 	baseURL, err := profile.NormalizeBaseURL(baseURL)
 	if err != nil {
 		return credentials.Credential{}, err
@@ -245,8 +249,8 @@ func (client *Client) Refresh(ctx context.Context, baseURL string, current crede
 		return credentials.Credential{}, err
 	}
 	if err := client.postForm(ctx, metadata.TokenEndpoint, url.Values{
-		"grant_type": {"refresh_token"}, "refresh_token": {current.RefreshToken},
-		"client_id": {client.clientID}, "device_id": {current.DeviceID},
+		"grant_type": {authParamRefreshToken}, authParamRefreshToken: {current.RefreshToken},
+		authParamClientID: {client.clientID}, "device_id": {current.DeviceID},
 	}, &response); err != nil {
 		return credentials.Credential{}, err
 	}
@@ -273,7 +277,7 @@ func (client *Client) Revoke(ctx context.Context, baseURL, refreshToken string) 
 		return err
 	}
 	return client.postForm(ctx, metadata.RevocationEndpoint, url.Values{
-		"token": {refreshToken}, "token_type_hint": {"refresh_token"}, "client_id": {client.clientID},
+		"token": {refreshToken}, "token_type_hint": {authParamRefreshToken}, authParamClientID: {client.clientID},
 	}, nil)
 }
 
@@ -288,8 +292,11 @@ func (client *Client) discoverProvider(ctx context.Context, baseURL string) (pro
 		return providerMetadata{}, err
 	}
 	if metadata.Issuer != baseURL || !sameOriginEndpoint(baseURL, metadata.AuthorizationEndpoint) ||
-		!sameOriginEndpoint(baseURL, metadata.TokenEndpoint) || !sameOriginEndpoint(baseURL, metadata.RevocationEndpoint) {
-		return providerMetadata{}, errors.New("OIDC discovery returned invalid provider metadata")
+		!sameOriginEndpoint(
+			baseURL,
+			metadata.TokenEndpoint,
+		) || !sameOriginEndpoint(baseURL, metadata.RevocationEndpoint) {
+		return providerMetadata{}, errors.New("oIDC discovery returned invalid provider metadata")
 	}
 	return metadata, nil
 }
@@ -306,10 +313,24 @@ func (client *Client) getJSON(ctx context.Context, endpoint string, destination 
 }
 
 func (client *Client) postForm(ctx context.Context, endpoint string, form url.Values, destination any) error {
-	return client.request(ctx, http.MethodPost, endpoint, "application/x-www-form-urlencoded", []byte(form.Encode()), destination)
+	return client.request(
+		ctx,
+		http.MethodPost,
+		endpoint,
+		"application/x-www-form-urlencoded",
+		[]byte(form.Encode()),
+		destination,
+	)
 }
 
-func (client *Client) request(ctx context.Context, method, endpoint, contentType string, raw []byte, destination any) error {
+func (client *Client) request(
+	ctx context.Context,
+	method,
+	endpoint,
+	contentType string,
+	raw []byte,
+	destination any,
+) (resultErr error) {
 	requestContext, cancel := context.WithTimeout(ctx, client.requestTimeout)
 	defer cancel()
 	request, err := http.NewRequestWithContext(requestContext, method, endpoint, bytes.NewReader(raw))
@@ -327,7 +348,11 @@ func (client *Client) request(ctx context.Context, method, endpoint, contentType
 		}
 		return fmt.Errorf("authentication request failed: %w", err)
 	}
-	defer response.Body.Close()
+	defer func() {
+		if err := response.Body.Close(); err != nil {
+			resultErr = errors.Join(resultErr, fmt.Errorf("close authentication response: %w", err))
+		}
+	}()
 	responseRaw, err := io.ReadAll(io.LimitReader(response.Body, maxResponseBytes+1))
 	if err != nil {
 		return errors.New("read authentication response")
@@ -384,14 +409,14 @@ func (client *Client) endCallback(pending *pendingCallback) {
 	}
 }
 
-func (client *Client) startLoopbackCallback() (string, func(), error) {
+func (client *Client) startLoopbackCallback(ctx context.Context) (string, func(), error) {
 	redirect, err := url.Parse(client.redirectURI)
 	if err != nil || redirect.Scheme != "http" || redirect.Hostname() != "127.0.0.1" ||
 		redirect.Port() != "" || redirect.Path != "/callback" || redirect.User != nil ||
 		redirect.RawQuery != "" || redirect.Fragment != "" {
 		return "", nil, errors.New("loopback login redirect URI is invalid")
 	}
-	listener, err := net.Listen("tcp", net.JoinHostPort(redirect.Hostname(), "0"))
+	listener, err := (&net.ListenConfig{}).Listen(ctx, "tcp", net.JoinHostPort(redirect.Hostname(), "0"))
 	if err != nil {
 		return "", nil, fmt.Errorf("listen for browser login callback: %w", err)
 	}
@@ -412,7 +437,11 @@ func (client *Client) startLoopbackCallback() (string, func(), error) {
 			http.Error(rw, "Login callback was rejected. Return to the terminal and try again.", http.StatusBadRequest)
 			return
 		}
-		_, _ = io.WriteString(rw, "<!doctype html><title>KubeLoop login complete</title><style>body{font-family:sans-serif;max-width:40rem;margin:15vh auto;padding:2rem}h1{color:#087f5b}</style><h1>Login complete</h1><p>You can close this window and return to KubeLoop TUI.</p>")
+		const loginCompleteHTML = "<!doctype html><title>KubeLoop login complete</title>" +
+			"<style>body{font-family:sans-serif;max-width:40rem;margin:15vh auto;padding:2rem}" +
+			"h1{color:#087f5b}</style><h1>Login complete</h1>" +
+			"<p>You can close this window and return to KubeLoop TUI.</p>"
+		_, _ = io.WriteString(rw, loginCompleteHTML)
 	})
 	server := &http.Server{
 		Handler:           mux,
@@ -483,20 +512,25 @@ func (client *Client) matchesCallbackTarget(callbackURL, redirectURL *url.URL) b
 	if callbackURL.Host == redirectURL.Host {
 		return true
 	}
-	return client.loopbackCallback && callbackURL.Scheme == "http" && callbackURL.Port() != "" &&
-		callbackURL.Hostname() == "127.0.0.1" && redirectURL.Hostname() == callbackURL.Hostname() &&
-		redirectURL.Port() == ""
+	validLoopback := client.loopbackCallback && callbackURL.Scheme == "http" && callbackURL.Port() != ""
+	sameHost := callbackURL.Hostname() == "127.0.0.1" && redirectURL.Hostname() == callbackURL.Hostname()
+	return validLoopback && sameHost && redirectURL.Port() == ""
 }
 
 func credentialFromResponse(response tokenResponse, deviceID string) (credentials.Credential, error) {
-	if !strings.EqualFold(response.TokenType, "Bearer") || response.AccessToken == "" || response.RefreshToken == "" ||
-		response.ExpiresIn <= 0 {
-		return credentials.Credential{}, errors.New("OAuth server returned an incomplete token response")
+	missingToken := response.AccessToken == "" || response.RefreshToken == ""
+	if !strings.EqualFold(response.TokenType, authorizationTypeBearer) || missingToken || response.ExpiresIn <= 0 {
+		return credentials.Credential{}, errors.New("oAuth server returned an incomplete token response")
 	}
 	identityID, userName := identityFromIDToken(response.IDToken)
 	return credentials.Credential{
-		TokenType: "Bearer", AccessToken: response.AccessToken, AccessExpiresAt: time.Now().Add(time.Duration(response.ExpiresIn) * time.Second),
-		RefreshToken: response.RefreshToken, DeviceID: deviceID, IdentityID: identityID, UserName: userName,
+		TokenType:       authorizationTypeBearer,
+		AccessToken:     response.AccessToken,
+		AccessExpiresAt: time.Now().Add(time.Duration(response.ExpiresIn) * time.Second),
+		RefreshToken:    response.RefreshToken,
+		DeviceID:        deviceID,
+		IdentityID:      identityID,
+		UserName:        userName,
 	}, nil
 }
 

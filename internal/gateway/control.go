@@ -18,13 +18,13 @@ func (s *Server) handleControl(
 	networkSpecHash string,
 	namespace string,
 ) {
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	s.mu.Lock()
 	if existing, ok := s.networks[token]; ok &&
 		(existing.hash != networkSpecHash || existing.namespace != namespace) {
 		s.mu.Unlock()
-		_ = tunnel.WriteStatus(client, errors.New("Session NetworkSpec changed"))
+		_ = tunnel.WriteStatus(client, errors.New("session NetworkSpec changed"))
 		return
 	}
 	s.networks[token] = tenantNetwork{spec: spec, hash: networkSpecHash, namespace: namespace}

@@ -23,7 +23,10 @@ import (
 
 type taskReader map[string]controlplanestorage.Task
 
-func (reader taskReader) GetByID(_ context.Context, id string) (controlplanestorage.Task, error) {
+func (reader taskReader) GetByID(
+	_ context.Context,
+	id string,
+) (controlplanestorage.Task, error) {
 	task, ok := reader[id]
 	if !ok {
 		return controlplanestorage.Task{}, controlplanestorage.ErrNotFound
@@ -95,7 +98,10 @@ func (reader taskReader) UpdateState(
 
 type sessionReader map[string]controlplanestorage.Session
 
-func (reader sessionReader) GetByID(_ context.Context, id string) (controlplanestorage.Session, error) {
+func (reader sessionReader) GetByID(
+	_ context.Context,
+	id string,
+) (controlplanestorage.Session, error) {
 	session, ok := reader[id]
 	if !ok {
 		return controlplanestorage.Session{}, controlplanestorage.ErrNotFound
@@ -105,7 +111,13 @@ func (reader sessionReader) GetByID(_ context.Context, id string) (controlplanes
 
 func TestActivateWaitsForReadyAndIsIdempotent(t *testing.T) {
 	kubernetesClient := fakeClient(t)
-	manager, err := New(kubernetesClient, Config{PollInterval: 10 * time.Millisecond, ControlPlaneID: "control-plane-a"})
+	manager, err := New(
+		kubernetesClient,
+		Config{
+			PollInterval:   10 * time.Millisecond,
+			ControlPlaneID: "control-plane-a",
+		},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,14 +154,24 @@ func TestActivateWaitsForReadyAndIsIdempotent(t *testing.T) {
 		ready.Labels[controlPlaneIDLabel] != manager.controlPlaneID {
 		t.Fatalf("unexpected ready binding: %#v", ready.ObjectMeta)
 	}
-	if _, managed, err := manager.Activate(context.Background(), binding); err != nil || !managed {
-		t.Fatalf("idempotent activation failed: managed=%v err=%v", managed, err)
+	if _, managed, err := manager.Activate(context.Background(), binding); err != nil ||
+		!managed {
+		t.Fatalf(
+			"idempotent activation failed: managed=%v err=%v",
+			managed,
+			err,
+		)
 	}
 
 	conflict := binding.DeepCopy()
 	conflict.Spec.Ports[0].TargetPort++
-	if _, managed, err := manager.Activate(context.Background(), conflict); err == nil || managed {
-		t.Fatalf("conflicting activation should fail before ownership: managed=%v err=%v", managed, err)
+	if _, managed, err := manager.Activate(context.Background(), conflict); err == nil ||
+		managed {
+		t.Fatalf(
+			"conflicting activation should fail before ownership: managed=%v err=%v",
+			managed,
+			err,
+		)
 	}
 	if err := manager.Delete(context.Background(), binding.Namespace, binding.Spec.TaskID); err != nil {
 		t.Fatal(err)
@@ -161,7 +183,10 @@ func TestActivateWaitsForReadyAndIsIdempotent(t *testing.T) {
 
 func TestActivateReturnsManagedDegradedError(t *testing.T) {
 	kubernetesClient := fakeClient(t)
-	manager, err := New(kubernetesClient, Config{PollInterval: 10 * time.Millisecond})
+	manager, err := New(
+		kubernetesClient,
+		Config{PollInterval: 10 * time.Millisecond},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,21 +203,30 @@ func TestActivateReturnsManagedDegradedError(t *testing.T) {
 					Type: trafficv1alpha1.ConditionDegraded, Status: metav1.ConditionTrue,
 					Reason: "TargetNotFound", Message: "target is unavailable", LastTransitionTime: metav1.Now(),
 				}}
-				_ = kubernetesClient.Status().Update(context.Background(), current)
+				_ = kubernetesClient.Status().
+					Update(context.Background(), current)
 				return
 			}
 			time.Sleep(time.Millisecond)
 		}
 	}()
 	_, managed, err := manager.Activate(context.Background(), binding)
-	if err == nil || !managed || !strings.Contains(err.Error(), "TargetNotFound") {
-		t.Fatalf("expected managed degraded error, got managed=%v err=%v", managed, err)
+	if err == nil || !managed ||
+		!strings.Contains(err.Error(), "TargetNotFound") {
+		t.Fatalf(
+			"expected managed degraded error, got managed=%v err=%v",
+			managed,
+			err,
+		)
 	}
 }
 
 func TestReconcilerDeletesOnlyOrphanedBindings(t *testing.T) {
 	kubernetesClient := fakeClient(t)
-	manager, err := New(kubernetesClient, Config{PollInterval: 10 * time.Millisecond})
+	manager, err := New(
+		kubernetesClient,
+		Config{PollInterval: 10 * time.Millisecond},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -219,7 +253,10 @@ func TestReconcilerDeletesOnlyOrphanedBindings(t *testing.T) {
 		},
 	}
 	reconciler, err := NewReconciler(manager, tasks, sessionReader{
-		live.Spec.SessionID: {ID: live.Spec.SessionID, Namespace: live.Namespace},
+		live.Spec.SessionID: {
+			ID:        live.Spec.SessionID,
+			Namespace: live.Namespace,
+		},
 	}, nil, ReconcilerConfig{Interval: time.Second, StaleAfter: 2 * time.Second, CleanupTimeout: time.Second, BatchSize: 10})
 	if err != nil {
 		t.Fatal(err)
@@ -228,20 +265,37 @@ func TestReconcilerDeletesOnlyOrphanedBindings(t *testing.T) {
 	if err != nil || removed != 1 {
 		t.Fatalf("reconcile orphans: removed=%d err=%v", removed, err)
 	}
-	if err := kubernetesClient.Get(context.Background(), client.ObjectKeyFromObject(live), &trafficv1alpha1.TrafficBinding{}); err != nil {
+	if err := kubernetesClient.Get(
+		context.Background(),
+		client.ObjectKeyFromObject(live),
+		&trafficv1alpha1.TrafficBinding{},
+	); err != nil {
 		t.Fatalf("live binding was removed: %v", err)
 	}
-	if err := kubernetesClient.Get(context.Background(), client.ObjectKeyFromObject(orphan), &trafficv1alpha1.TrafficBinding{}); err == nil {
+	if err := kubernetesClient.Get(
+		context.Background(),
+		client.ObjectKeyFromObject(orphan),
+		&trafficv1alpha1.TrafficBinding{},
+	); err == nil {
 		t.Fatal("orphaned binding still exists")
 	}
-	if err := kubernetesClient.Get(context.Background(), client.ObjectKeyFromObject(foreign), &trafficv1alpha1.TrafficBinding{}); err != nil {
+	if err := kubernetesClient.Get(
+		context.Background(),
+		client.ObjectKeyFromObject(foreign),
+		&trafficv1alpha1.TrafficBinding{},
+	); err != nil {
 		t.Fatalf("foreign Control Plane binding was removed: %v", err)
 	}
 }
 
-func TestReconcilerClaimsStaleTaskAndLetsOperatorFinalizerOwnCleanup(t *testing.T) {
+func TestReconcilerClaimsStaleTaskAndLetsOperatorFinalizerOwnCleanup(
+	t *testing.T,
+) {
 	kubernetesClient := fakeClient(t)
-	manager, err := New(kubernetesClient, Config{PollInterval: 10 * time.Millisecond})
+	manager, err := New(
+		kubernetesClient,
+		Config{PollInterval: 10 * time.Millisecond},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -257,11 +311,14 @@ func TestReconcilerClaimsStaleTaskAndLetsOperatorFinalizerOwnCleanup(t *testing.
 	}
 	now := time.Now().UTC()
 	tasks := taskReader{binding.Spec.TaskID: {
-		ID: binding.Spec.TaskID, SessionID: binding.Spec.SessionID, Type: "exchange",
+		ID: binding.Spec.TaskID, SessionID: binding.Spec.SessionID, Type: taskTypeExchange,
 		State: remotetask.Running, UpdatedAt: now.Add(-time.Minute),
 	}}
 	reconciler, err := NewReconciler(manager, tasks, sessionReader{
-		binding.Spec.SessionID: {ID: binding.Spec.SessionID, Namespace: binding.Namespace},
+		binding.Spec.SessionID: {
+			ID:        binding.Spec.SessionID,
+			Namespace: binding.Namespace,
+		},
 	}, nil, ReconcilerConfig{
 		Interval: time.Second, StaleAfter: 2 * time.Second, CleanupTimeout: time.Second,
 		BatchSize: 10, Now: func() time.Time { return now },
@@ -276,7 +333,11 @@ func TestReconcilerClaimsStaleTaskAndLetsOperatorFinalizerOwnCleanup(t *testing.
 	if task := tasks[binding.Spec.TaskID]; task.State != remotetask.Failed {
 		t.Fatalf("stale Task state = %q", task.State)
 	}
-	getErr := kubernetesClient.Get(context.Background(), client.ObjectKeyFromObject(binding), &trafficv1alpha1.TrafficBinding{})
+	getErr := kubernetesClient.Get(
+		context.Background(),
+		client.ObjectKeyFromObject(binding),
+		&trafficv1alpha1.TrafficBinding{},
+	)
 	if !apierrors.IsNotFound(getErr) {
 		t.Fatalf("stale TrafficBinding get error = %v, want not found", getErr)
 	}
@@ -290,12 +351,21 @@ func TestControlPlaneIDProducesStableLabelValues(t *testing.T) {
 	}{
 		{name: "default", value: "", want: "kubeloop"},
 		{name: "readable", value: " kubeloop-dev ", want: "kubeloop-dev"},
-		{name: "invalid", value: "control plane", want: "sha256-a32b176c56bea1f4"},
+		{
+			name:  "invalid",
+			value: "control plane",
+			want:  "sha256-a32b176c56bea1f4",
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			if got := controlPlaneID(test.value); got != test.want {
-				t.Fatalf("controlPlaneID(%q) = %q, want %q", test.value, got, test.want)
+				t.Fatalf(
+					"controlPlaneID(%q) = %q, want %q",
+					test.value,
+					got,
+					test.want,
+				)
 			}
 		})
 	}
@@ -310,7 +380,10 @@ func fakeClient(t *testing.T) client.Client {
 	if err := trafficv1alpha1.AddToScheme(scheme); err != nil {
 		t.Fatal(err)
 	}
-	return fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&trafficv1alpha1.TrafficBinding{}).Build()
+	return fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithStatusSubresource(&trafficv1alpha1.TrafficBinding{}).
+		Build()
 }
 
 func testBinding() *trafficv1alpha1.TrafficBinding {
@@ -319,7 +392,10 @@ func testBinding() *trafficv1alpha1.TrafficBinding {
 		Spec: trafficv1alpha1.TrafficBindingSpec{
 			Mode:      trafficv1alpha1.TrafficBindingModePortForward,
 			SessionID: uuid.NewString(), TaskID: uuid.NewString(), SessionGeneration: 1,
-			Target: &trafficv1alpha1.TrafficTarget{Kind: trafficv1alpha1.TargetKindService, Name: "api"},
+			Target: &trafficv1alpha1.TrafficTarget{
+				Kind: trafficv1alpha1.TargetKindService,
+				Name: "api",
+			},
 			Ports: []trafficv1alpha1.TrafficPort{{
 				TargetPort: 8080, Protocol: trafficv1alpha1.TransportProtocolTCP,
 			}},

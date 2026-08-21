@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -119,9 +120,13 @@ func TestUpdaterRollsBackStartFailure(t *testing.T) {
 	oldPayload := machOBytes("old")
 	newPayload := machOBytes("new")
 	writeExecutable(t, config.WorkerBinaryPath, oldPayload)
-	worker := &fakeWorker{config: config, startErrOnce: fmt.Errorf("start failed"), status: supervisorprotocol.WorkerStatus{
-		Installed: true, Running: true, CoreReady: true, Version: "new", Protocol: 7,
-	}}
+	worker := &fakeWorker{
+		config:       config,
+		startErrOnce: fmt.Errorf("start failed"),
+		status: supervisorprotocol.WorkerStatus{
+			Installed: true, Running: true, CoreReady: true, Version: "new", Protocol: 7,
+		},
+	}
 	updater := NewUpdater(config, worker, os.Getuid())
 	updater.verifyArtifact = func(context.Context, string, supervisorprotocol.UpdateManifest) error { return nil }
 	updater.readyTimeout = 10 * time.Millisecond
@@ -152,7 +157,7 @@ func testManifest(channel string, payload []byte) supervisorprotocol.UpdateManif
 		SchemaVersion: supervisorprotocol.SchemaVersion, RequestID: "request-1",
 		Channel: channel, Version: "dev", WorkerProtocol: 7,
 		MinimumSupervisorProtocol: supervisorprotocol.Version,
-		Size:                      int64(len(payload)), SHA256: fmt.Sprintf("%x", sum),
+		Size:                      int64(len(payload)), SHA256: hex.EncodeToString(sum[:]),
 	}
 }
 

@@ -8,9 +8,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
-	"github.com/google/uuid"
 )
 
 type fakeGateway struct {
@@ -32,10 +33,14 @@ func (gateway *fakeGateway) IssueRelayTicket(
 	gateway.mu.Lock()
 	defer gateway.mu.Unlock()
 	gateway.tickets++
-	if current.State != "active" {
+	if current.State != remoteSessionActive {
 		return remote.RelayTicket{}, errors.New("session is not active")
 	}
-	return remote.RelayTicket{TokenType: "KubeLoop-RelayTicket", Ticket: "signed.ticket.value", ExpiresAt: time.Now().Add(time.Minute)}, nil
+	return remote.RelayTicket{
+		TokenType: "KubeLoop-RelayTicket",
+		Ticket:    "signed.ticket.value",
+		ExpiresAt: time.Now().Add(time.Minute),
+	}, nil
 }
 
 func (gateway *fakeGateway) CreateSession(
@@ -52,7 +57,7 @@ func (gateway *fakeGateway) CreateSession(
 	}
 	now := time.Now().UTC()
 	return remote.Session{
-		ID: uuid.NewString(), Namespace: namespace, State: "active", Generation: 1,
+		ID: uuid.NewString(), Namespace: namespace, State: remoteSessionActive, Generation: 1,
 		CreatedAt: now, UpdatedAt: now, LastHeartbeatAt: now, ExpiresAt: now.Add(time.Minute),
 	}, nil
 }
@@ -354,7 +359,14 @@ func TestNamespaceSwitchFailurePreservesCurrentSession(t *testing.T) {
 	gateway.mu.Lock()
 	gateway.disconnectErr = disconnectFailure
 	gateway.mu.Unlock()
-	if _, err := manager.Connect(context.Background(), serverProfile, "production"); !errors.Is(err, disconnectFailure) {
+	if _, err := manager.Connect(
+		context.Background(),
+		serverProfile,
+		"production",
+	); !errors.Is(
+		err,
+		disconnectFailure,
+	) {
 		t.Fatalf("namespace switch error = %v", err)
 	}
 	retained, err := manager.Current(serverProfile.ID)

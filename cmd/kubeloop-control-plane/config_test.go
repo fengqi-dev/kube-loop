@@ -13,7 +13,11 @@ import (
 func TestLoadControlPlaneConfig(t *testing.T) {
 	directory := t.TempDir()
 	dsnPath := filepath.Join(directory, "dsn")
-	if err := os.WriteFile(dsnPath, []byte("postgres://user:secret@database/test?sslmode=require\n"), 0o600); err != nil {
+	if err := os.WriteFile(
+		dsnPath,
+		[]byte("postgres://user:secret@database/test?sslmode=require\n"),
+		0o600,
+	); err != nil {
 		t.Fatal(err)
 	}
 	path := filepath.Join(directory, "kubeloop.yaml")

@@ -11,40 +11,94 @@ import (
 )
 
 func TestOAuthClientCRUDAndSecretRotation(t *testing.T) {
-	handler, store := newReadTestHandler(t, WithOAuthClients(nilSafeRepositories(t), nilSafeTransactions(t)))
+	handler, store := newReadTestHandler(
+		t,
+		WithOAuthClients(nilSafeRepositories(t), nilSafeTransactions(t)),
+	)
 	// Replace the helpers' temporary stores with the handler's actual store.
 	handler.readAPI.oauthRepositories = store
 	handler.readAPI.oauthTransactions = store
 	cookie, csrf := issueTestSession(t, handler)
 
-	created := oauthClientWrite(t, handler, cookie, csrf, http.MethodPost, "/oauth-clients", map[string]any{
-		"id": "automation", "name": "Automation", "public": false, "redirectUris": []string{"https://client.example/callback"},
-		"grantTypes": []string{"client_credentials"}, "scopes": []string{"kubeloop.api"}, "enabled": true,
-		"reason": "create automation client",
-	})
+	created := oauthClientWrite(
+		t,
+		handler,
+		cookie,
+		csrf,
+		http.MethodPost,
+		"/oauth-clients",
+		map[string]any{
+			"id":              "automation",
+			nameField:         "Automation",
+			publicField:       false,
+			redirectURIsField: []string{"https://client.example/callback"},
+			grantTypesField: []string{
+				"client_credentials",
+			},
+			scopesField:  []string{"kubeloop.api"},
+			enabledField: true,
+			"reason":     "create automation client",
+		},
+	)
 	if created.Code != http.StatusCreated {
-		t.Fatalf("create status=%d body=%s", created.Code, created.Body.String())
+		t.Fatalf(
+			"create status=%d body=%s",
+			created.Code,
+			created.Body.String(),
+		)
 	}
 	var document map[string]any
-	if json.Unmarshal(created.Body.Bytes(), &document) != nil || document["clientSecret"] == "" || document["machineIdentityId"] == "" {
+	if json.Unmarshal(created.Body.Bytes(), &document) != nil ||
+		document["clientSecret"] == "" ||
+		document["machineIdentityId"] == "" {
 		t.Fatalf("create body=%s", created.Body.String())
 	}
 	if _, err := store.OAuthClients().GetSecret(t.Context(), "automation"); err != nil {
 		t.Fatal(err)
 	}
 
-	rotated := oauthClientWrite(t, handler, cookie, csrf, http.MethodPost, "/oauth-clients/automation/secret", map[string]any{"reason": "rotate automation secret"})
-	if rotated.Code != http.StatusOK || !bytes.Contains(rotated.Body.Bytes(), []byte("clientSecret")) {
-		t.Fatalf("rotate status=%d body=%s", rotated.Code, rotated.Body.String())
+	rotated := oauthClientWrite(
+		t,
+		handler,
+		cookie,
+		csrf,
+		http.MethodPost,
+		"/oauth-clients/automation/secret",
+		map[string]any{"reason": "rotate automation secret"},
+	)
+	if rotated.Code != http.StatusOK ||
+		!bytes.Contains(rotated.Body.Bytes(), []byte("clientSecret")) {
+		t.Fatalf(
+			"rotate status=%d body=%s",
+			rotated.Code,
+			rotated.Body.String(),
+		)
 	}
 
-	invalid := oauthClientWrite(t, handler, cookie, csrf, http.MethodPost, "/oauth-clients", map[string]any{
-		"id": "unsafe", "name": "Unsafe", "public": true, "redirectUris": []string{"https://client.example/callback"},
-		"grantTypes": []string{"password"}, "scopes": []string{"kubeloop.api"}, "enabled": true,
-		"reason": "reject unsupported grant",
-	})
+	invalid := oauthClientWrite(
+		t,
+		handler,
+		cookie,
+		csrf,
+		http.MethodPost,
+		"/oauth-clients",
+		map[string]any{
+			"id":              "unsafe",
+			nameField:         "Unsafe",
+			publicField:       true,
+			redirectURIsField: []string{"https://client.example/callback"},
+			grantTypesField:   []string{"password"},
+			scopesField:       []string{"kubeloop.api"},
+			enabledField:      true,
+			"reason":          "reject unsupported grant",
+		},
+	)
 	if invalid.Code != http.StatusBadRequest {
-		t.Fatalf("unsafe public password client status=%d body=%s", invalid.Code, invalid.Body.String())
+		t.Fatalf(
+			"unsafe public password client status=%d body=%s",
+			invalid.Code,
+			invalid.Body.String(),
+		)
 	}
 }
 
@@ -57,7 +111,7 @@ func TestOAuthClientRedirectURIValidation(t *testing.T) {
 		redirect string
 		valid    bool
 	}{
-		{name: "https", clientID: "client", redirect: "https://client.example/callback", valid: true},
+		{name: schemeHTTPS, clientID: "client", redirect: "https://client.example/callback", valid: true},
 		{name: "IPv4 loopback", clientID: "client", redirect: "http://127.0.0.1:8080/callback", valid: true},
 		{name: "IPv6 loopback", clientID: "client", redirect: "http://[::1]:8080/callback", valid: true},
 		{name: "desktop protocol", clientID: storage.DesktopOAuthClientID, redirect: storage.DesktopOAuthRedirectURI, valid: true},
@@ -68,13 +122,20 @@ func TestOAuthClientRedirectURIValidation(t *testing.T) {
 		{name: "fragment", clientID: "client", redirect: "https://client.example/callback#token"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
 			_, err := oauthClientFromInput(oauthClientInput{
 				ID: test.clientID, Name: "Client", Public: true,
-				RedirectURIs: []string{test.redirect}, GrantTypes: []string{"authorization_code"},
+				RedirectURIs: []string{
+					test.redirect,
+				}, GrantTypes: []string{"authorization_code"},
 				Scopes: []string{"openid"}, Enabled: true,
 			})
 			if (err == nil) != test.valid {
-				t.Fatalf("oauthClientFromInput() error = %v, valid = %t", err, test.valid)
+				t.Fatalf(
+					"oauthClientFromInput() error = %v, valid = %t",
+					err,
+					test.valid,
+				)
 			}
 		})
 	}
@@ -85,7 +146,13 @@ func TestOAuthClientRedirectURIValidation(t *testing.T) {
 // construction and are immediately replaced above.
 func nilSafeRepositories(t *testing.T) storage.Repositories {
 	t.Helper()
-	store, err := storage.Open(t.Context(), storage.Config{Backend: storage.BackendSQLite, SQLitePath: t.TempDir() + "/oauth-options.db"})
+	store, err := storage.Open(
+		t.Context(),
+		storage.Config{
+			Backend:    storage.BackendSQLite,
+			SQLitePath: t.TempDir() + "/oauth-options.db",
+		},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +163,13 @@ func nilSafeTransactions(t *testing.T) storage.TransactionManager {
 	return nilSafeRepositories(t).(storage.TransactionManager)
 }
 
-func oauthClientWrite(t *testing.T, handler *Handler, cookie *http.Cookie, csrf, method, path string, body any) *httptest.ResponseRecorder {
+func oauthClientWrite(
+	t *testing.T,
+	handler *Handler,
+	cookie *http.Cookie,
+	csrf, method, path string,
+	body any,
+) *httptest.ResponseRecorder {
 	t.Helper()
 	raw, err := json.Marshal(body)
 	if err != nil {

@@ -12,6 +12,7 @@ const (
 	LivePath    = "/health/live"
 	ReadyPath   = "/health/ready"
 	MetricsPath = "/metrics"
+	statusKey   = "status"
 )
 
 type GatewayState interface {
@@ -56,16 +57,16 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 
 func (handler *Handler) live(ctx *echo.Context) error {
 	ctx.Response().Header().Set(echo.HeaderCacheControl, "no-store")
-	return ctx.JSON(http.StatusOK, map[string]string{"status": "ok"})
+	return ctx.JSON(http.StatusOK, map[string]string{statusKey: "ok"})
 }
 
 func (handler *Handler) ready(ctx *echo.Context) error {
 	ctx.Response().Header().Set(echo.HeaderCacheControl, "no-store")
 	ready, status := handler.readiness()
 	if !ready {
-		return ctx.JSON(http.StatusServiceUnavailable, map[string]string{"status": status})
+		return ctx.JSON(http.StatusServiceUnavailable, map[string]string{statusKey: status})
 	}
-	return ctx.JSON(http.StatusOK, map[string]string{"status": "ready"})
+	return ctx.JSON(http.StatusOK, map[string]string{statusKey: "ready"})
 }
 
 func (handler *Handler) metrics(ctx *echo.Context) error {
@@ -102,7 +103,10 @@ func (handler *Handler) metrics(ctx *echo.Context) error {
 	_, _ = fmt.Fprintf(writer, "# HELP kubeloop_gateway_active_connections Active logical tunnel connections.\n")
 	_, _ = fmt.Fprintf(writer, "# TYPE kubeloop_gateway_active_connections gauge\n")
 	_, _ = fmt.Fprintf(writer, "kubeloop_gateway_active_connections %d\n", activeConnections)
-	_, _ = fmt.Fprintf(writer, "# HELP kubeloop_gateway_active_websocket_sessions Active physical WebSocket sessions.\n")
+	_, _ = fmt.Fprintf(
+		writer,
+		"# HELP kubeloop_gateway_active_websocket_sessions Active physical WebSocket sessions.\n",
+	)
 	_, _ = fmt.Fprintf(writer, "# TYPE kubeloop_gateway_active_websocket_sessions gauge\n")
 	_, _ = fmt.Fprintf(writer, "kubeloop_gateway_active_websocket_sessions %d\n", activeSessions)
 	return nil

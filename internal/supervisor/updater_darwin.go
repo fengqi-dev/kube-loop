@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"os/exec"
 	"os/user"
@@ -21,8 +22,9 @@ import (
 	"syscall"
 	"time"
 
-	supervisorprotocol "github.com/fengqi-dev/kube-loop/internal/protocol/supervisor"
 	"golang.org/x/sys/unix"
+
+	supervisorprotocol "github.com/fengqi-dev/kube-loop/internal/protocol/supervisor"
 )
 
 var requestIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
@@ -79,7 +81,11 @@ func (u *Updater) Recover(ctx context.Context) error {
 	return os.Remove(u.config.JournalPath())
 }
 
-func (u *Updater) Update(ctx context.Context, manifest supervisorprotocol.UpdateManifest, body io.Reader) (response supervisorprotocol.Response) {
+func (u *Updater) Update(
+	ctx context.Context,
+	manifest supervisorprotocol.UpdateManifest,
+	body io.Reader,
+) (response supervisorprotocol.Response) {
 	response.Protocol = supervisorprotocol.Version
 	response.Channel = u.config.Channel
 	if err := validateManifest(u.config, manifest); err != nil {
@@ -115,8 +121,13 @@ func (u *Updater) Update(ctx context.Context, manifest supervisorprotocol.Update
 		response.Error = err.Error()
 		return response
 	}
-	defer os.Remove(staged)
-	if err := u.writeJournal(journal{RequestID: manifest.RequestID, Phase: "staged", Version: manifest.Version, SHA256: manifest.SHA256}); err != nil {
+	defer func() { _ = os.Remove(staged) }()
+	if err := u.writeJournal(journal{
+		RequestID: manifest.RequestID,
+		Phase:     "staged",
+		Version:   manifest.Version,
+		SHA256:    manifest.SHA256,
+	}); err != nil {
 		response.Error = err.Error()
 		return response
 	}
@@ -178,10 +189,17 @@ func (u *Updater) acquireLock() (*os.File, error) {
 	return lock, nil
 }
 
-func (u *Updater) stageWorker(ctx context.Context, path string, manifest supervisorprotocol.UpdateManifest, body io.Reader) error {
+func (u *Updater) stageWorker(
+	ctx context.Context,
+	path string,
+	manifest supervisorprotocol.UpdateManifest,
+	body io.Reader,
+) error {
+	//nolint:gosec // The staged worker must be executable for identity verification.
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o755)
 	if os.IsExist(err) {
 		_ = os.Remove(path)
+		//nolint:gosec // The staged worker must be executable for identity verification.
 		file, err = os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o755)
 	}
 	if err != nil {
@@ -222,7 +240,7 @@ func (u *Updater) stageWorker(ctx context.Context, path string, manifest supervi
 		_ = os.Remove(path)
 		return err
 	}
-	if u.config.Channel == "release" {
+	if u.config.Channel == releaseChannel {
 		if output, err := exec.Command("/usr/bin/codesign", "--verify", "--strict", path).CombinedOutput(); err != nil {
 			_ = os.Remove(path)
 			return fmt.Errorf("verify worker signature: %w: %s", err, output)
@@ -249,8 +267,12 @@ func (w *limitedBuffer) Write(p []byte) (int, error) {
 	return w.buffer.Write(p)
 }
 
-func (u *Updater) verifyWorkerIdentity(ctx context.Context, path string, manifest supervisorprotocol.UpdateManifest) error {
-	account, err := user.LookupId(fmt.Sprintf("%d", u.artifactUID))
+func (u *Updater) verifyWorkerIdentity(
+	ctx context.Context,
+	path string,
+	manifest supervisorprotocol.UpdateManifest,
+) error {
+	account, err := user.LookupId(strconv.Itoa(u.artifactUID))
 	if err != nil {
 		return fmt.Errorf("resolve artifact owner: %w", err)
 	}
@@ -261,6 +283,9 @@ func (u *Updater) verifyWorkerIdentity(ctx context.Context, path string, manifes
 	verifyCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	command := exec.CommandContext(verifyCtx, path, "identity")
+	if u.artifactUID < 0 || uint64(u.artifactUID) > math.MaxUint32 {
+		return fmt.Errorf("artifact owner UID %d is outside uint32 range", u.artifactUID)
+	}
 	command.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{
 		Uid: uint32(u.artifactUID), Gid: uint32(gid),
 	}}
@@ -276,8 +301,15 @@ func (u *Updater) verifyWorkerIdentity(ctx context.Context, path string, manifes
 	if err := decoder.Decode(&identity); err != nil {
 		return fmt.Errorf("decode worker identity: %w", err)
 	}
-	if identity.Kind != "kubeloop-helper" || identity.Version != manifest.Version || identity.Protocol != manifest.WorkerProtocol {
-		return fmt.Errorf("worker identity mismatch: kind=%q version=%q protocol=%d", identity.Kind, identity.Version, identity.Protocol)
+	wrongIdentity := identity.Kind != "kubeloop-helper" || identity.Version != manifest.Version ||
+		identity.Protocol != manifest.WorkerProtocol
+	if wrongIdentity {
+		return fmt.Errorf(
+			"worker identity mismatch: kind=%q version=%q protocol=%d",
+			identity.Kind,
+			identity.Version,
+			identity.Protocol,
+		)
 	}
 	return nil
 }
@@ -287,7 +319,7 @@ func verifyMachO(path string) error {
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	var magic [4]byte
 	if _, err := io.ReadFull(file, magic[:]); err != nil {
 		return fmt.Errorf("read worker executable header: %w", err)
@@ -302,7 +334,11 @@ func verifyMachO(path string) error {
 	return nil
 }
 
-func (u *Updater) activate(ctx context.Context, staged string, manifest supervisorprotocol.UpdateManifest) (bool, error) {
+func (u *Updater) activate(
+	ctx context.Context,
+	staged string,
+	manifest supervisorprotocol.UpdateManifest,
+) (bool, error) {
 	if err := u.worker.Stop(ctx); err != nil {
 		return false, err
 	}
@@ -314,12 +350,18 @@ func (u *Updater) activate(ctx context.Context, staged string, manifest supervis
 			return false, fmt.Errorf("preserve previous worker: %w", err)
 		}
 	}
-	if err := u.writeJournal(journal{RequestID: manifest.RequestID, Phase: "swapping", Version: manifest.Version, SHA256: manifest.SHA256}); err != nil {
+	if err := u.writeJournal(journal{
+		RequestID: manifest.RequestID,
+		Phase:     "swapping",
+		Version:   manifest.Version,
+		SHA256:    manifest.SHA256,
+	}); err != nil {
 		return u.rollback(ctx, err)
 	}
 	if err := os.Rename(staged, u.config.WorkerBinaryPath); err != nil {
 		return u.rollback(ctx, fmt.Errorf("activate staged worker: %w", err))
 	}
+	//nolint:gosec // The installed worker must be executable by launchd.
 	if err := os.Chmod(u.config.WorkerBinaryPath, 0o755); err != nil {
 		return u.rollback(ctx, fmt.Errorf("secure worker executable: %w", err))
 	}
@@ -348,7 +390,13 @@ func (u *Updater) waitReady(ctx context.Context, manifest supervisorprotocol.Upd
 		if err != nil {
 			lastErr = err
 		} else {
-			lastErr = fmt.Errorf("worker readiness mismatch: version=%q protocol=%d coreReady=%v sha256=%q", status.Version, status.Protocol, status.CoreReady, status.SHA256)
+			lastErr = fmt.Errorf(
+				"worker readiness mismatch: version=%q protocol=%d coreReady=%v sha256=%q",
+				status.Version,
+				status.Protocol,
+				status.CoreReady,
+				status.SHA256,
+			)
 		}
 		timer := time.NewTimer(u.readyInterval)
 		select {

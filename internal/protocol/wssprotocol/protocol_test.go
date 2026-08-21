@@ -49,9 +49,13 @@ func TestHandshakeAdvertisesTunnelTrafficStreams(t *testing.T) {
 
 func TestHandshakeRejectsUnknownMissingDuplicateAndOversizedValues(t *testing.T) {
 	tests := [][]byte{
-		[]byte(`{"type":"client_hello","protocolVersions":["2.0"],"clientVersion":"2.0.0","deviceId":"device","capabilities":["smux.v2"],"unknown":true}`),
+		[]byte(
+			`{"type":"client_hello","protocolVersions":["2.0"],"clientVersion":"2.0.0","deviceId":"device","capabilities":["smux.v2"],"unknown":true}`,
+		),
 		[]byte(`{"type":"client_hello","protocolVersions":["2.0"],"clientVersion":"2.0.0","capabilities":["smux.v2"]}`),
-		[]byte(`{"type":"client_hello","protocolVersions":["2.0","2.0"],"clientVersion":"2.0.0","deviceId":"device","capabilities":["smux.v2"]}`),
+		[]byte(
+			`{"type":"client_hello","protocolVersions":["2.0","2.0"],"clientVersion":"2.0.0","deviceId":"device","capabilities":["smux.v2"]}`,
+		),
 		[]byte(`{"type":"unknown"}`),
 		bytes.Repeat([]byte{'x'}, MaximumHandshakeBytes+1),
 	}
@@ -67,10 +71,18 @@ func TestVersionNegotiationAndClientMinimum(t *testing.T) {
 	if err != nil || selected != "2.0" {
 		t.Fatalf("selected = %q, %v", selected, err)
 	}
-	if _, err := Negotiate([]string{"2.1"}, []string{"2.0"}); err == nil || !strings.Contains(err.Error(), CodeVersionMismatch) {
+	if _, err := Negotiate(
+		[]string{"2.1"},
+		[]string{"2.0"},
+	); err == nil ||
+		!strings.Contains(err.Error(), CodeVersionMismatch) {
 		t.Fatalf("version mismatch = %v", err)
 	}
-	if err := CheckClientVersion("2.0.0", "2.1.0"); err == nil || !strings.Contains(err.Error(), CodeClientVersionUnsupported) {
+	if err := CheckClientVersion(
+		"2.0.0",
+		"2.1.0",
+	); err == nil ||
+		!strings.Contains(err.Error(), CodeClientVersionUnsupported) {
 		t.Fatalf("client version = %v", err)
 	}
 	if err := CheckClientVersion("dev", "99.0.0"); err != nil {

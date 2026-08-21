@@ -15,9 +15,11 @@ func EndpointHostPolicy(allowed ...string) (EndpointPolicy, error) {
 	normalized := make([]string, 0, len(allowed))
 	for _, candidate := range allowed {
 		candidate = strings.ToLower(strings.TrimSpace(candidate))
-		if candidate == "" || strings.ContainsAny(candidate, "/:@[]") || strings.HasSuffix(candidate, ".") ||
-			candidate == "." || strings.Contains(candidate, "..") {
-			return nil, errors.New("Relay endpoint host policy is invalid")
+		if candidate == "" || strings.ContainsAny(candidate, "/:@[]") ||
+			strings.HasSuffix(candidate, ".") ||
+			candidate == "." ||
+			strings.Contains(candidate, "..") {
+			return nil, errors.New("relay endpoint host policy is invalid")
 		}
 		normalized = append(normalized, candidate)
 	}
@@ -27,12 +29,13 @@ func EndpointHostPolicy(allowed ...string) (EndpointPolicy, error) {
 	return func(_ relaycontrol.PeerIdentity, endpoint string) error {
 		parsed, err := url.Parse(endpoint)
 		if err != nil {
-			return errors.New("Relay endpoint is invalid")
+			return errors.New("relay endpoint is invalid")
 		}
 		host := strings.ToLower(parsed.Hostname())
 		for _, allowedHost := range normalized {
 			if strings.HasPrefix(allowedHost, ".") {
-				if strings.HasSuffix(host, allowedHost) && len(host) > len(allowedHost) {
+				if strings.HasSuffix(host, allowedHost) &&
+					len(host) > len(allowedHost) {
 					return nil
 				}
 				continue
@@ -41,6 +44,6 @@ func EndpointHostPolicy(allowed ...string) (EndpointPolicy, error) {
 				return nil
 			}
 		}
-		return errors.New("Relay endpoint host is not allowed")
+		return errors.New("relay endpoint host is not allowed")
 	}, nil
 }

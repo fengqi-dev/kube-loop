@@ -6,8 +6,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/fengqi-dev/kube-loop/internal/update"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
+
+	"github.com/fengqi-dev/kube-loop/internal/update"
 )
 
 func (a *App) CheckForUpdates() update.Info {
@@ -26,7 +27,7 @@ func (a *App) OpenUpdatePage() error {
 	target := a.updateState.URL
 	a.updateMu.RUnlock()
 	if target == "" {
-		target = "https://github.com/fengqi-dev/kube-loop/releases"
+		target = releaseURL
 	}
 	if a.ctx == nil {
 		err := errors.New("application is not ready")

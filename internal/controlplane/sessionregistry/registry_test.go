@@ -10,11 +10,19 @@ import (
 
 func TestDisconnectCancelsStreamsAndWaitsForRelease(t *testing.T) {
 	registry := New(context.Background())
-	firstContext, releaseFirst, err := registry.Attach(context.Background(), "session-a", "task-a")
+	firstContext, releaseFirst, err := registry.Attach(
+		context.Background(),
+		"session-a",
+		"task-a",
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	secondContext, releaseSecond, err := registry.Attach(context.Background(), "session-a", "task-b")
+	secondContext, releaseSecond, err := registry.Attach(
+		context.Background(),
+		"session-a",
+		"task-b",
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +58,11 @@ func TestDisconnectCancelsStreamsAndWaitsForRelease(t *testing.T) {
 func TestParentCancellationAndShutdownRejectNewStreams(t *testing.T) {
 	registry := New(context.Background())
 	parent, cancelParent := context.WithCancel(context.Background())
-	streamContext, release, err := registry.Attach(parent, "session-a", "task-a")
+	streamContext, release, err := registry.Attach(
+		parent,
+		"session-a",
+		"task-a",
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +78,10 @@ func TestParentCancellationAndShutdownRejectNewStreams(t *testing.T) {
 	if err := registry.Shutdown(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := registry.Attach(context.Background(), "session-b", "task-b"); !errors.Is(err, ErrClosed) {
+	if _, _, err := registry.Attach(context.Background(), "session-b", "task-b"); !errors.Is(
+		err,
+		ErrClosed,
+	) {
 		t.Fatalf("Attach after shutdown = %v", err)
 	}
 }

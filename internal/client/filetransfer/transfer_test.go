@@ -12,11 +12,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/filestream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
-	"github.com/google/uuid"
 )
 
 type testClient struct{ endpoint string }
@@ -30,10 +31,23 @@ func (client testClient) CreateFileTransferTask(
 ) (remote.FileTransferTask, error) {
 	now := time.Now().UTC()
 	return remote.FileTransferTask{
-		ID: uuid.NewString(), SessionID: session.ID, Namespace: session.Namespace, State: "pending",
-		Direction: spec.Direction, Kind: spec.Kind, Pod: spec.Pod, Container: spec.Container,
-		RemotePath: spec.RemotePath, Size: spec.Size, Offset: spec.Offset, Checksum: spec.Checksum,
-		Overwrite: spec.Overwrite, ResumeID: spec.ResumeID, CreatedAt: now, UpdatedAt: now, ExpiresAt: now.Add(time.Minute),
+		ID:         uuid.NewString(),
+		SessionID:  session.ID,
+		Namespace:  session.Namespace,
+		State:      "pending",
+		Direction:  spec.Direction,
+		Kind:       spec.Kind,
+		Pod:        spec.Pod,
+		Container:  spec.Container,
+		RemotePath: spec.RemotePath,
+		Size:       spec.Size,
+		Offset:     spec.Offset,
+		Checksum:   spec.Checksum,
+		Overwrite:  spec.Overwrite,
+		ResumeID:   spec.ResumeID,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+		ExpiresAt:  now.Add(time.Minute),
 	}, nil
 }
 
@@ -56,7 +70,7 @@ func TestUploadStreamsDataWhileReceivingProgressAndVerifiesResult(t *testing.T) 
 			t.Error(err)
 			return
 		}
-		defer connection.CloseNow()
+		defer checkTestClose(t, connection.CloseNow)
 		connection.SetReadLimit(filestream.MaximumData + 1)
 		hash := sha256.New()
 		var transferred uint64
@@ -86,7 +100,9 @@ func TestUploadStreamsDataWhileReceivingProgressAndVerifiesResult(t *testing.T) 
 			}
 			_, _ = hash.Write(frame.Payload)
 			transferred += uint64(len(frame.Payload))
-			progress, _ := filestream.EncodeProgress(filestream.ProgressStatus{Transferred: transferred, Total: uint64(len(contents))})
+			progress, _ := filestream.EncodeProgress(
+				filestream.ProgressStatus{Transferred: transferred, Total: uint64(len(contents))},
+			)
 			if err := connection.Write(request.Context(), websocket.MessageBinary, progress); err != nil {
 				t.Error(err)
 				return
@@ -97,10 +113,14 @@ func TestUploadStreamsDataWhileReceivingProgressAndVerifiesResult(t *testing.T) 
 	var progress filestream.ProgressStatus
 	task, result, err := Upload(
 		context.Background(), testClient{endpoint: websocketURL(server.URL)}, profile.Profile{ID: "server"},
-		remote.Session{ID: "session", Namespace: "development", State: "active"},
+		remote.Session{ID: "session", Namespace: "development", State: fileTransferSessionActive},
 		remote.FileTransferSpec{
-			Direction: "upload", Kind: "file", Pod: "api-0", RemotePath: "/workspace/data.bin",
-			Size: uint64(len(contents)), Checksum: filestream.FormatChecksum(checksum),
+			Direction:  fileTransferDirectionUpload,
+			Kind:       fileTransferKindFile,
+			Pod:        "api-0",
+			RemotePath: "/workspace/data.bin",
+			Size:       uint64(len(contents)),
+			Checksum:   filestream.FormatChecksum(checksum),
 		}, bytes.NewReader(contents), func(value filestream.ProgressStatus) { progress = value },
 	)
 	if err != nil || task.ID == "" || result.Status != filestream.ResultSucceeded || result.Checksum != checksum ||
@@ -118,15 +138,20 @@ func TestDownloadWritesOnlyDataAndVerifiesChecksum(t *testing.T) {
 			t.Error(err)
 			return
 		}
-		defer connection.CloseNow()
+		defer checkTestClose(t, connection.CloseNow)
 		for offset := 0; offset < len(contents); offset += filestream.MaximumData {
 			end := min(offset+filestream.MaximumData, len(contents))
 			data, _ := filestream.Encode(filestream.Frame{Type: filestream.Data, Payload: contents[offset:end]})
 			_ = connection.Write(request.Context(), websocket.MessageBinary, data)
 		}
-		progress, _ := filestream.EncodeProgress(filestream.ProgressStatus{Transferred: uint64(len(contents)), Total: uint64(len(contents))})
+		progress, _ := filestream.EncodeProgress(
+			filestream.ProgressStatus{Transferred: uint64(len(contents)), Total: uint64(len(contents))},
+		)
 		result, _ := filestream.EncodeResult(filestream.TransferResult{
-			Status: filestream.ResultSucceeded, Transferred: uint64(len(contents)), Checksum: checksum, HasChecksum: true,
+			Status:      filestream.ResultSucceeded,
+			Transferred: uint64(len(contents)),
+			Checksum:    checksum,
+			HasChecksum: true,
 		})
 		_ = connection.Write(request.Context(), websocket.MessageBinary, progress)
 		_ = connection.Write(request.Context(), websocket.MessageBinary, result)
@@ -135,12 +160,21 @@ func TestDownloadWritesOnlyDataAndVerifiesChecksum(t *testing.T) {
 	var output bytes.Buffer
 	var progress filestream.ProgressStatus
 	_, result, err := Download(
-		context.Background(), testClient{endpoint: websocketURL(server.URL)}, profile.Profile{ID: "server"},
-		remote.Session{ID: "session", Namespace: "development", State: "active"},
-		remote.FileTransferSpec{Direction: "download", Kind: "file", Pod: "api-0", RemotePath: "/workspace/data.bin"},
-		&output, func(value filestream.ProgressStatus) { progress = value },
+		context.Background(),
+		testClient{endpoint: websocketURL(server.URL)},
+		profile.Profile{ID: "server"},
+		remote.Session{ID: "session", Namespace: "development", State: fileTransferSessionActive},
+		remote.FileTransferSpec{
+			Direction:  fileTransferDirectionDownload,
+			Kind:       fileTransferKindFile,
+			Pod:        "api-0",
+			RemotePath: "/workspace/data.bin",
+		},
+		&output,
+		func(value filestream.ProgressStatus) { progress = value },
 	)
-	if err != nil || !bytes.Equal(output.Bytes(), contents) || result.Checksum != checksum || progress.Total != uint64(len(contents)) {
+	if err != nil || !bytes.Equal(output.Bytes(), contents) || result.Checksum != checksum ||
+		progress.Total != uint64(len(contents)) {
 		t.Fatalf("output bytes = %d result = %#v progress = %#v err = %v", output.Len(), result, progress, err)
 	}
 }
@@ -153,7 +187,7 @@ func TestDownloadCancelsGatewayWhenLocalWriterFails(t *testing.T) {
 			t.Error(err)
 			return
 		}
-		defer connection.CloseNow()
+		defer checkTestClose(t, connection.CloseNow)
 		data, _ := filestream.Encode(filestream.Frame{Type: filestream.Data, Payload: []byte("payload")})
 		if err := connection.Write(request.Context(), websocket.MessageBinary, data); err != nil {
 			t.Error(err)
@@ -171,10 +205,18 @@ func TestDownloadCancelsGatewayWhenLocalWriterFails(t *testing.T) {
 	}))
 	defer server.Close()
 	_, _, err := Download(
-		context.Background(), testClient{endpoint: websocketURL(server.URL)}, profile.Profile{ID: "server"},
-		remote.Session{ID: "session", Namespace: "development", State: "active"},
-		remote.FileTransferSpec{Direction: "download", Kind: "file", Pod: "api-0", RemotePath: "/workspace/data.bin"},
-		failingWriter{}, nil,
+		context.Background(),
+		testClient{endpoint: websocketURL(server.URL)},
+		profile.Profile{ID: "server"},
+		remote.Session{ID: "session", Namespace: "development", State: fileTransferSessionActive},
+		remote.FileTransferSpec{
+			Direction:  fileTransferDirectionDownload,
+			Kind:       fileTransferKindFile,
+			Pod:        "api-0",
+			RemotePath: "/workspace/data.bin",
+		},
+		failingWriter{},
+		nil,
 	)
 	if err == nil {
 		t.Fatal("local writer failure was ignored")

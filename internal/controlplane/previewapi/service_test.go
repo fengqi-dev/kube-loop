@@ -12,15 +12,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/labstack/echo/v5"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/servicebinding"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/sessionapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
-	"github.com/google/uuid"
-	"github.com/labstack/echo/v5"
-	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 type previewTestSessions struct{ session sessionapi.ActiveSession }
@@ -30,7 +31,8 @@ func (sessions previewTestSessions) RequireActive(
 	_ controlplaneapi.Identity,
 	namespace, sessionID string,
 ) (sessionapi.ActiveSession, *controlplaneapi.Error) {
-	if namespace != sessions.session.Namespace || sessionID != sessions.session.ID {
+	if namespace != sessions.session.Namespace ||
+		sessionID != sessions.session.ID {
 		return sessionapi.ActiveSession{}, notFound()
 	}
 	return sessions.session, nil
@@ -60,8 +62,11 @@ func (resources *recordingPreviewResources) Create(
 		return nil, resources.createErr
 	}
 	return &corev1.Service{
-		ObjectMeta: metav1.ObjectMeta{Name: snapshot.Service, Namespace: snapshot.Namespace},
-		Spec:       corev1.ServiceSpec{ClusterIP: "10.96.0.40"},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      snapshot.Service,
+			Namespace: snapshot.Namespace,
+		},
+		Spec: corev1.ServiceSpec{ClusterIP: "10.96.0.40"},
 	}, nil
 }
 
@@ -90,44 +95,96 @@ func TestPreviewTaskIsOwnedIdempotentAndDurablyStopped(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := "/api/sessions/" + active.ID + "/previews?namespace=development"
-	body := []byte(`{"name":"local-api","ports":[{"servicePort":53,"protocol":"udp"},{"name":"http","servicePort":80,"protocol":"tcp"}]}`)
-	created, apiError := previewRequest(handler, identity, http.MethodPost, path, body, "preview-1")
+	body := []byte(
+		`{"name":"local-api","ports":[{"servicePort":53,"protocol":"udp"},{"name":"http","servicePort":80,"protocol":"tcp"}]}`,
+	)
+	created, apiError := previewRequest(
+		handler,
+		identity,
+		http.MethodPost,
+		path,
+		body,
+		"preview-1",
+	)
 	if apiError != nil || created.Code != http.StatusCreated {
-		t.Fatalf("create Preview: status=%d error=%#v body=%s", created.Code, apiError, created.Body.String())
+		t.Fatalf(
+			"create Preview: status=%d error=%#v body=%s",
+			created.Code,
+			apiError,
+			created.Body.String(),
+		)
 	}
 	var document Document
 	if err := json.Unmarshal(created.Body.Bytes(), &document); err != nil || document.ID == "" ||
-		document.State != "pending" || len(document.Ports) != 2 || document.Ports[0].Name != "udp-53" {
+		document.State != "pending" || len(document.Ports) != 2 ||
+		document.Ports[0].Name != "udp-53" {
 		t.Fatalf("created Preview document=%#v err=%v", document, err)
 	}
 	if bytes.Contains(created.Body.Bytes(), []byte(`"expiresAt"`)) {
-		t.Fatalf("Preview response contains an expiration: %s", created.Body.String())
+		t.Fatalf(
+			"Preview response contains an expiration: %s",
+			created.Body.String(),
+		)
 	}
 	stored, err := stateStore.Tasks().GetByID(context.Background(), document.ID)
 	if err != nil || stored.ExpiresAt != nil {
 		t.Fatalf("stored Preview expiration=%v err=%v", stored.ExpiresAt, err)
 	}
-	replayed, apiError := previewRequest(handler, identity, http.MethodPost, path, body, "preview-1")
-	if apiError != nil || replayed.Code != http.StatusOK || replayed.Header().Get("Idempotent-Replayed") != "true" {
-		t.Fatalf("replayed Preview: status=%d error=%#v", replayed.Code, apiError)
+	replayed, apiError := previewRequest(
+		handler,
+		identity,
+		http.MethodPost,
+		path,
+		body,
+		"preview-1",
+	)
+	if apiError != nil || replayed.Code != http.StatusOK ||
+		replayed.Header().Get("Idempotent-Replayed") != "true" {
+		t.Fatalf(
+			"replayed Preview: status=%d error=%#v",
+			replayed.Code,
+			apiError,
+		)
 	}
 	_, apiError = previewRequest(
-		handler, identity, http.MethodPost, path,
-		[]byte(`{"name":"other","ports":[{"servicePort":80,"protocol":"tcp"}]}`), "preview-1",
+		handler,
+		identity,
+		http.MethodPost,
+		path,
+		[]byte(
+			`{"name":"other","ports":[{"servicePort":80,"protocol":"tcp"}]}`,
+		),
+		"preview-1",
 	)
 	if apiError == nil || apiError.Code != controlplaneapi.CodeConflict {
 		t.Fatalf("idempotency mismatch error=%#v", apiError)
 	}
 	taskPath := "/api/sessions/" + active.ID + "/previews/" + document.ID + "?namespace=development"
 	_, apiError = previewRequest(
-		handler, controlplaneapi.Identity{Subject: uuid.NewString()}, http.MethodGet, taskPath, nil, "",
+		handler,
+		controlplaneapi.Identity{Subject: uuid.NewString()},
+		http.MethodGet,
+		taskPath,
+		nil,
+		"",
 	)
 	if apiError == nil || apiError.Code != controlplaneapi.CodeNotFound {
 		t.Fatalf("cross-identity get error=%#v", apiError)
 	}
-	stopped, apiError := previewRequest(handler, identity, http.MethodDelete, taskPath, nil, "")
+	stopped, apiError := previewRequest(
+		handler,
+		identity,
+		http.MethodDelete,
+		taskPath,
+		nil,
+		"",
+	)
 	if apiError != nil || stopped.Code != http.StatusOK {
-		t.Fatalf("stop pending Preview: status=%d error=%#v", stopped.Code, apiError)
+		t.Fatalf(
+			"stop pending Preview: status=%d error=%#v",
+			stopped.Code,
+			apiError,
+		)
 	}
 	stored, err = stateStore.Tasks().GetByID(context.Background(), document.ID)
 	if err != nil || stored.State != "stopped" {
@@ -138,7 +195,9 @@ func TestPreviewTaskIsOwnedIdempotentAndDurablyStopped(t *testing.T) {
 func TestPreviewRequestValidationRejectsInvalidKubernetesNames(t *testing.T) {
 	stateStore, identity, active := previewTestStore(t)
 	handler, err := New(
-		stateStore, previewTestSessions{session: active}, &recordingPreviewResources{},
+		stateStore,
+		previewTestSessions{session: active},
+		&recordingPreviewResources{},
 		Config{},
 	)
 	if err != nil {
@@ -150,14 +209,24 @@ func TestPreviewRequestValidationRejectsInvalidKubernetesNames(t *testing.T) {
 		[]byte(`{"name":"local-api","ports":[{"name":"bad_name","servicePort":80,"protocol":"tcp"}]}`),
 		[]byte(`{"name":"local-api","ports":[{"name":"http","servicePort":80,"protocol":"tcp"},{"name":"http","servicePort":81,"protocol":"tcp"}]}`),
 	} {
-		_, apiError := previewRequest(handler, identity, http.MethodPost, path, body, uuid.NewString())
-		if apiError == nil || apiError.Code != controlplaneapi.CodeInvalidArgument {
+		_, apiError := previewRequest(
+			handler,
+			identity,
+			http.MethodPost,
+			path,
+			body,
+			uuid.NewString(),
+		)
+		if apiError == nil ||
+			apiError.Code != controlplaneapi.CodeInvalidArgument {
 			t.Fatalf("invalid Preview body=%s error=%#v", body, apiError)
 		}
 	}
 }
 
-func previewTestStore(t *testing.T) (*storage.Store, controlplaneapi.Identity, sessionapi.ActiveSession) {
+func previewTestStore(
+	t *testing.T,
+) (*storage.Store, controlplaneapi.Identity, sessionapi.ActiveSession) {
 	t.Helper()
 	ctx := context.Background()
 	stateStore, err := storage.Open(ctx, storage.Config{
@@ -174,7 +243,9 @@ func previewTestStore(t *testing.T) (*storage.Store, controlplaneapi.Identity, s
 	}); err != nil {
 		t.Fatal(err)
 	}
-	network, err := networkspec.Normalize(networkspec.Spec{ServiceIPs: []string{"10.96.0.10"}})
+	network, err := networkspec.Normalize(
+		networkspec.Spec{ServiceIPs: []string{"10.96.0.10"}},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,7 +262,12 @@ func previewTestStore(t *testing.T) (*storage.Store, controlplaneapi.Identity, s
 	}
 	return stateStore,
 		controlplaneapi.Identity{Subject: identityID, DeviceID: "device"},
-		sessionapi.ActiveSession{ID: sessionID, Namespace: "development", Generation: 1, ExpiresAt: expiresAt}
+		sessionapi.ActiveSession{
+			ID:         sessionID,
+			Namespace:  "development",
+			Generation: 1,
+			ExpiresAt:  expiresAt,
+		}
 }
 
 func previewRequest(
@@ -212,19 +288,39 @@ func previewRequest(
 	return response, serveAPI(handler, response, request, identity)
 }
 
-func serveAPI(handler *Service, writer http.ResponseWriter, request *http.Request, identity controlplaneapi.Identity) *controlplaneapi.Error {
+func serveAPI(
+	handler *Service,
+	writer http.ResponseWriter,
+	request *http.Request,
+	identity controlplaneapi.Identity,
+) *controlplaneapi.Error {
 	routes := NewRoutes(handler)
 	parts := strings.Split(strings.Trim(request.URL.Path, "/"), "/")
 	request.SetPathValue("sessionID", parts[2])
 	if len(parts) > 4 {
 		request.SetPathValue("taskID", parts[4])
 	}
-	switch {
-	case request.Method == http.MethodPost:
-		return routes.withSession(handler.create)(echo.New().NewContext(request, writer), identity)
-	case request.Method == http.MethodDelete:
-		return routes.withTask(handler.stop)(echo.New().NewContext(request, writer), identity)
+	switch request.Method {
+	case http.MethodPost:
+		return routes.withSession(
+			handler.create,
+		)(
+			echo.New().NewContext(request, writer),
+			identity,
+		)
+	case http.MethodDelete:
+		return routes.withTask(
+			handler.stop,
+		)(
+			echo.New().NewContext(request, writer),
+			identity,
+		)
 	default:
-		return routes.withTask(handler.get)(echo.New().NewContext(request, writer), identity)
+		return routes.withTask(
+			handler.get,
+		)(
+			echo.New().NewContext(request, writer),
+			identity,
+		)
 	}
 }

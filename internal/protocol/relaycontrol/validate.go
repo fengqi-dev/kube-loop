@@ -16,13 +16,15 @@ import (
 )
 
 const (
-	minimumHeartbeat = time.Second
-	maximumHeartbeat = time.Minute
-	maximumLease     = 5 * time.Minute
+	minimumHeartbeat         = time.Second
+	maximumHeartbeat         = time.Minute
+	maximumLease             = 5 * time.Minute
+	verificationKeyAlgorithm = "EdDSA"
+	publicKeyPEMType         = "PUBLIC KEY"
 )
 
-func (request RegistrationRequest) Validate(now time.Time) error {
-	if err := request.Envelope.validate(KindRegistrationRequest); err != nil {
+func (request RegistrationRequest) Validate(_ time.Time) error {
+	if err := request.validate(KindRegistrationRequest); err != nil {
 		return err
 	}
 	if !slices.Contains(request.SupportedVersions, request.APIVersion) ||
@@ -39,7 +41,7 @@ func (request RegistrationRequest) Validate(now time.Time) error {
 }
 
 func (response RegistrationResponse) Validate(now time.Time) error {
-	if err := response.Envelope.validate(KindRegistrationResponse); err != nil {
+	if err := response.validate(KindRegistrationResponse); err != nil {
 		return err
 	}
 	if response.SelectedVersion != response.APIVersion {
@@ -64,7 +66,7 @@ func (response RegistrationResponse) Validate(now time.Time) error {
 }
 
 func (request HeartbeatRequest) Validate(time.Time) error {
-	if err := request.Envelope.validate(KindHeartbeatRequest); err != nil {
+	if err := request.validate(KindHeartbeatRequest); err != nil {
 		return err
 	}
 	if _, err := uuid.Parse(request.LeaseID); err != nil {
@@ -77,7 +79,7 @@ func (request HeartbeatRequest) Validate(time.Time) error {
 }
 
 func (response HeartbeatResponse) Validate(now time.Time) error {
-	if err := response.Envelope.validate(KindHeartbeatResponse); err != nil {
+	if err := response.validate(KindHeartbeatResponse); err != nil {
 		return err
 	}
 	if err := validateLeaseTiming(response.LeaseExpiresAt, response.HeartbeatAfter, now); err != nil {
@@ -94,44 +96,45 @@ func (response HeartbeatResponse) Validate(now time.Time) error {
 
 func validTicketIssuer(value string) bool {
 	parsed, err := url.Parse(value)
-	return err == nil && (parsed.Scheme == "http" || parsed.Scheme == "https") && parsed.Host != "" && parsed.User == nil &&
+	validScheme := parsed.Scheme == "http" || parsed.Scheme == "https"
+	return err == nil && validScheme && parsed.Host != "" && parsed.User == nil &&
 		parsed.RawQuery == "" && parsed.Fragment == ""
 }
 
 func (request AllocationRequest) Validate(time.Time) error {
-	if err := request.Envelope.validate(KindAllocationRequest); err != nil {
+	if err := request.validate(KindAllocationRequest); err != nil {
 		return err
 	}
 	if _, err := uuid.Parse(request.SessionID); err != nil || request.Generation == 0 {
-		return errors.New("Session allocation identity is invalid")
+		return errors.New("session allocation identity is invalid")
 	}
 	if len(request.NetworkSpecHash) != sha256HexLength {
-		return errors.New("Session allocation NetworkSpec hash is invalid")
+		return errors.New("session allocation NetworkSpec hash is invalid")
 	}
 	if _, err := hex.DecodeString(request.NetworkSpecHash); err != nil {
-		return errors.New("Session allocation NetworkSpec hash is invalid")
+		return errors.New("session allocation NetworkSpec hash is invalid")
 	}
 	if !validTopology(request.Topology) {
-		return errors.New("Session allocation topology is invalid")
+		return errors.New("session allocation topology is invalid")
 	}
 	return nil
 }
 
 func (response AllocationResponse) Validate(now time.Time) error {
-	if err := response.Envelope.validate(KindAllocationResponse); err != nil {
+	if err := response.validate(KindAllocationResponse); err != nil {
 		return err
 	}
 	if !validRelayID(response.RelayID) {
-		return errors.New("Session assignment Relay ID is invalid")
+		return errors.New("session assignment Relay ID is invalid")
 	}
 	if _, err := uuid.Parse(response.LeaseID); err != nil {
-		return errors.New("Session assignment lease ID is invalid")
+		return errors.New("session assignment lease ID is invalid")
 	}
 	if err := validateEndpoint(response.Endpoint); err != nil {
 		return err
 	}
 	if response.AssignedAt.IsZero() || response.AssignedAt.After(now.Add(time.Minute)) {
-		return errors.New("Session assignment time is invalid")
+		return errors.New("session assignment time is invalid")
 	}
 	return nil
 }
@@ -163,7 +166,7 @@ func (keys VerificationKeySet) validate(now time.Time) error {
 	seen := make(map[string]struct{}, len(keys.Keys))
 	usable := false
 	for _, key := range keys.Keys {
-		if !safeIdentityValue(key.ID, 128) || key.Algorithm != "EdDSA" ||
+		if !safeIdentityValue(key.ID, 128) || key.Algorithm != verificationKeyAlgorithm ||
 			key.NotBefore.IsZero() || key.NotAfter.IsZero() || !key.NotAfter.After(key.NotBefore) {
 			return errors.New("RelayTicket verification key is invalid")
 		}
@@ -172,7 +175,7 @@ func (keys VerificationKeySet) validate(now time.Time) error {
 		}
 		seen[key.ID] = struct{}{}
 		block, rest := pem.Decode([]byte(key.PublicKey))
-		if block == nil || block.Type != "PUBLIC KEY" || len(rest) != 0 {
+		if block == nil || block.Type != publicKeyPEMType || len(rest) != 0 {
 			return errors.New("RelayTicket verification public key is invalid")
 		}
 		parsed, err := x509.ParsePKIXPublicKey(block.Bytes)

@@ -17,6 +17,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/pkg/sftp"
+	"golang.org/x/crypto/ssh"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	"github.com/fengqi-dev/kube-loop/e2e/harness"
 	"github.com/fengqi-dev/kube-loop/internal/client/credentials"
 	clientpodssh "github.com/fengqi-dev/kube-loop/internal/client/podssh"
@@ -30,10 +35,6 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/sessionapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
-	"github.com/google/uuid"
-	"github.com/pkg/sftp"
-	"golang.org/x/crypto/ssh"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 type e2ePodSSHSessionSource struct {
@@ -100,7 +101,9 @@ func TestRealPodSSHThroughGatewayAndLocalIdentityIsolation(t *testing.T) {
 	if err := harness.EnsureEchoWorkload(ctx, kubeClient); err != nil {
 		t.Fatalf("ensure real Pod SSH fixture: %v", err)
 	}
-	pods, err := kubeClient.CoreV1().Pods(harness.EchoNamespace).List(ctx, metav1.ListOptions{LabelSelector: "app=kubeloop-e2e-echo"})
+	pods, err := kubeClient.CoreV1().
+		Pods(harness.EchoNamespace).
+		List(ctx, metav1.ListOptions{LabelSelector: "app=kubeloop-e2e-echo"})
 	if err != nil || len(pods.Items) != 1 {
 		t.Fatalf("find real Pod SSH fixture: pods=%d err=%v", len(pods.Items), err)
 	}
@@ -252,7 +255,16 @@ func TestRealPodSSHThroughGatewayAndLocalIdentityIsolation(t *testing.T) {
 	fileContents := []byte("KubeLoop Pod SSH file transfer\n")
 	remoteFile := "/tmp/kubeloop-pod-ssh-" + uuid.NewString() + ".txt"
 	writeSFTPFile(t, sftpClient, remoteFile, fileContents)
-	if uploaded := runInterceptedPodSSHCommand(t, hostTCP, endpoint.Address, signerA, "cat "+remoteFile); !bytes.Equal(uploaded, fileContents) {
+	if uploaded := runInterceptedPodSSHCommand(
+		t,
+		hostTCP,
+		endpoint.Address,
+		signerA,
+		"cat "+remoteFile,
+	); !bytes.Equal(
+		uploaded,
+		fileContents,
+	) {
 		t.Fatalf("Pod SSH uploaded file=%q", uploaded)
 	}
 	downloaded, err := readSFTPFile(sftpClient, remoteFile)

@@ -14,11 +14,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
 	"github.com/fengqi-dev/kube-loop/internal/fsatomic"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/filestream"
-	"github.com/google/uuid"
 )
 
 const (
@@ -64,9 +65,9 @@ type Task struct {
 	ResumeID      string     `json:"resumeId,omitempty"`
 	TemporaryPath string     `json:"temporaryPath,omitempty"`
 	Error         string     `json:"error,omitempty"`
-	CreatedAt     time.Time  `json:"createdAt" ts_type:"string"`
-	UpdatedAt     time.Time  `json:"updatedAt" ts_type:"string"`
-	CompletedAt   *time.Time `json:"completedAt,omitempty" ts_type:"string"`
+	CreatedAt     time.Time  `json:"createdAt"               ts_type:"string"`
+	UpdatedAt     time.Time  `json:"updatedAt"               ts_type:"string"`
+	CompletedAt   *time.Time `json:"completedAt,omitempty"   ts_type:"string"`
 }
 
 type Config struct {
@@ -126,9 +127,16 @@ func NewManager(client Client, config Config) (*Manager, error) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	manager := &Manager{
-		client: client, statePath: strings.TrimSpace(config.StatePath), temporaryDir: strings.TrimSpace(config.TemporaryDir),
-		maximumBytes: config.MaximumBytes, now: config.Now, onEvent: config.OnEvent, ctx: ctx, cancel: cancel,
-		tasks: make(map[string]Task), active: make(map[string]*activeTransfer),
+		client:       client,
+		statePath:    strings.TrimSpace(config.StatePath),
+		temporaryDir: strings.TrimSpace(config.TemporaryDir),
+		maximumBytes: config.MaximumBytes,
+		now:          config.Now,
+		onEvent:      config.OnEvent,
+		ctx:          ctx,
+		cancel:       cancel,
+		tasks:        make(map[string]Task),
+		active:       make(map[string]*activeTransfer),
 	}
 	if manager.statePath != "" {
 		if err := fsatomic.CleanupTemps(manager.statePath); err != nil {
@@ -159,14 +167,14 @@ func (manager *Manager) Start(
 	request.Pod = strings.TrimSpace(request.Pod)
 	request.Container = strings.TrimSpace(request.Container)
 	request.RemotePath = strings.TrimSpace(request.RemotePath)
-	if request.ProfileID == "" || request.ProfileID != serverProfile.ID || session.State != "active" ||
+	if request.ProfileID == "" || request.ProfileID != serverProfile.ID || session.State != fileTransferSessionActive ||
 		session.ID == "" || session.Namespace == "" {
 		return Task{}, errors.New("active Profile Session is required for file transfer")
 	}
-	if request.Direction != "upload" && request.Direction != "download" {
+	if request.Direction != fileTransferDirectionUpload && request.Direction != fileTransferDirectionDownload {
 		return Task{}, errors.New("file transfer direction must be upload or download")
 	}
-	if request.Kind != "file" && request.Kind != "directory" {
+	if request.Kind != fileTransferKindFile && request.Kind != fileTransferKindDirectory {
 		return Task{}, errors.New("file transfer kind must be file or directory")
 	}
 	if request.Pod == "" {
@@ -187,8 +195,8 @@ func (manager *Manager) Start(
 		LocalPath: request.LocalPath, RemotePath: request.RemotePath, Overwrite: request.Overwrite,
 		Status: StatusQueued, CreatedAt: now, UpdatedAt: now,
 	}
-	if request.Kind == "file" {
-		if request.Direction == "upload" {
+	if request.Kind == fileTransferKindFile {
+		if request.Direction == fileTransferDirectionUpload {
 			task.ResumeID = task.ID
 		} else {
 			task.TemporaryPath = downloadTemporaryPath(request.LocalPath, task.ID)
@@ -216,14 +224,21 @@ func (manager *Manager) Start(
 	return task, nil
 }
 
-func (manager *Manager) Resume(serverProfile profile.Profile, session remote.Session, profileID, taskID string) (Task, error) {
+func (manager *Manager) Resume(
+	serverProfile profile.Profile,
+	session remote.Session,
+	profileID,
+	taskID string,
+) (Task, error) {
 	select {
 	case <-manager.ctx.Done():
 		return Task{}, errors.New("file transfer manager is shut down")
 	default:
 	}
 	profileID, taskID = strings.TrimSpace(profileID), strings.TrimSpace(taskID)
-	if profileID == "" || profileID != serverProfile.ID || session.State != "active" || session.ID == "" || session.Namespace == "" {
+	validProfile := profileID != "" && profileID == serverProfile.ID
+	validSession := session.State == fileTransferSessionActive && session.ID != "" && session.Namespace != ""
+	if !validProfile || !validSession {
 		return Task{}, errors.New("active Profile Session is required to resume file transfer")
 	}
 	manager.mu.Lock()
@@ -237,10 +252,11 @@ func (manager *Manager) Resume(serverProfile profile.Profile, session remote.Ses
 		ProfileID: profileID, Direction: task.Direction, Kind: task.Kind, Pod: task.Pod, Container: task.Container,
 		LocalPath: task.LocalPath, RemotePath: task.RemotePath, Overwrite: task.Overwrite,
 	}
-	if task.Kind == "file" && task.Direction == "upload" && task.ResumeID == "" {
+	if task.Kind == fileTransferKindFile && task.Direction == fileTransferDirectionUpload && task.ResumeID == "" {
 		task.ResumeID = task.ID
 	}
-	if task.Kind == "file" && task.Direction == "download" && task.TemporaryPath == "" {
+	if task.Kind == fileTransferKindFile && task.Direction == fileTransferDirectionDownload &&
+		task.TemporaryPath == "" {
 		task.TemporaryPath = downloadTemporaryPath(task.LocalPath, task.ID)
 	}
 	now := manager.now().UTC()
@@ -267,7 +283,8 @@ func (manager *Manager) Resume(serverProfile profile.Profile, session remote.Ses
 }
 
 func validateManagerRemotePath(value string) error {
-	if value == "" || len(value) > 4096 || value[0] != '/' || value == "/" || strings.Contains(value, "\\") || path.Clean(value) != value {
+	unsafeForm := value == "" || len(value) > 4096 || value[0] != '/' || value == "/"
+	if unsafeForm || strings.Contains(value, "\\") || path.Clean(value) != value {
 		return errors.New("file transfer remote path is invalid")
 	}
 	for _, character := range value {
@@ -366,7 +383,7 @@ func (manager *Manager) run(ctx context.Context, taskID string, entry *activeTra
 	manager.update(taskID, func(task *Task) { task.Status = StatusPreparing })
 	var result filestream.TransferResult
 	var err error
-	if entry.request.Direction == "upload" {
+	if entry.request.Direction == fileTransferDirectionUpload {
 		result, err = manager.runUpload(ctx, taskID, entry)
 	} else {
 		result, err = manager.runDownload(ctx, taskID, entry)
@@ -481,25 +498,36 @@ func normalizePersistedTask(task *Task) error {
 	if task == nil {
 		return errors.New("file transfer Task is nil")
 	}
-	if _, err := uuid.Parse(task.ID); err != nil || strings.TrimSpace(task.ProfileID) == "" || task.CreatedAt.IsZero() || task.UpdatedAt.IsZero() {
+	_, idErr := uuid.Parse(task.ID)
+	invalidIdentity := idErr != nil || strings.TrimSpace(task.ProfileID) == ""
+	if invalidIdentity || task.CreatedAt.IsZero() || task.UpdatedAt.IsZero() {
 		return errors.New("file transfer Task identity is invalid")
 	}
-	if task.Direction != "upload" && task.Direction != "download" {
+	if task.Direction != fileTransferDirectionUpload && task.Direction != fileTransferDirectionDownload {
 		return errors.New("file transfer Task direction is invalid")
 	}
-	if task.Kind != "file" && task.Kind != "directory" || strings.TrimSpace(task.Pod) == "" {
+	if task.Kind != fileTransferKindFile && task.Kind != fileTransferKindDirectory ||
+		strings.TrimSpace(task.Pod) == "" {
 		return errors.New("file transfer Task target is invalid")
 	}
 	localPath, err := cleanLocalPath(task.LocalPath)
 	if err != nil || localPath != task.LocalPath || validateManagerRemotePath(task.RemotePath) != nil {
 		return errors.New("file transfer Task path is invalid")
 	}
-	validStatus := task.Status == StatusQueued || task.Status == StatusPreparing || task.Status == StatusRunning ||
-		task.Status == StatusCompleted || task.Status == StatusFailed || task.Status == StatusCancelled || task.Status == StatusInterrupted
+	validStatus := task.Status == StatusQueued || task.Status == StatusPreparing || task.Status == StatusRunning
+	validStatus = validStatus || task.Status == StatusCompleted || task.Status == StatusFailed
+	validStatus = validStatus || task.Status == StatusCancelled || task.Status == StatusInterrupted
 	if !validStatus {
 		return errors.New("file transfer Task status is invalid")
 	}
-	if task.Kind == "file" && task.Direction == "upload" {
+	if err := normalizePersistedResume(task); err != nil {
+		return err
+	}
+	return normalizePersistedTemporaryPath(task)
+}
+
+func normalizePersistedResume(task *Task) error {
+	if task.Kind == fileTransferKindFile && task.Direction == fileTransferDirectionUpload {
 		if task.ResumeID == "" {
 			task.ResumeID = task.ID
 		}
@@ -509,7 +537,11 @@ func normalizePersistedTask(task *Task) error {
 	} else if task.ResumeID != "" {
 		return errors.New("file transfer Task has an unexpected Resume ID")
 	}
-	if task.Kind == "file" && task.Direction == "download" {
+	return nil
+}
+
+func normalizePersistedTemporaryPath(task *Task) error {
+	if task.Kind == fileTransferKindFile && task.Direction == fileTransferDirectionDownload {
 		expected := downloadTemporaryPath(task.LocalPath, task.ID)
 		if task.TemporaryPath == "" {
 			task.TemporaryPath = expected

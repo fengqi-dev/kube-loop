@@ -46,12 +46,21 @@ func (c *Client) StopAll(ctx context.Context) (helperprotocol.Response, error) {
 	return c.roundTrip(ctx, helperprotocol.Request{Op: helperprotocol.OpStopAll})
 }
 
-func (c *Client) UpdateDNS(ctx context.Context, sessionID string, dns singbox.DNSMeta) (helperprotocol.Response, error) {
-	return c.roundTrip(ctx, helperprotocol.Request{Op: helperprotocol.OpUpdateDNS, SessionID: sessionID, DNS: &dns})
+func (c *Client) UpdateDNS(
+	ctx context.Context,
+	sessionID string,
+	dns singbox.DNSMeta,
+) (helperprotocol.Response, error) {
+	return c.roundTrip(ctx, helperprotocol.Request{
+		Op: helperprotocol.OpUpdateDNS, SessionID: sessionID, DNS: &dns,
+	})
 }
 
 func (c *Client) ReadLogs(ctx context.Context, sessionID string, offset int64) (helperprotocol.Response, error) {
-	return c.roundTrip(ctx, helperprotocol.Request{Op: helperprotocol.OpReadLogs, SessionID: sessionID, LogOffset: offset})
+	return c.roundTrip(
+		ctx,
+		helperprotocol.Request{Op: helperprotocol.OpReadLogs, SessionID: sessionID, LogOffset: offset},
+	)
 }
 
 func (c *Client) roundTrip(ctx context.Context, request helperprotocol.Request) (helperprotocol.Response, error) {
@@ -67,7 +76,7 @@ func (c *Client) roundTrip(ctx context.Context, request helperprotocol.Request) 
 	if err != nil {
 		return helperprotocol.Response{}, err
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	timeout := 30 * time.Second
 	if request.Op == helperprotocol.OpStart {
 		timeout = 3 * time.Minute

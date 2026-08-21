@@ -65,13 +65,17 @@ func EnsureEchoWorkload(ctx context.Context, client kubernetes.Interface) error 
 	if err := waitAndCreateEchoNamespace(ctx, client, ns); err != nil {
 		return err
 	}
-	if existing, err := client.AppsV1().Deployments(EchoNamespace).Get(ctx, deploy.Name, metav1.GetOptions{}); err == nil {
+	if existing, err := client.AppsV1().
+		Deployments(EchoNamespace).
+		Get(ctx, deploy.Name, metav1.GetOptions{}); err == nil {
 		deploy.ResourceVersion = existing.ResourceVersion
 		_, err = client.AppsV1().Deployments(EchoNamespace).Update(ctx, deploy, metav1.UpdateOptions{})
 		if err != nil {
 			return err
 		}
-	} else if apierrors.IsNotFound(err) {
+	} else if apierrors.IsNotFound(
+		err,
+	) {
 		_, err = client.AppsV1().Deployments(EchoNamespace).Create(ctx, deploy, metav1.CreateOptions{})
 		if err != nil {
 			return err
@@ -80,14 +84,18 @@ func EnsureEchoWorkload(ctx context.Context, client kubernetes.Interface) error 
 		return err
 	}
 
-	if existing, err := client.CoreV1().Services(EchoNamespace).Get(ctx, service.Name, metav1.GetOptions{}); err == nil {
+	if existing, err := client.CoreV1().
+		Services(EchoNamespace).
+		Get(ctx, service.Name, metav1.GetOptions{}); err == nil {
 		service.ResourceVersion = existing.ResourceVersion
 		service.Spec.ClusterIP = existing.Spec.ClusterIP
 		_, err = client.CoreV1().Services(EchoNamespace).Update(ctx, service, metav1.UpdateOptions{})
 		if err != nil {
 			return err
 		}
-	} else if apierrors.IsNotFound(err) {
+	} else if apierrors.IsNotFound(
+		err,
+	) {
 		_, err = client.CoreV1().Services(EchoNamespace).Create(ctx, service, metav1.CreateOptions{})
 		if err != nil {
 			return err

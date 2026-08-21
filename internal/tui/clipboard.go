@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os/exec"
@@ -15,9 +16,9 @@ type clipboardCopiedMsg struct {
 	err  error
 }
 
-func copySessionToClipboard(kind, value string) tea.Cmd {
+func copySessionToClipboard(ctx context.Context, kind, value string) tea.Cmd {
 	return func() tea.Msg {
-		command, err := clipboardCommand()
+		command, err := clipboardCommand(ctx)
 		if err != nil {
 			return clipboardCopiedMsg{kind: strings.ToUpper(kind), err: err}
 		}
@@ -33,18 +34,18 @@ func copySessionToClipboard(kind, value string) tea.Cmd {
 	}
 }
 
-func clipboardCommand() (*exec.Cmd, error) {
+func clipboardCommand(ctx context.Context) (*exec.Cmd, error) {
 	switch runtime.GOOS {
 	case "darwin":
-		return exec.Command("pbcopy"), nil
+		return exec.CommandContext(ctx, "pbcopy"), nil
 	case "windows":
-		return exec.Command("cmd", "/c", "clip"), nil
+		return exec.CommandContext(ctx, "cmd", "/c", "clip"), nil
 	case "linux":
 		if path, err := exec.LookPath("wl-copy"); err == nil {
-			return exec.Command(path), nil
+			return exec.CommandContext(ctx, path), nil
 		}
 		if path, err := exec.LookPath("xclip"); err == nil {
-			return exec.Command(path, "-selection", "clipboard"), nil
+			return exec.CommandContext(ctx, path, "-selection", "clipboard"), nil
 		}
 		return nil, errors.New("install wl-copy or xclip to use the clipboard")
 	default:

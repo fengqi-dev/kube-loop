@@ -8,7 +8,7 @@ import (
 	"sync"
 )
 
-var ErrClosed = errors.New("Session runtime registry is closed")
+var ErrClosed = errors.New("session runtime registry is closed")
 
 type Registry struct {
 	root       context.Context
@@ -51,12 +51,16 @@ func New(parent context.Context) *Registry {
 		parent = context.Background()
 	}
 	root, cancel := context.WithCancelCause(parent)
-	return &Registry{root: root, cancelRoot: cancel, sessions: make(map[string]*sessionNode)}
+	return &Registry{
+		root:       root,
+		cancelRoot: cancel,
+		sessions:   make(map[string]*sessionNode),
+	}
 }
 
 func (registry *Registry) Ensure(sessionID string) error {
 	if !validID(sessionID) {
-		return errors.New("Session runtime ID is invalid")
+		return errors.New("session runtime ID is invalid")
 	}
 	registry.mu.Lock()
 	defer registry.mu.Unlock()
@@ -75,7 +79,9 @@ func (registry *Registry) Attach(
 	sessionID, taskID string,
 ) (context.Context, func(), error) {
 	if parent == nil || !validID(sessionID) || !validID(taskID) {
-		return nil, nil, errors.New("Session and Task runtime identities are required")
+		return nil, nil, errors.New(
+			"session and Task runtime identities are required",
+		)
 	}
 	registry.mu.Lock()
 	if registry.closed || registry.root.Err() != nil {
@@ -88,7 +94,7 @@ func (registry *Registry) Attach(
 		if err != nil {
 			return nil, nil, err
 		}
-		return nil, nil, errors.New("Session runtime is draining")
+		return nil, nil, errors.New("session runtime is draining")
 	}
 	task := session.tasks[taskID]
 	if task == nil {
@@ -103,8 +109,15 @@ func (registry *Registry) Attach(
 	registry.sequence++
 	streamID := registry.sequence
 	streamContext, cancelStream := context.WithCancelCause(task.ctx)
-	stream := &streamNode{sequence: streamID, cancel: cancelStream, done: make(chan struct{})}
-	stream.stopParent = context.AfterFunc(parent, func() { cancelStream(context.Cause(parent)) })
+	stream := &streamNode{
+		sequence: streamID,
+		cancel:   cancelStream,
+		done:     make(chan struct{}),
+	}
+	stream.stopParent = context.AfterFunc(
+		parent,
+		func() { cancelStream(context.Cause(parent)) },
+	)
 	task.streams[streamID] = stream
 	registry.mu.Unlock()
 
@@ -118,9 +131,14 @@ func (registry *Registry) Attach(
 	return streamContext, release, nil
 }
 
-func (registry *Registry) Disconnect(ctx context.Context, sessionID string) error {
+func (registry *Registry) Disconnect(
+	ctx context.Context,
+	sessionID string,
+) error {
 	if ctx == nil || !validID(sessionID) {
-		return errors.New("Session runtime identity and cleanup context are required")
+		return errors.New(
+			"session runtime identity and cleanup context are required",
+		)
 	}
 	registry.mu.Lock()
 	session := registry.sessions[sessionID]
@@ -128,7 +146,7 @@ func (registry *Registry) Disconnect(ctx context.Context, sessionID string) erro
 		registry.mu.Unlock()
 		return nil
 	}
-	registry.beginDrainLocked(session, errors.New("Session disconnected"))
+	registry.beginDrainLocked(session, errors.New("session disconnected"))
 	done := session.done
 	registry.mu.Unlock()
 	select {
@@ -141,7 +159,7 @@ func (registry *Registry) Disconnect(ctx context.Context, sessionID string) erro
 
 func (registry *Registry) Shutdown(ctx context.Context) error {
 	if ctx == nil {
-		return errors.New("Session registry shutdown context is required")
+		return errors.New("session registry shutdown context is required")
 	}
 	registry.mu.Lock()
 	if !registry.closed {
@@ -197,10 +215,12 @@ func (registry *Registry) beginDrainLocked(session *sessionNode, cause error) {
 	registry.finishSessionLocked(session)
 }
 
-func (registry *Registry) ensureSessionLocked(sessionID string) (*sessionNode, error) {
+func (registry *Registry) ensureSessionLocked(
+	sessionID string,
+) (*sessionNode, error) {
 	if session := registry.sessions[sessionID]; session != nil {
 		if session.draining {
-			return nil, errors.New("Session runtime is draining")
+			return nil, errors.New("session runtime is draining")
 		}
 		return session, nil
 	}

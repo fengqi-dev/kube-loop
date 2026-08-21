@@ -11,7 +11,9 @@ const MaximumManagementPageFetch = 101
 
 func normalizePage(limit int, cursor *PageCursor) (int, *PageCursor, error) {
 	if limit <= 0 || limit > MaximumManagementPageFetch {
-		return 0, nil, errors.New("management list limit must be between 1 and 101")
+		return 0, nil, errors.New(
+			"management list limit must be between 1 and 101",
+		)
 	}
 	normalized, err := normalizeCursor(cursor)
 	return limit, normalized, err
@@ -19,16 +21,22 @@ func normalizePage(limit int, cursor *PageCursor) (int, *PageCursor, error) {
 
 func normalizeCursor(cursor *PageCursor) (*PageCursor, error) {
 	if cursor == nil {
-		return nil, nil
+		return nil, nil //nolint:nilnil // A nil cursor is the valid representation of the first page.
 	}
-	if cursor.CreatedAt.IsZero() || validateUUID(cursor.ID, "management page cursor ID") != nil {
+	if cursor.CreatedAt.IsZero() ||
+		validateUUID(cursor.ID, "management page cursor ID") != nil {
 		return nil, errors.New("management page cursor is invalid")
 	}
 	normalized := &PageCursor{CreatedAt: cursor.CreatedAt.UTC(), ID: cursor.ID}
 	return normalized, nil
 }
 
-func appendPageBoundary(query string, arguments []any, columnPrefix string, cursor *PageCursor) (string, []any) {
+func appendPageBoundary(
+	query string,
+	arguments []any,
+	columnPrefix string,
+	cursor *PageCursor,
+) (string, []any) {
 	if cursor == nil {
 		return query, arguments
 	}

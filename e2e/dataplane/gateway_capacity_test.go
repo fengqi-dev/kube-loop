@@ -20,12 +20,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fengqi-dev/kube-loop/e2e/harness"
-	clientremote "github.com/fengqi-dev/kube-loop/internal/client/remote"
-	"github.com/fengqi-dev/kube-loop/internal/client/websocketmux"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/relayticket"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
 	"github.com/google/uuid"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -33,6 +27,13 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/utils/ptr"
+
+	"github.com/fengqi-dev/kube-loop/e2e/harness"
+	clientremote "github.com/fengqi-dev/kube-loop/internal/client/remote"
+	"github.com/fengqi-dev/kube-loop/internal/client/websocketmux"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/relayticket"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
 )
 
 const (
@@ -128,7 +129,10 @@ func TestGatewayPodMultiUserCapacityRSSAndCleanup(t *testing.T) {
 	service := waitForGateway(t, ctx, kubeClient, namespace)
 	gatewayPod := readyPodByLabel(t, ctx, kubeClient, namespace, "app.kubernetes.io/name=kubeloop-gateway")
 	capacityService := installCapacityEcho(t, ctx, kubeClient, namespace)
-	publicAddress := net.JoinHostPort(reachableNodeAddress(t, ctx, kubeClient), fmt.Sprint(service.Spec.Ports[0].NodePort))
+	publicAddress := net.JoinHostPort(
+		reachableNodeAddress(t, ctx, kubeClient),
+		fmt.Sprint(service.Spec.Ports[0].NodePort),
+	)
 	waitForHTTP(t, ctx, "http://"+publicAddress+"/health/ready")
 	spec, err := networkspec.Normalize(networkspec.Spec{ServiceIPs: []string{capacityService.Spec.ClusterIP}})
 	if err != nil {
@@ -169,7 +173,16 @@ func TestGatewayPodMultiUserCapacityRSSAndCleanup(t *testing.T) {
 	// A second device for an existing Identity is rejected even before the
 	// global limit can be exceeded. A new Identity is rejected at the global
 	// physical WSS limit.
-	assertCapacityConnectionRejected(t, ctx, signer, publicAddress, namespace, specHash, "capacity-overflow", uuid.NewString())
+	assertCapacityConnectionRejected(
+		t,
+		ctx,
+		signer,
+		publicAddress,
+		namespace,
+		specHash,
+		"capacity-overflow",
+		uuid.NewString(),
+	)
 	assertCapacityPodHealth(t, ctx, publicAddress)
 
 	payload := bytes.Repeat([]byte("k"), capacityPayloadBytes)
@@ -355,7 +368,11 @@ func capacityRoundTrip(
 	}
 	defer connection.Close()
 	_ = connection.SetDeadline(time.Now().Add(10 * time.Second))
-	if err := tunnel.WriteOpen(connection, tunnel.OpenRequest{Command: tunnel.CommandTCP, Host: host, Port: port}, client.token); err != nil {
+	if err := tunnel.WriteOpen(
+		connection,
+		tunnel.OpenRequest{Command: tunnel.CommandTCP, Host: host, Port: port},
+		client.token,
+	); err != nil {
 		return err
 	}
 	if err := tunnel.ReadStatus(connection); err != nil {
@@ -428,8 +445,11 @@ func installCapacityEcho(
 							{Name: "hold", ContainerPort: 19192},
 						},
 						ReadinessProbe: &corev1.Probe{
-							ProbeHandler:  corev1.ProbeHandler{TCPSocket: &corev1.TCPSocketAction{Port: intstr.FromString("echo")}},
-							PeriodSeconds: 1, FailureThreshold: 30,
+							ProbeHandler: corev1.ProbeHandler{
+								TCPSocket: &corev1.TCPSocketAction{Port: intstr.FromString("echo")},
+							},
+							PeriodSeconds:    1,
+							FailureThreshold: 30,
 						},
 					}},
 				},
@@ -466,7 +486,11 @@ func openCapacityStream(
 	t.Helper()
 	connection, err := (&net.Dialer{}).DialContext(ctx, "tcp", client.forwarder.Address())
 	if err == nil {
-		err = tunnel.WriteOpen(connection, tunnel.OpenRequest{Command: tunnel.CommandTCP, Host: host, Port: port}, client.token)
+		err = tunnel.WriteOpen(
+			connection,
+			tunnel.OpenRequest{Command: tunnel.CommandTCP, Host: host, Port: port},
+			client.token,
+		)
 	}
 	if err == nil {
 		err = tunnel.ReadStatus(connection)
@@ -488,7 +512,11 @@ func assertStreamCapacityRejected(t *testing.T, ctx context.Context, client *cap
 	}
 	defer connection.Close()
 	_ = connection.SetDeadline(time.Now().Add(3 * time.Second))
-	if err := tunnel.WriteOpen(connection, tunnel.OpenRequest{Command: tunnel.CommandTCP, Host: host, Port: port}, client.token); err != nil {
+	if err := tunnel.WriteOpen(
+		connection,
+		tunnel.OpenRequest{Command: tunnel.CommandTCP, Host: host, Port: port},
+		client.token,
+	); err != nil {
 		return
 	}
 	if err := tunnel.ReadStatus(connection); err == nil {
@@ -629,9 +657,21 @@ func assertMemoryCurve(t *testing.T, curve map[string]uint64) {
 	maximum := uint64(intEnv(t, "KUBELOOP_E2E_GATEWAY_MAX_RSS_BYTES", defaultMaximumRSSBytes))
 	maximumGrowth := uint64(intEnv(t, "KUBELOOP_E2E_GATEWAY_MAX_RSS_GROWTH_BYTES", defaultMaximumRSSGrowth))
 	if peak > maximum || peak-baseline > maximumGrowth {
-		t.Fatalf("Gateway RSS curve exceeded bounds: curve=%v peak=%d baseline=%d max=%d maxGrowth=%d", curve, peak, baseline, maximum, maximumGrowth)
+		t.Fatalf(
+			"Gateway RSS curve exceeded bounds: curve=%v peak=%d baseline=%d max=%d maxGrowth=%d",
+			curve,
+			peak,
+			baseline,
+			maximum,
+			maximumGrowth,
+		)
 	}
-	t.Logf("single-Pod Gateway working-set curve: %v (peak %.2f MiB, growth %.2f MiB)", curve, float64(peak)/(1<<20), float64(peak-baseline)/(1<<20))
+	t.Logf(
+		"single-Pod Gateway working-set curve: %v (peak %.2f MiB, growth %.2f MiB)",
+		curve,
+		float64(peak)/(1<<20),
+		float64(peak-baseline)/(1<<20),
+	)
 }
 
 func intEnv(t *testing.T, name string, fallback int) int {

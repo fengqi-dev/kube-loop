@@ -16,10 +16,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/relayregistry"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/relaycontrol"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/relayticket"
-	"github.com/google/uuid"
 )
 
 type staticRegistryAuthenticator struct{ identity relaycontrol.PeerIdentity }
@@ -57,7 +58,11 @@ type testApplier struct {
 	revocationGeneration uint64
 }
 
-func (applier *testApplier) Apply(_, _ string, keys relaycontrol.VerificationKeySet, revocations relaycontrol.RevocationSummary) error {
+func (applier *testApplier) Apply(
+	_, _ string,
+	keys relaycontrol.VerificationKeySet,
+	revocations relaycontrol.RevocationSummary,
+) error {
 	applier.mu.Lock()
 	applier.keyGeneration = keys.Generation
 	applier.revocationGeneration = revocations.Generation
@@ -90,7 +95,12 @@ func TestAgentRegistersAppliesControlStateAndAcknowledgesHeartbeat(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	keys, err := relaycontrol.NewVerificationKeySet(1, map[string]ed25519.PublicKey{"primary": publicKey}, now.Add(-time.Minute), now.Add(time.Hour))
+	keys, err := relaycontrol.NewVerificationKeySet(
+		1,
+		map[string]ed25519.PublicKey{"primary": publicKey},
+		now.Add(-time.Minute),
+		now.Add(time.Hour),
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,7 +156,10 @@ func TestAgentRegistersAppliesControlStateAndAcknowledgesHeartbeat(t *testing.T)
 		t.Fatalf("Registry status = %#v", statuses)
 	}
 	if requests.Load() != 4 {
-		t.Fatalf("Control Plane requests = %d, want two failed registrations, one registration, and one heartbeat", requests.Load())
+		t.Fatalf(
+			"Control Plane requests = %d, want two failed registrations, one registration, and one heartbeat",
+			requests.Load(),
+		)
 	}
 	agent.Stop()
 	select {
@@ -227,7 +240,12 @@ func TestTicketAuthenticatorAppliesAudienceAndRevocationAtomically(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	keys, err := relaycontrol.NewVerificationKeySet(3, map[string]ed25519.PublicKey{"primary": publicKey}, now.Add(-time.Minute), now.Add(time.Hour))
+	keys, err := relaycontrol.NewVerificationKeySet(
+		3,
+		map[string]ed25519.PublicKey{"primary": publicKey},
+		now.Add(-time.Minute),
+		now.Add(time.Hour),
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -257,10 +275,20 @@ func TestTicketAuthenticatorAppliesAudienceAndRevocationAtomically(t *testing.T)
 		t.Fatal(err)
 	}
 	ticket, err := signer.Sign(relayticket.Claims{
-		Version: relayticket.Version, Issuer: "https://controlPlane.example", Audience: relayID,
-		IdentityID: uuid.NewString(), DeviceID: uuid.NewString(), SessionID: sessionID, SessionGeneration: 1,
-		Namespace: "development", Operations: []string{"tunnel"}, NetworkSpecHash: strings.Repeat("b", 64),
-		TicketID: uuid.NewString(), IssuedAt: now.Unix(), NotBefore: now.Unix(), ExpiresAt: now.Add(30 * time.Second).Unix(),
+		Version:           relayticket.Version,
+		Issuer:            "https://controlPlane.example",
+		Audience:          relayID,
+		IdentityID:        uuid.NewString(),
+		DeviceID:          uuid.NewString(),
+		SessionID:         sessionID,
+		SessionGeneration: 1,
+		Namespace:         "development",
+		Operations:        []string{"tunnel"},
+		NetworkSpecHash:   strings.Repeat("b", 64),
+		TicketID:          uuid.NewString(),
+		IssuedAt:          now.Unix(),
+		NotBefore:         now.Unix(),
+		ExpiresAt:         now.Add(30 * time.Second).Unix(),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -270,7 +298,8 @@ func TestTicketAuthenticatorAppliesAudienceAndRevocationAtomically(t *testing.T)
 	if _, err := authenticator.Verify(request); err == nil {
 		t.Fatal("revoked Session generation was accepted")
 	}
-	if keyGeneration, revocationGeneration := authenticator.AppliedGenerations(); keyGeneration != 3 || revocationGeneration != 2 {
+	if keyGeneration, revocationGeneration := authenticator.AppliedGenerations(); keyGeneration != 3 ||
+		revocationGeneration != 2 {
 		t.Fatalf("generations = %d/%d", keyGeneration, revocationGeneration)
 	}
 }

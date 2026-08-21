@@ -5,10 +5,11 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/labstack/echo/v5"
+
 	adminbootstrap "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/bootstrap"
 	adminlocaluser "github.com/fengqi-dev/kube-loop/internal/controlplane/admin/localuser"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
-	"github.com/labstack/echo/v5"
 )
 
 type completeBootstrapRequest struct {
@@ -26,15 +27,19 @@ func (api *readAPI) completeBootstrap(ctx *echo.Context) error {
 	if responseErr := bindJSON(ctx, &input); responseErr != nil {
 		return responseErr.write(ctx)
 	}
-	result, err := api.bootstrapService.Complete(request.Context(), adminbootstrap.CompleteRequest{
-		Token: input.Token, Username: input.Username, Password: []byte(input.Password),
-		DisplayName: input.DisplayName, Email: input.Email, RequestID: requestID,
-	})
+	result, err := api.bootstrapService.Complete(
+		request.Context(),
+		adminbootstrap.CompleteRequest{
+			Token: input.Token, Username: input.Username, Password: []byte(input.Password),
+			DisplayName: input.DisplayName, Email: input.Email, RequestID: requestID,
+		},
+	)
 	input.Password = ""
 	if err != nil {
-		status, code, message := http.StatusBadRequest, "invalid_request", "bootstrap request is invalid"
+		status, code, message := http.StatusBadRequest, invalidRequestCode, "bootstrap request is invalid"
 		switch {
-		case errors.Is(err, adminbootstrap.ErrInvalidToken), errors.Is(err, adminbootstrap.ErrAlreadyCompleted):
+		case errors.Is(err, adminbootstrap.ErrInvalidToken),
+			errors.Is(err, adminbootstrap.ErrAlreadyCompleted):
 			status, code, message = http.StatusUnauthorized, "invalid_bootstrap_token", "bootstrap token is invalid or expired"
 		case errors.Is(err, adminlocaluser.ErrInvalidInput):
 			message = "identity or password is invalid"
@@ -43,9 +48,14 @@ func (api *readAPI) completeBootstrap(ctx *echo.Context) error {
 		}
 		return writeError(ctx, status, code, message, requestID)
 	}
-	return ctx.JSON(http.StatusCreated, map[string]any{"identity": map[string]string{
-		"id": result.Identity.IdentityID, "displayName": result.Identity.DisplayName, "email": result.Identity.Email,
-	}})
+	return ctx.JSON(
+		http.StatusCreated,
+		map[string]any{"identity": map[string]string{
+			"id":          result.Identity.IdentityID,
+			"displayName": result.Identity.DisplayName,
+			emailField:    result.Identity.Email,
+		}},
+	)
 }
 
 func (api *readAPI) bootstrap(ctx *echo.Context) error {
@@ -53,17 +63,38 @@ func (api *readAPI) bootstrap(ctx *echo.Context) error {
 	subject := subjectFromRequest(request)
 	stored, ok := request.Context().Value(sessionContextKey).(storage.AdminSession)
 	if !ok {
-		return writeError(ctx, http.StatusUnauthorized, "unauthenticated", "management authentication failed", requestID(request))
+		return writeError(
+			ctx,
+			http.StatusUnauthorized,
+			"unauthenticated",
+			"management authentication failed",
+			requestID(request),
+		)
 	}
-	identity, err := api.repositories.Identities().GetByID(request.Context(), subject.ID)
+	identity, err := api.repositories.Identities().
+		GetByID(request.Context(), subject.ID)
 	if err != nil {
-		return writeError(ctx, http.StatusUnauthorized, "unauthenticated", "management identity is unavailable", requestID(request))
+		return writeError(
+			ctx,
+			http.StatusUnauthorized,
+			"unauthenticated",
+			"management identity is unavailable",
+			requestID(request),
+		)
 	}
 	api.audit(request, subject, "admin.bootstrap/read", "success")
 	return ctx.JSON(http.StatusOK, map[string]any{
-		"identity": map[string]any{"id": identity.ID, "displayName": identity.DisplayName, "email": identity.PrimaryEmail, "type": identity.Type},
-		"session": map[string]any{"authenticationType": stored.AuthenticationType, "createdAt": stored.CreatedAt,
-			"lastSeenAt": stored.LastSeenAt, "idleExpiresAt": stored.IdleExpiresAt, "absoluteExpiresAt": stored.AbsoluteExpiresAt},
+		"identity": map[string]any{
+			"id":          identity.ID,
+			"displayName": identity.DisplayName, emailField: identity.PrimaryEmail, "type": identity.Type,
+		},
+		"session": map[string]any{
+			authenticationTypeField: stored.AuthenticationType,
+			"createdAt":             stored.CreatedAt,
+			"lastSeenAt":            stored.LastSeenAt,
+			"idleExpiresAt":         stored.IdleExpiresAt,
+			"absoluteExpiresAt":     stored.AbsoluteExpiresAt,
+		},
 		"generatedAt": time.Now().UTC(),
 	})
 }

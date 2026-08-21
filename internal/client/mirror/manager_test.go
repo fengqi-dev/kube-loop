@@ -9,12 +9,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/mirrorstream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficstream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
-	"github.com/google/uuid"
 )
 
 type testMirrorClient struct {
@@ -40,7 +41,7 @@ func (client *testMirrorClient) OpenTrafficStream(
 	client.openCalls++
 	client.mu.Unlock()
 	if profileID != "server" || mode != tunnel.TrafficModeMirror || taskID != client.task.ID {
-		return nil, errors.New("Mirror Traffic stream selector changed")
+		return nil, errors.New("mirror Traffic stream selector changed")
 	}
 	return client.connection, client.openErr
 }
@@ -63,11 +64,11 @@ func (client *testMirrorClient) calls() (int, int) {
 }
 
 func TestManagerCopiesTCPAndUDPRequestsAndDiscardsShadowResponses(t *testing.T) {
-	tcpListener, err := net.Listen("tcp", "127.0.0.1:0")
+	tcpListener, err := net.Listen(mirrorProtocolTCP, "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer tcpListener.Close()
+	defer checkTestClose(t, tcpListener.Close)
 	tcpPort := uint16(tcpListener.Addr().(*net.TCPAddr).Port)
 	tcpDone := make(chan error, 1)
 	go func() {
@@ -76,7 +77,7 @@ func TestManagerCopiesTCPAndUDPRequestsAndDiscardsShadowResponses(t *testing.T) 
 			tcpDone <- acceptErr
 			return
 		}
-		defer connection.Close()
+		defer checkTestClose(t, connection.Close)
 		request := make([]byte, len("tcp-request"))
 		if _, readErr := io.ReadFull(connection, request); readErr != nil || string(request) != "tcp-request" {
 			tcpDone <- errors.Join(readErr, errors.New("unexpected TCP shadow request"))
@@ -86,11 +87,11 @@ func TestManagerCopiesTCPAndUDPRequestsAndDiscardsShadowResponses(t *testing.T) 
 		tcpDone <- writeErr
 	}()
 
-	udpListener, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1")})
+	udpListener, err := net.ListenUDP(mirrorProtocolUDP, &net.UDPAddr{IP: net.ParseIP(mirrorLoopbackHost)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer udpListener.Close()
+	defer checkTestClose(t, udpListener.Close)
 	udpPort := uint16(udpListener.LocalAddr().(*net.UDPAddr).Port)
 	udpDone := make(chan error, 1)
 	go func() {
@@ -135,13 +136,22 @@ func TestManagerCopiesTCPAndUDPRequestsAndDiscardsShadowResponses(t *testing.T) 
 
 	now := time.Now().UTC()
 	session := remote.Session{
-		ID: uuid.NewString(), Namespace: "development", State: "active", ExpiresAt: now.Add(time.Hour),
+		ID: uuid.NewString(), Namespace: "development", State: mirrorSessionActive, ExpiresAt: now.Add(time.Hour),
 	}
 	task := remote.MirrorTask{
-		ID: uuid.NewString(), SessionID: session.ID, Namespace: session.Namespace, State: "pending",
-		Service: "api", ClusterIP: "10.96.0.20",
-		Ports:     []remote.MirrorPort{{ServicePort: 53, Protocol: "udp"}, {ServicePort: 80, Protocol: "tcp"}},
-		CreatedAt: now, UpdatedAt: now, ExpiresAt: session.ExpiresAt,
+		ID:        uuid.NewString(),
+		SessionID: session.ID,
+		Namespace: session.Namespace,
+		State:     "pending",
+		Service:   "api",
+		ClusterIP: "10.96.0.20",
+		Ports: []remote.MirrorPort{
+			{ServicePort: 53, Protocol: mirrorProtocolUDP},
+			{ServicePort: 80, Protocol: mirrorProtocolTCP},
+		},
+		CreatedAt: now,
+		UpdatedAt: now,
+		ExpiresAt: session.ExpiresAt,
 	}
 	client := &testMirrorClient{connection: connection, task: task}
 	manager, err := NewManager(client, Config{TrafficStreams: client})
@@ -152,8 +162,8 @@ func TestManagerCopiesTCPAndUDPRequestsAndDiscardsShadowResponses(t *testing.T) 
 	info, err := manager.Start(context.Background(), serverProfile, session, Request{
 		ProfileID: serverProfile.ID, Service: "api",
 		Targets: []LocalTarget{
-			{ServicePort: 53, Protocol: "udp", LocalHost: "127.0.0.1", LocalPort: udpPort},
-			{ServicePort: 80, Protocol: "tcp", LocalHost: "127.0.0.1", LocalPort: tcpPort},
+			{ServicePort: 53, Protocol: mirrorProtocolUDP, LocalHost: mirrorLoopbackHost, LocalPort: udpPort},
+			{ServicePort: 80, Protocol: mirrorProtocolTCP, LocalHost: mirrorLoopbackHost, LocalPort: tcpPort},
 		},
 	})
 	if err != nil || info.State != "running" {
@@ -191,10 +201,15 @@ func TestManagerCopiesTCPAndUDPRequestsAndDiscardsShadowResponses(t *testing.T) 
 
 func TestManagerCompensatesWhenMirrorStreamCannotOpen(t *testing.T) {
 	now := time.Now().UTC()
-	session := remote.Session{ID: uuid.NewString(), Namespace: "development", State: "active", ExpiresAt: now.Add(time.Hour)}
+	session := remote.Session{
+		ID:        uuid.NewString(),
+		Namespace: "development",
+		State:     mirrorSessionActive,
+		ExpiresAt: now.Add(time.Hour),
+	}
 	client := &testMirrorClient{task: remote.MirrorTask{
 		ID: uuid.NewString(), SessionID: session.ID, Namespace: session.Namespace, State: "pending",
-		Service: "api", Ports: []remote.MirrorPort{{ServicePort: 80, Protocol: "tcp"}},
+		Service: "api", Ports: []remote.MirrorPort{{ServicePort: 80, Protocol: mirrorProtocolTCP}},
 		CreatedAt: now, UpdatedAt: now, ExpiresAt: session.ExpiresAt,
 	}}
 	manager, err := NewManager(client, Config{TrafficStreams: client})
@@ -202,8 +217,11 @@ func TestManagerCompensatesWhenMirrorStreamCannotOpen(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = manager.Start(context.Background(), profile.Profile{ID: "server"}, session, Request{
-		ProfileID: "server", Service: "api",
-		Targets: []LocalTarget{{ServicePort: 80, Protocol: "tcp", LocalHost: "127.0.0.1", LocalPort: 8080}},
+		ProfileID: "server",
+		Service:   "api",
+		Targets: []LocalTarget{
+			{ServicePort: 80, Protocol: mirrorProtocolTCP, LocalHost: mirrorLoopbackHost, LocalPort: 8080},
+		},
 	})
 	if err == nil {
 		t.Fatal("Mirror started without a local stream")
@@ -216,17 +234,29 @@ func TestManagerCompensatesWhenMirrorStreamCannotOpen(t *testing.T) {
 
 func TestManagerRejectsUnboundMirrorBeforeOpeningStream(t *testing.T) {
 	now := time.Now().UTC()
-	session := remote.Session{ID: uuid.NewString(), Namespace: "development", State: "active", ExpiresAt: now.Add(time.Hour)}
+	session := remote.Session{
+		ID:        uuid.NewString(),
+		Namespace: "development",
+		State:     mirrorSessionActive,
+		ExpiresAt: now.Add(time.Hour),
+	}
 	client := &testMirrorClient{openErr: errors.New("stream unavailable"), task: remote.MirrorTask{
 		ID: uuid.NewString(), SessionID: session.ID, Namespace: session.Namespace, State: "pending",
-		Service: "api", Ports: []remote.MirrorPort{{ServicePort: 80, Protocol: "tcp"}},
+		Service: "api", Ports: []remote.MirrorPort{{ServicePort: 80, Protocol: mirrorProtocolTCP}},
 		CreatedAt: now, UpdatedAt: now, ExpiresAt: session.ExpiresAt,
 	}}
 	manager, err := NewManager(client, Config{TrafficStreams: client})
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := Request{ProfileID: "server", Service: "api", Targets: []LocalTarget{{ServicePort: 80, Protocol: "tcp", LocalHost: "127.0.0.1", LocalPort: 8080}}}
+	request := Request{
+		ProfileID: "server",
+		Service:   "api",
+		Targets: []LocalTarget{
+			{ServicePort: 80, Protocol: mirrorProtocolTCP, LocalHost: mirrorLoopbackHost, LocalPort: 8080},
+		},
+	}
+	//nolint:staticcheck // This test intentionally verifies defensive rejection of a nil context.
 	if _, err := manager.Start(nil, profile.Profile{ID: "server"}, session, request); err == nil {
 		t.Fatal("nil context was accepted")
 	}
@@ -247,8 +277,8 @@ func TestManagerRejectsUnboundMirrorBeforeOpeningStream(t *testing.T) {
 
 func TestNormalizeTargetsDefaultsAndRejectsUnsafeMirrorTargets(t *testing.T) {
 	targets, ports, err := normalizeTargets([]LocalTarget{{ServicePort: 8080}})
-	if err != nil || len(targets) != 1 || targets[0].Protocol != "tcp" ||
-		targets[0].LocalHost != "127.0.0.1" || targets[0].LocalPort != 8080 || len(ports) != 1 {
+	if err != nil || len(targets) != 1 || targets[0].Protocol != mirrorProtocolTCP ||
+		targets[0].LocalHost != mirrorLoopbackHost || targets[0].LocalPort != 8080 || len(ports) != 1 {
 		t.Fatalf("normalized targets=%#v ports=%#v err=%v", targets, ports, err)
 	}
 	invalid := [][]LocalTarget{
@@ -268,14 +298,16 @@ func TestNormalizeTargetsDefaultsAndRejectsUnsafeMirrorTargets(t *testing.T) {
 
 func TestShadowActorDropsSlowTargetWithoutBlockingProducer(t *testing.T) {
 	client, slowTarget := net.Pipe()
-	defer slowTarget.Close()
+	defer checkTestClose(t, slowTarget.Close)
 	config := Config{
 		ShadowQueueSize: 1, ShadowDialTimeout: time.Second,
 		ShadowWriteTimeout: 50 * time.Millisecond, ShadowIdleTimeout: time.Second,
 	}
 	actor := newShadowActor(
-		context.Background(), LocalTarget{ServicePort: 80, Protocol: "tcp", LocalHost: "127.0.0.1", LocalPort: 8080},
-		func(context.Context, string, string) (net.Conn, error) { return client, nil }, config,
+		context.Background(),
+		LocalTarget{ServicePort: 80, Protocol: mirrorProtocolTCP, LocalHost: mirrorLoopbackHost, LocalPort: 8080},
+		func(context.Context, string, string) (net.Conn, error) { return client, nil },
+		config,
 	)
 	start := time.Now()
 	for range 100 {
@@ -289,19 +321,34 @@ func TestShadowActorDropsSlowTargetWithoutBlockingProducer(t *testing.T) {
 
 func TestManagerRejectsGatewayPortSubstitutionBeforeOpeningStream(t *testing.T) {
 	now := time.Now().UTC()
-	session := remote.Session{ID: uuid.NewString(), Namespace: "development", State: "active", ExpiresAt: now.Add(time.Hour)}
+	session := remote.Session{
+		ID:        uuid.NewString(),
+		Namespace: "development",
+		State:     mirrorSessionActive,
+		ExpiresAt: now.Add(time.Hour),
+	}
 	client := &testMirrorClient{task: remote.MirrorTask{
-		ID: uuid.NewString(), SessionID: session.ID, Namespace: session.Namespace, State: "pending",
-		Service: "api", ClusterIP: "10.96.0.20", Ports: []remote.MirrorPort{{ServicePort: 81, Protocol: "tcp"}},
-		CreatedAt: now, UpdatedAt: now, ExpiresAt: session.ExpiresAt,
+		ID:        uuid.NewString(),
+		SessionID: session.ID,
+		Namespace: session.Namespace,
+		State:     "pending",
+		Service:   "api",
+		ClusterIP: "10.96.0.20",
+		Ports:     []remote.MirrorPort{{ServicePort: 81, Protocol: mirrorProtocolTCP}},
+		CreatedAt: now,
+		UpdatedAt: now,
+		ExpiresAt: session.ExpiresAt,
 	}}
 	manager, err := NewManager(client, Config{TrafficStreams: client})
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, err = manager.Start(context.Background(), profile.Profile{ID: "server"}, session, Request{
-		ProfileID: "server", Service: "api",
-		Targets: []LocalTarget{{ServicePort: 80, Protocol: "tcp", LocalHost: "127.0.0.1", LocalPort: 8080}},
+		ProfileID: "server",
+		Service:   "api",
+		Targets: []LocalTarget{
+			{ServicePort: 80, Protocol: mirrorProtocolTCP, LocalHost: mirrorLoopbackHost, LocalPort: 8080},
+		},
 	})
 	if err == nil {
 		t.Fatal("Gateway Mirror port substitution was accepted")

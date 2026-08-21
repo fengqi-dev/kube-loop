@@ -5,8 +5,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	clientfiletransfer "github.com/fengqi-dev/kube-loop/internal/client/filetransfer"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
+
+	clientfiletransfer "github.com/fengqi-dev/kube-loop/internal/client/filetransfer"
 )
 
 func (a *App) StartServerFileTransfer(request clientfiletransfer.Request) (clientfiletransfer.Task, error) {
@@ -78,9 +79,9 @@ func (a *App) PickServerUploadPath(kind string) (string, error) {
 		return "", errors.New("application is not ready")
 	}
 	switch strings.ToLower(strings.TrimSpace(kind)) {
-	case "file":
+	case serverFileKindFile:
 		return runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{Title: "Select file to upload"})
-	case "directory":
+	case serverFileKindDirectory:
 		return runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{Title: "Select directory to upload"})
 	default:
 		return "", errors.New("file transfer kind must be file or directory")
@@ -93,13 +94,18 @@ func (a *App) PickServerDownloadPath(kind, suggestedName string) (string, error)
 	}
 	name := safeDownloadName(suggestedName)
 	if name == "." || name == string(filepath.Separator) || name == "" {
-		name = "download"
+		name = fileTransferDirectionDownload
 	}
 	switch strings.ToLower(strings.TrimSpace(kind)) {
-	case "file":
-		return runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{Title: "Save downloaded file", DefaultFilename: name})
-	case "directory":
-		parent, err := runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{Title: "Select parent directory for download"})
+	case serverFileKindFile:
+		return runtime.SaveFileDialog(
+			a.ctx,
+			runtime.SaveDialogOptions{Title: "Save downloaded file", DefaultFilename: name},
+		)
+	case serverFileKindDirectory:
+		parent, err := runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{
+			Title: "Select parent directory for download",
+		})
 		if err != nil || parent == "" {
 			return parent, err
 		}
@@ -119,7 +125,7 @@ func safeDownloadName(value string) string {
 	}, name)
 	name = strings.Trim(name, ". ")
 	if name == "." || name == string(filepath.Separator) || name == "" {
-		return "download"
+		return fileTransferDirectionDownload
 	}
 	return name
 }

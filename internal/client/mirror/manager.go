@@ -10,11 +10,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficstream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
-	"github.com/google/uuid"
 )
 
 type Client interface {
@@ -90,7 +91,7 @@ type Manager struct {
 
 func NewManager(client Client, config Config) (*Manager, error) {
 	if client == nil || config.TrafficStreams == nil {
-		return nil, errors.New("Mirror control client and Data Plane stream opener are required")
+		return nil, errors.New("mirror control client and Data Plane stream opener are required")
 	}
 	streams := config.TrafficStreams
 	config.TrafficStreams = nil
@@ -114,7 +115,7 @@ func NewManager(client Client, config Config) (*Manager, error) {
 		config.ShadowDialTimeout < 100*time.Millisecond || config.ShadowDialTimeout > time.Minute ||
 		config.ShadowWriteTimeout < 10*time.Millisecond || config.ShadowWriteTimeout > time.Minute ||
 		config.ShadowIdleTimeout < 100*time.Millisecond || config.ShadowIdleTimeout > 24*time.Hour {
-		return nil, errors.New("Mirror shadow queue or timeout configuration is invalid")
+		return nil, errors.New("mirror shadow queue or timeout configuration is invalid")
 	}
 	return &Manager{
 		client: client, streams: streams, dial: config.DialContext,
@@ -128,7 +129,7 @@ func (manager *Manager) Start(
 	session remote.Session,
 	request Request,
 ) (Info, error) {
-	if ctx == nil || strings.TrimSpace(request.ProfileID) != serverProfile.ID || session.State != "active" {
+	if ctx == nil || strings.TrimSpace(request.ProfileID) != serverProfile.ID || session.State != mirrorSessionActive {
 		return Info{}, errors.New("active Server Profile Session is required")
 	}
 	targets, ports, err := normalizeTargets(request.Targets)
@@ -148,7 +149,7 @@ func (manager *Manager) Start(
 	connection, err := manager.streams.OpenTrafficStream(ctx, serverProfile.ID, tunnel.TrafficModeMirror, task.ID)
 	if err != nil || connection == nil {
 		if err == nil {
-			err = errors.New("Data Plane returned an empty Mirror stream")
+			err = errors.New("data Plane returned an empty Mirror stream")
 		}
 		_, stopErr := manager.client.StopMirror(ctx, serverProfile, session, task.ID)
 		return Info{}, errors.Join(err, stopErr)
@@ -163,8 +164,14 @@ func (manager *Manager) Start(
 	entry := &activeMirror{
 		profile: serverProfile, session: session, task: task, relay: relay, cancel: cancel, done: make(chan struct{}),
 		info: Info{
-			ID: task.ID, ProfileID: serverProfile.ID, SessionID: session.ID, Namespace: session.Namespace,
-			Service: task.Service, ClusterIP: task.ClusterIP, State: "running", Targets: append([]LocalTarget(nil), targets...),
+			ID:        task.ID,
+			ProfileID: serverProfile.ID,
+			SessionID: session.ID,
+			Namespace: session.Namespace,
+			Service:   task.Service,
+			ClusterIP: task.ClusterIP,
+			State:     "running",
+			Targets:   append([]LocalTarget(nil), targets...),
 		},
 	}
 	manager.mu.Lock()
@@ -173,7 +180,7 @@ func (manager *Manager) Start(
 		cancel()
 		_ = connection.Close()
 		_, stopErr := manager.client.StopMirror(ctx, serverProfile, session, task.ID)
-		return Info{}, errors.Join(errors.New("Mirror Task is already active locally"), stopErr)
+		return Info{}, errors.Join(errors.New("mirror Task is already active locally"), stopErr)
 	}
 	manager.active[task.ID] = entry
 	manager.mu.Unlock()
@@ -183,7 +190,7 @@ func (manager *Manager) Start(
 
 func (manager *Manager) Stop(ctx context.Context, profileID, taskID string) error {
 	if ctx == nil {
-		return errors.New("Mirror stop context is required")
+		return errors.New("mirror stop context is required")
 	}
 	manager.mu.Lock()
 	entry := manager.active[taskID]
@@ -194,7 +201,7 @@ func (manager *Manager) Stop(ctx context.Context, profileID, taskID string) erro
 	}
 	manager.mu.Unlock()
 	if entry == nil {
-		return errors.New("Mirror is not active locally")
+		return errors.New("mirror is not active locally")
 	}
 	// Persist the stop request before notifying the stream owner. Sending the
 	// stream frame first lets a fast owner race the DELETE state transition and
@@ -244,7 +251,7 @@ func (manager *Manager) StopProfile(ctx context.Context, profileID string) error
 
 func (manager *Manager) Shutdown(ctx context.Context) error {
 	if ctx == nil {
-		return errors.New("Mirror shutdown context is required")
+		return errors.New("mirror shutdown context is required")
 	}
 	manager.mu.Lock()
 	ids := make([]string, 0, len(manager.active))
@@ -275,7 +282,7 @@ func (manager *Manager) run(ctx context.Context, entry *activeMirror) {
 
 func normalizeTargets(input []LocalTarget) ([]LocalTarget, []remote.MirrorPort, error) {
 	if len(input) == 0 || len(input) > 64 {
-		return nil, nil, errors.New("Mirror requires one to 64 local targets")
+		return nil, nil, errors.New("mirror requires one to 64 local targets")
 	}
 	targets := make([]LocalTarget, len(input))
 	ports := make([]remote.MirrorPort, len(input))
@@ -283,22 +290,22 @@ func normalizeTargets(input []LocalTarget) ([]LocalTarget, []remote.MirrorPort, 
 	for index, target := range input {
 		target.Protocol = strings.ToLower(strings.TrimSpace(target.Protocol))
 		if target.Protocol == "" {
-			target.Protocol = "tcp"
+			target.Protocol = mirrorProtocolTCP
 		}
 		target.LocalHost = strings.TrimSpace(target.LocalHost)
 		if target.LocalHost == "" {
-			target.LocalHost = "127.0.0.1"
+			target.LocalHost = mirrorLoopbackHost
 		}
 		if target.LocalPort == 0 && target.ServicePort > 0 && target.ServicePort <= 65535 {
 			target.LocalPort = uint16(target.ServicePort)
 		}
 		if target.ServicePort < 1 || target.ServicePort > 65535 || target.LocalPort == 0 ||
-			(target.Protocol != "tcp" && target.Protocol != "udp") || !validLocalHost(target.LocalHost) {
-			return nil, nil, errors.New("Mirror local target is invalid")
+			(target.Protocol != mirrorProtocolTCP && target.Protocol != mirrorProtocolUDP) || !validLocalHost(target.LocalHost) {
+			return nil, nil, errors.New("mirror local target is invalid")
 		}
 		key := targetKey(target.Protocol, target.ServicePort)
 		if _, exists := seen[key]; exists {
-			return nil, nil, errors.New("Mirror Service ports must be unique")
+			return nil, nil, errors.New("mirror Service ports must be unique")
 		}
 		seen[key] = struct{}{}
 		targets[index] = target
@@ -331,7 +338,7 @@ func validLocalHost(host string) bool {
 
 func matchTaskTargets(task remote.MirrorTask, targets []LocalTarget) error {
 	if len(task.Ports) != len(targets) {
-		return errors.New("Gateway changed the requested Mirror ports")
+		return errors.New("gateway changed the requested Mirror ports")
 	}
 	want := make(map[string]struct{}, len(targets))
 	for _, target := range targets {
@@ -339,7 +346,7 @@ func matchTaskTargets(task remote.MirrorTask, targets []LocalTarget) error {
 	}
 	for _, port := range task.Ports {
 		if _, exists := want[targetKey(port.Protocol, port.ServicePort)]; !exists {
-			return errors.New("Gateway changed the requested Mirror ports")
+			return errors.New("gateway changed the requested Mirror ports")
 		}
 	}
 	return nil

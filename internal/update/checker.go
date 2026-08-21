@@ -24,8 +24,8 @@ type Info struct {
 	LatestVersion  string    `json:"latestVersion,omitempty"`
 	Available      bool      `json:"available"`
 	URL            string    `json:"url"`
-	PublishedAt    time.Time `json:"publishedAt,omitzero" ts_type:"string"`
-	CheckedAt      time.Time `json:"checkedAt" ts_type:"string"`
+	PublishedAt    time.Time `json:"publishedAt,omitzero"    ts_type:"string"`
+	CheckedAt      time.Time `json:"checkedAt"               ts_type:"string"`
 	Error          string    `json:"error,omitempty"`
 }
 
@@ -48,7 +48,7 @@ func (c *Checker) Check(ctx context.Context) (Info, error) {
 		return info, fmt.Errorf("create update request: %w", err)
 	}
 	request.Header.Set("Accept", "application/vnd.github+json")
-	request.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	request.Header.Set("X-Github-Api-Version", "2022-11-28")
 	request.Header.Set("User-Agent", "kube-loop/"+current)
 
 	client := c.HTTPClient
@@ -59,7 +59,7 @@ func (c *Checker) Check(ctx context.Context) (Info, error) {
 	if err != nil {
 		return info, fmt.Errorf("check for updates: %w", err)
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode == http.StatusNotFound {
 		return info, errors.New("no published KubeLoop release was found")
 	}

@@ -16,6 +16,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	"github.com/fengqi-dev/kube-loop/e2e/harness"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/authorization"
@@ -27,8 +30,6 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/protocol/execstream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
-	"github.com/google/uuid"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func TestRealPodExecStopsWhenOAuthGrantIsRevoked(t *testing.T) {
@@ -39,14 +40,18 @@ func TestRealPodExecStopsWhenOAuthGrantIsRevoked(t *testing.T) {
 	if err := harness.EnsureEchoWorkload(ctx, client); err != nil {
 		t.Fatalf("ensure real Pod exec fixture: %v", err)
 	}
-	pods, err := client.CoreV1().Pods(harness.EchoNamespace).List(ctx, metav1.ListOptions{LabelSelector: "app=kubeloop-e2e-echo"})
+	pods, err := client.CoreV1().
+		Pods(harness.EchoNamespace).
+		List(ctx, metav1.ListOptions{LabelSelector: "app=kubeloop-e2e-echo"})
 	if err != nil || len(pods.Items) != 1 {
 		t.Fatalf("find real Pod exec fixture: pods=%d err=%v", len(pods.Items), err)
 	}
 	podName := pods.Items[0].Name
 
 	stateStore, err := storage.Open(ctx, storage.Config{
-		Backend: storage.BackendSQLite, SQLitePath: filepath.Join(t.TempDir(), "v2-exec-e2e.db"), ControlPlaneReplicas: 1,
+		Backend:              storage.BackendSQLite,
+		SQLitePath:           filepath.Join(t.TempDir(), "v2-exec-e2e.db"),
+		ControlPlaneReplicas: 1,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -107,12 +112,18 @@ func TestRealPodExecStopsWhenOAuthGrantIsRevoked(t *testing.T) {
 		Subject: identityID, DeviceID: "e2e-device", AuthorizationID: authorizationID, AccessExpiresAt: expiresAt,
 	}
 	server, err := controlplane.NewServer(
-		controlplane.Config{PublicURL: "https://controlplane.e2e.invalid"}, controlplane.BuildInfo{},
+		controlplane.Config{PublicURL: "https://controlplane.e2e.invalid"},
+		controlplane.BuildInfo{},
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
-		controlplane.WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(*http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
-			return identity, nil
-		})),
-		controlplane.WithAuthorizer(policy), controlplane.WithAPIRoutes(controlplane.APIRoutes{Exec: execapi.NewRoutes(handler).Endpoints()}),
+		controlplane.WithAuthenticator(
+			controlplaneapi.AuthenticatorFunc(func(*http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
+				return identity, nil
+			}),
+		),
+		controlplane.WithAuthorizer(
+			policy,
+		),
+		controlplane.WithAPIRoutes(controlplane.APIRoutes{Exec: execapi.NewRoutes(handler).Endpoints()}),
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -140,7 +151,9 @@ func TestRealPodExecStopsWhenOAuthGrantIsRevoked(t *testing.T) {
 	}
 	defer createResponse.Body.Close()
 	var task execapi.Document
-	if err := json.NewDecoder(createResponse.Body).Decode(&task); err != nil || createResponse.StatusCode != http.StatusCreated {
+	if err := json.NewDecoder(createResponse.Body).
+		Decode(&task); err != nil ||
+		createResponse.StatusCode != http.StatusCreated {
 		t.Fatalf("create real Pod exec Task: status=%d task=%#v err=%v", createResponse.StatusCode, task, err)
 	}
 	streamURL := fmt.Sprintf(
@@ -180,8 +193,12 @@ func (validator e2eExecSessionValidator) RequireActive(
 	identity controlplaneapi.Identity,
 	namespace, sessionID string,
 ) (sessionapi.ActiveSession, *controlplaneapi.Error) {
-	if identity.Subject != validator.identityID || namespace != validator.session.Namespace || sessionID != validator.session.ID {
-		return sessionapi.ActiveSession{}, &controlplaneapi.Error{Code: controlplaneapi.CodeNotFound, Message: "resource not found"}
+	if identity.Subject != validator.identityID || namespace != validator.session.Namespace ||
+		sessionID != validator.session.ID {
+		return sessionapi.ActiveSession{}, &controlplaneapi.Error{
+			Code:    controlplaneapi.CodeNotFound,
+			Message: "resource not found",
+		}
 	}
 	return validator.session, nil
 }

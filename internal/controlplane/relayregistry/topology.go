@@ -5,10 +5,11 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/fengqi-dev/kube-loop/internal/protocol/relaycontrol"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/kubernetes"
+
+	"github.com/fengqi-dev/kube-loop/internal/protocol/relaycontrol"
 )
 
 const (
@@ -17,13 +18,20 @@ const (
 	TopologyHostname = "kubernetes.io/hostname"
 )
 
-func KubernetesTopologyResolver(client kubernetes.Interface, labelSelector map[string]string) (TopologyResolver, error) {
+func KubernetesTopologyResolver(
+	client kubernetes.Interface,
+	labelSelector map[string]string,
+) (TopologyResolver, error) {
 	if client == nil {
-		return nil, errors.New("Kubernetes client is required for Relay topology")
+		return nil, errors.New(
+			"kubernetes client is required for Relay topology",
+		)
 	}
 	selector := labels.SelectorFromSet(labelSelector).String()
 	return func(ctx context.Context, identity relaycontrol.PeerIdentity) (map[string]string, error) {
-		pods, err := client.CoreV1().Pods(identity.Namespace).List(ctx, metav1.ListOptions{LabelSelector: selector})
+		pods, err := client.CoreV1().
+			Pods(identity.Namespace).
+			List(ctx, metav1.ListOptions{LabelSelector: selector})
 		if err != nil {
 			return nil, fmt.Errorf("list Data Plane Pods: %w", err)
 		}
@@ -32,8 +40,11 @@ func KubernetesTopologyResolver(client kubernetes.Interface, labelSelector map[s
 			if string(pod.UID) != identity.PodUID {
 				continue
 			}
-			if pod.Spec.ServiceAccountName != identity.ServiceAccount || pod.Spec.NodeName == "" {
-				return nil, errors.New("authenticated Data Plane Pod identity does not match Kubernetes")
+			if pod.Spec.ServiceAccountName != identity.ServiceAccount ||
+				pod.Spec.NodeName == "" {
+				return nil, errors.New(
+					"authenticated Data Plane Pod identity does not match Kubernetes",
+				)
 			}
 			return nodeTopology(ctx, client, pod.Spec.NodeName)
 		}
@@ -47,19 +58,27 @@ func KubernetesPodTopology(
 	namespace, podName string,
 ) (map[string]string, error) {
 	if client == nil || namespace == "" || podName == "" {
-		return nil, errors.New("Control Plane Pod identity is required for Relay topology")
+		return nil, errors.New(
+			"control plane Pod identity is required for Relay topology",
+		)
 	}
-	pod, err := client.CoreV1().Pods(namespace).Get(ctx, podName, metav1.GetOptions{})
+	pod, err := client.CoreV1().
+		Pods(namespace).
+		Get(ctx, podName, metav1.GetOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("get Control Plane Pod: %w", err)
 	}
 	if pod.Spec.NodeName == "" {
-		return nil, errors.New("Control Plane Pod is not scheduled")
+		return nil, errors.New("control plane Pod is not scheduled")
 	}
 	return nodeTopology(ctx, client, pod.Spec.NodeName)
 }
 
-func nodeTopology(ctx context.Context, client kubernetes.Interface, nodeName string) (map[string]string, error) {
+func nodeTopology(
+	ctx context.Context,
+	client kubernetes.Interface,
+	nodeName string,
+) (map[string]string, error) {
 	node, err := client.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("get topology Node: %w", err)

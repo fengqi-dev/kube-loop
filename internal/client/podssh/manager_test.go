@@ -12,14 +12,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+	"golang.org/x/crypto/ssh"
+
 	localpodssh "github.com/fengqi-dev/kube-loop/internal/client/podssh/sshserver"
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
 	"github.com/fengqi-dev/kube-loop/internal/client/socksbridge"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/execstream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
-	"github.com/google/uuid"
-	"golang.org/x/crypto/ssh"
 )
 
 type fakeHostTCPRegistrar struct {
@@ -37,14 +38,14 @@ func (registrar *fakeHostTCPRegistrar) SetHostTCPHandler(profileID string, handl
 	return nil
 }
 
-func (registrar *fakeHostTCPRegistrar) dial(profileID, host string, port uint16) (net.Conn, error) {
+func (registrar *fakeHostTCPRegistrar) dial() (net.Conn, error) {
 	registrar.mu.Lock()
-	handler := registrar.handlers[profileID]
+	handler := registrar.handlers["server-a"]
 	registrar.mu.Unlock()
 	if handler == nil {
 		return nil, errors.New("host TCP handler is unavailable")
 	}
-	serve, ok := handler(host, port)
+	serve, ok := handler("10.244.1.7", 22)
 	if !ok || serve == nil {
 		return nil, errors.New("host TCP destination was not claimed")
 	}
@@ -93,7 +94,7 @@ func newFakeExecClient(t *testing.T) *fakeExecClient {
 		if err != nil {
 			return
 		}
-		defer connection.CloseNow()
+		defer checkTestClose(t, connection.CloseNow)
 		ctx, cancel := context.WithTimeout(request.Context(), 5*time.Second)
 		defer cancel()
 		for {
@@ -178,7 +179,7 @@ func TestManagerServesNativePodIPSSHThroughRemoteExec(t *testing.T) {
 	client := newFakeExecClient(t)
 	now := time.Now().UTC()
 	session := remote.Session{
-		ID: uuid.NewString(), Namespace: "development", State: "active", Generation: 1,
+		ID: uuid.NewString(), Namespace: "development", State: podSSHSessionActive, Generation: 1,
 		CreatedAt: now, UpdatedAt: now, LastHeartbeatAt: now, ExpiresAt: now.Add(time.Minute),
 	}
 	sessions := &fakeSessions{sessions: map[string]remote.Session{"server-a": session}}
@@ -190,17 +191,23 @@ func TestManagerServesNativePodIPSSHThroughRemoteExec(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = manager.Shutdown() })
-	info, err := manager.Start(context.Background(), profile.Profile{ID: "server-a", BaseURL: "https://gateway.test"}, session, Request{
-		ProfileID: "server-a", Namespace: "development", Pod: "api-0", Container: "main",
-		PodIP: "10.244.1.7", Ready: true, Containers: []string{"main", "sidecar"},
-	})
+	info, err := manager.Start(
+		context.Background(),
+		profile.Profile{ID: "server-a", BaseURL: "https://gateway.test"},
+		session,
+		Request{
+			ProfileID: "server-a", Namespace: "development", Pod: "api-0", Container: "main",
+			PodIP: "10.244.1.7", Ready: true, Containers: []string{"main", "sidecar"},
+		},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Address != "10.244.1.7:22" || info.Port != 22 || strings.Contains(info.Command, " -p ") || !strings.Contains(info.Command, "main@10.244.1.7") {
+	if info.Address != "10.244.1.7:22" || info.Port != 22 || strings.Contains(info.Command, " -p ") ||
+		!strings.Contains(info.Command, "main@10.244.1.7") {
 		t.Fatalf("Pod SSH info = %#v", info)
 	}
-	raw, err := registrar.dial("server-a", "10.244.1.7", 22)
+	raw, err := registrar.dial()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -212,12 +219,12 @@ func TestManagerServesNativePodIPSSHThroughRemoteExec(t *testing.T) {
 		t.Fatal(err)
 	}
 	sshClient := ssh.NewClient(connection, channels, requests)
-	defer sshClient.Close()
+	defer checkTestClose(t, sshClient.Close)
 	sshSession, err := sshClient.NewSession()
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer sshSession.Close()
+	defer checkTestClose(t, sshSession.Close)
 	if err := sshSession.RequestPty("xterm", 40, 120, ssh.TerminalModes{}); err != nil {
 		t.Fatal(err)
 	}
@@ -242,7 +249,7 @@ func TestManagerServesNativePodIPSSHThroughRemoteExec(t *testing.T) {
 	if err := manager.Stop("server-a", info.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := registrar.dial("server-a", "10.244.1.7", 22); err == nil {
+	if _, err := registrar.dial(); err == nil {
 		t.Fatal("disabled PodIP:22 remained claimed")
 	}
 }
@@ -252,7 +259,12 @@ func TestManagerRejectsNamespaceAndContainerEscapes(t *testing.T) {
 	signer, _ := ssh.NewSignerFromKey(privateKey)
 	client := newFakeExecClient(t)
 	now := time.Now().UTC()
-	session := remote.Session{ID: uuid.NewString(), Namespace: "development", State: "active", ExpiresAt: now.Add(time.Minute)}
+	session := remote.Session{
+		ID:        uuid.NewString(),
+		Namespace: "development",
+		State:     podSSHSessionActive,
+		ExpiresAt: now.Add(time.Minute),
+	}
 	manager, err := New(client, &fakeSessions{sessions: map[string]remote.Session{"server-a": session}}, Config{
 		ServerOptions: []localpodssh.Option{localpodssh.WithSigner(signer)}, HostTCPRegistrar: &fakeHostTCPRegistrar{},
 	})
@@ -263,7 +275,12 @@ func TestManagerRejectsNamespaceAndContainerEscapes(t *testing.T) {
 		{ProfileID: "server-a", Namespace: "production", Pod: "api", PodIP: "10.0.0.1", Ready: true, Containers: []string{"main"}},
 		{ProfileID: "server-a", Namespace: "development", Pod: "api", Container: "admin", PodIP: "10.0.0.1", Ready: true, Containers: []string{"main"}},
 	} {
-		if _, err := manager.Start(context.Background(), profile.Profile{ID: "server-a"}, session, request); err == nil {
+		if _, err := manager.Start(
+			context.Background(),
+			profile.Profile{ID: "server-a"},
+			session,
+			request,
+		); err == nil {
 			t.Fatalf("unsafe Pod SSH request accepted: %#v", request)
 		}
 	}
@@ -290,8 +307,18 @@ func TestManagerIsolatesEndpointByLocalUserKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
-	sessionA := remote.Session{ID: uuid.NewString(), Namespace: "development", State: "active", ExpiresAt: now.Add(time.Minute)}
-	sessionB := remote.Session{ID: uuid.NewString(), Namespace: "development", State: "active", ExpiresAt: now.Add(time.Minute)}
+	sessionA := remote.Session{
+		ID:        uuid.NewString(),
+		Namespace: "development",
+		State:     podSSHSessionActive,
+		ExpiresAt: now.Add(time.Minute),
+	}
+	sessionB := remote.Session{
+		ID:        uuid.NewString(),
+		Namespace: "development",
+		State:     podSSHSessionActive,
+		ExpiresAt: now.Add(time.Minute),
+	}
 	sessions := &fakeSessions{sessions: map[string]remote.Session{
 		"server-a": sessionA,
 		"server-b": sessionB,
@@ -332,26 +359,34 @@ func TestManagerIsolatesEndpointByLocalUserKey(t *testing.T) {
 		t.Fatalf("native endpoints = %q and %q", endpointA.Address, endpointB.Address)
 	}
 
-	unauthorizedRaw, err := registrar.dial("server-a", "10.244.1.7", 22)
+	unauthorizedRaw, err := registrar.dial()
 	if err != nil {
 		t.Fatal(err)
 	}
-	unauthorizedConnection, unauthorizedChannels, unauthorizedRequests, err := ssh.NewClientConn(unauthorizedRaw, endpointA.Address, &ssh.ClientConfig{
-		User: "main", Auth: []ssh.AuthMethod{ssh.PublicKeys(signerB)},
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(), Timeout: time.Second,
-	})
+	unauthorizedConnection, unauthorizedChannels, unauthorizedRequests, err := ssh.NewClientConn(
+		unauthorizedRaw,
+		endpointA.Address,
+		&ssh.ClientConfig{
+			User: "main", Auth: []ssh.AuthMethod{ssh.PublicKeys(signerB)},
+			HostKeyCallback: ssh.InsecureIgnoreHostKey(), Timeout: time.Second,
+		},
+	)
 	if err == nil {
 		_ = ssh.NewClient(unauthorizedConnection, unauthorizedChannels, unauthorizedRequests).Close()
 		t.Fatal("user B authenticated to user A Pod SSH endpoint")
 	}
-	authorizedRaw, err := registrar.dial("server-a", "10.244.1.7", 22)
+	authorizedRaw, err := registrar.dial()
 	if err != nil {
 		t.Fatal(err)
 	}
-	authorizedConnection, authorizedChannels, authorizedRequests, err := ssh.NewClientConn(authorizedRaw, endpointA.Address, &ssh.ClientConfig{
-		User: "main", Auth: []ssh.AuthMethod{ssh.PublicKeys(signerA)},
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(), Timeout: time.Second,
-	})
+	authorizedConnection, authorizedChannels, authorizedRequests, err := ssh.NewClientConn(
+		authorizedRaw,
+		endpointA.Address,
+		&ssh.ClientConfig{
+			User: "main", Auth: []ssh.AuthMethod{ssh.PublicKeys(signerA)},
+			HostKeyCallback: ssh.InsecureIgnoreHostKey(), Timeout: time.Second,
+		},
+	)
 	if err != nil {
 		t.Fatalf("user A could not authenticate to own Pod SSH endpoint: %v", err)
 	}

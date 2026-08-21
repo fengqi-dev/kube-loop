@@ -18,12 +18,12 @@ func TestAvailableTCPUDPPortSupportsBothProtocols(t *testing.T) {
 	if err != nil {
 		t.Fatalf("listen TCP on selected port: %v", err)
 	}
-	defer tcpListener.Close()
+	defer func() { _ = tcpListener.Close() }()
 	udpListener, err := net.ListenPacket("udp", address)
 	if err != nil {
 		t.Fatalf("listen UDP on selected port: %v", err)
 	}
-	defer udpListener.Close()
+	defer func() { _ = udpListener.Close() }()
 }
 
 func TestTrafficEndpointsShareListenAndDyeUsers(t *testing.T) {

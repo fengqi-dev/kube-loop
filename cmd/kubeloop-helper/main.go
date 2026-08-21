@@ -21,6 +21,7 @@ func main() {
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	os.Exit(execute(ctx, os.Args[1:], os.Stdout, os.Stderr, productionDependencies(), helper.Version))
+	exitCode := execute(ctx, os.Args[1:], os.Stdout, os.Stderr, productionDependencies(), helper.Version)
+	stop()
+	os.Exit(exitCode)
 }

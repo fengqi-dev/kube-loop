@@ -17,9 +17,14 @@ func TestSaveSelectAndDeleteServerProfile(t *testing.T) {
 	var server *httptest.Server
 	server = httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(writer).Encode(clientdiscovery.Document{
-			ServiceID: "service-1", PublicURL: server.URL, APIVersions: []string{"v2"},
-			AuthMethods: []clientdiscovery.AuthMethod{{ID: "company", Type: "oidc", Interaction: "browser"}},
-			ProtocolMin: "2.0", ProtocolMax: "2.0",
+			ServiceID:   "service-1",
+			PublicURL:   server.URL,
+			APIVersions: []string{"v2"},
+			AuthMethods: []clientdiscovery.AuthMethod{
+				{ID: "company", Type: "oidc", Interaction: authenticationProviderBrowser},
+			},
+			ProtocolMin: "2.0",
+			ProtocolMax: "2.0",
 		})
 	}))
 	defer server.Close()
@@ -31,7 +36,9 @@ func TestSaveSelectAndDeleteServerProfile(t *testing.T) {
 		profiles:  profileStore,
 		discovery: clientdiscovery.New(clientdiscovery.Config{HTTPClient: server.Client()}),
 	}
-	result, err := application.SaveServerProfile(SaveServerProfileRequest{BaseURL: server.URL, DisplayName: "Production", Activate: true})
+	result, err := application.SaveServerProfile(
+		SaveServerProfileRequest{BaseURL: server.URL, DisplayName: "Production", Activate: true},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +59,9 @@ func TestBootstrapWithActiveProfileDoesNotReadKubeconfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := profileStore.Upsert(clientprofile.Profile{ID: "service-1", BaseURL: "https://gateway.example.test"}); err != nil {
+	if err := profileStore.Upsert(
+		clientprofile.Profile{ID: "service-1", BaseURL: "https://gateway.example.test"},
+	); err != nil {
 		t.Fatal(err)
 	}
 	application := &App{profiles: profileStore}
@@ -89,17 +98,26 @@ func TestSaveServerProfileRejectsServiceIDCollisionAcrossOrigins(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := profileStore.Upsert(clientprofile.Profile{ID: "service-1", BaseURL: "https://existing.example.test"}); err != nil {
+	if err := profileStore.Upsert(
+		clientprofile.Profile{ID: "service-1", BaseURL: "https://existing.example.test"},
+	); err != nil {
 		t.Fatal(err)
 	}
 	var server *httptest.Server
 	server = httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(writer).Encode(clientdiscovery.Document{
-			ServiceID: "service-1", PublicURL: server.URL, APIVersions: []string{"v2"}, ProtocolMin: "2.0", ProtocolMax: "2.0",
+			ServiceID:   "service-1",
+			PublicURL:   server.URL,
+			APIVersions: []string{"v2"},
+			ProtocolMin: "2.0",
+			ProtocolMax: "2.0",
 		})
 	}))
 	defer server.Close()
-	application := &App{profiles: profileStore, discovery: clientdiscovery.New(clientdiscovery.Config{HTTPClient: server.Client()})}
+	application := &App{
+		profiles:  profileStore,
+		discovery: clientdiscovery.New(clientdiscovery.Config{HTTPClient: server.Client()}),
+	}
 	if _, err := application.SaveServerProfile(SaveServerProfileRequest{BaseURL: server.URL}); err == nil {
 		t.Fatal("service ID collision was accepted")
 	}
@@ -118,18 +136,26 @@ func TestSaveServerProfileEditsAddressForSameService(t *testing.T) {
 	var server *httptest.Server
 	server = httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(writer).Encode(clientdiscovery.Document{
-			ServiceID: "service-1", PublicURL: server.URL, APIVersions: []string{"v2"}, ProtocolMin: "2.0", ProtocolMax: "2.0",
+			ServiceID:   "service-1",
+			PublicURL:   server.URL,
+			APIVersions: []string{"v2"},
+			ProtocolMin: "2.0",
+			ProtocolMax: "2.0",
 		})
 	}))
 	defer server.Close()
-	application := &App{profiles: profileStore, discovery: clientdiscovery.New(clientdiscovery.Config{HTTPClient: server.Client()})}
+	application := &App{
+		profiles:  profileStore,
+		discovery: clientdiscovery.New(clientdiscovery.Config{HTTPClient: server.Client()}),
+	}
 	result, err := application.SaveServerProfile(SaveServerProfileRequest{
 		ID: "service-1", BaseURL: server.URL, DisplayName: "New name",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Profile.BaseURL != server.URL || result.Profile.DisplayName != "New name" || result.Profile.LastUserName != "fengqi" {
+	if result.Profile.BaseURL != server.URL || result.Profile.DisplayName != "New name" ||
+		result.Profile.LastUserName != "fengqi" {
 		t.Fatalf("edited profile = %#v", result.Profile)
 	}
 }
@@ -147,7 +173,10 @@ func TestSaveServerProfilePreservesRequestedHTTPScheme(t *testing.T) {
 		})
 	}))
 	defer server.Close()
-	application := &App{profiles: profileStore, discovery: clientdiscovery.New(clientdiscovery.Config{HTTPClient: server.Client()})}
+	application := &App{
+		profiles:  profileStore,
+		discovery: clientdiscovery.New(clientdiscovery.Config{HTTPClient: server.Client()}),
+	}
 	result, err := application.SaveServerProfile(SaveServerProfileRequest{BaseURL: server.URL, Activate: true})
 	if err != nil {
 		t.Fatal(err)
@@ -162,25 +191,36 @@ func TestSaveServerProfileRejectsEditToDifferentService(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := profileStore.Upsert(clientprofile.Profile{ID: "service-1", BaseURL: "https://old.example.test"}); err != nil {
+	if err := profileStore.Upsert(
+		clientprofile.Profile{ID: "service-1", BaseURL: "https://old.example.test"},
+	); err != nil {
 		t.Fatal(err)
 	}
 	var server *httptest.Server
 	server = httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(writer).Encode(clientdiscovery.Document{
-			ServiceID: "service-2", PublicURL: server.URL, APIVersions: []string{"v2"}, ProtocolMin: "2.0", ProtocolMax: "2.0",
+			ServiceID:   "service-2",
+			PublicURL:   server.URL,
+			APIVersions: []string{"v2"},
+			ProtocolMin: "2.0",
+			ProtocolMax: "2.0",
 		})
 	}))
 	defer server.Close()
-	application := &App{profiles: profileStore, discovery: clientdiscovery.New(clientdiscovery.Config{HTTPClient: server.Client()})}
-	if _, err := application.SaveServerProfile(SaveServerProfileRequest{ID: "service-1", BaseURL: server.URL}); err == nil {
+	application := &App{
+		profiles:  profileStore,
+		discovery: clientdiscovery.New(clientdiscovery.Config{HTTPClient: server.Client()}),
+	}
+	if _, err := application.SaveServerProfile(
+		SaveServerProfileRequest{ID: "service-1", BaseURL: server.URL},
+	); err == nil {
 		t.Fatal("editing a profile to a different service was accepted")
 	}
 }
 
 func TestSafeDownloadNameRemovesPathAndPlatformReservedCharacters(t *testing.T) {
 	for input, expected := range map[string]string{
-		"": "download", "../report.txt": "report.txt", `bad:name?.txt`: "bad_name_.txt", ".": "download",
+		"": fileTransferDirectionDownload, "../report.txt": "report.txt", `bad:name?.txt`: "bad_name_.txt", ".": fileTransferDirectionDownload,
 	} {
 		if actual := safeDownloadName(input); actual != expected {
 			t.Fatalf("safeDownloadName(%q) = %q, want %q", input, actual, expected)

@@ -17,7 +17,10 @@ import (
 	helperprotocol "github.com/fengqi-dev/kube-loop/internal/protocol/helper"
 )
 
+const goosWindows = "windows"
+
 func copyFile(src, dst string, mode os.FileMode) error {
+	//nolint:gosec // System executable directories must be traversable by service launchers.
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return err
 	}
@@ -25,7 +28,7 @@ func copyFile(src, dst string, mode os.FileMode) error {
 	if err != nil {
 		return err
 	}
-	defer in.Close()
+	defer func() { _ = in.Close() }()
 	tmp := dst + ".tmp"
 	out, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
 	if err != nil {
@@ -68,6 +71,7 @@ func copyFile(src, dst string, mode os.FileMode) error {
 	return os.Chmod(dst, mode)
 }
 
+//nolint:revive // InstallFromCLI preserves the established public helper API.
 func InstallFromCLI(source, token string, uid int, version, homeDir, ownerSID, singBoxPath string) (retErr error) {
 	if source == "" {
 		return fmt.Errorf("--source is required")
@@ -164,19 +168,24 @@ const installReadyTimeout = 90 * time.Second
 
 func waitForInstalledHelperReady(token, version string) error {
 	client := &helper.Client{Token: token}
-	return waitForHelperReady(context.Background(), installReadyTimeout, 100*time.Millisecond, func(pingCtx context.Context) (helperprotocol.Response, error) {
-		requestCtx, requestCancel := context.WithTimeout(pingCtx, 2*time.Second)
-		defer requestCancel()
-		response, err := client.Ping(requestCtx)
-		if err == nil && response.Version != version {
-			return response, fmt.Errorf(
-				"helper version %q does not match installed version %q",
-				response.Version,
-				version,
-			)
-		}
-		return response, err
-	})
+	return waitForHelperReady(
+		context.Background(),
+		installReadyTimeout,
+		100*time.Millisecond,
+		func(pingCtx context.Context) (helperprotocol.Response, error) {
+			requestCtx, requestCancel := context.WithTimeout(pingCtx, 2*time.Second)
+			defer requestCancel()
+			response, err := client.Ping(requestCtx)
+			if err == nil && response.Version != version {
+				return response, fmt.Errorf(
+					"helper version %q does not match installed version %q",
+					response.Version,
+					version,
+				)
+			}
+			return response, err
+		},
+	)
 }
 
 type installRollback struct {
@@ -301,7 +310,7 @@ func (f fileRollback) discard() {
 
 func singBoxNearHelperSource(source string) string {
 	name := "sing-box"
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == goosWindows {
 		name = "sing-box.exe"
 	}
 	dir := filepath.Dir(source)
@@ -342,6 +351,7 @@ func helperNeedsBinaryUpdate(source, dest string) (bool, error) {
 	}
 	dstHash, err := fileSHA256(dest)
 	if err != nil {
+		//nolint:nilerr // The caller needs the reinstall decision, not the stale-file read error.
 		return true, nil
 	}
 	return !strings.EqualFold(srcHash, dstHash), nil
@@ -365,7 +375,7 @@ func removeInstalledBinary(path string) {
 	// running; keep the packaged resource so the desktop can install it again.
 	// The application uninstaller removes the containing directory after this
 	// command exits.
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == goosWindows {
 		if executable, err := os.Executable(); err == nil && sameInstallPath(path, executable) {
 			return
 		}
@@ -380,7 +390,7 @@ func sameInstallPath(a, b string) bool {
 		return false
 	}
 	aAbs, bAbs = filepath.Clean(aAbs), filepath.Clean(bAbs)
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == goosWindows {
 		return strings.EqualFold(aAbs, bAbs)
 	}
 	return aAbs == bAbs

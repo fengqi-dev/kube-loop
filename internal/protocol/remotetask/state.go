@@ -38,9 +38,10 @@ func (state State) Owned() bool {
 	switch state {
 	case Starting, Running, Recovering, Stopping:
 		return true
-	default:
+	case Pending, Failed, Stopped:
 		return false
 	}
+	return false
 }
 
 func States() []State {
@@ -69,6 +70,8 @@ func ValidateTransition(current, next State) error {
 		allowed = next == Stopped || next == Failed || next == Recovering
 	case Recovering:
 		allowed = next == Stopping || next == Stopped || next == Failed
+	case Failed, Stopped:
+		allowed = false
 	}
 	if !allowed {
 		return fmt.Errorf("remote Task transition %q -> %q is not allowed", current, next)

@@ -21,15 +21,21 @@ func NewRequestTracker() *RequestTracker {
 }
 
 func (t *RequestTracker) Middleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if !t.begin() {
-			writer.Header().Set("Connection", "close")
-			http.Error(writer, "server is shutting down", http.StatusServiceUnavailable)
-			return
-		}
-		defer t.end()
-		next.ServeHTTP(writer, request)
-	})
+	return http.HandlerFunc(
+		func(writer http.ResponseWriter, request *http.Request) {
+			if !t.begin() {
+				writer.Header().Set("Connection", "close")
+				http.Error(
+					writer,
+					"server is shutting down",
+					http.StatusServiceUnavailable,
+				)
+				return
+			}
+			defer t.end()
+			next.ServeHTTP(writer, request)
+		},
+	)
 }
 
 func (t *RequestTracker) BeginDrain() {

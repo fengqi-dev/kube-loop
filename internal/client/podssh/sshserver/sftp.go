@@ -134,7 +134,11 @@ func (h *sftpHandler) Filecmd(request *sftp.Request) error {
 	case "Rename", "PosixRename":
 		command = "mv -- " + shellquote.Join(remotePath) + " " + shellquote.Join(cleanRemotePath(request.Target))
 	case "Symlink":
-		command = "ln -s -- " + shellquote.Join(request.Filepath) + " " + shellquote.Join(cleanRemotePath(request.Target))
+		command = "ln -s -- " + shellquote.Join(
+			request.Filepath,
+		) + " " + shellquote.Join(
+			cleanRemotePath(request.Target),
+		)
 	case "Link":
 		command = "ln -- " + shellquote.Join(remotePath) + " " + shellquote.Join(cleanRemotePath(request.Target))
 	case "Setstat":
@@ -167,7 +171,7 @@ func (h *sftpHandler) downloadFile(ctx context.Context, remotePath string) (*os.
 	execResult := make(chan error, 1)
 	go func() {
 		execResult <- h.executor.Exec(ctx, h.target, []string{
-			"/bin/sh", "-c",
+			defaultShellPath, "-c",
 			"tar cf - -C " + shellquote.Join(parent) + " " + shellquote.Join(base),
 		}, Streams{Stdout: writer, Stderr: io.Discard})
 		_ = writer.Close()
@@ -193,6 +197,7 @@ func (h *sftpHandler) downloadFile(ctx context.Context, remotePath string) (*os.
 			<-execResult
 			return nil, fmt.Errorf("%s is not a regular file", remotePath)
 		}
+		//nolint:gosec // The authenticated Pod stream is an uncompressed TAR file; SFTP preserves its file size.
 		if _, err := io.Copy(file, archive); err != nil {
 			_ = reader.CloseWithError(err)
 			<-execResult
@@ -250,7 +255,7 @@ func (h *sftpHandler) upload(
 		writeResult <- err
 	}()
 	execErr := h.executor.Exec(ctx, h.target, []string{
-		"/bin/sh", "-c",
+		defaultShellPath, "-c",
 		"tar xf - -C " + shellquote.Join(parent),
 	}, Streams{Stdin: reader, Stderr: io.Discard})
 	if execErr != nil {
@@ -271,7 +276,7 @@ func (h *sftpHandler) stat(ctx context.Context, remotePath string) (os.FileInfo,
 	execResult := make(chan error, 1)
 	go func() {
 		execResult <- h.executor.Exec(ctx, h.target, []string{
-			"/bin/sh", "-c",
+			defaultShellPath, "-c",
 			"tar cf - --no-recursion -C " + shellquote.Join(parent) + " " + shellquote.Join(base),
 		}, Streams{Stdout: writer, Stderr: io.Discard})
 		_ = writer.Close()
@@ -279,6 +284,7 @@ func (h *sftpHandler) stat(ctx context.Context, remotePath string) (os.FileInfo,
 	archive := tar.NewReader(reader)
 	header, readErr := archive.Next()
 	if readErr == nil {
+		//nolint:gosec // TAR is uncompressed; draining is required to let the context-bound Pod exec command finish.
 		_, _ = io.Copy(io.Discard, archive)
 	}
 	_, _ = io.Copy(io.Discard, reader)
@@ -363,7 +369,7 @@ func (h *sftpHandler) exec(
 	if stdout == nil {
 		stdout = io.Discard
 	}
-	err := h.executor.Exec(ctx, h.target, []string{"/bin/sh", "-c", script}, Streams{
+	err := h.executor.Exec(ctx, h.target, []string{defaultShellPath, "-c", script}, Streams{
 		Stdout: stdout, Stderr: &stderr,
 	})
 	if err != nil && strings.TrimSpace(stderr.String()) != "" {
@@ -374,6 +380,7 @@ func (h *sftpHandler) exec(
 
 type uploadFile struct {
 	*os.File
+
 	closeRemote func() error
 	once        sync.Once
 	closeErr    error
@@ -381,6 +388,7 @@ type uploadFile struct {
 
 type downloadFile struct {
 	*os.File
+
 	once sync.Once
 }
 
@@ -388,14 +396,14 @@ func (f *downloadFile) Close() error {
 	var err error
 	f.once.Do(func() {
 		err = f.File.Close()
-		_ = os.Remove(f.File.Name())
+		_ = os.Remove(f.Name())
 	})
 	return err
 }
 
 func (f *uploadFile) Close() error {
 	f.once.Do(func() {
-		if err := f.File.Sync(); err != nil {
+		if err := f.Sync(); err != nil {
 			f.closeErr = err
 		} else if err := f.closeRemote(); err != nil {
 			f.closeErr = err
@@ -403,7 +411,7 @@ func (f *uploadFile) Close() error {
 		if err := f.File.Close(); f.closeErr == nil {
 			f.closeErr = err
 		}
-		_ = os.Remove(f.File.Name())
+		_ = os.Remove(f.Name())
 	})
 	return f.closeErr
 }

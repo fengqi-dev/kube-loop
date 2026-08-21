@@ -7,9 +7,14 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/fengqi-dev/kube-loop/internal/controlplane"
 	"github.com/labstack/echo/v5"
+
+	"github.com/fengqi-dev/kube-loop/internal/controlplane"
 )
+
+const contentSecurityPolicy = "default-src 'none'; connect-src 'self'; script-src 'self'; " +
+	"style-src 'self'; img-src 'self' data:; form-action 'self'; frame-ancestors 'none'; " +
+	"base-uri 'none'; object-src 'none'"
 
 //go:embed assets/index.html assets/app.css assets/app.js
 var assets embed.FS
@@ -40,11 +45,11 @@ func (handler *Handler) serve(ctx *echo.Context) error {
 	writer, request := ctx.Response(), ctx.Request()
 	path := "/" + strings.TrimPrefix(ctx.Param("*"), "/")
 	if path == "" || path == "/" || path == "/callback" {
-		path = "/index.html"
+		path = indexPath
 	}
 	var contentType string
 	switch path {
-	case "/index.html":
+	case indexPath:
 		contentType = "text/html; charset=utf-8"
 	case "/app.css":
 		contentType = "text/css; charset=utf-8"
@@ -57,19 +62,32 @@ func (handler *Handler) serve(ctx *echo.Context) error {
 	content, err := fs.ReadFile(handler.assets, strings.TrimPrefix(path, "/"))
 	if err != nil {
 		http.NotFound(writer, request)
-		return nil
+		return nil //nolint:nilerr // The HTTP 404 response fully handles missing embedded assets.
 	}
-	if path == "/index.html" {
-		document := strings.ReplaceAll(string(content), "{{MANAGEMENT_PATH}}", handler.managementPath)
-		document = strings.ReplaceAll(document, `src="./app.js"`, `src="`+handler.managementPath+`/ui/app.js"`)
-		document = strings.ReplaceAll(document, `href="./app.css"`, `href="`+handler.managementPath+`/ui/app.css"`)
+	if path == indexPath {
+		document := strings.ReplaceAll(
+			string(content),
+			"{{MANAGEMENT_PATH}}",
+			handler.managementPath,
+		)
+		document = strings.ReplaceAll(
+			document,
+			`src="./app.js"`,
+			`src="`+handler.managementPath+`/ui/app.js"`,
+		)
+		document = strings.ReplaceAll(
+			document,
+			`href="./app.css"`,
+			`href="`+handler.managementPath+`/ui/app.css"`,
+		)
 		content = []byte(document)
 	}
 	writer.Header().Set("Cache-Control", "no-store")
 	writer.Header().Set("Content-Type", contentType)
 	writer.Header().Set("Cross-Origin-Opener-Policy", "same-origin")
 	writer.Header().Set("Cross-Origin-Resource-Policy", "same-origin")
-	writer.Header().Set("Content-Security-Policy", "default-src 'none'; connect-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; form-action 'self'; frame-ancestors 'none'; base-uri 'none'; object-src 'none'")
+	writer.Header().
+		Set("Content-Security-Policy", contentSecurityPolicy)
 	writer.Header().Set("X-Frame-Options", "DENY")
 	writer.Header().Set("X-Content-Type-Options", "nosniff")
 	writer.WriteHeader(http.StatusOK)

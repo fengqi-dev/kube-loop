@@ -77,7 +77,11 @@ func (signer *Signer) Sign(claims Claims) (string, error) {
 	if err != nil {
 		return "", errors.New("encode relay ticket claims")
 	}
-	unsigned := base64.RawURLEncoding.EncodeToString(headerJSON) + "." + base64.RawURLEncoding.EncodeToString(claimsJSON)
+	unsigned := base64.RawURLEncoding.EncodeToString(
+		headerJSON,
+	) + "." + base64.RawURLEncoding.EncodeToString(
+		claimsJSON,
+	)
 	signature := ed25519.Sign(signer.key, []byte(unsigned))
 	ticket := unsigned + "." + base64.RawURLEncoding.EncodeToString(signature)
 	if len(ticket) > MaximumTicketBytes {
@@ -138,7 +142,8 @@ func NewVerifier(config VerifierConfig) (*Verifier, error) {
 		if validity, exists := config.KeyValidity[keyID]; exists {
 			validity.NotBefore = validity.NotBefore.UTC()
 			validity.NotAfter = validity.NotAfter.UTC()
-			if validity.NotBefore.IsZero() || validity.NotAfter.IsZero() || !validity.NotAfter.After(validity.NotBefore) {
+			if validity.NotBefore.IsZero() || validity.NotAfter.IsZero() ||
+				!validity.NotAfter.After(validity.NotBefore) {
 				return nil, errors.New("relay ticket verification key validity is invalid")
 			}
 			keyValidity[keyID] = validity
@@ -177,9 +182,12 @@ func (verifier *Verifier) Verify(ticket string) (Claims, error) {
 		return Claims{}, ErrInvalid
 	}
 	nowTime := verifier.now().UTC()
-	if validity, bounded := verifier.keyValidity[ticketHeader.KeyID]; bounded &&
-		(nowTime.Add(verifier.clockSkew).Before(validity.NotBefore) || !nowTime.Add(-verifier.clockSkew).Before(validity.NotAfter)) {
-		return Claims{}, ErrInvalid
+	if validity, bounded := verifier.keyValidity[ticketHeader.KeyID]; bounded {
+		beforeValidity := nowTime.Add(verifier.clockSkew).Before(validity.NotBefore)
+		afterValidity := !nowTime.Add(-verifier.clockSkew).Before(validity.NotAfter)
+		if beforeValidity || afterValidity {
+			return Claims{}, ErrInvalid
+		}
 	}
 	signature, err := base64.RawURLEncoding.Strict().DecodeString(parts[2])
 	if err != nil || len(signature) != ed25519.SignatureSize ||

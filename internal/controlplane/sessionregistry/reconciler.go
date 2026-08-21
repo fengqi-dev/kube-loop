@@ -41,9 +41,13 @@ type Reconciler struct {
 	now        func() time.Time
 }
 
-func NewReconciler(store RecoveryStore, logger *slog.Logger, config RecoveryConfig) (*Reconciler, error) {
+func NewReconciler(
+	store RecoveryStore,
+	logger *slog.Logger,
+	config RecoveryConfig,
+) (*Reconciler, error) {
 	if store == nil {
-		return nil, errors.New("Session runtime recovery store is required")
+		return nil, errors.New("session runtime recovery store is required")
 	}
 	if logger == nil {
 		logger = slog.Default()
@@ -61,21 +65,27 @@ func NewReconciler(store RecoveryStore, logger *slog.Logger, config RecoveryConf
 		config.Now = time.Now
 	}
 	if len(config.TaskTypes) == 0 {
-		config.TaskTypes = []string{"pod-exec", "file-transfer"}
+		config.TaskTypes = []string{taskTypePodExec, "file-transfer"}
 	}
 	if config.Interval < 100*time.Millisecond || config.Interval > 24*time.Hour ||
-		config.StaleAfter < config.Interval || config.StaleAfter > 24*time.Hour {
-		return nil, errors.New("Session runtime recovery intervals are invalid")
+		config.StaleAfter < config.Interval ||
+		config.StaleAfter > 24*time.Hour {
+		return nil, errors.New("session runtime recovery intervals are invalid")
 	}
-	if config.BatchSize < 1 || config.BatchSize > 1000 || len(config.TaskTypes) > 16 {
-		return nil, errors.New("Session runtime recovery batch or Task types are invalid")
+	if config.BatchSize < 1 || config.BatchSize > 1000 ||
+		len(config.TaskTypes) > 16 {
+		return nil, errors.New(
+			"session runtime recovery batch or Task types are invalid",
+		)
 	}
 	seen := make(map[string]struct{}, len(config.TaskTypes))
 	taskTypes := make([]string, 0, len(config.TaskTypes))
 	for _, taskType := range config.TaskTypes {
 		taskType = strings.TrimSpace(taskType)
 		if taskType == "" || len(taskType) > 128 {
-			return nil, errors.New("Session runtime recovery Task type is invalid")
+			return nil, errors.New(
+				"session runtime recovery Task type is invalid",
+			)
 		}
 		if _, exists := seen[taskType]; exists {
 			continue
@@ -105,7 +115,7 @@ func (reconciler *Reconciler) Run(ctx context.Context) {
 
 func (reconciler *Reconciler) RunOnce(ctx context.Context) (int, error) {
 	if ctx == nil {
-		return 0, errors.New("Session runtime recovery context is required")
+		return 0, errors.New("session runtime recovery context is required")
 	}
 	now := reconciler.now().UTC()
 	recovered := 0
@@ -129,7 +139,8 @@ func (reconciler *Reconciler) RunOnce(ctx context.Context) (int, error) {
 			err := reconciler.store.Tasks().ClaimStale(
 				ctx, task.ID, task.State, task.UpdatedAt, next, encoded, now,
 			)
-			if errors.Is(err, storage.ErrConflict) || errors.Is(err, storage.ErrNotFound) {
+			if errors.Is(err, storage.ErrConflict) ||
+				errors.Is(err, storage.ErrNotFound) {
 				continue
 			}
 			if err != nil {
@@ -145,10 +156,18 @@ func (reconciler *Reconciler) RunOnce(ctx context.Context) (int, error) {
 	return recovered, result
 }
 
-func (reconciler *Reconciler) recoverPortForwards(ctx context.Context, now time.Time) (int, error) {
+func (reconciler *Reconciler) recoverPortForwards(
+	ctx context.Context,
+	now time.Time,
+) (int, error) {
 	tasks, err := reconciler.store.Tasks().ListStaleByTypeStates(
 		ctx, "port-forward",
-		[]remotetask.State{remotetask.Pending, remotetask.Starting, remotetask.Running, remotetask.Stopping},
+		[]remotetask.State{
+			remotetask.Pending,
+			remotetask.Starting,
+			remotetask.Running,
+			remotetask.Stopping,
+		},
 		now.Add(-reconciler.staleAfter), reconciler.batchSize,
 	)
 	if err != nil {
@@ -159,11 +178,12 @@ func (reconciler *Reconciler) recoverPortForwards(ctx context.Context, now time.
 	for _, task := range tasks {
 		next := remotetask.Stopped
 		message := ""
-		if task.State == remotetask.Pending || task.State == remotetask.Starting {
+		if task.State == remotetask.Pending ||
+			task.State == remotetask.Starting {
 			next, message = remotetask.Failed, "Control Plane Port Forward owner was lost during activation"
 		} else if task.State == remotetask.Running {
 			session, sessionErr := reconciler.store.Sessions().GetByID(ctx, task.SessionID)
-			if sessionErr == nil && session.State == "active" && session.ExpiresAt.After(now) {
+			if sessionErr == nil && session.State == statusActive && session.ExpiresAt.After(now) {
 				continue
 			}
 			if sessionErr != nil && !errors.Is(sessionErr, storage.ErrNotFound) {
@@ -174,7 +194,8 @@ func (reconciler *Reconciler) recoverPortForwards(ctx context.Context, now time.
 		err := reconciler.store.Tasks().ClaimStale(
 			ctx, task.ID, task.State, task.UpdatedAt, next, recoveryResult(task.Result, message), now,
 		)
-		if errors.Is(err, storage.ErrConflict) || errors.Is(err, storage.ErrNotFound) {
+		if errors.Is(err, storage.ErrConflict) ||
+			errors.Is(err, storage.ErrNotFound) {
 			continue
 		}
 		if err != nil {
@@ -202,11 +223,21 @@ func (reconciler *Reconciler) runAndLog(ctx context.Context) {
 	count, err := reconciler.RunOnce(ctx)
 	if err != nil {
 		if ctx.Err() == nil {
-			reconciler.logger.ErrorContext(ctx, "Session runtime recovery pass failed", "error", err)
+			reconciler.logger.ErrorContext(
+				ctx,
+				"Session runtime recovery pass failed",
+				"error",
+				err,
+			)
 		}
 		return
 	}
 	if count > 0 {
-		reconciler.logger.InfoContext(ctx, "Recovered orphaned Session stream Tasks", "tasks", count)
+		reconciler.logger.InfoContext(
+			ctx,
+			"Recovered orphaned Session stream Tasks",
+			"tasks",
+			count,
+		)
 	}
 }

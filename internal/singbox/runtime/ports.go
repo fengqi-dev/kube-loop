@@ -10,8 +10,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/fengqi-dev/kube-loop/internal/singbox"
 	"github.com/miekg/dns"
+
+	"github.com/fengqi-dev/kube-loop/internal/singbox"
 )
 
 func probeLocalDNS(ctx context.Context, host string, port int, qname string) error {
@@ -23,7 +24,7 @@ func probeLocalDNS(ctx context.Context, host string, port int, qname string) err
 	}
 	msg := new(dns.Msg)
 	msg.SetQuestion(dns.Fqdn(qname), dns.TypeA)
-	client := &dns.Client{Net: "udp", Timeout: 3 * time.Second}
+	client := &dns.Client{Net: networkUDP, Timeout: 3 * time.Second}
 	addr := net.JoinHostPort(host, strconv.Itoa(port))
 	type result struct {
 		resp *dns.Msg
@@ -52,24 +53,33 @@ func probeLocalDNS(ctx context.Context, host string, port int, qname string) err
 }
 
 func availablePort() (int, error) {
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	listener, err := net.Listen(networkTCP, "127.0.0.1:0")
 	if err != nil {
 		return 0, err
 	}
-	defer listener.Close()
-	return listener.Addr().(*net.TCPAddr).Port, nil
+	defer func() { _ = listener.Close() }()
+	address, ok := listener.Addr().(*net.TCPAddr)
+	if !ok {
+		return 0, fmt.Errorf("unexpected TCP listener address %T", listener.Addr())
+	}
+	return address.Port, nil
 }
 
 func availableTCPUDPPort() (int, error) {
 	var lastErr error
 	for range 100 {
-		udpListener, err := net.ListenPacket("udp", "127.0.0.1:0")
+		udpListener, err := net.ListenPacket(networkUDP, "127.0.0.1:0")
 		if err != nil {
 			return 0, err
 		}
-		port := udpListener.LocalAddr().(*net.UDPAddr).Port
+		udpAddress, ok := udpListener.LocalAddr().(*net.UDPAddr)
+		if !ok {
+			_ = udpListener.Close()
+			return 0, fmt.Errorf("unexpected UDP listener address %T", udpListener.LocalAddr())
+		}
+		port := udpAddress.Port
 		tcpListener, tcpErr := net.Listen(
-			"tcp",
+			networkTCP,
 			net.JoinHostPort("127.0.0.1", strconv.Itoa(port)),
 		)
 		if tcpErr == nil {

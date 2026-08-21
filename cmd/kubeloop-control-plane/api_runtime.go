@@ -37,6 +37,7 @@ type apiRuntime struct {
 	BindingRecovery *trafficbindingclient.Reconciler
 }
 
+//nolint:gocyclo // This composition root validates each independently constructed API dependency.
 func buildAPIRuntime(
 	ctx context.Context,
 	config loadedControlPlaneConfig,
@@ -120,17 +121,27 @@ func buildAPIRuntime(
 		os.Exit(1)
 	}
 	relayRegistry, err := newRelayRegistryRuntime(relayRegistryOptions{
-		ListenAddress:   config.Document.Relay.Registry.Listen,
-		CertificateFile: config.Document.Relay.Registry.CertificateFile, PrivateKeyFile: config.Document.Relay.Registry.PrivateKeyFile,
-		ClientCAFile: config.Document.Relay.Registry.ClientCAFile, AuthenticationMode: config.Document.Relay.Registry.Authentication,
-		TokenAudience: config.Document.Relay.Registry.TokenAudience, TrustDomain: config.Document.Relay.Registry.TrustDomain,
-		Namespace: config.Document.Relay.Registry.Namespace, ServiceAccount: config.Document.Relay.Registry.ServiceAccount,
-		AllowedHosts: config.Document.Relay.Registry.EndpointAllowedHosts, PublicURL: config.Document.API.PublicURL,
-		LeaseDuration: config.RelayLeaseDuration, HeartbeatAfter: config.RelayHeartbeatAfter,
-		KeyGeneration: config.Document.Relay.Registry.KeyGeneration, KeyValidity: config.RelayKeyValidity,
-		TicketKeyID: config.Document.Relay.Ticket.KeyID, TicketSigningKey: relaySigningKey,
-		KubernetesClient: systemClient, Context: ctx, ControlPlanePodName: environment.PodName,
-		Logger: logger,
+		ListenAddress:       config.Document.Relay.Registry.Listen,
+		CertificateFile:     config.Document.Relay.Registry.CertificateFile,
+		PrivateKeyFile:      config.Document.Relay.Registry.PrivateKeyFile,
+		ClientCAFile:        config.Document.Relay.Registry.ClientCAFile,
+		AuthenticationMode:  config.Document.Relay.Registry.Authentication,
+		TokenAudience:       config.Document.Relay.Registry.TokenAudience,
+		TrustDomain:         config.Document.Relay.Registry.TrustDomain,
+		Namespace:           config.Document.Relay.Registry.Namespace,
+		ServiceAccount:      config.Document.Relay.Registry.ServiceAccount,
+		AllowedHosts:        config.Document.Relay.Registry.EndpointAllowedHosts,
+		PublicURL:           config.Document.API.PublicURL,
+		LeaseDuration:       config.RelayLeaseDuration,
+		HeartbeatAfter:      config.RelayHeartbeatAfter,
+		KeyGeneration:       config.Document.Relay.Registry.KeyGeneration,
+		KeyValidity:         config.RelayKeyValidity,
+		TicketKeyID:         config.Document.Relay.Ticket.KeyID,
+		TicketSigningKey:    relaySigningKey,
+		KubernetesClient:    systemClient,
+		Context:             ctx,
+		ControlPlanePodName: environment.PodName,
+		Logger:              logger,
 	})
 	if err != nil {
 		_ = store.Close()
@@ -145,9 +156,19 @@ func buildAPIRuntime(
 			os.Exit(2)
 		}
 		for _, desired := range desiredStates {
-			if restoreErr := relayRegistry.registry.RestoreDesiredState(desired.RelayID, relaycontrol.State(desired.DesiredState)); restoreErr != nil {
+			restoreErr := relayRegistry.registry.RestoreDesiredState(
+				desired.RelayID,
+				relaycontrol.State(desired.DesiredState),
+			)
+			if restoreErr != nil {
 				_ = store.Close()
-				logger.Error("restore durable Relay desired state failed", "relay_id", desired.RelayID, "error", restoreErr)
+				logger.Error(
+					"restore durable Relay desired state failed",
+					"relay_id",
+					desired.RelayID,
+					"error",
+					restoreErr,
+				)
 				os.Exit(2)
 			}
 		}

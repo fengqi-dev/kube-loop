@@ -18,12 +18,18 @@ type recordingAuditRepository struct {
 	events []storage.AuditEvent
 }
 
-func (repository *recordingAuditRepository) Append(_ context.Context, event storage.AuditEvent) error {
+func (repository *recordingAuditRepository) Append(
+	_ context.Context,
+	event storage.AuditEvent,
+) error {
 	repository.events = append(repository.events, event)
 	return nil
 }
 
-func (*recordingAuditRepository) List(context.Context, storage.AuditFilter) ([]storage.AuditEvent, error) {
+func (*recordingAuditRepository) List(
+	context.Context,
+	storage.AuditFilter,
+) ([]storage.AuditEvent, error) {
 	return nil, nil
 }
 
@@ -55,7 +61,8 @@ func TestStorageAuditSinkPersistsOnlyStructuredMetadata(t *testing.T) {
 		t.Fatalf("events = %d", len(repository.events))
 	}
 	event := repository.events[0]
-	if event.Action != "list" || event.ResourceType != "pods" || event.RequestID != "request-1" || event.Outcome != "success" {
+	if event.Action != "list" || event.ResourceType != "pods" || event.RequestID != "request-1" ||
+		event.Outcome != "success" {
 		t.Fatalf("event = %#v", event)
 	}
 	var metadata map[string]any
@@ -75,27 +82,43 @@ func TestStorageAuditSinkPersistsOnlyStructuredMetadata(t *testing.T) {
 func TestAPIAuditCapturesAuthenticatedOutcomes(t *testing.T) {
 	engine := authorization.NewAuthenticated()
 	sink := &recordingAuditSink{}
-	server := newAPITestServer(t,
-		WithAuthenticator(controlplaneapi.AuthenticatorFunc(func(*http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
-			return controlplaneapi.Identity{Subject: "5d7e7980-33df-4f93-a91f-ff6a48725384", Groups: []string{"developers"}}, nil
-		})),
-		WithAuthorizer(engine), WithAuditSink(sink),
-		WithAPIRoutes(testEndpoint(func(writer http.ResponseWriter, _ *http.Request, _ controlplaneapi.Identity) *controlplaneapi.Error {
-			writeTestJSON(writer, http.StatusOK, map[string]string{"status": "ok"})
-			return nil
-		})),
+	server := newAPITestServer(
+		t,
+		WithAuthenticator(
+			controlplaneapi.AuthenticatorFunc(
+				func(*http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
+					return controlplaneapi.Identity{
+						Subject: "5d7e7980-33df-4f93-a91f-ff6a48725384",
+						Groups:  []string{"developers"},
+					}, nil
+				},
+			),
+		),
+		WithAuthorizer(engine),
+		WithAuditSink(sink),
+		WithAPIRoutes(
+			testEndpoint(
+				func(writer http.ResponseWriter, _ *http.Request, _ controlplaneapi.Identity) *controlplaneapi.Error {
+					writeTestJSON(writer, http.StatusOK, map[string]string{"status": "ok"})
+					return nil
+				},
+			),
+		),
 	)
 	allowed := httptest.NewRecorder()
-	server.Handler().ServeHTTP(allowed, httptest.NewRequest(http.MethodGet, APIPathPrefix+"/namespaces/payments/pods", nil))
+	server.Handler().
+		ServeHTTP(allowed, httptest.NewRequest(http.MethodGet, APIPathPrefix+"/namespaces/payments/pods", nil))
 	second := httptest.NewRecorder()
-	server.Handler().ServeHTTP(second, httptest.NewRequest(http.MethodDelete, APIPathPrefix+"/namespaces/payments/pods/pod-1", nil))
+	server.Handler().
+		ServeHTTP(second, httptest.NewRequest(http.MethodDelete, APIPathPrefix+"/namespaces/payments/pods/pod-1", nil))
 	if len(sink.records) != 2 {
 		t.Fatalf("audit records = %#v", sink.records)
 	}
 	if sink.records[0].Outcome != "success" || sink.records[0].HTTPStatus != http.StatusOK {
 		t.Fatalf("allowed audit = %#v", sink.records[0])
 	}
-	if sink.records[1].Outcome != "success" || sink.records[1].HTTPStatus != http.StatusOK || sink.records[1].ResourceName != "pod-1" {
+	if sink.records[1].Outcome != "success" || sink.records[1].HTTPStatus != http.StatusOK ||
+		sink.records[1].ResourceName != "pod-1" {
 		t.Fatalf("second audit = %#v", sink.records[1])
 	}
 }

@@ -31,16 +31,16 @@ func main() {
 		fmt.Fprintf(os.Stderr, "kubeloop: %v\n", err)
 		os.Exit(1)
 	}
-	defer state.Close()
-
 	program := tea.NewProgram(
 		tui.New(state),
 		tea.WithAltScreen(),
 		tea.WithMouseCellMotion(),
 	)
 
-	if _, err := program.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "kubeloop: %v\n", err)
+	_, runErr := program.Run()
+	state.Close()
+	if runErr != nil {
+		fmt.Fprintf(os.Stderr, "kubeloop: %v\n", runErr)
 		os.Exit(1)
 	}
 }

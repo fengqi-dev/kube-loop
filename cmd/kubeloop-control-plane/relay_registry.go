@@ -10,10 +10,11 @@ import (
 	"strings"
 	"time"
 
+	"k8s.io/client-go/kubernetes"
+
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/relayregistry"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/relaycontrol"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/relayticket"
-	"k8s.io/client-go/kubernetes"
 )
 
 type relayRegistryOptions struct {
@@ -52,14 +53,17 @@ type relayRegistryRuntime struct {
 func newRelayRegistryRuntime(options relayRegistryOptions) (*relayRegistryRuntime, error) {
 	options.ListenAddress = strings.TrimSpace(options.ListenAddress)
 	if options.ListenAddress == "" {
-		return nil, errors.New("Relay Registry listen address is required")
+		return nil, errors.New("relay registry listen address is required")
 	}
 	if options.KeyGeneration == 0 || options.KeyValidity < relayticket.MaximumLifetime ||
 		len(options.TicketSigningKey) != ed25519.PrivateKeySize {
-		return nil, errors.New("Relay Registry key configuration is invalid")
+		return nil, errors.New("relay registry key configuration is invalid")
 	}
 	now := time.Now().UTC()
-	publicKey := options.TicketSigningKey.Public().(ed25519.PublicKey)
+	publicKey, ok := options.TicketSigningKey.Public().(ed25519.PublicKey)
+	if !ok {
+		return nil, errors.New("relayTicket signing key does not expose an Ed25519 public key")
+	}
 	keys, err := relaycontrol.NewVerificationKeySet(
 		options.KeyGeneration,
 		map[string]ed25519.PublicKey{strings.TrimSpace(options.TicketKeyID): publicKey},
@@ -93,7 +97,10 @@ func newRelayRegistryRuntime(options relayRegistryOptions) (*relayRegistryRuntim
 		options.Context = context.Background()
 	}
 	allocationTopology, err := relayregistry.KubernetesPodTopology(
-		options.Context, options.KubernetesClient, strings.TrimSpace(options.Namespace), strings.TrimSpace(options.ControlPlanePodName),
+		options.Context,
+		options.KubernetesClient,
+		strings.TrimSpace(options.Namespace),
+		strings.TrimSpace(options.ControlPlanePodName),
 	)
 	if err != nil {
 		return nil, err
@@ -106,13 +113,17 @@ func newRelayRegistryRuntime(options relayRegistryOptions) (*relayRegistryRuntim
 			ServiceAccount: strings.TrimSpace(options.ServiceAccount), TopologyResolver: topologyResolver,
 		})
 	case "tokenreview":
-		authenticator, err = relayregistry.NewTokenReviewAuthenticator(options.KubernetesClient, relayregistry.TokenReviewConfig{
+		tokenReviewConfig := relayregistry.TokenReviewConfig{
 			Audience: strings.TrimSpace(options.TokenAudience), TrustDomain: strings.TrimSpace(options.TrustDomain),
 			Namespace: strings.TrimSpace(options.Namespace), ServiceAccount: strings.TrimSpace(options.ServiceAccount),
 			TopologyResolver: topologyResolver,
-		})
+		}
+		authenticator, err = relayregistry.NewTokenReviewAuthenticator(
+			options.KubernetesClient,
+			tokenReviewConfig,
+		)
 	default:
-		return nil, errors.New("Relay Registry authentication mode must be mtls or tokenreview")
+		return nil, errors.New("relay registry authentication mode must be mtls or tokenreview")
 	}
 	if err != nil {
 		return nil, err
@@ -130,7 +141,11 @@ func newRelayRegistryRuntime(options relayRegistryOptions) (*relayRegistryRuntim
 		return nil, err
 	}
 	return &relayRegistryRuntime{
-		listenAddress: options.ListenAddress, registry: registry, handler: handler, authenticator: authenticator, tlsConfig: tlsConfig,
+		listenAddress:      options.ListenAddress,
+		registry:           registry,
+		handler:            handler,
+		authenticator:      authenticator,
+		tlsConfig:          tlsConfig,
 		allocationTopology: allocationTopology,
 	}, nil
 }
@@ -145,7 +160,7 @@ func registryAllowedHosts(configured, publicURL string) ([]string, error) {
 			}
 		}
 		if len(result) == 0 {
-			return nil, errors.New("Relay endpoint allowed hosts are empty")
+			return nil, errors.New("relay endpoint allowed hosts are empty")
 		}
 		return result, nil
 	}

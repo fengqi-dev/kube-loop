@@ -83,6 +83,7 @@ func TestTUIProfileFixture(t *testing.T) {
 	}
 }
 
+//nolint:recvcheck // Bubble Tea interface methods use values while fixture effect helpers mutate pointers.
 type tuiFixtureModel struct {
 	model Model
 }
@@ -97,7 +98,7 @@ func (m tuiFixtureModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.model.width, m.model.height = message.Width, message.Height
 		return m, nil
 	case tea.KeyMsg:
-		if message.String() == "ctrl+c" {
+		if message.String() == keyCtrlC {
 			return m, tea.Quit
 		}
 	}
@@ -107,44 +108,14 @@ func (m tuiFixtureModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	selectedTask, selectedTaskOK := m.model.selectedConsoleTask()
 	previousResource := m.model.workspace.resource
 	if cmd, handled := m.model.updateWorkspace(message); handled {
-		if isKey && (key.String() == "enter" || key.String() == "y") {
-			switch previousOverlay {
-			case overlayConfirmTask:
-				if selectedTaskOK && selectedTask.kind == "exec" {
-					index := selectedTask.index - len(m.model.portForwards) - len(m.model.podSSHEndpoints)
-					if index >= 0 && index < len(m.model.execTasks) {
-						m.model.execTasks[index].State = "stopped"
-					}
-				}
-				m.model.status = "Session stopped"
-			case overlayConfirmDisconnect:
-				m.model.dataPlaneStatus = clientdataplane.Status{}
-				m.model.status = "Data plane disconnected"
-			}
-		}
-		if isKey && previousResource == resourceNamespaces && key.String() == "enter" {
-			rows := m.model.workspaceFilteredRows()
-			view := m.model.workspaceView()
-			if view.cursor < len(rows) {
-				m.model.namespace = rows[view.cursor].title
-				m.model.workspace.resource = resourcePods
-				m.model.activeTab = tabWorkloads
-			}
-		}
-		if isKey && previousResource == resourceConnection {
-			switch key.String() {
-			case "m":
-				m.model.status = "Mode switched to " + string(m.model.selectedMode)
-			case "enter", "c", "x":
-				if previousOverlay == overlayNone && m.model.console.overlay == overlayNone {
-					m.model.dataPlaneStatus = clientdataplane.Status{State: "connected", Mode: string(m.model.selectedMode)}
-					m.model.status = "Data plane connected"
-				}
-			}
-		}
-		if isKey && previousResource == resourceTasks && previousOverlay == overlayNone && key.String() == "y" {
-			m.model.status = "Session output copied"
-		}
+		m.applyWorkspaceFixtureEffects(
+			key,
+			isKey,
+			previousOverlay,
+			selectedTask,
+			selectedTaskOK,
+			previousResource,
+		)
 		m.model.loading = false
 		if isConsoleQuitCommand(cmd) {
 			return m, tea.Quit
@@ -158,9 +129,81 @@ func (m tuiFixtureModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	if !isKey {
 		return m, nil
 	}
+	return m.updateFixtureKey(key), nil
+}
 
+func (m *tuiFixtureModel) applyWorkspaceFixtureEffects(
+	key tea.KeyMsg,
+	isKey bool,
+	previousOverlay consoleOverlay,
+	selectedTask consoleRow,
+	selectedTaskOK bool,
+	previousResource workspaceResource,
+) {
+	if !isKey {
+		return
+	}
+	if key.String() == keyEnter || key.String() == "y" {
+		m.applyConfirmedFixtureAction(previousOverlay, selectedTask, selectedTaskOK)
+	}
+	if previousResource == resourceNamespaces && key.String() == keyEnter {
+		rows := m.model.workspaceFilteredRows()
+		view := m.model.workspaceView()
+		if view.cursor < len(rows) {
+			m.model.namespace = rows[view.cursor].title
+			m.model.workspace.resource = resourcePods
+			m.model.activeTab = tabWorkloads
+		}
+	}
+	if previousResource == resourceConnection {
+		m.applyConnectionFixtureKey(key, previousOverlay)
+	}
+	if previousResource == resourceTasks && previousOverlay == overlayNone && key.String() == "y" {
+		m.model.status = "Session output copied"
+	}
+}
+
+func (m *tuiFixtureModel) applyConfirmedFixtureAction(
+	previousOverlay consoleOverlay,
+	selectedTask consoleRow,
+	selectedTaskOK bool,
+) {
+	switch previousOverlay {
+	case overlayConfirmTask:
+		if selectedTaskOK && selectedTask.kind == taskKindExec {
+			index := selectedTask.index - len(m.model.portForwards) - len(m.model.podSSHEndpoints)
+			if index >= 0 && index < len(m.model.execTasks) {
+				m.model.execTasks[index].State = "stopped"
+			}
+		}
+		m.model.status = "Session stopped"
+	case overlayConfirmDisconnect:
+		m.model.dataPlaneStatus = clientdataplane.Status{}
+		m.model.status = "Data plane disconnected"
+	case overlayNone, overlayHelp, overlayNamespace, overlayConfirmProfile,
+		overlayConfirmServiceUninstall, overlayProfiles, overlayProfileAdd:
+		// Other overlays do not simulate a confirmed action in this fixture.
+	}
+}
+
+func (m *tuiFixtureModel) applyConnectionFixtureKey(key tea.KeyMsg, previousOverlay consoleOverlay) {
+	switch key.String() {
+	case "m":
+		m.model.status = "Mode switched to " + string(m.model.selectedMode)
+	case keyEnter, "c", "x":
+		if previousOverlay == overlayNone && m.model.console.overlay == overlayNone {
+			m.model.dataPlaneStatus = clientdataplane.Status{
+				State: dataPlaneStateConnected,
+				Mode:  string(m.model.selectedMode),
+			}
+			m.model.status = statusDataPlaneConnected
+		}
+	}
+}
+
+func (m tuiFixtureModel) updateFixtureKey(key tea.KeyMsg) tuiFixtureModel {
 	if m.model.actionMode != actionNone {
-		if key.String() == "enter" {
+		if key.String() == keyEnter {
 			if m.model.actionMode == actionExec {
 				m.model.status = "Pod exec started"
 			} else {
@@ -168,17 +211,17 @@ func (m tuiFixtureModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.model.actionMode = actionNone
 			m.model.loading = false
-			return m, nil
+			return m
 		}
 		next, _ := m.model.updateAction(key)
 		m.model = next.(Model)
-		return m, nil
+		return m
 	}
 
 	if m.model.mode == viewLogin {
 		next, _ := m.model.updateLogin(key)
 		m.model = next.(Model)
-		return m, nil
+		return m
 	}
 
 	switch m.model.activeTab {
@@ -191,9 +234,12 @@ func (m tuiFixtureModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				m.model.selectedMode = clientdataplane.ModeTUN
 			}
 			m.model.status = "Mode switched to " + string(m.model.selectedMode)
-		case "enter", "c", "x":
-			m.model.dataPlaneStatus = clientdataplane.Status{State: "connected", Mode: string(m.model.selectedMode)}
-			m.model.status = "Data plane connected"
+		case keyEnter, "c", "x":
+			m.model.dataPlaneStatus = clientdataplane.Status{
+				State: dataPlaneStateConnected,
+				Mode:  string(m.model.selectedMode),
+			}
+			m.model.status = statusDataPlaneConnected
 		}
 	case tabWorkloads:
 		next, _ := m.model.updatePods(key)
@@ -201,8 +247,10 @@ func (m tuiFixtureModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case tabServices:
 		next, _ := m.model.updateServices(key)
 		m.model = next.(Model)
+	case tabTasks, tabCount:
+		// Task fixture effects are handled by the workspace path above.
 	}
-	return m, nil
+	return m
 }
 
 func (m tuiFixtureModel) View() string {

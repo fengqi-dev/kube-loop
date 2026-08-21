@@ -29,9 +29,14 @@ func newWorkspaceTestModel(resource workspaceResource) Model {
 		{Name: "api-0", Namespace: "default", Phase: "Running", PodIP: "10.0.0.1", NodeName: "worker-a", Ready: true},
 		{Name: "worker-0", Namespace: "default", Phase: "Pending", NodeName: "worker-b"},
 	}
-	model.services = []clientremote.Service{{Name: "api", Namespace: "default", Type: "ClusterIP", ClusterIP: "10.96.0.1"}}
+	model.services = []clientremote.Service{
+		{Name: "api", Namespace: "default", Type: "ClusterIP", ClusterIP: "10.96.0.1"},
+	}
 	model.namespaces = []clientremote.Namespace{{Name: "default"}, {Name: "production"}}
-	model.profiles = clientprofile.State{ActiveProfileID: "test", Profiles: []clientprofile.Profile{model.activeProfile}}
+	model.profiles = clientprofile.State{
+		ActiveProfileID: "test",
+		Profiles:        []clientprofile.Profile{model.activeProfile},
+	}
 	return model
 }
 
@@ -43,7 +48,8 @@ func TestWorkspaceLayoutUsesSingleResourceTable(t *testing.T) {
 			t.Fatalf("workspace view missing %q", expected)
 		}
 	}
-	if !strings.Contains(view, "<0>") || !strings.Contains(view, "<n>") || strings.Contains(view, "RESOURCE WORKSPACE") {
+	if !strings.Contains(view, "<0>") || !strings.Contains(view, "<n>") ||
+		strings.Contains(view, "RESOURCE WORKSPACE") {
 		t.Fatal("K9s-style workspace header is not rendered")
 	}
 }
@@ -235,7 +241,13 @@ func TestWorkspaceLogoutRequiresDisconnectedSession(t *testing.T) {
 	model.dataPlaneStatus.State = "disconnected"
 	cmd, handled = model.updateWorkspace(workspaceKey("L"))
 	if !handled || cmd == nil || !model.loading || model.status != "Logging out..." {
-		t.Fatalf("disconnected logout: handled=%v cmd=%v loading=%v status=%q", handled, cmd, model.loading, model.status)
+		t.Fatalf(
+			"disconnected logout: handled=%v cmd=%v loading=%v status=%q",
+			handled,
+			cmd,
+			model.loading,
+			model.status,
+		)
 	}
 
 	model.loading = false
@@ -306,7 +318,9 @@ func TestSelectedAuthenticatedProfileEntersConnection(t *testing.T) {
 	model.profileSelectionPending = true
 	next, cmd := model.Update(authStatusMsg{session: AuthSession{Authenticated: true, UserName: "operator"}})
 	updated := next.(Model)
-	if updated.profileSelectionPending || updated.workspace.resource != resourceConnection || updated.mode != viewMain || cmd == nil {
+	if updated.profileSelectionPending || updated.workspace.resource != resourceConnection ||
+		updated.mode != viewMain ||
+		cmd == nil {
 		t.Fatalf(
 			"selection result: pending=%v resource=%q mode=%d cmd=%v",
 			updated.profileSelectionPending, updated.workspace.resource, updated.mode, cmd,

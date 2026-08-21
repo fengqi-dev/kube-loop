@@ -47,7 +47,7 @@ func NewSingboxRuntime(
 			}
 			logEvent("WARN", "leftover privileged TUN session detected; stopping it before retry")
 			if _, stopErr := client.StopAll(ctx); stopErr != nil {
-				return nil, fmt.Errorf("helper start session: %w (stop-all: %v)", err, stopErr)
+				return nil, fmt.Errorf("helper start session: %w (stop-all: %w)", err, stopErr)
 			}
 			if _, err := client.Start(ctx, spec); err != nil {
 				return nil, fmt.Errorf("helper start session: %w", err)

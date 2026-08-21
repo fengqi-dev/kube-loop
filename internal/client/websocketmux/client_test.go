@@ -11,12 +11,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	clientmux "github.com/fengqi-dev/kube-loop/internal/client/websocketmux"
 	servermux "github.com/fengqi-dev/kube-loop/internal/gateway/websocketmux"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/exchangestream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficstream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
-	"github.com/google/uuid"
 )
 
 func TestForwarderSharesOnePhysicalWebSocketForTunnelAndTrafficStreams(t *testing.T) {
@@ -60,7 +61,11 @@ func TestForwarderSharesOnePhysicalWebSocketForTunnelAndTrafficStreams(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := tunnel.WriteOpen(ordinary, tunnel.OpenRequest{Command: tunnel.CommandTCP, Host: "10.42.0.5", Port: 8080}, token); err != nil {
+	if err := tunnel.WriteOpen(
+		ordinary,
+		tunnel.OpenRequest{Command: tunnel.CommandTCP, Host: "10.42.0.5", Port: 8080},
+		token,
+	); err != nil {
 		t.Fatal(err)
 	}
 	if err := tunnel.ReadStatus(ordinary); err != nil {
@@ -82,7 +87,11 @@ func TestForwarderSharesOnePhysicalWebSocketForTunnelAndTrafficStreams(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := tunnel.WriteTrafficOpen(logical, tunnel.TrafficOpenRequest{Mode: tunnel.TrafficModeExchange, TaskID: taskID}, token); err != nil {
+	if err := tunnel.WriteTrafficOpen(
+		logical,
+		tunnel.TrafficOpenRequest{Mode: tunnel.TrafficModeExchange, TaskID: taskID},
+		token,
+	); err != nil {
 		t.Fatal(err)
 	}
 	if err := tunnel.ReadStatus(logical); err != nil {
@@ -132,8 +141,10 @@ func handleTestStream(
 	connection net.Conn,
 	token tunnel.SessionToken,
 	taskID string,
-) error {
-	defer connection.Close()
+) (resultErr error) {
+	defer func() {
+		resultErr = errors.Join(resultErr, connection.Close())
+	}()
 	header, err := tunnel.ReadSessionHeader(connection)
 	if err != nil {
 		return err
@@ -165,7 +176,7 @@ func handleTestStream(
 			return err
 		}
 		if request.Mode != tunnel.TrafficModeExchange || request.TaskID != taskID {
-			return errors.New("Traffic Task selector changed")
+			return errors.New("traffic Task selector changed")
 		}
 		if err := tunnel.WriteStatus(connection, nil); err != nil {
 			return err
@@ -180,7 +191,7 @@ func handleTestStream(
 		}
 		frame, err := exchangestream.Decode(encoded)
 		if err != nil || frame.Type != exchangestream.Stop {
-			return errors.New("Traffic Task frame changed")
+			return errors.New("traffic Task frame changed")
 		}
 		return nil
 	default:

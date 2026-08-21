@@ -66,15 +66,26 @@ func CaptureServiceIntercept(
 		return fmt.Errorf("at least one port mapping is required")
 	}
 
-	service, err := client.CoreV1().Services(snapshot.Namespace).Get(ctx, snapshot.Service, metav1.GetOptions{})
+	service, err := client.CoreV1().
+		Services(snapshot.Namespace).
+		Get(ctx, snapshot.Service, metav1.GetOptions{})
 	if err != nil {
 		return fmt.Errorf("get service: %w", err)
 	}
-	if service.Spec.ClusterIP == corev1.ClusterIPNone || service.Spec.Type == corev1.ServiceTypeExternalName {
-		return fmt.Errorf("service %s/%s cannot be intercepted", snapshot.Namespace, snapshot.Service)
+	if service.Spec.ClusterIP == corev1.ClusterIPNone ||
+		service.Spec.Type == corev1.ServiceTypeExternalName {
+		return fmt.Errorf(
+			"service %s/%s cannot be intercepted",
+			snapshot.Namespace,
+			snapshot.Service,
+		)
 	}
 	if service.Annotations[annotationInterceptID] != "" {
-		return fmt.Errorf("service %s/%s is already intercepted", snapshot.Namespace, snapshot.Service)
+		return fmt.Errorf(
+			"service %s/%s is already intercepted",
+			snapshot.Namespace,
+			snapshot.Service,
+		)
 	}
 	snapshot.Selector = maps.Clone(service.Spec.Selector)
 	return snapshotEndpoints(ctx, client, snapshot)
@@ -102,7 +113,9 @@ func snapshotEndpoints(
 	snapshot.HasEndpoints = false
 	snapshot.EndpointsSubsets = nil
 
-	legacy, err := client.CoreV1().Endpoints(snapshot.Namespace).Get(ctx, snapshot.Service, metav1.GetOptions{})
+	legacy, err := client.CoreV1().
+		Endpoints(snapshot.Namespace).
+		Get(ctx, snapshot.Service, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
 		return nil
 	}

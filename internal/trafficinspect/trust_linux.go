@@ -122,7 +122,13 @@ func (s *linuxTrustStore) Install(ctx context.Context, authority *Authority) (re
 install -d -m 0755 -- "$1"
 install -m 0644 -- "$2" "$3"
 ` + shellquote.Join(s.backend.updateCommand...) + "\n"
-	output, err := s.runPrivileged(ctx, script, filepath.Dir(s.backend.anchorPath), certificatePath, s.backend.anchorPath)
+	output, err := s.runPrivileged(
+		ctx,
+		script,
+		filepath.Dir(s.backend.anchorPath),
+		certificatePath,
+		s.backend.anchorPath,
+	)
 	if err != nil {
 		return commandError("install Linux traffic inspection certificate", err, output)
 	}

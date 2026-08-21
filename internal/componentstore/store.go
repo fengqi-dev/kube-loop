@@ -56,6 +56,7 @@ func Cache(release, name, source string) (string, error) {
 	if err := os.MkdirAll(directory, 0o700); err != nil {
 		return "", fmt.Errorf("create component directory: %w", err)
 	}
+	//nolint:gosec // The private component directory needs owner execute permission for traversal.
 	if err := os.Chmod(directory, 0o700); err != nil {
 		return "", fmt.Errorf("secure component directory: %w", err)
 	}
@@ -75,7 +76,7 @@ func Cache(release, name, source string) (string, error) {
 		return "", fmt.Errorf("create component staging file: %w", err)
 	}
 	temporaryPath := temporary.Name()
-	defer os.Remove(temporaryPath)
+	defer func() { _ = os.Remove(temporaryPath) }()
 	if err := temporary.Chmod(0o700); err != nil {
 		_ = temporary.Close()
 		return "", fmt.Errorf("secure component staging file: %w", err)
@@ -101,6 +102,7 @@ func Cache(release, name, source string) (string, error) {
 	if err := activateFile(temporaryPath, destination); err != nil {
 		return "", fmt.Errorf("activate cached component %s: %w", name, err)
 	}
+	//nolint:gosec // Cached components are executable only by their owner.
 	if err := os.Chmod(destination, 0o700); err != nil {
 		return "", fmt.Errorf("secure cached component %s: %w", name, err)
 	}
@@ -196,7 +198,7 @@ func readManifest(directory string) (manifest, error) {
 	if err != nil {
 		return manifest{}, err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	decoder := json.NewDecoder(io.LimitReader(file, 1<<20))
 	decoder.DisallowUnknownFields()
 	var value manifest
@@ -220,7 +222,7 @@ func writeManifest(directory string, value manifest) error {
 		return fmt.Errorf("create component manifest: %w", err)
 	}
 	temporaryPath := temporary.Name()
-	defer os.Remove(temporaryPath)
+	defer func() { _ = os.Remove(temporaryPath) }()
 	if err := temporary.Chmod(0o600); err != nil {
 		_ = temporary.Close()
 		return err
@@ -270,7 +272,7 @@ func fileSHA256(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	hash := sha256.New()
 	if _, err := io.Copy(hash, file); err != nil {
 		return "", err

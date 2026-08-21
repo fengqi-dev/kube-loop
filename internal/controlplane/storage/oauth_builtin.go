@@ -19,32 +19,54 @@ const (
 // EnsureBuiltinOAuthClients creates the first-party public clients without
 // overwriting an existing administrator-visible record. Built-in constraints
 // are also enforced by OAuthClientRepository.Update and Delete.
-func EnsureBuiltinOAuthClients(ctx context.Context, repository OAuthClientRepository, managementRedirectURI string) error {
+func EnsureBuiltinOAuthClients(
+	ctx context.Context,
+	repository OAuthClientRepository,
+	managementRedirectURI string,
+) error {
 	if repository == nil {
-		return errors.New("OAuth client repository is required")
+		return errors.New("oAuth client repository is required")
 	}
 	now := time.Now().UTC()
 	clients := []OAuthClient{
 		{
 			ID: DesktopOAuthClientID, Name: "KubeLoop Desktop", Public: true,
 			RedirectURIs: []string{DesktopOAuthRedirectURI},
-			GrantTypes:   []string{"authorization_code", "refresh_token"},
-			Scopes:       []string{"openid", "profile", "email", "offline_access", "kubeloop.api"},
-			Trusted:      true, Enabled: true, Builtin: true, CreatedAt: now, UpdatedAt: now,
+			GrantTypes:   []string{grantAuthorizationCode, grantRefreshToken},
+			Scopes: []string{
+				scopeOpenID,
+				scopeProfile,
+				emailField,
+				scopeOfflineAccess,
+				scopeKubeLoopAPI,
+			},
+			Trusted: true, Enabled: true, Builtin: true, CreatedAt: now, UpdatedAt: now,
 		},
 		{
 			ID: TUIOAuthClientID, Name: "KubeLoop TUI", Public: true,
 			RedirectURIs: []string{TUIOAuthRedirectURI},
-			GrantTypes:   []string{"authorization_code", "refresh_token"},
-			Scopes:       []string{"openid", "profile", "email", "offline_access", "kubeloop.api"},
-			Trusted:      true, Enabled: true, Builtin: true, CreatedAt: now, UpdatedAt: now,
+			GrantTypes:   []string{grantAuthorizationCode, grantRefreshToken},
+			Scopes: []string{
+				scopeOpenID,
+				scopeProfile,
+				emailField,
+				scopeOfflineAccess,
+				scopeKubeLoopAPI,
+			},
+			Trusted: true, Enabled: true, Builtin: true, CreatedAt: now, UpdatedAt: now,
 		},
 		{
 			ID: ManagementOAuthClientID, Name: "KubeLoop Management", Public: true,
 			RedirectURIs: []string{managementRedirectURI},
-			GrantTypes:   []string{"authorization_code", "refresh_token"},
-			Scopes:       []string{"openid", "profile", "email", "offline_access", "kubeloop.api"},
-			Trusted:      true, Enabled: true, Builtin: true, CreatedAt: now, UpdatedAt: now,
+			GrantTypes:   []string{grantAuthorizationCode, grantRefreshToken},
+			Scopes: []string{
+				scopeOpenID,
+				scopeProfile,
+				emailField,
+				scopeOfflineAccess,
+				scopeKubeLoopAPI,
+			},
+			Trusted: true, Enabled: true, Builtin: true, CreatedAt: now, UpdatedAt: now,
 		},
 	}
 	for _, client := range clients {

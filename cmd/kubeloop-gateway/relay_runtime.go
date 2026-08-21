@@ -28,7 +28,7 @@ func expandRelayEndpoint(template string, environment gatewayEnvironment) (strin
 		result = strings.ReplaceAll(result, placeholder, metadata.value)
 	}
 	if strings.ContainsAny(result, "{}") {
-		return "", errors.New("Relay endpoint contains an unknown template placeholder")
+		return "", errors.New("relay endpoint contains an unknown template placeholder")
 	}
 	return result, nil
 }
@@ -48,8 +48,10 @@ func (reporter *relayRuntimeReporter) Snapshot() (relaycontrol.State, relaycontr
 	return state, relaycontrol.Capacity{
 		MaximumPhysicalConnections: reporter.maximumPhysical,
 		MaximumLogicalStreams:      reporter.maximumLogical,
-		ActivePhysicalConnections:  uint32(reporter.websocket.ActiveSessions()),
-		ActiveLogicalStreams:       uint32(reporter.gateway.ActiveConnections()),
+		//nolint:gosec // The WebSocket limiter keeps active sessions within the validated uint32 maximum.
+		ActivePhysicalConnections: uint32(reporter.websocket.ActiveSessions()),
+		//nolint:gosec // The Gateway tracks logical connections within the validated uint32 maximum.
+		ActiveLogicalStreams: uint32(reporter.gateway.ActiveConnections()),
 	}
 }
 

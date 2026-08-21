@@ -12,7 +12,7 @@ import (
 	"fmt"
 	"io"
 	pathpkg "path"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -25,6 +25,8 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/dynamicpb"
 )
+
+const protobufSchemaWire = "wire"
 
 const (
 	protobufMaxDepth       = 32
@@ -75,13 +77,15 @@ func (d *ProtobufDecoder) ReplaceSources(ctx context.Context, sources map[string
 	paths := make([]string, 0, len(sources))
 	for path := range sources {
 		cleaned := strings.TrimSpace(path)
-		if cleaned == "" || cleaned != path || strings.Contains(path, "\\") || pathpkg.IsAbs(path) || pathpkg.Clean(path) != path ||
-			strings.HasPrefix(path, "../") || !strings.HasSuffix(strings.ToLower(path), ".proto") {
+		invalidPath := cleaned == "" || cleaned != path || strings.Contains(path, "\\") ||
+			pathpkg.IsAbs(path) || pathpkg.Clean(path) != path || strings.HasPrefix(path, "../") ||
+			!strings.HasSuffix(strings.ToLower(path), ".proto")
+		if invalidPath {
 			return fmt.Errorf("invalid protobuf source path %q", path)
 		}
 		paths = append(paths, path)
 	}
-	sort.Strings(paths)
+	slices.Sort(paths)
 	compiler := protocompile.Compiler{Resolver: protocompile.WithStandardImports(
 		&protocompile.SourceResolver{Accessor: protocompile.SourceAccessorFromMap(sources)},
 	)}
@@ -92,10 +96,10 @@ func (d *ProtobufDecoder) ReplaceSources(ctx context.Context, sources map[string
 	methods := make(map[string]protobufMethod)
 	for _, file := range files {
 		services := file.Services()
-		for serviceIndex := 0; serviceIndex < services.Len(); serviceIndex++ {
+		for serviceIndex := range services.Len() {
 			service := services.Get(serviceIndex)
 			serviceMethods := service.Methods()
-			for methodIndex := 0; methodIndex < serviceMethods.Len(); methodIndex++ {
+			for methodIndex := range serviceMethods.Len() {
 				method := serviceMethods.Get(methodIndex)
 				path := "/" + string(service.FullName()) + "/" + string(method.Name())
 				methods[path] = protobufMethod{input: method.Input(), output: method.Output()}
@@ -120,7 +124,7 @@ func (d *ProtobufDecoder) Decode(path, direction, encoding string, framed []byte
 		descriptor = nil
 		messages, err = decodeGRPCFrames(framed, encoding, nil)
 	}
-	event := &ProtobufEvent{Format: "json", Schema: "wire"}
+	event := &ProtobufEvent{Format: "json", Schema: protobufSchemaWire}
 	if descriptor != nil {
 		event.Schema = "proto"
 		event.MessageType = string(descriptor.FullName())
@@ -168,7 +172,12 @@ func decodeGRPCFrames(
 		length := int(uint32(framed[1])<<24 | uint32(framed[2])<<16 | uint32(framed[3])<<8 | uint32(framed[4]))
 		framed = framed[5:]
 		if length > len(framed) {
-			return nil, fmt.Errorf("decode gRPC frame %d: payload length %d exceeds %d bytes", frameIndex, length, len(framed))
+			return nil, fmt.Errorf(
+				"decode gRPC frame %d: payload length %d exceeds %d bytes",
+				frameIndex,
+				length,
+				len(framed),
+			)
 		}
 		payload := framed[:length]
 		framed = framed[length:]
@@ -239,7 +248,7 @@ func decodeWireMessage(payload []byte, depth int, total *int) (map[string]any, i
 	result := make(map[string]any)
 	originalLength := len(payload)
 	for len(payload) > 0 {
-		*total = *total + 1
+		*total++
 		if *total > protobufMaxFields {
 			return nil, 0, errors.New("protobuf field count exceeds 10000")
 		}
@@ -273,19 +282,32 @@ func consumeWireValue(
 		if consumed < 0 {
 			return wireValue{}, 0, errors.New("invalid varint")
 		}
-		return wireValue{WireType: "varint", Value: strconv.FormatUint(value, 10), Signed: strconv.FormatInt(int64(value), 10), ZigZag: strconv.FormatInt(protowire.DecodeZigZag(value), 10)}, consumed, nil
+		return wireValue{
+			WireType: "varint",
+			Value:    strconv.FormatUint(value, 10),
+			Signed:   signedVarint(value),
+			ZigZag:   strconv.FormatInt(protowire.DecodeZigZag(value), 10),
+		}, consumed, nil
 	case protowire.Fixed32Type:
 		value, consumed := protowire.ConsumeFixed32(payload)
 		if consumed < 0 {
 			return wireValue{}, 0, errors.New("invalid fixed32")
 		}
-		return wireValue{WireType: "fixed32", Value: strconv.FormatUint(uint64(value), 10), Signed: strconv.FormatInt(int64(int32(value)), 10)}, consumed, nil
+		return wireValue{
+			WireType: "fixed32",
+			Value:    strconv.FormatUint(uint64(value), 10),
+			Signed:   signedFixed32(value),
+		}, consumed, nil
 	case protowire.Fixed64Type:
 		value, consumed := protowire.ConsumeFixed64(payload)
 		if consumed < 0 {
 			return wireValue{}, 0, errors.New("invalid fixed64")
 		}
-		return wireValue{WireType: "fixed64", Value: strconv.FormatUint(value, 10), Signed: strconv.FormatInt(int64(value), 10)}, consumed, nil
+		return wireValue{
+			WireType: "fixed64",
+			Value:    strconv.FormatUint(value, 10),
+			Signed:   signedVarint(value),
+		}, consumed, nil
 	case protowire.BytesType:
 		value, consumed := protowire.ConsumeBytes(payload)
 		if consumed < 0 {
@@ -296,7 +318,8 @@ func consumeWireValue(
 			decoded.Text = string(value)
 		} else if len(value) > 0 {
 			childTotal := *total
-			if nested, nestedConsumed, err := decodeWireMessage(value, depth+1, &childTotal); err == nil && nestedConsumed == len(value) {
+			nested, nestedConsumed, nestedErr := decodeWireMessage(value, depth+1, &childTotal)
+			if nestedErr == nil && nestedConsumed == len(value) {
 				decoded.Message = nested
 				*total = childTotal
 			} else {
@@ -310,6 +333,8 @@ func consumeWireValue(
 			return wireValue{}, 0, errors.New("invalid group")
 		}
 		return wireValue{WireType: "group", Hex: hex.EncodeToString(value)}, consumed, nil
+	case protowire.EndGroupType:
+		return wireValue{}, 0, errors.New("unexpected end group")
 	default:
 		return wireValue{}, 0, fmt.Errorf("unsupported wire type %d", wireType)
 	}
@@ -322,6 +347,16 @@ func isPrintableText(value string) bool {
 		}
 	}
 	return value != ""
+}
+
+func signedVarint(value uint64) string {
+	// Protobuf signed views intentionally reinterpret the same two's-complement bits.
+	return strconv.FormatInt(int64(value), 10) //nolint:gosec // Intentional two's-complement reinterpretation.
+}
+
+func signedFixed32(value uint32) string {
+	// Protobuf fixed32 signed views intentionally reinterpret the same 32 bits.
+	return strconv.FormatInt(int64(int32(value)), 10) //nolint:gosec // Intentional 32-bit reinterpretation.
 }
 
 func decompressGRPC(payload []byte, encoding string) ([]byte, error) {
@@ -348,7 +383,7 @@ func decompressGRPC(payload []byte, encoding string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open %s stream: %w", encoding, err)
 	}
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 	decoded, err := io.ReadAll(io.LimitReader(reader, protobufMaxDecodedSize+1))
 	if err != nil {
 		return nil, fmt.Errorf("decompress %s payload: %w", encoding, err)

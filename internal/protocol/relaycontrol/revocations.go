@@ -45,7 +45,9 @@ func HashSessionID(sessionID string) string {
 
 func (summary RevocationSummary) Validate(now time.Time) error {
 	if summary.Generation == 0 {
-		if summary.SHA256 != "" || !summary.GeneratedAt.IsZero() || !summary.ValidUntil.IsZero() || len(summary.Sessions) != 0 {
+		hasContents := summary.SHA256 != "" || !summary.GeneratedAt.IsZero() ||
+			!summary.ValidUntil.IsZero() || len(summary.Sessions) != 0
+		if hasContents {
 			return errors.New("empty revocation summary is inconsistent")
 		}
 		return nil
