@@ -89,6 +89,41 @@ gateway: {}
 	}
 }
 
+func TestLoadControlPlaneConfigDefaultsAccessTokenToOneDay(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "kubeloop.yaml")
+	raw := `
+controlPlane:
+  api:
+    publicURL: https://kubeloop.example.com
+  authentication:
+    oauth:
+      oidcSigningKeyFile: /run/secrets/oidc.pem
+      hmacSecretFile: /run/secrets/hmac
+  relay:
+    ticket:
+      signingKeyFile: /run/secrets/relay.pem
+    registry:
+      certificateFile: /run/secrets/tls.crt
+      privateKeyFile: /run/secrets/tls.key
+      namespace: kubeloop
+      serviceAccount: gateway
+gateway: {}
+`
+	if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	config, err := loadControlPlaneConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.AccessTokenTTL != 24*time.Hour {
+		t.Fatalf("AccessTokenTTL = %s, want 24h", config.AccessTokenTTL)
+	}
+	if config.RefreshTokenTTL != 30*24*time.Hour {
+		t.Fatalf("RefreshTokenTTL = %s, want 720h", config.RefreshTokenTTL)
+	}
+}
+
 func TestLoadControlPlaneConfigRejectsUnknownFields(t *testing.T) {
 	tests := map[string]struct {
 		raw   string
