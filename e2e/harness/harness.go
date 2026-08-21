@@ -9,7 +9,7 @@ import (
 
 const (
 	defaultContext = "minikube"
-	defaultImage   = "kube-loop-gateway:dev"
+	defaultImage   = "kubeloop-gateway:dev"
 
 	// EchoNamespace is the Minikube namespace for e2e echo fixtures.
 	EchoNamespace = "kubeloop-e2e"

@@ -5,5 +5,5 @@ frontend/dist
 build/embedded
 build/bin/*
 !build/bin/kubeloop-control-plane
-!build/bin/kube-loop-gateway
+!build/bin/kubeloop-gateway
 !build/bin/kubeloop-operator

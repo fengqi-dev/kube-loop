@@ -24,7 +24,7 @@ import (
 
 const (
 	controlPlaneImageRepository = "kube-loop-control-plane"
-	gatewayImageRepository      = "kube-loop-gateway"
+	gatewayImageRepository      = "kubeloop-gateway"
 	operatorImageRepository     = "kube-loop-operator"
 	developmentNamespace        = "kubeloop-dev"
 	developmentRelease          = "kubeloop-dev"
@@ -50,7 +50,7 @@ func main() {
 		fatalf("hash Gateway sources: %v", err)
 	}
 	gatewayImage := gatewayImageRepository + ":dev-" + gatewayHash[:12]
-	gatewayBinary := filepath.Join(root, "build", "bin", "kube-loop-gateway")
+	gatewayBinary := filepath.Join(root, "build", "bin", "kubeloop-gateway")
 	operatorHash, err := operatorSourceHash(root)
 	if err != nil {
 		fatalf("hash Operator sources: %v", err)

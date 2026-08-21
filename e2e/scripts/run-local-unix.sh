@@ -108,7 +108,7 @@ if [[ "${SKIP_BUILD}" -eq 1 && -z "${GATEWAY_IMAGE}" ]]; then
   exit 2
 fi
 if [[ -z "${GATEWAY_IMAGE}" ]]; then
-  GATEWAY_IMAGE="kube-loop-gateway:e2e-local-$$"
+  GATEWAY_IMAGE="kubeloop-gateway:e2e-local-$$"
 fi
 
 MAIN_LOG="${ROOT}/e2e-local.log"
@@ -116,7 +116,7 @@ PLATFORM_LOG="${ROOT}/e2e-platform.log"
 PLATFORM_TEST="${ROOT}/build/bin/helper-platform-e2e.test"
 SINGBOX="${ROOT}/build/bin/sing-box"
 HELPER_SOURCE="${ROOT}/build/embedded/kubeloop-helper"
-GATEWAY_BINARY="${ROOT}/build/bin/kube-loop-gateway"
+GATEWAY_BINARY="${ROOT}/build/bin/kubeloop-gateway"
 CACHE="$(mktemp -d "${TMPDIR:-/tmp}/kubeloop-e2e-cache.XXXXXX")"
 export GOCACHE="${CACHE}"
 : >"${MAIN_LOG}"

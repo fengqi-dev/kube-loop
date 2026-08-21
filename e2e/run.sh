@@ -6,10 +6,10 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT}"
 
 CONTEXT="${KUBELOOP_E2E_CONTEXT:-minikube}"
-IMAGE="${KUBELOOP_GATEWAY_IMAGE:-kube-loop-gateway:dev}"
+IMAGE="${KUBELOOP_GATEWAY_IMAGE:-kubeloop-gateway:dev}"
 ARCH="$(go env GOARCH)"
 
-BINARY="build/bin/kube-loop-gateway"
+BINARY="build/bin/kubeloop-gateway"
 DOCKERFILE="build/gateway.e2e.Dockerfile"
 GATEWAY_NS="kubeloop-system"
 GATEWAY_LABEL="app.kubernetes.io/name=kubeloop-gateway"
@@ -46,14 +46,14 @@ load_image_minikube() {
   log "host Docker unavailable; building inside minikube"
   local remote="/tmp/gwbuild"
 
-  minikube cp "${BINARY}" /tmp/kube-loop-gateway
+  minikube cp "${BINARY}" /tmp/kubeloop-gateway
   minikube cp "${DOCKERFILE}" /tmp/Dockerfile.e2e
   minikube ssh -- "
     set -e
     sudo mkdir -p ${remote}/build/bin
-    sudo cp /tmp/kube-loop-gateway ${remote}/build/bin/kube-loop-gateway
+    sudo cp /tmp/kubeloop-gateway ${remote}/build/bin/kubeloop-gateway
     sudo cp /tmp/Dockerfile.e2e ${remote}/Dockerfile
-    sudo chmod 755 ${remote}/build/bin/kube-loop-gateway
+    sudo chmod 755 ${remote}/build/bin/kubeloop-gateway
     cd ${remote} && sudo docker build -t ${IMAGE} -f Dockerfile .
   "
 }
