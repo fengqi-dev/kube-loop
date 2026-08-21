@@ -70,7 +70,7 @@ func NewState(version string) (*State, error) {
 		return nil, fmt.Errorf("open profile store: %w", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	credentialStore := credentials.NewSystemStoreForVersion(version)
+	credentialStore := credentials.NewSystemStoreForClient(version, authconfig.TUIClientID)
 	discoveryClient := clientdiscovery.New(clientdiscovery.Config{ClientVersion: version})
 	authClient := clientauth.New(clientauth.Config{
 		OpenBrowser: func(target string) error { return openBrowser(ctx, target) }, BrowserCallback: func() {},

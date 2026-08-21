@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 
+	clientauth "github.com/fengqi-dev/kube-loop/internal/client/auth"
 	"github.com/fengqi-dev/kube-loop/internal/client/credentials"
 	clientdiscovery "github.com/fengqi-dev/kube-loop/internal/client/discovery"
 	clientprofile "github.com/fengqi-dev/kube-loop/internal/client/profile"
@@ -121,6 +122,16 @@ func (a *App) RefreshServerLogin(profileID string) (AuthSession, error) {
 	}
 	credential, err := a.auth.Refresh(a.context(), serverProfile.BaseURL, current)
 	if err != nil {
+		if clientauth.IsInvalidGrant(err) {
+			deleteErr := a.credentials.Delete(serverProfile.ID)
+			if deleteErr != nil && !errors.Is(deleteErr, credentials.ErrNotFound) {
+				return AuthSession{}, errors.Join(
+					clientauth.ErrLoginExpired,
+					fmt.Errorf("clear expired Gateway login: %w", deleteErr),
+				)
+			}
+			return AuthSession{}, clientauth.ErrLoginExpired
+		}
 		return AuthSession{}, err
 	}
 	return a.persistCredential(serverProfile, credential)

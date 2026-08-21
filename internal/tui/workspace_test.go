@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -8,6 +9,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	clientauth "github.com/fengqi-dev/kube-loop/internal/client/auth"
 	clientdataplane "github.com/fengqi-dev/kube-loop/internal/client/dataplane"
 	clientprofile "github.com/fengqi-dev/kube-loop/internal/client/profile"
 	clientremote "github.com/fengqi-dev/kube-loop/internal/client/remote"
@@ -69,6 +71,26 @@ func TestWorkspaceRevisionUsesInjectedTag(t *testing.T) {
 func TestWorkspaceRevisionDefaultsToDev(t *testing.T) {
 	if got := workspaceBuildRevision(""); got != "dev" {
 		t.Fatalf("workspaceBuildRevision(\"\") = %q, want dev", got)
+	}
+}
+
+func TestExpiredLoginReturnsToServerSelection(t *testing.T) {
+	model := newWorkspaceTestModel(resourceConnection)
+	model.authSession = AuthSession{Authenticated: true, UserName: "operator"}
+	next, cmd := model.Update(dataPlaneConnectedMsg{
+		stage: "Create Cluster Session",
+		err:   fmt.Errorf("refresh Gateway login: %w", clientauth.ErrLoginExpired),
+	})
+	updated := next.(Model)
+	if updated.mode != viewLogin || updated.authSession.Authenticated ||
+		updated.workspace.resource != resourceProfiles || updated.err != "" || cmd == nil {
+		t.Fatalf(
+			"expired login state: mode=%d auth=%#v resource=%q err=%q cmd=%v",
+			updated.mode, updated.authSession, updated.workspace.resource, updated.err, cmd,
+		)
+	}
+	if updated.status != clientauth.ErrLoginExpired.Error() {
+		t.Fatalf("expired login status = %q", updated.status)
 	}
 }
 

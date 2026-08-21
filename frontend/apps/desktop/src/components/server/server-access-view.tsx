@@ -336,10 +336,10 @@ export function ServerAccessView({
     } catch (reason) {
       setError(messageOf(reason));
     } finally {
-	  clearWorkspaceState();
-	  onAuthChange?.({ authenticated: false });
-	  setSSHPod("");
-	  setSSHContainer("");
+      clearWorkspaceState();
+      onAuthChange?.({ authenticated: false });
+      setSSHPod("");
+      setSSHContainer("");
       setBusy(undefined);
     }
   }
@@ -358,6 +358,14 @@ export function ServerAccessView({
       setInventory(await backend.loadServerInventory(profile.id, inventory?.namespace ?? profile.lastNamespace ?? ""));
     } catch (reason) {
       setError(messageOf(reason));
+      try {
+        const session = await backend.serverAuthStatus(profile.id);
+        setAuth(session);
+        onAuthChange?.(session);
+        if (!session.authenticated) clearWorkspaceState();
+      } catch {
+        // Preserve the refresh error when credential-state reconciliation also fails.
+      }
     } finally {
       setBusy(undefined);
     }

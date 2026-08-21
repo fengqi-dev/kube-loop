@@ -15,6 +15,7 @@ import (
 
 	"github.com/google/uuid"
 
+	clientauth "github.com/fengqi-dev/kube-loop/internal/client/auth"
 	"github.com/fengqi-dev/kube-loop/internal/client/credentials"
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/execstream"
@@ -55,6 +56,19 @@ func (store *memoryStore) Delete(string) error {
 type fakeRefresher struct {
 	calls atomic.Int32
 	now   time.Time
+}
+
+type rejectingRefresher struct{}
+
+func (rejectingRefresher) Refresh(
+	context.Context,
+	string,
+	credentials.Credential,
+) (credentials.Credential, error) {
+	return credentials.Credential{}, &clientauth.APIError{
+		Status: http.StatusBadRequest,
+		Code:   clientauth.CodeInvalidGrant,
+	}
 }
 
 func (refresher *fakeRefresher) Refresh(
@@ -106,6 +120,53 @@ func TestConcurrentExpiredRequestsRotateRefreshTokenOnce(t *testing.T) {
 	}
 	if refresher.calls.Load() != 1 {
 		t.Fatalf("refresh calls = %d", refresher.calls.Load())
+	}
+}
+
+func TestInvalidRefreshGrantClearsCredential(t *testing.T) {
+	now := time.Now()
+	store := &memoryStore{value: credentials.Credential{
+		AccessToken: "access-old", RefreshToken: "refresh-old", AccessExpiresAt: now.Add(-time.Second),
+		DeviceID: "device-1",
+	}}
+	client, err := New(store, rejectingRefresher{}, Config{Now: func() time.Time { return now }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = client.usableCredential(
+		context.Background(),
+		profile.Profile{ID: "service-1", BaseURL: "https://gateway.example.test"},
+		"",
+	)
+	if !errors.Is(err, clientauth.ErrLoginExpired) {
+		t.Fatalf("refresh error = %v, want ErrLoginExpired", err)
+	}
+	if _, err := store.Get("service-1"); !errors.Is(err, credentials.ErrNotFound) {
+		t.Fatalf("credential remains after invalid grant: %v", err)
+	}
+}
+
+func TestKnownRefreshExpiryClearsCredentialWithoutNetworkRefresh(t *testing.T) {
+	now := time.Now()
+	store := &memoryStore{value: credentials.Credential{
+		AccessToken: "access-old", RefreshToken: "refresh-old", AccessExpiresAt: now.Add(-time.Second),
+		RefreshExpiresAt: now.Add(-time.Minute), DeviceID: "device-1",
+	}}
+	refresher := &fakeRefresher{now: now}
+	client, err := New(store, refresher, Config{Now: func() time.Time { return now }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = client.usableCredential(
+		context.Background(),
+		profile.Profile{ID: "service-1", BaseURL: "https://gateway.example.test"},
+		"",
+	)
+	if !errors.Is(err, clientauth.ErrLoginExpired) || refresher.calls.Load() != 0 {
+		t.Fatalf("expired refresh result: err=%v refresh calls=%d", err, refresher.calls.Load())
+	}
+	if _, err := store.Get("service-1"); !errors.Is(err, credentials.ErrNotFound) {
+		t.Fatalf("credential remains after known expiry: %v", err)
 	}
 }
 

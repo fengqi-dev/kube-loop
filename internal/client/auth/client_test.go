@@ -208,6 +208,17 @@ func TestAuthenticationRejectionReturnsTypedAPIError(t *testing.T) {
 		apiError.Code != CodeInvalidGrant || apiError.RequestID != "request-123" {
 		t.Fatalf("authentication error = %#v, %v", apiError, err)
 	}
+	if !IsInvalidGrant(err) {
+		t.Fatalf("invalid grant was not classified: %v", err)
+	}
+}
+
+func TestIsInvalidGrantRejectsOtherAuthenticationErrors(t *testing.T) {
+	t.Parallel()
+	if IsInvalidGrant(&APIError{Status: http.StatusUnauthorized, Code: "invalid_client"}) ||
+		IsInvalidGrant(errors.New("invalid_grant")) {
+		t.Fatal("non-typed invalid grant error was classified as an expired login")
+	}
 }
 
 func writeTokenResponse(t *testing.T, writer http.ResponseWriter) {

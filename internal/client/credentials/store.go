@@ -83,6 +83,13 @@ func NewSystemStoreForVersion(version string) *SystemStore {
 	return newStore(systemBackend{}, keyringServiceForVersion(version))
 }
 
+// NewSystemStoreForClient isolates OAuth credentials by client ID while still
+// allowing Desktop and TUI to share Server profiles. Refresh tokens are bound
+// to the OAuth client that obtained them and must never overwrite each other.
+func NewSystemStoreForClient(version, clientID string) *SystemStore {
+	return newStoreForClient(systemBackend{}, version, clientID)
+}
+
 func NewStore(backend Backend) *SystemStore {
 	return newStore(backend, serviceName)
 }
@@ -94,12 +101,24 @@ func newStore(backend Backend, service string) *SystemStore {
 	}}
 }
 
+func newStoreForClient(backend Backend, version, clientID string) *SystemStore {
+	return newStore(backend, keyringServiceForClient(version, clientID))
+}
+
 func keyringServiceForVersion(version string) string {
 	version = strings.TrimSpace(version)
 	if version == "" || version == "dev" {
 		return developmentServiceName
 	}
 	return serviceName
+}
+
+func keyringServiceForClient(version, clientID string) string {
+	clientID = strings.TrimSpace(clientID)
+	if clientID == "" {
+		return keyringServiceForVersion(version)
+	}
+	return keyringServiceForVersion(version) + " OAuth " + clientID
 }
 
 func (store *SystemStore) Set(profileID string, credential Credential) error {
