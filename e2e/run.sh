@@ -16,7 +16,7 @@ GATEWAY_LABEL="app.kubernetes.io/name=kubeloop-gateway"
 HELPER_SRC="build/embedded/kubeloop-helper"
 HELPER_BIN="build/bin/kubeloop-helper"
 SINGBOX_BIN="build/bin/sing-box"
-TOKEN_PATH="${HOME}/.kubeloop/helper.token"
+TOKEN_PATH="${HOME}/.kubeloop-dev/secrets/helper.token"
 
 log() { echo "==> $*"; }
 
@@ -88,7 +88,7 @@ restart_gateway() {
 }
 
 ensure_helper_token() {
-  mkdir -p "${HOME}/.kubeloop"
+  install -d -m 0700 "$(dirname "${TOKEN_PATH}")"
   if [[ ! -s "${TOKEN_PATH}" ]]; then
     # 64 hex chars; matches helper.EnsureUserToken entropy.
     openssl rand -hex 32 >"${TOKEN_PATH}"
