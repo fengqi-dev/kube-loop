@@ -414,7 +414,7 @@ func TestManagerResumesUploadAcrossProcessFromControllerNegotiatedOffset(t *test
 	})
 	events := make(chan Task, 32)
 	manager, err := NewManager(
-		resumeClient{testClient: testClient{endpoint: websocketURL(server.URL)}, uploadOffset: offset},
+		resumeClient{endpoint: websocketURL(server.URL), uploadOffset: offset},
 		Config{
 			StatePath: statePath, MaximumBytes: 1 << 20, OnEvent: func(task Task) { events <- task },
 		},

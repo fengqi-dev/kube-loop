@@ -193,6 +193,8 @@ linters:
         path: ^(e2e/operator/utils/|internal/helper/(install|platform)/|internal/helper/(listen|session_start)\.go$|internal/mcp/server\.go$|internal/singbox/runtime/ports\.go$|internal/supervisor/(install|updater)_darwin\.go$|internal/terminal/open_darwin\.go$)
       - linters:
           - staticcheck
-        text: "SA1019: corev1.Endpoint"
+        # TrafficBinding snapshots intentionally preserve the legacy Endpoints
+        # representation so cleanup can restore pre-EndpointSlice resources.
+        text: "SA1019: k8s.io/api/core/v1.(EndpointSubset|Endpoints)"
     paths:
       - ^third_party/

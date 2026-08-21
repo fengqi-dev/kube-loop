@@ -13,8 +13,7 @@ import (
 	apiMeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -41,7 +40,7 @@ type TrafficBindingReconciler struct {
 	client.Client
 
 	Scheme   *runtime.Scheme
-	Recorder record.EventRecorder
+	Recorder events.EventRecorder
 }
 
 // +kubebuilder:rbac:groups=traffic.kubeloop.io,resources=trafficbindings,verbs=get;list;watch;update;patch
@@ -86,7 +85,7 @@ func (r *TrafficBindingReconciler) Reconcile(ctx context.Context, request ctrl.R
 		if err := r.Patch(ctx, binding, client.MergeFrom(before)); err != nil {
 			return ctrl.Result{}, err
 		}
-		return ctrl.Result{Requeue: true}, nil
+		return ctrl.Result{RequeueAfter: time.Millisecond}, nil
 	}
 
 	statusBase := binding.DeepCopy()
@@ -130,7 +129,7 @@ func (r *TrafficBindingReconciler) reconcileActive(
 			if err := r.persistSnapshot(ctx, binding, snapshot); err != nil {
 				return ctrl.Result{}, err
 			}
-			return ctrl.Result{Requeue: true}, nil
+			return ctrl.Result{RequeueAfter: time.Millisecond}, nil
 		}
 		binding.Status.ServiceName = binding.Spec.Target.Name
 		binding.Status.ServiceClusterIP = ""
@@ -259,7 +258,7 @@ func (r *TrafficBindingReconciler) event(
 	eventType, reason, message string,
 ) {
 	if r.Recorder != nil {
-		r.Recorder.Event(binding, eventType, reason, message)
+		r.Recorder.Eventf(binding, nil, eventType, reason, reason, "%s", message)
 	}
 }
 
@@ -268,9 +267,8 @@ func requestsForBinding(object client.Object) []reconcile.Request {
 	if name == "" {
 		return nil
 	}
-	return []reconcile.Request{{NamespacedName: types.NamespacedName{
-		Namespace: object.GetNamespace(), Name: name,
-	}}}
+	return []reconcile.Request{{
+		Namespace: object.GetNamespace(), Name: name}}
 }
 
 // SetupWithManager sets up the controller with the Manager.

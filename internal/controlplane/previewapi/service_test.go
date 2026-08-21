@@ -15,7 +15,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v5"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/servicebinding"
@@ -62,11 +61,9 @@ func (resources *recordingPreviewResources) Create(
 		return nil, resources.createErr
 	}
 	return &corev1.Service{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      snapshot.Service,
-			Namespace: snapshot.Namespace,
-		},
-		Spec: corev1.ServiceSpec{ClusterIP: "10.96.0.40"},
+		Name:      snapshot.Service,
+		Namespace: snapshot.Namespace,
+		Spec:      corev1.ServiceSpec{ClusterIP: "10.96.0.40"},
 	}, nil
 }
 

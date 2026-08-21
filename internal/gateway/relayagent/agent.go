@@ -144,8 +144,7 @@ func (agent *Agent) Start(ctx context.Context) error {
 }
 
 func retryableRegistrationError(err error) bool {
-	var httpError *HTTPError
-	if errors.As(err, &httpError) {
+	if httpError, ok := errors.AsType[*HTTPError](err); ok {
 		return httpError.Status == http.StatusTooManyRequests || httpError.Status >= http.StatusInternalServerError
 	}
 	var requestError *url.Error

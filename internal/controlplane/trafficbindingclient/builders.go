@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
 	trafficv1alpha1 "github.com/fengqi-dev/kube-loop/api/v1alpha1"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/servicebinding"
 )
@@ -33,7 +31,7 @@ func NewInterceptBinding(
 		})
 	}
 	return &trafficv1alpha1.TrafficBinding{
-		ObjectMeta: metav1.ObjectMeta{Namespace: snapshot.Namespace},
+		Namespace: snapshot.Namespace,
 		Spec: trafficv1alpha1.TrafficBindingSpec{
 			Mode: mode, SessionID: owner.SessionID, TaskID: owner.TaskID,
 			SessionGeneration: owner.SessionGeneration,
@@ -62,7 +60,7 @@ func NewPreviewBinding(
 		})
 	}
 	return &trafficv1alpha1.TrafficBinding{
-		ObjectMeta: metav1.ObjectMeta{Namespace: snapshot.Namespace},
+		Namespace: snapshot.Namespace,
 		Spec: trafficv1alpha1.TrafficBindingSpec{
 			Mode:      trafficv1alpha1.TrafficBindingModePreview,
 			SessionID: owner.SessionID, TaskID: owner.TaskID, SessionGeneration: owner.SessionGeneration,
@@ -87,7 +85,7 @@ func NewPortForwardBinding(
 		targetKind = trafficv1alpha1.TargetKindPod
 	}
 	return &trafficv1alpha1.TrafficBinding{
-		ObjectMeta: metav1.ObjectMeta{Namespace: namespace},
+		Namespace: namespace,
 		Spec: trafficv1alpha1.TrafficBindingSpec{
 			Mode:      trafficv1alpha1.TrafficBindingModePortForward,
 			SessionID: owner.SessionID, TaskID: owner.TaskID, SessionGeneration: owner.SessionGeneration,

@@ -308,8 +308,7 @@ func (connection *Conn) Subprotocol() string {
 }
 
 func CloseStatus(err error) StatusCode {
-	var closeError *gorilla.CloseError
-	if errors.As(err, &closeError) {
+	if closeError, ok := errors.AsType[*gorilla.CloseError](err); ok {
 		return closeError.Code
 	}
 	return -1

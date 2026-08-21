@@ -114,8 +114,7 @@ func markFlagsRequired(command *cobra.Command, names ...string) {
 }
 
 func isUsageError(err error) bool {
-	var target *usageError
-	if errors.As(err, &target) {
+	if _, ok := errors.AsType[*usageError](err); ok {
 		return true
 	}
 	message := err.Error()

@@ -23,8 +23,10 @@ GOVULNCHECK ?= $(LOCALBIN)/govulncheck
 
 KUSTOMIZE_VERSION ?= v5.8.1
 CONTROLLER_TOOLS_VERSION ?= v0.21.0
-GOLANGCI_LINT_VERSION ?= v2.12.2
+GOLANGCI_LINT_VERSION ?= v2.13.0
 GOVULNCHECK_VERSION ?= v1.7.0
+GO_TOOLCHAIN_VERSION ?= $(shell go env GOVERSION)
+GO_TOOLCHAIN_STAMP := $(LOCALBIN)/.toolchain-$(GO_TOOLCHAIN_VERSION)
 ENVTEST_VERSION ?= $(shell v='$(call gomodver,sigs.k8s.io/controller-runtime)'; \
 	[ -n "$$v" ] || { echo "Set ENVTEST_VERSION manually (controller-runtime replace has no tag)" >&2; exit 1; }; \
 	printf '%s\n' "$$v")
@@ -338,14 +340,17 @@ recovery-test: ## Run resource recovery, owner-safety and Task lifecycle tests w
 $(LOCALBIN):
 	mkdir -p "$(LOCALBIN)"
 
+$(GO_TOOLCHAIN_STAMP): $(LOCALBIN)
+	touch "$@"
+
 .PHONY: kustomize
 kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary.
-$(KUSTOMIZE): $(LOCALBIN)
+$(KUSTOMIZE): $(GO_TOOLCHAIN_STAMP)
 	$(call go-install-tool,$(KUSTOMIZE),sigs.k8s.io/kustomize/kustomize/v5,$(KUSTOMIZE_VERSION))
 
 .PHONY: controller-gen
 controller-gen: $(CONTROLLER_GEN) ## Download controller-gen locally if necessary.
-$(CONTROLLER_GEN): $(LOCALBIN)
+$(CONTROLLER_GEN): $(GO_TOOLCHAIN_STAMP)
 	$(call go-install-tool,$(CONTROLLER_GEN),sigs.k8s.io/controller-tools/cmd/controller-gen,$(CONTROLLER_TOOLS_VERSION))
 
 .PHONY: setup-envtest
@@ -355,7 +360,7 @@ setup-envtest: envtest ## Download Kubernetes EnvTest binaries.
 
 .PHONY: envtest
 envtest: $(ENVTEST) ## Download setup-envtest locally if necessary.
-$(ENVTEST): $(LOCALBIN)
+$(ENVTEST): $(GO_TOOLCHAIN_STAMP)
 	$(call go-install-tool,$(ENVTEST),sigs.k8s.io/controller-runtime/tools/setup-envtest,$(ENVTEST_VERSION))
 
 .PHONY: golangci-lint
@@ -363,32 +368,32 @@ golangci-lint: $(GOLANGCI_LINT) ## Build golangci-lint with the repository's cus
 $(GOLANGCI_LINT): .custom-gcl.yml $(GOLANGCI_LINT_BUILDER)
 	"$(GOLANGCI_LINT_BUILDER)" custom
 
-$(GOLANGCI_LINT_BUILDER): $(LOCALBIN)
-	@[ -f "$@-$(GOLANGCI_LINT_VERSION)" ] && [ "$$(readlink -- "$@" 2>/dev/null)" = "$@-$(GOLANGCI_LINT_VERSION)" ] || { \
+$(GOLANGCI_LINT_BUILDER): $(GO_TOOLCHAIN_STAMP)
+	@[ -f "$@-$(GOLANGCI_LINT_VERSION)-$(GO_TOOLCHAIN_VERSION)" ] && [ "$$(readlink -- "$@" 2>/dev/null)" = "$@-$(GOLANGCI_LINT_VERSION)-$(GO_TOOLCHAIN_VERSION)" ] || { \
 		set -e; \
 		package=github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION); \
 		echo "Downloading $${package}"; \
 		rm -f "$@"; \
 		GOBIN="$(LOCALBIN)" go install "$${package}"; \
-		mv "$(LOCALBIN)/golangci-lint" "$@-$(GOLANGCI_LINT_VERSION)"; \
+		mv "$(LOCALBIN)/golangci-lint" "$@-$(GOLANGCI_LINT_VERSION)-$(GO_TOOLCHAIN_VERSION)"; \
 	}; \
-	ln -sf "$$(realpath "$@-$(GOLANGCI_LINT_VERSION)")" "$@"
+	ln -sf "$$(realpath "$@-$(GOLANGCI_LINT_VERSION)-$(GO_TOOLCHAIN_VERSION)")" "$@"
 
 .PHONY: govulncheck
 govulncheck: $(GOVULNCHECK) ## Download govulncheck locally if necessary.
-$(GOVULNCHECK): $(LOCALBIN)
+$(GOVULNCHECK): $(GO_TOOLCHAIN_STAMP)
 	$(call go-install-tool,$(GOVULNCHECK),golang.org/x/vuln/cmd/govulncheck,$(GOVULNCHECK_VERSION))
 
 define go-install-tool
-@[ -f "$(1)-$(3)" ] && [ "$$(readlink -- "$(1)" 2>/dev/null)" = "$(1)-$(3)" ] || { \
+@[ -f "$(1)-$(3)-$(GO_TOOLCHAIN_VERSION)" ] && [ "$$(readlink -- "$(1)" 2>/dev/null)" = "$(1)-$(3)-$(GO_TOOLCHAIN_VERSION)" ] || { \
 set -e; \
 package=$(2)@$(3); \
 echo "Downloading $${package}"; \
 rm -f "$(1)"; \
 GOBIN="$(LOCALBIN)" go install $${package}; \
-mv "$(LOCALBIN)/$$(basename "$(1)")" "$(1)-$(3)"; \
+mv "$(LOCALBIN)/$$(basename "$(1)")" "$(1)-$(3)-$(GO_TOOLCHAIN_VERSION)"; \
 }; \
-ln -sf "$$(realpath "$(1)-$(3)")" "$(1)"
+ln -sf "$$(realpath "$(1)-$(3)-$(GO_TOOLCHAIN_VERSION)")" "$(1)"
 endef
 
 define gomodver

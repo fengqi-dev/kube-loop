@@ -855,7 +855,7 @@ func TestPodExecTaskOpensAuthenticatedWebSocketStream(t *testing.T) {
 			t.Error(err)
 			return
 		}
-		defer checkTestClose(t, connection.CloseNow)
+		defer func() { _ = connection.CloseNow() }()
 		stdout, _ := execstream.Encode(execstream.Frame{Type: execstream.Stdout, Payload: []byte("hello")})
 		exit, _ := execstream.EncodeExit(execstream.ExitStatus{})
 		_ = connection.Write(request.Context(), websocket.MessageBinary, stdout)
@@ -924,7 +924,7 @@ func TestFileTransferTaskUsesAuthenticatedControlAndWebSocketAPIs(t *testing.T) 
 				t.Error(err)
 				return
 			}
-			defer checkTestClose(t, connection.CloseNow)
+			defer func() { _ = connection.CloseNow() }()
 			progress, _ := filestream.EncodeProgress(filestream.ProgressStatus{Total: 4})
 			result, _ := filestream.EncodeResult(
 				filestream.TransferResult{Status: filestream.ResultSucceeded, Transferred: 4},

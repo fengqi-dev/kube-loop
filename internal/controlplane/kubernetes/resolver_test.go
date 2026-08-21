@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
@@ -27,7 +26,7 @@ func (p staticClientProvider) ClientFor(authorization.Subject) (kubernetes.Inter
 
 func TestServiceResolverRequiresEveryRequestedPortToBeAuthoritative(t *testing.T) {
 	client := fake.NewSimpleClientset(&corev1.Service{
-		ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "development"},
+		Name: "api", Namespace: "development",
 		Spec: corev1.ServiceSpec{
 			ClusterIP: "10.96.0.20",
 			Ports: []corev1.ServicePort{
@@ -66,11 +65,11 @@ func TestServiceResolverRequiresEveryRequestedPortToBeAuthoritative(t *testing.T
 func TestPortForwardResolverResolvesPodAndService(t *testing.T) {
 	objects := []runtime.Object{
 		&corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{Name: "api-0", Namespace: "development"},
-			Status:     corev1.PodStatus{Phase: corev1.PodRunning, PodIP: "10.244.1.7"},
+			Name: "api-0", Namespace: "development",
+			Status: corev1.PodStatus{Phase: corev1.PodRunning, PodIP: "10.244.1.7"},
 		},
 		&corev1.Service{
-			ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "development"},
+			Name: "api", Namespace: "development",
 			Spec: corev1.ServiceSpec{
 				ClusterIP: "10.96.0.20",
 				Ports:     []corev1.ServicePort{{Port: 8443, Protocol: corev1.ProtocolTCP}},
@@ -116,12 +115,12 @@ func TestPortForwardResolverResolvesPodAndService(t *testing.T) {
 func TestContainerResolverSelectsAndValidatesContainer(t *testing.T) {
 	client := fake.NewSimpleClientset(
 		&corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{Name: "single", Namespace: "development"},
-			Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "app"}}},
-			Status:     corev1.PodStatus{Phase: corev1.PodRunning},
+			Name: "single", Namespace: "development",
+			Spec:   corev1.PodSpec{Containers: []corev1.Container{{Name: "app"}}},
+			Status: corev1.PodStatus{Phase: corev1.PodRunning},
 		},
 		&corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{Name: "multiple", Namespace: "development"},
+			Name: "multiple", Namespace: "development",
 			Spec: corev1.PodSpec{Containers: []corev1.Container{
 				{Name: "app"}, {Name: "sidecar"},
 			}},

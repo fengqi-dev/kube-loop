@@ -56,12 +56,10 @@ func stableError(err error) error {
 	if err == nil {
 		return nil
 	}
-	var existing *ToolError
-	if errors.As(err, &existing) {
+	if existing, ok := errors.AsType[*ToolError](err); ok {
 		return existing
 	}
-	var apiError *clientremote.APIError
-	if errors.As(err, &apiError) {
+	if apiError, ok := errors.AsType[*clientremote.APIError](err); ok {
 		code := ErrorInternal
 		switch apiError.Status {
 		case 400, 422:

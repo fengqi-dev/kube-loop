@@ -18,10 +18,8 @@ func TestInventoryWatchSharesInformerAndSlowSubscriberKeepsLatestSnapshot(
 ) {
 	client := fake.NewSimpleClientset(
 		&corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "pod-0",
-				Namespace: "development",
-			},
+			Name:      "pod-0",
+			Namespace: "development",
 		},
 	)
 	hub := newInventoryWatchHub(20 * time.Millisecond)
@@ -49,7 +47,7 @@ func TestInventoryWatchSharesInformerAndSlowSubscriberKeepsLatestSnapshot(
 	}
 	// Fill the slow subscriber's one-slot mailbox and intentionally stop reading.
 	if _, err := client.CoreV1().Pods("development").Create(ctx, &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Name: "pod-1", Namespace: "development"},
+		Name: "pod-1", Namespace: "development",
 	}, metav1.CreateOptions{}); err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +70,7 @@ func TestInventoryWatchSharesInformerAndSlowSubscriberKeepsLatestSnapshot(
 	hub.mu.Unlock()
 	for index := 2; index < 32; index++ {
 		if _, err := client.CoreV1().Pods("development").Create(ctx, &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("pod-%d", index), Namespace: "development"},
+			Name: fmt.Sprintf("pod-%d", index), Namespace: "development",
 		}, metav1.CreateOptions{}); err != nil {
 			t.Fatal(err)
 		}

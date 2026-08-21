@@ -388,7 +388,7 @@ func fakeClient(t *testing.T) client.Client {
 
 func testBinding() *trafficv1alpha1.TrafficBinding {
 	return &trafficv1alpha1.TrafficBinding{
-		ObjectMeta: metav1.ObjectMeta{Namespace: "development"},
+		Namespace: "development",
 		Spec: trafficv1alpha1.TrafficBindingSpec{
 			Mode:      trafficv1alpha1.TrafficBindingModePortForward,
 			SessionID: uuid.NewString(), TaskID: uuid.NewString(), SessionGeneration: 1,

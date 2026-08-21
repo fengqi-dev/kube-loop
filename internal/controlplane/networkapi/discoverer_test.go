@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
 
@@ -38,17 +37,13 @@ func TestDiscoverUsesIdentityClientAndReturnsNormalizedSpec(t *testing.T) {
 	provider := &fakeProvider{
 		client: fake.NewClientset(
 			&corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "api",
-					Namespace: "development",
-				},
-				Status: corev1.PodStatus{PodIP: "10.2.1.9"},
+				Name:      "api",
+				Namespace: "development",
+				Status:    corev1.PodStatus{PodIP: "10.2.1.9"},
 			},
 			&corev1.Service{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "api",
-					Namespace: "development",
-				},
+				Name:      "api",
+				Namespace: "development",
 				Spec: corev1.ServiceSpec{
 					ClusterIP:  "10.96.1.20",
 					ClusterIPs: []string{"10.96.1.20"},
@@ -57,20 +52,16 @@ func TestDiscoverUsesIdentityClientAndReturnsNormalizedSpec(t *testing.T) {
 		),
 		systemClient: fake.NewClientset(
 			&corev1.Service{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "kube-dns",
-					Namespace: "kube-system",
-				},
+				Name:      "kube-dns",
+				Namespace: "kube-system",
 				Spec: corev1.ServiceSpec{
 					ClusterIP:  "10.96.0.10",
 					ClusterIPs: []string{"10.96.0.10"},
 				},
 			},
 			&corev1.ConfigMap{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      coreDNSServiceName,
-					Namespace: "kube-system",
-				},
+				Name:      coreDNSServiceName,
+				Namespace: "kube-system",
 				Data: map[string]string{
 					"Corefile": ".:53 {\n  kubernetes corp.internal in-addr.arpa ip6.arpa {\n  }\n}",
 				},
