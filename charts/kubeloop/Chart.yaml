@@ -2,8 +2,8 @@ apiVersion: v2
 name: kubeloop
 description: KubeLoop control plane and independently scalable tunnel data plane
 type: application
-version: 2.1.0
-appVersion: "v2.1.0"
+version: 2.1.1
+appVersion: "v2.1.1"
 kubeVersion: ">=1.25.0-0"
 home: https://github.com/fengqi-dev/kube-loop
 sources:
