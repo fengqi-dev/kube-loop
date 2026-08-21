@@ -268,7 +268,7 @@ func applyControlPlaneDefaults(document *controlPlaneConfigDocument) {
 		document.Authentication.OAuth.KeyID = "primary"
 	}
 	if document.Authentication.OAuth.AccessTTL == "" {
-		document.Authentication.OAuth.AccessTTL = (5 * time.Minute).String()
+		document.Authentication.OAuth.AccessTTL = (24 * time.Hour).String()
 	}
 	if document.Authentication.OAuth.RefreshTTL == "" {
 		document.Authentication.OAuth.RefreshTTL = (30 * 24 * time.Hour).String()

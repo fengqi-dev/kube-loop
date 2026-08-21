@@ -25,7 +25,7 @@ controlPlane:
       oidcSigningKeyKey: oidc-signing-key.pem
       hmacSecretKey: hmac-secret
       keyID: primary
-      accessTTL: 5m
+      accessTTL: 24h
       refreshTTL: 720h
   relay:
     # Helm creates and retains the Ed25519 RelayTicket signing key.
