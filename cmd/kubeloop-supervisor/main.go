@@ -18,10 +18,6 @@ import (
 var version = "dev"
 
 func main() {
-	if version != "" && version != "dev" {
-		helper.Version = version
-		supervisor.Version = version
-	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	if err := run(ctx, os.Args[1:]); err != nil {
@@ -36,8 +32,17 @@ func run(ctx context.Context, args []string) error {
 	}
 	switch args[0] {
 	case "run":
-		if len(args) != 1 {
-			return fmt.Errorf("run does not accept arguments")
+		flags := flag.NewFlagSet("run", flag.ContinueOnError)
+		flags.SetOutput(os.Stderr)
+		channel := flags.String("channel", "release", "installation channel")
+		if err := flags.Parse(args[1:]); err != nil {
+			return err
+		}
+		if flags.NArg() != 0 {
+			return fmt.Errorf("run does not accept positional arguments")
+		}
+		if err := configureChannel(*channel, ""); err != nil {
+			return err
 		}
 		config := supervisor.CurrentConfig()
 		auth, err := supervisor.ReadAuth(config)
@@ -66,6 +71,7 @@ func runInstall(args []string) error {
 	worker := flags.String("worker", "", "worker source")
 	workerSHA := flags.String("worker-sha256", "", "worker SHA-256")
 	workerVersion := flags.String("worker-version", "", "worker version")
+	channel := flags.String("channel", "", "installation channel")
 	token := flags.String("token", "", "IPC token")
 	uid := flags.Int("uid", -1, "authorized UID")
 	home := flags.String("home", "", "authorized home")
@@ -73,8 +79,11 @@ func runInstall(args []string) error {
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	if flags.NArg() != 0 || *source == "" || *sha == "" || *worker == "" || *workerSHA == "" || *workerVersion == "" || *token == "" || *uid < 0 || *home == "" || *singBox == "" {
-		return fmt.Errorf("install requires source, sha256, worker, worker-sha256, worker-version, token, uid, home, and sing-box")
+	if flags.NArg() != 0 || *source == "" || *sha == "" || *worker == "" || *workerSHA == "" || *workerVersion == "" || *channel == "" || *token == "" || *uid < 0 || *home == "" || *singBox == "" {
+		return fmt.Errorf("install requires source, sha256, worker, worker-sha256, worker-version, channel, token, uid, home, and sing-box")
+	}
+	if err := configureChannel(*channel, *workerVersion); err != nil {
+		return err
 	}
 	actualWorkerSHA, err := hashFile(*worker)
 	if err != nil {
@@ -87,4 +96,27 @@ func runInstall(args []string) error {
 		return err
 	}
 	return supervisor.Install(*source, *sha, *token, *uid)
+}
+
+func configureChannel(channel, workerVersion string) error {
+	switch channel {
+	case "dev":
+		if workerVersion != "" && workerVersion != "dev" {
+			return fmt.Errorf("dev channel requires a dev worker, got %q", workerVersion)
+		}
+		helper.Version = "dev"
+		supervisor.Version = "dev"
+	case "release":
+		if workerVersion == "dev" {
+			return fmt.Errorf("release channel cannot install a dev worker")
+		}
+		helper.Version = workerVersion
+		if helper.Version == "" {
+			helper.Version = "release"
+		}
+		supervisor.Version = "release"
+	default:
+		return fmt.Errorf("unsupported supervisor channel %q", channel)
+	}
+	return nil
 }

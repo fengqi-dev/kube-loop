@@ -250,9 +250,6 @@ func LocateBundledSupervisor() (string, error) {
 
 func locateBundledTool(baseName string) (string, error) {
 	name := helperBinaryName(baseName)
-	if path, err := componentstore.Find(helper.Version, name); err == nil {
-		return path, nil
-	}
 	// Unix helpers are installed outside the application bundle. Always
 	// materialize the exact bytes embedded in this desktop build first so stale
 	// development/package artifacts cannot be selected as the privileged source.
@@ -260,6 +257,9 @@ func locateBundledTool(baseName string) (string, error) {
 		if path, ok, err := materializeBundledFile(name); ok || err != nil {
 			return path, err
 		}
+	}
+	if path, err := componentstore.Find(helper.Version, name); err == nil {
+		return path, nil
 	}
 	// Prefer on-disk package resources ({installRoot}\resources) over
 	// materializing the embedded copy — avoids multi-MB read/write on every elevate.
@@ -349,6 +349,12 @@ func materializeBundledFile(name string) (string, bool, error) {
 	bundledFilesMu.RUnlock()
 	if len(content) == 0 {
 		return "", false, nil
+	}
+	if cachedPath, err := componentstore.Find(helper.Version, name); err == nil {
+		cachedHash, hashErr := fileSHA256(cachedPath)
+		if hashErr == nil && cachedHash == wantHash {
+			return cachedPath, true, nil
+		}
 	}
 
 	temp, err := os.CreateTemp("", ".kubeloop-component-*")

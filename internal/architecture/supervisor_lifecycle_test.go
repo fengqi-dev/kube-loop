@@ -2,11 +2,13 @@ package architecture
 
 import (
 	"crypto/sha256"
+	"debug/buildinfo"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -25,6 +27,7 @@ func TestSupervisorBinaryDoesNotFollowApplicationVersion(t *testing.T) {
 	if firstSupervisor != secondSupervisor {
 		t.Fatal("supervisor binary changed with the application version")
 	}
+	assertNoVCSBuildSettings(t, filepath.Join(first, "kubeloop-supervisor"))
 }
 
 func buildDarwinRuntimeComponents(t *testing.T, root, version string) string {
@@ -49,4 +52,17 @@ func fileDigest(t *testing.T, path string) [sha256.Size]byte {
 		t.Fatal(fmt.Errorf("read %s: %w", path, err))
 	}
 	return sha256.Sum256(content)
+}
+
+func assertNoVCSBuildSettings(t *testing.T, path string) {
+	t.Helper()
+	info, err := buildinfo.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read build info from %s: %v", path, err)
+	}
+	for _, setting := range info.Settings {
+		if strings.HasPrefix(setting.Key, "vcs.") {
+			t.Fatalf("%s contains non-reproducible build setting %s=%s", path, setting.Key, setting.Value)
+		}
+	}
 }
