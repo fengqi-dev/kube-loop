@@ -130,6 +130,12 @@ func NewManager(client Client, config Config) (*Manager, error) {
 		maximumBytes: config.MaximumBytes, now: config.Now, onEvent: config.OnEvent, ctx: ctx, cancel: cancel,
 		tasks: make(map[string]Task), active: make(map[string]*activeTransfer),
 	}
+	if manager.statePath != "" {
+		if err := fsatomic.CleanupTemps(manager.statePath); err != nil {
+			cancel()
+			return nil, fmt.Errorf("clean file transfer state: %w", err)
+		}
+	}
 	if err := manager.load(); err != nil {
 		cancel()
 		return nil, err

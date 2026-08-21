@@ -40,7 +40,8 @@ brew install --formula kube-loop/kubeloop/kubeloop-tui
 
 稳定版 Release 会使用 macOS 与 Linux 原生压缩包的校验和自动更新 Formula。
 
-Server 配置与可选 TUI 配置位于 `~/.kubeloop`。首次启动进入 Servers，可添加 KubeLoop
+Server 配置与可选 TUI 配置位于 `~/.kubeloop/config`（开发构建使用
+`~/.kubeloop-dev/config`）。首次启动进入 Servers，可添加 KubeLoop
 Server URL 并完成登录。恢复已有登录或完成登录后，TUI 默认使用 TUN 模式自动连接。
 
 ## 工作区
@@ -73,7 +74,7 @@ TUI 不提供任意 Kubernetes 资源类型、直接 kubeconfig 访问、Shell �
 
 ## Alias 与 Hotkey
 
-可创建 `~/.kubeloop/tui.yaml`：
+可创建 `~/.kubeloop/config/tui.yaml`：
 
 ```yaml
 version: 1
@@ -94,7 +95,7 @@ SOCKS 模式不需要特权网络 Helper。TUN 模式沿用桌面客户端托管
 断开连接需要二次确认。
 
 两个客户端会校验并共享
-`~/.kubeloop/components/<version>/<os>-<arch>/` 下的版本化组件。该用户缓存只作为
+`~/.kubeloop/cache/components/<version>/<os>-<arch>/` 下的版本化组件。该用户缓存只作为
 分发源；TUN 安装会先把 Helper 和 sing-box 提升到受保护的系统路径，特权服务不会
 直接执行缓存目录或软件包目录中的 sing-box。
 

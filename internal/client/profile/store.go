@@ -16,6 +16,7 @@ import (
 
 	"github.com/fengqi-dev/kube-loop/internal/dnsname"
 	"github.com/fengqi-dev/kube-loop/internal/fsatomic"
+	"github.com/fengqi-dev/kube-loop/internal/userpaths"
 )
 
 const (
@@ -55,11 +56,11 @@ type Store struct {
 }
 
 func DefaultPath() (string, error) {
-	home, err := os.UserHomeDir()
+	layout, err := userpaths.Default()
 	if err != nil {
-		return "", errors.New("find user home directory")
+		return "", err
 	}
-	return filepath.Join(home, ".kubeloop", "servers.json"), nil
+	return filepath.Join(layout.ConfigDir(), "servers.json"), nil
 }
 
 func Open(path string) (*Store, error) {

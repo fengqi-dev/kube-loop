@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 
@@ -19,19 +18,10 @@ type workspaceConfig struct {
 	Hotkeys map[string]string `yaml:"hotkeys"`
 }
 
-func defaultWorkspaceConfigPath() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("resolve home directory: %w", err)
-	}
-	return filepath.Join(home, ".kubeloop", "tui.yaml"), nil
-}
-
-func loadWorkspaceConfig() (workspaceConfig, string) {
+func loadWorkspaceConfig(path string) (workspaceConfig, string) {
 	config := workspaceConfig{Version: workspaceConfigVersion, Aliases: map[string]string{}, Hotkeys: map[string]string{}}
-	path, err := defaultWorkspaceConfigPath()
-	if err != nil {
-		return config, err.Error()
+	if strings.TrimSpace(path) == "" {
+		return config, "TUI config path is unavailable"
 	}
 	contents, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {

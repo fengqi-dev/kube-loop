@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -350,31 +351,7 @@ func materializeBundledFile(name string) (string, bool, error) {
 		return "", false, nil
 	}
 
-	dir, err := helper.UserDir()
-	if err != nil {
-		return "", true, err
-	}
-	dir = filepath.Join(dir, "helper", "resources")
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return "", true, fmt.Errorf("create bundled helper directory: %w", err)
-	}
-	if err := os.Chmod(dir, 0o700); err != nil && runtime.GOOS != "windows" {
-		return "", true, fmt.Errorf("secure bundled helper directory: %w", err)
-	}
-
-	path := filepath.Join(dir, name)
-	if info, statErr := os.Stat(path); statErr == nil && info.Size() == int64(len(content)) {
-		if wantHash != "" {
-			if actual, hashErr := fileSHA256(path); hashErr == nil && actual == wantHash {
-				if err := os.Chmod(path, 0o700); err != nil && runtime.GOOS != "windows" {
-					return "", true, fmt.Errorf("make bundled helper executable: %w", err)
-				}
-				return path, true, nil
-			}
-		}
-	}
-
-	temp, err := os.CreateTemp(dir, ".kubeloop-helper-*")
+	temp, err := os.CreateTemp("", ".kubeloop-component-*")
 	if err != nil {
 		return "", true, fmt.Errorf("create bundled helper: %w", err)
 	}
@@ -391,11 +368,15 @@ func materializeBundledFile(name string) (string, bool, error) {
 	if err := temp.Close(); err != nil {
 		return "", true, fmt.Errorf("close bundled helper: %w", err)
 	}
-	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-		return "", true, fmt.Errorf("replace bundled helper: %w", err)
+	path, err := componentstore.Cache(helper.Version, name, tempPath)
+	if err != nil {
+		return "", true, fmt.Errorf("cache bundled helper: %w", err)
 	}
-	if err := os.Rename(tempPath, path); err != nil {
-		return "", true, fmt.Errorf("install bundled helper: %w", err)
+	if wantHash != "" {
+		actual, hashErr := fileSHA256(path)
+		if hashErr != nil || actual != wantHash {
+			return "", true, errors.New("cached bundled helper checksum does not match embedded content")
+		}
 	}
 	return path, true, nil
 }

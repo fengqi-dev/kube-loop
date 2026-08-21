@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/fengqi-dev/kube-loop/internal/userpaths"
 )
 
 const manifestVersion = 1
@@ -167,11 +169,11 @@ func directoryFor(release string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	home, err := os.UserHomeDir()
+	layout, err := userpaths.ForVersion(release)
 	if err != nil {
-		return "", fmt.Errorf("resolve component home: %w", err)
+		return "", err
 	}
-	return filepath.Join(home, ".kubeloop", "components", release, runtime.GOOS+"-"+runtime.GOARCH), nil
+	return filepath.Join(layout.CacheDir(), "components", release, runtime.GOOS+"-"+runtime.GOARCH), nil
 }
 
 func safeSegment(label, value string) (string, error) {

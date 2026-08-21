@@ -183,19 +183,18 @@ func TestWorkspaceConfigValidation(t *testing.T) {
 	}
 }
 
-func TestWorkspaceConfigLoadsFromHome(t *testing.T) {
+func TestWorkspaceConfigLoadsFromConfiguredPath(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
-	directory := filepath.Join(home, ".kubeloop")
+	directory := filepath.Join(home, ".kubeloop", "config")
 	if err := os.MkdirAll(directory, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	content := "version: 1\naliases:\n  pp: pods\nhotkeys:\n  ctrl+p: servers\n"
-	if err := os.WriteFile(filepath.Join(directory, "tui.yaml"), []byte(content), 0o600); err != nil {
+	path := filepath.Join(directory, "tui.yaml")
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	config, warning := loadWorkspaceConfig()
+	config, warning := loadWorkspaceConfig(path)
 	if warning != "" || config.Aliases["pp"] != "pods" || config.Hotkeys["ctrl+p"] != "servers" {
 		t.Fatalf("config=%#v warning=%q", config, warning)
 	}

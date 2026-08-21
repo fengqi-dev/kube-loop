@@ -16,6 +16,29 @@ var clientAPIErrorForTest = clientremote.APIError{
 	Status: 403, Code: "forbidden", Message: "denied", RequestID: "request-1",
 }
 
+func TestDefaultConfigPathUsesConfigDirectory(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	path, err := DefaultConfigPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(home, ".kubeloop", "config", "mcp.json"); path != want {
+		t.Fatalf("DefaultConfigPath() = %q, want %q", path, want)
+	}
+}
+
+func TestKeyringServiceSeparatesReleaseAndDevelopment(t *testing.T) {
+	t.Parallel()
+	if got := keyringServiceForVersion("v2.1.0"); got != keyringService {
+		t.Fatalf("release service = %q, want %q", got, keyringService)
+	}
+	if got := keyringServiceForVersion("dev"); got != devKeyringService {
+		t.Fatalf("development service = %q, want %q", got, devKeyringService)
+	}
+}
+
 type memorySecrets struct{ values map[string]string }
 
 func (secrets *memorySecrets) Set(service, account, secret string) error {

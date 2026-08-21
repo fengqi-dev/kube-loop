@@ -149,9 +149,12 @@ func TestMaterializeBundledHelper(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		name += ".exe"
 	}
-	wantPath := filepath.Join(home, ".kubeloop", "helper", "resources", name)
+	wantPath := filepath.Join(home, ".kubeloop-dev", "cache", "components", "dev", runtime.GOOS+"-"+runtime.GOARCH, name)
 	if path != wantPath {
 		t.Fatalf("materialized path = %q, want %q", path, wantPath)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".kubeloop-dev", "helper", "resources", name)); !os.IsNotExist(err) {
+		t.Fatalf("legacy helper/resources path was created: %v", err)
 	}
 	assertFileContent(t, path, "first helper")
 
@@ -252,7 +255,7 @@ func TestLocateBundledToolPrefersEmbeddedHelperOnUnix(t *testing.T) {
 	if err != nil {
 		t.Fatalf("locate bundled helper: %v", err)
 	}
-	want := filepath.Join(home, ".kubeloop", "helper", "resources", name)
+	want := filepath.Join(home, ".kubeloop-dev", "cache", "components", "dev", runtime.GOOS+"-"+runtime.GOARCH, name)
 	if path != want {
 		t.Fatalf("bundled helper path = %q, want materialized path %q", path, want)
 	}

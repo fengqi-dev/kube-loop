@@ -16,6 +16,7 @@ import (
 
 const (
 	serviceName                     = "KubeLoop"
+	developmentServiceName          = "KubeLoop Dev"
 	credentialMetadataSchemaVersion = 1
 )
 
@@ -47,6 +48,7 @@ type Backend interface {
 type SystemStore struct {
 	backend Backend
 	random  func([]byte) error
+	service string
 }
 
 type metadata struct {
@@ -77,11 +79,27 @@ func NewSystemStore() *SystemStore {
 	return NewStore(systemBackend{})
 }
 
+func NewSystemStoreForVersion(version string) *SystemStore {
+	return newStore(systemBackend{}, keyringServiceForVersion(version))
+}
+
 func NewStore(backend Backend) *SystemStore {
-	return &SystemStore{backend: backend, random: func(value []byte) error {
+	return newStore(backend, serviceName)
+}
+
+func newStore(backend Backend, service string) *SystemStore {
+	return &SystemStore{backend: backend, service: service, random: func(value []byte) error {
 		_, err := rand.Read(value)
 		return err
 	}}
+}
+
+func keyringServiceForVersion(version string) string {
+	version = strings.TrimSpace(version)
+	if version == "" || version == "dev" {
+		return developmentServiceName
+	}
+	return serviceName
 }
 
 func (store *SystemStore) Set(profileID string, credential Credential) error {
@@ -110,13 +128,13 @@ func (store *SystemStore) Set(profileID string, credential Credential) error {
 	newAccounts := credentialAccounts(prefix, generation)
 	values := []string{credential.AccessToken, credential.RefreshToken, string(metadataJSON)}
 	for index, account := range newAccounts {
-		if err := store.backend.Set(serviceName, account, values[index]); err != nil {
+		if err := store.backend.Set(store.service, account, values[index]); err != nil {
 			_ = store.deleteAccounts(newAccounts[:index])
 			return fmt.Errorf("store credentials in system keyring: %w", err)
 		}
 	}
-	oldGeneration, _ := store.backend.Get(serviceName, prefix+":current")
-	if err := store.backend.Set(serviceName, prefix+":current", generation); err != nil {
+	oldGeneration, _ := store.backend.Get(store.service, prefix+":current")
+	if err := store.backend.Set(store.service, prefix+":current", generation); err != nil {
 		_ = store.deleteAccounts(newAccounts)
 		return fmt.Errorf("activate credentials in system keyring: %w", err)
 	}
@@ -136,7 +154,7 @@ func (store *SystemStore) Get(profileID string) (Credential, error) {
 	if store.backend == nil {
 		return Credential{}, errors.New("system keyring is unavailable")
 	}
-	generation, err := store.backend.Get(serviceName, prefix+":current")
+	generation, err := store.backend.Get(store.service, prefix+":current")
 	if err != nil {
 		if errors.Is(err, keyring.ErrNotFound) {
 			return Credential{}, ErrNotFound
@@ -144,15 +162,15 @@ func (store *SystemStore) Get(profileID string) (Credential, error) {
 		return Credential{}, fmt.Errorf("read credentials from system keyring: %w", err)
 	}
 	accounts := credentialAccounts(prefix, generation)
-	accessToken, err := store.backend.Get(serviceName, accounts[0])
+	accessToken, err := store.backend.Get(store.service, accounts[0])
 	if err != nil {
 		return Credential{}, errors.New("system keyring credentials are incomplete")
 	}
-	refreshToken, err := store.backend.Get(serviceName, accounts[1])
+	refreshToken, err := store.backend.Get(store.service, accounts[1])
 	if err != nil {
 		return Credential{}, errors.New("system keyring credentials are incomplete")
 	}
-	metadataJSON, err := store.backend.Get(serviceName, accounts[2])
+	metadataJSON, err := store.backend.Get(store.service, accounts[2])
 	if err != nil {
 		return Credential{}, errors.New("system keyring credentials are incomplete")
 	}
@@ -183,7 +201,7 @@ func (store *SystemStore) Delete(profileID string) error {
 	if store.backend == nil {
 		return errors.New("system keyring is unavailable")
 	}
-	generation, getErr := store.backend.Get(serviceName, prefix+":current")
+	generation, getErr := store.backend.Get(store.service, prefix+":current")
 	if getErr != nil && !errors.Is(getErr, keyring.ErrNotFound) {
 		return fmt.Errorf("read credentials from system keyring: %w", getErr)
 	}
@@ -192,7 +210,7 @@ func (store *SystemStore) Delete(profileID string) error {
 			return fmt.Errorf("delete credentials from system keyring: %w", err)
 		}
 	}
-	if err := store.backend.Delete(serviceName, prefix+":current"); err != nil && !errors.Is(err, keyring.ErrNotFound) {
+	if err := store.backend.Delete(store.service, prefix+":current"); err != nil && !errors.Is(err, keyring.ErrNotFound) {
 		return fmt.Errorf("delete credentials from system keyring: %w", err)
 	}
 	return nil
@@ -201,7 +219,7 @@ func (store *SystemStore) Delete(profileID string) error {
 func (store *SystemStore) deleteAccounts(accounts []string) error {
 	var result error
 	for _, account := range accounts {
-		if err := store.backend.Delete(serviceName, account); err != nil && !errors.Is(err, keyring.ErrNotFound) {
+		if err := store.backend.Delete(store.service, account); err != nil && !errors.Is(err, keyring.ErrNotFound) {
 			result = errors.Join(result, err)
 		}
 	}

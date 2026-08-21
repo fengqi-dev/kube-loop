@@ -80,8 +80,8 @@ type workspaceState struct {
 	warning        string
 }
 
-func newWorkspaceState() workspaceState {
-	config, warning := loadWorkspaceConfig()
+func newWorkspaceState(configPath string) workspaceState {
+	config, warning := loadWorkspaceConfig(configPath)
 	return workspaceState{
 		initialized: true,
 		resource:    resourceConnection,
@@ -127,7 +127,7 @@ func (m *Model) ensureWorkspace() {
 	if m.workspace.initialized {
 		return
 	}
-	m.workspace = newWorkspaceState()
+	m.workspace = newWorkspaceState(m.state.configPath)
 	if m.mode == viewLogin {
 		m.workspace.resource = resourceProfiles
 		m.workspace.history = []workspaceResource{resourceProfiles}

@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/fengqi-dev/kube-loop/internal/fsatomic"
+	"github.com/fengqi-dev/kube-loop/internal/userpaths"
 )
 
 const (
@@ -39,11 +40,11 @@ type Authority struct {
 
 // DefaultAuthorityPath returns the user-scoped CA bundle path.
 func DefaultAuthorityPath() (string, error) {
-	home, err := os.UserHomeDir()
+	layout, err := userpaths.Default()
 	if err != nil {
-		return "", fmt.Errorf("find home directory: %w", err)
+		return "", err
 	}
-	return filepath.Join(home, ".kubeloop", authorityFileName), nil
+	return filepath.Join(layout.SecretsDir(), authorityFileName), nil
 }
 
 // LoadOrCreateAuthority loads an existing authority or generates a new one.

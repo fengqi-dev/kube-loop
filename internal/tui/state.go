@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 
 	"github.com/fengqi-dev/kube-loop/internal/authconfig"
@@ -15,12 +16,14 @@ import (
 	clientexec "github.com/fengqi-dev/kube-loop/internal/client/exec"
 	clientmirror "github.com/fengqi-dev/kube-loop/internal/client/mirror"
 	clientpodssh "github.com/fengqi-dev/kube-loop/internal/client/podssh"
+	localpodssh "github.com/fengqi-dev/kube-loop/internal/client/podssh/sshserver"
 	clientportforward "github.com/fengqi-dev/kube-loop/internal/client/portforward"
 	clientpreview "github.com/fengqi-dev/kube-loop/internal/client/preview"
 	clientprofile "github.com/fengqi-dev/kube-loop/internal/client/profile"
 	clientremote "github.com/fengqi-dev/kube-loop/internal/client/remote"
 	clientremotesession "github.com/fengqi-dev/kube-loop/internal/client/remotesession"
 	singboxruntime "github.com/fengqi-dev/kube-loop/internal/singbox/runtime"
+	"github.com/fengqi-dev/kube-loop/internal/userpaths"
 )
 
 // State is the composition root for the core TUI client.
@@ -40,6 +43,7 @@ type State struct {
 	podSSH      *clientpodssh.Manager
 	execs       *clientexec.Manager
 	execEvents  chan clientexec.Event
+	configPath  string
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -53,12 +57,16 @@ type AuthSession struct {
 }
 
 func NewState(version string) (*State, error) {
-	profileStore, err := clientprofile.Open("")
+	layout, err := userpaths.ForVersion(version)
+	if err != nil {
+		return nil, fmt.Errorf("resolve user layout: %w", err)
+	}
+	profileStore, err := clientprofile.Open(filepath.Join(layout.ConfigDir(), "servers.json"))
 	if err != nil {
 		return nil, fmt.Errorf("open profile store: %w", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	credentialStore := credentials.NewSystemStore()
+	credentialStore := credentials.NewSystemStoreForVersion(version)
 	discoveryClient := clientdiscovery.New(clientdiscovery.Config{ClientVersion: version})
 	authClient := clientauth.New(clientauth.Config{
 		OpenBrowser: openBrowser, BrowserCallback: func() {},
@@ -84,7 +92,12 @@ func NewState(version string) (*State, error) {
 		cancel()
 		return nil, fmt.Errorf("create data plane manager: %w", err)
 	}
-	podSSH, err := clientpodssh.New(remoteClient, remoteSessions, clientpodssh.Config{HostTCPRegistrar: dataPlanes})
+	podSSH, err := clientpodssh.New(remoteClient, remoteSessions, clientpodssh.Config{
+		HostTCPRegistrar: dataPlanes,
+		ServerOptions: []localpodssh.Option{
+			localpodssh.WithHostKeyPath(filepath.Join(layout.SecretsDir(), "ssh_host_ed25519")),
+		},
+	})
 	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("create pod SSH manager: %w", err)
@@ -125,7 +138,8 @@ func NewState(version string) (*State, error) {
 		discovery: discoveryClient, auth: authClient, remote: remoteClient,
 		sessions: remoteSessions, dataPlanes: dataPlanes, forwards: forwards,
 		exchanges: exchanges, mirrors: mirrors, previews: previews,
-		podSSH: podSSH, execs: execs, execEvents: execEvents, ctx: ctx, cancel: cancel,
+		podSSH: podSSH, execs: execs, execEvents: execEvents,
+		configPath: filepath.Join(layout.ConfigDir(), "tui.yaml"), ctx: ctx, cancel: cancel,
 	}, nil
 }
 

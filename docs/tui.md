@@ -44,7 +44,8 @@ brew install --formula kube-loop/kubeloop/kubeloop-tui
 Stable releases automatically update the Formula with the native macOS and
 Linux archive checksums.
 
-Server profiles and optional TUI configuration live under `~/.kubeloop`. The
+Server profiles and optional TUI configuration live under `~/.kubeloop/config`
+(`~/.kubeloop-dev/config` for development builds). The
 first launch opens Servers so a KubeLoop Server URL can be added and
 authenticated. After restoring or completing authentication, the TUI connects
 automatically in TUN mode by default.
@@ -81,7 +82,7 @@ direct kubeconfig access, shell plugins, or arbitrary local command hooks.
 
 ## Aliases and hotkeys
 
-Create `~/.kubeloop/tui.yaml` to add aliases or hotkeys:
+Create `~/.kubeloop/config/tui.yaml` to add aliases or hotkeys:
 
 ```yaml
 version: 1
@@ -106,7 +107,7 @@ connected; changing Namespace rebuilds the corresponding Session and Data
 Plane. Disconnecting with active Sessions requires confirmation.
 
 Both clients verify and share release-specific components under
-`~/.kubeloop/components/<version>/<os>-<arch>/`. This user-owned cache is only
+`~/.kubeloop/cache/components/<version>/<os>-<arch>/`. This user-owned cache is only
 a distribution source. TUN installation promotes Helper and sing-box into
 protected system paths before elevated execution; the privileged service never
 executes sing-box directly from the cache or a package directory.

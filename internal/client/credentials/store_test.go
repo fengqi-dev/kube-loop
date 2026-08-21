@@ -93,6 +93,18 @@ func TestSystemStoreUsesVersionedKeyringEntries(t *testing.T) {
 	}
 }
 
+func TestKeyringServiceSeparatesReleaseAndDevelopment(t *testing.T) {
+	t.Parallel()
+	if got := keyringServiceForVersion("v2.1.0"); got != serviceName {
+		t.Fatalf("release service = %q, want %q", got, serviceName)
+	}
+	for _, version := range []string{"", "dev"} {
+		if got := keyringServiceForVersion(version); got != developmentServiceName {
+			t.Fatalf("development service for %q = %q, want %q", version, got, developmentServiceName)
+		}
+	}
+}
+
 func TestSystemStoreRequiresCurrentMetadataSchema(t *testing.T) {
 	backend := newMemoryBackend()
 	store := NewStore(backend)

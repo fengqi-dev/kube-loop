@@ -48,7 +48,7 @@ reported as live E2E success.
 
 ## Workspace configuration
 
-Optional aliases and hotkeys are loaded from `~/.kubeloop/tui.yaml`:
+Optional aliases and hotkeys are loaded from `~/.kubeloop/config/tui.yaml`:
 
 ```yaml
 version: 1

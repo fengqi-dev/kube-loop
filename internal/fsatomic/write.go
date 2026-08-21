@@ -1,6 +1,7 @@
 package fsatomic
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -39,4 +40,30 @@ func WriteFile(path string, data []byte, dirMode, fileMode os.FileMode) error {
 		return fmt.Errorf("replace file: %w", err)
 	}
 	return nil
+}
+
+// CleanupTemps removes regular temporary files left by interrupted WriteFile
+// calls for path. It deliberately leaves directories and symlinks untouched.
+func CleanupTemps(path string) error {
+	matches, err := filepath.Glob(filepath.Join(filepath.Dir(path), "."+filepath.Base(path)+".tmp-*"))
+	if err != nil {
+		return fmt.Errorf("find temporary files: %w", err)
+	}
+	var result error
+	for _, match := range matches {
+		info, err := os.Lstat(match)
+		if err != nil {
+			if !errors.Is(err, os.ErrNotExist) {
+				result = errors.Join(result, err)
+			}
+			continue
+		}
+		if !info.Mode().IsRegular() {
+			continue
+		}
+		if err := os.Remove(match); err != nil && !errors.Is(err, os.ErrNotExist) {
+			result = errors.Join(result, err)
+		}
+	}
+	return result
 }

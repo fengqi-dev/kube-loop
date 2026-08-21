@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/fengqi-dev/kube-loop/internal/userpaths"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -19,12 +20,12 @@ func (s *Server) signer() (ssh.Signer, error) {
 		}
 		path := s.hostKeyPath
 		if path == "" {
-			home, err := os.UserHomeDir()
+			layout, err := userpaths.Default()
 			if err != nil {
 				s.signerErr = fmt.Errorf("find home directory for SSH host key: %w", err)
 				return
 			}
-			path = filepath.Join(home, ".kubeloop", "ssh_host_ed25519")
+			path = filepath.Join(layout.SecretsDir(), "ssh_host_ed25519")
 		}
 		s.hostSigner, s.signerErr = loadOrCreateSigner(path)
 	})
