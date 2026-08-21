@@ -1,7 +1,6 @@
-class Kubeloop < Formula
+class KubeloopTui < Formula
   desc "K9s-style terminal client for KubeLoop"
   homepage "https://fengqi-dev.github.io/kube-loop/"
-  version "2.1.0"
   license "MIT"
 
   on_macos do
@@ -25,8 +24,7 @@ class Kubeloop < Formula
   end
 
   def install
-    libexec.install "kubeloop"
-    bin.write_exec_script libexec/"kubeloop"
+    bin.install "kubeloop"
   end
 
   test do

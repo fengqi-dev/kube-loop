@@ -495,19 +495,19 @@ jobs:
         with:
           ref: ${{ github.event.repository.default_branch }}
 
-      - name: Bump Casks/kubeloop.rb
+      - name: Bump Casks/kubeloop-desktop.rb
         env:
           VERSION: ${{ github.ref_name }}
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
         run: ./build/update-homebrew-cask.sh
 
-      - name: Bump Formula/kubeloop.rb
+      - name: Bump Formula/kubeloop-tui.rb
         env:
           VERSION: ${{ github.ref_name }}
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-        run: bash ./build/update-homebrew-formula.sh
+        run: ./build/update-homebrew-formula.sh
 
       - name: Commit and push Homebrew bump
         shell: bash
@@ -515,7 +515,7 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add Casks/kubeloop.rb Formula/kubeloop.rb
+          git add Casks/kubeloop-desktop.rb Formula/kubeloop-tui.rb
           if git diff --staged --quiet; then
             echo "Homebrew cask and formula already up to date"
             exit 0

@@ -31,16 +31,14 @@ TUI_GOOS=linux TUI_GOARCH=arm64 make tui
 还会构建匹配平台的 Helper、Supervisor（仅 macOS）和 sing-box，并将其嵌入 TUI
 可执行文件。
 
-Homebrew 可安装独立 Formula：
+Homebrew 可安装独立的 `kubeloop-tui` Formula，安装后的命令仍为 `kubeloop`：
 
 ```sh
 brew tap kube-loop/kubeloop https://github.com/fengqi-dev/kube-loop
-brew install kubeloop
+brew install --formula kube-loop/kubeloop/kubeloop-tui
 ```
 
-在首个包含 TUI 压缩包的稳定版本发布前，使用
-`brew install --HEAD kubeloop`。稳定版 Release 会使用 macOS 与 Linux 原生压缩包
-的校验和自动更新 Formula。
+稳定版 Release 会使用 macOS 与 Linux 原生压缩包的校验和自动更新 Formula。
 
 Server 配置与可选 TUI 配置位于 `~/.kubeloop`。首次启动进入 Servers，可添加 KubeLoop
 Server URL 并完成登录。恢复已有登录或完成登录后，TUI 默认使用 TUN 模式自动连接。
