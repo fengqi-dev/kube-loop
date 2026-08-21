@@ -6,10 +6,44 @@ import (
 	"encoding/pem"
 	"errors"
 	"os"
+	"path/filepath"
 	"testing"
 
 	supervisorprotocol "github.com/fengqi-dev/kube-loop/internal/protocol/supervisor"
 )
+
+func TestInstalledCoreMatches(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name             string
+		installedContent []byte
+		createInstalled  bool
+		want             bool
+	}{
+		{name: "same content at different path", installedContent: []byte("same-core"), createInstalled: true, want: true},
+		{name: "different content", installedContent: []byte("old-core"), createInstalled: true},
+		{name: "installed core missing"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			directory := t.TempDir()
+			source := filepath.Join(directory, "cached-sing-box")
+			installed := filepath.Join(directory, "system-sing-box")
+			if err := os.WriteFile(source, []byte("same-core"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if test.createInstalled {
+				if err := os.WriteFile(installed, test.installedContent, 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if got := installedCoreMatches(source, installed); got != test.want {
+				t.Fatalf("installedCoreMatches() = %v, want %v", got, test.want)
+			}
+		})
+	}
+}
 
 func TestWriteTemporaryTrustedCertificate(t *testing.T) {
 	t.Parallel()

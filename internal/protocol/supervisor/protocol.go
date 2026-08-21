@@ -6,6 +6,10 @@ const (
 	Version       = 1
 	SchemaVersion = 1
 
+	// BinaryVersion is independent from the KubeLoop application release. Bump
+	// it only when the privileged supervisor itself changes.
+	BinaryVersion = "v1.0.0"
+
 	MaxRequestBytes  = 64 << 10
 	MaxResponseBytes = 64 << 10
 	MaxWorkerBytes   = 128 << 20

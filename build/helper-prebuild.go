@@ -16,9 +16,14 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	supervisorprotocol "github.com/fengqi-dev/kube-loop/internal/protocol/supervisor"
 )
 
 func main() {
+	if len(os.Args) > 3 {
+		fatalf("usage: helper-prebuild [goos/goarch] [output-directory]")
+	}
 	target := runtime.GOOS + "/" + runtime.GOARCH
 	if len(os.Args) > 1 {
 		target = os.Args[1]
@@ -39,19 +44,24 @@ func main() {
 	}
 
 	targets := []struct {
-		pkg  string
-		name string
+		pkg     string
+		name    string
+		version string
 	}{
-		{pkg: "./cmd/kubeloop-helper", name: "kubeloop-helper"},
+		{pkg: "./cmd/kubeloop-helper", name: "kubeloop-helper", version: version},
 	}
 	if goos == "darwin" {
 		targets = append(targets, struct {
-			pkg  string
-			name string
-		}{pkg: "./cmd/kubeloop-supervisor", name: "kubeloop-supervisor"})
+			pkg     string
+			name    string
+			version string
+		}{pkg: "./cmd/kubeloop-supervisor", name: "kubeloop-supervisor", version: supervisorprotocol.BinaryVersion})
 	}
 
 	embeddedDir := filepath.Join(root, "build", "embedded")
+	if len(os.Args) > 2 {
+		embeddedDir = os.Args[2]
+	}
 	if err := os.MkdirAll(embeddedDir, 0o755); err != nil {
 		fatalf("create embedded helper directory: %v", err)
 	}
@@ -64,7 +74,7 @@ func main() {
 		args := []string{
 			"build",
 			"-trimpath",
-			"-ldflags", "-s -w -X main.version=" + version,
+			"-ldflags", "-s -w -X main.version=" + target.version,
 			"-o", output,
 			target.pkg,
 		}
@@ -77,7 +87,7 @@ func main() {
 		})
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
-		fmt.Printf("==> Building %s for %s/%s (version=%s)\n", name, goos, goarch, version)
+		fmt.Printf("==> Building %s for %s/%s (version=%s)\n", name, goos, goarch, target.version)
 		if err := cmd.Run(); err != nil {
 			fatalf("build %s: %v", name, err)
 		}
