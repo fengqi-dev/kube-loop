@@ -42,7 +42,7 @@ signing key and internal Relay Registry TLS Secret by default:
 ```bash
 helm upgrade --install kubeloop \
   oci://ghcr.io/fengqi-dev/kube-loop/charts/kubeloop \
-  --version 2.1.2 \
+  --version 2.1.3 \
   --namespace kubeloop-system \
   --create-namespace \
   --set publicURL=http://kubeloop.example.com \
@@ -85,7 +85,7 @@ curl -fsSL https://raw.githubusercontent.com/fengqi-dev/kube-loop/main/scripts/i
 To select a version or Linux package format:
 
 ```bash
-VERSION=v2.1.2 PACKAGE=deb \
+VERSION=v2.1.3 PACKAGE=deb \
   bash -c "$(curl -fsSL https://raw.githubusercontent.com/fengqi-dev/kube-loop/main/scripts/install.sh)"
 ```
 
@@ -128,7 +128,7 @@ On Windows:
 irm https://raw.githubusercontent.com/fengqi-dev/kube-loop/main/scripts/install-tui.ps1 | iex
 ```
 
-Set `VERSION=v2.1.2` to install a specific release. The installers select the
+Set `VERSION=v2.1.3` to install a specific release. The installers select the
 matching `kubeloop-tui-<version>-<os>-<arch>.tar.gz` archive and verify it using
 the release `SHA256SUMS` before installing `kubeloop` (`kubeloop.exe` on Windows).
 
