@@ -114,7 +114,13 @@ func TestCleanDirectoryWithOnlyServerURLBrowsesRemoteInventory(t *testing.T) {
 	if _, err := os.Stat(profilePath); err != nil {
 		t.Fatalf("Server Profile was not persisted in clean directory: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(cleanDirectory, "config")); !os.IsNotExist(err) {
-		t.Fatalf("unexpected kubeconfig-like file exists: %v", err)
+	for _, directory := range []string{"config", "data", "state", "secrets", "cache"} {
+		info, err := os.Stat(filepath.Join(cleanDirectory, directory))
+		if err != nil || !info.IsDir() {
+			t.Fatalf("standard user directory %q is unavailable: %v", directory, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(cleanDirectory, "config", "kubeconfig")); !os.IsNotExist(err) {
+		t.Fatalf("unexpected kubeconfig file exists: %v", err)
 	}
 }

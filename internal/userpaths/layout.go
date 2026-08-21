@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -57,3 +58,19 @@ func (layout Layout) SecretsDir() string {
 	return filepath.Join(layout.root, "secrets")
 }
 func (layout Layout) CacheDir() string { return filepath.Join(layout.root, "cache") }
+
+func (layout Layout) Ensure() error {
+	for _, directory := range []string{
+		layout.Root(), layout.ConfigDir(), layout.DataDir(), layout.StateDir(), layout.SecretsDir(), layout.CacheDir(),
+	} {
+		if err := os.MkdirAll(directory, 0o700); err != nil {
+			return err
+		}
+		if runtime.GOOS != "windows" {
+			if err := os.Chmod(directory, 0o700); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
