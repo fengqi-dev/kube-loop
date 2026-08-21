@@ -342,16 +342,18 @@ jobs:
           sudo apt-get install --yes --no-install-recommends nftables iproute2
           ./build/bundle-helper.sh
           go run ./e2e/scripts/ensure-singbox.go
-          mkdir -p "${HOME}/.kubeloop" build/bin
-          if [[ ! -s "${HOME}/.kubeloop/helper.token" ]]; then
-            openssl rand -hex 32 >"${HOME}/.kubeloop/helper.token"
-            chmod 600 "${HOME}/.kubeloop/helper.token"
+          token_path="${HOME}/.kubeloop-dev/secrets/helper.token"
+          install -d -m 0700 "$(dirname "${token_path}")"
+          mkdir -p build/bin
+          if [[ ! -s "${token_path}" ]]; then
+            openssl rand -hex 32 >"${token_path}"
+            chmod 600 "${token_path}"
           fi
           cp build/embedded/kubeloop-helper build/bin/kubeloop-helper
           chmod 755 build/bin/kubeloop-helper build/bin/sing-box
           sudo build/embedded/kubeloop-helper install \
             --source "${PWD}/build/embedded/kubeloop-helper" \
-            --token "$(tr -d '[:space:]' <"${HOME}/.kubeloop/helper.token")" \
+            --token "$(tr -d '[:space:]' <"${token_path}")" \
             --uid "$(id -u)" \
             --home "${HOME}" \
             --version dev \
