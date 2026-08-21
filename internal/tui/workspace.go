@@ -3,7 +3,6 @@ package tui
 import (
 	"fmt"
 	"regexp"
-	"runtime/debug"
 	"slices"
 	"sort"
 	"strings"
@@ -158,7 +157,8 @@ func (m *Model) updateWorkspace(message tea.Msg) (tea.Cmd, bool) {
 		if _, ok := message.(tea.MouseMsg); ok {
 			return m.updateConsole(message)
 		}
-		return nil, true
+		// Async discovery/save results must continue through Model.Update.
+		return nil, false
 	}
 	if _, ok := message.(tea.MouseMsg); ok && m.actionMode != actionNone {
 		return m.updateConsole(message)
@@ -903,10 +903,14 @@ func (m Model) viewWorkspace() string {
 		return lipgloss.JoinVertical(lipgloss.Left, top, body, footer)
 	}
 	if m.loginAdding {
+		progress := ""
+		if m.loading {
+			progress = "\n\n" + m.spinner.View() + " Discovering server…"
+		}
 		form := consoleSection.Render("ADD SERVER") + "\n\n" +
 			consoleSubtle.Render("Enter the complete HTTP or HTTPS Gateway service address.") + "\n\n" +
 			"Service address\n> " + m.loginURL + "_\n\n" +
-			"Enter add server   Esc cancel"
+			"Enter add server   Esc cancel" + progress
 		body := lipgloss.Place(m.width, bodyHeight, lipgloss.Center, lipgloss.Center, consoleOverlayBox.Copy().Width(minInt(72, m.width-8)).Render(form))
 		return lipgloss.JoinVertical(lipgloss.Left, top, body, footer)
 	}
@@ -939,7 +943,7 @@ func (m Model) viewWorkspaceHeader() string {
 		field("User", user),
 		field("Namespace", namespace),
 		field("Mode", strings.ToUpper(string(m.selectedMode))),
-		field("KubeLoop Rev", workspaceBuildRevision()),
+		field("KubeLoop Rev", workspaceBuildRevision(m.version)),
 		field("K8s Rev", "n/a"),
 	}, "\n")
 
@@ -1070,32 +1074,12 @@ func (m Model) viewWorkspaceHeader() string {
 	)
 }
 
-func workspaceBuildRevision() string {
-	info, ok := debug.ReadBuildInfo()
-	if !ok {
+func workspaceBuildRevision(version string) string {
+	version = strings.TrimSpace(version)
+	if version == "" || version == "(devel)" {
 		return "dev"
 	}
-	version := strings.TrimSpace(info.Main.Version)
-	if version != "" && version != "(devel)" && !strings.Contains(version, "-0.") && !strings.HasSuffix(version, "+dirty") {
-		return truncateConsole(version, 16)
-	}
-	revision, modified := "", false
-	for _, setting := range info.Settings {
-		switch setting.Key {
-		case "vcs.revision":
-			revision = strings.TrimSpace(setting.Value)
-		case "vcs.modified":
-			modified = setting.Value == "true"
-		}
-	}
-	if revision != "" {
-		revision = truncateConsole(revision, 8)
-		if modified {
-			revision += "*"
-		}
-		return revision
-	}
-	return "dev"
+	return truncateConsole(version, 20)
 }
 
 func (m Model) viewWorkspaceCommandBar() string {

@@ -48,6 +48,24 @@ func TestWorkspaceLayoutUsesSingleResourceTable(t *testing.T) {
 	}
 }
 
+func TestWorkspaceRevisionUsesInjectedTag(t *testing.T) {
+	model := newWorkspaceTestModel(resourceConnection)
+	model.version = "v2.2.0-preview.1"
+	view := model.View()
+	if !strings.Contains(view, "KubeLoop Rev: v2.2.0-preview.1") {
+		t.Fatalf("workspace header does not contain injected release tag: %q", view)
+	}
+	if strings.Contains(view, "b748a575") {
+		t.Fatalf("workspace header contains a commit revision: %q", view)
+	}
+}
+
+func TestWorkspaceRevisionDefaultsToDev(t *testing.T) {
+	if got := workspaceBuildRevision(""); got != "dev" {
+		t.Fatalf("workspaceBuildRevision(\"\") = %q, want dev", got)
+	}
+}
+
 func TestWorkspaceSelectedRowDoesNotWrapHyphenatedName(t *testing.T) {
 	model := newWorkspaceTestModel(resourcePods)
 	model.width = 76
@@ -270,5 +288,28 @@ func TestWorkspaceNamespaceShortcutReconnectsConnectedDataPlane(t *testing.T) {
 	cmd = model.updateConsoleOverlay(tea.KeyMsg{Type: tea.KeyEnter})
 	if cmd == nil || model.pendingNamespace != "production" || !model.loading {
 		t.Fatalf("namespace switch: cmd=%v pending=%q loading=%v", cmd, model.pendingNamespace, model.loading)
+	}
+}
+
+func TestWorkspaceAddProfileAllowsAsyncResult(t *testing.T) {
+	t.Parallel()
+	model := newWorkspaceTestModel(resourceProfiles)
+	model.loginAdding = true
+	if cmd, handled := model.updateWorkspace(profileSavedMsg{}); handled || cmd != nil {
+		t.Fatalf("async profile result was swallowed: handled=%v cmd=%v", handled, cmd)
+	}
+}
+
+func TestSelectedAuthenticatedProfileEntersConnection(t *testing.T) {
+	t.Parallel()
+	model := newWorkspaceTestModel(resourceProfiles)
+	model.profileSelectionPending = true
+	next, cmd := model.Update(authStatusMsg{session: AuthSession{Authenticated: true, UserName: "operator"}})
+	updated := next.(Model)
+	if updated.profileSelectionPending || updated.workspace.resource != resourceConnection || updated.mode != viewMain || cmd == nil {
+		t.Fatalf(
+			"selection result: pending=%v resource=%q mode=%d cmd=%v",
+			updated.profileSelectionPending, updated.workspace.resource, updated.mode, cmd,
+		)
 	}
 }

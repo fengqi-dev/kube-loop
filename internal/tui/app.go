@@ -66,7 +66,8 @@ type execTaskView struct {
 }
 
 type Model struct {
-	state *State
+	state   *State
+	version string
 
 	width, height           int
 	profiles                clientprofile.State
@@ -99,10 +100,11 @@ type Model struct {
 	autoConnect bool
 	spinner     spinner.Model
 
-	loginCursor int
-	loginURL    string
-	loginAdding bool
-	loginCancel func()
+	loginCursor             int
+	loginURL                string
+	loginAdding             bool
+	loginCancel             func()
+	profileSelectionPending bool
 
 	actionMode        actionMode
 	actionService     string
@@ -129,7 +131,7 @@ func New(state *State) Model {
 	workspace.resource = resourceProfiles
 	workspace.history = []workspaceResource{resourceProfiles}
 	return Model{
-		state: state, spinner: sp, profiles: profiles, workspace: workspace,
+		state: state, version: state.version, spinner: sp, profiles: profiles, workspace: workspace,
 		activeProfile: activeProfile, selectedMode: clientdataplane.ModeTUN, mode: viewLogin,
 	}
 }
@@ -229,10 +231,20 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case authStatusMsg:
 		m.loading = false
 		if msg.err != nil {
+			m.profileSelectionPending = false
 			m.authSession, m.err = AuthSession{}, msg.err.Error()
 			return m, nil
 		}
 		m.authSession = msg.session
+		if m.profileSelectionPending {
+			m.profileSelectionPending = false
+			if msg.session.Authenticated {
+				m.mode = viewMain
+				return m, m.workspaceNavigate(resourceConnection, true)
+			}
+			m.status = "Server selected — press 'l' to login"
+			return m, nil
+		}
 		if msg.session.Authenticated && m.mode == viewLogin {
 			m.mode, m.loading, m.autoConnect = viewMain, true, true
 			return m, m.workspaceNavigate(resourceConnection, true)
