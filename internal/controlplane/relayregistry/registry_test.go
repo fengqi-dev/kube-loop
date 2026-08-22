@@ -299,6 +299,83 @@ func TestConcurrentAllocationNeverExceedsCapacity(t *testing.T) {
 	}
 }
 
+func TestReleaseFencesGenerationAndRestoresRelayCapacity(t *testing.T) {
+	clock := &testClock{now: time.Now().UTC().Truncate(time.Second)}
+	registry := newTestRegistry(t, clock, 1)
+	registered := registerAndAcknowledge(
+		t,
+		registry,
+		peer("zone-a", "pod-a"),
+		"a.example.test",
+		1,
+		0,
+	)
+	request := allocationRequest("zone-a")
+	assigned, err := registry.Allocate(request)
+	if err != nil || assigned.RelayID != registered.RelayID {
+		t.Fatalf("assignment = %#v err = %v", assigned, err)
+	}
+	if registry.Release(request.SessionID, request.Generation+1) {
+		t.Fatal("mismatched generation released an assignment")
+	}
+	if statuses := registry.Snapshot(); len(statuses) != 1 || statuses[0].Reservations != 1 {
+		t.Fatalf("status after fenced release = %#v", statuses)
+	}
+	if !registry.Release(request.SessionID, request.Generation) {
+		t.Fatal("matching generation did not release the assignment")
+	}
+	if registry.Release(request.SessionID, request.Generation) {
+		t.Fatal("released assignment was released twice")
+	}
+	if statuses := registry.Snapshot(); len(statuses) != 1 || statuses[0].Reservations != 0 {
+		t.Fatalf("status after release = %#v", statuses)
+	}
+	if _, err := registry.Allocate(allocationRequest("zone-a")); err != nil {
+		t.Fatalf("released capacity was not reusable: %v", err)
+	}
+}
+
+func TestRestoreDesiredStateAppliesOfflineAndOnlineIntent(t *testing.T) {
+	clock := &testClock{now: time.Now().UTC().Truncate(time.Second)}
+	registry := newTestRegistry(t, clock, 10)
+	identity := peer("zone-a", "pod-a")
+	relayID, err := identity.RelayID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.RestoreDesiredState(relayID, relaycontrol.StateDraining); err != nil {
+		t.Fatal(err)
+	}
+	registered, err := registry.Register(identity, registrationRequest("a.example.test", 10, 0))
+	if err != nil || registered.DesiredState != relaycontrol.StateDraining {
+		t.Fatalf("registration = %#v err = %v", registered, err)
+	}
+	heartbeat := heartbeatRequest(registered.LeaseID, 10, 1)
+	response, err := registry.Heartbeat(identity, heartbeat)
+	if err != nil || response.DesiredState != relaycontrol.StateDraining {
+		t.Fatalf("draining heartbeat = %#v err = %v", response, err)
+	}
+	if _, err := registry.Allocate(allocationRequest("zone-a")); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("draining Relay allocation error = %v", err)
+	}
+	if err := registry.RestoreDesiredState(relayID, relaycontrol.StateReady); err != nil {
+		t.Fatal(err)
+	}
+	response, err = registry.Heartbeat(identity, heartbeat)
+	if err != nil || response.DesiredState != relaycontrol.StateReady {
+		t.Fatalf("ready heartbeat = %#v err = %v", response, err)
+	}
+	if _, err := registry.Allocate(allocationRequest("zone-a")); err != nil {
+		t.Fatalf("restored ready Relay was unavailable: %v", err)
+	}
+	if err := registry.RestoreDesiredState("", relaycontrol.StateReady); err == nil {
+		t.Fatal("empty durable Relay identity was accepted")
+	}
+	if err := registry.RestoreDesiredState(relayID, relaycontrol.State("invalid")); err == nil {
+		t.Fatal("invalid durable desired state was accepted")
+	}
+}
+
 func TestEndpointPolicyUsesAuthenticatedIdentity(t *testing.T) {
 	clock := &testClock{now: time.Now().UTC().Truncate(time.Second)}
 	keys := verificationKeys(t, clock.Now(), 1)
