@@ -89,6 +89,77 @@ func TestProtobufDecoderReportsMalformedFrameWithoutChangingRawCapture(t *testin
 	}
 }
 
+func TestDecodeWireMessageCoversWireTypes(t *testing.T) {
+	payload := protowire.AppendTag(nil, 1, protowire.VarintType)
+	payload = protowire.AppendVarint(payload, ^uint64(0))
+	payload = protowire.AppendTag(payload, 2, protowire.Fixed32Type)
+	payload = protowire.AppendFixed32(payload, ^uint32(0))
+	payload = protowire.AppendTag(payload, 3, protowire.Fixed64Type)
+	payload = protowire.AppendFixed64(payload, ^uint64(0))
+	payload = protowire.AppendTag(payload, 4, protowire.BytesType)
+	payload = protowire.AppendString(payload, "hello")
+	nested := protowire.AppendTag(nil, 1, protowire.VarintType)
+	nested = protowire.AppendVarint(nested, 7)
+	payload = protowire.AppendTag(payload, 5, protowire.BytesType)
+	payload = protowire.AppendBytes(payload, nested)
+	payload = protowire.AppendTag(payload, 6, protowire.BytesType)
+	payload = protowire.AppendBytes(payload, []byte{0xff})
+	payload = protowire.AppendTag(payload, 7, protowire.StartGroupType)
+	payload = protowire.AppendTag(payload, 1, protowire.VarintType)
+	payload = protowire.AppendVarint(payload, 1)
+	payload = protowire.AppendTag(payload, 7, protowire.EndGroupType)
+
+	total := 0
+	fields, consumed, err := decodeWireMessage(payload, 0, &total)
+	if err != nil || consumed != len(payload) {
+		t.Fatalf("decodeWireMessage() consumed=%d err=%v", consumed, err)
+	}
+	if fields["1"].([]wireValue)[0].Signed != "-1" ||
+		fields["2"].([]wireValue)[0].Signed != "-1" ||
+		fields["3"].([]wireValue)[0].Signed != "-1" {
+		t.Fatalf("signed wire values=%#v", fields)
+	}
+	if fields["4"].([]wireValue)[0].Text != "hello" ||
+		fields["5"].([]wireValue)[0].Message == nil ||
+		fields["6"].([]wireValue)[0].Hex != "ff" ||
+		fields["7"].([]wireValue)[0].WireType != "group" {
+		t.Fatalf("decoded wire values=%#v", fields)
+	}
+}
+
+func TestConsumeWireValueRejectsMalformedValues(t *testing.T) {
+	tests := []struct {
+		name     string
+		wireType protowire.Type
+		payload  []byte
+	}{
+		{name: "varint", wireType: protowire.VarintType, payload: []byte{0x80}},
+		{name: "fixed32", wireType: protowire.Fixed32Type, payload: []byte{1}},
+		{name: "fixed64", wireType: protowire.Fixed64Type, payload: []byte{1}},
+		{name: "bytes", wireType: protowire.BytesType, payload: []byte{2, 1}},
+		{name: "group", wireType: protowire.StartGroupType, payload: []byte{0x08}},
+		{name: "end group", wireType: protowire.EndGroupType},
+		{name: "unsupported", wireType: protowire.Type(7)},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			total := 0
+			if _, _, err := consumeWireValue(test.payload, 1, test.wireType, 0, &total); err == nil {
+				t.Fatal("malformed wire value was accepted")
+			}
+		})
+	}
+}
+
+func TestSignedFixed32(t *testing.T) {
+	if got := signedFixed32(^uint32(0)); got != "-1" {
+		t.Fatalf("signedFixed32(max) = %q, want -1", got)
+	}
+	if got := signedFixed32(7); got != "7" {
+		t.Fatalf("signedFixed32(7) = %q, want 7", got)
+	}
+}
+
 func grpcFrame(compressed bool, payload []byte) []byte {
 	frame := make([]byte, 5, len(payload)+5)
 	if compressed {
