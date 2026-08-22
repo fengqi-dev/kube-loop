@@ -241,6 +241,98 @@ func TestExecUsesExactArgvWithoutShellExpansion(t *testing.T) {
 	}
 }
 
+func TestExecPodCommandValidatesRequiredFields(t *testing.T) {
+	base := podCommandIn{
+		ProfileID: "server-a", SessionID: "session-1", Namespace: "default",
+		Pod: "api-0", Command: []string{"true"},
+	}
+	tests := []struct {
+		name   string
+		field  string
+		mutate func(*podCommandIn)
+	}{
+		{name: "profile", field: "profileId", mutate: func(input *podCommandIn) { input.ProfileID = "" }},
+		{name: "session", field: "sessionId", mutate: func(input *podCommandIn) { input.SessionID = "" }},
+		{name: "namespace", field: "namespace", mutate: func(input *podCommandIn) { input.Namespace = "" }},
+		{name: "pod", field: "pod", mutate: func(input *podCommandIn) { input.Pod = "" }},
+		{name: "command", field: "command", mutate: func(input *podCommandIn) { input.Command = nil }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			input := base
+			test.mutate(&input)
+			_, err := execPodCommand(t.Context(), &fakeBackend{}, input)
+			assertToolError(t, err, ErrorInvalidArgument, test.field)
+		})
+	}
+}
+
+func TestManageFileTransferLifecycle(t *testing.T) {
+	backend := &fakeBackend{}
+	listed, err := manageFileTransfer(backend, manageFileTransferIn{Action: actionList, ProfileID: " server-a "})
+	if err != nil || len(listed.Items) != 1 || listed.Items[0].ProfileID != "server-a" {
+		t.Fatalf("listed=%#v error=%v", listed, err)
+	}
+
+	started, err := manageFileTransfer(backend, manageFileTransferIn{
+		Action: actionStart, ProfileID: "server-a", SessionID: "session-1", Namespace: "default",
+		Direction: "upload", Kind: fileKindFile, Pod: "api-0", Container: "api",
+		LocalPath: "/tmp/input", RemotePath: "/work/input", Overwrite: true,
+	})
+	if err != nil || started.Task == nil || started.TaskID != "transfer-1" {
+		t.Fatalf("started=%#v error=%v", started, err)
+	}
+	if backend.transferIdentity != (TrafficIdentity{
+		ProfileID: "server-a", SessionID: "session-1", Namespace: "default",
+	}) || backend.transferRequest.LocalPath != "/tmp/input" ||
+		backend.transferRequest.RemotePath != "/work/input" || !backend.transferRequest.Overwrite {
+		t.Fatalf("identity=%#v request=%#v", backend.transferIdentity, backend.transferRequest)
+	}
+
+	cancelled, err := manageFileTransfer(backend, manageFileTransferIn{
+		Action: "cancel", ProfileID: "server-a", SessionID: "session-1", Namespace: "default",
+		TaskID: "transfer-1",
+	})
+	if err != nil || cancelled.TaskID != "transfer-1" || backend.cancelIdentity.TaskID != "transfer-1" {
+		t.Fatalf("cancelled=%#v identity=%#v error=%v", cancelled, backend.cancelIdentity, err)
+	}
+}
+
+func TestManageFileTransferValidatesInputs(t *testing.T) {
+	base := manageFileTransferIn{
+		Action: actionStart, ProfileID: "server-a", SessionID: "session-1", Namespace: "default",
+		Direction: "upload", Kind: fileKindFile, Pod: "api-0",
+		LocalPath: "/tmp/input", RemotePath: "/work/input",
+	}
+	tests := []struct {
+		name   string
+		field  string
+		mutate func(*manageFileTransferIn)
+	}{
+		{name: "profile", field: "profileId", mutate: func(input *manageFileTransferIn) { input.ProfileID = "" }},
+		{name: "session", field: "sessionId", mutate: func(input *manageFileTransferIn) { input.SessionID = "" }},
+		{name: "namespace", field: "namespace", mutate: func(input *manageFileTransferIn) { input.Namespace = "" }},
+		{name: "direction", field: "direction", mutate: func(input *manageFileTransferIn) { input.Direction = "copy" }},
+		{name: "kind", field: "kind", mutate: func(input *manageFileTransferIn) { input.Kind = "link" }},
+		{name: "pod", field: "pod", mutate: func(input *manageFileTransferIn) { input.Pod = "" }},
+		{name: "local path", field: "localPath", mutate: func(input *manageFileTransferIn) { input.LocalPath = "" }},
+		{name: "remote path", field: "remotePath", mutate: func(input *manageFileTransferIn) { input.RemotePath = "" }},
+		{
+			name: "cancel task", field: "taskId",
+			mutate: func(input *manageFileTransferIn) { input.Action, input.TaskID = "cancel", "" },
+		},
+		{name: "action", field: "action", mutate: func(input *manageFileTransferIn) { input.Action = "copy" }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			input := base
+			test.mutate(&input)
+			_, err := manageFileTransfer(&fakeBackend{}, input)
+			assertToolError(t, err, ErrorInvalidArgument, test.field)
+		})
+	}
+}
+
 func TestManagePodFilesCarriesExactSessionAndIdempotency(t *testing.T) {
 	backend := &fakeBackend{}
 	listed, err := managePodFiles(context.Background(), backend, managePodFilesIn{
