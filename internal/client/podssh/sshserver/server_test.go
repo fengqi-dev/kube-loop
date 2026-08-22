@@ -47,6 +47,21 @@ func (f *fakeExecutor) Exec(
 		script = command[2]
 	}
 	switch {
+	case strings.Contains(script, "tar cf - --no-recursion -C "):
+		name, typeFlag := "hello.txt", byte(tar.TypeReg)
+		if strings.Contains(script, shellquote.Join("/")+" "+shellquote.Join("tmp")) {
+			name, typeFlag = "tmp", tar.TypeDir
+		}
+		archive := tar.NewWriter(streams.Stdout)
+		if err := archive.WriteHeader(&tar.Header{
+			Name: name, Mode: 0o755, Typeflag: typeFlag,
+		}); err != nil {
+			return err
+		}
+		return archive.Close()
+	case script == "ls -A1 -- "+shellquote.Join("/tmp"):
+		_, err := io.WriteString(streams.Stdout, "hello.txt\n")
+		return err
 	case strings.Contains(script, "tar xf - -C "+shellquote.Join("/tmp")):
 		archive := tar.NewReader(streams.Stdin)
 		header, err := archive.Next()
