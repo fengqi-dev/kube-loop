@@ -1,6 +1,7 @@
 package sshserver
 
 import (
+	"encoding/binary"
 	"errors"
 	"io"
 	"os"
@@ -128,5 +129,27 @@ func TestCleanRemotePathContracts(t *testing.T) {
 				t.Fatalf("cleanRemotePath(%q) = %q, want %q", test.raw, got, test.want)
 			}
 		})
+	}
+}
+
+func TestSFTPHandlerSetstatBuildsExplicitCommands(t *testing.T) {
+	executor := &fakeExecutor{}
+	handler := newSFTPHandler(executor, Target{Context: "dev", Namespace: "default", Pod: "api"})
+	request := sftp.NewRequest("Setstat", "/tmp/file")
+	request.Flags = 0x01 | 0x04 | 0x08 // size, permissions, access/modification time
+	request.Attrs = binary.BigEndian.AppendUint64(nil, 12)
+	request.Attrs = binary.BigEndian.AppendUint32(request.Attrs, 0o640)
+	request.Attrs = binary.BigEndian.AppendUint32(request.Attrs, 100)
+	request.Attrs = binary.BigEndian.AppendUint32(request.Attrs, 123)
+
+	if err := handler.Filecmd(request); err != nil {
+		t.Fatal(err)
+	}
+	executor.mu.Lock()
+	command := executor.commands[len(executor.commands)-1]
+	executor.mu.Unlock()
+	want := "chmod 640 -- /tmp/file && truncate -s 12 -- /tmp/file && touch -m -d @123 -- /tmp/file"
+	if len(command) < 3 || command[2] != want {
+		t.Fatalf("command=%#v, want script %q", command, want)
 	}
 }
