@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -83,6 +84,76 @@ func TestOIDCProtocolLoginUsesStatePKCEAndExchange(t *testing.T) {
 	}
 	if browserCallbacks != 1 {
 		t.Fatalf("browser callbacks = %d, want 1", browserCallbacks)
+	}
+}
+
+func TestOIDCLoopbackLoginUsesEphemeralCallbackServer(t *testing.T) {
+	var server *httptest.Server
+	var redirectURI string
+	exchangeCode := strings.Repeat("c", 43)
+	server = httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/.well-known/openid-configuration":
+			writeProviderMetadata(t, writer, server.URL)
+		case "/oauth2/token":
+			if err := request.ParseForm(); err != nil {
+				t.Fatal(err)
+			}
+			if request.Form.Get("code") != exchangeCode || request.Form.Get("redirect_uri") != redirectURI {
+				t.Fatalf("exchange form = %#v", request.Form)
+			}
+			writeTokenResponse(t, writer)
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+	client := New(Config{
+		HTTPClient:       server.Client(),
+		RedirectURI:      "http://127.0.0.1/callback",
+		LoopbackCallback: true,
+		OpenBrowser: func(target string) error {
+			authorize, err := url.Parse(target)
+			if err != nil {
+				return err
+			}
+			redirectURI = authorize.Query().Get("redirect_uri")
+			callback, err := url.Parse(redirectURI)
+			if err != nil {
+				return err
+			}
+			query := callback.Query()
+			query.Set("state", authorize.Query().Get("state"))
+			query.Set("code", exchangeCode)
+			callback.RawQuery = query.Encode()
+			response, err := http.Get(callback.String())
+			if err != nil {
+				return err
+			}
+			defer response.Body.Close()
+			body, err := io.ReadAll(response.Body)
+			if err != nil {
+				return err
+			}
+			if response.StatusCode != http.StatusOK ||
+				response.Header.Get("Cache-Control") != "no-store" ||
+				!strings.Contains(string(body), "Login complete") {
+				t.Fatalf("callback status = %d headers = %#v body = %q", response.StatusCode, response.Header, body)
+			}
+			return nil
+		},
+	})
+	credential, err := client.LoginOIDC(context.Background(), server.URL, "company", "device-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	callback, err := url.Parse(redirectURI)
+	if err != nil || callback.Hostname() != "127.0.0.1" || callback.Port() == "" ||
+		callback.Path != "/callback" {
+		t.Fatalf("loopback redirect URI = %q err = %v", redirectURI, err)
+	}
+	if credential.AccessToken != "access-token" || credential.RefreshToken != "refresh-token" {
+		t.Fatalf("credential = %#v", credential)
 	}
 }
 
