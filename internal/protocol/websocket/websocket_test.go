@@ -58,6 +58,9 @@ func TestDialAcceptRoundTrip(t *testing.T) {
 	if connection.Subprotocol() != "test.v1" {
 		t.Fatalf("subprotocol = %q, want test.v1", connection.Subprotocol())
 	}
+	if err := connection.Ping(ctx); err != nil {
+		t.Fatalf("ping: %v", err)
+	}
 	if err := connection.Write(ctx, MessageBinary, []byte("payload")); err != nil {
 		t.Fatalf("write: %v", err)
 	}
@@ -141,6 +144,19 @@ func TestNetConnRoundTrip(t *testing.T) {
 	}
 	stream := NetConn(ctx, connection, MessageBinary)
 	defer func() { _ = stream.Close() }()
+	if stream.LocalAddr() == nil || stream.RemoteAddr() == nil {
+		t.Fatalf("stream addresses = %v / %v", stream.LocalAddr(), stream.RemoteAddr())
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	if err := stream.SetDeadline(deadline); err != nil {
+		t.Fatalf("set deadline: %v", err)
+	}
+	if err := stream.SetReadDeadline(deadline); err != nil {
+		t.Fatalf("set read deadline: %v", err)
+	}
+	if err := stream.SetWriteDeadline(deadline); err != nil {
+		t.Fatalf("set write deadline: %v", err)
+	}
 	if _, err := stream.Write([]byte("hello")); err != nil {
 		t.Fatalf("write stream: %v", err)
 	}
@@ -150,6 +166,50 @@ func TestNetConnRoundTrip(t *testing.T) {
 	}
 	if string(payload) != "world" {
 		t.Fatalf("payload = %q, want world", payload)
+	}
+}
+
+func TestOriginCheckerAppliesSameHostAndPatternPolicy(t *testing.T) {
+	tests := []struct {
+		name     string
+		host     string
+		origin   string
+		patterns []string
+		insecure bool
+		expected bool
+	}{
+		{name: "missing origin", host: "gateway.example", expected: true},
+		{name: "same host", host: "gateway.example:443", origin: "https://gateway.example", expected: true},
+		{
+			name: "host pattern", host: "gateway.example", origin: "https://app.example.test",
+			patterns: []string{"*.example.test"}, expected: true,
+		},
+		{
+			name: "URL pattern", host: "gateway.example", origin: "https://app.example.test",
+			patterns: []string{"https://*.example.test"}, expected: true,
+		},
+		{name: "foreign origin", host: "gateway.example", origin: "https://attacker.example", expected: false},
+		{name: "malformed origin", host: "gateway.example", origin: "://bad", expected: false},
+		{
+			name: "insecure override", host: "gateway.example", origin: "https://attacker.example",
+			insecure: true, expected: true,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodGet, "https://"+test.host+"/socket", nil)
+			request.Host = test.host
+			if test.origin != "" {
+				request.Header.Set("Origin", test.origin)
+			}
+			checker := originChecker(&AcceptOptions{
+				OriginPatterns:     test.patterns,
+				InsecureSkipVerify: test.insecure,
+			})
+			if got := checker(request); got != test.expected {
+				t.Fatalf("origin allowed = %t, want %t", got, test.expected)
+			}
+		})
 	}
 }
 
