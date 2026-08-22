@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -79,6 +80,72 @@ func TestManagerUploadsLocalFilePersistsProgressAndHistory(t *testing.T) {
 	history := reloaded.List("server")
 	if len(history) != 1 || history[0].ID != task.ID || history[0].Status != StatusCompleted {
 		t.Fatalf("reloaded history = %#v", history)
+	}
+}
+
+func TestManagerUploadsDirectorySnapshotAndCleansTemporaryArchive(t *testing.T) {
+	received := make(chan []byte, 1)
+	server := uploadServer(t, func(value []byte) { received <- value })
+	defer server.Close()
+	root := t.TempDir()
+	source := filepath.Join(root, "source")
+	if err := os.MkdirAll(filepath.Join(source, "nested"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(source, "nested", "report.txt"), []byte("report"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	temporaryDir := filepath.Join(root, "temporary")
+	events := make(chan Task, 32)
+	manager, err := NewManager(testClient{endpoint: websocketURL(server.URL)}, Config{
+		TemporaryDir: temporaryDir,
+		MaximumBytes: 1 << 20,
+		OnEvent:      func(task Task) { events <- task },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer checkTestClose(t, manager.Shutdown)
+	task, err := manager.Start(profile.Profile{ID: "server"}, activeFileSession(), Request{
+		ProfileID: "server", Direction: fileTransferDirectionUpload, Kind: fileTransferKindDirectory,
+		Pod: "api-0", LocalPath: source, RemotePath: "/workspace/source",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	completed := waitTransferTask(t, events, task.ID)
+	if completed.Status != StatusCompleted || completed.TotalBytes == 0 || completed.Checksum == "" {
+		t.Fatalf("completed task = %#v", completed)
+	}
+	select {
+	case archive := <-received:
+		reader := tar.NewReader(bytes.NewReader(archive))
+		found := false
+		for {
+			header, err := reader.Next()
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			contents, err := io.ReadAll(reader)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if header.Name == "nested/report.txt" && string(contents) == "report" {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatal("uploaded directory archive does not contain nested/report.txt")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("server did not receive directory upload")
+	}
+	temporary, err := filepath.Glob(filepath.Join(temporaryDir, "kubeloop-upload-*.tar"))
+	if err != nil || len(temporary) != 0 {
+		t.Fatalf("temporary upload archives = %#v err = %v", temporary, err)
 	}
 }
 
@@ -203,6 +270,74 @@ func TestManagerStopProfileWaitsForStreamAndMarksTaskCancelled(t *testing.T) {
 	items := manager.List("server")
 	if len(items) != 1 || items[0].ID != task.ID || items[0].Status != StatusCancelled {
 		t.Fatalf("tasks after stop = %#v", items)
+	}
+}
+
+func TestManagerCancelAndClearHistoryPersistLifecycle(t *testing.T) {
+	accepted := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		connection, err := websocket.Accept(writer, request, nil)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		defer checkTestClose(t, connection.CloseNow)
+		connection.SetReadLimit(filestream.MaximumData + 1)
+		close(accepted)
+		waitForTransferClientClose(request.Context(), connection)
+	}))
+	defer server.Close()
+	root := t.TempDir()
+	source := filepath.Join(root, "source.bin")
+	if err := os.WriteFile(source, []byte("contents"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	statePath := filepath.Join(root, "transfers.json")
+	events := make(chan Task, 32)
+	manager, err := NewManager(testClient{endpoint: websocketURL(server.URL)}, Config{
+		StatePath: statePath, MaximumBytes: 1 << 20, OnEvent: func(task Task) { events <- task },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err := manager.Start(profile.Profile{ID: "server"}, activeFileSession(), Request{
+		ProfileID: "server", Direction: fileTransferDirectionUpload, Kind: fileTransferKindFile,
+		Pod: "api-0", LocalPath: source, RemotePath: "/workspace/source.bin",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-accepted:
+	case <-time.After(time.Second):
+		t.Fatal("upload stream was not opened")
+	}
+	if err := manager.Cancel("server", task.ID); err != nil {
+		t.Fatal(err)
+	}
+	cancelled := waitTransferTask(t, events, task.ID)
+	if cancelled.Status != StatusCancelled || cancelled.Error != "" {
+		t.Fatalf("cancelled task = %#v", cancelled)
+	}
+	if err := manager.Cancel("server", task.ID); err == nil {
+		t.Fatal("completed transfer was accepted for cancellation")
+	}
+	if err := manager.ClearHistory("server"); err != nil {
+		t.Fatal(err)
+	}
+	if tasks := manager.List("server"); len(tasks) != 0 {
+		t.Fatalf("tasks after history clear = %#v", tasks)
+	}
+	if err := manager.Shutdown(); err != nil {
+		t.Fatal(err)
+	}
+	reloaded, err := NewManager(testClient{}, Config{StatePath: statePath, MaximumBytes: 1 << 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer checkTestClose(t, reloaded.Shutdown)
+	if tasks := reloaded.List("server"); len(tasks) != 0 {
+		t.Fatalf("reloaded tasks after history clear = %#v", tasks)
 	}
 }
 
