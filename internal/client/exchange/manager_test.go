@@ -433,6 +433,20 @@ func TestManagerRejectsGatewayPortSubstitutionBeforeOpeningStream(t *testing.T) 
 	}
 }
 
+func TestMatchTaskTargetsRejectsDuplicateGatewayPorts(t *testing.T) {
+	targets := []LocalTarget{
+		{ServicePort: 80, Protocol: exchangeProtocolTCP},
+		{ServicePort: 53, Protocol: exchangeProtocolUDP},
+	}
+	task := remote.ExchangeTask{Ports: []remote.ExchangePort{
+		{ServicePort: 80, Protocol: exchangeProtocolTCP},
+		{ServicePort: 80, Protocol: exchangeProtocolTCP},
+	}}
+	if err := matchTaskTargets(task, targets); err == nil {
+		t.Fatal("duplicate Gateway Exchange ports were accepted")
+	}
+}
+
 func writeTestFrame(ctx context.Context, connection *trafficstream.FrameConn, frame exchangestream.Frame) error {
 	encoded, err := exchangestream.Encode(frame)
 	if err != nil {

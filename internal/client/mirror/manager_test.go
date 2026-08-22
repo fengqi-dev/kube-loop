@@ -359,6 +359,20 @@ func TestManagerRejectsGatewayPortSubstitutionBeforeOpeningStream(t *testing.T) 
 	}
 }
 
+func TestMatchTaskTargetsRejectsDuplicateGatewayPorts(t *testing.T) {
+	targets := []LocalTarget{
+		{ServicePort: 80, Protocol: mirrorProtocolTCP},
+		{ServicePort: 53, Protocol: mirrorProtocolUDP},
+	}
+	task := remote.MirrorTask{Ports: []remote.MirrorPort{
+		{ServicePort: 80, Protocol: mirrorProtocolTCP},
+		{ServicePort: 80, Protocol: mirrorProtocolTCP},
+	}}
+	if err := matchTaskTargets(task, targets); err == nil {
+		t.Fatal("duplicate Gateway Mirror ports were accepted")
+	}
+}
+
 func writeMirrorTestFrame(ctx context.Context, connection *trafficstream.FrameConn, frame mirrorstream.Frame) error {
 	encoded, err := mirrorstream.Encode(frame)
 	if err != nil {

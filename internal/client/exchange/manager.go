@@ -316,9 +316,11 @@ func matchTaskTargets(task remote.ExchangeTask, targets []LocalTarget) error {
 		want[targetKey(target.Protocol, target.ServicePort)] = struct{}{}
 	}
 	for _, port := range task.Ports {
-		if _, exists := want[targetKey(port.Protocol, port.ServicePort)]; !exists {
+		key := targetKey(port.Protocol, port.ServicePort)
+		if _, exists := want[key]; !exists {
 			return errors.New("gateway changed the requested Exchange ports")
 		}
+		delete(want, key)
 	}
 	return nil
 }

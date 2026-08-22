@@ -342,9 +342,11 @@ func matchTask(task remote.PreviewTask, name string, targets []LocalTarget) erro
 		want[targetKey(target.Protocol, target.ServicePort)] = struct{}{}
 	}
 	for _, port := range task.Ports {
-		if _, exists := want[targetKey(port.Protocol, port.ServicePort)]; !exists {
+		key := targetKey(port.Protocol, port.ServicePort)
+		if _, exists := want[key]; !exists {
 			return errors.New("gateway changed the requested Preview ports")
 		}
+		delete(want, key)
 	}
 	return nil
 }

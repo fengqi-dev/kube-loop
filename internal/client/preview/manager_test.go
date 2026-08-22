@@ -417,6 +417,23 @@ func TestManagerRejectsGatewayPreviewPortSubstitutionBeforeOpeningStream(t *test
 	}
 }
 
+func TestMatchTaskRejectsDuplicateGatewayPreviewPorts(t *testing.T) {
+	targets := []LocalTarget{
+		{ServicePort: 80, Protocol: previewProtocolTCP},
+		{ServicePort: 53, Protocol: previewProtocolUDP},
+	}
+	task := remote.PreviewTask{
+		Name: "local-api",
+		Ports: []remote.PreviewPort{
+			{ServicePort: 80, Protocol: previewProtocolTCP},
+			{ServicePort: 80, Protocol: previewProtocolTCP},
+		},
+	}
+	if err := matchTask(task, "local-api", targets); err == nil {
+		t.Fatal("duplicate Gateway Preview ports were accepted")
+	}
+}
+
 func writePreviewTestFrame(ctx context.Context, connection *trafficstream.FrameConn, frame exchangestream.Frame) error {
 	encoded, err := exchangestream.Encode(frame)
 	if err != nil {
