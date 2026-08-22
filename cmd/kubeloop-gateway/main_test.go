@@ -1,10 +1,77 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/spf13/pflag"
 )
+
+func TestGatewayVersionCommands(t *testing.T) {
+	for _, args := range [][]string{{"version"}, {"--version"}} {
+		var stdout, stderr bytes.Buffer
+		if code := executeGateway(context.Background(), args, &stdout, &stderr); code != 0 {
+			t.Fatalf("args=%v exit=%d stderr=%q", args, code, stderr.String())
+		}
+		if stdout.String() != "kubeloop-gateway "+version+"\n" || stderr.Len() != 0 {
+			t.Fatalf("args=%v stdout=%q stderr=%q", args, stdout.String(), stderr.String())
+		}
+	}
+}
+
+func TestGatewayInvalidFlagUsesUsageExitCode(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if code := executeGateway(context.Background(), []string{"--unknown"}, &stdout, &stderr); code != 2 {
+		t.Fatalf("exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+}
+
+func TestGatewayConfigFlagOverridesEnvironment(t *testing.T) {
+	t.Setenv("KUBELOOP_GATEWAY_CONFIG_FILE", "/env/config.yaml")
+	config := newGatewayConfigResolver()
+	flags := pflag.NewFlagSet("test", pflag.ContinueOnError)
+	flags.String("config", "", "")
+	if err := config.BindPFlag("gateway.config-file", flags.Lookup("config")); err != nil {
+		t.Fatal(err)
+	}
+	if err := flags.Parse([]string{"--config", "/flag/config.yaml"}); err != nil {
+		t.Fatal(err)
+	}
+	environment, err := loadGatewayEnvironmentFrom(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if environment.ConfigFile != "/flag/config.yaml" {
+		t.Fatalf("Gateway config path = %q", environment.ConfigFile)
+	}
+}
+
+func TestGatewayOverridesUseFlagEnvironmentAndFilePrecedence(t *testing.T) {
+	loaded := defaultGatewayConfig()
+	loaded.Relay.ControlPlaneURL = "https://file.example.test"
+	loaded.Relay.Endpoint = "wss://file.example.test/tunnel"
+	t.Setenv("KUBELOOP_GATEWAY_LOG_LEVEL", "warn")
+	config := newGatewayConfigResolver()
+	flags := pflag.NewFlagSet("test", pflag.ContinueOnError)
+	flags.String("listen", "", "")
+	if err := config.BindPFlag("gateway.http.listen", flags.Lookup("listen")); err != nil {
+		t.Fatal(err)
+	}
+	if err := flags.Parse([]string{"--listen", ":7443"}); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := applyGatewayOverrides(config, loaded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved.HTTP.Listen != ":7443" || resolved.LogLevel != "warn" ||
+		resolved.Relay.ControlPlaneURL != "https://file.example.test" {
+		t.Fatalf("Gateway overrides = %#v", resolved)
+	}
+}
 
 type fakeRuntimeGateway struct {
 	draining bool

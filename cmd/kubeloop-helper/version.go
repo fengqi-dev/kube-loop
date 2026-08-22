@@ -12,7 +12,7 @@ func newVersionCommand(commandVersion string) *cobra.Command {
 		Short: "Print the helper version",
 		Args:  usageArgs(cobra.NoArgs),
 		RunE: func(command *cobra.Command, _ []string) error {
-			_, err := fmt.Fprintln(command.OutOrStdout(), commandVersion)
+			_, err := fmt.Fprintln(command.OutOrStdout(), "kubeloop-helper", commandVersion)
 			return err
 		},
 	}

@@ -123,8 +123,8 @@ func TestSQLiteChartRendersIndependentSecureWorkloads(t *testing.T) {
 	if !strings.Contains(string(dataPlaneYAML), "key: kubeloop.yaml") {
 		t.Fatal("Data Plane does not project the unified kubeloop.yaml")
 	}
-	if strings.Contains(string(dataPlaneYAML), "args:") ||
-		!strings.Contains(string(dataPlaneYAML), "KUBELOOP_GATEWAY_CONFIG_FILE") {
+	if !strings.Contains(string(dataPlaneYAML), "--config=/etc/kubeloop/gateway/kubeloop.yaml") ||
+		strings.Contains(string(dataPlaneYAML), "KUBELOOP_GATEWAY_CONFIG_FILE") {
 		t.Fatal("Data Plane must use only its mounted Gateway configuration file")
 	}
 	if containerHasEnvironment(t, dataPlane, "KUBELOOP_SQLITE_PATH") ||

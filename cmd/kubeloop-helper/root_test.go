@@ -18,7 +18,7 @@ func TestRootCommandVersion(t *testing.T) {
 			if exitCode != 0 {
 				t.Fatalf("exit code = %d, stderr = %q", exitCode, stderr)
 			}
-			if stdout != "1.2.3\n" {
+			if stdout != "kubeloop-helper 1.2.3\n" {
 				t.Fatalf("stdout = %q", stdout)
 			}
 			if stderr != "" {

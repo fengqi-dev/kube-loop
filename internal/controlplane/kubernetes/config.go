@@ -15,7 +15,7 @@ const (
 	DefaultTimeout   = 15 * time.Second
 	DefaultQPS       = float32(20)
 	DefaultBurst     = 40
-	DefaultUserAgent = "kube-loop-controlPlane/dev"
+	DefaultUserAgent = "kubeloop-control-plane/dev"
 	maxConfigBytes   = 1 << 20
 )
 

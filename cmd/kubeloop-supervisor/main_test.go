@@ -3,11 +3,32 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"testing"
 
 	"github.com/fengqi-dev/kube-loop/internal/helper"
 	"github.com/fengqi-dev/kube-loop/internal/supervisor"
 )
+
+func TestSupervisorVersionCommands(t *testing.T) {
+	for _, args := range [][]string{{"version"}, {"--version"}} {
+		var stdout, stderr bytes.Buffer
+		if code := executeSupervisor(context.Background(), args, &stdout, &stderr); code != 0 {
+			t.Fatalf("args=%v exit=%d stderr=%q", args, code, stderr.String())
+		}
+		if stdout.String() != "kubeloop-supervisor "+version+"\n" || stderr.Len() != 0 {
+			t.Fatalf("args=%v stdout=%q stderr=%q", args, stdout.String(), stderr.String())
+		}
+	}
+}
+
+func TestSupervisorInvalidCommandUsesUsageExitCode(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if code := executeSupervisor(context.Background(), []string{"unknown"}, &stdout, &stderr); code != 2 {
+		t.Fatalf("exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+}
 
 func TestConfigureChannelUsesWorkerChannelInsteadOfSupervisorBinaryVersion(t *testing.T) {
 	originalHelperVersion := helper.Version

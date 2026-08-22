@@ -4,10 +4,10 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
-	"os"
 	"sync"
 	"time"
 
@@ -15,7 +15,6 @@ import (
 	controlplanekubernetes "github.com/fengqi-dev/kube-loop/internal/controlplane/kubernetes"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/maintenance"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/sessionregistry"
-	controlplanestorage "github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/trafficbindingclient"
 )
 
@@ -24,7 +23,6 @@ type serverRuntimeOptions struct {
 	Stop              context.CancelFunc
 	Config            loadedControlPlaneConfig
 	Logger            *slog.Logger
-	Store             *controlplanestorage.Store
 	Server            *controlplane.Server
 	RelayRegistry     *relayRegistryRuntime
 	KubernetesConfig  controlplanekubernetes.Config
@@ -34,12 +32,10 @@ type serverRuntimeOptions struct {
 	SessionRuntime    *sessionregistry.Registry
 }
 
-func serveControlPlane(options serverRuntimeOptions) {
+func serveControlPlane(options serverRuntimeOptions) error {
 	listener, err := (&net.ListenConfig{}).Listen(options.Context, "tcp", options.Server.ListenAddress())
 	if err != nil {
-		_ = options.Store.Close()
-		options.Logger.Error("listen failed", "address", options.Server.ListenAddress(), "error", err)
-		os.Exit(1)
+		return fmt.Errorf("listen on %s: %w", options.Server.ListenAddress(), err)
 	}
 	var relayServer *http.Server
 	var relayListener net.Listener
@@ -51,15 +47,7 @@ func serveControlPlane(options serverRuntimeOptions) {
 		)
 		if listenErr != nil {
 			_ = listener.Close()
-			_ = options.Store.Close()
-			options.Logger.Error(
-				"Relay Registry listen failed",
-				"address",
-				options.RelayRegistry.listenAddress,
-				"error",
-				listenErr,
-			)
-			os.Exit(1)
+			return fmt.Errorf("relay registry listen on %s: %w", options.RelayRegistry.listenAddress, listenErr)
 		}
 		relayListener = tls.NewListener(rawRelayListener, options.RelayRegistry.tlsConfig)
 		relayServer = &http.Server{
@@ -150,9 +138,5 @@ func serveControlPlane(options serverRuntimeOptions) {
 	}
 	backgroundWorkers.Wait()
 	cancel()
-	closeError := options.Store.Close()
-	if finalError := errors.Join(firstServeError, shutdownError, closeError); finalError != nil {
-		options.Logger.Error("Control Plane stopped with an error", "error", finalError)
-		os.Exit(1)
-	}
+	return errors.Join(firstServeError, shutdownError)
 }
