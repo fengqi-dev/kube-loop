@@ -136,6 +136,68 @@ func TestForwarderSharesOnePhysicalWebSocketForTunnelAndTrafficStreams(t *testin
 	}
 }
 
+func TestForwarderExpandsPoolAtStreamCapacity(t *testing.T) {
+	const deviceID = "33333333-3333-4333-8333-333333333333"
+	var physicalConnections atomic.Int32
+	handler, err := servermux.NewHandler(servermux.ServerConfig{
+		MaxSessions:          4,
+		MaxSessionsPerUser:   4,
+		MaxStreamsPerSession: 1,
+		Authenticator: servermux.AuthenticatorFunc(func(*http.Request) (servermux.Identity, error) {
+			physicalConnections.Add(1)
+			return servermux.Identity{
+				IdentityID: "identity", DeviceID: deviceID, SessionID: uuid.NewString(),
+				SessionGeneration: 1, ExpiresAt: time.Now().Add(time.Minute),
+			}, nil
+		}),
+		Handle: func(_ context.Context, _ servermux.Identity, connection net.Conn) {
+			_, _ = io.Copy(io.Discard, connection)
+			_ = connection.Close()
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+	forwarder, err := clientmux.Start(t.Context(), clientmux.ClientConfig{
+		URL: "ws" + server.URL[len("http"):], Token: "relay-ticket", DeviceID: deviceID,
+		PoolSize: 1, MaxPhysical: 2, MaxStreamsPerConn: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = forwarder.Close() })
+	first, err := forwarder.OpenStream(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := forwarder.OpenStream(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := physicalConnections.Load(); got != 2 {
+		t.Fatalf("expanded physical connections = %d, want 2", got)
+	}
+	_ = first.Close()
+	_ = second.Close()
+}
+
+func TestHandshakeErrorFormatting(t *testing.T) {
+	var nilError *clientmux.HandshakeError
+	if nilError.Error() != "" {
+		t.Fatalf("nil handshake error = %q", nilError.Error())
+	}
+	withoutMessage := (&clientmux.HandshakeError{Code: "VERSION_MISMATCH"}).Error()
+	if withoutMessage != "Gateway rejected WSS handshake: VERSION_MISMATCH" {
+		t.Fatalf("handshake error = %q", withoutMessage)
+	}
+	withMessage := (&clientmux.HandshakeError{Code: "REJECTED", Message: "upgrade required"}).Error()
+	if withMessage != "Gateway rejected WSS handshake: REJECTED: upgrade required" {
+		t.Fatalf("handshake error = %q", withMessage)
+	}
+}
+
 func handleTestStream(
 	ctx context.Context,
 	connection net.Conn,
