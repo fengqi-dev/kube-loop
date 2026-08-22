@@ -1,21 +1,14 @@
 package distribution
 
 import (
-	"fmt"
+	"os"
 	"strings"
-
-	env "github.com/Netflix/go-env"
 )
 
-type installerEnvironment struct {
-	SingBoxPath string `env:"KUBELOOP_SINGBOX_PATH"`
-}
+type installerEnvironment struct{ SingBoxPath string }
 
-func loadInstallerEnvironment() (installerEnvironment, error) {
-	var environment installerEnvironment
-	if _, err := env.UnmarshalFromEnviron(&environment); err != nil {
-		return installerEnvironment{}, fmt.Errorf("decode sing-box installer environment: %w", err)
+func loadInstallerEnvironment() installerEnvironment {
+	return installerEnvironment{
+		SingBoxPath: strings.TrimSpace(os.Getenv("KUBELOOP_SINGBOX_PATH")),
 	}
-	environment.SingBoxPath = strings.TrimSpace(environment.SingBoxPath)
-	return environment, nil
 }

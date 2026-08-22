@@ -3,7 +3,6 @@ module github.com/fengqi-dev/kube-loop
 go 1.27.0
 
 require (
-	github.com/Netflix/go-env v0.1.2
 	github.com/bufbuild/protocompile v0.14.1
 	github.com/charmbracelet/bubbles v1.0.0
 	github.com/charmbracelet/bubbletea v1.3.10
