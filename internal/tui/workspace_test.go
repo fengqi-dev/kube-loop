@@ -42,6 +42,16 @@ func newWorkspaceTestModel(resource workspaceResource) Model {
 	return model
 }
 
+func TestNewWorkspaceStateStartsAtConnectionResource(t *testing.T) {
+	state := newWorkspaceState("")
+	if !state.initialized || state.resource != resourceConnection || state.commandPos != -1 {
+		t.Fatalf("workspace state = %#v", state)
+	}
+	if len(state.history) != 1 || state.history[0] != resourceConnection || state.views == nil {
+		t.Fatalf("workspace history/views = %#v/%#v", state.history, state.views)
+	}
+}
+
 func TestWorkspaceLayoutUsesSingleResourceTable(t *testing.T) {
 	model := newWorkspaceTestModel(resourcePods)
 	view := model.View()
@@ -54,6 +64,42 @@ func TestWorkspaceLayoutUsesSingleResourceTable(t *testing.T) {
 		strings.Contains(view, "RESOURCE WORKSPACE") {
 		t.Fatal("K9s-style workspace header is not rendered")
 	}
+}
+
+func TestWorkspaceSupportViews(t *testing.T) {
+	t.Run("terminal too small", func(t *testing.T) {
+		model := newWorkspaceTestModel(resourcePods)
+		model.width, model.height = workspaceMinWidth-1, workspaceMinHeight-1
+		view := model.View()
+		for _, expected := range []string{"Terminal is too small", "Required: 60x18", "press q to quit"} {
+			if !strings.Contains(view, expected) {
+				t.Fatalf("small workspace view missing %q", expected)
+			}
+		}
+	})
+
+	t.Run("help", func(t *testing.T) {
+		model := newWorkspaceTestModel(resourceServices)
+		model.workspace.help = true
+		view := model.View()
+		for _, expected := range []string{"K9S WORKSPACE HELP", "CURRENT ACTIONS", "f forward"} {
+			if !strings.Contains(view, expected) {
+				t.Fatalf("workspace help missing %q", expected)
+			}
+		}
+	})
+
+	t.Run("command and filter bars", func(t *testing.T) {
+		model := newWorkspaceTestModel(resourcePods)
+		model.workspace.input, model.workspace.inputText = workspaceInputCommand, "services"
+		if view := model.View(); !strings.Contains(view, "services█") {
+			t.Fatalf("command bar missing input: %q", view)
+		}
+		model.workspace.input, model.workspace.inputText = workspaceInputFilter, "running"
+		if view := model.View(); !strings.Contains(view, "/running█") {
+			t.Fatalf("filter bar missing input: %q", view)
+		}
+	})
 }
 
 func TestWorkspaceRevisionUsesInjectedTag(t *testing.T) {
@@ -192,6 +238,157 @@ func TestWorkspaceDetailAndResourceActions(t *testing.T) {
 	view := model.View()
 	if !strings.Contains(view, "PORT FORWARD") || strings.Contains(view, "OPERATIONS CONSOLE") {
 		t.Fatalf("action did not stay inside workspace: %q", view)
+	}
+}
+
+func TestWorkspaceMouseAndCursorNavigation(t *testing.T) {
+	model := newWorkspaceTestModel(resourcePods)
+	model.height = 20
+	model.pods = make([]clientremote.Pod, 12)
+	for index := range model.pods {
+		model.pods[index].Name = fmt.Sprintf("pod-%02d", index)
+	}
+
+	if _, handled := model.updateWorkspaceMouse(tea.MouseEvent{
+		X: 20, Y: 8, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft,
+	}); !handled || model.workspaceView().cursor != 1 {
+		t.Fatalf("mouse row selection handled=%v view=%#v", handled, model.workspaceView())
+	}
+	if _, handled := model.updateWorkspaceMouse(tea.MouseEvent{
+		X: 20, Y: 8, Action: tea.MouseActionPress, Button: tea.MouseButtonWheelDown,
+	}); !handled || model.workspaceView().cursor != 2 {
+		t.Fatalf("mouse wheel handled=%v view=%#v", handled, model.workspaceView())
+	}
+	model.setWorkspaceCursor(11)
+	view := model.workspaceView()
+	if view.cursor != 11 || view.offset == 0 || model.workspacePageSize() != 10 {
+		t.Fatalf("paged cursor view=%#v page=%d", view, model.workspacePageSize())
+	}
+	model.moveWorkspaceCursor(-100)
+	if view = model.workspaceView(); view.cursor != 0 || view.offset != 0 {
+		t.Fatalf("clamped cursor view=%#v", view)
+	}
+
+	empty := newWorkspaceTestModel(resourceConnection)
+	empty.setWorkspaceCursor(4)
+	if view = empty.workspaceView(); view.cursor != 0 || view.offset != 0 {
+		t.Fatalf("empty cursor view=%#v", view)
+	}
+}
+
+func TestWorkspaceResourceRows(t *testing.T) {
+	model := newWorkspaceTestModel(resourceProfiles)
+	rows := model.workspaceRawRows()
+	if len(rows) != 1 || rows[0].status != "Active" || rows[0].kind != "profile" {
+		t.Fatalf("profile rows = %#v", rows)
+	}
+	if _, handled := model.updateWorkspaceResource(workspaceKey("d")); !handled ||
+		model.console.overlay != overlayConfirmProfile {
+		t.Fatalf("profile delete handled=%v overlay=%d", handled, model.console.overlay)
+	}
+
+	model = newWorkspaceTestModel(resourceNamespaces)
+	rows = model.workspaceRawRows()
+	if len(rows) != 2 || rows[0].status != "Active" || rows[1].status != "" {
+		t.Fatalf("namespace rows = %#v", rows)
+	}
+	model.setWorkspaceCursor(1)
+	if cmd, handled := model.updateWorkspaceResource(tea.KeyMsg{Type: tea.KeyEnter}); !handled || cmd == nil ||
+		model.pendingNamespace != "production" {
+		t.Fatalf("namespace enter handled=%v cmd=%v pending=%q", handled, cmd != nil, model.pendingNamespace)
+	}
+
+	model = newWorkspaceTestModel(resourceTasks)
+	model.execTasks = []execTaskView{{Pod: "api-0", Command: "env", State: "running"}}
+	rows = model.workspaceRawRows()
+	if len(rows) != 1 || rows[0].status != taskStatusExec || model.workspaceLegacyTaskPosition(rows[0]) != 0 {
+		t.Fatalf("task rows = %#v", rows)
+	}
+}
+
+func TestWorkspaceConnectionResourceActions(t *testing.T) {
+	connection := newWorkspaceTestModel(resourceConnection)
+	if cmd, handled := connection.updateWorkspaceResource(workspaceKey("a")); !handled || cmd != nil ||
+		connection.err != "disconnect before adding a server" {
+		t.Fatalf("connected add handled=%v cmd=%v err=%q", handled, cmd != nil, connection.err)
+	}
+	connection.dataPlaneStatus.State = dataPlaneStateDisconnected
+	if cmd, handled := connection.updateWorkspaceResource(workspaceKey("a")); !handled || cmd == nil ||
+		!connection.loginAdding || connection.workspace.resource != resourceProfiles {
+		t.Fatalf(
+			"disconnected add handled=%v cmd=%v loginAdding=%v resource=%q",
+			handled,
+			cmd != nil,
+			connection.loginAdding,
+			connection.workspace.resource,
+		)
+	}
+}
+
+func TestWorkspaceEmptyAndNavigationResourceActions(t *testing.T) {
+	pods := newWorkspaceTestModel(resourcePods)
+	pods.pods = nil
+	if cmd, handled := pods.updateWorkspaceResource(tea.KeyMsg{Type: tea.KeyEnter}); !handled || cmd != nil {
+		t.Fatalf("empty pods handled=%v cmd=%v", handled, cmd != nil)
+	}
+
+	services := newWorkspaceTestModel(resourceServices)
+	services.services = nil
+	if cmd, handled := services.updateWorkspaceResource(tea.KeyMsg{Type: tea.KeyEnter}); !handled || cmd != nil {
+		t.Fatalf("empty services handled=%v cmd=%v", handled, cmd != nil)
+	}
+
+	tasks := newWorkspaceTestModel(resourceTasks)
+	tasks.execTasks = []execTaskView{{Pod: "api-0", State: "running"}}
+	if _, handled := tasks.updateWorkspaceResource(workspaceKey("t")); !handled ||
+		tasks.console.taskFilter != taskFilterForward {
+		t.Fatalf("tasks handled=%v filter=%d", handled, tasks.console.taskFilter)
+	}
+
+	profiles := newWorkspaceTestModel(resourceProfiles)
+	if _, handled := profiles.updateWorkspaceResource(workspaceKey("down")); !handled || profiles.loginCursor != 0 {
+		t.Fatalf("profiles handled=%v cursor=%d", handled, profiles.loginCursor)
+	}
+
+	namespaces := newWorkspaceTestModel(resourceNamespaces)
+	if cmd, handled := namespaces.updateWorkspaceResource(workspaceKey("x")); !handled || cmd != nil {
+		t.Fatalf("namespace no-op handled=%v cmd=%v", handled, cmd != nil)
+	}
+}
+
+func TestWorkspaceConnectionLifecycleAndLoadRouting(t *testing.T) {
+	disconnected := newWorkspaceTestModel(resourceConnection)
+	disconnected.dataPlaneStatus.State = dataPlaneStateDisconnected
+	if cmd := disconnected.beginDisconnect(); cmd != nil || disconnected.status != "Already disconnected" {
+		t.Fatalf("disconnected cmd=%v status=%q", cmd != nil, disconnected.status)
+	}
+
+	connected := newWorkspaceTestModel(resourceConnection)
+	connected.execTasks = []execTaskView{{Pod: "api-0", State: "running"}}
+	if cmd := connected.beginDisconnect(); cmd != nil || connected.console.overlay != overlayConfirmDisconnect {
+		t.Fatalf("active tasks cmd=%v overlay=%d", cmd != nil, connected.console.overlay)
+	}
+	connected.execTasks = nil
+	if cmd := connected.beginDisconnect(); cmd == nil || !connected.loading || connected.status != "Disconnecting..." {
+		t.Fatalf("disconnect cmd=%v loading=%v status=%q", cmd != nil, connected.loading, connected.status)
+	}
+
+	for _, resource := range []workspaceResource{
+		resourceProfiles,
+		resourceNamespaces,
+		resourceConnection,
+		resourcePods,
+		resourceServices,
+		resourceTasks,
+	} {
+		model := newWorkspaceTestModel(resource)
+		if cmd := model.loadWorkspaceData(); cmd == nil {
+			t.Fatalf("resource %q returned no load command", resource)
+		}
+	}
+	unknown := newWorkspaceTestModel(workspaceResource("unknown"))
+	if cmd := unknown.loadWorkspaceData(); cmd != nil {
+		t.Fatal("unknown workspace resource returned a load command")
 	}
 }
 

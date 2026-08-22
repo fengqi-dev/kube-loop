@@ -7,6 +7,11 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	clientdataplane "github.com/fengqi-dev/kube-loop/internal/client/dataplane"
+	clientexchange "github.com/fengqi-dev/kube-loop/internal/client/exchange"
+	clientmirror "github.com/fengqi-dev/kube-loop/internal/client/mirror"
+	clientpodssh "github.com/fengqi-dev/kube-loop/internal/client/podssh"
+	clientportforward "github.com/fengqi-dev/kube-loop/internal/client/portforward"
+	clientpreview "github.com/fengqi-dev/kube-loop/internal/client/preview"
 	clientprofile "github.com/fengqi-dev/kube-loop/internal/client/profile"
 	clientremote "github.com/fengqi-dev/kube-loop/internal/client/remote"
 )
@@ -97,6 +102,59 @@ func TestViewConsoleCoreViews(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			assertConsoleContains(t, test.model.View(), test.want...)
+		})
+	}
+}
+
+func TestConsoleTaskRowsCoverAllKindsAndFilters(t *testing.T) {
+	model := newConsoleTestModel(tabTasks, 120, 32)
+	model.portForwards = []clientportforward.Info{{
+		Name: "api", Namespace: "default", Kind: "service", Protocol: "tcp",
+		Address: "127.0.0.1:8080", DialAddress: "10.0.0.1:8080", RemotePort: 8080, State: "running",
+	}}
+	model.exchanges = []clientexchange.Info{{
+		Service: "exchange", Namespace: "default", ClusterIP: "10.96.0.10", State: "running",
+	}}
+	model.mirrors = []clientmirror.Info{{
+		Service: "mirror", Namespace: "default", ClusterIP: "10.96.0.11", State: "running",
+	}}
+	model.previews = []clientpreview.Info{{
+		Name: "preview", Namespace: "default", ClusterIP: "10.96.0.12", State: "running",
+	}}
+	model.podSSHEndpoints = []clientpodssh.Info{{
+		Pod: "api-0", Namespace: "default", PodIP: "10.0.0.2", Address: "127.0.0.1:2222",
+		Command: "sh", State: "running",
+	}}
+	model.execTasks = []execTaskView{{Pod: "api-0", Command: "env", State: "running", Output: "READY=true"}}
+
+	rows := model.consoleTaskRows()
+	expected := []string{"FORWARD", "EXCHANGE", "MIRROR", "PREVIEW", "SSH", "EXEC"}
+	if len(rows) != len(expected) {
+		t.Fatalf("task rows = %#v, want %d rows", rows, len(expected))
+	}
+	for index, status := range expected {
+		if rows[index].status != status {
+			t.Fatalf("row %d status = %q, want %q", index, rows[index].status, status)
+		}
+	}
+
+	tests := []struct {
+		name   string
+		filter int
+		count  int
+	}{
+		{name: "forward", filter: taskFilterForward, count: 1},
+		{name: "traffic", filter: taskFilterTraffic, count: 3},
+		{name: "ssh", filter: taskFilterSSH, count: 1},
+		{name: "exec", filter: taskFilterExec, count: 1},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			filtered := model
+			filtered.console.taskFilter = test.filter
+			if got := len(filtered.consoleTaskRows()); got != test.count {
+				t.Fatalf("filtered task rows = %d, want %d", got, test.count)
+			}
 		})
 	}
 }
@@ -278,6 +336,123 @@ func TestUpdateConsoleTaskFilterAndProfileOverlay(t *testing.T) {
 		t.Fatalf("overlay=%d, want profiles", model.console.overlay)
 	}
 	assertConsoleContains(t, model.View(), "MANAGE SERVERS")
+}
+
+func TestConsoleProfileOverlayKeyboardAndMouse(t *testing.T) {
+	profiles := []clientprofile.Profile{
+		{ID: "first", DisplayName: "First", BaseURL: "https://first.example.test"},
+		{ID: "second", DisplayName: "Second", BaseURL: "https://second.example.test"},
+	}
+	model := newConsoleTestModel(tabConnection, 120, 32)
+	model.profiles = clientprofile.State{ActiveProfileID: "first", Profiles: profiles}
+	model.console.overlay = overlayProfiles
+
+	assertConsoleContains(t, model.viewConsoleProfilesOverlay(), "First", "Second", "Enter select")
+	model.updateConsole(tea.MouseMsg(tea.MouseEvent{
+		X: 20, Y: 16, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft,
+	}))
+	if model.loginCursor != 1 {
+		t.Fatalf("profile cursor after overlay click = %d, want 1", model.loginCursor)
+	}
+	model.updateConsole(consoleKey("up"))
+	if model.loginCursor != 0 {
+		t.Fatalf("profile cursor after up = %d, want 0", model.loginCursor)
+	}
+	model.updateConsole(consoleKey("j"))
+	if model.loginCursor != 1 {
+		t.Fatalf("profile cursor after j = %d, want 1", model.loginCursor)
+	}
+	model.updateConsole(consoleKey("d"))
+	if model.console.overlay != overlayConfirmProfile || model.console.returnTo != overlayProfiles {
+		t.Fatalf("delete overlay=%d returnTo=%d", model.console.overlay, model.console.returnTo)
+	}
+	model.updateConsole(consoleKey("n"))
+	if model.console.overlay != overlayProfiles {
+		t.Fatalf("cancelled delete overlay = %d, want profiles", model.console.overlay)
+	}
+	model.updateConsole(consoleKey("a"))
+	if model.console.overlay != overlayProfileAdd || !model.loginAdding {
+		t.Fatalf("add overlay=%d loginAdding=%v", model.console.overlay, model.loginAdding)
+	}
+	model.console.overlay, model.loginAdding = overlayProfiles, false
+	model.updateConsole(consoleKey("p"))
+	if model.console.overlay != overlayNone {
+		t.Fatalf("profile overlay after p = %d, want none", model.console.overlay)
+	}
+
+	login := newConsoleTestModel(tabConnection, 120, 32)
+	login.mode = viewLogin
+	login.profiles = clientprofile.State{Profiles: profiles}
+	login.updateConsole(tea.MouseMsg(tea.MouseEvent{
+		X: 10, Y: 7, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft,
+	}))
+	if login.loginCursor != 1 {
+		t.Fatalf("login cursor after profile click = %d, want 1", login.loginCursor)
+	}
+	if _, handled := login.updateConsole(tea.MouseMsg(tea.MouseEvent{
+		X: 10, Y: 20, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft,
+	})); handled {
+		t.Fatal("click outside login profiles was handled")
+	}
+
+	adding := newConsoleTestModel(tabConnection, 120, 32)
+	adding.mode, adding.loginAdding, adding.loginURL = viewLogin, true, "https://new.example.test"
+	if _, handled := adding.updateConsole(tea.MouseMsg(tea.MouseEvent{
+		X: 10, Y: 10, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft,
+	})); !handled || !adding.loginAdding {
+		t.Fatalf("upper form click handled=%v loginAdding=%v", handled, adding.loginAdding)
+	}
+	if _, handled := adding.updateConsole(tea.MouseMsg(tea.MouseEvent{
+		X: 80, Y: 20, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft,
+	})); !handled || adding.loginAdding || adding.loginURL != "" {
+		t.Fatalf("cancel click handled=%v loginAdding=%v url=%q", handled, adding.loginAdding, adding.loginURL)
+	}
+
+	empty := newConsoleTestModel(tabConnection, 120, 32)
+	empty.profiles = clientprofile.State{}
+	assertConsoleContains(t, empty.viewConsoleProfilesOverlay(), "No servers configured")
+}
+
+func TestConfirmConsoleOverlayActions(t *testing.T) {
+	t.Run("profile deletion returns to profiles", func(t *testing.T) {
+		model := newConsoleTestModel(tabConnection, 120, 32)
+		model.mode = viewLogin
+		model.profiles = clientprofile.State{Profiles: []clientprofile.Profile{{ID: "test"}}}
+		model.console.overlay, model.console.returnTo = overlayConfirmProfile, overlayProfiles
+		cmd := model.confirmConsoleOverlay()
+		if cmd == nil || !model.loading || model.console.overlay != overlayProfiles {
+			t.Fatalf("profile delete cmd=%v loading=%v overlay=%d", cmd != nil, model.loading, model.console.overlay)
+		}
+	})
+
+	t.Run("disconnect", func(t *testing.T) {
+		model := newConsoleTestModel(tabConnection, 120, 32)
+		model.console.overlay = overlayConfirmDisconnect
+		if cmd := model.confirmConsoleOverlay(); cmd == nil || !model.loading || model.status != "Disconnecting..." {
+			t.Fatalf("disconnect cmd=%v loading=%v status=%q", cmd != nil, model.loading, model.status)
+		}
+	})
+
+	t.Run("service uninstall", func(t *testing.T) {
+		model := newConsoleTestModel(tabConnection, 120, 32)
+		model.console.overlay = overlayConfirmServiceUninstall
+		if cmd := model.confirmConsoleOverlay(); cmd == nil || !model.loading ||
+			model.status != "Uninstalling Helper Service..." {
+			t.Fatalf("uninstall cmd=%v loading=%v status=%q", cmd != nil, model.loading, model.status)
+		}
+	})
+
+	t.Run("non-confirmation overlays are no-op", func(t *testing.T) {
+		for _, overlay := range []consoleOverlay{
+			overlayNone, overlayHelp, overlayNamespace, overlayProfiles, overlayProfileAdd,
+		} {
+			model := newConsoleTestModel(tabConnection, 120, 32)
+			model.console.overlay = overlay
+			if cmd := model.confirmConsoleOverlay(); cmd != nil || model.console.overlay != overlayNone {
+				t.Fatalf("overlay %d cmd=%v resulting overlay=%d", overlay, cmd != nil, model.console.overlay)
+			}
+		}
+	})
 }
 
 func TestUpdateConsoleDetailFocusAndCopyOutput(t *testing.T) {
