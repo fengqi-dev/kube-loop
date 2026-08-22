@@ -23,7 +23,7 @@ func TestPasswordCredentialsAuthenticate(t *testing.T) {
 		t.Fatal(err)
 	}
 	password := []byte("correct-horse-battery")
-	_, err = service.Create(ctx, CreateRequest{
+	created, err := service.Create(ctx, CreateRequest{
 		Username: "ui-test", Password: password, DisplayName: "UI Test",
 	})
 	if err != nil {
@@ -54,5 +54,22 @@ func TestPasswordCredentialsAuthenticate(t *testing.T) {
 	}
 	if _, err := service.Authenticate(ctx, "ui-test", password); err != nil {
 		t.Fatalf("re-enabled authentication failed: %v", err)
+	}
+	loaded, err := service.Get(ctx, created.IdentityID)
+	if err != nil || loaded.IdentityID != created.IdentityID || loaded.Username != created.Username {
+		t.Fatalf("loaded user = %#v, %v", loaded, err)
+	}
+	if err := service.SetPassword(ctx, created.IdentityID, []byte("too-short")); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("short password error = %v", err)
+	}
+	newPassword := []byte("new-correct-horse-battery")
+	if err := service.SetPassword(ctx, created.IdentityID, newPassword); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Authenticate(ctx, "ui-test", password); !errors.Is(err, ErrAuthenticationFailed) {
+		t.Fatalf("old password authentication error = %v", err)
+	}
+	if _, err := service.Authenticate(ctx, "ui-test", newPassword); err != nil {
+		t.Fatalf("new password authentication failed: %v", err)
 	}
 }
