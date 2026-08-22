@@ -78,10 +78,7 @@ type Installer struct {
 
 func (i *Installer) Ensure(ctx context.Context) (string, error) {
 	if !i.DisableOverride {
-		environment, err := loadInstallerEnvironment()
-		if err != nil {
-			return "", err
-		}
+		environment := loadInstallerEnvironment()
 		if environment.SingBoxPath != "" {
 			return validateBinary(environment.SingBoxPath)
 		}

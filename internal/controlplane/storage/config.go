@@ -4,12 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
-	env "github.com/Netflix/go-env"
 	"github.com/go-sql-driver/mysql"
 	"github.com/jackc/pgx/v5"
 )
@@ -45,52 +43,6 @@ type Config struct {
 	TransactionMaxRetries   int
 	TransactionRetryBackoff time.Duration
 	AllowInsecureDatasource bool
-}
-
-type storageEnvironment struct {
-	SQLitePath              string        `env:"KUBELOOP_SQLITE_PATH"`
-	DatasourceURL           string        `env:"KUBELOOP_DATASOURCE_URL"`
-	DatasourceURLFile       string        `env:"KUBELOOP_DATASOURCE_URL_FILE"`
-	ControlPlaneReplicas    int           `env:"KUBELOOP_CONTROL_PLANE_REPLICAS,default=1"`
-	ConnectTimeout          time.Duration `env:"KUBELOOP_DATASOURCE_CONNECT_TIMEOUT"`
-	QueryTimeout            time.Duration `env:"KUBELOOP_DATASOURCE_QUERY_TIMEOUT"`
-	MaxOpenConnections      int           `env:"KUBELOOP_DATASOURCE_MAX_OPEN_CONNECTIONS"`
-	MaxIdleConnections      int           `env:"KUBELOOP_DATASOURCE_MAX_IDLE_CONNECTIONS"`
-	ConnectionMaxLifetime   time.Duration `env:"KUBELOOP_DATASOURCE_CONNECTION_MAX_LIFETIME"`
-	TransactionMaxRetries   int           `env:"KUBELOOP_DATASOURCE_TRANSACTION_MAX_RETRIES"`
-	TransactionRetryBackoff time.Duration `env:"KUBELOOP_DATASOURCE_TRANSACTION_RETRY_BACKOFF"`
-	AllowInsecureDatasource bool          `env:"KUBELOOP_DATASOURCE_ALLOW_INSECURE"`
-}
-
-func ConfigFromEnv() (Config, error) {
-	var environment storageEnvironment
-	if _, err := env.UnmarshalFromEnviron(&environment); err != nil {
-		return Config{}, fmt.Errorf("decode storage environment: %w", err)
-	}
-	config := Config{
-		SQLitePath: strings.TrimSpace(
-			environment.SQLitePath,
-		), DatasourceURL: strings.TrimSpace(environment.DatasourceURL),
-		ControlPlaneReplicas: environment.ControlPlaneReplicas, ConnectTimeout: environment.ConnectTimeout,
-		QueryTimeout: environment.QueryTimeout, MaxOpenConnections: environment.MaxOpenConnections,
-		MaxIdleConnections: environment.MaxIdleConnections, ConnectionMaxLifetime: environment.ConnectionMaxLifetime,
-		TransactionMaxRetries:   environment.TransactionMaxRetries,
-		TransactionRetryBackoff: environment.TransactionRetryBackoff,
-		AllowInsecureDatasource: environment.AllowInsecureDatasource,
-	}
-	if file := strings.TrimSpace(environment.DatasourceURLFile); file != "" {
-		if config.DatasourceURL != "" {
-			return Config{}, errors.New(
-				"configure only one of KUBELOOP_DATASOURCE_URL and KUBELOOP_DATASOURCE_URL_FILE",
-			)
-		}
-		content, err := os.ReadFile(filepath.Clean(file))
-		if err != nil {
-			return Config{}, errors.New("read datasource URL file")
-		}
-		config.DatasourceURL = strings.TrimSpace(string(content))
-	}
-	return Normalize(config)
 }
 
 // Normalize validates and applies defaults to Control Plane storage settings.
