@@ -17,10 +17,13 @@ type fakeProfiles struct{ state clientprofile.State }
 func (profiles fakeProfiles) Snapshot() clientprofile.State { return profiles.state }
 
 type fakeControlPlane struct {
-	versionCalls int
-	profileID    string
-	podFile      clientremote.PodFileSpec
-	podFileKey   string
+	versionCalls          int
+	profileID             string
+	capabilitiesNamespace string
+	podsNamespace         string
+	servicesNamespace     string
+	podFile               clientremote.PodFileSpec
+	podFileKey            string
 }
 
 func (gateway *fakeControlPlane) Version(
@@ -32,21 +35,32 @@ func (gateway *fakeControlPlane) Version(
 	return clientremote.Version{GitVersion: "v1.32.0"}, nil
 }
 
-func (*fakeControlPlane) Capabilities(
+func (gateway *fakeControlPlane) Capabilities(
 	_ context.Context,
 	_ clientprofile.Profile,
 	namespace string,
 ) (clientremote.Capabilities, error) {
+	gateway.capabilitiesNamespace = namespace
 	return clientremote.Capabilities{Namespace: namespace}, nil
 }
 func (*fakeControlPlane) Namespaces(context.Context, clientprofile.Profile) ([]clientremote.Namespace, error) {
 	return []clientremote.Namespace{{Name: "default"}}, nil
 }
-func (*fakeControlPlane) Pods(context.Context, clientprofile.Profile, string) ([]clientremote.Pod, error) {
-	return nil, nil
+func (gateway *fakeControlPlane) Pods(
+	_ context.Context,
+	_ clientprofile.Profile,
+	namespace string,
+) ([]clientremote.Pod, error) {
+	gateway.podsNamespace = namespace
+	return []clientremote.Pod{{Name: "api-0", Namespace: namespace}}, nil
 }
-func (*fakeControlPlane) Services(context.Context, clientprofile.Profile, string) ([]clientremote.Service, error) {
-	return nil, nil
+func (gateway *fakeControlPlane) Services(
+	_ context.Context,
+	_ clientprofile.Profile,
+	namespace string,
+) ([]clientremote.Service, error) {
+	gateway.servicesNamespace = namespace
+	return []clientremote.Service{{Name: "api", Namespace: namespace}}, nil
 }
 func (gateway *fakeControlPlane) ListPodFiles(
 	_ context.Context,
@@ -100,16 +114,27 @@ func (sessions *fakeSessions) Disconnect(context.Context, string) error {
 	return nil
 }
 
-type fakeDataPlanes struct{}
+type fakeDataPlanes struct {
+	connectCalls    *int
+	disconnectCalls *int
+}
 
-func (fakeDataPlanes) Connect(
+func (dataPlanes fakeDataPlanes) Connect(
 	context.Context,
 	clientprofile.Profile,
 	clientremote.Session,
 ) (clientdataplane.Status, error) {
+	if dataPlanes.connectCalls != nil {
+		*dataPlanes.connectCalls++
+	}
 	return clientdataplane.Status{}, nil
 }
-func (fakeDataPlanes) Disconnect(string) error { return nil }
+func (dataPlanes fakeDataPlanes) Disconnect(string) error {
+	if dataPlanes.disconnectCalls != nil {
+		*dataPlanes.disconnectCalls++
+	}
+	return nil
+}
 
 type fakeExecClient struct{}
 
@@ -132,6 +157,124 @@ func (fakeExecClient) OpenExecStream(
 	clientremote.ExecTask,
 ) (*websocket.Conn, error) {
 	return nil, errors.New("not implemented")
+}
+
+func TestNewRemoteBackendRequiresCoreDependencies(t *testing.T) {
+	valid := func() RemoteDependencies {
+		return RemoteDependencies{
+			Profiles: fakeProfiles{state: clientprofile.State{
+				ActiveProfileID: "active",
+				Profiles:        []clientprofile.Profile{{ID: "active"}},
+			}},
+			ControlPlane: &fakeControlPlane{},
+			Sessions:     &fakeSessions{},
+			DataPlanes:   fakeDataPlanes{},
+			ExecClient:   fakeExecClient{},
+		}
+	}
+	tests := []struct {
+		name   string
+		mutate func(*RemoteDependencies)
+	}{
+		{name: "profiles", mutate: func(dependencies *RemoteDependencies) { dependencies.Profiles = nil }},
+		{
+			name:   "control plane",
+			mutate: func(dependencies *RemoteDependencies) { dependencies.ControlPlane = nil },
+		},
+		{name: "sessions", mutate: func(dependencies *RemoteDependencies) { dependencies.Sessions = nil }},
+		{name: "data planes", mutate: func(dependencies *RemoteDependencies) { dependencies.DataPlanes = nil }},
+		{name: "exec client", mutate: func(dependencies *RemoteDependencies) { dependencies.ExecClient = nil }},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			dependencies := valid()
+			test.mutate(&dependencies)
+			if _, err := NewRemoteBackend(dependencies); err == nil {
+				t.Fatal("NewRemoteBackend accepted incomplete dependencies")
+			}
+		})
+	}
+	if _, err := NewRemoteBackend(valid()); err != nil {
+		t.Fatalf("NewRemoteBackend rejected complete dependencies: %v", err)
+	}
+}
+
+func TestRemoteBackendDelegatesInventoryForActiveProfile(t *testing.T) {
+	gateway := &fakeControlPlane{}
+	sessions := &fakeSessions{current: clientremote.Session{
+		ID: "session-a", Namespace: "default", State: sessionStateActive,
+	}}
+	backend, err := NewRemoteBackend(RemoteDependencies{
+		Profiles: fakeProfiles{state: clientprofile.State{
+			ActiveProfileID: "active", Profiles: []clientprofile.Profile{{ID: "active"}},
+		}},
+		ControlPlane: gateway,
+		Sessions:     sessions,
+		DataPlanes:   fakeDataPlanes{},
+		ExecClient:   fakeExecClient{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	capabilities, err := backend.Capabilities(t.Context(), "active", " default ")
+	if err != nil || capabilities.Namespace != "default" || gateway.capabilitiesNamespace != "default" {
+		t.Fatalf("capabilities=%#v namespace=%q error=%v", capabilities, gateway.capabilitiesNamespace, err)
+	}
+	namespaces, err := backend.Namespaces(t.Context(), "active")
+	if err != nil || len(namespaces) != 1 || namespaces[0].Name != "default" {
+		t.Fatalf("namespaces=%#v error=%v", namespaces, err)
+	}
+	pods, err := backend.Pods(t.Context(), "active", " default ")
+	if err != nil || len(pods) != 1 || gateway.podsNamespace != "default" {
+		t.Fatalf("pods=%#v namespace=%q error=%v", pods, gateway.podsNamespace, err)
+	}
+	services, err := backend.Services(t.Context(), "active", " default ")
+	if err != nil || len(services) != 1 || gateway.servicesNamespace != "default" {
+		t.Fatalf("services=%#v namespace=%q error=%v", services, gateway.servicesNamespace, err)
+	}
+	current, err := backend.CurrentSession("active")
+	if err != nil || current.ID != "session-a" {
+		t.Fatalf("current=%#v error=%v", current, err)
+	}
+}
+
+func TestRemoteBackendConnectSwitchesNamespaceAndStartsDataPlane(t *testing.T) {
+	connectCalls, disconnectCalls := 0, 0
+	sessions := &fakeSessions{current: clientremote.Session{
+		ID: "session-a", Namespace: "old", State: sessionStateActive,
+	}}
+	backend, err := NewRemoteBackend(RemoteDependencies{
+		Profiles: fakeProfiles{state: clientprofile.State{
+			ActiveProfileID: "active", Profiles: []clientprofile.Profile{{ID: "active"}},
+		}},
+		ControlPlane: &fakeControlPlane{},
+		Sessions:     sessions,
+		DataPlanes: fakeDataPlanes{
+			connectCalls: &connectCalls, disconnectCalls: &disconnectCalls,
+		},
+		ExecClient: fakeExecClient{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := backend.Connect(t.Context(), "active", "   "); err == nil {
+		t.Fatal("Connect accepted an empty namespace")
+	}
+	session, err := backend.Connect(t.Context(), "active", " new ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if session.Namespace != "new" || connectCalls != 1 || disconnectCalls != 1 {
+		t.Fatalf(
+			"session=%#v connectCalls=%d disconnectCalls=%d",
+			session,
+			connectCalls,
+			disconnectCalls,
+		)
+	}
 }
 
 func TestRemoteBackendRejectsNonActiveProfileBeforeControlPlaneCall(t *testing.T) {
