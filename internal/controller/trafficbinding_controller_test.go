@@ -60,9 +60,49 @@ var _ = Describe("TrafficBinding Controller", func() {
 		Expect(current.Status.ServiceName).To(Equal("preview-service"))
 		Expect(apiMeta.IsStatusConditionTrue(current.Status.Conditions, trafficv1alpha1.ConditionReady)).To(BeTrue())
 
+		service.Spec.Selector = map[string]string{"drifted": "true"}
+		service.Spec.Ports[0].TargetPort = intstr.FromInt32(39999)
+		delete(service.Annotations, bindingModeAnnotation)
+		Expect(k8sClient.Update(ctx, service)).To(Succeed())
+		driftedSlice := &slices.Items[0]
+		driftedSlice.Labels[serviceNameLabel] = "wrong-service"
+		driftedSlice.Endpoints[0].Addresses = []string{"10.0.0.99"}
+		*driftedSlice.Ports[0].Port = 39999
+		Expect(k8sClient.Update(ctx, driftedSlice)).To(Succeed())
+		_, err := reconciler.reconcilePreview(ctx, current)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(k8sClient.Get(ctx, objectKey(service.Name), service)).To(Succeed())
+		Expect(service.Spec.Selector).To(BeEmpty())
+		Expect(service.Spec.Ports[0].TargetPort).To(Equal(intstr.FromInt32(32001)))
+		Expect(service.Annotations[bindingModeAnnotation]).To(Equal(string(binding.Spec.Mode)))
+		Expect(k8sClient.Get(ctx, objectKey(driftedSlice.Name), driftedSlice)).To(Succeed())
+		Expect(driftedSlice.Labels[serviceNameLabel]).To(Equal(service.Name))
+		Expect(driftedSlice.Endpoints[0].Addresses).To(Equal([]string{"10.0.0.8"}))
+		Expect(*driftedSlice.Ports[0].Port).To(Equal(int32(32001)))
+
 		Expect(k8sClient.Delete(ctx, current)).To(Succeed())
 		reconcileSuccessfully(ctx, reconciler, binding.Name, 1)
 		Expect(k8sClient.Get(ctx, objectKey("preview-service"), &corev1.Service{})).To(Satisfy(apierrors.IsNotFound))
+	})
+
+	It("refuses to adopt a foreign Preview Service", func(ctx SpecContext) {
+		service := &corev1.Service{
+			Name: "occupied-preview", Namespace: testNamespace,
+			Spec: corev1.ServiceSpec{
+				Selector: map[string]string{"app": "foreign"},
+				Ports:    []corev1.ServicePort{{Name: "http", Port: 8080}},
+			},
+		}
+		Expect(k8sClient.Create(ctx, service)).To(Succeed())
+		DeferCleanup(func() { _ = k8sClient.Delete(context.Background(), service) })
+		binding := previewBinding("foreign-preview-binding", service.Name)
+		Expect(k8sClient.Create(ctx, binding)).To(Succeed())
+		DeferCleanup(deleteBinding, binding.Name)
+		binding = getBinding(ctx, binding.Name)
+		_, err := reconciler.reconcilePreview(ctx, binding)
+		Expect(err).To(MatchError(ContainSubstring("is not owned by this TrafficBinding")))
+		Expect(k8sClient.Get(ctx, objectKey(service.Name), service)).To(Succeed())
+		Expect(service.Spec.Selector).To(Equal(map[string]string{"app": "foreign"}))
 	})
 
 	DescribeTable("captures, applies and restores an intercepted Service",
@@ -127,6 +167,16 @@ var _ = Describe("TrafficBinding Controller", func() {
 			Expect(currentBinding.Status.Snapshot.ServiceUID).To(Equal(currentService.UID))
 			Expect(currentBinding.Status.Snapshot.HadEndpointSlices).To(BeTrue())
 			Expect(currentBinding.Status.Snapshot.HadEndpoints).To(BeTrue())
+			staleSlice := &discoveryv1.EndpointSlice{
+				Name: originalSlice.Name, Namespace: testNamespace,
+				Labels:      map[string]string{serviceNameLabel: serviceName},
+				AddressType: discoveryv1.AddressTypeIPv4,
+				Endpoints:   []discoveryv1.Endpoint{{Addresses: []string{"10.244.0.99"}}},
+				Ports: []discoveryv1.EndpointPort{
+					{Name: new("wrong"), Protocol: new(corev1.ProtocolTCP), Port: new(int32(9999))},
+				},
+			}
+			Expect(k8sClient.Create(ctx, staleSlice)).To(Succeed())
 			Expect(k8sClient.Delete(ctx, currentBinding)).To(Succeed())
 			reconcileSuccessfully(ctx, reconciler, bindingName, 1)
 
@@ -134,7 +184,11 @@ var _ = Describe("TrafficBinding Controller", func() {
 			Expect(k8sClient.Get(ctx, objectKey(serviceName), restored)).To(Succeed())
 			Expect(restored.Spec.Selector).To(Equal(map[string]string{"app": suffix}))
 			Expect(restored.Annotations).NotTo(HaveKey(bindingUIDAnnotation))
-			Expect(k8sClient.Get(ctx, objectKey(originalSlice.Name), &discoveryv1.EndpointSlice{})).To(Succeed())
+			restoredSlice := &discoveryv1.EndpointSlice{}
+			Expect(k8sClient.Get(ctx, objectKey(originalSlice.Name), restoredSlice)).To(Succeed())
+			Expect(restoredSlice.Endpoints[0].Addresses).To(Equal([]string{"10.244.0.9"}))
+			Expect(*restoredSlice.Ports[0].Name).To(Equal("http"))
+			Expect(*restoredSlice.Ports[0].Port).To(Equal(int32(8080)))
 			restoredEndpoints := &corev1.Endpoints{}
 			Expect(k8sClient.Get(ctx, objectKey(serviceName), restoredEndpoints)).To(Succeed())
 			Expect(restoredEndpoints.Subsets).To(HaveLen(1))
