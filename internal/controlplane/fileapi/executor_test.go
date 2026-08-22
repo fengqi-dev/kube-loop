@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -280,6 +281,170 @@ func TestKubernetesTransferExecutorNegotiatesAndResumesStablePartialUpload(
 	if err != nil || !bytes.Equal(downloaded, contents) {
 		t.Fatalf("remote contents = %q err = %v", downloaded, err)
 	}
+}
+
+func TestKubernetesTransferExecutorUploadsValidatedDirectoryArchive(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX container shell archive test")
+	}
+	root := t.TempDir()
+	archive := makeArchive(t, tar.Header{
+		Name: "nested/report.txt", Mode: 0o600, Size: 6, Typeflag: tar.TypeReg,
+	}, []byte("report"))
+	checksum := sha256.Sum256(archive)
+	remote := filepath.ToSlash(filepath.Join(root, "uploaded"))
+	executor, err := NewKubernetesTransferExecutor(localShellPodExecutor{}, 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec := Spec{
+		Direction:   DirectionUpload,
+		Kind:        KindDirectory,
+		Pod:         "pod",
+		Container:   "container",
+		RemotePath:  remote,
+		Size:        uint64(len(archive)),
+		Checksum:    hex.EncodeToString(checksum[:]),
+		AllowedRoot: filepath.ToSlash(root),
+	}
+	outcome, err := executor.Upload(
+		context.Background(),
+		controlplaneapi.Identity{Subject: "user"},
+		"development",
+		"directory-task",
+		spec,
+		bytes.NewReader(archive),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome.Transferred != uint64(len(archive)) || outcome.Checksum != checksum ||
+		!outcome.HasChecksum {
+		t.Fatalf("outcome = %#v", outcome)
+	}
+	contents, err := os.ReadFile(filepath.Join(root, "uploaded", "nested", "report.txt"))
+	if err != nil || string(contents) != "report" {
+		t.Fatalf("uploaded contents = %q err = %v", contents, err)
+	}
+	if _, err := os.Stat(remote + ".kubeloop-directory-task.part"); !os.IsNotExist(err) {
+		t.Fatalf("temporary archive was not removed: %v", err)
+	}
+}
+
+func TestKubernetesTransferExecutorDownloadsFileAndDirectory(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX container shell download test")
+	}
+	root := t.TempDir()
+	executor, err := NewKubernetesTransferExecutor(localShellPodExecutor{}, 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity := controlplaneapi.Identity{Subject: "user"}
+
+	t.Run("resumed file", func(t *testing.T) {
+		contents := []byte("downloaded payload")
+		remote := filepath.Join(root, "payload.bin")
+		if err := os.WriteFile(remote, contents, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		var metadata DownloadMetadata
+		var output bytes.Buffer
+		outcome, err := executor.Download(
+			context.Background(),
+			identity,
+			"development",
+			"file-task",
+			Spec{
+				Direction:   DirectionDownload,
+				Kind:        KindFile,
+				Pod:         "pod",
+				Container:   "container",
+				RemotePath:  filepath.ToSlash(remote),
+				Offset:      5,
+				AllowedRoot: filepath.ToSlash(root),
+			},
+			func(value DownloadMetadata) error {
+				metadata = value
+				return nil
+			},
+			&output,
+		)
+		checksum := sha256.Sum256(contents)
+		if err != nil || metadata.Total != uint64(len(contents)) ||
+			outcome.Transferred != uint64(len(contents)) || outcome.Checksum != checksum ||
+			output.String() != string(contents[5:]) {
+			t.Fatalf(
+				"metadata = %#v outcome = %#v output = %q err = %v",
+				metadata,
+				outcome,
+				output.String(),
+				err,
+			)
+		}
+	})
+
+	t.Run("sanitized directory", func(t *testing.T) {
+		remote := filepath.Join(root, "directory")
+		if err := os.MkdirAll(remote, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(remote, "report.txt"), []byte("report"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		var metadata DownloadMetadata
+		var output bytes.Buffer
+		outcome, err := executor.Download(
+			context.Background(),
+			identity,
+			"development",
+			"directory-task",
+			Spec{
+				Direction:   DirectionDownload,
+				Kind:        KindDirectory,
+				Pod:         "pod",
+				Container:   "container",
+				RemotePath:  filepath.ToSlash(remote),
+				AllowedRoot: filepath.ToSlash(root),
+			},
+			func(value DownloadMetadata) error {
+				metadata = value
+				return nil
+			},
+			&output,
+		)
+		if err != nil || metadata.Total != 0 || outcome.Transferred != uint64(output.Len()) ||
+			outcome.Checksum != sha256.Sum256(output.Bytes()) {
+			t.Fatalf(
+				"metadata = %#v outcome = %#v output bytes = %d err = %v",
+				metadata,
+				outcome,
+				output.Len(),
+				err,
+			)
+		}
+		reader := tar.NewReader(bytes.NewReader(output.Bytes()))
+		found := false
+		for {
+			header, err := reader.Next()
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			contents, err := io.ReadAll(reader)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if path.Clean(header.Name) == "report.txt" && string(contents) == "report" {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatal("downloaded archive does not contain report.txt")
+		}
+	})
 }
 
 func TestSanitizeArchiveReencodesOnlySafeMetadata(t *testing.T) {
