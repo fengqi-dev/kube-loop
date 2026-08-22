@@ -6,7 +6,11 @@ import (
 	"testing"
 
 	clientdataplane "github.com/fengqi-dev/kube-loop/internal/client/dataplane"
+	clientexchange "github.com/fengqi-dev/kube-loop/internal/client/exchange"
 	clientexec "github.com/fengqi-dev/kube-loop/internal/client/exec"
+	clientmirror "github.com/fengqi-dev/kube-loop/internal/client/mirror"
+	clientportforward "github.com/fengqi-dev/kube-loop/internal/client/portforward"
+	clientpreview "github.com/fengqi-dev/kube-loop/internal/client/preview"
 	clientprofile "github.com/fengqi-dev/kube-loop/internal/client/profile"
 	clientremote "github.com/fengqi-dev/kube-loop/internal/client/remote"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
@@ -135,6 +139,94 @@ func (dataPlanes fakeDataPlanes) Disconnect(string) error {
 	}
 	return nil
 }
+
+type fakeExchangeManager struct {
+	items     []clientexchange.Info
+	started   clientexchange.Request
+	stoppedID string
+}
+
+func (manager *fakeExchangeManager) Start(
+	_ context.Context,
+	_ clientprofile.Profile,
+	_ clientremote.Session,
+	request clientexchange.Request,
+) (clientexchange.Info, error) {
+	manager.started = request
+	return manager.items[0], nil
+}
+func (manager *fakeExchangeManager) Stop(_ context.Context, _ string, id string) error {
+	manager.stoppedID = id
+	return nil
+}
+func (manager *fakeExchangeManager) List(string) []clientexchange.Info { return manager.items }
+func (*fakeExchangeManager) StopProfile(context.Context, string) error { return nil }
+
+type fakeMirrorManager struct {
+	items     []clientmirror.Info
+	started   clientmirror.Request
+	stoppedID string
+}
+
+func (manager *fakeMirrorManager) Start(
+	_ context.Context,
+	_ clientprofile.Profile,
+	_ clientremote.Session,
+	request clientmirror.Request,
+) (clientmirror.Info, error) {
+	manager.started = request
+	return manager.items[0], nil
+}
+func (manager *fakeMirrorManager) Stop(_ context.Context, _ string, id string) error {
+	manager.stoppedID = id
+	return nil
+}
+func (manager *fakeMirrorManager) List(string) []clientmirror.Info   { return manager.items }
+func (*fakeMirrorManager) StopProfile(context.Context, string) error { return nil }
+
+type fakePreviewManager struct {
+	items     []clientpreview.Info
+	started   clientpreview.Request
+	stoppedID string
+}
+
+func (manager *fakePreviewManager) Start(
+	_ context.Context,
+	_ clientprofile.Profile,
+	_ clientremote.Session,
+	request clientpreview.Request,
+) (clientpreview.Info, error) {
+	manager.started = request
+	return manager.items[0], nil
+}
+func (manager *fakePreviewManager) Stop(_ context.Context, _ string, id string) error {
+	manager.stoppedID = id
+	return nil
+}
+func (manager *fakePreviewManager) List(string) []clientpreview.Info  { return manager.items }
+func (*fakePreviewManager) StopProfile(context.Context, string) error { return nil }
+
+type fakeForwardManager struct {
+	items     []clientportforward.Info
+	started   clientportforward.Request
+	stoppedID string
+}
+
+func (manager *fakeForwardManager) Start(
+	_ context.Context,
+	_ clientprofile.Profile,
+	_ clientremote.Session,
+	request clientportforward.Request,
+) (clientportforward.Info, error) {
+	manager.started = request
+	return manager.items[0], nil
+}
+func (manager *fakeForwardManager) Stop(_ context.Context, _ string, id string) error {
+	manager.stoppedID = id
+	return nil
+}
+func (manager *fakeForwardManager) List(string) []clientportforward.Info { return manager.items }
+func (*fakeForwardManager) StopProfile(context.Context, string) error    { return nil }
 
 type fakeExecClient struct{}
 
@@ -273,6 +365,104 @@ func TestRemoteBackendConnectSwitchesNamespaceAndStartsDataPlane(t *testing.T) {
 			session,
 			connectCalls,
 			disconnectCalls,
+		)
+	}
+}
+
+func TestRemoteBackendTrafficLifecycle(t *testing.T) {
+	const profileID, sessionID, namespace = "active", "session-a", "default"
+	exchanges := &fakeExchangeManager{items: []clientexchange.Info{{
+		ID: "d", ProfileID: profileID, SessionID: sessionID, Namespace: namespace,
+	}}}
+	mirrors := &fakeMirrorManager{items: []clientmirror.Info{{
+		ID: "c", ProfileID: profileID, SessionID: sessionID, Namespace: namespace,
+	}}}
+	previews := &fakePreviewManager{items: []clientpreview.Info{{
+		ID: "b", ProfileID: profileID, SessionID: sessionID, Namespace: namespace,
+	}}}
+	forwards := &fakeForwardManager{items: []clientportforward.Info{{
+		ID: "a", ProfileID: profileID, SessionID: sessionID, Namespace: namespace,
+	}}}
+	backend, err := NewRemoteBackend(RemoteDependencies{
+		Profiles: fakeProfiles{state: clientprofile.State{
+			ActiveProfileID: profileID, Profiles: []clientprofile.Profile{{ID: profileID}},
+		}},
+		ControlPlane: &fakeControlPlane{},
+		Sessions: &fakeSessions{current: clientremote.Session{
+			ID: sessionID, Namespace: namespace, State: sessionStateActive,
+		}},
+		DataPlanes: fakeDataPlanes{}, ExecClient: fakeExecClient{},
+		Exchanges: exchanges, Mirrors: mirrors, Previews: previews, Forwards: forwards,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name        string
+		trafficType string
+		request     TrafficStartRequest
+		wantID      string
+	}{
+		{
+			name: "exchange", trafficType: trafficTypeExchange, wantID: "d",
+			request: TrafficStartRequest{Service: "api", Targets: []LocalTarget{{ServicePort: 80}}},
+		},
+		{
+			name: "mirror", trafficType: trafficTypeMirror, wantID: "c",
+			request: TrafficStartRequest{Service: "api", Targets: []LocalTarget{{ServicePort: 80}}},
+		},
+		{
+			name: "preview", trafficType: trafficTypePreview, wantID: "b",
+			request: TrafficStartRequest{Name: "local-api", Targets: []LocalTarget{{ServicePort: 80}}},
+		},
+		{
+			name: "port forward", trafficType: trafficTypePortForward, wantID: "a",
+			request: TrafficStartRequest{
+				TargetKind: "pod", TargetName: "api-0", Protocol: "tcp", RemotePort: 8080,
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			request := test.request
+			request.Type, request.ProfileID = test.trafficType, profileID
+			request.SessionID, request.Namespace = sessionID, namespace
+			item, err := backend.StartTraffic(t.Context(), request)
+			if err != nil || item.Type != test.trafficType || trafficItemID(item) != test.wantID {
+				t.Fatalf("item=%#v error=%v", item, err)
+			}
+		})
+	}
+
+	items, err := backend.ListTraffic(profileID, "")
+	if err != nil || len(items) != 4 {
+		t.Fatalf("items=%#v error=%v", items, err)
+	}
+	for index, wantID := range []string{"a", "b", "c", "d"} {
+		if got := trafficItemID(items[index]); got != wantID {
+			t.Fatalf("items[%d] ID = %q, want %q", index, got, wantID)
+		}
+	}
+
+	for _, identity := range []TrafficIdentity{
+		{Type: trafficTypeExchange, ProfileID: profileID, SessionID: sessionID, Namespace: namespace, TaskID: "d"},
+		{Type: trafficTypeMirror, ProfileID: profileID, SessionID: sessionID, Namespace: namespace, TaskID: "c"},
+		{Type: trafficTypePreview, ProfileID: profileID, SessionID: sessionID, Namespace: namespace, TaskID: "b"},
+		{Type: trafficTypePortForward, ProfileID: profileID, SessionID: sessionID, Namespace: namespace, TaskID: "a"},
+	} {
+		if err := backend.StopTraffic(t.Context(), identity); err != nil {
+			t.Fatalf("StopTraffic(%q): %v", identity.Type, err)
+		}
+	}
+	if exchanges.stoppedID != "d" || mirrors.stoppedID != "c" || previews.stoppedID != "b" ||
+		forwards.stoppedID != "a" {
+		t.Fatalf(
+			"stopped exchange=%q mirror=%q preview=%q forward=%q",
+			exchanges.stoppedID,
+			mirrors.stoppedID,
+			previews.stoppedID,
+			forwards.stoppedID,
 		)
 	}
 }
