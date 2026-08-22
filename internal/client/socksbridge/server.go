@@ -106,6 +106,8 @@ func (b *Bridge) SetHostTCPHandler(handler HostTCPHandler) {
 }
 
 func (b *Bridge) SetHostUDPHandler(handler HostUDPHandler) {
+	b.server.hostMu.Lock()
+	defer b.server.hostMu.Unlock()
 	b.server.HostUDP = handler
 }
 
@@ -234,8 +236,11 @@ func (s *Server) dial(ctx context.Context, network, address string) (net.Conn, e
 	if network != "udp" {
 		return s.openGateway(ctx, tunnel.CommandTCP, host, port)
 	}
-	if s.HostUDP != nil {
-		if dial, ok := s.HostUDP(host, port); ok && dial != nil {
+	s.hostMu.RLock()
+	hostUDP := s.HostUDP
+	s.hostMu.RUnlock()
+	if hostUDP != nil {
+		if dial, ok := hostUDP(host, port); ok && dial != nil {
 			return dial(ctx)
 		}
 	}

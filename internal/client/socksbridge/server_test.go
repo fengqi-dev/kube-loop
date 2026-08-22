@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -34,6 +35,44 @@ func TestBridgeSetLogHandler(t *testing.T) {
 	if len(messages) != 1 || messages[0] != "TCP connected api.example.test:443" {
 		t.Fatalf("messages = %#v", messages)
 	}
+}
+
+func TestBridgeHostUDPHandlerSupportsConcurrentUpdates(t *testing.T) {
+	server := &Server{GatewayAddress: "127.0.0.1:0"}
+	bridge := &Bridge{server: server}
+	handler := HostUDPHandler(func(string, uint16) (func(context.Context) (net.Conn, error), bool) {
+		return func(context.Context) (net.Conn, error) {
+			client, peer := net.Pipe()
+			_ = peer.Close()
+			return client, nil
+		}, true
+	})
+	start := make(chan struct{})
+	var wait sync.WaitGroup
+	wait.Add(2)
+	go func() {
+		defer wait.Done()
+		<-start
+		for index := range 1_000 {
+			if index%2 == 0 {
+				bridge.SetHostUDPHandler(handler)
+			} else {
+				bridge.SetHostUDPHandler(nil)
+			}
+		}
+	}()
+	go func() {
+		defer wait.Done()
+		<-start
+		for range 1_000 {
+			connection, _ := server.dial(t.Context(), "udp", "127.0.0.1:53")
+			if connection != nil {
+				_ = connection.Close()
+			}
+		}
+	}()
+	close(start)
+	wait.Wait()
 }
 
 var testSessionToken = tunnel.SessionToken{1}
