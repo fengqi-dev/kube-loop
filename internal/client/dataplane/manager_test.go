@@ -12,6 +12,7 @@ import (
 
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
+	"github.com/fengqi-dev/kube-loop/internal/client/socksbridge"
 	"github.com/fengqi-dev/kube-loop/internal/client/websocketmux"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
@@ -160,6 +161,77 @@ func TestRuntimeConfigUsesProfileSOCKSPort(t *testing.T) {
 	}
 	if got := runtimeConfig(base, profile.Profile{SOCKSPort: 2080}).ListenAddress; got != "127.0.0.1:2080" {
 		t.Fatalf("profile listen address = %q", got)
+	}
+}
+
+func TestModeValidationAndInvalidSwitches(t *testing.T) {
+	for _, mode := range []Mode{ModeSOCKS, ModeTUN} {
+		if err := mode.Validate(); err != nil {
+			t.Fatalf("mode %q validation error = %v", mode, err)
+		}
+	}
+	invalid := Mode("invalid")
+	if err := invalid.Validate(); err == nil {
+		t.Fatal("invalid Data Plane mode was accepted")
+	}
+	manager := &Manager{}
+	if _, err := manager.SwitchMode(t.Context(), "server", invalid); err == nil {
+		t.Fatal("invalid SwitchMode was accepted")
+	}
+	if _, err := manager.ConnectMode(
+		t.Context(),
+		profile.Profile{ID: "server"},
+		remote.Session{},
+		invalid,
+	); err == nil {
+		t.Fatal("invalid ConnectMode was accepted")
+	}
+}
+
+func TestManagerThinOperationsRequireConnectedRuntime(t *testing.T) {
+	manager := &Manager{active: map[string]*managedRuntime{}}
+	if _, err := manager.Metrics(t.Context(), "missing"); err == nil {
+		t.Fatal("Metrics accepted a missing Runtime")
+	}
+	if err := manager.TestConnectivity(t.Context(), "missing"); err == nil {
+		t.Fatal("TestConnectivity accepted a missing Runtime")
+	}
+	if _, err := manager.Logs(t.Context(), "missing"); err == nil {
+		t.Fatal("Logs accepted a missing Runtime")
+	}
+	if _, err := manager.ConfigJSON("missing"); err == nil {
+		t.Fatal("ConfigJSON accepted a missing Runtime")
+	}
+	if err := manager.UpdateDNSNamespace(t.Context(), "missing", "default"); err == nil {
+		t.Fatal("UpdateDNSNamespace accepted a missing Runtime")
+	}
+	if err := manager.UpdateHostAliases(t.Context(), "missing", nil); err == nil {
+		t.Fatal("UpdateHostAliases accepted a missing Runtime")
+	}
+	if _, err := manager.Dialer("missing"); err == nil {
+		t.Fatal("Dialer accepted a missing Runtime")
+	}
+}
+
+func TestManagerSetHostTCPHandlerUpdatesActiveRuntime(t *testing.T) {
+	bridge := &testBridge{}
+	runtime := &Runtime{bridge: bridge, status: Status{Mode: ModeTUN}}
+	manager := &Manager{
+		active:  map[string]*managedRuntime{"server": {runtime: runtime}},
+		hostTCP: map[string]socksbridge.HostTCPHandler{},
+	}
+	handler := func(string, uint16) (func(net.Conn), bool) { return nil, false }
+	if err := manager.SetHostTCPHandler(" server ", handler); err != nil {
+		t.Fatal(err)
+	}
+	bridge.mu.Lock()
+	installed := bridge.hostTCP != nil
+	bridge.mu.Unlock()
+	if !installed || manager.hostTCP["server"] == nil {
+		t.Fatal("Host TCP handler was not installed on Manager and Runtime")
+	}
+	if err := manager.SetHostTCPHandler("missing", handler); err == nil {
+		t.Fatal("Host TCP handler accepted a missing Runtime")
 	}
 }
 
