@@ -3,6 +3,7 @@ package sessionapi_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -328,6 +329,67 @@ func TestHeartbeatDisconnectsRuntimeAfterPolicyRevocation(t *testing.T) {
 	}
 }
 
+func TestServicePublicRuntimeContracts(t *testing.T) {
+	now := time.Date(2026, 8, 10, 3, 0, 0, 0, time.UTC)
+	server, handler, stateStore, _, identityID := newSessionTestServerWithHandler(
+		t,
+		func() time.Time { return now },
+		staticCapabilityDiscoverer{},
+	)
+	defer func() { _ = stateStore.Close() }()
+
+	created := sessionRequest(
+		t,
+		server,
+		http.MethodPost,
+		"/api/sessions?namespace=development",
+		identityID,
+		map[string]string{sessionapi.IdempotencyHeader: "runtime-contracts"},
+	)
+	document := decodeDocument(t, created)
+	identity := controlplaneapi.Identity{Subject: identityID, DeviceID: "device-1"}
+
+	active, apiError := handler.RequireActive(
+		context.Background(),
+		identity,
+		"development",
+		document.ID,
+	)
+	if apiError != nil {
+		t.Fatalf("RequireActive error = %v", apiError)
+	}
+	if active.ID != document.ID || active.Namespace != document.Namespace ||
+		active.Generation != document.Generation || active.NetworkSpecHash != document.NetworkSpecHash {
+		t.Fatalf("active Session = %#v, want document %#v", active, document)
+	}
+
+	_, apiError = handler.RequireActive(
+		context.Background(),
+		controlplaneapi.Identity{Subject: identityID, DeviceID: "other-device"},
+		"development",
+		document.ID,
+	)
+	if apiError == nil || apiError.Code != controlplaneapi.CodeNotFound {
+		t.Fatalf("foreign RequireActive error = %#v, want not found", apiError)
+	}
+
+	streamContext, release, err := handler.AttachRuntime(
+		context.Background(),
+		document.ID,
+		uuid.NewString(),
+	)
+	if err != nil {
+		t.Fatalf("AttachRuntime error = %v", err)
+	}
+	if streamContext.Err() != nil {
+		t.Fatalf("attached runtime context error = %v", streamContext.Err())
+	}
+	release()
+	if !errors.Is(streamContext.Err(), context.Canceled) {
+		t.Fatalf("released runtime context error = %v, want canceled", streamContext.Err())
+	}
+}
+
 func TestSessionInputValidationStopsBeforeStorageLookup(t *testing.T) {
 	now := time.Now()
 	server, stateStore, _, identityID := newSessionTestServer(t, func() time.Time { return now })
@@ -374,6 +436,19 @@ func newSessionTestServerWithCapabilities(
 	now func() time.Time,
 	discoverer sessionapi.CapabilityDiscoverer,
 ) (*controlplane.Server, *storage.Store, *auditCapture, string) {
+	server, _, stateStore, capture, identityID := newSessionTestServerWithHandler(
+		t,
+		now,
+		discoverer,
+	)
+	return server, stateStore, capture, identityID
+}
+
+func newSessionTestServerWithHandler(
+	t *testing.T,
+	now func() time.Time,
+	discoverer sessionapi.CapabilityDiscoverer,
+) (*controlplane.Server, *sessionapi.Service, *storage.Store, *auditCapture, string) {
 	t.Helper()
 	stateStore, err := storage.Open(context.Background(), storage.Config{
 		Backend: storage.BackendSQLite, SQLitePath: filepath.Join(t.TempDir(), "sessions.db"), ControlPlaneReplicas: 1,
@@ -431,7 +506,7 @@ func newSessionTestServerWithCapabilities(
 		_ = stateStore.Close()
 		t.Fatal(err)
 	}
-	return server, stateStore, capture, identityID
+	return server, handler, stateStore, capture, identityID
 }
 
 func sessionRequest(
