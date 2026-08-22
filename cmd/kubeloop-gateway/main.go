@@ -3,7 +3,8 @@ package main
 import (
 	"context"
 	"errors"
-	"log"
+	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -14,7 +15,10 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v5"
+	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 
+	internalcli "github.com/fengqi-dev/kube-loop/internal/cli"
 	"github.com/fengqi-dev/kube-loop/internal/gateway"
 	"github.com/fengqi-dev/kube-loop/internal/gateway/operations"
 	"github.com/fengqi-dev/kube-loop/internal/gateway/relayagent"
@@ -27,24 +31,87 @@ import (
 var version = "dev"
 
 func main() {
-	environment, err := loadGatewayEnvironment()
-	if err != nil {
-		log.Fatal(err)
+	signalContext, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	exitCode := executeGateway(signalContext, os.Args[1:], os.Stdout, os.Stderr)
+	stopSignals()
+	os.Exit(exitCode)
+}
+
+func executeGateway(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	return internalcli.Execute(ctx, newGatewayCommand(ctx, stdout), args, stdout, stderr)
+}
+
+func newGatewayCommand(ctx context.Context, stdout io.Writer) *cobra.Command {
+	configResolver := newGatewayConfigResolver()
+	command := &cobra.Command{
+		Use:     "kubeloop-gateway",
+		Short:   "Run the KubeLoop tunnel data plane",
+		Version: version,
+		Args:    internalcli.NoArgs,
+		RunE: func(*cobra.Command, []string) error {
+			environment, err := loadGatewayEnvironmentFrom(configResolver)
+			if err != nil {
+				return internalcli.Usage(err)
+			}
+			config, err := loadGatewayConfig(environment.ConfigFile)
+			if err != nil {
+				return internalcli.Usage(err)
+			}
+			config, err = applyGatewayOverrides(configResolver, config)
+			if err != nil {
+				return internalcli.Usage(err)
+			}
+			return runGateway(ctx, environment, config, stdout)
+		},
 	}
-	config, err := loadGatewayConfig(environment.ConfigFile)
-	if err != nil {
-		log.Fatal(err)
+	internalcli.ConfigureRoot(command, "kubeloop-gateway")
+	internalcli.AddVersionCommand(command, "kubeloop-gateway", version)
+	command.Flags().String("config", "", "unified KubeLoop YAML configuration file")
+	command.Flags().String("listen", "", "Gateway HTTP listen address")
+	command.Flags().String("relay-control-plane-url", "", "Relay Registry control plane URL")
+	command.Flags().String("relay-endpoint", "", "advertised Relay endpoint")
+	command.Flags().String("log-level", "", "log level: debug, info, warn, or error")
+	bindings := map[string]string{
+		"config": "gateway.config-file", "listen": "gateway.http.listen",
+		"relay-control-plane-url": "gateway.relay.control-plane-url",
+		"relay-endpoint":          "gateway.relay.endpoint", "log-level": "gateway.log-level",
 	}
+	for flagName, key := range bindings {
+		if err := configResolver.BindPFlag(key, command.Flags().Lookup(flagName)); err != nil {
+			panic(err)
+		}
+	}
+	return command
+}
+
+func applyGatewayOverrides(config *viper.Viper, loaded gatewayConfig) (gatewayConfig, error) {
+	config.SetDefault("gateway.http.listen", loaded.HTTP.Listen)
+	config.SetDefault("gateway.relay.control-plane-url", loaded.Relay.ControlPlaneURL)
+	config.SetDefault("gateway.relay.endpoint", loaded.Relay.Endpoint)
+	config.SetDefault("gateway.log-level", loaded.LogLevel)
+	loaded.HTTP.Listen = config.GetString("gateway.http.listen")
+	loaded.Relay.ControlPlaneURL = config.GetString("gateway.relay.control-plane-url")
+	loaded.Relay.Endpoint = config.GetString("gateway.relay.endpoint")
+	loaded.LogLevel = config.GetString("gateway.log-level")
+	if err := loaded.normalizeAndValidate(); err != nil {
+		return gatewayConfig{}, err
+	}
+	return loaded, nil
+}
+
+func runGateway(
+	ctx context.Context,
+	environment gatewayEnvironment,
+	config gatewayConfig,
+	stdout io.Writer,
+) error {
 	parsedLogLevel, err := logging.ParseLevel(config.LogLevel)
 	if err != nil {
-		log.Fatal(err)
+		return fmt.Errorf("parse log level: %w", err)
 	}
-	logHandler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: parsedLogLevel})
+	logHandler := slog.NewJSONHandler(stdout, &slog.HandlerOptions{Level: parsedLogLevel})
 	componentLogger := slog.New(logHandler).With("component", "data-plane")
 	logger := slog.NewLogLogger(componentLogger.Handler(), slog.LevelInfo)
-	errorLogger := slog.NewLogLogger(componentLogger.Handler(), slog.LevelError)
-	signalContext, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stopSignals()
 	server := gateway.NewServer(componentLogger, 10*time.Second)
 	errCh := make(chan error, 1)
 	var httpHandler *websocketmux.Handler
@@ -57,7 +124,7 @@ func main() {
 		RequiredOperation: "tunnel", ReplayEntries: config.Relay.ReplayEntries,
 	})
 	if authenticatorErr != nil {
-		errorLogger.Fatal(authenticatorErr)
+		return fmt.Errorf("create RelayTicket authenticator: %w", authenticatorErr)
 	}
 	handler, handlerErr := websocketmux.NewHandler(websocketmux.ServerConfig{
 		Authenticator: websocketmux.AuthenticatorFunc(func(request *http.Request) (websocketmux.Identity, error) {
@@ -92,20 +159,20 @@ func main() {
 		},
 	})
 	if handlerErr != nil {
-		errorLogger.Fatal(handlerErr)
+		return fmt.Errorf("create WebSocket handler: %w", handlerErr)
 	}
 	httpHandler = handler
 	operationsState := operationsGatewayState{gateway: server}
 	advertisedEndpoint, endpointErr := expandRelayEndpoint(config.Relay.Endpoint, environment)
 	if endpointErr != nil {
-		errorLogger.Fatal(endpointErr)
+		return fmt.Errorf("expand Relay endpoint: %w", endpointErr)
 	}
 	httpClient, clientErr := relayagent.NewHTTPClient(relayagent.ClientTLSConfig{
 		CertificateFile: config.Relay.ClientCertificateFile, PrivateKeyFile: config.Relay.ClientPrivateKeyFile,
 		ServerCAFile: config.Relay.ServerCAFile, ServerName: config.Relay.ServerName,
 	})
 	if clientErr != nil {
-		errorLogger.Fatal(clientErr)
+		return fmt.Errorf("create Relay Registry HTTP client: %w", clientErr)
 	}
 	runtimeReporter = &relayRuntimeReporter{
 		gateway: server, websocket: handler,
@@ -123,23 +190,24 @@ func main() {
 		Reporter:        runtimeReporter, Applier: dynamicAuthenticator, Logger: logger,
 	})
 	if agentErr != nil {
-		errorLogger.Fatal(agentErr)
+		return fmt.Errorf("create Relay agent: %w", agentErr)
 	}
-	if agentErr := controlAgent.Start(signalContext); agentErr != nil {
-		errorLogger.Fatal(agentErr)
+	if agentErr := controlAgent.Start(ctx); agentErr != nil {
+		return fmt.Errorf("start Relay agent: %w", agentErr)
 	}
+	defer controlAgent.Stop()
 	operationsState.agent = controlAgent
 	logger.Printf("Data Plane registered as %s", controlAgent.RelayID())
 	trafficHandler, trafficErr := trafficapi.New(trafficapi.Config{
 		GatewayIP: environment.PodIP, ControlPlane: controlAgent,
 	})
 	if trafficErr != nil {
-		errorLogger.Fatal(trafficErr)
+		return fmt.Errorf("create traffic handler: %w", trafficErr)
 	}
 	server.SetTrafficHandler(trafficHandler)
-	httpListener, listenErr := (&net.ListenConfig{}).Listen(signalContext, "tcp", config.HTTP.Listen)
+	httpListener, listenErr := (&net.ListenConfig{}).Listen(ctx, "tcp", config.HTTP.Listen)
 	if listenErr != nil {
-		errorLogger.Fatal(listenErr)
+		return fmt.Errorf("listen on %s: %w", config.HTTP.Listen, listenErr)
 	}
 	router := echo.New()
 	router.Use(httpmiddleware.RequestID())
@@ -158,7 +226,7 @@ func main() {
 		}
 		http.NotFound(ctx.Response(), ctx.Request())
 	}
-	httpContext, cancel := context.WithCancel(context.Background())
+	httpContext, cancel := context.WithCancel(ctx)
 	cancelHTTP = cancel
 	go func() {
 		logger.Printf("WebSocket Gateway listening on %s%s", config.HTTP.Listen, config.HTTP.Path)
@@ -171,8 +239,7 @@ func main() {
 	case err := <-errCh:
 		serveFinished = true
 		serveError = err
-		stopSignals()
-	case <-signalContext.Done():
+	case <-ctx.Done():
 	}
 	logger.Printf("Gateway draining for up to %s", config.DrainTimeout.Duration)
 	server.BeginDrain()
@@ -189,14 +256,14 @@ func main() {
 		logger.Printf("Gateway drain deadline reached: %v", drainErr)
 	}
 	cancelHTTP()
-	controlAgent.Stop()
 	if !serveFinished {
 		if err := <-errCh; err != nil {
 			serveError = err
 		}
 	}
 	if serveError != nil {
-		errorLogger.Fatalf("Gateway listener stopped: %v", serveError)
+		return fmt.Errorf("gateway listener stopped: %w", serveError)
 	}
 	logger.Print("Gateway stopped")
+	return nil
 }

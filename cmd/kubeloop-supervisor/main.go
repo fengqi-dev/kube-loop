@@ -4,12 +4,15 @@ package main
 
 import (
 	"context"
-	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"syscall"
 
+	"github.com/spf13/cobra"
+
+	internalcli "github.com/fengqi-dev/kube-loop/internal/cli"
 	"github.com/fengqi-dev/kube-loop/internal/helper"
 	helperinstall "github.com/fengqi-dev/kube-loop/internal/helper/install"
 	"github.com/fengqi-dev/kube-loop/internal/supervisor"
@@ -24,97 +27,91 @@ var version = channelDev
 
 func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	if err := run(ctx, os.Args[1:]); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		cancel()
-		os.Exit(1)
-	}
+	exitCode := executeSupervisor(ctx, os.Args[1:], os.Stdout, os.Stderr)
 	cancel()
+	os.Exit(exitCode)
 }
 
-func run(ctx context.Context, args []string) error {
-	if len(args) == 0 {
-		return fmt.Errorf("usage: kubeloop-supervisor <run|install|version>")
-	}
-	switch args[0] {
-	case "run":
-		flags := flag.NewFlagSet("run", flag.ContinueOnError)
-		flags.SetOutput(os.Stderr)
-		channel := flags.String("channel", channelRelease, "installation channel")
-		if err := flags.Parse(args[1:]); err != nil {
-			return err
-		}
-		if flags.NArg() != 0 {
-			return fmt.Errorf("run does not accept positional arguments")
-		}
-		if err := configureChannel(*channel, ""); err != nil {
-			return err
-		}
-		config := supervisor.CurrentConfig()
-		auth, err := supervisor.ReadAuth(config)
-		if err != nil {
-			return err
-		}
-		return supervisor.NewServer(config, auth, nil).Serve(ctx)
-	case "version":
-		if len(args) != 1 {
-			return fmt.Errorf("version does not accept arguments")
-		}
-		fmt.Println(version)
-		return nil
-	case "install":
-		return runInstall(args[1:])
-	default:
-		return fmt.Errorf("unknown command %q", args[0])
-	}
+func executeSupervisor(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	return internalcli.Execute(ctx, newSupervisorCommand(), args, stdout, stderr)
 }
 
-func runInstall(args []string) error {
-	flags := flag.NewFlagSet("install", flag.ContinueOnError)
-	flags.SetOutput(os.Stderr)
-	source := flags.String("source", "", "supervisor source")
-	sha := flags.String("sha256", "", "supervisor SHA-256")
-	worker := flags.String("worker", "", "worker source")
-	workerSHA := flags.String("worker-sha256", "", "worker SHA-256")
-	workerVersion := flags.String("worker-version", "", "worker version")
-	channel := flags.String("channel", "", "installation channel")
-	token := flags.String("token", "", "IPC token")
-	uid := flags.Int("uid", -1, "authorized UID")
-	home := flags.String("home", "", "authorized home")
-	singBox := flags.String("sing-box", "", "sing-box path")
-	if err := flags.Parse(args); err != nil {
-		return err
+func newSupervisorCommand() *cobra.Command {
+	root := &cobra.Command{Use: "kubeloop-supervisor", Short: "Manage the privileged KubeLoop worker", Version: version}
+	internalcli.ConfigureRoot(root, "kubeloop-supervisor")
+	internalcli.AddVersionCommand(root, "kubeloop-supervisor", version)
+	root.AddCommand(newSupervisorRunCommand(), newSupervisorInstallCommand())
+	return root
+}
+
+func newSupervisorRunCommand() *cobra.Command {
+	channel := channelRelease
+	command := &cobra.Command{
+		Use:   "run",
+		Short: "Run the supervisor service",
+		Args:  internalcli.NoArgs,
+		RunE: func(command *cobra.Command, _ []string) error {
+			if err := configureChannel(channel, ""); err != nil {
+				return internalcli.Usage(err)
+			}
+			config := supervisor.CurrentConfig()
+			auth, err := supervisor.ReadAuth(config)
+			if err != nil {
+				return err
+			}
+			return supervisor.NewServer(config, auth, nil).Serve(command.Context())
+		},
 	}
-	missingValue := *source == "" || *sha == "" || *worker == "" || *workerSHA == "" ||
-		*workerVersion == "" || *channel == "" || *token == "" || *uid < 0 || *home == "" || *singBox == ""
-	if flags.NArg() != 0 || missingValue {
-		return fmt.Errorf(
-			"install requires source, sha256, worker, worker-sha256, worker-version, " +
-				"channel, token, uid, home, and sing-box",
-		)
+	command.Flags().StringVar(&channel, "channel", channelRelease, "installation channel")
+	return command
+}
+
+func newSupervisorInstallCommand() *cobra.Command {
+	var source, sha, worker, workerSHA, workerVersion, channel, token, home, singBox string
+	uid := -1
+	command := &cobra.Command{
+		Use:    "install",
+		Short:  "Install or upgrade the supervisor and worker",
+		Args:   internalcli.NoArgs,
+		Hidden: true,
+		PreRunE: func(*cobra.Command, []string) error {
+			missingValue := source == "" || sha == "" || worker == "" || workerSHA == "" ||
+				workerVersion == "" || channel == "" || token == "" || uid < 0 || home == "" || singBox == ""
+			if missingValue {
+				return internalcli.Usage(fmt.Errorf(
+					"install requires source, sha256, worker, worker-sha256, worker-version, channel, token, uid, home, and sing-box",
+				))
+			}
+			return nil
+		},
+		RunE: func(*cobra.Command, []string) error {
+			if err := configureChannel(channel, workerVersion); err != nil {
+				return internalcli.Usage(err)
+			}
+			actualWorkerSHA, err := hashFile(worker)
+			if err != nil {
+				return err
+			}
+			if actualWorkerSHA != workerSHA {
+				return fmt.Errorf("worker SHA-256 mismatch")
+			}
+			if err := helperinstall.InstallFromCLI(worker, token, uid, workerVersion, home, "", singBox); err != nil {
+				return err
+			}
+			return supervisor.Install(source, sha, token, uid)
+		},
 	}
-	if err := configureChannel(*channel, *workerVersion); err != nil {
-		return err
-	}
-	actualWorkerSHA, err := hashFile(*worker)
-	if err != nil {
-		return err
-	}
-	if actualWorkerSHA != *workerSHA {
-		return fmt.Errorf("worker SHA-256 mismatch")
-	}
-	if err := helperinstall.InstallFromCLI(
-		*worker,
-		*token,
-		*uid,
-		*workerVersion,
-		*home,
-		"",
-		*singBox,
-	); err != nil {
-		return err
-	}
-	return supervisor.Install(*source, *sha, *token, *uid)
+	command.Flags().StringVar(&source, "source", "", "supervisor source")
+	command.Flags().StringVar(&sha, "sha256", "", "supervisor SHA-256")
+	command.Flags().StringVar(&worker, "worker", "", "worker source")
+	command.Flags().StringVar(&workerSHA, "worker-sha256", "", "worker SHA-256")
+	command.Flags().StringVar(&workerVersion, "worker-version", "", "worker version")
+	command.Flags().StringVar(&channel, "channel", "", "installation channel")
+	command.Flags().StringVar(&token, "token", "", "IPC token")
+	command.Flags().IntVar(&uid, "uid", -1, "authorized UID")
+	command.Flags().StringVar(&home, "home", "", "authorized home")
+	command.Flags().StringVar(&singBox, "sing-box", "", "sing-box path")
+	return command
 }
 
 func configureChannel(channel, workerVersion string) error {

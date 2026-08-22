@@ -1,21 +1,30 @@
 package main
 
 import (
-	"fmt"
 	"strings"
 
-	env "github.com/Netflix/go-env"
+	"github.com/spf13/viper"
+
+	internalcli "github.com/fengqi-dev/kube-loop/internal/cli"
 )
 
 type controlPlaneEnvironment struct {
-	PodName string `env:"KUBELOOP_POD_NAME"`
+	PodName string
 }
 
-func loadControlPlaneEnvironment() (controlPlaneEnvironment, error) {
-	var environment controlPlaneEnvironment
-	if _, err := env.UnmarshalFromEnviron(&environment); err != nil {
-		return controlPlaneEnvironment{}, fmt.Errorf("decode Control Plane environment: %w", err)
-	}
+func loadControlPlaneEnvironment() controlPlaneEnvironment {
+	return loadControlPlaneEnvironmentFrom(newControlPlaneConfigResolver())
+}
+
+func newControlPlaneConfigResolver() *viper.Viper {
+	config := internalcli.NewViper()
+	config.SetDefault("control-plane.config-file", "")
+	config.SetDefault("pod.name", "")
+	return config
+}
+
+func loadControlPlaneEnvironmentFrom(config *viper.Viper) controlPlaneEnvironment {
+	environment := controlPlaneEnvironment{PodName: config.GetString("pod.name")}
 	environment.PodName = strings.TrimSpace(environment.PodName)
-	return environment, nil
+	return environment
 }

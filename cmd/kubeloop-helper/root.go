@@ -63,7 +63,7 @@ func newRootCommand(dependencies commandDependencies, commandVersion string) *co
 			return command.Help()
 		},
 	}
-	root.SetVersionTemplate("{{.Version}}\n")
+	root.SetVersionTemplate("kubeloop-helper {{.Version}}\n")
 	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {
 		return &usageError{err: err}
 	})

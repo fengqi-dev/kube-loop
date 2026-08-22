@@ -2,8 +2,9 @@ package main
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
-	"os"
 
 	"github.com/google/uuid"
 
@@ -29,32 +30,30 @@ func bootstrapControlPlane(
 	signalContext context.Context,
 	config loadedControlPlaneConfig,
 	logger *slog.Logger,
-) *bootstrapRuntime {
+) (_ *bootstrapRuntime, resultErr error) {
 	storageConfig := config.Storage
 	stateStore, err := controlplanestorage.Open(signalContext, storageConfig)
 	if err != nil {
-		logger.Error("initialize control plane storage failed", "error", err)
-		os.Exit(1)
+		return nil, fmt.Errorf("initialize control plane storage: %w", err)
 	}
+	defer func() {
+		if resultErr != nil {
+			resultErr = errors.Join(resultErr, stateStore.Close())
+		}
+	}()
 	maintenanceWorker, err := maintenance.New(stateStore, logger, maintenance.Config{
 		Interval: config.MaintenanceInterval, BatchSize: config.Document.Maintenance.BatchSize,
 	})
 	if err != nil {
-		_ = stateStore.Close()
-		logger.Error("initialize Control Plane maintenance worker failed", "error", err)
-		os.Exit(2)
+		return nil, fmt.Errorf("initialize Control Plane maintenance worker: %w", err)
 	}
 	localUsers, err := initializeLocalUsers(signalContext, stateStore)
 	if err != nil {
-		_ = stateStore.Close()
-		logger.Error("initialize Management Plane administrator failed", "error", err)
-		os.Exit(2)
+		return nil, fmt.Errorf("initialize Management Plane administrator: %w", err)
 	}
 	iamBootstrap, err := adminbootstrap.New(stateStore, localUsers)
 	if err != nil {
-		_ = stateStore.Close()
-		logger.Error("initialize IAM bootstrap failed", "error", err)
-		os.Exit(2)
+		return nil, fmt.Errorf("initialize IAM bootstrap: %w", err)
 	}
 	bootstrapConfig := config.Document.Admin.Bootstrap
 	if bootstrapConfig.Enabled {
@@ -62,9 +61,7 @@ func bootstrapControlPlane(
 		if bootstrapConfig.PasswordFile != "" {
 			configuredPassword, err = readInitialPasswordFile(bootstrapConfig.PasswordFile)
 			if err != nil {
-				_ = stateStore.Close()
-				logger.Error("load default IAM identity password failed", "error", err)
-				os.Exit(2)
+				return nil, fmt.Errorf("load default IAM identity password: %w", err)
 			}
 		}
 		result, initialPassword, created, bootstrapErr := iamBootstrap.CompleteDefault(
@@ -77,9 +74,7 @@ func bootstrapControlPlane(
 		)
 		clear(configuredPassword)
 		if bootstrapErr != nil {
-			_ = stateStore.Close()
-			logger.Error("initialize default IAM identity failed", "error", bootstrapErr)
-			os.Exit(2)
+			return nil, fmt.Errorf("initialize default IAM identity: %w", bootstrapErr)
 		}
 		if created {
 			if bootstrapConfig.PasswordFile == "" {
@@ -93,9 +88,7 @@ func bootstrapControlPlane(
 	} else {
 		bootstrapToken, bootstrapExpiresAt, bootstrapErr := iamBootstrap.EnsureToken(signalContext)
 		if bootstrapErr != nil {
-			_ = stateStore.Close()
-			logger.Error("initialize IAM bootstrap token failed", "error", bootstrapErr)
-			os.Exit(2)
+			return nil, fmt.Errorf("initialize IAM bootstrap token: %w", bootstrapErr)
 		}
 		if bootstrapToken != "" {
 			logger.Warn("one-time IAM bootstrap token generated; it will not be shown again",
@@ -104,17 +97,15 @@ func bootstrapControlPlane(
 	}
 	kubernetesConfig := config.Kubernetes
 	if kubernetesConfig.UserAgent == controlplanekubernetes.DefaultUserAgent {
-		kubernetesConfig.UserAgent = "kube-loop-control-plane/" + version
+		kubernetesConfig.UserAgent = "kubeloop-control-plane/" + version
 	}
 	kubernetesProvider, err := controlplanekubernetes.NewInCluster(kubernetesConfig)
 	if err != nil {
-		_ = stateStore.Close()
-		logger.Error("initialize in-cluster Kubernetes Provider failed", "error", err)
-		os.Exit(1)
+		return nil, fmt.Errorf("initialize in-cluster Kubernetes Provider: %w", err)
 	}
 	return &bootstrapRuntime{
 		Store: stateStore, MaintenanceWorker: maintenanceWorker, LocalUsers: localUsers, IAMBootstrap: iamBootstrap,
 		Authorizer:       authorization.NewAuthenticated(),
 		KubernetesConfig: kubernetesConfig, KubernetesProvider: kubernetesProvider,
-	}
+	}, nil
 }

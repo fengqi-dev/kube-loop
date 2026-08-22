@@ -2,23 +2,38 @@ package main
 
 import (
 	"errors"
-	"fmt"
 	"strings"
 
-	env "github.com/Netflix/go-env"
+	"github.com/spf13/viper"
+
+	internalcli "github.com/fengqi-dev/kube-loop/internal/cli"
 )
 
 type gatewayEnvironment struct {
-	ConfigFile string `env:"KUBELOOP_GATEWAY_CONFIG_FILE,required=true"`
-	PodName    string `env:"KUBELOOP_POD_NAME"`
-	PodUID     string `env:"KUBELOOP_POD_UID"`
-	PodIP      string `env:"KUBELOOP_POD_IP"`
+	ConfigFile string
+	PodName    string
+	PodUID     string
+	PodIP      string
 }
 
 func loadGatewayEnvironment() (gatewayEnvironment, error) {
-	var environment gatewayEnvironment
-	if _, err := env.UnmarshalFromEnviron(&environment); err != nil {
-		return gatewayEnvironment{}, fmt.Errorf("decode Gateway environment: %w", err)
+	return loadGatewayEnvironmentFrom(newGatewayConfigResolver())
+}
+
+func newGatewayConfigResolver() *viper.Viper {
+	config := internalcli.NewViper()
+	for _, key := range []string{"gateway.config-file", "pod.name", "pod.uid", "pod.ip"} {
+		config.SetDefault(key, "")
+	}
+	return config
+}
+
+func loadGatewayEnvironmentFrom(config *viper.Viper) (gatewayEnvironment, error) {
+	environment := gatewayEnvironment{
+		ConfigFile: config.GetString("gateway.config-file"),
+		PodName:    config.GetString("pod.name"),
+		PodUID:     config.GetString("pod.uid"),
+		PodIP:      config.GetString("pod.ip"),
 	}
 	environment.ConfigFile = strings.TrimSpace(environment.ConfigFile)
 	environment.PodName = strings.TrimSpace(environment.PodName)

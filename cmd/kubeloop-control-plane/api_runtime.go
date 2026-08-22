@@ -2,8 +2,8 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
-	"os"
 
 	"github.com/fengqi-dev/kube-loop/internal/controlplane"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/authorization"
@@ -37,7 +37,13 @@ type apiRuntime struct {
 	BindingRecovery *trafficbindingclient.Reconciler
 }
 
-//nolint:gocyclo // This composition root validates each independently constructed API dependency.
+type trafficTaskRuntime struct {
+	portForwards *portforwardservice.Service
+	exchanges    *exchangeapi.Service
+	mirrors      *mirrorapi.Service
+	previews     *previewapi.Service
+}
+
 func buildAPIRuntime(
 	ctx context.Context,
 	config loadedControlPlaneConfig,
@@ -46,43 +52,33 @@ func buildAPIRuntime(
 	store *controlplanestorage.Store,
 	authorizer authorization.Authorizer,
 	kubernetesProvider *controlplanekubernetes.Provider,
-) *apiRuntime {
+) (*apiRuntime, error) {
 	bindingRESTConfig, err := kubernetesProvider.SystemRESTConfig()
 	if err != nil {
-		_ = store.Close()
-		logger.Error("initialize TrafficBinding REST configuration failed", "error", err)
-		os.Exit(1)
+		return nil, fmt.Errorf("initialize TrafficBinding REST configuration: %w", err)
 	}
 	trafficBindings, err := trafficbindingclient.NewForRESTConfig(bindingRESTConfig, trafficbindingclient.Config{
 		ControlPlaneID: config.Document.API.ServiceID,
 	})
 	if err != nil {
-		_ = store.Close()
-		logger.Error("initialize TrafficBinding client failed", "error", err)
-		os.Exit(1)
+		return nil, fmt.Errorf("initialize TrafficBinding client: %w", err)
 	}
 	bindingRecovery, err := trafficbindingclient.NewReconciler(
 		trafficBindings, store.Tasks(), store.Sessions(), logger, trafficbindingclient.ReconcilerConfig{},
 	)
 	if err != nil {
-		_ = store.Close()
-		logger.Error("initialize TrafficBinding recovery worker failed", "error", err)
-		os.Exit(2)
+		return nil, fmt.Errorf("initialize TrafficBinding recovery worker: %w", err)
 	}
 	kubernetesAPI, err := kubeapi.New(
 		kubernetesProvider,
 		kubeapi.WithGatewayVersion(version),
 	)
 	if err != nil {
-		_ = store.Close()
-		logger.Error("initialize Kubernetes API handler failed", "error", err)
-		os.Exit(1)
+		return nil, fmt.Errorf("initialize Kubernetes API handler: %w", err)
 	}
 	networkDiscoverer, err := networkapi.NewDiscoverer(kubernetesProvider)
 	if err != nil {
-		_ = store.Close()
-		logger.Error("initialize NetworkSpec discoverer failed", "error", err)
-		os.Exit(1)
+		return nil, fmt.Errorf("initialize NetworkSpec discoverer: %w", err)
 	}
 	sessionRuntime := sessionregistry.New(ctx)
 	sessionAPI, err := sessionapi.New(store, sessionapi.Config{
@@ -90,35 +86,25 @@ func buildAPIRuntime(
 		Networks: networkDiscoverer, Capabilities: kubernetesAPI, Registry: sessionRuntime,
 	})
 	if err != nil {
-		_ = store.Close()
-		logger.Error("initialize Cluster Session API failed", "error", err)
-		os.Exit(2)
+		return nil, fmt.Errorf("initialize Cluster Session API: %w", err)
 	}
 	sessionRecovery, err := sessionregistry.NewReconciler(
 		store, logger, sessionregistry.RecoveryConfig{},
 	)
 	if err != nil {
-		_ = store.Close()
-		logger.Error("initialize Session runtime recovery worker failed", "error", err)
-		os.Exit(2)
+		return nil, fmt.Errorf("initialize Session runtime recovery worker: %w", err)
 	}
 	relaySigningKey, err := relayticket.LoadSigningKey(config.Document.Relay.Ticket.SigningKeyFile)
 	if err != nil {
-		_ = store.Close()
-		logger.Error("load RelayTicket signing key failed", "error", err)
-		os.Exit(2)
+		return nil, fmt.Errorf("load RelayTicket signing key: %w", err)
 	}
 	relaySigner, err := relayticket.NewSigner(config.Document.Relay.Ticket.KeyID, relaySigningKey)
 	if err != nil {
-		_ = store.Close()
-		logger.Error("initialize RelayTicket signer failed", "error", err)
-		os.Exit(2)
+		return nil, fmt.Errorf("initialize RelayTicket signer: %w", err)
 	}
 	systemClient, err := kubernetesProvider.SystemClient()
 	if err != nil {
-		_ = store.Close()
-		logger.Error("initialize Relay Registry Kubernetes client failed", "error", err)
-		os.Exit(1)
+		return nil, fmt.Errorf("initialize Relay Registry Kubernetes client: %w", err)
 	}
 	relayRegistry, err := newRelayRegistryRuntime(relayRegistryOptions{
 		ListenAddress:       config.Document.Relay.Registry.Listen,
@@ -144,16 +130,12 @@ func buildAPIRuntime(
 		Logger:              logger,
 	})
 	if err != nil {
-		_ = store.Close()
-		logger.Error("initialize Relay Registry failed", "error", err)
-		os.Exit(2)
+		return nil, fmt.Errorf("initialize Relay Registry: %w", err)
 	}
 	if relayRegistry != nil {
 		desiredStates, loadErr := store.RelayDesiredStates().List(ctx)
 		if loadErr != nil {
-			_ = store.Close()
-			logger.Error("load durable Relay desired states failed", "error", loadErr)
-			os.Exit(2)
+			return nil, fmt.Errorf("load durable Relay desired states: %w", loadErr)
 		}
 		for _, desired := range desiredStates {
 			restoreErr := relayRegistry.registry.RestoreDesiredState(
@@ -161,15 +143,11 @@ func buildAPIRuntime(
 				relaycontrol.State(desired.DesiredState),
 			)
 			if restoreErr != nil {
-				_ = store.Close()
-				logger.Error(
-					"restore durable Relay desired state failed",
-					"relay_id",
+				return nil, fmt.Errorf(
+					"restore durable Relay desired state for %s: %w",
 					desired.RelayID,
-					"error",
 					restoreErr,
 				)
-				os.Exit(2)
 			}
 		}
 	}
@@ -178,150 +156,52 @@ func buildAPIRuntime(
 		Allocator: relayRegistry.registry, Topology: relayRegistry.allocationTopology,
 	})
 	if err != nil {
-		_ = store.Close()
-		logger.Error("initialize RelayTicket API failed", "error", err)
-		os.Exit(2)
+		return nil, fmt.Errorf("initialize RelayTicket API: %w", err)
 	}
-	portForwardResolver, err := controlplanekubernetes.NewPortForwardResolver(kubernetesProvider)
-	if err != nil {
-		_ = store.Close()
-		logger.Error("initialize Port Forward target resolver failed", "error", err)
-		os.Exit(2)
-	}
-	portForwardBindings, err := portforwardapi.NewTrafficBindingManager(trafficBindings)
-	if err != nil {
-		_ = store.Close()
-		logger.Error("initialize Port Forward TrafficBinding manager failed", "error", err)
-		os.Exit(2)
-	}
-	portForwardService, err := portforwardservice.New(
-		store, portForwardResolver, portForwardBindings, portforwardservice.Config{},
+	trafficTasks, err := buildTrafficTaskRuntime(
+		store, sessionAPI, kubernetesProvider, trafficBindings, relayRegistry,
 	)
 	if err != nil {
-		_ = store.Close()
-		logger.Error("initialize Port Forward Task API failed", "error", err)
-		os.Exit(2)
-	}
-	serviceResolver, err := controlplanekubernetes.NewServiceResolver(kubernetesProvider)
-	if err != nil {
-		_ = store.Close()
-		logger.Error("initialize Exchange Service resolver failed", "error", err)
-		os.Exit(2)
-	}
-	exchangeMutator, err := exchangeapi.NewTrafficBindingResourceMutator(kubernetesProvider, store, trafficBindings)
-	if err != nil {
-		_ = store.Close()
-		logger.Error("initialize Exchange resource mutator failed", "error", err)
-		os.Exit(2)
-	}
-	exchangeAPI, err := exchangeapi.New(
-		store, sessionAPI, serviceResolver, exchangeMutator,
-		exchangeapi.Config{},
-	)
-	if err != nil {
-		_ = store.Close()
-		logger.Error("initialize Exchange Task API failed", "error", err)
-		os.Exit(2)
-	}
-	mirrorMutator, err := mirrorapi.NewTrafficBindingResourceMutator(kubernetesProvider, store, trafficBindings)
-	if err != nil {
-		_ = store.Close()
-		logger.Error("initialize Mirror resource mutator failed", "error", err)
-		os.Exit(2)
-	}
-	mirrorAPI, err := mirrorapi.New(
-		store, sessionAPI, serviceResolver, mirrorMutator,
-		mirrorapi.Config{},
-	)
-	if err != nil {
-		_ = store.Close()
-		logger.Error("initialize Mirror Task API failed", "error", err)
-		os.Exit(2)
-	}
-	previewResources, err := previewapi.NewTrafficBindingResourceManager(store, trafficBindings)
-	if err != nil {
-		_ = store.Close()
-		logger.Error("initialize Preview resource manager failed", "error", err)
-		os.Exit(2)
-	}
-	previewAPI, err := previewapi.New(
-		store, sessionAPI, previewResources,
-		previewapi.Config{},
-	)
-	if err != nil {
-		_ = store.Close()
-		logger.Error("initialize Preview Task API failed", "error", err)
-		os.Exit(2)
-	}
-	if relayRegistry != nil {
-		trafficDispatcher, dispatcherErr := trafficcontrolapi.NewDispatcher(exchangeAPI, mirrorAPI, previewAPI)
-		if dispatcherErr != nil {
-			_ = store.Close()
-			logger.Error("initialize traffic control dispatcher failed", "error", dispatcherErr)
-			os.Exit(2)
-		}
-		trafficAPI, trafficErr := trafficcontrolapi.New(relayRegistry.authenticator, trafficDispatcher)
-		if trafficErr == nil {
-			trafficErr = relayRegistry.handler.Mount(trafficAPI)
-		}
-		if trafficErr != nil {
-			_ = store.Close()
-			logger.Error("initialize Gateway traffic control API failed", "error", trafficErr)
-			os.Exit(2)
-		}
+		return nil, err
 	}
 	podExecutor, err := execapi.NewKubernetesExecutor(kubernetesProvider)
 	if err != nil {
-		_ = store.Close()
-		logger.Error("initialize Kubernetes Pod executor failed", "error", err)
-		os.Exit(2)
+		return nil, fmt.Errorf("initialize Kubernetes Pod executor: %w", err)
 	}
 	execAPI, err := execapi.New(store, sessionAPI, podExecutor, execapi.Config{Authorizer: authorizer})
 	if err != nil {
-		_ = store.Close()
-		logger.Error("initialize Pod exec Task API failed", "error", err)
-		os.Exit(2)
+		return nil, fmt.Errorf("initialize Pod exec Task API: %w", err)
 	}
 	fileTargetResolver, err := controlplanekubernetes.NewContainerResolver(kubernetesProvider)
 	if err != nil {
-		_ = store.Close()
-		logger.Error("initialize Kubernetes file target resolver failed", "error", err)
-		os.Exit(2)
+		return nil, fmt.Errorf("initialize Kubernetes file target resolver: %w", err)
 	}
 	fileConfig := config.Files
 	fileConfig.Authorizer = authorizer
 	fileExecutor, err := fileapi.NewKubernetesTransferExecutor(podExecutor, fileConfig.MaximumBytes)
 	if err != nil {
-		_ = store.Close()
-		logger.Error("initialize Kubernetes file transfer executor failed", "error", err)
-		os.Exit(2)
+		return nil, fmt.Errorf("initialize Kubernetes file transfer executor: %w", err)
 	}
 	fileAPI, err := fileapi.New(store, sessionAPI, fileTargetResolver, fileExecutor, fileConfig)
 	if err != nil {
-		_ = store.Close()
-		logger.Error("initialize file transfer Task API failed", "error", err)
-		os.Exit(2)
+		return nil, fmt.Errorf("initialize file transfer Task API: %w", err)
 	}
 	fileOperator, err := fileopsapi.NewKubernetesOperator(podExecutor)
 	if err != nil {
-		_ = store.Close()
-		logger.Error("initialize Kubernetes remote file operator failed", "error", err)
-		os.Exit(2)
+		return nil, fmt.Errorf("initialize Kubernetes remote file operator: %w", err)
 	}
 	fileOperationsAPI, err := fileopsapi.New(store, sessionAPI, fileTargetResolver, fileOperator, fileopsapi.Config{
 		AllowedPathRoots: fileConfig.AllowedPathRoots,
 	})
 	if err != nil {
-		_ = store.Close()
-		logger.Error("initialize remote file operation API failed", "error", err)
-		os.Exit(2)
+		return nil, fmt.Errorf("initialize remote file operation API: %w", err)
 	}
 	apiRoutes := controlplane.APIRoutes{
 		Tickets:        ticketapi.NewRoutes(relayTicketService, sessionAPI).Endpoints(),
-		PortForwards:   portforwardapi.NewRoutes(portForwardService, sessionAPI).Endpoints(),
-		Exchanges:      exchangeapi.NewRoutes(exchangeAPI).Endpoints(),
-		Mirrors:        mirrorapi.NewRoutes(mirrorAPI).Endpoints(),
-		Previews:       previewapi.NewRoutes(previewAPI).Endpoints(),
+		PortForwards:   portforwardapi.NewRoutes(trafficTasks.portForwards, sessionAPI).Endpoints(),
+		Exchanges:      exchangeapi.NewRoutes(trafficTasks.exchanges).Endpoints(),
+		Mirrors:        mirrorapi.NewRoutes(trafficTasks.mirrors).Endpoints(),
+		Previews:       previewapi.NewRoutes(trafficTasks.previews).Endpoints(),
 		FileOperations: fileopsapi.NewRoutes(fileOperationsAPI).Endpoints(),
 		FileTransfers:  fileapi.NewRoutes(fileAPI).Endpoints(),
 		Exec:           execapi.NewRoutes(execAPI).Endpoints(),
@@ -332,5 +212,72 @@ func buildAPIRuntime(
 		Routes: apiRoutes, RelayRegistry: relayRegistry,
 		SessionRuntime: sessionRuntime, SessionRecovery: sessionRecovery,
 		BindingRecovery: bindingRecovery,
+	}, nil
+}
+
+func buildTrafficTaskRuntime(
+	store *controlplanestorage.Store,
+	sessions *sessionapi.Service,
+	kubernetesProvider *controlplanekubernetes.Provider,
+	trafficBindings *trafficbindingclient.Manager,
+	relayRegistry *relayRegistryRuntime,
+) (*trafficTaskRuntime, error) {
+	portForwardResolver, err := controlplanekubernetes.NewPortForwardResolver(kubernetesProvider)
+	if err != nil {
+		return nil, fmt.Errorf("initialize Port Forward target resolver: %w", err)
 	}
+	portForwardBindings, err := portforwardapi.NewTrafficBindingManager(trafficBindings)
+	if err != nil {
+		return nil, fmt.Errorf("initialize Port Forward TrafficBinding manager: %w", err)
+	}
+	portForwardService, err := portforwardservice.New(
+		store, portForwardResolver, portForwardBindings, portforwardservice.Config{},
+	)
+	if err != nil {
+		return nil, fmt.Errorf("initialize Port Forward Task API: %w", err)
+	}
+	serviceResolver, err := controlplanekubernetes.NewServiceResolver(kubernetesProvider)
+	if err != nil {
+		return nil, fmt.Errorf("initialize Exchange Service resolver: %w", err)
+	}
+	exchangeMutator, err := exchangeapi.NewTrafficBindingResourceMutator(kubernetesProvider, store, trafficBindings)
+	if err != nil {
+		return nil, fmt.Errorf("initialize Exchange resource mutator: %w", err)
+	}
+	exchangeAPI, err := exchangeapi.New(store, sessions, serviceResolver, exchangeMutator, exchangeapi.Config{})
+	if err != nil {
+		return nil, fmt.Errorf("initialize Exchange Task API: %w", err)
+	}
+	mirrorMutator, err := mirrorapi.NewTrafficBindingResourceMutator(kubernetesProvider, store, trafficBindings)
+	if err != nil {
+		return nil, fmt.Errorf("initialize Mirror resource mutator: %w", err)
+	}
+	mirrorAPI, err := mirrorapi.New(store, sessions, serviceResolver, mirrorMutator, mirrorapi.Config{})
+	if err != nil {
+		return nil, fmt.Errorf("initialize Mirror Task API: %w", err)
+	}
+	previewResources, err := previewapi.NewTrafficBindingResourceManager(store, trafficBindings)
+	if err != nil {
+		return nil, fmt.Errorf("initialize Preview resource manager: %w", err)
+	}
+	previewAPI, err := previewapi.New(store, sessions, previewResources, previewapi.Config{})
+	if err != nil {
+		return nil, fmt.Errorf("initialize Preview Task API: %w", err)
+	}
+	if relayRegistry != nil {
+		dispatcher, err := trafficcontrolapi.NewDispatcher(exchangeAPI, mirrorAPI, previewAPI)
+		if err != nil {
+			return nil, fmt.Errorf("initialize traffic control dispatcher: %w", err)
+		}
+		trafficAPI, err := trafficcontrolapi.New(relayRegistry.authenticator, dispatcher)
+		if err == nil {
+			err = relayRegistry.handler.Mount(trafficAPI)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("initialize Gateway traffic control API: %w", err)
+		}
+	}
+	return &trafficTaskRuntime{
+		portForwards: portForwardService, exchanges: exchangeAPI, mirrors: mirrorAPI, previews: previewAPI,
+	}, nil
 }
