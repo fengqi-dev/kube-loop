@@ -309,6 +309,10 @@ helm-cleanup-test-e2e: ## Delete the dedicated Helm lifecycle Minikube profile.
 
 ##@ Quality gates
 
+.PHONY: lint
+lint: golangci-lint ## Lint all Go packages.
+	"$(GOLANGCI_LINT)" run ./...
+
 .PHONY: test-local
 test-local: ## Run all non-E2E tests and vet locally.
 	go test ./... -count=1

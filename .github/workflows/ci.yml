@@ -186,7 +186,7 @@ jobs:
 
       - name: Lint and vulnerability checks
         run: |
-          make operator-lint-config operator-lint
+          make operator-lint-config lint
           make vulncheck
 
   checks:
