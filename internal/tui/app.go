@@ -188,7 +188,10 @@ func (m Model) returnToLoginAfterExpiry() (tea.Model, tea.Cmd) {
 	m.loading, m.autoConnect = false, false
 	m.authSession, m.mode = AuthSession{}, viewLogin
 	m.err, m.status = "", clientauth.ErrLoginExpired.Error()
-	m.dataPlaneStatus = clientdataplane.Status{State: dataPlaneStateDisconnected, Mode: "socks"}
+	m.dataPlaneStatus = clientdataplane.Status{
+		State: dataPlaneStateDisconnected,
+		Mode:  clientdataplane.ModeSOCKS,
+	}
 	m.workspace.resource = resourceProfiles
 	m.workspace.history, m.workspace.historyPos = []workspaceResource{resourceProfiles}, 0
 	return m, loadProfiles(m.state)
@@ -707,7 +710,10 @@ func loadDataPlaneStatus(m Model) tea.Cmd {
 		}
 		status, err := m.state.dataPlanes.Status(m.activeProfile.ID)
 		if err != nil {
-			status = clientdataplane.Status{State: dataPlaneStateDisconnected, Mode: "socks"}
+			status = clientdataplane.Status{
+				State: dataPlaneStateDisconnected,
+				Mode:  clientdataplane.ModeSOCKS,
+			}
 		}
 		return dataPlaneStatusMsg{status: status}
 	}
@@ -850,8 +856,11 @@ func (m Model) disconnectDataPlane() tea.Cmd {
 	return func() tea.Msg {
 		err := m.state.dataPlanes.Disconnect(m.activeProfile.ID)
 		return dataPlaneDisconnectedMsg{
-			status: clientdataplane.Status{State: dataPlaneStateDisconnected, Mode: "socks"},
-			err:    err,
+			status: clientdataplane.Status{
+				State: dataPlaneStateDisconnected,
+				Mode:  clientdataplane.ModeSOCKS,
+			},
+			err: err,
 		}
 	}
 }
