@@ -156,6 +156,68 @@ func TestSQLiteIdentityRepositoryPersistsIdentity(t *testing.T) {
 	}
 }
 
+func TestSQLiteExplicitTransactionAndRepositoryAccessors(t *testing.T) {
+	store := openSQLiteTestStore(t, filepath.Join(t.TempDir(), "transactions.db"))
+	if store.BootstrapTokens() == nil || store.Credentials() == nil ||
+		store.OAuthAuthorizationRequests() == nil || store.OAuthBrowserSessions() == nil {
+		t.Fatal("Store repository accessors returned nil")
+	}
+	if err := store.WithinTransaction(t.Context(), nil); err == nil {
+		t.Fatal("nil transaction callback was accepted")
+	}
+	now := time.Now().UTC()
+	rolledBackID := uuid.NewString()
+	transaction, err := store.BeginTransaction(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if transaction.Repositories() == nil {
+		t.Fatal("explicit transaction repositories are nil")
+	}
+	if _, err := transaction.Repositories().Identities().Create(t.Context(), Identity{
+		ID: rolledBackID, Type: identityTypeHuman, DisplayName: "Rolled Back",
+		Status: statusActive, CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := transaction.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Identities().GetByID(t.Context(), rolledBackID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("rolled back identity error = %v", err)
+	}
+
+	committedID := uuid.NewString()
+	transaction, err = store.BeginTransaction(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := transaction.Repositories().Identities().Create(t.Context(), Identity{
+		ID: committedID, Type: identityTypeHuman, DisplayName: "Committed",
+		Status: statusActive, CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := transaction.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if identity, err := store.Identities().GetByID(t.Context(), committedID); err != nil ||
+		identity.DisplayName != "Committed" {
+		t.Fatalf("committed identity = %#v err = %v", identity, err)
+	}
+}
+
+func TestTransactionRetryWaitHonorsContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if err := waitForTransactionRetry(ctx, time.Second, 0); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled retry wait error = %v", err)
+	}
+	if err := waitForTransactionRetry(t.Context(), 0, 0); err != nil {
+		t.Fatalf("elapsed retry wait error = %v", err)
+	}
+}
+
 func TestSQLiteRejectsUnsupportedSchemaAndUnsafePaths(t *testing.T) {
 	t.Run("unsupported schema", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "kubeloop.db")
