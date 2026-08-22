@@ -3,9 +3,7 @@ package exchange
 import (
 	"context"
 	"errors"
-	"net"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 
@@ -33,8 +31,6 @@ type TrafficStreamOpener interface {
 	OpenTrafficStream(context.Context, string, string, string) (*trafficstream.FrameConn, error)
 }
 
-type LocalTarget = reverserelay.Target
-
 type Request struct {
 	ProfileID string        `json:"profileId"`
 	Service   string        `json:"service"`
@@ -50,13 +46,6 @@ type Info struct {
 	ClusterIP string        `json:"clusterIp"`
 	State     string        `json:"state"`
 	Targets   []LocalTarget `json:"targets"`
-}
-
-type DialContextFunc = reverserelay.DialContextFunc
-
-type Config struct {
-	DialContext    DialContextFunc
-	TrafficStreams TrafficStreamOpener
 }
 
 type activeExchange struct {
@@ -76,20 +65,6 @@ type Manager struct {
 
 	mu     sync.Mutex
 	active map[string]*activeExchange
-}
-
-func NewManager(client Client, config Config) (*Manager, error) {
-	if client == nil || config.TrafficStreams == nil {
-		return nil, errors.New("exchange control client and Data Plane stream opener are required")
-	}
-	if config.DialContext == nil {
-		dialer := &net.Dialer{}
-		config.DialContext = dialer.DialContext
-	}
-	return &Manager{
-		client: client, streams: config.TrafficStreams, dial: config.DialContext,
-		active: make(map[string]*activeExchange),
-	}, nil
 }
 
 func (manager *Manager) Start(
@@ -248,83 +223,4 @@ func (manager *Manager) run(ctx context.Context, entry *activeExchange) {
 		delete(manager.active, entry.task.ID)
 	}
 	manager.mu.Unlock()
-}
-
-func normalizeTargets(input []LocalTarget) ([]LocalTarget, []remote.ExchangePort, error) {
-	if len(input) == 0 || len(input) > 64 {
-		return nil, nil, errors.New("exchange requires one to 64 local targets")
-	}
-	targets := make([]LocalTarget, len(input))
-	ports := make([]remote.ExchangePort, len(input))
-	seen := make(map[string]struct{}, len(input))
-	for index, target := range input {
-		target.Protocol = strings.ToLower(strings.TrimSpace(target.Protocol))
-		if target.Protocol == "" {
-			target.Protocol = exchangeProtocolTCP
-		}
-		target.LocalHost = strings.TrimSpace(target.LocalHost)
-		if target.LocalHost == "" {
-			target.LocalHost = exchangeLoopbackHost
-		}
-		if target.LocalPort == 0 && target.ServicePort > 0 && target.ServicePort <= 65535 {
-			target.LocalPort = uint16(target.ServicePort)
-		}
-		invalidPort := target.ServicePort < 1 || target.ServicePort > 65535 || target.LocalPort == 0
-		invalidProtocol := target.Protocol != exchangeProtocolTCP && target.Protocol != exchangeProtocolUDP
-		if invalidPort || invalidProtocol || !validLocalHost(target.LocalHost) {
-			return nil, nil, errors.New("exchange local target is invalid")
-		}
-		key := targetKey(target.Protocol, target.ServicePort)
-		if _, exists := seen[key]; exists {
-			return nil, nil, errors.New("exchange Service ports must be unique")
-		}
-		seen[key] = struct{}{}
-		targets[index] = target
-		ports[index] = remote.ExchangePort{ServicePort: target.ServicePort, Protocol: target.Protocol}
-	}
-	return targets, ports, nil
-}
-
-func validLocalHost(host string) bool {
-	if address := net.ParseIP(host); address != nil {
-		return !address.IsUnspecified() && !address.IsMulticast()
-	}
-	if len(host) > 253 || strings.ContainsAny(host, " /\\\t\r\n") {
-		return false
-	}
-	for label := range strings.SplitSeq(host, ".") {
-		if label == "" || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
-			return false
-		}
-		for _, character := range label {
-			if (character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') ||
-				(character >= '0' && character <= '9') || character == '-' {
-				continue
-			}
-			return false
-		}
-	}
-	return true
-}
-
-func matchTaskTargets(task remote.ExchangeTask, targets []LocalTarget) error {
-	if len(task.Ports) != len(targets) {
-		return errors.New("gateway changed the requested Exchange ports")
-	}
-	want := make(map[string]struct{}, len(targets))
-	for _, target := range targets {
-		want[targetKey(target.Protocol, target.ServicePort)] = struct{}{}
-	}
-	for _, port := range task.Ports {
-		key := targetKey(port.Protocol, port.ServicePort)
-		if _, exists := want[key]; !exists {
-			return errors.New("gateway changed the requested Exchange ports")
-		}
-		delete(want, key)
-	}
-	return nil
-}
-
-func targetKey(protocol string, port int32) string {
-	return strings.ToLower(protocol) + "/" + strconv.Itoa(int(port))
 }
