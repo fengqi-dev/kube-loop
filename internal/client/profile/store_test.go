@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -18,6 +19,21 @@ func TestDefaultPathUsesConfigDirectory(t *testing.T) {
 	}
 	if want := filepath.Join(home, ".kubeloop", "config", "servers.json"); path != want {
 		t.Fatalf("DefaultPath() = %q, want %q", path, want)
+	}
+}
+
+func TestServerProfileStoreReportsAbsolutePath(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "servers.json")
+	store, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := filepath.Abs(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := store.Path(); got != want {
+		t.Fatalf("Path() = %q, want %q", got, want)
 	}
 }
 
@@ -57,6 +73,88 @@ func TestServerProfileStorePersistsOnlyNonSecretState(t *testing.T) {
 	var document map[string]any
 	if err := json.Unmarshal(raw, &document); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestServerProfileStorePersistsSelectionAndRemoval(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "servers.json")
+	store, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, profile := range []Profile{
+		{ID: "one", BaseURL: "https://one.example.test"},
+		{ID: "two", BaseURL: "https://two.example.test"},
+	} {
+		if err := store.Upsert(profile); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := store.SetActive(" two "); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := reopened.Snapshot().ActiveProfileID; got != "two" {
+		t.Fatalf("active Profile ID after reopen = %q, want %q", got, "two")
+	}
+
+	if err := reopened.Remove(" two "); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := reopened.Snapshot()
+	if state.ActiveProfileID != "one" || len(state.Profiles) != 1 || state.Profiles[0].ID != "one" {
+		t.Fatalf("state after removing active Profile = %#v", state)
+	}
+
+	if err := reopened.Remove("one"); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state = reopened.Snapshot()
+	if state.ActiveProfileID != "" || len(state.Profiles) != 0 {
+		t.Fatalf("state after removing final Profile = %#v", state)
+	}
+}
+
+func TestServerProfileStoreRejectsInvalidSelectionAndRemoval(t *testing.T) {
+	store, err := Open(filepath.Join(t.TempDir(), "servers.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Upsert(Profile{ID: "one", BaseURL: "https://one.example.test"}); err != nil {
+		t.Fatal(err)
+	}
+	want := store.Snapshot()
+
+	for _, test := range []struct {
+		name   string
+		mutate func() error
+	}{
+		{name: "empty removal", mutate: func() error { return store.Remove("  ") }},
+		{name: "missing removal", mutate: func() error { return store.Remove("missing") }},
+		{name: "empty selection", mutate: func() error { return store.SetActive("  ") }},
+		{name: "missing selection", mutate: func() error { return store.SetActive("missing") }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if err := test.mutate(); err == nil {
+				t.Fatal("mutation succeeded")
+			}
+			got := store.Snapshot()
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("failed mutation changed state: got %#v, want %#v", got, want)
+			}
+		})
 	}
 }
 
