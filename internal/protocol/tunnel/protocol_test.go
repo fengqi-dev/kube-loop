@@ -12,6 +12,16 @@ import (
 
 var protocolTestToken = SessionToken{1, 2, 3, 4}
 
+func TestNewSessionToken(t *testing.T) {
+	token, err := NewSessionToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if token == (SessionToken{}) {
+		t.Fatal("NewSessionToken returned a zero token")
+	}
+}
+
 func TestRelaySessionTokenIsStableAndDomainSeparated(t *testing.T) {
 	first, err := RelaySessionToken("33333333-3333-4333-8333-333333333333", 7)
 	if err != nil {
@@ -37,6 +47,26 @@ func TestRelaySessionTokenIsStableAndDomainSeparated(t *testing.T) {
 	}
 	if _, err := RelaySessionToken("33333333-3333-4333-8333-333333333333", 0); err == nil {
 		t.Fatal("zero Session generation was accepted")
+	}
+}
+
+func TestOpenRequestAddress(t *testing.T) {
+	tests := []struct {
+		name    string
+		request OpenRequest
+		want    string
+	}{
+		{name: "hostname", request: OpenRequest{Host: "api.default", Port: 8080}, want: "api.default:8080"},
+		{name: "IPv4", request: OpenRequest{Host: "10.0.0.1", Port: 53}, want: "10.0.0.1:53"},
+		{name: "IPv6", request: OpenRequest{Host: "2001:db8::1", Port: 443}, want: "[2001:db8::1]:443"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := test.request.Address(); got != test.want {
+				t.Fatalf("Address() = %q, want %q", got, test.want)
+			}
+		})
 	}
 }
 
