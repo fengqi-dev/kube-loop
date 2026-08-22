@@ -226,7 +226,7 @@ func runGateway(
 		}
 		http.NotFound(ctx.Response(), ctx.Request())
 	}
-	httpContext, cancel := context.WithCancel(ctx)
+	httpContext, cancel := context.WithCancel(context.Background())
 	cancelHTTP = cancel
 	go func() {
 		logger.Printf("WebSocket Gateway listening on %s%s", config.HTTP.Listen, config.HTTP.Path)
