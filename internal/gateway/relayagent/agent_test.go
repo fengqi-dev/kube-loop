@@ -222,7 +222,7 @@ func TestAgentReadinessRequiresCurrentLeaseAndHealthyHeartbeat(t *testing.T) {
 	}
 
 	agent.leaseExpiresAt = now.Add(time.Minute)
-	agent.lastError = errors.New("heartbeat failed")
+	agent.setError(errors.New("heartbeat failed"))
 	if agent.Ready() {
 		t.Fatal("failed Relay heartbeat remained ready")
 	}
@@ -231,6 +231,77 @@ func TestAgentReadinessRequiresCurrentLeaseAndHealthyHeartbeat(t *testing.T) {
 	agent.relayID = ""
 	if agent.Ready() {
 		t.Fatal("unregistered Relay reported ready")
+	}
+}
+
+func TestAgentDoJSONUsesTrustedTransportAndTypedErrors(t *testing.T) {
+	tokenFile := filepath.Join(t.TempDir(), "token")
+	if err := os.WriteFile(tokenFile, []byte("projected-token\n"), 0o400); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.Header.Get("Authorization") != "Bearer projected-token" {
+			t.Errorf("Authorization = %q", request.Header.Get("Authorization"))
+		}
+		switch request.URL.Path {
+		case "/internal/v1/test":
+			if request.Method != http.MethodPost {
+				t.Errorf("method = %q", request.Method)
+			}
+			writer.Header().Set("Content-Type", "application/json")
+			_, _ = writer.Write([]byte(`{"ok":true}`))
+		case "/internal/v1/error":
+			writer.WriteHeader(http.StatusConflict)
+			_, _ = writer.Write([]byte(`{"error":{"code":"CONFLICT"}}`))
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+	agent, err := New(Config{
+		ControlPlaneURL: server.URL, Endpoint: "wss://relay.example/tunnel",
+		HTTPClient: server.Client(), BearerTokenFile: tokenFile,
+		Reporter: &testRuntimeReporter{}, Applier: &testApplier{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output struct {
+		OK bool `json:"ok"`
+	}
+	if err := agent.DoJSON(
+		t.Context(),
+		http.MethodPost,
+		"/internal/v1/test",
+		map[string]string{"request": "value"},
+		&output,
+	); err != nil || !output.OK {
+		t.Fatalf("DoJSON output = %#v err = %v", output, err)
+	}
+	if err := agent.DoJSON(t.Context(), http.MethodGet, "/public", nil, nil); err == nil {
+		t.Fatal("non-internal path was accepted")
+	}
+	err = agent.DoJSON(t.Context(), http.MethodPost, "/internal/v1/error", struct{}{}, nil)
+	var httpError *HTTPError
+	if !errors.As(err, &httpError) || httpError.Status != http.StatusConflict ||
+		httpError.Code != "CONFLICT" || httpError.HTTPStatus() != http.StatusConflict ||
+		httpError.Error() != "Relay control HTTP 409 (CONFLICT)" || !isLeaseError(err) {
+		t.Fatalf("typed HTTP error = %#v err = %v", httpError, err)
+	}
+	if isLeaseError(&HTTPError{Status: http.StatusUnauthorized}) || isLeaseError(errors.New("conflict")) {
+		t.Fatal("non-lease error was classified as a lease failure")
+	}
+}
+
+func TestAgentDrainMarksRuntimeBeforeLeaseHeartbeat(t *testing.T) {
+	reporter := &testRuntimeReporter{}
+	agent := &Agent{config: Config{Reporter: reporter}}
+	if err := agent.Drain(t.Context()); err == nil {
+		t.Fatal("drain without a Relay lease succeeded")
+	}
+	state, _ := reporter.Snapshot()
+	if state != relaycontrol.StateDraining {
+		t.Fatalf("runtime state after drain = %q", state)
 	}
 }
 
