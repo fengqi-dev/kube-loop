@@ -339,6 +339,65 @@ func TestHandler_UnrecognizedProtocolsAreRelayedWithoutInspection(t *testing.T) 
 	}
 }
 
+func TestCanonicalAuthorityNormalizesHostAndDefaultPort(t *testing.T) {
+	tests := []struct {
+		name      string
+		authority string
+		scheme    string
+		expected  string
+	}{
+		{name: "explicit port", authority: "Example.COM.:8443", scheme: "https", expected: "example.com:8443"},
+		{name: "HTTP default", authority: "Example.COM.", scheme: "http", expected: "example.com:80"},
+		{name: "HTTPS default", authority: "Example.COM", scheme: "https", expected: "example.com:443"},
+		{name: "IPv6 default", authority: "[2001:DB8::1]", scheme: "https", expected: "[2001:db8::1]:443"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := canonicalAuthority(test.authority, test.scheme); got != test.expected {
+				t.Fatalf("canonical authority = %q, want %q", got, test.expected)
+			}
+		})
+	}
+}
+
+func TestConnectionResponseWriterForwardsStatusAndPayload(t *testing.T) {
+	server, client := net.Pipe()
+	t.Cleanup(func() {
+		_ = server.Close()
+		_ = client.Close()
+	})
+	tracked := newTransparentConn(server)
+	writer := &connectionResponseWriter{
+		connection: tracked,
+		header:     make(http.Header),
+	}
+	writer.Header().Set("X-Test", "present")
+	if writer.header.Get("X-Test") != "present" {
+		t.Fatalf("response headers = %#v", writer.header)
+	}
+	payload := []byte("body")
+	expected := []byte("HTTP/1.1 201 Created\r\n\r\nbody")
+	done := make(chan error, 1)
+	go func() {
+		writer.WriteHeader(http.StatusCreated)
+		_, err := writer.Write(payload)
+		done <- err
+	}()
+	if err := client.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	actual := make([]byte, len(expected))
+	if _, err := io.ReadFull(client, actual); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(actual, expected) {
+		t.Fatalf("response bytes = %q, want %q", actual, expected)
+	}
+}
+
 func TestHandler_PinsAuthorityChangesToOriginalDestination(t *testing.T) {
 	tests := []struct {
 		name        string
