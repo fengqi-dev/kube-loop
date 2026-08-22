@@ -289,6 +289,60 @@ func TestManagerRejectsNamespaceAndContainerEscapes(t *testing.T) {
 	}
 }
 
+func TestManagerStopProfilePreservesOtherProfiles(t *testing.T) {
+	_, privateKey, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signer, err := ssh.NewSignerFromKey(privateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	sessions := &fakeSessions{sessions: map[string]remote.Session{
+		"server-a": {
+			ID: uuid.NewString(), Namespace: "development", State: podSSHSessionActive,
+			ExpiresAt: now.Add(time.Minute),
+		},
+		"server-b": {
+			ID: uuid.NewString(), Namespace: "development", State: podSSHSessionActive,
+			ExpiresAt: now.Add(time.Minute),
+		},
+	}}
+	manager, err := New(newFakeExecClient(t), sessions, Config{
+		ServerOptions:    []localpodssh.Option{localpodssh.WithSigner(signer)},
+		HostTCPRegistrar: &fakeHostTCPRegistrar{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = manager.Shutdown() })
+
+	for _, profileID := range []string{"server-a", "server-b"} {
+		request := Request{
+			ProfileID: profileID, Namespace: "development", Pod: "api-0-" + profileID,
+			PodIP: "10.244.1.7", Ready: true, Containers: []string{"main"},
+		}
+		if _, err := manager.Start(
+			t.Context(),
+			profile.Profile{ID: profileID},
+			sessions.sessions[profileID],
+			request,
+		); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := manager.StopProfile("server-a"); err != nil {
+		t.Fatal(err)
+	}
+	if items := manager.List("server-a"); len(items) != 0 {
+		t.Fatalf("server-a endpoints=%#v, want none", items)
+	}
+	if items := manager.List("server-b"); len(items) != 1 || items[0].ProfileID != "server-b" {
+		t.Fatalf("server-b endpoints=%#v, want one preserved endpoint", items)
+	}
+}
+
 func TestManagerIsolatesEndpointByLocalUserKey(t *testing.T) {
 	_, privateKeyA, err := ed25519.GenerateKey(nil)
 	if err != nil {
