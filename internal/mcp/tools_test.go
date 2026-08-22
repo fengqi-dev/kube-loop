@@ -185,6 +185,111 @@ func TestManageClusterUsesExplicitProfile(t *testing.T) {
 	assertToolError(t, err, ErrorInvalidArgument, "namespace")
 }
 
+func TestManageClusterRoutesSupportedReads(t *testing.T) {
+	tests := []struct {
+		name  string
+		input manageClusterIn
+		check func(*testing.T, manageClusterOut)
+	}{
+		{
+			name: "version", input: manageClusterIn{Action: "get", Type: "version", ProfileID: "server-a"},
+			check: func(t *testing.T, output manageClusterOut) {
+				t.Helper()
+				if output.Version == nil || output.Version.GitVersion != "v1.32.0" {
+					t.Fatalf("output=%#v", output)
+				}
+			},
+		},
+		{
+			name: "capabilities",
+			input: manageClusterIn{
+				Action: "get", Type: "capabilities", ProfileID: "server-a", Namespace: "default",
+			},
+			check: func(t *testing.T, output manageClusterOut) {
+				t.Helper()
+				if output.Capabilities == nil || output.Capabilities.Namespace != "default" {
+					t.Fatalf("output=%#v", output)
+				}
+			},
+		},
+		{
+			name:  "namespaces",
+			input: manageClusterIn{Action: actionList, Type: resourceNamespace, ProfileID: "server-a"},
+			check: func(t *testing.T, output manageClusterOut) {
+				t.Helper()
+				if len(output.Namespaces) != 2 {
+					t.Fatalf("output=%#v", output)
+				}
+			},
+		},
+		{
+			name: "services",
+			input: manageClusterIn{
+				Action: actionList, Type: "service", ProfileID: "server-a", Namespace: "default",
+			},
+			check: func(t *testing.T, output manageClusterOut) {
+				t.Helper()
+				if len(output.Services) != 1 || output.Services[0].Name != "api" {
+					t.Fatalf("output=%#v", output)
+				}
+			},
+		},
+		{
+			name: "pods",
+			input: manageClusterIn{
+				Action: actionList, Type: resourcePod, ProfileID: "server-a", Namespace: "default",
+			},
+			check: func(t *testing.T, output manageClusterOut) {
+				t.Helper()
+				if len(output.Pods) != 1 || output.Pods[0].Name != "api-0" {
+					t.Fatalf("output=%#v", output)
+				}
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			output, err := manageCluster(t.Context(), &fakeBackend{}, test.input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			test.check(t, output)
+		})
+	}
+}
+
+func TestManageClusterValidatesCombinations(t *testing.T) {
+	tests := []struct {
+		name  string
+		field string
+		input manageClusterIn
+	}{
+		{name: "profile", field: fieldProfileID, input: manageClusterIn{Action: "get", Type: "version"}},
+		{
+			name: "capabilities namespace", field: resourceNamespace,
+			input: manageClusterIn{Action: "get", Type: "capabilities", ProfileID: "server-a"},
+		},
+		{
+			name: "service namespace", field: resourceNamespace,
+			input: manageClusterIn{Action: actionList, Type: "service", ProfileID: "server-a"},
+		},
+		{
+			name: "pod namespace", field: resourceNamespace,
+			input: manageClusterIn{Action: actionList, Type: resourcePod, ProfileID: "server-a"},
+		},
+		{
+			name: "unsupported", field: "action",
+			input: manageClusterIn{Action: "delete", Type: resourcePod, ProfileID: "server-a"},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := manageCluster(t.Context(), &fakeBackend{}, test.input)
+			assertToolError(t, err, ErrorInvalidArgument, test.field)
+		})
+	}
+}
+
 func TestManageConnectionMutationCarriesExactIdentity(t *testing.T) {
 	backend := &fakeBackend{}
 	connected, err := manageConnection(context.Background(), backend, manageConnectionIn{
@@ -205,6 +310,108 @@ func TestManageConnectionMutationCarriesExactIdentity(t *testing.T) {
 	if backend.disconnectIdentity.SessionID != "session-1" || backend.disconnectIdentity.Namespace != "default" {
 		t.Fatalf("disconnect=%#v", backend.disconnectIdentity)
 	}
+}
+
+func TestManageTrafficLifecycle(t *testing.T) {
+	backend := &fakeBackend{}
+	listed, err := manageTraffic(t.Context(), backend, manageTrafficIn{
+		Action: actionList, ProfileID: "server-a", Type: trafficTypeExchange,
+	})
+	if err != nil || len(listed.Items) != 1 || listed.Type != trafficTypeExchange {
+		t.Fatalf("listed=%#v error=%v", listed, err)
+	}
+
+	started, err := manageTraffic(t.Context(), backend, manageTrafficIn{
+		Action: actionStart, Type: trafficTypeExchange,
+		ProfileID: "server-a", SessionID: "session-1", Namespace: "default",
+		Service: "api", Targets: []portMappingIn{{ServicePort: 80, Protocol: "tcp", LocalPort: 8080}},
+	})
+	if err != nil || started.Item == nil || started.TaskID != "exchange-1" ||
+		backend.trafficRequest.Service != "api" || len(backend.trafficRequest.Targets) != 1 {
+		t.Fatalf("started=%#v request=%#v error=%v", started, backend.trafficRequest, err)
+	}
+
+	forwarded, err := manageTraffic(t.Context(), backend, manageTrafficIn{
+		Action: actionStart, Type: trafficTypePortForward,
+		ProfileID: "server-a", SessionID: "session-1", Namespace: "default",
+		TargetKind: resourcePod, TargetName: "api-0", Protocol: "tcp", RemotePort: 8080,
+	})
+	if err != nil || forwarded.TaskID != "pf-1" || backend.trafficRequest.TargetName != "api-0" {
+		t.Fatalf("forwarded=%#v request=%#v error=%v", forwarded, backend.trafficRequest, err)
+	}
+
+	stopped, err := manageTraffic(t.Context(), backend, manageTrafficIn{
+		Action: "stop", Type: trafficTypeExchange,
+		ProfileID: "server-a", SessionID: "session-1", Namespace: "default", TaskID: "exchange-1",
+	})
+	if err != nil || stopped.TaskID != "exchange-1" || backend.trafficStop.TaskID != "exchange-1" {
+		t.Fatalf("stopped=%#v identity=%#v error=%v", stopped, backend.trafficStop, err)
+	}
+}
+
+func TestManageTrafficValidatesInputs(t *testing.T) {
+	base := manageTrafficIn{
+		Action: actionStart, Type: trafficTypePortForward,
+		ProfileID: "server-a", SessionID: "session-1", Namespace: "default",
+		TargetKind: resourcePod, TargetName: "api-0", RemotePort: 8080,
+	}
+	tests := []struct {
+		name   string
+		field  string
+		mutate func(*manageTrafficIn)
+	}{
+		{name: "profile", field: fieldProfileID, mutate: func(input *manageTrafficIn) { input.ProfileID = "" }},
+		{name: "session", field: "sessionId", mutate: func(input *manageTrafficIn) { input.SessionID = "" }},
+		{name: "namespace", field: resourceNamespace, mutate: func(input *manageTrafficIn) { input.Namespace = "" }},
+		{name: "type", field: "type", mutate: func(input *manageTrafficIn) { input.Type = "capture" }},
+		{name: "target kind", field: "targetKind", mutate: func(input *manageTrafficIn) { input.TargetKind = "node" }},
+		{name: "target name", field: "targetName", mutate: func(input *manageTrafficIn) { input.TargetName = "" }},
+		{name: "remote port", field: "remotePort", mutate: func(input *manageTrafficIn) { input.RemotePort = 0 }},
+		{
+			name: "exchange service", field: "service",
+			mutate: func(input *manageTrafficIn) {
+				input.Type, input.Service = trafficTypeExchange, ""
+				input.Targets = []portMappingIn{{ServicePort: 80}}
+			},
+		},
+		{
+			name: "exchange targets", field: "targets",
+			mutate: func(input *manageTrafficIn) {
+				input.Type, input.Service, input.Targets = trafficTypeExchange, "api", nil
+			},
+		},
+		{
+			name: "preview name", field: "name",
+			mutate: func(input *manageTrafficIn) {
+				input.Type, input.Name = trafficTypePreview, ""
+				input.Targets = []portMappingIn{{ServicePort: 80}}
+			},
+		},
+		{
+			name: "preview targets", field: "targets",
+			mutate: func(input *manageTrafficIn) {
+				input.Type, input.Name, input.Targets = trafficTypePreview, "local-api", nil
+			},
+		},
+		{
+			name: "stop task", field: "taskId",
+			mutate: func(input *manageTrafficIn) { input.Action, input.TaskID = "stop", "" },
+		},
+		{name: "action", field: "action", mutate: func(input *manageTrafficIn) { input.Action = "restart" }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			input := base
+			test.mutate(&input)
+			_, err := manageTraffic(t.Context(), &fakeBackend{}, input)
+			assertToolError(t, err, ErrorInvalidArgument, test.field)
+		})
+	}
+
+	_, err := manageTraffic(t.Context(), &fakeBackend{}, manageTrafficIn{
+		Action: actionList, ProfileID: "server-a", Type: "capture",
+	})
+	assertToolError(t, err, ErrorInvalidArgument, "type")
 }
 
 func TestSensitiveToolsRejectImplicitSession(t *testing.T) {
