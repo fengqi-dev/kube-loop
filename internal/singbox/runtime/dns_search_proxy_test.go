@@ -49,6 +49,44 @@ func TestDNSSearchProxyUDPAndTCP(t *testing.T) {
 	}
 }
 
+func TestDNSSearchProxyConcurrentCloseWaitsForShutdown(t *testing.T) {
+	proxy := &dnsSearchProxy{}
+	proxy.serveWG.Add(1)
+	first := make(chan error, 1)
+	go func() { first <- proxy.Close() }()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		proxy.mu.Lock()
+		closing := proxy.closed
+		proxy.mu.Unlock()
+		if closing {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("first Close did not start")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	second := make(chan error, 1)
+	go func() { second <- proxy.Close() }()
+	select {
+	case err := <-second:
+		t.Fatalf("concurrent Close returned before shutdown completed: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	proxy.serveWG.Done()
+	for index, result := range []<-chan error{first, second} {
+		select {
+		case err := <-result:
+			if err != nil {
+				t.Fatalf("Close %d: %v", index+1, err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("Close %d did not complete", index+1)
+		}
+	}
+}
+
 func TestDNSSearchProxyPrefersExpandedClusterName(t *testing.T) {
 	handler := dns.HandlerFunc(func(w dns.ResponseWriter, r *dns.Msg) {
 		msg := new(dns.Msg)

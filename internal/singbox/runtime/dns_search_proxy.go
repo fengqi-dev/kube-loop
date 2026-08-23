@@ -38,8 +38,11 @@ type dnsSearchProxy struct {
 	clientUDP *dns.Client
 	clientTCP *dns.Client
 
-	mu     sync.Mutex
-	closed bool
+	mu        sync.Mutex
+	closed    bool
+	closeOnce sync.Once
+	closeErr  error
+	serveWG   sync.WaitGroup
 }
 
 func startDNSSearchProxy(
@@ -70,8 +73,15 @@ func startDNSSearchProxy(
 	proxy.publicTCP = &dns.Server{Addr: addr, Net: networkTCP, Handler: handler}
 
 	errCh := make(chan error, 2)
-	go func() { errCh <- proxy.publicUDP.ListenAndServe() }()
-	go func() { errCh <- proxy.publicTCP.ListenAndServe() }()
+	proxy.serveWG.Add(2)
+	go func() {
+		defer proxy.serveWG.Done()
+		errCh <- proxy.publicUDP.ListenAndServe()
+	}()
+	go func() {
+		defer proxy.serveWG.Done()
+		errCh <- proxy.publicTCP.ListenAndServe()
+	}()
 	select {
 	case err := <-errCh:
 		if err != nil {
@@ -119,24 +129,24 @@ func (p *dnsSearchProxy) SetHostAliases(hosts []singbox.HostAlias) {
 }
 
 func (p *dnsSearchProxy) Close() error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.closed {
-		return nil
-	}
-	p.closed = true
-	var first error
-	if p.publicUDP != nil {
-		if err := p.publicUDP.Shutdown(); err != nil {
-			first = err
+	p.closeOnce.Do(func() {
+		p.mu.Lock()
+		p.closed = true
+		publicUDP, publicTCP := p.publicUDP, p.publicTCP
+		p.mu.Unlock()
+		if publicUDP != nil {
+			if err := publicUDP.Shutdown(); err != nil {
+				p.closeErr = err
+			}
 		}
-	}
-	if p.publicTCP != nil {
-		if err := p.publicTCP.Shutdown(); err != nil && first == nil {
-			first = err
+		if publicTCP != nil {
+			if err := publicTCP.Shutdown(); err != nil && p.closeErr == nil {
+				p.closeErr = err
+			}
 		}
-	}
-	return first
+		p.serveWG.Wait()
+	})
+	return p.closeErr
 }
 
 func (p *dnsSearchProxy) serveDNS(w dns.ResponseWriter, req *dns.Msg) {
