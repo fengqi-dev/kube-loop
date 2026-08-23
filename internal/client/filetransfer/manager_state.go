@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"slices"
 	"strings"
@@ -48,7 +49,9 @@ func (manager *Manager) load() error {
 		}
 		manager.tasks[task.ID] = task
 	}
-	return manager.persistLocked()
+	manager.persistMu.Lock()
+	defer manager.persistMu.Unlock()
+	return manager.persist(cloneTasks(manager.tasks))
 }
 
 func normalizePersistedTask(task *Task) error {
@@ -112,12 +115,12 @@ func normalizePersistedTemporaryPath(task *Task) error {
 	return nil
 }
 
-func (manager *Manager) persistLocked() error {
+func (manager *Manager) persist(tasks map[string]Task) error {
 	if manager.statePath == "" {
 		return nil
 	}
-	state := persistedState{Version: stateVersion, Tasks: make([]Task, 0, len(manager.tasks))}
-	for _, task := range manager.tasks {
+	state := persistedState{Version: stateVersion, Tasks: make([]Task, 0, len(tasks))}
+	for _, task := range tasks {
 		state.Tasks = append(state.Tasks, task)
 	}
 	slices.SortFunc(state.Tasks, func(left, right Task) int { return strings.Compare(left.ID, right.ID) })
@@ -126,5 +129,13 @@ func (manager *Manager) persistLocked() error {
 		return errors.New("encode file transfer state")
 	}
 	contents = append(contents, '\n')
-	return fsatomic.WriteFile(manager.statePath, contents, 0o700, 0o600)
+	writeFile := manager.writeFile
+	if writeFile == nil {
+		writeFile = fsatomic.WriteFile
+	}
+	return writeFile(manager.statePath, contents, 0o700, 0o600)
+}
+
+func cloneTasks(tasks map[string]Task) map[string]Task {
+	return maps.Clone(tasks)
 }

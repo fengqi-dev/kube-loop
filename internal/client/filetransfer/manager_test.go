@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"testing"
 	"time"
 
@@ -20,6 +21,7 @@ import (
 
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
+	"github.com/fengqi-dev/kube-loop/internal/fsatomic"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/filestream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
 )
@@ -80,6 +82,95 @@ func TestManagerUploadsLocalFilePersistsProgressAndHistory(t *testing.T) {
 	history := reloaded.List("server")
 	if len(history) != 1 || history[0].ID != task.ID || history[0].Status != StatusCompleted {
 		t.Fatalf("reloaded history = %#v", history)
+	}
+}
+
+func TestManagerListDoesNotBlockOnCheckpointWrite(t *testing.T) {
+	root := t.TempDir()
+	source := filepath.Join(root, "source.bin")
+	if err := os.WriteFile(source, []byte("contents"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	manager, err := NewManager(testClient{}, Config{StatePath: filepath.Join(root, "transfers.json")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var startOnce, releaseOnce sync.Once
+	t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
+	manager.writeFile = func(path string, raw []byte, dirMode, fileMode os.FileMode) error {
+		startOnce.Do(func() { close(started) })
+		<-release
+		return fsatomic.WriteFile(path, raw, dirMode, fileMode)
+	}
+	type startResult struct {
+		task Task
+		err  error
+	}
+	result := make(chan startResult, 1)
+	go func() {
+		task, startErr := manager.Start(
+			profile.Profile{ID: "server"},
+			activeFileSession(),
+			Request{
+				ProfileID: "server", Direction: fileTransferDirectionUpload, Kind: fileTransferKindFile,
+				Pod: "api-0", LocalPath: source, RemotePath: "/workspace/source.bin",
+			},
+		)
+		result <- startResult{task: task, err: startErr}
+	}()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("file transfer checkpoint write did not start")
+	}
+	listed := make(chan []Task, 1)
+	go func() { listed <- manager.List("server") }()
+	select {
+	case tasks := <-listed:
+		if len(tasks) != 0 {
+			t.Fatalf("List during checkpoint = %#v", tasks)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("List blocked on file transfer checkpoint write")
+	}
+	releaseOnce.Do(func() { close(release) })
+	startedTask := <-result
+	if startedTask.err != nil || startedTask.task.ID == "" {
+		t.Fatalf("Start = %#v, %v", startedTask.task, startedTask.err)
+	}
+	if err := manager.Shutdown(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestManagerClearHistoryWriteFailureRestoresTasks(t *testing.T) {
+	manager, err := NewManager(testClient{}, Config{StatePath: filepath.Join(t.TempDir(), "transfers.json")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	task := Task{
+		ID: uuid.NewString(), ProfileID: "server", Status: StatusCompleted,
+		CreatedAt: now, UpdatedAt: now, CompletedAt: &now,
+	}
+	manager.mu.Lock()
+	manager.tasks[task.ID] = task
+	manager.mu.Unlock()
+	manager.persistMu.Lock()
+	if err := manager.persist(cloneTasks(manager.tasks)); err != nil {
+		manager.persistMu.Unlock()
+		t.Fatal(err)
+	}
+	manager.persistMu.Unlock()
+	writeErr := errors.New("disk unavailable")
+	manager.writeFile = func(string, []byte, os.FileMode, os.FileMode) error { return writeErr }
+	if err := manager.ClearHistory("server"); !errors.Is(err, writeErr) {
+		t.Fatalf("ClearHistory error = %v", err)
+	}
+	if tasks := manager.List("server"); len(tasks) != 1 || tasks[0].ID != task.ID {
+		t.Fatalf("tasks after failed ClearHistory = %#v", tasks)
 	}
 }
 

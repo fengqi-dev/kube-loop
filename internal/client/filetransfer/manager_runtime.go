@@ -33,28 +33,38 @@ func (manager *Manager) progress(taskID string, status filestream.ProgressStatus
 }
 
 func (manager *Manager) update(taskID string, mutate func(*Task)) {
+	manager.persistMu.Lock()
 	manager.mu.Lock()
 	task, exists := manager.tasks[taskID]
 	if !exists {
 		manager.mu.Unlock()
+		manager.persistMu.Unlock()
 		return
 	}
+	nextTasks := cloneTasks(manager.tasks)
+	manager.mu.Unlock()
 	mutate(&task)
 	task.UpdatedAt = manager.now().UTC()
-	manager.tasks[taskID] = task
-	_ = manager.persistLocked()
+	nextTasks[taskID] = task
+	_ = manager.persist(nextTasks)
+	manager.mu.Lock()
+	manager.tasks = nextTasks
 	manager.mu.Unlock()
+	manager.persistMu.Unlock()
 	manager.onEvent(task)
 }
 
 func (manager *Manager) finish(taskID string, result filestream.TransferResult, transferErr error, cancelled bool) {
+	manager.persistMu.Lock()
 	manager.mu.Lock()
 	task, exists := manager.tasks[taskID]
 	if !exists {
 		manager.mu.Unlock()
+		manager.persistMu.Unlock()
 		return
 	}
-	delete(manager.active, taskID)
+	nextTasks := cloneTasks(manager.tasks)
+	manager.mu.Unlock()
 	now := manager.now().UTC()
 	task.UpdatedAt = now
 	task.CompletedAt = &now
@@ -80,9 +90,13 @@ func (manager *Manager) finish(taskID string, result filestream.TransferResult, 
 		task.Status = StatusCompleted
 		task.Error = ""
 	}
-	manager.tasks[taskID] = task
-	_ = manager.persistLocked()
+	nextTasks[taskID] = task
+	_ = manager.persist(nextTasks)
+	manager.mu.Lock()
+	manager.tasks = nextTasks
+	delete(manager.active, taskID)
 	manager.mu.Unlock()
+	manager.persistMu.Unlock()
 	if cleanup != "" {
 		_ = os.Remove(cleanup)
 	}

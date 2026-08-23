@@ -19,6 +19,8 @@ func (manager *Manager) Start(
 	session remote.Session,
 	request Request,
 ) (Task, error) {
+	manager.lifecycle.RLock()
+	defer manager.lifecycle.RUnlock()
 	select {
 	case <-manager.ctx.Done():
 		return Task{}, errors.New("file transfer manager is shut down")
@@ -70,17 +72,21 @@ func (manager *Manager) Start(
 		profile: serverProfile, session: session, request: request, cancel: cancel, done: make(chan struct{}),
 		resumeID: task.ResumeID, temporaryPath: task.TemporaryPath,
 	}
+	manager.persistMu.Lock()
 	manager.mu.Lock()
-	manager.tasks[task.ID] = task
-	manager.active[task.ID] = entry
-	if err := manager.persistLocked(); err != nil {
-		delete(manager.tasks, task.ID)
-		delete(manager.active, task.ID)
-		manager.mu.Unlock()
+	nextTasks := cloneTasks(manager.tasks)
+	manager.mu.Unlock()
+	nextTasks[task.ID] = task
+	if err := manager.persist(nextTasks); err != nil {
+		manager.persistMu.Unlock()
 		cancel()
 		return Task{}, err
 	}
+	manager.mu.Lock()
+	manager.tasks = nextTasks
+	manager.active[task.ID] = entry
 	manager.mu.Unlock()
+	manager.persistMu.Unlock()
 	manager.onEvent(task)
 	manager.wg.Add(1)
 	go manager.run(transferContext, task.ID, entry)
@@ -93,6 +99,8 @@ func (manager *Manager) Resume(
 	profileID,
 	taskID string,
 ) (Task, error) {
+	manager.lifecycle.RLock()
+	defer manager.lifecycle.RUnlock()
 	select {
 	case <-manager.ctx.Done():
 		return Task{}, errors.New("file transfer manager is shut down")
@@ -104,13 +112,17 @@ func (manager *Manager) Resume(
 	if !validProfile || !validSession {
 		return Task{}, errors.New("active Profile Session is required to resume file transfer")
 	}
+	manager.persistMu.Lock()
 	manager.mu.Lock()
 	task, exists := manager.tasks[taskID]
 	if !exists || task.ProfileID != profileID || manager.active[taskID] != nil ||
 		(task.Status != StatusInterrupted && task.Status != StatusFailed) {
 		manager.mu.Unlock()
+		manager.persistMu.Unlock()
 		return Task{}, errors.New("file transfer is not resumable")
 	}
+	nextTasks := cloneTasks(manager.tasks)
+	manager.mu.Unlock()
 	request := Request{
 		ProfileID: profileID, Direction: task.Direction, Kind: task.Kind, Pod: task.Pod, Container: task.Container,
 		LocalPath: task.LocalPath, RemotePath: task.RemotePath, Overwrite: task.Overwrite,
@@ -131,14 +143,17 @@ func (manager *Manager) Resume(
 		profile: serverProfile, session: session, request: request, cancel: cancel, done: make(chan struct{}),
 		resumeID: task.ResumeID, temporaryPath: task.TemporaryPath,
 	}
-	manager.tasks[task.ID], manager.active[task.ID] = task, entry
-	if err := manager.persistLocked(); err != nil {
-		delete(manager.active, task.ID)
-		manager.mu.Unlock()
+	nextTasks[task.ID] = task
+	if err := manager.persist(nextTasks); err != nil {
+		manager.persistMu.Unlock()
 		cancel()
 		return Task{}, err
 	}
+	manager.mu.Lock()
+	manager.tasks = nextTasks
+	manager.active[task.ID] = entry
 	manager.mu.Unlock()
+	manager.persistMu.Unlock()
 	manager.onEvent(task)
 	manager.wg.Add(1)
 	go manager.run(transferContext, task.ID, entry)
@@ -214,28 +229,46 @@ func (manager *Manager) StopProfile(profileID string) error {
 }
 
 func (manager *Manager) ClearHistory(profileID string) error {
+	manager.persistMu.Lock()
+	defer manager.persistMu.Unlock()
 	manager.mu.Lock()
 	removed := make([]string, 0)
-	for id, task := range manager.tasks {
-		if (profileID == "" || task.ProfileID == profileID) && manager.active[id] == nil {
+	nextTasks := cloneTasks(manager.tasks)
+	active := make(map[string]struct{}, len(manager.active))
+	for id := range manager.active {
+		active[id] = struct{}{}
+	}
+	manager.mu.Unlock()
+	for id, task := range nextTasks {
+		_, isActive := active[id]
+		if (profileID == "" || task.ProfileID == profileID) && !isActive {
 			if task.TemporaryPath != "" {
 				removed = append(removed, task.TemporaryPath)
 			}
-			delete(manager.tasks, id)
+			delete(nextTasks, id)
 		}
 	}
-	err := manager.persistLocked()
+	if err := manager.persist(nextTasks); err != nil {
+		return err
+	}
+	manager.mu.Lock()
+	manager.tasks = nextTasks
 	manager.mu.Unlock()
 	for _, filename := range removed {
 		_ = os.Remove(filename)
 	}
-	return err
+	return nil
 }
 
 func (manager *Manager) Shutdown() error {
+	manager.lifecycle.Lock()
+	defer manager.lifecycle.Unlock()
 	manager.cancel()
 	manager.wg.Wait()
+	manager.persistMu.Lock()
+	defer manager.persistMu.Unlock()
 	manager.mu.Lock()
-	defer manager.mu.Unlock()
-	return manager.persistLocked()
+	tasks := cloneTasks(manager.tasks)
+	manager.mu.Unlock()
+	return manager.persist(tasks)
 }

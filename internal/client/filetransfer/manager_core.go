@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -95,10 +96,13 @@ type Manager struct {
 	ctx          context.Context
 	cancel       context.CancelFunc
 
-	mu     sync.Mutex
-	tasks  map[string]Task
-	active map[string]*activeTransfer
-	wg     sync.WaitGroup
+	lifecycle sync.RWMutex
+	persistMu sync.Mutex
+	mu        sync.Mutex
+	tasks     map[string]Task
+	active    map[string]*activeTransfer
+	wg        sync.WaitGroup
+	writeFile func(string, []byte, os.FileMode, os.FileMode) error
 }
 
 func NewManager(client Client, config Config) (*Manager, error) {
@@ -129,6 +133,7 @@ func NewManager(client Client, config Config) (*Manager, error) {
 		cancel:       cancel,
 		tasks:        make(map[string]Task),
 		active:       make(map[string]*activeTransfer),
+		writeFile:    fsatomic.WriteFile,
 	}
 	if manager.statePath != "" {
 		if err := fsatomic.CleanupTemps(manager.statePath); err != nil {
