@@ -22,16 +22,16 @@ func validNetworkSpecHash(value string) bool {
 }
 
 func (s *Server) relayUDP(client, target net.Conn) {
-	done := make(chan struct{})
 	var once sync.Once
 	stop := func() {
 		once.Do(func() {
-			close(done)
 			_ = target.Close()
 			_ = client.Close()
 		})
 	}
+	readerDone := make(chan struct{})
 	go func() {
+		defer close(readerDone)
 		defer stop()
 		reader := bufio.NewReader(client)
 		var buffer []byte
@@ -52,12 +52,12 @@ func (s *Server) relayUDP(client, target net.Conn) {
 		read, err := target.Read(buffer)
 		if err != nil {
 			stop()
-			<-done
+			<-readerDone
 			return
 		}
 		if err := tunnel.WriteDatagram(client, buffer[:read]); err != nil {
 			stop()
-			<-done
+			<-readerDone
 			return
 		}
 	}

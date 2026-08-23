@@ -4,11 +4,27 @@ import (
 	"bufio"
 	"io"
 	"net"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
 )
+
+type delayedRelayReadConn struct {
+	net.Conn
+
+	started   chan struct{}
+	release   chan struct{}
+	startOnce sync.Once
+}
+
+func (connection *delayedRelayReadConn) Read(payload []byte) (int, error) {
+	connection.startOnce.Do(func() { close(connection.started) })
+	count, err := connection.Conn.Read(payload)
+	<-connection.release
+	return count, err
+}
 
 func TestRelayTCPForwardsBothDirectionsUntilClose(t *testing.T) {
 	leftRelay, leftPeer := net.Pipe()
@@ -85,6 +101,37 @@ func TestRelayUDPAdaptsFramedClientDatagrams(t *testing.T) {
 	case <-done:
 	case <-time.After(time.Second):
 		t.Fatal("UDP relay did not stop after peers closed")
+	}
+}
+
+func TestRelayUDPWaitsForClientReader(t *testing.T) {
+	clientRelay, clientPeer := net.Pipe()
+	targetRelay, targetPeer := net.Pipe()
+	defer func() { _ = clientPeer.Close() }()
+	defer func() { _ = targetPeer.Close() }()
+	release := make(chan struct{})
+	client := &delayedRelayReadConn{Conn: clientRelay, started: make(chan struct{}), release: release}
+	done := make(chan struct{})
+	go func() {
+		(&Server{}).relayUDP(client, targetRelay)
+		close(done)
+	}()
+	select {
+	case <-client.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("UDP client reader did not start")
+	}
+	_ = targetPeer.Close()
+	select {
+	case <-done:
+		t.Fatal("UDP relay returned before client reader completed")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(release)
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("UDP relay did not wait for client reader")
 	}
 }
 
