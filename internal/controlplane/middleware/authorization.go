@@ -1,10 +1,12 @@
 package middleware
 
 import (
+	"context"
 	"net/http"
 	"strings"
 
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/authorization"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
 )
 
 func authorizationRequestForHTTP(
@@ -166,4 +168,34 @@ func applyPodFilesAuthorization(result *authorization.Request, parts []string) {
 			}
 		}
 	}
+}
+
+func authorizeIdentity(
+	ctx context.Context,
+	authorizer authorization.Authorizer,
+	identity controlplaneapi.Identity,
+	request authorization.Request,
+) (authorization.Decision, *controlplaneapi.Error) {
+	if identity.Subject == "" {
+		return authorization.Decision{}, &controlplaneapi.Error{
+			Code:    controlplaneapi.CodeUnauthenticated,
+			Message: authenticationRequiredMessage,
+		}
+	}
+	decision := authorizer.Authorize(
+		ctx,
+		authorization.Subject{
+			ID:       identity.Subject,
+			Provider: identity.Provider,
+			Groups:   append([]string(nil), identity.Groups...),
+		},
+		request,
+	)
+	if !decision.Allowed {
+		return authorization.Decision{}, &controlplaneapi.Error{
+			Code:    controlplaneapi.CodeForbidden,
+			Message: "operation is not permitted",
+		}
+	}
+	return decision, nil
 }

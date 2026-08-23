@@ -168,38 +168,14 @@ func New(config Config) echo.MiddlewareFunc {
 				writeError(ctx, requestID, authenticationError)
 				return nil
 			}
-			if identity.Subject == "" {
-				writeError(
-					ctx,
-					requestID,
-					&controlplaneapi.Error{
-						Code:    controlplaneapi.CodeUnauthenticated,
-						Message: authenticationRequiredMessage,
-					},
-				)
+			decision, authorizationError := authorizeIdentity(
+				request.Context(), config.Authorizer, identity, authorizationRequest,
+			)
+			if authorizationError != nil {
+				writeError(ctx, requestID, authorizationError)
 				return nil
 			}
 			requestContext = request.Context()
-			decision := config.Authorizer.Authorize(
-				request.Context(),
-				authorization.Subject{
-					ID:       identity.Subject,
-					Provider: identity.Provider,
-					Groups:   append([]string(nil), identity.Groups...),
-				},
-				authorizationRequest,
-			)
-			if !decision.Allowed {
-				writeError(
-					ctx,
-					requestID,
-					&controlplaneapi.Error{
-						Code:    controlplaneapi.CodeForbidden,
-						Message: "operation is not permitted",
-					},
-				)
-				return nil
-			}
 			requestContext = context.WithValue(
 				requestContext,
 				authorizationContextKey{},
