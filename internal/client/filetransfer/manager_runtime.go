@@ -104,7 +104,15 @@ func (manager *Manager) finish(taskID string, result filestream.TransferResult, 
 		task.Error = ""
 	}
 	nextTasks[taskID] = task
-	_ = manager.persist(nextTasks)
+	if err := manager.persist(nextTasks); err != nil {
+		persistErr := fmt.Errorf("persist terminal file transfer state: %w", err)
+		if task.Error != "" {
+			persistErr = errors.Join(errors.New(task.Error), persistErr)
+		}
+		task.Status = StatusFailed
+		task.Error = persistErr.Error()
+		nextTasks[taskID] = task
+	}
 	manager.mu.Lock()
 	manager.tasks = nextTasks
 	delete(manager.active, taskID)

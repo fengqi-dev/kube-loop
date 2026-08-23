@@ -242,6 +242,72 @@ func TestManagerStopsBeforeRemoteTransferWhenPreparingCheckpointFails(t *testing
 	}
 }
 
+func TestManagerMarksTerminalPersistenceFailureAndRetriesOnShutdown(t *testing.T) {
+	root := t.TempDir()
+	statePath := filepath.Join(root, "transfers.json")
+	events := make(chan Task, 2)
+	manager, err := NewManager(testClient{}, Config{
+		StatePath: statePath, MaximumBytes: 1 << 20, OnEvent: func(task Task) { events <- task },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	task := Task{
+		ID: uuid.NewString(), ProfileID: "server", SessionID: "session", Namespace: "development",
+		Direction: fileTransferDirectionUpload, Kind: fileTransferKindFile, Pod: "api-0",
+		LocalPath: filepath.Join(root, "source.bin"), RemotePath: "/workspace/source.bin",
+		ResumeID: "", Status: StatusRunning, CreatedAt: now, UpdatedAt: now,
+	}
+	task.ResumeID = task.ID
+	manager.mu.Lock()
+	manager.tasks[task.ID] = task
+	manager.active[task.ID] = &activeTransfer{}
+	manager.mu.Unlock()
+	manager.persistMu.Lock()
+	if err := manager.persist(cloneTasks(manager.tasks)); err != nil {
+		manager.persistMu.Unlock()
+		t.Fatal(err)
+	}
+	manager.persistMu.Unlock()
+	persistErr := errors.New("disk unavailable")
+	manager.writeFile = func(string, []byte, os.FileMode, os.FileMode) error { return persistErr }
+	manager.finish(task.ID, filestream.TransferResult{Status: filestream.ResultSucceeded}, nil, false)
+
+	failed := <-events
+	if failed.Status != StatusFailed || !strings.Contains(failed.Error, "persist terminal file transfer state") {
+		t.Fatalf("terminal event = %#v", failed)
+	}
+	raw, err := os.ReadFile(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var beforeRetry persistedState
+	if err := json.Unmarshal(raw, &beforeRetry); err != nil {
+		t.Fatal(err)
+	}
+	if len(beforeRetry.Tasks) != 1 || beforeRetry.Tasks[0].Status != StatusRunning {
+		t.Fatalf("state before retry = %#v", beforeRetry)
+	}
+
+	manager.writeFile = fsatomic.WriteFile
+	if err := manager.Shutdown(); err != nil {
+		t.Fatal(err)
+	}
+	raw, err = os.ReadFile(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var afterRetry persistedState
+	if err := json.Unmarshal(raw, &afterRetry); err != nil {
+		t.Fatal(err)
+	}
+	if len(afterRetry.Tasks) != 1 || afterRetry.Tasks[0].Status != StatusFailed ||
+		!strings.Contains(afterRetry.Tasks[0].Error, "persist terminal file transfer state") {
+		t.Fatalf("state after retry = %#v", afterRetry)
+	}
+}
+
 func TestManagerUploadsDirectorySnapshotAndCleansTemporaryArchive(t *testing.T) {
 	received := make(chan []byte, 1)
 	server := uploadServer(t, func(value []byte) { received <- value })
