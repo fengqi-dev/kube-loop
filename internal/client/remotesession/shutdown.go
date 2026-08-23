@@ -7,6 +7,10 @@ import (
 )
 
 func (manager *Manager) Shutdown(ctx context.Context) error {
+	if ctx == nil {
+		return errors.New("remote Session shutdown context is required")
+	}
+	manager.closed.Store(true)
 	manager.cancel()
 	select {
 	case <-manager.done:

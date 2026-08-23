@@ -348,8 +348,14 @@ func TestShutdownReportsDisconnectFailureAndCanRetry(t *testing.T) {
 	if err := manager.Shutdown(shutdownContext); !errors.Is(err, disconnectFailure) {
 		t.Fatalf("shutdown error = %v", err)
 	}
-	if _, err := manager.Current("service-a"); err != nil {
-		t.Fatalf("failed shutdown forgot active Session: %v", err)
+	if _, err := manager.Current("service-a"); !errors.Is(err, ErrClosed) {
+		t.Fatalf("failed shutdown left manager open: %v", err)
+	}
+	manager.mu.Lock()
+	_, retained := manager.active["service-a"]
+	manager.mu.Unlock()
+	if !retained {
+		t.Fatal("failed shutdown forgot active Session needed for retry")
 	}
 	gateway.mu.Lock()
 	gateway.disconnectErr = nil
@@ -357,8 +363,11 @@ func TestShutdownReportsDisconnectFailureAndCanRetry(t *testing.T) {
 	if err := manager.Shutdown(shutdownContext); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := manager.Current("service-a"); err == nil {
-		t.Fatal("successful shutdown retained Session")
+	manager.mu.Lock()
+	_, retained = manager.active["service-a"]
+	manager.mu.Unlock()
+	if retained {
+		t.Fatal("successful shutdown retained Session for retry")
 	}
 }
 
@@ -428,5 +437,58 @@ func TestDisconnectTreatsGoneSessionAsAlreadyClosed(t *testing.T) {
 	defer cancel()
 	if err := manager.Shutdown(shutdownContext); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestShutdownRejectsNilContextWithoutClosingManager(t *testing.T) {
+	gateway := &fakeGateway{}
+	manager, err := New(gateway, Config{HeartbeatInterval: time.Hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = manager.Shutdown(ctx)
+	})
+	var nilContext context.Context
+	if err := manager.Shutdown(nilContext); err == nil {
+		t.Fatal("Shutdown accepted a nil context")
+	}
+	if _, err := manager.Connect(
+		context.Background(),
+		profile.Profile{ID: "service-1"},
+		"development",
+	); err != nil {
+		t.Fatalf("manager was closed by rejected Shutdown: %v", err)
+	}
+}
+
+func TestShutdownRejectsSessionOperationsAfterClose(t *testing.T) {
+	manager, err := New(&fakeGateway{}, Config{HeartbeatInterval: time.Hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+	serverProfile := profile.Profile{ID: "service-1"}
+	if _, err := manager.Connect(context.Background(), serverProfile, "development"); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := manager.Shutdown(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Connect(
+		context.Background(), serverProfile, "development",
+	); !errors.Is(err, ErrClosed) {
+		t.Fatalf("Connect after Shutdown error = %v, want ErrClosed", err)
+	}
+	if _, err := manager.Current(serverProfile.ID); !errors.Is(err, ErrClosed) {
+		t.Fatalf("Current after Shutdown error = %v, want ErrClosed", err)
+	}
+	if _, err := manager.IssueRelayTicket(
+		context.Background(), serverProfile.ID,
+	); !errors.Is(err, ErrClosed) {
+		t.Fatalf("IssueRelayTicket after Shutdown error = %v, want ErrClosed", err)
 	}
 }

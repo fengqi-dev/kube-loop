@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
@@ -14,6 +15,8 @@ const (
 	DefaultHeartbeatInterval = 30 * time.Second
 	sessionUpdateBuffer      = 32
 )
+
+var ErrClosed = errors.New("remote Session manager is closed")
 
 type Gateway interface {
 	CreateSession(context.Context, profile.Profile, string, string) (remote.Session, error)
@@ -38,6 +41,7 @@ type Manager struct {
 	operations  map[string]*sync.Mutex
 	updates     chan remote.SessionUpdate
 	done        chan struct{}
+	closed      atomic.Bool
 }
 
 type entry struct {
@@ -68,6 +72,9 @@ func New(gateway Gateway, config Config) (*Manager, error) {
 }
 
 func (manager *Manager) Current(profileID string) (remote.Session, error) {
+	if manager.closed.Load() {
+		return remote.Session{}, ErrClosed
+	}
 	manager.mu.Lock()
 	defer manager.mu.Unlock()
 	current, ok := manager.active[profileID]

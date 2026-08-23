@@ -17,8 +17,14 @@ func (manager *Manager) SessionUpdates() <-chan remote.SessionUpdate {
 // the authoritative generation and prevents a stale reconnect from replacing a
 // newer Session selected by the desktop.
 func (manager *Manager) Refresh(ctx context.Context, profileID string) (remote.Session, error) {
+	if manager.closed.Load() {
+		return remote.Session{}, ErrClosed
+	}
 	manager.lifecycle.RLock()
 	defer manager.lifecycle.RUnlock()
+	if manager.closed.Load() {
+		return remote.Session{}, ErrClosed
+	}
 	operation := manager.profileOperation(profileID)
 	operation.Lock()
 	defer operation.Unlock()
@@ -62,6 +68,9 @@ func (manager *Manager) heartbeatLoop() {
 }
 
 func (manager *Manager) heartbeat() {
+	if manager.closed.Load() {
+		return
+	}
 	manager.lifecycle.RLock()
 	defer manager.lifecycle.RUnlock()
 	manager.mu.Lock()

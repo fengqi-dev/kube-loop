@@ -14,8 +14,14 @@ func (manager *Manager) Connect(
 	serverProfile profile.Profile,
 	namespace string,
 ) (remote.Session, error) {
+	if manager.closed.Load() {
+		return remote.Session{}, ErrClosed
+	}
 	manager.lifecycle.RLock()
 	defer manager.lifecycle.RUnlock()
+	if manager.closed.Load() {
+		return remote.Session{}, ErrClosed
+	}
 	operation := manager.profileOperation(serverProfile.ID)
 	operation.Lock()
 	defer operation.Unlock()

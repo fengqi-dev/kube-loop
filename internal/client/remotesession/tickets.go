@@ -11,8 +11,14 @@ func (manager *Manager) IssueRelayTicket(
 	ctx context.Context,
 	profileID string,
 ) (remote.RelayTicket, error) {
+	if manager.closed.Load() {
+		return remote.RelayTicket{}, ErrClosed
+	}
 	manager.lifecycle.RLock()
 	defer manager.lifecycle.RUnlock()
+	if manager.closed.Load() {
+		return remote.RelayTicket{}, ErrClosed
+	}
 	operation := manager.profileOperation(profileID)
 	operation.Lock()
 	defer operation.Unlock()
@@ -33,8 +39,14 @@ func (manager *Manager) RelayTicketSource(profileID string) func(context.Context
 	bound, ok := manager.active[profileID]
 	manager.mu.Unlock()
 	return func(ctx context.Context) (remote.RelayTicket, error) {
+		if manager.closed.Load() {
+			return remote.RelayTicket{}, ErrClosed
+		}
 		manager.lifecycle.RLock()
 		defer manager.lifecycle.RUnlock()
+		if manager.closed.Load() {
+			return remote.RelayTicket{}, ErrClosed
+		}
 		operation := manager.profileOperation(profileID)
 		operation.Lock()
 		defer operation.Unlock()
