@@ -107,7 +107,7 @@ func (manager *Manager) Start(
 		_, stopErr := manager.client.StopMirror(ctx, serverProfile, session, task.ID)
 		return Info{}, errors.Join(err, stopErr)
 	}
-	runContext, cancel := context.WithCancel(context.Background())
+	runContext, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	entry := &activeMirror{
 		profile: serverProfile, session: session, task: task, relay: relay, cancel: cancel, done: make(chan struct{}),
 		info: Info{

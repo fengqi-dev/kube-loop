@@ -114,7 +114,7 @@ func (manager *Manager) Start(
 		_, stopErr := manager.client.StopExchange(ctx, serverProfile, session, task.ID)
 		return Info{}, errors.Join(err, stopErr)
 	}
-	runContext, cancel := context.WithCancel(context.Background())
+	runContext, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	entry := &activeExchange{
 		profile: serverProfile, session: session, task: task, relay: relay, cancel: cancel, done: make(chan struct{}),
 		info: Info{

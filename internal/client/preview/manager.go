@@ -138,7 +138,7 @@ func (manager *Manager) Start(
 		return Info{}, errors.Join(err, stopErr, streamErr)
 	}
 
-	runContext, cancel := context.WithCancel(context.Background())
+	runContext, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	entry := &activePreview{
 		profile: serverProfile,
 		session: session,
