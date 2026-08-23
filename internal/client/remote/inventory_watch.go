@@ -33,13 +33,21 @@ type InventorySnapshot struct {
 	Services        []Service         `json:"services,omitempty"`
 }
 
+type inventoryConnection interface {
+	Read(context.Context) (websocket.MessageType, []byte, error)
+	Close(websocket.StatusCode, string) error
+}
+
+var _ inventoryConnection = (*websocket.Conn)(nil)
+
 type InventoryWatch struct {
-	connection *websocket.Conn
+	connection inventoryConnection
 	resource   InventoryResource
 	namespace  string
 	mu         sync.Mutex
 	sequence   uint64
 	closeOnce  sync.Once
+	closeErr   error
 }
 
 func (client *Client) OpenInventoryWatch(
@@ -133,9 +141,8 @@ func (watch *InventoryWatch) Close() error {
 	if watch == nil || watch.connection == nil {
 		return nil
 	}
-	var result error
 	watch.closeOnce.Do(func() {
-		result = watch.connection.Close(websocket.StatusNormalClosure, "client closed Inventory Watch")
+		watch.closeErr = watch.connection.Close(websocket.StatusNormalClosure, "client closed Inventory Watch")
 	})
-	return result
+	return watch.closeErr
 }
