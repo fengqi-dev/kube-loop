@@ -13,13 +13,14 @@ import (
 )
 
 type runtimeTestServer struct {
-	serveStarted  chan struct{}
-	shutdown      chan struct{}
-	shutdownOnce  sync.Once
-	serveErr      error
-	shutdownErr   error
-	shutdownValue any
-	shutdowns     atomic.Int32
+	serveStarted          chan struct{}
+	shutdown              chan struct{}
+	shutdownOnce          sync.Once
+	serveErr              error
+	shutdownErr           error
+	shutdownValue         any
+	shutdownUntilDeadline bool
+	shutdowns             atomic.Int32
 }
 
 type runtimeShutdownContextKey struct{}
@@ -64,6 +65,10 @@ func (server *runtimeTestServer) Shutdown(ctx context.Context) error {
 	server.shutdowns.Add(1)
 	server.shutdownValue = ctx.Value(runtimeShutdownContextKey{})
 	server.shutdownOnce.Do(func() { close(server.shutdown) })
+	if server.shutdownUntilDeadline {
+		<-ctx.Done()
+		return ctx.Err()
+	}
 	return server.shutdownErr
 }
 
@@ -94,12 +99,14 @@ func (worker *runtimeTestWorker) Run(ctx context.Context) {
 
 type runtimeTestSessionRuntime struct {
 	err           error
+	entryErr      error
 	shutdownValue any
 	shutdowns     atomic.Int32
 }
 
 func (runtime *runtimeTestSessionRuntime) Shutdown(ctx context.Context) error {
 	runtime.shutdowns.Add(1)
+	runtime.entryErr = ctx.Err()
 	runtime.shutdownValue = ctx.Value(runtimeShutdownContextKey{})
 	return runtime.err
 }
@@ -269,5 +276,42 @@ func TestServeControlPlaneBoundsServeLoopShutdown(t *testing.T) {
 		}
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("serveControlPlane ignored the serve-loop shutdown deadline")
+	}
+}
+
+func TestServeControlPlaneStartsIndependentShutdownsConcurrently(t *testing.T) {
+	ctx, stop := context.WithCancel(t.Context())
+	server := newRuntimeTestServer()
+	server.shutdownUntilDeadline = true
+	sessionRuntime := &runtimeTestSessionRuntime{}
+	workers := []*runtimeTestWorker{
+		newRuntimeTestWorker(), newRuntimeTestWorker(), newRuntimeTestWorker(),
+	}
+	options := runtimeTestOptions(
+		ctx, stop, server, sessionRuntime, workers[0], workers[1], workers[2],
+	)
+	options.Config.ShutdownTimeout = 50 * time.Millisecond
+	result := make(chan error, 1)
+	go func() { result <- serveControlPlane(options) }()
+
+	<-server.serveStarted
+	for _, worker := range workers {
+		<-worker.started
+	}
+	stop()
+	select {
+	case err := <-result:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("serveControlPlane() error = %v, want context deadline exceeded", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("serveControlPlane did not honor the parallel shutdown deadline")
+	}
+	if sessionRuntime.shutdowns.Load() != 1 || sessionRuntime.entryErr != nil {
+		t.Fatalf(
+			"Session shutdown calls=%d entry context error=%v",
+			sessionRuntime.shutdowns.Load(),
+			sessionRuntime.entryErr,
+		)
 	}
 }

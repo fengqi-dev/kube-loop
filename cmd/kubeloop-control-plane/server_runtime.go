@@ -146,10 +146,27 @@ func serveControlPlane(options serverRuntimeOptions) error {
 		options.Config.ShutdownTimeout,
 	)
 	defer cancel()
-	shutdownError := options.Server.Shutdown(shutdownContext)
-	shutdownError = errors.Join(shutdownError, options.SessionRuntime.Shutdown(shutdownContext))
+	shutdownFunctions := []func(context.Context) error{
+		options.Server.Shutdown,
+		options.SessionRuntime.Shutdown,
+	}
 	if relayServer != nil {
-		shutdownError = errors.Join(shutdownError, relayServer.Shutdown(shutdownContext))
+		shutdownFunctions = append(shutdownFunctions, relayServer.Shutdown)
+	}
+	shutdownResults := make(chan error, len(shutdownFunctions))
+	for _, shutdown := range shutdownFunctions {
+		go func() { shutdownResults <- shutdown(shutdownContext) }()
+	}
+	var shutdownError error
+	for remaining := len(shutdownFunctions); remaining > 0; {
+		select {
+		case shutdownResult := <-shutdownResults:
+			shutdownError = errors.Join(shutdownError, shutdownResult)
+			remaining--
+		case <-shutdownContext.Done():
+			shutdownError = errors.Join(shutdownError, shutdownContext.Err())
+			remaining = 0
+		}
 	}
 	serveWait := time.NewTimer(time.Second)
 	defer serveWait.Stop()
