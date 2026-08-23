@@ -229,23 +229,34 @@ func createElevatedExchangeFile(pattern, ownerSID string) (string, error) {
 func waitElevatedResult(ctx context.Context, path string) error {
 	ticker := time.NewTicker(elevatedResultPollInterval)
 	defer ticker.Stop()
+	var lastSyntaxError error
 	for {
 		raw, err := os.ReadFile(path)
 		if err == nil && len(raw) != 0 {
 			var result elevatedResult
 			if decodeErr := json.Unmarshal(raw, &result); decodeErr != nil {
-				return fmt.Errorf("decode elevated helper result: %w", decodeErr)
+				if _, partial := errors.AsType[*json.SyntaxError](decodeErr); !partial {
+					return fmt.Errorf("decode elevated helper result: %w", decodeErr)
+				}
+				lastSyntaxError = decodeErr
+			} else {
+				if result.Error != "" {
+					return fmt.Errorf("elevated helper command: %s", result.Error)
+				}
+				return nil
 			}
-			if result.Error != "" {
-				return fmt.Errorf("elevated helper command: %s", result.Error)
-			}
-			return nil
 		}
 		if err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("read elevated helper result: %w", err)
 		}
 		select {
 		case <-ctx.Done():
+			if lastSyntaxError != nil {
+				return errors.Join(
+					ctx.Err(),
+					fmt.Errorf("decode elevated helper result: %w", lastSyntaxError),
+				)
+			}
 			return ctx.Err()
 		case <-ticker.C:
 		}

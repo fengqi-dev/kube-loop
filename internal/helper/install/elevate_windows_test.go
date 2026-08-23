@@ -43,6 +43,23 @@ func TestWaitElevatedResultReturnsChildError(t *testing.T) {
 	}
 }
 
+func TestWaitElevatedResultRetriesPartialJSON(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "result.json")
+	if err := os.WriteFile(path, []byte(`{"error":`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		time.Sleep(150 * time.Millisecond)
+		raw, _ := json.Marshal(elevatedResult{})
+		_ = os.WriteFile(path, raw, 0o600)
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := waitElevatedResult(ctx, path); err != nil {
+		t.Fatalf("wait partial elevated result: %v", err)
+	}
+}
+
 func TestExecuteElevatedRequestRejectsUnknownOperation(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "request.json")
 	executable, err := os.Executable()
