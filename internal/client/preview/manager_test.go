@@ -81,115 +81,12 @@ func (client *testPreviewClient) calls() (remote.PreviewSpec, int, int, int) {
 	return client.createSpec, client.openCalls, client.getCalls, client.stopCalls
 }
 
-//nolint:gocyclo // TCP and UDP must be exercised together to verify one Preview reconciliation contract.
 func TestManagerRelaysPreviewTCPAndUDPToRetainedLocalTargets(t *testing.T) {
-	tcpListener, err := net.Listen(previewProtocolTCP, "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer checkTestClose(t, tcpListener.Close)
-	tcpPort := uint16(tcpListener.Addr().(*net.TCPAddr).Port)
-	tcpDone := make(chan error, 1)
-	go func() {
-		connection, acceptErr := tcpListener.Accept()
-		if acceptErr != nil {
-			tcpDone <- acceptErr
-			return
-		}
-		defer checkTestClose(t, connection.Close)
-		request := make([]byte, len("cluster-request"))
-		if _, readErr := io.ReadFull(connection, request); readErr != nil || string(request) != "cluster-request" {
-			tcpDone <- errors.Join(readErr, errors.New("unexpected Preview TCP request"))
-			return
-		}
-		_, writeErr := connection.Write([]byte("local-response"))
-		tcpDone <- writeErr
-	}()
-
-	udpListener, err := net.ListenUDP(previewProtocolUDP, &net.UDPAddr{IP: net.ParseIP(previewLoopbackHost)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer checkTestClose(t, udpListener.Close)
-	udpPort := uint16(udpListener.LocalAddr().(*net.UDPAddr).Port)
-	udpDone := make(chan error, 1)
-	go func() {
-		buffer := make([]byte, 64)
-		_ = udpListener.SetReadDeadline(time.Now().Add(5 * time.Second))
-		count, remoteAddress, readErr := udpListener.ReadFromUDP(buffer)
-		if readErr != nil || string(buffer[:count]) != "udp-request" {
-			udpDone <- errors.Join(readErr, errors.New("unexpected Preview UDP request"))
-			return
-		}
-		_, writeErr := udpListener.WriteToUDP([]byte("udp-response"), remoteAddress)
-		udpDone <- writeErr
-	}()
+	tcpPort, tcpDone := startPreviewTCPRelay(t)
+	udpPort, udpDone := startPreviewUDPRelay(t)
 
 	connection, gatewayConnection := mustTrafficConnections(t)
-	serverDone := make(chan error, 1)
-	relayVerified := make(chan struct{})
-	go func() {
-		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
-		defer cancel()
-		for _, frame := range []exchangestream.Frame{
-			{Type: exchangestream.Ready},
-			{Type: exchangestream.Open, StreamID: 1, ServicePort: 80, Protocol: exchangestream.ProtocolTCP},
-			{Type: exchangestream.Data, StreamID: 1, Payload: []byte("cluster-request")},
-		} {
-			if writeErr := writePreviewTestFrame(ctx, gatewayConnection, frame); writeErr != nil {
-				serverDone <- writeErr
-				return
-			}
-		}
-		data, readErr := readPreviewTestFrame(ctx, gatewayConnection)
-		if readErr != nil || data.Type != exchangestream.Data || data.StreamID != 1 ||
-			string(data.Payload) != "local-response" {
-			serverDone <- errors.Join(readErr, errors.New("unexpected local Preview TCP response"))
-			return
-		}
-		halfClose, readErr := readPreviewTestFrame(ctx, gatewayConnection)
-		if readErr != nil || halfClose.Type != exchangestream.CloseWrite || halfClose.StreamID != 1 {
-			serverDone <- errors.Join(readErr, errors.New("missing local Preview TCP half-close"))
-			return
-		}
-		if writeErr := writePreviewTestFrame(
-			ctx,
-			gatewayConnection,
-			exchangestream.Frame{Type: exchangestream.Close, StreamID: 1},
-		); writeErr != nil {
-			serverDone <- writeErr
-			return
-		}
-		if writeErr := writePreviewTestFrame(ctx, gatewayConnection, exchangestream.Frame{
-			Type: exchangestream.Datagram, StreamID: 2, ServicePort: 53,
-			Protocol: exchangestream.ProtocolUDP, Payload: []byte("udp-request"),
-		}); writeErr != nil {
-			serverDone <- writeErr
-			return
-		}
-		datagram, readErr := readPreviewTestFrame(ctx, gatewayConnection)
-		if readErr != nil || datagram.Type != exchangestream.Datagram || datagram.StreamID != 2 ||
-			datagram.ServicePort != 53 || string(datagram.Payload) != "udp-response" {
-			serverDone <- errors.Join(readErr, fmt.Errorf("unexpected local Preview UDP response: %#v", datagram))
-			return
-		}
-		if writeErr := writePreviewTestFrame(
-			ctx,
-			gatewayConnection,
-			exchangestream.Frame{Type: exchangestream.Close, StreamID: 2},
-		); writeErr != nil {
-			serverDone <- writeErr
-			return
-		}
-		close(relayVerified)
-		stop, readErr := readPreviewTestFrame(ctx, gatewayConnection)
-		if readErr != nil || stop.Type != exchangestream.Stop {
-			serverDone <- errors.Join(readErr, errors.New("missing client Preview stop"))
-			return
-		}
-		_ = writePreviewTestFrame(ctx, gatewayConnection, exchangestream.Frame{Type: exchangestream.Stop})
-		serverDone <- nil
-	}()
+	serverDone, relayVerified := startPreviewGateway(t, gatewayConnection)
 
 	now := time.Now().UTC()
 	session := remote.Session{
@@ -272,6 +169,124 @@ func TestManagerRelaysPreviewTCPAndUDPToRetainedLocalTargets(t *testing.T) {
 			manager.List(""),
 		)
 	}
+}
+
+func startPreviewTCPRelay(t *testing.T) (uint16, chan error) {
+	t.Helper()
+	listener, err := net.Listen(previewProtocolTCP, "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { checkTestClose(t, listener.Close) })
+	port := uint16(listener.Addr().(*net.TCPAddr).Port)
+	done := make(chan error, 1)
+	go func() {
+		connection, acceptErr := listener.Accept()
+		if acceptErr != nil {
+			done <- acceptErr
+			return
+		}
+		defer checkTestClose(t, connection.Close)
+		request := make([]byte, len("cluster-request"))
+		if _, readErr := io.ReadFull(connection, request); readErr != nil || string(request) != "cluster-request" {
+			done <- errors.Join(readErr, errors.New("unexpected Preview TCP request"))
+			return
+		}
+		_, writeErr := connection.Write([]byte("local-response"))
+		done <- writeErr
+	}()
+	return port, done
+}
+
+func startPreviewUDPRelay(t *testing.T) (uint16, chan error) {
+	t.Helper()
+	listener, err := net.ListenUDP(previewProtocolUDP, &net.UDPAddr{IP: net.ParseIP(previewLoopbackHost)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { checkTestClose(t, listener.Close) })
+	port := uint16(listener.LocalAddr().(*net.UDPAddr).Port)
+	done := make(chan error, 1)
+	go func() {
+		buffer := make([]byte, 64)
+		_ = listener.SetReadDeadline(time.Now().Add(5 * time.Second))
+		count, remoteAddress, readErr := listener.ReadFromUDP(buffer)
+		if readErr != nil || string(buffer[:count]) != "udp-request" {
+			done <- errors.Join(readErr, errors.New("unexpected Preview UDP request"))
+			return
+		}
+		_, writeErr := listener.WriteToUDP([]byte("udp-response"), remoteAddress)
+		done <- writeErr
+	}()
+	return port, done
+}
+
+func startPreviewGateway(
+	t *testing.T,
+	connection *trafficstream.FrameConn,
+) (chan error, chan struct{}) {
+	t.Helper()
+	done := make(chan error, 1)
+	verified := make(chan struct{})
+	go func() {
+		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+		defer cancel()
+		for _, frame := range []exchangestream.Frame{
+			{Type: exchangestream.Ready},
+			{Type: exchangestream.Open, StreamID: 1, ServicePort: 80, Protocol: exchangestream.ProtocolTCP},
+			{Type: exchangestream.Data, StreamID: 1, Payload: []byte("cluster-request")},
+		} {
+			if err := writePreviewTestFrame(ctx, connection, frame); err != nil {
+				done <- err
+				return
+			}
+		}
+		data, err := readPreviewTestFrame(ctx, connection)
+		if err != nil || data.Type != exchangestream.Data || data.StreamID != 1 ||
+			string(data.Payload) != "local-response" {
+			done <- errors.Join(err, errors.New("unexpected local Preview TCP response"))
+			return
+		}
+		halfClose, err := readPreviewTestFrame(ctx, connection)
+		if err != nil || halfClose.Type != exchangestream.CloseWrite || halfClose.StreamID != 1 {
+			done <- errors.Join(err, errors.New("missing local Preview TCP half-close"))
+			return
+		}
+		if err := writePreviewTestFrame(
+			ctx, connection, exchangestream.Frame{Type: exchangestream.Close, StreamID: 1},
+		); err != nil {
+			done <- err
+			return
+		}
+		if err := writePreviewTestFrame(ctx, connection, exchangestream.Frame{
+			Type: exchangestream.Datagram, StreamID: 2, ServicePort: 53,
+			Protocol: exchangestream.ProtocolUDP, Payload: []byte("udp-request"),
+		}); err != nil {
+			done <- err
+			return
+		}
+		datagram, err := readPreviewTestFrame(ctx, connection)
+		if err != nil || datagram.Type != exchangestream.Datagram || datagram.StreamID != 2 ||
+			datagram.ServicePort != 53 || string(datagram.Payload) != "udp-response" {
+			done <- errors.Join(err, fmt.Errorf("unexpected local Preview UDP response: %#v", datagram))
+			return
+		}
+		if err := writePreviewTestFrame(
+			ctx, connection, exchangestream.Frame{Type: exchangestream.Close, StreamID: 2},
+		); err != nil {
+			done <- err
+			return
+		}
+		close(verified)
+		stop, err := readPreviewTestFrame(ctx, connection)
+		if err != nil || stop.Type != exchangestream.Stop {
+			done <- errors.Join(err, errors.New("missing client Preview stop"))
+			return
+		}
+		_ = writePreviewTestFrame(ctx, connection, exchangestream.Frame{Type: exchangestream.Stop})
+		done <- nil
+	}()
+	return done, verified
 }
 
 func TestManagerCompensatesWhenPreviewStreamCannotOpen(t *testing.T) {

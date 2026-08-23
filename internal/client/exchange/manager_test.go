@@ -71,148 +71,12 @@ func (client *testExchangeClient) calls() (int, int) {
 	return client.openCalls, client.stopCalls
 }
 
-//nolint:gocyclo // TCP and UDP must be exercised together to verify one retained-target reconciliation contract.
 func TestManagerRelaysTCPAndUDPOnlyToRetainedLocalTargets(t *testing.T) {
-	tcpListener, err := net.Listen(exchangeProtocolTCP, "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer checkTestClose(t, tcpListener.Close)
-	tcpPort := uint16(tcpListener.Addr().(*net.TCPAddr).Port)
-	tcpDone := make(chan error, 1)
-	go func() {
-		connection, acceptErr := tcpListener.Accept()
-		if acceptErr != nil {
-			tcpDone <- acceptErr
-			return
-		}
-		defer checkTestClose(t, connection.Close)
-		request := make([]byte, len("cluster-request"))
-		if _, readErr := io.ReadFull(connection, request); readErr != nil || string(request) != "cluster-request" {
-			tcpDone <- errors.Join(readErr, errors.New("unexpected TCP request"))
-			return
-		}
-		if _, writeErr := connection.Write([]byte("local-response")); writeErr != nil {
-			tcpDone <- writeErr
-			return
-		}
-		if closeErr := connection.(*net.TCPConn).CloseWrite(); closeErr != nil {
-			tcpDone <- closeErr
-			return
-		}
-		_ = connection.SetReadDeadline(time.Now().Add(3 * time.Second))
-		buffer := make([]byte, 1)
-		_, readErr := connection.Read(buffer)
-		if !errors.Is(readErr, io.EOF) {
-			tcpDone <- readErr
-			return
-		}
-		tcpDone <- nil
-	}()
-
-	udpListener, err := net.ListenUDP(exchangeProtocolUDP, &net.UDPAddr{IP: net.ParseIP(exchangeLoopbackHost)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer checkTestClose(t, udpListener.Close)
-	udpPort := uint16(udpListener.LocalAddr().(*net.UDPAddr).Port)
-	udpDone := make(chan error, 1)
-	go func() {
-		buffer := make([]byte, 64)
-		_ = udpListener.SetReadDeadline(time.Now().Add(3 * time.Second))
-		count, remoteAddress, readErr := udpListener.ReadFromUDP(buffer)
-		if readErr != nil || string(buffer[:count]) != "udp-request" {
-			udpDone <- errors.Join(readErr, errors.New("unexpected UDP request"))
-			return
-		}
-		_, writeErr := udpListener.WriteToUDP([]byte("udp-response"), remoteAddress)
-		udpDone <- writeErr
-	}()
+	tcpPort, tcpDone := startExchangeTCPRelay(t)
+	udpPort, udpDone := startExchangeUDPRelay(t)
 
 	connection, gatewayConnection := mustTrafficConnections(t)
-	serverDone := make(chan error, 1)
-	relayVerified := make(chan struct{})
-	go func() {
-		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-		defer cancel()
-		if writeErr := writeTestFrame(
-			ctx,
-			gatewayConnection,
-			exchangestream.Frame{Type: exchangestream.Ready},
-		); writeErr != nil {
-			serverDone <- writeErr
-			return
-		}
-		if writeErr := writeTestFrame(ctx, gatewayConnection, exchangestream.Frame{
-			Type: exchangestream.Open, StreamID: 1, ServicePort: 80, Protocol: exchangestream.ProtocolTCP,
-		}); writeErr != nil {
-			serverDone <- writeErr
-			return
-		}
-		if writeErr := writeTestFrame(ctx, gatewayConnection, exchangestream.Frame{
-			Type: exchangestream.Data, StreamID: 1, Payload: []byte("cluster-request"),
-		}); writeErr != nil {
-			serverDone <- writeErr
-			return
-		}
-		data, readErr := readTestFrame(ctx, gatewayConnection)
-		if readErr != nil || data.Type != exchangestream.Data || data.StreamID != 1 ||
-			string(data.Payload) != "local-response" {
-			serverDone <- errors.Join(readErr, errors.New("unexpected local TCP response"))
-			return
-		}
-		halfClose, readErr := readTestFrame(ctx, gatewayConnection)
-		if readErr != nil || halfClose.Type != exchangestream.CloseWrite || halfClose.StreamID != 1 {
-			serverDone <- errors.Join(readErr, errors.New("missing local TCP half-close"))
-			return
-		}
-		if writeErr := writeTestFrame(
-			ctx,
-			gatewayConnection,
-			exchangestream.Frame{Type: exchangestream.CloseWrite, StreamID: 1},
-		); writeErr != nil {
-			serverDone <- writeErr
-			return
-		}
-		if writeErr := writeTestFrame(
-			ctx,
-			gatewayConnection,
-			exchangestream.Frame{Type: exchangestream.Close, StreamID: 1},
-		); writeErr != nil {
-			serverDone <- writeErr
-			return
-		}
-		if writeErr := writeTestFrame(ctx, gatewayConnection, exchangestream.Frame{
-			Type: exchangestream.Datagram, StreamID: 2, ServicePort: 53,
-			Protocol: exchangestream.ProtocolUDP, Payload: []byte("udp-request"),
-		}); writeErr != nil {
-			serverDone <- writeErr
-			return
-		}
-		datagram, readErr := readTestFrame(ctx, gatewayConnection)
-		if readErr != nil || datagram.Type != exchangestream.Datagram || datagram.StreamID != 2 ||
-			datagram.ServicePort != 53 || string(datagram.Payload) != "udp-response" {
-			serverDone <- errors.Join(readErr, fmt.Errorf("unexpected local UDP response: %#v", datagram))
-			return
-		}
-		if writeErr := writeTestFrame(
-			ctx,
-			gatewayConnection,
-			exchangestream.Frame{Type: exchangestream.Close, StreamID: 2},
-		); writeErr != nil {
-			serverDone <- writeErr
-			return
-		}
-		close(relayVerified)
-		stop, readErr := readTestFrame(ctx, gatewayConnection)
-		if readErr != nil || stop.Type != exchangestream.Stop {
-			serverDone <- errors.Join(readErr, errors.New("missing client Exchange stop"))
-			return
-		}
-		_ = writeTestFrame(ctx, gatewayConnection, exchangestream.Frame{Type: exchangestream.Stop})
-		_ = gatewayConnection.Close()
-		serverDone <- nil
-	}()
+	serverDone, relayVerified := startExchangeGateway(t, gatewayConnection)
 
 	now := time.Now().UTC()
 	session := remote.Session{
@@ -294,6 +158,141 @@ func TestManagerRelaysTCPAndUDPOnlyToRetainedLocalTargets(t *testing.T) {
 	if openCalls != 1 || stopCalls != 1 {
 		t.Fatalf("client calls: open=%d stop=%d", openCalls, stopCalls)
 	}
+}
+
+func startExchangeTCPRelay(t *testing.T) (uint16, chan error) {
+	t.Helper()
+	listener, err := net.Listen(exchangeProtocolTCP, "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { checkTestClose(t, listener.Close) })
+	port := uint16(listener.Addr().(*net.TCPAddr).Port)
+	done := make(chan error, 1)
+	go func() {
+		connection, acceptErr := listener.Accept()
+		if acceptErr != nil {
+			done <- acceptErr
+			return
+		}
+		defer checkTestClose(t, connection.Close)
+		request := make([]byte, len("cluster-request"))
+		if _, readErr := io.ReadFull(connection, request); readErr != nil || string(request) != "cluster-request" {
+			done <- errors.Join(readErr, errors.New("unexpected TCP request"))
+			return
+		}
+		if _, writeErr := connection.Write([]byte("local-response")); writeErr != nil {
+			done <- writeErr
+			return
+		}
+		if closeErr := connection.(*net.TCPConn).CloseWrite(); closeErr != nil {
+			done <- closeErr
+			return
+		}
+		_ = connection.SetReadDeadline(time.Now().Add(3 * time.Second))
+		buffer := make([]byte, 1)
+		_, readErr := connection.Read(buffer)
+		if !errors.Is(readErr, io.EOF) {
+			done <- readErr
+			return
+		}
+		done <- nil
+	}()
+	return port, done
+}
+
+func startExchangeUDPRelay(t *testing.T) (uint16, chan error) {
+	t.Helper()
+	listener, err := net.ListenUDP(exchangeProtocolUDP, &net.UDPAddr{IP: net.ParseIP(exchangeLoopbackHost)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { checkTestClose(t, listener.Close) })
+	port := uint16(listener.LocalAddr().(*net.UDPAddr).Port)
+	done := make(chan error, 1)
+	go func() {
+		buffer := make([]byte, 64)
+		_ = listener.SetReadDeadline(time.Now().Add(3 * time.Second))
+		count, remoteAddress, readErr := listener.ReadFromUDP(buffer)
+		if readErr != nil || string(buffer[:count]) != "udp-request" {
+			done <- errors.Join(readErr, errors.New("unexpected UDP request"))
+			return
+		}
+		_, writeErr := listener.WriteToUDP([]byte("udp-response"), remoteAddress)
+		done <- writeErr
+	}()
+	return port, done
+}
+
+func startExchangeGateway(
+	t *testing.T,
+	connection *trafficstream.FrameConn,
+) (chan error, chan struct{}) {
+	t.Helper()
+	done := make(chan error, 1)
+	verified := make(chan struct{})
+	go func() {
+		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+		defer cancel()
+		for _, frame := range []exchangestream.Frame{
+			{Type: exchangestream.Ready},
+			{Type: exchangestream.Open, StreamID: 1, ServicePort: 80, Protocol: exchangestream.ProtocolTCP},
+			{Type: exchangestream.Data, StreamID: 1, Payload: []byte("cluster-request")},
+		} {
+			if err := writeTestFrame(ctx, connection, frame); err != nil {
+				done <- err
+				return
+			}
+		}
+		data, err := readTestFrame(ctx, connection)
+		if err != nil || data.Type != exchangestream.Data || data.StreamID != 1 ||
+			string(data.Payload) != "local-response" {
+			done <- errors.Join(err, errors.New("unexpected local TCP response"))
+			return
+		}
+		halfClose, err := readTestFrame(ctx, connection)
+		if err != nil || halfClose.Type != exchangestream.CloseWrite || halfClose.StreamID != 1 {
+			done <- errors.Join(err, errors.New("missing local TCP half-close"))
+			return
+		}
+		for _, frame := range []exchangestream.Frame{
+			{Type: exchangestream.CloseWrite, StreamID: 1},
+			{Type: exchangestream.Close, StreamID: 1},
+			{
+				Type: exchangestream.Datagram, StreamID: 2, ServicePort: 53,
+				Protocol: exchangestream.ProtocolUDP, Payload: []byte("udp-request"),
+			},
+		} {
+			if err := writeTestFrame(ctx, connection, frame); err != nil {
+				done <- err
+				return
+			}
+		}
+		datagram, err := readTestFrame(ctx, connection)
+		if err != nil || datagram.Type != exchangestream.Datagram || datagram.StreamID != 2 ||
+			datagram.ServicePort != 53 || string(datagram.Payload) != "udp-response" {
+			done <- errors.Join(err, fmt.Errorf("unexpected local UDP response: %#v", datagram))
+			return
+		}
+		if err := writeTestFrame(
+			ctx,
+			connection,
+			exchangestream.Frame{Type: exchangestream.Close, StreamID: 2},
+		); err != nil {
+			done <- err
+			return
+		}
+		close(verified)
+		stop, err := readTestFrame(ctx, connection)
+		if err != nil || stop.Type != exchangestream.Stop {
+			done <- errors.Join(err, errors.New("missing client Exchange stop"))
+			return
+		}
+		_ = writeTestFrame(ctx, connection, exchangestream.Frame{Type: exchangestream.Stop})
+		_ = connection.Close()
+		done <- nil
+	}()
+	return done, verified
 }
 
 func TestManagerCompensatesWhenExchangeStreamCannotOpen(t *testing.T) {
