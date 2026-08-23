@@ -7,10 +7,12 @@ import (
 
 // SetEnabled updates the enabled flag and reconciles the listener.
 func (s *Server) SetEnabled(enabled bool) error {
+	s.lifecycle.Lock()
+	defer s.lifecycle.Unlock()
 	s.mu.Lock()
 	s.enabled = enabled
 	s.mu.Unlock()
-	return s.Apply()
+	return s.apply()
 }
 
 // SetPort updates the listen port and restarts if currently listening on a different port.
@@ -18,6 +20,8 @@ func (s *Server) SetPort(port int) error {
 	if port <= 0 || port > 65535 {
 		return fmt.Errorf("invalid mcp port %d", port)
 	}
+	s.lifecycle.Lock()
+	defer s.lifecycle.Unlock()
 	s.mu.Lock()
 	if s.port == port {
 		s.mu.Unlock()
@@ -28,12 +32,12 @@ func (s *Server) SetPort(port int) error {
 	enabled := s.enabled
 	s.mu.Unlock()
 	if wasListening || enabled {
-		_ = s.Stop()
+		_ = s.stop()
 		s.mu.Lock()
 		s.enabled = enabled
 		s.mu.Unlock()
 		if enabled {
-			return s.Start()
+			return s.start()
 		}
 	}
 	return nil
@@ -41,18 +45,20 @@ func (s *Server) SetPort(port int) error {
 
 // SetTokenEnabled turns Bearer token auth on or off and restarts if listening.
 func (s *Server) SetTokenEnabled(enabled bool) error {
+	s.lifecycle.Lock()
+	defer s.lifecycle.Unlock()
 	s.mu.Lock()
 	wasListening := s.listener != nil
 	s.tokenEnabled = enabled
 	serverEnabled := s.enabled
 	s.mu.Unlock()
 	if wasListening {
-		_ = s.Stop()
+		_ = s.stop()
 		s.mu.Lock()
 		s.enabled = serverEnabled
 		s.mu.Unlock()
 		if serverEnabled {
-			return s.Start()
+			return s.start()
 		}
 	}
 	return nil
@@ -64,18 +70,20 @@ func (s *Server) SetToken(token string) error {
 	if token == "" {
 		return errors.New("mcp token is required")
 	}
+	s.lifecycle.Lock()
+	defer s.lifecycle.Unlock()
 	s.mu.Lock()
 	wasListening := s.listener != nil
 	s.token = token
 	enabled := s.enabled
 	s.mu.Unlock()
 	if wasListening {
-		_ = s.Stop()
+		_ = s.stop()
 		s.mu.Lock()
 		s.enabled = enabled
 		s.mu.Unlock()
 		if enabled {
-			return s.Start()
+			return s.start()
 		}
 	}
 	return nil

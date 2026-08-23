@@ -299,6 +299,49 @@ func TestServerStopWithStreamableHTTPSession(t *testing.T) {
 	}
 }
 
+func TestServerStopWaitsForServeCleanup(t *testing.T) {
+	server := NewServer(&fakeBackend{}, "test")
+	server.Configure(Config{Enabled: true, Port: freePort(t), TokenEnabled: false})
+	cleanupStarted := make(chan struct{})
+	releaseCleanup := make(chan struct{})
+	server.SetErrorHandler(func(error) {
+		close(cleanupStarted)
+		<-releaseCleanup
+	})
+	if err := server.Start(); err != nil {
+		t.Fatal(err)
+	}
+
+	server.mu.Lock()
+	listener := server.listener
+	server.mu.Unlock()
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-cleanupStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Serve cleanup did not start")
+	}
+
+	stopped := make(chan error, 1)
+	go func() { stopped <- server.Stop() }()
+	select {
+	case err := <-stopped:
+		t.Fatalf("Stop returned before Serve cleanup completed: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(releaseCleanup)
+	select {
+	case err := <-stopped:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Stop did not wait for Serve cleanup")
+	}
+}
+
 type bearerRoundTripper struct {
 	token string
 	base  http.RoundTripper

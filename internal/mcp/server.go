@@ -25,6 +25,7 @@ type Server struct {
 	backend Backend
 	version string
 
+	lifecycle    sync.Mutex
 	mu           sync.Mutex
 	enabled      bool
 	port         int
@@ -32,6 +33,7 @@ type Server struct {
 	token        string
 	httpServer   *http.Server
 	listener     net.Listener
+	serveDone    chan struct{}
 	lastErr      string
 	onError      func(error)
 }
@@ -59,6 +61,8 @@ func (s *Server) SetErrorHandler(handler func(error)) {
 // Configure updates persisted settings without starting or stopping.
 // Use Apply to reconcile the listener with Enabled.
 func (s *Server) Configure(cfg Config) {
+	s.lifecycle.Lock()
+	defer s.lifecycle.Unlock()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.enabled = cfg.Enabled
