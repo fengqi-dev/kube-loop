@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -154,6 +155,25 @@ func TestOIDCLoopbackLoginUsesEphemeralCallbackServer(t *testing.T) {
 	}
 	if credential.AccessToken != "access-token" || credential.RefreshToken != "refresh-token" {
 		t.Fatalf("credential = %#v", credential)
+	}
+}
+
+func TestLoopbackCallbackStopIsIdempotent(t *testing.T) {
+	client := New(Config{RedirectURI: "http://127.0.0.1/callback", LoopbackCallback: true})
+	redirectURI, stop, err := client.startLoopbackCallback(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	stop()
+	stop()
+	callback, err := url.Parse(redirectURI)
+	if err != nil {
+		t.Fatal(err)
+	}
+	connection, err := net.DialTimeout("tcp", callback.Host, 100*time.Millisecond)
+	if err == nil {
+		_ = connection.Close()
+		t.Fatal("loopback callback listener remained open after stop")
 	}
 }
 

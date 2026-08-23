@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"sync"
 	"time"
 
 	"errors"
@@ -71,11 +72,18 @@ func (client *Client) startLoopbackCallback(ctx context.Context) (string, func()
 		ReadHeaderTimeout: 5 * time.Second,
 		IdleTimeout:       5 * time.Second,
 	}
+	serveDone := make(chan struct{})
 	go func() {
+		defer close(serveDone)
 		_ = server.Serve(listener)
 	}()
+	var stopOnce sync.Once
 	return actualRedirect.String(), func() {
-		_ = server.Close()
+		stopOnce.Do(func() {
+			_ = listener.Close()
+			_ = server.Close()
+			<-serveDone
+		})
 	}, nil
 }
 
