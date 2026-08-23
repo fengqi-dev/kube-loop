@@ -177,7 +177,20 @@ func (u *Updater) Restart(ctx context.Context) supervisorprotocol.Response {
 		response.Error = err.Error()
 		return response
 	}
-	response.Worker, _ = u.Status(ctx)
+	if err := u.waitAnyReady(ctx); err != nil {
+		response.Worker, _ = u.Status(ctx)
+		response.Error = fmt.Sprintf(
+			"worker did not become ready after restart: %v",
+			err,
+		)
+		return response
+	}
+	var statusErr error
+	response.Worker, statusErr = u.Status(ctx)
+	if statusErr != nil {
+		response.Error = statusErr.Error()
+		return response
+	}
 	response.OK = response.Worker.Running && response.Worker.CoreReady
 	if !response.OK {
 		response.Error = "worker did not become ready after restart"

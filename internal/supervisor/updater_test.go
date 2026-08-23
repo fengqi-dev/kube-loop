@@ -22,9 +22,15 @@ type fakeWorker struct {
 	startErrOnce error
 	stops        int
 	starts       int
+	statusCalls  int
+	readyAfter   int
 }
 
 func (w *fakeWorker) Status(context.Context) (supervisorprotocol.WorkerStatus, error) {
+	w.statusCalls++
+	if w.readyAfter > 0 && w.statusCalls >= w.readyAfter {
+		w.status.CoreReady = true
+	}
 	status := w.status
 	if digest, err := fileSHA256(w.config.WorkerBinaryPath); err == nil {
 		status.Installed = true
@@ -47,7 +53,7 @@ func (w *fakeWorker) Start(context.Context) error {
 		return err
 	}
 	w.status.Running = true
-	w.status.CoreReady = true
+	w.status.CoreReady = w.readyAfter == 0
 	return nil
 }
 
@@ -189,6 +195,30 @@ func TestUpdaterRestartCyclesWorker(t *testing.T) {
 	response := updater.Restart(t.Context())
 	if !response.OK || worker.stops != 1 || worker.starts != 1 {
 		t.Fatalf("Restart response=%#v stops=%d starts=%d", response, worker.stops, worker.starts)
+	}
+}
+
+func TestUpdaterRestartWaitsForWorkerReadiness(t *testing.T) {
+	config := testConfig(t)
+	worker := &fakeWorker{
+		config: config,
+		status: supervisorprotocol.WorkerStatus{
+			Installed: true, Running: true, CoreReady: true,
+		},
+		readyAfter: 3,
+	}
+	updater := NewUpdater(config, worker, os.Getuid())
+	updater.readyTimeout = time.Second
+	updater.readyInterval = time.Millisecond
+
+	response := updater.Restart(t.Context())
+	if !response.OK || worker.statusCalls < worker.readyAfter {
+		t.Fatalf(
+			"Restart response=%#v statusCalls=%d want at least %d",
+			response,
+			worker.statusCalls,
+			worker.readyAfter,
+		)
 	}
 }
 
