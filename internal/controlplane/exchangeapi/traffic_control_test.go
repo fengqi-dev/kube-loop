@@ -21,9 +21,12 @@ import (
 )
 
 type exchangeTrafficResources struct {
-	applied  bool
-	restored bool
+	applied      bool
+	restored     bool
+	restoreValue any
 }
+
+type exchangeCleanupContextKey struct{}
 
 func (*exchangeTrafficResources) Capture(
 	context.Context,
@@ -44,11 +47,12 @@ func (resources *exchangeTrafficResources) Apply(
 }
 
 func (resources *exchangeTrafficResources) Restore(
-	context.Context,
-	servicebinding.ServiceInterceptSnapshot,
-	string,
+	ctx context.Context,
+	_ servicebinding.ServiceInterceptSnapshot,
+	_ string,
 ) error {
 	resources.restored = true
+	resources.restoreValue = ctx.Value(exchangeCleanupContextKey{})
 	return nil
 }
 
@@ -249,10 +253,12 @@ func TestExchangeTrafficControlLifecycle(t *testing.T) {
 		t.Fatalf("stopping heartbeat = %#v error = %#v", heartbeat, apiError)
 	}
 
-	finished, apiError := handler.Finish(ctx, relayID, trafficcontrol.FinishRequest{
+	finishContext := context.WithValue(ctx, exchangeCleanupContextKey{}, "exchange-finish")
+	finished, apiError := handler.Finish(finishContext, relayID, trafficcontrol.FinishRequest{
 		Mode: trafficcontrol.ModeExchange, TaskID: taskID, RelayID: relayID,
 	})
-	if apiError != nil || finished.State != string(remotetask.Stopped) || !resources.restored {
+	if apiError != nil || finished.State != string(remotetask.Stopped) || !resources.restored ||
+		resources.restoreValue != "exchange-finish" {
 		t.Fatalf("finish = %#v restored = %t error = %#v", finished, resources.restored, apiError)
 	}
 }

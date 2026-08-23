@@ -28,7 +28,7 @@ func (service *Service) activate(
 	if err != nil {
 		if managed {
 			cleanupContext, cancel := context.WithTimeout(
-				context.Background(),
+				context.WithoutCancel(ctx),
 				30*time.Second,
 			)
 			_ = service.bindings.Delete(

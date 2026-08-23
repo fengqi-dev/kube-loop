@@ -50,7 +50,10 @@ type failingBindings struct {
 	activateErr      error
 	deletedNamespace string
 	deletedTaskID    string
+	deleteValue      any
 }
+
+type activationCleanupContextKey struct{}
 
 func (bindings *failingBindings) Activate(
 	context.Context,
@@ -61,9 +64,10 @@ func (bindings *failingBindings) Activate(
 	return bindings.managed, bindings.activateErr
 }
 
-func (bindings *failingBindings) Delete(_ context.Context, namespace, taskID string) error {
+func (bindings *failingBindings) Delete(ctx context.Context, namespace, taskID string) error {
 	bindings.deletedNamespace = namespace
 	bindings.deletedTaskID = taskID
+	bindings.deleteValue = ctx.Value(activationCleanupContextKey{})
 	return nil
 }
 
@@ -86,7 +90,8 @@ func TestActivateCleansManagedBindingAndMarksTaskFailed(t *testing.T) {
 	}
 	session := sessionapi.ActiveSession{ID: uuid.NewString(), Namespace: "development"}
 
-	apiError := service.activate(context.Background(), session, &task)
+	activateContext := context.WithValue(context.Background(), activationCleanupContextKey{}, "activation")
+	apiError := service.activate(activateContext, session, &task)
 	if apiError == nil || apiError.Code != controlplaneapi.CodeUnavailable {
 		t.Fatalf("activate error = %#v", apiError)
 	}
@@ -100,5 +105,8 @@ func TestActivateCleansManagedBindingAndMarksTaskFailed(t *testing.T) {
 			bindings.deletedNamespace,
 			bindings.deletedTaskID,
 		)
+	}
+	if bindings.deleteValue != "activation" {
+		t.Fatalf("cleanup context value = %v", bindings.deleteValue)
 	}
 }

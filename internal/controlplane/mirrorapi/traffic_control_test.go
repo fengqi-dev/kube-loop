@@ -22,9 +22,12 @@ import (
 )
 
 type mirrorTrafficResources struct {
-	applied  bool
-	restored bool
+	applied      bool
+	restored     bool
+	restoreValue any
 }
+
+type mirrorCleanupContextKey struct{}
 
 func (*mirrorTrafficResources) Capture(
 	_ context.Context,
@@ -52,11 +55,12 @@ func (resources *mirrorTrafficResources) Apply(
 }
 
 func (resources *mirrorTrafficResources) Restore(
-	context.Context,
-	servicebinding.ServiceInterceptSnapshot,
-	string,
+	ctx context.Context,
+	_ servicebinding.ServiceInterceptSnapshot,
+	_ string,
 ) error {
 	resources.restored = true
+	resources.restoreValue = ctx.Value(mirrorCleanupContextKey{})
 	return nil
 }
 
@@ -206,10 +210,12 @@ func TestMirrorTrafficControlLifecycle(t *testing.T) {
 		t.Fatalf("stopping heartbeat = %#v error = %#v", heartbeat, apiError)
 	}
 
-	finished, apiError := handler.Finish(ctx, relayID, trafficcontrol.FinishRequest{
+	finishContext := context.WithValue(ctx, mirrorCleanupContextKey{}, "mirror-finish")
+	finished, apiError := handler.Finish(finishContext, relayID, trafficcontrol.FinishRequest{
 		Mode: trafficcontrol.ModeMirror, TaskID: taskID, RelayID: relayID,
 	})
-	if apiError != nil || finished.State != string(remotetask.Stopped) || !resources.restored {
+	if apiError != nil || finished.State != string(remotetask.Stopped) || !resources.restored ||
+		resources.restoreValue != "mirror-finish" {
 		t.Fatalf("finish = %#v restored = %t error = %#v", finished, resources.restored, apiError)
 	}
 }

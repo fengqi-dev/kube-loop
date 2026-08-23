@@ -99,11 +99,13 @@ func TestPreviewTrafficControlLifecycle(t *testing.T) {
 		t.Fatalf("stopping heartbeat = %#v error = %#v", heartbeat, apiError)
 	}
 
-	finished, apiError := handler.Finish(ctx, relayID, trafficcontrol.FinishRequest{
+	finishContext := context.WithValue(ctx, previewCleanupContextKey{}, "preview-finish")
+	finished, apiError := handler.Finish(finishContext, relayID, trafficcontrol.FinishRequest{
 		Mode: trafficcontrol.ModePreview, TaskID: taskID, RelayID: relayID,
 	})
 	if apiError != nil || finished.State != string(remotetask.Stopped) ||
-		resources.deletedID != taskID || resources.deleteCalls != 1 {
+		resources.deletedID != taskID || resources.deleteCalls != 1 ||
+		resources.deleteValue != "preview-finish" {
 		t.Fatalf(
 			"finish = %#v deleted = %q calls = %d error = %#v",
 			finished,

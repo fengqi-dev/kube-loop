@@ -2,6 +2,7 @@ package trafficbindingclient
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -10,6 +11,25 @@ import (
 	controlplanestorage "github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/remotetask"
 )
+
+type recoveryContextKey struct{}
+
+type recordingTaskReader struct {
+	taskReader
+
+	updateValue any
+}
+
+func (reader *recordingTaskReader) UpdateState(
+	ctx context.Context,
+	id string,
+	expected, next remotetask.State,
+	result json.RawMessage,
+	updatedAt time.Time,
+) error {
+	reader.updateValue = ctx.Value(recoveryContextKey{})
+	return reader.taskReader.UpdateState(ctx, id, expected, next, result, updatedAt)
+}
 
 func TestReconcilerDefersRecoveryWhenSessionIsUnavailable(t *testing.T) {
 	manager, err := New(fakeClient(t), Config{PollInterval: 10 * time.Millisecond})
@@ -21,7 +41,7 @@ func TestReconcilerDefersRecoveryWhenSessionIsUnavailable(t *testing.T) {
 		ID: "task-a", SessionID: "session-a", Type: taskTypeExchange,
 		State: remotetask.Running, UpdatedAt: now.Add(-time.Minute),
 	}
-	tasks := taskReader{task.ID: task}
+	tasks := &recordingTaskReader{taskReader: taskReader{task.ID: task}}
 	reconciler, err := NewReconciler(
 		manager,
 		tasks,
@@ -36,13 +56,18 @@ func TestReconcilerDefersRecoveryWhenSessionIsUnavailable(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	claimed, err := reconciler.recoverTask(t.Context(), task, now)
+	parent, cancel := context.WithCancel(context.WithValue(t.Context(), recoveryContextKey{}, "recovery"))
+	cancel()
+	claimed, err := reconciler.recoverTask(parent, task, now)
 	if !claimed || err == nil || !errors.Is(err, controlplanestorage.ErrNotFound) {
 		t.Fatalf("claimed=%v err=%v", claimed, err)
 	}
-	deferred := tasks[task.ID]
+	deferred := tasks.taskReader[task.ID]
 	if deferred.State != remotetask.Recovering || !deferred.UpdatedAt.Equal(now) {
 		t.Fatalf("deferred task=%#v", deferred)
+	}
+	if tasks.updateValue != "recovery" {
+		t.Fatalf("deferred recovery context value = %v", tasks.updateValue)
 	}
 }
 

@@ -59,7 +59,7 @@ func (reconciler *Reconciler) recoverTask(
 	}
 	session, err := reconciler.sessions.GetByID(ctx, task.SessionID)
 	if err != nil {
-		reconciler.deferRecovery(task, now)
+		reconciler.deferRecovery(ctx, task, now)
 		return true, fmt.Errorf(
 			"read Session %s for stale Task %s: %w",
 			task.SessionID,
@@ -74,7 +74,7 @@ func (reconciler *Reconciler) recoverTask(
 	err = reconciler.manager.Delete(cleanupContext, session.Namespace, task.ID)
 	cancel()
 	if err != nil {
-		reconciler.deferRecovery(task, reconciler.now().UTC())
+		reconciler.deferRecovery(ctx, task, reconciler.now().UTC())
 		return true, fmt.Errorf(
 			"delete TrafficBinding for stale Task %s: %w",
 			task.ID,
@@ -111,10 +111,11 @@ func (reconciler *Reconciler) recoverTask(
 }
 
 func (reconciler *Reconciler) deferRecovery(
+	parent context.Context,
 	task controlplanestorage.Task,
 	now time.Time,
 ) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), 5*time.Second)
 	defer cancel()
 	_ = reconciler.tasks.UpdateState(
 		ctx,

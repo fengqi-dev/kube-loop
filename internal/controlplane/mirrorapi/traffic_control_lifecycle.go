@@ -80,7 +80,7 @@ func (handler *Service) Finish(
 	var restoreErr error
 	if cleanupRequired {
 		restoreContext, cancel := context.WithTimeout(
-			context.Background(),
+			context.WithoutCancel(ctx),
 			handler.config.RestoreTimeout,
 		)
 		restoreErr = handler.resources.Restore(

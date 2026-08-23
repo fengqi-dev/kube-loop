@@ -45,7 +45,10 @@ type recordingPreviewResources struct {
 	deleteCalls int
 	createErr   error
 	deleteErr   error
+	deleteValue any
 }
+
+type previewCleanupContextKey struct{}
 
 func (resources *recordingPreviewResources) Create(
 	_ context.Context,
@@ -68,7 +71,7 @@ func (resources *recordingPreviewResources) Create(
 }
 
 func (resources *recordingPreviewResources) Delete(
-	_ context.Context,
+	ctx context.Context,
 	snapshot servicebinding.PreviewServiceSnapshot,
 	previewID string,
 ) error {
@@ -77,6 +80,7 @@ func (resources *recordingPreviewResources) Delete(
 	resources.snapshot = snapshot
 	resources.deletedID = previewID
 	resources.deleteCalls++
+	resources.deleteValue = ctx.Value(previewCleanupContextKey{})
 	return resources.deleteErr
 }
 

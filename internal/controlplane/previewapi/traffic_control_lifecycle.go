@@ -80,7 +80,7 @@ func (handler *Service) Finish(
 	var deleteErr error
 	if cleanupRequired {
 		deleteContext, cancel := context.WithTimeout(
-			context.Background(),
+			context.WithoutCancel(ctx),
 			handler.config.DeleteTimeout,
 		)
 		deleteErr = handler.resources.Delete(
