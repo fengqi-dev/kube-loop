@@ -21,7 +21,7 @@ func daclAllowsSID(descriptor *windows.SECURITY_DESCRIPTOR, sidText string) (boo
 	if dacl == nil {
 		return false, nil
 	}
-	for index := uint32(0); index < uint32(dacl.AceCount); index++ {
+	for index := range uint32(dacl.AceCount) {
 		var ace *windows.ACCESS_ALLOWED_ACE
 		if err := windows.GetAce(dacl, index, &ace); err != nil {
 			return false, fmt.Errorf("read ACE %d: %w", index, err)

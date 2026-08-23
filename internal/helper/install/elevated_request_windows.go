@@ -141,7 +141,7 @@ func installWindowsCertificate(content []byte, run windowsCommandRunner) (return
 		return fmt.Errorf("close temporary traffic inspection certificate: %w", err)
 	}
 	if run == nil {
-		return fmt.Errorf("Windows certificate command runner is required")
+		return fmt.Errorf("windows certificate command runner is required")
 	}
 	output, err := run("certutil.exe", "-addstore", "-f", "Root", path)
 	if err != nil {
@@ -163,7 +163,7 @@ func uninstallWindowsCertificate(content []byte, run windowsCommandRunner) error
 		return err
 	}
 	if run == nil {
-		return fmt.Errorf("Windows certificate command runner is required")
+		return fmt.Errorf("windows certificate command runner is required")
 	}
 	identifier := sha1.Sum(certificate.Raw) // #nosec G401 -- certutil identifies store entries by SHA-1 thumbprint.
 	thumbprint := strings.ToUpper(hex.EncodeToString(identifier[:]))

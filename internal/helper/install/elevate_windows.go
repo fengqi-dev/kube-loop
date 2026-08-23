@@ -157,7 +157,7 @@ func runElevatedTool(ctx context.Context, tool, operation string, request elevat
 		0, verbPtr, toolPtr, argsPtr, cwdPtr, windows.SW_HIDE,
 	); err != nil {
 		if errors.Is(err, windows.ERROR_CANCELLED) {
-			return fmt.Errorf("Windows elevation was cancelled")
+			return fmt.Errorf("windows elevation was cancelled")
 		}
 		return fmt.Errorf("launch elevated helper tool: %w", err)
 	}

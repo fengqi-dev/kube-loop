@@ -20,19 +20,31 @@ func (s *windowsService) Execute(
 	defer cancel()
 	errCh := make(chan error, 1)
 	go func() { errCh <- s.server.Serve(ctx) }()
-	changes <- svc.Status{State: svc.Running, Accepts: svc.AcceptStop | svc.AcceptShutdown}
+	changes <- svc.Status{
+		State:   svc.Running,
+		Accepts: svc.AcceptStop | svc.AcceptShutdown | svc.AcceptPreShutdown,
+	}
 	for {
 		select {
-		case req := <-requests:
+		case req, ok := <-requests:
+			if !ok {
+				cancel()
+				<-errCh
+				return false, 0
+			}
 			switch req.Cmd {
 			case svc.Interrogate:
 				changes <- req.CurrentStatus
-			case svc.Stop, svc.Shutdown:
+			case svc.Stop, svc.Shutdown, svc.PreShutdown:
 				changes <- svc.Status{State: svc.StopPending}
 				cancel()
 				<-errCh
 				changes <- svc.Status{State: svc.Stopped}
 				return false, 0
+			case svc.Pause, svc.Continue, svc.ParamChange,
+				svc.NetBindAdd, svc.NetBindRemove, svc.NetBindEnable, svc.NetBindDisable,
+				svc.DeviceEvent, svc.HardwareProfileChange, svc.PowerEvent, svc.SessionChange:
+				// The helper supports only lifecycle and status commands.
 			}
 		case err := <-errCh:
 			if err != nil {

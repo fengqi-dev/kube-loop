@@ -3,6 +3,7 @@
 package terminal
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"syscall"
@@ -15,7 +16,7 @@ func open(command string) error {
 	if err != nil {
 		return fmt.Errorf("find PowerShell: %w", err)
 	}
-	process := exec.Command(path, "-NoExit", "-Command", command)
+	process := exec.CommandContext(context.Background(), path, "-NoExit", "-Command", command)
 	process.SysProcAttr = &syscall.SysProcAttr{CreationFlags: createNewConsole}
 	if err := process.Start(); err != nil {
 		return fmt.Errorf("open PowerShell: %w", err)

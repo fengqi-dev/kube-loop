@@ -10,7 +10,7 @@ import (
 
 func configureHelperSocketAccess(path, ownerSID string) error {
 	if ownerSID == "" {
-		return fmt.Errorf("Windows helper owner SID is required")
+		return fmt.Errorf("windows helper owner SID is required")
 	}
 	if _, err := windows.StringToSid(ownerSID); err != nil {
 		return fmt.Errorf("parse Windows helper owner SID: %w", err)
@@ -28,13 +28,6 @@ func ConfigureElevatedExchangeAccess(path, ownerSID string) error {
 	return setWindowsFileDACL(
 		path,
 		"D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GA;;;"+ownerSID+")",
-	)
-}
-
-func configureElevatedStagingAccess(path string) error {
-	return setWindowsFileDACL(
-		path,
-		"D:P(A;OICI;GA;;;SY)(A;OICI;GA;;;BA)",
 	)
 }
 

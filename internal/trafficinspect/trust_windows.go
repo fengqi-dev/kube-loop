@@ -81,7 +81,7 @@ func (s *windowsTrustStore) Install(ctx context.Context, authority *Authority) (
 		return err
 	}
 	if !status.Installed {
-		return errors.New("Windows traffic inspection certificate was not installed")
+		return errors.New("windows traffic inspection certificate was not installed")
 	}
 	return nil
 }
@@ -106,7 +106,7 @@ func (s *windowsTrustStore) Uninstall(ctx context.Context, authority *Authority)
 		return err
 	}
 	if installed {
-		return errors.New("Windows traffic inspection certificate is still installed")
+		return errors.New("windows traffic inspection certificate is still installed")
 	}
 	return nil
 }

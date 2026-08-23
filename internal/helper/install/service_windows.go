@@ -21,7 +21,7 @@ func enableService(binaryPath string) error {
 	if err != nil {
 		return fmt.Errorf("connect service manager: %w", err)
 	}
-	defer manager.Disconnect()
+	defer func() { _ = manager.Disconnect() }()
 
 	wantBinary := syscall.EscapeArg(binaryPath) + " run"
 	name := helper.ServiceNameWin()
@@ -106,7 +106,7 @@ func stopServiceForUpgrade() error {
 	if err != nil {
 		return fmt.Errorf("connect service manager: %w", err)
 	}
-	defer manager.Disconnect()
+	defer func() { _ = manager.Disconnect() }()
 	service, err := manager.OpenService(helper.ServiceNameWin())
 	if errors.Is(err, windows.ERROR_SERVICE_DOES_NOT_EXIST) {
 		return nil
@@ -149,7 +149,7 @@ func disableService() error {
 	if err != nil {
 		return fmt.Errorf("connect service manager: %w", err)
 	}
-	defer manager.Disconnect()
+	defer func() { _ = manager.Disconnect() }()
 	name := helper.ServiceNameWin()
 	service, err := manager.OpenService(name)
 	if errors.Is(err, windows.ERROR_SERVICE_DOES_NOT_EXIST) {

@@ -3,17 +3,19 @@
 package networkdiag
 
 import (
+	"context"
 	"fmt"
 	"net"
 )
 
 func inspectDNSPort() *Issue {
 	const address = "127.0.0.1:53"
-	tcp, tcpErr := net.Listen("tcp", address)
+	listenConfig := &net.ListenConfig{}
+	tcp, tcpErr := listenConfig.Listen(context.Background(), "tcp", address)
 	if tcp != nil {
 		_ = tcp.Close()
 	}
-	udp, udpErr := net.ListenPacket("udp", address)
+	udp, udpErr := listenConfig.ListenPacket(context.Background(), "udp", address)
 	if udp != nil {
 		_ = udp.Close()
 	}

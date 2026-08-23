@@ -47,7 +47,7 @@ func (a *App) uninstallHelperAndTrust(ctx context.Context) error {
 		return err
 	}
 	if status.Installed {
-		return errors.New("Windows traffic inspection certificate is still installed")
+		return errors.New("windows traffic inspection certificate is still installed")
 	}
 	return nil
 }

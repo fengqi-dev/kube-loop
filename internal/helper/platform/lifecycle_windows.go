@@ -3,12 +3,14 @@
 package platform
 
 import (
+	"context"
 	"fmt"
 	"net/netip"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/fengqi-dev/kube-loop/internal/singbox"
 )
@@ -39,7 +41,7 @@ func ApplyDNS(workDir string, dns singbox.DNSMeta) error {
 	}
 	b.WriteString(windowsSearchDomainMergeScript(dns.Search))
 	b.WriteString("Clear-DnsClientCache")
-	if _, err := runPowerShell(b.String()); err != nil {
+	if err := runPowerShell(b.String()); err != nil {
 		return fmt.Errorf("configure Windows DNS: %w", err)
 	}
 	return nil
@@ -69,32 +71,40 @@ func RestoreDNS(workDir string, _ singbox.DNSMeta) error {
 		_ = os.Remove(backupPath)
 	}
 	b.WriteString("Clear-DnsClientCache")
-	if _, err := runPowerShell(b.String()); err != nil {
+	if err := runPowerShell(b.String()); err != nil {
 		return err
 	}
 	return nil
 }
 
-func runPowerShell(command string) ([]byte, error) {
-	output, err := exec.Command(
+func runPowerShell(command string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	output, err := exec.CommandContext(
+		ctx,
 		"powershell.exe", "-NoProfile", "-NonInteractive",
 		"-ExecutionPolicy", "Bypass", "-Command", command,
 	).CombinedOutput()
 	if err != nil {
 		detail := strings.TrimSpace(string(output))
 		if detail == "" {
-			return output, err
+			return err
 		}
-		return output, fmt.Errorf("%w: %s", err, detail)
+		return fmt.Errorf("%w: %s", err, detail)
 	}
-	return output, nil
+	return nil
 }
 
 func CleanupRoutes(routes []string) {
 	for _, raw := range routes {
 		prefix, err := netip.ParsePrefix(raw)
 		if err == nil {
-			_ = exec.Command("route.exe", "delete", prefix.Masked().String()).Run()
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			// The route argument is canonical output from netip.ParsePrefix, not raw input.
+			_ = exec.CommandContext( //nolint:gosec // Canonical network prefix cannot inject command arguments.
+				ctx, "route.exe", "delete", prefix.Masked().String(),
+			).Run()
+			cancel()
 		}
 	}
 }
