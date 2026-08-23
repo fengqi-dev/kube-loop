@@ -28,11 +28,26 @@ func isPermanent(err error) bool {
 	return errors.As(err, &target)
 }
 
-//nolint:gocyclo // Keeping the CRD's cross-field rules together makes their ordering and coverage auditable.
 func validateBinding(binding *trafficv1alpha1.TrafficBinding) error {
 	if binding == nil {
 		return permanentf("TrafficBinding is required")
 	}
+	if err := validateBindingIdentity(binding); err != nil {
+		return err
+	}
+	if err := validateBindingPorts(binding); err != nil {
+		return err
+	}
+	if err := validateBindingMode(binding); err != nil {
+		return err
+	}
+	if err := validateBindingTarget(binding); err != nil {
+		return err
+	}
+	return validateBindingRelay(binding)
+}
+
+func validateBindingIdentity(binding *trafficv1alpha1.TrafficBinding) error {
 	if !uuidPattern.MatchString(strings.ToLower(binding.Spec.SessionID)) {
 		return permanentf("spec.sessionID must be a UUID")
 	}
@@ -45,6 +60,10 @@ func validateBinding(binding *trafficv1alpha1.TrafficBinding) error {
 	if len(binding.Spec.Ports) < 1 || len(binding.Spec.Ports) > 64 {
 		return permanentf("spec.ports must contain one to 64 mappings")
 	}
+	return nil
+}
+
+func validateBindingPorts(binding *trafficv1alpha1.TrafficBinding) error {
 	seenPorts := make(map[string]struct{}, len(binding.Spec.Ports))
 	seenNames := make(map[string]struct{}, len(binding.Spec.Ports))
 	for index := range binding.Spec.Ports {
@@ -78,6 +97,10 @@ func validateBinding(binding *trafficv1alpha1.TrafficBinding) error {
 		}
 		seenPorts[key] = struct{}{}
 	}
+	return nil
+}
+
+func validateBindingMode(binding *trafficv1alpha1.TrafficBinding) error {
 	switch binding.Spec.Mode {
 	case trafficv1alpha1.TrafficBindingModePortForward:
 		if binding.Spec.Target == nil || binding.Spec.Relay != nil ||
@@ -109,6 +132,10 @@ func validateBinding(binding *trafficv1alpha1.TrafficBinding) error {
 			}
 		}
 	}
+	return nil
+}
+
+func validateBindingTarget(binding *trafficv1alpha1.TrafficBinding) error {
 	if binding.Spec.Target != nil {
 		if binding.Spec.Target.Kind != trafficv1alpha1.TargetKindPod &&
 			binding.Spec.Target.Kind != trafficv1alpha1.TargetKindService {
@@ -118,6 +145,10 @@ func validateBinding(binding *trafficv1alpha1.TrafficBinding) error {
 			return permanentf("spec.target.name is invalid: %s", problems[0])
 		}
 	}
+	return nil
+}
+
+func validateBindingRelay(binding *trafficv1alpha1.TrafficBinding) error {
 	if binding.Spec.Relay != nil {
 		if net.ParseIP(strings.TrimSpace(binding.Spec.Relay.Address)) == nil {
 			return permanentf("spec.relay.address must be an IP literal")
