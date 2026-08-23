@@ -127,7 +127,7 @@ func TestContractNewGatewayRejectsUnknownAndMissingClientHelloFields(t *testing.
 			}
 		})
 	}
-	waitForActiveSessions(t, handler, 0)
+	waitForNoActiveSessions(t, handler)
 }
 
 func malformedHandshakeGateway(t *testing.T, response []byte) *httptest.Server {

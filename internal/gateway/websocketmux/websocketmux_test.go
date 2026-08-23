@@ -27,6 +27,61 @@ import (
 
 const testDeviceID = "22222222-2222-4222-8222-222222222222"
 
+func TestPhysicalSessionWaitsForLogicalStreamHandler(t *testing.T) {
+	handlerStarted := make(chan struct{})
+	releaseHandler := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseHandler) }) }
+	defer release()
+	handler, err := NewHandler(ServerConfig{
+		Authenticator: testAuthenticator("test-token"),
+		Handle: func(_ context.Context, _ Identity, connection net.Conn) {
+			defer func() { _ = connection.Close() }()
+			close(handlerStarted)
+			<-releaseHandler
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(handler)
+	defer server.Close()
+	forwarder, err := Start(t.Context(), ClientConfig{
+		URL: "ws" + strings.TrimPrefix(server.URL, "http"), Token: "test-token", DeviceID: testDeviceID,
+		PoolSize: 1, MaxPhysical: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	local, err := net.Dial("tcp", forwarder.Address())
+	if err != nil {
+		_ = forwarder.Close()
+		t.Fatal(err)
+	}
+	defer func() { _ = local.Close() }()
+	select {
+	case <-handlerStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("logical stream handler did not start")
+	}
+	closed := make(chan error, 1)
+	go func() { closed <- forwarder.Close() }()
+	select {
+	case err := <-closed:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("forwarder close blocked on remote handler")
+	}
+	time.Sleep(50 * time.Millisecond)
+	if handler.ActiveSessions() != 1 {
+		t.Fatalf("physical session ended before logical handler: active=%d", handler.ActiveSessions())
+	}
+	release()
+	waitForNoActiveSessions(t, handler)
+}
+
 func TestForwarderMultiplexesConcurrentStreams(t *testing.T) {
 	handler, err := NewHandler(ServerConfig{
 		Authenticator: testAuthenticator("test-token"),
@@ -612,7 +667,7 @@ func TestWSSHandshakeReturnsTypedVersionAndClientVersionRejections(t *testing.T)
 			}
 		})
 	}
-	waitForActiveSessions(t, handler, 0)
+	waitForNoActiveSessions(t, handler)
 }
 
 func TestWSSHandshakeBindsDeviceAndLimitsConnectionsPerIdentity(t *testing.T) {
@@ -661,7 +716,7 @@ func TestWSSHandshakeBindsDeviceAndLimitsConnectionsPerIdentity(t *testing.T) {
 	if !errors.As(err, &deviceErr) || deviceErr.Code != wssprotocol.CodeDeviceMismatch {
 		t.Fatalf("device mismatch = %#v, %v", deviceErr, err)
 	}
-	waitForActiveSessions(t, handler, 0)
+	waitForNoActiveSessions(t, handler)
 
 	first, err := Start(context.Background(), ClientConfig{
 		URL: endpoint, Token: "first", DeviceID: testDeviceID, PoolSize: 2, MaxPhysical: 4,
@@ -732,14 +787,14 @@ func dialRawWebSocket(t *testing.T, ctx context.Context, serverURL, token string
 	return connection
 }
 
-func waitForActiveSessions(t *testing.T, handler *Handler, expected int) {
+func waitForNoActiveSessions(t *testing.T, handler *Handler) {
 	t.Helper()
 	deadline := time.Now().Add(time.Second)
-	for handler.ActiveSessions() != expected && time.Now().Before(deadline) {
+	for handler.ActiveSessions() != 0 && time.Now().Before(deadline) {
 		time.Sleep(time.Millisecond)
 	}
-	if handler.ActiveSessions() != expected {
-		t.Fatalf("active sessions = %d, want %d", handler.ActiveSessions(), expected)
+	if handler.ActiveSessions() != 0 {
+		t.Fatalf("active sessions = %d, want 0", handler.ActiveSessions())
 	}
 }
 

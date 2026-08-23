@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/xtaci/smux"
@@ -178,6 +179,8 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		h.logf(requestID, "WebSocket multiplexer setup failed: remote=%s error=%v", request.RemoteAddr, err)
 		return
 	}
+	var streamHandlers sync.WaitGroup
+	defer streamHandlers.Wait()
 	defer func() { _ = session.Close() }()
 	streams := make(chan struct{}, h.config.MaxStreamsPerSession)
 	for {
@@ -202,13 +205,13 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 			}
 			streamIdentity := identity
 			streamIdentity.Groups = slices.Clone(identity.Groups)
-			go func() {
+			streamHandlers.Go(func() {
 				defer func() { <-streams }()
 				h.config.Handle(
 					request.Context(), streamIdentity,
 					shared.NewStreamConnWithIdleTimeout(stream, h.config.StreamIdleTimeout),
 				)
-			}()
+			})
 		default:
 			h.logf(
 				requestID, "WebSocket stream rejected: remote=%s reason=stream_limit max_streams=%d",
