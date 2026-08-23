@@ -177,6 +177,34 @@ func TestLoopbackCallbackStopIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestLoopbackCallbackStopsWhenContextIsCancelled(t *testing.T) {
+	client := New(Config{RedirectURI: "http://127.0.0.1/callback", LoopbackCallback: true})
+	ctx, cancel := context.WithCancel(context.Background())
+	redirectURI, stop, err := client.startLoopbackCallback(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stop()
+	callback, err := url.Parse(redirectURI)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cancel()
+	deadline := time.Now().Add(time.Second)
+	for {
+		connection, dialErr := net.DialTimeout("tcp", callback.Host, 50*time.Millisecond)
+		if dialErr != nil {
+			return
+		}
+		_ = connection.Close()
+		if time.Now().After(deadline) {
+			t.Fatal("loopback callback listener remained open after context cancellation")
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
 func TestProtocolCallbackRejectsTamperedStateWithoutConsumingLogin(t *testing.T) {
 	client := New(Config{})
 	pending, err := client.beginCallback(strings.Repeat("s", 43))

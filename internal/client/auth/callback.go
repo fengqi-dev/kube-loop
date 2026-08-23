@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"crypto/subtle"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -10,8 +11,6 @@ import (
 	"net/url"
 	"sync"
 	"time"
-
-	"errors"
 )
 
 func (client *Client) beginCallback(state string) (*pendingCallback, error) {
@@ -78,12 +77,17 @@ func (client *Client) startLoopbackCallback(ctx context.Context) (string, func()
 		_ = server.Serve(listener)
 	}()
 	var stopOnce sync.Once
-	return actualRedirect.String(), func() {
+	stop := func() {
 		stopOnce.Do(func() {
 			_ = listener.Close()
 			_ = server.Close()
 			<-serveDone
 		})
+	}
+	stopContext := context.AfterFunc(ctx, stop)
+	return actualRedirect.String(), func() {
+		stopContext()
+		stop()
 	}, nil
 }
 
