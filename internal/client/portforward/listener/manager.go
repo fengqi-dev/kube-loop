@@ -52,9 +52,11 @@ type TrafficDialer interface {
 }
 
 type Manager struct {
-	mu     sync.Mutex
-	nextID atomic.Uint64
-	active map[string]*runtimeForward
+	lifecycle sync.RWMutex
+	mu        sync.Mutex
+	nextID    atomic.Uint64
+	active    map[string]*runtimeForward
+	listenTCP func(context.Context, string) (net.Listener, error)
 }
 
 type runtimeForward struct {
@@ -63,7 +65,12 @@ type runtimeForward struct {
 }
 
 func NewManager() *Manager {
-	return &Manager{active: make(map[string]*runtimeForward)}
+	return &Manager{
+		active: make(map[string]*runtimeForward),
+		listenTCP: func(ctx context.Context, address string) (net.Listener, error) {
+			return (&net.ListenConfig{}).Listen(ctx, "tcp", address)
+		},
+	}
 }
 
 func (m *Manager) List() []Info {
@@ -85,6 +92,8 @@ func (m *Manager) StartResolved(
 	target string,
 	dialer TrafficDialer,
 ) (Info, error) {
+	m.lifecycle.RLock()
+	defer m.lifecycle.RUnlock()
 	if dialer == nil {
 		return Info{}, fmt.Errorf("port Forward traffic dialer is required")
 	}
@@ -137,7 +146,7 @@ func (m *Manager) startRouted(
 		}
 		forwarder = newRoutedUDPForwarder(socket, target, dialer)
 	} else {
-		listener, err := (&net.ListenConfig{}).Listen(ctx, "tcp", listenAddress)
+		listener, err := m.listenTCP(ctx, listenAddress)
 		if err != nil {
 			return Info{}, fmt.Errorf("listen for port-forward: %w", err)
 		}
@@ -178,6 +187,8 @@ func (m *Manager) Stop(id string) error {
 }
 
 func (m *Manager) StopAll() {
+	m.lifecycle.Lock()
+	defer m.lifecycle.Unlock()
 	m.mu.Lock()
 	items := slices.Collect(maps.Values(m.active))
 	clear(m.active)

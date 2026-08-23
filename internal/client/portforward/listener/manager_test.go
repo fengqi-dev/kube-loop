@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"net"
+	"sync"
 	"testing"
 	"time"
 )
@@ -93,5 +94,53 @@ func TestStartResolvedUDPPortForward(t *testing.T) {
 	}
 	if string(buffer) != "dns" {
 		t.Fatalf("echo = %q", buffer)
+	}
+}
+
+func TestStopAllWaitsForStartingListener(t *testing.T) {
+	manager := NewManager()
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
+	manager.listenTCP = func(ctx context.Context, address string) (net.Listener, error) {
+		close(started)
+		<-release
+		return (&net.ListenConfig{}).Listen(ctx, "tcp", address)
+	}
+	startResult := make(chan error, 1)
+	go func() {
+		_, err := manager.StartResolved(t.Context(), Request{
+			Context: "server", Namespace: "development", Kind: KindService,
+			Name: "api", RemotePort: 8080,
+		}, "10.96.0.20:8080", &echoTrafficDialer{targets: make(chan string, 1)})
+		startResult <- err
+	}()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("listener Start did not reach TCP bind")
+	}
+	stopped := make(chan struct{})
+	go func() {
+		manager.StopAll()
+		close(stopped)
+	}()
+	select {
+	case <-stopped:
+		t.Fatal("StopAll bypassed an in-flight listener Start")
+	case <-time.After(100 * time.Millisecond):
+	}
+	releaseOnce.Do(func() { close(release) })
+	if err := <-startResult; err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-stopped:
+	case <-time.After(time.Second):
+		t.Fatal("StopAll did not finish after listener Start")
+	}
+	if items := manager.List(); len(items) != 0 {
+		t.Fatalf("listener committed after StopAll: %#v", items)
 	}
 }
