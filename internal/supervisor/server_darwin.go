@@ -60,15 +60,8 @@ func (s *Server) Serve(ctx context.Context) error {
 	}
 
 	var handlers sync.WaitGroup
-	done := make(chan struct{})
-	go func() {
-		select {
-		case <-ctx.Done():
-			_ = listener.Close()
-		case <-done:
-		}
-	}()
-	defer close(done)
+	stopListener := context.AfterFunc(ctx, func() { _ = listener.Close() })
+	defer stopListener()
 	defer handlers.Wait()
 	s.log.Printf("kubeloop-supervisor listening on %s (protocol %d)", s.config.SocketPath, supervisorprotocol.Version)
 	for {
