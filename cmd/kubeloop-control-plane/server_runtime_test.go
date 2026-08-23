@@ -48,6 +48,16 @@ type runtimeTestWorker struct {
 	stopped chan struct{}
 }
 
+type runtimeBlockingWorker struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+func (worker *runtimeBlockingWorker) Run(context.Context) {
+	close(worker.started)
+	<-worker.release
+}
+
 func newRuntimeTestWorker() *runtimeTestWorker {
 	return &runtimeTestWorker{started: make(chan struct{}), stopped: make(chan struct{})}
 }
@@ -159,5 +169,41 @@ func TestServeControlPlaneStopsCleanlyAfterContextCancellation(t *testing.T) {
 			"shutdown calls: server=%d Sessions=%d",
 			server.shutdowns.Load(), sessionRuntime.shutdowns.Load(),
 		)
+	}
+}
+
+func TestServeControlPlaneBoundsBackgroundWorkerShutdown(t *testing.T) {
+	ctx, stop := context.WithCancel(t.Context())
+	server := newRuntimeTestServer()
+	sessionRuntime := &runtimeTestSessionRuntime{}
+	normalWorkers := []*runtimeTestWorker{newRuntimeTestWorker(), newRuntimeTestWorker()}
+	blockingWorker := &runtimeBlockingWorker{started: make(chan struct{}), release: make(chan struct{})}
+	t.Cleanup(func() { close(blockingWorker.release) })
+	options := runtimeTestOptions(
+		ctx,
+		stop,
+		server,
+		sessionRuntime,
+		normalWorkers[0],
+		normalWorkers[1],
+		blockingWorker,
+	)
+	options.Config.ShutdownTimeout = 50 * time.Millisecond
+	result := make(chan error, 1)
+	go func() { result <- serveControlPlane(options) }()
+
+	<-server.serveStarted
+	for _, worker := range normalWorkers {
+		<-worker.started
+	}
+	<-blockingWorker.started
+	stop()
+	select {
+	case err := <-result:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("serveControlPlane() error = %v, want context deadline exceeded", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("serveControlPlane ignored the background worker shutdown deadline")
 	}
 }

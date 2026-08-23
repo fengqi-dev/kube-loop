@@ -112,6 +112,11 @@ func serveControlPlane(options serverRuntimeOptions) error {
 		defer backgroundWorkers.Done()
 		options.BindingRecovery.Run(options.Context)
 	}()
+	backgroundDone := make(chan struct{})
+	go func() {
+		backgroundWorkers.Wait()
+		close(backgroundDone)
+	}()
 	go func() { errCh <- options.Server.Serve(listener) }()
 	if relayServer != nil {
 		go func() {
@@ -137,6 +142,7 @@ func serveControlPlane(options serverRuntimeOptions) error {
 	}
 	options.Logger.Info("kubeloop control plane shutting down")
 	shutdownContext, cancel := context.WithTimeout(context.Background(), options.Config.ShutdownTimeout)
+	defer cancel()
 	shutdownError := options.Server.Shutdown(shutdownContext)
 	shutdownError = errors.Join(shutdownError, options.SessionRuntime.Shutdown(shutdownContext))
 	if relayServer != nil {
@@ -158,7 +164,11 @@ func serveControlPlane(options serverRuntimeOptions) error {
 			serveResults = serveCount
 		}
 	}
-	backgroundWorkers.Wait()
-	cancel()
+	select {
+	case <-backgroundDone:
+	case <-shutdownContext.Done():
+		options.Logger.Warn("Control Plane background workers did not stop before shutdown deadline")
+		shutdownError = errors.Join(shutdownError, shutdownContext.Err())
+	}
 	return errors.Join(firstServeError, shutdownError)
 }
