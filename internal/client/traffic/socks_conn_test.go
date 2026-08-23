@@ -93,3 +93,30 @@ func TestUDPConnNetworkContracts(t *testing.T) {
 		t.Fatalf("second Close(): %v", err)
 	}
 }
+
+func TestUDPConnRetainsCloseError(t *testing.T) {
+	relay, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = relay.Close() })
+	socket, err := net.DialUDP("udp", nil, relay.LocalAddr().(*net.UDPAddr))
+	if err != nil {
+		t.Fatal(err)
+	}
+	control, peer := net.Pipe()
+	t.Cleanup(func() { _ = peer.Close() })
+	connection := &udpConn{control: control, socket: socket}
+	if err := socket.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	first := connection.Close()
+	if !errors.Is(first, net.ErrClosed) {
+		t.Fatalf("first Close() error = %v, want net.ErrClosed", first)
+	}
+	second := connection.Close()
+	if !errors.Is(second, net.ErrClosed) {
+		t.Fatalf("second Close() error = %v, want retained %v", second, first)
+	}
+}

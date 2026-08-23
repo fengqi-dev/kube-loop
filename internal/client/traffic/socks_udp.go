@@ -69,6 +69,7 @@ type udpConn struct {
 	targetHost string
 	targetPort uint16
 	closeOnce  sync.Once
+	closeErr   error
 }
 
 func (c *udpConn) Read(buffer []byte) (int, error) {
@@ -118,16 +119,15 @@ func decodeDatagram(packet []byte) ([]byte, error) {
 }
 
 func (c *udpConn) Close() error {
-	var first error
 	c.closeOnce.Do(func() {
 		if err := c.socket.Close(); err != nil {
-			first = err
+			c.closeErr = err
 		}
-		if err := c.control.Close(); err != nil && first == nil {
-			first = err
+		if err := c.control.Close(); err != nil && c.closeErr == nil {
+			c.closeErr = err
 		}
 	})
-	return first
+	return c.closeErr
 }
 
 func (c *udpConn) LocalAddr() net.Addr                { return c.socket.LocalAddr() }
