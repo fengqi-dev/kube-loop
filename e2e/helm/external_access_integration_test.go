@@ -39,8 +39,82 @@ func (externalAccessAuthorizer) Authorize(
 	return authorization.Decision{Allowed: true}
 }
 
-//nolint:gocyclo // This integration test intentionally validates the complete proxy lifecycle in one scenario.
 func TestSameOriginTLSProxyPreservesControlPlaneLimitsAndLongLivedWebSocket(t *testing.T) {
+	external := newExternalAccessServer(t)
+
+	response, err := external.Client().Get(external.URL + controlplane.DiscoveryPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = response.Body.Close() }()
+	if response.StatusCode != http.StatusOK || response.TLS == nil || response.TLS.Version != tls.VersionTLS13 {
+		t.Fatalf("TLS discovery status=%d TLS=%#v", response.StatusCode, response.TLS)
+	}
+	if response.Header.Get("X-Kubeloop-Test-Backend") != "control-plane" {
+		t.Fatalf("discovery backend = %q", response.Header.Get("X-Kubeloop-Test-Backend"))
+	}
+	var discovery controlplane.DiscoveryDocument
+	if err := json.NewDecoder(response.Body).Decode(&discovery); err != nil {
+		t.Fatal(err)
+	}
+	if discovery.PublicURL != external.URL || discovery.TunnelPath != "/tunnel" {
+		t.Fatalf("discovery external identity = %#v, proxy URL = %q", discovery, external.URL)
+	}
+
+	request, err := http.NewRequest(
+		http.MethodPost,
+		external.URL+controlplane.APIPathPrefix+"/body-limit",
+		strings.NewReader(`{"name":"0123456789"}`),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	response, err = external.Client().Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	limitedBody, readErr := io.ReadAll(response.Body)
+	_ = response.Body.Close()
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if response.StatusCode != http.StatusBadRequest ||
+		!strings.Contains(string(limitedBody), "request body exceeds the size limit") {
+		t.Fatalf("oversized body status=%d body=%s", response.StatusCode, limitedBody)
+	}
+
+	webSocketURL := "wss" + strings.TrimPrefix(external.URL, "https") + "/tunnel"
+	connection, upgradeResponse, err := websocket.Dial(context.Background(), webSocketURL, &websocket.DialOptions{
+		HTTPClient: external.Client(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = connection.CloseNow() }()
+	if upgradeResponse == nil || upgradeResponse.TLS == nil || upgradeResponse.TLS.Version != tls.VersionTLS13 ||
+		upgradeResponse.Header.Get("X-Kubeloop-Test-Backend") != "data-plane" {
+		t.Fatalf("WSS upgrade response = %#v", upgradeResponse)
+	}
+
+	time.Sleep(externalProxyWriteTimeout + 250*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	payload := []byte("long-lived-wss")
+	if err := connection.Write(ctx, websocket.MessageBinary, payload); err != nil {
+		t.Fatalf("write after proxy timeout: %v", err)
+	}
+	messageType, echoed, err := connection.Read(ctx)
+	if err != nil {
+		t.Fatalf("read after proxy timeout: %v", err)
+	}
+	if messageType != websocket.MessageBinary || string(echoed) != string(payload) {
+		t.Fatalf("WSS echo type=%v payload=%q", messageType, echoed)
+	}
+}
+
+func newExternalAccessServer(t *testing.T) *httptest.Server {
+	t.Helper()
 	var externalHandler http.Handler
 	external := httptest.NewUnstartedServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if externalHandler == nil {
@@ -124,76 +198,7 @@ func TestSameOriginTLSProxyPreservesControlPlaneLimitsAndLongLivedWebSocket(t *t
 	})
 	external.StartTLS()
 	t.Cleanup(external.Close)
-
-	response, err := external.Client().Get(external.URL + controlplane.DiscoveryPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = response.Body.Close() }()
-	if response.StatusCode != http.StatusOK || response.TLS == nil || response.TLS.Version != tls.VersionTLS13 {
-		t.Fatalf("TLS discovery status=%d TLS=%#v", response.StatusCode, response.TLS)
-	}
-	if response.Header.Get("X-Kubeloop-Test-Backend") != "control-plane" {
-		t.Fatalf("discovery backend = %q", response.Header.Get("X-Kubeloop-Test-Backend"))
-	}
-	var discovery controlplane.DiscoveryDocument
-	if err := json.NewDecoder(response.Body).Decode(&discovery); err != nil {
-		t.Fatal(err)
-	}
-	if discovery.PublicURL != external.URL || discovery.TunnelPath != "/tunnel" {
-		t.Fatalf("discovery external identity = %#v, proxy URL = %q", discovery, external.URL)
-	}
-
-	request, err := http.NewRequest(
-		http.MethodPost,
-		external.URL+controlplane.APIPathPrefix+"/body-limit",
-		strings.NewReader(`{"name":"0123456789"}`),
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	request.Header.Set("Content-Type", "application/json")
-	response, err = external.Client().Do(request)
-	if err != nil {
-		t.Fatal(err)
-	}
-	limitedBody, readErr := io.ReadAll(response.Body)
-	_ = response.Body.Close()
-	if readErr != nil {
-		t.Fatal(readErr)
-	}
-	if response.StatusCode != http.StatusBadRequest ||
-		!strings.Contains(string(limitedBody), "request body exceeds the size limit") {
-		t.Fatalf("oversized body status=%d body=%s", response.StatusCode, limitedBody)
-	}
-
-	webSocketURL := "wss" + strings.TrimPrefix(external.URL, "https") + "/tunnel"
-	connection, upgradeResponse, err := websocket.Dial(context.Background(), webSocketURL, &websocket.DialOptions{
-		HTTPClient: external.Client(),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = connection.CloseNow() }()
-	if upgradeResponse == nil || upgradeResponse.TLS == nil || upgradeResponse.TLS.Version != tls.VersionTLS13 ||
-		upgradeResponse.Header.Get("X-Kubeloop-Test-Backend") != "data-plane" {
-		t.Fatalf("WSS upgrade response = %#v", upgradeResponse)
-	}
-
-	time.Sleep(externalProxyWriteTimeout + 250*time.Millisecond)
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	payload := []byte("long-lived-wss")
-	if err := connection.Write(ctx, websocket.MessageBinary, payload); err != nil {
-		t.Fatalf("write after proxy timeout: %v", err)
-	}
-	messageType, echoed, err := connection.Read(ctx)
-	if err != nil {
-		t.Fatalf("read after proxy timeout: %v", err)
-	}
-	if messageType != websocket.MessageBinary || string(echoed) != string(payload) {
-		t.Fatalf("WSS echo type=%v payload=%q", messageType, echoed)
-	}
+	return external
 }
 
 func markBackend(name string, next http.Handler) http.Handler {
