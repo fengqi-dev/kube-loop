@@ -32,18 +32,11 @@ func Serve(ctx context.Context, listener net.Listener, handler http.Handler) err
 		ReadHeaderTimeout: defaultKeepAliveInterval,
 		BaseContext:       func(net.Listener) context.Context { return ctx },
 	}
-	done := make(chan struct{})
-	go func() {
-		select {
-		case <-ctx.Done():
-			_ = server.Close()
-		case <-done:
-		}
-	}()
+	stopClose := context.AfterFunc(ctx, func() { _ = server.Close() })
+	defer stopClose()
 	err := server.Serve(listener)
-	close(done)
 	if errors.Is(err, http.ErrServerClosed) && ctx.Err() != nil {
-		return nil //nolint:nilerr // Server closure after context cancellation is a successful shutdown.
+		return nil
 	}
 	return err
 }
