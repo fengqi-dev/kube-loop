@@ -85,3 +85,42 @@ func TestParentCancellationAndShutdownRejectNewStreams(t *testing.T) {
 		t.Fatalf("Attach after shutdown = %v", err)
 	}
 }
+
+func TestShutdownCancelsStreamsAndWaitsForRelease(t *testing.T) {
+	registry := New(context.Background())
+	streamContext, release, err := registry.Attach(
+		context.Background(),
+		"session-a",
+		"task-a",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	shutdownContext, cancelShutdown := context.WithTimeout(context.Background(), time.Second)
+	defer cancelShutdown()
+	shutdownDone := make(chan error, 1)
+	go func() { shutdownDone <- registry.Shutdown(shutdownContext) }()
+
+	select {
+	case <-streamContext.Done():
+		if !errors.Is(context.Cause(streamContext), ErrClosed) {
+			t.Fatalf("stream cancellation cause = %v", context.Cause(streamContext))
+		}
+	case <-shutdownContext.Done():
+		t.Fatal("shutdown did not cancel the active stream")
+	}
+	select {
+	case err := <-shutdownDone:
+		t.Fatalf("shutdown returned before stream release: %v", err)
+	default:
+	}
+	release()
+	select {
+	case err := <-shutdownDone:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-shutdownContext.Done():
+		t.Fatal("shutdown did not finish after stream release")
+	}
+}
