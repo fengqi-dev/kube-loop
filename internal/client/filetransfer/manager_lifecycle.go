@@ -19,6 +19,8 @@ func (manager *Manager) Cancel(profileID, taskID string) error {
 }
 
 func (manager *Manager) StopProfile(profileID string) error {
+	manager.lifecycle.Lock()
+	defer manager.lifecycle.Unlock()
 	manager.mu.Lock()
 	entries := make([]*activeTransfer, 0)
 	for taskID, entry := range manager.active {

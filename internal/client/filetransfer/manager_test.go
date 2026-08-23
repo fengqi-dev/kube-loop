@@ -135,10 +135,20 @@ func TestManagerListDoesNotBlockOnCheckpointWrite(t *testing.T) {
 	case <-time.After(100 * time.Millisecond):
 		t.Fatal("List blocked on file transfer checkpoint write")
 	}
+	stopped := make(chan error, 1)
+	go func() { stopped <- manager.StopProfile("server") }()
+	select {
+	case err := <-stopped:
+		t.Fatalf("StopProfile bypassed an in-flight checkpoint: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
 	releaseOnce.Do(func() { close(release) })
 	startedTask := <-result
 	if startedTask.err != nil || startedTask.task.ID == "" {
 		t.Fatalf("Start = %#v, %v", startedTask.task, startedTask.err)
+	}
+	if err := <-stopped; err != nil {
+		t.Fatal(err)
 	}
 	if err := manager.Shutdown(); err != nil {
 		t.Fatal(err)
