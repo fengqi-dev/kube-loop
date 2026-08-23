@@ -31,10 +31,20 @@ type TaskHandler func(
 	string,
 ) *controlplaneapi.Error
 
+type NamespaceResolver func(*http.Request) (string, *controlplaneapi.Error)
+
 func WithSession(sessions Sessions, next Handler) controlplane.EndpointFunc {
+	return WithSessionResolver(sessions, NamespaceFromQuery, next)
+}
+
+func WithSessionResolver(
+	sessions Sessions,
+	resolveNamespace NamespaceResolver,
+	next Handler,
+) controlplane.EndpointFunc {
 	return func(ctx *echo.Context, identity controlplaneapi.Identity) *controlplaneapi.Error {
 		request := ctx.Request()
-		session, apiError := ActiveSession(request, identity, sessions)
+		session, apiError := ActiveSessionWithResolver(request, identity, sessions, resolveNamespace)
 		if apiError != nil {
 			return apiError
 		}
@@ -43,8 +53,17 @@ func WithSession(sessions Sessions, next Handler) controlplane.EndpointFunc {
 }
 
 func WithTask(sessions Sessions, next TaskHandler) controlplane.EndpointFunc {
-	return WithSession(
+	return WithTaskResolver(sessions, NamespaceFromQuery, next)
+}
+
+func WithTaskResolver(
+	sessions Sessions,
+	resolveNamespace NamespaceResolver,
+	next TaskHandler,
+) controlplane.EndpointFunc {
+	return WithSessionResolver(
 		sessions,
+		resolveNamespace,
 		func(ctx *echo.Context, identity controlplaneapi.Identity, session sessionapi.ActiveSession) *controlplaneapi.Error {
 			return next(ctx, identity, session, ctx.Request().PathValue("taskID"))
 		},
@@ -56,7 +75,16 @@ func ActiveSession(
 	identity controlplaneapi.Identity,
 	sessions Sessions,
 ) (sessionapi.ActiveSession, *controlplaneapi.Error) {
-	namespace, apiError := NamespaceFromQuery(request)
+	return ActiveSessionWithResolver(request, identity, sessions, NamespaceFromQuery)
+}
+
+func ActiveSessionWithResolver(
+	request *http.Request,
+	identity controlplaneapi.Identity,
+	sessions Sessions,
+	resolveNamespace NamespaceResolver,
+) (sessionapi.ActiveSession, *controlplaneapi.Error) {
+	namespace, apiError := resolveNamespace(request)
 	if apiError != nil {
 		return sessionapi.ActiveSession{}, apiError
 	}

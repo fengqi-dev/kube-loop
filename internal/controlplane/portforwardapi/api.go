@@ -14,6 +14,7 @@ import (
 	controlplanemiddleware "github.com/fengqi-dev/kube-loop/internal/controlplane/middleware"
 	portforwardservice "github.com/fengqi-dev/kube-loop/internal/controlplane/portforwardapi/service"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/sessionapi"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/sessionroute"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/taskapi"
 )
 
@@ -40,60 +41,10 @@ func NewRoutes(
 
 func (routes *Routes) Endpoints() controlplane.PortForwardEndpoints {
 	return controlplane.PortForwardEndpoints{
-		Create: routes.withSession(routes.create),
-		List:   routes.withSession(routes.list),
-		Stop:   routes.withTask(routes.stop),
+		Create: sessionroute.WithSessionResolver(routes.sessions, namespaceFromQuery, routes.create),
+		List:   sessionroute.WithSessionResolver(routes.sessions, namespaceFromQuery, routes.list),
+		Stop:   sessionroute.WithTaskResolver(routes.sessions, namespaceFromQuery, routes.stop),
 	}
-}
-
-type sessionHandler func(*echo.Context, controlplaneapi.Identity, sessionapi.ActiveSession) *controlplaneapi.Error
-
-type taskHandler func(*echo.Context, controlplaneapi.Identity, sessionapi.ActiveSession, string) *controlplaneapi.Error
-
-func (routes *Routes) withSession(
-	next sessionHandler,
-) controlplane.EndpointFunc {
-	return func(ctx *echo.Context, identity controlplaneapi.Identity) *controlplaneapi.Error {
-		active, apiError := routes.activeSession(ctx.Request(), identity)
-		if apiError != nil {
-			return apiError
-		}
-		return next(ctx, identity, active)
-	}
-}
-
-func (routes *Routes) withTask(next taskHandler) controlplane.EndpointFunc {
-	return routes.withSession(
-		func(ctx *echo.Context, identity controlplaneapi.Identity, active sessionapi.ActiveSession) *controlplaneapi.Error {
-			return next(
-				ctx,
-				identity,
-				active,
-				ctx.Request().PathValue("taskID"),
-			)
-		},
-	)
-}
-
-func (routes *Routes) activeSession(
-	request *http.Request,
-	identity controlplaneapi.Identity,
-) (sessionapi.ActiveSession, *controlplaneapi.Error) {
-	namespace, apiError := namespaceFromQuery(request)
-	if apiError != nil {
-		return sessionapi.ActiveSession{}, apiError
-	}
-	active, apiError := routes.sessions.RequireActive(
-		request.Context(),
-		identity,
-		namespace,
-		request.PathValue("sessionID"),
-	)
-	if apiError != nil {
-		return sessionapi.ActiveSession{}, apiError
-	}
-	controlplanemiddleware.SetAuditSessionID(request.Context(), active.ID)
-	return active, nil
 }
 
 func (routes *Routes) create(
