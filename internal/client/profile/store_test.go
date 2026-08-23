@@ -2,11 +2,17 @@ package profile
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
+	"time"
+
+	"github.com/fengqi-dev/kube-loop/internal/fsatomic"
 )
 
 func TestDefaultPathUsesConfigDirectory(t *testing.T) {
@@ -284,6 +290,103 @@ func TestServerProfileStoreReturnsDefensiveSnapshots(t *testing.T) {
 	stored := store.Snapshot().Profiles[0]
 	if stored.BaseURL != "https://one.example.test" || stored.HostAliases[0].IP != "10.0.0.8" {
 		t.Fatal("snapshot mutated persisted profile")
+	}
+}
+
+func TestServerProfileStoreSnapshotDoesNotBlockOnDiskWrite(t *testing.T) {
+	store, err := Open(filepath.Join(t.TempDir(), "servers.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Upsert(Profile{ID: "one", BaseURL: "https://one.example.test"}); err != nil {
+		t.Fatal(err)
+	}
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var startOnce, releaseOnce sync.Once
+	t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
+	store.writeFile = func(path string, raw []byte, dirMode, fileMode os.FileMode) error {
+		if path == store.path {
+			startOnce.Do(func() { close(started) })
+			<-release
+		}
+		return fsatomic.WriteFile(path, raw, dirMode, fileMode)
+	}
+	written := make(chan error, 1)
+	go func() {
+		written <- store.Upsert(Profile{ID: "two", BaseURL: "https://two.example.test"})
+	}()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("Profile store write did not start")
+	}
+	snapshot := make(chan State, 1)
+	go func() { snapshot <- store.Snapshot() }()
+	select {
+	case state := <-snapshot:
+		if len(state.Profiles) != 1 || state.Profiles[0].ID != "one" {
+			t.Fatalf("Snapshot during write = %#v", state)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("Snapshot blocked on Profile store disk write")
+	}
+	releaseOnce.Do(func() { close(release) })
+	if err := <-written; err != nil {
+		t.Fatal(err)
+	}
+	if state := store.Snapshot(); len(state.Profiles) != 2 {
+		t.Fatalf("committed Snapshot = %#v", state)
+	}
+}
+
+func TestServerProfileStoreWriteFailurePreservesCommittedState(t *testing.T) {
+	store, err := Open(filepath.Join(t.TempDir(), "servers.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Upsert(Profile{ID: "one", BaseURL: "https://one.example.test"}); err != nil {
+		t.Fatal(err)
+	}
+	want := store.Snapshot()
+	writeErr := errors.New("disk unavailable")
+	store.writeFile = func(path string, raw []byte, dirMode, fileMode os.FileMode) error {
+		if path == store.path {
+			return writeErr
+		}
+		return fsatomic.WriteFile(path, raw, dirMode, fileMode)
+	}
+	if err := store.Upsert(Profile{ID: "two", BaseURL: "https://two.example.test"}); !errors.Is(err, writeErr) {
+		t.Fatalf("Upsert error = %v", err)
+	}
+	if got := store.Snapshot(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("failed write changed state: got %#v, want %#v", got, want)
+	}
+}
+
+func TestServerProfileStoreSerializesConcurrentWriters(t *testing.T) {
+	store, err := Open(filepath.Join(t.TempDir(), "servers.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const writers = 12
+	errs := make(chan error, writers)
+	var workers sync.WaitGroup
+	for index := range writers {
+		workers.Go(func() {
+			id := fmt.Sprintf("service-%02d", index)
+			errs <- store.Upsert(Profile{ID: id, BaseURL: "https://" + id + ".example.test"})
+		})
+	}
+	workers.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if state := store.Snapshot(); len(state.Profiles) != writers {
+		t.Fatalf("concurrent writers persisted %d Profiles, want %d", len(state.Profiles), writers)
 	}
 }
 

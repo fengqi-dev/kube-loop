@@ -14,11 +14,13 @@ import (
 const maxStateBytes = 1 << 20
 
 func (store *Store) load() error {
-	store.mu.Lock()
-	defer store.mu.Unlock()
+	store.writeMu.Lock()
+	defer store.writeMu.Unlock()
 	state, err := readState(store.path)
 	if err == nil {
+		store.mu.Lock()
 		store.state = state
+		store.mu.Unlock()
 		return nil
 	}
 	if errors.Is(err, os.ErrNotExist) {
@@ -28,12 +30,14 @@ func (store *Store) load() error {
 	if backupErr != nil {
 		return fmt.Errorf("load Server Profile store: %w", err)
 	}
+	store.mu.Lock()
 	store.state = backup
 	store.recovered = true
+	store.mu.Unlock()
 	return nil
 }
 
-func (store *Store) saveLocked(next State) error {
+func (store *Store) save(next State) error {
 	normalized, err := normalizeState(next)
 	if err != nil {
 		return err
@@ -45,19 +49,29 @@ func (store *Store) saveLocked(next State) error {
 	raw = append(raw, '\n')
 	if existing, err := os.ReadFile(store.path); err == nil {
 		if _, decodeErr := decodeState(existing); decodeErr == nil {
-			if err := fsatomic.WriteFile(store.path+".bak", existing, 0o700, 0o600); err != nil {
+			if err := store.write(store.path+".bak", existing); err != nil {
 				return fmt.Errorf("backup Server Profile store: %w", err)
 			}
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return errors.New("read existing Server Profile store")
 	}
-	if err := fsatomic.WriteFile(store.path, raw, 0o700, 0o600); err != nil {
+	if err := store.write(store.path, raw); err != nil {
 		return fmt.Errorf("save Server Profile store: %w", err)
 	}
+	store.mu.Lock()
 	store.state = normalized
 	store.recovered = false
+	store.mu.Unlock()
 	return nil
+}
+
+func (store *Store) write(path string, raw []byte) error {
+	writeFile := store.writeFile
+	if writeFile == nil {
+		writeFile = fsatomic.WriteFile
+	}
+	return writeFile(path, raw, 0o700, 0o600)
 }
 
 func readState(path string) (_ State, resultErr error) {

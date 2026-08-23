@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/fengqi-dev/kube-loop/internal/fsatomic"
 	"github.com/fengqi-dev/kube-loop/internal/userpaths"
 )
 
@@ -37,9 +38,11 @@ type HostAlias struct {
 
 type Store struct {
 	path      string
-	mu        sync.Mutex
+	writeMu   sync.Mutex
+	mu        sync.RWMutex
 	state     State
 	recovered bool
+	writeFile func(string, []byte, os.FileMode, os.FileMode) error
 }
 
 func DefaultPath() (string, error) {
@@ -62,7 +65,10 @@ func Open(path string) (*Store, error) {
 	if err != nil {
 		return nil, errors.New("resolve Server Profile store path")
 	}
-	store := &Store{path: absolute, state: State{Version: currentVersion, Profiles: []Profile{}}}
+	store := &Store{
+		path: absolute, state: State{Version: currentVersion, Profiles: []Profile{}},
+		writeFile: fsatomic.WriteFile,
+	}
 	if err := store.load(); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	}
@@ -71,14 +77,14 @@ func Open(path string) (*Store, error) {
 
 func (store *Store) Path() string { return store.path }
 func (store *Store) RecoveredFromBackup() bool {
-	store.mu.Lock()
-	defer store.mu.Unlock()
+	store.mu.RLock()
+	defer store.mu.RUnlock()
 	return store.recovered
 }
 
 func (store *Store) Snapshot() State {
-	store.mu.Lock()
-	defer store.mu.Unlock()
+	store.mu.RLock()
+	defer store.mu.RUnlock()
 	return cloneState(store.state)
 }
 
@@ -87,9 +93,11 @@ func (store *Store) Upsert(profile Profile) error {
 	if err != nil {
 		return err
 	}
-	store.mu.Lock()
-	defer store.mu.Unlock()
+	store.writeMu.Lock()
+	defer store.writeMu.Unlock()
+	store.mu.RLock()
 	next := cloneState(store.state)
+	store.mu.RUnlock()
 	index := slices.IndexFunc(next.Profiles, func(item Profile) bool { return item.ID == normalized.ID })
 	if index >= 0 {
 		next.Profiles[index] = normalized
@@ -99,7 +107,7 @@ func (store *Store) Upsert(profile Profile) error {
 	if next.ActiveProfileID == "" {
 		next.ActiveProfileID = normalized.ID
 	}
-	return store.saveLocked(next)
+	return store.save(next)
 }
 
 func (store *Store) Remove(id string) error {
@@ -107,9 +115,11 @@ func (store *Store) Remove(id string) error {
 	if id == "" {
 		return errors.New("server Profile ID is required")
 	}
-	store.mu.Lock()
-	defer store.mu.Unlock()
+	store.writeMu.Lock()
+	defer store.writeMu.Unlock()
+	store.mu.RLock()
 	next := cloneState(store.state)
+	store.mu.RUnlock()
 	index := slices.IndexFunc(next.Profiles, func(item Profile) bool { return item.ID == id })
 	if index < 0 {
 		return errors.New("server Profile not found")
@@ -121,19 +131,22 @@ func (store *Store) Remove(id string) error {
 			next.ActiveProfileID = next.Profiles[0].ID
 		}
 	}
-	return store.saveLocked(next)
+	return store.save(next)
 }
 
 func (store *Store) SetActive(id string) error {
 	id = strings.TrimSpace(id)
-	store.mu.Lock()
-	defer store.mu.Unlock()
+	store.writeMu.Lock()
+	defer store.writeMu.Unlock()
+	store.mu.RLock()
 	if !slices.ContainsFunc(store.state.Profiles, func(item Profile) bool { return item.ID == id }) {
+		store.mu.RUnlock()
 		return errors.New("server Profile not found")
 	}
 	next := cloneState(store.state)
+	store.mu.RUnlock()
 	next.ActiveProfileID = id
-	return store.saveLocked(next)
+	return store.save(next)
 }
 
 func cloneState(state State) State {
