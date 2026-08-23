@@ -2,27 +2,12 @@ package execapi
 
 import (
 	"errors"
-	"net/http"
 
 	"github.com/labstack/echo/v5"
-	"k8s.io/apimachinery/pkg/util/validation"
 
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 )
-
-func namespaceFromQuery(request *http.Request) (string, *controlplaneapi.Error) {
-	query := request.URL.Query()
-	if len(query) != 1 || len(query["namespace"]) != 1 ||
-		len(validation.IsDNS1123Label(query.Get("namespace"))) != 0 {
-		return "", &controlplaneapi.Error{
-			Code:    controlplaneapi.CodeInvalidArgument,
-			Field:   "namespace",
-			Message: "one valid namespace query parameter is required",
-		}
-	}
-	return query.Get("namespace"), nil
-}
 
 func storageError(err error) *controlplaneapi.Error {
 	switch {

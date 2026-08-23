@@ -103,6 +103,7 @@ func TestKubernetesDirectImportInventoryIsExhaustive(t *testing.T) {
 		"internal/controlplane/relayregistry",
 		"internal/controlplane/servicebinding",
 		"internal/controlplane/sessionapi",
+		"internal/controlplane/sessionroute",
 		"internal/controlplane/trafficbindingclient",
 	}
 
