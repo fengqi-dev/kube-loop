@@ -101,3 +101,47 @@ func TestSessionTooOld(t *testing.T) {
 		})
 	}
 }
+
+func TestLogoutRejectsCrossOriginBeforeSessionAccess(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		origin       string
+		secFetchSite string
+	}{
+		{name: "missing origin"},
+		{name: "foreign origin", origin: "https://attacker.example.test"},
+		{
+			name:         "cross-site fetch",
+			origin:       "https://kubeloop.example.test",
+			secFetchSite: "cross-site",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			request := httptest.NewRequest(http.MethodPost, "/oauth2/logout", nil)
+			request.Header.Set("Origin", test.origin)
+			request.Header.Set("Sec-Fetch-Site", test.secFetchSite)
+			response := httptest.NewRecorder()
+			ctx := echo.New().NewContext(request, response)
+			routes := NewRoutes(nil, WithIssuer("https://kubeloop.example.test"))
+
+			if err := routes.logout(ctx); err != nil {
+				t.Fatal(err)
+			}
+			if response.Code != http.StatusUnauthorized ||
+				!strings.Contains(response.Body.String(), `"error":"invalid_request"`) ||
+				len(response.Result().Cookies()) != 0 {
+				t.Fatalf(
+					"logout response = status %d headers %#v body %s",
+					response.Code,
+					response.Header(),
+					response.Body.String(),
+				)
+			}
+		})
+	}
+}
