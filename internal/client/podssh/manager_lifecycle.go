@@ -23,6 +23,8 @@ func (manager *Manager) Stop(profileID, endpointID string) error {
 }
 
 func (manager *Manager) StopProfile(profileID string) error {
+	manager.lifecycle.Lock()
+	defer manager.lifecycle.Unlock()
 	manager.mu.Lock()
 	ids := make([]string, 0)
 	for id, entry := range manager.active {
@@ -55,6 +57,8 @@ func (manager *Manager) List(profileID string) []Info {
 }
 
 func (manager *Manager) Shutdown() error {
+	manager.lifecycle.Lock()
+	defer manager.lifecycle.Unlock()
 	manager.mu.Lock()
 	ids := make([]string, 0, len(manager.active))
 	for id := range manager.active {

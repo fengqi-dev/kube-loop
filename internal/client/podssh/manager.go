@@ -67,9 +67,10 @@ type Manager struct {
 	server   *localpodssh.Server
 	hostTCP  HostTCPRegistrar
 
-	mu       sync.Mutex
-	active   map[string]*activeEndpoint
-	starting map[string]struct{}
+	lifecycle sync.RWMutex
+	mu        sync.Mutex
+	active    map[string]*activeEndpoint
+	starting  map[string]struct{}
 }
 
 func New(client clientexec.Client, sessions SessionSource, config Config) (*Manager, error) {
@@ -90,6 +91,8 @@ func (manager *Manager) Start(
 	session remote.Session,
 	request Request,
 ) (Info, error) {
+	manager.lifecycle.RLock()
+	defer manager.lifecycle.RUnlock()
 	if ctx == nil {
 		return Info{}, errors.New("pod SSH context is required")
 	}

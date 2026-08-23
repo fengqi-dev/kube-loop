@@ -28,6 +28,28 @@ type fakeHostTCPRegistrar struct {
 	handlers map[string]socksbridge.HostTCPHandler
 }
 
+type blockingHostTCPRegistrar struct {
+	*fakeHostTCPRegistrar
+
+	started     chan struct{}
+	release     chan struct{}
+	startedOnce sync.Once
+	releaseOnce sync.Once
+}
+
+func (registrar *blockingHostTCPRegistrar) SetHostTCPHandler(
+	profileID string,
+	handler socksbridge.HostTCPHandler,
+) error {
+	registrar.startedOnce.Do(func() { close(registrar.started) })
+	<-registrar.release
+	return registrar.fakeHostTCPRegistrar.SetHostTCPHandler(profileID, handler)
+}
+
+func (registrar *blockingHostTCPRegistrar) unblock() {
+	registrar.releaseOnce.Do(func() { close(registrar.release) })
+}
+
 func (registrar *fakeHostTCPRegistrar) SetHostTCPHandler(profileID string, handler socksbridge.HostTCPHandler) error {
 	registrar.mu.Lock()
 	defer registrar.mu.Unlock()
@@ -286,6 +308,68 @@ func TestManagerRejectsNamespaceAndContainerEscapes(t *testing.T) {
 	}
 	if len(manager.List("")) != 0 {
 		t.Fatalf("unsafe Pod SSH endpoints = %#v", manager.List(""))
+	}
+}
+
+func TestManagerStopProfileWaitsForStartingEndpoint(t *testing.T) {
+	_, privateKey, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signer, err := ssh.NewSignerFromKey(privateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	session := remote.Session{
+		ID: uuid.NewString(), Namespace: "development", State: podSSHSessionActive,
+		ExpiresAt: now.Add(time.Minute),
+	}
+	registrar := &blockingHostTCPRegistrar{
+		fakeHostTCPRegistrar: &fakeHostTCPRegistrar{},
+		started:              make(chan struct{}),
+		release:              make(chan struct{}),
+	}
+	t.Cleanup(registrar.unblock)
+	manager, err := New(
+		newFakeExecClient(t),
+		&fakeSessions{sessions: map[string]remote.Session{"server-a": session}},
+		Config{
+			ServerOptions: []localpodssh.Option{localpodssh.WithSigner(signer)}, HostTCPRegistrar: registrar,
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := make(chan error, 1)
+	go func() {
+		_, startErr := manager.Start(t.Context(), profile.Profile{ID: "server-a"}, session, Request{
+			ProfileID: "server-a", Namespace: "development", Pod: "api-0", PodIP: "10.244.1.7",
+			Ready: true, Containers: []string{"main"},
+		})
+		started <- startErr
+	}()
+	select {
+	case <-registrar.started:
+	case <-time.After(time.Second):
+		t.Fatal("Pod SSH endpoint did not reach Host TCP registration")
+	}
+	stopped := make(chan error, 1)
+	go func() { stopped <- manager.StopProfile("server-a") }()
+	select {
+	case err := <-stopped:
+		t.Fatalf("StopProfile bypassed an in-flight Start: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	registrar.unblock()
+	if err := <-started; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-stopped; err != nil {
+		t.Fatal(err)
+	}
+	if endpoints := manager.List("server-a"); len(endpoints) != 0 {
+		t.Fatalf("endpoint committed after StopProfile: %#v", endpoints)
 	}
 }
 
