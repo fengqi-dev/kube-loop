@@ -79,51 +79,8 @@ func (services *exchangeTestServices) ResolveService(
 	}, nil
 }
 
-//nolint:gocyclo // The lifecycle test intentionally verifies every state transition in one scenario.
 func TestExchangeTaskIsOwnedIdempotentAndDurablyStopped(t *testing.T) {
-	ctx := context.Background()
-	stateStore, err := storage.Open(ctx, storage.Config{
-		Backend: storage.BackendSQLite, SQLitePath: filepath.Join(t.TempDir(), "exchange.db"),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = stateStore.Close() })
-	now := time.Now().UTC()
-	identityID, sessionID := uuid.NewString(), uuid.NewString()
-	if _, err := stateStore.Identities().Create(ctx, storage.Identity{
-		ID: identityID, Type: "human", DisplayName: "Test Identity", Status: "active", CreatedAt: now, UpdatedAt: now,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	network, err := networkspec.Normalize(
-		networkspec.Spec{ServiceIPs: []string{"10.96.0.10"}},
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	networkJSON, err := networkspec.CanonicalJSON(network)
-	if err != nil {
-		t.Fatal(err)
-	}
-	networkHash, err := networkspec.Hash(network)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := stateStore.Sessions().Create(ctx, storage.Session{
-		ID: sessionID, IdentityID: identityID, DeviceID: "device", ClusterID: "cluster",
-		Namespace: "development", State: "active", Generation: 1,
-		NetworkSpec: networkJSON, NetworkSpecHash: networkHash,
-		CreatedAt: now, UpdatedAt: now, LastHeartbeatAt: now, ExpiresAt: now.Add(time.Hour),
-	}); err != nil {
-		t.Fatal(err)
-	}
-	active := sessionapi.ActiveSession{
-		ID:         sessionID,
-		Namespace:  "development",
-		Generation: 1,
-		ExpiresAt:  now.Add(time.Hour),
-	}
+	ctx, stateStore, now, identityID, sessionID, active := newExchangeLifecycleState(t)
 	services := &exchangeTestServices{}
 	handler, err := New(
 		stateStore,
@@ -274,6 +231,56 @@ func TestExchangeTaskIsOwnedIdempotentAndDurablyStopped(t *testing.T) {
 	if err != nil || stored.State != "stopping" {
 		t.Fatalf("stored stopping Exchange=%#v err=%v", stored, err)
 	}
+}
+
+func newExchangeLifecycleState(
+	t *testing.T,
+) (context.Context, *storage.Store, time.Time, string, string, sessionapi.ActiveSession) {
+	t.Helper()
+	ctx := context.Background()
+	stateStore, err := storage.Open(ctx, storage.Config{
+		Backend: storage.BackendSQLite, SQLitePath: filepath.Join(t.TempDir(), "exchange.db"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = stateStore.Close() })
+	now := time.Now().UTC()
+	identityID, sessionID := uuid.NewString(), uuid.NewString()
+	if _, err := stateStore.Identities().Create(ctx, storage.Identity{
+		ID: identityID, Type: "human", DisplayName: "Test Identity", Status: "active", CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	network, err := networkspec.Normalize(
+		networkspec.Spec{ServiceIPs: []string{"10.96.0.10"}},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	networkJSON, err := networkspec.CanonicalJSON(network)
+	if err != nil {
+		t.Fatal(err)
+	}
+	networkHash, err := networkspec.Hash(network)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := stateStore.Sessions().Create(ctx, storage.Session{
+		ID: sessionID, IdentityID: identityID, DeviceID: "device", ClusterID: "cluster",
+		Namespace: "development", State: "active", Generation: 1,
+		NetworkSpec: networkJSON, NetworkSpecHash: networkHash,
+		CreatedAt: now, UpdatedAt: now, LastHeartbeatAt: now, ExpiresAt: now.Add(time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	active := sessionapi.ActiveSession{
+		ID:         sessionID,
+		Namespace:  "development",
+		Generation: 1,
+		ExpiresAt:  now.Add(time.Hour),
+	}
+	return ctx, stateStore, now, identityID, sessionID, active
 }
 
 func exchangeRequest(
