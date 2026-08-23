@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sync"
 
 	clientexec "github.com/fengqi-dev/kube-loop/internal/client/exec"
 	localpodssh "github.com/fengqi-dev/kube-loop/internal/client/podssh/sshserver"
@@ -22,31 +23,47 @@ func (executor remoteExecutor) Exec(
 	command []string,
 	streams localpodssh.Streams,
 ) (resultErr error) {
+	workerGo := streams.Go
+	var localWorkers sync.WaitGroup
+	var localInput io.Closer
+	if streams.Stdin != nil && workerGo == nil {
+		closer, ok := streams.Stdin.(io.Closer)
+		if !ok {
+			return errors.New("pod SSH stream worker owner is required for non-closable input")
+		}
+		localInput = closer
+		workerGo = localWorkers.Go
+	}
+	if streams.TTY && streams.TerminalSizeQueue != nil && streams.Go == nil {
+		return errors.New("pod SSH stream worker owner is required for terminal resize input")
+	}
 	serverProfile, session, err := executor.manager.lookup(target)
 	if err != nil {
 		return err
 	}
 	execContext, cancel := context.WithCancel(ctx)
-	defer cancel()
 	stream, err := clientexec.Start(execContext, executor.manager.client, serverProfile, session, remote.ExecSpec{
 		Pod: target.Pod, Container: target.Container, Command: append([]string(nil), command...), TTY: streams.TTY,
 	})
 	if err != nil {
+		cancel()
 		return err
 	}
 	defer func() {
+		cancel()
 		if err := stream.Close(); err != nil {
 			resultErr = errors.Join(resultErr, fmt.Errorf("close Pod exec stream: %w", err))
 		}
+		if localInput != nil {
+			_ = localInput.Close()
+			localWorkers.Wait()
+		}
 	}()
-	if (streams.Stdin != nil || (streams.TTY && streams.TerminalSizeQueue != nil)) && streams.Go == nil {
-		return errors.New("pod SSH stream worker owner is required")
-	}
 	if streams.Stdin != nil {
-		streams.Go(func() { pumpInput(execContext, cancel, stream, streams.Stdin) })
+		workerGo(func() { pumpInput(execContext, cancel, stream, streams.Stdin) })
 	}
 	if streams.TTY && streams.TerminalSizeQueue != nil {
-		streams.Go(func() {
+		workerGo(func() {
 			pumpTerminalSizes(execContext, cancel, stream, streams.TerminalSizeQueue)
 		})
 	}
