@@ -140,6 +140,58 @@ func TestUpdaterRollsBackStartFailure(t *testing.T) {
 	assertBytes(t, config.WorkerBinaryPath, oldPayload)
 }
 
+func TestUpdaterRecoverClearsJournalForHealthyWorker(t *testing.T) {
+	config := testConfig(t)
+	if err := os.MkdirAll(config.StateDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(config.JournalPath(), []byte(`{"phase":"staged"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	worker := &fakeWorker{config: config, status: supervisorprotocol.WorkerStatus{
+		Installed: true, Running: true, CoreReady: true,
+	}}
+	updater := NewUpdater(config, worker, os.Getuid())
+
+	if err := updater.Recover(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(config.JournalPath()); !os.IsNotExist(err) {
+		t.Fatalf("recovery journal remains: %v", err)
+	}
+}
+
+func TestUpdaterManualRollbackRestoresPreviousWorker(t *testing.T) {
+	config := testConfig(t)
+	currentPayload := machOBytes("current")
+	previousPayload := machOBytes("previous")
+	writeExecutable(t, config.WorkerBinaryPath, currentPayload)
+	writeExecutable(t, config.PreviousPath(), previousPayload)
+	worker := &fakeWorker{config: config, status: supervisorprotocol.WorkerStatus{
+		Installed: true, Running: true, CoreReady: true,
+	}}
+	updater := NewUpdater(config, worker, os.Getuid())
+
+	response := updater.Rollback(t.Context())
+	if !response.OK || !response.RolledBack || worker.stops != 1 || worker.starts != 1 {
+		t.Fatalf("Rollback response=%#v stops=%d starts=%d", response, worker.stops, worker.starts)
+	}
+	assertBytes(t, config.WorkerBinaryPath, previousPayload)
+}
+
+func TestUpdaterRestartCyclesWorker(t *testing.T) {
+	config := testConfig(t)
+	worker := &fakeWorker{config: config, status: supervisorprotocol.WorkerStatus{
+		Installed: true, Running: true, CoreReady: true,
+	}}
+	updater := NewUpdater(config, worker, os.Getuid())
+
+	response := updater.Restart(t.Context())
+	if !response.OK || worker.stops != 1 || worker.starts != 1 {
+		t.Fatalf("Restart response=%#v stops=%d starts=%d", response, worker.stops, worker.starts)
+	}
+}
+
 func testConfig(t *testing.T) Config {
 	t.Helper()
 	dir := t.TempDir()
