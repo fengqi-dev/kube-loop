@@ -61,7 +61,6 @@ func (s *Server) Drain(ctx context.Context) error {
 		return nil
 	case <-ctx.Done():
 		s.closeActiveConnections()
-		<-done
 		return ctx.Err()
 	}
 }

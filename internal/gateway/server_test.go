@@ -9,6 +9,8 @@ import (
 	"net"
 	"net/netip"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -45,6 +47,17 @@ func (handler *gatewayTestTrafficHandler) ServeTraffic(
 }
 
 type gatewayTestContextKey struct{}
+
+type stubbornGatewayConnection struct {
+	net.Conn
+
+	closeCalls atomic.Int32
+}
+
+func (connection *stubbornGatewayConnection) Close() error {
+	connection.closeCalls.Add(1)
+	return nil
+}
 
 func TestServeConnForAuthorizationLogsRequestID(t *testing.T) {
 	var logs bytes.Buffer
@@ -116,9 +129,43 @@ func TestDrainDeadlineClosesActiveConnections(t *testing.T) {
 	if err := server.Drain(ctx); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("Drain error = %v", err)
 	}
-	if active := server.ActiveConnections(); active != 0 {
-		t.Fatalf("active connections = %d", active)
+	waitForActiveConnections(t, server, 0)
+}
+
+func TestDrainDeadlineDoesNotWaitForStubbornHandler(t *testing.T) {
+	server := NewServer(nil, time.Second)
+	connection := &stubbornGatewayConnection{}
+	if !server.trackConnection(connection) {
+		t.Fatal("failed to track test connection")
 	}
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	releaseHandler := func() { releaseOnce.Do(func() { close(release) }) }
+	t.Cleanup(releaseHandler)
+	go func() {
+		<-release
+		server.untrackConnection(connection)
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	drained := make(chan error, 1)
+	go func() { drained <- server.Drain(ctx) }()
+	select {
+	case err := <-drained:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("Drain() error = %v, want context deadline exceeded", err)
+		}
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("Drain waited for a handler after its deadline")
+	}
+	if connection.closeCalls.Load() != 1 || server.ActiveConnections() != 1 {
+		t.Fatalf(
+			"deadline cleanup: close calls=%d active=%d",
+			connection.closeCalls.Load(), server.ActiveConnections(),
+		)
+	}
+	releaseHandler()
+	waitForActiveConnections(t, server, 0)
 }
 
 func TestBeginDrainRejectsNewConnections(t *testing.T) {
