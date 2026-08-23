@@ -195,13 +195,6 @@ type installRollback struct {
 	token  fileRollback
 }
 
-type fileRollback struct {
-	path       string
-	backupPath string
-	existed    bool
-	mode       os.FileMode
-}
-
 func beginInstallRollback(binaryPath, corePath, authPath, tokenPath string) (*installRollback, error) {
 	binary, err := snapshotFileForRollback(binaryPath)
 	if err != nil {
@@ -226,30 +219,6 @@ func beginInstallRollback(binaryPath, corePath, authPath, tokenPath string) (*in
 		return nil, err
 	}
 	return &installRollback{binary: binary, core: core, auth: auth, token: token}, nil
-}
-
-func snapshotFileForRollback(path string) (fileRollback, error) {
-	snapshot := fileRollback{
-		path:       path,
-		backupPath: path + ".kubeloop-rollback",
-	}
-	info, err := os.Stat(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			_ = os.Remove(snapshot.backupPath)
-			return snapshot, nil
-		}
-		return snapshot, err
-	}
-	if info.IsDir() {
-		return snapshot, fmt.Errorf("%s is a directory", path)
-	}
-	snapshot.existed = true
-	snapshot.mode = info.Mode().Perm()
-	if err := copyFile(path, snapshot.backupPath, snapshot.mode); err != nil {
-		return snapshot, err
-	}
-	return snapshot, nil
 }
 
 func (r *installRollback) commit() {
@@ -288,24 +257,6 @@ func (r *installRollback) restore() error {
 		r.commit()
 	}
 	return rollbackErr
-}
-
-func (f fileRollback) restore() error {
-	if !f.existed {
-		if err := os.Remove(f.path); err != nil && !os.IsNotExist(err) {
-			return err
-		}
-		return nil
-	}
-	if err := replaceFile(f.backupPath, f.path); err != nil {
-		return err
-	}
-	return os.Chmod(f.path, f.mode)
-}
-
-func (f fileRollback) discard() {
-	_ = os.Remove(f.backupPath)
-	_ = os.Remove(f.backupPath + ".tmp")
 }
 
 func singBoxNearHelperSource(source string) string {
