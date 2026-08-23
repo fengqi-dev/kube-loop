@@ -63,11 +63,11 @@ func (s *Server) Serve(ctx context.Context) error {
 		s.closing.Store(true)
 		s.stopAllSessions()
 	}()
-	go func() {
-		<-ctx.Done()
+	stopListener := context.AfterFunc(ctx, func() {
 		s.closing.Store(true)
 		_ = listener.Close()
-	}()
+	})
+	defer stopListener()
 
 	s.Log.Printf("kubeloop-helper listening on %s (version %s)", SocketPath(), Version)
 	for {
