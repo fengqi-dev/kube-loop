@@ -127,6 +127,61 @@ func TestUpdaterActivatesHealthyWorker(t *testing.T) {
 	assertBytes(t, config.PreviousPath(), oldPayload)
 }
 
+func TestUpdaterReportsJournalCleanupFailure(t *testing.T) {
+	tests := []struct {
+		name           string
+		startErr       error
+		wantRolledBack bool
+	}{
+		{name: "successful activation"},
+		{
+			name: "successful rollback", startErr: fmt.Errorf("start failed"),
+			wantRolledBack: true,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			config := testConfig(t)
+			oldPayload := machOBytes("old")
+			newPayload := machOBytes("new")
+			writeExecutable(t, config.WorkerBinaryPath, oldPayload)
+			worker := &fakeWorker{
+				config: config, startErrOnce: test.startErr,
+				status: supervisorprotocol.WorkerStatus{
+					Installed: true, Running: true, CoreReady: true,
+					Version: "new", Protocol: 7,
+				},
+			}
+			updater := NewUpdater(config, worker, os.Getuid())
+			updater.verifyArtifact = func(
+				context.Context,
+				string,
+				supervisorprotocol.UpdateManifest,
+			) error {
+				return nil
+			}
+			cleanupErr := fmt.Errorf("journal cleanup failed")
+			updater.removeFile = func(path string) error {
+				if path == config.JournalPath() {
+					return cleanupErr
+				}
+				return removeUpdateFile(path)
+			}
+			manifest := testManifest(config.Channel, newPayload)
+			manifest.Version = "new"
+			manifest.WorkerProtocol = 7
+			response := updater.Update(t.Context(), manifest, bytes.NewReader(newPayload))
+			if response.OK || response.RolledBack != test.wantRolledBack ||
+				!strings.Contains(response.Error, cleanupErr.Error()) {
+				t.Fatalf("Update response = %#v", response)
+			}
+			if !fileExists(config.JournalPath()) {
+				t.Fatal("failed cleanup unexpectedly removed update journal")
+			}
+		})
+	}
+}
+
 func TestUpdaterRollsBackStartFailure(t *testing.T) {
 	t.Parallel()
 	config := testConfig(t)

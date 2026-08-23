@@ -24,8 +24,8 @@ func (u *Updater) Recover(ctx context.Context) error {
 	staged := u.stagedPath()
 	cleanup := func() error {
 		return errors.Join(
-			removeUpdateFile(staged),
-			removeUpdateFile(u.config.JournalPath()),
+			u.removeFile(staged),
+			u.removeFile(u.config.JournalPath()),
 		)
 	}
 	if record.Phase == journalPhaseStaged {

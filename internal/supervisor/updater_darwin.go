@@ -49,12 +49,14 @@ type Updater struct {
 	readyInterval  time.Duration
 	artifactUID    int
 	verifyArtifact func(context.Context, string, supervisorprotocol.UpdateManifest) error
+	removeFile     func(string) error
 }
 
 func NewUpdater(config Config, worker WorkerController, artifactUID int) *Updater {
 	updater := &Updater{
 		config: config, worker: worker,
 		readyTimeout: 20 * time.Second, readyInterval: 100 * time.Millisecond, artifactUID: artifactUID,
+		removeFile: removeUpdateFile,
 	}
 	updater.verifyArtifact = updater.verifyWorkerIdentity
 	return updater
@@ -122,7 +124,10 @@ func (u *Updater) Update(
 	rolledBack, updateErr := u.activate(ctx, staged, manifest)
 	response.RolledBack = rolledBack
 	if rolledBack {
-		_ = os.Remove(u.config.JournalPath())
+		updateErr = errors.Join(
+			updateErr,
+			u.removeFile(u.config.JournalPath()),
+		)
 	}
 	response.PreviousAvailable = fileExists(u.config.PreviousPath())
 	response.Worker, _ = u.Status(ctx)
@@ -130,8 +135,11 @@ func (u *Updater) Update(
 		response.Error = updateErr.Error()
 		return response
 	}
+	if err := u.removeFile(u.config.JournalPath()); err != nil {
+		response.Error = fmt.Sprintf("remove completed update journal: %v", err)
+		return response
+	}
 	response.OK = true
-	_ = os.Remove(u.config.JournalPath())
 	return response
 }
 
