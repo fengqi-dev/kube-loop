@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -24,6 +25,7 @@ type fakeController struct {
 	claimResponse *trafficcontrol.ClaimResponse
 	claimErr      error
 	prepareErr    error
+	heartbeatErr  error
 	calls         atomic.Int32
 }
 
@@ -58,6 +60,9 @@ func (controlPlane *fakeController) DoJSON(
 		controlPlane.prepared <- request
 		*output.(*trafficcontrol.PrepareResponse) = trafficcontrol.PrepareResponse{}
 	case trafficcontrol.InternalPathPrefix + "/heartbeat":
+		if controlPlane.heartbeatErr != nil {
+			return controlPlane.heartbeatErr
+		}
 		*output.(*trafficcontrol.HeartbeatResponse) = trafficcontrol.HeartbeatResponse{}
 	case trafficcontrol.InternalPathPrefix + "/finish":
 		request := input.(trafficcontrol.FinishRequest)
@@ -160,6 +165,52 @@ func TestExchangeLogicalStreamRunsOnGatewayAndReportsLifecycle(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("ControlPlane finish was not called")
+	}
+}
+
+func TestHeartbeatFailureReportsFailedLifecycle(t *testing.T) {
+	taskID := uuid.NewString()
+	controlPlane := &fakeController{
+		prepared:     make(chan trafficcontrol.PrepareRequest, 1),
+		finished:     make(chan trafficcontrol.FinishRequest, 1),
+		heartbeatErr: errors.New("control plane unavailable"),
+	}
+	api, err := trafficapi.New(trafficapi.Config{
+		GatewayIP: "127.0.0.1", ControlPlane: controlPlane,
+		HeartbeatEvery: 10 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gatewayConnection, clientConnection := net.Pipe()
+	t.Cleanup(func() { _ = clientConnection.Close() })
+	go api.ServeTraffic(
+		context.Background(),
+		gatewayConnection,
+		trafficcontrol.Identity{
+			IdentityID: "user-1", DeviceID: "device-1", SessionID: uuid.NewString(),
+			SessionGeneration: 1, Namespace: "development",
+		},
+		tunnel.TrafficOpenRequest{Mode: tunnel.TrafficModeExchange, TaskID: taskID},
+	)
+	if err := tunnel.ReadStatus(clientConnection); err != nil {
+		t.Fatal(err)
+	}
+	framed, err := trafficstream.Dial(context.Background(), clientConnection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := framed.ReadFrame(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case finished := <-controlPlane.finished:
+		if !finished.Failed || !strings.Contains(finished.Reason, "traffic heartbeat") {
+			t.Fatalf("heartbeat failure finish = %#v", finished)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("heartbeat failure was not finished")
 	}
 }
 

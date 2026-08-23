@@ -11,6 +11,11 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficcontrol"
 )
 
+var (
+	errHeartbeatFailed   = errors.New("traffic heartbeat")
+	errTaskStopRequested = errors.New("traffic Task stop requested")
+)
+
 func (api *API) heartbeat(
 	ctx context.Context,
 	cancel context.CancelCauseFunc,
@@ -36,11 +41,11 @@ func (api *API) heartbeat(
 		)
 		requestCancel()
 		if err != nil {
-			cancel(fmt.Errorf("traffic heartbeat: %w", err))
+			cancel(fmt.Errorf("%w: %w", errHeartbeatFailed, err))
 			return
 		}
 		if response.Stop {
-			cancel(errors.New("traffic Task stop requested"))
+			cancel(errTaskStopRequested)
 			return
 		}
 	}

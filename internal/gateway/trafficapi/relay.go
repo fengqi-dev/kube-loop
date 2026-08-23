@@ -98,12 +98,14 @@ func (api *API) runRelay(
 	if err == nil {
 		err = relay.Run(runContext)
 	}
-	failed := err != nil && !errors.Is(err, reverserelay.ErrClientStopped) &&
+	relayFailed := err != nil && !errors.Is(err, reverserelay.ErrClientStopped) &&
 		!errors.Is(err, mirrorrelay.ErrClientStopped) && runContext.Err() == nil
 	cancel(err)
+	cause := context.Cause(runContext)
+	failed := relayFailed || errors.Is(cause, errHeartbeatFailed)
 	_ = listeners.Close()
 	<-heartbeatDone
-	api.finish(context.WithoutCancel(ctx), mode, taskID, failed, err)
+	api.finish(context.WithoutCancel(ctx), mode, taskID, failed, cause)
 	api.writeStop(connection, mode)
 }
 
