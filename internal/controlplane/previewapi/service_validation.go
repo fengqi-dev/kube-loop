@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	"slices"
 	"strings"
 
@@ -92,20 +91,6 @@ func owned(
 ) bool {
 	return task.Type == TaskType && task.IdentityID == identity.Subject &&
 		task.SessionID == session.ID
-}
-
-func namespaceFromQuery(
-	request *http.Request,
-) (string, *controlplaneapi.Error) {
-	query := request.URL.Query()
-	if len(query) != 1 || len(query["namespace"]) != 1 ||
-		len(validation.IsDNS1123Label(query.Get("namespace"))) != 0 {
-		return "", invalid(
-			"namespace",
-			"one valid namespace query parameter is required",
-		)
-	}
-	return query.Get("namespace"), nil
 }
 
 func storageError(err error) *controlplaneapi.Error {

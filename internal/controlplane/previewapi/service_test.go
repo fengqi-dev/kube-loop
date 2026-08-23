@@ -291,7 +291,7 @@ func serveAPI(
 	request *http.Request,
 	identity controlplaneapi.Identity,
 ) *controlplaneapi.Error {
-	routes := NewRoutes(handler)
+	endpoints := NewRoutes(handler).Endpoints()
 	parts := strings.Split(strings.Trim(request.URL.Path, "/"), "/")
 	request.SetPathValue("sessionID", parts[2])
 	if len(parts) > 4 {
@@ -299,25 +299,10 @@ func serveAPI(
 	}
 	switch request.Method {
 	case http.MethodPost:
-		return routes.withSession(
-			handler.create,
-		)(
-			echo.New().NewContext(request, writer),
-			identity,
-		)
+		return endpoints.Create(echo.New().NewContext(request, writer), identity)
 	case http.MethodDelete:
-		return routes.withTask(
-			handler.stop,
-		)(
-			echo.New().NewContext(request, writer),
-			identity,
-		)
+		return endpoints.Stop(echo.New().NewContext(request, writer), identity)
 	default:
-		return routes.withTask(
-			handler.get,
-		)(
-			echo.New().NewContext(request, writer),
-			identity,
-		)
+		return endpoints.Get(echo.New().NewContext(request, writer), identity)
 	}
 }
