@@ -4,14 +4,11 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
-	"fmt"
 	"io"
 	"io/fs"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
@@ -20,113 +17,16 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/client/credentials"
 	clientdataplane "github.com/fengqi-dev/kube-loop/internal/client/dataplane"
 	clientdiscovery "github.com/fengqi-dev/kube-loop/internal/client/discovery"
-	clientexchange "github.com/fengqi-dev/kube-loop/internal/client/exchange"
 	clientexec "github.com/fengqi-dev/kube-loop/internal/client/exec"
 	clientfiletransfer "github.com/fengqi-dev/kube-loop/internal/client/filetransfer"
-	clientmirror "github.com/fengqi-dev/kube-loop/internal/client/mirror"
-	clientpodssh "github.com/fengqi-dev/kube-loop/internal/client/podssh"
-	clientportforward "github.com/fengqi-dev/kube-loop/internal/client/portforward"
-	clientpreview "github.com/fengqi-dev/kube-loop/internal/client/preview"
 	clientprofile "github.com/fengqi-dev/kube-loop/internal/client/profile"
 	clientremote "github.com/fengqi-dev/kube-loop/internal/client/remote"
 	clientremotesession "github.com/fengqi-dev/kube-loop/internal/client/remotesession"
 	"github.com/fengqi-dev/kube-loop/internal/helper"
-	"github.com/fengqi-dev/kube-loop/internal/mcp"
 	"github.com/fengqi-dev/kube-loop/internal/supervisor"
 	"github.com/fengqi-dev/kube-loop/internal/trafficinspect"
 	"github.com/fengqi-dev/kube-loop/internal/update"
-	"github.com/fengqi-dev/kube-loop/internal/userpaths"
 )
-
-type App struct {
-	ctx                       context.Context
-	profiles                  *clientprofile.Store
-	discovery                 *clientdiscovery.Client
-	auth                      *clientauth.Client
-	remote                    *clientremote.Client
-	remoteSessions            *clientremotesession.Manager
-	dataPlanes                *clientdataplane.Manager
-	remoteExecs               *clientexec.Manager
-	remoteFiles               *clientfiletransfer.Manager
-	remoteSSH                 *clientpodssh.Manager
-	remoteForwards            *clientportforward.Manager
-	remoteExchanges           *clientexchange.Manager
-	remoteMirrors             *clientmirror.Manager
-	remotePreviews            *clientpreview.Manager
-	credentials               credentials.Store
-	mcp                       *mcp.Controller
-	updater                   *update.Checker
-	once                      sync.Once
-	updateMu                  sync.RWMutex
-	updateCheck               sync.Mutex
-	updateState               update.Info
-	inventoryWatchMu          sync.Mutex
-	inventoryWatchProfile     string
-	inventoryWatchCancel      context.CancelFunc
-	powerWatchCancel          context.CancelFunc
-	serverLoginMu             sync.Mutex
-	serverLogin               *serverLoginAttempt
-	trafficInspectionOutput   io.Closer
-	trafficInspectionEvents   *trafficinspect.RingBufferSink
-	trafficInspectionSwitch   *trafficinspect.SwitchableSink
-	trafficInspectionSettings *trafficinspect.SettingsStore
-	trafficInspectionProtobuf *trafficinspect.ProtobufSchemaStore
-	trafficInspectionMu       sync.Mutex
-	trafficInspectionReady    func() bool
-	trafficInspectionCAPath   string
-	trafficInspectionTrust    trafficinspect.TrustStore
-}
-
-type serverLoginAttempt struct {
-	cancel context.CancelFunc
-}
-
-type BootstrapData struct {
-	Update         update.Info         `json:"update"`
-	Platform       string              `json:"platform"`
-	CoreVersion    string              `json:"coreVersion"`
-	ServerProfiles clientprofile.State `json:"serverProfiles"`
-}
-
-type appDependencies struct {
-	profilePath             string
-	credentialStore         credentials.Store
-	httpClient              *http.Client
-	trafficInspection       clientdataplane.TrafficInspectionConfig
-	trafficInspectionEvents *trafficinspect.RingBufferSink
-	trafficInspectionSwitch *trafficinspect.SwitchableSink
-}
-
-func appUserLayout(version, profilePath string) (userpaths.Layout, error) {
-	profilePath = strings.TrimSpace(profilePath)
-	var layout userpaths.Layout
-	var err error
-	if profilePath == "" {
-		layout, err = userpaths.ForVersion(version)
-	} else {
-		root := filepath.Dir(profilePath)
-		if filepath.Base(root) == "config" {
-			root = filepath.Dir(root)
-		}
-		layout, err = userpaths.New(root)
-	}
-	if err != nil {
-		return userpaths.Layout{}, err
-	}
-	if err := layout.Ensure(); err != nil {
-		return userpaths.Layout{}, fmt.Errorf("initialize KubeLoop user directories: %w", err)
-	}
-	return layout, nil
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if value = strings.TrimSpace(value); value != "" {
-			return value
-		}
-	}
-	return ""
-}
 
 // NewApp is the desktop composition root. It deliberately constructs no
 // kubeconfig or Kubernetes client: all cluster operations

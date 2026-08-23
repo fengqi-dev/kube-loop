@@ -5,6 +5,10 @@ import (
 	"errors"
 )
 
+type serverLoginAttempt struct {
+	cancel context.CancelFunc
+}
+
 // CancelServerLogin stops the active browser-based login, if any. It is
 // intentionally idempotent so UI cleanup can call it safely while unmounting.
 func (a *App) CancelServerLogin() {
