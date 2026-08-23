@@ -17,9 +17,27 @@ func (u *Updater) Recover(ctx context.Context) error {
 	if !fileExists(u.config.JournalPath()) {
 		return nil
 	}
+	record, err := u.readJournal()
+	if err != nil {
+		return err
+	}
+	staged := filepath.Join(
+		filepath.Dir(u.config.WorkerBinaryPath),
+		"."+u.config.WorkerLabel+".staged",
+	)
+	cleanup := func() error {
+		return errors.Join(
+			removeUpdateFile(staged),
+			removeUpdateFile(u.config.JournalPath()),
+		)
+	}
+	if record.Phase == journalPhaseStaged {
+		return cleanup()
+	}
 	status, err := u.worker.Status(ctx)
-	if err == nil && status.Running && status.CoreReady {
-		return os.Remove(u.config.JournalPath())
+	if err == nil && status.Running && status.CoreReady &&
+		status.Version == record.Version && status.SHA256 == record.SHA256 {
+		return cleanup()
 	}
 	if !fileExists(u.config.PreviousPath()) {
 		return fmt.Errorf("update journal exists but no previous worker is available")
@@ -28,7 +46,7 @@ func (u *Updater) Recover(ctx context.Context) error {
 	if !rolledBack {
 		return rollbackErr
 	}
-	return os.Remove(u.config.JournalPath())
+	return cleanup()
 }
 
 func (u *Updater) activate(
@@ -49,7 +67,7 @@ func (u *Updater) activate(
 	}
 	if err := u.writeJournal(journal{
 		RequestID: manifest.RequestID,
-		Phase:     "swapping",
+		Phase:     journalPhaseSwapping,
 		Version:   manifest.Version,
 		SHA256:    manifest.SHA256,
 	}); err != nil {

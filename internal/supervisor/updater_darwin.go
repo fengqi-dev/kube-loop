@@ -29,6 +29,11 @@ import (
 
 var requestIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
 
+const (
+	journalPhaseStaged   = "staged"
+	journalPhaseSwapping = "swapping"
+)
+
 type journal struct {
 	RequestID string `json:"requestId"`
 	Phase     string `json:"phase"`
@@ -106,7 +111,7 @@ func (u *Updater) Update(
 	defer func() { _ = os.Remove(staged) }()
 	if err := u.writeJournal(journal{
 		RequestID: manifest.RequestID,
-		Phase:     "staged",
+		Phase:     journalPhaseStaged,
 		Version:   manifest.Version,
 		SHA256:    manifest.SHA256,
 	}); err != nil {
@@ -336,6 +341,38 @@ func (u *Updater) writeJournal(value journal) error {
 		return err
 	}
 	return syncDir(u.config.StateDir)
+}
+
+func (u *Updater) readJournal() (journal, error) {
+	raw, err := os.ReadFile(u.config.JournalPath())
+	if err != nil {
+		return journal{}, err
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	var value journal
+	if err := decoder.Decode(&value); err != nil {
+		return journal{}, fmt.Errorf("decode update journal: %w", err)
+	}
+	var extra any
+	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+		return journal{}, fmt.Errorf("decode update journal: trailing data")
+	}
+	decodedSHA, err := hex.DecodeString(value.SHA256)
+	validPhase := value.Phase == journalPhaseStaged || value.Phase == journalPhaseSwapping
+	if !requestIDPattern.MatchString(value.RequestID) || !validPhase ||
+		value.Version == "" || err != nil || len(decodedSHA) != sha256.Size {
+		return journal{}, fmt.Errorf("update journal is invalid")
+	}
+	return value, nil
+}
+
+func removeUpdateFile(path string) error {
+	err := os.Remove(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	return err
 }
 
 func fileExists(path string) bool {

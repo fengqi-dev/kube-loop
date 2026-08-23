@@ -155,20 +155,51 @@ func TestUpdaterRollsBackStartFailure(t *testing.T) {
 
 func TestUpdaterRecoverClearsJournalForHealthyWorker(t *testing.T) {
 	config := testConfig(t)
-	if err := os.MkdirAll(config.StateDir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(config.JournalPath(), []byte(`{"phase":"staged"}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
 	worker := &fakeWorker{config: config, status: supervisorprotocol.WorkerStatus{
 		Installed: true, Running: true, CoreReady: true,
 	}}
 	updater := NewUpdater(config, worker, os.Getuid())
+	if err := updater.writeJournal(journal{
+		RequestID: "request-1", Phase: journalPhaseStaged,
+		Version: "next", SHA256: strings.Repeat("a", 64),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	staged := filepath.Join(filepath.Dir(config.WorkerBinaryPath), "."+config.WorkerLabel+".staged")
+	writeExecutable(t, staged, machOBytes("staged"))
 
 	if err := updater.Recover(t.Context()); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := os.Stat(config.JournalPath()); !os.IsNotExist(err) {
+		t.Fatalf("recovery journal remains: %v", err)
+	}
+	if _, err := os.Stat(staged); !os.IsNotExist(err) {
+		t.Fatalf("staged worker remains after recovery: %v", err)
+	}
+}
+
+func TestUpdaterRecoverRollsBackMismatchedHealthyWorker(t *testing.T) {
+	config := testConfig(t)
+	currentPayload := machOBytes("unexpected")
+	previousPayload := machOBytes("previous")
+	writeExecutable(t, config.WorkerBinaryPath, currentPayload)
+	writeExecutable(t, config.PreviousPath(), previousPayload)
+	worker := &fakeWorker{config: config, status: supervisorprotocol.WorkerStatus{
+		Installed: true, Running: true, CoreReady: true, Version: "unexpected",
+	}}
+	updater := NewUpdater(config, worker, os.Getuid())
+	if err := updater.writeJournal(journal{
+		RequestID: "request-1", Phase: journalPhaseSwapping,
+		Version: "expected", SHA256: strings.Repeat("b", 64),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := updater.Recover(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	assertBytes(t, config.WorkerBinaryPath, previousPayload)
 	if _, err := os.Stat(config.JournalPath()); !os.IsNotExist(err) {
 		t.Fatalf("recovery journal remains: %v", err)
 	}
