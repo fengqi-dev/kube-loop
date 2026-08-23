@@ -913,8 +913,34 @@ func TestManagerReplacesTransportWhenHeartbeatAdvancesGeneration(t *testing.T) {
 	}
 }
 
-//nolint:gocyclo // The heartbeat and TUN transitions form one ordered state-machine scenario.
 func TestManagerReconfiguresTUNWhenHeartbeatRefreshesNetworkSpec(t *testing.T) {
+	fixture := newNetworkSpecRefreshFixture(t)
+	firstStatus, firstCore, transportDone := fixture.start(t)
+	fixture.publishRefresh(t, transportDone)
+	fixture.releaseRefresh()
+	secondControl := receiveControl(t, fixture.controls)
+	t.Cleanup(func() { checkTestClose(t, secondControl.Close) })
+	fixture.assertRecovered(t, firstStatus, firstCore)
+}
+
+type networkSpecRefreshFixture struct {
+	manager        *Manager
+	tickets        *testTickets
+	tunStarter     *testTUNStarter
+	controls       chan net.Conn
+	statusEvents   chan StatusEvent
+	refreshStarted chan struct{}
+	allowRefresh   chan struct{}
+	releaseOnce    sync.Once
+	starts         atomic.Int32
+	profile        profile.Profile
+	initialSession remote.Session
+	refreshedSpec  networkspec.Spec
+	refreshedHash  string
+}
+
+func newNetworkSpecRefreshFixture(t *testing.T) *networkSpecRefreshFixture {
+	t.Helper()
 	initialSpec, err := networkspec.Normalize(networkspec.Spec{
 		PodCIDRs: []string{"10.42.0.0/16"}, ServiceIPs: []string{"10.96.0.10"},
 	})
@@ -929,31 +955,34 @@ func TestManagerReconfiguresTUNWhenHeartbeatRefreshesNetworkSpec(t *testing.T) {
 		t.Fatal(err)
 	}
 	refreshedHash, _ := networkspec.Hash(refreshedSpec)
-	session := remote.Session{
+	fixture := &networkSpecRefreshFixture{
+		tunStarter:     &testTUNStarter{},
+		controls:       make(chan net.Conn, 4),
+		statusEvents:   make(chan StatusEvent, 8),
+		refreshStarted: make(chan struct{}, 1),
+		allowRefresh:   make(chan struct{}),
+		profile: profile.Profile{
+			ID: "service", BaseURL: "https://gateway.example.test", TunnelPath: defaultTunnelPath,
+		},
+		refreshedSpec: refreshedSpec,
+		refreshedHash: refreshedHash,
+	}
+	fixture.initialSession = remote.Session{
 		ID: "ec0b67a2-e84c-4fe7-a0c5-810f210157b5", Namespace: "payments", State: dataplaneSessionActive,
 		Generation: 4, NetworkSpec: initialSpec, NetworkSpecHash: initialHash,
 	}
-	controls := make(chan net.Conn, 4)
-	statusEvents := make(chan StatusEvent, 8)
-	refreshStarted := make(chan struct{}, 1)
-	allowRefresh := make(chan struct{})
-	var allowRefreshOnce sync.Once
-	releaseRefresh := func() { allowRefreshOnce.Do(func() { close(allowRefresh) }) }
-	t.Cleanup(releaseRefresh)
-	var starts atomic.Int32
-	tunStarter := &testTUNStarter{}
-	tickets := &testTickets{session: session, updates: make(chan remote.SessionUpdate, 1)}
-	tickets.refresh = func(current remote.Session) (remote.Session, error) {
+	fixture.tickets = &testTickets{session: fixture.initialSession, updates: make(chan remote.SessionUpdate, 1)}
+	fixture.tickets.refresh = func(current remote.Session) (remote.Session, error) {
 		select {
-		case refreshStarted <- struct{}{}:
+		case fixture.refreshStarted <- struct{}{}:
 		default:
 		}
-		<-allowRefresh
+		<-fixture.allowRefresh
 		return current, nil
 	}
-	manager, err := NewManager(tickets, Config{
+	fixture.manager, err = NewManager(fixture.tickets, Config{
 		RecoveryAttempts: 2, RecoveryBackoff: 10 * time.Millisecond,
-		TUNStarter: tunStarter, OnStatus: func(event StatusEvent) { statusEvents <- event },
+		TUNStarter: fixture.tunStarter, OnStatus: func(event StatusEvent) { fixture.statusEvents <- event },
 		startForwarder: func(ctx context.Context, clientConfig websocketmux.ClientConfig) (streamForwarder, error) {
 			if _, err := clientConfig.TokenSource(ctx); err != nil {
 				return nil, err
@@ -962,80 +991,104 @@ func TestManagerReconfiguresTUNWhenHeartbeatRefreshesNetworkSpec(t *testing.T) {
 			if err != nil {
 				return nil, err
 			}
-			starts.Add(1)
-			go acceptTestControlWithSignal(listener, controls)
+			fixture.starts.Add(1)
+			go acceptTestControlWithSignal(listener, fixture.controls)
 			return &testForwarder{Listener: listener}, nil
 		},
 		listenSOCKS: func(_ context.Context, _, _ string, _ tunnel.SessionToken) (localBridge, error) {
-			return &testBridge{address: testAddress("127.0.0.1:" + strconv.Itoa(47000+int(starts.Load())))}, nil
+			return &testBridge{
+				address: testAddress("127.0.0.1:" + strconv.Itoa(47000+int(fixture.starts.Load()))),
+			}, nil
 		},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = manager.Shutdown() })
-	serverProfile := profile.Profile{
-		ID:         "service",
-		BaseURL:    "https://gateway.example.test",
-		TunnelPath: defaultTunnelPath,
-	}
-	firstStatus, err := manager.Connect(context.Background(), serverProfile, session)
+	t.Cleanup(fixture.releaseRefresh)
+	t.Cleanup(func() { _ = fixture.manager.Shutdown() })
+	return fixture
+}
+
+func (fixture *networkSpecRefreshFixture) releaseRefresh() {
+	fixture.releaseOnce.Do(func() { close(fixture.allowRefresh) })
+}
+
+func (fixture *networkSpecRefreshFixture) start(t *testing.T) (Status, *testCore, <-chan struct{}) {
+	t.Helper()
+	firstStatus, err := fixture.manager.Connect(context.Background(), fixture.profile, fixture.initialSession)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := manager.StartTUN(context.Background(), serverProfile.ID); err != nil {
+	if _, err := fixture.manager.StartTUN(context.Background(), fixture.profile.ID); err != nil {
 		t.Fatal(err)
 	}
-	_, _, _, _, firstCore := tunStarter.snapshot()
-	firstControl := receiveControl(t, controls)
-	defer checkTestClose(t, firstControl.Close)
-	manager.mu.Lock()
-	initialTransportDone := manager.active[serverProfile.ID].runtime.TransportDone()
-	manager.mu.Unlock()
-	tickets.mu.Lock()
-	tickets.session.Generation++
-	tickets.session.NetworkSpec = refreshedSpec
-	tickets.session.NetworkSpecHash = refreshedHash
-	updatedSession := tickets.session
-	tickets.mu.Unlock()
-	tickets.updates <- remote.SessionUpdate{ProfileID: serverProfile.ID, Session: updatedSession}
-	var refreshEvent StatusEvent
-	eventDeadline := time.After(time.Second)
-	for refreshEvent.Reason != reasonNetworkSpecChanged {
-		select {
-		case refreshEvent = <-statusEvents:
-		case <-eventDeadline:
-			t.Fatal("NetworkSpec refresh event was not published")
-		}
-	}
+	_, _, _, _, firstCore := fixture.tunStarter.snapshot()
+	firstControl := receiveControl(t, fixture.controls)
+	t.Cleanup(func() { checkTestClose(t, firstControl.Close) })
+	fixture.manager.mu.Lock()
+	transportDone := fixture.manager.active[fixture.profile.ID].runtime.TransportDone()
+	fixture.manager.mu.Unlock()
+	return firstStatus, firstCore, transportDone
+}
+
+func (fixture *networkSpecRefreshFixture) publishRefresh(t *testing.T, transportDone <-chan struct{}) {
+	t.Helper()
+	fixture.tickets.mu.Lock()
+	fixture.tickets.session.Generation++
+	fixture.tickets.session.NetworkSpec = fixture.refreshedSpec
+	fixture.tickets.session.NetworkSpecHash = fixture.refreshedHash
+	updatedSession := fixture.tickets.session
+	fixture.tickets.mu.Unlock()
+	fixture.tickets.updates <- remote.SessionUpdate{ProfileID: fixture.profile.ID, Session: updatedSession}
+	refreshEvent := waitStatusEvent(t, fixture.statusEvents, reasonNetworkSpecChanged)
 	if refreshEvent.Status.State != dataplaneReconnecting || !refreshEvent.Retryable {
 		t.Fatalf("NetworkSpec refresh event = %#v", refreshEvent)
 	}
 	select {
-	case <-refreshStarted:
+	case <-fixture.refreshStarted:
 	case <-time.After(time.Second):
 		t.Fatal("NetworkSpec refresh did not start")
 	}
 	select {
-	case <-initialTransportDone:
+	case <-transportDone:
 		t.Fatal("NetworkSpec refresh interrupted the active transport before its replacement was ready")
 	default:
 	}
-	releaseRefresh()
-	secondControl := receiveControl(t, controls)
-	defer checkTestClose(t, secondControl.Close)
+}
 
+func waitStatusEvent(t *testing.T, events <-chan StatusEvent, reason string) StatusEvent {
+	t.Helper()
+	deadline := time.After(time.Second)
+	for {
+		select {
+		case event := <-events:
+			if event.Reason == reason {
+				return event
+			}
+		case <-deadline:
+			t.Fatalf("status event %q was not published", reason)
+		}
+	}
+}
+
+func (fixture *networkSpecRefreshFixture) assertRecovered(
+	t *testing.T,
+	firstStatus Status,
+	firstCore *testCore,
+) {
+	t.Helper()
 	deadline := time.Now().Add(time.Second)
 	var recovered Status
 	for {
-		manager.mu.Lock()
-		entry := manager.active[serverProfile.ID]
-		ready := entry != nil && !entry.recovering && entry.session.Generation == session.Generation+1 &&
-			entry.session.NetworkSpecHash == refreshedHash && entry.runtime.Status().Mode == ModeTUN
+		fixture.manager.mu.Lock()
+		entry := fixture.manager.active[fixture.profile.ID]
+		ready := entry != nil && !entry.recovering &&
+			entry.session.Generation == fixture.initialSession.Generation+1 &&
+			entry.session.NetworkSpecHash == fixture.refreshedHash && entry.runtime.Status().Mode == ModeTUN
 		if entry != nil {
 			recovered = entry.runtime.Status()
 		}
-		manager.mu.Unlock()
+		fixture.manager.mu.Unlock()
 		if ready {
 			break
 		}
@@ -1051,10 +1104,10 @@ func TestManagerReconfiguresTUNWhenHeartbeatRefreshesNetworkSpec(t *testing.T) {
 			recovered.SOCKSAddress,
 		)
 	}
-	if starts.Load() != 2 {
-		t.Fatalf("transport starts = %d", starts.Load())
+	if fixture.starts.Load() != 2 {
+		t.Fatalf("transport starts = %d", fixture.starts.Load())
 	}
-	tunStarts, tunNetwork, tunBridge, _, recoveredCore := tunStarter.snapshot()
+	tunStarts, tunNetwork, tunBridge, _, recoveredCore := fixture.tunStarter.snapshot()
 	if tunStarts != 2 || recoveredCore == firstCore || tunBridge != recovered.SOCKSAddress ||
 		len(tunNetwork.PodIPs) != 1 || tunNetwork.PodIPs[0] != "10.42.7.9" || len(tunNetwork.ServiceIPs) != 0 {
 		t.Fatalf(
