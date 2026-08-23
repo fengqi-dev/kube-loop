@@ -245,6 +245,63 @@ func TestServerExecOverPodIP(t *testing.T) {
 	}
 }
 
+func TestServerTargetLifecycle(t *testing.T) {
+	server := NewServer(
+		&fakeExecutor{},
+		WithSigner(testSigner(t)),
+		WithClientIdentityPath("/tmp/id_ed25519"),
+	)
+	first, err := server.Enable(Target{
+		Context: "dev", Namespace: "zeta", Pod: "api", Container: "api", IP: "10.244.1.7",
+		Containers: []string{"api", "sidecar"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := server.Enable(Target{
+		Context: "dev", Namespace: "alpha", Pod: "worker", Container: "worker", IP: "10.244.1.8",
+		Containers: []string{"worker"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := server.List()
+	if len(items) != 2 || items[0].ID != second.ID || items[1].ID != first.ID {
+		t.Fatalf("sorted Pod SSH targets = %#v", items)
+	}
+
+	firstServer, firstPeer := net.Pipe()
+	t.Cleanup(func() { _ = firstPeer.Close() })
+	server.mu.Lock()
+	server.connections[firstServer] = first.ID
+	server.mu.Unlock()
+	if err := server.Disable(first.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := firstPeer.Read(make([]byte, 1)); err == nil {
+		t.Fatal("Disable did not close the active Pod SSH connection")
+	}
+	if err := server.Disable(first.ID); err == nil {
+		t.Fatal("repeated Disable succeeded")
+	}
+	if items := server.List(); len(items) != 1 || items[0].ID != second.ID {
+		t.Fatalf("targets after Disable = %#v", items)
+	}
+
+	secondServer, secondPeer := net.Pipe()
+	t.Cleanup(func() { _ = secondPeer.Close() })
+	server.mu.Lock()
+	server.connections[secondServer] = second.ID
+	server.mu.Unlock()
+	server.Reset()
+	if _, err := secondPeer.Read(make([]byte, 1)); err == nil {
+		t.Fatal("Reset did not close the active Pod SSH connection")
+	}
+	if items := server.List(); len(items) != 0 {
+		t.Fatalf("targets after Reset = %#v", items)
+	}
+}
+
 func TestTargetForLoginRejectsUnknownContainer(t *testing.T) {
 	target := Target{
 		Context: "dev", Namespace: "default", Pod: "api", Container: "api",
