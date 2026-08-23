@@ -165,7 +165,7 @@ func TestUpdaterRecoverClearsJournalForHealthyWorker(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	staged := filepath.Join(filepath.Dir(config.WorkerBinaryPath), "."+config.WorkerLabel+".staged")
+	staged := updater.stagedPath()
 	writeExecutable(t, staged, machOBytes("staged"))
 
 	if err := updater.Recover(t.Context()); err != nil {

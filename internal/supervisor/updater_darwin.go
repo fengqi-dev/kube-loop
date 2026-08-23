@@ -103,7 +103,7 @@ func (u *Updater) Update(
 		return response
 	}
 
-	staged := filepath.Join(filepath.Dir(u.config.WorkerBinaryPath), "."+u.config.WorkerLabel+".staged")
+	staged := u.stagedPath()
 	if err := u.stageWorker(ctx, staged, manifest, body); err != nil {
 		response.Error = err.Error()
 		return response
@@ -174,6 +174,13 @@ func (u *Updater) acquireLock() (*os.File, error) {
 		return nil, fmt.Errorf("another worker update is in progress")
 	}
 	return lock, nil
+}
+
+func (u *Updater) stagedPath() string {
+	return filepath.Join(
+		filepath.Dir(u.config.WorkerBinaryPath),
+		"."+u.config.WorkerLabel+".staged",
+	)
 }
 
 func (u *Updater) stageWorker(

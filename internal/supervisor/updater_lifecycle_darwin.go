@@ -21,10 +21,7 @@ func (u *Updater) Recover(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	staged := filepath.Join(
-		filepath.Dir(u.config.WorkerBinaryPath),
-		"."+u.config.WorkerLabel+".staged",
-	)
+	staged := u.stagedPath()
 	cleanup := func() error {
 		return errors.Join(
 			removeUpdateFile(staged),
