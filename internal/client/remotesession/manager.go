@@ -137,71 +137,6 @@ func (manager *Manager) Current(profileID string) (remote.Session, error) {
 	return current.session, nil
 }
 
-func (manager *Manager) SessionUpdates() <-chan remote.SessionUpdate {
-	return manager.updates
-}
-
-// Refresh performs an immediate heartbeat for Data Plane recovery. It returns
-// the authoritative generation and prevents a stale reconnect from replacing a
-// newer Session selected by the desktop.
-func (manager *Manager) Refresh(ctx context.Context, profileID string) (remote.Session, error) {
-	manager.mu.Lock()
-	defer manager.mu.Unlock()
-	current, ok := manager.active[profileID]
-	if !ok {
-		return remote.Session{}, errors.New("remote Session is not connected")
-	}
-	next, err := manager.gateway.HeartbeatSession(ctx, current.profile, current.session)
-	if err != nil {
-		current.lastError = err
-		manager.active[profileID] = current
-		return current.session, err
-	}
-	current.session = next
-	current.lastError = nil
-	manager.active[profileID] = current
-	manager.publishSessionUpdateLocked(profileID, next)
-	return next, nil
-}
-
-func (manager *Manager) IssueRelayTicket(
-	ctx context.Context,
-	profileID string,
-) (remote.RelayTicket, error) {
-	manager.mu.Lock()
-	current, ok := manager.active[profileID]
-	manager.mu.Unlock()
-	if !ok {
-		return remote.RelayTicket{}, errors.New("remote Session is not connected")
-	}
-	if current.lastError != nil {
-		return remote.RelayTicket{}, current.lastError
-	}
-	return manager.gateway.IssueRelayTicket(ctx, current.profile, current.session)
-}
-
-func (manager *Manager) RelayTicketSource(profileID string) func(context.Context) (remote.RelayTicket, error) {
-	manager.mu.Lock()
-	bound, ok := manager.active[profileID]
-	manager.mu.Unlock()
-	return func(ctx context.Context) (remote.RelayTicket, error) {
-		manager.mu.Lock()
-		current, active := manager.active[profileID]
-		if !ok || !active || current.session.ID != bound.session.ID ||
-			current.session.Generation != bound.session.Generation {
-			manager.mu.Unlock()
-			return remote.RelayTicket{}, errors.New("remote Session generation changed")
-		}
-		if current.lastError != nil {
-			err := current.lastError
-			manager.mu.Unlock()
-			return remote.RelayTicket{}, err
-		}
-		manager.mu.Unlock()
-		return manager.gateway.IssueRelayTicket(ctx, current.profile, current.session)
-	}
-}
-
 func (manager *Manager) Shutdown(ctx context.Context) error {
 	manager.cancel()
 	select {
@@ -225,56 +160,6 @@ func (manager *Manager) Shutdown(ctx context.Context) error {
 		delete(manager.active, profileID)
 	}
 	return result
-}
-
-func (manager *Manager) heartbeatLoop() {
-	defer close(manager.done)
-	ticker := time.NewTicker(manager.interval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-manager.ctx.Done():
-			return
-		case <-ticker.C:
-			manager.heartbeat()
-		}
-	}
-}
-
-func (manager *Manager) heartbeat() {
-	manager.mu.Lock()
-	defer manager.mu.Unlock()
-	for profileID, current := range manager.active {
-		ctx, cancel := context.WithTimeout(manager.ctx, manager.interval)
-		next, err := manager.gateway.HeartbeatSession(ctx, current.profile, current.session)
-		cancel()
-		if err != nil {
-			current.lastError = err
-			manager.active[profileID] = current
-			continue
-		}
-		current.session = next
-		current.lastError = nil
-		manager.active[profileID] = current
-		manager.publishSessionUpdateLocked(profileID, next)
-	}
-}
-
-func (manager *Manager) publishSessionUpdateLocked(profileID string, session remote.Session) {
-	update := remote.SessionUpdate{ProfileID: profileID, Session: session}
-	select {
-	case manager.updates <- update:
-		return
-	default:
-	}
-	select {
-	case <-manager.updates:
-	default:
-	}
-	select {
-	case manager.updates <- update:
-	default:
-	}
 }
 
 func isGone(err error) bool {
