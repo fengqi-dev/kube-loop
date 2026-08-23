@@ -3,11 +3,20 @@ package runtime
 import (
 	"context"
 	"errors"
+	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/fengqi-dev/kube-loop/internal/singbox"
 )
+
+type blockingRoundTripper struct{}
+
+func (blockingRoundTripper) RoundTrip(request *http.Request) (*http.Response, error) {
+	<-request.Context().Done()
+	return nil, request.Context().Err()
+}
 
 func TestStartWithPortCollisionRetry(t *testing.T) {
 	attempts := 0
@@ -81,5 +90,26 @@ func TestIsAddressAlreadyInUseRecognizesWindowsError(t *testing.T) {
 	)
 	if !isAddressAlreadyInUse(err) {
 		t.Fatalf("expected Windows port collision to be recognized: %v", err)
+	}
+}
+
+func TestWaitReadyBoundsBlockingControllerRequest(t *testing.T) {
+	runtime := &Runtime{
+		HTTPClient:    &http.Client{Transport: blockingRoundTripper{}},
+		readyTimeout:  50 * time.Millisecond,
+		readyInterval: 10 * time.Millisecond,
+	}
+	process := &Process{
+		done:              make(chan struct{}),
+		controllerAddress: "127.0.0.1:1",
+		httpClient:        runtime.HTTPClient,
+	}
+	started := time.Now()
+	err := runtime.waitReady(context.Background(), process)
+	if err == nil || !strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("waitReady error = %v", err)
+	}
+	if elapsed := time.Since(started); elapsed > 500*time.Millisecond {
+		t.Fatalf("waitReady exceeded bounded timeout: %s", elapsed)
 	}
 }

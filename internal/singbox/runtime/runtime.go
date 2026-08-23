@@ -17,13 +17,20 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/singbox"
 )
 
-const startPortCollisionAttempts = 3
+const (
+	startPortCollisionAttempts = 3
+	defaultReadyTimeout        = 30 * time.Second
+	defaultReadyInterval       = 200 * time.Millisecond
+)
 
 type Runtime struct {
 	HTTPClient          *http.Client
 	PrivilegedStart     singbox.PrivilegedStartFunc
 	PrivilegedUpdateDNS singbox.PrivilegedUpdateDNSFunc
 	PrivilegedReadLogs  singbox.PrivilegedReadLogsFunc
+
+	readyTimeout  time.Duration
+	readyInterval time.Duration
 }
 
 func (r *Runtime) Start(
@@ -218,19 +225,33 @@ func (r *Runtime) startOnce(
 func (r *Runtime) waitReady(ctx context.Context, process *Process) error {
 	// Linux auto_redirect/nftables cleanup after a previous session can delay
 	// clash API readiness beyond a tight 15s budget on busy CI runners.
-	deadline := time.NewTimer(30 * time.Second)
-	defer deadline.Stop()
-	ticker := time.NewTicker(200 * time.Millisecond)
+	timeout := r.readyTimeout
+	if timeout <= 0 {
+		timeout = defaultReadyTimeout
+	}
+	interval := r.readyInterval
+	if interval <= 0 {
+		interval = defaultReadyInterval
+	}
+	waitContext, cancelWait := context.WithTimeout(ctx, timeout)
+	defer cancelWait()
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
-		response, requestErr := process.request(ctx, "/")
+		requestContext, cancelRequest := context.WithTimeout(
+			waitContext,
+			interval,
+		)
+		response, requestErr := process.request(requestContext, "/")
 		if requestErr == nil {
 			_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 1<<20))
 			_ = response.Body.Close()
 			if response.StatusCode == http.StatusOK || response.StatusCode == http.StatusNotFound {
+				cancelRequest()
 				return nil
 			}
 		}
+		cancelRequest()
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -239,7 +260,10 @@ func (r *Runtime) waitReady(ctx context.Context, process *Process) error {
 				return err
 			}
 			return errors.New("sing-box exited before becoming ready")
-		case <-deadline.C:
+		case <-waitContext.Done():
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			return errors.New("timed out waiting for sing-box controller")
 		case <-ticker.C:
 		}
