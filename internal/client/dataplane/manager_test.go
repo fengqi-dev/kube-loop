@@ -377,8 +377,26 @@ func TestManagerOpenTrafficStreamRequiresMatchingActiveRuntimeSession(t *testing
 	}
 }
 
-//nolint:gocyclo // The lifecycle assertions intentionally stay in one scenario to verify ordering and reuse.
 func TestManagerReusesSessionAndReplacesChangedSession(t *testing.T) {
+	fixture := newManagerLifecycleFixture(t)
+	firstStatus := fixture.connectAndAssertReuse(t)
+	core := fixture.startAndAssertTUN(t, firstStatus)
+	fixture.updateAndAssertNetworkSettings(t, core)
+	fixture.stopAndReplace(t, firstStatus)
+	fixture.shutdownAndAssertTickets(t)
+}
+
+type managerLifecycleFixture struct {
+	manager    *Manager
+	tickets    *testTickets
+	tunStarter *testTUNStarter
+	profile    profile.Profile
+	first      remote.Session
+	starts     int
+}
+
+func newManagerLifecycleFixture(t *testing.T) *managerLifecycleFixture {
+	t.Helper()
 	spec, err := networkspec.Normalize(networkspec.Spec{
 		PodCIDRs: []string{"10.42.0.0/16"}, PodIPs: []string{"10.43.7.9"},
 	})
@@ -386,10 +404,20 @@ func TestManagerReusesSessionAndReplacesChangedSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	hash, _ := networkspec.Hash(spec)
-	starts := 0
-	tunStarter := &testTUNStarter{}
+	fixture := &managerLifecycleFixture{
+		tickets: &testTickets{}, tunStarter: &testTUNStarter{},
+		profile: profile.Profile{
+			ID: "service", BaseURL: "https://gateway.example.test", TunnelPath: defaultTunnelPath,
+			DNSNamespace: "dns-scope",
+			HostAliases:  []profile.HostAlias{{Domain: "api.example.test", IP: "10.0.0.8"}},
+		},
+		first: remote.Session{
+			ID: "ec0b67a2-e84c-4fe7-a0c5-810f210157b5", Namespace: "payments",
+			State: dataplaneSessionActive, Generation: 1, NetworkSpec: spec, NetworkSpecHash: hash,
+		},
+	}
 	config := Config{
-		TUNStarter: tunStarter,
+		TUNStarter: fixture.tunStarter,
 		startForwarder: func(ctx context.Context, clientConfig websocketmux.ClientConfig) (streamForwarder, error) {
 			if _, err := clientConfig.TokenSource(ctx); err != nil {
 				return nil, err
@@ -398,68 +426,73 @@ func TestManagerReusesSessionAndReplacesChangedSession(t *testing.T) {
 			if err != nil {
 				return nil, err
 			}
-			starts++
+			fixture.starts++
 			go acceptTestControl(listener)
 			return &testForwarder{Listener: listener}, nil
 		},
 		listenSOCKS: func(_ context.Context, _, _ string, _ tunnel.SessionToken) (localBridge, error) {
-			return &testBridge{address: testAddress("127.0.0.1:" + strconv.Itoa(43000+starts))}, nil
+			return &testBridge{address: testAddress("127.0.0.1:" + strconv.Itoa(43000+fixture.starts))}, nil
 		},
 	}
-	tickets := &testTickets{}
-	manager, err := NewManager(tickets, config)
+	fixture.manager, err = NewManager(fixture.tickets, config)
 	if err != nil {
 		t.Fatal(err)
 	}
-	serverProfile := profile.Profile{
-		ID: "service", BaseURL: "https://gateway.example.test", TunnelPath: defaultTunnelPath,
-		DNSNamespace: "dns-scope", HostAliases: []profile.HostAlias{{Domain: "api.example.test", IP: "10.0.0.8"}},
-	}
-	first := remote.Session{
-		ID:              "ec0b67a2-e84c-4fe7-a0c5-810f210157b5",
-		Namespace:       "payments",
-		State:           dataplaneSessionActive,
-		Generation:      1,
-		NetworkSpec:     spec,
-		NetworkSpecHash: hash,
-	}
-	tickets.session = first
-	firstStatus, err := manager.Connect(context.Background(), serverProfile, first)
+	fixture.tickets.session = fixture.first
+	return fixture
+}
+
+func (fixture *managerLifecycleFixture) connectAndAssertReuse(t *testing.T) Status {
+	t.Helper()
+	firstStatus, err := fixture.manager.Connect(context.Background(), fixture.profile, fixture.first)
 	if err != nil {
 		t.Fatal(err)
 	}
-	reused, err := manager.Connect(context.Background(), serverProfile, first)
+	reused, err := fixture.manager.Connect(context.Background(), fixture.profile, fixture.first)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if reused.SOCKSAddress != firstStatus.SOCKSAddress || starts != 1 {
-		t.Fatalf("reused = %#v, starts = %d", reused, starts)
+	if reused.SOCKSAddress != firstStatus.SOCKSAddress || fixture.starts != 1 {
+		t.Fatalf("reused = %#v, starts = %d", reused, fixture.starts)
 	}
-	tunStatus, err := manager.StartTUN(context.Background(), serverProfile.ID)
+	return firstStatus
+}
+
+func (fixture *managerLifecycleFixture) startAndAssertTUN(t *testing.T, firstStatus Status) *testCore {
+	t.Helper()
+	tunStatus, err := fixture.manager.StartTUN(context.Background(), fixture.profile.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	tunStarts, tunNetwork, tunBridge, tunNamespace, core := tunStarter.snapshot()
+	tunStarts, tunNetwork, tunBridge, tunNamespace, core := fixture.tunStarter.snapshot()
 	if tunStatus.Mode != ModeTUN || tunStarts != 1 || tunBridge != firstStatus.SOCKSAddress ||
-		tunNamespace != "dns-scope" || len(tunStarter.hosts) != 1 || tunStarter.hosts[0].Domain != "api.example.test" ||
+		tunNamespace != "dns-scope" || len(fixture.tunStarter.hosts) != 1 ||
+		fixture.tunStarter.hosts[0].Domain != "api.example.test" ||
 		len(tunNetwork.PodCIDRs) != 1 ||
 		len(tunNetwork.PodIPs) != 1 || tunNetwork.PodIPs[0] != "10.43.7.9" {
-		t.Fatalf("TUN status = %#v, starter = %#v", tunStatus, tunStarter)
+		t.Fatalf("TUN status = %#v, starter = %#v", tunStatus, fixture.tunStarter)
 	}
-	metrics, err := manager.Metrics(context.Background(), serverProfile.ID)
+	metrics, err := fixture.manager.Metrics(context.Background(), fixture.profile.ID)
 	if err != nil || metrics.ActiveConnections != 2 {
 		t.Fatalf("metrics = %#v, %v", metrics, err)
 	}
-	logs, err := manager.Logs(context.Background(), serverProfile.ID)
+	logs, err := fixture.manager.Logs(context.Background(), fixture.profile.ID)
 	if err != nil || len(logs) != 2 || !strings.Contains(logs[0], "[SOCKS] listening on ") || logs[1] != "[TUN] ready" {
 		t.Fatalf("logs = %#v, %v", logs, err)
 	}
-	if err := manager.UpdateDNSNamespace(context.Background(), serverProfile.ID, "observability"); err != nil {
+	return core
+}
+
+func (fixture *managerLifecycleFixture) updateAndAssertNetworkSettings(t *testing.T, core *testCore) {
+	t.Helper()
+	if err := fixture.manager.UpdateDNSNamespace(
+		context.Background(), fixture.profile.ID, "observability",
+	); err != nil {
 		t.Fatal(err)
 	}
-	if err := manager.UpdateHostAliases(
+	if err := fixture.manager.UpdateHostAliases(
 		context.Background(),
-		serverProfile.ID,
+		fixture.profile.ID,
 		[]singbox.HostAlias{{Domain: "db.example.test", IP: "10.0.0.9"}},
 	); err != nil {
 		t.Fatal(err)
@@ -469,31 +502,40 @@ func TestManagerReusesSessionAndReplacesChangedSession(t *testing.T) {
 		t.Fatalf("runtime network settings = namespace=%q aliases=%#v", core.dnsNamespace, core.hosts)
 	}
 	core.mu.Unlock()
-	if _, err := manager.StartTUN(context.Background(), serverProfile.ID); err != nil {
+	if _, err := fixture.manager.StartTUN(context.Background(), fixture.profile.ID); err != nil {
 		t.Fatalf("TUN was not reused: error=%v", err)
 	}
-	tunStarts, _, _, _, _ = tunStarter.snapshot()
+	tunStarts, _, _, _, _ := fixture.tunStarter.snapshot()
 	if tunStarts != 1 {
 		t.Fatalf("TUN was not reused: starts=%d", tunStarts)
 	}
-	socksStatus, err := manager.StopTUN(serverProfile.ID)
+}
+
+func (fixture *managerLifecycleFixture) stopAndReplace(t *testing.T, firstStatus Status) {
+	t.Helper()
+	socksStatus, err := fixture.manager.StopTUN(fixture.profile.ID)
 	if err != nil || socksStatus.Mode != ModeSOCKS {
 		t.Fatalf("stop TUN = %#v, %v", socksStatus, err)
 	}
-	second := first
+	second := fixture.first
 	second.ID = "be75e37d-4c2f-48f2-a6a3-3fe7ef01130d"
-	secondStatus, err := manager.Connect(context.Background(), serverProfile, second)
+	secondStatus, err := fixture.manager.Connect(context.Background(), fixture.profile, second)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if secondStatus.SessionID != second.ID || secondStatus.SOCKSAddress == firstStatus.SOCKSAddress || starts != 2 {
-		t.Fatalf("replacement = %#v, starts = %d", secondStatus, starts)
+	if secondStatus.SessionID != second.ID || secondStatus.SOCKSAddress == firstStatus.SOCKSAddress ||
+		fixture.starts != 2 {
+		t.Fatalf("replacement = %#v, starts = %d", secondStatus, fixture.starts)
 	}
-	if err := manager.Shutdown(); err != nil {
+}
+
+func (fixture *managerLifecycleFixture) shutdownAndAssertTickets(t *testing.T) {
+	t.Helper()
+	if err := fixture.manager.Shutdown(); err != nil {
 		t.Fatal(err)
 	}
-	if tickets.calls != 2 {
-		t.Fatalf("RelayTicket calls = %d", tickets.calls)
+	if fixture.tickets.calls != 2 {
+		t.Fatalf("RelayTicket calls = %d", fixture.tickets.calls)
 	}
 }
 
