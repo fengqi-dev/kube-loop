@@ -36,6 +36,13 @@ type RuntimeRegistry interface {
 	) (context.Context, func(), error)
 }
 
+type checker struct {
+	store     Store
+	identity  controlplaneapi.Identity
+	sessionID string
+	config    Config
+}
+
 func RuntimeFrom(value any) RuntimeRegistry {
 	runtime, _ := value.(RuntimeRegistry)
 	return runtime
@@ -112,6 +119,9 @@ func watch(
 	sessionID string,
 	config Config,
 ) {
+	lease := checker{
+		store: store, identity: identity, sessionID: sessionID, config: config,
+	}
 	periodic.RunAfter(
 		ctx,
 		config.CheckInterval,
@@ -120,55 +130,83 @@ func watch(
 				ctx,
 				config.CheckInterval,
 			)
-			valid := true
-			if config.Authorizer != nil {
-				valid = config.Authorizer.Authorize(
-					checkContext,
-					authorization.Subject{
-						ID:       identity.Subject,
-						Provider: identity.Provider,
-						Groups:   append([]string(nil), identity.Groups...),
-					},
-					config.Authorization,
-				).Allowed
-			}
-			if identity.AuthorizationID != "" {
-				identityID, deviceID, err := store.OAuthSessions().
-					RequestOwner(checkContext, identity.AuthorizationID)
-				active, activeErr := store.OAuthSessions().
-					RequestActive(checkContext, identity.AuthorizationID, config.Now().UTC())
-				now := config.Now().UTC()
-				valid = err == nil && activeErr == nil && active &&
-					identityID == identity.Subject &&
-					deviceID == identity.DeviceID &&
-					!now.IsZero()
-			}
-			if valid {
-				storedSession, err := store.Sessions().
-					GetByID(checkContext, sessionID)
-				now := config.Now().UTC()
-				valid = err == nil &&
-					storedSession.IdentityID == identity.Subject &&
-					storedSession.DeviceID == identity.DeviceID &&
-					storedSession.State == statusActive &&
-					storedSession.ExpiresAt.After(now)
-			}
-			if valid && config.HeartbeatTask {
-				task, err := store.Tasks().GetByID(checkContext, config.TaskID)
-				valid = err == nil && task.SessionID == sessionID &&
-					task.IdentityID == identity.Subject &&
-					task.State.Owned()
-				if valid {
-					err = store.Tasks().UpdateState(
-						checkContext, task.ID, task.State, task.State, task.Result, config.Now().UTC(),
-					)
-					valid = err == nil || errors.Is(err, storage.ErrConflict)
-				}
-			}
+			valid := lease.valid(checkContext)
 			checkCancel()
 			if !valid {
 				cancel()
 			}
 		},
 	)
+}
+
+func (lease checker) valid(ctx context.Context) bool {
+	valid := lease.authorized(ctx)
+	if lease.identity.AuthorizationID != "" {
+		valid = lease.grantActive(ctx)
+	}
+	return valid && lease.sessionActive(ctx) &&
+		lease.taskOwned(ctx)
+}
+
+func (lease checker) authorized(ctx context.Context) bool {
+	if lease.config.Authorizer == nil {
+		return true
+	}
+	return lease.config.Authorizer.Authorize(
+		ctx,
+		authorization.Subject{
+			ID:       lease.identity.Subject,
+			Provider: lease.identity.Provider,
+			Groups:   append([]string(nil), lease.identity.Groups...),
+		},
+		lease.config.Authorization,
+	).Allowed
+}
+
+func (lease checker) grantActive(ctx context.Context) bool {
+	if lease.identity.AuthorizationID == "" {
+		return true
+	}
+	identityID, deviceID, err := lease.store.OAuthSessions().
+		RequestOwner(ctx, lease.identity.AuthorizationID)
+	active, activeErr := lease.store.OAuthSessions().RequestActive(
+		ctx,
+		lease.identity.AuthorizationID,
+		lease.config.Now().UTC(),
+	)
+	now := lease.config.Now().UTC()
+	return err == nil && activeErr == nil && active &&
+		identityID == lease.identity.Subject &&
+		deviceID == lease.identity.DeviceID &&
+		!now.IsZero()
+}
+
+func (lease checker) sessionActive(ctx context.Context) bool {
+	stored, err := lease.store.Sessions().GetByID(ctx, lease.sessionID)
+	return err == nil &&
+		stored.IdentityID == lease.identity.Subject &&
+		stored.DeviceID == lease.identity.DeviceID &&
+		stored.State == statusActive &&
+		stored.ExpiresAt.After(lease.config.Now().UTC())
+}
+
+func (lease checker) taskOwned(ctx context.Context) bool {
+	if !lease.config.HeartbeatTask {
+		return true
+	}
+	task, err := lease.store.Tasks().GetByID(ctx, lease.config.TaskID)
+	if err != nil || task.SessionID != lease.sessionID ||
+		task.IdentityID != lease.identity.Subject ||
+		!task.State.Owned() {
+		return false
+	}
+	err = lease.store.Tasks().UpdateState(
+		ctx,
+		task.ID,
+		task.State,
+		task.State,
+		task.Result,
+		lease.config.Now().UTC(),
+	)
+	return err == nil || errors.Is(err, storage.ErrConflict)
 }
