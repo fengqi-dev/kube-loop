@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"context"
 	"errors"
 	"net"
 	"slices"
@@ -46,6 +47,57 @@ func TestDNSSearchProxyUDPAndTCP(t *testing.T) {
 	}
 	if len(resp.Answer) == 0 {
 		t.Fatalf("tcp empty answer: %#v", resp)
+	}
+}
+
+func TestDNSSearchProxyStartupClosesUDPWhenTCPBindFails(t *testing.T) {
+	tcpListener, err := net.Listen("tcp", net.JoinHostPort(singbox.DefaultDNSListen, "0"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tcpListener.Close() }()
+	port := tcpListener.Addr().(*net.TCPAddr).Port
+	address := net.JoinHostPort(singbox.DefaultDNSListen, strconv.Itoa(port))
+
+	proxy, err := startDNSSearchProxy(
+		context.Background(),
+		singbox.DefaultDNSListen,
+		port,
+		singbox.DefaultDNSListen,
+		53,
+		nil,
+		"cluster.local",
+	)
+	if err == nil {
+		_ = proxy.Close()
+		t.Fatal("DNS search proxy started with an occupied TCP port")
+	}
+
+	packetConnection, listenErr := net.ListenPacket("udp", address)
+	if listenErr != nil {
+		t.Fatalf("UDP listener leaked after TCP bind failure: %v", listenErr)
+	}
+	_ = packetConnection.Close()
+}
+
+func TestDNSSearchProxyCanCloseImmediatelyAfterStart(t *testing.T) {
+	for range 20 {
+		proxy, publicPort := startTestDNSSearchProxy(t, 53, nil, "cluster.local")
+		if err := proxy.Close(); err != nil {
+			t.Fatal(err)
+		}
+		address := net.JoinHostPort(singbox.DefaultDNSListen, strconv.Itoa(publicPort))
+		tcpListener, err := net.Listen("tcp", address)
+		if err != nil {
+			t.Fatalf("TCP listener leaked after immediate close: %v", err)
+		}
+		packetConnection, err := net.ListenPacket("udp", address)
+		if err != nil {
+			_ = tcpListener.Close()
+			t.Fatalf("UDP listener leaked after immediate close: %v", err)
+		}
+		_ = packetConnection.Close()
+		_ = tcpListener.Close()
 	}
 }
 
@@ -271,6 +323,7 @@ func startTestDNSSearchProxy(
 		publicPort := reservation.Addr().(*net.TCPAddr).Port
 		_ = reservation.Close()
 		proxy, err := startDNSSearchProxy(
+			context.Background(),
 			singbox.DefaultDNSListen,
 			publicPort,
 			singbox.DefaultDNSListen,

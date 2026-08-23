@@ -179,6 +179,7 @@ func (r *Runtime) startOnce(
 	searchDomains := meta.Search
 	resolverDomains := meta.Domains
 	dnsProxy, err := startDNSSearchProxy(
+		ctx,
 		singbox.DefaultDNSListen, publicDNSPort, singbox.DefaultDNSListen, internalDNSPort,
 		searchDomains, clusterDomains...,
 	)

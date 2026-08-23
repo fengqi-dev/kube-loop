@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"slices"
@@ -46,6 +47,7 @@ type dnsSearchProxy struct {
 }
 
 func startDNSSearchProxy(
+	ctx context.Context,
 	publicHost string, publicPort int, upstreamHost string, upstreamPort int,
 	search []string, clusterDomains ...string,
 ) (*dnsSearchProxy, error) {
@@ -69,26 +71,47 @@ func startDNSSearchProxy(
 	}
 	addr := net.JoinHostPort(publicHost, strconv.Itoa(publicPort))
 	handler := dns.HandlerFunc(proxy.serveDNS)
-	proxy.publicUDP = &dns.Server{Addr: addr, Net: networkUDP, Handler: handler, UDPSize: 1232}
-	proxy.publicTCP = &dns.Server{Addr: addr, Net: networkTCP, Handler: handler}
+	var listenConfig net.ListenConfig
+	packetConnection, err := listenConfig.ListenPacket(ctx, networkUDP, addr)
+	if err != nil {
+		return nil, fmt.Errorf("listen UDP DNS search proxy on %s: %w", addr, err)
+	}
+	tcpListener, err := listenConfig.Listen(ctx, networkTCP, addr)
+	if err != nil {
+		_ = packetConnection.Close()
+		return nil, fmt.Errorf("listen TCP DNS search proxy on %s: %w", addr, err)
+	}
+	proxy.publicUDP = &dns.Server{
+		Addr: addr, Net: networkUDP, Handler: handler, UDPSize: 1232,
+		PacketConn: packetConnection,
+	}
+	proxy.publicTCP = &dns.Server{
+		Addr: addr, Net: networkTCP, Handler: handler,
+		Listener: tcpListener,
+	}
 
+	started := make(chan struct{}, 2)
+	proxy.publicUDP.NotifyStartedFunc = func() { started <- struct{}{} }
+	proxy.publicTCP.NotifyStartedFunc = func() { started <- struct{}{} }
 	errCh := make(chan error, 2)
 	proxy.serveWG.Add(2)
 	go func() {
 		defer proxy.serveWG.Done()
-		errCh <- proxy.publicUDP.ListenAndServe()
+		errCh <- proxy.publicUDP.ActivateAndServe()
 	}()
 	go func() {
 		defer proxy.serveWG.Done()
-		errCh <- proxy.publicTCP.ListenAndServe()
+		errCh <- proxy.publicTCP.ActivateAndServe()
 	}()
-	select {
-	case err := <-errCh:
-		if err != nil {
-			_ = proxy.Close()
-			return nil, fmt.Errorf("listen DNS search proxy on %s: %w", addr, err)
+	for range 2 {
+		select {
+		case <-started:
+		case serveErr := <-errCh:
+			_ = packetConnection.Close()
+			_ = tcpListener.Close()
+			proxy.serveWG.Wait()
+			return nil, fmt.Errorf("activate DNS search proxy on %s: %w", addr, serveErr)
 		}
-	case <-time.After(150 * time.Millisecond):
 	}
 	return proxy, nil
 }
