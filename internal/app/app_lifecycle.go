@@ -76,61 +76,65 @@ func (a *App) shutdown(ctx context.Context) {
 	if err := waitForBackgroundShutdown(shutdownContext, &a.backgroundWG); err != nil {
 		log.Printf("application background shutdown: %v", err)
 	}
-	a.stopServerInventoryWatch("")
+	runShutdownAction(shutdownContext, "Server inventory Watch", func() error {
+		a.stopServerInventoryWatch("")
+		return nil
+	})
 	if a.mcp != nil {
-		if err := a.mcp.Stop(); err != nil {
-			log.Printf("MCP shutdown: %v", err)
-		}
+		runShutdownAction(shutdownContext, "MCP", a.mcp.Stop)
 	}
 	if a.remoteFiles != nil {
-		if err := a.remoteFiles.Shutdown(); err != nil {
-			log.Printf("remote file transfer shutdown: %v", err)
-		}
+		runShutdownAction(shutdownContext, "remote file transfer", a.remoteFiles.Shutdown)
 	}
 	if a.remoteExecs != nil {
-		if err := a.remoteExecs.Shutdown(); err != nil {
-			log.Printf("remote Pod exec shutdown: %v", err)
-		}
+		runShutdownAction(shutdownContext, "remote Pod exec", a.remoteExecs.Shutdown)
 	}
 	if a.remoteSSH != nil {
-		if err := a.remoteSSH.Shutdown(); err != nil {
-			log.Printf("remote Pod SSH shutdown: %v", err)
-		}
+		runShutdownAction(shutdownContext, "remote Pod SSH", a.remoteSSH.Shutdown)
 	}
 	if a.remoteForwards != nil {
-		if err := a.remoteForwards.Shutdown(shutdownContext); err != nil {
-			log.Printf("remote Port Forward shutdown: %v", err)
-		}
+		runShutdownAction(shutdownContext, "remote Port Forward", func() error {
+			return a.remoteForwards.Shutdown(shutdownContext)
+		})
 	}
 	if a.remoteExchanges != nil {
-		if err := a.remoteExchanges.Shutdown(shutdownContext); err != nil {
-			log.Printf("remote Exchange shutdown: %v", err)
-		}
+		runShutdownAction(shutdownContext, "remote Exchange", func() error {
+			return a.remoteExchanges.Shutdown(shutdownContext)
+		})
 	}
 	if a.remoteMirrors != nil {
-		if err := a.remoteMirrors.Shutdown(shutdownContext); err != nil {
-			log.Printf("remote Mirror shutdown: %v", err)
-		}
+		runShutdownAction(shutdownContext, "remote Mirror", func() error {
+			return a.remoteMirrors.Shutdown(shutdownContext)
+		})
 	}
 	if a.remotePreviews != nil {
-		if err := a.remotePreviews.Shutdown(shutdownContext); err != nil {
-			log.Printf("remote Preview shutdown: %v", err)
-		}
+		runShutdownAction(shutdownContext, "remote Preview", func() error {
+			return a.remotePreviews.Shutdown(shutdownContext)
+		})
 	}
 	if a.dataPlanes != nil {
-		if err := a.dataPlanes.Shutdown(); err != nil {
-			log.Printf("data plane shutdown: %v", err)
-		}
+		runShutdownAction(shutdownContext, "Data Plane", a.dataPlanes.Shutdown)
 	}
 	if a.remoteSessions != nil {
-		if err := a.remoteSessions.Shutdown(shutdownContext); err != nil {
-			log.Printf("remote session shutdown: %v", err)
-		}
+		runShutdownAction(shutdownContext, "remote Session", func() error {
+			return a.remoteSessions.Shutdown(shutdownContext)
+		})
 	}
 	if a.trafficInspectionOutput != nil {
-		if err := a.trafficInspectionOutput.Close(); err != nil {
-			log.Printf("traffic inspection output shutdown: %v", err)
+		runShutdownAction(shutdownContext, "traffic inspection output", a.trafficInspectionOutput.Close)
+	}
+}
+
+func runShutdownAction(ctx context.Context, name string, action func() error) {
+	result := make(chan error, 1)
+	go func() { result <- action() }()
+	select {
+	case err := <-result:
+		if err != nil {
+			log.Printf("%s shutdown: %v", name, err)
 		}
+	case <-ctx.Done():
+		log.Printf("%s shutdown: %v", name, ctx.Err())
 	}
 }
 

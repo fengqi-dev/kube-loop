@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -93,4 +94,32 @@ func TestShutdownBoundsBackgroundCleanupWait(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("shutdown ignored the background cleanup deadline")
 	}
+}
+
+func TestRunShutdownActionReturnsAndHonorsDeadline(t *testing.T) {
+	t.Run("completed", func(t *testing.T) {
+		runShutdownAction(t.Context(), "test", func() error {
+			return errors.New("close failed")
+		})
+	})
+
+	t.Run("deadline", func(t *testing.T) {
+		release := make(chan struct{})
+		t.Cleanup(func() { close(release) })
+		ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
+		defer cancel()
+		stopped := make(chan struct{})
+		go func() {
+			runShutdownAction(ctx, "test", func() error {
+				<-release
+				return nil
+			})
+			close(stopped)
+		}()
+		select {
+		case <-stopped:
+		case <-time.After(time.Second):
+			t.Fatal("shutdown action ignored its deadline")
+		}
+	})
 }
