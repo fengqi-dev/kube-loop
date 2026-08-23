@@ -3,25 +3,16 @@ package app
 import (
 	"context"
 	"crypto/tls"
-	"errors"
 	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 
-	"github.com/wailsapp/wails/v2/pkg/runtime"
-
 	"github.com/fengqi-dev/kube-loop/internal/authconfig"
-	clientauth "github.com/fengqi-dev/kube-loop/internal/client/auth"
 	"github.com/fengqi-dev/kube-loop/internal/client/credentials"
-	clientdataplane "github.com/fengqi-dev/kube-loop/internal/client/dataplane"
 	clientdiscovery "github.com/fengqi-dev/kube-loop/internal/client/discovery"
-	clientexec "github.com/fengqi-dev/kube-loop/internal/client/exec"
-	clientfiletransfer "github.com/fengqi-dev/kube-loop/internal/client/filetransfer"
 	clientprofile "github.com/fengqi-dev/kube-loop/internal/client/profile"
-	clientremote "github.com/fengqi-dev/kube-loop/internal/client/remote"
-	clientremotesession "github.com/fengqi-dev/kube-loop/internal/client/remotesession"
 	"github.com/fengqi-dev/kube-loop/internal/helper"
 	"github.com/fengqi-dev/kube-loop/internal/supervisor"
 	"github.com/fengqi-dev/kube-loop/internal/trafficinspect"
@@ -75,7 +66,6 @@ func newApp(version string, embeddedHelperFiles fs.FS, dependencies appDependenc
 		profilePath = filepath.Join(layout.ConfigDir(), "servers.json")
 	}
 	profileStore, profileErr := clientprofile.Open(profilePath)
-	transferStatePath := filepath.Join(layout.StateDir(), "transfers.json")
 	trafficInspectionSettingsPath := filepath.Join(layout.ConfigDir(), "traffic-inspection.json")
 	trafficInspectionSettings, trafficInspectionSettingsErr := trafficinspect.NewSettingsStore(
 		trafficInspectionSettingsPath,
@@ -152,84 +142,9 @@ func newApp(version string, embeddedHelperFiles fs.FS, dependencies appDependenc
 	if developmentTLSErr != nil {
 		application.appendLog("WARN", "Development Gateway CA unavailable: "+developmentTLSErr.Error())
 	}
-	application.auth = clientauth.New(clientauth.Config{
-		HTTPClient: dependencies.httpClient,
-		OpenBrowser: func(target string) error {
-			if application.ctx == nil {
-				return errors.New("application is not ready")
-			}
-			runtime.BrowserOpenURL(application.ctx, target)
-			return nil
-		},
-		BrowserCallback: func() {
-			if application.ctx == nil {
-				return
-			}
-			runtime.WindowUnminimise(application.ctx)
-			runtime.Show(application.ctx)
-		},
-	})
-	remoteClient, remoteErr := clientremote.New(
-		application.credentials, application.auth, clientremote.Config{HTTPClient: dependencies.httpClient},
-	)
-	if remoteErr != nil {
-		application.appendLog("ERROR", "Remote Cluster Backend unavailable: "+remoteErr.Error())
+	if !configureRemoteRuntime(application, layout, version, developmentTLSConfig, dependencies) {
 		return application
 	}
-	application.remote = remoteClient
-
-	remoteFiles, fileErr := clientfiletransfer.NewManager(remoteClient, clientfiletransfer.Config{
-		StatePath: transferStatePath,
-		OnEvent: func(task clientfiletransfer.Task) {
-			if application.ctx != nil {
-				runtime.EventsEmit(application.ctx, "server-file-transfer:event", task)
-			}
-		},
-	})
-	if fileErr != nil {
-		application.appendLog("ERROR", "file transfer manager unavailable: "+fileErr.Error())
-	} else {
-		application.remoteFiles = remoteFiles
-	}
-
-	remoteExecs, execErr := clientexec.NewManager(remoteClient, clientexec.ManagerConfig{
-		OnEvent: func(event clientexec.Event) {
-			if application.ctx != nil {
-				runtime.EventsEmit(application.ctx, "server-exec:event", event)
-			}
-		},
-	})
-	if execErr != nil {
-		application.appendLog("ERROR", "Pod exec manager unavailable: "+execErr.Error())
-	} else {
-		application.remoteExecs = remoteExecs
-	}
-
-	remoteSessions, sessionErr := clientremotesession.New(remoteClient, clientremotesession.Config{})
-	if sessionErr != nil {
-		application.appendLog("ERROR", "Remote Session Manager unavailable: "+sessionErr.Error())
-		return application
-	}
-	application.remoteSessions = remoteSessions
-	dataPlanes, dataPlaneErr := clientdataplane.NewManager(remoteSessions, clientdataplane.Config{
-		ClientVersion: version, TLSConfig: developmentTLSConfig,
-		TUNStarter: NewSingboxRuntime(
-			application.appendLog,
-			application.installTrafficInspectionTrust,
-		),
-		TrafficInspection: dependencies.trafficInspection,
-		OnStatus: func(event clientdataplane.StatusEvent) {
-			if application.ctx != nil {
-				runtime.EventsEmit(application.ctx, "dataplane:status", event)
-			}
-		},
-	})
-	if dataPlaneErr != nil {
-		application.appendLog("ERROR", "Data Plane Manager unavailable: "+dataPlaneErr.Error())
-		return application
-	}
-	application.dataPlanes = dataPlanes
-	configureRemoteTaskManagers(application, layout, remoteClient, remoteSessions, dataPlanes)
 
 	configureMCP(application, layout, version)
 	return application
