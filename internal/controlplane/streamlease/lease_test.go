@@ -3,6 +3,7 @@ package streamlease
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"path/filepath"
 	"sync/atomic"
 	"testing"
@@ -10,11 +11,23 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/authorization"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/sessionapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/remotetask"
 )
+
+type denyingAuthorizer struct{}
+
+func (denyingAuthorizer) Authorize(
+	context.Context,
+	authorization.Subject,
+	authorization.Request,
+) authorization.Decision {
+	return authorization.Decision{}
+}
 
 func TestLeaseUsesEarliestAccessAndSessionExpiry(t *testing.T) {
 	stateStore, identityID, sessionID, now := createLeaseStore(t)
@@ -219,6 +232,79 @@ func TestLeaseTerminatesAfterSessionStops(t *testing.T) {
 	waitForCancellation(ctx, t, "stopped Session")
 }
 
+func TestLeaseTerminatesAfterAuthorizationIsDenied(t *testing.T) {
+	stateStore, identityID, sessionID, now := createLeaseStore(t)
+	defer func() { _ = stateStore.Close() }()
+	ctx, cancel, err := Start(
+		context.Background(),
+		stateStore,
+		controlplaneapi.Identity{
+			Subject: identityID, DeviceID: "device", Groups: []string{"developers"},
+		},
+		sessionapi.ActiveSession{ID: sessionID, ExpiresAt: now.Add(time.Hour)},
+		Config{
+			CheckInterval: 10 * time.Millisecond,
+			Authorizer:    denyingAuthorizer{},
+			Authorization: authorization.Request{
+				Operation: "pods.exec", Namespace: "development",
+			},
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cancel()
+	waitForCancellation(ctx, t, "denied authorization")
+}
+
+func TestLeaseHeartbeatsOwnedTaskAndStopsWithOwnership(t *testing.T) {
+	stateStore, identityID, sessionID, now := createLeaseStore(t)
+	defer func() { _ = stateStore.Close() }()
+	task := storage.Task{
+		ID:             uuid.NewString(),
+		IdentityID:     identityID,
+		SessionID:      sessionID,
+		Type:           "pod-exec",
+		State:          remotetask.Running,
+		Spec:           json.RawMessage(`{}`),
+		Result:         json.RawMessage(`{}`),
+		IdempotencyKey: uuid.NewString(),
+		CreatedAt:      now.Add(-time.Minute),
+		UpdatedAt:      now.Add(-time.Minute),
+	}
+	if err := stateStore.Tasks().Create(context.Background(), task); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel, err := Start(
+		context.Background(),
+		stateStore,
+		controlplaneapi.Identity{Subject: identityID, DeviceID: "device"},
+		sessionapi.ActiveSession{ID: sessionID, ExpiresAt: now.Add(time.Hour)},
+		Config{
+			CheckInterval: 10 * time.Millisecond,
+			HeartbeatTask: true,
+			TaskID:        task.ID,
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cancel()
+
+	heartbeat := waitForTaskUpdate(t, stateStore, task.ID, task.UpdatedAt)
+	if err := stateStore.Tasks().UpdateState(
+		context.Background(),
+		task.ID,
+		remotetask.Running,
+		remotetask.Stopped,
+		heartbeat.Result,
+		time.Now().UTC(),
+	); err != nil {
+		t.Fatal(err)
+	}
+	waitForCancellation(ctx, t, "terminal Task ownership")
+}
+
 func createLeaseStore(
 	t *testing.T,
 ) (*storage.Store, string, string, time.Time) {
@@ -264,4 +350,26 @@ func waitForCancellation(ctx context.Context, t *testing.T, reason string) {
 	case <-time.After(time.Second):
 		t.Fatalf("%s did not terminate the lease", reason)
 	}
+}
+
+func waitForTaskUpdate(
+	t *testing.T,
+	stateStore *storage.Store,
+	taskID string,
+	previous time.Time,
+) storage.Task {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		task, err := stateStore.Tasks().GetByID(context.Background(), taskID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if task.UpdatedAt.After(previous) {
+			return task
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("Task owner heartbeat did not advance")
+	return storage.Task{}
 }
