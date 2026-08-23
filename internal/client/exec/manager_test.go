@@ -51,6 +51,7 @@ func (client *blockingStreamClient) unblock() {
 
 func TestManagerRoutesOutputInputResizeAndExitByProfileAndTask(t *testing.T) {
 	input := make(chan execstream.Frame, 2)
+	clientClosed := make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		connection, err := websocket.Accept(writer, request, nil)
 		if err != nil {
@@ -61,6 +62,7 @@ func TestManagerRoutesOutputInputResizeAndExitByProfileAndTask(t *testing.T) {
 		for range 2 {
 			_, encoded, readErr := connection.Read(request.Context())
 			if readErr != nil {
+				close(clientClosed)
 				t.Error(readErr)
 				return
 			}
@@ -87,14 +89,21 @@ func TestManagerRoutesOutputInputResizeAndExitByProfileAndTask(t *testing.T) {
 		t.Fatal(err)
 	}
 	serverProfile := profile.Profile{ID: "server"}
+	startContext, cancelStart := context.WithCancel(context.Background())
 	task, err := manager.Start(
-		context.Background(),
+		startContext,
 		serverProfile,
 		remote.Session{ID: "session", Namespace: "development", State: "active"},
 		remote.ExecSpec{Pod: "api-0", Command: []string{"/bin/sh"}, TTY: true},
 	)
 	if err != nil {
 		t.Fatal(err)
+	}
+	cancelStart()
+	select {
+	case <-clientClosed:
+		t.Fatal("Pod exec stream inherited the completed Start context")
+	case <-time.After(100 * time.Millisecond):
 	}
 	if err := manager.Write(context.Background(), "other", task.ID, []byte("id\r")); err == nil {
 		t.Fatal("cross-profile write was accepted")

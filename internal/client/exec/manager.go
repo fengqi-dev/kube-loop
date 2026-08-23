@@ -41,6 +41,8 @@ type managedStream struct {
 type Manager struct {
 	client  Client
 	onEvent func(Event)
+	ctx     context.Context
+	cancel  context.CancelFunc
 
 	lifecycle sync.RWMutex
 	mu        sync.Mutex
@@ -54,7 +56,11 @@ func NewManager(client Client, config ManagerConfig) (*Manager, error) {
 	if config.OnEvent == nil {
 		config.OnEvent = func(Event) {}
 	}
-	return &Manager{client: client, onEvent: config.OnEvent, active: make(map[string]*managedStream)}, nil
+	ctx, cancel := context.WithCancel(context.Background())
+	return &Manager{
+		client: client, onEvent: config.OnEvent, ctx: ctx, cancel: cancel,
+		active: make(map[string]*managedStream),
+	}, nil
 }
 
 func (manager *Manager) Start(
@@ -68,11 +74,16 @@ func (manager *Manager) Start(
 	if ctx == nil {
 		return remote.ExecTask{}, errors.New("pod exec context is required")
 	}
+	select {
+	case <-manager.ctx.Done():
+		return remote.ExecTask{}, errors.New("pod exec manager is shut down")
+	default:
+	}
 	stream, err := Start(ctx, manager.client, serverProfile, session, spec)
 	if err != nil {
 		return remote.ExecTask{}, err
 	}
-	streamContext, cancel := context.WithCancel(ctx)
+	streamContext, cancel := context.WithCancel(manager.ctx)
 	entry := &managedStream{profileID: serverProfile.ID, stream: stream, cancel: cancel}
 	manager.mu.Lock()
 	if _, exists := manager.active[stream.Task().ID]; exists {
@@ -135,6 +146,7 @@ func (manager *Manager) StopProfile(profileID string) error {
 func (manager *Manager) Shutdown() error {
 	manager.lifecycle.Lock()
 	defer manager.lifecycle.Unlock()
+	manager.cancel()
 	manager.mu.Lock()
 	entries := make([]*managedStream, 0, len(manager.active))
 	for taskID, entry := range manager.active {
