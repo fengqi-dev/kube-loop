@@ -328,6 +328,82 @@ func TestManagerCompensatesWhenExchangeStreamCannotOpen(t *testing.T) {
 	}
 }
 
+func TestManagerStopProfileWaitsForStartingExchange(t *testing.T) {
+	connection, gatewayConnection := mustTrafficConnections(t)
+	now := time.Now().UTC()
+	session := remote.Session{
+		ID: uuid.NewString(), Namespace: "development", State: exchangeSessionActive, ExpiresAt: now.Add(time.Hour),
+	}
+	task := remote.ExchangeTask{
+		ID: uuid.NewString(), SessionID: session.ID, Namespace: session.Namespace,
+		State: "pending", Service: "api", ClusterIP: "10.96.0.20",
+		Ports:     []remote.ExchangePort{{ServicePort: 80, Protocol: exchangeProtocolTCP}},
+		CreatedAt: now, UpdatedAt: now, ExpiresAt: session.ExpiresAt,
+	}
+	client := &testExchangeClient{connection: connection, task: task}
+	manager, err := NewManager(client, Config{TrafficStreams: client})
+	if err != nil {
+		t.Fatal(err)
+	}
+	serverProfile := profile.Profile{ID: "server"}
+	started := make(chan error, 1)
+	go func() {
+		_, startErr := manager.Start(t.Context(), serverProfile, session, Request{
+			ProfileID: "server", Service: "api",
+			Targets: []LocalTarget{
+				{ServicePort: 80, Protocol: exchangeProtocolTCP, LocalHost: exchangeLoopbackHost, LocalPort: 8080},
+			},
+		})
+		started <- startErr
+	}()
+	deadline := time.Now().Add(time.Second)
+	for {
+		openCalls, _ := client.calls()
+		if openCalls == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("Exchange Start did not reach readiness")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	stopped := make(chan error, 1)
+	go func() { stopped <- manager.StopProfile(t.Context(), "server") }()
+	select {
+	case err := <-stopped:
+		t.Fatalf("StopProfile bypassed an in-flight Exchange Start: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	gatewayDone := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+		defer cancel()
+		if err := writeTestFrame(ctx, gatewayConnection, exchangestream.Frame{Type: exchangestream.Ready}); err != nil {
+			gatewayDone <- err
+			return
+		}
+		stop, err := readTestFrame(ctx, gatewayConnection)
+		if err != nil || stop.Type != exchangestream.Stop {
+			gatewayDone <- errors.Join(err, errors.New("missing Exchange stop"))
+			return
+		}
+		_ = writeTestFrame(ctx, gatewayConnection, exchangestream.Frame{Type: exchangestream.Stop})
+		gatewayDone <- nil
+	}()
+	if err := <-started; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-stopped; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-gatewayDone; err != nil {
+		t.Fatal(err)
+	}
+	if items := manager.List("server"); len(items) != 0 {
+		t.Fatalf("Exchange committed after StopProfile: %#v", items)
+	}
+}
+
 func TestManagerRejectsUnboundExchangeBeforeOpeningStream(t *testing.T) {
 	now := time.Now().UTC()
 	session := remote.Session{

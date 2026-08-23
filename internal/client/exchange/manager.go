@@ -63,8 +63,9 @@ type Manager struct {
 	streams TrafficStreamOpener
 	dial    DialContextFunc
 
-	mu     sync.Mutex
-	active map[string]*activeExchange
+	lifecycle sync.RWMutex
+	mu        sync.Mutex
+	active    map[string]*activeExchange
 }
 
 func (manager *Manager) Start(
@@ -73,6 +74,8 @@ func (manager *Manager) Start(
 	session remote.Session,
 	request Request,
 ) (Info, error) {
+	manager.lifecycle.RLock()
+	defer manager.lifecycle.RUnlock()
 	if ctx == nil || strings.TrimSpace(request.ProfileID) != serverProfile.ID ||
 		session.State != exchangeSessionActive {
 		return Info{}, errors.New("active Server Profile Session is required")
@@ -178,6 +181,8 @@ func (manager *Manager) List(profileID string) []Info {
 }
 
 func (manager *Manager) StopProfile(ctx context.Context, profileID string) error {
+	manager.lifecycle.Lock()
+	defer manager.lifecycle.Unlock()
 	manager.mu.Lock()
 	ids := make([]string, 0)
 	for id, entry := range manager.active {
@@ -198,6 +203,8 @@ func (manager *Manager) Shutdown(ctx context.Context) error {
 	if ctx == nil {
 		return errors.New("exchange shutdown context is required")
 	}
+	manager.lifecycle.Lock()
+	defer manager.lifecycle.Unlock()
 	manager.mu.Lock()
 	ids := make([]string, 0, len(manager.active))
 	profiles := make(map[string]string, len(manager.active))

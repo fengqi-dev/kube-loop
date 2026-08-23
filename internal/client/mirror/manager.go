@@ -57,8 +57,9 @@ type Manager struct {
 	dial    DialContextFunc
 	config  Config
 
-	mu     sync.Mutex
-	active map[string]*activeMirror
+	lifecycle sync.RWMutex
+	mu        sync.Mutex
+	active    map[string]*activeMirror
 }
 
 func (manager *Manager) Start(
@@ -67,6 +68,8 @@ func (manager *Manager) Start(
 	session remote.Session,
 	request Request,
 ) (Info, error) {
+	manager.lifecycle.RLock()
+	defer manager.lifecycle.RUnlock()
 	if ctx == nil || strings.TrimSpace(request.ProfileID) != serverProfile.ID || session.State != mirrorSessionActive {
 		return Info{}, errors.New("active Server Profile Session is required")
 	}
@@ -171,6 +174,8 @@ func (manager *Manager) List(profileID string) []Info {
 }
 
 func (manager *Manager) StopProfile(ctx context.Context, profileID string) error {
+	manager.lifecycle.Lock()
+	defer manager.lifecycle.Unlock()
 	manager.mu.Lock()
 	ids := make([]string, 0)
 	for id, entry := range manager.active {
@@ -191,6 +196,8 @@ func (manager *Manager) Shutdown(ctx context.Context) error {
 	if ctx == nil {
 		return errors.New("mirror shutdown context is required")
 	}
+	manager.lifecycle.Lock()
+	defer manager.lifecycle.Unlock()
 	manager.mu.Lock()
 	ids := make([]string, 0, len(manager.active))
 	profiles := make(map[string]string, len(manager.active))
