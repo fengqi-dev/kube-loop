@@ -73,8 +73,9 @@ type Manager struct {
 	dataPlanes DataPlane
 	locals     localForwards
 
-	mu     sync.Mutex
-	active map[string]*activeForward
+	lifecycle sync.RWMutex
+	mu        sync.Mutex
+	active    map[string]*activeForward
 }
 
 func New(client TaskClient, dataPlanes DataPlane) (*Manager, error) {
@@ -93,6 +94,8 @@ func (manager *Manager) Start(
 	session remote.Session,
 	request Request,
 ) (Info, error) {
+	manager.lifecycle.RLock()
+	defer manager.lifecycle.RUnlock()
 	validProfile := strings.TrimSpace(request.ProfileID) == serverProfile.ID
 	if ctx == nil || !validProfile || session.State != portForwardSessionActive {
 		return Info{}, errors.New("active Server Profile Session is required")
@@ -175,6 +178,8 @@ func (manager *Manager) List(profileID string) []Info {
 }
 
 func (manager *Manager) StopProfile(ctx context.Context, profileID string) error {
+	manager.lifecycle.Lock()
+	defer manager.lifecycle.Unlock()
 	manager.mu.Lock()
 	ids := make([]string, 0)
 	for id, entry := range manager.active {
@@ -194,6 +199,8 @@ func (manager *Manager) Shutdown(ctx context.Context) error {
 	if ctx == nil {
 		return errors.New("port Forward shutdown context is required")
 	}
+	manager.lifecycle.Lock()
+	defer manager.lifecycle.Unlock()
 	manager.mu.Lock()
 	ids := make([]string, 0, len(manager.active))
 	for id := range manager.active {

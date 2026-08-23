@@ -56,6 +56,30 @@ type fakeLocals struct {
 	stopped  []string
 }
 
+type blockingLocals struct {
+	*fakeLocals
+
+	started     chan struct{}
+	release     chan struct{}
+	startedOnce sync.Once
+	releaseOnce sync.Once
+}
+
+func (locals *blockingLocals) StartResolved(
+	ctx context.Context,
+	request listener.Request,
+	dialAddress string,
+	dialer listener.TrafficDialer,
+) (listener.Info, error) {
+	locals.startedOnce.Do(func() { close(locals.started) })
+	<-locals.release
+	return locals.fakeLocals.StartResolved(ctx, request, dialAddress, dialer)
+}
+
+func (locals *blockingLocals) unblock() {
+	locals.releaseOnce.Do(func() { close(locals.release) })
+}
+
 func (locals *fakeLocals) StartResolved(
 	_ context.Context,
 	request listener.Request,
@@ -112,6 +136,56 @@ func TestManagerBindsGatewayTaskToLocalOnlyListener(t *testing.T) {
 	if len(locals.stopped) != 1 || locals.stopped[0] != "local-1" || len(client.stopped) != 1 ||
 		client.stopped[0] != task.ID {
 		t.Fatalf("local stops = %#v remote stops = %#v", locals.stopped, client.stopped)
+	}
+}
+
+func TestManagerStopProfileWaitsForStartingForward(t *testing.T) {
+	now := time.Now().UTC()
+	task := remote.PortForwardTask{
+		ID: uuid.NewString(), SessionID: uuid.NewString(), Namespace: "development", State: "running",
+		Kind: "service", Name: "api", Protocol: "tcp", RemotePort: 8443,
+		DialAddress: "10.96.0.20:8443", CreatedAt: now, UpdatedAt: now, ExpiresAt: now.Add(time.Minute),
+	}
+	client := &fakeTaskClient{task: task}
+	manager, err := New(client, fakeDataPlane{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	locals := &blockingLocals{
+		fakeLocals: &fakeLocals{}, started: make(chan struct{}), release: make(chan struct{}),
+	}
+	t.Cleanup(locals.unblock)
+	manager.locals = locals
+	profile := profile.Profile{ID: "server-1"}
+	session := remote.Session{ID: task.SessionID, Namespace: task.Namespace, State: portForwardSessionActive}
+	started := make(chan error, 1)
+	go func() {
+		_, startErr := manager.Start(t.Context(), profile, session, Request{
+			ProfileID: profile.ID, Kind: "service", Name: "api", Protocol: "tcp", RemotePort: 8443,
+		})
+		started <- startErr
+	}()
+	select {
+	case <-locals.started:
+	case <-time.After(time.Second):
+		t.Fatal("Port Forward Start did not reach local listener creation")
+	}
+	stopped := make(chan error, 1)
+	go func() { stopped <- manager.StopProfile(t.Context(), profile.ID) }()
+	select {
+	case err := <-stopped:
+		t.Fatalf("StopProfile bypassed an in-flight Port Forward Start: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	locals.unblock()
+	if err := <-started; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-stopped; err != nil {
+		t.Fatal(err)
+	}
+	if items := manager.List(profile.ID); len(items) != 0 {
+		t.Fatalf("Port Forward committed after StopProfile: %#v", items)
 	}
 }
 

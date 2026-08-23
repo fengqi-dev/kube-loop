@@ -42,8 +42,9 @@ type Manager struct {
 	client  Client
 	onEvent func(Event)
 
-	mu     sync.Mutex
-	active map[string]*managedStream
+	lifecycle sync.RWMutex
+	mu        sync.Mutex
+	active    map[string]*managedStream
 }
 
 func NewManager(client Client, config ManagerConfig) (*Manager, error) {
@@ -62,6 +63,8 @@ func (manager *Manager) Start(
 	session remote.Session,
 	spec remote.ExecSpec,
 ) (remote.ExecTask, error) {
+	manager.lifecycle.RLock()
+	defer manager.lifecycle.RUnlock()
 	if ctx == nil {
 		return remote.ExecTask{}, errors.New("pod exec context is required")
 	}
@@ -110,6 +113,8 @@ func (manager *Manager) Stop(profileID, taskID string) error {
 }
 
 func (manager *Manager) StopProfile(profileID string) error {
+	manager.lifecycle.Lock()
+	defer manager.lifecycle.Unlock()
 	manager.mu.Lock()
 	entries := make([]*managedStream, 0)
 	for taskID, entry := range manager.active {
@@ -128,6 +133,8 @@ func (manager *Manager) StopProfile(profileID string) error {
 }
 
 func (manager *Manager) Shutdown() error {
+	manager.lifecycle.Lock()
+	defer manager.lifecycle.Unlock()
 	manager.mu.Lock()
 	entries := make([]*managedStream, 0, len(manager.active))
 	for taskID, entry := range manager.active {
