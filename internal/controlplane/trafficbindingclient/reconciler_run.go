@@ -3,21 +3,12 @@ package trafficbindingclient
 import (
 	"context"
 	"errors"
-	"time"
+
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/periodic"
 )
 
 func (reconciler *Reconciler) Run(ctx context.Context) {
-	reconciler.runAndLog(ctx)
-	ticker := time.NewTicker(reconciler.interval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			reconciler.runAndLog(ctx)
-		}
-	}
+	periodic.Run(ctx, reconciler.interval, reconciler.runAndLog)
 }
 
 func (reconciler *Reconciler) RunOnce(ctx context.Context) (int, error) {

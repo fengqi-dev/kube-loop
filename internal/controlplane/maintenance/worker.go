@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/periodic"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 )
 
@@ -95,17 +96,7 @@ func New(
 }
 
 func (worker *Worker) Run(ctx context.Context) {
-	worker.runAndLog(ctx)
-	ticker := time.NewTicker(worker.interval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			worker.runAndLog(ctx)
-		}
-	}
+	periodic.Run(ctx, worker.interval, worker.runAndLog)
 }
 
 func (worker *Worker) RunOnce(ctx context.Context) (Report, error) {
