@@ -4,15 +4,84 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/filestream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
 )
+
+type waitErrorReader struct {
+	wake <-chan struct{}
+	err  error
+}
+
+func (reader waitErrorReader) Read([]byte) (int, error) {
+	<-reader.wake
+	return 0, reader.err
+}
+
+func TestUploadWaitsForResponseReaderOnLocalReadFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		connection, err := websocket.Accept(writer, request, nil)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		defer checkTestClose(t, connection.CloseNow)
+		progress, _ := filestream.EncodeProgress(filestream.ProgressStatus{Total: 1})
+		if err := connection.Write(request.Context(), websocket.MessageBinary, progress); err != nil {
+			t.Error(err)
+			return
+		}
+		_, _, _ = connection.Read(request.Context())
+	}))
+	defer server.Close()
+	callbackStarted := make(chan struct{})
+	releaseCallback := make(chan struct{})
+	readErr := errors.New("local read failed")
+	returned := make(chan error, 1)
+	go func() {
+		_, _, err := Upload(
+			context.Background(), testClient{endpoint: websocketURL(server.URL)}, profile.Profile{ID: "server"},
+			remote.Session{ID: "session", Namespace: "development", State: fileTransferSessionActive},
+			remote.FileTransferSpec{
+				Direction: fileTransferDirectionUpload, Kind: fileTransferKindFile, Pod: "api-0",
+				RemotePath: "/workspace/data.bin", Size: 1,
+			},
+			waitErrorReader{wake: callbackStarted, err: readErr},
+			func(filestream.ProgressStatus) {
+				close(callbackStarted)
+				<-releaseCallback
+			},
+		)
+		returned <- err
+	}()
+	select {
+	case <-callbackStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("response reader did not report progress")
+	}
+	select {
+	case err := <-returned:
+		t.Fatalf("Upload returned before response reader stopped: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(releaseCallback)
+	select {
+	case err := <-returned:
+		if !errors.Is(err, readErr) {
+			t.Fatalf("Upload error = %v, want %v", err, readErr)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Upload did not wait for response reader")
+	}
+}
 
 func TestUploadStreamsDataWhileReceivingProgressAndVerifiesResult(t *testing.T) {
 	contents := bytes.Repeat([]byte("upload-data-"), 40_000)

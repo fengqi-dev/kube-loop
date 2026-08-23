@@ -64,12 +64,17 @@ func Upload(
 	if err != nil {
 		return task, filestream.TransferResult{}, err
 	}
-	defer func() {
-		resultErr = errors.Join(resultErr, connection.CloseNow())
-	}()
 	connection.SetReadLimit(filestream.MaximumData + 1)
 	responses := make(chan streamResponse, 1)
-	go func() { responses <- readUploadResponses(ctx, connection, onProgress) }()
+	readerDone := make(chan struct{})
+	go func() {
+		defer close(readerDone)
+		responses <- readUploadResponses(ctx, connection, onProgress)
+	}()
+	defer func() {
+		resultErr = errors.Join(resultErr, connection.CloseNow())
+		<-readerDone
+	}()
 	remaining := spec.Size - spec.Offset
 	buffer := make([]byte, min(uint64(filestream.MaximumData), remaining))
 	for remaining > 0 {
