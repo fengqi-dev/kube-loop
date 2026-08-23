@@ -93,7 +93,6 @@ func (capture *auditCapture) Record(_ context.Context, record controlplane.Audit
 	return nil
 }
 
-//nolint:gocyclo // The test intentionally validates the complete owned and audited Session lifecycle.
 func TestClusterSessionLifecycleIsOwnedIdempotentAndAudited(t *testing.T) {
 	now := time.Date(2026, 8, 10, 1, 0, 0, 0, time.UTC)
 	server, stateStore, capture, identityID := newSessionTestServer(
@@ -199,6 +198,39 @@ func TestClusterSessionLifecycleIsOwnedIdempotentAndAudited(t *testing.T) {
 		t.Fatalf("foreign read status = %d body = %s", foreignRead.Code, foreignRead.Body.String())
 	}
 
+	taskIDs := createSessionLifecycleTasks(t, stateStore, identityID, document, now)
+
+	disconnect := sessionRequest(t, server, http.MethodDelete,
+		"/api/sessions/"+document.ID+"?namespace=development", identityID,
+		map[string]string{"If-Match": `"2"`},
+	)
+	disconnected := decodeDocument(t, disconnect)
+	if disconnect.Code != http.StatusOK || disconnected.State != "disconnected" ||
+		disconnected.Generation != 3 {
+		t.Fatalf("disconnect status = %d session = %#v", disconnect.Code, disconnected)
+	}
+	assertSessionLifecycleTaskStates(t, stateStore, taskIDs)
+
+	idempotentDisconnect := sessionRequest(t, server, http.MethodDelete,
+		"/api/sessions/"+document.ID+"?namespace=development", identityID,
+		map[string]string{"If-Match": `"1"`},
+	)
+	if got := decodeDocument(t, idempotentDisconnect); idempotentDisconnect.Code != http.StatusOK ||
+		got.Generation != 3 {
+		t.Fatalf("idempotent disconnect status = %d session = %#v", idempotentDisconnect.Code, got)
+	}
+
+	assertHeartbeatAudit(t, capture, document.ID)
+}
+
+func createSessionLifecycleTasks(
+	t *testing.T,
+	stateStore *storage.Store,
+	identityID string,
+	document sessionapi.Document,
+	now time.Time,
+) map[string]string {
+	t.Helper()
 	taskStates := map[string]remotetask.State{
 		"port-forward":  remotetask.Running,
 		"exchange":      remotetask.Running,
@@ -218,16 +250,11 @@ func TestClusterSessionLifecycleIsOwnedIdempotentAndAudited(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	return taskIDs
+}
 
-	disconnect := sessionRequest(t, server, http.MethodDelete,
-		"/api/sessions/"+document.ID+"?namespace=development", identityID,
-		map[string]string{"If-Match": `"2"`},
-	)
-	disconnected := decodeDocument(t, disconnect)
-	if disconnect.Code != http.StatusOK || disconnected.State != "disconnected" ||
-		disconnected.Generation != 3 {
-		t.Fatalf("disconnect status = %d session = %#v", disconnect.Code, disconnected)
-	}
+func assertSessionLifecycleTaskStates(t *testing.T, stateStore *storage.Store, taskIDs map[string]string) {
+	t.Helper()
 	wantTaskStates := map[string]remotetask.State{
 		"port-forward":  remotetask.Stopped,
 		"exchange":      remotetask.Recovering,
@@ -240,28 +267,18 @@ func TestClusterSessionLifecycleIsOwnedIdempotentAndAudited(t *testing.T) {
 			t.Fatalf("%s Task = %#v, %v; want %s", taskType, task, err, want)
 		}
 	}
+}
 
-	idempotentDisconnect := sessionRequest(t, server, http.MethodDelete,
-		"/api/sessions/"+document.ID+"?namespace=development", identityID,
-		map[string]string{"If-Match": `"1"`},
-	)
-	if got := decodeDocument(t, idempotentDisconnect); idempotentDisconnect.Code != http.StatusOK ||
-		got.Generation != 3 {
-		t.Fatalf("idempotent disconnect status = %d session = %#v", idempotentDisconnect.Code, got)
-	}
-
+func assertHeartbeatAudit(t *testing.T, capture *auditCapture, sessionID string) {
+	t.Helper()
 	capture.mu.Lock()
 	defer capture.mu.Unlock()
-	foundHeartbeatAudit := false
 	for _, record := range capture.records {
-		if record.Operation == "heartbeat" && record.SessionID == document.ID &&
-			record.Namespace == "development" {
-			foundHeartbeatAudit = true
+		if record.Operation == "heartbeat" && record.SessionID == sessionID && record.Namespace == "development" {
+			return
 		}
 	}
-	if !foundHeartbeatAudit {
-		t.Fatalf("heartbeat audit missing trusted session ID: %#v", capture.records)
-	}
+	t.Fatalf("heartbeat audit missing trusted session ID: %#v", capture.records)
 }
 
 func TestExpiredSessionCannotBeResurrected(t *testing.T) {
