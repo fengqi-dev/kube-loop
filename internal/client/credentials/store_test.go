@@ -196,3 +196,44 @@ func TestSystemStoreDoesNotActivatePartialWrite(t *testing.T) {
 		t.Fatalf("partial keyring entries remain: %#v", backend.values)
 	}
 }
+
+func TestSystemStoreRejectsMalformedMetadata(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		metadata string
+	}{
+		{
+			name:     "unknown field",
+			metadata: `{"schemaVersion":1,"deviceId":"device-1","extra":true}`,
+		},
+		{
+			name:     "trailing document",
+			metadata: `{"schemaVersion":1,"deviceId":"device-1"}{}`,
+		},
+		{name: "blank device", metadata: `{"schemaVersion":1,"deviceId":"  "}`},
+		{name: "malformed JSON", metadata: `{"schemaVersion":1`},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			backend := newMemoryBackend()
+			store := NewStore(backend)
+			prefix, err := accountPrefix("profile-1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			backend.values[serviceName+"/"+prefix+":current"] = "generation"
+			backend.values[serviceName+"/"+prefix+":generation:access"] = "access"
+			backend.values[serviceName+"/"+prefix+":generation:refresh"] = "refresh"
+			backend.values[serviceName+"/"+prefix+":generation:metadata"] = test.metadata
+
+			if _, err := store.Get("profile-1"); err == nil ||
+				err.Error() != "system keyring credential metadata is invalid" {
+				t.Fatalf("malformed metadata error = %v", err)
+			}
+		})
+	}
+}
