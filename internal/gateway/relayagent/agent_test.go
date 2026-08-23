@@ -168,6 +168,9 @@ func TestAgentRegistersAppliesControlStateAndAcknowledgesHeartbeat(t *testing.T)
 	case <-time.After(time.Second):
 		t.Fatal("Agent did not stop")
 	}
+	if agent.Ready() {
+		t.Fatal("stopped Agent remained ready")
+	}
 }
 
 func TestAgentStartDoesNotRetryPermanentRegistrationFailure(t *testing.T) {

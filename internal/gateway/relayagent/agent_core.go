@@ -47,6 +47,7 @@ const (
 	lifecycleIdle lifecycleState = iota
 	lifecycleStarting
 	lifecycleRunning
+	lifecycleStopped
 )
 
 type Agent struct {

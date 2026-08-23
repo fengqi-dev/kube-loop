@@ -74,7 +74,13 @@ func retryableRegistrationError(err error) bool {
 }
 
 func (agent *Agent) run(ctx context.Context) {
-	defer close(agent.done)
+	defer func() {
+		agent.mu.Lock()
+		agent.lifecycle = lifecycleStopped
+		agent.cancel = nil
+		agent.mu.Unlock()
+		close(agent.done)
+	}()
 	for {
 		agent.mu.RLock()
 		after := agent.heartbeatAfter
