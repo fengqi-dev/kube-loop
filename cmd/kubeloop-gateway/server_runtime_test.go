@@ -42,6 +42,7 @@ type gatewayRuntimeTestControl struct {
 type gatewayRuntimeTestServe struct {
 	started       chan struct{}
 	waitForCancel bool
+	release       <-chan struct{}
 	err           error
 	contextValue  any
 }
@@ -55,6 +56,9 @@ func (serve *gatewayRuntimeTestServe) Serve(
 	close(serve.started)
 	if serve.waitForCancel {
 		<-ctx.Done()
+	}
+	if serve.release != nil {
+		<-serve.release
 	}
 	return serve.err
 }
@@ -78,7 +82,7 @@ func gatewayRuntimeTestOptions(
 		ListenAddress: listener.Addr().String(), Path: "/tunnel",
 		Listener: listener, Handler: http.NotFoundHandler(),
 		Gateway: gateway, Admissions: admissions, Control: control,
-		DrainTimeout: 100 * time.Millisecond, Serve: serve,
+		DrainTimeout: 100 * time.Millisecond, ServeStopTimeout: time.Second, Serve: serve,
 	}
 }
 
@@ -153,5 +157,35 @@ func TestServeGatewayPropagatesListenerFailureAfterDrain(t *testing.T) {
 	if gateway.beginDrain.Load() != 1 || gateway.drains.Load() != 1 ||
 		admissions.beginDrain.Load() != 1 || control.drains.Load() != 1 {
 		t.Fatal("listener failure skipped Gateway drain lifecycle")
+	}
+}
+
+func TestServeGatewayBoundsListenerStopWait(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+	ctx, cancel := context.WithCancel(t.Context())
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	serve := &gatewayRuntimeTestServe{started: make(chan struct{}), release: release}
+	gateway := &gatewayRuntimeTestGateway{}
+	admissions := &gatewayRuntimeTestAdmissions{}
+	control := &gatewayRuntimeTestControl{}
+	options := gatewayRuntimeTestOptions(ctx, listener, serve.Serve, gateway, admissions, control)
+	options.ServeStopTimeout = 50 * time.Millisecond
+	result := make(chan error, 1)
+	go func() { result <- serveGateway(options) }()
+
+	<-serve.started
+	cancel()
+	select {
+	case err := <-result:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("serveGateway() error = %v, want context deadline exceeded", err)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("serveGateway ignored the listener-stop deadline")
 	}
 }

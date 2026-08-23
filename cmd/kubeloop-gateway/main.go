@@ -230,6 +230,7 @@ func runGateway(
 	return serveGateway(gatewayRuntimeOptions{
 		Context: ctx, Logger: logger, ListenAddress: config.HTTP.Listen, Path: config.HTTP.Path,
 		Listener: httpListener, Handler: router, Gateway: server, Admissions: httpHandler,
-		Control: controlAgent, DrainTimeout: config.DrainTimeout.Duration, Serve: websocketmux.Serve,
+		Control: controlAgent, DrainTimeout: config.DrainTimeout.Duration,
+		ServeStopTimeout: 5 * time.Second, Serve: websocketmux.Serve,
 	})
 }

@@ -14,17 +14,18 @@ import (
 )
 
 type gatewayRuntimeOptions struct {
-	Context       context.Context
-	Logger        *log.Logger
-	ListenAddress string
-	Path          string
-	Listener      net.Listener
-	Handler       http.Handler
-	Gateway       gatewayDrainRuntime
-	Admissions    gatewayAdmissionRuntime
-	Control       gatewayControlRuntime
-	DrainTimeout  time.Duration
-	Serve         gatewayServeFunc
+	Context          context.Context
+	Logger           *log.Logger
+	ListenAddress    string
+	Path             string
+	Listener         net.Listener
+	Handler          http.Handler
+	Gateway          gatewayDrainRuntime
+	Admissions       gatewayAdmissionRuntime
+	Control          gatewayControlRuntime
+	DrainTimeout     time.Duration
+	ServeStopTimeout time.Duration
+	Serve            gatewayServeFunc
 }
 
 type gatewayDrainRuntime interface {
@@ -86,9 +87,17 @@ func serveGateway(options gatewayRuntimeOptions) error {
 	}
 	cancelHTTP()
 	if !serveFinished {
-		if err := <-errCh; err != nil {
+		serveStopContext, cancelServeStop := context.WithTimeout(
+			context.WithoutCancel(options.Context),
+			options.ServeStopTimeout,
+		)
+		select {
+		case err := <-errCh:
 			serveError = err
+		case <-serveStopContext.Done():
+			serveError = fmt.Errorf("wait for Gateway listener shutdown: %w", serveStopContext.Err())
 		}
+		cancelServeStop()
 	}
 	if serveError != nil {
 		return fmt.Errorf("gateway listener stopped: %w", serveError)
