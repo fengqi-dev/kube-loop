@@ -103,6 +103,7 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	if handshakeErr != nil || message.ClientHello == nil {
 		cancelHandshake()
 		h.reject(
+			request.Context(),
 			requestID,
 			connection,
 			wssprotocol.NewReject(wssprotocol.CodeInvalidHandshake, "ClientHello is invalid"),
@@ -113,14 +114,14 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	selectedVersion, versionErr := wssprotocol.Negotiate(hello.ProtocolVersions, h.config.SupportedVersions)
 	if versionErr != nil {
 		cancelHandshake()
-		h.reject(requestID, connection, wssprotocol.NewReject(
+		h.reject(request.Context(), requestID, connection, wssprotocol.NewReject(
 			wssprotocol.CodeVersionMismatch, "No compatible WSS protocol version", h.config.SupportedVersions...,
 		))
 		return
 	}
 	if err := wssprotocol.CheckClientVersion(hello.ClientVersion, h.config.MinClientVersion); err != nil {
 		cancelHandshake()
-		h.reject(requestID, connection, wssprotocol.NewReject(
+		h.reject(request.Context(), requestID, connection, wssprotocol.NewReject(
 			wssprotocol.CodeClientVersionUnsupported, "Client version is not supported",
 		))
 		return
@@ -128,6 +129,7 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	if hello.DeviceID != identity.DeviceID {
 		cancelHandshake()
 		h.reject(
+			request.Context(),
 			requestID, connection,
 			wssprotocol.NewReject(wssprotocol.CodeDeviceMismatch, "Device does not match RelayTicket"),
 		)
@@ -137,6 +139,7 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		!slices.Contains(hello.Capabilities, wssprotocol.CapabilityTrafficWebSocket) {
 		cancelHandshake()
 		h.reject(
+			request.Context(),
 			requestID, connection,
 			wssprotocol.NewReject(wssprotocol.CodeInvalidHandshake, "Required capabilities are missing"),
 		)
@@ -145,6 +148,7 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	if !h.acquireUser(identity) {
 		cancelHandshake()
 		h.reject(
+			request.Context(),
 			requestID, connection,
 			wssprotocol.NewReject(wssprotocol.CodeUserCapacityExceeded, "Per-user connection limit reached"),
 		)

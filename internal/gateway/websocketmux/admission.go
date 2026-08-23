@@ -23,9 +23,14 @@ func (h *Handler) acquireGeneration(identity Identity) bool {
 	return true
 }
 
-func (h *Handler) reject(requestID string, connection *websocket.Conn, rejection wssprotocol.Reject) {
+func (h *Handler) reject(
+	parent context.Context,
+	requestID string,
+	connection *websocket.Conn,
+	rejection wssprotocol.Reject,
+) {
 	h.logf(requestID, "WebSocket handshake rejected: reason=%s", rejection.Code)
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), time.Second)
 	_ = wssprotocol.Write(ctx, connection, rejection)
 	cancel()
 	_ = connection.Close(websocket.StatusPolicyViolation, rejection.Code)
