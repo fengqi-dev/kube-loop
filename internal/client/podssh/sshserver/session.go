@@ -136,7 +136,7 @@ func (s *sessionState) runExec(command []string) {
 }
 
 func (s *sessionState) runSFTP() {
-	handler := newSFTPHandler(s.executor, s.target)
+	handler := newSFTPHandler(s.ctx, s.executor, s.target)
 	server := sftp.NewRequestServer(s.channel, sftp.Handlers{
 		FileGet: handler, FilePut: handler, FileCmd: handler, FileList: handler,
 	}, sftp.WithStartDirectory("/"))

@@ -13,12 +13,13 @@ import (
 )
 
 type sftpHandler struct {
+	ctx      context.Context
 	executor Executor
 	target   Target
 }
 
-func newSFTPHandler(executor Executor, target Target) *sftpHandler {
-	return &sftpHandler{executor: executor, target: target}
+func newSFTPHandler(ctx context.Context, executor Executor, target Target) *sftpHandler {
+	return &sftpHandler{ctx: ctx, executor: executor, target: target}
 }
 
 func (h *sftpHandler) Fileread(request *sftp.Request) (io.ReaderAt, error) {
@@ -108,7 +109,7 @@ func (h *sftpHandler) RealPath(raw string) (string, error) {
 
 func (h *sftpHandler) Readlink(raw string) (string, error) {
 	var stdout bytes.Buffer
-	err := h.exec(context.Background(), "readlink "+shellquote.Join(cleanRemotePath(raw)), &stdout)
+	err := h.exec(h.ctx, "readlink "+shellquote.Join(cleanRemotePath(raw)), &stdout)
 	if err != nil {
 		return "", err
 	}

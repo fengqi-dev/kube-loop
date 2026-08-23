@@ -384,7 +384,7 @@ func TestCommandSelectsContainerFromActiveEndpoint(t *testing.T) {
 
 func TestSFTPHandlerCopiesFilesWithTarStreams(t *testing.T) {
 	executor := &fakeExecutor{files: make(map[string][]byte)}
-	handler := newSFTPHandler(executor, Target{
+	handler := newSFTPHandler(t.Context(), executor, Target{
 		Context: "dev", Namespace: "default", Pod: "api", Container: "api", IP: "10.0.0.2",
 	})
 	put := sftp.NewRequest("Put", "/tmp/hello.txt")
@@ -425,7 +425,7 @@ func TestSFTPHandlerCopiesFilesWithTarStreams(t *testing.T) {
 
 func TestSFTPHandlerCreatesMissingFileWithoutTruncateFlag(t *testing.T) {
 	executor := &fakeExecutor{files: make(map[string][]byte)}
-	handler := newSFTPHandler(executor, Target{
+	handler := newSFTPHandler(t.Context(), executor, Target{
 		Context: "dev", Namespace: "default", Pod: "api", Container: "api", IP: "10.0.0.2",
 	})
 	put := sftp.NewRequest("Put", "/tmp/hello.txt")

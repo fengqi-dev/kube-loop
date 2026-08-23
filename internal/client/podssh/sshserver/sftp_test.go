@@ -1,18 +1,27 @@
 package sshserver
 
 import (
+	"context"
 	"encoding/binary"
 	"errors"
 	"io"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/pkg/sftp"
 )
 
+type cancelAwareExecutor struct{}
+
+func (cancelAwareExecutor) Exec(ctx context.Context, _ Target, _ []string, _ Streams) error {
+	<-ctx.Done()
+	return ctx.Err()
+}
+
 func TestSFTPHandlerListsAndStatsRemotePaths(t *testing.T) {
 	executor := &fakeExecutor{files: map[string][]byte{"/tmp/hello.txt": []byte("hello")}}
-	handler := newSFTPHandler(executor, Target{
+	handler := newSFTPHandler(t.Context(), executor, Target{
 		Context: "dev", Namespace: "default", Pod: "api", Container: "api",
 	})
 
@@ -54,7 +63,7 @@ func TestSFTPHandlerListsAndStatsRemotePaths(t *testing.T) {
 
 func TestSFTPHandlerPathAndCommandContracts(t *testing.T) {
 	executor := &fakeExecutor{}
-	handler := newSFTPHandler(executor, Target{Context: "dev", Namespace: "default", Pod: "api"})
+	handler := newSFTPHandler(t.Context(), executor, Target{Context: "dev", Namespace: "default", Pod: "api"})
 
 	if got, err := handler.RealPath("../tmp/./hello.txt"); err != nil || got != "/tmp/hello.txt" {
 		t.Fatalf("RealPath() = %q, %v", got, err)
@@ -112,6 +121,27 @@ func TestSFTPHandlerPathAndCommandContracts(t *testing.T) {
 	}
 }
 
+func TestSFTPHandlerReadlinkUsesSessionContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	handler := newSFTPHandler(ctx, cancelAwareExecutor{}, Target{
+		Context: "dev", Namespace: "default", Pod: "api",
+	})
+	result := make(chan error, 1)
+	go func() {
+		_, err := handler.Readlink("/tmp/link")
+		result <- err
+	}()
+	cancel()
+	select {
+	case err := <-result:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("Readlink error = %v, want context.Canceled", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Readlink ignored session cancellation")
+	}
+}
+
 func TestCleanRemotePathContracts(t *testing.T) {
 	tests := []struct {
 		name string
@@ -134,7 +164,7 @@ func TestCleanRemotePathContracts(t *testing.T) {
 
 func TestSFTPHandlerSetstatBuildsExplicitCommands(t *testing.T) {
 	executor := &fakeExecutor{}
-	handler := newSFTPHandler(executor, Target{Context: "dev", Namespace: "default", Pod: "api"})
+	handler := newSFTPHandler(t.Context(), executor, Target{Context: "dev", Namespace: "default", Pod: "api"})
 	request := sftp.NewRequest("Setstat", "/tmp/file")
 	request.Flags = 0x01 | 0x04 | 0x08 // size, permissions, access/modification time
 	request.Attrs = binary.BigEndian.AppendUint64(nil, 12)
