@@ -122,6 +122,47 @@ func TestBridgeClosePreservesInspectorErrorAfterListenerClosed(t *testing.T) {
 	}
 }
 
+func TestBridgeCloseStopsAcceptedConnectionsAndWaitsForHandlers(t *testing.T) {
+	bridge, err := Listen(
+		context.Background(),
+		"127.0.0.1:1",
+		"127.0.0.1:0",
+		testSessionToken,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	connection, err := net.Dial("tcp", bridge.Addr().String())
+	if err != nil {
+		_ = bridge.Close()
+		t.Fatal(err)
+	}
+	defer func() { _ = connection.Close() }()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		bridge.server.tasks.mu.Lock()
+		active := bridge.server.tasks.active
+		bridge.server.tasks.mu.Unlock()
+		if active > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			_ = bridge.Close()
+			t.Fatal("SOCKS handler did not accept connection")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if err := bridge.Close(); err != nil {
+		t.Fatal(err)
+	}
+	bridge.server.tasks.mu.Lock()
+	active := bridge.server.tasks.active
+	bridge.server.tasks.mu.Unlock()
+	if active != 0 {
+		t.Fatalf("active SOCKS tasks=%d", active)
+	}
+}
+
 func TestSOCKSUDPPacketRoundTrip(t *testing.T) {
 	want := []byte("dns payload")
 	packet, err := encodeTestDatagram("10.96.0.10", 53, want)

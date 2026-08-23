@@ -24,11 +24,16 @@ func Listen(
 			return nil, err
 		}
 	}
-	listener, err := (&net.ListenConfig{}).Listen(ctx, "tcp", listenAddress)
+	baseListener, err := (&net.ListenConfig{}).Listen(ctx, "tcp", listenAddress)
 	if err != nil {
 		return nil, err
 	}
-	server := &Server{GatewayAddress: gatewayAddress, SessionToken: token}
+	listener := newTrackedListener(baseListener)
+	server := &Server{
+		GatewayAddress: gatewayAddress,
+		SessionToken:   token,
+		tasks:          newGoroutinePool(),
+	}
 	if config.inspectorFactory != nil {
 		server.inspector, err = config.inspectorFactory(server.dial)
 		if err != nil {
@@ -36,10 +41,12 @@ func Listen(
 			return nil, fmt.Errorf("create SOCKS TCP inspector: %w", err)
 		}
 	}
+	serveDone := make(chan struct{})
+	bridge := &Bridge{Listener: listener, server: server, serveDone: serveDone}
+	bridge.stopContext = context.AfterFunc(ctx, func() { _ = bridge.Close() })
 	go func() {
-		<-ctx.Done()
-		_ = listener.Close() // Closing only wakes Serve after cancellation; no caller can act on the result.
+		defer close(serveDone)
+		_ = server.Serve(listener)
 	}()
-	go func() { _ = server.Serve(listener) }()
-	return &Bridge{Listener: listener, server: server}, nil
+	return bridge, nil
 }

@@ -14,6 +14,9 @@ import (
 )
 
 func (s *Server) Serve(listener net.Listener) error {
+	if s.tasks == nil {
+		s.tasks = newGoroutinePool()
+	}
 	server := socks5.NewServer(
 		socks5.WithResolver(remoteResolver{}),
 		socks5.WithBufferPool(bufferpool.NewPool(tunnel.MaxDatagramSize+512)),
@@ -30,6 +33,7 @@ func (s *Server) Serve(listener net.Listener) error {
 			request.DestAddr = &statute.AddrSpec{IP: net.IPv4zero}
 			return nil
 		}),
+		socks5.WithGPool(s.tasks),
 	)
 	if err := server.Serve(listener); err != nil && !errors.Is(err, net.ErrClosed) {
 		return err

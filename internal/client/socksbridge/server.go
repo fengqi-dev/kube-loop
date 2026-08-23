@@ -65,25 +65,37 @@ type Server struct {
 	gatewayMu sync.RWMutex
 	hostMu    sync.RWMutex
 	logMu     sync.RWMutex
+	tasks     *goroutinePool
 }
 
 // Bridge is the local SOCKS listener used by sing-box's kubernetes outbound.
 type Bridge struct {
 	net.Listener
 
-	server    *Server
-	closeOnce sync.Once
-	closeErr  error
+	server      *Server
+	serveDone   <-chan struct{}
+	stopContext func() bool
+	closeOnce   sync.Once
+	closeErr    error
 }
 
 // Close stops the SOCKS listener and releases inspector transports.
 func (b *Bridge) Close() error {
 	b.closeOnce.Do(func() {
+		if b.stopContext != nil {
+			b.stopContext()
+		}
 		listenerErr := b.Listener.Close()
 		if errors.Is(listenerErr, net.ErrClosed) {
 			listenerErr = nil
 		}
 		b.closeErr = listenerErr
+		if b.serveDone != nil {
+			<-b.serveDone
+		}
+		if b.server.tasks != nil {
+			b.server.tasks.Wait()
+		}
 		if b.server.inspector != nil {
 			b.closeErr = errors.Join(b.closeErr, b.server.inspector.Close())
 		}
