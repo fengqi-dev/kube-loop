@@ -127,6 +127,13 @@ func TestManagerBindsGatewayTaskToLocalOnlyListener(t *testing.T) {
 	if items := manager.List(serverProfile.ID); len(items) != 1 || items[0].LocalPort != 49152 {
 		t.Fatalf("active = %#v", items)
 	}
+	//nolint:staticcheck // This test intentionally verifies defensive rejection of a nil context.
+	if err := manager.Stop(nil, serverProfile.ID, task.ID); err == nil {
+		t.Fatal("nil stop context was accepted")
+	}
+	if len(manager.List(serverProfile.ID)) != 1 || len(locals.stopped) != 0 || len(client.stopped) != 0 {
+		t.Fatal("rejected stop mutated the active Port Forward")
+	}
 	if err := manager.Stop(context.Background(), serverProfile.ID, task.ID); err != nil {
 		t.Fatal(err)
 	}

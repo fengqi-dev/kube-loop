@@ -154,6 +154,9 @@ func (manager *Manager) Start(
 }
 
 func (manager *Manager) Stop(ctx context.Context, profileID, taskID string) error {
+	if ctx == nil {
+		return errors.New("port Forward stop context is required")
+	}
 	manager.mu.Lock()
 	entry := manager.active[taskID]
 	if entry != nil && entry.profile.ID == profileID {
