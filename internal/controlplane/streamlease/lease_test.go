@@ -257,6 +257,46 @@ func TestLeaseTerminatesAfterAuthorizationIsDenied(t *testing.T) {
 	waitForCancellation(ctx, t, "denied authorization")
 }
 
+func TestFamilyBackedLeaseStillRequiresAuthorization(t *testing.T) {
+	stateStore, identityID, sessionID, now := createLeaseStore(t)
+	defer func() { _ = stateStore.Close() }()
+	authorizationID := uuid.NewString()
+	if err := stateStore.OAuthSessions().Create(context.Background(), storage.OAuthSession{
+		Kind:          "refresh_token",
+		SignatureHash: bytes.Repeat([]byte{9}, 32),
+		RequestID:     authorizationID,
+		IdentityID:    identityID,
+		ClientID:      "desktop",
+		DeviceID:      "device",
+		RequestJSON:   []byte(`{}`),
+		Status:        statusActive,
+		CreatedAt:     now,
+		ExpiresAt:     now.Add(time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel, err := Start(
+		context.Background(),
+		stateStore,
+		controlplaneapi.Identity{
+			Subject: identityID, DeviceID: "device", AuthorizationID: authorizationID,
+		},
+		sessionapi.ActiveSession{ID: sessionID, ExpiresAt: now.Add(time.Hour)},
+		Config{
+			CheckInterval: 10 * time.Millisecond,
+			Authorizer:    denyingAuthorizer{},
+			Authorization: authorization.Request{
+				Operation: "pods.exec", Namespace: "development",
+			},
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cancel()
+	waitForCancellation(ctx, t, "denied Family-backed authorization")
+}
+
 func TestLeaseHeartbeatsOwnedTaskAndStopsWithOwnership(t *testing.T) {
 	stateStore, identityID, sessionID, now := createLeaseStore(t)
 	defer func() { _ = stateStore.Close() }()

@@ -140,11 +140,9 @@ func watch(
 }
 
 func (lease checker) valid(ctx context.Context) bool {
-	valid := lease.authorized(ctx)
-	if lease.identity.AuthorizationID != "" {
-		valid = lease.grantActive(ctx)
-	}
-	return valid && lease.sessionActive(ctx) &&
+	return lease.authorized(ctx) &&
+		lease.grantActive(ctx) &&
+		lease.sessionActive(ctx) &&
 		lease.taskOwned(ctx)
 }
 
