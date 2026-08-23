@@ -145,7 +145,11 @@ func findLocked(directory, name string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm()&0o077 != 0 {
+	// Windows FileMode permission bits do not represent the directory ACL. The
+	// cache remains scoped to the per-user data root there; retain POSIX mode
+	// enforcement on platforms where those bits are authoritative.
+	unsafePermissions := runtime.GOOS != "windows" && info.Mode().Perm()&0o077 != 0
+	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || unsafePermissions {
 		return "", fmt.Errorf("cached component %s has unsafe type or permissions", name)
 	}
 	if info.Size() != entry.Size {
