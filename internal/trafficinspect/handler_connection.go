@@ -14,6 +14,7 @@ type transparentConn struct {
 
 	done          chan struct{}
 	closeOnce     sync.Once
+	closeErr      error
 	writeAccess   sync.Mutex
 	suppressReply bool
 }
@@ -38,12 +39,11 @@ func (c *transparentConn) Write(payload []byte) (int, error) {
 }
 
 func (c *transparentConn) Close() error {
-	var closeErr error
 	c.closeOnce.Do(func() {
-		closeErr = c.Conn.Close()
+		c.closeErr = c.Conn.Close()
 		close(c.done)
 	})
-	return closeErr
+	return c.closeErr
 }
 
 type connectionResponseWriter struct {
