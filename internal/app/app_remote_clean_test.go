@@ -18,13 +18,57 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
 )
 
-//nolint:gocyclo // The integration flow intentionally validates one complete clean-directory startup lifecycle.
 func TestCleanDirectoryWithOnlyServerURLBrowsesRemoteInventory(t *testing.T) {
 	cleanDirectory := t.TempDir()
 	profilePath := filepath.Join(cleanDirectory, "servers.json")
 	if entries, err := os.ReadDir(cleanDirectory); err != nil || len(entries) != 0 {
 		t.Fatalf("initial directory = %v, %v", entries, err)
 	}
+	server := newCleanInventoryServer(t)
+
+	credentialStore := &memoryCredentialStore{values: map[string]credentials.Credential{}}
+	application := newApp("2.0.0", nil, appDependencies{
+		profilePath: profilePath, credentialStore: credentialStore, httpClient: server.Client(),
+	})
+	t.Cleanup(func() { application.shutdown(context.Background()) })
+	bootstrap, err := application.Bootstrap()
+	if err != nil || len(bootstrap.ServerProfiles.Profiles) != 0 {
+		t.Fatalf("clean bootstrap = %#v, %v", bootstrap, err)
+	}
+	profileResult, err := application.SaveServerProfile(SaveServerProfileRequest{BaseURL: server.URL, Activate: true})
+	if err != nil || profileResult.Profile.ID != "clean-service" {
+		t.Fatalf("save URL-only profile = %#v, %v", profileResult, err)
+	}
+	if err := credentialStore.Set("clean-service", credentials.Credential{
+		AccessToken: "clean-access", RefreshToken: "clean-refresh", DeviceID: "clean-device",
+		AccessExpiresAt: time.Now().Add(time.Hour), RefreshExpiresAt: time.Now().Add(24 * time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	inventory, err := application.LoadServerInventory("clean-service", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inventory.Namespace != "development" || len(inventory.Pods) != 1 || inventory.Pods[0].Name != "api-0" ||
+		inventory.Session == nil || inventory.DataPlane != nil || len(inventory.Services) != 0 {
+		t.Fatalf("remote-only inventory = %#v", inventory)
+	}
+	if _, err := os.Stat(profilePath); err != nil {
+		t.Fatalf("Server Profile was not persisted in clean directory: %v", err)
+	}
+	for _, directory := range []string{"config", "data", "state", "secrets", "cache"} {
+		info, err := os.Stat(filepath.Join(cleanDirectory, directory))
+		if err != nil || !info.IsDir() {
+			t.Fatalf("standard user directory %q is unavailable: %v", directory, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(cleanDirectory, "config", "kubeconfig")); !os.IsNotExist(err) {
+		t.Fatalf("unexpected kubeconfig file exists: %v", err)
+	}
+}
+
+func newCleanInventoryServer(t *testing.T) *httptest.Server {
+	t.Helper()
 	network, err := networkspec.Normalize(networkspec.Spec{
 		PodCIDRs: []string{"10.244.0.0/16"}, ServiceIPs: []string{"10.96.0.10"},
 		DNSServer: "10.96.0.10", ClusterDomains: []string{"cluster.local"},
@@ -109,44 +153,5 @@ func TestCleanDirectoryWithOnlyServerURLBrowsesRemoteInventory(t *testing.T) {
 		}
 	}))
 	t.Cleanup(server.Close)
-
-	credentialStore := &memoryCredentialStore{values: map[string]credentials.Credential{}}
-	application := newApp("2.0.0", nil, appDependencies{
-		profilePath: profilePath, credentialStore: credentialStore, httpClient: server.Client(),
-	})
-	t.Cleanup(func() { application.shutdown(context.Background()) })
-	bootstrap, err := application.Bootstrap()
-	if err != nil || len(bootstrap.ServerProfiles.Profiles) != 0 {
-		t.Fatalf("clean bootstrap = %#v, %v", bootstrap, err)
-	}
-	profileResult, err := application.SaveServerProfile(SaveServerProfileRequest{BaseURL: server.URL, Activate: true})
-	if err != nil || profileResult.Profile.ID != "clean-service" {
-		t.Fatalf("save URL-only profile = %#v, %v", profileResult, err)
-	}
-	if err := credentialStore.Set("clean-service", credentials.Credential{
-		AccessToken: "clean-access", RefreshToken: "clean-refresh", DeviceID: "clean-device",
-		AccessExpiresAt: time.Now().Add(time.Hour), RefreshExpiresAt: time.Now().Add(24 * time.Hour),
-	}); err != nil {
-		t.Fatal(err)
-	}
-	inventory, err := application.LoadServerInventory("clean-service", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if inventory.Namespace != "development" || len(inventory.Pods) != 1 || inventory.Pods[0].Name != "api-0" ||
-		inventory.Session == nil || inventory.DataPlane != nil || len(inventory.Services) != 0 {
-		t.Fatalf("remote-only inventory = %#v", inventory)
-	}
-	if _, err := os.Stat(profilePath); err != nil {
-		t.Fatalf("Server Profile was not persisted in clean directory: %v", err)
-	}
-	for _, directory := range []string{"config", "data", "state", "secrets", "cache"} {
-		info, err := os.Stat(filepath.Join(cleanDirectory, directory))
-		if err != nil || !info.IsDir() {
-			t.Fatalf("standard user directory %q is unavailable: %v", directory, err)
-		}
-	}
-	if _, err := os.Stat(filepath.Join(cleanDirectory, "config", "kubeconfig")); !os.IsNotExist(err) {
-		t.Fatalf("unexpected kubeconfig file exists: %v", err)
-	}
+	return server
 }

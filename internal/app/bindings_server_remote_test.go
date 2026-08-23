@@ -20,8 +20,69 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
 )
 
-//nolint:gocyclo // The integration flow intentionally asserts one inventory load across all advertised capabilities.
 func TestLoadServerInventoryUsesCapabilitiesAndRemembersNamespace(t *testing.T) {
+	server, serviceCalls := newCapabilityInventoryServer(t)
+	profileStore, err := clientprofile.Open(filepath.Join(t.TempDir(), "servers.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := profileStore.Upsert(clientprofile.Profile{ID: "service-1", BaseURL: server.URL}); err != nil {
+		t.Fatal(err)
+	}
+	credentialStore := &memoryCredentialStore{values: map[string]credentials.Credential{"service-1": {
+		AccessToken: "access-token", RefreshToken: "refresh-token", DeviceID: "device-1",
+		AccessExpiresAt: time.Now().Add(time.Minute), RefreshExpiresAt: time.Now().Add(time.Hour),
+	}}}
+	authClient := clientauth.New(clientauth.Config{HTTPClient: server.Client()})
+	remoteClient, err := clientremote.New(credentialStore, authClient, clientremote.Config{HTTPClient: server.Client()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	remoteSessions, err := clientremotesession.New(remoteClient, clientremotesession.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = remoteSessions.Shutdown(ctx)
+	}()
+	application := &App{
+		profiles: profileStore, credentials: credentialStore, auth: authClient,
+		remote: remoteClient, remoteSessions: remoteSessions,
+	}
+	result, err := application.LoadServerInventory("service-1", "development")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.KubernetesVersion != "v1.31.2" || result.GatewayVersion != "v2-test" ||
+		result.Namespace != "development" {
+		t.Fatalf("inventory = %#v", result)
+	}
+	if result.Session == nil || result.Session.State != "active" || result.Network == nil {
+		t.Fatalf("remote Session = %#v", result.Session)
+	}
+	if len(result.Namespaces) != 2 || result.Namespaces[0].Name != "development" || len(result.Pods) != 2 ||
+		result.Pods[0].Name != "api-0" {
+		t.Fatalf("inventory sorting = %#v", result)
+	}
+	if len(result.Services) != 0 || *serviceCalls != 0 {
+		t.Fatalf("unauthorized services were requested: result=%#v calls=%d", result.Services, *serviceCalls)
+	}
+	if profileStore.Snapshot().Profiles[0].LastNamespace != "development" {
+		t.Fatalf("profile = %#v", profileStore.Snapshot().Profiles[0])
+	}
+	raw, err := json.Marshal(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "access-token") || strings.Contains(string(raw), "refresh-token") {
+		t.Fatalf("credentials leaked into Wails result: %s", raw)
+	}
+}
+
+func newCapabilityInventoryServer(t *testing.T) (*httptest.Server, *int) {
+	t.Helper()
 	spec, err := networkspec.Normalize(networkspec.Spec{
 		PodCIDRs: []string{"10.2.0.0/16"}, ServiceCIDRs: []string{"10.96.0.0/12"},
 		ServiceIPs: []string{"10.96.0.10"}, DNSServer: "10.96.0.10",
@@ -78,62 +139,6 @@ func TestLoadServerInventoryUsesCapabilitiesAndRemembersNamespace(t *testing.T) 
 			http.NotFound(writer, request)
 		}
 	}))
-	defer server.Close()
-	profileStore, err := clientprofile.Open(filepath.Join(t.TempDir(), "servers.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := profileStore.Upsert(clientprofile.Profile{ID: "service-1", BaseURL: server.URL}); err != nil {
-		t.Fatal(err)
-	}
-	credentialStore := &memoryCredentialStore{values: map[string]credentials.Credential{"service-1": {
-		AccessToken: "access-token", RefreshToken: "refresh-token", DeviceID: "device-1",
-		AccessExpiresAt: time.Now().Add(time.Minute), RefreshExpiresAt: time.Now().Add(time.Hour),
-	}}}
-	authClient := clientauth.New(clientauth.Config{HTTPClient: server.Client()})
-	remoteClient, err := clientremote.New(credentialStore, authClient, clientremote.Config{HTTPClient: server.Client()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	remoteSessions, err := clientremotesession.New(remoteClient, clientremotesession.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-		defer cancel()
-		_ = remoteSessions.Shutdown(ctx)
-	}()
-	application := &App{
-		profiles: profileStore, credentials: credentialStore, auth: authClient,
-		remote: remoteClient, remoteSessions: remoteSessions,
-	}
-	result, err := application.LoadServerInventory("service-1", "development")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result.KubernetesVersion != "v1.31.2" || result.GatewayVersion != "v2-test" ||
-		result.Namespace != "development" {
-		t.Fatalf("inventory = %#v", result)
-	}
-	if result.Session == nil || result.Session.State != "active" || result.Network == nil {
-		t.Fatalf("remote Session = %#v", result.Session)
-	}
-	if len(result.Namespaces) != 2 || result.Namespaces[0].Name != "development" || len(result.Pods) != 2 ||
-		result.Pods[0].Name != "api-0" {
-		t.Fatalf("inventory sorting = %#v", result)
-	}
-	if len(result.Services) != 0 || serviceCalls != 0 {
-		t.Fatalf("unauthorized services were requested: result=%#v calls=%d", result.Services, serviceCalls)
-	}
-	if profileStore.Snapshot().Profiles[0].LastNamespace != "development" {
-		t.Fatalf("profile = %#v", profileStore.Snapshot().Profiles[0])
-	}
-	raw, err := json.Marshal(result)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(raw), "access-token") || strings.Contains(string(raw), "refresh-token") {
-		t.Fatalf("credentials leaked into Wails result: %s", raw)
-	}
+	t.Cleanup(server.Close)
+	return server, &serviceCalls
 }
