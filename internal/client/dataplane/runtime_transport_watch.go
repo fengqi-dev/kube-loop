@@ -48,6 +48,12 @@ func signalClosed(signal <-chan struct{}) bool {
 	}
 }
 
+func (runtime *Runtime) startControlWatch(control net.Conn, transportDone chan struct{}) {
+	runtime.transportWG.Go(func() {
+		runtime.watchControl(control, transportDone)
+	})
+}
+
 func (runtime *Runtime) watchControl(control net.Conn, transportDone chan struct{}) {
 	var buffer [1]byte
 	_, err := control.Read(buffer[:])

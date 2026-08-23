@@ -67,6 +67,7 @@ func (runtime *Runtime) Close() error {
 		for _, streams := range draining {
 			result = errors.Join(result, closeConnection(streams.control), closeForwarder(streams.forwarder))
 		}
+		runtime.transportWG.Wait()
 		close(runtime.done)
 	})
 	return result

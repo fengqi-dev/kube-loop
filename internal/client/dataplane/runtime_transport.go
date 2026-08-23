@@ -81,7 +81,7 @@ func startWithLifetime(
 	}
 	bridge.SetLogHandler(runtime.appendSOCKSLog)
 	runtime.appendSOCKSLog("listening on " + bridge.Addr().String())
-	go runtime.watchControl(transport.control, runtime.transportDone)
+	runtime.startControlWatch(transport.control, runtime.transportDone)
 	go runtime.watchContext(runtimeCtx)
 	return runtime, nil
 }

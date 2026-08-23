@@ -103,9 +103,11 @@ func (runtime *Runtime) Reconnect(
 			return fmt.Errorf("restore TUN for refreshed NetworkSpec: %w", err)
 		}
 	}
+	runtime.transportWG.Go(func() {
+		runtime.watchControl(transport.control, transportDone)
+	})
 	runtime.transportMu.Unlock()
 	runtime.stateMu.Unlock()
-	go runtime.watchControl(transport.control, transportDone)
 	return nil
 }
 

@@ -955,6 +955,32 @@ func TestRuntimeCloseReportsAllErrorsAndClosesResourcesOnce(t *testing.T) {
 	}
 }
 
+func TestRuntimeCloseWaitsForTransportWatchers(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	runtime := &Runtime{
+		ctx: ctx, cancel: cancel,
+		bridge: &testBridge{address: testAddress("127.0.0.1:45010")},
+		done:   make(chan struct{}), transportDone: make(chan struct{}),
+	}
+	runtime.transportWG.Add(1)
+	closed := make(chan error, 1)
+	go func() { closed <- runtime.Close() }()
+	select {
+	case err := <-closed:
+		t.Fatalf("Close returned before transport watcher completed: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	runtime.transportWG.Done()
+	select {
+	case err := <-closed:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Close did not wait for transport watcher")
+	}
+}
+
 func TestReconnectKeepsSuccessfulTransportContextAlive(t *testing.T) {
 	spec, err := networkspec.Normalize(networkspec.Spec{ServiceIPs: []string{"10.96.0.10"}})
 	if err != nil {

@@ -124,6 +124,7 @@ type Runtime struct {
 	transportDone chan struct{}
 	transportErr  error
 	streams       map[chan struct{}]*transportStreams
+	transportWG   sync.WaitGroup
 	errMu         sync.Mutex
 	err           error
 	logMu         sync.Mutex
