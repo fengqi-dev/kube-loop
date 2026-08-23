@@ -92,7 +92,8 @@ func Start(
 	} else {
 		ctx, cancel = context.WithDeadline(parent, identity.AccessExpiresAt.UTC())
 	}
-	go watch(ctx, cancel, store, identity, session.ID, config)
+	leaseContext := ctx
+	var releaseRuntime func()
 	if config.Runtime != nil {
 		runtimeContext, release, err := config.Runtime.AttachRuntime(
 			ctx,
@@ -103,12 +104,17 @@ func Start(
 			cancel()
 			return nil, nil, err
 		}
-		return runtimeContext, func() {
+		leaseContext = runtimeContext
+		releaseRuntime = release
+	}
+	go watch(ctx, cancel, store, identity, session.ID, config)
+	if releaseRuntime != nil {
+		return leaseContext, func() {
 			cancel()
-			release()
+			releaseRuntime()
 		}, nil
 	}
-	return ctx, cancel, nil
+	return leaseContext, cancel, nil
 }
 
 func watch(

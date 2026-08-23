@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"path/filepath"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/google/uuid"
@@ -27,6 +29,39 @@ func (denyingAuthorizer) Authorize(
 	authorization.Request,
 ) authorization.Decision {
 	return authorization.Decision{}
+}
+
+type countingDenyingAuthorizer struct{ calls *atomic.Int64 }
+
+func (authorizer countingDenyingAuthorizer) Authorize(
+	context.Context,
+	authorization.Subject,
+	authorization.Request,
+) authorization.Decision {
+	authorizer.calls.Add(1)
+	return authorization.Decision{}
+}
+
+type emptyStore struct{}
+
+func (emptyStore) OAuthSessions() storage.OAuthSessionRepository { return nil }
+func (emptyStore) Sessions() storage.SessionRepository           { return nil }
+func (emptyStore) Tasks() storage.TaskRepository                 { return nil }
+
+type blockingRuntime struct {
+	entered chan struct{}
+	release chan struct{}
+	err     error
+}
+
+func (runtime *blockingRuntime) AttachRuntime(
+	context.Context,
+	string,
+	string,
+) (context.Context, func(), error) {
+	close(runtime.entered)
+	<-runtime.release
+	return nil, nil, runtime.err
 }
 
 func TestLeaseUsesEarliestAccessAndSessionExpiry(t *testing.T) {
@@ -64,6 +99,68 @@ func TestLeaseUsesEarliestAccessAndSessionExpiry(t *testing.T) {
 	); err == nil {
 		t.Fatal("expired Session produced a lease")
 	}
+}
+
+func TestLeaseStartsWatcherOnlyAfterRuntimeAttach(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		const interval = 10 * time.Millisecond
+		now := time.Date(2026, 8, 23, 12, 0, 0, 0, time.UTC)
+		attachErr := errors.New("attach failed")
+		runtime := &blockingRuntime{
+			entered: make(chan struct{}),
+			release: make(chan struct{}),
+			err:     attachErr,
+		}
+		released := false
+		defer func() {
+			if !released {
+				close(runtime.release)
+			}
+		}()
+		var authorizationCalls atomic.Int64
+		result := make(chan error, 1)
+		go func() {
+			_, _, err := Start(
+				t.Context(),
+				emptyStore{},
+				controlplaneapi.Identity{Subject: "identity", DeviceID: "device"},
+				sessionapi.ActiveSession{ID: "session", ExpiresAt: now.Add(time.Hour)},
+				Config{
+					Now:           func() time.Time { return now },
+					CheckInterval: interval,
+					Runtime:       runtime,
+					Authorizer: countingDenyingAuthorizer{
+						calls: &authorizationCalls,
+					},
+				},
+			)
+			result <- err
+		}()
+
+		synctest.Wait()
+		select {
+		case <-runtime.entered:
+		default:
+			t.Fatal("runtime attach did not start")
+		}
+		time.Sleep(interval)
+		synctest.Wait()
+		if got := authorizationCalls.Load(); got != 0 {
+			t.Fatalf("authorization calls before runtime attach = %d, want 0", got)
+		}
+
+		close(runtime.release)
+		released = true
+		synctest.Wait()
+		select {
+		case err := <-result:
+			if !errors.Is(err, attachErr) {
+				t.Fatalf("Start error = %v, want %v", err, attachErr)
+			}
+		default:
+			t.Fatal("Start did not return after runtime attach failed")
+		}
+	})
 }
 
 func TestLeaseFollowsHeartbeatExtendedSessionExpiry(t *testing.T) {
