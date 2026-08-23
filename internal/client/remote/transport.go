@@ -11,75 +11,8 @@ import (
 	"net/url"
 	"strings"
 
-	clientauth "github.com/fengqi-dev/kube-loop/internal/client/auth"
-	"github.com/fengqi-dev/kube-loop/internal/client/credentials"
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
 )
-
-func (client *Client) openTaskWebSocket(
-	ctx context.Context,
-	serverProfile profile.Profile,
-	current Session,
-	streamPath string,
-) (*websocket.Conn, error) {
-	baseURL, err := profile.NormalizeBaseURL(serverProfile.BaseURL)
-	if err != nil {
-		return nil, err
-	}
-	endpoint, err := url.Parse(baseURL)
-	if err != nil {
-		return nil, errors.New("server Profile URL is invalid")
-	}
-	if endpoint.Scheme == "https" {
-		endpoint.Scheme = remoteWSSScheme
-	} else {
-		endpoint.Scheme = "ws"
-	}
-	endpoint.Path = streamPath
-	endpoint.RawQuery = url.Values{remoteParamNamespace: {current.Namespace}}.Encode()
-	credential, err := client.usableCredential(ctx, serverProfile, "")
-	if err != nil {
-		return nil, err
-	}
-	connection, status, err := client.dialWebSocket(ctx, endpoint.String(), credential.AccessToken)
-	if err == nil {
-		return connection, nil
-	}
-	if status != http.StatusUnauthorized {
-		return nil, err
-	}
-	credential, refreshErr := client.usableCredential(ctx, serverProfile, credential.AccessToken)
-	if refreshErr != nil {
-		return nil, refreshErr
-	}
-	connection, _, err = client.dialWebSocket(ctx, endpoint.String(), credential.AccessToken)
-	return connection, err
-}
-
-func (client *Client) dialWebSocket(
-	ctx context.Context,
-	endpoint,
-	accessToken string,
-) (*websocket.Conn, int, error) {
-	connection, response, err := websocket.Dial(ctx, endpoint, &websocket.DialOptions{
-		HTTPClient:      client.httpClient,
-		HTTPHeader:      http.Header{"Authorization": {"Bearer " + accessToken}},
-		CompressionMode: websocket.CompressionDisabled,
-	})
-	if err == nil {
-		return connection, 0, nil
-	}
-	if response == nil {
-		return nil, 0, fmt.Errorf("gateway WebSocket stream failed: %w", err)
-	}
-	status := response.StatusCode
-	contents, readErr := io.ReadAll(io.LimitReader(response.Body, maximumResponseBytes+1))
-	if bodyErr := errors.Join(readErr, response.Body.Close()); bodyErr != nil {
-		return nil, status, fmt.Errorf("read Gateway WebSocket error response: %w", bodyErr)
-	}
-	return nil, status, decodeAPIError(status, contents)
-}
 
 func (client *Client) getJSON(
 	ctx context.Context,
@@ -165,57 +98,6 @@ func (client *Client) doJSONBody(
 		return errors.New("gateway response must contain one JSON document")
 	}
 	return nil
-}
-
-func (client *Client) usableCredential(
-	ctx context.Context,
-	serverProfile profile.Profile,
-	rejectedAccessToken string,
-) (credentials.Credential, error) {
-	current, err := client.credentials.Get(serverProfile.ID)
-	if err != nil {
-		return credentials.Credential{}, err
-	}
-	if rejectedAccessToken == "" && current.AccessExpiresAt.After(client.now().Add(client.refreshAhead)) {
-		return current, nil
-	}
-	client.refreshMu.Lock()
-	defer client.refreshMu.Unlock()
-	current, err = client.credentials.Get(serverProfile.ID)
-	if err != nil {
-		return credentials.Credential{}, err
-	}
-	if rejectedAccessToken != "" && current.AccessToken != rejectedAccessToken {
-		return current, nil
-	}
-	if rejectedAccessToken == "" && current.AccessExpiresAt.After(client.now().Add(client.refreshAhead)) {
-		return current, nil
-	}
-	if !current.RefreshExpiresAt.IsZero() && !current.RefreshExpiresAt.After(client.now()) {
-		return credentials.Credential{}, client.expiredLogin(serverProfile.ID)
-	}
-	refreshed, err := client.refresher.Refresh(ctx, serverProfile.BaseURL, current)
-	if err != nil {
-		if clientauth.IsInvalidGrant(err) {
-			return credentials.Credential{}, client.expiredLogin(serverProfile.ID)
-		}
-		return credentials.Credential{}, fmt.Errorf("refresh Gateway login: %w", err)
-	}
-	if err := client.credentials.Set(serverProfile.ID, refreshed); err != nil {
-		return credentials.Credential{}, fmt.Errorf("store refreshed Gateway login: %w", err)
-	}
-	return refreshed, nil
-}
-
-func (client *Client) expiredLogin(profileID string) error {
-	deleteErr := client.credentials.Delete(profileID)
-	if deleteErr != nil && !errors.Is(deleteErr, credentials.ErrNotFound) {
-		return errors.Join(
-			clientauth.ErrLoginExpired,
-			fmt.Errorf("clear expired Gateway login: %w", deleteErr),
-		)
-	}
-	return clientauth.ErrLoginExpired
 }
 
 func (client *Client) request(
