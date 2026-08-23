@@ -21,6 +21,11 @@ type udpPrimaryAssociation struct {
 	lastSeen time.Time
 }
 
+type expiredUDPAssociation struct {
+	id          uint64
+	association *udpPrimaryAssociation
+}
+
 func (relay *mirrorRelay) readUDP(ctx context.Context, index int, binding trafficlistener.UDPBinding) error {
 	buffer := make([]byte, 65507)
 	for {
@@ -131,22 +136,32 @@ func (relay *mirrorRelay) reapUDP(ctx context.Context) error {
 			return nil
 		case <-ticker.C:
 			cutoff := relay.config.Now().UTC().Add(-relay.config.UDPIdleTimeout)
-			var expired []uint64
-			relay.mu.Lock()
-			for id, association := range relay.udp {
-				if !association.lastSeen.After(cutoff) {
-					expired = append(expired, id)
-				}
-			}
-			relay.mu.Unlock()
-			for _, id := range expired {
-				if relay.removeUDP(id) {
-					relay.emit(mirrorstream.Frame{Type: mirrorstream.Close, StreamID: id})
-					relay.clearDropped(id)
-				}
+			for _, expired := range relay.claimExpiredUDP(cutoff) {
+				_ = expired.association.primary.Close()
+				relay.emit(mirrorstream.Frame{Type: mirrorstream.Close, StreamID: expired.id})
+				relay.clearDropped(expired.id)
 			}
 		}
 	}
+}
+
+func (relay *mirrorRelay) claimExpiredUDP(
+	cutoff time.Time,
+) []expiredUDPAssociation {
+	relay.mu.Lock()
+	defer relay.mu.Unlock()
+	expired := make([]expiredUDPAssociation, 0)
+	for id, association := range relay.udp {
+		if association.lastSeen.After(cutoff) {
+			continue
+		}
+		delete(relay.udp, id)
+		delete(relay.udpKeys, association.key)
+		expired = append(expired, expiredUDPAssociation{
+			id: id, association: association,
+		})
+	}
+	return expired
 }
 
 func cloneUDPAddress(address *net.UDPAddr) *net.UDPAddr {

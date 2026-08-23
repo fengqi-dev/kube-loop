@@ -120,6 +120,36 @@ func TestMirrorRelayDropsOverflowedShadowStreamUntilClose(t *testing.T) {
 	}
 }
 
+func TestClaimExpiredUDPPreservesFreshAssociation(t *testing.T) {
+	cutoff := time.Date(2026, 8, 23, 12, 0, 0, 0, time.UTC)
+	stale := &udpPrimaryAssociation{key: "stale", lastSeen: cutoff}
+	fresh := &udpPrimaryAssociation{
+		key: "fresh", lastSeen: cutoff.Add(time.Nanosecond),
+	}
+	relay := &mirrorRelay{
+		udp: map[uint64]*udpPrimaryAssociation{1: stale, 2: fresh},
+		udpKeys: map[string]uint64{
+			stale.key: 1,
+			fresh.key: 2,
+		},
+	}
+
+	expired := relay.claimExpiredUDP(cutoff)
+	if len(expired) != 1 || expired[0].id != 1 ||
+		expired[0].association != stale {
+		t.Fatalf("expired UDP associations = %#v", expired)
+	}
+	if relay.udp[2] != fresh || relay.udpKeys[fresh.key] != 2 {
+		t.Fatal("fresh UDP association was removed")
+	}
+	if _, exists := relay.udp[1]; exists {
+		t.Fatal("stale UDP association remains in ID index")
+	}
+	if _, exists := relay.udpKeys[stale.key]; exists {
+		t.Fatal("stale UDP association remains in key index")
+	}
+}
+
 type relayFixture struct {
 	listeners *trafficlistener.Listeners
 	shadow    *trafficstream.FrameConn

@@ -5,20 +5,19 @@ import (
 	"net"
 )
 
-func (relay *mirrorRelay) removeTCP(id uint64) bool {
+func (relay *mirrorRelay) removeTCP(id uint64) {
 	relay.mu.Lock()
 	stream := relay.tcp[id]
 	delete(relay.tcp, id)
 	relay.mu.Unlock()
 	if stream == nil {
-		return false
+		return
 	}
 	_ = stream.client.Close()
 	_ = stream.primary.Close()
-	return true
 }
 
-func (relay *mirrorRelay) removeUDP(id uint64) bool {
+func (relay *mirrorRelay) removeUDP(id uint64) {
 	relay.mu.Lock()
 	association := relay.udp[id]
 	if association != nil {
@@ -27,10 +26,9 @@ func (relay *mirrorRelay) removeUDP(id uint64) bool {
 	}
 	relay.mu.Unlock()
 	if association == nil {
-		return false
+		return
 	}
 	_ = association.primary.Close()
-	return true
 }
 
 func (relay *mirrorRelay) closeStreams() {
