@@ -3,9 +3,11 @@ package httpapi
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 )
@@ -57,6 +59,61 @@ func TestOAuthClientCRUDAndSecretRotation(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	listed := oauthClientRequest(
+		t, handler, cookie, csrf, http.MethodGet, "/oauth-clients", nil, nil,
+	)
+	if listed.Code != http.StatusOK || !bytes.Contains(listed.Body.Bytes(), []byte(`"automation"`)) {
+		t.Fatalf("list status=%d body=%s", listed.Code, listed.Body.String())
+	}
+
+	stored, err := store.OAuthClients().Get(t.Context(), "automation")
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated := oauthClientRequest(
+		t,
+		handler,
+		cookie,
+		csrf,
+		http.MethodPut,
+		"/oauth-clients/automation",
+		map[string]any{
+			nameField:         "Updated Automation",
+			publicField:       false,
+			redirectURIsField: []string{"https://client.example/callback"},
+			grantTypesField:   []string{"client_credentials"},
+			scopesField:       []string{"kubeloop.api"},
+			enabledField:      true,
+			"reason":          "update automation client",
+		},
+		map[string]string{"If-Match": iamETag(stored.UpdatedAt)},
+	)
+	if updated.Code != http.StatusOK ||
+		!bytes.Contains(updated.Body.Bytes(), []byte(`"Updated Automation"`)) ||
+		updated.Header().Get("ETag") == "" {
+		t.Fatalf("update status=%d headers=%v body=%s", updated.Code, updated.Header(), updated.Body.String())
+	}
+
+	stored, err = store.OAuthClients().Get(t.Context(), "automation")
+	if err != nil {
+		t.Fatal(err)
+	}
+	disabled := oauthClientRequest(
+		t,
+		handler,
+		cookie,
+		csrf,
+		http.MethodPost,
+		"/oauth-clients/automation/enabled",
+		map[string]any{"enabled": false, "reason": "disable automation client"},
+		map[string]string{"If-Match": iamETag(stored.UpdatedAt)},
+	)
+	if disabled.Code != http.StatusOK ||
+		!bytes.Contains(disabled.Body.Bytes(), []byte(`"enabled":false`)) ||
+		disabled.Header().Get("ETag") == "" {
+		t.Fatalf("disable status=%d headers=%v body=%s", disabled.Code, disabled.Header(), disabled.Body.String())
+	}
+
 	rotated := oauthClientWrite(
 		t,
 		handler,
@@ -73,6 +130,58 @@ func TestOAuthClientCRUDAndSecretRotation(t *testing.T) {
 			rotated.Code,
 			rotated.Body.String(),
 		)
+	}
+
+	stored, err = store.OAuthClients().Get(t.Context(), "automation")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	scopeHash := bytes.Repeat([]byte{7}, 32)
+	if err := store.OAuthConsents().Grant(t.Context(), storage.OAuthConsent{
+		IdentityID: stored.MachineIdentityID,
+		ClientID:   stored.ID,
+		ScopeHash:  scopeHash,
+		Scopes:     []string{"kubeloop.api"},
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	revoked := oauthClientRequest(
+		t,
+		handler,
+		cookie,
+		csrf,
+		http.MethodDelete,
+		"/oauth-clients/automation/consents/"+stored.MachineIdentityID,
+		nil,
+		map[string]string{"X-Kubeloop-Reason": "revoke automation consent"},
+	)
+	if revoked.Code != http.StatusNoContent {
+		t.Fatalf("revoke consent status=%d body=%s", revoked.Code, revoked.Body.String())
+	}
+	if has, err := store.OAuthConsents().Has(
+		t.Context(), stored.MachineIdentityID, stored.ID, scopeHash,
+	); err != nil || has {
+		t.Fatalf("revoked consent has=%t error=%v", has, err)
+	}
+
+	deleted := oauthClientRequest(
+		t,
+		handler,
+		cookie,
+		csrf,
+		http.MethodDelete,
+		"/oauth-clients/automation",
+		nil,
+		map[string]string{"X-Kubeloop-Reason": "delete automation client"},
+	)
+	if deleted.Code != http.StatusNoContent {
+		t.Fatalf("delete status=%d body=%s", deleted.Code, deleted.Body.String())
+	}
+	if _, err := store.OAuthClients().Get(t.Context(), "automation"); !errors.Is(err, storage.ErrNotFound) {
+		t.Fatalf("deleted OAuth client error=%v", err)
 	}
 
 	invalid := oauthClientWrite(
@@ -171,15 +280,36 @@ func oauthClientWrite(
 	body any,
 ) *httptest.ResponseRecorder {
 	t.Helper()
-	raw, err := json.Marshal(body)
-	if err != nil {
-		t.Fatal(err)
+	return oauthClientRequest(t, handler, cookie, csrf, method, path, body, nil)
+}
+
+func oauthClientRequest(
+	t *testing.T,
+	handler *Handler,
+	cookie *http.Cookie,
+	csrf, method, path string,
+	body any,
+	headers map[string]string,
+) *httptest.ResponseRecorder {
+	t.Helper()
+	var raw []byte
+	var err error
+	if body != nil {
+		raw, err = json.Marshal(body)
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 	request := httptest.NewRequest(method, path, bytes.NewReader(raw))
 	request.AddCookie(cookie)
 	request.Header.Set("Origin", "https://gateway.example")
-	request.Header.Set("Content-Type", "application/json")
+	if body != nil {
+		request.Header.Set("Content-Type", "application/json")
+	}
 	request.Header.Set(CSRFHeaderName, csrf)
+	for name, value := range headers {
+		request.Header.Set(name, value)
+	}
 	recorder := httptest.NewRecorder()
 	serveHTTP(handler, recorder, request)
 	return recorder
