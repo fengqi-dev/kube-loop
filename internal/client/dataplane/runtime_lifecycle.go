@@ -28,7 +28,6 @@ func (runtime *Runtime) Err() error {
 }
 
 func (runtime *Runtime) Close() error {
-	var result error
 	runtime.closeOnce.Do(func() {
 		runtime.cancel()
 		runtime.stateMu.Lock()
@@ -41,7 +40,7 @@ func (runtime *Runtime) Close() error {
 			cancelTUN()
 		}
 		if core != nil {
-			result = errors.Join(result, core.Close())
+			runtime.closeErr = errors.Join(runtime.closeErr, core.Close())
 		}
 		runtime.tunWG.Wait()
 		runtime.transportMu.Lock()
@@ -59,19 +58,23 @@ func (runtime *Runtime) Close() error {
 		runtime.streams = nil
 		closeSignal(runtime.transportDone)
 		runtime.transportMu.Unlock()
-		result = errors.Join(
-			result,
+		runtime.closeErr = errors.Join(
+			runtime.closeErr,
 			ignoreClosed(runtime.bridge.Close()),
 			closeConnection(control),
 			closeForwarder(forwarder),
 		)
 		for _, streams := range draining {
-			result = errors.Join(result, closeConnection(streams.control), closeForwarder(streams.forwarder))
+			runtime.closeErr = errors.Join(
+				runtime.closeErr,
+				closeConnection(streams.control),
+				closeForwarder(streams.forwarder),
+			)
 		}
 		runtime.transportWG.Wait()
 		close(runtime.done)
 	})
-	return result
+	return runtime.closeErr
 }
 
 func (runtime *Runtime) watchContext(ctx context.Context) {

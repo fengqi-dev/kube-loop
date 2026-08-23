@@ -119,6 +119,7 @@ type Runtime struct {
 	config       Config
 
 	closeOnce     sync.Once
+	closeErr      error
 	done          chan struct{}
 	stateMu       sync.Mutex
 	transportMu   sync.Mutex
