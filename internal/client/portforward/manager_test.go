@@ -110,6 +110,10 @@ func TestManagerBindsGatewayTaskToLocalOnlyListener(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	//nolint:staticcheck // This test intentionally verifies defensive rejection of a nil context.
+	if err := manager.StopProfile(nil, "server-1"); err == nil {
+		t.Fatal("nil StopProfile context was accepted")
+	}
 	locals := &fakeLocals{}
 	manager.locals = locals
 	serverProfile := profile.Profile{ID: "server-1", BaseURL: "https://gateway.example.test"}

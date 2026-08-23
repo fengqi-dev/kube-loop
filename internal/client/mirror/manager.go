@@ -180,6 +180,9 @@ func (manager *Manager) List(profileID string) []Info {
 }
 
 func (manager *Manager) StopProfile(ctx context.Context, profileID string) error {
+	if ctx == nil {
+		return errors.New("mirror stop Profile context is required")
+	}
 	manager.lifecycle.Lock()
 	defer manager.lifecycle.Unlock()
 	manager.mu.Lock()

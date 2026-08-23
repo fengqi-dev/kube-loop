@@ -166,6 +166,10 @@ func TestManagerRejectsStartAfterShutdown(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	//nolint:staticcheck // This test intentionally verifies defensive rejection of a nil context.
+	if err := manager.StopProfile(nil, "server"); err == nil {
+		t.Fatal("nil StopProfile context was accepted")
+	}
 	if err := manager.Shutdown(t.Context()); err != nil {
 		t.Fatal(err)
 	}
