@@ -160,6 +160,25 @@ func TestManagerRelaysTCPAndUDPOnlyToRetainedLocalTargets(t *testing.T) {
 	}
 }
 
+func TestManagerRejectsStartAfterShutdown(t *testing.T) {
+	client := &testExchangeClient{}
+	manager, err := NewManager(client, Config{TrafficStreams: client})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Shutdown(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Start(
+		t.Context(),
+		profile.Profile{ID: "server"},
+		remote.Session{State: exchangeSessionActive},
+		Request{ProfileID: "server"},
+	); !errors.Is(err, ErrClosed) {
+		t.Fatalf("Start after Shutdown error = %v, want ErrClosed", err)
+	}
+}
+
 func startExchangeTCPRelay(t *testing.T) (uint16, chan error) {
 	t.Helper()
 	listener, err := net.Listen(exchangeProtocolTCP, "127.0.0.1:0")

@@ -33,6 +33,8 @@ type TrafficStreamOpener interface {
 	OpenTrafficStream(context.Context, string, string, string) (*trafficstream.FrameConn, error)
 }
 
+var ErrClosed = errors.New("preview manager is closed")
+
 type Request struct {
 	ProfileID string        `json:"profileId"`
 	Namespace string        `json:"namespace"`
@@ -67,6 +69,7 @@ type Manager struct {
 	dial    DialContextFunc
 
 	lifecycle sync.RWMutex
+	closed    bool
 	mu        sync.Mutex
 	active    map[string]*activePreview
 }
@@ -79,6 +82,9 @@ func (manager *Manager) Start(
 ) (Info, error) {
 	manager.lifecycle.RLock()
 	defer manager.lifecycle.RUnlock()
+	if manager.closed {
+		return Info{}, ErrClosed
+	}
 	if ctx == nil || strings.TrimSpace(request.ProfileID) != serverProfile.ID || session.State != previewSessionActive {
 		return Info{}, errors.New("active Server Profile Session is required")
 	}
@@ -233,6 +239,7 @@ func (manager *Manager) Shutdown(ctx context.Context) error {
 	}
 	manager.lifecycle.Lock()
 	defer manager.lifecycle.Unlock()
+	manager.closed = true
 	manager.mu.Lock()
 	ids := make([]string, 0, len(manager.active))
 	profiles := make(map[string]string, len(manager.active))

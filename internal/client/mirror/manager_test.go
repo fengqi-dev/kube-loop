@@ -199,6 +199,25 @@ func TestManagerCopiesTCPAndUDPRequestsAndDiscardsShadowResponses(t *testing.T) 
 	}
 }
 
+func TestManagerRejectsStartAfterShutdown(t *testing.T) {
+	client := &testMirrorClient{}
+	manager, err := NewManager(client, Config{TrafficStreams: client})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Shutdown(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Start(
+		t.Context(),
+		profile.Profile{ID: "server"},
+		remote.Session{State: mirrorSessionActive},
+		Request{ProfileID: "server"},
+	); !errors.Is(err, ErrClosed) {
+		t.Fatalf("Start after Shutdown error = %v, want ErrClosed", err)
+	}
+}
+
 func TestManagerCompensatesWhenMirrorStreamCannotOpen(t *testing.T) {
 	now := time.Now().UTC()
 	session := remote.Session{
