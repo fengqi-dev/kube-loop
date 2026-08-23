@@ -69,23 +69,8 @@ func (manager *Manager) Start(
 		profile: serverProfile, session: session, request: request, cancel: cancel, done: make(chan struct{}),
 		resumeID: task.ResumeID, temporaryPath: task.TemporaryPath,
 	}
-	manager.persistMu.Lock()
-	manager.mu.Lock()
-	nextTasks := cloneTasks(manager.tasks)
-	manager.mu.Unlock()
-	nextTasks[task.ID] = task
-	if err := manager.persist(nextTasks); err != nil {
-		manager.persistMu.Unlock()
-		cancel()
+	if err := manager.launch(transferContext, task, entry); err != nil {
 		return Task{}, err
 	}
-	manager.mu.Lock()
-	manager.tasks = nextTasks
-	manager.active[task.ID] = entry
-	manager.mu.Unlock()
-	manager.persistMu.Unlock()
-	manager.onEvent(task)
-	manager.wg.Add(1)
-	go manager.run(transferContext, task.ID, entry)
 	return task, nil
 }
