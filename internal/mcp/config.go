@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/zalando/go-keyring"
 
@@ -72,9 +73,11 @@ type persistedConfig struct {
 
 // SystemConfigStore splits non-secret settings from the MCP bearer token.
 type SystemConfigStore struct {
-	path    string
-	secrets SecretBackend
-	service string
+	path      string
+	secrets   SecretBackend
+	service   string
+	mu        sync.Mutex
+	writeFile func(string, []byte, os.FileMode, os.FileMode) error
 }
 
 func DefaultConfigPath() (string, error) {
@@ -120,12 +123,16 @@ func newSystemConfigStoreWithService(path string, secrets SecretBackend, service
 	if secrets == nil {
 		return nil, errors.New("MCP secret store is required")
 	}
-	return &SystemConfigStore{path: absolute, secrets: secrets, service: service}, nil
+	return &SystemConfigStore{
+		path: absolute, secrets: secrets, service: service, writeFile: fsatomic.WriteFile,
+	}, nil
 }
 
 func (store *SystemConfigStore) Path() string { return store.path }
 
 func (store *SystemConfigStore) Load() (Config, error) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
 	settings, err := readPersistedConfig(store.path)
 	if errors.Is(err, os.ErrNotExist) {
 		return DefaultConfig(), nil
@@ -151,11 +158,21 @@ func (store *SystemConfigStore) Load() (Config, error) {
 }
 
 func (store *SystemConfigStore) Save(config Config) error {
+	store.mu.Lock()
+	defer store.mu.Unlock()
 	config, err := normalizeConfig(config)
 	if err != nil {
 		return err
 	}
+	previousToken := ""
+	hadPreviousToken := false
 	if config.Token != "" {
+		previousToken, err = store.secrets.Get(store.service, keyringTokenAccount)
+		if err == nil {
+			hadPreviousToken = true
+		} else if !errors.Is(err, keyring.ErrNotFound) {
+			return fmt.Errorf("read existing MCP token from system keyring: %w", err)
+		}
 		if err := store.secrets.Set(store.service, keyringTokenAccount, config.Token); err != nil {
 			return fmt.Errorf("store MCP token in system keyring: %w", err)
 		}
@@ -168,8 +185,31 @@ func (store *SystemConfigStore) Save(config Config) error {
 		return errors.New("encode MCP settings")
 	}
 	raw = append(raw, '\n')
-	if err := fsatomic.WriteFile(store.path, raw, 0o700, 0o600); err != nil {
-		return fmt.Errorf("save MCP settings: %w", err)
+	writeFile := store.writeFile
+	if writeFile == nil {
+		writeFile = fsatomic.WriteFile
+	}
+	if err := writeFile(store.path, raw, 0o700, 0o600); err != nil {
+		saveErr := fmt.Errorf("save MCP settings: %w", err)
+		if config.Token == "" {
+			return saveErr
+		}
+		rollbackErr := store.restoreToken(previousToken, hadPreviousToken)
+		return errors.Join(saveErr, rollbackErr)
+	}
+	return nil
+}
+
+func (store *SystemConfigStore) restoreToken(previous string, existed bool) error {
+	if existed {
+		if err := store.secrets.Set(store.service, keyringTokenAccount, previous); err != nil {
+			return fmt.Errorf("restore MCP token in system keyring: %w", err)
+		}
+		return nil
+	}
+	if err := store.secrets.Delete(store.service, keyringTokenAccount); err != nil &&
+		!errors.Is(err, keyring.ErrNotFound) {
+		return fmt.Errorf("remove uncommitted MCP token from system keyring: %w", err)
 	}
 	return nil
 }

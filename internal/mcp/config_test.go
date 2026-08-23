@@ -11,6 +11,7 @@ import (
 	"github.com/zalando/go-keyring"
 
 	clientremote "github.com/fengqi-dev/kube-loop/internal/client/remote"
+	"github.com/fengqi-dev/kube-loop/internal/fsatomic"
 )
 
 var clientAPIErrorForTest = clientremote.APIError{
@@ -110,6 +111,66 @@ func TestSystemConfigStoreDefaultsWithoutTouchingKeyring(t *testing.T) {
 	}
 	if config.Port != DefaultPort || !config.TokenEnabled || config.Enabled {
 		t.Fatalf("config=%#v", config)
+	}
+}
+
+func TestSystemConfigStoreRestoresTokenWhenSettingsWriteFails(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "mcp.json")
+	secrets := &memorySecrets{}
+	store, err := newSystemConfigStore(path, secrets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldToken := strings.Repeat("a", 64)
+	oldConfig := Config{Enabled: true, Port: 31999, TokenEnabled: true, Token: oldToken}
+	if err := store.Save(oldConfig); err != nil {
+		t.Fatal(err)
+	}
+	writeErr := errors.New("disk unavailable")
+	store.writeFile = func(path string, raw []byte, dirMode, fileMode os.FileMode) error {
+		if path == store.path {
+			return writeErr
+		}
+		return fsatomic.WriteFile(path, raw, dirMode, fileMode)
+	}
+	newToken := strings.Repeat("b", 64)
+	if err := store.Save(Config{
+		Enabled: true, Port: 32000, TokenEnabled: true, Token: newToken,
+	}); !errors.Is(err, writeErr) {
+		t.Fatalf("Save error = %v", err)
+	}
+	storedToken, err := secrets.Get(store.service, keyringTokenAccount)
+	if err != nil || storedToken != oldToken {
+		t.Fatalf("restored token = %q, %v", storedToken, err)
+	}
+	loaded, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Token != oldToken || loaded.Port != oldConfig.Port {
+		t.Fatalf("loaded config after rollback = %#v", loaded)
+	}
+}
+
+func TestSystemConfigStoreRemovesNewTokenWhenInitialWriteFails(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "mcp.json")
+	secrets := &memorySecrets{}
+	store, err := newSystemConfigStore(path, secrets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeErr := errors.New("disk unavailable")
+	store.writeFile = func(string, []byte, os.FileMode, os.FileMode) error { return writeErr }
+	if err := store.Save(Config{
+		Enabled: true, Port: 31999, TokenEnabled: true, Token: strings.Repeat("a", 64),
+	}); !errors.Is(err, writeErr) {
+		t.Fatalf("Save error = %v", err)
+	}
+	if _, err := secrets.Get(store.service, keyringTokenAccount); !errors.Is(err, keyring.ErrNotFound) {
+		t.Fatalf("uncommitted token remained in keyring: %v", err)
+	}
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("failed initial save created settings file: %v", err)
 	}
 }
 
