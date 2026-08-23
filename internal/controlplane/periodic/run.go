@@ -13,16 +13,37 @@ func Run(
 	interval time.Duration,
 	operation func(context.Context),
 ) {
+	run(ctx, interval, operation, true)
+}
+
+// RunAfter waits for interval before the first invocation, then waits for the
+// same interval after each operation completes.
+func RunAfter(
+	ctx context.Context,
+	interval time.Duration,
+	operation func(context.Context),
+) {
+	run(ctx, interval, operation, false)
+}
+
+func run(
+	ctx context.Context,
+	interval time.Duration,
+	operation func(context.Context),
+	immediate bool,
+) {
 	if ctx == nil || interval <= 0 || operation == nil {
 		return
 	}
-	select {
-	case <-ctx.Done():
-		return
-	default:
+	if immediate {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+		operation(ctx)
 	}
 
-	operation(ctx)
 	timer := time.NewTimer(interval)
 	defer timer.Stop()
 	for {

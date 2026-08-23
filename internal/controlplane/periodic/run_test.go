@@ -72,3 +72,43 @@ func TestRunWaitsAfterOperationCompletes(t *testing.T) {
 		}
 	})
 }
+
+func TestRunAfterWaitsBeforeFirstOperation(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		const interval = time.Second
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+
+		var calls atomic.Int64
+		done := make(chan struct{})
+		go func() {
+			periodic.RunAfter(ctx, interval, func(context.Context) {
+				calls.Add(1)
+			})
+			close(done)
+		}()
+
+		synctest.Wait()
+		if got := calls.Load(); got != 0 {
+			t.Fatalf("initial operation calls = %d, want 0", got)
+		}
+		time.Sleep(interval - time.Nanosecond)
+		synctest.Wait()
+		if got := calls.Load(); got != 0 {
+			t.Fatalf("calls before first interval = %d, want 0", got)
+		}
+		time.Sleep(time.Nanosecond)
+		synctest.Wait()
+		if got := calls.Load(); got != 1 {
+			t.Fatalf("calls at first interval = %d, want 1", got)
+		}
+
+		cancel()
+		synctest.Wait()
+		select {
+		case <-done:
+		default:
+			t.Fatal("RunAfter did not stop after cancellation")
+		}
+	})
+}

@@ -7,6 +7,7 @@ import (
 
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/authorization"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/periodic"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/sessionapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 )
@@ -111,13 +112,10 @@ func watch(
 	sessionID string,
 	config Config,
 ) {
-	ticker := time.NewTicker(config.CheckInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
+	periodic.RunAfter(
+		ctx,
+		config.CheckInterval,
+		func(ctx context.Context) {
 			checkContext, checkCancel := context.WithTimeout(
 				ctx,
 				config.CheckInterval,
@@ -170,8 +168,7 @@ func watch(
 			checkCancel()
 			if !valid {
 				cancel()
-				return
 			}
-		}
-	}
+		},
+	)
 }
