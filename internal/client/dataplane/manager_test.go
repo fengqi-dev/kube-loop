@@ -2,6 +2,7 @@ package dataplane
 
 import (
 	"context"
+	"errors"
 	"net"
 	"strconv"
 	"strings"
@@ -342,6 +343,46 @@ func TestSlowTUNStartDoesNotBlockAnotherProfileStatus(t *testing.T) {
 	starter.unblock()
 	if err := <-tunResult; err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestManagerShutdownWaitsForStatusCallbackAndRejectsConnect(t *testing.T) {
+	callbackStarted := make(chan struct{})
+	releaseCallback := make(chan struct{})
+	var callbackOnce sync.Once
+	manager, err := NewManager(&testTickets{}, Config{OnStatus: func(StatusEvent) {
+		callbackOnce.Do(func() { close(callbackStarted) })
+		<-releaseCallback
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseCallback) }) }
+	t.Cleanup(release)
+	manager.emit("server", Status{State: dataplaneConnected}, nil)
+	select {
+	case <-callbackStarted:
+	case <-time.After(time.Second):
+		t.Fatal("Data Plane status callback did not start")
+	}
+	shutdown := make(chan error, 1)
+	go func() { shutdown <- manager.Shutdown() }()
+	select {
+	case err := <-shutdown:
+		t.Fatalf("Shutdown returned before status callback completed: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	release()
+	if err := <-shutdown; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Connect(
+		t.Context(),
+		profile.Profile{ID: "server"},
+		remote.Session{State: dataplaneSessionActive},
+	); !errors.Is(err, ErrClosed) {
+		t.Fatalf("Connect after Shutdown error = %v, want ErrClosed", err)
 	}
 }
 

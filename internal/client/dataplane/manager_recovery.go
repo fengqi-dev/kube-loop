@@ -96,7 +96,9 @@ func (manager *Manager) syncSession(update remote.SessionUpdate) {
 	status := runtime.Status()
 	status.State = dataplaneReconnecting
 	manager.emit(profileID, status, reason)
-	go manager.recover(profileID, entry, runtime, baseline)
+	manager.workers.Go(func() {
+		manager.recover(profileID, entry, runtime, baseline)
+	})
 }
 
 func (manager *Manager) sessionUpdateLoop(updates <-chan remote.SessionUpdate) {
@@ -169,7 +171,9 @@ func (manager *Manager) recover(profileID string, entry *managedRuntime, failed 
 		operation.Unlock()
 		manager.lifecycle.RUnlock()
 		manager.emit(profileID, failed.Status(), nil)
-		go manager.watch(profileID, entry, failed, failed.TransportDone())
+		manager.workers.Go(func() {
+			manager.watch(profileID, entry, failed, failed.TransportDone())
+		})
 		return
 	}
 	if lastError == nil {

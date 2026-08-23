@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
@@ -41,6 +42,7 @@ const (
 )
 
 var (
+	ErrClosed             = errors.New("data Plane manager is closed")
 	errSystemResumed      = errors.New("system resumed")
 	errNetworkSpecChanged = errors.New("session NetworkSpec changed")
 	errSessionChanged     = errors.New("session generation changed")
@@ -52,6 +54,8 @@ type Manager struct {
 	ctx        context.Context
 	cancel     context.CancelFunc
 	lifecycle  sync.RWMutex
+	workers    sync.WaitGroup
+	closed     atomic.Bool
 	mu         sync.Mutex
 	active     map[string]*managedRuntime
 	hostTCP    map[string]socksbridge.HostTCPHandler
@@ -98,11 +102,15 @@ func NewManager(sessions SessionSource, config Config) (*Manager, error) {
 		events:     make(chan StatusEvent, 32),
 	}
 	if config.OnStatus != nil {
-		go manager.eventLoop(config.OnStatus)
+		manager.workers.Go(func() {
+			manager.eventLoop(config.OnStatus)
+		})
 	}
 	if source, ok := sessions.(sessionUpdateSource); ok {
 		if updates := source.SessionUpdates(); updates != nil {
-			go manager.sessionUpdateLoop(updates)
+			manager.workers.Go(func() {
+				manager.sessionUpdateLoop(updates)
+			})
 		}
 	}
 	return manager, nil

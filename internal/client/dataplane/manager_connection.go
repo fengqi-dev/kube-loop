@@ -18,8 +18,14 @@ func (manager *Manager) Connect(
 	serverProfile profile.Profile,
 	session remote.Session,
 ) (Status, error) {
+	if manager.closed.Load() {
+		return Status{}, ErrClosed
+	}
 	manager.lifecycle.RLock()
 	defer manager.lifecycle.RUnlock()
+	if manager.closed.Load() {
+		return Status{}, ErrClosed
+	}
 	operation := manager.profileOperation(serverProfile.ID)
 	operation.Lock()
 	defer operation.Unlock()
@@ -49,7 +55,9 @@ func (manager *Manager) Connect(
 					baseline := current.session
 					status.State = dataplaneReconnecting
 					manager.emit(serverProfile.ID, status, errSessionChanged)
-					go manager.recover(serverProfile.ID, current, current.runtime, baseline)
+					manager.workers.Go(func() {
+						manager.recover(serverProfile.ID, current, current.runtime, baseline)
+					})
 				}
 				recovering := current.recovering
 				manager.mu.Unlock()
@@ -97,7 +105,9 @@ func (manager *Manager) Connect(
 	manager.mu.Lock()
 	manager.active[serverProfile.ID] = entry
 	manager.mu.Unlock()
-	go manager.watch(serverProfile.ID, entry, runtime, runtime.TransportDone())
+	manager.workers.Go(func() {
+		manager.watch(serverProfile.ID, entry, runtime, runtime.TransportDone())
+	})
 	manager.emit(serverProfile.ID, runtime.Status(), nil)
 	return runtime.Status(), nil
 }
