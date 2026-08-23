@@ -87,6 +87,55 @@ func testAdminSessionRepositoryConformance(t *testing.T, store *Store) {
 	}
 }
 
+func TestAdminSessionRepositoryRevokesAuthorizationSessions(t *testing.T) {
+	store := openSQLiteTestStore(
+		t,
+		filepath.Join(t.TempDir(), "revoke-admin-authorization.db"),
+	)
+	ctx := t.Context()
+	now := time.Date(2026, 8, 10, 16, 0, 0, 0, time.UTC)
+	identityID, authorizationID := seedAdminSessionIdentity(t, store, now)
+	hashes := make([][]byte, 0, 2)
+	for _, value := range []string{"first-management-session", "second-management-session"} {
+		idHash := sha256.Sum256([]byte(value))
+		csrfHash := sha256.Sum256([]byte("csrf-" + value))
+		if err := store.AdminSessions().Create(ctx, AdminSession{
+			IDHash:             idHash[:],
+			IdentityID:         identityID,
+			AuthorizationID:    authorizationID,
+			AuthenticationType: sessionKindNormal,
+			CSRFTokenHash:      csrfHash[:],
+			CreatedAt:          now,
+			LastSeenAt:         now,
+			IdleExpiresAt:      now.Add(15 * time.Minute),
+			AbsoluteExpiresAt:  now.Add(8 * time.Hour),
+		}); err != nil {
+			t.Fatal(err)
+		}
+		hashes = append(hashes, append([]byte(nil), idHash[:]...))
+	}
+
+	revokedAt := now.Add(time.Minute)
+	if err := store.AdminSessions().RevokeAuthorization(ctx, authorizationID, revokedAt); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AdminSessions().RevokeAuthorization(ctx, authorizationID, revokedAt.Add(time.Minute)); err != nil {
+		t.Fatalf("idempotent authorization revoke: %v", err)
+	}
+	for _, idHash := range hashes {
+		session, err := store.AdminSessions().GetByHash(ctx, idHash)
+		if err != nil || session.RevokedAt == nil || !session.RevokedAt.Equal(revokedAt) {
+			t.Fatalf("authorization-revoked management session = %#v, error = %v", session, err)
+		}
+	}
+	if err := store.AdminSessions().RevokeAuthorization(ctx, "", revokedAt); err == nil {
+		t.Fatal("empty authorization ID was accepted")
+	}
+	if err := store.AdminSessions().RevokeAuthorization(ctx, authorizationID, time.Time{}); err == nil {
+		t.Fatal("empty authorization revocation time was accepted")
+	}
+}
+
 func TestAdminSessionRepositoryRejectsInvalidHashesAndLifetime(t *testing.T) {
 	store := openSQLiteTestStore(
 		t,
