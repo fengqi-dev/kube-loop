@@ -121,10 +121,17 @@ func testRelayDesiredStateRepository(t *testing.T, store *Store) {
 	}
 }
 
-//nolint:gocyclo // The conformance scenario keeps pagination assertions together across all storage backends.
 func testManagementListPagination(t *testing.T, store *Store) {
 	ctx := context.Background()
 	now := time.Date(2026, 8, 11, 9, 0, 0, 0, time.UTC)
+	identities := testIdentityPagination(ctx, t, store, now)
+	sessions := testSessionPagination(ctx, t, store, now, identities[0].ID)
+	testTaskPagination(ctx, t, store, now, identities[0].ID, sessions)
+	testAuditPagination(ctx, t, store, now, identities[0].ID)
+}
+
+func testIdentityPagination(ctx context.Context, t *testing.T, store *Store, now time.Time) []Identity {
+	t.Helper()
 	search := "pagination-" + uuid.NewString()
 	identities := make([]Identity, 0, 3)
 	for index := range 3 {
@@ -167,13 +174,23 @@ func testManagementListPagination(t *testing.T, store *Store) {
 		secondIdentities[0].ID != identities[0].ID {
 		t.Fatalf("second identity page=%#v error=%v", secondIdentities, err)
 	}
+	return identities
+}
 
+func testSessionPagination(
+	ctx context.Context,
+	t *testing.T,
+	store *Store,
+	now time.Time,
+	identityID string,
+) []Session {
+	t.Helper()
 	networkSpec, networkSpecHash := conformanceNetworkSpec(t)
 	sessions := make([]Session, 0, 3)
 	for index := range 3 {
 		createdAt := now.Add(time.Duration(index) * time.Minute)
 		session := Session{
-			ID: uuid.NewString(), IdentityID: identities[0].ID, DeviceID: fmt.Sprintf("device-%d", index),
+			ID: uuid.NewString(), IdentityID: identityID, DeviceID: fmt.Sprintf("device-%d", index),
 			ClusterID: "cluster-pagination", Namespace: "pagination", State: statusActive,
 			NetworkSpec: networkSpec, NetworkSpecHash: networkSpecHash,
 			CreatedAt: createdAt, ExpiresAt: createdAt.Add(time.Hour),
@@ -196,12 +213,23 @@ func testManagementListPagination(t *testing.T, store *Store) {
 		secondSessions[0].ID != sessions[0].ID {
 		t.Fatalf("second session page=%#v error=%v", secondSessions, err)
 	}
+	return sessions
+}
 
+func testTaskPagination(
+	ctx context.Context,
+	t *testing.T,
+	store *Store,
+	now time.Time,
+	identityID string,
+	sessions []Session,
+) {
+	t.Helper()
 	tasks := make([]Task, 0, 3)
 	for index := range 3 {
 		createdAt := now.Add(time.Duration(index) * time.Minute)
 		task := Task{
-			ID: uuid.NewString(), IdentityID: identities[0].ID, SessionID: sessions[index].ID,
+			ID: uuid.NewString(), IdentityID: identityID, SessionID: sessions[index].ID,
 			Type: "pagination-task", State: remotetask.Pending, Spec: json.RawMessage(`{"safe":true}`),
 			IdempotencyKey: fmt.Sprintf(
 				"pagination-%d",
@@ -224,12 +252,15 @@ func testManagementListPagination(t *testing.T, store *Store) {
 	if err != nil || len(secondTasks) != 1 || secondTasks[0].ID != tasks[0].ID {
 		t.Fatalf("second task page=%#v error=%v", secondTasks, err)
 	}
+}
 
+func testAuditPagination(ctx context.Context, t *testing.T, store *Store, now time.Time, identityID string) {
+	t.Helper()
 	action := "pagination.audit." + uuid.NewString()
 	events := make([]AuditEvent, 0, 3)
 	for index := range 3 {
 		event := AuditEvent{
-			ID: uuid.NewString(), IdentityID: identities[0].ID, Action: action, Outcome: outcomeSuccess,
+			ID: uuid.NewString(), IdentityID: identityID, Action: action, Outcome: outcomeSuccess,
 			RequestID: fmt.Sprintf(
 				"pagination-request-%d",
 				index,
