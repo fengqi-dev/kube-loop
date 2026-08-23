@@ -172,6 +172,14 @@ jobs:
           path: build/tools
           key: go-analysis-tools-${{ runner.os }}-${{ hashFiles('Makefile', '.custom-gcl.yml') }}
 
+      - name: Prepare desktop embed placeholder
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p frontend/dist
+          printf '<!doctype html><title>KubeLoop static analysis</title>\n' \
+            > frontend/dist/index.html
+
       - name: Verify generated and patched sources
         shell: bash
         run: |
