@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"time"
@@ -9,7 +8,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	clientdataplane "github.com/fengqi-dev/kube-loop/internal/client/dataplane"
-	clientexec "github.com/fengqi-dev/kube-loop/internal/client/exec"
 	clientremote "github.com/fengqi-dev/kube-loop/internal/client/remote"
 	"github.com/fengqi-dev/kube-loop/internal/networkdiag"
 )
@@ -46,116 +44,6 @@ func (m Model) hintText() string {
 func (m Model) connected() bool {
 	state := m.dataPlaneStatus.State
 	return state == dataPlaneStateConnected || state == "active" || state == "reconnecting"
-}
-
-func (m Model) loadTabData() tea.Cmd {
-	switch m.activeTab {
-	case tabConnection:
-		return tea.Batch(loadAuthStatus(m), loadDataPlaneStatus(m), loadNamespaces(m))
-	case tabWorkloads:
-		return tea.Batch(loadPods(m), loadNamespaces(m))
-	case tabServices:
-		return tea.Batch(loadServices(m), loadNamespaces(m))
-	case tabTasks:
-		return tea.Batch(
-			loadPortForwards(m.state, m.activeProfile.ID),
-			loadTrafficOperations(m.state, m.activeProfile.ID),
-			loadPodSSH(m.state, m.activeProfile.ID),
-		)
-	case tabCount:
-		return nil
-	}
-	return nil
-}
-
-func loadProfiles(state *State) tea.Cmd {
-	return func() tea.Msg { return profilesLoadedMsg{state: state.Snapshot()} }
-}
-func loadAuthStatus(m Model) tea.Cmd {
-	return func() tea.Msg {
-		if m.activeProfile.ID == "" {
-			return authStatusMsg{}
-		}
-		session, err := m.state.AuthStatus(m.activeProfile.ID)
-		return authStatusMsg{session: session, err: err}
-	}
-}
-func loadDataPlaneStatus(m Model) tea.Cmd {
-	return func() tea.Msg {
-		if m.activeProfile.ID == "" {
-			return dataPlaneStatusMsg{}
-		}
-		status, err := m.state.dataPlanes.Status(m.activeProfile.ID)
-		if err != nil {
-			status = clientdataplane.Status{
-				State: dataPlaneStateDisconnected,
-				Mode:  clientdataplane.ModeSOCKS,
-			}
-		}
-		return dataPlaneStatusMsg{status: status}
-	}
-}
-func loadNamespaces(m Model) tea.Cmd {
-	return func() tea.Msg {
-		if m.activeProfile.ID == "" || !m.authSession.Authenticated {
-			return namespacesLoadedMsg{}
-		}
-		items, err := m.state.remote.Namespaces(m.state.ctx, m.activeProfile)
-		return namespacesLoadedMsg{namespaces: items, err: err}
-	}
-}
-func loadPods(m Model) tea.Cmd {
-	return func() tea.Msg {
-		if m.namespace != "" {
-			items, err := m.state.remote.Pods(m.state.ctx, m.activeProfile, m.namespace)
-			return podsLoadedMsg{pods: items, err: err}
-		}
-		items, err := loadAcrossNamespaces(m, func(namespace string) ([]clientremote.Pod, error) {
-			return m.state.remote.Pods(m.state.ctx, m.activeProfile, namespace)
-		})
-		return podsLoadedMsg{pods: items, err: err}
-	}
-}
-func loadServices(m Model) tea.Cmd {
-	return func() tea.Msg {
-		if m.namespace != "" {
-			items, err := m.state.remote.Services(m.state.ctx, m.activeProfile, m.namespace)
-			return servicesLoadedMsg{services: items, err: err}
-		}
-		items, err := loadAcrossNamespaces(m, func(namespace string) ([]clientremote.Service, error) {
-			return m.state.remote.Services(m.state.ctx, m.activeProfile, namespace)
-		})
-		return servicesLoadedMsg{services: items, err: err}
-	}
-}
-
-func loadAcrossNamespaces[T any](m Model, load func(string) ([]T, error)) ([]T, error) {
-	namespaces, err := m.state.remote.Namespaces(m.state.ctx, m.activeProfile)
-	if err != nil {
-		return nil, err
-	}
-	items := make([]T, 0)
-	var firstErr error
-	for _, namespace := range namespaces {
-		loaded, loadErr := load(namespace.Name)
-		if loadErr != nil {
-			if firstErr == nil {
-				firstErr = loadErr
-			}
-			continue
-		}
-		items = append(items, loaded...)
-	}
-	if len(items) == 0 {
-		return items, firstErr
-	}
-	return items, nil
-}
-func loadPortForwards(state *State, profileID string) tea.Cmd {
-	return func() tea.Msg { return portForwardsLoadedMsg{forwards: state.forwards.List(profileID)} }
-}
-func loadPodSSH(state *State, profileID string) tea.Cmd {
-	return func() tea.Msg { return podSSHLoadedMsg{endpoints: state.podSSH.List(profileID)} }
 }
 
 func (m Model) connectDataPlane() tea.Cmd {
@@ -260,56 +148,6 @@ func (m Model) switchDataPlaneMode(previous clientdataplane.Mode) tea.Cmd {
 		status, err := m.state.dataPlanes.SwitchMode(m.state.ctx, m.activeProfile.ID, m.selectedMode)
 		return dataPlaneModeMsg{status: status, previous: previous, err: err}
 	}
-}
-func waitExecEvent(state *State) tea.Cmd {
-	return func() tea.Msg {
-		select {
-		case event := <-state.execEvents:
-			return execEventMsg{event: event}
-		case <-state.ctx.Done():
-			return nil
-		}
-	}
-}
-
-func (m *Model) applyExecEvent(event clientexec.Event) {
-	index := -1
-	for i := range m.execTasks {
-		if m.execTasks[i].ID == event.TaskID {
-			index = i
-			break
-		}
-	}
-	if index < 0 {
-		m.execTasks = append(m.execTasks, execTaskView{ID: event.TaskID, State: taskStateRunning})
-		index = len(m.execTasks) - 1
-	}
-	switch event.Type {
-	case clientexec.EventStdout, clientexec.EventStderr:
-		data, err := base64.StdEncoding.DecodeString(event.Data)
-		if err == nil {
-			m.execTasks[index].Output += string(data)
-			if len(m.execTasks[index].Output) > 8192 {
-				m.execTasks[index].Output = m.execTasks[index].Output[len(m.execTasks[index].Output)-8192:]
-			}
-		}
-	case clientexec.EventExit:
-		m.execTasks[index].State = fmt.Sprintf("exit %d", event.ExitCode)
-	case clientexec.EventError:
-		m.execTasks[index].State, m.execTasks[index].Output = "error", m.execTasks[index].Output+event.Error
-	}
-}
-
-func upsertExecTask(items []execTaskView, item execTaskView) []execTaskView {
-	for i := range items {
-		if items[i].ID == item.ID {
-			output := items[i].Output
-			items[i] = item
-			items[i].Output = output
-			return items
-		}
-	}
-	return append(items, item)
 }
 func containsNamespace(items []clientremote.Namespace, name string) bool {
 	for _, item := range items {
