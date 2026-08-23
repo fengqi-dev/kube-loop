@@ -175,7 +175,12 @@ func (manager *Manager) Shutdown() error {
 }
 
 func (manager *Manager) read(ctx context.Context, taskID string, entry *managedStream) {
-	defer manager.cleanup(taskID, entry)
+	cleaned := false
+	defer func() {
+		if !cleaned {
+			manager.cleanup(taskID, entry)
+		}
+	}()
 	for {
 		frame, err := entry.stream.Read(ctx)
 		if err != nil {
@@ -206,6 +211,7 @@ func (manager *Manager) read(ctx context.Context, taskID string, entry *managedS
 				return
 			}
 			manager.cleanup(taskID, entry)
+			cleaned = true
 			manager.onEvent(Event{
 				ProfileID: entry.profileID, TaskID: taskID, Type: EventExit,
 				ExitCode: status.Code, Cancelled: status.Cancelled, Error: status.Error,

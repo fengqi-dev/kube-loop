@@ -132,6 +132,58 @@ func TestManagerRoutesOutputInputResizeAndExitByProfileAndTask(t *testing.T) {
 	}
 }
 
+func TestManagerEventCallbackCanStopItsOwnStream(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		connection, err := websocket.Accept(writer, request, nil)
+		if err != nil {
+			return
+		}
+		defer checkTestClose(t, connection.CloseNow)
+		output, _ := execstream.Encode(
+			execstream.Frame{Type: execstream.Stdout, Payload: []byte("stop")},
+		)
+		_ = connection.Write(request.Context(), websocket.MessageBinary, output)
+		for {
+			if _, _, err := connection.Read(request.Context()); err != nil {
+				return
+			}
+		}
+	}))
+	t.Cleanup(server.Close)
+	stopResult := make(chan error, 1)
+	var manager *Manager
+	manager, err := NewManager(
+		streamClient{endpoint: "ws" + strings.TrimPrefix(server.URL, "http")},
+		ManagerConfig{OnEvent: func(event Event) {
+			if event.Type == EventStdout {
+				stopResult <- manager.Stop(event.ProfileID, event.TaskID)
+			}
+		}},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Start(
+		t.Context(),
+		profile.Profile{ID: "server"},
+		remote.Session{ID: "session", Namespace: "development", State: "active"},
+		remote.ExecSpec{Pod: "api-0", Command: []string{"/bin/sh"}},
+	); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-stopResult:
+		if err != nil && !strings.Contains(err.Error(), "closed network connection") {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("event callback deadlocked while stopping its own stream")
+	}
+	if err := manager.Shutdown(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestManagerStopProfileWaitsForOpeningStream(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		connection, err := websocket.Accept(writer, request, nil)
