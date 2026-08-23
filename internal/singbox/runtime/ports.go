@@ -26,30 +26,17 @@ func probeLocalDNS(ctx context.Context, host string, port int, qname string) err
 	msg.SetQuestion(dns.Fqdn(qname), dns.TypeA)
 	client := &dns.Client{Net: networkUDP, Timeout: 3 * time.Second}
 	addr := net.JoinHostPort(host, strconv.Itoa(port))
-	type result struct {
-		resp *dns.Msg
-		err  error
+	resp, _, err := client.ExchangeContext(ctx, msg, addr)
+	if err != nil {
+		return err
 	}
-	ch := make(chan result, 1)
-	go func() {
-		resp, _, err := client.Exchange(msg, addr)
-		ch <- result{resp: resp, err: err}
-	}()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case out := <-ch:
-		if out.err != nil {
-			return out.err
-		}
-		if out.resp == nil {
-			return errors.New("empty DNS response")
-		}
-		if out.resp.Rcode != dns.RcodeSuccess || len(out.resp.Answer) == 0 {
-			return fmt.Errorf("DNS lookup %s failed (rcode=%d)", qname, out.resp.Rcode)
-		}
-		return nil
+	if resp == nil {
+		return errors.New("empty DNS response")
 	}
+	if resp.Rcode != dns.RcodeSuccess || len(resp.Answer) == 0 {
+		return fmt.Errorf("DNS lookup %s failed (rcode=%d)", qname, resp.Rcode)
+	}
+	return nil
 }
 
 func availablePort() (int, error) {
