@@ -298,7 +298,7 @@ func assertExecLifecycleAudit(
 			backgroundEvents++
 		}
 	}
-	if apiEvents != 2 || backgroundEvents != 1 {
+	if apiEvents != 3 || backgroundEvents != 0 {
 		t.Fatalf("Task transition audit sources: api=%d background=%d", apiEvents, backgroundEvents)
 	}
 }

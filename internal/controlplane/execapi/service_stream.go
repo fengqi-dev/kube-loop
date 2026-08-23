@@ -92,14 +92,19 @@ func (handler *Service) stream(
 		},
 	)
 	if contextErr != nil {
+		persistContext, persistCancel := context.WithTimeout(
+			context.WithoutCancel(request.Context()),
+			5*time.Second,
+		)
 		_ = handler.storage.Tasks().UpdateState(
-			context.Background(),
+			persistContext,
 			task.ID,
 			remotetask.Starting,
 			remotetask.Failed,
 			json.RawMessage(`{"error":"authorization lease expired"}`),
 			handler.now().UTC(),
 		)
+		persistCancel()
 		_ = connection.Close(websocket.StatusPolicyViolation, "authorization lease expired")
 		return nil
 	}
@@ -149,7 +154,10 @@ func (handler *Service) stream(
 	if execErr != nil && !cancelled {
 		nextState = remotetask.Failed
 	}
-	persistContext, persistCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	persistContext, persistCancel := context.WithTimeout(
+		context.WithoutCancel(request.Context()),
+		5*time.Second,
+	)
 	persistErr := handler.storage.Tasks().
 		UpdateState(persistContext, task.ID, remotetask.Running, nextState, taskResult(exitStatus), handler.now().UTC())
 	persistCancel()
@@ -159,9 +167,11 @@ func (handler *Service) stream(
 		return nil
 	}
 	encoded, _ := execstream.EncodeExit(exitStatus)
+	writeContext, writeCancel := context.WithTimeout(request.Context(), 5*time.Second)
 	writeMu.Lock()
-	_ = connection.Write(context.Background(), websocket.MessageBinary, encoded)
+	_ = connection.Write(writeContext, websocket.MessageBinary, encoded)
 	writeMu.Unlock()
+	writeCancel()
 	cancel()
 	_ = connection.Close(websocket.StatusNormalClosure, "exec complete")
 	return nil

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v5"
@@ -58,6 +59,7 @@ func (handler *Service) stream(
 	)
 	if err != nil {
 		_ = handler.persistState(
+			request.Context(),
 			task.ID,
 			remotetask.Starting,
 			remotetask.Failed,
@@ -91,6 +93,7 @@ func (handler *Service) stream(
 	)
 	if err != nil {
 		_ = handler.persistState(
+			request.Context(),
 			task.ID,
 			remotetask.Starting,
 			remotetask.Failed,
@@ -103,7 +106,9 @@ func (handler *Service) stream(
 		return nil
 	}
 	defer cancel()
-	if err := handler.persistState(task.ID, remotetask.Starting, remotetask.Running, streamResult{}); err != nil {
+	if err := handler.persistState(
+		request.Context(), task.ID, remotetask.Starting, remotetask.Running, streamResult{},
+	); err != nil {
 		_ = connection.Close(
 			websocket.StatusInternalError,
 			"file transfer state persistence failed",
@@ -137,7 +142,9 @@ func (handler *Service) stream(
 	if transferErr != nil && !cancelled {
 		nextState = remotetask.Failed
 	}
-	if err := handler.persistState(task.ID, remotetask.Running, nextState, result); err != nil {
+	if err := handler.persistState(
+		request.Context(), task.ID, remotetask.Running, nextState, result,
+	); err != nil {
 		_ = connection.Close(
 			websocket.StatusInternalError,
 			"file transfer state persistence failed",
@@ -145,9 +152,11 @@ func (handler *Service) stream(
 		return nil
 	}
 	encoded, _ := filestream.EncodeResult(result.protocol())
+	writeContext, cancelWrite := context.WithTimeout(request.Context(), 5*time.Second)
 	writeMu.Lock()
-	_ = connection.Write(context.Background(), websocket.MessageBinary, encoded)
+	_ = connection.Write(writeContext, websocket.MessageBinary, encoded)
 	writeMu.Unlock()
+	cancelWrite()
 	_ = connection.Close(
 		websocket.StatusNormalClosure,
 		"file transfer complete",

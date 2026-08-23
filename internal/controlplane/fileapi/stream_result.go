@@ -51,12 +51,13 @@ func (result streamResult) protocol() filestream.TransferResult {
 }
 
 func (handler *Service) persistState(
+	parent context.Context,
 	taskID string,
 	expected, next remotetask.State,
 	result streamResult,
 ) error {
 	encoded, _ := json.Marshal(result)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), 5*time.Second)
 	defer cancel()
 	return handler.storage.Tasks().
 		UpdateState(ctx, taskID, expected, next, encoded, handler.now().UTC())
