@@ -1,14 +1,10 @@
 package app
 
 import (
-	"context"
-	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
 
@@ -17,13 +13,6 @@ import (
 	clientdiscovery "github.com/fengqi-dev/kube-loop/internal/client/discovery"
 	clientprofile "github.com/fengqi-dev/kube-loop/internal/client/profile"
 )
-
-type AuthSession struct {
-	Authenticated    bool      `json:"authenticated"`
-	UserName         string    `json:"userName,omitempty"`
-	AccessExpiresAt  time.Time `json:"accessExpiresAt"    ts_type:"string"`
-	RefreshExpiresAt time.Time `json:"refreshExpiresAt"   ts_type:"string"`
-}
 
 func (a *App) LoginServerOIDC(profileID, providerID string) (AuthSession, error) {
 	loginContext, finishLogin, err := a.beginServerLogin()
@@ -57,37 +46,6 @@ func (a *App) HandleAuthCallbackURL(rawURL string) error {
 		return errors.New("authentication is unavailable")
 	}
 	return a.auth.HandleCallbackURL(rawURL)
-}
-
-// CancelServerLogin stops the active browser-based login, if any. It is
-// intentionally idempotent so UI cleanup can call it safely while unmounting.
-func (a *App) CancelServerLogin() {
-	a.serverLoginMu.Lock()
-	attempt := a.serverLogin
-	a.serverLogin = nil
-	a.serverLoginMu.Unlock()
-	if attempt != nil {
-		attempt.cancel()
-	}
-}
-
-func (a *App) beginServerLogin() (context.Context, func(), error) {
-	a.serverLoginMu.Lock()
-	defer a.serverLoginMu.Unlock()
-	if a.serverLogin != nil {
-		return nil, nil, errors.New("a browser login is already in progress")
-	}
-	loginContext, cancel := context.WithCancel(a.context())
-	attempt := &serverLoginAttempt{cancel: cancel}
-	a.serverLogin = attempt
-	return loginContext, func() {
-		a.serverLoginMu.Lock()
-		if a.serverLogin == attempt {
-			a.serverLogin = nil
-		}
-		a.serverLoginMu.Unlock()
-		cancel()
-	}, nil
 }
 
 func (a *App) ServerAuthStatus(profileID string) (AuthSession, error) {
@@ -268,42 +226,4 @@ func (a *App) persistCredential(
 		}
 	}
 	return session, nil
-}
-
-func authSession(credential credentials.Credential) AuthSession {
-	userName := strings.TrimSpace(credential.UserName)
-	if userName == "" {
-		userName = tokenUserName(credential.AccessToken)
-	}
-	return AuthSession{
-		Authenticated: true, UserName: userName, AccessExpiresAt: credential.AccessExpiresAt,
-		RefreshExpiresAt: credential.RefreshExpiresAt,
-	}
-}
-
-func tokenUserName(token string) string {
-	parts := strings.Split(token, ".")
-	if len(parts) != 3 {
-		return ""
-	}
-	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		return ""
-	}
-	var claims struct {
-		PreferredUserName string `json:"preferred_username"`
-		UserName          string `json:"username"`
-		Name              string `json:"name"`
-		Email             string `json:"email"`
-		Subject           string `json:"sub"`
-	}
-	if json.Unmarshal(payload, &claims) != nil {
-		return ""
-	}
-	for _, value := range []string{claims.Name, claims.PreferredUserName, claims.UserName, claims.Email, claims.Subject} {
-		if value = strings.TrimSpace(value); value != "" {
-			return value
-		}
-	}
-	return ""
 }

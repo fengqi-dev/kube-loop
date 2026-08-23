@@ -1,8 +1,6 @@
 package app
 
 import (
-	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -15,58 +13,6 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/client/credentials"
 	clientprofile "github.com/fengqi-dev/kube-loop/internal/client/profile"
 )
-
-func TestCancelServerLoginCancelsActiveAttemptAndAllowsRetry(t *testing.T) {
-	application := &App{}
-	loginContext, finish, err := application.beginServerLogin()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := application.beginServerLogin(); err == nil {
-		t.Fatal("concurrent browser login was allowed")
-	}
-
-	application.CancelServerLogin()
-	select {
-	case <-loginContext.Done():
-		if !errors.Is(loginContext.Err(), context.Canceled) {
-			t.Fatalf("login context error = %v", loginContext.Err())
-		}
-	default:
-		t.Fatal("active browser login was not cancelled")
-	}
-	finish()
-
-	_, retryFinish, err := application.beginServerLogin()
-	if err != nil {
-		t.Fatalf("start browser login after cancellation: %v", err)
-	}
-	retryFinish()
-	application.CancelServerLogin()
-}
-
-func TestTokenUserNamePrefersDisplayName(t *testing.T) {
-	payload := base64.RawURLEncoding.EncodeToString(
-		[]byte(`{"sub":"subject-1","email":"user@example.test","name":"Example User","preferred_username":"fengqi"}`),
-	)
-	if got := tokenUserName("header." + payload + ".signature"); got != "Example User" {
-		t.Fatalf("token username = %q", got)
-	}
-	fallbackPayload := base64.RawURLEncoding.EncodeToString([]byte(`{"sub":"subject-1","preferred_username":"fengqi"}`))
-	if got := tokenUserName("header." + fallbackPayload + ".signature"); got != "fengqi" {
-		t.Fatalf("fallback token username = %q", got)
-	}
-	if got := tokenUserName("opaque-token"); got != "" {
-		t.Fatalf("opaque token username = %q", got)
-	}
-}
-
-func TestAuthSessionUsesPersistedOIDCIdentityForOpaqueAccessToken(t *testing.T) {
-	session := authSession(credentials.Credential{AccessToken: "opaque-token", UserName: "Example User"})
-	if !session.Authenticated || session.UserName != "Example User" {
-		t.Fatalf("auth session = %#v", session)
-	}
-}
 
 type memoryCredentialStore struct {
 	values map[string]credentials.Credential
