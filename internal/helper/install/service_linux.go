@@ -3,14 +3,18 @@
 package install
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/fengqi-dev/kube-loop/internal/helper"
 )
+
+const systemctlCommand = "systemctl"
 
 func systemdUnitPath() string {
 	return filepath.Join("/etc/systemd/system", helper.SystemdUnitName())
@@ -32,19 +36,30 @@ RestartSec=2
 [Install]
 WantedBy=multi-user.target
 `, helper.ServiceDisplayName(), binaryPath)
-	if err := os.WriteFile(unitPath, []byte(unit), 0o644); err != nil {
+	if err := os.WriteFile(unitPath, []byte(unit), 0o600); err != nil {
 		return err
 	}
+	if err := os.Chmod(unitPath, 0o600); err != nil {
+		return fmt.Errorf("secure systemd unit: %w", err)
+	}
 	commands := [][]string{
-		{"systemctl", "daemon-reload"},
-		{"systemctl", "enable", unitName},
-		{"systemctl", "restart", unitName},
+		{"daemon-reload"},
+		{"enable", unitName},
+		{"restart", unitName},
 	}
 	for _, args := range commands {
-		cmd := exec.Command(args[0], args[1:]...)
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		cmd := exec.CommandContext(ctx, systemctlCommand, args...)
 		output, err := cmd.CombinedOutput()
+		cancel()
 		if err != nil {
-			return fmt.Errorf("%s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(output)))
+			return fmt.Errorf(
+				"%s %s: %w: %s",
+				systemctlCommand,
+				strings.Join(args, " "),
+				err,
+				strings.TrimSpace(string(output)),
+			)
 		}
 	}
 	return nil
@@ -53,8 +68,8 @@ WantedBy=multi-user.target
 func disableService() error {
 	unitName := helper.SystemdUnitName()
 	unitPath := systemdUnitPath()
-	_ = exec.Command("systemctl", "disable", "--now", unitName).Run()
+	_ = exec.Command(systemctlCommand, "disable", "--now", unitName).Run()
 	_ = os.Remove(unitPath)
-	_ = exec.Command("systemctl", "daemon-reload").Run()
+	_ = exec.Command(systemctlCommand, "daemon-reload").Run()
 	return nil
 }

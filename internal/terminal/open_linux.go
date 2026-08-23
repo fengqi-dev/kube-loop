@@ -3,10 +3,13 @@
 package terminal
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os/exec"
 )
+
+const shellLoginFlag = "-lc"
 
 func open(command string) error {
 	script := "exec " + command
@@ -14,16 +17,16 @@ func open(command string) error {
 		name string
 		args []string
 	}{
-		{name: "x-terminal-emulator", args: []string{"-e", "sh", "-lc", script}},
-		{name: "gnome-terminal", args: []string{"--", "sh", "-lc", script}},
-		{name: "konsole", args: []string{"-e", "sh", "-lc", script}},
+		{name: "x-terminal-emulator", args: []string{"-e", "sh", shellLoginFlag, script}},
+		{name: "gnome-terminal", args: []string{"--", "sh", shellLoginFlag, script}},
+		{name: "konsole", args: []string{"-e", "sh", shellLoginFlag, script}},
 	}
 	for _, candidate := range candidates {
 		path, err := exec.LookPath(candidate.name)
 		if err != nil {
 			continue
 		}
-		if err := exec.Command(path, candidate.args...).Start(); err != nil {
+		if err := exec.CommandContext(context.Background(), path, candidate.args...).Start(); err != nil {
 			return fmt.Errorf("open %s: %w", candidate.name, err)
 		}
 		return nil

@@ -137,7 +137,7 @@ install -m 0644 -- "$2" "$3"
 		return err
 	}
 	if !status.Installed {
-		return errors.New("Linux traffic inspection certificate was not installed")
+		return errors.New("linux traffic inspection certificate was not installed")
 	}
 	return nil
 }
@@ -163,7 +163,7 @@ func (s *linuxTrustStore) Uninstall(ctx context.Context, authority *Authority) e
 		return err
 	}
 	if status.Installed {
-		return errors.New("Linux traffic inspection certificate is still installed")
+		return errors.New("linux traffic inspection certificate is still installed")
 	}
 	return nil
 }

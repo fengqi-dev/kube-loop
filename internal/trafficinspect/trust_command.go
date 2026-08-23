@@ -77,8 +77,3 @@ func commandError(operation string, err error, output []byte) error {
 	}
 	return fmt.Errorf("%s: %w: %s", operation, err, detail)
 }
-
-func exitCodeIs(err error, code int) bool {
-	var exitErr *exec.ExitError
-	return errors.As(err, &exitErr) && exitErr.ExitCode() == code
-}

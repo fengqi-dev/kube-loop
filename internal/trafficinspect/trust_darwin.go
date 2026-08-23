@@ -7,12 +7,18 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"strconv"
 
 	"github.com/kballard/go-shellquote"
 )
 
 const systemKeychainPath = "/Library/Keychains/System.keychain"
+
+func exitCodeIs(err error, code int) bool {
+	var exitErr *exec.ExitError
+	return errors.As(err, &exitErr) && exitErr.ExitCode() == code
+}
 
 type darwinTrustStore struct {
 	runner commandRunner

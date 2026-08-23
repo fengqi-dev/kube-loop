@@ -48,15 +48,18 @@ func ApplyDNS(_ string, dns singbox.DNSMeta) error {
 		"%s\n[Resolve]\nDNS=%s:%d\nDomains=%s\nDNSSEC=no\nDNSOverTLS=no\nResolveUnicastSingleLabel=yes\n",
 		linuxDNSMarker, dns.Listen, dns.Port, strings.Join(domains, " "),
 	)
-	if err := os.MkdirAll(filepath.Dir(resolvedDropIn), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(resolvedDropIn), 0o750); err != nil {
 		return err
 	}
 	if existing, err := os.ReadFile(resolvedDropIn); err == nil &&
 		!strings.Contains(string(existing), linuxDNSMarker) {
 		return fmt.Errorf("%s is not owned by KubeLoop", resolvedDropIn)
 	}
-	if err := os.WriteFile(resolvedDropIn, []byte(content), 0o644); err != nil {
+	if err := os.WriteFile(resolvedDropIn, []byte(content), 0o600); err != nil {
 		return err
+	}
+	if err := os.Chmod(resolvedDropIn, 0o600); err != nil {
+		return fmt.Errorf("secure resolved drop-in: %w", err)
 	}
 	reloadResolved()
 	return nil
@@ -93,7 +96,7 @@ func reloadResolved() {
 	_ = exec.CommandContext(flushCtx, "resolvectl", "flush-caches").Run()
 }
 
-// applyLinkDNS configures systemd-resolved on the TUN interface. Per-link search
+// ApplyLinkDNS configures systemd-resolved on the TUN interface. Per-link search
 // domains are more reliable for single-label names than global drop-in Domains=
 // alone on GitHub Actions runners.
 func ApplyLinkDNS(tunAddress string, dns singbox.DNSMeta) error {
