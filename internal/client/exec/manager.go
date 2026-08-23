@@ -36,6 +36,7 @@ type managedStream struct {
 	profileID string
 	stream    *Stream
 	cancel    context.CancelFunc
+	done      chan struct{}
 }
 
 type Manager struct {
@@ -85,7 +86,10 @@ func (manager *Manager) Start(
 		return remote.ExecTask{}, err
 	}
 	streamContext, cancel := context.WithCancel(manager.ctx)
-	entry := &managedStream{profileID: serverProfile.ID, stream: stream, cancel: cancel}
+	entry := &managedStream{
+		profileID: serverProfile.ID, stream: stream, cancel: cancel,
+		done: make(chan struct{}),
+	}
 	manager.mu.Lock()
 	if _, exists := manager.active[stream.Task().ID]; exists {
 		manager.mu.Unlock()
@@ -96,6 +100,7 @@ func (manager *Manager) Start(
 	manager.active[stream.Task().ID] = entry
 	manager.mu.Unlock()
 	manager.wg.Go(func() {
+		defer close(entry.done)
 		manager.read(streamContext, stream.Task().ID, entry)
 	})
 	return stream.Task(), nil
@@ -142,6 +147,9 @@ func (manager *Manager) StopProfile(profileID string) error {
 	for _, entry := range entries {
 		entry.cancel()
 		result = errors.Join(result, entry.stream.Close())
+	}
+	for _, entry := range entries {
+		<-entry.done
 	}
 	return result
 }

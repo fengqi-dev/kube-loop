@@ -195,6 +195,23 @@ func TestManagerStopProfileWaitsForOpeningStream(t *testing.T) {
 }
 
 func TestManagerShutdownWaitsForEventCallback(t *testing.T) {
+	testManagerWaitsForEventCallback(t, "Shutdown", func(manager *Manager) error {
+		return manager.Shutdown()
+	})
+}
+
+func TestManagerStopProfileWaitsForEventCallback(t *testing.T) {
+	testManagerWaitsForEventCallback(t, "StopProfile", func(manager *Manager) error {
+		return manager.StopProfile("server")
+	})
+}
+
+func testManagerWaitsForEventCallback(
+	t *testing.T,
+	operation string,
+	stop func(*Manager) error,
+) {
+	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		connection, err := websocket.Accept(writer, request, nil)
 		if err != nil {
@@ -241,15 +258,15 @@ func TestManagerShutdownWaitsForEventCallback(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("Pod exec event callback did not start")
 	}
-	shutdown := make(chan error, 1)
-	go func() { shutdown <- manager.Shutdown() }()
+	stopped := make(chan error, 1)
+	go func() { stopped <- stop(manager) }()
 	select {
-	case err := <-shutdown:
-		t.Fatalf("Shutdown returned before event callback completed: %v", err)
+	case err := <-stopped:
+		t.Fatalf("%s returned before event callback completed: %v", operation, err)
 	case <-time.After(100 * time.Millisecond):
 	}
 	release()
-	if err := <-shutdown; err != nil && !strings.Contains(err.Error(), "closed network connection") {
+	if err := <-stopped; err != nil && !strings.Contains(err.Error(), "closed network connection") {
 		t.Fatal(err)
 	}
 }
