@@ -71,3 +71,27 @@ func TestWatcherRejectsUnsafeTiming(t *testing.T) {
 		}
 	}
 }
+
+func TestWatcherStopsWhenInjectedTicksClose(t *testing.T) {
+	ticks := make(chan time.Time)
+	watcher, err := New(Config{
+		Interval: time.Second,
+		WakeGap:  5 * time.Second,
+		OnWake:   func(Event) {},
+		ticks:    ticks,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() {
+		watcher.Run(t.Context())
+		close(done)
+	}()
+	close(ticks)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("watcher did not stop after injected ticks closed")
+	}
+}

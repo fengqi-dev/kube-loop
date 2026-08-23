@@ -80,7 +80,10 @@ func (watcher *Watcher) Run(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticks:
+		case _, ok := <-ticks:
+			if !ok {
+				return
+			}
 			watcher.Observe(watcher.now())
 		}
 	}
