@@ -130,34 +130,6 @@ func (backend *RemoteBackend) CancelFileTransfer(identity TrafficIdentity) error
 	return &ToolError{Code: ErrorNotFound, Message: "file transfer is not active"}
 }
 
-func (backend *RemoteBackend) ListPodFiles(
-	ctx context.Context,
-	identity TrafficIdentity,
-	spec clientremote.PodFileSpec,
-) (clientremote.PodFileList, error) {
-	serverProfile, session, err := backend.requireSession(identity.ProfileID, identity.SessionID, identity.Namespace)
-	if err != nil {
-		return clientremote.PodFileList{}, err
-	}
-	return backend.dependencies.ControlPlane.ListPodFiles(ctx, serverProfile, session, spec)
-}
-
-func (backend *RemoteBackend) CreatePodFileOperation(
-	ctx context.Context,
-	identity TrafficIdentity,
-	action string,
-	spec clientremote.PodFileSpec,
-	idempotencyKey string,
-) (clientremote.PodFileTask, error) {
-	serverProfile, session, err := backend.requireSession(identity.ProfileID, identity.SessionID, identity.Namespace)
-	if err != nil {
-		return clientremote.PodFileTask{}, err
-	}
-	return backend.dependencies.ControlPlane.CreatePodFileOperation(
-		ctx, serverProfile, session, action, spec, idempotencyKey,
-	)
-}
-
 type cappedBuffer struct {
 	value     []byte
 	limit     int
