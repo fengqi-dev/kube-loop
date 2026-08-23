@@ -13,6 +13,8 @@ import (
 
 const maxDataPlaneLogLines = 5_000
 
+const helperStopTimeout = 20 * time.Second
+
 var errProcessClosed = errors.New("sing-box process is closed")
 
 type Process struct {

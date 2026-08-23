@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"testing"
 
@@ -48,5 +49,28 @@ func TestProcessReadLogsReturnsSessionHistory(t *testing.T) {
 				got[0] = "mutated by caller"
 			}
 		})
+	}
+}
+
+func TestProcessCloseReportsHelperStopFailure(t *testing.T) {
+	stopErr := errors.New("helper stop failed")
+	process := &Process{
+		done:   make(chan struct{}),
+		stopCh: make(chan struct{}),
+		helperStop: func(context.Context) error {
+			return stopErr
+		},
+	}
+	go process.wait()
+	if err := process.Close(); !errors.Is(err, stopErr) {
+		t.Fatalf("Close error = %v, want %v", err, stopErr)
+	}
+	select {
+	case <-process.Done():
+	default:
+		t.Fatal("Process watcher did not stop")
+	}
+	if err := process.Close(); !errors.Is(err, stopErr) {
+		t.Fatalf("repeated Close error = %v, want %v", err, stopErr)
 	}
 }

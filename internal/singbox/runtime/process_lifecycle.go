@@ -3,14 +3,10 @@ package runtime
 import (
 	"context"
 	"strings"
-	"time"
 )
 
 func (p *Process) wait() {
 	<-p.stopCh
-	p.errMu.Lock()
-	p.waitErr = nil
-	p.errMu.Unlock()
 	close(p.done)
 }
 
@@ -25,20 +21,17 @@ func (p *Process) Close() error {
 		case <-p.done:
 		default:
 			// helperStop blocks until the helper has restored DNS and routes.
-			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), helperStopTimeout)
+			var stopErr error
 			if p.helperStop != nil {
-				_ = p.helperStop(ctx)
+				stopErr = p.helperStop(ctx)
 			}
 			cancel()
+			p.errMu.Lock()
+			p.waitErr = stopErr
+			p.errMu.Unlock()
 			close(p.stopCh)
-			select {
-			case <-p.done:
-			case <-time.After(20 * time.Second):
-				select {
-				case <-p.done:
-				case <-time.After(2 * time.Second):
-				}
-			}
+			<-p.done
 		}
 		p.specMu.Lock()
 		proxy := p.dnsProxy
