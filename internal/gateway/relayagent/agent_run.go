@@ -46,12 +46,8 @@ func (agent *Agent) Start(ctx context.Context) error {
 			"Relay registration failed (attempt %d/%d); retrying in %s: %v",
 			attempt, agent.config.RegistrationAttempts, agent.config.RegistrationRetryDelay, err,
 		)
-		timer := time.NewTimer(agent.config.RegistrationRetryDelay)
-		select {
-		case <-runContext.Done():
-			timer.Stop()
+		if !waitForRetry(runContext, agent.config.RegistrationRetryDelay) {
 			return runContext.Err()
-		case <-timer.C:
 		}
 	}
 	if err := runContext.Err(); err != nil {
@@ -103,11 +99,20 @@ func (agent *Agent) run(ctx context.Context) {
 				agent.setError(registerErr)
 				agent.logf("Relay re-registration failed: %v", registerErr)
 			}
-			select {
-			case <-ctx.Done():
+			if !waitForRetry(ctx, time.Second) {
 				return
-			case <-time.After(time.Second):
 			}
 		}
+	}
+}
+
+func waitForRetry(ctx context.Context, delay time.Duration) bool {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
 	}
 }

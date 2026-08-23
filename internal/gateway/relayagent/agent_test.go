@@ -401,6 +401,14 @@ func TestAgentDrainMarksRuntimeBeforeLeaseHeartbeat(t *testing.T) {
 	}
 }
 
+func TestWaitForRetryStopsOnCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if waitForRetry(ctx, time.Hour) {
+		t.Fatal("retry wait completed after context cancellation")
+	}
+}
+
 func TestTicketAuthenticatorAppliesAudienceAndRevocationAtomically(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
