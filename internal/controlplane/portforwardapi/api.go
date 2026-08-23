@@ -3,7 +3,6 @@ package portforwardapi
 import (
 	"context"
 	"fmt"
-	"io"
 	"net/http"
 
 	"github.com/labstack/echo/v5"
@@ -13,6 +12,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
 	controlplanemiddleware "github.com/fengqi-dev/kube-loop/internal/controlplane/middleware"
 	portforwardservice "github.com/fengqi-dev/kube-loop/internal/controlplane/portforwardapi/service"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/routequery"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/sessionapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/sessionroute"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/taskapi"
@@ -89,7 +89,7 @@ func (routes *Routes) list(
 	identity controlplaneapi.Identity,
 	session sessionapi.ActiveSession,
 ) *controlplaneapi.Error {
-	if apiError := requireEmptyBody(ctx.Request()); apiError != nil {
+	if apiError := routequery.RequireEmptyBody(ctx.Request()); apiError != nil {
 		return apiError
 	}
 	portForwards, apiError := routes.service.List(
@@ -114,7 +114,7 @@ func (routes *Routes) stop(
 	session sessionapi.ActiveSession,
 	taskID string,
 ) *controlplaneapi.Error {
-	if apiError := requireEmptyBody(ctx.Request()); apiError != nil {
+	if apiError := routequery.RequireEmptyBody(ctx.Request()); apiError != nil {
 		return apiError
 	}
 	portForward, apiError := routes.service.Stop(
@@ -162,21 +162,4 @@ func namespaceFromQuery(
 		}
 	}
 	return namespace, nil
-}
-
-func requireEmptyBody(request *http.Request) *controlplaneapi.Error {
-	contents, err := io.ReadAll(io.LimitReader(request.Body, 1))
-	if err != nil {
-		return &controlplaneapi.Error{
-			Code:    controlplaneapi.CodeInvalidArgument,
-			Message: "request body is invalid",
-		}
-	}
-	if len(contents) != 0 {
-		return &controlplaneapi.Error{
-			Code:    controlplaneapi.CodeInvalidArgument,
-			Message: "request body must be empty",
-		}
-	}
-	return nil
 }

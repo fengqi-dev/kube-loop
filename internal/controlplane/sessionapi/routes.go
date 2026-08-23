@@ -32,7 +32,7 @@ func (handler *Routes) withNamespace(next namespaceHandler) controlplane.Endpoin
 		if apiError != nil {
 			return apiError
 		}
-		if apiError := requireEmptyBody(request); apiError != nil {
+		if apiError := routequery.RequireEmptyBody(request); apiError != nil {
 			return apiError
 		}
 		return next(ctx, identity, namespace)
