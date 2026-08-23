@@ -18,11 +18,20 @@ type Client interface {
 	OpenExecStream(context.Context, profile.Profile, remote.Session, remote.ExecTask) (*websocket.Conn, error)
 }
 
+type execConnection interface {
+	Read(context.Context) (websocket.MessageType, []byte, error)
+	Write(context.Context, websocket.MessageType, []byte) error
+	Close(websocket.StatusCode, string) error
+}
+
+var _ execConnection = (*websocket.Conn)(nil)
+
 type Stream struct {
-	connection *websocket.Conn
+	connection execConnection
 	task       remote.ExecTask
 	writeMu    sync.Mutex
 	closeOnce  sync.Once
+	closeErr   error
 }
 
 func Start(
@@ -86,11 +95,10 @@ func (stream *Stream) CloseStdin(ctx context.Context) error {
 }
 
 func (stream *Stream) Close() error {
-	var result error
 	stream.closeOnce.Do(func() {
-		result = stream.connection.Close(websocket.StatusNormalClosure, "client closed exec stream")
+		stream.closeErr = stream.connection.Close(websocket.StatusNormalClosure, "client closed exec stream")
 	})
-	return result
+	return stream.closeErr
 }
 
 func (stream *Stream) write(ctx context.Context, frame execstream.Frame) error {

@@ -2,9 +2,11 @@ package exec
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -17,6 +19,28 @@ import (
 )
 
 type streamClient struct{ endpoint string }
+
+type blockingCloseConnection struct {
+	started chan struct{}
+	release chan struct{}
+	err     error
+	calls   atomic.Int32
+}
+
+func (*blockingCloseConnection) Read(context.Context) (websocket.MessageType, []byte, error) {
+	return 0, nil, errors.New("unexpected read")
+}
+
+func (*blockingCloseConnection) Write(context.Context, websocket.MessageType, []byte) error {
+	return errors.New("unexpected write")
+}
+
+func (connection *blockingCloseConnection) Close(websocket.StatusCode, string) error {
+	connection.calls.Add(1)
+	close(connection.started)
+	<-connection.release
+	return connection.err
+}
 
 func (client streamClient) CreateExecTask(
 	context.Context, profile.Profile, remote.Session, remote.ExecSpec, string,
@@ -91,5 +115,26 @@ func TestTypedStreamSeparatesInputResizeOutputAndExit(t *testing.T) {
 	frame, err := stream.Read(context.Background())
 	if err != nil || frame.Type != execstream.Stdout || string(frame.Payload) != "ready" {
 		t.Fatalf("frame = %#v err = %v", frame, err)
+	}
+}
+
+func TestStreamConcurrentCloseRetainsError(t *testing.T) {
+	closeFailure := errors.New("close exec stream")
+	connection := &blockingCloseConnection{
+		started: make(chan struct{}), release: make(chan struct{}), err: closeFailure,
+	}
+	stream := &Stream{connection: connection}
+	results := make(chan error, 2)
+	go func() { results <- stream.Close() }()
+	go func() { results <- stream.Close() }()
+	<-connection.started
+	close(connection.release)
+	for range 2 {
+		if err := <-results; !errors.Is(err, closeFailure) {
+			t.Fatalf("Close() error = %v, want %v", err, closeFailure)
+		}
+	}
+	if calls := connection.calls.Load(); calls != 1 {
+		t.Fatalf("connection close calls = %d, want 1", calls)
 	}
 }
