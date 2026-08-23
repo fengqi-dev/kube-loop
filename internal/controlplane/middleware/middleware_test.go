@@ -29,6 +29,15 @@ type fixedAuthorizer struct {
 	calls   int
 }
 
+type recordingAuditSink struct {
+	records []AuditRecord
+}
+
+func (sink *recordingAuditSink) Record(_ context.Context, record AuditRecord) error {
+	sink.records = append(sink.records, record)
+	return nil
+}
+
 func (authorizer *fixedAuthorizer) Authorize(
 	context.Context,
 	authorization.Subject,
@@ -179,6 +188,69 @@ func TestMiddlewareFailsClosedBeforeHandler(t *testing.T) {
 					handlerCalls,
 					response.Header().Get("WWW-Authenticate"),
 				)
+			}
+		})
+	}
+}
+
+func TestMiddlewareAuditsAccessOutcomes(t *testing.T) {
+	tests := []struct {
+		name          string
+		identity      controlplaneapi.Identity
+		authError     *controlplaneapi.Error
+		allowed       bool
+		handlerStatus int
+		wantStatus    int
+		wantOutcome   string
+	}{
+		{
+			name: "success", identity: controlplaneapi.Identity{Subject: "identity-1"},
+			allowed: true, handlerStatus: http.StatusNoContent,
+			wantStatus: http.StatusNoContent, wantOutcome: "success",
+		},
+		{
+			name: "denied", identity: controlplaneapi.Identity{Subject: "identity-1"},
+			wantStatus: http.StatusForbidden, wantOutcome: "denied",
+		},
+		{
+			name: "unauthenticated",
+			authError: &controlplaneapi.Error{
+				Code: controlplaneapi.CodeUnauthenticated, Message: "authentication required",
+			},
+			wantStatus: http.StatusUnauthorized, wantOutcome: "unauthenticated",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			audit := &recordingAuditSink{}
+			authorizer := &fixedAuthorizer{allowed: test.allowed}
+			middleware := New(Config{
+				APIPathPrefix: "/api", RequestTimeout: time.Second, MaxRequestBodySize: 1 << 20,
+				Authenticator: controlplaneapi.AuthenticatorFunc(
+					func(*http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
+						return test.identity, test.authError
+					},
+				),
+				Authorizer: authorizer, Audit: audit,
+			})
+			request := httptest.NewRequest(http.MethodGet, "/api/version", nil)
+			response := httptest.NewRecorder()
+			response.Header().Set(echo.HeaderXRequestID, "request-1")
+			ctx := echo.New().NewContext(request, response)
+
+			if err := middleware(func(ctx *echo.Context) error {
+				return ctx.NoContent(test.handlerStatus)
+			})(ctx); err != nil {
+				t.Fatal(err)
+			}
+			if response.Code != test.wantStatus || len(audit.records) != 1 {
+				t.Fatalf("response=%d audit=%#v", response.Code, audit.records)
+			}
+			record := audit.records[0]
+			if record.RequestID != "request-1" || record.IdentityID != test.identity.Subject ||
+				record.Operation != operationList || record.ResourceKind != "version" ||
+				record.HTTPStatus != test.wantStatus || record.Outcome != test.wantOutcome || record.Duration < 0 {
+				t.Fatalf("audit record = %#v", record)
 			}
 		})
 	}
