@@ -54,6 +54,56 @@ func TestServerRejectsMissingBearer(t *testing.T) {
 	}
 }
 
+func TestServerRestartsWhenTokenSettingsChange(t *testing.T) {
+	server := NewServer(&fakeBackend{}, "test")
+	server.Configure(Config{Enabled: true, Port: freePort(t)})
+	if err := server.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = server.Stop() }()
+	if err := server.SetToken(""); err == nil {
+		t.Fatal("empty MCP token was accepted")
+	}
+	firstToken := strings.Repeat("a", 64)
+	if err := server.SetToken(firstToken); err != nil {
+		t.Fatal(err)
+	}
+	if err := server.SetTokenEnabled(true); err != nil {
+		t.Fatal(err)
+	}
+	status := server.Status()
+	if !status.Listening || !status.TokenEnabled || status.Token != firstToken {
+		t.Fatalf("token-enabled MCP status = %#v", status)
+	}
+	if got := mcpRequestStatus(t, status.URL, ""); got != http.StatusUnauthorized {
+		t.Fatalf("missing-token status = %d, want %d", got, http.StatusUnauthorized)
+	}
+	if got := mcpRequestStatus(t, status.URL, firstToken); got == http.StatusUnauthorized {
+		t.Fatal("configured MCP token was rejected")
+	}
+
+	secondToken := strings.Repeat("b", 64)
+	if err := server.SetToken(secondToken); err != nil {
+		t.Fatal(err)
+	}
+	if got := mcpRequestStatus(t, status.URL, firstToken); got != http.StatusUnauthorized {
+		t.Fatalf("old-token status = %d, want %d", got, http.StatusUnauthorized)
+	}
+	if got := mcpRequestStatus(t, status.URL, secondToken); got == http.StatusUnauthorized {
+		t.Fatal("replacement MCP token was rejected")
+	}
+	if err := server.SetTokenEnabled(false); err != nil {
+		t.Fatal(err)
+	}
+	status = server.Status()
+	if !status.Listening || status.TokenEnabled || status.Token != "" {
+		t.Fatalf("token-disabled MCP status = %#v", status)
+	}
+	if got := mcpRequestStatus(t, status.URL, ""); got == http.StatusUnauthorized {
+		t.Fatal("token-disabled MCP server required authorization")
+	}
+}
+
 func TestServerPublishesAndExecutesV2Tools(t *testing.T) {
 	backend := &fakeBackend{}
 	server := NewServer(backend, "test")
@@ -268,4 +318,23 @@ func freePort(t *testing.T) int {
 	}
 	defer func() { _ = listener.Close() }()
 	return listener.Addr().(*net.TCPAddr).Port
+}
+
+func mcpRequestStatus(t *testing.T, endpoint, token string) int {
+	t.Helper()
+	request, err := http.NewRequest(http.MethodPost, endpoint, strings.NewReader(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Accept", "application/json, text/event-stream")
+	if token != "" {
+		request.Header.Set("Authorization", "Bearer "+token)
+	}
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = response.Body.Close() }()
+	return response.StatusCode
 }
