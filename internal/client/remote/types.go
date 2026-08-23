@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/fengqi-dev/kube-loop/internal/protocol/capability"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/remotetask"
 )
 
@@ -33,78 +32,6 @@ type Version struct {
 }
 
 type Capabilities = capability.Snapshot
-
-type Namespace struct {
-	Name   string `json:"name"`
-	Status string `json:"status,omitempty"`
-}
-
-type Pod struct {
-	Name            string    `json:"name"`
-	Namespace       string    `json:"namespace"`
-	Phase           string    `json:"phase,omitempty"`
-	PodIP           string    `json:"podIp,omitempty"`
-	NodeName        string    `json:"nodeName,omitempty"`
-	Ready           bool      `json:"ready"`
-	ReadyContainers int32     `json:"readyContainers"`
-	TotalContainers int32     `json:"totalContainers"`
-	Restarts        int32     `json:"restarts"`
-	AgeSeconds      int64     `json:"ageSeconds"`
-	Containers      []string  `json:"containers"`
-	Ports           []PodPort `json:"ports"`
-}
-
-type PodPort struct {
-	Name     string `json:"name,omitempty"`
-	Port     int32  `json:"port"`
-	Protocol string `json:"protocol"`
-}
-
-type Service struct {
-	Name         string        `json:"name"`
-	Namespace    string        `json:"namespace"`
-	Type         string        `json:"type"`
-	ClusterIP    string        `json:"clusterIp,omitempty"`
-	ExternalName string        `json:"externalName,omitempty"`
-	ExternalIPs  []string      `json:"externalIps"`
-	AgeSeconds   int64         `json:"ageSeconds"`
-	Ports        []ServicePort `json:"ports"`
-}
-
-type ServicePort struct {
-	Name       string `json:"name,omitempty"`
-	Port       int32  `json:"port"`
-	Protocol   string `json:"protocol"`
-	TargetPort string `json:"targetPort,omitempty"`
-}
-
-type Session struct {
-	ID              string           `json:"id"`
-	Namespace       string           `json:"namespace"`
-	State           string           `json:"state"`
-	Generation      uint64           `json:"generation"`
-	CreatedAt       time.Time        `json:"createdAt"              ts_type:"string"`
-	UpdatedAt       time.Time        `json:"updatedAt"              ts_type:"string"`
-	LastHeartbeatAt time.Time        `json:"lastHeartbeatAt"        ts_type:"string"`
-	ExpiresAt       time.Time        `json:"expiresAt"              ts_type:"string"`
-	NetworkSpec     networkspec.Spec `json:"networkSpec"`
-	NetworkSpecHash string           `json:"networkSpecHash"`
-	Capabilities    *Capabilities    `json:"capabilities,omitempty"`
-}
-
-type SessionUpdate struct {
-	ProfileID string
-	Session   Session
-}
-
-type RelayTicket struct {
-	TokenType string    `json:"tokenType"`
-	Ticket    string    `json:"ticket"`
-	ExpiresAt time.Time `json:"expiresAt"          ts_type:"string"`
-	DeviceID  string    `json:"deviceId"`
-	RelayID   string    `json:"relayId,omitempty"`
-	Endpoint  string    `json:"endpoint,omitempty"`
-}
 
 type PortForwardSpec struct {
 	Kind       string `json:"kind"`
