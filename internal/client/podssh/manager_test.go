@@ -276,6 +276,42 @@ func TestManagerServesNativePodIPSSHThroughRemoteExec(t *testing.T) {
 	}
 }
 
+func TestManagerRejectsStartAfterShutdown(t *testing.T) {
+	_, privateKey, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signer, err := ssh.NewSignerFromKey(privateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session := remote.Session{
+		ID: uuid.NewString(), Namespace: "development", State: podSSHSessionActive,
+	}
+	manager, err := New(
+		newFakeExecClient(t),
+		&fakeSessions{sessions: map[string]remote.Session{"server-a": session}},
+		Config{ServerOptions: []localpodssh.Option{localpodssh.WithSigner(signer)}},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Shutdown(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Start(
+		t.Context(),
+		profile.Profile{ID: "server-a"},
+		session,
+		Request{
+			ProfileID: "server-a", Namespace: "development", Pod: "api-0",
+			PodIP: "10.244.1.7", Ready: true, Containers: []string{"main"},
+		},
+	); !errors.Is(err, ErrClosed) {
+		t.Fatalf("Start after Shutdown error = %v, want ErrClosed", err)
+	}
+}
+
 func TestManagerRejectsNamespaceAndContainerEscapes(t *testing.T) {
 	_, privateKey, _ := ed25519.GenerateKey(nil)
 	signer, _ := ssh.NewSignerFromKey(privateKey)

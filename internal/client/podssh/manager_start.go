@@ -21,6 +21,9 @@ func (manager *Manager) Start(
 ) (Info, error) {
 	manager.lifecycle.RLock()
 	defer manager.lifecycle.RUnlock()
+	if manager.closed {
+		return Info{}, ErrClosed
+	}
 	if ctx == nil {
 		return Info{}, errors.New("pod SSH context is required")
 	}

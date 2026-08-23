@@ -24,6 +24,8 @@ type HostTCPRegistrar interface {
 	SetHostTCPHandler(string, socksbridge.HostTCPHandler) error
 }
 
+var ErrClosed = errors.New("pod SSH manager is closed")
+
 type Request struct {
 	ProfileID  string   `json:"profileId"`
 	Namespace  string   `json:"namespace"`
@@ -63,6 +65,7 @@ type Manager struct {
 	hostTCP  HostTCPRegistrar
 
 	lifecycle sync.RWMutex
+	closed    bool
 	mu        sync.Mutex
 	active    map[string]*activeEndpoint
 	starting  map[string]struct{}
