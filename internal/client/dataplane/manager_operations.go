@@ -146,6 +146,11 @@ func (manager *Manager) Dialer(profileID string) (traffic.Dialer, error) {
 // The Runtime keeps its stable SOCKS listener and active TUN while the
 // authoritative Session and RelayTicket are refreshed.
 func (manager *Manager) Resume(profileID string) error {
+	manager.lifecycle.RLock()
+	defer manager.lifecycle.RUnlock()
+	operation := manager.profileOperation(profileID)
+	operation.Lock()
+	defer operation.Unlock()
 	manager.mu.Lock()
 	entry := manager.active[profileID]
 	if entry == nil {
@@ -186,6 +191,8 @@ func (manager *Manager) ResumeAll() int {
 
 func (manager *Manager) Shutdown() error {
 	manager.cancel()
+	manager.lifecycle.Lock()
+	defer manager.lifecycle.Unlock()
 	manager.mu.Lock()
 	entries := make([]*managedRuntime, 0, len(manager.active))
 	for profileID, entry := range manager.active {

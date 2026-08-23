@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
 	"github.com/fengqi-dev/kube-loop/internal/client/socksbridge"
@@ -35,6 +37,34 @@ type testTUNStarter struct {
 	namespace     string
 	hosts         []singbox.HostAlias
 	core          *testCore
+}
+
+type blockingTUNStarter struct {
+	*testTUNStarter
+
+	started     chan struct{}
+	release     chan struct{}
+	startedOnce sync.Once
+	releaseOnce sync.Once
+}
+
+func (starter *blockingTUNStarter) Start(
+	ctx context.Context,
+	network singbox.NetworkSpec,
+	bridgeAddress, namespace string,
+	hosts []singbox.HostAlias,
+) (singbox.RunningCore, error) {
+	starter.startedOnce.Do(func() { close(starter.started) })
+	select {
+	case <-starter.release:
+		return starter.testTUNStarter.Start(ctx, network, bridgeAddress, namespace, hosts)
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func (starter *blockingTUNStarter) unblock() {
+	starter.releaseOnce.Do(func() { close(starter.release) })
 }
 
 func (starter *testTUNStarter) Start(
@@ -232,6 +262,86 @@ func TestManagerSetHostTCPHandlerUpdatesActiveRuntime(t *testing.T) {
 	}
 	if err := manager.SetHostTCPHandler("missing", handler); err == nil {
 		t.Fatal("Host TCP handler accepted a missing Runtime")
+	}
+}
+
+func TestSlowTUNStartDoesNotBlockAnotherProfileStatus(t *testing.T) {
+	spec, err := networkspec.Normalize(networkspec.Spec{PodCIDRs: []string{"10.42.0.0/16"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash, err := networkspec.Hash(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	starter := &blockingTUNStarter{
+		testTUNStarter: &testTUNStarter{},
+		started:        make(chan struct{}),
+		release:        make(chan struct{}),
+	}
+	t.Cleanup(starter.unblock)
+	var starts atomic.Int32
+	manager, err := NewManager(&testTickets{}, Config{
+		TUNStarter: starter,
+		startForwarder: func(ctx context.Context, clientConfig websocketmux.ClientConfig) (streamForwarder, error) {
+			if _, err := clientConfig.TokenSource(ctx); err != nil {
+				return nil, err
+			}
+			listener, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				return nil, err
+			}
+			go acceptTestControl(listener)
+			return &testForwarder{Listener: listener}, nil
+		},
+		listenSOCKS: func(context.Context, string, string, tunnel.SessionToken) (localBridge, error) {
+			port := 49000 + starts.Add(1)
+			return &testBridge{address: testAddress("127.0.0.1:" + strconv.Itoa(int(port)))}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = manager.Shutdown() })
+	profiles := []profile.Profile{
+		{ID: "service-slow", BaseURL: "https://gateway.example.test", TunnelPath: defaultTunnelPath},
+		{ID: "service-independent", BaseURL: "https://gateway.example.test", TunnelPath: defaultTunnelPath},
+	}
+	for index, serverProfile := range profiles {
+		session := remote.Session{
+			ID: uuid.NewString(), Namespace: "development", State: dataplaneSessionActive,
+			Generation: uint64(index + 1), NetworkSpec: spec, NetworkSpecHash: hash,
+		}
+		if _, err := manager.Connect(context.Background(), serverProfile, session); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tunResult := make(chan error, 1)
+	go func() {
+		_, startErr := manager.StartTUN(context.Background(), profiles[0].ID)
+		tunResult <- startErr
+	}()
+	select {
+	case <-starter.started:
+	case <-time.After(time.Second):
+		t.Fatal("TUN start did not begin")
+	}
+	statusResult := make(chan error, 1)
+	go func() {
+		_, statusErr := manager.Status(profiles[1].ID)
+		statusResult <- statusErr
+	}()
+	select {
+	case err := <-statusResult:
+		if err != nil {
+			t.Fatalf("independent Status failed: %v", err)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("independent Status blocked on another profile's TUN startup")
+	}
+	starter.unblock()
+	if err := <-tunResult; err != nil {
+		t.Fatal(err)
 	}
 }
 

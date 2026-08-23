@@ -32,20 +32,25 @@ func (manager *Manager) watch(
 		return
 	default:
 	}
+	operation := manager.profileOperation(profileID)
+	operation.Lock()
 	manager.mu.Lock()
 	if manager.active[profileID] != entry || entry.runtime != runtime || manager.ctx.Err() != nil ||
 		runtime.TransportDone() != transportDone {
 		manager.mu.Unlock()
+		operation.Unlock()
 		return
 	}
 	if entry.recovering {
 		manager.mu.Unlock()
+		operation.Unlock()
 		return
 	}
 	entry.recovering = true
 	entry.lastError = runtime.TransportErr()
 	baseline := entry.session
 	manager.mu.Unlock()
+	operation.Unlock()
 	status := runtime.Status()
 	status.State = dataplaneReconnecting
 	manager.emit(profileID, status, entry.lastError)
@@ -60,9 +65,15 @@ func (manager *Manager) watch(
 func (manager *Manager) syncSession(update remote.SessionUpdate) {
 	profileID := strings.TrimSpace(update.ProfileID)
 	session := update.Session
+	if profileID == "" {
+		return
+	}
+	operation := manager.profileOperation(profileID)
+	operation.Lock()
+	defer operation.Unlock()
 	manager.mu.Lock()
 	entry := manager.active[profileID]
-	if profileID == "" || entry == nil || entry.runtime == nil || entry.recovering || manager.ctx.Err() != nil {
+	if entry == nil || entry.runtime == nil || entry.recovering || manager.ctx.Err() != nil {
 		manager.mu.Unlock()
 		return
 	}
@@ -125,8 +136,21 @@ func (manager *Manager) recover(profileID string, entry *managedRuntime, failed 
 		if !valid {
 			return
 		}
+		manager.lifecycle.RLock()
+		operation := manager.profileOperation(profileID)
+		operation.Lock()
+		manager.mu.Lock()
+		valid = manager.active[profileID] == entry && entry.runtime == failed && manager.ctx.Err() == nil
+		manager.mu.Unlock()
+		if !valid {
+			operation.Unlock()
+			manager.lifecycle.RUnlock()
+			return
+		}
 		err = failed.Reconnect(manager.ctx, entry.profile, session, manager.sessions.RelayTicketSource(profileID))
 		if err != nil {
+			operation.Unlock()
+			manager.lifecycle.RUnlock()
 			lastError = err
 			continue
 		}
@@ -134,12 +158,16 @@ func (manager *Manager) recover(profileID string, entry *managedRuntime, failed 
 		if manager.active[profileID] != entry || entry.runtime != failed || manager.ctx.Err() != nil ||
 			session.Generation < entry.session.Generation {
 			manager.mu.Unlock()
+			operation.Unlock()
+			manager.lifecycle.RUnlock()
 			return
 		}
 		entry.session = session
 		entry.recovering = false
 		entry.lastError = nil
 		manager.mu.Unlock()
+		operation.Unlock()
+		manager.lifecycle.RUnlock()
 		manager.emit(profileID, failed.Status(), nil)
 		go manager.watch(profileID, entry, failed, failed.TransportDone())
 		return
@@ -151,6 +179,17 @@ func (manager *Manager) recover(profileID string, entry *managedRuntime, failed 
 	shouldClose := manager.active[profileID] == entry && entry.runtime == failed
 	manager.mu.Unlock()
 	if shouldClose {
+		manager.lifecycle.RLock()
+		operation := manager.profileOperation(profileID)
+		operation.Lock()
+		manager.mu.Lock()
+		shouldClose = manager.active[profileID] == entry && entry.runtime == failed
+		manager.mu.Unlock()
+		if !shouldClose {
+			operation.Unlock()
+			manager.lifecycle.RUnlock()
+			return
+		}
 		closeError := failed.Close()
 		terminalError := fmt.Errorf("recover Data Plane: %w", lastError)
 		if closeError != nil {
@@ -163,6 +202,8 @@ func (manager *Manager) recover(profileID string, entry *managedRuntime, failed 
 			entry.lastError = terminalError
 		}
 		manager.mu.Unlock()
+		operation.Unlock()
+		manager.lifecycle.RUnlock()
 		if !stillActive {
 			return
 		}

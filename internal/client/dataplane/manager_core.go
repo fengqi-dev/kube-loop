@@ -47,14 +47,16 @@ var (
 )
 
 type Manager struct {
-	sessions SessionSource
-	config   Config
-	ctx      context.Context
-	cancel   context.CancelFunc
-	mu       sync.Mutex
-	active   map[string]*managedRuntime
-	hostTCP  map[string]socksbridge.HostTCPHandler
-	events   chan StatusEvent
+	sessions   SessionSource
+	config     Config
+	ctx        context.Context
+	cancel     context.CancelFunc
+	lifecycle  sync.RWMutex
+	mu         sync.Mutex
+	active     map[string]*managedRuntime
+	hostTCP    map[string]socksbridge.HostTCPHandler
+	operations map[string]*sync.Mutex
+	events     chan StatusEvent
 }
 
 // Mode identifies how local applications enter the connected data plane.
@@ -92,7 +94,8 @@ func NewManager(sessions SessionSource, config Config) (*Manager, error) {
 	manager := &Manager{
 		sessions: sessions, config: config, ctx: ctx, cancel: cancel,
 		active: make(map[string]*managedRuntime), hostTCP: make(map[string]socksbridge.HostTCPHandler),
-		events: make(chan StatusEvent, 32),
+		operations: make(map[string]*sync.Mutex),
+		events:     make(chan StatusEvent, 32),
 	}
 	if config.OnStatus != nil {
 		go manager.eventLoop(config.OnStatus)
@@ -103,4 +106,18 @@ func NewManager(sessions SessionSource, config Config) (*Manager, error) {
 		}
 	}
 	return manager, nil
+}
+
+func (manager *Manager) profileOperation(profileID string) *sync.Mutex {
+	manager.mu.Lock()
+	defer manager.mu.Unlock()
+	if manager.operations == nil {
+		manager.operations = make(map[string]*sync.Mutex)
+	}
+	operation := manager.operations[profileID]
+	if operation == nil {
+		operation = &sync.Mutex{}
+		manager.operations[profileID] = operation
+	}
+	return operation
 }
