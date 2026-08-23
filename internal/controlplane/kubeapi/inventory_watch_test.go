@@ -90,3 +90,52 @@ func TestInventoryWatchSharesInformerAndSlowSubscriberKeepsLatestSnapshot(
 		}
 	}
 }
+
+func TestInventoryWatchLastUnsubscribeStopsFeed(t *testing.T) {
+	client := fake.NewSimpleClientset(&corev1.Service{
+		Name: "api", Namespace: "development",
+	})
+	hub := newInventoryWatchHub(20 * time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	subject := authorization.Subject{ID: "identity-1"}
+
+	updates, unsubscribe, err := hub.subscribe(
+		ctx,
+		subject,
+		client,
+		"development",
+		inventoryServices,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-updates:
+	case <-ctx.Done():
+		t.Fatal("initial Service snapshot timed out")
+	}
+	hub.mu.Lock()
+	var feed *inventoryFeed
+	for _, candidate := range hub.feeds {
+		feed = candidate
+	}
+	hub.mu.Unlock()
+	if feed == nil {
+		t.Fatal("subscribed feed is missing")
+	}
+
+	unsubscribe()
+	unsubscribe()
+	hub.mu.Lock()
+	remaining := len(hub.feeds)
+	hub.mu.Unlock()
+	if remaining != 0 {
+		t.Fatalf("feeds after last unsubscribe = %d", remaining)
+	}
+	select {
+	case <-feed.stop:
+	default:
+		t.Fatal("last unsubscribe did not stop the feed")
+	}
+}
