@@ -31,6 +31,8 @@ type DataPlane interface {
 	Dialer(string) (traffic.Dialer, error)
 }
 
+var ErrClosed = errors.New("port Forward manager is closed")
+
 type localForwards interface {
 	StartResolved(context.Context, listener.Request, string, listener.TrafficDialer) (listener.Info, error)
 	Stop(string) error
@@ -74,6 +76,7 @@ type Manager struct {
 	locals     localForwards
 
 	lifecycle sync.RWMutex
+	closed    bool
 	mu        sync.Mutex
 	active    map[string]*activeForward
 }
@@ -96,6 +99,9 @@ func (manager *Manager) Start(
 ) (Info, error) {
 	manager.lifecycle.RLock()
 	defer manager.lifecycle.RUnlock()
+	if manager.closed {
+		return Info{}, ErrClosed
+	}
 	validProfile := strings.TrimSpace(request.ProfileID) == serverProfile.ID
 	if ctx == nil || !validProfile || session.State != portForwardSessionActive {
 		return Info{}, errors.New("active Server Profile Session is required")
@@ -201,6 +207,7 @@ func (manager *Manager) Shutdown(ctx context.Context) error {
 	}
 	manager.lifecycle.Lock()
 	defer manager.lifecycle.Unlock()
+	manager.closed = true
 	manager.mu.Lock()
 	ids := make([]string, 0, len(manager.active))
 	for id := range manager.active {

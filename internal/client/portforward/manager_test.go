@@ -287,6 +287,11 @@ func TestManagerShutdownStopsLocalAndRemoteTasks(t *testing.T) {
 		client.stopped[0] != task.ID {
 		t.Fatalf("active = %#v local stops = %#v remote stops = %#v", manager.List(""), locals.stopped, client.stopped)
 	}
+	if _, err := manager.Start(context.Background(), serverProfile, session, Request{
+		ProfileID: serverProfile.ID, Kind: "service", Name: "api", RemotePort: 8443,
+	}); !errors.Is(err, ErrClosed) {
+		t.Fatalf("Start after Shutdown error = %v, want ErrClosed", err)
+	}
 }
 
 func TestManagerStopProfileDoesNotAffectAnotherServer(t *testing.T) {
