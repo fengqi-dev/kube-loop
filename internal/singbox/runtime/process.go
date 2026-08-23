@@ -15,6 +15,8 @@ import (
 
 const maxDataPlaneLogLines = 5_000
 
+var errProcessClosed = errors.New("sing-box process is closed")
+
 type Process struct {
 	done              chan struct{}
 	stopCh            chan struct{}
@@ -34,7 +36,9 @@ type Process struct {
 	spec              singbox.SessionSpec
 	updateDNS         singbox.PrivilegedUpdateDNSFunc
 	readLogs          singbox.PrivilegedReadLogsFunc
+	updateMu          sync.Mutex
 	specMu            sync.Mutex
+	closed            bool
 	logMu             sync.Mutex
 	logOffset         int64
 	logPending        string
@@ -105,31 +109,17 @@ func (p *Process) UpdateDNSNamespace(ctx context.Context, namespace string) erro
 	if namespace == "" {
 		namespace = defaultNamespace
 	}
-	p.specMu.Lock()
-	nextSpec := p.spec
-	nextSpec.DNSNamespace = namespace
-	nextSpec.Namespace = namespace
-	dns, err := nextSpec.DNS()
-	domains := slices.Clone(nextSpec.ClusterDomains)
-	sessionID := nextSpec.ID
-	proxy := p.dnsProxy
-	if err == nil {
-		p.spec = nextSpec
-		p.resolverDomains = dns.Domains
-	}
-	p.specMu.Unlock()
-	if err != nil {
-		return err
-	}
-	// Capture proxy under specMu so Close cannot nil it mid-update.
-	if proxy != nil {
-		proxy.SetSearch(dns.Search)
-		proxy.SetClusterDomains(domains)
-	}
-	if p.updateDNS == nil {
-		return errors.New("privileged DNS update is unavailable; reconnect to apply")
-	}
-	return p.updateDNS(ctx, sessionID, dns)
+	return p.applyDNSUpdate(
+		ctx,
+		func(spec *singbox.SessionSpec) {
+			spec.DNSNamespace = namespace
+			spec.Namespace = namespace
+		},
+		func(proxy *dnsSearchProxy, spec singbox.SessionSpec, dns singbox.DNSMeta) {
+			proxy.SetSearch(dns.Search)
+			proxy.SetClusterDomains(spec.ClusterDomains)
+		},
+	)
 }
 
 func (p *Process) UpdateHostAliases(ctx context.Context, hosts []singbox.HostAlias) error {
@@ -137,27 +127,55 @@ func (p *Process) UpdateHostAliases(ctx context.Context, hosts []singbox.HostAli
 	if err != nil {
 		return err
 	}
+	return p.applyDNSUpdate(
+		ctx,
+		func(spec *singbox.SessionSpec) {
+			spec.Hosts = normalized
+		},
+		func(proxy *dnsSearchProxy, spec singbox.SessionSpec, _ singbox.DNSMeta) {
+			proxy.SetHostAliases(spec.Hosts)
+		},
+	)
+}
+
+func (p *Process) applyDNSUpdate(
+	ctx context.Context,
+	mutate func(*singbox.SessionSpec),
+	commitProxy func(*dnsSearchProxy, singbox.SessionSpec, singbox.DNSMeta),
+) error {
+	p.updateMu.Lock()
+	defer p.updateMu.Unlock()
+
 	p.specMu.Lock()
+	if p.closed {
+		p.specMu.Unlock()
+		return errProcessClosed
+	}
 	nextSpec := p.spec
-	nextSpec.Hosts = normalized
+	mutate(&nextSpec)
 	dnsMeta, err := nextSpec.DNS()
 	sessionID := nextSpec.ID
-	proxy := p.dnsProxy
-	if err == nil {
-		p.spec = nextSpec
-		p.resolverDomains = dnsMeta.Domains
-	}
+	updateDNS := p.updateDNS
 	p.specMu.Unlock()
 	if err != nil {
 		return err
 	}
-	if proxy != nil {
-		proxy.SetHostAliases(normalized)
-	}
-	if p.updateDNS == nil {
+	if updateDNS == nil {
 		return errors.New("privileged DNS update is unavailable; reconnect to apply")
 	}
-	return p.updateDNS(ctx, sessionID, dnsMeta)
+	if err := updateDNS(ctx, sessionID, dnsMeta); err != nil {
+		return err
+	}
+
+	p.specMu.Lock()
+	p.spec = nextSpec
+	p.resolverDomains = slices.Clone(dnsMeta.Domains)
+	proxy := p.dnsProxy
+	p.specMu.Unlock()
+	if proxy != nil {
+		commitProxy(proxy, nextSpec, dnsMeta)
+	}
+	return nil
 }
 
 func (p *Process) ProbeClusterDNS(ctx context.Context) error {
@@ -197,6 +215,11 @@ func (p *Process) wait() {
 
 func (p *Process) Close() error {
 	p.closeOnce.Do(func() {
+		p.updateMu.Lock()
+		defer p.updateMu.Unlock()
+		p.specMu.Lock()
+		p.closed = true
+		p.specMu.Unlock()
 		select {
 		case <-p.done:
 		default:
