@@ -34,10 +34,12 @@ type persistedProtobufSources struct {
 // ProtobufSchemaStore persists the source set as one profile-scoped document.
 // Keeping import paths as map keys lets protocompile resolve nested imports.
 type ProtobufSchemaStore struct {
-	mu      sync.RWMutex
-	path    string
-	decoder *ProtobufDecoder
-	sources map[string]string
+	replaceMu sync.Mutex
+	mu        sync.RWMutex
+	path      string
+	decoder   *ProtobufDecoder
+	sources   map[string]string
+	writeFile func(string, []byte, os.FileMode, os.FileMode) error
 }
 
 func NewProtobufSchemaStore(path string, decoder *ProtobufDecoder) (*ProtobufSchemaStore, error) {
@@ -55,7 +57,9 @@ func NewProtobufSchemaStore(path string, decoder *ProtobufDecoder) (*ProtobufSch
 	if err != nil {
 		return nil, fmt.Errorf("resolve protobuf schema path: %w", err)
 	}
-	return &ProtobufSchemaStore{path: absolute, decoder: decoder, sources: make(map[string]string)}, nil
+	return &ProtobufSchemaStore{
+		path: absolute, decoder: decoder, sources: make(map[string]string), writeFile: fsatomic.WriteFile,
+	}, nil
 }
 
 func (s *ProtobufSchemaStore) Load(ctx context.Context) error {
@@ -104,6 +108,8 @@ func (s *ProtobufSchemaStore) Files() []string {
 }
 
 func (s *ProtobufSchemaStore) replace(ctx context.Context, sources map[string]string, persist bool) error {
+	s.replaceMu.Lock()
+	defer s.replaceMu.Unlock()
 	validated := NewProtobufDecoder()
 	if err := validated.ReplaceSources(ctx, sources); err != nil {
 		return err
@@ -118,13 +124,15 @@ func (s *ProtobufSchemaStore) replace(ctx context.Context, sources map[string]st
 			return errors.New("encode protobuf schemas")
 		}
 		raw = append(raw, '\n')
-		if err := fsatomic.WriteFile(s.path, raw, 0o700, 0o600); err != nil {
+		writeFile := s.writeFile
+		if writeFile == nil {
+			writeFile = fsatomic.WriteFile
+		}
+		if err := writeFile(s.path, raw, 0o700, 0o600); err != nil {
 			return fmt.Errorf("save protobuf schemas: %w", err)
 		}
 	}
-	if err := s.decoder.ReplaceSources(ctx, sources); err != nil {
-		return fmt.Errorf("activate protobuf schemas: %w", err)
-	}
+	s.decoder.replaceCompiled(validated)
 	s.mu.Lock()
 	s.sources = cloneStringMap(sources)
 	s.mu.Unlock()

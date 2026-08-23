@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	pathpkg "path"
 	"slices"
 	"strings"
@@ -88,6 +89,15 @@ func (d *ProtobufDecoder) ReplaceSources(ctx context.Context, sources map[string
 	d.methods = methods
 	d.mu.Unlock()
 	return nil
+}
+
+func (d *ProtobufDecoder) replaceCompiled(compiled *ProtobufDecoder) {
+	compiled.mu.RLock()
+	methods := maps.Clone(compiled.methods)
+	compiled.mu.RUnlock()
+	d.mu.Lock()
+	d.methods = methods
+	d.mu.Unlock()
 }
 
 func (d *ProtobufDecoder) Decode(path, direction, encoding string, framed []byte) *ProtobufEvent {
