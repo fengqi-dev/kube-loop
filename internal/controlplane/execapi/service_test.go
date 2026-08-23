@@ -104,7 +104,6 @@ func (executor *fakeExecutor) Exec(
 	return nil
 }
 
-//nolint:gocyclo // The test intentionally covers the complete owned single-use WebSocket lifecycle.
 func TestPodExecTaskAndWebSocketStreamAreOwnedAndSingleUse(t *testing.T) {
 	now := time.Now().UTC()
 	stateStore, err := storage.Open(context.Background(), storage.Config{
@@ -213,21 +212,7 @@ func TestPodExecTaskAndWebSocketStreamAreOwnedAndSingleUse(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = connection.CloseNow() }()
-	frames := make(map[byte]execstream.Frame)
-	for len(frames) < 3 {
-		messageType, encoded, err := connection.Read(context.Background())
-		if err != nil {
-			t.Fatal(err)
-		}
-		if messageType != websocket.MessageBinary {
-			t.Fatalf("message type = %v", messageType)
-		}
-		frame, err := execstream.Decode(encoded)
-		if err != nil {
-			t.Fatal(err)
-		}
-		frames[frame.Type] = frame
-	}
+	frames := readExecLifecycleFrames(t, connection)
 	if string(frames[execstream.Stdout].Payload) != "hello\n" ||
 		string(frames[execstream.Stderr].Payload) != "warning\n" {
 		t.Fatalf("frames = %#v", frames)
@@ -250,33 +235,7 @@ func TestPodExecTaskAndWebSocketStreamAreOwnedAndSingleUse(t *testing.T) {
 	if response != nil {
 		streamRequestID = response.Header.Get(echo.HeaderXRequestID)
 	}
-	apiEvents, backgroundEvents := 0, 0
-	for _, event := range transitionEvents {
-		if event.IdentityID != identityID || event.ResourceType != execapi.TaskType ||
-			event.ResourceID != document.ID {
-			t.Fatalf("Task transition audit event = %#v", event)
-		}
-		metadata := string(event.Metadata)
-		if strings.Contains(metadata, "/bin/sh") || strings.Contains(metadata, "hello") ||
-			strings.Contains(metadata, "warning") {
-			t.Fatalf("Pod exec command or output leaked into audit metadata: %s", metadata)
-		}
-		if strings.Contains(metadata, `"source":"api"`) {
-			apiEvents++
-			if streamRequestID == "" || event.RequestID != streamRequestID {
-				t.Fatalf(
-					"API transition request ID = %q, WebSocket request ID = %q",
-					event.RequestID,
-					streamRequestID,
-				)
-			}
-		} else if strings.Contains(metadata, `"source":"background"`) {
-			backgroundEvents++
-		}
-	}
-	if apiEvents != 2 || backgroundEvents != 1 {
-		t.Fatalf("Task transition audit sources: api=%d background=%d", apiEvents, backgroundEvents)
-	}
+	assertExecLifecycleAudit(t, transitionEvents, identityID, document.ID, streamRequestID)
 	_, replayResponse, replayErr := websocket.Dial(
 		context.Background(),
 		streamURL,
@@ -290,6 +249,57 @@ func TestPodExecTaskAndWebSocketStreamAreOwnedAndSingleUse(t *testing.T) {
 	defer executor.mu.Unlock()
 	if executor.validated != 1 || executor.executed != 1 {
 		t.Fatalf("validate = %d execute = %d", executor.validated, executor.executed)
+	}
+}
+
+func readExecLifecycleFrames(t *testing.T, connection *websocket.Conn) map[byte]execstream.Frame {
+	t.Helper()
+	frames := make(map[byte]execstream.Frame)
+	for len(frames) < 3 {
+		messageType, encoded, err := connection.Read(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if messageType != websocket.MessageBinary {
+			t.Fatalf("message type = %v", messageType)
+		}
+		frame, err := execstream.Decode(encoded)
+		if err != nil {
+			t.Fatal(err)
+		}
+		frames[frame.Type] = frame
+	}
+	return frames
+}
+
+func assertExecLifecycleAudit(
+	t *testing.T,
+	events []storage.AuditEvent,
+	identityID, taskID, requestID string,
+) {
+	t.Helper()
+	apiEvents, backgroundEvents := 0, 0
+	for _, event := range events {
+		if event.IdentityID != identityID || event.ResourceType != execapi.TaskType || event.ResourceID != taskID {
+			t.Fatalf("Task transition audit event = %#v", event)
+		}
+		metadata := string(event.Metadata)
+		if strings.Contains(metadata, "/bin/sh") || strings.Contains(metadata, "hello") ||
+			strings.Contains(metadata, "warning") {
+			t.Fatalf("Pod exec command or output leaked into audit metadata: %s", metadata)
+		}
+		switch {
+		case strings.Contains(metadata, `"source":"api"`):
+			apiEvents++
+			if requestID == "" || event.RequestID != requestID {
+				t.Fatalf("API transition request ID = %q, WebSocket request ID = %q", event.RequestID, requestID)
+			}
+		case strings.Contains(metadata, `"source":"background"`):
+			backgroundEvents++
+		}
+	}
+	if apiEvents != 2 || backgroundEvents != 1 {
+		t.Fatalf("Task transition audit sources: api=%d background=%d", apiEvents, backgroundEvents)
 	}
 }
 
