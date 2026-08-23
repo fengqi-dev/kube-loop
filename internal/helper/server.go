@@ -25,6 +25,10 @@ type Server struct {
 	sessions  map[string]*session
 	lifecycle sync.Mutex
 	closing   atomic.Bool
+
+	connectionMu sync.Mutex
+	connections  map[net.Conn]struct{}
+	handlers     sync.WaitGroup
 }
 
 type session struct {
@@ -47,9 +51,10 @@ type sessionExit struct {
 
 func NewServer(auth AuthFile) *Server {
 	return &Server{
-		Auth:     auth,
-		Log:      log.Default(),
-		sessions: map[string]*session{},
+		Auth:        auth,
+		Log:         log.Default(),
+		sessions:    map[string]*session{},
+		connections: map[net.Conn]struct{}{},
 	}
 }
 
@@ -58,14 +63,21 @@ func (s *Server) Serve(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	defer func() { _ = listener.Close() }()
+	return s.serve(ctx, listener)
+}
+
+func (s *Server) serve(ctx context.Context, listener net.Listener) error {
 	defer func() {
 		s.closing.Store(true)
+		_ = listener.Close()
+		s.closeConnections()
+		s.handlers.Wait()
 		s.stopAllSessions()
 	}()
 	stopListener := context.AfterFunc(ctx, func() {
 		s.closing.Store(true)
 		_ = listener.Close()
+		s.closeConnections()
 	})
 	defer stopListener()
 
@@ -80,7 +92,44 @@ func (s *Server) Serve(ctx context.Context) error {
 				return err
 			}
 		}
-		go s.handle(conn)
+		if !s.trackConnection(conn) {
+			_ = conn.Close()
+			continue
+		}
+		go func() {
+			defer s.finishConnection(conn)
+			s.handle(conn)
+		}()
+	}
+}
+
+func (s *Server) trackConnection(conn net.Conn) bool {
+	s.connectionMu.Lock()
+	defer s.connectionMu.Unlock()
+	if s.closing.Load() {
+		return false
+	}
+	s.connections[conn] = struct{}{}
+	s.handlers.Add(1)
+	return true
+}
+
+func (s *Server) finishConnection(conn net.Conn) {
+	s.connectionMu.Lock()
+	delete(s.connections, conn)
+	s.connectionMu.Unlock()
+	s.handlers.Done()
+}
+
+func (s *Server) closeConnections() {
+	s.connectionMu.Lock()
+	connections := make([]net.Conn, 0, len(s.connections))
+	for conn := range s.connections {
+		connections = append(connections, conn)
+	}
+	s.connectionMu.Unlock()
+	for _, conn := range connections {
+		_ = conn.Close()
 	}
 }
 

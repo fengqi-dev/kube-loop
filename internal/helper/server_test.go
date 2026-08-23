@@ -1,12 +1,63 @@
 package helper
 
 import (
+	"context"
 	"errors"
+	"net"
 	"testing"
+	"time"
 
 	helperprotocol "github.com/fengqi-dev/kube-loop/internal/protocol/helper"
 	"github.com/fengqi-dev/kube-loop/internal/singbox"
 )
+
+func TestServerShutdownClosesAndWaitsForHandlers(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := NewServer(AuthFile{})
+	ctx, cancel := context.WithCancel(context.Background())
+	served := make(chan error, 1)
+	go func() { served <- server.serve(ctx, listener) }()
+
+	connection, err := net.Dial("tcp", listener.Addr().String())
+	if err != nil {
+		cancel()
+		t.Fatal(err)
+	}
+	defer func() { _ = connection.Close() }()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		server.connectionMu.Lock()
+		active := len(server.connections)
+		server.connectionMu.Unlock()
+		if active == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			cancel()
+			t.Fatal("helper handler did not accept connection")
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	cancel()
+	select {
+	case err := <-served:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Serve did not wait for blocked handler shutdown")
+	}
+	server.connectionMu.Lock()
+	active := len(server.connections)
+	server.connectionMu.Unlock()
+	if active != 0 {
+		t.Fatalf("active helper connections=%d", active)
+	}
+}
 
 func TestDispatchRejectsLegacyExecutableRequest(t *testing.T) {
 	server := NewServer(AuthFile{Token: "secret"})
