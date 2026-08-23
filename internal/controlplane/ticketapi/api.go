@@ -11,6 +11,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/controlplane"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
 	controlplanemiddleware "github.com/fengqi-dev/kube-loop/internal/controlplane/middleware"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/routequery"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/sessionapi"
 	ticketservice "github.com/fengqi-dev/kube-loop/internal/controlplane/ticketapi/service"
 )
@@ -49,7 +50,7 @@ func (routes *Routes) issue(
 	if _, err := uuid.Parse(sessionID); err != nil {
 		return notFound()
 	}
-	namespace, apiError := namespaceFromQuery(request)
+	namespace, apiError := routequery.Namespace(request)
 	if apiError != nil {
 		return apiError
 	}
@@ -113,49 +114,6 @@ func (routes *Routes) issue(
 		}
 	}
 	return nil
-}
-
-func namespaceFromQuery(
-	request *http.Request,
-) (string, *controlplaneapi.Error) {
-	query := request.URL.Query()
-	for key, values := range query {
-		if key != namespaceQueryParameter {
-			return "", &controlplaneapi.Error{
-				Code:    controlplaneapi.CodeInvalidArgument,
-				Field:   key,
-				Message: "query parameter is not supported",
-			}
-		}
-		if len(values) != 1 {
-			return "", &controlplaneapi.Error{
-				Code:    controlplaneapi.CodeInvalidArgument,
-				Field:   key,
-				Message: "query parameter must be provided once",
-			}
-		}
-	}
-	namespace := query.Get(namespaceQueryParameter)
-	if namespace == "" || len(namespace) > 63 {
-		return "", &controlplaneapi.Error{
-			Code:    controlplaneapi.CodeInvalidArgument,
-			Field:   namespaceQueryParameter,
-			Message: "namespace is invalid",
-		}
-	}
-	for index, character := range namespace {
-		if (character >= 'a' && character <= 'z') ||
-			(character >= '0' && character <= '9') ||
-			(character == '-' && index > 0 && index < len(namespace)-1) {
-			continue
-		}
-		return "", &controlplaneapi.Error{
-			Code:    controlplaneapi.CodeInvalidArgument,
-			Field:   namespaceQueryParameter,
-			Message: "namespace is invalid",
-		}
-	}
-	return namespace, nil
 }
 
 func notFound() *controlplaneapi.Error {

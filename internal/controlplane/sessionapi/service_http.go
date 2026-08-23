@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/labstack/echo/v5"
-	"k8s.io/apimachinery/pkg/util/validation"
 
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
@@ -36,35 +35,6 @@ func documentWithCapabilities(session storage.Session, snapshot capability.Snaps
 func writeDocument(ctx *echo.Context, status int, document Document) {
 	ctx.Response().Header().Set("ETag", fmt.Sprintf("\"%d\"", document.Generation))
 	_ = ctx.JSON(status, document)
-}
-
-func namespaceFromQuery(request *http.Request) (string, *controlplaneapi.Error) {
-	query := request.URL.Query()
-	for key, values := range query {
-		if key != "namespace" {
-			return "", &controlplaneapi.Error{
-				Code:    controlplaneapi.CodeInvalidArgument,
-				Field:   key,
-				Message: "query parameter is not supported",
-			}
-		}
-		if len(values) != 1 {
-			return "", &controlplaneapi.Error{
-				Code:    controlplaneapi.CodeInvalidArgument,
-				Field:   key,
-				Message: "query parameter must be provided once",
-			}
-		}
-	}
-	namespace := query.Get("namespace")
-	if len(validation.IsDNS1123Label(namespace)) != 0 {
-		return "", &controlplaneapi.Error{
-			Code:    controlplaneapi.CodeInvalidArgument,
-			Field:   "namespace",
-			Message: "namespace is invalid",
-		}
-	}
-	return namespace, nil
 }
 
 func idempotencyKey(request *http.Request) (string, *controlplaneapi.Error) {

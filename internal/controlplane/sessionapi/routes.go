@@ -5,6 +5,7 @@ import (
 
 	"github.com/fengqi-dev/kube-loop/internal/controlplane"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/routequery"
 )
 
 type Routes struct{ *Service }
@@ -27,7 +28,7 @@ type sessionHandler func(*echo.Context, controlplaneapi.Identity, string, string
 func (handler *Routes) withNamespace(next namespaceHandler) controlplane.EndpointFunc {
 	return func(ctx *echo.Context, identity controlplaneapi.Identity) *controlplaneapi.Error {
 		request := ctx.Request()
-		namespace, apiError := namespaceFromQuery(request)
+		namespace, apiError := routequery.Namespace(request)
 		if apiError != nil {
 			return apiError
 		}
