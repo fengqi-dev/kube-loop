@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
@@ -62,13 +63,19 @@ func (a *App) startup(ctx context.Context) {
 	})
 }
 
-func (a *App) shutdown(context.Context) {
-	shutdownContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+func (a *App) shutdown(ctx context.Context) {
+	shutdownTimeout := a.shutdownTimeout
+	if shutdownTimeout <= 0 {
+		shutdownTimeout = 5 * time.Second
+	}
+	shutdownContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), shutdownTimeout)
 	defer cancel()
 	if a.backgroundCancel != nil {
 		a.backgroundCancel()
 	}
-	a.backgroundWG.Wait()
+	if err := waitForBackgroundShutdown(shutdownContext, &a.backgroundWG); err != nil {
+		log.Printf("application background shutdown: %v", err)
+	}
 	a.stopServerInventoryWatch("")
 	if a.mcp != nil {
 		if err := a.mcp.Stop(); err != nil {
@@ -124,6 +131,20 @@ func (a *App) shutdown(context.Context) {
 		if err := a.trafficInspectionOutput.Close(); err != nil {
 			log.Printf("traffic inspection output shutdown: %v", err)
 		}
+	}
+}
+
+func waitForBackgroundShutdown(ctx context.Context, wait *sync.WaitGroup) error {
+	done := make(chan struct{})
+	go func() {
+		wait.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
 

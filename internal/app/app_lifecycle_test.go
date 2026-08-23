@@ -72,3 +72,25 @@ func TestShutdownWaitsForBackgroundCleanup(t *testing.T) {
 		t.Fatal("shutdown did not return after background cleanup")
 	}
 }
+
+func TestShutdownBoundsBackgroundCleanupWait(t *testing.T) {
+	application := &App{shutdownTimeout: 20 * time.Millisecond}
+	ctx, cancel := context.WithCancel(t.Context())
+	application.backgroundCancel = cancel
+	releaseCleanup := make(chan struct{})
+	t.Cleanup(func() { close(releaseCleanup) })
+	application.backgroundWG.Go(func() {
+		<-ctx.Done()
+		<-releaseCleanup
+	})
+	stopped := make(chan struct{})
+	go func() {
+		application.shutdown(t.Context())
+		close(stopped)
+	}()
+	select {
+	case <-stopped:
+	case <-time.After(time.Second):
+		t.Fatal("shutdown ignored the background cleanup deadline")
+	}
+}

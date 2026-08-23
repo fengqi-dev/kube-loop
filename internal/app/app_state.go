@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"sync"
+	"time"
 
 	clientauth "github.com/fengqi-dev/kube-loop/internal/client/auth"
 	"github.com/fengqi-dev/kube-loop/internal/client/credentials"
@@ -53,6 +54,7 @@ type App struct {
 	inventoryWatchCancel      context.CancelFunc
 	backgroundCancel          context.CancelFunc
 	backgroundWG              sync.WaitGroup
+	shutdownTimeout           time.Duration
 	serverLoginMu             sync.Mutex
 	serverLogin               *serverLoginAttempt
 	trafficInspectionOutput   io.Closer
