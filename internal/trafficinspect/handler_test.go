@@ -219,6 +219,78 @@ func TestHandlerDynamicSwitchAppliesWithoutRecreatingHandler(t *testing.T) {
 	}
 }
 
+func TestServeConnWaitsForProxyHandlerAfterCancellation(t *testing.T) {
+	authority, err := LoadOrCreateAuthority(filepath.Join(t.TempDir(), authorityFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	routes := newRoutingDialer()
+	origin := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		_, _ = response.Write([]byte("ok"))
+	}))
+	defer origin.Close()
+	routes.add("blocked.test:80", origin.Listener.Addr().String())
+	handlerStarted := make(chan struct{})
+	releaseHandler := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseHandler) }) }
+	defer release()
+	handler, err := New(Config{
+		CA: authority.TLSCertificate(), DialContext: routes.DialContext,
+		OnRequest: func(*http.Request) {
+			close(handlerStarted)
+			<-releaseHandler
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = handler.Close() }()
+	serveResult := make(chan error, 1)
+	transport := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+		client, inspector := net.Pipe()
+		go func() { serveResult <- handler.ServeConn(ctx, inspector, "blocked.test:80") }()
+		return client, nil
+	}}
+	defer transport.CloseIdleConnections()
+	client := &http.Client{Transport: transport}
+	requestContext, cancelRequest := context.WithCancel(context.Background())
+	request, err := http.NewRequestWithContext(requestContext, http.MethodGet, "http://blocked.test/", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	requestResult := make(chan error, 1)
+	go func() {
+		response, requestErr := client.Do(request)
+		if response != nil {
+			_ = response.Body.Close()
+		}
+		requestResult <- requestErr
+	}()
+	select {
+	case <-handlerStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("proxy request handler did not start")
+	}
+	cancelRequest()
+	select {
+	case err := <-serveResult:
+		t.Fatalf("ServeConn returned before proxy handler completed: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	release()
+	select {
+	case <-serveResult:
+	case <-time.After(2 * time.Second):
+		t.Fatal("ServeConn did not wait for proxy handler")
+	}
+	select {
+	case <-requestResult:
+	case <-time.After(2 * time.Second):
+		t.Fatal("HTTP request did not stop after cancellation")
+	}
+}
+
 func TestHandler_H2CUsesInjectedDialer(t *testing.T) {
 	ca := newTestCertificate(t, "KubeLoop POC CA", true)
 	routes := newRoutingDialer()

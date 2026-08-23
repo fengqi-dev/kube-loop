@@ -83,6 +83,10 @@ func (h *Handler) ServeConn(ctx context.Context, connection net.Conn, target str
 		defer close(serveDone)
 		h.proxy.ServeHTTP(writer, request)
 	}()
+	defer func() {
+		_ = tracked.Close()
+		<-serveDone
+	}()
 
 	select {
 	case <-tracked.done:
