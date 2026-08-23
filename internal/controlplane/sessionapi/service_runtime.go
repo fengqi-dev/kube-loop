@@ -10,6 +10,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/protocol/remotetask"
 )
 
+// AttachRuntime is consumed by streamlease without coupling feature handlers.
 func (handler *Service) AttachRuntime(
 	parent context.Context,
 	sessionID, taskID string,
