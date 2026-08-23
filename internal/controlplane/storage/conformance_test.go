@@ -355,57 +355,10 @@ func testStableRepositoryErrors(t *testing.T, store *Store) {
 	}
 }
 
-//nolint:gocyclo // The conformance scenario exercises the full repository contract across all storage backends.
 func testSessionTaskSnapshotRepositories(t *testing.T, store *Store) {
-	ctx := context.Background()
-	identity := createTestIdentity(t, store.Identities(), "session-user")
-	now := time.Date(2026, 8, 9, 3, 0, 0, 100, time.UTC)
-	spec, err := networkspec.Normalize(networkspec.Spec{
-		PodCIDRs: []string{
-			"10.2.0.0/16",
-		}, ServiceCIDRs: []string{"10.96.0.0/12"},
-		ServiceIPs: []string{"10.96.0.10"}, DNSServer: "10.96.0.10",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	specJSON, _ := networkspec.CanonicalJSON(spec)
-	specHash, _ := networkspec.Hash(spec)
-	session := Session{
-		ID: uuid.NewString(), IdentityID: identity.ID, DeviceID: "device-2", ClusterID: "cluster-a",
-		Namespace: "development", State: "starting", CreatedAt: now, ExpiresAt: now.Add(time.Hour),
-		NetworkSpec: specJSON, NetworkSpecHash: specHash,
-	}
-	if err := store.Sessions().Create(ctx, session); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.Sessions().UpdateState(ctx, session.ID, 1, statusActive, now.Add(time.Second)); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.Sessions().UpdateState(ctx, session.ID, 1, "stopped", now.Add(2*time.Second)); !errors.Is(
-		err,
-		ErrConflict,
-	) {
-		t.Fatalf("stale session generation error = %v", err)
-	}
-	loadedSession, err := store.Sessions().GetByID(ctx, session.ID)
-	if err != nil || loadedSession.Generation != 2 ||
-		loadedSession.State != statusActive ||
-		loadedSession.NetworkSpecHash != specHash ||
-		!bytes.Equal(loadedSession.NetworkSpec, specJSON) {
-		t.Fatalf("loaded session = %#v, %v", loadedSession, err)
-	}
-	if err := store.Sessions().Heartbeat(
-		ctx, session.ID, 2, specJSON, specHash, now.Add(2*time.Second), now.Add(10*time.Minute),
-	); err != nil {
-		t.Fatal(err)
-	}
-	loadedSession, err = store.Sessions().GetByID(ctx, session.ID)
-	if err != nil || loadedSession.Generation != 3 ||
-		!loadedSession.LastHeartbeatAt.Equal(now.Add(2*time.Second)) ||
-		!loadedSession.ExpiresAt.Equal(now.Add(10*time.Minute)) {
-		t.Fatalf("heartbeat session = %#v, %v", loadedSession, err)
-	}
+	fixture := newSessionRepositoryFixture(t, store)
+	ctx, identity, now := fixture.ctx, fixture.identity, fixture.now
+	specJSON, specHash, session := fixture.specJSON, fixture.specHash, fixture.session
 	task := Task{
 		ID: uuid.NewString(), IdentityID: identity.ID, SessionID: session.ID,
 		Type: "port-forward", State: statusPending, Spec: json.RawMessage(`{"port":8080}`),
@@ -462,59 +415,131 @@ func testSessionTaskSnapshotRepositories(t *testing.T, store *Store) {
 	); err != nil {
 		t.Fatal(err)
 	}
-	transitions, err := store.Audit().
-		List(ctx, AuditFilter{Action: TaskTransitionAuditAction, Limit: 10})
-	if err != nil || len(transitions) != 3 {
-		t.Fatalf("Task transition audit events = %#v, %v", transitions, err)
+	assertTaskTransitionAudit(ctx, t, store, identity, session, task)
+	assertTerminalTaskAndSnapshots(ctx, t, store, task, now)
+
+	assertExpiredSessionSnapshotProtection(ctx, t, store, identity, now, specJSON, specHash)
+}
+
+type sessionRepositoryFixture struct {
+	ctx      context.Context
+	identity Identity
+	now      time.Time
+	specJSON []byte
+	specHash string
+	session  Session
+}
+
+func newSessionRepositoryFixture(t *testing.T, store *Store) sessionRepositoryFixture {
+	t.Helper()
+	ctx := context.Background()
+	identity := createTestIdentity(t, store.Identities(), "session-user")
+	now := time.Date(2026, 8, 9, 3, 0, 0, 100, time.UTC)
+	spec, err := networkspec.Normalize(networkspec.Spec{
+		PodCIDRs: []string{
+			"10.2.0.0/16",
+		}, ServiceCIDRs: []string{"10.96.0.0/12"},
+		ServiceIPs: []string{"10.96.0.10"}, DNSServer: "10.96.0.10",
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
-	wantStates := [][2]remotetask.State{
-		{remotetask.Recovering, remotetask.Failed},
-		{remotetask.Running, remotetask.Recovering},
-		{remotetask.Pending, remotetask.Running},
+	specJSON, _ := networkspec.CanonicalJSON(spec)
+	specHash, _ := networkspec.Hash(spec)
+	session := Session{
+		ID: uuid.NewString(), IdentityID: identity.ID, DeviceID: "device-2", ClusterID: "cluster-a",
+		Namespace: "development", State: "starting", CreatedAt: now, ExpiresAt: now.Add(time.Hour),
+		NetworkSpec: specJSON, NetworkSpecHash: specHash,
 	}
-	for index, event := range transitions {
-		if event.IdentityID != identity.ID ||
-			event.ResourceType != "port-forward" ||
-			event.ResourceID != task.ID ||
-			event.Outcome != outcomeSuccess {
-			t.Fatalf("Task transition audit event = %#v", event)
-		}
-		var metadata struct {
-			SessionID     string           `json:"sessionId"`
-			Namespace     string           `json:"namespace"`
-			PreviousState remotetask.State `json:"previousState"`
-			NextState     remotetask.State `json:"nextState"`
-			Source        string           `json:"source"`
-		}
-		if err := json.Unmarshal(event.Metadata, &metadata); err != nil {
-			t.Fatal(err)
-		}
-		if metadata.SessionID != session.ID ||
-			metadata.Namespace != session.Namespace ||
-			metadata.PreviousState != wantStates[index][0] ||
-			metadata.NextState != wantStates[index][1] {
-			t.Fatalf("Task transition audit metadata = %#v", metadata)
-		}
-		if strings.Contains(string(event.Metadata), "localPort") ||
-			strings.Contains(string(event.Metadata), "worker-a") {
-			t.Fatalf(
-				"Task result leaked into audit metadata: %s",
-				event.Metadata,
-			)
-		}
-		if index == 2 {
-			if event.RequestID != "request-task-running" ||
-				metadata.Source != auditSourceAPI {
-				t.Fatalf(
-					"API Task transition correlation = %q, %#v",
-					event.RequestID,
-					metadata,
-				)
-			}
-		} else if !strings.HasPrefix(event.RequestID, "background-") || metadata.Source != "background" {
-			t.Fatalf("background Task transition correlation = %q, %#v", event.RequestID, metadata)
-		}
+	if err := store.Sessions().Create(ctx, session); err != nil {
+		t.Fatal(err)
 	}
+	if err := store.Sessions().UpdateState(ctx, session.ID, 1, statusActive, now.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Sessions().UpdateState(ctx, session.ID, 1, "stopped", now.Add(2*time.Second)); !errors.Is(
+		err,
+		ErrConflict,
+	) {
+		t.Fatalf("stale session generation error = %v", err)
+	}
+	loadedSession, err := store.Sessions().GetByID(ctx, session.ID)
+	if err != nil || loadedSession.Generation != 2 ||
+		loadedSession.State != statusActive ||
+		loadedSession.NetworkSpecHash != specHash ||
+		!bytes.Equal(loadedSession.NetworkSpec, specJSON) {
+		t.Fatalf("loaded session = %#v, %v", loadedSession, err)
+	}
+	if err := store.Sessions().Heartbeat(
+		ctx, session.ID, 2, specJSON, specHash, now.Add(2*time.Second), now.Add(10*time.Minute),
+	); err != nil {
+		t.Fatal(err)
+	}
+	loadedSession, err = store.Sessions().GetByID(ctx, session.ID)
+	if err != nil || loadedSession.Generation != 3 ||
+		!loadedSession.LastHeartbeatAt.Equal(now.Add(2*time.Second)) ||
+		!loadedSession.ExpiresAt.Equal(now.Add(10*time.Minute)) {
+		t.Fatalf("heartbeat session = %#v, %v", loadedSession, err)
+	}
+	return sessionRepositoryFixture{
+		ctx: ctx, identity: identity, now: now, specJSON: specJSON, specHash: specHash, session: session,
+	}
+}
+
+func assertExpiredSessionSnapshotProtection(
+	ctx context.Context,
+	t *testing.T,
+	store *Store,
+	identity Identity,
+	now time.Time,
+	specJSON []byte,
+	specHash string,
+) {
+	t.Helper()
+	expiredSession := Session{
+		ID: uuid.NewString(), IdentityID: identity.ID, DeviceID: statusExpired, ClusterID: "cluster-a",
+		Namespace: "development", State: "stopped", CreatedAt: now.Add(-2 * time.Hour), ExpiresAt: now.Add(-time.Hour),
+		NetworkSpec: specJSON, NetworkSpecHash: specHash,
+	}
+	if err := store.Sessions().Create(ctx, expiredSession); err != nil {
+		t.Fatal(err)
+	}
+	protectedTask := Task{
+		ID: uuid.NewString(), IdentityID: identity.ID, SessionID: expiredSession.ID,
+		Type: "exchange", State: "running", Spec: json.RawMessage(`{"service":"api"}`),
+		IdempotencyKey: "protected-exchange", CreatedAt: now.Add(-2 * time.Hour), UpdatedAt: now.Add(-time.Hour),
+	}
+	if err := store.Tasks().Create(ctx, protectedTask); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ResourceSnapshots().Put(ctx, ResourceSnapshot{
+		ID: uuid.NewString(), TaskID: protectedTask.ID, Kind: "service-intercept",
+		Namespace: "development", Name: auditSourceAPI,
+		Data: json.RawMessage(`{"selector":{"app":"api"}}`), CreatedAt: now.Add(-time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	deleted, err := store.Sessions().DeleteExpired(ctx, now, 1)
+	if err != nil || deleted != 0 {
+		t.Fatalf("session with rollback snapshot was deleted: count=%d err=%v", deleted, err)
+	}
+	if _, err := store.ResourceSnapshots().DeleteByTask(ctx, protectedTask.ID); err != nil {
+		t.Fatal(err)
+	}
+	deleted, err = store.Sessions().DeleteExpired(ctx, now, 1)
+	if err != nil || deleted != 1 {
+		t.Fatalf("restored expired session deletion = %d, %v", deleted, err)
+	}
+}
+
+func assertTerminalTaskAndSnapshots(
+	ctx context.Context,
+	t *testing.T,
+	store *Store,
+	task Task,
+	now time.Time,
+) {
+	t.Helper()
 	if err := store.Tasks().UpdateState(
 		ctx, task.ID, remotetask.Failed, remotetask.Running, nil, now.Add(6*time.Second),
 	); err == nil {
@@ -541,56 +566,63 @@ func testSessionTaskSnapshotRepositories(t *testing.T, store *Store) {
 		t.Fatal(err)
 	}
 	snapshots, err := store.ResourceSnapshots().ListByTask(ctx, task.ID)
-	if err != nil || len(snapshots) != 1 ||
-		!bytes.Contains(snapshots[0].Data, []byte(`"2"`)) {
+	if err != nil || len(snapshots) != 1 || !bytes.Contains(snapshots[0].Data, []byte(`"2"`)) {
 		t.Fatalf("resource snapshots = %#v, %v", snapshots, err)
 	}
 	deleted, err := store.ResourceSnapshots().DeleteByTask(ctx, task.ID)
 	if err != nil || deleted != 1 {
 		t.Fatalf("deleted snapshots = %d, %v", deleted, err)
 	}
+}
 
-	expiredSession := Session{
-		ID: uuid.NewString(), IdentityID: identity.ID, DeviceID: statusExpired, ClusterID: "cluster-a",
-		Namespace: "development", State: "stopped", CreatedAt: now.Add(-2 * time.Hour), ExpiresAt: now.Add(-time.Hour),
-		NetworkSpec: specJSON, NetworkSpecHash: specHash,
+func assertTaskTransitionAudit(
+	ctx context.Context,
+	t *testing.T,
+	store *Store,
+	identity Identity,
+	session Session,
+	task Task,
+) {
+	t.Helper()
+	transitions, err := store.Audit().List(ctx, AuditFilter{Action: TaskTransitionAuditAction, Limit: 10})
+	if err != nil || len(transitions) != 3 {
+		t.Fatalf("Task transition audit events = %#v, %v", transitions, err)
 	}
-	if err := store.Sessions().Create(ctx, expiredSession); err != nil {
-		t.Fatal(err)
+	wantStates := [][2]remotetask.State{
+		{remotetask.Recovering, remotetask.Failed},
+		{remotetask.Running, remotetask.Recovering},
+		{remotetask.Pending, remotetask.Running},
 	}
-	protectedTask := Task{
-		ID: uuid.NewString(), IdentityID: identity.ID, SessionID: expiredSession.ID,
-		Type: "exchange", State: "running", Spec: json.RawMessage(`{"service":"api"}`),
-		IdempotencyKey: "protected-exchange", CreatedAt: now.Add(-2 * time.Hour), UpdatedAt: now.Add(-time.Hour),
-	}
-	if err := store.Tasks().Create(ctx, protectedTask); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.ResourceSnapshots().Put(ctx, ResourceSnapshot{
-		ID:        uuid.NewString(),
-		TaskID:    protectedTask.ID,
-		Kind:      "service-intercept",
-		Namespace: "development",
-		Name:      auditSourceAPI,
-		Data:      json.RawMessage(`{"selector":{"app":"api"}}`),
-		CreatedAt: now.Add(-time.Hour),
-	}); err != nil {
-		t.Fatal(err)
-	}
-	deleted, err = store.Sessions().DeleteExpired(ctx, now, 1)
-	if err != nil || deleted != 0 {
-		t.Fatalf(
-			"session with rollback snapshot was deleted: count=%d err=%v",
-			deleted,
-			err,
-		)
-	}
-	if _, err := store.ResourceSnapshots().DeleteByTask(ctx, protectedTask.ID); err != nil {
-		t.Fatal(err)
-	}
-	deleted, err = store.Sessions().DeleteExpired(ctx, now, 1)
-	if err != nil || deleted != 1 {
-		t.Fatalf("restored expired session deletion = %d, %v", deleted, err)
+	for index, event := range transitions {
+		if event.IdentityID != identity.ID || event.ResourceType != "port-forward" ||
+			event.ResourceID != task.ID || event.Outcome != outcomeSuccess {
+			t.Fatalf("Task transition audit event = %#v", event)
+		}
+		var metadata struct {
+			SessionID     string           `json:"sessionId"`
+			Namespace     string           `json:"namespace"`
+			PreviousState remotetask.State `json:"previousState"`
+			NextState     remotetask.State `json:"nextState"`
+			Source        string           `json:"source"`
+		}
+		if err := json.Unmarshal(event.Metadata, &metadata); err != nil {
+			t.Fatal(err)
+		}
+		if metadata.SessionID != session.ID || metadata.Namespace != session.Namespace ||
+			metadata.PreviousState != wantStates[index][0] || metadata.NextState != wantStates[index][1] {
+			t.Fatalf("Task transition audit metadata = %#v", metadata)
+		}
+		if strings.Contains(string(event.Metadata), "localPort") ||
+			strings.Contains(string(event.Metadata), "worker-a") {
+			t.Fatalf("Task result leaked into audit metadata: %s", event.Metadata)
+		}
+		if index == 2 {
+			if event.RequestID != "request-task-running" || metadata.Source != auditSourceAPI {
+				t.Fatalf("API Task transition correlation = %q, %#v", event.RequestID, metadata)
+			}
+		} else if !strings.HasPrefix(event.RequestID, "background-") || metadata.Source != "background" {
+			t.Fatalf("background Task transition correlation = %q, %#v", event.RequestID, metadata)
+		}
 	}
 }
 
