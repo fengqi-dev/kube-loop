@@ -195,7 +195,10 @@ func runGateway(
 	if agentErr := controlAgent.Start(ctx); agentErr != nil {
 		return fmt.Errorf("start Relay agent: %w", agentErr)
 	}
-	defer controlAgent.Stop()
+	defer func() {
+		controlAgent.Stop()
+		<-controlAgent.Done()
+	}()
 	operationsState.agent = controlAgent
 	logger.Printf("Data Plane registered as %s", controlAgent.RelayID())
 	trafficHandler, trafficErr := trafficapi.New(trafficapi.Config{
