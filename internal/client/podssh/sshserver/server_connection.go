@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/netip"
 	"strings"
+	"sync"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -47,14 +48,18 @@ func (s *Server) HostTCPForContext(contextName, host string, port uint16) (func(
 }
 
 func (s *Server) serveConnection(raw net.Conn, target Target) {
+	done := make(chan struct{})
 	s.mu.Lock()
 	s.connections[raw] = targetID(target)
+	s.connectionDone[raw] = done
 	s.mu.Unlock()
 	defer func() {
 		s.mu.Lock()
 		delete(s.connections, raw)
+		delete(s.connectionDone, raw)
 		s.mu.Unlock()
 		_ = raw.Close()
+		close(done)
 	}()
 
 	signer, err := s.signer()
@@ -90,6 +95,8 @@ func (s *Server) serveConnection(raw net.Conn, target Target) {
 	if err != nil {
 		return
 	}
+	var handlers sync.WaitGroup
+	defer handlers.Wait()
 	defer func() {
 		_ = connection.Close() // The SSH handler owns the accepted connection and has no result channel.
 	}()
@@ -97,7 +104,7 @@ func (s *Server) serveConnection(raw net.Conn, target Target) {
 	if !ok {
 		return
 	}
-	go ssh.DiscardRequests(requests)
+	handlers.Go(func() { ssh.DiscardRequests(requests) })
 	for channelRequest := range channels {
 		if channelRequest.ChannelType() != "session" {
 			_ = channelRequest.Reject(ssh.UnknownChannelType, "only session channels are supported")
@@ -107,6 +114,6 @@ func (s *Server) serveConnection(raw net.Conn, target Target) {
 		if err != nil {
 			continue
 		}
-		go s.serveSession(channel, channelRequests, selectedTarget)
+		handlers.Go(func() { s.serveSession(channel, channelRequests, selectedTarget) })
 	}
 }

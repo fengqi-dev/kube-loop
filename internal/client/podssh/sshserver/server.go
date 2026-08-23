@@ -34,13 +34,14 @@ func WithHostKeyPath(path string) Option {
 type Server struct {
 	executor Executor
 
-	mu          sync.RWMutex
-	targets     map[string]Target
-	connections map[net.Conn]string
-	hostSigner  ssh.Signer
-	hostKeyPath string
-	signerOnce  sync.Once
-	signerErr   error
+	mu             sync.RWMutex
+	targets        map[string]Target
+	connections    map[net.Conn]string
+	connectionDone map[net.Conn]<-chan struct{}
+	hostSigner     ssh.Signer
+	hostKeyPath    string
+	signerOnce     sync.Once
+	signerErr      error
 
 	clientKeys         []ssh.PublicKey
 	clientIdentityPath string
@@ -50,9 +51,10 @@ type Server struct {
 
 func NewServer(executor Executor, options ...Option) *Server {
 	server := &Server{
-		executor:    executor,
-		targets:     make(map[string]Target),
-		connections: make(map[net.Conn]string),
+		executor:       executor,
+		targets:        make(map[string]Target),
+		connections:    make(map[net.Conn]string),
+		connectionDone: make(map[net.Conn]<-chan struct{}),
 	}
 	for _, option := range options {
 		option(server)

@@ -25,15 +25,15 @@ func (s *Server) Disable(id string) error {
 		return fmt.Errorf("pod SSH endpoint %q not found", id)
 	}
 	connections := make([]net.Conn, 0)
+	done := make([]<-chan struct{}, 0)
 	for connection, target := range s.connections {
 		if target == id {
 			connections = append(connections, connection)
+			done = append(done, s.connectionDone[connection])
 		}
 	}
 	s.mu.Unlock()
-	for _, connection := range connections {
-		_ = connection.Close()
-	}
+	closeSSHConnections(connections, done)
 	return nil
 }
 
@@ -123,15 +123,15 @@ func (s *Server) Reconcile(pods []PodRef) error {
 	}
 	s.targets = next
 	connections := make([]net.Conn, 0)
+	done := make([]<-chan struct{}, 0)
 	for connection, id := range s.connections {
 		if _, ok := activeIDs[id]; !ok {
 			connections = append(connections, connection)
+			done = append(done, s.connectionDone[connection])
 		}
 	}
 	s.mu.Unlock()
-	for _, connection := range connections {
-		_ = connection.Close()
-	}
+	closeSSHConnections(connections, done)
 	return nil
 }
 
@@ -143,11 +143,22 @@ func (s *Server) Reset() {
 	s.mu.Lock()
 	s.targets = make(map[string]Target)
 	connections := make([]net.Conn, 0, len(s.connections))
+	done := make([]<-chan struct{}, 0, len(s.connections))
 	for connection := range s.connections {
 		connections = append(connections, connection)
+		done = append(done, s.connectionDone[connection])
 	}
 	s.mu.Unlock()
+	closeSSHConnections(connections, done)
+}
+
+func closeSSHConnections(connections []net.Conn, done []<-chan struct{}) {
 	for _, connection := range connections {
 		_ = connection.Close()
+	}
+	for _, connectionDone := range done {
+		if connectionDone != nil {
+			<-connectionDone
+		}
 	}
 }

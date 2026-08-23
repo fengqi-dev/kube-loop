@@ -22,6 +22,7 @@ type sessionState struct {
 	terminal  *terminalSizeQueue
 	tty       bool
 	startOnce sync.Once
+	workers   sync.WaitGroup
 }
 
 func (s *Server) serveSession(
@@ -38,6 +39,7 @@ func (s *Server) serveSession(
 		cancel()
 		state.terminal.Close()
 		_ = channel.Close()
+		state.workers.Wait()
 	}()
 	for request := range requests {
 		switch request.Type {
@@ -64,7 +66,7 @@ func (s *Server) serveSession(
 			state.startOnce.Do(func() {
 				started = true
 				_ = request.Reply(true, nil)
-				go state.runExec([]string{defaultShellPath})
+				state.workers.Go(func() { state.runExec([]string{defaultShellPath}) })
 			})
 			if !started {
 				_ = request.Reply(false, nil)
@@ -79,7 +81,9 @@ func (s *Server) serveSession(
 			state.startOnce.Do(func() {
 				started = true
 				_ = request.Reply(true, nil)
-				go state.runExec([]string{defaultShellPath, "-c", payload.Command})
+				state.workers.Go(func() {
+					state.runExec([]string{defaultShellPath, "-c", payload.Command})
+				})
 			})
 			if !started {
 				_ = request.Reply(false, nil)
@@ -94,7 +98,7 @@ func (s *Server) serveSession(
 			state.startOnce.Do(func() {
 				started = true
 				_ = request.Reply(true, nil)
-				go state.runSFTP()
+				state.workers.Go(state.runSFTP)
 			})
 			if !started {
 				_ = request.Reply(false, nil)

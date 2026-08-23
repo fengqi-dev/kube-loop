@@ -302,6 +302,40 @@ func TestServerTargetLifecycle(t *testing.T) {
 	}
 }
 
+func TestDisableWaitsForConnectionCleanup(t *testing.T) {
+	server := NewServer(&fakeExecutor{}, WithSigner(testSigner(t)))
+	info, err := server.Enable(Target{
+		Context: "dev", Namespace: "default", Pod: "api", Container: "api", IP: "10.244.1.7",
+		Containers: []string{"api"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	connection, peer := net.Pipe()
+	defer func() { _ = peer.Close() }()
+	cleanup := make(chan struct{})
+	server.mu.Lock()
+	server.connections[connection] = info.ID
+	server.connectionDone[connection] = cleanup
+	server.mu.Unlock()
+	disabled := make(chan error, 1)
+	go func() { disabled <- server.Disable(info.ID) }()
+	select {
+	case err := <-disabled:
+		t.Fatalf("Disable returned before connection cleanup: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(cleanup)
+	select {
+	case err := <-disabled:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Disable did not wait for connection cleanup")
+	}
+}
+
 func TestTargetForLoginRejectsUnknownContainer(t *testing.T) {
 	target := Target{
 		Context: "dev", Namespace: "default", Pod: "api", Container: "api",
