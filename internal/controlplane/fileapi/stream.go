@@ -65,7 +65,11 @@ func (handler *Service) stream(
 		)
 		return nil
 	}
-	defer func() { _ = connection.CloseNow() }()
+	var readers sync.WaitGroup
+	defer func() {
+		_ = connection.CloseNow()
+		readers.Wait()
+	}()
 	connection.SetReadLimit(filestream.MaximumData + 1)
 	leaseContext, cancel, err := streamlease.Start(
 		request.Context(),
@@ -122,7 +126,8 @@ func (handler *Service) stream(
 		)
 	} else {
 		outcome, transferErr = handler.download(
-			leaseContext, request.Context(), cancel, connection, &writeMu, identity, session.Namespace, task.ID, spec,
+			leaseContext, request.Context(), cancel, connection, &writeMu, &readers,
+			identity, session.Namespace, task.ID, spec,
 		)
 	}
 	cancelled := leaseContext.Err() != nil ||

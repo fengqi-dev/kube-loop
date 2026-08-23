@@ -49,11 +49,14 @@ func (handler *Service) download(
 	cancel context.CancelFunc,
 	connection *websocket.Conn,
 	writeMu *sync.Mutex,
+	readers *sync.WaitGroup,
 	identity controlplaneapi.Identity,
 	namespace, taskID string,
 	spec Spec,
 ) (Outcome, error) {
-	go readDownloadControl(socketContext, connection, cancel)
+	readers.Go(func() {
+		readDownloadControl(socketContext, connection, cancel)
+	})
 	output := &downloadWriter{
 		ctx: leaseContext, connection: connection, mu: writeMu,
 		transferred: spec.Offset, maximum: handler.maximumBytes,

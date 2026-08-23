@@ -70,7 +70,11 @@ func (handler *Service) stream(
 		)
 		return nil
 	}
-	defer func() { _ = connection.CloseNow() }()
+	var readers sync.WaitGroup
+	defer func() {
+		_ = connection.CloseNow()
+		readers.Wait()
+	}()
 	connection.SetReadLimit(execstream.MaximumPayload + 1)
 	streamContext, cancel, contextErr := streamlease.Start(
 		request.Context(),
@@ -115,12 +119,12 @@ func (handler *Service) stream(
 	defer func() { _ = stdinReader.Close() }()
 	sizes := newTerminalSizeQueue()
 	defer sizes.Close()
-	go func() {
+	readers.Go(func() {
 		inputErr := readInput(request.Context(), connection, stdinWriter, sizes)
 		if inputErr != nil {
 			cancel()
 		}
-	}()
+	})
 	var writeMu sync.Mutex
 	stdout := frameWriter{
 		ctx: streamContext, connection: connection, frameType: execstream.Stdout, mu: &writeMu,
