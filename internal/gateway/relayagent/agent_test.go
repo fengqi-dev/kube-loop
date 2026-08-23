@@ -1,6 +1,7 @@
 package relayagent
 
 import (
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"errors"
@@ -190,6 +191,98 @@ func TestAgentStartDoesNotRetryPermanentRegistrationFailure(t *testing.T) {
 	}
 	if requests.Load() != 1 {
 		t.Fatalf("Control Plane requests = %d, want 1", requests.Load())
+	}
+}
+
+func TestAgentSerializesConcurrentStartAndAllowsRetryAfterFailure(t *testing.T) {
+	firstRequest := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseFirst) }) }
+	var requests atomic.Int32
+	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		if requests.Add(1) == 1 {
+			close(firstRequest)
+			<-releaseFirst
+		}
+		http.Error(writer, "unauthorized", http.StatusUnauthorized)
+	}))
+	defer server.Close()
+	defer release()
+
+	agent, err := New(Config{
+		ControlPlaneURL: server.URL, Endpoint: "wss://relay.example/tunnel",
+		HTTPClient: server.Client(), Reporter: &testRuntimeReporter{}, Applier: &testApplier{},
+		RegistrationAttempts: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstResult := make(chan error, 1)
+	go func() { firstResult <- agent.Start(t.Context()) }()
+	select {
+	case <-firstRequest:
+	case <-time.After(time.Second):
+		t.Fatal("first registration did not start")
+	}
+	if err := agent.Start(t.Context()); err == nil {
+		t.Fatal("concurrent Agent start was accepted")
+	}
+	if got := requests.Load(); got != 1 {
+		t.Fatalf("concurrent registration requests = %d, want 1", got)
+	}
+	release()
+	if err := <-firstResult; err == nil {
+		t.Fatal("first Agent start accepted a failed registration")
+	}
+	if err := agent.Start(t.Context()); err == nil {
+		t.Fatal("Agent retry accepted a failed registration")
+	}
+	if got := requests.Load(); got != 2 {
+		t.Fatalf("registration requests after retry = %d, want 2", got)
+	}
+}
+
+func TestAgentStopCancelsRegistrationInProgress(t *testing.T) {
+	requestStarted := make(chan struct{})
+	releaseRequest := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseRequest) }) }
+	server := httptest.NewTLSServer(http.HandlerFunc(func(_ http.ResponseWriter, request *http.Request) {
+		close(requestStarted)
+		select {
+		case <-request.Context().Done():
+		case <-releaseRequest:
+		}
+	}))
+	defer server.Close()
+	defer release()
+
+	agent, err := New(Config{
+		ControlPlaneURL: server.URL, Endpoint: "wss://relay.example/tunnel",
+		HTTPClient: server.Client(), Reporter: &testRuntimeReporter{}, Applier: &testApplier{},
+		RegistrationAttempts: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	result := make(chan error, 1)
+	go func() { result <- agent.Start(ctx) }()
+	select {
+	case <-requestStarted:
+	case <-ctx.Done():
+		t.Fatal("registration did not start")
+	}
+	agent.Stop()
+	select {
+	case err := <-result:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("Start error = %v, want context canceled", err)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("Stop did not cancel registration")
 	}
 }
 

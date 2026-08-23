@@ -51,6 +51,7 @@ type Agent struct {
 	leaseExpiresAt time.Time
 	heartbeatAfter time.Duration
 	lastError      error
+	starting       bool
 	started        bool
 	cancel         context.CancelFunc
 	done           chan struct{}

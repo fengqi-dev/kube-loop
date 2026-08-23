@@ -12,15 +12,30 @@ func (agent *Agent) Start(ctx context.Context) error {
 	if agent == nil || ctx == nil {
 		return errors.New("relay agent context is required")
 	}
+	runContext, cancel := context.WithCancel(ctx)
 	agent.mu.Lock()
-	if agent.started {
+	if agent.starting || agent.started {
 		agent.mu.Unlock()
-		return errors.New("relay agent is already started")
+		cancel()
+		return errors.New("relay agent is already starting or started")
 	}
+	agent.starting = true
+	agent.cancel = cancel
 	agent.mu.Unlock()
+	running := false
+	defer func() {
+		if running {
+			return
+		}
+		cancel()
+		agent.mu.Lock()
+		agent.starting = false
+		agent.cancel = nil
+		agent.mu.Unlock()
+	}()
 	var err error
 	for attempt := 1; attempt <= agent.config.RegistrationAttempts; attempt++ {
-		err = agent.register(ctx)
+		err = agent.register(runContext)
 		if err == nil {
 			break
 		}
@@ -33,18 +48,21 @@ func (agent *Agent) Start(ctx context.Context) error {
 		)
 		timer := time.NewTimer(agent.config.RegistrationRetryDelay)
 		select {
-		case <-ctx.Done():
+		case <-runContext.Done():
 			timer.Stop()
-			return ctx.Err()
+			return runContext.Err()
 		case <-timer.C:
 		}
 	}
-	runContext, cancel := context.WithCancel(ctx)
+	if err := runContext.Err(); err != nil {
+		return err
+	}
 	agent.mu.Lock()
+	agent.starting = false
 	agent.started = true
-	agent.cancel = cancel
 	agent.mu.Unlock()
 	go agent.run(runContext)
+	running = true
 	return nil
 }
 
