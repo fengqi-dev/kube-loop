@@ -47,6 +47,8 @@ type App struct {
 	updateCheck               sync.Mutex
 	updateState               update.Info
 	inventoryWatchMu          sync.Mutex
+	inventoryWatchLifecycle   sync.Mutex
+	inventoryWatchWG          sync.WaitGroup
 	inventoryWatchProfile     string
 	inventoryWatchCancel      context.CancelFunc
 	powerWatchCancel          context.CancelFunc

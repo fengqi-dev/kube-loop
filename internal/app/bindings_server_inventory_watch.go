@@ -23,17 +23,23 @@ func (a *App) startServerInventoryWatch(serverProfile clientprofile.Profile, nam
 	if a.remote == nil {
 		return
 	}
-	a.stopServerInventoryWatch("")
+	a.inventoryWatchLifecycle.Lock()
+	defer a.inventoryWatchLifecycle.Unlock()
+	a.stopServerInventoryWatchLocked("")
 	ctx, cancel := context.WithCancel(a.context())
 	a.inventoryWatchMu.Lock()
 	a.inventoryWatchProfile = serverProfile.ID
 	a.inventoryWatchCancel = cancel
 	a.inventoryWatchMu.Unlock()
 	if slices.Contains(capabilities, "pods.watch") {
-		go a.runServerInventoryWatch(ctx, serverProfile, namespace, clientremote.InventoryPods)
+		a.inventoryWatchWG.Go(func() {
+			a.runServerInventoryWatch(ctx, serverProfile, namespace, clientremote.InventoryPods)
+		})
 	}
 	if slices.Contains(capabilities, "services.watch") {
-		go a.runServerInventoryWatch(ctx, serverProfile, namespace, clientremote.InventoryServices)
+		a.inventoryWatchWG.Go(func() {
+			a.runServerInventoryWatch(ctx, serverProfile, namespace, clientremote.InventoryServices)
+		})
 	}
 }
 
@@ -81,6 +87,12 @@ func (a *App) emitServerInventoryEvent(event ServerInventoryEvent) {
 }
 
 func (a *App) stopServerInventoryWatch(profileID string) {
+	a.inventoryWatchLifecycle.Lock()
+	defer a.inventoryWatchLifecycle.Unlock()
+	a.stopServerInventoryWatchLocked(profileID)
+}
+
+func (a *App) stopServerInventoryWatchLocked(profileID string) {
 	a.inventoryWatchMu.Lock()
 	if profileID != "" && a.inventoryWatchProfile != profileID {
 		a.inventoryWatchMu.Unlock()
@@ -93,4 +105,5 @@ func (a *App) stopServerInventoryWatch(profileID string) {
 	if cancel != nil {
 		cancel()
 	}
+	a.inventoryWatchWG.Wait()
 }
