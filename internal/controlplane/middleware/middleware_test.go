@@ -24,6 +24,20 @@ func (authorizer *recordingAuthorizer) Authorize(
 	return authorization.Decision{Allowed: true}
 }
 
+type fixedAuthorizer struct {
+	allowed bool
+	calls   int
+}
+
+func (authorizer *fixedAuthorizer) Authorize(
+	context.Context,
+	authorization.Subject,
+	authorization.Request,
+) authorization.Decision {
+	authorizer.calls++
+	return authorization.Decision{Allowed: authorizer.allowed}
+}
+
 func TestErrorStatusMapping(t *testing.T) {
 	tests := map[controlplaneapi.ErrorCode]int{
 		controlplaneapi.CodeUnauthenticated: http.StatusUnauthorized,
@@ -101,5 +115,71 @@ func TestAuthenticatedVersionDiscoveryIsAllowed(t *testing.T) {
 	}
 	if authorizer.calls != 1 {
 		t.Fatalf("version authorization calls = %d", authorizer.calls)
+	}
+}
+
+func TestMiddlewareFailsClosedBeforeHandler(t *testing.T) {
+	tests := []struct {
+		name             string
+		identity         controlplaneapi.Identity
+		authError        *controlplaneapi.Error
+		allowed          bool
+		wantStatus       int
+		wantAuthzCalls   int
+		wantAuthenticate string
+	}{
+		{
+			name: "authentication error",
+			authError: &controlplaneapi.Error{
+				Code: controlplaneapi.CodeUnauthenticated, Message: "authentication required",
+			},
+			wantStatus: http.StatusUnauthorized, wantAuthenticate: "Bearer",
+		},
+		{
+			name:       "empty authenticated subject",
+			wantStatus: http.StatusUnauthorized,
+		},
+		{
+			name: "authorization denied",
+			identity: controlplaneapi.Identity{
+				Subject: "identity-1", Provider: "local",
+			},
+			wantStatus: http.StatusForbidden, wantAuthzCalls: 1,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			authorizer := &fixedAuthorizer{allowed: test.allowed}
+			handlerCalls := 0
+			middleware := New(Config{
+				APIPathPrefix: "/api", RequestTimeout: time.Second, MaxRequestBodySize: 1 << 20,
+				Authenticator: controlplaneapi.AuthenticatorFunc(
+					func(*http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
+						return test.identity, test.authError
+					},
+				),
+				Authorizer: authorizer,
+			})
+			request := httptest.NewRequest(http.MethodGet, "/api/version", nil)
+			response := httptest.NewRecorder()
+			ctx := echo.New().NewContext(request, response)
+
+			if err := middleware(func(*echo.Context) error {
+				handlerCalls++
+				return nil
+			})(ctx); err != nil {
+				t.Fatal(err)
+			}
+			if response.Code != test.wantStatus || authorizer.calls != test.wantAuthzCalls ||
+				handlerCalls != 0 || response.Header().Get("WWW-Authenticate") != test.wantAuthenticate {
+				t.Fatalf(
+					"response=%d authz=%d handler=%d authenticate=%q",
+					response.Code,
+					authorizer.calls,
+					handlerCalls,
+					response.Header().Get("WWW-Authenticate"),
+				)
+			}
+		})
 	}
 }
