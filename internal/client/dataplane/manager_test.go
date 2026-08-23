@@ -615,6 +615,61 @@ func TestManagerDisconnectClosesRuntimeAndRemovesProfile(t *testing.T) {
 	}
 }
 
+func TestManagerRuntimeOutlivesConnectContext(t *testing.T) {
+	spec, err := networkspec.Normalize(networkspec.Spec{PodCIDRs: []string{"10.42.0.0/16"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash, err := networkspec.Hash(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager, err := NewManager(&testTickets{}, Config{
+		startForwarder: func(ctx context.Context, clientConfig websocketmux.ClientConfig) (streamForwarder, error) {
+			if _, err := clientConfig.TokenSource(ctx); err != nil {
+				return nil, err
+			}
+			listener, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				return nil, err
+			}
+			go acceptTestControl(listener)
+			return &testForwarder{Listener: listener}, nil
+		},
+		listenSOCKS: func(context.Context, string, string, tunnel.SessionToken) (localBridge, error) {
+			return &testBridge{address: testAddress("127.0.0.1:49010")}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	connectCtx, cancelConnect := context.WithCancel(context.Background())
+	_, err = manager.Connect(
+		connectCtx,
+		profile.Profile{ID: "service", BaseURL: "https://gateway.example.test", TunnelPath: defaultTunnelPath},
+		remote.Session{
+			ID: uuid.NewString(), Namespace: "development", State: dataplaneSessionActive,
+			Generation: 1, NetworkSpec: spec, NetworkSpecHash: hash,
+		},
+	)
+	if err != nil {
+		cancelConnect()
+		t.Fatal(err)
+	}
+	manager.mu.Lock()
+	runtime := manager.active["service"].runtime
+	manager.mu.Unlock()
+	cancelConnect()
+	select {
+	case <-runtime.Done():
+		t.Fatal("Data Plane Runtime inherited the completed Connect context")
+	case <-time.After(100 * time.Millisecond):
+	}
+	if err := manager.Shutdown(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestManagerRecoversControlStreamWithFreshSessionGeneration(t *testing.T) {
 	spec, err := networkspec.Normalize(networkspec.Spec{PodCIDRs: []string{"10.42.0.0/16"}})
 	if err != nil {

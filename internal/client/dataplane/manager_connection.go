@@ -68,8 +68,9 @@ func (manager *Manager) Connect(
 			}
 		}
 	}
-	runtime, err := Start(
+	runtime, err := startWithLifetime(
 		ctx,
+		manager.ctx,
 		serverProfile,
 		session,
 		manager.sessions.RelayTicketSource(serverProfile.ID),

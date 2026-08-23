@@ -18,14 +18,27 @@ func Start(
 	ticketSource func(context.Context) (remote.RelayTicket, error),
 	config Config,
 ) (*Runtime, error) {
-	if ctx == nil {
+	return startWithLifetime(ctx, ctx, serverProfile, session, ticketSource, config)
+}
+
+func startWithLifetime(
+	startupCtx context.Context,
+	lifetimeCtx context.Context,
+	serverProfile profile.Profile,
+	session remote.Session,
+	ticketSource func(context.Context) (remote.RelayTicket, error),
+	config Config,
+) (*Runtime, error) {
+	if startupCtx == nil || lifetimeCtx == nil {
 		return nil, errors.New("data Plane context is required")
 	}
 	useDefaultListenAddress := strings.TrimSpace(config.ListenAddress) == ""
 	config = normalizedConfig(config)
-	runtimeCtx, cancel := context.WithCancel(ctx)
+	runtimeCtx, cancel := context.WithCancel(lifetimeCtx)
+	stopStartupCancel := context.AfterFunc(startupCtx, cancel)
 	transport, err := openTransport(runtimeCtx, serverProfile, session, ticketSource, config)
 	if err != nil {
+		stopStartupCancel()
 		cancel()
 		return nil, err
 	}
@@ -41,8 +54,17 @@ func Start(
 	if err != nil {
 		_ = transport.control.Close()
 		_ = transport.forwarder.Close()
+		stopStartupCancel()
 		cancel()
 		return nil, fmt.Errorf("start Data Plane SOCKS bridge: %w", err)
+	}
+	stopStartupCancel()
+	if err := startupCtx.Err(); err != nil {
+		_ = bridge.Close()
+		_ = transport.control.Close()
+		_ = transport.forwarder.Close()
+		cancel()
+		return nil, err
 	}
 	runtime := &Runtime{
 		ctx: runtimeCtx, cancel: cancel, forwarder: transport.forwarder, control: transport.control,
