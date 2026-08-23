@@ -106,7 +106,12 @@ func (u *Updater) waitReady(ctx context.Context, manifest supervisorprotocol.Upd
 }
 
 func (u *Updater) rollback(ctx context.Context, cause error) (bool, error) {
-	_ = u.worker.Stop(ctx)
+	if err := u.worker.Stop(ctx); err != nil {
+		return false, errors.Join(
+			cause,
+			fmt.Errorf("stop current worker before rollback: %w", err),
+		)
+	}
 	if !fileExists(u.config.PreviousPath()) {
 		return false, cause
 	}

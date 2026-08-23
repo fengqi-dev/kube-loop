@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -20,6 +21,7 @@ type fakeWorker struct {
 	config       Config
 	status       supervisorprotocol.WorkerStatus
 	startErrOnce error
+	stopErrOnce  error
 	stops        int
 	starts       int
 	statusCalls  int
@@ -41,6 +43,11 @@ func (w *fakeWorker) Status(context.Context) (supervisorprotocol.WorkerStatus, e
 
 func (w *fakeWorker) Stop(context.Context) error {
 	w.stops++
+	if w.stopErrOnce != nil {
+		err := w.stopErrOnce
+		w.stopErrOnce = nil
+		return err
+	}
 	w.status.Running = false
 	return nil
 }
@@ -183,6 +190,30 @@ func TestUpdaterManualRollbackRestoresPreviousWorker(t *testing.T) {
 		t.Fatalf("Rollback response=%#v stops=%d starts=%d", response, worker.stops, worker.starts)
 	}
 	assertBytes(t, config.WorkerBinaryPath, previousPayload)
+}
+
+func TestUpdaterRollbackStopFailurePreservesWorkerFiles(t *testing.T) {
+	config := testConfig(t)
+	currentPayload := machOBytes("current")
+	previousPayload := machOBytes("previous")
+	writeExecutable(t, config.WorkerBinaryPath, currentPayload)
+	writeExecutable(t, config.PreviousPath(), previousPayload)
+	stopErr := fmt.Errorf("stop failed")
+	worker := &fakeWorker{
+		config: config,
+		status: supervisorprotocol.WorkerStatus{
+			Installed: true, Running: true, CoreReady: true,
+		},
+		stopErrOnce: stopErr,
+	}
+	updater := NewUpdater(config, worker, os.Getuid())
+
+	response := updater.Rollback(t.Context())
+	if response.OK || response.RolledBack || !strings.Contains(response.Error, stopErr.Error()) {
+		t.Fatalf("Rollback response = %#v", response)
+	}
+	assertBytes(t, config.WorkerBinaryPath, currentPayload)
+	assertBytes(t, config.PreviousPath(), previousPayload)
 }
 
 func TestUpdaterRestartCyclesWorker(t *testing.T) {
