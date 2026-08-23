@@ -39,6 +39,15 @@ type gatewayRuntimeTestControl struct {
 	drainValue any
 }
 
+type gatewayRuntimeTestAgent struct {
+	done  chan struct{}
+	stops atomic.Int32
+}
+
+func (agent *gatewayRuntimeTestAgent) Stop() { agent.stops.Add(1) }
+
+func (agent *gatewayRuntimeTestAgent) Done() <-chan struct{} { return agent.done }
+
 type gatewayRuntimeTestServe struct {
 	started       chan struct{}
 	waitForCancel bool
@@ -188,4 +197,29 @@ func TestServeGatewayBoundsListenerStopWait(t *testing.T) {
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("serveGateway ignored the listener-stop deadline")
 	}
+}
+
+func TestStopGatewayAgentWaitsForDoneAndHonorsDeadline(t *testing.T) {
+	t.Run("done", func(t *testing.T) {
+		agent := &gatewayRuntimeTestAgent{done: make(chan struct{})}
+		close(agent.done)
+		if err := stopGatewayAgent(t.Context(), agent); err != nil {
+			t.Fatal(err)
+		}
+		if agent.stops.Load() != 1 {
+			t.Fatalf("Stop() calls = %d, want 1", agent.stops.Load())
+		}
+	})
+
+	t.Run("deadline", func(t *testing.T) {
+		agent := &gatewayRuntimeTestAgent{done: make(chan struct{})}
+		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Millisecond)
+		defer cancel()
+		if err := stopGatewayAgent(ctx, agent); !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("stopGatewayAgent() error = %v, want context deadline exceeded", err)
+		}
+		if agent.stops.Load() != 1 {
+			t.Fatalf("Stop() calls = %d, want 1", agent.stops.Load())
+		}
+	})
 }

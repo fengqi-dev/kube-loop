@@ -104,7 +104,7 @@ func runGateway(
 	environment gatewayEnvironment,
 	config gatewayConfig,
 	stdout io.Writer,
-) error {
+) (resultErr error) {
 	parsedLogLevel, err := logging.ParseLevel(config.LogLevel)
 	if err != nil {
 		return fmt.Errorf("parse log level: %w", err)
@@ -194,8 +194,12 @@ func runGateway(
 		return fmt.Errorf("start Relay agent: %w", agentErr)
 	}
 	defer func() {
-		controlAgent.Stop()
-		<-controlAgent.Done()
+		stopContext, cancelStop := context.WithTimeout(
+			context.WithoutCancel(ctx),
+			5*time.Second,
+		)
+		resultErr = errors.Join(resultErr, stopGatewayAgent(stopContext, controlAgent))
+		cancelStop()
 	}()
 	operationsState.agent = controlAgent
 	logger.Printf("Data Plane registered as %s", controlAgent.RelayID())

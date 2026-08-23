@@ -41,13 +41,29 @@ type gatewayControlRuntime interface {
 	Drain(context.Context) error
 }
 
+type gatewayAgentLifecycle interface {
+	Stop()
+	Done() <-chan struct{}
+}
+
 type gatewayServeFunc func(context.Context, net.Listener, http.Handler) error
 
 var (
 	_ gatewayDrainRuntime     = (*gateway.Server)(nil)
 	_ gatewayAdmissionRuntime = (*websocketmux.Handler)(nil)
 	_ gatewayControlRuntime   = (*relayagent.Agent)(nil)
+	_ gatewayAgentLifecycle   = (*relayagent.Agent)(nil)
 )
+
+func stopGatewayAgent(ctx context.Context, agent gatewayAgentLifecycle) error {
+	agent.Stop()
+	select {
+	case <-agent.Done():
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("wait for Relay agent shutdown: %w", ctx.Err())
+	}
+}
 
 func serveGateway(options gatewayRuntimeOptions) error {
 	errCh := make(chan error, 1)
