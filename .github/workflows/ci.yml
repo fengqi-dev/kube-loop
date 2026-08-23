@@ -192,9 +192,11 @@ jobs:
             exit 1
           fi
 
-      - name: Lint and vulnerability checks
+      - name: Lint Linux and Windows, then check vulnerabilities
         run: |
-          make operator-lint-config lint
+          make operator-lint-config
+          make lint
+          GOOS=windows GOARCH=amd64 make lint
           make vulncheck
 
   checks:
