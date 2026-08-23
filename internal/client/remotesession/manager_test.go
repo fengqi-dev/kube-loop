@@ -24,6 +24,28 @@ type fakeGateway struct {
 	disconnectErr  error
 }
 
+type blockingDisconnectGateway struct {
+	*fakeGateway
+
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (gateway *blockingDisconnectGateway) DisconnectSession(
+	ctx context.Context,
+	serverProfile profile.Profile,
+	current remote.Session,
+) (remote.Session, error) {
+	gateway.once.Do(func() { close(gateway.started) })
+	select {
+	case <-gateway.release:
+		return gateway.fakeGateway.DisconnectSession(ctx, serverProfile, current)
+	case <-ctx.Done():
+		return current, ctx.Err()
+	}
+}
+
 func (gateway *fakeGateway) IssueRelayTicket(
 	_ context.Context,
 	_ profile.Profile,
@@ -192,6 +214,82 @@ func TestManagerDisconnectClosesRemoteSessionAndForgetsIt(t *testing.T) {
 	defer gateway.mu.Unlock()
 	if gateway.disconnections != 1 {
 		t.Fatalf("remote disconnects = %d", gateway.disconnections)
+	}
+}
+
+func TestCurrentDoesNotBlockDuringRemoteDisconnect(t *testing.T) {
+	gateway := &blockingDisconnectGateway{
+		fakeGateway: &fakeGateway{},
+		started:     make(chan struct{}),
+		release:     make(chan struct{}),
+	}
+	manager, err := New(gateway, Config{HeartbeatInterval: time.Hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+	serverProfile := profile.Profile{ID: "service-slow-disconnect"}
+	session, err := manager.Connect(context.Background(), serverProfile, "development")
+	if err != nil {
+		t.Fatal(err)
+	}
+	disconnected := make(chan error, 1)
+	go func() {
+		disconnected <- manager.Disconnect(context.Background(), serverProfile.ID)
+	}()
+	select {
+	case <-gateway.started:
+	case <-time.After(time.Second):
+		t.Fatal("remote disconnect did not start")
+	}
+
+	currentResult := make(chan struct {
+		session remote.Session
+		err     error
+	}, 1)
+	go func() {
+		current, currentErr := manager.Current(serverProfile.ID)
+		currentResult <- struct {
+			session remote.Session
+			err     error
+		}{session: current, err: currentErr}
+	}()
+	select {
+	case result := <-currentResult:
+		if result.err != nil || result.session.ID != session.ID {
+			t.Fatalf("Current during disconnect = %#v, %v", result.session, result.err)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("Current blocked on the remote disconnect")
+	}
+	connected := make(chan error, 1)
+	go func() {
+		_, connectErr := manager.Connect(
+			context.Background(),
+			profile.Profile{ID: "service-independent"},
+			"development",
+		)
+		connected <- connectErr
+	}()
+	select {
+	case err := <-connected:
+		if err != nil {
+			t.Fatalf("independent Connect failed: %v", err)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("independent Connect blocked on another profile's remote disconnect")
+	}
+
+	close(gateway.release)
+	if err := <-disconnected; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Current(serverProfile.ID); err == nil {
+		t.Fatal("completed disconnect retained the Session")
+	}
+	shutdownContext, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := manager.Shutdown(shutdownContext); err != nil {
+		t.Fatal(err)
 	}
 }
 

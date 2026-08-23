@@ -16,13 +16,24 @@ func (manager *Manager) SessionUpdates() <-chan remote.SessionUpdate {
 // the authoritative generation and prevents a stale reconnect from replacing a
 // newer Session selected by the desktop.
 func (manager *Manager) Refresh(ctx context.Context, profileID string) (remote.Session, error) {
+	manager.lifecycle.RLock()
+	defer manager.lifecycle.RUnlock()
+	operation := manager.profileOperation(profileID)
+	operation.Lock()
+	defer operation.Unlock()
+	return manager.refresh(ctx, profileID)
+}
+
+func (manager *Manager) refresh(ctx context.Context, profileID string) (remote.Session, error) {
 	manager.mu.Lock()
-	defer manager.mu.Unlock()
 	current, ok := manager.active[profileID]
+	manager.mu.Unlock()
 	if !ok {
 		return remote.Session{}, errors.New("remote Session is not connected")
 	}
 	next, err := manager.gateway.HeartbeatSession(ctx, current.profile, current.session)
+	manager.mu.Lock()
+	defer manager.mu.Unlock()
 	if err != nil {
 		current.lastError = err
 		manager.active[profileID] = current
@@ -50,21 +61,21 @@ func (manager *Manager) heartbeatLoop() {
 }
 
 func (manager *Manager) heartbeat() {
+	manager.lifecycle.RLock()
+	defer manager.lifecycle.RUnlock()
 	manager.mu.Lock()
-	defer manager.mu.Unlock()
-	for profileID, current := range manager.active {
+	profileIDs := make([]string, 0, len(manager.active))
+	for profileID := range manager.active {
+		profileIDs = append(profileIDs, profileID)
+	}
+	manager.mu.Unlock()
+	for _, profileID := range profileIDs {
+		operation := manager.profileOperation(profileID)
+		operation.Lock()
 		ctx, cancel := context.WithTimeout(manager.ctx, manager.interval)
-		next, err := manager.gateway.HeartbeatSession(ctx, current.profile, current.session)
+		_, _ = manager.refresh(ctx, profileID)
 		cancel()
-		if err != nil {
-			current.lastError = err
-			manager.active[profileID] = current
-			continue
-		}
-		current.session = next
-		current.lastError = nil
-		manager.active[profileID] = current
-		manager.publishSessionUpdateLocked(profileID, next)
+		operation.Unlock()
 	}
 }
 
