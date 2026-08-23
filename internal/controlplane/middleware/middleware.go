@@ -16,23 +16,6 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 )
 
-type AuditRecord struct {
-	RequestID    string
-	IdentityID   string
-	SessionID    string
-	Operation    string
-	Namespace    string
-	ResourceKind string
-	ResourceName string
-	Outcome      string
-	HTTPStatus   int
-	Duration     time.Duration
-}
-
-type AuditSink interface {
-	Record(context.Context, AuditRecord) error
-}
-
 type Config struct {
 	APIPathPrefix      string
 	RequestTimeout     time.Duration
@@ -132,29 +115,14 @@ func New(config Config) echo.MiddlewareFunc {
 					}
 					returnedError = nil
 				}
-				if config.Audit == nil {
-					return
-				}
 				status := responseState.Status
 				if status == 0 {
 					status = http.StatusOK
 				}
-				record := AuditRecord{
-					RequestID: requestID, IdentityID: identity.Subject, SessionID: auditState.sessionID,
-					Operation: authorizationRequest.Operation, Namespace: authorizationRequest.Namespace,
-					ResourceKind: authorizationRequest.ResourceKind, ResourceName: authorizationRequest.ResourceName,
-					Outcome: auditOutcome(
-						status,
-					), HTTPStatus: status, Duration: time.Since(startedAt),
-				}
-				if err := config.Audit.Record(request.Context(), record); err != nil {
-					config.Logger.ErrorContext(
-						request.Context(),
-						"append API audit event failed",
-						"request_id",
-						requestID,
-					)
-				}
+				recordAudit(
+					request.Context(), config.Audit, config.Logger, requestID, identity,
+					auditState, authorizationRequest, status, time.Since(startedAt),
+				)
 			}()
 
 			var authenticationError *controlplaneapi.Error
@@ -231,17 +199,4 @@ func isWebSocketUpgrade(request *http.Request) bool {
 		}
 	}
 	return false
-}
-
-func auditOutcome(status int) string {
-	switch {
-	case status == 0 || status >= 200 && status < 300:
-		return "success"
-	case status == http.StatusUnauthorized:
-		return "unauthenticated"
-	case status == http.StatusForbidden:
-		return "denied"
-	default:
-		return "error"
-	}
 }
