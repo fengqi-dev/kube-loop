@@ -50,7 +50,7 @@ var (
 
 func serveGateway(options gatewayRuntimeOptions) error {
 	errCh := make(chan error, 1)
-	httpContext, cancelHTTP := context.WithCancel(context.Background())
+	httpContext, cancelHTTP := context.WithCancel(context.WithoutCancel(options.Context))
 	go func() {
 		options.Logger.Printf("WebSocket Gateway listening on %s%s", options.ListenAddress, options.Path)
 		errCh <- options.Serve(httpContext, options.Listener, options.Handler)
@@ -67,12 +67,18 @@ func serveGateway(options gatewayRuntimeOptions) error {
 	options.Logger.Printf("Gateway draining for up to %s", options.DrainTimeout)
 	options.Gateway.BeginDrain()
 	options.Admissions.BeginDrain()
-	drainReportContext, cancelDrainReport := context.WithTimeout(context.Background(), 5*time.Second)
+	drainReportContext, cancelDrainReport := context.WithTimeout(
+		context.WithoutCancel(options.Context),
+		5*time.Second,
+	)
 	if err := options.Control.Drain(drainReportContext); err != nil {
 		options.Logger.Printf("report Data Plane drain failed: %v", err)
 	}
 	cancelDrainReport()
-	drainContext, cancelDrain := context.WithTimeout(context.Background(), options.DrainTimeout)
+	drainContext, cancelDrain := context.WithTimeout(
+		context.WithoutCancel(options.Context),
+		options.DrainTimeout,
+	)
 	drainErr := options.Gateway.Drain(drainContext)
 	cancelDrain()
 	if drainErr != nil {

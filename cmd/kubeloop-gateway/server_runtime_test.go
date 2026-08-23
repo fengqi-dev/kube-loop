@@ -16,12 +16,16 @@ type gatewayRuntimeTestGateway struct {
 	beginDrain atomic.Int32
 	drains     atomic.Int32
 	drainErr   error
+	drainValue any
 }
+
+type gatewayRuntimeContextKey struct{}
 
 func (gateway *gatewayRuntimeTestGateway) BeginDrain() { gateway.beginDrain.Add(1) }
 
-func (gateway *gatewayRuntimeTestGateway) Drain(context.Context) error {
+func (gateway *gatewayRuntimeTestGateway) Drain(ctx context.Context) error {
 	gateway.drains.Add(1)
+	gateway.drainValue = ctx.Value(gatewayRuntimeContextKey{})
 	return gateway.drainErr
 }
 
@@ -30,14 +34,16 @@ type gatewayRuntimeTestAdmissions struct{ beginDrain atomic.Int32 }
 func (admissions *gatewayRuntimeTestAdmissions) BeginDrain() { admissions.beginDrain.Add(1) }
 
 type gatewayRuntimeTestControl struct {
-	drains   atomic.Int32
-	drainErr error
+	drains     atomic.Int32
+	drainErr   error
+	drainValue any
 }
 
 type gatewayRuntimeTestServe struct {
 	started       chan struct{}
 	waitForCancel bool
 	err           error
+	contextValue  any
 }
 
 func (serve *gatewayRuntimeTestServe) Serve(
@@ -45,6 +51,7 @@ func (serve *gatewayRuntimeTestServe) Serve(
 	_ net.Listener,
 	_ http.Handler,
 ) error {
+	serve.contextValue = ctx.Value(gatewayRuntimeContextKey{})
 	close(serve.started)
 	if serve.waitForCancel {
 		<-ctx.Done()
@@ -52,8 +59,9 @@ func (serve *gatewayRuntimeTestServe) Serve(
 	return serve.err
 }
 
-func (control *gatewayRuntimeTestControl) Drain(context.Context) error {
+func (control *gatewayRuntimeTestControl) Drain(ctx context.Context) error {
 	control.drains.Add(1)
+	control.drainValue = ctx.Value(gatewayRuntimeContextKey{})
 	return control.drainErr
 }
 
@@ -80,7 +88,8 @@ func TestServeGatewayDrainsAndStopsAfterContextCancellation(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = listener.Close() })
-	ctx, cancel := context.WithCancel(t.Context())
+	parent := context.WithValue(t.Context(), gatewayRuntimeContextKey{}, "gateway-runtime")
+	ctx, cancel := context.WithCancel(parent)
 	serve := &gatewayRuntimeTestServe{started: make(chan struct{}), waitForCancel: true}
 	gateway := &gatewayRuntimeTestGateway{}
 	admissions := &gatewayRuntimeTestAdmissions{}
@@ -108,6 +117,13 @@ func TestServeGatewayDrainsAndStopsAfterContextCancellation(t *testing.T) {
 			"drain calls: Gateway begin=%d drain=%d admissions=%d control=%d",
 			gateway.beginDrain.Load(), gateway.drains.Load(),
 			admissions.beginDrain.Load(), control.drains.Load(),
+		)
+	}
+	if serve.contextValue != "gateway-runtime" || gateway.drainValue != "gateway-runtime" ||
+		control.drainValue != "gateway-runtime" {
+		t.Fatalf(
+			"runtime context values: Serve=%v Gateway=%v control=%v",
+			serve.contextValue, gateway.drainValue, control.drainValue,
 		)
 	}
 }
