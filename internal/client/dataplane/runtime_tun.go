@@ -25,6 +25,9 @@ func (runtime *Runtime) StartTUN(ctx context.Context) (Status, error) {
 }
 
 func (runtime *Runtime) startTUNLocked(ctx context.Context) (Status, error) {
+	if runtime.ctx != nil && runtime.ctx.Err() != nil {
+		return Status{}, errors.New("data Plane runtime is closed")
+	}
 	if runtime.tun != nil {
 		return runtime.status, nil
 	}
@@ -65,7 +68,7 @@ func (runtime *Runtime) startTUNLocked(ctx context.Context) (Status, error) {
 	runtime.tun = core
 	runtime.tunCancel = tunCancel
 	runtime.status.Mode = ModeTUN
-	go runtime.watchTUN(core)
+	runtime.tunWG.Go(func() { runtime.watchTUN(core) })
 	return runtime.status, nil
 }
 

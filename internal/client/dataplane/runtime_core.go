@@ -112,6 +112,7 @@ type Runtime struct {
 	session      remote.Session
 	tun          singbox.RunningCore
 	tunCancel    context.CancelFunc
+	tunWG        sync.WaitGroup
 	tunStarter   TUNStarter
 	dnsNamespace string
 	hostAliases  []singbox.HostAlias

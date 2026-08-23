@@ -43,6 +43,7 @@ func (runtime *Runtime) Close() error {
 		if core != nil {
 			result = errors.Join(result, core.Close())
 		}
+		runtime.tunWG.Wait()
 		runtime.transportMu.Lock()
 		control := runtime.control
 		forwarder := runtime.forwarder

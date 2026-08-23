@@ -32,5 +32,5 @@ func (runtime *Runtime) watchTUN(core singbox.RunningCore) {
 	runtime.errMu.Lock()
 	runtime.err = err
 	runtime.errMu.Unlock()
-	_ = runtime.Close()
+	runtime.cancel()
 }

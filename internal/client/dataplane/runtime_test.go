@@ -981,6 +981,37 @@ func TestRuntimeCloseWaitsForTransportWatchers(t *testing.T) {
 	}
 }
 
+func TestRuntimeRejectsTUNStartWhileClosing(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	starter := &testTUNStarter{}
+	runtime := &Runtime{
+		ctx: ctx, cancel: cancel, tunStarter: starter,
+		bridge: &testBridge{address: testAddress("127.0.0.1:45010")},
+		done:   make(chan struct{}), transportDone: make(chan struct{}),
+	}
+	runtime.transportWG.Add(1)
+	closed := make(chan error, 1)
+	go func() { closed <- runtime.Close() }()
+	deadline := time.Now().Add(2 * time.Second)
+	for runtime.ctx.Err() == nil && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if runtime.ctx.Err() == nil {
+		t.Fatal("Close did not cancel Runtime context")
+	}
+	if _, err := runtime.StartTUN(context.Background()); err == nil {
+		t.Fatal("StartTUN succeeded while Runtime was closing")
+	}
+	starts, _, _, _, _ := starter.snapshot()
+	if starts != 0 {
+		t.Fatalf("TUN starts while closing=%d", starts)
+	}
+	runtime.transportWG.Done()
+	if err := <-closed; err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestReconnectKeepsSuccessfulTransportContextAlive(t *testing.T) {
 	spec, err := networkspec.Normalize(networkspec.Spec{ServiceIPs: []string{"10.96.0.10"}})
 	if err != nil {
