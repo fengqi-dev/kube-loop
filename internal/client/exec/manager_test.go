@@ -194,6 +194,66 @@ func TestManagerStopProfileWaitsForOpeningStream(t *testing.T) {
 	}
 }
 
+func TestManagerShutdownWaitsForEventCallback(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		connection, err := websocket.Accept(writer, request, nil)
+		if err != nil {
+			return
+		}
+		defer checkTestClose(t, connection.CloseNow)
+		output, _ := execstream.Encode(
+			execstream.Frame{Type: execstream.Stdout, Payload: []byte("ready")},
+		)
+		_ = connection.Write(request.Context(), websocket.MessageBinary, output)
+		for {
+			if _, _, err := connection.Read(request.Context()); err != nil {
+				return
+			}
+		}
+	}))
+	t.Cleanup(server.Close)
+	callbackStarted := make(chan struct{})
+	releaseCallback := make(chan struct{})
+	var callbackOnce sync.Once
+	manager, err := NewManager(
+		streamClient{endpoint: "ws" + strings.TrimPrefix(server.URL, "http")},
+		ManagerConfig{OnEvent: func(Event) {
+			callbackOnce.Do(func() { close(callbackStarted) })
+			<-releaseCallback
+		}},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseCallback) }) }
+	t.Cleanup(release)
+	if _, err := manager.Start(
+		t.Context(),
+		profile.Profile{ID: "server"},
+		remote.Session{ID: "session", Namespace: "development", State: "active"},
+		remote.ExecSpec{Pod: "api-0", Command: []string{"/bin/sh"}},
+	); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-callbackStarted:
+	case <-time.After(time.Second):
+		t.Fatal("Pod exec event callback did not start")
+	}
+	shutdown := make(chan error, 1)
+	go func() { shutdown <- manager.Shutdown() }()
+	select {
+	case err := <-shutdown:
+		t.Fatalf("Shutdown returned before event callback completed: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	release()
+	if err := <-shutdown; err != nil && !strings.Contains(err.Error(), "closed network connection") {
+		t.Fatal(err)
+	}
+}
+
 func receiveEvent(t *testing.T, events <-chan Event) Event {
 	t.Helper()
 	select {

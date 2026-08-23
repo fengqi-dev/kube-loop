@@ -45,6 +45,7 @@ type Manager struct {
 	cancel  context.CancelFunc
 
 	lifecycle sync.RWMutex
+	wg        sync.WaitGroup
 	mu        sync.Mutex
 	active    map[string]*managedStream
 }
@@ -94,7 +95,9 @@ func (manager *Manager) Start(
 	}
 	manager.active[stream.Task().ID] = entry
 	manager.mu.Unlock()
-	go manager.read(streamContext, stream.Task().ID, entry)
+	manager.wg.Go(func() {
+		manager.read(streamContext, stream.Task().ID, entry)
+	})
 	return stream.Task(), nil
 }
 
@@ -159,6 +162,7 @@ func (manager *Manager) Shutdown() error {
 		entry.cancel()
 		result = errors.Join(result, entry.stream.Close())
 	}
+	manager.wg.Wait()
 	return result
 }
 
