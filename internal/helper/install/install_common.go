@@ -1,12 +1,9 @@
 package install
 
 import (
-	"bytes"
 	"context"
-	"crypto/sha256"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -18,58 +15,6 @@ import (
 )
 
 const goosWindows = "windows"
-
-func copyFile(src, dst string, mode os.FileMode) error {
-	//nolint:gosec // System executable directories must be traversable by service launchers.
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-		return err
-	}
-	in, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = in.Close() }()
-	tmp := dst + ".tmp"
-	out, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
-	if err != nil {
-		return err
-	}
-	copiedHash := sha256.New()
-	if _, err := io.Copy(io.MultiWriter(out, copiedHash), in); err != nil {
-		_ = out.Close()
-		_ = os.Remove(tmp)
-		return err
-	}
-	if err := out.Close(); err != nil {
-		_ = os.Remove(tmp)
-		return err
-	}
-	staged, err := os.Open(tmp)
-	if err != nil {
-		_ = os.Remove(tmp)
-		return err
-	}
-	stagedHash := sha256.New()
-	_, hashErr := io.Copy(stagedHash, staged)
-	closeErr := staged.Close()
-	if hashErr != nil {
-		_ = os.Remove(tmp)
-		return hashErr
-	}
-	if closeErr != nil {
-		_ = os.Remove(tmp)
-		return closeErr
-	}
-	if !bytes.Equal(copiedHash.Sum(nil), stagedHash.Sum(nil)) {
-		_ = os.Remove(tmp)
-		return fmt.Errorf("staged helper hash does not match source")
-	}
-	if err := replaceFile(tmp, dst); err != nil {
-		_ = os.Remove(tmp)
-		return err
-	}
-	return os.Chmod(dst, mode)
-}
 
 //nolint:revive // InstallFromCLI preserves the established public helper API.
 func InstallFromCLI(source, token string, uid int, version, homeDir, ownerSID, singBoxPath string) (retErr error) {
@@ -186,77 +131,6 @@ func waitForInstalledHelperReady(token, version string) error {
 			return response, err
 		},
 	)
-}
-
-type installRollback struct {
-	binary fileRollback
-	core   fileRollback
-	auth   fileRollback
-	token  fileRollback
-}
-
-func beginInstallRollback(binaryPath, corePath, authPath, tokenPath string) (*installRollback, error) {
-	binary, err := snapshotFileForRollback(binaryPath)
-	if err != nil {
-		return nil, err
-	}
-	core, err := snapshotFileForRollback(corePath)
-	if err != nil {
-		binary.discard()
-		return nil, err
-	}
-	auth, err := snapshotFileForRollback(authPath)
-	if err != nil {
-		binary.discard()
-		core.discard()
-		return nil, err
-	}
-	token, err := snapshotFileForRollback(tokenPath)
-	if err != nil {
-		binary.discard()
-		core.discard()
-		auth.discard()
-		return nil, err
-	}
-	return &installRollback{binary: binary, core: core, auth: auth, token: token}, nil
-}
-
-func (r *installRollback) commit() {
-	r.binary.discard()
-	r.core.discard()
-	r.auth.discard()
-	r.token.discard()
-}
-
-func (r *installRollback) restore() error {
-	var rollbackErrs []error
-	if err := prepareBinaryInstall(); err != nil {
-		rollbackErrs = append(rollbackErrs, fmt.Errorf("stop failed service: %w", err))
-	}
-	if err := r.binary.restore(); err != nil {
-		rollbackErrs = append(rollbackErrs, fmt.Errorf("restore helper binary: %w", err))
-	}
-	if err := r.core.restore(); err != nil {
-		rollbackErrs = append(rollbackErrs, fmt.Errorf("restore sing-box core: %w", err))
-	}
-	if err := r.auth.restore(); err != nil {
-		rollbackErrs = append(rollbackErrs, fmt.Errorf("restore helper auth: %w", err))
-	}
-	if err := r.token.restore(); err != nil {
-		rollbackErrs = append(rollbackErrs, fmt.Errorf("restore helper token: %w", err))
-	}
-	if r.binary.existed {
-		if err := enableService(r.binary.path); err != nil {
-			rollbackErrs = append(rollbackErrs, fmt.Errorf("restart previous helper: %w", err))
-		}
-	} else if err := disableService(); err != nil {
-		rollbackErrs = append(rollbackErrs, fmt.Errorf("remove failed helper service: %w", err))
-	}
-	rollbackErr := errors.Join(rollbackErrs...)
-	if rollbackErr == nil {
-		r.commit()
-	}
-	return rollbackErr
 }
 
 func singBoxNearHelperSource(source string) string {
