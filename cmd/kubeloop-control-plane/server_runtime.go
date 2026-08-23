@@ -23,14 +23,36 @@ type serverRuntimeOptions struct {
 	Stop              context.CancelFunc
 	Config            loadedControlPlaneConfig
 	Logger            *slog.Logger
-	Server            *controlplane.Server
+	Server            controlPlaneRuntimeServer
 	RelayRegistry     *relayRegistryRuntime
 	KubernetesConfig  controlplanekubernetes.Config
-	SessionRecovery   *sessionregistry.Reconciler
-	MaintenanceWorker *maintenance.Worker
-	BindingRecovery   *trafficbindingclient.Reconciler
-	SessionRuntime    *sessionregistry.Registry
+	SessionRecovery   controlPlaneWorker
+	MaintenanceWorker controlPlaneWorker
+	BindingRecovery   controlPlaneWorker
+	SessionRuntime    controlPlaneSessionRuntime
 }
+
+type controlPlaneRuntimeServer interface {
+	ListenAddress() string
+	Serve(net.Listener) error
+	Shutdown(context.Context) error
+}
+
+type controlPlaneWorker interface {
+	Run(context.Context)
+}
+
+type controlPlaneSessionRuntime interface {
+	Shutdown(context.Context) error
+}
+
+var (
+	_ controlPlaneRuntimeServer  = (*controlplane.Server)(nil)
+	_ controlPlaneWorker         = (*sessionregistry.Reconciler)(nil)
+	_ controlPlaneWorker         = (*maintenance.Worker)(nil)
+	_ controlPlaneWorker         = (*trafficbindingclient.Reconciler)(nil)
+	_ controlPlaneSessionRuntime = (*sessionregistry.Registry)(nil)
+)
 
 func serveControlPlane(options serverRuntimeOptions) error {
 	listener, err := (&net.ListenConfig{}).Listen(options.Context, "tcp", options.Server.ListenAddress())
