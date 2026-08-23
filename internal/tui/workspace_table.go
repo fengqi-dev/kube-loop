@@ -205,3 +205,77 @@ func workspaceDetailValue(detail, key string) string {
 	}
 	return "-"
 }
+
+func (m Model) viewWorkspaceBody(height int) string {
+	if m.workspace.resource == resourceConnection {
+		return m.viewWorkspaceConnection(height)
+	}
+	view := m.workspaceView()
+	if view.detail {
+		return m.viewWorkspaceDetail(height)
+	}
+	rows := m.workspaceFilteredRows()
+	filter := view.filter
+	heading := workspaceDescriptor(m.workspace.resource).title
+	if m.workspace.resource == resourcePods || m.workspace.resource == resourceServices {
+		heading += "(" + firstNonEmpty(m.namespace, "all") + ")"
+	}
+	heading += fmt.Sprintf("[%d]", len(rows))
+	if filter != "" {
+		heading += "   Filter: /" + filter
+	}
+	innerWidth := max(30, m.width-2)
+	heading = truncateConsole(heading, max(10, innerWidth-4))
+	titleWidth := lipgloss.Width(heading)
+	leftRule := max(0, (innerWidth-titleWidth-2)/2)
+	rightRule := max(0, innerWidth-titleWidth-leftRule-2)
+	border := lipgloss.NewStyle().Foreground(consoleTeal).Background(lipgloss.Color("#000000"))
+	rowStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#8BD5FF")).Background(lipgloss.Color("#000000"))
+	headerStyle := rowStyle.Bold(true)
+	selectedStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#071018")).
+		Background(lipgloss.Color("#7CC9F2")).
+		Bold(true)
+	top := border.Render("┌"+strings.Repeat("─", leftRule)+" ") +
+		consoleOK.Render(heading) +
+		border.Render(" "+strings.Repeat("─", rightRule)+"┐")
+	header := border.Render("│") +
+		headerStyle.Render(workspacePadLine(m.workspaceTableHeader(), innerWidth)) +
+		border.Render("│")
+	lines := []string{top, header}
+	page := max(1, height-3)
+	if view.cursor < view.offset {
+		view.offset = view.cursor
+	}
+	if view.cursor >= view.offset+page {
+		view.offset = view.cursor - page + 1
+	}
+	end := minInt(len(rows), view.offset+page)
+	for index := view.offset; index < end; index++ {
+		line := workspacePadLine(m.workspaceTableRow(rows[index]), innerWidth)
+		if index == view.cursor {
+			line = selectedStyle.Render(line)
+		} else {
+			line = rowStyle.Render(line)
+		}
+		lines = append(lines, border.Render("│")+line+border.Render("│"))
+	}
+	if len(rows) == 0 {
+		message := "No resources found."
+		if filter != "" {
+			message = "No matches for /" + filter
+		}
+		emptyRow := border.Render("│") +
+			rowStyle.Render(workspacePadLine(" "+message, innerWidth)) +
+			border.Render("│")
+		lines = append(lines, emptyRow)
+	}
+	for len(lines) < height-1 {
+		lines = append(lines, border.Render("│")+rowStyle.Render(strings.Repeat(" ", innerWidth))+border.Render("│"))
+	}
+	if len(lines) > height-1 {
+		lines = lines[:height-1]
+	}
+	lines = append(lines, border.Render("└"+strings.Repeat("─", innerWidth)+"┘"))
+	return strings.Join(lines, "\n")
+}
