@@ -39,11 +39,16 @@ func (executor remoteExecutor) Exec(
 			resultErr = errors.Join(resultErr, fmt.Errorf("close Pod exec stream: %w", err))
 		}
 	}()
+	if (streams.Stdin != nil || (streams.TTY && streams.TerminalSizeQueue != nil)) && streams.Go == nil {
+		return errors.New("pod SSH stream worker owner is required")
+	}
 	if streams.Stdin != nil {
-		go pumpInput(execContext, cancel, stream, streams.Stdin)
+		streams.Go(func() { pumpInput(execContext, cancel, stream, streams.Stdin) })
 	}
 	if streams.TTY && streams.TerminalSizeQueue != nil {
-		go pumpTerminalSizes(execContext, cancel, stream, streams.TerminalSizeQueue)
+		streams.Go(func() {
+			pumpTerminalSizes(execContext, cancel, stream, streams.TerminalSizeQueue)
+		})
 	}
 	for {
 		frame, err := stream.Read(execContext)

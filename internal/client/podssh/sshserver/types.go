@@ -44,6 +44,7 @@ type Streams struct {
 	Stderr            io.Writer
 	TTY               bool
 	TerminalSizeQueue TerminalSizeQueue
+	Go                func(func())
 }
 
 type TerminalSize struct {

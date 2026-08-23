@@ -118,6 +118,7 @@ func (s *sessionState) runExec(command []string) {
 		Stdout: s.channel,
 		Stderr: s.channel.Stderr(),
 		TTY:    s.tty,
+		Go:     s.workers.Go,
 	}
 	if s.tty {
 		streams.Stderr = nil
