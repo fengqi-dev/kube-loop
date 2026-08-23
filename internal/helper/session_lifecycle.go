@@ -11,6 +11,8 @@ import (
 // Server is the privileged helper RPC server.
 
 func (s *Server) updateSessionDNS(sessionID string, dns singbox.DNSMeta) error {
+	s.lifecycle.Lock()
+	defer s.lifecycle.Unlock()
 	if dns.Listen == "" || dns.Port < 1 || dns.Port > 65535 {
 		return fmt.Errorf("invalid DNS listen address")
 	}
@@ -52,6 +54,12 @@ func (s *Server) updateSessionDNS(sessionID string, dns singbox.DNSMeta) error {
 }
 
 func (s *Server) stopSession(sessionID string) error {
+	s.lifecycle.Lock()
+	defer s.lifecycle.Unlock()
+	return s.stopSessionLocked(sessionID)
+}
+
+func (s *Server) stopSessionLocked(sessionID string) error {
 	s.mu.Lock()
 	current := s.sessions[sessionID]
 	if current == nil {
@@ -82,6 +90,12 @@ func (s *Server) stopSession(sessionID string) error {
 }
 
 func (s *Server) stopAllSessions() {
+	s.lifecycle.Lock()
+	defer s.lifecycle.Unlock()
+	s.stopAllSessionsLocked()
+}
+
+func (s *Server) stopAllSessionsLocked() {
 	s.mu.Lock()
 	ids := make([]string, 0, len(s.sessions))
 	for id := range s.sessions {
@@ -89,7 +103,7 @@ func (s *Server) stopAllSessions() {
 	}
 	s.mu.Unlock()
 	for _, id := range ids {
-		if err := s.stopSession(id); err != nil {
+		if err := s.stopSessionLocked(id); err != nil {
 			s.Log.Printf("stop privileged session %s during stop-all: %v", id, err)
 		}
 	}

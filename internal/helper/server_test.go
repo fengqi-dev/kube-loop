@@ -1,9 +1,11 @@
 package helper
 
 import (
+	"errors"
 	"testing"
 
 	helperprotocol "github.com/fengqi-dev/kube-loop/internal/protocol/helper"
+	"github.com/fengqi-dev/kube-loop/internal/singbox"
 )
 
 func TestDispatchRejectsLegacyExecutableRequest(t *testing.T) {
@@ -21,6 +23,14 @@ func TestDispatchRequiresValidSessionIDForStop(t *testing.T) {
 	})
 	if response.OK {
 		t.Fatalf("dispatch() unexpectedly accepted an unsafe session ID")
+	}
+}
+
+func TestStartSessionRejectsServerClosing(t *testing.T) {
+	server := NewServer(AuthFile{})
+	server.closing.Store(true)
+	if err := server.startSession(singbox.SessionSpec{}); !errors.Is(err, errServerClosing) {
+		t.Fatalf("startSession error = %v, want %v", err, errServerClosing)
 	}
 }
 

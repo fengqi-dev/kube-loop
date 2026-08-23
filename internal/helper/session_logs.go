@@ -10,6 +10,8 @@ import (
 const maxSessionLogRead = 256 << 10
 
 func (s *Server) readSessionLogs(sessionID string, offset int64) (string, int64, error) {
+	s.lifecycle.Lock()
+	defer s.lifecycle.Unlock()
 	if offset < 0 {
 		return "", 0, fmt.Errorf("log offset must not be negative")
 	}
@@ -19,6 +21,8 @@ func (s *Server) readSessionLogs(sessionID string, offset int64) (string, int64,
 		s.mu.Unlock()
 		return "", offset, fmt.Errorf("session not found")
 	}
+	current.lifecycleMu.Lock()
+	defer current.lifecycleMu.Unlock()
 	logPath := filepath.Join(current.workDir, "sing-box.log")
 	s.mu.Unlock()
 

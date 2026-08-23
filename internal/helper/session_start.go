@@ -1,6 +1,7 @@
 package helper
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -18,7 +19,18 @@ import (
 
 // Server is the privileged helper RPC server.
 
+var errServerClosing = errors.New("privileged helper is shutting down")
+
 func (s *Server) startSession(spec singbox.SessionSpec) error {
+	s.lifecycle.Lock()
+	defer s.lifecycle.Unlock()
+	if s.closing.Load() {
+		return errServerClosing
+	}
+	return s.startSessionLocked(spec)
+}
+
+func (s *Server) startSessionLocked(spec singbox.SessionSpec) error {
 	if err := spec.Validate(); err != nil {
 		return fmt.Errorf("validate session: %w", err)
 	}
@@ -50,7 +62,7 @@ func (s *Server) startSession(spec singbox.SessionSpec) error {
 	// crash/reload so reconnect does not fail until a manual helper stop.
 	if stale {
 		s.Log.Printf("replacing leftover privileged TUN session before starting %s", spec.ID)
-		s.stopAllSessions()
+		s.stopAllSessionsLocked()
 	}
 	s.mu.Lock()
 	if len(s.sessions) != 0 {

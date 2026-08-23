@@ -10,6 +10,7 @@ import (
 	"net"
 	"os/exec"
 	"sync"
+	"sync/atomic"
 
 	helperprotocol "github.com/fengqi-dev/kube-loop/internal/protocol/helper"
 	"github.com/fengqi-dev/kube-loop/internal/singbox"
@@ -20,8 +21,10 @@ type Server struct {
 	Auth AuthFile
 	Log  *log.Logger
 
-	mu       sync.Mutex
-	sessions map[string]*session
+	mu        sync.Mutex
+	sessions  map[string]*session
+	lifecycle sync.Mutex
+	closing   atomic.Bool
 }
 
 type session struct {
@@ -56,8 +59,13 @@ func (s *Server) Serve(ctx context.Context) error {
 		return err
 	}
 	defer func() { _ = listener.Close() }()
+	defer func() {
+		s.closing.Store(true)
+		s.stopAllSessions()
+	}()
 	go func() {
 		<-ctx.Done()
+		s.closing.Store(true)
 		_ = listener.Close()
 	}()
 
@@ -67,7 +75,6 @@ func (s *Server) Serve(ctx context.Context) error {
 		if err != nil {
 			select {
 			case <-ctx.Done():
-				s.stopAllSessions()
 				return nil
 			default:
 				return err
