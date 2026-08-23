@@ -22,6 +22,13 @@ func nullableTime(value *time.Time) any {
 	return formatTime(*value)
 }
 
+func nullableString(value string) any {
+	if value == "" {
+		return nil
+	}
+	return value
+}
+
 func parseNullableTime(raw sql.NullString, field string) (*time.Time, error) {
 	if !raw.Valid {
 		return nil, nil //nolint:nilnil // SQL NULL is represented by a nil optional timestamp.
