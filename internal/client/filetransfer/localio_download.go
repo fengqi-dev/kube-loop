@@ -95,12 +95,15 @@ func (manager *Manager) runFileDownload(
 	if err != nil {
 		return filestream.TransferResult{}, err
 	}
-	manager.update(taskID, func(task *Task) {
+	if err := manager.update(taskID, func(task *Task) {
 		task.DoneBytes = offset
 		if task.TotalBytes < offset {
 			task.TotalBytes = offset
 		}
-	})
+	}); err != nil {
+		_ = temporary.Close()
+		return filestream.TransferResult{}, fmt.Errorf("checkpoint download metadata: %w", err)
+	}
 	bounded := &boundedWriter{writer: temporary, maximum: manager.maximumBytes, written: offset}
 	_, result, transferErr := Download(ctx, manager.client, entry.profile, entry.session, remote.FileTransferSpec{
 		Direction:  fileTransferDirectionDownload,

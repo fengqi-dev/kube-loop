@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -181,6 +182,63 @@ func TestManagerClearHistoryWriteFailureRestoresTasks(t *testing.T) {
 	}
 	if tasks := manager.List("server"); len(tasks) != 1 || tasks[0].ID != task.ID {
 		t.Fatalf("tasks after failed ClearHistory = %#v", tasks)
+	}
+}
+
+func TestManagerStopsBeforeRemoteTransferWhenPreparingCheckpointFails(t *testing.T) {
+	root := t.TempDir()
+	source := filepath.Join(root, "source.bin")
+	if err := os.WriteFile(source, []byte("contents"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	events := make(chan Task, 8)
+	statePath := filepath.Join(root, "transfers.json")
+	manager, err := NewManager(testClient{}, Config{
+		StatePath: statePath, MaximumBytes: 1 << 20, OnEvent: func(task Task) { events <- task },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeErr := errors.New("disk unavailable")
+	writes := 0
+	manager.writeFile = func(path string, raw []byte, dirMode, fileMode os.FileMode) error {
+		writes++
+		if writes == 1 {
+			return fsatomic.WriteFile(path, raw, dirMode, fileMode)
+		}
+		return writeErr
+	}
+	task, err := manager.Start(
+		profile.Profile{ID: "server"},
+		activeFileSession(),
+		Request{
+			ProfileID: "server", Direction: fileTransferDirectionUpload, Kind: fileTransferKindFile,
+			Pod: "api-0", LocalPath: source, RemotePath: "/workspace/source.bin",
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	queued := <-events
+	failed := <-events
+	if queued.ID != task.ID || queued.Status != StatusQueued || failed.Status != StatusFailed ||
+		!strings.Contains(failed.Error, "checkpoint file transfer state") {
+		t.Fatalf("events = %#v / %#v", queued, failed)
+	}
+	if err := manager.Shutdown(); !errors.Is(err, writeErr) {
+		t.Fatalf("Shutdown() error = %v, want %v", err, writeErr)
+	}
+	raw, err := os.ReadFile(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var persisted persistedState
+	if err := json.Unmarshal(raw, &persisted); err != nil {
+		t.Fatal(err)
+	}
+	if len(persisted.Tasks) != 1 || persisted.Tasks[0].ID != task.ID ||
+		persisted.Tasks[0].Status != StatusQueued {
+		t.Fatalf("persisted state = %#v", persisted)
 	}
 }
 

@@ -30,10 +30,12 @@ func (manager *Manager) runUpload(
 	if sizeChanged || checksumChanged {
 		return filestream.TransferResult{}, errors.New("local upload source changed since the transfer started")
 	}
-	manager.update(taskID, func(task *Task) {
+	if err := manager.update(taskID, func(task *Task) {
 		task.TotalBytes = size
 		task.Checksum = formattedChecksum
-	})
+	}); err != nil {
+		return filestream.TransferResult{}, fmt.Errorf("checkpoint upload metadata: %w", err)
+	}
 	_, result, err := Upload(ctx, manager.client, entry.profile, entry.session, remote.FileTransferSpec{
 		Direction:  fileTransferDirectionUpload,
 		Kind:       entry.request.Kind,

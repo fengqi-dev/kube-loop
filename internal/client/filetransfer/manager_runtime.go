@@ -3,6 +3,7 @@ package filetransfer
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 
 	"github.com/fengqi-dev/kube-loop/internal/protocol/filestream"
@@ -11,7 +12,15 @@ import (
 func (manager *Manager) run(ctx context.Context, taskID string, entry *activeTransfer) {
 	defer manager.wg.Done()
 	defer close(entry.done)
-	manager.update(taskID, func(task *Task) { task.Status = StatusPreparing })
+	if err := manager.update(taskID, func(task *Task) { task.Status = StatusPreparing }); err != nil {
+		manager.finish(
+			taskID,
+			filestream.TransferResult{},
+			fmt.Errorf("checkpoint file transfer state: %w", err),
+			false,
+		)
+		return
+	}
 	var result filestream.TransferResult
 	var err error
 	if entry.request.Direction == fileTransferDirectionUpload {
@@ -23,7 +32,7 @@ func (manager *Manager) run(ctx context.Context, taskID string, entry *activeTra
 }
 
 func (manager *Manager) progress(taskID string, status filestream.ProgressStatus) {
-	manager.update(taskID, func(task *Task) {
+	_ = manager.update(taskID, func(task *Task) {
 		task.Status = StatusRunning
 		task.DoneBytes = status.Transferred
 		if status.Total != 0 {
@@ -32,26 +41,30 @@ func (manager *Manager) progress(taskID string, status filestream.ProgressStatus
 	})
 }
 
-func (manager *Manager) update(taskID string, mutate func(*Task)) {
+func (manager *Manager) update(taskID string, mutate func(*Task)) error {
 	manager.persistMu.Lock()
 	manager.mu.Lock()
 	task, exists := manager.tasks[taskID]
 	if !exists {
 		manager.mu.Unlock()
 		manager.persistMu.Unlock()
-		return
+		return nil
 	}
 	nextTasks := cloneTasks(manager.tasks)
 	manager.mu.Unlock()
 	mutate(&task)
 	task.UpdatedAt = manager.now().UTC()
 	nextTasks[taskID] = task
-	_ = manager.persist(nextTasks)
+	if err := manager.persist(nextTasks); err != nil {
+		manager.persistMu.Unlock()
+		return err
+	}
 	manager.mu.Lock()
 	manager.tasks = nextTasks
 	manager.mu.Unlock()
 	manager.persistMu.Unlock()
 	manager.onEvent(task)
+	return nil
 }
 
 func (manager *Manager) finish(taskID string, result filestream.TransferResult, transferErr error, cancelled bool) {
