@@ -21,54 +21,32 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-//nolint:gocyclo // The chart contract is clearer as one end-to-end manifest assertion sequence.
 func TestSQLiteChartRendersIndependentSecureWorkloads(t *testing.T) {
 	objects := renderChart(t,
 		"--set", "publicURL=http://kubeloop.example.test",
 		"--set", "ingress.enabled=true",
 		"--set", "ingress.host=kubeloop.example.test",
 	)
-	controlPlanes := objectsByComponent(t, objects, "Deployment", "control-plane")
-	dataPlanes := objectsByComponent(t, objects, "Deployment", "data-plane")
-	operators := objectsByComponent(t, objects, "Deployment", "operator")
-	if len(controlPlanes) != 1 || len(dataPlanes) != 1 || len(operators) != 1 {
-		t.Fatalf(
-			"controlPlane deployments = %d, data-plane deployments = %d, operator deployments = %d",
-			len(controlPlanes),
-			len(dataPlanes),
-			len(operators),
-		)
-	}
-	controlPlane := controlPlanes[0]
-	dataPlane := dataPlanes[0]
-	operator := operators[0]
-	if valueAt(t, controlPlane, "spec", "strategy", "type") != "Recreate" {
-		t.Fatal("SQLite ControlPlane must use Recreate strategy")
-	}
-	if valueAt(t, controlPlane, "spec", "replicas") != 1 {
-		t.Fatalf("SQLite ControlPlane replicas = %#v", valueAt(t, controlPlane, "spec", "replicas"))
-	}
-	if valueAt(t, dataPlane, "spec", "strategy", "type") != "RollingUpdate" {
-		t.Fatal("Data Plane must use RollingUpdate independently of ControlPlane storage")
-	}
-	if valueAt(t, controlPlane, "spec", "template", "spec", "automountServiceAccountToken") != true {
-		t.Fatal("ControlPlane requires its own Kubernetes service account token")
-	}
-	if valueAt(t, dataPlane, "spec", "template", "spec", "automountServiceAccountToken") != false {
-		t.Fatal("Data Plane must not mount a Kubernetes service account token")
-	}
-	if valueAt(t, operator, "spec", "template", "spec", "automountServiceAccountToken") != true {
-		t.Fatal("Operator requires its isolated Kubernetes service account token")
-	}
-	if countKind(objects, "CustomResourceDefinition") != 1 {
-		t.Fatalf("TrafficBinding CRD count = %d", countKind(objects, "CustomResourceDefinition"))
-	}
-	if countKind(objects, "PersistentVolumeClaim") != 1 {
-		t.Fatalf("SQLite PVC count = %d", countKind(objects, "PersistentVolumeClaim"))
-	}
-	if countKind(objects, "ConfigMap") != 1 {
-		t.Fatalf("shared ConfigMap count = %d", countKind(objects, "ConfigMap"))
-	}
+	assertSQLiteChartContract(t, objects)
+}
+
+func assertSQLiteChartContract(t *testing.T, objects []map[string]any) {
+	t.Helper()
+	controlPlane, dataPlane := assertSQLiteWorkloads(t, objects)
+	_, gatewayConfig := assertUnifiedChartConfig(t, objects)
+	controlPlaneYAML, dataPlaneYAML := assertWorkloadConfiguration(
+		t, controlPlane, dataPlane, gatewayConfig,
+	)
+	assertAuthenticationMounts(t, objects, controlPlaneYAML, dataPlaneYAML)
+	assertSameOriginIngress(t, objects)
+	assertChartServices(t, objects)
+}
+
+func assertUnifiedChartConfig(
+	t *testing.T,
+	objects []map[string]any,
+) (map[string]any, map[string]any) {
+	t.Helper()
 	controlPlaneConfig := objectByName(t, objects, "ConfigMap", "test-kubeloop-config")
 	controlPlaneDocument := parseControlPlaneConfig(t, controlPlaneConfig)
 	gatewayConfig := parseUnifiedConfig(t, controlPlaneConfig)["gateway"].(map[string]any)
@@ -102,6 +80,14 @@ func TestSQLiteChartRendersIndependentSecureWorkloads(t *testing.T) {
 		valueAt(t, controlPlaneDocument, "storage", "sqlite", "path") == "" {
 		t.Fatal("ControlPlane is missing SQLite configuration in its YAML document")
 	}
+	return controlPlaneDocument, gatewayConfig
+}
+
+func assertWorkloadConfiguration(
+	t *testing.T,
+	controlPlane, dataPlane, gatewayConfig map[string]any,
+) (string, string) {
+	t.Helper()
 	controlPlaneYAML, _ := yaml.Marshal(controlPlane)
 	if !strings.Contains(string(controlPlaneYAML), "--config=/etc/kubeloop/kubeloop.yaml") ||
 		strings.Contains(
@@ -150,26 +136,42 @@ func TestSQLiteChartRendersIndependentSecureWorkloads(t *testing.T) {
 		strings.Contains(string(dataPlaneYAML), "relay/signing-key.pem") {
 		t.Fatal("RelayTicket private signing key is not isolated to ControlPlane")
 	}
+	return string(controlPlaneYAML), string(dataPlaneYAML)
+}
+
+func assertAuthenticationMounts(
+	t *testing.T,
+	objects []map[string]any,
+	controlPlaneYAML, dataPlaneYAML string,
+) {
+	t.Helper()
 	authSecret := objectByName(t, objects, "Secret", "test-kubeloop-control-plane-auth")
 	for _, key := range []string{"oidc-signing-key.pem", "hmac-secret", "initial-password"} {
 		if valueAt(t, authSecret, "data", key) == "" {
 			t.Fatalf("combined authentication Secret is missing %q", key)
 		}
 	}
-	if strings.Contains(string(controlPlaneYAML), "oauth/signing-key.pem") ||
-		!strings.Contains(string(controlPlaneYAML), "oauth/oidc-signing-key.pem") ||
-		!strings.Contains(string(controlPlaneYAML), "oauth/hmac-secret") {
+	if strings.Contains(controlPlaneYAML, "oauth/signing-key.pem") ||
+		!strings.Contains(controlPlaneYAML, "oauth/oidc-signing-key.pem") ||
+		!strings.Contains(controlPlaneYAML, "oauth/hmac-secret") {
 		t.Fatal("OAuth HMAC and OIDC signing key material are not mounted independently")
 	}
-	if strings.Contains(string(controlPlaneYAML), "iam-bootstrap") ||
-		!strings.Contains(string(controlPlaneYAML), "test-kubeloop-control-plane-auth") ||
-		!strings.Contains(string(controlPlaneYAML), "bootstrap/initial-password") {
+	if strings.Contains(controlPlaneYAML, "iam-bootstrap") ||
+		!strings.Contains(controlPlaneYAML, "test-kubeloop-control-plane-auth") ||
+		!strings.Contains(controlPlaneYAML, "bootstrap/initial-password") {
 		t.Fatal("Control Plane does not mount bootstrap material from the combined auth Secret")
 	}
+	if strings.Contains(dataPlaneYAML, "relay/signing-key.pem") {
+		t.Fatal("Data Plane received RelayTicket private signing key")
+	}
+}
+
+func assertSameOriginIngress(t *testing.T, objects []map[string]any) {
+	t.Helper()
 	if countKind(objects, "Ingress") != 1 {
 		t.Fatal("expected one same-origin Ingress")
 	}
-	ingress = objectByName(t, objects, "Ingress", "test-kubeloop")
+	ingress := objectByName(t, objects, "Ingress", "test-kubeloop")
 	ingressYAML, _ := yaml.Marshal(ingress)
 	for _, want := range []string{
 		"host: kubeloop.example.test", "path: /", "path: /tunnel", "pathType: Prefix",
@@ -189,6 +191,10 @@ func TestSQLiteChartRendersIndependentSecureWorkloads(t *testing.T) {
 	if strings.Contains(string(ingressYAML), "/traffic/v1") {
 		t.Fatalf("Ingress still exposes the removed traffic WebSocket endpoint: %s", ingressYAML)
 	}
+}
+
+func assertChartServices(t *testing.T, objects []map[string]any) {
+	t.Helper()
 	controlPlaneService := objectByName(t, objects, "Service", "test-kubeloop-control-plane")
 	dataPlaneService := objectByName(t, objects, "Service", "test-kubeloop-gateway")
 	if serviceAppProtocol(t, controlPlaneService) != "http" ||
@@ -209,6 +215,44 @@ func TestSQLiteChartRendersIndependentSecureWorkloads(t *testing.T) {
 	if valueAt(t, registryService, "spec", "type") != "ClusterIP" {
 		t.Fatal("Relay Registry must remain ClusterIP-only")
 	}
+}
+
+func assertSQLiteWorkloads(t *testing.T, objects []map[string]any) (map[string]any, map[string]any) {
+	t.Helper()
+	controlPlanes := objectsByComponent(t, objects, "Deployment", "control-plane")
+	dataPlanes := objectsByComponent(t, objects, "Deployment", "data-plane")
+	operators := objectsByComponent(t, objects, "Deployment", "operator")
+	if len(controlPlanes) != 1 || len(dataPlanes) != 1 || len(operators) != 1 {
+		t.Fatalf(
+			"controlPlane deployments = %d, data-plane deployments = %d, operator deployments = %d",
+			len(controlPlanes),
+			len(dataPlanes),
+			len(operators),
+		)
+	}
+	controlPlane, dataPlane, operator := controlPlanes[0], dataPlanes[0], operators[0]
+	if valueAt(t, controlPlane, "spec", "strategy", "type") != "Recreate" ||
+		valueAt(t, controlPlane, "spec", "replicas") != 1 {
+		t.Fatal("SQLite ControlPlane must use one replica with Recreate strategy")
+	}
+	if valueAt(t, dataPlane, "spec", "strategy", "type") != "RollingUpdate" {
+		t.Fatal("Data Plane must use RollingUpdate independently of ControlPlane storage")
+	}
+	if valueAt(t, controlPlane, "spec", "template", "spec", "automountServiceAccountToken") != true ||
+		valueAt(t, dataPlane, "spec", "template", "spec", "automountServiceAccountToken") != false ||
+		valueAt(t, operator, "spec", "template", "spec", "automountServiceAccountToken") != true {
+		t.Fatal("workload service account token isolation changed")
+	}
+	for kind, want := range map[string]int{
+		"CustomResourceDefinition": 1,
+		"PersistentVolumeClaim":    1,
+		"ConfigMap":                1,
+	} {
+		if got := countKind(objects, kind); got != want {
+			t.Fatalf("%s count = %d, want %d", kind, got, want)
+		}
+	}
+	return controlPlane, dataPlane
 }
 
 func TestIngressTLSCanBeEnabledExplicitly(t *testing.T) {
