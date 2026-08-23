@@ -141,7 +141,10 @@ func serveControlPlane(options serverRuntimeOptions) error {
 	case <-options.Context.Done():
 	}
 	options.Logger.Info("kubeloop control plane shutting down")
-	shutdownContext, cancel := context.WithTimeout(context.Background(), options.Config.ShutdownTimeout)
+	shutdownContext, cancel := context.WithTimeout(
+		context.WithoutCancel(options.Context),
+		options.Config.ShutdownTimeout,
+	)
 	defer cancel()
 	shutdownError := options.Server.Shutdown(shutdownContext)
 	shutdownError = errors.Join(shutdownError, options.SessionRuntime.Shutdown(shutdownContext))

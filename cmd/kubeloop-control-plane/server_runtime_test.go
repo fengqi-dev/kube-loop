@@ -13,13 +13,16 @@ import (
 )
 
 type runtimeTestServer struct {
-	serveStarted chan struct{}
-	shutdown     chan struct{}
-	shutdownOnce sync.Once
-	serveErr     error
-	shutdownErr  error
-	shutdowns    atomic.Int32
+	serveStarted  chan struct{}
+	shutdown      chan struct{}
+	shutdownOnce  sync.Once
+	serveErr      error
+	shutdownErr   error
+	shutdownValue any
+	shutdowns     atomic.Int32
 }
+
+type runtimeShutdownContextKey struct{}
 
 type runtimeBlockingServer struct {
 	serveStarted chan struct{}
@@ -57,8 +60,9 @@ func (server *runtimeTestServer) Serve(listener net.Listener) error {
 	return nil
 }
 
-func (server *runtimeTestServer) Shutdown(context.Context) error {
+func (server *runtimeTestServer) Shutdown(ctx context.Context) error {
 	server.shutdowns.Add(1)
+	server.shutdownValue = ctx.Value(runtimeShutdownContextKey{})
 	server.shutdownOnce.Do(func() { close(server.shutdown) })
 	return server.shutdownErr
 }
@@ -89,12 +93,14 @@ func (worker *runtimeTestWorker) Run(ctx context.Context) {
 }
 
 type runtimeTestSessionRuntime struct {
-	err       error
-	shutdowns atomic.Int32
+	err           error
+	shutdownValue any
+	shutdowns     atomic.Int32
 }
 
-func (runtime *runtimeTestSessionRuntime) Shutdown(context.Context) error {
+func (runtime *runtimeTestSessionRuntime) Shutdown(ctx context.Context) error {
 	runtime.shutdowns.Add(1)
+	runtime.shutdownValue = ctx.Value(runtimeShutdownContextKey{})
 	return runtime.err
 }
 
@@ -158,7 +164,8 @@ func TestServeControlPlanePropagatesServeAndShutdownErrors(t *testing.T) {
 }
 
 func TestServeControlPlaneStopsCleanlyAfterContextCancellation(t *testing.T) {
-	ctx, stop := context.WithCancel(t.Context())
+	parent := context.WithValue(t.Context(), runtimeShutdownContextKey{}, "runtime-shutdown")
+	ctx, stop := context.WithCancel(parent)
 	server := newRuntimeTestServer()
 	sessionRuntime := &runtimeTestSessionRuntime{}
 	workers := []*runtimeTestWorker{
@@ -188,6 +195,13 @@ func TestServeControlPlaneStopsCleanlyAfterContextCancellation(t *testing.T) {
 		t.Fatalf(
 			"shutdown calls: server=%d Sessions=%d",
 			server.shutdowns.Load(), sessionRuntime.shutdowns.Load(),
+		)
+	}
+	if server.shutdownValue != "runtime-shutdown" || sessionRuntime.shutdownValue != "runtime-shutdown" {
+		t.Fatalf(
+			"shutdown context values: server=%v Sessions=%v",
+			server.shutdownValue,
+			sessionRuntime.shutdownValue,
 		)
 	}
 }
