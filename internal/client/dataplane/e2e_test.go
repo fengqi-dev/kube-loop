@@ -79,7 +79,6 @@ func (dialer *echoDialer) DialContext(_ context.Context, network, address string
 	return client, nil
 }
 
-//nolint:gocyclo // One scenario must verify the shared authenticated TCP and UDP transport contract end to end.
 func TestAuthenticatedWSSDataPlaneCarriesAuthorizedSOCKSTCPAndUDP(t *testing.T) {
 	spec, err := networkspec.Normalize(networkspec.Spec{
 		PodCIDRs: []string{"10.42.0.0/16"}, ServiceCIDRs: []string{"10.96.0.0/12"},
@@ -91,32 +90,8 @@ func TestAuthenticatedWSSDataPlaneCarriesAuthorizedSOCKSTCPAndUDP(t *testing.T) 
 	}
 	hash, _ := networkspec.Hash(spec)
 	sessionID := "ec0b67a2-e84c-4fe7-a0c5-810f210157b5"
-	halfCloseListener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer checkTestClose(t, halfCloseListener.Close)
-	halfCloseResult := make(chan error, 1)
-	go func() {
-		connection, acceptErr := halfCloseListener.Accept()
-		if acceptErr != nil {
-			halfCloseResult <- acceptErr
-			return
-		}
-		defer checkTestClose(t, connection.Close)
-		request, readErr := io.ReadAll(connection)
-		if readErr != nil {
-			halfCloseResult <- readErr
-			return
-		}
-		if string(request) != "complete request" {
-			halfCloseResult <- errors.New("half-close request payload changed")
-			return
-		}
-		_, writeErr := io.WriteString(connection, "response after request EOF")
-		halfCloseResult <- writeErr
-	}()
-	dialer := &echoDialer{halfCloseTarget: halfCloseListener.Addr().String()}
+	halfCloseTarget, halfCloseResult := startHalfCloseTarget(t)
+	dialer := &echoDialer{halfCloseTarget: halfCloseTarget}
 	gatewayServer := gateway.NewServer(slog.New(slog.NewTextHandler(io.Discard, nil)), time.Second)
 	gatewayServer.Dialer = dialer
 	ticketCalls := 0
@@ -161,137 +136,12 @@ func TestAuthenticatedWSSDataPlaneCarriesAuthorizedSOCKSTCPAndUDP(t *testing.T) 
 		t.Fatal("WSS transport did not obtain a RelayTicket")
 	}
 
-	t.Run("tcp", func(t *testing.T) {
-		connection := openSOCKSTCP(t, runtime.Status().SOCKSAddress, net.IPv4(10, 42, 0, 5), 8080)
-		defer checkTestClose(t, connection.Close)
-		_ = connection.SetDeadline(time.Now().Add(3 * time.Second))
-		if _, err := connection.Write([]byte("hello")); err != nil {
-			t.Fatal(err)
-		}
-		buffer := make([]byte, 64)
-		read, err := connection.Read(buffer)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got := string(buffer[:read]); got != "hello" {
-			t.Fatalf("TCP echo = %q", got)
-		}
-	})
-
-	t.Run("udp", func(t *testing.T) {
-		control, relayAddress := openSOCKSUDP(t, runtime.Status().SOCKSAddress)
-		defer checkTestClose(t, control.Close)
-		client, err := net.DialUDP("udp", nil, relayAddress)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer checkTestClose(t, client.Close)
-		_ = client.SetDeadline(time.Now().Add(3 * time.Second))
-		packet, err := statute.NewDatagram("10.42.0.5:8080", []byte("hello"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := client.Write(packet.Bytes()); err != nil {
-			t.Fatal(err)
-		}
-		buffer := make([]byte, 512)
-		read, err := client.Read(buffer)
-		if err != nil {
-			t.Fatal(err)
-		}
-		reply, err := statute.ParseDatagram(buffer[:read])
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got := string(reply.Data); got != "hello" {
-			t.Fatalf("UDP echo = %q", got)
-		}
-	})
-
-	t.Run("backpressure", func(t *testing.T) {
-		connection := openSOCKSTCP(t, runtime.Status().SOCKSAddress, net.IPv4(10, 42, 0, 5), 8080)
-		defer checkTestClose(t, connection.Close)
-		_ = connection.SetDeadline(time.Now().Add(10 * time.Second))
-		payload := bytes.Repeat([]byte("kubeloop-data-plane-"), 64<<10)
-		writeResult := make(chan error, 1)
-		go func() {
-			_, err := connection.Write(payload)
-			writeResult <- err
-		}()
-		received := make([]byte, len(payload))
-		if _, err := io.ReadFull(connection, received); err != nil {
-			t.Fatal(err)
-		}
-		if err := <-writeResult; err != nil {
-			t.Fatal(err)
-		}
-		if !bytes.Equal(received, payload) {
-			t.Fatal("large TCP payload changed across WSS/smux backpressure")
-		}
-	})
-
-	t.Run("half-close", func(t *testing.T) {
-		connection := openSOCKSTCP(t, runtime.Status().SOCKSAddress, net.IPv4(10, 42, 0, 6), 8081)
-		defer checkTestClose(t, connection.Close)
-		_ = connection.SetDeadline(time.Now().Add(5 * time.Second))
-		if _, err := io.WriteString(connection, "complete request"); err != nil {
-			t.Fatal(err)
-		}
-		if err := connection.(*net.TCPConn).CloseWrite(); err != nil {
-			t.Fatal(err)
-		}
-		response, err := io.ReadAll(connection)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := <-halfCloseResult; err != nil {
-			t.Fatal(err)
-		}
-		if string(response) != "response after request EOF" {
-			t.Fatalf("half-close response = %q", response)
-		}
-	})
-
-	t.Run("dns", func(t *testing.T) {
-		control, relayAddress := openSOCKSUDP(t, runtime.Status().SOCKSAddress)
-		defer checkTestClose(t, control.Close)
-		client, err := net.DialUDP("udp", nil, relayAddress)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer checkTestClose(t, client.Close)
-		_ = client.SetDeadline(time.Now().Add(3 * time.Second))
-		query := new(dns.Msg)
-		query.SetQuestion("api.default.svc.cluster.local.", dns.TypeA)
-		payload, err := query.Pack()
-		if err != nil {
-			t.Fatal(err)
-		}
-		packet, err := statute.NewDatagram("10.96.0.10:53", payload)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := client.Write(packet.Bytes()); err != nil {
-			t.Fatal(err)
-		}
-		buffer := make([]byte, 2048)
-		read, err := client.Read(buffer)
-		if err != nil {
-			t.Fatal(err)
-		}
-		replyDatagram, err := statute.ParseDatagram(buffer[:read])
-		if err != nil {
-			t.Fatal(err)
-		}
-		var reply dns.Msg
-		if err := reply.Unpack(replyDatagram.Data); err != nil {
-			t.Fatal(err)
-		}
-		if len(reply.Answer) != 1 ||
-			reply.Answer[0].String() != "api.default.svc.cluster.local.\t30\tIN\tA\t10.42.0.5" {
-			t.Fatalf("DNS answer = %#v", reply.Answer)
-		}
-	})
+	socksAddress := runtime.Status().SOCKSAddress
+	t.Run("tcp", func(t *testing.T) { testDataPlaneTCP(t, socksAddress) })
+	t.Run("udp", func(t *testing.T) { testDataPlaneUDP(t, socksAddress) })
+	t.Run("backpressure", func(t *testing.T) { testDataPlaneBackpressure(t, socksAddress) })
+	t.Run("half-close", func(t *testing.T) { testDataPlaneHalfClose(t, socksAddress, halfCloseResult) })
+	t.Run("dns", func(t *testing.T) { testDataPlaneDNS(t, socksAddress) })
 
 	dialer.mu.Lock()
 	if len(dialer.targets) != 5 || dialer.works[0] != "tcp" || dialer.works[1] != "udp" ||
@@ -310,6 +160,173 @@ func TestAuthenticatedWSSDataPlaneCarriesAuthorizedSOCKSTCPAndUDP(t *testing.T) 
 		t.Fatal("active SOCKS stream survived Data Plane shutdown")
 	}
 	_ = idle.Close()
+}
+
+func startHalfCloseTarget(t *testing.T) (string, chan error) {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { checkTestClose(t, listener.Close) })
+	result := make(chan error, 1)
+	go func() {
+		connection, acceptErr := listener.Accept()
+		if acceptErr != nil {
+			result <- acceptErr
+			return
+		}
+		defer checkTestClose(t, connection.Close)
+		request, readErr := io.ReadAll(connection)
+		if readErr != nil {
+			result <- readErr
+			return
+		}
+		if string(request) != "complete request" {
+			result <- errors.New("half-close request payload changed")
+			return
+		}
+		_, writeErr := io.WriteString(connection, "response after request EOF")
+		result <- writeErr
+	}()
+	return listener.Addr().String(), result
+}
+
+func testDataPlaneTCP(t *testing.T, socksAddress string) {
+	t.Helper()
+	connection := openSOCKSTCP(t, socksAddress, net.IPv4(10, 42, 0, 5), 8080)
+	defer checkTestClose(t, connection.Close)
+	_ = connection.SetDeadline(time.Now().Add(3 * time.Second))
+	if _, err := connection.Write([]byte("hello")); err != nil {
+		t.Fatal(err)
+	}
+	buffer := make([]byte, 64)
+	read, err := connection.Read(buffer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(buffer[:read]); got != "hello" {
+		t.Fatalf("TCP echo = %q", got)
+	}
+}
+
+func testDataPlaneUDP(t *testing.T, socksAddress string) {
+	t.Helper()
+	control, relayAddress := openSOCKSUDP(t, socksAddress)
+	defer checkTestClose(t, control.Close)
+	client, err := net.DialUDP("udp", nil, relayAddress)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer checkTestClose(t, client.Close)
+	_ = client.SetDeadline(time.Now().Add(3 * time.Second))
+	packet, err := statute.NewDatagram("10.42.0.5:8080", []byte("hello"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Write(packet.Bytes()); err != nil {
+		t.Fatal(err)
+	}
+	buffer := make([]byte, 512)
+	read, err := client.Read(buffer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reply, err := statute.ParseDatagram(buffer[:read])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(reply.Data); got != "hello" {
+		t.Fatalf("UDP echo = %q", got)
+	}
+}
+
+func testDataPlaneBackpressure(t *testing.T, socksAddress string) {
+	t.Helper()
+	connection := openSOCKSTCP(t, socksAddress, net.IPv4(10, 42, 0, 5), 8080)
+	defer checkTestClose(t, connection.Close)
+	_ = connection.SetDeadline(time.Now().Add(10 * time.Second))
+	payload := bytes.Repeat([]byte("kubeloop-data-plane-"), 64<<10)
+	writeResult := make(chan error, 1)
+	go func() {
+		_, err := connection.Write(payload)
+		writeResult <- err
+	}()
+	received := make([]byte, len(payload))
+	if _, err := io.ReadFull(connection, received); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-writeResult; err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(received, payload) {
+		t.Fatal("large TCP payload changed across WSS/smux backpressure")
+	}
+}
+
+func testDataPlaneHalfClose(t *testing.T, socksAddress string, result <-chan error) {
+	t.Helper()
+	connection := openSOCKSTCP(t, socksAddress, net.IPv4(10, 42, 0, 6), 8081)
+	defer checkTestClose(t, connection.Close)
+	_ = connection.SetDeadline(time.Now().Add(5 * time.Second))
+	if _, err := io.WriteString(connection, "complete request"); err != nil {
+		t.Fatal(err)
+	}
+	if err := connection.(*net.TCPConn).CloseWrite(); err != nil {
+		t.Fatal(err)
+	}
+	response, err := io.ReadAll(connection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := <-result; err != nil {
+		t.Fatal(err)
+	}
+	if string(response) != "response after request EOF" {
+		t.Fatalf("half-close response = %q", response)
+	}
+}
+
+func testDataPlaneDNS(t *testing.T, socksAddress string) {
+	t.Helper()
+	control, relayAddress := openSOCKSUDP(t, socksAddress)
+	defer checkTestClose(t, control.Close)
+	client, err := net.DialUDP("udp", nil, relayAddress)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer checkTestClose(t, client.Close)
+	_ = client.SetDeadline(time.Now().Add(3 * time.Second))
+	query := new(dns.Msg)
+	query.SetQuestion("api.default.svc.cluster.local.", dns.TypeA)
+	payload, err := query.Pack()
+	if err != nil {
+		t.Fatal(err)
+	}
+	packet, err := statute.NewDatagram("10.96.0.10:53", payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Write(packet.Bytes()); err != nil {
+		t.Fatal(err)
+	}
+	buffer := make([]byte, 2048)
+	read, err := client.Read(buffer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replyDatagram, err := statute.ParseDatagram(buffer[:read])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var reply dns.Msg
+	if err := reply.Unpack(replyDatagram.Data); err != nil {
+		t.Fatal(err)
+	}
+	if len(reply.Answer) != 1 ||
+		reply.Answer[0].String() != "api.default.svc.cluster.local.\t30\tIN\tA\t10.42.0.5" {
+		t.Fatalf("DNS answer = %#v", reply.Answer)
+	}
 }
 
 func openSOCKSTCP(t *testing.T, address string, ip net.IP, port uint16) net.Conn {
