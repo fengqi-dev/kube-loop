@@ -51,7 +51,8 @@ type App struct {
 	inventoryWatchWG          sync.WaitGroup
 	inventoryWatchProfile     string
 	inventoryWatchCancel      context.CancelFunc
-	powerWatchCancel          context.CancelFunc
+	backgroundCancel          context.CancelFunc
+	backgroundWG              sync.WaitGroup
 	serverLoginMu             sync.Mutex
 	serverLogin               *serverLoginAttempt
 	trafficInspectionOutput   io.Closer

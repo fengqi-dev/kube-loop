@@ -2,7 +2,9 @@ package app
 
 import (
 	"context"
+	"sync"
 	"testing"
+	"time"
 )
 
 func TestLifecycleAdaptersWithoutRuntimeContext(t *testing.T) {
@@ -31,5 +33,42 @@ func TestAppContext(t *testing.T) {
 	application.ctx = runtimeContext
 	if got := application.context(); got != runtimeContext {
 		t.Fatalf("context() = %v, want runtime context", got)
+	}
+}
+
+func TestShutdownWaitsForBackgroundCleanup(t *testing.T) {
+	application := &App{}
+	ctx, cancel := context.WithCancel(t.Context())
+	application.backgroundCancel = cancel
+	cleanupStarted := make(chan struct{})
+	releaseCleanup := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseCleanup) }) }
+	t.Cleanup(release)
+	application.backgroundWG.Go(func() {
+		<-ctx.Done()
+		close(cleanupStarted)
+		<-releaseCleanup
+	})
+	stopped := make(chan struct{})
+	go func() {
+		application.shutdown(t.Context())
+		close(stopped)
+	}()
+	select {
+	case <-cleanupStarted:
+	case <-time.After(time.Second):
+		t.Fatal("background task did not observe shutdown cancellation")
+	}
+	select {
+	case <-stopped:
+		t.Fatal("shutdown returned before background cleanup")
+	case <-time.After(100 * time.Millisecond):
+	}
+	release()
+	select {
+	case <-stopped:
+	case <-time.After(time.Second):
+		t.Fatal("shutdown did not return after background cleanup")
 	}
 }

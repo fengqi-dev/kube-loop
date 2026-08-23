@@ -34,6 +34,8 @@ func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	a.once.Do(func() {
 		a.appendLog("INFO", "application startup initialized")
+		backgroundContext, cancelBackground := context.WithCancel(ctx)
+		a.backgroundCancel = cancelBackground
 		watcher, err := powerwatch.New(powerwatch.Config{OnWake: func(event powerwatch.Event) {
 			if a.dataPlanes == nil {
 				return
@@ -46,26 +48,27 @@ func (a *App) startup(ctx context.Context) {
 		if err != nil {
 			a.appendLog("ERROR", "Power wake monitor unavailable: "+err.Error())
 		} else {
-			watchContext, cancel := context.WithCancel(ctx)
-			a.powerWatchCancel = cancel
-			go watcher.Run(watchContext)
+			a.backgroundWG.Go(func() {
+				watcher.Run(backgroundContext)
+			})
 		}
 		if a.mcp != nil {
 			a.mcp.StartFromStore()
 		}
-		go func() {
-			state := a.checkForUpdates(ctx)
-			runtime.EventsEmit(ctx, "update:state", state)
-		}()
+		a.backgroundWG.Go(func() {
+			state := a.checkForUpdates(backgroundContext)
+			runtime.EventsEmit(backgroundContext, "update:state", state)
+		})
 	})
 }
 
 func (a *App) shutdown(context.Context) {
 	shutdownContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if a.powerWatchCancel != nil {
-		a.powerWatchCancel()
+	if a.backgroundCancel != nil {
+		a.backgroundCancel()
 	}
+	a.backgroundWG.Wait()
 	a.stopServerInventoryWatch("")
 	if a.mcp != nil {
 		if err := a.mcp.Stop(); err != nil {
