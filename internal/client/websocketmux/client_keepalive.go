@@ -8,7 +8,6 @@ import (
 )
 
 func (forwarder *Forwarder) keepAlive(item *pooledSession) {
-	defer forwarder.wg.Done()
 	ticker := time.NewTicker(defaultKeepAliveInterval)
 	defer ticker.Stop()
 	for {

@@ -77,3 +77,13 @@ func TestForwarderReplacesClosedPhysicalSession(t *testing.T) {
 		t.Fatalf("physical connections after replacement = %d, want at least 2", got)
 	}
 }
+
+func TestCommitSessionRejectsClosedForwarder(t *testing.T) {
+	forwarder := &Forwarder{closed: true}
+	if forwarder.commitSession(&pooledSession{}) {
+		t.Fatal("closed Forwarder accepted a physical session")
+	}
+	if len(forwarder.sessions) != 0 {
+		t.Fatal("closed Forwarder retained a physical session")
+	}
+}

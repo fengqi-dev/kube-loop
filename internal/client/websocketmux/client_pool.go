@@ -2,6 +2,7 @@ package websocketmux
 
 import (
 	"errors"
+	"net"
 
 	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
 )
@@ -40,10 +41,25 @@ func (forwarder *Forwarder) ensureSession() (*pooledSession, error) {
 	if err != nil {
 		return nil, err
 	}
-	forwarder.mu.Lock()
-	forwarder.sessions = append(forwarder.sessions, item)
-	forwarder.mu.Unlock()
+	if !forwarder.commitSession(item) {
+		_ = item.session.Close()
+		_ = item.ws.Close(websocket.StatusGoingAway, "client closed during session setup")
+		return nil, net.ErrClosed
+	}
 	return item, nil
+}
+
+func (forwarder *Forwarder) commitSession(item *pooledSession) bool {
+	forwarder.mu.Lock()
+	defer forwarder.mu.Unlock()
+	if forwarder.closed {
+		return false
+	}
+	forwarder.sessions = append(forwarder.sessions, item)
+	forwarder.wg.Go(func() {
+		forwarder.keepAlive(item)
+	})
+	return true
 }
 
 func (forwarder *Forwarder) discard(target *pooledSession) {

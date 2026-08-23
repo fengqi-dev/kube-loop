@@ -115,7 +115,5 @@ func (forwarder *Forwarder) dial() (*pooledSession, error) {
 		return nil, fmt.Errorf("start Gateway multiplexer: %w", err)
 	}
 	item := &pooledSession{ws: connection, session: session, maxStreams: maximumStreams}
-	forwarder.wg.Add(1)
-	go forwarder.keepAlive(item)
 	return item, nil
 }
