@@ -21,6 +21,26 @@ type runtimeTestServer struct {
 	shutdowns    atomic.Int32
 }
 
+type runtimeBlockingServer struct {
+	serveStarted chan struct{}
+	release      chan struct{}
+	shutdowns    atomic.Int32
+}
+
+func (*runtimeBlockingServer) ListenAddress() string { return "127.0.0.1:0" }
+
+func (server *runtimeBlockingServer) Serve(listener net.Listener) error {
+	defer func() { _ = listener.Close() }()
+	close(server.serveStarted)
+	<-server.release
+	return nil
+}
+
+func (server *runtimeBlockingServer) Shutdown(context.Context) error {
+	server.shutdowns.Add(1)
+	return nil
+}
+
 func newRuntimeTestServer() *runtimeTestServer {
 	return &runtimeTestServer{serveStarted: make(chan struct{}), shutdown: make(chan struct{})}
 }
@@ -205,5 +225,35 @@ func TestServeControlPlaneBoundsBackgroundWorkerShutdown(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("serveControlPlane ignored the background worker shutdown deadline")
+	}
+}
+
+func TestServeControlPlaneBoundsServeLoopShutdown(t *testing.T) {
+	ctx, stop := context.WithCancel(t.Context())
+	server := &runtimeBlockingServer{serveStarted: make(chan struct{}), release: make(chan struct{})}
+	t.Cleanup(func() { close(server.release) })
+	sessionRuntime := &runtimeTestSessionRuntime{}
+	workers := []*runtimeTestWorker{
+		newRuntimeTestWorker(), newRuntimeTestWorker(), newRuntimeTestWorker(),
+	}
+	options := runtimeTestOptions(
+		ctx, stop, server, sessionRuntime, workers[0], workers[1], workers[2],
+	)
+	options.Config.ShutdownTimeout = 50 * time.Millisecond
+	result := make(chan error, 1)
+	go func() { result <- serveControlPlane(options) }()
+
+	<-server.serveStarted
+	for _, worker := range workers {
+		<-worker.started
+	}
+	stop()
+	select {
+	case err := <-result:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("serveControlPlane() error = %v, want context deadline exceeded", err)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("serveControlPlane ignored the serve-loop shutdown deadline")
 	}
 }

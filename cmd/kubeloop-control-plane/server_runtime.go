@@ -148,6 +148,8 @@ func serveControlPlane(options serverRuntimeOptions) error {
 	if relayServer != nil {
 		shutdownError = errors.Join(shutdownError, relayServer.Shutdown(shutdownContext))
 	}
+	serveWait := time.NewTimer(time.Second)
+	defer serveWait.Stop()
 	for serveResults < serveCount {
 		select {
 		case serveError := <-errCh:
@@ -155,7 +157,15 @@ func serveControlPlane(options serverRuntimeOptions) error {
 			if serveError != nil && firstServeError == nil {
 				firstServeError = serveError
 			}
-		case <-time.After(time.Second):
+		case <-shutdownContext.Done():
+			options.Logger.Warn(
+				"Control Plane serve loop exceeded shutdown deadline",
+				"remaining",
+				serveCount-serveResults,
+			)
+			shutdownError = errors.Join(shutdownError, shutdownContext.Err())
+			serveResults = serveCount
+		case <-serveWait.C:
 			options.Logger.Warn(
 				"Control Plane serve loop did not report shutdown",
 				"remaining",
