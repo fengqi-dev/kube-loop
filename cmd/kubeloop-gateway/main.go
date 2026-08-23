@@ -113,9 +113,7 @@ func runGateway(
 	componentLogger := slog.New(logHandler).With("component", "data-plane")
 	logger := slog.NewLogLogger(componentLogger.Handler(), slog.LevelInfo)
 	server := gateway.NewServer(componentLogger, 10*time.Second)
-	errCh := make(chan error, 1)
 	var httpHandler *websocketmux.Handler
-	var cancelHTTP context.CancelFunc
 	var controlAgent *relayagent.Agent
 	var runtimeReporter *relayRuntimeReporter
 	var dynamicAuthenticator *relayagent.TicketAuthenticator
@@ -229,44 +227,9 @@ func runGateway(
 		}
 		http.NotFound(ctx.Response(), ctx.Request())
 	}
-	httpContext, cancel := context.WithCancel(context.Background())
-	cancelHTTP = cancel
-	go func() {
-		logger.Printf("WebSocket Gateway listening on %s%s", config.HTTP.Listen, config.HTTP.Path)
-		errCh <- websocketmux.Serve(httpContext, httpListener, router)
-	}()
-
-	serveFinished := false
-	var serveError error
-	select {
-	case err := <-errCh:
-		serveFinished = true
-		serveError = err
-	case <-ctx.Done():
-	}
-	logger.Printf("Gateway draining for up to %s", config.DrainTimeout.Duration)
-	server.BeginDrain()
-	httpHandler.BeginDrain()
-	drainReportContext, cancelDrainReport := context.WithTimeout(context.Background(), 5*time.Second)
-	if err := controlAgent.Drain(drainReportContext); err != nil {
-		logger.Printf("report Data Plane drain failed: %v", err)
-	}
-	cancelDrainReport()
-	drainContext, cancelDrain := context.WithTimeout(context.Background(), config.DrainTimeout.Duration)
-	drainErr := server.Drain(drainContext)
-	cancelDrain()
-	if drainErr != nil {
-		logger.Printf("Gateway drain deadline reached: %v", drainErr)
-	}
-	cancelHTTP()
-	if !serveFinished {
-		if err := <-errCh; err != nil {
-			serveError = err
-		}
-	}
-	if serveError != nil {
-		return fmt.Errorf("gateway listener stopped: %w", serveError)
-	}
-	logger.Print("Gateway stopped")
-	return nil
+	return serveGateway(gatewayRuntimeOptions{
+		Context: ctx, Logger: logger, ListenAddress: config.HTTP.Listen, Path: config.HTTP.Path,
+		Listener: httpListener, Handler: router, Gateway: server, Admissions: httpHandler,
+		Control: controlAgent, DrainTimeout: config.DrainTimeout.Duration, Serve: websocketmux.Serve,
+	})
 }
