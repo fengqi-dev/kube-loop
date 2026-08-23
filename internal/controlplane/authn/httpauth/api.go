@@ -97,36 +97,6 @@ func (routes *Routes) securityHeaders(next echo.HandlerFunc) echo.HandlerFunc {
 	}
 }
 
-func (routes *Routes) discovery(ctx *echo.Context) error {
-	issuer := routes.issuer
-	return ctx.JSON(http.StatusOK, discoveryResponse{
-		Issuer: issuer, AuthorizationEndpoint: issuer + oauthPath + "/authorize",
-		TokenEndpoint: issuer + oauthPath + "/token", UserInfoEndpoint: issuer + oauthPath + "/userinfo",
-		JWKSURI: issuer + oauthPath + "/jwks", RevocationEndpoint: issuer + oauthPath + "/revoke",
-		ScopesSupported: []string{
-			"openid",
-			"profile",
-			"email",
-			"offline_access",
-			"kubeloop.api",
-		},
-		ResponseTypesSupported: []string{"code"},
-		GrantTypesSupported: []string{
-			"authorization_code",
-			"refresh_token",
-			"client_credentials",
-		},
-		SubjectTypesSupported:             []string{"public"},
-		IDTokenSigningAlgorithmsSupported: []string{"ES256"},
-		CodeChallengeMethodsSupported:     []string{"S256"},
-		TokenEndpointAuthMethodsSupported: []string{
-			"none",
-			"client_secret_basic",
-			"client_secret_post",
-		},
-	})
-}
-
 func (routes *Routes) authorize(ctx *echo.Context) error {
 	challenge, err := routes.fosite.BeginAuthorization(
 		ctx.Request().Context(),
@@ -392,78 +362,5 @@ func (routes *Routes) userInfo(ctx *echo.Context) error {
 			"name":  session.DisplayName,
 			"email": session.Email,
 		},
-	)
-}
-
-func (routes *Routes) bindForm(ctx *echo.Context) (url.Values, bool) {
-	if !strings.HasPrefix(
-		strings.ToLower(ctx.Request().Header.Get("Content-Type")),
-		"application/x-www-form-urlencoded",
-	) {
-		_ = routes.oauthError(
-			ctx,
-			http.StatusBadRequest,
-			"invalid_request",
-			"form-encoded request body is required",
-		)
-		return nil, false
-	}
-	if err := ctx.Request().ParseForm(); err != nil ||
-		duplicateParameter(ctx.Request().PostForm) {
-		_ = routes.oauthError(
-			ctx,
-			http.StatusBadRequest,
-			"invalid_request",
-			"request form is invalid",
-		)
-		return nil, false
-	}
-	return ctx.Request().PostForm, true
-}
-
-func (routes *Routes) oauthError(
-	ctx *echo.Context,
-	status int,
-	code, description string,
-) error {
-	return ctx.JSON(
-		status,
-		errorResponse{Error: code, ErrorDescription: description},
-	)
-}
-
-func duplicateParameter(values url.Values) bool {
-	for _, items := range values {
-		if len(items) != 1 {
-			return true
-		}
-	}
-	return false
-}
-
-func browserLoginErrorURL(form url.Values, code string) string {
-	raw := form.Get("return_to")
-	if !strings.HasPrefix(raw, "?") {
-		return ""
-	}
-	query, err := url.ParseQuery(strings.TrimPrefix(raw, "?"))
-	if err != nil || len(query[queryTransaction]) != 1 || len(query[queryCSRF]) != 1 ||
-		query.Get(queryTransaction) == "" ||
-		query.Get(queryTransaction) != form.Get(queryTransaction) ||
-		query.Get(queryCSRF) == "" ||
-		query.Get(queryCSRF) != form.Get(queryCSRF) {
-		return ""
-	}
-	query.Set("error", code)
-	return oauthPath + "/ui/?" + query.Encode()
-}
-
-func writeBrowserError(ctx *echo.Context) error {
-	ctx.Response().
-		Header().
-		Set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
-	return ctx.String(
-		http.StatusBadRequest,
-		"KubeLoop login failed. Return to the application and try again.\n",
 	)
 }
