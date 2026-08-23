@@ -5,8 +5,31 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/fengqi-dev/kube-loop/internal/helper"
 	helperprotocol "github.com/fengqi-dev/kube-loop/internal/protocol/helper"
 )
+
+func waitForInstalledHelper(ctx context.Context, token string) error {
+	client := &helper.Client{Token: token}
+	return waitForHelperReady(
+		ctx,
+		20*time.Second,
+		100*time.Millisecond,
+		func(pingCtx context.Context) (helperprotocol.Response, error) {
+			requestCtx, cancel := context.WithTimeout(pingCtx, 2*time.Second)
+			defer cancel()
+			response, err := client.Ping(requestCtx)
+			if err == nil && response.Version != helper.Version {
+				return response, fmt.Errorf(
+					"helper version %q does not match expected version %q",
+					response.Version,
+					helper.Version,
+				)
+			}
+			return response, err
+		},
+	)
+}
 
 func waitForHelperReady(
 	ctx context.Context,

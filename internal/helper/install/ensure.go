@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"path/filepath"
 	"sync"
-	"time"
 
 	"github.com/fengqi-dev/kube-loop/internal/componentstore"
 	"github.com/fengqi-dev/kube-loop/internal/helper"
@@ -43,12 +42,44 @@ func ensureInstall(ctx context.Context, requireCurrentBinary bool, certificatePE
 	ensureInstallMu.Lock()
 	defer ensureInstallMu.Unlock()
 
+	decision, err := decideHelperInstall(ctx, requireCurrentBinary)
+	if err != nil {
+		return err
+	}
+	if !decision.required {
+		return nil
+	}
+	artifacts, err := prepareHelperInstall(decision.source)
+	if err != nil {
+		return err
+	}
+	if err := installCurrentHelper(
+		ctx,
+		artifacts.helperPath,
+		artifacts.helperSHA256,
+		artifacts.token,
+		currentUID(),
+		artifacts.home,
+		artifacts.singBoxPath,
+		certificatePEM,
+	); err != nil {
+		return err
+	}
+	return waitForInstalledHelper(ctx, artifacts.token)
+}
+
+type helperInstallDecision struct {
+	source   string
+	required bool
+}
+
+func decideHelperInstall(ctx context.Context, requireCurrentBinary bool) (helperInstallDecision, error) {
 	status := helper.GetStatus(ctx)
 	enforceBinaryMatch := mustMatchBundledHelper(requireCurrentBinary, helper.IsDevBuild())
 	if !enforceBinaryMatch && canReuseInstalledHelper(
 		status, helper.Version, helperprotocol.Version, false, false,
 	) {
-		return nil
+		return helperInstallDecision{}, nil
 	}
 	source, locateErr := LocateBundledHelper()
 	needsBinaryUpdate := false
@@ -56,71 +87,66 @@ func ensureInstall(ctx context.Context, requireCurrentBinary bool, certificatePE
 		var hashErr error
 		needsBinaryUpdate, hashErr = helperNeedsBinaryUpdate(source, helper.BinaryInstallPath())
 		if hashErr != nil {
-			return hashErr
+			return helperInstallDecision{}, hashErr
 		}
 	}
 	if canReuseInstalledHelper(
 		status, helper.Version, helperprotocol.Version, enforceBinaryMatch, needsBinaryUpdate,
 	) && !requiresSupervisorCheck(enforceBinaryMatch) {
-		return nil
+		return helperInstallDecision{}, nil
 	}
 	if locateErr != nil {
-		return locateErr
+		return helperInstallDecision{}, locateErr
 	}
-	source, err := componentstore.Cache(helper.Version, helperBinaryName(helperServiceName), source)
+	return helperInstallDecision{source: source, required: true}, nil
+}
+
+type helperInstallArtifacts struct {
+	helperPath   string
+	helperSHA256 string
+	singBoxPath  string
+	token        string
+	home         string
+}
+
+func prepareHelperInstall(source string) (helperInstallArtifacts, error) {
+	artifacts := helperInstallArtifacts{}
+	var err error
+	artifacts.helperPath, err = componentstore.Cache(
+		helper.Version,
+		helperBinaryName(helperServiceName),
+		source,
+	)
 	if err != nil {
-		return fmt.Errorf("cache bundled helper: %w", err)
+		return artifacts, fmt.Errorf("cache bundled helper: %w", err)
 	}
-	sourceSHA256, err := bundledHelperSHA256(source)
+	artifacts.helperSHA256, err = bundledHelperSHA256(artifacts.helperPath)
 	if err != nil {
-		return err
+		return artifacts, err
 	}
 	singBoxPath, bundled, err := materializeBundledFile(singBoxBinaryName())
 	if err != nil {
-		return err
+		return artifacts, err
 	}
 	if !bundled {
 		singBoxPath, err = helper.LocateBundledSingBox()
 		if err != nil {
-			return err
+			return artifacts, err
 		}
 	}
-	singBoxPath, err = componentstore.Cache(helper.Version, filepath.Base(singBoxPath), singBoxPath)
+	artifacts.singBoxPath, err = componentstore.Cache(helper.Version, filepath.Base(singBoxPath), singBoxPath)
 	if err != nil {
-		return fmt.Errorf("cache bundled sing-box: %w", err)
+		return artifacts, fmt.Errorf("cache bundled sing-box: %w", err)
 	}
-	token, err := helper.EnsureUserToken()
+	artifacts.token, err = helper.EnsureUserToken()
 	if err != nil {
-		return err
+		return artifacts, err
 	}
-	home, err := helper.UserHomeDir()
+	artifacts.home, err = helper.UserHomeDir()
 	if err != nil {
-		return err
+		return artifacts, err
 	}
-	if err := installCurrentHelper(
-		ctx, source, sourceSHA256, token, currentUID(), home, singBoxPath, certificatePEM,
-	); err != nil {
-		return err
-	}
-	client := &helper.Client{Token: token}
-	return waitForHelperReady(
-		ctx,
-		20*time.Second,
-		100*time.Millisecond,
-		func(pingCtx context.Context) (helperprotocol.Response, error) {
-			requestCtx, cancel := context.WithTimeout(pingCtx, 2*time.Second)
-			defer cancel()
-			response, pingErr := client.Ping(requestCtx)
-			if pingErr == nil && response.Version != helper.Version {
-				return response, fmt.Errorf(
-					"helper version %q does not match expected version %q",
-					response.Version,
-					helper.Version,
-				)
-			}
-			return response, pingErr
-		},
-	)
+	return artifacts, nil
 }
 
 func mustMatchBundledHelper(requireCurrentBinary, developmentBuild bool) bool {
