@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
 
@@ -111,5 +112,54 @@ example.org:53 {
 	}
 	if got := parseCoreDNSClusterDomains(strings.Repeat("a", maximumCorefileBytes+1)); got != nil {
 		t.Fatalf("oversized Corefile domains = %v", got)
+	}
+}
+
+func TestDiscoverPrefersAuthoritativeCIDRsAndExcludesHostNetworkPods(t *testing.T) {
+	provider := &fakeProvider{
+		client: fake.NewClientset(
+			&corev1.Pod{
+				Name: "api", Namespace: "development",
+				Status: corev1.PodStatus{PodIP: "10.2.1.9"},
+			},
+			&corev1.Pod{
+				Name: "host-agent", Namespace: "development",
+				Spec:   corev1.PodSpec{HostNetwork: true},
+				Status: corev1.PodStatus{PodIP: "192.168.1.10"},
+			},
+			&corev1.Service{
+				Name: "api", Namespace: "development",
+				Spec: corev1.ServiceSpec{ClusterIP: "10.97.0.20"},
+			},
+		),
+		systemClient: fake.NewClientset(
+			&corev1.Node{
+				Name: "node-1",
+				Spec: corev1.NodeSpec{PodCIDR: "10.244.0.0/16"},
+			},
+			&networkingv1.ServiceCIDR{
+				Name: "kubernetes",
+				Spec: networkingv1.ServiceCIDRSpec{CIDRs: []string{"10.96.0.0/12"}},
+			},
+		),
+	}
+	discoverer, err := NewDiscoverer(provider)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	spec, err := discoverer.Discover(
+		context.Background(),
+		controlplaneapi.Identity{Subject: "identity-a"},
+		"development",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(spec.PodCIDRs, []string{"10.244.0.0/16"}) ||
+		!slices.Equal(spec.PodIPs, []string{"10.2.1.9"}) ||
+		!slices.Equal(spec.ServiceCIDRs, []string{"10.96.0.0/12"}) ||
+		!slices.Equal(spec.ServiceIPs, []string{"10.97.0.20"}) {
+		t.Fatalf("authoritative NetworkSpec = %#v", spec)
 	}
 }
