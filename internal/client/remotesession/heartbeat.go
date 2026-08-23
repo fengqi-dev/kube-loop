@@ -3,6 +3,7 @@ package remotesession
 import (
 	"context"
 	"errors"
+	"sync"
 	"time"
 
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
@@ -69,14 +70,18 @@ func (manager *Manager) heartbeat() {
 		profileIDs = append(profileIDs, profileID)
 	}
 	manager.mu.Unlock()
+	var heartbeats sync.WaitGroup
 	for _, profileID := range profileIDs {
-		operation := manager.profileOperation(profileID)
-		operation.Lock()
-		ctx, cancel := context.WithTimeout(manager.ctx, manager.interval)
-		_, _ = manager.refresh(ctx, profileID)
-		cancel()
-		operation.Unlock()
+		heartbeats.Go(func() {
+			operation := manager.profileOperation(profileID)
+			operation.Lock()
+			defer operation.Unlock()
+			ctx, cancel := context.WithTimeout(manager.ctx, manager.interval)
+			defer cancel()
+			_, _ = manager.refresh(ctx, profileID)
+		})
 	}
+	heartbeats.Wait()
 }
 
 func (manager *Manager) publishSessionUpdateLocked(profileID string, session remote.Session) {
