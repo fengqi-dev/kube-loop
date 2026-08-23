@@ -84,13 +84,14 @@ func (actor *shadowActor) run() {
 		actor.cancel()
 		return
 	}
-	defer func() {
-		_ = connection.Close() // The shadow actor has no result channel; closing only releases its private connection.
-	}()
 	responseDone := make(chan struct{})
 	go func() {
 		_, _ = io.Copy(io.Discard, connection)
 		close(responseDone)
+	}()
+	defer func() {
+		_ = connection.Close()
+		<-responseDone
 	}()
 	idle := time.NewTimer(actor.config.ShadowIdleTimeout)
 	defer idle.Stop()

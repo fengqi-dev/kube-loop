@@ -338,6 +338,58 @@ func TestShadowActorDropsSlowTargetWithoutBlockingProducer(t *testing.T) {
 	actor.Close()
 }
 
+type delayedReadConn struct {
+	net.Conn
+
+	started   chan struct{}
+	release   chan struct{}
+	startOnce sync.Once
+}
+
+func (connection *delayedReadConn) Read(payload []byte) (int, error) {
+	connection.startOnce.Do(func() { close(connection.started) })
+	count, err := connection.Conn.Read(payload)
+	<-connection.release
+	return count, err
+}
+
+func TestShadowActorCloseWaitsForResponseReader(t *testing.T) {
+	client, peer := net.Pipe()
+	defer checkTestClose(t, peer.Close)
+	release := make(chan struct{})
+	connection := &delayedReadConn{Conn: client, started: make(chan struct{}), release: release}
+	actor := newShadowActor(
+		context.Background(),
+		LocalTarget{ServicePort: 80, Protocol: mirrorProtocolTCP, LocalHost: mirrorLoopbackHost, LocalPort: 8080},
+		func(context.Context, string, string) (net.Conn, error) { return connection, nil },
+		Config{
+			ShadowQueueSize: 1, ShadowDialTimeout: time.Second,
+			ShadowWriteTimeout: time.Second, ShadowIdleTimeout: time.Second,
+		},
+	)
+	select {
+	case <-connection.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("shadow response reader did not start")
+	}
+	closed := make(chan struct{})
+	go func() {
+		actor.Close()
+		close(closed)
+	}()
+	select {
+	case <-closed:
+		t.Fatal("actor Close returned before response reader completed")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(release)
+	select {
+	case <-closed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("actor Close did not wait for response reader")
+	}
+}
+
 func TestManagerRejectsGatewayPortSubstitutionBeforeOpeningStream(t *testing.T) {
 	now := time.Now().UTC()
 	session := remote.Session{
