@@ -41,6 +41,14 @@ const (
 	defaultRegistrationRetryDelay = 500 * time.Millisecond
 )
 
+type lifecycleState uint8
+
+const (
+	lifecycleIdle lifecycleState = iota
+	lifecycleStarting
+	lifecycleRunning
+)
+
 type Agent struct {
 	config Config
 
@@ -51,8 +59,7 @@ type Agent struct {
 	leaseExpiresAt time.Time
 	heartbeatAfter time.Duration
 	lastError      error
-	starting       bool
-	started        bool
+	lifecycle      lifecycleState
 	cancel         context.CancelFunc
 	done           chan struct{}
 }

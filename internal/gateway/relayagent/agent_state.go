@@ -19,7 +19,7 @@ func (agent *Agent) Ready() bool {
 	}
 	agent.mu.RLock()
 	defer agent.mu.RUnlock()
-	return agent.started && agent.lastError == nil && agent.relayID != "" &&
+	return agent.lifecycle == lifecycleRunning && agent.lastError == nil && agent.relayID != "" &&
 		agent.leaseExpiresAt.After(agent.config.Now().UTC())
 }
 

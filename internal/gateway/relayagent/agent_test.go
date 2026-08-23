@@ -301,7 +301,7 @@ func TestAgentReadinessRequiresCurrentLeaseAndHealthyHeartbeat(t *testing.T) {
 	now := time.Now().UTC()
 	agent := &Agent{
 		config:         Config{Now: func() time.Time { return now }},
-		started:        true,
+		lifecycle:      lifecycleRunning,
 		relayID:        "relay-1",
 		leaseExpiresAt: now.Add(time.Minute),
 	}

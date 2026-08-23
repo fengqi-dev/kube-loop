@@ -14,12 +14,12 @@ func (agent *Agent) Start(ctx context.Context) error {
 	}
 	runContext, cancel := context.WithCancel(ctx)
 	agent.mu.Lock()
-	if agent.starting || agent.started {
+	if agent.lifecycle != lifecycleIdle {
 		agent.mu.Unlock()
 		cancel()
 		return errors.New("relay agent is already starting or started")
 	}
-	agent.starting = true
+	agent.lifecycle = lifecycleStarting
 	agent.cancel = cancel
 	agent.mu.Unlock()
 	running := false
@@ -29,7 +29,7 @@ func (agent *Agent) Start(ctx context.Context) error {
 		}
 		cancel()
 		agent.mu.Lock()
-		agent.starting = false
+		agent.lifecycle = lifecycleIdle
 		agent.cancel = nil
 		agent.mu.Unlock()
 	}()
@@ -58,8 +58,7 @@ func (agent *Agent) Start(ctx context.Context) error {
 		return err
 	}
 	agent.mu.Lock()
-	agent.starting = false
-	agent.started = true
+	agent.lifecycle = lifecycleRunning
 	agent.mu.Unlock()
 	go agent.run(runContext)
 	running = true
