@@ -20,7 +20,7 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		requestID = request.Header.Get("X-Request-ID")
 	}
 	if h.draining.Load() {
-		h.logf(
+		h.logf(request.Context(),
 			requestID, "WebSocket request rejected: remote=%s method=%s path=%s status=%d reason=draining",
 			request.RemoteAddr, request.Method, request.URL.Path, http.StatusServiceUnavailable,
 		)
@@ -29,7 +29,7 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 	if request.Method != http.MethodGet {
-		h.logf(
+		h.logf(request.Context(),
 			requestID, "WebSocket request rejected: remote=%s method=%s path=%s status=%d reason=method",
 			request.RemoteAddr, request.Method, request.URL.Path, http.StatusMethodNotAllowed,
 		)
@@ -39,7 +39,7 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	identity, err := h.config.Authenticator.Authenticate(request)
 	if err != nil || identity.IdentityID == "" || identity.DeviceID == "" || identity.SessionID == "" ||
 		identity.SessionGeneration == 0 || !identity.ExpiresAt.After(time.Now()) {
-		h.logf(
+		h.logf(request.Context(),
 			requestID, "WebSocket request rejected: remote=%s method=%s path=%s status=%d reason=authentication",
 			request.RemoteAddr, request.Method, request.URL.Path, http.StatusUnauthorized,
 		)
@@ -48,7 +48,7 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 	if !h.acquireGeneration(identity) {
-		h.logf(
+		h.logf(request.Context(),
 			requestID, "WebSocket request rejected: remote=%s method=%s path=%s status=%d reason=stale_generation",
 			request.RemoteAddr, request.Method, request.URL.Path, http.StatusUnauthorized,
 		)
@@ -63,7 +63,7 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	case h.limit <- struct{}{}:
 		defer func() { <-h.limit }()
 	default:
-		h.logf(
+		h.logf(request.Context(),
 			requestID, "WebSocket request rejected: remote=%s path=%s status=%d reason=session_limit",
 			request.RemoteAddr, request.URL.Path, http.StatusServiceUnavailable,
 		)
@@ -75,7 +75,7 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		Subprotocols: []string{Subprotocol},
 	})
 	if err != nil {
-		h.logf(
+		h.logf(request.Context(),
 			requestID,
 			"WebSocket upgrade failed: remote=%s path=%s error=%v",
 			request.RemoteAddr,
@@ -86,7 +86,7 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	}
 	defer func() { _ = connection.CloseNow() }()
 	if connection.Subprotocol() != Subprotocol {
-		h.logf(
+		h.logf(request.Context(),
 			requestID,
 			"WebSocket request rejected: remote=%s path=%s reason=subprotocol requested=%q negotiated=%q",
 			request.RemoteAddr,
@@ -164,15 +164,20 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	serverHello.ProtocolVersion = selectedVersion
 	if err := wssprotocol.Write(handshakeContext, connection, serverHello); err != nil {
 		cancelHandshake()
-		h.logf(requestID, "WebSocket handshake response failed: remote=%s error=%v", request.RemoteAddr, err)
+		h.logf(
+			request.Context(), requestID,
+			"WebSocket handshake response failed: remote=%s error=%v",
+			request.RemoteAddr, err,
+		)
 		_ = connection.Close(websocket.StatusInternalError, "HANDSHAKE_FAILED")
 		return
 	}
 	cancelHandshake()
 	connection.SetReadLimit(h.config.MaxFrameBytes)
-	h.logf(
-		requestID, "WebSocket session opened: remote=%s path=%s active_sessions=%d subprotocol=%s",
-		request.RemoteAddr, request.URL.Path, len(h.limit), connection.Subprotocol(),
+	h.logSession(
+		request.Context(), "Gateway WebSocket session opened",
+		"gateway.websocket.session", "opened", identity,
+		"active_sessions", len(h.limit), "subprotocol", connection.Subprotocol(),
 	)
 	// RelayTicket expiry is an admission boundary for the authenticated WSS
 	// handshake, not a lifetime limit for accepted logical streams. Established
@@ -180,7 +185,11 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	streamConn := websocket.NetConn(request.Context(), connection, websocket.MessageBinary)
 	session, err := smux.Server(streamConn, smuxConfig())
 	if err != nil {
-		h.logf(requestID, "WebSocket multiplexer setup failed: remote=%s error=%v", request.RemoteAddr, err)
+		h.logf(
+			request.Context(), requestID,
+			"WebSocket multiplexer setup failed: remote=%s error=%v",
+			request.RemoteAddr, err,
+		)
 		return
 	}
 	var streamHandlers sync.WaitGroup
@@ -190,9 +199,10 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	for {
 		stream, acceptErr := session.AcceptStream()
 		if acceptErr != nil {
-			h.logf(
-				requestID, "WebSocket session closed: remote=%s active_sessions=%d error=%v",
-				request.RemoteAddr, len(h.limit)-1, acceptErr,
+			h.logSession(
+				request.Context(), "Gateway WebSocket session closed",
+				"gateway.websocket.session", "closed", identity,
+				"active_sessions", len(h.limit)-1, "error", acceptErr,
 			)
 			return
 		}
@@ -200,7 +210,7 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		case streams <- struct{}{}:
 			if !h.generationCurrent(identity) {
 				<-streams
-				h.logf(
+				h.logf(request.Context(),
 					requestID, "WebSocket stream rejected: remote=%s reason=stale_generation generation=%d",
 					request.RemoteAddr, identity.SessionGeneration,
 				)
@@ -211,13 +221,25 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 			streamIdentity.Groups = slices.Clone(identity.Groups)
 			streamHandlers.Go(func() {
 				defer func() { <-streams }()
+				startedAt := time.Now()
+				h.logSession(
+					request.Context(), "Gateway logical stream opened",
+					"gateway.tunnel.stream", "opened", streamIdentity, "stream_id", stream.ID(),
+				)
+				defer func() {
+					h.logSession(
+						request.Context(), "Gateway logical stream closed",
+						"gateway.tunnel.stream", "closed", streamIdentity, "stream_id", stream.ID(),
+						"duration_ms", time.Since(startedAt).Milliseconds(),
+					)
+				}()
 				h.config.Handle(
 					request.Context(), streamIdentity,
 					shared.NewStreamConnWithIdleTimeout(stream, h.config.StreamIdleTimeout),
 				)
 			})
 		default:
-			h.logf(
+			h.logf(request.Context(),
 				requestID, "WebSocket stream rejected: remote=%s reason=stream_limit max_streams=%d",
 				request.RemoteAddr, h.config.MaxStreamsPerSession,
 			)

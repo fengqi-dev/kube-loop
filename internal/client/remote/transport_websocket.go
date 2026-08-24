@@ -9,6 +9,7 @@ import (
 	"net/url"
 
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
+	"github.com/fengqi-dev/kube-loop/internal/correlation"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
 )
 
@@ -57,9 +58,13 @@ func (client *Client) dialWebSocket(
 	endpoint,
 	accessToken string,
 ) (*websocket.Conn, int, error) {
+	header := http.Header{"Authorization": {"Bearer " + accessToken}}
+	if correlationID := correlation.ID(ctx); correlationID != "" {
+		header.Set(correlation.Header, correlationID)
+	}
 	connection, response, err := websocket.Dial(ctx, endpoint, &websocket.DialOptions{
 		HTTPClient:      client.httpClient,
-		HTTPHeader:      http.Header{"Authorization": {"Bearer " + accessToken}},
+		HTTPHeader:      header,
 		CompressionMode: websocket.CompressionDisabled,
 	})
 	if err == nil {

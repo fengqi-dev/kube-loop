@@ -3,6 +3,7 @@ package websocketmux
 import (
 	"context"
 	"crypto/tls"
+	"log/slog"
 	"net"
 	"sync"
 	"time"
@@ -33,6 +34,9 @@ type ClientConfig struct {
 	TLSConfig         *tls.Config
 	ClientVersion     string
 	DeviceID          string
+	SessionID         string
+	SessionGeneration uint64
+	Logger            *slog.Logger
 	SupportedVersions []string
 	HandshakeTimeout  time.Duration
 	PoolSize          int
@@ -41,9 +45,10 @@ type ClientConfig struct {
 }
 
 type pooledSession struct {
-	ws         *websocket.Conn
-	session    *smux.Session
-	maxStreams int
+	ws            *websocket.Conn
+	session       *smux.Session
+	maxStreams    int
+	correlationID string
 }
 
 // HandshakeError is returned when the Gateway explicitly rejects WSS v2
@@ -72,6 +77,7 @@ type Forwarder struct {
 	cancel   context.CancelFunc
 	listener net.Listener
 	config   ClientConfig
+	logger   *slog.Logger
 
 	mu          sync.Mutex
 	sessions    []*pooledSession

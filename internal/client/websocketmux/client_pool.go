@@ -1,9 +1,11 @@
 package websocketmux
 
 import (
+	"context"
 	"errors"
 	"net"
 
+	"github.com/fengqi-dev/kube-loop/internal/correlation"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
 )
 
@@ -71,6 +73,15 @@ func (forwarder *Forwarder) discard(target *pooledSession) {
 		}
 	}
 	forwarder.mu.Unlock()
+	ctx := correlation.WithID(context.Background(), target.correlationID)
+	forwarder.logger.InfoContext(
+		ctx, "Gateway WebSocket session closed",
+		"operation", "gateway.websocket.session",
+		"outcome", "closed",
+		"correlation_id", target.correlationID,
+		"session_id", forwarder.config.SessionID,
+		"session_generation", forwarder.config.SessionGeneration,
+	)
 	_ = target.session.Close()
 	_ = target.ws.Close(websocket.StatusGoingAway, "session replaced")
 }

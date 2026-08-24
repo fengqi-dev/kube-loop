@@ -1,10 +1,12 @@
 package ticketapi
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -17,6 +19,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/sessionapi"
 	ticketservice "github.com/fengqi-dev/kube-loop/internal/controlplane/ticketapi/service"
+	"github.com/fengqi-dev/kube-loop/internal/correlation"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/relaycontrol"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/relayticket"
 )
@@ -138,6 +141,8 @@ func TestIssueRelayTicketIsBoundToActiveSession(t *testing.T) {
 }
 
 func TestIssueRelayTicketUsesRegistryAssignment(t *testing.T) {
+	const correlationID = "55555555-5555-4555-8555-555555555555"
+	var logs bytes.Buffer
 	now := time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC)
 	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -163,6 +168,7 @@ func TestIssueRelayTicketUsesRegistryAssignment(t *testing.T) {
 		ticketservice.Config{
 			Issuer: "https://controlplane.example", TTL: time.Minute, Now: func() time.Time { return now },
 			Signer: signer, Allocator: allocator, Topology: map[string]string{"topology.kubernetes.io/zone": "cn-a"},
+			Logger: slog.New(slog.NewJSONHandler(&logs, nil)),
 		},
 	)
 	request := httptest.NewRequest(
@@ -171,6 +177,7 @@ func TestIssueRelayTicketUsesRegistryAssignment(t *testing.T) {
 		strings.NewReader(`{}`),
 	)
 	request.Header.Set("Content-Type", "application/json")
+	request = request.WithContext(correlation.WithID(request.Context(), correlationID))
 	response := httptest.NewRecorder()
 	if apiError := serveTicketHandler(handler, response, request, controlplaneapi.Identity{
 		Subject: "11111111-1111-4111-8111-111111111111", DeviceID: "22222222-2222-4222-8222-222222222222",
@@ -203,8 +210,14 @@ func TestIssueRelayTicketUsesRegistryAssignment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := verifier.Verify(document.Ticket); err != nil {
+	claims, err := verifier.Verify(document.Ticket)
+	if err != nil {
 		t.Fatal(err)
+	}
+	if !strings.Contains(logs.String(), `"correlation_id":"`+correlationID+`"`) ||
+		!strings.Contains(logs.String(), `"ticket_id":"`+claims.TicketID+`"`) ||
+		strings.Contains(logs.String(), document.Ticket) {
+		t.Fatalf("RelayTicket log = %q", logs.String())
 	}
 }
 

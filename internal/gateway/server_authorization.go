@@ -30,22 +30,23 @@ func (s *Server) ServeConnForAuthorizationContext(
 	}
 	token, err := tunnel.RelaySessionToken(authorization.SessionID, authorization.Generation)
 	if err != nil {
-		s.log(authorization.RequestID, "Gateway logical connection rejected", "reason", "invalid_session")
+		s.log(ctx, authorization.RequestID, "Gateway logical connection rejected", "reason", "invalid_session")
 		_ = connection.Close()
 		return
 	}
 	if !validNetworkSpecHash(authorization.NetworkSpecHash) {
-		s.log(authorization.RequestID, "Gateway logical connection rejected", "reason", "invalid_network_spec")
+		s.log(ctx, authorization.RequestID, "Gateway logical connection rejected", "reason", "invalid_network_spec")
 		_ = connection.Close()
 		return
 	}
 	if !dnsname.ValidLabel(authorization.Namespace) {
-		s.log(authorization.RequestID, "Gateway logical connection rejected", "reason", "invalid_namespace")
+		s.log(ctx, authorization.RequestID, "Gateway logical connection rejected", "reason", "invalid_namespace")
 		_ = connection.Close()
 		return
 	}
 	required := requiredAuthorization{
 		requestID: authorization.RequestID, token: token,
+		ticketID:  authorization.TicketID,
 		namespace: authorization.Namespace, networkSpecHash: authorization.NetworkSpecHash,
 		identity: trafficcontrol.Identity{
 			IdentityID:        authorization.IdentityID,
@@ -61,6 +62,7 @@ func (s *Server) ServeConnForAuthorizationContext(
 
 type requiredAuthorization struct {
 	requestID       string
+	ticketID        string
 	token           tunnel.SessionToken
 	namespace       string
 	networkSpecHash string
@@ -69,7 +71,7 @@ type requiredAuthorization struct {
 
 func (s *Server) serveConn(ctx context.Context, connection net.Conn, required requiredAuthorization) {
 	if !s.trackConnection(connection) {
-		s.log(required.requestID, "Gateway logical connection rejected", "reason", "draining")
+		s.log(ctx, required.requestID, "Gateway logical connection rejected", "reason", "draining")
 		_ = connection.Close()
 		return
 	}

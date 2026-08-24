@@ -2,6 +2,7 @@ package dataplane
 
 import (
 	"context"
+	"log/slog"
 	"net"
 	"strings"
 
@@ -12,6 +13,9 @@ import (
 )
 
 func normalizedConfig(config Config) Config {
+	if config.Logger == nil {
+		config.Logger = slog.Default()
+	}
 	config.ListenAddress = strings.TrimSpace(config.ListenAddress)
 	if config.ListenAddress == "" {
 		config.ListenAddress = DefaultListenAddress

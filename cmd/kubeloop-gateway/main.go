@@ -109,7 +109,9 @@ func runGateway(
 	if err != nil {
 		return fmt.Errorf("parse log level: %w", err)
 	}
-	logHandler := slog.NewJSONHandler(stdout, &slog.HandlerOptions{Level: parsedLogLevel})
+	logHandler := logging.WithContext(
+		slog.NewJSONHandler(stdout, &slog.HandlerOptions{Level: parsedLogLevel}),
+	)
 	componentLogger := slog.New(logHandler).With("component", "data-plane")
 	logger := slog.NewLogLogger(componentLogger.Handler(), slog.LevelInfo)
 	server := gateway.NewServer(componentLogger, 10*time.Second)
@@ -137,6 +139,7 @@ func runGateway(
 				IdentityID: claims.IdentityID, Groups: append([]string(nil), claims.Groups...),
 				DeviceID: claims.DeviceID, SessionID: claims.SessionID,
 				SessionGeneration: claims.SessionGeneration,
+				TicketID:          claims.TicketID,
 				Namespace:         claims.Namespace, NetworkSpecHash: claims.NetworkSpecHash,
 				ExpiresAt: time.Unix(claims.ExpiresAt, 0).UTC(),
 			}, nil
@@ -151,6 +154,7 @@ func runGateway(
 				RequestID: identity.RequestID, IdentityID: identity.IdentityID,
 				Groups: append([]string(nil), identity.Groups...), DeviceID: identity.DeviceID,
 				SessionID: identity.SessionID, Generation: identity.SessionGeneration,
+				TicketID:        identity.TicketID,
 				Namespace:       identity.Namespace,
 				NetworkSpecHash: identity.NetworkSpecHash,
 			})

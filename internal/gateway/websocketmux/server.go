@@ -20,6 +20,7 @@ type Identity struct {
 	DeviceID          string
 	SessionID         string
 	SessionGeneration uint64
+	TicketID          string
 	Namespace         string
 	NetworkSpecHash   string
 	ExpiresAt         time.Time

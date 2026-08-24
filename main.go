@@ -3,6 +3,8 @@ package main
 import (
 	"embed"
 	"log"
+	"log/slog"
+	"os"
 	goruntime "runtime"
 	"strings"
 
@@ -13,6 +15,7 @@ import (
 
 	desktopapp "github.com/fengqi-dev/kube-loop/internal/app"
 	"github.com/fengqi-dev/kube-loop/internal/desktoptray"
+	internalLogging "github.com/fengqi-dev/kube-loop/internal/logging"
 )
 
 //go:embed all:frontend/dist
@@ -31,6 +34,9 @@ var embeddedHelperFiles embed.FS
 var version = "dev"
 
 func main() {
+	jsonLogger := slog.New(internalLogging.WithContext(slog.NewJSONHandler(os.Stderr, nil)))
+	slog.SetDefault(jsonLogger)
+	log.SetOutput(slog.NewLogLogger(jsonLogger.Handler(), slog.LevelInfo).Writer())
 	// The tray and Wails windows must be created on the same native UI thread.
 	goruntime.LockOSThread()
 

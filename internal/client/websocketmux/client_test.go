@@ -1,24 +1,90 @@
 package websocketmux_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/labstack/echo/v5"
 
 	clientmux "github.com/fengqi-dev/kube-loop/internal/client/websocketmux"
+	"github.com/fengqi-dev/kube-loop/internal/correlation"
 	servermux "github.com/fengqi-dev/kube-loop/internal/gateway/websocketmux"
+	"github.com/fengqi-dev/kube-loop/internal/httpmiddleware"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/exchangestream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficstream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
 )
+
+func TestForwarderPropagatesCorrelationToTokenSourceAndGateway(t *testing.T) {
+	const (
+		correlationID = "44444444-4444-4444-8444-444444444444"
+		deviceID      = "22222222-2222-4222-8222-222222222222"
+		sessionID     = "33333333-3333-4333-8333-333333333333"
+	)
+	var clientLogs, gatewayLogs bytes.Buffer
+	tokenCorrelation := make(chan string, 1)
+	requestCorrelation := make(chan string, 1)
+	handler, err := servermux.NewHandler(servermux.ServerConfig{
+		Authenticator: servermux.AuthenticatorFunc(func(request *http.Request) (servermux.Identity, error) {
+			requestCorrelation <- request.Header.Get(correlation.Header)
+			return servermux.Identity{
+				IdentityID: "identity", DeviceID: deviceID, SessionID: sessionID,
+				SessionGeneration: 1, TicketID: "ticket-id", ExpiresAt: time.Now().Add(time.Minute),
+			}, nil
+		}),
+		Logger: slog.New(slog.NewJSONHandler(&gatewayLogs, nil)),
+		Handle: func(context.Context, servermux.Identity, net.Conn) {},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	router := echo.New()
+	router.Use(httpmiddleware.RequestID())
+	router.Any(servermux.DefaultPath, echo.WrapHandler(handler))
+	server := httptest.NewServer(router)
+	defer server.Close()
+	ctx := correlation.WithID(t.Context(), correlationID)
+	forwarder, err := clientmux.Start(ctx, clientmux.ClientConfig{
+		URL: "ws" + strings.TrimPrefix(server.URL, "http") + servermux.DefaultPath,
+		TokenSource: func(ctx context.Context) (string, error) {
+			tokenCorrelation <- correlation.ID(ctx)
+			return "relay-ticket", nil
+		},
+		DeviceID: deviceID, SessionID: sessionID, SessionGeneration: 1,
+		PoolSize: 1, Logger: slog.New(slog.NewJSONHandler(&clientLogs, nil)),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := forwarder.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if got := <-tokenCorrelation; got != correlationID {
+		t.Fatalf("token source correlation ID = %q", got)
+	}
+	if got := <-requestCorrelation; got != correlationID {
+		t.Fatalf("Gateway header correlation ID = %q", got)
+	}
+	for name, output := range map[string]string{
+		"client": clientLogs.String(), "gateway": gatewayLogs.String(),
+	} {
+		if !strings.Contains(output, `"correlation_id":"`+correlationID+`"`) ||
+			strings.Contains(output, "relay-ticket") {
+			t.Fatalf("%s logs = %q", name, output)
+		}
+	}
+}
 
 func TestForwarderSharesOnePhysicalWebSocketForTunnelAndTrafficStreams(t *testing.T) {
 	const deviceID = "22222222-2222-4222-8222-222222222222"

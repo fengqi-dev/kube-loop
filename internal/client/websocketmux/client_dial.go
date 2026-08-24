@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"slices"
 	"strings"
@@ -11,11 +12,12 @@ import (
 
 	"github.com/xtaci/smux"
 
+	"github.com/fengqi-dev/kube-loop/internal/correlation"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/wssprotocol"
 )
 
-func (forwarder *Forwarder) dial() (*pooledSession, error) {
+func (forwarder *Forwarder) dial() (result *pooledSession, resultErr error) {
 	defaultTransport, ok := http.DefaultTransport.(*http.Transport)
 	if !ok {
 		return nil, fmt.Errorf("default HTTP transport %T is unsupported", http.DefaultTransport)
@@ -27,6 +29,33 @@ func (forwarder *Forwarder) dial() (*pooledSession, error) {
 	httpClient := &http.Client{Transport: transport}
 	dialCtx, cancel := context.WithTimeout(forwarder.ctx, 15*time.Second)
 	defer cancel()
+	dialCtx, correlationID := correlation.Ensure(dialCtx)
+	startedAt := time.Now()
+	forwarder.logger.InfoContext(
+		dialCtx, "Gateway WebSocket dial started",
+		"operation", "gateway.websocket.connect",
+		"outcome", "started",
+		"correlation_id", correlationID,
+		"session_id", forwarder.config.SessionID,
+		"session_generation", forwarder.config.SessionGeneration,
+	)
+	defer func() {
+		level := slog.LevelInfo
+		attributes := []any{
+			"operation", "gateway.websocket.connect",
+			"outcome", "success",
+			"correlation_id", correlationID,
+			"duration_ms", time.Since(startedAt).Milliseconds(),
+			"session_id", forwarder.config.SessionID,
+			"session_generation", forwarder.config.SessionGeneration,
+		}
+		if resultErr != nil {
+			level = slog.LevelError
+			attributes[3] = "failure"
+			attributes = append(attributes, "error", resultErr)
+		}
+		forwarder.logger.Log(dialCtx, level, "Gateway WebSocket dial completed", attributes...)
+	}()
 	token := forwarder.config.Token
 	if forwarder.config.TokenSource != nil {
 		var err error
@@ -40,6 +69,7 @@ func (forwarder *Forwarder) dial() (*pooledSession, error) {
 	}
 	header := make(http.Header)
 	header.Set("Authorization", "Bearer "+token)
+	header.Set(correlation.Header, correlationID)
 	connection, response, err := websocket.Dial(dialCtx, forwarder.config.URL, &websocket.DialOptions{
 		HTTPClient: httpClient, HTTPHeader: header, Subprotocols: []string{Subprotocol},
 	})
@@ -114,6 +144,9 @@ func (forwarder *Forwarder) dial() (*pooledSession, error) {
 		_ = connection.Close(websocket.StatusInternalError, "multiplexer setup failed")
 		return nil, fmt.Errorf("start Gateway multiplexer: %w", err)
 	}
-	item := &pooledSession{ws: connection, session: session, maxStreams: maximumStreams}
+	item := &pooledSession{
+		ws: connection, session: session, maxStreams: maximumStreams,
+		correlationID: correlationID,
+	}
 	return item, nil
 }

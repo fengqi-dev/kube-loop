@@ -9,6 +9,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/fengqi-dev/kube-loop/internal/correlation"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
 )
@@ -19,13 +20,16 @@ func (s *Server) handle(ctx context.Context, client net.Conn, required requiredA
 	if err != nil {
 		_ = client.Close()
 		if !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
-			s.log(required.requestID, "Gateway tunnel handshake rejected", "remote", client.RemoteAddr(), "error", err)
+			s.log(
+				ctx, required.requestID, "Gateway tunnel handshake rejected",
+				"remote", client.RemoteAddr(), "error", err,
+			)
 		}
 		return
 	}
 	_ = client.SetReadDeadline(time.Time{})
 	if header.Token != required.token {
-		s.log(required.requestID, "Gateway tunnel handshake rejected", "reason", "ticket_mismatch")
+		s.log(ctx, required.requestID, "Gateway tunnel handshake rejected", "reason", "ticket_mismatch")
 		_ = tunnel.WriteStatus(client, errors.New("gateway session does not match RelayTicket"))
 		_ = client.Close()
 		return
@@ -37,7 +41,7 @@ func (s *Server) handle(ctx context.Context, client net.Conn, required requiredA
 	case tunnel.CommandControl:
 		spec, readErr := tunnel.ReadAuthorizedControlSpec(client)
 		if readErr != nil {
-			s.log(
+			s.log(ctx,
 				required.requestID,
 				"Gateway control stream rejected",
 				"reason",
@@ -51,7 +55,7 @@ func (s *Server) handle(ctx context.Context, client net.Conn, required requiredA
 		}
 		hash, hashErr := networkspec.Hash(spec)
 		if hashErr != nil || hash != required.networkSpecHash {
-			s.log(
+			s.log(ctx,
 				required.requestID,
 				"Gateway control stream rejected",
 				"reason",
@@ -67,7 +71,10 @@ func (s *Server) handle(ctx context.Context, client net.Conn, required requiredA
 	case tunnel.CommandTraffic:
 		request, readErr := tunnel.ReadTrafficOpenBody(client)
 		if readErr != nil {
-			s.log(required.requestID, "Gateway traffic stream rejected", "reason", "invalid_request", "error", readErr)
+			s.log(
+				ctx, required.requestID, "Gateway traffic stream rejected",
+				"reason", "invalid_request", "error", readErr,
+			)
 			_ = tunnel.WriteStatus(client, errors.New("traffic request is invalid"))
 			_ = client.Close()
 			return
@@ -77,7 +84,7 @@ func (s *Server) handle(ctx context.Context, client net.Conn, required requiredA
 			if authorizationErr == nil {
 				authorizationErr = errors.New("gateway NetworkSpec authorization is not active")
 			}
-			s.log(
+			s.log(ctx,
 				required.requestID,
 				"Gateway traffic stream rejected",
 				"reason",
@@ -92,7 +99,7 @@ func (s *Server) handle(ctx context.Context, client net.Conn, required requiredA
 		identity := required.identity
 		identity.Groups = slices.Clone(required.identity.Groups)
 		if identity.Validate() != nil {
-			s.log(required.requestID, "Gateway traffic stream rejected", "reason", "invalid_identity")
+			s.log(ctx, required.requestID, "Gateway traffic stream rejected", "reason", "invalid_identity")
 			_ = tunnel.WriteStatus(client, errors.New("traffic identity is invalid"))
 			_ = client.Close()
 			return
@@ -105,9 +112,39 @@ func (s *Server) handle(ctx context.Context, client net.Conn, required requiredA
 			_ = client.Close()
 			return
 		}
+		startedAt := time.Now()
+		if s.Logger != nil {
+			s.Logger.InfoContext(
+				ctx, "Gateway traffic relay started",
+				"operation", "gateway.traffic.relay",
+				"outcome", "started",
+				"correlation_id", correlation.ID(ctx),
+				"request_id", required.requestID,
+				"session_id", identity.SessionID,
+				"session_generation", identity.SessionGeneration,
+				"ticket_id", required.ticketID,
+				"task_id", request.TaskID,
+				"mode", request.Mode,
+			)
+		}
 		traffic.ServeTraffic(ctx, client, identity, request)
+		if s.Logger != nil {
+			s.Logger.InfoContext(
+				ctx, "Gateway traffic relay completed",
+				"operation", "gateway.traffic.relay",
+				"outcome", "completed",
+				"correlation_id", correlation.ID(ctx),
+				"request_id", required.requestID,
+				"session_id", identity.SessionID,
+				"session_generation", identity.SessionGeneration,
+				"ticket_id", required.ticketID,
+				"task_id", request.TaskID,
+				"mode", request.Mode,
+				"duration_ms", time.Since(startedAt).Milliseconds(),
+			)
+		}
 	default:
-		s.log(required.requestID, "Gateway tunnel command rejected", "command", header.Command)
+		s.log(ctx, required.requestID, "Gateway tunnel command rejected", "command", header.Command)
 		_ = tunnel.WriteStatus(client, fmt.Errorf("unsupported command %d", header.Command))
 		_ = client.Close()
 	}

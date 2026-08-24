@@ -153,7 +153,7 @@ func buildAPIRuntime(
 	}
 	relayTicketService, err := ticketservice.New(ticketservice.Config{
 		Issuer: config.Document.API.PublicURL, TTL: config.RelayTicketTTL, Signer: relaySigner,
-		Allocator: relayRegistry.registry, Topology: relayRegistry.allocationTopology,
+		Allocator: relayRegistry.registry, Topology: relayRegistry.allocationTopology, Logger: logger,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("initialize RelayTicket API: %w", err)

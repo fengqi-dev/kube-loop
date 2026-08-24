@@ -29,7 +29,7 @@ func (h *Handler) reject(
 	connection *websocket.Conn,
 	rejection wssprotocol.Reject,
 ) {
-	h.logf(requestID, "WebSocket handshake rejected: reason=%s", rejection.Code)
+	h.logf(parent, requestID, "WebSocket handshake rejected: reason=%s", rejection.Code)
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), time.Second)
 	_ = wssprotocol.Write(ctx, connection, rejection)
 	cancel()

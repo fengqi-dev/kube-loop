@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+
+	"github.com/fengqi-dev/kube-loop/internal/correlation"
 )
 
 func (h *Handler) BeginDrain() {
@@ -20,10 +22,39 @@ func (h *Handler) ActiveSessions() int {
 	return len(h.limit)
 }
 
-func (h *Handler) logf(requestID, format string, values ...any) {
+func (h *Handler) logf(ctx context.Context, requestID, format string, values ...any) {
 	if h.config.Logger != nil {
-		h.config.Logger.Info(fmt.Sprintf(format, values...), "request_id", requestID)
+		h.config.Logger.InfoContext(
+			ctx,
+			fmt.Sprintf(format, values...),
+			"operation", "gateway.websocket.session",
+			"outcome", "failure",
+			"correlation_id", correlation.ID(ctx),
+			"request_id", requestID,
+		)
 	}
+}
+
+func (h *Handler) logSession(
+	ctx context.Context,
+	message, operation, outcome string,
+	identity Identity,
+	attributes ...any,
+) {
+	if h.config.Logger == nil {
+		return
+	}
+	arguments := []any{
+		"operation", operation,
+		"outcome", outcome,
+		"correlation_id", correlation.ID(ctx),
+		"request_id", identity.RequestID,
+		"session_id", identity.SessionID,
+		"session_generation", identity.SessionGeneration,
+		"ticket_id", identity.TicketID,
+	}
+	arguments = append(arguments, attributes...)
+	h.config.Logger.InfoContext(ctx, message, arguments...)
 }
 
 func Serve(ctx context.Context, listener net.Listener, handler http.Handler) error {

@@ -20,12 +20,15 @@ func (s *Server) handleOutbound(
 	spec, authorized, authorizationErr := s.authorizedNetwork(header.Token, required)
 	if authorizationErr != nil {
 		_ = tunnel.WriteStatus(client, authorizationErr)
-		s.log(required.requestID, "Gateway tunnel open rejected", "reason", "authorization", "error", authorizationErr)
+		s.log(
+			ctx, required.requestID, "Gateway tunnel open rejected",
+			"reason", "authorization", "error", authorizationErr,
+		)
 		return
 	}
 	request, err := tunnel.ReadOpenBody(client, header.Command)
 	if err != nil {
-		s.log(required.requestID, "Gateway tunnel open rejected", "remote", client.RemoteAddr(), "error", err)
+		s.log(ctx, required.requestID, "Gateway tunnel open rejected", "remote", client.RemoteAddr(), "error", err)
 		return
 	}
 
@@ -39,7 +42,7 @@ func (s *Server) handleOutbound(
 	}
 	if err != nil {
 		_ = tunnel.WriteStatus(client, err)
-		s.log(required.requestID, "Gateway target denied", "target", request.Address(), "error", err)
+		s.log(ctx, required.requestID, "Gateway target denied", "target", request.Address(), "error", err)
 		return
 	}
 	network := "tcp"
@@ -53,7 +56,7 @@ func (s *Server) handleOutbound(
 	target, err := dialer.DialContext(ctx, network, targetAddress)
 	if err != nil {
 		_ = tunnel.WriteStatus(client, fmt.Errorf("dial target: %w", err))
-		s.log(
+		s.log(ctx,
 			required.requestID, "Gateway target connection failed",
 			"network", network, "target", targetAddress, "error", err,
 		)

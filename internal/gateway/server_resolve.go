@@ -8,6 +8,8 @@ import (
 	"net/netip"
 	"strconv"
 	"strings"
+
+	"github.com/fengqi-dev/kube-loop/internal/correlation"
 )
 
 func resolvePrivate(ctx context.Context, host string, port uint16) (string, error) {
@@ -35,11 +37,17 @@ func isClusterAddress(ip netip.Addr) bool {
 	return ip.IsPrivate() && !ip.IsLoopback() && !ip.IsLinkLocalUnicast() && !ip.IsMulticast()
 }
 
-func (s *Server) log(requestID, message string, attributes ...any) {
+func (s *Server) log(ctx context.Context, requestID, message string, attributes ...any) {
 	if s.Logger != nil {
-		arguments := make([]any, 0, len(attributes)+2)
-		arguments = append(arguments, "request_id", requestID)
+		arguments := make([]any, 0, len(attributes)+6)
+		arguments = append(
+			arguments,
+			"operation", "gateway.tunnel.stream",
+			"outcome", "failure",
+			"correlation_id", correlation.ID(ctx),
+			"request_id", requestID,
+		)
 		arguments = append(arguments, attributes...)
-		s.Logger.WarnContext(context.Background(), message, arguments...)
+		s.Logger.WarnContext(ctx, message, arguments...)
 	}
 }

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"maps"
 	"strings"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/ticketapi/entity"
+	"github.com/fengqi-dev/kube-loop/internal/correlation"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/relaycontrol"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/relayticket"
 )
@@ -37,6 +39,7 @@ type Config struct {
 	Signer    *relayticket.Signer
 	Allocator RelayAllocator
 	Topology  map[string]string
+	Logger    *slog.Logger
 }
 
 type IssueInput struct {
@@ -57,6 +60,7 @@ type Service struct {
 	signer    *relayticket.Signer
 	allocator RelayAllocator
 	topology  map[string]string
+	logger    *slog.Logger
 }
 
 func New(config Config) (*Service, error) {
@@ -76,16 +80,21 @@ func New(config Config) (*Service, error) {
 	if config.Now == nil {
 		config.Now = time.Now
 	}
+	if config.Logger == nil {
+		config.Logger = slog.Default()
+	}
 	return &Service{
 		issuer: config.Issuer, ttl: config.TTL, now: config.Now,
 		signer: config.Signer, allocator: config.Allocator, topology: cloneTopology(config.Topology),
+		logger: config.Logger,
 	}, nil
 }
 
 func (service *Service) Issue(
-	_ context.Context,
+	ctx context.Context,
 	input IssueInput,
 ) (entity.Ticket, error) {
+	startedAt := time.Now()
 	now := service.now().UTC().Truncate(time.Second)
 	expiresAt := now.Add(service.ttl)
 	if input.SessionExpiresAt.Before(expiresAt) {
@@ -115,6 +124,18 @@ func (service *Service) Issue(
 	if err != nil {
 		return entity.Ticket{}, errors.Join(ErrSigning, err)
 	}
+	service.logger.InfoContext(
+		ctx,
+		"RelayTicket issued",
+		"operation", "relay.ticket.issue",
+		"outcome", "success",
+		"correlation_id", correlation.ID(ctx),
+		"duration_ms", time.Since(startedAt).Milliseconds(),
+		"session_id", input.SessionID,
+		"session_generation", input.Generation,
+		"ticket_id", claims.TicketID,
+		"relay_id", assignment.RelayID,
+	)
 	return entity.Ticket{
 		TokenType: relayticket.Type, Value: ticket, ExpiresAt: expiresAt,
 		DeviceID: input.DeviceID, RelayID: assignment.RelayID, Endpoint: assignment.Endpoint,

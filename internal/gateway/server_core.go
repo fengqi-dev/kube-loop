@@ -19,6 +19,7 @@ type SessionAuthorization struct {
 	DeviceID        string
 	SessionID       string
 	Generation      uint64
+	TicketID        string
 	Namespace       string
 	NetworkSpecHash string
 }

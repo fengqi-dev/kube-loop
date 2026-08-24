@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/url"
 	"strings"
@@ -45,6 +46,9 @@ func Start(ctx context.Context, config ClientConfig) (*Forwarder, error) {
 	if config.HandshakeTimeout > time.Minute {
 		return nil, errors.New("gateway WSS handshake timeout must not exceed one minute")
 	}
+	if config.Logger == nil {
+		config.Logger = slog.Default()
+	}
 	if config.PoolSize <= 0 {
 		config.PoolSize = defaultPoolSize
 	}
@@ -68,6 +72,7 @@ func Start(ctx context.Context, config ClientConfig) (*Forwarder, error) {
 	forwardCtx, cancel := context.WithCancel(ctx)
 	forwarder := &Forwarder{
 		ctx: forwardCtx, cancel: cancel, listener: listener, config: config,
+		logger: config.Logger.With("component", "client-data-plane"),
 		locals: make(map[net.Conn]struct{}), streams: make(map[net.Conn]struct{}),
 		openGate: make(chan struct{}, 1), maxPhysical: config.MaxPhysical,
 	}

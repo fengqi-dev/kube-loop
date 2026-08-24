@@ -10,6 +10,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v5"
+
+	"github.com/fengqi-dev/kube-loop/internal/correlation"
 )
 
 func TestRequestLoggerUsesClientRequestID(t *testing.T) {
@@ -35,6 +37,49 @@ func TestRequestLoggerUsesGeneratedRequestID(t *testing.T) {
 	}
 	if parsed.String() != requestID {
 		t.Fatalf("generated request ID %q is not in canonical UUID format", requestID)
+	}
+}
+
+func TestRequestLoggerPropagatesCorrelationID(t *testing.T) {
+	t.Parallel()
+	const correlationID = "44444444-4444-4444-8444-444444444444"
+	var logs bytes.Buffer
+	router := echo.New()
+	router.Use(RequestID())
+	router.Use(RequestLogger(slog.New(slog.NewJSONHandler(&logs, nil))))
+	router.GET("/items", func(ctx *echo.Context) error {
+		if id := correlation.ID(ctx.Request().Context()); id != correlationID {
+			t.Fatalf("handler correlation ID = %q", id)
+		}
+		return ctx.NoContent(http.StatusNoContent)
+	})
+	request := httptest.NewRequest(http.MethodGet, "/items", nil)
+	request.Header.Set(correlation.Header, correlationID)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if got := response.Header().Get(correlation.Header); got != correlationID {
+		t.Fatalf("response correlation ID = %q", got)
+	}
+	var event map[string]any
+	if err := json.Unmarshal(bytes.TrimSpace(logs.Bytes()), &event); err != nil {
+		t.Fatal(err)
+	}
+	if event["correlation_id"] != correlationID {
+		t.Fatalf("logged correlation ID = %#v", event["correlation_id"])
+	}
+}
+
+func TestRequestLoggerReplacesInvalidCorrelationID(t *testing.T) {
+	t.Parallel()
+	router := echo.New()
+	router.Use(RequestID())
+	router.GET("/items", func(ctx *echo.Context) error { return ctx.NoContent(http.StatusNoContent) })
+	request := httptest.NewRequest(http.MethodGet, "/items", nil)
+	request.Header.Set(correlation.Header, "forged\nvalue")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if got := response.Header().Get(correlation.Header); !correlation.Valid(got) {
+		t.Fatalf("response correlation ID = %q", got)
 	}
 }
 

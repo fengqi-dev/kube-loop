@@ -3,6 +3,7 @@ package dataplane
 import (
 	"context"
 	"crypto/tls"
+	"log/slog"
 	"net"
 	"net/http"
 	"sync"
@@ -33,6 +34,7 @@ type Config struct {
 	RecoveryAttempts  int
 	RecoveryBackoff   time.Duration
 	OnStatus          func(StatusEvent)
+	Logger            *slog.Logger
 	TrafficInspection TrafficInspectionConfig
 
 	startForwarder func(context.Context, websocketmux.ClientConfig) (streamForwarder, error)

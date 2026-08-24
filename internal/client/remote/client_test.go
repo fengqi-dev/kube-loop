@@ -18,6 +18,7 @@ import (
 	clientauth "github.com/fengqi-dev/kube-loop/internal/client/auth"
 	"github.com/fengqi-dev/kube-loop/internal/client/credentials"
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
+	"github.com/fengqi-dev/kube-loop/internal/correlation"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/execstream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/filestream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
@@ -499,6 +500,7 @@ func TestSessionLifecycleUsesIdempotencyAndGenerationHeaders(t *testing.T) {
 }
 
 func TestIssueRelayTicketUsesAuthenticatedJSONRequest(t *testing.T) {
+	const correlationID = "44444444-4444-4444-8444-444444444444"
 	now := time.Now().UTC()
 	store := &memoryStore{value: validCredential(now)}
 	session := Session{
@@ -511,7 +513,8 @@ func TestIssueRelayTicketUsesAuthenticatedJSONRequest(t *testing.T) {
 		}
 		if request.URL.Query().Get(remoteParamNamespace) != session.Namespace ||
 			request.Header.Get("Content-Type") != "application/json" ||
-			request.Header.Get("Authorization") != "Bearer access-token" {
+			request.Header.Get("Authorization") != "Bearer access-token" ||
+			request.Header.Get(correlation.Header) != correlationID {
 			t.Errorf("query = %q, Content-Type = %q, Authorization = %q",
 				request.URL.RawQuery, request.Header.Get("Content-Type"), request.Header.Get("Authorization"))
 		}
@@ -539,7 +542,8 @@ func TestIssueRelayTicketUsesAuthenticatedJSONRequest(t *testing.T) {
 		t.Fatal(err)
 	}
 	ticket, err := client.IssueRelayTicket(
-		context.Background(), profile.Profile{ID: "service-1", BaseURL: server.URL}, session,
+		correlation.WithID(context.Background(), correlationID),
+		profile.Profile{ID: "service-1", BaseURL: server.URL}, session,
 	)
 	if err != nil || ticket.Ticket != "signed.ticket.value" || ticket.TokenType != "KubeLoop-RelayTicket" ||
 		ticket.Endpoint != "wss://relay.example/tunnel" || ticket.DeviceID != "22222222-2222-4222-8222-222222222222" {

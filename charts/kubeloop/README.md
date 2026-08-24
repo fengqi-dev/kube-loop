@@ -20,6 +20,25 @@ dataPlane:
   logLevel: info
 ```
 
+### Correlating a tunnel locally
+
+The desktop client creates a canonical UUID for each Data Plane transport and
+sends it as `X-KubeLoop-Correlation-ID` while requesting RelayTickets and
+opening `/tunnel`. Control Plane and Data Plane preserve it as
+`correlation_id` in their JSON logs. The identifier is diagnostic metadata
+only; authentication and authorization continue to use the access token,
+RelayTicket and Session bindings.
+
+Search combined local logs with:
+
+```sh
+rg '"correlation_id":"<uuid>"' control-plane.log data-plane.log client.log
+```
+
+Related records retain their narrower identifiers (`request_id`, `session_id`,
+`ticket_id` and `stream_id`). Tokens, RelayTicket contents, authorization
+headers and stream payloads are never included in these lifecycle records.
+
 ## One public origin
 
 `publicURL` is the exact HTTP or HTTPS origin entered by desktop clients. It

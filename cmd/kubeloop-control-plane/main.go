@@ -64,7 +64,9 @@ func newControlPlaneCommand(stdout io.Writer) *cobra.Command {
 			if err != nil {
 				return internalcli.Usage(fmt.Errorf("invalid log level: %w", err))
 			}
-			logger := slog.New(slog.NewJSONHandler(stdout, &slog.HandlerOptions{Level: parsedLogLevel}))
+			logger := slog.New(logging.WithContext(
+				slog.NewJSONHandler(stdout, &slog.HandlerOptions{Level: parsedLogLevel}),
+			)).With("component", "control-plane")
 			runContext, stop := context.WithCancel(command.Context())
 			defer stop()
 			return runControlPlane(runContext, stop, config, environment, logger)
