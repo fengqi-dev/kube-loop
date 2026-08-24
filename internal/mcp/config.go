@@ -88,10 +88,6 @@ func DefaultConfigPath() (string, error) {
 	return filepath.Join(layout.ConfigDir(), "mcp.json"), nil
 }
 
-func NewSystemConfigStore(path string) (*SystemConfigStore, error) {
-	return newSystemConfigStoreWithService(path, keyringBackend{}, keyringService)
-}
-
 func NewSystemConfigStoreForVersion(path, version string) (*SystemConfigStore, error) {
 	return newSystemConfigStoreWithService(path, keyringBackend{}, keyringServiceForVersion(version))
 }

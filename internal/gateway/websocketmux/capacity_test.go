@@ -216,8 +216,8 @@ func BenchmarkGatewayLogicalStreamRoundTrip(b *testing.B) {
 	response := make([]byte, len(payload))
 	b.SetBytes(int64(len(payload)))
 	b.ReportAllocs()
-	b.ResetTimer()
-	for range b.N {
+	
+	for b.Loop() {
 		connection, dialErr := net.DialTimeout("tcp", forwarder.Address(), time.Second)
 		if dialErr != nil {
 			b.Fatal(dialErr)

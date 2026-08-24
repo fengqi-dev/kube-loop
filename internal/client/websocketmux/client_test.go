@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -26,13 +27,30 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
 )
 
+type lockedBuffer struct {
+	mu     sync.Mutex
+	buffer bytes.Buffer
+}
+
+func (buffer *lockedBuffer) Write(data []byte) (int, error) {
+	buffer.mu.Lock()
+	defer buffer.mu.Unlock()
+	return buffer.buffer.Write(data)
+}
+
+func (buffer *lockedBuffer) String() string {
+	buffer.mu.Lock()
+	defer buffer.mu.Unlock()
+	return buffer.buffer.String()
+}
+
 func TestForwarderPropagatesCorrelationToTokenSourceAndGateway(t *testing.T) {
 	const (
 		correlationID = "44444444-4444-4444-8444-444444444444"
 		deviceID      = "22222222-2222-4222-8222-222222222222"
 		sessionID     = "33333333-3333-4333-8333-333333333333"
 	)
-	var clientLogs, gatewayLogs bytes.Buffer
+	var clientLogs, gatewayLogs lockedBuffer
 	tokenCorrelation := make(chan string, 1)
 	requestCorrelation := make(chan string, 1)
 	handler, err := servermux.NewHandler(servermux.ServerConfig{
@@ -76,6 +94,7 @@ func TestForwarderPropagatesCorrelationToTokenSourceAndGateway(t *testing.T) {
 	if got := <-requestCorrelation; got != correlationID {
 		t.Fatalf("Gateway header correlation ID = %q", got)
 	}
+	server.Close()
 	for name, output := range map[string]string{
 		"client": clientLogs.String(), "gateway": gatewayLogs.String(),
 	} {

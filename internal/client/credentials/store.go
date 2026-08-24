@@ -62,14 +62,6 @@ func (systemBackend) Delete(service, account string) error {
 	return keyring.Delete(service, account)
 }
 
-func NewSystemStore() *SystemStore {
-	return NewStore(systemBackend{})
-}
-
-func NewSystemStoreForVersion(version string) *SystemStore {
-	return newStore(systemBackend{}, keyringServiceForVersion(version))
-}
-
 // NewSystemStoreForClient isolates OAuth credentials by client ID while still
 // allowing Desktop and TUI to share Server profiles. Refresh tokens are bound
 // to the OAuth client that obtained them and must never overwrite each other.

@@ -70,14 +70,6 @@ func WithTaskResolver(
 	)
 }
 
-func ActiveSession(
-	request *http.Request,
-	identity controlplaneapi.Identity,
-	sessions Sessions,
-) (sessionapi.ActiveSession, *controlplaneapi.Error) {
-	return ActiveSessionWithResolver(request, identity, sessions, NamespaceFromQuery)
-}
-
 func ActiveSessionWithResolver(
 	request *http.Request,
 	identity controlplaneapi.Identity,

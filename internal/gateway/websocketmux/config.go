@@ -24,14 +24,9 @@ func smuxConfig() *smux.Config {
 }
 
 const (
-	defaultPoolSize          = 2
-	defaultMaxPhysical       = 4
 	defaultMaxStreams        = 128
 	defaultKeepAliveInterval = 15 * time.Second
 	defaultKeepAliveTimeout  = 45 * time.Second
 	defaultStreamIdleTimeout = 30 * time.Minute
 	maxStreamIdleTimeout     = 24 * time.Hour
-	maxPoolSize              = 8
-	maxPhysicalConnections   = 16
-	maxStreamsPerConnection  = 1024
 )
