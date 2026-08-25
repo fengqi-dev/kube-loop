@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
@@ -46,6 +48,9 @@ func newTUICommand() *cobra.Command {
 }
 
 func runTUI(ctx context.Context) error {
+	restoreLogs := silenceTUIProcessLogs()
+	defer restoreLogs()
+
 	if err := registerBundledResources(); err != nil {
 		return fmt.Errorf("register bundled resources: %w", err)
 	}
@@ -66,4 +71,15 @@ func runTUI(ctx context.Context) error {
 	)
 	_, err = program.Run()
 	return err
+}
+
+func silenceTUIProcessLogs() func() {
+	previousLogger := slog.Default()
+	previousLogWriter := log.Writer()
+	slog.SetDefault(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	log.SetOutput(io.Discard)
+	return func() {
+		slog.SetDefault(previousLogger)
+		log.SetOutput(previousLogWriter)
+	}
 }
