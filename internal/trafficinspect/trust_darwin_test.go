@@ -67,8 +67,15 @@ func TestDarwinTrustStore_InstallAndUninstallAreIdempotent(t *testing.T) {
 	if runner.trustUninstallCalls != 1 {
 		t.Fatalf("trust uninstall calls = %d, want 1", runner.trustUninstallCalls)
 	}
-	if runner.uninstallFingerprint != authority.FingerprintSHA256() {
-		t.Fatalf("uninstall fingerprint = %q, want %q", runner.uninstallFingerprint, authority.FingerprintSHA256())
+	wantKeychainFingerprint, err := darwinKeychainFingerprint(authority)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runner.uninstallFingerprint != wantKeychainFingerprint {
+		t.Fatalf("uninstall fingerprint = %q, want %q", runner.uninstallFingerprint, wantKeychainFingerprint)
+	}
+	if runner.uninstallFingerprint == authority.FingerprintSHA256() {
+		t.Fatal("uninstall used SHA-256 instead of the macOS Keychain SHA-1 identifier")
 	}
 }
 

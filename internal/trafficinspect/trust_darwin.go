@@ -4,10 +4,13 @@ package trafficinspect
 
 import (
 	"context"
+	"crypto/sha1" //nolint:gosec // macOS Keychain uses SHA-1 as a certificate item identifier.
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/kballard/go-shellquote"
 )
@@ -132,9 +135,13 @@ func (s *darwinTrustStore) Uninstall(ctx context.Context, authority *Authority) 
 			return fmt.Errorf("remove macOS traffic inspection certificate trust: %w", err)
 		}
 	}
+	keychainFingerprint, err := darwinKeychainFingerprint(authority)
+	if err != nil {
+		return err
+	}
 	for range maxDarwinCertificateRemovalAttempts {
 		command := shellquote.Join(
-			"/usr/bin/security", "delete-certificate", "-Z", authority.FingerprintSHA256(),
+			"/usr/bin/security", "delete-certificate", "-Z", keychainFingerprint,
 			systemKeychainPath,
 		)
 		script := "do shell script " + strconv.Quote(command) + " with administrator privileges"
@@ -151,4 +158,13 @@ func (s *darwinTrustStore) Uninstall(ctx context.Context, authority *Authority) 
 		}
 	}
 	return errors.New("macOS traffic inspection certificate is still installed after repeated removal")
+}
+
+func darwinKeychainFingerprint(authority *Authority) (string, error) {
+	if authority == nil || authority.certificate.Leaf == nil || len(authority.certificate.Leaf.Raw) == 0 {
+		return "", errors.New("traffic inspection authority certificate is required")
+	}
+	//nolint:gosec // SHA-1 is required as a Keychain lookup identifier, not for security validation.
+	digest := sha1.Sum(authority.certificate.Leaf.Raw)
+	return strings.ToUpper(hex.EncodeToString(digest[:])), nil
 }
