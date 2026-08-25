@@ -9,11 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 	"testing"
-
-	"github.com/kballard/go-shellquote"
 )
 
 func TestDarwinTrustStore_InstallAndUninstallAreIdempotent(t *testing.T) {
@@ -42,7 +39,7 @@ func TestDarwinTrustStore_InstallAndUninstallAreIdempotent(t *testing.T) {
 		t.Fatalf("repeat authority install: %v", err)
 	}
 	if runner.installCalls != 1 {
-		t.Fatalf("privileged install calls = %d, want 1", runner.installCalls)
+		t.Fatalf("install calls = %d, want 1", runner.installCalls)
 	}
 	if runner.installedPublicPEM == nil {
 		t.Fatal("privileged install did not receive a public certificate")
@@ -59,7 +56,7 @@ func TestDarwinTrustStore_InstallAndUninstallAreIdempotent(t *testing.T) {
 		t.Fatalf("repeat authority uninstall: %v", err)
 	}
 	if runner.uninstallCalls != 1 {
-		t.Fatalf("privileged uninstall calls = %d, want 1", runner.uninstallCalls)
+		t.Fatalf("uninstall calls = %d, want 1", runner.uninstallCalls)
 	}
 	if runner.uninstallFingerprint != authority.FingerprintSHA256() {
 		t.Fatalf("uninstall fingerprint = %q, want %q", runner.uninstallFingerprint, authority.FingerprintSHA256())
@@ -72,8 +69,8 @@ func TestDarwinTrustStore_PropagatesAuthorizationFailure(t *testing.T) {
 		t.Fatalf("create authority: %v", err)
 	}
 	runner := &fakeDarwinTrustRunner{
-		authority:     authority,
-		privilegedErr: errors.New("authorization canceled"),
+		authority:  authority,
+		commandErr: errors.New("authorization canceled"),
 	}
 	store := &darwinTrustStore{runner: runner}
 	if err := store.Install(
@@ -83,12 +80,20 @@ func TestDarwinTrustStore_PropagatesAuthorizationFailure(t *testing.T) {
 		!strings.Contains(err.Error(), "authorization canceled") {
 		t.Fatalf("Install() error = %v, want authorization failure", err)
 	}
+	status, err := store.Status(t.Context(), authority)
+	if err != nil {
+		t.Fatalf("Status() error = %v", err)
+	}
+	if status.Installed {
+		t.Fatal("partially added certificate reported as trusted")
+	}
 }
 
 type fakeDarwinTrustRunner struct {
 	authority            *Authority
-	installed            bool
-	privilegedErr        error
+	present              bool
+	trusted              bool
+	commandErr           error
 	installCalls         int
 	uninstallCalls       int
 	installedPublicPEM   []byte
@@ -104,68 +109,53 @@ func (r *fakeDarwinTrustRunner) CombinedOutput(
 		return nil, err
 	}
 	if name == "/usr/bin/security" {
-		want := []string{"find-certificate", "-a", "-p", "-c", AuthorityCommonName, systemKeychainPath}
-		if !slices.Equal(arguments, want) {
-			return nil, errors.New("unexpected security trust query")
-		}
-		if !r.installed {
+		switch arguments[0] {
+		case "find-certificate":
+			want := []string{"find-certificate", "-a", "-p", "-c", AuthorityCommonName, systemKeychainPath}
+			if !slices.Equal(arguments, want) {
+				return nil, errors.New("unexpected security trust query")
+			}
+			if !r.present {
+				return nil, nil
+			}
+			return r.authority.PublicCertificatePEM(), nil
+		case "verify-cert":
+			if !r.trusted {
+				return []byte("certificate verification failed"), errors.New("not trusted")
+			}
 			return nil, nil
 		}
-		return r.authority.PublicCertificatePEM(), nil
 	}
-	if name != "/usr/bin/osascript" || len(arguments) != 2 || arguments[0] != "-e" {
+	if name != "/usr/bin/security" || len(arguments) < 2 {
 		return nil, errors.New("unexpected command")
 	}
-	if r.privilegedErr != nil {
-		return []byte("user canceled administrator authorization"), r.privilegedErr
+	if r.commandErr != nil {
+		r.present = true
+		r.trusted = false
+		return []byte("user canceled administrator authorization"), r.commandErr
 	}
-	command, err := decodeAdministratorScript(arguments[1])
-	if err != nil {
-		return nil, err
-	}
-	commandArguments, err := shellquote.Split(command)
-	if err != nil {
-		return nil, err
-	}
-	if len(commandArguments) < 2 {
-		return nil, errors.New("privileged command has too few arguments")
-	}
-	if commandArguments[0] != "/usr/bin/security" {
-		return nil, errors.New("unexpected privileged command")
-	}
-	switch commandArguments[1] {
+	switch arguments[0] {
 	case "add-trusted-cert":
 		r.installCalls++
-		certificatePath := commandArguments[len(commandArguments)-1]
+		certificatePath := arguments[len(arguments)-1]
+		var err error
 		r.installedPublicPEM, err = os.ReadFile(certificatePath)
 		if err != nil {
 			return nil, err
 		}
-		r.installed = true
+		r.present = true
+		r.trusted = true
 	case "delete-certificate":
 		r.uninstallCalls++
-		for index, argument := range commandArguments {
-			if argument == "-Z" && index+1 < len(commandArguments) {
-				r.uninstallFingerprint = commandArguments[index+1]
+		for index, argument := range arguments {
+			if argument == "-Z" && index+1 < len(arguments) {
+				r.uninstallFingerprint = arguments[index+1]
 			}
 		}
-		r.installed = false
+		r.present = false
+		r.trusted = false
 	default:
-		return nil, errors.New("unexpected privileged security operation")
+		return nil, errors.New("unexpected security operation")
 	}
 	return nil, nil
-}
-
-func decodeAdministratorScript(script string) (string, error) {
-	const prefix = "do shell script "
-	const suffix = " with administrator privileges"
-	if !strings.HasPrefix(script, prefix) || !strings.HasSuffix(script, suffix) {
-		return "", errors.New("invalid administrator script")
-	}
-	quoted := strings.TrimSuffix(strings.TrimPrefix(script, prefix), suffix)
-	command, err := strconv.Unquote(quoted)
-	if err != nil {
-		return "", err
-	}
-	return command, nil
 }

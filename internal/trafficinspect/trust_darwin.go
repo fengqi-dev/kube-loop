@@ -7,9 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"strconv"
-
-	"github.com/kballard/go-shellquote"
 )
 
 const systemKeychainPath = "/Library/Keychains/System.keychain"
@@ -38,6 +35,27 @@ func (s *darwinTrustStore) Status(ctx context.Context, authority *Authority) (Tr
 		return TrustStatus{}, commandError("inspect macOS system certificate trust", err, output)
 	}
 	installed := containsCertificate(output, authority.certificate.Leaf.Raw)
+	if installed {
+		// Presence in System.keychain is not sufficient: add-trusted-cert can add
+		// the certificate before its separate trust-settings authorization fails.
+		certificatePath, cleanup, writeErr := writePublicCertificate(authority)
+		if writeErr != nil {
+			return TrustStatus{}, writeErr
+		}
+		defer func() { _ = cleanup() }()
+		_, verifyErr := s.runner.CombinedOutput(
+			ctx,
+			"/usr/bin/security",
+			"verify-cert", "-q", "-l", "-L", "-c", certificatePath,
+			"-k", systemKeychainPath,
+		)
+		if verifyErr != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return TrustStatus{}, ctxErr
+			}
+			installed = false
+		}
+	}
 	return TrustStatus{
 		Installed:         installed,
 		FingerprintSHA256: authority.FingerprintSHA256(),
@@ -63,13 +81,19 @@ func (s *darwinTrustStore) Install(ctx context.Context, authority *Authority) (r
 		}
 	}()
 
-	command := shellquote.Join(
-		"/usr/bin/security", "add-trusted-cert", "-d", "-r", "trustRoot",
+	arguments := []string{
+		"add-trusted-cert", "-d", "-r", "trustRoot",
 		"-k", systemKeychainPath, certificatePath,
-	)
-	script := "do shell script " + strconv.Quote(command) + " with administrator privileges"
-	output, err := s.runner.CombinedOutput(ctx, "/usr/bin/osascript", "-e", script)
+	}
+	// Run security directly so SecurityAgent can present its own administrator
+	// authorization. Nesting this command inside an already elevated osascript
+	// prevents that second interaction on current macOS releases.
+	output, err := s.runner.CombinedOutput(ctx, "/usr/bin/security", arguments...)
 	if err != nil {
+		status, statusErr := s.Status(ctx, authority)
+		if statusErr == nil && status.Installed {
+			return nil
+		}
 		return commandError("install macOS traffic inspection certificate", err, output)
 	}
 	status, err = s.Status(ctx, authority)
@@ -90,13 +114,16 @@ func (s *darwinTrustStore) Uninstall(ctx context.Context, authority *Authority) 
 	if !status.Installed {
 		return nil
 	}
-	command := shellquote.Join(
-		"/usr/bin/security", "delete-certificate", "-Z", authority.FingerprintSHA256(),
+	arguments := []string{
+		"delete-certificate", "-Z", authority.FingerprintSHA256(),
 		"-t", systemKeychainPath,
-	)
-	script := "do shell script " + strconv.Quote(command) + " with administrator privileges"
-	output, err := s.runner.CombinedOutput(ctx, "/usr/bin/osascript", "-e", script)
+	}
+	output, err := s.runner.CombinedOutput(ctx, "/usr/bin/security", arguments...)
 	if err != nil {
+		status, statusErr := s.Status(ctx, authority)
+		if statusErr == nil && !status.Installed {
+			return nil
+		}
 		return commandError("uninstall macOS traffic inspection certificate", err, output)
 	}
 	status, err = s.Status(ctx, authority)

@@ -3,7 +3,6 @@
 package install
 
 import (
-	"encoding/pem"
 	"errors"
 	"os"
 	"path/filepath"
@@ -47,44 +46,6 @@ func TestInstalledCoreMatches(t *testing.T) {
 				t.Fatalf("installedCoreMatches() = %v, want %v", got, test.want)
 			}
 		})
-	}
-}
-
-func TestWriteTemporaryTrustedCertificate(t *testing.T) {
-	t.Parallel()
-	content := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: []byte("certificate")})
-	path, cleanup, err := writeTemporaryTrustedCertificate(content)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if path == "" {
-		t.Fatal("writeTemporaryTrustedCertificate() returned an empty path")
-	}
-	info, err := os.Stat(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if info.Mode().Perm() != 0o600 {
-		t.Fatalf("temporary certificate mode = %o, want 600", info.Mode().Perm())
-	}
-	got, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(got) != string(content) {
-		t.Fatal("temporary certificate content does not match")
-	}
-	cleanup()
-	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("temporary certificate remains after cleanup: %v", err)
-	}
-}
-
-func TestWriteTemporaryTrustedCertificateRejectsPrivateKey(t *testing.T) {
-	t.Parallel()
-	content := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: []byte("private")})
-	if _, _, err := writeTemporaryTrustedCertificate(content); err == nil {
-		t.Fatal("writeTemporaryTrustedCertificate() accepted a private key")
 	}
 }
 

@@ -3,9 +3,7 @@
 package install
 
 import (
-	"bytes"
 	"context"
-	"encoding/pem"
 	"fmt"
 	"os"
 	"time"
@@ -26,7 +24,7 @@ func installCurrentHelper(
 	source, sourceSHA256, token string,
 	uid int,
 	home, singBox string,
-	certificatePEM []byte,
+	_ []byte,
 ) error {
 	config := supervisor.CurrentConfig()
 	supervisorSource, err := LocateBundledSupervisor()
@@ -71,14 +69,9 @@ func installCurrentHelper(
 		return err
 	}
 
-	certificatePath, cleanup, err := writeTemporaryTrustedCertificate(certificatePEM)
-	if err != nil {
-		return err
-	}
-	defer cleanup()
 	return ElevateSupervisorInstall(
 		ctx, supervisorSource, supervisorSHA, source, sourceSHA256, helper.Version, config.Channel,
-		token, uid, home, singBox, certificatePath,
+		token, uid, home, singBox,
 	)
 }
 
@@ -87,38 +80,6 @@ func installedCoreMatches(source, installed string) bool {
 	// from the protected system copy even when both contain the same core.
 	needsUpdate, err := helperNeedsBinaryUpdate(source, installed)
 	return err == nil && !needsUpdate
-}
-
-func writeTemporaryTrustedCertificate(content []byte) (string, func(), error) {
-	if len(content) == 0 {
-		return "", func() {}, nil
-	}
-	block, trailing := pem.Decode(content)
-	if block == nil || block.Type != "CERTIFICATE" || len(bytes.TrimSpace(trailing)) != 0 {
-		return "", func() {}, fmt.Errorf("traffic inspection certificate PEM is invalid")
-	}
-	file, err := os.CreateTemp("", "kubeloop-inspection-ca-*.pem")
-	if err != nil {
-		return "", func() {}, fmt.Errorf("create temporary traffic inspection certificate: %w", err)
-	}
-	path := file.Name()
-	cleanup := func() {
-		_ = file.Close()
-		_ = os.Remove(path)
-	}
-	if err := file.Chmod(0o600); err != nil {
-		cleanup()
-		return "", func() {}, fmt.Errorf("secure temporary traffic inspection certificate: %w", err)
-	}
-	if _, err := file.Write(content); err != nil {
-		cleanup()
-		return "", func() {}, fmt.Errorf("write temporary traffic inspection certificate: %w", err)
-	}
-	if err := file.Close(); err != nil {
-		cleanup()
-		return "", func() {}, fmt.Errorf("close temporary traffic inspection certificate: %w", err)
-	}
-	return path, cleanup, nil
 }
 
 func canUpdateWorkerThroughSupervisor(
