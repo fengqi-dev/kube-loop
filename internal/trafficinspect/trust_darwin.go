@@ -7,53 +7,43 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
+
+	"github.com/kballard/go-shellquote"
 )
 
 const systemKeychainPath = "/Library/Keychains/System.keychain"
 
+const maxDarwinCertificateRemovalAttempts = 8
+
 type darwinTrustStore struct {
-	runner commandRunner
+	runner   commandRunner
+	settings darwinTrustSettings
+}
+
+type darwinTrustSettings interface {
+	Installed(*Authority) (bool, error)
+	Install(*Authority) error
+	Uninstall(*Authority) error
 }
 
 func newSystemTrustStore() TrustStore {
-	return &darwinTrustStore{runner: execCommandRunner{}}
+	return &darwinTrustStore{runner: execCommandRunner{}, settings: newDarwinTrustSettings()}
 }
 
 func (s *darwinTrustStore) Status(ctx context.Context, authority *Authority) (TrustStatus, error) {
 	if authority == nil {
 		return TrustStatus{}, errors.New("traffic inspection authority is required")
 	}
-	output, err := s.runner.CombinedOutput(
-		ctx,
-		"/usr/bin/security",
-		"find-certificate", "-a", "-p", "-c", AuthorityCommonName, systemKeychainPath,
-	)
+	present, err := s.certificatePresent(ctx, authority)
 	if err != nil {
-		if exitCodeIs(err, 44) {
-			return TrustStatus{FingerprintSHA256: authority.FingerprintSHA256(), Store: systemKeychainPath}, nil
-		}
-		return TrustStatus{}, commandError("inspect macOS system certificate trust", err, output)
+		return TrustStatus{}, err
 	}
-	installed := containsCertificate(output, authority.certificate.Leaf.Raw)
-	if installed {
-		// Presence in System.keychain is not sufficient: add-trusted-cert can add
-		// the certificate before its separate trust-settings authorization fails.
-		certificatePath, cleanup, writeErr := writePublicCertificate(authority)
-		if writeErr != nil {
-			return TrustStatus{}, writeErr
-		}
-		defer func() { _ = cleanup() }()
-		_, verifyErr := s.runner.CombinedOutput(
-			ctx,
-			"/usr/bin/security",
-			"verify-cert", "-q", "-l", "-L", "-c", certificatePath,
-			"-k", systemKeychainPath,
-		)
-		if verifyErr != nil {
-			if ctxErr := ctx.Err(); ctxErr != nil {
-				return TrustStatus{}, ctxErr
-			}
-			installed = false
+	installed := false
+	if present {
+		installed, err = s.settings.Installed(authority)
+		if err != nil {
+			return TrustStatus{}, fmt.Errorf("inspect macOS certificate trust settings: %w", err)
 		}
 	}
 	return TrustStatus{
@@ -61,6 +51,21 @@ func (s *darwinTrustStore) Status(ctx context.Context, authority *Authority) (Tr
 		FingerprintSHA256: authority.FingerprintSHA256(),
 		Store:             systemKeychainPath,
 	}, nil
+}
+
+func (s *darwinTrustStore) certificatePresent(ctx context.Context, authority *Authority) (bool, error) {
+	output, err := s.runner.CombinedOutput(
+		ctx,
+		"/usr/bin/security",
+		"find-certificate", "-a", "-p", "-c", AuthorityCommonName, systemKeychainPath,
+	)
+	if err != nil {
+		if exitCodeIs(err, 44) {
+			return false, nil
+		}
+		return false, commandError("inspect macOS system certificate", err, output)
+	}
+	return containsCertificate(output, authority.certificate.Leaf.Raw), nil
 }
 
 func (s *darwinTrustStore) Install(ctx context.Context, authority *Authority) (returnErr error) {
@@ -71,30 +76,31 @@ func (s *darwinTrustStore) Install(ctx context.Context, authority *Authority) (r
 	if status.Installed {
 		return nil
 	}
-	certificatePath, cleanup, err := writePublicCertificate(authority)
+	present, err := s.certificatePresent(ctx, authority)
 	if err != nil {
 		return err
 	}
-	defer func() {
-		if cleanupErr := cleanup(); cleanupErr != nil && !errors.Is(cleanupErr, os.ErrNotExist) {
-			returnErr = errors.Join(returnErr, fmt.Errorf("remove temporary public certificate: %w", cleanupErr))
+	if !present {
+		certificatePath, cleanup, writeErr := writePublicCertificate(authority)
+		if writeErr != nil {
+			return writeErr
 		}
-	}()
-
-	arguments := []string{
-		"add-trusted-cert", "-d", "-r", "trustRoot",
-		"-k", systemKeychainPath, certificatePath,
+		defer func() {
+			if cleanupErr := cleanup(); cleanupErr != nil && !errors.Is(cleanupErr, os.ErrNotExist) {
+				returnErr = errors.Join(returnErr, fmt.Errorf("remove temporary public certificate: %w", cleanupErr))
+			}
+		}()
+		command := shellquote.Join(
+			"/usr/bin/security", "add-certificates", "-k", systemKeychainPath, certificatePath,
+		)
+		script := "do shell script " + strconv.Quote(command) + " with administrator privileges"
+		output, commandErr := s.runner.CombinedOutput(ctx, "/usr/bin/osascript", "-e", script)
+		if commandErr != nil {
+			return commandError("add macOS traffic inspection certificate", commandErr, output)
+		}
 	}
-	// Run security directly so SecurityAgent can present its own administrator
-	// authorization. Nesting this command inside an already elevated osascript
-	// prevents that second interaction on current macOS releases.
-	output, err := s.runner.CombinedOutput(ctx, "/usr/bin/security", arguments...)
-	if err != nil {
-		status, statusErr := s.Status(ctx, authority)
-		if statusErr == nil && status.Installed {
-			return nil
-		}
-		return commandError("install macOS traffic inspection certificate", err, output)
+	if err := s.settings.Install(authority); err != nil {
+		return fmt.Errorf("authorize macOS traffic inspection certificate trust: %w", err)
 	}
 	status, err = s.Status(ctx, authority)
 	if err != nil {
@@ -107,31 +113,42 @@ func (s *darwinTrustStore) Install(ctx context.Context, authority *Authority) (r
 }
 
 func (s *darwinTrustStore) Uninstall(ctx context.Context, authority *Authority) error {
-	status, err := s.Status(ctx, authority)
+	if authority == nil {
+		return errors.New("traffic inspection authority is required")
+	}
+	present, err := s.certificatePresent(ctx, authority)
 	if err != nil {
 		return err
 	}
-	if !status.Installed {
+	if !present {
 		return nil
 	}
-	arguments := []string{
-		"delete-certificate", "-Z", authority.FingerprintSHA256(),
-		"-t", systemKeychainPath,
-	}
-	output, err := s.runner.CombinedOutput(ctx, "/usr/bin/security", arguments...)
+	trusted, err := s.settings.Installed(authority)
 	if err != nil {
-		status, statusErr := s.Status(ctx, authority)
-		if statusErr == nil && !status.Installed {
+		return fmt.Errorf("inspect macOS certificate trust settings: %w", err)
+	}
+	if trusted {
+		if err := s.settings.Uninstall(authority); err != nil {
+			return fmt.Errorf("remove macOS traffic inspection certificate trust: %w", err)
+		}
+	}
+	for range maxDarwinCertificateRemovalAttempts {
+		command := shellquote.Join(
+			"/usr/bin/security", "delete-certificate", "-Z", authority.FingerprintSHA256(),
+			systemKeychainPath,
+		)
+		script := "do shell script " + strconv.Quote(command) + " with administrator privileges"
+		output, commandErr := s.runner.CombinedOutput(ctx, "/usr/bin/osascript", "-e", script)
+		if commandErr != nil {
+			return commandError("remove macOS traffic inspection certificate", commandErr, output)
+		}
+		present, err = s.certificatePresent(ctx, authority)
+		if err != nil {
+			return err
+		}
+		if !present {
 			return nil
 		}
-		return commandError("uninstall macOS traffic inspection certificate", err, output)
 	}
-	status, err = s.Status(ctx, authority)
-	if err != nil {
-		return err
-	}
-	if status.Installed {
-		return errors.New("macOS traffic inspection certificate is still installed")
-	}
-	return nil
+	return errors.New("macOS traffic inspection certificate is still installed after repeated removal")
 }
