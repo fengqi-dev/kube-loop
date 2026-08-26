@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestLoadOrCreateAuthority_ReusesDeviceIdentity(t *testing.T) {
@@ -58,6 +59,29 @@ func TestLoadOrCreateAuthority_ReusesDeviceIdentity(t *testing.T) {
 		if info.Mode().Perm() != 0o600 {
 			t.Fatalf("authority permissions = %04o, want 0600", info.Mode().Perm())
 		}
+	}
+}
+
+func TestLoadPublicAuthority_AcceptsOnlyPublicCertificate(t *testing.T) {
+	t.Parallel()
+	generated, err := generateAuthority(time.Now())
+	if err != nil {
+		t.Fatalf("generate authority: %v", err)
+	}
+	certificateBlock, _ := pem.Decode(generated)
+	publicPEM := pem.EncodeToMemory(certificateBlock)
+	path := filepath.Join(t.TempDir(), "public-ca.pem")
+	if err := os.WriteFile(path, publicPEM, 0o600); err != nil {
+		t.Fatalf("write public authority: %v", err)
+	}
+	authority, err := loadPublicAuthority(path, time.Now())
+	if err != nil {
+		t.Fatalf("load public authority: %v", err)
+	}
+	if authority.certificate.PrivateKey != nil ||
+		authority.FingerprintSHA256() == "" ||
+		strings.Contains(string(authority.PublicCertificatePEM()), "PRIVATE KEY") {
+		t.Fatalf("loaded public authority contains unexpected material: %#v", authority)
 	}
 }
 

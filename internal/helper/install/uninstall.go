@@ -13,10 +13,15 @@ func Uninstall(ctx context.Context) error {
 
 // UninstallWithCertificate removes the macOS helper and an optional system
 // trust certificate in one elevated operation. Other platforms use Uninstall.
-func UninstallWithCertificate(ctx context.Context, fingerprint string) error {
+func UninstallWithCertificate(ctx context.Context, certificatePEM []byte) error {
 	source, err := LocateBundledHelper()
 	if err != nil {
 		return err
 	}
-	return ElevateUninstallWithCertificate(ctx, source, fingerprint)
+	certificatePath, cleanup, err := writeTemporaryPublicCertificate(certificatePEM)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	return ElevateUninstallWithCertificate(ctx, source, certificatePath)
 }

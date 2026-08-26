@@ -51,8 +51,27 @@ func ElevateUninstall(ctx context.Context, source string) error {
 	return ElevateUninstallWithCertificate(ctx, source, "")
 }
 
-func ElevateUninstallWithCertificate(ctx context.Context, source, fingerprint string) error {
-	command := darwinUninstallCommand(source, fingerprint)
+func ElevateTrustCertificate(ctx context.Context, source, certificatePath string) error {
+	command := darwinTrustCertificateCommand(source, certificatePath)
+	script := "do shell script " + strconv.Quote(command) +
+		" with administrator privileges"
+	output, err := exec.CommandContext(ctx, "osascript", "-e", script).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("install certificate trust: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+	return nil
+}
+
+func darwinTrustCertificateCommand(source, certificatePath string) string {
+	return shellquote.Join(
+		source, darwinTrustCertificateCommandName,
+		"--operation", "install",
+		"--certificate", certificatePath,
+	)
+}
+
+func ElevateUninstallWithCertificate(ctx context.Context, source, certificatePath string) error {
+	command := darwinUninstallCommand(source, certificatePath)
 	script := "do shell script " + strconv.Quote(command) +
 		" with administrator privileges"
 	cmd := exec.CommandContext(ctx, "osascript", "-e", script)
@@ -63,12 +82,13 @@ func ElevateUninstallWithCertificate(ctx context.Context, source, fingerprint st
 	return nil
 }
 
-func darwinUninstallCommand(source, fingerprint string) string {
+func darwinUninstallCommand(source, certificatePath string) string {
 	commands := make([]string, 0, 2)
-	if fingerprint = strings.TrimSpace(fingerprint); fingerprint != "" {
+	if certificatePath = strings.TrimSpace(certificatePath); certificatePath != "" {
 		commands = append(commands, shellquote.Join(
-			"/usr/bin/security", "delete-certificate", "-Z", fingerprint,
-			"-t", "/Library/Keychains/System.keychain",
+			source, darwinTrustCertificateCommandName,
+			"--operation", "uninstall",
+			"--certificate", certificatePath,
 		))
 	}
 	commands = append(commands, shellquote.Join(source, "uninstall"))

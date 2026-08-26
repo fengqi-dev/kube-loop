@@ -151,6 +151,44 @@ func loadAuthority(path string, now time.Time) (*Authority, error) {
 	}, nil
 }
 
+func loadPublicAuthority(path string, now time.Time) (*Authority, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return nil, fmt.Errorf("inspect public traffic inspection certificate: %w", err)
+	}
+	if !info.Mode().IsRegular() || info.Size() <= 0 || info.Size() > maximumAuthoritySize {
+		return nil, errors.New("public traffic inspection certificate file is invalid")
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read public traffic inspection certificate: %w", err)
+	}
+	block, trailing := pem.Decode(content)
+	if block == nil || block.Type != pemCertificateType || len(bytes.TrimSpace(trailing)) != 0 {
+		return nil, errors.New("public traffic inspection certificate PEM is invalid")
+	}
+	leaf, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("parse public traffic inspection certificate: %w", err)
+	}
+	if leaf.Subject.CommonName != AuthorityCommonName || !leaf.IsCA || leaf.KeyUsage&x509.KeyUsageCertSign == 0 {
+		return nil, errors.New("traffic inspection authority certificate constraints are invalid")
+	}
+	if err := leaf.CheckSignatureFrom(leaf); err != nil {
+		return nil, fmt.Errorf("verify traffic inspection authority self-signature: %w", err)
+	}
+	if now.Before(leaf.NotBefore) || !now.Before(leaf.NotAfter) {
+		return nil, errors.New("traffic inspection authority certificate is not currently valid")
+	}
+	certificatePEM := pem.EncodeToMemory(block)
+	fingerprint := sha256.Sum256(leaf.Raw)
+	return &Authority{
+		certificate:    tls.Certificate{Certificate: [][]byte{leaf.Raw}, Leaf: leaf},
+		certificatePEM: certificatePEM,
+		fingerprint:    fmt.Sprintf("%X", fingerprint[:]),
+	}, nil
+}
+
 func generateAuthority(now time.Time) ([]byte, error) {
 	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {

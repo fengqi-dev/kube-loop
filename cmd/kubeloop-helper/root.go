@@ -17,10 +17,11 @@ const (
 )
 
 type commandDependencies struct {
-	install   func(installOptions) error
-	uninstall func() error
-	run       func(context.Context) error
-	elevated  func(elevatedOptions) error
+	install          func(installOptions) error
+	uninstall        func() error
+	run              func(context.Context) error
+	elevated         func(elevatedOptions) error
+	trustCertificate func(context.Context, trustCertificateOptions) error
 }
 
 type usageError struct {
@@ -72,6 +73,7 @@ func newRootCommand(dependencies commandDependencies, commandVersion string) *co
 		newUninstallCommand(dependencies),
 		newRunCommand(dependencies),
 		newElevatedCommand(dependencies),
+		newTrustCertificateCommand(dependencies),
 		newVersionCommand(commandVersion),
 		newIdentityCommand(commandVersion),
 	)

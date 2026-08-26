@@ -12,15 +12,17 @@ import (
 	"github.com/kballard/go-shellquote"
 )
 
+const darwinTrustCertificateCommandName = "trust-certificate"
+
 func ElevateSupervisorInstall(
 	ctx context.Context,
 	supervisorSource, supervisorSHA, workerSource, workerSHA, workerVersion, channel, token string,
 	uid int,
-	home, singBox string,
+	home, singBox, certificatePath string,
 ) error {
 	command := darwinSupervisorInstallCommand(
 		supervisorSource, supervisorSHA, workerSource, workerSHA,
-		workerVersion, channel, token, uid, home, singBox,
+		workerVersion, channel, token, uid, home, singBox, certificatePath,
 	)
 	script := "do shell script " + strconv.Quote(command) + " with administrator privileges"
 	output, err := exec.CommandContext(ctx, "osascript", "-e", script).CombinedOutput()
@@ -33,7 +35,7 @@ func ElevateSupervisorInstall(
 func darwinSupervisorInstallCommand(
 	supervisorSource, supervisorSHA, workerSource, workerSHA, workerVersion, channel, token string,
 	uid int,
-	home, singBox string,
+	home, singBox, certificatePath string,
 ) string {
 	command := `set -eu
 workdir="$(mktemp -d "${TMPDIR:-/private/tmp}/kubeloop-supervisor.XXXXXX")"
@@ -58,5 +60,13 @@ worker_actual="$(/usr/bin/shasum -a 256 "$worker")"; worker_actual="${worker_act
 		` --uid ` + shellquote.Join(strconv.Itoa(uid)) +
 		` --home ` + shellquote.Join(home) +
 		` --sing-box ` + shellquote.Join(singBox)
+	if certificatePath != "" {
+		command += `
+"$worker" ` + shellquote.Join(
+			darwinTrustCertificateCommandName,
+			"--operation", "install",
+			"--certificate", certificatePath,
+		)
+	}
 	return command
 }

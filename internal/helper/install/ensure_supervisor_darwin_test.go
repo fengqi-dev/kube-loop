@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	supervisorprotocol "github.com/fengqi-dev/kube-loop/internal/protocol/supervisor"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/supervisor"
 )
 
 func TestInstalledCoreMatches(t *testing.T) {
@@ -51,34 +51,34 @@ func TestInstalledCoreMatches(t *testing.T) {
 
 func TestCanUpdateWorkerThroughSupervisor(t *testing.T) {
 	t.Parallel()
-	healthy := supervisorprotocol.Response{
-		Protocol: supervisorprotocol.Version,
+	healthy := supervisor.Response{
+		Protocol: supervisor.Version,
 		Channel:  "dev",
-		Worker: supervisorprotocol.WorkerStatus{
+		Worker: supervisor.WorkerStatus{
 			Installed: true,
 			Running:   true,
 		},
 	}
 	tests := []struct {
 		name      string
-		status    supervisorprotocol.Response
+		status    supervisor.Response
 		statusErr error
 		want      bool
 	}{
 		{name: "healthy installed worker", status: healthy, want: true},
 		{
 			name: "worker removed by uninstall",
-			status: supervisorprotocol.Response{
-				Protocol: supervisorprotocol.Version,
+			status: supervisor.Response{
+				Protocol: supervisor.Version,
 				Channel:  "dev",
 			},
 		},
 		{
 			name: "worker is not reachable",
-			status: supervisorprotocol.Response{
-				Protocol: supervisorprotocol.Version,
+			status: supervisor.Response{
+				Protocol: supervisor.Version,
 				Channel:  "dev",
-				Worker: supervisorprotocol.WorkerStatus{
+				Worker: supervisor.WorkerStatus{
 					Installed: true,
 				},
 			},
@@ -86,16 +86,16 @@ func TestCanUpdateWorkerThroughSupervisor(t *testing.T) {
 		{name: "supervisor status failed", status: healthy, statusErr: errors.New("status failed")},
 		{
 			name: "supervisor protocol mismatch",
-			status: supervisorprotocol.Response{
-				Protocol: supervisorprotocol.Version + 1,
+			status: supervisor.Response{
+				Protocol: supervisor.Version + 1,
 				Channel:  "dev",
 				Worker:   healthy.Worker,
 			},
 		},
 		{
 			name: "supervisor channel mismatch",
-			status: supervisorprotocol.Response{
-				Protocol: supervisorprotocol.Version,
+			status: supervisor.Response{
+				Protocol: supervisor.Version,
 				Channel:  "release",
 				Worker:   healthy.Worker,
 			},

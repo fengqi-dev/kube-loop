@@ -13,7 +13,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/componentstore"
 	"github.com/fengqi-dev/kube-loop/internal/helper"
 	helperspec "github.com/fengqi-dev/kube-loop/internal/protocol/helper"
-	supervisorprotocol "github.com/fengqi-dev/kube-loop/internal/protocol/supervisor"
+	supervisorproto "github.com/fengqi-dev/kube-loop/internal/protocol/supervisor"
 	"github.com/fengqi-dev/kube-loop/internal/supervisor"
 )
 
@@ -24,7 +24,7 @@ func installCurrentHelper(
 	source, sourceSHA256, token string,
 	uid int,
 	home, singBox string,
-	_ []byte,
+	certificatePEM []byte,
 ) error {
 	config := supervisor.CurrentConfig()
 	supervisorSource, err := LocateBundledSupervisor()
@@ -52,27 +52,57 @@ func installCurrentHelper(
 		canUpdateWorkerThroughSupervisor(status, statusErr, config.Channel, installedSupervisorSHA, supervisorSHA) {
 		if status.Worker.SHA256 == sourceSHA256 && status.Worker.Version == helper.Version &&
 			status.Worker.Protocol == helperspec.Version && status.Worker.CoreReady {
-			return nil
+			return installCertificateFromSource(ctx, source, certificatePEM)
 		}
 		info, err := os.Stat(source)
 		if err != nil {
 			return fmt.Errorf("stat bundled worker: %w", err)
 		}
-		manifest := supervisorprotocol.UpdateManifest{
-			SchemaVersion: supervisorprotocol.SchemaVersion,
+		manifest := supervisorproto.UpdateManifest{
+			SchemaVersion: supervisorproto.SchemaVersion,
 			RequestID:     uuid.NewString(), Channel: config.Channel,
 			Version: helper.Version, WorkerProtocol: helperspec.Version,
-			MinimumSupervisorProtocol: supervisorprotocol.Version,
+			MinimumSupervisorProtocol: supervisorproto.Version,
 			Size:                      info.Size(), SHA256: sourceSHA256,
 		}
-		_, err = client.UpdateWorker(ctx, manifest, source)
-		return err
+		if _, err = client.UpdateWorker(ctx, manifest, source); err != nil {
+			return err
+		}
+		return installCertificateFromSource(ctx, source, certificatePEM)
 	}
 
+	certificatePath, cleanup, err := writeTemporaryPublicCertificate(certificatePEM)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
 	return ElevateSupervisorInstall(
 		ctx, supervisorSource, supervisorSHA, source, sourceSHA256, helper.Version, config.Channel,
-		token, uid, home, singBox,
+		token, uid, home, singBox, certificatePath,
 	)
+}
+
+func installCertificateWithoutServiceChange(ctx context.Context, certificatePEM []byte) error {
+	if len(certificatePEM) == 0 {
+		return nil
+	}
+	source, err := LocateBundledHelper()
+	if err != nil {
+		return err
+	}
+	return installCertificateFromSource(ctx, source, certificatePEM)
+}
+
+func installCertificateFromSource(ctx context.Context, source string, certificatePEM []byte) error {
+	certificatePath, cleanup, err := writeTemporaryPublicCertificate(certificatePEM)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	if certificatePath == "" {
+		return nil
+	}
+	return ElevateTrustCertificate(ctx, source, certificatePath)
 }
 
 func installedCoreMatches(source, installed string) bool {
@@ -83,14 +113,14 @@ func installedCoreMatches(source, installed string) bool {
 }
 
 func canUpdateWorkerThroughSupervisor(
-	status supervisorprotocol.Response,
+	status supervisorproto.Response,
 	statusErr error,
 	channel string,
 	installedSupervisorSHA string,
 	bundledSupervisorSHA string,
 ) bool {
 	return statusErr == nil &&
-		status.Protocol == supervisorprotocol.Version &&
+		status.Protocol == supervisorproto.Version &&
 		status.Channel == channel &&
 		installedSupervisorSHA == bundledSupervisorSHA &&
 		status.Worker.Installed &&

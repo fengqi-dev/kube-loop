@@ -47,7 +47,7 @@ func ensureInstall(ctx context.Context, requireCurrentBinary bool, certificatePE
 		return err
 	}
 	if !decision.required {
-		return nil
+		return installCertificateWithoutServiceChange(ctx, certificatePEM)
 	}
 	artifacts, err := prepareHelperInstall(decision.source)
 	if err != nil {
