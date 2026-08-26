@@ -80,17 +80,15 @@ func (forwarder *Forwarder) acceptLoop() {
 			continue
 		}
 		forwarder.locals[connection] = struct{}{}
-		forwarder.wg.Add(1)
 		forwarder.mu.Unlock()
-		go func() {
-			defer forwarder.wg.Done()
+		forwarder.wg.Go(func() {
 			defer func() {
 				forwarder.mu.Lock()
+				defer forwarder.mu.Unlock()
 				delete(forwarder.locals, connection)
-				forwarder.mu.Unlock()
 			}()
 			forwarder.forward(connection)
-		}()
+		})
 	}
 }
 

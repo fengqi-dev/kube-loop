@@ -30,7 +30,8 @@ func (manager *Manager) launchPrepared(
 	manager.mu.Unlock()
 	manager.persistMu.Unlock()
 	manager.onEvent(task)
-	manager.wg.Add(1)
-	go manager.run(ctx, task.ID, entry)
+	manager.wg.Go(func() {
+		manager.run(ctx, task.ID, entry)
+	})
 	return nil
 }

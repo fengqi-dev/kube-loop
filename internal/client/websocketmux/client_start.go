@@ -102,7 +102,6 @@ func Start(ctx context.Context, config ClientConfig) (*Forwarder, error) {
 			return nil, net.ErrClosed
 		}
 	}
-	forwarder.wg.Add(1)
-	go forwarder.acceptLoop()
+	forwarder.wg.Go(forwarder.acceptLoop)
 	return forwarder, nil
 }

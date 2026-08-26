@@ -16,28 +16,24 @@ func (relay *localRelay) createActor(
 		return nil, errors.New("gateway requested an unconfigured local Mirror target")
 	}
 	relay.mu.Lock()
+	defer relay.mu.Unlock()
 	if relay.streams[id] != nil {
-		relay.mu.Unlock()
 		return nil, errors.New("gateway reused an active Mirror stream ID")
 	}
 	if _, wasDropped := relay.dropped[id]; wasDropped {
-		relay.mu.Unlock()
 		return nil, errors.New("gateway reused an active Mirror stream ID")
 	}
 	actor := newShadowActor(ctx, target, relay.dial, relay.config)
 	relay.streams[id] = actor
-	relay.wg.Add(1)
-	relay.mu.Unlock()
-	go func() {
-		defer relay.wg.Done()
+	relay.wg.Go(func() {
 		<-actor.done
 		relay.mu.Lock()
+		defer relay.mu.Unlock()
 		if relay.streams[id] == actor {
 			delete(relay.streams, id)
 			relay.markDroppedLocked(id)
 		}
-		relay.mu.Unlock()
-	}()
+	})
 	return actor, nil
 }
 
