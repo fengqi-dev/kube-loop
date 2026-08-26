@@ -17,7 +17,7 @@ import (
 	"runtime"
 	"strings"
 
-	supervisorprotocol "github.com/fengqi-dev/kube-loop/internal/protocol/supervisor"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/supervisor"
 )
 
 func main() {
@@ -55,7 +55,7 @@ func main() {
 			pkg     string
 			name    string
 			version string
-		}{pkg: "./cmd/kubeloop-supervisor", name: "kubeloop-supervisor", version: supervisorprotocol.BinaryVersion})
+		}{pkg: "./cmd/kubeloop-supervisor", name: "kubeloop-supervisor", version: supervisor.BinaryVersion})
 	}
 
 	embeddedDir := filepath.Join(root, "build", "embedded")
@@ -81,8 +81,14 @@ func main() {
 		}
 		cmd := exec.Command("go", args...)
 		cmd.Dir = root
+		cgoEnabled := "0"
+		if goos == "darwin" && target.name == "kubeloop-helper" {
+			// The macOS helper performs system trust changes from the same root
+			// process that installs the service. Security.framework requires cgo.
+			cgoEnabled = "1"
+		}
 		cmd.Env = setEnvironment(os.Environ(), map[string]string{
-			"CGO_ENABLED": "0",
+			"CGO_ENABLED": cgoEnabled,
 			"GOOS":        goos,
 			"GOARCH":      goarch,
 		})

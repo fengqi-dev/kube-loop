@@ -8,7 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficmodel"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/entity"
 )
 
 const (
@@ -40,10 +40,10 @@ type ClaimRequest struct {
 }
 
 type ClaimResponse struct {
-	Mode    Mode                `json:"mode"`
-	TaskID  string              `json:"taskId"`
-	Service string              `json:"service"`
-	Ports   []trafficmodel.Port `json:"ports"`
+	Mode    Mode          `json:"mode"`
+	TaskID  string        `json:"taskId"`
+	Service string        `json:"service"`
+	Ports   []entity.Port `json:"ports"`
 }
 
 type ListenerPort struct {

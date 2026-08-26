@@ -12,7 +12,7 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"github.com/fengqi-dev/kube-loop/internal/protocol/wssprotocol"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/wss"
 )
 
 func Start(ctx context.Context, config ClientConfig) (*Forwarder, error) {
@@ -32,16 +32,16 @@ func Start(ctx context.Context, config ClientConfig) (*Forwarder, error) {
 	}
 	config.DeviceID = strings.TrimSpace(config.DeviceID)
 	if len(config.SupportedVersions) == 0 {
-		config.SupportedVersions = []string{wssprotocol.Version}
+		config.SupportedVersions = []string{wss.Version}
 	} else {
 		config.SupportedVersions = append([]string(nil), config.SupportedVersions...)
 	}
 	if config.HandshakeTimeout <= 0 {
-		config.HandshakeTimeout = wssprotocol.DefaultHandshakeTimeout
+		config.HandshakeTimeout = wss.DefaultHandshakeTimeout
 	}
-	hello := wssprotocol.NewClientHello(config.ClientVersion, config.DeviceID)
+	hello := wss.NewClientHello(config.ClientVersion, config.DeviceID)
 	hello.ProtocolVersions = config.SupportedVersions
-	if _, err := wssprotocol.Encode(hello); err != nil {
+	if _, err := wss.Encode(hello); err != nil {
 		return nil, errors.New("gateway WSS client identity or protocol configuration is invalid")
 	}
 	if config.HandshakeTimeout > time.Minute {

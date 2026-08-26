@@ -21,6 +21,7 @@ import (
 
 	"github.com/fengqi-dev/kube-loop/e2e/harness"
 	clientapp "github.com/fengqi-dev/kube-loop/internal/app"
+	"github.com/fengqi-dev/kube-loop/internal/auth/relaybearer"
 	clientdataplane "github.com/fengqi-dev/kube-loop/internal/client/dataplane"
 	"github.com/fengqi-dev/kube-loop/internal/client/powerwatch"
 	clientprofile "github.com/fengqi-dev/kube-loop/internal/client/profile"
@@ -205,11 +206,11 @@ func startGateway(
 	if err != nil {
 		t.Fatal(err)
 	}
-	replay, err := relayticket.NewReplayGuard(128, nil)
+	replay, err := relaybearer.NewReplayGuard(128, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	requestVerifier, err := relayticket.NewRequestVerifier(verifier, replay)
+	requestVerifier, err := relaybearer.NewRequestVerifier(verifier, replay)
 	if err != nil {
 		t.Fatal(err)
 	}

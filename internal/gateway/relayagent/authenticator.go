@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/fengqi-dev/kube-loop/internal/auth/relaybearer"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/relaycontrol"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/relayticket"
 )
@@ -21,7 +22,7 @@ type TicketAuthenticatorConfig struct {
 type TicketAuthenticator struct {
 	mu                   sync.RWMutex
 	config               TicketAuthenticatorConfig
-	requestVerifier      *relayticket.RequestVerifier
+	requestVerifier      *relaybearer.RequestVerifier
 	relayID              string
 	issuer               string
 	keyGeneration        uint64
@@ -36,7 +37,7 @@ func NewTicketAuthenticator(config TicketAuthenticatorConfig) (*TicketAuthentica
 	if config.RequiredOperation == "" {
 		return nil, errors.New("dynamic RelayTicket authenticator configuration is invalid")
 	}
-	if _, err := relayticket.NewReplayGuard(config.ReplayEntries, config.Now); err != nil {
+	if _, err := relaybearer.NewReplayGuard(config.ReplayEntries, config.Now); err != nil {
 		return nil, err
 	}
 	return &TicketAuthenticator{config: config}, nil
@@ -74,7 +75,7 @@ func (authenticator *TicketAuthenticator) Apply(
 		return err
 	}
 	revocationSnapshot := revocations
-	checker := relayticket.RevocationChecker(func(claims relayticket.Claims, checkedAt time.Time) bool {
+	checker := relaybearer.RevocationChecker(func(claims relayticket.Claims, checkedAt time.Time) bool {
 		if revocationSnapshot.Generation > 0 && !revocationSnapshot.ValidUntil.After(checkedAt) {
 			return true
 		}
@@ -93,11 +94,11 @@ func (authenticator *TicketAuthenticator) Apply(
 		return errors.New("relay control generation moved backwards")
 	}
 	if authenticator.requestVerifier == nil {
-		replay, err := relayticket.NewReplayGuard(authenticator.config.ReplayEntries, authenticator.config.Now)
+		replay, err := relaybearer.NewReplayGuard(authenticator.config.ReplayEntries, authenticator.config.Now)
 		if err != nil {
 			return err
 		}
-		requestVerifier, err := relayticket.NewRequestVerifier(verifier, replay)
+		requestVerifier, err := relaybearer.NewRequestVerifier(verifier, replay)
 		if err != nil {
 			return err
 		}

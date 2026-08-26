@@ -10,10 +10,10 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/entity"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/remotetask"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficcontrol"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficmodel"
 )
 
 func TestPreviewTrafficControlLifecycle(t *testing.T) {
@@ -23,7 +23,7 @@ func TestPreviewTrafficControlLifecycle(t *testing.T) {
 	taskID := uuid.NewString()
 	specJSON, err := json.Marshal(storedSpec{
 		Name:  "local-api",
-		Ports: []trafficmodel.Port{{Name: "http", ServicePort: 80, Protocol: "tcp"}},
+		Ports: []entity.Port{{Name: "http", ServicePort: 80, Protocol: "tcp"}},
 	})
 	if err != nil {
 		t.Fatal(err)

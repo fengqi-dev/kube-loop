@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"time"
 
-	supervisorprotocol "github.com/fengqi-dev/kube-loop/internal/protocol/supervisor"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/supervisor"
 )
 
 func (u *Updater) Recover(ctx context.Context) error {
@@ -49,7 +49,7 @@ func (u *Updater) Recover(ctx context.Context) error {
 func (u *Updater) activate(
 	ctx context.Context,
 	staged string,
-	manifest supervisorprotocol.UpdateManifest,
+	manifest supervisor.UpdateManifest,
 ) (bool, error) {
 	if err := u.worker.Stop(ctx); err != nil {
 		return false, err
@@ -89,7 +89,7 @@ func (u *Updater) activate(
 	return false, nil
 }
 
-func (u *Updater) waitReady(ctx context.Context, manifest supervisorprotocol.UpdateManifest) error {
+func (u *Updater) waitReady(ctx context.Context, manifest supervisor.UpdateManifest) error {
 	waitCtx, cancel := context.WithTimeout(ctx, u.readyTimeout)
 	defer cancel()
 	var lastErr error
@@ -166,10 +166,10 @@ func (u *Updater) waitAnyReady(ctx context.Context) error {
 	}
 }
 
-func (u *Updater) Rollback(ctx context.Context) supervisorprotocol.Response {
+func (u *Updater) Rollback(ctx context.Context) supervisor.Response {
 	u.mu.Lock()
 	defer u.mu.Unlock()
-	response := supervisorprotocol.Response{Protocol: supervisorprotocol.Version, Channel: u.config.Channel}
+	response := supervisor.Response{Protocol: supervisor.Version, Channel: u.config.Channel}
 	if !fileExists(u.config.PreviousPath()) {
 		response.Error = "no previous worker is available"
 		return response
@@ -185,10 +185,10 @@ func (u *Updater) Rollback(ctx context.Context) supervisorprotocol.Response {
 	return response
 }
 
-func (u *Updater) Restart(ctx context.Context) supervisorprotocol.Response {
+func (u *Updater) Restart(ctx context.Context) supervisor.Response {
 	u.mu.Lock()
 	defer u.mu.Unlock()
-	response := supervisorprotocol.Response{Protocol: supervisorprotocol.Version, Channel: u.config.Channel}
+	response := supervisor.Response{Protocol: supervisor.Version, Channel: u.config.Channel}
 	if err := u.worker.Stop(ctx); err != nil {
 		response.Error = err.Error()
 		return response

@@ -10,7 +10,7 @@ import (
 	"os"
 	"time"
 
-	supervisorprotocol "github.com/fengqi-dev/kube-loop/internal/protocol/supervisor"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/supervisor"
 )
 
 type Client struct {
@@ -19,44 +19,44 @@ type Client struct {
 	Dial   func(context.Context, string) (*net.UnixConn, error)
 }
 
-func (c *Client) Status(ctx context.Context) (supervisorprotocol.Response, error) {
-	return c.roundTrip(ctx, supervisorprotocol.Request{
-		Protocol: supervisorprotocol.Version,
-		Op:       supervisorprotocol.OpStatus,
+func (c *Client) Status(ctx context.Context) (supervisor.Response, error) {
+	return c.roundTrip(ctx, supervisor.Request{
+		Protocol: supervisor.Version,
+		Op:       supervisor.OpStatus,
 	}, nil)
 }
 
-func (c *Client) RestartWorker(ctx context.Context) (supervisorprotocol.Response, error) {
-	return c.roundTrip(ctx, supervisorprotocol.Request{
-		Protocol: supervisorprotocol.Version,
-		Op:       supervisorprotocol.OpRestartWorker,
+func (c *Client) RestartWorker(ctx context.Context) (supervisor.Response, error) {
+	return c.roundTrip(ctx, supervisor.Request{
+		Protocol: supervisor.Version,
+		Op:       supervisor.OpRestartWorker,
 	}, nil)
 }
 
 func (c *Client) UpdateWorker(
 	ctx context.Context,
-	manifest supervisorprotocol.UpdateManifest,
+	manifest supervisor.UpdateManifest,
 	source string,
-) (supervisorprotocol.Response, error) {
+) (supervisor.Response, error) {
 	file, err := os.Open(source)
 	if err != nil {
-		return supervisorprotocol.Response{}, fmt.Errorf("open worker update: %w", err)
+		return supervisor.Response{}, fmt.Errorf("open worker update: %w", err)
 	}
 	defer func() { _ = file.Close() }()
-	return c.roundTrip(ctx, supervisorprotocol.Request{
-		Protocol: supervisorprotocol.Version,
-		Op:       supervisorprotocol.OpUpdateWorker,
+	return c.roundTrip(ctx, supervisor.Request{
+		Protocol: supervisor.Version,
+		Op:       supervisor.OpUpdateWorker,
 		Manifest: &manifest,
 	}, file)
 }
 
 func (c *Client) roundTrip(
 	ctx context.Context,
-	request supervisorprotocol.Request,
+	request supervisor.Request,
 	body io.Reader,
-) (supervisorprotocol.Response, error) {
+) (supervisor.Response, error) {
 	if c.Token == "" {
-		return supervisorprotocol.Response{}, fmt.Errorf("supervisor token is required")
+		return supervisor.Response{}, fmt.Errorf("supervisor token is required")
 	}
 	request.Token = c.Token
 	dial := c.Dial
@@ -77,7 +77,7 @@ func (c *Client) roundTrip(
 	}
 	connection, err := dial(ctx, c.Config.SocketPath)
 	if err != nil {
-		return supervisorprotocol.Response{}, fmt.Errorf("connect supervisor: %w", err)
+		return supervisor.Response{}, fmt.Errorf("connect supervisor: %w", err)
 	}
 	defer func() { _ = connection.Close() }()
 	deadline := time.Now().Add(3 * time.Minute)
@@ -85,36 +85,36 @@ func (c *Client) roundTrip(
 		deadline = value
 	}
 	_ = connection.SetDeadline(deadline)
-	if err := supervisorprotocol.WriteFrame(connection, request, supervisorprotocol.MaxRequestBytes); err != nil {
-		return supervisorprotocol.Response{}, fmt.Errorf("write supervisor request: %w", err)
+	if err := supervisor.WriteFrame(connection, request, supervisor.MaxRequestBytes); err != nil {
+		return supervisor.Response{}, fmt.Errorf("write supervisor request: %w", err)
 	}
 	if body != nil {
 		if _, err := io.Copy(connection, body); err != nil {
 			if response, responseErr := readSupervisorResponse(connection); responseErr == nil && !response.OK {
 				return response, supervisorResponseError(response)
 			}
-			return supervisorprotocol.Response{}, fmt.Errorf("write worker payload: %w", err)
+			return supervisor.Response{}, fmt.Errorf("write worker payload: %w", err)
 		}
 	}
 	if err := connection.CloseWrite(); err != nil {
-		return supervisorprotocol.Response{}, fmt.Errorf("finish supervisor request: %w", err)
+		return supervisor.Response{}, fmt.Errorf("finish supervisor request: %w", err)
 	}
 	response, err := readSupervisorResponse(connection)
 	if err != nil {
-		return supervisorprotocol.Response{}, fmt.Errorf("read supervisor response: %w", err)
+		return supervisor.Response{}, fmt.Errorf("read supervisor response: %w", err)
 	}
 	return response, supervisorResponseError(response)
 }
 
-func readSupervisorResponse(connection io.Reader) (supervisorprotocol.Response, error) {
-	var response supervisorprotocol.Response
-	if err := supervisorprotocol.ReadFrame(connection, &response, supervisorprotocol.MaxResponseBytes); err != nil {
-		return supervisorprotocol.Response{}, err
+func readSupervisorResponse(connection io.Reader) (supervisor.Response, error) {
+	var response supervisor.Response
+	if err := supervisor.ReadFrame(connection, &response, supervisor.MaxResponseBytes); err != nil {
+		return supervisor.Response{}, err
 	}
 	return response, nil
 }
 
-func supervisorResponseError(response supervisorprotocol.Response) error {
+func supervisorResponseError(response supervisor.Response) error {
 	if !response.OK {
 		if response.Error == "" {
 			response.Error = "supervisor request failed"

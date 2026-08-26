@@ -6,8 +6,8 @@ import (
 	"strings"
 
 	"github.com/fengqi-dev/kube-loop/internal/client/traffic"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficstream"
 	"github.com/fengqi-dev/kube-loop/internal/singbox"
+	"github.com/fengqi-dev/kube-loop/internal/transport/trafficstream"
 )
 
 func (manager *Manager) Status(profileID string) (Status, error) {

@@ -8,10 +8,10 @@ import (
 	"strings"
 
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/entity"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/servicebinding"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/remotetask"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficcontrol"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficmodel"
 )
 
 func (handler *Service) Claim(
@@ -48,7 +48,7 @@ func (handler *Service) Claim(
 	}
 	return trafficcontrol.ClaimResponse{
 		Mode: trafficcontrol.ModeMirror, TaskID: task.ID, Service: spec.Service,
-		Ports: append([]trafficmodel.Port(nil), spec.Ports...),
+		Ports: append([]entity.Port(nil), spec.Ports...),
 	}, nil
 }
 

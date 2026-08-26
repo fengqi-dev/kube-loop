@@ -21,8 +21,8 @@ import (
 	"github.com/xtaci/smux"
 
 	shared "github.com/fengqi-dev/kube-loop/internal/client/websocketmux"
-	protocolmux "github.com/fengqi-dev/kube-loop/internal/protocol/websocketmux"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/wssprotocol"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/wss"
+	protocolmux "github.com/fengqi-dev/kube-loop/internal/transport/websocketmux"
 )
 
 const testDeviceID = "22222222-2222-4222-8222-222222222222"
@@ -420,11 +420,11 @@ func rawClientSession(t *testing.T, ctx context.Context, serverURL, token string
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := wssprotocol.Write(ctx, connection, wssprotocol.NewClientHello("test", testDeviceID)); err != nil {
+	if err := wss.Write(ctx, connection, wss.NewClientHello("test", testDeviceID)); err != nil {
 		_ = connection.Close()
 		t.Fatal(err)
 	}
-	message, err := wssprotocol.Read(ctx, connection)
+	message, err := wss.Read(ctx, connection)
 	if err != nil || message.ServerHello == nil {
 		_ = connection.Close()
 		t.Fatalf("WSS handshake = %#v, %v", message, err)
@@ -642,12 +642,12 @@ func TestWSSHandshakeReturnsTypedVersionAndClientVersionRejections(t *testing.T)
 		wantCode string
 	}{
 		{
-			name: "protocol", wantCode: wssprotocol.CodeVersionMismatch,
+			name: "protocol", wantCode: wss.CodeVersionMismatch,
 			config: ClientConfig{URL: endpoint, Token: "token", DeviceID: testDeviceID, PoolSize: 1,
 				SupportedVersions: []string{"9.0"}},
 		},
 		{
-			name: "client version", wantCode: wssprotocol.CodeClientVersionUnsupported,
+			name: "client version", wantCode: wss.CodeClientVersionUnsupported,
 			config: ClientConfig{URL: endpoint, Token: "token", DeviceID: testDeviceID, PoolSize: 1,
 				ClientVersion: "2.0.0"},
 		},
@@ -663,8 +663,8 @@ func TestWSSHandshakeReturnsTypedVersionAndClientVersionRejections(t *testing.T)
 			if !errors.As(startErr, &handshakeErr) || handshakeErr.Code != test.wantCode {
 				t.Fatalf("handshake error = %#v, %v", handshakeErr, startErr)
 			}
-			if test.wantCode == wssprotocol.CodeVersionMismatch &&
-				!slices.Equal(handshakeErr.SupportedVersions, []string{wssprotocol.Version}) {
+			if test.wantCode == wss.CodeVersionMismatch &&
+				!slices.Equal(handshakeErr.SupportedVersions, []string{wss.Version}) {
 				t.Fatalf("supported versions = %#v", handshakeErr.SupportedVersions)
 			}
 		})
@@ -715,7 +715,7 @@ func TestWSSHandshakeBindsDeviceAndLimitsConnectionsPerIdentity(t *testing.T) {
 		_ = wrongDevice.Close()
 	}
 	var deviceErr *shared.HandshakeError
-	if !errors.As(err, &deviceErr) || deviceErr.Code != wssprotocol.CodeDeviceMismatch {
+	if !errors.As(err, &deviceErr) || deviceErr.Code != wss.CodeDeviceMismatch {
 		t.Fatalf("device mismatch = %#v, %v", deviceErr, err)
 	}
 	waitForNoActiveSessions(t, handler)
@@ -738,7 +738,7 @@ func TestWSSHandshakeBindsDeviceAndLimitsConnectionsPerIdentity(t *testing.T) {
 		_ = second.Close()
 	}
 	var capacityErr *shared.HandshakeError
-	if !errors.As(err, &capacityErr) || capacityErr.Code != wssprotocol.CodeUserCapacityExceeded {
+	if !errors.As(err, &capacityErr) || capacityErr.Code != wss.CodeUserCapacityExceeded {
 		t.Fatalf("per-user rejection = %#v, %v", capacityErr, err)
 	}
 }
@@ -758,15 +758,15 @@ func TestWSSServerHelloPublishesExactLimitsBeforeSmux(t *testing.T) {
 	defer cancel()
 	connection := dialRawWebSocket(t, ctx, server.URL, "token")
 	defer func() { _ = connection.Close() }()
-	if err := wssprotocol.Write(ctx, connection, wssprotocol.NewClientHello("2.5.0", testDeviceID)); err != nil {
+	if err := wss.Write(ctx, connection, wss.NewClientHello("2.5.0", testDeviceID)); err != nil {
 		t.Fatal(err)
 	}
-	message, err := wssprotocol.Read(ctx, connection)
+	message, err := wss.Read(ctx, connection)
 	if err != nil || message.ServerHello == nil {
 		t.Fatalf("ServerHello = %#v, %v", message, err)
 	}
 	hello := message.ServerHello
-	if hello.ProtocolVersion != wssprotocol.Version || hello.ServerVersion != "2.5.0" ||
+	if hello.ProtocolVersion != wss.Version || hello.ServerVersion != "2.5.0" ||
 		hello.Limits.MaximumFrameBytes != 768<<10 ||
 		hello.Limits.MaximumStreamFrameBytes != protocolmux.MaximumStreamFrameBytes ||
 		hello.Limits.MaximumStreamsPerConnection != 17 || hello.Limits.MaximumPhysicalConnections != 11 ||

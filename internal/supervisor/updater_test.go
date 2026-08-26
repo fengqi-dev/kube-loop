@@ -14,12 +14,12 @@ import (
 	"testing"
 	"time"
 
-	supervisorprotocol "github.com/fengqi-dev/kube-loop/internal/protocol/supervisor"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/supervisor"
 )
 
 type fakeWorker struct {
 	config       Config
-	status       supervisorprotocol.WorkerStatus
+	status       supervisor.WorkerStatus
 	startErrOnce error
 	stopErrOnce  error
 	stops        int
@@ -28,7 +28,7 @@ type fakeWorker struct {
 	readyAfter   int
 }
 
-func (w *fakeWorker) Status(context.Context) (supervisorprotocol.WorkerStatus, error) {
+func (w *fakeWorker) Status(context.Context) (supervisor.WorkerStatus, error) {
 	w.statusCalls++
 	if w.readyAfter > 0 && w.statusCalls >= w.readyAfter {
 		w.status.CoreReady = true
@@ -70,13 +70,13 @@ func TestValidateManifest(t *testing.T) {
 	valid := testManifest("dev", payload)
 	tests := []struct {
 		name   string
-		mutate func(*supervisorprotocol.UpdateManifest)
+		mutate func(*supervisor.UpdateManifest)
 	}{
-		{name: "schema", mutate: func(value *supervisorprotocol.UpdateManifest) { value.SchemaVersion++ }},
-		{name: "request ID", mutate: func(value *supervisorprotocol.UpdateManifest) { value.RequestID = "../bad" }},
-		{name: "channel", mutate: func(value *supervisorprotocol.UpdateManifest) { value.Channel = "release" }},
-		{name: "size", mutate: func(value *supervisorprotocol.UpdateManifest) { value.Size = 0 }},
-		{name: "hash", mutate: func(value *supervisorprotocol.UpdateManifest) { value.SHA256 = "bad" }},
+		{name: "schema", mutate: func(value *supervisor.UpdateManifest) { value.SchemaVersion++ }},
+		{name: "request ID", mutate: func(value *supervisor.UpdateManifest) { value.RequestID = "../bad" }},
+		{name: "channel", mutate: func(value *supervisor.UpdateManifest) { value.Channel = "release" }},
+		{name: "size", mutate: func(value *supervisor.UpdateManifest) { value.Size = 0 }},
+		{name: "hash", mutate: func(value *supervisor.UpdateManifest) { value.SHA256 = "bad" }},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -93,11 +93,11 @@ func TestValidateManifest(t *testing.T) {
 func TestUpdaterRejectsActiveSession(t *testing.T) {
 	t.Parallel()
 	config := testConfig(t)
-	worker := &fakeWorker{config: config, status: supervisorprotocol.WorkerStatus{
+	worker := &fakeWorker{config: config, status: supervisor.WorkerStatus{
 		Installed: true, Running: true, CoreReady: true, ActiveSessions: []string{"tun-1"},
 	}}
 	updater := NewUpdater(config, worker, os.Getuid())
-	updater.verifyArtifact = func(context.Context, string, supervisorprotocol.UpdateManifest) error { return nil }
+	updater.verifyArtifact = func(context.Context, string, supervisor.UpdateManifest) error { return nil }
 	payload := machOBytes("new")
 	response := updater.Update(t.Context(), testManifest(config.Channel, payload), bytes.NewReader(payload))
 	if response.OK || response.Error == "" || worker.stops != 0 {
@@ -111,11 +111,11 @@ func TestUpdaterActivatesHealthyWorker(t *testing.T) {
 	oldPayload := machOBytes("old")
 	newPayload := machOBytes("new")
 	writeExecutable(t, config.WorkerBinaryPath, oldPayload)
-	worker := &fakeWorker{config: config, status: supervisorprotocol.WorkerStatus{
+	worker := &fakeWorker{config: config, status: supervisor.WorkerStatus{
 		Installed: true, Running: true, CoreReady: true, Version: "new", Protocol: 7,
 	}}
 	updater := NewUpdater(config, worker, os.Getuid())
-	updater.verifyArtifact = func(context.Context, string, supervisorprotocol.UpdateManifest) error { return nil }
+	updater.verifyArtifact = func(context.Context, string, supervisor.UpdateManifest) error { return nil }
 	manifest := testManifest(config.Channel, newPayload)
 	manifest.Version = "new"
 	manifest.WorkerProtocol = 7
@@ -147,7 +147,7 @@ func TestUpdaterReportsJournalCleanupFailure(t *testing.T) {
 			writeExecutable(t, config.WorkerBinaryPath, oldPayload)
 			worker := &fakeWorker{
 				config: config, startErrOnce: test.startErr,
-				status: supervisorprotocol.WorkerStatus{
+				status: supervisor.WorkerStatus{
 					Installed: true, Running: true, CoreReady: true,
 					Version: "new", Protocol: 7,
 				},
@@ -156,7 +156,7 @@ func TestUpdaterReportsJournalCleanupFailure(t *testing.T) {
 			updater.verifyArtifact = func(
 				context.Context,
 				string,
-				supervisorprotocol.UpdateManifest,
+				supervisor.UpdateManifest,
 			) error {
 				return nil
 			}
@@ -191,12 +191,12 @@ func TestUpdaterRollsBackStartFailure(t *testing.T) {
 	worker := &fakeWorker{
 		config:       config,
 		startErrOnce: fmt.Errorf("start failed"),
-		status: supervisorprotocol.WorkerStatus{
+		status: supervisor.WorkerStatus{
 			Installed: true, Running: true, CoreReady: true, Version: "new", Protocol: 7,
 		},
 	}
 	updater := NewUpdater(config, worker, os.Getuid())
-	updater.verifyArtifact = func(context.Context, string, supervisorprotocol.UpdateManifest) error { return nil }
+	updater.verifyArtifact = func(context.Context, string, supervisor.UpdateManifest) error { return nil }
 	updater.readyTimeout = 10 * time.Millisecond
 	manifest := testManifest(config.Channel, newPayload)
 	manifest.Version = "new"
@@ -210,7 +210,7 @@ func TestUpdaterRollsBackStartFailure(t *testing.T) {
 
 func TestUpdaterRecoverClearsJournalForHealthyWorker(t *testing.T) {
 	config := testConfig(t)
-	worker := &fakeWorker{config: config, status: supervisorprotocol.WorkerStatus{
+	worker := &fakeWorker{config: config, status: supervisor.WorkerStatus{
 		Installed: true, Running: true, CoreReady: true,
 	}}
 	updater := NewUpdater(config, worker, os.Getuid())
@@ -240,7 +240,7 @@ func TestUpdaterRecoverRollsBackMismatchedHealthyWorker(t *testing.T) {
 	previousPayload := machOBytes("previous")
 	writeExecutable(t, config.WorkerBinaryPath, currentPayload)
 	writeExecutable(t, config.PreviousPath(), previousPayload)
-	worker := &fakeWorker{config: config, status: supervisorprotocol.WorkerStatus{
+	worker := &fakeWorker{config: config, status: supervisor.WorkerStatus{
 		Installed: true, Running: true, CoreReady: true, Version: "unexpected",
 	}}
 	updater := NewUpdater(config, worker, os.Getuid())
@@ -266,7 +266,7 @@ func TestUpdaterManualRollbackRestoresPreviousWorker(t *testing.T) {
 	previousPayload := machOBytes("previous")
 	writeExecutable(t, config.WorkerBinaryPath, currentPayload)
 	writeExecutable(t, config.PreviousPath(), previousPayload)
-	worker := &fakeWorker{config: config, status: supervisorprotocol.WorkerStatus{
+	worker := &fakeWorker{config: config, status: supervisor.WorkerStatus{
 		Installed: true, Running: true, CoreReady: true,
 	}}
 	updater := NewUpdater(config, worker, os.Getuid())
@@ -287,7 +287,7 @@ func TestUpdaterRollbackStopFailurePreservesWorkerFiles(t *testing.T) {
 	stopErr := fmt.Errorf("stop failed")
 	worker := &fakeWorker{
 		config: config,
-		status: supervisorprotocol.WorkerStatus{
+		status: supervisor.WorkerStatus{
 			Installed: true, Running: true, CoreReady: true,
 		},
 		stopErrOnce: stopErr,
@@ -304,7 +304,7 @@ func TestUpdaterRollbackStopFailurePreservesWorkerFiles(t *testing.T) {
 
 func TestUpdaterRestartCyclesWorker(t *testing.T) {
 	config := testConfig(t)
-	worker := &fakeWorker{config: config, status: supervisorprotocol.WorkerStatus{
+	worker := &fakeWorker{config: config, status: supervisor.WorkerStatus{
 		Installed: true, Running: true, CoreReady: true,
 	}}
 	updater := NewUpdater(config, worker, os.Getuid())
@@ -319,7 +319,7 @@ func TestUpdaterRestartWaitsForWorkerReadiness(t *testing.T) {
 	config := testConfig(t)
 	worker := &fakeWorker{
 		config: config,
-		status: supervisorprotocol.WorkerStatus{
+		status: supervisor.WorkerStatus{
 			Installed: true, Running: true, CoreReady: true,
 		},
 		readyAfter: 3,
@@ -350,12 +350,12 @@ func testConfig(t *testing.T) Config {
 	}
 }
 
-func testManifest(channel string, payload []byte) supervisorprotocol.UpdateManifest {
+func testManifest(channel string, payload []byte) supervisor.UpdateManifest {
 	sum := sha256.Sum256(payload)
-	return supervisorprotocol.UpdateManifest{
-		SchemaVersion: supervisorprotocol.SchemaVersion, RequestID: "request-1",
+	return supervisor.UpdateManifest{
+		SchemaVersion: supervisor.SchemaVersion, RequestID: "request-1",
 		Channel: channel, Version: "dev", WorkerProtocol: 7,
-		MinimumSupervisorProtocol: supervisorprotocol.Version,
+		MinimumSupervisorProtocol: supervisor.Version,
 		Size:                      int64(len(payload)), SHA256: hex.EncodeToString(sum[:]),
 	}
 }

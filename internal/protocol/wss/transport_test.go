@@ -1,4 +1,4 @@
-package wssprotocol
+package wss
 
 import (
 	"context"

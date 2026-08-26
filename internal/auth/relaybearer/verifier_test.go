@@ -1,4 +1,4 @@
-package relayticket
+package relaybearer
 
 import (
 	"crypto/ed25519"
@@ -11,7 +11,22 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/fengqi-dev/kube-loop/internal/protocol/relayticket"
 )
+
+func validClaims(now time.Time) relayticket.Claims {
+	return relayticket.Claims{
+		Version: relayticket.Version, Issuer: "https://control-plane.example", Audience: "relay-a",
+		IdentityID: "11111111-1111-4111-8111-111111111111",
+		Groups:     []string{"developers"},
+		DeviceID:   "22222222-2222-4222-8222-222222222222",
+		SessionID:  "33333333-3333-4333-8333-333333333333", SessionGeneration: 7, Namespace: "development",
+		Operations: []string{"tunnel"}, NetworkSpecHash: strings.Repeat("a", 64),
+		TicketID: "44444444-4444-4444-8444-444444444444",
+		IssuedAt: now.Unix(), NotBefore: now.Unix(), ExpiresAt: now.Add(time.Minute).Unix(),
+	}
+}
 
 func TestRequestVerifierConsumesRelayTicketOnce(t *testing.T) {
 	now := time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC)
@@ -19,7 +34,7 @@ func TestRequestVerifierConsumesRelayTicketOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	signer, err := NewSigner("primary", privateKey)
+	signer, err := relayticket.NewSigner("primary", privateKey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -27,7 +42,7 @@ func TestRequestVerifierConsumesRelayTicketOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	verifier, err := NewVerifier(VerifierConfig{
+	verifier, err := relayticket.NewVerifier(relayticket.VerifierConfig{
 		Keys: map[string]ed25519.PublicKey{"primary": publicKey}, Issuer: "https://control-plane.example",
 		Audience: "relay-a", RequiredOperation: "tunnel", Now: func() time.Time { return now },
 	})
@@ -67,11 +82,11 @@ func TestRequestVerifierRejectsOlderSessionGeneration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	signer, err := NewSigner("primary", privateKey)
+	signer, err := relayticket.NewSigner("primary", privateKey)
 	if err != nil {
 		t.Fatal(err)
 	}
-	verifier, err := NewVerifier(VerifierConfig{
+	verifier, err := relayticket.NewVerifier(relayticket.VerifierConfig{
 		Keys: map[string]ed25519.PublicKey{"primary": publicKey}, Issuer: "https://control-plane.example",
 		Audience: "relay-a", RequiredOperation: "tunnel", Now: func() time.Time { return now },
 	})
@@ -105,7 +120,7 @@ func TestRequestVerifierRejectsOlderSessionGeneration(t *testing.T) {
 	if err := verify(issue(8, "ticket-generation-8")); err != nil {
 		t.Fatalf("new generation rejected: %v", err)
 	}
-	if err := verify(issue(7, "ticket-generation-7")); !errors.Is(err, ErrInvalid) {
+	if err := verify(issue(7, "ticket-generation-7")); !errors.Is(err, relayticket.ErrInvalid) {
 		t.Fatalf("older generation accepted: %v", err)
 	}
 	if err := verify(issue(8, "ticket-generation-8-second")); err != nil {

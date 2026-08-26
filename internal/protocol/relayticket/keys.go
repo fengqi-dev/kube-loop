@@ -58,7 +58,7 @@ func LoadVerificationKeys(path string) (map[string]ed25519.PublicKey, error) {
 	}
 	keys := make(map[string]ed25519.PublicKey, len(document.Keys))
 	for _, entry := range document.Keys {
-		if !validIdentifier(entry.KeyID, 128) {
+		if !ValidIdentifier(entry.KeyID, 128) {
 			return nil, errors.New("relay ticket verification key ID is invalid")
 		}
 		if _, exists := keys[entry.KeyID]; exists {
@@ -112,7 +112,7 @@ func MarshalVerificationKeys(keys map[string]ed25519.PublicKey) ([]byte, error) 
 	slices.Sort(keyIDs)
 	for _, keyID := range keyIDs {
 		key := keys[keyID]
-		if !validIdentifier(keyID, 128) || len(key) != ed25519.PublicKeySize {
+		if !ValidIdentifier(keyID, 128) || len(key) != ed25519.PublicKeySize {
 			return nil, errors.New("relay ticket verification key is invalid")
 		}
 		encoded, err := x509.MarshalPKIXPublicKey(key)

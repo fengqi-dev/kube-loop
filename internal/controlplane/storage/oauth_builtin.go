@@ -36,7 +36,7 @@ func EnsureBuiltinOAuthClients(
 		},
 		{
 			ID: auth.TUIClientID, Name: "KubeLoop TUI", Public: true,
-			RedirectURIs: []string{auth.DesktopRedirectURI},
+			RedirectURIs: []string{auth.TUIRedirectURI},
 			GrantTypes:   []string{grantAuthorizationCode, grantRefreshToken},
 			Scopes: []string{
 				scopeOpenID,

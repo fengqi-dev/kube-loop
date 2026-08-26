@@ -1,4 +1,4 @@
-package supervisorprotocol
+package supervisor
 
 import (
 	"bytes"

@@ -9,15 +9,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/entity"
 	"github.com/fengqi-dev/kube-loop/internal/gateway/trafficlistener"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/mirrorstream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficcontrol"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficmodel"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficstream"
+	"github.com/fengqi-dev/kube-loop/internal/transport/trafficstream"
 )
 
 func TestMirrorRelayForwardsPrimaryTCPAndUDPAndEmitsShadowFrames(t *testing.T) {
-	listeners, err := trafficlistener.Bind("127.0.0.1", []trafficmodel.Port{
+	listeners, err := trafficlistener.Bind("127.0.0.1", []entity.Port{
 		{Name: "http", ServicePort: 8080, Protocol: "tcp"},
 		{Name: "dns", ServicePort: 5353, Protocol: "udp"},
 	})

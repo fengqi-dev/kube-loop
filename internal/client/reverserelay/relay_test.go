@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/fengqi-dev/kube-loop/internal/protocol/exchangestream"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficstream"
+	"github.com/fengqi-dev/kube-loop/internal/transport/trafficstream"
 )
 
 func TestRelayReadReady(t *testing.T) {

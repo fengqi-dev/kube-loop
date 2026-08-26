@@ -7,7 +7,7 @@ import (
 	"sync"
 
 	"github.com/fengqi-dev/kube-loop/internal/protocol/exchangestream"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficstream"
+	"github.com/fengqi-dev/kube-loop/internal/transport/trafficstream"
 )
 
 // Target is a client-retained destination for one Service port. It is never

@@ -6,8 +6,8 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"github.com/fengqi-dev/kube-loop/internal/protocol/streamcopy"
-	protocolmux "github.com/fengqi-dev/kube-loop/internal/protocol/websocketmux"
+	"github.com/fengqi-dev/kube-loop/internal/transport/streamcopy"
+	protocolmux "github.com/fengqi-dev/kube-loop/internal/transport/websocketmux"
 )
 
 func (forwarder *Forwarder) Address() string { return forwarder.listener.Addr().String() }

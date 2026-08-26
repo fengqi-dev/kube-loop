@@ -12,13 +12,13 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/entity"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/servicebinding"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/sessionapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/remotetask"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficcontrol"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficmodel"
 )
 
 type mirrorTrafficResources struct {
@@ -117,7 +117,7 @@ func newMirrorTrafficFixture(t *testing.T) mirrorTrafficFixture {
 	}
 	specJSON, err := json.Marshal(storedSpec{
 		Service: "api", ClusterIP: "10.96.0.20",
-		Ports: []trafficmodel.Port{{Name: "http", ServicePort: 80, Protocol: "tcp"}},
+		Ports: []entity.Port{{Name: "http", ServicePort: 80, Protocol: "tcp"}},
 	})
 	if err != nil {
 		t.Fatal(err)

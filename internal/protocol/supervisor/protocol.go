@@ -1,6 +1,6 @@
-// Package supervisorprotocol defines the bounded local RPC contract used to
+// Package supervisor defines the bounded local RPC contract used to
 // manage the macOS privileged worker.
-package supervisorprotocol
+package supervisor
 
 const (
 	Version       = 1

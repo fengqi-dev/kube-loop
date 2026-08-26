@@ -1,4 +1,4 @@
-package networkspec
+package gateway
 
 import (
 	"errors"
@@ -6,15 +6,16 @@ import (
 	"strings"
 
 	"github.com/fengqi-dev/kube-loop/internal/protocol/dns"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
 )
 
 // AuthorizeAddress applies the Data Plane target allowlist. Pod and Service
 // CIDRs are routing metadata only: only Pod and Service IPs actually observed
 // for the Session namespace are dialable. This prevents a namespace-scoped
 // Session from using a broad cluster CIDR to reach another namespace.
-func AuthorizeAddress(spec Spec, address netip.Addr, port uint16) error {
+func AuthorizeAddress(spec networkspec.Spec, address netip.Addr, port uint16) error {
 	address = address.Unmap()
-	if port == 0 || !allowedAddress(address) {
+	if port == 0 || !networkspec.AllowedAddress(address) {
 		return errors.New("target address is not allowed by NetworkSpec")
 	}
 	if spec.DNSServer != "" {
@@ -44,7 +45,7 @@ func AuthorizeAddress(spec Spec, address netip.Addr, port uint16) error {
 // AuthorizeDomain limits DNS resolution to Kubernetes cluster domains. The
 // resolved address must still pass AuthorizeAddress, which closes DNS-rebinding
 // and cross-namespace Service access.
-func AuthorizeDomain(spec Spec, host string) (string, error) {
+func AuthorizeDomain(spec networkspec.Spec, host string) (string, error) {
 	host = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(host)), ".")
 	if !dns.ValidClusterDomain(host) || isKubernetesAPIName(host) {
 		return "", errors.New("target domain is not allowed by NetworkSpec")

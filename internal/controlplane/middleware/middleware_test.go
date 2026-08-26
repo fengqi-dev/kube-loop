@@ -144,8 +144,10 @@ func TestMiddlewareFailsClosedBeforeHandler(t *testing.T) {
 			},
 			wantStatus: http.StatusUnauthorized, wantAuthenticate: "Bearer",
 		},
+		{name: "empty authenticated subject", wantStatus: http.StatusUnauthorized},
 		{
-			name:       "empty authenticated subject",
+			name:       "blank authenticated subject",
+			identity:   controlplaneapi.Identity{Subject: " \t\n"},
 			wantStatus: http.StatusUnauthorized,
 		},
 		{

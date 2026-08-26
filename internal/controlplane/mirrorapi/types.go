@@ -1,8 +1,8 @@
 package mirrorapi
 
-import "github.com/fengqi-dev/kube-loop/internal/protocol/trafficmodel"
+import "github.com/fengqi-dev/kube-loop/internal/controlplane/entity"
 
 type Spec struct {
-	Service string              `json:"service"`
-	Ports   []trafficmodel.Port `json:"ports"`
+	Service string        `json:"service"`
+	Ports   []entity.Port `json:"ports"`
 }

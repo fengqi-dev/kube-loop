@@ -1,4 +1,4 @@
-package relayticket
+package relaybearer
 
 import (
 	"errors"
@@ -6,21 +6,23 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/fengqi-dev/kube-loop/internal/protocol/relayticket"
 )
 
 const DefaultReplayEntries = 65536
 
 type RequestVerifier struct {
 	mu          sync.RWMutex
-	verifier    *Verifier
+	verifier    *relayticket.Verifier
 	replay      *ReplayGuard
 	generations *SessionGenerationGuard
 	revocations RevocationChecker
 }
 
-type RevocationChecker func(Claims, time.Time) bool
+type RevocationChecker func(relayticket.Claims, time.Time) bool
 
-func NewRequestVerifier(verifier *Verifier, replay *ReplayGuard) (*RequestVerifier, error) {
+func NewRequestVerifier(verifier *relayticket.Verifier, replay *ReplayGuard) (*RequestVerifier, error) {
 	if verifier == nil || replay == nil {
 		return nil, errors.New("relay ticket request verifier configuration is invalid")
 	}
@@ -31,7 +33,7 @@ func NewRequestVerifier(verifier *Verifier, replay *ReplayGuard) (*RequestVerifi
 	return &RequestVerifier{verifier: verifier, replay: replay, generations: generations}, nil
 }
 
-func (verifier *RequestVerifier) Update(next *Verifier, revocations RevocationChecker) error {
+func (verifier *RequestVerifier) Update(next *relayticket.Verifier, revocations RevocationChecker) error {
 	if verifier == nil || next == nil {
 		return errors.New("relay ticket request verifier update is invalid")
 	}
@@ -42,17 +44,17 @@ func (verifier *RequestVerifier) Update(next *Verifier, revocations RevocationCh
 	return nil
 }
 
-func (verifier *RequestVerifier) Verify(request *http.Request) (Claims, error) {
+func (verifier *RequestVerifier) Verify(request *http.Request) (relayticket.Claims, error) {
 	if verifier == nil || request == nil {
-		return Claims{}, ErrInvalid
+		return relayticket.Claims{}, relayticket.ErrInvalid
 	}
 	headers := request.Header.Values("Authorization")
 	if len(headers) != 1 {
-		return Claims{}, ErrInvalid
+		return relayticket.Claims{}, relayticket.ErrInvalid
 	}
 	parts := strings.Fields(headers[0])
 	if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
-		return Claims{}, ErrInvalid
+		return relayticket.Claims{}, relayticket.ErrInvalid
 	}
 	verifier.mu.RLock()
 	ticketVerifier := verifier.verifier
@@ -63,7 +65,7 @@ func (verifier *RequestVerifier) Verify(request *http.Request) (Claims, error) {
 	if err != nil || (revocations != nil && revocations(claims, verifier.replay.now().UTC())) ||
 		!verifier.replay.Consume(claims.TicketID, expiresAt) ||
 		!verifier.generations.Accept(claims.SessionID, claims.SessionGeneration, expiresAt) {
-		return Claims{}, ErrInvalid
+		return relayticket.Claims{}, relayticket.ErrInvalid
 	}
 	return claims, nil
 }
@@ -99,7 +101,7 @@ func NewSessionGenerationGuard(maxEntries int, now func() time.Time) (*SessionGe
 }
 
 func (guard *SessionGenerationGuard) Accept(sessionID string, generation uint64, expiresAt time.Time) bool {
-	if guard == nil || !validIdentifier(sessionID, 128) || generation == 0 {
+	if guard == nil || !relayticket.ValidIdentifier(sessionID, 128) || generation == 0 {
 		return false
 	}
 	now := guard.now().UTC().Unix()
@@ -161,7 +163,7 @@ func NewReplayGuard(maxEntries int, now func() time.Time) (*ReplayGuard, error) 
 }
 
 func (guard *ReplayGuard) Consume(ticketID string, expiresAt time.Time) bool {
-	if guard == nil || !validIdentifier(ticketID, 128) {
+	if guard == nil || !relayticket.ValidIdentifier(ticketID, 128) {
 		return false
 	}
 	now := guard.now().UTC().Unix()

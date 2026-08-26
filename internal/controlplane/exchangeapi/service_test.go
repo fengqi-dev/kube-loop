@@ -15,11 +15,11 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/entity"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/servicebinding"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/sessionapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficmodel"
 )
 
 type exchangeTestSessions struct{ session sessionapi.ActiveSession }
@@ -69,13 +69,13 @@ func (services *exchangeTestServices) ResolveService(
 	_ context.Context,
 	_ controlplaneapi.Identity,
 	_, name string,
-	ports []trafficmodel.Port,
-) (trafficmodel.ResolvedService, error) {
+	ports []entity.Port,
+) (entity.ResolvedService, error) {
 	services.calls++
-	return trafficmodel.ResolvedService{
+	return entity.ResolvedService{
 		Name:      name,
 		ClusterIP: "10.96.0.20",
-		Ports:     append([]trafficmodel.Port(nil), ports...),
+		Ports:     append([]entity.Port(nil), ports...),
 	}, nil
 }
 

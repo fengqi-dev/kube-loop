@@ -4,15 +4,15 @@ import (
 	"context"
 	"time"
 
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/entity"
 	"github.com/fengqi-dev/kube-loop/internal/gateway/trafficlistener"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/exchangestream"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficmodel"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficstream"
+	"github.com/fengqi-dev/kube-loop/internal/transport/trafficstream"
 )
 
 var ErrClientStopped = errClientStopped
 
-func BindListeners(gatewayIP string, ports []trafficmodel.Port) (*trafficlistener.Listeners, error) {
+func BindListeners(gatewayIP string, ports []entity.Port) (*trafficlistener.Listeners, error) {
 	return trafficlistener.Bind(gatewayIP, ports)
 }
 

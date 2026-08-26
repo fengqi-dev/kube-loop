@@ -14,8 +14,8 @@ import (
 	"github.com/xtaci/smux"
 
 	shared "github.com/fengqi-dev/kube-loop/internal/client/websocketmux"
-	protocolmux "github.com/fengqi-dev/kube-loop/internal/protocol/websocketmux"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/wssprotocol"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/wss"
+	protocolmux "github.com/fengqi-dev/kube-loop/internal/transport/websocketmux"
 )
 
 func TestContractNewClientAndOldGatewayClassifiesVersionMismatch(t *testing.T) {
@@ -46,7 +46,7 @@ func TestContractNewClientAndOldGatewayClassifiesVersionMismatch(t *testing.T) {
 		t.Fatal("new client created a partial Forwarder against an old Gateway")
 	}
 	var handshakeErr *shared.HandshakeError
-	if !errors.As(err, &handshakeErr) || handshakeErr.Code != wssprotocol.CodeVersionMismatch {
+	if !errors.As(err, &handshakeErr) || handshakeErr.Code != wss.CodeVersionMismatch {
 		t.Fatalf("old-Gateway error = %#v, %v", handshakeErr, err)
 	}
 }
@@ -78,7 +78,7 @@ func TestContractNewClientRejectsUnknownAndMissingServerHelloFields(t *testing.T
 				t.Fatal("malformed ServerHello created a partial Forwarder")
 			}
 			var handshakeErr *shared.HandshakeError
-			if !errors.As(err, &handshakeErr) || handshakeErr.Code != wssprotocol.CodeInvalidHandshake {
+			if !errors.As(err, &handshakeErr) || handshakeErr.Code != wss.CodeInvalidHandshake {
 				t.Fatalf("malformed ServerHello error = %#v, %v", handshakeErr, err)
 			}
 		})
@@ -119,9 +119,9 @@ func TestContractNewGatewayRejectsUnknownAndMissingClientHelloFields(t *testing.
 				_ = connection.Close()
 				t.Fatal(err)
 			}
-			message, err := wssprotocol.Read(ctx, connection)
+			message, err := wss.Read(ctx, connection)
 			_ = connection.Close()
-			if err != nil || message.Reject == nil || message.Reject.Code != wssprotocol.CodeInvalidHandshake {
+			if err != nil || message.Reject == nil || message.Reject.Code != wss.CodeInvalidHandshake {
 				t.Fatalf("malformed ClientHello rejection = %#v, %v", message, err)
 			}
 		})
@@ -132,10 +132,10 @@ func TestContractNewGatewayRejectsUnknownAndMissingClientHelloFields(t *testing.
 func malformedHandshakeGateway(t *testing.T, response []byte) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		writer.Header().Set(wssprotocol.VersionHeader, wssprotocol.Version)
+		writer.Header().Set(wss.VersionHeader, wss.Version)
 		connection, err := (&websocket.Upgrader{Subprotocols: []string{Subprotocol}}).
 			Upgrade(writer, request, http.Header{
-				wssprotocol.VersionHeader: []string{wssprotocol.Version},
+				wss.VersionHeader: []string{wss.Version},
 			})
 
 		if err != nil {
@@ -144,7 +144,7 @@ func malformedHandshakeGateway(t *testing.T, response []byte) *httptest.Server {
 		defer func() { _ = connection.Close() }()
 		ctx, cancel := context.WithTimeout(request.Context(), time.Second)
 		defer cancel()
-		message, err := wssprotocol.Read(ctx, connection)
+		message, err := wss.Read(ctx, connection)
 		if err != nil || message.ClientHello == nil {
 			return
 		}

@@ -7,7 +7,7 @@ import (
 
 	"github.com/xtaci/smux"
 
-	protocolmux "github.com/fengqi-dev/kube-loop/internal/protocol/websocketmux"
+	protocolmux "github.com/fengqi-dev/kube-loop/internal/transport/websocketmux"
 )
 
 func (forwarder *Forwarder) OpenStream(ctx context.Context) (net.Conn, error) {

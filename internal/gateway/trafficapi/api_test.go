@@ -11,12 +11,12 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/entity"
 	"github.com/fengqi-dev/kube-loop/internal/gateway/trafficapi"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/exchangestream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficcontrol"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficmodel"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficstream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
+	"github.com/fengqi-dev/kube-loop/internal/transport/trafficstream"
 )
 
 type fakeController struct {
@@ -50,7 +50,7 @@ func (controlPlane *fakeController) DoJSON(
 		request := input.(trafficcontrol.ClaimRequest)
 		*output.(*trafficcontrol.ClaimResponse) = trafficcontrol.ClaimResponse{
 			Mode: request.Mode, TaskID: request.TaskID, Service: "api",
-			Ports: []trafficmodel.Port{{Name: "http", ServicePort: 8080, Protocol: "tcp"}},
+			Ports: []entity.Port{{Name: "http", ServicePort: 8080, Protocol: "tcp"}},
 		}
 	case trafficcontrol.InternalPathPrefix + "/prepare":
 		if controlPlane.prepareErr != nil {
@@ -278,7 +278,7 @@ func TestInvalidClaimIsFinishedAndRejected(t *testing.T) {
 		finished: make(chan trafficcontrol.FinishRequest, 1),
 		claimResponse: &trafficcontrol.ClaimResponse{
 			Mode: trafficcontrol.ModeMirror, TaskID: taskID,
-			Ports: []trafficmodel.Port{{Name: "http", ServicePort: 8080, Protocol: "tcp"}},
+			Ports: []entity.Port{{Name: "http", ServicePort: 8080, Protocol: "tcp"}},
 		},
 	}
 	api, err := trafficapi.New(trafficapi.Config{GatewayIP: "127.0.0.1", ControlPlane: controlPlane})

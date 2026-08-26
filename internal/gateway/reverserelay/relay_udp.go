@@ -7,15 +7,15 @@ import (
 	"net"
 	"time"
 
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/entity"
 	"github.com/fengqi-dev/kube-loop/internal/gateway/trafficlistener"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/exchangestream"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficmodel"
 )
 
 type udpRelayAssociation struct {
 	connection *net.UDPConn
 	remote     *net.UDPAddr
-	port       trafficmodel.Port
+	port       entity.Port
 	key        string
 	lastSeen   time.Time
 }

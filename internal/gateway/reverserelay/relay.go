@@ -9,7 +9,7 @@ import (
 
 	"github.com/fengqi-dev/kube-loop/internal/gateway/trafficlistener"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/exchangestream"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficstream"
+	"github.com/fengqi-dev/kube-loop/internal/transport/trafficstream"
 )
 
 var errClientStopped = errors.New("exchange stopped by client")

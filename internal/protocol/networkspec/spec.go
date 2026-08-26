@@ -64,7 +64,7 @@ func Normalize(input Spec) (Spec, error) {
 	dnsServer := ""
 	if strings.TrimSpace(input.DNSServer) != "" {
 		address, parseErr := netip.ParseAddr(strings.TrimSpace(input.DNSServer))
-		if parseErr != nil || !allowedAddress(address.Unmap()) {
+		if parseErr != nil || !AllowedAddress(address.Unmap()) {
 			return Spec{}, errors.New("NetworkSpec DNS server is invalid")
 		}
 		dnsServer = address.Unmap().String()
@@ -192,7 +192,7 @@ func normalizeAddresses(values []string, kind string) ([]string, error) {
 	result := make([]string, 0, len(values))
 	for _, raw := range values {
 		address, err := netip.ParseAddr(strings.TrimSpace(raw))
-		if err != nil || !allowedAddress(address.Unmap()) {
+		if err != nil || !AllowedAddress(address.Unmap()) {
 			return nil, fmt.Errorf("NetworkSpec %s IP is invalid", kind)
 		}
 		value := address.Unmap().String()
@@ -206,7 +206,7 @@ func normalizeAddresses(values []string, kind string) ([]string, error) {
 }
 
 func allowedPrefix(prefix netip.Prefix) bool {
-	if !allowedAddress(prefix.Addr()) {
+	if !AllowedAddress(prefix.Addr()) {
 		return false
 	}
 	unsafePrefixes := []string{
@@ -221,7 +221,9 @@ func allowedPrefix(prefix netip.Prefix) bool {
 	return true
 }
 
-func allowedAddress(address netip.Addr) bool {
+// AllowedAddress reports whether address is a dialable unicast address in the
+// private or carrier-grade ranges accepted by the NetworkSpec.
+func AllowedAddress(address netip.Addr) bool {
 	if !address.IsValid() || address.IsUnspecified() || address.IsLoopback() ||
 		address.IsLinkLocalUnicast() || address.IsMulticast() {
 		return false

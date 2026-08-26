@@ -13,7 +13,7 @@ import (
 
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/authorization"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficmodel"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/entity"
 )
 
 type ClientProvider interface {
@@ -36,26 +36,26 @@ func (r *ServiceResolver) ResolveService(
 	identity controlplaneapi.Identity,
 	namespace string,
 	serviceName string,
-	requested []trafficmodel.Port,
-) (trafficmodel.ResolvedService, error) {
+	requested []entity.Port,
+) (entity.ResolvedService, error) {
 	client, err := r.provider.ClientFor(subjectFor(identity))
 	if err != nil {
-		return trafficmodel.ResolvedService{}, err
+		return entity.ResolvedService{}, err
 	}
 	service, err := client.CoreV1().Services(namespace).Get(ctx, serviceName, metav1.GetOptions{})
 	if err != nil {
-		return trafficmodel.ResolvedService{}, err
+		return entity.ResolvedService{}, err
 	}
 	if service.Spec.Type == corev1.ServiceTypeExternalName ||
 		service.Spec.ClusterIP == "" || service.Spec.ClusterIP == corev1.ClusterIPNone {
-		return trafficmodel.ResolvedService{}, fmt.Errorf(
+		return entity.ResolvedService{}, fmt.Errorf(
 			"service %s/%s cannot be resolved",
 			namespace,
 			serviceName,
 		)
 	}
 
-	ports := make([]trafficmodel.Port, 0, len(requested))
+	ports := make([]entity.Port, 0, len(requested))
 	for _, requestedPort := range requested {
 		matched := false
 		for _, servicePort := range service.Spec.Ports {
@@ -65,7 +65,7 @@ func (r *ServiceResolver) ResolveService(
 			}
 			if servicePort.Port == requestedPort.ServicePort &&
 				strings.EqualFold(string(protocol), requestedPort.Protocol) {
-				ports = append(ports, trafficmodel.Port{
+				ports = append(ports, entity.Port{
 					Name: servicePort.Name, ServicePort: servicePort.Port, Protocol: strings.ToLower(string(protocol)),
 				})
 				matched = true
@@ -73,18 +73,18 @@ func (r *ServiceResolver) ResolveService(
 			}
 		}
 		if !matched {
-			return trafficmodel.ResolvedService{}, errors.New(
+			return entity.ResolvedService{}, errors.New(
 				"requested port does not match the authoritative Service",
 			)
 		}
 	}
 	slices.SortFunc(ports, compareTrafficPorts)
-	return trafficmodel.ResolvedService{
+	return entity.ResolvedService{
 		Name: service.Name, ClusterIP: service.Spec.ClusterIP, Ports: ports,
 	}, nil
 }
 
-func compareTrafficPorts(left, right trafficmodel.Port) int {
+func compareTrafficPorts(left, right entity.Port) int {
 	if left.ServicePort != right.ServicePort {
 		return int(left.ServicePort - right.ServicePort)
 	}

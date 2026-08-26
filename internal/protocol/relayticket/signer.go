@@ -15,7 +15,7 @@ type Signer struct {
 
 func NewSigner(keyID string, key ed25519.PrivateKey) (*Signer, error) {
 	keyID = strings.TrimSpace(keyID)
-	if !validIdentifier(keyID, 128) || len(key) != ed25519.PrivateKeySize {
+	if !ValidIdentifier(keyID, 128) || len(key) != ed25519.PrivateKeySize {
 		return nil, errors.New("relay ticket signer configuration is invalid")
 	}
 	return &Signer{keyID: keyID, key: append(ed25519.PrivateKey(nil), key...)}, nil

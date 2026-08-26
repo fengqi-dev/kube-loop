@@ -10,11 +10,11 @@ import (
 	"time"
 
 	"github.com/fengqi-dev/kube-loop/internal/helper"
-	supervisorprotocol "github.com/fengqi-dev/kube-loop/internal/protocol/supervisor"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/supervisor"
 )
 
 type WorkerController interface {
-	Status(context.Context) (supervisorprotocol.WorkerStatus, error)
+	Status(context.Context) (supervisor.WorkerStatus, error)
 	Stop(context.Context) error
 	Start(context.Context) error
 }
@@ -23,8 +23,8 @@ type launchdWorker struct {
 	config Config
 }
 
-func (w launchdWorker) Status(ctx context.Context) (supervisorprotocol.WorkerStatus, error) {
-	status := supervisorprotocol.WorkerStatus{}
+func (w launchdWorker) Status(ctx context.Context) (supervisor.WorkerStatus, error) {
+	status := supervisor.WorkerStatus{}
 	if _, err := exec.LookPath("launchctl"); err != nil {
 		return status, err
 	}

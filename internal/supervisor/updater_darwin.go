@@ -24,7 +24,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	supervisorprotocol "github.com/fengqi-dev/kube-loop/internal/protocol/supervisor"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/supervisor"
 )
 
 var requestIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
@@ -48,7 +48,7 @@ type Updater struct {
 	readyTimeout   time.Duration
 	readyInterval  time.Duration
 	artifactUID    int
-	verifyArtifact func(context.Context, string, supervisorprotocol.UpdateManifest) error
+	verifyArtifact func(context.Context, string, supervisor.UpdateManifest) error
 	removeFile     func(string) error
 }
 
@@ -62,7 +62,7 @@ func NewUpdater(config Config, worker WorkerController, artifactUID int) *Update
 	return updater
 }
 
-func (u *Updater) Status(ctx context.Context) (supervisorprotocol.WorkerStatus, error) {
+func (u *Updater) Status(ctx context.Context) (supervisor.WorkerStatus, error) {
 	status, err := u.worker.Status(ctx)
 	if status.SHA256 == "" {
 		status.SHA256, _ = fileSHA256(u.config.WorkerBinaryPath)
@@ -72,10 +72,10 @@ func (u *Updater) Status(ctx context.Context) (supervisorprotocol.WorkerStatus, 
 
 func (u *Updater) Update(
 	ctx context.Context,
-	manifest supervisorprotocol.UpdateManifest,
+	manifest supervisor.UpdateManifest,
 	body io.Reader,
-) (response supervisorprotocol.Response) {
-	response.Protocol = supervisorprotocol.Version
+) (response supervisor.Response) {
+	response.Protocol = supervisor.Version
 	response.Channel = u.config.Channel
 	if err := validateManifest(u.config, manifest); err != nil {
 		response.Error = err.Error()
@@ -143,8 +143,8 @@ func (u *Updater) Update(
 	return response
 }
 
-func validateManifest(config Config, manifest supervisorprotocol.UpdateManifest) error {
-	if manifest.SchemaVersion != supervisorprotocol.SchemaVersion {
+func validateManifest(config Config, manifest supervisor.UpdateManifest) error {
+	if manifest.SchemaVersion != supervisor.SchemaVersion {
 		return fmt.Errorf("unsupported manifest schema %d", manifest.SchemaVersion)
 	}
 	if !requestIDPattern.MatchString(manifest.RequestID) {
@@ -156,11 +156,11 @@ func validateManifest(config Config, manifest supervisorprotocol.UpdateManifest)
 	if manifest.Version == "" || manifest.WorkerProtocol <= 0 {
 		return fmt.Errorf("worker version and protocol are required")
 	}
-	if manifest.MinimumSupervisorProtocol > supervisorprotocol.Version {
-		return fmt.Errorf("supervisor protocol %d is too old", supervisorprotocol.Version)
+	if manifest.MinimumSupervisorProtocol > supervisor.Version {
+		return fmt.Errorf("supervisor protocol %d is too old", supervisor.Version)
 	}
-	if manifest.Size <= 0 || manifest.Size > supervisorprotocol.MaxWorkerBytes {
-		return fmt.Errorf("worker size %d is outside 1..%d", manifest.Size, supervisorprotocol.MaxWorkerBytes)
+	if manifest.Size <= 0 || manifest.Size > supervisor.MaxWorkerBytes {
+		return fmt.Errorf("worker size %d is outside 1..%d", manifest.Size, supervisor.MaxWorkerBytes)
 	}
 	decoded, err := hex.DecodeString(manifest.SHA256)
 	if err != nil || len(decoded) != sha256.Size {
@@ -194,7 +194,7 @@ func (u *Updater) stagedPath() string {
 func (u *Updater) stageWorker(
 	ctx context.Context,
 	path string,
-	manifest supervisorprotocol.UpdateManifest,
+	manifest supervisor.UpdateManifest,
 	body io.Reader,
 ) error {
 	//nolint:gosec // The staged worker must be executable for identity verification.
@@ -272,7 +272,7 @@ func (w *limitedBuffer) Write(p []byte) (int, error) {
 func (u *Updater) verifyWorkerIdentity(
 	ctx context.Context,
 	path string,
-	manifest supervisorprotocol.UpdateManifest,
+	manifest supervisor.UpdateManifest,
 ) error {
 	account, err := user.LookupId(strconv.Itoa(u.artifactUID))
 	if err != nil {

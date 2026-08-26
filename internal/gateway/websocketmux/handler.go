@@ -10,8 +10,8 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/xtaci/smux"
 
-	shared "github.com/fengqi-dev/kube-loop/internal/protocol/websocketmux"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/wssprotocol"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/wss"
+	shared "github.com/fengqi-dev/kube-loop/internal/transport/websocketmux"
 )
 
 func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
@@ -70,7 +70,7 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		http.Error(writer, "Gateway session limit reached", http.StatusServiceUnavailable)
 		return
 	}
-	writer.Header().Set(wssprotocol.VersionHeader, wssprotocol.Version)
+	writer.Header().Set(wss.VersionHeader, wss.Version)
 	connection, err := (&websocket.Upgrader{
 		Subprotocols: []string{Subprotocol},
 	}).Upgrade(writer, request, writer.Header().Clone())
@@ -97,32 +97,32 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		_ = closeWebSocket(connection, websocket.ClosePolicyViolation, "subprotocol required")
 		return
 	}
-	connection.SetReadLimit(wssprotocol.MaximumHandshakeBytes)
+	connection.SetReadLimit(wss.MaximumHandshakeBytes)
 	handshakeContext, cancelHandshake := context.WithTimeout(request.Context(), h.config.HandshakeTimeout)
-	message, handshakeErr := wssprotocol.Read(handshakeContext, connection)
+	message, handshakeErr := wss.Read(handshakeContext, connection)
 	if handshakeErr != nil || message.ClientHello == nil {
 		cancelHandshake()
 		h.reject(
 			request.Context(),
 			requestID,
 			connection,
-			wssprotocol.NewReject(wssprotocol.CodeInvalidHandshake, "ClientHello is invalid"),
+			wss.NewReject(wss.CodeInvalidHandshake, "ClientHello is invalid"),
 		)
 		return
 	}
 	hello := *message.ClientHello
-	selectedVersion, versionErr := wssprotocol.Negotiate(hello.ProtocolVersions, h.config.SupportedVersions)
+	selectedVersion, versionErr := wss.Negotiate(hello.ProtocolVersions, h.config.SupportedVersions)
 	if versionErr != nil {
 		cancelHandshake()
-		h.reject(request.Context(), requestID, connection, wssprotocol.NewReject(
-			wssprotocol.CodeVersionMismatch, "No compatible WSS protocol version", h.config.SupportedVersions...,
+		h.reject(request.Context(), requestID, connection, wss.NewReject(
+			wss.CodeVersionMismatch, "No compatible WSS protocol version", h.config.SupportedVersions...,
 		))
 		return
 	}
-	if err := wssprotocol.CheckClientVersion(hello.ClientVersion, h.config.MinClientVersion); err != nil {
+	if err := wss.CheckClientVersion(hello.ClientVersion, h.config.MinClientVersion); err != nil {
 		cancelHandshake()
-		h.reject(request.Context(), requestID, connection, wssprotocol.NewReject(
-			wssprotocol.CodeClientVersionUnsupported, "Client version is not supported",
+		h.reject(request.Context(), requestID, connection, wss.NewReject(
+			wss.CodeClientVersionUnsupported, "Client version is not supported",
 		))
 		return
 	}
@@ -131,17 +131,17 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		h.reject(
 			request.Context(),
 			requestID, connection,
-			wssprotocol.NewReject(wssprotocol.CodeDeviceMismatch, "Device does not match RelayTicket"),
+			wss.NewReject(wss.CodeDeviceMismatch, "Device does not match RelayTicket"),
 		)
 		return
 	}
 	if !slices.Contains(hello.Capabilities, "smux.v2") || !slices.Contains(hello.Capabilities, "tunnel.open.v2") ||
-		!slices.Contains(hello.Capabilities, wssprotocol.CapabilityTrafficWebSocket) {
+		!slices.Contains(hello.Capabilities, wss.CapabilityTrafficWebSocket) {
 		cancelHandshake()
 		h.reject(
 			request.Context(),
 			requestID, connection,
-			wssprotocol.NewReject(wssprotocol.CodeInvalidHandshake, "Required capabilities are missing"),
+			wss.NewReject(wss.CodeInvalidHandshake, "Required capabilities are missing"),
 		)
 		return
 	}
@@ -150,19 +150,19 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		h.reject(
 			request.Context(),
 			requestID, connection,
-			wssprotocol.NewReject(wssprotocol.CodeUserCapacityExceeded, "Per-user connection limit reached"),
+			wss.NewReject(wss.CodeUserCapacityExceeded, "Per-user connection limit reached"),
 		)
 		return
 	}
 	defer h.releaseUser(identity)
-	serverHello := wssprotocol.NewServerHello(h.config.ServerVersion, wssprotocol.Limits{
+	serverHello := wss.NewServerHello(h.config.ServerVersion, wss.Limits{
 		MaximumFrameBytes: h.config.MaxFrameBytes, MaximumStreamFrameBytes: shared.MaximumStreamFrameBytes,
 		MaximumStreamsPerConnection: h.config.MaxStreamsPerSession,
 		MaximumPhysicalConnections:  h.config.MaxSessions, MaximumConnectionsPerUser: h.config.MaxSessionsPerUser,
 		StreamIdleTimeoutMillis: h.config.StreamIdleTimeout.Milliseconds(),
 	})
 	serverHello.ProtocolVersion = selectedVersion
-	if err := wssprotocol.Write(handshakeContext, connection, serverHello); err != nil {
+	if err := wss.Write(handshakeContext, connection, serverHello); err != nil {
 		cancelHandshake()
 		h.logf(
 			request.Context(), requestID,

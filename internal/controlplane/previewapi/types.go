@@ -1,8 +1,8 @@
 package previewapi
 
-import "github.com/fengqi-dev/kube-loop/internal/protocol/trafficmodel"
+import "github.com/fengqi-dev/kube-loop/internal/controlplane/entity"
 
 type Spec struct {
-	Name  string              `json:"name"`
-	Ports []trafficmodel.Port `json:"ports"`
+	Name  string        `json:"name"`
+	Ports []entity.Port `json:"ports"`
 }

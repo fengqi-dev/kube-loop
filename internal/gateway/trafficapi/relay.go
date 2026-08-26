@@ -12,8 +12,8 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/protocol/exchangestream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/mirrorstream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficcontrol"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficstream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
+	"github.com/fengqi-dev/kube-loop/internal/transport/trafficstream"
 )
 
 type trafficRelay interface {

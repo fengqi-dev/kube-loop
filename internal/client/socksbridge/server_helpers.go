@@ -8,7 +8,7 @@ import (
 
 	"github.com/things-go/go-socks5/statute"
 
-	"github.com/fengqi-dev/kube-loop/internal/protocol/streamcopy"
+	"github.com/fengqi-dev/kube-loop/internal/transport/streamcopy"
 )
 
 func (s *Server) logf(format string, values ...any) {

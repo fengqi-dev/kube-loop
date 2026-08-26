@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficstream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
+	"github.com/fengqi-dev/kube-loop/internal/transport/trafficstream"
 )
 
 // OpenTrafficStream opens one reverse-traffic Task as a logical stream on the

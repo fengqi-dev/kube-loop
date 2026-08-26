@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	supervisorprotocol "github.com/fengqi-dev/kube-loop/internal/protocol/supervisor"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/supervisor"
 )
 
 func TestClientReturnsEarlySupervisorRejection(t *testing.T) {
@@ -42,26 +42,26 @@ func TestClientReturnsEarlySupervisorRejection(t *testing.T) {
 			return
 		}
 		defer func() { _ = connection.Close() }()
-		var request supervisorprotocol.Request
-		if readErr := supervisorprotocol.ReadFrame(
+		var request supervisor.Request
+		if readErr := supervisor.ReadFrame(
 			connection,
 			&request,
-			supervisorprotocol.MaxRequestBytes,
+			supervisor.MaxRequestBytes,
 		); readErr != nil {
 			serverDone <- readErr
 			return
 		}
-		serverDone <- supervisorprotocol.WriteFrame(connection, supervisorprotocol.Response{
-			Protocol: supervisorprotocol.Version,
+		serverDone <- supervisor.WriteFrame(connection, supervisor.Response{
+			Protocol: supervisor.Version,
 			Channel:  "dev",
 			Error:    "worker is not installed",
-		}, supervisorprotocol.MaxResponseBytes)
+		}, supervisor.MaxResponseBytes)
 	}()
 
 	client := &Client{Config: Config{SocketPath: path}, Token: "secret"}
-	_, err = client.roundTrip(t.Context(), supervisorprotocol.Request{
-		Protocol: supervisorprotocol.Version,
-		Op:       supervisorprotocol.OpUpdateWorker,
+	_, err = client.roundTrip(t.Context(), supervisor.Request{
+		Protocol: supervisor.Version,
+		Op:       supervisor.OpUpdateWorker,
 	}, bytes.NewReader(make([]byte, 16<<20)))
 	if err == nil || !strings.Contains(err.Error(), "worker is not installed") {
 		t.Fatalf("roundTrip() error = %v, want supervisor rejection", err)
@@ -78,12 +78,12 @@ func TestSupervisorResponseError(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name     string
-		response supervisorprotocol.Response
+		response supervisor.Response
 		want     string
 	}{
-		{name: "success", response: supervisorprotocol.Response{OK: true}},
-		{name: "server message", response: supervisorprotocol.Response{Error: "rejected"}, want: "rejected"},
-		{name: "missing server message", response: supervisorprotocol.Response{}, want: "supervisor request failed"},
+		{name: "success", response: supervisor.Response{OK: true}},
+		{name: "server message", response: supervisor.Response{Error: "rejected"}, want: "rejected"},
+		{name: "missing server message", response: supervisor.Response{}, want: "supervisor request failed"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

@@ -7,17 +7,17 @@ import (
 	"net"
 	"sync"
 
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/entity"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficcontrol"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficmodel"
 )
 
 type TCPBinding struct {
-	Port     trafficmodel.Port
+	Port     entity.Port
 	Listener net.Listener
 }
 
 type UDPBinding struct {
-	Port       trafficmodel.Port
+	Port       entity.Port
 	Connection *net.UDPConn
 }
 
@@ -28,7 +28,7 @@ type Listeners struct {
 	once     sync.Once
 }
 
-func Bind(gatewayIP string, ports []trafficmodel.Port) (*Listeners, error) {
+func Bind(gatewayIP string, ports []entity.Port) (*Listeners, error) {
 	bound := &Listeners{
 		TCP: make([]TCPBinding, 0, len(ports)), UDP: make([]UDPBinding, 0, len(ports)),
 		mappings: make([]trafficcontrol.ListenerPort, 0, len(ports)),

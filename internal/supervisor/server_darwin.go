@@ -15,7 +15,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	supervisorprotocol "github.com/fengqi-dev/kube-loop/internal/protocol/supervisor"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/supervisor"
 )
 
 type Server struct {
@@ -63,7 +63,7 @@ func (s *Server) Serve(ctx context.Context) error {
 	stopListener := context.AfterFunc(ctx, func() { _ = listener.Close() })
 	defer stopListener()
 	defer handlers.Wait()
-	s.log.Printf("kubeloop-supervisor listening on %s (protocol %d)", s.config.SocketPath, supervisorprotocol.Version)
+	s.log.Printf("kubeloop-supervisor listening on %s (protocol %d)", s.config.SocketPath, supervisor.Version)
 	for {
 		connection, acceptErr := listener.AcceptUnix()
 		if acceptErr != nil {
@@ -86,12 +86,12 @@ func (s *Server) handle(serverCtx context.Context, connection *net.UnixConn) {
 		s.writeError(connection, "unable to verify peer credentials")
 		return
 	}
-	var request supervisorprotocol.Request
-	if err := supervisorprotocol.ReadFrame(connection, &request, supervisorprotocol.MaxRequestBytes); err != nil {
+	var request supervisor.Request
+	if err := supervisor.ReadFrame(connection, &request, supervisor.MaxRequestBytes); err != nil {
 		s.writeError(connection, "invalid request")
 		return
 	}
-	if request.Protocol != supervisorprotocol.Version {
+	if request.Protocol != supervisor.Version {
 		s.writeError(connection, "unsupported supervisor protocol")
 		return
 	}
@@ -102,9 +102,9 @@ func (s *Server) handle(serverCtx context.Context, connection *net.UnixConn) {
 
 	ctx, cancel := context.WithTimeout(serverCtx, 2*time.Minute)
 	defer cancel()
-	response := supervisorprotocol.Response{Protocol: supervisorprotocol.Version, Channel: s.config.Channel}
+	response := supervisor.Response{Protocol: supervisor.Version, Channel: s.config.Channel}
 	switch request.Op {
-	case supervisorprotocol.OpStatus:
+	case supervisor.OpStatus:
 		if request.Manifest != nil {
 			response.Error = "status does not accept a manifest"
 			break
@@ -114,19 +114,19 @@ func (s *Server) handle(serverCtx context.Context, connection *net.UnixConn) {
 		// A reachable supervisor remains healthy even when its worker is down;
 		// callers must still be able to submit a recovery update.
 		response.OK = true
-	case supervisorprotocol.OpUpdateWorker:
+	case supervisor.OpUpdateWorker:
 		if request.Manifest == nil {
 			response.Error = "update manifest is required"
 			break
 		}
 		response = s.updater.Update(ctx, *request.Manifest, connection)
-	case supervisorprotocol.OpRollbackWorker:
+	case supervisor.OpRollbackWorker:
 		if request.Manifest != nil {
 			response.Error = "rollback does not accept a manifest"
 			break
 		}
 		response = s.updater.Rollback(ctx)
-	case supervisorprotocol.OpRestartWorker:
+	case supervisor.OpRestartWorker:
 		if request.Manifest != nil {
 			response.Error = "restart does not accept a manifest"
 			break
@@ -135,15 +135,15 @@ func (s *Server) handle(serverCtx context.Context, connection *net.UnixConn) {
 	default:
 		response.Error = fmt.Sprintf("unsupported operation %q", request.Op)
 	}
-	if err := supervisorprotocol.WriteFrame(connection, response, supervisorprotocol.MaxResponseBytes); err != nil {
+	if err := supervisor.WriteFrame(connection, response, supervisor.MaxResponseBytes); err != nil {
 		s.log.Printf("write supervisor response: %v", err)
 	}
 }
 
 func (s *Server) writeError(w io.Writer, message string) {
-	_ = supervisorprotocol.WriteFrame(w, supervisorprotocol.Response{
-		Protocol: supervisorprotocol.Version, Channel: s.config.Channel, Error: message,
-	}, supervisorprotocol.MaxResponseBytes)
+	_ = supervisor.WriteFrame(w, supervisor.Response{
+		Protocol: supervisor.Version, Channel: s.config.Channel, Error: message,
+	}, supervisor.MaxResponseBytes)
 }
 
 func unixPeerUID(connection *net.UnixConn) (int, error) {

@@ -3,25 +3,25 @@ package previewapi
 import (
 	"time"
 
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/entity"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/remotetask"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficmodel"
 )
 
 type Document struct {
-	ID        string              `json:"id"`
-	SessionID string              `json:"sessionId"`
-	Namespace string              `json:"namespace"`
-	State     remotetask.State    `json:"state"`
-	Name      string              `json:"name"`
-	ClusterIP string              `json:"clusterIp,omitempty"`
-	Ports     []trafficmodel.Port `json:"ports"`
-	CreatedAt time.Time           `json:"createdAt"`
-	UpdatedAt time.Time           `json:"updatedAt"`
+	ID        string           `json:"id"`
+	SessionID string           `json:"sessionId"`
+	Namespace string           `json:"namespace"`
+	State     remotetask.State `json:"state"`
+	Name      string           `json:"name"`
+	ClusterIP string           `json:"clusterIp,omitempty"`
+	Ports     []entity.Port    `json:"ports"`
+	CreatedAt time.Time        `json:"createdAt"`
+	UpdatedAt time.Time        `json:"updatedAt"`
 }
 
 type storedSpec struct {
-	Name  string              `json:"name"`
-	Ports []trafficmodel.Port `json:"ports"`
+	Name  string        `json:"name"`
+	Ports []entity.Port `json:"ports"`
 }
 
 type ownerResult struct {

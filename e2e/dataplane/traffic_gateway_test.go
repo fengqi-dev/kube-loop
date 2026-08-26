@@ -19,6 +19,7 @@ import (
 
 	"github.com/labstack/echo/v5"
 
+	"github.com/fengqi-dev/kube-loop/internal/auth/relaybearer"
 	clientdataplane "github.com/fengqi-dev/kube-loop/internal/client/dataplane"
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
@@ -207,11 +208,11 @@ func startE2ETrafficGateway(
 	if err != nil {
 		t.Fatal(err)
 	}
-	replay, err := relayticket.NewReplayGuard(128, time.Now)
+	replay, err := relaybearer.NewReplayGuard(128, time.Now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	requestVerifier, err := relayticket.NewRequestVerifier(verifier, replay)
+	requestVerifier, err := relaybearer.NewRequestVerifier(verifier, replay)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -11,11 +11,11 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/xtaci/smux"
 
-	protocolmux "github.com/fengqi-dev/kube-loop/internal/protocol/websocketmux"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/wssprotocol"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/wss"
+	protocolmux "github.com/fengqi-dev/kube-loop/internal/transport/websocketmux"
 )
 
-const Subprotocol = wssprotocol.Subprotocol
+const Subprotocol = wss.Subprotocol
 
 const (
 	defaultPoolSize          = 2

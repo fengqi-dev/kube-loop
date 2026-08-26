@@ -176,7 +176,7 @@ func authorizeIdentity(
 	identity controlplaneapi.Identity,
 	request authorization.Request,
 ) (authorization.Decision, *controlplaneapi.Error) {
-	if identity.Subject == "" {
+	if strings.TrimSpace(identity.Subject) == "" {
 		return authorization.Decision{}, &controlplaneapi.Error{
 			Code:    controlplaneapi.CodeUnauthenticated,
 			Message: authenticationRequiredMessage,

@@ -13,9 +13,9 @@ import (
 	"k8s.io/apimachinery/pkg/util/validation"
 
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/entity"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/sessionapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficmodel"
 )
 
 func normalizeRequest(spec *Spec) *controlplaneapi.Error {
@@ -45,7 +45,7 @@ func normalizeRequest(spec *Spec) *controlplaneapi.Error {
 	return nil
 }
 
-func comparePorts(left, right trafficmodel.Port) int {
+func comparePorts(left, right entity.Port) int {
 	if left.ServicePort != right.ServicePort {
 		return int(left.ServicePort - right.ServicePort)
 	}
@@ -74,7 +74,7 @@ func documentFrom(
 	}
 	return Document{
 		ID: task.ID, SessionID: task.SessionID, Namespace: namespace, State: task.State,
-		Service: spec.Service, ClusterIP: spec.ClusterIP, Ports: append([]trafficmodel.Port(nil), spec.Ports...),
+		Service: spec.Service, ClusterIP: spec.ClusterIP, Ports: append([]entity.Port(nil), spec.Ports...),
 		CreatedAt: task.CreatedAt.UTC(), UpdatedAt: task.UpdatedAt.UTC(), ExpiresAt: expiresAt,
 	}
 }

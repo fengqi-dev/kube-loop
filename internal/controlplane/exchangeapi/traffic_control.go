@@ -10,13 +10,13 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/entity"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/servicebinding"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/sessionapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/taskstream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/remotetask"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficcontrol"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficmodel"
 )
 
 type ownerResult struct {
@@ -74,7 +74,7 @@ func trafficOwnedBy(task storage.Task, relayID string) bool {
 }
 
 func interceptPorts(
-	expected []trafficmodel.Port,
+	expected []entity.Port,
 	listeners []trafficcontrol.ListenerPort,
 ) ([]servicebinding.InterceptPort, error) {
 	if len(expected) != len(listeners) {

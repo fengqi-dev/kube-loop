@@ -6,9 +6,9 @@ import (
 	"time"
 
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/entity"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/sessionapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficmodel"
 )
 
 const TaskType = "exchange"
@@ -33,8 +33,8 @@ type ServiceResolver interface {
 		controlplaneapi.Identity,
 		string,
 		string,
-		[]trafficmodel.Port,
-	) (trafficmodel.ResolvedService, error)
+		[]entity.Port,
+	) (entity.ResolvedService, error)
 }
 
 type Service struct {

@@ -10,8 +10,8 @@ import (
 
 	"sigs.k8s.io/yaml"
 
+	"github.com/fengqi-dev/kube-loop/internal/auth/relaybearer"
 	"github.com/fengqi-dev/kube-loop/internal/gateway/websocketmux"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/relayticket"
 )
 
 const (
@@ -79,7 +79,7 @@ func (duration *jsonDuration) parse(value string) error {
 func defaultGatewayConfig() gatewayConfig {
 	return gatewayConfig{
 		HTTP:  gatewayHTTPConfig{Listen: ":8080", Path: websocketmux.DefaultPath},
-		Relay: gatewayRelayConfig{ReplayEntries: relayticket.DefaultReplayEntries},
+		Relay: gatewayRelayConfig{ReplayEntries: relaybearer.DefaultReplayEntries},
 		WebSocket: gatewayWebSocketConfig{
 			MaxSessions: 256, MaxSessionsPerUser: 8, MaxStreamsPerSession: 128, MaxFrameBytes: 1 << 20,
 			HandshakeTimeout:  jsonDuration{Duration: 10 * time.Second},

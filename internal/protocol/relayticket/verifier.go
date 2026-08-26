@@ -37,8 +37,8 @@ func NewVerifier(config VerifierConfig) (*Verifier, error) {
 	config.Issuer = strings.TrimSpace(config.Issuer)
 	config.Audience = strings.TrimSpace(config.Audience)
 	config.RequiredOperation = strings.TrimSpace(config.RequiredOperation)
-	if !validText(config.Issuer, 512) || !validIdentifier(config.Audience, 128) ||
-		!validIdentifier(config.RequiredOperation, 64) || len(config.Keys) == 0 || len(config.Keys) > 8 {
+	if !validText(config.Issuer, 512) || !ValidIdentifier(config.Audience, 128) ||
+		!ValidIdentifier(config.RequiredOperation, 64) || len(config.Keys) == 0 || len(config.Keys) > 8 {
 		return nil, errors.New("relay ticket verifier configuration is invalid")
 	}
 	if config.ClockSkew == 0 {
@@ -53,7 +53,7 @@ func NewVerifier(config VerifierConfig) (*Verifier, error) {
 	keys := make(map[string]ed25519.PublicKey, len(config.Keys))
 	keyValidity := make(map[string]KeyValidity, len(config.KeyValidity))
 	for keyID, key := range config.Keys {
-		if !validIdentifier(keyID, 128) || len(key) != ed25519.PublicKeySize {
+		if !ValidIdentifier(keyID, 128) || len(key) != ed25519.PublicKeySize {
 			return nil, errors.New("relay ticket verification key is invalid")
 		}
 		keys[keyID] = append(ed25519.PublicKey(nil), key...)
@@ -92,7 +92,7 @@ func (verifier *Verifier) Verify(ticket string) (Claims, error) {
 	}
 	var ticketHeader header
 	if err := decodeStrict(headerJSON, &ticketHeader); err != nil || ticketHeader.Algorithm != Algorithm ||
-		ticketHeader.Type != Type || !validIdentifier(ticketHeader.KeyID, 128) {
+		ticketHeader.Type != Type || !ValidIdentifier(ticketHeader.KeyID, 128) {
 		return Claims{}, ErrInvalid
 	}
 	key, exists := verifier.keys[ticketHeader.KeyID]

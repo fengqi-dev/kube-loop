@@ -1,13 +1,15 @@
-package networkspec
+package gateway
 
 import (
 	"net/netip"
 	"testing"
+
+	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
 )
 
-func targetTestSpec(t *testing.T) Spec {
+func targetTestSpec(t *testing.T) networkspec.Spec {
 	t.Helper()
-	spec, err := Normalize(Spec{
+	spec, err := networkspec.Normalize(networkspec.Spec{
 		PodCIDRs: []string{"10.2.0.0/16"}, ServiceCIDRs: []string{"10.96.0.0/12"},
 		PodIPs: []string{"10.2.4.5"}, ServiceIPs: []string{"10.96.1.20"}, DNSServer: "10.96.0.10",
 		ClusterDomains: []string{"cluster.local"},

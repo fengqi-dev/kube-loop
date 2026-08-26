@@ -15,8 +15,8 @@ import (
 
 	"github.com/fengqi-dev/kube-loop/internal/middleware"
 
-	protocolmux "github.com/fengqi-dev/kube-loop/internal/protocol/websocketmux"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/wssprotocol"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/wss"
+	protocolmux "github.com/fengqi-dev/kube-loop/internal/transport/websocketmux"
 )
 
 func (forwarder *Forwarder) dial() (result *pooledSession, resultErr error) {
@@ -90,30 +90,30 @@ func (forwarder *Forwarder) dial() (result *pooledSession, resultErr error) {
 			Subprotocol, connection.Subprotocol(),
 		)
 	}
-	if response == nil || response.Header.Get(wssprotocol.VersionHeader) != wssprotocol.Version {
-		_ = closeWebSocket(connection, websocket.ClosePolicyViolation, wssprotocol.CodeVersionMismatch)
+	if response == nil || response.Header.Get(wss.VersionHeader) != wss.Version {
+		_ = closeWebSocket(connection, websocket.ClosePolicyViolation, wss.CodeVersionMismatch)
 		return nil, &HandshakeError{
-			Code:              wssprotocol.CodeVersionMismatch,
+			Code:              wss.CodeVersionMismatch,
 			Message:           "Gateway does not advertise the WSS ClientHello contract",
-			SupportedVersions: []string{wssprotocol.Version},
+			SupportedVersions: []string{wss.Version},
 		}
 	}
-	connection.SetReadLimit(wssprotocol.MaximumHandshakeBytes)
+	connection.SetReadLimit(wss.MaximumHandshakeBytes)
 	handshakeCtx, cancelHandshake := context.WithTimeout(dialCtx, forwarder.config.HandshakeTimeout)
-	hello := wssprotocol.NewClientHello(forwarder.config.ClientVersion, forwarder.config.DeviceID)
+	hello := wss.NewClientHello(forwarder.config.ClientVersion, forwarder.config.DeviceID)
 	hello.ProtocolVersions = append([]string(nil), forwarder.config.SupportedVersions...)
-	if err := wssprotocol.Write(handshakeCtx, connection, hello); err != nil {
+	if err := wss.Write(handshakeCtx, connection, hello); err != nil {
 		cancelHandshake()
 		_ = closeWebSocket(connection, websocket.ClosePolicyViolation, "HANDSHAKE_FAILED")
 		return nil, fmt.Errorf("send Gateway WSS ClientHello: %w", err)
 	}
-	message, err := wssprotocol.Read(handshakeCtx, connection)
+	message, err := wss.Read(handshakeCtx, connection)
 	cancelHandshake()
 	if err != nil {
 		_ = closeWebSocket(connection, websocket.ClosePolicyViolation, "HANDSHAKE_FAILED")
-		if errors.Is(err, wssprotocol.ErrInvalidHandshake) {
+		if errors.Is(err, wss.ErrInvalidHandshake) {
 			return nil, &HandshakeError{
-				Code: wssprotocol.CodeInvalidHandshake, Message: "Gateway returned an invalid WSS handshake",
+				Code: wss.CodeInvalidHandshake, Message: "Gateway returned an invalid WSS handshake",
 			}
 		}
 		return nil, fmt.Errorf("read Gateway WSS handshake: %w", err)
@@ -130,7 +130,7 @@ func (forwarder *Forwarder) dial() (result *pooledSession, resultErr error) {
 	if serverHello == nil || !slices.Contains(hello.ProtocolVersions, serverHello.ProtocolVersion) ||
 		!slices.Contains(serverHello.Capabilities, "smux.v2") ||
 		!slices.Contains(serverHello.Capabilities, "tunnel.open.v2") ||
-		!slices.Contains(serverHello.Capabilities, wssprotocol.CapabilityTrafficWebSocket) {
+		!slices.Contains(serverHello.Capabilities, wss.CapabilityTrafficWebSocket) {
 		_ = closeWebSocket(connection, websocket.ClosePolicyViolation, "INVALID_HANDSHAKE")
 		return nil, errors.New("gateway returned an incompatible WSS ServerHello")
 	}

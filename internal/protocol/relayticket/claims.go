@@ -8,10 +8,10 @@ import (
 )
 
 func validateClaims(claims Claims) error {
-	if claims.Version != Version || !validText(claims.Issuer, 512) || !validIdentifier(claims.Audience, 128) ||
-		!validIdentifier(claims.IdentityID, 256) || !validIdentifier(claims.DeviceID, 256) ||
-		!validIdentifier(claims.SessionID, 128) || !validIdentifier(claims.Namespace, 253) ||
-		claims.SessionGeneration == 0 || !validIdentifier(claims.TicketID, 128) ||
+	if claims.Version != Version || !validText(claims.Issuer, 512) || !ValidIdentifier(claims.Audience, 128) ||
+		!ValidIdentifier(claims.IdentityID, 256) || !ValidIdentifier(claims.DeviceID, 256) ||
+		!ValidIdentifier(claims.SessionID, 128) || !ValidIdentifier(claims.Namespace, 253) ||
+		claims.SessionGeneration == 0 || !ValidIdentifier(claims.TicketID, 128) ||
 		len(claims.Groups) > 128 || len(claims.Operations) == 0 || len(claims.Operations) > 16 {
 		return errors.New("relay ticket claims are invalid")
 	}
@@ -27,7 +27,7 @@ func validateClaims(claims Claims) error {
 	}
 	seen := make(map[string]struct{}, len(claims.Operations))
 	for _, operation := range claims.Operations {
-		if !validIdentifier(operation, 64) {
+		if !ValidIdentifier(operation, 64) {
 			return errors.New("relay ticket operation is invalid")
 		}
 		if _, exists := seen[operation]; exists {
@@ -49,7 +49,9 @@ func validText(value string, maximum int) bool {
 	return value != "" && len(value) <= maximum && strings.TrimSpace(value) == value && !containsControl(value)
 }
 
-func validIdentifier(value string, maximum int) bool {
+// ValidIdentifier reports whether value is a non-empty, trimmed identifier of at
+// most maximum length drawn from the RelayTicket identifier alphabet.
+func ValidIdentifier(value string, maximum int) bool {
 	if !validText(value, maximum) {
 		return false
 	}

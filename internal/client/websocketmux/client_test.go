@@ -22,8 +22,8 @@ import (
 	servermux "github.com/fengqi-dev/kube-loop/internal/gateway/websocketmux"
 	"github.com/fengqi-dev/kube-loop/internal/middleware"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/exchangestream"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficstream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
+	"github.com/fengqi-dev/kube-loop/internal/transport/trafficstream"
 )
 
 type lockedBuffer struct {

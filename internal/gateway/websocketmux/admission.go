@@ -6,7 +6,7 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"github.com/fengqi-dev/kube-loop/internal/protocol/wssprotocol"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/wss"
 )
 
 func (h *Handler) acquireGeneration(identity Identity) bool {
@@ -28,11 +28,11 @@ func (h *Handler) reject(
 	parent context.Context,
 	requestID string,
 	connection *websocket.Conn,
-	rejection wssprotocol.Reject,
+	rejection wss.Reject,
 ) {
 	h.logf(parent, requestID, "WebSocket handshake rejected: reason=%s", rejection.Code)
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), time.Second)
-	_ = wssprotocol.Write(ctx, connection, rejection)
+	_ = wss.Write(ctx, connection, rejection)
 	cancel()
 	_ = closeWebSocket(connection, websocket.ClosePolicyViolation, rejection.Code)
 }

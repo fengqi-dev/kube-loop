@@ -11,12 +11,12 @@ import (
 
 	"github.com/fengqi-dev/kube-loop/internal/controlplane"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/entity"
 	controlplanemiddleware "github.com/fengqi-dev/kube-loop/internal/controlplane/middleware"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/sessionapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/taskapi"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/remotetask"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficmodel"
 )
 
 func (handler *Service) create(
@@ -73,7 +73,7 @@ func (handler *Service) create(
 	canonical := storedSpec{
 		Service:   service.Name,
 		ClusterIP: service.ClusterIP,
-		Ports:     append([]trafficmodel.Port(nil), service.Ports...),
+		Ports:     append([]entity.Port(nil), service.Ports...),
 	}
 	specJSON, _ := json.Marshal(canonical)
 	now := handler.now().UTC()

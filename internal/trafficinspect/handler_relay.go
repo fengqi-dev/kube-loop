@@ -7,7 +7,7 @@ import (
 	"net"
 	"strings"
 
-	"github.com/fengqi-dev/kube-loop/internal/protocol/streamcopy"
+	"github.com/fengqi-dev/kube-loop/internal/transport/streamcopy"
 )
 
 func (h *Handler) relayUninspected(ctx context.Context, client net.Conn, target string) error {

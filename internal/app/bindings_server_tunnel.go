@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	clientdataplane "github.com/fengqi-dev/kube-loop/internal/client/dataplane"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/networkdiag"
+	"github.com/fengqi-dev/kube-loop/internal/networkdiag"
 )
 
 func (a *App) ConnectServerDataPlane(profileID, mode string) (clientdataplane.Status, error) {

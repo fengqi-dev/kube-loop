@@ -23,12 +23,12 @@ func (s *Server) resolveAuthorized(
 ) (string, error) {
 	if address, err := netip.ParseAddr(host); err == nil {
 		address = address.Unmap()
-		if err := networkspec.AuthorizeAddress(spec, address, port); err != nil {
+		if err := AuthorizeAddress(spec, address, port); err != nil {
 			return "", err
 		}
 		return net.JoinHostPort(address.String(), strconv.Itoa(int(port))), nil
 	}
-	host, err := networkspec.AuthorizeDomain(spec, host)
+	host, err := AuthorizeDomain(spec, host)
 	if err != nil {
 		return "", err
 	}
@@ -43,7 +43,7 @@ func (s *Server) resolveAuthorized(
 	allowed := make([]netip.Addr, 0, len(addresses))
 	for _, address := range addresses {
 		address = address.Unmap()
-		if networkspec.AuthorizeAddress(spec, address, port) == nil {
+		if AuthorizeAddress(spec, address, port) == nil {
 			allowed = append(allowed, address)
 		}
 	}

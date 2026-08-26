@@ -5,11 +5,11 @@ import (
 
 	"github.com/xtaci/smux"
 
-	"github.com/fengqi-dev/kube-loop/internal/protocol/wssprotocol"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/wss"
 )
 
 const (
-	Subprotocol = wssprotocol.Subprotocol
+	Subprotocol = wss.Subprotocol
 	DefaultPath = "/v1/tunnel"
 )
 

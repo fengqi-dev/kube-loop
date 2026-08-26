@@ -10,7 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/fengqi-dev/kube-loop/internal/protocol/wssprotocol"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/wss"
 )
 
 type Identity struct {
@@ -88,19 +88,19 @@ func NewHandler(config ServerConfig) (*Handler, error) {
 	if config.MaxFrameBytes == 0 {
 		config.MaxFrameBytes = 1 << 20
 	}
-	if config.MaxFrameBytes < wssprotocol.MaximumHandshakeBytes || config.MaxFrameBytes > 16<<20 {
+	if config.MaxFrameBytes < wss.MaximumHandshakeBytes || config.MaxFrameBytes > 16<<20 {
 		return nil, errors.New("gateway WebSocket frame limit is invalid")
 	}
 	if config.HandshakeTimeout <= 0 {
-		config.HandshakeTimeout = wssprotocol.DefaultHandshakeTimeout
+		config.HandshakeTimeout = wss.DefaultHandshakeTimeout
 	}
 	if config.HandshakeTimeout > time.Minute {
 		return nil, errors.New("gateway WSS handshake timeout must not exceed one minute")
 	}
 	if len(config.SupportedVersions) == 0 {
-		config.SupportedVersions = []string{wssprotocol.Version}
+		config.SupportedVersions = []string{wss.Version}
 	}
-	if len(config.SupportedVersions) != 1 || config.SupportedVersions[0] != wssprotocol.Version {
+	if len(config.SupportedVersions) != 1 || config.SupportedVersions[0] != wss.Version {
 		return nil, errors.New("gateway WSS protocol versions are invalid")
 	}
 	if config.StreamIdleTimeout <= 0 {
