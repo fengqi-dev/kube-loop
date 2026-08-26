@@ -67,7 +67,6 @@ func (connection *trackedConn) Close() error {
 }
 
 func (forwarder *Forwarder) acceptLoop() {
-	defer forwarder.wg.Done()
 	for {
 		connection, err := forwarder.listener.Accept()
 		if err != nil {

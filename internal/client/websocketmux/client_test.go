@@ -94,8 +94,22 @@ func TestForwarderPropagatesCorrelationToTokenSourceAndGateway(t *testing.T) {
 		t.Fatalf("Gateway header correlation ID = %q", got)
 	}
 	server.Close()
+	var clientOutput, gatewayOutput string
+	deadline := time.After(3 * time.Second)
+	for {
+		clientOutput = clientLogs.String()
+		gatewayOutput = gatewayLogs.String()
+		if strings.Contains(gatewayOutput, `"correlation_id":"`+correlationID+`"`) {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("gateway logs = %q (timed out waiting for session closed log)", gatewayOutput)
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
 	for name, output := range map[string]string{
-		"client": clientLogs.String(), "gateway": gatewayLogs.String(),
+		"client": clientOutput, "gateway": gatewayOutput,
 	} {
 		if !strings.Contains(output, `"correlation_id":"`+correlationID+`"`) ||
 			strings.Contains(output, "relay-ticket") {

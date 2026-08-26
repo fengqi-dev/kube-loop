@@ -10,7 +10,6 @@ import (
 )
 
 func (manager *Manager) run(ctx context.Context, taskID string, entry *activeTransfer) {
-	defer manager.wg.Done()
 	defer close(entry.done)
 	if err := manager.update(taskID, func(task *Task) { task.Status = StatusPreparing }); err != nil {
 		manager.finish(
