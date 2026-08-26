@@ -2,6 +2,7 @@ package install
 
 import (
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -25,7 +26,9 @@ func TestWriteTemporaryPublicCertificateCleansUp(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0o600 {
+	if info, err := os.Stat(path); err != nil {
+		t.Fatalf("temporary certificate stat: info=%v err=%v", info, err)
+	} else if runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
 		t.Fatalf("temporary certificate mode: info=%v err=%v", info, err)
 	}
 	cleanup()
