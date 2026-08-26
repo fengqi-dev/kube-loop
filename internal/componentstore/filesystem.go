@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/fengqi-dev/kube-loop/internal/userpaths"
+	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
 func directoryFor(release string) (string, error) {
@@ -20,7 +20,7 @@ func directoryFor(release string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	layout, err := userpaths.ForVersion(release)
+	layout, err := utils.ForVersion(release)
 	if err != nil {
 		return "", err
 	}

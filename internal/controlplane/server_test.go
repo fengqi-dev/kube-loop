@@ -13,12 +13,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gorilla/websocket"
 	"github.com/labstack/echo/v5"
 
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/authorization"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/health"
-	"github.com/fengqi-dev/kube-loop/internal/testutil/websockettest"
 )
 
 type shutdownAllowAuthorizer struct{}
@@ -210,7 +210,7 @@ func TestShutdownCancelsAndWaitsForWebSocketHandlers(t *testing.T) {
 		WithAPIRoutes(
 			testEndpoint(
 				func(writer http.ResponseWriter, request *http.Request, _ controlplaneapi.Identity) *controlplaneapi.Error {
-					connection, err := websockettest.Accept(writer, request, nil)
+					connection, err := (&websocket.Upgrader{}).Upgrade(writer, request, nil)
 					if err != nil {
 						return &controlplaneapi.Error{
 							Code:    controlplaneapi.CodeInternal,
@@ -236,10 +236,9 @@ func TestShutdownCancelsAndWaitsForWebSocketHandlers(t *testing.T) {
 	}
 	serveDone := make(chan error, 1)
 	go func() { serveDone <- server.Serve(listener) }()
-	connection, _, err := websockettest.Dial(
+	connection, _, err := websocket.DefaultDialer.DialContext(
 		context.Background(),
-		"ws://"+listener.Addr().String()+"/api/stream",
-		nil)
+		"ws://"+listener.Addr().String()+"/api/stream", nil)
 
 	if err != nil {
 		t.Fatal(err)

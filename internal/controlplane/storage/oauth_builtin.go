@@ -5,15 +5,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/fengqi-dev/kube-loop/internal/authconfig"
-)
-
-const (
-	DesktopOAuthClientID    = authconfig.DesktopClientID
-	TUIOAuthClientID        = authconfig.TUIClientID
-	ManagementOAuthClientID = "kubeloop-management"
-	DesktopOAuthRedirectURI = authconfig.DesktopRedirectURI
-	TUIOAuthRedirectURI     = authconfig.TUIRedirectURI
+	"github.com/fengqi-dev/kube-loop/internal/auth"
 )
 
 // EnsureBuiltinOAuthClients creates the first-party public clients without
@@ -30,8 +22,8 @@ func EnsureBuiltinOAuthClients(
 	now := time.Now().UTC()
 	clients := []OAuthClient{
 		{
-			ID: DesktopOAuthClientID, Name: "KubeLoop Desktop", Public: true,
-			RedirectURIs: []string{DesktopOAuthRedirectURI},
+			ID: auth.DesktopClientID, Name: "KubeLoop Desktop", Public: true,
+			RedirectURIs: []string{auth.DesktopRedirectURI},
 			GrantTypes:   []string{grantAuthorizationCode, grantRefreshToken},
 			Scopes: []string{
 				scopeOpenID,
@@ -43,8 +35,8 @@ func EnsureBuiltinOAuthClients(
 			Trusted: true, Enabled: true, Builtin: true, CreatedAt: now, UpdatedAt: now,
 		},
 		{
-			ID: TUIOAuthClientID, Name: "KubeLoop TUI", Public: true,
-			RedirectURIs: []string{TUIOAuthRedirectURI},
+			ID: auth.TUIClientID, Name: "KubeLoop TUI", Public: true,
+			RedirectURIs: []string{auth.DesktopRedirectURI},
 			GrantTypes:   []string{grantAuthorizationCode, grantRefreshToken},
 			Scopes: []string{
 				scopeOpenID,
@@ -56,7 +48,7 @@ func EnsureBuiltinOAuthClients(
 			Trusted: true, Enabled: true, Builtin: true, CreatedAt: now, UpdatedAt: now,
 		},
 		{
-			ID: ManagementOAuthClientID, Name: "KubeLoop Management", Public: true,
+			ID: auth.ManagementOAuthClientID, Name: "KubeLoop Management", Public: true,
 			RedirectURIs: []string{managementRedirectURI},
 			GrantTypes:   []string{grantAuthorizationCode, grantRefreshToken},
 			Scopes: []string{

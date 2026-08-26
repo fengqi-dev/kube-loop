@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/fengqi-dev/kube-loop/internal/dnsname"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/dns"
 	"github.com/fengqi-dev/kube-loop/internal/singbox"
 )
 
@@ -127,7 +127,7 @@ func (r *Runtime) startOnce(
 	if err != nil {
 		return nil, err
 	}
-	clusterDomains, _ := dnsname.NormalizeClusterDomains(network.ClusterDomains)
+	clusterDomains, _ := dns.NormalizeClusterDomains(network.ClusterDomains)
 	podRoutes := slices.Clone(network.PodCIDRs)
 	for _, raw := range network.PodIPs {
 		address, parseErr := netip.ParseAddr(raw)

@@ -11,8 +11,8 @@ import (
 
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
-	"github.com/fengqi-dev/kube-loop/internal/fsatomic"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/filestream"
+	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
 const (
@@ -133,10 +133,10 @@ func NewManager(client Client, config Config) (*Manager, error) {
 		cancel:       cancel,
 		tasks:        make(map[string]Task),
 		active:       make(map[string]*activeTransfer),
-		writeFile:    fsatomic.WriteFile,
+		writeFile:    utils.WriteFile,
 	}
 	if manager.statePath != "" {
-		if err := fsatomic.CleanupTemps(manager.statePath); err != nil {
+		if err := utils.CleanupTemps(manager.statePath); err != nil {
 			cancel()
 			return nil, fmt.Errorf("clean file transfer state: %w", err)
 		}

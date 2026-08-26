@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/fengqi-dev/kube-loop/internal/correlation"
+	"github.com/fengqi-dev/kube-loop/internal/middleware"
 )
 
 func resolvePrivate(ctx context.Context, host string, port uint16) (string, error) {
@@ -44,7 +44,7 @@ func (s *Server) log(ctx context.Context, requestID, message string, attributes 
 			arguments,
 			"operation", "gateway.tunnel.stream",
 			"outcome", "failure",
-			"correlation_id", correlation.ID(ctx),
+			"correlation_id", middleware.ID(ctx),
 			"request_id", requestID,
 		)
 		arguments = append(arguments, attributes...)

@@ -11,14 +11,12 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-
-	"github.com/fengqi-dev/kube-loop/internal/testutil/websockettest"
 )
 
 func TestReadWriteRoundTripOverWebSocket(t *testing.T) {
 	serverResult := make(chan error, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		connection, err := websockettest.Accept(writer, request, nil)
+		connection, err := (&websocket.Upgrader{}).Upgrade(writer, request, nil)
 		if err != nil {
 			serverResult <- err
 			return
@@ -39,7 +37,7 @@ func TestReadWriteRoundTripOverWebSocket(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
-	connection, _, err := websockettest.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
+	connection, _, err := websocket.DefaultDialer.DialContext(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +57,7 @@ func TestReadWriteRoundTripOverWebSocket(t *testing.T) {
 func TestReadRejectsTextWebSocketMessage(t *testing.T) {
 	serverResult := make(chan error, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		connection, err := websockettest.Accept(writer, request, nil)
+		connection, err := (&websocket.Upgrader{}).Upgrade(writer, request, nil)
 		if err == nil {
 			defer func() { _ = connection.Close() }()
 			err = connection.WriteMessage(websocket.TextMessage, []byte(`{"type":"reject"}`))
@@ -70,7 +68,7 @@ func TestReadRejectsTextWebSocketMessage(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
-	connection, _, err := websockettest.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
+	connection, _, err := websocket.DefaultDialer.DialContext(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

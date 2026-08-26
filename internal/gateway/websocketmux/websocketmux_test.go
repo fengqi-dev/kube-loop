@@ -23,7 +23,6 @@ import (
 	shared "github.com/fengqi-dev/kube-loop/internal/client/websocketmux"
 	protocolmux "github.com/fengqi-dev/kube-loop/internal/protocol/websocketmux"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/wssprotocol"
-	"github.com/fengqi-dev/kube-loop/internal/testutil/websockettest"
 )
 
 const testDeviceID = "22222222-2222-4222-8222-222222222222"
@@ -414,11 +413,9 @@ func rawClientSession(t *testing.T, ctx context.Context, serverURL, token string
 	t.Helper()
 	header := make(http.Header)
 	header.Set("Authorization", "Bearer "+token)
-	connection, _, err := websockettest.Dial(
-		ctx,
-		"ws"+strings.TrimPrefix(serverURL, "http"),
-		&websockettest.DialOptions{HTTPHeader: header, Subprotocols: []string{Subprotocol}},
-	)
+	dialer := *websocket.DefaultDialer
+	dialer.Subprotocols = []string{Subprotocol}
+	connection, _, err := dialer.DialContext(ctx, "ws"+strings.TrimPrefix(serverURL, "http"), header)
 
 	if err != nil {
 		t.Fatal(err)
@@ -611,12 +608,13 @@ func TestNewGenerationLetsExistingStreamFinishAndRejectsOlderNewStreams(t *testi
 
 	header := make(http.Header)
 	header.Set("Authorization", "Bearer generation-1")
-	connection, responseHTTP, err := websockettest.Dial(
+	dialer := *websocket.DefaultDialer
+	dialer.Subprotocols = []string{Subprotocol}
+	connection, responseHTTP, err := dialer.DialContext(
 		ctx,
 		"ws"+strings.TrimPrefix(server.URL, "http"),
-		&websockettest.DialOptions{
-			HTTPHeader: header, Subprotocols: []string{Subprotocol},
-		})
+		header,
+	)
 
 	if connection != nil {
 		_ = connection.Close()
@@ -782,11 +780,9 @@ func dialRawWebSocket(t *testing.T, ctx context.Context, serverURL, token string
 	t.Helper()
 	header := make(http.Header)
 	header.Set("Authorization", "Bearer "+token)
-	connection, _, err := websockettest.Dial(
-		ctx,
-		"ws"+strings.TrimPrefix(serverURL, "http"),
-		&websockettest.DialOptions{HTTPHeader: header, Subprotocols: []string{Subprotocol}},
-	)
+	dialer := *websocket.DefaultDialer
+	dialer.Subprotocols = []string{Subprotocol}
+	connection, _, err := dialer.DialContext(ctx, "ws"+strings.TrimPrefix(serverURL, "http"), header)
 
 	if err != nil {
 		t.Fatal(err)

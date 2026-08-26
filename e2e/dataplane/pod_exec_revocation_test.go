@@ -31,7 +31,6 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/execstream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
-	"github.com/fengqi-dev/kube-loop/internal/testutil/websockettest"
 )
 
 func TestRealPodExecStopsWhenOAuthGrantIsRevoked(t *testing.T) {
@@ -162,7 +161,7 @@ func TestRealPodExecStopsWhenOAuthGrantIsRevoked(t *testing.T) {
 		"ws%s/api/sessions/%s/exec/%s/stream?namespace=%s",
 		strings.TrimPrefix(httpServer.URL, "http"), sessionID, task.ID, harness.EchoNamespace,
 	)
-	connection, response, err := websockettest.Dial(ctx, streamURL, nil)
+	connection, response, err := websocket.DefaultDialer.DialContext(ctx, streamURL, nil)
 	if err != nil {
 		if response != nil {
 			t.Fatalf("open real Pod exec stream: status=%d err=%v", response.StatusCode, err)
@@ -207,7 +206,7 @@ func (validator e2eExecSessionValidator) RequireActive(
 
 func waitForExecOutput(t *testing.T, ctx context.Context, connection *websocket.Conn, expected string) {
 	t.Helper()
-	readCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	_, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 	for {
 		_, encoded, err := connection.ReadMessage()
@@ -230,7 +229,7 @@ func waitForExecOutput(t *testing.T, ctx context.Context, connection *websocket.
 
 func waitForCancelledExit(t *testing.T, ctx context.Context, connection *websocket.Conn) execstream.ExitStatus {
 	t.Helper()
-	readCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	_, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 	for {
 		_, encoded, err := connection.ReadMessage()

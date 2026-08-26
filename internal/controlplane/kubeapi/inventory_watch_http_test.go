@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gorilla/websocket"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
@@ -19,7 +20,6 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/authorization"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/kubeapi"
-	"github.com/fengqi-dev/kube-loop/internal/testutil/websockettest"
 )
 
 type inventoryProvider struct{ client kubernetes.Interface }
@@ -72,15 +72,21 @@ func TestInventoryWatchHTTPStreamsAuthorizedResyncSnapshots(t *testing.T) {
 	defer httpServer.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	connection, _, err := websockettest.Dial(
+	dialer := *websocket.DefaultDialer
+	transport, ok := httpServer.Client().Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("HTTP transport = %T", httpServer.Client().Transport)
+	}
+	dialer.TLSClientConfig = transport.TLSClientConfig.Clone()
+	dialer.TLSClientConfig.NextProtos = []string{"http/1.1"}
+	connection, _, err := dialer.DialContext(
 		ctx,
 		"wss"+strings.TrimPrefix(
 			httpServer.URL,
 			"https",
 		)+"/api/namespaces/development/pods?watch=true",
-		&websockettest.DialOptions{
-			HTTPClient: httpServer.Client(),
-		})
+		nil,
+	)
 
 	if err != nil {
 		t.Fatal(err)

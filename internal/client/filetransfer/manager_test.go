@@ -24,9 +24,8 @@ import (
 
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
-	"github.com/fengqi-dev/kube-loop/internal/fsatomic"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/filestream"
-	"github.com/fengqi-dev/kube-loop/internal/testutil/websockettest"
+	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
 func TestManagerUploadsLocalFilePersistsProgressAndHistory(t *testing.T) {
@@ -105,7 +104,7 @@ func TestManagerListDoesNotBlockOnCheckpointWrite(t *testing.T) {
 	manager.writeFile = func(path string, raw []byte, dirMode, fileMode os.FileMode) error {
 		startOnce.Do(func() { close(started) })
 		<-release
-		return fsatomic.WriteFile(path, raw, dirMode, fileMode)
+		return utils.WriteFile(path, raw, dirMode, fileMode)
 	}
 	type startResult struct {
 		task Task
@@ -206,7 +205,7 @@ func TestManagerStopsBeforeRemoteTransferWhenPreparingCheckpointFails(t *testing
 	manager.writeFile = func(path string, raw []byte, dirMode, fileMode os.FileMode) error {
 		writes++
 		if writes == 1 {
-			return fsatomic.WriteFile(path, raw, dirMode, fileMode)
+			return utils.WriteFile(path, raw, dirMode, fileMode)
 		}
 		return writeErr
 	}
@@ -292,7 +291,7 @@ func TestManagerMarksTerminalPersistenceFailureAndRetriesOnShutdown(t *testing.T
 		t.Fatalf("state before retry = %#v", beforeRetry)
 	}
 
-	manager.writeFile = fsatomic.WriteFile
+	manager.writeFile = utils.WriteFile
 	if err := manager.Shutdown(); err != nil {
 		t.Fatal(err)
 	}
@@ -451,7 +450,7 @@ func TestManagerRejectsUnsafeDownloadedDirectoryWithoutPublishing(t *testing.T) 
 func TestManagerStopProfileWaitsForStreamAndMarksTaskCancelled(t *testing.T) {
 	accepted := make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		connection, err := websockettest.Accept(writer, request, nil)
+		connection, err := (&websocket.Upgrader{}).Upgrade(writer, request, nil)
 		if err != nil {
 			t.Error(err)
 			return
@@ -503,7 +502,7 @@ func TestManagerStopProfileWaitsForStreamAndMarksTaskCancelled(t *testing.T) {
 func TestManagerCancelAndClearHistoryPersistLifecycle(t *testing.T) {
 	accepted := make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		connection, err := websockettest.Accept(writer, request, nil)
+		connection, err := (&websocket.Upgrader{}).Upgrade(writer, request, nil)
 		if err != nil {
 			t.Error(err)
 			return
@@ -701,7 +700,7 @@ func TestManagerResumesUploadAcrossProcessFromControllerNegotiatedOffset(t *test
 	resumeID := taskID
 	receivedTail := make(chan []byte, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		connection, err := websockettest.Accept(writer, request, nil)
+		connection, err := (&websocket.Upgrader{}).Upgrade(writer, request, nil)
 		if err != nil {
 			t.Error(err)
 			return
@@ -815,7 +814,7 @@ func TestManagerResumesDownloadAcrossProcessUsingStablePartialFile(t *testing.T)
 		t.Fatal(err)
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		connection, err := websockettest.Accept(writer, request, nil)
+		connection, err := (&websocket.Upgrader{}).Upgrade(writer, request, nil)
 		if err != nil {
 			t.Error(err)
 			return
@@ -902,7 +901,7 @@ func TestManagerRejectsRelativeLocalAndUnsafeRemotePathsBeforeQueueing(t *testin
 func uploadServer(t *testing.T, receive func([]byte)) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		connection, err := websockettest.Accept(writer, request, nil)
+		connection, err := (&websocket.Upgrader{}).Upgrade(writer, request, nil)
 		if err != nil {
 			t.Error(err)
 			return
@@ -952,7 +951,7 @@ func uploadServer(t *testing.T, receive func([]byte)) *httptest.Server {
 func downloadServer(t *testing.T, contents []byte) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		connection, err := websockettest.Accept(writer, request, nil)
+		connection, err := (&websocket.Upgrader{}).Upgrade(writer, request, nil)
 		if err != nil {
 			t.Error(err)
 			return

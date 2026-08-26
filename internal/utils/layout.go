@@ -1,5 +1,4 @@
-// Package userpaths defines the user-scoped KubeLoop filesystem layout.
-package userpaths
+package utils
 
 import (
 	"errors"

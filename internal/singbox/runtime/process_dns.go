@@ -6,7 +6,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/fengqi-dev/kube-loop/internal/dnsname"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/dns"
 	"github.com/fengqi-dev/kube-loop/internal/singbox"
 )
 
@@ -90,7 +90,7 @@ func (p *Process) ProbeClusterDNS(ctx context.Context) error {
 	port := p.dnsPort
 	p.specMu.Unlock()
 	if len(domains) == 0 {
-		domains = []string{dnsname.DefaultClusterDomain}
+		domains = []string{dns.DefaultClusterDomain}
 	}
 	name := "kubernetes.default.svc." + domains[0] + "."
 	return probeLocalDNS(ctx, singbox.DefaultDNSListen, port, name)

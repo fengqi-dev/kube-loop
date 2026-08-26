@@ -10,10 +10,10 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/fengqi-dev/kube-loop/internal/middleware"
 	"github.com/gorilla/websocket"
 
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
-	"github.com/fengqi-dev/kube-loop/internal/correlation"
 )
 
 func (client *Client) openTaskWebSocket(
@@ -62,8 +62,8 @@ func (client *Client) dialWebSocket(
 	accessToken string,
 ) (*websocket.Conn, int, error) {
 	header := http.Header{"Authorization": {"Bearer " + accessToken}}
-	if correlationID := correlation.ID(ctx); correlationID != "" {
-		header.Set(correlation.Header, correlationID)
+	if correlationID := middleware.ID(ctx); correlationID != "" {
+		header.Set(middleware.Header, correlationID)
 	}
 	dialer, err := webSocketDialer(client.httpClient.Transport)
 	if err != nil {

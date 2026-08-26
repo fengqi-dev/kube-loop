@@ -18,8 +18,7 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/fengqi-dev/kube-loop/internal/fsatomic"
-	"github.com/fengqi-dev/kube-loop/internal/userpaths"
+	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
 const (
@@ -40,7 +39,7 @@ type Authority struct {
 
 // DefaultAuthorityPath returns the user-scoped CA bundle path.
 func DefaultAuthorityPath() (string, error) {
-	layout, err := userpaths.Default()
+	layout, err := utils.Default()
 	if err != nil {
 		return "", err
 	}
@@ -87,7 +86,7 @@ func loadOrCreateAuthority(path string, now func() time.Time) (*Authority, error
 	if err != nil {
 		return nil, err
 	}
-	if err := fsatomic.WriteFile(path, bundle, 0o700, 0o600); err != nil {
+	if err := utils.WriteFile(path, bundle, 0o700, 0o600); err != nil {
 		return nil, fmt.Errorf("persist traffic inspection authority: %w", err)
 	}
 	authority, err = loadAuthority(path, now())

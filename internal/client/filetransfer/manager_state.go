@@ -13,7 +13,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/fengqi-dev/kube-loop/internal/fsatomic"
+	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
 func (manager *Manager) load() error {
@@ -131,7 +131,7 @@ func (manager *Manager) persist(tasks map[string]Task) error {
 	contents = append(contents, '\n')
 	writeFile := manager.writeFile
 	if writeFile == nil {
-		writeFile = fsatomic.WriteFile
+		writeFile = utils.WriteFile
 	}
 	return writeFile(manager.statePath, contents, 0o700, 0o600)
 }

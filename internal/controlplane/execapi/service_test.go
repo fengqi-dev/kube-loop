@@ -27,7 +27,6 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/execstream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
-	"github.com/fengqi-dev/kube-loop/internal/testutil/websockettest"
 )
 
 type sessionValidator struct {
@@ -202,10 +201,9 @@ func TestPodExecTaskAndWebSocketStreamAreOwnedAndSingleUse(t *testing.T) {
 		httpServer.URL,
 		"http",
 	) + "/api/sessions/" + sessionID + "/exec/" + document.ID + "/stream?namespace=development"
-	connection, response, err := websockettest.Dial(
-		context.Background(),
-		streamURL,
-		&websockettest.DialOptions{HTTPHeader: http.Header{"X-Identity": {identityID}}})
+	connection, response, err := websocket.DefaultDialer.DialContext(
+		context.Background(), streamURL, http.Header{"X-Identity": {identityID}},
+	)
 
 	if err != nil {
 		if response != nil {
@@ -238,10 +236,9 @@ func TestPodExecTaskAndWebSocketStreamAreOwnedAndSingleUse(t *testing.T) {
 		streamRequestID = response.Header.Get(echo.HeaderXRequestID)
 	}
 	assertExecLifecycleAudit(t, transitionEvents, identityID, document.ID, streamRequestID)
-	_, replayResponse, replayErr := websockettest.Dial(
-		context.Background(),
-		streamURL,
-		&websockettest.DialOptions{HTTPHeader: http.Header{"X-Identity": {identityID}}})
+	_, replayResponse, replayErr := websocket.DefaultDialer.DialContext(
+		context.Background(), streamURL, http.Header{"X-Identity": {identityID}},
+	)
 
 	if replayErr == nil || replayResponse == nil ||
 		replayResponse.StatusCode != http.StatusConflict {
@@ -407,7 +404,7 @@ func TestPodExecStreamStopsWhenOAuthGrantIsRevoked(t *testing.T) {
 		httpServer.URL,
 		"http",
 	) + "/api/sessions/" + sessionID + "/exec/" + document.ID + "/stream?namespace=development"
-	connection, response, err := websockettest.Dial(context.Background(), streamURL, nil)
+	connection, response, err := websocket.DefaultDialer.DialContext(context.Background(), streamURL, nil)
 	if err != nil {
 		if response != nil {
 			t.Fatalf("dial status = %d err = %v", response.StatusCode, err)

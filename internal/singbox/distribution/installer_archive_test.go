@@ -32,6 +32,34 @@ func TestExtractReleaseFilesRejectsUnsupportedArchive(t *testing.T) {
 	}
 }
 
+func TestExtractReleaseFiles(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		archive    string
+		binaryName string
+	}{
+		{name: "tar gzip", archive: "sing-box-test.tar.gz", binaryName: singBoxBinary},
+		{name: "zip", archive: "sing-box-test.zip", binaryName: singBoxBinaryWin},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			content := []byte("binary")
+			archive := releaseArchive(t, test.archive, map[string][]byte{
+				"release/" + test.binaryName: content,
+			})
+			files, err := extractReleaseFiles(test.archive, archive)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(files[test.binaryName], content) {
+				t.Fatalf("extracted %s = %q", test.binaryName, files[test.binaryName])
+			}
+		})
+	}
+}
+
 func releaseArchive(t *testing.T, name string, files map[string][]byte) []byte {
 	t.Helper()
 	if strings.HasSuffix(name, ".zip") {

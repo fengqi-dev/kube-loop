@@ -9,7 +9,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/client/credentials"
 	clientdataplane "github.com/fengqi-dev/kube-loop/internal/client/dataplane"
 	"github.com/fengqi-dev/kube-loop/internal/trafficinspect"
-	"github.com/fengqi-dev/kube-loop/internal/userpaths"
+	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
 type appDependencies struct {
@@ -21,24 +21,24 @@ type appDependencies struct {
 	trafficInspectionSwitch *trafficinspect.SwitchableSink
 }
 
-func appUserLayout(version, profilePath string) (userpaths.Layout, error) {
+func appUserLayout(version, profilePath string) (utils.Layout, error) {
 	profilePath = strings.TrimSpace(profilePath)
-	var layout userpaths.Layout
+	var layout utils.Layout
 	var err error
 	if profilePath == "" {
-		layout, err = userpaths.ForVersion(version)
+		layout, err = utils.ForVersion(version)
 	} else {
 		root := filepath.Dir(profilePath)
 		if filepath.Base(root) == "config" {
 			root = filepath.Dir(root)
 		}
-		layout, err = userpaths.New(root)
+		layout, err = utils.New(root)
 	}
 	if err != nil {
-		return userpaths.Layout{}, err
+		return utils.Layout{}, err
 	}
 	if err := layout.Ensure(); err != nil {
-		return userpaths.Layout{}, fmt.Errorf("initialize KubeLoop user directories: %w", err)
+		return utils.Layout{}, fmt.Errorf("initialize KubeLoop user directories: %w", err)
 	}
 	return layout, nil
 }

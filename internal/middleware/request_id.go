@@ -1,4 +1,4 @@
-package httpmiddleware
+package middleware
 
 import (
 	"strings"
@@ -6,8 +6,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v5"
 	echomiddleware "github.com/labstack/echo/v5/middleware"
-
-	"github.com/fengqi-dev/kube-loop/internal/correlation"
 )
 
 // RequestID returns Echo middleware that preserves a canonical UUID request ID
@@ -24,12 +22,12 @@ func RequestID() echo.MiddlewareFunc {
 				ctx.Request().Header.Del(echo.HeaderXRequestID)
 			}
 			correlationID := canonicalCorrelationID(
-				ctx.Request().Header.Values(correlation.Header),
+				ctx.Request().Header.Values(Header),
 			)
-			requestContext := correlation.WithID(ctx.Request().Context(), correlationID)
+			requestContext := WithID(ctx.Request().Context(), correlationID)
 			ctx.SetRequest(ctx.Request().WithContext(requestContext))
-			ctx.Request().Header.Set(correlation.Header, correlationID)
-			ctx.Response().Header().Set(correlation.Header, correlationID)
+			ctx.Request().Header.Set(Header, correlationID)
+			ctx.Response().Header().Set(Header, correlationID)
 			return wrapped(ctx)
 		}
 	}
@@ -38,11 +36,11 @@ func RequestID() echo.MiddlewareFunc {
 func canonicalCorrelationID(values []string) string {
 	if len(values) == 1 {
 		value := strings.TrimSpace(values[0])
-		if correlation.Valid(value) && value == values[0] {
+		if Valid(value) && value == values[0] {
 			return value
 		}
 	}
-	return correlation.New()
+	return New()
 }
 
 func canonicalUUID(value string) bool {

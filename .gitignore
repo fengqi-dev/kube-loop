@@ -28,3 +28,4 @@ e2e/oidc/node_modules/
 *.swo
 *~
 .DS_Store
+*.idea/

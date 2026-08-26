@@ -7,7 +7,7 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"github.com/fengqi-dev/kube-loop/internal/httpmiddleware"
+	"github.com/fengqi-dev/kube-loop/internal/middleware"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/relaycontrol"
 )
 
@@ -33,8 +33,8 @@ func NewHTTPHandler(
 	}
 	handler := &HTTPHandler{registry: registry, authenticator: authenticator}
 	router := echo.New()
-	router.Use(httpmiddleware.RequestID())
-	router.Use(httpmiddleware.RequestLogger(logger))
+	router.Use(middleware.RequestID())
+	router.Use(middleware.RequestLogger(logger))
 	group := router.Group(InternalPathPrefix)
 	group.POST("/register", handler.register)
 	group.PUT("/heartbeat", handler.heartbeat)

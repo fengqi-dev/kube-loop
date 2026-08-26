@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/fengqi-dev/kube-loop/internal/middleware"
 	"github.com/gorilla/websocket"
 	"github.com/xtaci/smux"
 
-	"github.com/fengqi-dev/kube-loop/internal/correlation"
 	protocolmux "github.com/fengqi-dev/kube-loop/internal/protocol/websocketmux"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/wssprotocol"
 )
@@ -29,7 +29,7 @@ func (forwarder *Forwarder) dial() (result *pooledSession, resultErr error) {
 	}
 	dialCtx, cancel := context.WithTimeout(forwarder.ctx, 15*time.Second)
 	defer cancel()
-	dialCtx, correlationID := correlation.Ensure(dialCtx)
+	dialCtx, correlationID := middleware.Ensure(dialCtx)
 	startedAt := time.Now()
 	forwarder.logger.InfoContext(
 		dialCtx, "Gateway WebSocket dial started",
@@ -69,7 +69,7 @@ func (forwarder *Forwarder) dial() (result *pooledSession, resultErr error) {
 	}
 	header := make(http.Header)
 	header.Set("Authorization", "Bearer "+token)
-	header.Set(correlation.Header, correlationID)
+	header.Set(middleware.Header, correlationID)
 	dialer := newWebSocketDialer(transport)
 	dialer.Subprotocols = []string{Subprotocol}
 	connection, response, err := dialer.DialContext(dialCtx, forwarder.config.URL, header)

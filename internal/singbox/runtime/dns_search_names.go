@@ -5,7 +5,7 @@ import (
 
 	"github.com/miekg/dns"
 
-	"github.com/fengqi-dev/kube-loop/internal/dnsname"
+	dnsprotocol "github.com/fengqi-dev/kube-loop/internal/protocol/dns"
 )
 
 func dnsSearchCandidates(qname string, search []string, clusterDomains ...string) []string {
@@ -14,9 +14,9 @@ func dnsSearchCandidates(qname string, search []string, clusterDomains ...string
 		return nil
 	}
 	original := name + "."
-	domains, err := dnsname.NormalizeClusterDomains(clusterDomains)
+	domains, err := dnsprotocol.NormalizeClusterDomains(clusterDomains)
 	if err != nil || len(domains) == 0 {
-		domains = []string{dnsname.DefaultClusterDomain}
+		domains = []string{dnsprotocol.DefaultClusterDomain}
 	}
 	for _, domain := range domains {
 		if name == domain || strings.HasSuffix(name, "."+domain) {

@@ -48,7 +48,6 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/ticketapi"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
-	"github.com/fengqi-dev/kube-loop/internal/testutil/websockettest"
 	"github.com/fengqi-dev/kube-loop/internal/trafficinspect"
 )
 
@@ -201,10 +200,19 @@ func callWebSocketThroughDataPlane(t *testing.T, transport *http.Transport, addr
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
 	defer cancel()
-	connection, response, err := websockettest.Dial(
+	dialer := *websocket.DefaultDialer
+	dialer.Proxy = transport.Proxy
+	dialer.NetDialContext = transport.DialContext
+	dialer.NetDialTLSContext = transport.DialTLSContext
+	if transport.TLSClientConfig != nil {
+		dialer.TLSClientConfig = transport.TLSClientConfig.Clone()
+		dialer.TLSClientConfig.NextProtos = []string{"http/1.1"}
+	}
+	connection, response, err := dialer.DialContext(
 		ctx,
 		"ws://"+address+trafficInspectionWebSocketPath,
-		&websockettest.DialOptions{HTTPClient: &http.Client{Transport: transport}})
+		nil,
+	)
 
 	if err != nil {
 		t.Fatalf("connect go-httpbin WebSocket through Data Plane: %v", err)

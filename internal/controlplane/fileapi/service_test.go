@@ -27,7 +27,6 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/filestream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
-	"github.com/fengqi-dev/kube-loop/internal/testutil/websockettest"
 )
 
 type sessionValidator struct {
@@ -571,12 +570,9 @@ func TestFileTransferWebSocketUploadDownloadAndSingleClaim(t *testing.T) {
 	if err != nil || storedUpload.State != "stopped" {
 		t.Fatalf("stored upload = %#v err = %v", storedUpload, err)
 	}
-	_, replayResponse, replayErr := websockettest.Dial(
-		context.Background(),
-		uploadURL,
-		&websockettest.DialOptions{
-			HTTPHeader: http.Header{"X-Identity": {identityID}},
-		})
+	_, replayResponse, replayErr := websocket.DefaultDialer.DialContext(
+		context.Background(), uploadURL, http.Header{"X-Identity": {identityID}},
+	)
 
 	if replayErr == nil || replayResponse == nil ||
 		replayResponse.StatusCode != http.StatusConflict {
@@ -643,12 +639,9 @@ func dialFileStream(
 	streamURL, identityID string,
 ) *websocket.Conn {
 	t.Helper()
-	connection, response, err := websockettest.Dial(
-		context.Background(),
-		streamURL,
-		&websockettest.DialOptions{
-			HTTPHeader: http.Header{"X-Identity": {identityID}},
-		})
+	connection, response, err := websocket.DefaultDialer.DialContext(
+		context.Background(), streamURL, http.Header{"X-Identity": {identityID}},
+	)
 
 	if err != nil {
 		if response != nil {

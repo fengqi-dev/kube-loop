@@ -16,14 +16,13 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/filestream"
-	"github.com/fengqi-dev/kube-loop/internal/testutil/websockettest"
 )
 
 func TestDownloadWritesOnlyDataAndVerifiesChecksum(t *testing.T) {
 	contents := bytes.Repeat([]byte("download-data-"), 30_000)
 	checksum := sha256.Sum256(contents)
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		connection, err := websockettest.Accept(writer, request, nil)
+		connection, err := (&websocket.Upgrader{}).Upgrade(writer, request, nil)
 		if err != nil {
 			t.Error(err)
 			return
@@ -64,7 +63,7 @@ func TestDownloadWritesOnlyDataAndVerifiesChecksum(t *testing.T) {
 func TestDownloadCancelsGatewayWhenLocalWriterFails(t *testing.T) {
 	cancelled := make(chan struct{}, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		connection, err := websockettest.Accept(writer, request, nil)
+		connection, err := (&websocket.Upgrader{}).Upgrade(writer, request, nil)
 		if err != nil {
 			t.Error(err)
 			return

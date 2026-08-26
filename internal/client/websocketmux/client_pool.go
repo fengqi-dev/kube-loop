@@ -5,9 +5,8 @@ import (
 	"errors"
 	"net"
 
+	"github.com/fengqi-dev/kube-loop/internal/middleware"
 	"github.com/gorilla/websocket"
-
-	"github.com/fengqi-dev/kube-loop/internal/correlation"
 )
 
 func (forwarder *Forwarder) pickSession() *pooledSession {
@@ -74,7 +73,7 @@ func (forwarder *Forwarder) discard(target *pooledSession) {
 		}
 	}
 	forwarder.mu.Unlock()
-	ctx := correlation.WithID(context.Background(), target.correlationID)
+	ctx := middleware.WithID(context.Background(), target.correlationID)
 	forwarder.logger.InfoContext(
 		ctx, "Gateway WebSocket session closed",
 		"operation", "gateway.websocket.session",

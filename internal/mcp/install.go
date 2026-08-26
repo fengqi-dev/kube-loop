@@ -13,7 +13,7 @@ import (
 	toml "github.com/pelletier/go-toml/v2"
 	"github.com/pelletier/go-toml/v2/unstable"
 
-	"github.com/fengqi-dev/kube-loop/internal/fsatomic"
+	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
 const (
@@ -157,7 +157,7 @@ func upsertJSONMap(path, rootKey, serverName string, server map[string]any) erro
 		return fmt.Errorf("encode %s: %w", path, err)
 	}
 	out = append(out, '\n')
-	return fsatomic.WriteFile(path, out, 0o755, 0o600)
+	return utils.WriteFile(path, out, 0o755, 0o600)
 }
 
 func installCodexTOML(path, url, token string) error {
@@ -184,7 +184,7 @@ func installCodexTOML(path, url, token string) error {
 		content = append(content, '\n')
 	}
 	content = append(content, block...)
-	return fsatomic.WriteFile(path, content, 0o755, 0o600)
+	return utils.WriteFile(path, content, 0o755, 0o600)
 }
 
 type codexMCPConfig struct {

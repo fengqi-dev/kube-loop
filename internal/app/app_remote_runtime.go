@@ -13,12 +13,12 @@ import (
 	clientfiletransfer "github.com/fengqi-dev/kube-loop/internal/client/filetransfer"
 	clientremote "github.com/fengqi-dev/kube-loop/internal/client/remote"
 	clientremotesession "github.com/fengqi-dev/kube-loop/internal/client/remotesession"
-	"github.com/fengqi-dev/kube-loop/internal/userpaths"
+	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
 func configureRemoteRuntime(
 	application *App,
-	layout userpaths.Layout,
+	layout utils.Layout,
 	version string,
 	developmentTLSConfig *tls.Config,
 	dependencies appDependencies,

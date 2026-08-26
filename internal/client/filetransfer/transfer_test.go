@@ -11,7 +11,6 @@ import (
 
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
-	"github.com/fengqi-dev/kube-loop/internal/testutil/websockettest"
 )
 
 type testClient struct{ endpoint string }
@@ -39,7 +38,7 @@ func (client testClient) OpenFileTransferStream(
 	_ remote.Session,
 	_ remote.FileTransferTask,
 ) (*websocket.Conn, error) {
-	connection, _, err := websockettest.Dial(ctx, client.endpoint, nil)
+	connection, _, err := websocket.DefaultDialer.DialContext(ctx, client.endpoint, nil)
 	return connection, err
 }
 

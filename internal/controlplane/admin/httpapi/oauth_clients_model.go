@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/fengqi-dev/kube-loop/internal/auth"
 	"github.com/labstack/echo/v5"
 
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
@@ -74,8 +75,8 @@ func oauthClientFromInput(input oauthClientInput) (storage.OAuthClient, error) {
 	}
 	for _, redirect := range client.RedirectURIs {
 		parsed, err := url.Parse(redirect)
-		desktopCallback := client.ID == storage.DesktopOAuthClientID &&
-			redirect == storage.DesktopOAuthRedirectURI
+		desktopCallback := client.ID == auth.DesktopClientID &&
+			redirect == auth.DesktopRedirectURI
 		loopbackHTTP := parsed.Scheme == "http" &&
 			(parsed.Hostname() == "127.0.0.1" || parsed.Hostname() == "::1" || parsed.Hostname() == "localhost")
 		allowedScheme := desktopCallback || parsed.Scheme == schemeHTTPS ||

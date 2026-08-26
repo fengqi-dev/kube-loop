@@ -5,7 +5,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/fengqi-dev/kube-loop/internal/dnsname"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/dns"
 )
 
 const (
@@ -33,7 +33,7 @@ func Normalize(input Snapshot) (Snapshot, error) {
 		return Snapshot{}, errors.New("capability identity binding is invalid")
 	}
 	if input.Namespace != strings.ToLower(strings.TrimSpace(input.Namespace)) ||
-		!dnsname.ValidLabel(input.Namespace) {
+		!dns.ValidLabel(input.Namespace) {
 		return Snapshot{}, errors.New("capability namespace binding is invalid")
 	}
 	if !validOpaque(input.GatewayVersion, 256) {

@@ -16,15 +16,12 @@ import (
 	shared "github.com/fengqi-dev/kube-loop/internal/client/websocketmux"
 	protocolmux "github.com/fengqi-dev/kube-loop/internal/protocol/websocketmux"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/wssprotocol"
-	"github.com/fengqi-dev/kube-loop/internal/testutil/websockettest"
 )
 
 func TestContractNewClientAndOldGatewayClassifiesVersionMismatch(t *testing.T) {
 	oldGateway := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		connection, err := websockettest.Accept(
-			writer,
-			request,
-			&websockettest.AcceptOptions{Subprotocols: []string{Subprotocol}})
+		connection, err := (&websocket.Upgrader{Subprotocols: []string{Subprotocol}}).
+			Upgrade(writer, request, nil)
 
 		if err != nil {
 			return
@@ -136,10 +133,10 @@ func malformedHandshakeGateway(t *testing.T, response []byte) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set(wssprotocol.VersionHeader, wssprotocol.Version)
-		connection, err := websockettest.Accept(
-			writer,
-			request,
-			&websockettest.AcceptOptions{Subprotocols: []string{Subprotocol}})
+		connection, err := (&websocket.Upgrader{Subprotocols: []string{Subprotocol}}).
+			Upgrade(writer, request, http.Header{
+				wssprotocol.VersionHeader: []string{wssprotocol.Version},
+			})
 
 		if err != nil {
 			return

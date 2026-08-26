@@ -1,4 +1,4 @@
-package userpaths
+package utils
 
 import (
 	"os"

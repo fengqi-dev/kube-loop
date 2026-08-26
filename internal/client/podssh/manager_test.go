@@ -22,7 +22,6 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
 	"github.com/fengqi-dev/kube-loop/internal/client/socksbridge"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/execstream"
-	"github.com/fengqi-dev/kube-loop/internal/testutil/websockettest"
 )
 
 type fakeHostTCPRegistrar struct {
@@ -114,7 +113,7 @@ func newFakeExecClient(t *testing.T) *fakeExecClient {
 	t.Helper()
 	client := &fakeExecClient{}
 	client.server = httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		connection, err := websockettest.Accept(writer, request, nil)
+		connection, err := (&websocket.Upgrader{}).Upgrade(writer, request, nil)
 		if err != nil {
 			return
 		}
@@ -189,7 +188,7 @@ func (client *fakeExecClient) OpenExecStream(
 	_ remote.ExecTask,
 ) (*websocket.Conn, error) {
 	endpoint := "ws" + strings.TrimPrefix(client.server.URL, "http")
-	connection, _, err := websockettest.Dial(ctx, endpoint, nil)
+	connection, _, err := websocket.DefaultDialer.DialContext(ctx, endpoint, nil)
 	return connection, err
 }
 
@@ -522,8 +521,8 @@ func TestManagerIsolatesEndpointByLocalUserKey(t *testing.T) {
 	request := Request{
 		Namespace: "development", Pod: "api-0", Container: "main",
 		PodIP: "10.244.1.7", Ready: true, Containers: []string{"main"},
-	}
-	request.ProfileID = "server-a"
+
+		ProfileID: "server-a"}
 	endpointA, err := managerA.Start(context.Background(), profile.Profile{ID: "server-a"}, sessionA, request)
 	if err != nil {
 		t.Fatal(err)

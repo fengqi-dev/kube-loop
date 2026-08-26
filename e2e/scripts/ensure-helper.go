@@ -55,16 +55,9 @@ func main() {
 	}
 	singBox := filepath.Join(root, "build", "bin", singBoxName)
 	if _, err := os.Stat(singBox); err != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
-		path, ensureErr := (&singboxdist.Installer{}).Ensure(ctx)
-		cancel()
-		if ensureErr != nil {
-			fatal(ensureErr)
-		}
-		if err := copyFile(path, singBox); err != nil {
+		if err := singboxdist.BundleRelease(runtime.GOOS, runtime.GOARCH, filepath.Dir(singBox)); err != nil {
 			fatal(err)
 		}
-		_ = os.Chmod(singBox, 0o755)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)

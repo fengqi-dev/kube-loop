@@ -16,8 +16,6 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"github.com/fengqi-dev/kube-loop/internal/testutil/websockettest"
-
 	"github.com/labstack/echo/v5"
 
 	"github.com/fengqi-dev/kube-loop/internal/controlplane"
@@ -87,16 +85,27 @@ func TestSameOriginTLSProxyPreservesControlPlaneLimitsAndLongLivedWebSocket(t *t
 	}
 
 	webSocketURL := "wss" + strings.TrimPrefix(external.URL, "https") + "/tunnel"
-	connection, upgradeResponse, err := websockettest.Dial(
+	dialer := *websocket.DefaultDialer
+	transport, ok := external.Client().Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("HTTP transport = %T", external.Client().Transport)
+	}
+	dialer.TLSClientConfig = transport.TLSClientConfig.Clone()
+	dialer.TLSClientConfig.NextProtos = []string{"http/1.1"}
+	connection, upgradeResponse, err := dialer.DialContext(
 		context.Background(),
 		webSocketURL,
-		&websockettest.DialOptions{
-			HTTPClient: external.Client(),
-		},
+		nil,
 	)
 
 	if err != nil {
 		t.Fatal(err)
+	}
+	if upgradeResponse != nil && upgradeResponse.TLS == nil {
+		if tlsConnection, ok := connection.NetConn().(*tls.Conn); ok {
+			state := tlsConnection.ConnectionState()
+			upgradeResponse.TLS = &state
+		}
 	}
 	defer func() { _ = connection.Close() }()
 	if upgradeResponse == nil || upgradeResponse.TLS == nil || upgradeResponse.TLS.Version != tls.VersionTLS13 ||
@@ -174,7 +183,9 @@ func newExternalAccessServer(t *testing.T) *httptest.Server {
 
 	webSocketBackend := httptest.NewServer(
 		markBackend("data-plane", http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-			connection, acceptErr := websockettest.Accept(writer, request, nil)
+			connection, acceptErr := (&websocket.Upgrader{}).Upgrade(writer, request, http.Header{
+				"X-Kubeloop-Test-Backend": []string{"data-plane"},
+			})
 			if acceptErr != nil {
 				return
 			}

@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/fengqi-dev/kube-loop/internal/authconfig"
+	"github.com/fengqi-dev/kube-loop/internal/auth"
 	"github.com/fengqi-dev/kube-loop/internal/client/credentials"
 	clientdiscovery "github.com/fengqi-dev/kube-loop/internal/client/discovery"
 	clientprofile "github.com/fengqi-dev/kube-loop/internal/client/profile"
@@ -92,7 +92,7 @@ func newApp(version string, embeddedHelperFiles fs.FS, dependencies appDependenc
 
 	credentialStore := dependencies.credentialStore
 	if credentialStore == nil {
-		credentialStore = credentials.NewSystemStoreForClient(version, authconfig.DesktopClientID)
+		credentialStore = credentials.NewSystemStoreForClient(version, auth.DesktopClientID)
 	}
 	application := &App{
 		profiles: profileStore,

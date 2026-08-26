@@ -8,13 +8,13 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/fengqi-dev/kube-loop/internal/dnsname"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/dns"
 )
 
 func ResolverDomains(namespace string, clusterDomains []string, hosts []HostAlias, extra ...string) []string {
-	domains, err := dnsname.NormalizeClusterDomains(clusterDomains)
+	domains, err := dns.NormalizeClusterDomains(clusterDomains)
 	if err != nil || len(domains) == 0 {
-		domains = []string{dnsname.DefaultClusterDomain}
+		domains = []string{dns.DefaultClusterDomain}
 	}
 	out := make([]string, 0, len(domains)*3+len(hosts)+len(extra)+1)
 	seen := make(map[string]struct{}, len(domains)*3+len(hosts)+len(extra)+1)
@@ -62,7 +62,7 @@ func NormalizeHostAliases(items []HostAlias) ([]HostAlias, error) {
 		if strings.ContainsAny(domain, " \t/") {
 			return nil, fmt.Errorf("invalid host alias domain %q", item.Domain)
 		}
-		if !dnsname.ValidClusterDomain(domain) {
+		if !dns.ValidClusterDomain(domain) {
 			return nil, fmt.Errorf("invalid host alias domain %q", item.Domain)
 		}
 		ip, err := netip.ParseAddr(strings.TrimSpace(item.IP))
@@ -96,9 +96,9 @@ func SearchDomainsForNamespaces(namespaces []string, clusterDomains ...string) [
 	if len(namespaces) == 0 {
 		namespaces = []string{defaultNamespace}
 	}
-	domains, err := dnsname.NormalizeClusterDomains(clusterDomains)
+	domains, err := dns.NormalizeClusterDomains(clusterDomains)
 	if err != nil || len(domains) == 0 {
-		domains = []string{dnsname.DefaultClusterDomain}
+		domains = []string{dns.DefaultClusterDomain}
 	}
 	out := make([]string, 0, len(domains)*(len(namespaces)+2))
 	seen := make(map[string]struct{}, len(domains)*(len(namespaces)+2))

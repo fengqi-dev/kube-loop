@@ -15,8 +15,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/fengqi-dev/kube-loop/internal/fsatomic"
-	"github.com/fengqi-dev/kube-loop/internal/userpaths"
+	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
 const (
@@ -47,7 +46,7 @@ func NewProtobufSchemaStore(path string, decoder *ProtobufDecoder) (*ProtobufSch
 		return nil, errors.New("protobuf decoder is unavailable")
 	}
 	if strings.TrimSpace(path) == "" {
-		layout, err := userpaths.Default()
+		layout, err := utils.Default()
 		if err != nil {
 			return nil, err
 		}
@@ -58,7 +57,7 @@ func NewProtobufSchemaStore(path string, decoder *ProtobufDecoder) (*ProtobufSch
 		return nil, fmt.Errorf("resolve protobuf schema path: %w", err)
 	}
 	return &ProtobufSchemaStore{
-		path: absolute, decoder: decoder, sources: make(map[string]string), writeFile: fsatomic.WriteFile,
+		path: absolute, decoder: decoder, sources: make(map[string]string), writeFile: utils.WriteFile,
 	}, nil
 }
 
@@ -126,7 +125,7 @@ func (s *ProtobufSchemaStore) replace(ctx context.Context, sources map[string]st
 		raw = append(raw, '\n')
 		writeFile := s.writeFile
 		if writeFile == nil {
-			writeFile = fsatomic.WriteFile
+			writeFile = utils.WriteFile
 		}
 		if err := writeFile(s.path, raw, 0o700, 0o600); err != nil {
 			return fmt.Errorf("save protobuf schemas: %w", err)

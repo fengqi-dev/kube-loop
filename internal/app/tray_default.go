@@ -1,29 +1,27 @@
 //go:build !bindings
 
-package desktoptray
+package app
 
 import (
 	"github.com/gogpu/systray"
-
-	desktopapp "github.com/fengqi-dev/kube-loop/internal/app"
 )
 
 // New creates and shows the desktop system tray.
-func New(app *desktopapp.App, icon []byte) Tray {
+func New(app *App, icon []byte) Tray {
 	tray := systray.New()
 	menu := systray.NewMenu()
 	menu.Add("Open KubeLoop", func() {
-		desktopapp.ShowWindow(app)
+		ShowWindow(app)
 	})
 	menu.AddSeparator()
 	menu.Add("Quit KubeLoop", func() {
 		tray.Remove()
-		desktopapp.Quit(app)
+		Quit(app)
 	})
 	tray.SetIcon(icon).
 		SetTooltip("KubeLoop").
 		SetMenu(menu).
-		OnClick(func() { desktopapp.ShowWindow(app) }).
+		OnClick(func() { ShowWindow(app) }).
 		Show()
 	return tray
 }

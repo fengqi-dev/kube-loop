@@ -11,7 +11,7 @@ import (
 	"github.com/zalando/go-keyring"
 
 	clientremote "github.com/fengqi-dev/kube-loop/internal/client/remote"
-	"github.com/fengqi-dev/kube-loop/internal/fsatomic"
+	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
 var clientAPIErrorForTest = clientremote.APIError{
@@ -131,7 +131,7 @@ func TestSystemConfigStoreRestoresTokenWhenSettingsWriteFails(t *testing.T) {
 		if path == store.path {
 			return writeErr
 		}
-		return fsatomic.WriteFile(path, raw, dirMode, fileMode)
+		return utils.WriteFile(path, raw, dirMode, fileMode)
 	}
 	newToken := strings.Repeat("b", 64)
 	if err := store.Save(Config{

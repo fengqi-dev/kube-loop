@@ -5,7 +5,7 @@ import (
 	"net/netip"
 	"strings"
 
-	"github.com/fengqi-dev/kube-loop/internal/dnsname"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/dns"
 )
 
 // AuthorizeAddress applies the Data Plane target allowlist. Pod and Service
@@ -46,7 +46,7 @@ func AuthorizeAddress(spec Spec, address netip.Addr, port uint16) error {
 // and cross-namespace Service access.
 func AuthorizeDomain(spec Spec, host string) (string, error) {
 	host = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(host)), ".")
-	if !dnsname.ValidClusterDomain(host) || isKubernetesAPIName(host) {
+	if !dns.ValidClusterDomain(host) || isKubernetesAPIName(host) {
 		return "", errors.New("target domain is not allowed by NetworkSpec")
 	}
 	for _, domain := range spec.ClusterDomains {

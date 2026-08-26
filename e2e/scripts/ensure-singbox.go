@@ -5,13 +5,10 @@
 package main
 
 import (
-	"context"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"runtime"
-	"time"
 
 	singboxdist "github.com/fengqi-dev/kube-loop/internal/singbox/distribution"
 )
@@ -31,46 +28,17 @@ func main() {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
-	defer cancel()
-	path, err := (&singboxdist.Installer{}).Ensure(ctx)
-	if err != nil {
+	if err := singboxdist.BundleRelease(runtime.GOOS, runtime.GOARCH, filepath.Dir(dest)); err != nil {
 		fatal(err)
 	}
-	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
-		fatal(err)
+	if info, err := os.Stat(dest); err != nil || !info.Mode().IsRegular() ||
+		(runtime.GOOS != "windows" && info.Mode().Perm()&0o111 == 0) {
+		fatal(fmt.Errorf("bundled sing-box is unavailable at %s", dest))
 	}
-	if err := copyFile(path, dest); err != nil {
-		fatal(err)
-	}
-	if err := os.Chmod(dest, 0o755); err != nil {
+	if err := os.Chmod(dest, 0o755); err != nil && runtime.GOOS != "windows" {
 		fatal(err)
 	}
 	fmt.Println(dest)
-}
-
-func copyFile(src, dst string) error {
-	in, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
-	tmp := dst + ".tmp"
-	out, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
-	if err != nil {
-		return err
-	}
-	_, copyErr := io.Copy(out, in)
-	closeErr := out.Close()
-	if copyErr != nil {
-		_ = os.Remove(tmp)
-		return copyErr
-	}
-	if closeErr != nil {
-		_ = os.Remove(tmp)
-		return closeErr
-	}
-	return os.Rename(tmp, dst)
 }
 
 func fatal(err error) {

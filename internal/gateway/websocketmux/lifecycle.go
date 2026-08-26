@@ -7,7 +7,7 @@ import (
 	"net"
 	"net/http"
 
-	"github.com/fengqi-dev/kube-loop/internal/correlation"
+	"github.com/fengqi-dev/kube-loop/internal/middleware"
 )
 
 func (h *Handler) BeginDrain() {
@@ -29,7 +29,7 @@ func (h *Handler) logf(ctx context.Context, requestID, format string, values ...
 			fmt.Sprintf(format, values...),
 			"operation", "gateway.websocket.session",
 			"outcome", "failure",
-			"correlation_id", correlation.ID(ctx),
+			"correlation_id", middleware.ID(ctx),
 			"request_id", requestID,
 		)
 	}
@@ -47,7 +47,7 @@ func (h *Handler) logSession(
 	arguments := []any{
 		"operation", operation,
 		"outcome", outcome,
-		"correlation_id", correlation.ID(ctx),
+		"correlation_id", middleware.ID(ctx),
 		"request_id", identity.RequestID,
 		"session_id", identity.SessionID,
 		"session_generation", identity.SessionGeneration,

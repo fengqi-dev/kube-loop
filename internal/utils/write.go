@@ -1,4 +1,4 @@
-package fsatomic
+package utils
 
 import (
 	"errors"

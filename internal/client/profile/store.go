@@ -8,8 +8,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/fengqi-dev/kube-loop/internal/fsatomic"
-	"github.com/fengqi-dev/kube-loop/internal/userpaths"
+	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
 type State struct {
@@ -46,7 +45,7 @@ type Store struct {
 }
 
 func DefaultPath() (string, error) {
-	layout, err := userpaths.Default()
+	layout, err := utils.Default()
 	if err != nil {
 		return "", err
 	}
@@ -67,7 +66,7 @@ func Open(path string) (*Store, error) {
 	}
 	store := &Store{
 		path: absolute, state: State{Version: currentVersion, Profiles: []Profile{}},
-		writeFile: fsatomic.WriteFile,
+		writeFile: utils.WriteFile,
 	}
 	if err := store.load(); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, err

@@ -247,7 +247,7 @@ func TestRealPodExecTTYDisconnectAndControllerRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitForExecOutput(t, ctx, abruptConnection, "disconnect-started")
-	abruptConnection.CloseNow()
+	abruptConnection.Close()
 	abruptStored := waitForExecTaskState(t, ctx, stateStore, abruptTask.ID, "stopped")
 	assertCancelledTaskResult(t, abruptStored)
 

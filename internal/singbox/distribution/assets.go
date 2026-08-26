@@ -1,12 +1,5 @@
 package distribution
 
-import (
-	"context"
-	"fmt"
-	"net/http"
-	"strings"
-)
-
 const (
 	downloadBaseURL  = ProjectURL + "/releases/download/" + Version
 	singBoxBinary    = "sing-box"
@@ -46,49 +39,4 @@ var releaseAssets = map[string]releaseAsset{
 		Name:   "sing-box-1.13.19-windows-arm64.zip",
 		SHA256: "dbb6c4803f94a997fcc4a1cce313eff65a901abc197731b55109ea4fbd412c88",
 	},
-}
-
-type Installer struct {
-	HTTPClient      *http.Client
-	BaseDir         string
-	BundledPath     string
-	GOOS            string
-	GOARCH          string
-	Asset           *releaseAsset
-	DownloadURL     func(releaseAsset) string
-	DisableOverride bool
-	// DisableDownload skips downloading/copying into BaseDir/cores and only
-	// returns an already-present bundled or override binary.
-	DisableDownload bool
-}
-
-func (i *Installer) Ensure(ctx context.Context) (string, error) {
-	if !i.DisableOverride {
-		environment := loadInstallerEnvironment()
-		if environment.SingBoxPath != "" {
-			return validateBinary(environment.SingBoxPath)
-		}
-	}
-	var missing []string
-	for _, candidate := range i.bundledCandidates() {
-		path, err := validateBinary(candidate)
-		if err == nil {
-			return path, nil
-		}
-		missing = append(missing, candidate)
-	}
-	if i.DisableDownload {
-		if len(missing) == 0 {
-			return "", fmt.Errorf(
-				"bundled sing-box %s not found; reinstall the KubeLoop package",
-				Version,
-			)
-		}
-		return "", fmt.Errorf(
-			"bundled sing-box %s not found (tried %s); reinstall the KubeLoop package",
-			Version,
-			strings.Join(missing, ", "),
-		)
-	}
-	return i.downloadToCores(ctx)
 }

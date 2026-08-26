@@ -12,7 +12,7 @@ import (
 
 	"github.com/miekg/dns"
 
-	"github.com/fengqi-dev/kube-loop/internal/dnsname"
+	dnsprotocol "github.com/fengqi-dev/kube-loop/internal/protocol/dns"
 	"github.com/fengqi-dev/kube-loop/internal/singbox"
 )
 
@@ -57,9 +57,9 @@ func startDNSSearchProxy(
 	if upstreamHost == "" {
 		upstreamHost = singbox.DefaultDNSListen
 	}
-	domains, err := dnsname.NormalizeClusterDomains(clusterDomains)
+	domains, err := dnsprotocol.NormalizeClusterDomains(clusterDomains)
 	if err != nil {
-		domains = []string{dnsname.DefaultClusterDomain}
+		domains = []string{dnsprotocol.DefaultClusterDomain}
 	}
 	proxy := &dnsSearchProxy{
 		upstream:  net.JoinHostPort(upstreamHost, strconv.Itoa(upstreamPort)),
@@ -123,9 +123,9 @@ func (p *dnsSearchProxy) SetSearch(search []string) {
 }
 
 func (p *dnsSearchProxy) SetClusterDomains(domains []string) {
-	normalized, err := dnsname.NormalizeClusterDomains(domains)
+	normalized, err := dnsprotocol.NormalizeClusterDomains(domains)
 	if err != nil {
-		normalized = []string{dnsname.DefaultClusterDomain}
+		normalized = []string{dnsprotocol.DefaultClusterDomain}
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()

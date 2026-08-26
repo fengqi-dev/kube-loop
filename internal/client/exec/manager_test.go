@@ -15,7 +15,6 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/execstream"
-	"github.com/fengqi-dev/kube-loop/internal/testutil/websockettest"
 )
 
 type blockingStreamClient struct {
@@ -55,7 +54,7 @@ func TestManagerRoutesOutputInputResizeAndExitByProfileAndTask(t *testing.T) {
 	input := make(chan execstream.Frame, 2)
 	clientClosed := make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		connection, err := websockettest.Accept(writer, request, nil)
+		connection, err := (&websocket.Upgrader{}).Upgrade(writer, request, nil)
 		if err != nil {
 			t.Error(err)
 			return
@@ -136,7 +135,7 @@ func TestManagerRoutesOutputInputResizeAndExitByProfileAndTask(t *testing.T) {
 
 func TestManagerEventCallbackCanStopItsOwnStream(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		connection, err := websockettest.Accept(writer, request, nil)
+		connection, err := (&websocket.Upgrader{}).Upgrade(writer, request, nil)
 		if err != nil {
 			return
 		}
@@ -188,7 +187,7 @@ func TestManagerEventCallbackCanStopItsOwnStream(t *testing.T) {
 
 func TestManagerStopProfileWaitsForOpeningStream(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		connection, err := websockettest.Accept(writer, request, nil)
+		connection, err := (&websocket.Upgrader{}).Upgrade(writer, request, nil)
 		if err != nil {
 			return
 		}
@@ -267,7 +266,7 @@ func testManagerWaitsForEventCallback(
 ) {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		connection, err := websockettest.Accept(writer, request, nil)
+		connection, err := (&websocket.Upgrader{}).Upgrade(writer, request, nil)
 		if err != nil {
 			return
 		}

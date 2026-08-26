@@ -11,7 +11,7 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"github.com/fengqi-dev/kube-loop/internal/userpaths"
+	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
 func (s *Server) signer() (ssh.Signer, error) {
@@ -21,7 +21,7 @@ func (s *Server) signer() (ssh.Signer, error) {
 		}
 		path := s.hostKeyPath
 		if path == "" {
-			layout, err := userpaths.Default()
+			layout, err := utils.Default()
 			if err != nil {
 				s.signerErr = fmt.Errorf("find home directory for SSH host key: %w", err)
 				return

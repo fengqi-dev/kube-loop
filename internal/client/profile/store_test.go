@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fengqi-dev/kube-loop/internal/fsatomic"
+	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
 func TestDefaultPathUsesConfigDirectory(t *testing.T) {
@@ -310,7 +310,7 @@ func TestServerProfileStoreSnapshotDoesNotBlockOnDiskWrite(t *testing.T) {
 			startOnce.Do(func() { close(started) })
 			<-release
 		}
-		return fsatomic.WriteFile(path, raw, dirMode, fileMode)
+		return utils.WriteFile(path, raw, dirMode, fileMode)
 	}
 	written := make(chan error, 1)
 	go func() {
@@ -354,7 +354,7 @@ func TestServerProfileStoreWriteFailurePreservesCommittedState(t *testing.T) {
 		if path == store.path {
 			return writeErr
 		}
-		return fsatomic.WriteFile(path, raw, dirMode, fileMode)
+		return utils.WriteFile(path, raw, dirMode, fileMode)
 	}
 	if err := store.Upsert(Profile{ID: "two", BaseURL: "https://two.example.test"}); !errors.Is(err, writeErr) {
 		t.Fatalf("Upsert error = %v", err)

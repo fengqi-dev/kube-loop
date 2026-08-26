@@ -13,7 +13,6 @@ import (
 	"github.com/gorilla/websocket"
 
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
-	"github.com/fengqi-dev/kube-loop/internal/testutil/websockettest"
 )
 
 type blockingInventoryConnection struct {
@@ -42,10 +41,9 @@ func TestInventoryWatchAuthenticatesAndValidatesSnapshotBinding(t *testing.T) {
 			http.Error(writer, "invalid request", http.StatusBadRequest)
 			return
 		}
-		connection, err := websockettest.Accept(
+		connection, err := (&websocket.Upgrader{}).Upgrade(
 			writer,
-			request,
-			nil)
+			request, nil)
 
 		if err != nil {
 			return

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/fengqi-dev/kube-loop/internal/auth"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 )
 
@@ -223,8 +224,8 @@ func TestOAuthClientRedirectURIValidation(t *testing.T) {
 		{name: schemeHTTPS, clientID: "client", redirect: "https://client.example/callback", valid: true},
 		{name: "IPv4 loopback", clientID: "client", redirect: "http://127.0.0.1:8080/callback", valid: true},
 		{name: "IPv6 loopback", clientID: "client", redirect: "http://[::1]:8080/callback", valid: true},
-		{name: "desktop protocol", clientID: storage.DesktopOAuthClientID, redirect: storage.DesktopOAuthRedirectURI, valid: true},
-		{name: "desktop protocol on another client", clientID: "client", redirect: storage.DesktopOAuthRedirectURI},
+		{name: "desktop protocol", clientID: auth.DesktopClientID, redirect: auth.DesktopRedirectURI, valid: true},
+		{name: "desktop protocol on another client", clientID: "client", redirect: auth.DesktopRedirectURI},
 		{name: "other custom protocol", clientID: "client", redirect: "other://auth/callback"},
 		{name: "non-loopback HTTP", clientID: "client", redirect: "http://client.example/callback"},
 		{name: "userinfo", clientID: "client", redirect: "https://user@client.example/callback"},

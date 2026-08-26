@@ -8,7 +8,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/fengqi-dev/kube-loop/internal/fsatomic"
+	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
 const maxStateBytes = 1 << 20
@@ -69,7 +69,7 @@ func (store *Store) save(next State) error {
 func (store *Store) write(path string, raw []byte) error {
 	writeFile := store.writeFile
 	if writeFile == nil {
-		writeFile = fsatomic.WriteFile
+		writeFile = utils.WriteFile
 	}
 	return writeFile(path, raw, 0o700, 0o600)
 }

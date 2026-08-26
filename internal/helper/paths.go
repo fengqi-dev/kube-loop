@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"runtime"
 
-	"github.com/fengqi-dev/kube-loop/internal/userpaths"
+	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
 func UserHomeDir() (string, error) {
@@ -18,7 +18,7 @@ func UserHomeDir() (string, error) {
 }
 
 func UserDir() (string, error) {
-	layout, err := userpaths.ForVersion(Version)
+	layout, err := utils.ForVersion(Version)
 	if err != nil {
 		return "", err
 	}
@@ -30,7 +30,7 @@ func TokenPath() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	layout, err := userpaths.New(dir)
+	layout, err := utils.New(dir)
 	if err != nil {
 		return "", err
 	}

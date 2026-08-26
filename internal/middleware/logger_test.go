@@ -1,4 +1,4 @@
-package httpmiddleware
+package middleware
 
 import (
 	"bytes"
@@ -10,8 +10,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v5"
-
-	"github.com/fengqi-dev/kube-loop/internal/correlation"
 )
 
 func TestRequestLoggerUsesClientRequestID(t *testing.T) {
@@ -48,16 +46,16 @@ func TestRequestLoggerPropagatesCorrelationID(t *testing.T) {
 	router.Use(RequestID())
 	router.Use(RequestLogger(slog.New(slog.NewJSONHandler(&logs, nil))))
 	router.GET("/items", func(ctx *echo.Context) error {
-		if id := correlation.ID(ctx.Request().Context()); id != correlationID {
+		if id := ID(ctx.Request().Context()); id != correlationID {
 			t.Fatalf("handler correlation ID = %q", id)
 		}
 		return ctx.NoContent(http.StatusNoContent)
 	})
 	request := httptest.NewRequest(http.MethodGet, "/items", nil)
-	request.Header.Set(correlation.Header, correlationID)
+	request.Header.Set(Header, correlationID)
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, request)
-	if got := response.Header().Get(correlation.Header); got != correlationID {
+	if got := response.Header().Get(Header); got != correlationID {
 		t.Fatalf("response correlation ID = %q", got)
 	}
 	var event map[string]any
@@ -75,10 +73,10 @@ func TestRequestLoggerReplacesInvalidCorrelationID(t *testing.T) {
 	router.Use(RequestID())
 	router.GET("/items", func(ctx *echo.Context) error { return ctx.NoContent(http.StatusNoContent) })
 	request := httptest.NewRequest(http.MethodGet, "/items", nil)
-	request.Header.Set(correlation.Header, "forged\nvalue")
+	request.Header.Set(Header, "forged\nvalue")
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, request)
-	if got := response.Header().Get(correlation.Header); !correlation.Valid(got) {
+	if got := response.Header().Get(Header); !Valid(got) {
 		t.Fatalf("response correlation ID = %q", got)
 	}
 }

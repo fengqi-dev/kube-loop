@@ -19,9 +19,8 @@ import (
 	"github.com/labstack/echo/v5"
 
 	clientmux "github.com/fengqi-dev/kube-loop/internal/client/websocketmux"
-	"github.com/fengqi-dev/kube-loop/internal/correlation"
 	servermux "github.com/fengqi-dev/kube-loop/internal/gateway/websocketmux"
-	"github.com/fengqi-dev/kube-loop/internal/httpmiddleware"
+	"github.com/fengqi-dev/kube-loop/internal/middleware"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/exchangestream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficstream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
@@ -55,7 +54,7 @@ func TestForwarderPropagatesCorrelationToTokenSourceAndGateway(t *testing.T) {
 	requestCorrelation := make(chan string, 1)
 	handler, err := servermux.NewHandler(servermux.ServerConfig{
 		Authenticator: servermux.AuthenticatorFunc(func(request *http.Request) (servermux.Identity, error) {
-			requestCorrelation <- request.Header.Get(correlation.Header)
+			requestCorrelation <- request.Header.Get(middleware.Header)
 			return servermux.Identity{
 				IdentityID: "identity", DeviceID: deviceID, SessionID: sessionID,
 				SessionGeneration: 1, TicketID: "ticket-id", ExpiresAt: time.Now().Add(time.Minute),
@@ -68,15 +67,15 @@ func TestForwarderPropagatesCorrelationToTokenSourceAndGateway(t *testing.T) {
 		t.Fatal(err)
 	}
 	router := echo.New()
-	router.Use(httpmiddleware.RequestID())
+	router.Use(middleware.RequestID())
 	router.Any(servermux.DefaultPath, echo.WrapHandler(handler))
 	server := httptest.NewServer(router)
 	defer server.Close()
-	ctx := correlation.WithID(t.Context(), correlationID)
+	ctx := middleware.WithID(t.Context(), correlationID)
 	forwarder, err := clientmux.Start(ctx, clientmux.ClientConfig{
 		URL: "ws" + strings.TrimPrefix(server.URL, "http") + servermux.DefaultPath,
 		TokenSource: func(ctx context.Context) (string, error) {
-			tokenCorrelation <- correlation.ID(ctx)
+			tokenCorrelation <- middleware.ID(ctx)
 			return "relay-ticket", nil
 		},
 		DeviceID: deviceID, SessionID: sessionID, SessionGeneration: 1,

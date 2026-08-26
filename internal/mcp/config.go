@@ -13,8 +13,7 @@ import (
 
 	"github.com/zalando/go-keyring"
 
-	"github.com/fengqi-dev/kube-loop/internal/fsatomic"
-	"github.com/fengqi-dev/kube-loop/internal/userpaths"
+	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
 const (
@@ -81,7 +80,7 @@ type SystemConfigStore struct {
 }
 
 func DefaultConfigPath() (string, error) {
-	layout, err := userpaths.Default()
+	layout, err := utils.Default()
 	if err != nil {
 		return "", err
 	}
@@ -120,7 +119,7 @@ func newSystemConfigStoreWithService(path string, secrets SecretBackend, service
 		return nil, errors.New("MCP secret store is required")
 	}
 	return &SystemConfigStore{
-		path: absolute, secrets: secrets, service: service, writeFile: fsatomic.WriteFile,
+		path: absolute, secrets: secrets, service: service, writeFile: utils.WriteFile,
 	}, nil
 }
 
@@ -183,7 +182,7 @@ func (store *SystemConfigStore) Save(config Config) error {
 	raw = append(raw, '\n')
 	writeFile := store.writeFile
 	if writeFile == nil {
-		writeFile = fsatomic.WriteFile
+		writeFile = utils.WriteFile
 	}
 	if err := writeFile(store.path, raw, 0o700, 0o600); err != nil {
 		saveErr := fmt.Errorf("save MCP settings: %w", err)

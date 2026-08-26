@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/fengqi-dev/kube-loop/internal/auth"
 	"github.com/fengqi-dev/kube-loop/internal/client/credentials"
 )
 
@@ -34,8 +35,8 @@ func TestOIDCProtocolLoginUsesStatePKCEAndExchange(t *testing.T) {
 			}
 			hash := sha256.Sum256([]byte(request.Form.Get("code_verifier")))
 			if request.Form.Get("code") != exchangeCode || base64.RawURLEncoding.EncodeToString(hash[:]) != challenge ||
-				request.Form.Get("device_id") != "device-1" || request.Form.Get(authParamClientID) != DefaultClientID ||
-				request.Form.Get("redirect_uri") != DefaultRedirectURI {
+				request.Form.Get("device_id") != "device-1" || request.Form.Get(authParamClientID) != auth.DesktopClientID ||
+				request.Form.Get("redirect_uri") != auth.DesktopRedirectURI {
 				t.Fatalf("exchange form = %#v", request.Form)
 			}
 			writeTokenResponse(t, writer)
@@ -55,12 +56,12 @@ func TestOIDCProtocolLoginUsesStatePKCEAndExchange(t *testing.T) {
 			query := authorize.Query()
 			challenge = query.Get("code_challenge")
 			if authorize.Path != "/oauth2/authorize" || query.Get("provider") != "company" ||
-				query.Get(authParamClientID) != DefaultClientID || len(query.Get("state")) < 32 ||
-				query.Get("redirect_uri") != DefaultRedirectURI || len(query.Get("nonce")) < 32 ||
+				query.Get(authParamClientID) != auth.DesktopClientID || len(query.Get("state")) < 32 ||
+				query.Get("redirect_uri") != auth.DesktopRedirectURI || len(query.Get("nonce")) < 32 ||
 				len(challenge) != 43 || query.Get("code_challenge_method") != "S256" {
 				t.Fatalf("authorization URL = %q", target)
 			}
-			callback, err := url.Parse(DefaultRedirectURI)
+			callback, err := url.Parse(auth.DesktopRedirectURI)
 			if err != nil {
 				return err
 			}
@@ -213,7 +214,7 @@ func TestProtocolCallbackRejectsTamperedStateWithoutConsumingLogin(t *testing.T)
 	}
 	defer client.endCallback(pending)
 	if err := client.HandleCallbackURL(
-		DefaultRedirectURI + "?state=" + strings.Repeat("x", 43) + "&code=" + strings.Repeat("c", 43),
+		auth.DesktopRedirectURI + "?state=" + strings.Repeat("x", 43) + "&code=" + strings.Repeat("c", 43),
 	); err == nil {
 		t.Fatal("tampered callback succeeded")
 	}
@@ -223,7 +224,7 @@ func TestProtocolCallbackRejectsTamperedStateWithoutConsumingLogin(t *testing.T)
 	default:
 	}
 	if err := client.HandleCallbackURL(
-		DefaultRedirectURI + "?state=" + strings.Repeat("s", 43) + "&code=" + strings.Repeat("c", 43),
+		auth.DesktopRedirectURI + "?state=" + strings.Repeat("s", 43) + "&code=" + strings.Repeat("c", 43),
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -231,7 +232,7 @@ func TestProtocolCallbackRejectsTamperedStateWithoutConsumingLogin(t *testing.T)
 		t.Fatalf("valid callback result = %#v", result)
 	}
 	if err := client.HandleCallbackURL(
-		DefaultRedirectURI + "?state=" + strings.Repeat("s", 43) + "&code=" + strings.Repeat("d", 43),
+		auth.DesktopRedirectURI + "?state=" + strings.Repeat("s", 43) + "&code=" + strings.Repeat("d", 43),
 	); err == nil {
 		t.Fatal("duplicate callback succeeded")
 	}
@@ -252,8 +253,8 @@ func TestProtocolCallbackValidatesTargetAndParameters(t *testing.T) {
 		{name: "wrong scheme", url: "https://auth/callback?state=" + strings.Repeat("s", 43) + "&code=" + strings.Repeat("c", 43)},
 		{name: "wrong host", url: "kubeloop://other/callback?state=" + strings.Repeat("s", 43) + "&code=" + strings.Repeat("c", 43)},
 		{name: "wrong path", url: "kubeloop://auth/other?state=" + strings.Repeat("s", 43) + "&code=" + strings.Repeat("c", 43)},
-		{name: "duplicate state", url: DefaultRedirectURI + "?state=a&state=b&code=" + strings.Repeat("c", 43)},
-		{name: "short code", url: DefaultRedirectURI + "?state=" + strings.Repeat("s", 43) + "&code=short"},
+		{name: "duplicate state", url: auth.DesktopRedirectURI + "?state=a&state=b&code=" + strings.Repeat("c", 43)},
+		{name: "short code", url: auth.DesktopRedirectURI + "?state=" + strings.Repeat("s", 43) + "&code=short"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			if err := client.HandleCallbackURL(test.url); err == nil {

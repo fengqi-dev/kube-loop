@@ -17,7 +17,6 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/execstream"
-	"github.com/fengqi-dev/kube-loop/internal/testutil/websockettest"
 )
 
 type streamClient struct{ endpoint string }
@@ -63,14 +62,14 @@ func (client streamClient) CreateExecTask(
 func (client streamClient) OpenExecStream(
 	ctx context.Context, _ profile.Profile, _ remote.Session, _ remote.ExecTask,
 ) (*websocket.Conn, error) {
-	connection, _, err := websockettest.Dial(ctx, client.endpoint, nil)
+	connection, _, err := websocket.DefaultDialer.DialContext(ctx, client.endpoint, nil)
 	return connection, err
 }
 
 func TestTypedStreamSeparatesInputResizeOutputAndExit(t *testing.T) {
 	received := make(chan execstream.Frame, 2)
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		connection, err := websockettest.Accept(writer, request, nil)
+		connection, err := (&websocket.Upgrader{}).Upgrade(writer, request, nil)
 		if err != nil {
 			t.Error(err)
 			return

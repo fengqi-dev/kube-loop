@@ -1,6 +1,4 @@
-// Package correlation carries a non-authoritative identifier across one
-// client-to-data-plane operation for structured log correlation.
-package correlation
+package middleware
 
 import (
 	"context"

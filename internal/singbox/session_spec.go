@@ -8,7 +8,7 @@ import (
 	"regexp"
 	"slices"
 
-	"github.com/fengqi-dev/kube-loop/internal/dnsname"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/dns"
 )
 
 const maxSessionItems = 4096
@@ -95,14 +95,14 @@ func (s SessionSpec) Validate() error {
 		tun.Addr() == tun.Masked().Addr() {
 		return errors.New("TUN address must be a host in a 198.18.0.0/15 /30 subnet")
 	}
-	if s.Namespace != "" && !dnsname.ValidLabel(s.Namespace) {
+	if s.Namespace != "" && !dns.ValidLabel(s.Namespace) {
 		return errors.New("invalid namespace")
 	}
-	if s.DNSNamespace != "" && !dnsname.ValidLabel(s.DNSNamespace) {
+	if s.DNSNamespace != "" && !dns.ValidLabel(s.DNSNamespace) {
 		return errors.New("invalid DNS namespace")
 	}
 	for _, namespace := range s.Namespaces {
-		if !dnsname.ValidLabel(namespace) {
+		if !dns.ValidLabel(namespace) {
 			return errors.New("invalid namespace in namespace list")
 		}
 	}
@@ -111,7 +111,7 @@ func (s SessionSpec) Validate() error {
 			return fmt.Errorf("invalid cluster DNS address: %w", err)
 		}
 	}
-	if _, err := dnsname.NormalizeClusterDomains(s.ClusterDomains); err != nil {
+	if _, err := dns.NormalizeClusterDomains(s.ClusterDomains); err != nil {
 		return err
 	}
 	if _, err := NormalizeHostAliases(s.Hosts); err != nil {
@@ -133,7 +133,7 @@ func (s SessionSpec) GenerateConfig() ([]byte, error) {
 		return nil, err
 	}
 	hosts, _ := NormalizeHostAliases(s.Hosts)
-	domains, _ := dnsname.NormalizeClusterDomains(s.ClusterDomains)
+	domains, _ := dns.NormalizeClusterDomains(s.ClusterDomains)
 	return Generate(s.discovery(), Options{
 		BridgeHost:       s.BridgeHost,
 		BridgePort:       s.BridgePort,
@@ -162,7 +162,7 @@ func (s SessionSpec) DNS() (DNSMeta, error) {
 		return DNSMeta{}, err
 	}
 	hosts, _ := NormalizeHostAliases(s.Hosts)
-	domains, _ := dnsname.NormalizeClusterDomains(s.ClusterDomains)
+	domains, _ := dns.NormalizeClusterDomains(s.ClusterDomains)
 	ns := s.dnsNamespace()
 	return DNSMeta{
 		Listen:  s.DNSHost,
@@ -178,7 +178,7 @@ func (s SessionSpec) dnsNamespace() string {
 }
 
 func (s SessionSpec) discovery() NetworkSpec {
-	domains, _ := dnsname.NormalizeClusterDomains(s.ClusterDomains)
+	domains, _ := dns.NormalizeClusterDomains(s.ClusterDomains)
 	return NetworkSpec{
 		PodCIDRs:       s.PodCIDRs,
 		ServiceCIDRs:   s.ServiceCIDRs,

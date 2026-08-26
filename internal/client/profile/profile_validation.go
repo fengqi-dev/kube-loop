@@ -8,7 +8,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/fengqi-dev/kube-loop/internal/dnsname"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/dns"
 )
 
 const currentVersion = 1
@@ -50,7 +50,7 @@ func normalizeProfile(profile Profile) (Profile, error) {
 	if profile.SOCKSPort < 0 || profile.SOCKSPort > 65535 {
 		return Profile{}, errors.New("server Profile SOCKS port must be between 1 and 65535")
 	}
-	if profile.DNSNamespace != "" && !dnsname.ValidLabel(profile.DNSNamespace) {
+	if profile.DNSNamespace != "" && !dns.ValidLabel(profile.DNSNamespace) {
 		return Profile{}, errors.New("server Profile DNS namespace is invalid")
 	}
 	aliases, err := normalizeHostAliases(profile.HostAliases)
@@ -114,7 +114,7 @@ func normalizeHostAliases(items []HostAlias) ([]HostAlias, error) {
 	seen := make(map[string]struct{}, len(items))
 	for _, item := range items {
 		domain := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(item.Domain)), ".")
-		if !dnsname.ValidClusterDomain(domain) {
+		if !dns.ValidClusterDomain(domain) {
 			return nil, fmt.Errorf("invalid Server Profile host alias domain %q", item.Domain)
 		}
 		address, err := netip.ParseAddr(strings.TrimSpace(item.IP))

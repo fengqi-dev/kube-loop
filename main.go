@@ -14,7 +14,6 @@ import (
 	macoptions "github.com/wailsapp/wails/v2/pkg/options/mac"
 
 	desktopapp "github.com/fengqi-dev/kube-loop/internal/app"
-	"github.com/fengqi-dev/kube-loop/internal/desktoptray"
 	internalLogging "github.com/fengqi-dev/kube-loop/internal/logging"
 )
 
@@ -41,7 +40,7 @@ func main() {
 	goruntime.LockOSThread()
 
 	app := desktopapp.NewApp(version, embeddedHelperFiles)
-	tray := desktoptray.New(app, trayIcon)
+	tray := desktopapp.New(app, trayIcon)
 	err := wails.Run(&options.App{
 		Title:             "KubeLoop",
 		Width:             900,
@@ -80,7 +79,7 @@ func main() {
 	})
 	goruntime.UnlockOSThread()
 	if err != nil {
-		desktoptray.Remove(tray)
+		desktopapp.Remove(tray)
 		log.Fatal(err)
 	}
 }

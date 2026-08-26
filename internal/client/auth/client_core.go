@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/fengqi-dev/kube-loop/internal/authconfig"
+	"github.com/fengqi-dev/kube-loop/internal/auth"
 )
 
 const (
@@ -127,11 +127,11 @@ func New(config Config) *Client {
 	clone.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	clientID := strings.TrimSpace(config.ClientID)
 	if clientID == "" {
-		clientID = DefaultClientID
+		clientID = auth.DesktopClientID
 	}
 	redirectURI := strings.TrimSpace(config.RedirectURI)
 	if redirectURI == "" {
-		redirectURI = DefaultRedirectURI
+		redirectURI = auth.DesktopRedirectURI
 	}
 	return &Client{
 		httpClient: &clone, requestTimeout: requestTimeout, loginTimeout: loginTimeout,
@@ -139,8 +139,3 @@ func New(config Config) *Client {
 		clientID: clientID, redirectURI: redirectURI, loopbackCallback: config.LoopbackCallback,
 	}
 }
-
-const (
-	DefaultClientID    = authconfig.DesktopClientID
-	DefaultRedirectURI = authconfig.DesktopRedirectURI
-)

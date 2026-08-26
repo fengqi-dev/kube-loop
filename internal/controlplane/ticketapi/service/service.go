@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/fengqi-dev/kube-loop/internal/middleware"
 	"github.com/google/uuid"
 
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/ticketapi/entity"
-	"github.com/fengqi-dev/kube-loop/internal/correlation"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/relaycontrol"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/relayticket"
 )
@@ -129,7 +129,7 @@ func (service *Service) Issue(
 		"RelayTicket issued",
 		"operation", "relay.ticket.issue",
 		"outcome", "success",
-		"correlation_id", correlation.ID(ctx),
+		"correlation_id", middleware.ID(ctx),
 		"duration_ms", time.Since(startedAt).Milliseconds(),
 		"session_id", input.SessionID,
 		"session_generation", input.Generation,

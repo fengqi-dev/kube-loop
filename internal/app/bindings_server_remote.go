@@ -7,7 +7,7 @@ import (
 
 	clientdataplane "github.com/fengqi-dev/kube-loop/internal/client/dataplane"
 	clientremote "github.com/fengqi-dev/kube-loop/internal/client/remote"
-	"github.com/fengqi-dev/kube-loop/internal/networkdiag"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/networkdiag"
 )
 
 type RemoteInventory struct {

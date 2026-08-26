@@ -9,7 +9,7 @@ import (
 	"slices"
 	"time"
 
-	"github.com/fengqi-dev/kube-loop/internal/correlation"
+	"github.com/fengqi-dev/kube-loop/internal/middleware"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
 )
@@ -118,7 +118,7 @@ func (s *Server) handle(ctx context.Context, client net.Conn, required requiredA
 				ctx, "Gateway traffic relay started",
 				"operation", "gateway.traffic.relay",
 				"outcome", "started",
-				"correlation_id", correlation.ID(ctx),
+				"correlation_id", middleware.ID(ctx),
 				"request_id", required.requestID,
 				"session_id", identity.SessionID,
 				"session_generation", identity.SessionGeneration,
@@ -133,7 +133,7 @@ func (s *Server) handle(ctx context.Context, client net.Conn, required requiredA
 				ctx, "Gateway traffic relay completed",
 				"operation", "gateway.traffic.relay",
 				"outcome", "completed",
-				"correlation_id", correlation.ID(ctx),
+				"correlation_id", middleware.ID(ctx),
 				"request_id", required.requestID,
 				"session_id", identity.SessionID,
 				"session_generation", identity.SessionGeneration,

@@ -1,4 +1,4 @@
-package dnsname
+package dns
 
 import (
 	"slices"

@@ -10,7 +10,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/fengqi-dev/kube-loop/internal/dnsname"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/dns"
 )
 
 const (
@@ -73,7 +73,7 @@ func Normalize(input Spec) (Spec, error) {
 			slices.Sort(serviceIPs)
 		}
 	}
-	domains, err := dnsname.NormalizeClusterDomains(input.ClusterDomains)
+	domains, err := dns.NormalizeClusterDomains(input.ClusterDomains)
 	if err != nil {
 		return Spec{}, err
 	}

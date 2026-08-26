@@ -6,9 +6,8 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/fengqi-dev/kube-loop/internal/auth"
 	"github.com/ory/fosite"
-
-	controlstorage "github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 )
 
 // writeDesktopAuthorizationComplete keeps the browser on a useful completion
@@ -23,14 +22,14 @@ func writeDesktopAuthorizationComplete(
 ) bool {
 	if authorizeRequest.GetClient().
 		GetID() !=
-		controlstorage.DesktopOAuthClientID ||
+		auth.DesktopClientID ||
 		authorizeRequest.GetResponseMode() != fosite.ResponseModeDefault &&
 			authorizeRequest.GetResponseMode() != fosite.ResponseModeQuery {
 		return false
 	}
 	redirect := authorizeRequest.GetRedirectURI()
 	if redirect == nil ||
-		redirect.String() != controlstorage.DesktopOAuthRedirectURI {
+		redirect.String() != auth.DesktopRedirectURI {
 		return false
 	}
 	callback := *redirect

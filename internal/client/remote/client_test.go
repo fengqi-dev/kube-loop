@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/fengqi-dev/kube-loop/internal/middleware"
 	"github.com/google/uuid"
 
 	"github.com/gorilla/websocket"
@@ -20,11 +21,9 @@ import (
 	clientauth "github.com/fengqi-dev/kube-loop/internal/client/auth"
 	"github.com/fengqi-dev/kube-loop/internal/client/credentials"
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
-	"github.com/fengqi-dev/kube-loop/internal/correlation"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/execstream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/filestream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
-	"github.com/fengqi-dev/kube-loop/internal/testutil/websockettest"
 )
 
 type memoryStore struct {
@@ -516,7 +515,7 @@ func TestIssueRelayTicketUsesAuthenticatedJSONRequest(t *testing.T) {
 		if request.URL.Query().Get(remoteParamNamespace) != session.Namespace ||
 			request.Header.Get("Content-Type") != "application/json" ||
 			request.Header.Get("Authorization") != "Bearer access-token" ||
-			request.Header.Get(correlation.Header) != correlationID {
+			request.Header.Get(middleware.Header) != correlationID {
 			t.Errorf("query = %q, Content-Type = %q, Authorization = %q",
 				request.URL.RawQuery, request.Header.Get("Content-Type"), request.Header.Get("Authorization"))
 		}
@@ -544,7 +543,7 @@ func TestIssueRelayTicketUsesAuthenticatedJSONRequest(t *testing.T) {
 		t.Fatal(err)
 	}
 	ticket, err := client.IssueRelayTicket(
-		correlation.WithID(context.Background(), correlationID),
+		middleware.WithID(context.Background(), correlationID),
 		profile.Profile{ID: "service-1", BaseURL: server.URL}, session,
 	)
 	if err != nil || ticket.Ticket != "signed.ticket.value" || ticket.TokenType != "KubeLoop-RelayTicket" ||
@@ -614,7 +613,7 @@ func TestPodExecTaskOpensAuthenticatedWebSocketStream(t *testing.T) {
 		if request.Header.Get("Authorization") != "Bearer access-token" {
 			t.Errorf("Authorization = %q", request.Header.Get("Authorization"))
 		}
-		connection, err := websockettest.Accept(writer, request, nil)
+		connection, err := (&websocket.Upgrader{}).Upgrade(writer, request, nil)
 		if err != nil {
 			t.Error(err)
 			return
@@ -683,7 +682,7 @@ func TestFileTransferTaskUsesAuthenticatedControlAndWebSocketAPIs(t *testing.T) 
 			t.Errorf("Authorization = %q", request.Header.Get("Authorization"))
 		}
 		if strings.HasSuffix(request.URL.Path, "/stream") {
-			connection, err := websockettest.Accept(writer, request, nil)
+			connection, err := (&websocket.Upgrader{}).Upgrade(writer, request, nil)
 			if err != nil {
 				t.Error(err)
 				return

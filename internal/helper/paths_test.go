@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestUserPathsSeparateReleaseAndDevelopment(t *testing.T) {
+func TestSeparateReleaseAndDevelopment(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)

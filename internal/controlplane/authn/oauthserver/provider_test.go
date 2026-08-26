@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/fengqi-dev/kube-loop/internal/auth"
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 
@@ -87,11 +88,11 @@ func TestDesktopAuthorizationCodeRequiresPKCES256RotatesRefreshAndRejectsReplay(
 		t,
 		store,
 		controlstorage.OAuthClient{
-			ID:     controlstorage.DesktopOAuthClientID,
+			ID:     auth.DesktopClientID,
 			Name:   "Desktop",
 			Public: true,
 			RedirectURIs: []string{
-				controlstorage.DesktopOAuthRedirectURI,
+				auth.DesktopRedirectURI,
 			},
 			GrantTypes: []string{"authorization_code", "refresh_token"},
 			Scopes: []string{
@@ -106,8 +107,8 @@ func TestDesktopAuthorizationCodeRequiresPKCES256RotatesRefreshAndRejectsReplay(
 	challengeSum := sha256.Sum256([]byte(verifier))
 	query := url.Values{
 		"response_type": {responseTypeCode},
-		"client_id":     {controlstorage.DesktopOAuthClientID},
-		"redirect_uri":  {controlstorage.DesktopOAuthRedirectURI},
+		"client_id":     {auth.DesktopClientID},
+		"redirect_uri":  {auth.DesktopRedirectURI},
 		"scope": {
 			"openid offline_access kubeloop.api",
 		},
@@ -185,9 +186,9 @@ func TestDesktopAuthorizationCodeRequiresPKCES256RotatesRefreshAndRejectsReplay(
 		endpoints,
 		url.Values{
 			"grant_type": {"authorization_code"},
-			"client_id":  {controlstorage.DesktopOAuthClientID},
+			"client_id":  {auth.DesktopClientID},
 			"redirect_uri": {
-				controlstorage.DesktopOAuthRedirectURI,
+				auth.DesktopRedirectURI,
 			}, responseTypeCode: {code}, "code_verifier": {verifier},
 		},
 	)
@@ -205,7 +206,7 @@ func TestDesktopAuthorizationCodeRequiresPKCES256RotatesRefreshAndRejectsReplay(
 		endpoints,
 		url.Values{
 			"grant_type":    {"refresh_token"},
-			"client_id":     {controlstorage.DesktopOAuthClientID},
+			"client_id":     {auth.DesktopClientID},
 			"refresh_token": {oldRefresh},
 		},
 	)
@@ -225,7 +226,7 @@ func TestDesktopAuthorizationCodeRequiresPKCES256RotatesRefreshAndRejectsReplay(
 		endpoints,
 		url.Values{
 			"grant_type":    {"refresh_token"},
-			"client_id":     {controlstorage.DesktopOAuthClientID},
+			"client_id":     {auth.DesktopClientID},
 			"refresh_token": {oldRefresh},
 		},
 	); replay.Code == http.StatusOK {
@@ -235,7 +236,7 @@ func TestDesktopAuthorizationCodeRequiresPKCES256RotatesRefreshAndRejectsReplay(
 		endpoints,
 		url.Values{
 			"grant_type":    {"refresh_token"},
-			"client_id":     {controlstorage.DesktopOAuthClientID},
+			"client_id":     {auth.DesktopClientID},
 			"refresh_token": {refreshed["refresh_token"].(string)},
 		},
 	); replay.Code == http.StatusOK {
@@ -245,9 +246,9 @@ func TestDesktopAuthorizationCodeRequiresPKCES256RotatesRefreshAndRejectsReplay(
 		endpoints,
 		url.Values{
 			"grant_type": {"authorization_code"},
-			"client_id":  {controlstorage.DesktopOAuthClientID},
+			"client_id":  {auth.DesktopClientID},
 			"redirect_uri": {
-				controlstorage.DesktopOAuthRedirectURI,
+				auth.DesktopRedirectURI,
 			},
 			responseTypeCode: {code},
 			"code_verifier":  {verifier},
@@ -278,7 +279,7 @@ func TestRemovedGrantTypesAreRejected(t *testing.T) {
 				endpoints,
 				url.Values{
 					"grant_type": {grant},
-					"client_id":  {controlstorage.DesktopOAuthClientID},
+					"client_id":  {auth.DesktopClientID},
 				},
 			)
 			if response.Code == http.StatusOK {

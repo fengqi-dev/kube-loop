@@ -15,7 +15,6 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/filestream"
-	"github.com/fengqi-dev/kube-loop/internal/testutil/websockettest"
 )
 
 type waitErrorReader struct {
@@ -30,7 +29,7 @@ func (reader waitErrorReader) Read([]byte) (int, error) {
 
 func TestUploadWaitsForResponseReaderOnLocalReadFailure(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		connection, err := websockettest.Accept(writer, request, nil)
+		connection, err := (&websocket.Upgrader{}).Upgrade(writer, request, nil)
 		if err != nil {
 			t.Error(err)
 			return
@@ -89,7 +88,7 @@ func TestUploadStreamsDataWhileReceivingProgressAndVerifiesResult(t *testing.T) 
 	contents := bytes.Repeat([]byte("upload-data-"), 40_000)
 	checksum := sha256.Sum256(contents)
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		connection, err := websockettest.Accept(writer, request, nil)
+		connection, err := (&websocket.Upgrader{}).Upgrade(writer, request, nil)
 		if err != nil {
 			t.Error(err)
 			return

@@ -10,8 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/fengqi-dev/kube-loop/internal/fsatomic"
-	"github.com/fengqi-dev/kube-loop/internal/userpaths"
+	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
 const (
@@ -34,7 +33,7 @@ type SettingsStore struct {
 
 func NewSettingsStore(path string) (*SettingsStore, error) {
 	if strings.TrimSpace(path) == "" {
-		layout, err := userpaths.Default()
+		layout, err := utils.Default()
 		if err != nil {
 			return nil, err
 		}
@@ -87,7 +86,7 @@ func (s *SettingsStore) Save(settings Settings) error {
 		return errors.New("encode traffic inspection settings")
 	}
 	raw = append(raw, '\n')
-	if err := fsatomic.WriteFile(s.path, raw, 0o700, 0o600); err != nil {
+	if err := utils.WriteFile(s.path, raw, 0o700, 0o600); err != nil {
 		return fmt.Errorf("save traffic inspection settings: %w", err)
 	}
 	return nil

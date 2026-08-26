@@ -5,7 +5,7 @@ import (
 	"net"
 	"slices"
 
-	"github.com/fengqi-dev/kube-loop/internal/dnsname"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/dns"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficcontrol"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
 )
@@ -39,7 +39,7 @@ func (s *Server) ServeConnForAuthorizationContext(
 		_ = connection.Close()
 		return
 	}
-	if !dnsname.ValidLabel(authorization.Namespace) {
+	if !dns.ValidLabel(authorization.Namespace) {
 		s.log(ctx, authorization.RequestID, "Gateway logical connection rejected", "reason", "invalid_namespace")
 		_ = connection.Close()
 		return

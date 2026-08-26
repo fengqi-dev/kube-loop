@@ -1,4 +1,4 @@
-package httpmiddleware
+package middleware
 
 import (
 	"log/slog"
@@ -6,8 +6,6 @@ import (
 
 	"github.com/labstack/echo/v5"
 	echomiddleware "github.com/labstack/echo/v5/middleware"
-
-	"github.com/fengqi-dev/kube-loop/internal/correlation"
 )
 
 // RequestLogger returns Echo request logging middleware backed by slog.
@@ -34,7 +32,7 @@ func RequestLogger(logger *slog.Logger) echo.MiddlewareFunc {
 				level = slog.LevelWarn
 			}
 			attributes := []slog.Attr{
-				slog.String("correlation_id", correlation.ID(ctx.Request().Context())),
+				slog.String("correlation_id", ID(ctx.Request().Context())),
 				slog.String("request_id", values.RequestID),
 				slog.String("method", values.Method),
 				slog.String("path", values.URIPath),

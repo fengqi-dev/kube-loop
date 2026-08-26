@@ -6,7 +6,7 @@ import (
 	"net/netip"
 	"runtime"
 
-	"github.com/fengqi-dev/kube-loop/internal/dnsname"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/dns"
 )
 
 type generatedDNS struct {
@@ -55,13 +55,13 @@ func buildDNSConfig(network NetworkSpec, options Options) (generatedDNS, error) 
 		return generatedDNS{}, err
 	}
 
-	clusterDomains, err := dnsname.NormalizeClusterDomains(options.ClusterDomains)
+	clusterDomains, err := dns.NormalizeClusterDomains(options.ClusterDomains)
 	if err != nil {
 		return generatedDNS{}, err
 	}
 	if len(network.ClusterDomains) > 0 {
 		allDomains := append(append([]string{}, clusterDomains...), network.ClusterDomains...)
-		merged, mergeErr := dnsname.NormalizeClusterDomains(allDomains)
+		merged, mergeErr := dns.NormalizeClusterDomains(allDomains)
 		if mergeErr != nil {
 			return generatedDNS{}, mergeErr
 		}

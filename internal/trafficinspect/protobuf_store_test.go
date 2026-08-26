@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fengqi-dev/kube-loop/internal/fsatomic"
+	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
 func TestProtobufSchemaStoreImportsNestedDirectoryAndReloads(t *testing.T) {
@@ -99,7 +99,7 @@ func TestProtobufSchemaStoreActivatesPersistedCompileAfterContextCancellation(t 
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	store.writeFile = func(path string, raw []byte, dirMode, fileMode os.FileMode) error {
-		err := fsatomic.WriteFile(path, raw, dirMode, fileMode)
+		err := utils.WriteFile(path, raw, dirMode, fileMode)
 		cancel()
 		return err
 	}
@@ -144,7 +144,7 @@ func TestProtobufSchemaStoreSerializesConcurrentReplacements(t *testing.T) {
 			close(started)
 			<-release
 		}
-		return fsatomic.WriteFile(path, raw, dirMode, fileMode)
+		return utils.WriteFile(path, raw, dirMode, fileMode)
 	}
 	firstDone := make(chan error, 1)
 	go func() { firstDone <- store.ReplaceDirectory(context.Background(), first) }()

@@ -13,12 +13,12 @@ import (
 	clientremote "github.com/fengqi-dev/kube-loop/internal/client/remote"
 	clientremotesession "github.com/fengqi-dev/kube-loop/internal/client/remotesession"
 	"github.com/fengqi-dev/kube-loop/internal/mcp"
-	"github.com/fengqi-dev/kube-loop/internal/userpaths"
+	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
 func configureRemoteTaskManagers(
 	application *App,
-	layout userpaths.Layout,
+	layout utils.Layout,
 	remoteClient *clientremote.Client,
 	remoteSessions *clientremotesession.Manager,
 	dataPlanes *clientdataplane.Manager,
@@ -66,7 +66,7 @@ func configureRemoteTaskManagers(
 	}
 }
 
-func configureMCP(application *App, layout userpaths.Layout, version string) {
+func configureMCP(application *App, layout utils.Layout, version string) {
 	mcpSettingsPath := filepath.Join(layout.ConfigDir(), "mcp.json")
 	mcpStore, err := mcp.NewSystemConfigStoreForVersion(mcpSettingsPath, version)
 	if err != nil {

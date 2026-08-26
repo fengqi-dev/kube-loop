@@ -24,8 +24,8 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/gateway/relayagent"
 	"github.com/fengqi-dev/kube-loop/internal/gateway/trafficapi"
 	"github.com/fengqi-dev/kube-loop/internal/gateway/websocketmux"
-	"github.com/fengqi-dev/kube-loop/internal/httpmiddleware"
 	"github.com/fengqi-dev/kube-loop/internal/logging"
+	"github.com/fengqi-dev/kube-loop/internal/middleware"
 )
 
 var version = "dev"
@@ -219,8 +219,8 @@ func runGateway(
 		return fmt.Errorf("listen on %s: %w", config.HTTP.Listen, listenErr)
 	}
 	router := echo.New()
-	router.Use(httpmiddleware.RequestID())
-	router.Use(httpmiddleware.RequestLogger(componentLogger))
+	router.Use(middleware.RequestID())
+	router.Use(middleware.RequestLogger(componentLogger))
 	operations.NewHandler(operationsState, handler).Register(router)
 	router.Any(config.HTTP.Path, echo.WrapHandler(handler))
 	defaultHTTPErrorHandler := echo.DefaultHTTPErrorHandler(false)

@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 
-	"github.com/fengqi-dev/kube-loop/internal/authconfig"
+	"github.com/fengqi-dev/kube-loop/internal/auth"
 	clientauth "github.com/fengqi-dev/kube-loop/internal/client/auth"
 	"github.com/fengqi-dev/kube-loop/internal/client/credentials"
 	clientdataplane "github.com/fengqi-dev/kube-loop/internal/client/dataplane"
@@ -24,7 +24,7 @@ import (
 	clientremote "github.com/fengqi-dev/kube-loop/internal/client/remote"
 	clientremotesession "github.com/fengqi-dev/kube-loop/internal/client/remotesession"
 	singboxruntime "github.com/fengqi-dev/kube-loop/internal/singbox/runtime"
-	"github.com/fengqi-dev/kube-loop/internal/userpaths"
+	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
 // State is the composition root for the core TUI client.
@@ -58,7 +58,7 @@ type AuthSession struct {
 }
 
 func NewState(version string) (*State, error) {
-	layout, err := userpaths.ForVersion(version)
+	layout, err := utils.ForVersion(version)
 	if err != nil {
 		return nil, fmt.Errorf("resolve user layout: %w", err)
 	}
@@ -70,11 +70,11 @@ func NewState(version string) (*State, error) {
 		return nil, fmt.Errorf("open profile store: %w", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	credentialStore := credentials.NewSystemStoreForClient(version, authconfig.TUIClientID)
+	credentialStore := credentials.NewSystemStoreForClient(version, auth.DesktopClientID)
 	discoveryClient := clientdiscovery.New(clientdiscovery.Config{ClientVersion: version})
 	authClient := clientauth.New(clientauth.Config{
 		OpenBrowser: func(target string) error { return openBrowser(ctx, target) }, BrowserCallback: func() {},
-		ClientID: authconfig.TUIClientID, RedirectURI: authconfig.TUIRedirectURI,
+		ClientID: auth.DesktopClientID, RedirectURI: auth.DesktopRedirectURI,
 		LoopbackCallback: true,
 	})
 	remoteClient, err := clientremote.New(credentialStore, authClient, clientremote.Config{})
