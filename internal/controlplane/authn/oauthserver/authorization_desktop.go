@@ -6,8 +6,9 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/fengqi-dev/kube-loop/internal/auth"
 	"github.com/ory/fosite"
+
+	"github.com/fengqi-dev/kube-loop/internal/auth"
 )
 
 // writeDesktopAuthorizationComplete keeps the browser on a useful completion

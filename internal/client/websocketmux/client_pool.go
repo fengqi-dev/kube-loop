@@ -5,8 +5,9 @@ import (
 	"errors"
 	"net"
 
-	"github.com/fengqi-dev/kube-loop/internal/middleware"
 	"github.com/gorilla/websocket"
+
+	"github.com/fengqi-dev/kube-loop/internal/middleware"
 )
 
 func (forwarder *Forwarder) pickSession() *pooledSession {

@@ -8,8 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/fengqi-dev/kube-loop/internal/auth"
 	"github.com/labstack/echo/v5"
+
+	"github.com/fengqi-dev/kube-loop/internal/auth"
 
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 )

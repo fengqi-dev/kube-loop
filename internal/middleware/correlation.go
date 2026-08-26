@@ -6,7 +6,7 @@ import (
 	"github.com/google/uuid"
 )
 
-const Header = "X-KubeLoop-Correlation-ID"
+const Header = "X-Kubeloop-Correlation-Id"
 
 type contextKey struct{}
 

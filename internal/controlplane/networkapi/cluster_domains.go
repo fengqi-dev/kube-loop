@@ -4,9 +4,10 @@ import (
 	"context"
 	"strings"
 
-	"github.com/fengqi-dev/kube-loop/internal/protocol/dns"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kubernetesclient "k8s.io/client-go/kubernetes"
+
+	"github.com/fengqi-dev/kube-loop/internal/protocol/dns"
 )
 
 const (

@@ -10,8 +10,9 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/fengqi-dev/kube-loop/internal/middleware"
 	"github.com/gorilla/websocket"
+
+	"github.com/fengqi-dev/kube-loop/internal/middleware"
 
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 )

@@ -13,8 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fengqi-dev/kube-loop/internal/middleware"
 	"github.com/google/uuid"
+
+	"github.com/fengqi-dev/kube-loop/internal/middleware"
 
 	"github.com/gorilla/websocket"
 

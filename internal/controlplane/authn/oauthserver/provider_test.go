@@ -18,9 +18,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fengqi-dev/kube-loop/internal/auth"
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
+
+	"github.com/fengqi-dev/kube-loop/internal/auth"
 
 	controlstorage "github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 )

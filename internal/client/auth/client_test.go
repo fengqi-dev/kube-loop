@@ -25,25 +25,29 @@ func TestOIDCProtocolLoginUsesStatePKCEAndExchange(t *testing.T) {
 	var challenge string
 	browserCallbacks := 0
 	exchangeCode := strings.Repeat("c", 43)
-	server = httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		switch request.URL.Path {
-		case "/.well-known/openid-configuration":
-			writeProviderMetadata(t, writer, server.URL)
-		case "/oauth2/token":
-			if err := request.ParseForm(); err != nil {
-				t.Fatal(err)
+	server = httptest.NewTLSServer(
+		http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+			switch request.URL.Path {
+			case "/.well-known/openid-configuration":
+				writeProviderMetadata(t, writer, server.URL)
+			case "/oauth2/token":
+				if err := request.ParseForm(); err != nil {
+					t.Fatal(err)
+				}
+				hash := sha256.Sum256([]byte(request.Form.Get("code_verifier")))
+				if request.Form.Get("code") != exchangeCode ||
+					base64.RawURLEncoding.EncodeToString(hash[:]) != challenge ||
+					request.Form.Get("device_id") != "device-1" ||
+					request.Form.Get(authParamClientID) != auth.DesktopClientID ||
+					request.Form.Get("redirect_uri") != auth.DesktopRedirectURI {
+					t.Fatalf("exchange form = %#v", request.Form)
+				}
+				writeTokenResponse(t, writer)
+			default:
+				http.NotFound(writer, request)
 			}
-			hash := sha256.Sum256([]byte(request.Form.Get("code_verifier")))
-			if request.Form.Get("code") != exchangeCode || base64.RawURLEncoding.EncodeToString(hash[:]) != challenge ||
-				request.Form.Get("device_id") != "device-1" || request.Form.Get(authParamClientID) != auth.DesktopClientID ||
-				request.Form.Get("redirect_uri") != auth.DesktopRedirectURI {
-				t.Fatalf("exchange form = %#v", request.Form)
-			}
-			writeTokenResponse(t, writer)
-		default:
-			http.NotFound(writer, request)
-		}
-	}))
+		}),
+	)
 	defer server.Close()
 	client = New(Config{
 		HTTPClient:      server.Client(),
@@ -56,8 +60,12 @@ func TestOIDCProtocolLoginUsesStatePKCEAndExchange(t *testing.T) {
 			query := authorize.Query()
 			challenge = query.Get("code_challenge")
 			if authorize.Path != "/oauth2/authorize" || query.Get("provider") != "company" ||
-				query.Get(authParamClientID) != auth.DesktopClientID || len(query.Get("state")) < 32 ||
-				query.Get("redirect_uri") != auth.DesktopRedirectURI || len(query.Get("nonce")) < 32 ||
+				query.Get(
+					authParamClientID,
+				) != auth.DesktopClientID || len(query.Get("state")) < 32 ||
+				query.Get(
+					"redirect_uri",
+				) != auth.DesktopRedirectURI || len(query.Get("nonce")) < 32 ||
 				len(challenge) != 43 || query.Get("code_challenge_method") != "S256" {
 				t.Fatalf("authorization URL = %q", target)
 			}
@@ -76,13 +84,18 @@ func TestOIDCProtocolLoginUsesStatePKCEAndExchange(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tokenMismatch := credential.AccessToken != "access-token" || credential.RefreshToken != "refresh-token"
-	identityMismatch := credential.IdentityID != "identity-1" || credential.UserName != "Example User"
+	tokenMismatch := credential.AccessToken != "access-token" ||
+		credential.RefreshToken != "refresh-token"
+	identityMismatch := credential.IdentityID != "identity-1" ||
+		credential.UserName != "Example User"
 	if tokenMismatch || identityMismatch || credential.DeviceID != "device-1" {
 		t.Fatalf("credential = %#v", credential)
 	}
 	if !credential.RefreshExpiresAt.IsZero() {
-		t.Fatalf("standard OAuth response inferred a refresh expiry: %s", credential.RefreshExpiresAt)
+		t.Fatalf(
+			"standard OAuth response inferred a refresh expiry: %s",
+			credential.RefreshExpiresAt,
+		)
 	}
 	if browserCallbacks != 1 {
 		t.Fatalf("browser callbacks = %d, want 1", browserCallbacks)
@@ -93,22 +106,25 @@ func TestOIDCLoopbackLoginUsesEphemeralCallbackServer(t *testing.T) {
 	var server *httptest.Server
 	var redirectURI string
 	exchangeCode := strings.Repeat("c", 43)
-	server = httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		switch request.URL.Path {
-		case "/.well-known/openid-configuration":
-			writeProviderMetadata(t, writer, server.URL)
-		case "/oauth2/token":
-			if err := request.ParseForm(); err != nil {
-				t.Fatal(err)
+	server = httptest.NewTLSServer(
+		http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+			switch request.URL.Path {
+			case "/.well-known/openid-configuration":
+				writeProviderMetadata(t, writer, server.URL)
+			case "/oauth2/token":
+				if err := request.ParseForm(); err != nil {
+					t.Fatal(err)
+				}
+				if request.Form.Get("code") != exchangeCode ||
+					request.Form.Get("redirect_uri") != redirectURI {
+					t.Fatalf("exchange form = %#v", request.Form)
+				}
+				writeTokenResponse(t, writer)
+			default:
+				http.NotFound(writer, request)
 			}
-			if request.Form.Get("code") != exchangeCode || request.Form.Get("redirect_uri") != redirectURI {
-				t.Fatalf("exchange form = %#v", request.Form)
-			}
-			writeTokenResponse(t, writer)
-		default:
-			http.NotFound(writer, request)
-		}
-	}))
+		}),
+	)
 	defer server.Close()
 	client := New(Config{
 		HTTPClient:       server.Client(),
@@ -140,7 +156,12 @@ func TestOIDCLoopbackLoginUsesEphemeralCallbackServer(t *testing.T) {
 			if response.StatusCode != http.StatusOK ||
 				response.Header.Get("Cache-Control") != "no-store" ||
 				!strings.Contains(string(body), "Login complete") {
-				t.Fatalf("callback status = %d headers = %#v body = %q", response.StatusCode, response.Header, body)
+				t.Fatalf(
+					"callback status = %d headers = %#v body = %q",
+					response.StatusCode,
+					response.Header,
+					body,
+				)
 			}
 			return nil
 		},
@@ -272,24 +293,26 @@ func TestProtocolCallbackValidatesTargetAndParameters(t *testing.T) {
 func TestRefreshRevokeAndUnsafeTargets(t *testing.T) {
 	requests := 0
 	var server *httptest.Server
-	server = httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		requests++
-		switch request.URL.Path {
-		case "/.well-known/openid-configuration":
-			writeProviderMetadata(t, writer, server.URL)
-		case "/oauth2/token":
-			_ = json.NewEncoder(writer).Encode(map[string]any{
-				"token_type":          authorizationTypeBearer,
-				"access_token":        "access-token",
-				authParamRefreshToken: "refresh-token",
-				"expires_in":          60,
-			})
-		case "/oauth2/revoke":
-			writer.WriteHeader(http.StatusOK)
-		default:
-			http.NotFound(writer, request)
-		}
-	}))
+	server = httptest.NewTLSServer(
+		http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+			requests++
+			switch request.URL.Path {
+			case "/.well-known/openid-configuration":
+				writeProviderMetadata(t, writer, server.URL)
+			case "/oauth2/token":
+				_ = json.NewEncoder(writer).Encode(map[string]any{
+					"token_type":          authorizationTypeBearer,
+					"access_token":        "access-token",
+					authParamRefreshToken: "refresh-token",
+					"expires_in":          60,
+				})
+			case "/oauth2/revoke":
+				writer.WriteHeader(http.StatusOK)
+			default:
+				http.NotFound(writer, request)
+			}
+		}),
+	)
 	defer server.Close()
 	client := New(Config{HTTPClient: server.Client()})
 	current := credentialForTest()
@@ -310,15 +333,19 @@ func TestRefreshRevokeAndUnsafeTargets(t *testing.T) {
 
 func TestAuthenticationRejectionReturnsTypedAPIError(t *testing.T) {
 	var server *httptest.Server
-	server = httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if request.URL.Path == "/.well-known/openid-configuration" {
-			writeProviderMetadata(t, writer, server.URL)
-			return
-		}
-		writer.Header().Set("X-Request-ID", "request-123")
-		writer.WriteHeader(http.StatusUnauthorized)
-		_, _ = writer.Write([]byte(`{"error":"invalid_grant","error_description":"credentials were rejected"}`))
-	}))
+	server = httptest.NewTLSServer(
+		http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+			if request.URL.Path == "/.well-known/openid-configuration" {
+				writeProviderMetadata(t, writer, server.URL)
+				return
+			}
+			writer.Header().Set("X-Request-ID", "request-123")
+			writer.WriteHeader(http.StatusUnauthorized)
+			_, _ = writer.Write(
+				[]byte(`{"error":"invalid_grant","error_description":"credentials were rejected"}`),
+			)
+		}),
+	)
 	defer server.Close()
 	_, err := New(Config{HTTPClient: server.Client()}).Refresh(
 		context.Background(), server.URL, credentialForTest(),

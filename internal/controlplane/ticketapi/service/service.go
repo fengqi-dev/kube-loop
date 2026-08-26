@@ -8,8 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/fengqi-dev/kube-loop/internal/middleware"
 	"github.com/google/uuid"
+
+	"github.com/fengqi-dev/kube-loop/internal/middleware"
 
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/ticketapi/entity"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/relaycontrol"
