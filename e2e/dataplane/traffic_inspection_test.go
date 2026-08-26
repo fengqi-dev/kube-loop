@@ -34,6 +34,8 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/utils/ptr"
 
+	"github.com/gorilla/websocket"
+
 	"github.com/fengqi-dev/kube-loop/e2e/harness"
 	"github.com/fengqi-dev/kube-loop/internal/client/credentials"
 	clientdataplane "github.com/fengqi-dev/kube-loop/internal/client/dataplane"
@@ -46,7 +48,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/ticketapi"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
+	"github.com/fengqi-dev/kube-loop/internal/testutil/websockettest"
 	"github.com/fengqi-dev/kube-loop/internal/trafficinspect"
 )
 
@@ -199,29 +201,29 @@ func callWebSocketThroughDataPlane(t *testing.T, transport *http.Transport, addr
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
 	defer cancel()
-	connection, response, err := websocket.Dial(
+	connection, response, err := websockettest.Dial(
 		ctx,
 		"ws://"+address+trafficInspectionWebSocketPath,
-		&websocket.DialOptions{HTTPClient: &http.Client{Transport: transport}},
-	)
+		&websockettest.DialOptions{HTTPClient: &http.Client{Transport: transport}})
+
 	if err != nil {
 		t.Fatalf("connect go-httpbin WebSocket through Data Plane: %v", err)
 	}
-	defer connection.CloseNow()
+	defer connection.Close()
 	if response == nil || response.StatusCode != http.StatusSwitchingProtocols {
 		t.Fatalf("unexpected go-httpbin WebSocket upgrade response: %#v", response)
 	}
 	payload := []byte("kubeloop-websocket-" + uuid.NewString())
-	if err := connection.Write(ctx, websocket.MessageText, payload); err != nil {
+	if err := connection.WriteMessage(websocket.TextMessage, payload); err != nil {
 		t.Fatalf("write go-httpbin WebSocket payload: %v", err)
 	}
-	messageType, echoed, err := connection.Read(ctx)
+	messageType, echoed, err := connection.ReadMessage()
 	if err != nil {
 		t.Fatalf("read go-httpbin WebSocket payload: %v", err)
 	}
-	if messageType != websocket.MessageText || !bytes.Equal(echoed, payload) {
+	if messageType != websocket.TextMessage || !bytes.Equal(echoed, payload) {
 		t.Fatalf("go-httpbin WebSocket echoed type=%v payload=%q, want type=%v payload=%q",
-			messageType, echoed, websocket.MessageText, payload)
+			messageType, echoed, websocket.TextMessage, payload)
 	}
 }
 

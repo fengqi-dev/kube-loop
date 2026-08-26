@@ -6,9 +6,10 @@ import (
 	"errors"
 	"time"
 
+	"github.com/gorilla/websocket"
+
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/remotetask"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
 )
 
 type TaskStore interface {
@@ -73,7 +74,7 @@ func Failed(runContext context.Context, err error, stopErrors ...error) bool {
 
 func isFailure(err error, stopErrors ...error) bool {
 	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) ||
-		websocket.CloseStatus(err) != -1 {
+		isWebSocketClose(err) {
 		return false
 	}
 	for _, stopError := range stopErrors {
@@ -82,4 +83,9 @@ func isFailure(err error, stopErrors ...error) bool {
 		}
 	}
 	return true
+}
+
+func isWebSocketClose(err error) bool {
+	var closeError *websocket.CloseError
+	return errors.As(err, &closeError)
 }

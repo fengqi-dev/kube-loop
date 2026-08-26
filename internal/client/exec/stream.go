@@ -6,11 +6,11 @@ import (
 	"sync"
 
 	"github.com/google/uuid"
+	"github.com/gorilla/websocket"
 
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/execstream"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
 )
 
 type Client interface {
@@ -19,12 +19,10 @@ type Client interface {
 }
 
 type execConnection interface {
-	Read(context.Context) (websocket.MessageType, []byte, error)
-	Write(context.Context, websocket.MessageType, []byte) error
-	Close(websocket.StatusCode, string) error
+	Read(context.Context) (int, []byte, error)
+	Write(context.Context, int, []byte) error
+	Close(int, string) error
 }
-
-var _ execConnection = (*websocket.Conn)(nil)
 
 type Stream struct {
 	connection execConnection
@@ -52,7 +50,7 @@ func Start(
 	if err != nil {
 		return nil, err
 	}
-	return &Stream{connection: connection, task: task}, nil
+	return &Stream{connection: gorillaExecConnection{connection: connection}, task: task}, nil
 }
 
 func (stream *Stream) Task() remote.ExecTask { return stream.task }
@@ -62,7 +60,7 @@ func (stream *Stream) Read(ctx context.Context) (execstream.Frame, error) {
 	if err != nil {
 		return execstream.Frame{}, err
 	}
-	if messageType != websocket.MessageBinary {
+	if messageType != websocket.BinaryMessage {
 		return execstream.Frame{}, errors.New("pod exec stream returned a non-binary message")
 	}
 	frame, err := execstream.Decode(encoded)
@@ -96,7 +94,7 @@ func (stream *Stream) CloseStdin(ctx context.Context) error {
 
 func (stream *Stream) Close() error {
 	stream.closeOnce.Do(func() {
-		stream.closeErr = stream.connection.Close(websocket.StatusNormalClosure, "client closed exec stream")
+		stream.closeErr = stream.connection.Close(websocket.CloseNormalClosure, "client closed exec stream")
 	})
 	return stream.closeErr
 }
@@ -112,5 +110,5 @@ func (stream *Stream) write(ctx context.Context, frame execstream.Frame) error {
 func (stream *Stream) writeEncoded(ctx context.Context, encoded []byte) error {
 	stream.writeMu.Lock()
 	defer stream.writeMu.Unlock()
-	return stream.connection.Write(ctx, websocket.MessageBinary, encoded)
+	return stream.connection.Write(ctx, websocket.BinaryMessage, encoded)
 }

@@ -17,12 +17,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gorilla/websocket"
 	"github.com/xtaci/smux"
 
 	shared "github.com/fengqi-dev/kube-loop/internal/client/websocketmux"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
 	protocolmux "github.com/fengqi-dev/kube-loop/internal/protocol/websocketmux"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/wssprotocol"
+	"github.com/fengqi-dev/kube-loop/internal/testutil/websockettest"
 )
 
 const testDeviceID = "22222222-2222-4222-8222-222222222222"
@@ -413,30 +414,33 @@ func rawClientSession(t *testing.T, ctx context.Context, serverURL, token string
 	t.Helper()
 	header := make(http.Header)
 	header.Set("Authorization", "Bearer "+token)
-	connection, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(serverURL, "http"), &websocket.DialOptions{
-		HTTPHeader: header, Subprotocols: []string{Subprotocol},
-	})
+	connection, _, err := websockettest.Dial(
+		ctx,
+		"ws"+strings.TrimPrefix(serverURL, "http"),
+		&websockettest.DialOptions{HTTPHeader: header, Subprotocols: []string{Subprotocol}},
+	)
+
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := wssprotocol.Write(ctx, connection, wssprotocol.NewClientHello("test", testDeviceID)); err != nil {
-		_ = connection.CloseNow()
+		_ = connection.Close()
 		t.Fatal(err)
 	}
 	message, err := wssprotocol.Read(ctx, connection)
 	if err != nil || message.ServerHello == nil {
-		_ = connection.CloseNow()
+		_ = connection.Close()
 		t.Fatalf("WSS handshake = %#v, %v", message, err)
 	}
-	streamConnection := websocket.NetConn(ctx, connection, websocket.MessageBinary)
+	streamConnection := protocolmux.NewWebSocketConn(ctx, connection, websocket.BinaryMessage)
 	session, err := smux.Client(streamConnection, smuxConfig())
 	if err != nil {
-		_ = connection.CloseNow()
+		_ = connection.Close()
 		t.Fatal(err)
 	}
 	return session, func() {
 		_ = session.Close()
-		_ = connection.CloseNow()
+		_ = connection.Close()
 	}
 }
 
@@ -607,15 +611,15 @@ func TestNewGenerationLetsExistingStreamFinishAndRejectsOlderNewStreams(t *testi
 
 	header := make(http.Header)
 	header.Set("Authorization", "Bearer generation-1")
-	connection, responseHTTP, err := websocket.Dial(
+	connection, responseHTTP, err := websockettest.Dial(
 		ctx,
 		"ws"+strings.TrimPrefix(server.URL, "http"),
-		&websocket.DialOptions{
+		&websockettest.DialOptions{
 			HTTPHeader: header, Subprotocols: []string{Subprotocol},
-		},
-	)
+		})
+
 	if connection != nil {
-		_ = connection.CloseNow()
+		_ = connection.Close()
 	}
 	if err == nil || responseHTTP == nil || responseHTTP.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("older generation WebSocket handshake = response %#v, error %v", responseHTTP, err)
@@ -755,7 +759,7 @@ func TestWSSServerHelloPublishesExactLimitsBeforeSmux(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	connection := dialRawWebSocket(t, ctx, server.URL, "token")
-	defer func() { _ = connection.CloseNow() }()
+	defer func() { _ = connection.Close() }()
 	if err := wssprotocol.Write(ctx, connection, wssprotocol.NewClientHello("2.5.0", testDeviceID)); err != nil {
 		t.Fatal(err)
 	}
@@ -778,9 +782,12 @@ func dialRawWebSocket(t *testing.T, ctx context.Context, serverURL, token string
 	t.Helper()
 	header := make(http.Header)
 	header.Set("Authorization", "Bearer "+token)
-	connection, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(serverURL, "http"), &websocket.DialOptions{
-		HTTPHeader: header, Subprotocols: []string{Subprotocol},
-	})
+	connection, _, err := websockettest.Dial(
+		ctx,
+		"ws"+strings.TrimPrefix(serverURL, "http"),
+		&websockettest.DialOptions{HTTPHeader: header, Subprotocols: []string{Subprotocol}},
+	)
+
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -8,9 +8,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gorilla/websocket"
 	"github.com/xtaci/smux"
 
-	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
+	protocolmux "github.com/fengqi-dev/kube-loop/internal/protocol/websocketmux"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/wssprotocol"
 )
 
@@ -46,6 +47,7 @@ type ClientConfig struct {
 
 type pooledSession struct {
 	ws            *websocket.Conn
+	transport     *protocolmux.WebSocketConn
 	session       *smux.Session
 	maxStreams    int
 	correlationID string

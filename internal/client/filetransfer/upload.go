@@ -8,11 +8,11 @@ import (
 	"math"
 
 	"github.com/google/uuid"
+	"github.com/gorilla/websocket"
 
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/filestream"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
 )
 
 type streamResponse struct {
@@ -72,7 +72,7 @@ func Upload(
 		responses <- readUploadResponses(ctx, connection, onProgress)
 	}()
 	defer func() {
-		resultErr = errors.Join(resultErr, connection.CloseNow())
+		resultErr = errors.Join(resultErr, connection.Close())
 		<-readerDone
 	}()
 	remaining := spec.Size - spec.Offset
@@ -84,13 +84,13 @@ func Upload(
 			return task, filestream.TransferResult{}, fmt.Errorf("read local upload content: %w", err)
 		}
 		encoded, _ := filestream.Encode(filestream.Frame{Type: filestream.Data, Payload: buffer[:length]})
-		if err := connection.Write(ctx, websocket.MessageBinary, encoded); err != nil {
+		if err := writeWebSocket(ctx, connection, websocket.BinaryMessage, encoded); err != nil {
 			return uploadWriteResult(task, responses, err)
 		}
 		remaining -= length
 	}
 	complete, _ := filestream.Encode(filestream.Frame{Type: filestream.Complete})
-	if err := connection.Write(ctx, websocket.MessageBinary, complete); err != nil {
+	if err := writeWebSocket(ctx, connection, websocket.BinaryMessage, complete); err != nil {
 		return uploadWriteResult(task, responses, err)
 	}
 	response := <-responses
@@ -107,11 +107,11 @@ func Upload(
 
 func readUploadResponses(ctx context.Context, connection *websocket.Conn, onProgress ProgressFunc) streamResponse {
 	for {
-		messageType, encoded, err := connection.Read(ctx)
+		messageType, encoded, err := readWebSocket(ctx, connection)
 		if err != nil {
 			return streamResponse{err: fmt.Errorf("read Gateway file upload stream: %w", err)}
 		}
-		if messageType != websocket.MessageBinary {
+		if messageType != websocket.BinaryMessage {
 			return streamResponse{err: errors.New("gateway file upload stream returned a non-binary message")}
 		}
 		frame, err := filestream.Decode(encoded)

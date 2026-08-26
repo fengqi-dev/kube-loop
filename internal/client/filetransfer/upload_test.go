@@ -10,10 +10,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gorilla/websocket"
+
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/filestream"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
+	"github.com/fengqi-dev/kube-loop/internal/testutil/websockettest"
 )
 
 type waitErrorReader struct {
@@ -28,18 +30,18 @@ func (reader waitErrorReader) Read([]byte) (int, error) {
 
 func TestUploadWaitsForResponseReaderOnLocalReadFailure(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		connection, err := websocket.Accept(writer, request, nil)
+		connection, err := websockettest.Accept(writer, request, nil)
 		if err != nil {
 			t.Error(err)
 			return
 		}
-		defer checkTestClose(t, connection.CloseNow)
+		defer checkTestClose(t, connection.Close)
 		progress, _ := filestream.EncodeProgress(filestream.ProgressStatus{Total: 1})
-		if err := connection.Write(request.Context(), websocket.MessageBinary, progress); err != nil {
+		if err := connection.WriteMessage(websocket.BinaryMessage, progress); err != nil {
 			t.Error(err)
 			return
 		}
-		_, _, _ = connection.Read(request.Context())
+		_, _, _ = connection.ReadMessage()
 	}))
 	defer server.Close()
 	callbackStarted := make(chan struct{})
@@ -87,17 +89,17 @@ func TestUploadStreamsDataWhileReceivingProgressAndVerifiesResult(t *testing.T) 
 	contents := bytes.Repeat([]byte("upload-data-"), 40_000)
 	checksum := sha256.Sum256(contents)
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		connection, err := websocket.Accept(writer, request, nil)
+		connection, err := websockettest.Accept(writer, request, nil)
 		if err != nil {
 			t.Error(err)
 			return
 		}
-		defer checkTestClose(t, connection.CloseNow)
+		defer checkTestClose(t, connection.Close)
 		connection.SetReadLimit(filestream.MaximumData + 1)
 		hash := sha256.New()
 		var transferred uint64
 		for {
-			_, encoded, err := connection.Read(request.Context())
+			_, encoded, err := connection.ReadMessage()
 			if err != nil {
 				t.Error(err)
 				return
@@ -113,7 +115,7 @@ func TestUploadStreamsDataWhileReceivingProgressAndVerifiesResult(t *testing.T) 
 				result, _ := filestream.EncodeResult(filestream.TransferResult{
 					Status: filestream.ResultSucceeded, Transferred: transferred, Checksum: digest, HasChecksum: true,
 				})
-				_ = connection.Write(request.Context(), websocket.MessageBinary, result)
+				_ = connection.WriteMessage(websocket.BinaryMessage, result)
 				return
 			}
 			if frame.Type != filestream.Data {
@@ -125,7 +127,7 @@ func TestUploadStreamsDataWhileReceivingProgressAndVerifiesResult(t *testing.T) 
 			progress, _ := filestream.EncodeProgress(
 				filestream.ProgressStatus{Transferred: transferred, Total: uint64(len(contents))},
 			)
-			if err := connection.Write(request.Context(), websocket.MessageBinary, progress); err != nil {
+			if err := connection.WriteMessage(websocket.BinaryMessage, progress); err != nil {
 				t.Error(err)
 				return
 			}

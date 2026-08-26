@@ -5,8 +5,9 @@ import (
 	"errors"
 	"net"
 
+	"github.com/gorilla/websocket"
+
 	"github.com/fengqi-dev/kube-loop/internal/correlation"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
 )
 
 func (forwarder *Forwarder) pickSession() *pooledSession {
@@ -45,7 +46,7 @@ func (forwarder *Forwarder) ensureSession() (*pooledSession, error) {
 	}
 	if !forwarder.commitSession(item) {
 		_ = item.session.Close()
-		_ = item.ws.Close(websocket.StatusGoingAway, "client closed during session setup")
+		_ = closeWebSocket(item.ws, websocket.CloseGoingAway, "client closed during session setup")
 		return nil, net.ErrClosed
 	}
 	return item, nil
@@ -83,5 +84,5 @@ func (forwarder *Forwarder) discard(target *pooledSession) {
 		"session_generation", forwarder.config.SessionGeneration,
 	)
 	_ = target.session.Close()
-	_ = target.ws.Close(websocket.StatusGoingAway, "session replaced")
+	_ = closeWebSocket(target.ws, websocket.CloseGoingAway, "session replaced")
 }

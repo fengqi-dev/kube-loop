@@ -10,8 +10,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gorilla/websocket"
+
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
 )
 
 type InventoryResource string
@@ -34,11 +35,19 @@ type InventorySnapshot struct {
 }
 
 type inventoryConnection interface {
-	Read(context.Context) (websocket.MessageType, []byte, error)
-	Close(websocket.StatusCode, string) error
+	Read(context.Context) (int, []byte, error)
+	Close(int, string) error
 }
 
-var _ inventoryConnection = (*websocket.Conn)(nil)
+type gorillaInventoryConnection struct{ connection *websocket.Conn }
+
+func (connection gorillaInventoryConnection) Read(ctx context.Context) (int, []byte, error) {
+	return readWebSocket(ctx, connection.connection)
+}
+
+func (connection gorillaInventoryConnection) Close(code int, reason string) error {
+	return closeWebSocket(connection.connection, code, reason)
+}
 
 type InventoryWatch struct {
 	connection inventoryConnection
@@ -93,7 +102,9 @@ func (client *Client) OpenInventoryWatch(
 		return nil, err
 	}
 	connection.SetReadLimit(maximumResponseBytes)
-	return &InventoryWatch{connection: connection, resource: resource, namespace: namespace}, nil
+	return &InventoryWatch{
+		connection: gorillaInventoryConnection{connection: connection}, resource: resource, namespace: namespace,
+	}, nil
 }
 
 func (watch *InventoryWatch) Next(ctx context.Context) (InventorySnapshot, error) {
@@ -106,7 +117,7 @@ func (watch *InventoryWatch) Next(ctx context.Context) (InventorySnapshot, error
 	if err != nil {
 		return InventorySnapshot{}, err
 	}
-	if messageType != websocket.MessageText {
+	if messageType != websocket.TextMessage {
 		return InventorySnapshot{}, errors.New("gateway returned a non-text Inventory snapshot")
 	}
 	var snapshot InventorySnapshot
@@ -142,7 +153,7 @@ func (watch *InventoryWatch) Close() error {
 		return nil
 	}
 	watch.closeOnce.Do(func() {
-		watch.closeErr = watch.connection.Close(websocket.StatusNormalClosure, "client closed Inventory Watch")
+		watch.closeErr = watch.connection.Close(websocket.CloseNormalClosure, "client closed Inventory Watch")
 	})
 	return watch.closeErr
 }

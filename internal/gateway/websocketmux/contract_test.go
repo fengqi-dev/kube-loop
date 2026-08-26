@@ -10,25 +10,27 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gorilla/websocket"
 	"github.com/xtaci/smux"
 
 	shared "github.com/fengqi-dev/kube-loop/internal/client/websocketmux"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
+	protocolmux "github.com/fengqi-dev/kube-loop/internal/protocol/websocketmux"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/wssprotocol"
+	"github.com/fengqi-dev/kube-loop/internal/testutil/websockettest"
 )
 
 func TestContractNewClientAndOldGatewayClassifiesVersionMismatch(t *testing.T) {
 	oldGateway := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		connection, err := websocket.Accept(
+		connection, err := websockettest.Accept(
 			writer,
 			request,
-			&websocket.AcceptOptions{Subprotocols: []string{Subprotocol}},
-		)
+			&websockettest.AcceptOptions{Subprotocols: []string{Subprotocol}})
+
 		if err != nil {
 			return
 		}
-		defer func() { _ = connection.CloseNow() }()
-		streamConnection := websocket.NetConn(request.Context(), connection, websocket.MessageBinary)
+		defer func() { _ = connection.Close() }()
+		streamConnection := protocolmux.NewWebSocketConn(request.Context(), connection, websocket.BinaryMessage)
 		session, err := smux.Server(streamConnection, smuxConfig())
 		if err != nil {
 			return
@@ -116,12 +118,12 @@ func TestContractNewGatewayRejectsUnknownAndMissingClientHelloFields(t *testing.
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			connection := dialRawWebSocket(t, ctx, server.URL, "token")
-			if err := connection.Write(ctx, websocket.MessageBinary, []byte(test.raw)); err != nil {
-				_ = connection.CloseNow()
+			if err := connection.WriteMessage(websocket.BinaryMessage, []byte(test.raw)); err != nil {
+				_ = connection.Close()
 				t.Fatal(err)
 			}
 			message, err := wssprotocol.Read(ctx, connection)
-			_ = connection.CloseNow()
+			_ = connection.Close()
 			if err != nil || message.Reject == nil || message.Reject.Code != wssprotocol.CodeInvalidHandshake {
 				t.Fatalf("malformed ClientHello rejection = %#v, %v", message, err)
 			}
@@ -134,21 +136,21 @@ func malformedHandshakeGateway(t *testing.T, response []byte) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set(wssprotocol.VersionHeader, wssprotocol.Version)
-		connection, err := websocket.Accept(
+		connection, err := websockettest.Accept(
 			writer,
 			request,
-			&websocket.AcceptOptions{Subprotocols: []string{Subprotocol}},
-		)
+			&websockettest.AcceptOptions{Subprotocols: []string{Subprotocol}})
+
 		if err != nil {
 			return
 		}
-		defer func() { _ = connection.CloseNow() }()
+		defer func() { _ = connection.Close() }()
 		ctx, cancel := context.WithTimeout(request.Context(), time.Second)
 		defer cancel()
 		message, err := wssprotocol.Read(ctx, connection)
 		if err != nil || message.ClientHello == nil {
 			return
 		}
-		_ = connection.Write(ctx, websocket.MessageBinary, response)
+		_ = connection.WriteMessage(websocket.BinaryMessage, response)
 	}))
 }

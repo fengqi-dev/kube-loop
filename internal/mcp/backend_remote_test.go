@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/gorilla/websocket"
+
 	clientdataplane "github.com/fengqi-dev/kube-loop/internal/client/dataplane"
 	clientexchange "github.com/fengqi-dev/kube-loop/internal/client/exchange"
 	clientexec "github.com/fengqi-dev/kube-loop/internal/client/exec"
@@ -13,7 +15,6 @@ import (
 	clientpreview "github.com/fengqi-dev/kube-loop/internal/client/preview"
 	clientprofile "github.com/fengqi-dev/kube-loop/internal/client/profile"
 	clientremote "github.com/fengqi-dev/kube-loop/internal/client/remote"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
 )
 
 type fakeProfiles struct{ state clientprofile.State }

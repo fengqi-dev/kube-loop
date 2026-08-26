@@ -5,11 +5,11 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/gorilla/websocket"
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/authorization"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
 )
 
 func (handler *Service) watchInventory(
@@ -55,35 +55,29 @@ func (handler *Service) watchInventory(
 		}
 	}
 	defer unsubscribe()
-	connection, err := websocket.Accept(
-		writer,
-		request,
-		&websocket.AcceptOptions{
-			CompressionMode: websocket.CompressionDisabled,
-		},
-	)
+	connection, err := upgradeWebSocket(writer, request)
 	if err != nil {
 		return nil
 	}
-	defer func() { _ = connection.CloseNow() }()
+	defer func() { _ = connection.Close() }()
 	for {
 		select {
 		case <-watchContext.Done():
-			_ = connection.Close(
-				websocket.StatusNormalClosure,
+			_ = closeWebSocket(
+				connection, websocket.CloseNormalClosure,
 				"Inventory Watch closed",
 			)
 			return nil
 		case snapshot := <-updates:
 			encoded, encodeErr := json.Marshal(snapshot)
 			if encodeErr != nil {
-				_ = connection.Close(
-					websocket.StatusInternalError,
+				_ = closeWebSocket(
+					connection, websocket.CloseInternalServerErr,
 					"Inventory Watch encoding failed",
 				)
 				return nil
 			}
-			if writeErr := connection.Write(watchContext, websocket.MessageText, encoded); writeErr != nil {
+			if writeErr := writeWebSocket(watchContext, connection, websocket.TextMessage, encoded); writeErr != nil {
 				return nil
 			}
 		}

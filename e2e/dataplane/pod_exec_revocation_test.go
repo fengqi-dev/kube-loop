@@ -19,6 +19,8 @@ import (
 	"github.com/google/uuid"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	"github.com/gorilla/websocket"
+
 	"github.com/fengqi-dev/kube-loop/e2e/harness"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/authorization"
@@ -29,7 +31,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/execstream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
+	"github.com/fengqi-dev/kube-loop/internal/testutil/websockettest"
 )
 
 func TestRealPodExecStopsWhenOAuthGrantIsRevoked(t *testing.T) {
@@ -160,14 +162,14 @@ func TestRealPodExecStopsWhenOAuthGrantIsRevoked(t *testing.T) {
 		"ws%s/api/sessions/%s/exec/%s/stream?namespace=%s",
 		strings.TrimPrefix(httpServer.URL, "http"), sessionID, task.ID, harness.EchoNamespace,
 	)
-	connection, response, err := websocket.Dial(ctx, streamURL, nil)
+	connection, response, err := websockettest.Dial(ctx, streamURL, nil)
 	if err != nil {
 		if response != nil {
 			t.Fatalf("open real Pod exec stream: status=%d err=%v", response.StatusCode, err)
 		}
 		t.Fatal(err)
 	}
-	defer connection.CloseNow()
+	defer connection.Close()
 	waitForExecOutput(t, ctx, connection, "v2-exec-started")
 
 	if err := stateStore.OAuthSessions().RevokeRequest(ctx, authorizationID, time.Now().UTC()); err != nil {
@@ -208,7 +210,7 @@ func waitForExecOutput(t *testing.T, ctx context.Context, connection *websocket.
 	readCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 	for {
-		_, encoded, err := connection.Read(readCtx)
+		_, encoded, err := connection.ReadMessage()
 		if err != nil {
 			t.Fatalf("read real Pod exec output: %v", err)
 		}
@@ -231,7 +233,7 @@ func waitForCancelledExit(t *testing.T, ctx context.Context, connection *websock
 	readCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 	for {
-		_, encoded, err := connection.Read(readCtx)
+		_, encoded, err := connection.ReadMessage()
 		if err != nil {
 			t.Fatalf("read real Pod exec cancellation: %v", err)
 		}

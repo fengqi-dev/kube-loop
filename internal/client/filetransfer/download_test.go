@@ -11,26 +11,28 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gorilla/websocket"
+
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/filestream"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
+	"github.com/fengqi-dev/kube-loop/internal/testutil/websockettest"
 )
 
 func TestDownloadWritesOnlyDataAndVerifiesChecksum(t *testing.T) {
 	contents := bytes.Repeat([]byte("download-data-"), 30_000)
 	checksum := sha256.Sum256(contents)
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		connection, err := websocket.Accept(writer, request, nil)
+		connection, err := websockettest.Accept(writer, request, nil)
 		if err != nil {
 			t.Error(err)
 			return
 		}
-		defer checkTestClose(t, connection.CloseNow)
+		defer checkTestClose(t, connection.Close)
 		for offset := 0; offset < len(contents); offset += filestream.MaximumData {
 			end := min(offset+filestream.MaximumData, len(contents))
 			data, _ := filestream.Encode(filestream.Frame{Type: filestream.Data, Payload: contents[offset:end]})
-			_ = connection.Write(request.Context(), websocket.MessageBinary, data)
+			_ = connection.WriteMessage(websocket.BinaryMessage, data)
 		}
 		progress, _ := filestream.EncodeProgress(
 			filestream.ProgressStatus{Transferred: uint64(len(contents)), Total: uint64(len(contents))},
@@ -39,8 +41,8 @@ func TestDownloadWritesOnlyDataAndVerifiesChecksum(t *testing.T) {
 			Status: filestream.ResultSucceeded, Transferred: uint64(len(contents)),
 			Checksum: checksum, HasChecksum: true,
 		})
-		_ = connection.Write(request.Context(), websocket.MessageBinary, progress)
-		_ = connection.Write(request.Context(), websocket.MessageBinary, result)
+		_ = connection.WriteMessage(websocket.BinaryMessage, progress)
+		_ = connection.WriteMessage(websocket.BinaryMessage, result)
 	}))
 	defer server.Close()
 	var output bytes.Buffer
@@ -62,18 +64,18 @@ func TestDownloadWritesOnlyDataAndVerifiesChecksum(t *testing.T) {
 func TestDownloadCancelsGatewayWhenLocalWriterFails(t *testing.T) {
 	cancelled := make(chan struct{}, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		connection, err := websocket.Accept(writer, request, nil)
+		connection, err := websockettest.Accept(writer, request, nil)
 		if err != nil {
 			t.Error(err)
 			return
 		}
-		defer checkTestClose(t, connection.CloseNow)
+		defer checkTestClose(t, connection.Close)
 		data, _ := filestream.Encode(filestream.Frame{Type: filestream.Data, Payload: []byte("payload")})
-		if err := connection.Write(request.Context(), websocket.MessageBinary, data); err != nil {
+		if err := connection.WriteMessage(websocket.BinaryMessage, data); err != nil {
 			t.Error(err)
 			return
 		}
-		_, encoded, err := connection.Read(request.Context())
+		_, encoded, err := connection.ReadMessage()
 		if err != nil {
 			t.Error(err)
 			return

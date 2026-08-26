@@ -14,7 +14,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
+	"github.com/gorilla/websocket"
+
+	"github.com/fengqi-dev/kube-loop/internal/testutil/websockettest"
 
 	"github.com/labstack/echo/v5"
 
@@ -85,13 +87,18 @@ func TestSameOriginTLSProxyPreservesControlPlaneLimitsAndLongLivedWebSocket(t *t
 	}
 
 	webSocketURL := "wss" + strings.TrimPrefix(external.URL, "https") + "/tunnel"
-	connection, upgradeResponse, err := websocket.Dial(context.Background(), webSocketURL, &websocket.DialOptions{
-		HTTPClient: external.Client(),
-	})
+	connection, upgradeResponse, err := websockettest.Dial(
+		context.Background(),
+		webSocketURL,
+		&websockettest.DialOptions{
+			HTTPClient: external.Client(),
+		},
+	)
+
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = connection.CloseNow() }()
+	defer func() { _ = connection.Close() }()
 	if upgradeResponse == nil || upgradeResponse.TLS == nil || upgradeResponse.TLS.Version != tls.VersionTLS13 ||
 		upgradeResponse.Header.Get("X-Kubeloop-Test-Backend") != "data-plane" {
 		t.Fatalf("WSS upgrade response = %#v", upgradeResponse)
@@ -100,15 +107,22 @@ func TestSameOriginTLSProxyPreservesControlPlaneLimitsAndLongLivedWebSocket(t *t
 	time.Sleep(externalProxyWriteTimeout + 250*time.Millisecond)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
+	deadline, _ := ctx.Deadline()
+	if err := connection.SetReadDeadline(deadline); err != nil {
+		t.Fatal(err)
+	}
+	if err := connection.SetWriteDeadline(deadline); err != nil {
+		t.Fatal(err)
+	}
 	payload := []byte("long-lived-wss")
-	if err := connection.Write(ctx, websocket.MessageBinary, payload); err != nil {
+	if err := connection.WriteMessage(websocket.BinaryMessage, payload); err != nil {
 		t.Fatalf("write after proxy timeout: %v", err)
 	}
-	messageType, echoed, err := connection.Read(ctx)
+	messageType, echoed, err := connection.ReadMessage()
 	if err != nil {
 		t.Fatalf("read after proxy timeout: %v", err)
 	}
-	if messageType != websocket.MessageBinary || string(echoed) != string(payload) {
+	if messageType != websocket.BinaryMessage || string(echoed) != string(payload) {
 		t.Fatalf("WSS echo type=%v payload=%q", messageType, echoed)
 	}
 }
@@ -160,16 +174,16 @@ func newExternalAccessServer(t *testing.T) *httptest.Server {
 
 	webSocketBackend := httptest.NewServer(
 		markBackend("data-plane", http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-			connection, acceptErr := websocket.Accept(writer, request, nil)
+			connection, acceptErr := websockettest.Accept(writer, request, nil)
 			if acceptErr != nil {
 				return
 			}
-			defer func() { _ = connection.CloseNow() }()
-			messageType, payload, readErr := connection.Read(request.Context())
+			defer func() { _ = connection.Close() }()
+			messageType, payload, readErr := connection.ReadMessage()
 			if readErr != nil {
 				return
 			}
-			_ = connection.Write(request.Context(), messageType, payload)
+			_ = connection.WriteMessage(messageType, payload)
 		})),
 	)
 	t.Cleanup(webSocketBackend.Close)

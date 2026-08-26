@@ -7,10 +7,10 @@ import (
 	"io"
 	"sync"
 
+	"github.com/gorilla/websocket"
 	"k8s.io/client-go/tools/remotecommand"
 
 	"github.com/fengqi-dev/kube-loop/internal/protocol/execstream"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
 )
 
 type frameWriter struct {
@@ -29,7 +29,7 @@ func (writer frameWriter) Write(payload []byte) (int, error) {
 		return 0, err
 	}
 	writer.mu.Lock()
-	err = writer.connection.Write(writer.ctx, websocket.MessageBinary, encoded)
+	err = writeWebSocket(writer.ctx, writer.connection, websocket.BinaryMessage, encoded)
 	writer.mu.Unlock()
 	if err != nil {
 		return 0, err
@@ -90,11 +90,11 @@ func readInput(
 ) error {
 	defer func() { _ = stdin.Close() }()
 	for {
-		messageType, encoded, err := connection.Read(ctx)
+		messageType, encoded, err := readWebSocket(ctx, connection)
 		if err != nil {
 			return err
 		}
-		if messageType != websocket.MessageBinary {
+		if messageType != websocket.BinaryMessage {
 			return errors.New("exec stream accepts binary frames only")
 		}
 		frame, err := execstream.Decode(encoded)

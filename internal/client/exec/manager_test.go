@@ -10,10 +10,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gorilla/websocket"
+
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/execstream"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
+	"github.com/fengqi-dev/kube-loop/internal/testutil/websockettest"
 )
 
 type blockingStreamClient struct {
@@ -53,14 +55,14 @@ func TestManagerRoutesOutputInputResizeAndExitByProfileAndTask(t *testing.T) {
 	input := make(chan execstream.Frame, 2)
 	clientClosed := make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		connection, err := websocket.Accept(writer, request, nil)
+		connection, err := websockettest.Accept(writer, request, nil)
 		if err != nil {
 			t.Error(err)
 			return
 		}
-		defer checkTestClose(t, connection.CloseNow)
+		defer checkTestClose(t, connection.Close)
 		for range 2 {
-			_, encoded, readErr := connection.Read(request.Context())
+			_, encoded, readErr := connection.ReadMessage()
 			if readErr != nil {
 				close(clientClosed)
 				t.Error(readErr)
@@ -75,8 +77,8 @@ func TestManagerRoutesOutputInputResizeAndExitByProfileAndTask(t *testing.T) {
 		}
 		output, _ := execstream.Encode(execstream.Frame{Type: execstream.Stdout, Payload: []byte("ready\r\n")})
 		exit, _ := execstream.EncodeExit(execstream.ExitStatus{Code: 7, Error: "command exited unsuccessfully"})
-		_ = connection.Write(request.Context(), websocket.MessageBinary, output)
-		_ = connection.Write(request.Context(), websocket.MessageBinary, exit)
+		_ = connection.WriteMessage(websocket.BinaryMessage, output)
+		_ = connection.WriteMessage(websocket.BinaryMessage, exit)
 	}))
 	defer server.Close()
 
@@ -134,17 +136,17 @@ func TestManagerRoutesOutputInputResizeAndExitByProfileAndTask(t *testing.T) {
 
 func TestManagerEventCallbackCanStopItsOwnStream(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		connection, err := websocket.Accept(writer, request, nil)
+		connection, err := websockettest.Accept(writer, request, nil)
 		if err != nil {
 			return
 		}
-		defer checkTestClose(t, connection.CloseNow)
+		defer checkTestClose(t, connection.Close)
 		output, _ := execstream.Encode(
 			execstream.Frame{Type: execstream.Stdout, Payload: []byte("stop")},
 		)
-		_ = connection.Write(request.Context(), websocket.MessageBinary, output)
+		_ = connection.WriteMessage(websocket.BinaryMessage, output)
 		for {
-			if _, _, err := connection.Read(request.Context()); err != nil {
+			if _, _, err := connection.ReadMessage(); err != nil {
 				return
 			}
 		}
@@ -186,13 +188,13 @@ func TestManagerEventCallbackCanStopItsOwnStream(t *testing.T) {
 
 func TestManagerStopProfileWaitsForOpeningStream(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		connection, err := websocket.Accept(writer, request, nil)
+		connection, err := websockettest.Accept(writer, request, nil)
 		if err != nil {
 			return
 		}
-		defer checkTestClose(t, connection.CloseNow)
+		defer checkTestClose(t, connection.Close)
 		for {
-			if _, _, err := connection.Read(request.Context()); err != nil {
+			if _, _, err := connection.ReadMessage(); err != nil {
 				return
 			}
 		}
@@ -265,17 +267,17 @@ func testManagerWaitsForEventCallback(
 ) {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		connection, err := websocket.Accept(writer, request, nil)
+		connection, err := websockettest.Accept(writer, request, nil)
 		if err != nil {
 			return
 		}
-		defer checkTestClose(t, connection.CloseNow)
+		defer checkTestClose(t, connection.Close)
 		output, _ := execstream.Encode(
 			execstream.Frame{Type: execstream.Stdout, Payload: []byte("ready")},
 		)
-		_ = connection.Write(request.Context(), websocket.MessageBinary, output)
+		_ = connection.WriteMessage(websocket.BinaryMessage, output)
 		for {
-			if _, _, err := connection.Read(request.Context()); err != nil {
+			if _, _, err := connection.ReadMessage(); err != nil {
 				return
 			}
 		}

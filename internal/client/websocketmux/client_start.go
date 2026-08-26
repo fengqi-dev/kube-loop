@@ -10,7 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
+	"github.com/gorilla/websocket"
+
 	"github.com/fengqi-dev/kube-loop/internal/protocol/wssprotocol"
 )
 
@@ -95,7 +96,7 @@ func Start(ctx context.Context, config ClientConfig) (*Forwarder, error) {
 		}
 		if !forwarder.commitSession(session) {
 			_ = session.session.Close()
-			_ = session.ws.Close(websocket.StatusGoingAway, "client closed during session setup")
+			_ = closeWebSocket(session.ws, websocket.CloseGoingAway, "client closed during session setup")
 			_ = listener.Close()
 			cancel()
 			return nil, net.ErrClosed

@@ -7,9 +7,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gorilla/websocket"
 	"github.com/xtaci/smux"
 
-	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
 	shared "github.com/fengqi-dev/kube-loop/internal/protocol/websocketmux"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/wssprotocol"
 )
@@ -71,9 +71,9 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 	writer.Header().Set(wssprotocol.VersionHeader, wssprotocol.Version)
-	connection, err := websocket.Accept(writer, request, &websocket.AcceptOptions{
+	connection, err := (&websocket.Upgrader{
 		Subprotocols: []string{Subprotocol},
-	})
+	}).Upgrade(writer, request, writer.Header().Clone())
 	if err != nil {
 		h.logf(request.Context(),
 			requestID,
@@ -84,7 +84,7 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		)
 		return
 	}
-	defer func() { _ = connection.CloseNow() }()
+	defer func() { _ = connection.Close() }()
 	if connection.Subprotocol() != Subprotocol {
 		h.logf(request.Context(),
 			requestID,
@@ -94,7 +94,7 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 			request.Header.Get("Sec-WebSocket-Protocol"),
 			connection.Subprotocol(),
 		)
-		_ = connection.Close(websocket.StatusPolicyViolation, "subprotocol required")
+		_ = closeWebSocket(connection, websocket.ClosePolicyViolation, "subprotocol required")
 		return
 	}
 	connection.SetReadLimit(wssprotocol.MaximumHandshakeBytes)
@@ -169,7 +169,7 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 			"WebSocket handshake response failed: remote=%s error=%v",
 			request.RemoteAddr, err,
 		)
-		_ = connection.Close(websocket.StatusInternalError, "HANDSHAKE_FAILED")
+		_ = closeWebSocket(connection, websocket.CloseInternalServerErr, "HANDSHAKE_FAILED")
 		return
 	}
 	cancelHandshake()
@@ -182,7 +182,7 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	// RelayTicket expiry is an admission boundary for the authenticated WSS
 	// handshake, not a lifetime limit for accepted logical streams. Established
 	// sessions remain governed by generation fencing, shutdown and explicit close.
-	streamConn := websocket.NetConn(request.Context(), connection, websocket.MessageBinary)
+	streamConn := shared.NewWebSocketConn(request.Context(), connection, websocket.BinaryMessage)
 	session, err := smux.Server(streamConn, smuxConfig())
 	if err != nil {
 		h.logf(

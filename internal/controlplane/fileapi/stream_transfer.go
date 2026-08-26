@@ -6,8 +6,9 @@ import (
 	"io"
 	"sync"
 
+	"github.com/gorilla/websocket"
+
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
 )
 
 func (handler *Service) upload(

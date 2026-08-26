@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/gorilla/websocket"
 	"github.com/labstack/echo/v5"
 
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/authorization"
@@ -16,7 +17,6 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/streamlease"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/filestream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/remotetask"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
 )
 
 func (handler *Service) stream(
@@ -50,13 +50,7 @@ func (handler *Service) stream(
 	); err != nil {
 		return storageError(err)
 	}
-	connection, err := websocket.Accept(
-		writer,
-		request,
-		&websocket.AcceptOptions{
-			CompressionMode: websocket.CompressionDisabled,
-		},
-	)
+	connection, err := upgradeWebSocket(writer, request)
 	if err != nil {
 		_ = handler.persistState(
 			request.Context(),
@@ -69,7 +63,7 @@ func (handler *Service) stream(
 	}
 	var readers sync.WaitGroup
 	defer func() {
-		_ = connection.CloseNow()
+		_ = connection.Close()
 		readers.Wait()
 	}()
 	connection.SetReadLimit(filestream.MaximumData + 1)
@@ -99,8 +93,8 @@ func (handler *Service) stream(
 			remotetask.Failed,
 			streamResult{Error: "authorization lease expired"},
 		)
-		_ = connection.Close(
-			websocket.StatusPolicyViolation,
+		_ = closeWebSocket(
+			connection, websocket.ClosePolicyViolation,
 			"authorization lease expired",
 		)
 		return nil
@@ -109,8 +103,8 @@ func (handler *Service) stream(
 	if err := handler.persistState(
 		request.Context(), task.ID, remotetask.Starting, remotetask.Running, streamResult{},
 	); err != nil {
-		_ = connection.Close(
-			websocket.StatusInternalError,
+		_ = closeWebSocket(
+			connection, websocket.CloseInternalServerErr,
 			"file transfer state persistence failed",
 		)
 		return nil
@@ -145,8 +139,8 @@ func (handler *Service) stream(
 	if err := handler.persistState(
 		request.Context(), task.ID, remotetask.Running, nextState, result,
 	); err != nil {
-		_ = connection.Close(
-			websocket.StatusInternalError,
+		_ = closeWebSocket(
+			connection, websocket.CloseInternalServerErr,
 			"file transfer state persistence failed",
 		)
 		return nil
@@ -154,11 +148,11 @@ func (handler *Service) stream(
 	encoded, _ := filestream.EncodeResult(result.protocol())
 	writeContext, cancelWrite := context.WithTimeout(request.Context(), 5*time.Second)
 	writeMu.Lock()
-	_ = connection.Write(writeContext, websocket.MessageBinary, encoded)
+	_ = writeWebSocket(writeContext, connection, websocket.BinaryMessage, encoded)
 	writeMu.Unlock()
 	cancelWrite()
-	_ = connection.Close(
-		websocket.StatusNormalClosure,
+	_ = closeWebSocket(
+		connection, websocket.CloseNormalClosure,
 		"file transfer complete",
 	)
 	return nil

@@ -17,6 +17,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v5"
 
+	"github.com/gorilla/websocket"
+
 	"github.com/fengqi-dev/kube-loop/internal/controlplane"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/authorization"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
@@ -25,7 +27,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/execstream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
+	"github.com/fengqi-dev/kube-loop/internal/testutil/websockettest"
 )
 
 type sessionValidator struct {
@@ -200,18 +202,18 @@ func TestPodExecTaskAndWebSocketStreamAreOwnedAndSingleUse(t *testing.T) {
 		httpServer.URL,
 		"http",
 	) + "/api/sessions/" + sessionID + "/exec/" + document.ID + "/stream?namespace=development"
-	connection, response, err := websocket.Dial(
+	connection, response, err := websockettest.Dial(
 		context.Background(),
 		streamURL,
-		&websocket.DialOptions{HTTPHeader: http.Header{"X-Identity": {identityID}}},
-	)
+		&websockettest.DialOptions{HTTPHeader: http.Header{"X-Identity": {identityID}}})
+
 	if err != nil {
 		if response != nil {
 			t.Fatalf("dial status = %d err = %v", response.StatusCode, err)
 		}
 		t.Fatal(err)
 	}
-	defer func() { _ = connection.CloseNow() }()
+	defer func() { _ = connection.Close() }()
 	frames := readExecLifecycleFrames(t, connection)
 	if string(frames[execstream.Stdout].Payload) != "hello\n" ||
 		string(frames[execstream.Stderr].Payload) != "warning\n" {
@@ -236,11 +238,11 @@ func TestPodExecTaskAndWebSocketStreamAreOwnedAndSingleUse(t *testing.T) {
 		streamRequestID = response.Header.Get(echo.HeaderXRequestID)
 	}
 	assertExecLifecycleAudit(t, transitionEvents, identityID, document.ID, streamRequestID)
-	_, replayResponse, replayErr := websocket.Dial(
+	_, replayResponse, replayErr := websockettest.Dial(
 		context.Background(),
 		streamURL,
-		&websocket.DialOptions{HTTPHeader: http.Header{"X-Identity": {identityID}}},
-	)
+		&websockettest.DialOptions{HTTPHeader: http.Header{"X-Identity": {identityID}}})
+
 	if replayErr == nil || replayResponse == nil ||
 		replayResponse.StatusCode != http.StatusConflict {
 		t.Fatalf("replay response = %#v err = %v", replayResponse, replayErr)
@@ -256,11 +258,11 @@ func readExecLifecycleFrames(t *testing.T, connection *websocket.Conn) map[byte]
 	t.Helper()
 	frames := make(map[byte]execstream.Frame)
 	for len(frames) < 3 {
-		messageType, encoded, err := connection.Read(context.Background())
+		messageType, encoded, err := connection.ReadMessage()
 		if err != nil {
 			t.Fatal(err)
 		}
-		if messageType != websocket.MessageBinary {
+		if messageType != websocket.BinaryMessage {
 			t.Fatalf("message type = %v", messageType)
 		}
 		frame, err := execstream.Decode(encoded)
@@ -405,14 +407,14 @@ func TestPodExecStreamStopsWhenOAuthGrantIsRevoked(t *testing.T) {
 		httpServer.URL,
 		"http",
 	) + "/api/sessions/" + sessionID + "/exec/" + document.ID + "/stream?namespace=development"
-	connection, response, err := websocket.Dial(context.Background(), streamURL, nil)
+	connection, response, err := websockettest.Dial(context.Background(), streamURL, nil)
 	if err != nil {
 		if response != nil {
 			t.Fatalf("dial status = %d err = %v", response.StatusCode, err)
 		}
 		t.Fatal(err)
 	}
-	defer func() { _ = connection.CloseNow() }()
+	defer func() { _ = connection.Close() }()
 	select {
 	case <-executor.started:
 	case <-time.After(time.Second):
@@ -422,9 +424,10 @@ func TestPodExecStreamStopsWhenOAuthGrantIsRevoked(t *testing.T) {
 		RevokeRequest(context.Background(), authorizationID, time.Now().UTC()); err != nil {
 		t.Fatal(err)
 	}
-	readContext, readCancel := context.WithTimeout(context.Background(), time.Second)
-	defer readCancel()
-	_, encoded, err := connection.Read(readContext)
+	if err := connection.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	_, encoded, err := connection.ReadMessage()
 	if err != nil {
 		t.Fatal(err)
 	}

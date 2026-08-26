@@ -19,7 +19,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/authorization"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/kubeapi"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
+	"github.com/fengqi-dev/kube-loop/internal/testutil/websockettest"
 )
 
 type inventoryProvider struct{ client kubernetes.Interface }
@@ -72,21 +72,21 @@ func TestInventoryWatchHTTPStreamsAuthorizedResyncSnapshots(t *testing.T) {
 	defer httpServer.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	connection, _, err := websocket.Dial(
+	connection, _, err := websockettest.Dial(
 		ctx,
 		"wss"+strings.TrimPrefix(
 			httpServer.URL,
 			"https",
 		)+"/api/namespaces/development/pods?watch=true",
-		&websocket.DialOptions{
-			HTTPClient: httpServer.Client(), CompressionMode: websocket.CompressionDisabled,
-		},
-	)
+		&websockettest.DialOptions{
+			HTTPClient: httpServer.Client(),
+		})
+
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = connection.CloseNow() }()
-	_, encoded, err := connection.Read(ctx)
+	defer func() { _ = connection.Close() }()
+	_, encoded, err := connection.ReadMessage()
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -5,10 +5,11 @@ import (
 	"errors"
 	"time"
 
+	"github.com/gorilla/websocket"
+
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/filestream"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
 )
 
 type Client interface {
@@ -33,7 +34,7 @@ func cancel(connection *websocket.Conn) {
 	encoded, _ := filestream.Encode(filestream.Frame{Type: filestream.Cancel})
 	ctx, stop := context.WithTimeout(context.Background(), 2*time.Second)
 	defer stop()
-	_ = connection.Write(ctx, websocket.MessageBinary, encoded)
+	_ = writeWebSocket(ctx, connection, websocket.BinaryMessage, encoded)
 }
 
 func resultError(result filestream.TransferResult) error {

@@ -20,11 +20,13 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/gorilla/websocket"
+
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
 	"github.com/fengqi-dev/kube-loop/internal/fsatomic"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/filestream"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
+	"github.com/fengqi-dev/kube-loop/internal/testutil/websockettest"
 )
 
 func TestManagerUploadsLocalFilePersistsProgressAndHistory(t *testing.T) {
@@ -449,16 +451,16 @@ func TestManagerRejectsUnsafeDownloadedDirectoryWithoutPublishing(t *testing.T) 
 func TestManagerStopProfileWaitsForStreamAndMarksTaskCancelled(t *testing.T) {
 	accepted := make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		connection, err := websocket.Accept(writer, request, nil)
+		connection, err := websockettest.Accept(writer, request, nil)
 		if err != nil {
 			t.Error(err)
 			return
 		}
-		defer checkTestClose(t, connection.CloseNow)
+		defer checkTestClose(t, connection.Close)
 		connection.SetReadLimit(filestream.MaximumData + 1)
 		close(accepted)
 		for {
-			if _, _, err := connection.Read(request.Context()); err != nil {
+			if _, _, err := connection.ReadMessage(); err != nil {
 				return
 			}
 		}
@@ -501,15 +503,15 @@ func TestManagerStopProfileWaitsForStreamAndMarksTaskCancelled(t *testing.T) {
 func TestManagerCancelAndClearHistoryPersistLifecycle(t *testing.T) {
 	accepted := make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		connection, err := websocket.Accept(writer, request, nil)
+		connection, err := websockettest.Accept(writer, request, nil)
 		if err != nil {
 			t.Error(err)
 			return
 		}
-		defer checkTestClose(t, connection.CloseNow)
+		defer checkTestClose(t, connection.Close)
 		connection.SetReadLimit(filestream.MaximumData + 1)
 		close(accepted)
-		waitForTransferClientClose(request.Context(), connection)
+		waitForTransferClientClose(connection)
 	}))
 	defer server.Close()
 	root := t.TempDir()
@@ -699,17 +701,17 @@ func TestManagerResumesUploadAcrossProcessFromControllerNegotiatedOffset(t *test
 	resumeID := taskID
 	receivedTail := make(chan []byte, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		connection, err := websocket.Accept(writer, request, nil)
+		connection, err := websockettest.Accept(writer, request, nil)
 		if err != nil {
 			t.Error(err)
 			return
 		}
-		defer checkTestClose(t, connection.CloseNow)
+		defer checkTestClose(t, connection.Close)
 		connection.SetReadLimit(filestream.MaximumData + 1)
 		transferred := offset
 		var tail []byte
 		for {
-			_, encoded, err := connection.Read(request.Context())
+			_, encoded, err := connection.ReadMessage()
 			if err != nil {
 				t.Error(err)
 				return
@@ -725,7 +727,7 @@ func TestManagerResumesUploadAcrossProcessFromControllerNegotiatedOffset(t *test
 				progress, _ := filestream.EncodeProgress(
 					filestream.ProgressStatus{Transferred: transferred, Total: uint64(len(contents))},
 				)
-				_ = connection.Write(request.Context(), websocket.MessageBinary, progress)
+				_ = connection.WriteMessage(websocket.BinaryMessage, progress)
 				continue
 			}
 			result, _ := filestream.EncodeResult(filestream.TransferResult{
@@ -734,12 +736,12 @@ func TestManagerResumesUploadAcrossProcessFromControllerNegotiatedOffset(t *test
 				Checksum:    checksum,
 				HasChecksum: true,
 			})
-			if err := connection.Write(request.Context(), websocket.MessageBinary, result); err != nil {
+			if err := connection.WriteMessage(websocket.BinaryMessage, result); err != nil {
 				t.Error(err)
 				return
 			}
 			receivedTail <- tail
-			waitForTransferClientClose(request.Context(), connection)
+			waitForTransferClientClose(connection)
 			return
 		}
 	}))
@@ -813,16 +815,16 @@ func TestManagerResumesDownloadAcrossProcessUsingStablePartialFile(t *testing.T)
 		t.Fatal(err)
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		connection, err := websocket.Accept(writer, request, nil)
+		connection, err := websockettest.Accept(writer, request, nil)
 		if err != nil {
 			t.Error(err)
 			return
 		}
-		defer checkTestClose(t, connection.CloseNow)
+		defer checkTestClose(t, connection.Close)
 		for position := offset; position < len(contents); position += filestream.MaximumData {
 			end := min(position+filestream.MaximumData, len(contents))
 			data, _ := filestream.Encode(filestream.Frame{Type: filestream.Data, Payload: contents[position:end]})
-			_ = connection.Write(request.Context(), websocket.MessageBinary, data)
+			_ = connection.WriteMessage(websocket.BinaryMessage, data)
 		}
 		result, _ := filestream.EncodeResult(filestream.TransferResult{
 			Status:      filestream.ResultSucceeded,
@@ -830,11 +832,11 @@ func TestManagerResumesDownloadAcrossProcessUsingStablePartialFile(t *testing.T)
 			Checksum:    checksum,
 			HasChecksum: true,
 		})
-		if err := connection.Write(request.Context(), websocket.MessageBinary, result); err != nil {
+		if err := connection.WriteMessage(websocket.BinaryMessage, result); err != nil {
 			t.Error(err)
 			return
 		}
-		waitForTransferClientClose(request.Context(), connection)
+		waitForTransferClientClose(connection)
 	}))
 	defer server.Close()
 	now := time.Now().UTC()
@@ -900,16 +902,16 @@ func TestManagerRejectsRelativeLocalAndUnsafeRemotePathsBeforeQueueing(t *testin
 func uploadServer(t *testing.T, receive func([]byte)) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		connection, err := websocket.Accept(writer, request, nil)
+		connection, err := websockettest.Accept(writer, request, nil)
 		if err != nil {
 			t.Error(err)
 			return
 		}
-		defer checkTestClose(t, connection.CloseNow)
+		defer checkTestClose(t, connection.Close)
 		connection.SetReadLimit(filestream.MaximumData + 1)
 		var contents []byte
 		for {
-			_, encoded, err := connection.Read(request.Context())
+			_, encoded, err := connection.ReadMessage()
 			if err != nil {
 				t.Error(err)
 				return
@@ -922,7 +924,7 @@ func uploadServer(t *testing.T, receive func([]byte)) *httptest.Server {
 			if frame.Type == filestream.Data {
 				contents = append(contents, frame.Payload...)
 				progress, _ := filestream.EncodeProgress(filestream.ProgressStatus{Transferred: uint64(len(contents))})
-				_ = connection.Write(request.Context(), websocket.MessageBinary, progress)
+				_ = connection.WriteMessage(websocket.BinaryMessage, progress)
 				continue
 			}
 			if frame.Type != filestream.Complete {
@@ -936,12 +938,12 @@ func uploadServer(t *testing.T, receive func([]byte)) *httptest.Server {
 				Checksum:    checksum,
 				HasChecksum: true,
 			})
-			if err := connection.Write(request.Context(), websocket.MessageBinary, result); err != nil {
+			if err := connection.WriteMessage(websocket.BinaryMessage, result); err != nil {
 				t.Error(err)
 				return
 			}
 			receive(contents)
-			waitForTransferClientClose(request.Context(), connection)
+			waitForTransferClientClose(connection)
 			return
 		}
 	}))
@@ -950,16 +952,16 @@ func uploadServer(t *testing.T, receive func([]byte)) *httptest.Server {
 func downloadServer(t *testing.T, contents []byte) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		connection, err := websocket.Accept(writer, request, nil)
+		connection, err := websockettest.Accept(writer, request, nil)
 		if err != nil {
 			t.Error(err)
 			return
 		}
-		defer checkTestClose(t, connection.CloseNow)
+		defer checkTestClose(t, connection.Close)
 		for offset := 0; offset < len(contents); offset += filestream.MaximumData {
 			end := min(offset+filestream.MaximumData, len(contents))
 			data, _ := filestream.Encode(filestream.Frame{Type: filestream.Data, Payload: contents[offset:end]})
-			if err := connection.Write(request.Context(), websocket.MessageBinary, data); err != nil {
+			if err := connection.WriteMessage(websocket.BinaryMessage, data); err != nil {
 				t.Error(err)
 				return
 			}
@@ -971,17 +973,17 @@ func downloadServer(t *testing.T, contents []byte) *httptest.Server {
 			Checksum:    checksum,
 			HasChecksum: true,
 		})
-		if err := connection.Write(request.Context(), websocket.MessageBinary, result); err != nil {
+		if err := connection.WriteMessage(websocket.BinaryMessage, result); err != nil {
 			t.Error(err)
 			return
 		}
-		waitForTransferClientClose(request.Context(), connection)
+		waitForTransferClientClose(connection)
 	}))
 }
 
-func waitForTransferClientClose(ctx context.Context, connection *websocket.Conn) {
+func waitForTransferClientClose(connection *websocket.Conn) {
 	for {
-		if _, _, err := connection.Read(ctx); err != nil {
+		if _, _, err := connection.ReadMessage(); err != nil {
 			return
 		}
 	}

@@ -5,8 +5,9 @@ import (
 	"errors"
 	"sync"
 
+	"github.com/gorilla/websocket"
+
 	"github.com/fengqi-dev/kube-loop/internal/protocol/filestream"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
 )
 
 func readDownloadControl(
@@ -14,8 +15,8 @@ func readDownloadControl(
 	connection *websocket.Conn,
 	cancel context.CancelFunc,
 ) {
-	messageType, encoded, err := connection.Read(ctx)
-	if err != nil || messageType != websocket.MessageBinary {
+	messageType, encoded, err := readWebSocket(ctx, connection)
+	if err != nil || messageType != websocket.BinaryMessage {
 		cancel()
 		return
 	}
@@ -49,9 +50,9 @@ func (writer *downloadWriter) Write(value []byte) (int, error) {
 			filestream.Frame{Type: filestream.Data, Payload: chunk},
 		)
 		writer.mu.Lock()
-		err := writer.connection.Write(
-			writer.ctx,
-			websocket.MessageBinary,
+		err := writeWebSocket(
+			writer.ctx, writer.connection,
+			websocket.BinaryMessage,
 			encoded,
 		)
 		writer.mu.Unlock()
@@ -91,7 +92,7 @@ func writeProgress(
 		return err
 	}
 	writeMu.Lock()
-	err = connection.Write(ctx, websocket.MessageBinary, encoded)
+	err = writeWebSocket(ctx, connection, websocket.BinaryMessage, encoded)
 	writeMu.Unlock()
 	return err
 }

@@ -10,18 +10,20 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
+	"github.com/gorilla/websocket"
+
+	"github.com/fengqi-dev/kube-loop/internal/testutil/websockettest"
 )
 
 func TestReadWriteRoundTripOverWebSocket(t *testing.T) {
 	serverResult := make(chan error, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		connection, err := websocket.Accept(writer, request, nil)
+		connection, err := websockettest.Accept(writer, request, nil)
 		if err != nil {
 			serverResult <- err
 			return
 		}
-		defer func() { _ = connection.CloseNow() }()
+		defer func() { _ = connection.Close() }()
 		message, err := Read(request.Context(), connection)
 		if err != nil {
 			serverResult <- err
@@ -37,11 +39,11 @@ func TestReadWriteRoundTripOverWebSocket(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
-	connection, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
+	connection, _, err := websockettest.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = connection.CloseNow() }()
+	defer func() { _ = connection.Close() }()
 	if err := Write(ctx, connection, NewClientHello("2.4.0", "device-1")); err != nil {
 		t.Fatal(err)
 	}
@@ -57,10 +59,10 @@ func TestReadWriteRoundTripOverWebSocket(t *testing.T) {
 func TestReadRejectsTextWebSocketMessage(t *testing.T) {
 	serverResult := make(chan error, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		connection, err := websocket.Accept(writer, request, nil)
+		connection, err := websockettest.Accept(writer, request, nil)
 		if err == nil {
-			defer func() { _ = connection.CloseNow() }()
-			err = connection.Write(request.Context(), websocket.MessageText, []byte(`{"type":"reject"}`))
+			defer func() { _ = connection.Close() }()
+			err = connection.WriteMessage(websocket.TextMessage, []byte(`{"type":"reject"}`))
 		}
 		serverResult <- err
 	}))
@@ -68,11 +70,11 @@ func TestReadRejectsTextWebSocketMessage(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
-	connection, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
+	connection, _, err := websockettest.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = connection.CloseNow() }()
+	defer func() { _ = connection.Close() }()
 	if _, err := Read(ctx, connection); !errors.Is(err, ErrInvalidHandshake) {
 		t.Fatalf("Read() error = %v, want ErrInvalidHandshake", err)
 	}

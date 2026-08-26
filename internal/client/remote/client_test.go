@@ -15,6 +15,8 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/gorilla/websocket"
+
 	clientauth "github.com/fengqi-dev/kube-loop/internal/client/auth"
 	"github.com/fengqi-dev/kube-loop/internal/client/credentials"
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
@@ -22,7 +24,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/protocol/execstream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/filestream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
+	"github.com/fengqi-dev/kube-loop/internal/testutil/websockettest"
 )
 
 type memoryStore struct {
@@ -612,17 +614,17 @@ func TestPodExecTaskOpensAuthenticatedWebSocketStream(t *testing.T) {
 		if request.Header.Get("Authorization") != "Bearer access-token" {
 			t.Errorf("Authorization = %q", request.Header.Get("Authorization"))
 		}
-		connection, err := websocket.Accept(writer, request, nil)
+		connection, err := websockettest.Accept(writer, request, nil)
 		if err != nil {
 			t.Error(err)
 			return
 		}
-		defer func() { _ = connection.CloseNow() }()
+		defer func() { _ = connection.Close() }()
 		stdout, _ := execstream.Encode(execstream.Frame{Type: execstream.Stdout, Payload: []byte("hello")})
 		exit, _ := execstream.EncodeExit(execstream.ExitStatus{})
-		_ = connection.Write(request.Context(), websocket.MessageBinary, stdout)
-		_ = connection.Write(request.Context(), websocket.MessageBinary, exit)
-		_ = connection.Close(websocket.StatusNormalClosure, "done")
+		_ = connection.WriteMessage(websocket.BinaryMessage, stdout)
+		_ = connection.WriteMessage(websocket.BinaryMessage, exit)
+		_ = connection.Close()
 	}))
 	defer server.Close()
 	client, err := New(
@@ -644,8 +646,8 @@ func TestPodExecTaskOpensAuthenticatedWebSocketStream(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer checkTestClose(t, connection.CloseNow)
-	_, encoded, err := connection.Read(context.Background())
+	defer checkTestClose(t, connection.Close)
+	_, encoded, err := connection.ReadMessage()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -681,18 +683,18 @@ func TestFileTransferTaskUsesAuthenticatedControlAndWebSocketAPIs(t *testing.T) 
 			t.Errorf("Authorization = %q", request.Header.Get("Authorization"))
 		}
 		if strings.HasSuffix(request.URL.Path, "/stream") {
-			connection, err := websocket.Accept(writer, request, nil)
+			connection, err := websockettest.Accept(writer, request, nil)
 			if err != nil {
 				t.Error(err)
 				return
 			}
-			defer func() { _ = connection.CloseNow() }()
+			defer func() { _ = connection.Close() }()
 			progress, _ := filestream.EncodeProgress(filestream.ProgressStatus{Total: 4})
 			result, _ := filestream.EncodeResult(
 				filestream.TransferResult{Status: filestream.ResultSucceeded, Transferred: 4},
 			)
-			_ = connection.Write(request.Context(), websocket.MessageBinary, progress)
-			_ = connection.Write(request.Context(), websocket.MessageBinary, result)
+			_ = connection.WriteMessage(websocket.BinaryMessage, progress)
+			_ = connection.WriteMessage(websocket.BinaryMessage, result)
 			return
 		}
 		if request.Method == http.MethodPost {
@@ -732,8 +734,8 @@ func TestFileTransferTaskUsesAuthenticatedControlAndWebSocketAPIs(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer checkTestClose(t, connection.CloseNow)
-	_, encoded, err := connection.Read(context.Background())
+	defer checkTestClose(t, connection.Close)
+	_, encoded, err := connection.ReadMessage()
 	if err != nil {
 		t.Fatal(err)
 	}

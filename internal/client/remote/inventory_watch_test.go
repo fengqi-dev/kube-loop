@@ -10,8 +10,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gorilla/websocket"
+
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
+	"github.com/fengqi-dev/kube-loop/internal/testutil/websockettest"
 )
 
 type blockingInventoryConnection struct {
@@ -21,11 +23,11 @@ type blockingInventoryConnection struct {
 	calls   atomic.Int32
 }
 
-func (*blockingInventoryConnection) Read(context.Context) (websocket.MessageType, []byte, error) {
+func (*blockingInventoryConnection) Read(context.Context) (int, []byte, error) {
 	return 0, nil, errors.New("unexpected read")
 }
 
-func (connection *blockingInventoryConnection) Close(websocket.StatusCode, string) error {
+func (connection *blockingInventoryConnection) Close(int, string) error {
 	connection.calls.Add(1)
 	close(connection.started)
 	<-connection.release
@@ -40,20 +42,20 @@ func TestInventoryWatchAuthenticatesAndValidatesSnapshotBinding(t *testing.T) {
 			http.Error(writer, "invalid request", http.StatusBadRequest)
 			return
 		}
-		connection, err := websocket.Accept(
+		connection, err := websockettest.Accept(
 			writer,
 			request,
-			&websocket.AcceptOptions{CompressionMode: websocket.CompressionDisabled},
-		)
+			nil)
+
 		if err != nil {
 			return
 		}
-		defer func() { _ = connection.CloseNow() }()
+		defer func() { _ = connection.Close() }()
 		encoded, _ := json.Marshal(InventorySnapshot{
 			SchemaVersion: 1, Type: "snapshot", Resource: InventoryPods, Namespace: "development",
 			Sequence: 1, GeneratedAt: now, Pods: []Pod{{Name: "api-0", Namespace: "development"}},
 		})
-		_ = connection.Write(request.Context(), websocket.MessageText, encoded)
+		_ = connection.WriteMessage(websocket.TextMessage, encoded)
 		<-request.Context().Done()
 	}))
 	defer server.Close()

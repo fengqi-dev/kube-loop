@@ -18,7 +18,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/authorization"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/health"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
+	"github.com/fengqi-dev/kube-loop/internal/testutil/websockettest"
 )
 
 type shutdownAllowAuthorizer struct{}
@@ -210,7 +210,7 @@ func TestShutdownCancelsAndWaitsForWebSocketHandlers(t *testing.T) {
 		WithAPIRoutes(
 			testEndpoint(
 				func(writer http.ResponseWriter, request *http.Request, _ controlplaneapi.Identity) *controlplaneapi.Error {
-					connection, err := websocket.Accept(writer, request, nil)
+					connection, err := websockettest.Accept(writer, request, nil)
 					if err != nil {
 						return &controlplaneapi.Error{
 							Code:    controlplaneapi.CodeInternal,
@@ -220,7 +220,7 @@ func TestShutdownCancelsAndWaitsForWebSocketHandlers(t *testing.T) {
 					close(started)
 					<-request.Context().Done()
 					time.Sleep(20 * time.Millisecond)
-					_ = connection.CloseNow()
+					_ = connection.Close()
 					close(finished)
 					return nil
 				},
@@ -236,15 +236,15 @@ func TestShutdownCancelsAndWaitsForWebSocketHandlers(t *testing.T) {
 	}
 	serveDone := make(chan error, 1)
 	go func() { serveDone <- server.Serve(listener) }()
-	connection, _, err := websocket.Dial(
+	connection, _, err := websockettest.Dial(
 		context.Background(),
 		"ws://"+listener.Addr().String()+"/api/stream",
-		nil,
-	)
+		nil)
+
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = connection.CloseNow() }()
+	defer func() { _ = connection.Close() }()
 	select {
 	case <-started:
 	case <-time.After(time.Second):

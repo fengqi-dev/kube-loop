@@ -6,8 +6,9 @@ import (
 	"io"
 	"sync"
 
+	"github.com/gorilla/websocket"
+
 	"github.com/fengqi-dev/kube-loop/internal/protocol/filestream"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
 )
 
 func readUpload(
@@ -20,12 +21,12 @@ func readUpload(
 	defer func() { _ = pipe.Close() }()
 	transferred := spec.Offset
 	for {
-		messageType, encoded, err := connection.Read(ctx)
+		messageType, encoded, err := readWebSocket(ctx, connection)
 		if err != nil {
 			_ = pipe.CloseWithError(err)
 			return err
 		}
-		if messageType != websocket.MessageBinary {
+		if messageType != websocket.BinaryMessage {
 			err := errors.New("file upload requires binary frames")
 			_ = pipe.CloseWithError(err)
 			return err

@@ -19,7 +19,7 @@ func (forwarder *Forwarder) keepAlive(item *pooledSession) {
 			return
 		case <-ticker.C:
 			ctx, cancel := context.WithTimeout(forwarder.ctx, 10*time.Second)
-			err := item.ws.Ping(ctx)
+			err := item.transport.Ping(ctx)
 			cancel()
 			if err != nil {
 				forwarder.discard(item)

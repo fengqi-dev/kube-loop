@@ -4,7 +4,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
+	"github.com/gorilla/websocket"
+
 	"github.com/fengqi-dev/kube-loop/internal/protocol/wssprotocol"
 )
 
@@ -33,7 +34,7 @@ func (h *Handler) reject(
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), time.Second)
 	_ = wssprotocol.Write(ctx, connection, rejection)
 	cancel()
-	_ = connection.Close(websocket.StatusPolicyViolation, rejection.Code)
+	_ = closeWebSocket(connection, websocket.ClosePolicyViolation, rejection.Code)
 }
 
 func (h *Handler) acquireUser(identity Identity) bool {

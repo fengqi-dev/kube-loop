@@ -15,12 +15,14 @@ import (
 	"github.com/google/uuid"
 	"golang.org/x/crypto/ssh"
 
+	"github.com/gorilla/websocket"
+
 	localpodssh "github.com/fengqi-dev/kube-loop/internal/client/podssh/sshserver"
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
 	"github.com/fengqi-dev/kube-loop/internal/client/socksbridge"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/execstream"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
+	"github.com/fengqi-dev/kube-loop/internal/testutil/websockettest"
 )
 
 type fakeHostTCPRegistrar struct {
@@ -112,15 +114,17 @@ func newFakeExecClient(t *testing.T) *fakeExecClient {
 	t.Helper()
 	client := &fakeExecClient{}
 	client.server = httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		connection, err := websocket.Accept(writer, request, nil)
+		connection, err := websockettest.Accept(writer, request, nil)
 		if err != nil {
 			return
 		}
-		defer checkTestClose(t, connection.CloseNow)
-		ctx, cancel := context.WithTimeout(request.Context(), 5*time.Second)
-		defer cancel()
+		defer checkTestClose(t, connection.Close)
+		if err := connection.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
+			t.Error(err)
+			return
+		}
 		for {
-			_, encoded, err := connection.Read(ctx)
+			_, encoded, err := connection.ReadMessage()
 			if err != nil {
 				return
 			}
@@ -139,18 +143,18 @@ func newFakeExecClient(t *testing.T) *fakeExecClient {
 			client.sizes = append(client.sizes, size)
 			client.mu.Unlock()
 			stdout, _ := execstream.Encode(execstream.Frame{Type: execstream.Stdout, Payload: []byte("remote-shell\n")})
-			if err := connection.Write(ctx, websocket.MessageBinary, stdout); err != nil {
+			if err := connection.WriteMessage(websocket.BinaryMessage, stdout); err != nil {
 				return
 			}
 			exit, _ := execstream.EncodeExit(execstream.ExitStatus{})
-			if err := connection.Write(ctx, websocket.MessageBinary, exit); err != nil {
+			if err := connection.WriteMessage(websocket.BinaryMessage, exit); err != nil {
 				return
 			}
 			// Let the client consume the terminal frame and initiate the close
 			// handshake. Closing the TCP socket here can surface as WSAECONNRESET
 			// before the buffered exit frame is observed on Windows.
 			for {
-				if _, _, err := connection.Read(ctx); err != nil {
+				if _, _, err := connection.ReadMessage(); err != nil {
 					return
 				}
 			}
@@ -185,7 +189,7 @@ func (client *fakeExecClient) OpenExecStream(
 	_ remote.ExecTask,
 ) (*websocket.Conn, error) {
 	endpoint := "ws" + strings.TrimPrefix(client.server.URL, "http")
-	connection, _, err := websocket.Dial(ctx, endpoint, nil)
+	connection, _, err := websockettest.Dial(ctx, endpoint, nil)
 	return connection, err
 }
 

@@ -4,8 +4,9 @@ import (
 	"net"
 	"sync"
 
+	"github.com/gorilla/websocket"
+
 	"github.com/fengqi-dev/kube-loop/internal/protocol/streamcopy"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
 	protocolmux "github.com/fengqi-dev/kube-loop/internal/protocol/websocketmux"
 )
 
@@ -38,7 +39,7 @@ func (forwarder *Forwarder) Close() error {
 		}
 		for _, item := range sessions {
 			_ = item.session.Close()
-			_ = item.ws.Close(websocket.StatusNormalClosure, "client shutdown")
+			_ = closeWebSocket(item.ws, websocket.CloseNormalClosure, "client shutdown")
 		}
 		forwarder.wg.Wait()
 	})

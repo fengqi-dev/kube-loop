@@ -10,9 +10,10 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/gorilla/websocket"
+
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/filestream"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
 )
 
 func (client *Client) CreateExecTask(

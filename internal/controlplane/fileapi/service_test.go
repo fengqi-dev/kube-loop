@@ -17,6 +17,8 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/gorilla/websocket"
+
 	"github.com/fengqi-dev/kube-loop/internal/controlplane"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/authorization"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
@@ -25,7 +27,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/filestream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
+	"github.com/fengqi-dev/kube-loop/internal/testutil/websockettest"
 )
 
 type sessionValidator struct {
@@ -542,13 +544,13 @@ func TestFileTransferWebSocketUploadDownloadAndSingleClaim(t *testing.T) {
 	dataFrame, _ := filestream.Encode(
 		filestream.Frame{Type: filestream.Data, Payload: upload},
 	)
-	if err := uploadConnection.Write(context.Background(), websocket.MessageBinary, dataFrame); err != nil {
+	if err := uploadConnection.WriteMessage(websocket.BinaryMessage, dataFrame); err != nil {
 		t.Fatal(err)
 	}
 	completeFrame, _ := filestream.Encode(
 		filestream.Frame{Type: filestream.Complete},
 	)
-	if err := uploadConnection.Write(context.Background(), websocket.MessageBinary, completeFrame); err != nil {
+	if err := uploadConnection.WriteMessage(websocket.BinaryMessage, completeFrame); err != nil {
 		t.Fatal(err)
 	}
 	uploadResult, uploadProgress, _ := readFileStream(t, uploadConnection)
@@ -563,19 +565,19 @@ func TestFileTransferWebSocketUploadDownloadAndSingleClaim(t *testing.T) {
 			uploadProgress,
 		)
 	}
-	_ = uploadConnection.CloseNow()
+	_ = uploadConnection.Close()
 	storedUpload, err := stateStore.Tasks().
 		GetByID(context.Background(), uploadTask.ID)
 	if err != nil || storedUpload.State != "stopped" {
 		t.Fatalf("stored upload = %#v err = %v", storedUpload, err)
 	}
-	_, replayResponse, replayErr := websocket.Dial(
+	_, replayResponse, replayErr := websockettest.Dial(
 		context.Background(),
 		uploadURL,
-		&websocket.DialOptions{
+		&websockettest.DialOptions{
 			HTTPHeader: http.Header{"X-Identity": {identityID}},
-		},
-	)
+		})
+
 	if replayErr == nil || replayResponse == nil ||
 		replayResponse.StatusCode != http.StatusConflict {
 		t.Fatalf(
@@ -621,7 +623,7 @@ func TestFileTransferWebSocketUploadDownloadAndSingleClaim(t *testing.T) {
 			downloadProgress,
 		)
 	}
-	_ = downloadConnection.CloseNow()
+	_ = downloadConnection.Close()
 	executor.mu.Lock()
 	defer executor.mu.Unlock()
 	if string(executor.uploaded) != string(upload) ||
@@ -641,13 +643,13 @@ func dialFileStream(
 	streamURL, identityID string,
 ) *websocket.Conn {
 	t.Helper()
-	connection, response, err := websocket.Dial(
+	connection, response, err := websockettest.Dial(
 		context.Background(),
 		streamURL,
-		&websocket.DialOptions{
+		&websockettest.DialOptions{
 			HTTPHeader: http.Header{"X-Identity": {identityID}},
-		},
-	)
+		})
+
 	if err != nil {
 		if response != nil {
 			t.Fatalf("dial status = %d err = %v", response.StatusCode, err)
@@ -674,11 +676,11 @@ func readFileStream(
 	var progress filestream.ProgressStatus
 	var contents []byte
 	for {
-		messageType, encoded, err := connection.Read(context.Background())
+		messageType, encoded, err := connection.ReadMessage()
 		if err != nil {
 			t.Fatal(err)
 		}
-		if messageType != websocket.MessageBinary {
+		if messageType != websocket.BinaryMessage {
 			t.Fatalf("message type = %v", messageType)
 		}
 		frame, err := filestream.Decode(encoded)

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/gorilla/websocket"
 	"github.com/labstack/echo/v5"
 
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/authorization"
@@ -16,7 +17,6 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/streamlease"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/execstream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/remotetask"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
 )
 
 func (handler *Service) stream(
@@ -54,11 +54,7 @@ func (handler *Service) stream(
 	); err != nil {
 		return storageError(err)
 	}
-	connection, err := websocket.Accept(
-		writer,
-		request,
-		&websocket.AcceptOptions{CompressionMode: websocket.CompressionDisabled},
-	)
+	connection, err := upgradeWebSocket(writer, request)
 	if err != nil {
 		_ = handler.storage.Tasks().UpdateState(
 			request.Context(),
@@ -72,7 +68,7 @@ func (handler *Service) stream(
 	}
 	var readers sync.WaitGroup
 	defer func() {
-		_ = connection.CloseNow()
+		_ = connection.Close()
 		readers.Wait()
 	}()
 	connection.SetReadLimit(execstream.MaximumPayload + 1)
@@ -105,7 +101,7 @@ func (handler *Service) stream(
 			handler.now().UTC(),
 		)
 		persistCancel()
-		_ = connection.Close(websocket.StatusPolicyViolation, "authorization lease expired")
+		_ = closeWebSocket(connection, websocket.ClosePolicyViolation, "authorization lease expired")
 		return nil
 	}
 	defer cancel()
@@ -117,7 +113,7 @@ func (handler *Service) stream(
 		json.RawMessage(`{}`),
 		handler.now().UTC(),
 	); err != nil {
-		_ = connection.Close(websocket.StatusInternalError, "exec state persistence failed")
+		_ = closeWebSocket(connection, websocket.CloseInternalServerErr, "exec state persistence failed")
 		return nil
 	}
 	stdinReader, stdinWriter := io.Pipe()
@@ -163,16 +159,16 @@ func (handler *Service) stream(
 	persistCancel()
 	if persistErr != nil {
 		cancel()
-		_ = connection.Close(websocket.StatusInternalError, "exec state persistence failed")
+		_ = closeWebSocket(connection, websocket.CloseInternalServerErr, "exec state persistence failed")
 		return nil
 	}
 	encoded, _ := execstream.EncodeExit(exitStatus)
 	writeContext, writeCancel := context.WithTimeout(request.Context(), 5*time.Second)
 	writeMu.Lock()
-	_ = connection.Write(writeContext, websocket.MessageBinary, encoded)
+	_ = writeWebSocket(writeContext, connection, websocket.BinaryMessage, encoded)
 	writeMu.Unlock()
 	writeCancel()
 	cancel()
-	_ = connection.Close(websocket.StatusNormalClosure, "exec complete")
+	_ = closeWebSocket(connection, websocket.CloseNormalClosure, "exec complete")
 	return nil
 }

@@ -12,10 +12,12 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/gorilla/websocket"
+
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/execstream"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/websocket"
+	"github.com/fengqi-dev/kube-loop/internal/testutil/websockettest"
 )
 
 type streamClient struct{ endpoint string }
@@ -27,15 +29,15 @@ type blockingCloseConnection struct {
 	calls   atomic.Int32
 }
 
-func (*blockingCloseConnection) Read(context.Context) (websocket.MessageType, []byte, error) {
+func (*blockingCloseConnection) Read(context.Context) (int, []byte, error) {
 	return 0, nil, errors.New("unexpected read")
 }
 
-func (*blockingCloseConnection) Write(context.Context, websocket.MessageType, []byte) error {
+func (*blockingCloseConnection) Write(context.Context, int, []byte) error {
 	return errors.New("unexpected write")
 }
 
-func (connection *blockingCloseConnection) Close(websocket.StatusCode, string) error {
+func (connection *blockingCloseConnection) Close(int, string) error {
 	connection.calls.Add(1)
 	close(connection.started)
 	<-connection.release
@@ -61,21 +63,21 @@ func (client streamClient) CreateExecTask(
 func (client streamClient) OpenExecStream(
 	ctx context.Context, _ profile.Profile, _ remote.Session, _ remote.ExecTask,
 ) (*websocket.Conn, error) {
-	connection, _, err := websocket.Dial(ctx, client.endpoint, nil)
+	connection, _, err := websockettest.Dial(ctx, client.endpoint, nil)
 	return connection, err
 }
 
 func TestTypedStreamSeparatesInputResizeOutputAndExit(t *testing.T) {
 	received := make(chan execstream.Frame, 2)
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		connection, err := websocket.Accept(writer, request, nil)
+		connection, err := websockettest.Accept(writer, request, nil)
 		if err != nil {
 			t.Error(err)
 			return
 		}
-		defer checkTestClose(t, connection.CloseNow)
+		defer checkTestClose(t, connection.Close)
 		for range 2 {
-			_, encoded, err := connection.Read(request.Context())
+			_, encoded, err := connection.ReadMessage()
 			if err != nil {
 				t.Error(err)
 				return
@@ -88,7 +90,7 @@ func TestTypedStreamSeparatesInputResizeOutputAndExit(t *testing.T) {
 			received <- frame
 		}
 		stdout, _ := execstream.Encode(execstream.Frame{Type: execstream.Stdout, Payload: []byte("ready")})
-		_ = connection.Write(request.Context(), websocket.MessageBinary, stdout)
+		_ = connection.WriteMessage(websocket.BinaryMessage, stdout)
 	}))
 	defer server.Close()
 	stream, err := Start(
