@@ -10,8 +10,6 @@ import (
 	"strings"
 	"syscall"
 
-	_ "k8s.io/client-go/plugin/pkg/client/auth"
-
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"k8s.io/apimachinery/pkg/runtime"
