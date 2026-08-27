@@ -75,7 +75,7 @@ func main() {
 			"build",
 			"-buildvcs=false",
 			"-trimpath",
-			"-ldflags", "-s -w -X main.version=" + target.version,
+			"-ldflags", "-s -w -X github.com/fengqi-dev/kube-loop/internal/buildinfo.version=" + target.version,
 			"-o", output,
 			target.pkg,
 		}

@@ -9,7 +9,7 @@ COPY cmd/kubeloop-control-plane ./cmd/kubeloop-control-plane
 COPY api ./api
 COPY internal ./internal
 RUN CGO_ENABLED=0 go build -trimpath \
-  -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT}" \
+  -ldflags="-s -w -X github.com/fengqi-dev/kube-loop/internal/buildinfo.version=${VERSION} -X github.com/fengqi-dev/kube-loop/internal/buildinfo.commit=${COMMIT}" \
   -o /out/kubeloop-control-plane ./cmd/kubeloop-control-plane
 
 FROM scratch

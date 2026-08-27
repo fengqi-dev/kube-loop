@@ -1,6 +1,8 @@
 package helper
 
-// Version is the helper protocol/binary version. Overridden at link time.
+// Version selects the helper installation identity used by the running client.
+// Command binaries receive their build version from internal/buildinfo and may
+// copy a release version here when selecting the release service identity.
 var Version = developmentVersion
 
 const (
@@ -20,7 +22,8 @@ const (
 )
 
 // IsDevBuild reports whether this binary is a development (non-release) build.
-// Release CI injects a version tag via -X main.version=...; local/wails defaults stay "dev".
+// Release command builds inject their version into internal/buildinfo; local
+// and Wails development builds keep this runtime service identity as "dev".
 func IsDevBuild() bool {
 	return Version == "" || Version == developmentVersion
 }

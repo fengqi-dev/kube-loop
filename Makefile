@@ -51,7 +51,7 @@ SINGBOX_BINARY = build/bin/sing-box$(if $(filter windows,$(SINGBOX_GOOS)),.exe,)
 TUI_GOOS ?= $(shell go env GOOS)
 TUI_GOARCH ?= $(shell go env GOARCH)
 TUI_BINARY ?= build/bin/kubeloop$(if $(filter windows,$(TUI_GOOS)),.exe,)
-TUI_LDFLAGS ?= -s -w -X main.version=$(VERSION)
+TUI_LDFLAGS ?= -s -w -X github.com/fengqi-dev/kube-loop/internal/buildinfo.version=$(VERSION)
 
 .PHONY: help
 help: ## Display this help.
@@ -89,7 +89,7 @@ tui-components: ## Build the platform-matched privileged runtime sidecars.
 
 tui: tui-components ## Build the KubeLoop TUI and its runtime components.
 	@set -eu; \
-		embed_dir="cmd/kubeloop-tui/embedded"; \
+		embed_dir="cmd/kubeloop-tui/app/embedded"; \
 		rm -rf "$$embed_dir"; \
 		mkdir -p "$$embed_dir" "$(dir $(TUI_BINARY))"; \
 		cp build/bin/resources/* "$$embed_dir/"; \

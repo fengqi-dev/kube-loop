@@ -126,13 +126,13 @@ jobs:
           Copy-Item build/embedded/kubeloop-helper.exe build/bin/resources/
           Copy-Item build/bin/sing-box.exe build/bin/resources/
           New-Item -ItemType Directory -Force -Path $stage | Out-Null
-          $embedDir = "cmd/kubeloop-tui/embedded"
+          $embedDir = "cmd/kubeloop-tui/app/embedded"
           Remove-Item -Recurse -Force $embedDir -ErrorAction SilentlyContinue
           New-Item -ItemType Directory -Force -Path $embedDir | Out-Null
           Copy-Item build/bin/resources/* $embedDir/
           go build -trimpath `
             -tags kubeloop_embed `
-            -ldflags "-s -w -X main.version=${{ github.ref_name }}" `
+            -ldflags "-s -w -X github.com/fengqi-dev/kube-loop/internal/buildinfo.version=${{ github.ref_name }}" `
             -o "$stage/kubeloop.exe" `
             ./cmd/kubeloop-tui
           Remove-Item -Recurse -Force $embedDir

@@ -6,7 +6,7 @@ RUN go mod download
 COPY cmd/kubeloop-gateway ./cmd/kubeloop-gateway
 COPY internal ./internal
 RUN CGO_ENABLED=0 go build -trimpath \
-  -ldflags="-s -w -X main.version=${VERSION}" \
+  -ldflags="-s -w -X github.com/fengqi-dev/kube-loop/internal/buildinfo.version=${VERSION}" \
   -o /out/kubeloop-gateway ./cmd/kubeloop-gateway
 
 FROM scratch
