@@ -3,7 +3,7 @@
 #
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/fengqi-dev/kube-loop/main/scripts/install-tui.sh | bash
-#   VERSION=v2.1.3 DEST="$HOME/.local/bin" ./scripts/install-tui.sh
+#   VERSION=v2.2.0 DEST="$HOME/.local/bin" ./scripts/install-tui.sh
 set -euo pipefail
 
 REPO="${REPO:-fengqi-dev/kube-loop}"

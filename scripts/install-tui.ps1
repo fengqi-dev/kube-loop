@@ -1,7 +1,7 @@
 # Install the KubeLoop terminal client for Windows.
 # Usage:
 #   irm https://raw.githubusercontent.com/fengqi-dev/kube-loop/main/scripts/install-tui.ps1 | iex
-#   .\scripts\install-tui.ps1 -Version v2.1.3
+#   .\scripts\install-tui.ps1 -Version v2.2.0
 param(
   [string]$Version = $env:VERSION,
   [string]$Repo = $(if ($env:REPO) { $env:REPO } else { "fengqi-dev/kube-loop" }),

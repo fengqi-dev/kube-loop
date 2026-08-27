@@ -30,7 +30,7 @@ Install on Windows:
 irm https://raw.githubusercontent.com/fengqi-dev/kube-loop/main/scripts/install-tui.ps1 | iex
 ```
 
-Set `VERSION=v2.1.3` to select a release and `DEST` to override the install
+Set `VERSION=v2.2.0` to select a release and `DEST` to override the install
 directory. The macOS/Linux default is `~/.local/bin`; Windows defaults to the
 user-local KubeLoop program directory and adds it to the user `PATH`.
 
