@@ -62,10 +62,7 @@ func TestRawHTTPMessageIsUnredacted(t *testing.T) {
 }
 
 func TestEmitCapturedBodyKeepsRawGRPCFrames(t *testing.T) {
-	sink, err := NewChannelSink(1)
-	if err != nil {
-		t.Fatal(err)
-	}
+	events := make(chan Event, 1)
 	request := &http.Request{
 		Method:     http.MethodPost,
 		URL:        &url.URL{Scheme: "https", Path: "/grpcbin.GRPCBin/DummyUnary"},
@@ -76,8 +73,7 @@ func TestEmitCapturedBodyKeepsRawGRPCFrames(t *testing.T) {
 	}
 	frame := []byte{0, 0, 0, 0, 3, 1, 2, 3}
 	emitCapturedBody(
-		t.Context(),
-		Config{Sink: sink},
+		Config{OnEvent: func(event Event) { events <- event }},
 		requestTrace{flowID: "flow", protocol: ProtocolGRPCS, destination: "grpcbin:9001"},
 		request,
 		nil,
@@ -85,7 +81,7 @@ func TestEmitCapturedBodyKeepsRawGRPCFrames(t *testing.T) {
 		"application/grpc",
 		capturedBody{data: frame, size: int64(len(frame))},
 	)
-	event := <-sink.Events()
+	event := <-events
 	if event.Raw == nil || event.Raw.Format != "grpc" || event.Raw.Data != base64.StdEncoding.EncodeToString(frame) {
 		t.Fatalf("raw gRPC event = %#v", event)
 	}
@@ -98,10 +94,7 @@ func TestEmitCapturedBodyKeepsRawGRPCFrames(t *testing.T) {
 }
 
 func TestEmitCapturedBodyAddsProtobufAlongsideRawGRPC(t *testing.T) {
-	sink, err := NewChannelSink(1)
-	if err != nil {
-		t.Fatal(err)
-	}
+	events := make(chan Event, 1)
 	request := &http.Request{
 		Method:     http.MethodPost,
 		URL:        &url.URL{Scheme: "http", Path: "/unknown.Service/Call"},
@@ -113,8 +106,7 @@ func TestEmitCapturedBodyAddsProtobufAlongsideRawGRPC(t *testing.T) {
 	payload := []byte{0x08, 0x2a}
 	frame := grpcFrame(false, payload)
 	emitCapturedBody(
-		t.Context(),
-		Config{Sink: sink, Protobuf: NewProtobufDecoder()},
+		Config{OnEvent: func(event Event) { events <- event }, Protobuf: NewProtobufDecoder()},
 		requestTrace{flowID: "flow", protocol: ProtocolGRPC, destination: "grpc.test"},
 		request,
 		nil,
@@ -122,7 +114,7 @@ func TestEmitCapturedBodyAddsProtobufAlongsideRawGRPC(t *testing.T) {
 		"application/grpc",
 		capturedBody{data: frame, size: int64(len(frame))},
 	)
-	event := <-sink.Events()
+	event := <-events
 	if event.Raw == nil || event.Protobuf == nil || event.Protobuf.Schema != "wire" {
 		t.Fatalf("gRPC event = %#v", event)
 	}

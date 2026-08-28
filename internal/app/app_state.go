@@ -2,8 +2,8 @@ package app
 
 import (
 	"context"
-	"io"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	clientauth "github.com/fengqi-dev/kube-loop/internal/client/auth"
@@ -57,9 +57,7 @@ type App struct {
 	shutdownTimeout           time.Duration
 	serverLoginMu             sync.Mutex
 	serverLogin               *serverLoginAttempt
-	trafficInspectionOutput   io.Closer
-	trafficInspectionEvents   *trafficinspect.RingBufferSink
-	trafficInspectionSwitch   *trafficinspect.SwitchableSink
+	trafficInspectionEnabled  *atomic.Bool
 	trafficInspectionSettings *trafficinspect.SettingsStore
 	trafficInspectionProtobuf *trafficinspect.ProtobufSchemaStore
 	trafficInspectionMu       sync.Mutex

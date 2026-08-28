@@ -115,7 +115,7 @@ func TestRealTrafficInspectionThroughDataPlane(t *testing.T) {
 		t.Fatalf("ensure traffic inspection namespace: %v", err)
 	}
 	backends := installTrafficInspectionBackends(t, ctx, kubeClient)
-	dialContext, output := startTrafficInspectionDataPlane(t, ctx, kubeClient, backends.nodeIP)
+	dialContext, events := startTrafficInspectionDataPlane(t, ctx, kubeClient, backends.nodeIP)
 
 	transport := &http.Transport{DialContext: dialContext}
 	t.Cleanup(transport.CloseIdleConnections)
@@ -152,7 +152,7 @@ func TestRealTrafficInspectionThroughDataPlane(t *testing.T) {
 	}
 	callGRPCBinThroughDataPlane(t, dialContext, backends.grpcTLSAddress, grpcTLS, trafficInspectionGRPCUnaryPath, 1)
 	callGRPCBinThroughDataPlane(t, dialContext, backends.grpcTLSAddress, grpcTLS, trafficInspectionGRPCStreamPath, 10)
-	waitForTrafficInspectionEvents(t, output, map[string]bool{
+	waitForTrafficInspectionEvents(t, events, map[string]bool{
 		"http:request:request:" + trafficInspectionHTTPPath:        true,
 		"http:body:response:" + trafficInspectionSSEPath:           true,
 		"http:request:request:" + trafficInspectionWebSocketPath:   true,
@@ -245,11 +245,11 @@ func TestRealUnrecognizedTCPThroughDataPlane(t *testing.T) {
 	}
 	nodeIP := trafficInspectionNodeIP(t, ctx, kubeClient)
 	tcpEchoAddress := installTCPEchoBackend(t, ctx, kubeClient, nodeIP)
-	dialContext, output := startTrafficInspectionDataPlane(t, ctx, kubeClient, nodeIP)
+	dialContext, events := startTrafficInspectionDataPlane(t, ctx, kubeClient, nodeIP)
 
 	callTCPEchoThroughDataPlane(t, dialContext, tcpEchoAddress, "in-cluster TCP echo")
-	if events := output.Snapshot(); len(events) != 0 {
-		t.Fatalf("unrecognized TCP traffic emitted inspection events: %#v", events)
+	if count := len(events); count != 0 {
+		t.Fatalf("unrecognized TCP traffic emitted inspection events: %d", count)
 	}
 }
 
@@ -258,7 +258,7 @@ func startTrafficInspectionDataPlane(
 	ctx context.Context,
 	kubeClient kubernetes.Interface,
 	nodeIP string,
-) (func(context.Context, string, string) (net.Conn, error), *trafficinspect.RingBufferSink) {
+) (func(context.Context, string, string) (net.Conn, error), chan trafficinspect.Event) {
 	t.Helper()
 	_, identity, activeSession, remoteSession := trafficInspectionState(t, ctx, []string{nodeIP})
 	gatewayIP := reachableHostIP(t, ctx, kubeClient)
@@ -277,10 +277,7 @@ func startTrafficInspectionDataPlane(
 	if err != nil {
 		t.Fatal(err)
 	}
-	output, err := trafficinspect.NewRingBufferSink(256)
-	if err != nil {
-		t.Fatal(err)
-	}
+	events := make(chan trafficinspect.Event, 256)
 	protobufDecoder := trafficinspect.NewProtobufDecoder()
 	if err := protobufDecoder.ReplaceSources(ctx, map[string]string{
 		"grpcbin/types.proto":   trafficInspectionGRPCBinTypesProto,
@@ -295,7 +292,7 @@ func startTrafficInspectionDataPlane(
 			TLSConfig: &tls.Config{ //nolint:gosec // grpcbin ships a legacy self-signed E2E certificate.
 				MinVersion: tls.VersionTLS12, InsecureSkipVerify: true,
 			},
-			Sink:     output,
+			OnEvent:  func(event trafficinspect.Event) { events <- event },
 			Protobuf: protobufDecoder,
 			Policy: trafficinspect.CapturePolicy{
 				CaptureBodies: true,
@@ -307,7 +304,7 @@ func startTrafficInspectionDataPlane(
 	if err != nil {
 		t.Fatal(err)
 	}
-	return dialer.DialContext, output
+	return dialer.DialContext, events
 }
 
 func callTCPEchoThroughDataPlane(
@@ -463,8 +460,9 @@ func countGRPCFrames(payload []byte) (int, error) {
 	return frames, nil
 }
 
-func waitForTrafficInspectionEvents(t *testing.T, sink *trafficinspect.RingBufferSink, expected map[string]bool) {
+func waitForTrafficInspectionEvents(t *testing.T, events <-chan trafficinspect.Event, expected map[string]bool) {
 	t.Helper()
+	var received []trafficinspect.Event
 	err := wait.PollUntilContextTimeout(
 		t.Context(),
 		50*time.Millisecond,
@@ -472,7 +470,16 @@ func waitForTrafficInspectionEvents(t *testing.T, sink *trafficinspect.RingBuffe
 		true,
 		func(context.Context) (bool, error) {
 			seen := make(map[string]bool)
-			for _, event := range sink.Snapshot() {
+			for {
+				select {
+				case event := <-events:
+					received = append(received, event)
+				default:
+					goto drained
+				}
+			}
+		drained:
+			for _, event := range received {
 				if event.Raw == nil || event.Raw.Data == "" {
 					continue
 				}
@@ -510,7 +517,7 @@ func waitForTrafficInspectionEvents(t *testing.T, sink *trafficinspect.RingBuffe
 		},
 	)
 	if err != nil {
-		t.Fatalf("traffic inspection events incomplete: %v events=%#v", err, sink.Snapshot())
+		t.Fatalf("traffic inspection events incomplete: %v events=%#v", err, received)
 	}
 }
 

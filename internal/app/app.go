@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"crypto/tls"
-	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -24,12 +23,11 @@ import (
 // are performed remotely through the configured Gateway service.
 func NewApp(version string, embeddedHelperFiles fs.FS) *App {
 	profilePath := strings.TrimSpace(os.Getenv("KUBELOOP_PROFILE_PATH"))
-	trafficInspection, trafficInspectionEvents, trafficInspectionSwitch := newTrafficInspection(version, profilePath)
+	trafficInspection, trafficInspectionEnabled := newTrafficInspection()
 	return newApp(version, embeddedHelperFiles, appDependencies{
-		profilePath:             profilePath,
-		trafficInspection:       trafficInspection,
-		trafficInspectionEvents: trafficInspectionEvents,
-		trafficInspectionSwitch: trafficInspectionSwitch,
+		profilePath:              profilePath,
+		trafficInspection:        trafficInspection,
+		trafficInspectionEnabled: trafficInspectionEnabled,
 	})
 }
 
@@ -50,9 +48,8 @@ func newApp(version string, embeddedHelperFiles fs.FS, dependencies appDependenc
 	layout, layoutErr := appUserLayout(version, dependencies.profilePath)
 	if layoutErr != nil {
 		application := &App{
-			updater:                 &update.Checker{CurrentVersion: version},
-			trafficInspectionEvents: dependencies.trafficInspectionEvents,
-			trafficInspectionSwitch: dependencies.trafficInspectionSwitch,
+			updater:                  &update.Checker{CurrentVersion: version},
+			trafficInspectionEnabled: dependencies.trafficInspectionEnabled,
 			updateState: update.Info{
 				CurrentVersion: version,
 				URL:            releaseURL,
@@ -70,7 +67,7 @@ func newApp(version string, embeddedHelperFiles fs.FS, dependencies appDependenc
 	trafficInspectionSettings, trafficInspectionSettingsErr := trafficinspect.NewSettingsStore(
 		trafficInspectionSettingsPath,
 	)
-	if trafficInspectionSettingsErr == nil && dependencies.trafficInspectionSwitch != nil {
+	if trafficInspectionSettingsErr == nil && dependencies.trafficInspectionEnabled != nil {
 		settings, loadErr := trafficInspectionSettings.Load(trafficinspect.Settings{
 			Enabled: dependencies.trafficInspection.Enabled,
 		})
@@ -78,7 +75,7 @@ func newApp(version string, embeddedHelperFiles fs.FS, dependencies appDependenc
 			trafficInspectionSettingsErr = loadErr
 		} else {
 			dependencies.trafficInspection.Enabled = settings.Enabled
-			dependencies.trafficInspectionSwitch.SetEnabled(settings.Enabled)
+			dependencies.trafficInspectionEnabled.Store(settings.Enabled)
 		}
 	}
 	trafficInspectionProtobufPath := filepath.Join(layout.DataDir(), "traffic-inspection", "protobuf.json")
@@ -102,8 +99,7 @@ func newApp(version string, embeddedHelperFiles fs.FS, dependencies appDependenc
 		}),
 		credentials:               credentialStore,
 		updater:                   &update.Checker{CurrentVersion: version},
-		trafficInspectionEvents:   dependencies.trafficInspectionEvents,
-		trafficInspectionSwitch:   dependencies.trafficInspectionSwitch,
+		trafficInspectionEnabled:  dependencies.trafficInspectionEnabled,
 		trafficInspectionSettings: trafficInspectionSettings,
 		trafficInspectionProtobuf: trafficInspectionProtobuf,
 		trafficInspectionCAPath: firstNonEmpty(
@@ -127,9 +123,6 @@ func newApp(version string, embeddedHelperFiles fs.FS, dependencies appDependenc
 	}
 	application.trafficInspectionReady = func() bool {
 		return helper.GetStatus(application.context()).Running
-	}
-	if closer, ok := dependencies.trafficInspection.Sink.(io.Closer); ok {
-		application.trafficInspectionOutput = closer
 	}
 	switch {
 	case profileErr != nil:

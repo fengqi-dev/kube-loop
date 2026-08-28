@@ -5,20 +5,19 @@ import (
 	"net/http"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 
 	"github.com/fengqi-dev/kube-loop/internal/client/credentials"
 	clientdataplane "github.com/fengqi-dev/kube-loop/internal/client/dataplane"
-	"github.com/fengqi-dev/kube-loop/internal/trafficinspect"
 	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
 type appDependencies struct {
-	profilePath             string
-	credentialStore         credentials.Store
-	httpClient              *http.Client
-	trafficInspection       clientdataplane.TrafficInspectionConfig
-	trafficInspectionEvents *trafficinspect.RingBufferSink
-	trafficInspectionSwitch *trafficinspect.SwitchableSink
+	profilePath              string
+	credentialStore          credentials.Store
+	httpClient               *http.Client
+	trafficInspection        clientdataplane.TrafficInspectionConfig
+	trafficInspectionEnabled *atomic.Bool
 }
 
 func appUserLayout(version, profilePath string) (utils.Layout, error) {

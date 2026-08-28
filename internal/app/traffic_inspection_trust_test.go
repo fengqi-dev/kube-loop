@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 
 	"github.com/fengqi-dev/kube-loop/internal/trafficinspect"
@@ -12,9 +13,9 @@ func TestInstallTrafficInspectionTrustFollowsFeatureSwitch(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "inspection-ca.pem")
 	store := &recordingTrustStore{}
 	application := &App{
-		trafficInspectionSwitch: testTrafficInspectionSwitch(t, true),
-		trafficInspectionCAPath: path,
-		trafficInspectionTrust:  store,
+		trafficInspectionEnabled: testTrafficInspectionEnabled(t, true),
+		trafficInspectionCAPath:  path,
+		trafficInspectionTrust:   store,
 	}
 	if err := application.installTrafficInspectionTrust(t.Context()); err != nil {
 		t.Fatal(err)
@@ -36,9 +37,9 @@ func TestPendingTrafficInspectionCertificate(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "inspection-ca.pem")
 	store := &recordingTrustStore{}
 	application := &App{
-		trafficInspectionSwitch: testTrafficInspectionSwitch(t, true),
-		trafficInspectionCAPath: path,
-		trafficInspectionTrust:  store,
+		trafficInspectionEnabled: testTrafficInspectionEnabled(t, true),
+		trafficInspectionCAPath:  path,
+		trafficInspectionTrust:   store,
 	}
 	certificatePEM, err := application.pendingTrafficInspectionCertificate(t.Context())
 	if err != nil {
@@ -58,17 +59,11 @@ func TestPendingTrafficInspectionCertificate(t *testing.T) {
 	}
 }
 
-func testTrafficInspectionSwitch(t *testing.T, enabled bool) *trafficinspect.SwitchableSink {
+func testTrafficInspectionEnabled(t *testing.T, enabled bool) *atomic.Bool {
 	t.Helper()
-	destination, err := trafficinspect.NewRingBufferSink(1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	switchable, err := trafficinspect.NewSwitchableSink(destination, enabled)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return switchable
+	result := &atomic.Bool{}
+	result.Store(enabled)
+	return result
 }
 
 func TestUninstallTrafficInspectionTrustRemovesExistingAuthorityEvenWhenDisabled(t *testing.T) {

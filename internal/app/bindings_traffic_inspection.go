@@ -3,16 +3,10 @@ package app
 import (
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"github.com/fengqi-dev/kube-loop/internal/trafficinspect"
-)
-
-const (
-	defaultTrafficInspectionLimit = 200
-	maximumTrafficInspectionLimit = 500
 )
 
 type TrafficInspectionQuery struct {
@@ -33,7 +27,7 @@ type TrafficInspectionSettings struct {
 
 func (a *App) GetTrafficInspectionSettings() TrafficInspectionSettings {
 	settings := TrafficInspectionSettings{
-		Enabled:       a != nil && a.trafficInspectionSwitch != nil && a.trafficInspectionSwitch.Enabled(),
+		Enabled:       a != nil && a.trafficInspectionEnabled != nil && a.trafficInspectionEnabled.Load(),
 		ProtobufFiles: make([]string, 0),
 	}
 	if a != nil && a.trafficInspectionProtobuf != nil {
@@ -66,12 +60,12 @@ func (a *App) ImportTrafficInspectionProtoDirectory() (TrafficInspectionSettings
 }
 
 func (a *App) SetTrafficInspectionEnabled(enabled bool) (TrafficInspectionSettings, error) {
-	if a == nil || a.trafficInspectionSwitch == nil {
+	if a == nil || a.trafficInspectionEnabled == nil {
 		return TrafficInspectionSettings{}, errors.New("traffic inspection is unavailable")
 	}
 	a.trafficInspectionMu.Lock()
 	defer a.trafficInspectionMu.Unlock()
-	current := a.trafficInspectionSwitch.Enabled()
+	current := a.trafficInspectionEnabled.Load()
 	if current == enabled {
 		return a.GetTrafficInspectionSettings(), nil
 	}
@@ -91,50 +85,17 @@ func (a *App) SetTrafficInspectionEnabled(enabled bool) (TrafficInspectionSettin
 	if err := a.trafficInspectionSettings.Save(trafficinspect.Settings{Enabled: enabled}); err != nil {
 		return a.GetTrafficInspectionSettings(), err
 	}
-	a.trafficInspectionSwitch.SetEnabled(enabled)
+	a.trafficInspectionEnabled.Store(enabled)
 	return a.GetTrafficInspectionSettings(), nil
 }
 
-// TrafficInspectionEvents returns the newest decoded application events.
-// The persistent JSONL file is deliberately not queried by the UI.
+// TrafficInspectionEvents preserves the frontend API shape. Events are no
+// longer buffered by the application after inspection sinks were removed.
 func (a *App) TrafficInspectionEvents(query TrafficInspectionQuery) TrafficInspectionResult {
+	_ = query
 	result := TrafficInspectionResult{Events: make([]trafficinspect.Event, 0)}
-	if a.trafficInspectionEvents == nil || a.trafficInspectionSwitch == nil {
-		return result
-	}
-	result.Enabled = a.trafficInspectionSwitch.Enabled()
-	if !result.Enabled {
-		return result
-	}
-	host := strings.ToLower(strings.TrimSpace(query.Host))
-	path := strings.ToLower(strings.TrimSpace(query.Path))
-	limit := query.Limit
-	if limit <= 0 {
-		limit = defaultTrafficInspectionLimit
-	} else if limit > maximumTrafficInspectionLimit {
-		limit = maximumTrafficInspectionLimit
-	}
-	events := a.trafficInspectionEvents.Snapshot()
-	for index := len(events) - 1; index >= 0 && len(result.Events) < limit; index-- {
-		event := events[index]
-		if !trafficEventMatches(event, host, path) {
-			continue
-		}
-		result.Events = append(result.Events, event)
+	if a != nil && a.trafficInspectionEnabled != nil {
+		result.Enabled = a.trafficInspectionEnabled.Load()
 	}
 	return result
-}
-
-func trafficEventMatches(event trafficinspect.Event, host, path string) bool {
-	hostValue := event.Destination
-	pathValue := ""
-	if event.HTTP != nil {
-		hostValue += " " + event.HTTP.Host
-		pathValue = event.HTTP.Path
-	}
-	if event.GRPC != nil {
-		pathValue = event.GRPC.Path
-	}
-	return strings.Contains(strings.ToLower(hostValue), host) &&
-		strings.Contains(strings.ToLower(pathValue), path)
 }

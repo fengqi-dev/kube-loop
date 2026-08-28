@@ -21,37 +21,33 @@ type HostUDPHandler func(host string, port uint16) (dial func(context.Context) (
 
 type LogHandler func(message string)
 
-// TCPInspector handles one SOCKS CONNECT stream after the success reply has
-// been sent. Implementations open their upstream through the supplied bridge
-// dialer, so inspection does not require another local proxy listener.
+// TCPInspector is an optional TCP hook. The production dataplane no longer
+// installs one; SOCKS forwarding remains the default for every protocol.
 type TCPInspector interface {
 	ServeConn(context.Context, net.Conn, string) error
 	Close() error
 }
 
-// DialContextFunc opens an upstream connection through the current Gateway.
-type DialContextFunc func(context.Context, string, string) (net.Conn, error)
-
-// TCPInspectorFactory creates an inspector bound to the bridge dialer.
 type TCPInspectorFactory func(DialContextFunc) (TCPInspector, error)
 
 type listenConfig struct {
 	inspectorFactory TCPInspectorFactory
 }
 
-// ListenOption configures the local SOCKS bridge.
 type ListenOption func(*listenConfig) error
 
-// WithTCPInspector enables in-process TCP inspection without adding a listener.
 func WithTCPInspector(factory TCPInspectorFactory) ListenOption {
 	return func(config *listenConfig) error {
 		if factory == nil {
-			return errors.New("tCP inspector factory is required")
+			return errors.New("tcp inspector factory is required")
 		}
 		config.inspectorFactory = factory
 		return nil
 	}
 }
+
+// DialContextFunc opens an upstream connection through the current Gateway.
+type DialContextFunc func(context.Context, string, string) (net.Conn, error)
 
 type Server struct {
 	GatewayAddress string

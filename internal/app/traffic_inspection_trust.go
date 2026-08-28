@@ -11,14 +11,14 @@ import (
 )
 
 func (a *App) installTrafficInspectionTrust(ctx context.Context) error {
-	if a == nil || a.trafficInspectionSwitch == nil || !a.trafficInspectionSwitch.Enabled() {
+	if a == nil || a.trafficInspectionEnabled == nil || !a.trafficInspectionEnabled.Load() {
 		return nil
 	}
 	return a.ensureTrafficInspectionTrust(ctx)
 }
 
 func (a *App) pendingTrafficInspectionCertificate(ctx context.Context) ([]byte, error) {
-	if a == nil || a.trafficInspectionSwitch == nil || !a.trafficInspectionSwitch.Enabled() {
+	if a == nil || a.trafficInspectionEnabled == nil || !a.trafficInspectionEnabled.Load() {
 		return nil, nil
 	}
 	path, err := a.trafficInspectionAuthorityPath()

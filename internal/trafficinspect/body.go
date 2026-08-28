@@ -2,7 +2,6 @@ package trafficinspect
 
 import (
 	"bytes"
-	"context"
 	"encoding/base64"
 	"io"
 	"net/http"
@@ -88,7 +87,7 @@ func wrapRequestBody(request *http.Request, trace requestTrace, config Config) {
 	}
 	contentType := request.Header.Get("Content-Type")
 	request.Body = observeBody(request.Body, bodyLimit(config.Policy), func(body capturedBody) {
-		emitCapturedBody(request.Context(), config, trace, request, nil, directionRequest, contentType, body)
+		emitCapturedBody(config, trace, request, nil, directionRequest, contentType, body)
 	})
 }
 
@@ -98,21 +97,17 @@ func wrapResponseBody(response *http.Response, trace requestTrace, config Config
 	}
 	// net/http exposes an upgraded connection through a response body that also
 	// implements io.Writer. Wrapping it as a plain io.ReadCloser would prevent
-	// goproxy from relaying WebSocket (and other HTTP Upgrade) traffic.
+	// the proxy from relaying WebSocket (and other HTTP Upgrade) traffic.
 	if response.StatusCode == http.StatusSwitchingProtocols {
 		return
 	}
 	contentType := response.Header.Get("Content-Type")
 	response.Body = observeBody(response.Body, bodyLimit(config.Policy), func(body capturedBody) {
-		emitCapturedBody(
-			response.Request.Context(), config, trace, response.Request, response,
-			directionResponse, contentType, body,
-		)
+		emitCapturedBody(config, trace, response.Request, response, directionResponse, contentType, body)
 	})
 }
 
 func emitCapturedBody(
-	ctx context.Context,
 	config Config,
 	trace requestTrace,
 	request *http.Request,
@@ -126,7 +121,7 @@ func emitCapturedBody(
 		if response != nil && response.Header.Get("Grpc-Encoding") != "" {
 			encoding = response.Header.Get("Grpc-Encoding")
 		}
-		emitEvent(ctx, config, Event{
+		emitEvent(config, Event{
 			SchemaVersion: EventSchemaVersion,
 			ID:            newEventID(),
 			FlowID:        trace.flowID,
@@ -149,7 +144,7 @@ func emitCapturedBody(
 		})
 		return
 	}
-	emitEvent(ctx, config, Event{
+	emitEvent(config, Event{
 		SchemaVersion: EventSchemaVersion,
 		ID:            newEventID(),
 		FlowID:        trace.flowID,

@@ -120,9 +120,6 @@ func (a *App) shutdown(ctx context.Context) {
 			return a.remoteSessions.Shutdown(shutdownContext)
 		})
 	}
-	if a.trafficInspectionOutput != nil {
-		runShutdownAction(shutdownContext, "traffic inspection output", a.trafficInspectionOutput.Close)
-	}
 }
 
 func runShutdownAction(ctx context.Context, name string, action func() error) {

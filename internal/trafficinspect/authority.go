@@ -53,20 +53,48 @@ func LoadOrCreateAuthority(path string) (*Authority, error) {
 	return loadOrCreateAuthority(path, time.Now)
 }
 
-// TLSCertificate returns a copy suitable for Handler.Config.CA.
+// TLSCertificate returns an independent certificate value suitable for
+// Handler.Config.CA. Mutable certificate byte slices are copied so callers
+// cannot alter the authority held by this object.
 func (a *Authority) TLSCertificate() *tls.Certificate {
+	if a == nil {
+		return nil
+	}
 	certificate := a.certificate
+	certificate.Certificate = cloneByteSlices(a.certificate.Certificate)
+	certificate.SignedCertificateTimestamps = cloneByteSlices(a.certificate.SignedCertificateTimestamps)
+	certificate.OCSPStaple = bytes.Clone(a.certificate.OCSPStaple)
+	certificate.SupportedSignatureAlgorithms = append(
+		[]tls.SignatureScheme(nil), a.certificate.SupportedSignatureAlgorithms...,
+	)
 	return &certificate
 }
 
 // PublicCertificatePEM returns the public CA certificate without its private key.
 func (a *Authority) PublicCertificatePEM() []byte {
+	if a == nil {
+		return nil
+	}
 	return bytes.Clone(a.certificatePEM)
 }
 
 // FingerprintSHA256 returns the uppercase, unseparated SHA-256 fingerprint.
 func (a *Authority) FingerprintSHA256() string {
+	if a == nil {
+		return ""
+	}
 	return a.fingerprint
+}
+
+func cloneByteSlices(values [][]byte) [][]byte {
+	if values == nil {
+		return nil
+	}
+	cloned := make([][]byte, len(values))
+	for index, value := range values {
+		cloned[index] = bytes.Clone(value)
+	}
+	return cloned
 }
 
 func loadOrCreateAuthority(path string, now func() time.Time) (*Authority, error) {

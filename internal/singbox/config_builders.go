@@ -160,6 +160,11 @@ func buildRouteRules(routes, clusterDomains []string) []map[string]any {
 		map[string]any{configInboundKey: trafficIn, configActionKey: rejectRouteAction},
 		map[string]any{configActionKey: "sniff"},
 		map[string]any{"protocol": "dns", configActionKey: "hijack-dns"},
+		// All UDP from the TUN is carried through the Kubernetes SOCKS
+		// outbound; socksbridge performs UDP ASSOCIATE over the gateway.
+		map[string]any{
+			"network": []string{"udp"}, configOutboundKey: KubernetesOutbound,
+		},
 		map[string]any{
 			"domain_suffix": clusterDomains, configOutboundKey: KubernetesOutbound,
 		},

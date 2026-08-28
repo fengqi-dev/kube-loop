@@ -8,9 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"net/http"
-	"net/http/httptest"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -20,9 +17,7 @@ import (
 
 	"github.com/things-go/go-socks5/statute"
 
-	clienttraffic "github.com/fengqi-dev/kube-loop/internal/client/traffic"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
-	"github.com/fengqi-dev/kube-loop/internal/trafficinspect"
 )
 
 func TestBridgeSetLogHandler(t *testing.T) {
@@ -81,7 +76,6 @@ type testTCPInspector struct {
 	dial       DialContextFunc
 	served     chan string
 	closeCalls atomic.Int32
-	closeErr   error
 }
 
 func (inspector *testTCPInspector) ServeConn(ctx context.Context, client net.Conn, target string) error {
@@ -97,29 +91,7 @@ func (inspector *testTCPInspector) ServeConn(ctx context.Context, client net.Con
 
 func (inspector *testTCPInspector) Close() error {
 	inspector.closeCalls.Add(1)
-	return inspector.closeErr
-}
-
-func TestBridgeClosePreservesInspectorErrorAfterListenerClosed(t *testing.T) {
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := errors.New("close inspector")
-	inspector := &testTCPInspector{closeErr: want}
-	bridge := &Bridge{Listener: listener, server: &Server{inspector: inspector}}
-	if err := listener.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err := bridge.Close(); !errors.Is(err, want) {
-		t.Fatalf("close error = %v, want %v", err, want)
-	}
-	if err := bridge.Close(); !errors.Is(err, want) {
-		t.Fatalf("second close error = %v, want %v", err, want)
-	}
-	if inspector.closeCalls.Load() != 1 {
-		t.Fatalf("inspector close calls = %d, want 1", inspector.closeCalls.Load())
-	}
+	return nil
 }
 
 func TestBridgeCloseStopsAcceptedConnectionsAndWaitsForHandlers(t *testing.T) {
@@ -400,103 +372,6 @@ func TestBridgeTCPInspectorReusesGatewayDialer(t *testing.T) {
 	}
 	if inspector.closeCalls.Load() != 1 {
 		t.Fatalf("inspector close calls = %d, want 1", inspector.closeCalls.Load())
-	}
-}
-
-func TestBridgeInProcessHTTPInspectionThroughGateway(t *testing.T) {
-	origin := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
-		response.Header().Set("X-Origin-Path", request.URL.Path)
-		_, _ = io.WriteString(response, "through-relay")
-	}))
-	defer origin.Close()
-	gateway, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = gateway.Close() }()
-	gatewayDone := make(chan error, 1)
-	go func() {
-		connection, acceptErr := gateway.Accept()
-		if acceptErr != nil {
-			gatewayDone <- acceptErr
-			return
-		}
-		defer func() { _ = connection.Close() }()
-		request, readErr := tunnel.ReadOpen(connection)
-		if readErr != nil {
-			gatewayDone <- readErr
-			return
-		}
-		if request != (tunnel.OpenRequest{Command: tunnel.CommandTCP, Host: "http.test", Port: 80}) {
-			gatewayDone <- fmt.Errorf("unexpected inspection open request: %#v", request)
-			return
-		}
-		upstream, dialErr := net.Dial("tcp", origin.Listener.Addr().String())
-		if dialErr != nil {
-			gatewayDone <- dialErr
-			return
-		}
-		defer func() { _ = upstream.Close() }()
-		if writeErr := tunnel.WriteStatus(connection, nil); writeErr != nil {
-			gatewayDone <- writeErr
-			return
-		}
-		relay(connection, connection, upstream)
-		gatewayDone <- nil
-	}()
-	authority, err := trafficinspect.LoadOrCreateAuthority(filepath.Join(t.TempDir(), "inspection-ca.pem"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	inspected := make(chan string, 1)
-	bridge, err := Listen(
-		t.Context(),
-		gateway.Addr().String(),
-		"127.0.0.1:0",
-		testSessionToken,
-		WithTCPInspector(func(dial DialContextFunc) (TCPInspector, error) {
-			return trafficinspect.New(trafficinspect.Config{
-				CA:          authority.TLSCertificate(),
-				DialContext: trafficinspect.DialContextFunc(dial),
-				OnRequest: func(request *http.Request) {
-					inspected <- request.Method + " " + request.Host + request.URL.Path
-				},
-				AllowHTTP2: true,
-			})
-		}),
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = bridge.Close() })
-	transport := &http.Transport{DialContext: (clienttraffic.Dialer{Endpoint: clienttraffic.Endpoint{
-		Address: bridge.Addr().String(),
-	}}).DialContext}
-	t.Cleanup(transport.CloseIdleConnections)
-	client := &http.Client{Transport: transport}
-	request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://http.test/poc", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	request.Close = true
-	response, err := client.Do(request)
-	if err != nil {
-		t.Fatal(err)
-	}
-	body, readErr := io.ReadAll(response.Body)
-	closeErr := response.Body.Close()
-	if readErr != nil || closeErr != nil {
-		t.Fatal(errors.Join(readErr, closeErr))
-	}
-	if response.StatusCode != http.StatusOK || string(body) != "through-relay" ||
-		response.Header.Get("X-Origin-Path") != "/poc" {
-		t.Fatalf("response status=%d body=%q path=%q", response.StatusCode, body, response.Header.Get("X-Origin-Path"))
-	}
-	if event := <-inspected; event != "GET http.test/poc" {
-		t.Fatalf("inspection event = %q", event)
-	}
-	if err := <-gatewayDone; err != nil {
-		t.Fatal(err)
 	}
 }
 

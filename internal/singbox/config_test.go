@@ -32,6 +32,8 @@ func TestGenerateRoutesOnlyClusterTraffic(t *testing.T) {
 		`"prefer_ipv4"`,
 		`"tag": "kubernetes"`,
 		`"type": "socks"`,
+		`"network": [`,
+		`"udp"`,
 		`"final": "direct"`,
 		`"find_process": true`,
 		`"external_controller"`,
@@ -90,6 +92,21 @@ func TestGenerateRoutesOnlyClusterTraffic(t *testing.T) {
 		if value == "0.0.0.0/1" || value == "128.0.0.0/1" {
 			t.Fatalf("global route leaked into tun route_address: %v", routeAddress)
 		}
+	}
+	route, _ := parsed["route"].(map[string]any)
+	rules, _ := route["rules"].([]any)
+	udpRuleFound := false
+	for _, rawRule := range rules {
+		rule, _ := rawRule.(map[string]any)
+		networks, _ := rule["network"].([]any)
+		for _, network := range networks {
+			if network == "udp" && rule["outbound"] == KubernetesOutbound {
+				udpRuleFound = true
+			}
+		}
+	}
+	if !udpRuleFound {
+		t.Fatal("UDP route must use the Kubernetes SOCKS outbound")
 	}
 }
 

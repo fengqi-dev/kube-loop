@@ -26,15 +26,17 @@ const (
 )
 
 type Config struct {
-	ListenAddress     string
-	StartTimeout      time.Duration
-	ClientVersion     string
-	TLSConfig         *tls.Config
-	TUNStarter        TUNStarter
-	RecoveryAttempts  int
-	RecoveryBackoff   time.Duration
-	OnStatus          func(StatusEvent)
-	Logger            *slog.Logger
+	ListenAddress    string
+	StartTimeout     time.Duration
+	ClientVersion    string
+	TLSConfig        *tls.Config
+	TUNStarter       TUNStarter
+	RecoveryAttempts int
+	RecoveryBackoff  time.Duration
+	OnStatus         func(StatusEvent)
+	Logger           *slog.Logger
+	// TrafficInspection enables the optional goproxy-backed HTTP inspection
+	// branch. Non-inspectable traffic remains on the normal SOCKS path.
 	TrafficInspection TrafficInspectionConfig
 
 	startForwarder func(context.Context, websocketmux.ClientConfig) (streamForwarder, error)
@@ -42,9 +44,8 @@ type Config struct {
 	dialContext    func(context.Context, string, string) (net.Conn, error)
 }
 
-// TrafficInspectionConfig controls the optional in-process HTTP and gRPC
-// inspection path. The zero value is disabled and preserves the existing
-// SOCKS-to-Relay forwarding behavior.
+// TrafficInspectionConfig controls the optional goproxy-backed HTTP/HTTPS and
+// gRPC inspection branch. Unsupported protocols are relayed byte-for-byte.
 type TrafficInspectionConfig struct {
 	Enabled       bool
 	IsEnabled     func() bool
@@ -52,10 +53,9 @@ type TrafficInspectionConfig struct {
 	TLSConfig     *tls.Config
 	OnRequest     func(*http.Request)
 	OnResponse    func(*http.Response)
-	Sink          trafficinspect.Sink
+	OnEvent       func(trafficinspect.Event)
 	Policy        trafficinspect.CapturePolicy
 	Protobuf      *trafficinspect.ProtobufDecoder
-	OnSinkError   func(error)
 }
 
 type streamForwarder interface {

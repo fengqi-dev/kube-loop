@@ -32,7 +32,7 @@ func (s *Server) handleConnect(
 			client, ok := writer.(net.Conn)
 			if !ok {
 				_ = socks5.SendReply(writer, statute.RepServerFailure, nil)
-				return errors.New("sOCKS client is not a network connection")
+				return errors.New("SOCKS client is not a network connection")
 			}
 			if err := socks5.SendReply(writer, statute.RepSuccess, client.LocalAddr()); err != nil {
 				return err
@@ -45,7 +45,7 @@ func (s *Server) handleConnect(
 		client, ok := writer.(net.Conn)
 		if !ok {
 			_ = socks5.SendReply(writer, statute.RepServerFailure, nil)
-			return errors.New("sOCKS client is not a network connection")
+			return errors.New("SOCKS client is not a network connection")
 		}
 		if err := socks5.SendReply(writer, statute.RepSuccess, client.LocalAddr()); err != nil {
 			return err
@@ -60,7 +60,6 @@ func (s *Server) handleConnect(
 		}
 		return nil
 	}
-
 	target, err := s.openGateway(ctx, tunnel.CommandTCP, host, port)
 	if err != nil {
 		_ = socks5.SendReply(writer, statute.RepConnectionRefused, nil)

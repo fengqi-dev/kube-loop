@@ -1,7 +1,6 @@
 package trafficinspect
 
 import (
-	"context"
 	"net/http"
 	"strings"
 	"time"
@@ -83,12 +82,6 @@ type RawEvent struct {
 	Data      string `json:"data"`
 	Size      int64  `json:"size"`
 	Truncated bool   `json:"truncated"`
-}
-
-// Sink consumes structured inspection events. Implementations must be safe
-// for concurrent calls from independent proxy connections.
-type Sink interface {
-	Emit(context.Context, Event) error
 }
 
 type CapturePolicy struct {

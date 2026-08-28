@@ -62,6 +62,23 @@ func TestLoadOrCreateAuthority_ReusesDeviceIdentity(t *testing.T) {
 	}
 }
 
+func TestTLSCertificateReturnsIndependentCertificateBytes(t *testing.T) {
+	authority, err := LoadOrCreateAuthority(filepath.Join(t.TempDir(), authorityFileName))
+	if err != nil {
+		t.Fatalf("create authority: %v", err)
+	}
+	first := authority.TLSCertificate()
+	if first == nil || len(first.Certificate) == 0 || len(first.Certificate[0]) == 0 {
+		t.Fatal("authority certificate is empty")
+	}
+	original := first.Certificate[0][0]
+	first.Certificate[0][0] ^= 0xff
+	second := authority.TLSCertificate()
+	if second.Certificate[0][0] != original {
+		t.Fatal("TLSCertificate exposed mutable certificate bytes")
+	}
+}
+
 func TestLoadPublicAuthority_AcceptsOnlyPublicCertificate(t *testing.T) {
 	t.Parallel()
 	generated, err := generateAuthority(time.Now())

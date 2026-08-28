@@ -2,8 +2,6 @@ package app
 
 import (
 	"context"
-	"encoding/json"
-	"os"
 	"path/filepath"
 	"testing"
 
@@ -43,58 +41,14 @@ func TestNewAppLoadsPersistedTrafficInspectionSetting(t *testing.T) {
 }
 
 func TestTrafficInspectionDefaultsEnabledWithoutEnvironmentConfiguration(t *testing.T) {
-	profilePath := filepath.Join(t.TempDir(), "traffic", "servers.json")
-	config, events, switchable := newTrafficInspection("dev", profilePath)
-	if !config.Enabled || switchable == nil || !switchable.Enabled() {
-		t.Fatalf("traffic inspection default = %#v, switch = %#v", config, switchable)
+	config, enabled := newTrafficInspection()
+	if !config.Enabled || enabled == nil || !enabled.Load() {
+		t.Fatalf("traffic inspection default = %#v, enabled = %#v", config, enabled)
 	}
 	if !config.Policy.CaptureBodies || config.Policy.MaxBodyBytes != 4<<20 {
 		t.Fatalf("capture policy = %#v", config.Policy)
 	}
-	if events == nil || config.IsEnabled == nil {
+	if config.IsEnabled == nil {
 		t.Fatal("dynamic traffic inspection dependencies are missing")
-	}
-	if closer, ok := config.Sink.(interface{ Close() error }); ok {
-		t.Cleanup(func() { _ = closer.Close() })
-	}
-}
-
-func TestTrafficInspectionWritesToProfileDirectoryWhenEnabled(t *testing.T) {
-	directory := filepath.Join(t.TempDir(), "traffic")
-	profilePath := filepath.Join(directory, "servers.json")
-	path := filepath.Join(directory, "data", "traffic-inspection", "events.jsonl")
-	config, events, switchable := newTrafficInspection("dev", profilePath)
-	if config.Sink == nil {
-		t.Fatal("traffic inspection sink is nil")
-	}
-	if events == nil {
-		t.Fatal("traffic inspection event buffer is nil")
-	}
-	switchable.SetEnabled(true)
-	event := trafficinspect.Event{SchemaVersion: trafficinspect.EventSchemaVersion, ID: "event-1"}
-	if err := config.Sink.Emit(context.Background(), event); err != nil {
-		t.Fatal(err)
-	}
-	buffered := events.Snapshot()
-	if len(buffered) != 1 || buffered[0].ID != event.ID {
-		t.Fatalf("buffered events = %#v", buffered)
-	}
-	closer, ok := config.Sink.(interface{ Close() error })
-	if !ok {
-		t.Fatal("traffic inspection file sink is not closable")
-	}
-	if err := closer.Close(); err != nil {
-		t.Fatal(err)
-	}
-	contents, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var decoded trafficinspect.Event
-	if err := json.Unmarshal(contents, &decoded); err != nil {
-		t.Fatal(err)
-	}
-	if decoded.ID != event.ID {
-		t.Fatalf("event ID = %q", decoded.ID)
 	}
 }

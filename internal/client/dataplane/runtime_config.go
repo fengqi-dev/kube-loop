@@ -26,9 +26,6 @@ func normalizedConfig(config Config) Config {
 	if config.TLSConfig != nil {
 		config.TLSConfig = config.TLSConfig.Clone()
 	}
-	if config.TrafficInspection.TLSConfig != nil {
-		config.TrafficInspection.TLSConfig = config.TrafficInspection.TLSConfig.Clone()
-	}
 	if config.startForwarder == nil {
 		config.startForwarder = func(ctx context.Context, clientConfig websocketmux.ClientConfig) (streamForwarder, error) {
 			return websocketmux.Start(ctx, clientConfig)
@@ -69,10 +66,9 @@ func normalizedConfig(config Config) Config {
 							Enabled:     inspection.IsEnabled,
 							OnRequest:   inspection.OnRequest,
 							OnResponse:  inspection.OnResponse,
-							Sink:        inspection.Sink,
+							OnEvent:     inspection.OnEvent,
 							Policy:      inspection.Policy,
 							Protobuf:    inspection.Protobuf,
-							OnSinkError: inspection.OnSinkError,
 							TLSConfig:   inspection.TLSConfig,
 							AllowHTTP2:  true,
 						})
