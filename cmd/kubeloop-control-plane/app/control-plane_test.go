@@ -80,7 +80,7 @@ func TestControlPlaneConfigFlagOverridesEnvironment(t *testing.T) {
 	if err := flags.Parse([]string{"--config", "/flag/config.yaml"}); err != nil {
 		t.Fatal(err)
 	}
-	if got := options.ConfigPath(config); got != "/flag/config.yaml" {
+	if got := options.Path(config); got != "/flag/config.yaml" {
 		t.Fatalf("config path = %q", got)
 	}
 }

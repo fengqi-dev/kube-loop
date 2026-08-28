@@ -39,7 +39,7 @@ func newControlPlaneCommand(
 			)
 			defer stopSignals()
 			environment := options.LoadEnvironmentFrom(configResolver)
-			configPath := options.ConfigPath(configResolver)
+			configPath := options.Path(configResolver)
 			config, err := options.LoadConfig(configPath)
 			if err != nil {
 				return err

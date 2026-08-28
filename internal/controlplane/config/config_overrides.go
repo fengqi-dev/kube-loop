@@ -6,7 +6,7 @@ import (
 	"github.com/spf13/viper"
 )
 
-func ConfigPath(config *viper.Viper) string {
+func Path(config *viper.Viper) string {
 	return strings.TrimSpace(config.GetString("control-plane.config-file"))
 }
 
