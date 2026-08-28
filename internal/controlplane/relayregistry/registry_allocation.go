@@ -15,6 +15,7 @@ func (registry *Registry) Allocate(
 	if err := request.Validate(now); err != nil {
 		return relaycontrol.AllocationResponse{}, err
 	}
+	wantedEncryption := request.TrafficEncryption != nil && *request.TrafficEncryption
 	var displaced assignmentRecord
 	var displacedRelay *relayRecord
 	reservationReleased := false
@@ -26,7 +27,8 @@ func (registry *Registry) Allocate(
 		}
 		relay := registry.relays[existing.response.RelayID]
 		if relay == nil || relay.leaseID != existing.response.LeaseID ||
-			!registry.availableLocked(relay, now) {
+			!registry.availableLocked(relay, now) ||
+			!relaySupportsEncryption(relay, wantedEncryption) {
 			// A newer authoritative Session generation is the fencing boundary that
 			// permits failover. Reusing the same generation would allow two Relays
 			// to accept tickets for one Session concurrently during a partition.
@@ -50,7 +52,8 @@ func (registry *Registry) Allocate(
 	}
 	candidates := make([]*relayRecord, 0, len(registry.relays))
 	for _, relay := range registry.relays {
-		if registry.availableLocked(relay, now) {
+		if registry.availableLocked(relay, now) &&
+			relaySupportsEncryption(relay, wantedEncryption) {
 			candidates = append(candidates, relay)
 		}
 	}
@@ -98,11 +101,23 @@ func (registry *Registry) Allocate(
 		Envelope: relaycontrol.NewAllocationResponse().Envelope,
 		RelayID:  selected.relayID, LeaseID: selected.leaseID,
 		Endpoint: selected.endpoint, AssignedAt: now,
+		TrafficEncryption: selected.trafficEncryption,
+		NoisePublicKey:    selected.noisePublicKey,
 	}
 	registry.assignments[request.SessionID] = assignmentRecord{
 		response: assignment, generation: request.Generation, networkSpecHash: request.NetworkSpecHash,
 	}
 	return assignment, nil
+}
+
+func relaySupportsEncryption(relay *relayRecord, wanted bool) bool {
+	if relay.trafficEncryption != wanted {
+		return false
+	}
+	if !wanted {
+		return true
+	}
+	return relay.selectedVersion == relaycontrol.APIVersionV2 && relay.noisePublicKey != ""
 }
 
 func (registry *Registry) Release(sessionID string, generation uint64) bool {

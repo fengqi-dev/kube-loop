@@ -24,6 +24,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
+	controlplanerelayregistry "github.com/fengqi-dev/kube-loop/internal/controlplane/relayregistry"
 	ticketservice "github.com/fengqi-dev/kube-loop/internal/controlplane/ticketapi/service"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/trafficcontrolapi"
 	"github.com/fengqi-dev/kube-loop/internal/gateway"
@@ -32,6 +33,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/protocol/relaycontrol"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/relayticket"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficcontrol"
+	"github.com/fengqi-dev/kube-loop/internal/transport/trafficstream"
 )
 
 const (
@@ -41,9 +43,12 @@ const (
 )
 
 type e2eTrafficGateway struct {
-	tickets     *ticketservice.Service
-	httpClient  *http.Client
-	certificate *x509.Certificate
+	tickets        *ticketservice.Service
+	verifier       *relayticket.Verifier
+	httpClient     *http.Client
+	certificate    *x509.Certificate
+	relayID        string
+	noisePublicKey string
 }
 
 func startE2EControlPlaneServer(
@@ -93,6 +98,33 @@ func TestE2EControlPlaneClientTrustsControlPlaneAndGateway(t *testing.T) {
 		if response.StatusCode != http.StatusNoContent {
 			t.Fatalf("GET %s status = %d, want %d", endpoint, response.StatusCode, http.StatusNoContent)
 		}
+	}
+}
+
+func TestE2ENoiseTrafficEncryptionNegotiationAndRelayTicketBinding(t *testing.T) {
+	gateway := startE2ETrafficGateway(t, "127.0.0.1", nil, nil)
+	now := time.Now().UTC()
+	ticket, err := gateway.tickets.Issue(t.Context(), ticketservice.IssueInput{
+		IdentityID: "11111111-1111-4111-8111-111111111111",
+		DeviceID:   "22222222-2222-4222-8222-222222222222",
+		SessionID:  "33333333-3333-4333-8333-333333333333",
+		Generation: 1, Namespace: "default",
+		NetworkSpecHash: strings.Repeat("a", 64), SessionExpiresAt: now.Add(time.Minute),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ticket.RelayID != gateway.relayID || ticket.TrafficEncryption == nil ||
+		!*ticket.TrafficEncryption || ticket.NoisePublicKey != gateway.noisePublicKey {
+		t.Fatalf("encrypted RelayTicket assignment = %#v", ticket)
+	}
+	claims, err := gateway.verifier.Verify(ticket.Value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claims.TrafficEncryption == nil || !*claims.TrafficEncryption ||
+		claims.NoisePublicKey != gateway.noisePublicKey {
+		t.Fatalf("encrypted RelayTicket claims = %#v", claims)
 	}
 }
 
@@ -181,7 +213,14 @@ func startE2ETrafficGateway(
 	if err != nil {
 		t.Fatal(err)
 	}
-	relayID := "relay-" + strings.Repeat("1", 64)
+	noiseStaticKey, err := trafficstream.GenerateNoiseStaticKeypair()
+	if err != nil {
+		t.Fatal(err)
+	}
+	noisePublicKey, err := trafficstream.EncodeNoisePublicKey(noiseStaticKey.Public)
+	if err != nil {
+		t.Fatal(err)
+	}
 	router := echo.New()
 	server := httptest.NewTLSServer(router)
 	t.Cleanup(server.Close)
@@ -191,12 +230,55 @@ func startE2ETrafficGateway(
 	if err != nil {
 		t.Fatal(err)
 	}
+	now := time.Now().UTC()
+	verificationKeys, err := relaycontrol.NewVerificationKeySet(
+		1,
+		map[string]ed25519.PublicKey{e2eTrafficKeyID: publicKey},
+		now.Add(-time.Minute),
+		now.Add(time.Hour),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry, err := controlplanerelayregistry.New(controlplanerelayregistry.Config{
+		TicketIssuer: e2eTrafficIssuer, VerificationKeys: verificationKeys,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	relayIdentity := relaycontrol.PeerIdentity{
+		TrustDomain: "e2e", Namespace: "kubeloop-system",
+		ServiceAccount: "gateway", PodUID: "traffic-gateway",
+	}
+	registration := relaycontrol.NewRegistrationRequestWithNegotiation()
+	registration.Endpoint = endpoint
+	registration.State = relaycontrol.StateReady
+	registration.Capacity = relaycontrol.Capacity{
+		MaximumPhysicalConnections: 16, MaximumLogicalStreams: 1024,
+	}
+	registered, err := registry.Register(relayIdentity, registration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if registered.SelectedVersion != relaycontrol.APIVersionV2 {
+		t.Fatalf("Relay Control version = %q, want %q", registered.SelectedVersion, relaycontrol.APIVersionV2)
+	}
+	enabled := true
+	heartbeat := relaycontrol.NewHeartbeatRequestForVersion(registered.SelectedVersion)
+	heartbeat.LeaseID = registered.LeaseID
+	heartbeat.State = relaycontrol.StateReady
+	heartbeat.Capacity = registration.Capacity
+	heartbeat.AppliedKeyGeneration = verificationKeys.Generation
+	heartbeat.TrafficEncryption = &enabled
+	heartbeat.NoisePublicKey = noisePublicKey
+	if _, err := registry.Heartbeat(relayIdentity, heartbeat); err != nil {
+		t.Fatal(err)
+	}
+	relayID := registered.RelayID
 	tickets, err := ticketservice.New(ticketservice.Config{
-		Issuer: e2eTrafficIssuer,
-		Signer: signer,
-		Allocator: e2eTrafficAllocator{response: relaycontrol.AllocationResponse{
-			RelayID: relayID, Endpoint: endpoint, AssignedAt: time.Now().UTC(),
-		}},
+		Issuer:    e2eTrafficIssuer,
+		Signer:    signer,
+		Allocator: registry,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -220,6 +302,7 @@ func startE2ETrafficGateway(
 	api, err := trafficapi.New(trafficapi.Config{
 		GatewayIP: gatewayIP, ControlPlane: control,
 		MirrorPrimaryDialContext: mirrorDial,
+		TrafficEncryption:        &enabled, NoiseStaticKey: &noiseStaticKey,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -241,9 +324,12 @@ func startE2ETrafficGateway(
 				Namespace:         claims.Namespace,
 				NetworkSpecHash:   claims.NetworkSpecHash,
 				ExpiresAt:         time.Unix(claims.ExpiresAt, 0).UTC(),
+				TrafficEncryption: claims.TrafficEncryption,
+				NoisePublicKey:    claims.NoisePublicKey,
 			}, nil
 		}),
-		ServerVersion: "e2e",
+		ServerVersion:     "e2e",
+		TrafficEncryption: &enabled, NoisePublicKey: noisePublicKey,
 		Handle: func(ctx context.Context, identity websocketmux.Identity, connection net.Conn) {
 			core.ServeConnForAuthorizationContext(ctx, connection, gateway.SessionAuthorization{
 				RequestID: identity.RequestID, IdentityID: identity.IdentityID,
@@ -266,16 +352,10 @@ func startE2ETrafficGateway(
 		t.Fatalf("legacy traffic route status = %d, want %d", response.StatusCode, http.StatusNotFound)
 	}
 	return e2eTrafficGateway{
-		tickets: tickets, httpClient: server.Client(), certificate: server.Certificate(),
+		tickets: tickets, verifier: verifier,
+		httpClient: server.Client(), certificate: server.Certificate(),
+		relayID: relayID, noisePublicKey: noisePublicKey,
 	}
-}
-
-type e2eTrafficAllocator struct {
-	response relaycontrol.AllocationResponse
-}
-
-func (allocator e2eTrafficAllocator) Allocate(relaycontrol.AllocationRequest) (relaycontrol.AllocationResponse, error) {
-	return allocator.response, nil
 }
 
 type e2eTrafficControlClient struct {

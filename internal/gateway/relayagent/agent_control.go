@@ -12,7 +12,7 @@ import (
 func (agent *Agent) register(ctx context.Context) error {
 	state, capacity := agent.config.Reporter.Snapshot()
 	keyGeneration, revocationGeneration := agent.config.Applier.AppliedGenerations()
-	request := relaycontrol.NewRegistrationRequest()
+	request := relaycontrol.NewRegistrationRequestWithNegotiation()
 	request.Endpoint = agent.config.Endpoint
 	request.State = state
 	request.Capacity = capacity
@@ -33,12 +33,16 @@ func (agent *Agent) register(ctx context.Context) error {
 	if response.DesiredState == relaycontrol.StateDraining {
 		agent.config.Reporter.BeginDrain()
 	}
+	if agent.config.TrafficEncryption && response.SelectedVersion != relaycontrol.APIVersionV2 {
+		return errors.New("Control Plane does not support encrypted Relay traffic")
+	}
 	agent.mu.Lock()
 	agent.relayID = response.RelayID
 	agent.ticketIssuer = response.TicketIssuer
 	agent.leaseID = response.LeaseID
 	agent.leaseExpiresAt = response.LeaseExpiresAt
 	agent.heartbeatAfter = response.HeartbeatAfter
+	agent.selectedVersion = response.SelectedVersion
 	agent.lastError = nil
 	agent.mu.Unlock()
 	// Acknowledge the just-applied generations immediately. Registration
@@ -49,18 +53,25 @@ func (agent *Agent) register(ctx context.Context) error {
 func (agent *Agent) heartbeat(ctx context.Context) error {
 	agent.mu.RLock()
 	leaseID := agent.leaseID
+	selectedVersion := agent.selectedVersion
 	agent.mu.RUnlock()
 	if leaseID == "" {
 		return errors.New("relay agent has no lease")
 	}
 	state, capacity := agent.config.Reporter.Snapshot()
 	keyGeneration, revocationGeneration := agent.config.Applier.AppliedGenerations()
-	request := relaycontrol.NewHeartbeatRequest()
+	request := relaycontrol.NewHeartbeatRequestForVersion(selectedVersion)
 	request.LeaseID = leaseID
 	request.State = state
 	request.Capacity = capacity
 	request.AppliedKeyGeneration = keyGeneration
 	request.AppliedRevocationGeneration = revocationGeneration
+	if selectedVersion == relaycontrol.APIVersionV2 {
+		request.TrafficEncryption = boolPointer(agent.config.TrafficEncryption)
+		if agent.config.TrafficEncryption {
+			request.NoisePublicKey = agent.config.NoisePublicKey
+		}
+	}
 	var response relaycontrol.HeartbeatResponse
 	if err := call(
 		ctx, agent, http.MethodPut, "/internal/v1/relays/heartbeat",

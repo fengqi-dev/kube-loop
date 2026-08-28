@@ -53,6 +53,9 @@ type relayRecord struct {
 	leaseExpiresAt              time.Time
 	lastHeartbeatAt             time.Time
 	reservations                uint32
+	selectedVersion             string
+	trafficEncryption           bool
+	noisePublicKey              string
 }
 
 type assignmentRecord struct {
@@ -108,11 +111,14 @@ func New(config Config) (*Registry, error) {
 		return nil, errors.New("relay registry lease configuration is invalid")
 	}
 	if len(config.SupportedVersions) == 0 {
-		config.SupportedVersions = []string{relaycontrol.APIVersion}
+		config.SupportedVersions = []string{
+			relaycontrol.APIVersionV2,
+			relaycontrol.APIVersionV1,
+		}
 	}
 	if _, err := relaycontrol.NegotiateVersion(
 		config.SupportedVersions,
-		[]string{relaycontrol.APIVersion},
+		[]string{relaycontrol.APIVersionV2, relaycontrol.APIVersionV1},
 	); err != nil {
 		return nil, err
 	}

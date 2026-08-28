@@ -159,6 +159,7 @@ func TestIssueRelayTicketUsesRegistryAssignment(t *testing.T) {
 		Envelope: relaycontrol.NewAllocationResponse().Envelope,
 		RelayID:  relayID, LeaseID: "44444444-4444-4444-8444-444444444444",
 		Endpoint: "wss://relay.example/tunnel", AssignedAt: now,
+		TrafficEncryption: true, NoisePublicKey: "test-noise-public-key",
 	}}
 	handler := newTicketRoutes(
 		t,
@@ -346,7 +347,10 @@ func newTicketRoutes(
 	t.Helper()
 	if config.Allocator == nil {
 		config.Allocator = &fakeAllocator{
-			response: relaycontrol.AllocationResponse{RelayID: "relay-a"},
+			response: relaycontrol.AllocationResponse{
+				RelayID: "relay-a", TrafficEncryption: true,
+				NoisePublicKey: "test-noise-public-key",
+			},
 		}
 	}
 	service, err := ticketservice.New(config)

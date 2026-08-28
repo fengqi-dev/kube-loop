@@ -55,6 +55,86 @@ func TestFrameConnRoundTripsExchangeAndMirrorFrames(t *testing.T) {
 	}
 }
 
+func TestFrameConnCanDisableNoiseEncryption(t *testing.T) {
+	writer, reader := mustTrafficPairWithEncryption(t, false)
+	want := []byte("unencrypted compatibility frame")
+	writeDone := make(chan error, 1)
+	go func() { writeDone <- writer.WriteFrame(t.Context(), want) }()
+	got, err := reader.ReadFrame(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("frame = %q, want %q", got, want)
+	}
+	if err := <-writeDone; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestEncryptedFrameKeepsMaximumPlaintextSize(t *testing.T) {
+	writer, reader := mustTrafficPair(t)
+	want := bytes.Repeat([]byte{0x5a}, MaximumFrameBytes)
+	writeDone := make(chan error, 1)
+	go func() { writeDone <- writer.WriteFrame(t.Context(), want) }()
+	got, err := reader.ReadFrame(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("maximum encrypted frame changed: got=%d want=%d", len(got), len(want))
+	}
+	if err := <-writeDone; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAuthenticatedNoiseRejectsWrongGatewayKey(t *testing.T) {
+	actual, err := GenerateNoiseStaticKeypair()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrong, err := GenerateNoiseStaticKeypair()
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, server := net.Pipe()
+	serverDone := make(chan error, 1)
+	go func() {
+		_, acceptErr := AcceptWithEncryptionStatic(t.Context(), server, true, actual)
+		serverDone <- acceptErr
+	}()
+	if _, err := DialWithEncryptionPeer(t.Context(), client, true, wrong.Public); err == nil {
+		t.Fatal("Noise handshake accepted a Gateway key that did not match the RelayTicket")
+	}
+	_ = client.Close()
+	_ = server.Close()
+	select {
+	case <-serverDone:
+	case <-time.After(time.Second):
+		t.Fatal("Gateway handshake did not stop after key mismatch")
+	}
+}
+
+func TestEncryptedFrameRejectsTampering(t *testing.T) {
+	writer, reader := mustTrafficPair(t)
+	ciphertext, err := writer.writeState.Encrypt(nil, frameAssociatedData, []byte("authenticated"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ciphertext[len(ciphertext)-1] ^= 0x01
+	writeDone := make(chan error, 1)
+	go func() {
+		writeDone <- writer.conn.WriteMessage(websocket.BinaryMessage, ciphertext)
+	}()
+	if _, err := reader.ReadFrame(t.Context()); err == nil {
+		t.Fatal("tampered encrypted frame was accepted")
+	}
+	if err := <-writeDone; err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestFrameConnRejectsInvalidFrameSizesAndTextMessages(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -225,6 +305,10 @@ func TestAcceptPropagatesHandshakeCancellation(t *testing.T) {
 }
 
 func mustTrafficPair(t *testing.T) (*FrameConn, *FrameConn) {
+	return mustTrafficPairWithEncryption(t, true)
+}
+
+func mustTrafficPairWithEncryption(t *testing.T, encryptionEnabled bool) (*FrameConn, *FrameConn) {
 	t.Helper()
 	clientConnection, serverConnection := net.Pipe()
 	acceptResult := make(chan struct {
@@ -232,13 +316,13 @@ func mustTrafficPair(t *testing.T) (*FrameConn, *FrameConn) {
 		err        error
 	}, 1)
 	go func() {
-		connection, err := Accept(t.Context(), serverConnection)
+		connection, err := AcceptWithEncryption(t.Context(), serverConnection, encryptionEnabled)
 		acceptResult <- struct {
 			connection *FrameConn
 			err        error
 		}{connection: connection, err: err}
 	}()
-	client, err := Dial(t.Context(), clientConnection)
+	client, err := DialWithEncryption(t.Context(), clientConnection, encryptionEnabled)
 	if err != nil {
 		_ = clientConnection.Close()
 		_ = serverConnection.Close()

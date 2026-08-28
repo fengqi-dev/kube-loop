@@ -20,6 +20,42 @@ const (
 // Dial upgrades an already-authenticated tunnel multiplexer stream to the
 // client side of the Traffic WebSocket protocol.
 func Dial(ctx context.Context, connection net.Conn) (*FrameConn, error) {
+	return DialWithEncryption(ctx, connection, true)
+}
+
+// DialWithEncryption upgrades a stream and optionally enables the
+// Noise_XX_25519_ChaChaPoly_SHA256 transport. Encryption is enabled by default
+// by Dial; this explicit variant exists for the compatibility switch.
+func DialWithEncryption(ctx context.Context, connection net.Conn, encryptionEnabled bool) (*FrameConn, error) {
+	return dialWithEncryptionPrologue(ctx, connection, encryptionEnabled, nil, nil)
+}
+
+// DialWithEncryptionPeer authenticates the Gateway's Noise static key against
+// the public key carried by the Control Plane RelayTicket.
+func DialWithEncryptionPeer(
+	ctx context.Context,
+	connection net.Conn,
+	encryptionEnabled bool,
+	expectedPeerStatic []byte,
+) (*FrameConn, error) {
+	if encryptionEnabled && len(expectedPeerStatic) != NoisePublicKeyBytes {
+		return nil, errors.New("Gateway Noise public key is required")
+	}
+	return dialWithEncryptionPrologue(ctx, connection, encryptionEnabled, expectedPeerStatic, nil)
+}
+
+// DialWithEncryptionPrologue additionally binds the Noise handshake to an
+// authenticated session secret known by both endpoints.
+func DialWithEncryptionPrologue(ctx context.Context, connection net.Conn, encryptionEnabled bool, prologue []byte) (*FrameConn, error) {
+	return dialWithEncryptionPrologue(ctx, connection, encryptionEnabled, nil, prologue)
+}
+
+func dialWithEncryptionPrologue(
+	ctx context.Context,
+	connection net.Conn,
+	encryptionEnabled bool,
+	expectedPeerStatic, prologue []byte,
+) (*FrameConn, error) {
 	if err := validateHandshake(ctx, connection); err != nil {
 		return nil, err
 	}
@@ -48,12 +84,55 @@ func Dial(ctx context.Context, connection net.Conn) (*FrameConn, error) {
 		_ = webSocket.Close()
 		return nil, errors.New("traffic WebSocket subprotocol was not negotiated")
 	}
-	return newFrameConn(webSocket), nil
+	frameConn, err := newSecureFrameConn(
+		handshakeContext, webSocket, true, encryptionEnabled, nil, expectedPeerStatic, prologue,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("establish encrypted Traffic WebSocket: %w", err)
+	}
+	return frameConn, nil
 }
 
 // Accept upgrades an already-authenticated tunnel multiplexer stream to the
 // server side of the Traffic WebSocket protocol.
 func Accept(ctx context.Context, connection net.Conn) (*FrameConn, error) {
+	return AcceptWithEncryption(ctx, connection, true)
+}
+
+// AcceptWithEncryption accepts a stream and optionally enables the
+// Noise_XX_25519_ChaChaPoly_SHA256 transport. Encryption is enabled by default
+// by Accept; this explicit variant exists for the compatibility switch.
+func AcceptWithEncryption(ctx context.Context, connection net.Conn, encryptionEnabled bool) (*FrameConn, error) {
+	return acceptWithEncryptionPrologue(ctx, connection, encryptionEnabled, nil, nil)
+}
+
+// AcceptWithEncryptionStatic authenticates the Gateway with its process-scoped
+// Noise static keypair.
+func AcceptWithEncryptionStatic(
+	ctx context.Context,
+	connection net.Conn,
+	encryptionEnabled bool,
+	staticKey NoiseStaticKeypair,
+) (*FrameConn, error) {
+	if encryptionEnabled && (len(staticKey.Private) != NoisePublicKeyBytes || len(staticKey.Public) != NoisePublicKeyBytes) {
+		return nil, errors.New("Gateway Noise static keypair is required")
+	}
+	return acceptWithEncryptionPrologue(ctx, connection, encryptionEnabled, &staticKey, nil)
+}
+
+// AcceptWithEncryptionPrologue additionally binds the Noise handshake to an
+// authenticated session secret known by both endpoints.
+func AcceptWithEncryptionPrologue(ctx context.Context, connection net.Conn, encryptionEnabled bool, prologue []byte) (*FrameConn, error) {
+	return acceptWithEncryptionPrologue(ctx, connection, encryptionEnabled, nil, prologue)
+}
+
+func acceptWithEncryptionPrologue(
+	ctx context.Context,
+	connection net.Conn,
+	encryptionEnabled bool,
+	staticKey *NoiseStaticKeypair,
+	prologue []byte,
+) (*FrameConn, error) {
 	if err := validateHandshake(ctx, connection); err != nil {
 		return nil, err
 	}
@@ -108,7 +187,13 @@ func Accept(ctx context.Context, connection net.Conn) (*FrameConn, error) {
 		}
 		return nil, fmt.Errorf("accept Traffic WebSocket: %w", accepted.err)
 	}
-	return newFrameConn(accepted.connection), nil
+	frameConn, err := newSecureFrameConn(
+		handshakeContext, accepted.connection, false, encryptionEnabled, staticKey, nil, prologue,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("establish encrypted Traffic WebSocket: %w", err)
+	}
+	return frameConn, nil
 }
 
 func validateHandshake(ctx context.Context, connection net.Conn) error {

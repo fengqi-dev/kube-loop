@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
@@ -162,6 +163,37 @@ func TestRollingUpgradeNegotiatesHighestCommonVersion(t *testing.T) {
 		t.Fatal("incompatible rolling-upgrade versions were accepted")
 	}
 }
+
+func TestV2HeartbeatAdvertisesAuthenticatedTrafficEncryption(t *testing.T) {
+	now := time.Now().UTC()
+	request := NewHeartbeatRequestForVersion(APIVersionV2)
+	request.LeaseID = uuid.NewString()
+	request.State = StateReady
+	request.Capacity = Capacity{MaximumPhysicalConnections: 1, MaximumLogicalStreams: 1}
+	request.TrafficEncryption = boolPointerForTest(true)
+	request.NoisePublicKey = base64.RawURLEncoding.EncodeToString(make([]byte, 32))
+	raw, err := Encode(request, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := DecodeHeartbeatRequest(raw, now)
+	if err != nil || decoded.APIVersion != APIVersionV2 || decoded.NoisePublicKey != request.NoisePublicKey {
+		t.Fatalf("decoded heartbeat = %#v err = %v", decoded, err)
+	}
+
+	request.NoisePublicKey = "invalid"
+	if _, err := Encode(request, now); err == nil {
+		t.Fatal("v2 heartbeat accepted an invalid Noise public key")
+	}
+	legacy := NewHeartbeatRequest()
+	legacy.LeaseID, legacy.State, legacy.Capacity = request.LeaseID, StateReady, request.Capacity
+	legacy.TrafficEncryption = boolPointerForTest(true)
+	if _, err := Encode(legacy, now); err == nil {
+		t.Fatal("v1 heartbeat accepted v2 encryption capability fields")
+	}
+}
+
+func boolPointerForTest(value bool) *bool { return &value }
 
 func TestPeerIdentityDerivesRelayIDOutsideMessage(t *testing.T) {
 	identity := validPeerIdentity()

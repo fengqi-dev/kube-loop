@@ -135,6 +135,22 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		)
 		return
 	}
+	configuredEncryption := h.config.TrafficEncryption != nil && *h.config.TrafficEncryption
+	ticketEncryption := identity.TrafficEncryption != nil && *identity.TrafficEncryption
+	if h.legacyUnpinnedEncryption && identity.TrafficEncryption == nil {
+		ticketEncryption = true
+	}
+	clientEncryption := slices.Contains(hello.Capabilities, wss.CapabilityTrafficEncryption)
+	keyMatches := !configuredEncryption || h.legacyUnpinnedEncryption ||
+		identity.NoisePublicKey == h.config.NoisePublicKey
+	if configuredEncryption != ticketEncryption || clientEncryption != configuredEncryption || !keyMatches {
+		cancelHandshake()
+		h.reject(request.Context(), requestID, connection, wss.NewReject(
+			wss.CodeEncryptionMismatch,
+			"Traffic encryption negotiation does not match Control Plane and Gateway policy",
+		))
+		return
+	}
 	if !slices.Contains(hello.Capabilities, "smux.v2") || !slices.Contains(hello.Capabilities, "tunnel.open.v2") ||
 		!slices.Contains(hello.Capabilities, wss.CapabilityTrafficWebSocket) {
 		cancelHandshake()
@@ -162,6 +178,11 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		StreamIdleTimeoutMillis: h.config.StreamIdleTimeout.Milliseconds(),
 	})
 	serverHello.ProtocolVersion = selectedVersion
+	if !configuredEncryption {
+		serverHello.Capabilities = slices.DeleteFunc(serverHello.Capabilities, func(value string) bool {
+			return value == wss.CapabilityTrafficEncryption
+		})
+	}
 	if err := wss.Write(handshakeContext, connection, serverHello); err != nil {
 		cancelHandshake()
 		h.logf(

@@ -24,6 +24,8 @@ type Identity struct {
 	Namespace         string
 	NetworkSpecHash   string
 	ExpiresAt         time.Time
+	TrafficEncryption *bool
+	NoisePublicKey    string
 }
 
 type Authenticator interface {
@@ -48,17 +50,20 @@ type ServerConfig struct {
 	MinClientVersion     string
 	SupportedVersions    []string
 	Logger               *slog.Logger
+	TrafficEncryption    *bool
+	NoisePublicKey       string
 	Handle               func(context.Context, Identity, net.Conn)
 }
 
 type Handler struct {
-	config       ServerConfig
-	limit        chan struct{}
-	draining     atomic.Bool
-	generationMu sync.Mutex
-	generations  map[string]activeGeneration
-	userMu       sync.Mutex
-	userSessions map[string]int
+	config                   ServerConfig
+	limit                    chan struct{}
+	draining                 atomic.Bool
+	generationMu             sync.Mutex
+	generations              map[string]activeGeneration
+	userMu                   sync.Mutex
+	userSessions             map[string]int
+	legacyUnpinnedEncryption bool
 }
 
 type activeGeneration struct {
@@ -69,6 +74,19 @@ type activeGeneration struct {
 func NewHandler(config ServerConfig) (*Handler, error) {
 	if config.Authenticator == nil {
 		return nil, errors.New("gateway WebSocket authenticator is required")
+	}
+	legacyUnpinnedEncryption := config.TrafficEncryption == nil
+	if legacyUnpinnedEncryption {
+		value := true
+		config.TrafficEncryption = &value
+	}
+	configuredEncryption := *config.TrafficEncryption
+	if configuredEncryption {
+		if config.NoisePublicKey == "" && !legacyUnpinnedEncryption {
+			return nil, errors.New("gateway Noise public key is required")
+		}
+	} else if config.NoisePublicKey != "" {
+		return nil, errors.New("gateway Noise public key requires traffic encryption")
 	}
 	if config.Handle == nil {
 		return nil, errors.New("gateway stream handler is required")
@@ -112,5 +130,6 @@ func NewHandler(config ServerConfig) (*Handler, error) {
 	return &Handler{
 		config: config, limit: make(chan struct{}, config.MaxSessions),
 		generations: make(map[string]activeGeneration), userSessions: make(map[string]int),
+		legacyUnpinnedEncryption: legacyUnpinnedEncryption,
 	}, nil
 }

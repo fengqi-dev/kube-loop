@@ -22,6 +22,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/gateway/websocketmux"
 	"github.com/fengqi-dev/kube-loop/internal/logging"
 	"github.com/fengqi-dev/kube-loop/internal/middleware"
+	"github.com/fengqi-dev/kube-loop/internal/transport/trafficstream"
 )
 
 func Run(
@@ -41,6 +42,22 @@ func Run(
 	componentLogger := slog.New(logHandler).With("component", "data-plane")
 	logger := slog.NewLogLogger(componentLogger.Handler(), slog.LevelInfo)
 	server := gateway.NewServer(componentLogger, 10*time.Second)
+	encryptionEnabled := config.WebSocket.TrafficEncryption == nil ||
+		*config.WebSocket.TrafficEncryption
+	var noiseStaticKey *trafficstream.NoiseStaticKeypair
+	var noisePublicKey string
+	if encryptionEnabled {
+		generatedKey, generateErr := trafficstream.GenerateNoiseStaticKeypair()
+		err = generateErr
+		if err != nil {
+			return fmt.Errorf("generate Gateway Noise static key: %w", err)
+		}
+		noiseStaticKey = &generatedKey
+		noisePublicKey, err = trafficstream.EncodeNoisePublicKey(noiseStaticKey.Public)
+		if err != nil {
+			return fmt.Errorf("encode Gateway Noise public key: %w", err)
+		}
+	}
 	var httpHandler *websocketmux.Handler
 	var controlAgent *relayagent.Agent
 	var runtimeReporter *Reporter
@@ -67,7 +84,9 @@ func Run(
 				SessionGeneration: claims.SessionGeneration,
 				TicketID:          claims.TicketID,
 				Namespace:         claims.Namespace, NetworkSpecHash: claims.NetworkSpecHash,
-				ExpiresAt: time.Unix(claims.ExpiresAt, 0).UTC(),
+				ExpiresAt:         time.Unix(claims.ExpiresAt, 0).UTC(),
+				TrafficEncryption: cloneBoolPointer(claims.TrafficEncryption),
+				NoisePublicKey:    claims.NoisePublicKey,
 			}, nil
 		}),
 		Logger: componentLogger, StreamIdleTimeout: config.WebSocket.StreamIdleTimeout.Duration,
@@ -75,6 +94,8 @@ func Run(
 		ServerVersion:    info.Version, MinClientVersion: config.MinClientVersion,
 		MaxSessions: config.WebSocket.MaxSessions, MaxSessionsPerUser: config.WebSocket.MaxSessionsPerUser,
 		MaxStreamsPerSession: config.WebSocket.MaxStreamsPerSession, MaxFrameBytes: config.WebSocket.MaxFrameBytes,
+		TrafficEncryption: config.WebSocket.TrafficEncryption,
+		NoisePublicKey:    noisePublicKey,
 		Handle: func(ctx context.Context, identity websocketmux.Identity, connection net.Conn) {
 			server.ServeConnForAuthorizationContext(ctx, connection, gateway.SessionAuthorization{
 				RequestID: identity.RequestID, IdentityID: identity.IdentityID,
@@ -116,6 +137,7 @@ func Run(
 		ControlPlaneURL: config.Relay.ControlPlaneURL, Endpoint: advertisedEndpoint, HTTPClient: httpClient,
 		BearerTokenFile: config.Relay.BearerTokenFile,
 		Reporter:        runtimeReporter, Applier: dynamicAuthenticator, Logger: logger,
+		TrafficEncryption: encryptionEnabled, NoisePublicKey: noisePublicKey,
 	})
 	if agentErr != nil {
 		return fmt.Errorf("create Relay agent: %w", agentErr)
@@ -135,6 +157,8 @@ func Run(
 	logger.Printf("Data Plane registered as %s", controlAgent.RelayID())
 	trafficHandler, trafficErr := trafficapi.New(trafficapi.Config{
 		GatewayIP: environment.PodIP, ControlPlane: controlAgent,
+		TrafficEncryption: config.WebSocket.TrafficEncryption,
+		NoiseStaticKey:    noiseStaticKey,
 	})
 	if trafficErr != nil {
 		return fmt.Errorf("create traffic handler: %w", trafficErr)
@@ -167,4 +191,12 @@ func Run(
 		Control: controlAgent, DrainTimeout: config.DrainTimeout.Duration,
 		ServeStopTimeout: 5 * time.Second, Serve: websocketmux.Serve,
 	})
+}
+
+func cloneBoolPointer(value *bool) *bool {
+	if value == nil {
+		return nil
+	}
+	result := *value
+	return &result
 }

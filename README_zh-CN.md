@@ -62,6 +62,23 @@ curl http://kubeloop.example.com/.well-known/kubeloop
 Ingress 默认不启用 TLS。若需 HTTPS，请把 `publicURL` 改为 `https://…`，
 并设置 `ingress.tls.enabled=true` 和 `ingress.tls.secretName`。
 
+Traffic Task 默认启用 `Noise_XX_25519_ChaChaPoly_SHA256`，在客户端与 Gateway
+之间对 Traffic WebSocket 数据帧进行端到端加密。升级期间如需兼容旧版客户端或
+Gateway，可关闭该能力：
+
+```bash
+helm upgrade kubeloop \
+  oci://ghcr.io/fengqi-dev/kube-loop/charts/kubeloop \
+  --reuse-values \
+  --set controlPlane.relay.trafficEncryption=false
+```
+
+客户端默认跟随 Control Plane 签发的 RelayTicket；若客户端显式设置
+`dataplane.Config.TrafficEncryption`，其值必须与 RelayTicket 及 Gateway 配置一致。
+滚动升级时应先在 Control Plane、Gateway 和客户端全部关闭该开关，完成所有组件升级后
+再统一开启；启用策略下，Control Plane 不会向未通过 Relay Control v2 上报 Noise 公钥的
+旧 Gateway 分配新会话。
+
 卸载工作负载：
 
 ```bash

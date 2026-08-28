@@ -3,6 +3,7 @@ package relaycontrol
 import (
 	"crypto/ed25519"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/pem"
 	"errors"
@@ -24,7 +25,7 @@ const (
 )
 
 func (request RegistrationRequest) Validate(_ time.Time) error {
-	if err := request.validate(KindRegistrationRequest); err != nil {
+	if err := request.validateVersions(KindRegistrationRequest, APIVersionV1); err != nil {
 		return err
 	}
 	if !slices.Contains(request.SupportedVersions, request.APIVersion) ||
@@ -41,10 +42,10 @@ func (request RegistrationRequest) Validate(_ time.Time) error {
 }
 
 func (response RegistrationResponse) Validate(now time.Time) error {
-	if err := response.validate(KindRegistrationResponse); err != nil {
+	if err := response.validateVersions(KindRegistrationResponse, APIVersionV1); err != nil {
 		return err
 	}
-	if response.SelectedVersion != response.APIVersion {
+	if response.SelectedVersion != APIVersionV1 && response.SelectedVersion != APIVersionV2 {
 		return errors.New("relay selected protocol version is invalid")
 	}
 	if !validTicketIssuer(response.TicketIssuer) {
@@ -66,7 +67,7 @@ func (response RegistrationResponse) Validate(now time.Time) error {
 }
 
 func (request HeartbeatRequest) Validate(time.Time) error {
-	if err := request.validate(KindHeartbeatRequest); err != nil {
+	if err := request.validateVersions(KindHeartbeatRequest, APIVersionV1, APIVersionV2); err != nil {
 		return err
 	}
 	if _, err := uuid.Parse(request.LeaseID); err != nil {
@@ -75,11 +76,24 @@ func (request HeartbeatRequest) Validate(time.Time) error {
 	if request.State != StateReady && request.State != StateDraining {
 		return errors.New("relay heartbeat state is invalid")
 	}
+	if request.APIVersion == APIVersionV1 {
+		if request.TrafficEncryption != nil || request.NoisePublicKey != "" {
+			return errors.New("relay v1 heartbeat cannot advertise traffic encryption")
+		}
+	} else if request.TrafficEncryption == nil {
+		return errors.New("relay v2 heartbeat must advertise traffic encryption")
+	} else if *request.TrafficEncryption {
+		if !validNoisePublicKey(request.NoisePublicKey) {
+			return errors.New("relay Noise public key is invalid")
+		}
+	} else if request.NoisePublicKey != "" {
+		return errors.New("relay Noise public key requires traffic encryption")
+	}
 	return request.Capacity.validate()
 }
 
 func (response HeartbeatResponse) Validate(now time.Time) error {
-	if err := response.validate(KindHeartbeatResponse); err != nil {
+	if err := response.validateVersions(KindHeartbeatResponse, APIVersionV1, APIVersionV2); err != nil {
 		return err
 	}
 	if err := validateLeaseTiming(response.LeaseExpiresAt, response.HeartbeatAfter, now); err != nil {
@@ -136,17 +150,33 @@ func (response AllocationResponse) Validate(now time.Time) error {
 	if response.AssignedAt.IsZero() || response.AssignedAt.After(now.Add(time.Minute)) {
 		return errors.New("session assignment time is invalid")
 	}
+	if response.TrafficEncryption {
+		if !validNoisePublicKey(response.NoisePublicKey) {
+			return errors.New("session assignment Noise public key is invalid")
+		}
+	} else if response.NoisePublicKey != "" {
+		return errors.New("session assignment Noise public key requires traffic encryption")
+	}
 	return nil
 }
 
 func (envelope Envelope) validate(kind string) error {
-	if envelope.APIVersion != APIVersion {
+	return envelope.validateVersions(kind, APIVersion)
+}
+
+func (envelope Envelope) validateVersions(kind string, versions ...string) error {
+	if !slices.Contains(versions, envelope.APIVersion) {
 		return fmt.Errorf("unsupported relay control API version %q", envelope.APIVersion)
 	}
 	if envelope.Kind != kind {
 		return fmt.Errorf("relay control kind must be %q", kind)
 	}
 	return nil
+}
+
+func validNoisePublicKey(value string) bool {
+	decoded, err := base64.RawURLEncoding.Strict().DecodeString(value)
+	return err == nil && len(decoded) == 32
 }
 
 func (capacity Capacity) validate() error {

@@ -12,6 +12,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/middleware"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
+	"github.com/fengqi-dev/kube-loop/internal/transport/trafficstream"
 )
 
 func openTransport(
@@ -43,6 +44,19 @@ func openTransport(
 	if err != nil {
 		return openedTransport{}, fmt.Errorf("obtain RelayTicket assignment: %w", err)
 	}
+	clientEncryption := ticket.TrafficEncryption != nil && *ticket.TrafficEncryption
+	if config.TrafficEncryption != nil && *config.TrafficEncryption != clientEncryption {
+		return openedTransport{}, errors.New("client and Control Plane traffic encryption settings do not match")
+	}
+	var noisePublicKey []byte
+	if clientEncryption {
+		noisePublicKey, err = trafficstream.DecodeNoisePublicKey(ticket.NoisePublicKey)
+		if err != nil {
+			return openedTransport{}, errors.New("Control Plane returned an invalid Gateway Noise public key")
+		}
+	} else if !clientEncryption && ticket.NoisePublicKey != "" {
+		return openedTransport{}, errors.New("Control Plane returned a Noise key for plaintext traffic")
+	}
 	webSocketURL, err := transportURL(serverProfile, ticket.Endpoint)
 	if err != nil {
 		return openedTransport{}, err
@@ -52,6 +66,7 @@ func openTransport(
 		URL: webSocketURL, TokenSource: boundSource,
 		TLSConfig: config.TLSConfig, ClientVersion: config.ClientVersion, DeviceID: ticket.DeviceID,
 		SessionID: session.ID, SessionGeneration: session.Generation, Logger: config.Logger,
+		TrafficEncryption: &clientEncryption,
 	})
 	if err != nil {
 		return openedTransport{}, fmt.Errorf("start Data Plane WebSocket transport: %w", err)
@@ -72,5 +87,9 @@ func openTransport(
 		_ = forwarder.Close()
 		return openedTransport{}, fmt.Errorf("register Data Plane Session authorization: %w", err)
 	}
-	return openedTransport{forwarder: forwarder, control: control, token: token}, nil
+	return openedTransport{
+		forwarder: forwarder, control: control, token: token,
+		trafficEncryption: clientEncryption,
+		noisePublicKey:    noisePublicKey,
+	}, nil
 }

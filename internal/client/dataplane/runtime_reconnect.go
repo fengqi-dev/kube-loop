@@ -85,6 +85,9 @@ func (runtime *Runtime) Reconnect(
 	runtime.forwarder = transport.forwarder
 	runtime.control = transport.control
 	runtime.token = transport.token
+	runtime.trafficEncryption = transport.trafficEncryption
+	runtime.trafficEncryptionSet = true
+	runtime.noisePublicKey = append(runtime.noisePublicKey[:0], transport.noisePublicKey...)
 	transportDone := make(chan struct{})
 	runtime.transportDone = transportDone
 	runtime.transportErr = nil

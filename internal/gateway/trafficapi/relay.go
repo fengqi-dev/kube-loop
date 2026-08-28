@@ -47,7 +47,13 @@ func (api *API) serveRelay(
 		api.finish(context.WithoutCancel(ctx), mode, taskID, true, err)
 		return
 	}
-	frameConnection, err := trafficstream.Accept(ctx, connection)
+	encryptionEnabled := true
+	if api.config.TrafficEncryption != nil {
+		encryptionEnabled = *api.config.TrafficEncryption
+	}
+	frameConnection, err := trafficstream.AcceptWithEncryptionStatic(
+		ctx, connection, encryptionEnabled, noiseStaticKey(api.config.NoiseStaticKey),
+	)
 	if err != nil {
 		api.finish(context.WithoutCancel(ctx), mode, taskID, true, err)
 		return
@@ -60,6 +66,13 @@ func (api *API) serveRelay(
 		return
 	}
 	api.runRelay(ctx, frameConnection, relay, mode, taskID, listeners)
+}
+
+func noiseStaticKey(key *trafficstream.NoiseStaticKeypair) trafficstream.NoiseStaticKeypair {
+	if key == nil {
+		return trafficstream.NoiseStaticKeypair{}
+	}
+	return *key
 }
 
 func (api *API) newRelay(

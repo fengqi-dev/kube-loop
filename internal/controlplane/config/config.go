@@ -64,9 +64,10 @@ type RelayConfig struct {
 }
 
 type RelayTicketConfig struct {
-	SigningKeyFile string `json:"signingKeyFile"`
-	KeyID          string `json:"keyID"`
-	TTL            string `json:"ttl"`
+	SigningKeyFile    string `json:"signingKeyFile"`
+	KeyID             string `json:"keyID"`
+	TTL               string `json:"ttl"`
+	TrafficEncryption *bool  `json:"trafficEncryption"`
 }
 
 type RelayRegistryConfig struct {

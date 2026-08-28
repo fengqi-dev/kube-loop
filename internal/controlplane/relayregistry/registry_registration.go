@@ -28,11 +28,6 @@ func (registry *Registry) Register(
 	if err != nil {
 		return relaycontrol.RegistrationResponse{}, err
 	}
-	if selectedVersion != relaycontrol.APIVersion {
-		return relaycontrol.RegistrationResponse{}, errors.New(
-			"negotiated Relay protocol is not implemented",
-		)
-	}
 	if registry.config.EndpointPolicy != nil {
 		if err := registry.config.EndpointPolicy(identity, request.Endpoint); err != nil {
 			return relaycontrol.RegistrationResponse{}, err
@@ -65,7 +60,7 @@ func (registry *Registry) Register(
 		leaseExpiresAt: now.Add(
 			registry.config.LeaseDuration,
 		), lastHeartbeatAt: now,
-		reservations: reservations,
+		reservations: reservations, selectedVersion: selectedVersion,
 	}
 	return registry.registrationResponseLocked(relayID, selectedVersion), nil
 }
@@ -94,6 +89,9 @@ func (registry *Registry) Heartbeat(
 	if relay.leaseID != request.LeaseID {
 		return relaycontrol.HeartbeatResponse{}, ErrConflict
 	}
+	if relay.selectedVersion != request.APIVersion {
+		return relaycontrol.HeartbeatResponse{}, ErrConflict
+	}
 	if !relay.leaseExpiresAt.After(now) {
 		return relaycontrol.HeartbeatResponse{}, ErrNotFound
 	}
@@ -109,8 +107,12 @@ func (registry *Registry) Heartbeat(
 	relay.appliedRevocationGeneration = request.AppliedRevocationGeneration
 	relay.lastHeartbeatAt = now
 	relay.leaseExpiresAt = now.Add(registry.config.LeaseDuration)
+	relay.trafficEncryption = request.TrafficEncryption != nil && *request.TrafficEncryption
+	relay.noisePublicKey = request.NoisePublicKey
 	return relaycontrol.HeartbeatResponse{
-		Envelope:       relaycontrol.NewHeartbeatResponse().Envelope,
+		Envelope: relaycontrol.NewHeartbeatResponseForVersion(
+			relay.selectedVersion,
+		).Envelope,
 		LeaseExpiresAt: relay.leaseExpiresAt, HeartbeatAfter: registry.config.HeartbeatAfter,
 		DesiredState: relay.desiredState, Keys: cloneKeys(registry.config.VerificationKeys),
 		Revocations: cloneRevocations(registry.config.Revocations),

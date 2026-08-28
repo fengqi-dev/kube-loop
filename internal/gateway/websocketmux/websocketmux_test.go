@@ -27,6 +27,39 @@ import (
 
 const testDeviceID = "22222222-2222-4222-8222-222222222222"
 
+func TestWSSHandshakeRejectsRelayTicketForDifferentNoiseKey(t *testing.T) {
+	enabled := true
+	handler, err := NewHandler(ServerConfig{
+		Authenticator: AuthenticatorFunc(func(*http.Request) (Identity, error) {
+			return Identity{
+				IdentityID: "identity", DeviceID: testDeviceID,
+				SessionID: "33333333-3333-4333-8333-333333333333", SessionGeneration: 1,
+				ExpiresAt: time.Now().Add(time.Minute), TrafficEncryption: &enabled,
+				NoisePublicKey: "another-gateway-key",
+			}, nil
+		}),
+		TrafficEncryption: &enabled, NoisePublicKey: "this-gateway-key",
+		Handle: func(context.Context, Identity, net.Conn) {},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(handler)
+	defer server.Close()
+	forwarder, err := Start(t.Context(), ClientConfig{
+		URL: "ws" + strings.TrimPrefix(server.URL, "http"), Token: "token",
+		DeviceID: testDeviceID, TrafficEncryption: &enabled, PoolSize: 1,
+	})
+	if forwarder != nil {
+		_ = forwarder.Close()
+		t.Fatal("mismatched Gateway Noise key opened a WebSocket pool")
+	}
+	var handshakeErr *shared.HandshakeError
+	if !errors.As(err, &handshakeErr) || handshakeErr.Code != wss.CodeEncryptionMismatch {
+		t.Fatalf("Noise key mismatch error = %#v, %v", handshakeErr, err)
+	}
+}
+
 func TestPhysicalSessionWaitsForLogicalStreamHandler(t *testing.T) {
 	handlerStarted := make(chan struct{})
 	releaseHandler := make(chan struct{})

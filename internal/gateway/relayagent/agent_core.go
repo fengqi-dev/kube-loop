@@ -34,6 +34,8 @@ type Config struct {
 	Logger                 *log.Logger
 	RegistrationAttempts   int
 	RegistrationRetryDelay time.Duration
+	TrafficEncryption      bool
+	NoisePublicKey         string
 }
 
 const (
@@ -53,16 +55,17 @@ const (
 type Agent struct {
 	config Config
 
-	mu             sync.RWMutex
-	relayID        string
-	ticketIssuer   string
-	leaseID        string
-	leaseExpiresAt time.Time
-	heartbeatAfter time.Duration
-	lastError      error
-	lifecycle      lifecycleState
-	cancel         context.CancelFunc
-	done           chan struct{}
+	mu              sync.RWMutex
+	relayID         string
+	ticketIssuer    string
+	leaseID         string
+	leaseExpiresAt  time.Time
+	heartbeatAfter  time.Duration
+	selectedVersion string
+	lastError       error
+	lifecycle       lifecycleState
+	cancel          context.CancelFunc
+	done            chan struct{}
 }
 
 func New(config Config) (*Agent, error) {
@@ -101,5 +104,22 @@ func New(config Config) (*Agent, error) {
 		config.RegistrationRetryDelay < 10*time.Millisecond || config.RegistrationRetryDelay > 30*time.Second {
 		return nil, errors.New("relay agent registration retry policy is invalid")
 	}
+	if config.TrafficEncryption {
+		probe := relaycontrol.NewHeartbeatRequestForVersion(relaycontrol.APIVersionV2)
+		probe.LeaseID = "00000000-0000-0000-0000-000000000000"
+		probe.State = relaycontrol.StateReady
+		probe.Capacity = relaycontrol.Capacity{
+			MaximumPhysicalConnections: 1, MaximumLogicalStreams: 1,
+		}
+		probe.TrafficEncryption = boolPointer(true)
+		probe.NoisePublicKey = config.NoisePublicKey
+		if err := probe.Validate(time.Now()); err != nil {
+			return nil, errors.New("relay agent Noise public key is invalid")
+		}
+	} else if config.NoisePublicKey != "" {
+		return nil, errors.New("relay agent Noise public key requires traffic encryption")
+	}
 	return &Agent{config: config, done: make(chan struct{})}, nil
 }
+
+func boolPointer(value bool) *bool { return &value }

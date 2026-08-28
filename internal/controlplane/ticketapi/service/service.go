@@ -34,13 +34,14 @@ type RelayAllocator interface {
 }
 
 type Config struct {
-	Issuer    string
-	TTL       time.Duration
-	Now       func() time.Time
-	Signer    *relayticket.Signer
-	Allocator RelayAllocator
-	Topology  map[string]string
-	Logger    *slog.Logger
+	Issuer            string
+	TTL               time.Duration
+	Now               func() time.Time
+	Signer            *relayticket.Signer
+	Allocator         RelayAllocator
+	Topology          map[string]string
+	Logger            *slog.Logger
+	TrafficEncryption *bool
 }
 
 type IssueInput struct {
@@ -55,13 +56,14 @@ type IssueInput struct {
 }
 
 type Service struct {
-	issuer    string
-	ttl       time.Duration
-	now       func() time.Time
-	signer    *relayticket.Signer
-	allocator RelayAllocator
-	topology  map[string]string
-	logger    *slog.Logger
+	issuer            string
+	ttl               time.Duration
+	now               func() time.Time
+	signer            *relayticket.Signer
+	allocator         RelayAllocator
+	topology          map[string]string
+	logger            *slog.Logger
+	trafficEncryption bool
 }
 
 func New(config Config) (*Service, error) {
@@ -84,10 +86,14 @@ func New(config Config) (*Service, error) {
 	if config.Logger == nil {
 		config.Logger = slog.Default()
 	}
+	if config.TrafficEncryption == nil {
+		value := true
+		config.TrafficEncryption = &value
+	}
 	return &Service{
 		issuer: config.Issuer, ttl: config.TTL, now: config.Now,
 		signer: config.Signer, allocator: config.Allocator, topology: cloneTopology(config.Topology),
-		logger: config.Logger,
+		logger: config.Logger, trafficEncryption: *config.TrafficEncryption,
 	}, nil
 }
 
@@ -109,9 +115,18 @@ func (service *Service) Issue(
 	allocation.Generation = input.Generation
 	allocation.NetworkSpecHash = input.NetworkSpecHash
 	allocation.Topology = cloneTopology(service.topology)
+	allocation.TrafficEncryption = boolPointer(service.trafficEncryption)
 	assignment, err := service.allocator.Allocate(allocation)
 	if err != nil {
 		return entity.Ticket{}, errors.Join(ErrNoReadyDataPlane, err)
+	}
+	if assignment.TrafficEncryption != service.trafficEncryption ||
+		(service.trafficEncryption && assignment.NoisePublicKey == "") ||
+		(!service.trafficEncryption && assignment.NoisePublicKey != "") {
+		return entity.Ticket{}, errors.Join(
+			ErrNoReadyDataPlane,
+			errors.New("Data Plane traffic encryption capability does not match policy"),
+		)
 	}
 	claims := relayticket.Claims{
 		Version: relayticket.Version, Issuer: service.issuer, Audience: assignment.RelayID,
@@ -120,6 +135,10 @@ func (service *Service) Issue(
 		Namespace: input.Namespace, Operations: []string{OperationTunnel},
 		NetworkSpecHash: input.NetworkSpecHash, TicketID: uuid.NewString(),
 		IssuedAt: now.Unix(), NotBefore: now.Unix(), ExpiresAt: expiresAt.Unix(),
+	}
+	if service.trafficEncryption {
+		claims.TrafficEncryption = boolPointer(true)
+		claims.NoisePublicKey = assignment.NoisePublicKey
 	}
 	ticket, err := service.signer.Sign(claims)
 	if err != nil {
@@ -140,7 +159,19 @@ func (service *Service) Issue(
 	return entity.Ticket{
 		TokenType: relayticket.Type, Value: ticket, ExpiresAt: expiresAt,
 		DeviceID: input.DeviceID, RelayID: assignment.RelayID, Endpoint: assignment.Endpoint,
+		TrafficEncryption: cloneBoolPointer(claims.TrafficEncryption),
+		NoisePublicKey:    claims.NoisePublicKey,
 	}, nil
+}
+
+func boolPointer(value bool) *bool { return &value }
+
+func cloneBoolPointer(value *bool) *bool {
+	if value == nil {
+		return nil
+	}
+	result := *value
+	return &result
 }
 
 func cloneTopology(source map[string]string) map[string]string {

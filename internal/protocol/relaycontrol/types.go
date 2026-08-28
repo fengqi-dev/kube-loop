@@ -3,7 +3,9 @@ package relaycontrol
 import "time"
 
 const (
-	APIVersion       = "relay.kubeloop.io/v1"
+	APIVersionV1     = "relay.kubeloop.io/v1"
+	APIVersionV2     = "relay.kubeloop.io/v2"
+	APIVersion       = APIVersionV1
 	MaximumBodyBytes = 64 << 10
 
 	KindRegistrationRequest  = "RelayRegistration"
@@ -95,6 +97,8 @@ type HeartbeatRequest struct {
 	Capacity                    Capacity `json:"capacity"`
 	AppliedKeyGeneration        uint64   `json:"appliedKeyGeneration"`
 	AppliedRevocationGeneration uint64   `json:"appliedRevocationGeneration"`
+	TrafficEncryption           *bool    `json:"trafficEncryption,omitempty"`
+	NoisePublicKey              string   `json:"noisePublicKey,omitempty"`
 }
 
 type HeartbeatResponse struct {
@@ -110,26 +114,35 @@ type HeartbeatResponse struct {
 type AllocationRequest struct {
 	Envelope
 
-	SessionID       string            `json:"sessionId"`
-	Generation      uint64            `json:"generation"`
-	NetworkSpecHash string            `json:"networkSpecHash"`
-	Topology        map[string]string `json:"topology,omitempty"`
+	SessionID         string            `json:"sessionId"`
+	Generation        uint64            `json:"generation"`
+	NetworkSpecHash   string            `json:"networkSpecHash"`
+	Topology          map[string]string `json:"topology,omitempty"`
+	TrafficEncryption *bool             `json:"trafficEncryption,omitempty"`
 }
 
 type AllocationResponse struct {
 	Envelope
 
-	RelayID    string    `json:"relayId"`
-	LeaseID    string    `json:"leaseId"`
-	Endpoint   string    `json:"endpoint"`
-	AssignedAt time.Time `json:"assignedAt"`
+	RelayID           string    `json:"relayId"`
+	LeaseID           string    `json:"leaseId"`
+	Endpoint          string    `json:"endpoint"`
+	AssignedAt        time.Time `json:"assignedAt"`
+	TrafficEncryption bool      `json:"trafficEncryption,omitempty"`
+	NoisePublicKey    string    `json:"noisePublicKey,omitempty"`
 }
 
 func NewRegistrationRequest() RegistrationRequest {
 	return RegistrationRequest{
 		APIVersion: APIVersion, Kind: KindRegistrationRequest,
-		SupportedVersions: []string{APIVersion},
+		SupportedVersions: []string{APIVersionV1},
 	}
+}
+
+func NewRegistrationRequestWithNegotiation() RegistrationRequest {
+	request := NewRegistrationRequest()
+	request.SupportedVersions = []string{APIVersionV2, APIVersionV1}
+	return request
 }
 
 func NewRegistrationResponse() RegistrationResponse {
@@ -143,8 +156,16 @@ func NewHeartbeatRequest() HeartbeatRequest {
 	return HeartbeatRequest{APIVersion: APIVersion, Kind: KindHeartbeatRequest}
 }
 
+func NewHeartbeatRequestForVersion(version string) HeartbeatRequest {
+	return HeartbeatRequest{APIVersion: version, Kind: KindHeartbeatRequest}
+}
+
 func NewHeartbeatResponse() HeartbeatResponse {
 	return HeartbeatResponse{APIVersion: APIVersion, Kind: KindHeartbeatResponse}
+}
+
+func NewHeartbeatResponseForVersion(version string) HeartbeatResponse {
+	return HeartbeatResponse{APIVersion: version, Kind: KindHeartbeatResponse}
 }
 
 func NewAllocationRequest() AllocationRequest {

@@ -33,6 +33,8 @@ type Claims struct {
 	IssuedAt          int64    `json:"iat"`
 	NotBefore         int64    `json:"nbf"`
 	ExpiresAt         int64    `json:"exp"`
+	TrafficEncryption *bool    `json:"traffic_encryption,omitempty"`
+	NoisePublicKey    string   `json:"noise_public_key,omitempty"`
 }
 
 type header struct {

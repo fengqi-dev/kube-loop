@@ -26,6 +26,7 @@ type Config struct {
 	SessionTTL          time.Duration
 	SessionMaxLifetime  time.Duration
 	RelayTicketTTL      time.Duration
+	TrafficEncryption   bool
 	RelayLeaseDuration  time.Duration
 	RelayHeartbeatAfter time.Duration
 	RelayKeyValidity    time.Duration
@@ -36,7 +37,7 @@ type Config struct {
 
 func normalize(document Document) (Config, error) {
 	applyDefaults(&document)
-	result := Config{Document: document}
+	result := Config{Document: document, TrafficEncryption: document.Relay.Ticket.TrafficEncryption != nil && *document.Relay.Ticket.TrafficEncryption}
 	var err error
 	result.Kubernetes, err = normalizeKubernetesConfig(document.Kubernetes)
 	if err != nil {
@@ -128,6 +129,10 @@ func applyDefaults(document *Document) {
 	}
 	if document.Relay.Ticket.TTL == "" {
 		document.Relay.Ticket.TTL = relayticket.DefaultLifetime.String()
+	}
+	if document.Relay.Ticket.TrafficEncryption == nil {
+		value := true
+		document.Relay.Ticket.TrafficEncryption = &value
 	}
 	if document.Relay.Registry.Authentication == "" {
 		document.Relay.Registry.Authentication = "mtls"

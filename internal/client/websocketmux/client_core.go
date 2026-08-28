@@ -43,6 +43,7 @@ type ClientConfig struct {
 	PoolSize          int
 	MaxPhysical       int
 	MaxStreamsPerConn int
+	TrafficEncryption *bool
 }
 
 type pooledSession struct {

@@ -26,15 +26,18 @@ const (
 )
 
 type Config struct {
-	ListenAddress    string
-	StartTimeout     time.Duration
-	ClientVersion    string
-	TLSConfig        *tls.Config
-	TUNStarter       TUNStarter
-	RecoveryAttempts int
-	RecoveryBackoff  time.Duration
-	OnStatus         func(StatusEvent)
-	Logger           *slog.Logger
+	ListenAddress string
+	StartTimeout  time.Duration
+	ClientVersion string
+	TLSConfig     *tls.Config
+	// TrafficEncryption controls the client-to-Gateway traffic stream.
+	// nil means enabled; a false value is an explicit compatibility opt-out.
+	TrafficEncryption *bool
+	TUNStarter        TUNStarter
+	RecoveryAttempts  int
+	RecoveryBackoff   time.Duration
+	OnStatus          func(StatusEvent)
+	Logger            *slog.Logger
 	// TrafficInspection enables the optional goproxy-backed HTTP inspection
 	// branch. Non-inspectable traffic remains on the normal SOCKS path.
 	TrafficInspection TrafficInspectionConfig
@@ -74,9 +77,11 @@ type localBridge interface {
 }
 
 type openedTransport struct {
-	forwarder streamForwarder
-	control   net.Conn
-	token     tunnel.SessionToken
+	forwarder         streamForwarder
+	control           net.Conn
+	token             tunnel.SessionToken
+	trafficEncryption bool
+	noisePublicKey    []byte
 }
 
 type transportStreams struct {
@@ -120,19 +125,22 @@ type Runtime struct {
 	hostAliases  []singbox.HostAlias
 	config       Config
 
-	closeOnce     sync.Once
-	closeErr      error
-	done          chan struct{}
-	stateMu       sync.Mutex
-	transportMu   sync.Mutex
-	transportDone chan struct{}
-	transportErr  error
-	streams       map[chan struct{}]*transportStreams
-	transportWG   sync.WaitGroup
-	errMu         sync.Mutex
-	err           error
-	logMu         sync.Mutex
-	socksLogs     []string
+	closeOnce            sync.Once
+	closeErr             error
+	done                 chan struct{}
+	stateMu              sync.Mutex
+	transportMu          sync.Mutex
+	transportDone        chan struct{}
+	transportErr         error
+	trafficEncryption    bool
+	trafficEncryptionSet bool
+	noisePublicKey       []byte
+	streams              map[chan struct{}]*transportStreams
+	transportWG          sync.WaitGroup
+	errMu                sync.Mutex
+	err                  error
+	logMu                sync.Mutex
+	socksLogs            []string
 }
 
 type Status struct {

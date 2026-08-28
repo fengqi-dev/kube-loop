@@ -79,6 +79,9 @@ func startWithLifetime(
 			NetworkSpecHash: session.NetworkSpecHash,
 		},
 	}
+	runtime.trafficEncryption = transport.trafficEncryption
+	runtime.trafficEncryptionSet = true
+	runtime.noisePublicKey = append([]byte(nil), transport.noisePublicKey...)
 	bridge.SetLogHandler(runtime.appendSOCKSLog)
 	runtime.appendSOCKSLog("listening on " + bridge.Addr().String())
 	runtime.startControlWatch(transport.control, runtime.transportDone)

@@ -106,6 +106,8 @@ func (routes *Routes) issue(
 	if err := ctx.JSON(http.StatusCreated, issueResponse{
 		TokenType: ticket.TokenType, Ticket: ticket.Value, ExpiresAt: ticket.ExpiresAt,
 		DeviceID: ticket.DeviceID, RelayID: ticket.RelayID, Endpoint: ticket.Endpoint,
+		TrafficEncryption: ticket.TrafficEncryption,
+		NoisePublicKey:    ticket.NoisePublicKey,
 	}); err != nil {
 		return &controlplaneapi.Error{
 			Code:    controlplaneapi.CodeInternal,

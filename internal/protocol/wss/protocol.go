@@ -7,12 +7,13 @@ import (
 )
 
 const (
-	Version                    = "2.0"
-	Subprotocol                = "kubeloop-mux-v2"
-	VersionHeader              = "KubeLoop-WSS-Version"
-	CapabilityTrafficWebSocket = "traffic.websocket.v1"
-	MaximumHandshakeBytes      = 8 << 10
-	DefaultHandshakeTimeout    = 10 * time.Second
+	Version                     = "2.0"
+	Subprotocol                 = "kubeloop-mux-v2"
+	VersionHeader               = "KubeLoop-WSS-Version"
+	CapabilityTrafficWebSocket  = "traffic.websocket.v1"
+	CapabilityTrafficEncryption = "traffic.noise.v1"
+	MaximumHandshakeBytes       = 8 << 10
+	DefaultHandshakeTimeout     = 10 * time.Second
 
 	KindClientHello = "client_hello"
 	KindServerHello = "server_hello"
@@ -22,6 +23,7 @@ const (
 	CodeClientVersionUnsupported = "CLIENT_VERSION_UNSUPPORTED"
 	CodeDeviceMismatch           = "DEVICE_MISMATCH"
 	CodeInvalidHandshake         = "INVALID_HANDSHAKE"
+	CodeEncryptionMismatch       = "ENCRYPTION_MISMATCH"
 	CodeUserCapacityExceeded     = "USER_CAPACITY_EXCEEDED"
 )
 
@@ -84,6 +86,7 @@ func NewClientHello(clientVersion, deviceID string) ClientHello {
 			"ping-pong",
 			"smux.v2",
 			CapabilityTrafficWebSocket,
+			CapabilityTrafficEncryption,
 			"tunnel.open.v2",
 		},
 	}
@@ -103,6 +106,7 @@ func NewServerHello(serverVersion string, limits Limits) ServerHello {
 			"ping-pong",
 			"smux.v2",
 			CapabilityTrafficWebSocket,
+			CapabilityTrafficEncryption,
 			"tunnel.open.v2",
 		},
 		Limits: limits,

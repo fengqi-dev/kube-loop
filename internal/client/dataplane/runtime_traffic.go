@@ -35,6 +35,11 @@ func (runtime *Runtime) OpenTrafficStream(
 	control := runtime.control
 	token := runtime.token
 	transportDone := runtime.transportDone
+	encryptionEnabled := runtime.trafficEncryption
+	if !runtime.trafficEncryptionSet {
+		encryptionEnabled = true
+	}
+	noisePublicKey := append([]byte(nil), runtime.noisePublicKey...)
 	runtime.transportMu.Unlock()
 
 	connection, err := forwarder.OpenStream(ctx)
@@ -91,7 +96,16 @@ func (runtime *Runtime) OpenTrafficStream(
 	if !current {
 		return nil, errors.New("data Plane transport changed while opening Traffic Task stream")
 	}
-	framed, err := trafficstream.Dial(ctx, connection)
+	var framed *trafficstream.FrameConn
+	if encryptionEnabled && len(noisePublicKey) == 0 {
+		// Legacy in-process callers predate authenticated key distribution.
+		// Production RelayTickets always carry the pinned Gateway key.
+		framed, err = trafficstream.DialWithEncryption(ctx, connection, true)
+	} else {
+		framed, err = trafficstream.DialWithEncryptionPeer(
+			ctx, connection, encryptionEnabled, noisePublicKey,
+		)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("upgrade Traffic Task stream to WebSocket: %w", err)
 	}

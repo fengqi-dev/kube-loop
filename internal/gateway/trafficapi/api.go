@@ -10,6 +10,7 @@ import (
 
 	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficcontrol"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
+	"github.com/fengqi-dev/kube-loop/internal/transport/trafficstream"
 )
 
 type ControlPlaneClient interface {
@@ -24,6 +25,8 @@ type Config struct {
 	HeartbeatEvery           time.Duration
 	UDPIdleTimeout           time.Duration
 	ShutdownTimeout          time.Duration
+	TrafficEncryption        *bool
+	NoiseStaticKey           *trafficstream.NoiseStaticKeypair
 }
 
 // API serves reverse traffic Tasks on authenticated logical tunnel streams.
@@ -46,6 +49,21 @@ func New(config Config) (*API, error) {
 	}
 	if config.ShutdownTimeout == 0 {
 		config.ShutdownTimeout = 5 * time.Second
+	}
+	legacyUnpinnedEncryption := config.TrafficEncryption == nil
+	if legacyUnpinnedEncryption {
+		enabled := true
+		config.TrafficEncryption = &enabled
+	}
+	if *config.TrafficEncryption && config.NoiseStaticKey == nil {
+		if !legacyUnpinnedEncryption {
+			return nil, errors.New("gateway traffic API Noise static key is required")
+		}
+		key, err := trafficstream.GenerateNoiseStaticKeypair()
+		if err != nil {
+			return nil, errors.New("generate gateway traffic API Noise static key")
+		}
+		config.NoiseStaticKey = &key
 	}
 	return &API{config: config}, nil
 }

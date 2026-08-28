@@ -101,6 +101,11 @@ func (forwarder *Forwarder) dial() (result *pooledSession, resultErr error) {
 	connection.SetReadLimit(wss.MaximumHandshakeBytes)
 	handshakeCtx, cancelHandshake := context.WithTimeout(dialCtx, forwarder.config.HandshakeTimeout)
 	hello := wss.NewClientHello(forwarder.config.ClientVersion, forwarder.config.DeviceID)
+	if forwarder.config.TrafficEncryption != nil && !*forwarder.config.TrafficEncryption {
+		hello.Capabilities = slices.DeleteFunc(hello.Capabilities, func(value string) bool {
+			return value == wss.CapabilityTrafficEncryption
+		})
+	}
 	hello.ProtocolVersions = append([]string(nil), forwarder.config.SupportedVersions...)
 	if err := wss.Write(handshakeCtx, connection, hello); err != nil {
 		cancelHandshake()
@@ -127,10 +132,12 @@ func (forwarder *Forwarder) dial() (result *pooledSession, resultErr error) {
 		}
 	}
 	serverHello := message.ServerHello
+	encryptionEnabled := forwarder.config.TrafficEncryption == nil || *forwarder.config.TrafficEncryption
 	if serverHello == nil || !slices.Contains(hello.ProtocolVersions, serverHello.ProtocolVersion) ||
 		!slices.Contains(serverHello.Capabilities, "smux.v2") ||
 		!slices.Contains(serverHello.Capabilities, "tunnel.open.v2") ||
-		!slices.Contains(serverHello.Capabilities, wss.CapabilityTrafficWebSocket) {
+		!slices.Contains(serverHello.Capabilities, wss.CapabilityTrafficWebSocket) ||
+		slices.Contains(serverHello.Capabilities, wss.CapabilityTrafficEncryption) != encryptionEnabled {
 		_ = closeWebSocket(connection, websocket.ClosePolicyViolation, "INVALID_HANDSHAKE")
 		return nil, errors.New("gateway returned an incompatible WSS ServerHello")
 	}

@@ -8,20 +8,25 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/flynn/noise"
 	"github.com/gorilla/websocket"
 )
 
 const (
 	MaximumFrameBytes = 14 + (256 << 10)
 	Subprotocol       = "kubeloop.traffic.v1"
+	noiseOverhead     = 16
+	maximumCiphertext = MaximumFrameBytes + noiseOverhead
 )
 
 // FrameConn transports one binary WebSocket message at a time. It permits one
 // concurrent reader and any number of concurrent writers.
 type FrameConn struct {
-	conn      *websocket.Conn
-	readGate  chan struct{}
-	writeGate chan struct{}
+	conn       *websocket.Conn
+	readGate   chan struct{}
+	writeGate  chan struct{}
+	writeState *noise.CipherState
+	readState  *noise.CipherState
 }
 
 func newFrameConn(connection *websocket.Conn) *FrameConn {
@@ -57,9 +62,24 @@ func (connection *FrameConn) ReadFrame(ctx context.Context) ([]byte, error) {
 		_ = connection.conn.Close()
 		return nil, errors.New("traffic WebSocket message must be binary")
 	}
-	if len(frame) == 0 || len(frame) > MaximumFrameBytes {
+	maximumFrame := MaximumFrameBytes
+	if connection.readState != nil {
+		maximumFrame = maximumCiphertext
+	}
+	if len(frame) == 0 || len(frame) > maximumFrame {
 		_ = connection.conn.Close()
 		return nil, fmt.Errorf("traffic frame size %d is outside 1..%d", len(frame), MaximumFrameBytes)
+	}
+	if connection.readState != nil {
+		frame, err = connection.readState.Decrypt(nil, frameAssociatedData, frame)
+		if err != nil {
+			_ = connection.conn.Close()
+			return nil, fmt.Errorf("decrypt Traffic WebSocket message: %w", err)
+		}
+		if len(frame) == 0 || len(frame) > MaximumFrameBytes {
+			_ = connection.conn.Close()
+			return nil, fmt.Errorf("decrypted traffic frame size %d is invalid", len(frame))
+		}
 	}
 	return frame, nil
 }
@@ -83,10 +103,43 @@ func (connection *FrameConn) WriteFrame(ctx context.Context, frame []byte) error
 		return err
 	}
 	defer clearDeadline()
+	if connection.writeState != nil {
+		frame, err = connection.writeState.Encrypt(nil, frameAssociatedData, frame)
+		if err != nil {
+			return fmt.Errorf("encrypt Traffic WebSocket message: %w", err)
+		}
+	}
 	if err := connection.conn.WriteMessage(websocket.BinaryMessage, frame); err != nil {
 		return operationError(ctx, "write Traffic WebSocket message", err)
 	}
 	return nil
+}
+
+var frameAssociatedData = []byte("kubeloop.traffic.v1/frame")
+
+func newSecureFrameConn(
+	ctx context.Context,
+	connection *websocket.Conn,
+	initiator, enabled bool,
+	staticKey *NoiseStaticKeypair,
+	expectedPeerStatic, prologue []byte,
+) (*FrameConn, error) {
+	if enabled {
+		connection.SetReadLimit(noise.MaxMsgLen)
+		writeState, readState, err := noiseHandshake(
+			ctx, connection, initiator, staticKey, expectedPeerStatic, prologue,
+		)
+		if err != nil {
+			_ = connection.Close()
+			return nil, err
+		}
+		connection.SetReadLimit(maximumCiphertext)
+		return &FrameConn{
+			conn: connection, readGate: newOperationGate(), writeGate: newOperationGate(),
+			writeState: writeState, readState: readState,
+		}, nil
+	}
+	return newFrameConn(connection), nil
 }
 
 func (connection *FrameConn) Close() error {

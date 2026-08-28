@@ -63,6 +63,7 @@ data:
           signingKeyFile: "/var/run/secrets/kubeloop/auth/relay/signing-key.pem"
           keyID: {{ .Values.controlPlane.relay.keyID | quote }}
           ttl: {{ .Values.controlPlane.relay.ticketTTL | quote }}
+          trafficEncryption: {{ ternary true false .Values.controlPlane.relay.trafficEncryption }}
         registry:
           listen: {{ printf ":%v" .Values.controlPlane.relayRegistry.listenPort | quote }}
           certificateFile: "/var/run/secrets/kubeloop/relay-registry/tls.crt"
@@ -121,6 +122,7 @@ data:
         "maxSessionsPerUser" (int .Values.dataPlane.relayRegistry.maxWebSocketSessionsPerUser)
         "maxStreamsPerSession" (int .Values.dataPlane.relayRegistry.maxStreamsPerSession)
         "maxFrameBytes" (int64 .Values.dataPlane.relayRegistry.maxWebSocketFrameBytes)
+        "trafficEncryption" (ternary true false .Values.controlPlane.relay.trafficEncryption)
         "handshakeTimeout" .Values.dataPlane.relayRegistry.handshakeTimeout
         "streamIdleTimeout" .Values.dataPlane.streamIdleTimeout)
       "minClientVersion" .Values.controlPlane.minClientVersion

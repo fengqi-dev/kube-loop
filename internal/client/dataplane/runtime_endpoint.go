@@ -55,7 +55,9 @@ func newAssignmentTokenSource(
 				return "", err
 			}
 			if ticket.Endpoint != initial.Endpoint || ticket.RelayID != initial.RelayID ||
-				ticket.DeviceID != initial.DeviceID {
+				ticket.DeviceID != initial.DeviceID ||
+				!equalOptionalBool(ticket.TrafficEncryption, initial.TrafficEncryption) ||
+				ticket.NoisePublicKey != initial.NoisePublicKey {
 				return "", errors.New("relay assignment changed while opening a WebSocket pool")
 			}
 		}
@@ -64,6 +66,13 @@ func newAssignmentTokenSource(
 		}
 		return ticket.Ticket, nil
 	}
+}
+
+func equalOptionalBool(left, right *bool) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return *left == *right
 }
 
 func URL(serverProfile profile.Profile) (string, error) {
