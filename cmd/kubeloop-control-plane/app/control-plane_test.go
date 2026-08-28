@@ -11,8 +11,8 @@ import (
 
 	"github.com/spf13/pflag"
 
-	"github.com/fengqi-dev/kube-loop/cmd/kubeloop-control-plane/app/options"
 	"github.com/fengqi-dev/kube-loop/internal/buildinfo"
+	options "github.com/fengqi-dev/kube-loop/internal/controlplane/config"
 )
 
 var testBuildInfo = buildinfo.Info{Version: "1.2.3", Commit: "abc123", BuildDate: "2026-08-27"}

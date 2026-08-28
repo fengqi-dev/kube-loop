@@ -11,14 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/fengqi-dev/kube-loop/internal/buildinfo"
-	"github.com/fengqi-dev/kube-loop/internal/helper"
-	helperinstall "github.com/fengqi-dev/kube-loop/internal/helper/install"
-	"github.com/fengqi-dev/kube-loop/internal/supervisor"
-)
-
-const (
-	channelDev     = "dev"
-	channelRelease = "release"
+	supervisorapp "github.com/fengqi-dev/kube-loop/internal/supervisorapp"
 )
 
 // NewSupervisorCommand returns the kubeloop-supervisor cobra command.
@@ -51,30 +44,22 @@ func newSupervisorCommand(info buildinfo.Info) *cobra.Command {
 }
 
 func newSupervisorRunCommand() *cobra.Command {
-	channel := channelRelease
+	channel := supervisorapp.ChannelRelease
 	command := &cobra.Command{
 		Use:   "run",
 		Short: "Run the supervisor service",
 		Args:  cobra.NoArgs,
 		RunE: func(command *cobra.Command, _ []string) error {
-			if err := configureChannel(channel, ""); err != nil {
-				return err
-			}
-			config := supervisor.CurrentConfig()
-			auth, err := supervisor.ReadAuth(config)
-			if err != nil {
-				return err
-			}
 			signalContext, stopSignals := signal.NotifyContext(
 				command.Context(),
 				os.Interrupt,
 				syscall.SIGTERM,
 			)
 			defer stopSignals()
-			return supervisor.NewServer(config, auth, nil).Serve(signalContext)
+			return supervisorapp.Run(signalContext, channel)
 		},
 	}
-	command.Flags().StringVar(&channel, "channel", channelRelease, "installation channel")
+	command.Flags().StringVar(&channel, "channel", supervisorapp.ChannelRelease, "installation channel")
 	return command
 }
 
@@ -97,16 +82,11 @@ func newSupervisorInstallCommand() *cobra.Command {
 			return nil
 		},
 		RunE: func(*cobra.Command, []string) error {
-			if err := configureChannel(channel, workerVersion); err != nil {
-				return err
-			}
-			if err := supervisor.VerifyFileSHA256(worker, workerSHA); err != nil {
-				return fmt.Errorf("worker: %w", err)
-			}
-			if err := helperinstall.InstallFromCLI(worker, token, uid, workerVersion, home, "", singBox); err != nil {
-				return err
-			}
-			return supervisor.Install(source, sha, token, uid)
+			return supervisorapp.InstallRelease(supervisorapp.InstallOptions{
+				Source: source, SHA256: sha, Worker: worker, WorkerSHA256: workerSHA,
+				WorkerVersion: workerVersion, Channel: channel, Token: token,
+				UID: uid, Home: home, SingBox: singBox,
+			})
 		},
 	}
 	command.Flags().StringVar(&source, "source", "", "supervisor source")
@@ -120,27 +100,4 @@ func newSupervisorInstallCommand() *cobra.Command {
 	command.Flags().StringVar(&home, "home", "", "authorized home")
 	command.Flags().StringVar(&singBox, "sing-box", "", "sing-box path")
 	return command
-}
-
-func configureChannel(channel, workerVersion string) error {
-	switch channel {
-	case channelDev:
-		if workerVersion != "" && workerVersion != channelDev {
-			return fmt.Errorf("dev channel requires a dev worker, got %q", workerVersion)
-		}
-		helper.Version = channelDev
-		supervisor.Version = channelDev
-	case channelRelease:
-		if workerVersion == channelDev {
-			return fmt.Errorf("release channel cannot install a dev worker")
-		}
-		helper.Version = workerVersion
-		if helper.Version == "" {
-			helper.Version = channelRelease
-		}
-		supervisor.Version = channelRelease
-	default:
-		return fmt.Errorf("unsupported supervisor channel %q", channel)
-	}
-	return nil
 }

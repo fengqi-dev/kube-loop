@@ -12,6 +12,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/buildinfo"
 	"github.com/fengqi-dev/kube-loop/internal/helper"
 	"github.com/fengqi-dev/kube-loop/internal/supervisor"
+	supervisorapp "github.com/fengqi-dev/kube-loop/internal/supervisorapp"
 )
 
 var testBuildInfo = buildinfo.Info{Version: "1.2.3"}
@@ -61,14 +62,14 @@ func TestConfigureChannelUsesWorkerChannelInsteadOfSupervisorBinaryVersion(t *te
 		supervisor.Version = originalSupervisorVersion
 	})
 
-	if err := configureChannel("dev", "dev"); err != nil {
+	if err := supervisorapp.ConfigureChannel(supervisorapp.ChannelDev, supervisorapp.ChannelDev); err != nil {
 		t.Fatal(err)
 	}
 	if helper.Version != "dev" || supervisor.CurrentConfig().Channel != "dev" {
 		t.Fatalf("dev channel selected helper=%q supervisor=%q", helper.Version, supervisor.CurrentConfig().Channel)
 	}
 
-	if err := configureChannel("release", "v2.1.1"); err != nil {
+	if err := supervisorapp.ConfigureChannel(supervisorapp.ChannelRelease, "v2.1.1"); err != nil {
 		t.Fatal(err)
 	}
 	if helper.Version != "v2.1.1" || supervisor.CurrentConfig().Channel != "release" {
@@ -77,10 +78,10 @@ func TestConfigureChannelUsesWorkerChannelInsteadOfSupervisorBinaryVersion(t *te
 }
 
 func TestConfigureChannelRejectsWorkerChannelMismatch(t *testing.T) {
-	if err := configureChannel("dev", "v2.1.1"); err == nil {
+	if err := supervisorapp.ConfigureChannel(supervisorapp.ChannelDev, "v2.1.1"); err == nil {
 		t.Fatal("dev channel accepted release worker")
 	}
-	if err := configureChannel("release", "dev"); err == nil {
+	if err := supervisorapp.ConfigureChannel(supervisorapp.ChannelRelease, supervisorapp.ChannelDev); err == nil {
 		t.Fatal("release channel accepted dev worker")
 	}
 }

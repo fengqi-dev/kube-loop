@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/fengqi-dev/kube-loop/internal/buildinfo"
+	tuiruntime "github.com/fengqi-dev/kube-loop/internal/tui/runtime"
 )
 
 var testBuildInfo = buildinfo.Info{Version: "1.2.3"}
@@ -57,7 +58,7 @@ func TestSilenceTUIProcessLogsRestoresDefaults(t *testing.T) {
 	var output bytes.Buffer
 	slog.SetDefault(slog.New(slog.NewTextHandler(&output, nil)))
 	log.SetOutput(&output)
-	restore := silenceTUIProcessLogs()
+	restore := tuiruntime.SilenceProcessLogs()
 	slog.Info("hidden structured output")
 	log.Print("hidden standard output")
 	restore()

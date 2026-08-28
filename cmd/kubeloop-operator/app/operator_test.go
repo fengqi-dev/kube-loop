@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/fengqi-dev/kube-loop/internal/buildinfo"
+	operatorruntime "github.com/fengqi-dev/kube-loop/internal/operator/runtime"
 )
 
 var testBuildInfo = buildinfo.Info{Version: "1.2.3"}
@@ -60,7 +61,7 @@ func TestOperatorCommandDefaults(t *testing.T) {
 	config := newOperatorConfigResolver()
 	_ = newOperatorCommandWithConfig(config, testBuildInfo)
 	options := operatorOptionsFrom(config)
-	if options.metricsAddress != "0" || options.probeAddress != ":8081" || !options.secureMetrics {
+	if options.MetricsAddress != "0" || options.ProbeAddress != ":8081" || !options.SecureMetrics {
 		t.Fatalf("operator defaults = %#v", options)
 	}
 }
@@ -81,7 +82,7 @@ func TestOperatorViperReadsEnvironmentAndFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	options := operatorOptionsFrom(config)
-	if options.metricsAddress != ":9443" || !options.leaderElection || options.secureMetrics {
+	if options.MetricsAddress != ":9443" || !options.LeaderElection || options.SecureMetrics {
 		t.Fatalf("operator options = %#v", options)
 	}
 }
@@ -98,7 +99,7 @@ func TestOperatorFlagOverridesEnvironmentAndFile(t *testing.T) {
 	}
 	config := newOperatorConfigResolver()
 	command := newOperatorCommandWithConfig(config, testBuildInfo)
-	var got operatorOptions
+	var got operatorruntime.Options
 	command.RunE = func(*cobra.Command, []string) error {
 		got = operatorOptionsFrom(config)
 		return nil
@@ -109,7 +110,7 @@ func TestOperatorFlagOverridesEnvironmentAndFile(t *testing.T) {
 		[]string{"--config", configFile, "--metrics-bind-address", ":7443"},
 		&stdout, &stderr,
 	)
-	if code != 0 || got.metricsAddress != ":7443" || !got.leaderElection {
+	if code != 0 || got.MetricsAddress != ":7443" || !got.LeaderElection {
 		t.Fatalf("exit=%d options=%#v stderr=%q", code, got, stderr.String())
 	}
 }
