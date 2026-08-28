@@ -20,6 +20,7 @@ COPY cmd/kubeloop-operator ./cmd/kubeloop-operator
 COPY api ./api
 COPY internal/buildinfo ./internal/buildinfo
 COPY internal/controller ./internal/controller
+COPY internal/operator ./internal/operator
 
 # Build
 # the GOARCH has no default value to allow the binary to be built according to the host where the command

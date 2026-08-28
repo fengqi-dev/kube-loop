@@ -8,6 +8,9 @@
 !internal/controller
 !internal/controller/**/*.go
 internal/controller/**/*_test.go
+!internal/operator
+!internal/operator/**/*.go
+internal/operator/**/*_test.go
 !cmd
 !cmd/kubeloop-operator
 !cmd/kubeloop-operator/**/*.go
