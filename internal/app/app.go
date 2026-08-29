@@ -24,10 +24,12 @@ import (
 func NewApp(version string, embeddedHelperFiles fs.FS) *App {
 	profilePath := strings.TrimSpace(os.Getenv("KUBELOOP_PROFILE_PATH"))
 	trafficInspection, trafficInspectionEnabled := newTrafficInspection()
+	trafficInspectionEvents := trafficinspect.NewEventBuffer(2_000)
 	return newApp(version, embeddedHelperFiles, appDependencies{
 		profilePath:              profilePath,
 		trafficInspection:        trafficInspection,
 		trafficInspectionEnabled: trafficInspectionEnabled,
+		trafficInspectionEvents:  trafficInspectionEvents,
 	})
 }
 
@@ -102,6 +104,7 @@ func newApp(version string, embeddedHelperFiles fs.FS, dependencies appDependenc
 		trafficInspectionEnabled:  dependencies.trafficInspectionEnabled,
 		trafficInspectionSettings: trafficInspectionSettings,
 		trafficInspectionProtobuf: trafficInspectionProtobuf,
+		trafficInspectionEvents:   dependencies.trafficInspectionEvents,
 		trafficInspectionCAPath: firstNonEmpty(
 			dependencies.trafficInspection.AuthorityPath,
 			filepath.Join(layout.SecretsDir(), "inspection-ca.pem"),
@@ -111,6 +114,9 @@ func newApp(version string, embeddedHelperFiles fs.FS, dependencies appDependenc
 			CurrentVersion: version,
 			URL:            releaseURL,
 		},
+	}
+	if application.trafficInspectionEvents != nil {
+		dependencies.trafficInspection.OnEvent = application.trafficInspectionEvents.Append
 	}
 	if trafficInspectionSettingsErr != nil {
 		application.appendLog("ERROR", "Traffic inspection settings unavailable: "+trafficInspectionSettingsErr.Error())

@@ -14,6 +14,26 @@ func TestTrafficInspectionEventsDisabled(t *testing.T) {
 	}
 }
 
+func TestTrafficInspectionEventsReturnsNewestMatchingEvents(t *testing.T) {
+	enabled := testTrafficInspectionEnabled(t, true)
+	events := trafficinspect.NewEventBuffer(4)
+	events.Append(trafficinspect.Event{
+		ID: "old", Destination: "10.0.0.1:443",
+		HTTP: &trafficinspect.HTTPEvent{Host: "api.example", Path: "/old"},
+	})
+	events.Append(trafficinspect.Event{
+		ID: "new", Destination: "10.0.0.1:443",
+		HTTP: &trafficinspect.HTTPEvent{Host: "api.example", Path: "/users"},
+	})
+	application := &App{trafficInspectionEnabled: enabled, trafficInspectionEvents: events}
+	result := application.TrafficInspectionEvents(TrafficInspectionQuery{
+		Host: "API.EXAMPLE", Path: "/users", Limit: 1,
+	})
+	if !result.Enabled || len(result.Events) != 1 || result.Events[0].ID != "new" {
+		t.Fatalf("traffic inspection result = %#v", result)
+	}
+}
+
 func TestSetTrafficInspectionEnabledPersistsAndAppliesImmediately(t *testing.T) {
 	directory := t.TempDir()
 	settingsStore, err := trafficinspect.NewSettingsStore(filepath.Join(directory, "traffic-inspection.json"))

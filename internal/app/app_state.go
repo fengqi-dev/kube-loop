@@ -60,6 +60,7 @@ type App struct {
 	trafficInspectionEnabled  *atomic.Bool
 	trafficInspectionSettings *trafficinspect.SettingsStore
 	trafficInspectionProtobuf *trafficinspect.ProtobufSchemaStore
+	trafficInspectionEvents   *trafficinspect.EventBuffer
 	trafficInspectionMu       sync.Mutex
 	trafficInspectionReady    func() bool
 	trafficInspectionCAPath   string

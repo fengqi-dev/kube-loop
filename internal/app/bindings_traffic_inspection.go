@@ -3,6 +3,7 @@ package app
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
@@ -24,6 +25,11 @@ type TrafficInspectionSettings struct {
 	Enabled       bool     `json:"enabled"`
 	ProtobufFiles []string `json:"protobufFiles"`
 }
+
+const (
+	defaultTrafficInspectionLimit = 200
+	maximumTrafficInspectionLimit = 500
+)
 
 func (a *App) GetTrafficInspectionSettings() TrafficInspectionSettings {
 	settings := TrafficInspectionSettings{
@@ -89,13 +95,45 @@ func (a *App) SetTrafficInspectionEnabled(enabled bool) (TrafficInspectionSettin
 	return a.GetTrafficInspectionSettings(), nil
 }
 
-// TrafficInspectionEvents preserves the frontend API shape. Events are no
-// longer buffered by the application after inspection sinks were removed.
+// TrafficInspectionEvents returns the newest decoded application events.
 func (a *App) TrafficInspectionEvents(query TrafficInspectionQuery) TrafficInspectionResult {
-	_ = query
 	result := TrafficInspectionResult{Events: make([]trafficinspect.Event, 0)}
-	if a != nil && a.trafficInspectionEnabled != nil {
-		result.Enabled = a.trafficInspectionEnabled.Load()
+	if a == nil || a.trafficInspectionEnabled == nil || a.trafficInspectionEvents == nil {
+		return result
+	}
+	result.Enabled = a.trafficInspectionEnabled.Load()
+	if !result.Enabled {
+		return result
+	}
+	host := strings.ToLower(strings.TrimSpace(query.Host))
+	path := strings.ToLower(strings.TrimSpace(query.Path))
+	limit := query.Limit
+	if limit <= 0 {
+		limit = defaultTrafficInspectionLimit
+	} else if limit > maximumTrafficInspectionLimit {
+		limit = maximumTrafficInspectionLimit
+	}
+	events := a.trafficInspectionEvents.Snapshot()
+	for index := len(events) - 1; index >= 0 && len(result.Events) < limit; index-- {
+		event := events[index]
+		if !trafficEventMatches(event, host, path) {
+			continue
+		}
+		result.Events = append(result.Events, event)
 	}
 	return result
+}
+
+func trafficEventMatches(event trafficinspect.Event, host, path string) bool {
+	hostValue := event.Destination
+	pathValue := ""
+	if event.HTTP != nil {
+		hostValue += " " + event.HTTP.Host
+		pathValue = event.HTTP.Path
+	}
+	if event.GRPC != nil {
+		pathValue = event.GRPC.Path
+	}
+	return strings.Contains(strings.ToLower(hostValue), host) &&
+		strings.Contains(strings.ToLower(pathValue), path)
 }

@@ -9,6 +9,7 @@ import (
 
 	"github.com/fengqi-dev/kube-loop/internal/client/credentials"
 	clientdataplane "github.com/fengqi-dev/kube-loop/internal/client/dataplane"
+	"github.com/fengqi-dev/kube-loop/internal/trafficinspect"
 	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
@@ -18,6 +19,7 @@ type appDependencies struct {
 	httpClient               *http.Client
 	trafficInspection        clientdataplane.TrafficInspectionConfig
 	trafficInspectionEnabled *atomic.Bool
+	trafficInspectionEvents  *trafficinspect.EventBuffer
 }
 
 func appUserLayout(version, profilePath string) (utils.Layout, error) {
