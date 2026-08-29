@@ -190,6 +190,7 @@ func TestGatewayPodRestartRecoversDataPlane(t *testing.T) {
 	deviceID := "e2e-device-a"
 	source := &e2eSessionSource{
 		signer: signer, session: session, identityID: identityID, deviceID: deviceID,
+		trafficEncryption: new(false),
 	}
 	controlPlane := startPortForwardControlPlane(
 		t, ctx, kubeRESTConfig(t), proxy.Address(), "e2e", identityID, deviceID, session,
@@ -408,6 +409,7 @@ func TestGatewayPodRestartRecoversDataPlane(t *testing.T) {
 	secondSession.Generation = 1
 	secondSource := &e2eSessionSource{
 		signer: signer, session: secondSession, identityID: uuid.NewString(), deviceID: "e2e-device-b",
+		trafficEncryption: new(false),
 	}
 	secondManager, err := clientdataplane.NewManager(secondSource, clientdataplane.Config{
 		StartTimeout: 10 * time.Second, RecoveryAttempts: 3, RecoveryBackoff: 200 * time.Millisecond,
@@ -679,12 +681,13 @@ func (proxy *loopbackProxy) accept() {
 }
 
 type e2eSessionSource struct {
-	mu         sync.Mutex
-	signer     *relayticket.Signer
-	session    clientremote.Session
-	identityID string
-	deviceID   string
-	tickets    int
+	mu                sync.Mutex
+	signer            *relayticket.Signer
+	session           clientremote.Session
+	identityID        string
+	deviceID          string
+	trafficEncryption *bool
+	tickets           int
 }
 
 type recordingTUNStarter struct {
@@ -779,12 +782,14 @@ func (source *e2eSessionSource) RelayTicketSource(string) func(context.Context) 
 			IssuedAt:          now.Unix(),
 			NotBefore:         now.Unix(),
 			ExpiresAt:         now.Add(time.Minute).Unix(),
+			TrafficEncryption: source.trafficEncryption,
 		})
 		if err == nil {
 			source.tickets++
 		}
 		return clientremote.RelayTicket{
 			TokenType: relayticket.Type, Ticket: ticket, ExpiresAt: now.Add(time.Minute), DeviceID: source.deviceID,
+			TrafficEncryption: source.trafficEncryption,
 		}, err
 	}
 }
@@ -805,7 +810,7 @@ func assertCrossSessionRejected(
 			ticket, err := ticketSource(ctx)
 			return ticket.Ticket, err
 		},
-		PoolSize: 1, MaxPhysical: 1,
+		PoolSize: 1, MaxPhysical: 1, TrafficEncryption: source.trafficEncryption,
 	})
 	if err != nil {
 		t.Fatalf("open cross-Session isolation transport: %v", err)
@@ -1044,7 +1049,7 @@ func installGatewayWithLimits(
 	const name = "kubeloop-gateway"
 	labels := map[string]string{"app.kubernetes.io/name": name, "app.kubernetes.io/component": "data-plane"}
 	controlPlaneURL, serverCA := startRelayRegistryFixture(t, publicKey)
-	websocketConfig := map[string]any{}
+	websocketConfig := map[string]any{"trafficEncryption": false}
 	if limits != nil {
 		websocketConfig["maxSessions"] = limits.maxSessions
 		websocketConfig["maxSessionsPerUser"] = limits.maxSessionsPerUser

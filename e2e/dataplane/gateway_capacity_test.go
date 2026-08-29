@@ -292,7 +292,10 @@ func startCapacityPodClient(
 		CreatedAt: now, UpdatedAt: now, LastHeartbeatAt: now, ExpiresAt: now.Add(5 * time.Minute),
 		NetworkSpec: spec, NetworkSpecHash: specHash,
 	}
-	source := &e2eSessionSource{signer: signer, session: session, identityID: identityID, deviceID: deviceID}
+	source := &e2eSessionSource{
+		signer: signer, session: session, identityID: identityID, deviceID: deviceID,
+		trafficEncryption: new(false),
+	}
 	ticketSource := source.RelayTicketSource("capacity")
 	forwarder, err := websocketmux.Start(ctx, websocketmux.ClientConfig{
 		URL: "ws://" + gatewayAddress + testPath, DeviceID: deviceID,
@@ -301,6 +304,7 @@ func startCapacityPodClient(
 			return ticket.Ticket, err
 		},
 		PoolSize: 1, MaxPhysical: 1, MaxStreamsPerConn: capacityStreamsPerWSS,
+		TrafficEncryption: source.trafficEncryption,
 	})
 	if err != nil {
 		t.Fatalf("connect capacity client: %v", err)
@@ -340,12 +344,14 @@ func assertCapacityConnectionRejected(
 		IdentityID: identityID, DeviceID: deviceID, SessionID: uuid.NewString(), SessionGeneration: 1,
 		Namespace: namespace, Operations: []string{"tunnel"}, NetworkSpecHash: specHash,
 		TicketID: uuid.NewString(), IssuedAt: now.Unix(), NotBefore: now.Unix(), ExpiresAt: now.Add(time.Minute).Unix(),
+		TrafficEncryption: new(false),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	forwarder, err := websocketmux.Start(ctx, websocketmux.ClientConfig{
 		URL: "ws://" + gatewayAddress + testPath, Token: ticket, DeviceID: deviceID, PoolSize: 1, MaxPhysical: 1,
+		TrafficEncryption: new(false),
 	})
 	if forwarder != nil {
 		_ = forwarder.Close()
