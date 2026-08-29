@@ -295,7 +295,7 @@ func TestReconnectDrainsTransportUntilTrafficStreamCloses(t *testing.T) {
 			return remote.RelayTicket{Ticket: "relay-ticket"}, nil
 		},
 		Config{
-			TrafficEncryption: boolPointerForRuntimeTest(false),
+			TrafficEncryption: new(false),
 			startForwarder: func(ctx context.Context, config websocketmux.ClientConfig) (streamForwarder, error) {
 				if _, tokenErr := config.TokenSource(ctx); tokenErr != nil {
 					return nil, tokenErr
@@ -379,8 +379,6 @@ func TestReconnectDrainsTransportUntilTrafficStreamCloses(t *testing.T) {
 		t.Fatalf("current transport closed while draining old transport: closes=%d", closeCalls)
 	}
 }
-
-func boolPointerForRuntimeTest(value bool) *bool { return &value }
 
 func TestRuntimeOpenTrafficStreamDoesNotHoldTransportLockAcrossStartup(t *testing.T) {
 	token, err := tunnel.NewSessionToken()

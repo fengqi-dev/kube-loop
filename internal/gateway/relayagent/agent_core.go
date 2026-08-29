@@ -111,7 +111,7 @@ func New(config Config) (*Agent, error) {
 		probe.Capacity = relaycontrol.Capacity{
 			MaximumPhysicalConnections: 1, MaximumLogicalStreams: 1,
 		}
-		probe.TrafficEncryption = boolPointer(true)
+		probe.TrafficEncryption = new(true)
 		probe.NoisePublicKey = config.NoisePublicKey
 		if err := probe.Validate(time.Now()); err != nil {
 			return nil, errors.New("relay agent Noise public key is invalid")
@@ -121,5 +121,3 @@ func New(config Config) (*Agent, error) {
 	}
 	return &Agent{config: config, done: make(chan struct{})}, nil
 }
-
-func boolPointer(value bool) *bool { return &value }

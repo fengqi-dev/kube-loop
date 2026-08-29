@@ -76,17 +76,18 @@ func (request HeartbeatRequest) Validate(time.Time) error {
 	if request.State != StateReady && request.State != StateDraining {
 		return errors.New("relay heartbeat state is invalid")
 	}
-	if request.APIVersion == APIVersionV1 {
+	switch {
+	case request.APIVersion == APIVersionV1:
 		if request.TrafficEncryption != nil || request.NoisePublicKey != "" {
 			return errors.New("relay v1 heartbeat cannot advertise traffic encryption")
 		}
-	} else if request.TrafficEncryption == nil {
+	case request.TrafficEncryption == nil:
 		return errors.New("relay v2 heartbeat must advertise traffic encryption")
-	} else if *request.TrafficEncryption {
+	case *request.TrafficEncryption:
 		if !validNoisePublicKey(request.NoisePublicKey) {
 			return errors.New("relay Noise public key is invalid")
 		}
-	} else if request.NoisePublicKey != "" {
+	case request.NoisePublicKey != "":
 		return errors.New("relay Noise public key requires traffic encryption")
 	}
 	return request.Capacity.validate()

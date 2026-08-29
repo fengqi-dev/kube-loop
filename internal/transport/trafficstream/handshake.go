@@ -39,14 +39,19 @@ func DialWithEncryptionPeer(
 	expectedPeerStatic []byte,
 ) (*FrameConn, error) {
 	if encryptionEnabled && len(expectedPeerStatic) != NoisePublicKeyBytes {
-		return nil, errors.New("Gateway Noise public key is required")
+		return nil, errors.New("gateway Noise public key is required")
 	}
 	return dialWithEncryptionPrologue(ctx, connection, encryptionEnabled, expectedPeerStatic, nil)
 }
 
 // DialWithEncryptionPrologue additionally binds the Noise handshake to an
 // authenticated session secret known by both endpoints.
-func DialWithEncryptionPrologue(ctx context.Context, connection net.Conn, encryptionEnabled bool, prologue []byte) (*FrameConn, error) {
+func DialWithEncryptionPrologue(
+	ctx context.Context,
+	connection net.Conn,
+	encryptionEnabled bool,
+	prologue []byte,
+) (*FrameConn, error) {
 	return dialWithEncryptionPrologue(ctx, connection, encryptionEnabled, nil, prologue)
 }
 
@@ -114,15 +119,21 @@ func AcceptWithEncryptionStatic(
 	encryptionEnabled bool,
 	staticKey NoiseStaticKeypair,
 ) (*FrameConn, error) {
-	if encryptionEnabled && (len(staticKey.Private) != NoisePublicKeyBytes || len(staticKey.Public) != NoisePublicKeyBytes) {
-		return nil, errors.New("Gateway Noise static keypair is required")
+	if encryptionEnabled &&
+		(len(staticKey.Private) != NoisePublicKeyBytes || len(staticKey.Public) != NoisePublicKeyBytes) {
+		return nil, errors.New("gateway Noise static keypair is required")
 	}
 	return acceptWithEncryptionPrologue(ctx, connection, encryptionEnabled, &staticKey, nil)
 }
 
 // AcceptWithEncryptionPrologue additionally binds the Noise handshake to an
 // authenticated session secret known by both endpoints.
-func AcceptWithEncryptionPrologue(ctx context.Context, connection net.Conn, encryptionEnabled bool, prologue []byte) (*FrameConn, error) {
+func AcceptWithEncryptionPrologue(
+	ctx context.Context,
+	connection net.Conn,
+	encryptionEnabled bool,
+	prologue []byte,
+) (*FrameConn, error) {
 	return acceptWithEncryptionPrologue(ctx, connection, encryptionEnabled, nil, prologue)
 }
 

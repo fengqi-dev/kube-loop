@@ -85,14 +85,12 @@ func defaultConfig() Config {
 			MaxSessions: 256, MaxSessionsPerUser: 8, MaxStreamsPerSession: 128, MaxFrameBytes: 1 << 20,
 			HandshakeTimeout:  Duration{Duration: 10 * time.Second},
 			StreamIdleTimeout: Duration{Duration: 30 * time.Minute},
-			TrafficEncryption: boolPointer(true),
+			TrafficEncryption: new(true),
 		},
 		DrainTimeout: Duration{Duration: 30 * time.Second},
 		LogLevel:     "info",
 	}
 }
-
-func boolPointer(value bool) *bool { return &value }
 
 func LoadConfig(path string) (Config, error) {
 	path = strings.TrimSpace(path)

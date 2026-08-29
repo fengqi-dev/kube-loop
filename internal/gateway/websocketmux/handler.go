@@ -135,15 +135,8 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		)
 		return
 	}
-	configuredEncryption := h.config.TrafficEncryption != nil && *h.config.TrafficEncryption
-	ticketEncryption := identity.TrafficEncryption != nil && *identity.TrafficEncryption
-	if h.legacyUnpinnedEncryption && identity.TrafficEncryption == nil {
-		ticketEncryption = true
-	}
-	clientEncryption := slices.Contains(hello.Capabilities, wss.CapabilityTrafficEncryption)
-	keyMatches := !configuredEncryption || h.legacyUnpinnedEncryption ||
-		identity.NoisePublicKey == h.config.NoisePublicKey
-	if configuredEncryption != ticketEncryption || clientEncryption != configuredEncryption || !keyMatches {
+	configuredEncryption, encryptionMatches := h.trafficEncryptionMatches(identity, hello.Capabilities)
+	if !encryptionMatches {
 		cancelHandshake()
 		h.reject(request.Context(), requestID, connection, wss.NewReject(
 			wss.CodeEncryptionMismatch,
@@ -151,8 +144,7 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		))
 		return
 	}
-	if !slices.Contains(hello.Capabilities, "smux.v2") || !slices.Contains(hello.Capabilities, "tunnel.open.v2") ||
-		!slices.Contains(hello.Capabilities, wss.CapabilityTrafficWebSocket) {
+	if !requiredCapabilitiesPresent(hello.Capabilities) {
 		cancelHandshake()
 		h.reject(
 			request.Context(),
@@ -267,4 +259,22 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 			_ = stream.Close()
 		}
 	}
+}
+
+func (h *Handler) trafficEncryptionMatches(identity Identity, capabilities []string) (bool, bool) {
+	configured := h.config.TrafficEncryption != nil && *h.config.TrafficEncryption
+	ticket := identity.TrafficEncryption != nil && *identity.TrafficEncryption
+	if h.legacyUnpinnedEncryption && identity.TrafficEncryption == nil {
+		ticket = true
+	}
+	client := slices.Contains(capabilities, wss.CapabilityTrafficEncryption)
+	keyMatches := !configured || h.legacyUnpinnedEncryption ||
+		identity.NoisePublicKey == h.config.NoisePublicKey
+	return configured, configured == ticket && client == configured && keyMatches
+}
+
+func requiredCapabilitiesPresent(capabilities []string) bool {
+	return slices.Contains(capabilities, "smux.v2") &&
+		slices.Contains(capabilities, "tunnel.open.v2") &&
+		slices.Contains(capabilities, wss.CapabilityTrafficWebSocket)
 }

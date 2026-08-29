@@ -170,7 +170,7 @@ func TestV2HeartbeatAdvertisesAuthenticatedTrafficEncryption(t *testing.T) {
 	request.LeaseID = uuid.NewString()
 	request.State = StateReady
 	request.Capacity = Capacity{MaximumPhysicalConnections: 1, MaximumLogicalStreams: 1}
-	request.TrafficEncryption = boolPointerForTest(true)
+	request.TrafficEncryption = new(true)
 	request.NoisePublicKey = base64.RawURLEncoding.EncodeToString(make([]byte, 32))
 	raw, err := Encode(request, now)
 	if err != nil {
@@ -187,13 +187,11 @@ func TestV2HeartbeatAdvertisesAuthenticatedTrafficEncryption(t *testing.T) {
 	}
 	legacy := NewHeartbeatRequest()
 	legacy.LeaseID, legacy.State, legacy.Capacity = request.LeaseID, StateReady, request.Capacity
-	legacy.TrafficEncryption = boolPointerForTest(true)
+	legacy.TrafficEncryption = new(true)
 	if _, err := Encode(legacy, now); err == nil {
 		t.Fatal("v1 heartbeat accepted v2 encryption capability fields")
 	}
 }
-
-func boolPointerForTest(value bool) *bool { return &value }
 
 func TestPeerIdentityDerivesRelayIDOutsideMessage(t *testing.T) {
 	identity := validPeerIdentity()

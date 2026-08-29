@@ -28,7 +28,7 @@ type SessionUpdate struct {
 type RelayTicket struct {
 	TokenType         string    `json:"tokenType"`
 	Ticket            string    `json:"ticket"`
-	ExpiresAt         time.Time `json:"expiresAt"          ts_type:"string"`
+	ExpiresAt         time.Time `json:"expiresAt"                   ts_type:"string"`
 	DeviceID          string    `json:"deviceId"`
 	RelayID           string    `json:"relayId,omitempty"`
 	Endpoint          string    `json:"endpoint,omitempty"`

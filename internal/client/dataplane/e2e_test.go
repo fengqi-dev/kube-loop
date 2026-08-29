@@ -114,7 +114,7 @@ func TestAuthenticatedWSSDataPlaneCarriesAuthorizedSOCKSTCPAndUDP(t *testing.T) 
 				NetworkSpecHash: identity.NetworkSpecHash,
 			})
 		},
-		TrafficEncryption: boolPointerForDataplaneTest(false),
+		TrafficEncryption: new(false),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -162,8 +162,6 @@ func TestAuthenticatedWSSDataPlaneCarriesAuthorizedSOCKSTCPAndUDP(t *testing.T) 
 	}
 	_ = idle.Close()
 }
-
-func boolPointerForDataplaneTest(value bool) *bool { return &value }
 
 func startHalfCloseTarget(t *testing.T) (string, chan error) {
 	t.Helper()

@@ -115,7 +115,7 @@ func (service *Service) Issue(
 	allocation.Generation = input.Generation
 	allocation.NetworkSpecHash = input.NetworkSpecHash
 	allocation.Topology = cloneTopology(service.topology)
-	allocation.TrafficEncryption = boolPointer(service.trafficEncryption)
+	allocation.TrafficEncryption = new(service.trafficEncryption)
 	assignment, err := service.allocator.Allocate(allocation)
 	if err != nil {
 		return entity.Ticket{}, errors.Join(ErrNoReadyDataPlane, err)
@@ -125,7 +125,7 @@ func (service *Service) Issue(
 		(!service.trafficEncryption && assignment.NoisePublicKey != "") {
 		return entity.Ticket{}, errors.Join(
 			ErrNoReadyDataPlane,
-			errors.New("Data Plane traffic encryption capability does not match policy"),
+			errors.New("data plane traffic encryption capability does not match policy"),
 		)
 	}
 	claims := relayticket.Claims{
@@ -137,7 +137,7 @@ func (service *Service) Issue(
 		IssuedAt: now.Unix(), NotBefore: now.Unix(), ExpiresAt: expiresAt.Unix(),
 	}
 	if service.trafficEncryption {
-		claims.TrafficEncryption = boolPointer(true)
+		claims.TrafficEncryption = new(true)
 		claims.NoisePublicKey = assignment.NoisePublicKey
 	}
 	ticket, err := service.signer.Sign(claims)
@@ -163,8 +163,6 @@ func (service *Service) Issue(
 		NoisePublicKey:    claims.NoisePublicKey,
 	}, nil
 }
-
-func boolPointer(value bool) *bool { return &value }
 
 func cloneBoolPointer(value *bool) *bool {
 	if value == nil {

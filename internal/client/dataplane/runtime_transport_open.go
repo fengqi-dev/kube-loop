@@ -52,10 +52,10 @@ func openTransport(
 	if clientEncryption {
 		noisePublicKey, err = trafficstream.DecodeNoisePublicKey(ticket.NoisePublicKey)
 		if err != nil {
-			return openedTransport{}, errors.New("Control Plane returned an invalid Gateway Noise public key")
+			return openedTransport{}, errors.New("control plane returned an invalid Gateway Noise public key")
 		}
 	} else if !clientEncryption && ticket.NoisePublicKey != "" {
-		return openedTransport{}, errors.New("Control Plane returned a Noise key for plaintext traffic")
+		return openedTransport{}, errors.New("control plane returned a Noise key for plaintext traffic")
 	}
 	webSocketURL, err := transportURL(serverProfile, ticket.Endpoint)
 	if err != nil {

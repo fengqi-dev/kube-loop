@@ -162,14 +162,14 @@ func TestAllocationNegotiatesTrafficEncryptionCapability(t *testing.T) {
 	}
 	heartbeat := heartbeatRequest(registered.LeaseID, 10, 1)
 	heartbeat.APIVersion = relaycontrol.APIVersionV2
-	heartbeat.TrafficEncryption = boolPointer(true)
+	heartbeat.TrafficEncryption = new(true)
 	heartbeat.NoisePublicKey = base64.RawURLEncoding.EncodeToString(make([]byte, 32))
 	if _, err := registry.Heartbeat(encryptedIdentity, heartbeat); err != nil {
 		t.Fatal(err)
 	}
 
 	encryptedRequest := allocationRequest("zone-a")
-	encryptedRequest.TrafficEncryption = boolPointer(true)
+	encryptedRequest.TrafficEncryption = new(true)
 	encrypted, err := registry.Allocate(encryptedRequest)
 	if err != nil || encrypted.RelayID != registered.RelayID ||
 		!encrypted.TrafficEncryption || encrypted.NoisePublicKey != heartbeat.NoisePublicKey {
@@ -177,15 +177,14 @@ func TestAllocationNegotiatesTrafficEncryptionCapability(t *testing.T) {
 	}
 
 	plaintextRequest := allocationRequest("zone-a")
-	plaintextRequest.TrafficEncryption = boolPointer(false)
+	plaintextRequest.TrafficEncryption = new(false)
 	plaintext, err := registry.Allocate(plaintextRequest)
 	legacyRelayID, _ := legacyIdentity.RelayID()
-	if err != nil || plaintext.RelayID != legacyRelayID || plaintext.TrafficEncryption || plaintext.NoisePublicKey != "" {
+	if err != nil || plaintext.RelayID != legacyRelayID ||
+		plaintext.TrafficEncryption || plaintext.NoisePublicKey != "" {
 		t.Fatalf("plaintext assignment = %#v err = %v", plaintext, err)
 	}
 }
-
-func boolPointer(value bool) *bool { return &value }
 
 func TestAllocationPrefersTrustedTopologyThenLowerLoadAndHonorsDrain(
 	t *testing.T,

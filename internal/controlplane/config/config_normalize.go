@@ -37,7 +37,11 @@ type Config struct {
 
 func normalize(document Document) (Config, error) {
 	applyDefaults(&document)
-	result := Config{Document: document, TrafficEncryption: document.Relay.Ticket.TrafficEncryption != nil && *document.Relay.Ticket.TrafficEncryption}
+	result := Config{
+		Document: document,
+		TrafficEncryption: document.Relay.Ticket.TrafficEncryption != nil &&
+			*document.Relay.Ticket.TrafficEncryption,
+	}
 	var err error
 	result.Kubernetes, err = normalizeKubernetesConfig(document.Kubernetes)
 	if err != nil {

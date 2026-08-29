@@ -36,7 +36,7 @@ func GenerateNoiseStaticKeypair() (NoiseStaticKeypair, error) {
 
 func EncodeNoisePublicKey(key []byte) (string, error) {
 	if len(key) != NoisePublicKeyBytes {
-		return "", errors.New("Noise public key is invalid")
+		return "", errors.New("noise public key is invalid")
 	}
 	return base64.RawURLEncoding.EncodeToString(key), nil
 }
@@ -44,7 +44,7 @@ func EncodeNoisePublicKey(key []byte) (string, error) {
 func DecodeNoisePublicKey(encoded string) ([]byte, error) {
 	key, err := base64.RawURLEncoding.Strict().DecodeString(encoded)
 	if err != nil || len(key) != NoisePublicKeyBytes || base64.RawURLEncoding.EncodeToString(key) != encoded {
-		return nil, errors.New("Noise public key is invalid")
+		return nil, errors.New("noise public key is invalid")
 	}
 	return key, nil
 }
@@ -74,7 +74,7 @@ func noiseHandshake(
 		staticKey = &generated
 	}
 	if len(staticKey.Private) != NoisePublicKeyBytes || len(staticKey.Public) != NoisePublicKeyBytes {
-		return nil, nil, errors.New("Noise static keypair is invalid")
+		return nil, nil, errors.New("noise static keypair is invalid")
 	}
 	localKey.Private = append([]byte(nil), staticKey.Private...)
 	localKey.Public = append([]byte(nil), staticKey.Public...)
@@ -96,7 +96,7 @@ func noiseHandshake(
 		}
 		defer clearDeadline()
 		if len(message) == 0 || len(message) > noise.MaxMsgLen {
-			return errors.New("Noise handshake message size is invalid")
+			return errors.New("noise handshake message size is invalid")
 		}
 		return connection.WriteMessage(websocket.BinaryMessage, message)
 	}
@@ -111,40 +111,56 @@ func noiseHandshake(
 			return nil, readErr
 		}
 		if messageType != websocket.BinaryMessage || len(message) == 0 || len(message) > noise.MaxMsgLen {
-			return nil, errors.New("Noise handshake message is invalid")
+			return nil, errors.New("noise handshake message is invalid")
 		}
 		return message, nil
 	}
 
 	if initiator {
-		message, _, _, err := handshake.WriteMessage(nil, nil)
-		if err != nil {
-			return nil, nil, fmt.Errorf("write Noise handshake message 1: %w", err)
-		}
-		if err := write(message); err != nil {
-			return nil, nil, err
-		}
-		message, err = read()
-		if err != nil {
-			return nil, nil, fmt.Errorf("read Noise handshake message 2: %w", err)
-		}
-		if _, _, _, err := handshake.ReadMessage(nil, message); err != nil {
-			return nil, nil, fmt.Errorf("process Noise handshake message 2: %w", err)
-		}
-		if expectedPeerStatic != nil && (len(expectedPeerStatic) != NoisePublicKeyBytes ||
-			subtle.ConstantTimeCompare(handshake.PeerStatic(), expectedPeerStatic) != 1) {
-			return nil, nil, errors.New("Gateway Noise static key does not match RelayTicket")
-		}
-		message, writeState, readState, err := handshake.WriteMessage(nil, nil)
-		if err != nil {
-			return nil, nil, fmt.Errorf("write Noise handshake message 3: %w", err)
-		}
-		if err := write(message); err != nil {
-			return nil, nil, err
-		}
-		return writeState, readState, nil
+		return noiseInitiatorHandshake(handshake, write, read, expectedPeerStatic)
 	}
+	return noiseResponderHandshake(handshake, write, read)
+}
 
+func noiseInitiatorHandshake(
+	handshake *noise.HandshakeState,
+	write func([]byte) error,
+	read func() ([]byte, error),
+	expectedPeerStatic []byte,
+) (*noise.CipherState, *noise.CipherState, error) {
+	message, _, _, err := handshake.WriteMessage(nil, nil)
+	if err != nil {
+		return nil, nil, fmt.Errorf("write Noise handshake message 1: %w", err)
+	}
+	if err := write(message); err != nil {
+		return nil, nil, err
+	}
+	message, err = read()
+	if err != nil {
+		return nil, nil, fmt.Errorf("read Noise handshake message 2: %w", err)
+	}
+	if _, _, _, err := handshake.ReadMessage(nil, message); err != nil {
+		return nil, nil, fmt.Errorf("process Noise handshake message 2: %w", err)
+	}
+	if expectedPeerStatic != nil && (len(expectedPeerStatic) != NoisePublicKeyBytes ||
+		subtle.ConstantTimeCompare(handshake.PeerStatic(), expectedPeerStatic) != 1) {
+		return nil, nil, errors.New("gateway Noise static key does not match RelayTicket")
+	}
+	message, writeState, readState, err := handshake.WriteMessage(nil, nil)
+	if err != nil {
+		return nil, nil, fmt.Errorf("write Noise handshake message 3: %w", err)
+	}
+	if err := write(message); err != nil {
+		return nil, nil, err
+	}
+	return writeState, readState, nil
+}
+
+func noiseResponderHandshake(
+	handshake *noise.HandshakeState,
+	write func([]byte) error,
+	read func() ([]byte, error),
+) (*noise.CipherState, *noise.CipherState, error) {
 	message, err := read()
 	if err != nil {
 		return nil, nil, fmt.Errorf("read Noise handshake message 1: %w", err)

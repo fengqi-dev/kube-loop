@@ -34,7 +34,7 @@ func (agent *Agent) register(ctx context.Context) error {
 		agent.config.Reporter.BeginDrain()
 	}
 	if agent.config.TrafficEncryption && response.SelectedVersion != relaycontrol.APIVersionV2 {
-		return errors.New("Control Plane does not support encrypted Relay traffic")
+		return errors.New("control plane does not support encrypted Relay traffic")
 	}
 	agent.mu.Lock()
 	agent.relayID = response.RelayID
@@ -67,7 +67,7 @@ func (agent *Agent) heartbeat(ctx context.Context) error {
 	request.AppliedKeyGeneration = keyGeneration
 	request.AppliedRevocationGeneration = revocationGeneration
 	if selectedVersion == relaycontrol.APIVersionV2 {
-		request.TrafficEncryption = boolPointer(agent.config.TrafficEncryption)
+		request.TrafficEncryption = new(agent.config.TrafficEncryption)
 		if agent.config.TrafficEncryption {
 			request.NoisePublicKey = agent.config.NoisePublicKey
 		}
