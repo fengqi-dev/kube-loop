@@ -63,10 +63,12 @@ func (source *remoteSessionSource) RelayTicketSource(string) func(context.Contex
 			Namespace: source.session.Namespace, NetworkSpecHash: source.session.NetworkSpecHash,
 			Operations: []string{"tunnel"}, TicketID: uuid.NewString(),
 			IssuedAt: now.Unix(), NotBefore: now.Unix(), ExpiresAt: now.Add(time.Minute).Unix(),
+			TrafficEncryption: new(false),
 		})
 		return clientremote.RelayTicket{
 			TokenType: relayticket.Type, Ticket: ticket, ExpiresAt: now.Add(time.Minute),
 			RelayID: remoteRelayID, Endpoint: source.endpoint, DeviceID: source.device,
+			TrafficEncryption: new(false),
 		}, err
 	}
 }
@@ -227,9 +229,11 @@ func startGateway(
 				DeviceID: claims.DeviceID, SessionID: claims.SessionID,
 				SessionGeneration: claims.SessionGeneration, Namespace: claims.Namespace,
 				NetworkSpecHash: claims.NetworkSpecHash, ExpiresAt: time.Unix(claims.ExpiresAt, 0).UTC(),
+				TrafficEncryption: claims.TrafficEncryption,
 			}, nil
 		}),
 		ServerVersion: "e2e", MaxSessions: 8, MaxSessionsPerUser: 2, MaxStreamsPerSession: 16,
+		TrafficEncryption: new(false),
 		Handle: func(ctx context.Context, identity gatewaymux.Identity, connection net.Conn) {
 			core.ServeConnForAuthorizationContext(ctx, connection, gateway.SessionAuthorization{
 				RequestID: identity.RequestID, IdentityID: identity.IdentityID,
