@@ -91,7 +91,14 @@ func (manager *TrafficBindingResourceManager) Delete(
 	snapshot servicebinding.PreviewServiceSnapshot,
 	previewID string,
 ) error {
-	return manager.bindings.Delete(ctx, snapshot.Namespace, previewID)
+	return manager.bindings.Pause(ctx, snapshot.Namespace, previewID)
+}
+
+func (manager *TrafficBindingResourceManager) DeleteBinding(
+	ctx context.Context,
+	namespace, previewID string,
+) error {
+	return manager.bindings.Delete(ctx, namespace, previewID)
 }
 
 var _ ResourceManager = (*TrafficBindingResourceManager)(nil)

@@ -20,7 +20,7 @@ func TestHintTextMatchesActiveContext(t *testing.T) {
 		{name: "connection", edit: func(model *Model) { model.activeTab = tabConnection }, want: "connect"},
 		{name: "workloads", edit: func(model *Model) { model.activeTab = tabWorkloads }, want: "forward"},
 		{name: "services", edit: func(model *Model) { model.activeTab = tabServices }, want: "exchange"},
-		{name: "tasks", edit: func(model *Model) { model.activeTab = tabTasks }, want: "stop"},
+		{name: "tasks", edit: func(model *Model) { model.activeTab = tabTasks }, want: "pause"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

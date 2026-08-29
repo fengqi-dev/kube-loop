@@ -105,7 +105,14 @@ func (mutator *TrafficBindingResourceMutator) Restore(
 	snapshot servicebinding.ServiceInterceptSnapshot,
 	interceptID string,
 ) error {
-	return mutator.bindings.Delete(ctx, snapshot.Namespace, interceptID)
+	return mutator.bindings.Pause(ctx, snapshot.Namespace, interceptID)
+}
+
+func (mutator *TrafficBindingResourceMutator) DeleteBinding(
+	ctx context.Context,
+	namespace, interceptID string,
+) error {
+	return mutator.bindings.Delete(ctx, namespace, interceptID)
 }
 
 func (mutator *TrafficBindingResourceMutator) userClient(

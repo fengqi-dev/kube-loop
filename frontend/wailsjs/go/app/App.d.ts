@@ -32,9 +32,17 @@ export function CreateServerLocalFile(arg1:string,arg2:string,arg3:string):Promi
 
 export function CreateServerPodFile(arg1:app.ServerPodFileCreateRequest):Promise<remote.PodFileTask>;
 
+export function DeleteServerExchange(arg1:string,arg2:string):Promise<void>;
+
 export function DeleteServerLocalFile(arg1:string):Promise<void>;
 
+export function DeleteServerMirror(arg1:string,arg2:string):Promise<void>;
+
 export function DeleteServerPodFile(arg1:app.ServerPodFileDeleteRequest):Promise<remote.PodFileTask>;
+
+export function DeleteServerPortForward(arg1:string,arg2:string):Promise<void>;
+
+export function DeleteServerPreview(arg1:string,arg2:string):Promise<void>;
 
 export function DeleteServerProfile(arg1:string):Promise<profile.State>;
 
@@ -84,6 +92,14 @@ export function OpenServerPodSSH(arg1:string,arg2:string):Promise<void>;
 
 export function OpenUpdatePage():Promise<void>;
 
+export function PauseServerExchange(arg1:string,arg2:string):Promise<void>;
+
+export function PauseServerMirror(arg1:string,arg2:string):Promise<void>;
+
+export function PauseServerPortForward(arg1:string,arg2:string):Promise<void>;
+
+export function PauseServerPreview(arg1:string,arg2:string):Promise<void>;
+
 export function PickServerDownloadPath(arg1:string,arg2:string):Promise<string>;
 
 export function PickServerUploadPath(arg1:string):Promise<string>;
@@ -98,7 +114,15 @@ export function RenameServerPodFile(arg1:app.ServerPodFileRenameRequest):Promise
 
 export function ResizeServerExec(arg1:string,arg2:string,arg3:number,arg4:number):Promise<void>;
 
+export function ResumeServerExchange(arg1:string,arg2:string):Promise<exchange.Info>;
+
 export function ResumeServerFileTransfer(arg1:string,arg2:string):Promise<filetransfer.Task>;
+
+export function ResumeServerMirror(arg1:string,arg2:string):Promise<mirror.Info>;
+
+export function ResumeServerPortForward(arg1:string,arg2:string):Promise<portforward.Info>;
+
+export function ResumeServerPreview(arg1:string,arg2:string):Promise<preview.Info>;
 
 export function SaveServerProfile(arg1:app.SaveServerProfileRequest):Promise<app.ServerProfileResult>;
 
@@ -144,17 +168,9 @@ export function StartServerPreview(arg1:preview.Request):Promise<preview.Info>;
 
 export function StartServerTunnel(arg1:string):Promise<dataplane.Status>;
 
-export function StopServerExchange(arg1:string,arg2:string):Promise<void>;
-
 export function StopServerExec(arg1:string,arg2:string):Promise<void>;
 
-export function StopServerMirror(arg1:string,arg2:string):Promise<void>;
-
 export function StopServerPodSSH(arg1:string,arg2:string):Promise<void>;
-
-export function StopServerPortForward(arg1:string,arg2:string):Promise<void>;
-
-export function StopServerPreview(arg1:string,arg2:string):Promise<void>;
 
 export function StopServerTunnel(arg1:string):Promise<dataplane.Status>;
 

@@ -104,7 +104,7 @@ func (m Model) updateTaskOperationMessage(message tea.Msg) (tea.Model, tea.Cmd, 
 	case execEventMsg:
 		m.applyExecEvent(msg.event)
 		return m, waitExecEvent(m.state), true
-	case taskStoppedMsg:
+	case taskLifecycleMsg:
 		m.loading = false
 		if msg.err != nil {
 			m.err = msg.err.Error()
@@ -117,7 +117,7 @@ func (m Model) updateTaskOperationMessage(message tea.Msg) (tea.Model, tea.Cmd, 
 				}
 			}
 		}
-		m.status = "Session stopped"
+		m.status = "Session " + msg.action
 		return m, tea.Batch(
 			loadPortForwards(m.state, m.activeProfile.ID),
 			loadPodSSH(m.state, m.activeProfile.ID),

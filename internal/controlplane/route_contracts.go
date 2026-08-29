@@ -26,12 +26,18 @@ type TicketEndpoints struct {
 type PortForwardEndpoints struct {
 	Create EndpointFunc
 	List   EndpointFunc
+	Pause  EndpointFunc
+	Resume EndpointFunc
+	Delete EndpointFunc
 	Stop   EndpointFunc
 }
 
 type RemoteTaskEndpoints struct {
 	Create EndpointFunc
 	Get    EndpointFunc
+	Pause  EndpointFunc
+	Resume EndpointFunc
+	Delete EndpointFunc
 	Stop   EndpointFunc
 }
 

@@ -109,8 +109,8 @@ func (m *Model) confirmConsoleOverlay() tea.Cmd {
 	m.closeConsoleOverlay()
 	switch action {
 	case overlayConfirmTask:
-		m.loading, m.status = true, "Stopping session..."
-		return tea.Batch(m.spinner.Tick, m.stopTaskAt(m.console.pendingTask))
+		m.loading, m.status = true, "Deleting session..."
+		return tea.Batch(m.spinner.Tick, m.deleteTaskAt(m.console.pendingTask))
 	case overlayConfirmProfile:
 		next, cmd := m.updateLogin(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
 		*m = requireModel(next)

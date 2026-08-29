@@ -88,7 +88,7 @@ func tuiMessageError(message tea.Msg) error {
 		return msg.err
 	case execStartedMsg:
 		return msg.err
-	case taskStoppedMsg:
+	case taskLifecycleMsg:
 		return msg.err
 	default:
 		return nil

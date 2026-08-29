@@ -13,6 +13,9 @@ func (handler *Routes) Endpoints() controlplane.RemoteTaskEndpoints {
 	return controlplane.RemoteTaskEndpoints{
 		Create: sessionroute.WithSession(handler.sessions, handler.create),
 		Get:    sessionroute.WithTask(handler.sessions, handler.get),
-		Stop:   sessionroute.WithTask(handler.sessions, handler.stop),
+		Pause:  sessionroute.WithTask(handler.sessions, handler.pause),
+		Resume: sessionroute.WithTask(handler.sessions, handler.resume),
+		Delete: sessionroute.WithTask(handler.sessions, handler.delete),
+		Stop:   sessionroute.WithTask(handler.sessions, handler.pause),
 	}
 }

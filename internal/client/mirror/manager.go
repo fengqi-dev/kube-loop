@@ -26,6 +26,8 @@ type TrafficStreamOpener interface {
 
 var ErrClosed = errors.New("mirror manager is closed")
 
+const mirrorStateRunning = "running"
+
 type Request struct {
 	ProfileID string        `json:"profileId"`
 	Service   string        `json:"service"`
@@ -90,7 +92,7 @@ func (manager *Manager) Start(
 		return Info{}, err
 	}
 	if err := matchTaskTargets(task, targets); err != nil {
-		_, stopErr := manager.client.StopMirror(ctx, serverProfile, session, task.ID)
+		_, stopErr := deleteMirror(ctx, manager.client, serverProfile, session, task.ID)
 		return Info{}, errors.Join(err, stopErr)
 	}
 	connection, err := manager.streams.OpenTrafficStream(ctx, serverProfile.ID, tunnel.TrafficModeMirror, task.ID)
@@ -98,13 +100,13 @@ func (manager *Manager) Start(
 		if err == nil {
 			err = errors.New("data Plane returned an empty Mirror stream")
 		}
-		_, stopErr := manager.client.StopMirror(ctx, serverProfile, session, task.ID)
+		_, stopErr := deleteMirror(ctx, manager.client, serverProfile, session, task.ID)
 		return Info{}, errors.Join(err, stopErr)
 	}
 	relay := newLocalRelay(connection, targets, manager.dial, manager.config)
 	if err := relay.readReady(ctx); err != nil {
 		_ = connection.Close()
-		_, stopErr := manager.client.StopMirror(ctx, serverProfile, session, task.ID)
+		_, stopErr := deleteMirror(ctx, manager.client, serverProfile, session, task.ID)
 		return Info{}, errors.Join(err, stopErr)
 	}
 	runContext, cancel := context.WithCancel(context.WithoutCancel(ctx))
@@ -117,7 +119,7 @@ func (manager *Manager) Start(
 			Namespace: session.Namespace,
 			Service:   task.Service,
 			ClusterIP: task.ClusterIP,
-			State:     "running",
+			State:     mirrorStateRunning,
 			Targets:   append([]LocalTarget(nil), targets...),
 		},
 	}
@@ -126,7 +128,7 @@ func (manager *Manager) Start(
 		manager.mu.Unlock()
 		cancel()
 		_ = connection.Close()
-		_, stopErr := manager.client.StopMirror(ctx, serverProfile, session, task.ID)
+		_, stopErr := deleteMirror(ctx, manager.client, serverProfile, session, task.ID)
 		return Info{}, errors.Join(errors.New("mirror Task is already active locally"), stopErr)
 	}
 	manager.active[task.ID] = entry
@@ -135,16 +137,17 @@ func (manager *Manager) Start(
 	return entry.info, nil
 }
 
-func (manager *Manager) Stop(ctx context.Context, profileID, taskID string) error {
+func (manager *Manager) Pause(ctx context.Context, profileID, taskID string) error {
 	if ctx == nil {
-		return errors.New("mirror stop context is required")
+		return errors.New("mirror pause context is required")
 	}
 	manager.mu.Lock()
 	entry := manager.active[taskID]
-	if entry == nil || entry.profile.ID != profileID {
+	if entry == nil || entry.profile.ID != profileID ||
+		(entry.info.State != "" && entry.info.State != mirrorStateRunning) {
 		entry = nil
 	} else {
-		delete(manager.active, taskID)
+		entry.info.State = "pausing"
 	}
 	manager.mu.Unlock()
 	if entry == nil {
@@ -153,7 +156,7 @@ func (manager *Manager) Stop(ctx context.Context, profileID, taskID string) erro
 	// Persist the stop request before notifying the stream owner. Sending the
 	// stream frame first lets a fast owner race the DELETE state transition and
 	// turn an otherwise idempotent stop into a 409 conflict.
-	_, remoteErr := manager.client.StopMirror(ctx, entry.profile, entry.session, entry.task.ID)
+	_, remoteErr := pauseMirror(ctx, manager.client, entry.profile, entry.session, entry.task.ID)
 	streamErr := entry.relay.stop(ctx)
 	entry.cancel()
 	select {
@@ -161,7 +164,148 @@ func (manager *Manager) Stop(ctx context.Context, profileID, taskID string) erro
 	case <-ctx.Done():
 		streamErr = errors.Join(streamErr, ctx.Err())
 	}
+	manager.mu.Lock()
+	if manager.active[taskID] == entry {
+		entry.info.State = "paused"
+		entry.relay, entry.cancel, entry.done = nil, nil, nil
+	}
+	manager.mu.Unlock()
 	return errors.Join(remoteErr, streamErr)
+}
+
+func (manager *Manager) Resume(ctx context.Context, profileID, taskID string) (Info, error) {
+	if ctx == nil {
+		return Info{}, errors.New("mirror resume context is required")
+	}
+	manager.mu.Lock()
+	paused := manager.active[taskID]
+	if paused == nil || paused.profile.ID != profileID || paused.info.State != "paused" {
+		paused = nil
+	}
+	manager.mu.Unlock()
+	if paused == nil {
+		return Info{}, errors.New("mirror is not paused locally")
+	}
+	task, err := resumeMirror(ctx, manager.client, paused.profile, paused.session, paused.task.ID)
+	if err != nil {
+		return Info{}, err
+	}
+	connection, err := manager.streams.OpenTrafficStream(ctx, paused.profile.ID, tunnel.TrafficModeMirror, task.ID)
+	if err != nil || connection == nil {
+		if err == nil {
+			err = errors.New("data Plane returned an empty Mirror stream")
+		}
+		_, pauseErr := manager.client.StopMirror(ctx, paused.profile, paused.session, task.ID)
+		return Info{}, errors.Join(err, pauseErr)
+	}
+	targets := append([]LocalTarget(nil), paused.info.Targets...)
+	relay := newLocalRelay(connection, targets, manager.dial, manager.config)
+	if err := relay.readReady(ctx); err != nil {
+		_ = connection.Close()
+		_, pauseErr := manager.client.StopMirror(ctx, paused.profile, paused.session, task.ID)
+		return Info{}, errors.Join(err, pauseErr)
+	}
+	runContext, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	entry := &activeMirror{
+		profile: paused.profile, session: paused.session, task: task, relay: relay,
+		cancel: cancel, done: make(chan struct{}), info: paused.info,
+	}
+	entry.info.State = mirrorStateRunning
+	manager.mu.Lock()
+	manager.active[taskID] = entry
+	manager.mu.Unlock()
+	go manager.run(runContext, entry)
+	return entry.info, nil
+}
+
+func (manager *Manager) Delete(ctx context.Context, profileID, taskID string) error {
+	if ctx == nil {
+		return errors.New("mirror delete context is required")
+	}
+	manager.mu.Lock()
+	entry := manager.active[taskID]
+	manager.mu.Unlock()
+	if entry == nil || entry.profile.ID != profileID {
+		return errors.New("mirror is not managed locally")
+	}
+	var pauseErr error
+	if entry.info.State == mirrorStateRunning {
+		pauseErr = manager.Pause(ctx, profileID, taskID)
+	}
+	_, deleteErr := deleteMirror(ctx, manager.client, entry.profile, entry.session, entry.task.ID)
+	if deleteErr == nil {
+		manager.mu.Lock()
+		delete(manager.active, taskID)
+		manager.mu.Unlock()
+	}
+	return errors.Join(pauseErr, deleteErr)
+}
+
+func resumeMirror(
+	ctx context.Context, client Client, serverProfile profile.Profile, session remote.Session, taskID string,
+) (remote.MirrorTask, error) {
+	lifecycle, ok := client.(interface {
+		ResumeMirror(context.Context, profile.Profile, remote.Session, string) (remote.MirrorTask, error)
+	})
+	if !ok {
+		return remote.MirrorTask{}, errors.New("mirror resume is unavailable")
+	}
+	return lifecycle.ResumeMirror(ctx, serverProfile, session, taskID)
+}
+
+func pauseMirror(
+	ctx context.Context, client Client, serverProfile profile.Profile, session remote.Session, taskID string,
+) (remote.MirrorTask, error) {
+	pauser, ok := client.(interface {
+		PauseMirror(context.Context, profile.Profile, remote.Session, string) (remote.MirrorTask, error)
+	})
+	if !ok {
+		return client.StopMirror(ctx, serverProfile, session, taskID)
+	}
+	return pauser.PauseMirror(ctx, serverProfile, session, taskID)
+}
+
+func deleteMirror(
+	ctx context.Context, client Client, serverProfile profile.Profile, session remote.Session, taskID string,
+) (remote.MirrorTask, error) {
+	lifecycle, ok := client.(interface {
+		DeleteMirror(context.Context, profile.Profile, remote.Session, string) (remote.MirrorTask, error)
+	})
+	if !ok {
+		return client.StopMirror(ctx, serverProfile, session, taskID)
+	}
+	return lifecycle.DeleteMirror(ctx, serverProfile, session, taskID)
+}
+
+func (manager *Manager) Stop(ctx context.Context, profileID, taskID string) error {
+	err := manager.Pause(ctx, profileID, taskID)
+	if err == nil {
+		manager.mu.Lock()
+		delete(manager.active, taskID)
+		manager.mu.Unlock()
+	}
+	return err
+}
+
+func (manager *Manager) StopProfile(ctx context.Context, profileID string) error {
+	if ctx == nil {
+		return errors.New("mirror stop Profile context is required")
+	}
+	manager.lifecycle.Lock()
+	defer manager.lifecycle.Unlock()
+	manager.mu.Lock()
+	ids := make([]string, 0)
+	for id, entry := range manager.active {
+		if entry.profile.ID == profileID && (entry.info.State == "" || entry.info.State == mirrorStateRunning) {
+			ids = append(ids, id)
+		}
+	}
+	manager.mu.Unlock()
+	var result error
+	for _, id := range ids {
+		result = errors.Join(result, manager.Stop(ctx, profileID, id))
+	}
+	return result
 }
 
 func (manager *Manager) List(profileID string) []Info {
@@ -179,9 +323,9 @@ func (manager *Manager) List(profileID string) []Info {
 	return items
 }
 
-func (manager *Manager) StopProfile(ctx context.Context, profileID string) error {
+func (manager *Manager) PauseProfile(ctx context.Context, profileID string) error {
 	if ctx == nil {
-		return errors.New("mirror stop Profile context is required")
+		return errors.New("mirror pause Profile context is required")
 	}
 	manager.lifecycle.Lock()
 	defer manager.lifecycle.Unlock()
@@ -196,7 +340,12 @@ func (manager *Manager) StopProfile(ctx context.Context, profileID string) error
 	slices.Sort(ids)
 	var result error
 	for _, id := range ids {
-		result = errors.Join(result, manager.Stop(ctx, profileID, id))
+		manager.mu.Lock()
+		entry := manager.active[id]
+		manager.mu.Unlock()
+		if entry != nil && entry.info.State == mirrorStateRunning {
+			result = errors.Join(result, manager.Pause(ctx, profileID, id))
+		}
 	}
 	return result
 }
@@ -219,7 +368,12 @@ func (manager *Manager) Shutdown(ctx context.Context) error {
 	slices.Sort(ids)
 	var result error
 	for _, id := range ids {
-		result = errors.Join(result, manager.Stop(ctx, profiles[id], id))
+		manager.mu.Lock()
+		entry := manager.active[id]
+		manager.mu.Unlock()
+		if entry != nil && entry.info.State == mirrorStateRunning {
+			result = errors.Join(result, manager.Stop(ctx, profiles[id], id))
+		}
 	}
 	return result
 }
@@ -229,7 +383,7 @@ func (manager *Manager) run(ctx context.Context, entry *activeMirror) {
 	_ = entry.relay.run(ctx)
 	entry.cancel()
 	manager.mu.Lock()
-	if manager.active[entry.task.ID] == entry {
+	if manager.active[entry.task.ID] == entry && entry.info.State == mirrorStateRunning {
 		delete(manager.active, entry.task.ID)
 	}
 	manager.mu.Unlock()

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Globe2, Network, RefreshCw, Square } from "lucide-react";
+import { Globe2, Network, Pause, Play, RefreshCw, Trash2 } from "lucide-react";
 import { backend } from "@/backend";
 import { ActionIconButton, exchangeIcon, mirrorIcon, portForwardIcon } from "@/components/network/action-icons";
 import { CopyableText } from "@/components/shared/copyable-text";
@@ -114,14 +114,13 @@ export function ServerNetworkView({ profileId }: { profileId: string }) {
     } finally { setBusy(false); }
   }
 
-  async function stop(kind: Action, id: string) {
+  async function mutateTask(operation: "pause" | "resume" | "delete", kind: Action, id: string) {
     if (!profileId || busy) return;
     setBusy(true); setError("");
     try {
-      if (kind === "port-forward") await backend.stopServerPortForward(profileId, id);
-      else if (kind === "exchange") await backend.stopServerExchange(profileId, id);
-      else if (kind === "mirror") await backend.stopServerMirror(profileId, id);
-      else await backend.stopServerPreview(profileId, id);
+	  const suffix = kind === "port-forward" ? "PortForward" : kind[0].toUpperCase() + kind.slice(1);
+	  const method = `${operation}Server${suffix}` as keyof typeof backend;
+	  await (backend[method] as (profileId: string, taskId: string) => Promise<unknown>)(profileId, id);
       await load(inventory?.namespace);
     } catch (reason) { setError(messageOf(reason)); } finally { setBusy(false); }
   }
@@ -173,10 +172,10 @@ export function ServerNetworkView({ profileId }: { profileId: string }) {
         </div>
 
         <div className="rounded-lg border bg-card"><div className="border-b px-4 py-3 font-medium">Active Sessions</div><Table><TableHeader><TableRow><TableHead>Type</TableHead><TableHead>Target</TableHead><TableHead>Address / Target</TableHead><TableHead>State</TableHead><TableHead className="text-right">Actions</TableHead></TableRow></TableHeader><TableBody>
-          {forwards.map((item) => <OperationRow key={item.id} kind="port-forward" id={item.id} target={`${item.kind}/${item.name}:${item.remotePort}`} detail={portForwardDetail(item)} state={item.state} busy={busy} onStop={stop} />)}
-          {exchanges.map((item) => <OperationRow key={item.id} kind="exchange" id={item.id} target={item.service} detail={trafficTargetDetail(item)} state={item.state} busy={busy} onStop={stop} />)}
-          {mirrors.map((item) => <OperationRow key={item.id} kind="mirror" id={item.id} target={item.service} detail={trafficTargetDetail(item)} state={item.state} busy={busy} onStop={stop} />)}
-          {previews.map((item) => <OperationRow key={item.id} kind="preview" id={item.id} target={`${item.namespace}/${item.name}`} detail={trafficTargetDetail(item)} state={item.state} busy={busy} onStop={stop} />)}
+          {forwards.map((item) => <OperationRow key={item.id} kind="port-forward" id={item.id} target={`${item.kind}/${item.name}:${item.remotePort}`} detail={portForwardDetail(item)} state={item.state} busy={busy} onMutate={mutateTask} />)}
+          {exchanges.map((item) => <OperationRow key={item.id} kind="exchange" id={item.id} target={item.service} detail={trafficTargetDetail(item)} state={item.state} busy={busy} onMutate={mutateTask} />)}
+          {mirrors.map((item) => <OperationRow key={item.id} kind="mirror" id={item.id} target={item.service} detail={trafficTargetDetail(item)} state={item.state} busy={busy} onMutate={mutateTask} />)}
+          {previews.map((item) => <OperationRow key={item.id} kind="preview" id={item.id} target={`${item.namespace}/${item.name}`} detail={trafficTargetDetail(item)} state={item.state} busy={busy} onMutate={mutateTask} />)}
         </TableBody></Table>{forwards.length + exchanges.length + mirrors.length + previews.length === 0 ? <div className="p-8 text-center text-sm text-muted-foreground">No active sessions.</div> : null}</div>
       </div>}
 
@@ -408,8 +407,9 @@ export function ServerNetworkView({ profileId }: { profileId: string }) {
   );
 }
 
-function OperationRow({ kind, id, target, detail, state, busy, onStop }: { kind: Action; id: string; target: string; detail?: string; state: string; busy: boolean; onStop(kind: Action, id: string): void }) {
-  return <TableRow><TableCell><Badge variant="outline">{labelFor(kind)}</Badge></TableCell><TableCell>{target}</TableCell><TableCell className="font-mono text-xs">{detail || "—"}</TableCell><TableCell>{state}</TableCell><TableCell><div className="flex justify-end gap-1"><Button type="button" size="xs" variant="outline" disabled={busy} onClick={() => onStop(kind, id)}><Square size={11} />Stop</Button></div></TableCell></TableRow>;
+function OperationRow({ kind, id, target, detail, state, busy, onMutate }: { kind: Action; id: string; target: string; detail?: string; state: string; busy: boolean; onMutate(operation: "pause" | "resume" | "delete", kind: Action, id: string): void }) {
+  const paused = state === "paused" || state === "stopped";
+  return <TableRow><TableCell><Badge variant="outline">{labelFor(kind)}</Badge></TableCell><TableCell>{target}</TableCell><TableCell className="font-mono text-xs">{detail || "—"}</TableCell><TableCell>{state}</TableCell><TableCell><div className="flex justify-end gap-1">{paused ? <Button type="button" size="xs" variant="outline" disabled={busy} onClick={() => onMutate("resume", kind, id)}><Play size={11} />Resume</Button> : <Button type="button" size="xs" variant="outline" disabled={busy} onClick={() => onMutate("pause", kind, id)}><Pause size={11} />Pause</Button>}<Button type="button" size="xs" variant="outline" disabled={busy} onClick={() => onMutate("delete", kind, id)}><Trash2 size={11} />Delete</Button></div></TableCell></TableRow>;
 }
 function protocolFor(service: RemoteService, port: number): "tcp" | "udp" { return service.ports.find((item) => item.port === port)?.protocol.toLowerCase() === "udp" ? "udp" : "tcp"; }
 function portForwardDetail(item: ServerPortForwardInfo) {

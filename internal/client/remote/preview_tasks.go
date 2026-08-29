@@ -1,3 +1,4 @@
+//nolint:dupl // Task endpoints intentionally share the same typed lifecycle shape.
 package remote
 
 import (
@@ -33,14 +34,39 @@ func (client *Client) GetPreview(
 	)
 }
 
-func (client *Client) StopPreview(
+func (client *Client) PausePreview(
 	ctx context.Context,
 	serverProfile profile.Profile,
 	current Session,
 	taskID string,
 ) (PreviewTask, error) {
-	return remoteTaskByID(
+	return remoteTaskAction(
+		ctx, client, serverProfile, current, taskID, http.MethodPost,
+		"previews", "pause", "Preview Task ID is invalid", validatePreviewTask,
+	)
+}
+
+// StopPreview is retained for internal compatibility and deletes the task.
+func (client *Client) StopPreview(
+	ctx context.Context, serverProfile profile.Profile, current Session, taskID string,
+) (PreviewTask, error) {
+	return client.DeletePreview(ctx, serverProfile, current, taskID)
+}
+
+func (client *Client) ResumePreview(
+	ctx context.Context, serverProfile profile.Profile, current Session, taskID string,
+) (PreviewTask, error) {
+	return remoteTaskAction(
+		ctx, client, serverProfile, current, taskID, http.MethodPost,
+		"previews", "resume", "Preview Task ID is invalid", validatePreviewTask,
+	)
+}
+
+func (client *Client) DeletePreview(
+	ctx context.Context, serverProfile profile.Profile, current Session, taskID string,
+) (PreviewTask, error) {
+	return remoteTaskAction(
 		ctx, client, serverProfile, current, taskID, http.MethodDelete,
-		"previews", "Preview Task ID is invalid", validatePreviewTask,
+		"previews", "", "Preview Task ID is invalid", validatePreviewTask,
 	)
 }

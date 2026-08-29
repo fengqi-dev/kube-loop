@@ -37,7 +37,21 @@ var _ = Describe("TrafficBinding Controller", func() {
 		Expect(k8sClient.Create(ctx, binding)).To(Succeed())
 		DeferCleanup(deleteBinding, binding.Name)
 
-		reconcileSuccessfully(ctx, reconciler, binding.Name, 2)
+		reconcileSuccessfully(ctx, reconciler, binding.Name, 1)
+		pending := getBinding(ctx, binding.Name)
+		Expect(pending.Status.Phase).To(Equal(trafficv1alpha1.TrafficBindingPhasePending))
+		Expect(apiMeta.IsStatusConditionTrue(
+			pending.Status.Conditions,
+			trafficv1alpha1.ConditionAccepted,
+		)).To(BeTrue())
+		reconcileSuccessfully(ctx, reconciler, binding.Name, 1)
+		reconciling := getBinding(ctx, binding.Name)
+		Expect(reconciling.Status.Phase).To(Equal(trafficv1alpha1.TrafficBindingPhaseReconciling))
+		Expect(apiMeta.IsStatusConditionTrue(
+			reconciling.Status.Conditions,
+			trafficv1alpha1.ConditionProgressing,
+		)).To(BeTrue())
+		reconcileSuccessfully(ctx, reconciler, binding.Name, 1)
 		service := &corev1.Service{}
 		Expect(k8sClient.Get(ctx, objectKey(binding.Spec.Preview.ServiceName), service)).To(Succeed())
 		Expect(service.Spec.Selector).To(BeEmpty())
@@ -59,6 +73,10 @@ var _ = Describe("TrafficBinding Controller", func() {
 		Expect(current.Status.Phase).To(Equal(trafficv1alpha1.TrafficBindingPhaseReady))
 		Expect(current.Status.ServiceName).To(Equal("preview-service"))
 		Expect(apiMeta.IsStatusConditionTrue(current.Status.Conditions, trafficv1alpha1.ConditionReady)).To(BeTrue())
+		Expect(apiMeta.IsStatusConditionFalse(
+			current.Status.Conditions,
+			trafficv1alpha1.ConditionProgressing,
+		)).To(BeTrue())
 
 		service.Spec.Selector = map[string]string{"drifted": "true"}
 		service.Spec.Ports[0].TargetPort = intstr.FromInt32(39999)
@@ -82,7 +100,21 @@ var _ = Describe("TrafficBinding Controller", func() {
 
 		Expect(k8sClient.Delete(ctx, current)).To(Succeed())
 		reconcileSuccessfully(ctx, reconciler, binding.Name, 1)
+		restoring := getBinding(ctx, binding.Name)
+		Expect(restoring.Status.Phase).To(Equal(trafficv1alpha1.TrafficBindingPhaseRestoring))
+		Expect(apiMeta.IsStatusConditionTrue(
+			restoring.Status.Conditions,
+			trafficv1alpha1.ConditionProgressing,
+		)).To(BeTrue())
+		reconcileSuccessfully(ctx, reconciler, binding.Name, 1)
+		restored := getBinding(ctx, binding.Name)
+		Expect(restored.Status.Phase).To(Equal(trafficv1alpha1.TrafficBindingPhaseRestored))
+		Expect(apiMeta.IsStatusConditionTrue(
+			restored.Status.Conditions,
+			trafficv1alpha1.ConditionRestored,
+		)).To(BeTrue())
 		Expect(k8sClient.Get(ctx, objectKey("preview-service"), &corev1.Service{})).To(Satisfy(apierrors.IsNotFound))
+		reconcileSuccessfully(ctx, reconciler, binding.Name, 1)
 	})
 
 	It("refuses to adopt a foreign Preview Service", func(ctx SpecContext) {
@@ -141,7 +173,7 @@ var _ = Describe("TrafficBinding Controller", func() {
 			binding := interceptBinding(bindingName, serviceName, mode)
 			Expect(k8sClient.Create(ctx, binding)).To(Succeed())
 			DeferCleanup(deleteBinding, binding.Name)
-			reconcileSuccessfully(ctx, reconciler, binding.Name, 3)
+			reconcileSuccessfully(ctx, reconciler, binding.Name, 4)
 
 			currentService := &corev1.Service{}
 			Expect(k8sClient.Get(ctx, objectKey(serviceName), currentService)).To(Succeed())
@@ -179,6 +211,16 @@ var _ = Describe("TrafficBinding Controller", func() {
 			Expect(k8sClient.Create(ctx, staleSlice)).To(Succeed())
 			Expect(k8sClient.Delete(ctx, currentBinding)).To(Succeed())
 			reconcileSuccessfully(ctx, reconciler, bindingName, 1)
+			Expect(getBinding(ctx, bindingName).Status.Phase).To(Equal(
+				trafficv1alpha1.TrafficBindingPhaseRestoring,
+			))
+			reconcileSuccessfully(ctx, reconciler, bindingName, 1)
+			restoredBinding := getBinding(ctx, bindingName)
+			Expect(restoredBinding.Status.Phase).To(Equal(trafficv1alpha1.TrafficBindingPhaseRestored))
+			Expect(apiMeta.IsStatusConditionTrue(
+				restoredBinding.Status.Conditions,
+				trafficv1alpha1.ConditionRestored,
+			)).To(BeTrue())
 
 			restored := &corev1.Service{}
 			Expect(k8sClient.Get(ctx, objectKey(serviceName), restored)).To(Succeed())
@@ -192,6 +234,7 @@ var _ = Describe("TrafficBinding Controller", func() {
 			restoredEndpoints := &corev1.Endpoints{}
 			Expect(k8sClient.Get(ctx, objectKey(serviceName), restoredEndpoints)).To(Succeed())
 			Expect(restoredEndpoints.Subsets).To(HaveLen(1))
+			reconcileSuccessfully(ctx, reconciler, bindingName, 1)
 		},
 		Entry("Exchange", trafficv1alpha1.TrafficBindingModeExchange),
 		Entry("Mirror", trafficv1alpha1.TrafficBindingModeMirror),
@@ -209,13 +252,100 @@ var _ = Describe("TrafficBinding Controller", func() {
 		binding := portForwardBinding("port-forward-binding", pod.Name)
 		Expect(k8sClient.Create(ctx, binding)).To(Succeed())
 		DeferCleanup(deleteBinding, binding.Name)
-		reconcileSuccessfully(ctx, reconciler, binding.Name, 2)
+		reconcileSuccessfully(ctx, reconciler, binding.Name, 3)
 		Expect(getBinding(ctx, binding.Name).Status.Phase).To(Equal(trafficv1alpha1.TrafficBindingPhaseReady))
 
 		Expect(k8sClient.Delete(ctx, pod)).To(Succeed())
 		_, err := reconciler.Reconcile(ctx, requestFor(binding.Name))
 		Expect(err).To(HaveOccurred())
 		Expect(getBinding(ctx, binding.Name).Status.Phase).To(Equal(trafficv1alpha1.TrafficBindingPhaseDegraded))
+	})
+
+	It("deletes an Exchange that failed before mutating its Service", func(ctx SpecContext) {
+		binding := interceptBinding(
+			"unmutated-exchange",
+			"missing-service",
+			trafficv1alpha1.TrafficBindingModeExchange,
+		)
+		Expect(k8sClient.Create(ctx, binding)).To(Succeed())
+		reconcileSuccessfully(ctx, reconciler, binding.Name, 2)
+		_, err := reconciler.Reconcile(ctx, requestFor(binding.Name))
+		Expect(err).To(HaveOccurred())
+		degraded := getBinding(ctx, binding.Name)
+		Expect(degraded.Status.Phase).To(Equal(trafficv1alpha1.TrafficBindingPhaseDegraded))
+		Expect(degraded.Status.Snapshot).To(BeNil())
+		Expect(degraded.Status.ServiceName).To(BeEmpty())
+
+		Expect(k8sClient.Delete(ctx, degraded)).To(Succeed())
+		reconcileSuccessfully(ctx, reconciler, binding.Name, 3)
+		Expect(k8sClient.Get(
+			ctx,
+			objectKey(binding.Name),
+			&trafficv1alpha1.TrafficBinding{},
+		)).To(Satisfy(apierrors.IsNotFound))
+	})
+
+	It("pauses, survives an Operator restart and activates again", func(ctx SpecContext) {
+		binding := previewBinding("restart-preview-binding", "restart-preview-service")
+		Expect(k8sClient.Create(ctx, binding)).To(Succeed())
+		DeferCleanup(deleteBinding, binding.Name)
+		reconcileSuccessfully(ctx, reconciler, binding.Name, 3)
+		Expect(getBinding(ctx, binding.Name).Status.Phase).To(Equal(
+			trafficv1alpha1.TrafficBindingPhaseReady,
+		))
+
+		stopping := getBinding(ctx, binding.Name)
+		stopping.Spec.DesiredState = trafficv1alpha1.TrafficBindingDesiredStatePaused
+		Expect(k8sClient.Update(ctx, stopping)).To(Succeed())
+		reconcileSuccessfully(ctx, reconciler, binding.Name, 1)
+		Expect(getBinding(ctx, binding.Name).Status.Phase).To(Equal(
+			trafficv1alpha1.TrafficBindingPhasePausing,
+		))
+
+		restarted := &TrafficBindingReconciler{
+			Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: events.NewFakeRecorder(64),
+		}
+		reconcileSuccessfully(ctx, restarted, binding.Name, 1)
+		stopped := getBinding(ctx, binding.Name)
+		Expect(stopped.Status.Phase).To(Equal(trafficv1alpha1.TrafficBindingPhasePaused))
+		Expect(stopped.Status.ObservedGeneration).To(Equal(stopped.Generation))
+		Expect(apiMeta.IsStatusConditionTrue(
+			stopped.Status.Conditions,
+			trafficv1alpha1.ConditionPaused,
+		)).To(BeTrue())
+		Expect(k8sClient.Get(
+			ctx,
+			objectKey(binding.Spec.Preview.ServiceName),
+			&corev1.Service{},
+		)).To(Satisfy(apierrors.IsNotFound))
+
+		stopped.Spec.DesiredState = trafficv1alpha1.TrafficBindingDesiredStateActive
+		Expect(k8sClient.Update(ctx, stopped)).To(Succeed())
+		reconcileSuccessfully(ctx, restarted, binding.Name, 2)
+		active := getBinding(ctx, binding.Name)
+		Expect(active.Status.Phase).To(Equal(trafficv1alpha1.TrafficBindingPhaseReady))
+		Expect(apiMeta.IsStatusConditionFalse(
+			active.Status.Conditions,
+			trafficv1alpha1.ConditionPaused,
+		)).To(BeTrue())
+		Expect(k8sClient.Get(
+			ctx,
+			objectKey(binding.Spec.Preview.ServiceName),
+			&corev1.Service{},
+		)).To(Succeed())
+
+		active.Spec.DesiredState = trafficv1alpha1.TrafficBindingDesiredStatePaused
+		Expect(k8sClient.Update(ctx, active)).To(Succeed())
+		reconcileSuccessfully(ctx, restarted, binding.Name, 2)
+		stopped = getBinding(ctx, binding.Name)
+		Expect(stopped.Status.Phase).To(Equal(trafficv1alpha1.TrafficBindingPhasePaused))
+		Expect(k8sClient.Delete(ctx, stopped)).To(Succeed())
+		reconcileSuccessfully(ctx, restarted, binding.Name, 2)
+		Expect(k8sClient.Get(
+			ctx,
+			objectKey(binding.Name),
+			&trafficv1alpha1.TrafficBinding{},
+		)).To(Satisfy(apierrors.IsNotFound))
 	})
 
 	It("completes the Controller TrafficBinding activation and deletion contract", func(ctx SpecContext) {
@@ -252,7 +382,7 @@ var _ = Describe("TrafficBinding Controller", func() {
 		Eventually(func() error {
 			return k8sClient.Get(ctx, objectKey(bindingName), &trafficv1alpha1.TrafficBinding{})
 		}).Should(Succeed())
-		reconcileSuccessfully(ctx, reconciler, bindingName, 2)
+		reconcileSuccessfully(ctx, reconciler, bindingName, 3)
 		var result activationResult
 		Eventually(activated).Should(Receive(&result))
 		Expect(result.err).NotTo(HaveOccurred())
@@ -265,7 +395,7 @@ var _ = Describe("TrafficBinding Controller", func() {
 			binding := &trafficv1alpha1.TrafficBinding{}
 			return k8sClient.Get(ctx, objectKey(bindingName), binding) == nil && !binding.DeletionTimestamp.IsZero()
 		}).Should(BeTrue())
-		reconcileSuccessfully(ctx, reconciler, bindingName, 1)
+		reconcileSuccessfully(ctx, reconciler, bindingName, 3)
 		Eventually(deleted).Should(Receive(Succeed()))
 		Expect(
 			k8sClient.Get(ctx, objectKey(bindingName), &trafficv1alpha1.TrafficBinding{}),
@@ -284,6 +414,9 @@ var _ = Describe("TrafficBinding Controller", func() {
 		Expect(stored.Spec.Ports[0].Protocol).To(Equal(trafficv1alpha1.TransportProtocolTCP))
 		stored.Spec.Ports[0].TargetPort = 9090
 		Expect(k8sClient.Update(ctx, stored)).To(Satisfy(apierrors.IsInvalid))
+		stored = getBinding(ctx, valid.Name)
+		stored.Spec.DesiredState = trafficv1alpha1.TrafficBindingDesiredStatePaused
+		Expect(k8sClient.Update(ctx, stored)).To(Succeed())
 	})
 })
 
@@ -291,9 +424,10 @@ func previewBinding(name, service string) *trafficv1alpha1.TrafficBinding {
 	return &trafficv1alpha1.TrafficBinding{
 		Name: name, Namespace: testNamespace,
 		Spec: trafficv1alpha1.TrafficBindingSpec{
-			Mode:      trafficv1alpha1.TrafficBindingModePreview,
-			SessionID: "11111111-1111-4111-8111-111111111111",
-			TaskID:    "22222222-2222-4222-8222-222222222222", SessionGeneration: 1,
+			DesiredState: trafficv1alpha1.TrafficBindingDesiredStateActive,
+			Mode:         trafficv1alpha1.TrafficBindingModePreview,
+			SessionID:    "11111111-1111-4111-8111-111111111111",
+			TaskID:       "22222222-2222-4222-8222-222222222222", SessionGeneration: 1,
 			Relay:   &trafficv1alpha1.RelayEndpoint{Address: "10.0.0.8"},
 			Preview: &trafficv1alpha1.PreviewExposure{ServiceName: service},
 			Ports: []trafficv1alpha1.TrafficPort{
@@ -318,9 +452,10 @@ func interceptBinding(name, service string, mode trafficv1alpha1.TrafficBindingM
 	return &trafficv1alpha1.TrafficBinding{
 		Name: name, Namespace: testNamespace,
 		Spec: trafficv1alpha1.TrafficBindingSpec{
-			Mode:      mode,
-			SessionID: "33333333-3333-4333-8333-333333333333",
-			TaskID:    "44444444-4444-4444-8444-444444444444", SessionGeneration: 1,
+			DesiredState: trafficv1alpha1.TrafficBindingDesiredStateActive,
+			Mode:         mode,
+			SessionID:    "33333333-3333-4333-8333-333333333333",
+			TaskID:       "44444444-4444-4444-8444-444444444444", SessionGeneration: 1,
 			Target: &trafficv1alpha1.TrafficTarget{Kind: trafficv1alpha1.TargetKindService, Name: service},
 			Relay:  &trafficv1alpha1.RelayEndpoint{Address: "10.0.0.8"},
 			Ports: []trafficv1alpha1.TrafficPort{
@@ -339,9 +474,10 @@ func portForwardBinding(name, pod string) *trafficv1alpha1.TrafficBinding {
 	return &trafficv1alpha1.TrafficBinding{
 		Name: name, Namespace: testNamespace,
 		Spec: trafficv1alpha1.TrafficBindingSpec{
-			Mode:      trafficv1alpha1.TrafficBindingModePortForward,
-			SessionID: "55555555-5555-4555-8555-555555555555",
-			TaskID:    "66666666-6666-4666-8666-666666666666", SessionGeneration: 1,
+			DesiredState: trafficv1alpha1.TrafficBindingDesiredStateActive,
+			Mode:         trafficv1alpha1.TrafficBindingModePortForward,
+			SessionID:    "55555555-5555-4555-8555-555555555555",
+			TaskID:       "66666666-6666-4666-8666-666666666666", SessionGeneration: 1,
 			Target: &trafficv1alpha1.TrafficTarget{Kind: trafficv1alpha1.TargetKindPod, Name: pod},
 			Ports:  []trafficv1alpha1.TrafficPort{{TargetPort: 8080, Protocol: trafficv1alpha1.TransportProtocolTCP}},
 		},
@@ -379,5 +515,9 @@ func deleteBinding(name string) {
 		_ = k8sClient.Delete(ctx, binding)
 	}
 	reconciler := &TrafficBindingReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
-	_, _ = reconciler.Reconcile(ctx, requestFor(name))
+	for range 3 {
+		if _, err := reconciler.Reconcile(ctx, requestFor(name)); err != nil {
+			return
+		}
+	}
 }

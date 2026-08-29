@@ -221,6 +221,62 @@ func TestActivateReturnsManagedDegradedError(t *testing.T) {
 	}
 }
 
+func TestPauseRetainsBindingAndActivateResumesIt(t *testing.T) {
+	kubernetesClient := fakeClient(t)
+	manager, err := New(
+		kubernetesClient,
+		Config{PollInterval: 10 * time.Millisecond},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding := testBinding()
+	binding.Name, _ = NameForTask(binding.Spec.TaskID)
+	binding.Labels = map[string]string{
+		managedByLabel: managedByValue, controlPlaneIDLabel: manager.controlPlaneID,
+		taskIDLabel: binding.Spec.TaskID, sessionIDLabel: binding.Spec.SessionID,
+	}
+	desired := binding.DeepCopy()
+	desired.Name = ""
+	desired.Labels = nil
+	if err := kubernetesClient.Create(context.Background(), binding); err != nil {
+		t.Fatal(err)
+	}
+	key := client.ObjectKeyFromObject(binding)
+	statusWhenState(t, kubernetesClient, key, trafficv1alpha1.TrafficBindingDesiredStatePaused,
+		trafficv1alpha1.TrafficBindingPhasePaused, trafficv1alpha1.ConditionPaused)
+	if err := manager.Pause(context.Background(), binding.Namespace, binding.Spec.TaskID); err != nil {
+		t.Fatal(err)
+	}
+	retained := &trafficv1alpha1.TrafficBinding{}
+	if err := kubernetesClient.Get(context.Background(), key, retained); err != nil {
+		t.Fatalf("stopped binding was deleted: %v", err)
+	}
+	if retained.Spec.DesiredState != trafficv1alpha1.TrafficBindingDesiredStatePaused {
+		t.Fatalf("desired state = %q", retained.Spec.DesiredState)
+	}
+
+	statusWhenState(t, kubernetesClient, key, trafficv1alpha1.TrafficBindingDesiredStateActive,
+		trafficv1alpha1.TrafficBindingPhaseReady, trafficv1alpha1.ConditionReady)
+	active, managed, err := manager.Activate(context.Background(), desired)
+	if err != nil || !managed {
+		t.Fatalf("resume TrafficBinding: managed=%v err=%v", managed, err)
+	}
+	if active.Spec.DesiredState != trafficv1alpha1.TrafficBindingDesiredStateActive {
+		t.Fatalf("resumed desired state = %q", active.Spec.DesiredState)
+	}
+	if err := manager.Delete(context.Background(), binding.Namespace, binding.Spec.TaskID); err != nil {
+		t.Fatal(err)
+	}
+	if err := kubernetesClient.Get(
+		context.Background(),
+		key,
+		&trafficv1alpha1.TrafficBinding{},
+	); !apierrors.IsNotFound(err) {
+		t.Fatalf("deleted binding get error = %v, want not found", err)
+	}
+}
+
 func TestReconcilerDeletesOnlyOrphanedBindings(t *testing.T) {
 	kubernetesClient := fakeClient(t)
 	manager, err := New(
@@ -233,7 +289,9 @@ func TestReconcilerDeletesOnlyOrphanedBindings(t *testing.T) {
 	live := testBinding()
 	orphan := testBinding()
 	foreign := testBinding()
-	for _, binding := range []*trafficv1alpha1.TrafficBinding{live, orphan, foreign} {
+	stopped := testBinding()
+	stopped.Spec.DesiredState = trafficv1alpha1.TrafficBindingDesiredStatePaused
+	for _, binding := range []*trafficv1alpha1.TrafficBinding{live, orphan, foreign, stopped} {
 		binding.Name, _ = NameForTask(binding.Spec.TaskID)
 		binding.Labels = map[string]string{
 			managedByLabel: managedByValue, controlPlaneIDLabel: manager.controlPlaneID,
@@ -250,6 +308,10 @@ func TestReconcilerDeletesOnlyOrphanedBindings(t *testing.T) {
 		live.Spec.TaskID: {
 			ID: live.Spec.TaskID, SessionID: live.Spec.SessionID, Type: "port-forward", State: remotetask.Running,
 			UpdatedAt: time.Now(),
+		},
+		stopped.Spec.TaskID: {
+			ID: stopped.Spec.TaskID, SessionID: stopped.Spec.SessionID,
+			Type: "port-forward", State: remotetask.Stopped, UpdatedAt: time.Now(),
 		},
 	}
 	reconciler, err := NewReconciler(manager, tasks, sessionReader{
@@ -271,6 +333,13 @@ func TestReconcilerDeletesOnlyOrphanedBindings(t *testing.T) {
 		&trafficv1alpha1.TrafficBinding{},
 	); err != nil {
 		t.Fatalf("live binding was removed: %v", err)
+	}
+	if err := kubernetesClient.Get(
+		context.Background(),
+		client.ObjectKeyFromObject(stopped),
+		&trafficv1alpha1.TrafficBinding{},
+	); err != nil {
+		t.Fatalf("stopped binding was removed during startup recovery: %v", err)
 	}
 	if err := kubernetesClient.Get(
 		context.Background(),
@@ -386,12 +455,41 @@ func fakeClient(t *testing.T) client.Client {
 		Build()
 }
 
+func statusWhenState(
+	t *testing.T,
+	kubernetesClient client.Client,
+	key client.ObjectKey,
+	desiredState trafficv1alpha1.TrafficBindingDesiredState,
+	phase trafficv1alpha1.TrafficBindingPhase,
+	conditionType string,
+) {
+	t.Helper()
+	go func() {
+		for {
+			current := &trafficv1alpha1.TrafficBinding{}
+			if err := kubernetesClient.Get(context.Background(), key, current); err == nil &&
+				current.Spec.DesiredState == desiredState {
+				current.Status.ObservedGeneration = current.Generation
+				current.Status.Phase = phase
+				current.Status.Conditions = []metav1.Condition{{
+					Type: conditionType, Status: metav1.ConditionTrue,
+					Reason: string(phase), LastTransitionTime: metav1.Now(),
+				}}
+				_ = kubernetesClient.Status().Update(context.Background(), current)
+				return
+			}
+			time.Sleep(time.Millisecond)
+		}
+	}()
+}
+
 func testBinding() *trafficv1alpha1.TrafficBinding {
 	return &trafficv1alpha1.TrafficBinding{
 		Namespace: "development",
 		Spec: trafficv1alpha1.TrafficBindingSpec{
-			Mode:      trafficv1alpha1.TrafficBindingModePortForward,
-			SessionID: uuid.NewString(), TaskID: uuid.NewString(), SessionGeneration: 1,
+			DesiredState: trafficv1alpha1.TrafficBindingDesiredStateActive,
+			Mode:         trafficv1alpha1.TrafficBindingModePortForward,
+			SessionID:    uuid.NewString(), TaskID: uuid.NewString(), SessionGeneration: 1,
 			Target: &trafficv1alpha1.TrafficTarget{
 				Kind: trafficv1alpha1.TargetKindService,
 				Name: "api",

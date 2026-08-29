@@ -104,7 +104,7 @@ func (manager *Manager) Start(
 		return Info{}, err
 	}
 	if err := matchTask(task, request.Name, targets); err != nil {
-		_, stopErr := manager.client.StopPreview(ctx, serverProfile, session, task.ID)
+		_, stopErr := deletePreview(ctx, manager.client, serverProfile, session, task.ID)
 		return Info{}, errors.Join(err, stopErr)
 	}
 	connection, err := manager.streams.OpenTrafficStream(ctx, serverProfile.ID, tunnel.TrafficModePreview, task.ID)
@@ -112,13 +112,13 @@ func (manager *Manager) Start(
 		if err == nil {
 			err = errors.New("data Plane returned an empty Preview stream")
 		}
-		_, stopErr := manager.client.StopPreview(ctx, serverProfile, session, task.ID)
+		_, stopErr := deletePreview(ctx, manager.client, serverProfile, session, task.ID)
 		return Info{}, errors.Join(err, stopErr)
 	}
 	relay := reverserelay.New(connection, targets, manager.dial)
 	if err := relay.ReadReady(ctx); err != nil {
 		_ = connection.Close()
-		_, stopErr := manager.client.StopPreview(ctx, serverProfile, session, task.ID)
+		_, stopErr := deletePreview(ctx, manager.client, serverProfile, session, task.ID)
 		return Info{}, errors.Join(err, stopErr)
 	}
 	running, err := manager.client.GetPreview(ctx, serverProfile, session, task.ID)
@@ -126,13 +126,13 @@ func (manager *Manager) Start(
 		if err == nil {
 			err = errors.New("gateway returned an incomplete running Preview")
 		}
-		_, stopErr := manager.client.StopPreview(ctx, serverProfile, session, task.ID)
+		_, stopErr := deletePreview(ctx, manager.client, serverProfile, session, task.ID)
 		streamErr := relay.Stop(ctx)
 		_ = connection.Close()
 		return Info{}, errors.Join(err, stopErr, streamErr)
 	}
 	if err := matchTask(running, request.Name, targets); err != nil {
-		_, stopErr := manager.client.StopPreview(ctx, serverProfile, session, task.ID)
+		_, stopErr := deletePreview(ctx, manager.client, serverProfile, session, task.ID)
 		streamErr := relay.Stop(ctx)
 		_ = connection.Close()
 		return Info{}, errors.Join(err, stopErr, streamErr)
@@ -161,7 +161,7 @@ func (manager *Manager) Start(
 	if _, exists := manager.active[running.ID]; exists {
 		manager.mu.Unlock()
 		cancel()
-		_, stopErr := manager.client.StopPreview(ctx, serverProfile, session, running.ID)
+		_, stopErr := deletePreview(ctx, manager.client, serverProfile, session, running.ID)
 		streamErr := relay.Stop(ctx)
 		_ = connection.Close()
 		return Info{}, errors.Join(errors.New("preview Task is already active locally"), stopErr, streamErr)
@@ -172,23 +172,24 @@ func (manager *Manager) Start(
 	return entry.info, nil
 }
 
-func (manager *Manager) Stop(ctx context.Context, profileID, taskID string) error {
+func (manager *Manager) Pause(ctx context.Context, profileID, taskID string) error {
 	if ctx == nil {
-		return errors.New("preview stop context is required")
+		return errors.New("preview pause context is required")
 	}
 	manager.mu.Lock()
 	entry := manager.active[taskID]
-	if entry == nil || entry.profile.ID != profileID {
+	if entry == nil || entry.profile.ID != profileID ||
+		(entry.info.State != "" && entry.info.State != previewTaskRunning) {
 		entry = nil
 	} else {
-		delete(manager.active, taskID)
+		entry.info.State = "pausing"
 	}
 	manager.mu.Unlock()
 	if entry == nil {
 		return errors.New("preview is not active locally")
 	}
 	// The durable stop request wins the race with the stream owner's cleanup.
-	_, remoteErr := manager.client.StopPreview(ctx, entry.profile, entry.session, entry.task.ID)
+	_, remoteErr := pausePreview(ctx, manager.client, entry.profile, entry.session, entry.task.ID)
 	streamErr := entry.relay.Stop(ctx)
 	entry.cancel()
 	select {
@@ -196,7 +197,157 @@ func (manager *Manager) Stop(ctx context.Context, profileID, taskID string) erro
 	case <-ctx.Done():
 		streamErr = errors.Join(streamErr, ctx.Err())
 	}
+	manager.mu.Lock()
+	if manager.active[taskID] == entry {
+		entry.info.State = "paused"
+		entry.relay, entry.cancel, entry.done = nil, nil, nil
+	}
+	manager.mu.Unlock()
 	return errors.Join(remoteErr, streamErr)
+}
+
+func (manager *Manager) Resume(ctx context.Context, profileID, taskID string) (Info, error) {
+	if ctx == nil {
+		return Info{}, errors.New("preview resume context is required")
+	}
+	manager.mu.Lock()
+	paused := manager.active[taskID]
+	if paused == nil || paused.profile.ID != profileID || paused.info.State != "paused" {
+		paused = nil
+	}
+	manager.mu.Unlock()
+	if paused == nil {
+		return Info{}, errors.New("preview is not paused locally")
+	}
+	task, err := resumePreview(ctx, manager.client, paused.profile, paused.session, paused.task.ID)
+	if err != nil {
+		return Info{}, err
+	}
+	connection, err := manager.streams.OpenTrafficStream(ctx, paused.profile.ID, tunnel.TrafficModePreview, task.ID)
+	if err != nil || connection == nil {
+		if err == nil {
+			err = errors.New("data Plane returned an empty Preview stream")
+		}
+		_, pauseErr := manager.client.StopPreview(ctx, paused.profile, paused.session, task.ID)
+		return Info{}, errors.Join(err, pauseErr)
+	}
+	targets := append([]LocalTarget(nil), paused.info.Targets...)
+	relay := reverserelay.New(connection, targets, manager.dial)
+	if err := relay.ReadReady(ctx); err != nil {
+		_ = connection.Close()
+		_, pauseErr := manager.client.StopPreview(ctx, paused.profile, paused.session, task.ID)
+		return Info{}, errors.Join(err, pauseErr)
+	}
+	running, err := manager.client.GetPreview(ctx, paused.profile, paused.session, task.ID)
+	if err != nil || running.State != previewTaskRunning || net.ParseIP(running.ClusterIP) == nil {
+		if err == nil {
+			err = errors.New("gateway returned an incomplete running Preview")
+		}
+		_, pauseErr := manager.client.StopPreview(ctx, paused.profile, paused.session, task.ID)
+		_ = relay.Stop(ctx)
+		return Info{}, errors.Join(err, pauseErr)
+	}
+	runContext, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	entry := &activePreview{
+		profile: paused.profile, session: paused.session, task: running, relay: relay,
+		cancel: cancel, done: make(chan struct{}), info: paused.info,
+	}
+	entry.info.State, entry.info.ClusterIP = previewTaskRunning, running.ClusterIP
+	manager.mu.Lock()
+	manager.active[taskID] = entry
+	manager.mu.Unlock()
+	go manager.run(runContext, entry)
+	return entry.info, nil
+}
+
+func (manager *Manager) Delete(ctx context.Context, profileID, taskID string) error {
+	if ctx == nil {
+		return errors.New("preview delete context is required")
+	}
+	manager.mu.Lock()
+	entry := manager.active[taskID]
+	manager.mu.Unlock()
+	if entry == nil || entry.profile.ID != profileID {
+		return errors.New("preview is not managed locally")
+	}
+	var pauseErr error
+	if entry.info.State == previewTaskRunning {
+		pauseErr = manager.Pause(ctx, profileID, taskID)
+	}
+	_, deleteErr := deletePreview(ctx, manager.client, entry.profile, entry.session, entry.task.ID)
+	if deleteErr == nil {
+		manager.mu.Lock()
+		delete(manager.active, taskID)
+		manager.mu.Unlock()
+	}
+	return errors.Join(pauseErr, deleteErr)
+}
+
+func resumePreview(
+	ctx context.Context, client Client, serverProfile profile.Profile, session remote.Session, taskID string,
+) (remote.PreviewTask, error) {
+	lifecycle, ok := client.(interface {
+		ResumePreview(context.Context, profile.Profile, remote.Session, string) (remote.PreviewTask, error)
+	})
+	if !ok {
+		return remote.PreviewTask{}, errors.New("preview resume is unavailable")
+	}
+	return lifecycle.ResumePreview(ctx, serverProfile, session, taskID)
+}
+
+func pausePreview(
+	ctx context.Context, client Client, serverProfile profile.Profile, session remote.Session, taskID string,
+) (remote.PreviewTask, error) {
+	pauser, ok := client.(interface {
+		PausePreview(context.Context, profile.Profile, remote.Session, string) (remote.PreviewTask, error)
+	})
+	if !ok {
+		return client.StopPreview(ctx, serverProfile, session, taskID)
+	}
+	return pauser.PausePreview(ctx, serverProfile, session, taskID)
+}
+
+func deletePreview(
+	ctx context.Context, client Client, serverProfile profile.Profile, session remote.Session, taskID string,
+) (remote.PreviewTask, error) {
+	lifecycle, ok := client.(interface {
+		DeletePreview(context.Context, profile.Profile, remote.Session, string) (remote.PreviewTask, error)
+	})
+	if !ok {
+		return client.StopPreview(ctx, serverProfile, session, taskID)
+	}
+	return lifecycle.DeletePreview(ctx, serverProfile, session, taskID)
+}
+
+func (manager *Manager) Stop(ctx context.Context, profileID, taskID string) error {
+	err := manager.Pause(ctx, profileID, taskID)
+	if err == nil {
+		manager.mu.Lock()
+		delete(manager.active, taskID)
+		manager.mu.Unlock()
+	}
+	return err
+}
+
+func (manager *Manager) StopProfile(ctx context.Context, profileID string) error {
+	if ctx == nil {
+		return errors.New("preview stop Profile context is required")
+	}
+	manager.lifecycle.Lock()
+	defer manager.lifecycle.Unlock()
+	manager.mu.Lock()
+	ids := make([]string, 0)
+	for id, entry := range manager.active {
+		if entry.profile.ID == profileID && (entry.info.State == "" || entry.info.State == previewTaskRunning) {
+			ids = append(ids, id)
+		}
+	}
+	manager.mu.Unlock()
+	var result error
+	for _, id := range ids {
+		result = errors.Join(result, manager.Stop(ctx, profileID, id))
+	}
+	return result
 }
 
 func (manager *Manager) List(profileID string) []Info {
@@ -214,9 +365,9 @@ func (manager *Manager) List(profileID string) []Info {
 	return items
 }
 
-func (manager *Manager) StopProfile(ctx context.Context, profileID string) error {
+func (manager *Manager) PauseProfile(ctx context.Context, profileID string) error {
 	if ctx == nil {
-		return errors.New("preview stop Profile context is required")
+		return errors.New("preview pause Profile context is required")
 	}
 	manager.lifecycle.Lock()
 	defer manager.lifecycle.Unlock()
@@ -231,7 +382,12 @@ func (manager *Manager) StopProfile(ctx context.Context, profileID string) error
 	slices.Sort(ids)
 	var result error
 	for _, id := range ids {
-		result = errors.Join(result, manager.Stop(ctx, profileID, id))
+		manager.mu.Lock()
+		entry := manager.active[id]
+		manager.mu.Unlock()
+		if entry != nil && entry.info.State == previewTaskRunning {
+			result = errors.Join(result, manager.Pause(ctx, profileID, id))
+		}
 	}
 	return result
 }
@@ -254,7 +410,12 @@ func (manager *Manager) Shutdown(ctx context.Context) error {
 	slices.Sort(ids)
 	var result error
 	for _, id := range ids {
-		result = errors.Join(result, manager.Stop(ctx, profiles[id], id))
+		manager.mu.Lock()
+		entry := manager.active[id]
+		manager.mu.Unlock()
+		if entry != nil && entry.info.State == previewTaskRunning {
+			result = errors.Join(result, manager.Stop(ctx, profiles[id], id))
+		}
 	}
 	return result
 }
@@ -264,7 +425,7 @@ func (manager *Manager) run(ctx context.Context, entry *activePreview) {
 	_ = entry.relay.Run(ctx)
 	entry.cancel()
 	manager.mu.Lock()
-	if manager.active[entry.task.ID] == entry {
+	if manager.active[entry.task.ID] == entry && entry.info.State == previewTaskRunning {
 		delete(manager.active, entry.task.ID)
 	}
 	manager.mu.Unlock()

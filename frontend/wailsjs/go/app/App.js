@@ -34,12 +34,28 @@ export function CreateServerPodFile(arg1) {
   return window['go']['app']['App']['CreateServerPodFile'](arg1);
 }
 
+export function DeleteServerExchange(arg1, arg2) {
+  return window['go']['app']['App']['DeleteServerExchange'](arg1, arg2);
+}
+
 export function DeleteServerLocalFile(arg1) {
   return window['go']['app']['App']['DeleteServerLocalFile'](arg1);
 }
 
+export function DeleteServerMirror(arg1, arg2) {
+  return window['go']['app']['App']['DeleteServerMirror'](arg1, arg2);
+}
+
 export function DeleteServerPodFile(arg1) {
   return window['go']['app']['App']['DeleteServerPodFile'](arg1);
+}
+
+export function DeleteServerPortForward(arg1, arg2) {
+  return window['go']['app']['App']['DeleteServerPortForward'](arg1, arg2);
+}
+
+export function DeleteServerPreview(arg1, arg2) {
+  return window['go']['app']['App']['DeleteServerPreview'](arg1, arg2);
 }
 
 export function DeleteServerProfile(arg1) {
@@ -138,6 +154,22 @@ export function OpenUpdatePage() {
   return window['go']['app']['App']['OpenUpdatePage']();
 }
 
+export function PauseServerExchange(arg1, arg2) {
+  return window['go']['app']['App']['PauseServerExchange'](arg1, arg2);
+}
+
+export function PauseServerMirror(arg1, arg2) {
+  return window['go']['app']['App']['PauseServerMirror'](arg1, arg2);
+}
+
+export function PauseServerPortForward(arg1, arg2) {
+  return window['go']['app']['App']['PauseServerPortForward'](arg1, arg2);
+}
+
+export function PauseServerPreview(arg1, arg2) {
+  return window['go']['app']['App']['PauseServerPreview'](arg1, arg2);
+}
+
 export function PickServerDownloadPath(arg1, arg2) {
   return window['go']['app']['App']['PickServerDownloadPath'](arg1, arg2);
 }
@@ -166,8 +198,24 @@ export function ResizeServerExec(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['ResizeServerExec'](arg1, arg2, arg3, arg4);
 }
 
+export function ResumeServerExchange(arg1, arg2) {
+  return window['go']['app']['App']['ResumeServerExchange'](arg1, arg2);
+}
+
 export function ResumeServerFileTransfer(arg1, arg2) {
   return window['go']['app']['App']['ResumeServerFileTransfer'](arg1, arg2);
+}
+
+export function ResumeServerMirror(arg1, arg2) {
+  return window['go']['app']['App']['ResumeServerMirror'](arg1, arg2);
+}
+
+export function ResumeServerPortForward(arg1, arg2) {
+  return window['go']['app']['App']['ResumeServerPortForward'](arg1, arg2);
+}
+
+export function ResumeServerPreview(arg1, arg2) {
+  return window['go']['app']['App']['ResumeServerPreview'](arg1, arg2);
 }
 
 export function SaveServerProfile(arg1) {
@@ -258,28 +306,12 @@ export function StartServerTunnel(arg1) {
   return window['go']['app']['App']['StartServerTunnel'](arg1);
 }
 
-export function StopServerExchange(arg1, arg2) {
-  return window['go']['app']['App']['StopServerExchange'](arg1, arg2);
-}
-
 export function StopServerExec(arg1, arg2) {
   return window['go']['app']['App']['StopServerExec'](arg1, arg2);
 }
 
-export function StopServerMirror(arg1, arg2) {
-  return window['go']['app']['App']['StopServerMirror'](arg1, arg2);
-}
-
 export function StopServerPodSSH(arg1, arg2) {
   return window['go']['app']['App']['StopServerPodSSH'](arg1, arg2);
-}
-
-export function StopServerPortForward(arg1, arg2) {
-  return window['go']['app']['App']['StopServerPortForward'](arg1, arg2);
-}
-
-export function StopServerPreview(arg1, arg2) {
-  return window['go']['app']['App']['StopServerPreview'](arg1, arg2);
 }
 
 export function StopServerTunnel(arg1) {

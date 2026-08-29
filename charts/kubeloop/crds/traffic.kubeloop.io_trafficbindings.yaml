@@ -55,6 +55,15 @@ spec:
             description: TrafficBindingSpec defines the immutable desired state of
               TrafficBinding.
             properties:
+              desiredState:
+                default: Active
+                description: |-
+                  desiredState controls whether the Operator applies or restores the binding.
+                  Paused bindings remain available for later activation or explicit deletion.
+                enum:
+                - Active
+                - Paused
+                type: string
               mode:
                 description: mode selects the workflow semantics.
                 enum:
@@ -174,8 +183,14 @@ spec:
             - taskID
             type: object
             x-kubernetes-validations:
-            - message: TrafficBinding spec is immutable
-              rule: self == oldSelf
+            - message: TrafficBinding fields other than desiredState are immutable
+              rule: self.mode == oldSelf.mode && self.sessionID == oldSelf.sessionID
+                && self.taskID == oldSelf.taskID && self.sessionGeneration == oldSelf.sessionGeneration
+                && has(self.target) == has(oldSelf.target) && (!has(self.target) ||
+                self.target == oldSelf.target) && has(self.relay) == has(oldSelf.relay)
+                && (!has(self.relay) || self.relay == oldSelf.relay) && has(self.preview)
+                == has(oldSelf.preview) && (!has(self.preview) || self.preview ==
+                oldSelf.preview) && self.ports == oldSelf.ports
             - message: PortForward requires one target port and forbids relay ports
                 and preview
               rule: self.mode != 'PortForward' || (has(self.target) && !has(self.relay)
@@ -193,8 +208,9 @@ spec:
             description: TrafficBindingStatus defines the observed state of TrafficBinding.
             properties:
               conditions:
-                description: conditions use Ready and Degraded as stable condition
-                  types.
+                description: |-
+                  conditions expose validation, reconciliation, readiness, failure and
+                  restoration transitions for the complete binding lifecycle.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -262,9 +278,13 @@ spec:
                   authoritative detail.
                 enum:
                 - Pending
+                - Reconciling
                 - Ready
                 - Degraded
+                - Pausing
+                - Paused
                 - Restoring
+                - Restored
                 type: string
               serviceClusterIP:
                 description: serviceClusterIP is populated for a ready Preview.

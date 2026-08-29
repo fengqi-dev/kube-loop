@@ -19,7 +19,45 @@ type fakeTaskClient struct {
 	mu        sync.Mutex
 	task      remote.PortForwardTask
 	stopped   []string
+	paused    []string
+	resumed   []string
+	deleted   []string
 	createErr error
+}
+
+func (client *fakeTaskClient) PausePortForward(
+	_ context.Context, _ profile.Profile, _ remote.Session, taskID string,
+) (remote.PortForwardTask, error) {
+	client.mu.Lock()
+	client.paused = append(client.paused, taskID)
+	client.stopped = append(client.stopped, taskID)
+	client.mu.Unlock()
+	task := client.task
+	task.State = "stopped"
+	return task, nil
+}
+
+func (client *fakeTaskClient) ResumePortForward(
+	_ context.Context, _ profile.Profile, _ remote.Session, taskID string,
+) (remote.PortForwardTask, error) {
+	client.mu.Lock()
+	client.resumed = append(client.resumed, taskID)
+	client.mu.Unlock()
+	task := client.task
+	task.State = "running"
+	return task, nil
+}
+
+func (client *fakeTaskClient) DeletePortForward(
+	_ context.Context, _ profile.Profile, _ remote.Session, taskID string,
+) (remote.PortForwardTask, error) {
+	client.mu.Lock()
+	client.deleted = append(client.deleted, taskID)
+	client.stopped = append(client.stopped, taskID)
+	client.mu.Unlock()
+	task := client.task
+	task.State = "stopped"
+	return task, nil
 }
 
 func (client *fakeTaskClient) CreatePortForward(
@@ -147,6 +185,48 @@ func TestManagerBindsGatewayTaskToLocalOnlyListener(t *testing.T) {
 	if len(locals.stopped) != 1 || locals.stopped[0] != "local-1" || len(client.stopped) != 1 ||
 		client.stopped[0] != task.ID {
 		t.Fatalf("local stops = %#v remote stops = %#v", locals.stopped, client.stopped)
+	}
+}
+
+func TestManagerPauseResumeDeleteLifecycle(t *testing.T) {
+	now := time.Now().UTC()
+	task := remote.PortForwardTask{
+		ID: uuid.NewString(), SessionID: uuid.NewString(), Namespace: "development", State: "running",
+		Kind: "service", Name: "api", Protocol: "tcp", RemotePort: 8443,
+		DialAddress: "10.96.0.20:8443", CreatedAt: now, UpdatedAt: now, ExpiresAt: now.Add(time.Minute),
+	}
+	client := &fakeTaskClient{task: task}
+	manager, err := New(client, fakeDataPlane{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	locals := &fakeLocals{}
+	manager.locals = locals
+	serverProfile := profile.Profile{ID: "server-1"}
+	session := remote.Session{ID: task.SessionID, Namespace: task.Namespace, State: portForwardSessionActive}
+	if _, err := manager.Start(t.Context(), serverProfile, session, Request{
+		ProfileID: serverProfile.ID, Kind: task.Kind, Name: task.Name,
+		Protocol: task.Protocol, RemotePort: task.RemotePort,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Pause(t.Context(), serverProfile.ID, task.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := manager.List(serverProfile.ID); len(got) != 1 || got[0].State != "paused" {
+		t.Fatalf("paused tasks = %#v", got)
+	}
+	if resumed, err := manager.Resume(t.Context(), serverProfile.ID, task.ID); err != nil || resumed.State != "active" {
+		t.Fatalf("resume = %#v, %v", resumed, err)
+	}
+	if err := manager.Delete(t.Context(), serverProfile.ID, task.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := manager.List(serverProfile.ID); len(got) != 0 {
+		t.Fatalf("deleted tasks = %#v", got)
+	}
+	if len(client.paused) != 2 || len(client.resumed) != 1 || len(client.deleted) != 1 {
+		t.Fatalf("lifecycle calls: pause=%v resume=%v delete=%v", client.paused, client.resumed, client.deleted)
 	}
 }
 

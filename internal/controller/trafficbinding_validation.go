@@ -35,6 +35,9 @@ func validateBinding(binding *trafficv1alpha1.TrafficBinding) error {
 	if err := validateBindingIdentity(binding); err != nil {
 		return err
 	}
+	if err := validateDesiredState(binding.Spec.DesiredState); err != nil {
+		return err
+	}
 	if err := validateBindingPorts(binding); err != nil {
 		return err
 	}
@@ -45,6 +48,16 @@ func validateBinding(binding *trafficv1alpha1.TrafficBinding) error {
 		return err
 	}
 	return validateBindingRelay(binding)
+}
+
+func validateDesiredState(state trafficv1alpha1.TrafficBindingDesiredState) error {
+	switch state {
+	case "", trafficv1alpha1.TrafficBindingDesiredStateActive,
+		trafficv1alpha1.TrafficBindingDesiredStatePaused:
+		return nil
+	default:
+		return permanentf("spec.desiredState %q is unsupported", state)
+	}
 }
 
 func validateBindingIdentity(binding *trafficv1alpha1.TrafficBinding) error {

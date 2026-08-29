@@ -12,7 +12,9 @@ const (
 	actionDelete     = "delete"
 	actionDisconnect = "disconnect"
 	actionList       = "list"
+	actionPause      = "pause"
 	actionRename     = "rename"
+	actionResume     = "resume"
 	actionStart      = "start"
 
 	fileKindDirectory       = "directory"
@@ -66,7 +68,7 @@ func registerTools(server *mcpsdk.Server, backend Backend) {
 
 	mcpsdk.AddTool(server, &mcpsdk.Tool{
 		Name: toolManageTraffic,
-		Description: "Start, stop, or list Exchange, Mirror, Preview, and Port Forward Tasks. " +
+		Description: "Start, pause, resume, delete, or list Exchange, Mirror, Preview, and Port Forward Tasks. " +
 			"Every mutation requires exact Profile, Session, namespace, target, and local endpoint parameters.",
 	}, func(
 		ctx context.Context,

@@ -212,14 +212,14 @@ func TestUpdateConsoleOverlays(t *testing.T) {
 		assertConsoleContains(t, model.View(), "SELECT NAMESPACE", "production")
 	})
 
-	t.Run("confirm task stop", func(t *testing.T) {
+	t.Run("confirm task delete", func(t *testing.T) {
 		model := newConsoleTestModel(tabTasks, 100, 28)
 		model.execTasks = []execTaskView{{Pod: "api-0", State: "running"}}
 		model.updateConsole(consoleKey("d"))
 		if model.console.overlay != overlayConfirmTask {
 			t.Fatalf("overlay = %d, want task confirmation", model.console.overlay)
 		}
-		assertConsoleContains(t, model.View(), "STOP SESSION?", "Stop session")
+		assertConsoleContains(t, model.View(), "DELETE SESSION?", "Delete session")
 		model.updateConsole(consoleKey("n"))
 		if model.console.overlay != overlayNone {
 			t.Fatalf("overlay = %d after cancel, want none", model.console.overlay)

@@ -69,7 +69,9 @@ type PortForwardManager interface {
 		clientremote.Session,
 		clientportforward.Request,
 	) (clientportforward.Info, error)
-	Stop(context.Context, string, string) error
+	Pause(context.Context, string, string) error
+	Resume(context.Context, string, string) (clientportforward.Info, error)
+	Delete(context.Context, string, string) error
 	List(string) []clientportforward.Info
 	StopProfile(context.Context, string) error
 }
@@ -81,14 +83,18 @@ type ExchangeManager interface {
 		clientremote.Session,
 		clientexchange.Request,
 	) (clientexchange.Info, error)
-	Stop(context.Context, string, string) error
+	Pause(context.Context, string, string) error
+	Resume(context.Context, string, string) (clientexchange.Info, error)
+	Delete(context.Context, string, string) error
 	List(string) []clientexchange.Info
 	StopProfile(context.Context, string) error
 }
 
 type MirrorManager interface {
 	Start(context.Context, clientprofile.Profile, clientremote.Session, clientmirror.Request) (clientmirror.Info, error)
-	Stop(context.Context, string, string) error
+	Pause(context.Context, string, string) error
+	Resume(context.Context, string, string) (clientmirror.Info, error)
+	Delete(context.Context, string, string) error
 	List(string) []clientmirror.Info
 	StopProfile(context.Context, string) error
 }
@@ -100,7 +106,9 @@ type PreviewManager interface {
 		clientremote.Session,
 		clientpreview.Request,
 	) (clientpreview.Info, error)
-	Stop(context.Context, string, string) error
+	Pause(context.Context, string, string) error
+	Resume(context.Context, string, string) (clientpreview.Info, error)
+	Delete(context.Context, string, string) error
 	List(string) []clientpreview.Info
 	StopProfile(context.Context, string) error
 }

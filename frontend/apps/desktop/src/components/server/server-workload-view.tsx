@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Circle, Network, Square } from "lucide-react";
+import { Circle, Network, Pause, Play, Square, Trash2 } from "lucide-react";
 import { backend } from "@/backend";
 import { ActionIconButton, portForwardIcon, sftpIcon, sshIcon } from "@/components/network/action-icons";
 import { ALL_NAMESPACES, ResourceToolbar } from "@/components/network/resource-toolbar";
@@ -129,11 +129,13 @@ export function ServerWorkloadView({ profileId }: { profileId: string }) {
     }
   }
 
-  async function stopForward(id: string) {
+  async function mutateForward(operation: "pause" | "resume" | "delete", id: string) {
     if (busy) return;
     setBusy(true);
     try {
-      await backend.stopServerPortForward(profileId, id);
+	  if (operation === "pause") await backend.pauseServerPortForward(profileId, id);
+	  else if (operation === "resume") await backend.resumeServerPortForward(profileId, id);
+	  else await backend.deleteServerPortForward(profileId, id);
       await reload(namespace);
     } catch (reason) {
       setError(messageOf(reason));
@@ -285,7 +287,8 @@ export function ServerWorkloadView({ profileId }: { profileId: string }) {
                 <TableCell>{item.state}</TableCell>
                 <TableCell>
                   <div className="flex justify-end gap-1">
-                    <Button type="button" size="xs" variant="outline" disabled={busy} onClick={() => void stopForward(item.id)}><Square size={11} />Stop</Button>
+					{item.state === "paused" || item.state === "stopped" ? <Button type="button" size="xs" variant="outline" disabled={busy} onClick={() => void mutateForward("resume", item.id)}><Play size={11} />Resume</Button> : <Button type="button" size="xs" variant="outline" disabled={busy} onClick={() => void mutateForward("pause", item.id)}><Pause size={11} />Pause</Button>}
+					<Button type="button" size="xs" variant="outline" disabled={busy} onClick={() => void mutateForward("delete", item.id)}><Trash2 size={11} />Delete</Button>
                   </div>
                 </TableCell>
               </TableRow>

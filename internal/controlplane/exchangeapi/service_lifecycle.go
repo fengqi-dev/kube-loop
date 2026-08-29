@@ -3,6 +3,7 @@ package exchangeapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -39,7 +40,7 @@ func (handler *Service) get(
 	return nil
 }
 
-func (handler *Service) stop(
+func (handler *Service) pause(
 	ctx *echo.Context,
 	identity controlplaneapi.Identity,
 	session sessionapi.ActiveSession,
@@ -89,6 +90,78 @@ func (handler *Service) stop(
 		document,
 	)
 	return nil
+}
+
+func (handler *Service) resume(
+	ctx *echo.Context,
+	identity controlplaneapi.Identity,
+	session sessionapi.ActiveSession,
+	taskID string,
+) *controlplaneapi.Error {
+	task, apiError := handler.ownedTask(ctx.Request().Context(), identity, session, taskID)
+	if apiError != nil {
+		return apiError
+	}
+	if task.State == remotetask.Stopped {
+		now := handler.now().UTC()
+		if err := handler.storage.Tasks().UpdateState(
+			ctx.Request().Context(), task.ID, task.State, remotetask.Pending, nil, now,
+		); err != nil {
+			return storageError(err)
+		}
+		task.State, task.Result, task.UpdatedAt = remotetask.Pending, nil, now
+	} else if task.State != remotetask.Pending {
+		return storageError(storage.ErrConflict)
+	}
+	document, err := decodeTask(task, session.Namespace)
+	if err != nil {
+		return internalError(err)
+	}
+	writeJSON(ctx, http.StatusAccepted, document)
+	return nil
+}
+
+func (handler *Service) delete(
+	ctx *echo.Context,
+	identity controlplaneapi.Identity,
+	session sessionapi.ActiveSession,
+	taskID string,
+) *controlplaneapi.Error {
+	task, apiError := handler.ownedTask(ctx.Request().Context(), identity, session, taskID)
+	if apiError != nil {
+		return apiError
+	}
+	requestContext := ctx.Request().Context()
+	if err := deleteExchangeBinding(requestContext, handler.resources, session.Namespace, task.ID); err != nil {
+		return internalError(err)
+	}
+	if task.State != remotetask.Stopped {
+		now := handler.now().UTC()
+		if err := handler.storage.Tasks().UpdateState(
+			ctx.Request().Context(), task.ID, task.State, remotetask.Stopped, task.Result, now,
+		); err != nil {
+			return storageError(err)
+		}
+		task.State, task.UpdatedAt = remotetask.Stopped, now
+	}
+	document, err := decodeTask(task, session.Namespace)
+	if err != nil {
+		return internalError(err)
+	}
+	writeJSON(ctx, http.StatusOK, document)
+	return nil
+}
+
+func deleteExchangeBinding(
+	ctx context.Context, resources ResourceMutator, namespace, taskID string,
+) error {
+	deleter, ok := resources.(interface {
+		DeleteBinding(context.Context, string, string) error
+	})
+	if !ok {
+		return errors.New("exchange deletion is unavailable")
+	}
+	return deleter.DeleteBinding(ctx, namespace, taskID)
 }
 
 func (handler *Service) ownedTask(

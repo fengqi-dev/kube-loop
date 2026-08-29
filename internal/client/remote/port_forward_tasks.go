@@ -66,7 +66,7 @@ func (client *Client) ListPortForwards(
 	return result.Items, nil
 }
 
-func (client *Client) StopPortForward(
+func (client *Client) PausePortForward(
 	ctx context.Context,
 	serverProfile profile.Profile,
 	current Session,
@@ -80,8 +80,53 @@ func (client *Client) StopPortForward(
 	}
 	var result PortForwardTask
 	if err := client.doJSON(
-		ctx, serverProfile, http.MethodDelete,
-		"/api/sessions/"+url.PathEscape(current.ID)+"/port-forwards/"+url.PathEscape(taskID),
+		ctx, serverProfile, http.MethodPost,
+		"/api/sessions/"+url.PathEscape(current.ID)+"/port-forwards/"+url.PathEscape(taskID)+"/pause",
+		url.Values{remoteParamNamespace: {current.Namespace}}, nil, &result,
+	); err != nil {
+		return PortForwardTask{}, err
+	}
+	return validatePortForwardTask(result, current)
+}
+
+// StopPortForward is retained for internal compatibility and deletes the task.
+func (client *Client) StopPortForward(
+	ctx context.Context, serverProfile profile.Profile, current Session, taskID string,
+) (PortForwardTask, error) {
+	return client.DeletePortForward(ctx, serverProfile, current, taskID)
+}
+
+func (client *Client) ResumePortForward(
+	ctx context.Context, serverProfile profile.Profile, current Session, taskID string,
+) (PortForwardTask, error) {
+	return client.mutatePortForward(ctx, serverProfile, current, taskID, http.MethodPost, "resume")
+}
+
+func (client *Client) DeletePortForward(
+	ctx context.Context, serverProfile profile.Profile, current Session, taskID string,
+) (PortForwardTask, error) {
+	return client.mutatePortForward(ctx, serverProfile, current, taskID, http.MethodDelete, "")
+}
+
+func (client *Client) mutatePortForward(
+	ctx context.Context,
+	serverProfile profile.Profile,
+	current Session,
+	taskID, method, action string,
+) (PortForwardTask, error) {
+	if err := validateSessionTarget(current.Namespace, current.ID); err != nil || current.State != remoteSessionActive {
+		return PortForwardTask{}, errors.New("active Session identity is required")
+	}
+	if _, err := uuid.Parse(strings.TrimSpace(taskID)); err != nil {
+		return PortForwardTask{}, errors.New("port Forward Task ID is invalid")
+	}
+	path := "/api/sessions/" + url.PathEscape(current.ID) + "/port-forwards/" + url.PathEscape(taskID)
+	if action != "" {
+		path += "/" + url.PathEscape(action)
+	}
+	var result PortForwardTask
+	if err := client.doJSON(
+		ctx, serverProfile, method, path,
 		url.Values{remoteParamNamespace: {current.Namespace}}, nil, &result,
 	); err != nil {
 		return PortForwardTask{}, err

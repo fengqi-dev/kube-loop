@@ -9,6 +9,7 @@ import (
 
 	trafficv1alpha1 "github.com/fengqi-dev/kube-loop/api/v1alpha1"
 	controlplanestorage "github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/remotetask"
 )
 
 func (reconciler *Reconciler) removeOrphanedBindings(
@@ -69,6 +70,10 @@ func (reconciler *Reconciler) orphaned(
 		)
 	}
 	expectedType, ok := taskTypeForMode(binding.Spec.Mode)
+	if ok && task.State == remotetask.Stopped &&
+		binding.Spec.DesiredState == trafficv1alpha1.TrafficBindingDesiredStatePaused {
+		return false, nil
+	}
 	return task.SessionID != binding.Spec.SessionID ||
 		task.Type != expectedType ||
 		!ok ||

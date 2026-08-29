@@ -45,12 +45,12 @@ type portMappingIn struct {
 }
 
 type manageTrafficIn struct {
-	Action     string          `json:"action"               jsonschema:"start, stop, or list"`
+	Action     string          `json:"action"               jsonschema:"start, pause, resume, delete, or list"`
 	Type       string          `json:"type,omitempty"       jsonschema:"Traffic type; optional only for list"`
 	ProfileID  string          `json:"profileId"            jsonschema:"Explicit active Server Profile ID"`
-	SessionID  string          `json:"sessionId,omitempty"  jsonschema:"Active Session ID for start and stop"`
-	Namespace  string          `json:"namespace,omitempty"  jsonschema:"Active namespace for start and stop"`
-	TaskID     string          `json:"taskId,omitempty"     jsonschema:"Explicit Task ID required for stop"`
+	SessionID  string          `json:"sessionId,omitempty"  jsonschema:"Active Session ID for mutations"`
+	Namespace  string          `json:"namespace,omitempty"  jsonschema:"Active namespace for mutations"`
+	TaskID     string          `json:"taskId,omitempty"     jsonschema:"Explicit Task ID required for pause, resume, and delete"`
 	Service    string          `json:"service,omitempty"    jsonschema:"Service name for exchange or mirror"`
 	Name       string          `json:"name,omitempty"       jsonschema:"Preview Service name"`
 	Targets    []portMappingIn `json:"targets,omitempty"    jsonschema:"Local targets for exchange, mirror, or preview"`

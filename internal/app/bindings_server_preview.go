@@ -1,3 +1,4 @@
+//nolint:dupl // The Wails API keeps one explicit binding per traffic type.
 package app
 
 import (
@@ -11,8 +12,20 @@ func (a *App) StartServerPreview(request clientpreview.Request) (clientpreview.I
 	)
 }
 
-func (a *App) StopServerPreview(profileID, taskID string) error {
-	return stopManagedServerTask(
+func (a *App) PauseServerPreview(profileID, taskID string) error {
+	return pauseManagedServerTask(
+		a, a.remotePreviews, a.remotePreviews != nil, "Preview is unavailable", profileID, taskID,
+	)
+}
+
+func (a *App) ResumeServerPreview(profileID, taskID string) (clientpreview.Info, error) {
+	return resumeManagedServerTask(
+		a, a.remotePreviews, a.remotePreviews != nil, "Preview is unavailable", profileID, taskID,
+	)
+}
+
+func (a *App) DeleteServerPreview(profileID, taskID string) error {
+	return deleteManagedServerTask(
 		a, a.remotePreviews, a.remotePreviews != nil, "Preview is unavailable", profileID, taskID,
 	)
 }

@@ -33,6 +33,7 @@ type BindingManager interface {
 		string,
 		Spec,
 	) (bool, error)
+	Stop(context.Context, string, string) error
 	Delete(context.Context, string, string) error
 }
 

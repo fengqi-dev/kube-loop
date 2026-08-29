@@ -9,8 +9,12 @@ import (
 )
 
 const (
-	ConditionReady    = "Ready"
-	ConditionDegraded = "Degraded"
+	ConditionAccepted    = "Accepted"
+	ConditionProgressing = "Progressing"
+	ConditionReady       = "Ready"
+	ConditionDegraded    = "Degraded"
+	ConditionPaused      = "Paused"
+	ConditionRestored    = "Restored"
 )
 
 // TrafficBindingMode identifies the traffic workflow represented by a binding.
@@ -22,6 +26,15 @@ const (
 	TrafficBindingModePreview     TrafficBindingMode = "Preview"
 	TrafficBindingModeExchange    TrafficBindingMode = "Exchange"
 	TrafficBindingModeMirror      TrafficBindingMode = "Mirror"
+)
+
+// TrafficBindingDesiredState selects whether the binding is active or paused.
+// +kubebuilder:validation:Enum=Active;Paused
+type TrafficBindingDesiredState string
+
+const (
+	TrafficBindingDesiredStateActive TrafficBindingDesiredState = "Active"
+	TrafficBindingDesiredStatePaused TrafficBindingDesiredState = "Paused"
 )
 
 // TargetKind is a Kubernetes resource that can receive a traffic workflow.
@@ -101,11 +114,17 @@ type TrafficPort struct {
 
 // TrafficBindingSpec defines the immutable desired state of TrafficBinding.
 //
-// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="TrafficBinding spec is immutable"
+// +kubebuilder:validation:XValidation:rule="self.mode == oldSelf.mode && self.sessionID == oldSelf.sessionID && self.taskID == oldSelf.taskID && self.sessionGeneration == oldSelf.sessionGeneration && has(self.target) == has(oldSelf.target) && (!has(self.target) || self.target == oldSelf.target) && has(self.relay) == has(oldSelf.relay) && (!has(self.relay) || self.relay == oldSelf.relay) && has(self.preview) == has(oldSelf.preview) && (!has(self.preview) || self.preview == oldSelf.preview) && self.ports == oldSelf.ports",message="TrafficBinding fields other than desiredState are immutable"
 // +kubebuilder:validation:XValidation:rule="self.mode != 'PortForward' || (has(self.target) && !has(self.relay) && !has(self.preview) && size(self.ports) == 1 && self.ports.all(p, !has(p.relayPort)))",message="PortForward requires one target port and forbids relay ports and preview"
 // +kubebuilder:validation:XValidation:rule="self.mode != 'Preview' || (!has(self.target) && has(self.relay) && has(self.preview) && self.ports.all(p, has(p.relayPort)))",message="Preview requires relay, preview and relayPort on every port"
 // +kubebuilder:validation:XValidation:rule="!(self.mode in ['Exchange', 'Mirror']) || (has(self.target) && self.target.kind == 'Service' && has(self.relay) && !has(self.preview) && self.ports.all(p, has(p.relayPort)))",message="Exchange and Mirror require a Service target, relay and relayPort on every port"
 type TrafficBindingSpec struct {
+	// desiredState controls whether the Operator applies or restores the binding.
+	// Paused bindings remain available for later activation or explicit deletion.
+	// +kubebuilder:default=Active
+	// +optional
+	DesiredState TrafficBindingDesiredState `json:"desiredState,omitempty"`
+
 	// mode selects the workflow semantics.
 	// +required
 	Mode TrafficBindingMode `json:"mode"`
@@ -173,14 +192,18 @@ type ServiceSnapshot struct {
 }
 
 // TrafficBindingPhase summarizes the reconciliation lifecycle.
-// +kubebuilder:validation:Enum=Pending;Ready;Degraded;Restoring
+// +kubebuilder:validation:Enum=Pending;Reconciling;Ready;Degraded;Pausing;Paused;Restoring;Restored
 type TrafficBindingPhase string
 
 const (
-	TrafficBindingPhasePending   TrafficBindingPhase = "Pending"
-	TrafficBindingPhaseReady     TrafficBindingPhase = "Ready"
-	TrafficBindingPhaseDegraded  TrafficBindingPhase = "Degraded"
-	TrafficBindingPhaseRestoring TrafficBindingPhase = "Restoring"
+	TrafficBindingPhasePending     TrafficBindingPhase = "Pending"
+	TrafficBindingPhaseReconciling TrafficBindingPhase = "Reconciling"
+	TrafficBindingPhaseReady       TrafficBindingPhase = "Ready"
+	TrafficBindingPhaseDegraded    TrafficBindingPhase = "Degraded"
+	TrafficBindingPhasePausing     TrafficBindingPhase = "Pausing"
+	TrafficBindingPhasePaused      TrafficBindingPhase = "Paused"
+	TrafficBindingPhaseRestoring   TrafficBindingPhase = "Restoring"
+	TrafficBindingPhaseRestored    TrafficBindingPhase = "Restored"
 )
 
 // TrafficBindingStatus defines the observed state of TrafficBinding.
@@ -205,7 +228,8 @@ type TrafficBindingStatus struct {
 	// +optional
 	Snapshot *ServiceSnapshot `json:"snapshot,omitempty"`
 
-	// conditions use Ready and Degraded as stable condition types.
+	// conditions expose validation, reconciliation, readiness, failure and
+	// restoration transitions for the complete binding lifecycle.
 	// +listType=map
 	// +listMapKey=type
 	// +optional

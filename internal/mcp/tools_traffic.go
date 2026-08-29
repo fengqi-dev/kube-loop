@@ -70,7 +70,7 @@ func manageTraffic(ctx context.Context, backend Backend, input manageTrafficIn) 
 			LocalPort:  input.LocalPort,
 		})
 		return manageTrafficOut{Action: input.Action, Type: input.Type, TaskID: trafficItemID(item), Item: &item}, err
-	case "stop":
+	case actionPause, actionResume, actionDelete:
 		if err := validateMutationIdentity(input.ProfileID, input.SessionID, input.Namespace); err != nil {
 			return manageTrafficOut{}, err
 		}
@@ -80,12 +80,24 @@ func manageTraffic(ctx context.Context, backend Backend, input manageTrafficIn) 
 		if strings.TrimSpace(input.TaskID) == "" {
 			return manageTrafficOut{}, invalid("taskId", "taskId is required")
 		}
-		err := backend.StopTraffic(ctx, TrafficIdentity{
+		identity := TrafficIdentity{
 			Type: input.Type, ProfileID: input.ProfileID, SessionID: input.SessionID,
 			Namespace: input.Namespace, TaskID: input.TaskID,
-		})
-		return manageTrafficOut{Action: input.Action, Type: input.Type, TaskID: input.TaskID}, err
+		}
+		switch input.Action {
+		case actionPause:
+			err := backend.PauseTraffic(ctx, identity)
+			return manageTrafficOut{Action: input.Action, Type: input.Type, TaskID: input.TaskID}, err
+		case actionResume:
+			item, err := backend.ResumeTraffic(ctx, identity)
+			return manageTrafficOut{
+				Action: input.Action, Type: input.Type, TaskID: input.TaskID, Item: &item,
+			}, err
+		default:
+			err := backend.DeleteTraffic(ctx, identity)
+			return manageTrafficOut{Action: input.Action, Type: input.Type, TaskID: input.TaskID}, err
+		}
 	default:
-		return manageTrafficOut{}, invalid("action", "action must be start, stop, or list")
+		return manageTrafficOut{}, invalid("action", "action must be start, pause, resume, delete, or list")
 	}
 }

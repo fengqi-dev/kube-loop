@@ -165,7 +165,7 @@ func (a *App) DeleteServerProfile(id string) (clientprofile.State, error) {
 		}
 	}
 	if a.remoteForwards != nil {
-		if err := a.remoteForwards.StopProfile(a.context(), serverProfile.ID); err != nil {
+		if err := a.remoteForwards.PauseProfile(a.context(), serverProfile.ID); err != nil {
 			cleanupErr = errors.Join(
 				cleanupErr,
 				fmt.Errorf("stop Server Profile Port Forwards before deletion: %w", err),
@@ -173,17 +173,17 @@ func (a *App) DeleteServerProfile(id string) (clientprofile.State, error) {
 		}
 	}
 	if a.remoteExchanges != nil {
-		if err := a.remoteExchanges.StopProfile(a.context(), serverProfile.ID); err != nil {
+		if err := a.remoteExchanges.PauseProfile(a.context(), serverProfile.ID); err != nil {
 			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("stop Server Profile Exchanges before deletion: %w", err))
 		}
 	}
 	if a.remoteMirrors != nil {
-		if err := a.remoteMirrors.StopProfile(a.context(), serverProfile.ID); err != nil {
+		if err := a.remoteMirrors.PauseProfile(a.context(), serverProfile.ID); err != nil {
 			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("stop Server Profile Mirrors before deletion: %w", err))
 		}
 	}
 	if a.remotePreviews != nil {
-		if err := a.remotePreviews.StopProfile(a.context(), serverProfile.ID); err != nil {
+		if err := a.remotePreviews.PauseProfile(a.context(), serverProfile.ID); err != nil {
 			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("stop Server Profile Previews before deletion: %w", err))
 		}
 	}

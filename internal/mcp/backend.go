@@ -88,7 +88,9 @@ type Backend interface {
 	Disconnect(context.Context, string, string, string) error
 
 	StartTraffic(context.Context, TrafficStartRequest) (TrafficItem, error)
-	StopTraffic(context.Context, TrafficIdentity) error
+	PauseTraffic(context.Context, TrafficIdentity) error
+	ResumeTraffic(context.Context, TrafficIdentity) (TrafficItem, error)
+	DeleteTraffic(context.Context, TrafficIdentity) error
 	ListTraffic(string, string) ([]TrafficItem, error)
 
 	ExecPodCommand(context.Context, PodCommandRequest) (PodCommandResult, error)

@@ -7,6 +7,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
 	trafficv1alpha1 "github.com/fengqi-dev/kube-loop/api/v1alpha1"
 	controlplanestorage "github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/remotetask"
@@ -101,6 +104,71 @@ func TestReconcilerSkipsConflictingStaleClaim(t *testing.T) {
 	claimed, err := reconciler.recoverTask(t.Context(), task, now)
 	if claimed || err != nil {
 		t.Fatalf("claimed=%v err=%v", claimed, err)
+	}
+}
+
+func TestReconcilerCompletesPauseAfterStartup(t *testing.T) {
+	kubernetesClient := fakeClient(t)
+	manager, err := New(kubernetesClient, Config{PollInterval: 10 * time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	binding := testBinding()
+	binding.Spec.TaskID = uuid.NewString()
+	binding.Name, _ = NameForTask(binding.Spec.TaskID)
+	binding.Labels = map[string]string{
+		managedByLabel: managedByValue, controlPlaneIDLabel: manager.controlPlaneID,
+		taskIDLabel: binding.Spec.TaskID, sessionIDLabel: binding.Spec.SessionID,
+	}
+	if err := kubernetesClient.Create(t.Context(), binding); err != nil {
+		t.Fatal(err)
+	}
+	statusWhenState(
+		t,
+		kubernetesClient,
+		client.ObjectKeyFromObject(binding),
+		trafficv1alpha1.TrafficBindingDesiredStatePaused,
+		trafficv1alpha1.TrafficBindingPhasePaused,
+		trafficv1alpha1.ConditionPaused,
+	)
+	task := controlplanestorage.Task{
+		ID: binding.Spec.TaskID, SessionID: binding.Spec.SessionID,
+		Type: "port-forward", State: remotetask.Stopping, UpdatedAt: now.Add(-time.Minute),
+	}
+	tasks := taskReader{task.ID: task}
+	reconciler, err := NewReconciler(
+		manager,
+		tasks,
+		sessionReader{task.SessionID: {
+			ID: task.SessionID, Namespace: binding.Namespace,
+		}},
+		nil,
+		ReconcilerConfig{
+			Interval: time.Second, StaleAfter: 2 * time.Second,
+			CleanupTimeout: time.Second, BatchSize: 10, Now: func() time.Time { return now },
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := reconciler.recoverTask(t.Context(), task, now)
+	if err != nil || !claimed {
+		t.Fatalf("recover stopping task: claimed=%v err=%v", claimed, err)
+	}
+	if got := tasks[task.ID].State; got != remotetask.Stopped {
+		t.Fatalf("recovered task state = %q", got)
+	}
+	retained := &trafficv1alpha1.TrafficBinding{}
+	if err := kubernetesClient.Get(
+		t.Context(),
+		client.ObjectKeyFromObject(binding),
+		retained,
+	); err != nil {
+		t.Fatalf("paused binding was not retained: %v", err)
+	}
+	if retained.Spec.DesiredState != trafficv1alpha1.TrafficBindingDesiredStatePaused {
+		t.Fatalf("recovered desired state = %q", retained.Spec.DesiredState)
 	}
 }
 

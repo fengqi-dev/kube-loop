@@ -34,6 +34,7 @@ func (manager *Manager) Activate(
 		return nil, false, err
 	}
 	desired := binding.DeepCopy()
+	desired.Spec.DesiredState = trafficv1alpha1.TrafficBindingDesiredStateActive
 	desired.Name = name
 	desired.Namespace = strings.TrimSpace(desired.Namespace)
 	desired.TypeMeta = metav1.TypeMeta{
@@ -66,7 +67,7 @@ func (manager *Manager) Activate(
 				getErr,
 			)
 		}
-		if !reflect.DeepEqual(existing.Spec, desired.Spec) ||
+		if !sameBindingSpec(existing.Spec, desired.Spec) ||
 			existing.Labels[taskIDLabel] != desired.Spec.TaskID ||
 			existing.Labels[controlPlaneIDLabel] != manager.controlPlaneID {
 			return nil, false, fmt.Errorf(
@@ -74,6 +75,22 @@ func (manager *Manager) Activate(
 				desired.Namespace,
 				desired.Name,
 			)
+		}
+		if existing.Spec.DesiredState != trafficv1alpha1.TrafficBindingDesiredStateActive {
+			before := existing.DeepCopy()
+			existing.Spec.DesiredState = trafficv1alpha1.TrafficBindingDesiredStateActive
+			if patchErr := manager.client.Patch(
+				ctx,
+				existing,
+				client.MergeFrom(before),
+			); patchErr != nil {
+				return nil, true, fmt.Errorf(
+					"activate TrafficBinding %s/%s: %w",
+					existing.Namespace,
+					existing.Name,
+					patchErr,
+				)
+			}
 		}
 	}
 
@@ -136,4 +153,10 @@ func (manager *Manager) Activate(
 		)
 	}
 	return current, true, nil
+}
+
+func sameBindingSpec(left, right trafficv1alpha1.TrafficBindingSpec) bool {
+	left.DesiredState = trafficv1alpha1.TrafficBindingDesiredStateActive
+	right.DesiredState = trafficv1alpha1.TrafficBindingDesiredStateActive
+	return reflect.DeepEqual(left, right)
 }

@@ -55,4 +55,18 @@ func (manager *TrafficBindingManager) Delete(
 	return manager.bindings.Delete(ctx, namespace, taskID)
 }
 
+func (manager *TrafficBindingManager) Pause(
+	ctx context.Context,
+	namespace, taskID string,
+) error {
+	return manager.bindings.Pause(ctx, namespace, taskID)
+}
+
+func (manager *TrafficBindingManager) Stop(
+	ctx context.Context,
+	namespace, taskID string,
+) error {
+	return manager.Pause(ctx, namespace, taskID)
+}
+
 var _ portforwardservice.BindingManager = (*TrafficBindingManager)(nil)

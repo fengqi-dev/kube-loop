@@ -91,3 +91,42 @@ func remoteTaskByID[Task any](
 	}
 	return validateTask(result, current)
 }
+
+func remoteTaskAction[Task any](
+	ctx context.Context,
+	client *Client,
+	serverProfile profile.Profile,
+	current Session,
+	taskID,
+	method,
+	resource,
+	action,
+	invalidIDError string,
+	validateTask func(Task, Session) (Task, error),
+) (Task, error) {
+	var zero Task
+	if err := validateSessionTarget(current.Namespace, current.ID); err != nil || current.State != remoteSessionActive {
+		return zero, errors.New("active Session identity is required")
+	}
+	taskID = strings.TrimSpace(taskID)
+	if _, err := uuid.Parse(taskID); err != nil {
+		return zero, errors.New(invalidIDError)
+	}
+	path := "/api/sessions/" + url.PathEscape(current.ID) + "/" + resource + "/" + url.PathEscape(taskID)
+	if action != "" {
+		path += "/" + url.PathEscape(action)
+	}
+	var result Task
+	if err := client.doJSON(
+		ctx,
+		serverProfile,
+		method,
+		path,
+		url.Values{remoteParamNamespace: {current.Namespace}},
+		nil,
+		&result,
+	); err != nil {
+		return zero, err
+	}
+	return validateTask(result, current)
+}

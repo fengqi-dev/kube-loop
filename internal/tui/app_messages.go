@@ -95,8 +95,10 @@ type execStartedMsg struct {
 	err     error
 }
 type execEventMsg struct{ event clientexec.Event }
-type taskStoppedMsg struct {
-	kind, id string
-	err      error
+type taskLifecycleMsg struct {
+	action, kind, id string
+	err              error
 }
+
+type taskStoppedMsg = taskLifecycleMsg
 type tickMsg struct{ time time.Time }

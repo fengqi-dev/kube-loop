@@ -122,7 +122,7 @@ func (manager *Manager) Start(
 		Protocol: task.Protocol, RemotePort: task.RemotePort, LocalPort: request.LocalPort,
 	}, task.DialAddress, dialer)
 	if err != nil {
-		_, stopErr := manager.client.StopPortForward(ctx, serverProfile, session, task.ID)
+		_, stopErr := deletePortForward(ctx, manager.client, serverProfile, session, task.ID)
 		return Info{}, errors.Join(fmt.Errorf("start local Port Forward listener: %w", err), stopErr)
 	}
 	info := Info{
@@ -143,7 +143,7 @@ func (manager *Manager) Start(
 	if _, exists := manager.active[task.ID]; exists {
 		manager.mu.Unlock()
 		_ = manager.locals.Stop(local.ID)
-		_, stopErr := manager.client.StopPortForward(ctx, serverProfile, session, task.ID)
+		_, stopErr := deletePortForward(ctx, manager.client, serverProfile, session, task.ID)
 		return Info{}, errors.Join(errors.New("port Forward Task is already active locally"), stopErr)
 	}
 	manager.active[task.ID] = &activeForward{
@@ -153,24 +153,157 @@ func (manager *Manager) Start(
 	return info, nil
 }
 
-func (manager *Manager) Stop(ctx context.Context, profileID, taskID string) error {
+func (manager *Manager) Pause(ctx context.Context, profileID, taskID string) error {
 	if ctx == nil {
-		return errors.New("port Forward stop context is required")
+		return errors.New("port Forward pause context is required")
 	}
 	manager.mu.Lock()
 	entry := manager.active[taskID]
-	if entry != nil && entry.profile.ID == profileID {
-		delete(manager.active, taskID)
-	} else {
+	if entry == nil || entry.profile.ID != profileID ||
+		(entry.info.State != "" && entry.info.State != portForwardSessionActive) {
 		entry = nil
 	}
 	manager.mu.Unlock()
 	if entry == nil {
 		return errors.New("port Forward is not active locally")
 	}
+	_, remoteErr := pausePortForward(ctx, manager.client, entry.profile, entry.session, entry.task.ID)
 	localErr := manager.locals.Stop(entry.localID)
-	_, remoteErr := manager.client.StopPortForward(ctx, entry.profile, entry.session, entry.task.ID)
+	manager.mu.Lock()
+	if manager.active[taskID] == entry {
+		entry.localID = ""
+		entry.info.State = "paused"
+	}
+	manager.mu.Unlock()
 	return errors.Join(localErr, remoteErr)
+}
+
+func (manager *Manager) Resume(ctx context.Context, profileID, taskID string) (Info, error) {
+	if ctx == nil {
+		return Info{}, errors.New("port Forward resume context is required")
+	}
+	manager.mu.Lock()
+	entry := manager.active[taskID]
+	if entry == nil || entry.profile.ID != profileID || entry.info.State != "paused" {
+		entry = nil
+	}
+	manager.mu.Unlock()
+	if entry == nil {
+		return Info{}, errors.New("port Forward is not paused locally")
+	}
+	task, err := resumePortForward(ctx, manager.client, entry.profile, entry.session, entry.task.ID)
+	if err != nil {
+		return Info{}, err
+	}
+	dialer, err := manager.dataPlanes.Dialer(entry.profile.ID)
+	if err != nil {
+		return Info{}, err
+	}
+	local, err := manager.locals.StartResolved(ctx, listener.Request{
+		Context: entry.profile.ID, Namespace: entry.session.Namespace, Kind: task.Kind, Name: task.Name,
+		Protocol: task.Protocol, RemotePort: task.RemotePort, LocalPort: entry.info.LocalPort,
+	}, task.DialAddress, dialer)
+	if err != nil {
+		_, pauseErr := manager.client.StopPortForward(ctx, entry.profile, entry.session, task.ID)
+		return Info{}, errors.Join(err, pauseErr)
+	}
+	manager.mu.Lock()
+	entry.task, entry.localID = task, local.ID
+	entry.info.State, entry.info.Address, entry.info.LocalPort = portForwardSessionActive, local.Address, local.LocalPort
+	entry.info.DialAddress = task.DialAddress
+	info := entry.info
+	manager.mu.Unlock()
+	return info, nil
+}
+
+func (manager *Manager) Delete(ctx context.Context, profileID, taskID string) error {
+	if ctx == nil {
+		return errors.New("port Forward delete context is required")
+	}
+	manager.mu.Lock()
+	entry := manager.active[taskID]
+	manager.mu.Unlock()
+	if entry == nil || entry.profile.ID != profileID {
+		return errors.New("port Forward is not managed locally")
+	}
+	var pauseErr error
+	if entry.info.State == portForwardSessionActive {
+		pauseErr = manager.Pause(ctx, profileID, taskID)
+	}
+	_, deleteErr := deletePortForward(ctx, manager.client, entry.profile, entry.session, entry.task.ID)
+	if deleteErr == nil {
+		manager.mu.Lock()
+		delete(manager.active, taskID)
+		manager.mu.Unlock()
+	}
+	return errors.Join(pauseErr, deleteErr)
+}
+
+func resumePortForward(
+	ctx context.Context, client TaskClient, serverProfile profile.Profile, session remote.Session, taskID string,
+) (remote.PortForwardTask, error) {
+	lifecycle, ok := client.(interface {
+		ResumePortForward(context.Context, profile.Profile, remote.Session, string) (remote.PortForwardTask, error)
+	})
+	if !ok {
+		return remote.PortForwardTask{}, errors.New("port Forward resume is unavailable")
+	}
+	return lifecycle.ResumePortForward(ctx, serverProfile, session, taskID)
+}
+
+func pausePortForward(
+	ctx context.Context, client TaskClient, serverProfile profile.Profile, session remote.Session, taskID string,
+) (remote.PortForwardTask, error) {
+	pauser, ok := client.(interface {
+		PausePortForward(context.Context, profile.Profile, remote.Session, string) (remote.PortForwardTask, error)
+	})
+	if !ok {
+		return client.StopPortForward(ctx, serverProfile, session, taskID)
+	}
+	return pauser.PausePortForward(ctx, serverProfile, session, taskID)
+}
+
+func deletePortForward(
+	ctx context.Context, client TaskClient, serverProfile profile.Profile, session remote.Session, taskID string,
+) (remote.PortForwardTask, error) {
+	lifecycle, ok := client.(interface {
+		DeletePortForward(context.Context, profile.Profile, remote.Session, string) (remote.PortForwardTask, error)
+	})
+	if !ok {
+		return client.StopPortForward(ctx, serverProfile, session, taskID)
+	}
+	return lifecycle.DeletePortForward(ctx, serverProfile, session, taskID)
+}
+
+func (manager *Manager) Stop(ctx context.Context, profileID, taskID string) error {
+	err := manager.Pause(ctx, profileID, taskID)
+	if err == nil {
+		manager.mu.Lock()
+		delete(manager.active, taskID)
+		manager.mu.Unlock()
+	}
+	return err
+}
+
+func (manager *Manager) StopProfile(ctx context.Context, profileID string) error {
+	if ctx == nil {
+		return errors.New("port Forward stop Profile context is required")
+	}
+	manager.lifecycle.Lock()
+	defer manager.lifecycle.Unlock()
+	manager.mu.Lock()
+	ids := make([]string, 0)
+	for id, entry := range manager.active {
+		if entry.profile.ID == profileID && (entry.info.State == "" || entry.info.State == portForwardSessionActive) {
+			ids = append(ids, id)
+		}
+	}
+	manager.mu.Unlock()
+	var result error
+	for _, id := range ids {
+		result = errors.Join(result, manager.Stop(ctx, profileID, id))
+	}
+	return result
 }
 
 func (manager *Manager) List(profileID string) []Info {
@@ -186,9 +319,9 @@ func (manager *Manager) List(profileID string) []Info {
 	return items
 }
 
-func (manager *Manager) StopProfile(ctx context.Context, profileID string) error {
+func (manager *Manager) PauseProfile(ctx context.Context, profileID string) error {
 	if ctx == nil {
-		return errors.New("port Forward stop Profile context is required")
+		return errors.New("port Forward pause Profile context is required")
 	}
 	manager.lifecycle.Lock()
 	defer manager.lifecycle.Unlock()
@@ -202,7 +335,7 @@ func (manager *Manager) StopProfile(ctx context.Context, profileID string) error
 	manager.mu.Unlock()
 	var result error
 	for _, id := range ids {
-		result = errors.Join(result, manager.Stop(ctx, profileID, id))
+		result = errors.Join(result, manager.Pause(ctx, profileID, id))
 	}
 	return result
 }
@@ -227,7 +360,9 @@ func (manager *Manager) Shutdown(ctx context.Context) error {
 		entry := manager.active[id]
 		manager.mu.Unlock()
 		if entry != nil {
-			result = errors.Join(result, manager.Stop(ctx, entry.profile.ID, id))
+			if entry.info.State == "" || entry.info.State == portForwardSessionActive {
+				result = errors.Join(result, manager.Stop(ctx, entry.profile.ID, id))
+			}
 		}
 	}
 	return result

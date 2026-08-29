@@ -43,7 +43,10 @@ func (routes *Routes) Endpoints() controlplane.PortForwardEndpoints {
 	return controlplane.PortForwardEndpoints{
 		Create: sessionroute.WithSessionResolver(routes.sessions, namespaceFromQuery, routes.create),
 		List:   sessionroute.WithSessionResolver(routes.sessions, namespaceFromQuery, routes.list),
-		Stop:   sessionroute.WithTaskResolver(routes.sessions, namespaceFromQuery, routes.stop),
+		Pause:  sessionroute.WithTaskResolver(routes.sessions, namespaceFromQuery, routes.pause),
+		Resume: sessionroute.WithTaskResolver(routes.sessions, namespaceFromQuery, routes.resume),
+		Delete: sessionroute.WithTaskResolver(routes.sessions, namespaceFromQuery, routes.delete),
+		Stop:   sessionroute.WithTaskResolver(routes.sessions, namespaceFromQuery, routes.pause),
 	}
 }
 
@@ -108,7 +111,7 @@ func (routes *Routes) list(
 	return nil
 }
 
-func (routes *Routes) stop(
+func (routes *Routes) pause(
 	ctx *echo.Context,
 	identity controlplaneapi.Identity,
 	session sessionapi.ActiveSession,
@@ -117,11 +120,49 @@ func (routes *Routes) stop(
 	if apiError := routequery.RequireEmptyBody(ctx.Request()); apiError != nil {
 		return apiError
 	}
-	portForward, apiError := routes.service.Stop(
+	portForward, apiError := routes.service.Pause(
 		ctx.Request().Context(),
 		identity,
 		session,
 		taskID,
+	)
+	if apiError != nil {
+		return apiError
+	}
+	_ = ctx.JSON(http.StatusOK, documentFromEntity(portForward))
+	return nil
+}
+
+func (routes *Routes) resume(
+	ctx *echo.Context,
+	identity controlplaneapi.Identity,
+	session sessionapi.ActiveSession,
+	taskID string,
+) *controlplaneapi.Error {
+	if apiError := routequery.RequireEmptyBody(ctx.Request()); apiError != nil {
+		return apiError
+	}
+	portForward, apiError := routes.service.Resume(
+		ctx.Request().Context(), identity, session, taskID,
+	)
+	if apiError != nil {
+		return apiError
+	}
+	_ = ctx.JSON(http.StatusOK, documentFromEntity(portForward))
+	return nil
+}
+
+func (routes *Routes) delete(
+	ctx *echo.Context,
+	identity controlplaneapi.Identity,
+	session sessionapi.ActiveSession,
+	taskID string,
+) *controlplaneapi.Error {
+	if apiError := routequery.RequireEmptyBody(ctx.Request()); apiError != nil {
+		return apiError
+	}
+	portForward, apiError := routes.service.Delete(
+		ctx.Request().Context(), identity, session, taskID,
 	)
 	if apiError != nil {
 		return apiError

@@ -18,7 +18,7 @@ type fakeBackend struct {
 	connectedNamespace string
 	disconnectIdentity TrafficIdentity
 	trafficRequest     TrafficStartRequest
-	trafficStop        TrafficIdentity
+	trafficMutation    TrafficIdentity
 	commandRequest     PodCommandRequest
 	transferIdentity   TrafficIdentity
 	transferRequest    clientfiletransfer.Request
@@ -94,8 +94,19 @@ func (backend *fakeBackend) StartTraffic(_ context.Context, request TrafficStart
 	return TrafficItem{Type: request.Type, Exchange: &info}, nil
 }
 
-func (backend *fakeBackend) StopTraffic(_ context.Context, identity TrafficIdentity) error {
-	backend.trafficStop = identity
+func (backend *fakeBackend) PauseTraffic(_ context.Context, identity TrafficIdentity) error {
+	backend.trafficMutation = identity
+	return nil
+}
+
+func (backend *fakeBackend) ResumeTraffic(_ context.Context, identity TrafficIdentity) (TrafficItem, error) {
+	backend.trafficMutation = identity
+	info := clientexchange.Info{ID: identity.TaskID}
+	return TrafficItem{Type: identity.Type, Exchange: &info}, nil
+}
+
+func (backend *fakeBackend) DeleteTraffic(_ context.Context, identity TrafficIdentity) error {
+	backend.trafficMutation = identity
 	return nil
 }
 
@@ -340,12 +351,14 @@ func TestManageTrafficLifecycle(t *testing.T) {
 		t.Fatalf("forwarded=%#v request=%#v error=%v", forwarded, backend.trafficRequest, err)
 	}
 
-	stopped, err := manageTraffic(t.Context(), backend, manageTrafficIn{
-		Action: "stop", Type: trafficTypeExchange,
-		ProfileID: "server-a", SessionID: "session-1", Namespace: "default", TaskID: "exchange-1",
-	})
-	if err != nil || stopped.TaskID != "exchange-1" || backend.trafficStop.TaskID != "exchange-1" {
-		t.Fatalf("stopped=%#v identity=%#v error=%v", stopped, backend.trafficStop, err)
+	for _, action := range []string{actionPause, actionResume, actionDelete} {
+		result, err := manageTraffic(t.Context(), backend, manageTrafficIn{
+			Action: action, Type: trafficTypeExchange,
+			ProfileID: "server-a", SessionID: "session-1", Namespace: "default", TaskID: "exchange-1",
+		})
+		if err != nil || result.TaskID != "exchange-1" || backend.trafficMutation.TaskID != "exchange-1" {
+			t.Fatalf("action=%q result=%#v identity=%#v error=%v", action, result, backend.trafficMutation, err)
+		}
 	}
 }
 
@@ -394,8 +407,8 @@ func TestManageTrafficValidatesInputs(t *testing.T) {
 			},
 		},
 		{
-			name: "stop task", field: "taskId",
-			mutate: func(input *manageTrafficIn) { input.Action, input.TaskID = "stop", "" },
+			name: "pause task", field: "taskId",
+			mutate: func(input *manageTrafficIn) { input.Action, input.TaskID = actionPause, "" },
 		},
 		{name: "action", field: "action", mutate: func(input *manageTrafficIn) { input.Action = "restart" }},
 	}

@@ -138,22 +138,22 @@ func (a *App) stopServerRuntime(profileID string, disconnectSession bool) error 
 		}
 	}
 	if a.remoteForwards != nil {
-		if err := a.remoteForwards.StopProfile(a.context(), profileID); err != nil {
+		if err := a.remoteForwards.PauseProfile(a.context(), profileID); err != nil {
 			return err
 		}
 	}
 	if a.remoteExchanges != nil {
-		if err := a.remoteExchanges.StopProfile(a.context(), profileID); err != nil {
+		if err := a.remoteExchanges.PauseProfile(a.context(), profileID); err != nil {
 			return err
 		}
 	}
 	if a.remoteMirrors != nil {
-		if err := a.remoteMirrors.StopProfile(a.context(), profileID); err != nil {
+		if err := a.remoteMirrors.PauseProfile(a.context(), profileID); err != nil {
 			return err
 		}
 	}
 	if a.remotePreviews != nil {
-		if err := a.remotePreviews.StopProfile(a.context(), profileID); err != nil {
+		if err := a.remotePreviews.PauseProfile(a.context(), profileID); err != nil {
 			return err
 		}
 	}

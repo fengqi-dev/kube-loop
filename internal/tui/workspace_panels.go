@@ -90,7 +90,7 @@ func (m Model) viewWorkspaceFooter() string {
 	}
 	right := workspaceDescriptor(m.workspace.resource).actions + inputHints
 	if m.workspace.resource == resourceTasks {
-		right = "d stop  y copy  / filter  : command  ? help"
+		right = "p pause  r resume  d delete  y copy  / filter  : command  ? help"
 	}
 	lines := []string{}
 	if m.workspace.warning != "" {
@@ -121,7 +121,7 @@ func (m Model) viewWorkspaceFooter() string {
 		}
 		right = workspaceDescriptor(m.workspace.resource).actions + shortcuts
 		if m.workspace.resource == resourceTasks {
-			right = "d stop  y copy  / : ?"
+			right = "p pause  r resume  d delete  y copy  / : ?"
 		}
 	}
 	gap := strings.Repeat(" ", max(1, m.width-lipgloss.Width(left)-lipgloss.Width(right)-2))

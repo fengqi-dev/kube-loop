@@ -56,18 +56,39 @@ func (r *TrafficBindingReconciler) Reconcile(ctx context.Context, request ctrl.R
 		if !controllerutil.ContainsFinalizer(binding, bindingFinalizer) {
 			return ctrl.Result{}, nil
 		}
-		if err := r.cleanup(ctx, binding); err != nil {
+		if binding.Status.Phase == trafficv1alpha1.TrafficBindingPhaseRestored {
+			before := binding.DeepCopy()
+			controllerutil.RemoveFinalizer(binding, bindingFinalizer)
+			if err := r.Patch(ctx, binding, client.MergeFrom(before)); err != nil {
+				return ctrl.Result{}, client.IgnoreNotFound(err)
+			}
+			return ctrl.Result{}, nil
+		}
+		if binding.Status.Phase == trafficv1alpha1.TrafficBindingPhasePaused {
+			if err := r.setRestored(ctx, binding); err != nil {
+				return ctrl.Result{}, err
+			}
+			return ctrl.Result{RequeueAfter: time.Millisecond}, nil
+		}
+		if binding.Status.Phase != trafficv1alpha1.TrafficBindingPhaseRestoring {
+			if err := r.setRestoring(ctx, binding); err != nil {
+				return ctrl.Result{}, err
+			}
+			return ctrl.Result{RequeueAfter: time.Millisecond}, nil
+		}
+		if err := r.cleanupForDeletion(ctx, binding); err != nil {
 			log.Error(err, "Could not restore TrafficBinding resources", "mode", binding.Spec.Mode)
+			if statusErr := r.setRestoreFailed(ctx, binding, err); statusErr != nil {
+				return ctrl.Result{}, errors.Join(err, statusErr)
+			}
 			r.event(binding, corev1.EventTypeWarning, "RestoreFailed", safeMessage(err))
 			return ctrl.Result{}, err
 		}
-		before := binding.DeepCopy()
-		controllerutil.RemoveFinalizer(binding, bindingFinalizer)
-		if err := r.Patch(ctx, binding, client.MergeFrom(before)); err != nil {
-			return ctrl.Result{}, client.IgnoreNotFound(err)
+		if err := r.setRestored(ctx, binding); err != nil {
+			return ctrl.Result{}, err
 		}
 		r.event(binding, corev1.EventTypeNormal, "Restored", "TrafficBinding resources were restored")
-		return ctrl.Result{}, nil
+		return ctrl.Result{RequeueAfter: time.Millisecond}, nil
 	}
 
 	if err := validateBinding(binding); err != nil {
@@ -80,12 +101,28 @@ func (r *TrafficBindingReconciler) Reconcile(ctx context.Context, request ctrl.R
 		if err := r.Patch(ctx, binding, client.MergeFrom(before)); err != nil {
 			return ctrl.Result{}, err
 		}
+		if err := r.setPending(ctx, binding); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{RequeueAfter: time.Millisecond}, nil
+	}
+	if desiredState(binding) == trafficv1alpha1.TrafficBindingDesiredStatePaused {
+		return r.reconcilePaused(ctx, binding)
+	}
+	if binding.Status.Phase != trafficv1alpha1.TrafficBindingPhaseReady &&
+		binding.Status.Phase != trafficv1alpha1.TrafficBindingPhaseReconciling {
+		if err := r.setReconciling(ctx, binding); err != nil {
+			return ctrl.Result{}, err
+		}
 		return ctrl.Result{RequeueAfter: time.Millisecond}, nil
 	}
 
 	statusBase := binding.DeepCopy()
-	result, err := r.reconcileActive(ctx, binding)
+	result, complete, err := r.reconcileActive(ctx, binding)
 	if err == nil {
+		if !complete {
+			return result, nil
+		}
 		if statusErr := r.setReady(ctx, binding, statusBase); statusErr != nil {
 			return ctrl.Result{}, statusErr
 		}
@@ -101,36 +138,68 @@ func (r *TrafficBindingReconciler) Reconcile(ctx context.Context, request ctrl.R
 	return ctrl.Result{RequeueAfter: retryAfter}, err
 }
 
-func (r *TrafficBindingReconciler) reconcileActive(
+func (r *TrafficBindingReconciler) reconcilePaused(
 	ctx context.Context,
 	binding *trafficv1alpha1.TrafficBinding,
 ) (ctrl.Result, error) {
+	if binding.Status.Phase == trafficv1alpha1.TrafficBindingPhasePaused &&
+		binding.Status.ObservedGeneration == binding.Generation {
+		return ctrl.Result{}, nil
+	}
+	if binding.Status.Phase == trafficv1alpha1.TrafficBindingPhasePending ||
+		binding.Status.Phase == "" {
+		return ctrl.Result{}, r.setPaused(ctx, binding)
+	}
+	if binding.Status.Phase != trafficv1alpha1.TrafficBindingPhasePausing {
+		if err := r.setPausing(ctx, binding); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{RequeueAfter: time.Millisecond}, nil
+	}
+	if err := r.cleanupForPause(ctx, binding); err != nil {
+		if statusErr := r.setPauseFailed(ctx, binding, err); statusErr != nil {
+			return ctrl.Result{}, errors.Join(err, statusErr)
+		}
+		r.event(binding, corev1.EventTypeWarning, "PauseFailed", safeMessage(err))
+		return ctrl.Result{RequeueAfter: retryAfter}, err
+	}
+	if err := r.setPaused(ctx, binding); err != nil {
+		return ctrl.Result{}, err
+	}
+	r.event(binding, corev1.EventTypeNormal, "Paused", "TrafficBinding resources were restored and paused")
+	return ctrl.Result{}, nil
+}
+
+func (r *TrafficBindingReconciler) reconcileActive(
+	ctx context.Context,
+	binding *trafficv1alpha1.TrafficBinding,
+) (ctrl.Result, bool, error) {
 	switch binding.Spec.Mode {
 	case trafficv1alpha1.TrafficBindingModePortForward:
-		return ctrl.Result{RequeueAfter: targetRecheckAfter}, r.validateTarget(ctx, binding)
+		return ctrl.Result{RequeueAfter: targetRecheckAfter}, true, r.validateTarget(ctx, binding)
 	case trafficv1alpha1.TrafficBindingModePreview:
 		service, err := r.reconcilePreview(ctx, binding)
 		if err == nil {
 			binding.Status.ServiceName = service.Name
 			binding.Status.ServiceClusterIP = service.Spec.ClusterIP
 		}
-		return ctrl.Result{}, err
+		return ctrl.Result{}, true, err
 	case trafficv1alpha1.TrafficBindingModeExchange, trafficv1alpha1.TrafficBindingModeMirror:
 		if binding.Status.Snapshot == nil {
 			snapshot, err := r.captureService(ctx, binding)
 			if err != nil {
-				return ctrl.Result{}, err
+				return ctrl.Result{}, false, err
 			}
 			if err := r.persistSnapshot(ctx, binding, snapshot); err != nil {
-				return ctrl.Result{}, err
+				return ctrl.Result{}, false, err
 			}
-			return ctrl.Result{RequeueAfter: time.Millisecond}, nil
+			return ctrl.Result{RequeueAfter: time.Millisecond}, false, nil
 		}
 		binding.Status.ServiceName = binding.Spec.Target.Name
 		binding.Status.ServiceClusterIP = ""
-		return ctrl.Result{}, r.reconcileIntercept(ctx, binding)
+		return ctrl.Result{}, true, r.reconcileIntercept(ctx, binding)
 	default:
-		return ctrl.Result{}, permanentf("spec.mode %q is unsupported", binding.Spec.Mode)
+		return ctrl.Result{}, false, permanentf("spec.mode %q is unsupported", binding.Spec.Mode)
 	}
 }
 
@@ -142,12 +211,41 @@ func (r *TrafficBindingReconciler) cleanup(ctx context.Context, binding *traffic
 		return r.deletePreview(ctx, binding)
 	case trafficv1alpha1.TrafficBindingModeExchange, trafficv1alpha1.TrafficBindingModeMirror:
 		if binding.Status.Snapshot == nil {
+			if binding.Status.ServiceName == "" {
+				return nil
+			}
 			return permanentf("rollback snapshot is missing")
 		}
 		return r.restoreService(ctx, binding)
 	default:
 		return permanentf("spec.mode %q is unsupported", binding.Spec.Mode)
 	}
+}
+
+func (r *TrafficBindingReconciler) cleanupForPause(
+	ctx context.Context,
+	binding *trafficv1alpha1.TrafficBinding,
+) error {
+	return r.cleanup(ctx, binding)
+}
+
+func (r *TrafficBindingReconciler) cleanupForDeletion(
+	ctx context.Context,
+	binding *trafficv1alpha1.TrafficBinding,
+) error {
+	if desiredState(binding) == trafficv1alpha1.TrafficBindingDesiredStatePaused {
+		return r.cleanupForPause(ctx, binding)
+	}
+	return r.cleanup(ctx, binding)
+}
+
+func desiredState(
+	binding *trafficv1alpha1.TrafficBinding,
+) trafficv1alpha1.TrafficBindingDesiredState {
+	if binding.Spec.DesiredState == "" {
+		return trafficv1alpha1.TrafficBindingDesiredStateActive
+	}
+	return binding.Spec.DesiredState
 }
 
 func requestsForBinding(object client.Object) []reconcile.Request {

@@ -70,7 +70,9 @@ func ValidateTransition(current, next State) error {
 		allowed = next == Stopped || next == Failed || next == Recovering
 	case Recovering:
 		allowed = next == Stopping || next == Stopped || next == Failed
-	case Failed, Stopped:
+	case Stopped:
+		allowed = next == Pending
+	case Failed:
 		allowed = false
 	}
 	if !allowed {

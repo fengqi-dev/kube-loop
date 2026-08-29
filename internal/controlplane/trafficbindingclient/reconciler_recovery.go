@@ -71,7 +71,11 @@ func (reconciler *Reconciler) recoverTask(
 		context.WithoutCancel(ctx),
 		reconciler.cleanupTimeout,
 	)
-	err = reconciler.manager.Delete(cleanupContext, session.Namespace, task.ID)
+	if task.State == remotetask.Stopping {
+		err = reconciler.manager.Pause(cleanupContext, session.Namespace, task.ID)
+	} else {
+		err = reconciler.manager.Delete(cleanupContext, session.Namespace, task.ID)
+	}
 	cancel()
 	if err != nil {
 		reconciler.deferRecovery(ctx, task, reconciler.now().UTC())

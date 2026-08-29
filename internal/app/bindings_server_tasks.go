@@ -10,7 +10,9 @@ import (
 
 type serverTaskManager[Request, Info any] interface {
 	Start(context.Context, clientprofile.Profile, clientremote.Session, Request) (Info, error)
-	Stop(context.Context, string, string) error
+	Pause(context.Context, string, string) error
+	Resume(context.Context, string, string) (Info, error)
+	Delete(context.Context, string, string) error
 	List(string) []Info
 }
 
@@ -94,14 +96,42 @@ func startManagedServerTask[Request, Info any](
 		})
 }
 
-func stopManagedServerTask[Request, Info any](
+func pauseManagedServerTask[Request, Info any](
 	a *App,
 	manager serverTaskManager[Request, Info],
 	available bool,
 	unavailable, profileID, taskID string,
 ) error {
 	return stopServerTask(a, profileID, unavailable, available,
-		func(id string) error { return manager.Stop(a.context(), id, taskID) })
+		func(id string) error { return manager.Pause(a.context(), id, taskID) })
+}
+
+func resumeManagedServerTask[Request, Info any](
+	a *App,
+	manager serverTaskManager[Request, Info],
+	available bool,
+	unavailable, profileID, taskID string,
+) (Info, error) {
+	if !available {
+		var zero Info
+		return zero, errors.New(unavailable)
+	}
+	serverProfile, err := a.serverProfile(profileID)
+	if err != nil {
+		var zero Info
+		return zero, err
+	}
+	return manager.Resume(a.context(), serverProfile.ID, taskID)
+}
+
+func deleteManagedServerTask[Request, Info any](
+	a *App,
+	manager serverTaskManager[Request, Info],
+	available bool,
+	unavailable, profileID, taskID string,
+) error {
+	return stopServerTask(a, profileID, unavailable, available,
+		func(id string) error { return manager.Delete(a.context(), id, taskID) })
 }
 
 func listManagedServerTasks[Request, Info any](

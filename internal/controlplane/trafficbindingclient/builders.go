@@ -33,7 +33,8 @@ func NewInterceptBinding(
 	return &trafficv1alpha1.TrafficBinding{
 		Namespace: snapshot.Namespace,
 		Spec: trafficv1alpha1.TrafficBindingSpec{
-			Mode: mode, SessionID: owner.SessionID, TaskID: owner.TaskID,
+			DesiredState: trafficv1alpha1.TrafficBindingDesiredStateActive,
+			Mode:         mode, SessionID: owner.SessionID, TaskID: owner.TaskID,
 			SessionGeneration: owner.SessionGeneration,
 			Target: &trafficv1alpha1.TrafficTarget{
 				Kind: trafficv1alpha1.TargetKindService,
@@ -62,8 +63,9 @@ func NewPreviewBinding(
 	return &trafficv1alpha1.TrafficBinding{
 		Namespace: snapshot.Namespace,
 		Spec: trafficv1alpha1.TrafficBindingSpec{
-			Mode:      trafficv1alpha1.TrafficBindingModePreview,
-			SessionID: owner.SessionID, TaskID: owner.TaskID, SessionGeneration: owner.SessionGeneration,
+			DesiredState: trafficv1alpha1.TrafficBindingDesiredStateActive,
+			Mode:         trafficv1alpha1.TrafficBindingModePreview,
+			SessionID:    owner.SessionID, TaskID: owner.TaskID, SessionGeneration: owner.SessionGeneration,
 			Relay: &trafficv1alpha1.RelayEndpoint{
 				Address: snapshot.GatewayIP,
 			},
@@ -87,8 +89,9 @@ func NewPortForwardBinding(
 	return &trafficv1alpha1.TrafficBinding{
 		Namespace: namespace,
 		Spec: trafficv1alpha1.TrafficBindingSpec{
-			Mode:      trafficv1alpha1.TrafficBindingModePortForward,
-			SessionID: owner.SessionID, TaskID: owner.TaskID, SessionGeneration: owner.SessionGeneration,
+			DesiredState: trafficv1alpha1.TrafficBindingDesiredStateActive,
+			Mode:         trafficv1alpha1.TrafficBindingModePortForward,
+			SessionID:    owner.SessionID, TaskID: owner.TaskID, SessionGeneration: owner.SessionGeneration,
 			Target: &trafficv1alpha1.TrafficTarget{
 				Kind: targetKind,
 				Name: name,

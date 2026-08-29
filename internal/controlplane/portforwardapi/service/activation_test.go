@@ -71,6 +71,10 @@ func (bindings *failingBindings) Delete(ctx context.Context, namespace, taskID s
 	return nil
 }
 
+func (bindings *failingBindings) Stop(ctx context.Context, namespace, taskID string) error {
+	return bindings.Delete(ctx, namespace, taskID)
+}
+
 func TestActivateCleansManagedBindingAndMarksTaskFailed(t *testing.T) {
 	now := time.Date(2026, 8, 23, 10, 0, 0, 0, time.UTC)
 	specJSON, err := json.Marshal(Spec{

@@ -34,7 +34,7 @@ func (m Model) hintText() string {
 	case tabServices:
 		return HintStyle.Render(": cmd  / filter  f forward  x exchange  m mirror  p preview")
 	case tabTasks:
-		return HintStyle.Render(": cmd  / filter  enter/d stop  y copy")
+		return HintStyle.Render(": cmd  / filter  p pause  r resume  d delete  y copy")
 	case tabCount:
 		return HintStyle.Render("r refresh")
 	}

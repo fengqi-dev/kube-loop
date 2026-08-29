@@ -111,6 +111,7 @@ func (crashBindingManager) Activate(
 }
 
 func (crashBindingManager) Delete(context.Context, string, string) error { return nil }
+func (crashBindingManager) Stop(context.Context, string, string) error   { return nil }
 
 func (crashTargetResolver) Resolve(
 	context.Context,

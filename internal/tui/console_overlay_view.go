@@ -13,7 +13,8 @@ func (m Model) viewConsoleAction(width, height int) string {
 	if m.actionMode == actionExec {
 		title, description = "EXECUTE COMMAND", "Type the command to run in the selected pod."
 	}
-	if m.actionMode == actionExchange || m.actionMode == actionMirror || m.actionMode == actionPreview {
+	if m.actionMode == actionExchange || m.actionMode == actionMirror ||
+		m.actionMode == actionPreview {
 		return m.viewServiceTrafficAction(width, height)
 	}
 	values := "Target: " + firstNonEmpty(m.actionPod, m.actionService, "-") +
@@ -46,7 +47,9 @@ func (m Model) viewConsoleAction(width, height int) string {
 		values = "Target: " + firstNonEmpty(m.actionPod, m.actionService, "-") + "\n\n" +
 			remotePrefix + "Remote port  " + remoteValue + "\n" +
 			localPrefix + "Local port   " + localValue
-		controls = "\n\n" + consoleSubtle.Render("↑/↓ field   ←/→ select port   Tab next   0 = auto")
+		controls = "\n\n" + consoleSubtle.Render(
+			"↑/↓ field   ←/→ select port   Tab next   0 = auto",
+		)
 	}
 	content := consoleSection.Render(title) + "\n\n" +
 		description + "\n\n" +
@@ -93,7 +96,13 @@ q                 Quit`
 			"Search: " + consoleValue.Render(m.console.query+"_"),
 			"",
 		}
-		start, end := max(0, m.console.overlayPos-4), minInt(len(matches), max(0, m.console.overlayPos-4)+9)
+		start, end := max(
+			0,
+			m.console.overlayPos-4,
+		), minInt(
+			len(matches),
+			max(0, m.console.overlayPos-4)+9,
+		)
 		for i := start; i < end; i++ {
 			line := "  " + matches[i]
 			if i == m.console.overlayPos {
@@ -104,12 +113,24 @@ q                 Quit`
 		if len(matches) == 0 {
 			lines = append(lines, consoleSubtle.Render("No matching namespaces"))
 		}
-		lines = append(lines, "", consoleSubtle.Render("Type to filter   Enter select   Esc cancel"))
+		lines = append(
+			lines,
+			"",
+			consoleSubtle.Render("Type to filter   Enter select   Esc cancel"),
+		)
 		content = strings.Join(lines, "\n")
 	case overlayConfirmTask:
-		content = consoleConfirmContent("STOP SESSION?", "The selected client session will be stopped.", "Stop session")
+		content = consoleConfirmContent(
+			"DELETE SESSION?",
+			"The selected client session will be deleted.",
+			"Delete session",
+		)
 	case overlayConfirmProfile:
-		content = consoleConfirmContent("DELETE SERVER?", "The selected server will be removed.", "Delete server")
+		content = consoleConfirmContent(
+			"DELETE SERVER?",
+			"The selected server will be removed.",
+			"Delete server",
+		)
 	case overlayConfirmDisconnect:
 		content = consoleConfirmContent(
 			"DISCONNECT?",
@@ -126,7 +147,9 @@ q                 Quit`
 		content = m.viewConsoleProfilesOverlay()
 	case overlayProfileAdd:
 		content = consoleSection.Render("ADD SERVER") + "\n\n" +
-			consoleSubtle.Render("Enter the complete HTTP or HTTPS Gateway service address.") + "\n\n" +
+			consoleSubtle.Render(
+				"Enter the complete HTTP or HTTPS Gateway service address.",
+			) + "\n\n" +
 			"Service address\n> " + m.loginURL + "_\n\n" +
 			"Enter add server   Esc back"
 	case overlayNone:

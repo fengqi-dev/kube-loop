@@ -93,16 +93,24 @@ declare global {
 		  SetTrafficInspectionEnabled(enabled: boolean): Promise<TrafficInspectionSettings>;
 		  ImportTrafficInspectionProtoDirectory(): Promise<TrafficInspectionSettings>;
 		  StartServerPortForward(request: ServerPortForwardRequest): Promise<ServerPortForwardInfo>;
-		  StopServerPortForward(profileId: string, taskId: string): Promise<void>;
+		  PauseServerPortForward(profileId: string, taskId: string): Promise<void>;
+		  ResumeServerPortForward(profileId: string, taskId: string): Promise<ServerPortForwardInfo>;
+		  DeleteServerPortForward(profileId: string, taskId: string): Promise<void>;
 		  ListServerPortForwards(profileId: string): Promise<ServerPortForwardInfo[]>;
 			  StartServerExchange(request: ServerExchangeRequest): Promise<ServerExchangeInfo>;
-			  StopServerExchange(profileId: string, taskId: string): Promise<void>;
+			  PauseServerExchange(profileId: string, taskId: string): Promise<void>;
+			  ResumeServerExchange(profileId: string, taskId: string): Promise<ServerExchangeInfo>;
+			  DeleteServerExchange(profileId: string, taskId: string): Promise<void>;
 			  ListServerExchanges(profileId: string): Promise<ServerExchangeInfo[]>;
 			  StartServerMirror(request: ServerMirrorRequest): Promise<ServerMirrorInfo>;
-			  StopServerMirror(profileId: string, taskId: string): Promise<void>;
+			  PauseServerMirror(profileId: string, taskId: string): Promise<void>;
+			  ResumeServerMirror(profileId: string, taskId: string): Promise<ServerMirrorInfo>;
+			  DeleteServerMirror(profileId: string, taskId: string): Promise<void>;
 			  ListServerMirrors(profileId: string): Promise<ServerMirrorInfo[]>;
 			  StartServerPreview(request: ServerPreviewRequest): Promise<ServerPreviewInfo>;
-			  StopServerPreview(profileId: string, taskId: string): Promise<void>;
+			  PauseServerPreview(profileId: string, taskId: string): Promise<void>;
+			  ResumeServerPreview(profileId: string, taskId: string): Promise<ServerPreviewInfo>;
+			  DeleteServerPreview(profileId: string, taskId: string): Promise<void>;
 			  ListServerPreviews(profileId: string): Promise<ServerPreviewInfo[]>;
 			  StartServerPodSSH(request: ServerPodSSHRequest): Promise<ServerPodSSHInfo>;
 		  StopServerPodSSH(profileId: string, endpointId: string): Promise<void>;
@@ -296,26 +304,42 @@ export const backend = {
 		Promise.resolve().then(() => api().ImportTrafficInspectionProtoDirectory()),
 	startServerPortForward: (request: ServerPortForwardRequest) =>
 		Promise.resolve().then(() => api().StartServerPortForward(request)),
-	stopServerPortForward: (profileId: string, taskId: string) =>
-		Promise.resolve().then(() => api().StopServerPortForward(profileId, taskId)),
+	pauseServerPortForward: (profileId: string, taskId: string) =>
+		Promise.resolve().then(() => api().PauseServerPortForward(profileId, taskId)),
+	resumeServerPortForward: (profileId: string, taskId: string) =>
+		Promise.resolve().then(() => api().ResumeServerPortForward(profileId, taskId)),
+	deleteServerPortForward: (profileId: string, taskId: string) =>
+		Promise.resolve().then(() => api().DeleteServerPortForward(profileId, taskId)),
 	listServerPortForwards: (profileId: string) =>
 		Promise.resolve().then(() => api().ListServerPortForwards(profileId)),
 	startServerExchange: (request: ServerExchangeRequest) =>
 		Promise.resolve().then(() => api().StartServerExchange(request)),
-	stopServerExchange: (profileId: string, taskId: string) =>
-		Promise.resolve().then(() => api().StopServerExchange(profileId, taskId)),
+	pauseServerExchange: (profileId: string, taskId: string) =>
+		Promise.resolve().then(() => api().PauseServerExchange(profileId, taskId)),
+	resumeServerExchange: (profileId: string, taskId: string) =>
+		Promise.resolve().then(() => api().ResumeServerExchange(profileId, taskId)),
+	deleteServerExchange: (profileId: string, taskId: string) =>
+		Promise.resolve().then(() => api().DeleteServerExchange(profileId, taskId)),
 		listServerExchanges: (profileId: string) =>
 			Promise.resolve().then(() => api().ListServerExchanges(profileId)),
 		startServerMirror: (request: ServerMirrorRequest) =>
 			Promise.resolve().then(() => api().StartServerMirror(request)),
-		stopServerMirror: (profileId: string, taskId: string) =>
-			Promise.resolve().then(() => api().StopServerMirror(profileId, taskId)),
+		pauseServerMirror: (profileId: string, taskId: string) =>
+			Promise.resolve().then(() => api().PauseServerMirror(profileId, taskId)),
+		resumeServerMirror: (profileId: string, taskId: string) =>
+			Promise.resolve().then(() => api().ResumeServerMirror(profileId, taskId)),
+		deleteServerMirror: (profileId: string, taskId: string) =>
+			Promise.resolve().then(() => api().DeleteServerMirror(profileId, taskId)),
 			listServerMirrors: (profileId: string) =>
 				Promise.resolve().then(() => api().ListServerMirrors(profileId)),
 			startServerPreview: (request: ServerPreviewRequest) =>
 				Promise.resolve().then(() => api().StartServerPreview(request)),
-			stopServerPreview: (profileId: string, taskId: string) =>
-				Promise.resolve().then(() => api().StopServerPreview(profileId, taskId)),
+			pauseServerPreview: (profileId: string, taskId: string) =>
+				Promise.resolve().then(() => api().PauseServerPreview(profileId, taskId)),
+			resumeServerPreview: (profileId: string, taskId: string) =>
+				Promise.resolve().then(() => api().ResumeServerPreview(profileId, taskId)),
+			deleteServerPreview: (profileId: string, taskId: string) =>
+				Promise.resolve().then(() => api().DeleteServerPreview(profileId, taskId)),
 			listServerPreviews: (profileId: string) =>
 				Promise.resolve().then(() => api().ListServerPreviews(profileId)),
 		startServerPodSSH: (request: ServerPodSSHRequest) =>

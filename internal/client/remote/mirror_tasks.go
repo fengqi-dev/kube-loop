@@ -1,3 +1,4 @@
+//nolint:dupl // Task endpoints intentionally share the same typed lifecycle shape.
 package remote
 
 import (
@@ -33,14 +34,39 @@ func (client *Client) GetMirror(
 	)
 }
 
-func (client *Client) StopMirror(
+func (client *Client) PauseMirror(
 	ctx context.Context,
 	serverProfile profile.Profile,
 	current Session,
 	taskID string,
 ) (MirrorTask, error) {
-	return remoteTaskByID(
+	return remoteTaskAction(
+		ctx, client, serverProfile, current, taskID, http.MethodPost,
+		"mirrors", "pause", "Mirror Task ID is invalid", validateMirrorTask,
+	)
+}
+
+// StopMirror is retained for internal compatibility and deletes the task.
+func (client *Client) StopMirror(
+	ctx context.Context, serverProfile profile.Profile, current Session, taskID string,
+) (MirrorTask, error) {
+	return client.DeleteMirror(ctx, serverProfile, current, taskID)
+}
+
+func (client *Client) ResumeMirror(
+	ctx context.Context, serverProfile profile.Profile, current Session, taskID string,
+) (MirrorTask, error) {
+	return remoteTaskAction(
+		ctx, client, serverProfile, current, taskID, http.MethodPost,
+		"mirrors", "resume", "Mirror Task ID is invalid", validateMirrorTask,
+	)
+}
+
+func (client *Client) DeleteMirror(
+	ctx context.Context, serverProfile profile.Profile, current Session, taskID string,
+) (MirrorTask, error) {
+	return remoteTaskAction(
 		ctx, client, serverProfile, current, taskID, http.MethodDelete,
-		"mirrors", "Mirror Task ID is invalid", validateMirrorTask,
+		"mirrors", "", "Mirror Task ID is invalid", validateMirrorTask,
 	)
 }

@@ -25,9 +25,21 @@ func (routes APIRoutes) RegisterSessionRoutes(group *echo.Group) {
 	)
 	registerRoute(
 		group,
+		http.MethodPost,
+		"/sessions/:sessionID/port-forwards/:taskID/pause",
+		routes.PortForwards.Pause,
+	)
+	registerRoute(
+		group,
+		http.MethodPost,
+		"/sessions/:sessionID/port-forwards/:taskID/resume",
+		routes.PortForwards.Resume,
+	)
+	registerRoute(
+		group,
 		http.MethodDelete,
 		"/sessions/:sessionID/port-forwards/:taskID",
-		routes.PortForwards.Stop,
+		routes.PortForwards.Delete,
 	)
 
 	registerRoute(group, http.MethodPost, "/sessions/:sessionID/exchanges", routes.Exchanges.Create)
@@ -39,18 +51,42 @@ func (routes APIRoutes) RegisterSessionRoutes(group *echo.Group) {
 	)
 	registerRoute(
 		group,
+		http.MethodPost,
+		"/sessions/:sessionID/exchanges/:taskID/pause",
+		routes.Exchanges.Pause,
+	)
+	registerRoute(
+		group,
+		http.MethodPost,
+		"/sessions/:sessionID/exchanges/:taskID/resume",
+		routes.Exchanges.Resume,
+	)
+	registerRoute(
+		group,
 		http.MethodDelete,
 		"/sessions/:sessionID/exchanges/:taskID",
-		routes.Exchanges.Stop,
+		routes.Exchanges.Delete,
 	)
 
 	registerRoute(group, http.MethodPost, "/sessions/:sessionID/mirrors", routes.Mirrors.Create)
 	registerRoute(group, http.MethodGet, "/sessions/:sessionID/mirrors/:taskID", routes.Mirrors.Get)
 	registerRoute(
 		group,
+		http.MethodPost,
+		"/sessions/:sessionID/mirrors/:taskID/pause",
+		routes.Mirrors.Pause,
+	)
+	registerRoute(
+		group,
+		http.MethodPost,
+		"/sessions/:sessionID/mirrors/:taskID/resume",
+		routes.Mirrors.Resume,
+	)
+	registerRoute(
+		group,
 		http.MethodDelete,
 		"/sessions/:sessionID/mirrors/:taskID",
-		routes.Mirrors.Stop,
+		routes.Mirrors.Delete,
 	)
 
 	registerRoute(group, http.MethodPost, "/sessions/:sessionID/previews", routes.Previews.Create)
@@ -62,9 +98,21 @@ func (routes APIRoutes) RegisterSessionRoutes(group *echo.Group) {
 	)
 	registerRoute(
 		group,
+		http.MethodPost,
+		"/sessions/:sessionID/previews/:taskID/pause",
+		routes.Previews.Pause,
+	)
+	registerRoute(
+		group,
+		http.MethodPost,
+		"/sessions/:sessionID/previews/:taskID/resume",
+		routes.Previews.Resume,
+	)
+	registerRoute(
+		group,
 		http.MethodDelete,
 		"/sessions/:sessionID/previews/:taskID",
-		routes.Previews.Stop,
+		routes.Previews.Delete,
 	)
 
 	registerRoute(

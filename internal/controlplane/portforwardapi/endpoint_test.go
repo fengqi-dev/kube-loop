@@ -70,6 +70,22 @@ func (bindingManager) Delete(
 	return nil
 }
 
+func (bindingManager) Stop(
+	context.Context,
+	string,
+	string,
+) error {
+	return nil
+}
+
+func (bindingManager) Pause(
+	context.Context,
+	string,
+	string,
+) error {
+	return nil
+}
+
 func (resolver *captureResolver) Resolve(
 	_ context.Context,
 	_ controlplaneapi.Identity,
@@ -252,11 +268,36 @@ func TestPortForwardTaskLifecycleIsOwnedIdempotentAndPolicyMapped(
 			listed.Body.String(),
 		)
 	}
+	taskPath := "/api/sessions/" + sessionID + "/port-forwards/" + document.ID
+	paused := taskRequest(
+		t,
+		server,
+		http.MethodPost,
+		taskPath+"/pause?namespace=development",
+		identityID,
+		"",
+		nil,
+	)
+	if paused.Code != http.StatusOK || decodeTaskDocument(t, paused).State != "stopped" {
+		t.Fatalf("pause status = %d body = %s", paused.Code, paused.Body.String())
+	}
+	resumed := taskRequest(
+		t,
+		server,
+		http.MethodPost,
+		taskPath+"/resume?namespace=development",
+		identityID,
+		"",
+		nil,
+	)
+	if resumed.Code != http.StatusOK || decodeTaskDocument(t, resumed).State != "running" {
+		t.Fatalf("resume status = %d body = %s", resumed.Code, resumed.Body.String())
+	}
 	stopped := taskRequest(
 		t,
 		server,
 		http.MethodDelete,
-		"/api/sessions/"+sessionID+"/port-forwards/"+document.ID+"?namespace=development",
+		taskPath+"?namespace=development",
 		identityID,
 		"",
 		nil,
@@ -264,7 +305,7 @@ func TestPortForwardTaskLifecycleIsOwnedIdempotentAndPolicyMapped(
 	if stopped.Code != http.StatusOK ||
 		decodeTaskDocument(t, stopped).State != "stopped" {
 		t.Fatalf(
-			"stop status = %d body = %s",
+			"delete status = %d body = %s",
 			stopped.Code,
 			stopped.Body.String(),
 		)

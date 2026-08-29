@@ -115,16 +115,16 @@ func (a *App) LogoutServer(profileID string) error {
 		disconnectErr = errors.Join(disconnectErr, a.remoteSSH.StopProfile(serverProfile.ID))
 	}
 	if a.remoteForwards != nil {
-		disconnectErr = errors.Join(disconnectErr, a.remoteForwards.StopProfile(a.context(), serverProfile.ID))
+		disconnectErr = errors.Join(disconnectErr, a.remoteForwards.PauseProfile(a.context(), serverProfile.ID))
 	}
 	if a.remoteExchanges != nil {
-		disconnectErr = errors.Join(disconnectErr, a.remoteExchanges.StopProfile(a.context(), serverProfile.ID))
+		disconnectErr = errors.Join(disconnectErr, a.remoteExchanges.PauseProfile(a.context(), serverProfile.ID))
 	}
 	if a.remoteMirrors != nil {
-		disconnectErr = errors.Join(disconnectErr, a.remoteMirrors.StopProfile(a.context(), serverProfile.ID))
+		disconnectErr = errors.Join(disconnectErr, a.remoteMirrors.PauseProfile(a.context(), serverProfile.ID))
 	}
 	if a.remotePreviews != nil {
-		disconnectErr = errors.Join(disconnectErr, a.remotePreviews.StopProfile(a.context(), serverProfile.ID))
+		disconnectErr = errors.Join(disconnectErr, a.remotePreviews.PauseProfile(a.context(), serverProfile.ID))
 	}
 	if a.dataPlanes != nil {
 		disconnectErr = errors.Join(disconnectErr, a.dataPlanes.Disconnect(serverProfile.ID))

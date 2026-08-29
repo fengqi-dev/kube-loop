@@ -1,3 +1,4 @@
+//nolint:dupl // The Wails API keeps one explicit binding per traffic type.
 package app
 
 import (
@@ -11,8 +12,20 @@ func (a *App) StartServerMirror(request clientmirror.Request) (clientmirror.Info
 	)
 }
 
-func (a *App) StopServerMirror(profileID, taskID string) error {
-	return stopManagedServerTask(
+func (a *App) PauseServerMirror(profileID, taskID string) error {
+	return pauseManagedServerTask(
+		a, a.remoteMirrors, a.remoteMirrors != nil, "Mirror is unavailable", profileID, taskID,
+	)
+}
+
+func (a *App) ResumeServerMirror(profileID, taskID string) (clientmirror.Info, error) {
+	return resumeManagedServerTask(
+		a, a.remoteMirrors, a.remoteMirrors != nil, "Mirror is unavailable", profileID, taskID,
+	)
+}
+
+func (a *App) DeleteServerMirror(profileID, taskID string) error {
+	return deleteManagedServerTask(
 		a, a.remoteMirrors, a.remoteMirrors != nil, "Mirror is unavailable", profileID, taskID,
 	)
 }

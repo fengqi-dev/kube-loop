@@ -67,7 +67,15 @@ func (backend *RemoteBackend) StartTraffic(ctx context.Context, request TrafficS
 	}
 }
 
-func (backend *RemoteBackend) StopTraffic(ctx context.Context, identity TrafficIdentity) error {
+func (backend *RemoteBackend) PauseTraffic(ctx context.Context, identity TrafficIdentity) error {
+	return backend.mutateTraffic(ctx, identity, actionPause)
+}
+
+func (backend *RemoteBackend) DeleteTraffic(ctx context.Context, identity TrafficIdentity) error {
+	return backend.mutateTraffic(ctx, identity, actionDelete)
+}
+
+func (backend *RemoteBackend) mutateTraffic(ctx context.Context, identity TrafficIdentity, action string) error {
 	serverProfile, _, err := backend.requireSession(identity.ProfileID, identity.SessionID, identity.Namespace)
 	if err != nil {
 		return err
@@ -81,27 +89,84 @@ func (backend *RemoteBackend) StopTraffic(ctx context.Context, identity TrafficI
 		if items == nil || !matchesExchange(items.List(serverProfile.ID), identity) {
 			return &ToolError{Code: ErrorNotFound, Message: "Exchange is not active"}
 		}
-		return backend.dependencies.Exchanges.Stop(ctx, serverProfile.ID, identity.TaskID)
+		if action == actionPause {
+			return backend.dependencies.Exchanges.Pause(ctx, serverProfile.ID, identity.TaskID)
+		}
+		return backend.dependencies.Exchanges.Delete(ctx, serverProfile.ID, identity.TaskID)
 	case trafficTypeMirror:
 		items := backend.dependencies.Mirrors
 		if items == nil || !matchesMirror(items.List(serverProfile.ID), identity) {
 			return &ToolError{Code: ErrorNotFound, Message: "Mirror is not active"}
 		}
-		return backend.dependencies.Mirrors.Stop(ctx, serverProfile.ID, identity.TaskID)
+		if action == actionPause {
+			return backend.dependencies.Mirrors.Pause(ctx, serverProfile.ID, identity.TaskID)
+		}
+		return backend.dependencies.Mirrors.Delete(ctx, serverProfile.ID, identity.TaskID)
 	case trafficTypePreview:
 		items := backend.dependencies.Previews
 		if items == nil || !matchesPreview(items.List(serverProfile.ID), identity) {
 			return &ToolError{Code: ErrorNotFound, Message: "Preview is not active"}
 		}
-		return backend.dependencies.Previews.Stop(ctx, serverProfile.ID, identity.TaskID)
+		if action == actionPause {
+			return backend.dependencies.Previews.Pause(ctx, serverProfile.ID, identity.TaskID)
+		}
+		return backend.dependencies.Previews.Delete(ctx, serverProfile.ID, identity.TaskID)
 	case trafficTypePortForward:
 		items := backend.dependencies.Forwards
 		if items == nil || !matchesForward(items.List(serverProfile.ID), identity) {
 			return &ToolError{Code: ErrorNotFound, Message: "Port Forward is not active"}
 		}
-		return backend.dependencies.Forwards.Stop(ctx, serverProfile.ID, identity.TaskID)
+		if action == actionPause {
+			return backend.dependencies.Forwards.Pause(ctx, serverProfile.ID, identity.TaskID)
+		}
+		return backend.dependencies.Forwards.Delete(ctx, serverProfile.ID, identity.TaskID)
 	default:
 		return invalid("type", "type must be exchange, mirror, preview, or port_forward")
+	}
+}
+
+func (backend *RemoteBackend) ResumeTraffic(
+	ctx context.Context,
+	identity TrafficIdentity,
+) (TrafficItem, error) {
+	serverProfile, _, err := backend.requireSession(identity.ProfileID, identity.SessionID, identity.Namespace)
+	if err != nil {
+		return TrafficItem{}, err
+	}
+	if strings.TrimSpace(identity.TaskID) == "" {
+		return TrafficItem{}, invalid("taskId", "taskId is required")
+	}
+	switch identity.Type {
+	case trafficTypeExchange:
+		items := backend.dependencies.Exchanges
+		if items == nil || !matchesExchange(items.List(serverProfile.ID), identity) {
+			return TrafficItem{}, &ToolError{Code: ErrorNotFound, Message: "Exchange is not paused"}
+		}
+		info, err := items.Resume(ctx, serverProfile.ID, identity.TaskID)
+		return TrafficItem{Type: identity.Type, Exchange: &info}, err
+	case trafficTypeMirror:
+		items := backend.dependencies.Mirrors
+		if items == nil || !matchesMirror(items.List(serverProfile.ID), identity) {
+			return TrafficItem{}, &ToolError{Code: ErrorNotFound, Message: "Mirror is not paused"}
+		}
+		info, err := items.Resume(ctx, serverProfile.ID, identity.TaskID)
+		return TrafficItem{Type: identity.Type, Mirror: &info}, err
+	case trafficTypePreview:
+		items := backend.dependencies.Previews
+		if items == nil || !matchesPreview(items.List(serverProfile.ID), identity) {
+			return TrafficItem{}, &ToolError{Code: ErrorNotFound, Message: "Preview is not paused"}
+		}
+		info, err := items.Resume(ctx, serverProfile.ID, identity.TaskID)
+		return TrafficItem{Type: identity.Type, Preview: &info}, err
+	case trafficTypePortForward:
+		items := backend.dependencies.Forwards
+		if items == nil || !matchesForward(items.List(serverProfile.ID), identity) {
+			return TrafficItem{}, &ToolError{Code: ErrorNotFound, Message: "Port Forward is not paused"}
+		}
+		info, err := items.Resume(ctx, serverProfile.ID, identity.TaskID)
+		return TrafficItem{Type: identity.Type, PortForward: &info}, err
+	default:
+		return TrafficItem{}, invalid("type", "type must be exchange, mirror, preview, or port_forward")
 	}
 }
 

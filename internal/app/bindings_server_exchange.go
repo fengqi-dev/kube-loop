@@ -1,3 +1,4 @@
+//nolint:dupl // The Wails API keeps one explicit binding per traffic type.
 package app
 
 import (
@@ -11,8 +12,20 @@ func (a *App) StartServerExchange(request clientexchange.Request) (clientexchang
 	)
 }
 
-func (a *App) StopServerExchange(profileID, taskID string) error {
-	return stopManagedServerTask(
+func (a *App) PauseServerExchange(profileID, taskID string) error {
+	return pauseManagedServerTask(
+		a, a.remoteExchanges, a.remoteExchanges != nil, "Exchange is unavailable", profileID, taskID,
+	)
+}
+
+func (a *App) ResumeServerExchange(profileID, taskID string) (clientexchange.Info, error) {
+	return resumeManagedServerTask(
+		a, a.remoteExchanges, a.remoteExchanges != nil, "Exchange is unavailable", profileID, taskID,
+	)
+}
+
+func (a *App) DeleteServerExchange(profileID, taskID string) error {
+	return deleteManagedServerTask(
 		a, a.remoteExchanges, a.remoteExchanges != nil, "Exchange is unavailable", profileID, taskID,
 	)
 }

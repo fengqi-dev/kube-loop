@@ -160,6 +160,20 @@ func (manager *fakeExchangeManager) Stop(_ context.Context, _ string, id string)
 	manager.stoppedID = id
 	return nil
 }
+func (manager *fakeExchangeManager) Pause(ctx context.Context, profileID, id string) error {
+	return manager.Stop(ctx, profileID, id)
+}
+func (manager *fakeExchangeManager) Resume(_ context.Context, _ string, id string) (clientexchange.Info, error) {
+	for _, item := range manager.items {
+		if item.ID == id {
+			return item, nil
+		}
+	}
+	return clientexchange.Info{}, nil
+}
+func (manager *fakeExchangeManager) Delete(ctx context.Context, profileID, id string) error {
+	return manager.Stop(ctx, profileID, id)
+}
 func (manager *fakeExchangeManager) List(string) []clientexchange.Info { return manager.items }
 func (*fakeExchangeManager) StopProfile(context.Context, string) error { return nil }
 
@@ -181,6 +195,20 @@ func (manager *fakeMirrorManager) Start(
 func (manager *fakeMirrorManager) Stop(_ context.Context, _ string, id string) error {
 	manager.stoppedID = id
 	return nil
+}
+func (manager *fakeMirrorManager) Pause(ctx context.Context, profileID, id string) error {
+	return manager.Stop(ctx, profileID, id)
+}
+func (manager *fakeMirrorManager) Resume(_ context.Context, _ string, id string) (clientmirror.Info, error) {
+	for _, item := range manager.items {
+		if item.ID == id {
+			return item, nil
+		}
+	}
+	return clientmirror.Info{}, nil
+}
+func (manager *fakeMirrorManager) Delete(ctx context.Context, profileID, id string) error {
+	return manager.Stop(ctx, profileID, id)
 }
 func (manager *fakeMirrorManager) List(string) []clientmirror.Info   { return manager.items }
 func (*fakeMirrorManager) StopProfile(context.Context, string) error { return nil }
@@ -204,6 +232,20 @@ func (manager *fakePreviewManager) Stop(_ context.Context, _ string, id string) 
 	manager.stoppedID = id
 	return nil
 }
+func (manager *fakePreviewManager) Pause(ctx context.Context, profileID, id string) error {
+	return manager.Stop(ctx, profileID, id)
+}
+func (manager *fakePreviewManager) Resume(_ context.Context, _ string, id string) (clientpreview.Info, error) {
+	for _, item := range manager.items {
+		if item.ID == id {
+			return item, nil
+		}
+	}
+	return clientpreview.Info{}, nil
+}
+func (manager *fakePreviewManager) Delete(ctx context.Context, profileID, id string) error {
+	return manager.Stop(ctx, profileID, id)
+}
 func (manager *fakePreviewManager) List(string) []clientpreview.Info  { return manager.items }
 func (*fakePreviewManager) StopProfile(context.Context, string) error { return nil }
 
@@ -225,6 +267,24 @@ func (manager *fakeForwardManager) Start(
 func (manager *fakeForwardManager) Stop(_ context.Context, _ string, id string) error {
 	manager.stoppedID = id
 	return nil
+}
+func (manager *fakeForwardManager) Pause(ctx context.Context, profileID, id string) error {
+	return manager.Stop(ctx, profileID, id)
+}
+func (manager *fakeForwardManager) Resume(
+	_ context.Context,
+	_ string,
+	id string,
+) (clientportforward.Info, error) {
+	for _, item := range manager.items {
+		if item.ID == id {
+			return item, nil
+		}
+	}
+	return clientportforward.Info{}, nil
+}
+func (manager *fakeForwardManager) Delete(ctx context.Context, profileID, id string) error {
+	return manager.Stop(ctx, profileID, id)
 }
 func (manager *fakeForwardManager) List(string) []clientportforward.Info { return manager.items }
 func (*fakeForwardManager) StopProfile(context.Context, string) error    { return nil }
@@ -452,8 +512,15 @@ func TestRemoteBackendTrafficLifecycle(t *testing.T) {
 		{Type: trafficTypePreview, ProfileID: profileID, SessionID: sessionID, Namespace: namespace, TaskID: "b"},
 		{Type: trafficTypePortForward, ProfileID: profileID, SessionID: sessionID, Namespace: namespace, TaskID: "a"},
 	} {
-		if err := backend.StopTraffic(t.Context(), identity); err != nil {
-			t.Fatalf("StopTraffic(%q): %v", identity.Type, err)
+		if err := backend.PauseTraffic(t.Context(), identity); err != nil {
+			t.Fatalf("PauseTraffic(%q): %v", identity.Type, err)
+		}
+		item, err := backend.ResumeTraffic(t.Context(), identity)
+		if err != nil || trafficItemID(item) != identity.TaskID {
+			t.Fatalf("ResumeTraffic(%q): item=%#v error=%v", identity.Type, item, err)
+		}
+		if err := backend.DeleteTraffic(t.Context(), identity); err != nil {
+			t.Fatalf("DeleteTraffic(%q): %v", identity.Type, err)
 		}
 	}
 	if exchanges.stoppedID != "d" || mirrors.stoppedID != "c" || previews.stoppedID != "b" ||
