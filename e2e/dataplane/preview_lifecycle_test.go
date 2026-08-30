@@ -164,7 +164,7 @@ func TestRealPreviewLifecycleOwnershipAndStaleRecovery(t *testing.T) {
 	assertPreviewOwned(t, ctx, kubeClient, stateStore, firstName, first.ID)
 	harness.WaitClusterProbe(t, ctx, kubeClient, first.ClusterIP, 8080, "tcp", "explicit", "preview-tcp:")
 	harness.WaitClusterProbe(t, ctx, kubeClient, first.ClusterIP, 9090, "udp", "explicit", "preview-udp:")
-	stopRealPreview(t, ctx, manager, serverProfile.ID, first.ID)
+	deleteRealPreview(t, ctx, manager, serverProfile.ID, first.ID)
 	waitForRealPreviewState(t, ctx, stateStore, first.ID, "stopped")
 	assertPreviewAbsent(t, ctx, kubeClient, bindingConfig, stateStore, firstName, first.ID)
 
@@ -209,7 +209,7 @@ func TestRealPreviewLifecycleOwnershipAndStaleRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { deletePreviewFixture(context.Background(), kubeClient, replacedName) })
-	stopRealPreview(t, ctx, manager, serverProfile.ID, replaced.ID)
+	deleteRealPreview(t, ctx, manager, serverProfile.ID, replaced.ID)
 	waitForRealPreviewState(t, ctx, stateStore, replaced.ID, "stopped")
 	preserved, err := kubeClient.CoreV1().Services(harness.EchoNamespace).Get(ctx, replacedName, metav1.GetOptions{})
 	if err != nil || preserved.UID != foreign.UID || preserved.Labels["owner"] != "replacement-user" ||
@@ -227,7 +227,7 @@ func TestRealPreviewLifecycleOwnershipAndStaleRecovery(t *testing.T) {
 	stale := startRealPreview(t, ctx, manager, serverProfile, remoteSession, staleName, targets)
 	assertPreviewOwned(t, ctx, kubeClient, stateStore, staleName, stale.ID)
 	kubeOutage.Enable()
-	stopRealPreview(t, ctx, manager, serverProfile.ID, stale.ID)
+	pauseRealPreview(t, ctx, manager, serverProfile.ID, stale.ID)
 	waitForRealPreviewState(t, ctx, stateStore, stale.ID, "recovering")
 	if requests := kubeOutage.RequestCount(); requests == 0 {
 		t.Fatal("Preview cleanup did not exercise the simulated Kubernetes API outage")
@@ -248,6 +248,7 @@ func TestRealPreviewLifecycleOwnershipAndStaleRecovery(t *testing.T) {
 		t.Fatalf("recover stale real Preview: recovered=%d err=%v", recovered, recoverErr)
 	}
 	waitForRealPreviewState(t, ctx, stateStore, stale.ID, "failed")
+	deleteRealPreview(t, ctx, manager, serverProfile.ID, stale.ID)
 	assertPreviewAbsent(t, ctx, kubeClient, bindingConfig, stateStore, staleName, stale.ID)
 }
 
@@ -366,7 +367,7 @@ func startRealPreview(
 	return info
 }
 
-func stopRealPreview(
+func pauseRealPreview(
 	t *testing.T,
 	ctx context.Context,
 	manager *clientpreview.Manager,
@@ -375,8 +376,22 @@ func stopRealPreview(
 	t.Helper()
 	stopContext, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	if err := manager.Stop(stopContext, profileID, taskID); err != nil {
-		t.Fatalf("stop real Preview: %v", err)
+	if err := manager.Pause(stopContext, profileID, taskID); err != nil {
+		t.Fatalf("pause real Preview: %v", err)
+	}
+}
+
+func deleteRealPreview(
+	t *testing.T,
+	ctx context.Context,
+	manager *clientpreview.Manager,
+	profileID, taskID string,
+) {
+	t.Helper()
+	deleteContext, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	if err := manager.Delete(deleteContext, profileID, taskID); err != nil {
+		t.Fatalf("delete real Preview: %v", err)
 	}
 }
 

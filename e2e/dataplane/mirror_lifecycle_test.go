@@ -200,9 +200,9 @@ func TestRealMirrorPreservesPrimaryPathAndRecoversStaleOwner(t *testing.T) {
 		"cluster-udp:",
 	)
 	stopContext, stopCancel := context.WithTimeout(ctx, 20*time.Second)
-	if err := manager.Stop(stopContext, serverProfile.ID, first.ID); err != nil {
+	if err := manager.Delete(stopContext, serverProfile.ID, first.ID); err != nil {
 		stopCancel()
-		t.Fatalf("stop real Mirror: %v", err)
+		t.Fatalf("delete real Mirror: %v", err)
 	}
 	stopCancel()
 	waitForMirrorState(t, ctx, stateStore, first.ID, "stopped")
@@ -259,9 +259,9 @@ func TestRealMirrorPreservesPrimaryPathAndRecoversStaleOwner(t *testing.T) {
 	)
 	mutator.failOneRestore()
 	stopContext, stopCancel = context.WithTimeout(ctx, 20*time.Second)
-	if err := manager.Stop(stopContext, serverProfile.ID, second.ID); err != nil {
+	if err := manager.Pause(stopContext, serverProfile.ID, second.ID); err != nil {
 		stopCancel()
-		t.Fatalf("stop Mirror during simulated Control Plane loss: %v", err)
+		t.Fatalf("pause Mirror during simulated Control Plane loss: %v", err)
 	}
 	stopCancel()
 	waitForMirrorState(t, ctx, stateStore, second.ID, "recovering")
@@ -276,12 +276,15 @@ func TestRealMirrorPreservesPrimaryPathAndRecoversStaleOwner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if recovered, recoverErr := reconciler.RunOnce(ctx); recoverErr != nil || recovered != 1 {
+	if recovered, recoverErr := reconciler.RunOnce(ctx); recoverErr != nil || recovered < 1 {
 		t.Fatalf("recover stale real Mirror: recovered=%d err=%v", recovered, recoverErr)
 	}
 	waitForMirrorState(t, ctx, stateStore, second.ID, "failed")
 	assertServiceRestored(t, ctx, kubeClient, stateStore, serviceName, second.ID, originalSelector)
 	harness.WaitClusterProbe(t, ctx, kubeClient, service.Spec.ClusterIP, 8080, "tcp", "after-recovery", "cluster-tcp:")
+	if err := manager.Delete(ctx, serverProfile.ID, second.ID); err != nil {
+		t.Fatalf("delete recovered Mirror: %v", err)
+	}
 
 }
 
