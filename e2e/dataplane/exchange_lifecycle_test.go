@@ -85,6 +85,19 @@ func (mutator *failNextRestoreMutator) Restore(
 	return mutator.delegate.Restore(ctx, snapshot, taskID)
 }
 
+func (mutator *failNextRestoreMutator) DeleteBinding(
+	ctx context.Context,
+	namespace, taskID string,
+) error {
+	deleter, ok := mutator.delegate.(interface {
+		DeleteBinding(context.Context, string, string) error
+	})
+	if !ok {
+		return errors.New("traffic binding deletion is unavailable")
+	}
+	return deleter.DeleteBinding(ctx, namespace, taskID)
+}
+
 func (mutator *failNextRestoreMutator) failOneRestore() {
 	mutator.mu.Lock()
 	defer mutator.mu.Unlock()

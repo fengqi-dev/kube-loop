@@ -2,13 +2,11 @@ package runtime
 
 import (
 	"context"
-	"errors"
 	"net"
 	"slices"
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 
@@ -51,13 +49,18 @@ func TestDNSSearchProxyUDPAndTCP(t *testing.T) {
 }
 
 func TestDNSSearchProxyStartupClosesUDPWhenTCPBindFails(t *testing.T) {
-	tcpListener, err := net.Listen("tcp", net.JoinHostPort(singbox.DefaultDNSListen, "0"))
+	udpReservation, err := net.ListenPacket("udp", net.JoinHostPort(singbox.DefaultDNSListen, "0"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := udpReservation.LocalAddr().(*net.UDPAddr).Port
+	address := net.JoinHostPort(singbox.DefaultDNSListen, strconv.Itoa(port))
+	tcpListener, err := net.Listen("tcp", address)
+	_ = udpReservation.Close()
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = tcpListener.Close() }()
-	port := tcpListener.Addr().(*net.TCPAddr).Port
-	address := net.JoinHostPort(singbox.DefaultDNSListen, strconv.Itoa(port))
 
 	proxy, err := startDNSSearchProxy(
 		context.Background(),
@@ -315,13 +318,12 @@ func startTestDNSSearchProxy(
 	clusterDomains ...string,
 ) (*dnsSearchProxy, int) {
 	t.Helper()
+	var lastErr error
 	for range 20 {
-		reservation, err := net.Listen("tcp", net.JoinHostPort(singbox.DefaultDNSListen, "0"))
+		publicPort, err := availableTCPUDPPort()
 		if err != nil {
 			t.Fatal(err)
 		}
-		publicPort := reservation.Addr().(*net.TCPAddr).Port
-		_ = reservation.Close()
 		proxy, err := startDNSSearchProxy(
 			context.Background(),
 			singbox.DefaultDNSListen,
@@ -334,11 +336,9 @@ func startTestDNSSearchProxy(
 		if err == nil {
 			return proxy, publicPort
 		}
-		if !errors.Is(err, syscall.EADDRINUSE) {
-			t.Fatal(err)
-		}
+		lastErr = err
 	}
-	t.Fatal("could not reserve a shared TCP/UDP DNS test port")
+	t.Fatalf("could not reserve a shared TCP/UDP DNS test port: %v", lastErr)
 	return nil, 0
 }
 

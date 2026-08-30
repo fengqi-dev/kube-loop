@@ -13,6 +13,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/sessionapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/tasklifecycle"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/remotetask"
 )
 
@@ -135,14 +136,9 @@ func (handler *Service) delete(
 	if err := deleteExchangeBinding(requestContext, handler.resources, session.Namespace, task.ID); err != nil {
 		return internalError(err)
 	}
-	if task.State != remotetask.Stopped {
-		now := handler.now().UTC()
-		if err := handler.storage.Tasks().UpdateState(
-			ctx.Request().Context(), task.ID, task.State, remotetask.Stopped, task.Result, now,
-		); err != nil {
-			return storageError(err)
-		}
-		task.State, task.UpdatedAt = remotetask.Stopped, now
+	task, err := tasklifecycle.Stop(requestContext, handler.storage.Tasks(), task.ID, handler.now)
+	if err != nil {
+		return storageError(err)
 	}
 	document, err := decodeTask(task, session.Namespace)
 	if err != nil {

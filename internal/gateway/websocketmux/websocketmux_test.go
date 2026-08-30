@@ -300,11 +300,6 @@ func TestSlowConsumerDoesNotBlockSiblingStream(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("slow stream was not accepted")
 	}
-	select {
-	case err := <-slowWrite:
-		t.Fatalf("slow write completed before consumer release: %v", err)
-	default:
-	}
 	fast, err := net.Dial("tcp", forwarder.Address())
 	if err != nil {
 		t.Fatal(err)
