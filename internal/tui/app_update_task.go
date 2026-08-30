@@ -113,7 +113,7 @@ func (m Model) updateTaskOperationMessage(message tea.Msg) (tea.Model, tea.Cmd, 
 		if msg.kind == taskKindExec {
 			for i := range m.execTasks {
 				if m.execTasks[i].ID == msg.id {
-					m.execTasks[i].State = "stopped"
+					m.execTasks[i].State = taskStateStopped
 				}
 			}
 		}

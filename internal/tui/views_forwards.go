@@ -94,6 +94,29 @@ func (m Model) pauseTaskAt(index int) tea.Cmd {
 				err:    m.state.execs.Stop(m.activeProfile.ID, task.ID),
 			}
 		}
+		index -= len(m.previews)
+		if index < len(m.podSSHEndpoints) {
+			task := m.podSSHEndpoints[index]
+			return taskLifecycleMsg{
+				action: taskStateStopped,
+				kind:   taskKindSSH,
+				id:     task.ID,
+				err:    m.state.podSSH.Stop(m.activeProfile.ID, task.ID),
+			}
+		}
+		index -= len(m.podSSHEndpoints)
+		if index < len(m.execTasks) {
+			task := m.execTasks[index]
+			if task.State != taskStateRunning {
+				return taskLifecycleMsg{action: taskStateStopped, kind: taskKindExec, id: task.ID}
+			}
+			return taskLifecycleMsg{
+				action: taskStateStopped,
+				kind:   taskKindExec,
+				id:     task.ID,
+				err:    m.state.execs.Stop(m.activeProfile.ID, task.ID),
+			}
+		}
 		return taskLifecycleMsg{
 			action: taskActionPaused,
 			err:    fmt.Errorf("session selection is invalid"),

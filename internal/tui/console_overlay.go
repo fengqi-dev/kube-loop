@@ -106,10 +106,14 @@ func (m *Model) updateConfirmationOverlay(key tea.KeyMsg) tea.Cmd {
 func (m *Model) confirmConsoleOverlay() tea.Cmd {
 	action := m.console.overlay
 	returnTo := m.console.returnTo
+	deleteTask := m.selectedTaskSupportsDelete()
 	m.closeConsoleOverlay()
 	switch action {
 	case overlayConfirmTask:
-		m.loading, m.status = true, "Deleting session..."
+		m.loading, m.status = true, "Stopping session..."
+		if deleteTask {
+			m.status = "Deleting session..."
+		}
 		return tea.Batch(m.spinner.Tick, m.deleteTaskAt(m.console.pendingTask))
 	case overlayConfirmProfile:
 		next, cmd := m.updateLogin(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
@@ -127,6 +131,19 @@ func (m *Model) confirmConsoleOverlay() tea.Cmd {
 		return nil
 	}
 	return nil
+}
+
+func (m Model) selectedTaskSupportsDelete() bool {
+	row, ok := m.selectedConsoleTask()
+	if !ok {
+		return false
+	}
+	switch row.kind {
+	case taskKindForward, taskKindExchange, taskKindMirror, taskKindPreview:
+		return true
+	default:
+		return false
+	}
 }
 
 func (m *Model) closeConsoleOverlay() {

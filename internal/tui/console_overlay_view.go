@@ -120,11 +120,19 @@ q                 Quit`
 		)
 		content = strings.Join(lines, "\n")
 	case overlayConfirmTask:
-		content = consoleConfirmContent(
-			"DELETE SESSION?",
-			"The selected client session will be deleted.",
-			"Delete session",
-		)
+		if m.selectedTaskSupportsDelete() {
+			content = consoleConfirmContent(
+				"DELETE SESSION?",
+				"The selected client session will be deleted.",
+				"Delete session",
+			)
+		} else {
+			content = consoleConfirmContent(
+				"STOP SESSION?",
+				"The selected client session will be stopped.",
+				"Stop session",
+			)
+		}
 	case overlayConfirmProfile:
 		content = consoleConfirmContent(
 			"DELETE SERVER?",

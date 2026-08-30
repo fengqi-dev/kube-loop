@@ -219,11 +219,18 @@ func TestUpdateConsoleOverlays(t *testing.T) {
 		if model.console.overlay != overlayConfirmTask {
 			t.Fatalf("overlay = %d, want task confirmation", model.console.overlay)
 		}
-		assertConsoleContains(t, model.View(), "DELETE SESSION?", "Delete session")
+		assertConsoleContains(t, model.View(), "STOP SESSION?", "Stop session")
 		model.updateConsole(consoleKey("n"))
 		if model.console.overlay != overlayNone {
 			t.Fatalf("overlay = %d after cancel, want none", model.console.overlay)
 		}
+	})
+
+	t.Run("confirm traffic task delete", func(t *testing.T) {
+		model := newConsoleTestModel(tabTasks, 100, 28)
+		model.portForwards = []clientportforward.Info{{ID: "forward-1", State: "running"}}
+		model.updateConsole(consoleKey("d"))
+		assertConsoleContains(t, model.View(), "DELETE SESSION?", "Delete session")
 	})
 
 	t.Run("confirm disconnect with active tasks", func(t *testing.T) {

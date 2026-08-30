@@ -30,6 +30,7 @@ const (
 	taskActionResumed   = "resumed"
 	taskActionDeleted   = "deleted"
 	taskStateRunning    = "running"
+	taskStateStopped    = "stopped"
 	resourceKindPod     = "pod"
 	resourceKindService = "service"
 	taskStatusExec      = "EXEC"
