@@ -73,7 +73,7 @@ func ValidateTransition(current, next State) error {
 	case Stopped:
 		allowed = next == Pending
 	case Failed:
-		allowed = false
+		allowed = next == Stopped
 	}
 	if !allowed {
 		return fmt.Errorf("remote Task transition %q -> %q is not allowed", current, next)

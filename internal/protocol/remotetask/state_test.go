@@ -16,6 +16,7 @@ func TestStatesAreStableAndTransitionsRejectRegression(t *testing.T) {
 	for _, transition := range [][2]State{
 		{Pending, Starting}, {Starting, Running}, {Running, Stopping}, {Stopping, Stopped},
 		{Starting, Recovering}, {Running, Recovering}, {Recovering, Failed},
+		{Failed, Stopped},
 		{Starting, Starting}, {Running, Running}, {Recovering, Recovering},
 	} {
 		if err := ValidateTransition(transition[0], transition[1]); err != nil {
