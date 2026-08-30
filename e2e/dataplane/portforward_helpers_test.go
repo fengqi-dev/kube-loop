@@ -65,6 +65,12 @@ func (e2eBindingManager) Activate(
 
 func (e2eBindingManager) Delete(context.Context, string, string) error { return nil }
 
+func (e2eBindingManager) Pause(context.Context, string, string) error { return nil }
+
+func (manager e2eBindingManager) Stop(ctx context.Context, namespace, taskID string) error {
+	return manager.Pause(ctx, namespace, taskID)
+}
+
 func (discoverer staticNetworkDiscoverer) Discover(
 	context.Context,
 	controlplaneapi.Identity,
