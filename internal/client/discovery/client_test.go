@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -70,6 +71,37 @@ func TestDiscoverPreservesExplicitConfiguredScheme(t *testing.T) {
 	}
 	if document.PublicURL != server.URL {
 		t.Fatalf("public URL = %q, want configured %q", document.PublicURL, server.URL)
+	}
+}
+
+type discoveryRoundTripper func(*http.Request) (*http.Response, error)
+
+func (roundTripper discoveryRoundTripper) RoundTrip(
+	request *http.Request,
+) (*http.Response, error) {
+	return roundTripper(request)
+}
+
+func TestDiscoverRetriesTransientTransportFailures(t *testing.T) {
+	attempts := 0
+	client := New(Config{HTTPClient: &http.Client{Transport: discoveryRoundTripper(
+		func(_ *http.Request) (*http.Response, error) {
+			attempts++
+			if attempts < 3 {
+				return nil, errors.New("simulated EOF")
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     make(http.Header),
+				Body: io.NopCloser(strings.NewReader(
+					`{"serviceId":"service","publicUrl":"http://service.example","tunnelPath":"/tunnel","apiVersions":["v2"],"authMethods":[],"protocolMin":"2.0","protocolMax":"2.0"}`,
+				)),
+			}, nil
+		},
+	)}})
+	_, err := client.Discover(context.Background(), "http://service.example")
+	if err != nil || attempts != 3 {
+		t.Fatalf("discovery err=%v attempts=%d", err, attempts)
 	}
 }
 

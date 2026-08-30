@@ -22,7 +22,10 @@ const (
 	MaxDocumentBytes             = 64 << 10
 	CodeVersionMismatch          = "VERSION_MISMATCH"
 	CodeClientVersionUnsupported = "CLIENT_VERSION_UNSUPPORTED"
+	discoveryAttempts            = 3
 )
+
+var discoveryRetryDelays = [...]time.Duration{100 * time.Millisecond, 250 * time.Millisecond}
 
 type AuthMethod struct {
 	ID          string `json:"id"`
@@ -107,17 +110,35 @@ func (client *Client) Discover(ctx context.Context, serviceAddress string) (_ Do
 	}
 	requestContext, cancel := context.WithTimeout(ctx, client.timeout)
 	defer cancel()
-	request, err := http.NewRequestWithContext(requestContext, http.MethodGet, baseURL+Path, nil)
-	if err != nil {
-		return Document{}, errors.New("create discovery request")
+	var response *http.Response
+	var requestErr error
+	for attempt := range discoveryAttempts {
+		request, err := http.NewRequestWithContext(requestContext, http.MethodGet, baseURL+Path, nil)
+		if err != nil {
+			return Document{}, errors.New("create discovery request")
+		}
+		request.Header.Set("Accept", "application/json")
+		response, requestErr = client.httpClient.Do(request)
+		if requestErr == nil {
+			break
+		}
+		if requestContext.Err() != nil {
+			break
+		}
+		if attempt < len(discoveryRetryDelays) {
+			timer := time.NewTimer(discoveryRetryDelays[attempt])
+			select {
+			case <-requestContext.Done():
+				timer.Stop()
+			case <-timer.C:
+			}
+		}
 	}
-	request.Header.Set("Accept", "application/json")
-	response, err := client.httpClient.Do(request)
-	if err != nil {
+	if requestErr != nil {
 		if errors.Is(requestContext.Err(), context.DeadlineExceeded) {
 			return Document{}, errors.New("service discovery timed out")
 		}
-		return Document{}, fmt.Errorf("service discovery failed: %w", err)
+		return Document{}, fmt.Errorf("service discovery failed: %w", requestErr)
 	}
 	defer func() {
 		if err := response.Body.Close(); err != nil {
