@@ -237,6 +237,7 @@ func TestForwarderPreservesTCPHalfClose(t *testing.T) {
 
 func TestSlowConsumerDoesNotBlockSiblingStream(t *testing.T) {
 	slowStarted := make(chan struct{})
+	slowResumed := make(chan struct{})
 	releaseSlow := make(chan struct{})
 	var releaseOnce sync.Once
 	release := func() { releaseOnce.Do(func() { close(releaseSlow) }) }
@@ -252,7 +253,12 @@ func TestSlowConsumerDoesNotBlockSiblingStream(t *testing.T) {
 			if kind[0] == 'S' {
 				close(slowStarted)
 				<-releaseSlow
-				_, _ = io.Copy(io.Discard, connection)
+				// Reading beyond the configured 512 KiB stream window proves
+				// flow control resumed without coupling the assertion to the
+				// time needed to transfer the entire stress payload under -race.
+				if _, err := io.CopyN(io.Discard, connection, 1<<20); err == nil {
+					close(slowResumed)
+				}
 				return
 			}
 			if kind[0] == 'F' {
@@ -294,6 +300,11 @@ func TestSlowConsumerDoesNotBlockSiblingStream(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("slow stream was not accepted")
 	}
+	select {
+	case err := <-slowWrite:
+		t.Fatalf("slow write completed before consumer release: %v", err)
+	default:
+	}
 	fast, err := net.Dial("tcp", forwarder.Address())
 	if err != nil {
 		t.Fatal(err)
@@ -314,12 +325,15 @@ func TestSlowConsumerDoesNotBlockSiblingStream(t *testing.T) {
 
 	release()
 	select {
-	case err := <-slowWrite:
-		if err != nil {
-			t.Fatal(err)
-		}
+	case <-slowResumed:
 	case <-ctx.Done():
 		t.Fatal("slow stream did not resume after consumer release")
+	}
+	_ = slow.Close()
+	select {
+	case <-slowWrite:
+	case <-ctx.Done():
+		t.Fatal("slow writer did not stop after connection close")
 	}
 }
 
