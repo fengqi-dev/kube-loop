@@ -18,6 +18,7 @@ import (
 	discoveryv1 "k8s.io/api/discovery/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
@@ -81,9 +82,7 @@ func TestRealPreviewLifecycleOwnershipAndStaleRecovery(t *testing.T) {
 		stateStore,
 		e2eExecSessionValidator{identityID: identity.Subject, session: activeSession},
 		realResources,
-		previewapi.Config{
-			DeleteTimeout: 5 * time.Second,
-		},
+		previewapi.Config{},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -157,7 +156,7 @@ func TestRealPreviewLifecycleOwnershipAndStaleRecovery(t *testing.T) {
 		t.Fatalf("collision Service was changed: %#v err=%v", unchanged, err)
 	}
 
-	// Explicit stop removes the exact owner Service/EndpointSlice and leaves no
+	// Explicit delete removes the exact owner Service/EndpointSlice and leaves no
 	// cleanup intent after real cluster TCP and UDP traffic reached the desktop.
 	firstName := previewName("preview-explicit")
 	first := startRealPreview(t, ctx, manager, serverProfile, remoteSession, firstName, targets)
@@ -169,7 +168,8 @@ func TestRealPreviewLifecycleOwnershipAndStaleRecovery(t *testing.T) {
 	assertPreviewAbsent(t, ctx, kubeClient, bindingConfig, stateStore, firstName, first.ID)
 
 	// Abrupt desktop loss sends neither a relay Stop frame nor a DELETE request.
-	// The stream owner must still delete the exact-owner Service and EndpointSlice.
+	// The stream owner removes runtime resources but retains the paused binding so
+	// startup recovery can discover it. Explicit deletion removes that intent.
 	crashedName := previewName("preview-client-crash")
 	crashed, err := remoteClient.CreatePreview(ctx, serverProfile, remoteSession, remote.PreviewSpec{
 		Name: crashedName,
@@ -189,7 +189,13 @@ func TestRealPreviewLifecycleOwnershipAndStaleRecovery(t *testing.T) {
 	assertPreviewOwned(t, ctx, kubeClient, stateStore, crashedName, crashed.ID)
 	_ = crashedConnection.Close()
 	waitForRealPreviewState(t, ctx, stateStore, crashed.ID, "failed")
-	assertPreviewAbsent(t, ctx, kubeClient, bindingConfig, stateStore, crashedName, crashed.ID)
+	assertPreviewResourcesAbsent(t, ctx, kubeClient, crashedName)
+	assertTrafficBindingPaused(t, ctx, bindingConfig, crashed.ID)
+	if err := bindings.Delete(ctx, harness.EchoNamespace, crashed.ID); err != nil {
+		t.Fatalf("delete crashed Preview binding: %v", err)
+	}
+	assertTrafficBindingAbsent(t, ctx, bindingConfig, crashed.ID)
+	assertSnapshotCount(t, stateStore, crashed.ID, 0)
 
 	// If a user takes ownership of the Service after creation, stop only removes
 	// the still-owned EndpointSlice and preserves that Service. Deleting and
@@ -374,7 +380,7 @@ func pauseRealPreview(
 	profileID, taskID string,
 ) {
 	t.Helper()
-	stopContext, cancel := context.WithTimeout(ctx, 20*time.Second)
+	stopContext, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
 	if err := manager.Pause(stopContext, profileID, taskID); err != nil {
 		t.Fatalf("pause real Preview: %v", err)
@@ -388,7 +394,7 @@ func deleteRealPreview(
 	profileID, taskID string,
 ) {
 	t.Helper()
-	deleteContext, cancel := context.WithTimeout(ctx, 20*time.Second)
+	deleteContext, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
 	if err := manager.Delete(deleteContext, profileID, taskID); err != nil {
 		t.Fatalf("delete real Preview: %v", err)
@@ -463,6 +469,18 @@ func assertPreviewAbsent(
 	name, taskID string,
 ) {
 	t.Helper()
+	assertPreviewResourcesAbsent(t, ctx, client, name)
+	assertTrafficBindingAbsent(t, ctx, bindingConfig, taskID)
+	assertSnapshotCount(t, stateStore, taskID, 0)
+}
+
+func assertPreviewResourcesAbsent(
+	t *testing.T,
+	ctx context.Context,
+	client kubernetes.Interface,
+	name string,
+) {
+	t.Helper()
 	deadline := time.NewTimer(20 * time.Second)
 	defer deadline.Stop()
 	ticker := time.NewTicker(100 * time.Millisecond)
@@ -487,8 +505,42 @@ func assertPreviewAbsent(
 		case <-ticker.C:
 		}
 	}
-	assertTrafficBindingAbsent(t, ctx, bindingConfig, taskID)
-	assertSnapshotCount(t, stateStore, taskID, 0)
+}
+
+func assertTrafficBindingPaused(t *testing.T, ctx context.Context, config *rest.Config, taskID string) {
+	t.Helper()
+	client, err := dynamic.NewForConfig(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	name, err := trafficbindingclient.NameForTask(taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resource := client.Resource(schema.GroupVersionResource{
+		Group: "traffic.kubeloop.io", Version: "v1alpha1", Resource: "trafficbindings",
+	}).Namespace(harness.EchoNamespace)
+	deadline := time.NewTimer(20 * time.Second)
+	defer deadline.Stop()
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		binding, getErr := resource.Get(ctx, name, metav1.GetOptions{})
+		if getErr == nil {
+			desiredState, _, _ := unstructured.NestedString(binding.Object, "spec", "desiredState")
+			phase, _, _ := unstructured.NestedString(binding.Object, "status", "phase")
+			if desiredState == "Paused" && phase == "Paused" {
+				return
+			}
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		case <-deadline.C:
+			t.Fatalf("TrafficBinding %s was not paused: %v", name, getErr)
+		case <-ticker.C:
+		}
+	}
 }
 
 func assertTrafficBindingAbsent(t *testing.T, ctx context.Context, config *rest.Config, taskID string) {

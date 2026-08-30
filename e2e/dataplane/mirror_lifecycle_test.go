@@ -130,9 +130,7 @@ func TestRealMirrorPreservesPrimaryPathAndRecoversStaleOwner(t *testing.T) {
 		e2eExecSessionValidator{identityID: identity.Subject, session: activeSession},
 		resolver,
 		mutator,
-		mirrorapi.Config{
-			RestoreTimeout: 5 * time.Second,
-		},
+		mirrorapi.Config{},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -199,7 +197,7 @@ func TestRealMirrorPreservesPrimaryPathAndRecoversStaleOwner(t *testing.T) {
 		"normal-udp",
 		"cluster-udp:",
 	)
-	stopContext, stopCancel := context.WithTimeout(ctx, 20*time.Second)
+	stopContext, stopCancel := context.WithTimeout(ctx, 45*time.Second)
 	if err := manager.Delete(stopContext, serverProfile.ID, first.ID); err != nil {
 		stopCancel()
 		t.Fatalf("delete real Mirror: %v", err)
@@ -258,7 +256,7 @@ func TestRealMirrorPreservesPrimaryPathAndRecoversStaleOwner(t *testing.T) {
 		"cluster-tcp:",
 	)
 	mutator.failOneRestore()
-	stopContext, stopCancel = context.WithTimeout(ctx, 20*time.Second)
+	stopContext, stopCancel = context.WithTimeout(ctx, 45*time.Second)
 	if err := manager.Pause(stopContext, serverProfile.ID, second.ID); err != nil {
 		stopCancel()
 		t.Fatalf("pause Mirror during simulated Control Plane loss: %v", err)

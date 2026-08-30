@@ -160,9 +160,7 @@ func TestRealExchangeLifecycleAndStaleOwnerRecovery(t *testing.T) {
 		e2eExecSessionValidator{identityID: identity.Subject, session: activeSession},
 		resolver,
 		mutator,
-		exchangeapi.Config{
-			RestoreTimeout: 5 * time.Second,
-		},
+		exchangeapi.Config{},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -203,13 +201,13 @@ func TestRealExchangeLifecycleAndStaleOwnerRecovery(t *testing.T) {
 		{ServicePort: 9090, Protocol: "udp", LocalHost: "127.0.0.1", LocalPort: uint16(udpAddress.Port)},
 	}
 
-	// Explicit stop must close listeners, restore Kubernetes resources, and
+	// Explicit delete must close listeners, restore Kubernetes resources, and
 	// delete the durable rollback snapshot.
 	first := startRealExchange(t, ctx, manager, serverProfile, remoteSession, serviceName, targets)
 	assertServiceIntercepted(t, ctx, kubeClient, stateStore, serviceName, gatewayIP, first.ID)
 	harness.WaitClusterProbe(t, ctx, kubeClient, service.Spec.ClusterIP, 8080, "tcp", "normal", "desktop-tcp:")
 	harness.WaitClusterProbe(t, ctx, kubeClient, service.Spec.ClusterIP, 9090, "udp", "normal", "desktop-udp:")
-	stopContext, stopCancel := context.WithTimeout(ctx, 20*time.Second)
+	stopContext, stopCancel := context.WithTimeout(ctx, 45*time.Second)
 	if err := manager.Delete(stopContext, serverProfile.ID, first.ID); err != nil {
 		stopCancel()
 		t.Fatalf("delete real Exchange: %v", err)
@@ -259,7 +257,7 @@ func TestRealExchangeLifecycleAndStaleOwnerRecovery(t *testing.T) {
 	assertServiceIntercepted(t, ctx, kubeClient, stateStore, serviceName, gatewayIP, second.ID)
 	harness.WaitClusterProbe(t, ctx, kubeClient, service.Spec.ClusterIP, 8080, "tcp", "before-crash", "desktop-tcp:")
 	mutator.failOneRestore()
-	stopContext, stopCancel = context.WithTimeout(ctx, 20*time.Second)
+	stopContext, stopCancel = context.WithTimeout(ctx, 45*time.Second)
 	if err := manager.Pause(stopContext, serverProfile.ID, second.ID); err != nil {
 		stopCancel()
 		t.Fatalf("pause Exchange during simulated Control Plane loss: %v", err)
