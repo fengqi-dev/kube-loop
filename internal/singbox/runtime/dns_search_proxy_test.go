@@ -49,18 +49,18 @@ func TestDNSSearchProxyUDPAndTCP(t *testing.T) {
 }
 
 func TestDNSSearchProxyStartupClosesUDPWhenTCPBindFails(t *testing.T) {
-	udpReservation, err := net.ListenPacket("udp", net.JoinHostPort(singbox.DefaultDNSListen, "0"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	port := udpReservation.LocalAddr().(*net.UDPAddr).Port
-	address := net.JoinHostPort(singbox.DefaultDNSListen, strconv.Itoa(port))
-	tcpListener, err := net.Listen("tcp", address)
-	_ = udpReservation.Close()
+	tcpListener, err := net.Listen("tcp", net.JoinHostPort(singbox.DefaultDNSListen, "0"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = tcpListener.Close() }()
+	port := tcpListener.Addr().(*net.TCPAddr).Port
+	address := net.JoinHostPort(singbox.DefaultDNSListen, strconv.Itoa(port))
+	udpProbe, err := net.ListenPacket("udp", address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = udpProbe.Close()
 
 	proxy, err := startDNSSearchProxy(
 		context.Background(),
