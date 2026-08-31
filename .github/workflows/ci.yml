@@ -323,6 +323,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
+        with:
+          submodules: recursive
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -446,6 +448,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
+        with:
+          submodules: recursive
 
       - name: Validate PowerShell installers
         shell: pwsh
@@ -535,6 +539,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
+        with:
+          submodules: recursive
 
       - name: Download frontend dist
         uses: actions/download-artifact@v7
