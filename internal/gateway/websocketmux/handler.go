@@ -2,6 +2,7 @@ package websocketmux
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"slices"
 	"sync"
@@ -10,9 +11,57 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/xtaci/smux"
 
+	"github.com/fengqi-dev/kube-loop/internal/middleware"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/wss"
 	shared "github.com/fengqi-dev/kube-loop/internal/transport/websocketmux"
 )
+
+func (h *Handler) BeginDrain() {
+	h.draining.Store(true)
+}
+
+func (h *Handler) Draining() bool {
+	return h.draining.Load()
+}
+
+func (h *Handler) ActiveSessions() int {
+	return len(h.limit)
+}
+
+func (h *Handler) logf(ctx context.Context, requestID, format string, values ...any) {
+	if h.config.Logger != nil {
+		h.config.Logger.InfoContext(
+			ctx,
+			fmt.Sprintf(format, values...),
+			"operation", "gateway.websocket.session",
+			"outcome", "failure",
+			"correlation_id", middleware.ID(ctx),
+			"request_id", requestID,
+		)
+	}
+}
+
+func (h *Handler) logSession(
+	ctx context.Context,
+	message, operation, outcome string,
+	identity Identity,
+	attributes ...any,
+) {
+	if h.config.Logger == nil {
+		return
+	}
+	arguments := []any{
+		"operation", operation,
+		"outcome", outcome,
+		"correlation_id", middleware.ID(ctx),
+		"request_id", identity.RequestID,
+		"session_id", identity.SessionID,
+		"session_generation", identity.SessionGeneration,
+		"ticket_id", identity.TicketID,
+	}
+	arguments = append(arguments, attributes...)
+	h.config.Logger.InfoContext(ctx, message, arguments...)
+}
 
 func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	requestID := writer.Header().Get("X-Request-ID")

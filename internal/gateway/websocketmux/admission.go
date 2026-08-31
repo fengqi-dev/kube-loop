@@ -2,12 +2,22 @@ package websocketmux
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/gorilla/websocket"
 
 	"github.com/fengqi-dev/kube-loop/internal/protocol/wss"
 )
+
+func closeWebSocket(connection *websocket.Conn, code int, reason string) error {
+	writeErr := connection.WriteControl(
+		websocket.CloseMessage,
+		websocket.FormatCloseMessage(code, reason),
+		time.Now().Add(5*time.Second),
+	)
+	return errors.Join(writeErr, connection.Close())
+}
 
 func (h *Handler) acquireGeneration(identity Identity) bool {
 	h.generationMu.Lock()

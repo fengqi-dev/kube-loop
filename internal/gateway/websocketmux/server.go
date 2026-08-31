@@ -133,3 +133,17 @@ func NewHandler(config ServerConfig) (*Handler, error) {
 		legacyUnpinnedEncryption: legacyUnpinnedEncryption,
 	}, nil
 }
+func Serve(ctx context.Context, listener net.Listener, handler http.Handler) error {
+	server := &http.Server{
+		Handler:           handler,
+		ReadHeaderTimeout: defaultKeepAliveInterval,
+		BaseContext:       func(net.Listener) context.Context { return ctx },
+	}
+	stopClose := context.AfterFunc(ctx, func() { _ = server.Close() })
+	defer stopClose()
+	err := server.Serve(listener)
+	if errors.Is(err, http.ErrServerClosed) && ctx.Err() != nil {
+		return nil
+	}
+	return err
+}
