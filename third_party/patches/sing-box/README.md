@@ -5,8 +5,8 @@ upstream source, apply the patch files in this directory, and compile the
 result in an isolated temporary directory.
 
 - Upstream: `https://github.com/SagerNet/sing-box`
-- Tag: `v1.13.19`
-- Revision: `b5ebaa1fc0f2b94256180b95468e73ef53caa27d`
+- Tag: `v1.13.21`
+- Revision: `628cb31ffa79cffffd34c2f9cde6cae044e4fc12`
 - License: GPL-3.0
 - Retained build tags: `with_gvisor,with_clash_api,kubeloop_minimal`
 
@@ -49,8 +49,8 @@ make singbox-package
 ```
 
 `make singbox-package` writes a binary archive, a reconstructable patch archive,
-and SHA-256 checksums to `dist/`. Desktop release builds use this patched source
-by default. Set `KUBELOOP_SINGBOX_SOURCE=upstream` only for comparison builds.
+and SHA-256 checksums to `dist/`. Desktop release builds and end-to-end tests use
+this patched source.
 
 When updating sing-box, change the submodule, `Version` and `SourceRevision` in
 `internal/singbox/distribution/version.go`, refresh the patch, and rerun the

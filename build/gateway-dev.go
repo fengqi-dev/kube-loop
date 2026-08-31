@@ -126,8 +126,7 @@ func main() {
 // buildDevelopmentSingBox uses the same staging command as a packaged Wails
 // build. Keeping the binary under build/bin lets the development application
 // and Helper exercise the exact patched sing-box that will ship to users.
-// KUBELOOP_SINGBOX_SOURCE remains available for the documented debug and
-// upstream variants.
+// KUBELOOP_SINGBOX_SOURCE remains available for debug builds.
 func buildDevelopmentSingBox(root string) error {
 	target := runtime.GOOS + "/" + runtime.GOARCH
 	fmt.Printf("==> Building local sing-box for %s\n", target)

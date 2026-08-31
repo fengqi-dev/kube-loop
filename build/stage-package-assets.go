@@ -1,6 +1,6 @@
 //go:build ignore
 
-// Command stage-package-assets downloads the pinned sing-box release and stages
+// Command stage-package-assets builds the pinned sing-box source and stages
 // installer sidecars under build/bin after Wails has compiled the app.
 //
 // Must run as a postBuildHook: wails -clean deletes build/bin during compile,
@@ -14,8 +14,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-
-	singboxdist "github.com/fengqi-dev/kube-loop/internal/singbox/distribution"
 )
 
 func main() {
@@ -64,14 +62,8 @@ func main() {
 		if err := cmd.Run(); err != nil {
 			fatalf("build %s sing-box from source: %v", source, err)
 		}
-	case "upstream":
-		fmt.Printf("==> Fetching sing-box %s for %s/%s\n", singboxdist.Version, goos, goarch)
-		if err := singboxdist.BundleRelease(goos, goarch, binDir); err != nil {
-			fatalf("bundle sing-box: %v", err)
-		}
-		fmt.Printf("==> Staged sing-box into %s\n", binDir)
 	default:
-		fatalf("unsupported KUBELOOP_SINGBOX_SOURCE %q (want patched, upstream, or debug)", source)
+		fatalf("unsupported KUBELOOP_SINGBOX_SOURCE %q (want patched or debug)", source)
 	}
 
 	if goos == "windows" {

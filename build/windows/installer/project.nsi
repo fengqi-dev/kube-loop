@@ -102,8 +102,8 @@ Section
 
     # Fixed sing-box core (pinned version) next to the app.
     File "..\..\bin\sing-box.exe"
-    File /nonfatal "..\..\bin\libcronet.dll"
-    File /nonfatal "..\..\bin\wintun.dll"
+    File "..\..\bin\libcronet.dll"
+    File "..\..\bin\wintun.dll"
     File "..\..\bin\LICENSE.sing-box.txt"
 
     # Unified privileged helper used for service, install, and uninstall operations.

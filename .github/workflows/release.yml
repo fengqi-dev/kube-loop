@@ -303,7 +303,10 @@ jobs:
           Copy-Item "build/bin/LICENSE.sing-box.txt" $stage.FullName
           foreach ($sidecar in @("libcronet.dll", "wintun.dll")) {
             $path = Join-Path "build/bin" $sidecar
-            if (Test-Path $path) { Copy-Item $path $stage.FullName }
+            if (-not (Test-Path $path)) {
+              throw "Required sing-box sidecar not found: $path"
+            }
+            Copy-Item $path $stage.FullName
           }
           Copy-Item -Recurse "build/bin/resources" $stage.FullName
           Compress-Archive -Path "$($stage.FullName)\*" -DestinationPath "dist/kubeloop-desktop-$version-windows-$arch.zip"

@@ -8,12 +8,12 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"time"
 
 	helperinstall "github.com/fengqi-dev/kube-loop/internal/helper/install"
-	singboxdist "github.com/fengqi-dev/kube-loop/internal/singbox/distribution"
 )
 
 func main() {
@@ -55,8 +55,16 @@ func main() {
 	}
 	singBox := filepath.Join(root, "build", "bin", singBoxName)
 	if _, err := os.Stat(singBox); err != nil {
-		if err := singboxdist.BundleRelease(runtime.GOOS, runtime.GOARCH, filepath.Dir(singBox)); err != nil {
-			fatal(err)
+		command := exec.Command(
+			"go", "run", "./build/singbox-patched.go",
+			"-target", runtime.GOOS+"/"+runtime.GOARCH,
+			"-output", singBox,
+		)
+		command.Dir = root
+		command.Stdout = os.Stdout
+		command.Stderr = os.Stderr
+		if err := command.Run(); err != nil {
+			fatal(fmt.Errorf("build patched sing-box: %w", err))
 		}
 	}
 

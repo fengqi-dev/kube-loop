@@ -121,7 +121,66 @@ func main() {
 	if err := os.WriteFile(filepath.Join(filepath.Dir(output), "LICENSE.sing-box.txt"), license, 0o644); err != nil {
 		fatalf("write sing-box license: %v", err)
 	}
+	if goos == "windows" {
+		if err := stageWindowsSidecars(workDir, goarch, filepath.Dir(output)); err != nil {
+			fatalf("stage Windows sing-box sidecars: %v", err)
+		}
+	}
 	fmt.Printf("==> Patched sing-box staged at %s\n", output)
+}
+
+func stageWindowsSidecars(sourceDir, goarch, outputDir string) error {
+	if goarch != "amd64" && goarch != "arm64" {
+		return fmt.Errorf("unsupported Windows architecture %q", goarch)
+	}
+	dependencies := []struct {
+		module string
+		path   string
+		name   string
+	}{
+		{
+			module: "github.com/sagernet/sing-tun",
+			path:   filepath.Join("internal", "wintun", goarch, "wintun.dll"),
+			name:   "wintun.dll",
+		},
+		{
+			module: "github.com/sagernet/cronet-go/lib/windows_" + goarch,
+			path:   "libcronet.dll",
+			name:   "libcronet.dll",
+		},
+	}
+	for _, dependency := range dependencies {
+		moduleDir, err := goModuleDir(sourceDir, dependency.module)
+		if err != nil {
+			return err
+		}
+		content, err := os.ReadFile(filepath.Join(moduleDir, dependency.path))
+		if err != nil {
+			return fmt.Errorf("read %s from %s: %w", dependency.name, dependency.module, err)
+		}
+		if err := os.WriteFile(filepath.Join(outputDir, dependency.name), content, 0o644); err != nil {
+			return fmt.Errorf("write %s: %w", dependency.name, err)
+		}
+		fmt.Printf("==> Staged %s from %s\n", dependency.name, dependency.module)
+	}
+	return nil
+}
+
+func goModuleDir(sourceDir, module string) (string, error) {
+	command := exec.Command("go", "list", "-m", "-f", "{{.Dir}}", module)
+	command.Dir = sourceDir
+	command.Env = setEnvironment(os.Environ(), map[string]string{
+		"GOTOOLCHAIN": "local",
+	})
+	output, err := command.Output()
+	if err != nil {
+		return "", fmt.Errorf("locate Go module %s: %w", module, err)
+	}
+	dir := strings.TrimSpace(string(output))
+	if dir == "" {
+		return "", fmt.Errorf("Go module %s has no source directory", module)
+	}
+	return dir, nil
 }
 
 func verifyPinnedSource(sourceDir string) error {
