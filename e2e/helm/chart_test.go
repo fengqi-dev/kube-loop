@@ -246,7 +246,7 @@ func assertSQLiteWorkloads(t *testing.T, objects []map[string]any) (map[string]a
 	for kind, want := range map[string]int{
 		"CustomResourceDefinition": 1,
 		"PersistentVolumeClaim":    1,
-		"ConfigMap":                1,
+		"ConfigMap":                2,
 	} {
 		if got := countKind(objects, kind); got != want {
 			t.Fatalf("%s count = %d, want %d", kind, got, want)
@@ -494,6 +494,40 @@ func TestTrafficBindingCRDMatchesGeneratedManifest(t *testing.T) {
 		t.Fatal(
 			"Helm TrafficBinding CRD is stale; run make operator-manifests and copy the generated CRD into charts/kubeloop/crds",
 		)
+	}
+	objects := renderChart(t, "--set", "publicURL=https://kubeloop.example.test")
+	upgradeConfig := mustYAML(t, objectByName(
+		t,
+		objects,
+		"ConfigMap",
+		"test-kubeloop-operator-crd",
+	))
+	operator := mustYAML(t, objectsByComponent(t, objects, "Deployment", "operator")[0])
+	operatorRole := mustYAML(t, objectByName(t, objects, "ClusterRole", "test-kubeloop-operator"))
+	for document, required := range map[string][]string{
+		upgradeConfig: {
+			"trafficbinding-crd.yaml:",
+			"- Reconciling",
+			"- Pausing",
+			"- Paused",
+			"- Restored",
+		},
+		operator: {
+			"checksum/trafficbinding-crd:",
+			"--crd-file=/etc/kubeloop/crd/trafficbinding-crd.yaml",
+			"name: trafficbinding-crd",
+		},
+		operatorRole: {
+			"apiextensions.k8s.io",
+			"trafficbindings.traffic.kubeloop.io",
+			"events.k8s.io",
+		},
+	} {
+		for _, value := range required {
+			if !strings.Contains(document, value) {
+				t.Fatalf("rendered Operator CRD synchronization is missing %q: %s", value, document)
+			}
+		}
 	}
 }
 

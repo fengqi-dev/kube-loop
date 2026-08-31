@@ -16,8 +16,9 @@ spec:
       app.kubernetes.io/component: operator
   template:
     metadata:
-      {{- with .Values.operator.podAnnotations }}
       annotations:
+        checksum/trafficbinding-crd: {{ .Files.Get "crds/traffic.kubeloop.io_trafficbindings.yaml" | sha256sum }}
+      {{- with .Values.operator.podAnnotations }}
         {{- toYaml . | nindent 8 }}
       {{- end }}
       labels:
@@ -41,6 +42,7 @@ spec:
           image: {{ include "kubeloop.operatorImage" . | quote }}
           imagePullPolicy: {{ .Values.operator.image.pullPolicy }}
           args:
+            - --crd-file=/etc/kubeloop/crd/trafficbinding-crd.yaml
             - --metrics-bind-address=0
             - --health-probe-bind-address=:8081
             - --leader-elect={{ .Values.operator.leaderElection }}
@@ -60,6 +62,14 @@ spec:
             {{- toYaml .Values.containerSecurityContext | nindent 12 }}
           resources:
             {{- toYaml .Values.operator.resources | nindent 12 }}
+          volumeMounts:
+            - name: trafficbinding-crd
+              mountPath: /etc/kubeloop/crd
+              readOnly: true
+      volumes:
+        - name: trafficbinding-crd
+          configMap:
+            name: {{ include "kubeloop.operatorName" . }}-crd
       {{- with .Values.operator.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

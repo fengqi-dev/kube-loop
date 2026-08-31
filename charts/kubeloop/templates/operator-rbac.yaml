@@ -8,6 +8,10 @@ metadata:
     {{- include "kubeloop.labels" . | nindent 4 }}
     app.kubernetes.io/component: operator
 rules:
+  - apiGroups: ["apiextensions.k8s.io"]
+    resources: ["customresourcedefinitions"]
+    resourceNames: ["trafficbindings.traffic.kubeloop.io"]
+    verbs: ["get", "update", "patch"]
   - apiGroups: ["traffic.kubeloop.io"]
     resources: ["trafficbindings"]
     verbs: ["get", "list", "watch", "update", "patch"]
@@ -27,6 +31,9 @@ rules:
     resources: ["endpointslices"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+  - apiGroups: ["events.k8s.io"]
     resources: ["events"]
     verbs: ["create", "patch"]
   {{- if .Values.operator.leaderElection }}

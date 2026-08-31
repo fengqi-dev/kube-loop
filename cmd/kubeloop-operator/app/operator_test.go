@@ -107,10 +107,15 @@ func TestOperatorFlagOverridesEnvironmentAndFile(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := executeCommand(
 		context.Background(), command,
-		[]string{"--config", configFile, "--metrics-bind-address", ":7443"},
+		[]string{
+			"--config", configFile,
+			"--crd-file", "/etc/kubeloop/crd.yaml",
+			"--metrics-bind-address", ":7443",
+		},
 		&stdout, &stderr,
 	)
-	if code != 0 || got.MetricsAddress != ":7443" || !got.LeaderElection {
+	if code != 0 || got.CRDFile != "/etc/kubeloop/crd.yaml" ||
+		got.MetricsAddress != ":7443" || !got.LeaderElection {
 		t.Fatalf("exit=%d options=%#v stderr=%q", code, got, stderr.String())
 	}
 }

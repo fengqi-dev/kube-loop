@@ -66,6 +66,7 @@ func newOperatorCommandWithConfig(config *viper.Viper, info buildinfo.Info) *cob
 
 	flags := command.Flags()
 	flags.String("config", "", "optional Operator YAML configuration file")
+	flags.String("crd-file", "", "optional TrafficBinding CRD manifest synchronized before startup")
 	flags.String("metrics-bind-address", "0", "metrics listen address, or 0 to disable")
 	flags.String("health-probe-bind-address", ":8081", "health probe listen address")
 	flags.Bool("leader-elect", false, "enable leader election")
@@ -82,7 +83,8 @@ func newOperatorCommandWithConfig(config *viper.Viper, info buildinfo.Info) *cob
 	zapOptions.BindFlags(goFlags)
 	flags.AddGoFlagSet(goFlags)
 	bindings := map[string]string{
-		"config": "operator.config-file", "metrics-bind-address": "operator.metrics-bind-address",
+		"config": "operator.config-file", "crd-file": "operator.crd-file",
+		"metrics-bind-address":      "operator.metrics-bind-address",
 		"health-probe-bind-address": "operator.health-probe-bind-address", "leader-elect": "operator.leader-elect",
 		"metrics-secure": "operator.metrics-secure", "webhook-cert-path": "operator.webhook-cert-path",
 		"webhook-cert-name": "operator.webhook-cert-name", "webhook-cert-key": "operator.webhook-cert-key",
@@ -107,6 +109,7 @@ func newOperatorConfigResolver() *viper.Viper {
 
 func operatorOptionsFrom(config *viper.Viper) operatorruntime.Options {
 	return operatorruntime.Options{
+		CRDFile:               config.GetString("operator.crd-file"),
 		MetricsAddress:        config.GetString("operator.metrics-bind-address"),
 		MetricsCertificateDir: config.GetString("operator.metrics-cert-path"),
 		MetricsCertificate:    config.GetString("operator.metrics-cert-name"),

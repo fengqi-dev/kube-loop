@@ -26,6 +26,7 @@ var (
 )
 
 type Options struct {
+	CRDFile               string
 	MetricsAddress        string
 	MetricsCertificateDir string
 	MetricsCertificate    string
@@ -74,6 +75,9 @@ func Run(ctx context.Context, options Options, zapOptions zap.Options, info buil
 	restConfig, err := ctrl.GetConfig()
 	if err != nil {
 		return fmt.Errorf("load Kubernetes REST configuration: %w", err)
+	}
+	if err := syncTrafficBindingCRDFile(ctx, restConfig, options.CRDFile); err != nil {
+		return fmt.Errorf("synchronize TrafficBinding CRD: %w", err)
 	}
 	manager, err := ctrl.NewManager(restConfig, ctrl.Options{
 		Scheme: Scheme, Metrics: metricsOptions, WebhookServer: webhook.NewServer(webhookOptions),
