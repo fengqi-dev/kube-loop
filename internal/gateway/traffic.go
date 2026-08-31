@@ -166,7 +166,10 @@ func (s *Server) handleOutbound(
 	spec, authorized, authorizationErr := s.authorizedNetwork(header.Token, required)
 	if authorizationErr != nil {
 		_ = tunnel.WriteStatus(client, authorizationErr)
-		s.log(ctx, required.requestID, "Gateway tunnel open rejected", "reason", "authorization", "error", authorizationErr)
+		s.log(
+			ctx, required.requestID, "Gateway tunnel open rejected",
+			"reason", "authorization", "error", authorizationErr,
+		)
 		return
 	}
 	request, err := tunnel.ReadOpenBody(client, header.Command)
@@ -198,7 +201,10 @@ func (s *Server) handleOutbound(
 	target, err := dialer.DialContext(ctx, network, targetAddress)
 	if err != nil {
 		_ = tunnel.WriteStatus(client, fmt.Errorf("dial target: %w", err))
-		s.log(ctx, required.requestID, "Gateway target connection failed", "network", network, "target", targetAddress, "error", err)
+		s.log(
+			ctx, required.requestID, "Gateway target connection failed",
+			"network", network, "target", targetAddress, "error", err,
+		)
 		return
 	}
 	defer func() { _ = target.Close() }()
@@ -212,7 +218,10 @@ func (s *Server) handleOutbound(
 	relayTCP(client, target)
 }
 
-func (s *Server) authorizedNetwork(token tunnel.SessionToken, required *requiredAuthorization) (networkspec.Spec, bool, error) {
+func (s *Server) authorizedNetwork(
+	token tunnel.SessionToken,
+	required *requiredAuthorization,
+) (networkspec.Spec, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.tenants[token] <= 0 {
@@ -306,7 +315,11 @@ func isClusterAddress(ip netip.Addr) bool {
 func (s *Server) log(ctx context.Context, requestID, message string, attributes ...any) {
 	if s.Logger != nil {
 		arguments := make([]any, 0, len(attributes)+6)
-		arguments = append(arguments, "operation", "gateway.tunnel.stream", "outcome", "failure", "correlation_id", middleware.ID(ctx), "request_id", requestID)
+		arguments = append(
+			arguments,
+			"operation", "gateway.tunnel.stream", "outcome", "failure",
+			"correlation_id", middleware.ID(ctx), "request_id", requestID,
+		)
 		arguments = append(arguments, attributes...)
 		s.Logger.WarnContext(ctx, message, arguments...)
 	}

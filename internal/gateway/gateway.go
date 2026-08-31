@@ -232,8 +232,10 @@ func (reporter *Reporter) Snapshot() (relaycontrol.State, relaycontrol.Capacity)
 	return state, relaycontrol.Capacity{
 		MaximumPhysicalConnections: reporter.MaximumPhysical,
 		MaximumLogicalStreams:      reporter.MaximumLogical,
-		ActivePhysicalConnections:  uint32(reporter.WebSocket.ActiveSessions()),
-		ActiveLogicalStreams:       uint32(reporter.Gateway.ActiveConnections()),
+		//nolint:gosec // The WebSocket limiter keeps active sessions within the validated uint32 maximum.
+		ActivePhysicalConnections: uint32(reporter.WebSocket.ActiveSessions()),
+		//nolint:gosec // The Gateway tracks logical connections within the validated uint32 maximum.
+		ActiveLogicalStreams: uint32(reporter.Gateway.ActiveConnections()),
 	}
 }
 
