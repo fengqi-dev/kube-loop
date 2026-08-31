@@ -1,5 +1,7 @@
 // +kubebuilder:object:generate=true
 // +groupName=traffic.kubeloop.io
+//
+//nolint:revive // Kubebuilder package markers intentionally replace package documentation.
 package v1alpha1
 
 import (
