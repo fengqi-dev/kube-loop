@@ -38,6 +38,7 @@ type Lifecycle interface {
 		context.Context,
 		*trafficv1alpha1.TrafficBinding,
 	) (*trafficv1alpha1.TrafficBinding, bool, error)
+	RequestPause(context.Context, string, string) error
 	Pause(context.Context, string, string) error
 	Delete(context.Context, string, string) error
 }

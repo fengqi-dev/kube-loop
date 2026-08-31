@@ -176,8 +176,8 @@ func TestMirrorTaskIsOwnedIdempotentAndDurablyStopped(t *testing.T) {
 	stopped, apiError := mirrorRequest(
 		handler,
 		identity,
-		http.MethodDelete,
-		taskPath,
+		http.MethodPost,
+		strings.Replace(taskPath, "?", "/pause?", 1),
 		nil,
 		"",
 	)
@@ -215,8 +215,8 @@ func TestMirrorTaskIsOwnedIdempotentAndDurablyStopped(t *testing.T) {
 	stopping, apiError := mirrorRequest(
 		handler,
 		identity,
-		http.MethodDelete,
-		taskPath,
+		http.MethodPost,
+		strings.Replace(taskPath, "?", "/pause?", 1),
 		nil,
 		"",
 	)
@@ -312,6 +312,9 @@ func serveAPI(
 	request.SetPathValue("sessionID", parts[2])
 	if len(parts) > 4 {
 		request.SetPathValue("taskID", parts[4])
+	}
+	if len(parts) > 5 && parts[5] == "pause" {
+		return endpoints.Pause(echo.New().NewContext(request, writer), identity)
 	}
 	switch request.Method {
 	case http.MethodPost:

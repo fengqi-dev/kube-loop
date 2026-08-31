@@ -20,23 +20,42 @@ func (manager *Manager) Pause(
 	ctx context.Context,
 	namespace, taskID string,
 ) error {
+	key, err := manager.requestPause(ctx, namespace, taskID)
+	if err != nil || key == nil {
+		return err
+	}
+	return manager.waitForPaused(ctx, *key)
+}
+
+func (manager *Manager) RequestPause(
+	ctx context.Context,
+	namespace, taskID string,
+) error {
+	_, err := manager.requestPause(ctx, namespace, taskID)
+	return err
+}
+
+func (manager *Manager) requestPause(
+	ctx context.Context,
+	namespace, taskID string,
+) (*types.NamespacedName, error) {
 	name, err := NameForTask(taskID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	key := types.NamespacedName{
 		Namespace: strings.TrimSpace(namespace),
 		Name:      name,
 	}
 	if key.Namespace == "" {
-		return errors.New("traffic binding namespace is required")
+		return nil, errors.New("traffic binding namespace is required")
 	}
 	binding := &trafficv1alpha1.TrafficBinding{}
 	if err := manager.client.Get(ctx, key, binding); err != nil {
 		if apierrors.IsNotFound(err) {
-			return nil
+			return nil, nil
 		}
-		return fmt.Errorf(
+		return nil, fmt.Errorf(
 			"read TrafficBinding %s/%s for pausing: %w",
 			key.Namespace,
 			key.Name,
@@ -45,7 +64,7 @@ func (manager *Manager) Pause(
 	}
 	if binding.Spec.TaskID != taskID || binding.Labels[taskIDLabel] != taskID ||
 		binding.Labels[controlPlaneIDLabel] != manager.controlPlaneID {
-		return fmt.Errorf(
+		return nil, fmt.Errorf(
 			"traffic binding %s/%s is not owned by Task %s",
 			key.Namespace,
 			key.Name,
@@ -53,7 +72,7 @@ func (manager *Manager) Pause(
 		)
 	}
 	if !binding.DeletionTimestamp.IsZero() {
-		return fmt.Errorf(
+		return nil, fmt.Errorf(
 			"traffic binding %s/%s is being deleted",
 			key.Namespace,
 			key.Name,
@@ -63,7 +82,7 @@ func (manager *Manager) Pause(
 		before := binding.DeepCopy()
 		binding.Spec.DesiredState = trafficv1alpha1.TrafficBindingDesiredStatePaused
 		if err := manager.client.Patch(ctx, binding, client.MergeFrom(before)); err != nil {
-			return fmt.Errorf(
+			return nil, fmt.Errorf(
 				"pause TrafficBinding %s/%s: %w",
 				key.Namespace,
 				key.Name,
@@ -71,14 +90,13 @@ func (manager *Manager) Pause(
 			)
 		}
 	}
-	// PortForward has no Kubernetes resources to clean up. The Operator still
-	// advances the binding through Pausing to Paused asynchronously, but the
-	// API request must not wait for that status update. In particular, callers
-	// may have a short request deadline while the desired state patch is already
-	// durable and will be reconciled by the Operator.
-	if binding.Spec.Mode == trafficv1alpha1.TrafficBindingModePortForward {
-		return nil
-	}
+	return &key, nil
+}
+
+func (manager *Manager) waitForPaused(
+	ctx context.Context,
+	key types.NamespacedName,
+) error {
 	return wait.PollUntilContextCancel(
 		ctx,
 		manager.pollInterval,

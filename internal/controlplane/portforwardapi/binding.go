@@ -59,7 +59,7 @@ func (manager *TrafficBindingManager) Pause(
 	ctx context.Context,
 	namespace, taskID string,
 ) error {
-	return manager.bindings.Pause(ctx, namespace, taskID)
+	return manager.bindings.RequestPause(ctx, namespace, taskID)
 }
 
 func (manager *TrafficBindingManager) Stop(

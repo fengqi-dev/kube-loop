@@ -277,13 +277,14 @@ func TestPauseRetainsBindingAndActivateResumesIt(t *testing.T) {
 	}
 }
 
-func TestPausePortForwardReturnsAfterDesiredStatePatch(t *testing.T) {
+func TestRequestPauseReturnsAfterDesiredStatePatch(t *testing.T) {
 	kubernetesClient := fakeClient(t)
 	manager, err := New(kubernetesClient, Config{PollInterval: 10 * time.Millisecond})
 	if err != nil {
 		t.Fatal(err)
 	}
 	binding := testBinding()
+	binding.Spec.Mode = ""
 	binding.Name, _ = NameForTask(binding.Spec.TaskID)
 	binding.Labels = map[string]string{
 		managedByLabel: managedByValue, controlPlaneIDLabel: manager.controlPlaneID,
@@ -295,7 +296,7 @@ func TestPausePortForwardReturnsAfterDesiredStatePatch(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
-	if err := manager.Pause(ctx, binding.Namespace, binding.Spec.TaskID); err != nil {
+	if err := manager.RequestPause(ctx, binding.Namespace, binding.Spec.TaskID); err != nil {
 		t.Fatalf("pause PortForward binding: %v", err)
 	}
 	paused := &trafficv1alpha1.TrafficBinding{}
