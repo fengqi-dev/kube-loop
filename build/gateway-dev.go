@@ -1,8 +1,5 @@
 //go:build ignore
 
-// Command gateway-dev prepares the content-addressed Control Plane, Gateway, and
-// Operator images used by wails dev, then deploys a complete development stack
-// to the active local cluster.
 package main
 
 import (

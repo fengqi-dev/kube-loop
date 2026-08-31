@@ -1,6 +1,5 @@
 //go:build ignore
 
-// Exits 0 when the privileged helper is reachable and CoreReady.
 package main
 
 import (

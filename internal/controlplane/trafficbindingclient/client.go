@@ -1,6 +1,3 @@
-// Package trafficbindingclient owns the Control Plane-side lifecycle of
-// TrafficBinding custom resources. Kubernetes resource mutation remains in
-// the independently deployed Operator.
 package trafficbindingclient
 
 import (

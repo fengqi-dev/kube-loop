@@ -1,10 +1,5 @@
 //go:build ignore
 
-// Command stage-package-assets builds the pinned sing-box source and stages
-// installer sidecars under build/bin after Wails has compiled the app.
-//
-// Must run as a postBuildHook: wails -clean deletes build/bin during compile,
-// which would wipe anything staged by preBuildHooks.
 package main
 
 import (

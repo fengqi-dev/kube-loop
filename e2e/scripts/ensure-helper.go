@@ -1,6 +1,5 @@
 //go:build ignore
 
-// Ensures the privileged helper is installed (may prompt for admin on macOS).
 package main
 
 import (

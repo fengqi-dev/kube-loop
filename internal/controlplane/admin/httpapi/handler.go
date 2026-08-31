@@ -1,6 +1,3 @@
-// Package httpapi exposes the browser-only Control Plane Management Plane API.
-// Its routing and cookie authentication are isolated from the ordinary Gateway
-// Bearer API framework.
 package httpapi
 
 import (

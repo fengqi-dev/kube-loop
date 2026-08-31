@@ -1,5 +1,3 @@
-// Package streamcopy contains connection-copy helpers that preserve TCP
-// half-close semantics across protocol adapters.
 package streamcopy
 
 import (

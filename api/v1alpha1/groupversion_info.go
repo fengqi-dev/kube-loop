@@ -1,4 +1,3 @@
-// Package v1alpha1 contains API schema definitions for the traffic v1alpha1 API group.
 // +kubebuilder:object:generate=true
 // +groupName=traffic.kubeloop.io
 package v1alpha1

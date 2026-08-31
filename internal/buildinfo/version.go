@@ -1,4 +1,3 @@
-// Package buildinfo exposes immutable build metadata for KubeLoop binaries.
 package buildinfo
 
 import (

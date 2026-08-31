@@ -1,7 +1,3 @@
-// Package powerwatch detects a host wake by observing a long wall-clock gap
-// between scheduler ticks. The implementation is deliberately portable: it
-// requires no platform daemon, cgo callback, or desktop framework event and
-// therefore behaves identically on macOS, Windows, and Linux.
 package powerwatch
 
 import (

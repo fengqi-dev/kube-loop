@@ -1,5 +1,3 @@
-// Package trafficstream carries reverse traffic protocol frames as binary
-// WebSocket messages inside one tunnel multiplexer stream.
 package trafficstream
 
 import (

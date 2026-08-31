@@ -1,8 +1,5 @@
 //go:build ignore
 
-// Installs or uninstalls the real platform helper for hosted-runner E2E.
-// The command is started as the normal runner user so its token and identity
-// keep matching the desktop process; --elevate only wraps the privileged child.
 package main
 
 import (

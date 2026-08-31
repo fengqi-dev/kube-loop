@@ -1,4 +1,3 @@
-// Package localuser manages KubeLoop password identities.
 package localuser
 
 import (

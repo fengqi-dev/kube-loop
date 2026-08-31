@@ -1,5 +1,3 @@
-// Package trafficinspect provides optional HTTP/HTTPS inspection through a
-// goproxy-backed side path. Non-inspectable traffic remains a raw relay.
 package trafficinspect
 
 import (

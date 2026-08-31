@@ -1,5 +1,3 @@
-// Package remotetask defines the shared lifecycle contract for durable remote
-// operations.
 package remotetask
 
 import (

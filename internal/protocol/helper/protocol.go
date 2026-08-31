@@ -1,5 +1,3 @@
-// Package helperprotocol defines the versioned JSON-line contract shared by
-// the desktop process and the privileged local helper.
 package helperprotocol
 
 import "github.com/fengqi-dev/kube-loop/internal/singbox"

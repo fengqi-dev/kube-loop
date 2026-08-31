@@ -1,5 +1,3 @@
-// Package session issues and validates browser-only Management Plane sessions.
-// It is deliberately separate from ordinary Gateway bearer-token sessions.
 package session
 
 import (

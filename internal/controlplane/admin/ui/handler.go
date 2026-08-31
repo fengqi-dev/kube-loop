@@ -1,4 +1,3 @@
-// Package ui serves the embedded browser Management Plane application.
 package ui
 
 import (

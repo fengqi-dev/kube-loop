@@ -1,7 +1,5 @@
 //go:build ignore
 
-// Ensures sing-box is available at the platform-native path under build/bin
-// for e2e helper install.
 package main
 
 import (

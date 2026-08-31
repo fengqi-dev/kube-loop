@@ -1,6 +1,3 @@
-// Package mirrorstream defines the neutral, authenticated reverse stream used
-// to deliver best-effort request copies to a desktop shadow target. Primary
-// Service responses never travel through this protocol.
 package mirrorstream
 
 import (

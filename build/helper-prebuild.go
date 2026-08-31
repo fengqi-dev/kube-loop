@@ -1,12 +1,5 @@
 //go:build ignore
 
-// Command helper-prebuild builds the platform helper before Wails compiles the
-// desktop application so it can be embedded from build/embedded.
-//
-// Wails runs build hooks from build/bin. Package assets that must live next to
-// the final binary (sing-box, Windows resources/) are staged in
-// stage-package-assets.go via postBuildHooks — wails -clean wipes build/bin
-// during CompileProject after preBuildHooks.
 package main
 
 import (

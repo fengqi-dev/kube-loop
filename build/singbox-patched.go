@@ -1,7 +1,5 @@
 //go:build ignore
 
-// Command singbox-patched builds the pinned sing-box source after applying the
-// repository-owned patch set to an isolated temporary source tree.
 package main
 
 import (

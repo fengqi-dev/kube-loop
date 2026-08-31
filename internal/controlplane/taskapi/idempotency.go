@@ -1,4 +1,3 @@
-// Package taskapi contains HTTP contract helpers shared by durable remote Task APIs.
 package taskapi
 
 import (

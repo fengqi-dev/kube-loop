@@ -1,5 +1,3 @@
-// Package servicebinding contains the shared Kubernetes snapshot models and
-// read-only capture helpers used by the control plane and operator.
 package servicebinding
 
 import (

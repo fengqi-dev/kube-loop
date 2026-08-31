@@ -1,7 +1,5 @@
 //go:build ignore
 
-// Command singbox-debug builds the pinned sing-box submodule with compiler
-// optimizations and inlining disabled so a debugger can use source breakpoints.
 package main
 
 import (

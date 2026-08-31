@@ -1,6 +1,5 @@
 //go:build ignore
 
-// Best-effort stop of all privileged helper TUN sessions after e2e.
 package main
 
 import (
