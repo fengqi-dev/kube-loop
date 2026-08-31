@@ -9,8 +9,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/fengqi-dev/kube-loop/internal/buildinfo"
+	"github.com/fengqi-dev/kube-loop/internal/gateway"
 	options "github.com/fengqi-dev/kube-loop/internal/gateway/config"
-	gatewayruntime "github.com/fengqi-dev/kube-loop/internal/gateway/runtime"
 )
 
 // NewGatewayCommand returns the kubeloop-gateway cobra command.
@@ -44,7 +44,7 @@ func newGatewayCommand(info buildinfo.Info) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return gatewayruntime.Run(signalContext, environment, config, info, command.OutOrStdout())
+			return gateway.Run(signalContext, environment, config, info, command.OutOrStdout())
 		},
 	}
 	command.SilenceErrors = true

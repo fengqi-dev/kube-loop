@@ -71,6 +71,14 @@ func (manager *Manager) Pause(
 			)
 		}
 	}
+	// PortForward has no Kubernetes resources to clean up. The Operator still
+	// advances the binding through Pausing to Paused asynchronously, but the
+	// API request must not wait for that status update. In particular, callers
+	// may have a short request deadline while the desired state patch is already
+	// durable and will be reconciled by the Operator.
+	if binding.Spec.Mode == trafficv1alpha1.TrafficBindingModePortForward {
+		return nil
+	}
 	return wait.PollUntilContextCancel(
 		ctx,
 		manager.pollInterval,

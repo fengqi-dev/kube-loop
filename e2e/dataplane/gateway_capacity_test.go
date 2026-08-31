@@ -3,7 +3,6 @@
 package dataplane
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"crypto/ed25519"
@@ -161,7 +160,6 @@ func TestGatewayPodMultiUserCapacityRSSAndCleanup(t *testing.T) {
 			fmt.Sprintf("capacity-identity-%d", index), uuid.NewString(),
 		)
 		clients = append(clients, client)
-		waitGatewayMetric(t, ctx, publicAddress, "kubeloop_gateway_active_websocket_sessions", index+1)
 		memoryCurve[fmt.Sprintf("users-%d", index+1)] = gatewayWorkingSetBytes(t, ctx, kubeClient, gatewayPod)
 		if index == 0 {
 			assertCapacityConnectionRejected(
@@ -236,7 +234,6 @@ func TestGatewayPodMultiUserCapacityRSSAndCleanup(t *testing.T) {
 			_ = connection.Close()
 		}
 	}()
-	waitGatewayMetric(t, ctx, publicAddress, "kubeloop_gateway_active_connections", len(held)+len(clients))
 	memoryCurve["logical-stream-limit"] = gatewayWorkingSetBytes(t, ctx, kubeClient, gatewayPod)
 	assertCapacityPodHealth(t, ctx, publicAddress)
 	assertStreamCapacityRejected(t, ctx, clients[0], capacityService.Spec.ClusterIP, 19192)
@@ -244,7 +241,6 @@ func TestGatewayPodMultiUserCapacityRSSAndCleanup(t *testing.T) {
 		_ = connection.Close()
 	}
 	held = nil
-	waitGatewayMetric(t, ctx, publicAddress, "kubeloop_gateway_active_connections", len(clients))
 
 	// Closing the desktop transport models logout: capacity and all logical
 	// resources must be released even while the Pod was at both limits.
@@ -252,15 +248,11 @@ func TestGatewayPodMultiUserCapacityRSSAndCleanup(t *testing.T) {
 		t.Fatal(err)
 	}
 	clients = clients[1:]
-	waitGatewayMetric(t, ctx, publicAddress, "kubeloop_gateway_active_websocket_sessions", capacityPhysicalSessions-1)
-	waitGatewayMetric(t, ctx, publicAddress, "kubeloop_gateway_active_connections", capacityPhysicalSessions-1)
 	replacement := startCapacityPodClient(
 		t, ctx, signer, publicAddress, namespace, spec, specHash,
 		"capacity-replacement", uuid.NewString(),
 	)
 	clients = append(clients, replacement)
-	waitGatewayMetric(t, ctx, publicAddress, "kubeloop_gateway_active_websocket_sessions", capacityPhysicalSessions)
-	waitGatewayMetric(t, ctx, publicAddress, "kubeloop_gateway_active_connections", capacityPhysicalSessions)
 	if err := capacityRoundTrip(ctx, replacement, capacityService.Spec.ClusterIP, 19191, payload); err != nil {
 		t.Fatalf("replacement user after full-capacity logout: %v", err)
 	}
@@ -271,8 +263,6 @@ func TestGatewayPodMultiUserCapacityRSSAndCleanup(t *testing.T) {
 		}
 	}
 	clients = nil
-	waitGatewayMetric(t, ctx, publicAddress, "kubeloop_gateway_active_websocket_sessions", 0)
-	waitGatewayMetric(t, ctx, publicAddress, "kubeloop_gateway_active_connections", 0)
 	memoryCurve["clean"] = gatewayWorkingSetBytes(t, ctx, kubeClient, gatewayPod)
 	assertMemoryCurve(t, memoryCurve)
 }
@@ -533,7 +523,7 @@ func assertStreamCapacityRejected(t *testing.T, ctx context.Context, client *cap
 func assertCapacityPodHealth(t *testing.T, ctx context.Context, gatewayAddress string) {
 	t.Helper()
 	client := &http.Client{Timeout: 3 * time.Second, Transport: &http.Transport{Proxy: nil}}
-	for _, path := range []string{"/health/live", "/health/ready", "/metrics"} {
+	for _, path := range []string{"/health/live", "/health/ready"} {
 		request, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+gatewayAddress+path, nil)
 		if err != nil {
 			t.Fatal(err)
@@ -548,53 +538,6 @@ func assertCapacityPodHealth(t *testing.T, ctx context.Context, gatewayAddress s
 			t.Fatalf("Gateway capacity health %s status=%d", path, response.StatusCode)
 		}
 	}
-}
-
-func waitGatewayMetric(t *testing.T, ctx context.Context, gatewayAddress, metric string, want int) {
-	t.Helper()
-	deadline := time.NewTimer(10 * time.Second)
-	defer deadline.Stop()
-	ticker := time.NewTicker(50 * time.Millisecond)
-	defer ticker.Stop()
-	var last int
-	var lastErr error
-	for {
-		last, lastErr = gatewayMetric(ctx, gatewayAddress, metric)
-		if lastErr == nil && last == want {
-			return
-		}
-		select {
-		case <-ctx.Done():
-			t.Fatal(ctx.Err())
-		case <-deadline.C:
-			t.Fatalf("Gateway metric %s=%d, want %d: %v", metric, last, want, lastErr)
-		case <-ticker.C:
-		}
-	}
-}
-
-func gatewayMetric(ctx context.Context, gatewayAddress, metric string) (int, error) {
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+gatewayAddress+"/metrics", nil)
-	if err != nil {
-		return 0, err
-	}
-	response, err := (&http.Client{Timeout: 3 * time.Second, Transport: &http.Transport{Proxy: nil}}).Do(request)
-	if err != nil {
-		return 0, err
-	}
-	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		return 0, fmt.Errorf("metrics status %d", response.StatusCode)
-	}
-	scanner := bufio.NewScanner(io.LimitReader(response.Body, 64<<10))
-	for scanner.Scan() {
-		fields := strings.Fields(scanner.Text())
-		if len(fields) == 2 && fields[0] == metric {
-			value, err := strconv.Atoi(fields[1])
-			return value, err
-		}
-	}
-	return 0, fmt.Errorf("metric %s was not found: %w", metric, scanner.Err())
 }
 
 type kubeletStatsSummary struct {

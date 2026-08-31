@@ -277,6 +277,38 @@ func TestPauseRetainsBindingAndActivateResumesIt(t *testing.T) {
 	}
 }
 
+func TestPausePortForwardReturnsAfterDesiredStatePatch(t *testing.T) {
+	kubernetesClient := fakeClient(t)
+	manager, err := New(kubernetesClient, Config{PollInterval: 10 * time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding := testBinding()
+	binding.Name, _ = NameForTask(binding.Spec.TaskID)
+	binding.Labels = map[string]string{
+		managedByLabel: managedByValue, controlPlaneIDLabel: manager.controlPlaneID,
+		taskIDLabel: binding.Spec.TaskID, sessionIDLabel: binding.Spec.SessionID,
+	}
+	if err := kubernetesClient.Create(context.Background(), binding); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	if err := manager.Pause(ctx, binding.Namespace, binding.Spec.TaskID); err != nil {
+		t.Fatalf("pause PortForward binding: %v", err)
+	}
+	paused := &trafficv1alpha1.TrafficBinding{}
+	if err := kubernetesClient.Get(
+		context.Background(), client.ObjectKeyFromObject(binding), paused,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if paused.Spec.DesiredState != trafficv1alpha1.TrafficBindingDesiredStatePaused {
+		t.Fatalf("desired state = %q, want Paused", paused.Spec.DesiredState)
+	}
+}
+
 func TestReconcilerDeletesOnlyOrphanedBindings(t *testing.T) {
 	kubernetesClient := fakeClient(t)
 	manager, err := New(

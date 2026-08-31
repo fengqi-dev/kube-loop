@@ -28,7 +28,7 @@ import (
 	ticketservice "github.com/fengqi-dev/kube-loop/internal/controlplane/ticketapi/service"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/trafficcontrolapi"
 	"github.com/fengqi-dev/kube-loop/internal/gateway"
-	"github.com/fengqi-dev/kube-loop/internal/gateway/trafficapi"
+	"github.com/fengqi-dev/kube-loop/internal/gateway/api"
 	"github.com/fengqi-dev/kube-loop/internal/gateway/websocketmux"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/relaycontrol"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/relayticket"
@@ -299,7 +299,7 @@ func startE2ETrafficGateway(
 		t.Fatal(err)
 	}
 	control := &e2eTrafficControlClient{t: t, relayID: relayID, coordinator: coordinator}
-	api, err := trafficapi.New(trafficapi.Config{
+	api, err := api.New(api.Config{
 		GatewayIP: gatewayIP, ControlPlane: control,
 		MirrorPrimaryDialContext: mirrorDial,
 		TrafficEncryption:        &enabled, NoiseStaticKey: &noiseStaticKey,

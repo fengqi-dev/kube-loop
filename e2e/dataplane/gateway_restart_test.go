@@ -427,7 +427,6 @@ func TestGatewayPodRestartRecoversDataPlane(t *testing.T) {
 		t.Fatalf("second identity cluster request: %v", err)
 	}
 	assertCrossSessionRejected(t, ctx, proxy.Address(), source, secondSession.ID, spec)
-	assertMetricsHideIdentity(t, ctx, proxy.Address(), source, secondSource)
 	if err := secondManager.Shutdown(); err != nil {
 		t.Fatalf("shutdown second identity: %v", err)
 	}
@@ -833,40 +832,6 @@ func assertCrossSessionRejected(
 	); err == nil ||
 		!strings.Contains(err.Error(), "does not match RelayTicket") {
 		t.Fatalf("cross-Session protocol token was not rejected: %v", err)
-	}
-}
-
-func assertMetricsHideIdentity(
-	t *testing.T,
-	ctx context.Context,
-	gatewayAddress string,
-	sources ...*e2eSessionSource,
-) {
-	t.Helper()
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+gatewayAddress+"/metrics", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	client := &http.Client{Timeout: 3 * time.Second, Transport: &http.Transport{Proxy: nil}}
-	response, err := client.Do(request)
-	if err != nil {
-		t.Fatalf("read Data Plane metrics: %v", err)
-	}
-	defer response.Body.Close()
-	raw, err := io.ReadAll(io.LimitReader(response.Body, 64<<10))
-	if err != nil || response.StatusCode != http.StatusOK {
-		t.Fatalf("read Data Plane metrics: status=%d err=%v", response.StatusCode, err)
-	}
-	metrics := string(raw)
-	for _, source := range sources {
-		source.mu.Lock()
-		values := []string{source.identityID, source.deviceID, source.session.ID}
-		source.mu.Unlock()
-		for _, value := range values {
-			if value != "" && strings.Contains(metrics, value) {
-				t.Fatalf("Data Plane metrics leaked identity %q: %s", value, metrics)
-			}
-		}
 	}
 }
 

@@ -14,7 +14,7 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"github.com/fengqi-dev/kube-loop/internal/gateway/operations"
+	"github.com/fengqi-dev/kube-loop/internal/gateway/api"
 )
 
 type capacityGatewayState struct{}
@@ -77,7 +77,7 @@ func TestCapacityLimitsSessionsAndStreamsWithoutBlockingHealth(t *testing.T) {
 	}
 	router := echo.New()
 	router.Any("/tunnel", echo.WrapHandler(handler))
-	operations.NewHandler(capacityGatewayState{}, handler).Register(router)
+	api.NewHandler(capacityGatewayState{}, handler).Register(router)
 	server := httptest.NewServer(router)
 	defer server.Close()
 	endpoint := "ws" + strings.TrimPrefix(server.URL, "http") + "/tunnel"
@@ -172,7 +172,7 @@ func waitCapacitySessions(t *testing.T, handler *Handler, expected int) {
 func assertCapacityHealth(t *testing.T, baseURL string) {
 	t.Helper()
 	client := &http.Client{Timeout: time.Second}
-	for _, path := range []string{operations.LivePath, operations.ReadyPath, operations.MetricsPath} {
+	for _, path := range []string{api.LivePath, api.ReadyPath} {
 		response, err := client.Get(baseURL + path)
 		if err != nil {
 			t.Fatalf("capacity health %s: %v", path, err)

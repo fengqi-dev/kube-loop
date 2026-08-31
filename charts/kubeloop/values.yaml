@@ -263,14 +263,6 @@ networkPolicy:
     dataPlane: []
     operator: []
 
-monitoring:
-  serviceMonitor:
-    enabled: false
-    namespace: ""
-    labels: {}
-    interval: 30s
-    scrapeTimeout: 10s
-
 podDisruptionBudget:
   # Rendered only for a multi-replica external-datasource Control Plane. SQLite never
   # receives a PDB that could prevent voluntary maintenance.

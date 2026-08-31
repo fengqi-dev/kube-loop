@@ -361,9 +361,6 @@ func TestRuntimeSecurityBaselineIsAppliedToEveryWorkload(t *testing.T) {
 	if countKind(objects, "PodDisruptionBudget") != 0 {
 		t.Fatal("SQLite mode must not create a PodDisruptionBudget")
 	}
-	if countKind(objects, "ServiceMonitor") != 0 {
-		t.Fatal("ServiceMonitor must remain opt-in")
-	}
 }
 
 func TestEveryWorkloadUsesItsDocumentedHealthContract(t *testing.T) {
@@ -440,29 +437,10 @@ func TestMonitoringAndTopologySpreadAreOptInAndScoped(t *testing.T) {
 	objects := renderChart(t,
 		"--set", "publicURL=https://kubeloop.example.test",
 		"--set", "controlPlane.storage.datasource.existingSecret=database",
-		"--set", "monitoring.serviceMonitor.enabled=true",
-		"--set", "monitoring.serviceMonitor.labels.release=prometheus",
 		"--set-json", "controlPlane.topologySpreadConstraints="+spread,
 		"--set-json", "dataPlane.topologySpreadConstraints="+spread,
 		"--set-json", "operator.topologySpreadConstraints="+spread,
 	)
-	if countKind(objects, "PodDisruptionBudget") != 0 || countKind(objects, "ServiceMonitor") != 1 {
-		t.Fatalf(
-			"runtime objects: PDB=%d ServiceMonitor=%d",
-			countKind(objects, "PodDisruptionBudget"),
-			countKind(objects, "ServiceMonitor"),
-		)
-	}
-	monitor := objectByName(t, objects, "ServiceMonitor", "test-kubeloop-gateway")
-	monitorYAML, err := yaml.Marshal(monitor)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{"app.kubernetes.io/component: data-plane", "path: /metrics", "port: http", "interval: 30s", "scrapeTimeout: 10s", "release: prometheus"} {
-		if !strings.Contains(string(monitorYAML), want) {
-			t.Fatalf("ServiceMonitor is missing %q: %s", want, monitorYAML)
-		}
-	}
 	for _, component := range []string{"control-plane", "data-plane", "operator"} {
 		deployment := objectsByComponent(t, objects, "Deployment", component)[0]
 		if !strings.Contains(mustYAML(t, deployment), "topologySpreadConstraints:") ||
