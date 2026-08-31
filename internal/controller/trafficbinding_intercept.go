@@ -134,5 +134,5 @@ func (r *TrafficBindingReconciler) reconcileIntercept(
 	if err := r.Delete(ctx, legacy); err != nil && !apierrors.IsNotFound(err) {
 		return err
 	}
-	return r.reconcileRelaySlice(ctx, binding, service.Name, ports)
+	return r.reconcileRelaySlice(ctx, binding, service, ports)
 }

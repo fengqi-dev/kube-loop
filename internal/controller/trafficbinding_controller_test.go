@@ -11,6 +11,7 @@ import (
 	discoveryv1 "k8s.io/api/discovery/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apiMeta "k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/tools/events"
@@ -67,6 +68,11 @@ var _ = Describe("TrafficBinding Controller", func() {
 		Expect(slices.Items).To(HaveLen(1))
 		Expect(slices.Items[0].Endpoints[0].Addresses).To(Equal([]string{"10.0.0.8"}))
 		Expect(*slices.Items[0].Ports[0].Port).To(Equal(int32(32001)))
+		serviceOwner := findOwnerReference(slices.Items[0].OwnerReferences, "Service", service.Name)
+		Expect(serviceOwner).NotTo(BeNil())
+		Expect(serviceOwner.APIVersion).To(Equal("v1"))
+		Expect(serviceOwner.UID).To(Equal(service.UID))
+		Expect(serviceOwner.Controller).To(BeNil())
 		Expect(*slices.Items[0].Ports[1].Port).To(Equal(int32(32002)))
 
 		current := getBinding(ctx, binding.Name)
@@ -419,6 +425,15 @@ var _ = Describe("TrafficBinding Controller", func() {
 		Expect(k8sClient.Update(ctx, stored)).To(Succeed())
 	})
 })
+
+func findOwnerReference(references []metav1.OwnerReference, kind, name string) *metav1.OwnerReference {
+	for index := range references {
+		if references[index].Kind == kind && references[index].Name == name {
+			return &references[index]
+		}
+	}
+	return nil
+}
 
 func previewBinding(name, service string) *trafficv1alpha1.TrafficBinding {
 	return &trafficv1alpha1.TrafficBinding{

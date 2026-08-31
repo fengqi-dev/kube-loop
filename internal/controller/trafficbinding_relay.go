@@ -6,6 +6,7 @@ import (
 	"net"
 	"reflect"
 
+	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -19,11 +20,17 @@ import (
 func (r *TrafficBindingReconciler) reconcileRelaySlice(
 	ctx context.Context,
 	binding *trafficv1alpha1.TrafficBinding,
-	serviceName string,
+	service *corev1.Service,
 	ports []trafficv1alpha1.TrafficPort,
 ) error {
-	desired := desiredRelaySlice(binding, serviceName, ports)
+	desired := desiredRelaySlice(binding, service.Name, ports)
 	if err := controllerutil.SetControllerReference(binding, desired, r.Scheme); err != nil {
+		return err
+	}
+	// Keep the TrafficBinding as the controller owner, while also making the
+	// preview Service an owner so Kubernetes garbage collection removes the
+	// relay slice when the Service is deleted independently.
+	if err := controllerutil.SetOwnerReference(service, desired, r.Scheme); err != nil {
 		return err
 	}
 	current := &discoveryv1.EndpointSlice{}
@@ -49,11 +56,13 @@ func (r *TrafficBindingReconciler) reconcileRelaySlice(
 	before := current.DeepCopy()
 	current.Labels = maps.Clone(desired.Labels)
 	current.Annotations = maps.Clone(desired.Annotations)
+	current.OwnerReferences = append([]metav1.OwnerReference(nil), desired.OwnerReferences...)
 	current.AddressType = desired.AddressType
 	current.Endpoints = desired.Endpoints
 	current.Ports = desired.Ports
 	if reflect.DeepEqual(before.Labels, current.Labels) &&
 		reflect.DeepEqual(before.Annotations, current.Annotations) &&
+		reflect.DeepEqual(before.OwnerReferences, current.OwnerReferences) &&
 		reflect.DeepEqual(before.AddressType, current.AddressType) &&
 		reflect.DeepEqual(before.Endpoints, current.Endpoints) &&
 		reflect.DeepEqual(before.Ports, current.Ports) {
