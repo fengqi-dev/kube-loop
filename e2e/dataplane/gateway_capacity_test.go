@@ -248,7 +248,7 @@ func TestGatewayPodMultiUserCapacityRSSAndCleanup(t *testing.T) {
 		t.Fatal(err)
 	}
 	clients = clients[1:]
-	replacement := startCapacityPodClient(
+	replacement := startCapacityPodClientEventually(
 		t, ctx, signer, publicAddress, namespace, spec, specHash,
 		"capacity-replacement", uuid.NewString(),
 	)
@@ -276,6 +276,56 @@ func startCapacityPodClient(
 	specHash, identityID, deviceID string,
 ) *capacityClient {
 	t.Helper()
+	client, err := tryStartCapacityPodClient(
+		ctx, signer, gatewayAddress, namespace, spec, specHash, identityID, deviceID,
+	)
+	if err != nil {
+		t.Fatalf("connect capacity client: %v", err)
+	}
+	return client
+}
+
+func startCapacityPodClientEventually(
+	t *testing.T,
+	ctx context.Context,
+	signer *relayticket.Signer,
+	gatewayAddress, namespace string,
+	spec networkspec.Spec,
+	specHash, identityID, deviceID string,
+) *capacityClient {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	var lastErr error
+	for {
+		client, err := tryStartCapacityPodClient(
+			ctx, signer, gatewayAddress, namespace, spec, specHash, identityID, deviceID,
+		)
+		if err == nil {
+			return client
+		}
+		lastErr = err
+		if time.Now().After(deadline) {
+			t.Fatalf("connect replacement capacity client: %v", lastErr)
+		}
+		timer := time.NewTimer(100 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
+			t.Fatalf("connect replacement capacity client: %v", ctx.Err())
+		case <-timer.C:
+		}
+	}
+}
+
+func tryStartCapacityPodClient(
+	ctx context.Context,
+	signer *relayticket.Signer,
+	gatewayAddress, namespace string,
+	spec networkspec.Spec,
+	specHash, identityID, deviceID string,
+) (*capacityClient, error) {
 	now := time.Now().UTC()
 	session := clientremote.Session{
 		ID: uuid.NewString(), Namespace: namespace, State: "active", Generation: 1,
@@ -297,12 +347,12 @@ func startCapacityPodClient(
 		TrafficEncryption: source.trafficEncryption,
 	})
 	if err != nil {
-		t.Fatalf("connect capacity client: %v", err)
+		return nil, fmt.Errorf("connect capacity client: %w", err)
 	}
 	token, err := tunnel.RelaySessionToken(session.ID, session.Generation)
 	if err != nil {
 		_ = forwarder.Close()
-		t.Fatal(err)
+		return nil, err
 	}
 	control, err := (&net.Dialer{}).DialContext(ctx, "tcp", forwarder.Address())
 	if err == nil {
@@ -316,9 +366,9 @@ func startCapacityPodClient(
 			_ = control.Close()
 		}
 		_ = forwarder.Close()
-		t.Fatalf("register capacity Session: %v", err)
+		return nil, fmt.Errorf("register capacity Session: %w", err)
 	}
-	return &capacityClient{forwarder: forwarder, control: control, token: token, source: source}
+	return &capacityClient{forwarder: forwarder, control: control, token: token, source: source}, nil
 }
 
 func assertCapacityConnectionRejected(

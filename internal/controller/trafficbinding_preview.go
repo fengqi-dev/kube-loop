@@ -5,6 +5,7 @@ import (
 	"reflect"
 
 	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -88,6 +89,20 @@ func (r *TrafficBindingReconciler) deletePreview(
 	binding *trafficv1alpha1.TrafficBinding,
 ) error {
 	var result error
+	slice := &discoveryv1.EndpointSlice{}
+	sliceKey := types.NamespacedName{
+		Namespace: binding.Namespace,
+		Name:      managedEndpointSliceName(binding),
+	}
+	if err := r.Get(ctx, sliceKey, slice); err == nil {
+		if ownedByBinding(slice, binding) && metav1.IsControlledBy(slice, binding) {
+			if deleteErr := r.Delete(ctx, slice); deleteErr != nil && !apierrors.IsNotFound(deleteErr) {
+				result = errorsJoin(result, deleteErr)
+			}
+		}
+	} else if !apierrors.IsNotFound(err) {
+		result = errorsJoin(result, err)
+	}
 	service := &corev1.Service{}
 	serviceKey := types.NamespacedName{Namespace: binding.Namespace, Name: binding.Spec.Preview.ServiceName}
 	if err := r.Get(ctx, serviceKey, service); err == nil {

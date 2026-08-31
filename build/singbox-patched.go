@@ -7,6 +7,7 @@ package main
 import (
 	"archive/tar"
 	"bytes"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -167,18 +168,28 @@ func stageWindowsSidecars(sourceDir, goarch, outputDir string) error {
 }
 
 func goModuleDir(sourceDir, module string) (string, error) {
-	command := exec.Command("go", "list", "-m", "-f", "{{.Dir}}", module)
+	command := exec.Command("go", "mod", "download", "-json", module)
 	command.Dir = sourceDir
 	command.Env = setEnvironment(os.Environ(), map[string]string{
 		"GOTOOLCHAIN": "local",
 	})
 	output, err := command.Output()
 	if err != nil {
-		return "", fmt.Errorf("locate Go module %s: %w", module, err)
+		return "", fmt.Errorf("download Go module %s: %w", module, err)
 	}
-	dir := strings.TrimSpace(string(output))
+	var downloaded struct {
+		Dir   string `json:"Dir"`
+		Error string `json:"Error"`
+	}
+	if err := json.Unmarshal(output, &downloaded); err != nil {
+		return "", fmt.Errorf("parse Go module %s metadata: %w", module, err)
+	}
+	if downloaded.Error != "" {
+		return "", fmt.Errorf("download Go module %s: %s", module, downloaded.Error)
+	}
+	dir := strings.TrimSpace(downloaded.Dir)
 	if dir == "" {
-		return "", fmt.Errorf("Go module %s has no source directory", module)
+		return "", fmt.Errorf("Go module %s download has no source directory", module)
 	}
 	return dir, nil
 }

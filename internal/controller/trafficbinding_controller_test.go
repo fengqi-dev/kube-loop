@@ -120,6 +120,9 @@ var _ = Describe("TrafficBinding Controller", func() {
 			trafficv1alpha1.ConditionRestored,
 		)).To(BeTrue())
 		Expect(k8sClient.Get(ctx, objectKey("preview-service"), &corev1.Service{})).To(Satisfy(apierrors.IsNotFound))
+		Expect(k8sClient.Get(ctx, objectKey(managedEndpointSliceName(restored)), &discoveryv1.EndpointSlice{})).To(
+			Satisfy(apierrors.IsNotFound),
+		)
 		reconcileSuccessfully(ctx, reconciler, binding.Name, 1)
 	})
 
