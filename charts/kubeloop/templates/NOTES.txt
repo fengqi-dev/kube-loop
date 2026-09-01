@@ -1,3 +1,4 @@
+{{- $publicURL := trimSuffix "/" (required "publicURL is required" .Values.publicURL) -}}
 KubeLoop has been installed as three independent workloads:
 
   Control Plane: {{ include "kubeloop.controlPlaneName" . }}
@@ -8,8 +9,9 @@ KubeLoop has been installed as three independent workloads:
 Development mode is enabled. Any authenticated user can access the service.
 {{- end }}
 
-Service discovery:
-  {{ required "publicURL is required" .Values.publicURL }}/.well-known/kubeloop
+Endpoints:
+  Admin UI:          {{ $publicURL }}/admin/ui
+  Service discovery: {{ $publicURL }}/.well-known/kubeloop
 
 Helm generated and retained the internal Relay signing and TLS Secret:
   {{ include "kubeloop.relaySecretName" . }}
@@ -28,9 +30,6 @@ Management UI to create the first administrator.
 Start a local tunnel:
   kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "kubeloop.controlPlaneName" . }} 8080:{{ .Values.controlPlane.service.port }}
 {{- end }}
-Then sign in at:
-  {{ required "publicURL is required" .Values.publicURL }}/admin/ui
-
 {{- if and (not .Values.ingress.enabled) (not .Values.gatewayAPI.enabled) }}
 Chart-managed external routing is disabled. Route the same public origin as follows:
   / -> {{ include "kubeloop.controlPlaneName" . }}

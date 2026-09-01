@@ -410,6 +410,13 @@ func deployDevelopmentStack(
 		"--set-string",
 		"ingress.tls.secretName=" + ingressSecret,
 	}
+	// Helm 4 uses Server-Side Apply for new releases. Development images are
+	// intentionally owned by this chart, so reclaim fields changed by commands
+	// such as `kubectl set image`. Keep older Helm versions working by adding the
+	// flag only when their upgrade command advertises support for it.
+	if helmUpgradeSupportsForceConflicts() {
+		arguments = append(arguments, "--force-conflicts")
+	}
 	fmt.Printf("==> Deploying KubeLoop development stack to namespace %s\n", developmentNamespace)
 	if err := run(root, exec.Command("helm", arguments...)); err != nil {
 		return "", err
@@ -420,6 +427,11 @@ func deployDevelopmentStack(
 		return "", err
 	}
 	return publicURL, nil
+}
+
+func helmUpgradeSupportsForceConflicts() bool {
+	output, err := exec.Command("helm", "upgrade", "--help").Output()
+	return err == nil && bytes.Contains(output, []byte("--force-conflicts"))
 }
 
 func recoverDevelopmentHelmRelease(root string) error {
