@@ -830,13 +830,6 @@ export interface PortForwardInfo {
   address: string;
 }
 
-export interface SessionIntentCounts {
-  podPortForwards: number;
-  networkPortForwards: number;
-  exchanges: number;
-  mirrors: number;
-}
-
 export interface MCPStatus {
   enabled: boolean;
   listening: boolean;

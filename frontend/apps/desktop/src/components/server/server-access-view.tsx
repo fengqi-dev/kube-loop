@@ -876,7 +876,6 @@ export function ServerAccessView({
         onRefresh={() => void loadInventory()}
         onConnect={connectDataPlane}
         onDisconnect={() => void disconnectDataPlane()}
-        onNavigate={(view) => onNavigate?.(view)}
       />
     );
   }

@@ -52,7 +52,6 @@ import type {
 	ServerPodFileList,
 	ServerPodFileTask,
 	ServerNetworkSettings,
-  SessionIntentCounts,
   SessionState,
   UpdateInfo,
 	TrafficInspectionQuery,
@@ -210,8 +209,6 @@ declare global {
           StartPortForward(request: PortForwardRequest): Promise<PortForwardInfo>;
           StopPortForward(id: string): Promise<void>;
           ListPortForwards(): Promise<PortForwardInfo[]>;
-          ResetSessions(): Promise<void>;
-          SessionIntentCounts(): Promise<SessionIntentCounts>;
           CheckForUpdates(): Promise<UpdateInfo>;
           OpenUpdatePage(): Promise<void>;
           HelperStatus(): Promise<HelperStatus>;
@@ -490,9 +487,6 @@ export const backend = {
     Promise.resolve().then(() => api().StartPortForward(request)),
   stopPortForward: (id: string) => Promise.resolve().then(() => api().StopPortForward(id)),
   listPortForwards: () => Promise.resolve().then(() => api().ListPortForwards()),
-  resetSessions: () => Promise.resolve().then(() => api().ResetSessions()),
-  sessionIntentCounts: () =>
-    Promise.resolve().then(() => api().SessionIntentCounts()),
   checkForUpdates: () => Promise.resolve().then(() => api().CheckForUpdates()),
   openUpdatePage: () => Promise.resolve().then(() => api().OpenUpdatePage()),
 	getServerSingBoxConfig: (profileId: string) =>

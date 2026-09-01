@@ -1,21 +1,16 @@
 import { useCallback, useEffect, useState } from "react";
 import {
-  ArrowRightLeft,
   Cable,
   Copy,
-  CopyPlus,
-  Eye,
   Network,
   RefreshCw,
   Server,
   ShieldCheck,
   Trash2,
-  type LucideIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import { backend } from "@/backend";
 import { ConnectionOrb } from "@/components/overview/connection-orb";
-import type { AppView } from "@/components/layout/navigation";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -30,7 +25,6 @@ import type {
   RemoteInventory,
   ServerDiscovery,
   ServerProfile,
-  ServerTrafficBindingSession,
   SessionState,
 } from "@/types";
 
@@ -45,7 +39,6 @@ export function ServerOverviewView({
   onRefresh,
   onConnect,
   onDisconnect,
-  onNavigate,
 }: {
   profile: ServerProfile;
   discovery?: ServerDiscovery;
@@ -57,7 +50,6 @@ export function ServerOverviewView({
   onRefresh(): void;
   onConnect(mode: "socks" | "tun"): Promise<void>;
   onDisconnect(): void;
-  onNavigate(view: AppView): void;
 }) {
   const { t } = useI18n();
   const dataPlane = inventory.dataPlane;
@@ -81,7 +73,6 @@ export function ServerOverviewView({
   const [socksPort, setSocksPort] = useState(profile.socksPort || 1080);
   const [socksPortInput, setSocksPortInput] = useState(String(profile.socksPort || 1080));
   const [savingSocksPort, setSavingSocksPort] = useState(false);
-  const [sessionBindings, setSessionBindings] = useState<ServerTrafficBindingSession[]>([]);
   const refreshHelper = useCallback(async () => {
     try {
       setHelper(await backend.helperStatus());
@@ -93,15 +84,6 @@ export function ServerOverviewView({
   }, [t]);
 
   useEffect(() => { void refreshHelper(); }, [refreshHelper]);
-  useEffect(() => {
-    let active = true;
-    void backend.listServerSessions(profile.id).then((items) => {
-      if (active) setSessionBindings(items);
-    }).catch(() => {
-      if (active) setSessionBindings([]);
-    });
-    return () => { active = false; };
-  }, [profile.id, inventory.session?.id]);
   useEffect(() => {
     let active = true;
     void backend.getServerNetworkSettings(profile.id).then((settings) => {
@@ -244,26 +226,32 @@ export function ServerOverviewView({
               />
             </div>
 
-            <div className="mt-5 grid grid-cols-2 gap-x-4 gap-y-3 rounded-xl border border-border/40 bg-muted/20 py-3.5 px-4 sm:grid-cols-3 xl:grid-cols-6">
-              <ServerValue label="Kubernetes" value={inventory.kubernetesVersion} />
-              <ServerValue label="Gateway" value={inventory.gatewayVersion} />
-              <ServerValue label="Pod CIDR" value={networkSpec?.podCIDRs?.join(", ")} />
-              <ServerValue label="Service CIDR" value={networkSpec?.serviceCIDRs?.join(", ")} />
-              <ServerValue label="Session" value={inventory.session?.state} />
-              <ServerValue label="Identity" value={userName || "Authenticated user"} />
-            </div>
+            <div className="mt-5 grid items-stretch gap-4 lg:grid-cols-[minmax(260px,0.78fr)_minmax(0,1.5fr)]">
+              <section className="rounded-2xl border border-border/50 bg-muted/15 p-4">
+                <div className="mb-3 text-[10px] font-medium tracking-[0.12em] text-muted-foreground uppercase">
+                  {t("overview.clusterNetwork")}
+                </div>
+                <div className="grid grid-cols-2 gap-x-5 gap-y-4">
+                  <ServerValue label="Kubernetes" value={inventory.kubernetesVersion} />
+                  <ServerValue label="Gateway" value={inventory.gatewayVersion} />
+                  <ServerValue label="Pod CIDR" value={networkSpec?.podCIDRs?.join(", ")} />
+                  <ServerValue label="Service CIDR" value={networkSpec?.serviceCIDRs?.join(", ")} />
+                  <ServerValue label="Session" value={inventory.session?.state} />
+                  <ServerValue label="Identity" value={userName || "Authenticated user"} />
+                </div>
+              </section>
 
-            <div className="pt-5">
-              <div className="mb-2.5 flex items-center justify-between gap-3">
-                <div className="text-[10px] font-medium tracking-[0.12em] text-muted-foreground uppercase">
-                  {t("overview.connectionMode")}
+              <section className="rounded-2xl border border-border/50 bg-muted/15 p-4">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <div className="text-[10px] font-medium tracking-[0.12em] text-muted-foreground uppercase">
+                    {t("overview.connectionMode")}
+                  </div>
+                  <div className="text-[10px] font-medium text-muted-foreground">
+                    {selectedMode === "tun" ? t("overview.tunMode") : t("overview.socksProxy")}
+                  </div>
                 </div>
-                <div className="text-[10px] font-medium text-muted-foreground">
-                  {selectedMode === "tun" ? t("overview.tunMode") : t("overview.socksProxy")}
-                </div>
-              </div>
-              <div className="overflow-hidden rounded-2xl border border-border/50 bg-muted/15 p-1.5">
-                <ToggleGroup
+                <div className="overflow-hidden rounded-2xl border border-border/50 bg-muted/15 p-1.5">
+                  <ToggleGroup
                   type="single"
                   value={selectedMode}
                   disabled={ready || busy}
@@ -309,10 +297,10 @@ export function ServerOverviewView({
                       </span>
                     </span>
                   </ToggleGroupItem>
-                </ToggleGroup>
+                  </ToggleGroup>
 
-              <div className="mt-1 min-h-[60px] rounded-xl border border-border/50 bg-background/60 px-3.5 py-3">
-                {selectedMode === "socks" ? (
+                  <div className="mt-1 min-h-[60px] rounded-xl border border-border/50 bg-background/60 px-3.5 py-3">
+                    {selectedMode === "socks" ? (
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div className="min-w-0 flex-1">
                       <div className="text-[10px] leading-4 text-muted-foreground">{t("overview.socksHint")}</div>
@@ -386,9 +374,10 @@ export function ServerOverviewView({
                       ) : null}
                     </div>
                   </div>
-                )}
-              </div>
-              </div>
+                    )}
+                  </div>
+                </div>
+              </section>
             </div>
 
             {dataPlaneError ? (
@@ -397,74 +386,10 @@ export function ServerOverviewView({
               </Alert>
             ) : null}
 
-            <div className="mt-5 border-t border-border/40 pt-4">
-              <SessionMetrics counts={bindingCounts(sessionBindings)} onNavigate={onNavigate} />
-            </div>
           </CardContent>
         </Card>
       </div>
     </div>
-  );
-}
-
-function bindingCounts(items: ServerTrafficBindingSession[]) {
-  return {
-    podPortForwards: items.filter((item) => item.mode === "PortForward" && item.target?.kind === "Pod").length,
-    networkPortForwards: items.filter((item) => item.mode === "PortForward" && item.target?.kind !== "Pod").length,
-    exchanges: items.filter((item) => item.mode === "Exchange").length,
-    mirrors: items.filter((item) => item.mode === "Mirror").length,
-    previews: items.filter((item) => item.mode === "Preview").length,
-  };
-}
-
-function SessionMetrics({
-  counts,
-  onNavigate,
-}: {
-  counts: {
-    podPortForwards: number;
-    networkPortForwards: number;
-    exchanges: number;
-    mirrors: number;
-    previews: number;
-  };
-  onNavigate(view: AppView): void;
-}) {
-  const { t } = useI18n();
-  const rows: Array<{ group: string; icon: LucideIcon; label: string; value: number; view: AppView }> = [
-    { group: t("overview.podGroup"), icon: Cable, label: t("network.tabPortForward"), value: counts.podPortForwards, view: "sessions" },
-    { group: t("overview.networkGroup"), icon: Cable, label: t("network.tabPortForward"), value: counts.networkPortForwards, view: "sessions" },
-    { group: t("overview.networkGroup"), icon: ArrowRightLeft, label: t("network.tabExchange"), value: counts.exchanges, view: "sessions" },
-    { group: t("overview.networkGroup"), icon: CopyPlus, label: t("network.tabMirror"), value: counts.mirrors, view: "sessions" },
-    { group: t("overview.networkGroup"), icon: Eye, label: t("network.tabPreview"), value: counts.previews, view: "sessions" },
-  ];
-  return (
-    <section>
-      <div className="mb-2 flex items-center justify-between gap-3">
-        <span className="text-[10px] font-medium tracking-[0.12em] text-muted-foreground uppercase">{t("overview.sessionsPanel")}</span>
-        <span className="font-mono text-[10px] text-muted-foreground">{rows.reduce((total, row) => total + row.value, 0)} sessions</span>
-      </div>
-      <div className="grid grid-cols-2 gap-2 lg:grid-cols-5">
-        {rows.map((row) => (
-          <Button
-            key={`${row.group}-${row.label}`}
-            type="button"
-            variant="ghost"
-            title={`${row.group} · ${row.label}`}
-            onClick={() => onNavigate(row.view)}
-            className="flex h-11 min-w-0 items-center justify-start gap-2 rounded-xl border border-border/50 bg-background/60 px-3 text-left hover:bg-accent/40 hover:border-border/80 last:col-span-2 lg:last:col-span-1"
-          >
-            <row.icon className="shrink-0 text-muted-foreground" size={13} />
-            <span className="min-w-0 flex-1 truncate text-[9px] text-foreground">
-              <span className="text-muted-foreground">{row.group}</span>
-              <span className="px-1 text-muted-foreground/60">·</span>
-              {row.label}
-            </span>
-            <span className="ml-auto font-mono text-[13px] font-bold tabular-nums">{row.value}</span>
-          </Button>
-        ))}
-      </div>
-    </section>
   );
 }
 
