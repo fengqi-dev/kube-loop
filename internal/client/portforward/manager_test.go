@@ -197,6 +197,16 @@ func TestManagerBindsGatewayTaskToLocalOnlyListener(t *testing.T) {
 	}
 }
 
+func TestManagerDeleteReportsNotManagedLocally(t *testing.T) {
+	t.Parallel()
+	manager := &Manager{active: make(map[string]*activeForward)}
+	if err := manager.Delete(
+		context.Background(), "server-1", uuid.NewString(),
+	); !errors.Is(err, ErrNotManagedLocally) {
+		t.Fatalf("Delete() error = %v", err)
+	}
+}
+
 func TestManagerPauseResumeDeleteLifecycle(t *testing.T) {
 	now := time.Now().UTC()
 	task := remote.PortForwardTask{

@@ -62,6 +62,10 @@ export function DeleteServerProfile(arg1) {
   return window['go']['app']['App']['DeleteServerProfile'](arg1);
 }
 
+export function DeleteServerTrafficBinding(arg1, arg2) {
+  return window['go']['app']['App']['DeleteServerTrafficBinding'](arg1, arg2);
+}
+
 export function DisconnectServerDataPlane(arg1) {
   return window['go']['app']['App']['DisconnectServerDataPlane'](arg1);
 }

@@ -160,6 +160,13 @@ func (r *TrafficBindingReconciler) reconcilePaused(
 		binding.Status.ObservedGeneration == binding.Generation {
 		return ctrl.Result{}, nil
 	}
+	if binding.Status.Phase == trafficv1alpha1.TrafficBindingPhasePaused {
+		// Session adoption updates transport metadata in spec and therefore the
+		// Kubernetes generation. The workload is already restored in Paused, so
+		// only acknowledge the new generation instead of attempting rollback a
+		// second time after setPaused has discarded the completed snapshot.
+		return ctrl.Result{}, r.setPaused(ctx, binding)
+	}
 	if binding.Status.Phase == trafficv1alpha1.TrafficBindingPhasePending ||
 		binding.Status.Phase == "" {
 		return ctrl.Result{}, r.setPaused(ctx, binding)
@@ -225,10 +232,7 @@ func (r *TrafficBindingReconciler) cleanup(ctx context.Context, binding *traffic
 		return r.deletePreview(ctx, binding)
 	case trafficv1alpha1.TrafficBindingModeExchange, trafficv1alpha1.TrafficBindingModeMirror:
 		if binding.Status.Snapshot == nil {
-			if binding.Status.ServiceName == "" {
-				return nil
-			}
-			return permanentf("rollback snapshot is missing")
+			return r.cleanupInterceptWithoutSnapshot(ctx, binding)
 		}
 		return r.restoreService(ctx, binding)
 	default:

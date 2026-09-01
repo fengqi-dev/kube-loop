@@ -667,11 +667,11 @@ func installTrafficInspectionBackends(
 	grpcName := "traffic-grpcbin-" + suffix
 	httpImage := strings.TrimSpace(os.Getenv("KUBELOOP_HTTPBIN_IMAGE"))
 	if httpImage == "" {
-		httpImage = "ghcr.io/mccutchen/go-httpbin:latest"
+		httpImage = "go-httpbin:latest"
 	}
 	grpcImage := strings.TrimSpace(os.Getenv("KUBELOOP_GRPCBIN_IMAGE"))
 	if grpcImage == "" {
-		grpcImage = "docker.io/kong/grpcbin:latest"
+		grpcImage = "kong/grpcbin:latest"
 	}
 	httpService := installTrafficInspectionBackend(t, ctx, client, httpName, httpImage, nil, []corev1.ContainerPort{
 		{Name: "http", ContainerPort: 8080},

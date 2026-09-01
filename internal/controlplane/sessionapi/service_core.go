@@ -42,32 +42,41 @@ type TrafficBindingSynchronizer interface {
 }
 
 type TrafficBindingLister interface {
-	List(context.Context, string, string) ([]trafficbindingclient.SessionBinding, error)
+	List(
+		ctx context.Context,
+		namespace, identityID string,
+	) ([]trafficbindingclient.SessionBinding, error)
+}
+
+type TrafficBindingDeleter interface {
+	Delete(context.Context, string, string, string) error
 }
 
 type Config struct {
-	ClusterID            string
-	SessionTTL           time.Duration
-	MaxLifetime          time.Duration
-	Now                  func() time.Time
-	Networks             NetworkDiscoverer
-	Capabilities         CapabilityDiscoverer
-	Registry             *sessionregistry.Registry
-	TrafficBindings      TrafficBindingSynchronizer
-	TrafficBindingLister TrafficBindingLister
+	ClusterID             string
+	SessionTTL            time.Duration
+	MaxLifetime           time.Duration
+	Now                   func() time.Time
+	Networks              NetworkDiscoverer
+	Capabilities          CapabilityDiscoverer
+	Registry              *sessionregistry.Registry
+	TrafficBindings       TrafficBindingSynchronizer
+	TrafficBindingLister  TrafficBindingLister
+	TrafficBindingDeleter TrafficBindingDeleter
 }
 
 type Service struct {
-	storage              Storage
-	clusterID            string
-	sessionTTL           time.Duration
-	maxLifetime          time.Duration
-	now                  func() time.Time
-	networks             NetworkDiscoverer
-	capabilities         CapabilityDiscoverer
-	registry             *sessionregistry.Registry
-	trafficBindings      TrafficBindingSynchronizer
-	trafficBindingLister TrafficBindingLister
+	storage               Storage
+	clusterID             string
+	sessionTTL            time.Duration
+	maxLifetime           time.Duration
+	now                   func() time.Time
+	networks              NetworkDiscoverer
+	capabilities          CapabilityDiscoverer
+	registry              *sessionregistry.Registry
+	trafficBindings       TrafficBindingSynchronizer
+	trafficBindingLister  TrafficBindingLister
+	trafficBindingDeleter TrafficBindingDeleter
 }
 
 func New(storageBackend Storage, config Config) (*Service, error) {
@@ -102,7 +111,8 @@ func New(storageBackend Storage, config Config) (*Service, error) {
 		storage: storageBackend, clusterID: config.ClusterID, sessionTTL: config.SessionTTL,
 		maxLifetime: config.MaxLifetime, now: config.Now, networks: config.Networks,
 		capabilities: config.Capabilities, registry: config.Registry,
-		trafficBindings:      config.TrafficBindings,
-		trafficBindingLister: config.TrafficBindingLister,
+		trafficBindings:       config.TrafficBindings,
+		trafficBindingLister:  config.TrafficBindingLister,
+		trafficBindingDeleter: config.TrafficBindingDeleter,
 	}, nil
 }

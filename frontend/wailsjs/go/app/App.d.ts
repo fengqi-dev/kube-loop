@@ -45,6 +45,8 @@ export function DeleteServerPreview(arg1:string,arg2:string):Promise<void>;
 
 export function DeleteServerProfile(arg1:string):Promise<profile.State>;
 
+export function DeleteServerTrafficBinding(arg1:string,arg2:string):Promise<void>;
+
 export function DisconnectServerDataPlane(arg1:string):Promise<dataplane.Status>;
 
 export function GetMCPStatus():Promise<mcp.Status>;

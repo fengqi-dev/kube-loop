@@ -97,6 +97,7 @@ declare global {
 		  DeleteServerPortForward(profileId: string, taskId: string): Promise<void>;
 		  ListServerPortForwards(profileId: string): Promise<ServerPortForwardInfo[]>;
 		  ListServerSessions(profileId: string): Promise<ServerTrafficBindingSession[]>;
+		  DeleteServerTrafficBinding(profileId: string, taskId: string): Promise<void>;
 			  StartServerExchange(request: ServerExchangeRequest): Promise<ServerExchangeInfo>;
 			  PauseServerExchange(profileId: string, taskId: string): Promise<void>;
 			  ResumeServerExchange(profileId: string, taskId: string): Promise<ServerExchangeInfo>;
@@ -312,6 +313,8 @@ export const backend = {
 		Promise.resolve().then(() => api().ListServerPortForwards(profileId)),
 	listServerSessions: (profileId: string) =>
 		Promise.resolve().then(() => api().ListServerSessions(profileId)),
+	deleteServerTrafficBinding: (profileId: string, taskId: string) =>
+		Promise.resolve().then(() => api().DeleteServerTrafficBinding(profileId, taskId)),
 	startServerExchange: (request: ServerExchangeRequest) =>
 		Promise.resolve().then(() => api().StartServerExchange(request)),
 	pauseServerExchange: (profileId: string, taskId: string) =>

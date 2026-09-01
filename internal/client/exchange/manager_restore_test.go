@@ -47,6 +47,30 @@ func TestManagerRestoreRehydratesStoppedExchange(t *testing.T) {
 	}
 }
 
+func TestManagerRestoreFailureDoesNotPauseRunningExchange(t *testing.T) {
+	now := time.Now().UTC()
+	session := remote.Session{ID: uuid.NewString(), Namespace: "development", State: exchangeSessionActive}
+	task := remote.ExchangeTask{
+		ID: uuid.NewString(), SessionID: session.ID, Namespace: session.Namespace,
+		State: "running", Service: "api", ClusterIP: "10.96.0.20",
+		Ports:        []remote.ExchangePort{{ServicePort: 80, Protocol: "tcp"}},
+		LocalTargets: []remote.LocalTarget{{ServicePort: 80, Protocol: "tcp", LocalPort: 8080}},
+		CreatedAt:    now, UpdatedAt: now, ExpiresAt: now.Add(time.Hour),
+	}
+	client := &restoreExchangeClient{testExchangeClient: testExchangeClient{task: task}, tasks: []remote.ExchangeTask{task}}
+	manager, err := NewManager(client, Config{TrafficStreams: client})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Restore(t.Context(), profile.Profile{ID: "server"}, session); err == nil {
+		t.Fatal("Restore() succeeded without a local Traffic stream")
+	}
+	_, stopCalls := client.calls()
+	if stopCalls != 0 {
+		t.Fatalf("remote stop calls = %d", stopCalls)
+	}
+}
+
 func TestManagerRestoreDoesNotRehydrateDeletedExchange(t *testing.T) {
 	now := time.Now().UTC()
 	session := remote.Session{ID: uuid.NewString(), Namespace: "development", State: exchangeSessionActive}

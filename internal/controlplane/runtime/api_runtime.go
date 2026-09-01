@@ -84,8 +84,9 @@ func buildAPIRuntime(
 	sessionAPI, err := sessionapi.New(store, sessionapi.Config{
 		ClusterID: config.Document.API.ServiceID, SessionTTL: config.SessionTTL, MaxLifetime: config.SessionMaxLifetime,
 		Networks: networkDiscoverer, Capabilities: kubernetesAPI, Registry: sessionRuntime,
-		TrafficBindings:      bindingSessions,
-		TrafficBindingLister: bindingSessions,
+		TrafficBindings:       bindingSessions,
+		TrafficBindingLister:  bindingSessions,
+		TrafficBindingDeleter: bindingSessions,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("initialize Cluster Session API: %w", err)

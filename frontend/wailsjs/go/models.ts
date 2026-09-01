@@ -1600,6 +1600,8 @@ export namespace remote {
 	    name?: string;
 	    targetPort: number;
 	    relayPort?: number;
+	    localHost?: string;
+	    localPort?: number;
 	    protocol: string;
 	
 	    static createFrom(source: any = {}) {
@@ -1611,6 +1613,8 @@ export namespace remote {
 	        this.name = source["name"];
 	        this.targetPort = source["targetPort"];
 	        this.relayPort = source["relayPort"];
+	        this.localHost = source["localHost"];
+	        this.localPort = source["localPort"];
 	        this.protocol = source["protocol"];
 	    }
 	}
@@ -1666,6 +1670,7 @@ export namespace remote {
 	    ports: TrafficBindingPort[];
 	    serviceName?: string;
 	    serviceClusterIp?: string;
+	    dialAddress?: string;
 	    createdAt: string;
 
 	    static createFrom(source: any = {}) {
@@ -1687,6 +1692,7 @@ export namespace remote {
 	        this.ports = this.convertValues(source["ports"], TrafficBindingPort);
 	        this.serviceName = source["serviceName"];
 	        this.serviceClusterIp = source["serviceClusterIp"];
+	        this.dialAddress = source["dialAddress"];
 	        this.createdAt = source["createdAt"];
 	    }
 	
@@ -1733,7 +1739,6 @@ export namespace reverserelay {
 	}
 
 }
-
 export namespace trafficinspect {
 	
 	export class RawEvent {

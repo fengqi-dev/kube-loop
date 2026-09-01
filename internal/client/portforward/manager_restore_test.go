@@ -46,6 +46,76 @@ func TestManagerRestoreRehydratesStoppedPortForward(t *testing.T) {
 	}
 }
 
+func TestManagerRestoreStartsRunningPortForwardLocallyWithoutRemoteResume(t *testing.T) {
+	now := time.Now().UTC()
+	session := remote.Session{ID: uuid.NewString(), Namespace: "development", State: portForwardSessionActive}
+	task := remote.PortForwardTask{
+		ID: uuid.NewString(), SessionID: session.ID, Namespace: session.Namespace,
+		State: "running", Kind: "service", Name: "api", Protocol: "tcp",
+		RemotePort: 8443, LocalPort: 18443, DialAddress: "10.96.0.20:8443",
+		CreatedAt: now, UpdatedAt: now, ExpiresAt: now.Add(time.Hour),
+	}
+	client := &restorePortForwardClient{tasks: []remote.PortForwardTask{task}}
+	client.task = task
+	manager, err := New(client, fakeDataPlane{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	locals := &fakeLocals{}
+	manager.locals = locals
+	if err := manager.Restore(t.Context(), profile.Profile{ID: "server"}, session); err != nil {
+		t.Fatal(err)
+	}
+	items := manager.List("server")
+	if len(items) != 1 || items[0].State != "active" || len(locals.started) != 1 {
+		t.Fatalf("reconciled Port Forwards = %#v, local starts = %#v", items, locals.started)
+	}
+	client.mu.Lock()
+	resumeCalls := len(client.resumed)
+	client.mu.Unlock()
+	if resumeCalls != 0 {
+		t.Fatalf("remote Resume calls = %d", resumeCalls)
+	}
+}
+
+func TestManagerRestoreStopsLocalPortForwardWhenCRDIsPaused(t *testing.T) {
+	now := time.Now().UTC()
+	session := remote.Session{ID: uuid.NewString(), Namespace: "development", State: portForwardSessionActive}
+	task := remote.PortForwardTask{
+		ID: uuid.NewString(), SessionID: session.ID, Namespace: session.Namespace,
+		State: "running", Kind: "service", Name: "api", Protocol: "tcp",
+		RemotePort: 8443, LocalPort: 18443, DialAddress: "10.96.0.20:8443",
+		CreatedAt: now, UpdatedAt: now, ExpiresAt: now.Add(time.Hour),
+	}
+	client := &restorePortForwardClient{tasks: []remote.PortForwardTask{task}}
+	client.task = task
+	manager, err := New(client, fakeDataPlane{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	locals := &fakeLocals{}
+	manager.locals = locals
+	serverProfile := profile.Profile{ID: "server"}
+	if err := manager.Restore(t.Context(), serverProfile, session); err != nil {
+		t.Fatal(err)
+	}
+	task.State = "stopped"
+	client.tasks = []remote.PortForwardTask{task}
+	if err := manager.Restore(t.Context(), serverProfile, session); err != nil {
+		t.Fatal(err)
+	}
+	items := manager.List("server")
+	if len(items) != 1 || items[0].State != "paused" || len(locals.stopped) != 1 {
+		t.Fatalf("reconciled Port Forwards = %#v, local stops = %#v", items, locals.stopped)
+	}
+	client.mu.Lock()
+	pauseCalls := len(client.paused)
+	client.mu.Unlock()
+	if pauseCalls != 0 {
+		t.Fatalf("remote Pause calls = %d", pauseCalls)
+	}
+}
+
 func TestManagerRestoreDoesNotRehydrateDeletedPortForward(t *testing.T) {
 	now := time.Now().UTC()
 	session := remote.Session{ID: uuid.NewString(), Namespace: "development", State: portForwardSessionActive}

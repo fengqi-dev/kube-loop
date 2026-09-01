@@ -25,6 +25,7 @@ const (
 	controlPlaneIDLabel = "traffic.kubeloop.io/control-plane-id"
 	taskIDLabel         = "traffic.kubeloop.io/task-id"
 	sessionIDLabel      = "traffic.kubeloop.io/session-id"
+	userIDLabel         = "traffic.kubeloop.io/user-id"
 	defaultPoll         = 100 * time.Millisecond
 )
 

@@ -119,6 +119,12 @@ func applySessionCoreAuthorization(
 		result.ResourceName = parts[1]
 		result.Operation = operationList
 	}
+	if len(parts) == 4 && parts[0] == resourceSessions &&
+		parts[2] == "traffic-bindings" && request.Method == http.MethodDelete {
+		result.ResourceKind = "traffic-bindings"
+		result.ResourceName = parts[3]
+		result.Operation = operationDelete
+	}
 	if len(parts) >= 3 && parts[0] == resourceSessions && parts[2] == "exec" {
 		result.ResourceKind = "pod-exec"
 		result.ResourceName = parts[1]

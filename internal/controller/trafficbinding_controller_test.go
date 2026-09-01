@@ -294,6 +294,87 @@ var _ = Describe("TrafficBinding Controller", func() {
 		)).To(Satisfy(apierrors.IsNotFound))
 	})
 
+	It("keeps a paused Exchange restored across Session metadata changes and deletion retries", func(ctx SpecContext) {
+		service := &corev1.Service{
+			Name: "paused-exchange-service", Namespace: testNamespace,
+			Spec: corev1.ServiceSpec{
+				Selector: map[string]string{"app": "paused-exchange"},
+				Ports:    []corev1.ServicePort{{Name: "http", Port: 8080, Protocol: corev1.ProtocolTCP}},
+			},
+		}
+		Expect(k8sClient.Create(ctx, service)).To(Succeed())
+		DeferCleanup(func() { _ = k8sClient.Delete(context.Background(), service) })
+
+		binding := interceptBinding(
+			"paused-exchange-binding",
+			service.Name,
+			trafficv1alpha1.TrafficBindingModeExchange,
+		)
+		Expect(k8sClient.Create(ctx, binding)).To(Succeed())
+		DeferCleanup(deleteBinding, binding.Name)
+		reconcileSuccessfully(ctx, reconciler, binding.Name, 4)
+
+		stopping := getBinding(ctx, binding.Name)
+		stopping.Spec.DesiredState = trafficv1alpha1.TrafficBindingDesiredStatePaused
+		Expect(k8sClient.Update(ctx, stopping)).To(Succeed())
+		reconcileSuccessfully(ctx, reconciler, binding.Name, 2)
+		paused := getBinding(ctx, binding.Name)
+		Expect(paused.Status.Phase).To(Equal(trafficv1alpha1.TrafficBindingPhasePaused))
+		Expect(paused.Status.Snapshot).To(BeNil())
+
+		restoredService := &corev1.Service{}
+		Expect(k8sClient.Get(ctx, objectKey(service.Name), restoredService)).To(Succeed())
+		Expect(restoredService.Spec.Selector).To(Equal(map[string]string{"app": "paused-exchange"}))
+		Expect(restoredService.Annotations).NotTo(HaveKey(bindingUIDAnnotation))
+
+		paused.Spec.SessionGeneration++
+		Expect(k8sClient.Update(ctx, paused)).To(Succeed())
+		reconcileSuccessfully(ctx, reconciler, binding.Name, 1)
+		refreshed := getBinding(ctx, binding.Name)
+		Expect(refreshed.Status.Phase).To(Equal(trafficv1alpha1.TrafficBindingPhasePaused))
+		Expect(refreshed.Status.ObservedGeneration).To(Equal(refreshed.Generation))
+
+		// Simulate a deletion retry after an earlier reconciler moved a restored
+		// paused binding into Restoring and then restarted.
+		refreshed.Status.Phase = trafficv1alpha1.TrafficBindingPhaseRestoring
+		Expect(k8sClient.Status().Update(ctx, refreshed)).To(Succeed())
+		Expect(k8sClient.Delete(ctx, refreshed)).To(Succeed())
+		reconcileSuccessfully(ctx, reconciler, binding.Name, 2)
+		Expect(k8sClient.Get(
+			ctx,
+			objectKey(binding.Name),
+			&trafficv1alpha1.TrafficBinding{},
+		)).To(Satisfy(apierrors.IsNotFound))
+	})
+
+	It("retains cleanup protection when a missing snapshot Service is still intercepted", func(ctx SpecContext) {
+		service := &corev1.Service{
+			Name: "unsafe-missing-snapshot-service", Namespace: testNamespace,
+			Spec: corev1.ServiceSpec{
+				Ports: []corev1.ServicePort{{Name: "http", Port: 8080, Protocol: corev1.ProtocolTCP}},
+			},
+		}
+		Expect(k8sClient.Create(ctx, service)).To(Succeed())
+		DeferCleanup(func() { _ = k8sClient.Delete(context.Background(), service) })
+		binding := interceptBinding(
+			"unsafe-missing-snapshot-binding",
+			service.Name,
+			trafficv1alpha1.TrafficBindingModeExchange,
+		)
+		Expect(k8sClient.Create(ctx, binding)).To(Succeed())
+		DeferCleanup(deleteBinding, binding.Name)
+		binding = getBinding(ctx, binding.Name)
+		binding.Status.ServiceName = service.Name
+		applyBindingAnnotations(service, binding)
+		Expect(k8sClient.Update(ctx, service)).To(Succeed())
+
+		err := reconciler.cleanup(ctx, binding)
+		Expect(err).To(MatchError(ContainSubstring("is still intercepted")))
+		currentService := &corev1.Service{}
+		Expect(k8sClient.Get(ctx, objectKey(service.Name), currentService)).To(Succeed())
+		Expect(ownedByBinding(currentService, binding)).To(BeTrue())
+	})
+
 	It("pauses, survives an Operator restart and activates again", func(ctx SpecContext) {
 		binding := previewBinding("restart-preview-binding", "restart-preview-service")
 		Expect(k8sClient.Create(ctx, binding)).To(Succeed())

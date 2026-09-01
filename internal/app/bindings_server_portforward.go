@@ -2,6 +2,8 @@
 package app
 
 import (
+	"errors"
+
 	clientportforward "github.com/fengqi-dev/kube-loop/internal/client/portforward"
 )
 
@@ -25,9 +27,13 @@ func (a *App) ResumeServerPortForward(profileID, taskID string) (clientportforwa
 }
 
 func (a *App) DeleteServerPortForward(profileID, taskID string) error {
-	return deleteManagedServerTask(
+	err := deleteManagedServerTask(
 		a, a.remoteForwards, a.remoteForwards != nil, "Port Forward is unavailable", profileID, taskID,
 	)
+	if errors.Is(err, clientportforward.ErrNotManagedLocally) {
+		return a.DeleteServerTrafficBinding(profileID, taskID)
+	}
+	return err
 }
 
 func (a *App) ListServerPortForwards(profileID string) ([]clientportforward.Info, error) {

@@ -57,17 +57,33 @@ func (manager *Manager) EnsureSession(
 			name,
 		)
 	}
+	if existing.Labels[userIDLabel] != desired.Spec.IdentityID {
+		before := existing.DeepCopy()
+		if existing.Labels == nil {
+			existing.Labels = make(map[string]string, 1)
+		}
+		existing.Labels[userIDLabel] = desired.Spec.IdentityID
+		if err := manager.client.Patch(ctx, existing, client.MergeFrom(before)); err != nil {
+			return nil, false, fmt.Errorf(
+				"label TrafficBinding Session %s/%s: %w",
+				desired.Namespace,
+				name,
+				err,
+			)
+		}
+	}
 	return existing, false, nil
 }
 
 func (manager *Manager) setLabels(binding *trafficv1alpha1.TrafficBinding) {
 	if binding.Labels == nil {
-		binding.Labels = make(map[string]string, 4)
+		binding.Labels = make(map[string]string, 5)
 	}
 	binding.Labels[managedByLabel] = managedByValue
 	binding.Labels[controlPlaneIDLabel] = manager.controlPlaneID
 	binding.Labels[taskIDLabel] = binding.Spec.TaskID
 	binding.Labels[sessionIDLabel] = binding.Spec.SessionID
+	binding.Labels[userIDLabel] = binding.Spec.IdentityID
 }
 
 func (manager *Manager) GetSession(

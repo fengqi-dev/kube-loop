@@ -56,6 +56,32 @@ func (r *TrafficBindingReconciler) restoreService(
 	return nil
 }
 
+func (r *TrafficBindingReconciler) cleanupInterceptWithoutSnapshot(
+	ctx context.Context,
+	binding *trafficv1alpha1.TrafficBinding,
+) error {
+	if binding.Status.ServiceName == "" {
+		return nil
+	}
+	service := &corev1.Service{}
+	key := types.NamespacedName{Namespace: binding.Namespace, Name: binding.Status.ServiceName}
+	if err := r.Get(ctx, key, service); apierrors.IsNotFound(err) {
+		return r.deleteManagedSlice(ctx, binding)
+	} else if err != nil {
+		return err
+	}
+	annotations := service.GetAnnotations()
+	if annotations[bindingNameAnnotation] == binding.Name ||
+		annotations[bindingUIDAnnotation] == string(binding.UID) {
+		return permanentf(
+			"rollback snapshot is missing while Service %s/%s is still intercepted",
+			key.Namespace,
+			key.Name,
+		)
+	}
+	return r.deleteManagedSlice(ctx, binding)
+}
+
 func (r *TrafficBindingReconciler) deleteManagedSlice(
 	ctx context.Context,
 	binding *trafficv1alpha1.TrafficBinding,

@@ -62,12 +62,13 @@ type ExecEndpoints struct {
 }
 
 type SessionEndpoints struct {
-	Create              EndpointFunc
-	Get                 EndpointFunc
-	Heartbeat           EndpointFunc
-	Sync                EndpointFunc
-	ListTrafficBindings EndpointFunc
-	Disconnect          EndpointFunc
+	Create               EndpointFunc
+	Get                  EndpointFunc
+	Heartbeat            EndpointFunc
+	Sync                 EndpointFunc
+	ListTrafficBindings  EndpointFunc
+	DeleteTrafficBinding EndpointFunc
+	Disconnect           EndpointFunc
 }
 
 type KubernetesEndpoints struct {

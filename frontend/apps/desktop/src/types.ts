@@ -312,6 +312,8 @@ export interface ServerTrafficBindingPort {
   name?: string;
   targetPort: number;
   relayPort?: number;
+  localHost?: string;
+  localPort?: number;
   protocol: string;
 }
 
@@ -329,6 +331,7 @@ export interface ServerTrafficBindingSession {
   ports: ServerTrafficBindingPort[];
   serviceName?: string;
   serviceClusterIp?: string;
+  dialAddress?: string;
   createdAt: string;
 }
 

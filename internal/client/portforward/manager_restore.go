@@ -11,8 +11,8 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/protocol/remotetask"
 )
 
-// Restore repopulates locally resumable Port Forward sessions from the
-// TrafficBindings owned by the active remote Session.
+// Restore reconciles local listeners toward the state projected from
+// TrafficBinding CRDs. It never changes the remote desired state.
 func (manager *Manager) Restore(
 	ctx context.Context, serverProfile profile.Profile, session remote.Session,
 ) error {
@@ -27,19 +27,51 @@ func (manager *Manager) Restore(
 		return err
 	}
 	manager.mu.Lock()
-	defer manager.mu.Unlock()
 	for id, entry := range manager.active {
 		if entry.profile.ID == serverProfile.ID && entry.session.ID != session.ID {
+			if entry.localID != "" {
+				_ = manager.locals.Stop(entry.localID)
+			}
 			delete(manager.active, id)
 		}
 	}
+	manager.mu.Unlock()
 	for _, task := range tasks {
-		_, wasDeleted := manager.deleted[task.ID]
-		if _, exists := manager.active[task.ID]; exists || wasDeleted || task.LocalPort == 0 ||
-			(task.State != remotetask.Stopped && task.State != remotetask.Pending) {
+		if task.LocalPort == 0 ||
+			(task.State != remotetask.Stopped && task.State != remotetask.Pending &&
+				task.State != remotetask.Running) {
 			continue
 		}
-		manager.active[task.ID] = &activeForward{
+		manager.mu.Lock()
+		_, wasDeleted := manager.deleted[task.ID]
+		entry := manager.active[task.ID]
+		if wasDeleted {
+			manager.mu.Unlock()
+			continue
+		}
+		if entry != nil {
+			entry.profile, entry.session, entry.task = serverProfile, session, task
+			if task.State == remotetask.Running && entry.localID == "" {
+				manager.mu.Unlock()
+				if _, err := manager.startLocal(ctx, entry, task, false); err != nil {
+					return err
+				}
+				continue
+			}
+			if task.State != remotetask.Running && entry.localID != "" {
+				localID := entry.localID
+				entry.localID = ""
+				entry.info.State = portForwardStatePaused
+				manager.mu.Unlock()
+				if err := manager.locals.Stop(localID); err != nil {
+					return err
+				}
+				continue
+			}
+			manager.mu.Unlock()
+			continue
+		}
+		entry = &activeForward{
 			profile: serverProfile,
 			session: session,
 			task:    task,
@@ -50,6 +82,18 @@ func (manager *Manager) Restore(
 				Address:     net.JoinHostPort("127.0.0.1", strconv.Itoa(int(task.LocalPort))),
 				DialAddress: task.DialAddress, State: portForwardStatePaused,
 			},
+		}
+		manager.active[task.ID] = entry
+		manager.mu.Unlock()
+		if task.State == remotetask.Running {
+			if _, err := manager.startLocal(ctx, entry, task, false); err != nil {
+				manager.mu.Lock()
+				if manager.active[task.ID] == entry {
+					delete(manager.active, task.ID)
+				}
+				manager.mu.Unlock()
+				return err
+			}
 		}
 	}
 	return nil

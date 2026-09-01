@@ -2,6 +2,8 @@
 package app
 
 import (
+	"errors"
+
 	clientmirror "github.com/fengqi-dev/kube-loop/internal/client/mirror"
 )
 
@@ -25,9 +27,13 @@ func (a *App) ResumeServerMirror(profileID, taskID string) (clientmirror.Info, e
 }
 
 func (a *App) DeleteServerMirror(profileID, taskID string) error {
-	return deleteManagedServerTask(
+	err := deleteManagedServerTask(
 		a, a.remoteMirrors, a.remoteMirrors != nil, "Mirror is unavailable", profileID, taskID,
 	)
+	if errors.Is(err, clientmirror.ErrNotManagedLocally) {
+		return a.DeleteServerTrafficBinding(profileID, taskID)
+	}
+	return err
 }
 
 func (a *App) ListServerMirrors(profileID string) ([]clientmirror.Info, error) {

@@ -33,7 +33,10 @@ type TrafficStreamOpener interface {
 	OpenTrafficStream(context.Context, string, string, string) (*trafficstream.FrameConn, error)
 }
 
-var ErrClosed = errors.New("exchange manager is closed")
+var (
+	ErrClosed            = errors.New("exchange manager is closed")
+	ErrNotManagedLocally = errors.New("exchange is not managed locally")
+)
 
 const (
 	exchangeStateRunning = "running"
@@ -194,6 +197,33 @@ func isClosedTrafficStream(err error) bool {
 		errors.Is(err, net.ErrClosed)
 }
 
+func (manager *Manager) stopLocal(ctx context.Context, entry *activeExchange) error {
+	manager.mu.Lock()
+	if manager.active[entry.task.ID] != entry || entry.info.State != exchangeStateRunning {
+		manager.mu.Unlock()
+		return nil
+	}
+	entry.info.State = "pausing"
+	manager.mu.Unlock()
+	streamErr := entry.relay.Stop(ctx)
+	if isClosedTrafficStream(streamErr) {
+		streamErr = nil
+	}
+	entry.cancel()
+	select {
+	case <-entry.done:
+	case <-ctx.Done():
+		streamErr = errors.Join(streamErr, ctx.Err())
+	}
+	manager.mu.Lock()
+	if manager.active[entry.task.ID] == entry {
+		entry.info.State = exchangeStatePaused
+		entry.relay, entry.cancel, entry.done = nil, nil, nil
+	}
+	manager.mu.Unlock()
+	return streamErr
+}
+
 func (manager *Manager) Resume(ctx context.Context, profileID, taskID string) (Info, error) {
 	if ctx == nil {
 		return Info{}, errors.New("exchange resume context is required")
@@ -211,20 +241,35 @@ func (manager *Manager) Resume(ctx context.Context, profileID, taskID string) (I
 	if err != nil {
 		return Info{}, err
 	}
+	return manager.startLocal(ctx, paused, task, true)
+}
+
+func (manager *Manager) startLocal(
+	ctx context.Context,
+	paused *activeExchange,
+	task remote.ExchangeTask,
+	compensateRemote bool,
+) (Info, error) {
 	connection, err := manager.streams.OpenTrafficStream(ctx, paused.profile.ID, tunnel.TrafficModeExchange, task.ID)
 	if err != nil || connection == nil {
 		if err == nil {
 			err = errors.New("data Plane returned an empty Exchange stream")
 		}
-		_, pauseErr := manager.client.StopExchange(ctx, paused.profile, paused.session, task.ID)
-		return Info{}, errors.Join(err, pauseErr)
+		if !compensateRemote {
+			return Info{}, err
+		}
+		_, remoteErr := manager.client.StopExchange(ctx, paused.profile, paused.session, task.ID)
+		return Info{}, errors.Join(err, remoteErr)
 	}
 	finiteTargets := append([]LocalTarget(nil), paused.info.Targets...)
 	relay := reverserelay.New(connection, finiteTargets, manager.dial)
 	if err := relay.ReadReady(ctx); err != nil {
 		_ = connection.Close()
-		_, pauseErr := manager.client.StopExchange(ctx, paused.profile, paused.session, task.ID)
-		return Info{}, errors.Join(err, pauseErr)
+		if !compensateRemote {
+			return Info{}, err
+		}
+		_, remoteErr := manager.client.StopExchange(ctx, paused.profile, paused.session, task.ID)
+		return Info{}, errors.Join(err, remoteErr)
 	}
 	runContext, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	entry := &activeExchange{
@@ -233,7 +278,7 @@ func (manager *Manager) Resume(ctx context.Context, profileID, taskID string) (I
 	}
 	entry.info.State = exchangeStateRunning
 	manager.mu.Lock()
-	manager.active[taskID] = entry
+	manager.active[task.ID] = entry
 	manager.mu.Unlock()
 	go manager.run(runContext, entry)
 	return entry.info, nil
@@ -247,7 +292,7 @@ func (manager *Manager) Delete(ctx context.Context, profileID, taskID string) er
 	entry := manager.active[taskID]
 	manager.mu.Unlock()
 	if entry == nil || entry.profile.ID != profileID {
-		return errors.New("exchange is not managed locally")
+		return ErrNotManagedLocally
 	}
 	var pauseErr error
 	if entry.info.State == exchangeStateRunning {

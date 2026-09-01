@@ -9,7 +9,8 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/protocol/remotetask"
 )
 
-// Restore repopulates locally resumable tasks from the active remote Session.
+// Restore reconciles the local relay toward TrafficBinding state without
+// writing remote desired state.
 func (manager *Manager) Restore(
 	ctx context.Context, serverProfile profile.Profile, session remote.Session,
 ) error {
@@ -24,30 +25,66 @@ func (manager *Manager) Restore(
 		return err
 	}
 	manager.mu.Lock()
-	defer manager.mu.Unlock()
 	for id, entry := range manager.active {
 		if entry.profile.ID == serverProfile.ID && entry.session.ID != session.ID {
+			if entry.cancel != nil {
+				entry.cancel()
+			}
 			delete(manager.active, id)
 		}
 	}
+	manager.mu.Unlock()
 	for _, task := range tasks {
+		if (task.State != remotetask.Stopped && task.State != remotetask.Pending &&
+			task.State != remotetask.Running) || len(task.LocalTargets) == 0 {
+			continue
+		}
+		manager.mu.Lock()
 		_, wasDeleted := manager.deleted[task.ID]
-		if _, exists := manager.active[task.ID]; exists || wasDeleted ||
-			(task.State != remotetask.Stopped && task.State != remotetask.Pending) ||
-			len(task.LocalTargets) == 0 {
+		entry := manager.active[task.ID]
+		if wasDeleted {
+			manager.mu.Unlock()
+			continue
+		}
+		if entry != nil {
+			entry.profile, entry.session, entry.task = serverProfile, session, task
+			localState := entry.info.State
+			manager.mu.Unlock()
+			if task.State == remotetask.Running && localState == mirrorStatePaused {
+				if _, err := manager.startLocal(ctx, entry, task, false); err != nil {
+					return err
+				}
+			} else if task.State != remotetask.Running && localState == mirrorStateRunning {
+				if err := manager.stopLocal(ctx, entry); err != nil {
+					return err
+				}
+			}
 			continue
 		}
 		targets, _, normalizeErr := normalizeTargets(mirrorTargets(task.LocalTargets))
 		if normalizeErr != nil || matchTaskTargets(task, targets) != nil {
+			manager.mu.Unlock()
 			continue
 		}
-		manager.active[task.ID] = &activeMirror{
+		entry = &activeMirror{
 			profile: serverProfile, session: session, task: task,
 			info: Info{
 				ID: task.ID, ProfileID: serverProfile.ID, SessionID: session.ID,
 				Namespace: session.Namespace, Service: task.Service, ClusterIP: task.ClusterIP,
 				State: mirrorStatePaused, Targets: targets,
 			},
+		}
+		manager.active[task.ID] = entry
+		manager.mu.Unlock()
+		if task.State == remotetask.Running {
+			if _, err := manager.startLocal(ctx, entry, task, false); err != nil {
+				manager.mu.Lock()
+				if manager.active[task.ID] == entry {
+					delete(manager.active, task.ID)
+				}
+				manager.mu.Unlock()
+				return err
+			}
 		}
 	}
 	return nil

@@ -26,7 +26,10 @@ type TrafficStreamOpener interface {
 	OpenTrafficStream(context.Context, string, string, string) (*trafficstream.FrameConn, error)
 }
 
-var ErrClosed = errors.New("mirror manager is closed")
+var (
+	ErrClosed            = errors.New("mirror manager is closed")
+	ErrNotManagedLocally = errors.New("mirror is not managed locally")
+)
 
 const (
 	mirrorStateRunning = "running"
@@ -187,6 +190,33 @@ func isClosedTrafficStream(err error) bool {
 		errors.Is(err, net.ErrClosed)
 }
 
+func (manager *Manager) stopLocal(ctx context.Context, entry *activeMirror) error {
+	manager.mu.Lock()
+	if manager.active[entry.task.ID] != entry || entry.info.State != mirrorStateRunning {
+		manager.mu.Unlock()
+		return nil
+	}
+	entry.info.State = "pausing"
+	manager.mu.Unlock()
+	streamErr := entry.relay.stop(ctx)
+	if isClosedTrafficStream(streamErr) {
+		streamErr = nil
+	}
+	entry.cancel()
+	select {
+	case <-entry.done:
+	case <-ctx.Done():
+		streamErr = errors.Join(streamErr, ctx.Err())
+	}
+	manager.mu.Lock()
+	if manager.active[entry.task.ID] == entry {
+		entry.info.State = mirrorStatePaused
+		entry.relay, entry.cancel, entry.done = nil, nil, nil
+	}
+	manager.mu.Unlock()
+	return streamErr
+}
+
 func (manager *Manager) Resume(ctx context.Context, profileID, taskID string) (Info, error) {
 	if ctx == nil {
 		return Info{}, errors.New("mirror resume context is required")
@@ -204,20 +234,35 @@ func (manager *Manager) Resume(ctx context.Context, profileID, taskID string) (I
 	if err != nil {
 		return Info{}, err
 	}
+	return manager.startLocal(ctx, paused, task, true)
+}
+
+func (manager *Manager) startLocal(
+	ctx context.Context,
+	paused *activeMirror,
+	task remote.MirrorTask,
+	compensateRemote bool,
+) (Info, error) {
 	connection, err := manager.streams.OpenTrafficStream(ctx, paused.profile.ID, tunnel.TrafficModeMirror, task.ID)
 	if err != nil || connection == nil {
 		if err == nil {
 			err = errors.New("data Plane returned an empty Mirror stream")
 		}
-		_, pauseErr := manager.client.StopMirror(ctx, paused.profile, paused.session, task.ID)
-		return Info{}, errors.Join(err, pauseErr)
+		if !compensateRemote {
+			return Info{}, err
+		}
+		_, remoteErr := manager.client.StopMirror(ctx, paused.profile, paused.session, task.ID)
+		return Info{}, errors.Join(err, remoteErr)
 	}
 	targets := append([]LocalTarget(nil), paused.info.Targets...)
 	relay := newLocalRelay(connection, targets, manager.dial, manager.config)
 	if err := relay.readReady(ctx); err != nil {
 		_ = connection.Close()
-		_, pauseErr := manager.client.StopMirror(ctx, paused.profile, paused.session, task.ID)
-		return Info{}, errors.Join(err, pauseErr)
+		if !compensateRemote {
+			return Info{}, err
+		}
+		_, remoteErr := manager.client.StopMirror(ctx, paused.profile, paused.session, task.ID)
+		return Info{}, errors.Join(err, remoteErr)
 	}
 	runContext, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	entry := &activeMirror{
@@ -226,7 +271,7 @@ func (manager *Manager) Resume(ctx context.Context, profileID, taskID string) (I
 	}
 	entry.info.State = mirrorStateRunning
 	manager.mu.Lock()
-	manager.active[taskID] = entry
+	manager.active[task.ID] = entry
 	manager.mu.Unlock()
 	go manager.run(runContext, entry)
 	return entry.info, nil
@@ -240,7 +285,7 @@ func (manager *Manager) Delete(ctx context.Context, profileID, taskID string) er
 	entry := manager.active[taskID]
 	manager.mu.Unlock()
 	if entry == nil || entry.profile.ID != profileID {
-		return errors.New("mirror is not managed locally")
+		return ErrNotManagedLocally
 	}
 	var pauseErr error
 	if entry.info.State == mirrorStateRunning {

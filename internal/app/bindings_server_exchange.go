@@ -2,6 +2,8 @@
 package app
 
 import (
+	"errors"
+
 	clientexchange "github.com/fengqi-dev/kube-loop/internal/client/exchange"
 )
 
@@ -25,9 +27,13 @@ func (a *App) ResumeServerExchange(profileID, taskID string) (clientexchange.Inf
 }
 
 func (a *App) DeleteServerExchange(profileID, taskID string) error {
-	return deleteManagedServerTask(
+	err := deleteManagedServerTask(
 		a, a.remoteExchanges, a.remoteExchanges != nil, "Exchange is unavailable", profileID, taskID,
 	)
+	if errors.Is(err, clientexchange.ErrNotManagedLocally) {
+		return a.DeleteServerTrafficBinding(profileID, taskID)
+	}
+	return err
 }
 
 func (a *App) ListServerExchanges(profileID string) ([]clientexchange.Info, error) {

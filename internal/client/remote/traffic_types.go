@@ -30,6 +30,7 @@ type TrafficBindingSession struct {
 	Ports        []TrafficBindingPort   `json:"ports"`
 	ServiceName  string                 `json:"serviceName,omitempty"`
 	ClusterIP    string                 `json:"serviceClusterIp,omitempty"`
+	DialAddress  string                 `json:"dialAddress,omitempty"`
 
 	CreatedAt time.Time `json:"createdAt" ts_type:"string"`
 }
@@ -51,6 +52,8 @@ type TrafficBindingPort struct {
 	Name       string `json:"name,omitempty"`
 	TargetPort int32  `json:"targetPort"`
 	RelayPort  *int32 `json:"relayPort,omitempty"`
+	LocalHost  string `json:"localHost,omitempty"`
+	LocalPort  *int32 `json:"localPort,omitempty"`
 	Protocol   string `json:"protocol"`
 }
 

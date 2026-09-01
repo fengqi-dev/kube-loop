@@ -53,12 +53,13 @@ func (manager *Manager) Activate(
 		Kind:       "TrafficBinding",
 	}
 	if desired.Labels == nil {
-		desired.Labels = make(map[string]string, 3)
+		desired.Labels = make(map[string]string, 5)
 	}
 	desired.Labels[managedByLabel] = managedByValue
 	desired.Labels[controlPlaneIDLabel] = manager.controlPlaneID
 	desired.Labels[taskIDLabel] = desired.Spec.TaskID
 	desired.Labels[sessionIDLabel] = desired.Spec.SessionID
+	desired.Labels[userIDLabel] = desired.Spec.IdentityID
 
 	if err := manager.client.Create(ctx, desired); err != nil {
 		if !apierrors.IsAlreadyExists(err) {
@@ -89,13 +90,15 @@ func (manager *Manager) Activate(
 			)
 		}
 		if !reflect.DeepEqual(existing.Spec, desired.Spec) ||
-			existing.Labels[sessionIDLabel] != desired.Spec.SessionID {
+			existing.Labels[sessionIDLabel] != desired.Spec.SessionID ||
+			existing.Labels[userIDLabel] != desired.Spec.IdentityID {
 			before := existing.DeepCopy()
 			existing.Spec = *desired.Spec.DeepCopy()
 			existing.Labels[managedByLabel] = managedByValue
 			existing.Labels[controlPlaneIDLabel] = manager.controlPlaneID
 			existing.Labels[taskIDLabel] = desired.Spec.TaskID
 			existing.Labels[sessionIDLabel] = desired.Spec.SessionID
+			existing.Labels[userIDLabel] = desired.Spec.IdentityID
 			if patchErr := manager.client.Patch(
 				ctx,
 				existing,

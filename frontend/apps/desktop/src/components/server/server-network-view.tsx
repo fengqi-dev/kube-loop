@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Globe2, Network, Pause, Play, RefreshCw, Trash2 } from "lucide-react";
+import { toast } from "sonner";
 import { backend } from "@/backend";
 import { ActionIconButton, exchangeIcon, mirrorIcon, portForwardIcon } from "@/components/network/action-icons";
 import { CopyableText } from "@/components/shared/copyable-text";
@@ -51,12 +52,19 @@ export function ServerNetworkView({ profileId }: { profileId: string }) {
     setLoading(true);
     try {
       const next = await backend.loadServerInventory(profileId, namespace);
-      const [nextForwards, nextExchanges, nextMirrors, nextPreviews] = await Promise.all([
+      setInventory(next);
+      const [nextForwards, nextExchanges, nextMirrors, nextPreviews] = await Promise.allSettled([
         backend.listServerPortForwards(profileId), backend.listServerExchanges(profileId),
         backend.listServerMirrors(profileId), backend.listServerPreviews(profileId),
       ]);
-      setInventory(next); setForwards(nextForwards); setExchanges(nextExchanges);
-      setMirrors(nextMirrors); setPreviews(nextPreviews); setError("");
+      if (nextForwards.status === "fulfilled") setForwards(nextForwards.value);
+      if (nextExchanges.status === "fulfilled") setExchanges(nextExchanges.value);
+      if (nextMirrors.status === "fulfilled") setMirrors(nextMirrors.value);
+      if (nextPreviews.status === "fulfilled") setPreviews(nextPreviews.value);
+      const failures = [nextForwards, nextExchanges, nextMirrors, nextPreviews]
+        .filter((result) => result.status === "rejected")
+        .map((result) => messageOf(result.reason));
+      setError(failures.join("\n"));
     } catch (reason) {
       setError(messageOf(reason));
     } finally {
@@ -100,15 +108,19 @@ export function ServerNetworkView({ profileId }: { profileId: string }) {
       if (action === "port-forward" && service) {
         const created = await backend.startServerPortForward({ profileId, kind: "service", name: service.name, protocol: protocolFor(service, remote), remotePort: remote, localPort: local });
         setForwards((current) => upsertTask(current, created));
+        toast.success("Port Forward started", { description: created.address });
       } else if (action === "exchange" && service) {
         const created = await backend.startServerExchange({ profileId, service: service.name, targets: [{ servicePort: remote, protocol: protocolFor(service, remote), localHost, localPort: local }] });
         setExchanges((current) => upsertTask(current, created));
+        toast.success("Exchange started", { description: `${service.name}:${remote} → ${localHost}:${local}` });
       } else if (action === "mirror" && service) {
         const created = await backend.startServerMirror({ profileId, service: service.name, targets: [{ servicePort: remote, protocol: protocolFor(service, remote), localHost, localPort: local }] });
         setMirrors((current) => upsertTask(current, created));
+        toast.success("Mirror started", { description: `${service.name}:${remote} → ${localHost}:${local}` });
       } else if (action === "preview" && previewName.trim()) {
         const created = await backend.startServerPreview({ profileId, namespace: inventory.namespace ?? "", name: previewName.trim(), targets: [{ servicePort: remote, protocol: previewProtocol, localHost, localPort: local }] });
         setPreviews((current) => upsertTask(current, created));
+        toast.success("Preview started", { description: `${created.namespace}/${created.name} → ${localHost}:${local}` });
       } else {
         throw new Error("Choose a Service or enter a Preview name.");
       }

@@ -1,8 +1,17 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Pause, Play, RefreshCw, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUpDown, Copy, Pause, Play, RefreshCw, Trash2 } from "lucide-react";
 import { backend } from "@/backend";
 import { ActionIconButton } from "@/components/network/action-icons";
+import {
+  sessionTargetType,
+  targetWithPorts,
+  targetTypeLabel,
+  trafficBindingDetails,
+  type SessionTargetType,
+  type TrafficEndpointPair,
+} from "@/components/sessions/session-row-model";
 import { PageShell } from "@/components/shared/page-shell";
+import { CopyableText } from "@/components/shared/copyable-text";
 import { ResourcePagination, RESOURCE_PAGE_SIZE } from "@/components/shared/resource-pagination";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -12,16 +21,24 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { useI18n } from "@/i18n";
 import type {
   RemoteInventory,
+  ServerExchangeInfo,
+  ServerMirrorInfo,
+  ServerPortForwardInfo,
+  ServerPreviewInfo,
   ServerTrafficBindingSession,
 } from "@/types";
 
 type Action = "port-forward" | "exchange" | "mirror" | "preview";
-type SessionRow = { key: string; id: string; kind: Action; target: string; detail?: string; state: string };
+type SessionRow = { key: string; id: string; kind: Action; targetType: SessionTargetType; target: string; details: TrafficEndpointPair[]; state: string; managedLocally: boolean };
 
 export function SessionsView({ profileId }: { profileId: string }) {
   const { t } = useI18n();
   const [inventory, setInventory] = useState<RemoteInventory>();
   const [sessions, setSessions] = useState<ServerTrafficBindingSession[]>([]);
+  const [portForwards, setPortForwards] = useState<ServerPortForwardInfo[]>([]);
+  const [exchanges, setExchanges] = useState<ServerExchangeInfo[]>([]);
+  const [mirrors, setMirrors] = useState<ServerMirrorInfo[]>([]);
+  const [previews, setPreviews] = useState<ServerPreviewInfo[]>([]);
   const [namespace, setNamespace] = useState("");
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
@@ -38,11 +55,24 @@ export function SessionsView({ profileId }: { profileId: string }) {
     setLoading(true);
     try {
       const next = await backend.loadServerInventory(profileId, nextNamespace);
-      const nextSessions = await backend.listServerSessions(profileId);
       setInventory(next);
       setNamespace(next.namespace ?? "");
-      setSessions(nextSessions);
-      setError("");
+      const results = await Promise.allSettled([
+        backend.listServerSessions(profileId),
+        backend.listServerPortForwards(profileId),
+        backend.listServerExchanges(profileId),
+        backend.listServerMirrors(profileId),
+        backend.listServerPreviews(profileId),
+      ]);
+      if (results[0].status === "fulfilled") setSessions(results[0].value);
+      if (results[1].status === "fulfilled") setPortForwards(results[1].value);
+      if (results[2].status === "fulfilled") setExchanges(results[2].value);
+      if (results[3].status === "fulfilled") setMirrors(results[3].value);
+      if (results[4].status === "fulfilled") setPreviews(results[4].value);
+      setError(results
+        .filter((result) => result.status === "rejected")
+        .map((result) => messageOf(result.reason))
+        .join("\n"));
     } catch (reason) {
       setError(messageOf(reason));
     } finally {
@@ -57,12 +87,27 @@ export function SessionsView({ profileId }: { profileId: string }) {
   }, [load]);
 
   const rows = useMemo(() => {
-    const list: SessionRow[] = sessions.map(sessionRow);
+    const localPortForwards = new Map(portForwards.map((item) => [item.id, item]));
+    const localIDs = new Set([
+      ...portForwards.map((item) => item.id),
+      ...exchanges.map((item) => item.id),
+      ...mirrors.map((item) => item.id),
+      ...previews.map((item) => item.id),
+    ]);
+    const list: SessionRow[] = sessions.map((item) =>
+      sessionRow(item, localPortForwards.get(item.id), localIDs.has(item.id)));
+    const remoteIDs = new Set(sessions.map((item) => item.id));
+    list.push(
+      ...portForwards.filter((item) => !remoteIDs.has(item.id)).map(portForwardRow),
+      ...exchanges.filter((item) => !remoteIDs.has(item.id)).map((item) => localTargetRow("exchange", item)),
+      ...mirrors.filter((item) => !remoteIDs.has(item.id)).map((item) => localTargetRow("mirror", item)),
+      ...previews.filter((item) => !remoteIDs.has(item.id)).map(previewRow),
+    );
     const normalized = query.trim().toLocaleLowerCase();
     return normalized
-      ? list.filter((row) => [labelFor(row.kind), row.target, row.detail, row.state].some((value) => String(value).toLocaleLowerCase().includes(normalized)))
+      ? list.filter((row) => [labelFor(row.kind), row.targetType, row.target, row.details.flatMap((detail) => [detail.local, detail.remote]).join(" "), row.state].some((value) => String(value).toLocaleLowerCase().includes(normalized)))
       : list;
-  }, [sessions, query]);
+  }, [exchanges, mirrors, portForwards, previews, sessions, query]);
 
   const pageCount = Math.max(1, Math.ceil(rows.length / RESOURCE_PAGE_SIZE));
   const visibleRows = rows.slice((page - 1) * RESOURCE_PAGE_SIZE, page * RESOURCE_PAGE_SIZE);
@@ -70,13 +115,15 @@ export function SessionsView({ profileId }: { profileId: string }) {
   useEffect(() => setPage(1), [query, namespace]);
   useEffect(() => setPage((current) => Math.min(current, pageCount)), [pageCount]);
 
-  async function mutateTask(operation: "pause" | "resume" | "delete", kind: Action, id: string) {
+  async function mutateTask(operation: "pause" | "resume" | "delete", kind: Action, id: string, managedLocally: boolean) {
     const key = `${kind}:${id}`;
     if (!profileId || busyTasks.has(key)) return;
     setBusyTasks((current) => new Set(current).add(key));
     setError("");
     try {
-      if (kind === "port-forward") {
+      if (operation === "delete" && !managedLocally) {
+        await backend.deleteServerTrafficBinding(profileId, id);
+      } else if (kind === "port-forward") {
         await mutateSession(operation, {
           pause: () => backend.pauseServerPortForward(profileId, id),
           resume: () => backend.resumeServerPortForward(profileId, id),
@@ -101,7 +148,22 @@ export function SessionsView({ profileId }: { profileId: string }) {
           delete: () => backend.deleteServerPreview(profileId, id),
         });
       }
-      setSessions(await backend.listServerSessions(profileId));
+      const results = await Promise.allSettled([
+        backend.listServerSessions(profileId),
+        backend.listServerPortForwards(profileId),
+        backend.listServerExchanges(profileId),
+        backend.listServerMirrors(profileId),
+        backend.listServerPreviews(profileId),
+      ]);
+      if (results[0].status === "fulfilled") setSessions(results[0].value);
+      if (results[1].status === "fulfilled") setPortForwards(results[1].value);
+      if (results[2].status === "fulfilled") setExchanges(results[2].value);
+      if (results[3].status === "fulfilled") setMirrors(results[3].value);
+      if (results[4].status === "fulfilled") setPreviews(results[4].value);
+      setError(results
+        .filter((result) => result.status === "rejected")
+        .map((result) => messageOf(result.reason))
+        .join("\n"));
     } catch (reason) {
       setError(messageOf(reason));
     } finally {
@@ -132,6 +194,7 @@ export function SessionsView({ profileId }: { profileId: string }) {
             <TableHeader>
               <TableRow>
                 <TableHead>Type</TableHead>
+                <TableHead>Target Type</TableHead>
                 <TableHead>Target</TableHead>
                 <TableHead>Address / Target</TableHead>
                 <TableHead>State</TableHead>
@@ -140,11 +203,11 @@ export function SessionsView({ profileId }: { profileId: string }) {
             </TableHeader>
             <TableBody>
               {loading ? (
-                <TableRow className="hover:bg-transparent"><TableCell colSpan={5} className="h-32 text-center text-[12px] text-muted-foreground"><Spinner className="mx-auto" /></TableCell></TableRow>
+                <TableRow className="hover:bg-transparent"><TableCell colSpan={6} className="h-32 text-center text-[12px] text-muted-foreground"><Spinner className="mx-auto" /></TableCell></TableRow>
               ) : rows.length === 0 ? (
-                <TableRow className="hover:bg-transparent"><TableCell colSpan={5} className="h-32 text-center text-[12px] text-muted-foreground">No active sessions.</TableCell></TableRow>
+                <TableRow className="hover:bg-transparent"><TableCell colSpan={6} className="h-32 text-center text-[12px] text-muted-foreground">No active sessions.</TableCell></TableRow>
               ) : (
-                visibleRows.map((row) => <OperationRow key={row.key} kind={row.kind} id={row.id} target={row.target} detail={row.detail} state={row.state} busy={busyTasks.has(row.key)} onMutate={mutateTask} />)
+                visibleRows.map((row) => <OperationRow key={row.key} kind={row.kind} id={row.id} targetType={row.targetType} target={row.target} details={row.details} state={row.state} managedLocally={row.managedLocally} busy={busyTasks.has(row.key)} onMutate={mutateTask} />)
               )}
             </TableBody>
           </Table>
@@ -155,41 +218,128 @@ export function SessionsView({ profileId }: { profileId: string }) {
   );
 }
 
-function OperationRow({ kind, id, target, detail, state, busy, onMutate }: { kind: Action; id: string; target: string; detail?: string; state: string; busy: boolean; onMutate(operation: "pause" | "resume" | "delete", kind: Action, id: string): void }) {
+function OperationRow({ kind, id, targetType, target, details, state, managedLocally, busy, onMutate }: { kind: Action; id: string; targetType: SessionTargetType; target: string; details: TrafficEndpointPair[]; state: string; managedLocally: boolean; busy: boolean; onMutate(operation: "pause" | "resume" | "delete", kind: Action, id: string, managedLocally: boolean): void }) {
   const paused = state === "paused" || state === "stopped";
   return (
     <TableRow>
       <TableCell><Badge variant="outline">{labelFor(kind)}</Badge></TableCell>
+      <TableCell>{targetType}</TableCell>
       <TableCell>{target}</TableCell>
-      <TableCell className="font-mono text-xs">{detail || "—"}</TableCell>
+      <TableCell className="font-mono text-xs">
+        {details.length > 0
+            ? <div className="space-y-3 whitespace-normal break-all">{details.map((detail, index) => (
+              <div key={`${detail.local}:${detail.remote}:${index}`} className="inline-grid max-w-full justify-items-start">
+                <Endpoint value={detail.flow === "remote-to-local" ? detail.remote : detail.local} />
+                {detail.flow === "remote-to-local"
+                  ? <ArrowDown className="my-0.5 size-3.5 justify-self-center text-muted-foreground" aria-label="Cluster to local traffic" />
+                  : <ArrowUpDown className="my-0.5 size-3.5 justify-self-center text-muted-foreground" aria-label="Bidirectional traffic" />}
+                <Endpoint value={detail.flow === "remote-to-local" ? detail.local : detail.remote} emphasized />
+              </div>
+            ))}</div>
+          : "—"}
+      </TableCell>
       <TableCell>{state}</TableCell>
       <TableCell>
         <div className="flex justify-end gap-1">
           {paused ? (
-            <ActionIconButton label="Resume" icon={Play} disabled={busy} onClick={() => onMutate("resume", kind, id)} />
+            <ActionIconButton label="Resume" icon={Play} disabled={busy} onClick={() => onMutate("resume", kind, id, managedLocally)} />
           ) : (
-            <ActionIconButton label="Pause" icon={Pause} disabled={busy} onClick={() => onMutate("pause", kind, id)} />
+            <ActionIconButton label="Pause" icon={Pause} disabled={busy} onClick={() => onMutate("pause", kind, id, managedLocally)} />
           )}
-          <ActionIconButton label="Delete" icon={Trash2} disabled={busy} onClick={() => onMutate("delete", kind, id)} />
+          <ActionIconButton label="Delete" icon={Trash2} disabled={busy} onClick={() => onMutate("delete", kind, id, managedLocally)} />
         </div>
       </TableCell>
     </TableRow>
   );
 }
 
-function sessionRow(item: ServerTrafficBindingSession): SessionRow {
+function Endpoint({ value, emphasized = false }: { value: string; emphasized?: boolean }) {
+  if (value === "—") return <span className={emphasized ? "font-semibold text-foreground" : undefined}>—</span>;
+  return (
+    <CopyableText
+      value={value}
+      label={<span className="inline-flex items-center gap-1"><span>{value}</span><Copy className="size-3 text-muted-foreground" aria-hidden="true" /></span>}
+      className={emphasized ? "font-semibold text-foreground" : undefined}
+      titleKey="network.copyAddress"
+      successKey="network.addressCopied"
+      failKey="network.addressCopyFailed"
+    />
+  );
+}
+
+function sessionRow(item: ServerTrafficBindingSession, localPortForward: ServerPortForwardInfo | undefined, managedLocally: boolean): SessionRow {
   const kind = actionForMode(item.mode);
-  const port = item.ports[0];
-  const target = item.mode === "Preview"
-    ? `${item.namespace}/${item.preview?.serviceName ?? item.serviceName ?? item.name}`
+  const targetName = item.mode === "Preview"
+    ? item.preview?.serviceName ?? item.serviceName ?? item.name
     : item.mode === "PortForward"
-      ? `${item.target?.kind?.toLocaleLowerCase() ?? "target"}/${item.target?.name ?? "—"}:${port?.targetPort ?? "—"}`
+      ? item.target?.name ?? "—"
       : item.target?.name ?? item.serviceName ?? item.name;
-  const mappings = item.ports.map((entry) => entry.relayPort
-    ? `${entry.targetPort} ↔ ${entry.relayPort}/${entry.protocol.toUpperCase()}`
-    : `${entry.targetPort}/${entry.protocol.toUpperCase()}`).join(", ");
-  const detail = [item.serviceClusterIp, item.relay?.address, mappings].filter(Boolean).join(" · ");
-  return { key: `${kind}:${item.id}`, id: item.id, kind, target, detail, state: stateForBinding(item) };
+  return {
+    key: `${kind}:${item.id}`,
+    id: item.id,
+    kind,
+    targetType: sessionTargetType(item, localPortForward),
+    target: targetWithPorts(targetName, item.ports.map((port) => port.targetPort)),
+    details: trafficBindingDetails(item, localPortForward),
+    state: stateForBinding(item),
+    managedLocally,
+  };
+}
+
+function portForwardRow(item: ServerPortForwardInfo): SessionRow {
+  return {
+    key: `port-forward:${item.id}`,
+    id: item.id,
+    kind: "port-forward",
+    targetType: targetTypeLabel(item.kind),
+    target: targetWithPorts(`${item.namespace}/${item.name}`, [item.remotePort]),
+    details: [{ local: item.address, remote: item.dialAddress, flow: "bidirectional" }],
+    state: item.state,
+    managedLocally: true,
+  };
+}
+
+function localTargetRow(kind: "exchange" | "mirror", item: ServerExchangeInfo | ServerMirrorInfo): SessionRow {
+  return {
+    key: `${kind}:${item.id}`,
+    id: item.id,
+    kind,
+    targetType: "Service",
+    target: targetWithPorts(`${item.namespace}/${item.service}`, item.targets.map((target) => target.servicePort)),
+    details: localTargetDetails(item.clusterIp, item.targets, kind === "mirror"),
+    state: item.state,
+    managedLocally: true,
+  };
+}
+
+function previewRow(item: ServerPreviewInfo): SessionRow {
+  return {
+    key: `preview:${item.id}`,
+    id: item.id,
+    kind: "preview",
+    targetType: "Service",
+    target: targetWithPorts(item.name, item.targets.map((target) => target.servicePort)),
+    details: localTargetDetails(item.clusterIp, item.targets, false),
+    state: item.state,
+    managedLocally: true,
+  };
+}
+
+function localTargetDetails(
+  clusterIp: string,
+  targets: Array<{ servicePort: number; protocol: string; localHost: string; localPort: number }>,
+  oneWay: boolean,
+): TrafficEndpointPair[] {
+  return targets.flatMap((target) => {
+    const cluster = formatHostPort(clusterIp, target.servicePort);
+    const local = formatHostPort(target.localHost, target.localPort);
+    return [{ local, remote: cluster, flow: oneWay ? "remote-to-local" : "bidirectional" }];
+  });
+}
+
+function formatHostPort(host: string, port: number) {
+  const formattedHost = host.includes(":") && !host.startsWith("[") ? `[${host}]` : host;
+  return `${formattedHost || "—"}:${port}`;
 }
 
 function actionForMode(mode: ServerTrafficBindingSession["mode"]): Action {

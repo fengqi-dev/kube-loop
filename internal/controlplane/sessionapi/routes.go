@@ -14,12 +14,13 @@ func NewRoutes(service *Service) *Routes { return &Routes{Service: service} }
 
 func (handler *Routes) Endpoints() controlplane.SessionEndpoints {
 	return controlplane.SessionEndpoints{
-		Create:              handler.withNamespace(handler.create),
-		Get:                 handler.withSession(handler.get),
-		Heartbeat:           handler.withSession(handler.heartbeat),
-		Sync:                handler.withSession(handler.syncTrafficBindings),
-		ListTrafficBindings: handler.withSession(handler.listTrafficBindings),
-		Disconnect:          handler.withSession(handler.disconnect),
+		Create:               handler.withNamespace(handler.create),
+		Get:                  handler.withSession(handler.get),
+		Heartbeat:            handler.withSession(handler.heartbeat),
+		Sync:                 handler.withSession(handler.syncTrafficBindings),
+		ListTrafficBindings:  handler.withSession(handler.listTrafficBindings),
+		DeleteTrafficBinding: handler.withSession(handler.deleteTrafficBinding),
+		Disconnect:           handler.withSession(handler.disconnect),
 	}
 }
 

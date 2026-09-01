@@ -99,6 +99,10 @@ func newCapabilityInventoryServer(t *testing.T) (*httptest.Server, *int) {
 		if request.Header.Get("Authorization") != "Bearer access-token" {
 			t.Fatalf("Authorization = %q", request.Header.Get("Authorization"))
 		}
+		if strings.HasSuffix(request.URL.Path, "/sync") {
+			http.Error(writer, "gateway request timed out", http.StatusGatewayTimeout)
+			return
+		}
 		switch request.URL.Path {
 		case "/api/version":
 			_, _ = writer.Write([]byte(`{"gitVersion":"v1.31.2","gatewayVersion":"v2-test"}`))

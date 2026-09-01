@@ -31,7 +31,10 @@ type DataPlane interface {
 	Dialer(string) (traffic.Dialer, error)
 }
 
-var ErrClosed = errors.New("port Forward manager is closed")
+var (
+	ErrClosed            = errors.New("port Forward manager is closed")
+	ErrNotManagedLocally = errors.New("port Forward is not managed locally")
+)
 
 const (
 	portForwardStatePaused   = "paused"
@@ -215,6 +218,22 @@ func (manager *Manager) Resume(ctx context.Context, profileID, taskID string) (I
 	if err != nil {
 		return Info{}, err
 	}
+	info, err := manager.startLocal(ctx, entry, task, true)
+	if err != nil {
+		return Info{}, err
+	}
+	resumed = true
+	return info, nil
+}
+
+// startLocal materializes an already-running TrafficBinding as a local
+// listener. Reconciliation leaves the CRD untouched on failure so it can retry.
+func (manager *Manager) startLocal(
+	ctx context.Context,
+	entry *activeForward,
+	task remote.PortForwardTask,
+	compensateRemote bool,
+) (Info, error) {
 	dialer, err := manager.dataPlanes.Dialer(entry.profile.ID)
 	if err != nil {
 		return Info{}, err
@@ -224,21 +243,26 @@ func (manager *Manager) Resume(ctx context.Context, profileID, taskID string) (I
 		Protocol: task.Protocol, RemotePort: task.RemotePort, LocalPort: entry.info.LocalPort,
 	}, task.DialAddress, dialer)
 	if err != nil {
-		_, pauseErr := pausePortForward(ctx, manager.client, entry.profile, entry.session, task.ID)
-		return Info{}, errors.Join(err, pauseErr)
+		if !compensateRemote {
+			return Info{}, err
+		}
+		_, remoteErr := pausePortForward(ctx, manager.client, entry.profile, entry.session, task.ID)
+		return Info{}, errors.Join(err, remoteErr)
 	}
 	manager.mu.Lock()
-	if manager.active[taskID] != entry {
+	if manager.active[task.ID] != entry {
 		manager.mu.Unlock()
 		_ = manager.locals.Stop(local.ID)
-		_, pauseErr := pausePortForward(ctx, manager.client, entry.profile, entry.session, task.ID)
-		return Info{}, errors.Join(errors.New("port Forward changed while resuming"), pauseErr)
+		if !compensateRemote {
+			return Info{}, errors.New("port Forward changed while reconciling")
+		}
+		_, remoteErr := pausePortForward(ctx, manager.client, entry.profile, entry.session, task.ID)
+		return Info{}, errors.Join(errors.New("port Forward changed while resuming"), remoteErr)
 	}
 	entry.task, entry.localID = task, local.ID
 	entry.info.State, entry.info.Address, entry.info.LocalPort = portForwardSessionActive, local.Address, local.LocalPort
 	entry.info.DialAddress = task.DialAddress
 	info := entry.info
-	resumed = true
 	manager.mu.Unlock()
 	return info, nil
 }
@@ -251,7 +275,7 @@ func (manager *Manager) Delete(ctx context.Context, profileID, taskID string) er
 	entry := manager.active[taskID]
 	manager.mu.Unlock()
 	if entry == nil || entry.profile.ID != profileID {
-		return errors.New("port Forward is not managed locally")
+		return ErrNotManagedLocally
 	}
 	var pauseErr error
 	if entry.info.State == portForwardSessionActive {

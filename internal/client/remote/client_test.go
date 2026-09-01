@@ -436,6 +436,9 @@ func TestSessionLifecycleUsesIdempotencyAndGenerationHeaders(t *testing.T) {
 	now := time.Now().UTC()
 	store := &memoryStore{value: validCredential(now)}
 	sessionID := uuid.NewString()
+	previousSessionID := uuid.NewString()
+	relayPort := int32(41445)
+	localPort := int32(8000)
 	generation := uint64(1)
 	state := remoteSessionActive
 	spec, specHash := testNetworkSpec(t)
@@ -460,10 +463,21 @@ func TestSessionLifecycleUsesIdempotencyAndGenerationHeaders(t *testing.T) {
 		case request.Method == http.MethodGet && strings.HasSuffix(request.URL.Path, "/traffic-bindings"):
 			_ = json.NewEncoder(writer).Encode(map[string]any{"items": []TrafficBindingSession{{
 				ID: uuid.NewString(), Name: "kubeloop-session", Namespace: "development",
-				SessionID: sessionID, Mode: "PortForward", DesiredState: "Paused", Phase: "Paused",
-				Target: &TrafficBindingTarget{Kind: "Service", Name: "api"},
-				Ports:  []TrafficBindingPort{{TargetPort: 8443, Protocol: "TCP"}}, CreatedAt: now,
+				SessionID: previousSessionID, Mode: "PortForward", DesiredState: "Paused", Phase: "Paused",
+				Target:      &TrafficBindingTarget{Kind: "Service", Name: "api"},
+				DialAddress: "10.244.1.200:8443",
+				Ports: []TrafficBindingPort{{
+					TargetPort: 8443,
+					RelayPort:  &relayPort,
+					LocalHost:  "127.0.0.1",
+					LocalPort:  &localPort,
+					Protocol:   "TCP",
+				}},
+				CreatedAt: now,
 			}}})
+			return
+		case request.Method == http.MethodDelete && strings.Contains(request.URL.Path, "/traffic-bindings/"):
+			_ = json.NewEncoder(writer).Encode(map[string]bool{"deleted": true})
 			return
 		case request.Method == http.MethodDelete:
 			if request.Header.Get("If-Match") != `"2"` {
@@ -509,8 +523,17 @@ func TestSessionLifecycleUsesIdempotencyAndGenerationHeaders(t *testing.T) {
 		t.Fatalf("synchronized = %#v, %v", synchronized, err)
 	}
 	bindings, err := client.ListTrafficBindings(context.Background(), serverProfile, synchronized)
-	if err != nil || len(bindings) != 1 || bindings[0].Target == nil || bindings[0].Target.Name != "api" {
+	if err != nil || len(bindings) != 1 || bindings[0].SessionID != previousSessionID ||
+		bindings[0].Target == nil || bindings[0].Target.Name != "api" ||
+		bindings[0].DialAddress != "10.244.1.200:8443" ||
+		bindings[0].Ports[0].LocalHost != "127.0.0.1" ||
+		bindings[0].Ports[0].LocalPort == nil || *bindings[0].Ports[0].LocalPort != localPort {
 		t.Fatalf("TrafficBinding Sessions = %#v, %v", bindings, err)
+	}
+	if err := client.DeleteTrafficBinding(
+		context.Background(), serverProfile, synchronized, bindings[0].ID,
+	); err != nil {
+		t.Fatalf("DeleteTrafficBinding() = %v", err)
 	}
 	heartbeat, err := client.HeartbeatSession(context.Background(), serverProfile, created)
 	if err != nil || heartbeat.Generation != 2 || heartbeat.Capabilities == nil {

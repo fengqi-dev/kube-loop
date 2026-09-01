@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Circle, Network } from "lucide-react";
+import { toast } from "sonner";
 import { backend } from "@/backend";
 import { ActionIconButton, portForwardIcon, sftpIcon, sshIcon } from "@/components/network/action-icons";
 import { ALL_NAMESPACES, ResourceToolbar } from "@/components/network/resource-toolbar";
@@ -43,16 +44,24 @@ export function ServerWorkloadView({ profileId }: { profileId: string }) {
     }
     setLoading(true);
     try {
-      const [next, endpoints, activeForwards] = await Promise.all([
-        backend.loadServerInventory(profileId, nextNamespace === ALL_NAMESPACES ? "" : nextNamespace),
+      const next = await backend.loadServerInventory(
+        profileId,
+        nextNamespace === ALL_NAMESPACES ? "" : nextNamespace,
+      );
+      setInventory({ ...next, pods: (next.pods ?? []).map((pod) => ({ ...pod, ports: pod.ports ?? [] })) });
+      setNamespace(next.namespace ?? "");
+      const [endpoints, activeForwards] = await Promise.allSettled([
         backend.listServerPodSSH(profileId),
         backend.listServerPortForwards(profileId),
       ]);
-      setInventory({ ...next, pods: (next.pods ?? []).map((pod) => ({ ...pod, ports: pod.ports ?? [] })) });
-      setNamespace(next.namespace ?? "");
-      setSSHEndpoints(endpoints);
-      setForwards(activeForwards.filter((item) => item.kind === "pod"));
-      setError("");
+      if (endpoints.status === "fulfilled") setSSHEndpoints(endpoints.value);
+      if (activeForwards.status === "fulfilled") {
+        setForwards(activeForwards.value.filter((item) => item.kind === "pod"));
+      }
+      const failures = [endpoints, activeForwards]
+        .filter((result) => result.status === "rejected")
+        .map((result) => messageOf(result.reason));
+      setError(failures.join("\n"));
     } catch (reason) {
       setError(messageOf(reason));
     } finally {
@@ -109,6 +118,7 @@ export function ServerWorkloadView({ profileId }: { profileId: string }) {
         localPort: local,
       });
       setForwards((current) => [...current.filter((item) => item.id !== created.id), created]);
+      toast.success("Port Forward started", { description: created.address });
       setDialogOpen(false);
       setSelected(null);
       setRemotePort("");

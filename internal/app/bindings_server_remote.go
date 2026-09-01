@@ -1,15 +1,19 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"slices"
 	"strings"
+	"time"
 
 	clientdataplane "github.com/fengqi-dev/kube-loop/internal/client/dataplane"
 	clientprofile "github.com/fengqi-dev/kube-loop/internal/client/profile"
 	clientremote "github.com/fengqi-dev/kube-loop/internal/client/remote"
 	"github.com/fengqi-dev/kube-loop/internal/networkdiag"
 )
+
+const serverTaskSynchronizationTimeout = 3 * time.Second
 
 type RemoteInventory struct {
 	KubernetesVersion string                   `json:"kubernetesVersion"`
@@ -74,12 +78,14 @@ func (a *App) LoadServerInventory(profileID, namespace string) (RemoteInventory,
 	if err != nil {
 		return RemoteInventory{}, err
 	}
-	session, err = a.synchronizeTrafficBindings(serverProfile, session)
-	if err != nil {
-		return RemoteInventory{}, err
-	}
-	if err := a.restoreServerTasks(serverProfile, session); err != nil {
-		return RemoteInventory{}, err
+	synchronized, synchronizationErr := a.synchronizeTrafficBindings(serverProfile, session)
+	if synchronizationErr != nil {
+		a.appendLog("WARN", "Traffic Binding synchronization unavailable: "+synchronizationErr.Error())
+	} else {
+		session = synchronized
+		if restoreErr := a.restoreServerTasks(serverProfile, session); restoreErr != nil {
+			a.appendLog("WARN", "Server task restoration unavailable: "+restoreErr.Error())
+		}
 	}
 	result.Session = &session
 	network := networkdiag.InspectNetworkSpec(session.NetworkSpec)
@@ -129,11 +135,33 @@ func (a *App) LoadServerInventory(profileID, namespace string) (RemoteInventory,
 	return result, nil
 }
 
+// DeleteServerTrafficBinding deletes a user-owned CRD that has no local
+// runtime entry. Active local tasks use their mode-specific manager instead so
+// listeners and reverse-relay resources are closed before the CRD is removed.
+func (a *App) DeleteServerTrafficBinding(profileID, taskID string) error {
+	if a.remote == nil || a.remoteSessions == nil {
+		return errors.New("remote cluster backend is unavailable")
+	}
+	serverProfile, err := a.serverProfile(profileID)
+	if err != nil {
+		return err
+	}
+	session, err := a.remoteSessions.Current(serverProfile.ID)
+	if err != nil {
+		return err
+	}
+	return a.remote.DeleteTrafficBinding(
+		a.context(), serverProfile, session, taskID,
+	)
+}
+
 func (a *App) synchronizeTrafficBindings(
 	serverProfile clientprofile.Profile,
 	session clientremote.Session,
 ) (clientremote.Session, error) {
-	synchronized, err := a.remote.SyncTrafficBindings(a.context(), serverProfile, session)
+	ctx, cancel := context.WithTimeout(a.context(), serverTaskSynchronizationTimeout)
+	defer cancel()
+	synchronized, err := a.remote.SyncTrafficBindings(ctx, serverProfile, session)
 	if err == nil {
 		return synchronized, nil
 	}

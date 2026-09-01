@@ -196,5 +196,11 @@ func (routes APIRoutes) RegisterSessionRoutes(group *echo.Group) {
 		"/sessions/:sessionID/traffic-bindings",
 		routes.Sessions.ListTrafficBindings,
 	)
+	registerRoute(
+		group,
+		http.MethodDelete,
+		"/sessions/:sessionID/traffic-bindings/:taskID",
+		routes.Sessions.DeleteTrafficBinding,
+	)
 	registerRoute(group, http.MethodDelete, "/sessions/:sessionID", routes.Sessions.Disconnect)
 }

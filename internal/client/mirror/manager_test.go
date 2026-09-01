@@ -18,6 +18,16 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/transport/trafficstream"
 )
 
+func TestManagerDeleteReportsNotManagedLocally(t *testing.T) {
+	t.Parallel()
+	manager := &Manager{active: make(map[string]*activeMirror)}
+	if err := manager.Delete(
+		context.Background(), "server-1", uuid.NewString(),
+	); !errors.Is(err, ErrNotManagedLocally) {
+		t.Fatalf("Delete() error = %v", err)
+	}
+}
+
 type testMirrorClient struct {
 	connection *trafficstream.FrameConn
 	openErr    error

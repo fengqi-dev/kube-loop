@@ -18,9 +18,9 @@ type SessionSynchronizer struct {
 	bindings *Manager
 }
 
-// SessionBinding is the client-facing Session projection whose source of truth
-// is one TrafficBinding object. Database tasks are deliberately not consulted
-// when listing these records.
+// SessionBinding is the client-facing projection whose source of truth is one
+// TrafficBinding object. Database tasks are deliberately not consulted when
+// listing these records.
 type SessionBinding struct {
 	ID           string                                     `json:"id"`
 	Name         string                                     `json:"name"`
@@ -35,15 +35,16 @@ type SessionBinding struct {
 	Ports        []trafficv1alpha1.TrafficPort              `json:"ports"`
 	ServiceName  string                                     `json:"serviceName,omitempty"`
 	ClusterIP    string                                     `json:"serviceClusterIp,omitempty"`
+	DialAddress  string                                     `json:"dialAddress,omitempty"`
 	CreatedAt    time.Time                                  `json:"createdAt"`
 }
 
-// List returns exactly the TrafficBindings attached to the current transport
-// Session. A stale database Task without a CRD can therefore never appear as a
+// List returns exactly the user's TrafficBindings selected by their user ID
+// label. A stale database Task without a CRD can therefore never appear as a
 // Session.
 func (synchronizer *SessionSynchronizer) List(
 	ctx context.Context,
-	namespace, sessionID string,
+	namespace, userID string,
 ) ([]SessionBinding, error) {
 	bindings := &trafficv1alpha1.TrafficBindingList{}
 	if err := synchronizer.bindings.client.List(
@@ -53,7 +54,7 @@ func (synchronizer *SessionSynchronizer) List(
 		client.MatchingLabels{
 			managedByLabel:      managedByValue,
 			controlPlaneIDLabel: synchronizer.bindings.controlPlaneID,
-			sessionIDLabel:      sessionID,
+			userIDLabel:         userID,
 		},
 	); err != nil {
 		return nil, fmt.Errorf("list TrafficBinding Sessions: %w", err)
@@ -61,8 +62,12 @@ func (synchronizer *SessionSynchronizer) List(
 	items := make([]SessionBinding, 0, len(bindings.Items))
 	for index := range bindings.Items {
 		binding := &bindings.Items[index]
-		if binding.Spec.SessionID != sessionID {
+		if binding.Spec.IdentityID != userID {
 			continue
+		}
+		clusterIP := binding.Status.ServiceClusterIP
+		if clusterIP == "" {
+			clusterIP = binding.Spec.ClusterIP
 		}
 		items = append(items, SessionBinding{
 			ID:           binding.Spec.TaskID,
@@ -80,7 +85,8 @@ func (synchronizer *SessionSynchronizer) List(
 				binding.Spec.Ports...,
 			),
 			ServiceName: binding.Status.ServiceName,
-			ClusterIP:   binding.Status.ServiceClusterIP,
+			ClusterIP:   clusterIP,
+			DialAddress: binding.Spec.DialAddress,
 			CreatedAt:   binding.CreationTimestamp.Time,
 		})
 	}
@@ -95,6 +101,22 @@ func NewSessionSynchronizer(bindings *Manager) (*SessionSynchronizer, error) {
 		return nil, errors.New("TrafficBinding manager is required")
 	}
 	return &SessionSynchronizer{bindings: bindings}, nil
+}
+
+// Delete removes one TrafficBinding only when it belongs to the authenticated
+// user. The current transport Session is intentionally not part of ownership.
+func (synchronizer *SessionSynchronizer) Delete(
+	ctx context.Context,
+	namespace, userID, taskID string,
+) error {
+	binding, err := synchronizer.bindings.GetSession(ctx, namespace, taskID)
+	if err != nil {
+		return err
+	}
+	if binding.Spec.IdentityID != userID || binding.Labels[userIDLabel] != userID {
+		return ErrTrafficBindingNotFound
+	}
+	return synchronizer.bindings.Delete(ctx, namespace, taskID)
 }
 
 // Synchronize adopts each recoverable TrafficBinding in a namespace into the
@@ -119,6 +141,33 @@ func (synchronizer *SessionSynchronizer) Synchronize(
 	); err != nil {
 		return fmt.Errorf("list TrafficBinding Sessions: %w", err)
 	}
+	// Backfill the user ID label on legacy objects before adoption. Keep this
+	// separate from transport metadata so the label remains queryable even when
+	// a later adoption patch conflicts.
+	for index := range bindings.Items {
+		binding := &bindings.Items[index]
+		if binding.Spec.IdentityID != identityID ||
+			!binding.DeletionTimestamp.IsZero() ||
+			binding.Labels[userIDLabel] == identityID {
+			continue
+		}
+		before := binding.DeepCopy()
+		if binding.Labels == nil {
+			binding.Labels = make(map[string]string, 1)
+		}
+		binding.Labels[userIDLabel] = identityID
+		if err := synchronizer.bindings.client.Patch(
+			ctx,
+			binding,
+			client.MergeFrom(before),
+		); err != nil {
+			return fmt.Errorf(
+				"label TrafficBinding Session %s: %w",
+				binding.Spec.TaskID,
+				err,
+			)
+		}
+	}
 	for index := range bindings.Items {
 		binding := &bindings.Items[index]
 		if binding.Spec.IdentityID != identityID ||
@@ -129,9 +178,6 @@ func (synchronizer *SessionSynchronizer) Synchronize(
 			binding.Spec.SessionGeneration == int64(generation) {
 			continue
 		}
-		if err := synchronizer.bindings.Pause(ctx, namespace, binding.Spec.TaskID); err != nil {
-			return fmt.Errorf("pause TrafficBinding Session %s before adoption: %w", binding.Spec.TaskID, err)
-		}
 		current := &trafficv1alpha1.TrafficBinding{}
 		key := client.ObjectKeyFromObject(binding)
 		if err := synchronizer.bindings.client.Get(ctx, key, current); err != nil {
@@ -141,9 +187,10 @@ func (synchronizer *SessionSynchronizer) Synchronize(
 		current.Spec.SessionID = sessionID
 		current.Spec.SessionGeneration = int64(generation)
 		if current.Labels == nil {
-			current.Labels = make(map[string]string, 3)
+			current.Labels = make(map[string]string, 2)
 		}
 		current.Labels[sessionIDLabel] = sessionID
+		current.Labels[userIDLabel] = identityID
 		if err := synchronizer.bindings.client.Patch(ctx, current, client.MergeFrom(before)); err != nil {
 			return fmt.Errorf("adopt TrafficBinding Session %s: %w", binding.Spec.TaskID, err)
 		}

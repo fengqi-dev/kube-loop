@@ -2,6 +2,8 @@
 package app
 
 import (
+	"errors"
+
 	clientpreview "github.com/fengqi-dev/kube-loop/internal/client/preview"
 )
 
@@ -25,9 +27,13 @@ func (a *App) ResumeServerPreview(profileID, taskID string) (clientpreview.Info,
 }
 
 func (a *App) DeleteServerPreview(profileID, taskID string) error {
-	return deleteManagedServerTask(
+	err := deleteManagedServerTask(
 		a, a.remotePreviews, a.remotePreviews != nil, "Preview is unavailable", profileID, taskID,
 	)
+	if errors.Is(err, clientpreview.ErrNotManagedLocally) {
+		return a.DeleteServerTrafficBinding(profileID, taskID)
+	}
+	return err
 }
 
 func (a *App) ListServerPreviews(profileID string) ([]clientpreview.Info, error) {

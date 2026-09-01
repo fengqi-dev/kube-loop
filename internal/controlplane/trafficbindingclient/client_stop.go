@@ -117,6 +117,20 @@ func (manager *Manager) waitForPaused(
 			if err := manager.client.Get(ctx, key, current); err != nil {
 				return false, err
 			}
+			degraded := apiMeta.FindStatusCondition(
+				current.Status.Conditions,
+				trafficv1alpha1.ConditionDegraded,
+			)
+			if current.Status.ObservedGeneration == current.Generation &&
+				degraded != nil && degraded.Status == metav1.ConditionTrue &&
+				degraded.Reason == "PauseFailed" {
+				return false, fmt.Errorf(
+					"pause TrafficBinding %s/%s failed: %s",
+					key.Namespace,
+					key.Name,
+					degraded.Message,
+				)
+			}
 			paused := apiMeta.FindStatusCondition(
 				current.Status.Conditions,
 				trafficv1alpha1.ConditionPaused,

@@ -7,6 +7,8 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/google/uuid"
+
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/capability"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/relayticket"
@@ -139,12 +141,45 @@ func (client *Client) ListTrafficBindings(
 		result.Items = []TrafficBindingSession{}
 	}
 	for _, item := range result.Items {
-		if item.ID == "" || item.Namespace != current.Namespace || item.SessionID != current.ID ||
+		if item.ID == "" || item.Namespace != current.Namespace || item.SessionID == "" ||
 			item.Mode == "" || len(item.Ports) == 0 {
 			return nil, errors.New("gateway returned an invalid TrafficBinding Session")
 		}
 	}
 	return result.Items, nil
+}
+
+func (client *Client) DeleteTrafficBinding(
+	ctx context.Context,
+	serverProfile profile.Profile,
+	current Session,
+	taskID string,
+) error {
+	if err := validateSessionTarget(current.Namespace, current.ID); err != nil ||
+		current.State != remoteSessionActive {
+		return errors.New("active Session identity is required")
+	}
+	if _, err := uuid.Parse(strings.TrimSpace(taskID)); err != nil {
+		return errors.New("TrafficBinding Session ID is invalid")
+	}
+	var result struct {
+		Deleted bool `json:"deleted"`
+	}
+	if err := client.doJSON(
+		ctx,
+		serverProfile,
+		http.MethodDelete,
+		"/api/sessions/"+url.PathEscape(current.ID)+"/traffic-bindings/"+url.PathEscape(taskID),
+		url.Values{remoteParamNamespace: {current.Namespace}},
+		nil,
+		&result,
+	); err != nil {
+		return err
+	}
+	if !result.Deleted {
+		return errors.New("gateway did not delete the TrafficBinding Session")
+	}
+	return nil
 }
 
 func (client *Client) DisconnectSession(
