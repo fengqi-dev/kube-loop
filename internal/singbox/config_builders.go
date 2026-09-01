@@ -113,7 +113,7 @@ func buildDNSConfig(network NetworkSpec, options Options) (generatedDNS, error) 
 
 func buildRouteRules(routes, clusterDomains []string) []map[string]any {
 	trafficIn := []string{TrafficInbound}
-	localUsers := localTrafficUsers()
+	localUsers := []string{TrafficLocalUser}
 	routeRules := []map[string]any{
 		{configInboundKey: []string{"dns-in"}, configActionKey: "hijack-dns"},
 		{
@@ -125,21 +125,25 @@ func buildRouteRules(routes, clusterDomains []string) []map[string]any {
 	}
 	routeRules = append(routeRules,
 		map[string]any{
-			configInboundKey:  trafficIn,
-			configAuthUserKey: localUsers,
-			configIPCIDRKey:   []string{"127.0.0.0/8", "::1/128"},
-			configOutboundKey: LocalOutbound,
-		},
-		map[string]any{
-			configInboundKey:  trafficIn,
-			configAuthUserKey: localUsers,
-			"domain":          []string{"localhost"},
-			configOutboundKey: LocalOutbound,
-		},
-		map[string]any{
-			configInboundKey:  trafficIn,
-			configAuthUserKey: localUsers,
-			"ip_is_private":   true,
+			configTypeKey: logicalRuleType,
+			configModeKey: logicalRuleModeOr,
+			configRulesKey: []map[string]any{
+				{
+					configInboundKey:  trafficIn,
+					configAuthUserKey: localUsers,
+					configIPCIDRKey:   []string{"127.0.0.0/8", "::1/128"},
+				},
+				{
+					configInboundKey:  trafficIn,
+					configAuthUserKey: localUsers,
+					"domain":          []string{"localhost"},
+				},
+				{
+					configInboundKey:  trafficIn,
+					configAuthUserKey: localUsers,
+					"ip_is_private":   true,
+				},
+			},
 			configOutboundKey: LocalOutbound,
 		},
 		// Unknown or missing auth_user on traffic-in must not fall through to
@@ -149,14 +153,15 @@ func buildRouteRules(routes, clusterDomains []string) []map[string]any {
 		map[string]any{"protocol": "dns", configActionKey: "hijack-dns"},
 		// All UDP from the TUN is carried through the Kubernetes SOCKS
 		// outbound; socksbridge performs UDP ASSOCIATE over the gateway.
+		// Cluster domains and routes also route through Kubernetes.
 		map[string]any{
-			"network": []string{"udp"}, configOutboundKey: KubernetesOutbound,
-		},
-		map[string]any{
-			"domain_suffix": clusterDomains, configOutboundKey: KubernetesOutbound,
-		},
-		map[string]any{
-			configIPCIDRKey:   routes,
+			configTypeKey: logicalRuleType,
+			configModeKey: logicalRuleModeOr,
+			configRulesKey: []map[string]any{
+				{"network": []string{"udp"}},
+				{"domain_suffix": clusterDomains},
+				{configIPCIDRKey: routes},
+			},
 			configOutboundKey: KubernetesOutbound,
 		},
 	)
@@ -199,19 +204,15 @@ func buildInbounds(routes []string, options Options) ([]map[string]any, error) {
 	if err := validatePort(options.TrafficPorts.Listen, TrafficInbound); err != nil {
 		return nil, err
 	}
-	users := make([]map[string]any, 0, len(TrafficFeatureUsers()))
-	for _, username := range TrafficFeatureUsers() {
-		users = append(users, map[string]any{
-			"username": username,
-			"password": options.TrafficPassword,
-		})
-	}
 	inbounds = append(inbounds, map[string]any{
 		configTypeKey: "socks",
 		configTagKey:  TrafficInbound,
 		"listen":      DefaultDNSListen,
 		"listen_port": options.TrafficPorts.Listen,
-		"users":       users,
+		"users": []map[string]any{{
+			"username": TrafficLocalUser,
+			"password": options.TrafficPassword,
+		}},
 	})
 	return inbounds, nil
 }

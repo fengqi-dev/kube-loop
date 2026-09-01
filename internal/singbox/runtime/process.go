@@ -31,7 +31,6 @@ type Process struct {
 	closeOnce         sync.Once
 	errMu             sync.RWMutex
 	waitErr           error
-	trafficEndpoints  singbox.TrafficEndpoints
 	config            []byte
 	spec              singbox.SessionSpec
 	updateDNS         singbox.PrivilegedUpdateDNSFunc
@@ -54,8 +53,6 @@ func (p *Process) Err() error {
 	defer p.errMu.RUnlock()
 	return p.waitErr
 }
-
-func (p *Process) TrafficEndpoints() singbox.TrafficEndpoints { return p.trafficEndpoints }
 
 func (p *Process) SessionID() string {
 	p.specMu.Lock()

@@ -97,22 +97,6 @@ func availableTrafficPorts(excluded ...int) (singbox.TrafficInboundPorts, error)
 	}
 }
 
-func trafficEndpoints(ports singbox.TrafficInboundPorts, password string) singbox.TrafficEndpoints {
-	address := net.JoinHostPort("127.0.0.1", strconv.Itoa(ports.Listen))
-	endpoint := func(username string) singbox.TrafficEndpoint {
-		return singbox.TrafficEndpoint{
-			Address:  address,
-			Username: username,
-			Password: password,
-		}
-	}
-	return singbox.TrafficEndpoints{
-		Exchange:     endpoint(singbox.TrafficUserExchange),
-		Preview:      endpoint(singbox.TrafficUserPreview),
-		MirrorShadow: endpoint(singbox.TrafficUserMirrorShadow),
-	}
-}
-
 func randomSecret() (string, error) {
 	value := make([]byte, 32)
 	if _, err := rand.Read(value); err != nil {

@@ -196,7 +196,6 @@ func (r *Runtime) startOnce(
 		resolverDomains:   resolverDomains,
 		dnsProxy:          dnsProxy,
 		httpClient:        r.HTTPClient,
-		trafficEndpoints:  trafficEndpoints(trafficPorts, trafficPassword),
 		config:            config,
 		spec:              spec,
 		updateDNS:         r.PrivilegedUpdateDNS,

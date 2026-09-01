@@ -19,41 +19,30 @@ const (
 	configAuthUserKey = "auth_user"
 	configIPCIDRKey   = "ip_cidr"
 	configInboundKey  = "inbound"
+	configModeKey     = "mode"
 	configOutboundKey = "outbound"
+	configRulesKey    = "rules"
 	configServerKey   = "server"
 	configTagKey      = "tag"
 	configTypeKey     = "type"
+	logicalRuleModeOr = "or"
+	logicalRuleType   = "logical"
 	hostsDNSServer    = "hosts"
 	rejectRouteAction = "reject"
 
-	// TrafficInbound is the single loopback SOCKS inbound for local feature adapters.
-	// Feature identity is carried as SOCKS auth_user (see TrafficUser*).
+	// TrafficInbound is the single loopback SOCKS inbound for local feature
+	// adapters. All local features share one auth_user (TrafficLocalUser);
+	// routing identity is the SOCKS username.
 	TrafficInbound = "traffic-in"
 
-	TrafficUserExchange     = "exchange"
-	TrafficUserPreview      = "preview"
-	TrafficUserMirrorShadow = "mirror-shadow"
+	// TrafficLocalUser is the sole SOCKS auth_user registered on traffic-in.
+	TrafficLocalUser = "kube-loop"
 )
 
 // TrafficInboundPorts holds the single fixed loopback SOCKS listen port used by
-// local feature adapters. Targets remain dynamic in the SOCKS request; feature
-// identity is the SOCKS username (TrafficUser*).
+// local feature adapters. Targets remain dynamic in the SOCKS request.
 type TrafficInboundPorts struct {
 	Listen int `json:"listen"`
-}
-
-// TrafficFeatureUsers returns every SOCKS auth user registered on traffic-in.
-// Mirror primary reaches the original Pod via Gateway dial, not traffic-in.
-func TrafficFeatureUsers() []string {
-	return []string{
-		TrafficUserExchange,
-		TrafficUserPreview,
-		TrafficUserMirrorShadow,
-	}
-}
-
-func localTrafficUsers() []string {
-	return []string{TrafficUserExchange, TrafficUserPreview, TrafficUserMirrorShadow}
 }
 
 // HostAlias maps a DNS name to an IPv4 address for the local dns-in resolver.

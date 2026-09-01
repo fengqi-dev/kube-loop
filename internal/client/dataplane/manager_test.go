@@ -119,11 +119,10 @@ func (core *testCore) Close() error {
 	core.closeOnce.Do(func() { close(core.done) })
 	return core.closeErr
 }
-func (core *testCore) Done() <-chan struct{}                      { return core.done }
-func (core *testCore) Err() error                                 { return nil }
-func (core *testCore) TrafficEndpoints() singbox.TrafficEndpoints { return singbox.TrafficEndpoints{} }
-func (core *testCore) SessionID() string                          { return core.sessionID }
-func (core *testCore) Config() []byte                             { return []byte(`{"version":2}`) }
+func (core *testCore) Done() <-chan struct{} { return core.done }
+func (core *testCore) Err() error            { return nil }
+func (core *testCore) SessionID() string     { return core.sessionID }
+func (core *testCore) Config() []byte        { return []byte(`{"version":2}`) }
 func (core *testCore) ReadLogs(context.Context) ([]string, error) {
 	return []string{"ready"}, core.logsErr
 }

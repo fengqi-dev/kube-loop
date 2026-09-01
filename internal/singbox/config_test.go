@@ -99,14 +99,28 @@ func TestGenerateRoutesOnlyClusterTraffic(t *testing.T) {
 	route, _ := parsed["route"].(map[string]any)
 	rules, _ := route["rules"].([]any)
 	udpRuleFound := false
+	kubernetesLogicalFound := false
 	for _, rawRule := range rules {
 		rule, _ := rawRule.(map[string]any)
-		networks, _ := rule["network"].([]any)
-		for _, network := range networks {
-			if network == "udp" && rule["outbound"] == KubernetesOutbound {
-				udpRuleFound = true
+		if rule[configTypeKey] == "logical" {
+			if rule[configOutboundKey] != KubernetesOutbound {
+				continue
+			}
+			kubernetesLogicalFound = true
+			subRules, _ := rule["rules"].([]any)
+			for _, rawSub := range subRules {
+				sub, _ := rawSub.(map[string]any)
+				networks, _ := sub["network"].([]any)
+				for _, network := range networks {
+					if network == "udp" {
+						udpRuleFound = true
+					}
+				}
 			}
 		}
+	}
+	if !kubernetesLogicalFound {
+		t.Fatal("cluster routes must be grouped in a Kubernetes logical rule")
 	}
 	if !udpRuleFound {
 		t.Fatal("UDP route must use the Kubernetes SOCKS outbound")
@@ -147,14 +161,21 @@ func TestGenerateFixedTrafficInbounds(t *testing.T) {
 	for _, item := range []string{
 		`"tag": "traffic-in"`,
 		`"listen_port": 18081`,
-		`"username": "exchange"`,
-		`"username": "preview"`,
-		`"username": "mirror-shadow"`,
+		`"username": "kube-loop"`,
 		`"auth_user"`,
 		`"tag": "local"`,
 	} {
 		if !strings.Contains(text, item) {
 			t.Fatalf("generated config missing %q:\n%s", item, text)
+		}
+	}
+	for _, item := range []string{
+		`"username": "exchange"`,
+		`"username": "preview"`,
+		`"username": "mirror-shadow"`,
+	} {
+		if strings.Contains(text, item) {
+			t.Fatalf("dyed traffic users must be merged into the single local user, found %q:\n%s", item, text)
 		}
 	}
 	if strings.Contains(text, `"username": "port-forward"`) {

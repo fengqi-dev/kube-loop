@@ -58,13 +58,13 @@ func TestDialerInteroperatesWithSingBox(t *testing.T) {
 			"type": "socks", "tag": "traffic-in",
 			"listen": "127.0.0.1", "listen_port": proxyPort,
 			"users": []map[string]any{{
-				"username": "exchange", "password": "integration-password",
+				"username": "local", "password": "integration-password",
 			}},
 		}},
 		"outbounds": []map[string]any{{"type": "direct", "tag": "local"}},
 		"route": map[string]any{
 			"rules": []map[string]any{{
-				"inbound": []string{"traffic-in"}, "auth_user": []string{"exchange"},
+				"inbound": []string{"traffic-in"}, "auth_user": []string{"local"},
 				"outbound": "local",
 			}},
 			"final": "local", "auto_detect_interface": true,
@@ -95,7 +95,7 @@ func TestDialerInteroperatesWithSingBox(t *testing.T) {
 
 	dialer := Dialer{Endpoint: Endpoint{
 		Address:  net.JoinHostPort("127.0.0.1", strconv.Itoa(proxyPort)),
-		Username: "exchange", Password: "integration-password",
+		Username: "local", Password: "integration-password",
 	}}
 	var connection net.Conn
 	deadline := time.Now().Add(3 * time.Second)
