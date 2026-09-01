@@ -23,7 +23,6 @@ ingress.
 - **No public cluster ingress** — RelayTicket-authenticated WebSockets carry traffic to an assigned Data Plane.
 - **Focused routing** — only discovered or configured Kubernetes routes enter the tunnel.
 - **Local iteration tools** — Port Forward, Exchange, Mirror, and Preview cover outbound and inbound traffic.
-- **Traffic inspection** — intercept and decode live HTTP and gRPC traffic through the proxy, with auto-generated `curl`/`grpcurl` replay commands and optional `.proto` schema import.
 - **Desktop workflow** — inspect workloads, use Pod SSH/SFTP, transfer files, and diagnose connections in one UI.
 - **Cross-platform** — macOS, Windows, and Linux on amd64 and arm64.
 
@@ -165,7 +164,6 @@ Once connected, use a ClusterIP, Pod IP, or cluster DNS name from any local appl
 | Mirror | Existing Service → Pods + local shadow | Observe a copy without putting the local app on the primary path |
 | Preview | New temporary Service → local app | Make a local application reachable from the cluster |
 | Pod SSH/SFTP | Local SSH client → `pods/exec` | Use a shell or transfer files without running `sshd` in the container |
-| Traffic Inspection | Local app → cluster (via proxy) | Intercept decoded HTTP/gRPC requests with replayable commands and `.proto` decoding |
 
 KubeLoop restores or removes affected Services, Endpoints, and EndpointSlices
 when a workflow stops or the cluster connection closes.

@@ -12,7 +12,6 @@ const headerKeys: Record<AppView, TranslationKey> = {
   network: "header.network",
   sessions: "header.sessions",
   "host-aliases": "header.hostAliases",
-  "traffic-inspection": "header.trafficInspection",
   mcp: "header.mcp",
   settings: "header.settings",
 };

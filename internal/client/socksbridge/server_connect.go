@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"strconv"
 
 	"github.com/things-go/go-socks5"
 	"github.com/things-go/go-socks5/statute"
@@ -40,25 +39,6 @@ func (s *Server) handleConnect(
 			serve(&bufferedConn{Conn: client, reader: request.Reader})
 			return nil
 		}
-	}
-	if s.inspector != nil {
-		client, ok := writer.(net.Conn)
-		if !ok {
-			_ = socks5.SendReply(writer, statute.RepServerFailure, nil)
-			return errors.New("SOCKS client is not a network connection")
-		}
-		if err := socks5.SendReply(writer, statute.RepSuccess, client.LocalAddr()); err != nil {
-			return err
-		}
-		target := net.JoinHostPort(host, strconv.Itoa(int(port)))
-		if err := s.inspector.ServeConn(ctx, &bufferedConn{Conn: client, reader: request.Reader}, target); err != nil {
-			if errors.Is(err, context.Canceled) || errors.Is(err, net.ErrClosed) {
-				return nil
-			}
-			s.logf("TCP inspect %s failed: %v", target, err)
-			return fmt.Errorf("inspect TCP %s: %w", target, err)
-		}
-		return nil
 	}
 	target, err := s.openGateway(ctx, tunnel.CommandTCP, host, port)
 	if err != nil {

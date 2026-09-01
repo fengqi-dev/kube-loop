@@ -21,34 +21,6 @@ type HostUDPHandler func(host string, port uint16) (dial func(context.Context) (
 
 type LogHandler func(message string)
 
-// TCPInspector is an optional TCP hook. The production dataplane no longer
-// installs one; SOCKS forwarding remains the default for every protocol.
-type TCPInspector interface {
-	ServeConn(context.Context, net.Conn, string) error
-	Close() error
-}
-
-type TCPInspectorFactory func(DialContextFunc) (TCPInspector, error)
-
-type listenConfig struct {
-	inspectorFactory TCPInspectorFactory
-}
-
-type ListenOption func(*listenConfig) error
-
-func WithTCPInspector(factory TCPInspectorFactory) ListenOption {
-	return func(config *listenConfig) error {
-		if factory == nil {
-			return errors.New("tcp inspector factory is required")
-		}
-		config.inspectorFactory = factory
-		return nil
-	}
-}
-
-// DialContextFunc opens an upstream connection through the current Gateway.
-type DialContextFunc func(context.Context, string, string) (net.Conn, error)
-
 type Server struct {
 	GatewayAddress string
 	SessionToken   tunnel.SessionToken
@@ -56,7 +28,6 @@ type Server struct {
 	HostTCP        HostTCPHandler
 	HostUDP        HostUDPHandler
 	LogHandler     LogHandler
-	inspector      TCPInspector
 
 	gatewayMu sync.RWMutex
 	hostMu    sync.RWMutex
@@ -75,7 +46,7 @@ type Bridge struct {
 	closeErr    error
 }
 
-// Close stops the SOCKS listener and releases inspector transports.
+// Close stops the SOCKS listener and waits for active handlers.
 func (b *Bridge) Close() error {
 	b.closeOnce.Do(func() {
 		if b.stopContext != nil {
@@ -91,9 +62,6 @@ func (b *Bridge) Close() error {
 		}
 		if b.server.tasks != nil {
 			b.server.tasks.Wait()
-		}
-		if b.server.inspector != nil {
-			b.closeErr = errors.Join(b.closeErr, b.server.inspector.Close())
 		}
 	})
 	return b.closeErr

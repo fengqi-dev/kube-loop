@@ -31,8 +31,5 @@ func productionDependencies() commandDependencies {
 		elevated: func(options elevatedOptions) error {
 			return helperinstall.RunElevatedRequest(options.operation, options.request, options.result)
 		},
-		trustCertificate: func(ctx context.Context, options trustCertificateOptions) error {
-			return helperinstall.ManageDarwinTrustFromCLI(ctx, options.operation, options.certificate)
-		},
 	}
 }

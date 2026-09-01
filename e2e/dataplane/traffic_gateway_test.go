@@ -164,20 +164,6 @@ func startE2EDataPlane(
 	serverProfile profile.Profile,
 	session remote.Session,
 ) *clientdataplane.Manager {
-	return startE2EDataPlaneWithInspection(
-		t, ctx, client, gatewayClient, serverProfile, session, clientdataplane.TrafficInspectionConfig{},
-	)
-}
-
-func startE2EDataPlaneWithInspection(
-	t *testing.T,
-	ctx context.Context,
-	client *remote.Client,
-	gatewayClient *http.Client,
-	serverProfile profile.Profile,
-	session remote.Session,
-	inspection clientdataplane.TrafficInspectionConfig,
-) *clientdataplane.Manager {
 	t.Helper()
 	transport, ok := gatewayClient.Transport.(*http.Transport)
 	if !ok || transport.TLSClientConfig == nil {
@@ -186,7 +172,6 @@ func startE2EDataPlaneWithInspection(
 	sessions := &e2eTrafficSessionSource{client: client, profile: serverProfile, session: session}
 	manager, err := clientdataplane.NewManager(sessions, clientdataplane.Config{
 		ListenAddress: "127.0.0.1:0", ClientVersion: "e2e", TLSConfig: transport.TLSClientConfig.Clone(),
-		TrafficInspection: inspection,
 	})
 	if err != nil {
 		t.Fatal(err)

@@ -10,7 +10,6 @@ import {
   Network,
   Server,
   Settings2,
-  ScrollText,
   type LucideIcon,
 } from "lucide-react";
 import { LogoMark } from "@/components/brand/logo-mark";
@@ -38,7 +37,6 @@ const navigation: Array<{ id: Exclude<AppView, "settings">; icon: LucideIcon }> 
   { id: "network", icon: Network },
   { id: "sessions", icon: Layers },
   { id: "host-aliases", icon: Globe },
-  { id: "traffic-inspection", icon: ScrollText },
   { id: "mcp", icon: Bot },
 ];
 

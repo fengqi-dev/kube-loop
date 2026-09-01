@@ -11,9 +11,6 @@ func installCurrentHelper(
 	source, sourceSHA256, token string,
 	uid int,
 	home, singBox string,
-	certificatePEM []byte,
 ) error {
-	return elevateWindowsInstall(
-		ctx, source, sourceSHA256, token, uid, home, singBox, certificatePEM,
-	)
+	return ElevateInstall(ctx, source, sourceSHA256, token, uid, home, singBox)
 }

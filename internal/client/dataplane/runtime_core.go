@@ -5,7 +5,6 @@ import (
 	"crypto/tls"
 	"log/slog"
 	"net"
-	"net/http"
 	"sync"
 	"time"
 
@@ -14,7 +13,6 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/client/websocketmux"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
 	"github.com/fengqi-dev/kube-loop/internal/singbox"
-	"github.com/fengqi-dev/kube-loop/internal/trafficinspect"
 )
 
 const (
@@ -38,27 +36,9 @@ type Config struct {
 	RecoveryBackoff   time.Duration
 	OnStatus          func(StatusEvent)
 	Logger            *slog.Logger
-	// TrafficInspection enables the optional goproxy-backed HTTP inspection
-	// branch. Non-inspectable traffic remains on the normal SOCKS path.
-	TrafficInspection TrafficInspectionConfig
-
-	startForwarder func(context.Context, websocketmux.ClientConfig) (streamForwarder, error)
-	listenSOCKS    func(context.Context, string, string, tunnel.SessionToken) (localBridge, error)
-	dialContext    func(context.Context, string, string) (net.Conn, error)
-}
-
-// TrafficInspectionConfig controls the optional goproxy-backed HTTP/HTTPS and
-// gRPC inspection branch. Unsupported protocols are relayed byte-for-byte.
-type TrafficInspectionConfig struct {
-	Enabled       bool
-	IsEnabled     func() bool
-	AuthorityPath string
-	TLSConfig     *tls.Config
-	OnRequest     func(*http.Request)
-	OnResponse    func(*http.Response)
-	OnEvent       func(trafficinspect.Event)
-	Policy        trafficinspect.CapturePolicy
-	Protobuf      *trafficinspect.ProtobufDecoder
+	startForwarder    func(context.Context, websocketmux.ClientConfig) (streamForwarder, error)
+	listenSOCKS       func(context.Context, string, string, tunnel.SessionToken) (localBridge, error)
+	dialContext       func(context.Context, string, string) (net.Conn, error)
 }
 
 type streamForwarder interface {

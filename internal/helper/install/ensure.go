@@ -20,25 +20,17 @@ var (
 // builds reuse a healthy, protocol-compatible helper so wails dev does not
 // request administrator authorization after every helper rebuild.
 func EnsureInstall(ctx context.Context) error {
-	return ensureInstall(ctx, false, nil)
+	return ensureInstall(ctx, false)
 }
 
 // EnsureCurrentInstall installs or upgrades to the exact bundled helper. Use it
 // for explicit user-driven installs and E2E setup where binary drift must not be
 // accepted, including in development builds.
 func EnsureCurrentInstall(ctx context.Context) error {
-	return ensureInstall(ctx, true, nil)
+	return ensureInstall(ctx, true)
 }
 
-// EnsureCurrentInstallWithCertificate installs the exact bundled helper and,
-// when the platform needs a privileged install, trusts certificatePEM in the
-// same administrator authorization on macOS, Linux, and Windows. Other update
-// paths leave certificate installation to the caller.
-func EnsureCurrentInstallWithCertificate(ctx context.Context, certificatePEM []byte) error {
-	return ensureInstall(ctx, true, certificatePEM)
-}
-
-func ensureInstall(ctx context.Context, requireCurrentBinary bool, certificatePEM []byte) error {
+func ensureInstall(ctx context.Context, requireCurrentBinary bool) error {
 	ensureInstallMu.Lock()
 	defer ensureInstallMu.Unlock()
 
@@ -47,7 +39,7 @@ func ensureInstall(ctx context.Context, requireCurrentBinary bool, certificatePE
 		return err
 	}
 	if !decision.required {
-		return installCertificateWithoutServiceChange(ctx, certificatePEM)
+		return nil
 	}
 	artifacts, err := prepareHelperInstall(decision.source)
 	if err != nil {
@@ -61,7 +53,6 @@ func ensureInstall(ctx context.Context, requireCurrentBinary bool, certificatePE
 		currentUID(),
 		artifacts.home,
 		artifacts.singBoxPath,
-		certificatePEM,
 	); err != nil {
 		return err
 	}

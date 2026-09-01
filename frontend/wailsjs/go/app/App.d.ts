@@ -55,13 +55,9 @@ export function GetServerNetworkSettings(arg1:string):Promise<app.ServerNetworkS
 
 export function GetServerSingBoxConfig(arg1:string):Promise<string>;
 
-export function GetTrafficInspectionSettings():Promise<app.TrafficInspectionSettings>;
-
 export function HandleAuthCallbackURL(arg1:string):Promise<void>;
 
 export function HelperStatus():Promise<helper.Status>;
-
-export function ImportTrafficInspectionProtoDirectory():Promise<app.TrafficInspectionSettings>;
 
 export function InstallHelper():Promise<void>;
 
@@ -151,8 +147,6 @@ export function SetServerHostAliases(arg1:string,arg2:Array<profile.HostAlias>):
 
 export function SetServerSOCKSPort(arg1:string,arg2:number):Promise<app.ServerNetworkSettings>;
 
-export function SetTrafficInspectionEnabled(arg1:boolean):Promise<app.TrafficInspectionSettings>;
-
 export function StartServerExchange(arg1:exchange.Request):Promise<exchange.Info>;
 
 export function StartServerExec(arg1:app.ServerExecRequest):Promise<remote.ExecTask>;
@@ -176,8 +170,6 @@ export function StopServerPodSSH(arg1:string,arg2:string):Promise<void>;
 export function StopServerTunnel(arg1:string):Promise<dataplane.Status>;
 
 export function TestServerAddress(arg1:string):Promise<discovery.Document>;
-
-export function TrafficInspectionEvents(arg1:app.TrafficInspectionQuery):Promise<app.TrafficInspectionResult>;
 
 export function UninstallHelper():Promise<void>;
 

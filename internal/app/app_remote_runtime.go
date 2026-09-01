@@ -84,11 +84,7 @@ func configureRemoteRuntime(
 	application.remoteSessions = remoteSessions
 	dataPlanes, dataPlaneErr := clientdataplane.NewManager(remoteSessions, clientdataplane.Config{
 		ClientVersion: version, TLSConfig: developmentTLSConfig,
-		TUNStarter: NewSingboxRuntime(
-			application.appendLog,
-			application.installTrafficInspectionTrust,
-		),
-		TrafficInspection: dependencies.trafficInspection,
+		TUNStarter: NewSingboxRuntime(application.appendLog),
 		OnStatus: func(event clientdataplane.StatusEvent) {
 			if application.ctx != nil {
 				runtime.EventsEmit(application.ctx, "dataplane:status", event)

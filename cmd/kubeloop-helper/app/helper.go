@@ -18,11 +18,10 @@ const (
 )
 
 type commandDependencies struct {
-	install          func(installOptions) error
-	uninstall        func() error
-	run              func(context.Context) error
-	elevated         func(elevatedOptions) error
-	trustCertificate func(context.Context, trustCertificateOptions) error
+	install   func(installOptions) error
+	uninstall func() error
+	run       func(context.Context) error
+	elevated  func(elevatedOptions) error
 }
 
 // NewHelperCommand returns the kubeloop-helper cobra command.
@@ -62,7 +61,6 @@ func newHelperCommand(dependencies commandDependencies, info buildinfo.Info) *co
 		newUninstallCommand(dependencies),
 		newRunCommand(dependencies),
 		newElevatedCommand(dependencies),
-		newTrustCertificateCommand(dependencies),
 		versionCommand,
 		newIdentityCommand(commandVersion),
 	)

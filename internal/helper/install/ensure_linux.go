@@ -11,18 +11,6 @@ func installCurrentHelper(
 	source, sourceSHA256, token string,
 	uid int,
 	home, singBox string,
-	certificatePEM []byte,
 ) error {
-	certificatePath, cleanup, err := writeTemporaryLinuxCertificate(certificatePEM)
-	if err != nil {
-		return err
-	}
-	defer cleanup()
-	return elevateLinuxInstall(
-		ctx, source, sourceSHA256, token, uid, home, singBox, certificatePath,
-	)
-}
-
-func writeTemporaryLinuxCertificate(content []byte) (string, func(), error) {
-	return writeTemporaryPublicCertificate(content)
+	return ElevateInstall(ctx, source, sourceSHA256, token, uid, home, singBox)
 }

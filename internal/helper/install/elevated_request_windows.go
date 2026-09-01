@@ -3,16 +3,9 @@
 package install
 
 import (
-	"bytes"
-	"crypto/sha1" // #nosec G505 -- Windows certificate-store thumbprint identifier, not a security digest.
-	"crypto/x509"
-	"encoding/hex"
 	"encoding/json"
-	"encoding/pem"
-	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 )
@@ -60,8 +53,7 @@ func executeElevatedRequest(operation, requestPath string) error {
 	case "install":
 		return elevatedInstall(request)
 	case "uninstall":
-		certificateErr := uninstallWindowsCertificate(request.CertificatePEM, runWindowsCommand)
-		return errors.Join(certificateErr, UninstallFromCLI())
+		return UninstallFromCLI()
 	default:
 		return fmt.Errorf("unsupported elevated operation %q", operation)
 	}
@@ -104,88 +96,5 @@ func elevatedInstall(request elevatedRequest) error {
 	); err != nil {
 		return err
 	}
-	return installWindowsCertificate(request.CertificatePEM, runWindowsCommand)
-}
-
-type windowsCommandRunner func(string, ...string) ([]byte, error)
-
-func runWindowsCommand(name string, arguments ...string) ([]byte, error) {
-	return exec.Command(name, arguments...).CombinedOutput()
-}
-
-func installWindowsCertificate(content []byte, run windowsCommandRunner) (returnErr error) {
-	if len(content) == 0 {
-		return nil
-	}
-	if _, err := parseWindowsCertificate(content); err != nil {
-		return err
-	}
-	file, err := os.CreateTemp("", "kubeloop-inspection-ca-*.pem")
-	if err != nil {
-		return fmt.Errorf("create temporary traffic inspection certificate: %w", err)
-	}
-	path := file.Name()
-	defer func() {
-		if cleanupErr := os.Remove(path); cleanupErr != nil && !os.IsNotExist(cleanupErr) {
-			returnErr = errors.Join(
-				returnErr,
-				fmt.Errorf("remove temporary traffic inspection certificate: %w", cleanupErr),
-			)
-		}
-	}()
-	if _, err := file.Write(content); err != nil {
-		_ = file.Close()
-		return fmt.Errorf("write temporary traffic inspection certificate: %w", err)
-	}
-	if err := file.Close(); err != nil {
-		return fmt.Errorf("close temporary traffic inspection certificate: %w", err)
-	}
-	if run == nil {
-		return fmt.Errorf("windows certificate command runner is required")
-	}
-	output, err := run("certutil.exe", "-addstore", "-f", "Root", path)
-	if err != nil {
-		return fmt.Errorf(
-			"install Windows traffic inspection certificate: %w: %s",
-			err,
-			strings.TrimSpace(string(output)),
-		)
-	}
 	return nil
-}
-
-func uninstallWindowsCertificate(content []byte, run windowsCommandRunner) error {
-	if len(content) == 0 {
-		return nil
-	}
-	certificate, err := parseWindowsCertificate(content)
-	if err != nil {
-		return err
-	}
-	if run == nil {
-		return fmt.Errorf("windows certificate command runner is required")
-	}
-	identifier := sha1.Sum(certificate.Raw) // #nosec G401 -- certutil identifies store entries by SHA-1 thumbprint.
-	thumbprint := strings.ToUpper(hex.EncodeToString(identifier[:]))
-	output, err := run("certutil.exe", "-delstore", "Root", thumbprint)
-	if err != nil {
-		return fmt.Errorf(
-			"uninstall Windows traffic inspection certificate: %w: %s",
-			err,
-			strings.TrimSpace(string(output)),
-		)
-	}
-	return nil
-}
-
-func parseWindowsCertificate(content []byte) (*x509.Certificate, error) {
-	block, trailing := pem.Decode(content)
-	if block == nil || block.Type != "CERTIFICATE" || len(bytes.TrimSpace(trailing)) != 0 {
-		return nil, fmt.Errorf("traffic inspection certificate PEM is invalid")
-	}
-	certificate, err := x509.ParseCertificate(block.Bytes)
-	if err != nil {
-		return nil, fmt.Errorf("parse traffic inspection certificate: %w", err)
-	}
-	return certificate, nil
 }

@@ -48,30 +48,7 @@ fi
 }
 
 func ElevateUninstall(ctx context.Context, source string) error {
-	return ElevateUninstallWithCertificate(ctx, source, "")
-}
-
-func ElevateTrustCertificate(ctx context.Context, source, certificatePath string) error {
-	command := darwinTrustCertificateCommand(source, certificatePath)
-	script := "do shell script " + strconv.Quote(command) +
-		" with administrator privileges"
-	output, err := exec.CommandContext(ctx, "osascript", "-e", script).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("install certificate trust: %w: %s", err, strings.TrimSpace(string(output)))
-	}
-	return nil
-}
-
-func darwinTrustCertificateCommand(source, certificatePath string) string {
-	return shellquote.Join(
-		source, darwinTrustCertificateCommandName,
-		"--operation", "install",
-		"--certificate", certificatePath,
-	)
-}
-
-func ElevateUninstallWithCertificate(ctx context.Context, source, certificatePath string) error {
-	command := darwinUninstallCommand(source, certificatePath)
+	command := shellquote.Join(source, "uninstall")
 	script := "do shell script " + strconv.Quote(command) +
 		" with administrator privileges"
 	cmd := exec.CommandContext(ctx, "osascript", "-e", script)
@@ -80,17 +57,4 @@ func ElevateUninstallWithCertificate(ctx context.Context, source, certificatePat
 		return fmt.Errorf("uninstall helper: %w: %s", err, strings.TrimSpace(string(output)))
 	}
 	return nil
-}
-
-func darwinUninstallCommand(source, certificatePath string) string {
-	commands := make([]string, 0, 2)
-	if certificatePath = strings.TrimSpace(certificatePath); certificatePath != "" {
-		commands = append(commands, shellquote.Join(
-			source, darwinTrustCertificateCommandName,
-			"--operation", "uninstall",
-			"--certificate", certificatePath,
-		))
-	}
-	commands = append(commands, shellquote.Join(source, "uninstall"))
-	return strings.Join(commands, "\n")
 }

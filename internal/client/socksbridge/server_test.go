@@ -11,7 +11,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -71,28 +70,6 @@ func TestBridgeHostUDPHandlerSupportsConcurrentUpdates(t *testing.T) {
 }
 
 var testSessionToken = tunnel.SessionToken{1}
-
-type testTCPInspector struct {
-	dial       DialContextFunc
-	served     chan string
-	closeCalls atomic.Int32
-}
-
-func (inspector *testTCPInspector) ServeConn(ctx context.Context, client net.Conn, target string) error {
-	inspector.served <- target
-	upstream, err := inspector.dial(ctx, "tcp", target)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = upstream.Close() }()
-	relay(client, client, upstream)
-	return nil
-}
-
-func (inspector *testTCPInspector) Close() error {
-	inspector.closeCalls.Add(1)
-	return nil
-}
 
 func TestBridgeCloseStopsAcceptedConnectionsAndWaitsForHandlers(t *testing.T) {
 	bridge, err := Listen(
@@ -267,111 +244,6 @@ func TestDialGatewayTCPPreservesDomain(t *testing.T) {
 	}
 	if err := <-result; err != nil {
 		t.Fatal(err)
-	}
-}
-
-func TestBridgeTCPInspectorReusesGatewayDialer(t *testing.T) {
-	gateway, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = gateway.Close() }()
-	gatewayDone := make(chan error, 1)
-	go func() {
-		connection, acceptErr := gateway.Accept()
-		if acceptErr != nil {
-			gatewayDone <- acceptErr
-			return
-		}
-		defer func() { _ = connection.Close() }()
-		request, readErr := tunnel.ReadOpen(connection)
-		if readErr != nil {
-			gatewayDone <- readErr
-			return
-		}
-		want := tunnel.OpenRequest{Command: tunnel.CommandTCP, Host: "api.default.svc.cluster.local", Port: 8443}
-		if request != want {
-			gatewayDone <- fmt.Errorf("open request = %#v, want %#v", request, want)
-			return
-		}
-		if writeErr := tunnel.WriteStatus(connection, nil); writeErr != nil {
-			gatewayDone <- writeErr
-			return
-		}
-		var payload [4]byte
-		if _, readErr := io.ReadFull(connection, payload[:]); readErr != nil {
-			gatewayDone <- readErr
-			return
-		}
-		_, writeErr := connection.Write(append([]byte("inspected:"), payload[:]...))
-		gatewayDone <- writeErr
-	}()
-
-	inspector := &testTCPInspector{served: make(chan string, 1)}
-	bridge, err := Listen(
-		t.Context(),
-		gateway.Addr().String(),
-		"127.0.0.1:0",
-		testSessionToken,
-		WithTCPInspector(func(dial DialContextFunc) (TCPInspector, error) {
-			inspector.dial = dial
-			return inspector, nil
-		}),
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	client, err := net.Dial("tcp", bridge.Addr().String())
-	if err != nil {
-		_ = bridge.Close()
-		t.Fatal(err)
-	}
-	_ = client.SetDeadline(time.Now().Add(3 * time.Second))
-	if _, err := client.Write([]byte{5, 1, 0}); err != nil {
-		t.Fatal(err)
-	}
-	methodReply := make([]byte, 2)
-	if _, err := io.ReadFull(client, methodReply); err != nil {
-		t.Fatal(err)
-	}
-	request := make([]byte, 0, 36)
-	request = append(request, 5, 1, 0, 3, 29)
-	request = append(request, []byte("api.default.svc.cluster.local")...)
-	request = append(request, 0x20, 0xfb)
-	if _, err := client.Write(request); err != nil {
-		t.Fatal(err)
-	}
-	reply := make([]byte, 10)
-	if _, err := io.ReadFull(client, reply); err != nil {
-		t.Fatal(err)
-	}
-	if reply[1] != 0 {
-		t.Fatalf("SOCKS reply status = %d", reply[1])
-	}
-	if _, err := client.Write([]byte("ping")); err != nil {
-		t.Fatal(err)
-	}
-	response := make([]byte, len("inspected:ping"))
-	if _, err := io.ReadFull(client, response); err != nil {
-		t.Fatal(err)
-	}
-	if string(response) != "inspected:ping" {
-		t.Fatalf("response = %q", response)
-	}
-	if target := <-inspector.served; target != "api.default.svc.cluster.local:8443" {
-		t.Fatalf("inspected target = %q", target)
-	}
-	if err := <-gatewayDone; err != nil {
-		t.Fatal(err)
-	}
-	if err := client.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err := bridge.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if inspector.closeCalls.Load() != 1 {
-		t.Fatalf("inspector close calls = %d, want 1", inspector.closeCalls.Load())
 	}
 }
 

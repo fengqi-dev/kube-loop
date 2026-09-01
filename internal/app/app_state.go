@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	clientauth "github.com/fengqi-dev/kube-loop/internal/client/auth"
@@ -21,51 +20,42 @@ import (
 	clientremote "github.com/fengqi-dev/kube-loop/internal/client/remote"
 	clientremotesession "github.com/fengqi-dev/kube-loop/internal/client/remotesession"
 	"github.com/fengqi-dev/kube-loop/internal/mcp"
-	"github.com/fengqi-dev/kube-loop/internal/trafficinspect"
 	"github.com/fengqi-dev/kube-loop/internal/update"
 )
 
 type App struct {
-	ctx                       context.Context
-	profiles                  *clientprofile.Store
-	discovery                 *clientdiscovery.Client
-	auth                      *clientauth.Client
-	remote                    *clientremote.Client
-	remoteSessions            *clientremotesession.Manager
-	dataPlanes                *clientdataplane.Manager
-	remoteExecs               *clientexec.Manager
-	remoteFiles               *clientfiletransfer.Manager
-	remoteSSH                 *clientpodssh.Manager
-	remoteForwards            *clientportforward.Manager
-	remoteExchanges           *clientexchange.Manager
-	remoteMirrors             *clientmirror.Manager
-	remotePreviews            *clientpreview.Manager
-	credentials               credentials.Store
-	mcp                       *mcp.Controller
-	updater                   *update.Checker
-	once                      sync.Once
-	updateMu                  sync.RWMutex
-	updateCheck               sync.Mutex
-	updateState               update.Info
-	inventoryWatchMu          sync.Mutex
-	inventoryWatchLifecycle   sync.Mutex
-	inventoryWatchWG          sync.WaitGroup
-	inventoryWatchProfile     string
-	inventoryWatchCancel      context.CancelFunc
-	backgroundCancel          context.CancelFunc
-	backgroundWG              sync.WaitGroup
-	startupSessionSync        func(context.Context) error
-	shutdownTimeout           time.Duration
-	serverLoginMu             sync.Mutex
-	serverLogin               *serverLoginAttempt
-	trafficInspectionEnabled  *atomic.Bool
-	trafficInspectionSettings *trafficinspect.SettingsStore
-	trafficInspectionProtobuf *trafficinspect.ProtobufSchemaStore
-	trafficInspectionEvents   *trafficinspect.EventBuffer
-	trafficInspectionMu       sync.Mutex
-	trafficInspectionReady    func() bool
-	trafficInspectionCAPath   string
-	trafficInspectionTrust    trafficinspect.TrustStore
+	ctx                     context.Context
+	profiles                *clientprofile.Store
+	discovery               *clientdiscovery.Client
+	auth                    *clientauth.Client
+	remote                  *clientremote.Client
+	remoteSessions          *clientremotesession.Manager
+	dataPlanes              *clientdataplane.Manager
+	remoteExecs             *clientexec.Manager
+	remoteFiles             *clientfiletransfer.Manager
+	remoteSSH               *clientpodssh.Manager
+	remoteForwards          *clientportforward.Manager
+	remoteExchanges         *clientexchange.Manager
+	remoteMirrors           *clientmirror.Manager
+	remotePreviews          *clientpreview.Manager
+	credentials             credentials.Store
+	mcp                     *mcp.Controller
+	updater                 *update.Checker
+	once                    sync.Once
+	updateMu                sync.RWMutex
+	updateCheck             sync.Mutex
+	updateState             update.Info
+	inventoryWatchMu        sync.Mutex
+	inventoryWatchLifecycle sync.Mutex
+	inventoryWatchWG        sync.WaitGroup
+	inventoryWatchProfile   string
+	inventoryWatchCancel    context.CancelFunc
+	backgroundCancel        context.CancelFunc
+	backgroundWG            sync.WaitGroup
+	startupSessionSync      func(context.Context) error
+	shutdownTimeout         time.Duration
+	serverLoginMu           sync.Mutex
+	serverLogin             *serverLoginAttempt
 }
 
 type BootstrapData struct {

@@ -7,7 +7,6 @@ export type AppView =
   | "network"
   | "sessions"
   | "host-aliases"
-  | "traffic-inspection"
   | "mcp"
   | "settings";
 
@@ -18,7 +17,6 @@ export const navKeys: Record<AppView, TranslationKey> = {
   network: "nav.network",
   sessions: "nav.sessions",
   "host-aliases": "nav.hostAliases",
-  "traffic-inspection": "nav.trafficInspection",
   mcp: "nav.mcp",
   settings: "nav.settings",
 };

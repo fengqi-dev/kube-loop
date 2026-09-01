@@ -14,7 +14,3 @@ func ElevateInstall(context.Context, string, string, string, int, string, string
 func ElevateUninstall(context.Context, string) error {
 	return fmt.Errorf("helper uninstall is unsupported on this platform")
 }
-
-func ElevateUninstallWithCertificate(ctx context.Context, source, _ string) error {
-	return ElevateUninstall(ctx, source)
-}

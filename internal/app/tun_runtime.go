@@ -16,7 +16,6 @@ import (
 // kubeconfig or talks to Kubernetes.
 func NewSingboxRuntime(
 	appendLog func(string, string),
-	installTrust ...func(context.Context) error,
 ) *singboxruntime.Runtime {
 	logEvent := func(level, message string) {
 		if appendLog != nil {
@@ -30,12 +29,6 @@ func NewSingboxRuntime(
 		logEvent("INFO", "ensuring privileged helper is ready")
 		if err := helperinstall.EnsureInstall(ctx); err != nil {
 			return nil, fmt.Errorf("ensure privileged helper: %w", err)
-		}
-		if len(installTrust) > 0 && installTrust[0] != nil {
-			logEvent("INFO", "ensuring traffic inspection certificate is trusted")
-			if err := installTrust[0](ctx); err != nil {
-				return nil, fmt.Errorf("ensure traffic inspection certificate trust: %w", err)
-			}
 		}
 		client, err := helper.NewClient()
 		if err != nil {

@@ -24,7 +24,6 @@ func installCurrentHelper(
 	source, sourceSHA256, token string,
 	uid int,
 	home, singBox string,
-	certificatePEM []byte,
 ) error {
 	config := supervisor.CurrentConfig()
 	supervisorSource, err := LocateBundledSupervisor()
@@ -52,7 +51,7 @@ func installCurrentHelper(
 		canUpdateWorkerThroughSupervisor(status, statusErr, config.Channel, installedSupervisorSHA, supervisorSHA) {
 		if status.Worker.SHA256 == sourceSHA256 && status.Worker.Version == helper.Version &&
 			status.Worker.Protocol == helperspec.Version && status.Worker.CoreReady {
-			return installCertificateFromSource(ctx, source, certificatePEM)
+			return nil
 		}
 		info, err := os.Stat(source)
 		if err != nil {
@@ -68,41 +67,12 @@ func installCurrentHelper(
 		if _, err = client.UpdateWorker(ctx, manifest, source); err != nil {
 			return err
 		}
-		return installCertificateFromSource(ctx, source, certificatePEM)
+		return nil
 	}
-
-	certificatePath, cleanup, err := writeTemporaryPublicCertificate(certificatePEM)
-	if err != nil {
-		return err
-	}
-	defer cleanup()
 	return ElevateSupervisorInstall(
 		ctx, supervisorSource, supervisorSHA, source, sourceSHA256, helper.Version, config.Channel,
-		token, uid, home, singBox, certificatePath,
+		token, uid, home, singBox,
 	)
-}
-
-func installCertificateWithoutServiceChange(ctx context.Context, certificatePEM []byte) error {
-	if len(certificatePEM) == 0 {
-		return nil
-	}
-	source, err := LocateBundledHelper()
-	if err != nil {
-		return err
-	}
-	return installCertificateFromSource(ctx, source, certificatePEM)
-}
-
-func installCertificateFromSource(ctx context.Context, source string, certificatePEM []byte) error {
-	certificatePath, cleanup, err := writeTemporaryPublicCertificate(certificatePEM)
-	if err != nil {
-		return err
-	}
-	defer cleanup()
-	if certificatePath == "" {
-		return nil
-	}
-	return ElevateTrustCertificate(ctx, source, certificatePath)
 }
 
 func installedCoreMatches(source, installed string) bool {

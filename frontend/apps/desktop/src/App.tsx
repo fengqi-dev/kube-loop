@@ -10,7 +10,6 @@ import { ServerNetworkView } from "@/components/server/server-network-view";
 import { ServerWorkloadView } from "@/components/server/server-workload-view";
 import { SessionsView } from "@/components/sessions/sessions-view";
 import { SettingsView } from "@/components/settings/settings-view";
-import { TrafficInspectionView } from "@/components/traffic-inspection/traffic-inspection-view";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { Spinner } from "@/components/ui/spinner";
 import type { AuthSession, BootstrapData, ServerProfileState } from "@/types";
@@ -175,8 +174,6 @@ function App() {
             <SessionsView profileId={activeProfile?.id ?? ""} />
           ) : view === "mcp" ? (
             <MCPView />
-          ) : view === "traffic-inspection" ? (
-            <TrafficInspectionView />
           ) : view === "settings" ? (
             <SettingsView
               profileId={activeProfile?.id ?? ""}

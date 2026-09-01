@@ -167,33 +167,8 @@ func TestElevatedCommandIsHidden(t *testing.T) {
 	if exitCode != 0 {
 		t.Fatalf("exit code = %d, stderr = %q", exitCode, stderr)
 	}
-	if strings.Contains(stdout, "elevated") || strings.Contains(stdout, trustCertificateCommandName) {
+	if strings.Contains(stdout, "elevated") {
 		t.Fatalf("internal elevated command appeared in help:\n%s", stdout)
-	}
-}
-
-func TestTrustCertificateCommand(t *testing.T) {
-	t.Parallel()
-
-	var received trustCertificateOptions
-	dependencies := commandDependencies{
-		trustCertificate: func(_ context.Context, options trustCertificateOptions) error {
-			received = options
-			return nil
-		},
-	}
-	stdout, stderr, exitCode := executeForTest(t, []string{
-		trustCertificateCommandName,
-		"--operation", "install",
-		"--certificate", "/tmp/inspection-ca.pem",
-	}, dependencies, "dev")
-	if exitCode != 0 || stdout != "" || stderr != "" {
-		t.Fatalf("exit code = %d, stdout/stderr = %q/%q", exitCode, stdout, stderr)
-	}
-	if received != (trustCertificateOptions{
-		operation: "install", certificate: "/tmp/inspection-ca.pem",
-	}) {
-		t.Fatalf("trust certificate options = %#v", received)
 	}
 }
 

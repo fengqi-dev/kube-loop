@@ -54,9 +54,6 @@ import type {
 	ServerNetworkSettings,
   SessionState,
   UpdateInfo,
-	TrafficInspectionQuery,
-	TrafficInspectionResult,
-	TrafficInspectionSettings,
 } from "./types";
 
 declare global {
@@ -86,10 +83,6 @@ declare global {
 		  SetServerDNSNamespace(profileId: string, namespace: string): Promise<ServerNetworkSettings>;
 		  SetServerHostAliases(profileId: string, aliases: HostAlias[]): Promise<ServerNetworkSettings>;
 		  ServerDataPlaneLogs(profileId: string): Promise<string[]>;
-		  TrafficInspectionEvents(query: TrafficInspectionQuery): Promise<TrafficInspectionResult>;
-		  GetTrafficInspectionSettings(): Promise<TrafficInspectionSettings>;
-		  SetTrafficInspectionEnabled(enabled: boolean): Promise<TrafficInspectionSettings>;
-		  ImportTrafficInspectionProtoDirectory(): Promise<TrafficInspectionSettings>;
 		  StartServerPortForward(request: ServerPortForwardRequest): Promise<ServerPortForwardInfo>;
 		  PauseServerPortForward(profileId: string, taskId: string): Promise<void>;
 		  ResumeServerPortForward(profileId: string, taskId: string): Promise<ServerPortForwardInfo>;
@@ -290,14 +283,6 @@ export const backend = {
 		Promise.resolve().then(() => api().SetServerHostAliases(profileId, aliases)),
 	serverDataPlaneLogs: (profileId: string) =>
 		Promise.resolve().then(() => api().ServerDataPlaneLogs(profileId)),
-	trafficInspectionEvents: (query: TrafficInspectionQuery) =>
-		Promise.resolve().then(() => api().TrafficInspectionEvents(query)),
-	getTrafficInspectionSettings: () =>
-		Promise.resolve().then(() => api().GetTrafficInspectionSettings()),
-	setTrafficInspectionEnabled: (enabled: boolean) =>
-		Promise.resolve().then(() => api().SetTrafficInspectionEnabled(enabled)),
-	importTrafficInspectionProtoDirectory: () =>
-		Promise.resolve().then(() => api().ImportTrafficInspectionProtoDirectory()),
 	startServerPortForward: (request: ServerPortForwardRequest) =>
 		Promise.resolve().then(() => api().StartServerPortForward(request)),
 	pauseServerPortForward: (profileId: string, taskId: string) =>
