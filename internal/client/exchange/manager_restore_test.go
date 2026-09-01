@@ -57,7 +57,10 @@ func TestManagerRestoreFailureDoesNotPauseRunningExchange(t *testing.T) {
 		LocalTargets: []remote.LocalTarget{{ServicePort: 80, Protocol: "tcp", LocalPort: 8080}},
 		CreatedAt:    now, UpdatedAt: now, ExpiresAt: now.Add(time.Hour),
 	}
-	client := &restoreExchangeClient{testExchangeClient: testExchangeClient{task: task}, tasks: []remote.ExchangeTask{task}}
+	client := &restoreExchangeClient{
+		task:  task,
+		tasks: []remote.ExchangeTask{task},
+	}
 	manager, err := NewManager(client, Config{TrafficStreams: client})
 	if err != nil {
 		t.Fatal(err)

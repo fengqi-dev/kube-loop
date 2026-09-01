@@ -57,7 +57,10 @@ func TestManagerRestoreFailureDoesNotPauseRunningMirror(t *testing.T) {
 		LocalTargets: []remote.LocalTarget{{ServicePort: 80, Protocol: "tcp", LocalPort: 8080}},
 		CreatedAt:    now, UpdatedAt: now, ExpiresAt: now.Add(time.Hour),
 	}
-	client := &restoreMirrorClient{testMirrorClient: testMirrorClient{task: task}, tasks: []remote.MirrorTask{task}}
+	client := &restoreMirrorClient{
+		task:  task,
+		tasks: []remote.MirrorTask{task},
+	}
 	manager, err := NewManager(client, Config{TrafficStreams: client})
 	if err != nil {
 		t.Fatal(err)

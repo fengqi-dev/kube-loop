@@ -7,5 +7,6 @@ const (
 	internalServerErrorMessage    = "internal server error"
 	operationList                 = "list"
 	resourceSessions              = "sessions"
+	resourceTrafficBindings       = "traffic-bindings"
 	operationStream               = "stream"
 )

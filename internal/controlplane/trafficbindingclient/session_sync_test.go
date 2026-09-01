@@ -6,9 +6,10 @@ import (
 	"testing"
 	"time"
 
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
 	trafficv1alpha1 "github.com/fengqi-dev/kube-loop/api/v1alpha1"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/entity"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 func TestSessionSynchronizerListsEveryIdentityBindingAcrossSessions(t *testing.T) {

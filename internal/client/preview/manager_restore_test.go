@@ -58,8 +58,9 @@ func TestManagerRestoreFailureDoesNotPauseRunningPreview(t *testing.T) {
 		CreatedAt:    now, UpdatedAt: now,
 	}
 	client := &restorePreviewClient{
-		testPreviewClient: testPreviewClient{created: task, running: task},
-		tasks:             []remote.PreviewTask{task},
+		created: task,
+		running: task,
+		tasks:   []remote.PreviewTask{task},
 	}
 	manager, err := NewManager(client, Config{TrafficStreams: client})
 	if err != nil {

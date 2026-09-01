@@ -114,14 +114,14 @@ func applySessionCoreAuthorization(
 		}
 	}
 	if len(parts) == 3 && parts[0] == resourceSessions &&
-		parts[2] == "traffic-bindings" && request.Method == http.MethodGet {
-		result.ResourceKind = "traffic-bindings"
+		parts[2] == resourceTrafficBindings && request.Method == http.MethodGet {
+		result.ResourceKind = resourceTrafficBindings
 		result.ResourceName = parts[1]
 		result.Operation = operationList
 	}
 	if len(parts) == 4 && parts[0] == resourceSessions &&
-		parts[2] == "traffic-bindings" && request.Method == http.MethodDelete {
-		result.ResourceKind = "traffic-bindings"
+		parts[2] == resourceTrafficBindings && request.Method == http.MethodDelete {
+		result.ResourceKind = resourceTrafficBindings
 		result.ResourceName = parts[3]
 		result.Operation = operationDelete
 	}

@@ -18,7 +18,8 @@ func TestWaitForPausedReturnsPermanentPauseFailure(t *testing.T) {
 	manager := newFakeManager(t)
 	key := types.NamespacedName{Namespace: "development", Name: "kubeloop-broken"}
 	binding := &trafficv1alpha1.TrafficBinding{
-		ObjectMeta: metav1.ObjectMeta{Name: key.Name, Namespace: key.Namespace},
+		Name:      key.Name,
+		Namespace: key.Namespace,
 	}
 	if err := manager.client.Create(context.Background(), binding); err != nil {
 		t.Fatal(err)
