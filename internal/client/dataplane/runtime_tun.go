@@ -93,16 +93,6 @@ func (runtime *Runtime) StopTUN() (Status, error) {
 	return status, nil
 }
 
-func (runtime *Runtime) Metrics(ctx context.Context) (singbox.Metrics, error) {
-	runtime.stateMu.Lock()
-	core := runtime.tun
-	runtime.stateMu.Unlock()
-	if core == nil {
-		return singbox.Metrics{}, errors.New("tUN runtime is not running")
-	}
-	return core.Snapshot(ctx)
-}
-
 func (runtime *Runtime) Logs(ctx context.Context) ([]string, error) {
 	runtime.stateMu.Lock()
 	core := runtime.tun

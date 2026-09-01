@@ -3,20 +3,13 @@ package exchangeapi
 import (
 	"context"
 	"errors"
-	"time"
 
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/entity"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/sessionapi"
-	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 )
 
 const TaskType = "exchange"
-
-type Storage interface {
-	storage.Repositories
-	storage.TransactionManager
-}
 
 type SessionValidator interface {
 	RequireActive(
@@ -38,32 +31,27 @@ type ServiceResolver interface {
 }
 
 type Service struct {
-	storage   Storage
 	sessions  SessionValidator
 	services  ServiceResolver
 	resources ResourceMutator
-	now       func() time.Time
 	config    Config
 }
 
 func New(
-	storageBackend Storage,
 	sessions SessionValidator,
 	services ServiceResolver,
 	resources ResourceMutator,
 	config Config,
 ) (*Service, error) {
-	if storageBackend == nil || sessions == nil || services == nil ||
-		resources == nil {
+	if sessions == nil || services == nil || resources == nil {
 		return nil, errors.New(
-			"exchange storage, Session validator, Service resolver and resource mutator are required",
+			"exchange Session validator, Service resolver and resource mutator are required",
 		)
 	}
 	if err := config.normalize(); err != nil {
 		return nil, err
 	}
 	return &Service{
-		storage: storageBackend, sessions: sessions, services: services, resources: resources,
-		now: config.Now, config: config,
+		sessions: sessions, services: services, resources: resources, config: config,
 	}, nil
 }

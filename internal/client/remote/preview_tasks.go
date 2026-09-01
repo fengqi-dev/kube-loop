@@ -34,6 +34,14 @@ func (client *Client) GetPreview(
 	)
 }
 
+func (client *Client) ListPreviews(
+	ctx context.Context,
+	serverProfile profile.Profile,
+	current Session,
+) ([]PreviewTask, error) {
+	return listRemoteTasks(ctx, client, serverProfile, current, "previews", validatePreviewTask)
+}
+
 func (client *Client) PausePreview(
 	ctx context.Context,
 	serverProfile profile.Profile,

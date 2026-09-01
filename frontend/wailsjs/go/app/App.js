@@ -134,6 +134,10 @@ export function ListServerPreviews(arg1) {
   return window['go']['app']['App']['ListServerPreviews'](arg1);
 }
 
+export function ListServerSessions(arg1) {
+  return window['go']['app']['App']['ListServerSessions'](arg1);
+}
+
 export function LoadServerInventory(arg1, arg2) {
   return window['go']['app']['App']['LoadServerInventory'](arg1, arg2);
 }
@@ -232,10 +236,6 @@ export function ServerAuthStatus(arg1) {
 
 export function ServerDataPlaneLogs(arg1) {
   return window['go']['app']['App']['ServerDataPlaneLogs'](arg1);
-}
-
-export function ServerDataPlaneMetrics(arg1) {
-  return window['go']['app']['App']['ServerDataPlaneMetrics'](arg1);
 }
 
 export function ServerLocalHomeDirectory() {

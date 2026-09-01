@@ -13,7 +13,6 @@ import {mirror} from '../models';
 import {podssh} from '../models';
 import {portforward} from '../models';
 import {preview} from '../models';
-import {singbox} from '../models';
 import {discovery} from '../models';
 
 export function Bootstrap():Promise<app.BootstrapData>;
@@ -82,6 +81,8 @@ export function ListServerPortForwards(arg1:string):Promise<Array<portforward.In
 
 export function ListServerPreviews(arg1:string):Promise<Array<preview.Info>>;
 
+export function ListServerSessions(arg1:string):Promise<Array<remote.TrafficBindingSession>>;
+
 export function LoadServerInventory(arg1:string,arg2:string):Promise<app.RemoteInventory>;
 
 export function LoginServerOIDC(arg1:string,arg2:string):Promise<app.AuthSession>;
@@ -131,8 +132,6 @@ export function SelectServerProfile(arg1:string):Promise<profile.State>;
 export function ServerAuthStatus(arg1:string):Promise<app.AuthSession>;
 
 export function ServerDataPlaneLogs(arg1:string):Promise<Array<string>>;
-
-export function ServerDataPlaneMetrics(arg1:string):Promise<singbox.Metrics>;
 
 export function ServerLocalHomeDirectory():Promise<string>;
 

@@ -413,6 +413,13 @@ func (client *e2eTrafficControlClient) DoJSON(
 		return fmt.Errorf("unsupported traffic control request %s %s", method, path)
 	}
 	if apiError != nil {
+		client.t.Logf(
+			"traffic control failed: method=%s path=%s code=%s cause=%v",
+			method,
+			path,
+			apiError.Code,
+			apiError.Cause,
+		)
 		return e2eTrafficControlError{apiError: apiError}
 	}
 	raw, err := json.Marshal(response)
@@ -426,7 +433,12 @@ type e2eTrafficControlError struct {
 	apiError *controlplaneapi.Error
 }
 
-func (failure e2eTrafficControlError) Error() string { return failure.apiError.Message }
+func (failure e2eTrafficControlError) Error() string {
+	if failure.apiError.Cause != nil {
+		return fmt.Sprintf("%s: %v", failure.apiError.Message, failure.apiError.Cause)
+	}
+	return failure.apiError.Message
+}
 
 func (failure e2eTrafficControlError) HTTPStatus() int {
 	switch failure.apiError.Code {

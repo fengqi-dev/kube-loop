@@ -48,23 +48,18 @@ func (handler *Service) settleOwnedTasks(ctx context.Context, sessionID string) 
 	}
 	var result error
 	for _, task := range tasks {
-		if task.State.Terminal() {
-			continue
-		}
-		resourceBacked := task.Type == "exchange" || task.Type == "mirror" || task.Type == "preview"
-		if resourceBacked && task.State == remotetask.Recovering {
-			// The feature-specific recovery worker owns this state and its
-			// heartbeat; do not postpone its stale-owner boundary on repeated GET.
+		if task.State == remotetask.Stopped || task.State.Terminal() {
 			continue
 		}
 		next := remotetask.Failed
-		switch {
-		case task.State == remotetask.Pending || task.Type == "port-forward":
+		switch task.State {
+		case remotetask.Pending:
 			next = remotetask.Stopped
-		case resourceBacked:
-			next = remotetask.Recovering
-		case task.State == remotetask.Stopping:
+		case remotetask.Stopping:
 			next = remotetask.Stopped
+		case remotetask.Starting, remotetask.Running, remotetask.Recovering,
+			remotetask.Failed, remotetask.Stopped, remotetask.Deleted:
+			next = remotetask.Failed
 		}
 		if updateErr := handler.storage.Tasks().UpdateState(
 			ctx, task.ID, task.State, next, task.Result, handler.now().UTC(),

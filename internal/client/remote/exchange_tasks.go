@@ -34,6 +34,14 @@ func (client *Client) GetExchange(
 	)
 }
 
+func (client *Client) ListExchanges(
+	ctx context.Context,
+	serverProfile profile.Profile,
+	current Session,
+) ([]ExchangeTask, error) {
+	return listRemoteTasks(ctx, client, serverProfile, current, "exchanges", validateExchangeTask)
+}
+
 func (client *Client) PauseExchange(
 	ctx context.Context,
 	serverProfile profile.Profile,

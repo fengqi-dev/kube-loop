@@ -33,6 +33,7 @@ import type {
 	DataPlaneStatus,
 	ServerPortForwardInfo,
 	ServerPortForwardRequest,
+	ServerTrafficBindingSession,
 		ServerExchangeInfo,
 		ServerExchangeRequest,
 			ServerMirrorInfo,
@@ -51,7 +52,6 @@ import type {
 	ServerPodFileList,
 	ServerPodFileTask,
 	ServerNetworkSettings,
-  Metrics,
   SessionIntentCounts,
   SessionState,
   UpdateInfo,
@@ -86,7 +86,6 @@ declare global {
 		  SetServerSOCKSPort(profileId: string, port: number): Promise<ServerNetworkSettings>;
 		  SetServerDNSNamespace(profileId: string, namespace: string): Promise<ServerNetworkSettings>;
 		  SetServerHostAliases(profileId: string, aliases: HostAlias[]): Promise<ServerNetworkSettings>;
-		  ServerDataPlaneMetrics(profileId: string): Promise<Metrics>;
 		  ServerDataPlaneLogs(profileId: string): Promise<string[]>;
 		  TrafficInspectionEvents(query: TrafficInspectionQuery): Promise<TrafficInspectionResult>;
 		  GetTrafficInspectionSettings(): Promise<TrafficInspectionSettings>;
@@ -97,6 +96,7 @@ declare global {
 		  ResumeServerPortForward(profileId: string, taskId: string): Promise<ServerPortForwardInfo>;
 		  DeleteServerPortForward(profileId: string, taskId: string): Promise<void>;
 		  ListServerPortForwards(profileId: string): Promise<ServerPortForwardInfo[]>;
+		  ListServerSessions(profileId: string): Promise<ServerTrafficBindingSession[]>;
 			  StartServerExchange(request: ServerExchangeRequest): Promise<ServerExchangeInfo>;
 			  PauseServerExchange(profileId: string, taskId: string): Promise<void>;
 			  ResumeServerExchange(profileId: string, taskId: string): Promise<ServerExchangeInfo>;
@@ -290,8 +290,6 @@ export const backend = {
 		Promise.resolve().then(() => api().SetServerDNSNamespace(profileId, namespace)),
 	setServerHostAliases: (profileId: string, aliases: HostAlias[]) =>
 		Promise.resolve().then(() => api().SetServerHostAliases(profileId, aliases)),
-	serverDataPlaneMetrics: (profileId: string) =>
-		Promise.resolve().then(() => api().ServerDataPlaneMetrics(profileId)),
 	serverDataPlaneLogs: (profileId: string) =>
 		Promise.resolve().then(() => api().ServerDataPlaneLogs(profileId)),
 	trafficInspectionEvents: (query: TrafficInspectionQuery) =>
@@ -312,6 +310,8 @@ export const backend = {
 		Promise.resolve().then(() => api().DeleteServerPortForward(profileId, taskId)),
 	listServerPortForwards: (profileId: string) =>
 		Promise.resolve().then(() => api().ListServerPortForwards(profileId)),
+	listServerSessions: (profileId: string) =>
+		Promise.resolve().then(() => api().ListServerSessions(profileId)),
 	startServerExchange: (request: ServerExchangeRequest) =>
 		Promise.resolve().then(() => api().StartServerExchange(request)),
 	pauseServerExchange: (profileId: string, taskId: string) =>
@@ -509,13 +509,6 @@ export const backend = {
   onSession: (callback: (state: SessionState) => void) => {
     if (!window.runtime) return () => undefined;
     return window.runtime.EventsOn("session:state", callback as (state: never) => void);
-  },
-  onSessionMetrics: (callback: (metrics: Metrics) => void) => {
-    if (!window.runtime) return () => undefined;
-    return window.runtime.EventsOn(
-      "session:metrics",
-      callback as (metrics: never) => void,
-    );
   },
   onUpdate: (callback: (state: UpdateInfo) => void) => {
     if (!window.runtime) return () => undefined;

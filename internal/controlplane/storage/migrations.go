@@ -5,7 +5,10 @@ import (
 	"strings"
 )
 
-const currentSchemaID = "kubeloop-v1"
+const (
+	currentSchemaID  = "kubeloop-v2"
+	previousSchemaID = "kubeloop-v1"
+)
 
 //go:embed schema.sqlite.sql
 var sqliteBaselineSchema string

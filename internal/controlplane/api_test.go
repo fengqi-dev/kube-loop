@@ -351,6 +351,13 @@ func TestUnifiedAuthorizerGatesTaskCreationAndControlPlaneStreams(t *testing.T) 
 			"port-forwards",
 		},
 		{
+			"traffic binding sessions",
+			http.MethodGet,
+			APIPathPrefix + "/sessions/session-1/traffic-bindings?namespace=development",
+			"list",
+			"traffic-bindings",
+		},
+		{
 			"pod exec",
 			http.MethodPost,
 			APIPathPrefix + "/sessions/session-1/exec?namespace=development",

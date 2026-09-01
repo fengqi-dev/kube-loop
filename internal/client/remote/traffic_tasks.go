@@ -58,6 +58,40 @@ func createRemoteTask[Spec, Task any](
 	return validateTask(result, current)
 }
 
+func listRemoteTasks[Task any](
+	ctx context.Context,
+	client *Client,
+	serverProfile profile.Profile,
+	current Session,
+	resource string,
+	validateTask func(Task, Session) (Task, error),
+) ([]Task, error) {
+	if err := validateSessionTarget(current.Namespace, current.ID); err != nil || current.State != remoteSessionActive {
+		return nil, errors.New("active Session identity is required")
+	}
+	var result struct {
+		Items []Task `json:"items"`
+	}
+	if err := client.doJSON(
+		ctx, serverProfile, http.MethodGet,
+		"/api/sessions/"+url.PathEscape(current.ID)+"/"+resource,
+		url.Values{remoteParamNamespace: {current.Namespace}}, nil, &result,
+	); err != nil {
+		return nil, err
+	}
+	if result.Items == nil {
+		result.Items = []Task{}
+	}
+	for index := range result.Items {
+		validated, err := validateTask(result.Items[index], current)
+		if err != nil {
+			return nil, err
+		}
+		result.Items[index] = validated
+	}
+	return result.Items, nil
+}
+
 func remoteTaskByID[Task any](
 	ctx context.Context,
 	client *Client,

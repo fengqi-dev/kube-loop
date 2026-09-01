@@ -1,5 +1,4 @@
 import { backend } from "@/backend";
-import { ConnectionsView } from "@/components/connections/connections-view";
 import { HostAliasesView } from "@/components/host-aliases/host-aliases-view";
 import { AppHeader } from "@/components/layout/app-header";
 import { AppSidebar } from "@/components/layout/app-sidebar";
@@ -9,11 +8,12 @@ import { WindowControls } from "@/components/layout/window-controls";
 import { ServerAccessView } from "@/components/server/server-access-view";
 import { ServerNetworkView } from "@/components/server/server-network-view";
 import { ServerWorkloadView } from "@/components/server/server-workload-view";
+import { SessionsView } from "@/components/sessions/sessions-view";
 import { SettingsView } from "@/components/settings/settings-view";
 import { TrafficInspectionView } from "@/components/traffic-inspection/traffic-inspection-view";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { Spinner } from "@/components/ui/spinner";
-import type { AuthSession, BootstrapData, Metrics, ServerProfileState } from "@/types";
+import type { AuthSession, BootstrapData, ServerProfileState } from "@/types";
 import { toast } from "sonner";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 
@@ -22,8 +22,7 @@ function App() {
   const [profiles, setProfiles] = useState<ServerProfileState>();
   const [auth, setAuth] = useState<AuthSession>({ authenticated: false });
   const [view, setView] = useState<AppView>("overview");
-  const [metrics, setMetrics] = useState<Metrics>();
-  const [metricsError, setMetricsError] = useState("");
+  const [sessionConnected, setSessionConnected] = useState(false);
   const [updateBusy, setUpdateBusy] = useState(false);
   const [logoutBusy, setLogoutBusy] = useState(false);
   const [error, setError] = useState("");
@@ -71,35 +70,6 @@ function App() {
     authQueryGeneration.current += 1;
     setAuth(session);
   }, []);
-
-  useEffect(() => {
-    if (!activeProfile) {
-      setMetrics(undefined);
-      setMetricsError("");
-      return;
-    }
-    let active = true;
-    const refresh = async () => {
-      try {
-        const next = await backend.serverDataPlaneMetrics(activeProfile.id);
-        if (active) {
-          setMetrics(next);
-          setMetricsError("");
-        }
-      } catch (reason) {
-        if (active) {
-          setMetrics(undefined);
-          setMetricsError(reason instanceof Error ? reason.message : String(reason));
-        }
-      }
-    };
-    void refresh();
-    const timer = window.setInterval(() => void refresh(), 1_000);
-    return () => {
-      active = false;
-      window.clearInterval(timer);
-    };
-  }, [activeProfile]);
 
   useEffect(() => {
     if (!activeProfile) {
@@ -169,7 +139,6 @@ function App() {
     >
       <AppSidebar
         view={view}
-        connectionsAlert={Boolean(metrics?.connections?.length)}
         updateAvailable={data.update.available}
         authenticated={auth.authenticated}
         userName={auth.userName}
@@ -185,26 +154,25 @@ function App() {
             <ServerAccessView
               profiles={profiles}
               authSession={auth}
+              overviewVisible={view === "overview"}
               onProfilesChange={setProfiles}
               onAuthChange={updateAuth}
               onNavigate={setView}
+              onConnectionChange={setSessionConnected}
             />
           </div>
-          {view === "overview" ? null : view === "connections" ? (
-            <div className="space-y-3">
-              {metricsError ? <p className="text-sm text-muted-foreground">{metricsError}</p> : null}
-              <ConnectionsView ready={Boolean(metrics)} metrics={metrics} />
-            </div>
-          ) : view === "host-aliases" ? (
+          {view === "overview" ? null : view === "host-aliases" ? (
             <HostAliasesView
               profileId={activeProfile?.id ?? ""}
               profileName={activeProfile?.displayName}
-              ready={Boolean(metrics)}
+              ready={sessionConnected}
             />
           ) : view === "workload" ? (
             <ServerWorkloadView profileId={activeProfile?.id ?? ""} />
           ) : view === "network" ? (
             <ServerNetworkView profileId={activeProfile?.id ?? ""} />
+          ) : view === "sessions" ? (
+            <SessionsView profileId={activeProfile?.id ?? ""} />
           ) : view === "mcp" ? (
             <MCPView />
           ) : view === "traffic-inspection" ? (
@@ -212,7 +180,7 @@ function App() {
           ) : view === "settings" ? (
             <SettingsView
               profileId={activeProfile?.id ?? ""}
-              ready={Boolean(metrics)}
+              ready={sessionConnected}
               coreVersion={data.coreVersion}
               update={data.update}
               checking={updateBusy}
@@ -226,6 +194,7 @@ function App() {
               management
               onProfilesChange={setProfiles}
               onNavigate={setView}
+              onConnectionChange={setSessionConnected}
             />
           ) : null}
         </div>

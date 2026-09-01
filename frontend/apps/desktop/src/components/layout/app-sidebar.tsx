@@ -4,13 +4,13 @@ import {
   ChevronsUpDown,
   Gauge,
   Globe,
+  Layers,
   LogIn,
   LogOut,
   Network,
   Server,
   Settings2,
   ScrollText,
-  Waypoints,
   type LucideIcon,
 } from "lucide-react";
 import { LogoMark } from "@/components/brand/logo-mark";
@@ -34,9 +34,9 @@ import { useEffect, useRef, useState } from "react";
 const navigation: Array<{ id: Exclude<AppView, "settings">; icon: LucideIcon }> = [
   { id: "overview", icon: Gauge },
   { id: "clusters", icon: Server },
-  { id: "connections", icon: Waypoints },
   { id: "workload", icon: Boxes },
   { id: "network", icon: Network },
+  { id: "sessions", icon: Layers },
   { id: "host-aliases", icon: Globe },
   { id: "traffic-inspection", icon: ScrollText },
   { id: "mcp", icon: Bot },
@@ -44,7 +44,6 @@ const navigation: Array<{ id: Exclude<AppView, "settings">; icon: LucideIcon }> 
 
 export function AppSidebar({
   view,
-  connectionsAlert,
   updateAvailable,
   authenticated,
   userName,
@@ -54,7 +53,6 @@ export function AppSidebar({
   onLogout,
 }: {
   view: AppView;
-  connectionsAlert?: boolean;
   updateAvailable: boolean;
   authenticated?: boolean;
   userName?: string;
@@ -86,7 +84,6 @@ export function AppSidebar({
   function menuItem(
     id: AppView,
     Icon: LucideIcon,
-    indicator?: "success" | "primary",
   ) {
     const label = t(navKeys[id]);
     const active = view === id;
@@ -117,14 +114,6 @@ export function AppSidebar({
             )}
           />
           <span>{label}</span>
-          {indicator ? (
-            <span
-              className={cn(
-                "ml-auto size-1.5 shrink-0 rounded-full group-data-[collapsible=icon]:absolute group-data-[collapsible=icon]:top-1.5 group-data-[collapsible=icon]:right-1.5",
-                indicator === "success" ? "bg-success" : "bg-sidebar-primary",
-              )}
-            />
-          ) : null}
         </SidebarMenuButton>
       </SidebarMenuItem>
     );
@@ -151,13 +140,7 @@ export function AppSidebar({
         <SidebarGroup className="px-2 py-0">
           <SidebarGroupContent>
             <SidebarMenu className="gap-0.5">
-              {navigation.map(({ id, icon }) =>
-                menuItem(
-                  id,
-                  icon,
-                  id === "connections" && connectionsAlert ? "success" : undefined,
-                ),
-              )}
+              {navigation.map(({ id, icon }) => menuItem(id, icon))}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>

@@ -40,16 +40,20 @@ export function ServerAccessView({
   profiles,
   authSession,
   management = false,
+  overviewVisible = true,
   onProfilesChange,
   onAuthChange,
   onNavigate,
+  onConnectionChange,
 }: {
   profiles: ServerProfileState;
   authSession?: AuthSession;
   management?: boolean;
+  overviewVisible?: boolean;
   onProfilesChange?(profiles: ServerProfileState): void;
   onAuthChange?(auth: AuthSession): void;
   onNavigate?(view: AppView): void;
+  onConnectionChange?(connected: boolean): void;
 }) {
   const [profileState, setProfileState] = useState(() => normalizeProfileState(profiles));
   const initialProfile = useMemo(
@@ -89,6 +93,7 @@ export function ServerAccessView({
   const [loginCancelBusy, setLoginCancelBusy] = useState(false);
   const loginInFlight = useRef(false);
   const loginCancelled = useRef(false);
+  const wasOverviewVisible = useRef(overviewVisible);
   const [error, setError] = useState("");
   const [dataPlaneError, setDataPlaneError] = useState("");
   const [dataPlaneReason, setDataPlaneReason] = useState<DataPlaneStatusEvent["reason"]>();
@@ -184,6 +189,32 @@ export function ServerAccessView({
     });
     return () => unsubscribe?.();
   }, [profile]);
+
+  useEffect(() => {
+    if (!onConnectionChange) return;
+    onConnectionChange(inventory?.dataPlane?.state === "connected");
+  }, [inventory?.dataPlane?.state, onConnectionChange]);
+
+  useEffect(() => {
+    const becameVisible = overviewVisible && !wasOverviewVisible.current;
+    wasOverviewVisible.current = overviewVisible;
+    if (!becameVisible || management || !authenticated || !profile) return;
+
+    let active = true;
+    void Promise.allSettled([
+      backend.listServerPortForwards(profile.id),
+      backend.listServerExchanges(profile.id),
+      backend.listServerMirrors(profile.id),
+      backend.listServerPreviews(profile.id),
+    ]).then(([remoteForwards, remoteExchanges, remoteMirrors, remotePreviews]) => {
+      if (!active) return;
+      if (remoteForwards.status === "fulfilled") setForwards(remoteForwards.value);
+      if (remoteExchanges.status === "fulfilled") setExchanges(remoteExchanges.value);
+      if (remoteMirrors.status === "fulfilled") setMirrors(remoteMirrors.value);
+      if (remotePreviews.status === "fulfilled") setPreviews(remotePreviews.value);
+    });
+    return () => { active = false; };
+  }, [authenticated, management, overviewVisible, profile]);
 
   useEffect(() => () => {
     if (loginInFlight.current) {
@@ -842,13 +873,6 @@ export function ServerAccessView({
         busy={Boolean(busy)}
         dataPlaneError={dataPlaneError}
         dataPlaneReason={dataPlaneReason}
-        counts={{
-          podPortForwards: forwards.filter((item) => item.kind === "pod").length,
-          networkPortForwards: forwards.filter((item) => item.kind === "service").length,
-          exchanges: exchanges.length,
-          mirrors: mirrors.length,
-          previews: previews.length,
-        }}
         onRefresh={() => void loadInventory()}
         onConnect={connectDataPlane}
         onDisconnect={() => void disconnectDataPlane()}

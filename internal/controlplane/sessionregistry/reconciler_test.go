@@ -67,11 +67,6 @@ func TestReconcilerTerminatesOnlyStaleStreamOwners(t *testing.T) {
 			State: remotetask.Running, Spec: json.RawMessage(`{}`), Result: json.RawMessage(`{}`),
 			IdempotencyKey: "live-exec", CreatedAt: now.Add(-time.Minute), UpdatedAt: now.Add(-time.Second),
 		},
-		"live-port-forward": {
-			ID: uuid.NewString(), IdentityID: identityID, SessionID: sessionID, Type: "port-forward",
-			State: remotetask.Running, Spec: json.RawMessage(`{}`), Result: json.RawMessage(`{}`),
-			IdempotencyKey: "live-port-forward", CreatedAt: now.Add(-time.Minute), UpdatedAt: now.Add(-time.Minute),
-		},
 	}
 	for _, task := range tasks {
 		if err := store.Tasks().Create(ctx, task); err != nil {
@@ -95,23 +90,12 @@ func TestReconcilerTerminatesOnlyStaleStreamOwners(t *testing.T) {
 	}
 	want := map[string]remotetask.State{
 		"stale-exec": remotetask.Failed, "stopping-file": remotetask.Stopped,
-		"live-exec": remotetask.Running, "live-port-forward": remotetask.Running,
+		"live-exec": remotetask.Running,
 	}
 	for name, task := range tasks {
 		loaded, err := store.Tasks().GetByID(ctx, task.ID)
 		if err != nil || loaded.State != want[name] {
 			t.Fatalf("%s = %#v, %v; want %s", name, loaded, err, want[name])
 		}
-	}
-	if err := store.Sessions().UpdateState(ctx, sessionID, 1, "disconnected", now); err != nil {
-		t.Fatal(err)
-	}
-	if count, err := reconciler.RunOnce(ctx); err != nil || count != 1 {
-		t.Fatalf("disconnected RunOnce() = %d, %v", count, err)
-	}
-	portForward, err := store.Tasks().
-		GetByID(ctx, tasks["live-port-forward"].ID)
-	if err != nil || portForward.State != remotetask.Stopped {
-		t.Fatalf("disconnected Port Forward = %#v, %v", portForward, err)
 	}
 }

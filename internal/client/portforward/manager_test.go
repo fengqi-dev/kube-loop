@@ -16,13 +16,16 @@ import (
 )
 
 type fakeTaskClient struct {
-	mu        sync.Mutex
-	task      remote.PortForwardTask
-	stopped   []string
-	paused    []string
-	resumed   []string
-	deleted   []string
-	createErr error
+	mu            sync.Mutex
+	task          remote.PortForwardTask
+	stopped       []string
+	paused        []string
+	resumed       []string
+	deleted       []string
+	createErr     error
+	resumeStarted chan struct{}
+	resumeRelease chan struct{}
+	resumeOnce    sync.Once
 }
 
 func (client *fakeTaskClient) PausePortForward(
@@ -43,6 +46,12 @@ func (client *fakeTaskClient) ResumePortForward(
 	client.mu.Lock()
 	client.resumed = append(client.resumed, taskID)
 	client.mu.Unlock()
+	if client.resumeStarted != nil {
+		client.resumeOnce.Do(func() { close(client.resumeStarted) })
+	}
+	if client.resumeRelease != nil {
+		<-client.resumeRelease
+	}
 	task := client.task
 	task.State = "running"
 	return task, nil
@@ -227,6 +236,53 @@ func TestManagerPauseResumeDeleteLifecycle(t *testing.T) {
 	}
 	if len(client.paused) != 2 || len(client.resumed) != 1 || len(client.deleted) != 1 {
 		t.Fatalf("lifecycle calls: pause=%v resume=%v delete=%v", client.paused, client.resumed, client.deleted)
+	}
+}
+
+func TestManagerSerializesConcurrentResume(t *testing.T) {
+	now := time.Now().UTC()
+	task := remote.PortForwardTask{
+		ID: uuid.NewString(), SessionID: uuid.NewString(), Namespace: "development", State: "running",
+		Kind: "service", Name: "api", Protocol: "tcp", RemotePort: 8443,
+		DialAddress: "10.96.0.20:8443", CreatedAt: now, UpdatedAt: now, ExpiresAt: now.Add(time.Minute),
+	}
+	client := &fakeTaskClient{
+		task: task, resumeStarted: make(chan struct{}), resumeRelease: make(chan struct{}),
+	}
+	manager, err := New(client, fakeDataPlane{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager.locals = &fakeLocals{}
+	serverProfile := profile.Profile{ID: "server-1"}
+	session := remote.Session{ID: task.SessionID, Namespace: task.Namespace, State: portForwardSessionActive}
+	if _, err := manager.Start(t.Context(), serverProfile, session, Request{
+		ProfileID: serverProfile.ID, Kind: task.Kind, Name: task.Name,
+		Protocol: task.Protocol, RemotePort: task.RemotePort,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Pause(t.Context(), serverProfile.ID, task.ID); err != nil {
+		t.Fatal(err)
+	}
+	firstDone := make(chan error, 1)
+	go func() {
+		_, resumeErr := manager.Resume(t.Context(), serverProfile.ID, task.ID)
+		firstDone <- resumeErr
+	}()
+	<-client.resumeStarted
+	if _, err := manager.Resume(t.Context(), serverProfile.ID, task.ID); err == nil {
+		t.Fatal("concurrent Resume reached the remote Task")
+	}
+	close(client.resumeRelease)
+	if err := <-firstDone; err != nil {
+		t.Fatal(err)
+	}
+	client.mu.Lock()
+	resumeCalls := len(client.resumed)
+	client.mu.Unlock()
+	if resumeCalls != 1 {
+		t.Fatalf("remote Resume calls = %d", resumeCalls)
 	}
 }
 

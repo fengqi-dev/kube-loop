@@ -32,6 +32,7 @@ import (
 	portforwardservice "github.com/fengqi-dev/kube-loop/internal/controlplane/portforwardapi/service"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/sessionapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/trafficbindingclient"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/capability"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
 )
@@ -50,25 +51,6 @@ func (staticCapabilityDiscoverer) DiscoverCapabilities(
 	string,
 ) (capability.Snapshot, *controlplaneapi.Error) {
 	return capability.Snapshot{}, nil
-}
-
-type e2eBindingManager struct{}
-
-func (e2eBindingManager) Activate(
-	context.Context,
-	sessionapi.ActiveSession,
-	string,
-	portforwardservice.Spec,
-) (bool, error) {
-	return true, nil
-}
-
-func (e2eBindingManager) Delete(context.Context, string, string) error { return nil }
-
-func (e2eBindingManager) Pause(context.Context, string, string) error { return nil }
-
-func (manager e2eBindingManager) Stop(ctx context.Context, namespace, taskID string) error {
-	return manager.Pause(ctx, namespace, taskID)
 }
 
 func (discoverer staticNetworkDiscoverer) Discover(
@@ -125,9 +107,9 @@ func (e2eTokenRefresher) Refresh(
 }
 
 type portForwardControlPlane struct {
-	profile profile.Profile
-	remote  *remote.Client
-	store   *storage.Store
+	profile       profile.Profile
+	remote        *remote.Client
+	bindingConfig *rest.Config
 }
 
 func startPortForwardControlPlane(
@@ -186,7 +168,21 @@ func startPortForwardControlPlane(
 	if err != nil {
 		t.Fatalf("create Port Forward Session validator: %v", err)
 	}
-	portForwards, err := portforwardservice.New(stateStore, resolver, e2eBindingManager{}, portforwardservice.Config{})
+	bindingConfig, err := provider.SystemRESTConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	bindings, err := trafficbindingclient.NewForRESTConfig(bindingConfig, trafficbindingclient.Config{
+		ControlPlaneID: e2eTrafficControlPlaneID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bindingManager, err := portforwardapi.NewTrafficBindingManager(bindings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	portForwards, err := portforwardservice.New(resolver, bindingManager, portforwardservice.Config{})
 	if err != nil {
 		t.Fatalf("create Port Forward API: %v", err)
 	}
@@ -245,9 +241,9 @@ func startPortForwardControlPlane(
 		t.Fatal(err)
 	}
 	return &portForwardControlPlane{
-		profile: profile.Profile{ID: serverProfileID, BaseURL: publicServer.URL, TunnelPath: testPath},
-		remote:  remoteClient,
-		store:   stateStore,
+		profile:       profile.Profile{ID: serverProfileID, BaseURL: publicServer.URL, TunnelPath: testPath},
+		remote:        remoteClient,
+		bindingConfig: bindingConfig,
 	}
 }
 
@@ -289,6 +285,31 @@ func assertPortForwardEcho(ctx context.Context, tcpAddress, udpAddress string) e
 		return fmt.Errorf("unexpected UDP Port Forward response %q", udpResponse[:count])
 	}
 	return nil
+}
+
+func availablePortForwardPort(t *testing.T, network string) uint16 {
+	t.Helper()
+	address := "127.0.0.1:0"
+	if network == "tcp" {
+		listener, err := net.Listen("tcp", address)
+		if err != nil {
+			t.Fatalf("reserve TCP Port Forward port: %v", err)
+		}
+		port := listener.Addr().(*net.TCPAddr).Port
+		if err := listener.Close(); err != nil {
+			t.Fatalf("release TCP Port Forward port: %v", err)
+		}
+		return uint16(port)
+	}
+	connection, err := net.ListenPacket("udp", address)
+	if err != nil {
+		t.Fatalf("reserve UDP Port Forward port: %v", err)
+	}
+	port := connection.LocalAddr().(*net.UDPAddr).Port
+	if err := connection.Close(); err != nil {
+		t.Fatalf("release UDP Port Forward port: %v", err)
+	}
+	return uint16(port)
 }
 
 func assertPortForwardAddresses(

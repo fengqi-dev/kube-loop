@@ -878,9 +878,6 @@ func TestRuntimeStoresNormalizedNetworkSettingsBeforeTUNStarts(t *testing.T) {
 
 func TestRuntimeDiagnosticsIncludeSOCKSAndTUNLogs(t *testing.T) {
 	runtime := &Runtime{socksLogs: []string{"12:00:00 [SOCKS] listening on 127.0.0.1:1080"}}
-	if _, err := runtime.Metrics(context.Background()); err == nil {
-		t.Fatal("metrics succeeded without TUN")
-	}
 	logs, err := runtime.Logs(context.Background())
 	if err != nil || !reflect.DeepEqual(logs, runtime.socksLogs) {
 		t.Fatalf("SOCKS logs = %#v, %v", logs, err)
@@ -888,12 +885,8 @@ func TestRuntimeDiagnosticsIncludeSOCKSAndTUNLogs(t *testing.T) {
 	if _, err := runtime.ConfigJSON(); err == nil {
 		t.Fatal("config succeeded without TUN")
 	}
-	metricsFailure := errors.New("metrics failed")
 	logsFailure := errors.New("logs failed")
-	runtime.tun = &testCore{done: make(chan struct{}), metricsErr: metricsFailure, logsErr: logsFailure}
-	if _, err := runtime.Metrics(context.Background()); !errors.Is(err, metricsFailure) {
-		t.Fatalf("metrics error = %v", err)
-	}
+	runtime.tun = &testCore{done: make(chan struct{}), logsErr: logsFailure}
 	if _, err := runtime.Logs(context.Background()); !errors.Is(err, logsFailure) {
 		t.Fatalf("logs error = %v", err)
 	}

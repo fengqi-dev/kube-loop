@@ -431,6 +431,7 @@ func TestContractHTTPResponseAllowsAdditiveFieldsButRejectsMissingRequiredFields
 	}
 }
 
+//nolint:gocyclo // One integration-style test validates the complete Session HTTP lifecycle contract.
 func TestSessionLifecycleUsesIdempotencyAndGenerationHeaders(t *testing.T) {
 	now := time.Now().UTC()
 	store := &memoryStore{value: validCredential(now)}
@@ -452,6 +453,18 @@ func TestSessionLifecycleUsesIdempotencyAndGenerationHeaders(t *testing.T) {
 				t.Errorf("heartbeat If-Match = %q", request.Header.Get("If-Match"))
 			}
 			generation = 2
+		case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/sync"):
+			if request.Header.Get("If-Match") != "" {
+				t.Errorf("sync If-Match = %q", request.Header.Get("If-Match"))
+			}
+		case request.Method == http.MethodGet && strings.HasSuffix(request.URL.Path, "/traffic-bindings"):
+			_ = json.NewEncoder(writer).Encode(map[string]any{"items": []TrafficBindingSession{{
+				ID: uuid.NewString(), Name: "kubeloop-session", Namespace: "development",
+				SessionID: sessionID, Mode: "PortForward", DesiredState: "Paused", Phase: "Paused",
+				Target: &TrafficBindingTarget{Kind: "Service", Name: "api"},
+				Ports:  []TrafficBindingPort{{TargetPort: 8443, Protocol: "TCP"}}, CreatedAt: now,
+			}}})
+			return
 		case request.Method == http.MethodDelete:
 			if request.Header.Get("If-Match") != `"2"` {
 				t.Errorf("disconnect If-Match = %q", request.Header.Get("If-Match"))
@@ -490,6 +503,14 @@ func TestSessionLifecycleUsesIdempotencyAndGenerationHeaders(t *testing.T) {
 	cached, err := client.Capabilities(context.Background(), serverProfile, "development")
 	if err != nil || len(cached.Capabilities) != 2 {
 		t.Fatalf("Session capability cache = %#v, %v", cached, err)
+	}
+	synchronized, err := client.SyncTrafficBindings(context.Background(), serverProfile, created)
+	if err != nil || synchronized.ID != created.ID || synchronized.Capabilities == nil {
+		t.Fatalf("synchronized = %#v, %v", synchronized, err)
+	}
+	bindings, err := client.ListTrafficBindings(context.Background(), serverProfile, synchronized)
+	if err != nil || len(bindings) != 1 || bindings[0].Target == nil || bindings[0].Target.Name != "api" {
+		t.Fatalf("TrafficBinding Sessions = %#v, %v", bindings, err)
 	}
 	heartbeat, err := client.HeartbeatSession(context.Background(), serverProfile, created)
 	if err != nil || heartbeat.Generation != 2 || heartbeat.Capabilities == nil {

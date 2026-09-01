@@ -6,10 +6,10 @@ import (
 
 	"github.com/google/uuid"
 
+	trafficv1alpha1 "github.com/fengqi-dev/kube-loop/api/v1alpha1"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/sessionapi"
-	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/remotetask"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/trafficbindingclient"
 )
 
 func (service *Service) List(
@@ -17,20 +17,16 @@ func (service *Service) List(
 	identity controlplaneapi.Identity,
 	session sessionapi.ActiveSession,
 ) ([]PortForward, *controlplaneapi.Error) {
-	tasks, err := service.storage.Tasks().ListBySession(ctx, session.ID, 1000)
+	bindings, err := service.bindings.List(ctx, session.Namespace, session.ID)
 	if err != nil {
-		return nil, mapStorageError(err)
+		return nil, internalError(err)
 	}
-	items := make([]PortForward, 0, len(tasks))
-	for _, task := range tasks {
-		if task.Type != TaskType || task.IdentityID != identity.Subject {
-			continue
+	items := make([]PortForward, 0, len(bindings))
+	for index := range bindings {
+		binding := &bindings[index]
+		if ownedBinding(binding, identity, session) && isPortForward(binding) {
+			items = append(items, portForwardFromBinding(binding, session))
 		}
-		portForward, decodeErr := decodeTask(task, session.Namespace)
-		if decodeErr != nil {
-			return nil, internalError(decodeErr)
-		}
-		items = append(items, portForward)
 	}
 	return items, nil
 }
@@ -41,51 +37,21 @@ func (service *Service) Pause(
 	session sessionapi.ActiveSession,
 	taskID string,
 ) (PortForward, *controlplaneapi.Error) {
-	if _, err := uuid.Parse(taskID); err != nil {
-		return PortForward{}, notFound()
+	_, apiError := service.ownedBinding(ctx, identity, session, taskID)
+	if apiError != nil {
+		return PortForward{}, apiError
 	}
-	task, err := service.storage.Tasks().GetByID(ctx, taskID)
-	if err != nil || !owned(task, identity, session) {
-		if err != nil && !errors.Is(err, storage.ErrNotFound) {
-			return PortForward{}, mapStorageError(err)
-		}
-		return PortForward{}, notFound()
-	}
-	if err := pausePortForwardBinding(ctx, service.bindings, session.Namespace, task.ID); err != nil {
+	if err := service.bindings.Stop(ctx, session.Namespace, taskID); err != nil {
 		return PortForward{}, &controlplaneapi.Error{
 			Code:    controlplaneapi.CodeUnavailable,
-			Message: "Port Forward cleanup is pending",
-			Cause:   err,
+			Message: "Port Forward cleanup is pending", Cause: err,
 		}
 	}
-	if !task.State.Terminal() {
-		if err := service.storage.Tasks().UpdateState(
-			ctx, task.ID, task.State, remotetask.Stopped, task.Result, service.now().UTC(),
-		); err != nil {
-			return PortForward{}, mapStorageError(err)
-		}
-		task, err = service.storage.Tasks().GetByID(ctx, task.ID)
-		if err != nil {
-			return PortForward{}, mapStorageError(err)
-		}
-	}
-	portForward, err := decodeTask(task, session.Namespace)
+	binding, err := service.bindings.Get(ctx, session.Namespace, taskID)
 	if err != nil {
 		return PortForward{}, internalError(err)
 	}
-	return portForward, nil
-}
-
-func pausePortForwardBinding(
-	ctx context.Context, bindings BindingManager, namespace, taskID string,
-) error {
-	pauser, ok := bindings.(interface {
-		Pause(context.Context, string, string) error
-	})
-	if ok {
-		return pauser.Pause(ctx, namespace, taskID)
-	}
-	return bindings.Stop(ctx, namespace, taskID)
+	return portForwardFromBinding(binding, session), nil
 }
 
 func (service *Service) Resume(
@@ -94,29 +60,28 @@ func (service *Service) Resume(
 	session sessionapi.ActiveSession,
 	taskID string,
 ) (PortForward, *controlplaneapi.Error) {
-	task, apiError := service.ownedTask(ctx, identity, session, taskID)
+	binding, apiError := service.ownedBinding(ctx, identity, session, taskID)
 	if apiError != nil {
 		return PortForward{}, apiError
 	}
-	if task.State == remotetask.Stopped {
-		now := service.now().UTC()
-		if err := service.storage.Tasks().UpdateState(
-			ctx, task.ID, task.State, remotetask.Pending, task.Result, now,
-		); err != nil {
-			return PortForward{}, mapStorageError(err)
+	if binding.Spec.DesiredState != trafficv1alpha1.TrafficBindingDesiredStatePaused {
+		return PortForward{}, &controlplaneapi.Error{
+			Code: controlplaneapi.CodeConflict, Message: "Port Forward Session is not paused",
 		}
-		task.State, task.UpdatedAt = remotetask.Pending, now
-	} else if task.State != remotetask.Pending && task.State != remotetask.Running {
-		return PortForward{}, mapStorageError(storage.ErrConflict)
 	}
-	if apiError := service.activate(ctx, session, &task); apiError != nil {
-		return PortForward{}, apiError
+	resumer, ok := service.bindings.(interface {
+		Resume(context.Context, string, string) error
+	})
+	if !ok {
+		return PortForward{}, internalError(errors.New("port Forward resume is unavailable"))
 	}
-	result, err := decodeTask(task, session.Namespace)
-	if err != nil {
-		return PortForward{}, internalError(err)
+	if err := resumer.Resume(ctx, session.Namespace, taskID); err != nil {
+		return PortForward{}, &controlplaneapi.Error{
+			Code: controlplaneapi.CodeUnavailable, Message: "Port Forward resume failed", Cause: err,
+		}
 	}
-	return result, nil
+	binding, _ = service.bindings.Get(ctx, session.Namespace, taskID)
+	return portForwardFromBinding(binding, session), nil
 }
 
 func (service *Service) Delete(
@@ -125,46 +90,35 @@ func (service *Service) Delete(
 	session sessionapi.ActiveSession,
 	taskID string,
 ) (PortForward, *controlplaneapi.Error) {
-	task, apiError := service.ownedTask(ctx, identity, session, taskID)
+	binding, apiError := service.ownedBinding(ctx, identity, session, taskID)
 	if apiError != nil {
 		return PortForward{}, apiError
 	}
-	if err := service.bindings.Delete(ctx, session.Namespace, task.ID); err != nil {
+	result := portForwardFromBinding(binding, session)
+	if err := service.bindings.Delete(ctx, session.Namespace, taskID); err != nil {
 		return PortForward{}, &controlplaneapi.Error{
-			Code: controlplaneapi.CodeUnavailable, Message: "Port Forward deletion is pending", Cause: err,
+			Code:    controlplaneapi.CodeUnavailable,
+			Message: "Port Forward deletion is pending", Cause: err,
 		}
-	}
-	if task.State != remotetask.Stopped {
-		now := service.now().UTC()
-		if err := service.storage.Tasks().UpdateState(
-			ctx, task.ID, task.State, remotetask.Stopped, task.Result, now,
-		); err != nil {
-			return PortForward{}, mapStorageError(err)
-		}
-		task.State, task.UpdatedAt = remotetask.Stopped, now
-	}
-	result, err := decodeTask(task, session.Namespace)
-	if err != nil {
-		return PortForward{}, internalError(err)
 	}
 	return result, nil
 }
 
-func (service *Service) ownedTask(
+func (service *Service) ownedBinding(
 	ctx context.Context,
 	identity controlplaneapi.Identity,
 	session sessionapi.ActiveSession,
 	taskID string,
-) (storage.Task, *controlplaneapi.Error) {
+) (*trafficv1alpha1.TrafficBinding, *controlplaneapi.Error) {
 	if _, err := uuid.Parse(taskID); err != nil {
-		return storage.Task{}, notFound()
+		return nil, notFound()
 	}
-	task, err := service.storage.Tasks().GetByID(ctx, taskID)
-	if err != nil || !owned(task, identity, session) {
-		if err != nil && !errors.Is(err, storage.ErrNotFound) {
-			return storage.Task{}, mapStorageError(err)
+	binding, err := service.bindings.Get(ctx, session.Namespace, taskID)
+	if err != nil || !ownedBinding(binding, identity, session) || !isPortForward(binding) {
+		if err != nil && !errors.Is(err, trafficbindingclient.ErrTrafficBindingNotFound) {
+			return nil, internalError(err)
 		}
-		return storage.Task{}, notFound()
+		return nil, notFound()
 	}
-	return task, nil
+	return binding, nil
 }

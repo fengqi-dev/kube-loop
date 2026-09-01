@@ -92,6 +92,61 @@ func (client *Client) HeartbeatSession(
 	return result, nil
 }
 
+func (client *Client) SyncTrafficBindings(
+	ctx context.Context,
+	serverProfile profile.Profile,
+	current Session,
+) (Session, error) {
+	if err := validateSessionTarget(current.Namespace, current.ID); err != nil || current.State != remoteSessionActive {
+		return Session{}, errors.New("active Session identity is required")
+	}
+	var result Session
+	if err := client.doJSON(
+		ctx, serverProfile, http.MethodPost,
+		"/api/sessions/"+url.PathEscape(current.ID)+"/sync",
+		url.Values{remoteParamNamespace: {current.Namespace}}, nil, &result,
+	); err != nil {
+		return Session{}, err
+	}
+	result, err := validateSession(result, current.Namespace)
+	if err != nil {
+		return Session{}, err
+	}
+	result.Capabilities = cloneCapabilityPointer(current.Capabilities)
+	return result, nil
+}
+
+func (client *Client) ListTrafficBindings(
+	ctx context.Context,
+	serverProfile profile.Profile,
+	current Session,
+) ([]TrafficBindingSession, error) {
+	if err := validateSessionTarget(current.Namespace, current.ID); err != nil ||
+		current.State != remoteSessionActive {
+		return nil, errors.New("active Session identity is required")
+	}
+	var result struct {
+		Items []TrafficBindingSession `json:"items"`
+	}
+	if err := client.doJSON(
+		ctx, serverProfile, http.MethodGet,
+		"/api/sessions/"+url.PathEscape(current.ID)+"/traffic-bindings",
+		url.Values{remoteParamNamespace: {current.Namespace}}, nil, &result,
+	); err != nil {
+		return nil, err
+	}
+	if result.Items == nil {
+		result.Items = []TrafficBindingSession{}
+	}
+	for _, item := range result.Items {
+		if item.ID == "" || item.Namespace != current.Namespace || item.SessionID != current.ID ||
+			item.Mode == "" || len(item.Ports) == 0 {
+			return nil, errors.New("gateway returned an invalid TrafficBinding Session")
+		}
+	}
+	return result.Items, nil
+}
+
 func (client *Client) DisconnectSession(
 	ctx context.Context,
 	serverProfile profile.Profile,

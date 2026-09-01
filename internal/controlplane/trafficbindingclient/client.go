@@ -28,6 +28,8 @@ const (
 	defaultPoll         = 100 * time.Millisecond
 )
 
+var ErrTrafficBindingConflict = errors.New("TrafficBinding Session conflicts with existing state")
+
 type Config struct {
 	PollInterval   time.Duration
 	ControlPlaneID string
@@ -100,11 +102,11 @@ func NameForTask(taskID string) (string, error) {
 	taskID = strings.ToLower(strings.TrimSpace(taskID))
 	parsed, err := uuid.Parse(taskID)
 	if err != nil {
-		return "", fmt.Errorf("invalid TrafficBinding Task ID: %w", err)
+		return "", fmt.Errorf("invalid TrafficBinding Session ID: %w", err)
 	}
 	if parsed.String() != taskID {
 		return "", errors.New(
-			"traffic binding Task ID must use canonical UUID format",
+			"traffic binding Session ID must use canonical UUID format",
 		)
 	}
 	return bindingNamePrefix + taskID, nil

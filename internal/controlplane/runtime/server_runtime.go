@@ -17,7 +17,6 @@ import (
 	controlplanekubernetes "github.com/fengqi-dev/kube-loop/internal/controlplane/kubernetes"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/maintenance"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/sessionregistry"
-	"github.com/fengqi-dev/kube-loop/internal/controlplane/trafficbindingclient"
 )
 
 type serverRuntimeOptions struct {
@@ -32,7 +31,6 @@ type serverRuntimeOptions struct {
 	KubernetesConfig  controlplanekubernetes.Config
 	SessionRecovery   controlPlaneWorker
 	MaintenanceWorker controlPlaneWorker
-	BindingRecovery   controlPlaneWorker
 	SessionRuntime    controlPlaneSessionRuntime
 }
 
@@ -54,7 +52,6 @@ var (
 	_ controlPlaneRuntimeServer  = (*controlplane.Server)(nil)
 	_ controlPlaneWorker         = (*sessionregistry.Reconciler)(nil)
 	_ controlPlaneWorker         = (*maintenance.Worker)(nil)
-	_ controlPlaneWorker         = (*trafficbindingclient.Reconciler)(nil)
 	_ controlPlaneSessionRuntime = (*sessionregistry.Registry)(nil)
 )
 
@@ -105,7 +102,7 @@ func serveControlPlane(options serverRuntimeOptions) error {
 	}
 	errCh := make(chan error, serveCount)
 	var backgroundWorkers sync.WaitGroup
-	backgroundWorkers.Add(3)
+	backgroundWorkers.Add(2)
 	go func() {
 		defer backgroundWorkers.Done()
 		options.SessionRecovery.Run(options.Context)
@@ -113,10 +110,6 @@ func serveControlPlane(options serverRuntimeOptions) error {
 	go func() {
 		defer backgroundWorkers.Done()
 		options.MaintenanceWorker.Run(options.Context)
-	}()
-	go func() {
-		defer backgroundWorkers.Done()
-		options.BindingRecovery.Run(options.Context)
 	}()
 	backgroundDone := make(chan struct{})
 	go func() {

@@ -8,9 +8,9 @@ import { useI18n, type TranslationKey } from "@/i18n";
 const headerKeys: Record<AppView, TranslationKey> = {
   overview: "header.overview",
   clusters: "header.clusters",
-  connections: "header.connections",
   workload: "header.workload",
   network: "header.network",
+  sessions: "header.sessions",
   "host-aliases": "header.hostAliases",
   "traffic-inspection": "header.trafficInspection",
   mcp: "header.mcp",

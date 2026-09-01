@@ -7,9 +7,9 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 
+	trafficv1alpha1 "github.com/fengqi-dev/kube-loop/api/v1alpha1"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/servicebinding"
-	controlplanestorage "github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/trafficbindingclient"
 )
 
@@ -24,22 +24,19 @@ type ResourceManager interface {
 }
 
 type TrafficBindingResourceManager struct {
-	repositories controlplanestorage.Repositories
-	bindings     trafficbindingclient.Lifecycle
+	bindings trafficbindingclient.Lifecycle
 }
 
 func NewTrafficBindingResourceManager(
-	repositories controlplanestorage.Repositories,
 	bindings trafficbindingclient.Lifecycle,
 ) (*TrafficBindingResourceManager, error) {
-	if repositories == nil || bindings == nil {
+	if bindings == nil {
 		return nil, errors.New(
-			"preview storage and TrafficBinding lifecycle are required",
+			"preview TrafficBinding lifecycle is required",
 		)
 	}
 	return &TrafficBindingResourceManager{
-		repositories: repositories,
-		bindings:     bindings,
+		bindings: bindings,
 	}, nil
 }
 
@@ -49,17 +46,16 @@ func (manager *TrafficBindingResourceManager) Create(
 	snapshot servicebinding.PreviewServiceSnapshot,
 	previewID string,
 ) (*corev1.Service, error) {
-	owner, err := trafficbindingclient.OwnerForTask(
-		ctx,
-		manager.repositories,
-		previewID,
-		TaskType,
-		snapshot.Namespace,
-	)
+	store, ok := manager.bindings.(interface {
+		GetSession(context.Context, string, string) (*trafficv1alpha1.TrafficBinding, error)
+	})
+	if !ok {
+		return nil, errors.New("TrafficBinding Session lookup is unavailable")
+	}
+	binding, err := store.GetSession(ctx, snapshot.Namespace, previewID)
 	if err != nil {
 		return nil, err
 	}
-	binding := trafficbindingclient.NewPreviewBinding(owner, snapshot)
 	active, managed, err := manager.bindings.Activate(ctx, binding)
 	if err != nil {
 		if managed {
@@ -102,3 +98,8 @@ func (manager *TrafficBindingResourceManager) DeleteBinding(
 }
 
 var _ ResourceManager = (*TrafficBindingResourceManager)(nil)
+
+func (manager *TrafficBindingResourceManager) BindingManager() *trafficbindingclient.Manager {
+	bindings, _ := manager.bindings.(*trafficbindingclient.Manager)
+	return bindings
+}

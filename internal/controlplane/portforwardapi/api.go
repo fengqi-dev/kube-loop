@@ -176,6 +176,7 @@ func documentFromEntity(portForward portforwardservice.PortForward) Document {
 		ID: portForward.ID, SessionID: portForward.SessionID, Namespace: portForward.Namespace,
 		State: portForward.State, Kind: portForward.Kind, Name: portForward.Name,
 		Protocol: portForward.Protocol, RemotePort: portForward.RemotePort,
+		LocalPort:   portForward.LocalPort,
 		DialAddress: portForward.DialAddress, CreatedAt: portForward.CreatedAt,
 		UpdatedAt: portForward.UpdatedAt, ExpiresAt: portForward.ExpiresAt,
 	}

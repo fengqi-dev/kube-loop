@@ -22,8 +22,8 @@ func (r *TrafficBindingReconciler) setPending(
 		ctx,
 		binding,
 		trafficv1alpha1.TrafficBindingPhasePending,
-		"FinalizerInstalled",
-		"TrafficBinding is waiting for reconciliation",
+		"WaitingForRelay",
+		"TrafficBinding is waiting for a Gateway relay assignment",
 		metav1.ConditionFalse,
 	)
 }

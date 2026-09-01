@@ -117,7 +117,10 @@ func validatePortForwardTask(task PortForwardTask, session Session) (PortForward
 		task.ExpiresAt.IsZero() {
 		return PortForwardTask{}, errors.New("gateway returned an incomplete Port Forward Task")
 	}
-	spec := PortForwardSpec{Kind: task.Kind, Name: task.Name, Protocol: task.Protocol, RemotePort: task.RemotePort}
+	spec := PortForwardSpec{
+		Kind: task.Kind, Name: task.Name, Protocol: task.Protocol,
+		RemotePort: task.RemotePort, LocalPort: task.LocalPort,
+	}
 	if err := validatePortForwardSpec(&spec); err != nil {
 		return PortForwardTask{}, errors.New("gateway returned an invalid Port Forward Task")
 	}
@@ -129,7 +132,7 @@ func validatePortForwardTask(task PortForwardTask, session Session) (PortForward
 	if err != nil || port == 0 {
 		return PortForwardTask{}, errors.New("gateway returned an invalid Port Forward target")
 	}
-	task.Kind, task.Name, task.Protocol = spec.Kind, spec.Name, spec.Protocol
+	task.Kind, task.Name, task.Protocol, task.LocalPort = spec.Kind, spec.Name, spec.Protocol, spec.LocalPort
 	return task, nil
 }
 

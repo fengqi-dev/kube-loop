@@ -232,8 +232,6 @@ func createSessionLifecycleTasks(
 ) map[string]string {
 	t.Helper()
 	taskStates := map[string]remotetask.State{
-		"port-forward":  remotetask.Running,
-		"exchange":      remotetask.Running,
 		"pod-exec":      remotetask.Pending,
 		"file-transfer": remotetask.Running,
 	}
@@ -256,8 +254,6 @@ func createSessionLifecycleTasks(
 func assertSessionLifecycleTaskStates(t *testing.T, stateStore *storage.Store, taskIDs map[string]string) {
 	t.Helper()
 	wantTaskStates := map[string]remotetask.State{
-		"port-forward":  remotetask.Stopped,
-		"exchange":      remotetask.Recovering,
 		"pod-exec":      remotetask.Stopped,
 		"file-transfer": remotetask.Failed,
 	}

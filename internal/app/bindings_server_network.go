@@ -107,17 +107,6 @@ func (a *App) SetServerHostAliases(
 	return networkSettings(stored), nil
 }
 
-func (a *App) ServerDataPlaneMetrics(profileID string) (singbox.Metrics, error) {
-	if a.dataPlanes == nil {
-		return singbox.Metrics{}, errors.New("data plane is unavailable")
-	}
-	serverProfile, err := a.serverProfile(profileID)
-	if err != nil {
-		return singbox.Metrics{}, err
-	}
-	return a.dataPlanes.Metrics(a.context(), serverProfile.ID)
-}
-
 func (a *App) ServerDataPlaneLogs(profileID string) ([]string, error) {
 	if a.dataPlanes == nil {
 		return nil, errors.New("data plane is unavailable")

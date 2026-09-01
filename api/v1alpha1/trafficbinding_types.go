@@ -107,17 +107,31 @@ type TrafficPort struct {
 	// +optional
 	RelayPort *int32 `json:"relayPort,omitempty"`
 
+	// localHost is the desktop-local backend host used when traffic is sent
+	// from the cluster to the client. It is never used by PortForward.
+	// +kubebuilder:validation:MaxLength=253
+	// +optional
+	LocalHost string `json:"localHost,omitempty"`
+
+	// localPort is the desktop listener/backend port. For PortForward it is
+	// the local listener; for other modes it belongs to localHost.
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=65535
+	// +optional
+	LocalPort *int32 `json:"localPort,omitempty"`
+
 	// protocol is TCP or UDP.
 	// +required
 	Protocol TransportProtocol `json:"protocol"`
 }
 
-// TrafficBindingSpec defines the immutable desired state of TrafficBinding.
+// TrafficBindingSpec defines a TrafficBinding's immutable Session workload and
+// its rebindable Session and Gateway relay transport.
 //
-// +kubebuilder:validation:XValidation:rule="self.mode == oldSelf.mode && self.sessionID == oldSelf.sessionID && self.taskID == oldSelf.taskID && self.sessionGeneration == oldSelf.sessionGeneration && has(self.target) == has(oldSelf.target) && (!has(self.target) || self.target == oldSelf.target) && has(self.relay) == has(oldSelf.relay) && (!has(self.relay) || self.relay == oldSelf.relay) && has(self.preview) == has(oldSelf.preview) && (!has(self.preview) || self.preview == oldSelf.preview) && self.ports == oldSelf.ports",message="TrafficBinding fields other than desiredState are immutable"
+// +kubebuilder:validation:XValidation:rule="self.mode == oldSelf.mode && self.identityID == oldSelf.identityID && self.taskID == oldSelf.taskID && has(self.clusterIP) == has(oldSelf.clusterIP) && (!has(self.clusterIP) || self.clusterIP == oldSelf.clusterIP) && has(self.dialAddress) == has(oldSelf.dialAddress) && (!has(self.dialAddress) || self.dialAddress == oldSelf.dialAddress) && has(self.target) == has(oldSelf.target) && (!has(self.target) || self.target == oldSelf.target) && has(self.preview) == has(oldSelf.preview) && (!has(self.preview) || self.preview == oldSelf.preview) && size(self.ports) == size(oldSelf.ports) && self.ports.all(p, oldSelf.ports.exists(op, has(p.name) == has(op.name) && (!has(p.name) || p.name == op.name) && p.targetPort == op.targetPort && p.protocol == op.protocol && has(p.localHost) == has(op.localHost) && (!has(p.localHost) || p.localHost == op.localHost) && has(p.localPort) == has(op.localPort) && (!has(p.localPort) || p.localPort == op.localPort)))",message="TrafficBinding workload fields are immutable"
 // +kubebuilder:validation:XValidation:rule="self.mode != 'PortForward' || (has(self.target) && !has(self.relay) && !has(self.preview) && size(self.ports) == 1 && self.ports.all(p, !has(p.relayPort)))",message="PortForward requires one target port and forbids relay ports and preview"
-// +kubebuilder:validation:XValidation:rule="self.mode != 'Preview' || (!has(self.target) && has(self.relay) && has(self.preview) && self.ports.all(p, has(p.relayPort)))",message="Preview requires relay, preview and relayPort on every port"
-// +kubebuilder:validation:XValidation:rule="!(self.mode in ['Exchange', 'Mirror']) || (has(self.target) && self.target.kind == 'Service' && has(self.relay) && !has(self.preview) && self.ports.all(p, has(p.relayPort)))",message="Exchange and Mirror require a Service target, relay and relayPort on every port"
+// +kubebuilder:validation:XValidation:rule="self.mode != 'Preview' || (!has(self.target) && has(self.preview) && ((has(self.relay) && self.ports.all(p, has(p.relayPort))) || (!has(self.relay) && self.ports.all(p, !has(p.relayPort)))))",message="Preview requires preview and either a complete relay assignment or no relay assignment"
+// +kubebuilder:validation:XValidation:rule="!(self.mode in ['Exchange', 'Mirror']) || (has(self.target) && self.target.kind == 'Service' && !has(self.preview) && ((has(self.relay) && self.ports.all(p, has(p.relayPort))) || (!has(self.relay) && self.ports.all(p, !has(p.relayPort)))))",message="Exchange and Mirror require a Service target and either a complete relay assignment or no relay assignment"
 type TrafficBindingSpec struct {
 	// desiredState controls whether the Operator applies or restores the binding.
 	// Paused bindings remain available for later activation or explicit deletion.
@@ -129,28 +143,45 @@ type TrafficBindingSpec struct {
 	// +required
 	Mode TrafficBindingMode `json:"mode"`
 
-	// sessionID is the owning KubeLoop Cluster Session UUID.
+	// identityID owns this durable business Session. It is used to authorize
+	// adoption by a new transport ClusterSession after reconnect or restart.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=256
+	// +required
+	IdentityID string `json:"identityID"`
+
+	// sessionID is the current transport ClusterSession UUID. Startup
+	// synchronization may rebind it without changing the TrafficBinding Session.
 	// +kubebuilder:validation:Format=uuid
 	// +required
 	SessionID string `json:"sessionID"`
 
-	// taskID is the owning KubeLoop Task UUID and is unique per binding.
+	// taskID is the stable Session UUID retained for API compatibility.
 	// +kubebuilder:validation:Format=uuid
 	// +required
 	TaskID string `json:"taskID"`
 
-	// sessionGeneration prevents an old binding from being reused by a newer
-	// incarnation of the same Session.
+	// sessionGeneration fences the current transport ClusterSession incarnation.
 	// +kubebuilder:validation:Minimum=1
 	// +required
 	SessionGeneration int64 `json:"sessionGeneration"`
+
+	// clusterIP is the resolved Service IP captured when the Session is
+	// created. It is used by Exchange and Mirror client projections.
+	// +optional
+	ClusterIP string `json:"clusterIP,omitempty"`
+
+	// dialAddress is the resolved in-cluster PortForward destination.
+	// +kubebuilder:validation:MaxLength=320
+	// +optional
+	DialAddress string `json:"dialAddress,omitempty"`
 
 	// target is required by PortForward, Exchange and Mirror.
 	// +optional
 	Target *TrafficTarget `json:"target,omitempty"`
 
-	// relay is required by Preview, Exchange and Mirror. It is a trusted
-	// Gateway listener, never a desktop-provided destination.
+	// relay is required by Preview, Exchange and Mirror. It is a trusted,
+	// rebindable Gateway listener, never a desktop-provided destination.
 	// +optional
 	Relay *RelayEndpoint `json:"relay,omitempty"`
 
@@ -223,6 +254,18 @@ type TrafficBindingStatus struct {
 	// serviceClusterIP is populated for a ready Preview.
 	// +optional
 	ServiceClusterIP string `json:"serviceClusterIP,omitempty"`
+
+	// relayOwnerID is the Gateway currently responsible for this Session.
+	// +optional
+	RelayOwnerID string `json:"relayOwnerID,omitempty"`
+
+	// relayHeartbeatAt is the last heartbeat observed from relayOwnerID.
+	// +optional
+	RelayHeartbeatAt *metav1.Time `json:"relayHeartbeatAt,omitempty"`
+
+	// relayError is the terminal error reported by the Gateway, if any.
+	// +optional
+	RelayError string `json:"relayError,omitempty"`
 
 	// snapshot is captured and persisted before Exchange or Mirror mutation.
 	// +optional

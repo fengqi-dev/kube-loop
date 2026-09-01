@@ -2,113 +2,81 @@ package mirrorapi
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
 	"strings"
 
+	trafficv1alpha1 "github.com/fengqi-dev/kube-loop/api/v1alpha1"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/servicebinding"
-	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/remotetask"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficcontrol"
 )
 
-func (handler *Service) Heartbeat(
-	ctx context.Context,
-	relayID string,
-	request trafficcontrol.HeartbeatRequest,
-) (trafficcontrol.HeartbeatResponse, *controlplaneapi.Error) {
-	task, err := handler.storage.Tasks().GetByID(ctx, request.TaskID)
-	if err != nil || task.Type != TaskType {
+func (handler *Service) Heartbeat(ctx context.Context, relayID string,
+	request trafficcontrol.HeartbeatRequest) (trafficcontrol.HeartbeatResponse, *controlplaneapi.Error) {
+	sessions, err := handler.bindingSessions()
+	if err != nil {
+		return trafficcontrol.HeartbeatResponse{}, internalError(err)
+	}
+	binding, err := sessions.FindSession(ctx, request.TaskID)
+	if err != nil || binding.Spec.Mode != trafficv1alpha1.TrafficBindingModeMirror {
 		return trafficcontrol.HeartbeatResponse{}, notFound()
 	}
-	if !trafficOwnedBy(task, relayID) {
+	if binding.Status.RelayOwnerID != relayID {
 		return trafficcontrol.HeartbeatResponse{}, &controlplaneapi.Error{
-			Code:    controlplaneapi.CodeConflict,
-			Message: mirrorTaskOwnershipMessage,
+			Code: controlplaneapi.CodeConflict, Message: mirrorTaskOwnershipMessage,
 		}
 	}
-	switch task.State {
-	case remotetask.Starting, remotetask.Running:
-		if err := handler.updateTrafficTask(
-			ctx, task.ID, task.State, task.State, task.Result,
-		); err != nil &&
-			!errors.Is(err, storage.ErrConflict) {
-			return trafficcontrol.HeartbeatResponse{}, storageError(err)
-		}
-		return trafficcontrol.HeartbeatResponse{}, nil
-	case remotetask.Stopping,
-		remotetask.Stopped,
-		remotetask.Failed,
-		remotetask.Recovering:
+	if binding.Spec.DesiredState == trafficv1alpha1.TrafficBindingDesiredStatePaused ||
+		!binding.DeletionTimestamp.IsZero() {
 		return trafficcontrol.HeartbeatResponse{Stop: true}, nil
-	case remotetask.Pending:
-		return trafficcontrol.HeartbeatResponse{}, internalError(
-			fmt.Errorf("stored Mirror Task has invalid state %q", task.State),
-		)
-	default:
-		return trafficcontrol.HeartbeatResponse{}, internalError(
-			fmt.Errorf("stored Mirror Task has invalid state %q", task.State),
-		)
 	}
+	if err := sessions.RelayHeartbeat(ctx, binding, relayID); err != nil {
+		return trafficcontrol.HeartbeatResponse{}, internalError(err)
+	}
+	return trafficcontrol.HeartbeatResponse{}, nil
 }
 
-func (handler *Service) Finish(
-	ctx context.Context,
-	relayID string,
-	request trafficcontrol.FinishRequest,
-) (trafficcontrol.FinishResponse, *controlplaneapi.Error) {
-	task, err := handler.storage.Tasks().GetByID(ctx, request.TaskID)
-	if err != nil || task.Type != TaskType {
+func (handler *Service) Finish(ctx context.Context, relayID string,
+	request trafficcontrol.FinishRequest) (trafficcontrol.FinishResponse, *controlplaneapi.Error) {
+	sessions, err := handler.bindingSessions()
+	if err != nil {
+		return trafficcontrol.FinishResponse{}, internalError(err)
+	}
+	binding, err := sessions.FindSession(ctx, request.TaskID)
+	if err != nil || binding.Spec.Mode != trafficv1alpha1.TrafficBindingModeMirror {
 		return trafficcontrol.FinishResponse{}, notFound()
 	}
-	if !trafficOwnedBy(task, relayID) {
+	if binding.Status.RelayOwnerID != relayID {
 		return trafficcontrol.FinishResponse{}, &controlplaneapi.Error{
-			Code:    controlplaneapi.CodeConflict,
-			Message: mirrorTaskOwnershipMessage,
+			Code: controlplaneapi.CodeConflict, Message: mirrorTaskOwnershipMessage,
 		}
 	}
-	session, err := handler.storage.Sessions().GetByID(ctx, task.SessionID)
-	if err != nil {
-		return trafficcontrol.FinishResponse{}, storageError(err)
-	}
-	var owner ownerResult
-	_ = json.Unmarshal(task.Result, &owner)
-	cleanupRequired := owner.GatewayIP != ""
-	restored := !cleanupRequired
-	var restoreErr error
-	if cleanupRequired {
-		restoreContext, cancel := context.WithTimeout(
-			context.WithoutCancel(ctx),
-			handler.config.RestoreTimeout,
-		)
-		restoreErr = handler.resources.Restore(
-			restoreContext,
-			servicebinding.ServiceInterceptSnapshot{
-				Namespace: session.Namespace,
-			},
-			task.ID,
-		)
-		cancel()
-		restored = restoreErr == nil
-	}
-	var cause error
+	reason := ""
 	if request.Failed {
-		cause = errors.New(strings.TrimSpace(request.Reason))
-		if cause.Error() == "" {
-			cause = errors.New("mirror relay failed")
+		reason = strings.TrimSpace(request.Reason)
+		if reason == "" {
+			reason = "mirror relay failed"
 		}
 	}
-	handler.finishMirror(
-		task.ID,
-		cleanupRequired,
-		restored,
-		errors.Join(cause, restoreErr),
-	)
-	current, err := handler.storage.Tasks().GetByID(ctx, task.ID)
-	if err != nil {
-		return trafficcontrol.FinishResponse{}, storageError(err)
+	restoreContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), handler.config.RestoreTimeout)
+	restoreErr := handler.resources.Restore(restoreContext,
+		servicebinding.ServiceInterceptSnapshot{Namespace: binding.Namespace}, binding.Spec.TaskID)
+	cancel()
+	if restoreErr != nil {
+		reason = errors.Join(errors.New(reason), restoreErr).Error()
 	}
-	return trafficcontrol.FinishResponse{State: string(current.State)}, nil
+	if current, reloadErr := sessions.FindSession(ctx, request.TaskID); reloadErr == nil {
+		binding = current
+	} else if restoreErr == nil {
+		return trafficcontrol.FinishResponse{}, internalError(reloadErr)
+	}
+	if err := sessions.FinishRelay(ctx, binding, relayID, reason); err != nil {
+		return trafficcontrol.FinishResponse{}, internalError(err)
+	}
+	state := remotetask.Stopped
+	if request.Failed || restoreErr != nil {
+		state = remotetask.Failed
+	}
+	return trafficcontrol.FinishResponse{State: string(state)}, nil
 }

@@ -15,6 +15,7 @@ type Document struct {
 	Name        string           `json:"name"`
 	Protocol    string           `json:"protocol"`
 	RemotePort  uint16           `json:"remotePort"`
+	LocalPort   uint16           `json:"localPort,omitempty"`
 	DialAddress string           `json:"dialAddress"`
 	CreatedAt   time.Time        `json:"createdAt"`
 	UpdatedAt   time.Time        `json:"updatedAt"`

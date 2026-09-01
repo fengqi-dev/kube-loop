@@ -88,7 +88,16 @@ func (r *TrafficBindingReconciler) restoreEndpointSlice(
 	current := &discoveryv1.EndpointSlice{}
 	key := types.NamespacedName{Namespace: namespace, Name: snapshot.Name}
 	if err := r.Get(ctx, key, current); apierrors.IsNotFound(err) {
-		return r.Create(ctx, desired)
+		if createErr := r.Create(ctx, desired); createErr == nil {
+			return nil
+		} else if !apierrors.IsAlreadyExists(createErr) {
+			return createErr
+		}
+		// The EndpointSlice controller may recreate the selector-backed slice
+		// between our read and create. Read that object and converge it below.
+		if getErr := r.Get(ctx, key, current); getErr != nil {
+			return getErr
+		}
 	} else if err != nil {
 		return err
 	}

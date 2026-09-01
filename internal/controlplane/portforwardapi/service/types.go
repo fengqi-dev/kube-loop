@@ -14,6 +14,7 @@ type Spec struct {
 	Name       string `json:"name"`
 	Protocol   string `json:"protocol"`
 	RemotePort uint16 `json:"remotePort"`
+	LocalPort  uint16 `json:"localPort,omitempty"`
 }
 
 // Target is the resolved in-cluster dial target.
@@ -26,7 +27,7 @@ func (target Target) Address() string {
 	return net.JoinHostPort(target.Host, strconv.Itoa(int(target.Port)))
 }
 
-// PortForward is the service representation persisted as a remote task.
+// PortForward is the API projection of a TrafficBinding-backed Session.
 type PortForward struct {
 	ID          string           `json:"id"`
 	SessionID   string           `json:"sessionId"`
@@ -36,6 +37,7 @@ type PortForward struct {
 	Name        string           `json:"name"`
 	Protocol    string           `json:"protocol"`
 	RemotePort  uint16           `json:"remotePort"`
+	LocalPort   uint16           `json:"localPort,omitempty"`
 	DialAddress string           `json:"dialAddress"`
 	CreatedAt   time.Time        `json:"createdAt"`
 	UpdatedAt   time.Time        `json:"updatedAt"`

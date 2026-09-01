@@ -33,6 +33,11 @@ type DataPlane interface {
 
 var ErrClosed = errors.New("port Forward manager is closed")
 
+const (
+	portForwardStatePaused   = "paused"
+	portForwardStateResuming = "resuming"
+)
+
 type localForwards interface {
 	StartResolved(context.Context, listener.Request, string, listener.TrafficDialer) (listener.Info, error)
 	Stop(string) error
@@ -79,6 +84,7 @@ type Manager struct {
 	closed    bool
 	mu        sync.Mutex
 	active    map[string]*activeForward
+	deleted   map[string]struct{}
 }
 
 func New(client TaskClient, dataPlanes DataPlane) (*Manager, error) {
@@ -87,7 +93,7 @@ func New(client TaskClient, dataPlanes DataPlane) (*Manager, error) {
 	}
 	return &Manager{
 		client: client, dataPlanes: dataPlanes, locals: listener.NewManager(),
-		active: make(map[string]*activeForward),
+		active: make(map[string]*activeForward), deleted: make(map[string]struct{}),
 	}, nil
 }
 
@@ -112,7 +118,8 @@ func (manager *Manager) Start(
 	}
 	idempotencyKey := "port-forward:" + requestID()
 	task, err := manager.client.CreatePortForward(ctx, serverProfile, session, remote.PortForwardSpec{
-		Kind: request.Kind, Name: request.Name, Protocol: request.Protocol, RemotePort: request.RemotePort,
+		Kind: request.Kind, Name: request.Name, Protocol: request.Protocol,
+		RemotePort: request.RemotePort, LocalPort: request.LocalPort,
 	}, idempotencyKey)
 	if err != nil {
 		return Info{}, err
@@ -172,7 +179,7 @@ func (manager *Manager) Pause(ctx context.Context, profileID, taskID string) err
 	manager.mu.Lock()
 	if manager.active[taskID] == entry {
 		entry.localID = ""
-		entry.info.State = "paused"
+		entry.info.State = portForwardStatePaused
 	}
 	manager.mu.Unlock()
 	return errors.Join(localErr, remoteErr)
@@ -184,13 +191,26 @@ func (manager *Manager) Resume(ctx context.Context, profileID, taskID string) (I
 	}
 	manager.mu.Lock()
 	entry := manager.active[taskID]
-	if entry == nil || entry.profile.ID != profileID || entry.info.State != "paused" {
+	if entry == nil || entry.profile.ID != profileID || entry.info.State != portForwardStatePaused {
 		entry = nil
+	} else {
+		entry.info.State = portForwardStateResuming
 	}
 	manager.mu.Unlock()
 	if entry == nil {
 		return Info{}, errors.New("port Forward is not paused locally")
 	}
+	resumed := false
+	defer func() {
+		if resumed {
+			return
+		}
+		manager.mu.Lock()
+		if manager.active[taskID] == entry && entry.info.State == portForwardStateResuming {
+			entry.info.State = portForwardStatePaused
+		}
+		manager.mu.Unlock()
+	}()
 	task, err := resumePortForward(ctx, manager.client, entry.profile, entry.session, entry.task.ID)
 	if err != nil {
 		return Info{}, err
@@ -204,14 +224,21 @@ func (manager *Manager) Resume(ctx context.Context, profileID, taskID string) (I
 		Protocol: task.Protocol, RemotePort: task.RemotePort, LocalPort: entry.info.LocalPort,
 	}, task.DialAddress, dialer)
 	if err != nil {
-		_, pauseErr := manager.client.StopPortForward(ctx, entry.profile, entry.session, task.ID)
+		_, pauseErr := pausePortForward(ctx, manager.client, entry.profile, entry.session, task.ID)
 		return Info{}, errors.Join(err, pauseErr)
 	}
 	manager.mu.Lock()
+	if manager.active[taskID] != entry {
+		manager.mu.Unlock()
+		_ = manager.locals.Stop(local.ID)
+		_, pauseErr := pausePortForward(ctx, manager.client, entry.profile, entry.session, task.ID)
+		return Info{}, errors.Join(errors.New("port Forward changed while resuming"), pauseErr)
+	}
 	entry.task, entry.localID = task, local.ID
 	entry.info.State, entry.info.Address, entry.info.LocalPort = portForwardSessionActive, local.Address, local.LocalPort
 	entry.info.DialAddress = task.DialAddress
 	info := entry.info
+	resumed = true
 	manager.mu.Unlock()
 	return info, nil
 }
@@ -234,6 +261,7 @@ func (manager *Manager) Delete(ctx context.Context, profileID, taskID string) er
 	if deleteErr == nil {
 		manager.mu.Lock()
 		delete(manager.active, taskID)
+		manager.deleted[taskID] = struct{}{}
 		manager.mu.Unlock()
 	}
 	return errors.Join(pauseErr, deleteErr)

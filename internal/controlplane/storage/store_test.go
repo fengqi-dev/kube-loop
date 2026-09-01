@@ -51,6 +51,91 @@ func TestSQLiteOpenInitializesAndConfiguresDatabase(t *testing.T) {
 	}
 }
 
+func TestSQLiteSchemaV2MigrationRemovesOnlyLegacyTrafficTasks(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "migration.db")
+	store, err := Open(ctx, Config{Backend: BackendSQLite, SQLitePath: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture := newSessionRepositoryFixture(t, store)
+	trafficTypes := []string{"port-forward", "exchange", "mirror", "preview"}
+	trafficTaskIDs := make([]string, 0, len(trafficTypes))
+	for _, taskType := range trafficTypes {
+		taskID := uuid.NewString()
+		trafficTaskIDs = append(trafficTaskIDs, taskID)
+		if err := store.Tasks().Create(ctx, Task{
+			ID: taskID, IdentityID: fixture.identity.ID, SessionID: fixture.session.ID,
+			Type: taskType, State: "running", Spec: []byte(`{}`),
+			IdempotencyKey: "legacy-" + taskType, CreatedAt: fixture.now,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.ResourceSnapshots().Put(ctx, ResourceSnapshot{
+			ID: uuid.NewString(), TaskID: taskID, Kind: "Service", Namespace: "development",
+			Name: taskType, Data: []byte(`{}`), CreatedAt: fixture.now,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := store.Idempotency().Reserve(ctx, IdempotencyRecord{
+			Scope: "traffic:" + taskType, Key: "key", RequestHash: "hash",
+			ResourceType: taskType, ResourceID: taskID,
+			CreatedAt: fixture.now, ExpiresAt: fixture.now.Add(time.Hour),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	nonTrafficID := uuid.NewString()
+	if err := store.Tasks().Create(ctx, Task{
+		ID: nonTrafficID, IdentityID: fixture.identity.ID, SessionID: fixture.session.ID,
+		Type: "pod-exec", State: "running", Spec: []byte(`{}`),
+		IdempotencyKey: "keep-pod-exec", CreatedAt: fixture.now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.Idempotency().Reserve(ctx, IdempotencyRecord{
+		Scope: "task:pod-exec", Key: "key", RequestHash: "hash",
+		ResourceType: "pod-exec", ResourceID: nonTrafficID,
+		CreatedAt: fixture.now, ExpiresAt: fixture.now.Add(time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.Exec(`UPDATE schema_metadata SET schema_id = ? WHERE id = 1`, previousSchemaID); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened, err := Open(ctx, Config{Backend: BackendSQLite, SQLitePath: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = reopened.Close() }()
+	for index, taskID := range trafficTaskIDs {
+		if _, err := reopened.Tasks().GetByID(ctx, taskID); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("legacy %s Task survived migration: %v", trafficTypes[index], err)
+		}
+		if snapshots, err := reopened.ResourceSnapshots().ListByTask(ctx, taskID); err != nil || len(snapshots) != 0 {
+			t.Fatalf("legacy %s snapshots = %#v, %v", trafficTypes[index], snapshots, err)
+		}
+		_, err := reopened.Idempotency().Get(
+			ctx,
+			"traffic:"+trafficTypes[index],
+			"key",
+		)
+		if !errors.Is(err, ErrNotFound) {
+			t.Fatalf("legacy %s idempotency survived migration: %v", trafficTypes[index], err)
+		}
+	}
+	if _, err := reopened.Tasks().GetByID(ctx, nonTrafficID); err != nil {
+		t.Fatalf("non-traffic Task was removed: %v", err)
+	}
+	if _, err := reopened.Idempotency().Get(ctx, "task:pod-exec", "key"); err != nil {
+		t.Fatalf("non-traffic idempotency was removed: %v", err)
+	}
+}
+
 func TestSQLiteInitialSchemaOmitsRemovedResourcesAndLegacyFields(t *testing.T) {
 	store := openSQLiteTestStore(t, filepath.Join(t.TempDir(), "initial.db"))
 	for _, table := range []string{"identity_emails", "invitations", "organizations", "organization_memberships", "iam_groups", "group_memberships", "group_namespaces", "security_policies"} {

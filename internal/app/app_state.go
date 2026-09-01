@@ -54,6 +54,7 @@ type App struct {
 	inventoryWatchCancel      context.CancelFunc
 	backgroundCancel          context.CancelFunc
 	backgroundWG              sync.WaitGroup
+	startupSessionSync        func(context.Context) error
 	shutdownTimeout           time.Duration
 	serverLoginMu             sync.Mutex
 	serverLogin               *serverLoginAttempt

@@ -1596,90 +1596,98 @@ export namespace remote {
 		    return a;
 		}
 	}
-
-}
-
-export namespace reverserelay {
-	
-	export class Target {
-	    servicePort: number;
+	export class TrafficBindingPort {
+	    name?: string;
+	    targetPort: number;
+	    relayPort?: number;
 	    protocol: string;
-	    localHost: string;
-	    localPort: number;
 	
 	    static createFrom(source: any = {}) {
-	        return new Target(source);
+	        return new TrafficBindingPort(source);
 	    }
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.servicePort = source["servicePort"];
+	        this.name = source["name"];
+	        this.targetPort = source["targetPort"];
+	        this.relayPort = source["relayPort"];
 	        this.protocol = source["protocol"];
-	        this.localHost = source["localHost"];
-	        this.localPort = source["localPort"];
 	    }
 	}
+	export class TrafficBindingPreview {
+	    serviceName: string;
 
-}
+	    static createFrom(source: any = {}) {
+	        return new TrafficBindingPreview(source);
+	    }
 
-export namespace singbox {
-	
-	export class Connection {
-	    id: string;
-	    network: string;
-	    source: string;
-	    destination: string;
-	    process: string;
-	    upload: number;
-	    download: number;
-	    uploadSpeed?: number;
-	    downloadSpeed?: number;
-	    startedAt: string;
-	    inbound: string;
-	    feature?: string;
-	    outbound: string;
-	    rule: string;
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.serviceName = source["serviceName"];
+	    }
+	}
+	export class TrafficBindingRelay {
+	    address: string;
 	
 	    static createFrom(source: any = {}) {
-	        return new Connection(source);
+	        return new TrafficBindingRelay(source);
 	    }
 	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.address = source["address"];
+	    }
+	}
+	export class TrafficBindingTarget {
+	    kind: string;
+	    name: string;
+
+	    static createFrom(source: any = {}) {
+	        return new TrafficBindingTarget(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.kind = source["kind"];
+	        this.name = source["name"];
+	    }
+	}
+	export class TrafficBindingSession {
+	    id: string;
+	    name: string;
+	    namespace: string;
+	    sessionId: string;
+	    mode: string;
+	    desiredState: string;
+	    phase: string;
+	    target?: TrafficBindingTarget;
+	    preview?: TrafficBindingPreview;
+	    relay?: TrafficBindingRelay;
+	    ports: TrafficBindingPort[];
+	    serviceName?: string;
+	    serviceClusterIp?: string;
+	    createdAt: string;
+
+	    static createFrom(source: any = {}) {
+	        return new TrafficBindingSession(source);
+	    }
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
-	        this.network = source["network"];
-	        this.source = source["source"];
-	        this.destination = source["destination"];
-	        this.process = source["process"];
-	        this.upload = source["upload"];
-	        this.download = source["download"];
-	        this.uploadSpeed = source["uploadSpeed"];
-	        this.downloadSpeed = source["downloadSpeed"];
-	        this.startedAt = source["startedAt"];
-	        this.inbound = source["inbound"];
-	        this.feature = source["feature"];
-	        this.outbound = source["outbound"];
-	        this.rule = source["rule"];
-	    }
-	}
-	export class Metrics {
-	    downloadTotal: number;
-	    uploadTotal: number;
-	    memory?: number;
-	    activeConnections: number;
-	    connections: Connection[];
-	
-	    static createFrom(source: any = {}) {
-	        return new Metrics(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.downloadTotal = source["downloadTotal"];
-	        this.uploadTotal = source["uploadTotal"];
-	        this.memory = source["memory"];
-	        this.activeConnections = source["activeConnections"];
-	        this.connections = this.convertValues(source["connections"], Connection);
+	        this.name = source["name"];
+	        this.namespace = source["namespace"];
+	        this.sessionId = source["sessionId"];
+	        this.mode = source["mode"];
+	        this.desiredState = source["desiredState"];
+	        this.phase = source["phase"];
+	        this.target = this.convertValues(source["target"], TrafficBindingTarget);
+	        this.preview = this.convertValues(source["preview"], TrafficBindingPreview);
+	        this.relay = this.convertValues(source["relay"], TrafficBindingRelay);
+	        this.ports = this.convertValues(source["ports"], TrafficBindingPort);
+	        this.serviceName = source["serviceName"];
+	        this.serviceClusterIp = source["serviceClusterIp"];
+	        this.createdAt = source["createdAt"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -1699,6 +1707,29 @@ export namespace singbox {
 		    }
 		    return a;
 		}
+	}
+
+}
+
+export namespace reverserelay {
+
+	export class Target {
+	    servicePort: number;
+	    protocol: string;
+	    localHost: string;
+	    localPort: number;
+
+	    static createFrom(source: any = {}) {
+	        return new Target(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.servicePort = source["servicePort"];
+	        this.protocol = source["protocol"];
+	        this.localHost = source["localHost"];
+	        this.localPort = source["localPort"];
+	    }
 	}
 
 }
@@ -1878,4 +1909,3 @@ export namespace update {
 	}
 
 }
-

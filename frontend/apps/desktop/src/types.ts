@@ -104,31 +104,6 @@ export interface ServerNetworkSettings {
   hostAliases?: HostAlias[];
 }
 
-export interface Connection {
-  id: string;
-  network: string;
-  source: string;
-  destination: string;
-  process: string;
-  upload: number;
-  download: number;
-  uploadSpeed?: number;
-  downloadSpeed?: number;
-  startedAt: string;
-  inbound: string;
-  feature?: string;
-  outbound: string;
-  rule: string;
-}
-
-export interface Metrics {
-  downloadTotal: number;
-  uploadTotal: number;
-  memory?: number;
-  activeConnections?: number;
-  connections: Connection[];
-}
-
 export interface UpdateInfo {
   currentVersion: string;
   latestVersion?: string;
@@ -166,7 +141,6 @@ export interface SessionState {
   socksPort?: number;
   kubernetesVersion?: string;
   connectedAt?: string;
-  metrics?: Metrics;
   /** Bumps on Informer inventory changes only; not on metrics ticks. */
   inventoryRevision?: number;
   updatedAt: string;
@@ -332,6 +306,30 @@ export interface ServerPortForwardInfo {
 	address: string;
 	dialAddress: string;
 	state: string;
+}
+
+export interface ServerTrafficBindingPort {
+  name?: string;
+  targetPort: number;
+  relayPort?: number;
+  protocol: string;
+}
+
+export interface ServerTrafficBindingSession {
+  id: string;
+  name: string;
+  namespace: string;
+  sessionId: string;
+  mode: "PortForward" | "Exchange" | "Mirror" | "Preview";
+  desiredState: "Active" | "Paused";
+  phase: string;
+  target?: { kind: string; name: string };
+  preview?: { serviceName: string };
+  relay?: { address: string };
+  ports: ServerTrafficBindingPort[];
+  serviceName?: string;
+  serviceClusterIp?: string;
+  createdAt: string;
 }
 
 export interface ServerExchangeTarget {

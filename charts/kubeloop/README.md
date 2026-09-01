@@ -270,7 +270,7 @@ capabilities it does not offer:
 | relay-registry | pods in the Helm release namespace | get, list | trusted Relay Pod/Node topology lookup |
 | inventory | pods, services | get, list | Namespace/Pod/Service inventory |
 | exec-file | pods; pods/exec | get; create | exec and file workflows, which both execute in the target Pod |
-| traffic | pods; services/endpoints; endpointslices; trafficbindings | get; get/list; get/list; get/list/watch/create/delete | resolve authorized targets and manage Task-owned CR intents |
+| traffic | pods; services/endpoints; endpointslices; trafficbindings | get; get/list; get/list; get/list/watch/create/update/patch/delete | resolve authorized targets and manage Task-owned CR intents |
 
 The Operator role is independent: it may reconcile `trafficbindings` and their
 status/finalizers, read Pods, and create/update/delete Services, Endpoints and

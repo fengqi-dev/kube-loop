@@ -98,31 +98,24 @@ export function ServerNetworkView({ profileId }: { profileId: string }) {
     setBusy(true); setError("");
     try {
       if (action === "port-forward" && service) {
-        await backend.startServerPortForward({ profileId, kind: "service", name: service.name, protocol: protocolFor(service, remote), remotePort: remote, localPort: local });
+        const created = await backend.startServerPortForward({ profileId, kind: "service", name: service.name, protocol: protocolFor(service, remote), remotePort: remote, localPort: local });
+        setForwards((current) => upsertTask(current, created));
       } else if (action === "exchange" && service) {
-        await backend.startServerExchange({ profileId, service: service.name, targets: [{ servicePort: remote, protocol: protocolFor(service, remote), localHost, localPort: local }] });
+        const created = await backend.startServerExchange({ profileId, service: service.name, targets: [{ servicePort: remote, protocol: protocolFor(service, remote), localHost, localPort: local }] });
+        setExchanges((current) => upsertTask(current, created));
       } else if (action === "mirror" && service) {
-        await backend.startServerMirror({ profileId, service: service.name, targets: [{ servicePort: remote, protocol: protocolFor(service, remote), localHost, localPort: local }] });
+        const created = await backend.startServerMirror({ profileId, service: service.name, targets: [{ servicePort: remote, protocol: protocolFor(service, remote), localHost, localPort: local }] });
+        setMirrors((current) => upsertTask(current, created));
       } else if (action === "preview" && previewName.trim()) {
-        await backend.startServerPreview({ profileId, namespace: inventory.namespace ?? "", name: previewName.trim(), targets: [{ servicePort: remote, protocol: previewProtocol, localHost, localPort: local }] });
+        const created = await backend.startServerPreview({ profileId, namespace: inventory.namespace ?? "", name: previewName.trim(), targets: [{ servicePort: remote, protocol: previewProtocol, localHost, localPort: local }] });
+        setPreviews((current) => upsertTask(current, created));
       } else {
         throw new Error("Choose a Service or enter a Preview name.");
       }
-      setAction(undefined); setService(undefined); await load(inventory.namespace);
+      setAction(undefined); setService(undefined);
     } catch (reason) {
       setError(messageOf(reason));
     } finally { setBusy(false); }
-  }
-
-  async function mutateTask(operation: "pause" | "resume" | "delete", kind: Action, id: string) {
-    if (!profileId || busy) return;
-    setBusy(true); setError("");
-    try {
-	  const suffix = kind === "port-forward" ? "PortForward" : kind[0].toUpperCase() + kind.slice(1);
-	  const method = `${operation}Server${suffix}` as keyof typeof backend;
-	  await (backend[method] as (profileId: string, taskId: string) => Promise<unknown>)(profileId, id);
-      await load(inventory?.namespace);
-    } catch (reason) { setError(messageOf(reason)); } finally { setBusy(false); }
   }
 
   const ready = inventory?.dataPlane?.state === "connected";
@@ -160,23 +153,17 @@ export function ServerNetworkView({ profileId }: { profileId: string }) {
               </TableRow>
             ) : (
               visibleServices.map((item) => {
+            const forward = forwards.some((entry) => entry.kind === "service" && entry.name === item.name && entry.namespace === item.namespace);
             const exchange = exchanges.some((entry) => entry.service === item.name && entry.namespace === item.namespace);
             const mirror = mirrors.some((entry) => entry.service === item.name && entry.namespace === item.namespace);
             const preview = previews.some((entry) => entry.name === item.name && entry.namespace === item.namespace);
             return <TableRow key={`${item.namespace}/${item.name}`}><TableCell className="w-40 min-w-40 max-w-40 font-medium"><span className="block truncate" title={item.name}>{item.name}</span></TableCell><TableCell>{item.namespace}</TableCell><TableCell>{item.type}</TableCell><TableCell className="font-mono text-xs"><CopyableText value={item.clusterIp || item.externalName} /></TableCell><TableCell className="font-mono text-xs text-muted-foreground">{item.ports.length > 0 ? <div className="flex flex-col items-start gap-0.5">{item.ports.map((port) => <CopyableText key={`${port.protocol}-${port.port}-${port.name || ""}`} value={item.clusterIp ? `${item.clusterIp}:${port.port}` : null} label={`${port.protocol}/${port.port}`} titleKey="network.copyAddress" successKey="network.addressCopied" failKey="network.addressCopyFailed" empty={`${port.protocol}/${port.port}`} />)}</div> : "—"}</TableCell>
-              <TableCell><div className="flex items-center gap-1"><ActionIconButton label="Port Forward" icon={portForwardIcon} disabled={preview || !ready || !canForward} onClick={() => selectAction("port-forward", item)} /><ActionIconButton label="Exchange" icon={exchangeIcon} disabled={preview || !ready || !canExchange || exchange || mirror} onClick={() => selectAction("exchange", item)} /><ActionIconButton label="Mirror" icon={mirrorIcon} disabled={preview || !ready || !canMirror || exchange || mirror} onClick={() => selectAction("mirror", item)} /></div></TableCell></TableRow>;
+              <TableCell><div className="flex items-center gap-1"><ActionIconButton label="Port Forward" icon={portForwardIcon} disabled={forward || preview || !ready || !canForward} onClick={() => selectAction("port-forward", item)} /><ActionIconButton label="Exchange" icon={exchangeIcon} disabled={preview || !ready || !canExchange || exchange || mirror} onClick={() => selectAction("exchange", item)} /><ActionIconButton label="Mirror" icon={mirrorIcon} disabled={preview || !ready || !canMirror || exchange || mirror} onClick={() => selectAction("mirror", item)} /></div></TableCell></TableRow>;
               })
             )}
           </TableBody></Table>
           <ResourcePagination page={page} total={services.length} showWhenEmpty onPageChange={setPage} />
         </div>
-
-        <div className="rounded-lg border bg-card"><div className="border-b px-4 py-3 font-medium">Active Sessions</div><Table><TableHeader><TableRow><TableHead>Type</TableHead><TableHead>Target</TableHead><TableHead>Address / Target</TableHead><TableHead>State</TableHead><TableHead className="text-right">Actions</TableHead></TableRow></TableHeader><TableBody>
-          {forwards.map((item) => <OperationRow key={item.id} kind="port-forward" id={item.id} target={`${item.kind}/${item.name}:${item.remotePort}`} detail={portForwardDetail(item)} state={item.state} busy={busy} onMutate={mutateTask} />)}
-          {exchanges.map((item) => <OperationRow key={item.id} kind="exchange" id={item.id} target={item.service} detail={trafficTargetDetail(item)} state={item.state} busy={busy} onMutate={mutateTask} />)}
-          {mirrors.map((item) => <OperationRow key={item.id} kind="mirror" id={item.id} target={item.service} detail={trafficTargetDetail(item)} state={item.state} busy={busy} onMutate={mutateTask} />)}
-          {previews.map((item) => <OperationRow key={item.id} kind="preview" id={item.id} target={`${item.namespace}/${item.name}`} detail={trafficTargetDetail(item)} state={item.state} busy={busy} onMutate={mutateTask} />)}
-        </TableBody></Table>{forwards.length + exchanges.length + mirrors.length + previews.length === 0 ? <div className="p-8 text-center text-sm text-muted-foreground">No active sessions.</div> : null}</div>
       </div>}
 
       <Dialog
@@ -407,21 +394,9 @@ export function ServerNetworkView({ profileId }: { profileId: string }) {
   );
 }
 
-function OperationRow({ kind, id, target, detail, state, busy, onMutate }: { kind: Action; id: string; target: string; detail?: string; state: string; busy: boolean; onMutate(operation: "pause" | "resume" | "delete", kind: Action, id: string): void }) {
-  const paused = state === "paused" || state === "stopped";
-  return <TableRow><TableCell><Badge variant="outline">{labelFor(kind)}</Badge></TableCell><TableCell>{target}</TableCell><TableCell className="font-mono text-xs">{detail || "—"}</TableCell><TableCell>{state}</TableCell><TableCell><div className="flex justify-end gap-1">{paused ? <Button type="button" size="xs" variant="outline" disabled={busy} onClick={() => onMutate("resume", kind, id)}><Play size={11} />Resume</Button> : <Button type="button" size="xs" variant="outline" disabled={busy} onClick={() => onMutate("pause", kind, id)}><Pause size={11} />Pause</Button>}<Button type="button" size="xs" variant="outline" disabled={busy} onClick={() => onMutate("delete", kind, id)}><Trash2 size={11} />Delete</Button></div></TableCell></TableRow>;
-}
 function protocolFor(service: RemoteService, port: number): "tcp" | "udp" { return service.ports.find((item) => item.port === port)?.protocol.toLowerCase() === "udp" ? "udp" : "tcp"; }
-function portForwardDetail(item: ServerPortForwardInfo) {
-  const protocol = item.protocol ? ` (${item.protocol.toUpperCase()})` : "";
-  return item.dialAddress ? `${item.address} → ${item.dialAddress}${protocol}` : `${item.address}${protocol}`;
-}
-function trafficTargetDetail(item: ServerExchangeInfo | ServerMirrorInfo | ServerPreviewInfo) {
-  if (item.targets.length === 0) return item.clusterIp;
-  return item.targets.map((target) => {
-    const serviceAddress = item.clusterIp ? `${item.clusterIp}:${target.servicePort}` : String(target.servicePort);
-    return `${serviceAddress} → ${target.localHost}:${target.localPort} (${target.protocol.toUpperCase()})`;
-  }).join(", ");
-}
 function labelFor(action: Action) { return action === "port-forward" ? "Port Forward" : action[0]!.toUpperCase() + action.slice(1); }
 function messageOf(reason: unknown) { return reason instanceof Error ? reason.message : String(reason); }
+function upsertTask<T extends { id: string }>(items: T[], task: T) {
+  return [...items.filter((item) => item.id !== task.id), task];
+}

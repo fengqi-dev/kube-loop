@@ -1,12 +1,11 @@
 package exchangeapi
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/labstack/echo/v5"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -14,8 +13,8 @@ import (
 
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/entity"
-	"github.com/fengqi-dev/kube-loop/internal/controlplane/sessionapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/trafficbindingclient"
 )
 
 func normalizeRequest(spec *Spec) *controlplaneapi.Error {
@@ -42,7 +41,60 @@ func normalizeRequest(spec *Spec) *controlplaneapi.Error {
 		seen[key] = struct{}{}
 	}
 	slices.SortFunc(spec.Ports, comparePorts)
+	if apiError := normalizeLocalTargets(&spec.LocalTargets, spec.Ports); apiError != nil {
+		return apiError
+	}
 	return nil
+}
+
+func normalizeLocalTargets(
+	targets *[]entity.LocalTarget,
+	ports []entity.Port,
+) *controlplaneapi.Error {
+	if len(*targets) == 0 {
+		return nil
+	}
+	if len(*targets) != len(ports) {
+		return invalid("localTargets", "local targets must match Service ports")
+	}
+	expected := make(map[string]struct{}, len(ports))
+	for _, port := range ports {
+		expected[localTargetKey(port.ServicePort, port.Protocol)] = struct{}{}
+	}
+	seen := make(map[string]struct{}, len(*targets))
+	for index := range *targets {
+		target := &(*targets)[index]
+		target.Protocol = strings.ToLower(strings.TrimSpace(target.Protocol))
+		target.LocalHost = strings.TrimSpace(target.LocalHost)
+		if target.LocalHost == "" {
+			target.LocalHost = "127.0.0.1"
+		}
+		address := net.ParseIP(target.LocalHost)
+		invalidHost := address != nil && (address.IsUnspecified() || address.IsMulticast())
+		invalidHost = invalidHost || address == nil && len(validation.IsDNS1123Subdomain(target.LocalHost)) != 0
+		key := localTargetKey(target.ServicePort, target.Protocol)
+		_, matchesPort := expected[key]
+		_, duplicate := seen[key]
+		if target.ServicePort < 1 || target.ServicePort > 65535 || target.LocalPort < 1 ||
+			(target.Protocol != "tcp" && target.Protocol != "udp") ||
+			invalidHost || !matchesPort || duplicate {
+			return invalid("localTargets", "local target is invalid")
+		}
+		seen[key] = struct{}{}
+	}
+	slices.SortFunc(*targets, compareLocalTargets)
+	return nil
+}
+
+func localTargetKey(port int32, protocol string) string {
+	return fmt.Sprintf("%d/%s", port, strings.ToLower(strings.TrimSpace(protocol)))
+}
+
+func compareLocalTargets(left, right entity.LocalTarget) int {
+	if left.ServicePort != right.ServicePort {
+		return int(left.ServicePort - right.ServicePort)
+	}
+	return strings.Compare(left.Protocol, right.Protocol)
 }
 
 func comparePorts(left, right entity.Port) int {
@@ -50,42 +102,6 @@ func comparePorts(left, right entity.Port) int {
 		return int(left.ServicePort - right.ServicePort)
 	}
 	return strings.Compare(left.Protocol, right.Protocol)
-}
-
-func decodeTask(task storage.Task, namespace string) (Document, error) {
-	var spec storedSpec
-	if task.Type != TaskType || json.Unmarshal(task.Spec, &spec) != nil ||
-		spec.Service == "" ||
-		spec.ClusterIP == "" ||
-		len(spec.Ports) == 0 {
-		return Document{}, errors.New("stored Exchange Task is invalid")
-	}
-	return documentFrom(task, namespace, spec), nil
-}
-
-func documentFrom(
-	task storage.Task,
-	namespace string,
-	spec storedSpec,
-) Document {
-	expiresAt := time.Time{}
-	if task.ExpiresAt != nil {
-		expiresAt = task.ExpiresAt.UTC()
-	}
-	return Document{
-		ID: task.ID, SessionID: task.SessionID, Namespace: namespace, State: task.State,
-		Service: spec.Service, ClusterIP: spec.ClusterIP, Ports: append([]entity.Port(nil), spec.Ports...),
-		CreatedAt: task.CreatedAt.UTC(), UpdatedAt: task.UpdatedAt.UTC(), ExpiresAt: expiresAt,
-	}
-}
-
-func owned(
-	task storage.Task,
-	identity controlplaneapi.Identity,
-	session sessionapi.ActiveSession,
-) bool {
-	return task.Type == TaskType && task.IdentityID == identity.Subject &&
-		task.SessionID == session.ID
 }
 
 func targetError(err error) *controlplaneapi.Error {
@@ -108,7 +124,8 @@ func storageError(err error) *controlplaneapi.Error {
 	case errors.Is(err, storage.ErrNotFound):
 		return notFound()
 	case errors.Is(err, storage.ErrConflict),
-		errors.Is(err, storage.ErrIdempotencyMismatch):
+		errors.Is(err, storage.ErrIdempotencyMismatch),
+		errors.Is(err, trafficbindingclient.ErrTrafficBindingConflict):
 		return &controlplaneapi.Error{
 			Code:    controlplaneapi.CodeConflict,
 			Message: "Exchange Task conflicts with existing state",

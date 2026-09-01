@@ -37,6 +37,26 @@ func TestAppContext(t *testing.T) {
 	}
 }
 
+func TestStartupSynchronizesSessions(t *testing.T) {
+	called := make(chan struct{})
+	application := &App{startupSessionSync: func(ctx context.Context) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		close(called)
+		return nil
+	}}
+	ctx, cancel := context.WithCancel(t.Context())
+	application.startup(ctx)
+	select {
+	case <-called:
+	case <-time.After(time.Second):
+		t.Fatal("startup did not synchronize Sessions")
+	}
+	cancel()
+	application.shutdown(t.Context())
+}
+
 func TestShutdownWaitsForBackgroundCleanup(t *testing.T) {
 	application := &App{}
 	ctx, cancel := context.WithCancel(t.Context())

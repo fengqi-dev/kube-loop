@@ -2,156 +2,122 @@ package mirrorapi
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v5"
 
+	trafficv1alpha1 "github.com/fengqi-dev/kube-loop/api/v1alpha1"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/servicebinding"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/sessionapi"
-	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
-	"github.com/fengqi-dev/kube-loop/internal/controlplane/tasklifecycle"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/remotetask"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/trafficbindingclient"
 )
 
-func (handler *Service) get(
-	ctx *echo.Context,
-	identity controlplaneapi.Identity,
-	session sessionapi.ActiveSession,
-	taskID string,
-) *controlplaneapi.Error {
-	request := ctx.Request()
-	task, apiError := handler.ownedTask(
-		request.Context(),
-		identity,
-		session,
-		taskID,
-	)
+func (handler *Service) get(ctx *echo.Context, identity controlplaneapi.Identity,
+	session sessionapi.ActiveSession, taskID string) *controlplaneapi.Error {
+	binding, apiError := handler.ownedBinding(ctx.Request().Context(), identity, session, taskID)
 	if apiError != nil {
 		return apiError
 	}
-	document, err := decodeTask(task, session.Namespace)
+	writeJSON(ctx, http.StatusOK, mirrorDocument(binding, session))
+	return nil
+}
+
+func (handler *Service) list(ctx *echo.Context, identity controlplaneapi.Identity,
+	session sessionapi.ActiveSession) *controlplaneapi.Error {
+	sessions, err := handler.bindingSessions()
 	if err != nil {
+		return internalError(err)
+	}
+	bindings, err := sessions.ListSessions(ctx.Request().Context(), session.Namespace, session.ID)
+	if err != nil {
+		return internalError(err)
+	}
+	items := make([]Document, 0, len(bindings))
+	for index := range bindings {
+		if ownedMirror(&bindings[index], identity, session) {
+			items = append(items, mirrorDocument(&bindings[index], session))
+		}
+	}
+	writeJSON(ctx, http.StatusOK, listDocument{Items: items})
+	return nil
+}
+
+func (handler *Service) pause(ctx *echo.Context, identity controlplaneapi.Identity,
+	session sessionapi.ActiveSession, taskID string) *controlplaneapi.Error {
+	_, apiError := handler.ownedBinding(ctx.Request().Context(), identity, session, taskID)
+	if apiError != nil {
+		return apiError
+	}
+	if err := handler.resources.Restore(ctx.Request().Context(),
+		servicebinding.ServiceInterceptSnapshot{Namespace: session.Namespace}, taskID); err != nil {
+		return internalError(err)
+	}
+	sessions, _ := handler.bindingSessions()
+	binding, err := sessions.GetSession(ctx.Request().Context(), session.Namespace, taskID)
+	if err != nil {
+		return internalError(err)
+	}
+	writeJSON(ctx, http.StatusOK, mirrorDocument(binding, session))
+	return nil
+}
+
+func (handler *Service) resume(ctx *echo.Context, identity controlplaneapi.Identity,
+	session sessionapi.ActiveSession, taskID string) *controlplaneapi.Error {
+	binding, apiError := handler.ownedBinding(ctx.Request().Context(), identity, session, taskID)
+	if apiError != nil {
+		return apiError
+	}
+	if binding.Spec.DesiredState != trafficv1alpha1.TrafficBindingDesiredStatePaused {
+		return storageError(errors.New("mirror Session is not paused"))
+	}
+	sessions, _ := handler.bindingSessions()
+	if err := sessions.ResetRelay(ctx.Request().Context(), binding); err != nil {
+		return internalError(err)
+	}
+	binding, _ = sessions.GetSession(ctx.Request().Context(), session.Namespace, taskID)
+	writeJSON(ctx, http.StatusAccepted, mirrorDocument(binding, session))
+	return nil
+}
+
+func (handler *Service) delete(ctx *echo.Context, identity controlplaneapi.Identity,
+	session sessionapi.ActiveSession, taskID string) *controlplaneapi.Error {
+	binding, apiError := handler.ownedBinding(ctx.Request().Context(), identity, session, taskID)
+	if apiError != nil {
+		return apiError
+	}
+	document := mirrorDocument(binding, session)
+	if err := deleteMirrorBinding(ctx.Request().Context(), handler.resources,
+		session.Namespace, taskID); err != nil {
 		return internalError(err)
 	}
 	writeJSON(ctx, http.StatusOK, document)
 	return nil
 }
 
-func (handler *Service) pause(
-	ctx *echo.Context,
-	identity controlplaneapi.Identity,
-	session sessionapi.ActiveSession,
-	taskID string,
-) *controlplaneapi.Error {
-	request := ctx.Request()
-	task, apiError := handler.ownedTask(
-		request.Context(),
-		identity,
-		session,
-		taskID,
-	)
-	if apiError != nil {
-		return apiError
+func (handler *Service) ownedBinding(ctx context.Context, identity controlplaneapi.Identity,
+	session sessionapi.ActiveSession, taskID string) (*trafficv1alpha1.TrafficBinding, *controlplaneapi.Error) {
+	if _, err := uuid.Parse(taskID); err != nil {
+		return nil, notFound()
 	}
-	next := task.State
-	switch task.State {
-	case remotetask.Pending:
-		next = remotetask.Stopped
-	case remotetask.Starting, remotetask.Running, remotetask.Recovering:
-		next = remotetask.Stopping
-	case remotetask.Stopping, remotetask.Stopped, remotetask.Failed:
-	default:
-		return internalError(
-			fmt.Errorf("stored Mirror Task has invalid state %q", task.State),
-		)
+	sessions, err := handler.bindingSessions()
+	if err != nil {
+		return nil, internalError(err)
 	}
-	if next != task.State {
-		var owner ownerResult
-		_ = json.Unmarshal(task.Result, &owner)
-		owner.StopRequested = true
-		result, _ := json.Marshal(owner)
-		now := handler.now().UTC()
-		if err := handler.storage.Tasks().
-			UpdateState(request.Context(), task.ID, task.State, next, result, now); err != nil {
-			return storageError(err)
+	binding, err := sessions.GetSession(ctx, session.Namespace, taskID)
+	if err != nil || !ownedMirror(binding, identity, session) {
+		if err != nil && !errors.Is(err, trafficbindingclient.ErrTrafficBindingNotFound) {
+			return nil, internalError(err)
 		}
-		task.State, task.Result, task.UpdatedAt = next, result, now
+		return nil, notFound()
 	}
-	document, err := decodeTask(task, session.Namespace)
-	if err != nil {
-		return internalError(err)
-	}
-	writeJSON(
-		ctx,
-		map[bool]int{true: http.StatusAccepted, false: http.StatusOK}[next == remotetask.Stopping],
-		document,
-	)
-	return nil
+	return binding, nil
 }
 
-func (handler *Service) resume(
-	ctx *echo.Context,
-	identity controlplaneapi.Identity,
-	session sessionapi.ActiveSession,
-	taskID string,
-) *controlplaneapi.Error {
-	task, apiError := handler.ownedTask(ctx.Request().Context(), identity, session, taskID)
-	if apiError != nil {
-		return apiError
-	}
-	if task.State == remotetask.Stopped {
-		now := handler.now().UTC()
-		if err := handler.storage.Tasks().UpdateState(
-			ctx.Request().Context(), task.ID, task.State, remotetask.Pending, nil, now,
-		); err != nil {
-			return storageError(err)
-		}
-		task.State, task.Result, task.UpdatedAt = remotetask.Pending, nil, now
-	} else if task.State != remotetask.Pending {
-		return storageError(storage.ErrConflict)
-	}
-	document, err := decodeTask(task, session.Namespace)
-	if err != nil {
-		return internalError(err)
-	}
-	writeJSON(ctx, http.StatusAccepted, document)
-	return nil
-}
-
-func (handler *Service) delete(
-	ctx *echo.Context,
-	identity controlplaneapi.Identity,
-	session sessionapi.ActiveSession,
-	taskID string,
-) *controlplaneapi.Error {
-	task, apiError := handler.ownedTask(ctx.Request().Context(), identity, session, taskID)
-	if apiError != nil {
-		return apiError
-	}
-	if err := deleteMirrorBinding(ctx.Request().Context(), handler.resources, session.Namespace, task.ID); err != nil {
-		return internalError(err)
-	}
-	task, err := tasklifecycle.Stop(
-		ctx.Request().Context(), handler.storage.Tasks(), task.ID, handler.now,
-	)
-	if err != nil {
-		return storageError(err)
-	}
-	document, err := decodeTask(task, session.Namespace)
-	if err != nil {
-		return internalError(err)
-	}
-	writeJSON(ctx, http.StatusOK, document)
-	return nil
-}
-
-func deleteMirrorBinding(
-	ctx context.Context, resources ResourceMutator, namespace, taskID string,
-) error {
+func deleteMirrorBinding(ctx context.Context, resources ResourceMutator,
+	namespace, taskID string) error {
 	deleter, ok := resources.(interface {
 		DeleteBinding(context.Context, string, string) error
 	})
@@ -159,20 +125,4 @@ func deleteMirrorBinding(
 		return errors.New("mirror deletion is unavailable")
 	}
 	return deleter.DeleteBinding(ctx, namespace, taskID)
-}
-
-func (handler *Service) ownedTask(
-	ctx context.Context,
-	identity controlplaneapi.Identity,
-	session sessionapi.ActiveSession,
-	taskID string,
-) (storage.Task, *controlplaneapi.Error) {
-	if _, err := uuid.Parse(taskID); err != nil {
-		return storage.Task{}, notFound()
-	}
-	task, err := handler.storage.Tasks().GetByID(ctx, taskID)
-	if err != nil || !owned(task, identity, session) {
-		return storage.Task{}, notFound()
-	}
-	return task, nil
 }

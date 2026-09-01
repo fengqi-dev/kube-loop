@@ -50,6 +50,17 @@ func normalizeTargets(input []LocalTarget) ([]LocalTarget, []remote.MirrorPort, 
 	return targets, ports, nil
 }
 
+func remoteTargets(targets []LocalTarget) []remote.LocalTarget {
+	items := make([]remote.LocalTarget, len(targets))
+	for index, target := range targets {
+		items[index] = remote.LocalTarget{
+			Protocol: target.Protocol, ServicePort: target.ServicePort,
+			LocalHost: target.LocalHost, LocalPort: target.LocalPort,
+		}
+	}
+	return items
+}
+
 func validLocalHost(host string) bool {
 	if address := net.ParseIP(host); address != nil {
 		return !address.IsUnspecified() && !address.IsMulticast()

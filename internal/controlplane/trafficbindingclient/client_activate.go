@@ -16,9 +16,9 @@ import (
 	trafficv1alpha1 "github.com/fengqi-dev/kube-loop/api/v1alpha1"
 )
 
-// Activate creates the immutable Task-owned binding and waits until the
-// Operator has observed it. The boolean is true once this task owns a CR,
-// including an idempotent replay of an existing identical object.
+// Activate creates the Session binding or rebinds its transport fields and
+// waits until the Operator has observed it. The boolean is true once this task
+// owns a CR, including an idempotent replay of an existing object.
 func (manager *Manager) Activate(
 	ctx context.Context,
 	binding *trafficv1alpha1.TrafficBinding,
@@ -37,6 +37,17 @@ func (manager *Manager) Activate(
 	desired.Spec.DesiredState = trafficv1alpha1.TrafficBindingDesiredStateActive
 	desired.Name = name
 	desired.Namespace = strings.TrimSpace(desired.Namespace)
+	// Activate also accepts an object returned by GetSession. Treat that object
+	// as desired configuration, not as a create payload with server-owned
+	// metadata. The subsequent AlreadyExists path reloads the live object before
+	// patching it.
+	desired.ResourceVersion = ""
+	desired.UID = ""
+	desired.Generation = 0
+	desired.CreationTimestamp = metav1.Time{}
+	desired.DeletionTimestamp = nil
+	desired.DeletionGracePeriodSeconds = nil
+	desired.ManagedFields = nil
 	desired.TypeMeta = metav1.TypeMeta{
 		APIVersion: trafficv1alpha1.SchemeGroupVersion.String(),
 		Kind:       "TrafficBinding",
@@ -67,18 +78,24 @@ func (manager *Manager) Activate(
 				getErr,
 			)
 		}
-		if !sameBindingSpec(existing.Spec, desired.Spec) ||
+		if !sameBindingWorkload(existing.Spec, desired.Spec) ||
 			existing.Labels[taskIDLabel] != desired.Spec.TaskID ||
 			existing.Labels[controlPlaneIDLabel] != manager.controlPlaneID {
 			return nil, false, fmt.Errorf(
-				"traffic binding %s/%s conflicts with another Task",
+				"%w: traffic binding %s/%s belongs to another Session",
+				ErrTrafficBindingConflict,
 				desired.Namespace,
 				desired.Name,
 			)
 		}
-		if existing.Spec.DesiredState != trafficv1alpha1.TrafficBindingDesiredStateActive {
+		if !reflect.DeepEqual(existing.Spec, desired.Spec) ||
+			existing.Labels[sessionIDLabel] != desired.Spec.SessionID {
 			before := existing.DeepCopy()
-			existing.Spec.DesiredState = trafficv1alpha1.TrafficBindingDesiredStateActive
+			existing.Spec = *desired.Spec.DeepCopy()
+			existing.Labels[managedByLabel] = managedByValue
+			existing.Labels[controlPlaneIDLabel] = manager.controlPlaneID
+			existing.Labels[taskIDLabel] = desired.Spec.TaskID
+			existing.Labels[sessionIDLabel] = desired.Spec.SessionID
 			if patchErr := manager.client.Patch(
 				ctx,
 				existing,
@@ -155,8 +172,30 @@ func (manager *Manager) Activate(
 	return current, true, nil
 }
 
-func sameBindingSpec(left, right trafficv1alpha1.TrafficBindingSpec) bool {
-	left.DesiredState = trafficv1alpha1.TrafficBindingDesiredStateActive
-	right.DesiredState = trafficv1alpha1.TrafficBindingDesiredStateActive
-	return reflect.DeepEqual(left, right)
+func sameBindingWorkload(left, right trafficv1alpha1.TrafficBindingSpec) bool {
+	if left.Mode != right.Mode || left.IdentityID != right.IdentityID ||
+		left.TaskID != right.TaskID || left.ClusterIP != right.ClusterIP ||
+		left.DialAddress != right.DialAddress ||
+		!reflect.DeepEqual(left.Target, right.Target) ||
+		!reflect.DeepEqual(left.Preview, right.Preview) ||
+		len(left.Ports) != len(right.Ports) {
+		return false
+	}
+	for _, leftPort := range left.Ports {
+		matched := false
+		for _, rightPort := range right.Ports {
+			if leftPort.Name == rightPort.Name &&
+				leftPort.TargetPort == rightPort.TargetPort &&
+				leftPort.Protocol == rightPort.Protocol &&
+				leftPort.LocalHost == rightPort.LocalHost &&
+				reflect.DeepEqual(leftPort.LocalPort, rightPort.LocalPort) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return false
+		}
+	}
+	return true
 }

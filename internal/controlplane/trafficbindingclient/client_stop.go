@@ -16,12 +16,20 @@ import (
 	trafficv1alpha1 "github.com/fengqi-dev/kube-loop/api/v1alpha1"
 )
 
+// ErrTrafficBindingNotFound is returned when the traffic binding for a Session
+// does not exist. Callers treat it as a no-op success (there is nothing to
+// pause or wait on).
+var ErrTrafficBindingNotFound = errors.New("traffic binding not found")
+
 func (manager *Manager) Pause(
 	ctx context.Context,
 	namespace, taskID string,
 ) error {
 	key, err := manager.requestPause(ctx, namespace, taskID)
-	if err != nil || key == nil {
+	if errors.Is(err, ErrTrafficBindingNotFound) {
+		return nil
+	}
+	if err != nil {
 		return err
 	}
 	return manager.waitForPaused(ctx, *key)
@@ -32,6 +40,9 @@ func (manager *Manager) RequestPause(
 	namespace, taskID string,
 ) error {
 	_, err := manager.requestPause(ctx, namespace, taskID)
+	if errors.Is(err, ErrTrafficBindingNotFound) {
+		return nil
+	}
 	return err
 }
 
@@ -53,7 +64,7 @@ func (manager *Manager) requestPause(
 	binding := &trafficv1alpha1.TrafficBinding{}
 	if err := manager.client.Get(ctx, key, binding); err != nil {
 		if apierrors.IsNotFound(err) {
-			return nil, nil
+			return nil, ErrTrafficBindingNotFound
 		}
 		return nil, fmt.Errorf(
 			"read TrafficBinding %s/%s for pausing: %w",
@@ -105,19 +116,6 @@ func (manager *Manager) waitForPaused(
 			current := &trafficv1alpha1.TrafficBinding{}
 			if err := manager.client.Get(ctx, key, current); err != nil {
 				return false, err
-			}
-			degraded := apiMeta.FindStatusCondition(
-				current.Status.Conditions,
-				trafficv1alpha1.ConditionDegraded,
-			)
-			if degraded != nil && degraded.Status == metav1.ConditionTrue {
-				return false, fmt.Errorf(
-					"traffic binding %s/%s could not pause (%s): %s",
-					key.Namespace,
-					key.Name,
-					degraded.Reason,
-					degraded.Message,
-				)
 			}
 			paused := apiMeta.FindStatusCondition(
 				current.Status.Conditions,

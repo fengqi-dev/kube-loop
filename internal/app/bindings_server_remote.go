@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	clientdataplane "github.com/fengqi-dev/kube-loop/internal/client/dataplane"
+	clientprofile "github.com/fengqi-dev/kube-loop/internal/client/profile"
 	clientremote "github.com/fengqi-dev/kube-loop/internal/client/remote"
 	"github.com/fengqi-dev/kube-loop/internal/networkdiag"
 )
@@ -73,6 +74,13 @@ func (a *App) LoadServerInventory(profileID, namespace string) (RemoteInventory,
 	if err != nil {
 		return RemoteInventory{}, err
 	}
+	session, err = a.synchronizeTrafficBindings(serverProfile, session)
+	if err != nil {
+		return RemoteInventory{}, err
+	}
+	if err := a.restoreServerTasks(serverProfile, session); err != nil {
+		return RemoteInventory{}, err
+	}
 	result.Session = &session
 	network := networkdiag.InspectNetworkSpec(session.NetworkSpec)
 	result.Network = &network
@@ -119,6 +127,57 @@ func (a *App) LoadServerInventory(profileID, namespace string) (RemoteInventory,
 	}
 	a.startServerInventoryWatch(serverProfile, selected, result.Capabilities)
 	return result, nil
+}
+
+func (a *App) synchronizeTrafficBindings(
+	serverProfile clientprofile.Profile,
+	session clientremote.Session,
+) (clientremote.Session, error) {
+	synchronized, err := a.remote.SyncTrafficBindings(a.context(), serverProfile, session)
+	if err == nil {
+		return synchronized, nil
+	}
+	var apiError *clientremote.APIError
+	if errors.As(err, &apiError) && apiError.Status == 404 {
+		return session, nil
+	}
+	return clientremote.Session{}, err
+}
+
+func (a *App) restoreServerTasks(
+	serverProfile clientprofile.Profile,
+	session clientremote.Session,
+) error {
+	var result error
+	if a.remoteForwards != nil {
+		result = errors.Join(result, optionalTaskRestore(
+			a.remoteForwards.Restore(a.context(), serverProfile, session),
+		))
+	}
+	if a.remoteExchanges != nil {
+		result = errors.Join(result, optionalTaskRestore(
+			a.remoteExchanges.Restore(a.context(), serverProfile, session),
+		))
+	}
+	if a.remoteMirrors != nil {
+		result = errors.Join(result, optionalTaskRestore(
+			a.remoteMirrors.Restore(a.context(), serverProfile, session),
+		))
+	}
+	if a.remotePreviews != nil {
+		result = errors.Join(result, optionalTaskRestore(
+			a.remotePreviews.Restore(a.context(), serverProfile, session),
+		))
+	}
+	return result
+}
+
+func optionalTaskRestore(err error) error {
+	var apiError *clientremote.APIError
+	if errors.As(err, &apiError) && apiError.Status == 404 {
+		return nil
+	}
+	return err
 }
 
 func (a *App) stopServerRuntime(profileID string, disconnectSession bool) error {

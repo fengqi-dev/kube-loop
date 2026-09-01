@@ -361,7 +361,7 @@ func testSessionTaskSnapshotRepositories(t *testing.T, store *Store) {
 	specJSON, specHash, session := fixture.specJSON, fixture.specHash, fixture.session
 	task := Task{
 		ID: uuid.NewString(), IdentityID: identity.ID, SessionID: session.ID,
-		Type: "port-forward", State: statusPending, Spec: json.RawMessage(`{"port":8080}`),
+		Type: "pod-exec", State: statusPending, Spec: json.RawMessage(`{"pod":"api"}`),
 		IdempotencyKey: "task-key", CreatedAt: now,
 	}
 	if err := store.Tasks().Create(ctx, task); err != nil {
@@ -396,7 +396,7 @@ func testSessionTaskSnapshotRepositories(t *testing.T, store *Store) {
 		t.Fatalf("session tasks = %#v, %v", tasks, err)
 	}
 	stale, err := store.Tasks().
-		ListStaleByTypeStates(ctx, "port-forward", []remotetask.State{remotetask.Running}, now.Add(2*time.Second), 10)
+		ListStaleByTypeStates(ctx, "pod-exec", []remotetask.State{remotetask.Running}, now.Add(2*time.Second), 10)
 	if err != nil || len(stale) != 1 || stale[0].ID != task.ID {
 		t.Fatalf("stale tasks = %#v, %v", stale, err)
 	}
@@ -419,6 +419,42 @@ func testSessionTaskSnapshotRepositories(t *testing.T, store *Store) {
 	assertTerminalTaskAndSnapshots(ctx, t, store, task, now)
 
 	assertExpiredSessionSnapshotProtection(ctx, t, store, identity, now, specJSON, specHash)
+	assertExpiredSessionNonTrafficCleanup(ctx, t, store, identity, now, specJSON, specHash)
+}
+
+func assertExpiredSessionNonTrafficCleanup(
+	ctx context.Context,
+	t *testing.T,
+	store *Store,
+	identity Identity,
+	now time.Time,
+	specJSON []byte,
+	specHash string,
+) {
+	t.Helper()
+	expiredSession := Session{
+		ID: uuid.NewString(), IdentityID: identity.ID, DeviceID: "expired-non-traffic", ClusterID: "cluster-a",
+		Namespace: "development", State: "stopped", CreatedAt: now.Add(-2 * time.Hour), ExpiresAt: now.Add(-time.Hour),
+		NetworkSpec: specJSON, NetworkSpecHash: specHash,
+	}
+	if err := store.Sessions().Create(ctx, expiredSession); err != nil {
+		t.Fatal(err)
+	}
+	task := Task{
+		ID: uuid.NewString(), IdentityID: identity.ID, SessionID: expiredSession.ID,
+		Type: "pod-exec", State: remotetask.Running, Spec: json.RawMessage(`{"pod":"api"}`),
+		IdempotencyKey: "expired-non-traffic", CreatedAt: now.Add(-2 * time.Hour), UpdatedAt: now.Add(-time.Hour),
+	}
+	if err := store.Tasks().Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	deleted, err := store.Sessions().DeleteExpired(ctx, now, 1)
+	if err != nil || deleted != 1 {
+		t.Fatalf("expired non-TrafficBinding Session deletion = %d, %v", deleted, err)
+	}
+	if _, err := store.Tasks().GetByID(ctx, task.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expired non-TrafficBinding Task lookup = %v", err)
+	}
 }
 
 type sessionRepositoryFixture struct {
@@ -506,8 +542,8 @@ func assertExpiredSessionSnapshotProtection(
 	}
 	protectedTask := Task{
 		ID: uuid.NewString(), IdentityID: identity.ID, SessionID: expiredSession.ID,
-		Type: "exchange", State: "running", Spec: json.RawMessage(`{"service":"api"}`),
-		IdempotencyKey: "protected-exchange", CreatedAt: now.Add(-2 * time.Hour), UpdatedAt: now.Add(-time.Hour),
+		Type: "pod-exec", State: "running", Spec: json.RawMessage(`{"pod":"api"}`),
+		IdempotencyKey: "protected-pod-exec", CreatedAt: now.Add(-2 * time.Hour), UpdatedAt: now.Add(-time.Hour),
 	}
 	if err := store.Tasks().Create(ctx, protectedTask); err != nil {
 		t.Fatal(err)
@@ -524,6 +560,11 @@ func assertExpiredSessionSnapshotProtection(
 		t.Fatalf("session with rollback snapshot was deleted: count=%d err=%v", deleted, err)
 	}
 	if _, err := store.ResourceSnapshots().DeleteByTask(ctx, protectedTask.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Tasks().UpdateState(
+		ctx, protectedTask.ID, remotetask.Running, remotetask.Deleted, nil, now,
+	); err != nil {
 		t.Fatal(err)
 	}
 	deleted, err = store.Sessions().DeleteExpired(ctx, now, 1)
@@ -594,7 +635,7 @@ func assertTaskTransitionAudit(
 		{remotetask.Pending, remotetask.Running},
 	}
 	for index, event := range transitions {
-		if event.IdentityID != identity.ID || event.ResourceType != "port-forward" ||
+		if event.IdentityID != identity.ID || event.ResourceType != "pod-exec" ||
 			event.ResourceID != task.ID || event.Outcome != outcomeSuccess {
 			t.Fatalf("Task transition audit event = %#v", event)
 		}

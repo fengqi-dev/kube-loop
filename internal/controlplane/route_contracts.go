@@ -35,6 +35,7 @@ type PortForwardEndpoints struct {
 type RemoteTaskEndpoints struct {
 	Create EndpointFunc
 	Get    EndpointFunc
+	List   EndpointFunc
 	Pause  EndpointFunc
 	Resume EndpointFunc
 	Delete EndpointFunc
@@ -61,10 +62,12 @@ type ExecEndpoints struct {
 }
 
 type SessionEndpoints struct {
-	Create     EndpointFunc
-	Get        EndpointFunc
-	Heartbeat  EndpointFunc
-	Disconnect EndpointFunc
+	Create              EndpointFunc
+	Get                 EndpointFunc
+	Heartbeat           EndpointFunc
+	Sync                EndpointFunc
+	ListTrafficBindings EndpointFunc
+	Disconnect          EndpointFunc
 }
 
 type KubernetesEndpoints struct {

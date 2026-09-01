@@ -32,7 +32,6 @@ type RunningCore interface {
 	io.Closer
 	Done() <-chan struct{}
 	Err() error
-	Snapshot(ctx context.Context) (Metrics, error)
 	TrafficEndpoints() TrafficEndpoints
 	SessionID() string
 	Config() []byte

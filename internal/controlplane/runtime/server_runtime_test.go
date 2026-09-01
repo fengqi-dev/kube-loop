@@ -131,7 +131,6 @@ func runtimeTestOptions(
 		Server:            server,
 		SessionRecovery:   workers[0],
 		MaintenanceWorker: workers[1],
-		BindingRecovery:   workers[2],
 		SessionRuntime:    sessionRuntime,
 	}
 }
@@ -146,11 +145,11 @@ func TestServeControlPlanePropagatesServeAndShutdownErrors(t *testing.T) {
 	server.shutdownErr = serverShutdownFailure
 	sessionRuntime := &runtimeTestSessionRuntime{err: sessionShutdownFailure}
 	workers := []*runtimeTestWorker{
-		newRuntimeTestWorker(), newRuntimeTestWorker(), newRuntimeTestWorker(),
+		newRuntimeTestWorker(), newRuntimeTestWorker(),
 	}
 
 	err := serveControlPlane(runtimeTestOptions(
-		ctx, stop, server, sessionRuntime, workers[0], workers[1], workers[2],
+		ctx, stop, server, sessionRuntime, workers[0], workers[1],
 	))
 	for _, expected := range []error{serveFailure, serverShutdownFailure, sessionShutdownFailure} {
 		if !errors.Is(err, expected) {
@@ -178,12 +177,12 @@ func TestServeControlPlaneStopsCleanlyAfterContextCancellation(t *testing.T) {
 	server := newRuntimeTestServer()
 	sessionRuntime := &runtimeTestSessionRuntime{}
 	workers := []*runtimeTestWorker{
-		newRuntimeTestWorker(), newRuntimeTestWorker(), newRuntimeTestWorker(),
+		newRuntimeTestWorker(), newRuntimeTestWorker(),
 	}
 	result := make(chan error, 1)
 	go func() {
 		result <- serveControlPlane(runtimeTestOptions(
-			ctx, stop, server, sessionRuntime, workers[0], workers[1], workers[2],
+			ctx, stop, server, sessionRuntime, workers[0], workers[1],
 		))
 	}()
 
@@ -219,7 +218,7 @@ func TestServeControlPlaneBoundsBackgroundWorkerShutdown(t *testing.T) {
 	ctx, stop := context.WithCancel(t.Context())
 	server := newRuntimeTestServer()
 	sessionRuntime := &runtimeTestSessionRuntime{}
-	normalWorkers := []*runtimeTestWorker{newRuntimeTestWorker(), newRuntimeTestWorker()}
+	normalWorkers := []*runtimeTestWorker{newRuntimeTestWorker()}
 	blockingWorker := &runtimeBlockingWorker{started: make(chan struct{}), release: make(chan struct{})}
 	t.Cleanup(func() { close(blockingWorker.release) })
 	options := runtimeTestOptions(
@@ -228,7 +227,6 @@ func TestServeControlPlaneBoundsBackgroundWorkerShutdown(t *testing.T) {
 		server,
 		sessionRuntime,
 		normalWorkers[0],
-		normalWorkers[1],
 		blockingWorker,
 	)
 	options.Config.ShutdownTimeout = 50 * time.Millisecond
@@ -257,10 +255,10 @@ func TestServeControlPlaneBoundsServeLoopShutdown(t *testing.T) {
 	t.Cleanup(func() { close(server.release) })
 	sessionRuntime := &runtimeTestSessionRuntime{}
 	workers := []*runtimeTestWorker{
-		newRuntimeTestWorker(), newRuntimeTestWorker(), newRuntimeTestWorker(),
+		newRuntimeTestWorker(), newRuntimeTestWorker(),
 	}
 	options := runtimeTestOptions(
-		ctx, stop, server, sessionRuntime, workers[0], workers[1], workers[2],
+		ctx, stop, server, sessionRuntime, workers[0], workers[1],
 	)
 	options.Config.ShutdownTimeout = 50 * time.Millisecond
 	result := make(chan error, 1)
@@ -287,10 +285,10 @@ func TestServeControlPlaneStartsIndependentShutdownsConcurrently(t *testing.T) {
 	server.shutdownUntilDeadline = true
 	sessionRuntime := &runtimeTestSessionRuntime{}
 	workers := []*runtimeTestWorker{
-		newRuntimeTestWorker(), newRuntimeTestWorker(), newRuntimeTestWorker(),
+		newRuntimeTestWorker(), newRuntimeTestWorker(),
 	}
 	options := runtimeTestOptions(
-		ctx, stop, server, sessionRuntime, workers[0], workers[1], workers[2],
+		ctx, stop, server, sessionRuntime, workers[0], workers[1],
 	)
 	options.Config.ShutdownTimeout = 50 * time.Millisecond
 	result := make(chan error, 1)

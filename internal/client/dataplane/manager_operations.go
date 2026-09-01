@@ -24,14 +24,6 @@ func (manager *Manager) Status(profileID string) (Status, error) {
 	return status, nil
 }
 
-func (manager *Manager) Metrics(ctx context.Context, profileID string) (singbox.Metrics, error) {
-	runtime, err := manager.activeRuntime(profileID)
-	if err != nil {
-		return singbox.Metrics{}, err
-	}
-	return runtime.Metrics(ctx)
-}
-
 func (manager *Manager) TestConnectivity(ctx context.Context, profileID string) error {
 	runtime, err := manager.activeRuntime(profileID)
 	if err != nil {

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Circle, Network, Pause, Play, Square, Trash2 } from "lucide-react";
+import { Circle, Network } from "lucide-react";
 import { backend } from "@/backend";
 import { ActionIconButton, portForwardIcon, sftpIcon, sshIcon } from "@/components/network/action-icons";
 import { ALL_NAMESPACES, ResourceToolbar } from "@/components/network/resource-toolbar";
@@ -8,7 +8,6 @@ import { CopyableText } from "@/components/shared/copyable-text";
 import { EmptyState } from "@/components/shared/empty-state";
 import { PageShell } from "@/components/shared/page-shell";
 import { ResourcePagination, RESOURCE_PAGE_SIZE } from "@/components/shared/resource-pagination";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -101,12 +100,19 @@ export function ServerWorkloadView({ profileId }: { profileId: string }) {
     }
     setBusy(true);
     try {
-      await backend.startServerPortForward({ profileId, kind: "pod", name: selected.name, protocol, remotePort: remote, localPort: local });
+      const created = await backend.startServerPortForward({
+        profileId,
+        kind: "pod",
+        name: selected.name,
+        protocol,
+        remotePort: remote,
+        localPort: local,
+      });
+      setForwards((current) => [...current.filter((item) => item.id !== created.id), created]);
       setDialogOpen(false);
       setSelected(null);
       setRemotePort("");
       setLocalPort("");
-      await reload(namespace);
     } catch (reason) {
       setError(messageOf(reason));
     } finally {
@@ -122,48 +128,6 @@ export function ServerWorkloadView({ profileId }: { profileId: string }) {
       if (!endpoint) endpoint = await backend.startServerPodSSH({ profileId, pod: pod.name, container });
       setSSHEndpoints((current) => [...current.filter((item) => item.id !== endpoint!.id), endpoint!]);
       await backend.openServerPodSSH(profileId, endpoint.id);
-    } catch (reason) {
-      setError(messageOf(reason));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function mutateForward(operation: "pause" | "resume" | "delete", id: string) {
-    if (busy) return;
-    setBusy(true);
-    try {
-	  if (operation === "pause") await backend.pauseServerPortForward(profileId, id);
-	  else if (operation === "resume") await backend.resumeServerPortForward(profileId, id);
-	  else await backend.deleteServerPortForward(profileId, id);
-      await reload(namespace);
-    } catch (reason) {
-      setError(messageOf(reason));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function stopSSH(id: string) {
-    if (busy) return;
-    setBusy(true);
-    setError("");
-    try {
-      await backend.stopServerPodSSH(profileId, id);
-      setSSHEndpoints((current) => current.filter((item) => item.id !== id));
-    } catch (reason) {
-      setError(messageOf(reason));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function openSSHEndpoint(id: string) {
-    if (busy) return;
-    setBusy(true);
-    setError("");
-    try {
-      await backend.openServerPodSSH(profileId, id);
     } catch (reason) {
       setError(messageOf(reason));
     } finally {
@@ -250,7 +214,7 @@ export function ServerWorkloadView({ profileId }: { profileId: string }) {
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-1">
-                        <ActionIconButton label={t("network.tabPortForward")} icon={portForwardIcon} disabled={!ready || !canForward} onClick={() => { const port = pod.ports?.[0]; setSelected(pod); setRemotePort(port ? String(port.port) : ""); setProtocol(port?.protocol.toLowerCase() === "udp" ? "udp" : "tcp"); setDialogOpen(true); }} />
+                        <ActionIconButton label={t("network.tabPortForward")} icon={portForwardIcon} disabled={!ready || !canForward || forwards.some((entry) => entry.name === pod.name && entry.namespace === pod.namespace)} onClick={() => { const port = pod.ports?.[0]; setSelected(pod); setRemotePort(port ? String(port.port) : ""); setProtocol(port?.protocol.toLowerCase() === "udp" ? "udp" : "tcp"); setDialogOpen(true); }} />
                         <ActionIconButton label={t("sftp.openManager")} icon={sftpIcon} disabled={!ready || (!canFiles && !canManageFiles)} onClick={() => { setSelected(pod); setSFTPOpen(true); }} />
                         {pod.containers.map((container) => (
                           <ActionIconButton key={container} label={`${t("workload.openSSH")} · ${container}`} icon={sshIcon} text={pod.containers.length > 1 ? container : undefined} disabled={!ready || !pod.ready || !canExec || busy} onClick={() => void openSSH(pod, container)} />
@@ -266,51 +230,7 @@ export function ServerWorkloadView({ profileId }: { profileId: string }) {
         </div>
       )}
 
-      {profileId ? <div className="overflow-hidden rounded-lg border bg-card">
-        <div className="border-b px-4 py-3 font-medium">Active operations</div>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Type</TableHead>
-              <TableHead>Target</TableHead>
-              <TableHead>Address / Target</TableHead>
-              <TableHead>State</TableHead>
-              <TableHead className="text-right">Actions</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {forwards.map((item) => (
-              <TableRow key={item.id}>
-                <TableCell><Badge variant="outline">Port Forward</Badge></TableCell>
-                <TableCell>{`pod/${item.name}:${item.remotePort}`}</TableCell>
-                <TableCell className="font-mono text-xs">{item.address || "—"}</TableCell>
-                <TableCell>{item.state}</TableCell>
-                <TableCell>
-                  <div className="flex justify-end gap-1">
-					{item.state === "paused" || item.state === "stopped" ? <Button type="button" size="xs" variant="outline" disabled={busy} onClick={() => void mutateForward("resume", item.id)}><Play size={11} />Resume</Button> : <Button type="button" size="xs" variant="outline" disabled={busy} onClick={() => void mutateForward("pause", item.id)}><Pause size={11} />Pause</Button>}
-					<Button type="button" size="xs" variant="outline" disabled={busy} onClick={() => void mutateForward("delete", item.id)}><Trash2 size={11} />Delete</Button>
-                  </div>
-                </TableCell>
-              </TableRow>
-            ))}
-            {sshEndpoints.map((item) => (
-              <TableRow key={item.id}>
-                <TableCell><Badge variant="outline">SSH</Badge></TableCell>
-                <TableCell>{`pod/${item.pod}${item.container ? ` · ${item.container}` : ""}`}</TableCell>
-                <TableCell className="font-mono text-xs">{item.address || item.podIp || "—"}</TableCell>
-                <TableCell>{item.state}</TableCell>
-                <TableCell>
-                  <div className="flex justify-end gap-1">
-                    <Button type="button" size="xs" variant="outline" disabled={busy} onClick={() => void openSSHEndpoint(item.id)}>Open</Button>
-                    <Button type="button" size="xs" variant="outline" disabled={busy} onClick={() => void stopSSH(item.id)}><Square size={11} />Stop</Button>
-                  </div>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-        {forwards.length + sshEndpoints.length === 0 ? <div className="p-8 text-center text-sm text-muted-foreground">No active operations.</div> : null}
-      </div> : null}
+      {profileId ? null : null}
 
       <SFTPFileManagerDialog
         open={sftpOpen}

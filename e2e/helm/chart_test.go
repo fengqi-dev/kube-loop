@@ -727,6 +727,8 @@ func TestKubernetesProviderUsesControlPlaneServiceAccountWithoutDefaultImpersona
 		"list",
 		"watch",
 		"create",
+		"update",
+		"patch",
 		"delete",
 	)
 	operatorRole := objectByName(t, objects, "ClusterRole", "test-kubeloop-operator")
@@ -870,6 +872,26 @@ func TestNamespaceScopedRBACConfinesWorkflowPermissions(t *testing.T) {
 				t.Fatalf("RoleBinding %s/%s roleRef kind = %#v", namespace, name, got)
 			}
 		}
+		trafficRole := objectByNameNamespace(
+			t,
+			objects,
+			"Role",
+			namespace,
+			"test-kubeloop-control-plane-traffic",
+		)
+		assertRuleVerbs(
+			t,
+			trafficRole,
+			"traffic.kubeloop.io",
+			"trafficbindings",
+			"get",
+			"list",
+			"watch",
+			"create",
+			"update",
+			"patch",
+			"delete",
+		)
 	}
 }
 

@@ -5,7 +5,6 @@ package dataplane
 import (
 	"context"
 	"fmt"
-	"io"
 	"log/slog"
 	"maps"
 	"net"
@@ -35,6 +34,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/ticketapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/trafficbindingclient"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/trafficsession"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
 )
 
@@ -120,16 +120,14 @@ func TestRealMirrorPreservesPrimaryPathAndRecoversStaleOwner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	realMutator, err := mirrorapi.NewTrafficBindingResourceMutator(provider, stateStore, bindings)
+	realMutator, err := mirrorapi.NewTrafficBindingResourceMutator(provider, bindings)
 	if err != nil {
 		t.Fatal(err)
 	}
-	mutator := &failNextRestoreMutator{delegate: realMutator}
 	handler, err := mirrorapi.New(
-		stateStore,
 		e2eExecSessionValidator{identityID: identity.Subject, session: activeSession},
 		resolver,
-		mutator,
+		realMutator,
 		mirrorapi.Config{},
 	)
 	if err != nil {
@@ -173,8 +171,10 @@ func TestRealMirrorPreservesPrimaryPathAndRecoversStaleOwner(t *testing.T) {
 
 	// The original Pod response remains authoritative. Desktop responses use a
 	// deliberately different prefix and must never appear on the cluster path.
+	// Stop retains a paused TrafficBinding; explicit delete removes it.
 	first := startRealMirror(t, ctx, manager, serverProfile, remoteSession, serviceName, targets)
 	assertServiceIntercepted(t, ctx, kubeClient, stateStore, serviceName, gatewayIP, first.ID)
+	assertTrafficBindingActive(ctx, t, bindingConfig, harness.EchoNamespace, first.ID, "Mirror")
 	waitForMirroredClusterProbe(
 		t,
 		ctx,
@@ -198,14 +198,56 @@ func TestRealMirrorPreservesPrimaryPathAndRecoversStaleOwner(t *testing.T) {
 		"cluster-udp:",
 	)
 	stopContext, stopCancel := context.WithTimeout(ctx, 45*time.Second)
-	if err := manager.Delete(stopContext, serverProfile.ID, first.ID); err != nil {
+	if err := manager.Pause(stopContext, serverProfile.ID, first.ID); err != nil {
 		stopCancel()
-		t.Fatalf("delete real Mirror: %v", err)
+		t.Fatalf("stop real Mirror: %v", err)
 	}
 	stopCancel()
 	waitForMirrorState(t, ctx, stateStore, first.ID, "stopped")
+	assertTrafficBindingPaused(ctx, t, bindingConfig, harness.EchoNamespace, first.ID)
 	assertServiceRestored(t, ctx, kubeClient, stateStore, serviceName, first.ID, originalSelector)
 	harness.WaitClusterProbe(t, ctx, kubeClient, service.Spec.ClusterIP, 8080, "tcp", "restored", "cluster-tcp:")
+	if err := manager.Shutdown(ctx); err != nil {
+		t.Fatalf("shutdown Mirror manager before restore: %v", err)
+	}
+	restoredManager, err := clientmirror.NewManager(
+		remoteClient,
+		clientmirror.Config{TrafficStreams: dataPlane},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		shutdownContext, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer shutdownCancel()
+		_ = restoredManager.Shutdown(shutdownContext)
+	})
+	if err := restoredManager.Restore(ctx, serverProfile, remoteSession); err != nil {
+		t.Fatalf("restore stopped Mirror after client restart: %v", err)
+	}
+	restored := restoredManager.List(serverProfile.ID)
+	if len(restored) != 1 || restored[0].ID != first.ID || restored[0].State != "paused" {
+		t.Fatalf("restored Mirror list = %#v", restored)
+	}
+	if _, err := restoredManager.Resume(ctx, serverProfile.ID, first.ID); err != nil {
+		t.Fatalf("resume restored Mirror: %v", err)
+	}
+	waitForMirrorState(t, ctx, stateStore, first.ID, "running")
+	assertTrafficBindingActive(ctx, t, bindingConfig, harness.EchoNamespace, first.ID, "Mirror")
+	waitForMirroredClusterProbe(
+		t, ctx, kubeClient, tcpCopies, service.Spec.ClusterIP, 8080, "tcp", "resumed", "cluster-tcp:",
+	)
+	if err := restoredManager.Pause(ctx, serverProfile.ID, first.ID); err != nil {
+		t.Fatalf("stop restored Mirror: %v", err)
+	}
+	waitForMirrorState(t, ctx, stateStore, first.ID, "stopped")
+	assertTrafficBindingPaused(ctx, t, bindingConfig, harness.EchoNamespace, first.ID)
+	if err := restoredManager.Delete(ctx, serverProfile.ID, first.ID); err != nil {
+		t.Fatalf("delete stopped Mirror: %v", err)
+	}
+	waitForMirrorState(t, ctx, stateStore, first.ID, "deleted")
+	assertTrafficBindingAbsent(ctx, t, bindingConfig, harness.EchoNamespace, first.ID)
+	manager = restoredManager
 
 	// Abrupt desktop loss skips both the relay Stop frame and the DELETE API.
 	// The stream owner must still restore the primary Service and discard its
@@ -255,35 +297,17 @@ func TestRealMirrorPreservesPrimaryPathAndRecoversStaleOwner(t *testing.T) {
 		"before-crash",
 		"cluster-tcp:",
 	)
-	mutator.failOneRestore()
-	stopContext, stopCancel = context.WithTimeout(ctx, 45*time.Second)
-	if err := manager.Pause(stopContext, serverProfile.ID, second.ID); err != nil {
-		stopCancel()
-		t.Fatalf("pause Mirror during simulated Control Plane loss: %v", err)
-	}
-	stopCancel()
-	waitForMirrorState(t, ctx, stateStore, second.ID, "recovering")
 	assertSnapshotCount(t, stateStore, second.ID, 0)
-	time.Sleep(150 * time.Millisecond)
-	reconciler, err := trafficbindingclient.NewReconciler(
-		bindings, stateStore.Tasks(), stateStore.Sessions(), slog.New(slog.NewTextHandler(io.Discard, nil)),
-		trafficbindingclient.ReconcilerConfig{
-			Interval: 100 * time.Millisecond, StaleAfter: 100 * time.Millisecond, CleanupTimeout: 5 * time.Second,
-		},
-	)
-	if err != nil {
-		t.Fatal(err)
+	if err := bindings.Pause(ctx, harness.EchoNamespace, second.ID); err != nil {
+		t.Fatalf("recover real Mirror from its TrafficBinding: %v", err)
 	}
-	if recovered, recoverErr := reconciler.RunOnce(ctx); recoverErr != nil || recovered < 1 {
-		t.Fatalf("recover stale real Mirror: recovered=%d err=%v", recovered, recoverErr)
-	}
-	waitForMirrorState(t, ctx, stateStore, second.ID, "failed")
+	waitForMirrorState(t, ctx, stateStore, second.ID, "stopped")
 	assertServiceRestored(t, ctx, kubeClient, stateStore, serviceName, second.ID, originalSelector)
 	harness.WaitClusterProbe(t, ctx, kubeClient, service.Spec.ClusterIP, 8080, "tcp", "after-recovery", "cluster-tcp:")
-	if err := manager.Delete(ctx, serverProfile.ID, second.ID); err != nil {
+	if err := bindings.Delete(ctx, harness.EchoNamespace, second.ID); err != nil {
 		t.Fatalf("delete recovered Mirror: %v", err)
 	}
-
+	assertTrafficBindingAbsent(ctx, t, bindingConfig, harness.EchoNamespace, second.ID)
 }
 
 func mirrorNodePortDialer(
@@ -324,7 +348,7 @@ func startMirrorLifecycleController(
 	server, err := controlplane.NewServer(
 		controlplane.Config{PublicURL: "http://127.0.0.1"},
 		controlplane.BuildInfo{},
-		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		slog.Default(),
 		controlplane.WithAuthenticator(
 			controlplaneapi.AuthenticatorFunc(
 				func(request *http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
@@ -376,24 +400,34 @@ func startRealMirror(
 func waitForMirrorState(
 	t *testing.T,
 	ctx context.Context,
-	stateStore *storage.Store,
+	_ *storage.Store,
 	taskID, want string,
-) storage.Task {
+) {
 	t.Helper()
+	bindings, err := trafficbindingclient.NewForRESTConfig(
+		kubeRESTConfig(t), trafficbindingclient.Config{ControlPlaneID: e2eTrafficControlPlaneID},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
 	deadline := time.NewTimer(20 * time.Second)
 	defer deadline.Stop()
 	ticker := time.NewTicker(25 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		task, err := stateStore.Tasks().GetByID(ctx, taskID)
-		if err == nil && string(task.State) == want {
-			return task
+		binding, getErr := bindings.GetSession(ctx, harness.EchoNamespace, taskID)
+		state := "deleted"
+		if getErr == nil {
+			state = string(trafficsession.State(binding))
+		}
+		if state == want {
+			return
 		}
 		select {
 		case <-ctx.Done():
 			t.Fatal(ctx.Err())
 		case <-deadline.C:
-			t.Fatalf("Mirror Task %s did not reach %s: task=%#v err=%v", taskID, want, task, err)
+			t.Fatalf("Mirror Session %s did not reach %s: state=%s err=%v", taskID, want, state, getErr)
 		case <-ticker.C:
 		}
 	}

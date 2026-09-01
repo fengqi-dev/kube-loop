@@ -4,8 +4,6 @@ package dataplane
 
 import (
 	"context"
-	"errors"
-	"io"
 	"log/slog"
 	"maps"
 	"net"
@@ -14,7 +12,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -40,69 +37,12 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/ticketapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/trafficbindingclient"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/trafficsession"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
 )
 
 const exchangeLifecycleAccessToken = "e2e-exchange-lifecycle"
-
-type failNextRestoreMutator struct {
-	delegate exchangeapi.ResourceMutator
-
-	mu       sync.Mutex
-	failNext bool
-}
-
-func (mutator *failNextRestoreMutator) Capture(
-	ctx context.Context,
-	identity controlplaneapi.Identity,
-	snapshot *servicebinding.ServiceInterceptSnapshot,
-) error {
-	return mutator.delegate.Capture(ctx, identity, snapshot)
-}
-
-func (mutator *failNextRestoreMutator) Apply(
-	ctx context.Context,
-	identity controlplaneapi.Identity,
-	snapshot servicebinding.ServiceInterceptSnapshot,
-	taskID string,
-) error {
-	return mutator.delegate.Apply(ctx, identity, snapshot, taskID)
-}
-
-func (mutator *failNextRestoreMutator) Restore(
-	ctx context.Context,
-	snapshot servicebinding.ServiceInterceptSnapshot,
-	taskID string,
-) error {
-	mutator.mu.Lock()
-	if mutator.failNext {
-		mutator.failNext = false
-		mutator.mu.Unlock()
-		return errors.New("simulated Control Plane loss before resource restoration")
-	}
-	mutator.mu.Unlock()
-	return mutator.delegate.Restore(ctx, snapshot, taskID)
-}
-
-func (mutator *failNextRestoreMutator) DeleteBinding(
-	ctx context.Context,
-	namespace, taskID string,
-) error {
-	deleter, ok := mutator.delegate.(interface {
-		DeleteBinding(context.Context, string, string) error
-	})
-	if !ok {
-		return errors.New("traffic binding deletion is unavailable")
-	}
-	return deleter.DeleteBinding(ctx, namespace, taskID)
-}
-
-func (mutator *failNextRestoreMutator) failOneRestore() {
-	mutator.mu.Lock()
-	defer mutator.mu.Unlock()
-	mutator.failNext = true
-}
 
 func TestRealExchangeLifecycleAndStaleOwnerRecovery(t *testing.T) {
 	harness.RequireE2E(t)
@@ -163,16 +103,14 @@ func TestRealExchangeLifecycleAndStaleOwnerRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	realMutator, err := exchangeapi.NewTrafficBindingResourceMutator(provider, stateStore, bindings)
+	realMutator, err := exchangeapi.NewTrafficBindingResourceMutator(provider, bindings)
 	if err != nil {
 		t.Fatal(err)
 	}
-	mutator := &failNextRestoreMutator{delegate: realMutator}
 	handler, err := exchangeapi.New(
-		stateStore,
 		e2eExecSessionValidator{identityID: identity.Subject, session: activeSession},
 		resolver,
-		mutator,
+		realMutator,
 		exchangeapi.Config{},
 	)
 	if err != nil {
@@ -214,21 +152,63 @@ func TestRealExchangeLifecycleAndStaleOwnerRecovery(t *testing.T) {
 		{ServicePort: 9090, Protocol: "udp", LocalHost: "127.0.0.1", LocalPort: uint16(udpAddress.Port)},
 	}
 
-	// Explicit delete must close listeners, restore Kubernetes resources, and
-	// delete the durable rollback snapshot.
+	// The user-facing lifecycle is create, stop, then delete. Stop restores
+	// Kubernetes resources but retains the paused TrafficBinding for recovery;
+	// delete removes that durable intent.
 	first := startRealExchange(t, ctx, manager, serverProfile, remoteSession, serviceName, targets)
 	assertServiceIntercepted(t, ctx, kubeClient, stateStore, serviceName, gatewayIP, first.ID)
+	assertTrafficBindingActive(ctx, t, bindingConfig, harness.EchoNamespace, first.ID, "Exchange")
 	harness.WaitClusterProbe(t, ctx, kubeClient, service.Spec.ClusterIP, 8080, "tcp", "normal", "desktop-tcp:")
 	harness.WaitClusterProbe(t, ctx, kubeClient, service.Spec.ClusterIP, 9090, "udp", "normal", "desktop-udp:")
 	stopContext, stopCancel := context.WithTimeout(ctx, 45*time.Second)
-	if err := manager.Delete(stopContext, serverProfile.ID, first.ID); err != nil {
+	if err := manager.Pause(stopContext, serverProfile.ID, first.ID); err != nil {
 		stopCancel()
-		t.Fatalf("delete real Exchange: %v", err)
+		t.Fatalf("stop real Exchange: %v", err)
 	}
 	stopCancel()
 	waitForRealExchangeState(t, ctx, stateStore, first.ID, "stopped")
+	assertTrafficBindingPaused(ctx, t, bindingConfig, harness.EchoNamespace, first.ID)
 	assertServiceRestored(t, ctx, kubeClient, stateStore, serviceName, first.ID, originalSelector)
 	harness.WaitClusterProbe(t, ctx, kubeClient, service.Spec.ClusterIP, 8080, "tcp", "restored", "cluster-tcp:")
+	if err := manager.Shutdown(ctx); err != nil {
+		t.Fatalf("shutdown Exchange manager before restore: %v", err)
+	}
+	restoredManager, err := clientexchange.NewManager(
+		remoteClient,
+		clientexchange.Config{TrafficStreams: dataPlane},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		shutdownContext, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer shutdownCancel()
+		_ = restoredManager.Shutdown(shutdownContext)
+	})
+	if err := restoredManager.Restore(ctx, serverProfile, remoteSession); err != nil {
+		t.Fatalf("restore stopped Exchange after client restart: %v", err)
+	}
+	restored := restoredManager.List(serverProfile.ID)
+	if len(restored) != 1 || restored[0].ID != first.ID || restored[0].State != "paused" {
+		t.Fatalf("restored Exchange list = %#v", restored)
+	}
+	if _, err := restoredManager.Resume(ctx, serverProfile.ID, first.ID); err != nil {
+		t.Fatalf("resume restored Exchange: %v", err)
+	}
+	waitForRealExchangeState(t, ctx, stateStore, first.ID, "running")
+	assertTrafficBindingActive(ctx, t, bindingConfig, harness.EchoNamespace, first.ID, "Exchange")
+	harness.WaitClusterProbe(t, ctx, kubeClient, service.Spec.ClusterIP, 8080, "tcp", "resumed", "desktop-tcp:")
+	if err := restoredManager.Pause(ctx, serverProfile.ID, first.ID); err != nil {
+		t.Fatalf("stop restored Exchange: %v", err)
+	}
+	waitForRealExchangeState(t, ctx, stateStore, first.ID, "stopped")
+	assertTrafficBindingPaused(ctx, t, bindingConfig, harness.EchoNamespace, first.ID)
+	if err := restoredManager.Delete(ctx, serverProfile.ID, first.ID); err != nil {
+		t.Fatalf("delete stopped Exchange: %v", err)
+	}
+	waitForRealExchangeState(t, ctx, stateStore, first.ID, "deleted")
+	assertTrafficBindingAbsent(ctx, t, bindingConfig, harness.EchoNamespace, first.ID)
+	manager = restoredManager
 
 	// A desktop process can disappear without sending either the relay Stop
 	// frame or the DELETE request. Closing the underlying WebSocket abruptly
@@ -263,41 +243,22 @@ func TestRealExchangeLifecycleAndStaleOwnerRecovery(t *testing.T) {
 		"cluster-tcp:",
 	)
 
-	// Simulate the old Control Plane dying after listeners are gone but before it
-	// can restore the Service. The replacement worker must claim the durable
-	// recovering Task and compensate using its system Kubernetes identity.
+	// Simulate startup recovery reading the durable CRD directly. Pausing that
+	// CRD must restore the Service without any database Task record.
 	second := startRealExchange(t, ctx, manager, serverProfile, remoteSession, serviceName, targets)
 	assertServiceIntercepted(t, ctx, kubeClient, stateStore, serviceName, gatewayIP, second.ID)
 	harness.WaitClusterProbe(t, ctx, kubeClient, service.Spec.ClusterIP, 8080, "tcp", "before-crash", "desktop-tcp:")
-	mutator.failOneRestore()
-	stopContext, stopCancel = context.WithTimeout(ctx, 45*time.Second)
-	if err := manager.Pause(stopContext, serverProfile.ID, second.ID); err != nil {
-		stopCancel()
-		t.Fatalf("pause Exchange during simulated Control Plane loss: %v", err)
-	}
-	stopCancel()
-	waitForRealExchangeState(t, ctx, stateStore, second.ID, "recovering")
 	assertSnapshotCount(t, stateStore, second.ID, 0)
-	time.Sleep(150 * time.Millisecond)
-	reconciler, err := trafficbindingclient.NewReconciler(
-		bindings, stateStore.Tasks(), stateStore.Sessions(), slog.New(slog.NewTextHandler(io.Discard, nil)),
-		trafficbindingclient.ReconcilerConfig{
-			Interval: 100 * time.Millisecond, StaleAfter: 100 * time.Millisecond, CleanupTimeout: 5 * time.Second,
-		},
-	)
-	if err != nil {
-		t.Fatal(err)
+	if err := bindings.Pause(ctx, harness.EchoNamespace, second.ID); err != nil {
+		t.Fatalf("recover real Exchange from its TrafficBinding: %v", err)
 	}
-	if recovered, recoverErr := reconciler.RunOnce(ctx); recoverErr != nil || recovered < 1 {
-		t.Fatalf("recover stale real Exchange: recovered=%d err=%v", recovered, recoverErr)
-	}
-	waitForRealExchangeState(t, ctx, stateStore, second.ID, "failed")
+	waitForRealExchangeState(t, ctx, stateStore, second.ID, "stopped")
 	assertServiceRestored(t, ctx, kubeClient, stateStore, serviceName, second.ID, originalSelector)
 	harness.WaitClusterProbe(t, ctx, kubeClient, service.Spec.ClusterIP, 8080, "tcp", "after-recovery", "cluster-tcp:")
-	if err := manager.Delete(ctx, serverProfile.ID, second.ID); err != nil {
+	if err := bindings.Delete(ctx, harness.EchoNamespace, second.ID); err != nil {
 		t.Fatalf("delete recovered Exchange: %v", err)
 	}
-
+	assertTrafficBindingAbsent(ctx, t, bindingConfig, harness.EchoNamespace, second.ID)
 }
 
 func exchangeLifecycleState(
@@ -366,7 +327,7 @@ func startExchangeLifecycleController(
 	server, err := controlplane.NewServer(
 		controlplane.Config{PublicURL: "http://127.0.0.1"},
 		controlplane.BuildInfo{},
-		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		slog.Default(),
 		controlplane.WithAuthenticator(
 			controlplaneapi.AuthenticatorFunc(
 				func(request *http.Request) (controlplaneapi.Identity, *controlplaneapi.Error) {
@@ -509,24 +470,34 @@ func assertSnapshotCount(t *testing.T, stateStore *storage.Store, taskID string,
 func waitForRealExchangeState(
 	t *testing.T,
 	ctx context.Context,
-	stateStore *storage.Store,
+	_ *storage.Store,
 	taskID, want string,
-) storage.Task {
+) {
 	t.Helper()
+	bindings, err := trafficbindingclient.NewForRESTConfig(
+		kubeRESTConfig(t), trafficbindingclient.Config{ControlPlaneID: e2eTrafficControlPlaneID},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
 	deadline := time.NewTimer(20 * time.Second)
 	defer deadline.Stop()
 	ticker := time.NewTicker(25 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		task, err := stateStore.Tasks().GetByID(ctx, taskID)
-		if err == nil && string(task.State) == want {
-			return task
+		binding, getErr := bindings.GetSession(ctx, harness.EchoNamespace, taskID)
+		state := "deleted"
+		if getErr == nil {
+			state = string(trafficsession.State(binding))
+		}
+		if state == want {
+			return
 		}
 		select {
 		case <-ctx.Done():
 			t.Fatal(ctx.Err())
 		case <-deadline.C:
-			t.Fatalf("Exchange Task %s did not reach %s: task=%#v err=%v", taskID, want, task, err)
+			t.Fatalf("Exchange Session %s did not reach %s: state=%s err=%v", taskID, want, state, getErr)
 		case <-ticker.C:
 		}
 	}

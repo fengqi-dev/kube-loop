@@ -109,6 +109,15 @@ func (r *TrafficBindingReconciler) Reconcile(ctx context.Context, request ctrl.R
 	if desiredState(binding) == trafficv1alpha1.TrafficBindingDesiredStatePaused {
 		return r.reconcilePaused(ctx, binding)
 	}
+	if awaitingRelay(binding) {
+		if binding.Status.Phase != trafficv1alpha1.TrafficBindingPhasePending ||
+			binding.Status.ObservedGeneration != binding.Generation {
+			if err := r.setPending(ctx, binding); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+		return ctrl.Result{}, nil
+	}
 	if binding.Status.Phase != trafficv1alpha1.TrafficBindingPhaseReady &&
 		binding.Status.Phase != trafficv1alpha1.TrafficBindingPhaseReconciling {
 		if err := r.setReconciling(ctx, binding); err != nil {
@@ -136,6 +145,11 @@ func (r *TrafficBindingReconciler) Reconcile(ctx context.Context, request ctrl.R
 		return ctrl.Result{}, nil
 	}
 	return ctrl.Result{RequeueAfter: retryAfter}, err
+}
+
+func awaitingRelay(binding *trafficv1alpha1.TrafficBinding) bool {
+	return binding.Spec.Mode != trafficv1alpha1.TrafficBindingModePortForward &&
+		binding.Spec.Relay == nil
 }
 
 func (r *TrafficBindingReconciler) reconcilePaused(

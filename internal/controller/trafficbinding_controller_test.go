@@ -444,6 +444,7 @@ func previewBinding(name, service string) *trafficv1alpha1.TrafficBinding {
 		Spec: trafficv1alpha1.TrafficBindingSpec{
 			DesiredState: trafficv1alpha1.TrafficBindingDesiredStateActive,
 			Mode:         trafficv1alpha1.TrafficBindingModePreview,
+			IdentityID:   "identity-a",
 			SessionID:    "11111111-1111-4111-8111-111111111111",
 			TaskID:       "22222222-2222-4222-8222-222222222222", SessionGeneration: 1,
 			Relay:   &trafficv1alpha1.RelayEndpoint{Address: "10.0.0.8"},
@@ -472,6 +473,7 @@ func interceptBinding(name, service string, mode trafficv1alpha1.TrafficBindingM
 		Spec: trafficv1alpha1.TrafficBindingSpec{
 			DesiredState: trafficv1alpha1.TrafficBindingDesiredStateActive,
 			Mode:         mode,
+			IdentityID:   "identity-a",
 			SessionID:    "33333333-3333-4333-8333-333333333333",
 			TaskID:       "44444444-4444-4444-8444-444444444444", SessionGeneration: 1,
 			Target: &trafficv1alpha1.TrafficTarget{Kind: trafficv1alpha1.TargetKindService, Name: service},
@@ -494,6 +496,7 @@ func portForwardBinding(name, pod string) *trafficv1alpha1.TrafficBinding {
 		Spec: trafficv1alpha1.TrafficBindingSpec{
 			DesiredState: trafficv1alpha1.TrafficBindingDesiredStateActive,
 			Mode:         trafficv1alpha1.TrafficBindingModePortForward,
+			IdentityID:   "identity-a",
 			SessionID:    "55555555-5555-4555-8555-555555555555",
 			TaskID:       "66666666-6666-4666-8666-666666666666", SessionGeneration: 1,
 			Target: &trafficv1alpha1.TrafficTarget{Kind: trafficv1alpha1.TargetKindPod, Name: pod},

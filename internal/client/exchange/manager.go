@@ -3,6 +3,8 @@ package exchange
 import (
 	"context"
 	"errors"
+	"io"
+	"net"
 	"slices"
 	"strings"
 	"sync"
@@ -33,7 +35,10 @@ type TrafficStreamOpener interface {
 
 var ErrClosed = errors.New("exchange manager is closed")
 
-const exchangeStateRunning = "running"
+const (
+	exchangeStateRunning = "running"
+	exchangeStatePaused  = "paused"
+)
 
 type Request struct {
 	ProfileID string        `json:"profileId"`
@@ -71,6 +76,7 @@ type Manager struct {
 	closed    bool
 	mu        sync.Mutex
 	active    map[string]*activeExchange
+	deleted   map[string]struct{}
 }
 
 func (manager *Manager) Start(
@@ -93,7 +99,7 @@ func (manager *Manager) Start(
 		return Info{}, err
 	}
 	task, err := manager.client.CreateExchange(ctx, serverProfile, session, remote.ExchangeSpec{
-		Service: strings.TrimSpace(request.Service), Ports: ports,
+		Service: strings.TrimSpace(request.Service), Ports: ports, LocalTargets: remoteTargets(targets),
 	}, "exchange:"+uuid.NewString())
 	if err != nil {
 		return Info{}, err
@@ -165,6 +171,9 @@ func (manager *Manager) Pause(ctx context.Context, profileID, taskID string) err
 	// turn an otherwise idempotent stop into a 409 conflict.
 	_, remoteErr := pauseExchange(ctx, manager.client, entry.profile, entry.session, entry.task.ID)
 	streamErr := entry.relay.Stop(ctx)
+	if remoteErr == nil && isClosedTrafficStream(streamErr) {
+		streamErr = nil
+	}
 	entry.cancel()
 	select {
 	case <-entry.done:
@@ -173,11 +182,16 @@ func (manager *Manager) Pause(ctx context.Context, profileID, taskID string) err
 	}
 	manager.mu.Lock()
 	if manager.active[taskID] == entry {
-		entry.info.State = "paused"
+		entry.info.State = exchangeStatePaused
 		entry.relay, entry.cancel, entry.done = nil, nil, nil
 	}
 	manager.mu.Unlock()
 	return errors.Join(remoteErr, streamErr)
+}
+
+func isClosedTrafficStream(err error) bool {
+	return errors.Is(err, io.EOF) || errors.Is(err, io.ErrClosedPipe) ||
+		errors.Is(err, net.ErrClosed)
 }
 
 func (manager *Manager) Resume(ctx context.Context, profileID, taskID string) (Info, error) {
@@ -243,6 +257,7 @@ func (manager *Manager) Delete(ctx context.Context, profileID, taskID string) er
 	if deleteErr == nil {
 		manager.mu.Lock()
 		delete(manager.active, taskID)
+		manager.deleted[taskID] = struct{}{}
 		manager.mu.Unlock()
 	}
 	return errors.Join(pauseErr, deleteErr)

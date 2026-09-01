@@ -107,7 +107,6 @@ type testCore struct {
 	hosts        []singbox.HostAlias
 	dnsErr       error
 	hostsErr     error
-	metricsErr   error
 	logsErr      error
 	closeErr     error
 	closeCalls   int
@@ -120,11 +119,8 @@ func (core *testCore) Close() error {
 	core.closeOnce.Do(func() { close(core.done) })
 	return core.closeErr
 }
-func (core *testCore) Done() <-chan struct{} { return core.done }
-func (core *testCore) Err() error            { return nil }
-func (core *testCore) Snapshot(context.Context) (singbox.Metrics, error) {
-	return singbox.Metrics{ActiveConnections: 2}, core.metricsErr
-}
+func (core *testCore) Done() <-chan struct{}                      { return core.done }
+func (core *testCore) Err() error                                 { return nil }
 func (core *testCore) TrafficEndpoints() singbox.TrafficEndpoints { return singbox.TrafficEndpoints{} }
 func (core *testCore) SessionID() string                          { return core.sessionID }
 func (core *testCore) Config() []byte                             { return []byte(`{"version":2}`) }
@@ -221,9 +217,6 @@ func TestModeValidationAndInvalidSwitches(t *testing.T) {
 
 func TestManagerThinOperationsRequireConnectedRuntime(t *testing.T) {
 	manager := &Manager{active: map[string]*managedRuntime{}}
-	if _, err := manager.Metrics(t.Context(), "missing"); err == nil {
-		t.Fatal("Metrics accepted a missing Runtime")
-	}
 	if err := manager.TestConnectivity(t.Context(), "missing"); err == nil {
 		t.Fatal("TestConnectivity accepted a missing Runtime")
 	}
@@ -512,10 +505,6 @@ func (fixture *managerLifecycleFixture) startAndAssertTUN(t *testing.T, firstSta
 		len(tunNetwork.PodCIDRs) != 1 ||
 		len(tunNetwork.PodIPs) != 1 || tunNetwork.PodIPs[0] != "10.43.7.9" {
 		t.Fatalf("TUN status = %#v, starter = %#v", tunStatus, fixture.tunStarter)
-	}
-	metrics, err := fixture.manager.Metrics(context.Background(), fixture.profile.ID)
-	if err != nil || metrics.ActiveConnections != 2 {
-		t.Fatalf("metrics = %#v, %v", metrics, err)
 	}
 	logs, err := fixture.manager.Logs(context.Background(), fixture.profile.ID)
 	if err != nil || len(logs) != 2 || !strings.Contains(logs[0], "[SOCKS] listening on ") || logs[1] != "[TUN] ready" {

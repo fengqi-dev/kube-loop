@@ -9,6 +9,7 @@ const (
 	remoteResourceService      = "service"
 	remoteProtocolTCP          = "tcp"
 	remoteProtocolUDP          = "udp"
+	remoteLoopbackHost         = "127.0.0.1"
 	remoteDirectionUpload      = "upload"
 	remoteDirectionDownload    = "download"
 	remoteKindFile             = "file"

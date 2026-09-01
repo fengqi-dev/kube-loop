@@ -2,117 +2,91 @@ package previewapi
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
+	trafficv1alpha1 "github.com/fengqi-dev/kube-loop/api/v1alpha1"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/entity"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/servicebinding"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/remotetask"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/trafficsession"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficcontrol"
 )
 
-func (handler *Service) Claim(
-	ctx context.Context,
-	relayID string,
-	request trafficcontrol.ClaimRequest,
-) (trafficcontrol.ClaimResponse, *controlplaneapi.Error) {
+func (handler *Service) Claim(ctx context.Context, relayID string,
+	request trafficcontrol.ClaimRequest) (trafficcontrol.ClaimResponse, *controlplaneapi.Error) {
 	identity, session, apiError := handler.trafficSession(ctx, request.Identity)
 	if apiError != nil {
 		return trafficcontrol.ClaimResponse{}, apiError
 	}
-	task, apiError := handler.ownedTask(ctx, identity, session, request.TaskID)
+	binding, apiError := handler.ownedBinding(ctx, identity, session, request.TaskID)
 	if apiError != nil {
 		return trafficcontrol.ClaimResponse{}, apiError
 	}
-	if task.State != remotetask.Pending {
+	if binding.Spec.DesiredState != trafficv1alpha1.TrafficBindingDesiredStateActive ||
+		binding.Spec.Relay != nil || binding.Status.RelayOwnerID != "" {
 		return trafficcontrol.ClaimResponse{}, &controlplaneapi.Error{
-			Code:    controlplaneapi.CodeConflict,
-			Message: "Preview Task was already claimed",
+			Code: controlplaneapi.CodeConflict, Message: "Preview Session was already claimed",
 		}
 	}
-	var spec storedSpec
-	if json.Unmarshal(task.Spec, &spec) != nil || spec.Name == "" ||
-		len(spec.Ports) == 0 {
-		return trafficcontrol.ClaimResponse{}, internalError(
-			errors.New("stored Preview Task is invalid"),
-		)
-	}
-	result, _ := json.Marshal(ownerResult{OwnerID: relayID})
-	if err := handler.updateTrafficTask(
-		ctx, task.ID, remotetask.Pending, remotetask.Starting, result,
-	); err != nil {
+	sessions, _ := handler.bindingSessions()
+	if _, err := sessions.ClaimRelay(ctx, binding, relayID); err != nil {
 		return trafficcontrol.ClaimResponse{}, storageError(err)
 	}
+	name := ""
+	if binding.Spec.Preview != nil {
+		name = binding.Spec.Preview.ServiceName
+	}
 	return trafficcontrol.ClaimResponse{
-		Mode: trafficcontrol.ModePreview, TaskID: task.ID, Service: spec.Name,
-		Ports: append([]entity.Port(nil), spec.Ports...),
+		Mode: trafficcontrol.ModePreview, TaskID: binding.Spec.TaskID,
+		Service: name, Ports: append([]entity.Port(nil), trafficsession.Ports(binding)...),
 	}, nil
 }
 
-func (handler *Service) Prepare(
-	ctx context.Context,
-	relayID string,
-	request trafficcontrol.PrepareRequest,
-) (trafficcontrol.PrepareResponse, *controlplaneapi.Error) {
+func (handler *Service) Prepare(ctx context.Context, relayID string,
+	request trafficcontrol.PrepareRequest) (trafficcontrol.PrepareResponse, *controlplaneapi.Error) {
 	identity, session, apiError := handler.trafficSession(ctx, request.Identity)
 	if apiError != nil {
 		return trafficcontrol.PrepareResponse{}, apiError
 	}
-	task, apiError := handler.ownedTask(ctx, identity, session, request.TaskID)
+	binding, apiError := handler.ownedBinding(ctx, identity, session, request.TaskID)
 	if apiError != nil {
 		return trafficcontrol.PrepareResponse{}, apiError
 	}
-	if task.State != remotetask.Starting || !trafficOwnedBy(task, relayID) {
+	if binding.Status.RelayOwnerID != relayID || binding.Spec.Relay != nil {
 		return trafficcontrol.PrepareResponse{}, &controlplaneapi.Error{
-			Code:    controlplaneapi.CodeConflict,
-			Message: previewTaskOwnershipMessage,
+			Code: controlplaneapi.CodeConflict, Message: previewTaskOwnershipMessage,
 		}
 	}
-	var spec storedSpec
-	if json.Unmarshal(task.Spec, &spec) != nil {
-		return trafficcontrol.PrepareResponse{}, internalError(
-			errors.New("stored Preview Task is invalid"),
-		)
-	}
-	ports, err := interceptPorts(spec.Ports, request.Ports)
+	ports, err := interceptPorts(trafficsession.Ports(binding), request.Ports)
 	if err != nil {
 		return trafficcontrol.PrepareResponse{}, &controlplaneapi.Error{
-			Code:    controlplaneapi.CodeInvalidArgument,
-			Message: err.Error(),
-			Cause:   err,
+			Code: controlplaneapi.CodeInvalidArgument, Message: err.Error(), Cause: err,
 		}
 	}
-	claim := ownerResult{OwnerID: relayID, GatewayIP: request.GatewayIP}
-	claimJSON, _ := json.Marshal(claim)
-	if err := handler.updateTrafficTask(
-		ctx, task.ID, remotetask.Starting, remotetask.Starting, claimJSON,
-	); err != nil {
-		return trafficcontrol.PrepareResponse{}, storageError(err)
+	name := ""
+	if binding.Spec.Preview != nil {
+		name = binding.Spec.Preview.ServiceName
 	}
 	snapshot := servicebinding.PreviewServiceSnapshot{
-		Namespace: session.Namespace, Service: spec.Name, GatewayIP: request.GatewayIP, Ports: ports,
+		Namespace: session.Namespace, Service: name,
+		GatewayIP: request.GatewayIP, Ports: ports,
 	}
-	service, err := handler.resources.Create(ctx, identity, snapshot, task.ID)
+	listenerPorts := make(map[string]int32, len(request.Ports))
+	for _, port := range request.Ports {
+		listenerPorts[strings.ToUpper(port.Protocol)+fmt.Sprintf("/%d", port.ServicePort)] = port.ListenPort
+	}
+	sessions, _ := handler.bindingSessions()
+	if err := sessions.AttachRelay(ctx, binding, relayID, request.GatewayIP, listenerPorts); err != nil {
+		return trafficcontrol.PrepareResponse{}, internalError(err)
+	}
+	service, err := handler.resources.Create(ctx, identity, snapshot, binding.Spec.TaskID)
 	if err != nil {
-		return trafficcontrol.PrepareResponse{}, internalError(
-			fmt.Errorf("create Preview binding: %w", err),
-		)
+		return trafficcontrol.PrepareResponse{}, internalError(fmt.Errorf("create Preview binding: %w", err))
 	}
 	if service == nil || service.Spec.ClusterIP == "" {
-		return trafficcontrol.PrepareResponse{}, internalError(
-			errors.New("created Preview Service has no ClusterIP"),
-		)
+		return trafficcontrol.PrepareResponse{}, internalError(errors.New("created Preview Service has no ClusterIP"))
 	}
-	claim.ClusterIP = service.Spec.ClusterIP
-	claimJSON, _ = json.Marshal(claim)
-	if err := handler.updateTrafficTask(
-		ctx, task.ID, remotetask.Starting, remotetask.Running, claimJSON,
-	); err != nil {
-		return trafficcontrol.PrepareResponse{}, storageError(err)
-	}
-	return trafficcontrol.PrepareResponse{
-		ClusterIP: service.Spec.ClusterIP,
-	}, nil
+	return trafficcontrol.PrepareResponse{ClusterIP: service.Spec.ClusterIP}, nil
 }

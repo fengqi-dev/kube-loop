@@ -56,11 +56,42 @@ func (a *App) startup(ctx context.Context) {
 		if a.mcp != nil {
 			a.mcp.StartFromStore()
 		}
+		syncSessions := a.startupSessionSync
+		if syncSessions == nil {
+			syncSessions = a.syncServerSessions
+		}
 		a.backgroundWG.Go(func() {
-			state := a.checkForUpdates(backgroundContext)
-			runtime.EventsEmit(backgroundContext, "update:state", state)
+			if err := syncSessions(backgroundContext); err != nil {
+				a.appendLog("WARN", "Session synchronization failed: "+err.Error())
+				return
+			}
+			a.appendLog("INFO", "Sessions synchronized from TrafficBindings")
 		})
+		if a.updater != nil {
+			a.backgroundWG.Go(func() {
+				state := a.checkForUpdates(backgroundContext)
+				runtime.EventsEmit(backgroundContext, "update:state", state)
+			})
+		}
 	})
+}
+
+func (a *App) syncServerSessions(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if a.profiles == nil || a.remoteSessions == nil {
+		return nil
+	}
+	state := a.profiles.Snapshot()
+	for _, serverProfile := range state.Profiles {
+		if serverProfile.ID != state.ActiveProfileID {
+			continue
+		}
+		_, err := a.LoadServerInventory(serverProfile.ID, serverProfile.LastNamespace)
+		return err
+	}
+	return nil
 }
 
 func (a *App) shutdown(ctx context.Context) {

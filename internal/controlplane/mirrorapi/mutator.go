@@ -10,7 +10,6 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/authorization"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/servicebinding"
-	controlplanestorage "github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/trafficbindingclient"
 )
 
@@ -38,25 +37,21 @@ type KubernetesMutationProvider interface {
 }
 
 type TrafficBindingResourceMutator struct {
-	provider     KubernetesMutationProvider
-	repositories controlplanestorage.Repositories
-	bindings     trafficbindingclient.Lifecycle
+	provider KubernetesMutationProvider
+	bindings trafficbindingclient.Lifecycle
 }
 
 func NewTrafficBindingResourceMutator(
 	provider KubernetesMutationProvider,
-	repositories controlplanestorage.Repositories,
 	bindings trafficbindingclient.Lifecycle,
 ) (*TrafficBindingResourceMutator, error) {
-	if provider == nil || repositories == nil || bindings == nil {
+	if provider == nil || bindings == nil {
 		return nil, errors.New(
-			"kubernetes Provider, storage and TrafficBinding lifecycle are required",
+			"kubernetes Provider and TrafficBinding lifecycle are required",
 		)
 	}
 	return &TrafficBindingResourceMutator{
-		provider:     provider,
-		repositories: repositories,
-		bindings:     bindings,
+		provider: provider, bindings: bindings,
 	}, nil
 }
 
@@ -78,21 +73,13 @@ func (mutator *TrafficBindingResourceMutator) Apply(
 	snapshot servicebinding.ServiceInterceptSnapshot,
 	interceptID string,
 ) error {
-	owner, err := trafficbindingclient.OwnerForTask(
-		ctx,
-		mutator.repositories,
-		interceptID,
-		TaskType,
-		snapshot.Namespace,
-	)
-	if err != nil {
-		return err
+	store, ok := mutator.bindings.(interface {
+		GetSession(context.Context, string, string) (*trafficv1alpha1.TrafficBinding, error)
+	})
+	if !ok {
+		return errors.New("TrafficBinding Session lookup is unavailable")
 	}
-	binding, err := trafficbindingclient.NewInterceptBinding(
-		trafficv1alpha1.TrafficBindingModeMirror,
-		owner,
-		snapshot,
-	)
+	binding, err := store.GetSession(ctx, snapshot.Namespace, interceptID)
 	if err != nil {
 		return err
 	}
@@ -124,3 +111,8 @@ func (mutator *TrafficBindingResourceMutator) userClient(
 }
 
 var _ ResourceMutator = (*TrafficBindingResourceMutator)(nil)
+
+func (mutator *TrafficBindingResourceMutator) BindingManager() *trafficbindingclient.Manager {
+	manager, _ := mutator.bindings.(*trafficbindingclient.Manager)
+	return manager
+}

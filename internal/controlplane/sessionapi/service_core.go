@@ -9,6 +9,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/sessionregistry"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/trafficbindingclient"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/capability"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
 )
@@ -36,25 +37,37 @@ type CapabilityDiscoverer interface {
 	) (capability.Snapshot, *controlplaneapi.Error)
 }
 
+type TrafficBindingSynchronizer interface {
+	Synchronize(context.Context, string, string, string, uint64, time.Time) error
+}
+
+type TrafficBindingLister interface {
+	List(context.Context, string, string) ([]trafficbindingclient.SessionBinding, error)
+}
+
 type Config struct {
-	ClusterID    string
-	SessionTTL   time.Duration
-	MaxLifetime  time.Duration
-	Now          func() time.Time
-	Networks     NetworkDiscoverer
-	Capabilities CapabilityDiscoverer
-	Registry     *sessionregistry.Registry
+	ClusterID            string
+	SessionTTL           time.Duration
+	MaxLifetime          time.Duration
+	Now                  func() time.Time
+	Networks             NetworkDiscoverer
+	Capabilities         CapabilityDiscoverer
+	Registry             *sessionregistry.Registry
+	TrafficBindings      TrafficBindingSynchronizer
+	TrafficBindingLister TrafficBindingLister
 }
 
 type Service struct {
-	storage      Storage
-	clusterID    string
-	sessionTTL   time.Duration
-	maxLifetime  time.Duration
-	now          func() time.Time
-	networks     NetworkDiscoverer
-	capabilities CapabilityDiscoverer
-	registry     *sessionregistry.Registry
+	storage              Storage
+	clusterID            string
+	sessionTTL           time.Duration
+	maxLifetime          time.Duration
+	now                  func() time.Time
+	networks             NetworkDiscoverer
+	capabilities         CapabilityDiscoverer
+	registry             *sessionregistry.Registry
+	trafficBindings      TrafficBindingSynchronizer
+	trafficBindingLister TrafficBindingLister
 }
 
 func New(storageBackend Storage, config Config) (*Service, error) {
@@ -89,5 +102,7 @@ func New(storageBackend Storage, config Config) (*Service, error) {
 		storage: storageBackend, clusterID: config.ClusterID, sessionTTL: config.SessionTTL,
 		maxLifetime: config.MaxLifetime, now: config.Now, networks: config.Networks,
 		capabilities: config.Capabilities, registry: config.Registry,
+		trafficBindings:      config.TrafficBindings,
+		trafficBindingLister: config.TrafficBindingLister,
 	}, nil
 }

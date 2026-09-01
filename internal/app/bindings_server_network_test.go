@@ -86,9 +86,6 @@ func TestServerNetworkSettingsRejectInvalidValues(t *testing.T) {
 
 func TestServerDataPlaneDiagnosticsReportUnavailableManager(t *testing.T) {
 	application := &App{}
-	if _, err := application.ServerDataPlaneMetrics("service-1"); err == nil {
-		t.Fatal("metrics succeeded without Data Plane manager")
-	}
 	if _, err := application.ServerDataPlaneLogs("service-1"); err == nil {
 		t.Fatal("logs succeeded without Data Plane manager")
 	}

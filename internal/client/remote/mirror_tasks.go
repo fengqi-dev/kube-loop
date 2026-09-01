@@ -34,6 +34,14 @@ func (client *Client) GetMirror(
 	)
 }
 
+func (client *Client) ListMirrors(
+	ctx context.Context,
+	serverProfile profile.Profile,
+	current Session,
+) ([]MirrorTask, error) {
+	return listRemoteTasks(ctx, client, serverProfile, current, "mirrors", validateMirrorTask)
+}
+
 func (client *Client) PauseMirror(
 	ctx context.Context,
 	serverProfile profile.Profile,

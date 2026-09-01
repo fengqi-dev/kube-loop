@@ -40,7 +40,7 @@ func TestPortForwardTaskLifecycleUsesSessionBoundGatewayAPI(t *testing.T) {
 			var spec PortForwardSpec
 			if err := json.NewDecoder(request.Body).
 				Decode(&spec); err != nil || spec.Name != "api" ||
-				spec.RemotePort != 8443 {
+				spec.RemotePort != 8443 || spec.LocalPort != 18443 {
 				t.Errorf("spec = %#v err = %v", spec, err)
 			}
 		}
@@ -50,6 +50,7 @@ func TestPortForwardTaskLifecycleUsesSessionBoundGatewayAPI(t *testing.T) {
 		document := PortForwardTask{
 			ID: taskID, SessionID: session.ID, Namespace: session.Namespace, State: state,
 			Kind: remoteResourceService, Name: "api", Protocol: remoteProtocolTCP, RemotePort: 8443,
+			LocalPort:   18443,
 			DialAddress: "10.96.0.20:8443", CreatedAt: now, UpdatedAt: now, ExpiresAt: session.ExpiresAt,
 		}
 		if request.Method == http.MethodGet {
@@ -72,8 +73,9 @@ func TestPortForwardTaskLifecycleUsesSessionBoundGatewayAPI(t *testing.T) {
 	serverProfile := profile.Profile{ID: "service-1", BaseURL: server.URL}
 	created, err := client.CreatePortForward(context.Background(), serverProfile, session, PortForwardSpec{
 		Kind: remoteResourceService, Name: "api", Protocol: remoteProtocolTCP, RemotePort: 8443,
+		LocalPort: 18443,
 	}, "pf-key")
-	if err != nil || created.DialAddress != "10.96.0.20:8443" {
+	if err != nil || created.DialAddress != "10.96.0.20:8443" || created.LocalPort != 18443 {
 		t.Fatalf("created = %#v err = %v", created, err)
 	}
 	listed, err := client.ListPortForwards(context.Background(), serverProfile, session)

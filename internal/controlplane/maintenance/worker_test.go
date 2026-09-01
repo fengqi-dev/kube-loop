@@ -67,8 +67,8 @@ func TestRunOnceDeletesExpiredSessionAndCascadesTask(t *testing.T) {
 	expiry := expiredSession.ExpiresAt
 	expiredTask := storage.Task{
 		ID: uuid.NewString(), IdentityID: identity.ID, SessionID: expiredSession.ID,
-		Type: "port-forward", State: remotetask.Running, Spec: json.RawMessage(`{"kind":"service"}`),
-		IdempotencyKey: "crashed-port-forward", CreatedAt: now.Add(-time.Minute), ExpiresAt: &expiry,
+		Type: "pod-exec", State: remotetask.Running, Spec: json.RawMessage(`{"pod":"api"}`),
+		IdempotencyKey: "crashed-pod-exec", CreatedAt: now.Add(-time.Minute), ExpiresAt: &expiry,
 	}
 	if err := store.Tasks().Create(ctx, expiredTask); err != nil {
 		t.Fatal(err)
@@ -85,7 +85,7 @@ func TestRunOnceDeletesExpiredSessionAndCascadesTask(t *testing.T) {
 	activeTask := expiredTask
 	activeTask.ID = uuid.NewString()
 	activeTask.SessionID = activeSession.ID
-	activeTask.IdempotencyKey = "healthy-port-forward"
+	activeTask.IdempotencyKey = "healthy-pod-exec"
 	activeTask.ExpiresAt = &activeExpiry
 	if err := store.Tasks().Create(ctx, activeTask); err != nil {
 		t.Fatal(err)
@@ -150,13 +150,13 @@ func TestRunOnceDeletesExpiredSessionAndCascadesTask(t *testing.T) {
 		t.Fatalf("expired Session lookup = %v", err)
 	}
 	if _, err := store.Tasks().GetByID(ctx, expiredTask.ID); !errors.Is(err, storage.ErrNotFound) {
-		t.Fatalf("crashed client's Port Forward Task lookup = %v", err)
+		t.Fatalf("crashed client's Pod Exec Task lookup = %v", err)
 	}
 	if _, err := store.Sessions().GetByID(ctx, activeSession.ID); err != nil {
 		t.Fatalf("active Session lookup = %v", err)
 	}
 	if _, err := store.Tasks().GetByID(ctx, activeTask.ID); err != nil {
-		t.Fatalf("active Port Forward Task lookup = %v", err)
+		t.Fatalf("active Pod Exec Task lookup = %v", err)
 	}
 	if _, err := store.AdminSessions().
 		GetByHash(ctx, expiredAdminSession.IDHash); !errors.Is(

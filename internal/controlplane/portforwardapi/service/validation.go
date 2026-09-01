@@ -1,17 +1,18 @@
 package service
 
 import (
-	"encoding/json"
 	"errors"
 	"net"
 	"strings"
-	"time"
 
 	"k8s.io/apimachinery/pkg/util/validation"
 
+	trafficv1alpha1 "github.com/fengqi-dev/kube-loop/api/v1alpha1"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/sessionapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/trafficbindingclient"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/remotetask"
 )
 
 func normalizeSpec(spec *Spec) *controlplaneapi.Error {
@@ -61,53 +62,78 @@ func validateTarget(target Target) error {
 	return nil
 }
 
-func owned(
-	task storage.Task,
+func ownedBinding(
+	binding *trafficv1alpha1.TrafficBinding,
 	identity controlplaneapi.Identity,
 	session sessionapi.ActiveSession,
 ) bool {
-	return task.Type == TaskType && task.IdentityID == identity.Subject &&
-		task.SessionID == session.ID
+	return binding != nil && binding.Spec.IdentityID == identity.Subject &&
+		binding.Spec.SessionID == session.ID && binding.Namespace == session.Namespace
 }
 
-func portForwardFromTask(task storage.Task, namespace string) PortForward {
-	portForward, _ := decodeTask(task, namespace)
-	return portForward
+func isPortForward(binding *trafficv1alpha1.TrafficBinding) bool {
+	return binding != nil && binding.Spec.Mode == trafficv1alpha1.TrafficBindingModePortForward &&
+		binding.Spec.Target != nil && len(binding.Spec.Ports) == 1
 }
 
-func decodeTask(task storage.Task, namespace string) (PortForward, error) {
-	var spec Spec
-	var target Target
-	if err := json.Unmarshal(task.Spec, &spec); err != nil {
-		return PortForward{}, errors.New("decode Port Forward task spec")
+func portForwardFromBinding(
+	binding *trafficv1alpha1.TrafficBinding,
+	session sessionapi.ActiveSession,
+) PortForward {
+	port := binding.Spec.Ports[0]
+	kind := strings.ToLower(string(binding.Spec.Target.Kind))
+	localPort := uint16(0)
+	if port.LocalPort != nil {
+		localPort = uint16(*port.LocalPort) //nolint:gosec // CRD validation bounds this port.
 	}
-	if err := json.Unmarshal(task.Result, &target); err != nil {
-		return PortForward{}, errors.New("decode Port Forward task target")
-	}
-	if apiError := normalizeSpec(&spec); apiError != nil {
-		return PortForward{}, errors.New(
-			"stored Port Forward task spec is invalid",
-		)
-	}
-	if err := validateTarget(target); err != nil {
-		return PortForward{}, err
-	}
-	expiresAt := time.Time{}
-	if task.ExpiresAt != nil {
-		expiresAt = task.ExpiresAt.UTC()
+	updatedAt := binding.CreationTimestamp.Time
+	for _, condition := range binding.Status.Conditions {
+		if condition.LastTransitionTime.Time.After(updatedAt) {
+			updatedAt = condition.LastTransitionTime.Time
+		}
 	}
 	return PortForward{
-		ID: task.ID, SessionID: task.SessionID, Namespace: namespace, State: task.State,
-		Kind: spec.Kind, Name: spec.Name, Protocol: spec.Protocol, RemotePort: spec.RemotePort,
-		DialAddress: target.Address(), CreatedAt: task.CreatedAt, UpdatedAt: task.UpdatedAt, ExpiresAt: expiresAt,
-	}, nil
+		ID: binding.Spec.TaskID, SessionID: binding.Spec.SessionID,
+		Namespace: binding.Namespace, State: stateFromBinding(binding),
+		Kind: kind, Name: binding.Spec.Target.Name,
+		Protocol:   strings.ToLower(string(port.Protocol)),
+		RemotePort: uint16(port.TargetPort), //nolint:gosec // CRD validation bounds this port.
+		LocalPort:  localPort, DialAddress: binding.Spec.DialAddress,
+		CreatedAt: binding.CreationTimestamp.Time, UpdatedAt: updatedAt,
+		ExpiresAt: session.ExpiresAt.UTC(),
+	}
+}
+
+func stateFromBinding(binding *trafficv1alpha1.TrafficBinding) remotetask.State {
+	if binding == nil || !binding.DeletionTimestamp.IsZero() {
+		return remotetask.Deleted
+	}
+	switch binding.Status.Phase {
+	case trafficv1alpha1.TrafficBindingPhasePending, "":
+		return remotetask.Pending
+	case trafficv1alpha1.TrafficBindingPhaseReconciling:
+		return remotetask.Starting
+	case trafficv1alpha1.TrafficBindingPhaseReady:
+		return remotetask.Running
+	case trafficv1alpha1.TrafficBindingPhasePausing,
+		trafficv1alpha1.TrafficBindingPhaseRestoring:
+		return remotetask.Stopping
+	case trafficv1alpha1.TrafficBindingPhasePaused,
+		trafficv1alpha1.TrafficBindingPhaseRestored:
+		return remotetask.Stopped
+	case trafficv1alpha1.TrafficBindingPhaseDegraded:
+		return remotetask.Failed
+	default:
+		return remotetask.Failed
+	}
 }
 
 func mapStorageError(err error) *controlplaneapi.Error {
 	switch {
 	case errors.Is(err, storage.ErrNotFound):
 		return notFound()
-	case errors.Is(err, storage.ErrConflict):
+	case errors.Is(err, storage.ErrConflict),
+		errors.Is(err, trafficbindingclient.ErrTrafficBindingConflict):
 		return &controlplaneapi.Error{
 			Code:    controlplaneapi.CodeConflict,
 			Message: "Port Forward Task state changed; reload and retry",

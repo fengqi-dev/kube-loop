@@ -20,6 +20,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -105,6 +106,8 @@ func TestGatewayPodRestartRecoversDataPlane(t *testing.T) {
 	harness.RequireE2E(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
+	harness.StopAllHelperSessions()
+	t.Cleanup(harness.StopAllHelperSessions)
 
 	client := kubeClient(t)
 	namespace := "kubeloop-dataplane-" + strings.ToLower(uuid.NewString()[:8])
@@ -195,8 +198,6 @@ func TestGatewayPodRestartRecoversDataPlane(t *testing.T) {
 	controlPlane := startPortForwardControlPlane(
 		t, ctx, kubeRESTConfig(t), proxy.Address(), "e2e", identityID, deviceID, session,
 	)
-	harness.StopAllHelperSessions()
-	t.Cleanup(harness.StopAllHelperSessions)
 	statusEvents := make(chan clientdataplane.StatusEvent, 32)
 	tunStarter := &recordingTUNStarter{delegate: clientapp.NewSingboxRuntime(nil)}
 	manager, err := clientdataplane.NewManager(source, clientdataplane.Config{
@@ -272,12 +273,14 @@ func TestGatewayPodRestartRecoversDataPlane(t *testing.T) {
 	})
 	tcpForward, err := portForwards.Start(ctx, serverProfile, session, clientportforward.Request{
 		ProfileID: serverProfile.ID, Kind: "service", Name: echoService.Name, Protocol: "tcp", RemotePort: 19090,
+		LocalPort: availablePortForwardPort(t, "tcp"),
 	})
 	if err != nil {
 		t.Fatalf("start real TCP Port Forward: %v", err)
 	}
 	udpForward, err := portForwards.Start(ctx, serverProfile, session, clientportforward.Request{
 		ProfileID: serverProfile.ID, Kind: "service", Name: echoService.Name, Protocol: "udp", RemotePort: 19090,
+		LocalPort: availablePortForwardPort(t, "udp"),
 	})
 	if err != nil {
 		t.Fatalf("start real UDP Port Forward: %v", err)
@@ -287,12 +290,14 @@ func TestGatewayPodRestartRecoversDataPlane(t *testing.T) {
 	}
 	podTCPForward, err := portForwards.Start(ctx, serverProfile, session, clientportforward.Request{
 		ProfileID: serverProfile.ID, Kind: "pod", Name: echoPod.Name, Protocol: "tcp", RemotePort: 19090,
+		LocalPort: availablePortForwardPort(t, "tcp"),
 	})
 	if err != nil {
 		t.Fatalf("start real Pod TCP Port Forward: %v", err)
 	}
 	podUDPForward, err := portForwards.Start(ctx, serverProfile, session, clientportforward.Request{
 		ProfileID: serverProfile.ID, Kind: "pod", Name: echoPod.Name, Protocol: "udp", RemotePort: 19090,
+		LocalPort: availablePortForwardPort(t, "udp"),
 	})
 	if err != nil {
 		t.Fatalf("start real Pod UDP Port Forward: %v", err)
@@ -495,14 +500,70 @@ func TestGatewayPodRestartRecoversDataPlane(t *testing.T) {
 	allForwards := []clientportforward.Info{tcpForward, udpForward, podTCPForward, podUDPForward}
 	assertPortForwardAddresses(t, portForwards, serverProfile.ID, allForwards...)
 	for _, forward := range allForwards {
-		if err := portForwards.Stop(ctx, serverProfile.ID, forward.ID); err != nil {
+		assertTrafficBindingActive(
+			ctx, t, controlPlane.bindingConfig, namespace, forward.ID, "PortForward",
+		)
+		if err := portForwards.Pause(ctx, serverProfile.ID, forward.ID); err != nil {
 			t.Fatalf("stop real %s %s Port Forward: %v", forward.Kind, forward.Protocol, err)
 		}
-		stored, loadErr := controlPlane.store.Tasks().GetByID(ctx, forward.ID)
-		if loadErr != nil || stored.State != "stopped" {
-			t.Fatalf("stored %s %s Port Forward Task = %#v, %v", forward.Kind, forward.Protocol, stored, loadErr)
-		}
+		assertTrafficBindingPaused(ctx, t, controlPlane.bindingConfig, namespace, forward.ID)
 	}
+	if err := portForwards.Shutdown(ctx); err != nil {
+		t.Fatalf("shutdown Port Forward manager before restore: %v", err)
+	}
+	restoredPortForwards, err := clientportforward.New(controlPlane.remote, manager)
+	if err != nil {
+		t.Fatalf("create restored Port Forward manager: %v", err)
+	}
+	t.Cleanup(func() {
+		shutdownContext, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer shutdownCancel()
+		_ = restoredPortForwards.Shutdown(shutdownContext)
+	})
+	if err := restoredPortForwards.Restore(ctx, serverProfile, session); err != nil {
+		t.Fatalf("restore stopped Port Forwards after client restart: %v", err)
+	}
+	restored := restoredPortForwards.List(serverProfile.ID)
+	if len(restored) != len(allForwards) {
+		t.Fatalf("restored Port Forward list = %#v", restored)
+	}
+	restoredByID := make(map[string]clientportforward.Info, len(restored))
+	for _, forward := range restored {
+		restoredByID[forward.ID] = forward
+	}
+	for _, forward := range allForwards {
+		item, ok := restoredByID[forward.ID]
+		if !ok || item.State != "paused" || item.LocalPort != forward.LocalPort {
+			t.Fatalf("restored Port Forward %s = %#v", forward.ID, item)
+		}
+		resumed, resumeErr := restoredPortForwards.Resume(ctx, serverProfile.ID, forward.ID)
+		if resumeErr != nil {
+			t.Fatalf("resume restored %s %s Port Forward: %v", forward.Kind, forward.Protocol, resumeErr)
+		}
+		if resumed.LocalPort != forward.LocalPort || resumed.State != "active" {
+			t.Fatalf("resumed Port Forward %s = %#v", forward.ID, resumed)
+		}
+		assertTrafficBindingActive(
+			ctx, t, controlPlane.bindingConfig, namespace, forward.ID, "PortForward",
+		)
+	}
+	if err := assertPortForwardEcho(ctx, tcpForward.Address, udpForward.Address); err != nil {
+		t.Fatalf("restored real Service TCP/UDP Port Forward: %v", err)
+	}
+	if err := assertPortForwardEcho(ctx, podTCPForward.Address, podUDPForward.Address); err != nil {
+		t.Fatalf("restored real Pod TCP/UDP Port Forward: %v", err)
+	}
+	for _, forward := range allForwards {
+		if err := restoredPortForwards.Pause(ctx, serverProfile.ID, forward.ID); err != nil {
+			t.Fatalf("stop restored %s %s Port Forward: %v", forward.Kind, forward.Protocol, err)
+		}
+		assertTrafficBindingPaused(ctx, t, controlPlane.bindingConfig, namespace, forward.ID)
+		if err := restoredPortForwards.Delete(ctx, serverProfile.ID, forward.ID); err != nil {
+			t.Fatalf("delete stopped %s %s Port Forward: %v", forward.Kind, forward.Protocol, err)
+		}
+		assertTrafficBindingAbsent(ctx, t, controlPlane.bindingConfig, namespace, forward.ID)
+	}
+	portForwards = restoredPortForwards
 	assertPortForwardPortsReleased(t, tcpForward.Address, udpForward.Address)
 	assertPortForwardPortsReleased(t, podTCPForward.Address, podUDPForward.Address)
 	stopped, err := manager.StopTUN(serverProfile.ID)
@@ -1046,6 +1107,11 @@ func installGatewayWithLimits(
 	if err != nil {
 		t.Fatalf("create Gateway RelayTicket key Secret: %v", err)
 	}
+	hostNetwork := runtime.GOOS == "darwin"
+	dnsPolicy := corev1.DNSClusterFirst
+	if hostNetwork {
+		dnsPolicy = corev1.DNSClusterFirstWithHostNet
+	}
 	_, err = client.AppsV1().Deployments(namespace).Create(ctx, &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Labels: labels},
 		Spec: appsv1.DeploymentSpec{
@@ -1054,6 +1120,7 @@ func installGatewayWithLimits(
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: labels},
 				Spec: corev1.PodSpec{
+					HostNetwork: hostNetwork, DNSPolicy: dnsPolicy,
 					AutomountServiceAccountToken: ptr.To(false), TerminationGracePeriodSeconds: ptr.To[int64](8),
 					Containers: []corev1.Container{
 						{

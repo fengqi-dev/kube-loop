@@ -179,6 +179,14 @@ func New(config Config) echo.MiddlewareFunc {
 					Cause:   returnedError,
 				}
 			}
+			if apiError.Cause != nil && apiError.Code == controlplaneapi.CodeInternal {
+				config.Logger.ErrorContext(
+					request.Context(),
+					"API handler failed",
+					"request_id", requestID,
+					"error", apiError.Cause,
+				)
+			}
 			writeError(ctx, requestID, apiError)
 			return nil
 		}

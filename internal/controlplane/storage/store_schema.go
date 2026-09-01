@@ -44,6 +44,12 @@ func (store *Store) initializeSchema(ctx context.Context) error {
 		return err
 	}
 	if initialized != "" {
+		if initialized == previousSchemaID {
+			if err := migrateSchemaV1ToV2(ctx, transaction); err != nil {
+				return err
+			}
+			initialized = currentSchemaID
+		}
 		if initialized != currentSchemaID {
 			return fmt.Errorf(
 				"storage schema %q is unsupported; recreate the database",
@@ -96,6 +102,27 @@ func (store *Store) initializeSchema(ctx context.Context) error {
 		transaction,
 		&mysqlInitializationLock,
 	)
+}
+
+func migrateSchemaV1ToV2(ctx context.Context, transaction bun.Tx) error {
+	trafficTypes := "('port-forward', 'exchange', 'mirror', 'preview')"
+	if _, err := transaction.ExecContext(
+		ctx,
+		"DELETE FROM idempotency_records WHERE resource_type IN "+trafficTypes,
+	); err != nil {
+		return errors.New("remove legacy Traffic Session idempotency records")
+	}
+	if _, err := transaction.ExecContext(
+		ctx,
+		"DELETE FROM tasks WHERE type IN "+trafficTypes,
+	); err != nil {
+		return errors.New("remove legacy Traffic Session Tasks")
+	}
+	query := `UPDATE schema_metadata SET schema_id = ? WHERE id = 1`
+	if _, err := transaction.ExecContext(ctx, query, currentSchemaID); err != nil {
+		return errors.New("record storage schema migration")
+	}
+	return nil
 }
 
 func (store *Store) readSchemaID(

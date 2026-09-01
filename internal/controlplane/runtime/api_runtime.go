@@ -36,7 +36,6 @@ type apiRuntime struct {
 	RelayRegistry   *relayRegistryRuntime
 	SessionRuntime  *sessionregistry.Registry
 	SessionRecovery *sessionregistry.Reconciler
-	BindingRecovery *trafficbindingclient.Reconciler
 }
 
 type trafficTaskRuntime struct {
@@ -66,12 +65,6 @@ func buildAPIRuntime(
 	if err != nil {
 		return nil, fmt.Errorf("initialize TrafficBinding client: %w", err)
 	}
-	bindingRecovery, err := trafficbindingclient.NewReconciler(
-		trafficBindings, store.Tasks(), store.Sessions(), logger, trafficbindingclient.ReconcilerConfig{},
-	)
-	if err != nil {
-		return nil, fmt.Errorf("initialize TrafficBinding recovery worker: %w", err)
-	}
 	kubernetesAPI, err := kubeapi.New(
 		kubernetesProvider,
 		kubeapi.WithGatewayVersion(info.Version),
@@ -84,9 +77,15 @@ func buildAPIRuntime(
 		return nil, fmt.Errorf("initialize NetworkSpec discoverer: %w", err)
 	}
 	sessionRuntime := sessionregistry.New(ctx)
+	bindingSessions, err := trafficbindingclient.NewSessionSynchronizer(trafficBindings)
+	if err != nil {
+		return nil, fmt.Errorf("initialize TrafficBinding Session synchronizer: %w", err)
+	}
 	sessionAPI, err := sessionapi.New(store, sessionapi.Config{
 		ClusterID: config.Document.API.ServiceID, SessionTTL: config.SessionTTL, MaxLifetime: config.SessionMaxLifetime,
 		Networks: networkDiscoverer, Capabilities: kubernetesAPI, Registry: sessionRuntime,
+		TrafficBindings:      bindingSessions,
+		TrafficBindingLister: bindingSessions,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("initialize Cluster Session API: %w", err)
@@ -163,7 +162,7 @@ func buildAPIRuntime(
 		return nil, fmt.Errorf("initialize RelayTicket API: %w", err)
 	}
 	trafficTasks, err := buildTrafficTaskRuntime(
-		store, sessionAPI, kubernetesProvider, trafficBindings, relayRegistry,
+		sessionAPI, kubernetesProvider, trafficBindings, relayRegistry,
 	)
 	if err != nil {
 		return nil, err
@@ -215,12 +214,10 @@ func buildAPIRuntime(
 	return &apiRuntime{
 		Routes: apiRoutes, RelayRegistry: relayRegistry,
 		SessionRuntime: sessionRuntime, SessionRecovery: sessionRecovery,
-		BindingRecovery: bindingRecovery,
 	}, nil
 }
 
 func buildTrafficTaskRuntime(
-	store *controlplanestorage.Store,
 	sessions *sessionapi.Service,
 	kubernetesProvider *controlplanekubernetes.Provider,
 	trafficBindings *trafficbindingclient.Manager,
@@ -235,7 +232,7 @@ func buildTrafficTaskRuntime(
 		return nil, fmt.Errorf("initialize Port Forward TrafficBinding manager: %w", err)
 	}
 	portForwardService, err := portforwardservice.New(
-		store, portForwardResolver, portForwardBindings, portforwardservice.Config{},
+		portForwardResolver, portForwardBindings, portforwardservice.Config{},
 	)
 	if err != nil {
 		return nil, fmt.Errorf("initialize Port Forward Task API: %w", err)
@@ -244,27 +241,27 @@ func buildTrafficTaskRuntime(
 	if err != nil {
 		return nil, fmt.Errorf("initialize Exchange Service resolver: %w", err)
 	}
-	exchangeMutator, err := exchangeapi.NewTrafficBindingResourceMutator(kubernetesProvider, store, trafficBindings)
+	exchangeMutator, err := exchangeapi.NewTrafficBindingResourceMutator(kubernetesProvider, trafficBindings)
 	if err != nil {
 		return nil, fmt.Errorf("initialize Exchange resource mutator: %w", err)
 	}
-	exchangeAPI, err := exchangeapi.New(store, sessions, serviceResolver, exchangeMutator, exchangeapi.Config{})
+	exchangeAPI, err := exchangeapi.New(sessions, serviceResolver, exchangeMutator, exchangeapi.Config{})
 	if err != nil {
 		return nil, fmt.Errorf("initialize Exchange Task API: %w", err)
 	}
-	mirrorMutator, err := mirrorapi.NewTrafficBindingResourceMutator(kubernetesProvider, store, trafficBindings)
+	mirrorMutator, err := mirrorapi.NewTrafficBindingResourceMutator(kubernetesProvider, trafficBindings)
 	if err != nil {
 		return nil, fmt.Errorf("initialize Mirror resource mutator: %w", err)
 	}
-	mirrorAPI, err := mirrorapi.New(store, sessions, serviceResolver, mirrorMutator, mirrorapi.Config{})
+	mirrorAPI, err := mirrorapi.New(sessions, serviceResolver, mirrorMutator, mirrorapi.Config{})
 	if err != nil {
 		return nil, fmt.Errorf("initialize Mirror Task API: %w", err)
 	}
-	previewResources, err := previewapi.NewTrafficBindingResourceManager(store, trafficBindings)
+	previewResources, err := previewapi.NewTrafficBindingResourceManager(trafficBindings)
 	if err != nil {
 		return nil, fmt.Errorf("initialize Preview resource manager: %w", err)
 	}
-	previewAPI, err := previewapi.New(store, sessions, previewResources, previewapi.Config{})
+	previewAPI, err := previewapi.New(sessions, previewResources, previewapi.Config{})
 	if err != nil {
 		return nil, fmt.Errorf("initialize Preview Task API: %w", err)
 	}

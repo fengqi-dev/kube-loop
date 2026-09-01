@@ -63,7 +63,6 @@ func Run(
 	relayRegistry := apiRuntime.RelayRegistry
 	sessionRuntime := apiRuntime.SessionRuntime
 	sessionRecovery := apiRuntime.SessionRecovery
-	bindingRecovery := apiRuntime.BindingRecovery
 	auditSink, err := controlplane.NewStorageAuditSink(stateStore.Audit())
 	if err != nil {
 		return fmt.Errorf("initialize API audit sink: %w", err)
@@ -178,7 +177,7 @@ func Run(
 		KubernetesConfig:  kubernetesConfig,
 		SessionRecovery:   sessionRecovery,
 		MaintenanceWorker: maintenanceWorker,
-		BindingRecovery:   bindingRecovery, SessionRuntime: sessionRuntime,
+		SessionRuntime:    sessionRuntime,
 	}); err != nil {
 		return err
 	}

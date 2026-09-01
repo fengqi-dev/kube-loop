@@ -21,7 +21,6 @@ const (
 
 type RecoveryStore interface {
 	Tasks() storage.TaskRepository
-	Sessions() storage.SessionRepository
 }
 
 type RecoveryConfig struct {
@@ -140,60 +139,6 @@ func (reconciler *Reconciler) RunOnce(ctx context.Context) (int, error) {
 			}
 			recovered++
 		}
-	}
-	count, err := reconciler.recoverPortForwards(ctx, now)
-	recovered += count
-	result = errors.Join(result, err)
-	return recovered, result
-}
-
-func (reconciler *Reconciler) recoverPortForwards(
-	ctx context.Context,
-	now time.Time,
-) (int, error) {
-	tasks, err := reconciler.store.Tasks().ListStaleByTypeStates(
-		ctx, "port-forward",
-		[]remotetask.State{
-			remotetask.Pending,
-			remotetask.Starting,
-			remotetask.Running,
-			remotetask.Stopping,
-		},
-		now.Add(-reconciler.staleAfter), reconciler.batchSize,
-	)
-	if err != nil {
-		return 0, err
-	}
-	recovered := 0
-	var result error
-	for _, task := range tasks {
-		next := remotetask.Stopped
-		message := ""
-		if task.State == remotetask.Pending ||
-			task.State == remotetask.Starting {
-			next, message = remotetask.Failed, "Control Plane Port Forward owner was lost during activation"
-		} else if task.State == remotetask.Running {
-			session, sessionErr := reconciler.store.Sessions().GetByID(ctx, task.SessionID)
-			if sessionErr == nil && session.State == statusActive && session.ExpiresAt.After(now) {
-				continue
-			}
-			if sessionErr != nil && !errors.Is(sessionErr, storage.ErrNotFound) {
-				result = errors.Join(result, sessionErr)
-				continue
-			}
-		}
-		err := reconciler.store.Tasks().ClaimStale(
-			ctx, task.ID, task.State, task.UpdatedAt, next, recoveryResult(task.Result, message), now,
-		)
-		if errors.Is(err, storage.ErrConflict) ||
-			errors.Is(err, storage.ErrNotFound) {
-			continue
-		}
-		if err != nil {
-			result = errors.Join(result, err)
-			continue
-		}
-		recovered++
 	}
 	return recovered, result
 }

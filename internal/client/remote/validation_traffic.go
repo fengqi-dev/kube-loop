@@ -15,6 +15,75 @@ type servicePortValue struct {
 	protocol    string
 }
 
+func validateLocalTargets(targets []LocalTarget) error {
+	if len(targets) > 64 {
+		return errors.New("local targets are invalid")
+	}
+	seen := make(map[string]struct{}, len(targets))
+	for index := range targets {
+		target := &targets[index]
+		target.Protocol = strings.ToLower(strings.TrimSpace(target.Protocol))
+		if target.Protocol != remoteProtocolTCP && target.Protocol != remoteProtocolUDP {
+			return errors.New("local target Protocol is invalid")
+		}
+		if target.ServicePort < 1 || target.ServicePort > 65535 || target.LocalPort < 1 {
+			return errors.New("local target port is invalid")
+		}
+		host := strings.TrimSpace(target.LocalHost)
+		if host == "" {
+			host = remoteLoopbackHost
+		}
+		if !validLocalHost(host) {
+			return errors.New("local target host is invalid")
+		}
+		target.LocalHost = host
+		key := strconv.Itoa(int(target.ServicePort)) + "/" + target.Protocol
+		if _, exists := seen[key]; exists {
+			return errors.New("local targets must be unique")
+		}
+		seen[key] = struct{}{}
+	}
+	return nil
+}
+
+func validLocalHost(host string) bool {
+	if address := net.ParseIP(host); address != nil {
+		return !address.IsUnspecified() && !address.IsMulticast()
+	}
+	return validDNSSubdomain(host)
+}
+
+// validateTargetsAgainstPorts ensures every service port has exactly one matching
+// local target (same protocol + service port) and that there are no extras.
+// Empty targets are tolerated for backward compatibility with records that were
+// created before local target persistence existed.
+func validateTargetsAgainstPorts(ports []servicePortValue, targets []LocalTarget) error {
+	if len(targets) == 0 {
+		return nil
+	}
+	if len(ports) != len(targets) {
+		return errors.New("local targets must match service ports")
+	}
+	if err := validateLocalTargets(targets); err != nil {
+		return err
+	}
+	for _, port := range ports {
+		key := strconv.Itoa(int(port.servicePort)) + "/" + port.protocol
+		found := false
+		for _, target := range targets {
+			targetKey := strconv.Itoa(int(target.ServicePort)) + "/" + strings.ToLower(target.Protocol)
+			if targetKey == key {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return errors.New("local targets must match service ports")
+		}
+	}
+	return nil
+}
+
 func validateServiceSpec(service *string, ports []servicePortValue, subject string) error {
 	*service = strings.TrimSpace(*service)
 	if !validDNSSubdomain(*service) || len(ports) == 0 || len(ports) > 64 {
@@ -47,9 +116,13 @@ func validateExchangeSpec(spec *ExchangeSpec) error {
 	for index, port := range ports {
 		spec.Ports[index].Name, spec.Ports[index].Protocol = port.name, port.protocol
 	}
-	return err
+	if err != nil {
+		return err
+	}
+	return validateTargetsAgainstPorts(ports, spec.LocalTargets)
 }
 
+//nolint:dupl // Exchange and Mirror keep distinct wire types so their APIs cannot be mixed accidentally.
 func validateExchangeTask(task ExchangeTask, session Session) (ExchangeTask, error) {
 	invalidIdentity := taskIdentityInvalid(task.ID, task.SessionID, task.Namespace, session)
 	invalidState := !task.State.Valid() || net.ParseIP(task.ClusterIP) == nil
@@ -57,12 +130,23 @@ func validateExchangeTask(task ExchangeTask, session Session) (ExchangeTask, err
 	if invalidIdentity || invalidState || invalidTimestamps {
 		return ExchangeTask{}, errors.New("gateway returned an incomplete Exchange Task")
 	}
-	spec := ExchangeSpec{Service: task.Service, Ports: append([]ExchangePort(nil), task.Ports...)}
+	spec := ExchangeSpec{
+		Service:      task.Service,
+		Ports:        append([]ExchangePort(nil), task.Ports...),
+		LocalTargets: cloneLocalTargets(task.LocalTargets),
+	}
 	if err := validateExchangeSpec(&spec); err != nil {
 		return ExchangeTask{}, errors.New("gateway returned an invalid Exchange Task")
 	}
-	task.Service, task.Ports = spec.Service, spec.Ports
+	task.Service, task.Ports, task.LocalTargets = spec.Service, spec.Ports, spec.LocalTargets
 	return task, nil
+}
+
+func cloneLocalTargets(targets []LocalTarget) []LocalTarget {
+	if len(targets) == 0 {
+		return nil
+	}
+	return append([]LocalTarget(nil), targets...)
 }
 
 func validateMirrorSpec(spec *MirrorSpec) error {
@@ -74,9 +158,13 @@ func validateMirrorSpec(spec *MirrorSpec) error {
 	for index, port := range ports {
 		spec.Ports[index].Name, spec.Ports[index].Protocol = port.name, port.protocol
 	}
-	return err
+	if err != nil {
+		return err
+	}
+	return validateTargetsAgainstPorts(ports, spec.LocalTargets)
 }
 
+//nolint:dupl // Exchange and Mirror keep distinct wire types so their APIs cannot be mixed accidentally.
 func validateMirrorTask(task MirrorTask, session Session) (MirrorTask, error) {
 	invalidIdentity := taskIdentityInvalid(task.ID, task.SessionID, task.Namespace, session)
 	invalidState := !task.State.Valid() || net.ParseIP(task.ClusterIP) == nil
@@ -84,11 +172,15 @@ func validateMirrorTask(task MirrorTask, session Session) (MirrorTask, error) {
 	if invalidIdentity || invalidState || invalidTimestamps {
 		return MirrorTask{}, errors.New("gateway returned an incomplete Mirror Task")
 	}
-	spec := MirrorSpec{Service: task.Service, Ports: append([]MirrorPort(nil), task.Ports...)}
+	spec := MirrorSpec{
+		Service:      task.Service,
+		Ports:        append([]MirrorPort(nil), task.Ports...),
+		LocalTargets: cloneLocalTargets(task.LocalTargets),
+	}
 	if err := validateMirrorSpec(&spec); err != nil {
 		return MirrorTask{}, errors.New("gateway returned an invalid Mirror Task")
 	}
-	task.Service, task.Ports = spec.Service, spec.Ports
+	task.Service, task.Ports, task.LocalTargets = spec.Service, spec.Ports, spec.LocalTargets
 	return task, nil
 }
 
@@ -99,6 +191,7 @@ func validatePreviewSpec(spec *PreviewSpec) error {
 	}
 	seenPorts := make(map[string]struct{}, len(spec.Ports))
 	seenNames := make(map[string]struct{}, len(spec.Ports))
+	ports := make([]servicePortValue, len(spec.Ports))
 	for index := range spec.Ports {
 		port := &spec.Ports[index]
 		port.Name = strings.TrimSpace(port.Name)
@@ -119,8 +212,9 @@ func validatePreviewSpec(spec *PreviewSpec) error {
 			seenNames[port.Name] = struct{}{}
 		}
 		seenPorts[key] = struct{}{}
+		ports[index] = servicePortValue{name: port.Name, servicePort: port.ServicePort, protocol: port.Protocol}
 	}
-	return nil
+	return validateTargetsAgainstPorts(ports, spec.LocalTargets)
 }
 
 func validatePreviewTask(task PreviewTask, session Session) (PreviewTask, error) {
@@ -132,10 +226,14 @@ func validatePreviewTask(task PreviewTask, session Session) (PreviewTask, error)
 	if invalidIdentity || invalidState || task.CreatedAt.IsZero() || task.UpdatedAt.IsZero() {
 		return PreviewTask{}, errors.New("gateway returned an incomplete Preview Task")
 	}
-	spec := PreviewSpec{Name: task.Name, Ports: append([]PreviewPort(nil), task.Ports...)}
+	spec := PreviewSpec{
+		Name:         task.Name,
+		Ports:        append([]PreviewPort(nil), task.Ports...),
+		LocalTargets: cloneLocalTargets(task.LocalTargets),
+	}
 	if err := validatePreviewSpec(&spec); err != nil {
 		return PreviewTask{}, errors.New("gateway returned an invalid Preview Task")
 	}
-	task.Name, task.Ports = spec.Name, spec.Ports
+	task.Name, task.Ports, task.LocalTargets = spec.Name, spec.Ports, spec.LocalTargets
 	return task, nil
 }

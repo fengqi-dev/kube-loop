@@ -43,6 +43,7 @@ func (routes APIRoutes) RegisterSessionRoutes(group *echo.Group) {
 	)
 
 	registerRoute(group, http.MethodPost, "/sessions/:sessionID/exchanges", routes.Exchanges.Create)
+	registerRoute(group, http.MethodGet, "/sessions/:sessionID/exchanges", routes.Exchanges.List)
 	registerRoute(
 		group,
 		http.MethodGet,
@@ -69,6 +70,7 @@ func (routes APIRoutes) RegisterSessionRoutes(group *echo.Group) {
 	)
 
 	registerRoute(group, http.MethodPost, "/sessions/:sessionID/mirrors", routes.Mirrors.Create)
+	registerRoute(group, http.MethodGet, "/sessions/:sessionID/mirrors", routes.Mirrors.List)
 	registerRoute(group, http.MethodGet, "/sessions/:sessionID/mirrors/:taskID", routes.Mirrors.Get)
 	registerRoute(
 		group,
@@ -90,6 +92,7 @@ func (routes APIRoutes) RegisterSessionRoutes(group *echo.Group) {
 	)
 
 	registerRoute(group, http.MethodPost, "/sessions/:sessionID/previews", routes.Previews.Create)
+	registerRoute(group, http.MethodGet, "/sessions/:sessionID/previews", routes.Previews.List)
 	registerRoute(
 		group,
 		http.MethodGet,
@@ -180,6 +183,18 @@ func (routes APIRoutes) RegisterSessionRoutes(group *echo.Group) {
 		http.MethodPost,
 		"/sessions/:sessionID/heartbeat",
 		routes.Sessions.Heartbeat,
+	)
+	registerRoute(
+		group,
+		http.MethodPost,
+		"/sessions/:sessionID/sync",
+		routes.Sessions.Sync,
+	)
+	registerRoute(
+		group,
+		http.MethodGet,
+		"/sessions/:sessionID/traffic-bindings",
+		routes.Sessions.ListTrafficBindings,
 	)
 	registerRoute(group, http.MethodDelete, "/sessions/:sessionID", routes.Sessions.Disconnect)
 }

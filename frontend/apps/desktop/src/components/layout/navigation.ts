@@ -3,9 +3,9 @@ import type { TranslationKey } from "@/i18n";
 export type AppView =
   | "overview"
   | "clusters"
-  | "connections"
   | "workload"
   | "network"
+  | "sessions"
   | "host-aliases"
   | "traffic-inspection"
   | "mcp"
@@ -14,9 +14,9 @@ export type AppView =
 export const navKeys: Record<AppView, TranslationKey> = {
   overview: "nav.overview",
   clusters: "nav.clusters",
-  connections: "nav.connections",
   workload: "nav.workload",
   network: "nav.network",
+  sessions: "nav.sessions",
   "host-aliases": "nav.hostAliases",
   "traffic-inspection": "nav.trafficInspection",
   mcp: "nav.mcp",

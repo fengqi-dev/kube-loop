@@ -67,6 +67,9 @@ func validateBindingIdentity(binding *trafficv1alpha1.TrafficBinding) error {
 	if !uuidPattern.MatchString(strings.ToLower(binding.Spec.TaskID)) {
 		return permanentf("spec.taskID must be a UUID")
 	}
+	if strings.TrimSpace(binding.Spec.IdentityID) == "" || len(binding.Spec.IdentityID) > 256 {
+		return permanentf("spec.identityID is required and must not exceed 256 bytes")
+	}
 	if binding.Spec.SessionGeneration < 1 {
 		return permanentf("spec.sessionGeneration must be positive")
 	}
@@ -92,6 +95,11 @@ func validateBindingPorts(binding *trafficv1alpha1.TrafficBinding) error {
 		}
 		if port.RelayPort != nil {
 			if err := validatePort(*port.RelayPort, fmt.Sprintf("spec.ports[%d].relayPort", index)); err != nil {
+				return err
+			}
+		}
+		if port.LocalPort != nil {
+			if err := validatePort(*port.LocalPort, fmt.Sprintf("spec.ports[%d].localPort", index)); err != nil {
 				return err
 			}
 		}
@@ -124,24 +132,31 @@ func validateBindingMode(binding *trafficv1alpha1.TrafficBinding) error {
 			return permanentf("PortForward forbids spec.ports[0].relayPort")
 		}
 	case trafficv1alpha1.TrafficBindingModePreview:
-		if binding.Spec.Target != nil || binding.Spec.Relay == nil || binding.Spec.Preview == nil {
-			return permanentf("Preview requires spec.relay and spec.preview")
+		if binding.Spec.Target != nil || binding.Spec.Preview == nil {
+			return permanentf("Preview requires spec.preview")
 		}
 		if problems := validation.IsDNS1123Label(binding.Spec.Preview.ServiceName); len(problems) > 0 {
 			return permanentf("spec.preview.serviceName is invalid: %s", problems[0])
 		}
 	case trafficv1alpha1.TrafficBindingModeExchange, trafficv1alpha1.TrafficBindingModeMirror:
 		if binding.Spec.Target == nil || binding.Spec.Target.Kind != trafficv1alpha1.TargetKindService ||
-			binding.Spec.Relay == nil || binding.Spec.Preview != nil {
-			return permanentf("%s requires a Service target and spec.relay", binding.Spec.Mode)
+			binding.Spec.Preview != nil {
+			return permanentf("%s requires a Service target", binding.Spec.Mode)
 		}
 	default:
 		return permanentf("spec.mode %q is unsupported", binding.Spec.Mode)
 	}
-	if binding.Spec.Mode != trafficv1alpha1.TrafficBindingModePortForward {
+	if binding.Spec.Mode != trafficv1alpha1.TrafficBindingModePortForward && binding.Spec.Relay != nil {
 		for index := range binding.Spec.Ports {
 			if binding.Spec.Ports[index].RelayPort == nil {
 				return permanentf("spec.ports[%d].relayPort is required for %s", index, binding.Spec.Mode)
+			}
+		}
+	}
+	if binding.Spec.Mode != trafficv1alpha1.TrafficBindingModePortForward && binding.Spec.Relay == nil {
+		for index := range binding.Spec.Ports {
+			if binding.Spec.Ports[index].RelayPort != nil {
+				return permanentf("spec.ports[%d].relayPort requires spec.relay", index)
 			}
 		}
 	}
