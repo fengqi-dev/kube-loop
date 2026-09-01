@@ -50,7 +50,6 @@ type TrafficEndpoint struct {
 }
 
 type TrafficEndpoints struct {
-	PortForward  TrafficEndpoint
 	Exchange     TrafficEndpoint
 	Preview      TrafficEndpoint
 	MirrorShadow TrafficEndpoint
@@ -62,7 +61,6 @@ func (e TrafficEndpoints) Validate() error {
 		username string
 		endpoint TrafficEndpoint
 	}{
-		{TrafficUserPortForward, TrafficUserPortForward, e.PortForward},
 		{TrafficUserExchange, TrafficUserExchange, e.Exchange},
 		{TrafficUserPreview, TrafficUserPreview, e.Preview},
 		{TrafficUserMirrorShadow, TrafficUserMirrorShadow, e.MirrorShadow},

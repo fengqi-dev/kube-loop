@@ -1558,11 +1558,11 @@ export namespace remote {
 	}
 	export class TrafficBindingPreview {
 	    serviceName: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new TrafficBindingPreview(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.serviceName = source["serviceName"];
@@ -1583,11 +1583,11 @@ export namespace remote {
 	export class TrafficBindingTarget {
 	    kind: string;
 	    name: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new TrafficBindingTarget(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.kind = source["kind"];
@@ -1610,11 +1610,11 @@ export namespace remote {
 	    serviceClusterIp?: string;
 	    dialAddress?: string;
 	    createdAt: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new TrafficBindingSession(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
@@ -1656,17 +1656,17 @@ export namespace remote {
 }
 
 export namespace reverserelay {
-
+	
 	export class Target {
 	    servicePort: number;
 	    protocol: string;
 	    localHost: string;
 	    localPort: number;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new Target(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.servicePort = source["servicePort"];
@@ -1706,3 +1706,4 @@ export namespace update {
 	}
 
 }
+

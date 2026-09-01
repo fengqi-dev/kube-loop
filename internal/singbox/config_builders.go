@@ -113,23 +113,15 @@ func buildDNSConfig(network NetworkSpec, options Options) (generatedDNS, error) 
 
 func buildRouteRules(routes, clusterDomains []string) []map[string]any {
 	trafficIn := []string{TrafficInbound}
-	clusterUsers := clusterTrafficUsers()
 	localUsers := localTrafficUsers()
 	routeRules := []map[string]any{
 		{configInboundKey: []string{"dns-in"}, configActionKey: "hijack-dns"},
 		{
 			configInboundKey:  trafficIn,
-			configAuthUserKey: clusterUsers,
-			configOutboundKey: KubernetesOutbound,
-		},
-	}
-	for _, route := range routes {
-		routeRules = append(routeRules, map[string]any{
-			configInboundKey:  trafficIn,
 			configAuthUserKey: localUsers,
-			configIPCIDRKey:   []string{route},
+			configIPCIDRKey:   routes,
 			configActionKey:   rejectRouteAction,
-		})
+		},
 	}
 	routeRules = append(routeRules,
 		map[string]any{
@@ -150,11 +142,6 @@ func buildRouteRules(routes, clusterDomains []string) []map[string]any {
 			"ip_is_private":   true,
 			configOutboundKey: LocalOutbound,
 		},
-		map[string]any{
-			configInboundKey:  trafficIn,
-			configAuthUserKey: localUsers,
-			configActionKey:   rejectRouteAction,
-		},
 		// Unknown or missing auth_user on traffic-in must not fall through to
 		// TUN/cluster rules (UDP ASSOCIATE dye loss would otherwise misroute).
 		map[string]any{configInboundKey: trafficIn, configActionKey: rejectRouteAction},
@@ -168,13 +155,11 @@ func buildRouteRules(routes, clusterDomains []string) []map[string]any {
 		map[string]any{
 			"domain_suffix": clusterDomains, configOutboundKey: KubernetesOutbound,
 		},
-	)
-	for _, route := range routes {
-		routeRules = append(routeRules, map[string]any{
-			configIPCIDRKey:   []string{route},
+		map[string]any{
+			configIPCIDRKey:   routes,
 			configOutboundKey: KubernetesOutbound,
-		})
-	}
+		},
+	)
 	return routeRules
 }
 

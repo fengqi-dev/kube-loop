@@ -46,7 +46,4 @@ func TestTrafficEndpointsShareListenAndDyeUsers(t *testing.T) {
 	if endpoints.MirrorShadow.Username != singbox.TrafficUserMirrorShadow {
 		t.Fatalf("mirror-shadow user = %q", endpoints.MirrorShadow.Username)
 	}
-	if endpoints.PortForward.Username != singbox.TrafficUserPortForward {
-		t.Fatalf("port-forward user = %q", endpoints.PortForward.Username)
-	}
 }

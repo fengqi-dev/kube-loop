@@ -10,7 +10,7 @@ import (
 func TestGenerateRoutesOnlyClusterTraffic(t *testing.T) {
 	content, err := Generate(NetworkSpec{
 		PodCIDRs:     []string{"10.244.0.0/16"},
-		PodIPs:       []string{"10.245.7.9"},
+		PodIPs:       []string{"10.244.1.7", "10.245.7.9"},
 		ServiceCIDRs: []string{"10.96.0.0/12"},
 		ServiceIPs:   []string{"10.96.0.10", "10.96.0.1", "10.105.153.132"},
 		DNSServer:    "10.96.0.10",
@@ -42,6 +42,9 @@ func TestGenerateRoutesOnlyClusterTraffic(t *testing.T) {
 		if strings.Contains(text, item) {
 			t.Errorf("per-IP route %s should be omitted when Service CIDR is present:\n%s", item, text)
 		}
+	}
+	if strings.Contains(text, `"10.244.1.7/32"`) {
+		t.Fatalf("Pod /32 covered by Pod CIDR should be omitted:\n%s", text)
 	}
 	for _, item := range required {
 		if !strings.Contains(text, item) {
@@ -144,7 +147,6 @@ func TestGenerateFixedTrafficInbounds(t *testing.T) {
 	for _, item := range []string{
 		`"tag": "traffic-in"`,
 		`"listen_port": 18081`,
-		`"username": "port-forward"`,
 		`"username": "exchange"`,
 		`"username": "preview"`,
 		`"username": "mirror-shadow"`,
@@ -154,6 +156,9 @@ func TestGenerateFixedTrafficInbounds(t *testing.T) {
 		if !strings.Contains(text, item) {
 			t.Fatalf("generated config missing %q:\n%s", item, text)
 		}
+	}
+	if strings.Contains(text, `"username": "port-forward"`) {
+		t.Fatalf("Port Forward must use the Data Plane SOCKS bridge, not traffic-in:\n%s", text)
 	}
 	if strings.Contains(text, `"username": "mirror-primary"`) {
 		t.Fatalf("mirror-primary must use Gateway dial, not traffic-in:\n%s", text)

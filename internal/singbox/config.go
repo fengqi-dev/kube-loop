@@ -26,18 +26,17 @@ const (
 	hostsDNSServer    = "hosts"
 	rejectRouteAction = "reject"
 
-	// TrafficInbound is the single loopback SOCKS inbound for all feature adapters.
+	// TrafficInbound is the single loopback SOCKS inbound for local feature adapters.
 	// Feature identity is carried as SOCKS auth_user (see TrafficUser*).
 	TrafficInbound = "traffic-in"
 
-	TrafficUserPortForward  = "port-forward"
 	TrafficUserExchange     = "exchange"
 	TrafficUserPreview      = "preview"
 	TrafficUserMirrorShadow = "mirror-shadow"
 )
 
 // TrafficInboundPorts holds the single fixed loopback SOCKS listen port used by
-// all feature adapters. Targets remain dynamic in the SOCKS request; feature
+// local feature adapters. Targets remain dynamic in the SOCKS request; feature
 // identity is the SOCKS username (TrafficUser*).
 type TrafficInboundPorts struct {
 	Listen int `json:"listen"`
@@ -47,15 +46,10 @@ type TrafficInboundPorts struct {
 // Mirror primary reaches the original Pod via Gateway dial, not traffic-in.
 func TrafficFeatureUsers() []string {
 	return []string{
-		TrafficUserPortForward,
 		TrafficUserExchange,
 		TrafficUserPreview,
 		TrafficUserMirrorShadow,
 	}
-}
-
-func clusterTrafficUsers() []string {
-	return []string{TrafficUserPortForward}
 }
 
 func localTrafficUsers() []string {

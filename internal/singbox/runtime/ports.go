@@ -107,7 +107,6 @@ func trafficEndpoints(ports singbox.TrafficInboundPorts, password string) singbo
 		}
 	}
 	return singbox.TrafficEndpoints{
-		PortForward:  endpoint(singbox.TrafficUserPortForward),
 		Exchange:     endpoint(singbox.TrafficUserExchange),
 		Preview:      endpoint(singbox.TrafficUserPreview),
 		MirrorShadow: endpoint(singbox.TrafficUserMirrorShadow),
