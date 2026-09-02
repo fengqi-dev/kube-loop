@@ -12,6 +12,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
+import { toast } from "sonner";
 import { ServerFileTransfer } from "@/components/server/server-file-transfer";
 import { ServerOverviewView } from "@/components/server/server-overview-view";
 import { ServerListView } from "@/components/server/server-list-view";
@@ -186,6 +187,11 @@ export function ServerAccessView({
         : "");
       setDataPlaneReason(event.status.state === "error" ? event.reason : undefined);
       setDataPlaneRetryable(event.status.state === "error" && Boolean(event.retryable));
+      if (event.status.state === "error") {
+        toast.error(dataPlaneFailureTitle(event.reason), {
+          description: event.error || "The Data Plane connection could not be restored.",
+        });
+      }
     });
     return () => unsubscribe?.();
   }, [profile]);
