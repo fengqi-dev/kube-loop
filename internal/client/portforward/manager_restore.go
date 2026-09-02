@@ -42,12 +42,7 @@ func (manager *Manager) Restore(
 			continue
 		}
 		manager.mu.Lock()
-		_, wasDeleted := manager.deleted[task.ID]
 		entry := manager.active[task.ID]
-		if wasDeleted {
-			manager.mu.Unlock()
-			continue
-		}
 		if entry != nil {
 			entry.profile, entry.session, entry.task = serverProfile, session, task
 			if task.State == remotetask.Running && entry.localID == "" {
@@ -72,11 +67,8 @@ func (manager *Manager) Restore(
 		}
 		// An entry that only exists on the Gateway needs a persisted local port
 		// to be re-materialized; desktop-side allocations (requested as 0) are
-		// not recoverable and stay visible as paused.
-		if task.LocalPort == 0 {
-			manager.mu.Unlock()
-			continue
-		}
+		// not recoverable directly, so the entry stays available as paused with a
+		// zero port and is re-bound on Resume (which re-allocates the local port).
 		entry = &activeForward{
 			profile: serverProfile,
 			session: session,
@@ -85,13 +77,13 @@ func (manager *Manager) Restore(
 				ID: task.ID, ProfileID: serverProfile.ID, SessionID: session.ID,
 				Namespace: session.Namespace, Kind: task.Kind, Name: task.Name,
 				Protocol: task.Protocol, RemotePort: task.RemotePort, LocalPort: task.LocalPort,
-				Address:     net.JoinHostPort("127.0.0.1", strconv.Itoa(int(task.LocalPort))),
+				Address:     portForwardAddress(task.LocalPort),
 				DialAddress: task.DialAddress, State: portForwardStatePaused,
 			},
 		}
 		manager.active[task.ID] = entry
 		manager.mu.Unlock()
-		if task.State == remotetask.Running {
+		if task.State == remotetask.Running && task.LocalPort != 0 {
 			if _, err := manager.startLocal(ctx, entry, task, false); err != nil {
 				manager.mu.Lock()
 				if manager.active[task.ID] == entry {
@@ -103,4 +95,11 @@ func (manager *Manager) Restore(
 		}
 	}
 	return nil
+}
+
+func portForwardAddress(port uint16) string {
+	if port == 0 {
+		return ""
+	}
+	return net.JoinHostPort("127.0.0.1", strconv.Itoa(int(port)))
 }

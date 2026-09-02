@@ -237,25 +237,49 @@ func TestManagerRestoreReestablishesReleasedAutoLocalPort(t *testing.T) {
 	}
 }
 
-func TestManagerRestoreDoesNotRehydrateDeletedPortForward(t *testing.T) {
+func TestManagerRestoreKeepsAutoLocalPortPausedThenResumeRebinds(t *testing.T) {
 	now := time.Now().UTC()
 	session := remote.Session{ID: uuid.NewString(), Namespace: "development", State: portForwardSessionActive}
+	// Simulate a client restart: the TaskClient only knows the CRD state, whose
+	// LocalPort is 0 because the Gateway never persists desktop-side allocations.
+	// Restore must keep a usable (paused) entry so a later Resume can re-bind.
 	task := remote.PortForwardTask{
 		ID: uuid.NewString(), SessionID: session.ID, Namespace: session.Namespace,
-		State: "stopped", Kind: "pod", Name: "api-0", Protocol: "tcp",
-		RemotePort: 8080, LocalPort: 18080, DialAddress: "10.2.0.10:8080",
+		State: "running", Kind: "service", Name: "api", Protocol: "tcp",
+		RemotePort: 8443, LocalPort: 0, DialAddress: "10.96.0.20:8443",
 		CreatedAt: now, UpdatedAt: now, ExpiresAt: now.Add(time.Hour),
 	}
 	client := &restorePortForwardClient{tasks: []remote.PortForwardTask{task}}
+	client.task = task
 	manager, err := New(client, fakeDataPlane{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	manager.deleted[task.ID] = struct{}{}
-	if err := manager.Restore(t.Context(), profile.Profile{ID: "server"}, session); err != nil {
+	locals := &fakeLocals{}
+	manager.locals = locals
+	serverProfile := profile.Profile{ID: "server"}
+	if err := manager.Restore(t.Context(), serverProfile, session); err != nil {
 		t.Fatal(err)
 	}
-	if items := manager.List("server"); len(items) != 0 {
-		t.Fatalf("deleted Port Forward was restored: %#v", items)
+	items := manager.List(serverProfile.ID)
+	if len(items) != 1 || items[0].State != "paused" || items[0].LocalPort != 0 || len(locals.started) != 0 {
+		t.Fatalf("restored Port Forwards = %#v, local starts = %#v", items, locals.started)
+	}
+	if _, err := manager.Resume(t.Context(), serverProfile.ID, task.ID); err != nil {
+		t.Fatalf("resume after restart failed: %v", err)
+	}
+	items = manager.List(serverProfile.ID)
+	if len(items) != 1 || items[0].State != "active" || items[0].LocalPort != 49152 ||
+		len(locals.started) != 1 {
+		t.Fatalf("resumed Port Forwards = %#v, local starts = %#v", items, locals.started)
+	}
+	client.mu.Lock()
+	resumeCalls := len(client.resumed)
+	client.mu.Unlock()
+	if resumeCalls != 1 {
+		t.Fatalf("remote Resume calls = %d", resumeCalls)
+	}
+	if len(locals.started) != 1 || locals.started[0].LocalPort != 0 {
+		t.Fatalf("Resume did not re-allocate the local port: %#v", locals.started)
 	}
 }
