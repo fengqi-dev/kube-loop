@@ -5,21 +5,21 @@ class KubeloopTui < Formula
 
   on_macos do
     if Hardware::CPU.arm?
-      url "https://github.com/fengqi-dev/kube-loop/releases/download/v2.3.0/kubeloop-tui-2.3.0-darwin-arm64.tar.gz"
-      sha256 "ec3733583f685fed31ac28f9e8dfb593f0471b829f6dd846fd320f0ccbeda802"
+      url "https://github.com/fengqi-dev/kube-loop/releases/download/v2.4.0/kubeloop-tui-2.4.0-darwin-arm64.tar.gz"
+      sha256 "3aa5bdb1dc06f874677cc3e2dfda80c7f7985f4ada497aa95cf39f685eb72f48"
     else
-      url "https://github.com/fengqi-dev/kube-loop/releases/download/v2.3.0/kubeloop-tui-2.3.0-darwin-amd64.tar.gz"
-      sha256 "550d5284af063e9647756e7965429e7cd955757bf58020eb366ecbc1b3d8cf97"
+      url "https://github.com/fengqi-dev/kube-loop/releases/download/v2.4.0/kubeloop-tui-2.4.0-darwin-amd64.tar.gz"
+      sha256 "65c87c1a3108163a8414a8a37f928e41db4d140d91c9c0d1f4fb5354d1089178"
     end
   end
 
   on_linux do
     if Hardware::CPU.arm?
-      url "https://github.com/fengqi-dev/kube-loop/releases/download/v2.3.0/kubeloop-tui-2.3.0-linux-arm64.tar.gz"
-      sha256 "30c59afc786dd3b81232f556d3aae0141517e7edb284bffc02037a0e4bc8a3aa"
+      url "https://github.com/fengqi-dev/kube-loop/releases/download/v2.4.0/kubeloop-tui-2.4.0-linux-arm64.tar.gz"
+      sha256 "d6fcc0eb96af8f88b5f5591b52d2849259ecb207025f875be2b4fd1d41f239c4"
     else
-      url "https://github.com/fengqi-dev/kube-loop/releases/download/v2.3.0/kubeloop-tui-2.3.0-linux-amd64.tar.gz"
-      sha256 "52ce975b2b0e902ba13fb0c4b64b01d53f0d2a77489cc9c3108f6be6bb719176"
+      url "https://github.com/fengqi-dev/kube-loop/releases/download/v2.4.0/kubeloop-tui-2.4.0-linux-amd64.tar.gz"
+      sha256 "fe9b0dca5450b73d2af755262bbd7593aa8dad6c7b20c11785c82f4e38319ed3"
     end
   end
 
