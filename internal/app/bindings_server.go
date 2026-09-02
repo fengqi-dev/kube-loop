@@ -1,15 +1,19 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/fengqi-dev/kube-loop/internal/client/credentials"
 	clientdiscovery "github.com/fengqi-dev/kube-loop/internal/client/discovery"
 	clientprofile "github.com/fengqi-dev/kube-loop/internal/client/profile"
 )
+
+const serverProfileCleanupTimeout = 10 * time.Second
 
 type SaveServerProfileRequest struct {
 	ID          string `json:"id,omitempty"`
@@ -139,90 +143,95 @@ func (a *App) DeleteServerProfile(id string) (clientprofile.State, error) {
 		return clientprofile.State{}, err
 	}
 	a.stopServerInventoryWatch(serverProfile.ID)
-	var cleanupErr error
-	if a.remoteFiles != nil {
-		if err := a.remoteFiles.StopProfile(serverProfile.ID); err != nil {
-			cleanupErr = errors.Join(
-				cleanupErr,
-				fmt.Errorf("stop Server Profile file transfers before deletion: %w", err),
-			)
-		}
-	}
-	if a.remoteExecs != nil {
-		if err := a.remoteExecs.StopProfile(serverProfile.ID); err != nil {
-			cleanupErr = errors.Join(
-				cleanupErr,
-				fmt.Errorf("stop Server Profile Pod exec streams before deletion: %w", err),
-			)
-		}
-	}
-	if a.remoteSSH != nil {
-		if err := a.remoteSSH.StopProfile(serverProfile.ID); err != nil {
-			cleanupErr = errors.Join(
-				cleanupErr,
-				fmt.Errorf("stop Server Profile Pod SSH endpoints before deletion: %w", err),
-			)
-		}
-	}
-	if a.remoteForwards != nil {
-		if err := a.remoteForwards.PauseProfile(a.context(), serverProfile.ID); err != nil {
-			cleanupErr = errors.Join(
-				cleanupErr,
-				fmt.Errorf("stop Server Profile Port Forwards before deletion: %w", err),
-			)
-		}
-	}
-	if a.remoteExchanges != nil {
-		if err := a.remoteExchanges.PauseProfile(a.context(), serverProfile.ID); err != nil {
-			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("stop Server Profile Exchanges before deletion: %w", err))
-		}
-	}
-	if a.remoteMirrors != nil {
-		if err := a.remoteMirrors.PauseProfile(a.context(), serverProfile.ID); err != nil {
-			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("stop Server Profile Mirrors before deletion: %w", err))
-		}
-	}
-	if a.remotePreviews != nil {
-		if err := a.remotePreviews.PauseProfile(a.context(), serverProfile.ID); err != nil {
-			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("stop Server Profile Previews before deletion: %w", err))
-		}
-	}
-	if a.dataPlanes != nil {
-		if err := a.dataPlanes.Disconnect(serverProfile.ID); err != nil {
-			cleanupErr = errors.Join(
-				cleanupErr,
-				fmt.Errorf("disconnect Server Profile Data Plane before deletion: %w", err),
-			)
-		}
-	}
-	if a.remoteSessions != nil {
-		if err := a.remoteSessions.Disconnect(a.context(), serverProfile.ID); err != nil {
-			cleanupErr = errors.Join(
-				cleanupErr,
-				fmt.Errorf("disconnect Server Profile session before deletion: %w", err),
-			)
-		}
-	}
+
+	// Capture the login credential before removing it so a background revoke can
+	// still reach the Gateway with the original refresh token.
+	var refreshToken string
 	if a.credentials != nil {
-		credential, credentialErr := a.credentials.Get(serverProfile.ID)
-		switch {
-		case credentialErr == nil:
-			if a.auth == nil {
-				cleanupErr = errors.Join(cleanupErr, errors.New("authentication is unavailable"))
-			} else if err := a.auth.Revoke(a.context(), serverProfile.BaseURL, credential.RefreshToken); err != nil {
-				cleanupErr = errors.Join(cleanupErr, fmt.Errorf("revoke Server Profile login before deletion: %w", err))
-			}
-			if err := a.credentials.Delete(serverProfile.ID); err != nil {
-				cleanupErr = errors.Join(cleanupErr, fmt.Errorf("delete Server Profile credentials: %w", err))
-			}
-		case !errors.Is(credentialErr, credentials.ErrNotFound):
-			cleanupErr = errors.Join(cleanupErr, credentialErr)
+		if credential, credentialErr := a.credentials.Get(serverProfile.ID); credentialErr == nil {
+			refreshToken = credential.RefreshToken
+		}
+	}
+
+	// Remove the server Profile and its login state locally and immediately, so
+	// deletion never depends on (or is blocked by) Gateway reachability.
+	var removeErr error
+	if a.credentials != nil {
+		if err := a.credentials.Delete(serverProfile.ID); err != nil && !errors.Is(err, credentials.ErrNotFound) {
+			removeErr = errors.Join(removeErr, fmt.Errorf("delete Server Profile credentials: %w", err))
 		}
 	}
 	if err := a.profiles.Remove(id); err != nil {
-		cleanupErr = errors.Join(cleanupErr, err)
+		removeErr = errors.Join(removeErr, err)
 	}
-	return a.profiles.Snapshot(), cleanupErr
+
+	// Remote cleanup (pause traffic, disconnect tunnels, revoke the login) is
+	// best-effort and runs in the background with a bounded timeout; if the
+	// server is unreachable the local deletion has already succeeded.
+	a.cleanupServerProfileRemote(serverProfile, refreshToken)
+	return a.profiles.Snapshot(), removeErr
+}
+
+func (a *App) cleanupServerProfileRemote(serverProfile clientprofile.Profile, refreshToken string) {
+	go func() {
+		profileID := serverProfile.ID
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(a.context()), serverProfileCleanupTimeout)
+		defer cancel()
+		var cleanupErr error
+		if a.remoteFiles != nil {
+			if err := a.remoteFiles.StopProfile(profileID); err != nil {
+				cleanupErr = errors.Join(cleanupErr, fmt.Errorf("stop Server Profile file transfers: %w", err))
+			}
+		}
+		if a.remoteExecs != nil {
+			if err := a.remoteExecs.StopProfile(profileID); err != nil {
+				cleanupErr = errors.Join(cleanupErr, fmt.Errorf("stop Server Profile Pod exec streams: %w", err))
+			}
+		}
+		if a.remoteSSH != nil {
+			if err := a.remoteSSH.StopProfile(profileID); err != nil {
+				cleanupErr = errors.Join(cleanupErr, fmt.Errorf("stop Server Profile Pod SSH endpoints: %w", err))
+			}
+		}
+		if a.remoteForwards != nil {
+			if err := a.remoteForwards.PauseProfile(ctx, profileID); err != nil {
+				cleanupErr = errors.Join(cleanupErr, fmt.Errorf("pause Server Profile Port Forwards: %w", err))
+			}
+		}
+		if a.remoteExchanges != nil {
+			if err := a.remoteExchanges.PauseProfile(ctx, profileID); err != nil {
+				cleanupErr = errors.Join(cleanupErr, fmt.Errorf("pause Server Profile Exchanges: %w", err))
+			}
+		}
+		if a.remoteMirrors != nil {
+			if err := a.remoteMirrors.PauseProfile(ctx, profileID); err != nil {
+				cleanupErr = errors.Join(cleanupErr, fmt.Errorf("pause Server Profile Mirrors: %w", err))
+			}
+		}
+		if a.remotePreviews != nil {
+			if err := a.remotePreviews.PauseProfile(ctx, profileID); err != nil {
+				cleanupErr = errors.Join(cleanupErr, fmt.Errorf("pause Server Profile Previews: %w", err))
+			}
+		}
+		if a.dataPlanes != nil {
+			if err := a.dataPlanes.Disconnect(profileID); err != nil {
+				cleanupErr = errors.Join(cleanupErr, fmt.Errorf("disconnect Server Profile Data Plane: %w", err))
+			}
+		}
+		if a.remoteSessions != nil {
+			if err := a.remoteSessions.Disconnect(ctx, profileID); err != nil {
+				cleanupErr = errors.Join(cleanupErr, fmt.Errorf("disconnect Server Profile session: %w", err))
+			}
+		}
+		if a.auth != nil && refreshToken != "" {
+			if err := a.auth.Revoke(ctx, serverProfile.BaseURL, refreshToken); err != nil {
+				cleanupErr = errors.Join(cleanupErr, fmt.Errorf("revoke Server Profile login: %w", err))
+			}
+		}
+		if cleanupErr != nil {
+			a.appendLog("warn", fmt.Sprintf("clean up deleted Server Profile %q: %v", profileID, cleanupErr))
+		}
+	}()
 }
 
 func (a *App) serverProfiles() clientprofile.State {

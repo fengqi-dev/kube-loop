@@ -103,7 +103,7 @@ func TestRefreshInvalidGrantClearsLocalCredentials(t *testing.T) {
 	}
 }
 
-func TestDeleteServerProfileClearsLocalStateWhenRemoteRevokeFails(t *testing.T) {
+func TestDeleteServerProfileRemovesLocallyWhenRemoteRevokeFails(t *testing.T) {
 	profileStore, err := clientprofile.Open(filepath.Join(t.TempDir(), "servers.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -120,8 +120,8 @@ func TestDeleteServerProfileClearsLocalStateWhenRemoteRevokeFails(t *testing.T) 
 		auth:        clientauth.New(clientauth.Config{RequestTimeout: 20 * time.Millisecond}),
 	}
 	state, err := application.DeleteServerProfile("service-1")
-	if err == nil {
-		t.Fatal("failed remote revoke was not reported")
+	if err != nil {
+		t.Fatalf("unreachable remote revoke blocked deletion: %v", err)
 	}
 	if len(credentialStore.values) != 0 {
 		t.Fatalf("credentials remained after failed revoke: %#v", credentialStore.values)
