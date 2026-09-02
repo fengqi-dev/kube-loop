@@ -45,7 +45,7 @@ HELM_E2E_BUSYBOX_IMAGE ?= busybox:1.36.1
 SINGBOX_TARGET ?= $(shell go env GOOS)/$(shell go env GOARCH)
 SINGBOX_GOOS = $(word 1,$(subst /, ,$(SINGBOX_TARGET)))
 SINGBOX_GOARCH = $(word 2,$(subst /, ,$(SINGBOX_TARGET)))
-SINGBOX_VERSION ?= v1.13.21
+SINGBOX_VERSION ?= v1.14.0
 SINGBOX_BINARY = build/bin/sing-box$(if $(filter windows,$(SINGBOX_GOOS)),.exe,)
 
 TUI_GOOS ?= $(shell go env GOOS)

@@ -170,13 +170,15 @@ func buildRouteRules(routes, clusterDomains []string) []map[string]any {
 
 func buildInbounds(routes []string, options Options) ([]map[string]any, error) {
 	tunInbound := map[string]any{
-		// dns_mode is sing-box 1.14+; we pin 1.13 and use /etc/resolver
-		// (or platform split DNS) + dns-in instead of TUN DNS hijack.
+		// dns_mode pins TUN DNS hijack into the DNS router, preserving the
+		// 1.13 behavior this config was built against; split DNS uses platform
+		// resolver rules (/etc/resolver) that target the dns-in inbound directly.
 		configTypeKey: "tun",
 		configTagKey:  "tun-in",
 		"address":     []string{options.TUNAddress},
 		"mtu":         9000,
 		"auto_route":  true,
+		"dns_mode":    "hijack",
 		// Windows WFP strict_route blocks DNS on other interfaces
 		"strict_route": runtime.GOOS != "windows",
 		// Linux: auto_redirect uses nftables and avoids TUN vs Docker/Minikube

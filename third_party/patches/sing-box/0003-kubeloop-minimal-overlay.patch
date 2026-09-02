@@ -1,0 +1,25 @@
+diff --git a/route/route.go b/route/route.go
+index 93a00225b..cafc926a9 100644
+--- a/route/route.go
++++ b/route/route.go
+@@ -13,9 +13,7 @@ import (
+ 	C "github.com/sagernet/sing-box/constant"
+ 	"github.com/sagernet/sing-box/log"
+ 	R "github.com/sagernet/sing-box/route/rule"
+-	"github.com/sagernet/sing-mux"
+ 	"github.com/sagernet/sing-tun"
+-	"github.com/sagernet/sing-vmess"
+ 	"github.com/sagernet/sing/common"
+ 	"github.com/sagernet/sing/common/buf"
+ 	"github.com/sagernet/sing/common/bufio"
+@@ -89,10 +87,6 @@ func (r *Router) routeConnection(ctx context.Context, conn net.Conn, metadata ad
+ 	}
+ 	metadata.Network = N.NetworkTCP
+ 	switch metadata.Destination.Fqdn {
+-	case mux.Destination.Fqdn:
+-		return E.New("global multiplex is deprecated since sing-box v1.7.0, enable multiplex in Inbound fields instead.")
+-	case vmess.MuxDestination.Fqdn:
+-		return E.New("global multiplex (v2ray legacy) not supported since sing-box v1.7.0.")
+ 	case uot.MagicAddress:
+ 		return E.New("global UoT not supported since sing-box v1.7.0.")
+ 	case uot.LegacyMagicAddress:

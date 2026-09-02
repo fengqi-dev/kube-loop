@@ -1,4 +1,585 @@
+diff --git a/cmd/sing-box/cmd_api.go b/cmd/sing-box/cmd_api.go
+index dea0073dd..463e64224 100644
+--- a/cmd/sing-box/cmd_api.go
++++ b/cmd/sing-box/cmd_api.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_api_connection.go b/cmd/sing-box/cmd_api_connection.go
+index 80b1f7d47..6c397ebc0 100644
+--- a/cmd/sing-box/cmd_api_connection.go
++++ b/cmd/sing-box/cmd_api_connection.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_api_connection_close.go b/cmd/sing-box/cmd_api_connection_close.go
+index 892a05508..f9064c0d0 100644
+--- a/cmd/sing-box/cmd_api_connection_close.go
++++ b/cmd/sing-box/cmd_api_connection_close.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_api_connection_list.go b/cmd/sing-box/cmd_api_connection_list.go
+index 28595701c..d6a52cf0e 100644
+--- a/cmd/sing-box/cmd_api_connection_list.go
++++ b/cmd/sing-box/cmd_api_connection_list.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_api_connection_show.go b/cmd/sing-box/cmd_api_connection_show.go
+index 1bffe3d4f..01f255957 100644
+--- a/cmd/sing-box/cmd_api_connection_show.go
++++ b/cmd/sing-box/cmd_api_connection_show.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_api_group.go b/cmd/sing-box/cmd_api_group.go
+index 6e0b63f28..593cd8bb6 100644
+--- a/cmd/sing-box/cmd_api_group.go
++++ b/cmd/sing-box/cmd_api_group.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_api_group_list.go b/cmd/sing-box/cmd_api_group_list.go
+index 2366623e9..1dbdf197c 100644
+--- a/cmd/sing-box/cmd_api_group_list.go
++++ b/cmd/sing-box/cmd_api_group_list.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_api_group_select.go b/cmd/sing-box/cmd_api_group_select.go
+index 7ea725c8c..95ec2d0d2 100644
+--- a/cmd/sing-box/cmd_api_group_select.go
++++ b/cmd/sing-box/cmd_api_group_select.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_api_group_show.go b/cmd/sing-box/cmd_api_group_show.go
+index 86de1fea3..9072cb9c7 100644
+--- a/cmd/sing-box/cmd_api_group_show.go
++++ b/cmd/sing-box/cmd_api_group_show.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_api_group_urltest.go b/cmd/sing-box/cmd_api_group_urltest.go
+index 2dbc59fbc..611c7af60 100644
+--- a/cmd/sing-box/cmd_api_group_urltest.go
++++ b/cmd/sing-box/cmd_api_group_urltest.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_api_logs.go b/cmd/sing-box/cmd_api_logs.go
+index 5e196c90b..8753f4db7 100644
+--- a/cmd/sing-box/cmd_api_logs.go
++++ b/cmd/sing-box/cmd_api_logs.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_api_mode.go b/cmd/sing-box/cmd_api_mode.go
+index e8b4da638..aea07d0a1 100644
+--- a/cmd/sing-box/cmd_api_mode.go
++++ b/cmd/sing-box/cmd_api_mode.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_api_mode_list.go b/cmd/sing-box/cmd_api_mode_list.go
+index 17badee43..1dec32d01 100644
+--- a/cmd/sing-box/cmd_api_mode_list.go
++++ b/cmd/sing-box/cmd_api_mode_list.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_api_mode_set.go b/cmd/sing-box/cmd_api_mode_set.go
+index 025e3b31f..9d2b6adde 100644
+--- a/cmd/sing-box/cmd_api_mode_set.go
++++ b/cmd/sing-box/cmd_api_mode_set.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_api_networkquality.go b/cmd/sing-box/cmd_api_networkquality.go
+index f0b69bb2e..b80599a1a 100644
+--- a/cmd/sing-box/cmd_api_networkquality.go
++++ b/cmd/sing-box/cmd_api_networkquality.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_api_openconnect.go b/cmd/sing-box/cmd_api_openconnect.go
+index 041b5faf8..8c9bf343f 100644
+--- a/cmd/sing-box/cmd_api_openconnect.go
++++ b/cmd/sing-box/cmd_api_openconnect.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_api_openconnect_auth.go b/cmd/sing-box/cmd_api_openconnect_auth.go
+index 12c67a5ae..6e8905e58 100644
+--- a/cmd/sing-box/cmd_api_openconnect_auth.go
++++ b/cmd/sing-box/cmd_api_openconnect_auth.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_api_openconnect_auth_browser.go b/cmd/sing-box/cmd_api_openconnect_auth_browser.go
+index 67a52049a..6f3feb06e 100644
+--- a/cmd/sing-box/cmd_api_openconnect_auth_browser.go
++++ b/cmd/sing-box/cmd_api_openconnect_auth_browser.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_api_openconnect_cancel.go b/cmd/sing-box/cmd_api_openconnect_cancel.go
+index a09b3769a..6d81985d0 100644
+--- a/cmd/sing-box/cmd_api_openconnect_cancel.go
++++ b/cmd/sing-box/cmd_api_openconnect_cancel.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_api_openconnect_openvpn.go b/cmd/sing-box/cmd_api_openconnect_openvpn.go
+index 260b98b2f..65dc15582 100644
+--- a/cmd/sing-box/cmd_api_openconnect_openvpn.go
++++ b/cmd/sing-box/cmd_api_openconnect_openvpn.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_api_openconnect_status.go b/cmd/sing-box/cmd_api_openconnect_status.go
+index 912c97184..2d6a66c42 100644
+--- a/cmd/sing-box/cmd_api_openconnect_status.go
++++ b/cmd/sing-box/cmd_api_openconnect_status.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_api_openvpn.go b/cmd/sing-box/cmd_api_openvpn.go
+index e9fc20369..0c60325c8 100644
+--- a/cmd/sing-box/cmd_api_openvpn.go
++++ b/cmd/sing-box/cmd_api_openvpn.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_api_openvpn_auth.go b/cmd/sing-box/cmd_api_openvpn_auth.go
+index f97555118..865b62670 100644
+--- a/cmd/sing-box/cmd_api_openvpn_auth.go
++++ b/cmd/sing-box/cmd_api_openvpn_auth.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_api_openvpn_cancel.go b/cmd/sing-box/cmd_api_openvpn_cancel.go
+index db0ab0814..a138366c8 100644
+--- a/cmd/sing-box/cmd_api_openvpn_cancel.go
++++ b/cmd/sing-box/cmd_api_openvpn_cancel.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_api_openvpn_status.go b/cmd/sing-box/cmd_api_openvpn_status.go
+index 735aa047e..38a7800d7 100644
+--- a/cmd/sing-box/cmd_api_openvpn_status.go
++++ b/cmd/sing-box/cmd_api_openvpn_status.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_api_outbounds.go b/cmd/sing-box/cmd_api_outbounds.go
+index b8840fdc3..5583ac08a 100644
+--- a/cmd/sing-box/cmd_api_outbounds.go
++++ b/cmd/sing-box/cmd_api_outbounds.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_api_output.go b/cmd/sing-box/cmd_api_output.go
+index f56dca30d..a3b4f13a2 100644
+--- a/cmd/sing-box/cmd_api_output.go
++++ b/cmd/sing-box/cmd_api_output.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_api_status.go b/cmd/sing-box/cmd_api_status.go
+index 2ac0c0d55..bdb86bac9 100644
+--- a/cmd/sing-box/cmd_api_status.go
++++ b/cmd/sing-box/cmd_api_status.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_api_stun.go b/cmd/sing-box/cmd_api_stun.go
+index 0fd54bdde..63213f678 100644
+--- a/cmd/sing-box/cmd_api_stun.go
++++ b/cmd/sing-box/cmd_api_stun.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_api_tailscale.go b/cmd/sing-box/cmd_api_tailscale.go
+index 2511c2831..cbed3862b 100644
+--- a/cmd/sing-box/cmd_api_tailscale.go
++++ b/cmd/sing-box/cmd_api_tailscale.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_api_tailscale_certificate.go b/cmd/sing-box/cmd_api_tailscale_certificate.go
+index 7fda2ae89..f422d2802 100644
+--- a/cmd/sing-box/cmd_api_tailscale_certificate.go
++++ b/cmd/sing-box/cmd_api_tailscale_certificate.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_api_tailscale_certificate_export.go b/cmd/sing-box/cmd_api_tailscale_certificate_export.go
+index 57369b9fb..f991c760a 100644
+--- a/cmd/sing-box/cmd_api_tailscale_certificate_export.go
++++ b/cmd/sing-box/cmd_api_tailscale_certificate_export.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_api_tailscale_certificate_list.go b/cmd/sing-box/cmd_api_tailscale_certificate_list.go
+index b9e507e76..9091f38c5 100644
+--- a/cmd/sing-box/cmd_api_tailscale_certificate_list.go
++++ b/cmd/sing-box/cmd_api_tailscale_certificate_list.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_api_tailscale_exit_node.go b/cmd/sing-box/cmd_api_tailscale_exit_node.go
+index d056a6488..e37c59db4 100644
+--- a/cmd/sing-box/cmd_api_tailscale_exit_node.go
++++ b/cmd/sing-box/cmd_api_tailscale_exit_node.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_api_tailscale_exit_node_clear.go b/cmd/sing-box/cmd_api_tailscale_exit_node_clear.go
+index 276a76dc4..715a3b46d 100644
+--- a/cmd/sing-box/cmd_api_tailscale_exit_node_clear.go
++++ b/cmd/sing-box/cmd_api_tailscale_exit_node_clear.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_api_tailscale_exit_node_list.go b/cmd/sing-box/cmd_api_tailscale_exit_node_list.go
+index 6c1b21981..32a682276 100644
+--- a/cmd/sing-box/cmd_api_tailscale_exit_node_list.go
++++ b/cmd/sing-box/cmd_api_tailscale_exit_node_list.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_api_tailscale_exit_node_set.go b/cmd/sing-box/cmd_api_tailscale_exit_node_set.go
+index 29d4c74b0..36e27d578 100644
+--- a/cmd/sing-box/cmd_api_tailscale_exit_node_set.go
++++ b/cmd/sing-box/cmd_api_tailscale_exit_node_set.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_api_tailscale_logout.go b/cmd/sing-box/cmd_api_tailscale_logout.go
+index cfab0a4ae..c7a81d675 100644
+--- a/cmd/sing-box/cmd_api_tailscale_logout.go
++++ b/cmd/sing-box/cmd_api_tailscale_logout.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_api_tailscale_peer.go b/cmd/sing-box/cmd_api_tailscale_peer.go
+index 43cc0c1df..b359d3633 100644
+--- a/cmd/sing-box/cmd_api_tailscale_peer.go
++++ b/cmd/sing-box/cmd_api_tailscale_peer.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_api_tailscale_peer_list.go b/cmd/sing-box/cmd_api_tailscale_peer_list.go
+index eadbeb5b9..fef36053a 100644
+--- a/cmd/sing-box/cmd_api_tailscale_peer_list.go
++++ b/cmd/sing-box/cmd_api_tailscale_peer_list.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_api_tailscale_peer_show.go b/cmd/sing-box/cmd_api_tailscale_peer_show.go
+index 4aefa6a99..0791c1a5d 100644
+--- a/cmd/sing-box/cmd_api_tailscale_peer_show.go
++++ b/cmd/sing-box/cmd_api_tailscale_peer_show.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_api_tailscale_ping.go b/cmd/sing-box/cmd_api_tailscale_ping.go
+index be717d7ba..9374f162e 100644
+--- a/cmd/sing-box/cmd_api_tailscale_ping.go
++++ b/cmd/sing-box/cmd_api_tailscale_ping.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_api_tailscale_ssh.go b/cmd/sing-box/cmd_api_tailscale_ssh.go
+index f6bbcc460..b53c74fb9 100644
+--- a/cmd/sing-box/cmd_api_tailscale_ssh.go
++++ b/cmd/sing-box/cmd_api_tailscale_ssh.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_api_tailscale_ssh_unix.go b/cmd/sing-box/cmd_api_tailscale_ssh_unix.go
+index 509d49b7e..490902b97 100644
+--- a/cmd/sing-box/cmd_api_tailscale_ssh_unix.go
++++ b/cmd/sing-box/cmd_api_tailscale_ssh_unix.go
+@@ -1,4 +1,4 @@
+-//go:build !windows
++//go:build !windows && !kubeloop_minimal
+ 
+ package main
+ 
+diff --git a/cmd/sing-box/cmd_api_tailscale_ssh_windows.go b/cmd/sing-box/cmd_api_tailscale_ssh_windows.go
+index d7e24e686..0d70f3efc 100644
+--- a/cmd/sing-box/cmd_api_tailscale_ssh_windows.go
++++ b/cmd/sing-box/cmd_api_tailscale_ssh_windows.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_api_tailscale_status.go b/cmd/sing-box/cmd_api_tailscale_status.go
+index 619904844..bbe30697c 100644
+--- a/cmd/sing-box/cmd_api_tailscale_status.go
++++ b/cmd/sing-box/cmd_api_tailscale_status.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_api_tailscale_taildrop.go b/cmd/sing-box/cmd_api_tailscale_taildrop.go
+index a3f794b3a..a9816adb6 100644
+--- a/cmd/sing-box/cmd_api_tailscale_taildrop.go
++++ b/cmd/sing-box/cmd_api_tailscale_taildrop.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_api_tailscale_taildrop_delete.go b/cmd/sing-box/cmd_api_tailscale_taildrop_delete.go
+index 4c51c1dd1..6e2aee683 100644
+--- a/cmd/sing-box/cmd_api_tailscale_taildrop_delete.go
++++ b/cmd/sing-box/cmd_api_tailscale_taildrop_delete.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_api_tailscale_taildrop_get.go b/cmd/sing-box/cmd_api_tailscale_taildrop_get.go
+index 88aa2f04b..3d63019a3 100644
+--- a/cmd/sing-box/cmd_api_tailscale_taildrop_get.go
++++ b/cmd/sing-box/cmd_api_tailscale_taildrop_get.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_api_tailscale_taildrop_list.go b/cmd/sing-box/cmd_api_tailscale_taildrop_list.go
+index e51d66f4e..1d3fb6746 100644
+--- a/cmd/sing-box/cmd_api_tailscale_taildrop_list.go
++++ b/cmd/sing-box/cmd_api_tailscale_taildrop_list.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_api_tailscale_taildrop_send.go b/cmd/sing-box/cmd_api_tailscale_taildrop_send.go
+index 022833d25..cd39ac4e4 100644
+--- a/cmd/sing-box/cmd_api_tailscale_taildrop_send.go
++++ b/cmd/sing-box/cmd_api_tailscale_taildrop_send.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_api_tailscale_taildrop_targets.go b/cmd/sing-box/cmd_api_tailscale_taildrop_targets.go
+index 4014470fc..2cce0d837 100644
+--- a/cmd/sing-box/cmd_api_tailscale_taildrop_targets.go
++++ b/cmd/sing-box/cmd_api_tailscale_taildrop_targets.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_api_usbip.go b/cmd/sing-box/cmd_api_usbip.go
+index 1deab7f3c..b94942646 100644
+--- a/cmd/sing-box/cmd_api_usbip.go
++++ b/cmd/sing-box/cmd_api_usbip.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_api_usbip_local.go b/cmd/sing-box/cmd_api_usbip_local.go
+index 1fd884bb6..99723997c 100644
+--- a/cmd/sing-box/cmd_api_usbip_local.go
++++ b/cmd/sing-box/cmd_api_usbip_local.go
+@@ -1,4 +1,4 @@
+-//go:build with_usbip && (linux || (darwin && cgo) || windows)
++//go:build with_usbip && (linux || (darwin && cgo) || windows) && !kubeloop_minimal
+ 
+ package main
+ 
+diff --git a/cmd/sing-box/cmd_api_usbip_share.go b/cmd/sing-box/cmd_api_usbip_share.go
+index 23b9c115f..6dcd5683c 100644
+--- a/cmd/sing-box/cmd_api_usbip_share.go
++++ b/cmd/sing-box/cmd_api_usbip_share.go
+@@ -1,4 +1,4 @@
+-//go:build with_usbip && (linux || (darwin && cgo) || windows)
++//go:build with_usbip && (linux || (darwin && cgo) || windows) && !kubeloop_minimal
+ 
+ package main
+ 
+diff --git a/cmd/sing-box/cmd_api_usbip_status.go b/cmd/sing-box/cmd_api_usbip_status.go
+index 9ba93f55e..04c140064 100644
+--- a/cmd/sing-box/cmd_api_usbip_status.go
++++ b/cmd/sing-box/cmd_api_usbip_status.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_api_usbip_stub.go b/cmd/sing-box/cmd_api_usbip_stub.go
+index 32f61760f..12d85a3e3 100644
+--- a/cmd/sing-box/cmd_api_usbip_stub.go
++++ b/cmd/sing-box/cmd_api_usbip_stub.go
+@@ -1,4 +1,4 @@
+-//go:build !with_usbip || !(linux || (darwin && cgo) || windows)
++//go:build !with_usbip || !(linux || (darwin && cgo) || windows) && !kubeloop_minimal
+ 
+ package main
+ 
+diff --git a/cmd/sing-box/cmd_api_version.go b/cmd/sing-box/cmd_api_version.go
+index 4615435a5..a92c93d28 100644
+--- a/cmd/sing-box/cmd_api_version.go
++++ b/cmd/sing-box/cmd_api_version.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
 diff --git a/cmd/sing-box/cmd_format.go b/cmd/sing-box/cmd_format.go
+index a8ecb6ab7..a1a0dbe36 100644
 --- a/cmd/sing-box/cmd_format.go
 +++ b/cmd/sing-box/cmd_format.go
 @@ -1,3 +1,5 @@
@@ -7,7 +588,18 @@ diff --git a/cmd/sing-box/cmd_format.go b/cmd/sing-box/cmd_format.go
  package main
  
  import (
+diff --git a/cmd/sing-box/cmd_generate.go b/cmd/sing-box/cmd_generate.go
+index 74d64c559..698905342 100644
+--- a/cmd/sing-box/cmd_generate.go
++++ b/cmd/sing-box/cmd_generate.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
 diff --git a/cmd/sing-box/cmd_generate_ech.go b/cmd/sing-box/cmd_generate_ech.go
+index 7942d588b..20401119b 100644
 --- a/cmd/sing-box/cmd_generate_ech.go
 +++ b/cmd/sing-box/cmd_generate_ech.go
 @@ -1,3 +1,5 @@
@@ -17,6 +609,7 @@ diff --git a/cmd/sing-box/cmd_generate_ech.go b/cmd/sing-box/cmd_generate_ech.go
  
  import (
 diff --git a/cmd/sing-box/cmd_generate_tls.go b/cmd/sing-box/cmd_generate_tls.go
+index 4cd4060d1..03a4920b5 100644
 --- a/cmd/sing-box/cmd_generate_tls.go
 +++ b/cmd/sing-box/cmd_generate_tls.go
 @@ -1,3 +1,5 @@
@@ -26,6 +619,7 @@ diff --git a/cmd/sing-box/cmd_generate_tls.go b/cmd/sing-box/cmd_generate_tls.go
  
  import (
 diff --git a/cmd/sing-box/cmd_generate_vapid.go b/cmd/sing-box/cmd_generate_vapid.go
+index e83e6d805..6d8a5bf4b 100644
 --- a/cmd/sing-box/cmd_generate_vapid.go
 +++ b/cmd/sing-box/cmd_generate_vapid.go
 @@ -1,4 +1,4 @@
@@ -35,6 +629,7 @@ diff --git a/cmd/sing-box/cmd_generate_vapid.go b/cmd/sing-box/cmd_generate_vapi
  package main
  
 diff --git a/cmd/sing-box/cmd_generate_wireguard.go b/cmd/sing-box/cmd_generate_wireguard.go
+index 087e74b27..b457ed588 100644
 --- a/cmd/sing-box/cmd_generate_wireguard.go
 +++ b/cmd/sing-box/cmd_generate_wireguard.go
 @@ -1,3 +1,5 @@
@@ -43,9 +638,10 @@ diff --git a/cmd/sing-box/cmd_generate_wireguard.go b/cmd/sing-box/cmd_generate_
  package main
  
  import (
-diff --git a/cmd/sing-box/cmd_generate.go b/cmd/sing-box/cmd_generate.go
---- a/cmd/sing-box/cmd_generate.go
-+++ b/cmd/sing-box/cmd_generate.go
+diff --git a/cmd/sing-box/cmd_geoip.go b/cmd/sing-box/cmd_geoip.go
+index dbbbff135..fef6056c3 100644
+--- a/cmd/sing-box/cmd_geoip.go
++++ b/cmd/sing-box/cmd_geoip.go
 @@ -1,3 +1,5 @@
 +//go:build !kubeloop_minimal
 +
@@ -53,6 +649,7 @@ diff --git a/cmd/sing-box/cmd_generate.go b/cmd/sing-box/cmd_generate.go
  
  import (
 diff --git a/cmd/sing-box/cmd_geoip_export.go b/cmd/sing-box/cmd_geoip_export.go
+index 6f59b4d53..2a36cb64b 100644
 --- a/cmd/sing-box/cmd_geoip_export.go
 +++ b/cmd/sing-box/cmd_geoip_export.go
 @@ -1,3 +1,5 @@
@@ -62,6 +659,7 @@ diff --git a/cmd/sing-box/cmd_geoip_export.go b/cmd/sing-box/cmd_geoip_export.go
  
  import (
 diff --git a/cmd/sing-box/cmd_geoip_list.go b/cmd/sing-box/cmd_geoip_list.go
+index 54dd426ea..0448f543e 100644
 --- a/cmd/sing-box/cmd_geoip_list.go
 +++ b/cmd/sing-box/cmd_geoip_list.go
 @@ -1,3 +1,5 @@
@@ -71,6 +669,7 @@ diff --git a/cmd/sing-box/cmd_geoip_list.go b/cmd/sing-box/cmd_geoip_list.go
  
  import (
 diff --git a/cmd/sing-box/cmd_geoip_lookup.go b/cmd/sing-box/cmd_geoip_lookup.go
+index d5157bb40..697793420 100644
 --- a/cmd/sing-box/cmd_geoip_lookup.go
 +++ b/cmd/sing-box/cmd_geoip_lookup.go
 @@ -1,3 +1,5 @@
@@ -79,9 +678,10 @@ diff --git a/cmd/sing-box/cmd_geoip_lookup.go b/cmd/sing-box/cmd_geoip_lookup.go
  package main
  
  import (
-diff --git a/cmd/sing-box/cmd_geoip.go b/cmd/sing-box/cmd_geoip.go
---- a/cmd/sing-box/cmd_geoip.go
-+++ b/cmd/sing-box/cmd_geoip.go
+diff --git a/cmd/sing-box/cmd_geosite.go b/cmd/sing-box/cmd_geosite.go
+index 95db93579..7fb38a371 100644
+--- a/cmd/sing-box/cmd_geosite.go
++++ b/cmd/sing-box/cmd_geosite.go
 @@ -1,3 +1,5 @@
 +//go:build !kubeloop_minimal
 +
@@ -89,6 +689,7 @@ diff --git a/cmd/sing-box/cmd_geoip.go b/cmd/sing-box/cmd_geoip.go
  
  import (
 diff --git a/cmd/sing-box/cmd_geosite_export.go b/cmd/sing-box/cmd_geosite_export.go
+index 573cc1dfe..45e3f7426 100644
 --- a/cmd/sing-box/cmd_geosite_export.go
 +++ b/cmd/sing-box/cmd_geosite_export.go
 @@ -1,3 +1,5 @@
@@ -98,6 +699,7 @@ diff --git a/cmd/sing-box/cmd_geosite_export.go b/cmd/sing-box/cmd_geosite_expor
  
  import (
 diff --git a/cmd/sing-box/cmd_geosite_list.go b/cmd/sing-box/cmd_geosite_list.go
+index cedb7adfd..93cf90eaf 100644
 --- a/cmd/sing-box/cmd_geosite_list.go
 +++ b/cmd/sing-box/cmd_geosite_list.go
 @@ -1,3 +1,5 @@
@@ -107,6 +709,7 @@ diff --git a/cmd/sing-box/cmd_geosite_list.go b/cmd/sing-box/cmd_geosite_list.go
  
  import (
 diff --git a/cmd/sing-box/cmd_geosite_lookup.go b/cmd/sing-box/cmd_geosite_lookup.go
+index f648ce62a..06e61f6f5 100644
 --- a/cmd/sing-box/cmd_geosite_lookup.go
 +++ b/cmd/sing-box/cmd_geosite_lookup.go
 @@ -1,3 +1,5 @@
@@ -116,6 +719,7 @@ diff --git a/cmd/sing-box/cmd_geosite_lookup.go b/cmd/sing-box/cmd_geosite_looku
  
  import (
 diff --git a/cmd/sing-box/cmd_geosite_matcher.go b/cmd/sing-box/cmd_geosite_matcher.go
+index 791dba249..823ef12b2 100644
 --- a/cmd/sing-box/cmd_geosite_matcher.go
 +++ b/cmd/sing-box/cmd_geosite_matcher.go
 @@ -1,3 +1,5 @@
@@ -124,152 +728,9 @@ diff --git a/cmd/sing-box/cmd_geosite_matcher.go b/cmd/sing-box/cmd_geosite_matc
  package main
  
  import (
-diff --git a/cmd/sing-box/cmd_geosite.go b/cmd/sing-box/cmd_geosite.go
---- a/cmd/sing-box/cmd_geosite.go
-+++ b/cmd/sing-box/cmd_geosite.go
-@@ -1,3 +1,5 @@
-+//go:build !kubeloop_minimal
-+
- package main
- 
- import (
-diff --git a/cmd/sing-box/cmd_merge.go b/cmd/sing-box/cmd_merge.go
---- a/cmd/sing-box/cmd_merge.go
-+++ b/cmd/sing-box/cmd_merge.go
-@@ -1,3 +1,5 @@
-+//go:build !kubeloop_minimal
-+
- package main
- 
- import (
-diff --git a/cmd/sing-box/cmd_rule_set_compile.go b/cmd/sing-box/cmd_rule_set_compile.go
---- a/cmd/sing-box/cmd_rule_set_compile.go
-+++ b/cmd/sing-box/cmd_rule_set_compile.go
-@@ -1,3 +1,5 @@
-+//go:build !kubeloop_minimal
-+
- package main
- 
- import (
-diff --git a/cmd/sing-box/cmd_rule_set_convert.go b/cmd/sing-box/cmd_rule_set_convert.go
---- a/cmd/sing-box/cmd_rule_set_convert.go
-+++ b/cmd/sing-box/cmd_rule_set_convert.go
-@@ -1,3 +1,5 @@
-+//go:build !kubeloop_minimal
-+
- package main
- 
- import (
-diff --git a/cmd/sing-box/cmd_rule_set_decompile.go b/cmd/sing-box/cmd_rule_set_decompile.go
---- a/cmd/sing-box/cmd_rule_set_decompile.go
-+++ b/cmd/sing-box/cmd_rule_set_decompile.go
-@@ -1,3 +1,5 @@
-+//go:build !kubeloop_minimal
-+
- package main
- 
- import (
-diff --git a/cmd/sing-box/cmd_rule_set_format.go b/cmd/sing-box/cmd_rule_set_format.go
---- a/cmd/sing-box/cmd_rule_set_format.go
-+++ b/cmd/sing-box/cmd_rule_set_format.go
-@@ -1,3 +1,5 @@
-+//go:build !kubeloop_minimal
-+
- package main
- 
- import (
-diff --git a/cmd/sing-box/cmd_rule_set_match.go b/cmd/sing-box/cmd_rule_set_match.go
---- a/cmd/sing-box/cmd_rule_set_match.go
-+++ b/cmd/sing-box/cmd_rule_set_match.go
-@@ -1,3 +1,5 @@
-+//go:build !kubeloop_minimal
-+
- package main
- 
- import (
-diff --git a/cmd/sing-box/cmd_rule_set_merge.go b/cmd/sing-box/cmd_rule_set_merge.go
---- a/cmd/sing-box/cmd_rule_set_merge.go
-+++ b/cmd/sing-box/cmd_rule_set_merge.go
-@@ -1,3 +1,5 @@
-+//go:build !kubeloop_minimal
-+
- package main
- 
- import (
-diff --git a/cmd/sing-box/cmd_rule_set_upgrade.go b/cmd/sing-box/cmd_rule_set_upgrade.go
---- a/cmd/sing-box/cmd_rule_set_upgrade.go
-+++ b/cmd/sing-box/cmd_rule_set_upgrade.go
-@@ -1,3 +1,5 @@
-+//go:build !kubeloop_minimal
-+
- package main
- 
- import (
-diff --git a/cmd/sing-box/cmd_rule_set.go b/cmd/sing-box/cmd_rule_set.go
---- a/cmd/sing-box/cmd_rule_set.go
-+++ b/cmd/sing-box/cmd_rule_set.go
-@@ -1,3 +1,5 @@
-+//go:build !kubeloop_minimal
-+
- package main
- 
- import (
-diff --git a/cmd/sing-box/cmd_tools_connect.go b/cmd/sing-box/cmd_tools_connect.go
---- a/cmd/sing-box/cmd_tools_connect.go
-+++ b/cmd/sing-box/cmd_tools_connect.go
-@@ -1,3 +1,5 @@
-+//go:build !kubeloop_minimal
-+
- package main
- 
- import (
-diff --git a/cmd/sing-box/cmd_tools_fetch_http3_stub.go b/cmd/sing-box/cmd_tools_fetch_http3_stub.go
---- a/cmd/sing-box/cmd_tools_fetch_http3_stub.go
-+++ b/cmd/sing-box/cmd_tools_fetch_http3_stub.go
-@@ -1,4 +1,4 @@
--//go:build !with_quic
-+//go:build !with_quic && !kubeloop_minimal
- 
- package main
- 
-diff --git a/cmd/sing-box/cmd_tools_fetch_http3.go b/cmd/sing-box/cmd_tools_fetch_http3.go
---- a/cmd/sing-box/cmd_tools_fetch_http3.go
-+++ b/cmd/sing-box/cmd_tools_fetch_http3.go
-@@ -1,4 +1,4 @@
--//go:build with_quic
-+//go:build with_quic && !kubeloop_minimal
- 
- package main
- 
-diff --git a/cmd/sing-box/cmd_tools_fetch.go b/cmd/sing-box/cmd_tools_fetch.go
---- a/cmd/sing-box/cmd_tools_fetch.go
-+++ b/cmd/sing-box/cmd_tools_fetch.go
-@@ -1,3 +1,5 @@
-+//go:build !kubeloop_minimal
-+
- package main
- 
- import (
-diff --git a/cmd/sing-box/cmd_tools_synctime.go b/cmd/sing-box/cmd_tools_synctime.go
---- a/cmd/sing-box/cmd_tools_synctime.go
-+++ b/cmd/sing-box/cmd_tools_synctime.go
-@@ -1,3 +1,5 @@
-+//go:build !kubeloop_minimal
-+
- package main
- 
- import (
-diff --git a/cmd/sing-box/cmd_tools.go b/cmd/sing-box/cmd_tools.go
---- a/cmd/sing-box/cmd_tools.go
-+++ b/cmd/sing-box/cmd_tools.go
-@@ -1,3 +1,5 @@
-+//go:build !kubeloop_minimal
-+
- package main
- 
- import (
 diff --git a/cmd/sing-box/cmd_kubeloop_minimal.go b/cmd/sing-box/cmd_kubeloop_minimal.go
 new file mode 100644
+index 000000000..1fee75ee9
 --- /dev/null
 +++ b/cmd/sing-box/cmd_kubeloop_minimal.go
 @@ -0,0 +1,9 @@
@@ -284,6 +745,7 @@ new file mode 100644
 +}
 diff --git a/cmd/sing-box/cmd_kubeloop_minimal_test.go b/cmd/sing-box/cmd_kubeloop_minimal_test.go
 new file mode 100644
+index 000000000..67a9c0ba7
 --- /dev/null
 +++ b/cmd/sing-box/cmd_kubeloop_minimal_test.go
 @@ -0,0 +1,29 @@
@@ -316,3 +778,193 @@ new file mode 100644
 +		t.Fatal("default completion command is enabled")
 +	}
 +}
+diff --git a/cmd/sing-box/cmd_merge.go b/cmd/sing-box/cmd_merge.go
+index 6ca9a15a1..e729181c0 100644
+--- a/cmd/sing-box/cmd_merge.go
++++ b/cmd/sing-box/cmd_merge.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_rule_set.go b/cmd/sing-box/cmd_rule_set.go
+index 242ea8b66..b20892e9e 100644
+--- a/cmd/sing-box/cmd_rule_set.go
++++ b/cmd/sing-box/cmd_rule_set.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_rule_set_compile.go b/cmd/sing-box/cmd_rule_set_compile.go
+index e2cbefc7b..8b676d42f 100644
+--- a/cmd/sing-box/cmd_rule_set_compile.go
++++ b/cmd/sing-box/cmd_rule_set_compile.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_rule_set_convert.go b/cmd/sing-box/cmd_rule_set_convert.go
+index f4f8d2cac..a8b18fdf5 100644
+--- a/cmd/sing-box/cmd_rule_set_convert.go
++++ b/cmd/sing-box/cmd_rule_set_convert.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_rule_set_decompile.go b/cmd/sing-box/cmd_rule_set_decompile.go
+index 6fc43d42a..b3d165ab9 100644
+--- a/cmd/sing-box/cmd_rule_set_decompile.go
++++ b/cmd/sing-box/cmd_rule_set_decompile.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_rule_set_format.go b/cmd/sing-box/cmd_rule_set_format.go
+index 6276204c4..b63efaabb 100644
+--- a/cmd/sing-box/cmd_rule_set_format.go
++++ b/cmd/sing-box/cmd_rule_set_format.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_rule_set_match.go b/cmd/sing-box/cmd_rule_set_match.go
+index e3dc19b8f..b08fc7c2d 100644
+--- a/cmd/sing-box/cmd_rule_set_match.go
++++ b/cmd/sing-box/cmd_rule_set_match.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_rule_set_merge.go b/cmd/sing-box/cmd_rule_set_merge.go
+index 7c8f7a535..b763d35bf 100644
+--- a/cmd/sing-box/cmd_rule_set_merge.go
++++ b/cmd/sing-box/cmd_rule_set_merge.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_rule_set_upgrade.go b/cmd/sing-box/cmd_rule_set_upgrade.go
+index 3d77a1d2d..fc3358218 100644
+--- a/cmd/sing-box/cmd_rule_set_upgrade.go
++++ b/cmd/sing-box/cmd_rule_set_upgrade.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_schema.go b/cmd/sing-box/cmd_schema.go
+index 73538125b..2dfbfbbcb 100644
+--- a/cmd/sing-box/cmd_schema.go
++++ b/cmd/sing-box/cmd_schema.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_tools.go b/cmd/sing-box/cmd_tools.go
+index 55e5b4587..5c6a1122d 100644
+--- a/cmd/sing-box/cmd_tools.go
++++ b/cmd/sing-box/cmd_tools.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_tools_connect.go b/cmd/sing-box/cmd_tools_connect.go
+index d352d533e..3d088ecd8 100644
+--- a/cmd/sing-box/cmd_tools_connect.go
++++ b/cmd/sing-box/cmd_tools_connect.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_tools_fetch.go b/cmd/sing-box/cmd_tools_fetch.go
+index 5ee3b8751..7d95b65b0 100644
+--- a/cmd/sing-box/cmd_tools_fetch.go
++++ b/cmd/sing-box/cmd_tools_fetch.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_tools_fetch_http3.go b/cmd/sing-box/cmd_tools_fetch_http3.go
+index f87450b56..ef409103c 100644
+--- a/cmd/sing-box/cmd_tools_fetch_http3.go
++++ b/cmd/sing-box/cmd_tools_fetch_http3.go
+@@ -1,4 +1,4 @@
+-//go:build with_quic
++//go:build with_quic && !kubeloop_minimal
+ 
+ package main
+ 
+diff --git a/cmd/sing-box/cmd_tools_fetch_http3_stub.go b/cmd/sing-box/cmd_tools_fetch_http3_stub.go
+index ae13f54c4..43f13c664 100644
+--- a/cmd/sing-box/cmd_tools_fetch_http3_stub.go
++++ b/cmd/sing-box/cmd_tools_fetch_http3_stub.go
+@@ -1,4 +1,4 @@
+-//go:build !with_quic
++//go:build !with_quic && !kubeloop_minimal
+ 
+ package main
+ 
+diff --git a/cmd/sing-box/cmd_tools_networkquality.go b/cmd/sing-box/cmd_tools_networkquality.go
+index 5f63571de..c945fa080 100644
+--- a/cmd/sing-box/cmd_tools_networkquality.go
++++ b/cmd/sing-box/cmd_tools_networkquality.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_tools_stun.go b/cmd/sing-box/cmd_tools_stun.go
+index f13086caa..2e08d2d86 100644
+--- a/cmd/sing-box/cmd_tools_stun.go
++++ b/cmd/sing-box/cmd_tools_stun.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/cmd_tools_synctime.go b/cmd/sing-box/cmd_tools_synctime.go
+index 09d487ef9..213330490 100644
+--- a/cmd/sing-box/cmd_tools_synctime.go
++++ b/cmd/sing-box/cmd_tools_synctime.go
+@@ -1,3 +1,5 @@
++//go:build !kubeloop_minimal
++
+ package main
+ 
+ import (
+diff --git a/cmd/sing-box/generate_completions.go b/cmd/sing-box/generate_completions.go
+index 6ab0cade9..7cca5c9c0 100644
+--- a/cmd/sing-box/generate_completions.go
++++ b/cmd/sing-box/generate_completions.go
+@@ -1,4 +1,4 @@
+-//go:build generate && generate_completions
++//go:build generate && generate_completions && !kubeloop_minimal
+ 
+ package main
+ 
