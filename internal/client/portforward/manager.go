@@ -87,7 +87,6 @@ type Manager struct {
 	closed    bool
 	mu        sync.Mutex
 	active    map[string]*activeForward
-	deleted   map[string]struct{}
 }
 
 func New(client TaskClient, dataPlanes DataPlane) (*Manager, error) {
@@ -96,7 +95,7 @@ func New(client TaskClient, dataPlanes DataPlane) (*Manager, error) {
 	}
 	return &Manager{
 		client: client, dataPlanes: dataPlanes, locals: listener.NewManager(),
-		active: make(map[string]*activeForward), deleted: make(map[string]struct{}),
+		active: make(map[string]*activeForward),
 	}, nil
 }
 
@@ -285,7 +284,6 @@ func (manager *Manager) Delete(ctx context.Context, profileID, taskID string) er
 	if deleteErr == nil {
 		manager.mu.Lock()
 		delete(manager.active, taskID)
-		manager.deleted[taskID] = struct{}{}
 		manager.mu.Unlock()
 	}
 	return errors.Join(pauseErr, deleteErr)

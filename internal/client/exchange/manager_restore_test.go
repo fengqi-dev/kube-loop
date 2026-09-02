@@ -113,27 +113,3 @@ func TestManagerRestoreReopensReleasedExchangeWithoutRemotePause(t *testing.T) {
 		t.Fatalf("released Exchange was dropped or resumed: %#v", items)
 	}
 }
-
-func TestManagerRestoreDoesNotRehydrateDeletedExchange(t *testing.T) {
-	now := time.Now().UTC()
-	session := remote.Session{ID: uuid.NewString(), Namespace: "development", State: exchangeSessionActive}
-	task := remote.ExchangeTask{
-		ID: uuid.NewString(), SessionID: session.ID, Namespace: session.Namespace,
-		State: "stopped", Service: "api", ClusterIP: "10.96.0.20",
-		Ports:        []remote.ExchangePort{{ServicePort: 80, Protocol: "tcp"}},
-		LocalTargets: []remote.LocalTarget{{ServicePort: 80, Protocol: "tcp", LocalPort: 8080}},
-		CreatedAt:    now, UpdatedAt: now, ExpiresAt: now.Add(time.Hour),
-	}
-	client := &restoreExchangeClient{tasks: []remote.ExchangeTask{task}}
-	manager, err := NewManager(client, Config{TrafficStreams: client})
-	if err != nil {
-		t.Fatal(err)
-	}
-	manager.deleted[task.ID] = struct{}{}
-	if err := manager.Restore(t.Context(), profile.Profile{ID: "server"}, session); err != nil {
-		t.Fatal(err)
-	}
-	if items := manager.List("server"); len(items) != 0 {
-		t.Fatalf("deleted exchange was restored: %#v", items)
-	}
-}

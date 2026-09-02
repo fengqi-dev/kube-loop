@@ -55,6 +55,6 @@ func NewManager(client Client, config Config) (*Manager, error) {
 	}
 	return &Manager{
 		client: client, streams: streams, dial: config.DialContext,
-		config: config, active: make(map[string]*activeMirror), deleted: make(map[string]struct{}),
+		config: config, active: make(map[string]*activeMirror),
 	}, nil
 }

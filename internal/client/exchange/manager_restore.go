@@ -40,12 +40,7 @@ func (manager *Manager) Restore(
 			continue
 		}
 		manager.mu.Lock()
-		_, wasDeleted := manager.deleted[task.ID]
 		entry := manager.active[task.ID]
-		if wasDeleted {
-			manager.mu.Unlock()
-			continue
-		}
 		if entry != nil {
 			entry.profile, entry.session, entry.task = serverProfile, session, task
 			localState := entry.info.State

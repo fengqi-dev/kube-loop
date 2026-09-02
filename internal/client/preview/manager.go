@@ -78,7 +78,6 @@ type Manager struct {
 	closed    bool
 	mu        sync.Mutex
 	active    map[string]*activePreview
-	deleted   map[string]struct{}
 }
 
 func (manager *Manager) Start(
@@ -342,7 +341,6 @@ func (manager *Manager) Delete(ctx context.Context, profileID, taskID string) er
 	if deleteErr == nil {
 		manager.mu.Lock()
 		delete(manager.active, taskID)
-		manager.deleted[taskID] = struct{}{}
 		manager.mu.Unlock()
 	}
 	return errors.Join(pauseErr, deleteErr)

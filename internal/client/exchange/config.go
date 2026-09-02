@@ -24,6 +24,6 @@ func NewManager(client Client, config Config) (*Manager, error) {
 	}
 	return &Manager{
 		client: client, streams: config.TrafficStreams, dial: config.DialContext,
-		active: make(map[string]*activeExchange), deleted: make(map[string]struct{}),
+		active: make(map[string]*activeExchange),
 	}, nil
 }
