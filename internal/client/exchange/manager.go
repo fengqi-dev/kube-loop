@@ -401,7 +401,7 @@ func (manager *Manager) PauseProfile(ctx context.Context, profileID string) erro
 	manager.mu.Lock()
 	ids := make([]string, 0)
 	for id, entry := range manager.active {
-		if entry.profile.ID == profileID {
+		if entry.profile.ID == profileID && (entry.info.State == "" || entry.info.State == exchangeStateRunning) {
 			ids = append(ids, id)
 		}
 	}
@@ -415,6 +415,30 @@ func (manager *Manager) PauseProfile(ctx context.Context, profileID string) erro
 		if entry != nil && entry.info.State == exchangeStateRunning {
 			result = errors.Join(result, manager.Pause(ctx, profileID, id))
 		}
+	}
+	return result
+}
+
+// ReleaseProfile stops the local relays of a profile without pausing the
+// underlying gateway tasks. Running TrafficBindings stay Running so the next
+// Restore re-materializes them; released entries read as paused locally.
+func (manager *Manager) ReleaseProfile(ctx context.Context, profileID string) error {
+	if ctx == nil {
+		return errors.New("exchange release Profile context is required")
+	}
+	manager.lifecycle.Lock()
+	defer manager.lifecycle.Unlock()
+	manager.mu.Lock()
+	entries := make([]*activeExchange, 0, len(manager.active))
+	for _, entry := range manager.active {
+		if entry.profile.ID == profileID && (entry.info.State == "" || entry.info.State == exchangeStateRunning) {
+			entries = append(entries, entry)
+		}
+	}
+	manager.mu.Unlock()
+	var result error
+	for _, entry := range entries {
+		result = errors.Join(result, manager.stopLocal(ctx, entry))
 	}
 	return result
 }

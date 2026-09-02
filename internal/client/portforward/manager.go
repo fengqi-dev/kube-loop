@@ -380,7 +380,7 @@ func (manager *Manager) PauseProfile(ctx context.Context, profileID string) erro
 	manager.mu.Lock()
 	ids := make([]string, 0)
 	for id, entry := range manager.active {
-		if entry.profile.ID == profileID {
+		if entry.profile.ID == profileID && (entry.info.State == "" || entry.info.State == portForwardSessionActive) {
 			ids = append(ids, id)
 		}
 	}
@@ -390,6 +390,51 @@ func (manager *Manager) PauseProfile(ctx context.Context, profileID string) erro
 		result = errors.Join(result, manager.Pause(ctx, profileID, id))
 	}
 	return result
+}
+
+// ReleaseProfile stops the local listeners of a profile without pausing the
+// underlying gateway tasks. Running TrafficBindings stay Running so the next
+// Restore re-materializes them; released entries read as paused locally.
+func (manager *Manager) ReleaseProfile(ctx context.Context, profileID string) error {
+	if ctx == nil {
+		return errors.New("port Forward release Profile context is required")
+	}
+	manager.lifecycle.Lock()
+	defer manager.lifecycle.Unlock()
+	manager.mu.Lock()
+	ids := make([]string, 0)
+	for id, entry := range manager.active {
+		if entry.profile.ID == profileID && (entry.info.State == "" || entry.info.State == portForwardSessionActive) {
+			ids = append(ids, id)
+		}
+	}
+	manager.mu.Unlock()
+	var result error
+	for _, id := range ids {
+		result = errors.Join(result, manager.releaseLocal(profileID, id))
+	}
+	return result
+}
+
+// releaseLocal stops the local listener of an entry without pausing the
+// gateway task, keeping the mapping available for the next Restore.
+func (manager *Manager) releaseLocal(profileID, taskID string) error {
+	manager.mu.Lock()
+	entry := manager.active[taskID]
+	if entry == nil || entry.profile.ID != profileID ||
+		(entry.info.State != "" && entry.info.State != portForwardSessionActive) {
+		manager.mu.Unlock()
+		return nil
+	}
+	manager.mu.Unlock()
+	localErr := manager.locals.Stop(entry.localID)
+	manager.mu.Lock()
+	if manager.active[taskID] == entry {
+		entry.localID = ""
+		entry.info.State = portForwardStatePaused
+	}
+	manager.mu.Unlock()
+	return localErr
 }
 
 func (manager *Manager) Shutdown(ctx context.Context) error {

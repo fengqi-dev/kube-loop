@@ -37,9 +37,8 @@ func (manager *Manager) Restore(
 	}
 	manager.mu.Unlock()
 	for _, task := range tasks {
-		if task.LocalPort == 0 ||
-			(task.State != remotetask.Stopped && task.State != remotetask.Pending &&
-				task.State != remotetask.Running) {
+		if task.State != remotetask.Stopped && task.State != remotetask.Pending &&
+			task.State != remotetask.Running {
 			continue
 		}
 		manager.mu.Lock()
@@ -68,6 +67,13 @@ func (manager *Manager) Restore(
 				}
 				continue
 			}
+			manager.mu.Unlock()
+			continue
+		}
+		// An entry that only exists on the Gateway needs a persisted local port
+		// to be re-materialized; desktop-side allocations (requested as 0) are
+		// not recoverable and stay visible as paused.
+		if task.LocalPort == 0 {
 			manager.mu.Unlock()
 			continue
 		}

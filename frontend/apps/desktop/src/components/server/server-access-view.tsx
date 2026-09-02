@@ -520,11 +520,27 @@ export function ServerAccessView({
     try {
       const dataPlane = await backend.connectServerDataPlane(profile.id, mode);
       setInventory({ ...inventory, dataPlane });
+      // The Data Plane connect restores local listeners for tasks that were
+      // still running on the Gateway, so surface them in the session lists.
+      await refreshSessionResources(profile.id);
     } catch (reason) {
       setError(messageOf(reason));
     } finally {
       setBusy(undefined);
     }
+  }
+
+  async function refreshSessionResources(profileId: string) {
+    const [remoteForwards, remoteExchanges, remoteMirrors, remotePreviews] = await Promise.allSettled([
+      backend.listServerPortForwards(profileId),
+      backend.listServerExchanges(profileId),
+      backend.listServerMirrors(profileId),
+      backend.listServerPreviews(profileId),
+    ]);
+    if (remoteForwards.status === "fulfilled") setForwards(remoteForwards.value);
+    if (remoteExchanges.status === "fulfilled") setExchanges(remoteExchanges.value);
+    if (remoteMirrors.status === "fulfilled") setMirrors(remoteMirrors.value);
+    if (remotePreviews.status === "fulfilled") setPreviews(remotePreviews.value);
   }
 
   async function disconnectDataPlane() {
@@ -534,6 +550,9 @@ export function ServerAccessView({
     try {
       const dataPlane = await backend.disconnectServerDataPlane(profile.id);
       setInventory({ ...inventory, dataPlane });
+      // The Data Plane disconnect releases the local listeners while the
+      // gateway tasks stay running, so surface the released state locally.
+      await refreshSessionResources(profile.id);
     } catch (reason) {
       setError(messageOf(reason));
     } finally {
