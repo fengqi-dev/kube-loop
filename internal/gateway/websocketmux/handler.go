@@ -11,10 +11,10 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/xtaci/smux"
 
-	"github.com/fengqi-dev/kube-loop/internal/middleware"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/wss"
 	"github.com/fengqi-dev/kube-loop/internal/transport/websocketio"
 	shared "github.com/fengqi-dev/kube-loop/internal/transport/websocketmux"
+	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
 func (h *Handler) BeginDrain() {
@@ -36,7 +36,7 @@ func (h *Handler) logf(ctx context.Context, requestID, format string, values ...
 			fmt.Sprintf(format, values...),
 			"operation", "gateway.websocket.session",
 			"outcome", "failure",
-			"correlation_id", middleware.ID(ctx),
+			"correlation_id", utils.CorrelationID(ctx),
 			"request_id", requestID,
 		)
 	}
@@ -54,7 +54,7 @@ func (h *Handler) logSession(
 	arguments := []any{
 		"operation", operation,
 		"outcome", outcome,
-		"correlation_id", middleware.ID(ctx),
+		"correlation_id", utils.CorrelationID(ctx),
 		"request_id", identity.RequestID,
 		"session_id", identity.SessionID,
 		"session_generation", identity.SessionGeneration,

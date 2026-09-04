@@ -13,6 +13,7 @@ import (
 
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/middleware"
+	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
 func (client *Client) getJSON(
@@ -125,7 +126,7 @@ func (client *Client) request(
 	}
 	request.Header.Set("Accept", "application/json")
 	request.Header.Set("Authorization", "Bearer "+accessToken)
-	if correlationID := middleware.ID(requestContext); correlationID != "" {
+	if correlationID := utils.CorrelationID(requestContext); correlationID != "" {
 		request.Header.Set(middleware.Header, correlationID)
 	}
 	if body != nil {

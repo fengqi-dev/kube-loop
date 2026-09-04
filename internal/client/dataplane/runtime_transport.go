@@ -10,7 +10,6 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
 	"github.com/fengqi-dev/kube-loop/internal/client/websocketmux"
-	"github.com/fengqi-dev/kube-loop/internal/middleware"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
 	"github.com/fengqi-dev/kube-loop/internal/transport/trafficstream"
@@ -108,7 +107,7 @@ func openTransport(
 	if strings.TrimSpace(serverProfile.ID) == "" || session.State != dataplaneSessionActive {
 		return openedTransport{}, errors.New("active Server Profile Session is required")
 	}
-	ctx, _ = middleware.Ensure(ctx)
+	ctx, _ = utils.EnsureCorrelationID(ctx)
 	token, err := tunnel.RelaySessionToken(session.ID, session.Generation)
 	if err != nil {
 		return openedTransport{}, fmt.Errorf("derive Data Plane Session token: %w", err)

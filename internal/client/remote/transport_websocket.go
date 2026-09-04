@@ -12,6 +12,7 @@ import (
 	"github.com/gorilla/websocket"
 
 	"github.com/fengqi-dev/kube-loop/internal/middleware"
+	"github.com/fengqi-dev/kube-loop/internal/utils"
 
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 )
@@ -62,7 +63,7 @@ func (client *Client) dialWebSocket(
 	accessToken string,
 ) (*websocket.Conn, int, error) {
 	header := http.Header{"Authorization": {"Bearer " + accessToken}}
-	if correlationID := middleware.ID(ctx); correlationID != "" {
+	if correlationID := utils.CorrelationID(ctx); correlationID != "" {
 		header.Set(middleware.Header, correlationID)
 	}
 	dialer, err := webSocketDialer(client.httpClient.Transport)

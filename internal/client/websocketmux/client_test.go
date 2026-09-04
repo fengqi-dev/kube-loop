@@ -24,6 +24,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/protocol/exchangestream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
 	"github.com/fengqi-dev/kube-loop/internal/transport/trafficstream"
+	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
 type lockedBuffer struct {
@@ -71,11 +72,11 @@ func TestForwarderPropagatesCorrelationToTokenSourceAndGateway(t *testing.T) {
 	router.Any(servermux.DefaultPath, echo.WrapHandler(handler))
 	server := httptest.NewServer(router)
 	defer server.Close()
-	ctx := middleware.WithID(t.Context(), correlationID)
+	ctx := utils.WithCorrelationID(t.Context(), correlationID)
 	forwarder, err := clientmux.Start(ctx, clientmux.ClientConfig{
 		URL: "ws" + strings.TrimPrefix(server.URL, "http") + servermux.DefaultPath,
 		TokenSource: func(ctx context.Context) (string, error) {
-			tokenCorrelation <- middleware.ID(ctx)
+			tokenCorrelation <- utils.CorrelationID(ctx)
 			return "relay-ticket", nil
 		},
 		DeviceID: deviceID, SessionID: sessionID, SessionGeneration: 1,

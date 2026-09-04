@@ -6,14 +6,14 @@ import (
 	"log/slog"
 	"testing"
 
-	"github.com/fengqi-dev/kube-loop/internal/middleware"
+	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
 func TestContextHandlerAddsCorrelationID(t *testing.T) {
 	t.Parallel()
 	var output bytes.Buffer
 	logger := slog.New(WithContext(slog.NewJSONHandler(&output, nil)))
-	ctx := middleware.WithID(t.Context(), "11111111-1111-4111-8111-111111111111")
+	ctx := utils.WithCorrelationID(t.Context(), "11111111-1111-4111-8111-111111111111")
 	logger.InfoContext(ctx, "connected", "session_id", "session-a")
 	var event map[string]any
 	if err := json.Unmarshal(output.Bytes(), &event); err != nil {

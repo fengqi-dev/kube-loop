@@ -10,6 +10,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v5"
+
+	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
 func TestRequestLoggerUsesClientRequestID(t *testing.T) {
@@ -46,7 +48,7 @@ func TestRequestLoggerPropagatesCorrelationID(t *testing.T) {
 	router.Use(RequestID())
 	router.Use(RequestLogger(slog.New(slog.NewJSONHandler(&logs, nil))))
 	router.GET("/items", func(ctx *echo.Context) error {
-		if id := ID(ctx.Request().Context()); id != correlationID {
+		if id := utils.CorrelationID(ctx.Request().Context()); id != correlationID {
 			t.Fatalf("handler correlation ID = %q", id)
 		}
 		return ctx.NoContent(http.StatusNoContent)
@@ -76,7 +78,7 @@ func TestRequestLoggerReplacesInvalidCorrelationID(t *testing.T) {
 	request.Header.Set(Header, "forged\nvalue")
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, request)
-	if got := response.Header().Get(Header); !Valid(got) {
+	if got := response.Header().Get(Header); !utils.ValidCorrelationID(got) {
 		t.Fatalf("response correlation ID = %q", got)
 	}
 }

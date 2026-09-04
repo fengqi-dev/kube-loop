@@ -18,6 +18,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/protocol/wss"
 	"github.com/fengqi-dev/kube-loop/internal/transport/websocketio"
 	protocolmux "github.com/fengqi-dev/kube-loop/internal/transport/websocketmux"
+	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
 func newWebSocketDialer(transport *http.Transport) websocket.Dialer {
@@ -44,7 +45,7 @@ func (forwarder *Forwarder) dial() (result *pooledSession, resultErr error) {
 	}
 	dialCtx, cancel := context.WithTimeout(forwarder.ctx, 15*time.Second)
 	defer cancel()
-	dialCtx, correlationID := middleware.Ensure(dialCtx)
+	dialCtx, correlationID := utils.EnsureCorrelationID(dialCtx)
 	startedAt := time.Now()
 	forwarder.logger.InfoContext(
 		dialCtx, "Gateway WebSocket dial started",
@@ -234,7 +235,7 @@ func (forwarder *Forwarder) discard(target *pooledSession) {
 		}
 	}
 	forwarder.mu.Unlock()
-	ctx := middleware.WithID(context.Background(), target.correlationID)
+	ctx := utils.WithCorrelationID(context.Background(), target.correlationID)
 	forwarder.logger.InfoContext(
 		ctx, "Gateway WebSocket session closed",
 		"operation", "gateway.websocket.session",

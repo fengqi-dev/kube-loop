@@ -14,10 +14,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/fengqi-dev/kube-loop/internal/middleware"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
 	"github.com/fengqi-dev/kube-loop/internal/transport/streamcopy"
+	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
 func (s *Server) handle(ctx context.Context, client net.Conn, required requiredAuthorization) {
@@ -124,7 +124,7 @@ func (s *Server) handle(ctx context.Context, client net.Conn, required requiredA
 				ctx, "Gateway traffic relay started",
 				"operation", "gateway.traffic.relay",
 				"outcome", "started",
-				"correlation_id", middleware.ID(ctx),
+				"correlation_id", utils.CorrelationID(ctx),
 				"request_id", required.requestID,
 				"session_id", identity.SessionID,
 				"session_generation", identity.SessionGeneration,
@@ -139,7 +139,7 @@ func (s *Server) handle(ctx context.Context, client net.Conn, required requiredA
 				ctx, "Gateway traffic relay completed",
 				"operation", "gateway.traffic.relay",
 				"outcome", "completed",
-				"correlation_id", middleware.ID(ctx),
+				"correlation_id", utils.CorrelationID(ctx),
 				"request_id", required.requestID,
 				"session_id", identity.SessionID,
 				"session_generation", identity.SessionGeneration,
@@ -316,7 +316,7 @@ func (s *Server) log(ctx context.Context, requestID, message string, attributes 
 		arguments = append(
 			arguments,
 			"operation", "gateway.tunnel.stream", "outcome", "failure",
-			"correlation_id", middleware.ID(ctx), "request_id", requestID,
+			"correlation_id", utils.CorrelationID(ctx), "request_id", requestID,
 		)
 		arguments = append(arguments, attributes...)
 		s.Logger.WarnContext(ctx, message, arguments...)

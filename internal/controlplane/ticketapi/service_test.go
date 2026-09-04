@@ -15,14 +15,13 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"github.com/fengqi-dev/kube-loop/internal/middleware"
-
 	"github.com/fengqi-dev/kube-loop/internal/controlplane"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/sessionapi"
 	ticketservice "github.com/fengqi-dev/kube-loop/internal/controlplane/ticketapi/service"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/relaycontrol"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/relayticket"
+	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
 type fakeAllocator struct {
@@ -179,7 +178,7 @@ func TestIssueRelayTicketUsesRegistryAssignment(t *testing.T) {
 		strings.NewReader(`{}`),
 	)
 	request.Header.Set("Content-Type", "application/json")
-	request = request.WithContext(middleware.WithID(request.Context(), correlationID))
+	request = request.WithContext(utils.WithCorrelationID(request.Context(), correlationID))
 	response := httptest.NewRecorder()
 	if apiError := serveTicketHandler(handler, response, request, controlplaneapi.Identity{
 		Subject: "11111111-1111-4111-8111-111111111111", DeviceID: "22222222-2222-4222-8222-222222222222",

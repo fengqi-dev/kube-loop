@@ -4,7 +4,7 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/fengqi-dev/kube-loop/internal/middleware"
+	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
 // WithContext decorates handler with request-scoped correlation attributes.
@@ -29,7 +29,7 @@ func (handler *contextHandler) Handle(ctx context.Context, record slog.Record) e
 		}
 		return true
 	})
-	if id := middleware.ID(ctx); id != "" && !hasCorrelationID {
+	if id := utils.CorrelationID(ctx); id != "" && !hasCorrelationID {
 		record.AddAttrs(slog.String("correlation_id", id))
 	}
 	return handler.handler.Handle(ctx, record)

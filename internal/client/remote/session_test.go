@@ -15,6 +15,7 @@ import (
 
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/middleware"
+	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
 func TestContractHTTPResponseAllowsAdditiveFieldsButRejectsMissingRequiredFields(t *testing.T) {
@@ -214,7 +215,7 @@ func TestIssueRelayTicketUsesAuthenticatedJSONRequest(t *testing.T) {
 		t.Fatal(err)
 	}
 	ticket, err := client.IssueRelayTicket(
-		middleware.WithID(context.Background(), correlationID),
+		utils.WithCorrelationID(context.Background(), correlationID),
 		profile.Profile{ID: "service-1", BaseURL: server.URL}, session,
 	)
 	if err != nil || ticket.Ticket != "signed.ticket.value" || ticket.TokenType != "KubeLoop-RelayTicket" ||

@@ -10,11 +10,10 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/fengqi-dev/kube-loop/internal/middleware"
-
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/ticketapi/entity"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/relaycontrol"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/relayticket"
+	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
 const OperationTunnel = "tunnel"
@@ -149,7 +148,7 @@ func (service *Service) Issue(
 		"RelayTicket issued",
 		"operation", "relay.ticket.issue",
 		"outcome", "success",
-		"correlation_id", middleware.ID(ctx),
+		"correlation_id", utils.CorrelationID(ctx),
 		"duration_ms", time.Since(startedAt).Milliseconds(),
 		"session_id", input.SessionID,
 		"session_generation", input.Generation,
