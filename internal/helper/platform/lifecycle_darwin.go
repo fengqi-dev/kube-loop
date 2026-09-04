@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/fengqi-dev/kube-loop/internal/singbox"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/sessionspec"
 )
 
 const (
@@ -23,10 +23,10 @@ const (
 
 type searchBackup map[string][]string
 
-func ApplyLinkDNS(string, singbox.DNSMeta) error { return nil }
-func RestoreLinkDNS(string) error                { return nil }
+func ApplyLinkDNS(string, sessionspec.DNSMeta) error { return nil }
+func RestoreLinkDNS(string) error                    { return nil }
 
-func ApplyDNS(workDir string, dns singbox.DNSMeta) error {
+func ApplyDNS(workDir string, dns sessionspec.DNSMeta) error {
 	if err := sweepResolvers(); err != nil {
 		return err
 	}
@@ -80,7 +80,7 @@ func ApplyDNS(workDir string, dns singbox.DNSMeta) error {
 	return nil
 }
 
-func RestoreDNS(workDir string, _ singbox.DNSMeta) error {
+func RestoreDNS(workDir string, _ sessionspec.DNSMeta) error {
 	var firstErr error
 	if err := sweepResolvers(); err != nil {
 		firstErr = err

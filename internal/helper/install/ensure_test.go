@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/fengqi-dev/kube-loop/internal/helper"
-	helperprotocol "github.com/fengqi-dev/kube-loop/internal/protocol/helper"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/helperrpc"
 )
 
 func TestCanReuseInstalledHelper(t *testing.T) {
@@ -22,7 +22,7 @@ func TestCanReuseInstalledHelper(t *testing.T) {
 		Running:   true,
 		CoreReady: true,
 		Version:   "dev",
-		Protocol:  helperprotocol.Version,
+		Protocol:  helperrpc.Version,
 	}
 	tests := []struct {
 		name               string
@@ -54,7 +54,7 @@ func TestCanReuseInstalledHelper(t *testing.T) {
 			status: helper.Status{
 				CoreReady: true,
 				Version:   "dev",
-				Protocol:  helperprotocol.Version,
+				Protocol:  helperrpc.Version,
 			},
 		},
 		{
@@ -62,7 +62,7 @@ func TestCanReuseInstalledHelper(t *testing.T) {
 			status: helper.Status{
 				Running:  true,
 				Version:  "dev",
-				Protocol: helperprotocol.Version,
+				Protocol: helperrpc.Version,
 			},
 		},
 		{
@@ -71,7 +71,7 @@ func TestCanReuseInstalledHelper(t *testing.T) {
 				Running:   true,
 				CoreReady: true,
 				Version:   "old",
-				Protocol:  helperprotocol.Version,
+				Protocol:  helperrpc.Version,
 			},
 		},
 		{
@@ -80,7 +80,7 @@ func TestCanReuseInstalledHelper(t *testing.T) {
 				Running:   true,
 				CoreReady: true,
 				Version:   "dev",
-				Protocol:  helperprotocol.Version + 1,
+				Protocol:  helperrpc.Version + 1,
 			},
 		},
 	}
@@ -90,7 +90,7 @@ func TestCanReuseInstalledHelper(t *testing.T) {
 			got := canReuseInstalledHelper(
 				test.status,
 				"dev",
-				helperprotocol.Version,
+				helperrpc.Version,
 				test.enforceBinaryMatch,
 				test.needsBinaryUpdate,
 			)
@@ -293,10 +293,10 @@ func TestWaitForHelperReadyRetriesAtInterval(t *testing.T) {
 		context.Background(),
 		time.Second,
 		40*time.Millisecond,
-		func(context.Context) (helperprotocol.Response, error) {
+		func(context.Context) (helperrpc.Response, error) {
 			calls++
-			return helperprotocol.Response{
-				Protocol:  helperprotocol.Version,
+			return helperrpc.Response{
+				Protocol:  helperrpc.Version,
 				CoreReady: calls >= 3,
 			}, nil
 		},
@@ -318,9 +318,9 @@ func TestWaitForHelperReadyCoreNotReadyTimesOut(t *testing.T) {
 		context.Background(),
 		180*time.Millisecond,
 		50*time.Millisecond,
-		func(context.Context) (helperprotocol.Response, error) {
+		func(context.Context) (helperrpc.Response, error) {
 			calls++
-			return helperprotocol.Response{Protocol: helperprotocol.Version, CoreReady: false}, nil
+			return helperrpc.Response{Protocol: helperrpc.Version, CoreReady: false}, nil
 		},
 	)
 	if err == nil || !strings.Contains(err.Error(), "bundled sing-box is not configured") {
@@ -338,8 +338,8 @@ func TestWaitForHelperReadyReturnsParentCancellation(t *testing.T) {
 		ctx,
 		time.Second,
 		50*time.Millisecond,
-		func(context.Context) (helperprotocol.Response, error) {
-			return helperprotocol.Response{}, errors.New("not ready")
+		func(context.Context) (helperrpc.Response, error) {
+			return helperrpc.Response{}, errors.New("not ready")
 		},
 	)
 	if !errors.Is(err, context.Canceled) {

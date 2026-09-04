@@ -20,8 +20,8 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/client/websocketmux"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/exchangestream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/sessionspec"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
-	"github.com/fengqi-dev/kube-loop/internal/singbox"
 	"github.com/fengqi-dev/kube-loop/internal/transport/trafficstream"
 )
 
@@ -783,12 +783,12 @@ func TestRuntimeNetworkSettingsCommitOnlyAfterCoreUpdate(t *testing.T) {
 	runtime := &Runtime{
 		session: remote.Session{Namespace: "payments"}, tun: core,
 		dnsNamespace: "development",
-		hostAliases:  []singbox.HostAlias{{Domain: "old.example.test", IP: "10.0.0.8"}},
+		hostAliases:  []sessionspec.HostAlias{{Domain: "old.example.test", IP: "10.0.0.8"}},
 	}
 	if err := runtime.UpdateDNSNamespace(context.Background(), "observability"); !errors.Is(err, dnsFailure) {
 		t.Fatalf("DNS update error = %v", err)
 	}
-	if err := runtime.UpdateHostAliases(context.Background(), []singbox.HostAlias{
+	if err := runtime.UpdateHostAliases(context.Background(), []sessionspec.HostAlias{
 		{Domain: "new.example.test", IP: "10.0.0.9"},
 	}); !errors.Is(err, hostsFailure) {
 		t.Fatalf("host alias update error = %v", err)
@@ -808,7 +808,7 @@ func TestRuntimeStoresNormalizedNetworkSettingsBeforeTUNStarts(t *testing.T) {
 	if err := runtime.UpdateDNSNamespace(context.Background(), "  observability  "); err != nil {
 		t.Fatal(err)
 	}
-	if err := runtime.UpdateHostAliases(context.Background(), []singbox.HostAlias{
+	if err := runtime.UpdateHostAliases(context.Background(), []sessionspec.HostAlias{
 		{Domain: "API.Example.Test.", IP: "10.0.0.9"},
 	}); err != nil {
 		t.Fatal(err)
@@ -817,7 +817,7 @@ func TestRuntimeStoresNormalizedNetworkSettingsBeforeTUNStarts(t *testing.T) {
 		runtime.hostAliases[0].Domain != "api.example.test" {
 		t.Fatalf("cached settings = namespace=%q aliases=%#v", runtime.dnsNamespace, runtime.hostAliases)
 	}
-	if err := runtime.UpdateHostAliases(context.Background(), []singbox.HostAlias{
+	if err := runtime.UpdateHostAliases(context.Background(), []sessionspec.HostAlias{
 		{Domain: "bad domain", IP: "10.0.0.9"},
 	}); err == nil {
 		t.Fatal("invalid host alias was cached")

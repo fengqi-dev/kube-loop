@@ -12,15 +12,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/fengqi-dev/kube-loop/internal/singbox"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/sessionspec"
 )
 
 const windowsSearchBackup = "search-domains.bak.json"
 
-func ApplyLinkDNS(string, singbox.DNSMeta) error { return nil }
-func RestoreLinkDNS(string) error                { return nil }
+func ApplyLinkDNS(string, sessionspec.DNSMeta) error { return nil }
+func RestoreLinkDNS(string) error                    { return nil }
 
-func ApplyDNS(workDir string, dns singbox.DNSMeta) error {
+func ApplyDNS(workDir string, dns sessionspec.DNSMeta) error {
 	var b strings.Builder
 	b.WriteString("$ErrorActionPreference='Stop'; ")
 	b.WriteString("$backup = @((Get-DnsClientGlobalSetting).SuffixSearchList) | ConvertTo-Json -Compress; ")
@@ -47,7 +47,7 @@ func ApplyDNS(workDir string, dns singbox.DNSMeta) error {
 	return nil
 }
 
-func RestoreDNS(workDir string, _ singbox.DNSMeta) error {
+func RestoreDNS(workDir string, _ sessionspec.DNSMeta) error {
 	var b strings.Builder
 	b.WriteString("$ErrorActionPreference='Continue'; ")
 	b.WriteString(

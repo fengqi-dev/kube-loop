@@ -12,6 +12,7 @@ import (
 
 	"github.com/miekg/dns"
 
+	"github.com/fengqi-dev/kube-loop/internal/protocol/sessionspec"
 	"github.com/fengqi-dev/kube-loop/internal/singbox"
 )
 
@@ -80,12 +81,12 @@ func availableTCPUDPPort() (int, error) {
 	return 0, fmt.Errorf("find TCP/UDP port: %w", lastErr)
 }
 
-func availableTrafficPorts(excluded ...int) (singbox.TrafficInboundPorts, error) {
+func availableTrafficPorts(excluded ...int) (sessionspec.TrafficInboundPorts, error) {
 	port, err := availablePortExcluding(excluded...)
 	if err != nil {
-		return singbox.TrafficInboundPorts{}, err
+		return sessionspec.TrafficInboundPorts{}, err
 	}
-	return singbox.TrafficInboundPorts{Listen: port}, nil
+	return sessionspec.TrafficInboundPorts{Listen: port}, nil
 }
 
 func availablePortExcluding(excluded ...int) (int, error) {

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/fengqi-dev/kube-loop/internal/protocol/dns"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/sessionspec"
 	"github.com/fengqi-dev/kube-loop/internal/singbox"
 )
 
@@ -62,7 +63,7 @@ func (r *Runtime) Start(
 	network singbox.NetworkSpec,
 	bridgeAddress string,
 	namespace string,
-	hosts []singbox.HostAlias,
+	hosts []sessionspec.HostAlias,
 ) (singbox.RunningCore, error) {
 	return startWithPortCollisionRetry(ctx, func() (singbox.RunningCore, error) {
 		return r.startOnce(ctx, network, bridgeAddress, namespace, hosts)
@@ -105,7 +106,7 @@ func (r *Runtime) startOnce(
 	network singbox.NetworkSpec,
 	bridgeAddress string,
 	namespace string,
-	hosts []singbox.HostAlias,
+	hosts []sessionspec.HostAlias,
 ) (singbox.RunningCore, error) {
 	host, rawPort, err := net.SplitHostPort(bridgeAddress)
 	if err != nil {
@@ -166,7 +167,7 @@ func (r *Runtime) startOnce(
 	if dnsNamespace == "" {
 		dnsNamespace = defaultNamespace
 	}
-	spec := singbox.SessionSpec{
+	spec := sessionspec.Spec{
 		ID:               "session-" + secret[:16],
 		PodCIDRs:         podRoutes,
 		ServiceCIDRs:     network.ServiceCIDRs,
@@ -192,17 +193,17 @@ func (r *Runtime) startOnce(
 	if r.PrivilegedStart == nil {
 		return nil, errors.New("privileged helper is required")
 	}
-	if err := spec.Validate(); err != nil {
+	if err := singbox.Validate(spec); err != nil {
 		r.errorf("startOnce: spec.Validate failed: %v", err)
 		return nil, err
 	}
-	config, err := spec.GenerateConfig()
+	config, err := singbox.GenerateConfig(spec)
 	if err != nil {
 		r.errorf("startOnce: GenerateConfig failed: %v", err)
 		return nil, fmt.Errorf("generate sing-box config: %w", err)
 	}
 	r.logf("startOnce: session %s config generated (%d bytes) tun=%s", spec.ID, len(config), spec.TUNAddress)
-	meta, err := spec.DNS()
+	meta, err := singbox.DNS(spec)
 	if err != nil {
 		return nil, err
 	}

@@ -10,7 +10,7 @@ import (
 
 	"github.com/fengqi-dev/kube-loop/internal/helper"
 	helperinstall "github.com/fengqi-dev/kube-loop/internal/helper/install"
-	"github.com/fengqi-dev/kube-loop/internal/singbox"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/sessionspec"
 	singboxruntime "github.com/fengqi-dev/kube-loop/internal/singbox/runtime"
 )
 
@@ -54,7 +54,7 @@ func NewSingboxRuntime(logger *slog.Logger, logLevel string) *singboxruntime.Run
 	warn := runtime.Logger.Warn
 	errLog := runtime.Logger.Error
 	runtime.PrivilegedStart = func(
-		ctx context.Context, spec singbox.SessionSpec,
+		ctx context.Context, spec sessionspec.Spec,
 	) (func(context.Context) error, error) {
 		info("ensuring privileged helper is ready")
 		if err := helperinstall.EnsureInstall(ctx); err != nil {
@@ -88,7 +88,7 @@ func NewSingboxRuntime(logger *slog.Logger, logLevel string) *singboxruntime.Run
 			return err
 		}, nil
 	}
-	runtime.PrivilegedUpdateDNS = func(ctx context.Context, sessionID string, dns singbox.DNSMeta) error {
+	runtime.PrivilegedUpdateDNS = func(ctx context.Context, sessionID string, dns sessionspec.DNSMeta) error {
 		client, err := helper.NewClient()
 		if err != nil {
 			return err

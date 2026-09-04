@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/fengqi-dev/kube-loop/internal/protocol/sessionspec"
 	"github.com/fengqi-dev/kube-loop/internal/singbox"
 )
 
@@ -32,7 +33,7 @@ type Process struct {
 	errMu             sync.RWMutex
 	waitErr           error
 	config            []byte
-	spec              singbox.SessionSpec
+	spec              sessionspec.Spec
 	updateDNS         singbox.PrivilegedUpdateDNSFunc
 	readLogs          singbox.PrivilegedReadLogsFunc
 	updateMu          sync.Mutex

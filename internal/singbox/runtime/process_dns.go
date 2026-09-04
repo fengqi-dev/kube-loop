@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/fengqi-dev/kube-loop/internal/protocol/dns"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/sessionspec"
 	"github.com/fengqi-dev/kube-loop/internal/singbox"
 )
 
@@ -17,28 +18,28 @@ func (p *Process) UpdateDNSNamespace(ctx context.Context, namespace string) erro
 	}
 	return p.applyDNSUpdate(
 		ctx,
-		func(spec *singbox.SessionSpec) {
+		func(spec *sessionspec.Spec) {
 			spec.DNSNamespace = namespace
 			spec.Namespace = namespace
 		},
-		func(proxy *dnsSearchProxy, spec singbox.SessionSpec, dns singbox.DNSMeta) {
+		func(proxy *dnsSearchProxy, spec sessionspec.Spec, dns sessionspec.DNSMeta) {
 			proxy.SetSearch(dns.Search)
 			proxy.SetClusterDomains(spec.ClusterDomains)
 		},
 	)
 }
 
-func (p *Process) UpdateHostAliases(ctx context.Context, hosts []singbox.HostAlias) error {
+func (p *Process) UpdateHostAliases(ctx context.Context, hosts []sessionspec.HostAlias) error {
 	normalized, err := singbox.NormalizeHostAliases(hosts)
 	if err != nil {
 		return err
 	}
 	return p.applyDNSUpdate(
 		ctx,
-		func(spec *singbox.SessionSpec) {
+		func(spec *sessionspec.Spec) {
 			spec.Hosts = normalized
 		},
-		func(proxy *dnsSearchProxy, spec singbox.SessionSpec, _ singbox.DNSMeta) {
+		func(proxy *dnsSearchProxy, spec sessionspec.Spec, _ sessionspec.DNSMeta) {
 			proxy.SetHostAliases(spec.Hosts)
 		},
 	)
@@ -46,8 +47,8 @@ func (p *Process) UpdateHostAliases(ctx context.Context, hosts []singbox.HostAli
 
 func (p *Process) applyDNSUpdate(
 	ctx context.Context,
-	mutate func(*singbox.SessionSpec),
-	commitProxy func(*dnsSearchProxy, singbox.SessionSpec, singbox.DNSMeta),
+	mutate func(*sessionspec.Spec),
+	commitProxy func(*dnsSearchProxy, sessionspec.Spec, sessionspec.DNSMeta),
 ) error {
 	p.updateMu.Lock()
 	defer p.updateMu.Unlock()
@@ -59,7 +60,7 @@ func (p *Process) applyDNSUpdate(
 	}
 	nextSpec := p.spec
 	mutate(&nextSpec)
-	dnsMeta, err := nextSpec.DNS()
+	dnsMeta, err := singbox.DNS(nextSpec)
 	sessionID := nextSpec.ID
 	updateDNS := p.updateDNS
 	p.specMu.Unlock()

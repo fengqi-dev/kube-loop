@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/fengqi-dev/kube-loop/internal/client/traffic"
-	"github.com/fengqi-dev/kube-loop/internal/singbox"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/sessionspec"
 	"github.com/fengqi-dev/kube-loop/internal/transport/trafficstream"
 )
 
@@ -57,7 +57,7 @@ func (manager *Manager) UpdateDNSNamespace(ctx context.Context, profileID, names
 }
 
 func (manager *Manager) UpdateHostAliases(
-	ctx context.Context, profileID string, aliases []singbox.HostAlias,
+	ctx context.Context, profileID string, aliases []sessionspec.HostAlias,
 ) error {
 	runtime, err := manager.activeRuntime(profileID)
 	if err != nil {

@@ -5,7 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	helperprotocol "github.com/fengqi-dev/kube-loop/internal/protocol/helper"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/helperrpc"
 )
 
 type helperIdentity struct {
@@ -22,7 +22,7 @@ func newIdentityCommand(commandVersion string) *cobra.Command {
 		Args:   cobra.NoArgs,
 		RunE: func(command *cobra.Command, _ []string) error {
 			return json.NewEncoder(command.OutOrStdout()).Encode(helperIdentity{
-				Kind: "kubeloop-helper", Version: commandVersion, Protocol: helperprotocol.Version,
+				Kind: "kubeloop-helper", Version: commandVersion, Protocol: helperrpc.Version,
 			})
 		},
 	}

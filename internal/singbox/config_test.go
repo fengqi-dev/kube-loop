@@ -5,6 +5,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/fengqi-dev/kube-loop/internal/protocol/sessionspec"
 )
 
 func TestGenerateRoutesOnlyClusterTraffic(t *testing.T) {
@@ -142,7 +144,7 @@ func TestGenerateFixedTrafficInbounds(t *testing.T) {
 	}, Options{
 		BridgePort: 17890, ControllerPort: 19090, ControllerSecret: "test-secret",
 		DNSPort:         1053,
-		TrafficPorts:    TrafficInboundPorts{Listen: 18081},
+		TrafficPorts:    sessionspec.TrafficInboundPorts{Listen: 18081},
 		TrafficPassword: "traffic-password-1234567890123456",
 	})
 	if err != nil {
@@ -192,7 +194,7 @@ func TestResolverDomains(t *testing.T) {
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("ResolverDomains = %v, want %v", got, want)
 	}
-	withHosts := ResolverDomains("demo", []string{"cluster.local"}, []HostAlias{{Domain: "app.dev", IP: "10.96.0.50"}})
+	withHosts := ResolverDomains("demo", []string{"cluster.local"}, []sessionspec.HostAlias{{Domain: "app.dev", IP: "10.96.0.50"}})
 	if !strings.Contains(strings.Join(withHosts, ","), "app.dev") {
 		t.Fatalf("ResolverDomains missing host alias: %v", withHosts)
 	}
@@ -211,7 +213,7 @@ func TestGenerateHostAliases(t *testing.T) {
 	}, Options{
 		BridgePort: 17890, ControllerPort: 19090, ControllerSecret: "test-secret",
 		DNSPort: 1053, Namespace: "default",
-		Hosts: []HostAlias{{Domain: "app.dev", IP: "10.96.0.50"}},
+		Hosts: []sessionspec.HostAlias{{Domain: "app.dev", IP: "10.96.0.50"}},
 	})
 	if err != nil {
 		t.Fatal(err)

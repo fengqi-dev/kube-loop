@@ -8,7 +8,7 @@ import (
 
 	"github.com/fengqi-dev/kube-loop/internal/componentstore"
 	"github.com/fengqi-dev/kube-loop/internal/helper"
-	helperprotocol "github.com/fengqi-dev/kube-loop/internal/protocol/helper"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/helperrpc"
 )
 
 var (
@@ -68,7 +68,7 @@ func decideHelperInstall(ctx context.Context, requireCurrentBinary bool) (helper
 	status := helper.GetStatus(ctx)
 	enforceBinaryMatch := mustMatchBundledHelper(requireCurrentBinary, helper.IsDevBuild())
 	helperHealthy := status.Running && status.CoreReady &&
-		status.Version == helper.Version && status.Protocol == helperprotocol.Version
+		status.Version == helper.Version && status.Protocol == helperrpc.Version
 	if helperHealthy && !enforceBinaryMatch && !coreNeedsUpdate() {
 		return helperInstallDecision{}, nil
 	}
@@ -82,7 +82,7 @@ func decideHelperInstall(ctx context.Context, requireCurrentBinary bool) (helper
 		}
 	}
 	if canReuseInstalledHelper(
-		status, helper.Version, helperprotocol.Version, enforceBinaryMatch, needsBinaryUpdate,
+		status, helper.Version, helperrpc.Version, enforceBinaryMatch, needsBinaryUpdate,
 	) && !requiresSupervisorCheck(enforceBinaryMatch) {
 		return helperInstallDecision{}, nil
 	}

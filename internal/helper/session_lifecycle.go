@@ -5,12 +5,12 @@ import (
 	"time"
 
 	helperplatform "github.com/fengqi-dev/kube-loop/internal/helper/platform"
-	"github.com/fengqi-dev/kube-loop/internal/singbox"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/sessionspec"
 )
 
 // Server is the privileged helper RPC server.
 
-func (s *Server) updateSessionDNS(sessionID string, dns singbox.DNSMeta) error {
+func (s *Server) updateSessionDNS(sessionID string, dns sessionspec.DNSMeta) error {
 	s.lifecycle.Lock()
 	defer s.lifecycle.Unlock()
 	if dns.Listen == "" || dns.Port < 1 || dns.Port > 65535 {

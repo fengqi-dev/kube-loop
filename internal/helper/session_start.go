@@ -14,6 +14,7 @@ import (
 	"time"
 
 	helperplatform "github.com/fengqi-dev/kube-loop/internal/helper/platform"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/sessionspec"
 	"github.com/fengqi-dev/kube-loop/internal/singbox"
 )
 
@@ -21,7 +22,7 @@ import (
 
 var errServerClosing = errors.New("privileged helper is shutting down")
 
-func (s *Server) startSession(spec singbox.SessionSpec) error {
+func (s *Server) startSession(spec sessionspec.Spec) error {
 	s.lifecycle.Lock()
 	defer s.lifecycle.Unlock()
 	if s.closing.Load() {
@@ -30,19 +31,19 @@ func (s *Server) startSession(spec singbox.SessionSpec) error {
 	return s.startSessionLocked(spec)
 }
 
-func (s *Server) startSessionLocked(spec singbox.SessionSpec) error {
-	if err := spec.Validate(); err != nil {
+func (s *Server) startSessionLocked(spec sessionspec.Spec) error {
+	if err := singbox.Validate(spec); err != nil {
 		return fmt.Errorf("validate session: %w", err)
 	}
-	config, err := spec.GenerateConfig()
+	config, err := singbox.GenerateConfig(spec)
 	if err != nil {
 		return fmt.Errorf("generate sing-box config: %w", err)
 	}
-	dns, err := spec.DNS()
+	dns, err := singbox.DNS(spec)
 	if err != nil {
 		return fmt.Errorf("build DNS settings: %w", err)
 	}
-	routes, err := spec.Routes()
+	routes, err := singbox.Routes(spec)
 	if err != nil {
 		return fmt.Errorf("build route settings: %w", err)
 	}
@@ -172,7 +173,7 @@ func (s *Server) startSessionLocked(spec singbox.SessionSpec) error {
 	return waitForSessionStartup(current, spec, dns)
 }
 
-func waitForSessionStartup(current *session, spec singbox.SessionSpec, dns singbox.DNSMeta) error {
+func waitForSessionStartup(current *session, spec sessionspec.Spec, dns sessionspec.DNSMeta) error {
 	controller := net.JoinHostPort("127.0.0.1", strconv.Itoa(spec.ControllerPort))
 	deadline := time.Now().Add(2 * time.Second)
 	ticker := time.NewTicker(50 * time.Millisecond)

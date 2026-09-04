@@ -11,6 +11,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
 	"github.com/fengqi-dev/kube-loop/internal/client/socksbridge"
 	"github.com/fengqi-dev/kube-loop/internal/client/websocketmux"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/sessionspec"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
 	"github.com/fengqi-dev/kube-loop/internal/singbox"
 )
@@ -102,7 +103,7 @@ type Runtime struct {
 	tunWG        sync.WaitGroup
 	tunStarter   TUNStarter
 	dnsNamespace string
-	hostAliases  []singbox.HostAlias
+	hostAliases  []sessionspec.HostAlias
 	config       Config
 
 	closeOnce            sync.Once
@@ -141,5 +142,5 @@ type StatusEvent struct {
 }
 
 type TUNStarter interface {
-	Start(context.Context, singbox.NetworkSpec, string, string, []singbox.HostAlias) (singbox.RunningCore, error)
+	Start(context.Context, singbox.NetworkSpec, string, string, []sessionspec.HostAlias) (singbox.RunningCore, error)
 }

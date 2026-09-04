@@ -6,7 +6,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/fengqi-dev/kube-loop/internal/singbox"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/sessionspec"
 )
 
 func TestProcessReadLogsReturnsSessionHistory(t *testing.T) {
@@ -20,7 +20,7 @@ func TestProcessReadLogsReturnsSessionHistory(t *testing.T) {
 	}
 	readIndex := 0
 	process := &Process{
-		spec: singbox.SessionSpec{ID: "session-1"},
+		spec: sessionspec.Spec{ID: "session-1"},
 		readLogs: func(context.Context, string, int64) (string, int64, error) {
 			response := responses[readIndex]
 			readIndex++

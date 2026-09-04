@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/sessionspec"
 	"github.com/fengqi-dev/kube-loop/internal/singbox"
 )
 
@@ -55,7 +56,7 @@ func (runtime *Runtime) startTUNLocked(ctx context.Context) (Status, error) {
 		ServiceCIDRs: append([]string(nil), spec.ServiceCIDRs...),
 		ServiceIPs:   append([]string(nil), spec.ServiceIPs...), DNSServer: spec.DNSServer,
 		ClusterDomains: append([]string(nil), spec.ClusterDomains...),
-	}, runtime.status.SOCKSAddress, namespace, append([]singbox.HostAlias{}, runtime.hostAliases...))
+	}, runtime.status.SOCKSAddress, namespace, append([]sessionspec.HostAlias{}, runtime.hostAliases...))
 	stopStartupCancel()
 	if err != nil {
 		runtime.appendSOCKSLog("TUN start failed: " + err.Error())
@@ -158,7 +159,7 @@ func (runtime *Runtime) UpdateDNSNamespace(ctx context.Context, namespace string
 	return nil
 }
 
-func (runtime *Runtime) UpdateHostAliases(ctx context.Context, aliases []singbox.HostAlias) error {
+func (runtime *Runtime) UpdateHostAliases(ctx context.Context, aliases []sessionspec.HostAlias) error {
 	normalized, err := singbox.NormalizeHostAliases(aliases)
 	if err != nil {
 		return err
@@ -180,10 +181,10 @@ func (runtime *Runtime) UpdateHostAliases(ctx context.Context, aliases []singbox
 	return nil
 }
 
-func profileHostAliases(items []profile.HostAlias) []singbox.HostAlias {
-	aliases := make([]singbox.HostAlias, len(items))
+func profileHostAliases(items []profile.HostAlias) []sessionspec.HostAlias {
+	aliases := make([]sessionspec.HostAlias, len(items))
 	for index, item := range items {
-		aliases[index] = singbox.HostAlias{Domain: item.Domain, IP: item.IP}
+		aliases[index] = sessionspec.HostAlias{Domain: item.Domain, IP: item.IP}
 	}
 	return aliases
 }

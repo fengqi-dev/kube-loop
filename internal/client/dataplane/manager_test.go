@@ -18,6 +18,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/client/socksbridge"
 	"github.com/fengqi-dev/kube-loop/internal/client/websocketmux"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/sessionspec"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
 	"github.com/fengqi-dev/kube-loop/internal/singbox"
 )
@@ -36,7 +37,7 @@ type testTUNStarter struct {
 	network       singbox.NetworkSpec
 	bridgeAddress string
 	namespace     string
-	hosts         []singbox.HostAlias
+	hosts         []sessionspec.HostAlias
 	core          *testCore
 }
 
@@ -53,7 +54,7 @@ func (starter *blockingTUNStarter) Start(
 	ctx context.Context,
 	network singbox.NetworkSpec,
 	bridgeAddress, namespace string,
-	hosts []singbox.HostAlias,
+	hosts []sessionspec.HostAlias,
 ) (singbox.RunningCore, error) {
 	starter.startedOnce.Do(func() { close(starter.started) })
 	select {
@@ -72,7 +73,7 @@ func (starter *testTUNStarter) Start(
 	ctx context.Context,
 	network singbox.NetworkSpec,
 	bridgeAddress, namespace string,
-	hosts []singbox.HostAlias,
+	hosts []sessionspec.HostAlias,
 ) (singbox.RunningCore, error) {
 	starter.mu.Lock()
 	defer starter.mu.Unlock()
@@ -80,7 +81,7 @@ func (starter *testTUNStarter) Start(
 	starter.network = network
 	starter.bridgeAddress = bridgeAddress
 	starter.namespace = namespace
-	starter.hosts = append([]singbox.HostAlias{}, hosts...)
+	starter.hosts = append([]sessionspec.HostAlias{}, hosts...)
 	starter.core = &testCore{done: make(chan struct{}), sessionID: "tun-session"}
 	go func(core *testCore) {
 		select {
@@ -104,7 +105,7 @@ type testCore struct {
 	closeOnce    sync.Once
 	sessionID    string
 	dnsNamespace string
-	hosts        []singbox.HostAlias
+	hosts        []sessionspec.HostAlias
 	dnsErr       error
 	hostsErr     error
 	logsErr      error
@@ -135,13 +136,13 @@ func (core *testCore) UpdateDNSNamespace(_ context.Context, namespace string) er
 	core.dnsNamespace = namespace
 	return nil
 }
-func (core *testCore) UpdateHostAliases(_ context.Context, hosts []singbox.HostAlias) error {
+func (core *testCore) UpdateHostAliases(_ context.Context, hosts []sessionspec.HostAlias) error {
 	core.mu.Lock()
 	defer core.mu.Unlock()
 	if core.hostsErr != nil {
 		return core.hostsErr
 	}
-	core.hosts = append([]singbox.HostAlias{}, hosts...)
+	core.hosts = append([]sessionspec.HostAlias{}, hosts...)
 	return nil
 }
 func (core *testCore) ProbeClusterDNS(context.Context) error { return nil }
@@ -531,7 +532,7 @@ func (fixture *managerLifecycleFixture) updateAndAssertNetworkSettings(t *testin
 	if err := fixture.manager.UpdateHostAliases(
 		context.Background(),
 		fixture.profile.ID,
-		[]singbox.HostAlias{{Domain: "db.example.test", IP: "10.0.0.9"}},
+		[]sessionspec.HostAlias{{Domain: "db.example.test", IP: "10.0.0.9"}},
 	); err != nil {
 		t.Fatal(err)
 	}

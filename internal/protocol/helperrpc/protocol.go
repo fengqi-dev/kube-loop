@@ -1,6 +1,6 @@
-package helperprotocol
+package helperrpc
 
-import "github.com/fengqi-dev/kube-loop/internal/singbox"
+import "github.com/fengqi-dev/kube-loop/internal/protocol/sessionspec"
 
 const (
 	Version = 8
@@ -18,10 +18,10 @@ const (
 type Request struct {
 	Op        string               `json:"op"`
 	Token     string               `json:"token,omitempty"`
-	Session   *singbox.SessionSpec `json:"session,omitempty"`
+	Session   *sessionspec.Spec    `json:"session,omitempty"`
 	SessionID string               `json:"sessionId,omitempty"`
 	LogOffset int64                `json:"logOffset,omitempty"`
-	DNS       *singbox.DNSMeta     `json:"dns,omitempty"`
+	DNS       *sessionspec.DNSMeta `json:"dns,omitempty"`
 }
 
 // Response is a single JSON-line RPC response.

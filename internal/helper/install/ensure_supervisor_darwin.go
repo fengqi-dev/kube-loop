@@ -12,7 +12,7 @@ import (
 
 	"github.com/fengqi-dev/kube-loop/internal/componentstore"
 	"github.com/fengqi-dev/kube-loop/internal/helper"
-	helperspec "github.com/fengqi-dev/kube-loop/internal/protocol/helper"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/helperrpc"
 	supervisorproto "github.com/fengqi-dev/kube-loop/internal/protocol/supervisor"
 	"github.com/fengqi-dev/kube-loop/internal/supervisor"
 )
@@ -50,7 +50,7 @@ func installCurrentHelper(
 	if installedCoreMatches(singBox, helper.CoreInstallPath()) &&
 		canUpdateWorkerThroughSupervisor(status, statusErr, config.Channel, installedSupervisorSHA, supervisorSHA) {
 		if status.Worker.SHA256 == sourceSHA256 && status.Worker.Version == helper.Version &&
-			status.Worker.Protocol == helperspec.Version && status.Worker.CoreReady {
+			status.Worker.Protocol == helperrpc.Version && status.Worker.CoreReady {
 			return nil
 		}
 		info, err := os.Stat(source)
@@ -60,7 +60,7 @@ func installCurrentHelper(
 		manifest := supervisorproto.UpdateManifest{
 			SchemaVersion: supervisorproto.SchemaVersion,
 			RequestID:     uuid.NewString(), Channel: config.Channel,
-			Version: helper.Version, WorkerProtocol: helperspec.Version,
+			Version: helper.Version, WorkerProtocol: helperrpc.Version,
 			MinimumSupervisorProtocol: supervisorproto.Version,
 			Size:                      info.Size(), SHA256: sourceSHA256,
 		}

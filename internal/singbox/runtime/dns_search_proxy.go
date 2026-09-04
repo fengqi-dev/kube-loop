@@ -13,6 +13,7 @@ import (
 	"github.com/miekg/dns"
 
 	dnsprotocol "github.com/fengqi-dev/kube-loop/internal/protocol/dns"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/sessionspec"
 	"github.com/fengqi-dev/kube-loop/internal/singbox"
 )
 
@@ -132,7 +133,7 @@ func (p *dnsSearchProxy) SetClusterDomains(domains []string) {
 	p.domains = normalized
 }
 
-func (p *dnsSearchProxy) SetHostAliases(hosts []singbox.HostAlias) {
+func (p *dnsSearchProxy) SetHostAliases(hosts []sessionspec.HostAlias) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.hosts == nil {

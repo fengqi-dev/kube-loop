@@ -4,17 +4,19 @@ import (
 	"context"
 	"io"
 	"time"
+
+	"github.com/fengqi-dev/kube-loop/internal/protocol/sessionspec"
 )
 
 // PrivilegedStartFunc starts sing-box via an external privileged helper.
 // It returns a stop function used during Close.
 type PrivilegedStartFunc func(
-	ctx context.Context, spec SessionSpec,
+	ctx context.Context, spec sessionspec.Spec,
 ) (stop func(context.Context) error, err error)
 
 // PrivilegedUpdateDNSFunc re-applies split DNS without restarting sing-box.
 type PrivilegedUpdateDNSFunc func(
-	ctx context.Context, sessionID string, dns DNSMeta,
+	ctx context.Context, sessionID string, dns sessionspec.DNSMeta,
 ) error
 
 type PrivilegedReadLogsFunc func(
@@ -32,7 +34,7 @@ type RunningCore interface {
 	Config() []byte
 	ReadLogs(ctx context.Context) ([]string, error)
 	UpdateDNSNamespace(ctx context.Context, namespace string) error
-	UpdateHostAliases(ctx context.Context, hosts []HostAlias) error
+	UpdateHostAliases(ctx context.Context, hosts []sessionspec.HostAlias) error
 	ProbeClusterDNS(ctx context.Context) error
 	DNSPort() int
 	InternalDNSPort() int

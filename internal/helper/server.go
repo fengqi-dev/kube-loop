@@ -12,7 +12,8 @@ import (
 	"sync"
 	"sync/atomic"
 
-	helperprotocol "github.com/fengqi-dev/kube-loop/internal/protocol/helper"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/helperrpc"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/sessionspec"
 	"github.com/fengqi-dev/kube-loop/internal/singbox"
 )
 
@@ -40,7 +41,7 @@ type session struct {
 	done       chan struct{}
 	exited     chan sessionExit
 	routes     []string
-	dns        singbox.DNSMeta
+	dns        sessionspec.DNSMeta
 	tunAddress string
 }
 
@@ -137,64 +138,64 @@ func (s *Server) handle(conn net.Conn) {
 	defer func() { _ = conn.Close() }()
 	decoder := json.NewDecoder(bufio.NewReader(conn))
 	decoder.DisallowUnknownFields()
-	var request helperprotocol.Request
+	var request helperrpc.Request
 	if err := decoder.Decode(&request); err != nil {
-		_ = writeResponse(conn, helperprotocol.Response{OK: false, Error: "invalid request"})
+		_ = writeResponse(conn, helperrpc.Response{OK: false, Error: "invalid request"})
 		return
 	}
 	response := s.dispatch(request)
 	if err := writeResponse(conn, response); err != nil &&
-		request.Op == helperprotocol.OpStart && response.OK && request.Session != nil {
+		request.Op == helperrpc.OpStart && response.OK && request.Session != nil {
 		_ = s.stopSession(request.Session.ID)
 	}
 }
 
-func (s *Server) dispatch(request helperprotocol.Request) helperprotocol.Response {
+func (s *Server) dispatch(request helperrpc.Request) helperrpc.Response {
 	if request.Token == "" || request.Token != s.Auth.Token {
-		return helperprotocol.Response{OK: false, Error: "unauthorized"}
+		return helperrpc.Response{OK: false, Error: "unauthorized"}
 	}
 	switch request.Op {
-	case helperprotocol.OpPing, helperprotocol.OpStatus:
+	case helperrpc.OpPing, helperrpc.OpStatus:
 		_, coreErr := resolveSingBoxPath(s.Auth)
 		activeSessions, pid := s.activeSessionState()
-		return helperprotocol.Response{
-			OK: true, Version: Version, Protocol: helperprotocol.Version,
+		return helperrpc.Response{
+			OK: true, Version: Version, Protocol: helperrpc.Version,
 			Installed: true, Running: true, CoreReady: coreErr == nil,
 			ActiveSessions: activeSessions, PID: pid,
 		}
-	case helperprotocol.OpStart:
+	case helperrpc.OpStart:
 		if request.Session == nil {
-			return helperprotocol.Response{OK: false, Error: "session is required"}
+			return helperrpc.Response{OK: false, Error: "session is required"}
 		}
 		s.Log.Printf("starting privileged session %s", request.Session.ID)
 		if err := s.startSession(*request.Session); err != nil {
 			s.Log.Printf("start privileged session %s: %v", request.Session.ID, err)
-			return helperprotocol.Response{OK: false, Error: err.Error()}
+			return helperrpc.Response{OK: false, Error: err.Error()}
 		}
 		s.Log.Printf("privileged session %s started", request.Session.ID)
-		return helperprotocol.Response{OK: true, Version: Version, Protocol: helperprotocol.Version}
-	case helperprotocol.OpStop:
+		return helperrpc.Response{OK: true, Version: Version, Protocol: helperrpc.Version}
+	case helperrpc.OpStop:
 		if err := singbox.ValidateSessionID(request.SessionID); err != nil {
-			return helperprotocol.Response{OK: false, Error: err.Error()}
+			return helperrpc.Response{OK: false, Error: err.Error()}
 		}
 		s.Log.Printf("stopping privileged session %s", request.SessionID)
 		if err := s.stopSession(request.SessionID); err != nil {
 			s.Log.Printf("stop privileged session %s: %v", request.SessionID, err)
-			return helperprotocol.Response{OK: false, Error: err.Error()}
+			return helperrpc.Response{OK: false, Error: err.Error()}
 		}
 		s.Log.Printf("privileged session %s stopped", request.SessionID)
-		return helperprotocol.Response{OK: true, Version: Version, Protocol: helperprotocol.Version}
-	case helperprotocol.OpStopAll:
+		return helperrpc.Response{OK: true, Version: Version, Protocol: helperrpc.Version}
+	case helperrpc.OpStopAll:
 		s.Log.Printf("stopping all privileged sessions")
 		s.stopAllSessions()
 		s.Log.Printf("all privileged sessions stopped")
-		return helperprotocol.Response{OK: true, Version: Version, Protocol: helperprotocol.Version}
-	case helperprotocol.OpUpdateDNS:
+		return helperrpc.Response{OK: true, Version: Version, Protocol: helperrpc.Version}
+	case helperrpc.OpUpdateDNS:
 		if err := singbox.ValidateSessionID(request.SessionID); err != nil {
-			return helperprotocol.Response{OK: false, Error: err.Error()}
+			return helperrpc.Response{OK: false, Error: err.Error()}
 		}
 		if request.DNS == nil {
-			return helperprotocol.Response{OK: false, Error: "dns is required"}
+			return helperrpc.Response{OK: false, Error: "dns is required"}
 		}
 		s.Log.Printf(
 			"updating split DNS for session %s: domains=%d",
@@ -202,24 +203,24 @@ func (s *Server) dispatch(request helperprotocol.Request) helperprotocol.Respons
 		)
 		if err := s.updateSessionDNS(request.SessionID, *request.DNS); err != nil {
 			s.Log.Printf("update split DNS for session %s: %v", request.SessionID, err)
-			return helperprotocol.Response{OK: false, Error: err.Error()}
+			return helperrpc.Response{OK: false, Error: err.Error()}
 		}
 		s.Log.Printf("split DNS updated for session %s", request.SessionID)
-		return helperprotocol.Response{OK: true, Version: Version, Protocol: helperprotocol.Version}
-	case helperprotocol.OpReadLogs:
+		return helperrpc.Response{OK: true, Version: Version, Protocol: helperrpc.Version}
+	case helperrpc.OpReadLogs:
 		if err := singbox.ValidateSessionID(request.SessionID); err != nil {
-			return helperprotocol.Response{OK: false, Error: err.Error()}
+			return helperrpc.Response{OK: false, Error: err.Error()}
 		}
 		data, offset, err := s.readSessionLogs(request.SessionID, request.LogOffset)
 		if err != nil {
-			return helperprotocol.Response{OK: false, Error: err.Error()}
+			return helperrpc.Response{OK: false, Error: err.Error()}
 		}
-		return helperprotocol.Response{
-			OK: true, Version: Version, Protocol: helperprotocol.Version,
+		return helperrpc.Response{
+			OK: true, Version: Version, Protocol: helperrpc.Version,
 			LogData: data, LogOffset: offset,
 		}
 	default:
-		return helperprotocol.Response{OK: false, Error: fmt.Sprintf("unsupported op %q", request.Op)}
+		return helperrpc.Response{OK: false, Error: fmt.Sprintf("unsupported op %q", request.Op)}
 	}
 }
 
@@ -237,6 +238,6 @@ func (s *Server) activeSessionState() ([]string, int) {
 	return ids, pid
 }
 
-func writeResponse(w io.Writer, response helperprotocol.Response) error {
+func writeResponse(w io.Writer, response helperrpc.Response) error {
 	return json.NewEncoder(w).Encode(response)
 }

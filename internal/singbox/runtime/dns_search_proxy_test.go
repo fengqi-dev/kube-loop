@@ -12,6 +12,7 @@ import (
 
 	"github.com/miekg/dns"
 
+	"github.com/fengqi-dev/kube-loop/internal/protocol/sessionspec"
 	"github.com/fengqi-dev/kube-loop/internal/singbox"
 )
 
@@ -278,11 +279,11 @@ func TestDNSSearchProxyUpdatesHostAliases(t *testing.T) {
 		}
 	}
 
-	proxy.SetHostAliases([]singbox.HostAlias{{
+	proxy.SetHostAliases([]sessionspec.HostAlias{{
 		Domain: "api.kubeloop.test", IP: "192.0.2.10",
 	}})
 	assertIP("192.0.2.10")
-	proxy.SetHostAliases([]singbox.HostAlias{{
+	proxy.SetHostAliases([]sessionspec.HostAlias{{
 		Domain: "api.kubeloop.test", IP: "192.0.2.11",
 	}})
 	assertIP("192.0.2.11")

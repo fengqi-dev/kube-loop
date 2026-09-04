@@ -8,6 +8,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/fengqi-dev/kube-loop/internal/protocol/sessionspec"
 	"github.com/fengqi-dev/kube-loop/internal/singbox"
 )
 
@@ -20,7 +21,7 @@ func TestProcessUpdateDNSNamespaceConcurrentClose(t *testing.T) {
 			stopCh:   make(chan struct{}),
 			dnsProxy: &dnsSearchProxy{},
 			spec:     validSessionSpec(),
-			updateDNS: func(context.Context, string, singbox.DNSMeta) error {
+			updateDNS: func(context.Context, string, sessionspec.DNSMeta) error {
 				return nil
 			},
 		}
@@ -65,7 +66,7 @@ func TestProcessDNSUpdatesCommitOnlyAfterPrivilegedApply(t *testing.T) {
 		{
 			name: "host aliases",
 			update: func(process *Process) error {
-				return process.UpdateHostAliases(context.Background(), []singbox.HostAlias{
+				return process.UpdateHostAliases(context.Background(), []sessionspec.HostAlias{
 					{Domain: "api.example.test", IP: "10.0.0.8"},
 				})
 			},
@@ -76,7 +77,7 @@ func TestProcessDNSUpdatesCommitOnlyAfterPrivilegedApply(t *testing.T) {
 			process := newDNSUpdateProcess(t)
 			before := snapshotDNSUpdateState(process)
 			applyErr := errors.New("helper update failed")
-			process.updateDNS = func(context.Context, string, singbox.DNSMeta) error { return applyErr }
+			process.updateDNS = func(context.Context, string, sessionspec.DNSMeta) error { return applyErr }
 			if err := test.update(process); !errors.Is(err, applyErr) {
 				t.Fatalf("update error = %v", err)
 			}
@@ -85,7 +86,7 @@ func TestProcessDNSUpdatesCommitOnlyAfterPrivilegedApply(t *testing.T) {
 			}
 
 			observedBeforeCommit := false
-			process.updateDNS = func(context.Context, string, singbox.DNSMeta) error {
+			process.updateDNS = func(context.Context, string, sessionspec.DNSMeta) error {
 				observedBeforeCommit = reflect.DeepEqual(snapshotDNSUpdateState(process), before)
 				return nil
 			}
@@ -103,7 +104,7 @@ func TestProcessDNSUpdatesCommitOnlyAfterPrivilegedApply(t *testing.T) {
 }
 
 type dnsUpdateState struct {
-	spec            singbox.SessionSpec
+	spec            sessionspec.Spec
 	resolverDomains []string
 	search          []string
 	domains         []string
@@ -113,8 +114,8 @@ type dnsUpdateState struct {
 func newDNSUpdateProcess(t *testing.T) *Process {
 	t.Helper()
 	spec := validSessionSpec()
-	spec.Hosts = []singbox.HostAlias{{Domain: "old.example.test", IP: "10.0.0.7"}}
-	dnsMeta, err := spec.DNS()
+	spec.Hosts = []sessionspec.HostAlias{{Domain: "old.example.test", IP: "10.0.0.7"}}
+	dnsMeta, err := singbox.DNS(spec)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,8 +150,8 @@ func snapshotDNSUpdateState(process *Process) dnsUpdateState {
 	return state
 }
 
-func validSessionSpec() singbox.SessionSpec {
-	return singbox.SessionSpec{
+func validSessionSpec() sessionspec.Spec {
+	return sessionspec.Spec{
 		ID:               "session-abc123",
 		PodCIDRs:         []string{"10.244.0.0/16"},
 		ServiceCIDRs:     []string{"10.96.0.0/12"},
@@ -165,7 +166,7 @@ func validSessionSpec() singbox.SessionSpec {
 		PublicDNSPort:    53,
 		TUNAddress:       "198.19.0.1/30",
 		Namespace:        "default",
-		TrafficPorts:     singbox.TrafficInboundPorts{Listen: 1081},
+		TrafficPorts:     sessionspec.TrafficInboundPorts{Listen: 1081},
 		TrafficPassword:  "traffic-password-1234567890123456",
 	}
 }

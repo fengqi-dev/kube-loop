@@ -9,9 +9,10 @@ import (
 	"strings"
 
 	"github.com/fengqi-dev/kube-loop/internal/protocol/dns"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/sessionspec"
 )
 
-func ResolverDomains(namespace string, clusterDomains []string, hosts []HostAlias, extra ...string) []string {
+func ResolverDomains(namespace string, clusterDomains []string, hosts []sessionspec.HostAlias, extra ...string) []string {
 	domains, err := dns.NormalizeClusterDomains(clusterDomains)
 	if err != nil || len(domains) == 0 {
 		domains = []string{dns.DefaultClusterDomain}
@@ -48,11 +49,11 @@ func ResolverDomains(namespace string, clusterDomains []string, hosts []HostAlia
 
 // NormalizeHostAliases validates and canonicalizes host aliases.
 // An empty input returns nil (clears config).
-func NormalizeHostAliases(items []HostAlias) ([]HostAlias, error) {
+func NormalizeHostAliases(items []sessionspec.HostAlias) ([]sessionspec.HostAlias, error) {
 	if len(items) == 0 {
 		return nil, nil
 	}
-	out := make([]HostAlias, 0, len(items))
+	out := make([]sessionspec.HostAlias, 0, len(items))
 	seen := make(map[string]struct{}, len(items))
 	for _, item := range items {
 		domain := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(item.Domain)), ".")
@@ -73,9 +74,9 @@ func NormalizeHostAliases(items []HostAlias) ([]HostAlias, error) {
 			return nil, fmt.Errorf("duplicate host alias domain %q", domain)
 		}
 		seen[domain] = struct{}{}
-		out = append(out, HostAlias{Domain: domain, IP: ip.String()})
+		out = append(out, sessionspec.HostAlias{Domain: domain, IP: ip.String()})
 	}
-	slices.SortFunc(out, func(left, right HostAlias) int {
+	slices.SortFunc(out, func(left, right sessionspec.HostAlias) int {
 		return cmp.Compare(left.Domain, right.Domain)
 	})
 	return out, nil

@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/fengqi-dev/kube-loop/internal/helper"
-	helperprotocol "github.com/fengqi-dev/kube-loop/internal/protocol/helper"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/helperrpc"
 )
 
 const goosWindows = "windows"
@@ -117,7 +117,7 @@ func waitForInstalledHelperReady(token, version string) error {
 		context.Background(),
 		installReadyTimeout,
 		100*time.Millisecond,
-		func(pingCtx context.Context) (helperprotocol.Response, error) {
+		func(pingCtx context.Context) (helperrpc.Response, error) {
 			requestCtx, requestCancel := context.WithTimeout(pingCtx, 2*time.Second)
 			defer requestCancel()
 			response, err := client.Ping(requestCtx)

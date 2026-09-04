@@ -14,8 +14,10 @@ Current contracts:
 - `dns`: Kubernetes cluster DNS domain and label validation shared by other
   contracts.
 - `exchangestream`, `execstream`, `filestream`, and `mirrorstream`: streaming
-  operation frames.
-- `helper`: desktop-to-privileged-helper JSON-line RPC.
+  operation frames. `exchangestream` and `mirrorstream` share their frame
+  layout through `streamframe` while keeping separate types and error wording,
+  so either can diverge from the shared layout on its own schedule.
+- `helperrpc`: desktop-to-privileged-helper JSON-line RPC.
 - `networkspec`: the normalized network document exchanged by the control plane,
   gateway, and client. Target authorization decisions derived from it live in
   `internal/gateway`.
@@ -24,6 +26,12 @@ Current contracts:
   and replay guards live in `internal/auth/relaybearer`.
 - `remotetask`: the declarative remote-operation lifecycle states and allowed
   transitions; executors stay with their owning packages.
+- `sessionspec`: the data-plane session document carried by `helperrpc`.
+  Validation and sing-box configuration generation live in `internal/singbox`,
+  which consumes these types rather than owning them.
+- `streamframe`: the frame layout shared by `exchangestream` and
+  `mirrorstream`. An implementation detail of those contracts, not a contract
+  of its own.
 - `supervisor`: length-prefixed JSON framing for the privileged-helper
   supervisor channel.
 - `trafficcontrol`: traffic operation request/response contracts (modes,

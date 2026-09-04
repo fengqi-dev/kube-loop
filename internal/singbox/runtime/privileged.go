@@ -7,7 +7,7 @@ import (
 
 	"github.com/fengqi-dev/kube-loop/internal/helper"
 	helperinstall "github.com/fengqi-dev/kube-loop/internal/helper/install"
-	"github.com/fengqi-dev/kube-loop/internal/singbox"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/sessionspec"
 )
 
 // NewPrivileged returns a Runtime backed by the narrowly scoped local helper.
@@ -16,7 +16,7 @@ func NewPrivileged() *Runtime {
 	runtime := &Runtime{}
 	runtime.PrivilegedStart = func(
 		ctx context.Context,
-		spec singbox.SessionSpec,
+		spec sessionspec.Spec,
 	) (func(context.Context) error, error) {
 		if err := helperinstall.EnsureInstall(ctx); err != nil {
 			return nil, fmt.Errorf("ensure privileged helper: %w", err)
@@ -44,7 +44,7 @@ func NewPrivileged() *Runtime {
 	runtime.PrivilegedUpdateDNS = func(
 		ctx context.Context,
 		sessionID string,
-		dns singbox.DNSMeta,
+		dns sessionspec.DNSMeta,
 	) error {
 		client, err := helper.NewClient()
 		if err != nil {

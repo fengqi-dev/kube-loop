@@ -5,6 +5,8 @@ import (
 	"net"
 	"strconv"
 	"strings"
+
+	"github.com/fengqi-dev/kube-loop/internal/protocol/sessionspec"
 )
 
 const (
@@ -40,18 +42,6 @@ const (
 	TrafficLocalUser = "kube-loop"
 )
 
-// TrafficInboundPorts holds the single fixed loopback SOCKS listen port used by
-// local feature adapters. Targets remain dynamic in the SOCKS request.
-type TrafficInboundPorts struct {
-	Listen int `json:"listen"`
-}
-
-// HostAlias maps a DNS name to an IPv4 address for the local dns-in resolver.
-type HostAlias struct {
-	Domain string `json:"domain"`
-	IP     string `json:"ip"`
-}
-
 // NetworkSpec is the data-plane view of a discovered cluster network.
 // Session translates Kubernetes discovery into this type at the adapter boundary.
 type NetworkSpec struct {
@@ -75,8 +65,8 @@ type Options struct {
 	TUNAddress       string
 	Namespace        string
 	ClusterDomains   []string
-	Hosts            []HostAlias
-	TrafficPorts     TrafficInboundPorts
+	Hosts            []sessionspec.HostAlias
+	TrafficPorts     sessionspec.TrafficInboundPorts
 	TrafficPassword  string
 	LogLevel         string
 }

@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	helperprotocol "github.com/fengqi-dev/kube-loop/internal/protocol/helper"
-	"github.com/fengqi-dev/kube-loop/internal/singbox"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/helperrpc"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/sessionspec"
 )
 
 func TestServerShutdownClosesAndWaitsForHandlers(t *testing.T) {
@@ -61,7 +61,7 @@ func TestServerShutdownClosesAndWaitsForHandlers(t *testing.T) {
 
 func TestDispatchRejectsLegacyExecutableRequest(t *testing.T) {
 	server := NewServer(AuthFile{Token: "secret"})
-	response := server.dispatch(helperprotocol.Request{Op: helperprotocol.OpStart, Token: "secret"})
+	response := server.dispatch(helperrpc.Request{Op: helperrpc.OpStart, Token: "secret"})
 	if response.OK || response.Error != "session is required" {
 		t.Fatalf("dispatch() = %#v", response)
 	}
@@ -69,8 +69,8 @@ func TestDispatchRejectsLegacyExecutableRequest(t *testing.T) {
 
 func TestDispatchRequiresValidSessionIDForStop(t *testing.T) {
 	server := NewServer(AuthFile{Token: "secret"})
-	response := server.dispatch(helperprotocol.Request{
-		Op: helperprotocol.OpStop, Token: "secret", SessionID: "../../session",
+	response := server.dispatch(helperrpc.Request{
+		Op: helperrpc.OpStop, Token: "secret", SessionID: "../../session",
 	})
 	if response.OK {
 		t.Fatalf("dispatch() unexpectedly accepted an unsafe session ID")
@@ -80,7 +80,7 @@ func TestDispatchRequiresValidSessionIDForStop(t *testing.T) {
 func TestStartSessionRejectsServerClosing(t *testing.T) {
 	server := NewServer(AuthFile{})
 	server.closing.Store(true)
-	if err := server.startSession(singbox.SessionSpec{}); !errors.Is(err, errServerClosing) {
+	if err := server.startSession(sessionspec.Spec{}); !errors.Is(err, errServerClosing) {
 		t.Fatalf("startSession error = %v, want %v", err, errServerClosing)
 	}
 }

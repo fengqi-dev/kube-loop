@@ -10,48 +10,15 @@ import (
 	"strings"
 
 	"github.com/fengqi-dev/kube-loop/internal/protocol/dns"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/sessionspec"
 )
 
 const maxSessionItems = 4096
 
 var sessionIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$`)
 
-// SessionSpec is the complete, field-constrained description accepted by the
-// privileged helper. It deliberately contains no filesystem paths or commands.
-type SessionSpec struct {
-	ID               string              `json:"id"`
-	PodCIDRs         []string            `json:"podCIDRs,omitempty"`
-	ServiceCIDRs     []string            `json:"serviceCIDRs,omitempty"`
-	ServiceIPs       []string            `json:"serviceIPs,omitempty"`
-	ClusterDNSServer string              `json:"clusterDNSServer,omitempty"`
-	ClusterDomains   []string            `json:"clusterDomains,omitempty"`
-	BridgeHost       string              `json:"bridgeHost"`
-	BridgePort       int                 `json:"bridgePort"`
-	ControllerPort   int                 `json:"controllerPort"`
-	ControllerSecret string              `json:"controllerSecret"`
-	DNSHost          string              `json:"dnsHost"`
-	DNSPort          int                 `json:"dnsPort"`
-	PublicDNSPort    int                 `json:"publicDNSPort"`
-	TUNAddress       string              `json:"tunAddress"`
-	Namespace        string              `json:"namespace,omitempty"`
-	DNSNamespace     string              `json:"dnsNamespace,omitempty"`
-	Namespaces       []string            `json:"namespaces,omitempty"`
-	Hosts            []HostAlias         `json:"hosts,omitempty"`
-	TrafficPorts     TrafficInboundPorts `json:"trafficPorts"`
-	TrafficPassword  string              `json:"trafficPassword"`
-	LogLevel         string              `json:"logLevel,omitempty"`
-}
-
-// DNSMeta describes the split-DNS state installed by the privileged helper.
-type DNSMeta struct {
-	Listen  string   `json:"listen"`
-	Port    int      `json:"port"`
-	Domains []string `json:"domains"`
-	Search  []string `json:"search"`
-	Ndots   int      `json:"ndots"`
-}
-
-func (s SessionSpec) Validate() error {
+// Validate reports whether spec is a well-formed session document.
+func Validate(s sessionspec.Spec) error {
 	if err := ValidateSessionID(s.ID); err != nil {
 		return err
 	}
@@ -124,7 +91,7 @@ func (s SessionSpec) Validate() error {
 	if _, err := NormalizeHostAliases(s.Hosts); err != nil {
 		return err
 	}
-	_, err = clusterRoutes(s.discovery())
+	_, err = clusterRoutes(discovery(s))
 	return err
 }
 
@@ -135,13 +102,14 @@ func ValidateSessionID(id string) error {
 	return nil
 }
 
-func (s SessionSpec) GenerateConfig() ([]byte, error) {
-	if err := s.Validate(); err != nil {
+// GenerateConfig renders the sing-box configuration for spec.
+func GenerateConfig(s sessionspec.Spec) ([]byte, error) {
+	if err := Validate(s); err != nil {
 		return nil, err
 	}
 	hosts, _ := NormalizeHostAliases(s.Hosts)
 	domains, _ := dns.NormalizeClusterDomains(s.ClusterDomains)
-	return Generate(s.discovery(), Options{
+	return Generate(discovery(s), Options{
 		BridgeHost:       s.BridgeHost,
 		BridgePort:       s.BridgePort,
 		ControllerPort:   s.ControllerPort,
@@ -149,7 +117,7 @@ func (s SessionSpec) GenerateConfig() ([]byte, error) {
 		DNSHost:          s.DNSHost,
 		DNSPort:          s.DNSPort,
 		TUNAddress:       s.TUNAddress,
-		Namespace:        s.dnsNamespace(),
+		Namespace:        dnsNamespace(s),
 		ClusterDomains:   domains,
 		Hosts:            hosts,
 		TrafficPorts:     s.TrafficPorts,
@@ -158,21 +126,23 @@ func (s SessionSpec) GenerateConfig() ([]byte, error) {
 	})
 }
 
-func (s SessionSpec) Routes() ([]string, error) {
-	if err := s.Validate(); err != nil {
+// Routes reports the cluster routes spec installs.
+func Routes(s sessionspec.Spec) ([]string, error) {
+	if err := Validate(s); err != nil {
 		return nil, err
 	}
-	return clusterRoutes(s.discovery())
+	return clusterRoutes(discovery(s))
 }
 
-func (s SessionSpec) DNS() (DNSMeta, error) {
-	if err := s.Validate(); err != nil {
-		return DNSMeta{}, err
+// DNS reports the split-DNS state spec installs.
+func DNS(s sessionspec.Spec) (sessionspec.DNSMeta, error) {
+	if err := Validate(s); err != nil {
+		return sessionspec.DNSMeta{}, err
 	}
 	hosts, _ := NormalizeHostAliases(s.Hosts)
 	domains, _ := dns.NormalizeClusterDomains(s.ClusterDomains)
-	ns := s.dnsNamespace()
-	return DNSMeta{
+	ns := dnsNamespace(s)
+	return sessionspec.DNSMeta{
 		Listen:  s.DNSHost,
 		Port:    s.PublicDNSPort,
 		Domains: ResolverDomains(ns, domains, hosts),
@@ -181,11 +151,11 @@ func (s SessionSpec) DNS() (DNSMeta, error) {
 	}, nil
 }
 
-func (s SessionSpec) dnsNamespace() string {
+func dnsNamespace(s sessionspec.Spec) string {
 	return cmp.Or(s.DNSNamespace, s.Namespace, defaultNamespace)
 }
 
-func (s SessionSpec) discovery() NetworkSpec {
+func discovery(s sessionspec.Spec) NetworkSpec {
 	domains, _ := dns.NormalizeClusterDomains(s.ClusterDomains)
 	return NetworkSpec{
 		PodCIDRs:       s.PodCIDRs,

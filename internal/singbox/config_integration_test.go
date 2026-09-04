@@ -5,6 +5,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+
+	"github.com/fengqi-dev/kube-loop/internal/protocol/sessionspec"
 )
 
 func TestGeneratedConfigAcceptedBySingBox(t *testing.T) {
@@ -20,7 +22,7 @@ func TestGeneratedConfigAcceptedBySingBox(t *testing.T) {
 		BridgePort: 17890, ControllerPort: 19090,
 		ControllerSecret: "controller-secret-1234567890123456",
 		DNSPort:          1053, TUNAddress: "198.19.0.1/30",
-		TrafficPorts:    TrafficInboundPorts{Listen: 18081},
+		TrafficPorts:    sessionspec.TrafficInboundPorts{Listen: 18081},
 		TrafficPassword: "traffic-password-1234567890123456",
 	})
 	if err != nil {

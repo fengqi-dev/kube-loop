@@ -9,7 +9,7 @@ import (
 	clientprofile "github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/helper"
 	helperinstall "github.com/fengqi-dev/kube-loop/internal/helper/install"
-	"github.com/fengqi-dev/kube-loop/internal/singbox"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/sessionspec"
 )
 
 type ServerNetworkSettings struct {
@@ -94,9 +94,9 @@ func (a *App) SetServerHostAliases(
 	}
 	if a.dataPlanes != nil {
 		if _, statusErr := a.dataPlanes.Status(profileID); statusErr == nil {
-			runtimeAliases := make([]singbox.HostAlias, len(stored.HostAliases))
+			runtimeAliases := make([]sessionspec.HostAlias, len(stored.HostAliases))
 			for index, item := range stored.HostAliases {
-				runtimeAliases[index] = singbox.HostAlias{Domain: item.Domain, IP: item.IP}
+				runtimeAliases[index] = sessionspec.HostAlias{Domain: item.Domain, IP: item.IP}
 			}
 			if updateErr := a.dataPlanes.UpdateHostAliases(a.context(), profileID, runtimeAliases); updateErr != nil {
 				_ = a.profiles.Upsert(previous)
