@@ -8,9 +8,9 @@ import (
 
 	trafficv1alpha1 "github.com/fengqi-dev/kube-loop/api/v1alpha1"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
-	"github.com/fengqi-dev/kube-loop/internal/controlplane/entity"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/servicebinding"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/trafficsession"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/servicemodel"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficcontrol"
 )
 
@@ -40,7 +40,7 @@ func (handler *Service) Claim(ctx context.Context, relayID string,
 	}
 	return trafficcontrol.ClaimResponse{
 		Mode: trafficcontrol.ModePreview, TaskID: binding.Spec.TaskID,
-		Service: name, Ports: append([]entity.Port(nil), trafficsession.Ports(binding)...),
+		Service: name, Ports: append([]servicemodel.Port(nil), trafficsession.Ports(binding)...),
 	}, nil
 }
 

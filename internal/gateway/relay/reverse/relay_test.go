@@ -9,13 +9,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fengqi-dev/kube-loop/internal/controlplane/entity"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/exchangestream"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/servicemodel"
 	"github.com/fengqi-dev/kube-loop/internal/transport/trafficstream"
 )
 
 func TestRunForwardsTCPAndUDP(t *testing.T) {
-	listeners, err := BindListeners("127.0.0.1", []entity.Port{
+	listeners, err := BindListeners("127.0.0.1", []servicemodel.Port{
 		{Name: "http", ServicePort: 8080, Protocol: "tcp"},
 		{Name: "dns", ServicePort: 5353, Protocol: "udp"},
 	})

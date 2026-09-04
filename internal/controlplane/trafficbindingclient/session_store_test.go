@@ -11,7 +11,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	trafficv1alpha1 "github.com/fengqi-dev/kube-loop/api/v1alpha1"
-	"github.com/fengqi-dev/kube-loop/internal/controlplane/entity"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/servicemodel"
 )
 
 func TestTrafficSessionLifecycleUsesOnlyTrafficBinding(t *testing.T) {
@@ -25,8 +25,8 @@ func TestTrafficSessionLifecycleUsesOnlyTrafficBinding(t *testing.T) {
 			TaskID: taskID, SessionGeneration: 1,
 		},
 		"development", "api", "10.96.0.20",
-		[]entity.Port{{Name: "http", ServicePort: 8080, Protocol: "tcp"}},
-		[]entity.LocalTarget{{ServicePort: 8080, Protocol: "tcp", LocalHost: "127.0.0.1", LocalPort: 18080}},
+		[]servicemodel.Port{{Name: "http", ServicePort: 8080, Protocol: "tcp"}},
+		[]servicemodel.LocalTarget{{ServicePort: 8080, Protocol: "tcp", LocalHost: "127.0.0.1", LocalPort: 18080}},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -77,7 +77,7 @@ func TestSessionSynchronizerAdoptsPausedTrafficBindingWithoutTaskStore(t *testin
 			TaskID: "22222222-2222-4222-8222-222222222222", SessionGeneration: 1,
 		},
 		"development", "preview-api",
-		[]entity.Port{{Name: "http", ServicePort: 8080, Protocol: "tcp"}}, nil,
+		[]servicemodel.Port{{Name: "http", ServicePort: 8080, Protocol: "tcp"}}, nil,
 	)
 	stored, _, err := manager.EnsureSession(context.Background(), binding)
 	if err != nil {

@@ -11,9 +11,9 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/fengqi-dev/kube-loop/internal/controlplane/entity"
 	"github.com/fengqi-dev/kube-loop/internal/gateway/api"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/exchangestream"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/servicemodel"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficcontrol"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
 	"github.com/fengqi-dev/kube-loop/internal/transport/trafficstream"
@@ -50,7 +50,7 @@ func (controlPlane *fakeController) DoJSON(
 		request := input.(trafficcontrol.ClaimRequest)
 		*output.(*trafficcontrol.ClaimResponse) = trafficcontrol.ClaimResponse{
 			Mode: request.Mode, TaskID: request.TaskID, Service: "api",
-			Ports: []entity.Port{{Name: "http", ServicePort: 8080, Protocol: "tcp"}},
+			Ports: []servicemodel.Port{{Name: "http", ServicePort: 8080, Protocol: "tcp"}},
 		}
 	case trafficcontrol.InternalPathPrefix + "/prepare":
 		if controlPlane.prepareErr != nil {
@@ -278,7 +278,7 @@ func TestInvalidClaimIsFinishedAndRejected(t *testing.T) {
 		finished: make(chan trafficcontrol.FinishRequest, 1),
 		claimResponse: &trafficcontrol.ClaimResponse{
 			Mode: trafficcontrol.ModeMirror, TaskID: taskID,
-			Ports: []entity.Port{{Name: "http", ServicePort: 8080, Protocol: "tcp"}},
+			Ports: []servicemodel.Port{{Name: "http", ServicePort: 8080, Protocol: "tcp"}},
 		},
 	}
 	api, err := api.New(api.Config{GatewayIP: "127.0.0.1", ControlPlane: controlPlane})

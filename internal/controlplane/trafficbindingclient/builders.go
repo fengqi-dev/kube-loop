@@ -5,16 +5,16 @@ import (
 	"strings"
 
 	trafficv1alpha1 "github.com/fengqi-dev/kube-loop/api/v1alpha1"
-	"github.com/fengqi-dev/kube-loop/internal/controlplane/entity"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/servicebinding"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/servicemodel"
 )
 
 func NewPendingInterceptBinding(
 	mode trafficv1alpha1.TrafficBindingMode,
 	owner Owner,
 	namespace, service, clusterIP string,
-	ports []entity.Port,
-	localTargets []entity.LocalTarget,
+	ports []servicemodel.Port,
+	localTargets []servicemodel.LocalTarget,
 ) (*trafficv1alpha1.TrafficBinding, error) {
 	if mode != trafficv1alpha1.TrafficBindingModeExchange &&
 		mode != trafficv1alpha1.TrafficBindingModeMirror {
@@ -26,8 +26,8 @@ func NewPendingInterceptBinding(
 func NewPendingPreviewBinding(
 	owner Owner,
 	namespace, service string,
-	ports []entity.Port,
-	localTargets []entity.LocalTarget,
+	ports []servicemodel.Port,
+	localTargets []servicemodel.LocalTarget,
 ) *trafficv1alpha1.TrafficBinding {
 	binding := pendingBinding(
 		trafficv1alpha1.TrafficBindingModePreview,
@@ -42,10 +42,10 @@ func pendingBinding(
 	mode trafficv1alpha1.TrafficBindingMode,
 	owner Owner,
 	namespace, service, clusterIP string,
-	ports []entity.Port,
-	localTargets []entity.LocalTarget,
+	ports []servicemodel.Port,
+	localTargets []servicemodel.LocalTarget,
 ) *trafficv1alpha1.TrafficBinding {
-	targets := make(map[string]entity.LocalTarget, len(localTargets))
+	targets := make(map[string]servicemodel.LocalTarget, len(localTargets))
 	for _, target := range localTargets {
 		targets[strings.ToUpper(target.Protocol)+fmt.Sprintf("/%d", target.ServicePort)] = target
 	}

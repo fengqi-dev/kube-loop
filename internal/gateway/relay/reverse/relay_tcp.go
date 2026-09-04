@@ -7,14 +7,14 @@ import (
 	"net"
 	"sync"
 
-	"github.com/fengqi-dev/kube-loop/internal/controlplane/entity"
 	"github.com/fengqi-dev/kube-loop/internal/gateway/relay/listener"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/exchangestream"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/servicemodel"
 )
 
 type tcpRelayStream struct {
 	connection net.Conn
-	port       entity.Port
+	port       servicemodel.Port
 }
 
 func (relay *relaySession) acceptTCP(

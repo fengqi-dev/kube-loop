@@ -9,7 +9,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	trafficv1alpha1 "github.com/fengqi-dev/kube-loop/api/v1alpha1"
-	"github.com/fengqi-dev/kube-loop/internal/controlplane/entity"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/servicemodel"
 )
 
 func TestSessionSynchronizerListsEveryIdentityBindingAcrossSessions(t *testing.T) {
@@ -45,7 +45,7 @@ func TestSessionSynchronizerListsEveryIdentityBindingAcrossSessions(t *testing.T
 				TaskID: item.taskID, SessionGeneration: 1,
 			},
 			item.namespace, "preview-"+item.taskID[:8],
-			[]entity.Port{{Name: "http", ServicePort: 8080, Protocol: "tcp"}}, nil,
+			[]servicemodel.Port{{Name: "http", ServicePort: 8080, Protocol: "tcp"}}, nil,
 		)
 		if _, _, err := manager.EnsureSession(context.Background(), binding); err != nil {
 			t.Fatal(err)
@@ -85,7 +85,7 @@ func TestSessionSynchronizerListsInterceptClusterIPFromSpec(t *testing.T) {
 				"development",
 				"api",
 				"10.96.0.42",
-				[]entity.Port{{Name: "http", ServicePort: 8080, Protocol: "tcp"}},
+				[]servicemodel.Port{{Name: "http", ServicePort: 8080, Protocol: "tcp"}},
 				nil,
 			)
 			if err != nil {
@@ -121,7 +121,7 @@ func TestSessionSynchronizerDeletesOnlyUserOwnedBinding(t *testing.T) {
 		},
 		"development",
 		"preview",
-		[]entity.Port{{Name: "http", ServicePort: 8080, Protocol: "tcp"}},
+		[]servicemodel.Port{{Name: "http", ServicePort: 8080, Protocol: "tcp"}},
 		nil,
 	)
 	if _, _, err := manager.EnsureSession(context.Background(), binding); err != nil {
@@ -165,7 +165,7 @@ func TestSessionSynchronizerBackfillsUserIDLabel(t *testing.T) {
 		},
 		"development",
 		"preview",
-		[]entity.Port{{Name: "http", ServicePort: 8080, Protocol: "tcp"}},
+		[]servicemodel.Port{{Name: "http", ServicePort: 8080, Protocol: "tcp"}},
 		nil,
 	)
 	stored, _, err := manager.EnsureSession(context.Background(), binding)
@@ -221,7 +221,7 @@ func TestSessionSynchronizerAdoptsActiveBindingWithoutChangingDesiredState(t *te
 		},
 		"development",
 		"preview",
-		[]entity.Port{{Name: "http", ServicePort: 8080, Protocol: "tcp"}},
+		[]servicemodel.Port{{Name: "http", ServicePort: 8080, Protocol: "tcp"}},
 		nil,
 	)
 	binding.Spec.DesiredState = trafficv1alpha1.TrafficBindingDesiredStateActive
@@ -267,7 +267,7 @@ func TestSessionSynchronizerRefreshesGenerationWithoutChangingDesiredState(t *te
 		},
 		"development",
 		"preview",
-		[]entity.Port{{Name: "http", ServicePort: 8080, Protocol: "tcp"}},
+		[]servicemodel.Port{{Name: "http", ServicePort: 8080, Protocol: "tcp"}},
 		nil,
 	)
 	binding.Spec.DesiredState = trafficv1alpha1.TrafficBindingDesiredStateActive

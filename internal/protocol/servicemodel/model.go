@@ -1,4 +1,4 @@
-package entity
+package servicemodel
 
 type Port struct {
 	Name        string `json:"name,omitempty"`

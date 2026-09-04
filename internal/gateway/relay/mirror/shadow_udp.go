@@ -7,9 +7,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/fengqi-dev/kube-loop/internal/controlplane/entity"
 	"github.com/fengqi-dev/kube-loop/internal/gateway/relay/listener"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/mirrorstream"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/servicemodel"
 	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
@@ -17,7 +17,7 @@ type udpPrimaryAssociation struct {
 	primary  net.Conn
 	listener *net.UDPConn
 	remote   *net.UDPAddr
-	port     entity.Port
+	port     servicemodel.Port
 	key      string
 	lastSeen time.Time
 }

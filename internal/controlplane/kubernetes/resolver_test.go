@@ -11,9 +11,9 @@ import (
 
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/authorization"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
-	"github.com/fengqi-dev/kube-loop/internal/controlplane/entity"
 	controlplanekubernetes "github.com/fengqi-dev/kube-loop/internal/controlplane/kubernetes"
 	portforwardservice "github.com/fengqi-dev/kube-loop/internal/controlplane/portforwardapi/service"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/servicemodel"
 )
 
 type staticClientProvider struct {
@@ -44,7 +44,7 @@ func TestServiceResolverRequiresEveryRequestedPortToBeAuthoritative(t *testing.T
 		controlplaneapi.Identity{Subject: "user"},
 		"development",
 		"api",
-		[]entity.Port{{ServicePort: 53, Protocol: "udp"}, {ServicePort: 80, Protocol: "tcp"}},
+		[]servicemodel.Port{{ServicePort: 53, Protocol: "udp"}, {ServicePort: 80, Protocol: "tcp"}},
 	)
 	if err != nil || service.ClusterIP != "10.96.0.20" || len(service.Ports) != 2 ||
 		service.Ports[0].Name != "dns" {
@@ -56,7 +56,7 @@ func TestServiceResolverRequiresEveryRequestedPortToBeAuthoritative(t *testing.T
 		controlplaneapi.Identity{Subject: "user"},
 		"development",
 		"api",
-		[]entity.Port{{ServicePort: 53, Protocol: "tcp"}},
+		[]servicemodel.Port{{ServicePort: 53, Protocol: "tcp"}},
 	); err == nil {
 		t.Fatal("mismatched protocol was accepted")
 	}

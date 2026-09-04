@@ -1,9 +1,9 @@
 package previewapi
 
-import "github.com/fengqi-dev/kube-loop/internal/controlplane/entity"
+import "github.com/fengqi-dev/kube-loop/internal/protocol/servicemodel"
 
 type Spec struct {
-	Name         string               `json:"name"`
-	Ports        []entity.Port        `json:"ports"`
-	LocalTargets []entity.LocalTarget `json:"localTargets,omitempty"`
+	Name         string                     `json:"name"`
+	Ports        []servicemodel.Port        `json:"ports"`
+	LocalTargets []servicemodel.LocalTarget `json:"localTargets,omitempty"`
 }

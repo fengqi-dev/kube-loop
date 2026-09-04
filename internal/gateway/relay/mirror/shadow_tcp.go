@@ -7,9 +7,9 @@ import (
 	"net"
 	"sync"
 
-	"github.com/fengqi-dev/kube-loop/internal/controlplane/entity"
 	"github.com/fengqi-dev/kube-loop/internal/gateway/relay/listener"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/mirrorstream"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/servicemodel"
 )
 
 type tcpPrimaryStream struct {
@@ -32,7 +32,7 @@ func (relay *mirrorRelay) acceptTCP(ctx context.Context, binding listener.TCPBin
 	}
 }
 
-func (relay *mirrorRelay) serveTCP(ctx context.Context, port entity.Port, client net.Conn) {
+func (relay *mirrorRelay) serveTCP(ctx context.Context, port servicemodel.Port, client net.Conn) {
 	dialContext, cancel := context.WithTimeout(ctx, relay.config.PrimaryDialTimeout)
 	primary, err := relay.primaries.Dial(dialContext, "tcp", port.ServicePort)
 	cancel()

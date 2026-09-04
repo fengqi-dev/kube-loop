@@ -20,11 +20,11 @@ import (
 	"k8s.io/apimachinery/pkg/util/validation"
 
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
-	"github.com/fengqi-dev/kube-loop/internal/controlplane/entity"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/servicebinding"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/sessionapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/trafficbindingclient"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/servicemodel"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficcontrol"
 )
 
@@ -94,8 +94,8 @@ func WriteJSON(ctx *echo.Context, status int, value any) {
 // NormalizeLocalTargets trims, defaults and sorts the local targets in place,
 // rejecting any that does not pair with exactly one of the Service ports.
 func NormalizeLocalTargets(
-	targets *[]entity.LocalTarget,
-	ports []entity.Port,
+	targets *[]servicemodel.LocalTarget,
+	ports []servicemodel.Port,
 ) *controlplaneapi.Error {
 	if len(*targets) == 0 {
 		return nil
@@ -136,14 +136,14 @@ func localTargetKey(port int32, protocol string) string {
 	return fmt.Sprintf("%d/%s", port, strings.ToLower(strings.TrimSpace(protocol)))
 }
 
-func CompareLocalTargets(left, right entity.LocalTarget) int {
+func CompareLocalTargets(left, right servicemodel.LocalTarget) int {
 	if left.ServicePort != right.ServicePort {
 		return int(left.ServicePort - right.ServicePort)
 	}
 	return strings.Compare(left.Protocol, right.Protocol)
 }
 
-func ComparePorts(left, right entity.Port) int {
+func ComparePorts(left, right servicemodel.Port) int {
 	if left.ServicePort != right.ServicePort {
 		return int(left.ServicePort - right.ServicePort)
 	}
@@ -200,7 +200,7 @@ func TrafficSession(
 // the Gateway disagreed about.
 func InterceptPorts(
 	name string,
-	expected []entity.Port,
+	expected []servicemodel.Port,
 	listeners []trafficcontrol.ListenerPort,
 ) ([]servicebinding.InterceptPort, error) {
 	mismatch := errors.New("gateway listener ports do not match the " + name + " Task")

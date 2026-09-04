@@ -9,8 +9,8 @@ import (
 	"k8s.io/apimachinery/pkg/util/validation"
 
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
-	"github.com/fengqi-dev/kube-loop/internal/controlplane/entity"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/trafficapi"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/servicemodel"
 )
 
 func normalizeRequest(spec *Spec) *controlplaneapi.Error {
@@ -74,10 +74,10 @@ func writeJSON(ctx *echo.Context, status int, value any) {
 }
 
 func normalizeLocalTargets(
-	targets *[]entity.LocalTarget,
-	ports []entity.Port,
+	targets *[]servicemodel.LocalTarget,
+	ports []servicemodel.Port,
 ) *controlplaneapi.Error {
 	return trafficapi.NormalizeLocalTargets(targets, ports)
 }
 
-func comparePorts(left, right entity.Port) int { return trafficapi.ComparePorts(left, right) }
+func comparePorts(left, right servicemodel.Port) int { return trafficapi.ComparePorts(left, right) }

@@ -4,10 +4,10 @@ import (
 	"context"
 
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
-	"github.com/fengqi-dev/kube-loop/internal/controlplane/entity"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/servicebinding"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/sessionapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/trafficapi"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/servicemodel"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficcontrol"
 )
 
@@ -19,7 +19,7 @@ func (handler *Service) trafficSession(
 }
 
 func interceptPorts(
-	expected []entity.Port,
+	expected []servicemodel.Port,
 	listeners []trafficcontrol.ListenerPort,
 ) ([]servicebinding.InterceptPort, error) {
 	return trafficapi.InterceptPorts("Mirror", expected, listeners)

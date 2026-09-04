@@ -5,8 +5,8 @@ import (
 	"time"
 
 	trafficv1alpha1 "github.com/fengqi-dev/kube-loop/api/v1alpha1"
-	"github.com/fengqi-dev/kube-loop/internal/controlplane/entity"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/remotetask"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/servicemodel"
 )
 
 func State(binding *trafficv1alpha1.TrafficBinding) remotetask.State {
@@ -44,10 +44,10 @@ func Owned(
 		binding.Spec.SessionID == sessionID && binding.Namespace == namespace
 }
 
-func Ports(binding *trafficv1alpha1.TrafficBinding) []entity.Port {
-	ports := make([]entity.Port, 0, len(binding.Spec.Ports))
+func Ports(binding *trafficv1alpha1.TrafficBinding) []servicemodel.Port {
+	ports := make([]servicemodel.Port, 0, len(binding.Spec.Ports))
 	for _, port := range binding.Spec.Ports {
-		ports = append(ports, entity.Port{
+		ports = append(ports, servicemodel.Port{
 			Name: port.Name, ServicePort: port.TargetPort,
 			Protocol: strings.ToLower(string(port.Protocol)),
 		})
@@ -55,13 +55,13 @@ func Ports(binding *trafficv1alpha1.TrafficBinding) []entity.Port {
 	return ports
 }
 
-func LocalTargets(binding *trafficv1alpha1.TrafficBinding) []entity.LocalTarget {
-	targets := make([]entity.LocalTarget, 0, len(binding.Spec.Ports))
+func LocalTargets(binding *trafficv1alpha1.TrafficBinding) []servicemodel.LocalTarget {
+	targets := make([]servicemodel.LocalTarget, 0, len(binding.Spec.Ports))
 	for _, port := range binding.Spec.Ports {
 		if port.LocalPort == nil {
 			continue
 		}
-		targets = append(targets, entity.LocalTarget{
+		targets = append(targets, servicemodel.LocalTarget{
 			Protocol: strings.ToLower(string(port.Protocol)), ServicePort: port.TargetPort,
 			// CRD validation restricts localPort to the uint16 range.
 			LocalHost: port.LocalHost,

@@ -7,9 +7,9 @@ import (
 
 	trafficv1alpha1 "github.com/fengqi-dev/kube-loop/api/v1alpha1"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
-	"github.com/fengqi-dev/kube-loop/internal/controlplane/entity"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/servicebinding"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/trafficsession"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/servicemodel"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficcontrol"
 )
 
@@ -42,7 +42,7 @@ func (handler *Service) Claim(
 	}
 	return trafficcontrol.ClaimResponse{
 		Mode: trafficcontrol.ModeExchange, TaskID: binding.Spec.TaskID,
-		Service: service, Ports: append([]entity.Port(nil), trafficsession.Ports(binding)...),
+		Service: service, Ports: append([]servicemodel.Port(nil), trafficsession.Ports(binding)...),
 	}, nil
 }
 

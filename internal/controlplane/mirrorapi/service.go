@@ -5,8 +5,8 @@ import (
 	"errors"
 
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
-	"github.com/fengqi-dev/kube-loop/internal/controlplane/entity"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/sessionapi"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/servicemodel"
 )
 
 const TaskType = "mirror"
@@ -26,8 +26,8 @@ type ServiceResolver interface {
 		controlplaneapi.Identity,
 		string,
 		string,
-		[]entity.Port,
-	) (entity.ResolvedService, error)
+		[]servicemodel.Port,
+	) (servicemodel.ResolvedService, error)
 }
 
 type Service struct {
