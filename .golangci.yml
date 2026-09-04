@@ -117,6 +117,33 @@ linters:
           deny:
             - pkg: sort
               desc: Use the slices package instead.
+        layering-protocol:
+          files:
+            - '**/internal/protocol/**'
+          deny:
+            - pkg: github.com/fengqi-dev/kube-loop/internal/controlplane
+              desc: The contract layer must not depend on Control Plane implementation packages.
+            - pkg: github.com/fengqi-dev/kube-loop/internal/client
+              desc: The contract layer must not depend on desktop client packages.
+            - pkg: github.com/fengqi-dev/kube-loop/internal/gateway
+              desc: The contract layer must not depend on Gateway implementation packages.
+            - pkg: github.com/fengqi-dev/kube-loop/internal/middleware
+              desc: The contract layer must not depend on HTTP middleware.
+        layering-foundation:
+          files:
+            - '**/internal/utils/**'
+            - '**/internal/logging/**'
+          deny:
+            - pkg: github.com/fengqi-dev/kube-loop/internal/middleware
+              desc: Foundation packages sit below middleware; keep shared context primitives in internal/utils.
+            - pkg: github.com/fengqi-dev/kube-loop/internal/protocol
+              desc: Foundation packages sit below the contract layer.
+            - pkg: github.com/fengqi-dev/kube-loop/internal/controlplane
+              desc: Foundation packages sit below the Control Plane.
+            - pkg: github.com/fengqi-dev/kube-loop/internal/client
+              desc: Foundation packages sit below the desktop client.
+            - pkg: github.com/fengqi-dev/kube-loop/internal/gateway
+              desc: Foundation packages sit below the Gateway.
     embeddedstructfieldcheck:
       forbid-mutex: true
     errcheck:
