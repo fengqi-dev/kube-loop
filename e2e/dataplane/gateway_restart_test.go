@@ -50,6 +50,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/relaycontrol"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/relayticket"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/sessionspec"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
 	"github.com/fengqi-dev/kube-loop/internal/singbox"
 )
@@ -199,7 +200,7 @@ func TestGatewayPodRestartRecoversDataPlane(t *testing.T) {
 		t, ctx, kubeRESTConfig(t), proxy.Address(), "e2e", identityID, deviceID, session,
 	)
 	statusEvents := make(chan clientdataplane.StatusEvent, 32)
-	tunStarter := &recordingTUNStarter{delegate: clientapp.NewSingboxRuntime(nil)}
+	tunStarter := &recordingTUNStarter{delegate: clientapp.NewSingboxRuntime(nil, "")}
 	manager, err := clientdataplane.NewManager(source, clientdataplane.Config{
 		StartTimeout: 10 * time.Second, RecoveryAttempts: 10, RecoveryBackoff: 200 * time.Millisecond,
 		TUNStarter: tunStarter,
@@ -761,7 +762,7 @@ func (starter *recordingTUNStarter) Start(
 	ctx context.Context,
 	network singbox.NetworkSpec,
 	bridgeAddress, namespace string,
-	hosts []singbox.HostAlias,
+	hosts []sessionspec.HostAlias,
 ) (singbox.RunningCore, error) {
 	core, err := starter.delegate.Start(ctx, network, bridgeAddress, namespace, hosts)
 	if err == nil {

@@ -128,7 +128,7 @@ func TestRemoteGatewayTUNSurvivesSystemWakeRefresh(t *testing.T) {
 	events := make(chan clientdataplane.StatusEvent, 16)
 	manager, err := clientdataplane.NewManager(source, clientdataplane.Config{
 		StartTimeout: 15 * time.Second, RecoveryAttempts: 5, RecoveryBackoff: 100 * time.Millisecond,
-		TUNStarter: clientapp.NewSingboxRuntime(nil),
+		TUNStarter: clientapp.NewSingboxRuntime(nil, ""),
 		OnStatus:   func(event clientdataplane.StatusEvent) { events <- event },
 	})
 	if err != nil {
