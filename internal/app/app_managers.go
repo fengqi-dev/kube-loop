@@ -30,13 +30,13 @@ func configureRemoteTaskManagers(
 		},
 	})
 	if sshErr != nil {
-		application.appendLog("ERROR", "Pod SSH Manager unavailable: "+sshErr.Error())
+		application.logError("Pod SSH Manager unavailable: " + sshErr.Error())
 	} else {
 		application.remoteSSH = remoteSSH
 	}
 	remoteForwards, portForwardErr := clientportforward.New(remoteClient, dataPlanes)
 	if portForwardErr != nil {
-		application.appendLog("ERROR", "Port Forward Manager unavailable: "+portForwardErr.Error())
+		application.logError("Port Forward Manager unavailable: " + portForwardErr.Error())
 	} else {
 		application.remoteForwards = remoteForwards
 	}
@@ -45,13 +45,13 @@ func configureRemoteTaskManagers(
 		clientexchange.Config{TrafficStreams: dataPlanes},
 	)
 	if exchangeErr != nil {
-		application.appendLog("ERROR", "Exchange Manager unavailable: "+exchangeErr.Error())
+		application.logError("Exchange Manager unavailable: " + exchangeErr.Error())
 	} else {
 		application.remoteExchanges = remoteExchanges
 	}
 	remoteMirrors, mirrorErr := clientmirror.NewManager(remoteClient, clientmirror.Config{TrafficStreams: dataPlanes})
 	if mirrorErr != nil {
-		application.appendLog("ERROR", "Mirror Manager unavailable: "+mirrorErr.Error())
+		application.logError("Mirror Manager unavailable: " + mirrorErr.Error())
 	} else {
 		application.remoteMirrors = remoteMirrors
 	}
@@ -60,7 +60,7 @@ func configureRemoteTaskManagers(
 		clientpreview.Config{TrafficStreams: dataPlanes},
 	)
 	if previewErr != nil {
-		application.appendLog("ERROR", "Preview Manager unavailable: "+previewErr.Error())
+		application.logError("Preview Manager unavailable: " + previewErr.Error())
 	} else {
 		application.remotePreviews = remotePreviews
 	}
@@ -70,7 +70,7 @@ func configureMCP(application *App, layout utils.Layout, version string) {
 	mcpSettingsPath := filepath.Join(layout.ConfigDir(), "mcp.json")
 	mcpStore, err := mcp.NewSystemConfigStoreForVersion(mcpSettingsPath, version)
 	if err != nil {
-		application.appendLog("ERROR", "MCP settings store unavailable: "+err.Error())
+		application.logError("MCP settings store unavailable: " + err.Error())
 		return
 	}
 	mcpDependencies := mcp.RemoteDependencies{
@@ -98,12 +98,12 @@ func configureMCP(application *App, layout utils.Layout, version string) {
 	}
 	mcpBackend, err := mcp.NewRemoteBackend(mcpDependencies)
 	if err != nil {
-		application.appendLog("ERROR", "MCP Gateway backend unavailable: "+err.Error())
+		application.logError("MCP Gateway backend unavailable: " + err.Error())
 		return
 	}
-	mcpController, err := mcp.NewController(mcpBackend, mcpStore, version, application.appendLog)
+	mcpController, err := mcp.NewController(mcpBackend, mcpStore, version, application.logger)
 	if err != nil {
-		application.appendLog("ERROR", "MCP controller unavailable: "+err.Error())
+		application.logError("MCP controller unavailable: " + err.Error())
 		return
 	}
 	application.mcp = mcpController

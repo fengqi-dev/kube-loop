@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/fengqi-dev/kube-loop/internal/buildinfo"
+	helperprotocol "github.com/fengqi-dev/kube-loop/internal/protocol/helper"
 )
 
 func TestHelperCommandVersion(t *testing.T) {
@@ -37,7 +38,7 @@ func TestIdentityCommand(t *testing.T) {
 	if exitCode != 0 || stderr != "" {
 		t.Fatalf("exit code = %d, stderr = %q", exitCode, stderr)
 	}
-	want := `{"kind":"kubeloop-helper","version":"1.2.3","protocol":6}` + "\n"
+	want := fmt.Sprintf(`{"kind":"kubeloop-helper","version":"1.2.3","protocol":%d}`+"\n", helperprotocol.Version)
 	if stdout != want {
 		t.Fatalf("stdout = %q, want %q", stdout, want)
 	}

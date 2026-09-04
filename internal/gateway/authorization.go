@@ -13,10 +13,10 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
 )
 
-// AuthorizeAddress applies the Data Plane target allowlist. Pod and Service
-// CIDRs are routing metadata only: only Pod and Service IPs actually observed
-// for the Session namespace are dialable. This prevents a namespace-scoped
-// Session from using a broad cluster CIDR to reach another namespace.
+// AuthorizeAddress applies the Data Plane target allowlist. Any address within
+// the NetworkSpec PodCIDR or ServiceCIDR is allowed, enabling cross-namespace
+// ClusterIP and PodIP access. Kubernetes API addresses and non-cluster private
+// networks are still blocked.
 func AuthorizeAddress(spec networkspec.Spec, address netip.Addr, port uint16) error {
 	address = address.Unmap()
 	if port == 0 || !networkspec.AllowedAddress(address) {
@@ -31,16 +31,32 @@ func AuthorizeAddress(spec networkspec.Spec, address netip.Addr, port uint16) er
 			return nil
 		}
 	}
-	for _, raw := range spec.ServiceIPs {
-		serviceIP, err := netip.ParseAddr(raw)
-		if err == nil && serviceIP.Unmap() == address {
+	for _, raw := range spec.ServiceCIDRs {
+		prefix, err := netip.ParsePrefix(raw)
+		if err == nil && prefix.Contains(address) {
 			return nil
 		}
 	}
-	for _, raw := range spec.PodIPs {
-		podIP, err := netip.ParseAddr(raw)
-		if err == nil && podIP.Unmap() == address {
+	if len(spec.ServiceCIDRs) == 0 {
+		for _, raw := range spec.ServiceIPs {
+			serviceIP, err := netip.ParseAddr(raw)
+			if err == nil && serviceIP.Unmap() == address {
+				return nil
+			}
+		}
+	}
+	for _, raw := range spec.PodCIDRs {
+		prefix, err := netip.ParsePrefix(raw)
+		if err == nil && prefix.Contains(address) {
 			return nil
+		}
+	}
+	if len(spec.PodCIDRs) == 0 {
+		for _, raw := range spec.PodIPs {
+			podIP, err := netip.ParseAddr(raw)
+			if err == nil && podIP.Unmap() == address {
+				return nil
+			}
 		}
 	}
 	return errors.New("target address is not allowed by NetworkSpec")

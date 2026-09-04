@@ -69,6 +69,35 @@ export function SettingsView({
   const [configBusy, setConfigBusy] = useState<"full" | "dns" | null>(null);
   const [configView, setConfigView] = useState<"full" | "dns">("full");
   const [configText, setConfigText] = useState("");
+  const [logLevel, setLogLevel] = useState<string>("info");
+
+  useEffect(() => {
+    let active = true;
+    backend.getLogLevel().then((level) => {
+      if (active) setLogLevel(level);
+    }).catch(() => {});
+    return () => { active = false; };
+  }, []);
+
+  async function onChangeLogLevel(level: string) {
+    setLogLevel(level);
+    const labels: Record<string, string> = {
+      debug: t("settings.logDebug"),
+      info: t("settings.logInfo"),
+      warn: t("settings.logWarn"),
+      error: t("settings.logError"),
+    };
+    try {
+      setLogLevel(await backend.setLogLevel(level));
+      toast.success(t("settings.logLevel"), {
+        description: labels[level],
+      });
+    } catch (error) {
+      toast.error(t("settings.logLevel"), {
+        description: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
   async function refreshHelper(showError = true) {
     try {
       setHelper(await backend.helperStatus());
@@ -237,6 +266,30 @@ export function SettingsView({
               <SelectContent>
                 <SelectItem value="en">{t("settings.english")}</SelectItem>
                 <SelectItem value="zh-CN">{t("settings.chinese")}</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="mb-5 gap-0 py-0 shadow-none">
+        <CardContent className="flex items-center justify-between gap-6 p-5">
+          <div>
+            <h3 className="text-[13px] font-semibold">{t("settings.logLevel")}</h3>
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              {t("settings.logLevelDescription")}
+            </p>
+          </div>
+          <div className="w-44 shrink-0">
+            <Select value={logLevel} onValueChange={(value) => void onChangeLogLevel(value)}>
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="debug">{t("settings.logDebug")}</SelectItem>
+                <SelectItem value="info">{t("settings.logInfo")}</SelectItem>
+                <SelectItem value="warn">{t("settings.logWarn")}</SelectItem>
+                <SelectItem value="error">{t("settings.logError")}</SelectItem>
               </SelectContent>
             </Select>
           </div>

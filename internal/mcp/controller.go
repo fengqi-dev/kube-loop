@@ -3,19 +3,18 @@ package mcp
 import (
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
+	"os"
 )
-
-type LogFunc func(level, message string)
 
 // Controller owns the embedded MCP listener and its settings store.
 type Controller struct {
 	server *Server
 	store  ConfigStore
-	log    LogFunc
+	log    *slog.Logger
 }
 
-func NewController(backend Backend, configStore ConfigStore, version string, logger LogFunc) (*Controller, error) {
+func NewController(backend Backend, configStore ConfigStore, version string, logger *slog.Logger) (*Controller, error) {
 	if backend == nil {
 		return nil, errors.New("MCP Control Plane backend is required")
 	}
@@ -23,7 +22,7 @@ func NewController(backend Backend, configStore ConfigStore, version string, log
 		return nil, errors.New("MCP settings store is required")
 	}
 	if logger == nil {
-		logger = func(level, message string) { log.Printf("[%s] %s", level, message) }
+		logger = slog.New(slog.NewTextHandler(os.Stderr, nil))
 	}
 	config, err := configStore.Load()
 	if err != nil {
@@ -34,7 +33,7 @@ func NewController(backend Backend, configStore ConfigStore, version string, log
 	}
 	controller.server.Configure(config)
 	controller.server.SetErrorHandler(func(err error) {
-		controller.appendLog("ERROR", fmt.Sprintf("MCP server stopped unexpectedly: %v", err))
+		controller.logError(fmt.Sprintf("MCP server stopped unexpectedly: %v", err))
 	})
 	return controller, nil
 }
@@ -45,23 +44,23 @@ func (controller *Controller) StartFromStore() {
 	}
 	config := controller.server.Config()
 	if !config.Enabled {
-		controller.appendLog("INFO", "MCP server disabled by saved configuration")
+		controller.logInfo("MCP server disabled by saved configuration")
 		return
 	}
 	prepared, err := ensureToken(config)
 	if err != nil {
-		controller.appendLog("ERROR", "prepare MCP authentication: "+err.Error())
+		controller.logError("prepare MCP authentication: " + err.Error())
 		return
 	}
 	if err := controller.persist(prepared); err != nil {
-		controller.appendLog("ERROR", "persist MCP configuration: "+err.Error())
+		controller.logError("persist MCP configuration: " + err.Error())
 		return
 	}
 	if err := controller.server.Apply(); err != nil {
-		controller.appendLog("ERROR", "start MCP server: "+err.Error())
+		controller.logError("start MCP server: " + err.Error())
 		return
 	}
-	controller.appendLog("INFO", "MCP server listening at "+controller.server.Status().URL)
+	controller.logInfo("MCP server listening at " + controller.server.Status().URL)
 }
 
 func (controller *Controller) Stop() error {
@@ -69,10 +68,10 @@ func (controller *Controller) Stop() error {
 		return nil
 	}
 	if err := controller.server.Stop(); err != nil {
-		controller.appendLog("ERROR", "stop MCP server: "+err.Error())
+		controller.logError("stop MCP server: " + err.Error())
 		return err
 	}
-	controller.appendLog("INFO", "MCP server stopped")
+	controller.logInfo("MCP server stopped")
 	return nil
 }
 
@@ -99,7 +98,7 @@ func (controller *Controller) SetEnabled(enabled bool) error {
 	if err := controller.server.SetEnabled(enabled); err != nil {
 		return err
 	}
-	controller.appendLog("INFO", fmt.Sprintf("MCP server enabled=%t", enabled))
+	controller.logInfo(fmt.Sprintf("MCP server enabled=%t", enabled))
 	return nil
 }
 
@@ -156,7 +155,7 @@ func (controller *Controller) RegenerateToken() (string, error) {
 	if err := controller.server.SetToken(token); err != nil {
 		return "", err
 	}
-	controller.appendLog("INFO", "MCP authentication token regenerated")
+	controller.logInfo("MCP authentication token regenerated")
 	return token, nil
 }
 
@@ -208,8 +207,20 @@ func ensureToken(config Config) (Config, error) {
 	return normalizeConfig(config)
 }
 
-func (controller *Controller) appendLog(level, message string) {
+func (controller *Controller) logInfo(message string) {
 	if controller != nil && controller.log != nil {
-		controller.log(level, message)
+		controller.log.Info(message)
+	}
+}
+
+func (controller *Controller) logWarn(message string) {
+	if controller != nil && controller.log != nil {
+		controller.log.Warn(message)
+	}
+}
+
+func (controller *Controller) logError(message string) {
+	if controller != nil && controller.log != nil {
+		controller.log.Error(message)
 	}
 }

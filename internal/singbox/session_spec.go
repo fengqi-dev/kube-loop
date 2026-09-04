@@ -7,6 +7,7 @@ import (
 	"net/netip"
 	"regexp"
 	"slices"
+	"strings"
 
 	"github.com/fengqi-dev/kube-loop/internal/protocol/dns"
 )
@@ -38,6 +39,7 @@ type SessionSpec struct {
 	Hosts            []HostAlias         `json:"hosts,omitempty"`
 	TrafficPorts     TrafficInboundPorts `json:"trafficPorts"`
 	TrafficPassword  string              `json:"trafficPassword"`
+	LogLevel         string              `json:"logLevel,omitempty"`
 }
 
 // DNSMeta describes the split-DNS state installed by the privileged helper.
@@ -111,6 +113,11 @@ func (s SessionSpec) Validate() error {
 			return fmt.Errorf("invalid cluster DNS address: %w", err)
 		}
 	}
+	if s.LogLevel != "" {
+		if _, ok := validLogLevels[strings.ToLower(strings.TrimSpace(s.LogLevel))]; !ok {
+			return errors.New("invalid log level")
+		}
+	}
 	if _, err := dns.NormalizeClusterDomains(s.ClusterDomains); err != nil {
 		return err
 	}
@@ -147,6 +154,7 @@ func (s SessionSpec) GenerateConfig() ([]byte, error) {
 		Hosts:            hosts,
 		TrafficPorts:     s.TrafficPorts,
 		TrafficPassword:  s.TrafficPassword,
+		LogLevel:         s.LogLevel,
 	})
 }
 

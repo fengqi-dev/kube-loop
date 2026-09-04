@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/netip"
@@ -28,9 +29,32 @@ type Runtime struct {
 	PrivilegedStart     singbox.PrivilegedStartFunc
 	PrivilegedUpdateDNS singbox.PrivilegedUpdateDNSFunc
 	PrivilegedReadLogs  singbox.PrivilegedReadLogsFunc
+	Logger              *slog.Logger
+	LogLevel            string
 
 	readyTimeout  time.Duration
 	readyInterval time.Duration
+}
+
+func (r *Runtime) logf(format string, values ...any) {
+	if r.Logger == nil {
+		return
+	}
+	r.Logger.Info(fmt.Sprintf(format, values...))
+}
+
+func (r *Runtime) debugf(format string, values ...any) {
+	if r.Logger == nil {
+		return
+	}
+	r.Logger.Debug(fmt.Sprintf(format, values...))
+}
+
+func (r *Runtime) errorf(format string, values ...any) {
+	if r.Logger == nil {
+		return
+	}
+	r.Logger.Error(fmt.Sprintf(format, values...))
 }
 
 func (r *Runtime) Start(
@@ -115,6 +139,8 @@ func (r *Runtime) startOnce(
 	if err != nil {
 		return nil, err
 	}
+	r.logf("startOnce: bridge=%d controller=%d publicDNS=%d internalDNS=%d traffic=%d",
+		bridgePort, controllerPort, publicDNSPort, internalDNSPort, trafficPorts.Listen)
 	trafficPassword, err := randomSecret()
 	if err != nil {
 		return nil, err
@@ -161,17 +187,21 @@ func (r *Runtime) startOnce(
 		Hosts:            normalizedHosts,
 		TrafficPorts:     trafficPorts,
 		TrafficPassword:  trafficPassword,
+		LogLevel:         r.LogLevel,
 	}
 	if r.PrivilegedStart == nil {
 		return nil, errors.New("privileged helper is required")
 	}
 	if err := spec.Validate(); err != nil {
+		r.errorf("startOnce: spec.Validate failed: %v", err)
 		return nil, err
 	}
 	config, err := spec.GenerateConfig()
 	if err != nil {
+		r.errorf("startOnce: GenerateConfig failed: %v", err)
 		return nil, fmt.Errorf("generate sing-box config: %w", err)
 	}
+	r.logf("startOnce: session %s config generated (%d bytes) tun=%s", spec.ID, len(config), spec.TUNAddress)
 	meta, err := spec.DNS()
 	if err != nil {
 		return nil, err
@@ -203,9 +233,11 @@ func (r *Runtime) startOnce(
 	}
 	stop, startErr := r.PrivilegedStart(ctx, spec)
 	if startErr != nil {
+		r.errorf("startOnce: PrivilegedStart failed: %v", startErr)
 		_ = dnsProxy.Close()
 		return nil, startErr
 	}
+	r.logf("startOnce: PrivilegedStart ok for session %s", spec.ID)
 	process.helperStop = stop
 	go process.wait()
 	go func() {
@@ -219,6 +251,7 @@ func (r *Runtime) startOnce(
 		_ = process.Close()
 		return nil, err
 	}
+	r.debugf("startOnce: session %s controller ready (tun=%s bridge=%d)", spec.ID, spec.TUNAddress, spec.BridgePort)
 	return process, nil
 }
 

@@ -34,7 +34,16 @@ func Quit(a *App) {
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	a.once.Do(func() {
-		a.appendLog("INFO", "application startup initialized")
+		a.logInfo("application startup initialized")
+		if a.startupTUNCleanup != nil {
+			cleanupContext, cancelCleanup := context.WithTimeout(ctx, 5*time.Second)
+			if err := a.startupTUNCleanup(cleanupContext); err != nil {
+				a.logWarn("Stale privileged TUN cleanup failed: " + err.Error())
+			} else {
+				a.logInfo("Stale privileged TUN sessions cleaned")
+			}
+			cancelCleanup()
+		}
 		backgroundContext, cancelBackground := context.WithCancel(ctx)
 		a.backgroundCancel = cancelBackground
 		watcher, err := powerwatch.New(powerwatch.Config{OnWake: func(event powerwatch.Event) {
@@ -42,12 +51,12 @@ func (a *App) startup(ctx context.Context) {
 				return
 			}
 			profiles := a.dataPlanes.ResumeAll()
-			a.appendLog("INFO", fmt.Sprintf(
+			a.logInfo(fmt.Sprintf(
 				"System wake detected after %s; refreshing %d Data Plane profile(s)", event.SleptFor, profiles,
 			))
 		}})
 		if err != nil {
-			a.appendLog("ERROR", "Power wake monitor unavailable: "+err.Error())
+			a.logError("Power wake monitor unavailable: " + err.Error())
 		} else {
 			a.backgroundWG.Go(func() {
 				watcher.Run(backgroundContext)
@@ -62,10 +71,10 @@ func (a *App) startup(ctx context.Context) {
 		}
 		a.backgroundWG.Go(func() {
 			if err := syncSessions(backgroundContext); err != nil {
-				a.appendLog("WARN", "Session synchronization failed: "+err.Error())
+				a.logWarn("Session synchronization failed: " + err.Error())
 				return
 			}
-			a.appendLog("INFO", "Sessions synchronized from TrafficBindings")
+			a.logInfo("Sessions synchronized from TrafficBindings")
 		})
 		if a.updater != nil {
 			a.backgroundWG.Go(func() {
@@ -185,8 +194,4 @@ func (a *App) context() context.Context {
 		return a.ctx
 	}
 	return context.Background()
-}
-
-func (a *App) appendLog(level, message string) {
-	log.Printf("[%s] %s", level, message)
 }

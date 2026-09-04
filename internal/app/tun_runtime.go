@@ -2,7 +2,10 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
+	"os"
 	"strings"
 
 	"github.com/fengqi-dev/kube-loop/internal/helper"
@@ -11,42 +14,75 @@ import (
 	singboxruntime "github.com/fengqi-dev/kube-loop/internal/singbox/runtime"
 )
 
+// cleanupPrivilegedTUNSessions removes sing-box sessions left behind when a
+// previous desktop process exited before its normal shutdown hooks ran. A
+// stale TUN must not keep intercepting traffic after its user-space SOCKS
+// bridge has disappeared.
+func cleanupPrivilegedTUNSessions(ctx context.Context) error {
+	tokenPath, err := helper.TokenPath()
+	if err != nil {
+		return err
+	}
+	if _, err := os.Stat(tokenPath); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("inspect helper token: %w", err)
+	}
+	client, err := helper.NewClient()
+	if err != nil {
+		return fmt.Errorf("create helper client: %w", err)
+	}
+	if _, err := client.StopAll(ctx); err != nil {
+		return fmt.Errorf("stop stale privileged TUN sessions: %w", err)
+	}
+	return nil
+}
+
 // NewSingboxRuntime connects the Data Plane to the narrowly scoped local
 // privileged helper. This is local network plumbing only; it never loads a
-// kubeconfig or talks to Kubernetes.
-func NewSingboxRuntime(
-	appendLog func(string, string),
-) *singboxruntime.Runtime {
-	logEvent := func(level, message string) {
-		if appendLog != nil {
-			appendLog(level, message)
-		}
+// kubeconfig or talks to Kubernetes. The runtime logger is a child of the
+// application logger tagged with component=singbox, so its milestones share
+// the same threshold and file sink.
+func NewSingboxRuntime(logger *slog.Logger, logLevel string) *singboxruntime.Runtime {
+	if logger == nil {
+		logger = slog.Default()
 	}
-	runtime := &singboxruntime.Runtime{}
+	runtime := &singboxruntime.Runtime{LogLevel: logLevel}
+	runtime.Logger = logger.With("component", "singbox")
+	info := runtime.Logger.Info
+	warn := runtime.Logger.Warn
+	errLog := runtime.Logger.Error
 	runtime.PrivilegedStart = func(
 		ctx context.Context, spec singbox.SessionSpec,
 	) (func(context.Context) error, error) {
-		logEvent("INFO", "ensuring privileged helper is ready")
+		info("ensuring privileged helper is ready")
 		if err := helperinstall.EnsureInstall(ctx); err != nil {
+			errLog("ensure privileged helper: " + err.Error())
 			return nil, fmt.Errorf("ensure privileged helper: %w", err)
 		}
 		client, err := helper.NewClient()
 		if err != nil {
+			errLog("helper client: " + err.Error())
 			return nil, err
 		}
+		status, statusErr := client.Status(ctx)
+		info("helper status: ok=" + fmt.Sprint(status.OK) + " coreReady=" + fmt.Sprint(status.CoreReady) + " err=" + fmt.Sprint(statusErr))
 		if _, err := client.Start(ctx, spec); err != nil {
 			if !helperSessionBusy(err) {
+				errLog("helper start session: " + err.Error())
 				return nil, fmt.Errorf("helper start session: %w", err)
 			}
-			logEvent("WARN", "leftover privileged TUN session detected; stopping it before retry")
+			warn("leftover privileged TUN session detected; stopping it before retry")
 			if _, stopErr := client.StopAll(ctx); stopErr != nil {
 				return nil, fmt.Errorf("helper start session: %w (stop-all: %w)", err, stopErr)
 			}
 			if _, err := client.Start(ctx, spec); err != nil {
+				errLog("helper start session retry: " + err.Error())
 				return nil, fmt.Errorf("helper start session: %w", err)
 			}
 		}
-		logEvent("INFO", "privileged TUN session started")
+		info("privileged TUN session started")
 		return func(stopCtx context.Context) error {
 			_, err := client.Stop(stopCtx, spec.ID)
 			return err

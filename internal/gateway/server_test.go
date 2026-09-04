@@ -284,7 +284,7 @@ func TestAuthenticatedSessionDeniesTargetOutsideRegisteredNetworkSpec(t *testing
 	client, gatewayConnection := net.Pipe()
 	go server.ServeConnForAuthorization(gatewayConnection, authorization)
 	if err := tunnel.WriteOpen(client, tunnel.OpenRequest{
-		Command: tunnel.CommandTCP, Host: "10.96.0.1", Port: 443,
+		Command: tunnel.CommandTCP, Host: "192.168.1.1", Port: 443,
 	}, token); err != nil {
 		t.Fatal(err)
 	}

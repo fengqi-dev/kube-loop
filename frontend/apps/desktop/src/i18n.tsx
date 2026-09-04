@@ -452,6 +452,13 @@ const en = {
   "settings.themeLight": "Light",
   "settings.themeDark": "Dark",
   "settings.themeSystem": "System",
+  "settings.logLevel": "Log level",
+  "settings.logLevelDescription":
+    "Records below this level are filtered out of the application log.",
+  "settings.logDebug": "Debug",
+  "settings.logInfo": "Info",
+  "settings.logWarn": "Warn",
+  "settings.logError": "Error",
   "settings.shareGateway": "Share Gateway",
   "settings.shareGatewayDescription":
     "Use the Gateway with other KubeLoop clients in the configured namespace. Turn this off to use a client-specific Gateway name. Disconnect before changing it.",
@@ -962,6 +969,12 @@ const zh: Record<TranslationKey, string> = {
   "settings.themeLight": "浅色",
   "settings.themeDark": "深色",
   "settings.themeSystem": "跟随系统",
+  "settings.logLevel": "日志级别",
+  "settings.logLevelDescription": "低于此级别的日志记录将从应用程序日志中过滤掉。",
+  "settings.logDebug": "调试",
+  "settings.logInfo": "信息",
+  "settings.logWarn": "警告",
+  "settings.logError": "错误",
   "settings.shareGateway": "共享 Gateway",
   "settings.shareGatewayDescription":
     "在配置的命名空间中与其他 KubeLoop 客户端共用 Gateway。关闭后会使用当前客户端专属的 Gateway 名称；修改前请先断开连接。",

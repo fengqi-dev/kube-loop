@@ -39,13 +39,28 @@ func TestAppContext(t *testing.T) {
 
 func TestStartupSynchronizesSessions(t *testing.T) {
 	called := make(chan struct{})
-	application := &App{startupSessionSync: func(ctx context.Context) error {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		close(called)
-		return nil
-	}}
+	cleanupCalled := make(chan struct{})
+	application := &App{
+		startupTUNCleanup: func(ctx context.Context) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			close(cleanupCalled)
+			return nil
+		},
+		startupSessionSync: func(ctx context.Context) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			select {
+			case <-cleanupCalled:
+			default:
+				t.Fatal("Session synchronization started before stale TUN cleanup")
+			}
+			close(called)
+			return nil
+		},
+	}
 	ctx, cancel := context.WithCancel(t.Context())
 	application.startup(ctx)
 	select {

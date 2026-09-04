@@ -32,6 +32,7 @@ func (a *App) LoadServerInventory(profileID, namespace string) (RemoteInventory,
 	if a.remote == nil || a.remoteSessions == nil {
 		return RemoteInventory{}, errors.New("remote cluster backend is unavailable")
 	}
+	a.logInfo("load server inventory: profile=" + profileID + " namespace=" + namespace)
 	serverProfile, err := a.serverProfile(profileID)
 	if err != nil {
 		return RemoteInventory{}, err
@@ -80,11 +81,11 @@ func (a *App) LoadServerInventory(profileID, namespace string) (RemoteInventory,
 	}
 	synchronized, synchronizationErr := a.synchronizeTrafficBindings(serverProfile, session)
 	if synchronizationErr != nil {
-		a.appendLog("WARN", "Traffic Binding synchronization unavailable: "+synchronizationErr.Error())
+		a.logWarn("Traffic Binding synchronization unavailable: " + synchronizationErr.Error())
 	} else {
 		session = synchronized
 		if restoreErr := a.restoreServerTasks(serverProfile, session); restoreErr != nil {
-			a.appendLog("WARN", "Server task restoration unavailable: "+restoreErr.Error())
+			a.logWarn("Server task restoration unavailable: " + restoreErr.Error())
 		}
 	}
 	result.Session = &session
@@ -132,6 +133,7 @@ func (a *App) LoadServerInventory(profileID, namespace string) (RemoteInventory,
 		}
 	}
 	a.startServerInventoryWatch(serverProfile, selected, result.Capabilities)
+	a.logInfo("server inventory loaded: profile=" + serverProfile.ID + " namespace=" + selected + " version=" + version.GitVersion)
 	return result, nil
 }
 

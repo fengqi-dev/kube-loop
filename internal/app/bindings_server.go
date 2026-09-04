@@ -229,7 +229,7 @@ func (a *App) cleanupServerProfileRemote(serverProfile clientprofile.Profile, re
 			}
 		}
 		if cleanupErr != nil {
-			a.appendLog("warn", fmt.Sprintf("clean up deleted Server Profile %q: %v", profileID, cleanupErr))
+			a.logWarn(fmt.Sprintf("clean up deleted Server Profile %q: %v", profileID, cleanupErr))
 		}
 	}()
 }

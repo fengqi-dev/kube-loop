@@ -11,17 +11,21 @@ import (
 )
 
 func (a *App) ConnectServerDataPlane(profileID, mode string) (clientdataplane.Status, error) {
+	a.logInfo("connect data plane: profile=" + profileID + " mode=" + mode)
 	if a.dataPlanes == nil || a.remoteSessions == nil {
+		a.logError("connect data plane: unavailable")
 		return clientdataplane.Status{}, errors.New("data plane is unavailable")
 	}
 	serverProfile, err := a.serverProfile(profileID)
 	if err != nil {
+		a.logError("connect data plane: " + err.Error())
 		return clientdataplane.Status{}, err
 	}
 	session, err := a.remoteSessions.Current(serverProfile.ID)
 	if err != nil {
 		session, err = a.remoteSessions.Connect(a.context(), serverProfile, session.Namespace)
 		if err != nil {
+			a.logError("connect data plane session: " + err.Error())
 			return clientdataplane.Status{}, err
 		}
 	}
@@ -33,6 +37,7 @@ func (a *App) ConnectServerDataPlane(profileID, mode string) (clientdataplane.St
 		diagnostics := networkdiag.InspectNetworkSpec(session.NetworkSpec)
 		for _, issue := range diagnostics.Issues {
 			if issue.Severity == networkdiag.SeverityWarning {
+				a.logError("TUN blocked by network conflict: " + issue.Message)
 				return clientdataplane.Status{}, fmt.Errorf(
 					"cannot install TUN while a local network conflict exists: %s",
 					issue.Message,
@@ -42,13 +47,18 @@ func (a *App) ConnectServerDataPlane(profileID, mode string) (clientdataplane.St
 	}
 	status, err := a.dataPlanes.Connect(a.context(), serverProfile, session)
 	if err != nil {
+		a.logError("connect data plane: " + err.Error())
 		return clientdataplane.Status{}, err
 	}
+	a.logInfo("data plane connected mode=" + status.Mode)
 	if mode == tunnelModeTUN && status.Mode != tunnelModeTUN {
+		a.logInfo("starting TUN for profile=" + serverProfile.ID)
 		status, err = a.dataPlanes.StartTUN(a.context(), serverProfile.ID)
 		if err != nil {
+			a.logError("start TUN failed: " + err.Error())
 			return clientdataplane.Status{}, errors.Join(err, a.dataPlanes.Disconnect(serverProfile.ID))
 		}
+		a.logInfo("TUN started mode=" + status.Mode)
 	}
 	a.restoreConnectedTasks(serverProfile)
 	return status, nil
@@ -68,11 +78,12 @@ func (a *App) restoreConnectedTasks(serverProfile clientprofile.Profile) {
 		return
 	}
 	if err := a.restoreServerTasks(serverProfile, session); err != nil {
-		a.appendLog("WARN", "Data Plane task restoration unavailable: "+err.Error())
+		a.logWarn("Data Plane task restoration unavailable: " + err.Error())
 	}
 }
 
 func (a *App) DisconnectServerDataPlane(profileID string) (clientdataplane.Status, error) {
+	a.logInfo("disconnect data plane: profile=" + profileID)
 	if a.dataPlanes == nil {
 		return clientdataplane.Status{}, errors.New("data plane is unavailable")
 	}
@@ -85,8 +96,9 @@ func (a *App) DisconnectServerDataPlane(profileID string) (clientdataplane.Statu
 		return clientdataplane.Status{}, errors.Join(releaseErr, err)
 	}
 	if releaseErr != nil {
-		a.appendLog("WARN", "Data Plane local listeners released with errors: "+releaseErr.Error())
+		a.logWarn("Data Plane local listeners released with errors: " + releaseErr.Error())
 	}
+	a.logInfo("data plane disconnected profile=" + profileID)
 	return clientdataplane.Status{State: remoteStateDisconnected, Mode: tunnelModeSOCKS}, nil
 }
 
@@ -114,6 +126,7 @@ func (a *App) releaseServerTasks(profileID string) error {
 }
 
 func (a *App) StartServerTunnel(profileID string) (clientdataplane.Status, error) {
+	a.logInfo("StartServerTunnel profile=" + profileID)
 	if a.dataPlanes == nil || a.remoteSessions == nil {
 		return clientdataplane.Status{}, errors.New("data plane is unavailable")
 	}
@@ -134,10 +147,17 @@ func (a *App) StartServerTunnel(profileID string) (clientdataplane.Status, error
 			)
 		}
 	}
-	return a.dataPlanes.StartTUN(a.context(), serverProfile.ID)
+	status, err := a.dataPlanes.StartTUN(a.context(), serverProfile.ID)
+	if err != nil {
+		a.logError("StartServerTunnel failed: " + err.Error())
+		return clientdataplane.Status{}, err
+	}
+	a.logInfo("StartServerTunnel ok mode=" + status.Mode)
+	return status, nil
 }
 
 func (a *App) StopServerTunnel(profileID string) (clientdataplane.Status, error) {
+	a.logInfo("stop TUN: profile=" + profileID)
 	if a.dataPlanes == nil {
 		return clientdataplane.Status{}, errors.New("data plane is unavailable")
 	}
@@ -145,5 +165,11 @@ func (a *App) StopServerTunnel(profileID string) (clientdataplane.Status, error)
 	if err != nil {
 		return clientdataplane.Status{}, err
 	}
-	return a.dataPlanes.StopTUN(serverProfile.ID)
+	status, err := a.dataPlanes.StopTUN(serverProfile.ID)
+	if err != nil {
+		a.logError("stop TUN failed: " + err.Error())
+		return clientdataplane.Status{}, err
+	}
+	a.logInfo("TUN stopped profile=" + profileID)
+	return status, nil
 }

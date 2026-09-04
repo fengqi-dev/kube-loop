@@ -14,6 +14,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/helper"
 	"github.com/fengqi-dev/kube-loop/internal/supervisor"
 	"github.com/fengqi-dev/kube-loop/internal/update"
+	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
 // NewApp is the desktop composition root. It deliberately constructs no
@@ -48,8 +49,10 @@ func newApp(version string, embeddedHelperFiles fs.FS, dependencies appDependenc
 				CurrentVersion: version,
 				URL:            releaseURL,
 			},
+			logSink: configureAppLog(utils.Layout{}, false),
 		}
-		application.appendLog("ERROR", "KubeLoop user layout unavailable: "+layoutErr.Error())
+		application.logger = newAppLogger(application.logSink, os.Stderr)
+		application.logError("KubeLoop user layout unavailable: " + layoutErr.Error())
 		return application
 	}
 	profilePath := strings.TrimSpace(dependencies.profilePath)
@@ -63,7 +66,8 @@ func newApp(version string, embeddedHelperFiles fs.FS, dependencies appDependenc
 		credentialStore = credentials.NewSystemStoreForClient(version, auth.DesktopClientID)
 	}
 	application := &App{
-		profiles: profileStore,
+		profiles:          profileStore,
+		startupTUNCleanup: cleanupPrivilegedTUNSessions,
 		discovery: clientdiscovery.New(clientdiscovery.Config{
 			ClientVersion: version,
 			HTTPClient:    dependencies.httpClient,
@@ -74,17 +78,21 @@ func newApp(version string, embeddedHelperFiles fs.FS, dependencies appDependenc
 			CurrentVersion: version,
 			URL:            releaseURL,
 		},
+		logSink:  configureAppLog(layout, true),
+		settings: newSettingsStore(layout),
 	}
+	application.logger = newAppLogger(application.logSink, os.Stderr)
+	application.loadPersistedLogLevel()
 	switch {
 	case profileErr != nil:
-		application.appendLog("ERROR", "Server Profile store unavailable: "+profileErr.Error())
+		application.logError("Server Profile store unavailable: " + profileErr.Error())
 	case profileStore.RecoveredFromBackup():
-		application.appendLog("WARN", "Server Profile store recovered from backup")
+		application.logWarn("Server Profile store recovered from backup")
 	default:
-		application.appendLog("INFO", "Server Profile store loaded")
+		application.logInfo("Server Profile store loaded")
 	}
 	if developmentTLSErr != nil {
-		application.appendLog("WARN", "Development Gateway CA unavailable: "+developmentTLSErr.Error())
+		application.logWarn("Development Gateway CA unavailable: " + developmentTLSErr.Error())
 	}
 	if !configureRemoteRuntime(application, layout, version, developmentTLSConfig, dependencies) {
 		return application

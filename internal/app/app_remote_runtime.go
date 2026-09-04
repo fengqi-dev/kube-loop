@@ -44,7 +44,7 @@ func configureRemoteRuntime(
 		application.credentials, application.auth, clientremote.Config{HTTPClient: dependencies.httpClient},
 	)
 	if remoteErr != nil {
-		application.appendLog("ERROR", "Remote Cluster Backend unavailable: "+remoteErr.Error())
+		application.logError("Remote Cluster Backend unavailable: " + remoteErr.Error())
 		return false
 	}
 	application.remote = remoteClient
@@ -58,7 +58,7 @@ func configureRemoteRuntime(
 		},
 	})
 	if fileErr != nil {
-		application.appendLog("ERROR", "file transfer manager unavailable: "+fileErr.Error())
+		application.logError("file transfer manager unavailable: " + fileErr.Error())
 	} else {
 		application.remoteFiles = remoteFiles
 	}
@@ -71,20 +71,20 @@ func configureRemoteRuntime(
 		},
 	})
 	if execErr != nil {
-		application.appendLog("ERROR", "Pod exec manager unavailable: "+execErr.Error())
+		application.logError("Pod exec manager unavailable: " + execErr.Error())
 	} else {
 		application.remoteExecs = remoteExecs
 	}
 
 	remoteSessions, sessionErr := clientremotesession.New(remoteClient, clientremotesession.Config{})
 	if sessionErr != nil {
-		application.appendLog("ERROR", "Remote Session Manager unavailable: "+sessionErr.Error())
+		application.logError("Remote Session Manager unavailable: " + sessionErr.Error())
 		return false
 	}
 	application.remoteSessions = remoteSessions
 	dataPlanes, dataPlaneErr := clientdataplane.NewManager(remoteSessions, clientdataplane.Config{
 		ClientVersion: version, TLSConfig: developmentTLSConfig,
-		TUNStarter: NewSingboxRuntime(application.appendLog),
+		TUNStarter: NewSingboxRuntime(application.logger, application.currentLogLevel()),
 		OnStatus: func(event clientdataplane.StatusEvent) {
 			if application.ctx != nil {
 				runtime.EventsEmit(application.ctx, "dataplane:status", event)
@@ -92,7 +92,7 @@ func configureRemoteRuntime(
 		},
 	})
 	if dataPlaneErr != nil {
-		application.appendLog("ERROR", "Data Plane Manager unavailable: "+dataPlaneErr.Error())
+		application.logError("Data Plane Manager unavailable: " + dataPlaneErr.Error())
 		return false
 	}
 	application.dataPlanes = dataPlanes

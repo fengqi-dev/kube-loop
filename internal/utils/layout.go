@@ -53,6 +53,7 @@ func (layout Layout) Root() string      { return layout.root }
 func (layout Layout) ConfigDir() string { return filepath.Join(layout.root, "config") }
 func (layout Layout) DataDir() string   { return filepath.Join(layout.root, "data") }
 func (layout Layout) StateDir() string  { return filepath.Join(layout.root, "state") }
+func (layout Layout) LogsDir() string   { return filepath.Join(layout.root, "logs") }
 func (layout Layout) SecretsDir() string {
 	return filepath.Join(layout.root, "secrets")
 }
@@ -60,7 +61,7 @@ func (layout Layout) CacheDir() string { return filepath.Join(layout.root, "cach
 
 func (layout Layout) Ensure() error {
 	for _, directory := range []string{
-		layout.Root(), layout.ConfigDir(), layout.DataDir(), layout.StateDir(), layout.SecretsDir(), layout.CacheDir(),
+		layout.Root(), layout.ConfigDir(), layout.DataDir(), layout.StateDir(), layout.SecretsDir(), layout.CacheDir(), layout.LogsDir(),
 	} {
 		if err := os.MkdirAll(directory, 0o700); err != nil {
 			return err

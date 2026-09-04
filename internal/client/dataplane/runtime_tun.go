@@ -49,6 +49,7 @@ func (runtime *Runtime) startTUNLocked(ctx context.Context) (Status, error) {
 	if namespace == "" {
 		namespace = runtime.session.Namespace
 	}
+	runtime.appendSOCKSLog("starting TUN")
 	core, err := runtime.tunStarter.Start(tunCtx, singbox.NetworkSpec{
 		PodCIDRs: append([]string(nil), spec.PodCIDRs...), PodIPs: append([]string(nil), spec.PodIPs...),
 		ServiceCIDRs: append([]string(nil), spec.ServiceCIDRs...),
@@ -57,6 +58,7 @@ func (runtime *Runtime) startTUNLocked(ctx context.Context) (Status, error) {
 	}, runtime.status.SOCKSAddress, namespace, append([]singbox.HostAlias{}, runtime.hostAliases...))
 	stopStartupCancel()
 	if err != nil {
+		runtime.appendSOCKSLog("TUN start failed: " + err.Error())
 		tunCancel()
 		return Status{}, fmt.Errorf("start TUN: %w", err)
 	}
@@ -65,6 +67,7 @@ func (runtime *Runtime) startTUNLocked(ctx context.Context) (Status, error) {
 		_ = core.Close()
 		return Status{}, fmt.Errorf("start TUN: %w", err)
 	}
+	runtime.appendSOCKSLog("TUN core ready")
 	runtime.tun = core
 	runtime.tunCancel = tunCancel
 	runtime.status.Mode = ModeTUN

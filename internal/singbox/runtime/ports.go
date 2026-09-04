@@ -81,6 +81,14 @@ func availableTCPUDPPort() (int, error) {
 }
 
 func availableTrafficPorts(excluded ...int) (singbox.TrafficInboundPorts, error) {
+	port, err := availablePortExcluding(excluded...)
+	if err != nil {
+		return singbox.TrafficInboundPorts{}, err
+	}
+	return singbox.TrafficInboundPorts{Listen: port}, nil
+}
+
+func availablePortExcluding(excluded ...int) (int, error) {
 	seen := make(map[int]struct{}, len(excluded))
 	for _, port := range excluded {
 		seen[port] = struct{}{}
@@ -88,12 +96,12 @@ func availableTrafficPorts(excluded ...int) (singbox.TrafficInboundPorts, error)
 	for {
 		port, err := availablePort()
 		if err != nil {
-			return singbox.TrafficInboundPorts{}, err
+			return 0, err
 		}
 		if _, exists := seen[port]; exists {
 			continue
 		}
-		return singbox.TrafficInboundPorts{Listen: port}, nil
+		return port, nil
 	}
 }
 

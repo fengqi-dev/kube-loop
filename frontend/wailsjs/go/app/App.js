@@ -22,6 +22,10 @@ export function ClearServerFileTransferHistory(arg1) {
   return window['go']['app']['App']['ClearServerFileTransferHistory'](arg1);
 }
 
+export function Close() {
+  return window['go']['app']['App']['Close']();
+}
+
 export function ConnectServerDataPlane(arg1, arg2) {
   return window['go']['app']['App']['ConnectServerDataPlane'](arg1, arg2);
 }
@@ -68,6 +72,10 @@ export function DeleteServerTrafficBinding(arg1, arg2) {
 
 export function DisconnectServerDataPlane(arg1) {
   return window['go']['app']['App']['DisconnectServerDataPlane'](arg1);
+}
+
+export function GetLogLevel() {
+  return window['go']['app']['App']['GetLogLevel']();
 }
 
 export function GetMCPStatus() {
@@ -240,6 +248,10 @@ export function ServerLocalHomeDirectory() {
 
 export function ServerProfiles() {
   return window['go']['app']['App']['ServerProfiles']();
+}
+
+export function SetLogLevel(arg1) {
+  return window['go']['app']['App']['SetLogLevel'](arg1);
 }
 
 export function SetMCPEnabled(arg1) {

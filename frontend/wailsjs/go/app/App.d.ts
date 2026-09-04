@@ -25,6 +25,8 @@ export function CheckForUpdates():Promise<update.Info>;
 
 export function ClearServerFileTransferHistory(arg1:string):Promise<void>;
 
+export function Close():Promise<void>;
+
 export function ConnectServerDataPlane(arg1:string,arg2:string):Promise<dataplane.Status>;
 
 export function CreateServerLocalFile(arg1:string,arg2:string,arg3:string):Promise<void>;
@@ -48,6 +50,8 @@ export function DeleteServerProfile(arg1:string):Promise<profile.State>;
 export function DeleteServerTrafficBinding(arg1:string,arg2:string):Promise<void>;
 
 export function DisconnectServerDataPlane(arg1:string):Promise<dataplane.Status>;
+
+export function GetLogLevel():Promise<string>;
 
 export function GetMCPStatus():Promise<mcp.Status>;
 
@@ -134,6 +138,8 @@ export function ServerDataPlaneLogs(arg1:string):Promise<Array<string>>;
 export function ServerLocalHomeDirectory():Promise<string>;
 
 export function ServerProfiles():Promise<profile.State>;
+
+export function SetLogLevel(arg1:string):Promise<string>;
 
 export function SetMCPEnabled(arg1:boolean):Promise<void>;
 

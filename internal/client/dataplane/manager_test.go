@@ -506,8 +506,17 @@ func (fixture *managerLifecycleFixture) startAndAssertTUN(t *testing.T, firstSta
 		t.Fatalf("TUN status = %#v, starter = %#v", tunStatus, fixture.tunStarter)
 	}
 	logs, err := fixture.manager.Logs(context.Background(), fixture.profile.ID)
-	if err != nil || len(logs) != 2 || !strings.Contains(logs[0], "[SOCKS] listening on ") || logs[1] != "[TUN] ready" {
+	if err != nil || len(logs) < 2 || !strings.Contains(logs[0], "[SOCKS] listening on ") {
 		t.Fatalf("logs = %#v, %v", logs, err)
+	}
+	foundTUNReady := false
+	for _, line := range logs {
+		if line == "[TUN] ready" {
+			foundTUNReady = true
+		}
+	}
+	if !foundTUNReady {
+		t.Fatalf("logs = %#v, want [TUN] ready", logs)
 	}
 	return core
 }

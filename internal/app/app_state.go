@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -52,10 +53,14 @@ type App struct {
 	inventoryWatchCancel    context.CancelFunc
 	backgroundCancel        context.CancelFunc
 	backgroundWG            sync.WaitGroup
+	startupTUNCleanup       func(context.Context) error
 	startupSessionSync      func(context.Context) error
 	shutdownTimeout         time.Duration
 	serverLoginMu           sync.Mutex
 	serverLogin             *serverLoginAttempt
+	logSink                 *appLog
+	logger                  *slog.Logger
+	settings                *settingsStore
 }
 
 type BootstrapData struct {

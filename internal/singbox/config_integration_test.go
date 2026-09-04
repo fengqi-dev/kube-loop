@@ -26,12 +26,17 @@ func TestGeneratedConfigAcceptedBySingBox(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	configPath := filepath.Join(t.TempDir(), "config.json")
+	checkSingBoxConfig(t, binary, "base", content)
+}
+
+func checkSingBoxConfig(t *testing.T, binary, name string, content []byte) {
+	t.Helper()
+	configPath := filepath.Join(t.TempDir(), "config-"+name+".json")
 	if err := os.WriteFile(configPath, content, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	command := exec.Command(binary, "check", "-c", configPath)
 	if output, err := command.CombinedOutput(); err != nil {
-		t.Fatalf("sing-box config check failed: %v\n%s", err, output)
+		t.Fatalf("sing-box config check (%s) failed: %v\n%s", name, err, output)
 	}
 }

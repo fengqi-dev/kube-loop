@@ -67,9 +67,9 @@ type helperInstallDecision struct {
 func decideHelperInstall(ctx context.Context, requireCurrentBinary bool) (helperInstallDecision, error) {
 	status := helper.GetStatus(ctx)
 	enforceBinaryMatch := mustMatchBundledHelper(requireCurrentBinary, helper.IsDevBuild())
-	if !enforceBinaryMatch && canReuseInstalledHelper(
-		status, helper.Version, helperprotocol.Version, false, false,
-	) {
+	helperHealthy := status.Running && status.CoreReady &&
+		status.Version == helper.Version && status.Protocol == helperprotocol.Version
+	if helperHealthy && !enforceBinaryMatch && !coreNeedsUpdate() {
 		return helperInstallDecision{}, nil
 	}
 	source, locateErr := LocateBundledHelper()
@@ -142,6 +142,23 @@ func prepareHelperInstall(source string) (helperInstallArtifacts, error) {
 
 func mustMatchBundledHelper(requireCurrentBinary, developmentBuild bool) bool {
 	return requireCurrentBinary || !developmentBuild
+}
+
+// coreNeedsUpdate reports whether the sing-box binary installed at CoreInstallPath
+// differs from the bundled copy (build/bin/sing-box). When the helper is healthy
+// and reused in dev builds, this check ensures a fresh sing-box build is picked up
+// without requiring a full helper reinstall.
+func coreNeedsUpdate() bool {
+	bundled, err := helper.LocateBundledSingBox()
+	if err != nil {
+		return true
+	}
+	installed := helper.CoreInstallPath()
+	needsUpdate, err := helperNeedsBinaryUpdate(bundled, installed)
+	if err != nil {
+		return true
+	}
+	return needsUpdate
 }
 
 func canReuseInstalledHelper(

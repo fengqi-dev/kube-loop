@@ -32,14 +32,14 @@ func TestResolveAuthorizedFiltersDNSAnswersAndServiceCIDR(t *testing.T) {
 		"api.development.svc.cluster.local": {
 			netip.MustParseAddr("8.8.8.8"), netip.MustParseAddr("10.96.1.20"),
 		},
-		"api.production.svc.cluster.local": {netip.MustParseAddr("10.96.2.30")},
+		"api.production.svc.cluster.local": {netip.MustParseAddr("192.168.1.1")},
 	}
 	spec := authorizedTargetSpec(t)
 	address, err := server.resolveAuthorized(context.Background(), "api.development.svc.cluster.local", 443, spec)
 	if err != nil || address != "10.96.1.20:443" {
 		t.Fatalf("address = %q, %v", address, err)
 	}
-	for _, target := range []string{"10.96.0.1", "169.254.169.254", "8.8.8.8"} {
+	for _, target := range []string{"192.168.1.1", "169.254.169.254", "8.8.8.8"} {
 		if _, err := server.resolveAuthorized(context.Background(), target, 443, spec); err == nil {
 			t.Fatalf("target %s allowed", target)
 		}
@@ -47,6 +47,6 @@ func TestResolveAuthorizedFiltersDNSAnswersAndServiceCIDR(t *testing.T) {
 	if _, err := server.resolveAuthorized(
 		context.Background(), "api.production.svc.cluster.local", 443, spec,
 	); err == nil {
-		t.Fatal("cross-namespace DNS target was allowed")
+		t.Fatal("cluster-domain DNS resolving outside the NetworkSpec was allowed")
 	}
 }

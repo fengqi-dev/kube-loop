@@ -20,12 +20,18 @@ func targetTestSpec(t *testing.T) networkspec.Spec {
 	return spec
 }
 
-func TestAuthorizeAddressUsesExactNamespacePodAndServiceIPs(t *testing.T) {
+func TestAuthorizeAddressAllowsAnyIPWithinClusterCIDRs(t *testing.T) {
 	spec := targetTestSpec(t)
 	allowed := []struct {
 		address string
 		port    uint16
-	}{{"10.2.4.5", 8080}, {"10.96.1.20", 443}, {"10.96.0.10", 53}}
+	}{
+		{"10.2.4.5", 8080},  // exact PodIP
+		{"10.2.99.1", 8080}, // cross-namespace PodIP in PodCIDR
+		{"10.96.1.20", 443}, // exact ServiceIP
+		{"10.96.0.1", 443},  // cross-namespace ClusterIP in ServiceCIDR
+		{"10.96.0.10", 53},  // DNS server in ServiceCIDR
+	}
 	for _, item := range allowed {
 		if err := AuthorizeAddress(spec, netip.MustParseAddr(item.address), item.port); err != nil {
 			t.Fatalf("%s:%d denied: %v", item.address, item.port, err)
@@ -34,7 +40,48 @@ func TestAuthorizeAddressUsesExactNamespacePodAndServiceIPs(t *testing.T) {
 	denied := []struct {
 		address string
 		port    uint16
-	}{{"10.2.4.6", 8080}, {"10.96.0.1", 443}, {"10.96.0.10", 9153}, {"169.254.169.254", 80}, {"8.8.8.8", 53}}
+	}{
+		{"10.96.0.10", 9153},    // DNS server on non-53 port
+		{"169.254.169.254", 80}, // cloud metadata
+		{"8.8.8.8", 53},         // public IP
+		{"192.168.1.1", 8080},   // outside cluster CIDRs
+	}
+	for _, item := range denied {
+		if err := AuthorizeAddress(spec, netip.MustParseAddr(item.address), item.port); err == nil {
+			t.Fatalf("%s:%d allowed", item.address, item.port)
+		}
+	}
+}
+
+func TestAuthorizeAddressFallsBackToExactIPsWhenCIDRsEmpty(t *testing.T) {
+	spec, err := networkspec.Normalize(networkspec.Spec{
+		PodIPs:     []string{"10.2.4.5"},
+		ServiceIPs: []string{"10.96.1.20"},
+		DNSServer:  "10.96.0.10",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	allowed := []struct {
+		address string
+		port    uint16
+	}{
+		{"10.2.4.5", 8080},
+		{"10.96.1.20", 443},
+		{"10.96.0.10", 53},
+	}
+	for _, item := range allowed {
+		if err := AuthorizeAddress(spec, netip.MustParseAddr(item.address), item.port); err != nil {
+			t.Fatalf("%s:%d denied: %v", item.address, item.port, err)
+		}
+	}
+	denied := []struct {
+		address string
+		port    uint16
+	}{
+		{"10.2.4.6", 8080},
+		{"10.96.0.1", 443},
+	}
 	for _, item := range denied {
 		if err := AuthorizeAddress(spec, netip.MustParseAddr(item.address), item.port); err == nil {
 			t.Fatalf("%s:%d allowed", item.address, item.port)

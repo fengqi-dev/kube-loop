@@ -144,18 +144,18 @@ func (a *App) HelperStatus() helper.Status {
 }
 
 func (a *App) InstallHelper() error {
-	a.appendLog("INFO", "installing privileged helper")
+	a.logInfo("installing privileged helper")
 	if err := helperinstall.EnsureCurrentInstall(a.context()); err != nil {
-		a.appendLog("ERROR", fmt.Sprintf("install privileged helper: %v", err))
+		a.logError(fmt.Sprintf("install privileged helper: %v", err))
 		return err
 	}
 	return nil
 }
 
 func (a *App) UninstallHelper() error {
-	a.appendLog("INFO", "uninstalling privileged helper")
+	a.logInfo("uninstalling privileged helper")
 	if err := helperinstall.Uninstall(a.context()); err != nil {
-		a.appendLog("ERROR", fmt.Sprintf("uninstall privileged helper: %v", err))
+		a.logError(fmt.Sprintf("uninstall privileged helper: %v", err))
 		return err
 	}
 	return nil

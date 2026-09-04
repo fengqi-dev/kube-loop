@@ -3,7 +3,7 @@ package helperprotocol
 import "github.com/fengqi-dev/kube-loop/internal/singbox"
 
 const (
-	Version = 6
+	Version = 8
 
 	OpPing      = "ping"
 	OpStart     = "start"

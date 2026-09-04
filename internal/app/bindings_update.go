@@ -12,7 +12,7 @@ import (
 )
 
 func (a *App) CheckForUpdates() update.Info {
-	a.appendLog("INFO", "checking for application updates")
+	a.logInfo("checking for application updates")
 	checkContext, cancel := context.WithTimeout(a.context(), 20*time.Second)
 	defer cancel()
 	state := a.checkForUpdates(checkContext)
@@ -31,10 +31,10 @@ func (a *App) OpenUpdatePage() error {
 	}
 	if a.ctx == nil {
 		err := errors.New("application is not ready")
-		a.appendLog("ERROR", "open update page: "+err.Error())
+		a.logError("open update page: " + err.Error())
 		return err
 	}
-	a.appendLog("INFO", "opening application update page")
+	a.logInfo("opening application update page")
 	runtime.BrowserOpenURL(a.ctx, target)
 	return nil
 }
@@ -46,14 +46,14 @@ func (a *App) checkForUpdates(ctx context.Context) update.Info {
 	switch {
 	case err != nil:
 		state.Error = err.Error()
-		a.appendLog("WARN", fmt.Sprintf("application update check failed: %v", err))
+		a.logWarn(fmt.Sprintf("application update check failed: %v", err))
 	case state.Available:
-		a.appendLog("INFO", fmt.Sprintf(
+		a.logInfo(fmt.Sprintf(
 			"application update available: current=%s latest=%s",
 			state.CurrentVersion, state.LatestVersion,
 		))
 	default:
-		a.appendLog("INFO", "application is up to date")
+		a.logInfo("application is up to date")
 	}
 	a.updateMu.Lock()
 	a.updateState = state

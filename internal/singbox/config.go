@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net"
 	"strconv"
+	"strings"
 )
 
 const (
@@ -77,6 +78,7 @@ type Options struct {
 	Hosts            []HostAlias
 	TrafficPorts     TrafficInboundPorts
 	TrafficPassword  string
+	LogLevel         string
 }
 
 func Generate(network NetworkSpec, options Options) ([]byte, error) {
@@ -99,7 +101,7 @@ func Generate(network NetworkSpec, options Options) ([]byte, error) {
 	routeRules := buildRouteRules(routes, dnsConfig.clusterDomains)
 
 	config := map[string]any{
-		"log": map[string]any{"level": "info", "output": "sing-box.log"},
+		"log": map[string]any{"level": normalizeLogLevel(options.LogLevel), "output": "sing-box.log"},
 		"dns": map[string]any{
 			"servers":  dnsConfig.servers,
 			"rules":    dnsConfig.rules,
@@ -136,4 +138,22 @@ func Generate(network NetworkSpec, options Options) ([]byte, error) {
 	}
 
 	return json.MarshalIndent(config, "", "  ")
+}
+
+// normalizeLogLevel maps a session log level onto a sing-box "level" value.
+// The empty value (and any unknown value) resolves to the default "info".
+func normalizeLogLevel(raw string) string {
+	level, ok := validLogLevels[strings.ToLower(strings.TrimSpace(raw))]
+	if !ok {
+		return "info"
+	}
+	return level
+}
+
+// validLogLevels is the set of sing-box log levels accepted for a session.
+var validLogLevels = map[string]string{
+	"debug": "debug",
+	"info":  "info",
+	"warn":  "warn",
+	"error": "error",
 }
