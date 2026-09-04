@@ -7,6 +7,8 @@ import (
 	"io"
 	"net"
 	"strconv"
+
+	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
 func writeRequest(writer io.Writer, command byte, address string) error {
@@ -26,21 +28,7 @@ func writeRequest(writer io.Writer, command byte, address string) error {
 		return err
 	}
 	request := append([]byte{socksVersion, command, 0}, encoded...)
-	return writeAll(writer, request)
-}
-
-func writeAll(writer io.Writer, value []byte) error {
-	for len(value) > 0 {
-		written, err := writer.Write(value)
-		if err != nil {
-			return err
-		}
-		if written == 0 {
-			return io.ErrShortWrite
-		}
-		value = value[written:]
-	}
-	return nil
+	return utils.WriteAll(writer, request)
 }
 
 func readReply(reader io.Reader) (string, error) {

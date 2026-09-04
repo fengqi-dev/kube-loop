@@ -5,11 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+
+	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
 func WriteStatus(w io.Writer, err error) error {
 	if err == nil {
-		return writeAll(w, []byte{StatusOK})
+		return utils.WriteAll(w, []byte{StatusOK})
 	}
 	message := err.Error()
 	if len(message) > maxErrorSize {
@@ -19,7 +21,7 @@ func WriteStatus(w io.Writer, err error) error {
 	messageLength := uint16(len(message)) //nolint:gosec // Message is truncated to a uint16-sized limit.
 	value := binary.BigEndian.AppendUint16([]byte{StatusError}, messageLength)
 	value = append(value, message...)
-	return writeAll(w, value)
+	return utils.WriteAll(w, value)
 }
 
 func ReadStatus(r io.Reader) error {

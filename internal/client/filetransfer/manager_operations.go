@@ -6,9 +6,10 @@ import (
 	"os"
 	"strings"
 
+	"github.com/google/uuid"
+
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
-	"github.com/google/uuid"
 )
 
 func (manager *Manager) Start(

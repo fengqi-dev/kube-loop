@@ -13,6 +13,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/filestream"
+	"github.com/fengqi-dev/kube-loop/internal/transport/websocketio"
 )
 
 type streamResponse struct {
@@ -84,13 +85,13 @@ func Upload(
 			return task, filestream.TransferResult{}, fmt.Errorf("read local upload content: %w", err)
 		}
 		encoded, _ := filestream.Encode(filestream.Frame{Type: filestream.Data, Payload: buffer[:length]})
-		if err := writeWebSocket(ctx, connection, websocket.BinaryMessage, encoded); err != nil {
+		if err := websocketio.Write(ctx, connection, websocket.BinaryMessage, encoded); err != nil {
 			return uploadWriteResult(task, responses, err)
 		}
 		remaining -= length
 	}
 	complete, _ := filestream.Encode(filestream.Frame{Type: filestream.Complete})
-	if err := writeWebSocket(ctx, connection, websocket.BinaryMessage, complete); err != nil {
+	if err := websocketio.Write(ctx, connection, websocket.BinaryMessage, complete); err != nil {
 		return uploadWriteResult(task, responses, err)
 	}
 	response := <-responses
@@ -107,7 +108,7 @@ func Upload(
 
 func readUploadResponses(ctx context.Context, connection *websocket.Conn, onProgress ProgressFunc) streamResponse {
 	for {
-		messageType, encoded, err := readWebSocket(ctx, connection)
+		messageType, encoded, err := websocketio.Read(ctx, connection)
 		if err != nil {
 			return streamResponse{err: fmt.Errorf("read Gateway file upload stream: %w", err)}
 		}

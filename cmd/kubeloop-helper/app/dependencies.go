@@ -4,7 +4,8 @@ import (
 	"context"
 
 	"github.com/fengqi-dev/kube-loop/internal/helper"
-	helperinstall "github.com/fengqi-dev/kube-loop/internal/helper/install"
+	"github.com/fengqi-dev/kube-loop/internal/helperd"
+	"github.com/fengqi-dev/kube-loop/internal/helperinstall"
 )
 
 func productionDependencies() commandDependencies {
@@ -26,7 +27,7 @@ func productionDependencies() commandDependencies {
 			if err != nil {
 				return err
 			}
-			return helper.RunService(ctx, helper.NewServer(auth))
+			return helperd.RunService(ctx, helperd.NewServer(auth))
 		},
 		elevated: func(options elevatedOptions) error {
 			return helperinstall.RunElevatedRequest(options.operation, options.request, options.result)

@@ -190,7 +190,7 @@ linters:
       # for application HTTP, RPC, and ordinary subprocess code.
       - linters:
           - noctx
-        path: ^(e2e/operator/utils/|internal/helper/(install|platform)/|internal/helper/(listen|session_start)\.go$|internal/mcp/server\.go$|internal/singbox/runtime/ports\.go$|internal/supervisor/(install|updater)_darwin\.go$|internal/terminal/open_darwin\.go$)
+        path: ^(e2e/operator/utils/|internal/helperinstall/|internal/helperd/platform/|internal/helperd/(listen|session_start)\.go$|internal/mcp/server\.go$|internal/singbox/runtime/ports\.go$|internal/utils/freeport\.go$|internal/supervisor/(install|updater)_darwin\.go$|internal/terminal/open_darwin\.go$)
       - linters:
           - staticcheck
         # TrafficBinding snapshots intentionally preserve the legacy Endpoints

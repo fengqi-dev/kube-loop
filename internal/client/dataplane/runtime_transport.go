@@ -14,6 +14,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
 	"github.com/fengqi-dev/kube-loop/internal/transport/trafficstream"
+	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
 func Start(
@@ -48,7 +49,7 @@ func startWithLifetime(
 		return nil, err
 	}
 	bridge, err := config.listenSOCKS(runtimeCtx, transport.forwarder.Address(), config.ListenAddress, transport.token)
-	if err != nil && useDefaultListenAddress && isAddressAlreadyInUse(err) {
+	if err != nil && useDefaultListenAddress && utils.IsAddressAlreadyInUse(err) {
 		host, _, splitErr := net.SplitHostPort(config.ListenAddress)
 		if splitErr == nil {
 			bridge, err = config.listenSOCKS(

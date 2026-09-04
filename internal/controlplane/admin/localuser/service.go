@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
+	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
 const (
@@ -100,7 +101,7 @@ func (service *Service) CreateWithRepositories(
 	if repositories == nil {
 		return User{}, ErrInvalidInput
 	}
-	request.Username = normalizeUsername(request.Username)
+	request.Username = utils.NormalizeUsername(request.Username)
 	request.DisplayName = strings.TrimSpace(request.DisplayName)
 	request.Email = strings.TrimSpace(request.Email)
 	if !validUsername(request.Username) ||

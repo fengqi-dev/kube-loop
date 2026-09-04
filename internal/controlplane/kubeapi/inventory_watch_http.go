@@ -10,6 +10,7 @@ import (
 
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/authorization"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
+	"github.com/fengqi-dev/kube-loop/internal/transport/websocketio"
 )
 
 func (handler *Service) watchInventory(
@@ -55,7 +56,7 @@ func (handler *Service) watchInventory(
 		}
 	}
 	defer unsubscribe()
-	connection, err := upgradeWebSocket(writer, request)
+	connection, err := websocketio.Upgrade(writer, request)
 	if err != nil {
 		return nil
 	}
@@ -63,7 +64,7 @@ func (handler *Service) watchInventory(
 	for {
 		select {
 		case <-watchContext.Done():
-			_ = closeWebSocket(
+			_ = websocketio.Close(
 				connection, websocket.CloseNormalClosure,
 				"Inventory Watch closed",
 			)
@@ -71,13 +72,18 @@ func (handler *Service) watchInventory(
 		case snapshot := <-updates:
 			encoded, encodeErr := json.Marshal(snapshot)
 			if encodeErr != nil {
-				_ = closeWebSocket(
+				_ = websocketio.Close(
 					connection, websocket.CloseInternalServerErr,
 					"Inventory Watch encoding failed",
 				)
 				return nil
 			}
-			if writeErr := writeWebSocket(watchContext, connection, websocket.TextMessage, encoded); writeErr != nil {
+			if writeErr := websocketio.Write(
+				watchContext,
+				connection,
+				websocket.TextMessage,
+				encoded,
+			); writeErr != nil {
 				return nil
 			}
 		}

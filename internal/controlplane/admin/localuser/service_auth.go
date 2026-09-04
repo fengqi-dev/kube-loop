@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
+	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
 func (service *Service) Authenticate(
@@ -33,7 +34,7 @@ func (service *Service) Authenticate(
 				RequestID: requestID, Metadata: metadata, CreatedAt: service.now().UTC()})
 	}()
 	stored, err := service.store.Credentials().
-		GetPasswordByUsername(ctx, normalizeUsername(username))
+		GetPasswordByUsername(ctx, utils.NormalizeUsername(username))
 	hash := service.dummyHash
 	if err == nil {
 		hash, identityID = stored.PasswordHash, stored.IdentityID

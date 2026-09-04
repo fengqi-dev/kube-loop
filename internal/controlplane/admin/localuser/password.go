@@ -58,12 +58,6 @@ func verifyPassword(password []byte, encoded string) bool {
 	return subtle.ConstantTimeCompare(actual, expected) == 1
 }
 
-func normalizeUsername(
-	value string,
-) string {
-	return strings.ToLower(strings.TrimSpace(value))
-}
-
 func validUsername(value string) bool {
 	if value == "" || len(value) > 128 ||
 		strings.ContainsAny(value, "\x00\r\n\t ") {

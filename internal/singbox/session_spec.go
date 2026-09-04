@@ -22,35 +22,8 @@ func Validate(s sessionspec.Spec) error {
 	if err := ValidateSessionID(s.ID); err != nil {
 		return err
 	}
-	if err := validateLoopback(s.BridgeHost, "bridge"); err != nil {
+	if err := validateEndpoints(s); err != nil {
 		return err
-	}
-	if err := validateLoopback(s.DNSHost, "DNS"); err != nil {
-		return err
-	}
-	if err := validatePort(s.BridgePort, "bridge"); err != nil {
-		return err
-	}
-	if err := validatePort(s.ControllerPort, "controller"); err != nil {
-		return err
-	}
-	if err := validatePort(s.DNSPort, "DNS"); err != nil {
-		return err
-	}
-	if err := validatePort(s.PublicDNSPort, "public DNS"); err != nil {
-		return err
-	}
-	if len(s.ControllerSecret) < 32 || len(s.ControllerSecret) > 256 {
-		return errors.New("controller secret must be between 32 and 256 characters")
-	}
-	if len(s.TrafficPassword) < 32 || len(s.TrafficPassword) > 255 {
-		return errors.New("traffic password must be between 32 and 255 characters")
-	}
-	if err := validatePort(s.TrafficPorts.Listen, TrafficInbound); err != nil {
-		return err
-	}
-	if slices.Contains([]int{s.BridgePort, s.ControllerPort, s.DNSPort, s.PublicDNSPort}, s.TrafficPorts.Listen) {
-		return errors.New("traffic inbound port must not overlap internal ports")
 	}
 	if len(s.PodCIDRs)+len(s.ServiceCIDRs)+len(s.ServiceIPs)+len(s.Namespaces)+len(s.Hosts) > maxSessionItems {
 		return errors.New("session contains too many routes or host aliases")
@@ -93,6 +66,43 @@ func Validate(s sessionspec.Spec) error {
 	}
 	_, err = clusterRoutes(discovery(s))
 	return err
+}
+
+// validateEndpoints checks the loopback hosts, the internal ports and the
+// credentials a session binds. It is split out of Validate to keep either
+// function readable on its own.
+func validateEndpoints(s sessionspec.Spec) error {
+	if err := validateLoopback(s.BridgeHost, "bridge"); err != nil {
+		return err
+	}
+	if err := validateLoopback(s.DNSHost, "DNS"); err != nil {
+		return err
+	}
+	if err := validatePort(s.BridgePort, "bridge"); err != nil {
+		return err
+	}
+	if err := validatePort(s.ControllerPort, "controller"); err != nil {
+		return err
+	}
+	if err := validatePort(s.DNSPort, "DNS"); err != nil {
+		return err
+	}
+	if err := validatePort(s.PublicDNSPort, "public DNS"); err != nil {
+		return err
+	}
+	if len(s.ControllerSecret) < 32 || len(s.ControllerSecret) > 256 {
+		return errors.New("controller secret must be between 32 and 256 characters")
+	}
+	if len(s.TrafficPassword) < 32 || len(s.TrafficPassword) > 255 {
+		return errors.New("traffic password must be between 32 and 255 characters")
+	}
+	if err := validatePort(s.TrafficPorts.Listen, TrafficInbound); err != nil {
+		return err
+	}
+	if slices.Contains([]int{s.BridgePort, s.ControllerPort, s.DNSPort, s.PublicDNSPort}, s.TrafficPorts.Listen) {
+		return errors.New("traffic inbound port must not overlap internal ports")
+	}
+	return nil
 }
 
 func ValidateSessionID(id string) error {

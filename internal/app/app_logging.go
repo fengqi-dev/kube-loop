@@ -15,7 +15,13 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
-const appLogFileName = "app.log"
+const (
+	appLogFileName = "app.log"
+
+	// defaultLogLevelName is the canonical label for the level the app falls
+	// back to whenever none is configured.
+	defaultLogLevelName = "info"
+)
 
 // appLog is the file-backed half of the application log. slog records are
 // routed to it by the shared logger's handler alongside the terminal stream.
@@ -130,7 +136,6 @@ func (a *App) log(level slog.Level, message string) {
 	a.logger.Log(context.Background(), level, message)
 }
 
-func (a *App) logDebug(message string) { a.log(slog.LevelDebug, message) }
 func (a *App) logInfo(message string)  { a.log(slog.LevelInfo, message) }
 func (a *App) logWarn(message string)  { a.log(slog.LevelWarn, message) }
 func (a *App) logError(message string) { a.log(slog.LevelError, message) }
@@ -154,7 +159,7 @@ func slogLevelString(level slog.Level) string {
 	case level >= slog.LevelWarn:
 		return "warn"
 	case level >= slog.LevelInfo:
-		return "info"
+		return defaultLogLevelName
 	default:
 		return "debug"
 	}

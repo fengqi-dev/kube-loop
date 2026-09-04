@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"strings"
 	"time"
 
 	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
@@ -161,13 +160,4 @@ func contextConnectionError(ctx context.Context, err error) error {
 		return ctxErr
 	}
 	return err
-}
-
-func isAddressAlreadyInUse(err error) bool {
-	if err == nil {
-		return false
-	}
-	message := strings.ToLower(err.Error())
-	return strings.Contains(message, "address already in use") ||
-		strings.Contains(message, "only one usage of each socket address")
 }

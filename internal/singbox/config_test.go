@@ -194,7 +194,11 @@ func TestResolverDomains(t *testing.T) {
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("ResolverDomains = %v, want %v", got, want)
 	}
-	withHosts := ResolverDomains("demo", []string{"cluster.local"}, []sessionspec.HostAlias{{Domain: "app.dev", IP: "10.96.0.50"}})
+	withHosts := ResolverDomains(
+		"demo",
+		[]string{"cluster.local"},
+		[]sessionspec.HostAlias{{Domain: "app.dev", IP: "10.96.0.50"}},
+	)
 	if !strings.Contains(strings.Join(withHosts, ","), "app.dev") {
 		t.Fatalf("ResolverDomains missing host alias: %v", withHosts)
 	}

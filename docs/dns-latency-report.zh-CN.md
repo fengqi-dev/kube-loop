@@ -54,9 +54,9 @@ macOS helper 写入搜索域时，会把新搜索域与网络服务当前值合�
 |---|---|
 | `internal/singbox/runtime/dns_search_proxy.go` | `.svc` 名称只生成规范集群 FQDN；NODATA 立即返回 |
 | `internal/singbox/session_spec.go` | 搜索域收敛到当前 namespace；设置 `ndots:1` |
-| `internal/helper/platform/search_domains.go` | 提供 macOS/Windows 共用的集群根域识别和安全 PowerShell 脚本生成 |
-| `internal/helper/platform/lifecycle_darwin.go` | 过滤旧 Kubernetes 搜索域，保留非 Kubernetes 搜索域和原始恢复备份 |
-| `internal/helper/platform/lifecycle_windows.go` | 写入全局搜索域前过滤同一集群的旧 Kubernetes 后缀，保留其他搜索域和断开恢复备份 |
+| `internal/helperd/platform/search_domains.go` | 提供 macOS/Windows 共用的集群根域识别和安全 PowerShell 脚本生成 |
+| `internal/helperd/platform/lifecycle_darwin.go` | 过滤旧 Kubernetes 搜索域，保留非 Kubernetes 搜索域和原始恢复备份 |
+| `internal/helperd/platform/lifecycle_windows.go` | 写入全局搜索域前过滤同一集群的旧 Kubernetes 后缀，保留其他搜索域和断开恢复备份 |
 | 对应测试文件 | 增加 NODATA、候选生成、SessionSpec 和 macOS 搜索域合并回归测试 |
 
 ## 5. 测试环境
@@ -190,10 +190,10 @@ cluster.local
 
 ```text
 gopls check
-go test ./internal/singbox/... ./internal/helper/platform ./internal/helper -count=1
-go test -race ./internal/singbox/... ./internal/helper/platform ./internal/helper -count=1
-GOOS=windows GOARCH=amd64 go test -exec=/usr/bin/true ./internal/helper/platform
-GOOS=windows GOARCH=arm64 go test -exec=/usr/bin/true ./internal/helper/platform
+go test ./internal/singbox/... ./internal/helperd/platform ./internal/helper -count=1
+go test -race ./internal/singbox/... ./internal/helperd/platform ./internal/helper -count=1
+GOOS=windows GOARCH=amd64 go test -exec=/usr/bin/true ./internal/helperd/platform
+GOOS=windows GOARCH=arm64 go test -exec=/usr/bin/true ./internal/helperd/platform
 git diff --check
 ```
 

@@ -9,6 +9,7 @@ import (
 	"github.com/gorilla/websocket"
 
 	"github.com/fengqi-dev/kube-loop/internal/protocol/filestream"
+	"github.com/fengqi-dev/kube-loop/internal/transport/websocketio"
 )
 
 func readUpload(
@@ -21,7 +22,7 @@ func readUpload(
 	defer func() { _ = pipe.Close() }()
 	transferred := spec.Offset
 	for {
-		messageType, encoded, err := readWebSocket(ctx, connection)
+		messageType, encoded, err := websocketio.Read(ctx, connection)
 		if err != nil {
 			_ = pipe.CloseWithError(err)
 			return err

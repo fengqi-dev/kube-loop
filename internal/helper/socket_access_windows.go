@@ -8,7 +8,7 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-func configureHelperSocketAccess(path, ownerSID string) error {
+func ConfigureSocketAccess(path, ownerSID string) error {
 	if ownerSID == "" {
 		return fmt.Errorf("windows helper owner SID is required")
 	}

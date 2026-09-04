@@ -11,6 +11,7 @@ import (
 
 	"github.com/fengqi-dev/kube-loop/internal/helper"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/supervisor"
+	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
 type WorkerController interface {
@@ -28,7 +29,7 @@ func (w launchdWorker) Status(ctx context.Context) (supervisor.WorkerStatus, err
 	if _, err := exec.LookPath("launchctl"); err != nil {
 		return status, err
 	}
-	if digest, err := fileSHA256(w.config.WorkerBinaryPath); err == nil {
+	if digest, err := utils.FileSHA256(w.config.WorkerBinaryPath); err == nil {
 		status.Installed = true
 		status.SHA256 = digest
 	}

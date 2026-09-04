@@ -13,6 +13,7 @@ import (
 	"github.com/gorilla/websocket"
 
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
+	"github.com/fengqi-dev/kube-loop/internal/transport/websocketio"
 )
 
 type InventoryResource string
@@ -42,11 +43,11 @@ type inventoryConnection interface {
 type gorillaInventoryConnection struct{ connection *websocket.Conn }
 
 func (connection gorillaInventoryConnection) Read(ctx context.Context) (int, []byte, error) {
-	return readWebSocket(ctx, connection.connection)
+	return websocketio.Read(ctx, connection.connection)
 }
 
 func (connection gorillaInventoryConnection) Close(code int, reason string) error {
-	return closeWebSocket(connection.connection, code, reason)
+	return websocketio.Close(connection.connection, code, reason)
 }
 
 type InventoryWatch struct {

@@ -17,6 +17,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/streamlease"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/execstream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/remotetask"
+	"github.com/fengqi-dev/kube-loop/internal/transport/websocketio"
 )
 
 func (handler *Service) stream(
@@ -54,7 +55,7 @@ func (handler *Service) stream(
 	); err != nil {
 		return storageError(err)
 	}
-	connection, err := upgradeWebSocket(writer, request)
+	connection, err := websocketio.Upgrade(writer, request)
 	if err != nil {
 		_ = handler.storage.Tasks().UpdateState(
 			request.Context(),
@@ -101,7 +102,7 @@ func (handler *Service) stream(
 			handler.now().UTC(),
 		)
 		persistCancel()
-		_ = closeWebSocket(connection, websocket.ClosePolicyViolation, "authorization lease expired")
+		_ = websocketio.Close(connection, websocket.ClosePolicyViolation, "authorization lease expired")
 		return nil
 	}
 	defer cancel()
@@ -113,7 +114,7 @@ func (handler *Service) stream(
 		json.RawMessage(`{}`),
 		handler.now().UTC(),
 	); err != nil {
-		_ = closeWebSocket(connection, websocket.CloseInternalServerErr, "exec state persistence failed")
+		_ = websocketio.Close(connection, websocket.CloseInternalServerErr, "exec state persistence failed")
 		return nil
 	}
 	stdinReader, stdinWriter := io.Pipe()
@@ -159,16 +160,16 @@ func (handler *Service) stream(
 	persistCancel()
 	if persistErr != nil {
 		cancel()
-		_ = closeWebSocket(connection, websocket.CloseInternalServerErr, "exec state persistence failed")
+		_ = websocketio.Close(connection, websocket.CloseInternalServerErr, "exec state persistence failed")
 		return nil
 	}
 	encoded, _ := execstream.EncodeExit(exitStatus)
 	writeContext, writeCancel := context.WithTimeout(request.Context(), 5*time.Second)
 	writeMu.Lock()
-	_ = writeWebSocket(writeContext, connection, websocket.BinaryMessage, encoded)
+	_ = websocketio.Write(writeContext, connection, websocket.BinaryMessage, encoded)
 	writeMu.Unlock()
 	writeCancel()
 	cancel()
-	_ = closeWebSocket(connection, websocket.CloseNormalClosure, "exec complete")
+	_ = websocketio.Close(connection, websocket.CloseNormalClosure, "exec complete")
 	return nil
 }

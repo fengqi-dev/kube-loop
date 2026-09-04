@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net"
+
+	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
 func (d Dialer) openControl(ctx context.Context) (net.Conn, *bufio.Reader, error) {
@@ -23,7 +25,7 @@ func (d Dialer) openControl(ctx context.Context) (net.Conn, *bufio.Reader, error
 	if d.Endpoint.Username != "" || d.Endpoint.Password != "" {
 		methods = []byte{socksMethodPassword}
 	}
-	if err := writeAll(conn, append([]byte{socksVersion, 1}, methods...)); err != nil {
+	if err := utils.WriteAll(conn, append([]byte{socksVersion, 1}, methods...)); err != nil {
 		_ = conn.Close()
 		return nil, nil, err
 	}
@@ -65,7 +67,7 @@ func authenticate(conn net.Conn, reader *bufio.Reader, username, password string
 	//nolint:gosec // The length validation above bounds both values to one-byte SOCKS fields.
 	request = append(request, byte(len(password)))
 	request = append(request, password...)
-	if err := writeAll(conn, request); err != nil {
+	if err := utils.WriteAll(conn, request); err != nil {
 		return err
 	}
 	response := make([]byte, 2)

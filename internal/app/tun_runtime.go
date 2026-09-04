@@ -6,10 +6,11 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/fengqi-dev/kube-loop/internal/helper"
-	helperinstall "github.com/fengqi-dev/kube-loop/internal/helper/install"
+	"github.com/fengqi-dev/kube-loop/internal/helperinstall"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/sessionspec"
 	singboxruntime "github.com/fengqi-dev/kube-loop/internal/singbox/runtime"
 )
@@ -67,7 +68,15 @@ func NewSingboxRuntime(logger *slog.Logger, logLevel string) *singboxruntime.Run
 			return nil, err
 		}
 		status, statusErr := client.Status(ctx)
-		info("helper status: ok=" + fmt.Sprint(status.OK) + " coreReady=" + fmt.Sprint(status.CoreReady) + " err=" + fmt.Sprint(statusErr))
+		info(
+			"helper status: ok=" + strconv.FormatBool(
+				status.OK,
+			) + " coreReady=" + strconv.FormatBool(
+				status.CoreReady,
+			) + " err=" + fmt.Sprint(
+				statusErr,
+			),
+		)
 		if _, err := client.Start(ctx, spec); err != nil {
 			if !helperSessionBusy(err) {
 				errLog("helper start session: " + err.Error())

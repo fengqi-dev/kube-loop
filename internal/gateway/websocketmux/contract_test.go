@@ -28,7 +28,7 @@ func TestContractNewClientAndOldGatewayClassifiesVersionMismatch(t *testing.T) {
 		}
 		defer func() { _ = connection.Close() }()
 		streamConnection := protocolmux.NewWebSocketConn(request.Context(), connection, websocket.BinaryMessage)
-		session, err := smux.Server(streamConnection, smuxConfig())
+		session, err := smux.Server(streamConnection, protocolmux.SmuxConfig())
 		if err != nil {
 			return
 		}

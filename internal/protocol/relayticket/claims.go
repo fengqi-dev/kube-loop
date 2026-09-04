@@ -2,9 +2,10 @@ package relayticket
 
 import (
 	"errors"
-	"slices"
 	"strings"
 	"time"
+
+	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
 func validateClaims(claims Claims) error {
@@ -46,7 +47,7 @@ func validateClaims(claims Claims) error {
 }
 
 func validText(value string, maximum int) bool {
-	return value != "" && len(value) <= maximum && strings.TrimSpace(value) == value && !containsControl(value)
+	return value != "" && len(value) <= maximum && strings.TrimSpace(value) == value && !utils.ContainsControl(value)
 }
 
 // ValidIdentifier reports whether value is a non-empty, trimmed identifier of at
@@ -65,15 +66,6 @@ func ValidIdentifier(value string, maximum int) bool {
 	return true
 }
 
-func containsControl(value string) bool {
-	for _, character := range value {
-		if character < 0x20 || character == 0x7f {
-			return true
-		}
-	}
-	return false
-}
-
 func validLowerHex(value string, length int) bool {
 	if len(value) != length {
 		return false
@@ -84,8 +76,4 @@ func validLowerHex(value string, length int) bool {
 		}
 	}
 	return true
-}
-
-func contains(values []string, target string) bool {
-	return slices.Contains(values, target)
 }

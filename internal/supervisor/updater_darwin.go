@@ -25,6 +25,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/fengqi-dev/kube-loop/internal/protocol/supervisor"
+	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
 var requestIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
@@ -65,7 +66,7 @@ func NewUpdater(config Config, worker WorkerController, artifactUID int) *Update
 func (u *Updater) Status(ctx context.Context) (supervisor.WorkerStatus, error) {
 	status, err := u.worker.Status(ctx)
 	if status.SHA256 == "" {
-		status.SHA256, _ = fileSHA256(u.config.WorkerBinaryPath)
+		status.SHA256, _ = utils.FileSHA256(u.config.WorkerBinaryPath)
 	}
 	return status, err
 }

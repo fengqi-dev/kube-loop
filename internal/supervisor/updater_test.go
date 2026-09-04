@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/fengqi-dev/kube-loop/internal/protocol/supervisor"
+	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
 type fakeWorker struct {
@@ -34,7 +35,7 @@ func (w *fakeWorker) Status(context.Context) (supervisor.WorkerStatus, error) {
 		w.status.CoreReady = true
 	}
 	status := w.status
-	if digest, err := fileSHA256(w.config.WorkerBinaryPath); err == nil {
+	if digest, err := utils.FileSHA256(w.config.WorkerBinaryPath); err == nil {
 		status.Installed = true
 		status.SHA256 = digest
 	}

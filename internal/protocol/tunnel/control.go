@@ -6,6 +6,7 @@ import (
 	"io"
 
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
+	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
 // WriteAuthorizedControlSession registers the immutable NetworkSpec snapshot
@@ -22,7 +23,7 @@ func WriteAuthorizedControlSession(w io.Writer, token SessionToken, spec network
 	// Canonical NetworkSpec JSON is bounded by networkspec.MaximumJSONSize.
 	value = binary.BigEndian.AppendUint32(value, uint32(len(contents))) //nolint:gosec // NetworkSpec JSON is bounded.
 	value = append(value, contents...)
-	return writeAll(w, value)
+	return utils.WriteAll(w, value)
 }
 
 func ReadAuthorizedControlSpec(r io.Reader) (networkspec.Spec, error) {

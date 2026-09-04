@@ -10,6 +10,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/entity"
 	"github.com/fengqi-dev/kube-loop/internal/gateway/relay/listener"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/mirrorstream"
+	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
 type udpPrimaryAssociation struct {
@@ -89,7 +90,7 @@ func (relay *mirrorRelay) udpAssociation(
 	}
 	id := relay.nextStreamID()
 	association := &udpPrimaryAssociation{
-		primary: primary, listener: binding.Connection, remote: cloneUDPAddress(remote),
+		primary: primary, listener: binding.Connection, remote: utils.CloneUDPAddress(remote),
 		port: binding.Port, key: key, lastSeen: now,
 	}
 	relay.udpKeys[key] = id
@@ -162,8 +163,4 @@ func (relay *mirrorRelay) claimExpiredUDP(
 		})
 	}
 	return expired
-}
-
-func cloneUDPAddress(address *net.UDPAddr) *net.UDPAddr {
-	return &net.UDPAddr{IP: append(net.IP(nil), address.IP...), Port: address.Port, Zone: address.Zone}
 }

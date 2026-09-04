@@ -1,7 +1,5 @@
 package tunnel
 
-import "io"
-
 const (
 	CommandTCP     byte = 1
 	CommandUDP     byte = 2
@@ -30,17 +28,3 @@ const (
 )
 
 var magic = [4]byte{'K', 'C', 'G', 2}
-
-func writeAll(w io.Writer, value []byte) error {
-	for len(value) > 0 {
-		written, err := w.Write(value)
-		if err != nil {
-			return err
-		}
-		if written == 0 {
-			return io.ErrShortWrite
-		}
-		value = value[written:]
-	}
-	return nil
-}

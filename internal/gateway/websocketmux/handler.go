@@ -13,6 +13,7 @@ import (
 
 	"github.com/fengqi-dev/kube-loop/internal/middleware"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/wss"
+	"github.com/fengqi-dev/kube-loop/internal/transport/websocketio"
 	shared "github.com/fengqi-dev/kube-loop/internal/transport/websocketmux"
 )
 
@@ -143,7 +144,7 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 			request.Header.Get("Sec-WebSocket-Protocol"),
 			connection.Subprotocol(),
 		)
-		_ = closeWebSocket(connection, websocket.ClosePolicyViolation, "subprotocol required")
+		_ = websocketio.Close(connection, websocket.ClosePolicyViolation, "subprotocol required")
 		return
 	}
 	connection.SetReadLimit(wss.MaximumHandshakeBytes)
@@ -231,7 +232,7 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 			"WebSocket handshake response failed: remote=%s error=%v",
 			request.RemoteAddr, err,
 		)
-		_ = closeWebSocket(connection, websocket.CloseInternalServerErr, "HANDSHAKE_FAILED")
+		_ = websocketio.Close(connection, websocket.CloseInternalServerErr, "HANDSHAKE_FAILED")
 		return
 	}
 	cancelHandshake()
@@ -245,7 +246,7 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	// handshake, not a lifetime limit for accepted logical streams. Established
 	// sessions remain governed by generation fencing, shutdown and explicit close.
 	streamConn := shared.NewWebSocketConn(request.Context(), connection, websocket.BinaryMessage)
-	session, err := smux.Server(streamConn, smuxConfig())
+	session, err := smux.Server(streamConn, shared.SmuxConfig())
 	if err != nil {
 		h.logf(
 			request.Context(), requestID,

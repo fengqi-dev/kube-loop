@@ -6,6 +6,7 @@ import (
 
 	"github.com/fengqi-dev/kube-loop/internal/protocol/mirrorstream"
 	"github.com/fengqi-dev/kube-loop/internal/transport/trafficstream"
+	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
 func newLocalRelay(
@@ -16,7 +17,7 @@ func newLocalRelay(
 ) *localRelay {
 	targetMap := make(map[string]LocalTarget, len(targets))
 	for _, target := range targets {
-		targetMap[targetKey(target.Protocol, target.ServicePort)] = target
+		targetMap[utils.TargetKey(target.Protocol, target.ServicePort)] = target
 	}
 	return &localRelay{
 		stream: connection, targets: targetMap, dial: dial, config: config,

@@ -111,7 +111,7 @@ func (s *Server) Reconcile(pods []PodRef) error {
 	activeIDs := make(map[string]struct{}, len(live))
 	for id, pod := range live {
 		container := pod.Containers[0]
-		if target, ok := current[id]; ok && contains(pod.Containers, target.Container) {
+		if target, ok := current[id]; ok && slices.Contains(pod.Containers, target.Container) {
 			container = target.Container
 		}
 		target := Target{

@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"sync"
+
+	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
 const manifestVersion = 1
@@ -155,7 +157,7 @@ func findLocked(directory, name string) (string, error) {
 	if info.Size() != entry.Size {
 		return "", fmt.Errorf("cached component %s size does not match manifest", name)
 	}
-	digest, err := fileSHA256(path)
+	digest, err := utils.FileSHA256(path)
 	if err != nil {
 		return "", err
 	}

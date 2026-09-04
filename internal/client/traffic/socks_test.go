@@ -8,6 +8,8 @@ import (
 	"net"
 	"testing"
 	"time"
+
+	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
 func TestSOCKSAddressRoundTrip(t *testing.T) {
@@ -86,7 +88,7 @@ func TestDialTCPWithPasswordAuthentication(t *testing.T) {
 			serverErr <- readErr
 			return
 		}
-		if err := writeAll(conn, []byte{socksVersion, socksMethodPassword}); err != nil {
+		if err := utils.WriteAll(conn, []byte{socksVersion, socksMethodPassword}); err != nil {
 			serverErr <- err
 			return
 		}
@@ -114,7 +116,7 @@ func TestDialTCPWithPasswordAuthentication(t *testing.T) {
 			serverErr <- io.ErrUnexpectedEOF
 			return
 		}
-		if err := writeAll(conn, []byte{1, 0}); err != nil {
+		if err := utils.WriteAll(conn, []byte{1, 0}); err != nil {
 			serverErr <- err
 			return
 		}
@@ -139,7 +141,7 @@ func TestDialTCPWithPasswordAuthentication(t *testing.T) {
 		bound, _ := encodeAddress("127.0.0.1", 12345)
 		response := append([]byte{socksVersion, 0, 0}, bound...)
 		response = append(response, []byte("ready")...)
-		if err := writeAll(conn, response); err != nil {
+		if err := utils.WriteAll(conn, response); err != nil {
 			serverErr <- err
 			return
 		}
@@ -148,7 +150,7 @@ func TestDialTCPWithPasswordAuthentication(t *testing.T) {
 			serverErr <- readErr
 			return
 		}
-		serverErr <- writeAll(conn, payload)
+		serverErr <- utils.WriteAll(conn, payload)
 	}()
 
 	dialer := Dialer{Endpoint: Endpoint{
@@ -202,7 +204,7 @@ func TestDialUDPHidesSOCKSDatagramFraming(t *testing.T) {
 			serverErr <- readErr
 			return
 		}
-		if err := writeAll(control, []byte{socksVersion, socksMethodNone}); err != nil {
+		if err := utils.WriteAll(control, []byte{socksVersion, socksMethodNone}); err != nil {
 			serverErr <- err
 			return
 		}
@@ -228,7 +230,7 @@ func TestDialUDPHidesSOCKSDatagramFraming(t *testing.T) {
 		}
 		defer checkTestClose(t, relay.Close)
 		bound, _ := encodeAddress("127.0.0.1", uint16(relay.LocalAddr().(*net.UDPAddr).Port))
-		if err := writeAll(control, append([]byte{socksVersion, 0, 0}, bound...)); err != nil {
+		if err := utils.WriteAll(control, append([]byte{socksVersion, 0, 0}, bound...)); err != nil {
 			serverErr <- err
 			return
 		}

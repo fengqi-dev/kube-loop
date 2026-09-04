@@ -3,7 +3,7 @@ package tui
 import (
 	tea "github.com/charmbracelet/bubbletea"
 
-	helperinstall "github.com/fengqi-dev/kube-loop/internal/helper/install"
+	"github.com/fengqi-dev/kube-loop/internal/helperinstall"
 )
 
 func (m *Model) beginServiceUninstall() tea.Cmd {

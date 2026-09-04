@@ -5,7 +5,7 @@ import (
 	"path"
 	"strings"
 
-	helperinstall "github.com/fengqi-dev/kube-loop/internal/helper/install"
+	"github.com/fengqi-dev/kube-loop/internal/helperinstall"
 )
 
 const embeddedDevelopmentCA = "development-ca.pem"

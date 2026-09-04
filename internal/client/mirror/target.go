@@ -2,11 +2,10 @@ package mirror
 
 import (
 	"errors"
-	"net"
-	"strconv"
 	"strings"
 
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
+	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
 type LocalTarget struct {
@@ -36,10 +35,10 @@ func normalizeTargets(input []LocalTarget) ([]LocalTarget, []remote.MirrorPort, 
 			target.LocalPort = uint16(target.ServicePort)
 		}
 		if target.ServicePort < 1 || target.ServicePort > 65535 || target.LocalPort == 0 ||
-			(target.Protocol != mirrorProtocolTCP && target.Protocol != mirrorProtocolUDP) || !validLocalHost(target.LocalHost) {
+			(target.Protocol != mirrorProtocolTCP && target.Protocol != mirrorProtocolUDP) || !utils.ValidLocalHost(target.LocalHost) {
 			return nil, nil, errors.New("mirror local target is invalid")
 		}
-		key := targetKey(target.Protocol, target.ServicePort)
+		key := utils.TargetKey(target.Protocol, target.ServicePort)
 		if _, exists := seen[key]; exists {
 			return nil, nil, errors.New("mirror Service ports must be unique")
 		}
@@ -61,46 +60,20 @@ func remoteTargets(targets []LocalTarget) []remote.LocalTarget {
 	return items
 }
 
-func validLocalHost(host string) bool {
-	if address := net.ParseIP(host); address != nil {
-		return !address.IsUnspecified() && !address.IsMulticast()
-	}
-	if len(host) > 253 || strings.ContainsAny(host, " /\\\t\r\n") {
-		return false
-	}
-	for label := range strings.SplitSeq(host, ".") {
-		if label == "" || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
-			return false
-		}
-		for _, character := range label {
-			if (character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') ||
-				(character >= '0' && character <= '9') || character == '-' {
-				continue
-			}
-			return false
-		}
-	}
-	return true
-}
-
 func matchTaskTargets(task remote.MirrorTask, targets []LocalTarget) error {
 	if len(task.Ports) != len(targets) {
 		return errors.New("gateway changed the requested Mirror ports")
 	}
 	want := make(map[string]struct{}, len(targets))
 	for _, target := range targets {
-		want[targetKey(target.Protocol, target.ServicePort)] = struct{}{}
+		want[utils.TargetKey(target.Protocol, target.ServicePort)] = struct{}{}
 	}
 	for _, port := range task.Ports {
-		key := targetKey(port.Protocol, port.ServicePort)
+		key := utils.TargetKey(port.Protocol, port.ServicePort)
 		if _, exists := want[key]; !exists {
 			return errors.New("gateway changed the requested Mirror ports")
 		}
 		delete(want, key)
 	}
 	return nil
-}
-
-func targetKey(protocol string, port int32) string {
-	return strings.ToLower(protocol) + "/" + strconv.Itoa(int(port))
 }

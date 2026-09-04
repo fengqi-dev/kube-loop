@@ -1,10 +1,9 @@
 package wss
 
 import (
-	"bytes"
 	"encoding/json"
-	"errors"
-	"io"
+
+	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
 func Encode(message any) ([]byte, error) {
@@ -31,19 +30,19 @@ func Decode(raw []byte) (Message, error) {
 	switch envelope.Type {
 	case KindClientHello:
 		var hello ClientHello
-		if err := decodeStrict(raw, &hello); err != nil || hello.Validate() != nil {
+		if err := utils.DecodeStrictJSON(raw, &hello); err != nil || hello.Validate() != nil {
 			return Message{}, ErrInvalidHandshake
 		}
 		return Message{ClientHello: &hello}, nil
 	case KindServerHello:
 		var hello ServerHello
-		if err := decodeStrict(raw, &hello); err != nil || hello.Validate() != nil {
+		if err := utils.DecodeStrictJSON(raw, &hello); err != nil || hello.Validate() != nil {
 			return Message{}, ErrInvalidHandshake
 		}
 		return Message{ServerHello: &hello}, nil
 	case KindReject:
 		var reject Reject
-		if err := decodeStrict(raw, &reject); err != nil || reject.Validate() != nil {
+		if err := utils.DecodeStrictJSON(raw, &reject); err != nil || reject.Validate() != nil {
 			return Message{}, ErrInvalidHandshake
 		}
 		return Message{Reject: &reject}, nil
@@ -78,16 +77,4 @@ func validateMessage(message any) error {
 	default:
 		return ErrInvalidHandshake
 	}
-}
-
-func decodeStrict(raw []byte, destination any) error {
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(destination); err != nil {
-		return err
-	}
-	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-		return ErrInvalidHandshake
-	}
-	return nil
 }

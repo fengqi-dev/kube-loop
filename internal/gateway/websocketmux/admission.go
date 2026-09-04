@@ -2,22 +2,13 @@ package websocketmux
 
 import (
 	"context"
-	"errors"
 	"time"
 
 	"github.com/gorilla/websocket"
 
 	"github.com/fengqi-dev/kube-loop/internal/protocol/wss"
+	"github.com/fengqi-dev/kube-loop/internal/transport/websocketio"
 )
-
-func closeWebSocket(connection *websocket.Conn, code int, reason string) error {
-	writeErr := connection.WriteControl(
-		websocket.CloseMessage,
-		websocket.FormatCloseMessage(code, reason),
-		time.Now().Add(5*time.Second),
-	)
-	return errors.Join(writeErr, connection.Close())
-}
 
 func (h *Handler) acquireGeneration(identity Identity) bool {
 	h.generationMu.Lock()
@@ -44,7 +35,7 @@ func (h *Handler) reject(
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), time.Second)
 	_ = wss.Write(ctx, connection, rejection)
 	cancel()
-	_ = closeWebSocket(connection, websocket.ClosePolicyViolation, rejection.Code)
+	_ = websocketio.Close(connection, websocket.ClosePolicyViolation, rejection.Code)
 }
 
 func (h *Handler) acquireUser(identity Identity) bool {

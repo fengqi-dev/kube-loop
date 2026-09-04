@@ -6,9 +6,10 @@ import (
 	"net"
 	"sync"
 
+	"github.com/xtaci/smux"
+
 	"github.com/fengqi-dev/kube-loop/internal/transport/streamcopy"
 	protocolmux "github.com/fengqi-dev/kube-loop/internal/transport/websocketmux"
-	"github.com/xtaci/smux"
 )
 
 // OpenStream opens one tracked logical connection on the existing WebSocket

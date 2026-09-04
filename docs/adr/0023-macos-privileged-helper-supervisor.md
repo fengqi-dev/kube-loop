@@ -395,8 +395,8 @@ internal/supervisor/
 | `build/helper-prebuild.go` | 构建并内嵌 Supervisor；为 Worker 生成 manifest |
 | `build/package-desktop.sh` | release Supervisor/Worker 签名顺序和 requirement 验证 |
 | `internal/app/embedded_helper.go` | 区分 Supervisor、Worker 和 manifest 资源 |
-| `internal/helper/install/ensure.go` | 优先通过 Supervisor 更新 Worker |
-| `internal/helper/install/elevate_darwin.go` | 只保留首次安装/修复 Supervisor 的提权入口 |
+| `internal/helperinstall/ensure.go` | 优先通过 Supervisor 更新 Worker |
+| `internal/helperinstall/elevate_darwin.go` | 只保留首次安装/修复 Supervisor 的提权入口 |
 | `internal/app/bindings_server_network.go` | 展示 Supervisor/Worker 独立状态和修复动作 |
 | `e2e/scripts/ensure-helper.go` | 发送当前构建 Worker，并校验 digest/generation |
 | `internal/helper/socket_access_default.go` | 后续独立收紧 Worker Socket；不阻塞首版 Supervisor |

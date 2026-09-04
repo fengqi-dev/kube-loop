@@ -5,6 +5,8 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+
+	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
 func WriteDatagram(w io.Writer, payload []byte) error {
@@ -14,10 +16,10 @@ func WriteDatagram(w io.Writer, payload []byte) error {
 	var size [2]byte
 	// payload is bounded by the uint16-sized MaxDatagramSize above.
 	binary.BigEndian.PutUint16(size[:], uint16(len(payload))) //nolint:gosec // Datagram size is bounded.
-	if err := writeAll(w, size[:]); err != nil {
+	if err := utils.WriteAll(w, size[:]); err != nil {
 		return err
 	}
-	return writeAll(w, payload)
+	return utils.WriteAll(w, payload)
 }
 
 func ReadDatagram(r *bufio.Reader, buffer []byte) ([]byte, error) {

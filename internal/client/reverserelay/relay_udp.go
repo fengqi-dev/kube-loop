@@ -6,6 +6,7 @@ import (
 	"io"
 
 	"github.com/fengqi-dev/kube-loop/internal/protocol/exchangestream"
+	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
 func (relay *Relay) datagram(ctx context.Context, frame exchangestream.Frame) error {
@@ -13,7 +14,7 @@ func (relay *Relay) datagram(ctx context.Context, frame exchangestream.Frame) er
 	if err != nil {
 		return err
 	}
-	target, exists := relay.targets[targetKey("udp", servicePort)]
+	target, exists := relay.targets[utils.TargetKey("udp", servicePort)]
 	if !exists {
 		return errors.New("gateway requested an unconfigured local UDP target")
 	}

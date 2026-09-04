@@ -10,6 +10,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/gateway/relay/listener"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/exchangestream"
 	"github.com/fengqi-dev/kube-loop/internal/transport/trafficstream"
+	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
 var errClientStopped = errors.New("exchange stopped by client")
@@ -94,7 +95,7 @@ func (relay *relaySession) readClient(ctx context.Context) error {
 			if stream == nil {
 				return errors.New("exchange data references an unknown TCP stream")
 			}
-			if err := writeAll(stream.connection, frame.Payload); err != nil {
+			if err := utils.WriteAll(stream.connection, frame.Payload); err != nil {
 				relay.removeTCP(frame.StreamID)
 				_ = relay.write(ctx, exchangestream.Frame{Type: exchangestream.Close, StreamID: frame.StreamID})
 			}

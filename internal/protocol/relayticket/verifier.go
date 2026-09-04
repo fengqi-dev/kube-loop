@@ -4,8 +4,11 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"errors"
+	"slices"
 	"strings"
 	"time"
+
+	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
 type VerifierConfig struct {
@@ -91,7 +94,7 @@ func (verifier *Verifier) Verify(ticket string) (Claims, error) {
 		return Claims{}, ErrInvalid
 	}
 	var ticketHeader header
-	if err := decodeStrict(headerJSON, &ticketHeader); err != nil || ticketHeader.Algorithm != Algorithm ||
+	if err := utils.DecodeStrictJSON(headerJSON, &ticketHeader); err != nil || ticketHeader.Algorithm != Algorithm ||
 		ticketHeader.Type != Type || !ValidIdentifier(ticketHeader.KeyID, 128) {
 		return Claims{}, ErrInvalid
 	}
@@ -117,14 +120,14 @@ func (verifier *Verifier) Verify(ticket string) (Claims, error) {
 		return Claims{}, ErrInvalid
 	}
 	var claims Claims
-	if err := decodeStrict(claimsJSON, &claims); err != nil || validateClaims(claims) != nil {
+	if err := utils.DecodeStrictJSON(claimsJSON, &claims); err != nil || validateClaims(claims) != nil {
 		return Claims{}, ErrInvalid
 	}
 	now := nowTime.Unix()
 	skew := int64(verifier.clockSkew / time.Second)
 	if claims.Issuer != verifier.issuer || claims.Audience != verifier.audience ||
 		claims.NotBefore > now+skew || claims.IssuedAt > now+skew || claims.ExpiresAt <= now-skew ||
-		!contains(claims.Operations, verifier.requiredOperation) {
+		!slices.Contains(claims.Operations, verifier.requiredOperation) {
 		return Claims{}, ErrInvalid
 	}
 	return claims, nil

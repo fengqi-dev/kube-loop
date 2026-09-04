@@ -8,7 +8,7 @@ import (
 
 	clientprofile "github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/helper"
-	helperinstall "github.com/fengqi-dev/kube-loop/internal/helper/install"
+	"github.com/fengqi-dev/kube-loop/internal/helperinstall"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/sessionspec"
 )
 

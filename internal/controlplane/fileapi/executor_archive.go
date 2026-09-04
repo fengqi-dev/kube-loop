@@ -12,6 +12,7 @@ import (
 	"github.com/kballard/go-shellquote"
 
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
+	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
 func (executor *KubernetesTransferExecutor) uploadValidatedArchive(
@@ -145,7 +146,7 @@ func validateArchiveHeader(
 	cleaned := path.Clean(name)
 	if name == "" || path.IsAbs(name) || cleaned == ".." ||
 		strings.HasPrefix(cleaned, "../") ||
-		containsParentPathComponent(name) {
+		utils.ContainsParentPathComponent(name) {
 		return errors.New("archive path traversal is not allowed")
 	}
 	if header.Typeflag != tar.TypeDir && header.Typeflag != tar.TypeReg {
@@ -157,13 +158,4 @@ func validateArchiveHeader(
 	}
 	*total += uint64(header.Size)
 	return nil
-}
-
-func containsParentPathComponent(value string) bool {
-	for component := range strings.SplitSeq(value, "/") {
-		if component == ".." {
-			return true
-		}
-	}
-	return false
 }

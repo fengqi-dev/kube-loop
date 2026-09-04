@@ -5,7 +5,6 @@ import (
 	"io"
 	"net"
 	"strconv"
-	"strings"
 )
 
 type localConnection struct {
@@ -73,10 +72,6 @@ func (relay *Relay) closeAll() {
 	for _, connection := range connections {
 		_ = connection.Close()
 	}
-}
-
-func targetKey(protocol string, port int32) string {
-	return strings.ToLower(protocol) + "/" + strconv.Itoa(int(port))
 }
 
 func localAddress(target Target) string {

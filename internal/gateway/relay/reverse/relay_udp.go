@@ -10,6 +10,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/entity"
 	"github.com/fengqi-dev/kube-loop/internal/gateway/relay/listener"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/exchangestream"
+	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
 type udpRelayAssociation struct {
@@ -58,7 +59,11 @@ func (relay *relaySession) udpAssociation(binding listener.UDPBinding, remote *n
 	id := relay.nextStreamID()
 	relay.udpKeys[key] = id
 	relay.udp[id] = &udpRelayAssociation{
-		connection: binding.Connection, remote: cloneUDPAddress(remote), port: binding.Port, key: key, lastSeen: now,
+		connection: binding.Connection,
+		remote:     utils.CloneUDPAddress(remote),
+		port:       binding.Port,
+		key:        key,
+		lastSeen:   now,
 	}
 	return id
 }
@@ -90,8 +95,4 @@ func (relay *relaySession) reapUDP(ctx context.Context) error {
 			}
 		}
 	}
-}
-
-func cloneUDPAddress(address *net.UDPAddr) *net.UDPAddr {
-	return &net.UDPAddr{IP: append(net.IP(nil), address.IP...), Port: address.Port, Zone: address.Zone}
 }

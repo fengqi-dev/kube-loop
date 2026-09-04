@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/fengqi-dev/kube-loop/internal/singbox"
+	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
 type blockingRoundTripper struct{}
@@ -88,7 +89,7 @@ func TestIsAddressAlreadyInUseRecognizesWindowsError(t *testing.T) {
 		"bind: Only one usage of each socket address " +
 			"(protocol/network address/port) is normally permitted.",
 	)
-	if !isAddressAlreadyInUse(err) {
+	if !utils.IsAddressAlreadyInUse(err) {
 		t.Fatalf("expected Windows port collision to be recognized: %v", err)
 	}
 }

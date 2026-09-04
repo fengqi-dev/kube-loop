@@ -8,6 +8,7 @@ import (
 	"github.com/gorilla/websocket"
 
 	"github.com/fengqi-dev/kube-loop/internal/protocol/filestream"
+	"github.com/fengqi-dev/kube-loop/internal/transport/websocketio"
 )
 
 func readDownloadControl(
@@ -15,7 +16,7 @@ func readDownloadControl(
 	connection *websocket.Conn,
 	cancel context.CancelFunc,
 ) {
-	messageType, encoded, err := readWebSocket(ctx, connection)
+	messageType, encoded, err := websocketio.Read(ctx, connection)
 	if err != nil || messageType != websocket.BinaryMessage {
 		cancel()
 		return
@@ -50,7 +51,7 @@ func (writer *downloadWriter) Write(value []byte) (int, error) {
 			filestream.Frame{Type: filestream.Data, Payload: chunk},
 		)
 		writer.mu.Lock()
-		err := writeWebSocket(
+		err := websocketio.Write(
 			writer.ctx, writer.connection,
 			websocket.BinaryMessage,
 			encoded,
@@ -92,7 +93,7 @@ func writeProgress(
 		return err
 	}
 	writeMu.Lock()
-	err = writeWebSocket(ctx, connection, websocket.BinaryMessage, encoded)
+	err = websocketio.Write(ctx, connection, websocket.BinaryMessage, encoded)
 	writeMu.Unlock()
 	return err
 }

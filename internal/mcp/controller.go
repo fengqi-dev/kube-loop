@@ -213,12 +213,6 @@ func (controller *Controller) logInfo(message string) {
 	}
 }
 
-func (controller *Controller) logWarn(message string) {
-	if controller != nil && controller.log != nil {
-		controller.log.Warn(message)
-	}
-}
-
 func (controller *Controller) logError(message string) {
 	if controller != nil && controller.log != nil {
 		controller.log.Error(message)

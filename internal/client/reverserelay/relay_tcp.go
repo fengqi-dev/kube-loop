@@ -7,6 +7,7 @@ import (
 	"net"
 
 	"github.com/fengqi-dev/kube-loop/internal/protocol/exchangestream"
+	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
 func (relay *Relay) openTCP(ctx context.Context, frame exchangestream.Frame) error {
@@ -14,7 +15,7 @@ func (relay *Relay) openTCP(ctx context.Context, frame exchangestream.Frame) err
 	if err != nil {
 		return err
 	}
-	target, exists := relay.targets[targetKey("tcp", servicePort)]
+	target, exists := relay.targets[utils.TargetKey("tcp", servicePort)]
 	if !exists {
 		return errors.New("gateway requested an unconfigured local TCP target")
 	}

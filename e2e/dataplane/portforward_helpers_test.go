@@ -35,6 +35,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/trafficbindingclient"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/capability"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
+	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
 const portForwardAccessToken = "e2e-port-forward-access"
@@ -289,25 +290,13 @@ func assertPortForwardEcho(ctx context.Context, tcpAddress, udpAddress string) e
 
 func availablePortForwardPort(t *testing.T, network string) uint16 {
 	t.Helper()
-	address := "127.0.0.1:0"
+	reserve := utils.FreeUDPPort
 	if network == "tcp" {
-		listener, err := net.Listen("tcp", address)
-		if err != nil {
-			t.Fatalf("reserve TCP Port Forward port: %v", err)
-		}
-		port := listener.Addr().(*net.TCPAddr).Port
-		if err := listener.Close(); err != nil {
-			t.Fatalf("release TCP Port Forward port: %v", err)
-		}
-		return uint16(port)
+		reserve = utils.FreeTCPPort
 	}
-	connection, err := net.ListenPacket("udp", address)
+	port, err := reserve()
 	if err != nil {
-		t.Fatalf("reserve UDP Port Forward port: %v", err)
-	}
-	port := connection.LocalAddr().(*net.UDPAddr).Port
-	if err := connection.Close(); err != nil {
-		t.Fatalf("release UDP Port Forward port: %v", err)
+		t.Fatalf("reserve %s Port Forward port: %v", network, err)
 	}
 	return uint16(port)
 }

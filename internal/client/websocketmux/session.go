@@ -11,11 +11,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/fengqi-dev/kube-loop/internal/middleware"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/wss"
-	protocolmux "github.com/fengqi-dev/kube-loop/internal/transport/websocketmux"
 	"github.com/gorilla/websocket"
 	"github.com/xtaci/smux"
+
+	"github.com/fengqi-dev/kube-loop/internal/middleware"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/wss"
+	"github.com/fengqi-dev/kube-loop/internal/transport/websocketio"
+	protocolmux "github.com/fengqi-dev/kube-loop/internal/transport/websocketmux"
 )
 
 func newWebSocketDialer(transport *http.Transport) websocket.Dialer {
@@ -29,25 +31,6 @@ func newWebSocketDialer(transport *http.Transport) websocket.Dialer {
 		dialer.TLSClientConfig.NextProtos = []string{"http/1.1"}
 	}
 	return dialer
-}
-
-func closeWebSocket(connection *websocket.Conn, code int, reason string) error {
-	writeErr := connection.WriteControl(
-		websocket.CloseMessage,
-		websocket.FormatCloseMessage(code, reason),
-		time.Now().Add(5*time.Second),
-	)
-	return errors.Join(writeErr, connection.Close())
-}
-
-func smuxConfig() *smux.Config {
-	config := smux.DefaultConfig()
-	config.Version = 2
-	config.KeepAliveInterval = defaultKeepAliveInterval
-	config.KeepAliveTimeout = defaultKeepAliveTimeout
-	config.MaxReceiveBuffer = 4 * 1024 * 1024
-	config.MaxStreamBuffer = 512 * 1024
-	return config
 }
 
 func (forwarder *Forwarder) dial() (result *pooledSession, resultErr error) {
@@ -115,14 +98,14 @@ func (forwarder *Forwarder) dial() (result *pooledSession, resultErr error) {
 		return nil, fmt.Errorf("dial Gateway WebSocket: %w", err)
 	}
 	if connection.Subprotocol() != Subprotocol {
-		_ = closeWebSocket(connection, websocket.ClosePolicyViolation, "subprotocol required")
+		_ = websocketio.Close(connection, websocket.ClosePolicyViolation, "subprotocol required")
 		return nil, fmt.Errorf(
 			"gateway did not negotiate multiplexing subprotocol %q (got %q)",
 			Subprotocol, connection.Subprotocol(),
 		)
 	}
 	if response == nil || response.Header.Get(wss.VersionHeader) != wss.Version {
-		_ = closeWebSocket(connection, websocket.ClosePolicyViolation, wss.CodeVersionMismatch)
+		_ = websocketio.Close(connection, websocket.ClosePolicyViolation, wss.CodeVersionMismatch)
 		return nil, &HandshakeError{
 			Code:              wss.CodeVersionMismatch,
 			Message:           "Gateway does not advertise the WSS ClientHello contract",
@@ -140,13 +123,13 @@ func (forwarder *Forwarder) dial() (result *pooledSession, resultErr error) {
 	hello.ProtocolVersions = append([]string(nil), forwarder.config.SupportedVersions...)
 	if err := wss.Write(handshakeCtx, connection, hello); err != nil {
 		cancelHandshake()
-		_ = closeWebSocket(connection, websocket.ClosePolicyViolation, "HANDSHAKE_FAILED")
+		_ = websocketio.Close(connection, websocket.ClosePolicyViolation, "HANDSHAKE_FAILED")
 		return nil, fmt.Errorf("send Gateway WSS ClientHello: %w", err)
 	}
 	message, err := wss.Read(handshakeCtx, connection)
 	cancelHandshake()
 	if err != nil {
-		_ = closeWebSocket(connection, websocket.ClosePolicyViolation, "HANDSHAKE_FAILED")
+		_ = websocketio.Close(connection, websocket.ClosePolicyViolation, "HANDSHAKE_FAILED")
 		if errors.Is(err, wss.ErrInvalidHandshake) {
 			return nil, &HandshakeError{
 				Code: wss.CodeInvalidHandshake, Message: "Gateway returned an invalid WSS handshake",
@@ -156,7 +139,7 @@ func (forwarder *Forwarder) dial() (result *pooledSession, resultErr error) {
 	}
 	if message.Reject != nil {
 		rejection := message.Reject
-		_ = closeWebSocket(connection, websocket.ClosePolicyViolation, rejection.Code)
+		_ = websocketio.Close(connection, websocket.ClosePolicyViolation, rejection.Code)
 		return nil, &HandshakeError{
 			Code: rejection.Code, Message: rejection.Message,
 			SupportedVersions: append([]string(nil), rejection.SupportedVersions...),
@@ -169,7 +152,7 @@ func (forwarder *Forwarder) dial() (result *pooledSession, resultErr error) {
 		!slices.Contains(serverHello.Capabilities, "tunnel.open.v2") ||
 		!slices.Contains(serverHello.Capabilities, wss.CapabilityTrafficWebSocket) ||
 		slices.Contains(serverHello.Capabilities, wss.CapabilityTrafficEncryption) != encryptionEnabled {
-		_ = closeWebSocket(connection, websocket.ClosePolicyViolation, "INVALID_HANDSHAKE")
+		_ = websocketio.Close(connection, websocket.ClosePolicyViolation, "INVALID_HANDSHAKE")
 		return nil, errors.New("gateway returned an incompatible WSS ServerHello")
 	}
 	maximumStreams := min(forwarder.config.MaxStreamsPerConn, serverHello.Limits.MaximumStreamsPerConnection)
@@ -178,9 +161,9 @@ func (forwarder *Forwarder) dial() (result *pooledSession, resultErr error) {
 	forwarder.mu.Unlock()
 	streamConn := protocolmux.NewWebSocketConn(forwarder.ctx, connection, websocket.BinaryMessage)
 	connection.SetReadLimit(serverHello.Limits.MaximumFrameBytes)
-	session, err := smux.Client(streamConn, smuxConfig())
+	session, err := smux.Client(streamConn, protocolmux.SmuxConfig())
 	if err != nil {
-		_ = closeWebSocket(connection, websocket.CloseInternalServerErr, "multiplexer setup failed")
+		_ = websocketio.Close(connection, websocket.CloseInternalServerErr, "multiplexer setup failed")
 		return nil, fmt.Errorf("start Gateway multiplexer: %w", err)
 	}
 	item := &pooledSession{
@@ -223,7 +206,7 @@ func (forwarder *Forwarder) ensureSession() (*pooledSession, error) {
 	}
 	if !forwarder.commitSession(item) {
 		_ = item.session.Close()
-		_ = closeWebSocket(item.ws, websocket.CloseGoingAway, "client closed during session setup")
+		_ = websocketio.Close(item.ws, websocket.CloseGoingAway, "client closed during session setup")
 		return nil, net.ErrClosed
 	}
 	return item, nil
@@ -261,7 +244,7 @@ func (forwarder *Forwarder) discard(target *pooledSession) {
 		"session_generation", forwarder.config.SessionGeneration,
 	)
 	_ = target.session.Close()
-	_ = closeWebSocket(target.ws, websocket.CloseGoingAway, "session replaced")
+	_ = websocketio.Close(target.ws, websocket.CloseGoingAway, "session replaced")
 }
 
 func (forwarder *Forwarder) keepAlive(item *pooledSession) {

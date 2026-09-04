@@ -12,10 +12,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/filestream"
 	"github.com/fengqi-dev/kube-loop/internal/utils"
-	"github.com/google/uuid"
 )
 
 func TestManagerUploadsLocalFilePersistsProgressAndHistory(t *testing.T) {

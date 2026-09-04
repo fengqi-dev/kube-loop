@@ -8,6 +8,7 @@ import (
 
 	"github.com/fengqi-dev/kube-loop/internal/protocol/exchangestream"
 	"github.com/fengqi-dev/kube-loop/internal/transport/trafficstream"
+	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
 // Target is a client-retained destination for one Service port. It is never
@@ -37,7 +38,7 @@ type Relay struct {
 func New(connection *trafficstream.FrameConn, targets []Target, dial DialContextFunc) *Relay {
 	targetMap := make(map[string]Target, len(targets))
 	for _, target := range targets {
-		targetMap[targetKey(target.Protocol, target.ServicePort)] = target
+		targetMap[utils.TargetKey(target.Protocol, target.ServicePort)] = target
 	}
 	return &Relay{
 		stream: connection, targets: targetMap, dial: dial,

@@ -12,10 +12,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/fengqi-dev/kube-loop/internal/protocol/wss"
-	protocolmux "github.com/fengqi-dev/kube-loop/internal/transport/websocketmux"
 	"github.com/gorilla/websocket"
 	"github.com/xtaci/smux"
+
+	"github.com/fengqi-dev/kube-loop/internal/protocol/wss"
+	"github.com/fengqi-dev/kube-loop/internal/transport/websocketio"
+	protocolmux "github.com/fengqi-dev/kube-loop/internal/transport/websocketmux"
 )
 
 const Subprotocol = wss.Subprotocol
@@ -24,8 +26,8 @@ const (
 	defaultPoolSize          = 2
 	defaultMaxPhysical       = 4
 	defaultMaxStreams        = 128
-	defaultKeepAliveInterval = 15 * time.Second
-	defaultKeepAliveTimeout  = 45 * time.Second
+	defaultKeepAliveInterval = protocolmux.KeepAliveInterval
+	defaultKeepAliveTimeout  = protocolmux.KeepAliveTimeout
 	maxPoolSize              = 8
 	maxPhysicalConnections   = 16
 	maxStreamsPerConnection  = 1024
@@ -179,7 +181,7 @@ func Start(ctx context.Context, config ClientConfig) (*Forwarder, error) {
 		}
 		if !forwarder.commitSession(session) {
 			_ = session.session.Close()
-			_ = closeWebSocket(session.ws, websocket.CloseGoingAway, "client closed during session setup")
+			_ = websocketio.Close(session.ws, websocket.CloseGoingAway, "client closed during session setup")
 			_ = listener.Close()
 			cancel()
 			return nil, net.ErrClosed
@@ -218,7 +220,7 @@ func (forwarder *Forwarder) Close() error {
 		}
 		for _, item := range sessions {
 			_ = item.session.Close()
-			_ = closeWebSocket(item.ws, websocket.CloseNormalClosure, "client shutdown")
+			_ = websocketio.Close(item.ws, websocket.CloseNormalClosure, "client shutdown")
 		}
 		forwarder.wg.Wait()
 	})

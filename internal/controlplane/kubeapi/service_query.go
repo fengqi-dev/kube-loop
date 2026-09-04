@@ -11,6 +11,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/validation"
 
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
+	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
 func listOptions(
@@ -43,13 +44,13 @@ func listOptions(
 		limit = parsed
 	}
 	continueToken := request.URL.Query().Get("continue")
-	if len(continueToken) > maximumContinue || containsControl(continueToken) {
+	if len(continueToken) > maximumContinue || utils.ContainsControl(continueToken) {
 		return metav1.ListOptions{}, &controlplaneapi.Error{
 			Code: controlplaneapi.CodeInvalidArgument, Field: "continue", Message: "continue token is invalid",
 		}
 	}
 	labelSelector := request.URL.Query().Get(labelSelectorQueryParameter)
-	if len(labelSelector) > 1024 || containsControl(labelSelector) {
+	if len(labelSelector) > 1024 || utils.ContainsControl(labelSelector) {
 		return metav1.ListOptions{}, &controlplaneapi.Error{
 			Code:    controlplaneapi.CodeInvalidArgument,
 			Field:   labelSelectorQueryParameter,
@@ -66,7 +67,7 @@ func listOptions(
 		}
 	}
 	fieldSelector := request.URL.Query().Get(fieldSelectorQueryParameter)
-	if len(fieldSelector) > 1024 || containsControl(fieldSelector) {
+	if len(fieldSelector) > 1024 || utils.ContainsControl(fieldSelector) {
 		return metav1.ListOptions{}, &controlplaneapi.Error{
 			Code:    controlplaneapi.CodeInvalidArgument,
 			Field:   fieldSelectorQueryParameter,

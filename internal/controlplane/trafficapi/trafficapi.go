@@ -79,20 +79,13 @@ func (reporter Errors) Internal(err error) *controlplaneapi.Error {
 	}
 }
 
+// Invalid rejects one named request field.
 func Invalid(field, message string) *controlplaneapi.Error {
-	return &controlplaneapi.Error{
-		Code:    controlplaneapi.CodeInvalidArgument,
-		Field:   field,
-		Message: message,
-	}
+	return controlplaneapi.Invalid(field, message)
 }
 
-func NotFound() *controlplaneapi.Error {
-	return &controlplaneapi.Error{
-		Code:    controlplaneapi.CodeNotFound,
-		Message: "resource not found",
-	}
-}
+// NotFound reports a resource the caller may not learn anything about.
+func NotFound() *controlplaneapi.Error { return controlplaneapi.NotFound() }
 
 func WriteJSON(ctx *echo.Context, status int, value any) {
 	_ = ctx.JSON(status, value)

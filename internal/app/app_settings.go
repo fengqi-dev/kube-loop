@@ -108,7 +108,7 @@ func (a *App) loadPersistedLogLevel() {
 // GetLogLevel returns the currently configured log level (debug/info/warn/error).
 func (a *App) GetLogLevel() (string, error) {
 	if a.logSink == nil {
-		return "info", nil
+		return defaultLogLevelName, nil
 	}
 	return slogLevelString(a.logSink.Level()), nil
 }
@@ -117,7 +117,7 @@ func (a *App) GetLogLevel() (string, error) {
 // label, defaulting to info. It is used to configure the sing-box runtime.
 func (a *App) currentLogLevel() string {
 	if a.logSink == nil {
-		return "info"
+		return defaultLogLevelName
 	}
 	return slogLevelString(a.logSink.Level())
 }

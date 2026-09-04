@@ -472,7 +472,7 @@ func rawClientSession(t *testing.T, ctx context.Context, serverURL, token string
 		t.Fatalf("WSS handshake = %#v, %v", message, err)
 	}
 	streamConnection := protocolmux.NewWebSocketConn(ctx, connection, websocket.BinaryMessage)
-	session, err := smux.Client(streamConnection, smuxConfig())
+	session, err := smux.Client(streamConnection, protocolmux.SmuxConfig())
 	if err != nil {
 		_ = connection.Close()
 		t.Fatal(err)

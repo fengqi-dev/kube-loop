@@ -8,6 +8,8 @@ import (
 	"net"
 	"sync"
 	"time"
+
+	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
 const (
@@ -133,27 +135,11 @@ func (connection *StreamConn) writeFrame(kind byte, payload []byte) error {
 	header[0] = kind
 	// Stream payloads are bounded by the negotiated uint32 frame limit.
 	binary.BigEndian.PutUint32(header[1:], uint32(len(payload))) //nolint:gosec // Frame payload is bounded.
-	if err := writeAll(connection.Conn, header[:]); err != nil {
+	if err := utils.WriteAll(connection.Conn, header[:]); err != nil {
 		return err
 	}
 	if len(payload) > 0 {
-		return writeAll(connection.Conn, payload)
-	}
-	return nil
-}
-
-func writeAll(writer io.Writer, payload []byte) error {
-	for len(payload) > 0 {
-		written, err := writer.Write(payload)
-		if written > 0 {
-			payload = payload[written:]
-		}
-		if err != nil {
-			return err
-		}
-		if written == 0 {
-			return io.ErrNoProgress
-		}
+		return utils.WriteAll(connection.Conn, payload)
 	}
 	return nil
 }

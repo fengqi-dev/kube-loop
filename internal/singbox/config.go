@@ -130,12 +130,16 @@ func Generate(network NetworkSpec, options Options) ([]byte, error) {
 	return json.MarshalIndent(config, "", "  ")
 }
 
+// defaultSingBoxLogLevel is the level an empty or unrecognized value falls
+// back to.
+const defaultSingBoxLogLevel = "info"
+
 // normalizeLogLevel maps a session log level onto a sing-box "level" value.
-// The empty value (and any unknown value) resolves to the default "info".
+// The empty value (and any unknown value) resolves to the default.
 func normalizeLogLevel(raw string) string {
 	level, ok := validLogLevels[strings.ToLower(strings.TrimSpace(raw))]
 	if !ok {
-		return "info"
+		return defaultSingBoxLogLevel
 	}
 	return level
 }
@@ -143,7 +147,7 @@ func normalizeLogLevel(raw string) string {
 // validLogLevels is the set of sing-box log levels accepted for a session.
 var validLogLevels = map[string]string{
 	"debug": "debug",
-	"info":  "info",
+	"info":  defaultSingBoxLogLevel,
 	"warn":  "warn",
 	"error": "error",
 }

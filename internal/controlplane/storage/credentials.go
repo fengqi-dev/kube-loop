@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
 type credentialRepository struct{ repositoryBase }
@@ -50,7 +52,7 @@ func (repository *credentialRepository) GetPasswordByUsername(
 	ctx context.Context,
 	username string,
 ) (PasswordCredential, error) {
-	username = normalizeUsername(username)
+	username = utils.NormalizeUsername(username)
 	if username == "" {
 		return PasswordCredential{}, errors.New(
 			"credential username is required",
@@ -149,7 +151,7 @@ func normalizePasswordCredential(credential *PasswordCredential) error {
 	if _, err := uuid.Parse(credential.IdentityID); err != nil {
 		return errors.New("password credential identity ID must be a UUID")
 	}
-	credential.Username = normalizeUsername(credential.Username)
+	credential.Username = utils.NormalizeUsername(credential.Username)
 	credential.PasswordHash = strings.TrimSpace(credential.PasswordHash)
 	if credential.Username == "" || len(credential.Username) > 128 ||
 		strings.ContainsAny(credential.Username, "\x00\r\n\t ") ||
@@ -163,10 +165,4 @@ func normalizePasswordCredential(credential *PasswordCredential) error {
 	credential.CreatedAt = credential.CreatedAt.UTC()
 	credential.UpdatedAt = credential.UpdatedAt.UTC()
 	return nil
-}
-
-func normalizeUsername(
-	value string,
-) string {
-	return strings.ToLower(strings.TrimSpace(value))
 }

@@ -14,6 +14,7 @@ import (
 
 	"github.com/fengqi-dev/kube-loop/internal/protocol/sessionspec"
 	"github.com/fengqi-dev/kube-loop/internal/singbox"
+	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
 func TestDNSSearchProxyUDPAndTCP(t *testing.T) {
@@ -321,7 +322,7 @@ func startTestDNSSearchProxy(
 	t.Helper()
 	var lastErr error
 	for range 20 {
-		publicPort, err := availableTCPUDPPort()
+		publicPort, err := utils.FreeTCPUDPPort()
 		if err != nil {
 			t.Fatal(err)
 		}

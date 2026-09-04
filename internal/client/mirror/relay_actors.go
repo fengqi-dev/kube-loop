@@ -3,6 +3,8 @@ package mirror
 import (
 	"context"
 	"errors"
+
+	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
 func (relay *localRelay) createActor(
@@ -11,7 +13,7 @@ func (relay *localRelay) createActor(
 	protocol string,
 	servicePort int32,
 ) (*shadowActor, error) {
-	target, exists := relay.targets[targetKey(protocol, servicePort)]
+	target, exists := relay.targets[utils.TargetKey(protocol, servicePort)]
 	if !exists {
 		return nil, errors.New("gateway requested an unconfigured local Mirror target")
 	}

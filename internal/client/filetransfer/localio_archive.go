@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"errors"
+
+	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
 const maximumLocalArchiveEntries = 100_000
@@ -137,7 +139,7 @@ func extractArchive(ctx context.Context, input io.Reader, root string, maximum u
 		name := strings.ReplaceAll(header.Name, "\\", "/")
 		cleaned := path.Clean(name)
 		if name == "" || path.IsAbs(name) || cleaned == ".." || strings.HasPrefix(cleaned, "../") ||
-			containsParentPathComponent(name) ||
+			utils.ContainsParentPathComponent(name) ||
 			(header.Typeflag != tar.TypeDir && header.Typeflag != tar.TypeReg) ||
 			header.Size < 0 || total > maximum || uint64(header.Size) > maximum-total {
 			return errors.New("downloaded directory archive contains an unsafe entry")
@@ -180,13 +182,4 @@ func extractArchive(ctx context.Context, input io.Reader, root string, maximum u
 			return errors.Join(copyErr, closeErr)
 		}
 	}
-}
-
-func containsParentPathComponent(value string) bool {
-	for component := range strings.SplitSeq(value, "/") {
-		if component == ".." {
-			return true
-		}
-	}
-	return false
 }

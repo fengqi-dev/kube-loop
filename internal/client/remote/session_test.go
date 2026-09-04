@@ -11,9 +11,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/middleware"
-	"github.com/google/uuid"
 )
 
 func TestContractHTTPResponseAllowsAdditiveFieldsButRejectsMissingRequiredFields(t *testing.T) {

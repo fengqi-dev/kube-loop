@@ -133,7 +133,9 @@ func (a *App) LoadServerInventory(profileID, namespace string) (RemoteInventory,
 		}
 	}
 	a.startServerInventoryWatch(serverProfile, selected, result.Capabilities)
-	a.logInfo("server inventory loaded: profile=" + serverProfile.ID + " namespace=" + selected + " version=" + version.GitVersion)
+	a.logInfo(
+		"server inventory loaded: profile=" + serverProfile.ID + " namespace=" + selected + " version=" + version.GitVersion,
+	)
 	return result, nil
 }
 

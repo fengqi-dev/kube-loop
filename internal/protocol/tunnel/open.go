@@ -9,6 +9,8 @@ import (
 	"strconv"
 
 	"github.com/google/uuid"
+
+	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
 type OpenRequest struct {
@@ -44,7 +46,7 @@ func WriteOpen(w io.Writer, request OpenRequest, token SessionToken) error {
 	}
 	value = appendUint16String(value, request.Host)
 	value = binary.BigEndian.AppendUint16(value, request.Port)
-	return writeAll(w, value)
+	return utils.WriteAll(w, value)
 }
 
 func ReadOpen(r io.Reader) (OpenRequest, error) {
@@ -95,7 +97,7 @@ func WriteTrafficOpen(w io.Writer, request TrafficOpenRequest, token SessionToke
 	}
 	value = append(value, mode)
 	value = append(value, request.TaskID...)
-	return writeAll(w, value)
+	return utils.WriteAll(w, value)
 }
 
 func ReadTrafficOpen(r io.Reader) (TrafficOpenRequest, error) {

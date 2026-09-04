@@ -11,12 +11,12 @@ import (
 	"net/netip"
 	"slices"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/fengqi-dev/kube-loop/internal/protocol/dns"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/sessionspec"
 	"github.com/fengqi-dev/kube-loop/internal/singbox"
+	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
 const (
@@ -81,7 +81,7 @@ func startWithPortCollisionRetry(
 			return core, nil
 		}
 		lastErr = err
-		if ctx.Err() != nil || !isAddressAlreadyInUse(err) {
+		if ctx.Err() != nil || !utils.IsAddressAlreadyInUse(err) {
 			return nil, err
 		}
 	}
@@ -90,15 +90,6 @@ func startWithPortCollisionRetry(
 		startPortCollisionAttempts,
 		lastErr,
 	)
-}
-
-func isAddressAlreadyInUse(err error) bool {
-	if err == nil {
-		return false
-	}
-	message := strings.ToLower(err.Error())
-	return strings.Contains(message, "address already in use") ||
-		strings.Contains(message, "only one usage of each socket address")
 }
 
 func (r *Runtime) startOnce(
@@ -116,7 +107,7 @@ func (r *Runtime) startOnce(
 	if err != nil {
 		return nil, fmt.Errorf("parse SOCKS bridge port: %w", err)
 	}
-	controllerPort, err := availablePort()
+	controllerPort, err := utils.FreeTCPPort()
 	if err != nil {
 		return nil, err
 	}
@@ -126,11 +117,11 @@ func (r *Runtime) startOnce(
 	if err != nil {
 		return nil, err
 	}
-	internalDNSPort, err := availableTCPUDPPort()
+	internalDNSPort, err := utils.FreeTCPUDPPort()
 	if err != nil {
 		return nil, err
 	}
-	secret, err := randomSecret()
+	secret, err := utils.RandomHexToken()
 	if err != nil {
 		return nil, err
 	}
@@ -142,7 +133,7 @@ func (r *Runtime) startOnce(
 	}
 	r.logf("startOnce: bridge=%d controller=%d publicDNS=%d internalDNS=%d traffic=%d",
 		bridgePort, controllerPort, publicDNSPort, internalDNSPort, trafficPorts.Listen)
-	trafficPassword, err := randomSecret()
+	trafficPassword, err := utils.RandomHexToken()
 	if err != nil {
 		return nil, err
 	}

@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"io/fs"
 
-	helperinstall "github.com/fengqi-dev/kube-loop/internal/helper/install"
+	"github.com/fengqi-dev/kube-loop/internal/helperinstall"
 )
 
 //go:embed embedded/*

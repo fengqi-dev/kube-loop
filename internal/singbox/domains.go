@@ -12,7 +12,12 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/protocol/sessionspec"
 )
 
-func ResolverDomains(namespace string, clusterDomains []string, hosts []sessionspec.HostAlias, extra ...string) []string {
+func ResolverDomains(
+	namespace string,
+	clusterDomains []string,
+	hosts []sessionspec.HostAlias,
+	extra ...string,
+) []string {
 	domains, err := dns.NormalizeClusterDomains(clusterDomains)
 	if err != nil || len(domains) == 0 {
 		domains = []string{dns.DefaultClusterDomain}

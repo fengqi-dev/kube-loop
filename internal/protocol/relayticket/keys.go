@@ -10,6 +10,8 @@ import (
 	"os"
 	"slices"
 	"strings"
+
+	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
 const (
@@ -53,7 +55,7 @@ func LoadVerificationKeys(path string) (map[string]ed25519.PublicKey, error) {
 		return nil, errors.New("read relay ticket verification keys file")
 	}
 	var document publicKeysFile
-	if err := decodeStrict(data, &document); err != nil || len(document.Keys) == 0 || len(document.Keys) > 8 {
+	if err := utils.DecodeStrictJSON(data, &document); err != nil || len(document.Keys) == 0 || len(document.Keys) > 8 {
 		return nil, errors.New("parse relay ticket verification keys file")
 	}
 	keys := make(map[string]ed25519.PublicKey, len(document.Keys))

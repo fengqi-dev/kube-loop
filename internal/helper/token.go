@@ -1,14 +1,14 @@
 package helper
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
 func EnsureUserToken() (string, error) {
@@ -22,7 +22,7 @@ func EnsureUserToken() (string, error) {
 			return token, nil
 		}
 	}
-	token, err := randomToken()
+	token, err := utils.RandomHexToken()
 	if err != nil {
 		return "", err
 	}
@@ -83,12 +83,4 @@ func ReadSystemAuth() (AuthFile, error) {
 		return AuthFile{}, fmt.Errorf("empty system helper auth")
 	}
 	return auth, nil
-}
-
-func randomToken() (string, error) {
-	buf := make([]byte, 32)
-	if _, err := rand.Read(buf); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(buf), nil
 }

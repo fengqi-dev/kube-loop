@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"slices"
 	"strings"
 	"sync"
 
@@ -73,7 +74,7 @@ func (s *Server) Enable(target Target) (Info, error) {
 	if len(target.Containers) == 0 {
 		target.Containers = []string{target.Container}
 	}
-	if !contains(target.Containers, target.Container) {
+	if !slices.Contains(target.Containers, target.Container) {
 		return Info{}, fmt.Errorf("container %q is not available for Pod SSH", target.Container)
 	}
 	ip, err := netip.ParseAddr(strings.TrimSpace(target.IP))

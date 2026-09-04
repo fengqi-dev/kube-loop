@@ -1,0 +1,10 @@
+//go:build !windows
+
+package helperd
+
+import "context"
+
+// RunService starts the helper RPC server until the context is cancelled.
+func RunService(ctx context.Context, server *Server) error {
+	return server.Serve(ctx)
+}

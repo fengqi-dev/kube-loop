@@ -133,12 +133,3 @@ func isUnavailableKubernetesError(err error) bool {
 func writeJSON(ctx *echo.Context, value any) {
 	_ = ctx.JSON(http.StatusOK, value)
 }
-
-func containsControl(value string) bool {
-	for _, character := range value {
-		if character < 0x20 || character == 0x7f {
-			return true
-		}
-	}
-	return false
-}

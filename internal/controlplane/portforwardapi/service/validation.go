@@ -158,9 +158,4 @@ func internalError(err error) *controlplaneapi.Error {
 	}
 }
 
-func notFound() *controlplaneapi.Error {
-	return &controlplaneapi.Error{
-		Code:    controlplaneapi.CodeNotFound,
-		Message: "resource not found",
-	}
-}
+func notFound() *controlplaneapi.Error { return controlplaneapi.NotFound() }

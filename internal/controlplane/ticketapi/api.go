@@ -118,9 +118,4 @@ func (routes *Routes) issue(
 	return nil
 }
 
-func notFound() *controlplaneapi.Error {
-	return &controlplaneapi.Error{
-		Code:    controlplaneapi.CodeNotFound,
-		Message: resourceNotFoundMessage,
-	}
-}
+func notFound() *controlplaneapi.Error { return controlplaneapi.NotFound() }

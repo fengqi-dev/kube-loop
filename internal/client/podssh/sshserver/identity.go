@@ -39,7 +39,7 @@ func targetForLogin(target Target, login string) (Target, bool) {
 	if len(containers) == 0 {
 		containers = []string{target.Container}
 	}
-	if !contains(containers, login) {
+	if !slices.Contains(containers, login) {
 		return Target{}, false
 	}
 	target.Container = login
@@ -52,8 +52,4 @@ func targetID(target Target) string {
 
 func podIdentity(contextName, namespace, pod string) string {
 	return contextName + "/" + namespace + "/" + pod
-}
-
-func contains(items []string, wanted string) bool {
-	return slices.Contains(items, wanted)
 }

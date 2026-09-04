@@ -13,6 +13,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/filestream"
+	"github.com/fengqi-dev/kube-loop/internal/transport/websocketio"
 )
 
 func Download(
@@ -56,7 +57,7 @@ func Download(
 	}
 	transferred := spec.Offset
 	for {
-		messageType, encoded, err := readWebSocket(ctx, connection)
+		messageType, encoded, err := websocketio.Read(ctx, connection)
 		if err != nil {
 			return task, filestream.TransferResult{}, fmt.Errorf("read Gateway file download stream: %w", err)
 		}

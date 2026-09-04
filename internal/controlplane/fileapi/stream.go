@@ -17,6 +17,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/streamlease"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/filestream"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/remotetask"
+	"github.com/fengqi-dev/kube-loop/internal/transport/websocketio"
 )
 
 func (handler *Service) stream(
@@ -50,7 +51,7 @@ func (handler *Service) stream(
 	); err != nil {
 		return storageError(err)
 	}
-	connection, err := upgradeWebSocket(writer, request)
+	connection, err := websocketio.Upgrade(writer, request)
 	if err != nil {
 		_ = handler.persistState(
 			request.Context(),
@@ -93,7 +94,7 @@ func (handler *Service) stream(
 			remotetask.Failed,
 			streamResult{Error: "authorization lease expired"},
 		)
-		_ = closeWebSocket(
+		_ = websocketio.Close(
 			connection, websocket.ClosePolicyViolation,
 			"authorization lease expired",
 		)
@@ -103,7 +104,7 @@ func (handler *Service) stream(
 	if err := handler.persistState(
 		request.Context(), task.ID, remotetask.Starting, remotetask.Running, streamResult{},
 	); err != nil {
-		_ = closeWebSocket(
+		_ = websocketio.Close(
 			connection, websocket.CloseInternalServerErr,
 			"file transfer state persistence failed",
 		)
@@ -139,7 +140,7 @@ func (handler *Service) stream(
 	if err := handler.persistState(
 		request.Context(), task.ID, remotetask.Running, nextState, result,
 	); err != nil {
-		_ = closeWebSocket(
+		_ = websocketio.Close(
 			connection, websocket.CloseInternalServerErr,
 			"file transfer state persistence failed",
 		)
@@ -148,10 +149,10 @@ func (handler *Service) stream(
 	encoded, _ := filestream.EncodeResult(result.protocol())
 	writeContext, cancelWrite := context.WithTimeout(request.Context(), 5*time.Second)
 	writeMu.Lock()
-	_ = writeWebSocket(writeContext, connection, websocket.BinaryMessage, encoded)
+	_ = websocketio.Write(writeContext, connection, websocket.BinaryMessage, encoded)
 	writeMu.Unlock()
 	cancelWrite()
-	_ = closeWebSocket(
+	_ = websocketio.Close(
 		connection, websocket.CloseNormalClosure,
 		"file transfer complete",
 	)

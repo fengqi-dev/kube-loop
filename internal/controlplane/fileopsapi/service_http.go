@@ -39,11 +39,7 @@ func targetError(err error) *controlplaneapi.Error {
 }
 
 func invalid(field, message string) *controlplaneapi.Error {
-	return &controlplaneapi.Error{
-		Code:    controlplaneapi.CodeInvalidArgument,
-		Field:   field,
-		Message: message,
-	}
+	return controlplaneapi.Invalid(field, message)
 }
 
 func internalError(err error) *controlplaneapi.Error {
@@ -54,12 +50,7 @@ func internalError(err error) *controlplaneapi.Error {
 	}
 }
 
-func notFound() *controlplaneapi.Error {
-	return &controlplaneapi.Error{
-		Code:    controlplaneapi.CodeNotFound,
-		Message: "resource not found",
-	}
-}
+func notFound() *controlplaneapi.Error { return controlplaneapi.NotFound() }
 
 func writeJSON(ctx *echo.Context, status int, value any) {
 	_ = ctx.JSON(status, value)

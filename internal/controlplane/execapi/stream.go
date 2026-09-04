@@ -11,6 +11,7 @@ import (
 	"k8s.io/client-go/tools/remotecommand"
 
 	"github.com/fengqi-dev/kube-loop/internal/protocol/execstream"
+	"github.com/fengqi-dev/kube-loop/internal/transport/websocketio"
 )
 
 type frameWriter struct {
@@ -29,7 +30,7 @@ func (writer frameWriter) Write(payload []byte) (int, error) {
 		return 0, err
 	}
 	writer.mu.Lock()
-	err = writeWebSocket(writer.ctx, writer.connection, websocket.BinaryMessage, encoded)
+	err = websocketio.Write(writer.ctx, writer.connection, websocket.BinaryMessage, encoded)
 	writer.mu.Unlock()
 	if err != nil {
 		return 0, err
@@ -90,7 +91,7 @@ func readInput(
 ) error {
 	defer func() { _ = stdin.Close() }()
 	for {
-		messageType, encoded, err := readWebSocket(ctx, connection)
+		messageType, encoded, err := websocketio.Read(ctx, connection)
 		if err != nil {
 			return err
 		}
