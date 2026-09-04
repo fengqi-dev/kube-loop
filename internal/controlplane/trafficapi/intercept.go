@@ -1,4 +1,4 @@
-package mirrorapi
+package trafficapi
 
 import (
 	"context"
@@ -13,7 +13,10 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/trafficbindingclient"
 )
 
-type ResourceMutator interface {
+// InterceptResources is the Kubernetes side of a Service-intercepting traffic
+// task. Exchange and Mirror both redirect an existing Service at the Gateway
+// and later put it back, so they share one implementation.
+type InterceptResources interface {
 	Capture(
 		context.Context,
 		controlplaneapi.Identity,
@@ -32,48 +35,51 @@ type ResourceMutator interface {
 	) error
 }
 
+// KubernetesMutationProvider hands out a Kubernetes client that acts as the
+// requesting user, so a capture can never read more than the user may.
 type KubernetesMutationProvider interface {
 	ClientFor(authorization.Subject) (kubernetes.Interface, error)
 }
 
-type TrafficBindingResourceMutator struct {
+// TrafficBindingInterceptResources drives the intercept through the
+// TrafficBinding Operator: the Control Plane records intent on the CR and the
+// Operator performs the Service mutation.
+type TrafficBindingInterceptResources struct {
 	provider KubernetesMutationProvider
 	bindings trafficbindingclient.Lifecycle
 }
 
-func NewTrafficBindingResourceMutator(
+func NewTrafficBindingInterceptResources(
 	provider KubernetesMutationProvider,
 	bindings trafficbindingclient.Lifecycle,
-) (*TrafficBindingResourceMutator, error) {
+) (*TrafficBindingInterceptResources, error) {
 	if provider == nil || bindings == nil {
 		return nil, errors.New(
 			"kubernetes Provider and TrafficBinding lifecycle are required",
 		)
 	}
-	return &TrafficBindingResourceMutator{
-		provider: provider, bindings: bindings,
-	}, nil
+	return &TrafficBindingInterceptResources{provider: provider, bindings: bindings}, nil
 }
 
-func (mutator *TrafficBindingResourceMutator) Capture(
+func (resources *TrafficBindingInterceptResources) Capture(
 	ctx context.Context,
 	identity controlplaneapi.Identity,
 	snapshot *servicebinding.ServiceInterceptSnapshot,
 ) error {
-	client, err := mutator.userClient(identity)
+	client, err := resources.userClient(identity)
 	if err != nil {
 		return err
 	}
 	return servicebinding.CaptureServiceIntercept(ctx, client, snapshot)
 }
 
-func (mutator *TrafficBindingResourceMutator) Apply(
+func (resources *TrafficBindingInterceptResources) Apply(
 	ctx context.Context,
 	_ controlplaneapi.Identity,
 	snapshot servicebinding.ServiceInterceptSnapshot,
 	interceptID string,
 ) error {
-	store, ok := mutator.bindings.(interface {
+	store, ok := resources.bindings.(interface {
 		GetSession(context.Context, string, string) (*trafficv1alpha1.TrafficBinding, error)
 	})
 	if !ok {
@@ -83,36 +89,38 @@ func (mutator *TrafficBindingResourceMutator) Apply(
 	if err != nil {
 		return err
 	}
-	_, _, err = mutator.bindings.Activate(ctx, binding)
+	_, _, err = resources.bindings.Activate(ctx, binding)
 	return err
 }
 
-func (mutator *TrafficBindingResourceMutator) Restore(
+func (resources *TrafficBindingInterceptResources) Restore(
 	ctx context.Context,
 	snapshot servicebinding.ServiceInterceptSnapshot,
 	interceptID string,
 ) error {
-	return mutator.bindings.Pause(ctx, snapshot.Namespace, interceptID)
+	return resources.bindings.Pause(ctx, snapshot.Namespace, interceptID)
 }
 
-func (mutator *TrafficBindingResourceMutator) DeleteBinding(
+func (resources *TrafficBindingInterceptResources) DeleteBinding(
 	ctx context.Context,
 	namespace, interceptID string,
 ) error {
-	return mutator.bindings.Delete(ctx, namespace, interceptID)
+	return resources.bindings.Delete(ctx, namespace, interceptID)
 }
 
-func (mutator *TrafficBindingResourceMutator) userClient(
+// BindingManager exposes the TrafficBinding session store the task APIs read
+// and write their durable state through.
+func (resources *TrafficBindingInterceptResources) BindingManager() *trafficbindingclient.Manager {
+	manager, _ := resources.bindings.(*trafficbindingclient.Manager)
+	return manager
+}
+
+func (resources *TrafficBindingInterceptResources) userClient(
 	identity controlplaneapi.Identity,
 ) (kubernetes.Interface, error) {
-	return mutator.provider.ClientFor(authorization.Subject{
+	return resources.provider.ClientFor(authorization.Subject{
 		ID: identity.Subject, Groups: append([]string(nil), identity.Groups...),
 	})
 }
 
-var _ ResourceMutator = (*TrafficBindingResourceMutator)(nil)
-
-func (mutator *TrafficBindingResourceMutator) BindingManager() *trafficbindingclient.Manager {
-	manager, _ := mutator.bindings.(*trafficbindingclient.Manager)
-	return manager
-}
+var _ InterceptResources = (*TrafficBindingInterceptResources)(nil)

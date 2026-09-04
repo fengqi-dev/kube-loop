@@ -47,13 +47,11 @@ func normalizeRequest(spec *Spec) *controlplaneapi.Error {
 // what all three traffic task APIs do identically. They stay declared here so
 // the call sites in this package read against its own vocabulary.
 
-var apiErrors = trafficapi.Errors{Name: "Mirror"}
+var apiErrors = task.Errors()
 
 func invalid(field, message string) *controlplaneapi.Error {
 	return trafficapi.Invalid(field, message)
 }
-
-func notFound() *controlplaneapi.Error { return trafficapi.NotFound() }
 
 func storageError(err error) *controlplaneapi.Error { return apiErrors.Storage(err) }
 

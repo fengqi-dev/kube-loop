@@ -6,6 +6,7 @@ import (
 
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/sessionapi"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/trafficapi"
 )
 
 const TaskType = "preview"
@@ -20,6 +21,10 @@ type SessionValidator interface {
 }
 
 type Service struct {
+	// Relay carries the traffic-control handshake every traffic task API
+	// serves identically: Claim, Heartbeat and Finish.
+	trafficapi.Relay
+
 	sessions  SessionValidator
 	resources ResourceManager
 	config    Config
@@ -38,9 +43,15 @@ func New(
 	if err := config.normalize(); err != nil {
 		return nil, err
 	}
-	return &Service{
+	service := &Service{
 		sessions:  sessions,
 		resources: resources,
 		config:    config,
-	}, nil
+	}
+	service.Relay = trafficapi.Relay{
+		Task: task, Sessions: sessions, Bindings: service.bindingSessions,
+		ServiceName: trafficapi.ServiceNameFromPreview,
+		Release:     service.release, ReleaseTimeout: config.DeleteTimeout,
+	}
+	return service, nil
 }

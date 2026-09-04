@@ -5,19 +5,16 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/google/uuid"
 	"github.com/labstack/echo/v5"
 
 	trafficv1alpha1 "github.com/fengqi-dev/kube-loop/api/v1alpha1"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
-	"github.com/fengqi-dev/kube-loop/internal/controlplane/servicebinding"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/sessionapi"
-	"github.com/fengqi-dev/kube-loop/internal/controlplane/trafficbindingclient"
 )
 
 func (handler *Service) get(ctx *echo.Context, identity controlplaneapi.Identity,
 	session sessionapi.ActiveSession, taskID string) *controlplaneapi.Error {
-	binding, apiError := handler.ownedBinding(ctx.Request().Context(), identity, session, taskID)
+	binding, apiError := handler.OwnedBinding(ctx.Request().Context(), identity, session, taskID)
 	if apiError != nil {
 		return apiError
 	}
@@ -37,7 +34,7 @@ func (handler *Service) list(ctx *echo.Context, identity controlplaneapi.Identit
 	}
 	items := make([]Document, 0, len(bindings))
 	for index := range bindings {
-		if ownedPreview(&bindings[index], identity, session) {
+		if task.Owns(&bindings[index], identity, session) {
 			items = append(items, previewDocument(&bindings[index]))
 		}
 	}
@@ -47,12 +44,11 @@ func (handler *Service) list(ctx *echo.Context, identity controlplaneapi.Identit
 
 func (handler *Service) pause(ctx *echo.Context, identity controlplaneapi.Identity,
 	session sessionapi.ActiveSession, taskID string) *controlplaneapi.Error {
-	_, apiError := handler.ownedBinding(ctx.Request().Context(), identity, session, taskID)
+	_, apiError := handler.OwnedBinding(ctx.Request().Context(), identity, session, taskID)
 	if apiError != nil {
 		return apiError
 	}
-	if err := handler.resources.Delete(ctx.Request().Context(),
-		servicebinding.PreviewServiceSnapshot{Namespace: session.Namespace}, taskID); err != nil {
+	if err := handler.release(ctx.Request().Context(), session.Namespace, taskID); err != nil {
 		return internalError(err)
 	}
 	sessions, _ := handler.bindingSessions()
@@ -66,7 +62,7 @@ func (handler *Service) pause(ctx *echo.Context, identity controlplaneapi.Identi
 
 func (handler *Service) resume(ctx *echo.Context, identity controlplaneapi.Identity,
 	session sessionapi.ActiveSession, taskID string) *controlplaneapi.Error {
-	binding, apiError := handler.ownedBinding(ctx.Request().Context(), identity, session, taskID)
+	binding, apiError := handler.OwnedBinding(ctx.Request().Context(), identity, session, taskID)
 	if apiError != nil {
 		return apiError
 	}
@@ -84,7 +80,7 @@ func (handler *Service) resume(ctx *echo.Context, identity controlplaneapi.Ident
 
 func (handler *Service) delete(ctx *echo.Context, identity controlplaneapi.Identity,
 	session sessionapi.ActiveSession, taskID string) *controlplaneapi.Error {
-	binding, apiError := handler.ownedBinding(ctx.Request().Context(), identity, session, taskID)
+	binding, apiError := handler.OwnedBinding(ctx.Request().Context(), identity, session, taskID)
 	if apiError != nil {
 		return apiError
 	}
@@ -95,25 +91,6 @@ func (handler *Service) delete(ctx *echo.Context, identity controlplaneapi.Ident
 	}
 	writeJSON(ctx, http.StatusOK, document)
 	return nil
-}
-
-func (handler *Service) ownedBinding(ctx context.Context, identity controlplaneapi.Identity,
-	session sessionapi.ActiveSession, taskID string) (*trafficv1alpha1.TrafficBinding, *controlplaneapi.Error) {
-	if _, err := uuid.Parse(taskID); err != nil {
-		return nil, notFound()
-	}
-	sessions, err := handler.bindingSessions()
-	if err != nil {
-		return nil, internalError(err)
-	}
-	binding, err := sessions.GetSession(ctx, session.Namespace, taskID)
-	if err != nil || !ownedPreview(binding, identity, session) {
-		if err != nil && !errors.Is(err, trafficbindingclient.ErrTrafficBindingNotFound) {
-			return nil, internalError(err)
-		}
-		return nil, notFound()
-	}
-	return binding, nil
 }
 
 func deletePreviewBinding(ctx context.Context, resources ResourceManager,

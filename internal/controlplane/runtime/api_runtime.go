@@ -25,6 +25,7 @@ import (
 	controlplanestorage "github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/ticketapi"
 	ticketservice "github.com/fengqi-dev/kube-loop/internal/controlplane/ticketapi/service"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/trafficapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/trafficbindingclient"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/trafficcontrolapi"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/relaycontrol"
@@ -242,19 +243,19 @@ func buildTrafficTaskRuntime(
 	if err != nil {
 		return nil, fmt.Errorf("initialize Exchange Service resolver: %w", err)
 	}
-	exchangeMutator, err := exchangeapi.NewTrafficBindingResourceMutator(kubernetesProvider, trafficBindings)
+	// Exchange and Mirror intercept a Service identically, so one stateless
+	// mutator serves both.
+	interceptResources, err := trafficapi.NewTrafficBindingInterceptResources(
+		kubernetesProvider, trafficBindings,
+	)
 	if err != nil {
-		return nil, fmt.Errorf("initialize Exchange resource mutator: %w", err)
+		return nil, fmt.Errorf("initialize Service intercept resources: %w", err)
 	}
-	exchangeAPI, err := exchangeapi.New(sessions, serviceResolver, exchangeMutator, exchangeapi.Config{})
+	exchangeAPI, err := exchangeapi.New(sessions, serviceResolver, interceptResources, exchangeapi.Config{})
 	if err != nil {
 		return nil, fmt.Errorf("initialize Exchange Task API: %w", err)
 	}
-	mirrorMutator, err := mirrorapi.NewTrafficBindingResourceMutator(kubernetesProvider, trafficBindings)
-	if err != nil {
-		return nil, fmt.Errorf("initialize Mirror resource mutator: %w", err)
-	}
-	mirrorAPI, err := mirrorapi.New(sessions, serviceResolver, mirrorMutator, mirrorapi.Config{})
+	mirrorAPI, err := mirrorapi.New(sessions, serviceResolver, interceptResources, mirrorapi.Config{})
 	if err != nil {
 		return nil, fmt.Errorf("initialize Mirror Task API: %w", err)
 	}

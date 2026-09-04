@@ -6,6 +6,7 @@ import (
 
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/sessionapi"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/trafficapi"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/servicemodel"
 )
 
@@ -30,7 +31,16 @@ type ServiceResolver interface {
 	) (servicemodel.ResolvedService, error)
 }
 
+// ResourceMutator is the Kubernetes side of this API. Exchange and Mirror
+// intercept a Service the same way, so both use the shared implementation in
+// internal/controlplane/trafficapi.
+type ResourceMutator = trafficapi.InterceptResources
+
 type Service struct {
+	// Relay carries the traffic-control handshake every traffic task API
+	// serves identically: Claim, Heartbeat and Finish.
+	trafficapi.Relay
+
 	sessions  SessionValidator
 	services  ServiceResolver
 	resources ResourceMutator
@@ -51,7 +61,13 @@ func New(
 	if err := config.normalize(); err != nil {
 		return nil, err
 	}
-	return &Service{
+	service := &Service{
 		sessions: sessions, services: services, resources: resources, config: config,
-	}, nil
+	}
+	service.Relay = trafficapi.Relay{
+		Task: task, Sessions: sessions, Bindings: service.bindingSessions,
+		ServiceName: trafficapi.ServiceNameFromTarget,
+		Release:     service.release, ReleaseTimeout: config.RestoreTimeout,
+	}
+	return service, nil
 }

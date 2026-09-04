@@ -4,7 +4,6 @@ import (
 	"errors"
 
 	trafficv1alpha1 "github.com/fengqi-dev/kube-loop/api/v1alpha1"
-	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/sessionapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/trafficbindingclient"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/trafficsession"
@@ -36,14 +35,4 @@ func exchangeDocument(
 		CreatedAt: binding.CreationTimestamp.Time, UpdatedAt: trafficsession.UpdatedAt(binding),
 		ExpiresAt: session.ExpiresAt.UTC(),
 	}
-}
-
-func ownedExchange(
-	binding *trafficv1alpha1.TrafficBinding,
-	identity controlplaneapi.Identity,
-	session sessionapi.ActiveSession,
-) bool {
-	return trafficsession.Owned(
-		binding, identity.Subject, session.ID, session.Namespace,
-	) && binding.Spec.Mode == trafficv1alpha1.TrafficBindingModeExchange
 }

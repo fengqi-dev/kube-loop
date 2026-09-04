@@ -5,58 +5,24 @@ import (
 	"fmt"
 	"strings"
 
-	trafficv1alpha1 "github.com/fengqi-dev/kube-loop/api/v1alpha1"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/servicebinding"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/trafficapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/trafficsession"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/servicemodel"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/trafficcontrol"
 )
 
-func (handler *Service) Claim(ctx context.Context, relayID string,
-	request trafficcontrol.ClaimRequest) (trafficcontrol.ClaimResponse, *controlplaneapi.Error) {
-	identity, session, apiError := handler.trafficSession(ctx, request.Identity)
-	if apiError != nil {
-		return trafficcontrol.ClaimResponse{}, apiError
-	}
-	binding, apiError := handler.ownedBinding(ctx, identity, session, request.TaskID)
-	if apiError != nil {
-		return trafficcontrol.ClaimResponse{}, apiError
-	}
-	if binding.Spec.DesiredState != trafficv1alpha1.TrafficBindingDesiredStateActive ||
-		binding.Spec.Relay != nil || binding.Status.RelayOwnerID != "" {
-		return trafficcontrol.ClaimResponse{}, &controlplaneapi.Error{
-			Code: controlplaneapi.CodeConflict, Message: "Mirror Session was already claimed",
-		}
-	}
-	sessions, _ := handler.bindingSessions()
-	if _, err := sessions.ClaimRelay(ctx, binding, relayID); err != nil {
-		return trafficcontrol.ClaimResponse{}, storageError(err)
-	}
-	service := ""
-	if binding.Spec.Target != nil {
-		service = binding.Spec.Target.Name
-	}
-	return trafficcontrol.ClaimResponse{
-		Mode: trafficcontrol.ModeMirror, TaskID: binding.Spec.TaskID,
-		Service: service, Ports: append([]servicemodel.Port(nil), trafficsession.Ports(binding)...),
-	}, nil
-}
-
-func (handler *Service) Prepare(ctx context.Context, relayID string,
-	request trafficcontrol.PrepareRequest) (trafficcontrol.PrepareResponse, *controlplaneapi.Error) {
-	identity, session, apiError := handler.trafficSession(ctx, request.Identity)
+// Prepare captures the intercepted Service and, unlike Exchange, hands the
+// Gateway the original backends: the shadow workload only sees a copy of the
+// traffic, so the primary path has to keep reaching the real Pods (ADR 0012).
+func (handler *Service) Prepare(
+	ctx context.Context,
+	relayID string,
+	request trafficcontrol.PrepareRequest,
+) (trafficcontrol.PrepareResponse, *controlplaneapi.Error) {
+	identity, session, binding, apiError := handler.PrepareBinding(ctx, relayID, request)
 	if apiError != nil {
 		return trafficcontrol.PrepareResponse{}, apiError
-	}
-	binding, apiError := handler.ownedBinding(ctx, identity, session, request.TaskID)
-	if apiError != nil {
-		return trafficcontrol.PrepareResponse{}, apiError
-	}
-	if binding.Status.RelayOwnerID != relayID || binding.Spec.Relay != nil {
-		return trafficcontrol.PrepareResponse{}, &controlplaneapi.Error{
-			Code: controlplaneapi.CodeConflict, Message: mirrorTaskOwnershipMessage,
-		}
 	}
 	ports, err := interceptPorts(trafficsession.Ports(binding), request.Ports)
 	if err != nil {
@@ -64,47 +30,49 @@ func (handler *Service) Prepare(ctx context.Context, relayID string,
 			Code: controlplaneapi.CodeInvalidArgument, Message: err.Error(), Cause: err,
 		}
 	}
-	service := ""
-	if binding.Spec.Target != nil {
-		service = binding.Spec.Target.Name
-	}
 	snapshot := servicebinding.ServiceInterceptSnapshot{
-		Namespace: session.Namespace, Service: service,
+		Namespace: session.Namespace, Service: trafficapi.ServiceNameFromTarget(binding),
 		GatewayIP: request.GatewayIP, Ports: ports,
 	}
 	if err := handler.resources.Capture(ctx, identity, &snapshot); err != nil {
-		return trafficcontrol.PrepareResponse{}, internalError(fmt.Errorf("capture Mirror Service: %w", err))
+		return trafficcontrol.PrepareResponse{},
+			internalError(fmt.Errorf("capture Mirror Service: %w", err))
 	}
 	backendSets, err := servicebinding.ResolveSnapshotBackends(snapshot)
 	if err != nil {
-		return trafficcontrol.PrepareResponse{}, internalError(fmt.Errorf("resolve Mirror backends: %w", err))
+		return trafficcontrol.PrepareResponse{},
+			internalError(fmt.Errorf("resolve Mirror backends: %w", err))
 	}
-	listenerPorts := make(map[string]int32, len(request.Ports))
-	for _, port := range request.Ports {
-		listenerPorts[strings.ToUpper(port.Protocol)+fmt.Sprintf("/%d", port.ServicePort)] = port.ListenPort
+	sessions, err := handler.bindingSessions()
+	if err != nil {
+		return trafficcontrol.PrepareResponse{}, internalError(err)
 	}
-	sessions, _ := handler.bindingSessions()
-	if err := sessions.AttachRelay(ctx, binding, relayID, request.GatewayIP, listenerPorts); err != nil {
+	if err := sessions.AttachRelay(
+		ctx, binding, relayID, request.GatewayIP, trafficapi.ListenerPorts(request.Ports),
+	); err != nil {
 		return trafficcontrol.PrepareResponse{}, internalError(err)
 	}
 	if err := handler.resources.Apply(ctx, identity, snapshot, binding.Spec.TaskID); err != nil {
-		return trafficcontrol.PrepareResponse{}, internalError(fmt.Errorf("apply Mirror binding: %w", err))
+		return trafficcontrol.PrepareResponse{},
+			internalError(fmt.Errorf("apply Mirror binding: %w", err))
 	}
-	response := trafficcontrol.PrepareResponse{
-		Backends: make([]trafficcontrol.BackendSet, 0, len(backendSets)),
-	}
-	for _, backendSet := range backendSets {
-		converted := trafficcontrol.BackendSet{
-			Name: backendSet.Name, ServicePort: backendSet.ServicePort,
-			Protocol: strings.ToLower(string(backendSet.Protocol)),
-			Targets:  make([]trafficcontrol.BackendTarget, 0, len(backendSet.Targets)),
+	return trafficcontrol.PrepareResponse{Backends: originalBackends(backendSets)}, nil
+}
+
+func originalBackends(sets []servicebinding.BackendSet) []trafficcontrol.BackendSet {
+	converted := make([]trafficcontrol.BackendSet, 0, len(sets))
+	for _, set := range sets {
+		backends := trafficcontrol.BackendSet{
+			Name: set.Name, ServicePort: set.ServicePort,
+			Protocol: strings.ToLower(string(set.Protocol)),
+			Targets:  make([]trafficcontrol.BackendTarget, 0, len(set.Targets)),
 		}
-		for _, target := range backendSet.Targets {
-			converted.Targets = append(converted.Targets, trafficcontrol.BackendTarget{
+		for _, target := range set.Targets {
+			backends.Targets = append(backends.Targets, trafficcontrol.BackendTarget{
 				Address: target.Address, Port: target.Port,
 			})
 		}
-		response.Backends = append(response.Backends, converted)
+		converted = append(converted, backends)
 	}
-	return response, nil
+	return converted
 }
