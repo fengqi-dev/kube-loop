@@ -18,7 +18,7 @@ func TestConfigureHelperSocketAccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("find current user SID: %v", err)
 	}
-	if err := configureHelperSocketAccess(path, ownerSID); err != nil {
+	if err := ConfigureSocketAccess(path, ownerSID); err != nil {
 		t.Fatalf("configure helper socket access: %v", err)
 	}
 	descriptor, err := windows.GetNamedSecurityInfo(
@@ -71,7 +71,7 @@ func TestConfigureElevatedExchangeAccess(t *testing.T) {
 }
 
 func TestConfigureHelperSocketAccessRejectsMissingSID(t *testing.T) {
-	if err := configureHelperSocketAccess(t.TempDir()+`\missing.sock`, ""); err == nil {
+	if err := ConfigureSocketAccess(t.TempDir()+`\missing.sock`, ""); err == nil {
 		t.Fatal("configure helper socket access accepted an empty owner SID")
 	}
 }
