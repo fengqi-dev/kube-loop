@@ -8,10 +8,10 @@ import (
 	"io"
 	"maps"
 	"os"
+	"path"
 	"slices"
 	"strings"
-
-	"github.com/google/uuid"
+	"uuid"
 
 	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
@@ -138,4 +138,17 @@ func (manager *Manager) persist(tasks map[string]Task) error {
 
 func cloneTasks(tasks map[string]Task) map[string]Task {
 	return maps.Clone(tasks)
+}
+
+func validateManagerRemotePath(value string) error {
+	unsafeForm := value == "" || len(value) > 4096 || value[0] != '/' || value == "/"
+	if unsafeForm || strings.Contains(value, "\\") || path.Clean(value) != value {
+		return errors.New("file transfer remote path is invalid")
+	}
+	for _, character := range value {
+		if character < 0x20 || character == 0x7f {
+			return errors.New("file transfer remote path is invalid")
+		}
+	}
+	return nil
 }
