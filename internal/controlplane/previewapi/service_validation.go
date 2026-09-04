@@ -1,9 +1,7 @@
 package previewapi
 
 import (
-	"errors"
 	"fmt"
-	"net"
 	"slices"
 	"strings"
 
@@ -12,8 +10,7 @@ import (
 
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/entity"
-	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
-	"github.com/fengqi-dev/kube-loop/internal/controlplane/trafficbindingclient"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/trafficapi"
 )
 
 func normalizeRequest(spec *Spec) *controlplaneapi.Error {
@@ -56,103 +53,31 @@ func normalizeRequest(spec *Spec) *controlplaneapi.Error {
 	return nil
 }
 
+// The helpers below delegate to internal/controlplane/trafficapi, which owns
+// what all three traffic task APIs do identically. They stay declared here so
+// the call sites in this package read against its own vocabulary.
+
+var apiErrors = trafficapi.Errors{Name: "Preview"}
+
+func invalid(field, message string) *controlplaneapi.Error {
+	return trafficapi.Invalid(field, message)
+}
+
+func notFound() *controlplaneapi.Error { return trafficapi.NotFound() }
+
+func storageError(err error) *controlplaneapi.Error { return apiErrors.Storage(err) }
+
+func internalError(err error) *controlplaneapi.Error { return apiErrors.Internal(err) }
+
+func writeJSON(ctx *echo.Context, status int, value any) {
+	trafficapi.WriteJSON(ctx, status, value)
+}
+
 func normalizeLocalTargets(
 	targets *[]entity.LocalTarget,
 	ports []entity.Port,
 ) *controlplaneapi.Error {
-	if len(*targets) == 0 {
-		return nil
-	}
-	if len(*targets) != len(ports) {
-		return invalid("localTargets", "local targets must match Service ports")
-	}
-	expected := make(map[string]struct{}, len(ports))
-	for _, port := range ports {
-		expected[localTargetKey(port.ServicePort, port.Protocol)] = struct{}{}
-	}
-	seen := make(map[string]struct{}, len(*targets))
-	for index := range *targets {
-		target := &(*targets)[index]
-		target.Protocol = strings.ToLower(strings.TrimSpace(target.Protocol))
-		target.LocalHost = strings.TrimSpace(target.LocalHost)
-		if target.LocalHost == "" {
-			target.LocalHost = "127.0.0.1"
-		}
-		address := net.ParseIP(target.LocalHost)
-		invalidHost := address != nil && (address.IsUnspecified() || address.IsMulticast())
-		invalidHost = invalidHost || address == nil && len(validation.IsDNS1123Subdomain(target.LocalHost)) != 0
-		key := localTargetKey(target.ServicePort, target.Protocol)
-		_, matchesPort := expected[key]
-		_, duplicate := seen[key]
-		if target.ServicePort < 1 || target.ServicePort > 65535 || target.LocalPort < 1 ||
-			(target.Protocol != "tcp" && target.Protocol != "udp") ||
-			invalidHost || !matchesPort || duplicate {
-			return invalid("localTargets", "local target is invalid")
-		}
-		seen[key] = struct{}{}
-	}
-	slices.SortFunc(*targets, compareLocalTargets)
-	return nil
+	return trafficapi.NormalizeLocalTargets(targets, ports)
 }
 
-func localTargetKey(port int32, protocol string) string {
-	return fmt.Sprintf("%d/%s", port, strings.ToLower(strings.TrimSpace(protocol)))
-}
-
-func compareLocalTargets(left, right entity.LocalTarget) int {
-	if left.ServicePort != right.ServicePort {
-		return int(left.ServicePort - right.ServicePort)
-	}
-	return strings.Compare(left.Protocol, right.Protocol)
-}
-
-func comparePorts(left, right entity.Port) int {
-	if left.ServicePort != right.ServicePort {
-		return int(left.ServicePort - right.ServicePort)
-	}
-	return strings.Compare(left.Protocol, right.Protocol)
-}
-
-func storageError(err error) *controlplaneapi.Error {
-	switch {
-	case errors.Is(err, storage.ErrNotFound):
-		return notFound()
-	case errors.Is(err, storage.ErrConflict),
-		errors.Is(err, storage.ErrIdempotencyMismatch),
-		errors.Is(err, trafficbindingclient.ErrTrafficBindingConflict):
-		return &controlplaneapi.Error{
-			Code:    controlplaneapi.CodeConflict,
-			Message: "Preview Task conflicts with existing state",
-			Cause:   err,
-		}
-	default:
-		return internalError(err)
-	}
-}
-
-func invalid(field, message string) *controlplaneapi.Error {
-	return &controlplaneapi.Error{
-		Code:    controlplaneapi.CodeInvalidArgument,
-		Field:   field,
-		Message: message,
-	}
-}
-
-func notFound() *controlplaneapi.Error {
-	return &controlplaneapi.Error{
-		Code:    controlplaneapi.CodeNotFound,
-		Message: "resource not found",
-	}
-}
-
-func internalError(err error) *controlplaneapi.Error {
-	return &controlplaneapi.Error{
-		Code:    controlplaneapi.CodeInternal,
-		Message: "Preview operation failed",
-		Cause:   err,
-	}
-}
-
-func writeJSON(ctx *echo.Context, status int, value any) {
-	_ = ctx.JSON(status, value)
-}
+func comparePorts(left, right entity.Port) int { return trafficapi.ComparePorts(left, right) }

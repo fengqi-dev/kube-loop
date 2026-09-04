@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/fengqi-dev/kube-loop/internal/logging"
 	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
@@ -134,21 +135,14 @@ func (a *App) logInfo(message string)  { a.log(slog.LevelInfo, message) }
 func (a *App) logWarn(message string)  { a.log(slog.LevelWarn, message) }
 func (a *App) logError(message string) { a.log(slog.LevelError, message) }
 
-// parseSlogLevel converts a user-facing level string into a slog level.
-// An empty value resolves to the default (info).
+// parseSlogLevel converts a user-facing level string into a slog level. The
+// level names themselves come from internal/logging, which owns the set the
+// Gateway and Control Plane already accept; only the empty default is local.
 func parseSlogLevel(raw string) (slog.Level, error) {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "", "info":
+	if strings.TrimSpace(raw) == "" {
 		return slog.LevelInfo, nil
-	case "debug":
-		return slog.LevelDebug, nil
-	case "warn":
-		return slog.LevelWarn, nil
-	case "error":
-		return slog.LevelError, nil
-	default:
-		return 0, errors.New("unknown log level")
 	}
+	return logging.ParseLevel(raw)
 }
 
 // slogLevelString maps a slog level onto the canonical lowercase label used by

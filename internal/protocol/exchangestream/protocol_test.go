@@ -2,53 +2,39 @@ package exchangestream
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 )
 
-func TestFramesRoundTrip(t *testing.T) {
-	frames := []Frame{
-		{Type: Ready},
-		{Type: Open, StreamID: 1, ServicePort: 8080, Protocol: ProtocolTCP},
-		{Type: Data, StreamID: 1, Payload: []byte("request")},
-		{Type: CloseWrite, StreamID: 1},
-		{Type: Close, StreamID: 1, Payload: []byte("closed")},
-		{Type: Datagram, StreamID: 2, ServicePort: 5353, Protocol: ProtocolUDP, Payload: []byte("dns")},
-		{Type: Stop, Payload: []byte("Session ended")},
+// The frame layout itself is covered in internal/protocol/streamframe. What
+// belongs here is the part this contract owns: that its own constants and
+// Frame type travel through its own codec, and that it names itself when it
+// refuses a frame.
+func TestFramesRoundTripThroughContractTypes(t *testing.T) {
+	want := Frame{Type: Data, StreamID: 1, Payload: []byte("payload")}
+	encoded, err := Encode(want)
+	if err != nil {
+		t.Fatalf("encode: %v", err)
 	}
-	for _, want := range frames {
-		encoded, err := Encode(want)
-		if err != nil {
-			t.Fatalf("encode %#v: %v", want, err)
-		}
-		got, err := Decode(encoded)
-		if err != nil {
-			t.Fatalf("decode %#v: %v", want, err)
-		}
-		if got.Type != want.Type || got.StreamID != want.StreamID || got.ServicePort != want.ServicePort ||
-			got.Protocol != want.Protocol || !bytes.Equal(got.Payload, want.Payload) {
-			t.Fatalf("round trip got=%#v want=%#v", got, want)
-		}
+	got, err := Decode(encoded)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.Type != want.Type || got.StreamID != want.StreamID || !bytes.Equal(got.Payload, want.Payload) {
+		t.Fatalf("round trip got=%#v want=%#v", got, want)
+	}
+	open := Frame{Type: Open, StreamID: 1, ServicePort: 8080, Protocol: ProtocolTCP}
+	if _, err := Encode(open); err != nil {
+		t.Fatalf("encode open frame: %v", err)
 	}
 }
 
-func TestFramesRejectCrossDirectionMetadataAndOversize(t *testing.T) {
-	invalid := []Frame{
-		{Type: Ready, StreamID: 1},
-		{Type: Open, StreamID: 1, ServicePort: 80, Protocol: ProtocolUDP},
-		{Type: Data, StreamID: 1},
-		{Type: Data, StreamID: 1, Payload: make([]byte, MaximumData+1)},
-		{Type: CloseWrite},
-		{Type: Close, StreamID: 1, Payload: make([]byte, MaximumError+1)},
-		{Type: Datagram, StreamID: 1, ServicePort: 53, Protocol: ProtocolTCP, Payload: []byte("x")},
-		{Type: Stop, Protocol: ProtocolTCP},
-		{Type: 255},
+func TestRejectionsNameThisContract(t *testing.T) {
+	if _, err := Encode(Frame{Type: Data, StreamID: 1, Payload: make([]byte, MaximumData+1)}); err == nil ||
+		!strings.Contains(err.Error(), "exchange") {
+		t.Fatalf("oversize rejection = %v, want one naming exchange", err)
 	}
-	for _, frame := range invalid {
-		if _, err := Encode(frame); err == nil {
-			t.Fatalf("invalid frame accepted: %#v", frame)
-		}
-	}
-	if _, err := Decode([]byte{Ready}); err == nil {
-		t.Fatal("truncated Exchange frame accepted")
+	if _, err := Decode([]byte{Ready}); err == nil || !strings.Contains(err.Error(), "exchange") {
+		t.Fatalf("truncated rejection = %v, want one naming exchange", err)
 	}
 }
