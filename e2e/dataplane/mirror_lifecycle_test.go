@@ -33,6 +33,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/sessionapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/ticketapi"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/trafficapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/trafficbindingclient"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/trafficsession"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
@@ -120,7 +121,7 @@ func TestRealMirrorPreservesPrimaryPathAndRecoversStaleOwner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	realMutator, err := mirrorapi.NewTrafficBindingResourceMutator(provider, bindings)
+	realMutator, err := trafficapi.NewTrafficBindingInterceptResources(provider, bindings)
 	if err != nil {
 		t.Fatal(err)
 	}
