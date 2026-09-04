@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"time"
 
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/execapi"
@@ -54,6 +55,15 @@ type PodExecutor interface {
 		execapi.Streams,
 	) error
 }
+
+// A resumed upload waits for the interrupted attempt's container writer to
+// stop growing the partial file before it reports an offset. Two consecutive
+// equal reads settle it; the bound keeps a container that writes continuously
+// from stalling the request.
+const (
+	partialUploadSettleInterval = 50 * time.Millisecond
+	partialUploadSettleReads    = 20
+)
 
 type KubernetesTransferExecutor struct {
 	pods         PodExecutor

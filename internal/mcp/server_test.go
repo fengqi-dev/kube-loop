@@ -371,6 +371,9 @@ func mcpRequestStatus(t *testing.T, endpoint, token string) int {
 	}
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Accept", "application/json, text/event-stream")
+	// The server is deliberately restarted between requests in this test.
+	// Do not let the shared client reuse a connection to the closed listener.
+	request.Close = true
 	if token != "" {
 		request.Header.Set("Authorization", "Bearer "+token)
 	}

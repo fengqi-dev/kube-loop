@@ -117,7 +117,6 @@ func (handler *Service) stream(
 	if spec.Direction == DirectionUpload {
 		outcome, transferErr = handler.upload(
 			leaseContext,
-			cancel,
 			connection,
 			&writeMu,
 			identity,
@@ -131,12 +130,29 @@ func (handler *Service) stream(
 			identity, session.Namespace, task.ID, spec,
 		)
 	}
-	cancelled := leaseContext.Err() != nil ||
-		errors.Is(transferErr, context.Canceled)
+	cancelled := transferWasCancelled(
+		leaseContext,
+		transferErr,
+		handler.credentialCheckInterval,
+	)
 	result := resultFromOutcome(outcome, transferErr, cancelled)
 	nextState := remotetask.Stopped
 	if transferErr != nil && !cancelled {
 		nextState = remotetask.Failed
+		// The client is told only that the transfer failed, because the
+		// container's own message may describe paths it must not learn about.
+		// Record the real cause here or it is lost entirely.
+		handler.logger.ErrorContext(
+			request.Context(),
+			"file transfer failed",
+			"error", transferErr,
+			"task", task.ID,
+			"direction", spec.Direction,
+			"kind", spec.Kind,
+			"offset", spec.Offset,
+			"size", spec.Size,
+			"transferred", outcome.Transferred,
+		)
 	}
 	if err := handler.persistState(
 		request.Context(), task.ID, remotetask.Running, nextState, result,
@@ -158,4 +174,29 @@ func (handler *Service) stream(
 		"file transfer complete",
 	)
 	return nil
+}
+
+func transferWasCancelled(
+	leaseContext context.Context,
+	transferErr error,
+	checkInterval time.Duration,
+) bool {
+	if leaseContext.Err() != nil || errors.Is(transferErr, context.Canceled) {
+		return true
+	}
+	if transferErr == nil {
+		return false
+	}
+
+	// A revoked client can close the upload before the periodic lease check
+	// observes the revocation. Give that check one full interval to distinguish
+	// an ended lease from an ordinary executor failure.
+	timer := time.NewTimer(checkInterval)
+	defer timer.Stop()
+	select {
+	case <-leaseContext.Done():
+		return true
+	case <-timer.C:
+		return false
+	}
 }

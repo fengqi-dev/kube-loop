@@ -264,6 +264,9 @@ func TestKubernetesTransferExecutorNegotiatesAndResumesStablePartialUpload(
 	if err != nil || offset != 7 {
 		t.Fatalf("offset = %d err = %v", offset, err)
 	}
+	if err := os.WriteFile(temporary, contents[:9], 0o600); err != nil {
+		t.Fatal(err)
+	}
 	spec.Offset = offset
 	outcome, err := executor.Upload(
 		context.Background(),
@@ -276,6 +279,52 @@ func TestKubernetesTransferExecutorNegotiatesAndResumesStablePartialUpload(
 	if err != nil || outcome.Transferred != uint64(len(contents)) ||
 		outcome.Checksum != checksum {
 		t.Fatalf("outcome = %#v err = %v", outcome, err)
+	}
+	downloaded, err := os.ReadFile(remote)
+	if err != nil || !bytes.Equal(downloaded, contents) {
+		t.Fatalf("remote contents = %q err = %v", downloaded, err)
+	}
+}
+
+func TestKubernetesTransferExecutorFencesStalePartialWriter(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX container shell resume test")
+	}
+	root := t.TempDir()
+	contents := []byte("stable resumable upload")
+	checksum := sha256.Sum256(contents)
+	remote := filepath.ToSlash(filepath.Join(root, "result.bin"))
+	spec := Spec{
+		Direction: DirectionUpload, Kind: KindFile, Pod: "pod", Container: "container", RemotePath: remote,
+		Size: uint64(len(contents)), Checksum: hex.EncodeToString(checksum[:]),
+		ResumeID: uuid.NewString(), AllowedRoot: filepath.ToSlash(root), Offset: 7,
+	}
+	temporary := uploadTemporaryPath(spec, "ignored-task")
+	if err := os.WriteFile(temporary, contents[:spec.Offset], 0o600); err != nil {
+		t.Fatal(err)
+	}
+	staleWriter, err := os.OpenFile(temporary, os.O_WRONLY|os.O_APPEND, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = staleWriter.Close() })
+	executor, err := NewKubernetesTransferExecutor(localShellPodExecutor{}, 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outcome, err := executor.Upload(
+		context.Background(),
+		controlplaneapi.Identity{Subject: "user"},
+		"development",
+		"new-task",
+		spec,
+		bytes.NewReader(contents[spec.Offset:]),
+	)
+	if err != nil || outcome.Transferred != uint64(len(contents)) || outcome.Checksum != checksum {
+		t.Fatalf("outcome = %#v err = %v", outcome, err)
+	}
+	if _, err := staleWriter.WriteString("stale writer"); err != nil {
+		t.Fatal(err)
 	}
 	downloaded, err := os.ReadFile(remote)
 	if err != nil || !bytes.Equal(downloaded, contents) {
@@ -501,4 +550,62 @@ func makeArchive(t *testing.T, header tar.Header, contents []byte) []byte {
 		t.Fatal(err)
 	}
 	return buffer.Bytes()
+}
+
+// TestUploadOffsetWaitsForTheInterruptedWriterToStop covers the resume race an
+// interrupted upload leaves behind: the Control Plane stops a transfer when its
+// own stream ends, but the container's writer keeps appending for a moment
+// afterwards. An offset read while that writer is alive is already stale by the
+// time the resumed upload uses it, and both writers then append to the same
+// partial file.
+func TestUploadOffsetWaitsForTheInterruptedWriterToStop(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX container shell resume test")
+	}
+	root := t.TempDir()
+	remote := filepath.ToSlash(filepath.Join(root, "result.bin"))
+	spec := Spec{
+		Direction: DirectionUpload, Kind: KindFile, Pod: "pod", Container: "container",
+		RemotePath: remote, Size: 4096, Checksum: hex.EncodeToString(make([]byte, 32)),
+		ResumeID: uuid.NewString(), AllowedRoot: filepath.ToSlash(root),
+	}
+	temporary := uploadTemporaryPath(spec, "")
+	if err := os.WriteFile(temporary, make([]byte, 8), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	executor, err := NewKubernetesTransferExecutor(localShellPodExecutor{}, 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Stand in for the interrupted attempt's container shell, still flushing
+	// while the resume arrives.
+	const finalSize = 8 + 3*16
+	writing := make(chan struct{})
+	go func() {
+		defer close(writing)
+		for range 3 {
+			time.Sleep(partialUploadSettleInterval)
+			file, err := os.OpenFile(temporary, os.O_APPEND|os.O_WRONLY, 0o600)
+			if err != nil {
+				return
+			}
+			_, _ = file.Write(make([]byte, 16))
+			_ = file.Close()
+		}
+	}()
+
+	offset, err := executor.UploadOffset(
+		t.Context(), controlplaneapi.Identity{Subject: "user"}, "development", spec,
+	)
+	<-writing
+	if err != nil {
+		t.Fatalf("UploadOffset() error = %v", err)
+	}
+	if offset != finalSize {
+		t.Fatalf(
+			"UploadOffset() = %d, want %d: the offset was read while the interrupted writer was still appending",
+			offset, finalSize,
+		)
+	}
 }

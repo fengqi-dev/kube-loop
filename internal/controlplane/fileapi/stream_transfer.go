@@ -13,24 +13,25 @@ import (
 
 func (handler *Service) upload(
 	leaseContext context.Context,
-	cancel context.CancelFunc,
 	connection *websocket.Conn,
 	writeMu *sync.Mutex,
 	identity controlplaneapi.Identity,
 	namespace, taskID string,
 	spec Spec,
 ) (Outcome, error) {
+	transferContext, cancelTransfer := context.WithCancel(leaseContext)
+	defer cancelTransfer()
 	reader, writer := io.Pipe()
 	inputResult := make(chan error, 1)
 	go func() {
-		err := readUpload(leaseContext, connection, writer, writeMu, spec)
+		err := readUpload(transferContext, connection, writer, writeMu, spec)
 		if err != nil {
-			cancel()
+			cancelTransfer()
 		}
 		inputResult <- err
 	}()
 	outcome, transferErr := handler.executor.Upload(
-		leaseContext,
+		transferContext,
 		identity,
 		namespace,
 		taskID,

@@ -43,6 +43,8 @@ type checker struct {
 	config    Config
 }
 
+const validationErrorsBeforeCancellation = 2
+
 func RuntimeFrom(value any) RuntimeRegistry {
 	runtime, _ := value.(RuntimeRegistry)
 	return runtime
@@ -128,16 +130,34 @@ func watch(
 	lease := checker{
 		store: store, identity: identity, sessionID: sessionID, config: config,
 	}
+	watchValidation(ctx, cancel, config.CheckInterval, lease.valid)
+}
+
+func watchValidation(
+	ctx context.Context,
+	cancel context.CancelFunc,
+	checkInterval time.Duration,
+	validate func(context.Context) (bool, error),
+) {
+	consecutiveErrors := 0
 	periodic.RunAfter(
 		ctx,
-		config.CheckInterval,
+		checkInterval,
 		func(ctx context.Context) {
 			checkContext, checkCancel := context.WithTimeout(
 				ctx,
-				config.CheckInterval,
+				checkInterval,
 			)
-			valid := lease.valid(checkContext)
+			valid, err := validate(checkContext)
 			checkCancel()
+			if err != nil {
+				consecutiveErrors++
+				if consecutiveErrors >= validationErrorsBeforeCancellation {
+					cancel()
+				}
+				return
+			}
+			consecutiveErrors = 0
 			if !valid {
 				cancel()
 			}
@@ -145,11 +165,22 @@ func watch(
 	)
 }
 
-func (lease checker) valid(ctx context.Context) bool {
-	return lease.authorized(ctx) &&
-		lease.grantActive(ctx) &&
-		lease.sessionActive(ctx) &&
-		lease.taskOwned(ctx)
+func (lease checker) valid(ctx context.Context) (bool, error) {
+	if !lease.authorized(ctx) {
+		return false, nil
+	}
+	checks := []func(context.Context) (bool, error){
+		lease.grantActive,
+		lease.sessionActive,
+		lease.taskOwned,
+	}
+	for _, check := range checks {
+		valid, err := check(ctx)
+		if err != nil || !valid {
+			return valid, err
+		}
+	}
+	return true, nil
 }
 
 func (lease checker) authorized(ctx context.Context) bool {
@@ -167,42 +198,62 @@ func (lease checker) authorized(ctx context.Context) bool {
 	).Allowed
 }
 
-func (lease checker) grantActive(ctx context.Context) bool {
+func (lease checker) grantActive(ctx context.Context) (bool, error) {
 	if lease.identity.AuthorizationID == "" {
-		return true
+		return true, nil
 	}
 	identityID, deviceID, err := lease.store.OAuthSessions().
 		RequestOwner(ctx, lease.identity.AuthorizationID)
+	if errors.Is(err, storage.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
 	active, activeErr := lease.store.OAuthSessions().RequestActive(
 		ctx,
 		lease.identity.AuthorizationID,
 		lease.config.Now().UTC(),
 	)
+	if activeErr != nil {
+		return false, activeErr
+	}
 	now := lease.config.Now().UTC()
-	return err == nil && activeErr == nil && active &&
+	return active &&
 		identityID == lease.identity.Subject &&
 		deviceID == lease.identity.DeviceID &&
-		!now.IsZero()
+		!now.IsZero(), nil
 }
 
-func (lease checker) sessionActive(ctx context.Context) bool {
+func (lease checker) sessionActive(ctx context.Context) (bool, error) {
 	stored, err := lease.store.Sessions().GetByID(ctx, lease.sessionID)
-	return err == nil &&
-		stored.IdentityID == lease.identity.Subject &&
+	if errors.Is(err, storage.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return stored.IdentityID == lease.identity.Subject &&
 		stored.DeviceID == lease.identity.DeviceID &&
 		stored.State == statusActive &&
-		stored.ExpiresAt.After(lease.config.Now().UTC())
+		stored.ExpiresAt.After(lease.config.Now().UTC()), nil
 }
 
-func (lease checker) taskOwned(ctx context.Context) bool {
+func (lease checker) taskOwned(ctx context.Context) (bool, error) {
 	if !lease.config.HeartbeatTask {
-		return true
+		return true, nil
 	}
 	task, err := lease.store.Tasks().GetByID(ctx, lease.config.TaskID)
-	if err != nil || task.SessionID != lease.sessionID ||
+	if errors.Is(err, storage.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if task.SessionID != lease.sessionID ||
 		task.IdentityID != lease.identity.Subject ||
 		!task.State.Owned() {
-		return false
+		return false, nil
 	}
 	err = lease.store.Tasks().UpdateState(
 		ctx,
@@ -212,5 +263,8 @@ func (lease checker) taskOwned(ctx context.Context) bool {
 		task.Result,
 		lease.config.Now().UTC(),
 	)
-	return err == nil || errors.Is(err, storage.ErrConflict)
+	if err == nil || errors.Is(err, storage.ErrConflict) {
+		return true, nil
+	}
+	return false, err
 }

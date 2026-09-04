@@ -1,8 +1,10 @@
 package fileapi
 
 import (
+	"context"
 	"errors"
 	"testing"
+	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -10,6 +12,33 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 )
+
+func TestTransferCancellationWaitsForPendingLeaseRevocation(t *testing.T) {
+	leaseContext, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go func() {
+		time.Sleep(10 * time.Millisecond)
+		cancel()
+	}()
+
+	if !transferWasCancelled(
+		leaseContext,
+		errors.New("partial upload"),
+		100*time.Millisecond,
+	) {
+		t.Fatal("transfer failure was not classified as a pending lease cancellation")
+	}
+}
+
+func TestTransferCancellationPreservesExecutorFailure(t *testing.T) {
+	if transferWasCancelled(
+		context.Background(),
+		errors.New("executor failed"),
+		10*time.Millisecond,
+	) {
+		t.Fatal("executor failure was classified as a lease cancellation")
+	}
+}
 
 func TestTargetErrorMapsStablePublicCategories(t *testing.T) {
 	resource := schema.GroupResource{Resource: "pods"}

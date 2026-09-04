@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -153,6 +154,7 @@ type streamExecutor struct {
 	mu            sync.Mutex
 	uploaded      []byte
 	download      []byte
+	uploadErr     error
 	uploadCalls   int
 	downloadCalls int
 }
@@ -173,6 +175,12 @@ func (executor *streamExecutor) Upload(
 	_ fileapi.Spec,
 	input io.Reader,
 ) (fileapi.Outcome, error) {
+	executor.mu.Lock()
+	uploadErr := executor.uploadErr
+	executor.mu.Unlock()
+	if uploadErr != nil {
+		return fileapi.Outcome{}, uploadErr
+	}
 	contents, err := io.ReadAll(input)
 	if err != nil {
 		return fileapi.Outcome{}, err
@@ -582,6 +590,35 @@ func TestFileTransferWebSocketUploadDownloadAndSingleClaim(t *testing.T) {
 			replayErr,
 		)
 	}
+
+	executor.mu.Lock()
+	executor.uploadErr = errors.New("executor failed")
+	executor.mu.Unlock()
+	failedTask := createTask(
+		t,
+		httpServer.URL,
+		identityID,
+		sessionID,
+		"upload-stream-failed",
+		string(uploadBody),
+		http.StatusCreated,
+	)
+	failedConnection := dialFileStream(
+		t,
+		fileStreamURL(httpServer.URL, sessionID, failedTask.ID),
+		identityID,
+	)
+	if err := failedConnection.WriteMessage(websocket.BinaryMessage, dataFrame); err != nil {
+		t.Fatal(err)
+	}
+	failedResult, _, _ := readFileStream(t, failedConnection)
+	if failedResult.Status != filestream.ResultFailed || failedResult.Error != "file transfer failed" {
+		t.Fatalf("failed upload result = %#v", failedResult)
+	}
+	_ = failedConnection.Close()
+	executor.mu.Lock()
+	executor.uploadErr = nil
+	executor.mu.Unlock()
 
 	downloadBody, _ := json.Marshal(fileapi.Spec{
 		Direction:  fileapi.DirectionDownload,

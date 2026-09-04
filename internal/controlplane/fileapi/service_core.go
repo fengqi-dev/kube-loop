@@ -3,6 +3,7 @@ package fileapi
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"time"
 
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/authorization"
@@ -51,6 +52,9 @@ type Config struct {
 	AllowedPathRoots        []string
 	CredentialCheckInterval time.Duration
 	Authorizer              authorization.Authorizer
+	// Logger records the container-side reason a transfer failed. Clients only
+	// ever see a sanitized message, so without this the cause is lost.
+	Logger *slog.Logger
 }
 
 type Service struct {
@@ -63,6 +67,7 @@ type Service struct {
 	allowedRoots            []string
 	credentialCheckInterval time.Duration
 	authorizer              authorization.Authorizer
+	logger                  *slog.Logger
 }
 
 func New(
@@ -103,9 +108,12 @@ func New(
 	if err != nil {
 		return nil, err
 	}
+	if config.Logger == nil {
+		config.Logger = slog.Default()
+	}
 	return &Service{
 		storage: storageBackend, sessions: sessions, targets: targets, executor: executor, now: config.Now,
 		maximumBytes: config.MaximumBytes, allowedRoots: roots, credentialCheckInterval: config.CredentialCheckInterval,
-		authorizer: config.Authorizer,
+		authorizer: config.Authorizer, logger: config.Logger,
 	}, nil
 }

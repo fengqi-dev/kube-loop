@@ -163,6 +163,56 @@ func TestLeaseStartsWatcherOnlyAfterRuntimeAttach(t *testing.T) {
 	})
 }
 
+func TestWatcherRetriesSingleValidationError(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		const interval = time.Second
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+
+		var calls atomic.Int64
+		go watchValidation(ctx, cancel, interval, func(context.Context) (bool, error) {
+			if calls.Add(1) == 1 {
+				return false, errors.New("temporary storage failure")
+			}
+			return true, nil
+		})
+
+		time.Sleep(interval)
+		synctest.Wait()
+		if err := ctx.Err(); err != nil {
+			t.Fatalf("single validation error canceled lease: %v", err)
+		}
+		time.Sleep(interval)
+		synctest.Wait()
+		if err := ctx.Err(); err != nil {
+			t.Fatalf("successful retry did not preserve lease: %v", err)
+		}
+	})
+}
+
+func TestWatcherCancelsAfterRepeatedValidationErrors(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		const interval = time.Second
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+
+		go watchValidation(ctx, cancel, interval, func(context.Context) (bool, error) {
+			return false, errors.New("persistent storage failure")
+		})
+
+		time.Sleep(interval)
+		synctest.Wait()
+		if err := ctx.Err(); err != nil {
+			t.Fatalf("first validation error canceled lease: %v", err)
+		}
+		time.Sleep(interval)
+		synctest.Wait()
+		if !errors.Is(ctx.Err(), context.Canceled) {
+			t.Fatalf("repeated validation errors left lease active: %v", ctx.Err())
+		}
+	})
+}
+
 func TestLeaseFollowsHeartbeatExtendedSessionExpiry(t *testing.T) {
 	stateStore, identityID, sessionID, _ := createLeaseStore(t)
 	defer func() { _ = stateStore.Close() }()

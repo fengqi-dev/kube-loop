@@ -5,10 +5,12 @@ import (
 	"context"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"path"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/kballard/go-shellquote"
 
@@ -54,8 +56,14 @@ func (executor *KubernetesTransferExecutor) Upload(
 	}
 	expected, _ := hex.DecodeString(spec.Checksum)
 	if size != spec.Size || !bytes.Equal(checksum[:], expected) {
-		return Outcome{}, errors.New(
-			"uploaded content does not match declared size and checksum",
+		// The caller sanitizes this before the client sees it, so name what
+		// actually differs: a short write and corrupted content are the same
+		// message otherwise, and a resume can only be debugged by telling them
+		// apart.
+		return Outcome{}, fmt.Errorf(
+			"uploaded content does not match declared size and checksum: "+
+				"size %d of %d, checksum %s of %s, resumed from %d",
+			size, spec.Size, hex.EncodeToString(checksum[:]), spec.Checksum, spec.Offset,
 		)
 	}
 	finalSource := temporaryArchive
@@ -97,6 +105,48 @@ func (executor *KubernetesTransferExecutor) UploadOffset(
 		return 0, errors.New("resumable file upload specification is invalid")
 	}
 	temporary := uploadTemporaryPath(spec, "")
+	// The interrupted attempt's container shell exits on its own schedule: the
+	// Control Plane stops a transfer as soon as its own stream ends, but the
+	// `cat` still appending inside the container only sees the closed stdin a
+	// moment later. Reporting a size while that writer is alive hands back an
+	// offset the resumed upload then has to race, and both writers end up
+	// appending to the same partial file. Report the size only once two
+	// consecutive reads agree, so the resume starts after the old writer
+	// rather than alongside it.
+	settled, err := executor.partialUploadSize(ctx, identity, namespace, spec, temporary)
+	if err != nil {
+		return 0, err
+	}
+	for range partialUploadSettleReads {
+		select {
+		case <-ctx.Done():
+			return 0, ctx.Err()
+		case <-time.After(partialUploadSettleInterval):
+		}
+		current, err := executor.partialUploadSize(ctx, identity, namespace, spec, temporary)
+		if err != nil {
+			return 0, err
+		}
+		if current == settled {
+			return settled, nil
+		}
+		settled = current
+	}
+	// A partial file that never settles is still resumable: the upload
+	// reconciles a larger one by trimming it back to this offset.
+	return settled, nil
+}
+
+// partialUploadSize reports how much of a resumable upload the container
+// already holds. A symlink or any other non-regular file at the partial path
+// is refused rather than measured, so a resume cannot be redirected.
+func (executor *KubernetesTransferExecutor) partialUploadSize(
+	ctx context.Context,
+	identity controlplaneapi.Identity,
+	namespace string,
+	spec Spec,
+	temporary string,
+) (uint64, error) {
 	var stdout bytes.Buffer
 	quoted := shellquote.Join(temporary)
 	script := "if [ -L " + quoted + " ]; then exit 74; " +
@@ -105,13 +155,13 @@ func (executor *KubernetesTransferExecutor) UploadOffset(
 	if err := executor.shell(ctx, identity, namespace, spec, script, nil, &stdout); err != nil {
 		return 0, err
 	}
-	offset, err := strconv.ParseUint(strings.TrimSpace(stdout.String()), 10, 64)
-	if err != nil || offset > executor.maximumBytes {
+	size, err := strconv.ParseUint(strings.TrimSpace(stdout.String()), 10, 64)
+	if err != nil || size > executor.maximumBytes {
 		return 0, errors.New(
 			"container returned an invalid partial upload size",
 		)
 	}
-	return offset, nil
+	return size, nil
 }
 
 func uploadTemporaryPath(spec Spec, taskID string) string {
@@ -134,12 +184,14 @@ func (executor *KubernetesTransferExecutor) uploadFile(
 	precondition := ""
 	if spec.Offset > 0 {
 		operator = ">>"
-		precondition = "test \"$(wc -c < " + shellquote.Join(
-			temporary,
-		) + ")\" -eq " + strconv.FormatUint(
-			spec.Offset,
-			10,
-		) + "; "
+		quotedTemporary := shellquote.Join(temporary)
+		quotedTrimmed := shellquote.Join(temporary + ".trim")
+		offset := strconv.FormatUint(spec.Offset, 10)
+		precondition = "actual=$(wc -c < " + quotedTemporary + "); " +
+			"test \"$actual\" -ge " + offset + "; " +
+			"rm -f -- " + quotedTrimmed + "; " +
+			"head -c " + offset + " -- " + quotedTemporary + " > " + quotedTrimmed + "; " +
+			"mv -f -- " + quotedTrimmed + " " + quotedTemporary + "; "
 	}
 	script := "set -eu; mkdir -p -- " + shellquote.Join(
 		parent,
