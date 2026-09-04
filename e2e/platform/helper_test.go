@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/fengqi-dev/kube-loop/internal/helper"
-	helperprotocol "github.com/fengqi-dev/kube-loop/internal/protocol/helper"
+	helperprotocol "github.com/fengqi-dev/kube-loop/internal/protocol/helperrpc"
 )
 
 func requirePlatformE2E(t *testing.T) {

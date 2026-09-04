@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/fengqi-dev/kube-loop/internal/helper"
-	helperprotocol "github.com/fengqi-dev/kube-loop/internal/protocol/helper"
+	helperprotocol "github.com/fengqi-dev/kube-loop/internal/protocol/helperrpc"
 )
 
 func main() {

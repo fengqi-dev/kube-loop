@@ -6,8 +6,8 @@ import (
 	"os"
 	"testing"
 
-	helperplatform "github.com/fengqi-dev/kube-loop/internal/helper/platform"
-	"github.com/fengqi-dev/kube-loop/internal/singbox"
+	helperplatform "github.com/fengqi-dev/kube-loop/internal/helperd/platform"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/sessionspec"
 )
 
 const platformE2EDomain = "kubeloop-e2e.test"
@@ -17,7 +17,7 @@ func TestPlatformDNSApplyAndRestore(t *testing.T) {
 		t.Skip("set KUBELOOP_PLATFORM_E2E=1 to modify real platform DNS")
 	}
 	workDir := t.TempDir()
-	dns := singbox.DNSMeta{
+	dns := sessionspec.DNSMeta{
 		Listen:  "127.0.0.1",
 		Port:    53,
 		Domains: []string{platformE2EDomain},
