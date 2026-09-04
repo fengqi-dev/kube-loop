@@ -83,15 +83,9 @@ func trafficConsoleRow(
 }
 
 func mirrorConsoleRow(index int, task clientmirror.Info) consoleRow {
-	targets := make([]clientreverserelay.Target, 0, len(task.Targets))
-	for _, target := range task.Targets {
-		targets = append(targets, clientreverserelay.Target{
-			ServicePort: target.ServicePort,
-			Protocol:    target.Protocol,
-			LocalHost:   target.LocalHost,
-			LocalPort:   target.LocalPort,
-		})
-	}
+	// Mirror's local targets are the shared relay target type, so the row
+	// takes them as they are.
+	targets := append([]clientreverserelay.Target(nil), task.Targets...)
 	return trafficConsoleRow(
 		"MIRROR",
 		"mirror",

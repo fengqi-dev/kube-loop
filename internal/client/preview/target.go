@@ -74,3 +74,14 @@ func matchTask(task remote.PreviewTask, name string, targets []LocalTarget) erro
 	}
 	return nil
 }
+
+func previewTargets(items []remote.LocalTarget) []LocalTarget {
+	targets := make([]LocalTarget, len(items))
+	for index, item := range items {
+		targets[index] = LocalTarget{
+			Protocol: item.Protocol, ServicePort: item.ServicePort,
+			LocalHost: item.LocalHost, LocalPort: item.LocalPort,
+		}
+	}
+	return targets
+}

@@ -1,13 +1,15 @@
 package mirror
 
 import (
-	"context"
 	"errors"
 	"net"
 	"time"
+
+	"github.com/fengqi-dev/kube-loop/internal/client/reverserelay"
+	"github.com/fengqi-dev/kube-loop/internal/client/taskrelay"
 )
 
-type DialContextFunc func(context.Context, string, string) (net.Conn, error)
+type DialContextFunc = reverserelay.DialContextFunc
 
 type Config struct {
 	DialContext        DialContextFunc
@@ -53,8 +55,14 @@ func NewManager(client Client, config Config) (*Manager, error) {
 		config.ShadowIdleTimeout < 100*time.Millisecond || config.ShadowIdleTimeout > 24*time.Hour {
 		return nil, errors.New("mirror shadow queue or timeout configuration is invalid")
 	}
-	return &Manager{
-		client: client, streams: streams, dial: config.DialContext,
-		config: config, active: make(map[string]*activeMirror),
-	}, nil
+	remoteGateway := gateway{
+		client: client, streams: streams, dial: config.DialContext, config: config,
+	}
+	tasks, err := taskrelay.New(taskrelay.Config[Info]{
+		Name: "mirror", Gateway: remoteGateway, Open: remoteGateway.open, Describe: describe,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &Manager{Manager: tasks, client: client, gateway: remoteGateway}, nil
 }

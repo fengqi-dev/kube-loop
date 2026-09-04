@@ -9,6 +9,7 @@ import (
 
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
+	"github.com/fengqi-dev/kube-loop/internal/client/taskrelay"
 )
 
 type restorePreviewClient struct {
@@ -41,16 +42,11 @@ func TestManagerRestoreReopensReleasedPreviewWithoutRemotePause(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	manager.mu.Lock()
-	manager.active[task.ID] = &activePreview{
-		profile: profile.Profile{ID: "server"}, session: session, task: task,
-		info: Info{
-			ID: task.ID, ProfileID: "server", SessionID: session.ID, Namespace: session.Namespace,
-			Name: task.Name, ClusterIP: task.ClusterIP, State: previewStatePaused,
-			Targets: []LocalTarget{{Protocol: "tcp", ServicePort: 80, LocalHost: "127.0.0.1", LocalPort: 8080}},
-		},
-	}
-	manager.mu.Unlock()
+	manager.Track(profile.Profile{ID: "server"}, session, taskrelay.Task{
+		ID: task.ID, SessionID: session.ID, Namespace: session.Namespace,
+		Service: task.Name, ClusterIP: task.ClusterIP,
+		Targets: []LocalTarget{{Protocol: "tcp", ServicePort: 80, LocalHost: "127.0.0.1", LocalPort: 8080}},
+	})
 	if err := manager.Restore(t.Context(), profile.Profile{ID: "server"}, session); err == nil {
 		t.Fatal("Restore() reopened a released Preview without a local Traffic stream")
 	}
@@ -58,7 +54,7 @@ func TestManagerRestoreReopensReleasedPreviewWithoutRemotePause(t *testing.T) {
 	if openCalls != 1 || stopCalls != 0 {
 		t.Fatalf("restore calls = open %d, stop %d; want open 1, stop 0", openCalls, stopCalls)
 	}
-	if items := manager.List("server"); len(items) != 1 || items[0].State != previewStatePaused {
+	if items := manager.List("server"); len(items) != 1 || items[0].State != taskrelay.StatePaused {
 		t.Fatalf("released Preview was dropped or resumed: %#v", items)
 	}
 }

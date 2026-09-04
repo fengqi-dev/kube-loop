@@ -21,7 +21,11 @@ import (
 
 func TestManagerDeleteReportsNotManagedLocally(t *testing.T) {
 	t.Parallel()
-	manager := &Manager{active: make(map[string]*activeExchange)}
+	client := &testExchangeClient{}
+	manager, err := NewManager(client, Config{TrafficStreams: client})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := manager.Delete(
 		context.Background(), "server-1", uuid.NewString(),
 	); !errors.Is(err, ErrNotManagedLocally) {

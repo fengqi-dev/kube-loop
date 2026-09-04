@@ -9,6 +9,7 @@ import (
 
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
+	"github.com/fengqi-dev/kube-loop/internal/client/taskrelay"
 )
 
 type restoreMirrorClient struct {
@@ -41,16 +42,11 @@ func TestManagerRestoreReopensReleasedMirrorWithoutRemotePause(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	manager.mu.Lock()
-	manager.active[task.ID] = &activeMirror{
-		profile: profile.Profile{ID: "server"}, session: session, task: task,
-		info: Info{
-			ID: task.ID, ProfileID: "server", SessionID: session.ID, Namespace: session.Namespace,
-			Service: task.Service, ClusterIP: task.ClusterIP, State: mirrorStatePaused,
-			Targets: []LocalTarget{{Protocol: "tcp", ServicePort: 80, LocalHost: "127.0.0.1", LocalPort: 8080}},
-		},
-	}
-	manager.mu.Unlock()
+	manager.Track(profile.Profile{ID: "server"}, session, taskrelay.Task{
+		ID: task.ID, SessionID: session.ID, Namespace: session.Namespace,
+		Service: task.Service, ClusterIP: task.ClusterIP,
+		Targets: []LocalTarget{{Protocol: "tcp", ServicePort: 80, LocalHost: "127.0.0.1", LocalPort: 8080}},
+	})
 	if err := manager.Restore(t.Context(), profile.Profile{ID: "server"}, session); err == nil {
 		t.Fatal("Restore() reopened a released Mirror without a local Traffic stream")
 	}
@@ -58,7 +54,7 @@ func TestManagerRestoreReopensReleasedMirrorWithoutRemotePause(t *testing.T) {
 	if openCalls != 1 || stopCalls != 0 {
 		t.Fatalf("restore calls = open %d, stop %d; want open 1, stop 0", openCalls, stopCalls)
 	}
-	if items := manager.List("server"); len(items) != 1 || items[0].State != mirrorStatePaused {
+	if items := manager.List("server"); len(items) != 1 || items[0].State != taskrelay.StatePaused {
 		t.Fatalf("released Mirror was dropped or resumed: %#v", items)
 	}
 }

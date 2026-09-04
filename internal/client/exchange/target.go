@@ -74,3 +74,14 @@ func matchTaskTargets(task remote.ExchangeTask, targets []LocalTarget) error {
 	}
 	return nil
 }
+
+func exchangeTargets(items []remote.LocalTarget) []LocalTarget {
+	targets := make([]LocalTarget, len(items))
+	for index, item := range items {
+		targets[index] = LocalTarget{
+			Protocol: item.Protocol, ServicePort: item.ServicePort,
+			LocalHost: item.LocalHost, LocalPort: item.LocalPort,
+		}
+	}
+	return targets
+}

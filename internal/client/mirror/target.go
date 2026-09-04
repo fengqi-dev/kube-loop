@@ -5,15 +5,11 @@ import (
 	"strings"
 
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
+	"github.com/fengqi-dev/kube-loop/internal/client/reverserelay"
 	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
-type LocalTarget struct {
-	ServicePort int32  `json:"servicePort"`
-	Protocol    string `json:"protocol"`
-	LocalHost   string `json:"localHost"`
-	LocalPort   uint16 `json:"localPort"`
-}
+type LocalTarget = reverserelay.Target
 
 func normalizeTargets(input []LocalTarget) ([]LocalTarget, []remote.MirrorPort, error) {
 	if len(input) == 0 || len(input) > 64 {
@@ -76,4 +72,15 @@ func matchTaskTargets(task remote.MirrorTask, targets []LocalTarget) error {
 		delete(want, key)
 	}
 	return nil
+}
+
+func mirrorTargets(items []remote.LocalTarget) []LocalTarget {
+	targets := make([]LocalTarget, len(items))
+	for index, item := range items {
+		targets[index] = LocalTarget{
+			Protocol: item.Protocol, ServicePort: item.ServicePort,
+			LocalHost: item.LocalHost, LocalPort: item.LocalPort,
+		}
+	}
+	return targets
 }
