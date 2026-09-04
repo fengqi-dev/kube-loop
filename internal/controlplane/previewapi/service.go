@@ -21,9 +21,10 @@ type SessionValidator interface {
 }
 
 type Service struct {
-	// Relay carries the traffic-control handshake every traffic task API
-	// serves identically: Claim, Heartbeat and Finish.
-	trafficapi.Relay
+	// Handlers carries everything the three traffic task APIs do identically:
+	// the REST surface over this API's own Spec and Document, and the
+	// traffic-control handshake it embeds in turn.
+	trafficapi.Handlers[Spec, Document]
 
 	sessions  SessionValidator
 	resources ResourceManager
@@ -48,10 +49,15 @@ func New(
 		resources: resources,
 		config:    config,
 	}
-	service.Relay = trafficapi.Relay{
+	service.Handlers = trafficapi.Handlers[Spec, Document]{
 		Task: task, Sessions: sessions, Bindings: service.bindingSessions,
 		ServiceName: trafficapi.ServiceNameFromPreview,
 		Release:     service.release, ReleaseTimeout: config.DeleteTimeout,
+		TaskType: TaskType, PathSegment: "previews",
+		Normalize:     normalizeRequest,
+		NewBinding:    service.newBinding,
+		Document:      previewDocument,
+		DeleteBinding: service.deleteBinding,
 	}
 	return service, nil
 }

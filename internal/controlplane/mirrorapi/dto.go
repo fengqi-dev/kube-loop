@@ -20,7 +20,3 @@ type Document struct {
 	UpdatedAt    time.Time                  `json:"updatedAt"`
 	ExpiresAt    time.Time                  `json:"expiresAt"`
 }
-
-type listDocument struct {
-	Items []Document `json:"items"`
-}

@@ -5,7 +5,6 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/labstack/echo/v5"
 	"k8s.io/apimachinery/pkg/util/validation"
 
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
@@ -63,13 +62,7 @@ func invalid(field, message string) *controlplaneapi.Error {
 	return trafficapi.Invalid(field, message)
 }
 
-func storageError(err error) *controlplaneapi.Error { return apiErrors.Storage(err) }
-
 func internalError(err error) *controlplaneapi.Error { return apiErrors.Internal(err) }
-
-func writeJSON(ctx *echo.Context, status int, value any) {
-	trafficapi.WriteJSON(ctx, status, value)
-}
 
 func normalizeLocalTargets(
 	targets *[]servicemodel.LocalTarget,

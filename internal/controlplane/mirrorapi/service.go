@@ -37,9 +37,10 @@ type ServiceResolver interface {
 type ResourceMutator = trafficapi.InterceptResources
 
 type Service struct {
-	// Relay carries the traffic-control handshake every traffic task API
-	// serves identically: Claim, Heartbeat and Finish.
-	trafficapi.Relay
+	// Handlers carries everything the three traffic task APIs do identically:
+	// the REST surface over this API's own Spec and Document, and the
+	// traffic-control handshake it embeds in turn.
+	trafficapi.Handlers[Spec, Document]
 
 	sessions  SessionValidator
 	services  ServiceResolver
@@ -64,10 +65,15 @@ func New(
 	service := &Service{
 		sessions: sessions, services: services, resources: resources, config: config,
 	}
-	service.Relay = trafficapi.Relay{
+	service.Handlers = trafficapi.Handlers[Spec, Document]{
 		Task: task, Sessions: sessions, Bindings: service.bindingSessions,
 		ServiceName: trafficapi.ServiceNameFromTarget,
 		Release:     service.release, ReleaseTimeout: config.RestoreTimeout,
+		TaskType: TaskType, PathSegment: "mirrors",
+		Normalize:     normalizeRequest,
+		NewBinding:    service.newBinding,
+		Document:      mirrorDocument,
+		DeleteBinding: service.deleteBinding,
 	}
 	return service, nil
 }

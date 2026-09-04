@@ -4,6 +4,7 @@ import (
 	"errors"
 
 	trafficv1alpha1 "github.com/fengqi-dev/kube-loop/api/v1alpha1"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/sessionapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/trafficbindingclient"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/trafficsession"
 )
@@ -18,7 +19,11 @@ func (handler *Service) bindingSessions() (*trafficbindingclient.Manager, error)
 	return provider.BindingManager(), nil
 }
 
-func previewDocument(binding *trafficv1alpha1.TrafficBinding) Document {
+// previewDocument ignores the Session: unlike Exchange and Mirror, a Preview
+// document does not expose the Session expiry.
+func previewDocument(
+	binding *trafficv1alpha1.TrafficBinding, _ sessionapi.ActiveSession,
+) Document {
 	name := ""
 	if binding.Spec.Preview != nil {
 		name = binding.Spec.Preview.ServiceName
