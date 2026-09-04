@@ -149,7 +149,11 @@ type_text "connection"
 send -- "\r"
 expect_text "connection command" {<connection>}
 send -- "m"
-expect_text "SOCKS mode" {Mode: SOCKS}
+# The workspace header styles the label and the value separately, so the
+# label, the space and the value are split by SGR escapes whenever the
+# terminal reports colour support. Match across them rather than assuming the
+# uncoloured rendering a CI runner happens to produce.
+expect_text "SOCKS mode" {Mode:[^\n]{0,40}SOCKS}
 send -- "\r"
 expect_text "fixture connect" {Data plane connected}
 send -- "\r"
