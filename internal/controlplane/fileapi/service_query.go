@@ -12,6 +12,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/sessionapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/taskapi"
 )
 
 func (handler *Service) get(
@@ -25,7 +26,7 @@ func (handler *Service) get(
 		return notFound()
 	}
 	task, err := handler.storage.Tasks().GetByID(request.Context(), taskID)
-	if err != nil || !owned(task, identity, session) {
+	if err != nil || !taskapi.Owned(task, TaskType, identity, session) {
 		return notFound()
 	}
 	document, err := handler.decodeTask(task, session.Namespace)
@@ -47,14 +48,6 @@ func (handler *Service) specFromTask(task storage.Task) (Spec, error) {
 	return spec, nil
 }
 
-func (handler *Service) documentFromTask(
-	task storage.Task,
-	namespace string,
-) Document {
-	document, _ := handler.decodeTask(task, namespace)
-	return document
-}
-
 func (handler *Service) decodeTask(
 	task storage.Task,
 	namespace string,
@@ -74,13 +67,4 @@ func (handler *Service) decodeTask(
 		Overwrite: spec.Overwrite, ResumeID: spec.ResumeID,
 		CreatedAt: task.CreatedAt, UpdatedAt: task.UpdatedAt, ExpiresAt: expiresAt,
 	}, nil
-}
-
-func owned(
-	task storage.Task,
-	identity controlplaneapi.Identity,
-	session sessionapi.ActiveSession,
-) bool {
-	return task.Type == TaskType && task.IdentityID == identity.Subject &&
-		task.SessionID == session.ID
 }

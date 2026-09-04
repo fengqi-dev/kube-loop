@@ -1,39 +1,16 @@
 package execapi
 
 import (
-	"errors"
-
-	"github.com/labstack/echo/v5"
-
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
-	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/taskapi"
 )
 
-func storageError(err error) *controlplaneapi.Error {
-	switch {
-	case errors.Is(err, storage.ErrNotFound):
-		return notFound()
-	case errors.Is(err, storage.ErrConflict), errors.Is(err, storage.ErrIdempotencyMismatch):
-		return &controlplaneapi.Error{
-			Code:    controlplaneapi.CodeConflict,
-			Message: "Pod exec Task state changed; reload and retry",
-			Cause:   err,
-		}
-	default:
-		return internalError(err)
-	}
-}
+// apiErrors names this API in every message a client can see. The mapping from
+// storage failures to those messages is shared with the other task APIs.
+var apiErrors = taskapi.Errors{Name: "Pod exec"}
 
-func writeJSON(ctx *echo.Context, status int, value any) {
-	_ = ctx.JSON(status, value)
-}
+func storageError(err error) *controlplaneapi.Error { return apiErrors.Storage(err) }
 
-func internalError(err error) *controlplaneapi.Error {
-	return &controlplaneapi.Error{
-		Code:    controlplaneapi.CodeInternal,
-		Message: "Pod exec operation failed",
-		Cause:   err,
-	}
-}
+func internalError(err error) *controlplaneapi.Error { return apiErrors.Internal(err) }
 
 func notFound() *controlplaneapi.Error { return controlplaneapi.NotFound() }

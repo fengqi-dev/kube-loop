@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
-	"github.com/fengqi-dev/kube-loop/internal/controlplane/sessionapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 )
 
@@ -41,13 +39,4 @@ func decodeTask(task storage.Task, namespace string) (Document, error) {
 		UpdatedAt:   task.UpdatedAt,
 		ExpiresAt:   expiresAt,
 	}, nil
-}
-
-func owned(
-	task storage.Task,
-	identity controlplaneapi.Identity,
-	session sessionapi.ActiveSession,
-) bool {
-	return task.Type == TaskType && task.IdentityID == identity.Subject &&
-		task.SessionID == session.ID
 }

@@ -3,15 +3,11 @@ package fileopsapi
 import (
 	"context"
 	"encoding/json"
-	"fmt"
-	"net/http"
 
-	"github.com/google/uuid"
 	"github.com/labstack/echo/v5"
 
 	"github.com/fengqi-dev/kube-loop/internal/controlplane"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
-	controlplanemiddleware "github.com/fengqi-dev/kube-loop/internal/controlplane/middleware"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/sessionapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/taskapi"
@@ -24,129 +20,50 @@ func (handler *Service) mutate(
 	session sessionapi.ActiveSession,
 	action string,
 ) *controlplaneapi.Error {
-	request := ctx.Request()
-	spec := Spec{}
-	if err := ctx.Bind(&spec); err != nil {
-		return controlplanemiddleware.BindingError(err)
-	}
-	spec.Action = action
-	if apiError := handler.normalize(&spec); apiError != nil {
-		return apiError
-	}
-	key, apiError := taskapi.IdempotencyKey(request)
-	if apiError != nil {
-		return apiError
-	}
-	requestHash, err := taskapi.RequestHash(session.ID, session.Namespace, spec)
-	if err != nil {
-		return internalError(err)
-	}
-	scope := taskapi.Scope(TaskType, identity.Subject)
-	task, replayed, apiError := handler.replay(
-		request.Context(), scope, key, requestHash, identity, session,
-	)
-	if apiError != nil {
-		return apiError
-	} else if replayed {
-		document, err := decodeTask(task, session.Namespace)
-		if err != nil {
-			return internalError(err)
-		}
-		ctx.Response().Header().Set("Idempotent-Replayed", "true")
-		writeJSON(ctx, http.StatusOK, document)
-		return nil
-	}
+	return taskapi.Creator[Spec, Document]{
+		TaskType: TaskType, Storage: handler.storage, Now: handler.now, Errors: apiErrors,
+		Normalize: func(spec *Spec) *controlplaneapi.Error {
+			// The action comes from the route, not the body, so it is fixed
+			// before the spec rules for that action are applied.
+			spec.Action = action
+			return handler.normalize(spec)
+		},
+		Prepare:  handler.resolveContainer,
+		Document: decodeTask,
+		Location: func(session sessionapi.ActiveSession, taskID string) string {
+			return controlplane.APIPathPrefix + "/sessions/" + session.ID +
+				"/pod-files/operations/" + taskID + "?namespace=" + session.Namespace
+		},
+		// A file operation completes within the request, so the Task is
+		// already terminal by the time it is rendered.
+		AfterCreate: handler.execute,
+	}.Create(ctx, identity, session)
+}
+
+// resolveContainer pins the container the operation will run in before the
+// Task is persisted, so a replay cannot land in a different one.
+func (handler *Service) resolveContainer(
+	ctx context.Context,
+	identity controlplaneapi.Identity,
+	session sessionapi.ActiveSession,
+	spec *Spec,
+) *controlplaneapi.Error {
 	container, err := handler.targets.ResolveContainer(
-		request.Context(),
-		identity,
-		session.Namespace,
-		spec.Pod,
-		spec.Container,
+		ctx, identity, session.Namespace, spec.Pod, spec.Container,
 	)
 	if err != nil {
 		return targetError(err)
 	}
 	spec.Container = container
-	specJSON, _ := json.Marshal(spec)
-	now, expiresAt := handler.now().UTC(), session.ExpiresAt.UTC()
-	task = storage.Task{
-		ID:             uuid.NewString(),
-		IdentityID:     identity.Subject,
-		SessionID:      session.ID,
-		Type:           TaskType,
-		State:          remotetask.Pending,
-		Spec:           specJSON,
-		IdempotencyKey: key,
-		CreatedAt:      now,
-		UpdatedAt:      now,
-		ExpiresAt:      &expiresAt,
-	}
-	created := false
-	err = handler.storage.WithinTransaction(
-		request.Context(),
-		func(repositories storage.Repositories) error {
-			record, reserved, reserveErr := repositories.Idempotency().
-				Reserve(request.Context(), storage.IdempotencyRecord{
-					Scope: scope, Key: key, RequestHash: requestHash, ResourceType: TaskType, ResourceID: task.ID,
-					CreatedAt: now, ExpiresAt: expiresAt,
-				})
-			if reserveErr != nil {
-				return reserveErr
-			}
-			if !reserved {
-				existing, loadErr := repositories.Tasks().
-					GetByID(request.Context(), record.ResourceID)
-				if loadErr != nil || !owned(existing, identity, session) {
-					return storage.ErrNotFound
-				}
-				task = existing
-				return nil
-			}
-			if createErr := repositories.Tasks().Create(request.Context(), task); createErr != nil {
-				return createErr
-			}
-			created = true
-			return nil
-		},
-	)
-	if err != nil {
-		return storageError(err)
-	}
-	if created {
-		task, err = handler.execute(
-			request.Context(),
-			identity,
-			session.Namespace,
-			task,
-			spec,
-		)
-		if err != nil {
-			return internalError(err)
-		}
-	} else {
-		ctx.Response().Header().Set("Idempotent-Replayed", "true")
-	}
-	document, err := decodeTask(task, session.Namespace)
-	if err != nil {
-		return internalError(err)
-	}
-	location := fmt.Sprintf(
-		"%s/sessions/%s/pod-files/operations/%s?namespace=%s",
-		controlplane.APIPathPrefix, session.ID, task.ID, session.Namespace,
-	)
-	ctx.Response().Header().Set("Location", location)
-	writeJSON(
-		ctx,
-		map[bool]int{true: http.StatusCreated, false: http.StatusOK}[created],
-		document,
-	)
 	return nil
 }
 
+// execute performs the operation and records its outcome, so the response
+// already carries the result rather than a Task the client must poll.
 func (handler *Service) execute(
 	ctx context.Context,
 	identity controlplaneapi.Identity,
-	namespace string,
+	session sessionapi.ActiveSession,
 	task storage.Task,
 	spec Spec,
 ) (storage.Task, error) {
@@ -158,7 +75,7 @@ func (handler *Service) execute(
 	}
 	next := remotetask.Stopped
 	result := Result{Completed: true}
-	if err := handler.operator.Mutate(ctx, identity, namespace, spec); err != nil {
+	if err := handler.operator.Mutate(ctx, identity, session.Namespace, spec); err != nil {
 		next = remotetask.Failed
 		result = Result{Error: "remote file operation failed"}
 	}

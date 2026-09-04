@@ -5,19 +5,8 @@ import (
 	"errors"
 	"time"
 
-	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
-	"github.com/fengqi-dev/kube-loop/internal/controlplane/sessionapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
 )
-
-func owned(
-	task storage.Task,
-	identity controlplaneapi.Identity,
-	session sessionapi.ActiveSession,
-) bool {
-	return task.Type == TaskType && task.IdentityID == identity.Subject &&
-		task.SessionID == session.ID
-}
 
 func specFromTask(task storage.Task) (Spec, error) {
 	var spec Spec
@@ -28,11 +17,6 @@ func specFromTask(task storage.Task) (Spec, error) {
 		return Spec{}, errors.New("stored Pod exec Task is invalid")
 	}
 	return spec, nil
-}
-
-func documentFromTask(task storage.Task, namespace string) Document {
-	document, _ := decodeTask(task, namespace)
-	return document
 }
 
 func decodeTask(task storage.Task, namespace string) (Document, error) {

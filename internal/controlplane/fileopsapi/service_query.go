@@ -1,8 +1,6 @@
 package fileopsapi
 
 import (
-	"context"
-	"errors"
 	"net/http"
 
 	"github.com/google/uuid"
@@ -11,7 +9,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/controlplaneapi"
 	controlplanemiddleware "github.com/fengqi-dev/kube-loop/internal/controlplane/middleware"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/sessionapi"
-	"github.com/fengqi-dev/kube-loop/internal/controlplane/storage"
+	"github.com/fengqi-dev/kube-loop/internal/controlplane/taskapi"
 )
 
 func (handler *Service) list(
@@ -58,31 +56,6 @@ func (handler *Service) list(
 	})
 	return nil
 }
-func (handler *Service) replay(
-	ctx context.Context,
-	scope, key, hash string,
-	identity controlplaneapi.Identity,
-	session sessionapi.ActiveSession,
-) (storage.Task, bool, *controlplaneapi.Error) {
-	record, err := handler.storage.Idempotency().Get(ctx, scope, key)
-	if errors.Is(err, storage.ErrNotFound) {
-		return storage.Task{}, false, nil
-	}
-	if err != nil {
-		return storage.Task{}, false, storageError(err)
-	}
-	if record.RequestHash != hash {
-		return storage.Task{}, false, storageError(
-			storage.ErrIdempotencyMismatch,
-		)
-	}
-	task, err := handler.storage.Tasks().GetByID(ctx, record.ResourceID)
-	if err != nil || !owned(task, identity, session) {
-		return storage.Task{}, false, notFound()
-	}
-	return task, true, nil
-}
-
 func (handler *Service) get(
 	ctx *echo.Context,
 	identity controlplaneapi.Identity,
@@ -94,7 +67,7 @@ func (handler *Service) get(
 		return notFound()
 	}
 	task, err := handler.storage.Tasks().GetByID(request.Context(), taskID)
-	if err != nil || !owned(task, identity, session) {
+	if err != nil || !taskapi.Owned(task, TaskType, identity, session) {
 		return notFound()
 	}
 	document, err := decodeTask(task, session.Namespace)
