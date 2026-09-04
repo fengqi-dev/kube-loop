@@ -215,7 +215,7 @@ func (s *Server) handleOutbound(
 		s.relayUDP(client, target)
 		return
 	}
-	relayTCP(client, target)
+	streamcopy.Bidirectional(client, target)
 }
 
 func (s *Server) authorizedNetwork(
@@ -284,8 +284,6 @@ func (s *Server) relayUDP(client, target net.Conn) {
 		}
 	}
 }
-
-func relayTCP(left, right net.Conn) { streamcopy.Bidirectional(left, right) }
 
 func resolvePrivate(ctx context.Context, host string, port uint16) (string, error) {
 	if strings.EqualFold(host, "localhost") {

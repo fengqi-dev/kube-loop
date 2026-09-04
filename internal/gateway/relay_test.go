@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
+	"github.com/fengqi-dev/kube-loop/internal/transport/streamcopy"
 )
 
 type delayedRelayReadConn struct {
@@ -35,7 +36,7 @@ func TestRelayTCPForwardsBothDirectionsUntilClose(t *testing.T) {
 	})
 	done := make(chan struct{})
 	go func() {
-		relayTCP(leftRelay, rightRelay)
+		streamcopy.Bidirectional(leftRelay, rightRelay)
 		close(done)
 	}()
 	deadline := time.Now().Add(time.Second)

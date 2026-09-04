@@ -34,18 +34,13 @@ func destination(address *statute.AddrSpec) (string, uint16, error) {
 	return host, uint16(address.Port), nil
 }
 
+// relay copies between the SOCKS client and the target until both directions
+// end. The client halves stay separate because the handshake reader is
+// buffered ahead of the raw connection.
 func relay(client io.Writer, clientReader io.Reader, target net.Conn) {
-	done := make(chan struct{}, 2)
-	go func() {
-		_, _ = io.Copy(target, clientReader)
-		streamcopy.CloseWrite(target)
-		done <- struct{}{}
-	}()
-	go func() {
-		_, _ = io.Copy(client, target)
-		streamcopy.CloseWrite(client)
-		done <- struct{}{}
-	}()
-	<-done
-	<-done
+	streamcopy.Relay(
+		streamcopy.Side{Reader: clientReader, Writer: client},
+		streamcopy.ConnSide(target),
+		streamcopy.Options{},
+	)
 }
