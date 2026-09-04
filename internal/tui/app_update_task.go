@@ -30,7 +30,7 @@ func (m Model) updateTaskListMessage(message tea.Msg) (tea.Model, tea.Cmd, bool)
 			m.err = msg.err.Error()
 			return m, nil, true
 		}
-		m.loginAdding, m.loginURL, m.status = false, "", "Server saved"
+		m.login.adding, m.login.url, m.status = false, "", "Server saved"
 		if m.console.overlay == overlayProfileAdd {
 			m.console.overlay = overlayProfiles
 		}
@@ -51,7 +51,7 @@ func (m Model) updateTaskListMessage(message tea.Msg) (tea.Model, tea.Cmd, bool)
 func (m Model) updateTaskOperationMessage(message tea.Msg) (tea.Model, tea.Cmd, bool) {
 	switch msg := message.(type) {
 	case portForwardStartedMsg:
-		m.loading, m.actionMode = false, actionNone
+		m.loading, m.action.mode = false, actionNone
 		if msg.err != nil {
 			m.err = msg.err.Error()
 			return m, nil, true
@@ -59,7 +59,7 @@ func (m Model) updateTaskOperationMessage(message tea.Msg) (tea.Model, tea.Cmd, 
 		m.status = fmt.Sprintf("Port forward started on %s", msg.info.Address)
 		return m, m.workspaceNavigate(resourceTasks, true), true
 	case trafficOperationStartedMsg:
-		m.loading, m.actionMode = false, actionNone
+		m.loading, m.action.mode = false, actionNone
 		if msg.err != nil {
 			m.err = msg.err.Error()
 			return m, nil, true
@@ -90,7 +90,7 @@ func (m Model) updateTaskOperationMessage(message tea.Msg) (tea.Model, tea.Cmd, 
 		m.err, m.status = "", "Helper Service uninstalled"
 		return m, nil, true
 	case execStartedMsg:
-		m.loading, m.actionMode = false, actionNone
+		m.loading, m.action.mode = false, actionNone
 		if msg.err != nil {
 			m.err = msg.err.Error()
 			return m, nil, true

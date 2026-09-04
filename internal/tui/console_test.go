@@ -285,23 +285,23 @@ func TestUpdateConsoleMouseNavigation(t *testing.T) {
 
 func TestViewConsoleActionOverlay(t *testing.T) {
 	model := newConsoleTestModel(tabWorkloads, 100, 28)
-	model.actionMode = actionExec
-	model.actionPod = "api-0"
-	model.actionCommand = "env"
+	model.action.mode = actionExec
+	model.action.pod = "api-0"
+	model.action.command = "env"
 	assertConsoleContains(t, model.View(), "EXECUTE COMMAND", "api-0", "Command: env", "Enter  Start")
 }
 
 func TestUpdateAddProfileAcceptsPasteAndUnicode(t *testing.T) {
-	model := Model{loginAdding: true}
+	model := Model{login: loginState{adding: true}}
 	next, _ := model.updateAddProfile(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("https://例子.test/path")})
 	model = next.(Model)
-	if model.loginURL != "https://例子.test/path" {
-		t.Fatalf("loginURL = %q", model.loginURL)
+	if model.login.url != "https://例子.test/path" {
+		t.Fatalf("loginURL = %q", model.login.url)
 	}
 	next, _ = model.updateAddProfile(tea.KeyMsg{Type: tea.KeyBackspace})
 	model = next.(Model)
-	if model.loginURL != "https://例子.test/pat" {
-		t.Fatalf("loginURL after backspace = %q", model.loginURL)
+	if model.login.url != "https://例子.test/pat" {
+		t.Fatalf("loginURL after backspace = %q", model.login.url)
 	}
 }
 
@@ -358,16 +358,16 @@ func TestConsoleProfileOverlayKeyboardAndMouse(t *testing.T) {
 	model.updateConsole(tea.MouseMsg(tea.MouseEvent{
 		X: 20, Y: 16, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft,
 	}))
-	if model.loginCursor != 1 {
-		t.Fatalf("profile cursor after overlay click = %d, want 1", model.loginCursor)
+	if model.login.cursor != 1 {
+		t.Fatalf("profile cursor after overlay click = %d, want 1", model.login.cursor)
 	}
 	model.updateConsole(consoleKey("up"))
-	if model.loginCursor != 0 {
-		t.Fatalf("profile cursor after up = %d, want 0", model.loginCursor)
+	if model.login.cursor != 0 {
+		t.Fatalf("profile cursor after up = %d, want 0", model.login.cursor)
 	}
 	model.updateConsole(consoleKey("j"))
-	if model.loginCursor != 1 {
-		t.Fatalf("profile cursor after j = %d, want 1", model.loginCursor)
+	if model.login.cursor != 1 {
+		t.Fatalf("profile cursor after j = %d, want 1", model.login.cursor)
 	}
 	model.updateConsole(consoleKey("d"))
 	if model.console.overlay != overlayConfirmProfile || model.console.returnTo != overlayProfiles {
@@ -378,10 +378,10 @@ func TestConsoleProfileOverlayKeyboardAndMouse(t *testing.T) {
 		t.Fatalf("cancelled delete overlay = %d, want profiles", model.console.overlay)
 	}
 	model.updateConsole(consoleKey("a"))
-	if model.console.overlay != overlayProfileAdd || !model.loginAdding {
-		t.Fatalf("add overlay=%d loginAdding=%v", model.console.overlay, model.loginAdding)
+	if model.console.overlay != overlayProfileAdd || !model.login.adding {
+		t.Fatalf("add overlay=%d loginAdding=%v", model.console.overlay, model.login.adding)
 	}
-	model.console.overlay, model.loginAdding = overlayProfiles, false
+	model.console.overlay, model.login.adding = overlayProfiles, false
 	model.updateConsole(consoleKey("p"))
 	if model.console.overlay != overlayNone {
 		t.Fatalf("profile overlay after p = %d, want none", model.console.overlay)
@@ -393,8 +393,8 @@ func TestConsoleProfileOverlayKeyboardAndMouse(t *testing.T) {
 	login.updateConsole(tea.MouseMsg(tea.MouseEvent{
 		X: 10, Y: 7, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft,
 	}))
-	if login.loginCursor != 1 {
-		t.Fatalf("login cursor after profile click = %d, want 1", login.loginCursor)
+	if login.login.cursor != 1 {
+		t.Fatalf("login cursor after profile click = %d, want 1", login.login.cursor)
 	}
 	if _, handled := login.updateConsole(tea.MouseMsg(tea.MouseEvent{
 		X: 10, Y: 20, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft,
@@ -403,16 +403,16 @@ func TestConsoleProfileOverlayKeyboardAndMouse(t *testing.T) {
 	}
 
 	adding := newConsoleTestModel(tabConnection, 120, 32)
-	adding.mode, adding.loginAdding, adding.loginURL = viewLogin, true, "https://new.example.test"
+	adding.mode, adding.login.adding, adding.login.url = viewLogin, true, "https://new.example.test"
 	if _, handled := adding.updateConsole(tea.MouseMsg(tea.MouseEvent{
 		X: 10, Y: 10, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft,
-	})); !handled || !adding.loginAdding {
-		t.Fatalf("upper form click handled=%v loginAdding=%v", handled, adding.loginAdding)
+	})); !handled || !adding.login.adding {
+		t.Fatalf("upper form click handled=%v loginAdding=%v", handled, adding.login.adding)
 	}
 	if _, handled := adding.updateConsole(tea.MouseMsg(tea.MouseEvent{
 		X: 80, Y: 20, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft,
-	})); !handled || adding.loginAdding || adding.loginURL != "" {
-		t.Fatalf("cancel click handled=%v loginAdding=%v url=%q", handled, adding.loginAdding, adding.loginURL)
+	})); !handled || adding.login.adding || adding.login.url != "" {
+		t.Fatalf("cancel click handled=%v loginAdding=%v url=%q", handled, adding.login.adding, adding.login.url)
 	}
 
 	empty := newConsoleTestModel(tabConnection, 120, 32)
@@ -501,10 +501,10 @@ func TestUpdateConsolePagingAndTaskActions(t *testing.T) {
 		{Pod: "done", Command: "true", State: "completed"},
 	}
 	model.updateConsole(consoleKey("e"))
-	if model.actionMode != actionExec || model.actionPod != "running" || model.actionCommand != "env" {
-		t.Fatalf("exec rerun action=%d pod=%q command=%q", model.actionMode, model.actionPod, model.actionCommand)
+	if model.action.mode != actionExec || model.action.pod != "running" || model.action.command != "env" {
+		t.Fatalf("exec rerun action=%d pod=%q command=%q", model.action.mode, model.action.pod, model.action.command)
 	}
-	model.actionMode = actionNone
+	model.action.mode = actionNone
 	model.updateConsole(consoleKey("C"))
 	if len(model.execTasks) != 1 || model.execTasks[0].Pod != "running" {
 		t.Fatalf("exec tasks after clear=%v", model.execTasks)
@@ -536,12 +536,12 @@ func TestUpdateConsoleMouseButtons(t *testing.T) {
 
 	t.Run("action cancel button", func(t *testing.T) {
 		model := newConsoleTestModel(tabTasks, 120, 32)
-		model.actionMode, model.actionPod = actionExec, "api-0"
+		model.action.mode, model.action.pod = actionExec, "api-0"
 		_, handled := model.updateConsole(
 			tea.MouseMsg(tea.MouseEvent{X: 90, Y: 19, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft}),
 		)
-		if !handled || model.actionMode != actionNone {
-			t.Fatalf("handled=%v actionMode=%d", handled, model.actionMode)
+		if !handled || model.action.mode != actionNone {
+			t.Fatalf("handled=%v actionMode=%d", handled, model.action.mode)
 		}
 	})
 }
@@ -676,12 +676,12 @@ func TestUpdateConsoleCommandMode(t *testing.T) {
 
 	t.Run("command bar stays closed while typing a form", func(t *testing.T) {
 		model := newConsoleTestModel(tabConnection, 100, 28)
-		model.loginAdding = true
+		model.login.adding = true
 		if _, handled := model.updateConsole(consoleKey(":")); handled {
 			t.Fatal(": should not open the command bar while the profile form is open")
 		}
-		model.loginAdding = false
-		model.actionMode = actionExec
+		model.login.adding = false
+		model.action.mode = actionExec
 		if _, handled := model.updateConsole(consoleKey(":")); handled {
 			t.Fatal(": should not open the command bar during an action")
 		}
@@ -733,8 +733,8 @@ func TestUpdateConsoleFilterMode(t *testing.T) {
 		}
 		next, _ := model.updatePods(consoleKey("f"))
 		updated := next.(Model)
-		if updated.actionMode != actionPortForward || updated.actionPod != "cache-0" {
-			t.Fatalf("action=%d pod=%q, want port forward on cache-0", updated.actionMode, updated.actionPod)
+		if updated.action.mode != actionPortForward || updated.action.pod != "cache-0" {
+			t.Fatalf("action=%d pod=%q, want port forward on cache-0", updated.action.mode, updated.action.pod)
 		}
 	})
 

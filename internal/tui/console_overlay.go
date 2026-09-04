@@ -19,7 +19,7 @@ func (m *Model) updateConsoleOverlay(key tea.KeyMsg) tea.Cmd {
 	case overlayProfileAdd:
 		next, cmd := m.updateAddProfile(key)
 		*m = requireModel(next)
-		if !m.loginAdding {
+		if !m.login.adding {
 			m.console.overlay = overlayProfiles
 		}
 		return cmd
@@ -67,11 +67,11 @@ func (m *Model) updateProfilesOverlay(key tea.KeyMsg) tea.Cmd {
 	case keyEsc, "p":
 		m.closeConsoleOverlay()
 	case "up", "k":
-		m.loginCursor = max(0, m.loginCursor-1)
+		m.login.cursor = max(0, m.login.cursor-1)
 	case keyDown, "j":
-		m.loginCursor = minInt(max(0, len(m.profiles.Profiles)-1), m.loginCursor+1)
+		m.login.cursor = minInt(max(0, len(m.profiles.Profiles)-1), m.login.cursor+1)
 	case "a", "n":
-		m.loginAdding, m.loginURL = true, ""
+		m.login.adding, m.login.url = true, ""
 		m.console.overlay = overlayProfileAdd
 	case "d":
 		if len(m.profiles.Profiles) > 0 {

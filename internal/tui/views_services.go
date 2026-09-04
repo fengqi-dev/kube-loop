@@ -32,15 +32,15 @@ func (m Model) updateServices(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.err = "service exposes no ports"
 			return m, nil
 		}
-		m.actionMode, m.actionService, m.actionPod = actionPortForward, service.Name, ""
-		m.actionPorts = make([]actionPortOption, 0, len(service.Ports))
+		m.action.mode, m.action.service, m.action.pod = actionPortForward, service.Name, ""
+		m.action.ports = make([]actionPortOption, 0, len(service.Ports))
 		for _, port := range service.Ports {
-			m.actionPorts = append(
-				m.actionPorts,
+			m.action.ports = append(
+				m.action.ports,
 				actionPortOption{Name: port.Name, Port: port.Port, Protocol: port.Protocol},
 			)
 		}
-		m.actionPortIndex, m.actionLocalPort, m.actionField = 0, "0", 0
+		m.action.portIndex, m.action.localPort, m.action.field = 0, "0", 0
 		m.selectActionPort()
 		m.err, m.status = "", ""
 	case "x", "m":
@@ -54,28 +54,28 @@ func (m Model) updateServices(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if msg.String() == "x" {
-			m.actionMode = actionExchange
+			m.action.mode = actionExchange
 		} else {
-			m.actionMode = actionMirror
+			m.action.mode = actionMirror
 		}
-		m.actionService, m.actionPod = service.Name, ""
-		m.actionPorts = make([]actionPortOption, 0, len(service.Ports))
+		m.action.service, m.action.pod = service.Name, ""
+		m.action.ports = make([]actionPortOption, 0, len(service.Ports))
 		for _, port := range service.Ports {
-			m.actionPorts = append(
-				m.actionPorts,
+			m.action.ports = append(
+				m.action.ports,
 				actionPortOption{Name: port.Name, Port: port.Port, Protocol: port.Protocol},
 			)
 		}
-		m.actionPortIndex, m.actionField = 0, 0
-		m.actionLocalHost = "127.0.0.1"
+		m.action.portIndex, m.action.field = 0, 0
+		m.action.localHost = "127.0.0.1"
 		m.selectActionPort()
-		m.actionLocalPort = strconv.Itoa(int(m.actionPort))
+		m.action.localPort = strconv.Itoa(int(m.action.port))
 		m.err, m.status = "", ""
 	case "p":
-		m.actionMode, m.actionService, m.actionPod = actionPreview, "", ""
-		m.actionPreviewName, m.actionProtocol = "", "tcp"
-		m.actionServicePort, m.actionLocalPort = "", ""
-		m.actionLocalHost, m.actionField = "127.0.0.1", 0
+		m.action.mode, m.action.service, m.action.pod = actionPreview, "", ""
+		m.action.previewName, m.action.protocol = "", "tcp"
+		m.action.servicePort, m.action.localPort = "", ""
+		m.action.localHost, m.action.field = "127.0.0.1", 0
 		m.err, m.status = "", ""
 	}
 	return m, nil

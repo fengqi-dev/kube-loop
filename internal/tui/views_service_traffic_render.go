@@ -13,39 +13,39 @@ import (
 func (m Model) viewServiceTrafficAction(width, height int) string {
 	title := "EXCHANGE"
 	description := "Configure the Service port and local target, then press Enter to start."
-	if m.actionMode == actionMirror {
+	if m.action.mode == actionMirror {
 		title = "MIRROR"
 	}
-	if m.actionMode == actionPreview {
+	if m.action.mode == actionPreview {
 		title = "CREATE PREVIEW"
 		description = "Configure the Preview Service and local target, then press Enter to start."
 	}
 	line := func(index int, label, value string) string {
 		prefix := "  "
-		if m.actionField == index {
+		if m.action.field == index {
 			prefix, value = "> ", value+"_"
 		}
 		return prefix + label + "  " + value
 	}
 	var values string
-	if m.actionMode == actionPreview {
+	if m.action.mode == actionPreview {
 		values = strings.Join([]string{
 			"Target: Preview Service",
 			"",
-			line(0, "Name        ", m.actionPreviewName),
-			line(1, "Protocol    ", strings.ToUpper(m.actionProtocol)),
-			line(2, "Service port", m.actionServicePort),
-			line(3, "Local host  ", m.actionLocalHost),
-			line(4, "Local port  ", firstNonEmpty(m.actionLocalPort, "0 (auto)")),
+			line(0, "Name        ", m.action.previewName),
+			line(1, "Protocol    ", strings.ToUpper(m.action.protocol)),
+			line(2, "Service port", m.action.servicePort),
+			line(3, "Local host  ", m.action.localHost),
+			line(4, "Local port  ", firstNonEmpty(m.action.localPort, "0 (auto)")),
 		}, "\n")
 	} else {
-		port := fmt.Sprintf("%d/%s", m.actionPort, strings.ToUpper(m.actionProtocol))
+		port := fmt.Sprintf("%d/%s", m.action.port, strings.ToUpper(m.action.protocol))
 		values = strings.Join([]string{
-			"Target: " + m.actionService,
+			"Target: " + m.action.service,
 			"",
 			line(0, "Service port", port),
-			line(1, "Local host  ", m.actionLocalHost),
-			line(2, "Local port  ", firstNonEmpty(m.actionLocalPort, "0 (auto)")),
+			line(1, "Local host  ", m.action.localHost),
+			line(2, "Local port  ", firstNonEmpty(m.action.localPort, "0 (auto)")),
 		}, "\n")
 	}
 	controls := consoleSubtle.Render("↑/↓ field   ←/→ select   Tab next")

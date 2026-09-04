@@ -29,7 +29,7 @@ func (m *Model) updateConsoleTaskKey(key tea.KeyMsg) (tea.Cmd, bool) {
 				index := m.consoleExecIndex(row.index)
 				if index >= 0 && index < len(m.execTasks) {
 					task := m.execTasks[index]
-					m.actionMode, m.actionPod, m.actionCommand = actionExec, task.Pod, task.Command
+					m.action.mode, m.action.pod, m.action.command = actionExec, task.Pod, task.Command
 					return nil, true
 				}
 			}

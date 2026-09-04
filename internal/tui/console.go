@@ -22,7 +22,7 @@ func (m *Model) updateConsole(message tea.Msg) (tea.Cmd, bool) {
 	if m.console.inputMode != inputNone {
 		return m.updateConsoleInput(key), true
 	}
-	if m.actionMode != actionNone || m.loginAdding {
+	if m.action.mode != actionNone || m.login.adding {
 		return nil, false
 	}
 	if cmd, handled := m.updateConsoleNavigationKey(key); handled {

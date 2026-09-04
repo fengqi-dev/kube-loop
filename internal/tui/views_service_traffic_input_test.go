@@ -11,32 +11,38 @@ func TestUpdateServiceTrafficActionPreviewInput(t *testing.T) {
 	t.Parallel()
 
 	model := Model{
-		actionMode: actionPreview, actionProtocol: "tcp", actionField: 1,
-		actionPreviewName: "preview", actionServicePort: "8080",
-		actionLocalHost: "127.0.0.1", actionLocalPort: "9090",
+		action: actionState{
+			mode:        actionPreview,
+			protocol:    "tcp",
+			field:       1,
+			previewName: "preview",
+			servicePort: "8080",
+			localHost:   "127.0.0.1",
+			localPort:   "9090",
+		},
 	}
 	next, _ := model.updateServiceTrafficAction(tea.KeyMsg{Type: tea.KeyRight})
 	model = requireModel(next)
-	if model.actionProtocol != "udp" {
-		t.Fatalf("protocol = %q, want udp", model.actionProtocol)
+	if model.action.protocol != "udp" {
+		t.Fatalf("protocol = %q, want udp", model.action.protocol)
 	}
 	next, _ = model.updateServiceTrafficAction(tea.KeyMsg{Type: tea.KeyTab})
 	model = requireModel(next)
-	if model.actionField != 2 {
-		t.Fatalf("field = %d, want 2", model.actionField)
+	if model.action.field != 2 {
+		t.Fatalf("field = %d, want 2", model.action.field)
 	}
-	model.actionServicePort = ""
+	model.action.servicePort = ""
 	next, _ = model.updateServiceTrafficAction(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("8x0")})
 	model = requireModel(next)
-	if model.actionServicePort != "80" {
-		t.Fatalf("service port input = %q", model.actionServicePort)
+	if model.action.servicePort != "80" {
+		t.Fatalf("service port input = %q", model.action.servicePort)
 	}
 	next, _ = model.updateServiceTrafficAction(tea.KeyMsg{Type: tea.KeyBackspace})
 	model = requireModel(next)
-	if model.actionServicePort != "8" {
-		t.Fatalf("service port after backspace = %q", model.actionServicePort)
+	if model.action.servicePort != "8" {
+		t.Fatalf("service port after backspace = %q", model.action.servicePort)
 	}
-	model.actionServicePort = "8080"
+	model.action.servicePort = "8080"
 	next, command := model.updateServiceTrafficAction(tea.KeyMsg{Type: tea.KeyEnter})
 	model = requireModel(next)
 	if command == nil || !model.loading || model.err != "" {
@@ -47,22 +53,19 @@ func TestUpdateServiceTrafficActionPreviewInput(t *testing.T) {
 func TestUpdateServiceTrafficActionSelectsServicePort(t *testing.T) {
 	t.Parallel()
 
-	model := Model{
-		actionMode: actionExchange, actionField: 0, actionPortIndex: 0,
-		actionPorts: []actionPortOption{
-			{Name: "http", Port: 8080, Protocol: "tcp"},
-			{Name: "dns", Port: 5353, Protocol: "udp"},
-		},
-	}
+	model := Model{action: actionState{mode: actionExchange, field: 0, portIndex: 0, ports: []actionPortOption{
+		{Name: "http", Port: 8080, Protocol: "tcp"},
+		{Name: "dns", Port: 5353, Protocol: "udp"},
+	}}}
 	next, _ := model.updateServiceTrafficAction(tea.KeyMsg{Type: tea.KeyRight})
 	model = requireModel(next)
-	if model.actionPortIndex != 1 || model.actionPort != 5353 || model.actionProtocol != "udp" ||
-		model.actionLocalPort != "5353" {
+	if model.action.portIndex != 1 || model.action.port != 5353 || model.action.protocol != "udp" ||
+		model.action.localPort != "5353" {
 		t.Fatalf("selected port state = %#v", model)
 	}
 	next, _ = model.updateServiceTrafficAction(tea.KeyMsg{Type: tea.KeyLeft})
 	model = requireModel(next)
-	if model.actionPortIndex != 0 || model.actionPort != 8080 || model.actionProtocol != "tcp" {
+	if model.action.portIndex != 0 || model.action.port != 8080 || model.action.protocol != "tcp" {
 		t.Fatalf("wrapped port state = %#v", model)
 	}
 }
@@ -70,7 +73,7 @@ func TestUpdateServiceTrafficActionSelectsServicePort(t *testing.T) {
 func TestUpdateServiceTrafficActionRejectsInvalidInput(t *testing.T) {
 	t.Parallel()
 
-	model := Model{actionMode: actionPreview, actionProtocol: "tcp"}
+	model := Model{action: actionState{mode: actionPreview, protocol: "tcp"}}
 	next, command := model.updateServiceTrafficAction(tea.KeyMsg{Type: tea.KeyEnter})
 	model = requireModel(next)
 	if command != nil || model.loading || !strings.Contains(model.err, "local host") {
@@ -86,34 +89,43 @@ func TestValidateServiceTrafficAction(t *testing.T) {
 		model Model
 		want  string
 	}{
-		{name: "local host", model: Model{actionMode: actionExchange}, want: "local host"},
+		{name: "local host", model: Model{action: actionState{mode: actionExchange}}, want: "local host"},
 		{
 			name:  "preview name",
-			model: Model{actionMode: actionPreview, actionLocalHost: "127.0.0.1", actionServicePort: "8080"},
+			model: Model{action: actionState{mode: actionPreview, localHost: "127.0.0.1", servicePort: "8080"}},
 			want:  "preview name",
 		},
 		{
 			name: "service port",
 			model: Model{
-				actionMode: actionPreview, actionPreviewName: "preview", actionLocalHost: "127.0.0.1",
-				actionServicePort: "0",
+				action: actionState{
+					mode:        actionPreview,
+					previewName: "preview",
+					localHost:   "127.0.0.1",
+					servicePort: "0",
+				},
 			},
 			want: "service port",
 		},
 		{
 			name:  "local port",
-			model: Model{actionMode: actionExchange, actionLocalHost: "127.0.0.1", actionLocalPort: "70000"},
+			model: Model{action: actionState{mode: actionExchange, localHost: "127.0.0.1", localPort: "70000"}},
 			want:  "local port",
 		},
 		{
 			name:  "valid exchange",
-			model: Model{actionMode: actionExchange, actionLocalHost: "127.0.0.1"},
+			model: Model{action: actionState{mode: actionExchange, localHost: "127.0.0.1"}},
 		},
 		{
 			name: "valid preview",
 			model: Model{
-				actionMode: actionPreview, actionPreviewName: "preview", actionLocalHost: "127.0.0.1",
-				actionServicePort: "8080", actionLocalPort: "9090",
+				action: actionState{
+					mode:        actionPreview,
+					previewName: "preview",
+					localHost:   "127.0.0.1",
+					servicePort: "8080",
+					localPort:   "9090",
+				},
 			},
 		},
 	}

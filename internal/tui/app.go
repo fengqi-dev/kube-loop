@@ -97,26 +97,39 @@ type Model struct {
 	autoConnect bool
 	spinner     spinner.Model
 
-	loginCursor             int
-	loginURL                string
-	loginAdding             bool
-	loginCancel             func()
-	profileSelectionPending bool
+	login  loginState
+	action actionState
+}
 
-	actionMode        actionMode
-	actionService     string
-	actionPod         string
-	actionContainer   string
-	actionPort        int32
-	actionProtocol    string
-	actionPorts       []actionPortOption
-	actionPortIndex   int
-	actionLocalPort   string
-	actionLocalHost   string
-	actionPreviewName string
-	actionServicePort string
-	actionField       int
-	actionCommand     string
+// loginState is the sign-in flow: which Server Profile the cursor is on,
+// whether the user is entering a new address, and how to abandon an in-flight
+// browser login.
+type loginState struct {
+	cursor                  int
+	url                     string
+	adding                  bool
+	cancel                  func()
+	profileSelectionPending bool
+}
+
+// actionState is the traffic action form -- Port Forward, Exchange, Mirror,
+// Preview and Pod exec all fill in the same overlay, so one state covers them
+// and mode says which is being created.
+type actionState struct {
+	mode        actionMode
+	service     string
+	pod         string
+	container   string
+	port        int32
+	protocol    string
+	ports       []actionPortOption
+	portIndex   int
+	localPort   string
+	localHost   string
+	previewName string
+	servicePort string
+	field       int
+	command     string
 }
 
 func requireModel(next tea.Model) Model {

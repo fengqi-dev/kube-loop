@@ -21,45 +21,45 @@ func (m Model) startServiceTraffic() tea.Cmd {
 		if err != nil {
 			return trafficOperationStartedMsg{err: err}
 		}
-		localPort, _ := parseActionPort(m.actionLocalPort, true)
-		localHost := strings.TrimSpace(m.actionLocalHost)
-		switch m.actionMode {
+		localPort, _ := parseActionPort(m.action.localPort, true)
+		localHost := strings.TrimSpace(m.action.localHost)
+		switch m.action.mode {
 		case actionExchange:
 			request := clientexchange.Request{
 				ProfileID: profile.ID,
-				Service:   m.actionService,
+				Service:   m.action.service,
 				Targets: []clientexchange.LocalTarget{{
-					ServicePort: m.actionPort,
-					Protocol:    m.actionProtocol,
+					ServicePort: m.action.port,
+					Protocol:    m.action.protocol,
 					LocalHost:   localHost,
 					LocalPort:   localPort,
 				}},
 			}
 			_, err = m.state.exchanges.Start(m.state.ctx, profile, session, request)
-			return trafficOperationStartedMsg{kind: "Exchange", target: m.actionService, err: err}
+			return trafficOperationStartedMsg{kind: "Exchange", target: m.action.service, err: err}
 		case actionMirror:
 			request := clientmirror.Request{
 				ProfileID: profile.ID,
-				Service:   m.actionService,
+				Service:   m.action.service,
 				Targets: []clientmirror.LocalTarget{{
-					ServicePort: m.actionPort,
-					Protocol:    m.actionProtocol,
+					ServicePort: m.action.port,
+					Protocol:    m.action.protocol,
 					LocalHost:   localHost,
 					LocalPort:   localPort,
 				}},
 			}
 			_, err = m.state.mirrors.Start(m.state.ctx, profile, session, request)
-			return trafficOperationStartedMsg{kind: "Mirror", target: m.actionService, err: err}
+			return trafficOperationStartedMsg{kind: "Mirror", target: m.action.service, err: err}
 		case actionPreview:
-			servicePort, _ := parseActionPort(m.actionServicePort, false)
-			name := strings.TrimSpace(m.actionPreviewName)
+			servicePort, _ := parseActionPort(m.action.servicePort, false)
+			name := strings.TrimSpace(m.action.previewName)
 			request := clientpreview.Request{
 				ProfileID: profile.ID,
 				Namespace: session.Namespace,
 				Name:      name,
 				Targets: []clientpreview.LocalTarget{{
 					ServicePort: int32(servicePort),
-					Protocol:    m.actionProtocol,
+					Protocol:    m.action.protocol,
 					LocalHost:   localHost,
 					LocalPort:   localPort,
 				}},

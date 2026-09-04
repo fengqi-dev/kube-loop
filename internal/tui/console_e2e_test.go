@@ -202,14 +202,14 @@ func (m *tuiFixtureModel) applyConnectionFixtureKey(key tea.KeyMsg, previousOver
 }
 
 func (m tuiFixtureModel) updateFixtureKey(key tea.KeyMsg) tuiFixtureModel {
-	if m.model.actionMode != actionNone {
+	if m.model.action.mode != actionNone {
 		if key.String() == keyEnter {
-			if m.model.actionMode == actionExec {
+			if m.model.action.mode == actionExec {
 				m.model.status = "Pod exec started"
 			} else {
 				m.model.status = "Port forward started"
 			}
-			m.model.actionMode = actionNone
+			m.model.action.mode = actionNone
 			m.model.loading = false
 			return m
 		}

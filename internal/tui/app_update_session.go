@@ -10,8 +10,8 @@ func (m Model) updateSessionMessage(message tea.Msg) (tea.Model, tea.Cmd, bool) 
 	switch msg := message.(type) {
 	case profilesLoadedMsg:
 		m.profiles = msg.state
-		if m.loginCursor >= len(msg.state.Profiles) {
-			m.loginCursor = max(0, len(msg.state.Profiles)-1)
+		if m.login.cursor >= len(msg.state.Profiles) {
+			m.login.cursor = max(0, len(msg.state.Profiles)-1)
 		}
 		for _, profile := range msg.state.Profiles {
 			if profile.ID == msg.state.ActiveProfileID {
@@ -24,13 +24,13 @@ func (m Model) updateSessionMessage(message tea.Msg) (tea.Model, tea.Cmd, bool) 
 	case authStatusMsg:
 		m.loading = false
 		if msg.err != nil {
-			m.profileSelectionPending = false
+			m.login.profileSelectionPending = false
 			m.authSession, m.err = AuthSession{}, msg.err.Error()
 			return m, nil, true
 		}
 		m.authSession = msg.session
-		if m.profileSelectionPending {
-			m.profileSelectionPending = false
+		if m.login.profileSelectionPending {
+			m.login.profileSelectionPending = false
 			if msg.session.Authenticated {
 				m.mode = viewMain
 				return m, m.workspaceNavigate(resourceConnection, true), true
@@ -44,7 +44,7 @@ func (m Model) updateSessionMessage(message tea.Msg) (tea.Model, tea.Cmd, bool) 
 		}
 		return m, nil, true
 	case loginResultMsg:
-		m.loading, m.loginCancel = false, nil
+		m.loading, m.login.cancel = false, nil
 		if msg.cancelled {
 			m.err, m.status = "", "Login cancelled"
 			return m, nil, true

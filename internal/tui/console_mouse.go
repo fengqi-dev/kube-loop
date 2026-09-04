@@ -24,7 +24,7 @@ func (m *Model) updateConsoleMouse(event tea.MouseEvent) (tea.Cmd, bool) {
 	if m.console.overlay != overlayNone {
 		return m.updateConsoleOverlayMouse(event), true
 	}
-	if m.actionMode != actionNone {
+	if m.action.mode != actionNone {
 		return m.updateConsoleActionMouse(event), true
 	}
 	if m.mode == viewLogin {
@@ -103,7 +103,7 @@ func (m *Model) updateConsoleOverlayMouse(event tea.MouseEvent) tea.Cmd {
 			}
 			next, cmd := m.updateAddProfile(key)
 			*m = requireModel(next)
-			if !m.loginAdding {
+			if !m.login.adding {
 				m.console.overlay = overlayProfiles
 			}
 			return cmd
@@ -128,7 +128,7 @@ func (m *Model) updateConsoleActionMouse(event tea.MouseEvent) tea.Cmd {
 }
 
 func (m *Model) updateConsoleProfileMouse(event tea.MouseEvent) (tea.Cmd, bool) {
-	if m.loginAdding {
+	if m.login.adding {
 		if event.Y < m.height/2+2 {
 			return nil, true
 		}
@@ -142,7 +142,7 @@ func (m *Model) updateConsoleProfileMouse(event tea.MouseEvent) (tea.Cmd, bool) 
 	}
 	row := event.Y - 6
 	if row >= 0 && row < len(m.profiles.Profiles) {
-		m.loginCursor = row
+		m.login.cursor = row
 		return nil, true
 	}
 	return nil, false
@@ -151,7 +151,7 @@ func (m *Model) updateConsoleProfileMouse(event tea.MouseEvent) (tea.Cmd, bool) 
 func (m *Model) updateConsoleProfileOverlayMouse(event tea.MouseEvent) tea.Cmd {
 	row := event.Y - (m.height/2 - len(m.profiles.Profiles)/2)
 	if row >= 0 && row < len(m.profiles.Profiles) {
-		m.loginCursor = row
+		m.login.cursor = row
 	}
 	return nil
 }

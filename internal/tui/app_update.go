@@ -140,13 +140,13 @@ func (m Model) updateClipboardCopied(msg clipboardCopiedMsg) Model {
 }
 
 func (m Model) updateKeyMessage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if msg.String() == keyCtrlC || (msg.String() == "q" && !m.loginAdding && m.actionMode == actionNone) {
+	if msg.String() == keyCtrlC || (msg.String() == "q" && !m.login.adding && m.action.mode == actionNone) {
 		return m, tea.Quit
 	}
 	if m.mode == viewLogin {
 		return m.updateLogin(msg)
 	}
-	if m.actionMode != actionNone {
+	if m.action.mode != actionNone {
 		return m.updateAction(msg)
 	}
 	switch msg.String() {

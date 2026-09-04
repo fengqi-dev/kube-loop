@@ -99,10 +99,10 @@ func TestUpdateSessionMessages(t *testing.T) {
 		t.Fatalf("auth error handled=%v cmd=%v err=%q", handled, cmd != nil, model.err)
 	}
 
-	model.loginCancel = func() {}
+	model.login.cancel = func() {}
 	next, cmd, handled = model.updateSessionMessage(loginResultMsg{cancelled: true})
 	model = next.(Model)
-	if !handled || cmd != nil || model.loginCancel != nil || model.status != "Login cancelled" {
+	if !handled || cmd != nil || model.login.cancel != nil || model.status != "Login cancelled" {
 		t.Fatalf("login cancel handled=%v cmd=%v status=%q", handled, cmd != nil, model.status)
 	}
 

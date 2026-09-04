@@ -38,15 +38,15 @@ func (m Model) updatePods(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.err = "pod exposes no ports"
 			return m, nil
 		}
-		m.actionMode, m.actionPod, m.actionService = actionPortForward, pod.Name, ""
-		m.actionPorts = make([]actionPortOption, 0, len(pod.Ports))
+		m.action.mode, m.action.pod, m.action.service = actionPortForward, pod.Name, ""
+		m.action.ports = make([]actionPortOption, 0, len(pod.Ports))
 		for _, port := range pod.Ports {
-			m.actionPorts = append(
-				m.actionPorts,
+			m.action.ports = append(
+				m.action.ports,
 				actionPortOption{Name: port.Name, Port: port.Port, Protocol: port.Protocol},
 			)
 		}
-		m.actionPortIndex, m.actionLocalPort, m.actionField = 0, "0", 0
+		m.action.portIndex, m.action.localPort, m.action.field = 0, "0", 0
 		m.selectActionPort()
 		m.err, m.status = "", ""
 		return m, nil
@@ -67,10 +67,10 @@ func (m Model) updatePods(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m Model) updateAction(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if msg.String() == keyEsc {
-		m.actionMode, m.actionCommand, m.actionPorts = actionNone, "", nil
+		m.action.mode, m.action.command, m.action.ports = actionNone, "", nil
 		return m, nil
 	}
-	switch m.actionMode {
+	switch m.action.mode {
 	case actionExec:
 		return m.updateExecAction(msg)
 	case actionExchange, actionMirror, actionPreview:
@@ -84,17 +84,17 @@ func (m Model) updateAction(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m Model) updateExecAction(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case keyEnter:
-		if strings.TrimSpace(m.actionCommand) == "" {
+		if strings.TrimSpace(m.action.command) == "" {
 			m.err = "command is required"
 			return m, nil
 		}
 		m.loading = true
 		return m, tea.Batch(m.spinner.Tick, m.startExec())
 	case keyBackspace:
-		m.actionCommand = trimLastRune(m.actionCommand)
+		m.action.command = trimLastRune(m.action.command)
 	default:
 		if len(msg.Runes) > 0 {
-			m.actionCommand += string(msg.Runes)
+			m.action.command += string(msg.Runes)
 		}
 	}
 	return m, nil
@@ -103,33 +103,33 @@ func (m Model) updateExecAction(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m Model) updatePortForwardAction(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case keyTab, keyShiftTab:
-		m.actionField = 1 - m.actionField
+		m.action.field = 1 - m.action.field
 		return m, nil
 	case "up", "k":
-		m.actionField = (m.actionField - 1 + 2) % 2
+		m.action.field = (m.action.field - 1 + 2) % 2
 		return m, nil
 	case keyDown, "j":
-		m.actionField = (m.actionField + 1) % 2
+		m.action.field = (m.action.field + 1) % 2
 		return m, nil
 	case keyLeft, "h":
-		if m.actionField == 0 && len(m.actionPorts) > 1 {
-			m.actionPortIndex = (m.actionPortIndex - 1 + len(m.actionPorts)) % len(m.actionPorts)
+		if m.action.field == 0 && len(m.action.ports) > 1 {
+			m.action.portIndex = (m.action.portIndex - 1 + len(m.action.ports)) % len(m.action.ports)
 			m.selectActionPort()
 		}
 		return m, nil
 	case keyRight, "l":
-		if m.actionField == 0 && len(m.actionPorts) > 1 {
-			m.actionPortIndex = (m.actionPortIndex + 1) % len(m.actionPorts)
+		if m.action.field == 0 && len(m.action.ports) > 1 {
+			m.action.portIndex = (m.action.portIndex + 1) % len(m.action.ports)
 			m.selectActionPort()
 		}
 		return m, nil
 	case keyBackspace:
-		if m.actionField == 1 {
-			m.actionLocalPort = trimLastRune(m.actionLocalPort)
+		if m.action.field == 1 {
+			m.action.localPort = trimLastRune(m.action.localPort)
 		}
 		return m, nil
 	case keyEnter:
-		localPort := strings.TrimSpace(m.actionLocalPort)
+		localPort := strings.TrimSpace(m.action.localPort)
 		if localPort == "" {
 			localPort = "0"
 		}
@@ -140,13 +140,13 @@ func (m Model) updatePortForwardAction(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.loading = true
 		return m, tea.Batch(m.spinner.Tick, m.startPortForward())
 	default:
-		if m.actionField == 1 && len(msg.Runes) > 0 {
+		if m.action.field == 1 && len(msg.Runes) > 0 {
 			for _, character := range msg.Runes {
-				if character >= '0' && character <= '9' && len(m.actionLocalPort) < 5 {
-					if m.actionLocalPort == "0" {
-						m.actionLocalPort = ""
+				if character >= '0' && character <= '9' && len(m.action.localPort) < 5 {
+					if m.action.localPort == "0" {
+						m.action.localPort = ""
 					}
-					m.actionLocalPort += string(character)
+					m.action.localPort += string(character)
 				}
 			}
 		}
@@ -155,11 +155,11 @@ func (m Model) updatePortForwardAction(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) selectActionPort() {
-	if m.actionPortIndex < 0 || m.actionPortIndex >= len(m.actionPorts) {
+	if m.action.portIndex < 0 || m.action.portIndex >= len(m.action.ports) {
 		return
 	}
-	selected := m.actionPorts[m.actionPortIndex]
-	m.actionPort, m.actionProtocol = selected.Port, selected.Protocol
+	selected := m.action.ports[m.action.portIndex]
+	m.action.port, m.action.protocol = selected.Port, selected.Protocol
 }
 
 func (m Model) startPortForward() tea.Cmd {
@@ -172,11 +172,11 @@ func (m Model) startPortForward() tea.Cmd {
 		if err != nil {
 			return portForwardStartedMsg{err: err}
 		}
-		kind, name := resourceKindPod, m.actionPod
-		if m.actionService != "" {
-			kind, name = resourceKindService, m.actionService
+		kind, name := resourceKindPod, m.action.pod
+		if m.action.service != "" {
+			kind, name = resourceKindService, m.action.service
 		}
-		localPort, err := strconv.ParseUint(firstNonEmpty(strings.TrimSpace(m.actionLocalPort), "0"), 10, 16)
+		localPort, err := strconv.ParseUint(firstNonEmpty(strings.TrimSpace(m.action.localPort), "0"), 10, 16)
 		if err != nil {
 			return portForwardStartedMsg{err: fmt.Errorf("local port is invalid")}
 		}
@@ -184,8 +184,8 @@ func (m Model) startPortForward() tea.Cmd {
 			ProfileID:  profile.ID,
 			Kind:       kind,
 			Name:       name,
-			Protocol:   m.actionProtocol,
-			RemotePort: uint16(m.actionPort), //nolint:gosec // Selected Kubernetes ports are validated as uint16.
+			Protocol:   m.action.protocol,
+			RemotePort: uint16(m.action.port), //nolint:gosec // Selected Kubernetes ports are validated as uint16.
 			LocalPort:  uint16(localPort),
 		}
 		info, err := m.state.forwards.Start(m.state.ctx, profile, session, request)
@@ -253,10 +253,10 @@ func (m Model) startExec() tea.Cmd {
 		if err != nil {
 			return execStartedMsg{err: err}
 		}
-		command := strings.TrimSpace(m.actionCommand)
+		command := strings.TrimSpace(m.action.command)
 		spec := clientremote.ExecSpec{
-			Pod:       m.actionPod,
-			Container: m.actionContainer,
+			Pod:       m.action.pod,
+			Container: m.action.container,
 			Command:   []string{"/bin/sh", "-lc", command},
 			TTY:       false,
 		}

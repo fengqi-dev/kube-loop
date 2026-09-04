@@ -37,7 +37,7 @@ func (m Model) viewConsole() string {
 			m.viewConsoleMain(contentWidth, bodyHeight-lipgloss.Height(nav)-1),
 		)
 	}
-	if m.actionMode != actionNone {
+	if m.action.mode != actionNone {
 		body = m.viewConsoleAction(contentWidth, bodyHeight)
 	}
 	if m.console.overlay != overlayNone {

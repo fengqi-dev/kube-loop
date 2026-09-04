@@ -10,38 +10,38 @@ import (
 
 func (m Model) updateServiceTrafficAction(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	fields := 3
-	if m.actionMode == actionPreview {
+	if m.action.mode == actionPreview {
 		fields = 5
 	}
 	switch msg.String() {
 	case keyTab:
-		m.actionField = (m.actionField + 1) % fields
+		m.action.field = (m.action.field + 1) % fields
 		return m, nil
 	case keyShiftTab:
-		m.actionField = (m.actionField - 1 + fields) % fields
+		m.action.field = (m.action.field - 1 + fields) % fields
 		return m, nil
 	case "up":
-		m.actionField = (m.actionField - 1 + fields) % fields
+		m.action.field = (m.action.field - 1 + fields) % fields
 		return m, nil
 	case keyDown:
-		m.actionField = (m.actionField + 1) % fields
+		m.action.field = (m.action.field + 1) % fields
 		return m, nil
 	case keyLeft:
-		if m.actionMode == actionPreview && m.actionField == 1 {
+		if m.action.mode == actionPreview && m.action.field == 1 {
 			m.toggleActionProtocol()
-		} else if m.actionMode != actionPreview && m.actionField == 0 && len(m.actionPorts) > 1 {
-			m.actionPortIndex = (m.actionPortIndex - 1 + len(m.actionPorts)) % len(m.actionPorts)
+		} else if m.action.mode != actionPreview && m.action.field == 0 && len(m.action.ports) > 1 {
+			m.action.portIndex = (m.action.portIndex - 1 + len(m.action.ports)) % len(m.action.ports)
 			m.selectActionPort()
-			m.actionLocalPort = strconv.Itoa(int(m.actionPort))
+			m.action.localPort = strconv.Itoa(int(m.action.port))
 		}
 		return m, nil
 	case keyRight, " ":
-		if m.actionMode == actionPreview && m.actionField == 1 {
+		if m.action.mode == actionPreview && m.action.field == 1 {
 			m.toggleActionProtocol()
-		} else if m.actionMode != actionPreview && m.actionField == 0 && len(m.actionPorts) > 1 {
-			m.actionPortIndex = (m.actionPortIndex + 1) % len(m.actionPorts)
+		} else if m.action.mode != actionPreview && m.action.field == 0 && len(m.action.ports) > 1 {
+			m.action.portIndex = (m.action.portIndex + 1) % len(m.action.ports)
 			m.selectActionPort()
-			m.actionLocalPort = strconv.Itoa(int(m.actionPort))
+			m.action.localPort = strconv.Itoa(int(m.action.port))
 		}
 		return m, nil
 	case keyBackspace:
@@ -63,32 +63,32 @@ func (m Model) updateServiceTrafficAction(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) toggleActionProtocol() {
-	if strings.EqualFold(m.actionProtocol, "udp") {
-		m.actionProtocol = "tcp"
+	if strings.EqualFold(m.action.protocol, "udp") {
+		m.action.protocol = "tcp"
 	} else {
-		m.actionProtocol = "udp"
+		m.action.protocol = "udp"
 	}
 }
 
 func (m *Model) backspaceServiceTrafficField() {
-	if m.actionMode == actionPreview {
-		switch m.actionField {
+	if m.action.mode == actionPreview {
+		switch m.action.field {
 		case 0:
-			m.actionPreviewName = trimLastRune(m.actionPreviewName)
+			m.action.previewName = trimLastRune(m.action.previewName)
 		case 2:
-			m.actionServicePort = trimLastRune(m.actionServicePort)
+			m.action.servicePort = trimLastRune(m.action.servicePort)
 		case 3:
-			m.actionLocalHost = trimLastRune(m.actionLocalHost)
+			m.action.localHost = trimLastRune(m.action.localHost)
 		case 4:
-			m.actionLocalPort = trimLastRune(m.actionLocalPort)
+			m.action.localPort = trimLastRune(m.action.localPort)
 		}
 		return
 	}
-	switch m.actionField {
+	switch m.action.field {
 	case 1:
-		m.actionLocalHost = trimLastRune(m.actionLocalHost)
+		m.action.localHost = trimLastRune(m.action.localHost)
 	case 2:
-		m.actionLocalPort = trimLastRune(m.actionLocalPort)
+		m.action.localPort = trimLastRune(m.action.localPort)
 	}
 }
 
@@ -100,40 +100,40 @@ func (m *Model) appendServiceTrafficInput(runes []rune) {
 			}
 		}
 	}
-	if m.actionMode == actionPreview {
-		switch m.actionField {
+	if m.action.mode == actionPreview {
+		switch m.action.field {
 		case 0:
-			m.actionPreviewName += string(runes)
+			m.action.previewName += string(runes)
 		case 2:
-			appendPort(&m.actionServicePort)
+			appendPort(&m.action.servicePort)
 		case 3:
-			m.actionLocalHost += string(runes)
+			m.action.localHost += string(runes)
 		case 4:
-			appendPort(&m.actionLocalPort)
+			appendPort(&m.action.localPort)
 		}
 		return
 	}
-	switch m.actionField {
+	switch m.action.field {
 	case 1:
-		m.actionLocalHost += string(runes)
+		m.action.localHost += string(runes)
 	case 2:
-		appendPort(&m.actionLocalPort)
+		appendPort(&m.action.localPort)
 	}
 }
 
 func (m Model) validateServiceTrafficAction() error {
-	if strings.TrimSpace(m.actionLocalHost) == "" {
+	if strings.TrimSpace(m.action.localHost) == "" {
 		return fmt.Errorf("local host is required")
 	}
-	if m.actionMode == actionPreview {
-		if strings.TrimSpace(m.actionPreviewName) == "" {
+	if m.action.mode == actionPreview {
+		if strings.TrimSpace(m.action.previewName) == "" {
 			return fmt.Errorf("preview name is required")
 		}
-		if _, err := parseActionPort(m.actionServicePort, false); err != nil {
+		if _, err := parseActionPort(m.action.servicePort, false); err != nil {
 			return fmt.Errorf("service port must be between 1 and 65535")
 		}
 	}
-	if _, err := parseActionPort(m.actionLocalPort, true); err != nil {
+	if _, err := parseActionPort(m.action.localPort, true); err != nil {
 		return fmt.Errorf("local port must be between 0 and 65535")
 	}
 	return nil

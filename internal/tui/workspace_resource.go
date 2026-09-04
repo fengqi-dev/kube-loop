@@ -70,8 +70,8 @@ func (m *Model) updateWorkspaceResource(key tea.KeyMsg) (tea.Cmd, bool) {
 				m.err, m.status = "disconnect before adding a server", ""
 				return nil, true
 			}
-			m.loginAdding = true
-			m.loginURL = ""
+			m.login.adding = true
+			m.login.url = ""
 			m.err, m.status = "", ""
 			return m.workspaceNavigate(resourceProfiles, true), true
 		case "p":
@@ -133,15 +133,15 @@ func (m *Model) updateWorkspaceResource(key tea.KeyMsg) (tea.Cmd, bool) {
 		return nil, true
 	case resourceProfiles:
 		if key.String() == "d" && len(m.profiles.Profiles) > 0 {
-			m.loginCursor = view.cursor
+			m.login.cursor = view.cursor
 			m.console.returnTo = overlayNone
 			m.console.overlay = overlayConfirmProfile
 			return nil, true
 		}
-		m.loginCursor = view.cursor
+		m.login.cursor = view.cursor
 		next, cmd := m.updateLogin(key)
 		*m = requireModel(next)
-		view.cursor = m.loginCursor
+		view.cursor = m.login.cursor
 		m.setWorkspaceView(view)
 		return cmd, true
 	case resourceNamespaces:

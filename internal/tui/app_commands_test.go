@@ -16,7 +16,7 @@ func TestHintTextMatchesActiveContext(t *testing.T) {
 		want string
 	}{
 		{name: "login", edit: func(model *Model) { model.mode = viewLogin }, want: "server"},
-		{name: "action", edit: func(model *Model) { model.actionMode = actionExec }, want: "confirm"},
+		{name: "action", edit: func(model *Model) { model.action.mode = actionExec }, want: "confirm"},
 		{name: "connection", edit: func(model *Model) { model.activeTab = tabConnection }, want: "connect"},
 		{name: "workloads", edit: func(model *Model) { model.activeTab = tabWorkloads }, want: "forward"},
 		{name: "services", edit: func(model *Model) { model.activeTab = tabServices }, want: "exchange"},

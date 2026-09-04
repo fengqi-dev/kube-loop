@@ -13,12 +13,12 @@ import (
 
 // updateLogin handles key presses in the login view.
 func (m Model) updateLogin(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if m.loginAdding {
+	if m.login.adding {
 		return m.updateAddProfile(msg)
 	}
-	if msg.String() == keyEsc && m.loginCancel != nil {
-		m.loginCancel()
-		m.loginCancel = nil
+	if msg.String() == keyEsc && m.login.cancel != nil {
+		m.login.cancel()
+		m.login.cancel = nil
 		m.loading = false
 		m.err, m.status = "", "Cancelling login..."
 		return m, nil
@@ -26,51 +26,51 @@ func (m Model) updateLogin(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	switch msg.String() {
 	case "up", "k":
-		if m.loginCursor > 0 {
-			m.loginCursor--
+		if m.login.cursor > 0 {
+			m.login.cursor--
 		}
 	case keyDown, "j":
-		if m.loginCursor < len(m.profiles.Profiles)-1 {
-			m.loginCursor++
+		if m.login.cursor < len(m.profiles.Profiles)-1 {
+			m.login.cursor++
 		}
 	case keyEnter:
-		if len(m.profiles.Profiles) == 0 || m.loginCursor >= len(m.profiles.Profiles) {
+		if len(m.profiles.Profiles) == 0 || m.login.cursor >= len(m.profiles.Profiles) {
 			return m, nil
 		}
-		profile := m.profiles.Profiles[m.loginCursor]
+		profile := m.profiles.Profiles[m.login.cursor]
 		m.activeProfile = profile
 		if err := m.state.profiles.SetActive(profile.ID); err != nil {
 			m.err, m.status = err.Error(), ""
 			return m, nil
 		}
 		m.profiles = m.state.Snapshot()
-		m.loading, m.profileSelectionPending = true, true
+		m.loading, m.login.profileSelectionPending = true, true
 		m.status = fmt.Sprintf("Opening: %s", firstNonEmpty(profile.DisplayName, profile.ID))
 		return m, loadAuthStatus(m)
 
 	case "a", "n":
-		m.loginAdding = true
-		m.loginURL = ""
+		m.login.adding = true
+		m.login.url = ""
 		m.err = ""
 		return m, nil
 
 	case "d":
-		if len(m.profiles.Profiles) == 0 || m.loginCursor >= len(m.profiles.Profiles) {
+		if len(m.profiles.Profiles) == 0 || m.login.cursor >= len(m.profiles.Profiles) {
 			return m, nil
 		}
-		profile := m.profiles.Profiles[m.loginCursor]
+		profile := m.profiles.Profiles[m.login.cursor]
 		m.loading = true
 		return m, m.deleteProfile(profile.ID)
 
 	case "l":
-		if len(m.profiles.Profiles) == 0 || m.loginCursor >= len(m.profiles.Profiles) {
+		if len(m.profiles.Profiles) == 0 || m.login.cursor >= len(m.profiles.Profiles) {
 			return m, nil
 		}
-		profile := m.profiles.Profiles[m.loginCursor]
+		profile := m.profiles.Profiles[m.login.cursor]
 		m.activeProfile = profile
 		_ = m.state.profiles.SetActive(profile.ID)
 		loginContext, cancel := context.WithCancel(m.state.ctx)
-		m.loginCancel = cancel
+		m.login.cancel = cancel
 		m.loading = true
 		m.err, m.status = "", "Waiting for browser login... Press Esc to cancel"
 		return m, tea.Batch(m.spinner.Tick, m.startLogin(loginContext))
@@ -103,8 +103,8 @@ func (m Model) updateAddProfile(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	switch msg.String() {
 	case keyEnter:
-		m.loginURL = strings.TrimSpace(m.loginURL)
-		if m.loginURL == "" {
+		m.login.url = strings.TrimSpace(m.login.url)
+		if m.login.url == "" {
 			m.err = "Service address is required"
 			return m, nil
 		}
@@ -113,18 +113,18 @@ func (m Model) updateAddProfile(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(m.spinner.Tick, m.saveProfile())
 
 	case keyEsc:
-		m.loginAdding = false
-		m.loginURL = ""
+		m.login.adding = false
+		m.login.url = ""
 		m.err = ""
 		return m, nil
 
 	case keyBackspace:
-		m.loginURL = trimLastRune(m.loginURL)
+		m.login.url = trimLastRune(m.login.url)
 		return m, nil
 
 	default:
 		if msg.Type == tea.KeyRunes && len(msg.Runes) > 0 {
-			m.loginURL += string(msg.Runes)
+			m.login.url += string(msg.Runes)
 		}
 		return m, nil
 	}
@@ -179,11 +179,11 @@ func (m Model) logout() tea.Cmd {
 // saveProfile creates a command to save a new profile via server discovery.
 func (m Model) saveProfile() tea.Cmd {
 	return func() tea.Msg {
-		document, err := m.state.discovery.Discover(m.state.ctx, m.loginURL)
+		document, err := m.state.discovery.Discover(m.state.ctx, m.login.url)
 		if err != nil {
 			return profileSavedMsg{err: fmt.Errorf("discover server: %w", err)}
 		}
-		baseURL, err := requestedServerBaseURL(m.loginURL)
+		baseURL, err := requestedServerBaseURL(m.login.url)
 		if err != nil {
 			return profileSavedMsg{err: err}
 		}

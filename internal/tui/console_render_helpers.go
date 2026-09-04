@@ -23,7 +23,7 @@ func (m Model) viewConsoleProfilesOverlay() string {
 	lines := []string{consoleSection.Render("MANAGE SERVERS"), ""}
 	for index, profile := range m.profiles.Profiles {
 		marker, style := "  ", consoleValue
-		if index == m.loginCursor {
+		if index == m.login.cursor {
 			marker, style = "> ", consoleSelected
 		}
 		name := truncateConsole(firstNonEmpty(profile.DisplayName, profile.ID), 20)

@@ -10,41 +10,41 @@ import (
 
 func (m Model) viewConsoleAction(width, height int) string {
 	title, description := "PORT FORWARD", "Configure the target, then press Enter to start."
-	if m.actionMode == actionExec {
+	if m.action.mode == actionExec {
 		title, description = "EXECUTE COMMAND", "Type the command to run in the selected pod."
 	}
-	if m.actionMode == actionExchange || m.actionMode == actionMirror ||
-		m.actionMode == actionPreview {
+	if m.action.mode == actionExchange || m.action.mode == actionMirror ||
+		m.action.mode == actionPreview {
 		return m.viewServiceTrafficAction(width, height)
 	}
-	values := "Target: " + firstNonEmpty(m.actionPod, m.actionService, "-") +
-		"\nPort: " + strconv.Itoa(int(m.actionPort)) +
-		"\nCommand: " + m.actionCommand
+	values := "Target: " + firstNonEmpty(m.action.pod, m.action.service, "-") +
+		"\nPort: " + strconv.Itoa(int(m.action.port)) +
+		"\nCommand: " + m.action.command
 	controls := ""
-	if m.actionMode == actionPortForward {
+	if m.action.mode == actionPortForward {
 		portName := ""
-		if m.actionPortIndex >= 0 && m.actionPortIndex < len(m.actionPorts) &&
-			m.actionPorts[m.actionPortIndex].Name != "" {
-			portName = m.actionPorts[m.actionPortIndex].Name + "  "
+		if m.action.portIndex >= 0 && m.action.portIndex < len(m.action.ports) &&
+			m.action.ports[m.action.portIndex].Name != "" {
+			portName = m.action.ports[m.action.portIndex].Name + "  "
 		}
 		remoteValue := fmt.Sprintf(
 			"%s%d/%s",
 			portName,
-			m.actionPort,
-			strings.ToUpper(firstNonEmpty(m.actionProtocol, "tcp")),
+			m.action.port,
+			strings.ToUpper(firstNonEmpty(m.action.protocol, "tcp")),
 		)
-		localValue := firstNonEmpty(m.actionLocalPort, "0")
+		localValue := firstNonEmpty(m.action.localPort, "0")
 		if localValue == "0" {
 			localValue += " (auto)"
 		}
 		remotePrefix, localPrefix := "  ", "  "
-		if m.actionField == 0 {
+		if m.action.field == 0 {
 			remotePrefix = "> "
 		} else {
 			localPrefix = "> "
 			localValue += "_"
 		}
-		values = "Target: " + firstNonEmpty(m.actionPod, m.actionService, "-") + "\n\n" +
+		values = "Target: " + firstNonEmpty(m.action.pod, m.action.service, "-") + "\n\n" +
 			remotePrefix + "Remote port  " + remoteValue + "\n" +
 			localPrefix + "Local port   " + localValue
 		controls = "\n\n" + consoleSubtle.Render(
@@ -158,7 +158,7 @@ q                 Quit`
 			consoleSubtle.Render(
 				"Enter the complete HTTP or HTTPS Gateway service address.",
 			) + "\n\n" +
-			"Service address\n> " + m.loginURL + "_\n\n" +
+			"Service address\n> " + m.login.url + "_\n\n" +
 			"Enter add server   Esc back"
 	case overlayNone:
 		content = ""

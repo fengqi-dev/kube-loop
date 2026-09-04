@@ -32,14 +32,14 @@ func (m Model) viewWorkspace() string {
 		body := m.viewConnectionProgressPopup(bodyHeight)
 		return lipgloss.JoinVertical(lipgloss.Left, top, body, footer)
 	}
-	if m.loginAdding {
+	if m.login.adding {
 		progress := ""
 		if m.loading {
 			progress = "\n\n" + m.spinner.View() + " Discovering server…"
 		}
 		form := consoleSection.Render("ADD SERVER") + "\n\n" +
 			consoleSubtle.Render("Enter the complete HTTP or HTTPS Gateway service address.") + "\n\n" +
-			"Service address\n> " + m.loginURL + "_\n\n" +
+			"Service address\n> " + m.login.url + "_\n\n" +
 			"Enter add server   Esc cancel" + progress
 		body := lipgloss.Place(
 			m.width,
@@ -50,7 +50,7 @@ func (m Model) viewWorkspace() string {
 		)
 		return lipgloss.JoinVertical(lipgloss.Left, top, body, footer)
 	}
-	if m.actionMode != actionNone {
+	if m.action.mode != actionNone {
 		body := m.viewConsoleAction(m.width, bodyHeight)
 		return lipgloss.JoinVertical(lipgloss.Left, top, body, footer)
 	}

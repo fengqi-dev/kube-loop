@@ -23,7 +23,7 @@ func (m Model) hintText() string {
 	if m.mode == viewLogin {
 		return HintStyle.Render("↑↓ server  enter select  a add  l login  : cmd  q quit")
 	}
-	if m.actionMode != actionNone {
+	if m.action.mode != actionNone {
 		return HintStyle.Render("enter confirm  esc cancel")
 	}
 	switch m.activeTab {

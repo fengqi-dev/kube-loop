@@ -19,7 +19,7 @@ func (m *Model) updateWorkspace(message tea.Msg) (tea.Cmd, bool) {
 	if m.console.overlay != overlayNone {
 		return m.updateConsole(message)
 	}
-	if m.loginAdding {
+	if m.login.adding {
 		if key, ok := message.(tea.KeyMsg); ok {
 			next, cmd := m.updateAddProfile(key)
 			*m = requireModel(next)
@@ -31,10 +31,10 @@ func (m *Model) updateWorkspace(message tea.Msg) (tea.Cmd, bool) {
 		// Async discovery/save results must continue through Model.Update.
 		return nil, false
 	}
-	if _, ok := message.(tea.MouseMsg); ok && m.actionMode != actionNone {
+	if _, ok := message.(tea.MouseMsg); ok && m.action.mode != actionNone {
 		return m.updateConsole(message)
 	}
-	if m.actionMode != actionNone {
+	if m.action.mode != actionNone {
 		return nil, false
 	}
 	if mouse, ok := message.(tea.MouseMsg); ok {

@@ -28,10 +28,10 @@ func (m Model) viewConsoleProfiles() string {
 		Render(footerLeft)
 	height := max(8, m.height-lipgloss.Height(header)-lipgloss.Height(footer)-2)
 	var body string
-	if m.loginAdding {
+	if m.login.adding {
 		form := consoleSection.Render("ADD SERVER") + "\n\n" +
 			consoleSubtle.Render("Enter the complete HTTP or HTTPS Gateway service address.") + "\n\n" +
-			"Service address\n> " + m.loginURL + "_\n\n" +
+			"Service address\n> " + m.login.url + "_\n\n" +
 			"Enter add server   Esc cancel"
 		body = lipgloss.Place(
 			m.width,
@@ -44,7 +44,7 @@ func (m Model) viewConsoleProfiles() string {
 		lines := []string{consoleSection.Render(fmt.Sprintf("SERVERS  %d", len(m.profiles.Profiles))), ""}
 		for i, profile := range m.profiles.Profiles {
 			marker, style := "  ", consoleValue
-			if i == m.loginCursor {
+			if i == m.login.cursor {
 				marker, style = "> ", consoleSelected
 			}
 			name := firstNonEmpty(profile.DisplayName, profile.ID, "Unnamed server")

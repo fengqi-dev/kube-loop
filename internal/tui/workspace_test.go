@@ -232,8 +232,8 @@ func TestWorkspaceDetailAndResourceActions(t *testing.T) {
 	}
 	model.pods[0].Ports = []clientremote.PodPort{{Name: "http", Port: 8080, Protocol: "TCP"}}
 	model.updateWorkspace(workspaceKey("f"))
-	if model.actionMode != actionPortForward || model.actionPod != "api-0" {
-		t.Fatalf("action=%d pod=%q", model.actionMode, model.actionPod)
+	if model.action.mode != actionPortForward || model.action.pod != "api-0" {
+		t.Fatalf("action=%d pod=%q", model.action.mode, model.action.pod)
 	}
 	view := model.View()
 	if !strings.Contains(view, "PORT FORWARD") || strings.Contains(view, "OPERATIONS CONSOLE") {
@@ -314,12 +314,12 @@ func TestWorkspaceConnectionResourceActions(t *testing.T) {
 	}
 	connection.dataPlaneStatus.State = dataPlaneStateDisconnected
 	if cmd, handled := connection.updateWorkspaceResource(workspaceKey("a")); !handled || cmd == nil ||
-		!connection.loginAdding || connection.workspace.resource != resourceProfiles {
+		!connection.login.adding || connection.workspace.resource != resourceProfiles {
 		t.Fatalf(
-			"disconnected add handled=%v cmd=%v loginAdding=%v resource=%q",
+			"disconnected add handled=%v cmd=%v login.adding=%v resource=%q",
 			handled,
 			cmd != nil,
-			connection.loginAdding,
+			connection.login.adding,
 			connection.workspace.resource,
 		)
 	}
@@ -346,8 +346,8 @@ func TestWorkspaceEmptyAndNavigationResourceActions(t *testing.T) {
 	}
 
 	profiles := newWorkspaceTestModel(resourceProfiles)
-	if _, handled := profiles.updateWorkspaceResource(workspaceKey("down")); !handled || profiles.loginCursor != 0 {
-		t.Fatalf("profiles handled=%v cursor=%d", handled, profiles.loginCursor)
+	if _, handled := profiles.updateWorkspaceResource(workspaceKey("down")); !handled || profiles.login.cursor != 0 {
+		t.Fatalf("profiles handled=%v cursor=%d", handled, profiles.login.cursor)
 	}
 
 	namespaces := newWorkspaceTestModel(resourceNamespaces)
@@ -525,7 +525,7 @@ func TestWorkspaceNamespaceShortcutReconnectsConnectedDataPlane(t *testing.T) {
 func TestWorkspaceAddProfileAllowsAsyncResult(t *testing.T) {
 	t.Parallel()
 	model := newWorkspaceTestModel(resourceProfiles)
-	model.loginAdding = true
+	model.login.adding = true
 	if cmd, handled := model.updateWorkspace(profileSavedMsg{}); handled || cmd != nil {
 		t.Fatalf("async profile result was swallowed: handled=%v cmd=%v", handled, cmd)
 	}
@@ -534,15 +534,15 @@ func TestWorkspaceAddProfileAllowsAsyncResult(t *testing.T) {
 func TestSelectedAuthenticatedProfileEntersConnection(t *testing.T) {
 	t.Parallel()
 	model := newWorkspaceTestModel(resourceProfiles)
-	model.profileSelectionPending = true
+	model.login.profileSelectionPending = true
 	next, cmd := model.Update(authStatusMsg{session: AuthSession{Authenticated: true, UserName: "operator"}})
 	updated := next.(Model)
-	if updated.profileSelectionPending || updated.workspace.resource != resourceConnection ||
+	if updated.login.profileSelectionPending || updated.workspace.resource != resourceConnection ||
 		updated.mode != viewMain ||
 		cmd == nil {
 		t.Fatalf(
 			"selection result: pending=%v resource=%q mode=%d cmd=%v",
-			updated.profileSelectionPending, updated.workspace.resource, updated.mode, cmd,
+			updated.login.profileSelectionPending, updated.workspace.resource, updated.mode, cmd,
 		)
 	}
 }

@@ -19,24 +19,40 @@ func TestViewServiceTrafficAction(t *testing.T) {
 		{
 			name: "exchange",
 			model: Model{
-				actionMode: actionExchange, actionService: "api", actionPort: 8080,
-				actionProtocol: "tcp", actionLocalHost: "127.0.0.1",
+				action: actionState{
+					mode:      actionExchange,
+					service:   "api",
+					port:      8080,
+					protocol:  "tcp",
+					localHost: "127.0.0.1",
+				},
 			},
 			want: []string{"EXCHANGE", "Target: api", "8080/TCP", "0 (auto)"},
 		},
 		{
 			name: "mirror",
 			model: Model{
-				actionMode: actionMirror, actionService: "api", actionPort: 8080,
-				actionProtocol: "tcp", actionLocalHost: "127.0.0.1",
+				action: actionState{
+					mode:      actionMirror,
+					service:   "api",
+					port:      8080,
+					protocol:  "tcp",
+					localHost: "127.0.0.1",
+				},
 			},
 			want: []string{"MIRROR", "Target: api"},
 		},
 		{
 			name: "preview",
 			model: Model{
-				actionMode: actionPreview, actionPreviewName: "preview", actionProtocol: "udp",
-				actionServicePort: "5353", actionLocalHost: "127.0.0.1", actionLocalPort: "5353",
+				action: actionState{
+					mode:        actionPreview,
+					previewName: "preview",
+					protocol:    "udp",
+					servicePort: "5353",
+					localHost:   "127.0.0.1",
+					localPort:   "5353",
+				},
 			},
 			want: []string{"CREATE PREVIEW", "Preview Service", "preview", "UDP", "5353"},
 		},
