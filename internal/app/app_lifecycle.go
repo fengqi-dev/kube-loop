@@ -104,6 +104,8 @@ func (a *App) syncServerSessions(ctx context.Context) error {
 }
 
 func (a *App) shutdown(ctx context.Context) {
+	defer a.Close()
+
 	shutdownTimeout := a.shutdownTimeout
 	if shutdownTimeout <= 0 {
 		shutdownTimeout = 5 * time.Second

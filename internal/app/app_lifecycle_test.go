@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"os"
 	"sync"
 	"testing"
 	"time"
@@ -128,6 +129,27 @@ func TestShutdownBoundsBackgroundCleanupWait(t *testing.T) {
 	case <-stopped:
 	case <-time.After(time.Second):
 		t.Fatal("shutdown ignored the background cleanup deadline")
+	}
+}
+
+func TestShutdownClosesApplicationLog(t *testing.T) {
+	file, err := os.CreateTemp(t.TempDir(), "app.log")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sink := &appLog{file: file}
+	application := &App{logSink: sink}
+
+	application.shutdown(t.Context())
+
+	if sink.file != nil || !sink.closed {
+		t.Fatalf("application log remains open after shutdown: %#v", sink)
+	}
+	if _, err := sink.Write([]byte("after shutdown")); err != nil {
+		t.Fatalf("discard log after shutdown: %v", err)
+	}
+	if sink.file != nil {
+		t.Fatal("application log reopened after shutdown")
 	}
 }
 

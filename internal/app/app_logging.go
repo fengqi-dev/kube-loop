@@ -28,10 +28,11 @@ const (
 // The file is truncated (covered) on each application start so it cannot grow
 // unbounded. It implements io.Writer so it can be a slog handler output.
 type appLog struct {
-	mu    sync.Mutex
-	path  string
-	level slog.LevelVar
-	file  *os.File
+	mu     sync.Mutex
+	path   string
+	level  slog.LevelVar
+	file   *os.File
+	closed bool
 }
 
 // Level reports the currently configured threshold (LevelVar implements
@@ -43,6 +44,9 @@ func (sink *appLog) Level() slog.Level { return sink.level.Level() }
 func (sink *appLog) Write(line []byte) (int, error) {
 	sink.mu.Lock()
 	defer sink.mu.Unlock()
+	if sink.closed {
+		return len(line), nil
+	}
 	if sink.file == nil {
 		if sink.openLocked() != nil {
 			return 0, errors.New("application log file unavailable")
@@ -73,6 +77,7 @@ func (sink *appLog) openLocked() error {
 func (sink *appLog) truncate() error {
 	sink.mu.Lock()
 	defer sink.mu.Unlock()
+	sink.closed = false
 	if sink.path == "" {
 		return errors.New("application log path is unavailable")
 	}
@@ -90,6 +95,7 @@ func (sink *appLog) close() {
 	}
 	sink.mu.Lock()
 	defer sink.mu.Unlock()
+	sink.closed = true
 	if sink.file != nil {
 		_ = sink.file.Close()
 		sink.file = nil
