@@ -121,14 +121,14 @@ func configureAppLog(layout utils.Layout, available bool) *appLog {
 	return sink
 }
 
-// newAppLogger builds the application logger. It writes to both the terminal
-// stream and the file sink through a MultiHandler that shares a single
-// threshold, so a runtime level change filters both immediately.
+// newAppLogger builds the application logger. It writes JSON records to both
+// the terminal stream and the file sink through a MultiHandler that shares a
+// single threshold, so a runtime level change filters both immediately.
 func newAppLogger(sink *appLog, terminal io.Writer) *slog.Logger {
 	options := &slog.HandlerOptions{Level: &sink.level}
 	return slog.New(slog.NewMultiHandler(
-		slog.NewTextHandler(terminal, options),
-		slog.NewTextHandler(sink, options),
+		slog.NewJSONHandler(terminal, options),
+		slog.NewJSONHandler(sink, options),
 	))
 }
 
