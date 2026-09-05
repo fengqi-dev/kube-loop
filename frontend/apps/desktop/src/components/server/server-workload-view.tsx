@@ -21,7 +21,7 @@ import { useI18n } from "@/i18n";
 import { cn } from "@/lib/utils";
 import type { RemoteInventory, RemotePod, ServerInventoryEvent, ServerPodSSHInfo, ServerPortForwardInfo } from "@/types";
 
-export function ServerWorkloadView({ profileId, active = true, selectedNamespace, onNamespaceChange }: { profileId: string; active?: boolean; selectedNamespace?: string; onNamespaceChange?(namespace: string): void }) {
+export function ServerWorkloadView({ profileId, active = true, selectedNamespace, sharedInventory, inventoryLoading = false, onNamespaceChange }: { profileId: string; active?: boolean; selectedNamespace?: string; sharedInventory?: RemoteInventory; inventoryLoading?: boolean; onNamespaceChange?(namespace: string): void }) {
   const { t } = useI18n();
   const workspace = useResourceWorkspace();
   const requests = useRequestGeneration();
@@ -29,7 +29,8 @@ export function ServerWorkloadView({ profileId, active = true, selectedNamespace
   const [namespace, setNamespace] = useState("");
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
-  const [loading, setLoading] = useState(true);
+  const [localLoading, setLoading] = useState(true);
+  const loading = localLoading || inventoryLoading;
   const [error, setError] = useState("");
   const [selected, setSelected] = useState<RemotePod | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -41,7 +42,7 @@ export function ServerWorkloadView({ profileId, active = true, selectedNamespace
   const [sshEndpoints, setSSHEndpoints] = useState<ServerPodSSHInfo[]>([]);
   const [forwards, setForwards] = useState<ServerPortForwardInfo[]>([]);
 
-  const reload = useCallback(async (nextNamespace = namespace) => {
+  const reload = useCallback(async (nextNamespace = namespace, snapshot?: RemoteInventory) => {
     const isCurrent = requests.begin();
     if (!profileId) {
       if (!isCurrent()) return;
@@ -51,7 +52,7 @@ export function ServerWorkloadView({ profileId, active = true, selectedNamespace
     }
     setLoading(true);
     try {
-      const next = await backend.loadServerInventory(
+      const next = snapshot ?? await backend.loadServerInventory(
         profileId,
         nextNamespace === ALL_NAMESPACES ? "" : nextNamespace,
       );
@@ -80,11 +81,18 @@ export function ServerWorkloadView({ profileId, active = true, selectedNamespace
   }, [namespace, profileId]);
 
   useEffect(() => {
-    if (active) void reload(selectedNamespace ?? namespace);
-    else requests.invalidate();
+    if (!active) { requests.invalidate(); return; }
+    // The connection controller already loads the selected namespace. Reuse its
+    // snapshot instead of issuing another full inventory request after it finishes.
+    if (onNamespaceChange) {
+      if (sharedInventory) void reload(sharedInventory.namespace, sharedInventory);
+      else { requests.invalidate(); setInventory(undefined); setLoading(false); }
+      return;
+    }
+    void reload(selectedNamespace);
     // Revalidate the retained namespace before its actions become available.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profileId, active, selectedNamespace]);
+  }, [profileId, active, selectedNamespace, sharedInventory]);
 
   useEffect(() => {
     const unsubscribe = window.runtime?.EventsOn("server-inventory:snapshot", (value: unknown) => {
@@ -193,7 +201,7 @@ export function ServerWorkloadView({ profileId, active = true, selectedNamespace
         count={filtered.length}
         loading={loading}
         disabled={!profileId}
-        onRefresh={() => void reload(namespace)}
+        onRefresh={() => onNamespaceChange ? onNamespaceChange(namespace) : void reload(namespace)}
         allowAllNamespaces={false}
         namespacePlaceholder={loading ? t("overview.loadingKubeconfig") : undefined}
       />

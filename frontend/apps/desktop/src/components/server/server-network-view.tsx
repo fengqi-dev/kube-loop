@@ -29,7 +29,7 @@ import type {
 
 type Action = "port-forward" | "exchange" | "mirror" | "preview";
 
-export function ServerNetworkView({ profileId, active = true, selectedNamespace, onNamespaceChange }: { profileId: string; active?: boolean; selectedNamespace?: string; onNamespaceChange?(namespace: string): void }) {
+export function ServerNetworkView({ profileId, active = true, selectedNamespace, sharedInventory, inventoryLoading = false, onNamespaceChange }: { profileId: string; active?: boolean; selectedNamespace?: string; sharedInventory?: RemoteInventory; inventoryLoading?: boolean; onNamespaceChange?(namespace: string): void }) {
   const { t } = useI18n();
   const workspace = useResourceWorkspace();
   const requests = useRequestGeneration();
@@ -47,11 +47,12 @@ export function ServerNetworkView({ profileId, active = true, selectedNamespace,
   const [localPort, setLocalPort] = useState("");
   const [previewName, setPreviewName] = useState("");
   const [previewProtocol, setPreviewProtocol] = useState<"tcp" | "udp">("tcp");
-  const [loading, setLoading] = useState(true);
+  const [localLoading, setLoading] = useState(true);
+  const loading = localLoading || inventoryLoading;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
-  const load = useCallback(async (namespace = "") => {
+  const load = useCallback(async (namespace = "", snapshot?: RemoteInventory) => {
     const isCurrent = requests.begin();
     if (!profileId) {
       if (!isCurrent()) return;
@@ -61,7 +62,7 @@ export function ServerNetworkView({ profileId, active = true, selectedNamespace,
     }
     setLoading(true);
     try {
-      const next = await backend.loadServerInventory(profileId, namespace);
+      const next = snapshot ?? await backend.loadServerInventory(profileId, namespace);
       if (!isCurrent()) return;
       setInventory(next);
       const [nextForwards, nextExchanges, nextMirrors, nextPreviews] = await Promise.allSettled([
@@ -86,11 +87,18 @@ export function ServerNetworkView({ profileId, active = true, selectedNamespace,
   }, [profileId]);
 
   useEffect(() => {
-    if (active) void load(selectedNamespace ?? inventory?.namespace);
-    else requests.invalidate();
+    if (!active) { requests.invalidate(); return; }
+    // The connection controller already loads the selected namespace. Reuse its
+    // snapshot instead of issuing another full inventory request after it finishes.
+    if (onNamespaceChange) {
+      if (sharedInventory) void load(sharedInventory.namespace, sharedInventory);
+      else { requests.invalidate(); setInventory(undefined); setLoading(false); }
+      return;
+    }
+    void load(selectedNamespace ?? inventory?.namespace);
     // Keep each view’s filters while revalidating its current namespace.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [load, active, selectedNamespace]);
+  }, [load, active, selectedNamespace, sharedInventory]);
 
   const services = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase();
@@ -173,7 +181,7 @@ export function ServerNetworkView({ profileId, active = true, selectedNamespace,
           {(inventory?.namespaces ?? []).map((item) => <option key={item.name} value={item.name}>{item.name}</option>)}
         </select>
         <Input className="min-w-0 flex-1" value={query} placeholder="Search Services" onChange={(event) => setQuery(event.target.value)} />
-        <Button className="shrink-0 whitespace-nowrap" type="button" variant="outline" size="sm" disabled={!profileId || loading} onClick={() => void load(inventory?.namespace)}>{loading ? <Spinner data-icon="inline-start" /> : <RefreshCw size={14} />}Refresh</Button>
+        <Button className="shrink-0 whitespace-nowrap" type="button" variant="outline" size="sm" disabled={!profileId || loading} onClick={() => onNamespaceChange ? onNamespaceChange(inventory?.namespace ?? "") : void load(inventory?.namespace)}>{loading ? <Spinner data-icon="inline-start" /> : <RefreshCw size={14} />}Refresh</Button>
         <ToolbarActions><Button className="shrink-0 whitespace-nowrap" type="button" size="sm" disabled={!inventory?.session || !ready || !canPreview} onClick={() => selectAction("preview")}><Globe2 size={14} />Create Preview</Button></ToolbarActions>
       </div>
       <ResourceWorkspace namespace={inventory?.namespace} workspace={workspace} resources={workspaceResources} settled={!loading && !error}>

@@ -17,7 +17,7 @@ import { SettingsView } from "@/components/settings/settings-view";
 import { ResourceExplorer } from "@/components/workspace/resource-workspace";
 import { Spinner } from "@/components/ui/spinner";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import type { BootstrapData } from "@/types";
+import type { BootstrapData, RemoteInventory } from "@/types";
 
 function App() {
   const [data, setData] = useState<BootstrapData>();
@@ -74,7 +74,7 @@ function DesktopWorkspace({ initialData }: { initialData: BootstrapData }) {
             <div className={view === "overview" || view === "clusters" ? `connection-page utility-page ${view === "clusters" ? "server-management" : ""}` : "hidden"}>
               <ServerAccessView connection={connection} management={view === "clusters"} />
             </div>
-            <ResourcePages key={`${profileId}:${auth.authenticated}`} view={view} profileId={profileId} namespace={namespace} onNamespaceChange={connection.loadInventory} resourceHost={resourceHost} onResourceSelect={() => setDrawerOpen(false)} />
+            <ResourcePages key={`${profileId}:${auth.authenticated}`} view={view} profileId={profileId} namespace={namespace} inventory={inventory} inventoryLoading={busy === "inventory" || (Boolean(profileId) && !inventory && Boolean(busy))} onNamespaceChange={connection.loadInventory} resourceHost={resourceHost} onResourceSelect={() => setDrawerOpen(false)} />
             {view === "host-aliases" ? <div className="utility-page"><HostAliasesView profileId={profileId} profileName={profile?.displayName} ready={connected} /></div>
               : view === "mcp" ? <div className="utility-page"><MCPView /></div>
               : view === "settings" ? <div className="utility-page"><SettingsView profileId={profileId} ready={connected} coreVersion={data.coreVersion} update={data.update} checking={checking} onCheck={() => void checkForUpdates()} onOpen={() => void backend.openUpdatePage()} /></div> : null}
@@ -92,16 +92,16 @@ function DesktopWorkspace({ initialData }: { initialData: BootstrapData }) {
   </TooltipProvider>;
 }
 
-function ResourcePages({ view, profileId, namespace, onNamespaceChange, resourceHost, onResourceSelect }: {
-  view: AppView; profileId: string; namespace?: string; onNamespaceChange(namespace: string): void; resourceHost: HTMLDivElement | null; onResourceSelect(): void;
+function ResourcePages({ view, profileId, namespace, inventory, inventoryLoading, onNamespaceChange, resourceHost, onResourceSelect }: {
+  view: AppView; profileId: string; namespace?: string; inventory?: RemoteInventory; inventoryLoading: boolean; onNamespaceChange(namespace: string): void; resourceHost: HTMLDivElement | null; onResourceSelect(): void;
 }) {
   const [visited, setVisited] = useState<Set<AppView>>(() => new Set([view]));
   useEffect(() => { setVisited(current => current.has(view) ? current : new Set([...current, view])); }, [view]);
   return <>{(["workload", "network", "sessions"] as const).map(page => (visited.has(page) || page === view) &&
     <div key={page} className={page === view ? "resource-page" : "hidden"}>
       <ResourceExplorer.Provider value={page === view ? { host: resourceHost, onSelect: onResourceSelect } : null}>
-        {page === "workload" ? <ServerWorkloadView active={page === view} profileId={profileId} selectedNamespace={namespace} onNamespaceChange={onNamespaceChange} />
-          : page === "network" ? <ServerNetworkView active={page === view} profileId={profileId} selectedNamespace={namespace} onNamespaceChange={onNamespaceChange} />
+        {page === "workload" ? <ServerWorkloadView sharedInventory={inventory} inventoryLoading={inventoryLoading} active={page === view} profileId={profileId} selectedNamespace={namespace} onNamespaceChange={onNamespaceChange} />
+          : page === "network" ? <ServerNetworkView sharedInventory={inventory} inventoryLoading={inventoryLoading} active={page === view} profileId={profileId} selectedNamespace={namespace} onNamespaceChange={onNamespaceChange} />
           : <SessionsView active={page === view} profileId={profileId} selectedNamespace={namespace} onNamespaceChange={onNamespaceChange} />}
       </ResourceExplorer.Provider>
     </div>)}</>;
